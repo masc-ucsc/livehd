@@ -7,3 +7,6 @@
 [submodule "subs/BitMagic"]
 	path = subs/BitMagic
 	url = https://github.com/tlk00/BitMagic.git
+[submodule "subs/anubis"]
+	path = subs/anubis
+	url = https://github.com/masc-ucsc/anubis.git
