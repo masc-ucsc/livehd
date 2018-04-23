@@ -1,0 +1,44 @@
+//CFG to Lgraph pseudo code
+create GIO node
+while(getline(infile,s)){
+  vector<string> words = split(s);
+  if(words[begin] has not been created){
+    create node words[begin]  // how to check? use some nid table?
+    if(words[begin-1] is "null")
+      do nothing
+
+  }else{  //special case, if ....other control flow operator
+    create node words[begin-1]
+    connect null_id node to words[begin-1]
+
+    node(begin) output connect to node[end]
+    node(begin) output connect to node[end+1]
+  }
+  if(words[begin-1] != null){
+    create node words[begin-1]
+    create edge from node(begin) to node(begin-1)
+  }
+
+}
+
+
+    for(auto iter_compo = dinfo.compos.begin(); iter_compo != dinfo.compos.end(); ++iter_compo) {//iterate over all components in def file
+        Node compo_node = g->create_node();
+        Index_ID  compo_nid = compo_node.get_nid();
+        ht_comp2nid[iter_compo->name] = compo_nid;
+        //comment out for IWLS18
+        //g->node_place_set(compo_nid, iter_compo->posx, iter_compo->posy);
+        //cout<< "node_place of nid " << compo_nid << " is " << g->get_x(compo_nid) << " " << g->get_y(compo_nid) << endl;
+       for(int cell_id =0; cell_id < cell_types_size; cell_id++){ //decide component's cell_type
+          std::string cell_type_name = tlib->get_const_cell(cell_id)->get_name();
+          if(iter_compo->macro_name == cell_type_name)
+              g->node_tmap_set(compo_nid,cell_id); //node nid's cell type is cell_id.
+       //for debugging
+    }
+       //const Tech_cell* cell_type = tlib->get_const_cell(g->tmap_id_get(compo_nid));
+       //cout << "node_type of nid "  << compo_nid << " is " << cell_type->get_name()<< endl;
+       //cout << "total pin nunber is " << cell_type->get_pins_size() << endl;
+       //for(int i = 0 ; i< cell_type->get_pins_size(); ++i)
+       //    cout << "has pin " << cell_type->get_name(i) << " with direction " << cell_type->get_direction(i) << endl;
+       //cout << endl;
+    }//end outer for

@@ -1,0 +1,29 @@
+project(core_test)
+
+FILE(GLOB core_test_SOURCE *.cpp)
+FILE(GLOB core_test_HEADER *.hpp)
+
+
+#SET(EXELIST "mmap_vector" "dense_tst" "iterator_tst" "options_tst" "round_power2_tst" "yaml_tst")
+SET(EXELIST "mmap_vector" "dense_tst" "iterator_tst" "options_tst" "edge" "char_tst")
+
+INCLUDE_DIRECTORIES(${core_SOURCE_DIR})
+
+FOREACH(EXE ${EXELIST})
+	FILE(GLOB exec_SOURCE "${EXE}.cpp")
+	ADD_EXECUTABLE(${EXE} ${exec_SOURCE})
+	LIST(REMOVE_ITEM core_test_SOURCE ${exec_SOURCE})
+ENDFOREACH(EXE)
+
+FOREACH(EXE ${EXELIST})
+  TARGET_LINK_LIBRARIES(${EXE} core bitscan)
+  TARGET_LINK_LIBRARIES(${EXE} ${BOOST_LIBS} -lpthread)
+ENDFOREACH(EXE)
+
+
+add_test(NAME core_prep  COMMAND mkdir -p lgdb)
+FOREACH(EXE ${EXELIST})
+  add_test(NAME core_${EXE}    COMMAND ${PROJECT_BINARY_DIR}/${EXE})
+  SET_TESTS_PROPERTIES(core_${EXE} PROPERTIES DEPENDS core_prep)
+ENDFOREACH(EXE)
+

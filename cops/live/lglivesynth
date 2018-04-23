@@ -1,0 +1,219 @@
+#!/bin/bash
+
+TEMP=`getopt -o l::y::b::I::d --long logdir::,basename::,inou::,binary::,incdir::,debug,os_lgdb::,oe_lgdb::,me_lgdb::,de_lgdb::,ds_lgdb::,f_lgdb::,bounds::,lib::,constr::,freq::,define:: -n 'lglivesynth' -- "$@"`
+eval set -- "$TEMP"
+
+OPT_YOSYS="./misc/yosys/bin/yosys"
+OPT_LOGDIR="./logs"
+
+OPT_OSLGDB="./lgdb_synth"
+OPT_OELGDB="./lgdb_elab"
+OPT_DELGDB="./lgdb_synth_delta"
+OPT_DSLGDB="./lgdb_elab_delta"
+OPT_MELGDB="./lgdb_synth_modif"
+OPT_FLGDB="./lgdb_elab_final"
+
+OPT_INOU_YOSYS="./inou/yosys/libinou_yosys.so"
+OPT_DIFF="./cops/live/lglive"
+OPT_LGSTITCH="./cops/live/lgstitch"
+OPT_DEBUG=0
+OPT_TO_VERILOG=0
+OPT_GRAPH_INPUT=""
+OPT_LIB=""
+OPT_CONSTR=""
+OPT_INCDIR=""
+OPT_CELL="./inou/yosys/simcell.v"
+OPT_DEFINE=""
+OPT_FREQ="100"
+OPT_BOUNDS="${OPT_LOGDIR}/bounds"
+OPT_BASENAME=""
+
+while true ; do
+    case "$1" in
+        -b|--binary)
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_YOSYS=$2 ; shift 2 ;;
+            esac ;;
+        -l|--logdir)
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_LOGDIR=$2 ; shift 2 ;;
+            esac ;;
+        -I|--incdir)
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_INCDIR="verilog_defaults -add -I$2" ;
+                shift 2 ;;
+            esac ;;
+        --basename)
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_BASENAME=$2 ; shift 2 ;;
+            esac ;;
+        --define)
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_DEFINE=$2 ; shift 2 ;;
+            esac ;;
+        --bounds)
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_BOUNDS=$2 ; shift 2 ;;
+            esac ;;
+        --os_lgdb)
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_OSLGDB=$2 ; shift 2 ;;
+            esac ;;
+        --oe_lgdb)
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_OELGDB=$2 ; shift 2 ;;
+            esac ;;
+        --me_lgdb)
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_MELGDB=$2 ; shift 2 ;;
+            esac ;;
+        --de_lgdb)
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_DELGDB=$2 ; shift 2 ;;
+            esac ;;
+        --ds_lgdb)
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_DSLGDB=$2 ; shift 2 ;;
+            esac ;;
+        --f_lgdb)
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_FLGDB=$2 ; shift 2 ;;
+            esac ;;
+        --lib)
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_LIB=$2 ; shift 2 ;;
+            esac ;;
+        --constr)
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_CONSTR=$2 ; shift 2 ;;
+            esac ;;
+        --freq)
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_FREQ=$2 ; shift 2 ;;
+            esac ;;
+        -d|--debug)
+          shift 1 ;
+          OPT_DEBUG=1 ;;
+        -y|--inou)
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_INOU_YOSYS=$2 ; shift 2 ;;
+            esac ;;
+        --) shift ; break ;;
+        *) echo "Internal error!" ; exit 1 ;;
+    esac
+done
+OPT_FILES=$*
+
+OPT_INVARIANT=./cops/live/lginvariant
+
+orig_dir=${OPT_OELGDB}
+synt_dir=${OPT_OSLGDB}
+modi_dir=${OPT_MELGDB}
+delt_dir=${OPT_DELGDB}
+delt_synt_dir=${OPT_DSLGDB}
+final_dir=${OPT_FLGDB}
+log_dir=${OPT_LOGDIR}
+
+mkdir -p ${modi_dir}
+mkdir -p ${log_dir}
+mkdir -p ${delt_dir}
+mkdir -p ${delt_synt_dir}
+cp ${synt_dir}/tech_library  ${delt_synt_dir}
+
+cp -r ${synt_dir}  ${final_dir}
+cp ${orig_dir}/* ${modi_dir}/
+cp ${orig_dir}/graph_library ${delt_dir}
+
+BASE=`echo ${OPT_FILES} | awk '{print $1}' | awk -F . '{print $1}'`
+FILE_LIST=`echo $OPT_FILES | tr ' ' '\n' | awk '{print "read_verilog -sv -nomeminit "$1";"}'`
+DEFINE=`echo $OPT_DEFINE | awk '{print "verilog_defaults -add -D"$1";"}';`
+
+if [ "$OPT_BASENAME" == "" ]; then
+  OPT_BASENAME=$BASE
+fi
+
+tmap=""
+
+if [ "$OPT_LIB" == "fpga" ]; then
+  libfiles="read_verilog -lib +/xilinx/cells_sim.v; read_verilog -lib +/xilinx/cells_xtra.v; read_verilog -lib +/xilinx/brams_bb.v; read_verilog -lib +/xilinx/drams_bb.v ;"
+  tmap="memory_bram -rules +/xilinx/brams.txt; techmap -map +/xilinx/brams_map.v; memory_bram -rules +/xilinx/drams.txt; techmap -map +/xilinx/drams_map.v; opt -fast -full; memory_map; dffsr2dff; dff2dffe; opt -full; techmap -map +/techmap.v -map +/xilinx/arith_map.v; opt  -fast; techmap -D ALU_RIPPLE; opt -fast; abc -D 100 ${OPT_FREQ};"
+
+elif [ "$OPT_LIB" != "" ]; then
+  sh   ./inou/tech/func_liberty_json.sh ${OPT_LIB} > ${OPT_SLGDB}/tech_library
+  abc_script="-D ${OPT_FREQ} -liberty ${OPT_LIB} -constr ${constraint_file}"
+  tmap="dffsr2dff; techmap -map +/techmap.v; opt -fast; dfflibmap -liberty ${OPT_LIB}; memory; dfflibmap -liberty ${OPT_LIB};  opt -fast; opt -full; techmap -D ALU_RIPPLE; abc ${abc_script}"
+
+else
+  abc_script="-D ${OPT_FREQ}"
+  tmap="dffsr2dff; techmap -map +/techmap.v; opt -fast; memory; opt -fast; opt -full; techmap -D ALU_RIPPLE; abc ${abc_script}"
+
+fi
+
+elab_script="hierarchy -auto-top; proc_arst; proc; opt -fast; pmuxtree; memory -nomap;"
+synth_script="hierarchy -check; proc; flatten; opt -fast; synth -run coarse; opt -fast; opt;  ${tmap}; opt -fast; stat"
+
+
+cmd="${DEFINE}; ${OPT_INCDIR}; ${FILE_LIST}; ${elab_script}; inou_yosys ${modi_dir};"
+echo "gdb --args ${OPT_YOSYS} -ql ${log_dir}/${OPT_BASENAME}_elab.log -m ${OPT_INOU_YOSYS} -p \"${cmd}\"" > ${log_dir}/${OPT_BASENAME}_cmd_elab
+${OPT_YOSYS} -ql ${log_dir}/${OPT_BASENAME}_elab.log -m ${OPT_INOU_YOSYS} -p "${cmd}" > ${log_dir}/${OPT_BASENAME}_elab_yosys.log 2> ${log_dir}/${OPT_BASENAME}_elab_yosys.err
+
+if [ $? -ne 0 ]; then
+	echo "FAILED: was not able to cmd_elab for ${OPT_BASENAME}"
+else
+	echo "SUCCESS: Finished elaboration of modified file for ${OPT_BASENAME}"
+fi
+
+echo "gdb --args ${OPT_DIFF} --original_lgdb ${orig_dir} --modified_lgdb ${modi_dir} --synth_lgdb ${synt_dir} --boundaries ${OPT_BOUNDS} --delta_lgdb ${delt_dir} --diff ${delt_dir}/${OPT_BASENAME}_diff" > ${log_dir}/${OPT_BASENAME}_cmd_diff
+${OPT_DIFF} --original_lgdb ${orig_dir} --modified_lgdb ${modi_dir} --synth_lgdb ${synt_dir} --boundaries ${OPT_BOUNDS} --delta_lgdb ${delt_dir} --diff ${delt_dir}/${OPT_BASENAME}_diff > ${log_dir}/${OPT_BASENAME}_diff.log 2>${log_dir}/${OPT_BASENAME}_diff.err
+
+if [ $? -ne 0 ]; then
+	echo "FAILED: was not able to run cmd_diff for ${OPT_BASENAME}"
+else
+	echo "SUCCESS: found different cones for ${OPT_BASENAME}"
+fi
+
+echo "gdb --args ${OPT_YOSYS} -ql ${log_dir}/${OPT_BASENAME}_yosys_delt_synt.log -m ${OPT_INOU_YOSYS} -p \"dump_yosys -directory ${delt_dir}; write_verilog -noattr ${delt_dir}/${OPT_BASENAME}_delab.v; ${synth_script}; inou_yosys ${delt_synt_dir}\"" >  ${log_dir}/${OPT_BASENAME}_cmd_delt_synt
+${OPT_YOSYS} -ql ${log_dir}/${OPT_BASENAME}_yosys_delt_synt.log -m ${OPT_INOU_YOSYS} -p "dump_yosys -directory ${delt_dir} -hierarchy; write_verilog -noattr ${delt_dir}/${OPT_BASENAME}_delab.v; ${synth_script}; inou_yosys ${delt_synt_dir}; setundef -zero; write_verilog -noattr ${delt_synt_dir}/${OPT_BASENAME}_dsynth.v " > ${log_dir}/${OPT_BASENAME}_diff_synth_yosys.log 2> ${log_dir}/${OPT_BASENAME}_diff_synt_yosys.err
+
+if [ $? -ne 0 ]; then
+	echo "DONE: nothing to be done"
+	exit 0
+else
+	echo "SUCCESS: finished delta synthesis for ${OPT_BASENAME}"
+fi
+
+echo "gdb --args ${OPT_LGSTITCH} -o ${final_dir} -n ${delt_synt_dir} -m LiveSynth -b ${OPT_BOUNDS} -d ${delt_dir}/${OPT_BASENAME}_diff " > ${log_dir}/${OPT_BASENAME}_cmd_stitch
+${OPT_LGSTITCH} -o ${final_dir} -n ${delt_synt_dir} -m LiveSynth -b ${OPT_BOUNDS} -d ${delt_dir}/${OPT_BASENAMA}_diff > ${log_dir}/${OPT_BASENAME}_stitch.log 2> ${log_dir}/${OPT_BASENAME}_stitch.err
+
+if [ $? -ne 0 ]; then
+	echo "FAILED: was not able to run cmd_stitch for ${OPT_BASENAME}"
+else
+	echo "SUCCESS: finished stitching delta into original graph for ${OPT_BASENAME}"
+fi
+
+echo "gdb --args ${OPT_YOSYS} -ql ${log_dir}/${OPT_BASENAME}_final_to_v.log -m ${OPT_INOU_YOSYS} -p \"dump_yosys -directory ${final_dir}; write_verilog -noattr ${final_dir}/${OPT_BANEMANE}_final.v;\"" > ${log_dir}/${OPT_BASENAME}_cmd_gen
+${OPT_YOSYS} -ql ${log_dir}/final_to_v.log -m ${OPT_INOU_YOSYS} -p "dump_yosys -directory ${final_dir}; setundef -zero; write_verilog -noattr ${final_dir}/${OPT_BASENAME}_final.v;" > ${log_dir}/${OPT_BASENAME}_final_tov.log 2> ${log_dir}/${OPT_BASENAME}_final_tov.err
+
+if [ $? -ne 0 ]; then
+	echo "FAILED: was not able to run cmd_gen for ${OPT_BASENAME}"
+else
+	echo "SUCCESS: generated final verilog for ${OPT_BASENAME}"
+fi
+
+

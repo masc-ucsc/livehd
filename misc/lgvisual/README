@@ -1,0 +1,6 @@
+Simple utility to visualize lgraph;
+Use for simple graph only!!
+
+Parse a json file written by lgjson
+
+Usage: python lgvisual.py *.json

@@ -1,0 +1,26 @@
+project(lgopt_dce)
+
+FILE(GLOB lgopt_dce_SOURCE *.cpp)
+FILE(GLOB lgopt_dce_HEADER *.hpp)
+
+SET(EXELIST "pass_lgopt_dce")
+
+INCLUDE_DIRECTORIES(${core_SOURCE_DIR})
+
+FOREACH(EXE ${EXELIST})
+	FILE(GLOB exec_SOURCE "${EXE}.cpp")
+	ADD_EXECUTABLE(${EXE} ${exec_SOURCE})
+	LIST(REMOVE_ITEM lgopt_dce_SOURCE ${exec_SOURCE})
+ENDFOREACH(EXE)
+
+#ADD_LIBRARY(lgopt_dce ${lgopt_dce_SOURCE} ${lgopt_dce_HEADER})
+
+
+FOREACH(EXE ${EXELIST})
+  TARGET_LINK_LIBRARIES(${EXE} lgopt_dce pass_dce pass_cse core bitscan)
+  TARGET_LINK_LIBRARIES(${EXE} ${BOOST_LIBS} -lpthread)
+ENDFOREACH(EXE)
+
+#add_custom_command(TARGET lgopt_dce PRE_BUILD COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/lgopt_dce ${PROJECT_BINARY_DIR}/lgopt_dce)
+#add_custom_command(TARGET lgopt_dce PRE_BUILD COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/tests ${PROJECT_BINARY_DIR}/tests/)
+

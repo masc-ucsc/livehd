@@ -1,0 +1,155 @@
+Create a json format for the parameters needed in lef/def
+
+{via:
+  {
+    "name": via12_1c,
+    "layers":{
+      "metal1":[-0.065 -0.035 0.065 0.035],
+        "via1":[-0.065 -0.035 0.065 0.035],
+      "metal2":[-0.065 -0.035 0.065 0.035],
+    }
+  }
+}
+
+
+
+{macro:
+  {
+    "name":aoi221x2,
+    "size":[2.0, 1.71],
+    "pins":{
+      "a0":{
+        "direction": "in",
+        "use":"signal",
+        "ports":{
+          "layer": "metal1",
+          "rects":[0.235000, 0.625000, 0.364000, 0.715000,
+                   0.285000, 0.610000, 0.960000, 0.690000,
+                   0.285000, 0.610000, 0.365000, 0.715000,
+                   0.235000, 0.625000, 0.960000, 0.690000]
+        }
+      }
+      "a1":{
+        "direction": "in",
+        "use":"signal",
+        "ports":{
+          "layer": "metal1",
+          "rects":[0.660000, 0.765000, 0.740000, 1.065000]
+        }
+      }
+      "b0":{
+        "direction": "in",
+        "use":"signal",
+        "ports":{
+          "layer": "metal1",
+          "rects":[0.660000, 0.765000, 0.740000, 1.065000]
+        }
+      }
+    }
+  }
+}
+
+
+
+
+
+E.g:
+
+{ layer: {
+    name: "Metal1",
+    horizontal: true,
+    minwidth: 0.06,
+    area: 0.02,
+    # width No need same as minwidth
+    spacing: [
+    0.060000,
+    0.090000, 0.090000, 0.025000
+    ]
+    spacingtable: {
+      0.000000,  0.070000,
+      0.100000,  0.150000,
+      0.750000,  0.250000,
+      1.500000,  0.450000,
+    }
+  }
+}
+
+/****************************************************************************/
+/****** alternative expression on spacing end of line & spacing table********/
+/****************************************************************************/
+
+{ layer: {
+    name: "Metal1",
+    horizontal: true,
+    minwidth: 0.06,
+    area: 0.02,
+    # width No need same as minwidth
+    spacing: 0.060000,
+    spacing_eol: [0.090000, 0.090000, 0.025000],
+    spctb_prl: 0,
+    spctb_width:   [0.0, 0.1, 0.75, 1.5],
+    spctb_spacing: [0.0, 0.1, 0.75, 1.5]
+  }
+}
+
+LAYER Metal1
+    TYPE ROUTING ;
+    DIRECTION HORIZONTAL ;
+    MINWIDTH 0.060000 ;
+    AREA 0.020000 ;
+    WIDTH 0.060000 ;
+    SPACING 0.060000 ;
+    SPACING 0.090000 ENDOFLINE 0.090000 WITHIN 0.025000 ;
+    SPACINGTABLE
+    PARALLELRUNLENGTH
+                       0.000000
+      WIDTH  0.000000  0.060000
+      WIDTH  0.100000  0.100000
+      WIDTH  0.750000  0.250000
+      WIDTH  1.500000  0.450000 ;
+    PITCH 0.190000 0.190000 ;
+END Metal1
+
+
+/***************************************************/
+/***************************************************/
+/***************************************************/
+
+Official JSON example 1
+
+{
+    "glossary": {
+        "title": "example glossary",
+		"GlossDiv": {
+            "title": "S",
+			"GlossList": {
+                "GlossEntry": {
+                    "ID": "SGML",
+					"SortAs": "SGML",
+					"GlossTerm": "Standard Generalized Markup Language",
+					"Acronym": "SGML",
+					"Abbrev": "ISO 8879:1986",
+					"GlossDef": {
+                        "para": "A meta-markup language, used to create markup languages such as DocBook.",
+						"GlossSeeAlso": ["GML", "XML"]
+                    },
+					"GlossSee": "markup"
+                }
+            }
+        }
+    }
+}
+
+
+Official JSON example 2
+{"menu": {
+  "id": "file",
+  "value": "File",
+  "popup": {
+    "menuitem": [
+      {"value": "New", "onclick": "CreateNewDoc()"},
+      {"value": "Open", "onclick": "OpenDoc()"},
+      {"value": "Close", "onclick": "CloseDoc()"}
+    ]
+  }
+}}

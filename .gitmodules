@@ -1,0 +1,9 @@
+[submodule "subs/yosys"]
+	path = subs/yosys
+	url = https://github.com/cliffordwolf/yosys.git
+[submodule "subs/sparsehash-c11"]
+	path = subs/sparsehash-c11
+	url = https://github.com/sparsehash/sparsehash-c11.git
+[submodule "subs/BitMagic"]
+	path = subs/BitMagic
+	url = https://github.com/tlk00/BitMagic.git

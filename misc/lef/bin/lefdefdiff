@@ -1,0 +1,526 @@
+#!/bin/sh
+
+set -f
+
+OS_TYPE=`uname -s`
+
+# Add path to lefdefdiff so lefdiff and defdiff are found if not already on $PATH
+PATH=$PATH:`dirname $0`
+
+lef=0
+def=0
+outFile=0
+file1=0
+file2=0
+tmpPath="."
+quick=0
+ignorePinExtra=0
+ignoreRowName=0
+ignoreViaName=0
+netSegComp=0
+
+#----------------
+# shell functions
+#----------------
+output_usage_msg()
+{
+   echo "Usage: lefdefdiff -lef|-def inFilename1 inFilename2 [-o outFilename]"
+   echo "       [-path pathName] [-quick] [-d] [-ignorePinExtra] [-ignoreRowName]"
+   echo "       [-ignoreViaName] [-netSegComp]"
+   echo "       -path pathName redirects the intermediate files create by lefdefdiff"
+   echo "       to the given pathName instead of the current directory"
+   echo "       If \"-quick\" option is used, bdiff will be used to do the diff."
+   echo "       -ignorePinExtra applies for def only.  It will ignore the"
+   echo "       .extra<n> in the pin name."
+   echo "       -ignoreRowName applies for def only.  It will ignore the row name."
+   echo "       -ignoreViaName applies for def only.  It will ignore the via name"
+   echo "       SpecialNet specialWiring &  Net retularWiring routingPoints."
+   echo "       -netSegComp applies for def only. If this flag is set, it will compare"
+   echo "       the net by segment instead of single point."
+   echo "       User needs to verify the accuracy of the diff results."
+}
+
+output_def_msg()
+{
+   echo "ERROR: Options -ignorePinExtra, -ignoreRowName, -ignoreViaName and -netSegComp apply to def files only."
+   echo "       You have run lefdefdiff with lef files."
+}
+
+ld_sort="/bin/sort"
+if [ ! -x $ld_sort ] ; then
+  ld_sort="/usr/bin/sort"
+fi
+if [ ! -x $ld_sort ] ; then
+  ld_sort="sort"
+fi
+
+ld_diff="/bin/diff"
+if [ ! -x $ld_diff ] ; then
+  ld_diff="/usr/bin/diff"
+fi
+if [ ! -x $ld_diff ] ; then
+  ld_diff="diff"
+fi
+
+# arguments combination can be:
+# lefdefdiff -lef|def inFilename1 inFilename2
+# lefdefdiff -lef|def inFilename1 inFilename2 -o outFilename
+# lefdefdiff -lef|def inFilename1 inFilename2 -o outFilename -quick
+# lefdefdiff -lef|def inFilename1 inFilename2 -o outFilename -quick -d
+# lefdefdiff -lef|def inFilename1 inFilename2 -o outFilename -d -quick
+# lefdefdiff -lef|def inFilename1 inFilename2 -d -quick
+# lefdefdiff -lef|def inFilename1 inFilename2 -quick -d
+# lefdefdiff -lef|def inFilename1 inFilename2 -quick
+# lefdefdiff -lef|def inFilename1 inFilename2 -d
+# lefdefdiff -lef|def inFilename1 inFilename2 -o outFileName -quick -d -path pathName
+# lefdefdiff -def inFilename1 inFilename2 -o outFilename -d -quick -ignorePinExtra
+# lefdefdiff -def inFilename1 inFilename2 -o outFilename -d -quick -ignoreRowName
+# lefdefdiff -def inFilename1 inFilename2 -o outFilename -d -quick -ignoreViaName
+# lefdefdiff -def inFilename1 inFilename2 -o outFilename -d -quick -netSetCmp
+# lefdefdiff -def inFilename1 inFilename2 -o outFilename -d -quick -ignorePinExtra -ignoreRowName
+# lefdefdiff -def inFilename1 inFilename2 -o outFilename -d -quick -ignorePinExtra -ignoreViaName
+# lefdefdiff -def inFilename1 inFilename2 -o outFilename -d -quick -ignorePinExtra -netSegComp
+# lefdefdiff -def inFilename1 inFilename2 -o outFilename -d -quick -ignorePinExtra -ignoreRowName -ignoreViaName
+# lefdefdiff -def inFilename1 inFilename2 -o outFilename -d -quick -ignorePinExtra -ignoreRowName -netSetComp
+# lefdefdiff -def inFilename1 inFilename2 -o outFilename -d -quick -ignorePinExtra -ignoreViaName -netSegComp
+# lefdefdiff -def inFilename1 inFilename2 -o outFilename -d -quick -ignorePinExtra -ignoreRowName -ignoreViaName -netSegComp
+# lefdefdiff -def inFilename1 inFilename2 -o outFilename -d -quick -ignoreRowName -ignoreViaName
+# lefdefdiff -def inFilename1 inFilename2 -o outFilename -d -quick -ignoreRowName -netSegComp
+# lefdefdiff -def inFilename1 inFilename2 -o outFilename -d -quick -ignoreRowName -ignoreViaName -netSegComp
+# lefdefdiff -def inFilename1 inFilename2 -o outFilename -d -quick -ignoreViaName -netSegComp
+
+if [ $# = 1 ] ; then
+   if [ "$1" = "-help" ] || [ "$1" = "-h" ] ; then
+      output_usage_msg
+      exit 0
+   elif [ "$1" = "-version" ] ; then
+      if [ "$OS_TYPE" = "Windows_NT" ] ; then
+         lefdiff.exe $1
+      else
+         lefdiff $1
+      fi
+      exit 0
+   fi
+   output_usage_msg
+   exit 1
+fi
+
+if [ $# -lt 3 ] ; then
+   output_usage_msg
+   exit 1
+fi
+
+if [ "$1" = "-def" -o "$1" = "-DEF" ] ; then
+   def=1
+elif [ "$1" = "-lef" -o "$1" = "-LEF" ] ; then
+   lef=1
+else
+   output_usage_msg
+   exit 1
+fi
+
+file1=$2
+file2=$3
+
+if [ $# -gt 3 ] ; then
+   argCount=1
+   while [ $# -a "$argCount" -lt 4 ]
+   do
+      argCount=`expr $argCount + 1`
+      shift
+   done
+   while [ "$#" -gt 0 ]
+   do
+      if [ "$1" = "-o" ] ; then
+         if [ $# -gt 1 ] ; then
+            outFile=$2 
+            shift
+         else
+            output_usage_msg
+            exit 1
+         fi
+      elif [ "$1" = "-path" ] ; then
+         if [ $# -gt 1 ] ; then
+            if [ "$2" != "-ignorePinExtra" ] && [ "$2" != "-ignoreRowName" ] &&
+               [ "$2" != "-ignoreViaName" ] && [ "$2" != "-d" ] &&
+               [ "$2" != "-quick" ] ; then
+               tmpPath=$2
+               shift
+            else
+               output_usage_msg
+               exit 1
+            fi
+         else
+            output_usage_msg
+            exit 1
+         fi
+      elif [ "$1" = "-quick" ] ; then
+         if [ "$quick" = 1 ] ; then
+            output_usage_msg
+            exit 1
+         fi
+         quick=1
+      elif [ "$1" = "-ignorePinExtra" ] ; then
+         if [ "$ignorePinExtra" = 1 ] ; then
+            output_usage_msg
+            exit 1
+         fi
+         ignorePinExtra=1
+      elif [ "$1" = "-ignoreRowName" ] ; then
+         if [ "$ignoreRowName" = 1 ] ; then
+            output_usage_msg
+            exit 1
+         fi
+         ignoreRowName=1
+      elif [ "$1" = "-ignoreViaName" ] ; then
+         if [ "$ignoreViaName" = 1 ] ; then
+            output_usage_msg
+            exit 1
+         fi
+         ignoreViaName=1
+      elif [ "$1" = "-netSegComp" ] ; then
+         if [ "$netSegComp" = 1 ] ; then
+            output_usage_msg
+            exit 1
+         fi
+         netSegComp=1
+      elif [ "$1" != "-d" ] ; then
+         output_usage_msg
+         exit 1
+      fi
+      shift
+   done
+fi
+
+# ignorePinExtra only apply to -def
+if [ $ignorePinExtra = 1 ] && [ $def != 1 ] ; then
+   output_def_msg
+   exit 1
+fi
+
+# ignoreRowName only apply to -def
+if [ $ignoreRowName = 1 ] && [ $def != 1 ] ; then
+   output_def_msg
+   exit 1
+fi
+
+# ignoreViaName only apply to -def
+if [ $ignoreViaName = 1 ] && [ $def != 1 ] ; then
+   output_def_msg
+   exit 1
+fi
+
+# netSegComp only apply to -def
+if [ $netSegComp = 1 ] && [ $def != 1 ] ; then
+   output_def_msg
+   exit 1
+fi
+
+# split the following from unix & window_NT
+if [ "$OS_TYPE" = "Windows_NT" ] ; then
+   # it's a lef file
+   if [ "$lef" = 1 ] ; then
+      lefdiff.exe $file1 $file2 lefOut1.$$ lefOut2.$$
+      status=$?
+      if [ $status != 0 ] ; then
+         echo "Error in reading the input files, lefdefdiff stops execution!"
+         if [ -f lefOut1.$$ ] ; then   # file already created, remove it
+            rm lefOut1.$$
+         fi
+         if [ -f lefOut2.$$ ] ; then   # file already created, remove it
+            rm lefOut2.$$
+         fi
+         exit $status
+      fi
+      if [ -f lefOut1S.$$ ] ; then # if sort file for file 1 in tmp, remove it
+         rm lefOut1S.$$
+      fi
+      if [ -f lefOut2S.$$ ] ; then # if sort file for file 2 in tmp, remove it
+         rm lefOut2S.$$
+      fi
+      if [ -f lefOut1.$$ ] ; then  # if both output files are there, it means
+         if [ -f lefOut2.$$ ] ; then   # the parser parsed successfully
+            $ld_sort lefOut1.$$ > lefOut1S.$$   # sort the output file
+            $ld_sort lefOut2.$$ > lefOut2S.$$
+            if [ $outFile != 0 ] ; then # user has requested to
+                                       # save output in a file
+               if [ -f $outFile ] ; then # the file exist, remove it
+                  rm $outFile
+               fi
+               echo "< $file1" > $outFile
+               echo "> $file2" >> $outFile
+               # -e #1 below:
+               #    find something that matches begining of line, 1 or more
+               #    numbers followed by 0 or 1 commas follow by 0 or more
+               #    numbers followed by the letter 'c' ... and replace it with
+               #    "Changed:"
+               # -e #2 below:
+               #    find something that matches begining of line, 1 or more
+               #    numbers followed by 0 or 1 commas follow by 0 or more
+               #    numbers followed by the letter 'd' ... and replace it with
+               #    "Deleted:"
+               # -e #3 below:
+               #    find something that matches begining of line, 1 or more
+               #    numbers followed by 0 or 1 commas follow by 0 or more
+               #    numbers followed by the letter 'a' ... and replace it with
+               #    "Added:"
+               diff  lefOut1S.$$ lefOut2S.$$ | \
+               sed \
+                  -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*c[0-9][0-9]*,\{0,1\}[0-9]*/Changed:/' \
+                  -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*d[0-9][0-9]*,\{0,1\}[0-9]*/Deleted:/' \
+                  -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*a[0-9][0-9]*,\{0,1\}[0-9]*/Added:/' \
+                  >> $outFile
+            else
+               echo "< $file1"
+               echo "> $file2"
+               # no output file, output to standard out
+               diff lefOut1S.$$ lefOut2S.$$ | \
+               sed \
+                  -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*c[0-9][0-9]*,\{0,1\}[0-9]*/Changed:/' \
+                  -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*d[0-9][0-9]*,\{0,1\}[0-9]*/Deleted:/' \
+                  -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*a[0-9][0-9]*,\{0,1\}[0-9]*/Added:/'
+            fi
+            rm lefOut1.$$ lefOut1S.$$ lefOut2.$$ lefOut2S.$$
+         fi                       # remove all the temp files from
+      fi
+   elif [ "$def" = 1 ] ; then   # it's a def file
+      defdiff.exe $file1 $file2 defOut1.$$ defOut2.$$ $ignorePinExtra $ignoreRowName $ignoreViaName $netSegComp
+      status=$?
+      if [ $status != 0 ] ; then
+         echo "Error in reading the input files, lefdefdiff stops execution!"
+         if [ -f defOut1.$$ ] ; then   # file already created, remove it
+            rm defOut1.$$
+         fi
+         if [ -f defOut2.$$ ] ; then   # file already created, remove it
+            rm defOut2.$$
+         fi
+         exit $status
+      fi
+      if [ -f defOut1S.$$ ] ; then # if sort file for file 1 in tmp, remove it
+         rm defOut1S.$$
+      fi
+      if [ -f defOut2S.$$ ] ; then # if sort file for file 2 in tmp, remove it
+         rm defOut2S.$$
+      fi
+      if [ -f defOut1.$$ ] ; then   # if both output files are there, it means
+         if [ -f defOut2.$$ ] ; then # the parser parsed successfully
+            $ld_sort defOut1.$$ > defOut1S.$$   # sort the output file
+            $ld_sort defOut2.$$ > defOut2S.$$
+            if [ $outFile != 0 ] ; then # user has requested to
+                                       # save output in a file
+               if [ -f $outFile ] ; then     # the file exist, remove it
+                  rm $outFile
+               fi
+               echo "< $file1" > $outFile
+               echo "> $file2" >> $outFile
+               # -e #1 below:
+               #    find something that matches begining of line, 1 or more
+               #    numbers followed by 0 or 1 commas follow by 0 or more
+               #    numbers followed by the letter 'c' ... and replace it
+               #    with "Changed:"
+               # -e #2 below:
+               #    find something that matches begining of line, 1 or more
+               #    numbers followed by 0 or 1 commas follow by 0 or more
+               #    numbers followed by the letter 'd' ... and replace it
+               #    with "Deleted:"
+               # -e #3 below:
+               #    find something that matches begining of line, 1 or more
+               #    numbers followed by 0 or 1 commas follow by 0 or more
+               #    numbers followed by the letter 'a' ... and replace it
+               #    with "Added:"
+               diff  defOut1S.$$ defOut2S.$$ | \
+               sed \
+                  -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*c[0-9][0-9]*,\{0,1\}[0-9]*/Changed:/' \
+                  -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*d[0-9][0-9]*,\{0,1\}[0-9]*/Deleted:/' \
+                  -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*a[0-9][0-9]*,\{0,1\}[0-9]*/Added:/' \
+                  >> $outFile
+         else
+               echo "< $file1"
+               echo "> $file2"
+               # no output file, output to standard out
+               diff defOut1S.$$ defOut2S.$$ | \
+               sed \
+                  -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*c[0-9][0-9]*,\{0,1\}[0-9]*/Changed:/' \
+                  -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*d[0-9][0-9]*,\{0,1\}[0-9]*/Deleted:/' \
+                  -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*a[0-9][0-9]*,\{0,1\}[0-9]*/Added:/'
+            fi
+            rm defOut1.$$ defOut1S.$$ defOut2.$$ defOut2S.$$
+         fi                       # remove all the temp files from /tmp
+      fi
+   else
+      # neither -lef nor -def
+      output_usage_msg
+   fi
+else
+   # it's a lef file
+   if [ "$lef" = 1 ] ; then
+      # 11/23/99 - Wanda da Rosa, PCR 284352, make the temporary files unique
+      #            per process
+      lefdiff $file1 $file2 $tmpPath/lefOut1.$$ $tmpPath/lefOut2.$$
+      # 11/22/99 - Wanda da Rosa, PCR 281498, check the return status
+      status=$?
+      if [ $status != 0 ] ; then
+         echo "Error in reading the input files, lefdefdiff stops execution!"
+         if [ -f $tmpPath/lefOut1.$$ ] ; then   # file already created, remove it
+            rm $tmpPath/lefOut1.$$
+         fi
+         if [ -f $tmpPath/lefOut2.$$ ] ; then   # file already created, remove it
+            rm $tmpPath/lefOut2.$$
+         fi
+         exit $status
+      fi
+      if [ -f $tmpPath/lefOut1S.$$ ] ; then # if sort file in tmp, remove it
+         rm $tmpPath/lefOut1S.$$
+      fi
+      if [ -f $tmpPath/lefOut2S.$$ ] ; then # if sort file in tmp, remove it
+         rm $tmpPath/lefOut2S.$$
+      fi
+      if [ -f $tmpPath/lefOut1.$$ ] ; then      # if both output files are there, 
+         if [ -f $tmpPath/lefOut2.$$ ] ; then   # the parser parsed successfully
+            $ld_sort $tmpPath/lefOut1.$$ > $tmpPath/lefOut1S.$$   # sort the output file
+            $ld_sort $tmpPath/lefOut2.$$ > $tmpPath/lefOut2S.$$ 
+            if [ $outFile != 0 ] ; then # user has requested to
+                                       # save output in a file
+               if [ -f $outFile ] ; then # the file exist, remove it
+                  rm $outFile
+               fi 
+               echo "< $file1" > $outFile
+               echo "> $file2" >> $outFile
+               # -e #1 below:
+               #    find something that matches begining of line, 1 or more
+               #    numbers followed by 0 or 1 commas follow by 0 or more
+               #    numbers followed by the letter 'c' ... and replace it with
+               #    "Changed:"
+               # -e #2 below:
+               #    find something that matches begining of line, 1 or more
+               #    numbers followed by 0 or 1 commas follow by 0 or more
+               #    numbers followed by the letter 'd' ... and replace it with
+               #    "Deleted:"
+               # -e #3 below:
+               #    find something that matches begining of line, 1 or more
+               #    numbers followed by 0 or 1 commas follow by 0 or more
+               #    numbers followed by the letter 'a' ... and replace it with
+               #    "Added:"
+               if [ $quick = 1 ] && [ -x bdiff ] ; then
+                  bdiff  $tmpPath/lefOut1S.$$ $tmpPath/lefOut2S.$$ | \
+                  sed \
+                     -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*c[0-9][0-9]*,\{0,1\}[0-9]*/Changed:/' \
+                     -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*d[0-9][0-9]*,\{0,1\}[0-9]*/Deleted:/' \
+                     -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*a[0-9][0-9]*,\{0,1\}[0-9]*/Added:/' \
+                     >> $outFile
+               else
+                     $ld_diff  $tmpPath/lefOut1S.$$ $tmpPath/lefOut2S.$$ | \
+                  sed \
+                     -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*c[0-9][0-9]*,\{0,1\}[0-9]*/Changed:/' \
+                     -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*d[0-9][0-9]*,\{0,1\}[0-9]*/Deleted:/' \
+                     -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*a[0-9][0-9]*,\{0,1\}[0-9]*/Added:/' \
+                     >> $outFile
+               fi
+            else
+               echo "< $file1"
+               echo "> $file2"
+               # no output file, output to standard out
+               if [ $quick = 1 ] && [ -x bdiff ] ; then
+                  bdiff $tmpPath/lefOut1S.$$ $tmpPath/lefOut2S.$$ | \
+                  sed \
+                     -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*c[0-9][0-9]*,\{0,1\}[0-9]*/Changed:/' \
+                     -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*d[0-9][0-9]*,\{0,1\}[0-9]*/Deleted:/' \
+                     -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*a[0-9][0-9]*,\{0,1\}[0-9]*/Added:/'
+               else
+                  $ld_diff $tmpPath/lefOut1S.$$ $tmpPath/lefOut2S.$$ | \
+                  sed \
+                     -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*c[0-9][0-9]*,\{0,1\}[0-9]*/Changed:/' \
+                     -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*d[0-9][0-9]*,\{0,1\}[0-9]*/Deleted:/' \
+                     -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*a[0-9][0-9]*,\{0,1\}[0-9]*/Added:/'
+               fi
+            fi
+            rm $tmpPath/lefOut1.$$ $tmpPath/lefOut1S.$$ $tmpPath/lefOut2.$$ $tmpPath/lefOut2S.$$
+         fi                       # remove all the temp files from /tmp
+      fi
+   elif [ "$def" = 1 ] ; then   # it's a def file
+      defdiff $file1 $file2 $tmpPath/defOut1.$$ $tmpPath/defOut2.$$ $ignorePinExtra $ignoreRowName $ignoreViaName $netSegComp 
+      # 11/22/99 - Wanda da Rosa, PCR 281498, check the return status
+      status=$?
+      if [ $status != 0 ] ; then
+         echo "Error in reading the input files, lefdefdiff stops execution!"
+         if [ -f $tmpPath/defOut1.$$ ] ; then   # file already created, remove it
+            rm $tmpPath/defOut1.$$
+         fi
+         if [ -f $tmpPath/defOut2.$$ ] ; then   # file already created, remove it
+            rm $tmpPath/defOut2.$$
+         fi
+         exit $status
+      fi
+      if [ -f $tmpPath/defOut1S.$$ ] ; then # if sort file in tmp, remove it
+         rm $tmpPath/defOut1S.$$
+      fi
+      if [ -f $tmpPath/defOut2S.$$ ] ; then # if sort file in tmp, remove it
+         rm $tmpPath/defOut2S.$$
+      fi
+      if [ -f $tmpPath/defOut1.$$ ] ; then    # if both output files are there,
+         if [ -f $tmpPath/defOut2.$$ ] ; then # the parser parsed successfully
+            $ld_sort $tmpPath/defOut1.$$ > $tmpPath/defOut1S.$$   # sort the output file
+            $ld_sort $tmpPath/defOut2.$$ > $tmpPath/defOut2S.$$
+            if [ $outFile != 0 ] ; then # user has requested to
+                                       # save output in a file
+               if [ -f $outFile ] ; then     # the file exist, remove it
+                  rm $outFile
+               fi
+               echo "< $file1" > $outFile
+               echo "> $file2" >> $outFile
+               # -e #1 below:
+               #    find something that matches begining of line, 1 or more
+               #    numbers followed by 0 or 1 commas follow by 0 or more
+               #    numbers followed by the letter 'c' ... and replace it 
+               #    with "Changed:"
+               # -e #2 below:
+               #    find something that matches begining of line, 1 or more
+               #    numbers followed by 0 or 1 commas follow by 0 or more
+               #    numbers followed by the letter 'd' ... and replace it
+               #    with "Deleted:"
+               # -e #3 below:
+               #    find something that matches begining of line, 1 or more
+               #    numbers followed by 0 or 1 commas follow by 0 or more
+               #    numbers followed by the letter 'a' ... and replace it
+               #    with "Added:"
+               if [ $quick = 1 ] && [ -x bdiff ] ; then
+                  bdiff  $tmpPath/defOut1S.$$ $tmpPath/defOut2S.$$ | \
+                  sed \
+                     -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*c[0-9][0-9]*,\{0,1\}[0-9]*/Changed:/' \
+                     -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*d[0-9][0-9]*,\{0,1\}[0-9]*/Deleted:/' \
+                     -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*a[0-9][0-9]*,\{0,1\}[0-9]*/Added:/' \
+                     >> $outFile
+               else
+                  $ld_diff  $tmpPath/defOut1S.$$ $tmpPath/defOut2S.$$ | \
+                  sed \
+                     -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*c[0-9][0-9]*,\{0,1\}[0-9]*/Changed:/' \
+                     -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*d[0-9][0-9]*,\{0,1\}[0-9]*/Deleted:/' \
+                     -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*a[0-9][0-9]*,\{0,1\}[0-9]*/Added:/' \
+                     >> $outFile
+               fi
+            else
+               echo "< $file1"
+               echo "> $file2"
+               # no output file, output to standard out
+               if [ $quick = 1 ] && [ -x bdiff ] ; then
+                  bdiff $tmpPath/defOut1S.$$ $tmpPath/defOut2S.$$ | \
+                  sed \
+                     -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*c[0-9][0-9]*,\{0,1\}[0-9]*/Changed:/' \
+                     -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*d[0-9][0-9]*,\{0,1\}[0-9]*/Deleted:/' \
+                     -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*a[0-9][0-9]*,\{0,1\}[0-9]*/Added:/'
+               else
+                  $ld_diff $tmpPath/defOut1S.$$ $tmpPath/defOut2S.$$ | \
+                  sed \
+                     -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*c[0-9][0-9]*,\{0,1\}[0-9]*/Changed:/' \
+                     -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*d[0-9][0-9]*,\{0,1\}[0-9]*/Deleted:/' \
+                     -e 's/^[0-9][0-9]*,\{0,1\}[0-9]*a[0-9][0-9]*,\{0,1\}[0-9]*/Added:/'
+               fi
+            fi
+            rm $tmpPath/defOut1.$$ $tmpPath/defOut1S.$$ $tmpPath/defOut2.$$ $tmpPath/defOut2S.$$
+         fi                       # remove all the temp files from /tmp
+      fi
+   else
+      # neither -lef nor -def
+      output_usage_msg
+   fi
+fi
