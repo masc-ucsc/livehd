@@ -1,7 +1,5 @@
 #include "lefdef_json.hpp"
 
-using namespace std;
-
 //void Tech_file::to_json(){
 //  rapidjson::StringBuffer s;
 //  rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(s);
