@@ -4,7 +4,6 @@
 #include "lgraph.hpp"
 #include "lgbench.hpp"
 
-#include "inou/yaml/inou_yaml.hpp"
 #include "inou/json/inou_json.hpp"
 #include "inou/rand/inou_rand.hpp"
 
@@ -15,7 +14,6 @@ int main(int argc, const char **argv) {
 
   Options::setup(argc, argv);
 
-  Inou_yaml yaml;
   Inou_json json;
   Inou_rand rand;
 
@@ -28,7 +26,6 @@ int main(int argc, const char **argv) {
 
   for(auto &g:vgen) {
     g->print_stats();
-    yaml.generate(g);
     json.generate(g);
   }
 }

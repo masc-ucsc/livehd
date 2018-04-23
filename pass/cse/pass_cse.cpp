@@ -2,7 +2,6 @@
 #include <time.h>
 #include <string>
 
-#include "bitscan/bitscan.h"
 #include "pass_cse.hpp"
 #include "lgraph.hpp"
 #include "lgedgeiter.hpp"
@@ -25,7 +24,7 @@ public:
   int idx;
   //int next_avail_pid;
   bool need_modify;
-  typedef pair<Node_Pin, int> NPPair; // <the node pin, to be replaced by idx>
+  typedef std::pair<Node_Pin, int> NPPair; // <the node pin, to be replaced by idx>
   typedef std::map<int, int> CoverByNPMap; // key (idx) is covered by value (idx)
   CoverByNPMap cover_by_np_map;
   typedef std::vector<NPPair> NPPairVec;
@@ -66,7 +65,7 @@ public:
             a.first.get_pid() == b.first.get_pid()) {
           LCS[i][j] = LCS[i - 1][j - 1] + 1;
         } else {
-          LCS[i][j] = max(LCS[i - 1][j], LCS[i][j - 1]);
+          LCS[i][j] = std::max(LCS[i - 1][j], LCS[i][j - 1]);
         }
         j++;
       }
@@ -101,7 +100,7 @@ public:
     Node_Pin dummy_node = Node_Pin(1, 1, 0);
     CoveredPos new_covered_pos;
     std::vector<int> conflict_idx_vec;
-    NPPair last_pair = make_pair(dummy_node, -1);
+    NPPair last_pair = std::make_pair(dummy_node, -1);
     for(auto i=that_node.np_pair_vec.begin(); i!=that_node.np_pair_vec.end(); ++i){
       fmt::print("j.nid:{}, i.nid:{}, j.pid:{}, i.pid:{}\n",  j->first.get_nid(),  i->first.get_nid() , j->first.get_pid(), i->first.get_pid());
       if (j->first.get_nid() == i->first.get_nid() && j->first.get_pid() == i->first.get_pid()) {
@@ -261,13 +260,13 @@ void Pass_cse::traverse(LGraph *g, std::map<int,and_node_for_comp> &and_node_for
                     and_node_for_comp new_node_for_comp;
                     new_node_for_comp.idx = idx;
                     for(const auto &in_edge:g->inp_edges(idx)) {
-                      pair<Node_Pin, int> new_pair = make_pair(in_edge.get_out_pin(), -1);
+                      std::pair<Node_Pin, int> new_pair = std::make_pair(in_edge.get_out_pin(), -1);
                       new_node_for_comp.np_pair_vec.push_back(new_pair);
                     }
                     for(auto i:and_node_for_comp_map){
                       fmt::print("Before comp.\n");
                       result = new_node_for_comp.comp(i.second);
-                      string to_print;
+                      std::string to_print;
                       switch (result) {
                         case equalset: to_print = "equalset"; break;
                         case subset: to_print = "subset";break;
@@ -276,7 +275,7 @@ void Pass_cse::traverse(LGraph *g, std::map<int,and_node_for_comp> &and_node_for
                       }
                       fmt::print("result is {}.\n", to_print);
                     }
-                      and_node_for_comp_map.insert(make_pair(idx, new_node_for_comp));
+                      and_node_for_comp_map.insert(std::make_pair(idx, new_node_for_comp));
 //haha//
                   }
                   else if (round==2){
@@ -292,7 +291,7 @@ void Pass_cse::traverse(LGraph *g, std::map<int,and_node_for_comp> &and_node_for
                           Node_Pin dst = Node_Pin(idx, 0, 1);
                           Node_Pin src = Node_Pin(it->second, 0, 0);
                           g->add_edge(src, dst);
-                          local_map.insert(make_pair(it->second, 1));
+                          local_map.insert(std::make_pair(it->second, 1));
                           fmt::print("Adding edge from {} to {}.\n", it->second, idx);
                         }
                         // rm old edges
@@ -334,7 +333,7 @@ void Pass_cse::traverse(LGraph *g, std::map<int,and_node_for_comp> &and_node_for
 }
 
 void Pass_cse::transform(LGraph *g) {
-  map<int,and_node_for_comp> and_node_for_comp_map; // idx, node
+  std::map<int,and_node_for_comp> and_node_for_comp_map; // idx, node
 //  std::map<std::string, int> idx_map; // <op_sort_pid, idx>
   fmt::print("trying a graph with {} size\n",g->size());
 

@@ -16,7 +16,7 @@ ENDFOREACH(EXE)
 ADD_LIBRARY(inou_cfg ${inou_cfg_SOURCE} ${inou_cfg_HEADER})
 
 FOREACH(EXE ${EXELIST})
-  TARGET_LINK_LIBRARIES(${EXE} inou_cfg inou_rand core bitscan)
+  TARGET_LINK_LIBRARIES(${EXE} inou_cfg inou_rand core)
   TARGET_LINK_LIBRARIES(${EXE} ${BOOST_LIBS} -lpthread)
 ENDFOREACH(EXE)
 

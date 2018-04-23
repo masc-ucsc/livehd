@@ -1,8 +1,6 @@
 
 #include <assert.h>
 
-// #include "bitscan/bitscan.h"
-
 #include <iostream>
 #include <fstream>
 #include <set>

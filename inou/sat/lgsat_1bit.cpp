@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <iostream>
 #include <random>
-#include "ezsat/ezminisat.hpp"
+#include "ezminisat.hpp"
 #include "lgraph.hpp"
 #include "inou.hpp"
 #include "lgedgeiter.hpp"

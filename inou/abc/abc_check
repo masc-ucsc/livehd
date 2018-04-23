@@ -50,7 +50,7 @@ do
 done
 
 script="cec -n ${filename} $golden"
-abc_binary="./misc/yosys/bin/yosys-abc"
+abc_binary="./subs/yosys/bin/yosys-abc"
 ${abc_binary} -c "${script}" | grep "Networks are equivalent."
 if [ $? -eq 0 ]; then
    rm -rf temp.blif

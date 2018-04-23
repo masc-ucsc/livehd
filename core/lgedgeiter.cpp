@@ -1,7 +1,6 @@
 
 #include <assert.h>
 
-#include "bitscan/bitscan.h"
 #include "sparsehash/dense_hash_map"
 
 #include <iostream>

@@ -1,10 +1,10 @@
 #ifndef INVARIANT_FINDER_H_
 #define INVARIANT_FINDER_H_
 
+#include "bm.h"
+
 #include "lgraph.hpp"
 #include "invariant.hpp"
-
-#include "bitscan/bitscan.h"
 
 class Invariant_finder {
 
@@ -15,7 +15,7 @@ private:
   std::string          hier_separator;
 
   bool                 processed;
-  bitarray             stack;
+  bm::bvector<>        stack;
 
   typedef std::pair<Index_ID, uint32_t> Node_bit;
   std::map<Node_bit, Gate_set>          partial_cone_cells;  // partial_gate_count
@@ -29,7 +29,7 @@ private:
 
 public:
   Invariant_finder(LGraph* elab, LGraph* synth, std::string hier_sep = ".") :
-    hier_separator(hier_sep), stack(synth->max_size()) {
+    hier_separator(hier_sep) {
     processed   = false;
     elab_graph  = elab;
     synth_graph = synth;

@@ -20,7 +20,7 @@ ADD_LIBRARY(inou_sat ${inou_sat_SOURCE} ${inou_sat_HEADER})
 
 
 FOREACH(EXE ${EXELIST})
-  TARGET_LINK_LIBRARIES(${EXE}  inou_sat ezsat core bitscan)
+  TARGET_LINK_LIBRARIES(${EXE}  inou_sat ezsat core)
   TARGET_LINK_LIBRARIES(${EXE} ${BOOST_LIBS} -lpthread -lcryptominisat5 ${REQUIRED_LIBS})
 ENDFOREACH(EXE)
 

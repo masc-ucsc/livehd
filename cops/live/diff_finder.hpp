@@ -4,8 +4,6 @@
 #include "lgraph.hpp"
 #include "invariant.hpp"
 
-#include "bitscan/bitscan.h"
-
 class Diff_finder {
 
   private:

@@ -94,7 +94,7 @@ lefiError(int           check,
     if (lefSettings->ErrorLogFunction)
         (*lefSettings->ErrorLogFunction)(str);
     else
-        fprintf(stderr, str);
+        fprintf(stderr, "%s", str);
 }
 
 static char lefiShift [] = {

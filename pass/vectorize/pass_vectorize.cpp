@@ -2,7 +2,6 @@
 #include <time.h>
 #include <string>
 
-#include "bitscan/bitscan.h"
 #include "pass_vectorize.hpp"
 #include "lgraph.hpp"
 #include "lgedgeiter.hpp"

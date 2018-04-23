@@ -4,7 +4,6 @@
 #include <sstream>
 #include <fstream>
 
-#include "bitscan/bitscan.h"
 #include "inou_pyrope.hpp"
 
 #include "lgraph.hpp"
@@ -495,7 +494,8 @@ bool Inou_pyrope::to_subgraph(Out_string &w, Out_string &out, const LGraph *g, I
 
     w << "):{\n";
 
-    bitarray noinline(sg->max_size());
+#if 0
+    bm::bvector<> noinline;
     // Inline if single output and not function call
     for(auto idx:sg->forward()) {
       const auto &op = sg->node_type_get(idx);
@@ -518,6 +518,7 @@ bool Inou_pyrope::to_subgraph(Out_string &w, Out_string &out, const LGraph *g, I
         noinline.set_bit(idx);
       }
     );
+#endif
 
     //inline_stmt.clear();
     //
@@ -608,7 +609,7 @@ std::set<Port_ID> visited_out_pids;
         uint16_t    out_size = subgraph->get_bits(subgraph->get_graph_output(out_name).get_nid());
 */
 
-  vector <const char *> :: iterator i;
+  std::vector<const char *> :: iterator i;
   i = output_vars.begin();
   for(const auto &c:g->out_edges(idx)) {
     out << '\n';
@@ -636,7 +637,8 @@ void Inou_pyrope::to_pyrope(const LGraph *g, const std::string filename) {
   Out_string w, sub;
   w << "# " << prp_file << ".prp file from " << g->get_name() << "\n";
 
-  bitarray noinline(g->size());
+#if 0
+  bm::bvector<> noinline;
   // Inline if single output and not function call
   // this was using backward if things break
   for(auto idx:g->forward()) {
@@ -653,7 +655,6 @@ void Inou_pyrope::to_pyrope(const LGraph *g, const std::string filename) {
   }
   g->each_output([&](Index_ID idx) {
       noinline.erase_bit(idx);
-//      noinline.set_bit(idx);
       }
   );
 
@@ -661,11 +662,7 @@ void Inou_pyrope::to_pyrope(const LGraph *g, const std::string filename) {
       noinline.set_bit(idx);
       }
   );
-
-//    for(const auto &c:g->out_edges(idx)) {
-//      if (!noinline.is_bit(c.get_idx()))
-//        noinline.set_bit(idx);
-//    }
+#endif
 
   inline_stmt.clear();
 

@@ -3,7 +3,7 @@
 TEMP=`getopt -o t::l::y::b::I::dhg:: --long testdir::,logdir::,inou::,binary::,incdir::debug,techmap,hierarchy,graph_name::,lgdb::,top::,lib:: -n 'lgyosys' -- "$@"`
 eval set -- "$TEMP"
 
-OPT_YOSYS="./misc/yosys/bin/yosys"
+OPT_YOSYS="./subs/yosys/bin/yosys"
 OPT_TESTDIR="./tests"
 OPT_LOGDIR="./logs"
 OPT_LGDB="./lgdb"
