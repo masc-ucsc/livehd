@@ -8,8 +8,6 @@
 #include "lgbench.hpp"
 #include "inou_def.hpp"
 
-using namespace std;
-
 int main(int argc, const char **argv) {
 	LGBench b;
 	Options::setup(argc, argv);

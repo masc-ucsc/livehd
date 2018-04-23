@@ -36,7 +36,7 @@ pandoc -S -N -V geometry:margin=1in ./docs/Usage.md -o ./docs/Usage.pdf
 
 ```bash
 # Clone the directory the first time
-git clone  gitosis@mada0.cse.ucsc.edu:live.git
+git clone  git@github.com:masc-ucsc/lgraph.git
 # Must clone submodules like yosys too
 git submodule update --init --recursive
 
@@ -51,7 +51,7 @@ You need either debug or release, if you are developing, use the debug option.
 ```bash
 mkdir -p ~/build/lgraphd
 cd ~/build/lgraphd
-cmake -DCMAKE_BUILD_TYPE=Debug ~/projs/live/lgraph
+cmake -DCMAKE_BUILD_TYPE=Debug ~/projs/lgraph
 make VERBOSE=1
 ```
 
@@ -59,7 +59,7 @@ make VERBOSE=1
 ```bash
 mkdir -p ~/build/lgraph
 cd ~/build/lgraph
-cmake ~/projs/live/lgraph
+cmake ~/projs/lgraph
 make
 ```
 
