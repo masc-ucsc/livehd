@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+filename="temp.blif"
+golden=$1
+mapped=$2
+
+rm -rf $filename
+lines_in_file () {
+    local DCNT=0
+    cat $mapped | while read LINE
+    do
+        set -- $LINE
+        DCNT=$((DCNT+1))
+        if [[ "$1" == ".latch" ]]; then
+            echo $DCNT
+            break
+        fi
+        if [[ "$1" == ".names" ]]; then
+            echo $DCNT
+            break
+        fi
+    done
+}
+
+
+cat $golden | while read LINE
+do
+    set -- $LINE
+    if [[ "$1" == ".model" ]]; then
+        echo $LINE >> $filename
+    fi
+
+    if [[ "$1" == ".inputs" ]]; then
+        echo $LINE >> $filename
+    fi
+
+    if [[ "$1" == ".outputs" ]]; then
+        echo $LINE >> $filename
+        break;
+    fi
+done
+
+DCNT=$(lines_in_file)
+cout=0;
+cat $mapped | while read LINE
+do
+     cout=$((cout+1))
+     if [[ $cout -ge $DCNT ]]; then
+        echo $LINE >> $filename
+     fi
+done
+
+script="cec -n ${filename} $golden"
+abc_binary="./misc/yosys/bin/yosys-abc"
+${abc_binary} -c "${script}" | grep "Networks are equivalent."
+if [ $? -eq 0 ]; then
+   rm -rf temp.blif
+   echo "Successfully matched generated verilog with yosys elaborated verilog file"
+else
+   rm -rf temp.blif
+   echo "Netlist Equivalent check failed!!"
+fi

@@ -1,0 +1,167 @@
+#!/bin/bash
+
+TEMP=`getopt -o t::l::y::b::I::dhg:: --long testdir::,logdir::,inou::,binary::,incdir::debug,techmap,hierarchy,graph_name::,lgdb::,top::,lib:: -n 'lgyosys' -- "$@"`
+eval set -- "$TEMP"
+
+OPT_YOSYS="./misc/yosys/bin/yosys"
+OPT_TESTDIR="./tests"
+OPT_LOGDIR="./logs"
+OPT_LGDB="./lgdb"
+OPT_INOU_YOSYS="./inou/yosys/libinou_yosys.so"
+OPT_DEBUG=0
+OPT_TECHMAP=0
+OPT_TO_VERILOG=0
+OPT_GRAPH_INPUT=""
+OPT_HIERARCHY=""
+OPT_LIB=""
+OPT_INCDIR=""
+OPT_CELL="./inou/yosys/simcell.v"
+OPT_TOP=""
+
+while true ; do
+    case "$1" in
+        -t|--testdir)
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_TESTDIR=$2 ; shift 2 ;;
+            esac ;;
+        -b|--binary)
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_YOSYS=$2 ; shift 2 ;;
+            esac ;;
+        -l|--logdir)
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_LOGDIR=$2 ; shift 2 ;;
+            esac ;;
+        -I|--incdir)
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_INCDIR="verilog_defaults -add -I $2" ;
+                shift 2 ;;
+            esac ;;
+        --lgdb)
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_LGDB=$2 ; shift 2 ;;
+            esac ;;
+        --top)
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_TOP=$2 ; shift 2 ;;
+            esac ;;
+        --lib)
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_LIB=$2 ; shift 2 ;;
+            esac ;;
+        -d|--debug)
+          shift 1 ;
+          OPT_DEBUG=1 ;;
+        -m|--techmap)
+          shift 1 ;
+          OPT_TECHMAP=1 ;;
+        -h|--hierarchy)
+          shift 1 ;
+          OPT_HIERARCHY="-hierarchy" ;;
+        -y|--inou)
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_INOU_YOSYS=$2 ; shift 2 ;;
+            esac ;;
+        -g|--graph_name)
+          OPT_TO_VERILOG=1
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_GRAPH_INPUT=$2 ; shift 2 ;;
+            esac ;;
+        --) shift ; break ;;
+        *) echo "Internal error!" ; exit 1 ;;
+    esac
+done
+OPT_FILES=$*
+
+if [ -f "${OPT_YOSYS}" ]; then
+  echo ""
+else
+  echo $PWD
+  echo "Could not find yosys binary in ${OPT_YOSYS}"
+  exit 3
+fi
+
+if [ $OPT_DEBUG -eq 1 ]; then
+  OPT_YOSYS="gdb --args ${OPT_YOSYS}"
+fi
+
+if [ -f "${OPT_INOU_YOSYS}" ]; then
+  # Found library
+  echo ""
+else
+  echo "Could not find libinou_yosys.so library in ${OPT_INOU_YOSYS}"
+  exit 3
+fi
+
+if [ ${OPT_TO_VERILOG} -eq 0 ]; then
+
+  if [ -d "${OPT_TESTDIR}" ]; then
+    FILE_LIST=${OPT_TESTDIR}/*.v
+    BASE=$(basename OPT_TESTDIR)
+  elif [ "${OPT_FILES}" != "" ]; then
+    FILE_LIST=$OPT_FILES
+    for a in ${OPT_FILES}; do
+      if [ ! -f "${a}" ]; then
+        echo "Could not open source file: ${OPT_FILES}"
+      fi
+      BASE=$(basename $a)
+    done
+  else
+    echo "Specify a list of files to process. Either --testdir=foo or bar.v foo.v"
+    exit 4
+  fi
+
+  techmap=""
+  mkdir -p ${OPT_LOGDIR}
+  if [ $OPT_TECHMAP -eq 1 ]; then
+    mkdir -p ${OPT_LOGDIR}
+    mkdir -p ${OPT_LGDB}
+    ruby ./inou/tech/verilog_json.rb ${OPT_CELL} > ./${OPT_LGDB}/tech_library
+    techmap="techmap; opt_expr -full; "
+  fi
+
+  top=""
+  if [ "$OPT_TOP" != "" ]; then
+    top="-top ${OPT_TOP}"
+  fi
+
+  lib=""
+  if [ "$OPT_LIB" != "" ]; then
+    lib="techmap -D ALU_RIPPLE; abc -liberty ${OPT_LIB}; "
+  fi
+
+
+  ${OPT_YOSYS} -ql ${OPT_LOGDIR}/${BASE}.log  -m $OPT_INOU_YOSYS -p "
+  ${OPT_INCDIR}; read_verilog -sv -nomeminit ${FILE_LIST};
+  hierarchy ${top}; proc; pmuxtree; memory_dff; memory_collect; ${techmap}; ${lib};
+  write_blif golden.blif; write_verilog golden.v ; inou_yosys ${OPT_LGDB}"
+
+  if [ $? -eq 0 ]; then
+    echo "Successfully parsed yosys file "$a
+  else
+    echo "FAIL: Yosys input terminated with an error"
+    exit 1
+  fi
+
+else
+
+    BASE=${OPT_GRAPH_INPUT}_to_yosys
+    ${OPT_YOSYS} -ql ${OPT_LOGDIR}/${BASE}.log  -m $OPT_INOU_YOSYS -p "dump_yosys ${OPT_HIERARCHY} -graph_name ${OPT_GRAPH_INPUT}; write_verilog ${OPT_GRAPH_INPUT}_dirty.v; opt -fast; opt_clean -purge; write_verilog ${OPT_GRAPH_INPUT}.v;"
+    if [ $? -eq 0 ]; then
+      echo "Successfully generated verilog file ${OPT_GRAPH_INPUT}.v"
+    else
+      echo "FAIL: Yosys output terminated with an error"
+      exit 1
+    fi
+fi
+
+exit 0

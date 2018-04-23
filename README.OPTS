@@ -1,0 +1,15 @@
+
+Vectorize:
+
+ -In the lgraph, combine operations to vector (and/or/...) whenever possible.
+
+ -In the llvm variable generation, put bits located in memory close by so that a single load can handle the vector
+
+
+profile/If-Conversion
+
+ -Create if blocks no selects and insert edge profile.
+
+ -If the profile sets a branch as highly misspredicted, then switch to selectinst (no branch)
+
+ -Put infrequently taken basic blocks out of the execution path

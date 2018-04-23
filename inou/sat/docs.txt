@@ -1,0 +1,36 @@
+
+A. Finding Xoring:
+
+1. creating lgraph with several 1 bit inputs and one 1 bit output(satsmall.v)
+mada0:~/build/lgraph$
+./inou/yosys/lgyosys ./inou/yosys/tests/satsmall.v
+
+2.Running lgsat
+mada0:~/build/lgraph$
+./inou/sat/lgsat_1bit --graph_name satsmall
+
+This will result in xoring 2 lgraphs. Both the lgraps will create the formula devired from the lgraph and feed it into the satsolver.
+
+
+B. Multibit:
+
+1. creating lgraph with several bit inputs and one multibit output(satsmall.v)
+mada0:~/build/lgraph$
+./inou/yosys/lgyosys ./inou/yosys/tests/satsmall.v
+
+2.mada0:~/build/lgraph$
+./inou/sat/lgsat_multibit --graph_name satsmall
+
+The promt will ask the number of bits you want to feed as input/output bits(1 for single bit input/output);
+The program does not automatically detect the input /output bits.
+The result will show that for multibit the program also works.
+The output will be the formula derived from a lgraph satsmall and verify it using a consant/manual derivation ofthe lgraph.
+lgsat read the lgraph and prints the formula(e.g, and(and(a,b),or(a,c))) before insertin to the sat solver.
+
+TODO:
+
+1. need to autodetect the number of input bits for multibits
+2. need to incorporate 2 different lgraphs(I tried but needto do debug of the errors)
+3. incorporate many operations as FLOP
+4. need to work for more than 1 output.
+

@@ -1,0 +1,5 @@
+
+Does both. JIT run and obj code generation
+
+clang++ -std=c++14 -g -O0 JitFromScratch.cpp `llvm-config --cxxflags --ldflags --system-libs --libs all` -O0 -o toy
+
