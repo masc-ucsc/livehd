@@ -52,7 +52,11 @@ int lef_macro_cb(lefrCallbackType_e c, lefiMacro *fmacro, lefiUserData ud) {
 	auto &tmp_cell = tlib->get_vec_cell_types()->back();
 
 	if (fmacro->hasSize()) {
+    assert(false);
+#if 0
+    FIXME???
 		tmp_cell.set_dimentions(static_cast<float>(fmacro->sizeX()), static_cast<float>(fmacro->sizeY()));
+#endif
 	}
 	return 0;
 }

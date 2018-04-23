@@ -39,17 +39,17 @@ enum Node_Type_Op:uint64_t {
   ShiftRight_Op,
   ShiftLeft_Op,
   GraphIO_Op,
-  SubGraph_Op,
-  BlackBox_Op,
-  TechMap_Op,
-  U32Const_Op,
-  StrConst_Op,
   CfgAssign_Op,
   CfgIf_Op,
   CfgFunctionCall_Op,
   CfgFor_Op,
   CfgWhile_Op,
-    // Add here, operators needed
+  // Add here, operators needed
+  SubGraph_Op,
+  BlackBox_Op,
+  TechMap_Op,
+  U32Const_Op,
+  StrConst_Op,
   SubGraphMin_Op, // Each subgraph cell starts here
   SubGraphMax_Op = (1ULL<<32),
   U32ConstMin_Op,

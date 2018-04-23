@@ -17,7 +17,7 @@ int main(int argc, const char **argv) {
   LGBench b;
 
   Live_pass_pack pack(argc, argv);
-  ifstream invariant_file(pack.boundaries_name);
+  std::ifstream invariant_file(pack.boundaries_name);
   if(!invariant_file.good()) {
     console->error("Error reading boundaries file {}\n",pack.boundaries_name);
     exit(1);

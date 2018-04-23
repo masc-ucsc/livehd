@@ -19,7 +19,7 @@ add_custom_command(TARGET inou_tech PRE_BUILD COMMAND ${CMAKE_COMMAND} -E copy $
 add_custom_command(TARGET inou_tech PRE_BUILD COMMAND ${CMAKE_COMMAND} -E echo "${CMAKE_CURRENT_SOURCE_DIR}" > ${PROJECT_BINARY_DIR}/src)
 
 FOREACH(EXE ${EXELIST})
-  TARGET_LINK_LIBRARIES(${EXE} inou_tech core bitscan)
+  TARGET_LINK_LIBRARIES(${EXE} inou_tech core)
   TARGET_LINK_LIBRARIES(${EXE} ${BOOST_LIBS} -lpthread)
 ENDFOREACH(EXE)
 

@@ -18,10 +18,10 @@ ENDFOREACH(EXE)
 
 
 ADD_LIBRARY(inou_blif ${inou_blif_SOURCE} ${inou_blif_HEADER})
-TARGET_LINK_LIBRARIES(inou_blif core bitscan )
+TARGET_LINK_LIBRARIES(inou_blif core)
 TARGET_LINK_LIBRARIES(inou_blif -Wl,-Bstatic ${BOOST_LIBS} -Wl,-Bdynamic -lrt -lpthread ${REQUIRED_LIBS})
 
 FOREACH(EXE ${EXELIST})
-  TARGET_LINK_LIBRARIES(${EXE} inou_blif core bitscan)
+  TARGET_LINK_LIBRARIES(${EXE} inou_blif core)
   TARGET_LINK_LIBRARIES(${EXE} ${BOOST_LIBS} -lpthread)
 ENDFOREACH(EXE)

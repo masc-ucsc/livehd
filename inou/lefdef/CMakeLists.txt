@@ -16,7 +16,7 @@ ENDFOREACH(EXE)
 ADD_LIBRARY(inou_lefdef ${inou_lefdef_SOURCE} ${inou_lefdef_HEADER})
 
 FOREACH(EXE ${EXELIST})
-  TARGET_LINK_LIBRARIES(${EXE} inou_lefdef inou_json lef def core bitscan)
+  TARGET_LINK_LIBRARIES(${EXE} inou_lefdef inou_json lef def core)
   TARGET_LINK_LIBRARIES(${EXE} ${BOOST_LIBS} -lpthread ${REQUIRED_LIBS})
 ENDFOREACH(EXE)
 

@@ -17,7 +17,7 @@ ADD_LIBRARY(inou_json ${inou_json_SOURCE} ${inou_json_HEADER})
 
 add_custom_command(TARGET inou_json PRE_BUILD COMMAND ${CMAKE_COMMAND} -E copy ${core_SOURCE_DIR}/../misc/lgvisual/lgvisual.py ${PROJECT_BINARY_DIR}/lgvisual.py)
 FOREACH(EXE ${EXELIST})
-  TARGET_LINK_LIBRARIES(${EXE} inou_json inou_rand core bitscan)
+  TARGET_LINK_LIBRARIES(${EXE} inou_json inou_rand core)
   TARGET_LINK_LIBRARIES(${EXE} ${BOOST_LIBS} -lpthread)
 ENDFOREACH(EXE)
 

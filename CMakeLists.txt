@@ -42,7 +42,6 @@ ENDIF(CMAKE_BUILD_TYPE MATCHES "Debug")
 
 
 FIND_PACKAGE(Threads)
-FIND_LIBRARY(YAMLCPP_LIBRARIES NAMES yaml-cpp)
 FIND_PACKAGE(Boost)
 FIND_PACKAGE(BISON REQUIRED)
 FIND_PACKAGE(Hg)
@@ -57,6 +56,7 @@ include(ExternalProject)
 # MISC
 INCLUDE_DIRECTORIES(misc/lef/lef)
 INCLUDE_DIRECTORIES(misc/def/def)
+INCLUDE_DIRECTORIES(misc/ezsat)
 
 ADD_SUBDIRECTORY(misc/lef/lef)
 ADD_SUBDIRECTORY(misc/def/def)
@@ -82,6 +82,8 @@ include_directories ("${PROJECT_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}/subs")
 # Include-only libraries
 INCLUDE_DIRECTORIES(subs/sparsehash-c11)
 INCLUDE_DIRECTORIES(subs/BitMagic/src)
+INCLUDE_DIRECTORIES(subs/spdlog/include)
+INCLUDE_DIRECTORIES(subs/yosys)
 
 # code and include libraries
 ADD_SUBDIRECTORY(core)
@@ -95,7 +97,6 @@ ADD_SUBDIRECTORY(pass/lgopt_dce)
 ADD_SUBDIRECTORY(pass/lgopt_gvn_pre)
 ADD_SUBDIRECTORY(pass/lgopt_fluid)
 ADD_SUBDIRECTORY(pass/droute)
-ADD_SUBDIRECTORY(inou/yaml)
 ADD_SUBDIRECTORY(inou/lefdef)
 ADD_SUBDIRECTORY(inou/rand)
 ADD_SUBDIRECTORY(inou/yosys)
@@ -112,7 +113,6 @@ ADD_SUBDIRECTORY(inou/sat)
 ADD_SUBDIRECTORY(inou/cfg)
 
 add_test(NAME basic_inou_abc           COMMAND  ${PROJECT_SOURCE_DIR}/test/abc.sh)
-add_test(NAME basic_inou_rand_yaml     COMMAND  ${PROJECT_SOURCE_DIR}/test/rand_yaml.sh)
 add_test(NAME basic_inou_rand_json     COMMAND  ${PROJECT_SOURCE_DIR}/test/rand_json.sh)
 add_test(NAME basic_inou_yosys         COMMAND  ${PROJECT_SOURCE_DIR}/test/yosys.sh)
 add_test(NAME basic_inou_synth_yosys   COMMAND  ${PROJECT_SOURCE_DIR}/test/synth.sh -s${PROJECT_SOURCE_DIR})

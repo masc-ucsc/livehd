@@ -2,7 +2,6 @@
 #include <time.h>
 #include <string>
 
-#include "bitscan/bitscan.h"
 #include "pass_fluid.hpp"
 #include "lgraph.hpp"
 #include "lgedgeiter.hpp"
@@ -154,7 +153,7 @@ void Pass_fluid::add_fork(LGraph *g)
   fmt::print("\n**Add Fork: **\n");
 
   // add vi
-  string vi_name = "vi";
+  std::string vi_name = "vi";
   Index_ID vi_nid = g->create_node().get_nid();
   // TODO: ask how to add pid to IO
   // Port_ID vi_pid = vi_nid;
@@ -165,7 +164,7 @@ void Pass_fluid::add_fork(LGraph *g)
   Node_Pin global_vi(vi_nid, vi_pid , false);
 
   // add so
-  string so_name = "so";
+  std::string so_name = "so";
   Index_ID so_nid = g->create_node().get_nid();
   // TODO: ask how to add pid to IO
 //  Port_ID so_pid = so_nid;
@@ -176,7 +175,7 @@ void Pass_fluid::add_fork(LGraph *g)
   Node_Pin global_so(so_nid, so_pid , false);
 
   // add vo
-  string vo_name = "vo";
+  std::string vo_name = "vo";
   Index_ID vo_nid = g->create_node().get_nid();
   // TODO: ask how to add pid to IO
 //  Port_ID vo_pid = vo_nid;
@@ -187,7 +186,7 @@ void Pass_fluid::add_fork(LGraph *g)
   Node_Pin global_vo(vo_nid, vo_pid , true);
 
   // add si
-  string si_name = "si";
+  std::string si_name = "si";
   Index_ID si_nid = g->create_node().get_nid();
   // TODO: ask how to add pid to IO
 //  Port_ID si_pid = si_nid;
@@ -389,7 +388,7 @@ void Pass_fluid::add_fork_deadlock(LGraph *g)
   fmt::print("\n**Add Fork: **\n");
 
   // add vi
-  string vi_name = "vi";
+  std::string vi_name = "vi";
   Index_ID vi_nid = g->create_node().get_nid();
   // TODO: ask how to add pid to IO
   // Port_ID vi_pid = vi_nid;
@@ -400,7 +399,7 @@ void Pass_fluid::add_fork_deadlock(LGraph *g)
   Node_Pin global_vi(vi_nid, vi_pid , false);
 
   // add so
-  string so_name = "so";
+  std::string so_name = "so";
   Index_ID so_nid = g->create_node().get_nid();
   // TODO: ask how to add pid to IO
 //  Port_ID so_pid = so_nid;
@@ -411,7 +410,7 @@ void Pass_fluid::add_fork_deadlock(LGraph *g)
   Node_Pin global_so(so_nid, so_pid , false);
 
   // add vo
-  string vo_name = "vo";
+  std::string vo_name = "vo";
   Index_ID vo_nid = g->create_node().get_nid();
   // TODO: ask how to add pid to IO
 //  Port_ID vo_pid = vo_nid;
@@ -422,7 +421,7 @@ void Pass_fluid::add_fork_deadlock(LGraph *g)
   Node_Pin global_vo(vo_nid, vo_pid , true);
 
   // add si
-  string si_name = "si";
+  std::string si_name = "si";
   Index_ID si_nid = g->create_node().get_nid();
   // TODO: ask how to add pid to IO
 //  Port_ID si_pid = si_nid;

@@ -6,6 +6,7 @@
 #include <algorithm>
 
 #include <unordered_map>
+#include <map>
 
 #include "lglog.hpp"
 
@@ -50,7 +51,7 @@ class Tech_cell {
 
     std::vector<Pin>      pins;
 
-    std::map<std::string, pin_type> pname2id;
+    std::unordered_map<std::string, pin_type> pname2id;
 
     //FIXME: technically, this should be a full table for each pair?
     std::map<ppair, float> delay; // maps an (ipin x opin) to delay
@@ -261,7 +262,7 @@ class Tech_library {
     std::vector<Tech_layer>          layers;    // only for routing
     std::vector<Tech_via>            vias;      // only for routing
 
-    std::map<std::string, uint16_t>  cname2id;
+    std::unordered_map<std::string, uint16_t>  cname2id;
 
     Tech_library(std::string _path) {
       lgdb = _path;

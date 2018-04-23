@@ -19,8 +19,6 @@
 #include "lgedgeiter.hpp"
 //#include "inou/yaml/inou_yaml.hpp"
 
-#include "bitscan/bitscan.h"
-
 USING_YOSYS_NAMESPACE
 PRIVATE_NAMESPACE_BEGIN
 

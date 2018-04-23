@@ -102,7 +102,7 @@ void Invariant_finder::propagate_until_boundary(Index_ID nid, uint32_t bit_selec
       // FIXME: for registers don't propagate through clk, rst, enable
       // FIXME: for fflops propagate data to data, valid to valid and retry to retry only
 
-      if(stack.is_bit(driver_cell)) {
+      if(stack.get_bit(driver_cell)) {
         continue;
       }
 
@@ -120,7 +120,7 @@ void Invariant_finder::propagate_until_boundary(Index_ID nid, uint32_t bit_selec
     }
   }
 
-  stack.erase_bit(nid);
+  stack.clear_bit(nid);
 }
 
 void Invariant_finder::find_invariant_boundaries() {

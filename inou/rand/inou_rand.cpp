@@ -3,7 +3,8 @@
 #include <string>
 #include <random>
 
-#include "bitscan/bitscan.h"
+#include "bm.h"
+
 #include "inou_rand.hpp"
 #include "lgraph.hpp"
 
@@ -116,7 +117,7 @@ std::vector<LGraph *> Inou_rand::generate() {
     }
   }
 
-  bitarray used_port(max_nid);
+  bm::bvector<> used_port;
 
   std::set<std::pair<Node_Pin, Node_Pin>, struct pin_pair_compare> connections;
 
@@ -137,7 +138,7 @@ std::vector<LGraph *> Inou_rand::generate() {
       continue;
 
     Port_ID dst_port = 0;
-    if (used_port.is_bit(dst_nid)) {
+    if (used_port.get_bit(dst_nid)) {
       dst_port =rnd_4(rnd);
     }
     used_port.set_bit(dst_nid);

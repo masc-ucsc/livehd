@@ -16,7 +16,7 @@ ENDFOREACH(EXE)
 #ADD_LIBRARY(pass_lgopt_dce ${pass_lgopt_dce_SOURCE} ${pass_lgopt_dce_HEADER})
 
 FOREACH(EXE ${EXELIST})
-  TARGET_LINK_LIBRARIES(${EXE} pass_dce pass_cse core bitscan)
+  TARGET_LINK_LIBRARIES(${EXE} pass_dce pass_cse core)
   TARGET_LINK_LIBRARIES(${EXE} ${BOOST_LIBS} -lpthread ${REQUIRED_LIBS})
 ENDFOREACH(EXE)
 

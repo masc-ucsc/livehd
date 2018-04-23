@@ -14,7 +14,7 @@ FOREACH(EXE ${EXELIST})
 ENDFOREACH(EXE)
 
 FOREACH(EXE ${EXELIST})
-  TARGET_LINK_LIBRARIES(${EXE} pass_dce pass_cse pass_vectorize core bitscan)
+  TARGET_LINK_LIBRARIES(${EXE} pass_dce pass_cse pass_vectorize core)
   TARGET_LINK_LIBRARIES(${EXE} ${BOOST_LIBS} -lpthread ${REQUIRED_LIBS})
 ENDFOREACH(EXE)
 

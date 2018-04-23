@@ -10,3 +10,6 @@
 [submodule "subs/anubis"]
 	path = subs/anubis
 	url = https://github.com/masc-ucsc/anubis.git
+[submodule "subs/spdlog"]
+	path = subs/spdlog
+	url = https://github.com/gabime/spdlog.git

@@ -16,7 +16,7 @@ ENDFOREACH(EXE)
 ADD_LIBRARY(inou_pyrope ${inou_pyrope_SOURCE} ${inou_pyrope_HEADER})
 
 FOREACH(EXE ${EXELIST})
-  TARGET_LINK_LIBRARIES(${EXE} inou_pyrope core bitscan)
+  TARGET_LINK_LIBRARIES(${EXE} inou_pyrope core)
   TARGET_LINK_LIBRARIES(${EXE} ${BOOST_LIBS} -lpthread ${REQUIRED_LIBS})
 ENDFOREACH(EXE)
 
