@@ -53,34 +53,37 @@ SET(REQUIRED_LIBS "")
 
 include(ExternalProject)
 
+##########################################################
+# MISC
+INCLUDE_DIRECTORIES(misc/lef/lef)
+INCLUDE_DIRECTORIES(misc/def/def)
+
+ADD_SUBDIRECTORY(misc/lef/lef)
+ADD_SUBDIRECTORY(misc/def/def)
+ADD_SUBDIRECTORY(misc/ezsat)
+
+##########################################################
+# SUBS
 ExternalProject_Add(yosys
-  SOURCE_DIR ${PROJECT_SOURCE_DIR}/misc/yosys
+  SOURCE_DIR ${PROJECT_SOURCE_DIR}/subs/yosys
   GIT_SUBMODULES yosys
   CONFIGURE_COMMAND make config-clang
   PREFIX ""
   BUILD_COMMAND make $(MFLAGS)
   BUILD_IN_SOURCE 1
-  #BINARY_DIR #${CMAKE_CURRENT_BINARY_DIR}/misc/yosys
-  TMP_DIR ${CMAKE_CURRENT_BINARY_DIR}/misc/yosys/tmp
-  STAMP_DIR ${CMAKE_CURRENT_BINARY_DIR}/misc/yosys/stampdir
+  TMP_DIR ${CMAKE_CURRENT_BINARY_DIR}/subs/yosys/tmp
+  STAMP_DIR ${CMAKE_CURRENT_BINARY_DIR}/subs/yosys/stampdir
   DOWNLOAD_COMMAND ""
-  INSTALL_COMMAND make $(MFLAGS) -C ${PROJECT_SOURCE_DIR}/misc/yosys install PREFIX=${CMAKE_BINARY_DIR}/misc/yosys
+  INSTALL_COMMAND make $(MFLAGS) -C ${PROJECT_SOURCE_DIR}/subs/yosys install PREFIX=${CMAKE_BINARY_DIR}/subs/yosys
   )
 
-include_directories ("${PROJECT_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}/misc")
+include_directories ("${PROJECT_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}/subs")
 
 # Include-only libraries
-INCLUDE_DIRECTORIES(misc/sparsehash)
-INCLUDE_DIRECTORIES(misc/BitMagic/src)
-INCLUDE_DIRECTORIES(misc/lef/lef)
-INCLUDE_DIRECTORIES(misc/def/def)
-
+INCLUDE_DIRECTORIES(subs/sparsehash-c11)
+INCLUDE_DIRECTORIES(subs/BitMagic/src)
 
 # code and include libraries
-ADD_SUBDIRECTORY(misc/lef/lef)
-ADD_SUBDIRECTORY(misc/def/def)
-ADD_SUBDIRECTORY(misc/bitscan)
-ADD_SUBDIRECTORY(misc/ezsat)
 ADD_SUBDIRECTORY(core)
 ADD_SUBDIRECTORY(pass/dce)
 ADD_SUBDIRECTORY(pass/cse)
@@ -115,12 +118,12 @@ add_test(NAME basic_inou_yosys         COMMAND  ${PROJECT_SOURCE_DIR}/test/yosys
 add_test(NAME basic_inou_synth_yosys   COMMAND  ${PROJECT_SOURCE_DIR}/test/synth.sh -s${PROJECT_SOURCE_DIR})
 add_test(NAME basic_lgopt_dce          COMMAND  ${PROJECT_SOURCE_DIR}/test/lgopt_dce.sh)
 add_test(NAME basic_lgopt_gvn_pre      COMMAND  ${PROJECT_SOURCE_DIR}/test/lgopt_gvn_pre.sh)
-add_test(NAME compl_tmap_verilog       COMMAND  ruby ${PROJECT_SOURCE_DIR}/inou/tech/verilog.rb ${PROJECT_SOURCE_DIR}//misc/yosys/techlibs/common/simcells.v > tech_library)
+add_test(NAME compl_tmap_verilog       COMMAND  ruby ${PROJECT_SOURCE_DIR}/inou/tech/verilog.rb ${PROJECT_SOURCE_DIR}//subs/yosys/techlibs/common/simcells.v > tech_library)
 add_test(NAME compl_lgopt_fluid        COMMAND  ${PROJECT_SOURCE_DIR}/test/lgopt_fluid.sh)
-add_test(NAME extra_inou_ANUBIS-alpha  COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=al_lgdb --testdir=${PROJECT_SOURCE_DIR}/misc/anubis/alpha)
-add_test(NAME extra_inou_ANUBIS-dlx    COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=dl_lgdb --testdir=${PROJECT_SOURCE_DIR}/misc/anubis/dlx)
-add_test(NAME extra_inou_ANUBIS-fpu    COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=fp_lgdb --testdir=${PROJECT_SOURCE_DIR}/misc/anubis/fpu)
-#add_test(NAME extra_inou_ANUBIS-mor1kx COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=mo_lgdb --testdir=${PROJECT_SOURCE_DIR}/misc/anubis/mor1kx)
-#add_test(NAME extra_inou_ANUBIS-or1200 COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=or_lgdb --testdir=${PROJECT_SOURCE_DIR}/misc/anubis/or1200)
-add_test(NAME extra_inou_BOOM          COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=bo_lgdb  ${PROJECT_SOURCE_DIR}/misc/anubis/boom/boombase.v ${PROJECT_SOURCE_DIR}/misc/anubis/boom/boom.fix.v --top=BoomCore)
+add_test(NAME extra_inou_ANUBIS-alpha  COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=al_lgdb --testdir=${PROJECT_SOURCE_DIR}/subs/anubis/alpha)
+add_test(NAME extra_inou_ANUBIS-dlx    COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=dl_lgdb --testdir=${PROJECT_SOURCE_DIR}/subs/anubis/dlx)
+add_test(NAME extra_inou_ANUBIS-fpu    COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=fp_lgdb --testdir=${PROJECT_SOURCE_DIR}/subs/anubis/fpu)
+#add_test(NAME extra_inou_ANUBIS-mor1kx COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=mo_lgdb --testdir=${PROJECT_SOURCE_DIR}/subs/anubis/mor1kx)
+#add_test(NAME extra_inou_ANUBIS-or1200 COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=or_lgdb --testdir=${PROJECT_SOURCE_DIR}/subs/anubis/or1200)
+add_test(NAME extra_inou_BOOM          COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=bo_lgdb  ${PROJECT_SOURCE_DIR}/subs/anubis/boom/boombase.v ${PROJECT_SOURCE_DIR}/subs/anubis/boom/boom.fix.v --top=BoomCore)
 
