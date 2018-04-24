@@ -41,11 +41,11 @@ ENDIF(CMAKE_BUILD_TYPE MATCHES "Debug")
 # -fPIC needed because Yosys uses lgraph as dynamic library
 
 
-FIND_PACKAGE(Threads)
-FIND_PACKAGE(Boost)
+FIND_PACKAGE(Threads REQUIRED)
+FIND_PACKAGE(Boost REQUIRED)
 FIND_PACKAGE(BISON REQUIRED)
-FIND_PACKAGE(Hg)
-FIND_PACKAGE(TCL)
+FIND_PACKAGE(TCL REQUIRED)
+FIND_PACKAGE(RapidJSON REQUIRED)
 
 SET(BOOST_LIBS "-lboost_filesystem -lboost_program_options -lboost_system -lboost_iostreams -lboost_serialization")
 SET(REQUIRED_LIBS "")
