@@ -35,7 +35,7 @@ done
 rm -rf ./lgdb/ ./logs ./yosys-test *.yaml *.v *.json
 mkdir yosys-test/
 
-./misc/yosys/bin/yosys -V
+./subs/yosys/bin/yosys -V
 
 for input in ${inputs[@]}
 do
@@ -78,13 +78,13 @@ do
   yosys_equiv_extra="${yosys_simple}; equiv_simple -seq 5; equiv_induct -seq 5;"
 
   #try fast script first, if it fails, goes to more complex one
-  ./misc/yosys/bin/yosys -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; equiv_status -assert" \
+  ./subs/yosys/bin/yosys -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; equiv_status -assert" \
     2> /dev/null | grep "Equivalence successfully proven!"
 
   if [ $? -eq 0 ]; then
     echo "Successfully matched generated verilog with original verilog1 ("${input}")"
   else
-    ./misc/yosys/bin/yosys -p "${yosys_read};
+    ./subs/yosys/bin/yosys -p "${yosys_read};
     memory -nomap; opt_expr -full; opt -purge; proc; opt -purge;
     opt_reduce -full; opt_expr -mux_undef; opt_reduce; opt_merge; opt_clean -purge;
     ${yosys_prep}; opt -purge; proc; opt -purge; ${yosys_equiv}; equiv_status -assert" \
@@ -94,7 +94,7 @@ do
       echo "Successfully matched generated verilog with original verilog2 ("${input}")"
     else
 
-      ./misc/yosys/bin/yosys -p "${yosys_read};
+      ./subs/yosys/bin/yosys -p "${yosys_read};
       memory -nomap; opt_expr -full; opt -purge; proc; opt -purge;
       opt_reduce -full; opt_expr -mux_undef; opt_reduce; opt_merge; opt_clean -purge; techmap -map +/adff2dff.v;
       ${yosys_prep}; opt -purge; proc; opt -purge; ${yosys_equiv_extra}; equiv_status -assert" \
@@ -106,8 +106,7 @@ do
 
       else
       echo "WARN: Yosys failed to prove equivalency, trying to prove equivalency with Formality."
-      #echo "./misc/yosys/bin/yosys -p \"read_verilog -sv ${base}.v; read_verilog -sv ./inou/yosys/tests/${base}.v; flatten; proc; memory -nomap; opt_expr -full; opt -purge; proc; opt -purge; opt_reduce -full; opt_expr -mux_undef; opt_reduce; opt_merge; opt_clean -purge; equiv_make ${base} lgraph_${base} equiv; hierarchy -top equiv; hierarchy -check; flatten; opt -purge; proc; opt -purge; equiv_simple; equiv_status -assert\""
-      echo "./misc/yosys/bin/yosys -p \"${yosys_read}; memory -nomap; opt_expr -full; opt -purge; proc; opt -purge; opt_reduce -full; opt_expr -mux_undef; opt_reduce; opt_merge; opt_clean -purge; techmap -map +/adff2dff.v; ${yosys_prep}; opt -purge; proc; opt -purge; ${yosys_equiv_extra}; equiv_status -assert\""
+      echo "./subs/yosys/bin/yosys -p \"${yosys_read}; memory -nomap; opt_expr -full; opt -purge; proc; opt -purge; opt_reduce -full; opt_expr -mux_undef; opt_reduce; opt_merge; opt_clean -purge; techmap -map +/adff2dff.v; ${yosys_prep}; opt -purge; proc; opt -purge; ${yosys_equiv_extra}; equiv_status -assert\""
 
       echo "
       set_app_var synopsys_auto_setup true

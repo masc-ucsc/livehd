@@ -53,7 +53,7 @@ do
   yosys_equiv_extra="${yosys_simple}; equiv_simple -seq 5; equiv_induct -seq 5;"
 
   #try fast script first, if it fails, goes to more complex one
-  ./misc/yosys/bin/yosys -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; equiv_status -assert" \
+  ./subs/yosys/bin/yosys -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; equiv_status -assert" \
     2> /dev/null | grep "Equivalence successfully proven!"
   if [ $? -eq 0 ]; then
     echo "Successfully matched generated verilog with original verilog ("${input}")"
