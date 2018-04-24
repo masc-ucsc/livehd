@@ -56,16 +56,15 @@ if [ ! -f "${OPT_LGRAPH}/inou/tech/verilog.rb" ]; then
 fi
 
 
-rm -rf ./lgdb/ ./logs ./synth-test *.yaml *.v
+rm -rf ./lgdb/ ./logs ./synth-test *.json *.v
 mkdir synth-test/
 mkdir logs
 mkdir lgdb
 
 ruby ${OPT_LGRAPH}/inou/tech/verilog_json.rb \
-  ${OPT_LGRAPH}/misc/yosys/techlibs/common/simcells.v  \
-  ${OPT_LGRAPH}/misc/yosys/techlibs/xilinx/cells_sim.v \
-  ${OPT_LGRAPH}/misc/yosys/techlibs/xilinx/brams_bb.v \
-  ${OPT_LGRAPH}/misc/yosys/techlibs/xilinx/drams_bb.v  > lgdb/tech_library
+  ${OPT_LGRAPH}/subs/yosys/techlibs/common/simcells.v  \
+  ${OPT_LGRAPH}/subs/yosys/techlibs/xilinx/cells_sim.v \
+  ${OPT_LGRAPH}/subs/yosys/techlibs/xilinx/brams_bb.v > lgdb/tech_library
 
 for input in ${inputs[@]}
 do
@@ -85,18 +84,13 @@ do
   if [ $? -eq 0 ]; then
     echo "Successfully created graph from "${input}
   else
-  echo "gdb --args ./misc/yosys/bin/yosys -m ./inou/yosys/libinou_yosys.so -p \"read_verilog -sv ./inou/yosys/tests/${input};
+  echo "gdb --args ./subs/yosys/bin/yosys -m ./inou/yosys/libinou_yosys.so -p \"read_verilog -sv ./inou/yosys/tests/${input};
     ${synth};  write_verilog ${input}_synth.v; inou_yosys lgdb\""
     echo "FAIL: lgyosys parsing terminated with an error (testcase ${input})"
     exit 1
   fi
 
   base=${input%.*}
-  ./inou/yaml/lgyaml  --graph_name ${base} --yaml_output ${base}.yaml > ./synth-test/log_yaml_${input} 2> ./synth-test/err_yaml_${input}
-  if [ $? -ne 0 ]; then
-    echo "WARN: Not able to create YAML for testcase ${input}"
-  fi
-
   ./inou/json/lgjson  --graph_name ${base} --json_output ${base}.json > ./synth-test/log_json_${input} 2> ./synth-test/err_json_${input}
   if [ $? -ne 0 ]; then
     echo "WARN: Not able to create json for testcase ${input}"
@@ -125,14 +119,14 @@ do
   yosys_equiv_extra="${yosys_simple}; equiv_simple -seq 5; equiv_induct -seq 5;"
 
   #try fast script first, if it fails, goes to more complex one
-  ./misc/yosys/bin/yosys -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; equiv_status -assert" \
+  ./subs/yosys/bin/yosys -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; equiv_status -assert" \
     2> /dev/null | grep "Equivalence successfully proven!"
 
   if [ $? -eq 0 ]; then
     echo "Successfully matched generated verilog with original verilog1 ("${input}")"
   else
 
-    ./misc/yosys/bin/yosys -p "${yosys_read}; memory -nomap; opt_expr -full; opt -purge; proc; opt -purge;
+    ./subs/yosys/bin/yosys -p "${yosys_read}; memory -nomap; opt_expr -full; opt -purge; proc; opt -purge;
     opt_reduce -full; opt_expr -mux_undef; opt_reduce; opt_merge; opt_clean -purge; ${yosys_prep}; opt -purge; proc; opt -purge; ${yosys_equiv}; equiv_status -assert" \
       | grep "Equivalence successfully proven!"
 
@@ -144,7 +138,7 @@ do
         echo "Successfully matched generated verilog with original verilog2 ("${input}")"
       else
 
-        ./misc/yosys/bin/yosys -p "${yosys_read}; memory -nomap; opt_expr -full; opt -purge; proc; opt -purge;
+        ./subs/yosys/bin/yosys -p "${yosys_read}; memory -nomap; opt_expr -full; opt -purge; proc; opt -purge;
         opt_reduce -full; opt_expr -mux_undef; opt_reduce; opt_merge; opt_clean -purge; techmap -map +/adff2dff.v;
         ${yosys_prep}; opt -purge; proc; opt -purge; ${yosys_equiv_extra}; equiv_status -assert" \
           | grep "Equivalence successfully proven!"
@@ -154,7 +148,7 @@ do
 
         else
           echo "WARN: Yosys failed to prove equivalency, trying to prove equivalency with Formality."
-          echo "./misc/yosys/bin/yosys -p \"read_verilog -sv ${base}.v; read_verilog -sv ./inou/yosys/tests/${base}.v; flatten; proc; memory -nomap; opt_expr -full; opt -purge; proc; opt -purge; opt_reduce -full; opt_expr -mux_undef; opt_reduce; opt_merge; opt_clean -purge; equiv_make ${base} lgraph_${base} equiv; hierarchy -top equiv; hierarchy -check; flatten; opt -purge; proc; opt -purge; equiv_simple; equiv_status -assert\""
+          echo "./subs/yosys/bin/yosys -p \"read_verilog -sv ${base}.v; read_verilog -sv ./inou/yosys/tests/${base}.v; flatten; proc; memory -nomap; opt_expr -full; opt -purge; proc; opt -purge; opt_reduce -full; opt_expr -mux_undef; opt_reduce; opt_merge; opt_clean -purge; equiv_make ${base} lgraph_${base} equiv; hierarchy -top equiv; hierarchy -check; flatten; opt -purge; proc; opt -purge; equiv_simple; equiv_status -assert\""
 
           echo "source /mada/software/synopsys/F-2011.09-SP1formality/admin/setup/.synopsys_fm.setup
           set_app_var synopsys_auto_setup true
