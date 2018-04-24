@@ -34,4 +34,5 @@ do
      exit 1
   fi
 done
+rm -rf *.genlib
 exit 0
