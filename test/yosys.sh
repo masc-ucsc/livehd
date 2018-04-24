@@ -32,7 +32,7 @@ while true ; do
 done
 
 
-rm -rf ./lgdb/ ./logs ./yosys-test *.yaml *.v *.json
+rm -rf ./lgdb/ ./logs ./yosys-test *.v *.json
 mkdir yosys-test/
 
 ./subs/yosys/bin/yosys -V
@@ -50,10 +50,6 @@ do
   fi
 
   base=${input%.*}
-  #./inou/yaml/lgyaml  --graph_name ${base} --yaml_output ${base}.yaml > ./yosys-test/log_yaml_${input} 2> ./yosys-test/err_yaml_${input}
-  #if [ $? -ne 0 ]; then
-  #  echo "WARN: Not able to create YAML for testcase ${input}"
-  #fi
 
   ./inou/json/lgjson  --graph_name ${base} --json_output ${base}.json > ./yosys-test/log_json_${input} 2> ./yosys-test/err_json_${input}
   if [ $? -ne 0 ]; then
