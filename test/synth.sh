@@ -76,7 +76,7 @@ do
   opt -fast -full; memory_map; dffsr2dff; dff2dffe; opt -full;
   techmap -map +/techmap.v -map +/xilinx/arith_map.v; opt -fast; techmap -D ALU_RIPPLE;
   opt -fast; abc -D 100 cpu_bug;"
-  ./misc/yosys/bin/yosys -m ./inou/yosys/libinou_yosys.so -p "read_verilog -sv ./inou/yosys/tests/${input};
+  ./subs/yosys/bin/yosys -m ./inou/yosys/libinou_yosys.so -p "read_verilog -sv ./inou/yosys/tests/${input};
    ${synth}; write_verilog ${input}_synth.v; inou_yosys lgdb" > ./synth-test/log_from_yosys_${input} 2> ./synth-test/err_from_yosys_${input}
 
 
