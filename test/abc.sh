@@ -1,6 +1,6 @@
 #!/bin/bash
 
-design=../test/gcd.v
+design=./inou/yosys/tests/gcd.v
 #Lef=../test/NanGate_15nm_OCL.macro.lef
 #Liberty=../test/NanGate_15nm_OCL_fast_conditional_ecsm.lib
 
