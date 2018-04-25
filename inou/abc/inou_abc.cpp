@@ -79,7 +79,7 @@ void Inou_abc::generate(std::vector<const LGraph *> out) {
 	if (out.size() == 1) {
 		if (is_techmap(out[0])) { // if no combinational cell , we will use other approach
 			find_cell_conn(out[0]);
-			if(combinational_id.size()) {
+			if (combinational_id.size()) {
 				LGraph *Mapped_Lgraph = new LGraph(opack.lgdb_path, opack.graph_name + "_mapped", true);
 				from_abc(Mapped_Lgraph, out[0], to_abc(out[0]));
 				Mapped_Lgraph->sync();
@@ -205,7 +205,7 @@ void Inou_abc::find_graphio_output_conn(const LGraph *g) {
 		topology_info pid;
 		int width = g->get_bits(idx);
 		int index = 0;
-		for(const auto &input : g->inp_edges(idx)) {
+		for (const auto &input : g->inp_edges(idx)) {
 			for (index = 0; index < width; index++) {
 				int bit_index[2] = {index, index};
 				recursive_find(g, &input, pid, bit_index);
@@ -218,33 +218,33 @@ void Inou_abc::find_graphio_output_conn(const LGraph *g) {
 
 void Inou_abc::find_subgraph_conn(const LGraph *g) {
 
-	for(const auto &idx : subgraph_id) {
+	for (const auto &idx : subgraph_id) {
 		if (opack.verbose == "true")
 			fmt::print("\nSubGraph_Op NodeID:{} has direct input from Node: \n", idx);
-		std::unordered_map<Port_ID ,const Edge *> inp_edges;
-		std::unordered_map<Port_ID ,topology_info> subgraph_pid;
+		std::unordered_map<Port_ID, const Edge *> inp_edges;
+		std::unordered_map<Port_ID, topology_info> subgraph_pid;
 
-		for(const auto &input : g->inp_edges(idx)) {
+		for (const auto &input : g->inp_edges(idx)) {
 			Port_ID inp_id = input.get_inp_pin().get_pid();
 			inp_edges[inp_id] = &input;
 		}
 
-		for(const auto &input : inp_edges) {
+		for (const auto &input : inp_edges) {
 			if (opack.verbose == "true")
 				fmt::print("\n------------------------------------------------ \n", idx);
 			topology_info pid;
 			auto node_idx = input.second->get_idx();
 			auto width = g->get_bits(node_idx);
 			int index = 0;
-			if(width > 1) {
-				for(index = 0; index < width; index++) {
+			if (width > 1) {
+				for (index = 0; index < width; index++) {
 					int bit_index[2] = {index, index};
-					recursive_find(g,input.second, pid, bit_index);
+					recursive_find(g, input.second, pid, bit_index);
 				}
 			}
 			else {
 				int bit_index[2] = {0, 0};
-				recursive_find(g,input.second, pid, bit_index);
+				recursive_find(g, input.second, pid, bit_index);
 			}
 			subgraph_pid[input.first] = std::move(pid);
 		}
@@ -291,7 +291,7 @@ void Inou_abc::recursive_find(const LGraph *g, const Edge *input, topology_info 
 			fmt::print("\t U32Const_Op_NodeID:{},bit [{}:{}] portid : {} \n",
 			           input->get_idx(), bit_addr[0], bit_addr[1], input->get_out_pin().get_pid());
 
-		index_offset info = {this_idx, input->get_out_pin().get_pid(),{bit_addr[0], bit_addr[1]}};
+		index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
 		pid.push_back(info);
 	}
 	else if (this_node_type == StrConst_Op) {
@@ -324,9 +324,9 @@ void Inou_abc::recursive_find(const LGraph *g, const Edge *input, topology_info 
 		index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
 		pid.push_back(info);
 
-		sprintf(namebuffer, "%%subgraph_output_%ld_%d_%d%%",this_idx,input->get_out_pin().get_pid(),bit_addr[0]);
+		sprintf(namebuffer, "%%subgraph_output_%ld_%d_%d%%", this_idx, input->get_out_pin().get_pid(), bit_addr[0]);
 		const auto it = subgraph_generated_output_wire.find(info);
-		if(it == subgraph_generated_output_wire.end()){
+		if (it == subgraph_generated_output_wire.end()) {
 			subgraph_generated_output_wire[info] = std::string(namebuffer);
 		}
 	}
@@ -459,7 +459,7 @@ bool Inou_abc::is_techmap(const LGraph *g) {
 								const Tech_cell *tcell = g->get_tlibrary()->get_const_cell(g->tmap_id_get(out.get_idx()));
 								std::string cell_name = tcell->get_name();
 								console->error("nodeID:{} type:Join_Op has output to idx:{} cell_name: {}; mismatch in data width!\n",
-												idx, out.get_idx(), cell_name);
+								               idx, out.get_idx(), cell_name);
 								is_valid_input = false;
 								break;
 							}

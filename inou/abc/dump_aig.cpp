@@ -45,8 +45,6 @@ Abc_Ntk_t *Inou_abc::to_abc(const LGraph *g) {
 	Abc_Ntk_t *pAig;
 	Abc_Start();
 	pAbc = Abc_FrameGetGlobalFrame();
-
-	char Command[1000];
 	pAig = Abc_NtkAlloc(ABC_NTK_NETLIST, ABC_FUNC_AIG, 1);
 	pAig->pName = Extra_UtilStrsav(opack.graph_name.c_str());
 
@@ -58,6 +56,7 @@ Abc_Ntk_t *Inou_abc::to_abc(const LGraph *g) {
 		exit(-4);
 	}
 	else {
+		char Command[1000];
 		Abc_Ntk_t *pTemp = pAig;
 		pAig = Abc_NtkToLogic(pTemp);
 		Abc_FrameClearVerifStatus(pAbc);
@@ -80,7 +79,7 @@ Abc_Ntk_t *Inou_abc::to_abc(const LGraph *g) {
 		std::string path_name("abc_output");
 		boost::filesystem::path dir(path_name);
 
-		if(!(boost::filesystem::exists(dir))) {
+		if (!(boost::filesystem::exists(dir))) {
 			boost::filesystem::create_directory(dir);
 		}
 
@@ -89,7 +88,7 @@ Abc_Ntk_t *Inou_abc::to_abc(const LGraph *g) {
 			fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
 		}
 
-		sprintf(Command, "cleanup;strash;write_blif %s/%s_pre.blif",path_name.c_str(),opack.graph_name.c_str());
+		sprintf(Command, "cleanup;strash;write_blif %s/%s_pre.blif", path_name.c_str(), opack.graph_name.c_str());
 		if (Cmd_CommandExecute(pAbc, Command)) {
 			fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
 		}
@@ -104,12 +103,12 @@ Abc_Ntk_t *Inou_abc::to_abc(const LGraph *g) {
 			fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
 		}
 
-		sprintf(Command, "write_blif %s/%s_post.blif",path_name.c_str() ,opack.graph_name.c_str());
+		sprintf(Command, "write_blif %s/%s_post.blif", path_name.c_str(), opack.graph_name.c_str());
 		if (Cmd_CommandExecute(pAbc, Command)) {
 			fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
 		}
 
-		sprintf(Command, "write_verilog %s/%s_post.v",path_name.c_str() ,opack.graph_name.c_str());
+		sprintf(Command, "write_verilog %s/%s_post.v", path_name.c_str(), opack.graph_name.c_str());
 		if (Cmd_CommandExecute(pAbc, Command)) {
 			fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
 		}
@@ -119,12 +118,12 @@ Abc_Ntk_t *Inou_abc::to_abc(const LGraph *g) {
 			fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
 		}
 
-		sprintf(Command, "write_blif %s/%s_map.blif", path_name.c_str(),opack.graph_name.c_str());
+		sprintf(Command, "write_blif %s/%s_map.blif", path_name.c_str(), opack.graph_name.c_str());
 		if (Cmd_CommandExecute(pAbc, Command)) {
 			fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
 		}
 
-		sprintf(Command, "write_verilog %s/%s_map.v", path_name.c_str(),opack.graph_name.c_str());
+		sprintf(Command, "write_verilog %s/%s_map.v", path_name.c_str(), opack.graph_name.c_str());
 		if (Cmd_CommandExecute(pAbc, Command)) {
 			fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
 		}
@@ -143,7 +142,7 @@ Abc_Ntk_t *Inou_abc::to_abc(const LGraph *g) {
 
 	boost::filesystem::wpath file("stdcells.genlib");
 
-	if(boost::filesystem::exists(file))
+	if (boost::filesystem::exists(file))
 		boost::filesystem::remove(file);
 
 	return pNtkMapped;
@@ -174,7 +173,7 @@ void Inou_abc::gen_netList(const LGraph *g, Abc_Ntk_t *pAig) {
 	console->info("Inou_abc::conn_primary_output():Lgraph is calling ABC API to connect all primary outputs");
 	conn_primary_output(g, pAig);
 	console->info("Inou_abc::conn_subgraph():Lgraph is calling ABC API to connect all subgraph output");
-	conn_subgraph(g,pAig);
+	conn_subgraph(g, pAig);
 	console->info("Inou_abc::conn_clock():Lgraph is calling ABC API to create clock network if generated clock exsit");
 	conn_clock(g, pAig);
 	console->info("Inou_abc::conn_reset():Lgraph is calling ABC API to create reset network if generated clock exsit");
@@ -266,14 +265,14 @@ void Inou_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
 		if (width > 1) {
 			for (int i = 0; i < width; i++) {
 				pObj = Abc_NtkCreatePo(pAig);
-				index_offset key = {idx,0,{i,i}};
+				index_offset key = {idx, 0, {i, i}};
 				Abc_primary_output new_primary_output = {pObj, NULL};
 				primary_output[key] = new_primary_output;
 			}
 		}
 		else {
 			pObj = Abc_NtkCreatePo(pAig);
-			index_offset key = {idx,0 ,{0,0}};
+			index_offset key = {idx, 0, {0, 0}};
 			Abc_primary_output new_primary_output = {pObj, NULL};
 			primary_output[key] = new_primary_output;
 		}
@@ -289,10 +288,10 @@ void Inou_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
 				Abc_ObjAddFanin(pNet, pObj);
 				Abc_Obj_t *pbuf = Abc_NtkCreateNode(pAig);
 				pbuf->pData = Hop_IthVar((Hop_Man_t *) pAig->pManFunc, 0);
-				Abc_ObjAddFanin(pbuf,pNet);
+				Abc_ObjAddFanin(pbuf, pNet);
 				Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
-				Abc_ObjAddFanin(pwire,pbuf);
-				index_offset key = {idx,0,{i,i}};
+				Abc_ObjAddFanin(pwire, pbuf);
+				index_offset key = {idx, 0, {i, i}};
 				Abc_primary_input new_primary_input = {pObj, pwire};
 				primary_input[key] = new_primary_input;
 			}
@@ -305,10 +304,10 @@ void Inou_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
 			Abc_ObjAddFanin(pNet, pObj);
 			Abc_Obj_t *pbuf = Abc_NtkCreateNode(pAig);
 			pbuf->pData = Hop_IthVar((Hop_Man_t *) pAig->pManFunc, 0);
-			Abc_ObjAddFanin(pbuf,pNet);
+			Abc_ObjAddFanin(pbuf, pNet);
 			Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
-			Abc_ObjAddFanin(pwire,pbuf);
-			index_offset key = {idx,0 ,{0,0}};
+			Abc_ObjAddFanin(pwire, pbuf);
+			index_offset key = {idx, 0, {0, 0}};
 			Abc_primary_input new_primary_input = {pObj, pwire};
 			primary_input[key] = new_primary_input;
 		}
@@ -472,15 +471,15 @@ void Inou_abc::conn_combinational_cell(const LGraph *g, Abc_Ntk_t *pAig) {
 
 			Index_ID src_idx = inp.idx;
 			int src_bits = inp.offset[0];
-			index_offset rhs = {src_idx,0 ,{src_bits,src_bits}};
+			index_offset rhs = {src_idx, 0, {src_bits, src_bits}};
 			Node_Type_Op this_node_type = g->node_type_get(src_idx).op;
 
-			if(this_node_type ==  SubGraph_Op) {
+			if (this_node_type == SubGraph_Op) {
 				Abc_Obj_t *pseudo_subgraph_input = Abc_NtkCreatePi(pAig);
 				Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
-				Abc_ObjAssignName(pNet,const_cast<char*>(subgraph_generated_output_wire[inp].c_str()), NULL);
+				Abc_ObjAssignName(pNet, const_cast<char *>(subgraph_generated_output_wire[inp].c_str()), NULL);
 				Abc_ObjAddFanin(pNet, pseudo_subgraph_input);
-				Abc_ObjAddFanin(combinational_cell[idx].pNodeInput,pNet);
+				Abc_ObjAddFanin(combinational_cell[idx].pNodeInput, pNet);
 			}
 
 			else if (this_node_type == TechMap_Op) {
@@ -523,15 +522,15 @@ void Inou_abc::conn_latch(const LGraph *g, Abc_Ntk_t *pAig) {
 		for (const auto &inp : src) {
 			Index_ID src_idx = inp.idx;
 			int src_bits = inp.offset[0];
-			index_offset rhs = {src_idx,0, {src_bits,src_bits}};
+			index_offset rhs = {src_idx, 0, {src_bits, src_bits}};
 			Node_Type_Op this_node_type = g->node_type_get(src_idx).op;
 
-			if(this_node_type == SubGraph_Op) {
+			if (this_node_type == SubGraph_Op) {
 				Abc_Obj_t *pseudo_subgraph_input = Abc_NtkCreatePi(pAig);
 				Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
-				Abc_ObjAssignName(pNet, const_cast<char*>(subgraph_generated_output_wire[inp].c_str()), NULL);
+				Abc_ObjAssignName(pNet, const_cast<char *>(subgraph_generated_output_wire[inp].c_str()), NULL);
 				Abc_ObjAddFanin(pNet, pseudo_subgraph_input);
-				Abc_ObjAddFanin(sequential_cell[idx].pLatchInput,pNet);
+				Abc_ObjAddFanin(sequential_cell[idx].pLatchInput, pNet);
 			}
 			else if (this_node_type == TechMap_Op) {
 				const Tech_cell *tcell = g->get_tlibrary()->get_const_cell(g->tmap_id_get(src_idx));
@@ -575,21 +574,21 @@ void Inou_abc::conn_primary_output(const LGraph *g, Abc_Ntk_t *pAig) {
 			char namebuffer[255];
 			Index_ID src_idx = inp.idx;
 			int src_bits = inp.offset[0];
-			index_offset lhs = {idx, 0 ,{bit_index,bit_index}};
-			index_offset rhs = {src_idx,0, {src_bits,src_bits}};
+			index_offset lhs = {idx, 0, {bit_index, bit_index}};
+			index_offset rhs = {src_idx, 0, {src_bits, src_bits}};
 			Node_Type_Op this_node_type = g->node_type_get(src_idx).op;
 
 			if (this_node_type == SubGraph_Op) {
 				Abc_Obj_t *pseudo_subgraph_input = Abc_NtkCreatePi(pAig);
 				Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
-				Abc_ObjAssignName(pNet, const_cast<char*>(subgraph_generated_output_wire[inp].c_str()), NULL);
+				Abc_ObjAssignName(pNet, const_cast<char *>(subgraph_generated_output_wire[inp].c_str()), NULL);
 				Abc_ObjAddFanin(pNet, pseudo_subgraph_input);
 				Abc_Obj_t *pbuf = Abc_NtkCreateNode(pAig);
 				pbuf->pData = Hop_IthVar((Hop_Man_t *) pAig->pManFunc, 0);
 				Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
-				Abc_ObjAddFanin(pbuf,pNet);
+				Abc_ObjAddFanin(pbuf, pNet);
 				Abc_ObjAddFanin(pwire, pbuf);
-				Abc_ObjAddFanin(primary_output[lhs].PO,pwire);
+				Abc_ObjAddFanin(primary_output[lhs].PO, pwire);
 			}
 
 			else if (this_node_type == TechMap_Op) {
@@ -703,29 +702,29 @@ void Inou_abc::conn_clock(const LGraph *g, Abc_Ntk_t *pAig) {
  * description: connect all generated subgraph signal
  ***********************************************************************/
 void Inou_abc::conn_subgraph(const LGraph *g, Abc_Ntk_t *pAig) {
-	for(const auto &idx : subgraph_id) {
+	for (const auto &idx : subgraph_id) {
 		auto inp_info = subgraph_conn[idx];
-		for(const auto &src : inp_info) {
+		for (const auto &src : inp_info) {
 			Port_ID offset = 0;
-			for(const auto &inp : src.second) {
+			for (const auto &inp : src.second) {
 				char namebuffer[255];
 				Abc_Obj_t *pseduo_subgraph_output = nullptr;
 				Index_ID src_idx = inp.idx;
 				int src_bits = inp.offset[0];
-				index_offset rhs = {src_idx,0 ,{src_bits,src_bits}};
+				index_offset rhs = {src_idx, 0, {src_bits, src_bits}};
 				Node_Type_Op this_node_type = g->node_type_get(src_idx).op;
 
-				if(this_node_type == SubGraph_Op) {
+				if (this_node_type == SubGraph_Op) {
 					pseduo_subgraph_output = Abc_NtkCreatePo(pAig);
 					Abc_Obj_t *pseudo_subgraph_input = Abc_NtkCreatePi(pAig);
 					Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
-					Abc_ObjAssignName(pNet, const_cast<char*>(subgraph_generated_output_wire[inp].c_str()), NULL);
+					Abc_ObjAssignName(pNet, const_cast<char *>(subgraph_generated_output_wire[inp].c_str()), NULL);
 					Abc_ObjAddFanin(pNet, pseudo_subgraph_input);
 
 					Abc_Obj_t *pbuf = Abc_NtkCreateNode(pAig);
 					pbuf->pData = Hop_IthVar((Hop_Man_t *) pAig->pManFunc, 0);
 					Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
-					Abc_ObjAddFanin(pbuf,pNet);
+					Abc_ObjAddFanin(pbuf, pNet);
 					Abc_ObjAddFanin(pwire, pbuf);
 
 					Abc_ObjAddFanin(pseduo_subgraph_output, pwire);
@@ -738,7 +737,7 @@ void Inou_abc::conn_subgraph(const LGraph *g, Abc_Ntk_t *pAig) {
 						Abc_Obj_t *pbuf = Abc_NtkCreateNode(pAig);
 						pbuf->pData = Hop_IthVar((Hop_Man_t *) pAig->pManFunc, 0);
 						Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
-						Abc_ObjAddFanin(pbuf,sequential_cell[src_idx].pLatchOutput);
+						Abc_ObjAddFanin(pbuf, sequential_cell[src_idx].pLatchOutput);
 						Abc_ObjAddFanin(pwire, pbuf);
 
 						Abc_ObjAddFanin(pseduo_subgraph_output, pwire);
@@ -760,23 +759,22 @@ void Inou_abc::conn_subgraph(const LGraph *g, Abc_Ntk_t *pAig) {
 					assert(this_node_type == GraphIO_Op);
 					assert(g->is_graph_input(src_idx));
 					int width = g->get_bits(src_idx);
-					if(width > 1) {
+					if (width > 1) {
 						sprintf(namebuffer, "%s[%d]", g->get_graph_input_name(src_idx), offset);
 					}
 					else {
 						sprintf(namebuffer, "%s", g->get_graph_input_name(src_idx));
 					}
-					index_offset info = {idx,src.first,{offset,offset}};
+					index_offset info = {idx, src.first, {offset, offset}};
 					subgraph_generated_input_wire[info] = std::string(namebuffer);
-					fmt::print("has graphio input the name buffer is {}\n",namebuffer);
+					fmt::print("has graphio input the name buffer is {}\n", namebuffer);
 					offset++;
 					continue;
 				}
-
 				assert(pseduo_subgraph_output != nullptr);
-				sprintf(namebuffer, "%%subgraph_input_%ld_%d_%d%%", idx,src.first,offset);
+				sprintf(namebuffer, "%%subgraph_input_%ld_%d_%d%%", idx, src.first, offset);
 				Abc_ObjAssignName(Abc_ObjFanin0Ntk(pseduo_subgraph_output), namebuffer, NULL);
-				index_offset info = {idx,src.first,{offset,offset}};
+				index_offset info = {idx, src.first, {offset, offset}};
 				subgraph_generated_input_wire[info] = std::string(namebuffer);
 				offset++;
 			}

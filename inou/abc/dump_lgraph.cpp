@@ -95,7 +95,7 @@ void Inou_abc::gen_comb_cell_from_abc(LGraph *new_graph, const LGraph *old_graph
 				else {
 					new_graph->node_tmap_set(cell_idx, tcell->get_id());
 				}
-				new_graph->set_bits(cell_idx,1);
+				new_graph->set_bits(cell_idx, 1);
 				cell2id[Abc_ObjFanout0(pObj)] = cell_idx; // remember the fanout net of std_cell
 				cell_out_pid[cell_idx] = 0;               // set the initial output pid to 0
 			}
@@ -107,7 +107,8 @@ void Inou_abc::gen_comb_cell_from_abc(LGraph *new_graph, const LGraph *old_graph
 
 void Inou_abc::gen_latch_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
 	assert(old_graph);
-	Abc_Obj_t *pNet, *pLatch;
+	Abc_Obj_t *pNet = nullptr;
+	Abc_Obj_t *pLatch = nullptr;
 	int i;
 	Abc_NtkForEachLatch(pNtk, pLatch, i) {
 			pNet = Abc_ObjFanout0(Abc_ObjFanout0(pLatch));
@@ -119,7 +120,7 @@ void Inou_abc::gen_latch_from_abc(LGraph *new_graph, const LGraph *old_graph, Ab
 			cell2id[pNet] = cell_idx;   // remember the fanout net of Q pin of the latch
 			cell_out_pid[cell_idx] = 0; // set the initial output pid to 0
 			new_graph->set_node_wirename(cell_idx, Abc_ObjName(pNet));
-			new_graph->set_bits(cell_idx,1);
+			new_graph->set_bits(cell_idx, 1);
 		}
 }
 
