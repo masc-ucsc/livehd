@@ -70,11 +70,12 @@ public:
 	struct index_pid {
 		Index_ID idx;
 		Port_ID pid;
-		inline bool operator ==(const index_pid &rhs) const {
+
+		inline bool operator==(const index_pid &rhs) const {
 			return ((idx == rhs.idx) && (pid == rhs.idx));
 		}
 
-		inline bool operator <(const index_pid &rhs) const {
+		inline bool operator<(const index_pid &rhs) const {
 			if (idx < rhs.idx)
 				return true;
 			else if (idx == rhs.idx) {
@@ -83,7 +84,8 @@ public:
 			else
 				return false;
 		}
-		inline bool operator ()(const index_pid &lhs, const index_pid &rhs) const {
+
+		inline bool operator()(const index_pid &lhs, const index_pid &rhs) const {
 			if (lhs.idx < rhs.idx)
 				return true;
 			else if (lhs.idx == rhs.idx) {
@@ -102,17 +104,17 @@ public:
 		Port_ID pid;
 		int offset[2];
 
-		inline bool operator ==(const index_offset &rhs) const {
-			return ((idx == rhs.idx) && pid==rhs.pid && offset[0] && rhs.offset[0] );
+		inline bool operator==(const index_offset &rhs) const {
+			return ((idx == rhs.idx) && pid == rhs.pid && offset[0] && rhs.offset[0]);
 		}
 
-		inline bool operator <(const index_offset &rhs) const {
+		inline bool operator<(const index_offset &rhs) const {
 			if (idx < rhs.idx)
 				return true;
 			else if (idx == rhs.idx) {
 				if (pid < rhs.pid)
 					return true;
-				else if(pid == rhs.pid) {
+				else if (pid == rhs.pid) {
 					return offset[0] < rhs.offset[0];
 				}
 				else
@@ -122,13 +124,13 @@ public:
 				return false;
 		}
 
-		inline bool operator ()(const index_offset &lhs,const index_offset &rhs) const {
+		inline bool operator()(const index_offset &lhs, const index_offset &rhs) const {
 			if (lhs.idx < rhs.idx)
 				return true;
 			else if (lhs.idx == rhs.idx) {
 				if (lhs.pid < rhs.pid)
 					return true;
-				else if(lhs.pid == rhs.pid) {
+				else if (lhs.pid == rhs.pid) {
 					return lhs.offset[0] < rhs.offset[0];
 				}
 				else
@@ -167,19 +169,18 @@ private:
 	using skew_group = std::map<std::string, std::set<Index_ID>>;
 	using reset_group = std::map<std::string, std::set<Index_ID>>;
 	using node_conn = std::unordered_map<Index_ID, topology_info, IndexID_Hash>;
-	using block_conn = std::unordered_map<Index_ID, std::unordered_map<Port_ID ,topology_info>, IndexID_Hash>;
-	using pseduo_name = std::map<index_offset,std::string>;
+	using block_conn = std::unordered_map<Index_ID, std::unordered_map<Port_ID, topology_info>, IndexID_Hash>;
+	using pseduo_name = std::map<index_offset, std::string>;
 
-	using idremap = std::unordered_map<Index_ID ,Index_ID >;
-	using pidremap = std::unordered_map<Index_ID ,std::unordered_map<Port_ID ,Index_ID >>;
+	using idremap = std::unordered_map<Index_ID, Index_ID>;
+	using pidremap = std::unordered_map<Index_ID, std::unordered_map<Port_ID, Index_ID >>;
 
 	using ptr2id = std::unordered_map<Abc_Obj_t *, Index_ID>;
 	using id2pid = std::unordered_map<Index_ID, Port_ID, IndexID_Hash>;
 
 	using value_size = std::pair<uint32_t, uint32_t>;
 	using value2idx = std::map<value_size, Index_ID>;
-	using pickmap = std::map<index_offset,Index_ID >;
-
+	using pickmap = std::map<index_offset, Index_ID>;
 
 
 	po_group primary_output;
@@ -213,7 +214,6 @@ private:
 	pickmap pickop_map;
 
 
-
 	bool is_techmap(const LGraph *g);
 
 	bool is_latch(const Tech_cell *tcell) {
@@ -241,8 +241,6 @@ private:
 	void find_subgraph_conn(const LGraph *g);
 
 	void recursive_find(const LGraph *g, const Edge *input, topology_info &pid, int *bit_addr);
-
-
 
 	Abc_Obj_t *gen_const_from_lgraph(const LGraph *g, index_offset key, Abc_Ntk_t *pAig);
 
@@ -278,7 +276,7 @@ private:
 
 	void gen_subgraph_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
 
-	void connect_constant(LGraph* g, uint32_t value, uint32_t size, Index_ID onid, Port_ID opid);
+	void connect_constant(LGraph *g, uint32_t value, uint32_t size, Index_ID onid, Port_ID opid);
 
 	void conn_latch(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
 
@@ -287,7 +285,6 @@ private:
 	void conn_combinational_cell(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
 
 	void conn_subgraph(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
-
 
 
 };
