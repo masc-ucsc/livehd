@@ -111,11 +111,11 @@ void Inou_cfg::cfg_2_lgraph(std::ifstream &infile, LGraph* g){
 
         g->set_node_wirename(new_node.get_nid(), dfg_data.c_str());
 
-				if(     w5th == ".()"   || w6th == ".()")      // FIX: modify it when Akash change cfg order
+				if(     w5th == ".()")
 					g->node_type_set(name2id[w1st], CfgFunctionCall_Op);
-        else if(w5th == "for"   || w6th == "for")      // FIX: modify it when Akash change cfg order
+        else if(w5th == "for")
           g->node_type_set(name2id[w1st], CfgFor_Op);
-        else if(w5th == "while" || w6th == "while")    // FIX: modify it when Akash change cfg order
+        else if(w5th == "while")
           g->node_type_set(name2id[w1st], CfgWhile_Op);
         else
           g->node_type_set(name2id[w1st], CfgAssign_Op);
@@ -123,11 +123,11 @@ void Inou_cfg::cfg_2_lgraph(std::ifstream &infile, LGraph* g){
       else{
         g->set_node_wirename(name2id[w1st], dfg_data.c_str());
 
-        if     (w5th == ".()"   || w6th == ".()")      // FIX: modify it when Akash change cfg order
+        if     (w5th == ".()")
           g->node_type_set(name2id[w1st], CfgFunctionCall_Op);
-        else if(w5th == "for"   || w6th == "for")      // FIX: modify it when Akash change cfg order
+        else if(w5th == "for")
           g->node_type_set(name2id[w1st], CfgFor_Op);
-        else if(w5th == "while" || w6th == "while")    // FIX: modify it when Akash change cfg order
+        else if(w5th == "while")
           g->node_type_set(name2id[w1st], CfgWhile_Op);
         else if(w5th == "if")
           g->node_type_set(name2id[w1st], CfgIf_Op);
@@ -154,7 +154,6 @@ void Inou_cfg::cfg_2_lgraph(std::ifstream &infile, LGraph* g){
 
 			if(w5th == "if"){//special case: if
         //III-1. connect if node to the begin of "true chunk" statement
-				std::string w8th = *(words.begin()+7);
 				src_nid = name2id[w1st];
 				dst_nid = name2id[w7th];
         g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
@@ -186,6 +185,56 @@ void Inou_cfg::cfg_2_lgraph(std::ifstream &infile, LGraph* g){
 					}
           id_nbr_null.clear();
         }
+			}//end special case: if
+
+			else if(w5th == "for"){
+
+				//I. connect for node to body
+				src_nid = name2id[w1st];
+				dst_nid = name2id[w7th];
+				g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+				fmt::print("for statement, connect src_node {} to dst_node {} ----- 1\n", src_nid, dst_nid);
+
+				//II. connect body end node to for end node
+				for(auto i = 0; i< id_nbr_null.size(); i++){
+					fmt::print("con{}\n",id_nbr_null[i]);
+					src_nid = *(id_nbr_null.begin()+i);
+					dst_nid = name2id[w2nd];
+					g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, i, true));
+					fmt::print("for statement, connect src_node {} to dst_node {} ----- 2\n", src_nid, dst_nid);
+				}
+				id_nbr_null.clear();
+
+				//III connect for begin node to for end node
+				src_nid = name2id[w1st];
+				dst_nid = name2id[w2nd];
+				g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+				fmt::print("for statement, connect src_node {} to dst_node {} ----- 3\n", src_nid, dst_nid);
+			}
+
+			else if(w5th == "while"){
+
+				//I. connect for node to body
+				src_nid = name2id[w1st];
+				dst_nid = name2id[w7th];
+				g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+				fmt::print("while statement, connect src_node {} to dst_node {} ----- 1\n", src_nid, dst_nid);
+
+				//II. connect body end node to while end node
+				for(auto i = 0; i< id_nbr_null.size(); i++){
+					fmt::print("con{}\n",id_nbr_null[i]);
+					src_nid = *(id_nbr_null.begin()+i);
+					dst_nid = name2id[w2nd];
+					g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, i, true));
+					fmt::print("while statement, connect src_node {} to dst_node {} ----- 2\n", src_nid, dst_nid);
+				}
+				id_nbr_null.clear();
+
+				//III connect while begin node to while end node
+				src_nid = name2id[w1st];
+				dst_nid = name2id[w2nd];
+				g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+				fmt::print("while statement, connect src_node {} to dst_node {} ----- 3\n", src_nid, dst_nid);
 			}
 
 			else if(w2nd != "null"){ //normal case:Kx->Ky
