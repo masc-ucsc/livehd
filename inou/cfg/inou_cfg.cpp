@@ -80,11 +80,15 @@ void Inou_cfg::cfg_2_lgraph(std::ifstream &infile, LGraph* g){
 			if(*(words.begin()) == "END")
 				break;
 
-			std::string word_1st = *(words.begin());
-			std::string word_2nd = *(words.begin()+1);
-			std::string word_5th = *(words.begin()+4);
-			std::string word_6th = *(words.begin()+5);
-			std::string word_7th = *(words.begin()+6);
+			std::string w1st = *(words.begin());
+			std::string w2nd = *(words.begin()+1);
+			std::string w5th = *(words.begin()+4);
+			std::string w6th = *(words.begin()+5);
+			std::string w7th = *(words.begin()+6);
+			std::string w8th;
+			if(w5th == "if")
+      	w8th = *(words.begin()+7);
+
 
       std::string dfg_data;
       for(std::vector<std::string>::size_type i = 0; i != words.size(); i++){
@@ -96,116 +100,150 @@ void Inou_cfg::cfg_2_lgraph(std::ifstream &infile, LGraph* g){
 
       fmt::print("dfg_data:{}\n", dfg_data);
 
-
-
 			//I.process 1st node
       //only assign node type for first K per line in cfg
-			if(name2id.count(word_1st) == 0){//if node has not been created before
+			if(name2id.count(w1st) == 0){//if node has not been created before
 				Node new_node = g->create_node();
-				name2id[word_1st] = new_node.get_nid();
+				name2id[w1st] = new_node.get_nid();
         nid_final =  new_node.get_nid();//keep update the latest final nid
 
-        fmt::print("create node:{}, nid:{}\n", word_1st, name2id[word_1st]);
+        fmt::print("create node:{}, nid:{}\n", w1st, name2id[w1st]);
 
         g->set_node_wirename(new_node.get_nid(), dfg_data.c_str());
 
-				if(     word_5th == ".()"   || word_6th == ".()")      // FIX: modify it when Akash change cfg order
-					g->node_type_set(name2id[word_1st], CfgFunctionCall_Op);
-        else if(word_5th == "for"   || word_6th == "for")      // FIX: modify it when Akash change cfg order
-          g->node_type_set(name2id[word_1st], CfgFor_Op);
-        else if(word_5th == "while" || word_6th == "while")    // FIX: modify it when Akash change cfg order
-          g->node_type_set(name2id[word_1st], CfgWhile_Op);
+				if(     w5th == ".()")
+					g->node_type_set(name2id[w1st], CfgFunctionCall_Op);
+        else if(w5th == "for")
+          g->node_type_set(name2id[w1st], CfgFor_Op);
+        else if(w5th == "while")
+          g->node_type_set(name2id[w1st], CfgWhile_Op);
         else
-          g->node_type_set(name2id[word_1st], CfgAssign_Op);
+          g->node_type_set(name2id[w1st], CfgAssign_Op);
 			}
       else{
-        g->set_node_wirename(name2id[word_1st], dfg_data.c_str());
+        g->set_node_wirename(name2id[w1st], dfg_data.c_str());
 
-        if     (word_5th == ".()"   || word_6th == ".()")      // FIX: modify it when Akash change cfg order
-          g->node_type_set(name2id[word_1st], CfgFunctionCall_Op);
-        else if(word_5th == "for"   || word_6th == "for")      // FIX: modify it when Akash change cfg order
-          g->node_type_set(name2id[word_1st], CfgFor_Op);
-        else if(word_5th == "while" || word_6th == "while")    // FIX: modify it when Akash change cfg order
-          g->node_type_set(name2id[word_1st], CfgWhile_Op);
-        else if(word_5th == "if")
-          g->node_type_set(name2id[word_1st], CfgIf_Op);
+        if     (w5th == ".()")
+          g->node_type_set(name2id[w1st], CfgFunctionCall_Op);
+        else if(w5th == "for")
+          g->node_type_set(name2id[w1st], CfgFor_Op);
+        else if(w5th == "while")
+          g->node_type_set(name2id[w1st], CfgWhile_Op);
+        else if(w5th == "if")
+          g->node_type_set(name2id[w1st], CfgIf_Op);
         else
-          g->node_type_set(name2id[word_1st], CfgAssign_Op);
+          g->node_type_set(name2id[w1st], CfgAssign_Op);
       }
 
 			//II.process 2nd node
-			if(word_2nd != "null" && name2id.count(word_2nd) == 0){
+			if(w2nd != "null" && name2id.count(w2nd) == 0){
 				Node new_node = g->create_node();
-				name2id[word_2nd] = new_node.get_nid();
+				name2id[w2nd] = new_node.get_nid();
         nid_final =  new_node.get_nid();//keep update the latest final nid
-
-        fmt::print("create node:{}, nid:{}\n", word_2nd, name2id[word_2nd]);
+        fmt::print("create node:{}, nid:{}\n", w2nd, name2id[w2nd]);
 			}
-      else
-        id_nbr_null.push_back(name2id[word_1st]);
+      else if(w2nd == "null"){
+				if(w5th == "if" && !w8th.empty() && w8th != "null")
+					;
+				else
+					id_nbr_null.push_back(name2id[w1st]);
+			}
 
 			//III.deal with edge connection
 			Index_ID src_nid, dst_nid;
 
-			if(word_5th == "if"){//special case: if
+			if(w5th == "if"){//special case: if
         //III-1. connect if node to the begin of "true chunk" statement
-				std::string word_8th = *(words.begin()+7);
-				src_nid = name2id[word_1st];
-				dst_nid = name2id[word_7th];
+				src_nid = name2id[w1st];
+				dst_nid = name2id[w7th];
         g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
 				fmt::print("if statement, connect src_node {} to dst_node {} ----- 1\n", src_nid, dst_nid);
 
         //III-2. connect if node to the begin of "false chunk" statement
-        if(word_8th != "null"){
-          src_nid = name2id[word_1st];
-          dst_nid = name2id[word_8th];
+        if(w8th != "null"){
+          src_nid = name2id[w1st];
+          dst_nid = name2id[w8th];
           g->add_edge (Node_Pin(src_nid, 1, false), Node_Pin(dst_nid, 0, true));
 					fmt::print("if statement, connect src_node {} to dst_node {} ----- 2\n", src_nid, dst_nid);
         }
 
-        if(word_2nd != "null" && word_8th =="null"){
-          src_nid = name2id[word_1st];
-          dst_nid = name2id[word_2nd];
+        if(w2nd != "null" && w8th =="null"){
+          src_nid = name2id[w1st];
+          dst_nid = name2id[w2nd];
           g->add_edge (Node_Pin(src_nid, 2, false), Node_Pin(dst_nid, 2, true));
 					fmt::print("if statement, connect src_node {} to dst_node {} ----- 3\n", src_nid, dst_nid);
         }
 
-        //III-3. connect the end of "true chunk" statement to the "end if" node
-        if(word_2nd !="null"){// it is the final if
-
+        //III-3. connect the end of "every chunk" statement to the "end if" node
+        if(w2nd !="null"){// it is the final if
 					for(auto i = 0; i< id_nbr_null.size(); i++){
 						fmt::print("con{}\n",id_nbr_null[i]);
 						src_nid = *(id_nbr_null.begin()+i);
-						dst_nid = name2id[word_2nd];
+						dst_nid = name2id[w2nd];
 						g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, i, true));
 						fmt::print("if statement, connect src_node {} to dst_node {} ----- 4\n", src_nid, dst_nid);
 					}
-					/*
-          src_nid = *id_nbr_null.begin();
-          dst_nid = name2id[word_2nd];
-          g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
-          //if(word_8th != "null"){
-					src_nid = *(id_nbr_null.begin()+1);
-          dst_nid = name2id[word_2nd];
-          g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 1, true));
-
-					src_nid = *(id_nbr_null.begin()+2);
-					dst_nid = name2id[word_2nd];
-					g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 2, true));
-          //}
-          */
           id_nbr_null.clear();
         }
-        //else{ //word_2nd == "null" means it is not the final if
-				//	id_nbr_null.push_back(name2id[word_1st]); //only 2 elements will be in id_nbr_null vec
-				//	fmt::print("ifffffff!! push back nid:{}\n", name2id[word_1st]);
-        //}
+			}//end special case: if
 
+			else if(w5th == "for"){
+
+				//I. connect for node to body
+				src_nid = name2id[w1st];
+				dst_nid = name2id[w7th];
+				g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+				fmt::print("for statement, connect src_node {} to dst_node {} ----- 1\n", src_nid, dst_nid);
+
+				//II. connect body end node to for end node
+				for(auto i = 0; i< id_nbr_null.size(); i++){
+					fmt::print("con{}\n",id_nbr_null[i]);
+					src_nid = *(id_nbr_null.begin()+i);
+					dst_nid = name2id[w2nd];
+					g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, i, true));
+					fmt::print("for statement, connect src_node {} to dst_node {} ----- 2\n", src_nid, dst_nid);
+				}
+				id_nbr_null.clear();
+
+				//III connect for begin node to for end node
+				src_nid = name2id[w1st];
+				dst_nid = name2id[w2nd];
+				g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+				fmt::print("for statement, connect src_node {} to dst_node {} ----- 3\n", src_nid, dst_nid);
 			}
 
-			else if(word_2nd != "null"){ //normal case:Kx->Ky
-				src_nid = name2id[word_1st];
-				dst_nid = name2id[word_2nd];
+			else if(w5th == "while"){
+
+				//I. connect for node to body
+				src_nid = name2id[w1st];
+				dst_nid = name2id[w7th];
+				g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+				fmt::print("while statement, connect src_node {} to dst_node {} ----- 1\n", src_nid, dst_nid);
+
+				//II. connect body end node to while end node
+				for(auto i = 0; i< id_nbr_null.size(); i++){
+					fmt::print("con{}\n",id_nbr_null[i]);
+					src_nid = *(id_nbr_null.begin()+i);
+					dst_nid = name2id[w2nd];
+					g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, i, true));
+					fmt::print("while statement, connect src_node {} to dst_node {} ----- 2\n", src_nid, dst_nid);
+				}
+				id_nbr_null.clear();
+
+				//III connect while begin node to while end node
+				src_nid = name2id[w1st];
+				dst_nid = name2id[w2nd];
+				g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+				fmt::print("while statement, connect src_node {} to dst_node {} ----- 3\n", src_nid, dst_nid);
+			}
+
+			else if(w5th == ".()"){
+				;
+			}
+
+			else if(w2nd != "null"){ //normal case:Kx->Ky
+				src_nid = name2id[w1st];
+				dst_nid = name2id[w2nd];
         g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
 				fmt::print("if statement, connect src_node {} to dst_node {} ----- 5\n", src_nid, dst_nid);
 				//fmt::print("src_node:{}, dst_node:{}\n",id2name[src_nid],id2name[dst_nid]);
