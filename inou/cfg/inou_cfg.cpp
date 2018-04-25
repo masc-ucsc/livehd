@@ -237,6 +237,10 @@ void Inou_cfg::cfg_2_lgraph(std::ifstream &infile, LGraph* g){
 				fmt::print("while statement, connect src_node {} to dst_node {} ----- 3\n", src_nid, dst_nid);
 			}
 
+			else if(w5th == ".()"){
+				;
+			}
+
 			else if(w2nd != "null"){ //normal case:Kx->Ky
 				src_nid = name2id[w1st];
 				dst_nid = name2id[w2nd];
