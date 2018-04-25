@@ -1,6 +1,14 @@
 
 #include <fstream>
 #include "inou_cfg.hpp"
+#include <stdint.h>
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/mman.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include "lgraphbase.hpp"
 #include "lgedgeiter.hpp"
 
@@ -53,29 +61,51 @@ std::vector<LGraph *> Inou_cfg::generate() {
 		//LGraph* g = lgs[0];
 		std::string cfg_file = opack.cfg_input;
 
-    std::ifstream infile(cfg_file);
+    //old
+    //std::ifstream infile(cfg_file);
 
-		cfg_2_lgraph(infile, lgs[0]);
+    int fd = open(cfg_file.c_str(), O_RDONLY);
+		if (fd<0) {
+      console->error("cannot find input file\n");
+			exit(-3);
+		}
+
+	  struct stat sb;
+	  fstat(fd, &sb);
+	  //printf("Size: %lu\n", (uint64_t)sb.st_size);
+
+	  char* memblock = (char* )mmap(nullptr, sb.st_size, PROT_WRITE, MAP_PRIVATE, fd, 0);
+	  if (memblock == MAP_FAILED) {
+      console->error("error, mmap failed\n");
+	  	exit(-3);
+	  }
+
+    //old
+		//cfg_2_lgraph(infile, lgs[0]);
+    cfg_2_lgraph(&memblock, lgs[0]);
 
 		lgs[0]->sync();
 	}
 	return lgs;
 }
-
 /*
  * create lgraph based on the first two nodes defined in CFG table
  */
 
-void Inou_cfg::cfg_2_lgraph(std::ifstream &infile, LGraph* g){
-	if(infile){
+//old
+//void Inou_cfg::cfg_2_lgraph(std::ifstream &infile, LGraph* g){
+void Inou_cfg::cfg_2_lgraph(char** memblock, LGraph* g){
 		std::string s;
 		std::vector<std::string> id2name(1);
 		std::map <std::string,Index_ID> name2id;
     std::vector<Index_ID> id_nbr_null;//this id's neighbor is a null
     int64_t nid_final = 0;
+    char *p = strtok(*memblock, "\n\r\f");
 
-		while(getline(infile,s)){
-			std::vector <std::string> words = split(s);
+		while(p){
+			//old
+      //std::vector <std::string> words = split(s);
+      std::vector <std::string> words = split(p);
 
 			if(*(words.begin()) == "END")
 				break;
@@ -113,14 +143,14 @@ void Inou_cfg::cfg_2_lgraph(std::ifstream &infile, LGraph* g){
 
 				if(     w5th == ".()")
 					g->node_type_set(name2id[w1st], CfgFunctionCall_Op);
-        else if(w5th == "for")
+				else if(w5th == "for")
           g->node_type_set(name2id[w1st], CfgFor_Op);
-        else if(w5th == "while")
+				else if(w5th == "while")
           g->node_type_set(name2id[w1st], CfgWhile_Op);
-        else
+				else
           g->node_type_set(name2id[w1st], CfgAssign_Op);
 			}
-      else{
+			else{
         g->set_node_wirename(name2id[w1st], dfg_data.c_str());
 
         if     (w5th == ".()")
@@ -142,7 +172,7 @@ void Inou_cfg::cfg_2_lgraph(std::ifstream &infile, LGraph* g){
         nid_final =  new_node.get_nid();//keep update the latest final nid
         fmt::print("create node:{}, nid:{}\n", w2nd, name2id[w2nd]);
 			}
-      else if(w2nd == "null"){
+			else if(w2nd == "null"){
 				if(w5th == "if" && !w8th.empty() && w8th != "null")
 					;
 				else
@@ -249,6 +279,7 @@ void Inou_cfg::cfg_2_lgraph(std::ifstream &infile, LGraph* g){
 				//fmt::print("src_node:{}, dst_node:{}\n",id2name[src_nid],id2name[dst_nid]);
 			}
 			fmt::print("\n");
+      p = strtok(NULL, "\n\r\f");
 		}//end while loop
 
     //deal with GIO
@@ -257,7 +288,7 @@ void Inou_cfg::cfg_2_lgraph(std::ifstream &infile, LGraph* g){
     fmt::print("create node:{}, nid:{}\n", "GIO", gio_node_bg.get_nid());
     g->node_type_set(gio_node_bg.get_nid(), GraphIO_Op);
     Index_ID src_nid = gio_node_bg.get_nid();
-    Index_ID dst_nid = 1;
+    Index_ID dst_nid = name2id["K1"];
     g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
 
     //Graph output
@@ -269,10 +300,11 @@ void Inou_cfg::cfg_2_lgraph(std::ifstream &infile, LGraph* g){
     dst_nid = gio_node_ed.get_nid();;
     g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
 
-	}else{
-		console->error("cannot find input file\n");
-		exit(-1);
-	}
+  // old
+	//}else{
+	//	console->error("cannot find input file\n");
+	//	exit(-1);
+	//}
 }
 
 
@@ -286,7 +318,7 @@ std::vector<std::string> Inou_cfg::split(const std::string& str){
     // find end of next word
 		iter j = find_if(i, str.end(), space);
 
-		//copy the charactors in [i,j)
+		//copy the characters in [i,j)
 		if (i != str.end())
 			ret.push_back(std::string(i,j));
 
