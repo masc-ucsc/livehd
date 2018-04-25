@@ -287,8 +287,13 @@ void Inou_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
 				sprintf(namebuffer, "%s[%d]", g->get_graph_input_name(idx), i);
 				Abc_ObjAssignName(pNet, namebuffer, NULL);
 				Abc_ObjAddFanin(pNet, pObj);
+				Abc_Obj_t *pbuf = Abc_NtkCreateNode(pAig);
+				pbuf->pData = Hop_IthVar((Hop_Man_t *) pAig->pManFunc, 0);
+				Abc_ObjAddFanin(pbuf,pNet);
+				Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
+				Abc_ObjAddFanin(pwire,pbuf);
 				index_offset key = {idx,0,{i,i}};
-				Abc_primary_input new_primary_input = {pObj, pNet};
+				Abc_primary_input new_primary_input = {pObj, pwire};
 				primary_input[key] = new_primary_input;
 			}
 		}
@@ -298,8 +303,13 @@ void Inou_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
 			sprintf(namebuffer, "%s", g->get_graph_input_name(idx));
 			Abc_ObjAssignName(pNet, namebuffer, NULL);
 			Abc_ObjAddFanin(pNet, pObj);
+			Abc_Obj_t *pbuf = Abc_NtkCreateNode(pAig);
+			pbuf->pData = Hop_IthVar((Hop_Man_t *) pAig->pManFunc, 0);
+			Abc_ObjAddFanin(pbuf,pNet);
+			Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
+			Abc_ObjAddFanin(pwire,pbuf);
 			index_offset key = {idx,0 ,{0,0}};
-			Abc_primary_input new_primary_input = {pObj, pNet};
+			Abc_primary_input new_primary_input = {pObj, pwire};
 			primary_input[key] = new_primary_input;
 		}
 	}
@@ -596,6 +606,7 @@ void Inou_abc::conn_primary_output(const LGraph *g, Abc_Ntk_t *pAig) {
 					Abc_ObjAddFanin(primary_output[lhs].PO, combinational_cell[src_idx].pNodeOutput);
 				}
 			}
+
 			else if (this_node_type == U32Const_Op) {
 				Abc_ObjAddFanin(primary_output[lhs].PO, gen_const_from_lgraph(g, rhs, pAig));
 			}
