@@ -54,20 +54,24 @@ const Edge &Edge::get_reverse_edge() const {
   Index_ID dst_idx = get_idx();
   Node_Internal *ptr_inp = &ptr_node[dst_idx - ptr_idx];
 
-  Index_ID out_pid = get_out_pid();
-  Index_ID inp_pid = get_inp_pid();
-  console->warn("get_reverse {} {} {} node_master:{} inp_master:{} get_idx:{} io:{}", ptr_idx, ptr_nid, out_pid, ptr_node->get_root_nid(), ptr_inp->get_root_nid(), get_idx()
+  Index_ID out_pid = get_out_pin().get_pid();
+  Index_ID inp_pid = get_inp_pin().get_pid();
+#ifdef DEBUG
+  console->info("get_reverse {} {} {} node_master:{} inp_master:{} get_idx:{} io:{}", ptr_idx, ptr_nid, out_pid, ptr_node->get_root_nid(), ptr_inp->get_root_nid(), get_idx()
       ,ptr_inp->is_graph_io());
   ptr_inp->dump(); fmt::print("\n");
+#endif
   if (!input) {
     // If it was an output, it has to be an input in the other side
     do{
       const Edge *eit = ptr_inp->get_input_begin();
       while(eit != ptr_inp->get_input_end()) {
-        console->warn("OUT:get_reverse {} {} {} vs {} {} sedge:{}", ptr_idx, ptr_nid, out_pid,
+#ifdef DEBUG
+        console->info("OUT:get_reverse {} {} {} vs {} {} sedge:{}", ptr_idx, ptr_nid, out_pid,
             eit->get_idx(), eit->get_inp_pid(), eit->is_snode());
         eit->dump();
         fmt::print(" {}\n", sizeof(Edge));
+#endif
         if (eit->get_idx() == ptr_nid && eit->get_inp_pid() == out_pid && eit->get_out_pid() == inp_pid) {
           return *eit;
         }
@@ -77,9 +81,6 @@ const Edge &Edge::get_reverse_edge() const {
           eit += 3;
       }
       if (ptr_inp->is_last_state()) {
-        //FIXME remove throw and keep assertion after we find out why some edges
-        //don't have reverse
-        throw false;
         assert(false); // Not found all over
       }
 
@@ -97,10 +98,12 @@ const Edge &Edge::get_reverse_edge() const {
 
       const Edge *eit = ptr_inp->get_output_begin();
       while(eit != ptr_inp->get_output_end()) {
-        console->warn("INP:get_reverse {} {} {} vs {} {} sedge:{}", ptr_idx, ptr_nid, inp_pid,
+#ifdef DEBUG
+        console->info("INP:get_reverse {} {} {} vs {} {} sedge:{}", ptr_idx, ptr_nid, inp_pid,
             eit->get_idx(), eit->get_inp_pid(), eit->is_snode());
         eit->dump();
         fmt::print(" {}\n", sizeof(Edge));
+#endif
         if (eit->get_idx() == ptr_nid && eit->get_out_pid() == inp_pid && eit->get_inp_pid() == out_pid) {
           return *eit;
         }
@@ -374,6 +377,12 @@ void Node_Internal::del_output_int(const Edge &out_edge) {
 }
 
 void Node_Internal::del(const Edge &edge) {
+  fmt::print("rtp: deleting edge {}:{} -> {}:{}\n",
+      edge.get_out_pin().get_nid(), edge.get_out_pin().get_pid(),
+      edge.get_inp_pin().get_nid(), edge.get_inp_pin().get_pid());
+  fmt::print("\trtp: reverse {}:{} -> {}:{}\n",
+      edge.get_reverse_edge().get_out_pin().get_nid(), edge.get_reverse_edge().get_out_pin().get_pid(),
+      edge.get_reverse_edge().get_inp_pin().get_nid(), edge.get_reverse_edge().get_inp_pin().get_pid());
   if (edge.is_input())
     del_input(edge);
   else
