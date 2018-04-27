@@ -53,7 +53,7 @@ void Inou_abc::from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *p
 	gen_comb_cell_from_abc(new_graph, old_graph, pNtk);
 	gen_latch_from_abc(new_graph, old_graph, pNtk);
 	gen_memory_from_abc(new_graph, old_graph, pNtk);
-	//gen_subgraph_from_abc(new_graph, old_graph, pNtk);
+	gen_subgraph_from_abc(new_graph, old_graph, pNtk);
 
 	conn_latch(new_graph, old_graph, pNtk);
 	conn_primary_output(new_graph, old_graph, pNtk);
@@ -233,11 +233,12 @@ void Inou_abc::gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, A
 		std::string output_name(((Abc_ObjName(pNet))));
 		if (output_name.substr(0,14)=="%memory_input_") {
 			std::regex trap("%memory_input_(\\d++)_(\\d++)_(\\d++)%");
-			std::smatch subgraph_info;
-			if (std::regex_search(output_name, subgraph_info, trap)) {
-				Index_ID old_memory_idx = std::stol(subgraph_info[1]);
-				Port_ID old_inp_pid = static_cast<Port_ID>(std::stol(subgraph_info[2]));
-				Port_ID old_offset = static_cast<Port_ID>(std::stol(subgraph_info[3]));
+			std::smatch memory_info;
+			if (std::regex_search(output_name, memory_info, trap)) {
+				assert(memory_info.size() - 1 == 3); // disregard the 0th capture
+				Index_ID old_memory_idx = std::stol(memory_info[1]);
+				Port_ID old_inp_pid = static_cast<Port_ID>(std::stol(memory_info[2]));
+				Port_ID old_offset = static_cast<Port_ID>(std::stol(memory_info[3]));
 
 				Index_ID new_memory_idx = memory_remap[old_memory_idx];
 				if (LGRAPH_MEMOP_ISWREN(old_inp_pid) || LGRAPH_MEMOP_ISRDEN(old_inp_pid)) {
@@ -256,7 +257,7 @@ void Inou_abc::gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, A
 	Abc_NtkForEachPi(pNtk, pTerm, i) {
 		pNet = Abc_ObjFanout0(pTerm);
 		std::string input_name(((Abc_ObjName(pNet))));
-		if (input_name[0] == '%' && input_name[input_name.size() - 1] == '%') {
+		if (input_name.substr(0,15) == "%memory_output_") {
 			std::regex trap("%memory_output_(\\d++)_(\\d++)_(\\d++)%");
 			std::smatch memory_info;
 			if (std::regex_search(input_name, memory_info, trap)) {
@@ -333,6 +334,94 @@ void Inou_abc::gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, A
 				cell_out_pid[pseudo_pin.get_nid()] = 0;
 				//fmt::print("generated memory output idx : {} name is {}\n",
 				//           pseudo_pin.get_nid(),Abc_ObjName(memory_output_map[key]));
+			}
+		}
+	}
+}
+
+void Inou_abc::gen_subgraph_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
+	assert(old_graph);
+	for(const auto &idx : subgraph_id) {
+
+		std::string subgraph_name(old_graph->get_library()->get_name(old_graph->subgraph_id_get(idx)));
+		LGraph *sub_graph = LGraph::find_graph(subgraph_name, old_graph->get_path());
+		Index_ID new_subgraph_idx = new_graph->create_node().get_nid();
+		subgraph_remap[idx] = new_subgraph_idx;
+		new_graph->node_type_set(new_subgraph_idx, SubGraph_Op);
+		new_graph->set_node_instance_name(new_subgraph_idx, old_graph->get_node_instancename(idx));
+		new_graph->node_subgraph_set(new_subgraph_idx, sub_graph->lg_id());
+	}
+	Abc_Obj_t *pTerm, *pNet;
+	int i;
+
+	std::map<index_offset,Abc_Obj_t *> subgraph_input_map;
+	Abc_NtkForEachPo(pNtk, pTerm, i) {
+		pNet = Abc_ObjFanin0(pTerm);
+		std::string output_name(((Abc_ObjName(pNet))));
+		if (output_name.substr(0,16)=="%subgraph_input_") {
+			std::regex trap("%subgraph_input_(\\d++)_(\\d++)_(\\d++)%");
+			std::smatch subgraph_info;
+			if (std::regex_search(output_name, subgraph_info, trap)) {
+				assert(subgraph_info.size() - 1 == 3); // disregard the 0th capture
+				Index_ID old_subgraph_idx = std::stol(subgraph_info[1]);
+				Port_ID old_inp_pid = static_cast<Port_ID>(std::stol(subgraph_info[2]));
+				Port_ID old_offset = static_cast<Port_ID>(std::stol(subgraph_info[3]));
+				index_offset info = {subgraph_remap[old_subgraph_idx],old_inp_pid,{old_offset,old_offset}};
+				subgraph_input_map[info] = pNet;
+			}
+		}
+	}
+
+	std::map<index_offset,Abc_Obj_t *> subgraph_output_map;
+	Abc_NtkForEachPi(pNtk, pTerm, i) {
+		pNet = Abc_ObjFanout0(pTerm);
+		std::string input_name(((Abc_ObjName(pNet))));
+		if (input_name.substr(0,17) == "%subgraph_output_") {
+			std::regex trap("%subgraph_output_(\\d++)_(\\d++)_(\\d++)%");
+			std::smatch subgraph_info;
+			if (std::regex_search(input_name, subgraph_info, trap)) {
+				assert(subgraph_info.size() - 1 == 3); // disregard the 0th capture
+				Index_ID old_subgraph_idx = std::stol(subgraph_info[1]);
+				Port_ID old_inp_pid = static_cast<Port_ID>(std::stol(subgraph_info[2]));
+				Port_ID old_offset = static_cast<Port_ID>(std::stol(subgraph_info[3]));
+
+				index_offset info = {subgraph_remap[old_subgraph_idx], old_inp_pid, {old_offset, old_offset}};
+				subgraph_output_map[info] = pNet;
+			}
+		}
+	}
+
+	for(const auto &old_idx : subgraph_id) {
+		Index_ID new_subgraph_idx = subgraph_remap[old_idx];
+		for(const auto &input : old_graph->inp_edges(old_idx)) {
+			Port_ID old_inp_pid = input.get_inp_pin().get_pid();
+			auto inp_info = subgraph_conn[old_idx][old_inp_pid];
+			auto size = inp_info.size();
+			Index_ID join_id = new_graph->create_node().get_nid();
+			new_graph->node_type_set(join_id,Join_Op);
+			new_graph->set_bits(join_id,size);
+			auto src_pin = Node_Pin(join_id , 0 , false);
+			auto dst_pin = Node_Pin(new_subgraph_idx,old_inp_pid,true);
+			new_graph->add_edge(src_pin,dst_pin);
+			for(int offset = 0 ; offset < size ; ++offset) {
+				index_offset info = {new_subgraph_idx,old_inp_pid,{offset,offset}};
+				auto * pObj = subgraph_input_map[info];
+				new_graph->add_edge(Node_Pin(cell2id[pObj], cell_out_pid[cell2id[pObj]]++, false),
+				                    Node_Pin(join_id, offset, true));
+			}
+		}
+		for(const auto &out : old_graph->out_edges(old_idx)) {
+			auto out_pid = out.get_out_pin().get_pid();
+			auto node = old_graph->get_dest_node(out);
+			auto width = node.get_bits();
+			Node_Pin pick_pin = create_pick_operator(new_graph, Node_Pin(new_subgraph_idx, out_pid, false), 0, width);
+			for(int offset = 0; offset < width; ++offset) {
+				Node_Pin pseudo_pin = create_pick_operator(new_graph, Node_Pin(pick_pin.get_nid(), offset, false), offset , 1);
+				index_offset key = {new_subgraph_idx,out_pid,{offset,offset}};
+				cell2id[subgraph_output_map[key]] = pseudo_pin.get_nid();
+				cell_out_pid[pseudo_pin.get_nid()] = 0;
+				fmt::print("generated subgraph output idx : {} name is {}\n",
+				           pseudo_pin.get_nid(),Abc_ObjName(subgraph_output_map[key]));
 			}
 		}
 	}
