@@ -70,11 +70,12 @@ public:
 	struct index_pid {
 		Index_ID idx;
 		Port_ID pid;
-		inline bool operator ==(const index_pid &rhs) const {
+
+		inline bool operator==(const index_pid &rhs) const {
 			return ((idx == rhs.idx) && (pid == rhs.idx));
 		}
 
-		inline bool operator <(const index_pid &rhs) const {
+		inline bool operator<(const index_pid &rhs) const {
 			if (idx < rhs.idx)
 				return true;
 			else if (idx == rhs.idx) {
@@ -83,7 +84,8 @@ public:
 			else
 				return false;
 		}
-		inline bool operator ()(const index_pid &lhs, const index_pid &rhs) const {
+
+		inline bool operator()(const index_pid &lhs, const index_pid &rhs) const {
 			if (lhs.idx < rhs.idx)
 				return true;
 			else if (lhs.idx == rhs.idx) {
@@ -102,17 +104,17 @@ public:
 		Port_ID pid;
 		int offset[2];
 
-		inline bool operator ==(const index_offset &rhs) const {
-			return ((idx == rhs.idx) && pid==rhs.pid && offset[0] && rhs.offset[0] );
+		inline bool operator==(const index_offset &rhs) const {
+			return ((idx == rhs.idx) && pid == rhs.pid && offset[0] && rhs.offset[0]);
 		}
 
-		inline bool operator <(const index_offset &rhs) const {
+		inline bool operator<(const index_offset &rhs) const {
 			if (idx < rhs.idx)
 				return true;
 			else if (idx == rhs.idx) {
 				if (pid < rhs.pid)
 					return true;
-				else if(pid == rhs.pid) {
+				else if (pid == rhs.pid) {
 					return offset[0] < rhs.offset[0];
 				}
 				else
@@ -122,13 +124,13 @@ public:
 				return false;
 		}
 
-		inline bool operator ()(const index_offset &lhs,const index_offset &rhs) const {
+		inline bool operator()(const index_offset &lhs, const index_offset &rhs) const {
 			if (lhs.idx < rhs.idx)
 				return true;
 			else if (lhs.idx == rhs.idx) {
 				if (lhs.pid < rhs.pid)
 					return true;
-				else if(lhs.pid == rhs.pid) {
+				else if (lhs.pid == rhs.pid) {
 					return lhs.offset[0] < rhs.offset[0];
 				}
 				else
@@ -138,6 +140,21 @@ public:
 				return false;
 		}
 	};// pid is to track src output edge
+
+	struct Pick_ID {
+		Node_Pin driver;
+		int offset;
+		int width;
+
+		Pick_ID(Node_Pin driver, int offset, int width) :
+						driver(driver), offset(offset), width(width) {
+		}
+
+		bool operator<(const Pick_ID other) const {
+			return (driver < other.driver) || (driver == other.driver && offset < other.offset) ||
+			       (driver == other.driver && offset == other.offset && width < other.width);
+		}
+	};
 
 	Inou_abc();
 
@@ -157,6 +174,7 @@ private:
 	std::vector<Index_ID> graphio_input_id;
 	std::vector<Index_ID> graphio_output_id;
 	std::vector<Index_ID> subgraph_id;
+	std::vector<Index_ID> memory_id;
 
 	using topology_info = std::vector<index_offset>;
 	using name2id = std::unordered_map<std::string, Index_ID>;
@@ -167,19 +185,17 @@ private:
 	using skew_group = std::map<std::string, std::set<Index_ID>>;
 	using reset_group = std::map<std::string, std::set<Index_ID>>;
 	using node_conn = std::unordered_map<Index_ID, topology_info, IndexID_Hash>;
-	using block_conn = std::unordered_map<Index_ID, std::unordered_map<Port_ID ,topology_info>, IndexID_Hash>;
-	using pseduo_name = std::map<index_offset,std::string>;
+	using block_conn = std::unordered_map<Index_ID, std::unordered_map<Port_ID, topology_info>, IndexID_Hash>;
+	using pseduo_name = std::map<index_offset, std::string>;
 
-	using idremap = std::unordered_map<Index_ID ,Index_ID >;
-	using pidremap = std::unordered_map<Index_ID ,std::unordered_map<Port_ID ,Index_ID >>;
+	using idremap = std::unordered_map<Index_ID, Index_ID>;
+	using pidremap = std::unordered_map<Index_ID, std::unordered_map<Port_ID, Index_ID >>;
 
 	using ptr2id = std::unordered_map<Abc_Obj_t *, Index_ID>;
 	using id2pid = std::unordered_map<Index_ID, Port_ID, IndexID_Hash>;
 
 	using value_size = std::pair<uint32_t, uint32_t>;
 	using value2idx = std::map<value_size, Index_ID>;
-	using pickmap = std::map<index_offset,Index_ID >;
-
 
 
 	po_group primary_output;
@@ -197,21 +213,25 @@ private:
 	node_conn latch_conn;
 	node_conn primary_output_conn;
 	block_conn subgraph_conn;
+	block_conn memory_conn;
 	pseduo_name subgraph_generated_output_wire; // use this to track generated input name
 	pseduo_name subgraph_generated_input_wire;// use this to track generated output name
+	pseduo_name memory_generated_output_wire;
+	pseduo_name memory_generated_input_wire;
 
 
 	name2id ck_remap;
 	name2id rst_remap;
 	name2id io_remap;
 	idremap subgraph_remap;
+	idremap memory_remap;
 	pidremap subgraph_outpid_remap;
 	pidremap subgraph_inpid_remap;
 	ptr2id cell2id;
 	id2pid cell_out_pid;
 	value2idx int_const_map;
-	pickmap pickop_map;
 
+	std::map<Pick_ID, Node_Pin> picks;
 
 
 	bool is_techmap(const LGraph *g);
@@ -240,9 +260,9 @@ private:
 
 	void find_subgraph_conn(const LGraph *g);
 
+	void find_memory_conn(const LGraph *g);
+
 	void recursive_find(const LGraph *g, const Edge *input, topology_info &pid, int *bit_addr);
-
-
 
 	Abc_Obj_t *gen_const_from_lgraph(const LGraph *g, index_offset key, Abc_Ntk_t *pAig);
 
@@ -264,6 +284,8 @@ private:
 
 	void conn_subgraph(const LGraph *g, Abc_Ntk_t *pAig);
 
+	void conn_memory(const LGraph *g, Abc_Ntk_t *pAig);
+
 	void gen_netList(const LGraph *g, Abc_Ntk_t *pAig);
 
 	Abc_Ntk_t *to_abc(const LGraph *g);
@@ -278,7 +300,11 @@ private:
 
 	void gen_subgraph_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
 
-	void connect_constant(LGraph* g, uint32_t value, uint32_t size, Index_ID onid, Port_ID opid);
+	void gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
+
+	Node_Pin create_pick_operator(LGraph* g, const Node_Pin driver, int offset, int width);
+
+	void connect_constant(LGraph *g, uint32_t value, uint32_t size, Index_ID onid, Port_ID opid);
 
 	void conn_latch(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
 
@@ -288,7 +314,7 @@ private:
 
 	void conn_subgraph(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
 
-
+	void conn_memory(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
 
 };
 

@@ -23,7 +23,7 @@ class Diff_finder {
       //for primitives, it doesn't matter since most have a single output
       Port_ID     pid;
 
-      Graph_Node(LGraph* module, Index_ID idx, uint32_t bit, std::string instance, Port_ID pid) :
+      Graph_Node(LGraph* module, Index_ID idx, uint32_t bit, const std::string &instance, Port_ID pid) :
         module(module), idx(idx), bit(bit), instance(instance), pid(pid) {
         }
 
