@@ -3,6 +3,7 @@
 //
 #include "inou/lef/inou_lef.hpp"
 #include "inou_abc.hpp"
+#include "nodetype.hpp"
 #include <boost/filesystem.hpp>
 
 Inou_abc_options_pack::Inou_abc_options_pack() {
@@ -221,7 +222,7 @@ void Inou_abc::find_subgraph_conn(const LGraph *g) {
 	for (const auto &idx : subgraph_id) {
 		if (opack.verbose == "true")
 			fmt::print("\nSubGraph_Op NodeID:{} has direct input from Node: \n", idx);
-		std::unordered_map<Port_ID, const Edge *> inp_edges;
+		std::map<Port_ID, const Edge *> inp_edges;
 		std::unordered_map<Port_ID, topology_info> subgraph_pid;
 
 		for (const auto &input : g->inp_edges(idx)) {
@@ -252,6 +253,57 @@ void Inou_abc::find_subgraph_conn(const LGraph *g) {
 	}
 }
 
+void Inou_abc::find_memory_conn(const LGraph *g) {
+	for(const auto &idx : memory_id) {
+		if(opack.verbose == "true")
+			fmt::print("\nMemory_Op NodeID:{} has direct input from Node: \n", idx);
+		std::map<Port_ID, const Edge *> inp_edges;
+		std::unordered_map<Port_ID, topology_info> memory_pid;
+		for (const auto &input : g->inp_edges(idx)) {
+			Port_ID inp_id = input.get_inp_pin().get_pid();
+			if(inp_id >= LGRAPH_MEMOP_CLK)
+				inp_edges[inp_id] = &input;
+			else
+				continue;
+		}
+		for (const auto &input : inp_edges) {
+			Port_ID input_id = input.second->get_inp_pin().get_pid();
+				if (opack.verbose == "true")
+					fmt::print("\n-------------------{}---------------------- \n", input_id);
+				topology_info pid;
+				auto node_idx = input.second->get_idx();
+				auto width = g->get_bits(node_idx);
+				int index = 0;
+				if (width > 1) {
+					for (index = 0; index < width; index++) {
+						int bit_index[2] = {index, index};
+						recursive_find(g, input.second, pid, bit_index);
+					}
+				}
+				else {
+					int bit_index[2] = {0, 0};
+					recursive_find(g, input.second, pid, bit_index);
+				}
+				if(input_id == LGRAPH_MEMOP_CLK) {
+					assert(pid.size() == 1);
+					Index_ID clk_idx = pid[0].idx;
+					char clk_name[100];
+					if (g->is_graph_input(clk_idx)) {
+						sprintf(clk_name, "%s", g->get_node_wirename(clk_idx));
+					}
+					else {
+						sprintf(clk_name, "generated_clock_id_%ld", clk_idx);
+					}
+					std::string clock_name(clk_name);
+					clock_id[clock_name] = clk_idx;
+					skew_group_map[clock_name].insert(idx);
+				}
+				memory_pid[input.first] = std::move(pid);
+			}
+		memory_conn[idx] = std::move(memory_pid);
+	}
+}
+
 void Inou_abc::find_cell_conn(const LGraph *g) {
 
 	fmt::print("\n******************************************************************\n");
@@ -261,6 +313,7 @@ void Inou_abc::find_cell_conn(const LGraph *g) {
 	find_combinational_conn(g);
 	find_graphio_output_conn(g);
 	find_subgraph_conn(g);
+	find_memory_conn(g);
 	fmt::print("\n******************************************************************\n");
 	fmt::print("Finish Computing Netlist Topology Based On Lgraph\n");
 	fmt::print("******************************************************************\n");
@@ -314,6 +367,20 @@ void Inou_abc::recursive_find(const LGraph *g, const Edge *input, topology_info 
 				           this_idx, bit_addr[0], bit_addr[1], input->get_out_pin().get_pid());
 			index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
 			pid.push_back(info);
+		}
+	}
+	else if (this_node_type == Memory_Op) {
+		char namebuffer[255];
+		if (opack.verbose == "true")
+			fmt::print("\t Memory_Op:{},bit [{}:{}] portid : {} \n",
+			           this_idx, bit_addr[0], bit_addr[1], input->get_out_pin().get_pid());
+		index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
+		pid.push_back(info);
+
+		sprintf(namebuffer, "%%memory_output_%ld_%d_%d%%", this_idx, input->get_out_pin().get_pid(), bit_addr[0]);
+		const auto it = memory_generated_output_wire.find(info);
+		if (it == memory_generated_output_wire.end()) {
+			memory_generated_output_wire[info] = std::string(namebuffer);
 		}
 	}
 	else if (this_node_type == SubGraph_Op) {
@@ -505,6 +572,10 @@ bool Inou_abc::is_techmap(const LGraph *g) {
 			}
 			case SubGraph_Op: {
 				subgraph_id.push_back(idx);
+				break;
+			}
+			case Memory_Op: {
+				memory_id.push_back(idx);
 				break;
 			}
 			default: {
