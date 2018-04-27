@@ -1,5 +1,5 @@
 #!/bin/bash
-declare -a inputs=("trivial.v" "simple_flop.v" "test.v"\
+declare -a inputs=("trivial.v" "test.v"\
                    #"shift.v" "wires.v" "assigns.v" "trivial2.v" "consts.v" \   ## debug later
                    "simple_add.v"  \
                    "reduce.v" \
