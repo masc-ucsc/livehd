@@ -850,14 +850,13 @@ void LGraph_Base::del_node(Index_ID idx) {
   // TODO: do this more effiently (no need to build iterator)
 
   assert(node_internal[idx].is_master_root());
-
   // Deleting can break the iterator. Restart each time
   bool deleted;
   do{
     deleted = false;
     for(auto &c:inp_edges(idx)) {
-      assert(Node_Internal::get(&c).get_self_idx()==idx);
-      node_internal[idx].del(c);
+      assert(Node_Internal::get(&c).get_master_root_nid()==idx);
+      node_internal[c.get_self_idx()].del(c);
       deleted = true;
       break;
     }
@@ -875,6 +874,16 @@ void LGraph_Base::del_node(Index_ID idx) {
 
   assert(node_internal[idx].get_inp_pos()==0);
   assert(node_internal[idx].get_out_pos()==0);
+
+  //clear child nodes
+  del_int_node(idx);
+}
+
+void LGraph_Base::del_int_node(Index_ID idx) {
+  if(!node_internal[idx].is_last_state()) {
+    del_int_node(node_internal[idx].get_next());
+  }
+  node_internal[idx].reset();
 }
 
 Edge_iterator LGraph_Base::out_edges(Index_ID idx) const {

@@ -2,9 +2,7 @@
 #include "lgraph.hpp"
 #include "lgedgeiter.hpp"
 
-int main() {
-
-
+bool test1() {
   LGraph* g = new LGraph("lgdb","test", true);
 
   Index_ID idx1 = g->create_node().get_nid();
@@ -43,6 +41,112 @@ int main() {
   }
 
 
+  for(auto & out : g->out_edges(idx1)) {
+    auto& reverse = out.get_reverse_edge();
+    assert(reverse.get_inp_pin().get_nid() == out.get_out_pin().get_nid());
+    assert(reverse.get_inp_pin().get_pid() == out.get_out_pin().get_pid());
+
+    assert(reverse.get_out_pin().get_nid() == out.get_inp_pin().get_nid());
+    assert(reverse.get_out_pin().get_pid() == out.get_inp_pin().get_pid());
+  }
+
+
+  for(auto & inp : g->inp_edges(idx2)) {
+    auto& reverse = inp.get_reverse_edge();
+    assert(reverse.get_inp_pin().get_nid() == inp.get_out_pin().get_nid());
+    assert(reverse.get_inp_pin().get_pid() == inp.get_out_pin().get_pid());
+
+    assert(reverse.get_out_pin().get_nid() == inp.get_inp_pin().get_nid());
+    assert(reverse.get_out_pin().get_pid() == inp.get_inp_pin().get_pid());
+  }
+
+
+  return true;
+}
+
+
+bool test2() {
+
+  LGraph* g = new LGraph("lgdb","test2", true);
+
+  Index_ID idx1 = g->create_node().get_nid();
+  Index_ID idx2 = g->create_node().get_nid();
+
+  g->add_edge(Node_Pin(idx1, 20, false),
+              Node_Pin(idx2, 25, true));
+
+
+
+  for(auto & inp : g->inp_edges(idx2)) {
+    g->del_edge(inp);
+  }
+
+  for(auto& inp : g->inp_edges(idx2)) {
+    assert(false);
+    (void) inp; //just to silence the warning
+  }
+
+  return true;
+
+}
+
+bool test3() {
+
+  LGraph* g = new LGraph("lgdb","test3", true);
+
+  Index_ID idx1 = g->create_node().get_nid();
+  Index_ID idx2 = g->create_node().get_nid();
+
+  g->add_edge(Node_Pin(idx1, 20, false),
+              Node_Pin(idx2, 25, true));
+
+
+
+  for(auto & inp : g->inp_edges(idx2)) {
+    g->del_edge(inp);
+  }
+
+  for(auto& inp : g->inp_edges(idx2)) {
+    assert(false);
+    (void) inp; //just to silence the warning
+  }
+
+  g->del_node(idx2);
+
+  for(auto nid : g->fast()) {
+    assert(nid != idx2);
+  }
+
+  return true;
+}
+
+bool test4() {
+
+  LGraph* g = new LGraph("lgdb","test4", true);
+
+  Index_ID idx1 = g->create_node().get_nid();
+  Index_ID idx2 = g->create_node().get_nid();
+
+  g->add_edge(Node_Pin(idx1, 20, false),
+              Node_Pin(idx2, 25, true));
+
+
+  Index_ID idx_child = g->get_idx_from_pid(idx2, 25);
+
+  g->del_node(idx2);
+
+  for(auto nid : g->fast()) {
+    assert(nid != idx2);
+  }
+
+  return true;
+}
+
+int main() {
+  test1();
+  test2();
+  test3();
+  test4();
 
   return 0;
 }

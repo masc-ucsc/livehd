@@ -27,22 +27,7 @@ void Pass_dce::transform(LGraph *g) {
     if (output_used.get_bit(idx))
       continue;
 
-    bool deleted;
-    do {
-      deleted = false;
-      for(const auto &c:g->out_edges(idx)) {
-        g->del_edge(c);
-        deleted = true;
-      }
-    }while(deleted);
-
-    do {
-      deleted = false;
-      for(const auto &c:g->inp_edges(idx)) {
-        g->del_edge(c);
-        deleted = true;
-      }
-    }while(deleted); // Delete can mess the iterator, try again
+    g->del_node(idx);
   }
 
   g->sync();
