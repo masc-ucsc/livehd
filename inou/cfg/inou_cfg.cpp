@@ -1,7 +1,6 @@
 
 #include <fstream>
 #include "inou_cfg.hpp"
-#include <stdint.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -61,8 +60,6 @@ std::vector<LGraph *> Inou_cfg::generate() {
 		//LGraph* g = lgs[0];
 		std::string cfg_file = opack.cfg_input;
 
-    //old
-    //std::ifstream infile(cfg_file);
 
     int fd = open(cfg_file.c_str(), O_RDONLY);
 		if (fd<0) {
@@ -80,31 +77,26 @@ std::vector<LGraph *> Inou_cfg::generate() {
 	  	exit(-3);
 	  }
 
-    //old
-		//cfg_2_lgraph(infile, lgs[0]);
     cfg_2_lgraph(&memblock, lgs[0]);
 
 		lgs[0]->sync();
+    close(fd);
 	}
 	return lgs;
 }
 /*
- * create lgraph based on the first two nodes defined in CFG table
+ * create lgraph based on every first two nodes defined in CFG table
  */
 
-//old
-//void Inou_cfg::cfg_2_lgraph(std::ifstream &infile, LGraph* g){
 void Inou_cfg::cfg_2_lgraph(char** memblock, LGraph* g){
 		std::string s;
 		std::vector<std::string> id2name(1);
 		std::map <std::string,Index_ID> name2id;
-    std::vector<Index_ID> id_nbr_null;//this id's neighbor is a null
+    std::vector<Index_ID> id_nbr_null;//these id's neighbor is a null
     int64_t nid_final = 0;
     char *p = strtok(*memblock, "\n\r\f");
 
 		while(p){
-			//old
-      //std::vector <std::string> words = split(s);
       std::vector <std::string> words = split(p);
 
 			if(*(words.begin()) == "END")
@@ -116,7 +108,7 @@ void Inou_cfg::cfg_2_lgraph(char** memblock, LGraph* g){
 			std::string w6th = *(words.begin()+5);
 			std::string w7th = *(words.begin()+6);
 			std::string w8th;
-			if(w5th == "if")
+			if(w5th == "if" || w5th == "::{")
       	w8th = *(words.begin()+7);
 
 
@@ -240,7 +232,7 @@ void Inou_cfg::cfg_2_lgraph(char** memblock, LGraph* g){
 				dst_nid = name2id[w2nd];
 				g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
 				fmt::print("for statement, connect src_node {} to dst_node {} ----- 3\n", src_nid, dst_nid);
-			}
+			}//end special case: for
 
 			else if(w5th == "while"){
 
@@ -265,21 +257,34 @@ void Inou_cfg::cfg_2_lgraph(char** memblock, LGraph* g){
 				dst_nid = name2id[w2nd];
 				g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
 				fmt::print("while statement, connect src_node {} to dst_node {} ----- 3\n", src_nid, dst_nid);
-			}
+      }//end special case: while
 
-			else if(w5th == ".()"){
-				;
-			}
+			else if(w5th == "::{"){
+        //connect to the begin of function call
+        src_nid = name2id[w1st];
+        dst_nid = name2id[w8th];
+        g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+        fmt::print("function call statement, connect src_node {} to dst_node {} ----- 1\n", src_nid, dst_nid);
+
+        // connect end of function call body
+        for(auto i = 0; i< id_nbr_null.size(); i++){
+          fmt::print("neighbor is null{}\n",id_nbr_null[i]);
+          src_nid = *(id_nbr_null.begin()+i);
+          dst_nid = name2id[w2nd];
+          g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, i, true));
+          fmt::print("function call statement, connect src_node {} to dst_node {} ----- 4\n", src_nid, dst_nid);
+        }
+      }//end special case: ::{
 
 			else if(w2nd != "null"){ //normal case:Kx->Ky
 				src_nid = name2id[w1st];
 				dst_nid = name2id[w2nd];
         g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
-				fmt::print("if statement, connect src_node {} to dst_node {} ----- 5\n", src_nid, dst_nid);
+				fmt::print("normal case connection, connect src_node {} to dst_node {} ----- 5\n", src_nid, dst_nid);
 				//fmt::print("src_node:{}, dst_node:{}\n",id2name[src_nid],id2name[dst_nid]);
 			}
 			fmt::print("\n");
-      p = strtok(NULL, "\n\r\f");
+      p = strtok(nullptr, "\n\r\f");
 		}//end while loop
 
     //deal with GIO
@@ -299,12 +304,6 @@ void Inou_cfg::cfg_2_lgraph(char** memblock, LGraph* g){
     fmt::print("total node number:{}\n", name2id.size());
     dst_nid = gio_node_ed.get_nid();;
     g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
-
-  // old
-	//}else{
-	//	console->error("cannot find input file\n");
-	//	exit(-1);
-	//}
 }
 
 
@@ -327,10 +326,29 @@ std::vector<std::string> Inou_cfg::split(const std::string& str){
 	return ret;
 }
 
+void Inou_cfg::lgraph_2_cfg(const LGraph* g, const std::string& filename ) {
+  int line_cnt = 0;
+  for (auto &idx : g->fast()) {
+    if (g->get_node_wirename(idx) != nullptr) {
+      fmt::print("{}\n",g->get_node_wirename(idx));//for now, just print out cfg, maybe mmap write later
+      ++line_cnt;
+    }
+	}
+  fmt::print("END\n");
+  ++line_cnt;
+  fmt::print("line_cnt = {}\n",line_cnt);
+}
 
 void Inou_cfg::generate(std::vector<const LGraph *> out) {
-	assert(0); //just generate
-	out.clear();
+  if (out.size() == 1) {
+    lgraph_2_cfg(out[0], opack.cfg_output);
+  }
+  else {
+    for (const auto &g : out) {
+      std::string file = g->get_name() + "_" + opack.cfg_output;
+      lgraph_2_cfg(g, file);
+    }
+  }
 }
 
 //tmp zone

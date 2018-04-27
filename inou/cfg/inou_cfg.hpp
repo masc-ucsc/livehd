@@ -24,8 +24,7 @@ private:
   static bool space(char c)    {return  isspace(c);}
   static bool not_space(char c){return !isspace(c);}
   std::vector<std::string> split(const std::string& str);
-  //old
-	//void cfg_2_lgraph(std::ifstream&, LGraph*);
+
   void cfg_2_lgraph(char**, LGraph*);
 protected:
 	Inou_cfg_options_pack opack;
@@ -36,6 +35,8 @@ public:
 	virtual ~Inou_cfg();
 
 	std::vector<LGraph *> generate() override final;
+
+  void lgraph_2_cfg(const LGraph* g, const std::string& filename);
 
 	using Inou::generate;
 
