@@ -106,6 +106,13 @@ class Tech_cell {
       return pname2id.at(name);
     }
 
+    bool pin_name_exist(std::string name) const {
+      if(pname2id.find(name) != pname2id.end())
+        return true;
+      else
+        return false;
+    }
+
     const pin_type get_out_id(std::string name) const {
       assert(pname2id.find(name) != pname2id.end());
       pin_type pin_id = pname2id.at(name);

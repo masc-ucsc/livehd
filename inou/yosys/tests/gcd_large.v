@@ -1,4 +1,4 @@
-module gcd(input clk, 
+module gcd_large(input clk, 
            input reset, 
            input [40:0] a,
            input [40:0] b, 
@@ -64,5 +64,3 @@ module gcd(input clk,
   end
 
 endmodule
-
-

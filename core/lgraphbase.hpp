@@ -74,6 +74,8 @@ protected:
   Index_ID add_graph_input(const char *str, Index_ID nid=0, uint16_t bits = 0);
   Index_ID add_graph_output(const char *str, Index_ID nid=0, uint16_t bits = 0);
 
+  void del_int_node(Index_ID idx);
+
   friend Fast_edge_iterator;
   friend Forward_edge_iterator;
   friend Backward_edge_iterator;
