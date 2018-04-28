@@ -3,7 +3,6 @@
 //
 #include "inou/lef/inou_lef.hpp"
 #include "inou_abc.hpp"
-#include "nodetype.hpp"
 #include <boost/filesystem.hpp>
 
 Inou_abc_options_pack::Inou_abc_options_pack() {
@@ -67,7 +66,6 @@ std::vector<LGraph *> Inou_abc::generate() {
 			Inou_lef::lef_parsing(lgs[0]->get_tech_library(), opack.lef_file);
 			lgs[0]->sync(); // sync because Tech Library is loaded
 		}
-		// No need to sync because it is a reload. Already sync
 	}
 	else {
 		console->error("Please specify the graph name!\n");
@@ -106,6 +104,7 @@ void Inou_abc::generate(std::vector<const LGraph *> out) {
  * 							node_conn latch_conn;
  * 							node_conn PO_conn;
  * 							block_conn subgraph_conn;
+ * 							block_conn memory_conn;
  ***********************************************************************/
 
 void Inou_abc::find_latch_conn(const LGraph *g) {
@@ -114,6 +113,7 @@ void Inou_abc::find_latch_conn(const LGraph *g) {
 		const Tech_cell *tcell = g->get_tlibrary()->get_const_cell(g->tmap_id_get(idx));
 		if (opack.verbose == "true")
 			fmt::print("\nLatch_Op_ID NodeID:{} has direct input from Node: \n", idx);
+		std::string trig_pin = tcell->pin_name_exist("C") ? "C" : "E";
 		for (const auto &input : g->inp_edges(idx)) {
 			if (input.get_inp_pin().get_pid() == tcell->get_pin_id("D")) {
 				if (opack.verbose == "true")
@@ -130,9 +130,9 @@ void Inou_abc::find_latch_conn(const LGraph *g) {
 				 * Although industrial standard flops usually have more pins such as
 				 * scan_en, si, etc..,
 				 * Due to the limitation of ABC synthesis,
-				 * this build only support "clock" pin and "reset" pin,
+				 * this build only support "clock(FF) or Enable(latch)" pin and "reset" pin
 				 *********************************************************************/
-			else if (input.get_inp_pin().get_pid() == tcell->get_pin_id("C")) {
+			else if (input.get_inp_pin().get_pid() == tcell->get_pin_id(trig_pin)) {
 				topology_info clock_pid;
 				int bit_index[2] = {0, 0};
 				recursive_find(g, &input, clock_pid, bit_index);
@@ -254,52 +254,52 @@ void Inou_abc::find_subgraph_conn(const LGraph *g) {
 }
 
 void Inou_abc::find_memory_conn(const LGraph *g) {
-	for(const auto &idx : memory_id) {
-		if(opack.verbose == "true")
+	for (const auto &idx : memory_id) {
+		if (opack.verbose == "true")
 			fmt::print("\nMemory_Op NodeID:{} has direct input from Node: \n", idx);
 		std::map<Port_ID, const Edge *> inp_edges;
 		std::unordered_map<Port_ID, topology_info> memory_pid;
 		for (const auto &input : g->inp_edges(idx)) {
 			Port_ID inp_id = input.get_inp_pin().get_pid();
-			if(inp_id >= LGRAPH_MEMOP_CLK)
+			if (inp_id >= LGRAPH_MEMOP_CLK)
 				inp_edges[inp_id] = &input;
 			else
 				continue;
 		}
 		for (const auto &input : inp_edges) {
 			Port_ID input_id = input.second->get_inp_pin().get_pid();
-				if (opack.verbose == "true")
-					fmt::print("\n-------------------{}---------------------- \n", input_id);
-				topology_info pid;
-				auto node_idx = input.second->get_idx();
-				auto width = g->get_bits(node_idx);
-				int index = 0;
-				if (width > 1) {
-					for (index = 0; index < width; index++) {
-						int bit_index[2] = {index, index};
-						recursive_find(g, input.second, pid, bit_index);
-					}
-				}
-				else {
-					int bit_index[2] = {0, 0};
+			if (opack.verbose == "true")
+				fmt::print("\n-------------------{}---------------------- \n", input_id);
+			topology_info pid;
+			auto node_idx = input.second->get_idx();
+			auto width = g->get_bits(node_idx);
+			int index = 0;
+			if (width > 1) {
+				for (index = 0; index < width; index++) {
+					int bit_index[2] = {index, index};
 					recursive_find(g, input.second, pid, bit_index);
 				}
-				if(input_id == LGRAPH_MEMOP_CLK) {
-					assert(pid.size() == 1);
-					Index_ID clk_idx = pid[0].idx;
-					char clk_name[100];
-					if (g->is_graph_input(clk_idx)) {
-						sprintf(clk_name, "%s", g->get_node_wirename(clk_idx));
-					}
-					else {
-						sprintf(clk_name, "generated_clock_id_%ld", clk_idx);
-					}
-					std::string clock_name(clk_name);
-					clock_id[clock_name] = clk_idx;
-					skew_group_map[clock_name].insert(idx);
-				}
-				memory_pid[input.first] = std::move(pid);
 			}
+			else {
+				int bit_index[2] = {0, 0};
+				recursive_find(g, input.second, pid, bit_index);
+			}
+			if (input_id == LGRAPH_MEMOP_CLK) {
+				assert(pid.size() == 1);
+				Index_ID clk_idx = pid[0].idx;
+				char clk_name[100];
+				if (g->is_graph_input(clk_idx)) {
+					sprintf(clk_name, "%s", g->get_node_wirename(clk_idx));
+				}
+				else {
+					sprintf(clk_name, "generated_clock_id_%ld", clk_idx);
+				}
+				std::string clock_name(clk_name);
+				clock_id[clock_name] = clk_idx;
+				skew_group_map[clock_name].insert(idx);
+			}
+			memory_pid[input.first] = std::move(pid);
+		}
 		memory_conn[idx] = std::move(memory_pid);
 	}
 }

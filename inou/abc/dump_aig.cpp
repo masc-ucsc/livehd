@@ -175,7 +175,7 @@ void Inou_abc::gen_netList(const LGraph *g, Abc_Ntk_t *pAig) {
 	console->info("Inou_abc::conn_subgraph():Lgraph is calling ABC API to connect all subgraph");
 	conn_subgraph(g, pAig);
 	console->info("Inou_abc::conn_memory():Lgraph is calling ABC API to connect all memory");
-	conn_memory(g,pAig);
+	conn_memory(g, pAig);
 	console->info("Inou_abc::conn_clock():Lgraph is calling ABC API to create clock network if generated clock exsit");
 	conn_clock(g, pAig);
 	console->info("Inou_abc::conn_reset():Lgraph is calling ABC API to create reset network if generated clock exsit");
@@ -789,7 +789,6 @@ void Inou_abc::conn_subgraph(const LGraph *g, Abc_Ntk_t *pAig) {
 					}
 					index_offset info = {idx, src.first, {offset, offset}};
 					subgraph_generated_input_wire[info] = std::string(namebuffer);
-					fmt::print("has graphio input the name buffer is {}\n", namebuffer);
 					offset++;
 					continue;
 				}

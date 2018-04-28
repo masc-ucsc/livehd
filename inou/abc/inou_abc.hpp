@@ -67,37 +67,6 @@ public:
 		Abc_Obj_t *pNodeOutput;   //Fanout of this node type: nets
 	};
 
-	struct index_pid {
-		Index_ID idx;
-		Port_ID pid;
-
-		inline bool operator==(const index_pid &rhs) const {
-			return ((idx == rhs.idx) && (pid == rhs.idx));
-		}
-
-		inline bool operator<(const index_pid &rhs) const {
-			if (idx < rhs.idx)
-				return true;
-			else if (idx == rhs.idx) {
-				return (pid < rhs.pid);
-			}
-			else
-				return false;
-		}
-
-		inline bool operator()(const index_pid &lhs, const index_pid &rhs) const {
-			if (lhs.idx < rhs.idx)
-				return true;
-			else if (lhs.idx == rhs.idx) {
-				return (lhs.pid < rhs.pid);
-			}
-			else
-				return false;
-		}
-
-
-	}; // used for dump_lgraph
-
 	struct index_offset {
 
 		Index_ID idx;
@@ -139,7 +108,7 @@ public:
 			else
 				return false;
 		}
-	};// pid is to track src output edge
+	};
 
 	struct Pick_ID {
 		Node_Pin driver;
@@ -187,15 +156,13 @@ private:
 	using node_conn = std::unordered_map<Index_ID, topology_info, IndexID_Hash>;
 	using block_conn = std::unordered_map<Index_ID, std::unordered_map<Port_ID, topology_info>, IndexID_Hash>;
 	using pseduo_name = std::map<index_offset, std::string>;
-
 	using idremap = std::unordered_map<Index_ID, Index_ID>;
 	using pidremap = std::unordered_map<Index_ID, std::unordered_map<Port_ID, Index_ID >>;
-
 	using ptr2id = std::unordered_map<Abc_Obj_t *, Index_ID>;
 	using id2pid = std::unordered_map<Index_ID, Port_ID, IndexID_Hash>;
-
 	using value_size = std::pair<uint32_t, uint32_t>;
 	using value2idx = std::map<value_size, Index_ID>;
+	using picks2pin = std::map<Pick_ID, Node_Pin>;
 
 
 	po_group primary_output;
@@ -204,34 +171,30 @@ private:
 	name2id latchname2id;
 	latch_group sequential_cell;
 
-	skew_group skew_group_map;// Flops with same clock
-	name2id clock_id;// clock id
-	reset_group reset_group_map;// Flops with same reset
-	name2id reset_id;// reset id
+	skew_group skew_group_map;
+	name2id clock_id;
+	reset_group reset_group_map;
+	name2id reset_id;
 
 	node_conn comb_conn;
 	node_conn latch_conn;
 	node_conn primary_output_conn;
 	block_conn subgraph_conn;
 	block_conn memory_conn;
-	pseduo_name subgraph_generated_output_wire; // use this to track generated input name
-	pseduo_name subgraph_generated_input_wire;// use this to track generated output name
+	pseduo_name subgraph_generated_output_wire;
+	pseduo_name subgraph_generated_input_wire;
 	pseduo_name memory_generated_output_wire;
 	pseduo_name memory_generated_input_wire;
-
 
 	name2id ck_remap;
 	name2id rst_remap;
 	name2id io_remap;
 	idremap subgraph_remap;
 	idremap memory_remap;
-	pidremap subgraph_outpid_remap;
-	pidremap subgraph_inpid_remap;
 	ptr2id cell2id;
 	id2pid cell_out_pid;
 	value2idx int_const_map;
-
-	std::map<Pick_ID, Node_Pin> picks;
+	picks2pin picks;
 
 
 	bool is_techmap(const LGraph *g);
@@ -302,7 +265,7 @@ private:
 
 	void gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
 
-	Node_Pin create_pick_operator(LGraph* g, const Node_Pin driver, int offset, int width);
+	Node_Pin create_pick_operator(LGraph *g, const Node_Pin &driver, int offset, int width);
 
 	void connect_constant(LGraph *g, uint32_t value, uint32_t size, Index_ID onid, Port_ID opid);
 
@@ -311,10 +274,6 @@ private:
 	void conn_primary_output(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
 
 	void conn_combinational_cell(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
-
-	void conn_subgraph(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
-
-	void conn_memory(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
 
 };
 
