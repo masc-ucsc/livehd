@@ -9,14 +9,7 @@ ruby ./inou/tech/verilog_json.rb ./misc/yosys/techlibs/common/simcells.v   > cma
 ./inou/abc/lgaig --lgdb lgdb --graph_name foo
 
 
-Current Limitation:
-1. Does not suuport Asynchronize Reset
-2. Does not support Hardmacro like memory block (comes later ....)
+TO DO LIST & current limitation:
+1. Find a way to verify the logic equivalency?
 
-
-TO DO LIST:
-1. Dumper from ABC_AIG -> Lgraph;
-2. More generic API ? Code restructure?
-3. Find a way to verify the logic equivalency?
-4. Add mapping support?
 
