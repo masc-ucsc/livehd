@@ -163,7 +163,7 @@ private:
 	using value_size = std::pair<uint32_t, uint32_t>;
 	using value2idx = std::map<value_size, Index_ID>;
 	using picks2pin = std::map<Pick_ID, Node_Pin>;
-
+	using record = std::unordered_map<std::string,Abc_Obj_t *>;
 
 	po_group primary_output;
 	pi_group primary_input;
@@ -185,6 +185,8 @@ private:
 	pseduo_name subgraph_generated_input_wire;
 	pseduo_name memory_generated_output_wire;
 	pseduo_name memory_generated_input_wire;
+	record pseduo_record;
+
 
 	name2id ck_remap;
 	name2id rst_remap;
