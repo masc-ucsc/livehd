@@ -764,25 +764,7 @@ void Inou_abc::conn_subgraph(const LGraph *g, Abc_Ntk_t *pAig) {
 				index_offset rhs = {src_idx, 0, {src_bits, src_bits}};
 				Node_Type_Op this_node_type = g->node_type_get(src_idx).op;
 
-				if (this_node_type == SubGraph_Op) {
-					pseduo_subgraph_output = Abc_NtkCreatePo(pAig);
-					if(pseduo_record.find(subgraph_generated_output_wire[inp]) == pseduo_record.end()) {
-						Abc_Obj_t *pseudo_subgraph_input = Abc_NtkCreatePi(pAig);
-						Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
-						Abc_ObjAssignName(pNet, const_cast<char *>(subgraph_generated_output_wire[inp].c_str()), NULL);
-						Abc_ObjAddFanin(pNet, pseudo_subgraph_input);
-						pseduo_record[subgraph_generated_output_wire[inp]] = pNet;
-					}
-					Abc_Obj_t *pbuf = Abc_NtkCreateNode(pAig);
-					pbuf->pData = Hop_IthVar((Hop_Man_t *) pAig->pManFunc, 0);
-					Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
-					Abc_ObjAddFanin(pbuf, pseduo_record[subgraph_generated_output_wire[inp]]);
-					Abc_ObjAddFanin(pwire, pbuf);
-
-					Abc_ObjAddFanin(pseduo_subgraph_output, pwire);
-				}
-
-				else if (this_node_type == TechMap_Op) {
+				if (this_node_type == TechMap_Op) {
 					const Tech_cell *tcell = g->get_tlibrary()->get_const_cell(g->tmap_id_get(src_idx));
 					pseduo_subgraph_output = Abc_NtkCreatePo(pAig);
 					if (is_latch(tcell)) {
@@ -799,6 +781,19 @@ void Inou_abc::conn_subgraph(const LGraph *g, Abc_Ntk_t *pAig) {
 					}
 				}
 
+				else if (this_node_type == GraphIO_Op) {
+					assert(g->is_graph_input(src_idx));
+					pseduo_subgraph_output = Abc_NtkCreatePo(pAig);
+
+					Abc_Obj_t *pbuf = Abc_NtkCreateNode(pAig);
+					pbuf->pData = Hop_IthVar((Hop_Man_t *) pAig->pManFunc, 0);
+					Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
+					Abc_ObjAddFanin(pbuf, primary_input[rhs].PIOut);
+					Abc_ObjAddFanin(pwire, pbuf);
+					Abc_ObjAddFanin(pseduo_subgraph_output, pwire);
+
+				}
+
 				else if (this_node_type == U32Const_Op) {
 					pseduo_subgraph_output = Abc_NtkCreatePo(pAig);
 					Abc_ObjAddFanin(pseduo_subgraph_output, gen_const_from_lgraph(g, rhs, pAig));
@@ -807,20 +802,44 @@ void Inou_abc::conn_subgraph(const LGraph *g, Abc_Ntk_t *pAig) {
 					pseduo_subgraph_output = Abc_NtkCreatePo(pAig);
 					Abc_ObjAddFanin(pseduo_subgraph_output, gen_const_from_lgraph(g, rhs, pAig));
 				}
+
+				else if (this_node_type == Memory_Op) {
+					pseduo_subgraph_output = Abc_NtkCreatePo(pAig);
+					if(pseduo_record.find(memory_generated_output_wire[inp]) == pseduo_record.end()) {
+						Abc_Obj_t *pseudo_memory_input = Abc_NtkCreatePi(pAig);
+						Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
+						Abc_ObjAssignName(pNet, const_cast<char *>(memory_generated_output_wire[inp].c_str()), NULL);
+						Abc_ObjAddFanin(pNet, pseudo_memory_input);
+						pseduo_record[memory_generated_output_wire[inp]] = pNet;
+					}
+					Abc_Obj_t *pbuf = Abc_NtkCreateNode(pAig);
+					pbuf->pData = Hop_IthVar((Hop_Man_t *) pAig->pManFunc, 0);
+					Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
+					Abc_ObjAddFanin(pbuf, pseduo_record[memory_generated_output_wire[inp]]);
+					Abc_ObjAddFanin(pwire, pbuf);
+
+					Abc_ObjAddFanin(pseduo_subgraph_output, pwire);
+				}
+
+				else if (this_node_type == SubGraph_Op) {
+					pseduo_subgraph_output = Abc_NtkCreatePo(pAig);
+					if(pseduo_record.find(subgraph_generated_output_wire[inp]) == pseduo_record.end()) {
+						Abc_Obj_t *pseudo_subgraph_input = Abc_NtkCreatePi(pAig);
+						Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
+						Abc_ObjAssignName(pNet, const_cast<char *>(subgraph_generated_output_wire[inp].c_str()), NULL);
+						Abc_ObjAddFanin(pNet, pseudo_subgraph_input);
+						pseduo_record[subgraph_generated_output_wire[inp]] = pNet;
+					}
+					Abc_Obj_t *pbuf = Abc_NtkCreateNode(pAig);
+					pbuf->pData = Hop_IthVar((Hop_Man_t *) pAig->pManFunc, 0);
+					Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
+					Abc_ObjAddFanin(pbuf, pseduo_record[subgraph_generated_output_wire[inp]]);
+					Abc_ObjAddFanin(pwire, pbuf);
+
+					Abc_ObjAddFanin(pseduo_subgraph_output, pwire);
+				}
 				else {
-					assert(this_node_type == GraphIO_Op);
-					assert(g->is_graph_input(src_idx));
-					int width = g->get_bits(src_idx);
-					if (width > 1) {
-						sprintf(namebuffer, "%s[%d]", g->get_graph_input_name(src_idx), offset);
-					}
-					else {
-						sprintf(namebuffer, "%s", g->get_graph_input_name(src_idx));
-					}
-					index_offset info = {idx, src.first, {offset, offset}};
-					subgraph_generated_input_wire[info] = std::string(namebuffer);
-					offset++;
-					continue;
+					assert(false);
 				}
 				assert(pseduo_subgraph_output != nullptr);
 				sprintf(namebuffer, "%%subgraph_input_%ld_%d_%d%%", idx, src.first, offset);

@@ -374,16 +374,13 @@ void Inou_abc::gen_subgraph_from_abc(LGraph *new_graph, const LGraph *old_graph,
 		}
 		for (const auto &out : old_graph->out_edges(old_idx)) {
 			auto out_pid = out.get_out_pin().get_pid();
-			auto node = old_graph->get_dest_node(out);
-			auto width = node.get_bits();
+			auto width = old_graph->get_bits(out.get_out_pin().get_nid());
 			Node_Pin pick_pin = create_pick_operator(new_graph, Node_Pin(new_subgraph_idx, out_pid, false), 0, width);
 			for (int offset = 0; offset < width; ++offset) {
 				Node_Pin pseudo_pin = create_pick_operator(new_graph, Node_Pin(pick_pin.get_nid(), offset, false), offset, 1);
 				index_offset key = {new_subgraph_idx, out_pid, {offset, offset}};
 				cell2id[subgraph_output_map[key]] = pseudo_pin.get_nid();
 				cell_out_pid[pseudo_pin.get_nid()] = 0;
-				//fmt::print("generated subgraph output idx : {} name is {}\n",
-				//           pseudo_pin.get_nid(),Abc_ObjName(subgraph_output_map[key]));
 			}
 		}
 	}
