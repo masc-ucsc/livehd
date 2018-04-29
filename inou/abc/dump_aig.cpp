@@ -264,21 +264,41 @@ void Inou_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
 	char namebuffer[255];
 	for (const auto &idx : graphio_output_id) {
 		int width = g->get_bits(idx);
+		char namebuffer[255];
 		if (width > 1) {
 			for (int i = 0; i < width; i++) {
+				Abc_Obj_t *pbuf = Abc_NtkCreateNode(pAig);
+				pbuf->pData = Hop_IthVar((Hop_Man_t *) pAig->pManFunc, 0);
+				Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
+				Abc_ObjAddFanin(pwire, pbuf);
+
+				sprintf(namebuffer, "%s[%d]", g->get_graph_output_name(idx), i);
 				pObj = Abc_NtkCreatePo(pAig);
+				Abc_ObjAddFanin(pObj,pwire);
+				Abc_ObjAssignName(pwire, namebuffer, NULL);
 				index_offset key = {idx, 0, {i, i}};
-				Abc_primary_output new_primary_output = {pObj, NULL};
+				Abc_primary_output new_primary_output = {pbuf, NULL};
 				primary_output[key] = new_primary_output;
 			}
 		}
 		else {
+			Abc_Obj_t *pbuf = Abc_NtkCreateNode(pAig);
+			pbuf->pData = Hop_IthVar((Hop_Man_t *) pAig->pManFunc, 0);
+			Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
+			Abc_ObjAddFanin(pwire, pbuf);
+
+			sprintf(namebuffer, "%s", g->get_graph_output_name(idx));
 			pObj = Abc_NtkCreatePo(pAig);
+			Abc_ObjAddFanin(pObj,pwire);
+			Abc_ObjAssignName(pwire, namebuffer, NULL);
 			index_offset key = {idx, 0, {0, 0}};
-			Abc_primary_output new_primary_output = {pObj, NULL};
+			Abc_primary_output new_primary_output = {pbuf, NULL};
 			primary_output[key] = new_primary_output;
 		}
 	}
+
+
+
 	for (const auto &idx : graphio_input_id) {
 		int width = g->get_bits(idx);
 		if (width > 1) {
@@ -596,7 +616,6 @@ void Inou_abc::conn_primary_output(const LGraph *g, Abc_Ntk_t *pAig) {
 		auto src = primary_output_conn[idx];
 		int bit_index = 0;
 		for (const auto &inp : src) {
-			char namebuffer[255];
 			Index_ID src_idx = inp.idx;
 			int src_bits = inp.offset[0];
 			index_offset lhs = {idx, 0, {bit_index, bit_index}};
@@ -657,18 +676,7 @@ void Inou_abc::conn_primary_output(const LGraph *g, Abc_Ntk_t *pAig) {
 			else {
 				assert(false);
 			}
-
-			if (g->get_bits(lhs.idx) > 1) {
-				sprintf(namebuffer, "%s[%d]", g->get_graph_output_name(lhs.idx), lhs.offset[0]);
-				Abc_ObjAssignName((Abc_ObjFanin0Ntk(primary_output[lhs].PO)), namebuffer, NULL);
-			}
-			else {
-				sprintf(namebuffer, "%s", g->get_graph_output_name(lhs.idx));
-				Abc_ObjAssignName((Abc_ObjFanin0Ntk(primary_output[lhs].PO)), namebuffer, NULL);
-			}
-
 			bit_index++;
-
 		}
 	}
 }

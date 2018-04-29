@@ -76,17 +76,12 @@ std::vector<LGraph *> Inou_abc::generate() {
 
 void Inou_abc::generate(std::vector<const LGraph *> out) {
 	if (out.size() == 1) {
-		if (is_techmap(out[0])) { // if no combinational cell , we will use other approach
+		if (is_techmap(out[0])) {
 			find_cell_conn(out[0]);
-			if (combinational_id.size()) {
-				LGraph *Mapped_Lgraph = new LGraph(opack.lgdb_path, opack.graph_name + "_mapped", true);
-				from_abc(Mapped_Lgraph, out[0], to_abc(out[0]));
-				Mapped_Lgraph->sync();
-				Mapped_Lgraph->print_stats();
-			}
-			else {
-				console->warn("Netlist contains no combinational logic!! Skip ABC synthesis \n");
-			}
+			LGraph *Mapped_Lgraph = new LGraph(opack.lgdb_path, opack.graph_name + "_mapped", true);
+			from_abc(Mapped_Lgraph, out[0], to_abc(out[0]));
+			Mapped_Lgraph->sync();
+			Mapped_Lgraph->print_stats();
 		}
 	}
 }
