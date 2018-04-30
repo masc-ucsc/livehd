@@ -40,27 +40,6 @@ bool test1() {
     assert(inp.get_inp_pin().is_input() == true);
   }
 
-
-  for(auto & out : g->out_edges(idx1)) {
-    auto& reverse = out.get_reverse_edge();
-    assert(reverse.get_inp_pin().get_nid() == out.get_out_pin().get_nid());
-    assert(reverse.get_inp_pin().get_pid() == out.get_out_pin().get_pid());
-
-    assert(reverse.get_out_pin().get_nid() == out.get_inp_pin().get_nid());
-    assert(reverse.get_out_pin().get_pid() == out.get_inp_pin().get_pid());
-  }
-
-
-  for(auto & inp : g->inp_edges(idx2)) {
-    auto& reverse = inp.get_reverse_edge();
-    assert(reverse.get_inp_pin().get_nid() == inp.get_out_pin().get_nid());
-    assert(reverse.get_inp_pin().get_pid() == inp.get_out_pin().get_pid());
-
-    assert(reverse.get_out_pin().get_nid() == inp.get_inp_pin().get_nid());
-    assert(reverse.get_out_pin().get_pid() == inp.get_inp_pin().get_pid());
-  }
-
-
   return true;
 }
 
