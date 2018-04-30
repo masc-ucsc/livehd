@@ -1,10 +1,10 @@
 #!/bin/bash
-declare -a inputs=("trivial.v" "simple_flop.v" "test.v"\
-                   #"shift.v" "wires.v" "assigns.v" "trivial2.v" "consts.v" \   ## debug later
+declare -a inputs=("trivial.v" "test.v"\
+                   "shift.v" "wires.v" "assigns.v" "consts.v" \
                    "simple_add.v"  \
                    "reduce.v" \
-                   #"submodule.v" "multiport.v" "null_port.v" \
-                   "gcd.v" "gcd_small.v" "gcd_large.v" "common_sub.v" \
+                   #"submodule.v" "multiport.v" "null_port.v" "trivial2.v" \
+                   "gcd.v" "gcd_small.v" "common_sub.v" "gcd_large.v" \
                    "gates.v" "operators.v" \
                    #"offset.v" "submodule_offset.v" "mem.v" "mem2.v" \
                    )

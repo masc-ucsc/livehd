@@ -15,7 +15,7 @@ int main(int argc, const char **argv) {
 	Options::setup_lock();
 	std::vector<LGraph *> rvec = cfg.generate();
 
-	//for (auto &g:rvec) {
-	//	cfg.generate(g);
-	//}
+	for (auto &g:rvec) {
+		cfg.generate(g);
+	}
 }
