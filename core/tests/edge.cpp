@@ -66,7 +66,6 @@ bool test2() {
   }
 
   return true;
-
 }
 
 bool test3() {
