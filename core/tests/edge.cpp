@@ -109,7 +109,6 @@ bool test4() {
   g->add_edge(Node_Pin(idx1, 20, false),
               Node_Pin(idx2, 25, true));
 
-
   Index_ID idx_child = g->get_idx_from_pid(idx2, 25);
 
   g->del_node(idx2);
