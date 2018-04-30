@@ -149,6 +149,8 @@ protected:
     return l->get_inp_pid();
   }
 
+  const Edge &get_reverse_for_deletion() const;
+
 public:
   //Edge() {};
   friend struct Node_Internal_Page;
@@ -172,7 +174,10 @@ public:
     assert(snode == ((SEdge_Internal *)this)->is_snode());
   }
 
-  const Edge &get_reverse_edge() const;
+  const Edge &get_reverse_edge() const {
+    console->error("Edge::get_reverse_edge() has been deprecated\n");
+    assert(false);
+  }
 
   // Output edge: inp (self_nid, out_pid) -> out (idx, inp_pid)
   // Input edge : inp (idx, out_pid)      -> out (self_nid, inp_pid)
@@ -341,7 +346,7 @@ private:
     //Index_ID       ptr_idx  = ptr_node->get_self_idx();
     //Index_ID       ptr_nid  = ptr_node->get_nid();
 
-    const Edge &inp_edge = out_edge.get_reverse_edge();
+    const Edge &inp_edge = out_edge.get_reverse_for_deletion();
     assert(inp_edge.is_input());
     assert(!out_edge.is_input());
 
@@ -356,7 +361,7 @@ private:
     //Index_ID       ptr_idx  = ptr_node->get_self_idx();
     //Index_ID       ptr_nid  = ptr_node->get_nid();
 
-    const Edge &out_edge = inp_edge.get_reverse_edge();
+    const Edge &out_edge = inp_edge.get_reverse_for_deletion();
     assert(inp_edge.is_input());
     assert(!out_edge.is_input());
 
