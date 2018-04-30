@@ -523,12 +523,12 @@ bool Inou_pyrope::to_subgraph(Out_string &w, Out_string &out, const LGraph *g, I
     //inline_stmt.clear();
     //
     //sg->out_edges does not go over all output edges!
-/*
+
     for (auto &edge:sg->out_edges(idx)) {
       //out << sg->get_graph_output_name_from_pid(edge.get_out_pin().get_pid());
       //to_normal_var(w,sg,edge.get_idx());
       w << sg->get_graph_output_name(edge.get_idx());
-    }
+    }/*
     for (auto &edge:sg->inp_edges(idx)) {
       //out << sg->get_graph_input_name_from_pid(edge.get_inp_pin().get_pid());
       //to_normal_var(w,sg,edge.get_idx());

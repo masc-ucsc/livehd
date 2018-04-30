@@ -14,4 +14,5 @@ int main(int argc, const char **argv) {
 		abc.generate(g);
 	}
 	b.sample("abc");
+	return 0;
 }

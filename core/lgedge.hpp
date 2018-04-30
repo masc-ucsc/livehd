@@ -110,13 +110,13 @@ public:
   Port_ID  get_pid()   const { return pid;    }
   bool     is_input()  const { return input;  }
 
-	bool operator==(const Node_Pin &other) const {
-		return (nid == other.nid) && (pid == other.pid) && (input == other.input);
-	}
+  bool operator==(const Node_Pin &other) const {
+    return (nid == other.nid) && (pid == other.pid) && (input == other.input);
+  }
 
-	bool operator!=(const Node_Pin &other) const {
-		return (nid != other.nid) || (pid != other.pid) || (input != other.input);
-	}
+  bool operator!=(const Node_Pin &other) const {
+    return (nid != other.nid) || (pid != other.pid) || (input != other.input);
+  }
 
   bool operator<(const Node_Pin&other) const {
     return (nid < other.nid) || (nid == other.nid && pid < other.pid) ||
@@ -149,6 +149,8 @@ protected:
     return l->get_inp_pid();
   }
 
+  const Edge &get_reverse_for_deletion() const;
+
 public:
   //Edge() {};
   friend struct Node_Internal_Page;
@@ -172,7 +174,10 @@ public:
     assert(snode == ((SEdge_Internal *)this)->is_snode());
   }
 
-  const Edge &get_reverse_edge() const;
+  const Edge &get_reverse_edge() const {
+    console->error("Edge::get_reverse_edge() has been deprecated\n");
+    assert(false);
+  }
 
   // Output edge: inp (self_nid, out_pid) -> out (idx, inp_pid)
   // Input edge : inp (idx, out_pid)      -> out (self_nid, inp_pid)
@@ -312,7 +317,7 @@ class __attribute__ ((packed)) Node_Internal {
 private:
   // BEGIN 10 Bytes common payload
   Node_State         state:3; // State must be the first thing (Node_Internal_Page)
-  uint16_t            bits:11;
+  uint16_t           bits:11;
   uint16_t         inp_pos:4;
   uint16_t         out_pos:4;
   uint16_t            root:1;
@@ -327,8 +332,8 @@ public:
   static constexpr int Num_SEdges = 16-5; // 5 entries for the 80 bits (10 bytes)
   SEdge sedge[Num_SEdges]; // WARNING: Must not be the last field in struct or iterators fail
 private:
-  Index_ID             nid:Index_Bits; // 36bits, 4 byte aligned
-  Port_ID          out_pid:Port_Bits;  // Not well aligned
+  Index_ID        nid:Index_Bits; // 36bits, 4 byte aligned
+  Port_ID         out_pid:Port_Bits;  // Not well aligned
   uint16_t        out_long:2;
   // END 10 Bytes common payload
 
@@ -341,11 +346,11 @@ private:
     //Index_ID       ptr_idx  = ptr_node->get_self_idx();
     //Index_ID       ptr_nid  = ptr_node->get_nid();
 
-		const Edge &inp_edge = out_edge.get_reverse_edge();
+    const Edge &inp_edge = out_edge.get_reverse_for_deletion();
     assert(inp_edge.is_input());
     assert(!out_edge.is_input());
 
-		Node_Internal::get(&inp_edge).del_input_int(inp_edge);
+    Node_Internal::get(&inp_edge).del_input_int(inp_edge);
     del_output_int(out_edge);
 
     try_recycle();
@@ -356,22 +361,17 @@ private:
     //Index_ID       ptr_idx  = ptr_node->get_self_idx();
     //Index_ID       ptr_nid  = ptr_node->get_nid();
 
-		const Edge &out_edge = inp_edge.get_reverse_edge();
+    const Edge &out_edge = inp_edge.get_reverse_for_deletion();
     assert(inp_edge.is_input());
     assert(!out_edge.is_input());
 
-		Node_Internal::get(&out_edge).del_output_int(out_edge);
+    Node_Internal::get(&out_edge).del_output_int(out_edge);
     del_input_int(inp_edge);
 
     try_recycle();
   }
 public:
   Node_Internal() {
-    bits       = 0;
-    out_pid    = 0;
-    root       = 1;
-    graph_io_input  = false;
-    graph_io_output = false;
     reset();
   }
 
@@ -396,10 +396,16 @@ public:
   int32_t get_num_outputs() const;
 
   void reset() {
+    bits       = 0;
+    out_pid    = 0;
+    root       = 1;
+    graph_io_input  = false;
+    graph_io_output = false;
     inp_pos  = 0; // SEdge uses 1, LEdge uses 3
     out_pos  = 0; // SEdge uses 1, LEdge uses 3
     inp_long = 0;
     out_long = 0;
+    nid      = 0;
     state    = Last_Node_State;
   }
 
@@ -438,8 +444,8 @@ public:
     assert(!is_graph_io());
     nid = _nid;
 #ifdef DEBUG
-		if (nid == get_self_idx())
-				assert(root);
+    if (nid == get_self_idx())
+        assert(root);
 #endif
   }
 
