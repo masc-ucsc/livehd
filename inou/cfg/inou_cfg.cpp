@@ -10,7 +10,7 @@
 #include <fcntl.h>
 #include "lgraphbase.hpp"
 #include "lgedgeiter.hpp"
-
+using std::string;
 Inou_cfg_options_pack::Inou_cfg_options_pack() {
 
 	Options::get_desc()->add_options()
@@ -22,7 +22,7 @@ Inou_cfg_options_pack::Inou_cfg_options_pack() {
 					boost::program_options::command_line_parser(Options::get_cargc(), Options::get_cargv()).options(
 									*Options::get_desc()).allow_unregistered().run(), vm);
 	if (vm.count("cfg_output")) {
-		cfg_output = vm["cfg_output"].as<std::string>();
+		cfg_output = vm["cfg_output"].as<string>();
 	}
 	else {
 		cfg_output = "output.cfg";
@@ -30,7 +30,7 @@ Inou_cfg_options_pack::Inou_cfg_options_pack() {
 
 
 	if (vm.count("cfg_input")) {
-		cfg_input = vm["cfg_input"].as<std::string>();
+		cfg_input = vm["cfg_input"].as<string>();
 	}
 	else {
 		cfg_input = "test.cfg";
@@ -58,7 +58,7 @@ std::vector<LGraph *> Inou_cfg::generate() {
 
 		lgs.push_back(new LGraph(opack.lgdb_path));
 		//LGraph* g = lgs[0];
-		std::string cfg_file = opack.cfg_input;
+		string cfg_file = opack.cfg_input;
 
 
     int fd = open(cfg_file.c_str(), O_RDONLY);
@@ -89,41 +89,38 @@ std::vector<LGraph *> Inou_cfg::generate() {
  */
 
 void Inou_cfg::cfg_2_lgraph(char** memblock, LGraph* g){
-		std::string s;
-		std::vector<std::string> id2name(1);
-		std::map <std::string,Index_ID> name2id;
+
+		string s;
+		std::vector<string> id2name(1);
+		std::map <string,Index_ID> name2id;
     std::vector<Index_ID> id_nbr_null;//these id's neighbor is a null
     int64_t nid_final = 0;
     char *p = strtok(*memblock, "\n\r\f");
 
 		while(p){
-      std::vector <std::string> words = split(p);
+      std::vector <string> words = split(p);
 
 			if(*(words.begin()) == "END")
 				break;
 
-			std::string w1st = *(words.begin());
-			std::string w2nd = *(words.begin()+1);
-			std::string w5th = *(words.begin()+4);
-			std::string w6th = *(words.begin()+5);
-			std::string w7th = *(words.begin()+6);
-			std::string w8th;
+			string w1st = *(words.begin());
+			string w2nd = *(words.begin()+1);
+			string w5th = *(words.begin()+4);
+			string w6th = *(words.begin()+5);
+			string w7th = *(words.begin()+6);
+			string w8th;
 			if(w5th == "if" || w5th == "::{")
       	w8th = *(words.begin()+7);
 
 
-      std::string dfg_data;
-      for(std::vector<std::string>::size_type i = 0; i != words.size(); i++){
-        if(i == words.size()-1)
-          dfg_data = dfg_data + words[i];//no final space stored
-        else
-          dfg_data = dfg_data + words[i] + " ";
-      }
+      string dfg_data = p;
 
       fmt::print("dfg_data:{}\n", dfg_data);
 
-			//I.process 1st node
-      //only assign node type for first K per line in cfg
+      /*
+			  I.process 1st node
+        only assign node type for first K in every line of cfg
+      */
 			if(name2id.count(w1st) == 0){//if node has not been created before
 				Node new_node = g->create_node();
 				name2id[w1st] = new_node.get_nid();
@@ -157,7 +154,10 @@ void Inou_cfg::cfg_2_lgraph(char** memblock, LGraph* g){
           g->node_type_set(name2id[w1st], CfgAssign_Op);
       }
 
-			//II.process 2nd node
+      /*
+        II.process 2nd node
+      */
+
 			if(w2nd != "null" && name2id.count(w2nd) == 0){
 				Node new_node = g->create_node();
 				name2id[w2nd] = new_node.get_nid();
@@ -171,7 +171,10 @@ void Inou_cfg::cfg_2_lgraph(char** memblock, LGraph* g){
 					id_nbr_null.push_back(name2id[w1st]);
 			}
 
-			//III.deal with edge connection
+
+      /*
+        III.deal with edge connection
+      */
 			Index_ID src_nid, dst_nid;
 
 			if(w5th == "if"){//special case: if
@@ -221,7 +224,7 @@ void Inou_cfg::cfg_2_lgraph(char** memblock, LGraph* g){
 				for(auto i = 0; i< id_nbr_null.size(); i++){
 					fmt::print("con{}\n",id_nbr_null[i]);
 					src_nid = *(id_nbr_null.begin()+i);
-					dst_nid = name2id[w2nd];
+					dst_nid = name2id[w1st];//modify from w2nd to w1st
 					g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, i, true));
 					fmt::print("for statement, connect src_node {} to dst_node {} ----- 2\n", src_nid, dst_nid);
 				}
@@ -246,7 +249,7 @@ void Inou_cfg::cfg_2_lgraph(char** memblock, LGraph* g){
 				for(auto i = 0; i< id_nbr_null.size(); i++){
 					fmt::print("con{}\n",id_nbr_null[i]);
 					src_nid = *(id_nbr_null.begin()+i);
-					dst_nid = name2id[w2nd];
+					dst_nid = name2id[w1st];//modify from w2nd to w1st
 					g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, i, true));
 					fmt::print("while statement, connect src_node {} to dst_node {} ----- 2\n", src_nid, dst_nid);
 				}
@@ -287,7 +290,9 @@ void Inou_cfg::cfg_2_lgraph(char** memblock, LGraph* g){
       p = strtok(nullptr, "\n\r\f");
 		}//end while loop
 
-    //deal with GIO
+    /*
+      deal with GIO
+    */
     //Graph input
     Node gio_node_bg = g->create_node();
     fmt::print("create node:{}, nid:{}\n", "GIO", gio_node_bg.get_nid());
@@ -307,9 +312,9 @@ void Inou_cfg::cfg_2_lgraph(char** memblock, LGraph* g){
 }
 
 
-std::vector<std::string> Inou_cfg::split(const std::string& str){
-	typedef std::string::const_iterator iter;
-	std::vector<std::string> ret;
+std::vector<string> Inou_cfg::split(const string& str){
+	typedef string::const_iterator iter;
+	std::vector<string> ret;
 
 	iter i = str.begin();
 	while(i != str.end()){
@@ -319,14 +324,14 @@ std::vector<std::string> Inou_cfg::split(const std::string& str){
 
 		//copy the characters in [i,j)
 		if (i != str.end())
-			ret.push_back(std::string(i,j));
+			ret.push_back(string(i,j));
 
 		i = j;
 	}
 	return ret;
 }
 
-void Inou_cfg::lgraph_2_cfg(const LGraph* g, const std::string& filename ) {
+void Inou_cfg::lgraph_2_cfg(const LGraph* g, const string& filename ) {
   int line_cnt = 0;
   for (auto &idx : g->fast()) {
     if (g->get_node_wirename(idx) != nullptr) {
@@ -345,7 +350,7 @@ void Inou_cfg::generate(std::vector<const LGraph *> out) {
   }
   else {
     for (const auto &g : out) {
-      std::string file = g->get_name() + "_" + opack.cfg_output;
+      string file = g->get_name() + "_" + opack.cfg_output;
       lgraph_2_cfg(g, file);
     }
   }
@@ -359,3 +364,10 @@ void Inou_cfg::generate(std::vector<const LGraph *> out) {
 //str4num_2 = (*(words.begin()+1)).substr(1);//get substring s[1:end]
 //int num2 = std::stoi(str4num_2);
 //fmt::print("num2 number is {}\n", num2);
+
+//for(std::vector<string>::size_type i = 0; i != words.size(); i++){
+//  if(i == words.size()-1)
+//    dfg_data = dfg_data + words[i];//no final space stored
+//  else
+//    dfg_data = dfg_data + words[i] + " ";
+//}
