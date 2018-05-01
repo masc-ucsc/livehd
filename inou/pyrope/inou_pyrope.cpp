@@ -171,10 +171,10 @@ bool Inou_pyrope::to_mux(Out_string &w, const LGraph *g, Index_ID idx) const {
 
   // WARNING: input edges dst_pid can go anywhere, must search reverse edge to see input
   for(const auto &c:g->inp_edges(idx)) {
-    const auto &re = c.get_reverse_edge();
-    switch(re.get_inp_pin().get_pid()) {
-      case 1: t_idx = c.get_idx() ; break;
+    const auto &re = c.get_reverse_edge(); // FIXME: remove rever
+    switch(re.get_inp_pin().get_pid()) { // FIXME: Either c.get_inp_pid() or c.get_out_pid()??
       case 0: f_idx = c.get_idx() ; break;
+      case 1: t_idx = c.get_idx() ; break;
       case 2: c_idx = c.get_idx() ; break;
       default: assert(false);
     }
