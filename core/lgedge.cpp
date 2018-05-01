@@ -89,8 +89,6 @@ const Edge &Edge::get_reverse_for_deletion() const {
     do{
       const Edge *eit = ptr_inp->get_output_begin();
       while(eit != ptr_inp->get_output_end()) {
-        fmt::print("rtp2");
-        eit->dump();
 #ifdef DEBUG
         console->info("INP:get_reverse {} {} {} vs {} {} sedge:{}", ptr_idx, ptr_nid, inp_pid,
             eit->get_idx(), eit->get_inp_pid(), eit->is_snode());
@@ -347,7 +345,7 @@ void Node_Internal::del_output_int(const Edge &out_edge) {
   assert((Num_SEdges-out_pos)<=pos);
 
   int sz = 1;
-  if (out_edge.is_snode()) {
+  if (!out_edge.is_snode()) {
     sz = 3;
     assert(out_long>0);
     out_long--;
@@ -365,9 +363,6 @@ void Node_Internal::del_output_int(const Edge &out_edge) {
 }
 
 void Node_Internal::del(const Edge &edge) {
-  fmt::print("rtp: deleting edge {}:{} -> {}:{}\n",
-      edge.get_out_pin().get_nid(), edge.get_out_pin().get_pid(),
-      edge.get_inp_pin().get_nid(), edge.get_inp_pin().get_pid());
   if (edge.is_input())
     del_input(edge);
   else
@@ -438,9 +433,6 @@ void Node_Internal::assimilate_edges(Node_Internal &other) {
   int original_start_pos = other_pos;
 
   int self_pos = 0;
-
-  if(get_self_idx() == 2768 || other.get_self_idx() == 2768)
-    fmt::print("hello");
 
   Port_ID other_out_pid = other.get_out_pid();
 
