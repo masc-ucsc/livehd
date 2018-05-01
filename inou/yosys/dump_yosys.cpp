@@ -4,9 +4,9 @@
 #include "math.h"
 #include "lgedgeiter.hpp"
 
-RTLIL::Wire* Dump_yosys::get_wire(const Edge& inp_edge, bool can_fail = false) {
-  long idx = inp_edge.get_idx();
-  std::pair<Index_ID,Port_ID> nid_pid = std::make_pair(inp_edge.get_idx(), inp_edge.get_out_pin().get_pid());
+RTLIL::Wire* Dump_yosys::get_wire(Index_ID idx, Port_ID pid, bool can_fail = false) {
+  //std::pair<Index_ID,Port_ID> nid_pid = std::make_pair(inp_edge.get_idx(), inp_edge.get_out_pin().get_pid());
+  std::pair<Index_ID,Port_ID> nid_pid = std::make_pair(idx, pid);
   if(input_map.find(idx) != input_map.end()) {
     return input_map[idx];
 
@@ -287,7 +287,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
         }
 
 
-        RTLIL::SigSpec rhs = RTLIL::SigSpec(get_wire(c));
+        RTLIL::SigSpec rhs = RTLIL::SigSpec(get_wire(c.get_idx(), c.get_out_pin().get_pid()));
         module->connect(lhs, rhs);
       }
       continue;
@@ -317,10 +317,10 @@ void Dump_yosys::to_yosys(const LGraph *g) {
           size = (c.get_bits() > size)? c.get_bits() : size;
 
           switch(c.get_inp_pin().get_pid()) {
-            case 0: add_signed.push_back(get_wire(c));   break;
-            case 1: add_unsigned.push_back(get_wire(c)); break;
-            case 2: sub_signed.push_back(get_wire(c));   break;
-            case 3: sub_unsigned.push_back(get_wire(c)); break;
+            case 0: add_signed.push_back(get_wire(c.get_idx(), c.get_out_pin().get_pid()));   break;
+            case 1: add_unsigned.push_back(get_wire(c.get_idx(), c.get_out_pin().get_pid())); break;
+            case 2: sub_signed.push_back(get_wire(c.get_idx(), c.get_out_pin().get_pid()));   break;
+            case 3: sub_unsigned.push_back(get_wire(c.get_idx(), c.get_out_pin().get_pid())); break;
           }
         }
 
@@ -421,8 +421,8 @@ void Dump_yosys::to_yosys(const LGraph *g) {
           size = (c.get_bits() > size)? c.get_bits() : size;
 
           switch(c.get_inp_pin().get_pid()) {
-            case 0: m_signed.push_back(get_wire(c));   break;
-            case 1: m_unsigned.push_back(get_wire(c)); break;
+            case 0: m_signed.push_back(get_wire(c.get_idx(), c.get_out_pin().get_pid()));   break;
+            case 1: m_unsigned.push_back(get_wire(c.get_idx(), c.get_out_pin().get_pid())); break;
           }
         }
 
@@ -469,7 +469,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
 
         for(const auto &c:g->inp_edges(idx)) {
           n_inps++;
-          RTLIL::Wire* inWire = get_wire(c);
+          RTLIL::Wire* inWire = get_wire(c.get_idx(), c.get_out_pin().get_pid());
           module->addNot(next_id(), inWire, cell_output_map[std::make_pair(idx,0)]);
         }
         //if the assertion fails, check what does a not with multiple inputs mean
@@ -483,7 +483,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
         uint32_t width = 0;
         bool has_inputs = false;
         for(const auto &c:g->inp_edges(idx)) {
-          RTLIL::Wire* join = get_wire(c);
+          RTLIL::Wire* join = get_wire(c.get_idx(), c.get_out_pin().get_pid());
           joined_wires[c.get_inp_pin().get_pid()] = RTLIL::SigChunk(join);
           width += join->width;
           has_inputs = true;
@@ -505,7 +505,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
         for(const auto &c:g->inp_edges(idx)) {
           switch(c.get_inp_pin().get_pid()) {
             case 0:
-              picked_wire = get_wire(c);
+              picked_wire = get_wire(c.get_idx(), c.get_out_pin().get_pid());
               break;
             case 1:
               if(g->node_type_get(c.get_idx()).op != U32Const_Op)
@@ -532,7 +532,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
         std::vector<RTLIL::Wire*> and_inps;
         uint32_t width = 0;
         for(const auto &c:g->inp_edges(idx)) {
-          RTLIL::Wire * current = get_wire(c);
+          RTLIL::Wire * current = get_wire(c.get_idx(), c.get_out_pin().get_pid());
           and_inps.push_back(current);
           width = (width < current->width) ? current->width : width;
         }
@@ -551,7 +551,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
         log("adding Or_Op\n");
         std::vector<RTLIL::Wire*> or_inps;
         for(const auto &c:g->inp_edges(idx)) {
-          or_inps.push_back(get_wire(c));
+          or_inps.push_back(get_wire(c.get_idx(), c.get_out_pin().get_pid()));
         }
 
         if(or_inps.size() == 1) {
@@ -567,7 +567,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
         log("adding xOr_Op\n");
         std::vector<RTLIL::Wire*> xor_inps;
         for(const auto &c:g->inp_edges(idx)) {
-          xor_inps.push_back(get_wire(c));
+          xor_inps.push_back(get_wire(c.get_idx(), c.get_out_pin().get_pid()));
         }
 
         if(xor_inps.size() == 1) {
@@ -591,19 +591,19 @@ void Dump_yosys::to_yosys(const LGraph *g) {
         for(const auto &c:g->inp_edges(idx)) {
           switch(c.get_inp_pin().get_pid()) {
             case 0:
-              clkWire = get_wire(c);
+              clkWire = get_wire(c.get_idx(), c.get_out_pin().get_pid());
               break;
             case 1:
-              dWire = get_wire(c);
+              dWire = get_wire(c.get_idx(), c.get_out_pin().get_pid());
               break;
             case 2:
-              enWire = get_wire(c);
+              enWire = get_wire(c.get_idx(), c.get_out_pin().get_pid());
               break;
             case 3:
-              rstWire = get_wire(c);
+              rstWire = get_wire(c.get_idx(), c.get_out_pin().get_pid());
               break;
             case 4:
-              rstVal = get_wire(c);
+              rstVal = get_wire(c.get_idx(), c.get_out_pin().get_pid());
               break;
             default:
               log("[WARNING] DumpYosys: unrecognized wire connection pid=%d\n",c.get_out_pin().get_pid());
@@ -646,24 +646,24 @@ void Dump_yosys::to_yosys(const LGraph *g) {
             case 0:
               if(lhs != nullptr)
                 log_error("Internal error: found two connections to GT pid.\n");
-              lhs = get_wire(c);
+              lhs = get_wire(c.get_idx(), c.get_out_pin().get_pid());
               sign = true;
               break;
             case 1:
               if(lhs != nullptr)
                 log_error("Internal error: found two connections to GT pid.\n");
-              lhs = get_wire(c);
+              lhs = get_wire(c.get_idx(), c.get_out_pin().get_pid());
               break;
             case 2:
               if(rhs != nullptr)
                 log_error("Internal error: found two connections to GT pid.\n");
-              rhs = get_wire(c);
+              rhs = get_wire(c.get_idx(), c.get_out_pin().get_pid());
               sign = true;
               break;
             case 3:
               if(rhs != nullptr)
                 log_error("Internal error: found two connections to GT pid.\n");
-              rhs = get_wire(c);
+              rhs = get_wire(c.get_idx(), c.get_out_pin().get_pid());
               break;
           }
         }
@@ -701,7 +701,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
             case 0:
               if(shifted_wire != nullptr)
                 log_error("Internal Error: multiple wires assigned to same shift\n");
-              shifted_wire = get_wire(c);
+              shifted_wire = get_wire(c.get_idx(), c.get_out_pin().get_pid());
               break;
             case 1:
               if(shift_amount.size() != 0)
@@ -709,7 +709,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
               if(g->node_type_get(c.get_idx()).op == U32Const_Op)
                 shift_amount = RTLIL::Const(g->node_value_get(c.get_idx()));
               else
-                shift_amount = get_wire(c);
+                shift_amount = get_wire(c.get_idx(), c.get_out_pin().get_pid());
               break;
           }
         }
@@ -735,7 +735,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
             case 0:
               if(shifted_wire != nullptr)
                 log_error("Internal Error: multiple wires assigned to same shift\n");
-              shifted_wire = get_wire(c);
+              shifted_wire = get_wire(c.get_idx(), c.get_out_pin().get_pid());
               break;
             case 1:
               if(shift_amount.size() != 0)
@@ -743,7 +743,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
               if(g->node_type_get(c.get_idx()).op == U32Const_Op)
                 shift_amount = RTLIL::Const(g->node_value_get(c.get_idx()));
               else
-                shift_amount = get_wire(c);
+                shift_amount = get_wire(c.get_idx(), c.get_out_pin().get_pid());
               break;
             case 2:
               if(g->node_type_get(c.get_idx()).op != U32Const_Op)
@@ -775,8 +775,8 @@ void Dump_yosys::to_yosys(const LGraph *g) {
           size = (c.get_bits() > size)? c.get_bits() : size;
 
           switch(c.get_inp_pin().get_pid()) {
-            case 0: e_signed.push_back(get_wire(c));   break;
-            case 1: e_unsigned.push_back(get_wire(c)); break;
+            case 0: e_signed.push_back(get_wire(c.get_idx(), c.get_out_pin().get_pid()));   break;
+            case 1: e_unsigned.push_back(get_wire(c.get_idx(), c.get_out_pin().get_pid())); break;
           }
         }
 
@@ -827,17 +827,17 @@ void Dump_yosys::to_yosys(const LGraph *g) {
             case 0:
               if(aport != nullptr)
                 log_error("Internal Error: multiple wires assigned to same mux port\n");
-              aport = get_wire(c);
+              aport = get_wire(c.get_idx(), c.get_out_pin().get_pid());
               break;
             case 1:
               if(bport != nullptr)
                 log_error("Internal Error: multiple wires assigned to same mux port\n");
-              bport = get_wire(c);
+              bport = get_wire(c.get_idx(), c.get_out_pin().get_pid());
               break;
             case 2:
               if(sel != nullptr)
                 log_error("Internal Error: multiple wires assigned to same mux port\n");
-              sel = get_wire(c);
+              sel = get_wire(c.get_idx(), c.get_out_pin().get_pid());
               break;
           }
         }
@@ -872,7 +872,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
           if(input_pin == LGRAPH_MEMOP_CLK) {
             if(clk != nullptr)
               log_error("Internal Error: multiple wires assigned to same mem port\n");
-            clk = get_wire(c);
+            clk = get_wire(c.get_idx(), c.get_out_pin().get_pid());
             assert(clk);
           } else if(input_pin == LGRAPH_MEMOP_SIZE) {
             if(g->node_type_get(c.get_idx()).op != U32Const_Op)
@@ -899,18 +899,18 @@ void Dump_yosys::to_yosys(const LGraph *g) {
               log_error("Internal Error: Mem RD_CLK polarity is not a constant.\n");
             posedge = (g->node_value_get(c.get_idx()) == 0) ? RTLIL::State::S1 : RTLIL::State::S0;
           } else if(LGRAPH_MEMOP_ISWRADDR(input_pin)) {
-            wr_addr.append(RTLIL::SigSpec(get_wire(c)));
+            wr_addr.append(RTLIL::SigSpec(get_wire(c.get_idx(), c.get_out_pin().get_pid())));
           } else if(LGRAPH_MEMOP_ISWRDATA(input_pin)) {
-            wr_data.append(RTLIL::SigSpec(get_wire(c)));
+            wr_data.append(RTLIL::SigSpec(get_wire(c.get_idx(), c.get_out_pin().get_pid())));
           } else if(LGRAPH_MEMOP_ISWREN(input_pin)) {
             // we assume one write per port, yosys has one per bit
-            RTLIL::Wire* en = get_wire(c);
+            RTLIL::Wire* en = get_wire(c.get_idx(), c.get_out_pin().get_pid());
             assert(en->width == 1);
             wr_en.append(RTLIL::SigSpec(RTLIL::SigBit(en), g->get_bits(idx)));
           } else if(LGRAPH_MEMOP_ISRDADDR(input_pin)) {
-            rd_addr.append(RTLIL::SigSpec(get_wire(c)));
+            rd_addr.append(RTLIL::SigSpec(get_wire(c.get_idx(), c.get_out_pin().get_pid())));
           } else if(LGRAPH_MEMOP_ISRDEN(input_pin)) {
-            rd_en.append(RTLIL::SigSpec(get_wire(c)));
+            rd_en.append(RTLIL::SigSpec(get_wire(c.get_idx(), c.get_out_pin().get_pid())));
           } else {
             log_error("Unrecognized input pid %hu\n", input_pin);
             assert(false);
@@ -972,12 +972,12 @@ void Dump_yosys::to_yosys(const LGraph *g) {
         RTLIL::Cell* new_cell = module->addCell(instance_name, "\\" + subgraph->get_name().substr(7));
         for(const auto &c:g->inp_edges(idx)) {
           std::string port = subgraph->get_graph_input_name_from_pid(c.get_inp_pin().get_pid());
-          RTLIL::Wire* input = get_wire(c);
+          RTLIL::Wire* input = get_wire(c.get_idx(), c.get_out_pin().get_pid());
           new_cell->setPort(("\\" + port).c_str(), input);
         }
         for(const auto &c:g->out_edges(idx)) {
           std::string port = subgraph->get_graph_output_name_from_pid(c.get_out_pin().get_pid());
-          RTLIL::Wire* output = get_wire(c.get_reverse_edge());
+          RTLIL::Wire* output = get_wire(c.get_out_pin().get_nid(), c.get_out_pin().get_pid());
           new_cell->setPort(("\\" + port).c_str(), output);
         }
         break;
@@ -1005,7 +1005,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
           else
             log_error("I could not find a port associated with inp pin %hu\n",c.get_inp_pin().get_pid());
 
-          RTLIL::Wire* input = get_wire(c);
+          RTLIL::Wire* input = get_wire(c.get_idx(), c.get_out_pin().get_pid());
           new_cell->setPort(("\\" + port).c_str(), input);
 
         }
@@ -1015,7 +1015,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
             port = tcell->get_output_name(c.get_out_pin().get_pid());
           else
             log_error("I could not find a port associated with out pin %hu\n",c.get_out_pin().get_pid());
-          RTLIL::Wire* output = get_wire(c.get_reverse_edge());
+          RTLIL::Wire* output = get_wire(c.get_out_pin().get_nid(), c.get_out_pin().get_pid());
           assert(output);
           new_cell->setPort(("\\" + port).c_str(), output);
         }
@@ -1084,7 +1084,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
                 } else if(g->node_type_get(c.get_idx()).op == StrConst_Op) {
                   cell->setPort("\\" + current_name, RTLIL::Const(g->node_const_value_get(c.get_idx())));
                 } else {
-                  cell->setPort("\\" + current_name, get_wire(c));
+                  cell->setPort("\\" + current_name, get_wire(c.get_idx(), c.get_out_pin().get_pid()));
                 }
               }
 #ifdef DEBUG

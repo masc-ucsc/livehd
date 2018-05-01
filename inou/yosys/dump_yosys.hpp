@@ -13,7 +13,7 @@ USING_YOSYS_NAMESPACE
 class Dump_yosys : public Inou_trivial {
   private:
     RTLIL::Design* design;
-    RTLIL::Wire * get_wire(const Edge& conn, bool can_fail);
+    RTLIL::Wire * get_wire(Index_ID idx, Port_ID pid, bool can_fail);
 
     void to_yosys(const LGraph* g);
 
