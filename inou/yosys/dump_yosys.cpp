@@ -89,6 +89,8 @@ void Dump_yosys::to_yosys(const LGraph *g) {
 
   // first create all the output wires
   for(auto idx:g->fast()) {
+    if(idx == 12)
+      fmt::print("foo\n");
     assert(g->is_root(idx));
     log("creating wire for node: %ld, width %d, type %s\n", idx, g->get_bits(idx), g->node_type_get(idx).get_name().c_str());
 
