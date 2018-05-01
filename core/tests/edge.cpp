@@ -2,6 +2,22 @@
 #include "lgraph.hpp"
 #include "lgedgeiter.hpp"
 
+bool test0() {
+  LGraph* g = new LGraph("lgdb","test0", true);
+
+  Index_ID idx1 = g->create_node().get_nid();
+  g->create_node().get_nid();
+
+  g->get_idx_from_pid(idx1, 20);
+
+  for(auto & out : g->out_edges(idx1)) {
+    assert(false);
+    (void) out; //just to silence the warning
+  }
+
+  return true;
+}
+
 bool test1() {
   LGraph* g = new LGraph("lgdb","test", true);
 
@@ -18,9 +34,6 @@ bool test1() {
     assert(out.get_inp_pin().get_pid() == 25);
     assert(out.get_out_pin().get_pid() == 20);
 
-    //assert(out.get_inp_pid() == 25);
-    //assert(out.get_out_pid() == 20);
-
     assert(out.get_out_pin().is_input() == false);
     assert(out.get_inp_pin().is_input() == true);
   }
@@ -33,9 +46,6 @@ bool test1() {
     assert(inp.get_inp_pin().get_pid() == 25);
     assert(inp.get_out_pin().get_pid() == 20);
 
-    //assert(inp.get_inp_pid() == 25);
-    //assert(inp.get_out_pid() == 20);
-
     assert(inp.get_out_pin().is_input() == false);
     assert(inp.get_inp_pin().is_input() == true);
   }
@@ -43,6 +53,60 @@ bool test1() {
   return true;
 }
 
+bool test20() {
+  LGraph* g = new LGraph("lgdb","test20", true);
+
+  Index_ID idx1 = g->create_node().get_nid();
+  Index_ID idx2 = g->create_node().get_nid();
+
+  g->add_edge(Node_Pin(idx1, 0, false),
+              Node_Pin(idx2, 0, true));
+
+
+  for(auto & inp : g->inp_edges(idx2)) {
+    g->del_edge(inp);
+  }
+
+  for(auto& inp : g->inp_edges(idx2)) {
+    assert(false);
+    (void) inp; //just to silence the warning
+  }
+
+  for(auto& out : g->out_edges(idx1)) {
+    assert(false);
+    (void) out; //just to silence the warning
+  }
+
+  return true;
+}
+
+bool test21() {
+
+  LGraph* g = new LGraph("lgdb","test21", true);
+
+  Index_ID idx1 = g->create_node().get_nid();
+  Index_ID idx2 = g->create_node().get_nid();
+
+  g->add_edge(Node_Pin(idx1, 0, false),
+              Node_Pin(idx2, 0, true));
+
+
+  for(auto & out : g->out_edges(idx1)) {
+    g->del_edge(out);
+  }
+
+  for(auto& inp : g->inp_edges(idx2)) {
+    assert(false);
+    (void) inp; //just to silence the warning
+  }
+
+  for(auto& out : g->out_edges(idx1)) {
+    assert(false);
+    (void) out; //just to silence the warning
+  }
+
+  return true;
+}
 
 bool test2() {
 
@@ -55,7 +119,6 @@ bool test2() {
               Node_Pin(idx2, 25, true));
 
 
-
   for(auto & inp : g->inp_edges(idx2)) {
     g->del_edge(inp);
   }
@@ -65,8 +128,42 @@ bool test2() {
     (void) inp; //just to silence the warning
   }
 
+  for(auto& out : g->out_edges(idx1)) {
+    assert(false);
+    (void) out; //just to silence the warning
+  }
+
   return true;
 }
+
+bool test22() {
+
+  LGraph* g = new LGraph("lgdb","test22", true);
+
+  Index_ID idx1 = g->create_node().get_nid();
+  Index_ID idx2 = g->create_node().get_nid();
+
+  g->add_edge(Node_Pin(idx1, 20, false),
+              Node_Pin(idx2, 25, true));
+
+
+  for(auto & out : g->out_edges(idx1)) {
+    g->del_edge(out);
+  }
+
+  for(auto& inp : g->inp_edges(idx2)) {
+    assert(false);
+    (void) inp; //just to silence the warning
+  }
+
+  for(auto& out : g->out_edges(idx1)) {
+    assert(false);
+    (void) out; //just to silence the warning
+  }
+
+  return true;
+}
+
 
 bool test3() {
 
@@ -78,8 +175,6 @@ bool test3() {
   g->add_edge(Node_Pin(idx1, 20, false),
               Node_Pin(idx2, 25, true));
 
-
-
   for(auto & inp : g->inp_edges(idx2)) {
     g->del_edge(inp);
   }
@@ -87,6 +182,11 @@ bool test3() {
   for(auto& inp : g->inp_edges(idx2)) {
     assert(false);
     (void) inp; //just to silence the warning
+  }
+
+  for(auto& out : g->out_edges(idx1)) {
+    assert(false);
+    (void) out; //just to silence the warning
   }
 
   g->del_node(idx2);
@@ -108,8 +208,6 @@ bool test4() {
   g->add_edge(Node_Pin(idx1, 20, false),
               Node_Pin(idx2, 25, true));
 
-  Index_ID idx_child = g->get_idx_from_pid(idx2, 25);
-
   g->del_node(idx2);
 
   for(auto nid : g->fast()) {
@@ -120,8 +218,12 @@ bool test4() {
 }
 
 int main() {
+  test0();
   test1();
+  test20();
+  test21();
   test2();
+  test22();
   test3();
   test4();
 
