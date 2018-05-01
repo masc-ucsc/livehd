@@ -171,8 +171,8 @@ bool Inou_pyrope::to_mux(Out_string &w, const LGraph *g, Index_ID idx) const {
 
   // WARNING: input edges dst_pid can go anywhere, must search reverse edge to see input
   for(const auto &c:g->inp_edges(idx)) {
-    const auto &re = c.get_reverse_edge(); // FIXME: remove rever
-    switch(re.get_inp_pin().get_pid()) { // FIXME: Either c.get_inp_pid() or c.get_out_pid()??
+    //const auto &re = c.get_reverse_edge(); // FIXME: remove rever
+    switch(c.get_inp_pin().get_pid()) { // FIXME: Either c.get_inp_pid() or c.get_out_pid()??
       case 0: f_idx = c.get_idx() ; break;
       case 1: t_idx = c.get_idx() ; break;
       case 2: c_idx = c.get_idx() ; break;
@@ -300,8 +300,8 @@ bool Inou_pyrope::to_flop(Out_string &w, const LGraph *g, Index_ID idx) const {
       << " =";
   }
   for(const auto &c:g->inp_edges(idx)) {
-    const auto &re = c.get_reverse_edge();
-    if (re.get_inp_pin().get_pid()!=0)
+    //const auto &re = c.get_reverse_edge();
+    if (c.get_inp_pin().get_pid()!=0)
       to_src_var(w,g,c.get_idx());
   }
 
@@ -360,12 +360,12 @@ bool Inou_pyrope::to_shift(Out_string &w, const LGraph *g, Index_ID idx, const c
 
   bool first = true, done = false;
   for(const auto &c:g->inp_edges(idx)) {
-    const auto &re = c.get_reverse_edge();
+    //const auto &re = c.get_reverse_edge();
     if (first) {
       first = false;
     }else if (!done) {
       w << " " << c_op;
-      if (re.get_inp_pin().get_pid() > 1) {
+      if (c.get_inp_pin().get_pid() > 1) {
         done = true;
         continue;
       }
@@ -380,8 +380,8 @@ bool Inou_pyrope::to_sum(Out_string &w, const LGraph *g, Index_ID idx) const {
 
   bool first = true;
   for(const auto &c:g->inp_edges(idx)) {
-    const auto &re = c.get_reverse_edge();
-    if(re.get_inp_pin().get_pid() == 0 || re.get_inp_pin().get_pid() == 1) {
+    //const auto &re = c.get_reverse_edge();
+    if(c.get_inp_pin().get_pid() == 0 || c.get_inp_pin().get_pid() == 1) {
       if (first) {
         first = false;
       }else{
@@ -392,8 +392,8 @@ bool Inou_pyrope::to_sum(Out_string &w, const LGraph *g, Index_ID idx) const {
   }
 
   for(const auto &c:g->inp_edges(idx)) {
-    const auto &re = c.get_reverse_edge();
-    if(re.get_inp_pin().get_pid() != 0 && re.get_inp_pin().get_pid() != 1) {
+    //const auto &re = c.get_reverse_edge();
+    if(c.get_inp_pin().get_pid() != 0 && c.get_inp_pin().get_pid() != 1) {
       if (first) {
         first = false;
       }else{

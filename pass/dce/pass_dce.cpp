@@ -21,11 +21,13 @@ void Pass_dce::transform(LGraph *g) {
     for(const auto &c:g->inp_edges(idx)) {
       output_used.set_bit(c.get_idx());
     }
+    fmt::print("dce using {}\n",idx);
   }
 
   for(auto idx:g->fast()) {
     if (output_used.get_bit(idx))
       continue;
+    fmt::print("dce removing {}\n",idx);
 
     g->del_node(idx);
   }
