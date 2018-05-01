@@ -50,12 +50,12 @@ void Pass_vectorize::collapse_reset(LGraph *g) {
 
     bool reset_set = false;
     for(const auto &c:g->inp_edges(flop_idx)) {
-      const auto &re = c.get_reverse_edge();
-      if (re.get_inp_pin().get_pid() == Node_Type::get(Flop_Op).get_input_match("R")) {
+      //const auto &re = c.get_reverse_edge();
+      if (c.get_inp_pin().get_pid() == Node_Type::get(Flop_Op).get_input_match("R")) {
         reset_set = true;
         break; // Can not handle 2 resets
       }
-      if (re.get_inp_pin().get_pid() == Node_Type::get(Flop_Op).get_input_match("Rval")) {
+      if (c.get_inp_pin().get_pid() == Node_Type::get(Flop_Op).get_input_match("Rval")) {
         reset_set = true;
         break; // Can not handle 2 resets
       }
@@ -68,13 +68,13 @@ void Pass_vectorize::collapse_reset(LGraph *g) {
     Index_ID mux_b_idx=0;
     Index_ID mux_b_pid=0;
     for(const auto &c:g->inp_edges(mux_idx)) {
-      const auto &re = c.get_reverse_edge();
-      if (re.get_inp_pin().get_pid() == Node_Type::get(Mux_Op).get_input_match("A")) {
+      //const auto &re = c.get_reverse_edge();
+      if (c.get_inp_pin().get_pid() == Node_Type::get(Mux_Op).get_input_match("A")) {
         mux_a_idx = c.get_idx();
-        mux_a_pid = re.get_out_pin().get_pid();
-      }else if (re.get_inp_pin().get_pid() == Node_Type::get(Mux_Op).get_input_match("B")) {
+        mux_a_pid = c.get_out_pin().get_pid();
+      }else if (c.get_inp_pin().get_pid() == Node_Type::get(Mux_Op).get_input_match("B")) {
         mux_b_idx = c.get_idx();
-        mux_b_pid = re.get_out_pin().get_pid();
+        mux_b_pid = c.get_out_pin().get_pid();
       }
     }
 
@@ -110,9 +110,9 @@ void Pass_vectorize::collapse_join(LGraph *g) {
     Index_ID src_idx=0;
     Port_ID  src_pid=0;
     for(const auto &c:g->inp_edges(idx)) {
-      const auto &re = c.get_reverse_edge();
+      //const auto &re = c.get_reverse_edge();
       src_idx = c.get_idx();
-      src_pid = re.get_out_pin().get_pid();
+      src_pid = c.get_out_pin().get_pid();
     }
 
     Node_Pin src(src_idx,src_pid,false);

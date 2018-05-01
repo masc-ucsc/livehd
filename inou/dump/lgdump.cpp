@@ -54,10 +54,9 @@ void lgdump_digraph(const LGraph *g) {
       fprintf(stderr,"node%d:%d -> node%d:%d TSTbck\n"
           , (int)c.get_idx(), (int)c.get_inp_pin().get_pid()
           , (int)idx, (int)c.get_out_pin().get_pid());
-      const auto &re = c.get_reverse_edge();
       fprintf(stderr,"node%d:%d -> node%d:%d TSTrbck\n"
-          , (int)re.get_self_nid(), (int)re.get_inp_pin().get_pid()
-          , (int)re.get_idx()     , (int)re.get_out_pin().get_pid());
+          , (int)c.get_self_nid(), (int)c.get_inp_pin().get_pid()
+          , (int)c.get_idx()     , (int)c.get_out_pin().get_pid());
     }
   }
 
