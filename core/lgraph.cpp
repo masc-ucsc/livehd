@@ -13,7 +13,7 @@
 std::map<std::string, std::map<std::string,LGraph *>>  LGraph::name2graph;
 uint32_t LGraph::lgraph_counter = 0;
 
-LGraph::LGraph(std::string path)
+LGraph::LGraph(const std::string& path)
    :LGraph_Base          (path, "lgraph_" + std::to_string(lgraph_counter))
    ,LGraph_Node_Type     (path, "lgraph_" + std::to_string(lgraph_counter))
    ,LGraph_Node_Delay    (path, "lgraph_" + std::to_string(lgraph_counter))
@@ -32,7 +32,7 @@ LGraph::LGraph(std::string path)
   clear();
 }
 
-LGraph::LGraph(std::string path, std::string _name, bool _clear)
+LGraph::LGraph(const std::string& path, const std::string& _name, bool _clear)
    :LGraph_Base          (path, "lgraph_" + _name)
    ,LGraph_Node_Type     (path, "lgraph_" + _name)
    ,LGraph_Node_Delay    (path, "lgraph_" + _name)
@@ -128,7 +128,7 @@ Index_ID LGraph::add_graph_output(const char *str, Index_ID nid, uint16_t bits, 
   return idx;
 }
 
-LGraph *LGraph::find_graph(std::string gname, std::string path) {
+LGraph *LGraph::find_graph(const std::string& gname, const std::string& path) {
 
   if (name2graph.find(path) == name2graph.end() ||
       name2graph[path].find("lgraph_" + gname) == name2graph[path].end()) {
