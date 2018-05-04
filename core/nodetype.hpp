@@ -19,6 +19,8 @@ enum Node_Type_Op:uint64_t {
   Invalid_Op,
   Sum_Op,
   Mult_Op,
+  Div_Op,
+  Mod_Op,
   Not_Op,
   Join_Op,
   Pick_Op,
@@ -141,6 +143,32 @@ public:
     outputs.push_back("Y");
   };
 };
+
+// Y = (As|Au)/(Bs/Bu)
+class Node_Type_Div : public Node_Type {
+public:
+  Node_Type_Div() : Node_Type("div",Div_Op,false) {
+    inputs.push_back("As");
+    inputs.push_back("Au");
+    inputs.push_back("Bs");
+    inputs.push_back("Bu");
+    outputs.push_back("Y");
+  };
+};
+
+// Y = (As|Au)%(Bs/Bu)
+class Node_Type_Mod : public Node_Type {
+public:
+  Node_Type_Mod() : Node_Type("mod",Mod_Op,false) {
+    inputs.push_back("As");
+    inputs.push_back("Au");
+    inputs.push_back("Bs");
+    inputs.push_back("Bu");
+    outputs.push_back("Y");
+  };
+};
+
+
 
 class Node_Type_Not : public Node_Type {
 public:

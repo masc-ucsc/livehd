@@ -635,6 +635,8 @@ void Dump_yosys::to_yosys(const LGraph *g) {
         break;
 
       }
+      case Div_Op:
+      case Mod_Op:
       case LessThan_Op:
       case GreaterThan_Op:
       case LessEqualThan_Op:
@@ -685,6 +687,12 @@ void Dump_yosys::to_yosys(const LGraph *g) {
             break;
           case GreaterEqualThan_Op:
             module->addGe(next_id(), lhs, rhs, cell_output_map[std::make_pair(idx,0)], sign);
+            break;
+          case Div_Op:
+            module->addDiv(next_id(), lhs, rhs, cell_output_map[std::make_pair(idx,0)], sign);
+            break;
+          case Mod_Op:
+            module->addMod(next_id(), lhs, rhs, cell_output_map[std::make_pair(idx,0)], sign);
             break;
           default:
             console->error("Internal Error!");
