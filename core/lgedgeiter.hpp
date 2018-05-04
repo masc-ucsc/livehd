@@ -180,14 +180,9 @@ public:
 
       CForward_edge_iterator operator++() {
         assert(nid); // Do not call ++ after end
-
         CForward_edge_iterator i(nid, g, frontier, pending);
-
         add_node(nid);
-
-
         set_next_nid();
-
         return i;
       };
   };
@@ -291,13 +286,9 @@ public:
 
       CBackward_edge_iterator operator++() {
         assert(nid); // Do not call ++ after end
-
         CBackward_edge_iterator i(nid, g, frontier, pending);
-
         add_node(nid);
-
         set_next_nid();
-
         return i;
       };
   };

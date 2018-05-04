@@ -4,7 +4,8 @@ declare -a inputs=("trivial.v" "test.v"\
                    "simple_add.v"  \
                    "reduce.v" \
                    #"submodule.v" "multiport.v" "null_port.v" "trivial2.v" \
-                   "gcd.v" "gcd_small.v" "common_sub.v" "gcd_large.v" \
+                   "gcd.v" "common_sub.v" "gcd_small.v" \
+                   #"gcd_large.v" \
                    "gates.v" "operators.v" \
                    #"offset.v" "submodule_offset.v" "mem.v" "mem2.v" \
                    )

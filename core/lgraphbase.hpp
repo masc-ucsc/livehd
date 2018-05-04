@@ -81,7 +81,7 @@ protected:
   friend Backward_edge_iterator;
 
 public:
-  LGraph_Base(std::string path, std::string _name);
+  LGraph_Base(const std::string &path, const std::string &_name);
 
   void each_input(std::function<void(Index_ID)> f1) const;
   void each_output(std::function<void(Index_ID)> f1) const;
@@ -95,15 +95,15 @@ public:
 
   void dump() const;
 
-  const std::string get_name() const { return name; }
-  const std::string get_path() const { return path; }
+  const std::string &get_name() const { return name; }
+  const std::string &get_path() const { return path; }
 
   // Graph input/output functions
   bool is_graph_input(const char *str) const;
   bool is_graph_output(const char *str) const;
 
-  bool is_graph_input(const std::string str) const { return is_graph_input(str.c_str()); }
-  bool is_graph_output(const std::string str) const { return is_graph_output(str.c_str()); }
+  bool is_graph_input(const std::string &str) const { return is_graph_input(str.c_str()); }
+  bool is_graph_output(const std::string &str) const { return is_graph_output(str.c_str()); }
 
   bool is_graph_input(Index_ID idx) const;
   bool is_graph_output(Index_ID idx) const;
@@ -125,8 +125,8 @@ public:
   Node_Pin get_graph_input(const char *str)  const;
   Node_Pin get_graph_output(const char *str) const;
 
-  Node_Pin get_graph_input(const std::string str)  const { return get_graph_input(str.c_str()); }
-  Node_Pin get_graph_output(const std::string str) const { return get_graph_output(str.c_str()); }
+  Node_Pin get_graph_input(const std::string &str)  const { return get_graph_input(str.c_str()); }
+  Node_Pin get_graph_output(const std::string &str) const { return get_graph_output(str.c_str()); }
 
   // get extra (non-master root) node for port_id pid
   // will allocate space if none is available
