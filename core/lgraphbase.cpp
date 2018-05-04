@@ -8,7 +8,7 @@
 #include "lgraphbase.hpp"
 #include "lgedgeiter.hpp"
 
-LGraph_Base::LGraph_Base(std::string _path, std::string _name)
+LGraph_Base::LGraph_Base(const std::string& _path, const std::string& _name)
   : name(_name)
    ,path(_path)
    ,node_internal( _path + "/" + _name + "_nodes")

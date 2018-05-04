@@ -37,8 +37,8 @@ protected:
 
   Index_ID create_node_int() final;
 public:
-  LGraph(std::string path);
-  LGraph(std::string path,  std::string name, bool clear);
+  LGraph(const std::string& path);
+  LGraph(const std::string& path, const std::string& name, bool clear);
 
   ~LGraph() {
     fmt::print("lgraph destructor\n");
@@ -71,14 +71,9 @@ public:
   const Tech_library*  get_tlibrary() const { return tlibrary; }
   Tech_library* get_tech_library() {return tlibrary;}
 
-  std::string node_subgraph_name(Index_ID nid) const {
-    assert(node_type_get(nid).op == SubGraph_Op);
-    return get_library()->get_name(subgraph_id_get(nid));
-  }
+  static LGraph *find_graph(const std::string& gname, const std::string& path);
 
-  static LGraph *find_graph(std::string, std::string path);
-
-  static LGraph* open_lgraph(std::string path, std::string name) {
+  static LGraph* open_lgraph(const std::string& path, const std::string& name) {
     char cadena[4096];
     snprintf(cadena,4096,"%s/lgraph_%s_nodes",path.c_str(),name.c_str());
     if(access(cadena, R_OK|W_OK) == -1) {

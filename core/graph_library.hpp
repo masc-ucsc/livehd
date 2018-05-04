@@ -26,7 +26,7 @@ class Graph_library {
     Graph_library() {
     }
 
-    Graph_library(std::string _path) {
+    Graph_library(std::string& _path) {
       path = _path;
       std::ifstream graph_list;
       graph_library_clean = true;
@@ -71,7 +71,7 @@ class Graph_library {
     static std::unordered_map<std::string,Graph_library*> instances;
 
   public:
-    int add_name(std::string name) {
+    int add_name(std::string& name) {
       assert(name2id.find(name) == name2id.end());
 
       int id = id2name.size();
