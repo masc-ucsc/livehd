@@ -4,12 +4,14 @@ SET(CMAKE_CXX_COMPILER "/usr/bin/clang++")
 
 cmake_minimum_required(VERSION 3.1)
 
-PROJECT(lgraph)
+project(lgraph)
 
 enable_testing()
 
 # C++1z is enough, but C++14 is supposed to be more standard/stable
 set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 IF(CMAKE_BUILD_TYPE_INITIALIZED_TO_DEFAULT)
   SET(CMAKE_BUILD_TYPE Release)
@@ -22,7 +24,7 @@ IF(CMAKE_BUILD_TYPE MATCHES "Debug")
 ELSE(CMAKE_BUILD_TYPE MATCHES "Release")
   MESSAGE("  -DCMAKE_BUILD_TYPE=Release    release compilation options (default)")
   SET(CMAKE_CXX_FLAGS       "-DLIN64 -fPIC -Ofast -mtune=native -DNDEBUG -D_YOSYS_")
-  SET(CMAKE_C_FLAGS         "-DLIN64 -fPIC -Ofast -mtune-native -DNDEBUG -D_YOSYS_")
+  SET(CMAKE_C_FLAGS         "-DLIN64 -fPIC -Ofast -mtune=native -DNDEBUG -D_YOSYS_")
 ENDIF(CMAKE_BUILD_TYPE MATCHES "Debug")
 
 #SET(CMAKE_CXX_FLAGS_RELEASE "-g -ftest-coverage -fprofile-arcs")
