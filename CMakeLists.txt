@@ -117,5 +117,5 @@ add_test(NAME extra_inou_ANUBIS-dlx    COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys
 add_test(NAME extra_inou_ANUBIS-fpu    COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=fp_lgdb --testdir=${PROJECT_SOURCE_DIR}/subs/anubis/fpu/rtl/)
 #add_test(NAME extra_inou_ANUBIS-mor1kx COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=mo_lgdb --testdir=${PROJECT_SOURCE_DIR}/subs/anubis/mor1kx/rtl/verilog)
 #add_test(NAME extra_inou_ANUBIS-or1200 COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=or_lgdb --testdir=${PROJECT_SOURCE_DIR}/subs/anubis/or1200)
-add_test(NAME extra_inou_BOOM          COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=bo_lgdb  ${PROJECT_SOURCE_DIR}/subs/anubis/boom/boombase.v ${PROJECT_SOURCE_DIR}/subs/anubis/boom/boom.fix.v --top=BoomCore)
+add_test(NAME extra_inou_BOOM          COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=bo_lgdb ${PROJECT_SOURCE_DIR}/test/benchmarks/boom/boombase.v ${PROJECT_SOURCE_DIR}/test/benchmarks/boom/boom.fix.v --top=BoomCore)
 
