@@ -13,12 +13,12 @@ do
     exit 1
   fi
 
-  ./inou/yaml/lgyaml --lgdb lgdb --graph_name fluid_example --yaml_output fluid_example.yaml
+  ./inou/json/lgjson --lgdb lgdb --graph_name fluid_example --json_output fluid_example.json
 
   if [ $? -eq 0 ]; then
-    echo "Successfully lgyaml file "$a
+    echo "Successfully lgjson file "$a
   else
-    echo "FAIL: lgyaml terminated with and error"
+    echo "FAIL: lgjson terminated with and error"
     exit 1
   fi
 
