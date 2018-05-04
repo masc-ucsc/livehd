@@ -44,6 +44,7 @@ enum Node_Type_Op:uint64_t {
   CfgFunctionCall_Op,
   CfgFor_Op,
   CfgWhile_Op,
+  CfgIfMerge_Op,
   // Add here, operators needed
   SubGraph_Op,
   BlackBox_Op,
@@ -572,6 +573,16 @@ public:
     outputs.push_back("Y");
   };
 };
+
+class Node_Type_CfgIfMerge : public Node_Type {
+public:
+  Node_Type_CfgIfMerge() : Node_Type("cfg_if_merge",CfgIfMerge_Op,false) {
+    inputs.push_back("A");
+    outputs.push_back("Y");
+  };
+};
+
+
 
 class LGraph_Node_Type : public LGraph_Consts,
                          virtual public LGraph_Base {
