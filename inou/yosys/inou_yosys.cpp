@@ -182,9 +182,6 @@ static void set_bits_wirename(LGraph* g, const Index_ID idx, const RTLIL::Wire* 
   if(!wire)
     return;
 
-  if(idx == 1825)
-    fmt::print("foo");
-
   if(!wire->port_input && !wire->port_output) {
 
 #ifdef DEBUG
@@ -404,8 +401,6 @@ static void look_for_cell_outputs(RTLIL::Module *module) {
     Index_ID nid = g->create_node().get_nid();
     //assert(cell2nid.find(cell) == cell2nid.end());
     cell2nid[cell] = nid;
-    if(nid == 62)
-      fmt::print("foo");
 
     LGraph* sub_graph = nullptr;
     const Tech_cell* tcell = nullptr;
@@ -633,8 +628,6 @@ static LGraph *process_module(RTLIL::Module *module) {
     Index_ID onid, inid;
     assert(cell2nid.find(cell) != cell2nid.end());
     onid = cell2nid[cell];
-    if(onid == 62)
-      fmt::print("foo");
     LGraph *sub_graph = 0;
     Node_Type_Op op;
 
@@ -735,6 +728,16 @@ static LGraph *process_module(RTLIL::Module *module) {
       output = &cell->getPort("\\Y");
     } else if (std::strncmp(cell->type.c_str(),"$mul",4) == 0) {
       op     = Mult_Op;
+      if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
+        size   = cell->parameters["\\Y_WIDTH"].as_int();
+      output = &cell->getPort("\\Y");
+    } else if (std::strncmp(cell->type.c_str(),"$div",4) == 0) {
+      op     = Div_Op;
+      if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
+        size   = cell->parameters["\\Y_WIDTH"].as_int();
+      output = &cell->getPort("\\Y");
+    } else if (std::strncmp(cell->type.c_str(),"$mod",4) == 0) {
+      op     = Mod_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size   = cell->parameters["\\Y_WIDTH"].as_int();
       output = &cell->getPort("\\Y");
@@ -1015,7 +1018,12 @@ static LGraph *process_module(RTLIL::Module *module) {
             dst_pid += 1;
           if (negonly || (subtraction && conn.first.c_str()[1] == 'B'))
             dst_pid += 2;
-        } else if (op == GreaterThan_Op || op == LessThan_Op || op == GreaterEqualThan_Op || op == LessEqualThan_Op) {
+        } else if(op == Mult_Op) {
+          dst_pid  = 0;
+          if(cell->parameters[conn.first.str() + "_SIGNED"].as_int() == 0)
+            dst_pid += 1;
+        } else if (op == GreaterThan_Op || op == LessThan_Op || op == GreaterEqualThan_Op || op == LessEqualThan_Op || op == Div_Op ||
+            op == Mod_Op) {
           dst_pid  = 0;
           if(cell->parameters[conn.first.str() + "_SIGNED"].as_int() == 0)
             dst_pid += 1;

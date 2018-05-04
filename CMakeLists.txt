@@ -4,12 +4,14 @@ SET(CMAKE_CXX_COMPILER "/usr/bin/clang++")
 
 cmake_minimum_required(VERSION 3.1)
 
-PROJECT(lgraph)
+project(lgraph)
 
 enable_testing()
 
 # C++1z is enough, but C++14 is supposed to be more standard/stable
 set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 IF(CMAKE_BUILD_TYPE_INITIALIZED_TO_DEFAULT)
   SET(CMAKE_BUILD_TYPE Release)
@@ -22,7 +24,7 @@ IF(CMAKE_BUILD_TYPE MATCHES "Debug")
 ELSE(CMAKE_BUILD_TYPE MATCHES "Release")
   MESSAGE("  -DCMAKE_BUILD_TYPE=Release    release compilation options (default)")
   SET(CMAKE_CXX_FLAGS       "-DLIN64 -fPIC -Ofast -mtune=native -DNDEBUG -D_YOSYS_")
-  SET(CMAKE_C_FLAGS         "-DLIN64 -fPIC -Ofast -mtune-native -DNDEBUG -D_YOSYS_")
+  SET(CMAKE_C_FLAGS         "-DLIN64 -fPIC -Ofast -mtune=native -DNDEBUG -D_YOSYS_")
 ENDIF(CMAKE_BUILD_TYPE MATCHES "Debug")
 
 #SET(CMAKE_CXX_FLAGS_RELEASE "-g -ftest-coverage -fprofile-arcs")
@@ -110,10 +112,10 @@ add_test(NAME basic_lgopt_dce          COMMAND  ${PROJECT_SOURCE_DIR}/test/lgopt
 add_test(NAME basic_lgopt_gvn_pre      COMMAND  ${PROJECT_SOURCE_DIR}/test/lgopt_gvn_pre.sh)
 add_test(NAME compl_tmap_verilog       COMMAND  ruby ${PROJECT_SOURCE_DIR}/inou/tech/verilog.rb ${PROJECT_SOURCE_DIR}//subs/yosys/techlibs/common/simcells.v > tech_library)
 add_test(NAME compl_lgopt_fluid        COMMAND  ${PROJECT_SOURCE_DIR}/test/lgopt_fluid.sh)
-add_test(NAME extra_inou_ANUBIS-alpha  COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=al_lgdb --testdir=${PROJECT_SOURCE_DIR}/subs/anubis/alpha)
-add_test(NAME extra_inou_ANUBIS-dlx    COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=dl_lgdb --testdir=${PROJECT_SOURCE_DIR}/subs/anubis/dlx)
-add_test(NAME extra_inou_ANUBIS-fpu    COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=fp_lgdb --testdir=${PROJECT_SOURCE_DIR}/subs/anubis/fpu)
-#add_test(NAME extra_inou_ANUBIS-mor1kx COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=mo_lgdb --testdir=${PROJECT_SOURCE_DIR}/subs/anubis/mor1kx)
-#add_test(NAME extra_inou_ANUBIS-or1200 COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=or_lgdb --testdir=${PROJECT_SOURCE_DIR}/subs/anubis/or1200)
-add_test(NAME extra_inou_BOOM          COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=bo_lgdb  ${PROJECT_SOURCE_DIR}/subs/anubis/boom/boombase.v ${PROJECT_SOURCE_DIR}/subs/anubis/boom/boom.fix.v --top=BoomCore)
+add_test(NAME extra_inou_ANUBIS-alpha  COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=al_lgdb --testdir=${PROJECT_SOURCE_DIR}/subs/anubis/alpha CONFIGURATIONS complete)
+add_test(NAME extra_inou_ANUBIS-dlx    COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=dl_lgdb --testdir=${PROJECT_SOURCE_DIR}/subs/anubis/dlx CONFIGURATIONS complete)
+add_test(NAME extra_inou_ANUBIS-fpu    COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=fp_lgdb --testdir=${PROJECT_SOURCE_DIR}/subs/anubis/fpu/rtl/ CONFIGURATIONS complete)
+add_test(NAME extra_inou_ANUBIS-mor1kx COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=mo_lgdb --testdir=${PROJECT_SOURCE_DIR}/subs/anubis/mor1kx/rtl/verilog CONFIGURATIONS complete)
+add_test(NAME extra_inou_ANUBIS-or1200 COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=or_lgdb --testdir=${PROJECT_SOURCE_DIR}/subs/anubis/or1200 CONFIGURATIONS complete)
+add_test(NAME extra_inou_BOOM          COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=bo_lgdb ${PROJECT_SOURCE_DIR}/test/benchmarks/boom/boombase.v ${PROJECT_SOURCE_DIR}/test/benchmarks/boom/boom.fix.v --top=BoomCore CONFIGURATIONS complete)
 

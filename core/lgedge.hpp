@@ -174,11 +174,6 @@ public:
     assert(snode == ((SEdge_Internal *)this)->is_snode());
   }
 
-  const Edge &get_reverse_edge() const {
-    console->error("Edge::get_reverse_edge() has been deprecated\n");
-    assert(false);
-  }
-
   // Output edge: inp (self_nid, out_pid) -> out (idx, inp_pid)
   // Input edge : inp (idx, out_pid)      -> out (self_nid, inp_pid)
   Node_Pin get_out_pin() const {
