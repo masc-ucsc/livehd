@@ -42,10 +42,6 @@ public:
     assert(node_internal[nid].get_nid() == nid);
     assert(std::string(name) != "");
 
-   fmt::print("RTPINST {}\n", name);
-   if(nid == 973842)
-     names.dump();
-
     Char_Array_ID cid = names.create_id(name, nid);
     set_node_instance(nid, cid);
     return cid;

@@ -14,6 +14,8 @@ Node_Type::_init::_init() {
   Node_Type::table[Invalid_Op]          = new Node_Type_Invalid();
   Node_Type::table[Sum_Op]              = new Node_Type_Sum();
   Node_Type::table[Mult_Op]             = new Node_Type_Mult();
+  Node_Type::table[Div_Op]              = new Node_Type_Div();
+  Node_Type::table[Mod_Op]              = new Node_Type_Mod();
   Node_Type::table[Not_Op]              = new Node_Type_Not();
   Node_Type::table[Join_Op]             = new Node_Type_Join();
   Node_Type::table[Pick_Op]             = new Node_Type_Pick();
