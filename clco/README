@@ -1,1 +1,35 @@
-Cloud Computing
+Amazon Cloud Computing
+Tanvir Heer
+----------------------------
+
+TODOs:
+  - Create AWS Lambda function using AWS CLI - [DONE]
+  - Create Google Cloud Computing.
+	- Figure out if C++ implemented using AWS.
+	- Fix lGraph error and read source code.
+
+----------------------------
+
+INFO:
+
+AWS CLI supports 3 different output forms:
+	-JSON (Using now).
+	-Text
+	-ASCII Table
+
+----------------------------
+Creating CLI FILE:
+
+1. Write code and Create it in file.Js file
+2. ZIP IT (zip -r file.zip /folder)
+3. Create-function.sh file that consists parameters.
+
+Run:
+sh lambda-create.sh
+
+output -> on AWS Cloud
+
+*note (Permissions/Role on AWS Cloud have to be set order to run)
+
+Output Usage:
+20MB used, 18.38 ms using CLI. (Memory size; 128 MB given).
