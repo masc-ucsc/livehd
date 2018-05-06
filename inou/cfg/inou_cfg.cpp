@@ -104,6 +104,7 @@ void Inou_cfg::cfg_2_lgraph(char** memblock, std::vector<LGraph*>& lgs){
 
 		string w1st = *(words.begin());
 		string w2nd = *(words.begin()+1);
+    string w3rd = *(words.begin()+2);
 		string w5th = *(words.begin()+4);
 		string w6th = *(words.begin()+5);
 		string w7th = *(words.begin()+6);
@@ -118,6 +119,18 @@ void Inou_cfg::cfg_2_lgraph(char** memblock, std::vector<LGraph*>& lgs){
 		string dfg_data = p;
 
 		fmt::print("dfg_data:{}\n", dfg_data);
+
+
+		//if(w3rd != "0" && std::stoi(w3rd)>= lgs.size()){//create sub graph if different scope id
+		//	lgs.push_back(new LGraph(opack.lgdb_path));
+
+		//}
+		//else if(w3rd != "0"){//construct sub-graph, i.e. function definition
+		//	g_construct(words, lgs[std::stoi(w3rd)]);
+		//}
+		//else{
+		//	g_construct(words, gtop);
+		//}
 
 		/*
       I.process 1st node
@@ -325,7 +338,6 @@ void Inou_cfg::cfg_2_lgraph(char** memblock, std::vector<LGraph*>& lgs){
 			}
 			else
 				vecs[target_vec_id].push_back(w2nd);
-
 		}
 
 
