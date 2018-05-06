@@ -21,21 +21,20 @@ public:
 
 class Inou_cfg : public Inou {
 private:
-  static bool space(char c)    {return  isspace(c);}
-  static bool not_space(char c){return !isspace(c);}
+  static bool              space(char c)    {return  isspace(c);}
+  static bool              not_space(char c){return !isspace(c);}
   std::vector<std::string> split(const std::string& str);
-
-  void cfg_2_lgraph_bk(char**, LGraph*);
- 	void cfg_2_lgraph(char**, std::vector<LGraph *>&);
+ 	void                     build_graph(std::vector<std::string>&, std::string&, LGraph*, std::map<std::string, Index_ID>&, std::map<std::string, std::vector<std::string>>&, int64_t &);
+ 	void                     cfg_2_lgraph(char**, std::vector<LGraph *>&);
 protected:
-	Inou_cfg_options_pack opack;
+	Inou_cfg_options_pack 	 opack;
 
 public:
 	Inou_cfg();
 
 	virtual ~Inou_cfg();
 
-	std::vector<LGraph *> generate() override final;
+	std::vector<LGraph *>    generate() override final;
 
   void lgraph_2_cfg(const LGraph* g, const std::string& filename);
 
