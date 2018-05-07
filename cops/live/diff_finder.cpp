@@ -165,7 +165,11 @@ bool Diff_finder::is_invariant(Graph_Node node) {
   } else {
     return false;
   }
-  std::string hierarchical_name = instance + net_name;
+  std::string hierarchical_name = "";
+  if(instance != "")
+    hierarchical_name = instance + hier_sep + net_name;
+  else
+    hierarchical_name = net_name;
 
   Index_ID    synth_idx;
   WireName_ID wire_id;
@@ -188,6 +192,7 @@ bool Diff_finder::compare_cone(Graph_Node start_boundary, Graph_Node original_bo
 
   std::string instance = start_boundary.instance;
 
+
   if(different.find(start_boundary) != different.end()) {
     assert(cones.find(start_boundary) != cones.end());
     assert(endpoints.find(start_boundary) != endpoints.end());
@@ -206,6 +211,12 @@ bool Diff_finder::compare_cone(Graph_Node start_boundary, Graph_Node original_bo
   Index_ID idx     = start_boundary.idx;
   LGraph*  current = start_boundary.module;
   Port_ID  pid     = start_boundary.pid;
+
+  if(current->get_wid(idx)) {
+    fmt::print("{} {} {} {} {} \n", start_boundary.module->get_name(), idx, pid, instance, current->get_node_wirename(idx));
+  } else {
+    fmt::print("{} {} {} {} nowirename \n", start_boundary.module->get_name(), idx, pid, instance);
+  }
 
   LGraph* current_original = original_boundary.module;
   Index_ID original_idx = original_boundary.idx;
@@ -237,6 +248,7 @@ bool Diff_finder::compare_cone(Graph_Node start_boundary, Graph_Node original_bo
     cones[start_boundary].insert(child);
 
     bool diff = compare_cone(child, child_original);
+
     if(diff) {
       different[start_boundary] = true;
     }
