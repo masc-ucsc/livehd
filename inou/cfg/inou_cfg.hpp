@@ -25,7 +25,8 @@ private:
   static bool not_space(char c){return !isspace(c);}
   std::vector<std::string> split(const std::string& str);
 
-  void cfg_2_lgraph(char**, LGraph*);
+  void cfg_2_lgraph_bk(char**, LGraph*);
+ 	void cfg_2_lgraph(char**, std::vector<LGraph *>&);
 protected:
 	Inou_cfg_options_pack opack;
 
