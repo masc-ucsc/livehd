@@ -786,10 +786,10 @@ void Diff_finder::generate_delta(std::string modified_lgdb, std::string out_lgdb
             Graph_Node bound(current, ridx, bit, instance, pid);
 
 
-            LGraph* current_original = LGraph::find_graph(original->get_name(), original->get_path());
+            LGraph* current_original = LGraph::find_graph(current->get_name(), original->get_path());
             if(!current_original) {
               //dealing with "lgraph_" that is appended to graph name
-              current_original = LGraph::find_graph(original->get_name().substr(7), original->get_path());
+              current_original = LGraph::find_graph(current->get_name().substr(7), original->get_path());
             }
             assert(current_original);
 
