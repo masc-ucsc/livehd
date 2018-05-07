@@ -106,7 +106,11 @@ void Diff_finder::find_fwd_boundaries(Graph_Node start_boundary,
       return;
     }
   } else if(current->is_graph_output(idx)) {
-    assert(start_boundary.instance != "");
+    if(start_boundary.instance != "") {
+      //global output, we're done.
+      stack.erase(start_boundary);
+      return;
+    }
     Graph_Node parent = go_up(start_boundary);
 
     if(stack.find(parent) == stack.end()) {
