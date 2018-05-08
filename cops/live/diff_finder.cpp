@@ -88,7 +88,7 @@ auto Diff_finder::go_down(Graph_Node boundary, bool output) {
   return bound;
 }
 
-void Diff_finder::find_fwd_boundaries(Graph_Node start_boundary,
+void Diff_finder::find_fwd_boundaries(Graph_Node &start_boundary,
     std::set<Graph_Node>& discovered) {
 
   stack.insert(start_boundary);
@@ -106,7 +106,7 @@ void Diff_finder::find_fwd_boundaries(Graph_Node start_boundary,
       return;
     }
   } else if(current->is_graph_output(idx)) {
-    if(start_boundary.instance != "") {
+    if(start_boundary.instance == "") {
       //global output, we're done.
       stack.erase(start_boundary);
       return;
@@ -740,44 +740,39 @@ void Diff_finder::generate_modules(std::set<Graph_Node> different_nodes, std::st
 
 void Diff_finder::generate_delta(std::string modified_lgdb, std::string out_lgdb, std::set<Net_ID>& diffs) {
 
-  std::set<LGraph*> discovered_modules, visited_modules;
+  std::set<LGraph*> discovered_modules;
   std::set<Graph_Node> discovered_boundaries, visited_boundaries, all_diff;
 
   Graph_library* modified_library = Graph_library::instance(modified_lgdb);
   for(int id = 0; id < modified_library->lgraph_count(); id++) {
     assert(modified_library->get_graph(id));
     discovered_modules.insert(modified_library->get_graph(id));
+    fmt::print("discovered module {} \n", modified_library->get_graph(id)->get_name());
   }
-
-  //discovered_modules.insert(modified);
 
   while(discovered_modules.size() > 0) {
     LGraph* current = *(discovered_modules.begin());
     discovered_modules.erase(current);
-    if(visited_modules.find(current) != visited_modules.end())
-      continue;
-    visited_modules.insert(current);
 
-    for(auto & idx : current->fast()) {
-      if(current->node_type_get(idx).op == SubGraph_Op) {
-        LGraph* child = modified_library->get_graph(current->subgraph_id_get(idx));
-        if(visited_modules.find(child) == visited_modules.end())
-          discovered_modules.insert(child);
-      }
-    }
+    fmt::print("current module {} \n", current->get_name());
+
+    if(current->get_name() == "lgraph_fp_add64")
+      fmt::print("foo");
 
     for(auto & instance :  boundaries->instance_collection[Invariant_boundaries::get_graphID(current)]) {
       for(auto & ridx: current->fast()) {
+        std::set<Port_ID> out_pids;
+        if(current->is_graph_output(ridx)) {
+          //graph outputs may not have out_edges
+          out_pids.insert(0);
+        } else {
+          for(auto& cout : current->out_edges(ridx)) {
+            out_pids.insert(cout.get_out_pin().get_pid());
+          }
+        }
 
-        std::set<Port_ID> visited;
-
-        for(auto& cout : current->out_edges(ridx)) {
-           Port_ID pid = cout.get_out_pin().get_pid();
-           if(visited.find(pid) != visited.end())
-             continue;
-
-           visited.insert(pid);
-           Index_ID idx = current->get_idx_from_pid(ridx, pid);
+        for(Port_ID pid : out_pids) {
+          Index_ID idx = current->get_idx_from_pid(ridx, pid);
 
           if(!is_user_def(current, ridx, pid))
             continue;
@@ -785,11 +780,10 @@ void Diff_finder::generate_delta(std::string modified_lgdb, std::string out_lgdb
           for(int bit = 0; bit < current->get_bits(idx); bit++) {
             Graph_Node bound(current, ridx, bit, instance, pid);
 
-
-            LGraph* current_original = LGraph::find_graph(original->get_name(), original->get_path());
+            LGraph* current_original = LGraph::find_graph(current->get_name(), original->get_path());
             if(!current_original) {
               //dealing with "lgraph_" that is appended to graph name
-              current_original = LGraph::find_graph(original->get_name().substr(7), original->get_path());
+              current_original = LGraph::find_graph(current->get_name().substr(7), original->get_path());
             }
             assert(current_original);
 
