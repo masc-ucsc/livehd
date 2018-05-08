@@ -62,7 +62,7 @@ vector<LGraph *> Inou_cfg::generate() {
 
     int fd = open(cfg_file.c_str(), O_RDONLY);
 		if (fd<0) {
-      console->error("cannot find input file\n");
+      console->error("cannot find input file {}\n", cfg_file);
 			exit(-3);
 		}
 
