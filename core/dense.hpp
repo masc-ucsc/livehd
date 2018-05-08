@@ -23,9 +23,7 @@
 // 28: 64
 
 #include <unistd.h>
-
 #include <vector>
-
 #include "mmap_allocator.hpp"
 
 template <typename T>
