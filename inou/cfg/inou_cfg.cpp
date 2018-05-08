@@ -90,18 +90,14 @@ vector<LGraph *> Inou_cfg::generate() {
 
 void Inou_cfg::cfg_2_lgraph(char** memblock, vector<LGraph*>& lgs){
 	string s;
-	vector< map<string, Index_ID> >          name2id_gs;//ghs = graphs
-	vector< map<string, vector<string>> > chain_vecs_gs;//chain_vectors for every graph
-	vector<string >   nname_begs;//nname = node name
-	vector<Index_ID > nid_ends;
+	vector<map<string, Index_ID>>       name2id_gs(1);   //gs = graphs
+	vector<map<string, vector<string>>> chain_stks_gs(1);//chain_stacks for every graph, use vector to implement stack
+	vector<string>                      nname_bg_gs(1);   //nname = node name
+	vector<Index_ID >                   nid_ed_gs(1);
+  map<string, uint32_t >              nfirst2gid;//map for every sub-graph and its first node name
 	LGraph* gtop = lgs[0];
 
 	bool gtop_bg_nname_recorded = false;
-
-	name2id_gs.resize(name2id_gs.size()+1);//initialize for gtop
-	chain_vecs_gs.resize(chain_vecs_gs.size()+1);//initialize for gtop
-	nname_begs.resize(nname_begs.size()+1);
-	nid_ends.resize(nid_ends.size()+1);
 
 	char *p = strtok(*memblock, "\n\r\f");
 
@@ -115,8 +111,10 @@ void Inou_cfg::cfg_2_lgraph(char** memblock, vector<LGraph*>& lgs){
     string w3rd = *(words.begin()+2);
 		string w6th = *(words.begin()+5);
 
+		uint32_t gsub_id = std::stoi(w3rd);
+
 		if(!gtop_bg_nname_recorded){
-			nname_begs[0] = w1st;
+			nname_bg_gs[0] = w1st;
 			gtop_bg_nname_recorded = true;
 		}
 
@@ -126,27 +124,19 @@ void Inou_cfg::cfg_2_lgraph(char** memblock, vector<LGraph*>& lgs){
 			lgs.push_back(new LGraph(opack.lgdb_path));
 			fmt::print("lgs size:{}", lgs.size());
 			name2id_gs.resize(name2id_gs.size()+1);
-			chain_vecs_gs.resize(chain_vecs_gs.size()+1);
-			nid_ends.resize(nid_ends.size()+1);
-			nname_begs.push_back(w1st);
-			build_graph(words, dfg_data, lgs[std::stoi(w3rd)], name2id_gs[std::stoi(w3rd)], chain_vecs_gs[std::stoi(w3rd)], nid_ends[std::stoi(w3rd)]);
+			chain_stks_gs.resize(chain_stks_gs.size()+1);
+			nid_ed_gs.resize(nid_ed_gs.size()+1);
+			nname_bg_gs.push_back(w1st);
+			nfirst2gid[w1st] = gsub_id;
+			build_graph(words, dfg_data, lgs[gsub_id], nfirst2gid, name2id_gs[gsub_id], chain_stks_gs[gsub_id], nid_ed_gs[gsub_id]);
 		}
-		else if(w3rd != "0")//construct sub-graph, i.e. function definition
-			build_graph(words, dfg_data, lgs[std::stoi(w3rd)], name2id_gs[std::stoi(w3rd)], chain_vecs_gs[std::stoi(w3rd)], nid_ends[std::stoi(w3rd)]);
+		else if(w3rd != "0")//construct sub-graph for function definition
+			build_graph(words, dfg_data, lgs[gsub_id], nfirst2gid, name2id_gs[gsub_id], chain_stks_gs[gsub_id], nid_ed_gs[gsub_id]);
 		else //build top graph
-			build_graph(words, dfg_data, gtop, name2id_gs[0], chain_vecs_gs[0], nid_ends[0]);
+			build_graph(words, dfg_data, gtop, nfirst2gid, name2id_gs[0], chain_stks_gs[0], nid_ed_gs[0]);
 
 
 
-		for(int i =0; i < chain_vecs_gs.size(); i++){
-			for (auto& x : chain_vecs_gs[i]){
-				fmt::print("\nvid {} content is\n",x.first);
-				while(!x.second.empty()){
-					fmt::print("{}\n",x.second.back());
-					x.second.pop_back();
-				}
-			}
-		}
 
 		fmt::print("\n");
 		p = strtok(nullptr, "\n\r\f");
@@ -162,21 +152,35 @@ void Inou_cfg::cfg_2_lgraph(char** memblock, vector<LGraph*>& lgs){
 		fmt::print("create node:{}, nid:{}\n", "GIO", gio_node_bg.get_nid());
 		lgs[i]->node_type_set(gio_node_bg.get_nid(), GraphIO_Op);
 		Index_ID src_nid = gio_node_bg.get_nid();
-		Index_ID dst_nid = name2id_gs[i][nname_begs[i]];
+		Index_ID dst_nid = name2id_gs[i][nname_bg_gs[i]];
 		lgs[i]->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
 
 		//Graph output
 		Node gio_node_ed = lgs[i]->create_node();
 		fmt::print("create node:{}, nid:{}\n", "GIO", gio_node_ed.get_nid());
 		lgs[i]->node_type_set(gio_node_ed.get_nid(), GraphIO_Op);
-		src_nid = nid_ends[i];
+		src_nid = nid_ed_gs[i];
 		fmt::print("total node number:{}\n", name2id_gs[0].size());
 		dst_nid = gio_node_ed.get_nid();;
 		lgs[i]->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
 	}
+
+
+
+	for(int i =0; i < chain_stks_gs.size(); i++){
+		for (auto& x : chain_stks_gs[i]){
+			fmt::print("\ncurrent is chain_stks_gs[{}], vid {} content is\n", i, x.first);
+			for (auto j = x.second.rbegin(); j != x.second.rend(); ++j)
+				fmt::print("{}\n",*j);
+		}
+	}
+
+
 }
 
-void Inou_cfg::build_graph(vector<string>& words, string& dfg_data, LGraph* g, map<string, Index_ID>& name2id, map<string, vector<string>>& chain_vecs, int64_t& nid_end) {
+void Inou_cfg::build_graph(vector<string>& words, string& dfg_data, LGraph* g, map<string,uint32_t >& nfirst2gid,
+													 map<string, Index_ID>& name2id, map<string, vector<string>>& chain_stks, int64_t& nid_end) {
+
 	fmt::print("dfg_data:{}\n", dfg_data);
 	string w1st = *(words.begin()  );
 	string w2nd = *(words.begin()+1);
@@ -212,6 +216,8 @@ void Inou_cfg::build_graph(vector<string>& words, string& dfg_data, LGraph* g, m
 			g->node_type_set(name2id[w1st], CfgFor_Op);
 		else if(w6th == "while")
 			g->node_type_set(name2id[w1st], CfgWhile_Op);
+		else if(w6th == "if")
+			g->node_type_set(name2id[w1st], CfgIf_Op);
 		else
 			g->node_type_set(name2id[w1st], CfgAssign_Op);
 	}
@@ -224,6 +230,11 @@ void Inou_cfg::build_graph(vector<string>& words, string& dfg_data, LGraph* g, m
 			g->node_type_set(name2id[w1st], CfgFor_Op);
 		else if(w6th == "while")
 			g->node_type_set(name2id[w1st], CfgWhile_Op);
+		else if(w6th == "if")
+			g->node_type_set(name2id[w1st], CfgIf_Op);
+		else if(w6th == "::{"){
+			g->node_subgraph_set(name2id[w1st],nfirst2gid[w9th]);//use nfirst2gid to get sub-graph gid
+		}
 		else
 			g->node_type_set(name2id[w1st], CfgAssign_Op);
 	}
@@ -270,16 +281,18 @@ void Inou_cfg::build_graph(vector<string>& words, string& dfg_data, LGraph* g, m
 		}
 
 		//III-3. connect top of stack to end if node
-		if(chain_vecs[w8th].back() != w10th){
-			src_nid = name2id[chain_vecs[w8th].back()];
+		if(chain_stks[w8th].back() != w10th){
+			src_nid = name2id[chain_stks[w8th].back()];
+      fmt::print("chain_stks[w8th] back{}\n", chain_stks[w8th].back());
 			dst_nid = name2id[w10th];
 			g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
 			fmt::print("if statement, connect src_node {} to dst_node {} ----- 3\n", src_nid, dst_nid);
 		}
 
 		if(w9th != "null"){
-			if(chain_vecs[w9th].back() != w10th ){
-				src_nid = name2id[chain_vecs[w9th].back()];
+			if(chain_stks[w9th].back() != w10th ){
+				src_nid = name2id[chain_stks[w9th].back()];
+				fmt::print("chain_stks[w9th] back{}\n", chain_stks[w9th].back());
 				dst_nid = name2id[w10th];
 				g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
 				fmt::print("if statement, connect src_node {} to dst_node {} ----- 4\n", src_nid, dst_nid);
@@ -302,9 +315,9 @@ void Inou_cfg::build_graph(vector<string>& words, string& dfg_data, LGraph* g, m
 		}
 
 		//III-5. figure out which stack w1st is belong to and push w10th into that stack
-		for (auto const& x : chain_vecs){
+		for (auto const& x : chain_stks){
 			if(w1st == x.second.back()){
-				chain_vecs[x.second[0]].push_back(w10th);
+				chain_stks[x.second[0]].push_back(w10th);
 				break;
 			}
 		}
@@ -338,30 +351,21 @@ void Inou_cfg::build_graph(vector<string>& words, string& dfg_data, LGraph* g, m
 		fmt::print("while statement, connect src_node {} to dst_node {}\n", src_nid, dst_nid);
 	}//end special case: while
 
-		/*
-		else if(w6th == "::{"){
-			//connect to the begin of function call
-			src_nid = name2id[w1st];
-			dst_nid = name2id[w9th];
-			g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
-			fmt::print("function call statement, connect src_node {} to dst_node {} ----- 1\n", src_nid, dst_nid);
 
-			// connect end of function call body
-			for(auto i = 0; i< id_nbr_null.size(); i++){
-				fmt::print("neighbor is null{}\n",id_nbr_null[i]);
-				src_nid = *(id_nbr_null.begin()+i);
-				dst_nid = name2id[w2nd];
-				g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, i, true));
-				fmt::print("function call statement, connect src_node {} to dst_node {} ----- 4\n", src_nid, dst_nid);
-			}
-		}//end special case: ::{
-		*/
-	else if(w2nd == "null"){ //no w2nd to create edge, only update chain_vecs
+	else if(w6th == "::{"){
+		//connect to the begin of function call
+		src_nid = name2id[w1st];
+		dst_nid = name2id[w9th];
+		g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+		fmt::print("function call statement, connect src_node {} to dst_node {} ----- 1\n", src_nid, dst_nid);
+	}//end special case: ::{
+
+	else if(w2nd == "null"){ //no w2nd to create edge, only update chain_stks
 		bool belong_tops = false;
 		string target_vec_id = w1st;
 
-		//check equivalence between src_nid and every top of chain_vecs
-		for (auto const& x : chain_vecs){
+		//check equivalence between src_nid and every top of chain_stks
+		for (auto const& x : chain_stks){
 			if(w1st == x.second.back()){
 				belong_tops = true;
 				target_vec_id = x.first;
@@ -369,10 +373,10 @@ void Inou_cfg::build_graph(vector<string>& words, string& dfg_data, LGraph* g, m
 			}
 		}
 		if(!belong_tops)
-			chain_vecs[target_vec_id].push_back(w1st);
+			chain_stks[target_vec_id].push_back(w1st);
 
 	}
-	else if(w2nd != "null"){ //normal edge connection: Kx->Ky, update chain_vecs
+	else if(w2nd != "null"){ //normal edge connection: Kx->Ky, update chain_stks
 		src_nid = name2id[w1st];
 		dst_nid = name2id[w2nd];
 		g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
@@ -381,8 +385,8 @@ void Inou_cfg::build_graph(vector<string>& words, string& dfg_data, LGraph* g, m
 		bool belong_tops = false;
 		string target_vec_id = w1st;
 
-		//check equivalence between src_nid and every top of chain_vecs
-		for (auto const& x : chain_vecs){
+		//check equivalence between src_nid and every top of chain_stks
+		for (auto const& x : chain_stks){
 			if(w1st == x.second.back()){
 				belong_tops = true;
 				target_vec_id = x.first;
@@ -391,14 +395,15 @@ void Inou_cfg::build_graph(vector<string>& words, string& dfg_data, LGraph* g, m
 		}
 
 		if(!belong_tops){
-			chain_vecs[target_vec_id].push_back(w1st);
-			chain_vecs[target_vec_id].push_back(w2nd);
+			chain_stks[target_vec_id].push_back(w1st);
+			chain_stks[target_vec_id].push_back(w2nd);
 		}
 		else
-			chain_vecs[target_vec_id].push_back(w2nd);
+			chain_stks[target_vec_id].push_back(w2nd);
+
 	}
 
-}
+}//end of build_graph
 
 
 /*

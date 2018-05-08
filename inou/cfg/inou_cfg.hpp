@@ -24,7 +24,7 @@ private:
   static bool              space(char c)    {return  isspace(c);}
   static bool              not_space(char c){return !isspace(c);}
   std::vector<std::string> split(const std::string& str);
- 	void                     build_graph(std::vector<std::string>&, std::string&, LGraph*, std::map<std::string, Index_ID>&, std::map<std::string, std::vector<std::string>>&, int64_t &);
+ 	void build_graph(std::vector<std::string>&, std::string&, LGraph*, std::map<std::string, uint32_t >&, std::map<std::string, Index_ID>&, std::map<std::string, std::vector<std::string>>&, int64_t&);
  	void                     cfg_2_lgraph(char**, std::vector<LGraph *>&);
 protected:
 	Inou_cfg_options_pack 	 opack;
