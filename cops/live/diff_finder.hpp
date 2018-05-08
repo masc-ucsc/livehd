@@ -48,7 +48,7 @@ class Diff_finder {
     bool is_user_def(LGraph* current, Index_ID idx, Port_ID pid) const;
     bool is_invariant(Graph_Node node);
 
-    void find_fwd_boundaries(Graph_Node start_boundary, std::set<Graph_Node>& discovered);
+    void find_fwd_boundaries(Graph_Node &start_boundary, std::set<Graph_Node>& discovered);
     bool compare_cone(Graph_Node start_boundary, Graph_Node original_boundary, bool went_up = false);
 
     auto go_up(Graph_Node boundary);
