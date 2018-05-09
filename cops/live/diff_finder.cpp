@@ -8,7 +8,7 @@
 
 using namespace Live;
 
-auto Diff_finder::go_up(Graph_Node boundary) {
+auto Diff_finder::go_up(const Graph_Node &boundary) {
 
   Graph_Node bound;
   bound.module = nullptr;
@@ -52,7 +52,7 @@ auto Diff_finder::go_up(Graph_Node boundary) {
 }
 
 
-auto Diff_finder::go_down(Graph_Node boundary, bool output) {
+auto Diff_finder::go_down(const Graph_Node &boundary, bool output) {
   Graph_Node bound;
 
   LGraph*  current = boundary.module;
@@ -89,7 +89,9 @@ auto Diff_finder::go_down(Graph_Node boundary, bool output) {
 }
 
 void Diff_finder::find_fwd_boundaries(Graph_Node &start_boundary,
-    std::set<Graph_Node>& discovered) {
+    std::set<Graph_Node>& discovered, bool went_up) {
+
+  fmt::print("fwd bound {} {} {} {} {}\n", start_boundary.module->get_name(), start_boundary.idx, start_boundary.pid, start_boundary.bit, start_boundary.instance);
 
   stack.insert(start_boundary);
 
@@ -97,7 +99,8 @@ void Diff_finder::find_fwd_boundaries(Graph_Node &start_boundary,
   LGraph*  current = start_boundary.module;
   Port_ID  pid     = start_boundary.pid;
 
-  if(current->node_type_get(idx).op == SubGraph_Op && current->is_graph_input(idx)) {
+
+  if(current->node_type_get(idx).op == SubGraph_Op && !went_up) {
     Graph_Node child = go_down(start_boundary, false);
 
     if(stack.find(child) == stack.end()) {
@@ -114,11 +117,12 @@ void Diff_finder::find_fwd_boundaries(Graph_Node &start_boundary,
     Graph_Node parent = go_up(start_boundary);
 
     if(stack.find(parent) == stack.end()) {
-      find_fwd_boundaries(parent, discovered);
+      find_fwd_boundaries(parent, discovered, true);
       stack.erase(start_boundary);
       return;
     }
   }
+
 
   for(auto& out : current->out_edges(idx)) {
     //FIXME: what other cases do we need to take into account for propagation?
@@ -132,7 +136,7 @@ void Diff_finder::find_fwd_boundaries(Graph_Node &start_boundary,
       continue;
 
     for(uint32_t bit : relevant_bits) {
-      Graph_Node bound(current, next, bit, start_boundary.instance, out.get_out_pin().get_pid());
+      Graph_Node bound(current, next, bit, start_boundary.instance, out.get_inp_pin().get_pid());
       if(is_invariant(bound)) {
         discovered.insert(bound);
       } else {
@@ -188,7 +192,7 @@ bool Diff_finder::is_invariant(Graph_Node node) {
   return boundaries->is_invariant_boundary(id);
 }
 
-bool Diff_finder::compare_cone(Graph_Node start_boundary, Graph_Node original_boundary, bool went_up) {
+bool Diff_finder::compare_cone(const Graph_Node &start_boundary, const Graph_Node &original_boundary, bool went_up) {
 
   std::string instance = start_boundary.instance;
 
@@ -436,7 +440,7 @@ void Diff_finder::add_ios_up(LGraph* module, Index_ID nid, std::map<std::string,
 }
 
 
-void Diff_finder::generate_modules(std::set<Graph_Node> different_nodes, std::string out_lgdb) {
+void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const std::string &out_lgdb) {
 
   std::map<std::string, LGraph*> name2graph;
   std::map<Graph_Node, Index_ID> node2idx;
@@ -738,7 +742,7 @@ void Diff_finder::generate_modules(std::set<Graph_Node> different_nodes, std::st
   }
 }
 
-void Diff_finder::generate_delta(std::string modified_lgdb, std::string out_lgdb, std::set<Net_ID>& diffs) {
+void Diff_finder::generate_delta(const std::string &modified_lgdb, const std::string &out_lgdb, std::set<Net_ID>& diffs) {
 
   std::set<LGraph*> discovered_modules;
   std::set<Graph_Node> discovered_boundaries, visited_boundaries, all_diff;

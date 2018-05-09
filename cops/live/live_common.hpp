@@ -257,7 +257,6 @@ namespace Live {
     }
     return 0;
   }
-
 }
 
 

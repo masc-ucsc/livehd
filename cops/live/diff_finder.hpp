@@ -48,13 +48,13 @@ class Diff_finder {
     bool is_user_def(LGraph* current, Index_ID idx, Port_ID pid) const;
     bool is_invariant(Graph_Node node);
 
-    void find_fwd_boundaries(Graph_Node &start_boundary, std::set<Graph_Node>& discovered);
-    bool compare_cone(Graph_Node start_boundary, Graph_Node original_boundary, bool went_up = false);
+    void find_fwd_boundaries(Graph_Node &start_boundary, std::set<Graph_Node>& discovered, bool went_up = false);
+    bool compare_cone(const Graph_Node &start_boundary, const Graph_Node &original_boundary, bool went_up = false);
 
-    auto go_up(Graph_Node boundary);
-    auto go_down(Graph_Node boundary, bool output);
+    auto go_up(const Graph_Node &boundary);
+    auto go_down(const Graph_Node &boundary, bool output);
 
-    void generate_modules(std::set<Graph_Node> different_nodes, std::string out_lgdb);
+    void generate_modules(std::set<Graph_Node> &different_nodes, const std::string &out_lgdb);
 
     void add_ios_up(LGraph* module, Index_ID nid, std::map<std::string, LGraph*>& name2graph);
 
@@ -65,7 +65,7 @@ class Diff_finder {
     }
 
 
-    void generate_delta(std::string mod_lgdb, std::string out_lgdb, std::set<Net_ID>& diffs);
+    void generate_delta(const std::string &mod_lgdb, const std::string &out_lgdb, std::set<Net_ID>& diffs);
 };
 
 #endif
