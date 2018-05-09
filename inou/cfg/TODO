@@ -1,0 +1,6 @@
+
+
+// True if it can convert to 32bits. Always try to populate signed and bits (bits = 0 means no bits set)
+bool prp_get_value(const char *str, bool &signed, uint32_t &bits, uint32_t &explicit_bits, uint32_t &val); 
+
+
