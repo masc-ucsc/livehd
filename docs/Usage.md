@@ -41,6 +41,7 @@ git clone  git@github.com:masc-ucsc/lgraph.git
 git submodule update --init --recursive
 
 # If you cloned already, use this to update submodules
+# This command will update the submodules to the commit specified in lgraph
 git pull --recurse-submodules
 ```
 
@@ -164,4 +165,18 @@ If you are a developer for lgraph, you will likely have to create graph objects
 from the code.
 
 ```cpp
+```
+
+
+# Updating submodules from origin
+
+If you need to update a submodule to the latest version and want lgraph to point
+to the latest commit in the child repository, you need to:
+
+```bash
+cd subs/<repo>
+git pull origin master
+cd ..
+git commit
+git push
 ```
