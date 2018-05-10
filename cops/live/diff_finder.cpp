@@ -91,6 +91,11 @@ auto Diff_finder::go_down(const Graph_Node &boundary, bool output) {
 void Diff_finder::find_fwd_boundaries(Graph_Node &start_boundary,
     std::set<Graph_Node>& discovered, bool went_up) {
 
+  if(fwd_visited.find(start_boundary) != fwd_visited.end())
+    return;
+
+  fwd_visited.insert(start_boundary);
+
   fmt::print("fwd bound {} {} {} {} {}\n", start_boundary.module->get_name(), start_boundary.idx, start_boundary.pid, start_boundary.bit, start_boundary.instance);
 
   stack.insert(start_boundary);

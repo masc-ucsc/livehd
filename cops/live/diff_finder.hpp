@@ -45,6 +45,8 @@ class Diff_finder {
     std::map<Graph_Node, Net_ID>                synth_map;
     std::map<Graph_Node, std::string>           bound2net;
 
+    std::set<Graph_Node>                        fwd_visited;
+
     bool is_user_def(LGraph* current, Index_ID idx, Port_ID pid) const;
     bool is_invariant(Graph_Node node);
 
