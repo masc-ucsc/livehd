@@ -185,6 +185,7 @@ void Inou_cfg::build_graph(vector<string>& words, string& dfg_data, LGraph* g, m
 	string w1st = *(words.begin()  );
 	string w2nd = *(words.begin()+1);
 	string w3rd = *(words.begin()+2);
+	string w4th = *(words.begin()+3);
 	string w5th = *(words.begin()+4);
 	string w6th = *(words.begin()+5);
 	string w7th = *(words.begin()+6);
@@ -209,6 +210,7 @@ void Inou_cfg::build_graph(vector<string>& words, string& dfg_data, LGraph* g, m
 		fmt::print("create node:{}, nid:{}\n", w1st, name2id[w1st]);
 
 		g->set_node_wirename(new_node.get_nid(), dfg_data.c_str());
+    g->node_loc_set(new_node.get_nid(),opack.cfg_input.c_str(), (uint32_t)std::stoi(w4th), (uint32_t)std::stoi(w5th));
 
 		if(     w6th == ".()")
 			g->node_type_set(name2id[w1st], CfgFunctionCall_Op);
@@ -223,6 +225,7 @@ void Inou_cfg::build_graph(vector<string>& words, string& dfg_data, LGraph* g, m
 	}
 	else{
 		g->set_node_wirename(name2id[w1st], dfg_data.c_str());
+		g->node_loc_set(name2id[w1st], opack.cfg_input.c_str(), (uint32_t)std::stoi(w4th), (uint32_t)std::stoi(w5th));
 
 		if(     w6th == ".()")
 			g->node_type_set(name2id[w1st], CfgFunctionCall_Op);
@@ -235,8 +238,9 @@ void Inou_cfg::build_graph(vector<string>& words, string& dfg_data, LGraph* g, m
 		else if(w6th == "::{"){
 			g->node_subgraph_set(name2id[w1st],nfirst2gid[w9th]);//use nfirst2gid to get sub-graph gid
 		}
-		else
+		else{
 			g->node_type_set(name2id[w1st], CfgAssign_Op);
+		}
 	}
 
 
