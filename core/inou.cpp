@@ -52,7 +52,7 @@ std::vector<LGraph *> Inou_trivial::generate() {
   return lgs;
 }
 
-void Inou_trivial::generate(std::vector<const LGraph *> out) {
+void Inou_trivial::generate(std::vector<const LGraph *>& out) {
   // No output
 }
 

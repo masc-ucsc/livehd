@@ -187,7 +187,7 @@ std::vector<LGraph *> Inou_json::generate() {
 
 }
 
-void Inou_json::generate(std::vector<const LGraph *> out) {
+void Inou_json::generate(std::vector<const LGraph *>& out) {
 	if (out.size() == 1) {
 		to_json(out[0], opack.json_output);
 	}

@@ -135,7 +135,7 @@ std::vector<LGraph *> Inou_def::generate() {
   return lgs;
 }
 
-void Inou_def::generate(std::vector<const LGraph *> out) {
+void Inou_def::generate(std::vector<const LGraph *>& out) {
 	assert(0); //just generate
 	out.clear();
 }

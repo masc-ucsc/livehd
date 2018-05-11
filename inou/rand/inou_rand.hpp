@@ -27,7 +27,7 @@ public:
 
   std::vector<LGraph *> generate() override final;
   using Inou::generate;
-  void generate(std::vector<const LGraph *> out) override final;
+  void generate(std::vector<const LGraph *>& out) override final;
 };
 
 #endif
