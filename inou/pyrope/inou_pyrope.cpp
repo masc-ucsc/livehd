@@ -56,7 +56,7 @@ std::vector<LGraph *> Inou_pyrope::generate() {
   return lgs;
 }
 
-void Inou_pyrope::generate(std::vector<const LGraph *> out) {
+void Inou_pyrope::generate(std::vector<const LGraph *>& out) {
   for(const auto &g:out) {
     to_pyrope(g, opack.pyrope_output);
   }

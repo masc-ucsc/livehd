@@ -49,7 +49,7 @@ class Dump_yosys : public Inou_trivial {
       hierarchy = hier;
     };
 
-    void generate(std::vector<const LGraph *> out) override final {
+    void generate(std::vector<const LGraph *>& out) override final {
       for(const auto &g:out) {
         std::cout << g->get_name() << std::endl;
         to_yosys(g);
