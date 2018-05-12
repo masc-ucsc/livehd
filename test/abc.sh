@@ -23,8 +23,20 @@ do
   rm -rf ./lgdb/ ./logs ./yosys-test *.json *.v *.blif
 
   ${YOSYS} --techmap ${input_root}/${input}
+  if [ $? -ne 0 ]; then
+    echo "failed"
+    exit 1
+  fi
   ${ABC} --lgdb ./lgdb --graph_name ${base}
+  if [ $? -ne 0 ]; then
+    echo "failed"
+    exit 1
+  fi
   ${json} --lgdb ./lgdb --graph_name ${base}_mapped
+  if [ $? -ne 0 ]; then
+    echo "failed"
+    exit 1
+  fi
   ${CHECK} golden.blif abc_output/${base}_post.blif | grep "Successfully matched generated verilog with yosys elaborated verilog file"
   if [ $? -eq 0 ]; then
      rm -rf temp.blif
