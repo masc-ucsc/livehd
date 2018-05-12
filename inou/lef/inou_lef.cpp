@@ -239,7 +239,7 @@ std::vector<LGraph *> Inou_lef::generate() {
 	return lgs;
 }
 
-void Inou_lef::generate(std::vector<const LGraph *> out) {
+void Inou_lef::generate(std::vector<const LGraph *>& out) {
 	if (out.size() != 0) {
 		fmt::print("lef file synced into tech library!\n");
 	}

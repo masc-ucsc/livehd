@@ -40,7 +40,7 @@ public:
 
 	using Inou::generate;
 
-	void generate(std::vector<const LGraph *> out) override final;
+	void generate(std::vector<const LGraph *>& out) override final;
 
 };
 

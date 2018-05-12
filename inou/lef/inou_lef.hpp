@@ -35,7 +35,7 @@ public:
 
 	using Inou::generate;
 
-	void generate(std::vector<const LGraph *> out) override final;
+	void generate(std::vector<const LGraph *>& out) override final;
 
 	static void lef_parsing(Tech_library *tlib, std::string &lef_file_name);
 
