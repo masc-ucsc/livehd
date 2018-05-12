@@ -447,7 +447,7 @@ void Inou_cfg::lgraph_2_cfg(const LGraph* g, const string& filename ) {
   fmt::print("line_cnt = {}\n",line_cnt);
 }
 
-void Inou_cfg::generate(vector<const LGraph *> out) {
+void Inou_cfg::generate(vector<const LGraph *>& out) {
   if (out.size() == 1) {
     lgraph_2_cfg(out[0], opack.cfg_output);
   }

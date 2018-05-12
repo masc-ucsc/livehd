@@ -175,7 +175,7 @@ std::vector<LGraph *> Inou_rand::generate() {
   return lgs;
 }
 
-void Inou_rand::generate(std::vector<const LGraph *> out) {
+void Inou_rand::generate(std::vector<const LGraph *>& out) {
 
   assert(0); // No method to randinly transform a graph, just to generate.
 
