@@ -1,0 +1,4 @@
+1) Need to use pip3 to install python_example2 by using pip3 install python_example2
+2) Open python3 and import all modules from python_example2 by using from python_example2 import *
+3) define the speak() class by using s = speak()
+4) call the function by using call_hello(s)
