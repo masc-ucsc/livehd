@@ -618,9 +618,6 @@ private:
   Dense<Node_Type_Op>  node_type_op;
   bm::bvector<>        const_nodes;
 
-protected:
-
-  void node_type_emplace_back();
 public:
   LGraph_Node_Type(std::string path, std::string name);
 
