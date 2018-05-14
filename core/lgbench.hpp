@@ -7,7 +7,7 @@
 
 #include <chrono>
 #include <iostream>
-
+#include <vector>
 class LGBench {
 private:
   int parseLine(char *line) {
@@ -23,8 +23,8 @@ private:
 
   int getValue() { //Note: this value is in KB!
     FILE *file   = fopen("/proc/self/status", "r");
-    intresult = -1;
-    charline[128];
+    int result = -1;
+    char line[128];
 
     while(fgets(line, 128, file) != NULL) {
       if(strncmp(line, "VmRSS:", 6) == 0) {
