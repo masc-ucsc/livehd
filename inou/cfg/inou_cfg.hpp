@@ -35,6 +35,7 @@ public:
 	virtual ~Inou_cfg();
 
 	std::vector<LGraph *>    generate() override final;
+  void                     cfg_2_dot(LGraph *, const std::string &path);
 
   void lgraph_2_cfg(const LGraph* g, const std::string& filename);
 
