@@ -3,23 +3,23 @@
 
 #include "bm.h"
 
-#include "lgraph.hpp"
 #include "invariant.hpp"
+#include "lgraph.hpp"
 
 class Invariant_finder {
 
 private:
-  LGraph*              elab_graph;
-  LGraph*              synth_graph;
+  LGraph *             elab_graph;
+  LGraph *             synth_graph;
   Invariant_boundaries boundaries;
   std::string          hier_separator;
 
-  bool                 processed;
-  bm::bvector<>        stack;
+  bool          processed;
+  bm::bvector<> stack;
 
   typedef std::pair<Index_ID, uint32_t> Node_bit;
-  std::map<Node_bit, Gate_set>          partial_cone_cells;  // partial_gate_count
-  std::map<Node_bit, Net_set>           partial_endpoints;   //sips
+  std::map<Node_bit, Gate_set>          partial_cone_cells; // partial_gate_count
+  std::map<Node_bit, Net_set>           partial_endpoints;  //sips
 
   void get_topology();
 
@@ -28,13 +28,11 @@ private:
   void propagate_until_boundary(Index_ID nid, uint32_t bit_selection);
 
 public:
-  Invariant_finder(LGraph* elab, LGraph* synth, std::string hier_sep = ".") :
-    hier_separator(hier_sep) {
+  Invariant_finder(LGraph *elab, LGraph *synth, std::string hier_sep = ".") : hier_separator(hier_sep) {
     processed   = false;
     elab_graph  = elab;
     synth_graph = synth;
   }
-
 
   Invariant_boundaries get_boundaries() {
     if(!processed) {
@@ -44,9 +42,7 @@ public:
   }
   ~Invariant_finder() {
     fmt::print("IF destructor\n");
-
   }
 };
 
 #endif
-

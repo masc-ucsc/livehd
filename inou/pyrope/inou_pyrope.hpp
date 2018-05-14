@@ -1,8 +1,8 @@
 #ifndef INOU_pyrope_H
 #define INOU_pyrope_H
 
-#include <string>
 #include <sstream>
+#include <string>
 
 #include "inou.hpp"
 #include "options.hpp"
@@ -47,9 +47,7 @@ public:
 
   std::vector<LGraph *> generate() override final;
   using Inou::generate;
-  void generate(std::vector<const LGraph *>& out) override final;
+  void generate(std::vector<const LGraph *> &out) override final;
 };
 
-
 #endif
-

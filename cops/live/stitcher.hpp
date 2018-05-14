@@ -5,20 +5,16 @@
 
 class Live_stitcher {
 
-  private:
+private:
+  LGraph *original;
 
-    LGraph* original;
+  Invariant_boundaries *boundaries;
 
-    Invariant_boundaries* boundaries;
+public:
+  Live_stitcher(LGraph *original, Invariant_boundaries *boundaries) : original(original), boundaries(boundaries) {
+  }
 
-  public:
-
-    Live_stitcher(LGraph* original, Invariant_boundaries* boundaries) :
-      original(original), boundaries(boundaries) {
-    }
-
-    void stitch(LGraph* nsynth, std::set<Net_ID> diffs);
-
+  void stitch(LGraph *nsynth, std::set<Net_ID> diffs);
 };
 
 #endif

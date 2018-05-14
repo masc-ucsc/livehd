@@ -5,14 +5,14 @@
 // binary, for any purpose, commercial or non-commercial, and by any
 // means.
 
-#include "kernel/yosys.h"
 #include "kernel/sigtools.h"
+#include "kernel/yosys.h"
 
-#include <string>
-#include <map>
-#include <set>
 #include <assert.h>
 #include <boost/filesystem.hpp>
+#include <map>
+#include <set>
+#include <string>
 
 #include "dump_yosys.hpp"
 
@@ -22,45 +22,45 @@ PRIVATE_NAMESPACE_BEGIN
 // each pass contains a singleton object that is derived from Pass
 // note that this is a frontend to yosys
 struct Dump_Yosys_Pass : public Pass {
-  Dump_Yosys_Pass() : Pass("dump_yosys", "converts lgraph to yosys") { }
-	virtual void help() {
-		//   |---v---|---v---|---v---|---v---|---v---|---v---|---v---|---v---|---v---|---v---|
-		log("\n");
-		log("    dump_yosys [options]\n");
-		log("\n");
-		log("Reads lgraph(s) into yosys.\n");
-		log("\n");
-		log("    -hierarchy [optional]\n");
-		log("        Reads the whole hierarchy bellow the graph_name indicated\n");
-		log("    -graph_name (required)\n");
-		log("        Specify the graphs name to read\n");
-		log("    -directory [default=lgdb]\n");
-		log("        Specify from which directory to read\n");
-		log("\n");
-		log("\n");
-	}
+  Dump_Yosys_Pass() : Pass("dump_yosys", "converts lgraph to yosys") {}
+  virtual void help() {
+    //   |---v---|---v---|---v---|---v---|---v---|---v---|---v---|---v---|---v---|---v---|
+    log("\n");
+    log("    dump_yosys [options]\n");
+    log("\n");
+    log("Reads lgraph(s) into yosys.\n");
+    log("\n");
+    log("    -hierarchy [optional]\n");
+    log("        Reads the whole hierarchy bellow the graph_name indicated\n");
+    log("    -graph_name (required)\n");
+    log("        Specify the graphs name to read\n");
+    log("    -directory [default=lgdb]\n");
+    log("        Specify from which directory to read\n");
+    log("\n");
+    log("\n");
+  }
 
   virtual void execute(std::vector<std::string> args, RTLIL::Design *design) {
     log_header(design, "Executing dump_yosys pass (convert from lgraph to yosys).\n");
 
     // parse options
-    size_t argidx;
-    bool single_graph_mode = false;
-    bool hierarchy = false;
+    size_t      argidx;
+    bool        single_graph_mode = false;
+    bool        hierarchy         = false;
     std::string graph_name;
     std::string input_directory = "lgdb";
 
-    for (argidx = 1; argidx < args.size(); argidx++) {
-      if (args[argidx] == "-graph_name") {
+    for(argidx = 1; argidx < args.size(); argidx++) {
+      if(args[argidx] == "-graph_name") {
         single_graph_mode = true;
-        graph_name = args[++argidx];
+        graph_name        = args[++argidx];
         continue;
       }
-      if (args[argidx] == "-directory") {
+      if(args[argidx] == "-directory") {
         input_directory = args[++argidx];
         continue;
       }
-      if (args[argidx] == "-hierarchy") {
+      if(args[argidx] == "-hierarchy") {
         hierarchy = true;
         continue;
       }
@@ -86,29 +86,29 @@ struct Dump_Yosys_Pass : public Pass {
       log("converting all graphs in directory %s.\n", input_directory.c_str());
     }
     if(single_graph_mode) {
-      const char * argvs2 [] = {"", "--lgdb", input_directory.c_str(), "--graph_name", graph_name.c_str()};
+      const char *argvs2[] = {"", "--lgdb", input_directory.c_str(), "--graph_name", graph_name.c_str()};
       Options::setup(5, argvs2);
     } else {
-      const char * argvs2 [] = {"", "--lgdb", input_directory.c_str()};
+      const char *argvs2[] = {"", "--lgdb", input_directory.c_str()};
       Options::setup(3, argvs2);
     }
 
-    std::set<LGraph*> generated;
-    Options_pack opt;
-    Dump_yosys dumper(design, opt, hierarchy);
+    std::set<LGraph *> generated;
+    Options_pack       opt;
+    Dump_yosys         dumper(design, opt, hierarchy);
 
     //read existing graph
-    std::vector<LGraph*> lgs = dumper.generate();
+    std::vector<LGraph *> lgs = dumper.generate();
 
     //export to yosys
     dumper.generate(lgs);
-    for(auto *g: lgs) {
+    for(auto *g : lgs) {
       generated.insert(g);
     }
 
     while(dumper.subgraphs().size() >= generated.size()) {
-      std::vector<LGraph*> lgs_;
-      for(auto* g: dumper.subgraphs()) {
+      std::vector<LGraph *> lgs_;
+      for(auto *g : dumper.subgraphs()) {
         if(generated.find(g) == generated.end()) {
           lgs_.push_back(g);
           generated.insert(g);

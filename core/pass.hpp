@@ -8,7 +8,8 @@
 class Pass {
 private:
 protected:
-  static std::map<std::string,Pass *> passes;
+  static std::map<std::string, Pass *> passes;
+
 public:
   Pass(std::string name);
 

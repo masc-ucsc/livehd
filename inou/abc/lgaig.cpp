@@ -5,14 +5,14 @@
 #include "lgbench.hpp"
 
 int main(int argc, const char **argv) {
-	LGBench b;
-	Options::setup(argc, argv);
-	Inou_abc abc;
-	Options::setup_lock();
-	std::vector<LGraph *> rvec = abc.generate();
-	for (auto &g : rvec) {
-		abc.generate(g);
-	}
-	b.sample("abc");
-	return 0;
+  LGBench b;
+  Options::setup(argc, argv);
+  Inou_abc abc;
+  Options::setup_lock();
+  std::vector<LGraph *> rvec = abc.generate();
+  for(auto &g : rvec) {
+    abc.generate(g);
+  }
+  b.sample("abc");
+  return 0;
 }
