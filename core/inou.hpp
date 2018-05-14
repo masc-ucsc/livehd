@@ -16,7 +16,7 @@ public:
   void generate(const LGraph &g);
   void generate(LGraph &g);
 
-  void register_inou(std::string name, Options_pack *opack);
+  void register_inou(const std::string & name, Options_pack *opack);
 };
 
 class Inou_trivial : public Inou {

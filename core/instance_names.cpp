@@ -1,7 +1,7 @@
 #include "instance_names.hpp"
 
-LGraph_InstanceNames::LGraph_InstanceNames(std::string path, std::string name)
-    : names(path, name + "_inst_names"), instances(path + "/" + name + "_inst") {
+LGraph_InstanceNames::LGraph_InstanceNames(const std::string & path, const std::string & name) noexcept
+    : LGraph_Base(path,name), names(path, name + "_inst_names"), instances(path + "/" + name + "_inst") {
 }
 
 void LGraph_InstanceNames::clear() {

@@ -26,7 +26,7 @@ protected:
   Graph_library() {
   }
 
-  Graph_library(std::string &_path) {
+  explicit Graph_library(const std::string &_path) {
     path = _path;
     std::ifstream graph_list;
     graph_library_clean = true;
@@ -71,7 +71,7 @@ protected:
   static std::unordered_map<std::string, Graph_library *> instances;
 
 public:
-  int add_name(std::string &name) {
+  int add_name(const std::string &name) {
     assert(name2id.find(name) == name2id.end());
 
     int id = id2name.size();
@@ -96,14 +96,14 @@ public:
   }
 
   //adds the name if it doesn't exist yet
-  int get_id(std::string name) {
+  int get_id(const std::string & name) {
     if(name2id.find(name) != name2id.end()) {
       return name2id[name];
     }
     return add_name(name);
   }
 
-  int get_id_const(std::string name) const {
+  int get_id_const(const std::string & name) const {
     if(name2id.find(name) != name2id.end()) {
       return name2id.at(name);
     }
@@ -111,7 +111,7 @@ public:
   }
 
   //FIXME: replace this by a find / end when the iterator is working
-  bool include(std::string name) const {
+  bool include(const std::string & name) const {
     return name2id.find(name) != name2id.end();
   }
 

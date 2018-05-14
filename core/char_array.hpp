@@ -54,7 +54,7 @@ private:
   bool pending_clear_reload;
 
 public:
-  Char_Array(std::string path, std::string _name)
+  Char_Array(const std::string & path, const std::string & _name)
       : variable_internal(path + "/" + _name) {
 
     pending_clear_reload = true;
@@ -96,7 +96,7 @@ public:
   Char_Array_ID create_id(const char *str) {
     assert(!pending_clear_reload);
 
-    int len = strlen(str);
+    size_t len = strlen(str);
     len++;      // for zero
     if(len & 1) // multiple of 2 bytes storage
       len++;

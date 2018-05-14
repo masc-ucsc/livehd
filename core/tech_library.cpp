@@ -11,16 +11,16 @@
 #include "rapidjson/filewritestream.h"
 #include "rapidjson/prettywriter.h"
 
-bool Tech_library::include(std::string name) const {
+bool Tech_library::include(const std::string & name) const {
   return cname2id.find(name) != cname2id.end();
 }
 
-uint16_t Tech_library::get_cell_id(std::string name) const {
+uint16_t Tech_library::get_cell_id(const std::string & name) const {
   assert(include(name));
   return cname2id.at(name);
 }
 
-uint16_t Tech_library::create_cell_id(std::string name) {
+uint16_t Tech_library::create_cell_id(const std::string & name) {
   assert(!include(name));
   assert(cell_types.size() < std::numeric_limits<uint16_t>::max()); // increase to uin32t if needed
 

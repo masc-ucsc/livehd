@@ -40,7 +40,7 @@ protected:
 public:
   struct IndexID_Hash {
     inline std::size_t operator()(const Index_ID &k) const {
-      return k;
+      return (size_t) k;
     }
   };
 
@@ -196,10 +196,8 @@ private:
     std::string latch     = "LATCH";
     if(cell_name.find(flop) != std::string::npos) {
       return true;
-    } else if(cell_name.find(latch) != std::string::npos) {
-      return true;
     } else
-      return false;
+	  return cell_name.find(latch) != std::string::npos;
   }
 
   void find_cell_conn(const LGraph *g);
