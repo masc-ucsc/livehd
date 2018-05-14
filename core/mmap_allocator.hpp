@@ -163,7 +163,7 @@ class mmap_allocator {
       return mmap_capacity;
     }
 
-  private:
+  protected:
     uint64_t *mmap_base;
     size_t file_size;
     size_t mmap_size;
