@@ -74,7 +74,7 @@ std::vector<LGraph *> Inou_abc::generate() {
 	return lgs;
 }
 
-void Inou_abc::generate(std::vector<const LGraph *> out) {
+void Inou_abc::generate(std::vector<const LGraph *>& out) {
 	if (out.size() == 1) {
 		if (is_techmap(out[0])) {
 			find_cell_conn(out[0]);

@@ -447,7 +447,7 @@ void Inou_cfg::lgraph_2_cfg(const LGraph* g, const string& filename ) {
   fmt::print("line_cnt = {}\n",line_cnt);
 }
 
-void Inou_cfg::generate(vector<const LGraph *> out) {
+void Inou_cfg::generate(vector<const LGraph *>& out) {
   if (out.size() == 1) {
     lgraph_2_cfg(out[0], opack.cfg_output);
   }
@@ -457,6 +457,30 @@ void Inou_cfg::generate(vector<const LGraph *> out) {
       lgraph_2_cfg(g, file);
     }
   }
+}
+  
+void Inou_cfg::cfg_2_dot(LGraph *g, const std::string &path) {
+  FILE *dot = fopen(path.c_str(), "w");
+
+  fprintf(dot, "digraph fwd_%s {\n", g->get_name().c_str());
+
+  for(auto idx:g->fast()) {
+    if (g->is_graph_input(idx))
+      fprintf(dot, "node%d[label =\"%d $%s\"];\n",(int)idx, (int)idx, g->get_graph_input_name(idx));
+    else if (g->is_graph_output(idx))
+      fprintf(dot, "node%d[label =\"%d %%%s\"];\n",(int)idx, (int)idx, g->get_graph_output_name(idx));
+    else
+      fprintf(dot, "node%d[label =\"%d %s\"];\n",(int)idx, (int)idx, g->node_type_get(idx).get_name().c_str());
+  }
+
+  for(auto idx:g->fast()) {
+    for(const auto &c:g->out_edges(idx)) {
+      fprintf(dot, "node%d -> node%d\n", (int)idx, (int)c.get_idx());
+    }
+  }
+
+  fprintf(dot, "}\n");
+  fclose(dot);
 }
 
 //tmp zone
