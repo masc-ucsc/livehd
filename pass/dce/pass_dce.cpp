@@ -1,23 +1,23 @@
 
-#include <time.h>
 #include <string>
+#include <time.h>
 
 #include <bm.h>
 
-#include "pass_dce.hpp"
-#include "lgraph.hpp"
 #include "lgedgeiter.hpp"
+#include "lgraph.hpp"
+#include "pass_dce.hpp"
 
 Pass_dce::Pass_dce()
-  : Pass("dce") {
+    : Pass("dce") {
 }
 
 void Pass_dce::transform(LGraph *g) {
 
-  bm::bvector<> output_used;
+  bm::bvector<>      output_used;
   std::set<Index_ID> pending;
 
-  for(auto idx:g->fast()) {
+  for(auto idx : g->fast()) {
     if(g->is_graph_output(idx)) {
       pending.insert(idx);
     }
@@ -27,9 +27,9 @@ void Pass_dce::transform(LGraph *g) {
     Index_ID current = *(pending.begin());
     pending.erase(current);
     output_used.set_bit(current);
-    fmt::print("dce using {}\n",current);
+    fmt::print("dce using {}\n", current);
 
-    for(auto& c:g->inp_edges(current)) {
+    for(auto &c : g->inp_edges(current)) {
       if(output_used.get_bit(c.get_out_pin().get_nid()))
         continue;
 
@@ -45,15 +45,13 @@ void Pass_dce::transform(LGraph *g) {
     fmt::print("dce using {}\n",idx);
   }*/
 
-  for(auto idx:g->fast()) {
-    if (output_used.get_bit(idx))
+  for(auto idx : g->fast()) {
+    if(output_used.get_bit(idx))
       continue;
-    fmt::print("dce removing {}\n",idx);
+    fmt::print("dce removing {}\n", idx);
 
     g->del_node(idx);
   }
 
   g->sync();
-
 }
-

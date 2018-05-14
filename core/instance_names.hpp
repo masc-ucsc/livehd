@@ -4,9 +4,9 @@
 
 #include <assert.h>
 
-#include <string>
-#include <map>
 #include "dense.hpp"
+#include <map>
+#include <string>
 
 #include "lgraphbase.hpp"
 #include <string>
@@ -19,7 +19,6 @@ private:
   Dense<Index_ID>      instances;
 
 protected:
-
   friend LGraph;
 
 public:
@@ -30,13 +29,13 @@ public:
   virtual void sync();
   virtual void emplace_back();
 
-  const char * get_instancename(Char_Array_ID wid) const;
+  const char *get_instancename(Char_Array_ID wid) const;
 
   Char_Array_ID get_instance_name_id(Index_ID nid) const;
-  void set_node_instance(Index_ID nid, Char_Array_ID instance_name_id);
+  void          set_node_instance(Index_ID nid, Char_Array_ID instance_name_id);
 
-  Char_Array_ID set_node_instance_name(Index_ID nid, const char* name) {
-    assert(nid<instances.size());
+  Char_Array_ID set_node_instance_name(Index_ID nid, const char *name) {
+    assert(nid < instances.size());
     assert(node_internal[nid].is_node_state());
     assert(node_internal[nid].is_root());
     assert(node_internal[nid].get_nid() == nid);
@@ -47,8 +46,8 @@ public:
     return cid;
   }
 
-  const char* get_node_instancename(Index_ID nid) const {
-    assert(nid<instances.size());
+  const char *get_node_instancename(Index_ID nid) const {
+    assert(nid < instances.size());
     assert(node_internal[nid].is_node_state());
     assert(node_internal[nid].is_root());
     assert(node_internal[nid].get_nid() == nid);
@@ -58,9 +57,9 @@ public:
     return get_instancename(get_instance_name_id(nid));
   }
 
-  bool has_instance_name(const char* name) const;
+  bool has_instance_name(const char *name) const;
 
-  Index_ID get_node_from_instance_name(const char* name) const;
+  Index_ID get_node_from_instance_name(const char *name) const;
 };
 
 #endif

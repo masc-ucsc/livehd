@@ -8,18 +8,18 @@ using namespace Live;
 
 void Invariant_finder::get_topology() {
 
-  std::vector<LGraph*> discovered;
-  std::set<LGraph*> visited;
+  std::vector<LGraph *> discovered;
+  std::set<LGraph *>    visited;
 
   discovered.push_back(elab_graph);
 
   //top module
   boundaries.instance_collection[Invariant_boundaries::get_graphID(elab_graph)].insert("");
   boundaries.instance_type_map["##TOP##"] = Invariant_boundaries::get_graphID(elab_graph);
-  boundaries.top = elab_graph->get_name();
+  boundaries.top                          = elab_graph->get_name();
 
   while(discovered.size()) {
-    LGraph* current = discovered.back();
+    LGraph *current = discovered.back();
     discovered.pop_back();
     if(visited.find(current) != visited.end()) {
       continue;
@@ -27,17 +27,17 @@ void Invariant_finder::get_topology() {
 
     visited.insert(current);
 
-    for(auto &idx: current->fast()) {
+    for(auto &idx : current->fast()) {
 
       //filter out primitives, we're only interested in user defined modules
       if(current->node_type_get(idx).op != SubGraph_Op)
         continue;
 
-      LGraph* subgraph = LGraph::find_graph(current->get_subgraph_name(idx), current->get_path());
+      LGraph *subgraph = LGraph::find_graph(current->get_subgraph_name(idx), current->get_path());
 
       boundaries.hierarchy_tree[Invariant_boundaries::get_graphID(subgraph)].insert(Invariant_boundaries::get_graphID(current));
 
-      for(auto& prefix : boundaries.instance_collection[Invariant_boundaries::get_graphID(current)]) {
+      for(auto &prefix : boundaries.instance_collection[Invariant_boundaries::get_graphID(current)]) {
         std::string instance_name;
         if(current->get_instance_name_id(idx) == 0) {
 #ifdef DEBUG
@@ -79,16 +79,16 @@ void Invariant_finder::propagate_until_boundary(Index_ID nid, uint32_t bit_selec
   stack.set_bit(nid);
 
   if(synth_graph->is_graph_input(nid) ||
-      synth_graph->node_type_get(nid).op == U32Const_Op ||
-      synth_graph->node_type_get(nid).op == StrConst_Op) {
+     synth_graph->node_type_get(nid).op == U32Const_Op ||
+     synth_graph->node_type_get(nid).op == StrConst_Op) {
     return;
   }
 
-  for(auto & edge : synth_graph->inp_edges(nid)) {
+  for(auto &edge : synth_graph->inp_edges(nid)) {
 
     //in cases like join/pick we only propagate to a specific bit
     std::set<uint32_t> bit_selections;
-    int propagate = resolve_bit(synth_graph, nid, bit_selection, edge.get_inp_pin().get_pid(), bit_selections);
+    int                propagate = resolve_bit(synth_graph, nid, bit_selection, edge.get_inp_pin().get_pid(), bit_selections);
     if(propagate == -1)
       continue;
 
@@ -108,7 +108,7 @@ void Invariant_finder::propagate_until_boundary(Index_ID nid, uint32_t bit_selec
 
       // no net name set, thus this is not a invariant boundary
       if(synth_graph->get_wid(driver_cell) == 0 ||
-          !boundaries.is_invariant_boundary(net_bit)) {
+         !boundaries.is_invariant_boundary(net_bit)) {
         //recurse
         propagate_until_boundary(driver_cell, t_bit_selection);
         partial_endpoints[nid_bit].insert(partial_endpoints[driver_bit].begin(), partial_endpoints[driver_bit].end());
@@ -127,19 +127,18 @@ void Invariant_finder::find_invariant_boundaries() {
   std::string path = elab_graph->get_path();
   get_topology();
 
-  for(auto & _inst : boundaries.instance_type_map) {
+  for(auto &_inst : boundaries.instance_type_map) {
     Instance_name inst = _inst.first;
     if(inst == "##TOP##")
       inst = "";
     else
       inst = inst + hier_separator;
 
-    LGraph*        lg = Invariant_boundaries::get_graph(_inst.second, path);
-    fmt::print("going over module {} instance name {}\n",_inst.second, _inst.first);
-
+    LGraph *lg = Invariant_boundaries::get_graph(_inst.second, path);
+    fmt::print("going over module {} instance name {}\n", _inst.second, _inst.first);
 
     std::map<Net_ID, Index_ID> invariant_boundaries;
-    for(auto& node: lg->fast()) {
+    for(auto &node : lg->fast()) {
       std::string net_name;
 
       //FIXME: when testing with synopsys, bit gets merged into name, we need to
@@ -164,26 +163,26 @@ void Invariant_finder::find_invariant_boundaries() {
 
 #ifdef DEBUG
       } else {
-        assert(!synth_graph->has_name(("\\"  + hierarchical_name).c_str()));
+        assert(!synth_graph->has_name(("\\" + hierarchical_name).c_str()));
 #endif
         continue;
       }
 
       for(int bit = 0; bit < synth_graph->get_bits(idx); bit++) {
-        Net_ID id = std::make_pair(wire_id, bit);
+        Net_ID id                      = std::make_pair(wire_id, bit);
         boundaries.invariant_cones[id] = Net_set();
         invariant_boundaries.insert(std::make_pair(id, idx));
-        fmt::print("invariant {}[{}] net {}\n",wire_id, bit, hierarchical_name);
+        fmt::print("invariant {}[{}] net {}\n", wire_id, bit, hierarchical_name);
       }
     }
 
-    for(auto& invar : invariant_boundaries) {
+    for(auto &invar : invariant_boundaries) {
 
-      fmt::print("invar boundary {} nid {} bit{} \n",invar.first.first, invar.second, invar.first.second);
+      fmt::print("invar boundary {} nid {} bit{} \n", invar.first.first, invar.second, invar.first.second);
 
-      Index_ID    idx     = invar.second;
+      Index_ID idx = invar.second;
       //WireName_ID wire_id = invar.first.first;
-      uint32_t    bit     = invar.first.second;
+      uint32_t bit = invar.first.second;
 
       propagate_until_boundary(idx, bit);
 
@@ -192,7 +191,7 @@ void Invariant_finder::find_invariant_boundaries() {
       boundaries.invariant_cones[invar.first].insert(partial_endpoints[nid_bit].begin(), partial_endpoints[nid_bit].end());
       boundaries.invariant_cone_cells[invar.first].insert(partial_cone_cells[nid_bit].begin(), partial_cone_cells[nid_bit].end());
 
-      for(auto & cell : partial_cone_cells[nid_bit]) {
+      for(auto &cell : partial_cone_cells[nid_bit]) {
         if(boundaries.gate_appearances.find(cell) == boundaries.gate_appearances.end()) {
           boundaries.gate_appearances[cell] = 0;
         }
@@ -201,7 +200,4 @@ void Invariant_finder::find_invariant_boundaries() {
     }
   }
   fmt::print("RTP END fibs\n");
-
 }
-
-

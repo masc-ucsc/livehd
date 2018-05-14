@@ -3,9 +3,9 @@
 
 #include <assert.h>
 
-#include <string>
-#include <map>
 #include "dense.hpp"
+#include <map>
+#include <string>
 
 #include "lgraphbase.hpp"
 #include <string>
@@ -23,8 +23,8 @@ public:
   virtual void reload();
   virtual void sync();
 
-  Const_ID get_constant_id(const char *constant);
-  const char * get_constant(Const_ID const_id) const;
+  Const_ID    get_constant_id(const char *constant);
+  const char *get_constant(Const_ID const_id) const;
 };
 
 #endif

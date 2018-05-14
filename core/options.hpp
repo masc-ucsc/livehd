@@ -20,17 +20,16 @@ public:
 // Pure static class
 class Options {
 private:
-  Options() {
-  };
+  Options(){};
 
 protected:
-  static int cargc;
-  static char **cargv;
+  static int                                         cargc;
+  static char **                                     cargv;
   static boost::program_options::options_description desc;
 
 public:
-  static int get_cargc() { return cargc; };
-  static char **get_cargv() { return cargv; };
+  static int                                          get_cargc() { return cargc; };
+  static char **                                      get_cargv() { return cargv; };
   static boost::program_options::options_description *get_desc() { return &desc; };
 
   static void setup(std::string cmd);
@@ -41,4 +40,3 @@ public:
 };
 
 #endif
-

@@ -6,16 +6,15 @@
 
 class Import_verilog : public Import_library {
 
-  private:
-    Tech_library* tlib;
+private:
+  Tech_library *tlib;
 
-  public:
-    Import_verilog(Tech_options_pack opack) : Import_library(opack) {
-      tlib = Tech_library::instance(opack.lgdb_path);
-    }
+public:
+  Import_verilog(Tech_options_pack opack) : Import_library(opack) {
+    tlib = Tech_library::instance(opack.lgdb_path);
+  }
 
-    void update() override;
+  void update() override;
 };
 
 #endif
-

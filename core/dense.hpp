@@ -22,23 +22,22 @@
 // 29: 32
 // 28: 64
 
+#include "mmap_allocator.hpp"
 #include <unistd.h>
 #include <vector>
-#include "mmap_allocator.hpp"
 
 template <typename T>
 class Dense : public std::vector<T, mmap_allocator<T>> {
 
 public:
-  typedef mmap_allocator<T> allocator_type;
+  typedef mmap_allocator<T>              allocator_type;
   typedef std::vector<T, allocator_type> b_vector;
 
   Dense(const std::string filename)
-    :b_vector(get_saved_size(filename)
-    ,allocator_type(filename)) {
+      : b_vector(get_saved_size(filename), allocator_type(filename)) {
 
-      b_vector::reserve(this->get_allocator().capacity());
-    }
+    b_vector::reserve(this->get_allocator().capacity());
+  }
 
   virtual ~Dense() {
     this->get_allocator().save_size(this->size());
@@ -52,10 +51,10 @@ public:
 
   void resize(size_t sz) {
     this->get_allocator().save_size(sz);
-    if (sz <= this->size()) {
+    if(sz <= this->size()) {
       b_vector::resize(sz);
-    }else{
-      if (sz > this->capacity())
+    } else {
+      if(sz > this->capacity())
         this->reserve(sz);
       b_vector::_M_impl._M_finish = b_vector::_M_impl._M_start + sz;
     }
@@ -68,11 +67,11 @@ public:
 private:
   long get_saved_size(std::string filename) {
     int fd = open(filename.c_str(), O_RDONLY);
-    if (fd<0)
+    if(fd < 0)
       return 0;
 
     uint64_t size;
-    read(fd,&size,sizeof(uint64_t));
+    read(fd, &size, sizeof(uint64_t));
 
     close(fd);
 
@@ -81,4 +80,3 @@ private:
 };
 
 #endif
-

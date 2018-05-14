@@ -1,14 +1,12 @@
 #ifndef LIVE_OPTIONS_H_
 #define LIVE_OPTIONS_H_
 
-
-#include <boost/program_options.hpp>
 #include "core/options.hpp"
+#include <boost/program_options.hpp>
 
 class Live_pass_pack {
 
 public:
-
   //input related options
   std::string original_lgdb;
   std::string modified_lgdb;
@@ -20,8 +18,7 @@ public:
   std::string delta_lgdb;
   std::string diff_file;
 
-
-  Live_pass_pack(int argc, const char ** argv);
+  Live_pass_pack(int argc, const char **argv);
 };
 
 #endif

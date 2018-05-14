@@ -1,18 +1,17 @@
 
-#include <queue>
-#include <functional>
 #include "structural.hpp"
 #include "lgedgeiter.hpp"
-
+#include <functional>
+#include <queue>
 
 /*bool operator<(const queue_element& lhs, const queue_element& rhs) {
   return lhs.priority < rhs.priority;
 }*/
 
-Node_Pin Live_structural::get_inp_edge(LGraph* current, Index_ID nid, Port_ID pid) {
-  Node_Pin candidate(1,1,false);
-  bool found = false;
-  for(auto& inp : current->inp_edges(nid)) {
+Node_Pin Live_structural::get_inp_edge(LGraph *current, Index_ID nid, Port_ID pid) {
+  Node_Pin candidate(1, 1, false);
+  bool     found = false;
+  for(auto &inp : current->inp_edges(nid)) {
     if(inp.get_inp_pin().get_pid()) {
       assert(!found);
       candidate = inp.get_inp_pin();
@@ -23,18 +22,18 @@ Node_Pin Live_structural::get_inp_edge(LGraph* current, Index_ID nid, Port_ID pi
 }
 
 //void Live_structural::replace(LGraph* nsynth, std::set<Net_ID>& diffs) {
-void Live_structural::replace(LGraph* nsynth) {
+void Live_structural::replace(LGraph *nsynth) {
 
   std::map<Index_ID, Index_ID> candidate_equiv;
-  std::set<Index_ID> no_match;
-  std::set<Index_ID> visited;
+  std::set<Index_ID>           no_match;
+  std::set<Index_ID>           visited;
 
-  std::set<Index_ID> outputs;
+  std::set<Index_ID>                                                      outputs;
   std::priority_queue<queue_element, std::vector<queue_element>, Compare> discovered;
-  for(auto& idx : nsynth->fast()) {
+  for(auto &idx : nsynth->fast()) {
     if(nsynth->is_graph_output(idx)) {
       outputs.insert(idx);
-      discovered.push(queue_element(idx,0));
+      discovered.push(queue_element(idx, 0));
       if(Index_ID oid = get_candidate(idx, nsynth))
         candidate_equiv[idx] = oid;
       else
@@ -44,8 +43,8 @@ void Live_structural::replace(LGraph* nsynth) {
 
   while(discovered.size() > 1) {
     queue_element current_ = discovered.top();
-    int prio = current_.priority;
-    Index_ID current = current_.id;
+    int           prio     = current_.priority;
+    Index_ID      current  = current_.id;
     discovered.pop();
     visited.insert(current);
     if(candidate_equiv.find(current) == candidate_equiv.end()) {
@@ -58,9 +57,9 @@ void Live_structural::replace(LGraph* nsynth) {
 
     Index_ID candidate_current = candidate_equiv[current];
 
-    for(auto & pred : nsynth->inp_edges(current)) {
+    for(auto &pred : nsynth->inp_edges(current)) {
       discovered.push(queue_element(pred.get_inp_pin().get_pid(), current_.priority + 1));
-      for(auto & orig_pred : original->inp_edges(candidate_current)) {
+      for(auto &orig_pred : original->inp_edges(candidate_current)) {
         if(orig_pred.get_inp_pin().get_pid() == pred.get_inp_pin().get_pid()) {
           if(candidate_equiv.find(pred.get_out_pin().get_nid()) == candidate_equiv.end()) {
             candidate_equiv[pred.get_out_pin().get_nid()] = orig_pred.get_out_pin().get_nid();
@@ -70,16 +69,16 @@ void Live_structural::replace(LGraph* nsynth) {
             }
           }
           if(visited.find(pred.get_out_pin().get_nid()) == visited.end()) {
-            discovered.push(queue_element(pred.get_out_pin().get_nid(), prio+1));
+            discovered.push(queue_element(pred.get_out_pin().get_nid(), prio + 1));
           }
         }
       }
     }
   }
 
-  int count = 0;
+  int                count = 0;
   std::set<Index_ID> match;
-  for(auto& equivs : candidate_equiv) {
+  for(auto &equivs : candidate_equiv) {
     if(no_match.find(equivs.first) != no_match.end())
       continue;
 
@@ -87,5 +86,4 @@ void Live_structural::replace(LGraph* nsynth) {
   }
 
   fmt::print("nomatch {}, match {}\n", no_match.size(), count);
-
 }
