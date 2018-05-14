@@ -1,7 +1,7 @@
 #include "lgconsts.hpp"
 
-LGraph_Consts::LGraph_Consts(std::string path, std::string name)
-    : consts(path, name + "_constants") {
+LGraph_Consts::LGraph_Consts(const std::string & path, const std::string & name) noexcept
+    : LGraph_Base(path,name), consts(path, name + "_constants") {
   locked = false;
 }
 

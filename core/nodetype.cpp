@@ -70,22 +70,21 @@ Node_Type &Node_Type::get(Node_Type_Op op) {
   return *table[op];
 }
 
-Node_Type_Op Node_Type::get(const std::string opname) {
+Node_Type_Op Node_Type::get(const std::string & opname) {
   assert(is_type(opname));
   return name2node[opname]->op;
 }
 
-bool Node_Type::is_type(const std::string opname) {
+bool Node_Type::is_type(const std::string & opname) {
   return (name2node.find(opname) != name2node.end());
 }
 
-LGraph_Node_Type::LGraph_Node_Type(std::string path, std::string name)
-    : LGraph_Consts(path, name), node_type_op(path + "/" + name + "_type") {
+LGraph_Node_Type::LGraph_Node_Type(const std::string& path, const std::string & name) noexcept
+    : LGraph_Base(path,name), LGraph_Consts(path, name), node_type_op(path + "/" + name + "_type") {
 }
 
 void LGraph_Node_Type::emplace_back() {
-  node_type_op.emplace_back();
-  node_type_op[node_type_op.size() - 1] = Invalid_Op;
+  node_type_op.emplace_back(Invalid_Op);
 }
 
 void LGraph_Node_Type::clear() {
@@ -196,7 +195,7 @@ uint32_t LGraph_Node_Type::node_value_get(Index_ID nid) const {
   return (uint32_t)(node_type_op[node_internal[nid].get_nid()] - U32ConstMin_Op);
 }
 
-void LGraph_Node_Type::node_const_type_set(Index_ID nid, std::string value
+void LGraph_Node_Type::node_const_type_set(Index_ID nid, const std::string & value
 #ifdef DEBUG
                                            ,
                                            bool enforce_bits

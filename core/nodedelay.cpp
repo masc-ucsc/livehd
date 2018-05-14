@@ -2,8 +2,8 @@
 #include "nodedelay.hpp"
 #include "lgraph.hpp"
 
-LGraph_Node_Delay::LGraph_Node_Delay(std::string path, std::string name)
-    : node_delay(path + "/" + name + "_delay") {
+LGraph_Node_Delay::LGraph_Node_Delay(const std::string & path, const std::string & name) noexcept
+    : LGraph_Base(path,name), node_delay(path + "/" + name + "_delay") {
 }
 
 void LGraph_Node_Delay::clear() {

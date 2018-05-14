@@ -54,7 +54,7 @@ private:
   bool pending_clear_reload;
 
 public:
-  Char_Array(std::string path, std::string _name)
+  Char_Array(const std::string & path, const std::string & _name)
       : variable_internal(path + "/" + _name) {
 
     pending_clear_reload = true;
