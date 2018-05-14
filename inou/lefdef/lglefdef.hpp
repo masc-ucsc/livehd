@@ -105,7 +105,7 @@ int lef_pin_cb(lefrCallbackType_e c, lefiPin *fpin, lefiUserData ud) { //fpin me
 
 int lef_layer_cb(lefrCallbackType_e c, lefiLayer *flayer, lefiUserData ud) { //flayer means layer information from lef file
   Tech_library *tlib = (Tech_library *)ud;                                               //convert void* into Tech_library*
-  inti, j, k;
+  int i, j, k;
   lefiSpacingTable *spTable;
   lefiParallel *parallel;
 
