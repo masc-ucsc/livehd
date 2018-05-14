@@ -98,7 +98,7 @@ void Options::setup(int argc, const char **argv) {
 
   cargv = (char **)malloc(sizeof(char *) * (argc + 1));
   for(int i = 0; i < argc; i++) {
-    int len  = strlen(argv[i]) + 1;
+    size_t len  = strlen(argv[i]) + 1;
     cargv[i] = (char *)malloc(sizeof(char) * len);
     strcpy(cargv[i], argv[i]);
   }

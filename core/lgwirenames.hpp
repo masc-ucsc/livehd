@@ -30,7 +30,7 @@ protected:
     offsets[nid] = offset;
   }
 
-  uint16_t get_offset(Index_ID nid) const {
+  virtual uint16_t get_offset(Index_ID nid) const {
     assert(nid < offsets.size());
     assert(node_internal[nid].is_node_state());
     assert(node_internal[nid].is_root());

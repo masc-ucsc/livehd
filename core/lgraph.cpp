@@ -185,11 +185,11 @@ const Edge_iterator ConstNode::out_edges() const {
   return g->out_edges(nid);
 }
 
-Edge_iterator Node::inp_edges() const {
+const Edge_iterator Node::inp_edges() const {
   return g->inp_edges(nid);
 }
 
-Edge_iterator Node::out_edges() const {
+const Edge_iterator Node::out_edges() const {
   return g->out_edges(nid);
 }
 

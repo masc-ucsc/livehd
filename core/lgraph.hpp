@@ -84,7 +84,7 @@ public:
     LGraph_WireNames::dump();
   }
 
-  uint16_t get_offset(Index_ID nid) const {
+  uint16_t get_offset(Index_ID nid) const override {
     return LGraph_WireNames::get_offset(nid);
   }
 
@@ -117,8 +117,8 @@ public:
 
   uint16_t get_bits() const { return g->get_bits(nid); }
 
-  const Edge_iterator inp_edges() const;
-  const Edge_iterator out_edges() const;
+  virtual const Edge_iterator inp_edges() const;
+  virtual const Edge_iterator out_edges() const;
 
   bool is_root() const { return g->is_root(nid); }
   bool is_graph_input() const { return g->is_graph_input(nid); }
@@ -157,8 +157,8 @@ public:
     g->node_delay_set(nid, t);
   }
 
-  Edge_iterator inp_edges() const;
-  Edge_iterator out_edges() const;
+  const Edge_iterator inp_edges() const override ;
+  const Edge_iterator out_edges() const override ;
 };
 
 #endif
