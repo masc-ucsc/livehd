@@ -84,7 +84,7 @@ LGraph_Node_Type::LGraph_Node_Type(std::string path, std::string name)
 }
 
 void LGraph_Node_Type::emplace_back() {
-  node_type_emplace_back();
+  node_type_op.emplace_back();
   node_type_op[node_type_op.size() - 1] = Invalid_Op;
 }
 
