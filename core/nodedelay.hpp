@@ -24,7 +24,7 @@ protected:
   void node_delay_emplace_back();
 
 public:
-  LGraph_Node_Delay(std::string path, std::string name);
+  explicit LGraph_Node_Delay(const std::string & path, const std::string & name) noexcept ;
 
   virtual void clear();
   virtual void reload();

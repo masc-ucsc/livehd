@@ -8,6 +8,7 @@
 #include <chrono>
 #include <iostream>
 #include <vector>
+
 class LGBench {
 private:
   int parseLine(char *line) {
@@ -65,7 +66,7 @@ public:
     start_mem  = getValue();
   }
 
-  void sample(std::string name) {
+  void sample(const std::string & name) {
     Time_Sample s;
     s.tp   = std::chrono::system_clock::now();
     s.mem  = getValue();

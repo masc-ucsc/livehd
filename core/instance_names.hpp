@@ -22,7 +22,7 @@ protected:
   friend LGraph;
 
 public:
-  LGraph_InstanceNames(std::string path, std::string name);
+  explicit LGraph_InstanceNames(const std::string& path, const std::string& name) noexcept ;
 
   virtual void clear();
   virtual void reload();

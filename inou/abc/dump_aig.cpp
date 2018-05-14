@@ -258,7 +258,6 @@ void Inou_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
   char       namebuffer[255];
   for(const auto &idx : graphio_output_id) {
     int  width = g->get_bits(idx);
-    char namebuffer[255];
     if(width > 1) {
       for(int i = 0; i < width; i++) {
         Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
