@@ -20,7 +20,7 @@ ENDFOREACH (EXE)
 
 ADD_CUSTOM_TARGET(libabc ALL)
 ADD_CUSTOM_COMMAND(
-        OUTPUT libabc.a
+        TARGET libabc
         COMMAND make -C ${CMAKE_SOURCE_DIR}/subs/yosys/abc libabc.a ABC_USE_PIC=true
         COMMENT "Building libabc.a"
 )

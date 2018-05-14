@@ -266,6 +266,3 @@ const Node_Type &LGraph_Node_Type::node_type_get(Index_ID nid) const {
   return Node_Type::get(op);
 }
 
-void LGraph_Node_Type::node_type_emplace_back() {
-  node_type_op.emplace_back();
-}
