@@ -17,7 +17,7 @@ private:
   Char_Array<Const_ID> consts;
 
 public:
-  LGraph_Consts(std::string path, std::string name);
+  explicit LGraph_Consts(const std::string & path, const std::string & name) noexcept;
 
   virtual void clear();
   virtual void reload();

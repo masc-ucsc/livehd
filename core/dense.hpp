@@ -33,7 +33,7 @@ public:
   typedef mmap_allocator<T>              allocator_type;
   typedef std::vector<T, allocator_type> b_vector;
 
-  Dense(const std::string filename)
+  Dense(const std::string & filename)
       : b_vector(get_saved_size(filename), allocator_type(filename)) {
 
     b_vector::reserve(this->get_allocator().capacity());
@@ -65,7 +65,7 @@ public:
   }
 
 private:
-  long get_saved_size(std::string filename) {
+  long get_saved_size(const std::string & filename) {
     int fd = open(filename.c_str(), O_RDONLY);
     if(fd < 0)
       return 0;

@@ -2,8 +2,8 @@
 #include "nodeplace.hpp"
 #include "lgraph.hpp"
 
-LGraph_Node_Place::LGraph_Node_Place(std::string path, std::string name)
-    : node_place(path + "/" + name + "_place") {
+LGraph_Node_Place::LGraph_Node_Place(const std::string & path, const std::string & name) noexcept
+    : LGraph_Base(path,name), node_place(path + "/" + name + "_place") {
 }
 
 void LGraph_Node_Place::clear() { node_place.clear(); }

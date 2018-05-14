@@ -80,14 +80,14 @@ protected:
 public:
   const Node_Type_Op op;
 
-  Node_Type(const std::string _name, Node_Type_Op _op, bool _pipelined)
+  Node_Type(const std::string & _name, Node_Type_Op _op, bool _pipelined)
       : name(_name), pipelined(_pipelined), op(_op){};
 
   static Node_Type &create_sub_graph(LGraph *g);
 
   static Node_Type &  get(Node_Type_Op op);
-  static Node_Type_Op get(const std::string opname);
-  static bool         is_type(const std::string opname);
+  static Node_Type_Op get(const std::string & opname);
+  static bool         is_type(const std::string & opname);
 
   const std::string &get_name() const { return name; }
 
@@ -606,7 +606,7 @@ private:
   bm::bvector<>       const_nodes;
 
 public:
-  LGraph_Node_Type(std::string path, std::string name);
+  explicit LGraph_Node_Type(const std::string& path, const std::string& name) noexcept ;
 
   virtual void clear();
   virtual void reload();
@@ -621,7 +621,7 @@ public:
   void     node_subgraph_set(Index_ID nid, uint32_t subgraphid);
   uint32_t subgraph_id_get(Index_ID nid) const;
 
-  void node_const_type_set(Index_ID nid, std::string value
+  void node_const_type_set(Index_ID nid, const std::string & value
 #ifdef DEBUG
                            ,
                            bool enforce_bits = true

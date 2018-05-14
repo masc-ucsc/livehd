@@ -41,7 +41,7 @@ protected:
   friend LGraph;
 
 public:
-  LGraph_WireNames(std::string path, std::string name);
+  explicit LGraph_WireNames(const std::string & path, const std::string & name) noexcept ;
 
   virtual void clear();
   virtual void reload();
@@ -82,10 +82,10 @@ public:
   }
 
   bool has_name(const char *name) const;
-  bool has_name(const std::string name) const { return has_name(name.c_str()); }
+  bool has_name(const std::string & name) const { return has_name(name.c_str()); }
 
   Index_ID get_node_id(const char *name) const;
-  Index_ID get_node_id(const std::string name) const { return get_node_id(name.c_str()); }
+  Index_ID get_node_id(const std::string & name) const { return get_node_id(name.c_str()); }
 
   void dump() { names.dump(); }
 };

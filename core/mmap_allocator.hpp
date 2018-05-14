@@ -21,7 +21,14 @@ class mmap_allocator {
 public:
   typedef T value_type;
 
-  mmap_allocator(const std::string &filename) : mmap_base(0), file_size(0), mmap_size(0), mmap_capacity(0), mmap_fd(-1), alloc(0), mmap_name(filename) {
+  explicit mmap_allocator(const std::string &filename) :
+	  mmap_base(0),
+	  file_size(0),
+	  mmap_size(0),
+	  mmap_capacity(0),
+	  mmap_fd(-1),
+	  alloc(0),
+	  mmap_name(filename) {
   }
 
 #pragma clang diagnostic push
