@@ -8,8 +8,11 @@
 #include "lgedgeiter.hpp"
 #include "lgraphbase.hpp"
 
-LGraph_Base::LGraph_Base(const std::string &_path, const std::string &_name)
-    : name(_name), path(_path), node_internal(_path + "/" + _name + "_nodes"), input_array(_path, _name + "_inputs"), output_array(_path, _name + "_outputs") {
+LGraph_Base::LGraph_Base(const std::string &_path, const std::string &_name) noexcept
+    : name(_name), path(_path),
+	  node_internal(_path + "/" + _name + "_nodes"),
+	  input_array(_path, _name + "_inputs"),
+	  output_array(_path, _name + "_outputs") {
 
   locked = false;
 }
