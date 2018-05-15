@@ -21,7 +21,7 @@ public:
   static void* operator new[](std::size_t sz) {
     std::cout << "custom new for size " << sz << '\n';
     return ::operator new(sz);
-  } 
+  }
 };
   std::ostream& operator<<(std::ostream& os, const potato& obj) {
     os << obj.a;
@@ -48,7 +48,7 @@ int main(int argc, char* argv[]) {
   //potato *p1 = new potato();
   potato p;
   p.a = 65+v.size();
-  v.push_back(p);
+  v.emplace_back(p);
   if (v.size()>1) {
     v[0].a++;
   }
