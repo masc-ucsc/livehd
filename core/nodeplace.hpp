@@ -37,7 +37,9 @@ protected:
   void node_place_emplace_back();
 
 public:
+  LGraph_Node_Place() = delete;
   explicit LGraph_Node_Place(const std::string& path, const std::string& name) noexcept ;
+  virtual ~LGraph_Node_Place(){};
 
   virtual void clear();
   virtual void reload();

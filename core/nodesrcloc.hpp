@@ -32,7 +32,9 @@ private:
   Dense<int>           node_src_loc;
 
 public:
+  LGraph_Node_Src_Loc() = delete;
   explicit LGraph_Node_Src_Loc(const std::string & path, const std::string & name) noexcept ;
+  virtual ~LGraph_Node_Src_Loc(){};
 
   virtual void clear();
   virtual void reload();

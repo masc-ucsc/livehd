@@ -2,7 +2,7 @@
 SET(CMAKE_C_COMPILER   "/usr/bin/clang")
 SET(CMAKE_CXX_COMPILER "/usr/bin/clang++")
 
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.9)
 
 project(lgraph)
 
@@ -12,6 +12,7 @@ enable_testing()
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
 
 IF(CMAKE_BUILD_TYPE_INITIALIZED_TO_DEFAULT)
   SET(CMAKE_BUILD_TYPE Release)
@@ -25,6 +26,7 @@ ELSE(CMAKE_BUILD_TYPE MATCHES "Release")
   MESSAGE("  -DCMAKE_BUILD_TYPE=Release    release compilation options (default)")
   SET(CMAKE_CXX_FLAGS       "-DLIN64 -fPIC -Ofast -mtune=native -DNDEBUG -D_YOSYS_")
   SET(CMAKE_C_FLAGS         "-DLIN64 -fPIC -Ofast -mtune=native -DNDEBUG -D_YOSYS_")
+  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 ENDIF(CMAKE_BUILD_TYPE MATCHES "Debug")
 
 #SET(CMAKE_CXX_FLAGS_RELEASE "-g -ftest-coverage -fprofile-arcs")
