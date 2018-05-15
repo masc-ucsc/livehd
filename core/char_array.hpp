@@ -45,7 +45,7 @@ private:
     return &variable_internal[1];
   }
   const uint16_t *last() const {
-    return &variable_internal[variable_internal.size()];
+    return (uint16_t*)variable_internal.end();
   }
 
   std::unordered_map<std::string, int> str2id;
@@ -64,7 +64,7 @@ public:
     pending_clear_reload = false;
 
     variable_internal.clear();
-    variable_internal.push_back(0); // so that ID zero is not used
+    variable_internal.emplace_back(0); // so that ID zero is not used
     str2id.clear();
   }
 
@@ -73,9 +73,9 @@ public:
     pending_clear_reload = false;
 
     if (variable_internal.empty()) {
-      variable_internal.push_back(0); // so that ID zero is not used
+      variable_internal.emplace_back(0); // so that ID zero is not used
     }else{
-      for(int i=1;i<variable_internal.size();) {
+      for(int i=1;i<variable_internal.size()-1;) {
         const char *str = (const char *)&variable_internal[i+1];
 
         str2id[str] = i;
@@ -107,13 +107,13 @@ public:
     }
 
     int start = variable_internal.size();
-    variable_internal.push_back(len/2);
+    variable_internal.emplace_back(len/2);
 
     for(int i=0;i<len;i+=2) {
       uint16_t val = str[i+1];
       val <<= 8;
       val  |= str[i];
-      variable_internal.push_back(val);
+      variable_internal.emplace_back(val);
     }
 
     assert(start < 0xFFFFFFFF);
@@ -150,17 +150,17 @@ public:
     assert((sizeof(Data_Type)&1) == 0); // multiple of 2 bytes storage
     int start = variable_internal.size();
 
-    variable_internal.push_back(len/2);
+    variable_internal.emplace_back(len/2);
 
     for(int i=0;i<slen;i+=2) {
       uint16_t val = str[i+1];
       val <<= 8;
       val  |= str[i];
-      variable_internal.push_back(val);
+      variable_internal.emplace_back(val);
     }
     uint16_t *x = (uint16_t *)&dt;
     for(int i=0;i<sizeof(Data_Type)/2;i++) {
-      variable_internal.push_back(x[i]);
+      variable_internal.emplace_back(x[i]);
     }
 
     str2id[str] = start;

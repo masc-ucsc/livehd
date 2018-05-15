@@ -23,49 +23,115 @@
 // 28: 64
 
 #include <unistd.h>
-#include <vector>
 #include "mmap_allocator.hpp"
 
 template <typename T>
-class Dense : public std::vector<T, mmap_allocator<T>> {
+class Dense {
 
 public:
-  typedef mmap_allocator<T> allocator_type;
-  typedef std::vector<T, allocator_type> b_vector;
+  typedef T                   value_type;
+  typedef mmap_allocator<T>   allocator_type;
+  typedef value_type*         iterator;
+  typedef const value_type*   const_iterator;
 
-  Dense(const std::string filename)
-    :b_vector(get_saved_size(filename)
-    ,allocator_type(filename)) {
-
-      b_vector::reserve(this->get_allocator().capacity());
+  Dense(const std::string filename) : __allocator(filename) {
+    long sz = get_saved_size(filename);
+    if(sz > 0) {
+      __buffer = __allocator.allocate(sz);
+      __size   = sz;
+    } else {
+      __buffer = 0;
+      __size = 0;
     }
+  }
 
   virtual ~Dense() {
-    this->get_allocator().save_size(this->size());
+    __allocator.save_size(this->size());
   }
 
   void sync() {
-    this->get_allocator().save_size(this->size());
+    __allocator.save_size(this->size());
   }
+
   void reload() {
   }
 
   void resize(size_t sz) {
-    this->get_allocator().save_size(sz);
-    if (sz <= this->size()) {
-      b_vector::resize(sz);
-    }else{
-      if (sz > this->capacity())
-        this->reserve(sz);
-      b_vector::_M_impl._M_finish = b_vector::_M_impl._M_start + sz;
+    if(sz > __size) {
+      reserve(sz);
     }
+    __size = sz;
   }
 
-  void clear() {
-    b_vector::clear();
+  void clear() noexcept {
+    __size = 0;
   }
+
+  void push_back(const value_type& x) {
+    if(__size >= capacity()) {
+      reserve(__size+1);
+    }
+    __buffer[__size] = x;
+    __size++;
+  }
+
+  template <class... Args> void emplace_back(Args&&... args) {
+    if(__size >= capacity()) {
+      reserve(__size+1);
+    }
+    __buffer[__size] = value_type(std::forward<Args>(args)...);
+    __size++;
+  }
+
+  size_t size() const { return __size; }
+  size_t capacity() const { return __allocator.capacity(); }
+  bool empty() const { return __size == 0; }
+
+  void reserve(size_t sz) {
+    value_type* new_buffer = __allocator.allocate(sz);
+    //since we are using mmap with memremap, we do not need to worry about the
+    //old buffer pointer, since the OS will move it and thus deallocate the old
+    //memory
+    __buffer = new_buffer;
+  }
+
+  value_type& operator[](const size_t idx) {
+    assert(idx < __size);
+    return __buffer[idx];
+  }
+
+  const value_type& operator[](const size_t idx) const {
+    assert(idx < __size);
+    return __buffer[idx];
+  }
+
+  value_type& back() { return __buffer[__size-1]; }
+  const value_type& back() const { return __buffer[__size-1]; }
+
+  value_type* data() noexcept { return __buffer; }
+  const value_type* data() const noexcept  { return __buffer; }
+
+	iterator begin() { return __buffer; }
+	iterator end()   { return __buffer+__size; }
+
+	const_iterator cbegin() { return __buffer; }
+	const_iterator cend()   { return __buffer+__size; }
+
+	const_iterator begin() const { return __buffer; }
+	const_iterator end()   const { return __buffer+__size; }
+
+	const_iterator cbegin() const { return __buffer; }
+  const_iterator cend() const { return __buffer+__size; }
+
 
 private:
+
+  allocator_type  __allocator;
+  size_t          __size;
+
+  value_type*     __buffer;
+
+
   long get_saved_size(std::string filename) {
     int fd = open(filename.c_str(), O_RDONLY);
     if (fd<0)

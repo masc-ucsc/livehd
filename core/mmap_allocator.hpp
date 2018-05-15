@@ -12,6 +12,7 @@
 
 
 #define MMAPA_INIT_ENTRIES  (1ULL<<20)
+#define MMAPA_INCR_ENTRIES  (1ULL<<20)
 #define MMAPA_MAX_ENTRIES   (1ULL<<34)
 #define MMAPA_ALIGN_BITS    (12)
 #define MMAPA_ALIGN_MASK    ((1<<MMAPA_ALIGN_BITS)-1)
@@ -58,6 +59,8 @@ class mmap_allocator {
         file_size = s.st_size;
 
         mmap_size = sizeof(uint64_t)+MMAPA_INIT_ENTRIES*sizeof(T)+MMAPA_ALIGN_SIZE;
+        //mmap_size = MMAPA_INIT_ENTRIES*sizeof(T);
+        //mmap_size = MMAPA_INIT_ENTRIES*sizeof(T)+MMAPA_ALIGN_SIZE;
         if(file_size > mmap_size)
           mmap_size = file_size;
         mmap_base = reinterpret_cast<uint64_t *>(mmap(0, mmap_size, PROT_READ|PROT_WRITE, MAP_SHARED, mmap_fd, 0));
@@ -68,13 +71,17 @@ class mmap_allocator {
         }
       }
       if (file_size < (sizeof(uint64_t)+sizeof(T)*n+MMAPA_ALIGN_SIZE)) {
-
         file_size =    sizeof(uint64_t)+sizeof(T)*n+MMAPA_ALIGN_SIZE;
+
+      /*if (file_size < (sizeof(T)*n)) {
+        file_size =    sizeof(T)*n;*/
+      /*if (file_size < (sizeof(uint64_t)+sizeof(T)*n+MMAPA_ALIGN_SIZE)) {
+        file_size =    sizeof(T)*n+MMAPA_ALIGN_SIZE;*/
 
         if(mmap_size < file_size) {
           size_t old_size = mmap_size;
           while(mmap_size < file_size) {
-            mmap_size += (1ULL<<30);
+            mmap_size += MMAPA_INCR_ENTRIES;
           }
           mmap_base = reinterpret_cast<uint64_t *>(mremap(mmap_base, old_size, mmap_size, MREMAP_MAYMOVE));
           if (mmap_base  == MAP_FAILED) {
@@ -85,39 +92,25 @@ class mmap_allocator {
         }
 
         assert(file_size < MMAPA_MAX_ENTRIES*sizeof(T));
-        //std::cout << "growing swap file " << mmap_name << " with size " << n << std::endl;
         ftruncate(mmap_fd, file_size);
       }
-
-#if 0
-      if (file_size < (sizeof(uint64_t)+sizeof(T)*n)) {
-        file_size = (sizeof(uint64_t)+sizeof(T)*n);
-        status = lseek(mmap_fd, file_size, SEEK_SET);
-        if (status <0) {
-          std::cerr << "ERROR: Could not allocate " << file_size << " size to " << mmap_name << std::endl;
-          exit(-2);
-        }
-        write(mmap_fd,"", 1);
-        status = lseek(mmap_fd, 0, SEEK_SET);
-      }
-#endif
       // 64KB Page aligned
       uint64_t b = (uint64_t)(mmap_base+8);
       uint64_t a = b;
-#if 1
       if ((a & MMAPA_ALIGN_MASK) != 0) {
         a = a>>MMAPA_ALIGN_BITS;
         a++;
         a = a<<MMAPA_ALIGN_BITS;
       }
-#endif
 
-      int64_t sz = (file_size-8+a-b)/sizeof(T);
+      /*int64_t sz = (file_size-8+a-b)/sizeof(T);
       if (sz<0)
         mmap_capacity = 0;
       else
-        mmap_capacity = sz;
+        mmap_capacity = sz;*/
+      mmap_capacity = n;
 
+      //return (T*)(mmap_base+MMAPA_ALIGN_BITS/sizeof(T));
       return (T*)(a);
     }
 
@@ -126,10 +119,7 @@ class mmap_allocator {
     }
 
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunused-parameter"
-    void deallocate(T* p, size_t n) {
-#pragma clang diagnostic pop
+    void deallocate(T* p, size_t) {
       alloc--;
       //std::cout << "mmap_allocator::deallocate\n";
       if (alloc!=0)
@@ -142,6 +132,7 @@ class mmap_allocator {
         close(mmap_fd);
       mmap_fd   = -1;
       mmap_base = 0;
+      mmap_capacity = 0;
     }
 
     virtual ~mmap_allocator() {
@@ -156,6 +147,8 @@ class mmap_allocator {
 
       *mmap_base = size;
       file_size  = sizeof(uint64_t)+sizeof(T)*size+MMAPA_ALIGN_SIZE;
+      //file_size  = sizeof(T)*size;
+      //file_size  = sizeof(T)*size+MMAPA_ALIGN_SIZE;
       msync(mmap_base, file_size, MS_SYNC);
     }
 
@@ -163,7 +156,7 @@ class mmap_allocator {
       return mmap_capacity;
     }
 
-  private:
+  protected:
     uint64_t *mmap_base;
     size_t file_size;
     size_t mmap_size;
