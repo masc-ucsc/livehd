@@ -64,7 +64,7 @@ public:
       }
       file_size = s.st_size;
 
-      mmap_size = sizeof(uint64_t) + MMAPA_INIT_ENTRIES * sizeof(T) + MMAPA_ALIGN_SIZE;
+      mmap_size = MMAPA_INIT_ENTRIES * sizeof(T) + MMAPA_ALIGN_SIZE;
       if(file_size > mmap_size)
         mmap_size = file_size;
       mmap_base = reinterpret_cast<uint64_t *>(mmap(0, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, mmap_fd, 0));
@@ -74,8 +74,8 @@ public:
         exit(-1);
       }
     }
-    if(file_size < (sizeof(uint64_t) + sizeof(T) * n + MMAPA_ALIGN_SIZE)) {
-      file_size = sizeof(uint64_t) + sizeof(T) * n + MMAPA_ALIGN_SIZE;
+    if(file_size < sizeof(T) * n + MMAPA_ALIGN_SIZE) {
+      file_size = sizeof(T) * n + MMAPA_ALIGN_SIZE;
 
       if(mmap_size < file_size) {
         size_t old_size = mmap_size;
@@ -143,7 +143,7 @@ public:
       return;
 
     *mmap_base = size;
-    file_size  = sizeof(uint64_t)+sizeof(T)*size+MMAPA_ALIGN_SIZE;
+    file_size  = sizeof(T)*size+MMAPA_ALIGN_SIZE;
     //file_size  = sizeof(T)*size;
     //file_size  = sizeof(T)*size+MMAPA_ALIGN_SIZE;
     msync(mmap_base, file_size, MS_SYNC);
