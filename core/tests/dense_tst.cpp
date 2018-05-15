@@ -36,11 +36,11 @@ int main (int argc, char **argv) {
   std::string str = "p" + std::to_string(vec.size()) + "x";
 
   std::cout << "1.last = " << &vec.back() << std::endl;
-  vec.push_back(CharPtr(str.c_str()));
+  vec.emplace_back(CharPtr(str.c_str()));
   std::cout << "2.last = " << &vec.back() << std::endl;
-  vec.push_back(CharPtr(""));
+  vec.emplace_back(CharPtr(""));
   std::cout << "3.last = " << &vec.back() << std::endl;
-  vec.push_back(CharPtr("0123456789"));
+  vec.emplace_back(CharPtr("0123456789"));
   std::cout << "4.last = " << &vec.back() << std::endl;
 
   std::cout << "size=" << vec.size() << " base=" << vec.data() << std::endl;
