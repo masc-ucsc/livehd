@@ -1,0 +1,12 @@
+d = 4
+
+add = :(a,b):{
+  return a + b 
+}
+
+sub = :(a,b):{
+  return a - b 
+}
+
+d = 5 
+x = add 1 2
