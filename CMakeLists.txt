@@ -104,17 +104,28 @@ ADD_SUBDIRECTORY(inou/lef)
 ADD_SUBDIRECTORY(inou/sat)
 ADD_SUBDIRECTORY(inou/cfg)
 
-add_test(NAME basic_inou_abc           COMMAND  ${PROJECT_SOURCE_DIR}/test/abc.sh)
-add_test(NAME basic_inou_rand_json     COMMAND  ${PROJECT_SOURCE_DIR}/test/rand_json.sh)
+add_test(NAME basic_inou_rand_json        COMMAND  ${PROJECT_SOURCE_DIR}/test/rand_json.sh)
+SET_TESTS_PROPERTIES(basic_inou_rand_json PROPERTIES DEPENDS core_done)
+
+
+# add your test bellow, please add either basic, compl or extra in the test name
+# your test script should return 0 if it succeeds or anything else if it fails
+# alternatively, you can add tests to the CMakeLists.txt file in your subdirectory
+
 add_test(NAME basic_inou_yosys         COMMAND  ${PROJECT_SOURCE_DIR}/test/yosys.sh)
 add_test(NAME basic_inou_synth_yosys   COMMAND  ${PROJECT_SOURCE_DIR}/test/synth.sh -s${PROJECT_SOURCE_DIR})
+add_test(NAME basic_inou_abc           COMMAND  ${PROJECT_SOURCE_DIR}/test/abc.sh)
 add_test(NAME basic_lgopt_dce          COMMAND  ${PROJECT_SOURCE_DIR}/test/lgopt_dce.sh)
 add_test(NAME basic_lgopt_gvn_pre      COMMAND  ${PROJECT_SOURCE_DIR}/test/lgopt_gvn_pre.sh)
+
 add_test(NAME compl_tmap_verilog       COMMAND  ruby ${PROJECT_SOURCE_DIR}/inou/tech/verilog.rb ${PROJECT_SOURCE_DIR}//subs/yosys/techlibs/common/simcells.v > tech_library)
 add_test(NAME compl_lgopt_fluid        COMMAND  ${PROJECT_SOURCE_DIR}/test/lgopt_fluid.sh)
+
 add_test(NAME extra_inou_ANUBIS-alpha  COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=al_lgdb --testdir=${PROJECT_SOURCE_DIR}/subs/anubis/alpha CONFIGURATIONS complete)
 add_test(NAME extra_inou_ANUBIS-dlx    COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=dl_lgdb --testdir=${PROJECT_SOURCE_DIR}/subs/anubis/dlx CONFIGURATIONS complete)
 add_test(NAME extra_inou_ANUBIS-fpu    COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=fp_lgdb --testdir=${PROJECT_SOURCE_DIR}/subs/anubis/fpu/rtl/ CONFIGURATIONS complete)
+
+# only run in the complete regression
 add_test(NAME extra_inou_ANUBIS-mor1kx COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=mo_lgdb --testdir=${PROJECT_SOURCE_DIR}/subs/anubis/mor1kx/rtl/verilog CONFIGURATIONS complete)
 add_test(NAME extra_inou_ANUBIS-or1200 COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=or_lgdb --testdir=${PROJECT_SOURCE_DIR}/subs/anubis/or1200 CONFIGURATIONS complete)
 add_test(NAME extra_inou_BOOM          COMMAND  ${PROJECT_SOURCE_DIR}/inou/yosys/lgyosys --lgdb=bo_lgdb ${PROJECT_SOURCE_DIR}/test/benchmarks/boom/boombase.v ${PROJECT_SOURCE_DIR}/test/benchmarks/boom/boom.fix.v --top=BoomCore CONFIGURATIONS complete)
