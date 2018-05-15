@@ -3,8 +3,8 @@
 
 #include <assert.h>
 
-#include "lgraphbase.hpp"
 #include "dense.hpp"
+#include "lgraphbase.hpp"
 
 class Node_Delay {
 private:
@@ -18,20 +18,20 @@ public:
 
 class LGraph_Node_Delay : virtual public LGraph_Base {
 private:
-  Dense<Node_Delay>    node_delay;
+  Dense<Node_Delay> node_delay;
 
 protected:
-
   void node_delay_emplace_back();
+
 public:
-  LGraph_Node_Delay(std::string path, std::string name);
+  explicit LGraph_Node_Delay(const std::string & path, const std::string & name) noexcept ;
 
   virtual void clear();
   virtual void reload();
   virtual void sync();
   virtual void emplace_back();
 
-  void node_delay_set(Index_ID nid, float t);
+  void  node_delay_set(Index_ID nid, float t);
   float node_delay_get(Index_ID nid) const;
 };
 

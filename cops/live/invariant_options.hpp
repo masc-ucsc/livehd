@@ -1,9 +1,8 @@
 #ifndef INVARIANT_OPTIONS_H_
 #define INVARIANT_OPTIONS_H_
 
-
-#include <boost/program_options.hpp>
 #include "core/options.hpp"
+#include <boost/program_options.hpp>
 
 class Invariant_find_pack {
 
@@ -15,6 +14,5 @@ public:
 
   Invariant_find_pack();
 };
-
 
 #endif

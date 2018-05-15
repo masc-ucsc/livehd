@@ -2,8 +2,8 @@
 #ifndef PASS_DCE_H
 #define PASS_DCE_H
 
-#include "pass.hpp"
 #include "options.hpp"
+#include "pass.hpp"
 
 #include <string>
 
@@ -17,6 +17,7 @@ protected:
   std::string dce_type;
 
   Pass_dce_options_pack opack;
+
 public:
   Pass_dce();
 
@@ -24,4 +25,3 @@ public:
 };
 
 #endif
-

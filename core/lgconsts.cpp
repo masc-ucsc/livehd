@@ -1,8 +1,8 @@
 #include "lgconsts.hpp"
 
-LGraph_Consts::LGraph_Consts(std::string path, std::string name)
-  : consts(path, name + "_constants") {
-    locked = false;
+LGraph_Consts::LGraph_Consts(const std::string & path, const std::string & name) noexcept
+    : LGraph_Base(path,name), consts(path, name + "_constants") {
+  locked = false;
 }
 
 void LGraph_Consts::clear() {
@@ -22,7 +22,6 @@ Const_ID LGraph_Consts::get_constant_id(const char *constant) {
   return consts.create_id(constant);
 }
 
-const char * LGraph_Consts::get_constant(Const_ID const_id) const {
+const char *LGraph_Consts::get_constant(Const_ID const_id) const {
   return consts.get_char(const_id);
 }
-

@@ -2,8 +2,8 @@
 #ifndef PASS_vectorize_H
 #define PASS_vectorize_H
 
-#include "pass.hpp"
 #include "options.hpp"
+#include "pass.hpp"
 
 #include <string>
 
@@ -20,6 +20,7 @@ protected:
   std::string vectorize_type;
 
   Pass_vectorize_options_pack opack;
+
 public:
   Pass_vectorize();
 
@@ -27,4 +28,3 @@ public:
 };
 
 #endif
-

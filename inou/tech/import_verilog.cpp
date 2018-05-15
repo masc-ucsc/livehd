@@ -3,11 +3,10 @@
 
 #include "import_verilog.hpp"
 
-#include <iostream>
 #include <fstream>
+#include <iostream>
 
 #include <regex>
-
 
 //FIXME: consider replacing with a simple lex/yacc parser?
 //This only parses
@@ -19,10 +18,8 @@ void Import_verilog::update() {
   std::ifstream input_file(opack.file_path);
 
   if(!input_file.good()) {
-    console->error("Unable to open technology file {}\n",opack.file_path);
+    console->error("Unable to open technology file {}\n", opack.file_path);
   }
-
 
   input_file.close();
 }
-

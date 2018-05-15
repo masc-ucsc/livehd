@@ -17,7 +17,7 @@ protected:
   uint32_t posy;
 
 public:
-  Node_Place(uint32_t x = 0, uint32_t y = 0) : posx(x), posy(y)  {  };
+  Node_Place(uint32_t x = 0, uint32_t y = 0) : posx(x), posy(y){};
 
   void replace(uint32_t x, uint32_t y) {
     posx = x;
@@ -37,36 +37,36 @@ protected:
   void node_place_emplace_back();
 
 public:
-  LGraph_Node_Place(std::string path, std::string name);
+  explicit LGraph_Node_Place(const std::string& path, const std::string& name) noexcept ;
 
   virtual void clear();
   virtual void reload();
   virtual void sync();
   virtual void emplace_back();
 
-  void node_place_set(Index_ID nid, uint32_t x, uint32_t y){
-    assert(nid<node_place.size());
+  void node_place_set(Index_ID nid, uint32_t x, uint32_t y) {
+    assert(nid < node_place.size());
     assert(node_internal[nid].is_node_state());
     assert(node_internal[nid].is_root());
     node_place[nid].posx = x;
     node_place[nid].posy = y;
   };
-  const Node_Place &node_place_get(Index_ID nid) const{
-    assert(nid<node_place.size());
+  const Node_Place &node_place_get(Index_ID nid) const {
+    assert(nid < node_place.size());
     assert(node_internal[nid].is_node_state());
     assert(node_internal[nid].is_root());
     return node_place[nid];
   };
 
   uint32_t get_x(Index_ID nid) const {
-    assert(nid<node_place.size());
+    assert(nid < node_place.size());
     assert(node_internal[nid].is_node_state());
     assert(node_internal[nid].is_root());
     return node_place[nid].posx;
   }
 
   uint32_t get_y(Index_ID nid) const {
-    assert(nid<node_place.size());
+    assert(nid < node_place.size());
     assert(node_internal[nid].is_node_state());
     assert(node_internal[nid].is_root());
     return node_place[nid].posy;

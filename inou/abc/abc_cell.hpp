@@ -6,7 +6,6 @@
 #ifndef LGRAPH_ABC_CELL_HPP
 #define LGRAPH_ABC_CELL_HPP
 
-
 Inou_abc::Abc_comb LGraph_CreateNot(Abc_Ntk_t *pAig);
 
 Inou_abc::Abc_comb LGraph_CreateAnd(Abc_Ntk_t *pAig);
@@ -35,7 +34,4 @@ Inou_abc::Abc_comb LGraph_CreateOai4(Abc_Ntk_t *pAig);
 
 Inou_abc::Abc_comb LGraph_CreateMUX(Abc_Ntk_t *pAig);
 
-
 #endif //LGRAPH_ABC_CELL_HPP
-
-

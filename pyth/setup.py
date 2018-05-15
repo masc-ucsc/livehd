@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(name='lgraph',
-      version='0.1.1',
+      version='0.1.2',
       description='LiveGraph for synthesis and Simulation',
       url='https://github.com/masc-ucsc/lgraph',
       author='MASC Group',

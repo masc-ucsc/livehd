@@ -3,8 +3,8 @@
 #include <iostream>
 #include <random>
 
-#include "lgraph.hpp"
 #include "lgbench.hpp"
+#include "lgraph.hpp"
 
 #include "inou/pyrope/inou_pyrope.hpp"
 
@@ -20,7 +20,7 @@ int main(int argc, const char **argv) {
 
   std::vector<LGraph *> rvec = pyrope.generate();
 
-  for(auto &g:rvec) {
+  for(auto &g : rvec) {
     g->print_stats();
     pyrope.generate(g);
   }
@@ -28,4 +28,3 @@ int main(int argc, const char **argv) {
   b.sample("creation");
   b.sample("to_pyrope");
 }
-
