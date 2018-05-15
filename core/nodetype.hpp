@@ -606,7 +606,9 @@ private:
   bm::bvector<>       const_nodes;
 
 public:
+  LGraph_Node_Type() = delete;
   explicit LGraph_Node_Type(const std::string& path, const std::string& name) noexcept ;
+  virtual ~LGraph_Node_Type(){};
 
   virtual void clear();
   virtual void reload();
