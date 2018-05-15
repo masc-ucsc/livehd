@@ -79,7 +79,9 @@ protected:
   friend Backward_edge_iterator;
 
 public:
-  LGraph_Base(const std::string &path, const std::string &_name);
+  LGraph_Base() = delete;
+  explicit LGraph_Base(const std::string &path, const std::string &_name) noexcept ;
+  virtual ~LGraph_Base(){};
 
   void each_input(std::function<void(Index_ID)> f1) const;
   void each_output(std::function<void(Index_ID)> f1) const;

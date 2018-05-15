@@ -41,8 +41,9 @@ protected:
   friend LGraph;
 
 public:
+  LGraph_WireNames() = delete;
   explicit LGraph_WireNames(const std::string & path, const std::string & name) noexcept ;
-
+  virtual ~LGraph_WireNames(){};
   virtual void clear();
   virtual void reload();
   virtual void sync();
