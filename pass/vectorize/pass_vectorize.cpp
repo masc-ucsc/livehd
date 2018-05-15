@@ -1,130 +1,130 @@
 
-#include <time.h>
 #include <string>
+#include <time.h>
 
-#include "pass_vectorize.hpp"
-#include "lgraph.hpp"
 #include "lgedgeiter.hpp"
+#include "lgraph.hpp"
+#include "pass_vectorize.hpp"
 
 Pass_vectorize::Pass_vectorize()
-  : Pass("vectorize") {
+    : Pass("vectorize") {
 }
 
 void Pass_vectorize::collapse_reset(LGraph *g) {
 
   Index_ID reset_idx = 0;
-  Port_ID reset_pid  = 0;
+  Port_ID  reset_pid = 0;
 
-  if (g->is_graph_input("reset")) {
+  if(g->is_graph_input("reset")) {
     reset_idx = g->get_graph_input("reset").get_nid();
     reset_pid = g->get_graph_input("reset").get_pid();
   }
-  if (reset_idx==0) {
-    if (g->is_graph_input("rst")) {
+  if(reset_idx == 0) {
+    if(g->is_graph_input("rst")) {
       reset_idx = g->get_graph_input("rst").get_nid();
       reset_pid = g->get_graph_input("rst").get_pid();
     }
   }
 
-  if (reset_idx==0)
+  if(reset_idx == 0)
     return;
 
-  for(const auto &c1:g->out_edges(reset_idx)) {
+  for(const auto &c1 : g->out_edges(reset_idx)) {
     const auto op = g->node_type_get(c1.get_idx());
-    if (op.op != Mux_Op)
+    if(op.op != Mux_Op)
       continue;
-    if (c1.get_inp_pin().get_pid() != Node_Type::get(Mux_Op).get_input_match("S"))
+    if(c1.get_inp_pin().get_pid() != Node_Type::get(Mux_Op).get_input_match("S"))
       continue; // Control in mux
 
     Index_ID mux_idx  = c1.get_idx();
     Index_ID flop_idx = 0;
 
-    for(const auto &c2:g->out_edges(c1.get_idx())) {
+    for(const auto &c2 : g->out_edges(c1.get_idx())) {
       const auto op = g->node_type_get(c2.get_idx());
-      if (op.op != Flop_Op)
+      if(op.op != Flop_Op)
         continue;
       flop_idx = c2.get_idx();
     }
-    if (!mux_idx || !flop_idx)
+    if(!mux_idx || !flop_idx)
       continue;
 
     bool reset_set = false;
-    for(const auto &c:g->inp_edges(flop_idx)) {
+    for(const auto &c : g->inp_edges(flop_idx)) {
       //const auto &re = c.get_reverse_edge();
-      if (c.get_inp_pin().get_pid() == Node_Type::get(Flop_Op).get_input_match("R")) {
+      if(c.get_inp_pin().get_pid() == Node_Type::get(Flop_Op).get_input_match("R")) {
         reset_set = true;
         break; // Can not handle 2 resets
       }
-      if (c.get_inp_pin().get_pid() == Node_Type::get(Flop_Op).get_input_match("Rval")) {
+      if(c.get_inp_pin().get_pid() == Node_Type::get(Flop_Op).get_input_match("Rval")) {
         reset_set = true;
         break; // Can not handle 2 resets
       }
     }
-    if (reset_set)
+    if(reset_set)
       continue;
 
-    Index_ID mux_a_idx=0;
-    Index_ID mux_a_pid=0;
-    Index_ID mux_b_idx=0;
-    Index_ID mux_b_pid=0;
-    for(const auto &c:g->inp_edges(mux_idx)) {
+    Index_ID mux_a_idx = 0;
+    Index_ID mux_a_pid = 0;
+    Index_ID mux_b_idx = 0;
+    Index_ID mux_b_pid = 0;
+    for(const auto &c : g->inp_edges(mux_idx)) {
       //const auto &re = c.get_reverse_edge();
-      if (c.get_inp_pin().get_pid() == Node_Type::get(Mux_Op).get_input_match("A")) {
+      if(c.get_inp_pin().get_pid() == Node_Type::get(Mux_Op).get_input_match("A")) {
         mux_a_idx = c.get_idx();
         mux_a_pid = c.get_out_pin().get_pid();
-      }else if (c.get_inp_pin().get_pid() == Node_Type::get(Mux_Op).get_input_match("B")) {
+      } else if(c.get_inp_pin().get_pid() == Node_Type::get(Mux_Op).get_input_match("B")) {
         mux_b_idx = c.get_idx();
         mux_b_pid = c.get_out_pin().get_pid();
       }
     }
 
-    if (!mux_a_idx || !mux_b_idx)
+    if(!mux_a_idx || !mux_b_idx)
       continue;
 
     g->del_node(mux_idx);
 
-    Node_Pin src_d(mux_b_idx,mux_b_pid,false);
-    Node_Pin dst_d(flop_idx, Node_Type::get(Flop_Op).get_input_match("D"),true);
-    g->add_edge(src_d,dst_d);
+    Node_Pin src_d(mux_b_idx, mux_b_pid, false);
+    Node_Pin dst_d(flop_idx, Node_Type::get(Flop_Op).get_input_match("D"), true);
+    g->add_edge(src_d, dst_d);
 
-    Node_Pin src_val(mux_a_idx,mux_a_pid,false);
-    Node_Pin dst_val(flop_idx, Node_Type::get(Flop_Op).get_input_match("Rval"),true);
-    g->add_edge(src_val,dst_val);
+    Node_Pin src_val(mux_a_idx, mux_a_pid, false);
+    Node_Pin dst_val(flop_idx, Node_Type::get(Flop_Op).get_input_match("Rval"), true);
+    g->add_edge(src_val, dst_val);
 
-    Node_Pin src_r(reset_idx,reset_pid,false);
-    Node_Pin dst_r(flop_idx, Node_Type::get(Flop_Op).get_input_match("R"),true);
-    g->add_edge(src_r,dst_r);
+    Node_Pin src_r(reset_idx, reset_pid, false);
+    Node_Pin dst_r(flop_idx, Node_Type::get(Flop_Op).get_input_match("R"), true);
+    g->add_edge(src_r, dst_r);
   }
 }
 
 void Pass_vectorize::collapse_join(LGraph *g) {
 
-  for(auto idx:g->fast()) {
+  for(auto idx : g->fast()) {
     const auto op = g->node_type_get(idx);
-    if (op.op != Join_Op)
+    if(op.op != Join_Op)
       continue;
 
-    if (g->get_node_int(idx).get_num_inputs()!=1)
+    if(g->get_node_int(idx).get_num_inputs() != 1)
       continue;
 
-    Index_ID src_idx=0;
-    Port_ID  src_pid=0;
-    for(const auto &c:g->inp_edges(idx)) {
+    Index_ID src_idx = 0;
+    Port_ID  src_pid = 0;
+    for(const auto &c : g->inp_edges(idx)) {
       //const auto &re = c.get_reverse_edge();
       src_idx = c.get_idx();
       src_pid = c.get_out_pin().get_pid();
     }
 
-    Node_Pin src(src_idx,src_pid,false);
+    Node_Pin src(src_idx, src_pid, false);
 
-    for(const auto &c:g->out_edges(idx)) {
-      Index_ID dst_idx=c.get_idx();
-      Port_ID  dst_pid=c.get_inp_pin().get_pid();
+    for(const auto &c : g->out_edges(idx)) {
+      Index_ID dst_idx = c.get_idx();
+      Port_ID  dst_pid = c.get_inp_pin().get_pid();
 
       g->del_edge(c);
 
-      Node_Pin dst(dst_idx,dst_pid,true);
-      g->add_edge(src,dst);
+      Node_Pin dst(dst_idx, dst_pid, true);
+      g->add_edge(src, dst);
     }
     g->del_node(idx);
   }
@@ -189,4 +189,3 @@ void Pass_vectorize::transform(LGraph *g) {
   }
 #endif
 }
-

@@ -6,17 +6,15 @@
 
 class Import_library {
 
-  protected:
-    Tech_options_pack opack;
+protected:
+  Tech_options_pack opack;
 
-  public:
-    Import_library(Tech_options_pack opack) : opack(opack) {
-    }
+public:
+  Import_library(Tech_options_pack opack) : opack(opack) {
+  }
 
-    // read tech file and updates the tech library
-    virtual void update() = 0;
-
+  // read tech file and updates the tech library
+  virtual void update() = 0;
 };
-
 
 #endif

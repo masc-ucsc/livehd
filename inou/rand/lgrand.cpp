@@ -1,8 +1,8 @@
 
 #include <iostream>
 
-#include "lgraph.hpp"
 #include "lgbench.hpp"
+#include "lgraph.hpp"
 
 #include "inou/json/inou_json.hpp"
 #include "inou/rand/inou_rand.hpp"
@@ -24,9 +24,8 @@ int main(int argc, const char **argv) {
 
   assert(vgen.size() == 1);
 
-  for(auto &g:vgen) {
+  for(auto &g : vgen) {
     g->print_stats();
     json.generate(g);
   }
 }
-

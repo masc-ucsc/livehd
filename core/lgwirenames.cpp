@@ -1,10 +1,8 @@
 #include "lgwirenames.hpp"
 
-LGraph_WireNames::LGraph_WireNames(std::string path, std::string name)
-  : names(path, name + "_wnames")
-  , wires(path + "/" + name + "_wid")
-  , offsets(path + "/" + name + "_offsets")
-{
+LGraph_WireNames::LGraph_WireNames(const std::string & path, const std::string & name) noexcept
+    : LGraph_Base(path,name), names(path, name + "_wnames"),
+	  wires(path + "/" + name + "_wid"), offsets(path + "/" + name + "_offsets") {
 }
 
 void LGraph_WireNames::clear() {
@@ -27,10 +25,10 @@ void LGraph_WireNames::sync() {
 
 void LGraph_WireNames::emplace_back() {
   wires.emplace_back();
-  wires[wires.size()-1] = 0;
+  wires[wires.size() - 1] = 0;
 
   offsets.emplace_back();
-  offsets[offsets.size()-1] = 0;
+  offsets[offsets.size() - 1] = 0;
 }
 
 /*WireName_ID LGraph_WireNames::get_wirename_id(const char *wirename) {
@@ -38,12 +36,12 @@ void LGraph_WireNames::emplace_back() {
   return names.create_id(wirename);
 }*/
 
-const char * LGraph_WireNames::get_wirename(WireName_ID wid) const {
+const char *LGraph_WireNames::get_wirename(WireName_ID wid) const {
   return names.get_char(wid);
 }
 
 WireName_ID LGraph_WireNames::get_wid(Index_ID nid) const {
-  assert(nid<wires.size());
+  assert(nid < wires.size());
   assert(node_internal[nid].is_node_state());
   assert(node_internal[nid].is_root());
 
@@ -51,7 +49,7 @@ WireName_ID LGraph_WireNames::get_wid(Index_ID nid) const {
 }
 
 void LGraph_WireNames::set_node_wirename(Index_ID nid, WireName_ID wid) {
-  assert(nid<wires.size());
+  assert(nid < wires.size());
   assert(node_internal[nid].is_node_state());
   assert(node_internal[nid].is_root());
   //assert(node_internal[nid].get_nid() == nid);
@@ -59,11 +57,10 @@ void LGraph_WireNames::set_node_wirename(Index_ID nid, WireName_ID wid) {
   wires[nid] = wid;
 }
 
-bool LGraph_WireNames::has_name(const char* name) const {
+bool LGraph_WireNames::has_name(const char *name) const {
   return names.include(name);
 }
 
-Index_ID LGraph_WireNames::get_node_id(const char* name) const {
+Index_ID LGraph_WireNames::get_node_id(const char *name) const {
   return names.get_field(names.get_id(name));
 }
-

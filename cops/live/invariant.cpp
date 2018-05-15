@@ -1,18 +1,16 @@
 
 //serialization stuff
-#include <iostream>
-#include <boost/archive/text_oarchive.hpp>
 #include <boost/archive/text_iarchive.hpp>
+#include <boost/archive/text_oarchive.hpp>
 #include <boost/serialization/base_object.hpp>
-#include <boost/serialization/vector.hpp>
 #include <boost/serialization/map.hpp>
 #include <boost/serialization/set.hpp>
-
+#include <boost/serialization/vector.hpp>
+#include <iostream>
 
 #include "invariant.hpp"
 
-
-void Invariant_boundaries::serialize(Invariant_boundaries* ib, std::ostream& ofs) {
+void Invariant_boundaries::serialize(Invariant_boundaries *ib, std::ostream &ofs) {
   boost::archive::text_oarchive oa(ofs);
   oa << *ib;
   /*ofs << "Invatiant_boundaries: " << ib->top << std::endl;
@@ -59,11 +57,10 @@ void Invariant_boundaries::serialize(Invariant_boundaries* ib, std::ostream& ofs
   for(auto inst : ib->gate_appearances) {
     ofs << inst.first << " " << inst.second << std::endl;
   }*/
-
 }
 
-Invariant_boundaries* Invariant_boundaries::deserialize(std::istream& ifs) {
-  Invariant_boundaries* ib = new Invariant_boundaries;
+Invariant_boundaries *Invariant_boundaries::deserialize(std::istream &ifs) {
+  Invariant_boundaries *        ib = new Invariant_boundaries;
   boost::archive::text_iarchive ia(ifs);
   ia >> *ib;
   /*std::string tmp1, tmp2;
@@ -127,13 +124,13 @@ Invariant_boundaries* Invariant_boundaries::deserialize(std::istream& ifs) {
   return ib;
 }
 
-template<class Archive>
-void Invariant_boundaries::serialize(Archive & ar, const unsigned int version) {
-  ar & top;
-  ar & hierarchy_tree;
-  ar & gate_appearances;
-  ar & instance_collection;
-  ar & instance_type_map;
-  ar & invariant_cones;
-  ar & invariant_cone_cells;
+template <class Archive>
+void Invariant_boundaries::serialize(Archive &ar, const unsigned int version) {
+  ar &top;
+  ar &hierarchy_tree;
+  ar &gate_appearances;
+  ar &instance_collection;
+  ar &instance_type_map;
+  ar &invariant_cones;
+  ar &invariant_cone_cells;
 }

@@ -1,13 +1,11 @@
 #ifndef GUARD_LEFDEF_JSON
 #define GUARD_LEFDEF_JSON
 
-#include <iostream>
+#include "rapidjson/prettywriter.h"
 #include <fstream>
+#include <iostream>
 #include <string>
 #include <vector>
-#include "rapidjson/prettywriter.h"
-
-
 
 //class Tech_rect{
 //  public:
@@ -37,8 +35,6 @@
 //
 //  void to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer>&) const;
 //};
-
-
 
 //class Tech_file{
 //  public:

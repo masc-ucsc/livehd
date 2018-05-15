@@ -26,8 +26,6 @@
 //  fout.close();
 //}
 
-
-
 /*
 void Tech_macro::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer>& writer) const {
   writer.StartObject();
@@ -88,7 +86,6 @@ void Tech_macro::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer>& write
 
 }
 */
-
 
 //void Tech_layer::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer>& writer) const {
 //  if(strncmp(name.c_str(), "Metal", 5) ==0) { //Layer type is Metal
@@ -190,6 +187,3 @@ void Tech_macro::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer>& write
 //  }
 //  writer.EndObject();
 //}
-
-
-

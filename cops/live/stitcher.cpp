@@ -2,15 +2,14 @@
 #include "stitcher.hpp"
 #include "lgedgeiter.hpp"
 
-
-void Live_stitcher::stitch(LGraph* nsynth, std::set<Net_ID> diffs) {
+void Live_stitcher::stitch(LGraph *nsynth, std::set<Net_ID> diffs) {
 
   std::map<Index_ID, Index_ID> nsynth2originalid;
   std::map<Index_ID, Index_ID> inp2originalid;
   std::map<Index_ID, Index_ID> out2originalid;
 
   //add new cells
-  for(auto& idx : nsynth->fast()) {
+  for(auto &idx : nsynth->fast()) {
     if(nsynth->node_type_get(idx).op == GraphIO_Op) {
       //FIXME: how to check if there are new global IOs?
       //FIXME: how to check if I need to delete global IOs?
@@ -33,53 +32,53 @@ void Live_stitcher::stitch(LGraph* nsynth, std::set<Net_ID> diffs) {
 
     } else {
 
-      Index_ID nidx = original->create_node().get_nid();
+      Index_ID nidx          = original->create_node().get_nid();
       nsynth2originalid[idx] = nidx;
 
       switch(nsynth->node_type_get(idx).op) {
-        case TechMap_Op:
-          original->node_tmap_set(nidx, nsynth->tmap_id_get(idx));
-          break;
-        case Join_Op:
-        case Pick_Op:
-          original->node_type_set(nidx, nsynth->node_type_get(idx).op);
-          break;
-        case U32Const_Op:
-          original->node_u32type_set(nidx, nsynth->node_value_get(idx));
-          break;
-        case StrConst_Op:
-          original->node_const_type_set(nidx, nsynth->node_const_value_get(idx));
-          break;
+      case TechMap_Op:
+        original->node_tmap_set(nidx, nsynth->tmap_id_get(idx));
+        break;
+      case Join_Op:
+      case Pick_Op:
+        original->node_type_set(nidx, nsynth->node_type_get(idx).op);
+        break;
+      case U32Const_Op:
+        original->node_u32type_set(nidx, nsynth->node_value_get(idx));
+        break;
+      case StrConst_Op:
+        original->node_const_type_set(nidx, nsynth->node_const_value_get(idx));
+        break;
 
-        default:
-          console->error("Unsupported synthesized type\n");
+      default:
+        console->error("Unsupported synthesized type\n");
       }
     }
   }
 
   //connect new cells
-  for(auto& idx : nsynth->fast()) {
+  for(auto &idx : nsynth->fast()) {
     if(!nsynth->is_graph_output(idx)) {
-      for(auto & c : nsynth->inp_edges(idx)) {
+      for(auto &c : nsynth->inp_edges(idx)) {
         //if driver is in the delta region
         if(nsynth2originalid.find(c.get_out_pin().get_nid()) != nsynth2originalid.end()) {
           original->add_edge(Node_Pin(nsynth2originalid[c.get_out_pin().get_nid()], c.get_out_pin().get_pid(), false),
-              Node_Pin(nsynth2originalid[c.get_inp_pin().get_nid()], c.get_inp_pin().get_pid(), true));
+                             Node_Pin(nsynth2originalid[c.get_inp_pin().get_nid()], c.get_inp_pin().get_pid(), true));
 
         } else {
           //FIXME: is there a case where I need to consider the out pid?
           if(inp2originalid.find(idx) != inp2originalid.end())
             original->add_edge(Node_Pin(inp2originalid[idx], 0, false),
-              Node_Pin(nsynth2originalid[c.get_inp_pin().get_nid()], c.get_inp_pin().get_pid(), true));
+                               Node_Pin(nsynth2originalid[c.get_inp_pin().get_nid()], c.get_inp_pin().get_pid(), true));
         }
       }
     } else {
       if(out2originalid.find(idx) != out2originalid.end()) {
         //global output
         //FIXME: I need to consider the inp PID
-        for(auto & c : nsynth->inp_edges(idx)) {
+        for(auto &c : nsynth->inp_edges(idx)) {
           original->add_edge(Node_Pin(nsynth2originalid[c.get_out_pin().get_nid()], c.get_out_pin().get_pid(), false),
-              Node_Pin(out2originalid[idx], out2originalid[idx], true));
+                             Node_Pin(out2originalid[idx], out2originalid[idx], true));
         }
       } else {
         //invariant boundary
@@ -87,9 +86,9 @@ void Live_stitcher::stitch(LGraph* nsynth, std::set<Net_ID> diffs) {
         if(!original->has_name(name))
           continue;
         Index_ID oidx = original->get_node_id(name);
-        for(auto& edge : original->out_edges(oidx)) {
+        for(auto &edge : original->out_edges(oidx)) {
           original->add_edge(Node_Pin(inp2originalid[idx], edge.get_out_pin().get_pid(), false),
-              edge.get_inp_pin());
+                             edge.get_inp_pin());
 
           original->del_edge(edge);
         }
@@ -98,10 +97,10 @@ void Live_stitcher::stitch(LGraph* nsynth, std::set<Net_ID> diffs) {
   }
 
   //removed original graph
-  for(auto& diff : diffs) {
+  for(auto &diff : diffs) {
 
     assert(boundaries->invariant_cone_cells.find(diff) != boundaries->invariant_cone_cells.end());
-    for(auto& gate : boundaries->invariant_cone_cells[diff]) {
+    for(auto &gate : boundaries->invariant_cone_cells[diff]) {
 
       assert(boundaries->gate_appearances.find(gate) != boundaries->gate_appearances.end());
       boundaries->gate_appearances[gate]--;
@@ -113,7 +112,3 @@ void Live_stitcher::stitch(LGraph* nsynth, std::set<Net_ID> diffs) {
 
   original->sync();
 }
-
-
-
-

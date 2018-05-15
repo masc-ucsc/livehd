@@ -132,13 +132,13 @@ private:
   value_type*     __buffer;
 
 
-  long get_saved_size(std::string filename) {
+  long get_saved_size(const std::string & filename) {
     int fd = open(filename.c_str(), O_RDONLY);
-    if (fd<0)
+    if(fd < 0)
       return 0;
 
     uint64_t size;
-    read(fd,&size,sizeof(uint64_t));
+    read(fd, &size, sizeof(uint64_t));
 
     close(fd);
 
@@ -147,4 +147,3 @@ private:
 };
 
 #endif
-
