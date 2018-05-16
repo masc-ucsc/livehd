@@ -1,25 +1,25 @@
 // *****************************************************************************
 // *****************************************************************************
 // Copyright 2013 - 2017, Cadence Design Systems
-// 
+//
 // This  file  is  part  of  the  Cadence  LEF/DEF  Open   Source
-// Distribution,  Product Version 5.8. 
-// 
+// Distribution,  Product Version 5.8.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 //    you may not use this file except in compliance with the License.
 //    You may obtain a copy of the License at
-// 
+//
 //        http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 //    Unless required by applicable law or agreed to in writing, software
 //    distributed under the License is distributed on an "AS IS" BASIS,
 //    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 //    implied. See the License for the specific language governing
 //    permissions and limitations under the License.
-// 
+//
 // For updates, support, or to become part of the LEF/DEF Community,
 // check www.openeda.org for details.
-// 
+//
 //  $Author: icftcm $
 //  $Revision: #2 $
 //  $Date: 2017/06/07 $
@@ -307,7 +307,7 @@ typeToString(defrCallbackType_e num)
         return "Extension";
 
         // NEW CALLBACK - If you created a new callback then add the
-        // type enums that you created here for debug printing.     
+        // type enums that you created here for debug printing.
 
     case defrDesignEndCbkType:
         return "DesignEnd";
@@ -337,9 +337,9 @@ defrCatchAll(defrCallbackType_e typ, void*, defiUserData)
 //
 // These functions provide access to the class member functions
 // for compatibility with previous parser kits. Returns non-zero
-// status if the initialization is failed. 
+// status if the initialization is failed.
 // *****************************************************************
-int 
+int
 defrInit()
 {
     return defrInitSession(0);
@@ -348,7 +348,7 @@ defrInit()
 int
 defrInitSession(int startSession)
 {
-    if (startSession) { 
+    if (startSession) {
         if (defContext.init_call_func != NULL) {
             fprintf(stderr, "ERROR: Attempt to call configuration function '%s' in DEF parser before defrInit() call in session-based mode.\n", defContext.init_call_func);
             return 1;
@@ -366,7 +366,7 @@ defrInitSession(int startSession)
         if (defContext.callbacks == NULL) {
             defContext.callbacks = new defrCallbacks();
         }
-    
+
         if (defContext.settings == NULL) {
             defContext.settings = new defrSettings();
         }
@@ -384,14 +384,14 @@ defrInitSession(int startSession)
     return 0;
 }
 
-// obsoleted now 
+// obsoleted now
 int
 defrReset()
 {
     return 0;
 }
 
-int 
+int
 defrClear()
 {
     delete defContext.callbacks;
@@ -1205,7 +1205,7 @@ defrFName()
     return NULL;
 }
 
-void 
+void
 defrClearSession()
 {
     if (defContext.session) {
@@ -1225,8 +1225,8 @@ defrRead(FILE           *f,
 
     delete defContext.data;
 
-    defrData *defData = new defrData(defContext.callbacks, 
-                                     defContext.settings, 
+    defrData *defData = new defrData(defContext.callbacks,
+                                     defContext.settings,
                                      defContext.session);
 
     defContext.data = defData;
@@ -2051,7 +2051,7 @@ defrSetExtensionCbk(defrStringCbkFnType f)
     defContext.callbacks->ExtensionCbk = f;
 }
 
-// NEW CALLBACK - Put the set functions for the new callbacks here. 
+// NEW CALLBACK - Put the set functions for the new callbacks here.
 
 void
 defrSetAssertionWarnings(int warn)
@@ -2234,19 +2234,19 @@ defrDisableParserMsgs(int   nMsg,
         defContext.settings->disableDMsgs = (int*) malloc(sizeof(int) * nMsg);
         for (i = 0; i < nMsg; i++)
             defContext.settings->disableDMsgs[i] = msgs[i];
-    } else {  // add the list to the existing list 
-        // 1st check if the msgId is already on the list before adding it on 
+    } else {  // add the list to the existing list
+        // 1st check if the msgId is already on the list before adding it on
         tmp = (int*) malloc(sizeof(int) * (nMsg + defContext.settings->nDDMsgs));
-        for (i = 0; i < defContext.settings->nDDMsgs; i++)  // copy the existing to the new list 
+        for (i = 0; i < defContext.settings->nDDMsgs; i++)  // copy the existing to the new list
             tmp[i] = defContext.settings->disableDMsgs[i];
         free((int*) (defContext.settings->disableDMsgs));
-        defContext.settings->disableDMsgs = tmp;           // set disableDMsgs to the new list 
-        for (i = 0; i < nMsg; i++) { // merge the new list with the existing 
+        defContext.settings->disableDMsgs = tmp;           // set disableDMsgs to the new list
+        for (i = 0; i < nMsg; i++) { // merge the new list with the existing
             for (j = 0; j < defContext.settings->nDDMsgs; j++) {
                 if (defContext.settings->disableDMsgs[j] == msgs[i])
-                    break;             // msgId already on the list 
+                    break;             // msgId already on the list
             }
-            if (j == defContext.settings->nDDMsgs)           // msgId not on the list, add it on 
+            if (j == defContext.settings->nDDMsgs)           // msgId not on the list, add it on
                 defContext.settings->disableDMsgs[defContext.settings->nDDMsgs++] = msgs[i];
         }
     }
@@ -2262,17 +2262,17 @@ defrEnableParserMsgs(int    nMsg,
     int i, j;
 
     if (defContext.settings->nDDMsgs == 0)
-        return;                       // list is empty, nothing to remove 
+        return;                       // list is empty, nothing to remove
 
-    for (i = 0; i < nMsg; i++) {     // loop through the given list 
+    for (i = 0; i < nMsg; i++) {     // loop through the given list
         for (j = 0; j < defContext.settings->nDDMsgs; j++) {
             if (defContext.settings->disableDMsgs[j] == msgs[i]) {
-                defContext.settings->disableDMsgs[j] = -1;    // temp assign a -1 on that slot 
+                defContext.settings->disableDMsgs[j] = -1;    // temp assign a -1 on that slot
                 break;
             }
         }
     }
-    // fill up the empty slot with the next non -1 msgId 
+    // fill up the empty slot with the next non -1 msgId
     for (i = 0; i < defContext.settings->nDDMsgs; i++) {
         if (defContext.settings->disableDMsgs[i] == -1) {
             j = i + 1;
@@ -2280,12 +2280,12 @@ defrEnableParserMsgs(int    nMsg,
                 if (defContext.settings->disableDMsgs[j] != -1)
                     defContext.settings->disableDMsgs[i++] = defContext.settings->disableDMsgs[j++];
             }
-            break;     // break out the for loop, the list should all moved 
+            break;     // break out the for loop, the list should all moved
         }
     }
-    // Count how many messageId left and change all -1 to 0 
+    // Count how many messageId left and change all -1 to 0
     for (j = i; j < defContext.settings->nDDMsgs; j++) {
-        defContext.settings->disableDMsgs[j] = 0;     // set to 0 
+        defContext.settings->disableDMsgs[j] = 0;     // set to 0
     }
     defContext.settings->nDDMsgs = i;
     return;
@@ -2512,26 +2512,26 @@ defrSetNLines(long long n)
     defData->nlines = n;
 }
 
-int defrLineNumber() 
-{    
-    // Compatibility feature: in old versions the translators,  
-    // the function can be called before defData initialization. 
+int defrLineNumber()
+{
+    // Compatibility feature: in old versions the translators,
+    // the function can be called before defData initialization.
     if (defContext.data) {
-        return (int)defContext.data->nlines; 
+        return (int)defContext.data->nlines;
     }
 
     return 0;
 }
 
 long long defrLongLineNumber() {
-    // Compatibility feature: in old versions the translators,  
-    // the function can be called before defData initialization. 
-    
+    // Compatibility feature: in old versions the translators,
+    // the function can be called before defData initialization.
+
     if (defContext.data) {
-        return defContext.data->nlines; 
+        return defContext.data->nlines;
     }
 
-    return (long  long) 0; 
+    return (long  long) 0;
 }
 
 END_LEFDEF_PARSER_NAMESPACE

@@ -1,25 +1,25 @@
 // *****************************************************************************
 // *****************************************************************************
 // Copyright 2013-2016, Cadence Design Systems
-// 
+//
 // This  file  is  part  of  the  Cadence  LEF/DEF  Open   Source
-// Distribution,  Product Version 5.8. 
-// 
+// Distribution,  Product Version 5.8.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 //    you may not use this file except in compliance with the License.
 //    You may obtain a copy of the License at
-// 
+//
 //        http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 //    Unless required by applicable law or agreed to in writing, software
 //    distributed under the License is distributed on an "AS IS" BASIS,
 //    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 //    implied. See the License for the specific language governing
 //    permissions and limitations under the License.
-// 
+//
 // For updates, support, or to become part of the LEF/DEF Community,
 // check www.openeda.org for details.
-// 
+//
 //  $Author: dell $
 //  $Revision: #1 $
 //  $Date: 2017/06/06 $
@@ -154,8 +154,8 @@ typedef enum {
   defrComponentMaskShiftLayerCbkType,
   defrDesignEndCbkType
 } defrCallbackType_e;
- 
- 
+
+
 // Declarations of function signatures for each type of callback.
 // These declarations are type-safe when compiling with ANSI C
 // or C++; you will only be able to register a function pointer
@@ -187,113 +187,113 @@ typedef enum {
 // function, register that function for multiple callbacks, then
 // switch based on the callback type to handle the appropriate type of
 // data.
- 
 
-// A declaration of the signature of all callbacks that return nothing.     
+
+// A declaration of the signature of all callbacks that return nothing.
 typedef int (*defrVoidCbkFnType) (defrCallbackType_e, void* v, defiUserData);
 
-// A declaration of the signature of all callbacks that return a string.     
+// A declaration of the signature of all callbacks that return a string.
 typedef int (*defrStringCbkFnType) (defrCallbackType_e, const char *string, defiUserData);
- 
-// A declaration of the signature of all callbacks that return a integer.     
+
+// A declaration of the signature of all callbacks that return a integer.
 typedef int (*defrIntegerCbkFnType) (defrCallbackType_e, int number, defiUserData);
- 
-// A declaration of the signature of all callbacks that return a double.     
+
+// A declaration of the signature of all callbacks that return a double.
 typedef int (*defrDoubleCbkFnType) (defrCallbackType_e, double number, defiUserData);
- 
-// A declaration of the signature of all callbacks that return a defiProp.     
+
+// A declaration of the signature of all callbacks that return a defiProp.
 typedef int (*defrPropCbkFnType) (defrCallbackType_e, defiProp *prop, defiUserData);
- 
-// A declaration of the signature of all callbacks that return a defiSite.     
+
+// A declaration of the signature of all callbacks that return a defiSite.
 typedef int (*defrSiteCbkFnType) (defrCallbackType_e, defiSite *site, defiUserData);
- 
-// A declaration of the signature of all callbacks that return a defComponent.     
+
+// A declaration of the signature of all callbacks that return a defComponent.
 typedef int (*defrComponentCbkFnType) (defrCallbackType_e, defiComponent *comp, defiUserData);
 
-// A declaration of the signature of all callbacks that return a defComponentMaskShiftLayer.     
+// A declaration of the signature of all callbacks that return a defComponentMaskShiftLayer.
 typedef int (*defrComponentMaskShiftLayerCbkFnType) (defrCallbackType_e, defiComponentMaskShiftLayer *comp, defiUserData);
- 
-// A declaration of the signature of all callbacks that return a defNet.     
+
+// A declaration of the signature of all callbacks that return a defNet.
 typedef int (*defrNetCbkFnType) (defrCallbackType_e, defiNet *net, defiUserData);
 
-// A declaration of the signature of all callbacks that return a defPath.     
+// A declaration of the signature of all callbacks that return a defPath.
 typedef int (*defrPathCbkFnType) (defrCallbackType_e, defiPath *path, defiUserData);
- 
-// A declaration of the signature of all callbacks that return a defiBox.     
+
+// A declaration of the signature of all callbacks that return a defiBox.
 typedef int (*defrBoxCbkFnType) (defrCallbackType_e, defiBox *box, defiUserData);
- 
 
-// A declaration of the signature of all callbacks that return a defiPinCap.     
+
+// A declaration of the signature of all callbacks that return a defiPinCap.
 typedef int (*defrPinCapCbkFnType) (defrCallbackType_e, defiPinCap *pincap, defiUserData);
- 
 
-// A declaration of the signature of all callbacks that return a defiPin.     
+
+// A declaration of the signature of all callbacks that return a defiPin.
 typedef int (*defrPinCbkFnType) (defrCallbackType_e, defiPin *pin, defiUserData);
- 
 
-// A declaration of the signature of all callbacks that return a defiRow.     
+
+// A declaration of the signature of all callbacks that return a defiRow.
 typedef int (*defrRowCbkFnType) (defrCallbackType_e, defiRow *row, defiUserData);
- 
 
-// A declaration of the signature of all callbacks that return a defiTrack.     
+
+// A declaration of the signature of all callbacks that return a defiTrack.
 typedef int (*defrTrackCbkFnType) (defrCallbackType_e, defiTrack *track, defiUserData);
- 
 
-// A declaration of the signature of all callbacks that return a defiGcellGrid.     
+
+// A declaration of the signature of all callbacks that return a defiGcellGrid.
 typedef int (*defrGcellGridCbkFnType) (defrCallbackType_e, defiGcellGrid *grid, defiUserData);
- 
 
-// A declaration of the signature of all callbacks that return a defiVia.     
+
+// A declaration of the signature of all callbacks that return a defiVia.
 typedef int (*defrViaCbkFnType) (defrCallbackType_e, defiVia *, defiUserData);
- 
 
-// A declaration of the signature of all callbacks that return a defiRegion.     
+
+// A declaration of the signature of all callbacks that return a defiRegion.
 typedef int (*defrRegionCbkFnType) (defrCallbackType_e, defiRegion *, defiUserData);
- 
 
-// A declaration of the signature of all callbacks that return a defiGroup.     
+
+// A declaration of the signature of all callbacks that return a defiGroup.
 typedef int (*defrGroupCbkFnType) (defrCallbackType_e, defiGroup *, defiUserData);
- 
 
-// A declaration of the signature of all callbacks that return a defiAssertion. 
+
+// A declaration of the signature of all callbacks that return a defiAssertion.
 typedef int (*defrAssertionCbkFnType) (defrCallbackType_e, defiAssertion *, defiUserData);
- 
 
-// A declaration of the signature of all callbacks that return a defiScanChain. 
+
+// A declaration of the signature of all callbacks that return a defiScanChain.
 typedef int (*defrScanchainCbkFnType) (defrCallbackType_e, defiScanchain *, defiUserData);
- 
 
-// A declaration of the signature of all callbacks that return a defiIOTiming. 
+
+// A declaration of the signature of all callbacks that return a defiIOTiming.
 typedef int (*defrIOTimingCbkFnType) (defrCallbackType_e, defiIOTiming *, defiUserData);
- 
 
-// A declaration of the signature of all callbacks that return a defiFPC. 
+
+// A declaration of the signature of all callbacks that return a defiFPC.
 typedef int (*defrFPCCbkFnType) (defrCallbackType_e, defiFPC *, defiUserData);
- 
 
-// A declaration of the signature of all callbacks that return a defiTimingDisable. 
+
+// A declaration of the signature of all callbacks that return a defiTimingDisable.
 typedef int (*defrTimingDisableCbkFnType) (defrCallbackType_e, defiTimingDisable *, defiUserData);
- 
 
-// A declaration of the signature of all callbacks that return a defiPartition. 
+
+// A declaration of the signature of all callbacks that return a defiPartition.
 typedef int (*defrPartitionCbkFnType) (defrCallbackType_e, defiPartition *, defiUserData);
- 
-// A declaration of the signature of all callbacks that return a defiPinProp. 
+
+// A declaration of the signature of all callbacks that return a defiPinProp.
 typedef int (*defrPinPropCbkFnType) (defrCallbackType_e, defiPinProp *, defiUserData);
 
-// A declaration of the signature of all callbacks that return a defiBlockage. 
+// A declaration of the signature of all callbacks that return a defiBlockage.
 typedef int (*defrBlockageCbkFnType) (defrCallbackType_e, defiBlockage *, defiUserData);
 
-// A declaration of the signature of all callbacks that return a defiSlot. 
+// A declaration of the signature of all callbacks that return a defiSlot.
 typedef int (*defrSlotCbkFnType) (defrCallbackType_e, defiSlot *, defiUserData);
 
-// A declaration of the signature of all callbacks that return a defiFill. 
+// A declaration of the signature of all callbacks that return a defiFill.
 typedef int (*defrFillCbkFnType) (defrCallbackType_e, defiFill *, defiUserData);
 
 // A declaration of the signature of all callbacks that return a defiNonDefault.
 typedef int (*defrNonDefaultCbkFnType) (defrCallbackType_e, defiNonDefault *, defiUserData);
 
-// A declaration of the signature of all callbacks that return a defiStyles. 
+// A declaration of the signature of all callbacks that return a defiStyles.
 typedef int (*defrStylesCbkFnType) (defrCallbackType_e, defiStyles *, defiUserData);
 
 // NEW CALLBACK - Each callback must return user data, enum, and
@@ -301,7 +301,7 @@ typedef int (*defrStylesCbkFnType) (defrCallbackType_e, defiStyles *, defiUserDa
 //   each type of OUR-DATA.  Some routines return a string, some
 //   return an integer, and some return a pointer to a class.
 //   If you create a new class, then you must create a new function
-//   type here to return that class to the user. 
+//   type here to return that class to the user.
 
 // The reader initialization.  Must be called before defrRead().
 extern int defrInit ();
@@ -314,7 +314,7 @@ extern int defrReset ();
 extern int defrClear();
 
 // Change the comment character in the DEF file.  The default
-// is '#' 
+// is '#'
 extern void defrSetCommentChar (char c);
 
 // Functions to call to set specific actions in the parser.
@@ -356,12 +356,12 @@ extern int defrRead (FILE *file,
 extern void defrSetUserData (defiUserData);
 extern defiUserData defrGetUserData ();
 
- 
+
 // Functions to call to register a callback function or get the function
 //pointer after it has been registered.
 //
 
-// Register one function for all callbacks with the same signature 
+// Register one function for all callbacks with the same signature
 extern void defrSetArrayNameCbk (defrStringCbkFnType);
 extern void defrSetAssertionCbk (defrAssertionCbkFnType);
 extern void defrSetAssertionsStartCbk (defrIntegerCbkFnType);
@@ -469,7 +469,7 @@ extern void defrSetViaEndCbk (defrVoidCbkFnType);
 
 // NEW CALLBACK - For each new callback you create, you must
 // create a routine that allows the user to set it.  Add the
-// setting routines here. 
+// setting routines here.
 
 //Set all of the callbacks that have not yet been set to the following
 //function.  This is especially useful if you want to check to see
@@ -583,48 +583,48 @@ extern void defrUnsetViaStartCbk ();
 extern void defrUnsetViaEndCbk ();
 
 // Routine to set all unused callbacks. This is useful for checking
-//to see if you missed something. 
+//to see if you missed something.
 extern void defrSetUnusedCallbacks (defrVoidCbkFnType func);
 
-// Return the current line number in the input file. 
+// Return the current line number in the input file.
 extern int defrLineNumber ();
 extern long long defrLongLineNumber ();
 
-// Routine to set the message logging routine for errors 
+// Routine to set the message logging routine for errors
 #ifndef DEFI_LOG_FUNCTION
     typedef void (*DEFI_LOG_FUNCTION) (const char*);
 #endif
 extern void defrSetLogFunction(DEFI_LOG_FUNCTION);
 
-// Routine to set the message logging routine for warnings 
+// Routine to set the message logging routine for warnings
 #ifndef DEFI_WARNING_LOG_FUNCTION
     typedef void (*DEFI_WARNING_LOG_FUNCTION) (const char*);
 #endif
 extern void defrSetWarningLogFunction(DEFI_WARNING_LOG_FUNCTION);
 
-// Routine to set the message logging routine for errors 
+// Routine to set the message logging routine for errors
 // Used in re-enterable environment.
 #ifndef DEFI_LOG_FUNCTION
     typedef void (*DEFI_CONTEXT_LOG_FUNCTION) (defiUserData userData, const char*);
 #endif
 extern void defrSetContextLogFunction(DEFI_CONTEXT_LOG_FUNCTION);
 
-// Routine to set the message logging routine for warnings 
+// Routine to set the message logging routine for warnings
 // Used in re-enterable environment.
 #ifndef DEFI_WARNING_LOG_FUNCTION
     typedef void (*DEFI_CONTEXT_WARNING_LOG_FUNCTION) (defiUserData userData, const char*);
 #endif
 extern void defrSetContextWarningLogFunction(DEFI_CONTEXT_WARNING_LOG_FUNCTION);
 
-// Routine to set the user defined malloc routine 
+// Routine to set the user defined malloc routine
 typedef void* (*DEFI_MALLOC_FUNCTION) (size_t);
 extern void defrSetMallocFunction(DEFI_MALLOC_FUNCTION);
 
-// Routine to set the user defined realloc routine 
+// Routine to set the user defined realloc routine
 typedef void* (*DEFI_REALLOC_FUNCTION) (void*, size_t);
 extern void defrSetReallocFunction(DEFI_REALLOC_FUNCTION);
 
-// Routine to set the user defined free routine 
+// Routine to set the user defined free routine
 typedef void (*DEFI_FREE_FUNCTION) (void *);
 extern void defrSetFreeFunction(DEFI_FREE_FUNCTION);
 
@@ -646,35 +646,35 @@ extern void defrSetContextLineNumberFunction(DEFI_CONTEXT_LINE_NUMBER_FUNCTION);
 typedef void (*DEFI_CONTEXT_LONG_LINE_NUMBER_FUNCTION)  (defiUserData userData, long long);
 extern void defrSetContextLongLineNumberFunction(DEFI_CONTEXT_LONG_LINE_NUMBER_FUNCTION);
 
-// Set the number of lines before calling the line function callback routine 
-// Default is 10000 
+// Set the number of lines before calling the line function callback routine
+// Default is 10000
 extern void defrSetDeltaNumberLines  (int);
 
-// Routine to set the read function 
+// Routine to set the read function
 typedef size_t (*DEFI_READ_FUNCTION)  (FILE*, char*, size_t);
 extern void defrSetReadFunction(DEFI_READ_FUNCTION);
 extern void defrUnsetReadFunction ();
 
-// Routine to set the defrWarning.log to open as append instead for write 
-// New in 5.7 
+// Routine to set the defrWarning.log to open as append instead for write
+// New in 5.7
 extern void defrSetOpenLogFileAppend ();
 extern void defrUnsetOpenLogFileAppend ();
 
-// Routine to set the magic comment found routine 
+// Routine to set the magic comment found routine
 typedef void (*DEFI_MAGIC_COMMENT_FOUND_FUNCTION) ();
 extern void defrSetMagicCommentFoundFunction(DEFI_MAGIC_COMMENT_FOUND_FUNCTION);
 
-// Routine to set the magic comment string 
+// Routine to set the magic comment string
 extern void defrSetMagicCommentString(char *);
 
-// Routine to disable string property value process, default it will process 
-// the value string 
+// Routine to disable string property value process, default it will process
+// the value string
 extern void defrDisablePropStrProcess ();
 
-// Testing purposes only 
+// Testing purposes only
 extern void defrSetNLines(long long n);
 
-// Routine to set the max number of warnings for a perticular section 
+// Routine to set the max number of warnings for a perticular section
 
 extern void defrSetAssertionWarnings(int warn);
 extern void defrSetBlockageWarnings(int warn);
@@ -698,7 +698,7 @@ extern void defrSetUnitsWarnings(int warn);
 extern void defrSetVersionWarnings(int warn);
 extern void defrSetViaWarnings(int warn);
 
-// Handling output messages 
+// Handling output messages
 extern void defrDisableParserMsgs(int nMsg, int* msgs);
 extern void defrEnableParserMsgs(int nMsg, int* msgs);
 extern void defrEnableAllMsgs();
@@ -706,13 +706,13 @@ extern void defrSetTotalMsgLimit(int totNumMsgs);
 extern void defrSetLimitPerMsg(int msgId, int numMsg);
 
 // Return codes for the user callbacks.
-//The user should return one of these values. 
-#define PARSE_OK 0      // continue parsing 
-#define STOP_PARSE 1    // stop parsing with no error message 
-#define PARSE_ERROR 2   // stop parsing, print an error message 
+//The user should return one of these values.
+#define PARSE_OK 0      // continue parsing
+#define STOP_PARSE 1    // stop parsing with no error message
+#define PARSE_ERROR 2   // stop parsing, print an error message
 
-// Add this alias to the list for the parser     
-extern void defrAddAlias (const char* key, 
+// Add this alias to the list for the parser
+extern void defrAddAlias (const char* key,
                           const char* value,
                           int marked);
 
