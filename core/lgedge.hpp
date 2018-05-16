@@ -142,6 +142,7 @@ protected:
 
   Port_ID get_out_pid() const;
 
+
   Port_ID get_inp_pid() const {
     const SEdge_Internal *s = reinterpret_cast<const SEdge_Internal *>(this);
     if(is_snode())
@@ -150,6 +151,8 @@ protected:
     const LEdge_Internal *l = reinterpret_cast<const LEdge_Internal *>(this);
     return l->get_inp_pid();
   }
+
+  const Edge *find_edge(const Edge *bt, const Edge *et, Index_ID ptr_nid, Port_ID inp_pod, Port_ID out_pid) const;
 
   const Edge &get_reverse_for_deletion() const;
 
@@ -277,26 +280,11 @@ struct alignas(32) Node_Internal_Page {
     return *root;
   }
   static Node_Internal_Page &get(const Edge *ptr) {
-    // Every 1 Page a full Node is reserved for pointer keeping
-    uint64_t root_int = (uint64_t)ptr;
-    root_int          = root_int >> 12;
-    root_int          = root_int << 12;
-
-    Node_Internal_Page *root = (Node_Internal_Page *)root_int;
-    assert(root->state == Page_Node_State);
-
-    return *root;
+    return get(reinterpret_cast<const SEdge_Internal *>(ptr));
   }
+
   static Node_Internal_Page &get(const Node_Internal *ptr) {
-    // Every 1 Page a full Node is reserved for pointer keeping
-    uint64_t root_int = (uint64_t)ptr;
-    root_int          = root_int >> 12;
-    root_int          = root_int << 12;
-
-    Node_Internal_Page *root = (Node_Internal_Page *)root_int;
-    assert(root->state == Page_Node_State);
-
-    return *root;
+    return get(reinterpret_cast<const SEdge_Internal *>(ptr));
   }
 
   bool is_page_align() const {
