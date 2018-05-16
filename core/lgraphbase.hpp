@@ -74,6 +74,8 @@ protected:
 
   void del_int_node(Index_ID idx);
 
+  Index_ID find_idx_from_pid_int(Index_ID nid, Port_ID pid) const;
+
   friend Fast_edge_iterator;
   friend Forward_edge_iterator;
   friend Backward_edge_iterator;
