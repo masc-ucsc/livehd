@@ -171,9 +171,9 @@ public:
 
   bool is_snode() const { return snode; }
   void set_snode(bool s) {
-    assert(snode == ((SEdge_Internal *)this)->is_snode());
+    assert(snode == reinterpret_cast<const SEdge_Internal *>(this)->is_snode());
     snode = s;
-    assert(snode == ((SEdge_Internal *)this)->is_snode());
+    assert(snode == reinterpret_cast<const SEdge_Internal *>(this)->is_snode());
   }
 
   // Output edge: inp (self_nid, out_pid) -> out (idx, inp_pid)
@@ -194,15 +194,15 @@ public:
   Index_ID get_self_idx() const;
   Index_ID get_self_nid() const;
   Index_ID get_idx() const {
-    SEdge_Internal *s = (SEdge_Internal *)this;
+    const SEdge_Internal *s = reinterpret_cast<const SEdge_Internal *>(this);
     if(is_snode())
       return s->get_idx(get_page_idx());
 
-    LEdge_Internal *l = (LEdge_Internal *)this;
+    const LEdge_Internal *l = reinterpret_cast<const LEdge_Internal *>(this);
     return l->get_idx();
   }
   void dump() const {
-    const SEdge_Internal *s = (SEdge_Internal *)this;
+    const SEdge_Internal *s = reinterpret_cast<const SEdge_Internal *>(this);
     Index_ID              a = -1;
     if(is_snode())
       a = s->ridx;
@@ -471,8 +471,9 @@ public:
     root_int          = root_int >> 5;
     root_int          = root_int << 5;
 
-    Node_Internal *root_n = (Node_Internal *)root_int;
+    Node_Internal *root_n = reinterpret_cast<Node_Internal *>(root_int);
     assert(root_n->is_node_state());
+
     return *root_n;
   }
 
