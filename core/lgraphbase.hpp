@@ -131,9 +131,7 @@ public:
   // get extra (non-master root) node for port_id pid
   // will allocate space if none is available
   Index_ID get_idx_from_pid(Index_ID nid, Port_ID pid);
-  // get extra (non-master root) node for port_id pid
-  // will allocate space if none is available
-  Index_ID get_idx_from_pid(Index_ID nid, Port_ID pid) const;
+  Index_ID find_idx_from_pid(Index_ID nid, Port_ID pid) const;
   void     set_bits_pid(Index_ID nid, Port_ID pid, uint16_t bits);
   uint16_t get_bits_pid(Index_ID nid, Port_ID pid) const;
   uint16_t get_bits_pid(Index_ID nid, Port_ID pid);
