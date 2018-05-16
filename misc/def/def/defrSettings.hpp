@@ -1,25 +1,25 @@
 // *****************************************************************************
 // *****************************************************************************
 // Copyright 2013-2014, Cadence Design Systems
-// 
+//
 // This  file  is  part  of  the  Cadence  LEF/DEF  Open   Source
-// Distribution,  Product Version 5.8. 
-// 
+// Distribution,  Product Version 5.8.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 //    you may not use this file except in compliance with the License.
 //    You may obtain a copy of the License at
-// 
+//
 //        http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 //    Unless required by applicable law or agreed to in writing, software
 //    distributed under the License is distributed on an "AS IS" BASIS,
 //    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 //    implied. See the License for the specific language governing
 //    permissions and limitations under the License.
-// 
+//
 // For updates, support, or to become part of the LEF/DEF Community,
 // check www.openeda.org for details.
-// 
+//
 //  $Author: arakhman $
 //  $Revision: #6 $
 //  $Date: 2013/08/09 $
@@ -40,7 +40,7 @@
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
-struct defCompareCStrings 
+struct defCompareCStrings
 {
     bool operator()(const char* lhs, const char* rhs) const {
         return std::strcmp(lhs, rhs) < 0;
@@ -55,7 +55,7 @@ public:
 
     void init_symbol_table();
 
-    defKeywordMap Keyword_set; 
+    defKeywordMap Keyword_set;
 
     int defiDeltaNumberLines;
 
@@ -74,7 +74,7 @@ public:
     int FillWarnings;
     int GcellGridWarnings;
     int IOTimingWarnings;
-    int LogFileAppend; 
+    int LogFileAppend;
     int NetWarnings;
     int NonDefaultWarnings;
     int PinExtWarnings;
@@ -89,13 +89,13 @@ public:
     int VersionWarnings;
     int ViaWarnings;
 
-    int  nDDMsgs; 
+    int  nDDMsgs;
     int* disableDMsgs;
     int  totalDefMsgLimit; // to save the user set total msg limit to output
     int AddPathToNet;
     int AllowComponentNets;
     char CommentChar;
-    int DisPropStrProcess; 
+    int DisPropStrProcess;
 
     int reader_case_sensitive_set;
 

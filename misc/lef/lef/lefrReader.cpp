@@ -1,25 +1,25 @@
 // *****************************************************************************
 // *****************************************************************************
 // Copyright 2012 - 2017, Cadence Design Systems
-// 
+//
 // This  file  is  part  of  the  Cadence  LEF/DEF  Open   Source
-// Distribution,  Product Version 5.8. 
-// 
+// Distribution,  Product Version 5.8.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 //    you may not use this file except in compliance with the License.
 //    You may obtain a copy of the License at
-// 
+//
 //        http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 //    Unless required by applicable law or agreed to in writing, software
 //    distributed under the License is distributed on an "AS IS" BASIS,
 //    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 //    implied. See the License for the specific language governing
 //    permissions and limitations under the License.
-// 
+//
 // For updates, support, or to become part of the LEF/DEF Community,
 // check www.openeda.org for details.
-// 
+//
 //  $Author: dell $
 //  $Revision: #1 $
 //  $Date: 2017/06/06 $
@@ -200,7 +200,7 @@ lefrSetLimitPerMsg(int  msgId,
                    int  numMsg)
 {
     LEF_INIT;
-    
+
     if ((msgId > 0) && (msgId < NOLEFMSG)) {
         lefSettings->MsgLimit[msgId] = numMsg;
     }
@@ -236,7 +236,7 @@ lefrInit()
 int
 lefrInitSession(int startSession)
 {
-	if (startSession) { 
+	if (startSession) {
 		if (init_call_func != NULL) {
 			fprintf(stderr, "ERROR: Attempt to call configuration function '%s' in LEF parser before lefrInit() call in session-based mode.\n", init_call_func);
 			return 1;
@@ -248,7 +248,7 @@ lefrInitSession(int startSession)
 		if (lefCallbacks == NULL) {
 			lefrCallbacks::reset();
 		}
-	
+
 		if (lefSettings == NULL) {
 			lefrSettings::reset();
 		}
@@ -265,7 +265,7 @@ lefrReset()
 }
 
 
-int 
+int
 lefrClear()
 {
     delete lefData;
@@ -425,7 +425,7 @@ lefrSetUnusedCallbacks(lefrVoidCbkFnType func)
     if (lefCallbacks->InoutAntennaCbk == 0)
         lefCallbacks->InoutAntennaCbk = (lefrDoubleCbkFnType) func;
 
-    // NEW CALLBACK - Add a line here for each new callback routine 
+    // NEW CALLBACK - Add a line here for each new callback routine
     if (lefCallbacks->AntennaInputCbk == 0)
         lefCallbacks->AntennaInputCbk = (lefrDoubleCbkFnType) func;
     if (lefCallbacks->AntennaInoutCbk == 0)
@@ -462,7 +462,7 @@ lefrSetUnusedCallbacks(lefrVoidCbkFnType func)
         lefCallbacks->FixedMaskCbk = (lefrIntegerCbkFnType) func;
 }
 
-// These count up the number of times an unset callback is called... 
+// These count up the number of times an unset callback is called...
 static int lefrUnusedCount[NOCBK];
 
 int
@@ -688,7 +688,7 @@ lefrPrintUnusedCallbacks(FILE *f)
             case lefrMacroEndCbkType:
                 trueCB = 0;
                 break;
-                // NEW CALLBACK  add the print here 
+                // NEW CALLBACK  add the print here
             case lefrDensityCbkType:
                 fprintf(f, "Density");
                 break;
@@ -1545,9 +1545,9 @@ lefrSetViaRuleCbk(lefrViaRuleCbkFnType f)
 int
 lefrLineNumber()
 {
-    // Compatibility feature: in old versions the translators,  
-    // the function can be called before lefData initialization. 
-    return lefData ? lefData->lef_nlines : 0; 
+    // Compatibility feature: in old versions the translators,
+    // the function can be called before lefData initialization.
+    return lefData ? lefData->lef_nlines : 0;
 }
 
 void

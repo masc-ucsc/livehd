@@ -1,25 +1,25 @@
 // *****************************************************************************
 // *****************************************************************************
 // Copyright 2012 - 2017, Cadence Design Systems
-// 
+//
 // This  file  is  part  of  the  Cadence  LEF/DEF  Open   Source
-// Distribution,  Product Version 5.8. 
-// 
+// Distribution,  Product Version 5.8.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 //    you may not use this file except in compliance with the License.
 //    You may obtain a copy of the License at
-// 
+//
 //        http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 //    Unless required by applicable law or agreed to in writing, software
 //    distributed under the License is distributed on an "AS IS" BASIS,
 //    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 //    implied. See the License for the specific language governing
 //    permissions and limitations under the License.
-// 
+//
 // For updates, support, or to become part of the LEF/DEF Community,
 // check www.openeda.org for details.
-// 
+//
 //  $Author: arakhman $
 //  $Revision: #11 $
 //  $Date: 2013/04/23 $
@@ -98,7 +98,7 @@ lefrSettings::lefrSettings()
 
     // Popular layer groups.
     const char *polyroutingLayers[] = {"ROUTING", ""};
-    const char *mimcapLayers[] = {"ROUTING", "CUT", ""};    
+    const char *mimcapLayers[] = {"ROUTING", "CUT", ""};
     const char *tsvLayers[] = {"CUT", ""};
     const char *mastersliceOnly[] = {"MASTERSLICE", ""};
     const char *wellLayers[] = {"MASTERSLICE", "OVERLAP", ""};
@@ -545,14 +545,14 @@ lefrSettings::init_symbol_table()
 }
 
 
-void 
+void
 lefrSettings::disableMsg(int msgId)
 {
     msgsDisableMap[msgId] = 0;
 }
 
 
-void 
+void
 lefrSettings::enableMsg(int msgId)
 {
     std::map<int, int>::iterator search = msgsDisableMap.find(msgId);
@@ -563,7 +563,7 @@ lefrSettings::enableMsg(int msgId)
 }
 
 
-void 
+void
 lefrSettings::enableAllMsgs()
 {
     msgsDisableMap.clear();
@@ -572,7 +572,7 @@ lefrSettings::enableAllMsgs()
 
 // Check if the message was disabled and returns statuses:
 // 0 - enabled, 1 - disabled, need warning print, 2 - disabled no warning.
-int 
+int
 lefrSettings::suppresMsg(int msgId)
 {
     std::map<int, int>::iterator search = msgsDisableMap.find(msgId);
@@ -591,15 +591,15 @@ lefrSettings::suppresMsg(int msgId)
 }
 
 
-// This function will get token from input string. Also sets 
+// This function will get token from input string. Also sets
 // startIdx on first character after the token.
 std::string
 lefrSettings::getToken(const std::string &input, int &startIdx)
 {
     std::string  divChars = " \n\t\r;";
-    int          tokenStart = input.find_first_not_of(divChars, 
+    int          tokenStart = input.find_first_not_of(divChars,
                                                       startIdx);
-    int          tokenEnd = input.find_first_of(divChars, 
+    int          tokenEnd = input.find_first_of(divChars,
                                                  tokenStart);
 
     startIdx = tokenEnd;
@@ -607,12 +607,12 @@ lefrSettings::getToken(const std::string &input, int &startIdx)
 }
 
 
-// This function adds new lef58Type-layerType pairs. layerType 
-// is reference to string array last element of which should be 
+// This function adds new lef58Type-layerType pairs. layerType
+// is reference to string array last element of which should be
 // "". The pairs will be created for each element of the array.
 // Duplicated pairs will be ignored.
-void 
-lefrSettings::addLef58Type(const char *lef58Type, 
+void
+lefrSettings::addLef58Type(const char *lef58Type,
                            const char **layerType)
 {
     for (;**layerType;     layerType++) {
