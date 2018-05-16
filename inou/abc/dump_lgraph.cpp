@@ -180,9 +180,9 @@ void Inou_abc::gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, A
   }
 
   Abc_Obj_t *pTerm = nullptr, *pNet = nullptr;
-  int        i;
 
   std::map<index_offset, Abc_Obj_t *> memory_input_map;
+  int        i=0;
   Abc_NtkForEachPo(pNtk, pTerm, i) {
     pNet = Abc_ObjFanin0(pTerm);
     std::string output_name(((Abc_ObjName(pNet))));
@@ -304,9 +304,10 @@ void Inou_abc::gen_subgraph_from_abc(LGraph *new_graph, const LGraph *old_graph,
     new_graph->node_subgraph_set(new_subgraph_idx, sub_graph->lg_id());
   }
   Abc_Obj_t *pTerm = nullptr, *pNet = nullptr;
-  int        i = 0;
 
   std::map<index_offset, Abc_Obj_t *> subgraph_input_map;
+
+  int        i = 0;
   Abc_NtkForEachPo(pNtk, pTerm, i) {
     pNet = Abc_ObjFanin0(pTerm);
     std::string output_name(((Abc_ObjName(pNet))));
@@ -409,7 +410,7 @@ void Inou_abc::conn_latch(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t 
 
 void Inou_abc::conn_primary_output(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
   Abc_Obj_t *pTerm = nullptr;
-  int        i;
+  int        i=0;
   Abc_NtkForEachPo(pNtk, pTerm, i) {
 	Abc_Obj_t * pNet = Abc_ObjFanin0(pTerm);
     std::string output_name(Abc_ObjName(pNet));
@@ -429,7 +430,7 @@ void Inou_abc::conn_primary_output(LGraph *new_graph, const LGraph *old_graph, A
 
 void Inou_abc::conn_combinational_cell(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
   Abc_Obj_t *pObj = nullptr;
-  int        k;
+  int        k=0;
   Abc_NtkForEachNode(pNtk, pObj, k) {
     int        i;
     Mio_Gate_t *pGate = (Mio_Gate_t *)pObj->pData;
