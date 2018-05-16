@@ -75,9 +75,9 @@ int lef_pin_cb(lefrCallbackType_e c, lefiPin *fpin, lefiUserData ud) {
 
   auto &tmp_cell = tlib->get_vec_cell_types()->back();
   if(is_input) {
-    tmp_cell.set_direction(tmp_cell.add_pin(fpin->name()), Tech_cell::Direction::input);
+    tmp_cell.add_pin(fpin->name(), Tech_cell::Direction::input);
   } else {
-    tmp_cell.set_direction(tmp_cell.add_pin(fpin->name()), Tech_cell::Direction::output);
+    tmp_cell.add_pin(fpin->name(), Tech_cell::Direction::output);
   }
 
   Tech_cell::Pin &pin_info = tmp_cell.get_vec_pins()->back();
