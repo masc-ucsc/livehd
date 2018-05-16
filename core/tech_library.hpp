@@ -75,12 +75,27 @@ public:
   const std::string get_function() const { return function; }
   void              set_function(std::string _function) { function = _function; }
 
-  pin_type add_pin(const std::string & name) {
+  pin_type add_pin(const std::string & name, Direction dir) {
     pin_type id = pins.size();
     Pin      aPin;
     aPin.name = name;
+    aPin.dir  = dir;
     pins.push_back(aPin);
     pname2id.insert(std::make_pair(name, id));
+
+    if(dir == input) {
+      assert(std::find(inputs.begin(), inputs.end(), id) == inputs.end());
+
+      pins[id].io_id = inputs.size();
+      inputs.push_back(id);
+    }else{
+      assert(std::find(outputs.begin(), outputs.end(), id) == outputs.end());
+      assert(dir == output);
+
+      pins[id].io_id = outputs.size();
+      outputs.push_back(id);
+    }
+
     return id;
   }
 
@@ -143,23 +158,6 @@ public:
     return pins[outputs[id]].name;
   }
 
-  void set_direction(pin_type id, Direction dir) {
-    assert(pins.size() > id);
-    if(dir == input) {
-#ifdef DEBUG
-      assert(std::find(outputs.begin(), outputs.end(), id) == outputs.end());
-#endif
-      pins[id].io_id = inputs.size();
-      inputs.push_back(id);
-    } else {
-#ifdef DEBUG
-      assert(std::find(inputs.begin(), inputs.end(), id) == inputs.end());
-#endif
-      pins[id].io_id = outputs.size();
-      outputs.push_back(id);
-    }
-    pins[id].dir = dir;
-  }
 
   const Direction get_direction(pin_type id) const {
     assert(pins.size() > id);

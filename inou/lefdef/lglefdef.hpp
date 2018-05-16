@@ -55,17 +55,20 @@ int lef_pin_cb(lefrCallbackType_e c, lefiPin *fpin, lefiUserData ud) { //fpin me
 
   Tech_cell &tmp_cell = tlib->get_vec_cell_types()->back();
 
-  tmp_cell.add_pin(fpin->name());
-  Tech_cell::Pin &tmp_pin = tmp_cell.get_vec_pins()->back();
 
+  Tech_cell::Direction dir = Tech_cell::Direction::input;
   if(fpin->hasDirection()) {
     if(strcmp(fpin->direction(), "INPUT") == 0)
-      tmp_pin.dir = Tech_cell::Direction::input;
+      dir = Tech_cell::Direction::input;
     else if(strcmp(fpin->direction(), "OUTPUT") == 0)
-      tmp_pin.dir = Tech_cell::Direction::output;
+      dir = Tech_cell::Direction::output;
     else if(strcmp(fpin->direction(), "INOUT") == 0) //we will set inout as input in lgraph
-      tmp_pin.dir = Tech_cell::Direction::input;
+      dir = Tech_cell::Direction::input;
+    else
+      assert(false); // Unknown option
   }
+  tmp_cell.add_pin(fpin->name(),dir);
+  Tech_cell::Pin &tmp_pin = tmp_cell.get_vec_pins()->back();
 
   if(fpin->hasUse())
     tmp_pin.use = fpin->use();
