@@ -42,7 +42,7 @@ do
   ${YOSYS} ./inou/yosys/tests/${input} > ./yosys-test/log_from_yosys_${input} 2> ./yosys-test/err_from_yosys_${input}
 
   if [ $? -eq 0 ]; then
-    echo "Successfully created graph from "${input}
+    echo "Successfully created graph from ${input}"
   else
     echo "${YOSYS} ./inou/yosys/tests/${input} -d"
     echo "FAIL: lgyosys parsing terminated with an error (testcase ${input})"
@@ -78,7 +78,7 @@ do
     2> /dev/null | grep "Equivalence successfully proven!"
 
   if [ $? -eq 0 ]; then
-    echo "Successfully matched generated verilog with original verilog1 ("${input}")"
+    echo "Successfully matched generated verilog with original verilog1 (${input})"
   else
     ./subs/yosys/bin/yosys -p "${yosys_read};
     memory -nomap; opt_expr -full; opt -purge; proc; opt -purge;
@@ -87,7 +87,7 @@ do
       | grep "Equivalence successfully proven!"
 
     if [ $? -eq 0 ]; then
-      echo "Successfully matched generated verilog with original verilog2 ("${input}")"
+      echo "Successfully matched generated verilog with original verilog2 (${input})"
     else
 
       ./subs/yosys/bin/yosys -p "${yosys_read};
@@ -97,7 +97,7 @@ do
         | grep "Equivalence successfully proven!"
 
       if [ $? -eq 0 ]; then
-        echo "Successfully matched generated verilog with original verilog3 ("${input}")"
+        echo "Successfully matched generated verilog with original verilog3 (${input})"
 
 
       else
@@ -124,9 +124,9 @@ do
       fm_shell -64bit -f fm_script_${base}.tcl | grep "Verification SUCCEEDED"
 
       if [ $? -eq 0 ]; then
-        echo "Successfully matched generated verilog with original verilog ("${input}")"
+        echo "Successfully matched generated verilog with original verilog (${input})"
       else
-        echo "FAIL: circuits are not equivalent ("${input}")"
+        echo "FAIL: circuits are not equivalent (${input})"
         exit 1
       fi
     fi
