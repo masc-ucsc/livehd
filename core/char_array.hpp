@@ -53,8 +53,9 @@ private:
 
   bool pending_clear_reload;
 
+  explicit Char_Array() { } // Not allowed
 public:
-  Char_Array(const std::string & path, const std::string & _name)
+  explicit Char_Array(const std::string & path, const std::string & _name)
       : variable_internal(path + "/" + _name) {
 
     pending_clear_reload = true;
