@@ -365,12 +365,10 @@ Index_ID LGraph_Base::create_node_space(Index_ID last_idx, Port_ID out_pid, Inde
     assert(node_internal[idx2].get_master_root_nid() == master_nid);
 
     node_internal[last_idx].push_next_state(idx2);
-#ifdef DEBUG
-    int32_t dbg_ni2 = dbg_master.get_num_inputs();
-    int32_t dbg_no2 = dbg_master.get_num_outputs();
-    assert(dbg_ni2 == dbg_ni);
-    assert(dbg_no2 == dbg_no);
-#endif
+
+    assert(dbg_master.get_num_inputs() == dbg_ni);
+    assert(dbg_master.get_num_outputs() == dbg_no);
+
     if(!node_internal[last_idx].has_space(true)) {
       if(node_internal[idx2].has_space(true))
         return idx2;
@@ -412,12 +410,8 @@ Index_ID LGraph_Base::create_node_space(Index_ID last_idx, Port_ID out_pid, Inde
   assert(node_internal[idx3].get_master_root_nid() == master_nid);
   assert(node_internal[idx2].get_master_root_nid() == master_nid);
 
-#ifdef DEBUG
-  int32_t dbg_ni2 = dbg_master.get_num_inputs();
-  int32_t dbg_no2 = dbg_master.get_num_outputs();
-  assert(dbg_ni2 == dbg_ni);
-  assert(dbg_no2 == dbg_no);
-#endif
+  assert(dbg_master.get_num_inputs() == dbg_ni);
+  assert(dbg_master.get_num_outputs() == dbg_no);
 
   assert(node_internal[idx2].has_space(true));
   return idx2;
@@ -532,38 +526,10 @@ Index_ID LGraph_Base::get_idx_from_pid(Index_ID nid, Port_ID pid) {
   Index_ID idx_new = get_space_output_pin(nid, pid, root_nid);
   if(root_nid == 0)
     root_nid = idx_new;
+
   assert(node_internal[root_nid].is_root());
+
   return idx_new;
-
-  assert(node_internal[nid].is_root());
-  assert(node_internal[nid].is_node_state());
-  if(node_internal[nid].get_out_pid() == pid) {
-    return nid;
-  }
-
-  Index_ID idx = nid;
-  while(true) {
-    if(node_internal[idx].get_out_pid() == pid) {
-      return idx;
-    }
-
-    if(node_internal[idx].is_last_state()) {
-      Index_ID idx_new;
-      Index_ID root_nid;
-      idx_new = get_space_output_pin(nid, pid, root_nid);
-      if(root_nid == 0)
-        root_nid = idx_new;
-      assert(node_internal[root_nid].is_root());
-      return idx_new;
-    }
-
-    Index_ID idx2 = node_internal[idx].get_next();
-    assert(node_internal[idx2].get_master_root_nid() == node_internal[idx].get_master_root_nid());
-    idx = idx2;
-  }
-
-  assert(false);
-  return 0;
 }
 
 void LGraph_Base::set_bits_pid(Index_ID nid, Port_ID pid, uint16_t bits) {
