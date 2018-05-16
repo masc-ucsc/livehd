@@ -75,7 +75,7 @@ public:
   const std::string get_function() const { return function; }
   void              set_function(std::string _function) { function = _function; }
 
-  pin_type add_pin(const std::string & name, Direction dir) {
+  pin_type add_pin(const std::string &name, Direction dir) {
     pin_type id = pins.size();
     Pin      aPin;
     aPin.name = name;
@@ -99,7 +99,7 @@ public:
     return id;
   }
 
-  bool include_pin(const std::string & name) const {
+  bool include_pin(const std::string &name) const {
     return pname2id.find(name) != pname2id.end();
   }
 
@@ -115,26 +115,26 @@ public:
     return outputs.size();
   }
 
-  const pin_type get_pin_id(const std::string & name) const {
+  const pin_type get_pin_id(const std::string &name) const {
     assert(pname2id.find(name) != pname2id.end());
     return pname2id.at(name);
   }
 
-  bool pin_name_exist(const std::string & name) const {
+  bool pin_name_exist(const std::string &name) const {
     if(pname2id.find(name) != pname2id.end())
       return true;
     else
       return false;
   }
 
-  const pin_type get_out_id(const std::string & name) const {
+  const pin_type get_out_id(const std::string &name) const {
     assert(pname2id.find(name) != pname2id.end());
     pin_type pin_id = pname2id.at(name);
     assert(pins[pin_id].dir == Direction::output);
     return pins[pin_id].io_id;
   }
 
-  const pin_type get_inp_id(const std::string & name) const {
+  const pin_type get_inp_id(const std::string &name) const {
     assert(pname2id.find(name) != pname2id.end());
     pin_type pin_id = pname2id.at(name);
     assert(pins[pin_id].dir == Direction::input);
@@ -143,46 +143,45 @@ public:
 
   const int get_pins_size() const { return pins.size(); };
 
-  const std::string get_name(pin_type id) const {
+  const std::string &get_name(pin_type id) const {
     assert(pins.size() > id);
     return pins[id].name;
   }
 
-  const std::string get_input_name(pin_type id) const {
+  const std::string &get_input_name(pin_type id) const {
     assert(inputs.size() > id);
     return pins[inputs[id]].name;
   }
 
-  const std::string get_output_name(pin_type id) const {
+  const std::string &get_output_name(pin_type id) const {
     assert(outputs.size() > id);
     return pins[outputs[id]].name;
   }
-
 
   const Direction get_direction(pin_type id) const {
     assert(pins.size() > id);
     return pins[id].dir;
   }
 
-  const std::vector<pin_type> get_inputs() const {
+  const std::vector<pin_type> &get_inputs() const {
     return inputs;
   }
 
-  bool is_input(const std::string & name) const {
+  bool is_input(const std::string &name) const {
     assert(pname2id.find(name) != pname2id.end());
 
     pin_type inpid = pname2id.at(name);
     return (pins.at(inpid).dir == Direction::input);
   }
 
-  bool is_output(const std::string & name) const {
+  bool is_output(const std::string &name) const {
     assert(pname2id.find(name) != pname2id.end());
 
     pin_type outid = pname2id.at(name);
     return (pins[outid].dir == Direction::output);
   }
 
-  const std::vector<pin_type> get_outputs() const {
+  const std::vector<pin_type> &get_outputs() const {
     return outputs;
   }
 
@@ -221,7 +220,6 @@ public:
   std::string         name;
   bool                horizontal;
   double              minwidth;
-  double              spacing;
   double              area;
   double              width;
   std::vector<double> spacing_eol;
@@ -254,8 +252,8 @@ public:
 
 class Tech_library {
 private:
-  std::string lgdb;
-  std::string lib_file;
+  const std::string lgdb;
+  const std::string lib_file;
 
   bool clean;
 
@@ -265,9 +263,10 @@ private:
 
   std::unordered_map<std::string, uint16_t> cname2id;
 
-  explicit Tech_library(const std::string & _path) {
-    lgdb     = _path;
-    lib_file = "tech_library";
+  explicit Tech_library(const std::string & _path)
+   : lgdb(_path)
+     , lib_file("tech_library") {
+
     cname2id.clear();
     cell_types.clear();
     clean = true;
