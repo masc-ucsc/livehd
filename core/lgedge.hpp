@@ -221,11 +221,11 @@ public:
     assert(!is_page_align());
     assert(get_out_pid() == _out_pid);
 
-    SEdge_Internal *s = (SEdge_Internal *)this;
+    SEdge_Internal *s = reinterpret_cast<SEdge_Internal *>(this);
     if(is_snode()) {
       return s->set(_idx, _inp_pid, _input);
     }
-    LEdge_Internal *l = (LEdge_Internal *)this;
+    LEdge_Internal *l = reinterpret_cast<LEdge_Internal *>(this);
     return l->set(_idx, _inp_pid, _input);
   }
 };
