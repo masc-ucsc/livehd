@@ -488,7 +488,7 @@ Index_ID LGraph_Base::get_space_output_pin(Index_ID master_nid, Index_ID start_n
   return 0;
 }
 
-Index_ID LGraph_Base::find_idx_from_pid(Index_ID nid, Port_ID pid) const {
+Index_ID LGraph_Base::find_idx_from_pid_int(Index_ID nid, Port_ID pid) const {
 
   assert(node_internal[nid].is_root());
   assert(node_internal[nid].is_node_state());
@@ -503,7 +503,6 @@ Index_ID LGraph_Base::find_idx_from_pid(Index_ID nid, Port_ID pid) const {
     }
 
     if(node_internal[idx].is_last_state()) {
-      assert(false); //not found
       return 0;
     }
 
@@ -516,7 +515,25 @@ Index_ID LGraph_Base::find_idx_from_pid(Index_ID nid, Port_ID pid) const {
   return 0;
 }
 
+Index_ID LGraph_Base::find_idx_from_pid(Index_ID nid, Port_ID pid) const {
+
+  Index_ID pos = find_idx_from_pid_int(nid,pid);
+  assert(pos);
+
+  return pos;
+}
+
 Index_ID LGraph_Base::get_idx_from_pid(Index_ID nid, Port_ID pid) {
+  Index_ID pos = find_idx_from_pid_int(nid,pid);
+  if (pos)
+    return pos;
+
+  Index_ID root_nid;
+  Index_ID idx_new = get_space_output_pin(nid, pid, root_nid);
+  if(root_nid == 0)
+    root_nid = idx_new;
+  assert(node_internal[root_nid].is_root());
+  return idx_new;
 
   assert(node_internal[nid].is_root());
   assert(node_internal[nid].is_node_state());
