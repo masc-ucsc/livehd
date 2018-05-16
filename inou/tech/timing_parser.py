@@ -3,7 +3,6 @@ Usage: python timing_parser.py /path/to/file/filename.lib'''
 
 import json
 import lib_parser
-import argparse
 import sys
 
 
