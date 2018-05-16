@@ -172,12 +172,12 @@ public:
 
   void print_stats() const;
 
-  // Node_Internal expossed queries
-  Node_Internal &get_node_int(Index_ID idx) {
+  const Node_Internal &get_node_int(Index_ID idx) const {
     assert(static_cast<Index_ID>(node_internal.size()) > idx);
     return node_internal[idx];
   }
-  const Node_Internal &get_node_int(Index_ID idx) const {
+
+  Node_Internal &get_node_int(Index_ID idx) {
     assert(static_cast<Index_ID>(node_internal.size()) > idx);
     return node_internal[idx];
   }
