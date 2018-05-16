@@ -83,6 +83,7 @@ void LGraph_Base::each_output(std::function<void(Index_ID)> f1) const {
 }
 
 void LGraph_Base::get_lock() {
+
   if(locked)
     return;
 
@@ -98,8 +99,6 @@ void LGraph_Base::get_lock() {
 }
 
 void LGraph_Base::reload() {
-
-  // get_lock(); Only when a new element is added
 
   node_internal.reload();
   input_array.reload();
@@ -121,6 +120,7 @@ void LGraph_Base::reload() {
 }
 
 void LGraph_Base::recompute_io_ports() {
+
   Port_ID pos = 0;
   for(auto &it : inputs2node) {
     it.second.pos = pos++;
@@ -136,6 +136,7 @@ Index_ID LGraph_Base::add_graph_input(const char *str, Index_ID nid, uint16_t bi
 
   if(nid == 0)
     nid = create_node_int();
+
   node_internal[nid].set_graph_io_input();
 
   if(bits != 0)
@@ -151,22 +152,7 @@ Index_ID LGraph_Base::add_graph_input(const char *str, Index_ID nid, uint16_t bi
 
   recompute_io_ports();
 
-#if 0
-  Port_ID max_out_pid=0; // FIXME4: Set pid = 0, not max
-  for(auto ent:inputs2node) {
-    Index_ID nid = ent.second.nid;
-    if (node_internal[nid].get_out_pid() > max_out_pid)
-      max_out_pid = node_internal[nid].get_out_pid();
-  }
-  for(auto ent:outputs2node) {
-    Index_ID nid = ent.second.nid;
-    if (node_internal[nid].get_out_pid() > max_out_pid)
-      max_out_pid = node_internal[nid].get_out_pid();
-  }
-  node_internal[nid].set_out_pid(max_out_pid+1);
-#else
   node_internal[nid].set_out_pid(0);
-#endif
 
   assert(node_internal[nid].is_master_root());
 
@@ -192,22 +178,7 @@ Index_ID LGraph_Base::add_graph_output(const char *str, Index_ID nid, uint16_t b
 
   recompute_io_ports();
 
-#if 0
-  Port_ID max_out_pid=0;
-  for(auto ent:inputs2node) {
-    Index_ID nid = ent.second;
-    if (node_internal[nid].get_out_pid() > max_out_pid)
-      max_out_pid = node_internal[nid].get_out_pid();
-  }
-  for(auto ent:outputs2node) {
-    Index_ID nid = ent.second;
-    if (node_internal[nid].get_out_pid() > max_out_pid)
-      max_out_pid = node_internal[nid].get_out_pid();
-  }
-  node_internal[nid].set_out_pid(max_out_pid+1);
-#else
   node_internal[nid].set_out_pid(0);
-#endif
 
   assert(node_internal[nid].is_master_root());
 
@@ -281,6 +252,7 @@ Port_ID LGraph_Base::get_graph_pid_from_nid(Index_ID nid) const {
     if(ent.second.nid == nid)
       return ent.second.pos;
   }
+
   for(auto const &ent : outputs2node) {
     if(ent.second.nid == nid)
       return ent.second.pos;
@@ -516,7 +488,7 @@ Index_ID LGraph_Base::get_space_output_pin(Index_ID master_nid, Index_ID start_n
   return 0;
 }
 
-Index_ID LGraph_Base::get_idx_from_pid(Index_ID nid, Port_ID pid) const {
+Index_ID LGraph_Base::find_idx_from_pid(Index_ID nid, Port_ID pid) const {
 
   assert(node_internal[nid].is_root());
   assert(node_internal[nid].is_node_state());
@@ -583,7 +555,7 @@ void LGraph_Base::set_bits_pid(Index_ID nid, Port_ID pid, uint16_t bits) {
 }
 
 uint16_t LGraph_Base::get_bits_pid(Index_ID nid, Port_ID pid) const {
-  Index_ID idx = get_idx_from_pid(nid, pid);
+  Index_ID idx = find_idx_from_pid(nid, pid);
   return get_bits(idx);
 }
 

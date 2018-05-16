@@ -26,9 +26,9 @@ add_custom_command(TARGET inou_yosys PRE_BUILD COMMAND ${CMAKE_COMMAND} -E copy 
 add_custom_command(TARGET inou_yosys PRE_BUILD COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/tests ${PROJECT_BINARY_DIR}/tests/)
 
 
-#add_test(NAME extra_inou_yosys_parse COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/lgyosys --testdir=${CMAKE_CURRENT_SOURCE_DIR}/tests
-#  --logdir=${PROJECT_BINARY_DIR}/../../logs
-#  --lgdb=${PROJECT_BINARY_DIR}/../../lgdb
-#  --binary=${PROJECT_BINARY_DIR}/../../subs/yosys/bin/yosys
-#  --inou=${PROJECT_BINARY_DIR}/libinou_yosys.so)
+add_test(NAME extra_inou_yosys_parse COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/lgyosys --testdir=${CMAKE_CURRENT_SOURCE_DIR}/tests
+  --logdir=${PROJECT_BINARY_DIR}/../../logs
+  --lgdb=${PROJECT_BINARY_DIR}/../../lgdb
+  --binary=${PROJECT_BINARY_DIR}/../../subs/yosys/bin/yosys
+  --inou=${PROJECT_BINARY_DIR}/libinou_yosys.so CONFIGURATIONS complete)
 

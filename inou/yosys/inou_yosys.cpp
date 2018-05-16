@@ -55,7 +55,9 @@ static std::map<std::string, uint32_t> used_names;
 #endif
 
 static void look_for_module_outputs(RTLIL::Module *module, std::string output_directory) {
+#ifdef DEBUG
   log("inou_yosys look_for_module_outputs pass for module %s:\n", module->name.c_str());
+#endif
   std::string name = &module->name.c_str()[1];
   auto *      g    = module2graph[name];
 
@@ -556,7 +558,10 @@ static Node_Pin create_join_operator(LGraph *g, const RTLIL::SigSpec &ss) {
 
 // this function is called for each module in the design
 static LGraph *process_module(RTLIL::Module *module) {
+#ifdef DEBUG
   log("inou_yosys pass for module %s:\n", module->name.c_str());
+  printf("process_module %s\n", module->name.c_str());
+#endif
 
   std::string name = &module->name.c_str()[1];
   assert(module2graph.find(name) != module2graph.end());
@@ -627,7 +632,9 @@ static LGraph *process_module(RTLIL::Module *module) {
 #endif
 
   for(auto cell : module->cells()) {
+#if DEBUG
     log("Looking for cell %s:\n", cell->type.c_str());
+#endif
 
     Index_ID onid, inid;
     assert(cell2nid.find(cell) != cell2nid.end());
@@ -847,8 +854,8 @@ static LGraph *process_module(RTLIL::Module *module) {
       connect_constant(g, transp.as_int(), 1, onid, LGRAPH_MEMOP_RDTRAN);
 
       //FIXME: get a test case to patch
-      if(cell->parameters.find("\\OFFSET") != cell->parameters.end())
-        assert(cell->parameters["\\OFFSET"].as_int() == 0);
+      /*if(cell->parameters.find("\\OFFSET") != cell->parameters.end())
+        assert(cell->parameters["\\OFFSET"].as_int() == 0);*/
       if(cell->parameters.find("\\INIT") != cell->parameters.end())
         assert(cell->parameters["\\INIT"].as_string() == "x");
 

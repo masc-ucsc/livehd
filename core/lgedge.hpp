@@ -143,11 +143,11 @@ protected:
   Port_ID get_out_pid() const;
 
   Port_ID get_inp_pid() const {
-    SEdge_Internal *s = (SEdge_Internal *)this;
+    const SEdge_Internal *s = reinterpret_cast<const SEdge_Internal *>(this);
     if(is_snode())
       return s->get_inp_pid();
 
-    LEdge_Internal *l = (LEdge_Internal *)this;
+    const LEdge_Internal *l = reinterpret_cast<const LEdge_Internal *>(this);
     return l->get_inp_pid();
   }
 
