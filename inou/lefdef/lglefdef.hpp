@@ -147,7 +147,7 @@ int lef_layer_cb(lefrCallbackType_e c, lefiLayer *flayer, lefiUserData ud) { //f
   if(flayer->hasSpacingNumber()) {
     for(i = 0; i < flayer->numSpacing(); i++) {
       if(i == 0)
-        tmp_layer.spacing = flayer->spacing(i);
+        tmp_layer.spacing_eol.push_back(flayer->spacing(i));
       else if(flayer->hasSpacingEndOfLine(i)) {
         tmp_layer.spacing_eol.push_back(flayer->spacing(i));
         tmp_layer.spacing_eol.push_back(flayer->spacingEolWidth(i));
