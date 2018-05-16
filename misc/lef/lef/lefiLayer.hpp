@@ -1,25 +1,25 @@
 // *****************************************************************************
 // *****************************************************************************
 // Copyright 2012 - 2015, Cadence Design Systems
-// 
+//
 // This  file  is  part  of  the  Cadence  LEF/DEF  Open   Source
-// Distribution,  Product Version 5.8. 
-// 
+// Distribution,  Product Version 5.8.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 //    you may not use this file except in compliance with the License.
 //    You may obtain a copy of the License at
-// 
+//
 //        http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 //    Unless required by applicable law or agreed to in writing, software
 //    distributed under the License is distributed on an "AS IS" BASIS,
 //    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 //    implied. See the License for the specific language governing
 //    permissions and limitations under the License.
-// 
+//
 // For updates, support, or to become part of the LEF/DEF Community,
 // check www.openeda.org for details.
-// 
+//
 //  $Author: dell $
 //  $Revision: #1 $
 //  $Date: 2017/06/06 $
@@ -64,8 +64,8 @@ public:
   void addAntennaPWL(double d, double r);
 
   int  numPWL() const;
-  double PWLdiffusion(int index); 
-  double PWLratio(int index); 
+  double PWLdiffusion(int index);
+  double PWLratio(int index);
 
 protected:
   int numAlloc_;
@@ -218,7 +218,7 @@ public:
   void addInfluence(double width, double distance, double spacing);
   void addTwoWidths(double width, double runLength, int numSpacing,
                     double* spacing, int hasPRL = 0);          // 5.7
-  
+
   int isInfluence() const;
   lefiInfluence* influence() const;
   int isParallel() const;
@@ -473,23 +473,23 @@ public:
   void setSpTwoWidthsHasPRL(int hasPRL);
   void addSpInfluence(double width, double distance, double spacing);
   void addSpTwoWidths(double width, double runLength);              // 5.7
-  
+
 
   // 5.6
   void addEnclosure(char* enclRule, double overhang1, double overhang2);
-  void addEnclosureWidth(double minWidth); 
+  void addEnclosureWidth(double minWidth);
   void addEnclosureExceptEC(double cutWithin);       // 5.7
   void addEnclosureLength(double minLength);         // 5.7
   void addEnclosureExtraCut();                       // 5.7+
   void addPreferEnclosure(char* enclRule, double overhang1, double overhang2);
-  void addPreferEnclosureWidth(double minWidth); 
+  void addPreferEnclosureWidth(double minWidth);
   void setResPerCut(double value);
   void setDiagMinEdgeLength(double value);
   void setMinSize(lefiGeometries* geom);
 
   // 5.8
   // POLYROUTING, MIMCAP, TSV, PASSIVATION, NWELL
-  void setLayerType(const char* lType) ; 
+  void setLayerType(const char* lType) ;
 
   int hasType() const ;
   int hasLayerType() const ;         // 5.8 - Some layers can be another types
@@ -506,7 +506,7 @@ public:
   int hasDiagPitch() const;          // 5.6
   int hasXYDiagPitch() const;        // 5.6
   int hasDiagWidth() const;          // 5.6
-  int hasDiagSpacing() const;        // 5.6 
+  int hasDiagSpacing() const;        // 5.6
   int hasSpacingNumber() const ;
   int hasSpacingName(int index) const ;
   int hasSpacingLayerStack(int index) const ;            // 5.7
@@ -572,8 +572,8 @@ public:
   double diagPitch() const ;                // 5.6
   double diagPitchX() const ;               // 5.6
   double diagPitchY() const ;               // 5.6
-  double diagWidth() const ;                // 5.6 
-  double diagSpacing() const ;              // 5.6 
+  double diagWidth() const ;                // 5.6
+  double diagSpacing() const ;              // 5.6
   double spacing(int index) const ;
   char*  spacingName(int index) const ;     // for CUT layer
   int    spacingAdjacentCuts(int index) const ;   // 5.5 - for CUT layer
@@ -658,7 +658,7 @@ public:
   int numAntennaModel() const;
   lefiAntennaModel* antennaModel(int index) const;
 
-  // The following is 8/21/01 5.4 enhancements 
+  // The following is 8/21/01 5.4 enhancements
   void setSlotWireWidth(double num);
   void setSlotWireLength(double num);
   void setSlotWidth(double num);
@@ -763,7 +763,7 @@ public:
   double minSizeLength(int index) const;
 
   // 5.7
-  int    hasMaxFloatingArea() const; 
+  int    hasMaxFloatingArea() const;
   double maxFloatingArea() const;
   int    hasArraySpacing() const;
   int    hasLongArray() const;
@@ -807,7 +807,7 @@ protected:
   int hasPitch_;
   int hasMask_;                       // 5.8 native
   int hasOffset_;
-  int hasWidth_;            
+  int hasWidth_;
   int hasArea_;
   int hasSpacing_;
   int hasDiagPitch_;                  // 5.6
@@ -900,7 +900,7 @@ protected:
   int     numMinstepAlloc_;                   // 5.6
   double* minstep_;                           // 5.6, switch to multiple
   char**  minstepType_;                       // INSIDECORNER|OUTSIDECORNER|STEP
-  double* minstepLengthsum_; 
+  double* minstepLengthsum_;
   int*    minstepMaxEdges_;                   // 5.7
   double* minstepMinAdjLength_;               // 5.7
   double* minstepMinBetLength_;               // 5.7
@@ -990,20 +990,20 @@ protected:
   int hasFillActiveSpacing_;
   int hasTwoWidthPRL_;
 
-  double slotWireWidth_; 
-  double slotWireLength_; 
-  double slotWidth_; 
-  double slotLength_; 
-  double maxAdjacentSlotSpacing_; 
-  double maxCoaxialSlotSpacing_; 
-  double maxEdgeSlotSpacing_; 
-  double splitWireWidth_; 
-  double minimumDensity_; 
-  double maximumDensity_; 
-  double densityCheckWindowLength_; 
-  double densityCheckWindowWidth_; 
-  double densityCheckStep_; 
-  double fillActiveSpacing_; 
+  double slotWireWidth_;
+  double slotWireLength_;
+  double slotWidth_;
+  double slotLength_;
+  double maxAdjacentSlotSpacing_;
+  double maxCoaxialSlotSpacing_;
+  double maxEdgeSlotSpacing_;
+  double splitWireWidth_;
+  double minimumDensity_;
+  double maximumDensity_;
+  double densityCheckWindowLength_;
+  double densityCheckWindowWidth_;
+  double densityCheckStep_;
+  double fillActiveSpacing_;
 
   // 5.5 SPACINGTABLE
   int numSpacingTable_;

@@ -21,8 +21,10 @@ ENDFOREACH(EXE)
 
 
 add_test(NAME core_prep  COMMAND mkdir -p lgdb)
+add_test(NAME core_done  COMMAND echo "core_done")
 FOREACH(EXE ${EXELIST})
-  add_test(NAME core_${EXE}    COMMAND ${PROJECT_BINARY_DIR}/${EXE})
+  add_test(NAME core_${EXE}        COMMAND ${PROJECT_BINARY_DIR}/${EXE})
   SET_TESTS_PROPERTIES(core_${EXE} PROPERTIES DEPENDS core_prep)
+  SET_PROPERTY(TEST core_done      APPEND PROPERTY DEPENDS core_${EXE})
 ENDFOREACH(EXE)
 

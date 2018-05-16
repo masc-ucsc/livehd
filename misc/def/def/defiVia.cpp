@@ -1,25 +1,25 @@
 // *****************************************************************************
 // *****************************************************************************
 // Copyright 2013 - 2016, Cadence Design Systems
-// 
+//
 // This  file  is  part  of  the  Cadence  LEF/DEF  Open   Source
-// Distribution,  Product Version 5.8. 
-// 
+// Distribution,  Product Version 5.8.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 //    you may not use this file except in compliance with the License.
 //    You may obtain a copy of the License at
-// 
+//
 //        http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 //    Unless required by applicable law or agreed to in writing, software
 //    distributed under the License is distributed on an "AS IS" BASIS,
 //    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 //    implied. See the License for the specific language governing
 //    permissions and limitations under the License.
-// 
+//
 // For updates, support, or to become part of the LEF/DEF Community,
 // check www.openeda.org for details.
-// 
+//
 //  $Author: dell $
 //  $Revision: #1 $
 //  $Date: 2017/06/06 $
@@ -45,7 +45,7 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
 //////////////////////////////////////////////
 
 
-defiVia::defiVia(defrData *data) 
+defiVia::defiVia(defrData *data)
  : defData(data)
 {
   Init();
@@ -105,7 +105,7 @@ void defiVia::clear() {
   xTopOffset_ = 0;
   yTopOffset_ = 0;
   hasCutPattern_ = 0;
-  
+
   if (polygonNames_) {
     struct defiPoints* p;
     for (i = 0; i < numPolys_; i++) {
@@ -305,7 +305,7 @@ void defiVia::addPolygon(const char* layer, defiGeometries* geom, int colorMask)
       free((char*)(polygons_));
     if (polygonNames_)
       free((char*)(polygonNames_));
-    if (polyMask_) 
+    if (polyMask_)
       free((char*)(polyMask_));
     polygonNames_ = newn;
     polygons_ = poly;
@@ -440,7 +440,7 @@ int defiVia::polyMask(int index) const {
     return 0;
 }
 
-void defiVia::layer(int index, char** layer, int* xl, int* yl, 
+void defiVia::layer(int index, char** layer, int* xl, int* yl,
       int* xh, int* yh) const {
   if (index >= 0 && index < numLayers_) {
     if (layer) *layer = layers_[index];
@@ -496,9 +496,9 @@ void defiVia::viaRule(char** viaRuleName, int* xSize, int* ySize,
 
 int defiVia::hasRowCol() const {
   if (rows_)
-    return rows_; 
+    return rows_;
   else
-    return cols_; 
+    return cols_;
 }
 
 void defiVia::rowCol(int* numCutRows, int* numCutCols) const {
@@ -525,7 +525,7 @@ int defiVia::hasOffset() const {
     return yBotOffset_;
   else if (xTopOffset_)
     return xTopOffset_;
-  else 
+  else
     return yTopOffset_;
 }
 
@@ -553,7 +553,7 @@ int defiVia::hasPolyMask(int index) const {
     if (index > 0 || index < numPolys_) {
         return polyMask_[index];
     }
-    
+
     return 0;
 }
 

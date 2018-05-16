@@ -1,25 +1,25 @@
 // *****************************************************************************
 // *****************************************************************************
 // Copyright 2013 - 2016, Cadence Design Systems
-// 
+//
 // This  file  is  part  of  the  Cadence  LEF/DEF  Open   Source
-// Distribution,  Product Version 5.8. 
-// 
+// Distribution,  Product Version 5.8.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 //    you may not use this file except in compliance with the License.
 //    You may obtain a copy of the License at
-// 
+//
 //        http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 //    Unless required by applicable law or agreed to in writing, software
 //    distributed under the License is distributed on an "AS IS" BASIS,
 //    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 //    implied. See the License for the specific language governing
 //    permissions and limitations under the License.
-// 
+//
 // For updates, support, or to become part of the LEF/DEF Community,
 // check www.openeda.org for details.
-// 
+//
 //  $Author: dell $
 //  $Revision: #1 $
 //  $Date: 2017/06/06 $
@@ -43,7 +43,7 @@ data_(NULL),
 pointer_(NULL),
 numUsed_(0),
 numAllocated_(0),
-numX_(0),      
+numX_(0),
 numY_(0),
 stepX_(0),
 stepY_(0),
@@ -53,13 +53,13 @@ mask_(0)
 {}
 
 
-defiPath::defiPath(defiPath *defiPathRef) 
+defiPath::defiPath(defiPath *defiPathRef)
 {
     *this = *defiPathRef;
 
     defiPathRef->pointer_ = NULL;
     defiPathRef->keys_ = NULL;
-    defiPathRef->data_ = NULL;    
+    defiPathRef->data_ = NULL;
 }
 
 
@@ -69,7 +69,7 @@ defiPath::~defiPath() {
 
 
 void defiPath::Init() {
-  // Should do nothing in constructor case. 
+  // Should do nothing in constructor case.
   Destroy();
 
   numUsed_ = 0;
@@ -77,7 +77,7 @@ void defiPath::Init() {
   pointer_ = new int;
   *pointer_ = -1;
 
-  numX_ = 0;      
+  numX_ = 0;
   numY_ = 0;
   stepX_ = 0;
   stepY_ = 0;
@@ -145,7 +145,7 @@ void defiPath::initTraverseBackwards() const {
 }
 
 
-int 
+int
 defiPath::currentType() const
 {
     if (*(pointer_) >= 0 && *(pointer_) < numUsed_) {
@@ -166,13 +166,13 @@ defiPath::currentType() const
             case 'M': return DEFIPATH_MASK;
             case 'C': return DEFIPATH_VIAMASK;
             default : return DEFIPATH_DONE;
-        } 
+        }
     }
 
     return DEFIPATH_DONE;
 }
 
-int defiPath::next() const 
+int defiPath::next() const
 {
     (*(pointer_))++;
 
