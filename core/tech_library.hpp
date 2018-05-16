@@ -59,8 +59,7 @@ private:
   // END:
 
 public:
-  explicit Tech_cell(const std::string & name, uint16_t id) : cell_name(name), id(id),height(0),width(0) {}
-
+  explicit Tech_cell(const std::string &name, uint16_t id) : cell_name(name), id(id), height(0), width(0) {}
 
   uint16_t          get_id() const { return id; }
   const std::string get_name() const { return cell_name; }
@@ -88,7 +87,7 @@ public:
 
       pins[id].io_id = inputs.size();
       inputs.push_back(id);
-    }else{
+    } else {
       assert(std::find(outputs.begin(), outputs.end(), id) == outputs.end());
       assert(dir == output);
 
@@ -263,9 +262,8 @@ private:
 
   std::unordered_map<std::string, uint16_t> cname2id;
 
-  explicit Tech_library(const std::string & _path)
-   : lgdb(_path)
-     , lib_file("tech_library") {
+  explicit Tech_library(const std::string &_path)
+      : lgdb(_path), lib_file("tech_library") {
 
     cname2id.clear();
     cell_types.clear();
@@ -304,11 +302,11 @@ public:
     cell_types.clear();
   }
 
-  bool include(const std::string & name) const;
+  bool include(const std::string &name) const;
 
-  uint16_t create_cell_id(const std::string & name);
+  uint16_t create_cell_id(const std::string &name);
 
-  uint16_t get_cell_id(const std::string & name) const;
+  uint16_t get_cell_id(const std::string &name) const;
 
   Tech_cell *get_cell(uint16_t cell_id);
 
