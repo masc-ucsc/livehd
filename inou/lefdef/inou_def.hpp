@@ -110,13 +110,13 @@ public:
 
   Inou_def_options_pack get_opack() { return opack; }
 
-  std::vector<LGraph *> generate() override final;
+  std::vector<LGraph *> generate() final;
 
   void set_def_info(Def_info &);
 
   using Inou::generate;
 
-  void generate(std::vector<const LGraph *> &out) override final;
+  void generate(std::vector<const LGraph *> &out) final;
 };
 
 #endif

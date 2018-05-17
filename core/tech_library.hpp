@@ -72,7 +72,7 @@ public:
   }
 
   const std::string get_function() const { return function; }
-  void              set_function(std::string _function) { function = _function; }
+  void              set_function(const std::string &_function) { function = _function; }
 
   pin_type add_pin(const std::string &name, Direction dir) {
     pin_type id = pins.size();

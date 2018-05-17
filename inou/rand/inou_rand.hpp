@@ -24,9 +24,9 @@ protected:
 public:
   Inou_rand();
 
-  std::vector<LGraph *> generate() override final;
+  std::vector<LGraph *> generate() final;
   using Inou::generate;
-  void generate(std::vector<const LGraph *> &out) override final;
+  void generate(std::vector<const LGraph *> &out) final;
 };
 
 #endif
