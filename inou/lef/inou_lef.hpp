@@ -30,11 +30,11 @@ public:
 
   virtual ~Inou_lef();
 
-  std::vector<LGraph *> generate() override final;
+  std::vector<LGraph *> generate() final;
 
   using Inou::generate;
 
-  void generate(std::vector<const LGraph *> &out) override final;
+  void generate(std::vector<const LGraph *> &out) final;
 
   static void lef_parsing(Tech_library *tlib, std::string &lef_file_name);
 };
