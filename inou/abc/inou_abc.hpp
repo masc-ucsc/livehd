@@ -121,11 +121,11 @@ public:
 
   virtual ~Inou_abc();
 
-  std::vector<LGraph *> generate() override final;
+  std::vector<LGraph *> generate() final;
 
   using Inou::generate;
 
-  void generate(std::vector<const LGraph *> &out) override final;
+  void generate(std::vector<const LGraph *> &out) final;
 
 private:
   /*store the idx by their type, dont iterate again and again*/

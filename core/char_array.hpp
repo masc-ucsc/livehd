@@ -39,10 +39,11 @@ public:
   };
 
 private:
-  //std::vector<uint16_t     , AAlloc::AlignedAllocator<uint16_t,4096> > variable_internal; // variable lenght
   Dense<uint16_t> variable_internal;
 
   const uint16_t *first() const {
+    if(variable_internal.size() <= 1)
+      return last();
     return &variable_internal[1];
   }
   const uint16_t *last() const {
@@ -53,8 +54,9 @@ private:
 
   bool pending_clear_reload;
 
+  explicit Char_Array() { } // Not allowed
 public:
-  Char_Array(const std::string & path, const std::string & _name)
+  explicit Char_Array(const std::string & path, const std::string & _name)
       : variable_internal(path + "/" + _name) {
 
     pending_clear_reload = true;

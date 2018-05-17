@@ -55,18 +55,25 @@ protected:
     graph_list.close();
   }
 
-  ~Graph_library() {
-    if(!graph_library_clean) {
-      std::ofstream graph_list;
+  void clean_library() {
+    if(graph_library_clean)
+      return;
 
-      graph_list.open(path + "/" + library_file);
-      graph_list << name2id.size() << std::endl;
-      for(auto nameid : name2id) {
-        graph_list << nameid.first << " " << nameid.second << std::endl;
-      }
+    std::ofstream graph_list;
 
-      graph_list.close();
+    graph_list.open(path + "/" + library_file);
+    graph_list << name2id.size() << std::endl;
+    for(auto nameid : name2id) {
+      graph_list << nameid.first << " " << nameid.second << std::endl;
     }
+
+    graph_list.close();
+
+    graph_library_clean = true;
+  }
+
+  ~Graph_library() {
+    clean_library();
   }
 
   static std::unordered_map<std::string, Graph_library *> instances;
@@ -124,18 +131,7 @@ public:
   }
 
   void sync() {
-    if(!graph_library_clean) {
-      std::ofstream graph_list;
-
-      graph_list.open(path + "/" + library_file);
-      graph_list << name2id.size() << std::endl;
-      for(auto nameid : name2id) {
-        graph_list << nameid.first << " " << nameid.second << std::endl;
-      }
-
-      graph_list.close();
-      graph_library_clean = true;
-    }
+    clean_library();
   }
 };
 
