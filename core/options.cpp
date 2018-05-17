@@ -82,7 +82,7 @@ void Options::setup(std::string cmd) {
     arg[token.size()] = '\0';
     args.push_back(arg);
   }
-  args.push_back(0);
+  //args.push_back(0);
 
   cargv = new char *[args.size() + 1];
   for(int i = 0; i < args.size(); i++) {

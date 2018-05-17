@@ -39,10 +39,11 @@ public:
   };
 
 private:
-  //std::vector<uint16_t     , AAlloc::AlignedAllocator<uint16_t,4096> > variable_internal; // variable lenght
   Dense<uint16_t> variable_internal;
 
   const uint16_t *first() const {
+    if(variable_internal.size() <= 1)
+      return last();
     return &variable_internal[1];
   }
   const uint16_t *last() const {
