@@ -1,25 +1,25 @@
 // *****************************************************************************
 // *****************************************************************************
 // Copyright 2013, Cadence Design Systems
-// 
+//
 // This  file  is  part  of  the  Cadence  LEF/DEF  Open   Source
-// Distribution,  Product Version 5.8. 
-// 
+// Distribution,  Product Version 5.8.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 //    you may not use this file except in compliance with the License.
 //    You may obtain a copy of the License at
-// 
+//
 //        http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 //    Unless required by applicable law or agreed to in writing, software
 //    distributed under the License is distributed on an "AS IS" BASIS,
 //    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 //    implied. See the License for the specific language governing
 //    permissions and limitations under the License.
-// 
+//
 // For updates, support, or to become part of the LEF/DEF Community,
 // check www.openeda.org for details.
-// 
+//
 //  $Author: dell $
 //  $Revision: #1 $
 //  $Date: 2017/06/06 $
@@ -42,7 +42,7 @@
 //    BusBitChars -- default to "[]"
 //    DividerChar -- default to "/"; //
 // Author: Wanda da Rosa
-// Date:   05/14/99 
+// Date:   05/14/99
 //
 // Revisions:
 
@@ -64,7 +64,7 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
 #define defwDesignCbk 4
 #define defwTechCbk 5
 #define defwArrayCbk 6
-#define defwFloorPlanCbk 7 
+#define defwFloorPlanCbk 7
 #define defwUnitsCbk 8
 #define defwHistoryCbk 9
 #define defwPropDefCbk 10
@@ -209,37 +209,37 @@ int defwCallbacksReq[MAXCBS][2] = {{0, 0},  // Version
 // The section names
 char defwSectionNames[MAXCBS] [80] = {"Version",
                                       "CaseSensitive",
-                                      "Divider", 
-                                      "BusBit", 
-                                      "Design", 
-                                      "Tech", 
-                                      "Array", 
-                                      "FloorPlan", 
-                                      "Units", 
-                                      "History", 
-                                      "PropertyDefinition", 
-                                      "DieArea", 
-                                      "Row", 
-                                      "Track", 
-                                      "GcellGrid", 
-                                      "DefaultCap", 
-                                      "Canplace", 
-                                      "CannotOccupy", 
-                                      "Via", 
-                                      "Region", 
-                                      "Component", 
-                                      "Pin", 
-                                      "PinProp", 
-                                      "SpecialNet", 
-                                      "Net", 
-                                      "IOTiming", 
-                                      "Scanchain", 
-                                      "Constraint", 
+                                      "Divider",
+                                      "BusBit",
+                                      "Design",
+                                      "Tech",
+                                      "Array",
+                                      "FloorPlan",
+                                      "Units",
+                                      "History",
+                                      "PropertyDefinition",
+                                      "DieArea",
+                                      "Row",
+                                      "Track",
+                                      "GcellGrid",
+                                      "DefaultCap",
+                                      "Canplace",
+                                      "CannotOccupy",
+                                      "Via",
+                                      "Region",
+                                      "Component",
+                                      "Pin",
+                                      "PinProp",
+                                      "SpecialNet",
+                                      "Net",
+                                      "IOTiming",
+                                      "Scanchain",
+                                      "Constraint",
                                       "Assertion",    // pre 5.2
-                                      "Group", 
+                                      "Group",
                                       "Blockage",
-                                      "Extension", 
-                                      "DesignEnd" 
+                                      "Extension",
+                                      "DesignEnd"
                                       // Add NEW CALLBACK here
                                      };
 
@@ -289,7 +289,7 @@ defwCallbackType_e defwCallbacksType[MAXCBS] = {defwVersionCbkType,
 const char* defwFName() {
   return defwFileName;
 }
- 
+
 
 int defwWrite(FILE* f, const char* fName, defiUserData uData) {
   int i;
@@ -313,7 +313,7 @@ int defwWrite(FILE* f, const char* fName, defiUserData uData) {
   for (i = 0; i < MAXCBS; i++) {
      if (defwCallbacksSeq[i] != 0) {   // user has set a callback function
         WRITER_CALLBACK(defwCallbacksSeq[i], defwCallbacksType[i]);
-     } else if ((defwCallbacksReq[i][0]) && (defwCallbacksReq[i][1] == 0)) { 
+     } else if ((defwCallbacksReq[i][0]) && (defwCallbacksReq[i][1] == 0)) {
         // it is required but user hasn't set up callback and there isn't a
         // default routine
         fprintf(f,

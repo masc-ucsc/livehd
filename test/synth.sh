@@ -1,3 +1,4 @@
+#!/bin/bash
 
 #declare -a inputs=("trivial.v" "null_port.v" "simple_flop.v" "test.v" "shift.v"\
 #                   "wires.v" "reduce.v" "graphtest.v" "add.v"  "assigns.v" \

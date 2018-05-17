@@ -42,11 +42,11 @@ public:
 
   virtual ~Inou_blif();
 
-  std::vector<LGraph *> generate() override final;
+  std::vector<LGraph *> generate() final;
 
   using Inou::generate;
 
-  void generate(std::vector<const LGraph *> &out) override final;
+  void generate(std::vector<const LGraph *> &out) final;
 
 private:
   std::vector<Index_ID> Comb_Op_ID;

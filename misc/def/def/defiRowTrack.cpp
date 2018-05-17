@@ -1,25 +1,25 @@
 // *****************************************************************************
 // *****************************************************************************
 // Copyright 2013 - 2015, Cadence Design Systems
-// 
+//
 // This  file  is  part  of  the  Cadence  LEF/DEF  Open   Source
-// Distribution,  Product Version 5.8. 
-// 
+// Distribution,  Product Version 5.8.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 //    you may not use this file except in compliance with the License.
 //    You may obtain a copy of the License at
-// 
+//
 //        http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 //    Unless required by applicable law or agreed to in writing, software
 //    distributed under the License is distributed on an "AS IS" BASIS,
 //    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 //    implied. See the License for the specific language governing
 //    permissions and limitations under the License.
-// 
+//
 // For updates, support, or to become part of the LEF/DEF Community,
 // check www.openeda.org for details.
-// 
+//
 //  $Author: dell $
 //  $Revision: #1 $
 //  $Date: 2017/06/06 $
@@ -151,7 +151,7 @@ void defiRow::setHasDoStep() {
 }
 
 
-void defiRow::addProperty(const char* name, const char* value, const char type) 
+void defiRow::addProperty(const char* name, const char* value, const char type)
 {
   int len;
   if (numProps_ == propsAllocated_) {
@@ -193,7 +193,7 @@ void defiRow::addProperty(const char* name, const char* value, const char type)
 
 
 void defiRow::addNumProperty(const char* name, const double d,
-                             const char* value, const char type) 
+                             const char* value, const char type)
 {
   int len;
   if (numProps_ == propsAllocated_) {
@@ -291,7 +291,7 @@ int defiRow::propIsNumber(int index) const {
               index, numProps_);
      defiError(0, 6140, msg, defData);
      return 0;
-  } 
+  }
   return propDValues_[index] ? 1 : 0;
 }
 
@@ -302,7 +302,7 @@ int defiRow::propIsString(int index) const {
               index, numProps_);
      defiError(0, 6140, msg, defData);
      return 0;
-  } 
+  }
   return propDValues_[index] ? 0 : 1;
 }
 

@@ -3,10 +3,8 @@ project(core_test)
 FILE(GLOB core_test_SOURCE *.cpp)
 FILE(GLOB core_test_HEADER *.hpp)
 
-#SET(EXELIST "mmap_vector" "dense_tst" "iterator_tst" "options_tst" "round_power2_tst" "yaml_tst")
 SET(TSTLIST "mmap_allocator" "mmap_vector" "dense_tst" "iterator_tst" "options_tst" "edge" "char_tst")
 SET(EXELIST "iter")
-
 
 INCLUDE_DIRECTORIES(${core_SOURCE_DIR})
 

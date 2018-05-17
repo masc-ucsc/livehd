@@ -4,8 +4,6 @@
     Check timing_parser.py for usage'''
 
 import re
-import glob
-import sys
 import os
 from fnmatch import fnmatch
 

@@ -1,25 +1,25 @@
 // *****************************************************************************
 // *****************************************************************************
 // Copyright 2013-2017, Cadence Design Systems
-// 
+//
 // This  file  is  part  of  the  Cadence  LEF/DEF  Open   Source
-// Distribution,  Product Version 5.8. 
-// 
+// Distribution,  Product Version 5.8.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 //    you may not use this file except in compliance with the License.
 //    You may obtain a copy of the License at
-// 
+//
 //        http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 //    Unless required by applicable law or agreed to in writing, software
 //    distributed under the License is distributed on an "AS IS" BASIS,
 //    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 //    implied. See the License for the specific language governing
 //    permissions and limitations under the License.
-// 
+//
 // For updates, support, or to become part of the LEF/DEF Community,
 // check www.openeda.org for details.
-// 
+//
 //  $Author: icftcm $
 //  $Revision: #4 $
 //  $Date: 2017/09/14 $
@@ -110,7 +110,7 @@ void defiSubnet::setNonDefault(const char* name) {
   strcpy(nonDefaultRule_, defData->DEFCASE(name));
 }
 
- 
+
 void defiSubnet::addMustPin(const char* instance, const char* pin, int syn) {
   addPin(instance, pin, syn);
   musts_[numPins_ - 1] = 1;
@@ -148,9 +148,9 @@ void defiSubnet::setType(const char* typ) {
   } else {
     // Silently do nothing with bad input.
   }
- 
+
 }
- 
+
 // WMD -- this will be removed by the next release
 void defiSubnet::addPath(defiPath* p, int reset, int netOsnet, int *needCbk) {
   int i;
@@ -159,9 +159,9 @@ void defiSubnet::addPath(defiPath* p, int reset, int netOsnet, int *needCbk) {
   if (reset) {
      for (i = 0; i < numPaths_; i++) {
         delete paths_[i];
-     }  
+     }
      numPaths_ = 0;
-  } 
+  }
 
   if (numPaths_ >= pathsAllocated_) {
     // 6/17/2003 - don't want to allocate too large memory just in case
@@ -176,7 +176,7 @@ void defiSubnet::addPath(defiPath* p, int reset, int netOsnet, int *needCbk) {
     }
 
     switch (netOsnet) {
-      case 2: 
+      case 2:
          bumpPaths(
             pathsAllocated_ ? incNumber : 1000);
          break;
@@ -186,9 +186,9 @@ void defiSubnet::addPath(defiPath* p, int reset, int netOsnet, int *needCbk) {
          break;
      }
   }
-  
+
   paths_[numPaths_++] = new defiPath(p);
-  
+
   if (numPaths_ == pathsAllocated_)
     *needCbk = 1;   // pre-warn the parser it needs to realloc next time
 }
@@ -205,7 +205,7 @@ void defiSubnet::addWire(const char* type) {
     for (i = 0; i < numWires_; i++) {
       array[i] = wires_[i];
     }
-    if (wires_) 
+    if (wires_)
        free((char*)(wires_));
     wires_ = array;
   }
@@ -275,14 +275,14 @@ int defiSubnet::pinIsSynthesized(int index) const {
 int defiSubnet::isFixed() const {
   return (int)(isFixed_);
 }
- 
- 
+
+
 // WMD -- this will be removed by the next release
 int defiSubnet::isRouted() const {
   return (int)(isRouted_);
 }
- 
- 
+
+
 // WMD -- this will be removed by the next release
 int defiSubnet::isCover() const {
   return (int)(isCover_);
@@ -388,7 +388,7 @@ void defiSubnet::print(FILE* f) const {
   if (numConnections()) {
     fprintf(f, "  Pins:\n");
     for (i = 0; i < numConnections(); i++) {
-    fprintf(f, "   '%s' '%s'%s%s\n", 
+    fprintf(f, "   '%s' '%s'%s%s\n",
       instance(i),
       pin(i),
       pinIsMustJoin(i) ? " MUSTJOIN" : "",
@@ -411,8 +411,8 @@ void defiSubnet::print(FILE* f) const {
 int defiSubnet::numWires() const {
   return numWires_;
 }
- 
- 
+
+
 defiWire* defiSubnet::wire(int index) {
   if (index >= 0 && index < numWires_)
     return wires_[index];
@@ -440,20 +440,20 @@ const defiPath* defiSubnet::path(int index) const {
         return paths_[index];
     return 0;
 }
- 
+
 // WMD -- this will be removed after the next release
 int defiSubnet::numPaths() const {
   return numPaths_;
 }
- 
+
 // WMD -- this will be removed after the next release
 void defiSubnet::bumpPaths(long long size) {
   long long i;
   defiPath** newPaths = new defiPath*[size];
- 
+
   for (i = 0; i < numPaths_; i++)
     newPaths[i] = paths_[i];
- 
+
   pathsAllocated_ = size;
 
   delete [] paths_;
@@ -692,7 +692,7 @@ void defiShield::bumpPaths(long long size) {
   pathsAllocated_ = size;
 
   delete [] paths_;
-  
+
   paths_ = newPaths;
 }
 
@@ -742,7 +742,7 @@ void defiWire::Init(const char* type, const char* wireShieldName) {
     wireShieldName_ = (char*)malloc(strlen(wireShieldName)+1);
     strcpy(wireShieldName_, wireShieldName);
   } else
-    wireShieldName_ = 0; 
+    wireShieldName_ = 0;
   numPaths_ = 0;
   pathsAllocated_ = 0;
   paths_ = 0;
@@ -793,7 +793,7 @@ void defiWire::addPath(defiPath* p, int reset, int netOsnet, int *needCbk) {
         break;
     }
   }
-  
+
   paths_[numPaths_++] = new defiPath(p);
 
   if (numPaths_ == pathsAllocated_)
@@ -829,7 +829,7 @@ void defiWire::clear() {
 
 void defiWire::bumpPaths(long long size) {
   long long i;
-  defiPath** newPaths =  new defiPath*[size]; 
+  defiPath** newPaths =  new defiPath*[size];
 
   for (i = 0; i < numPaths_; i++)
     newPaths[i] = paths_[i];
@@ -1197,7 +1197,7 @@ void defiNet::addShieldNet(const char* name) {
         bumpShieldNets(shieldNetsAllocated_ * 2);
 
   }
- 
+
   len = strlen(name) + 1;
   shieldNet_[numShieldNet_] = (char*)malloc(len);
   strcpy(shieldNet_[numShieldNet_], defData->DEFCASE(name));
@@ -1303,14 +1303,14 @@ const char defiNet::propType(int index) const {
 int defiNet::propIsNumber(int index) const {
   if (index >= 0 &&  index < numProps_)
     return propDValues_[index] ? 1 : 0;
-  return 0; 
+  return 0;
 }
 
 
 int defiNet::propIsString(int index) const {
   if (index >= 0 &&  index < numProps_)
     return propDValues_[index] ? 0 : 1;
-  return 0; 
+  return 0;
 }
 
 
@@ -1379,17 +1379,17 @@ const defiSubnet* defiNet::subnet(int index) const {
 int defiNet::isFixed() const {
   return (int)(isFixed_);
 }
- 
- 
+
+
 int defiNet::isRouted() const {
   return (int)(isRouted_);
 }
- 
- 
+
+
 int defiNet::isCover() const {
   return (int)(isCover_);
 }
- 
+
 
 // this method will only call if the callback defrSNetWireCbk is set
 // which will callback every wire.  Therefore, only one wire should be here
@@ -1484,14 +1484,14 @@ void defiNet::print(FILE* f) const {
   if (numConnections()) {
     fprintf(f, " Pins:\n");
     for (i = 0; i < numConnections(); i++) {
-    fprintf(f, "  '%s' '%s'%s%s\n", 
+    fprintf(f, "  '%s' '%s'%s%s\n",
       instance(i),
       pin(i),
       pinIsMustJoin(i) ? " MUSTJOIN" : "",
       pinIsSynthesized(i) ? " SYNTHESIZED" : "");
     }
   }
- 
+
   for (i = 0; i < numVpins_; i++) {
     vp = vpin(i);
     fprintf(f,
@@ -1713,7 +1713,7 @@ void defiNet::clear() {
   if (nonDefaultRule_) { free(nonDefaultRule_);
             nonDefaultRule_ = 0; }
   style_ = 0;
- 
+
   if (numWires_) {
     for (i = 0; i < numWires_; i++) {
       delete wires_[i];
@@ -1803,16 +1803,16 @@ void defiNet::clear() {
 
   if (rectNames_) {
     for (i = 0; i < numRects_; i++) {
-      if (rectNames_[i]) { 
+      if (rectNames_[i]) {
       free ((char*)(rectNames_[i]));
       }
-      if (rectRouteStatus_[i]) { 
+      if (rectRouteStatus_[i]) {
       free ((char*)(rectRouteStatus_[i]));
       }
       if (rectRouteStatusShieldNames_[i]) {
           free ((char*)(rectRouteStatusShieldNames_[i]));
       }
-      if (rectShapeTypes_[i]) { 
+      if (rectShapeTypes_[i]) {
       free ((char*)(rectShapeTypes_[i]));
       }
     }
@@ -2135,21 +2135,21 @@ void defiNet::bumpPaths(long long size) {
   long long i;
 
   defiPath** newPaths = new defiPath*[size];
- 
+
   for (i = 0; i < numPaths_; i++)
     newPaths[i] = paths_[i];
- 
+
   delete [] paths_;
   pathsAllocated_ = size;
   paths_ = newPaths;
 }
- 
+
 // WMD -- this will be removed by the next release
 int defiNet::numPaths() const {
   return numPaths_;
 }
 
- 
+
 // WMD -- this will be removed by the next release
 defiPath* defiNet::path(int index) {
   if (index >= 0 && index < numPaths_)
@@ -2187,14 +2187,14 @@ const defiWire* defiNet::wire(int index) const {
 void defiNet::bumpShieldNets(long long size) {
   char** newShieldNets = (char**)malloc(sizeof(char*)*size);
   long long i;
- 
+
   if (shieldNet_) {
     for (i = 0; i < shieldNetsAllocated_; i++) {
       newShieldNets[i] = shieldNet_[i];
     }
     free((char*)(shieldNet_));
   }
- 
+
   shieldNet_ = newShieldNets;
   shieldNetsAllocated_ = size;
 }
@@ -2578,7 +2578,7 @@ struct defiPoints defiNet::getPolygon(int index) const {
 
 // 5.6
 void defiNet::addRect(const char* layerName, int xl, int yl, int xh, int yh,
-                      int *needCbk, 
+                      int *needCbk,
               int colorMask,
               const char* routeStatus,
               const char* shapeType,
@@ -2770,7 +2770,7 @@ int defiNet::rectMask(int index) const {
 }
 
 
-void defiNet::addPts(const char* viaName, int o, defiGeometries* geom, 
+void defiNet::addPts(const char* viaName, int o, defiGeometries* geom,
 	             int *needCbk, int colorMask,
 		     const char* routeStatus,
 		     const char* shapeType,
@@ -2810,7 +2810,7 @@ void defiNet::addPts(const char* viaName, int o, defiGeometries* geom,
         }
         if (viaPts_)
             free((char*)(viaPts_));
-        if (viaNames_) 
+        if (viaNames_)
             free((char*)(viaNames_));
         if (viaOrients_)
             free((char*)(viaOrients_));
@@ -2822,7 +2822,7 @@ void defiNet::addPts(const char* viaName, int o, defiGeometries* geom,
 	    free((char*)(viaShapeTypes_));
         if (viaRouteStatusShieldNames_)
             free((char*)(viaRouteStatusShieldNames_));
-    
+
         viaPts_ = pts;
         viaNames_ = newn;
         viaOrients_ = orientn;

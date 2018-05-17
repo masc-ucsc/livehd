@@ -615,7 +615,8 @@ void Dump_yosys::to_yosys(const LGraph *g) {
           log("[WARNING] DumpYosys: unrecognized wire connection pid=%d\n", c.get_out_pin().get_pid());
         }
       }
-      log("adding flop_Op width = %d\n", dWire->width);
+      if (dWire)
+        log("adding flop_Op width = %d\n", dWire->width);
       //last argument is polarity
       switch(g->node_type_get(idx).op) {
       case Flop_Op:
