@@ -1,25 +1,25 @@
 // *****************************************************************************
 // *****************************************************************************
 // Copyright 2013, Cadence Design Systems
-// 
+//
 // This  file  is  part  of  the  Cadence  LEF/DEF  Open   Source
-// Distribution,  Product Version 5.8. 
-// 
+// Distribution,  Product Version 5.8.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 //    you may not use this file except in compliance with the License.
 //    You may obtain a copy of the License at
-// 
+//
 //        http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 //    Unless required by applicable law or agreed to in writing, software
 //    distributed under the License is distributed on an "AS IS" BASIS,
 //    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 //    implied. See the License for the specific language governing
 //    permissions and limitations under the License.
-// 
+//
 // For updates, support, or to become part of the LEF/DEF Community,
 // check www.openeda.org for details.
-// 
+//
 //  $Author: dell $
 //  $Revision: #1 $
 //  $Date: 2017/06/06 $
@@ -49,7 +49,7 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
 #define DEFW_OBSOLETE          6
 #define DEFW_TOO_MANY_STMS     7  // the number defined at the beginning of the
                                   // section is smaller than the actual number
-                                  // of statements defined in that section 
+                                  // of statements defined in that section
 
 /* orient
    0 = N
@@ -164,12 +164,12 @@ extern int defwStartPropDef ( void );
  * The objType can be LIBRARY or VIA or MACRO or PIN. */
 extern int defwIntPropDef(
                const char* objType,   // LIBRARY | LAYER | VIA | VIARULE |
-                                      // NONDEFAULTRULE | MACRO | PIN 
+                                      // NONDEFAULTRULE | MACRO | PIN
                const char* propName,
                double leftRange,      /* optional(0) - RANGE */
                double rightRange,     /* optional(0) */
                int    propValue);     /* optional(NULL) */
- 
+
 /* This routine must be called after defwStartPropDef.
  * This routine can be called multiple times.
  * It adds real property definition to the statement.
@@ -177,12 +177,12 @@ extern int defwIntPropDef(
  * The objType can be LIBRARY or VIA or MACRO or PIN. */
 extern int defwRealPropDef(
                const char* objType,   // LIBRARY | LAYER | VIA | VIARULE |
-                                      // NONDEFAULTRULE | MACRO | PIN 
+                                      // NONDEFAULTRULE | MACRO | PIN
                const char* propName,
                double leftRange,      /* optional(0) - RANGE */
                double rightRange,     /* optional(0) */
                double propValue);     /* optional(NULL) */
- 
+
 /* This routine must be called after defwStartPropDef.
  * This routine can be called multiple times.
  * It adds string property definition to the statement.
@@ -406,9 +406,9 @@ extern int defwViaRect(const char* layerName,
  * This routine can be called multiple times. */
 /* mask is 5.8 syntax */
 extern int defwViaPolygon(const char* layerName,
-                          int num_polys, 
-			  double* xl, 
-			  double* yl, 
+                          int num_polys,
+			  double* xl,
+			  double* yl,
 			  int mask = 0);
 
 /* These routine must be called after defwViaName.
@@ -517,13 +517,13 @@ extern int defwStartComponents( int count );
 extern int defwComponent(const char* instance,  /* compName */
               const char* master,           /* modelName */
               int   numNetName,             // optional(0) - # netNames defined
-                                            
+
               const char** netNames,        /* optional(NULL) - list */
               const char* eeq,              /* optional(NULL) - EEQMASTER */
               const char* genName,          /* optional(NULL) - GENERATE */
               const char* genParemeters,    /* optional(NULL) - parameters */
               const char* source,           // optional(NULL) - NETLIST | DIST |
-                                            // USER | TIMING 
+                                            // USER | TIMING
               int numForeign,               // optional(0) - # foreigns,
                                             // foreignx, foreigny & orients
               const char** foreigns,        /* optional(NULL) - list */
@@ -535,7 +535,7 @@ extern int defwComponent(const char* instance,  /* compName */
               int statusOrient,             /* optional(-1) - 0 to 7 */
               double weight,                /* optional(0) */
               const char* region,           // optional(NULL) - either xl, yl,
-                                            // xh, yh or region 
+                                            // xh, yh or region
               int xl, int yl,               /* optional(0) - region pt1 */
               int xh, int yh);              /* optional(0) - region pt2 */
 
@@ -545,7 +545,7 @@ extern int defwComponent(const char* instance,  /* compName */
  * The optional fields will be ignored if they are set to zero
  * (except for weight which must be set to -1.0).
  * Returns 0 if successful.
- * The routine can be called many times. 
+ * The routine can be called many times.
  * This routine is the same as defwComponent, except orient is a char** */
 extern int defwComponentStr(const char* instance,  /* compName */
               const char* master,           /* modelName */
@@ -556,19 +556,19 @@ extern int defwComponentStr(const char* instance,  /* compName */
               const char* genName,          /* optional(NULL) - GENERATE */
               const char* genParemeters,    /* optional(NULL) - parameters */
               const char* source,           // optional(NULL) - NETLIST | DIST |
-                                            // USER | TIMING 
+                                            // USER | TIMING
               int numForeign,               // optional(0) - # foreigns,
                                             // foreignx, foreigny & orients
               const char** foreigns,        /* optional(NULL) - list */
               int* foreignX, int* foreignY, /* optional(0) - list foreign pts */
               const char** foreignOrients,  /* optional(NULL) */
               const char* status,           // optional(NULL) - FIXED | COVER |
-                                            // PLACED | UNPLACED 
+                                            // PLACED | UNPLACED
               int statusX, int statusY,     /* optional(0) - status pt */
               const char* statusOrient,     /* optional(NULL) */
               double weight,                /* optional(0) */
               const char* region,           // optional(NULL) - either xl, yl,
-                                            // xh, yh or region 
+                                            // xh, yh or region
               int xl, int yl,               /* optional(0) - region pt1 */
               int xh, int yh);              /* optional(0) - region pt2 */
 
@@ -585,7 +585,7 @@ extern int defwComponentMaskShift(int shiftLayerMasks);
  * This is a 5.6 syntax.
  * Returns 0 if successful.  */
 extern int defwComponentHalo(int left, int bottom, int right, int top);
- 
+
 /* This routine must be called after either the defwComponent or
  * defwComponentStr.
  * This routine can only called once per component.
@@ -595,7 +595,7 @@ extern int defwComponentHalo(int left, int bottom, int right, int top);
  * This is a 5.7 syntax.
  * Returns 0 if successful.  */
 extern int defwComponentHaloSoft(int left, int bottom, int right, int top);
- 
+
 /* This routine must be called after either the defwComponent or
  * defwComponentStr.
  * This routine can only called once per component.
@@ -604,7 +604,7 @@ extern int defwComponentHaloSoft(int left, int bottom, int right, int top);
  * Returns 0 if successful.  */
 extern int defwComponentRouteHalo(int haloDist, const char* minLayer,
                                   const char* maxLayer);
- 
+
 /* This routine must be called after the defwComponent calls.
  * Returns 0 if successful.
  * If the count in StartComponents is not the same as the number of
@@ -630,11 +630,11 @@ extern int defwPin(const char* name,     /* pinName */
               const char* net,           /* netName */
               int special,               /* 0 - ignore, 1 - special */
               const char* direction,     // optional(NULL) - INPUT | OUTPUT |
-                                         // INOUT | FEEDTHRU 
+                                         // INOUT | FEEDTHRU
               const char* use,           // optional(NULL) - SIGNAL | POWER |
-                                         // GROUND | CLOCK | TIEOFF | ANALOG 
+                                         // GROUND | CLOCK | TIEOFF | ANALOG
               const char* status,        // optional(NULL) - FIXED | PLACED |
-                                         // COVER 
+                                         // COVER
               int statusX, int statusY,  /* optional(0) - status point */
               int orient,                /* optional(-1) - status orient */
               const char* layer,         /* optional(NULL) - layerName */
@@ -652,9 +652,9 @@ extern int defwPinStr(const char* name,     /* pinName */
               const char* net,           /* netName */
               int special,               /* 0 - ignore, 1 - special */
               const char* direction,     // optional(NULL) - INPUT | OUTPUT |
-                                         // INOUT | FEEDTHRU 
+                                         // INOUT | FEEDTHRU
               const char* use,           // optional(NULL) - SIGNAL | POWER |
-                                         // GROUND | CLOCK | TIEOFF | ANALOG 
+                                         // GROUND | CLOCK | TIEOFF | ANALOG
               const char* status,        // optional(NULL) - FIXED | PLACED |
                                          // COVER
               int statusX, int statusY,  /* optional(0) - status point */
@@ -707,7 +707,7 @@ extern int defwPinVia(const char* viaName, int xl, int yl, int mask = 0);
  * The routine can be called multiple times within a pin. */
 extern int defwPinPort();
 
-/* This routine is called after defwPinPort. 
+/* This routine is called after defwPinPort.
  * This is a 5.7 syntax.
  * This routine is optional.
  * Returns 0 if successful.
@@ -922,7 +922,7 @@ extern int defwSpecialNetEstCap(double value);
  * The individual parts of the path can be entered in
  * any order. */
 extern int defwSpecialNetPathStart(const char* typ); // ROUTED | FIXED | COVER |
-                                                     // SHIELD | NEW 
+                                                     // SHIELD | NEW
 extern int defwSpecialNetShieldNetName(const char* name); /* shieldNetName */
 
 extern int defwSpecialNetPathLayer(const char* name); /* layerName */
@@ -934,7 +934,7 @@ extern int defwSpecialNetPathWidth(int width);
 extern int defwSpecialNetPathStyle(int styleNum);
 
 extern int defwSpecialNetPathShape(const char* shapeType); // RING | STRIPE |
-        // FOLLOWPIN | IOWIRE | COREWIRE | BLOCKWIRE | FILLWIRE | BLOCKAGEWIRE 
+        // FOLLOWPIN | IOWIRE | COREWIRE | BLOCKWIRE | FILLWIRE | BLOCKAGEWIRE
 
 
 /* This routine is optional.
@@ -991,7 +991,7 @@ extern int defwSpecialNetShieldLayer(const char* name); /* layerName */
 extern int defwSpecialNetShieldWidth(int width);        /* width */
 extern int defwSpecialNetShieldShape(const char* shapeType); // RING | STRIPE |
         // FOLLOWPIN | IOWIRE | COREWIRE | BLOCKWIRE | FILLWIRE | BLOCKAGEWIRE
- 
+
 /* x and y location of the path */
 extern int defwSpecialNetShieldPoint(int numPts, /* # of connected points */
                    double* pointx,     /* point x list */
@@ -1002,7 +1002,7 @@ extern int defwSpecialNetShieldVia(const char* name);   /* viaName */
 extern int defwSpecialNetShieldViaData(int numX, int numY, int stepX, int stepY);
 extern int defwSpecialNetShieldEnd();
 /* end 5.3 */
- 
+
 /* This routine is called at the end of the special net section */
 extern int defwEndSpecialNets();
 
@@ -1072,7 +1072,7 @@ extern int defwNetSource(const char* name);
 /* This routine is for + ORIGINAL netname */
 extern int defwNetOriginal(const char* name);
 
-/* This routine is for + USE {SIGNAL | POWER | GROUND | CLOCK | TIEOFF | 
+/* This routine is for + USE {SIGNAL | POWER | GROUND | CLOCK | TIEOFF |
  * ANALOG} */
 extern int defwNetUse(const char* name);
 
@@ -1121,7 +1121,7 @@ extern int defwNetSubnetEnd();
  * The individual parts of the path can be entered in
  * any order. */
 extern int defwNetPathStart(const char* typ); // ROUTED | FIXED | COVER |
-                                              // NOSHIELD | NEW 
+                                              // NOSHIELD | NEW
 extern int defwNetPathWidth(int w);           /* width */
 extern int defwNetPathLayer(const char* name, /* layerName */
                  int isTaper,                 /* 0 - ignore, 1 - TAPER */
@@ -1259,7 +1259,7 @@ extern int defwScanchainFloatingBits(const char* name,   /* floatingComp */
 
 /* This routine is for + ORDERED {fixedComp [IN pin] [OUT pin]
  * fixedComp [IN pin] [OUT pin].
- * When this routine is called for the 1st time within a scanchain, 
+ * When this routine is called for the 1st time within a scanchain,
  * both name1 and name2 are required.  Only name1 is required is the
  * routine is called more than once. */
 extern int defwScanchainOrdered(const char* name1,
@@ -1275,7 +1275,7 @@ extern int defwScanchainOrdered(const char* name1,
 
 /* This routine is for + ORDERED {fixedComp [IN pin] [OUT pin]
  * fixedComp [IN pin] [OUT pin].
- * When this routine is called for the 1st time within a scanchain, 
+ * When this routine is called for the 1st time within a scanchain,
  * both name1 and name2 are required.  Only name1 is required is the
  * routine is called more than once.
  * This is a 5.4.1 syntax.
@@ -1306,7 +1306,7 @@ extern int defwStartConstraints (int count);  /* optional */
 /* The following routines are for - {operand [+ RISEMAX time] [+ FALLMAX time]
  * [+ RISEMIN time] [+ FALLMIN time] | WIREDLOGIC netName MAXDIST distance };}
  * operand - NET netName | PATH comp fromPin comp toPin | SUM (operand, ...)
- * The following apis are obsolete in 5.4. */ 
+ * The following apis are obsolete in 5.4. */
 extern int defwConstraintOperand();          /* begin an operand */
 extern int defwConstraintOperandNet(const char* netName);  /* NET */
 extern int defwConstraintOperandPath(const char* comp1,    /* PATH - comp|PIN */
@@ -1364,7 +1364,7 @@ extern int defwStartBlockages(int count);   /* count = numBlockages */
 * This is a 5.4 syntax. */
 extern int defwBlockagesLayer(const char* layerName);
 
-/* This routine is for - slots 
+/* This routine is for - slots
 * This routine is called per entry within a blockage layer, can't be more then one.
 * This is a 5.4 syntax. */
 extern int defwBlockagesLayerSlots();
@@ -1414,7 +1414,7 @@ extern int defwBlockagesLayerMask(int maskColor);
 extern int defwBlockageLayer(const char* layerName,
                              const char* compName);   /* optional(NULL) */
 
-/* This routine is for - layerName & slots 
+/* This routine is for - layerName & slots
  * Either this routine, defBlockageLayer, defBlockageLayerFills,
  * defwBlockagePlacement, or defwBlockagePushdown is called per entry within
  * a blockage, can't be more then one.
@@ -1484,12 +1484,12 @@ extern int defwBlockagesPlacementSoft();
 extern int defwBlockagesPlacementPartial(double maxDensity);
 
 /* This routine is for rectangle.
-* This routine is optional and can be called multiple time. 
+* This routine is optional and can be called multiple time.
 * This is a 5.4 syntax. */
 extern int defwBlockagesRect(int xl, int yl, int xh, int yh);
 
 /* This routine is for polygon.
-* This routine is optional and can be called multiple time. 
+* This routine is optional and can be called multiple time.
 * This is a 5.6 syntax. */
 extern int defwBlockagesPolygon(int num_polys, int* xl, int* yl);
 
@@ -1534,7 +1534,7 @@ extern int defwBlockageMask(int maskColor);
 extern int defwBlockageRect(int xl, int yl, int xh, int yh);
 
 /* This routine is for polygon.
- * This routine is optinal and can be called multiple time. 
+ * This routine is optinal and can be called multiple time.
  * This is a 5.6 syntax. */
 extern int defwBlockagePolygon(int num_polys, int* xl, int* yl);
 
@@ -1635,7 +1635,7 @@ extern int defwNonDefaultRule(const char* ruleName,
                               int hardSpacing);   /* optional(0) */
 
 /* Routines to enter NONDEFAULTRULES.  This section is required
- * This routine must be called after the defwNonDefaultRule. 
+ * This routine must be called after the defwNonDefaultRule.
  * This routine can be called multiple times.
  * This is a 5.6 syntax.
  * Returns 0 if successful. */
@@ -1646,21 +1646,21 @@ extern int defwNonDefaultRuleLayer(const char* layerName,
                                    int wireExt);     /* optional(0) */
 
 /* Routines to enter NONDEFAULTRULES.  This section is optional.
- * This routine must be called after the defwNonDefaultRule. 
+ * This routine must be called after the defwNonDefaultRule.
  * This routine can be called multiple times.
  * This is a 5.6 syntax.
  * Returns 0 if successful. */
 extern int defwNonDefaultRuleVia(const char* viaName);
 
 /* Routines to enter NONDEFAULTRULES.  This section is optional.
- * This routine must be called after the defwNonDefaultRule. 
+ * This routine must be called after the defwNonDefaultRule.
  * This routine can be called multiple times.
  * This is a 5.6 syntax.
  * Returns 0 if successful. */
 extern int defwNonDefaultRuleViaRule(const char* viaRuleName);
 
 /* Routines to enter NONDEFAULTRULES.  This section is optional.
- * This routine must be called after the defwNonDefaultRule. 
+ * This routine must be called after the defwNonDefaultRule.
  * This routine can be called multiple times.
  * This is a 5.6 syntax.
  * Returns 0 if successful. */
@@ -1733,7 +1733,7 @@ extern int defwCurrentLineNumber ( void );
  * extern int  defwGetCurrentLineNumber (void);
  * extern const char *defwGetCurrentFileName (void);
  */
- 
+
 /* This routine will print the error message. */
 extern void defwPrintError(int status);
 
@@ -1741,7 +1741,7 @@ extern void defwPrintError(int status);
  * automactically add a # infront of the line.
  */
 extern void defwAddComment(const char* comment);
- 
+
 /* This routine will indent 3 blank spaces */
 extern void defwAddIndent();
 

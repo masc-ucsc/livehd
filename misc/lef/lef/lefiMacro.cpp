@@ -1,25 +1,25 @@
 // *****************************************************************************
 // *****************************************************************************
 // Copyright 2012 - 2017, Cadence Design Systems
-// 
+//
 // This  file  is  part  of  the  Cadence  LEF/DEF  Open   Source
-// Distribution,  Product Version 5.8. 
-// 
+// Distribution,  Product Version 5.8.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 //    you may not use this file except in compliance with the License.
 //    You may obtain a copy of the License at
-// 
+//
 //        http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 //    Unless required by applicable law or agreed to in writing, software
 //    distributed under the License is distributed on an "AS IS" BASIS,
 //    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 //    implied. See the License for the specific language governing
 //    permissions and limitations under the License.
-// 
+//
 // For updates, support, or to become part of the LEF/DEF Community,
 // check www.openeda.org for details.
-// 
+//
 //  $Author: dell $
 //  $Revision: #1 $
 //  $Date: 2017/06/06 $
@@ -2259,14 +2259,14 @@ lefiPin::addAntennaModel(int oxide)
         antennaModelAllocated_ = 4;
         amo = antennaModel_[0];
         curAntennaModelIndex_ = 0;
-    } 
+    }
 
     // First can go any oxide, so fill pref oxides models.
     for (int idx = 0; idx < oxide - 1; idx++) {
         amo = antennaModel_[idx];
         if (!amo->antennaOxide()) {
             amo->Init();
-            amo->setAntennaModel(idx + 1);   
+            amo->setAntennaModel(idx + 1);
         }
     }
 
@@ -3137,7 +3137,7 @@ lefiMacro::addForeign(const char    *name,
 
 }
 
-    
+
 void
 lefiMacro::setXSymmetry()
 {
@@ -3208,7 +3208,7 @@ lefiMacro::setSize(double   x,
     sizeX_ = x;
     sizeY_ = y;
 }
-    
+
 
 int
 lefiMacro::hasClass() const
@@ -3669,7 +3669,7 @@ lefiTiming::lefiTiming()
   axisNumbersAllocated_(0),
   numOfTableEntries_(0),
   tableEntriesAllocated_(0),
-  table_(NULL),  // three numbers per entry 
+  table_(NULL),  // three numbers per entry
   delayRiseOrFall_(NULL),
   delayUnateness_(NULL),
   delayTableOne_(0.0),
@@ -3751,7 +3751,7 @@ lefiTiming::Init()
 
     numOfTableEntries_ = 0;
     tableEntriesAllocated_ = 1;
-    table_ = (double*) lefMalloc(sizeof(double) * 3);  // three numbers per entry 
+    table_ = (double*) lefMalloc(sizeof(double) * 3);  // three numbers per entry
 
     clear();
 }
@@ -4715,7 +4715,7 @@ lefiTiming::SDFcond()
     return SDFcond_;
 }
 
-lefiMacroSite::lefiMacroSite(const char            *name, 
+lefiMacroSite::lefiMacroSite(const char            *name,
                              const lefiSitePattern *pattern)
 : siteName_(name),
   sitePattern_(pattern)
@@ -4755,7 +4755,7 @@ lefiMacroForeign::cellName() const
     return cellName_;
 }
 
-int 
+int
 lefiMacroForeign::cellHasPts() const
 {
     return cellHasPts_;

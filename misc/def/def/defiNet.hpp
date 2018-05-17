@@ -1,25 +1,25 @@
 // *****************************************************************************
 // *****************************************************************************
 // Copyright 2013 - 2017, Cadence Design Systems
-// 
+//
 // This  file  is  part  of  the  Cadence  LEF/DEF  Open   Source
-// Distribution,  Product Version 5.8. 
-// 
+// Distribution,  Product Version 5.8.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 //    you may not use this file except in compliance with the License.
 //    You may obtain a copy of the License at
-// 
+//
 //        http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 //    Unless required by applicable law or agreed to in writing, software
 //    distributed under the License is distributed on an "AS IS" BASIS,
 //    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 //    implied. See the License for the specific language governing
 //    permissions and limitations under the License.
-// 
+//
 // For updates, support, or to become part of the LEF/DEF Community,
 // check www.openeda.org for details.
-// 
+//
 //  $Author: icftcm $
 //  $Revision: #2 $
 //  $Date: 2017/06/19 $
@@ -39,7 +39,7 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
 
 class defrData;
 
-/* Return codes for defiNet::viaOrient 
+/* Return codes for defiNet::viaOrient
     DEF_ORIENT_N  0
     DEF_ORIENT_W  1
     DEF_ORIENT_S  2
@@ -99,7 +99,7 @@ public:
   void addPath(defiPath* p, int reset, int netOsnet, int *needCbk);
 
   // NEW: a net can have more than 1 wire
-  void addWire(const char *typ); 
+  void addWire(const char *typ);
   void addWirePath(defiPath *p, int reset, int netOsnet, int *needCbk);
 
   // Debug printing
@@ -338,7 +338,7 @@ public:
 
   /* Routines to get the information about Virtual Pins. */
   int       numVpins() const;
-  
+
   defiVpin* vpin(int index);
   const defiVpin* vpin(int index) const;
 
@@ -378,7 +378,7 @@ public:
 
   // WMD -- the following will be removed by the next release
   int            numPaths() const;
-  
+
   defiPath*            path(int index);
   const defiPath*      path(int index) const;
 
@@ -414,11 +414,11 @@ public:
   const char* rectRouteStatus(int index) const;
   const char* rectRouteStatusShieldName(int index) const;
   const char* rectShapeType(int index) const;
-  
+
 
   // 5.8
   int  numViaSpecs() const;
-  struct defiPoints getViaPts(int index) const;                       
+  struct defiPoints getViaPts(int index) const;
   const char* viaName(int index) const;
   const int viaOrient(int index) const;
   const char* viaOrientStr(int index) const;
@@ -520,7 +520,7 @@ protected:
 
   int          numShields_;            // number of SHIELD paths used
   long long    shieldsAllocated_;      // allocated size of SHIELD paths array
-  defiShield** shields_;               // SHIELD data 
+  defiShield** shields_;               // SHIELD data
   int          numNoShields_;          // number of NOSHIELD paths used
 
   int          numShieldNet_;          // number of SHIELDNETS used in array.
@@ -547,11 +547,11 @@ protected:
   char** rectRouteStatus_;
   char** rectRouteStatusShieldNames_;
   char** rectShapeTypes_;
-  
 
-  struct defiPoints** viaPts_;      // 5.8                  
-  char**              viaNames_;                   
-  int                 numPts_;                    
+
+  struct defiPoints** viaPts_;      // 5.8
+  char**              viaNames_;
+  int                 numPts_;
   long long           ptsAllocated_;
   int*                viaOrients_;
   int*                viaMasks_;

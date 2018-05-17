@@ -16,21 +16,22 @@ class LGraph;
 class Graph_library {
 
 protected:
+  const std::string          path;
+  const std::string          library_file;
   std::vector<std::string>   id2name;
   std::map<std::string, int> name2id;
   bool                       graph_library_clean;
-  std::string                path;
 
-  std::string library_file;
 
   Graph_library() {
   }
 
-  explicit Graph_library(const std::string &_path) {
-    path = _path;
+  explicit Graph_library(const std::string &_path)
+   : path(_path) 
+    , library_file("graph_library") {
+
     std::ifstream graph_list;
     graph_library_clean = true;
-    library_file        = "graph_library";
 
     graph_list.open(path + "/" + library_file);
     if(graph_list.is_open()) {
@@ -54,18 +55,25 @@ protected:
     graph_list.close();
   }
 
-  ~Graph_library() {
-    if(!graph_library_clean) {
-      std::ofstream graph_list;
+  void clean_library() {
+    if(graph_library_clean)
+      return;
 
-      graph_list.open(path + "/" + library_file);
-      graph_list << name2id.size() << std::endl;
-      for(auto nameid : name2id) {
-        graph_list << nameid.first << " " << nameid.second << std::endl;
-      }
+    std::ofstream graph_list;
 
-      graph_list.close();
+    graph_list.open(path + "/" + library_file);
+    graph_list << name2id.size() << std::endl;
+    for(auto nameid : name2id) {
+      graph_list << nameid.first << " " << nameid.second << std::endl;
     }
+
+    graph_list.close();
+
+    graph_library_clean = true;
+  }
+
+  ~Graph_library() {
+    clean_library();
   }
 
   static std::unordered_map<std::string, Graph_library *> instances;
@@ -123,18 +131,7 @@ public:
   }
 
   void sync() {
-    if(!graph_library_clean) {
-      std::ofstream graph_list;
-
-      graph_list.open(path + "/" + library_file);
-      graph_list << name2id.size() << std::endl;
-      for(auto nameid : name2id) {
-        graph_list << nameid.first << " " << nameid.second << std::endl;
-      }
-
-      graph_list.close();
-      graph_library_clean = true;
-    }
+    clean_library();
   }
 };
 
