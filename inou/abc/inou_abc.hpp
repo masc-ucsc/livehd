@@ -222,6 +222,10 @@ private:
 
   void gen_comb_cell_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig);
 
+  Abc_Obj_t * gen_pseudo_subgraph_input( const index_offset& inp, Abc_Ntk_t *pAig);
+
+  Abc_Obj_t * gen_pseudo_memory_input( const index_offset& inp, Abc_Ntk_t *pAig);
+
   void conn_latch(const LGraph *g, Abc_Ntk_t *pAig);
 
   void conn_combinational_cell(const LGraph *g, Abc_Ntk_t *pAig);
@@ -254,7 +258,7 @@ private:
 
   Node_Pin create_pick_operator(LGraph *g, const Node_Pin &driver, int offset, int width);
 
-  void connect_constant(LGraph *g, uint32_t value, uint32_t size, Index_ID onid, Port_ID opid);
+  void connect_constant(LGraph *g, uint32_t value, uint32_t size, const Node_Pin &dst);
 
   void conn_latch(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
 
