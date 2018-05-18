@@ -79,6 +79,7 @@ public:
     Pin      aPin;
     aPin.name = name;
     aPin.dir  = dir;
+    aPin.use = "";
     pins.push_back(aPin);
     pname2id.insert(std::make_pair(name, id));
 

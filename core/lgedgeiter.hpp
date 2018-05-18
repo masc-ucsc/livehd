@@ -38,7 +38,8 @@ protected:
   const Edge *e;
 
 public:
-  Edge_iterator(const Edge *_b, const Edge *_e, bool _inputs)
+  Edge_iterator() = delete;
+  explicit Edge_iterator(const Edge *_b, const Edge *_e, bool _inputs)
       : inputs(_inputs) {
     b = _b;
     e = _e;
@@ -77,7 +78,8 @@ protected:
   const Index_ID     b;
 
 public:
-  Fast_edge_iterator(const Index_ID _b, const LGraph_Base *_g)
+  Fast_edge_iterator() = delete;
+  explicit Fast_edge_iterator(const Index_ID _b, const LGraph_Base *_g)
       : g(_g), b(_b) {
   }
 
@@ -201,7 +203,8 @@ protected:
   Pending_type  pending;  // vertex that cleared the frontier
 
 public:
-  Forward_edge_iterator(const LGraph *_g)
+  Forward_edge_iterator() = delete;
+  explicit Forward_edge_iterator(const LGraph *_g)
       : g(_g) {
     frontier.set_empty_key(0);     // 0 is not allowed as key
     frontier.set_deleted_key(128); // 128 is not allowed as key (4KB aligned)
@@ -308,7 +311,8 @@ protected:
   Pending_type  pending;  // vertex that cleared the frontier
 
 public:
-  Backward_edge_iterator(const LGraph *_g)
+  Backward_edge_iterator() = delete;
+  explicit Backward_edge_iterator(const LGraph *_g)
       : g(_g) {
     frontier.set_empty_key(0);     // 0 is not allowed as key
     frontier.set_deleted_key(128); // 128 is not allowed as key (4KB aligned)
