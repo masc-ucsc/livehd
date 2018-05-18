@@ -237,7 +237,7 @@ void Inou_abc::gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, A
         if(old_graph->node_type_get(node_idx).op == U32Const_Op) {
           val = old_graph->node_value_get(node_idx);
         }
-        connect_constant(new_graph, val, width, new_memory_idx, old_inp_pid);
+        connect_constant(new_graph, val, width, Node_Pin(new_memory_idx, old_inp_pid,true));
       } else if(old_inp_pid == LGRAPH_MEMOP_CLK) {
         for(const auto &sg : skew_group_map) {
           if(sg.second.find(old_idx) != sg.second.end()) {
@@ -444,18 +444,18 @@ void Inou_abc::conn_combinational_cell(LGraph *new_graph, const LGraph *old_grap
   }
 }
 
-void Inou_abc::connect_constant(LGraph *g, uint32_t value, uint32_t size, Index_ID onid, Port_ID opid) {
-  Index_ID const_nid;
-  if(int_const_map.find(std::make_pair(value, size)) == int_const_map.end()) {
-    const_nid = g->create_node().get_nid();
-    g->node_u32type_set(const_nid, value);
-    g->set_bits(const_nid, size);
-    int_const_map[std::make_pair(value, size)] = const_nid;
+void Inou_abc::connect_constant(LGraph *g, uint32_t value, uint32_t size, const Node_Pin &dst) {
+  Index_ID const_idx;
+  if(int_const_map.end() == int_const_map.find(std::make_pair(value, size))) {
+    const_idx = g->create_node().get_nid();
+    g->node_u32type_set(const_idx, value);
+    g->set_bits(const_idx, size);
+    int_const_map[std::make_pair(value, size)] = const_idx;
   } else {
-    const_nid = int_const_map[std::make_pair(value, size)];
+    const_idx = int_const_map[std::make_pair(value, size)];
   }
-  Node_Pin const_pin(const_nid, 0, false);
-  g->add_edge(const_pin, Node_Pin(onid, opid, true));
+  Node_Pin const_pin(const_idx, 0, false);
+  g->add_edge(const_pin, dst);
 }
 
 Node_Pin Inou_abc::create_pick_operator(LGraph *g, const Node_Pin &driver, int offset, int width) {
@@ -469,12 +469,8 @@ Node_Pin Inou_abc::create_pick_operator(LGraph *g, const Node_Pin &driver, int o
   Index_ID pick_nid = g->create_node().get_nid();
   g->node_type_set(pick_nid, Pick_Op);
   g->set_bits(pick_nid, width);
-
   g->add_edge(driver, Node_Pin(pick_nid, 0, true));
-
-  connect_constant(g, offset, 32, pick_nid, 1);
-
+  connect_constant(g, offset, 32, Node_Pin(pick_nid, 1,true));
   picks.insert(std::make_pair(pick_id, Node_Pin(pick_nid, 0, false)));
-
   return picks.at(pick_id);
 }
