@@ -6,6 +6,10 @@
 #include "inou_abc.hpp"
 #include <boost/filesystem.hpp>
 
+const static char ReadLib_Command[] = "read_library stdcells.genlib";
+const static char Synthesis_Command[] = "print_stats;cleanup;strash;ifraig;iresyn;dc2;strash;print_stats;";
+const static char Mapping_Command[] = "map;print_stats";
+
 static void gen_generic_lib() {
   std::string buffer = "stdcells.genlib";
   FILE *      f      = fopen(buffer.c_str(), "wt");
@@ -54,7 +58,8 @@ Abc_Ntk_t *Inou_abc::to_abc(const LGraph *g) {
     console->error("The AIG construction has failed.\n");
     Abc_NtkDelete(pAig);
     exit(-4);
-  } else {
+  }
+  else {
     char       Command[1000];
     Abc_Ntk_t *pTemp = pAig;
     pAig             = Abc_NtkToLogic(pTemp);
@@ -67,10 +72,8 @@ Abc_Ntk_t *Inou_abc::to_abc(const LGraph *g) {
       }
     } else {
       gen_generic_lib();
-
-      sprintf(Command, "read_library stdcells.genlib");
-      if(Cmd_CommandExecute(pAbc, Command)) {
-        fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
+      if(Cmd_CommandExecute(pAbc, ReadLib_Command)) {
+        fprintf(stdout, "Cannot execute command \"%s\".\n", ReadLib_Command);
       }
     }
 
@@ -81,50 +84,28 @@ Abc_Ntk_t *Inou_abc::to_abc(const LGraph *g) {
       boost::filesystem::create_directory(dir);
     }
 
-    sprintf(Command, "print_stats");
-    if(Cmd_CommandExecute(pAbc, Command)) {
-      fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
+    if(Cmd_CommandExecute(pAbc, Synthesis_Command)) {
+      console->error("Cannot execute command {}",Synthesis_Command);
     }
 
-    sprintf(Command, "cleanup;strash;write_blif %s/%s_pre.blif", path_name.c_str(), opack.graph_name.c_str());
+    sprintf(Command, "write_blif %s/%s_post.blif;write_verilog %s/%s_post.v;",
+			path_name.c_str(), opack.graph_name.c_str(),
+			path_name.c_str(), opack.graph_name.c_str());
     if(Cmd_CommandExecute(pAbc, Command)) {
-      fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
+      console->error("Cannot execute command {}",Command);
     }
 
-    sprintf(Command, "ifraig;iresyn;dc2;strash;");
-    if(Cmd_CommandExecute(pAbc, Command)) {
-      fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
+    if(Cmd_CommandExecute(pAbc, Mapping_Command)) {
+      console->error("Cannot execute command",Mapping_Command);
     }
 
-    sprintf(Command, "print_stats;");
+    sprintf(Command, "write_blif %s/%s_map.blif;write_verilog %s/%s_map.v",
+			path_name.c_str(), opack.graph_name.c_str(),
+			path_name.c_str(), opack.graph_name.c_str());
     if(Cmd_CommandExecute(pAbc, Command)) {
-      fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
+      console->error("Cannot execute command",Command);
     }
 
-    sprintf(Command, "write_blif %s/%s_post.blif", path_name.c_str(), opack.graph_name.c_str());
-    if(Cmd_CommandExecute(pAbc, Command)) {
-      fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
-    }
-
-    sprintf(Command, "write_verilog %s/%s_post.v", path_name.c_str(), opack.graph_name.c_str());
-    if(Cmd_CommandExecute(pAbc, Command)) {
-      fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
-    }
-
-    sprintf(Command, "map;print_stats;print_delay;");
-    if(Cmd_CommandExecute(pAbc, Command)) {
-      fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
-    }
-
-    sprintf(Command, "write_blif %s/%s_map.blif", path_name.c_str(), opack.graph_name.c_str());
-    if(Cmd_CommandExecute(pAbc, Command)) {
-      fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
-    }
-
-    sprintf(Command, "write_verilog %s/%s_map.v", path_name.c_str(), opack.graph_name.c_str());
-    if(Cmd_CommandExecute(pAbc, Command)) {
-      fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
-    }
     assert(pAbc != nullptr);
   }
 
@@ -342,55 +323,54 @@ void Inou_abc::gen_comb_cell_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
 
     if(tcell->get_name() == "$_NOT_") {
       combinational_cell[idx] = LGraph_CreateNot(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_AND_") {
+    }
+    else if(tcell->get_name() == "$_AND_") {
       combinational_cell[idx] = LGraph_CreateAnd(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_OR_") {
+    }
+    else if(tcell->get_name() == "$_OR_") {
       combinational_cell[idx] = LGraph_CreateOr(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_XOR_") {
+    }
+    else if(tcell->get_name() == "$_XOR_") {
       combinational_cell[idx] = LGraph_CreateXor(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_NAND_") {
+    }
+    else if(tcell->get_name() == "$_NAND_") {
       combinational_cell[idx] = LGraph_CreateNand(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_NOR_") {
+    }
+    else if(tcell->get_name() == "$_NOR_") {
       combinational_cell[idx] = LGraph_CreateNor(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_XNOR_") {
+    }
+    else if(tcell->get_name() == "$_XNOR_") {
       combinational_cell[idx] = LGraph_CreateXnor(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_ANDNOT_") {
+    }
+    else if(tcell->get_name() == "$_ANDNOT_") {
       //assign Y = A & (~B);
       combinational_cell[idx] = LGraph_CreateAndnot(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_ORNOT_") {
+    }
+    else if(tcell->get_name() == "$_ORNOT_") {
       //assign Y = A | (~B);
       combinational_cell[idx] = LGraph_CreateOrnot(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_AOI3_") {
+    }
+    else if(tcell->get_name() == "$_AOI3_") {
       //assign Y = ~((A & B) | C);
       combinational_cell[idx] = LGraph_CreateAoi3(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_OAI3_") {
+    }
+    else if(tcell->get_name() == "$_OAI3_") {
       //assign Y = ~((A | B) & C);
       combinational_cell[idx] = LGraph_CreateOai3(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_AOI4_") {
+    }
+    else if(tcell->get_name() == "$_AOI4_") {
       //assign Y = ~((A & B) | (C & D));
       combinational_cell[idx] = LGraph_CreateAoi4(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_OAI4_") {
+    }
+    else if(tcell->get_name() == "$_OAI4_") {
       //assign Y = ~((A | B) & (C | D));
       combinational_cell[idx] = LGraph_CreateOai4(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_MUX_") {
+    }
+    else if(tcell->get_name() == "$_MUX_") {
       combinational_cell[idx] = LGraph_CreateMUX(pAig);
-      continue;
-    } else {
+    }
+    else {
       console->error("Unknown cell type!!!!");
-      continue;
     }
   }
 }

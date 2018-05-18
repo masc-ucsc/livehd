@@ -16,9 +16,7 @@ char **Options::cargv;
 
 boost::program_options::options_description Options::desc("lgraph inout options setup");
 
-Options_pack::Options_pack() {
-  lgdb_path  = "lgdb";
-  graph_name = "";
+Options_pack::Options_pack() : lgdb_path("lgdb"),graph_name("") {
 
   assert(Options::get_cargc() != 0); // Options::setup(argc,argv) must be called before setup() is called
 
@@ -47,6 +45,7 @@ Options_pack::Options_pack() {
     boost::filesystem::path p(lgdb_path);
     boost::filesystem::create_directory(p);
   }
+
 }
 
 void Options::setup_lock() {
