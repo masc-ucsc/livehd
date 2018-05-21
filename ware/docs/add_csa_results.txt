@@ -1,0 +1,299 @@
+
+ /----------------------------------------------------------------------------\
+ |                                                                            |
+ |  yosys -- Yosys Open SYnthesis Suite                                       |
+ |                                                                            |
+ |  Copyright (C) 2012 - 2015  Clifford Wolf <clifford@clifford.at>           |
+ |                                                                            |
+ |  Permission to use, copy, modify, and/or distribute this software for any  |
+ |  purpose with or without fee is hereby granted, provided that the above    |
+ |  copyright notice and this permission notice appear in all copies.         |
+ |                                                                            |
+ |  THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES  |
+ |  WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF          |
+ |  MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR   |
+ |  ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES    |
+ |  WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN     |
+ |  ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF   |
+ |  OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.            |
+ |                                                                            |
+ \----------------------------------------------------------------------------/
+
+ Yosys 0.5+ (git sha1 f13e387, gcc 5.2.1-22ubuntu2 -O2 -fstack-protector-strong -fPIC -Os)
+
+
+-- Parsing `add_csa.v' using frontend `verilog' --
+
+1. Executing Verilog-2005 frontend.
+Parsing Verilog input from `add_csa.v' to AST representation.
+Generating RTLIL representation for module `\add_csa'.
+Successfully finished Verilog frontend.
+
+-- Parsing `add_rca.v' using frontend `verilog' --
+
+2. Executing Verilog-2005 frontend.
+Parsing Verilog input from `add_rca.v' to AST representation.
+Generating RTLIL representation for module `\add_rca'.
+Successfully finished Verilog frontend.
+
+-- Parsing `full_adder.v' using frontend `verilog' --
+
+3. Executing Verilog-2005 frontend.
+Parsing Verilog input from `full_adder.v' to AST representation.
+Generating RTLIL representation for module `\full_adder'.
+Successfully finished Verilog frontend.
+
+-- Running command `proc ; opt ;  techmap -D ALU_RIPPLE;; opt -fast ;; abc -D 100 -liberty ./NanGate_15nm_OCL_typical_conditional_nldm.lib  -constr ./NanGate_15nm_OCL_typical_conditional_nldm.constr ; stat' --
+
+4. Executing PROC pass (convert processes to netlists).
+
+4.1. Executing PROC_CLEAN pass (remove empty switches from decision trees).
+Cleaned up 0 empty switches.
+
+4.2. Executing PROC_RMDEAD pass (remove dead branches from decision trees).
+Removed a total of 0 dead cases.
+
+4.3. Executing PROC_INIT pass (extract init attributes).
+
+4.4. Executing PROC_ARST pass (detect async resets in processes).
+
+4.5. Executing PROC_MUX pass (convert decision trees to multiplexers).
+Creating decoders for process `\full_adder.$proc$full_adder.v:11$131'.
+  creating decoder for signal `$0\cout[0:0]'.
+  creating decoder for signal `$0\sum[0:0]'.
+Creating decoders for process `\add_rca.$proc$add_rca.v:34$130'.
+  creating decoder for signal `$0\carry[0:0]'.
+
+4.6. Executing PROC_DLATCH pass (convert process syncs to latches).
+No latch inferred for signal `\full_adder.\sum' from process `\full_adder.$proc$full_adder.v:11$131'.
+No latch inferred for signal `\full_adder.\cout' from process `\full_adder.$proc$full_adder.v:11$131'.
+No latch inferred for signal `\add_rca.\carry' from process `\add_rca.$proc$add_rca.v:34$130'.
+
+4.7. Executing PROC_DFF pass (convert process syncs to FFs).
+
+4.8. Executing PROC_CLEAN pass (remove empty switches from decision trees).
+Removing empty process `full_adder.$proc$full_adder.v:11$131'.
+Removing empty process `add_rca.$proc$add_rca.v:34$130'.
+Cleaned up 0 empty switches.
+
+5. Executing OPT pass (performing simple optimizations).
+
+5.1. Executing OPT_CONST pass (perform const folding).
+Replacing $shr cell `$shr$add_csa.v:37$65' (B=1, SHR=1) in module `add_csa' with fixed wiring: { 1'0 \si [63:1] }
+
+5.2. Executing OPT_SHARE pass (detect identical cells).
+Finding identical cells in module `\full_adder'.
+  Cell `$xor$full_adder.v:12$132' is identical to cell `$xor$full_adder.v:13$136'.
+    Redirecting output \Y: $xor$full_adder.v:12$132_Y = $xor$full_adder.v:13$136_Y
+    Removing $xor cell `$xor$full_adder.v:12$132' from module `\full_adder'.
+Finding identical cells in module `\add_rca'.
+Finding identical cells in module `\add_csa'.
+Removed a total of 1 cells.
+
+5.3. Executing OPT_MUXTREE pass (detect dead branches in mux trees).
+Running muxtree optimizier on module \full_adder..
+  Creating internal representation of mux trees.
+  No muxes found in this module.
+Running muxtree optimizier on module \add_rca..
+  Creating internal representation of mux trees.
+  No muxes found in this module.
+Running muxtree optimizier on module \add_csa..
+  Creating internal representation of mux trees.
+  No muxes found in this module.
+Removed 0 multiplexer ports.
+
+5.4. Executing OPT_REDUCE pass (consolidate $*mux and $reduce_* inputs).
+  Optimizing cells in module \full_adder.
+  Optimizing cells in module \add_rca.
+  Optimizing cells in module \add_csa.
+Performed a total of 0 changes.
+
+5.5. Executing OPT_SHARE pass (detect identical cells).
+Finding identical cells in module `\full_adder'.
+Finding identical cells in module `\add_rca'.
+Finding identical cells in module `\add_csa'.
+Removed a total of 0 cells.
+
+5.6. Executing OPT_RMDFF pass (remove dff with constant values).
+Replaced 0 DFF cells.
+
+5.7. Executing OPT_CLEAN pass (remove unused cells and wires).
+Finding unused cells or wires in module \full_adder..
+Finding unused cells or wires in module \add_rca..
+Finding unused cells or wires in module \add_csa..
+
+5.8. Executing OPT_CONST pass (perform const folding).
+
+5.9. Finished OPT passes. (There is nothing left to do.)
+
+6. Executing TECHMAP pass (map to technology primitives).
+
+6.1. Executing Verilog-2005 frontend.
+Parsing Verilog input from `<techmap.v>' to AST representation.
+Generating RTLIL representation for module `\_90_simplemap_bool_ops'.
+Generating RTLIL representation for module `\_90_simplemap_reduce_ops'.
+Generating RTLIL representation for module `\_90_simplemap_logic_ops'.
+Generating RTLIL representation for module `\_90_simplemap_compare_ops'.
+Generating RTLIL representation for module `\_90_simplemap_various'.
+Generating RTLIL representation for module `\_90_simplemap_registers'.
+Generating RTLIL representation for module `\_90_shift_ops_shr_shl_sshl_sshr'.
+Generating RTLIL representation for module `\_90_shift_shiftx'.
+Generating RTLIL representation for module `\_90_fa'.
+Generating RTLIL representation for module `\_90_lcu'.
+Generating RTLIL representation for module `\_90_alu'.
+Generating RTLIL representation for module `\_90_macc'.
+Generating RTLIL representation for module `\_90_alumacc'.
+Generating RTLIL representation for module `\$__div_mod_u'.
+Generating RTLIL representation for module `\$__div_mod'.
+Generating RTLIL representation for module `\_90_div'.
+Generating RTLIL representation for module `\_90_mod'.
+Generating RTLIL representation for module `\_90_pow'.
+Generating RTLIL representation for module `\_90_pmux'.
+Generating RTLIL representation for module `\_90_lut'.
+Successfully finished Verilog frontend.
+Mapping full_adder.$and$full_adder.v:12$133 ($and) with simplemap.
+Mapping full_adder.$and$full_adder.v:12$134 ($and) with simplemap.
+Mapping full_adder.$or$full_adder.v:12$135 ($or) with simplemap.
+Mapping full_adder.$xor$full_adder.v:13$136 ($xor) with simplemap.
+Mapping full_adder.$xor$full_adder.v:13$137 ($xor) with simplemap.
+No more expansions possible.
+
+7. Executing OPT pass (performing simple optimizations).
+
+7.1. Executing OPT_CONST pass (perform const folding).
+
+7.2. Executing OPT_SHARE pass (detect identical cells).
+Finding identical cells in module `\add_csa'.
+Finding identical cells in module `\add_rca'.
+Finding identical cells in module `\full_adder'.
+Removed a total of 0 cells.
+
+7.3. Executing OPT_RMDFF pass (remove dff with constant values).
+Replaced 0 DFF cells.
+
+7.4. Executing OPT_CLEAN pass (remove unused cells and wires).
+Finding unused cells or wires in module \add_csa..
+Finding unused cells or wires in module \add_rca..
+Finding unused cells or wires in module \full_adder..
+
+7.5. Finished fast OPT passes.
+
+8. Executing ABC pass (technology mapping using ABC).
+
+8.1. Extracting gate netlist of module `\add_csa' to `<abc-temp-dir>/input.blif'..
+Extracted 0 gates and 0 wires to a netlist network with 0 inputs and 0 outputs.
+Don't call ABC as there is nothing to map.
+Removing temp directory.
+
+8.2. Extracting gate netlist of module `\add_rca' to `<abc-temp-dir>/input.blif'..
+Extracted 0 gates and 0 wires to a netlist network with 0 inputs and 0 outputs.
+Don't call ABC as there is nothing to map.
+Removing temp directory.
+
+8.3. Extracting gate netlist of module `\full_adder' to `<abc-temp-dir>/input.blif'..
+Extracted 5 gates and 8 wires to a netlist network with 3 inputs and 2 outputs.
+
+8.3.1. Executing ABC.
+Running ABC command: <yosys-exe-dir>/berkeley-abc -s -f <abc-temp-dir>/abc.script 2>&1
+ABC: ABC command line: "source <abc-temp-dir>/abc.script".
+ABC: 
+ABC: + read_blif <abc-temp-dir>/input.blif 
+ABC: + read_lib -w /home/cmpe125/synth/./NanGate_15nm_OCL_typical_conditional_nldm.lib 
+ABC: Parsing finished successfully.  Parsing time =     0.04 sec
+ABC: Scl_LibertyReadGenlib() skipped cell "ANTENNA" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "CLKGATETST_X1" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "DFFRNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "DFFSNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped cell "FILLTIE" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X1" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X2" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X4" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X8" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X16" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "LHQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "SDFFRNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "SDFFSNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X1".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X2".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X4".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X8".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X12".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X16".
+ABC: Library "NanGate_15nm_OCL" from "/home/cmpe125/synth/./NanGate_15nm_OCL_typical_conditional_nldm.lib" has 57 cells (19 skipped: 5 seq; 6 tri-state; 8 no func).  Time =     0.06 sec
+ABC: Memory =    2.98 MB. Time =     0.06 sec
+ABC: Warning: Detected 2 multi-output gates (for example, "FA_X1").
+ABC: + read_constr -v /home/cmpe125/synth/./NanGate_15nm_OCL_typical_conditional_nldm.constr 
+ABC: Setting driving cell to be "BUF_X2".
+ABC: Setting driving cell to be 10.000000.
+ABC: + strash 
+ABC: + scorr 
+ABC: Error: The network is combinational (run "fraig" or "fraig_sweep").
+ABC: + ifraig 
+ABC: + retime -D 100 
+ABC: + strash 
+ABC: + dch -f 
+ABC: + map -D 100 
+ABC: + buffer 
+ABC: + upsize -D 100 
+ABC: Current delay (23.22 ps) does not exceed the target delay (100.00 ps). Upsizing is not performed.
+ABC: + dnsize -D 100 
+ABC: + stime -p 
+ABC: WireLoad = "none"  Gates =      5 (  0.0 %)   Cap =  3.8 ff (  0.0 %)   Area =        1.47 (100.0 %)   Delay =    23.22 ps  ( 40.0 %)               
+ABC: Path  0 --       3 : 0    2 pi      A =   0.00  Df =   1.1   -0.0 ps  S =   2.4 ps  Cin =  0.0 ff  Cout =   2.4 ff  Cmax =   0.0 ff  G =    0  
+ABC: Path  1 --       6 : 2    2 XOR2_X1 A =   0.44  Df =   7.3   -0.2 ps  S =   8.4 ps  Cin =  1.4 ff  Cout =   2.0 ff  Cmax = 100.0 ff  G =  139  
+ABC: Path  2 --      10 : 2    1 XOR2_X1 A =   0.44  Df =  23.2   -3.1 ps  S =  26.1 ps  Cin =  1.4 ff  Cout =  10.0 ff  Cmax = 100.0 ff  G =  696  
+ABC: Start-point = pi2.  End-point = po1.
+ABC: + write_blif <abc-temp-dir>/output.blif 
+
+8.3.2. Re-integrating ABC results.
+ABC RESULTS:          NAND2_X1 cells:        3
+ABC RESULTS:           XOR2_X1 cells:        2
+ABC RESULTS:        internal signals:        3
+ABC RESULTS:           input signals:        3
+ABC RESULTS:          output signals:        2
+Removing temp directory.
+
+9. Printing statistics.
+
+=== add_csa ===
+
+   Number of wires:                 10
+   Number of wire bits:            452
+   Number of public wires:          10
+   Number of public wire bits:     452
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                 65
+     add_rca                         1
+     full_adder                     64
+
+=== add_rca ===
+
+   Number of wires:                  7
+   Number of wire bits:            260
+   Number of public wires:           7
+   Number of public wire bits:     260
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                 64
+     full_adder                     64
+
+=== full_adder ===
+
+   Number of wires:                 16
+   Number of wire bits:             16
+   Number of public wires:           5
+   Number of public wire bits:       5
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                  5
+     NAND2_X1                        3
+     XOR2_X1                         2
+
+End of script. Logfile hash: 7e639abe67
+CPU: user 0.06s system 0.00s, MEM: 35.12 MB total, 8.64 MB resident
+Yosys 0.5+ (git sha1 f13e387, gcc 5.2.1-22ubuntu2 -O2 -fstack-protector-strong -fPIC -Os)
+Time spent: 37% 4x read_verilog (0 sec), 18% 2x clean (0 sec), ...

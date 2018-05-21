@@ -137,7 +137,7 @@ typename AlignedAllocator<T,align>::pointer AlignedAllocator<T,align>::allocate(
   #pragma omp critical(ptrmap_modify)
 #endif // OPENMP
   _ptrmap.insert( std::pair<ptrdiff_t, ptrdiff_t>(ap, op) );
-  return reinterpret_cast<pointer>(ap); 
+  return reinterpret_cast<pointer>(ap);
 }
 
 template <typename T, const unsigned align>
