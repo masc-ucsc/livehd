@@ -33,13 +33,17 @@ int main(int argc, const char **argv) {
   Tech_cell &tmp_cell = tlib->get_vec_cell_types()->back();
 
   for(auto iter_io = dinfo.ios.begin(); iter_io != dinfo.ios.end(); ++iter_io) {
-    tmp_cell.add_pin(iter_io->io_name);
-    Tech_cell::Pin &tmp_pin = tmp_cell.get_vec_pins()->back();
 
+    Tech_cell::Direction dir = Tech_cell::Direction::input;
     if(iter_io->dir == 0)
-      tmp_pin.dir = Tech_cell::Direction::input;
+      dir = Tech_cell::Direction::input;
     else if(iter_io->dir == 1)
-      tmp_pin.dir = Tech_cell::Direction::output;
+      dir = Tech_cell::Direction::output;
+    else
+      assert(false); // Unhandled direction option
+
+    tmp_cell.add_pin(iter_io->io_name,dir);
+    Tech_cell::Pin &tmp_pin = tmp_cell.get_vec_pins()->back();
 
     tmp_pin.phys.resize(tmp_pin.phys.size() + 1);
     Tech_cell::Physical_pin &tmp_phy = tmp_pin.phys.back();

@@ -81,7 +81,6 @@ void Inou_abc::gen_comb_cell_from_abc(LGraph *new_graph, const LGraph *old_graph
   int                 i, k = 0;
   Index_ID            cell_idx = 0;
 
-
   if(Abc_NtkHasMapping(pNtk)) {
     Abc_NtkForEachNode(pNtk, pObj, k) {
       bool       constnode = false;
@@ -155,9 +154,9 @@ void Inou_abc::gen_comb_cell_from_abc(LGraph *new_graph, const LGraph *old_graph
 void Inou_abc::gen_latch_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
   assert(old_graph);
   Abc_Obj_t *pLatch = nullptr;
-  int        i;
+  int        i      = 0;
   Abc_NtkForEachLatch(pNtk, pLatch, i) {
-    Abc_Obj_t *pNet = Abc_ObjFanout0(Abc_ObjFanout0(pLatch));
+    Abc_Obj_t * pNet = Abc_ObjFanout0(Abc_ObjFanout0(pLatch));
     std::string latch_name(Abc_ObjName(pNet));
     Index_ID    cell_idx = new_graph->create_node().get_nid();
     new_graph->set_bits(cell_idx, 1);
@@ -180,9 +179,9 @@ void Inou_abc::gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, A
   }
 
   Abc_Obj_t *pTerm = nullptr, *pNet = nullptr;
-  int        i;
 
   std::map<index_offset, Abc_Obj_t *> memory_input_map;
+  int                                 i = 0;
   Abc_NtkForEachPo(pNtk, pTerm, i) {
     pNet = Abc_ObjFanin0(pTerm);
     std::string output_name(((Abc_ObjName(pNet))));
@@ -238,7 +237,7 @@ void Inou_abc::gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, A
         if(old_graph->node_type_get(node_idx).op == U32Const_Op) {
           val = old_graph->node_value_get(node_idx);
         }
-        connect_constant(new_graph, val, width, new_memory_idx, old_inp_pid);
+        connect_constant(new_graph, val, width, Node_Pin(new_memory_idx, old_inp_pid,true));
       } else if(old_inp_pid == LGRAPH_MEMOP_CLK) {
         for(const auto &sg : skew_group_map) {
           if(sg.second.find(old_idx) != sg.second.end()) {
@@ -304,9 +303,10 @@ void Inou_abc::gen_subgraph_from_abc(LGraph *new_graph, const LGraph *old_graph,
     new_graph->node_subgraph_set(new_subgraph_idx, sub_graph->lg_id());
   }
   Abc_Obj_t *pTerm = nullptr, *pNet = nullptr;
-  int        i = 0;
 
   std::map<index_offset, Abc_Obj_t *> subgraph_input_map;
+
+  int i = 0;
   Abc_NtkForEachPo(pNtk, pTerm, i) {
     pNet = Abc_ObjFanin0(pTerm);
     std::string output_name(((Abc_ObjName(pNet))));
@@ -378,12 +378,12 @@ void Inou_abc::gen_subgraph_from_abc(LGraph *new_graph, const LGraph *old_graph,
 
 void Inou_abc::conn_latch(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
   Abc_Obj_t *pLatch = nullptr;
-  int        i;
+  int        i      = 0;
   Abc_NtkForEachLatch(pNtk, pLatch, i) {
     Index_ID         latch_new_idx = cell2id[Abc_ObjFanout0(Abc_ObjFanout0(pLatch))];
     const Tech_cell *tcell         = new_graph->get_tlibrary()->get_const_cell(new_graph->tmap_id_get(latch_new_idx));
     std::string      trig_pin      = tcell->pin_name_exist("C") ? "C" : "E";
-    Abc_Obj_t *pNode               = Abc_ObjFanin0(Abc_ObjFanin0(pLatch));
+    Abc_Obj_t *      pNode         = Abc_ObjFanin0(Abc_ObjFanin0(pLatch));
 
     new_graph->add_edge(Node_Pin(cell2id[pNode], cell_out_pid[cell2id[pNode]]++, false),
                         Node_Pin(latch_new_idx, tcell->get_pin_id("D"), true));
@@ -409,9 +409,9 @@ void Inou_abc::conn_latch(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t 
 
 void Inou_abc::conn_primary_output(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
   Abc_Obj_t *pTerm = nullptr;
-  int        i;
+  int        i     = 0;
   Abc_NtkForEachPo(pNtk, pTerm, i) {
-	Abc_Obj_t * pNet = Abc_ObjFanin0(pTerm);
+    Abc_Obj_t * pNet = Abc_ObjFanin0(pTerm);
     std::string output_name(Abc_ObjName(pNet));
 
     if(output_name[0] == '%' && output_name[output_name.size() - 1] == '%') {
@@ -429,32 +429,33 @@ void Inou_abc::conn_primary_output(LGraph *new_graph, const LGraph *old_graph, A
 
 void Inou_abc::conn_combinational_cell(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
   Abc_Obj_t *pObj = nullptr;
-  int        i, k;
+  int        k    = 0;
   Abc_NtkForEachNode(pNtk, pObj, k) {
+    int         i;
     Mio_Gate_t *pGate = (Mio_Gate_t *)pObj->pData;
     Mio_Pin_t * pGatePin;
     Port_ID     inpid = 0;
     for(pGatePin = Mio_GateReadPins(pGate), i = 0; pGatePin; pGatePin = Mio_PinReadNext(pGatePin), i++) {
       std::string fanin_pin_name((Mio_PinReadName(pGatePin)));
-	  Abc_Obj_t * pNet = Abc_ObjFanin(pObj, i);
+      Abc_Obj_t * pNet = Abc_ObjFanin(pObj, i);
       new_graph->add_edge(Node_Pin(cell2id[pNet], cell_out_pid[cell2id[pNet]]++, false),
                           Node_Pin(cell2id[Abc_ObjFanout0(pObj)], inpid++, true));
     }
   }
 }
 
-void Inou_abc::connect_constant(LGraph *g, uint32_t value, uint32_t size, Index_ID onid, Port_ID opid) {
-  Index_ID const_nid;
-  if(int_const_map.find(std::make_pair(value, size)) == int_const_map.end()) {
-    const_nid = g->create_node().get_nid();
-    g->node_u32type_set(const_nid, value);
-    g->set_bits(const_nid, size);
-    int_const_map[std::make_pair(value, size)] = const_nid;
+void Inou_abc::connect_constant(LGraph *g, uint32_t value, uint32_t size, const Node_Pin &dst) {
+  Index_ID const_idx;
+  if(int_const_map.end() == int_const_map.find(std::make_pair(value, size))) {
+    const_idx = g->create_node().get_nid();
+    g->node_u32type_set(const_idx, value);
+    g->set_bits(const_idx, size);
+    int_const_map[std::make_pair(value, size)] = const_idx;
   } else {
-    const_nid = int_const_map[std::make_pair(value, size)];
+    const_idx = int_const_map[std::make_pair(value, size)];
   }
-  Node_Pin const_pin(const_nid, 0, false);
-  g->add_edge(const_pin, Node_Pin(onid, opid, true));
+  Node_Pin const_pin(const_idx, 0, false);
+  g->add_edge(const_pin, dst);
 }
 
 Node_Pin Inou_abc::create_pick_operator(LGraph *g, const Node_Pin &driver, int offset, int width) {
@@ -468,12 +469,8 @@ Node_Pin Inou_abc::create_pick_operator(LGraph *g, const Node_Pin &driver, int o
   Index_ID pick_nid = g->create_node().get_nid();
   g->node_type_set(pick_nid, Pick_Op);
   g->set_bits(pick_nid, width);
-
   g->add_edge(driver, Node_Pin(pick_nid, 0, true));
-
-  connect_constant(g, offset, 32, pick_nid, 1);
-
+  connect_constant(g, offset, 32, Node_Pin(pick_nid, 1,true));
   picks.insert(std::make_pair(pick_id, Node_Pin(pick_nid, 0, false)));
-
   return picks.at(pick_id);
 }

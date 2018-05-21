@@ -27,6 +27,8 @@
 
 template <typename T>
 class Dense {
+private:
+  explicit Dense() = delete;
 
 public:
   typedef T                   value_type;
@@ -34,7 +36,7 @@ public:
   typedef value_type*         iterator;
   typedef const value_type*   const_iterator;
 
-  Dense(const std::string filename) : __allocator(filename) {
+  explicit Dense(const std::string& filename) : __allocator(filename) {
     long sz = get_saved_size(filename);
     if(sz > 0) {
       __buffer = __allocator.allocate(sz);

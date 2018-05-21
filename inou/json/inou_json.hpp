@@ -29,20 +29,20 @@ protected:
 
   bool is_int(std::string s);
 
-  void from_json(LGraph *g, rapidjson::Document &document);
+  void from_json(LGraph *g, rapidjson::Document& document);
 
-  void to_json(const LGraph *g, const std::string filename) const;
+  void to_json(const LGraph *g, const std::string& filename) const;
 
 public:
   Inou_json();
 
   virtual ~Inou_json();
 
-  std::vector<LGraph *> generate() override final;
+  std::vector<LGraph *> generate() final;
 
   using Inou::generate;
 
-  void generate(std::vector<const LGraph *> &out) override final;
+  void generate(std::vector<const LGraph *> &out) final;
 };
 
 #endif //LGRAPH_MY_TEST_H

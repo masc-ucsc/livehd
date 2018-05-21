@@ -48,7 +48,7 @@ public:
     hierarchy = hier;
   };
 
-  void generate(std::vector<const LGraph *> &out) override final {
+  void generate(std::vector<const LGraph *> &out) final {
     for(const auto &g : out) {
       std::cout << g->get_name() << std::endl;
       to_yosys(g);

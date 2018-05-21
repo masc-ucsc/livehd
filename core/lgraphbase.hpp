@@ -74,6 +74,8 @@ protected:
 
   void del_int_node(Index_ID idx);
 
+  Index_ID find_idx_from_pid_int(Index_ID nid, Port_ID pid) const;
+
   friend Fast_edge_iterator;
   friend Forward_edge_iterator;
   friend Backward_edge_iterator;
@@ -131,9 +133,7 @@ public:
   // get extra (non-master root) node for port_id pid
   // will allocate space if none is available
   Index_ID get_idx_from_pid(Index_ID nid, Port_ID pid);
-  // get extra (non-master root) node for port_id pid
-  // will allocate space if none is available
-  Index_ID get_idx_from_pid(Index_ID nid, Port_ID pid) const;
+  Index_ID find_idx_from_pid(Index_ID nid, Port_ID pid) const;
   void     set_bits_pid(Index_ID nid, Port_ID pid, uint16_t bits);
   uint16_t get_bits_pid(Index_ID nid, Port_ID pid) const;
   uint16_t get_bits_pid(Index_ID nid, Port_ID pid);
@@ -174,12 +174,12 @@ public:
 
   void print_stats() const;
 
-  // Node_Internal expossed queries
-  Node_Internal &get_node_int(Index_ID idx) {
+  const Node_Internal &get_node_int(Index_ID idx) const {
     assert(static_cast<Index_ID>(node_internal.size()) > idx);
     return node_internal[idx];
   }
-  const Node_Internal &get_node_int(Index_ID idx) const {
+
+  Node_Internal &get_node_int(Index_ID idx) {
     assert(static_cast<Index_ID>(node_internal.size()) > idx);
     return node_internal[idx];
   }

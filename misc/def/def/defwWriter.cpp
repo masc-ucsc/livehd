@@ -1,25 +1,25 @@
 // *****************************************************************************
 // *****************************************************************************
 // Copyright 2013, Cadence Design Systems
-// 
+//
 // This  file  is  part  of  the  Cadence  LEF/DEF  Open   Source
-// Distribution,  Product Version 5.8. 
-// 
+// Distribution,  Product Version 5.8.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 //    you may not use this file except in compliance with the License.
 //    You may obtain a copy of the License at
-// 
+//
 //        http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 //    Unless required by applicable law or agreed to in writing, software
 //    distributed under the License is distributed on an "AS IS" BASIS,
 //    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 //    implied. See the License for the specific language governing
 //    permissions and limitations under the License.
-// 
+//
 // For updates, support, or to become part of the LEF/DEF Community,
 // check www.openeda.org for details.
-// 
+//
 //  $Author: dell $
 //  $Revision: #1 $
 //  $Date: 2017/06/06 $
@@ -223,7 +223,7 @@ char defwStateStr[MAXSYN] [80] = {
     "PIN",                  // 37
     "PIN",                  // 38
     "PIN",                  // 39
-    "PINPROPERTY",          // 40 
+    "PINPROPERTY",          // 40
     "PINPROPERTY",          // 41
     "PINPROPERTY",          // 42
     "SNET",                 // 43
@@ -233,7 +233,7 @@ char defwStateStr[MAXSYN] [80] = {
     "SNET",                 // 47
     "PATH",                 // 48
     "PATH",                 // 49
-    "SHIELD",               // 50 
+    "SHIELD",               // 50
     "NET",                  // 51
     "NET",                  // 52
     "NET",                  // 53
@@ -243,7 +243,7 @@ char defwStateStr[MAXSYN] [80] = {
     "NOSHIELD",             // 57
     "IOTIMING",             // 58
     "IOTIMING",             // 59
-    "IOTIMING",             // 60 
+    "IOTIMING",             // 60
     "SCANCHAIN",            // 61
     "SCANCHAIN",            // 62
     "SCAN FLOATING",        // 63
@@ -253,7 +253,7 @@ char defwStateStr[MAXSYN] [80] = {
     "CONSTRAINTS",          // 67
     "CONSTRAINTS",          // 68
     "CONSTRAINTS",          // 69
-    "CONSTRAINTS",          // 70 
+    "CONSTRAINTS",          // 70
     "GROUP",                // 71
     "GROUP",                // 71
     "GROUP",                // 72
@@ -284,14 +284,14 @@ char defwStateStr[MAXSYN] [80] = {
     "BEGINEXT",             // 97
     "DESIGN END",           // 98
     "FILL_LAYERMASK",       // 99
-    "FILL_VIAMASK",         // 100 
+    "FILL_VIAMASK",         // 100
     "BLOCKAGE_MASK"         // 101
 
 };
 
 
 static int printPointsNum = 0;
-static void printPoints(FILE *file, double x, double y, 
+static void printPoints(FILE *file, double x, double y,
                         const char* prefix, const char* suffix)
 {
     static double x_old = 0;
@@ -342,10 +342,10 @@ defwInit(FILE       *f,
          const char *dividerChar,
          const char *busBitChars,
          const char *designName,
-         const char *technology,  // optional 
-         const char *array,       // optional 
-         const char *floorplan,   // optional 
-         double     units             // optional  (set to -1 to ignore) 
+         const char *technology,  // optional
+         const char *array,       // optional
+         const char *floorplan,   // optional
+         double     units             // optional  (set to -1 to ignore)
          )
 {
 
@@ -467,7 +467,7 @@ defwVersion(int vers1,
         return DEFW_UNINITIALIZED;
     if (!defwDidInit)
         return DEFW_BAD_ORDER;
-    if (defwState != DEFW_INIT)  // version follows init 
+    if (defwState != DEFW_INIT)  // version follows init
         return DEFW_BAD_ORDER;
     fprintf(defwFile, "VERSION %d.%d ;\n", vers1, vers2);
     if (vers2 >= 10)
@@ -705,8 +705,8 @@ int
 defwIntPropDef(const char   *objType,
                const char   *propName,
                double       leftRange,
-               double       rightRange,    // optional 
-               int          propValue                        // optional 
+               double       rightRange,    // optional
+               int          propValue                        // optional
                )
 {
 
@@ -740,8 +740,8 @@ int
 defwRealPropDef(const char  *objType,
                 const char  *propName,
                 double      leftRange,
-                double      rightRange,    // optional 
-                double      propValue                        // optional 
+                double      rightRange,    // optional
+                double      propValue                        // optional
                 )
 {
 
@@ -775,8 +775,8 @@ int
 defwStringPropDef(const char    *objType,
                   const char    *propName,
                   double        leftRange,
-                  double        rightRange,    // optional 
-                  const char    *propValue                   // optional 
+                  double        rightRange,    // optional
+                  const char    *propValue                   // optional
                   )
 {
 
@@ -2125,18 +2125,18 @@ defwStartPins(int count)
 int
 defwPin(const char  *name,
         const char  *net,
-        int         special,       // optional 0-ignore 1-special 
-        const char  *direction,                            // optional 
-        const char  *use,                                  // optional 
+        int         special,       // optional 0-ignore 1-special
+        const char  *direction,                            // optional
+        const char  *use,                                  // optional
         const char  *status,
         int         xo,
         int         yo,
-        int         orient,   // optional 
+        int         orient,   // optional
         const char  *layer,
         int         xl,
         int         yl,
         int         xh,
-        int         yh // optional 
+        int         yh // optional
         )
 {
 
@@ -2175,7 +2175,7 @@ defwPin(const char  *name,
         fprintf(defwFile, "\n      + %s ( %d %d ) %s", status, xo, yo,
                 defwOrient(orient));
     }
-    // In 5.6, user should use defPinLayer to write out layer construct 
+    // In 5.6, user should use defPinLayer to write out layer construct
     if (layer) {
         fprintf(defwFile, "\n      + LAYER %s ( %d %d ) ( %d %d )",
                 layer, xl, yl, xh, yh);
@@ -2191,18 +2191,18 @@ defwPin(const char  *name,
 int
 defwPinStr(const char   *name,
            const char   *net,
-           int          special,       // optional 0-ignore 1-special 
-           const char   *direction,                                    // optional 
-           const char   *use,                                          // optional 
+           int          special,       // optional 0-ignore 1-special
+           const char   *direction,                                    // optional
+           const char   *use,                                          // optional
            const char   *status,
            int          xo,
            int          yo,
-           const char   *orient,   // optional 
+           const char   *orient,   // optional
            const char   *layer,
            int          xl,
            int          yl,
            int          xh,
-           int          yh // optional 
+           int          yh // optional
            )
 {
 
@@ -2241,7 +2241,7 @@ defwPinStr(const char   *name,
         fprintf(defwFile, "\n      + %s ( %d %d ) %s", status, xo, yo,
                 orient);
     }
-    // In 5.6, user should use defPinLayer to write out layer construct 
+    // In 5.6, user should use defPinLayer to write out layer construct
     if (layer) {
         fprintf(defwFile, "\n      + LAYER %s ( %d %d ) ( %d %d )",
                 layer, xl, yl, xh, yh);
@@ -2335,11 +2335,11 @@ defwPinPolygon(const char   *layerName,
     for (i = 0; i < num_polys; i++) {
         if ((i == 0) || ((i % 5) == 0)) {
             printPoints(defwFile, *xl++, *yl++, "\n        ", " ");
-            defwLines++; 
+            defwLines++;
         } else
             printPoints(defwFile, *xl++, *yl++, "", " ");
     }
-   
+
     defwState = DEFW_PIN;
     defwLines++;
     return DEFW_OK;
@@ -2479,7 +2479,7 @@ defwPinPortPolygon(const char   *layerName,
     for (i = 0; i < num_polys; i++) {
         if ((i == 0) || ((i % 5) == 0)) {
             printPoints(defwFile, *xl++, *yl++, "\n          ", " ");
-            defwLines++; 
+            defwLines++;
         } else
             printPoints(defwFile, *xl++, *yl++, "", " ");
     }
@@ -2724,7 +2724,7 @@ defwPinAntennaPinMaxAreaCar(int         value,
 
     fprintf(defwFile, "\n      + ANTENNAPINMAXAREACAR %d", value);
     if (!layerName)
-        return DEFW_BAD_DATA;  // layerName is required 
+        return DEFW_BAD_DATA;  // layerName is required
 
     fprintf(defwFile, " LAYER %s", layerName);
     defwLines++;
@@ -2746,7 +2746,7 @@ defwPinAntennaPinMaxSideAreaCar(int         value,
 
     fprintf(defwFile, "\n      + ANTENNAPINMAXSIDEAREACAR %d", value);
     if (!layerName)
-        return DEFW_BAD_DATA;  // layerName is required 
+        return DEFW_BAD_DATA;  // layerName is required
 
     fprintf(defwFile, " LAYER %s", layerName);
     defwLines++;
@@ -3112,8 +3112,8 @@ defwSpecialNetPathStart(const char *typ)
     if (!defwFile)
         return DEFW_UNINITIALIZED;
     if (!defwSpecialNetOptions() &&
-        (defwState != DEFW_SUBNET) && // path in subnet 
-        (defwState != DEFW_PATH))   // NEW in the path, path hasn't end yet 
+        (defwState != DEFW_SUBNET) && // path in subnet
+        (defwState != DEFW_PATH))   // NEW in the path, path hasn't end yet
         return DEFW_BAD_ORDER;
 
     if (strcmp(typ, "NEW") && strcmp(typ, "FIXED") && strcmp(typ, "COVER") &&
@@ -3366,9 +3366,9 @@ defwSpecialNetPathEnd()
 }
 
 
-int 
+int
 defwSpecialNetPolygon(const char* layerName,
-                     int num_polys, 
+                     int num_polys,
                      double* xl, double* yl) {
                               int i;
 
@@ -3388,10 +3388,10 @@ defwSpecialNetPolygon(const char* layerName,
                                       printPoints(defwFile, *xl++, *yl++, "", " ");
                                   else {
                                       printPoints(defwFile,  *xl++, *yl++, "\n                ", " ");
-                                      defwLines++; 
+                                      defwLines++;
                                   }
                               }
-                              defwLines++; 
+                              defwLines++;
                               return DEFW_OK;
 }
 
@@ -3775,7 +3775,7 @@ defwNetMustjoinConnection(const char    *inst,
     fprintf(defwFile, " - MUSTJOIN ( %s %s )", inst, pin);
 
   defwState = DEFW_NET;
-  
+
   defwCounter--;
 
     return DEFW_OK;
@@ -4154,8 +4154,8 @@ defwNetSubnetEnd()
     defwFunc = DEFW_SUBNET;   // Current function of writer
     if (!defwFile)
         return DEFW_UNINITIALIZED;
-    if ((defwState != DEFW_SUBNET) &&    // subnet does not have path 
-        (defwState != DEFW_NET_OPTIONS)) // subnet has path and path just ended 
+    if ((defwState != DEFW_SUBNET) &&    // subnet does not have path
+        (defwState != DEFW_NET_OPTIONS)) // subnet has path and path just ended
         return DEFW_BAD_ORDER;
     defwState = DEFW_NET_OPTIONS;
     return DEFW_OK;
@@ -4168,8 +4168,8 @@ defwNetPathStart(const char *typ)
     defwFunc = DEFW_PATH;   // Current function of writer
     if (!defwFile)
         return DEFW_UNINITIALIZED;
-    if (!defwNetOptions() && (defwState != DEFW_SUBNET) && // path in subnet 
-        (defwState != DEFW_PATH))      // NEW in the path, path hasn't end yet 
+    if (!defwNetOptions() && (defwState != DEFW_SUBNET) && // path in subnet
+        (defwState != DEFW_PATH))      // NEW in the path, path hasn't end yet
         return DEFW_BAD_ORDER;
 
     if (strcmp(typ, "NEW") && strcmp(typ, "FIXED") && strcmp(typ, "COVER") &&
@@ -4473,7 +4473,7 @@ defwEndNets()
         return DEFW_UNINITIALIZED;
     if (defwState != DEFW_NET_START && defwState != DEFW_NET_OPTIONS &&
         defwState != DEFW_NET &&
-        defwState != DEFW_NET_ENDNET) // last state is a net 
+        defwState != DEFW_NET_ENDNET) // last state is a net
         return DEFW_BAD_ORDER;
     if (defwCounter > 0)
         return DEFW_BAD_DATA;
@@ -5571,7 +5571,7 @@ defwBlockagesLayerMask(int colorMask)
 int
 defwBlockageLayer(const char    *layerName,
                   const char    *compName)
-{      // optional(NULL) 
+{      // optional(NULL)
     defwFunc = DEFW_BLOCKAGE_LAYER;   // Current function of writer
     if (!defwFile)
         return DEFW_UNINITIALIZED;
@@ -6760,7 +6760,7 @@ defwBeginextDate()
         defwState != DEFW_BEGINEXT)
         return DEFW_BAD_ORDER;
 
-    todayTime = time(NULL);             // time in UTC 
+    todayTime = time(NULL);             // time in UTC
     rettime = ctime(&todayTime);        // convert to string
     rettime[strlen(rettime) - 1] = '\0';  // replace \n with \0
     fprintf(defwFile, "   DATE \"%s\"", rettime);

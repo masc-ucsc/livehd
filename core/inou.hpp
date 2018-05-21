@@ -27,7 +27,7 @@ public:
   bool is_graph_name_provided() const;
 
   Inou_trivial() {}
-  explicit Inou_trivial(Options_pack opt) : opack(opt) {}
+  explicit Inou_trivial(Options_pack& opt) : opack(opt) {}
 
   std::vector<LGraph *> generate() override;
   void                  generate(std::vector<const LGraph *> &out) override;

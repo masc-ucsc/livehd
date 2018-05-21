@@ -28,7 +28,7 @@ private:
 
     Graph_Node() {}
 
-    bool operator<(const Graph_Node rhs) const {
+    bool operator<(const Graph_Node &rhs) const {
       return (module < rhs.module) ||
              (module == rhs.module && idx < rhs.idx) ||
              (module == rhs.module && idx == rhs.idx && pid < rhs.pid) ||

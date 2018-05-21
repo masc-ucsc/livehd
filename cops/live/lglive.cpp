@@ -27,7 +27,7 @@ int main(int argc, const char **argv) {
   Invariant_boundaries *boundaries;
   try {
     boundaries = Invariant_boundaries::deserialize(invariant_file);
-  } catch(std::exception e) {
+  } catch(const std::exception &e) {
     console->warn("There was an error de-serializing the boundaries file\n");
   }
   invariant_file.close();

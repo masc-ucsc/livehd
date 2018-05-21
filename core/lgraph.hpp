@@ -42,8 +42,8 @@ protected:
 
 public:
   LGraph() = delete;
-  LGraph(const std::string &path);
-  LGraph(const std::string &path, const std::string &name, bool clear);
+  explicit LGraph(const std::string &path);
+  explicit LGraph(const std::string &path, const std::string &name, bool clear);
 
   ~LGraph() {
     fmt::print("lgraph destructor\n");

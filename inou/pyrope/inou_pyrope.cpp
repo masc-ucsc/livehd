@@ -492,46 +492,12 @@ bool Inou_pyrope::to_subgraph(Out_string &w, Out_string &out, const LGraph *g, I
 
     w << "):{\n";
 
-#if 0
-    bm::bvector<> noinline;
-    // Inline if single output and not function call
-    for(auto idx:sg->forward()) {
-      const auto &op = sg->node_type_get(idx);
-
-      const auto &node = sg->get_node_int(idx);
-      if (node.get_num_outputs() > 1) {
-        noinline.set_bit(idx);
-      }else if (op.op == Flop_Op) {
-        noinline.set_bit(idx);
-      }else if (op.op == Mux_Op) {
-        noinline.set_bit(idx);
-      }
-    }
-    sg->each_output([&](Index_ID idx) {
-        noinline.erase_bit(idx);
-      }
-    );
-
-    sg->each_input([&](Index_ID idx) {
-        noinline.set_bit(idx);
-      }
-    );
-#endif
-
-    //inline_stmt.clear();
-    //
-    //sg->out_edges does not go over all output edges!
-
     for(auto &edge : sg->out_edges(idx)) {
       //out << sg->get_graph_output_name_from_pid(edge.get_out_pin().get_pid());
       //to_normal_var(w,sg,edge.get_idx());
       w << sg->get_graph_output_name(edge.get_idx());
-    } /*
-    for (auto &edge:sg->inp_edges(idx)) {
-      //out << sg->get_graph_input_name_from_pid(edge.get_inp_pin().get_pid());
-      //to_normal_var(w,sg,edge.get_idx());
-      w << sg->get_graph_input_name(edge.get_idx());
-    }*/
+    }
+
     for(auto idx : sg->forward()) {
 
       assert(sg->is_root(idx));
@@ -666,33 +632,6 @@ void Inou_pyrope::to_pyrope(const LGraph *g, const std::string filename) {
 
   Out_string w, sub;
   w << "# " << prp_file << ".prp file from " << g->get_name() << "\n";
-
-#if 0
-  bm::bvector<> noinline;
-  // Inline if single output and not function call
-  // this was using backward if things break
-  for(auto idx:g->forward()) {
-    const auto &op = g->node_type_get(idx);
-
-    const auto &node = g->get_node_int(idx);
-    if (node.get_num_outputs() > 1) {
-      noinline.set_bit(idx);
-    }else if (op.op == Flop_Op) {
-      noinline.set_bit(idx);
-    }else if (op.op == Mux_Op) {
-      noinline.set_bit(idx);
-    }
-  }
-  g->each_output([&](Index_ID idx) {
-      noinline.erase_bit(idx);
-      }
-  );
-
-  g->each_input([&](Index_ID idx) {
-      noinline.set_bit(idx);
-      }
-  );
-#endif
 
   inline_stmt.clear();
 
