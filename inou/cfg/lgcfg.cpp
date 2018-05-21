@@ -4,6 +4,7 @@
 #include "lgraph.hpp"
 
 #include "inou/cfg/inou_cfg.hpp"
+#include <vector>
 
 int main(int argc, const char **argv) {
 
