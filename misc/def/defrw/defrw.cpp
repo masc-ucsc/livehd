@@ -2551,7 +2551,8 @@ int cls(defrCallbackType_e c, void* cl, defiUserData ud) {
          if (td->hasMacroThru())
              fprintf(fout, "- MACRO %s THRUPIN %s %s ",
                      td->macroName(),
-                     td->fromPin());
+                     td->fromPin(),
+                     td->toPin());
          fprintf(fout, ";\n");
          break;
   case defrPartitionCbkType :

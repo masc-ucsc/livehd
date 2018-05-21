@@ -152,10 +152,10 @@ void Tech_library::load_json() {
       }
 
       for(const auto &inp : inputs) {
-        tcell->set_direction(tcell->add_pin(inp), Tech_cell::Direction::input);
+        tcell->add_pin(inp, Tech_cell::Direction::input);
       }
       for(const auto &oup : outputs) {
-        tcell->set_direction(tcell->add_pin(oup), Tech_cell::Direction::output);
+        tcell->add_pin(oup, Tech_cell::Direction::output);
       }
 
       inputs.clear();

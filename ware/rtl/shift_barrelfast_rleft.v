@@ -11,7 +11,7 @@ module shift_barrelfast_rleft
   output reg [Bits-1:0]     b
 );
 
- reg [Bits-1:0]             array [Bits-1:0];
+ wire [Bits-1:0]             array [Bits-1:0];
  reg [(2*Bits-1):0]         a_double;
 
  assign a_double = {a,a};
@@ -19,7 +19,7 @@ module shift_barrelfast_rleft
 // rotate left 
  genvar i;
  generate
-  for(i=0; i<Bits; i++)
+  for(i=0; i<Bits; i=i+1)
    begin
     assign array[i] = a_double[2*Bits-1-i:Bits-i];
    end

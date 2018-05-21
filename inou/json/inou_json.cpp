@@ -193,7 +193,7 @@ bool Inou_json::is_int(std::string s) {
   return !s.empty() && std::find_if(s.begin(), s.end(), [](char c) { return !std::isdigit(c); }) == s.end();
 }
 
-void Inou_json::to_json(const LGraph *g, const std::string filename) const {
+void Inou_json::to_json(const LGraph *g, const std::string& filename) const {
   rapidjson::StringBuffer                          s;
   rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(s);
   {

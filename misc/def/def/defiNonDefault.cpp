@@ -1,25 +1,25 @@
 // *****************************************************************************
 // *****************************************************************************
 // Copyright 2013 - 2015, Cadence Design Systems
-// 
+//
 // This  file  is  part  of  the  Cadence  LEF/DEF  Open   Source
-// Distribution,  Product Version 5.8. 
-// 
+// Distribution,  Product Version 5.8.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 //    you may not use this file except in compliance with the License.
 //    You may obtain a copy of the License at
-// 
+//
 //        http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 //    Unless required by applicable law or agreed to in writing, software
 //    distributed under the License is distributed on an "AS IS" BASIS,
 //    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 //    implied. See the License for the specific language governing
 //    permissions and limitations under the License.
-// 
+//
 // For updates, support, or to become part of the LEF/DEF Community,
 // check www.openeda.org for details.
-// 
+//
 //  $Author: dell $
 //  $Revision: #1 $
 //  $Date: 2017/06/06 $
@@ -44,11 +44,11 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
 /////////////////////////////////////////
 
 defiNonDefault::defiNonDefault(defrData *data)
-: defData(data) { 
+: defData(data) {
   Init();
 }
 
-void defiNonDefault::Init() { 
+void defiNonDefault::Init() {
   name_ = 0;
   hardSpacing_ = 0;
   numLayers_ = 0;
@@ -83,7 +83,7 @@ void defiNonDefault::Init() {
   wireExt_ = 0;
 }
 
-defiNonDefault::~defiNonDefault() { 
+defiNonDefault::~defiNonDefault() {
   Destroy();
 }
 
@@ -115,7 +115,7 @@ void defiNonDefault::Destroy() {
   }
 }
 
-void defiNonDefault::clear() { 
+void defiNonDefault::clear() {
   int i;
 
   if (name_)
@@ -141,7 +141,7 @@ void defiNonDefault::clear() {
   numMinCuts_ = 0;
 }
 
-void defiNonDefault::setName(const char* name) { 
+void defiNonDefault::setName(const char* name) {
   name_ = (char*)malloc(strlen(name)+1);
   strcpy(name_, defData->DEFCASE(name));
 }
@@ -150,7 +150,7 @@ void defiNonDefault::setHardspacing() {
   hardSpacing_ = 1;
 }
 
-void defiNonDefault::addLayer(const char* name) { 
+void defiNonDefault::addLayer(const char* name) {
   int len = strlen(name) + 1;
   if (numLayers_ == layersAllocated_) {
     int i;
@@ -216,21 +216,21 @@ void defiNonDefault::addLayer(const char* name) {
   numLayers_ += 1;
 }
 
-void defiNonDefault::addWidth(double num) { 
+void defiNonDefault::addWidth(double num) {
   width_[numLayers_-1] = num;
 }
 
-void defiNonDefault::addDiagWidth(double num) { 
+void defiNonDefault::addDiagWidth(double num) {
   diagWidth_[numLayers_-1] = num;
   hasDiagWidth_[numLayers_-1] = 1;
 }
 
-void defiNonDefault::addSpacing(double num) { 
+void defiNonDefault::addSpacing(double num) {
   spacing_[numLayers_-1] = num;
   hasSpacing_[numLayers_-1] = 1;
 }
 
-void defiNonDefault::addWireExt(double num) { 
+void defiNonDefault::addWireExt(double num) {
   wireExt_[numLayers_-1] = num;
   hasWireExt_[numLayers_-1] = 1;
 }
@@ -250,7 +250,7 @@ void defiNonDefault::addVia(const char* name) {
     }
     free((char*)(viaNames_));
     viaNames_ = vn;
-  } 
+  }
   viaNames_[numVias_] = (char*)malloc(strlen(name)+1);
   strcpy(viaNames_[numVias_], defData->DEFCASE(name));
   numVias_ += 1;
@@ -271,7 +271,7 @@ void defiNonDefault::addViaRule(const char* name) {
     }
     free((char*)(viaRuleNames_));
     viaRuleNames_ = vn;
-  } 
+  }
   viaRuleNames_[numViaRules_] = (char*)malloc(strlen(name)+1);
   strcpy(viaRuleNames_[numViaRules_], defData->DEFCASE(name));
   numViaRules_ += 1;
@@ -299,7 +299,7 @@ void defiNonDefault::addMinCuts(const char* name, int numCuts) {
     }
     cutLayerName_ = cln;
     numCuts_ = nc;
-  } 
+  }
   cutLayerName_[numMinCuts_] = (char*)malloc(strlen(name)+1);
   strcpy(cutLayerName_[numMinCuts_], defData->DEFCASE(name));
   numCuts_[numMinCuts_] = numCuts;
@@ -314,11 +314,11 @@ int defiNonDefault::hasHardspacing() const {
   return hardSpacing_;
 }
 
-int defiNonDefault::numLayers() const { 
+int defiNonDefault::numLayers() const {
   return numLayers_;
 }
 
-const char* defiNonDefault::layerName(int index) const { 
+const char* defiNonDefault::layerName(int index) const {
   char msg[160];
   if (index < 0 || index >= numLayers_) {
      sprintf (msg, "ERROR (DEFPARS-6090): The index number %d specified for the NONDEFAULT LAYER is invalid.\nValid index is from 0 to %d. Specify a valid index number and then try again.",
@@ -330,7 +330,7 @@ const char* defiNonDefault::layerName(int index) const {
 }
 
 // Will be obsoleted in 5.7
-double defiNonDefault::layerWidth(int index) const { 
+double defiNonDefault::layerWidth(int index) const {
   char msg[160];
   if (index < 0 || index >= numLayers_) {
      sprintf (msg, "ERROR (DEFPARS-6090): The index number %d specified for the NONDEFAULT LAYER is invalid.\nValid index is from 0 to %d. Specify a valid index number and then try again.",
@@ -341,7 +341,7 @@ double defiNonDefault::layerWidth(int index) const {
   return width_[index];
 }
 
-int defiNonDefault::layerWidthVal(int index) const { 
+int defiNonDefault::layerWidthVal(int index) const {
   char msg[160];
   if (index < 0 || index >= numLayers_) {
      sprintf (msg, "ERROR (DEFPARS-6090): The index number %d specified for the NONDEFAULT LAYER is invalid.\nValid index is from 0 to %d. Specify a valid index number and then try again.",
@@ -352,7 +352,7 @@ int defiNonDefault::layerWidthVal(int index) const {
   return (int)width_[index];
 }
 
-int defiNonDefault::hasLayerDiagWidth(int index) const { 
+int defiNonDefault::hasLayerDiagWidth(int index) const {
   char msg[160];
   if (index < 0 || index >= numLayers_) {
      sprintf (msg, "ERROR (DEFPARS-6090): The index number %d specified for the NONDEFAULT LAYER is invalid.\nValid index is from 0 to %d. Specify a valid index number and then try again.",
@@ -364,7 +364,7 @@ int defiNonDefault::hasLayerDiagWidth(int index) const {
 }
 
 // Will be obsoleted in 5.7
-double defiNonDefault::layerDiagWidth(int index) const { 
+double defiNonDefault::layerDiagWidth(int index) const {
   char msg[160];
   if (index < 0 || index >= numLayers_) {
      sprintf (msg, "ERROR (DEFPARS-6090): The index number %d specified for the NONDEFAULT LAYER is invalid.\nValid index is from 0 to %d. Specify a valid index number and then try again.",
@@ -375,7 +375,7 @@ double defiNonDefault::layerDiagWidth(int index) const {
   return diagWidth_[index];
 }
 
-int defiNonDefault::layerDiagWidthVal(int index) const { 
+int defiNonDefault::layerDiagWidthVal(int index) const {
   char msg[160];
   if (index < 0 || index >= numLayers_) {
      sprintf (msg, "ERROR (DEFPARS-6090): The index number %d specified for the NONDEFAULT LAYER is invalid.\nValid index is from 0 to %d. Specify a valid index number and then try again.",
@@ -386,7 +386,7 @@ int defiNonDefault::layerDiagWidthVal(int index) const {
   return (int)diagWidth_[index];
 }
 
-int defiNonDefault::hasLayerWireExt(int index) const { 
+int defiNonDefault::hasLayerWireExt(int index) const {
   char msg[160];
   if (index < 0 || index >= numLayers_) {
      sprintf (msg, "ERROR (DEFPARS-6090): The index number %d specified for the NONDEFAULT LAYER is invalid.\nValid index is from 0 to %d. Specify a valid index number and then try again.",
@@ -397,7 +397,7 @@ int defiNonDefault::hasLayerWireExt(int index) const {
   return hasWireExt_[index];
 }
 
-int defiNonDefault::hasLayerSpacing(int index) const { 
+int defiNonDefault::hasLayerSpacing(int index) const {
   char msg[160];
   if (index < 0 || index >= numLayers_) {
      sprintf (msg, "ERROR (DEFPARS-6090): The index number %d specified for the NONDEFAULT LAYER is invalid.\nValid index is from 0 to %d. Specify a valid index number and then try again.",
@@ -409,7 +409,7 @@ int defiNonDefault::hasLayerSpacing(int index) const {
 }
 
 // Will be obsoleted in 5.7
-double defiNonDefault::layerWireExt(int index) const { 
+double defiNonDefault::layerWireExt(int index) const {
   char msg[160];
   if (index < 0 || index >= numLayers_) {
      sprintf (msg, "ERROR (DEFPARS-6090): The index number %d specified for the NONDEFAULT LAYER is invalid.\nValid index is from 0 to %d. Specify a valid index number and then try again.",
@@ -420,7 +420,7 @@ double defiNonDefault::layerWireExt(int index) const {
   return wireExt_[index];
 }
 
-int defiNonDefault::layerWireExtVal(int index) const { 
+int defiNonDefault::layerWireExtVal(int index) const {
   char msg[160];
   if (index < 0 || index >= numLayers_) {
      sprintf (msg, "ERROR (DEFPARS-6090): The index number %d specified for the NONDEFAULT LAYER is invalid.\nValid index is from 0 to %d. Specify a valid index number and then try again.",
@@ -432,7 +432,7 @@ int defiNonDefault::layerWireExtVal(int index) const {
 }
 
 // Will be obsoleted in 5.7
-double defiNonDefault::layerSpacing(int index) const { 
+double defiNonDefault::layerSpacing(int index) const {
   char msg[160];
   if (index < 0 || index >= numLayers_) {
      sprintf (msg, "ERROR (DEFPARS-6090): The index number %d specified for the NONDEFAULT LAYER is invalid.\nValid index is from 0 to %d. Specify a valid index number and then try again.",
@@ -443,7 +443,7 @@ double defiNonDefault::layerSpacing(int index) const {
   return spacing_[index];
 }
 
-int defiNonDefault::layerSpacingVal(int index) const { 
+int defiNonDefault::layerSpacingVal(int index) const {
   char msg[160];
   if (index < 0 || index >= numLayers_) {
      sprintf (msg, "ERROR (DEFPARS-6090): The index number %d specified for the NONDEFAULT LAYER is invalid.\nValid index is from 0 to %d. Specify a valid index number and then try again.",
@@ -454,7 +454,7 @@ int defiNonDefault::layerSpacingVal(int index) const {
   return (int)spacing_[index];
 }
 
-int defiNonDefault::numVias() const { 
+int defiNonDefault::numVias() const {
   return numVias_;
 }
 
@@ -469,7 +469,7 @@ const char* defiNonDefault::viaName(int index) const {
   return viaNames_[index];
 }
 
-int defiNonDefault::numViaRules() const { 
+int defiNonDefault::numViaRules() const {
   return numViaRules_;
 }
 
@@ -510,11 +510,11 @@ int defiNonDefault::numCuts(int index) const {
   return numCuts_[index];
 }
 
-void defiNonDefault::print(FILE* f) const { 
+void defiNonDefault::print(FILE* f) const {
   int   i;
 
   fprintf(f, "nondefaultrule %s\n", name());
-  
+
   fprintf(f, "%d layers   %d vias   %d viarules   %d mincuts\n",
     numLayers(),
     numVias(),
@@ -560,7 +560,7 @@ void defiNonDefault::addProperty(const char* name, const char* value,
     double* nd;
     char*   nt;
 
-    if (propsAllocated_ == 0) 
+    if (propsAllocated_ == 0)
       max = propsAllocated_ = 2;
     else
       max = propsAllocated_ *= 2;
@@ -605,7 +605,7 @@ void defiNonDefault::addNumProperty(const char* name, const double d,
     double* nd;
     char*   nt;
 
-    if (propsAllocated_ == 0) 
+    if (propsAllocated_ == 0)
       max = propsAllocated_ = 2;
     else
       max = propsAllocated_ *= 2;
