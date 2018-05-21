@@ -78,7 +78,7 @@
 #include "lex.h"
 
 #define DEF_MAX_INT 2147483647
-#define YYDEBUG 1     // this is temp fix for pcr 755132 
+#define YYDEBUG 1     // this is temp fix for pcr 755132
 // TX_DIR:TRANSLATION ON
 
 
@@ -2957,10 +2957,10 @@ yyreduce:
           defData->names_case_sensitive = 1;
           if (defData->callbacks->CaseSensitiveCbk)
             CALLBACK(defData->callbacks->CaseSensitiveCbk, defrCaseSensitiveCbkType,
-                     defData->names_case_sensitive); 
+                     defData->names_case_sensitive);
           defData->hasNameCase = 1;
         } else
-          if (defData->callbacks->CaseSensitiveCbk) // write error only if cbk is set 
+          if (defData->callbacks->CaseSensitiveCbk) // write error only if cbk is set
              if (defData->caseSensitiveWarnings++ < defData->settings->CaseSensitiveWarnings)
                defData->defWarning(7011, "The NAMESCASESENSITIVE statement is obsolete in version 5.6 and later.\nThe DEF parser will ignore this statement.");
       }
@@ -2977,7 +2977,7 @@ yyreduce:
                      defData->names_case_sensitive);
           defData->hasNameCase = 1;
         } else {
-          if (defData->callbacks->CaseSensitiveCbk) { // write error only if cbk is set 
+          if (defData->callbacks->CaseSensitiveCbk) { // write error only if cbk is set
             if (defData->caseSensitiveWarnings++ < defData->settings->CaseSensitiveWarnings) {
               defData->defError(6504, "Def parser version 5.7 and later does not support NAMESCASESENSITIVE OFF.\nEither remove this optional construct or set it to ON.");
               CHKERR();
@@ -3018,7 +3018,7 @@ yyreduce:
             if (!defData->hasVer) {
               char temp[300];
               sprintf(temp, "No VERSION statement found, using the default value %2g.", defData->VersionNum);
-              defData->defWarning(7012, temp);            
+              defData->defWarning(7012, temp);
             }
             if (!defData->hasNameCase && defData->VersionNum < 5.6)
               defData->defWarning(7013, "The DEF file is invalid if NAMESCASESENSITIVE is undefined.\nNAMESCASESENSITIVE is a mandatory statement in the DEF file with version 5.6 and earlier.\nTo define the NAMESCASESENSITIVE statement, refer to the LEF/DEF 5.5 and earlier Language Reference manual.");
@@ -3040,7 +3040,7 @@ yyreduce:
 
   case 55:
 #line 334 "def.y" /* yacc.c:1646  */
-    { 
+    {
             if (defData->callbacks->TechnologyCbk)
               CALLBACK(defData->callbacks->TechnologyCbk, defrTechNameCbkType, (yyvsp[-1].string));
           }
@@ -3055,7 +3055,7 @@ yyreduce:
 
   case 57:
 #line 340 "def.y" /* yacc.c:1646  */
-    { 
+    {
             if (defData->callbacks->ArrayNameCbk)
               CALLBACK(defData->callbacks->ArrayNameCbk, defrArrayNameCbkType, (yyvsp[-1].string));
           }
@@ -3070,7 +3070,7 @@ yyreduce:
 
   case 59:
 #line 346 "def.y" /* yacc.c:1646  */
-    { 
+    {
             if (defData->callbacks->FloorPlanNameCbk)
               CALLBACK(defData->callbacks->FloorPlanNameCbk, defrFloorPlanNameCbkType, (yyvsp[-1].string));
           }
@@ -3079,7 +3079,7 @@ yyreduce:
 
   case 60:
 #line 352 "def.y" /* yacc.c:1646  */
-    { 
+    {
             if (defData->callbacks->HistoryCbk)
               CALLBACK(defData->callbacks->HistoryCbk, defrHistoryCbkType, &defData->History_text[0]);
           }
@@ -3097,10 +3097,10 @@ yyreduce:
 
   case 62:
 #line 363 "def.y" /* yacc.c:1646  */
-    { 
+    {
             if (defData->callbacks->PropDefEndCbk)
               CALLBACK(defData->callbacks->PropDefEndCbk, defrPropDefEndCbkType, 0);
-            defData->real_num = 0;     // just want to make sure it is reset 
+            defData->real_num = 0;     // just want to make sure it is reset
           }
 #line 3106 "def.tab.c" /* yacc.c:1646  */
     break;
@@ -3266,7 +3266,7 @@ yyreduce:
     {
               if (defData->VersionNum < 5.6) {
                 if (defData->nonDefaultWarnings++ < defData->settings->NonDefaultWarnings) {
-                  defData->defMsg = (char*)malloc(1000); 
+                  defData->defMsg = (char*)malloc(1000);
                   sprintf (defData->defMsg,
                      "The NONDEFAULTRULE statement is available in version 5.6 and later.\nHowever, your DEF file is defined with version %g.", defData->VersionNum);
                   defData->defError(6505, defData->defMsg);
@@ -3377,7 +3377,7 @@ yyreduce:
 
   case 95:
 #line 517 "def.y" /* yacc.c:1646  */
-    { 
+    {
             if (defData->callbacks->BusBitCbk)
               CALLBACK(defData->callbacks->BusBitCbk, defrBusBitCbkType, (yyvsp[-1].string));
             defData->hasBusBit = 1;
@@ -3507,7 +3507,7 @@ yyreduce:
              if (defData->callbacks->DefaultCapCbk)
                 CALLBACK(defData->callbacks->DefaultCapCbk, defrDefaultCapCbkType, ROUND((yyvsp[0].dval)));
           } else {
-             if (defData->callbacks->DefaultCapCbk) // write error only if cbk is set 
+             if (defData->callbacks->DefaultCapCbk) // write error only if cbk is set
                 if (defData->defaultCapWarnings++ < defData->settings->DefaultCapWarnings)
                    defData->defWarning(7017, "The DEFAULTCAP statement is obsolete in version 5.4 and later.\nThe DEF parser will ignore this statement.");
           }
@@ -3543,7 +3543,7 @@ yyreduce:
 
   case 117:
 #line 607 "def.y" /* yacc.c:1646  */
-    { 
+    {
             if (defData->callbacks->StartPinsCbk)
               CALLBACK(defData->callbacks->StartPinsCbk, defrStartPinsCbkType, ROUND((yyvsp[-1].dval)));
           }
@@ -3575,7 +3575,7 @@ yyreduce:
 
   case 123:
 #line 625 "def.y" /* yacc.c:1646  */
-    { 
+    {
             if (defData->callbacks->PinCbk)
               CALLBACK(defData->callbacks->PinCbk, defrPinCbkType, &defData->Pin);
           }
@@ -3593,7 +3593,7 @@ yyreduce:
 
   case 127:
 #line 640 "def.y" /* yacc.c:1646  */
-    { 
+    {
             if (defData->callbacks->PinExtCbk)
               CALLBACK(defData->callbacks->PinExtCbk, defrPinExtCbkType, &defData->History_text[0]);
           }
@@ -3784,8 +3784,8 @@ yyreduce:
                    defData->Pin.addPolygon((yyvsp[0].string));
               }
             }
-            
-            defData->Geometries.Reset();            
+
+            defData->Geometries.Reset();
           }
 #line 3791 "def.tab.c" /* yacc.c:1646  */
     break;
@@ -3871,7 +3871,7 @@ yyreduce:
               }
             }
             if (defData->callbacks->PinCbk || defData->callbacks->PinExtCbk)
-              defData->Pin.addAPinPartialMetalArea((int)(yyvsp[-1].dval), (yyvsp[0].string)); 
+              defData->Pin.addAPinPartialMetalArea((int)(yyvsp[-1].dval), (yyvsp[0].string));
           }
 #line 3877 "def.tab.c" /* yacc.c:1646  */
     break;
@@ -3893,7 +3893,7 @@ yyreduce:
               }
             }
             if (defData->callbacks->PinCbk || defData->callbacks->PinExtCbk)
-              defData->Pin.addAPinPartialMetalSideArea((int)(yyvsp[-1].dval), (yyvsp[0].string)); 
+              defData->Pin.addAPinPartialMetalSideArea((int)(yyvsp[-1].dval), (yyvsp[0].string));
           }
 #line 3899 "def.tab.c" /* yacc.c:1646  */
     break;
@@ -3915,7 +3915,7 @@ yyreduce:
               }
             }
               if (defData->callbacks->PinCbk || defData->callbacks->PinExtCbk)
-                defData->Pin.addAPinGateArea((int)(yyvsp[-1].dval), (yyvsp[0].string)); 
+                defData->Pin.addAPinGateArea((int)(yyvsp[-1].dval), (yyvsp[0].string));
             }
 #line 3921 "def.tab.c" /* yacc.c:1646  */
     break;
@@ -3937,7 +3937,7 @@ yyreduce:
               }
             }
             if (defData->callbacks->PinCbk || defData->callbacks->PinExtCbk)
-              defData->Pin.addAPinDiffArea((int)(yyvsp[-1].dval), (yyvsp[0].string)); 
+              defData->Pin.addAPinDiffArea((int)(yyvsp[-1].dval), (yyvsp[0].string));
           }
 #line 3943 "def.tab.c" /* yacc.c:1646  */
     break;
@@ -3965,7 +3965,7 @@ yyreduce:
               }
             }
             if (defData->callbacks->PinCbk || defData->callbacks->PinExtCbk)
-              defData->Pin.addAPinMaxAreaCar((int)(yyvsp[-3].dval), (yyvsp[0].string)); 
+              defData->Pin.addAPinMaxAreaCar((int)(yyvsp[-3].dval), (yyvsp[0].string));
           }
 #line 3971 "def.tab.c" /* yacc.c:1646  */
     break;
@@ -3993,7 +3993,7 @@ yyreduce:
               }
             }
             if (defData->callbacks->PinCbk || defData->callbacks->PinExtCbk)
-              defData->Pin.addAPinMaxSideAreaCar((int)(yyvsp[-3].dval), (yyvsp[0].string)); 
+              defData->Pin.addAPinMaxSideAreaCar((int)(yyvsp[-3].dval), (yyvsp[0].string));
           }
 #line 3999 "def.tab.c" /* yacc.c:1646  */
     break;
@@ -4015,7 +4015,7 @@ yyreduce:
               }
             }
             if (defData->callbacks->PinCbk || defData->callbacks->PinExtCbk)
-              defData->Pin.addAPinPartialCutArea((int)(yyvsp[-1].dval), (yyvsp[0].string)); 
+              defData->Pin.addAPinPartialCutArea((int)(yyvsp[-1].dval), (yyvsp[0].string));
           }
 #line 4021 "def.tab.c" /* yacc.c:1646  */
     break;
@@ -4043,14 +4043,14 @@ yyreduce:
               }
             }
             if (defData->callbacks->PinCbk || defData->callbacks->PinExtCbk)
-              defData->Pin.addAPinMaxCutCar((int)(yyvsp[-3].dval), (yyvsp[0].string)); 
+              defData->Pin.addAPinMaxCutCar((int)(yyvsp[-3].dval), (yyvsp[0].string));
           }
 #line 4049 "def.tab.c" /* yacc.c:1646  */
     break;
 
   case 156:
 #line 976 "def.y" /* yacc.c:1646  */
-    {  // 5.5 syntax 
+    {  // 5.5 syntax
             if (defData->VersionNum < 5.5) {
               if (defData->callbacks->PinCbk || defData->callbacks->PinExtCbk) {
                 if ((defData->pinWarnings++ < defData->settings->PinWarnings) &&
@@ -4070,7 +4070,7 @@ yyreduce:
 
   case 158:
 #line 994 "def.y" /* yacc.c:1646  */
-    { 
+    {
            if (defData->validateMaskInput((int)(yyvsp[0].dval), defData->pinWarnings, defData->settings->PinWarnings)) {
               if (defData->callbacks->PinCbk || defData->callbacks->PinExtCbk) {
                 if (defData->hasPort)
@@ -4091,7 +4091,7 @@ yyreduce:
 
   case 160:
 #line 1009 "def.y" /* yacc.c:1646  */
-    { 
+    {
            if (defData->validateMaskInput((int)(yyvsp[0].dval), defData->pinWarnings, defData->settings->PinWarnings)) {
              (yyval.integer) = (yyvsp[0].dval);
            }
@@ -4101,7 +4101,7 @@ yyreduce:
 
   case 162:
 #line 1017 "def.y" /* yacc.c:1646  */
-    { 
+    {
            if (defData->validateMaskInput((int)(yyvsp[0].dval), defData->pinWarnings, defData->settings->PinWarnings)) {
               if (defData->callbacks->PinCbk || defData->callbacks->PinExtCbk) {
                 if (defData->hasPort)
@@ -4326,7 +4326,7 @@ yyreduce:
 
   case 184:
 #line 1170 "def.y" /* yacc.c:1646  */
-    { 
+    {
           if (defData->callbacks->PinEndCbk)
             CALLBACK(defData->callbacks->PinEndCbk, defrPinEndCbkType, 0);
         }
@@ -4353,7 +4353,7 @@ yyreduce:
   case 187:
 #line 1185 "def.y" /* yacc.c:1646  */
     {
-          if (defData->callbacks->RowCbk) 
+          if (defData->callbacks->RowCbk)
             CALLBACK(defData->callbacks->RowCbk, defrRowCbkType, &defData->Row);
         }
 #line 4360 "def.tab.c" /* yacc.c:1646  */
@@ -4377,16 +4377,16 @@ yyreduce:
   case 189:
 #line 1202 "def.y" /* yacc.c:1646  */
     {
-          // 06/05/2002 - pcr 448455 
-          // Check for 1 and 0 in the correct position 
-          // 07/26/2002 - Commented out due to pcr 459218 
+          // 06/05/2002 - pcr 448455
+          // Check for 1 and 0 in the correct position
+          // 07/26/2002 - Commented out due to pcr 459218
           if (defData->hasDoStep) {
-            // 04/29/2004 - pcr 695535 
-            // changed the testing 
+            // 04/29/2004 - pcr 695535
+            // changed the testing
             if ((((yyvsp[-1].dval) == 1) && (defData->yStep == 0)) ||
                 (((yyvsp[-3].dval) == 1) && (defData->xStep == 0))) {
-              // do nothing 
-            } else 
+              // do nothing
+            } else
               if (defData->VersionNum < 5.6) {
                 if (defData->callbacks->RowCbk) {
                   if (defData->rowWarnings++ < defData->settings->RowWarnings) {
@@ -4399,7 +4399,7 @@ yyreduce:
                   }
               }
           }
-          // pcr 459218 - Error if at least numX or numY does not equal 1 
+          // pcr 459218 - Error if at least numX or numY does not equal 1
           if (((yyvsp[-3].dval) != 1) && ((yyvsp[-1].dval) != 1)) {
             if (defData->callbacks->RowCbk) {
               if (defData->rowWarnings++ < defData->settings->RowWarnings) {
@@ -4453,7 +4453,7 @@ yyreduce:
              char* str = defData->ringCopy("                       ");
              propTp =  defData->session->RowProp.propType((yyvsp[-1].string));
              CHKPROPTYPE(propTp, (yyvsp[-1].string), "ROW");
-             // For backword compatibility, also set the string value 
+             // For backword compatibility, also set the string value
              sprintf(str, "%g", (yyvsp[0].dval));
              defData->Row.addNumProperty((yyvsp[-1].string), (yyvsp[0].dval), str, propTp);
           }
@@ -4550,7 +4550,7 @@ yyreduce:
 
   case 208:
 #line 1341 "def.y" /* yacc.c:1646  */
-    { 
+    {
               if (defData->validateMaskInput((int)(yyvsp[-1].dval), defData->trackWarnings, defData->settings->TrackWarnings)) {
                   if (defData->callbacks->TrackCbk) {
                     defData->Track.addMask((yyvsp[-1].dval), (yyvsp[0].integer));
@@ -4681,7 +4681,7 @@ yyreduce:
 
   case 230:
 #line 1437 "def.y" /* yacc.c:1646  */
-    { 
+    {
               if (defData->callbacks->ViaCbk)
                 if (defData->validateMaskInput((yyvsp[-2].integer), defData->viaWarnings, defData->settings->ViaWarnings)) {
                     defData->Via.addLayer((yyvsp[-3].string), (yyvsp[-1].pt).x, (yyvsp[-1].pt).y, (yyvsp[0].pt).x, (yyvsp[0].pt).y, (yyvsp[-2].integer));
@@ -4711,9 +4711,9 @@ yyreduce:
                   }
                 }
               }
-              
+
               defData->Geometries.Reset();
-              
+
             }
 #line 4719 "def.tab.c" /* yacc.c:1646  */
     break;
@@ -4746,7 +4746,7 @@ yyreduce:
               } else
                 if (defData->callbacks->ViaCbk)
                   if (defData->viaWarnings++ < defData->settings->ViaWarnings)
-                    defData->defWarning(7019, "The PATTERNNAME statement is obsolete in version 5.6 and later.\nThe DEF parser will ignore this statement."); 
+                    defData->defWarning(7019, "The PATTERNNAME statement is obsolete in version 5.6 and later.\nThe DEF parser will ignore this statement.");
             }
 #line 4752 "def.tab.c" /* yacc.c:1646  */
     break;
@@ -4782,7 +4782,7 @@ yyreduce:
                 if (defData->callbacks->ViaCbk)
                    defData->Via.addViaRule((yyvsp[-20].string), (int)(yyvsp[-17].dval), (int)(yyvsp[-16].dval), (yyvsp[-12].string), (yyvsp[-11].string),
                                              (yyvsp[-10].string), (int)(yyvsp[-7].dval), (int)(yyvsp[-6].dval), (int)(yyvsp[-3].dval),
-                                             (int)(yyvsp[-2].dval), (int)(yyvsp[-1].dval), (int)(yyvsp[0].dval)); 
+                                             (int)(yyvsp[-2].dval), (int)(yyvsp[-1].dval), (int)(yyvsp[0].dval));
               }
             }
 #line 4789 "def.tab.c" /* yacc.c:1646  */
@@ -4790,7 +4790,7 @@ yyreduce:
 
   case 240:
 #line 1507 "def.y" /* yacc.c:1646  */
-    { 
+    {
             if (defData->callbacks->ViaExtCbk)
               CALLBACK(defData->callbacks->ViaExtCbk, defrViaExtCbkType, &defData->History_text[0]);
           }
@@ -4933,7 +4933,7 @@ yyreduce:
 
   case 256:
 #line 1602 "def.y" /* yacc.c:1646  */
-    { 
+    {
           if (defData->callbacks->ViaEndCbk)
             CALLBACK(defData->callbacks->ViaEndCbk, defrViaEndCbkType, 0);
         }
@@ -5037,7 +5037,7 @@ yyreduce:
              char* str = defData->ringCopy("                       ");
              propTp = defData->session->RegionProp.propType((yyvsp[-1].string));
              CHKPROPTYPE(propTp, (yyvsp[-1].string), "REGION");
-             // For backword compatibility, also set the string value 
+             // For backword compatibility, also set the string value
              // We will use a temporary string to store the number.
              // The string space is borrowed from the ring buffer
              // in the lexer.
@@ -5108,7 +5108,7 @@ yyreduce:
 
   case 280:
 #line 1727 "def.y" /* yacc.c:1646  */
-    { 
+    {
             if (defData->callbacks->ComponentStartCbk)
               CALLBACK(defData->callbacks->ComponentStartCbk, defrComponentStartCbkType,
                        ROUND((yyvsp[-1].dval)));
@@ -5285,11 +5285,11 @@ yyreduce:
 
   case 321:
 #line 1840 "def.y" /* yacc.c:1646  */
-    { 
-          // 11/12/2002 - this is obsolete in 5.5, & will be ignored 
+    {
+          // 11/12/2002 - this is obsolete in 5.5, & will be ignored
           if (defData->VersionNum < 5.5) {
             if (defData->callbacks->ComponentCbk)
-               defData->Component.setRegionBounds((yyvsp[-1].pt).x, (yyvsp[-1].pt).y, 
+               defData->Component.setRegionBounds((yyvsp[-1].pt).x, (yyvsp[-1].pt).y,
                                                             (yyvsp[0].pt).x, (yyvsp[0].pt).y);
           }
           else
@@ -5300,8 +5300,8 @@ yyreduce:
 
   case 322:
 #line 1851 "def.y" /* yacc.c:1646  */
-    { 
-          // 11/12/2002 - this is obsolete in 5.5, & will be ignored 
+    {
+          // 11/12/2002 - this is obsolete in 5.5, & will be ignored
           if (defData->VersionNum < 5.5) {
             if (defData->callbacks->ComponentCbk)
                defData->Component.setRegionBounds((yyvsp[-1].pt).x, (yyvsp[-1].pt).y,
@@ -5460,7 +5460,7 @@ yyreduce:
 
   case 338:
 #line 1968 "def.y" /* yacc.c:1646  */
-    { 
+    {
           if (defData->VersionNum < 5.6) {
             if (defData->callbacks->ComponentCbk) {
               defData->Component.setForeignName((yyvsp[-2].string));
@@ -5511,7 +5511,7 @@ yyreduce:
   case 343:
 #line 2001 "def.y" /* yacc.c:1646  */
     {
-          if (defData->VersionNum < 5.4) {   // PCR 495463 
+          if (defData->VersionNum < 5.4) {   // PCR 495463
             if (defData->callbacks->ComponentCbk) {
               defData->Component.setPlacementStatus(
                                           DEFI_COMPONENT_UNPLACED);
@@ -5533,7 +5533,7 @@ yyreduce:
 
   case 345:
 #line 2016 "def.y" /* yacc.c:1646  */
-    {  
+    {
           if (defData->callbacks->ComponentCbk) {
             if (defData->validateMaskShiftInput((yyvsp[0].string), defData->componentWarnings, defData->settings->ComponentWarnings)) {
                 defData->Component.setMaskShift((yyvsp[0].string));
@@ -5572,7 +5572,7 @@ yyreduce:
 
   case 350:
 #line 2038 "def.y" /* yacc.c:1646  */
-    { 
+    {
           if (defData->callbacks->ComponentCbk)
             CALLBACK(defData->callbacks->ComponentEndCbk, defrComponentEndCbkType, 0);
         }
@@ -5581,7 +5581,7 @@ yyreduce:
 
   case 352:
 #line 2047 "def.y" /* yacc.c:1646  */
-    { 
+    {
           if (defData->callbacks->NetStartCbk)
             CALLBACK(defData->callbacks->NetStartCbk, defrNetStartCbkType, ROUND((yyvsp[-1].dval)));
           defData->netOsnet = 1;
@@ -5591,7 +5591,7 @@ yyreduce:
 
   case 355:
 #line 2058 "def.y" /* yacc.c:1646  */
-    { 
+    {
           if (defData->callbacks->NetCbk)
             CALLBACK(defData->callbacks->NetCbk, defrNetCbkType, &defData->Net);
         }
@@ -5613,8 +5613,8 @@ yyreduce:
   case 359:
 #line 2075 "def.y" /* yacc.c:1646  */
     {
-          // 9/22/1999 
-          // this is shared by both net and special net 
+          // 9/22/1999
+          // this is shared by both net and special net
           if ((defData->callbacks->NetCbk && (defData->netOsnet==1)) || (defData->callbacks->SNetCbk && (defData->netOsnet==2)))
             defData->Net.setName((yyvsp[0].string));
           if (defData->callbacks->NetNameCbk)
@@ -5649,14 +5649,14 @@ yyreduce:
   case 366:
 #line 2097 "def.y" /* yacc.c:1646  */
     {
-          // 9/22/1999 
-          // since the code is shared by both net & special net, 
-          // need to check on both flags 
+          // 9/22/1999
+          // since the code is shared by both net & special net,
+          // need to check on both flags
           if ((defData->callbacks->NetCbk && (defData->netOsnet==1)) || (defData->callbacks->SNetCbk && (defData->netOsnet==2)))
             defData->Net.addPin((yyvsp[-4].string), (yyvsp[-2].string), (yyvsp[-1].integer));
-          // 1/14/2000 - pcr 289156 
-          // reset defData->dumb_mode & defData->no_num to 3 , just in case 
-          // the next statement is another net_connection 
+          // 1/14/2000 - pcr 289156
+          // reset defData->dumb_mode & defData->no_num to 3 , just in case
+          // the next statement is another net_connection
           defData->dumb_mode = 3;
           defData->no_num = 3;
         }
@@ -5722,7 +5722,7 @@ yyreduce:
 
   case 376:
 #line 2143 "def.y" /* yacc.c:1646  */
-    {  
+    {
           if (defData->callbacks->NetCbk) defData->Net.addWire((yyvsp[0].string), NULL);
         }
 #line 5729 "def.tab.c" /* yacc.c:1646  */
@@ -5855,13 +5855,13 @@ yyreduce:
 
   case 391:
 #line 2221 "def.y" /* yacc.c:1646  */
-    { 
+    {
           if (defData->callbacks->NetCbk && defData->callbacks->NetNonDefaultRuleCbk) {
-             // User wants a callback on nondefaultrule 
+             // User wants a callback on nondefaultrule
              CALLBACK(defData->callbacks->NetNonDefaultRuleCbk,
                       defrNetNonDefaultRuleCbkType, (yyvsp[0].string));
           }
-          // Still save data in the class 
+          // Still save data in the class
           if (defData->callbacks->NetCbk) defData->Net.setNonDefaultRule((yyvsp[0].string));
         }
 #line 5868 "def.tab.c" /* yacc.c:1646  */
@@ -5887,9 +5887,9 @@ yyreduce:
 
   case 396:
 #line 2237 "def.y" /* yacc.c:1646  */
-    { // since the parser still support 5.3 and earlier, can't 
-          // move NOSHIELD in net_type 
-          if (defData->VersionNum < 5.4) {   // PCR 445209 
+    { // since the parser still support 5.3 and earlier, can't
+          // move NOSHIELD in net_type
+          if (defData->VersionNum < 5.4) {   // PCR 445209
             if (defData->callbacks->NetCbk) defData->Net.addNoShield("");
             defData->by_is_keyword = FALSE;
             defData->do_is_keyword = FALSE;
@@ -5899,7 +5899,7 @@ yyreduce:
             defData->virtual_is_keyword = FALSE;
             defData->mask_is_keyword = FALSE;
             defData->rect_is_keyword = FALSE;
-            defData->shield = TRUE;    // save the path info in the defData->shield paths 
+            defData->shield = TRUE;    // save the path info in the defData->shield paths
           } else
             if (defData->callbacks->NetCbk) defData->Net.addWire("NOSHIELD", NULL);
         }
@@ -5909,7 +5909,7 @@ yyreduce:
   case 397:
 #line 2254 "def.y" /* yacc.c:1646  */
     {
-          if (defData->VersionNum < 5.4) {   // PCR 445209 
+          if (defData->VersionNum < 5.4) {   // PCR 445209
             defData->shield = FALSE;
             defData->by_is_keyword = FALSE;
             defData->do_is_keyword = FALSE;
@@ -5952,10 +5952,10 @@ yyreduce:
 #line 2288 "def.y" /* yacc.c:1646  */
     {
           if (defData->callbacks->NetCbk && defData->callbacks->NetSubnetNameCbk) {
-            // User wants a callback on Net subnetName 
+            // User wants a callback on Net subnetName
             CALLBACK(defData->callbacks->NetSubnetNameCbk, defrNetSubnetNameCbkType, (yyvsp[0].string));
           }
-          // Still save the subnet name in the class 
+          // Still save the subnet name in the class
           if (defData->callbacks->NetCbk) {
             defData->Subnet->setName((yyvsp[0].string));
           }
@@ -6001,7 +6001,7 @@ yyreduce:
 
   case 404:
 #line 2317 "def.y" /* yacc.c:1646  */
-    { 
+    {
           if (defData->callbacks->NetExtCbk)
             CALLBACK(defData->callbacks->NetExtCbk, defrNetExtCbkType, &defData->History_text[0]);
         }
@@ -6082,7 +6082,7 @@ yyreduce:
   case 415:
 #line 2368 "def.y" /* yacc.c:1646  */
     {
-          // vpin_options may have to deal with orient 
+          // vpin_options may have to deal with orient
           defData->orient_is_keyword = TRUE;
         }
 #line 6089 "def.tab.c" /* yacc.c:1646  */
@@ -6201,11 +6201,11 @@ yyreduce:
               CHKERR();
             }
           }
-          // Since there is already error, the next token is insignificant 
+          // Since there is already error, the next token is insignificant
           defData->dumb_mode = 1; defData->no_num = 1;
         } else {
-          // CCR 766289 - Do not accummulate the layer information if there 
-          // is not a callback set 
+          // CCR 766289 - Do not accummulate the layer information if there
+          // is not a callback set
           if (defData->NeedPathData && defData->callbacks->NetCbk)
               defData->PathObj.addLayer((yyvsp[0].string));
           defData->dumb_mode = 0; defData->no_num = 0;
@@ -6220,7 +6220,7 @@ yyreduce:
 /*
        dumb_mode = 1; by_is_keyword = TRUE; do_is_keyword = TRUE;
 */
-        defData->new_is_keyword = TRUE; defData->step_is_keyword = TRUE; 
+        defData->new_is_keyword = TRUE; defData->step_is_keyword = TRUE;
         defData->orient_is_keyword = TRUE; defData->virtual_is_keyword = TRUE;
         defData->mask_is_keyword = TRUE, defData->rect_is_keyword = TRUE;  }
 #line 6227 "def.tab.c" /* yacc.c:1646  */
@@ -6317,7 +6317,7 @@ yyreduce:
 
   case 444:
 #line 2523 "def.y" /* yacc.c:1646  */
-    { 
+    {
         if (defData->validateMaskInput((int)(yyvsp[-2].dval), defData->sNetWarnings, defData->settings->SNetWarnings)) {
             if (defData->NeedPathData && ((defData->callbacks->NetCbk && (defData->netOsnet==1)) ||
                 (defData->callbacks->SNetCbk && (defData->netOsnet==2)))) {
@@ -6333,7 +6333,7 @@ yyreduce:
   case 445:
 #line 2534 "def.y" /* yacc.c:1646  */
     {
-        if (defData->validateMaskInput((int)(yyvsp[-8].dval), defData->sNetWarnings, defData->settings->SNetWarnings)) {      
+        if (defData->validateMaskInput((int)(yyvsp[-8].dval), defData->sNetWarnings, defData->settings->SNetWarnings)) {
             if (((yyvsp[-5].dval) == 0) || ((yyvsp[-3].dval) == 0)) {
               if (defData->NeedPathData &&
                   defData->callbacks->SNetCbk) {
@@ -6362,7 +6362,7 @@ yyreduce:
 #line 2558 "def.y" /* yacc.c:1646  */
     {
         if (defData->VersionNum < 5.5) {
-          if (defData->NeedPathData && 
+          if (defData->NeedPathData &&
               defData->callbacks->SNetCbk) {
             if (defData->netWarnings++ < defData->settings->NetWarnings) {
               defData->defMsg = (char*)malloc(1000);
@@ -6448,7 +6448,7 @@ yyreduce:
               }
             }
             if (defData->NeedPathData && (defData->callbacks->SNetCbk && (defData->netOsnet==2))) {
-                defData->PathObj.addViaMask((yyvsp[-9].dval)); 
+                defData->PathObj.addViaMask((yyvsp[-9].dval));
                 defData->PathObj.addVia((yyvsp[-8].string));
                 defData->PathObj.addViaRotation((yyvsp[-7].integer));;
                 defData->PathObj.addViaData((int)(yyvsp[-5].dval), (int)(yyvsp[-3].dval), (int)(yyvsp[-1].dval), (int)(yyvsp[0].dval));
@@ -6489,9 +6489,9 @@ yyreduce:
        if (defData->validateMaskInput((int)(yyvsp[0].dval), defData->sNetWarnings, defData->settings->SNetWarnings)) {
         if (defData->NeedPathData && ((defData->callbacks->NetCbk && (defData->netOsnet==1)) ||
           (defData->callbacks->SNetCbk && (defData->netOsnet==2)))) {
-          defData->PathObj.addMask((yyvsp[0].dval)); 
+          defData->PathObj.addMask((yyvsp[0].dval));
         }
-       }  
+       }
     }
 #line 6497 "def.tab.c" /* yacc.c:1646  */
     break;
@@ -6513,9 +6513,9 @@ yyreduce:
     {
         if (defData->NeedPathData && ((defData->callbacks->NetCbk && (defData->netOsnet==1)) ||
           (defData->callbacks->SNetCbk && (defData->netOsnet==2))))
-          defData->PathObj.addPoint(ROUND((yyvsp[-2].dval)), ROUND((yyvsp[-1].dval))); 
+          defData->PathObj.addPoint(ROUND((yyvsp[-2].dval)), ROUND((yyvsp[-1].dval)));
         defData->save_x = (yyvsp[-2].dval);
-        defData->save_y = (yyvsp[-1].dval); 
+        defData->save_y = (yyvsp[-1].dval);
       }
 #line 6521 "def.tab.c" /* yacc.c:1646  */
     break;
@@ -6525,7 +6525,7 @@ yyreduce:
     {
         if (defData->NeedPathData && ((defData->callbacks->NetCbk && (defData->netOsnet==1)) ||
           (defData->callbacks->SNetCbk && (defData->netOsnet==2))))
-          defData->PathObj.addPoint(ROUND(defData->save_x), ROUND((yyvsp[-1].dval))); 
+          defData->PathObj.addPoint(ROUND(defData->save_x), ROUND((yyvsp[-1].dval)));
         defData->save_y = (yyvsp[-1].dval);
       }
 #line 6532 "def.tab.c" /* yacc.c:1646  */
@@ -6536,7 +6536,7 @@ yyreduce:
     {
         if (defData->NeedPathData && ((defData->callbacks->NetCbk && (defData->netOsnet==1)) ||
           (defData->callbacks->SNetCbk && (defData->netOsnet==2))))
-          defData->PathObj.addPoint(ROUND((yyvsp[-2].dval)), ROUND(defData->save_y)); 
+          defData->PathObj.addPoint(ROUND((yyvsp[-2].dval)), ROUND(defData->save_y));
         defData->save_x = (yyvsp[-2].dval);
       }
 #line 6543 "def.tab.c" /* yacc.c:1646  */
@@ -6547,7 +6547,7 @@ yyreduce:
     {
         if (defData->NeedPathData && ((defData->callbacks->NetCbk && (defData->netOsnet==1)) ||
             (defData->callbacks->SNetCbk && (defData->netOsnet==2))))
-          defData->PathObj.addPoint(ROUND(defData->save_x), ROUND(defData->save_y)); 
+          defData->PathObj.addPoint(ROUND(defData->save_x), ROUND(defData->save_y));
       }
 #line 6553 "def.tab.c" /* yacc.c:1646  */
     break;
@@ -6557,7 +6557,7 @@ yyreduce:
     {
         if (defData->NeedPathData && ((defData->callbacks->NetCbk && (defData->netOsnet==1)) ||
             (defData->callbacks->SNetCbk && (defData->netOsnet==2))))
-          defData->PathObj.addFlushPoint(ROUND((yyvsp[-3].dval)), ROUND((yyvsp[-2].dval)), ROUND((yyvsp[-1].dval))); 
+          defData->PathObj.addFlushPoint(ROUND((yyvsp[-3].dval)), ROUND((yyvsp[-2].dval)), ROUND((yyvsp[-1].dval)));
         defData->save_x = (yyvsp[-3].dval);
         defData->save_y = (yyvsp[-2].dval);
       }
@@ -6570,7 +6570,7 @@ yyreduce:
         if (defData->NeedPathData && ((defData->callbacks->NetCbk && (defData->netOsnet==1)) ||
           (defData->callbacks->SNetCbk && (defData->netOsnet==2))))
           defData->PathObj.addFlushPoint(ROUND(defData->save_x), ROUND((yyvsp[-2].dval)),
-          ROUND((yyvsp[-1].dval))); 
+          ROUND((yyvsp[-1].dval)));
         defData->save_y = (yyvsp[-2].dval);
       }
 #line 6577 "def.tab.c" /* yacc.c:1646  */
@@ -6582,7 +6582,7 @@ yyreduce:
         if (defData->NeedPathData && ((defData->callbacks->NetCbk && (defData->netOsnet==1)) ||
           (defData->callbacks->SNetCbk && (defData->netOsnet==2))))
           defData->PathObj.addFlushPoint(ROUND((yyvsp[-3].dval)), ROUND(defData->save_y),
-          ROUND((yyvsp[-1].dval))); 
+          ROUND((yyvsp[-1].dval)));
         defData->save_x = (yyvsp[-3].dval);
       }
 #line 6589 "def.tab.c" /* yacc.c:1646  */
@@ -6594,7 +6594,7 @@ yyreduce:
         if (defData->NeedPathData && ((defData->callbacks->NetCbk && (defData->netOsnet==1)) ||
           (defData->callbacks->SNetCbk && (defData->netOsnet==2))))
           defData->PathObj.addFlushPoint(ROUND(defData->save_x), ROUND(defData->save_y),
-          ROUND((yyvsp[-1].dval))); 
+          ROUND((yyvsp[-1].dval)));
       }
 #line 6600 "def.tab.c" /* yacc.c:1646  */
     break;
@@ -6604,7 +6604,7 @@ yyreduce:
     {
         if (defData->NeedPathData && ((defData->callbacks->NetCbk && (defData->netOsnet==1)) ||
           (defData->callbacks->SNetCbk && (defData->netOsnet==2))))
-          defData->PathObj.addVirtualPoint(ROUND((yyvsp[-2].dval)), ROUND((yyvsp[-1].dval))); 
+          defData->PathObj.addVirtualPoint(ROUND((yyvsp[-2].dval)), ROUND((yyvsp[-1].dval)));
         defData->save_x = (yyvsp[-2].dval);
         defData->save_y = (yyvsp[-1].dval);
       }
@@ -6616,7 +6616,7 @@ yyreduce:
     {
         if (defData->NeedPathData && ((defData->callbacks->NetCbk && (defData->netOsnet==1)) ||
           (defData->callbacks->SNetCbk && (defData->netOsnet==2))))
-          defData->PathObj.addVirtualPoint(ROUND(defData->save_x), ROUND((yyvsp[-1].dval))); 
+          defData->PathObj.addVirtualPoint(ROUND(defData->save_x), ROUND((yyvsp[-1].dval)));
         defData->save_y = (yyvsp[-1].dval);
       }
 #line 6623 "def.tab.c" /* yacc.c:1646  */
@@ -6627,7 +6627,7 @@ yyreduce:
     {
         if (defData->NeedPathData && ((defData->callbacks->NetCbk && (defData->netOsnet==1)) ||
           (defData->callbacks->SNetCbk && (defData->netOsnet==2))))
-          defData->PathObj.addVirtualPoint(ROUND((yyvsp[-2].dval)), ROUND(defData->save_y)); 
+          defData->PathObj.addVirtualPoint(ROUND((yyvsp[-2].dval)), ROUND(defData->save_y));
         defData->save_x = (yyvsp[-2].dval);
       }
 #line 6634 "def.tab.c" /* yacc.c:1646  */
@@ -6648,8 +6648,8 @@ yyreduce:
     {
         if (defData->NeedPathData && ((defData->callbacks->NetCbk && (defData->netOsnet==1)) ||
           (defData->callbacks->SNetCbk && (defData->netOsnet==2)))) {
-          defData->PathObj.addViaRect((yyvsp[-4].dval), (yyvsp[-3].dval), (yyvsp[-2].dval), (yyvsp[-1].dval)); 
-        }    
+          defData->PathObj.addViaRect((yyvsp[-4].dval), (yyvsp[-3].dval), (yyvsp[-2].dval), (yyvsp[-1].dval));
+        }
     }
 #line 6655 "def.tab.c" /* yacc.c:1646  */
     break;
@@ -6678,7 +6678,7 @@ yyreduce:
 
   case 476:
 #line 2800 "def.y" /* yacc.c:1646  */
-    { 
+    {
         if (defData->VersionNum < 5.6) {
            if (defData->NeedPathData && (defData->callbacks->NetCbk ||
                defData->callbacks->SNetCbk)) {
@@ -6732,7 +6732,7 @@ yyreduce:
 
   case 481:
 #line 2849 "def.y" /* yacc.c:1646  */
-    { 
+    {
             CALLBACK(defData->callbacks->NetEndCbk, defrNetEndCbkType, 0);
             defData->netOsnet = 0;
           }
@@ -6837,7 +6837,7 @@ yyreduce:
              if (defData->VersionNum >= 5.8) {
                 defData->specialWire_routeStatus = (yyvsp[0].string);
              } else {
-                 if (defData->callbacks->SNetCbk) {   // PCR 902306 
+                 if (defData->callbacks->SNetCbk) {   // PCR 902306
                    defData->defMsg = (char*)malloc(1024);
                    sprintf(defData->defMsg, "The SPECIAL NET statement, with type %s, does not have any net statement defined.\nThe DEF parser will ignore this statemnet.", (yyvsp[0].string));
                    defData->defWarning(7023, defData->defMsg);
@@ -6885,16 +6885,16 @@ yyreduce:
 
   case 508:
 #line 2947 "def.y" /* yacc.c:1646  */
-    { defData->shieldName = (yyvsp[0].string); 
+    { defData->shieldName = (yyvsp[0].string);
               defData->specialWire_routeStatus = (char*)"SHIELD";
-              defData->specialWire_routeStatusName = (yyvsp[0].string); 
+              defData->specialWire_routeStatusName = (yyvsp[0].string);
             }
 #line 6893 "def.tab.c" /* yacc.c:1646  */
     break;
 
   case 510:
 #line 2954 "def.y" /* yacc.c:1646  */
-    {  
+    {
             defData->specialWire_shapeType = (yyvsp[0].string);
           }
 #line 6901 "def.tab.c" /* yacc.c:1646  */
@@ -6905,7 +6905,7 @@ yyreduce:
     {
             if (defData->validateMaskInput((int)(yyvsp[0].dval), defData->sNetWarnings, defData->settings->SNetWarnings)) {
                 defData->specialWire_mask = (yyvsp[0].dval);
-            }     
+            }
           }
 #line 6911 "def.tab.c" /* yacc.c:1646  */
     break;
@@ -6931,7 +6931,7 @@ yyreduce:
                 }
               }
             }
-            
+
             defData->Geometries.Reset();
           }
 #line 6938 "def.tab.c" /* yacc.c:1646  */
@@ -7097,8 +7097,8 @@ yyreduce:
 
   case 527:
 #line 3089 "def.y" /* yacc.c:1646  */
-    { 
-              // 11/12/2002 - this is obsolete in 5.5, & will be ignored 
+    {
+              // 11/12/2002 - this is obsolete in 5.5, & will be ignored
               if (defData->VersionNum < 5.5)
                  if (defData->callbacks->SNetCbk) defData->Net.setCap((yyvsp[0].dval));
               else
@@ -7195,7 +7195,7 @@ yyreduce:
 #line 3122 "def.y" /* yacc.c:1646  */
     {
                 if (defData->callbacks->SNetCbk) {
-                    if (defData->VersionNum < 5.8) { 
+                    if (defData->VersionNum < 5.8) {
                         defData->defMsg = (char*)malloc(1024);
                         sprintf(defData->defMsg, "The SPECIAL NET SHIELD statement doesn't have routing points definition.\nWill be ignored.");
                         defData->defWarning(7025, defData->defMsg);
@@ -7211,9 +7211,9 @@ yyreduce:
 
   case 543:
 #line 3136 "def.y" /* yacc.c:1646  */
-    { // since the parser still supports 5.3 and earlier, 
-              // can't just move SHIELD in net_type 
-              if (defData->VersionNum < 5.4) { // PCR 445209 
+    { // since the parser still supports 5.3 and earlier,
+              // can't just move SHIELD in net_type
+              if (defData->VersionNum < 5.4) { // PCR 445209
                 if (defData->callbacks->SNetCbk) defData->Net.addShield(defData->shieldName);
                 defData->by_is_keyword = FALSE;
                 defData->do_is_keyword = FALSE;
@@ -7225,7 +7225,7 @@ yyreduce:
                 defData->rect_is_keyword = FALSE;
                 defData->specialWire_routeStatus = (char*)"ROUTED";
                 defData->specialWire_routeStatusName = (char*)"";
-                defData->shield = TRUE;   // save the path info in the defData->shield paths 
+                defData->shield = TRUE;   // save the path info in the defData->shield paths
               } else
                 if (defData->callbacks->SNetCbk) defData->Net.addWire("SHIELD", defData->shieldName);
                 defData->specialWire_routeStatus = (char*)"ROUTED";
@@ -7245,7 +7245,7 @@ yyreduce:
                  else
                    defData->Net.freeWire();
               }
-              if (defData->VersionNum < 5.4) {  // PCR 445209 
+              if (defData->VersionNum < 5.4) {  // PCR 445209
                 defData->shield = FALSE;
                 defData->by_is_keyword = FALSE;
                 defData->do_is_keyword = FALSE;
@@ -7281,7 +7281,7 @@ yyreduce:
   case 546:
 #line 3192 "def.y" /* yacc.c:1646  */
     {
-              // 11/12/2002 - this is obsolete in 5.5, & will be ignored 
+              // 11/12/2002 - this is obsolete in 5.5, & will be ignored
               if (defData->VersionNum < 5.5)
                  if (defData->callbacks->SNetCbk) defData->Net.setWidth((yyvsp[-1].string), (yyvsp[0].dval));
               else
@@ -7346,7 +7346,7 @@ yyreduce:
                 char* str = defData->ringCopy("                       ");
                 propTp = defData->session->SNetProp.propType((yyvsp[-1].string));
                 CHKPROPTYPE(propTp, (yyvsp[-1].string), "SPECIAL NET");
-                // For backword compatibility, also set the string value 
+                // For backword compatibility, also set the string value
                 sprintf(str, "%g", (yyvsp[0].dval));
                 defData->Net.addNumProp((yyvsp[-1].string), (yyvsp[0].dval), str, propTp);
               }
@@ -7420,9 +7420,9 @@ yyreduce:
 
   case 565:
 #line 3282 "def.y" /* yacc.c:1646  */
-    { 
+    {
         if (defData->NeedPathData && defData->callbacks->SNetCbk) {
-           if (defData->needSNPCbk && defData->callbacks->SNetPartialPathCbk) { 
+           if (defData->needSNPCbk && defData->callbacks->SNetPartialPathCbk) {
               // require a callback before proceed because defData->needSNPCbk must be
               // set to 1 from the previous pathIsDone and user has registered
               // a callback routine.
@@ -7485,7 +7485,7 @@ yyreduce:
 #line 3328 "def.y" /* yacc.c:1646  */
     { defData->dumb_mode = DEF_MAX_INT; defData->by_is_keyword = TRUE; defData->do_is_keyword = TRUE;
         defData->new_is_keyword = TRUE; defData->step_is_keyword = TRUE;
-         defData->orient_is_keyword = TRUE; defData->rect_is_keyword = TRUE, defData->mask_is_keyword = TRUE; 
+         defData->orient_is_keyword = TRUE; defData->rect_is_keyword = TRUE, defData->mask_is_keyword = TRUE;
          defData->virtual_is_keyword = TRUE;  }
 #line 7491 "def.tab.c" /* yacc.c:1646  */
     break;
@@ -7506,7 +7506,7 @@ yyreduce:
 
   case 573:
 #line 3342 "def.y" /* yacc.c:1646  */
-    { 
+    {
         if (defData->callbacks->SNetStartCbk)
           CALLBACK(defData->callbacks->SNetStartCbk, defrSNetStartCbkType, ROUND((yyvsp[-1].dval)));
         defData->netOsnet = 2;
@@ -7516,7 +7516,7 @@ yyreduce:
 
   case 574:
 #line 3349 "def.y" /* yacc.c:1646  */
-    { 
+    {
         if (defData->callbacks->SNetEndCbk)
           CALLBACK(defData->callbacks->SNetEndCbk, defrSNetEndCbkType, 0);
         defData->netOsnet = 0;
@@ -7571,7 +7571,7 @@ yyreduce:
   case 584:
 #line 3390 "def.y" /* yacc.c:1646  */
     {
-        // if (defData->callbacks->GroupCbk) defData->Group.addMember($1); 
+        // if (defData->callbacks->GroupCbk) defData->Group.addMember($1);
         if (defData->callbacks->GroupMemberCbk)
           CALLBACK(defData->callbacks->GroupMemberCbk, defrGroupMemberCbkType, (yyvsp[0].string));
       }
@@ -7610,7 +7610,7 @@ yyreduce:
 
   case 592:
 #line 3408 "def.y" /* yacc.c:1646  */
-    { 
+    {
         if (defData->callbacks->GroupMemberCbk)
           CALLBACK(defData->callbacks->GroupExtCbk, defrGroupExtCbkType, &defData->History_text[0]);
       }
@@ -7620,7 +7620,7 @@ yyreduce:
   case 593:
 #line 3414 "def.y" /* yacc.c:1646  */
     {
-        // 11/12/2002 - this is obsolete in 5.5, & will be ignored 
+        // 11/12/2002 - this is obsolete in 5.5, & will be ignored
         if (defData->VersionNum < 5.5) {
           if (defData->callbacks->GroupCbk)
             defData->Group.addRegionRect((yyvsp[-1].pt).x, (yyvsp[-1].pt).y, (yyvsp[0].pt).x, (yyvsp[0].pt).y);
@@ -7689,7 +7689,7 @@ yyreduce:
   case 602:
 #line 3467 "def.y" /* yacc.c:1646  */
     {
-        // 11/12/2002 - this is obsolete in 5.5, & will be ignored 
+        // 11/12/2002 - this is obsolete in 5.5, & will be ignored
         if (defData->VersionNum < 5.5)
           if (defData->callbacks->GroupCbk) defData->Group.setMaxX(ROUND((yyvsp[0].dval)));
         else
@@ -7700,8 +7700,8 @@ yyreduce:
 
   case 603:
 #line 3475 "def.y" /* yacc.c:1646  */
-    { 
-        // 11/12/2002 - this is obsolete in 5.5, & will be ignored 
+    {
+        // 11/12/2002 - this is obsolete in 5.5, & will be ignored
         if (defData->VersionNum < 5.5)
           if (defData->callbacks->GroupCbk) defData->Group.setMaxY(ROUND((yyvsp[0].dval)));
         else
@@ -7712,8 +7712,8 @@ yyreduce:
 
   case 604:
 #line 3483 "def.y" /* yacc.c:1646  */
-    { 
-        // 11/12/2002 - this is obsolete in 5.5, & will be ignored 
+    {
+        // 11/12/2002 - this is obsolete in 5.5, & will be ignored
         if (defData->VersionNum < 5.5)
           if (defData->callbacks->GroupCbk) defData->Group.setPerim(ROUND((yyvsp[0].dval)));
         else
@@ -7724,7 +7724,7 @@ yyreduce:
 
   case 605:
 #line 3492 "def.y" /* yacc.c:1646  */
-    { 
+    {
         if (defData->callbacks->GroupsEndCbk)
           CALLBACK(defData->callbacks->GroupsEndCbk, defrGroupsEndCbkType, 0);
       }
@@ -7769,9 +7769,9 @@ yyreduce:
 #line 3539 "def.y" /* yacc.c:1646  */
     {
         if ((defData->VersionNum < 5.4) && (defData->callbacks->ConstraintCbk || defData->callbacks->AssertionCbk)) {
-          if (defData->Assertion.isConstraint()) 
+          if (defData->Assertion.isConstraint())
             CALLBACK(defData->callbacks->ConstraintCbk, defrConstraintCbkType, &defData->Assertion);
-          if (defData->Assertion.isAssertion()) 
+          if (defData->Assertion.isAssertion())
             CALLBACK(defData->callbacks->AssertionCbk, defrAssertionCbkType, &defData->Assertion);
         }
       }
@@ -7780,14 +7780,14 @@ yyreduce:
 
   case 614:
 #line 3549 "def.y" /* yacc.c:1646  */
-    { 
+    {
         if ((defData->VersionNum < 5.4) && (defData->callbacks->ConstraintCbk || defData->callbacks->AssertionCbk)) {
-          if (defData->Assertion.isConstraint()) 
+          if (defData->Assertion.isConstraint())
             CALLBACK(defData->callbacks->ConstraintCbk, defrConstraintCbkType, &defData->Assertion);
-          if (defData->Assertion.isAssertion()) 
+          if (defData->Assertion.isAssertion())
             CALLBACK(defData->callbacks->AssertionCbk, defrAssertionCbkType, &defData->Assertion);
         }
-   
+
         // reset all the flags and everything
         defData->Assertion.clear();
       }
@@ -7956,7 +7956,7 @@ yyreduce:
 
   case 640:
 #line 3661 "def.y" /* yacc.c:1646  */
-    { 
+    {
         if (defData->callbacks->ScanchainCbk)
           CALLBACK(defData->callbacks->ScanchainCbk, defrScanchainCbkType, &defData->Scanchain);
       }
@@ -8232,7 +8232,7 @@ yyreduce:
 
   case 673:
 #line 3839 "def.y" /* yacc.c:1646  */
-    { defData->dumb_mode = 1000; defData->no_num = 1000; 
+    { defData->dumb_mode = 1000; defData->no_num = 1000;
         if (defData->callbacks->ScanchainCbk)
           defData->Scanchain.addOrderedInst((yyvsp[0].string));
       }
@@ -8340,7 +8340,7 @@ yyreduce:
 
   case 681:
 #line 3919 "def.y" /* yacc.c:1646  */
-    { 
+    {
         if (defData->callbacks->ScanchainsEndCbk)
           CALLBACK(defData->callbacks->ScanchainsEndCbk, defrScanchainsEndCbkType, 0);
         defData->bit_is_keyword = FALSE;
@@ -8371,7 +8371,7 @@ yyreduce:
 
   case 686:
 #line 3946 "def.y" /* yacc.c:1646  */
-    { 
+    {
         if (defData->VersionNum < 5.4 && defData->callbacks->IOTimingCbk)
           CALLBACK(defData->callbacks->IOTimingCbk, defrIOTimingCbkType, &defData->IOTiming);
       }
@@ -8396,7 +8396,7 @@ yyreduce:
   case 691:
 #line 3963 "def.y" /* yacc.c:1646  */
     {
-        if (defData->callbacks->IOTimingCbk) 
+        if (defData->callbacks->IOTimingCbk)
           defData->IOTiming.setVariable((yyvsp[-3].string), (yyvsp[-1].dval), (yyvsp[0].dval));
       }
 #line 8403 "def.tab.c" /* yacc.c:1646  */
@@ -8405,7 +8405,7 @@ yyreduce:
   case 692:
 #line 3968 "def.y" /* yacc.c:1646  */
     {
-        if (defData->callbacks->IOTimingCbk) 
+        if (defData->callbacks->IOTimingCbk)
           defData->IOTiming.setSlewRate((yyvsp[-3].string), (yyvsp[-1].dval), (yyvsp[0].dval));
       }
 #line 8412 "def.tab.c" /* yacc.c:1646  */
@@ -8414,7 +8414,7 @@ yyreduce:
   case 693:
 #line 3973 "def.y" /* yacc.c:1646  */
     {
-        if (defData->callbacks->IOTimingCbk) 
+        if (defData->callbacks->IOTimingCbk)
           defData->IOTiming.setCapacitance((yyvsp[0].dval));
       }
 #line 8421 "def.tab.c" /* yacc.c:1646  */
@@ -8429,7 +8429,7 @@ yyreduce:
   case 695:
 #line 3978 "def.y" /* yacc.c:1646  */
     {
-        if (defData->callbacks->IOTimingCbk) 
+        if (defData->callbacks->IOTimingCbk)
           defData->IOTiming.setDriveCell((yyvsp[0].string));
       }
 #line 8436 "def.tab.c" /* yacc.c:1646  */
@@ -8453,7 +8453,7 @@ yyreduce:
   case 699:
 #line 3994 "def.y" /* yacc.c:1646  */
     {
-        if (defData->callbacks->IOTimingCbk) 
+        if (defData->callbacks->IOTimingCbk)
           defData->IOTiming.setTo((yyvsp[0].string));
       }
 #line 8460 "def.tab.c" /* yacc.c:1646  */
@@ -8506,7 +8506,7 @@ yyreduce:
 
   case 709:
 #line 4023 "def.y" /* yacc.c:1646  */
-    { 
+    {
         if (defData->callbacks->FPCEndCbk)
           CALLBACK(defData->callbacks->FPCEndCbk, defrFPCEndCbkType, 0);
       }
@@ -8620,7 +8620,7 @@ yyreduce:
 
   case 735:
 #line 4082 "def.y" /* yacc.c:1646  */
-    { 
+    {
         if (defData->callbacks->TimingDisablesStartCbk)
           CALLBACK(defData->callbacks->TimingDisablesStartCbk, defrTimingDisablesStartCbkType,
                    ROUND((yyvsp[-1].dval)));
@@ -8740,7 +8740,7 @@ yyreduce:
 
   case 751:
 #line 4136 "def.y" /* yacc.c:1646  */
-    { 
+    {
         if (defData->callbacks->TimingDisablesEndCbk)
           CALLBACK(defData->callbacks->TimingDisablesEndCbk, defrTimingDisablesEndCbkType, 0);
       }
@@ -8765,7 +8765,7 @@ yyreduce:
 
   case 756:
 #line 4157 "def.y" /* yacc.c:1646  */
-    { 
+    {
         if (defData->callbacks->PartitionCbk)
           CALLBACK(defData->callbacks->PartitionCbk, defrPartitionCbkType, &defData->Partition);
       }
@@ -8924,7 +8924,7 @@ yyreduce:
 
   case 781:
 #line 4229 "def.y" /* yacc.c:1646  */
-    { 
+    {
         if (defData->callbacks->PartitionsExtCbk)
           CALLBACK(defData->callbacks->PartitionsExtCbk, defrPartitionsExtCbkType,
                    &defData->History_text[0]);
@@ -9048,7 +9048,7 @@ yyreduce:
   case 806:
 #line 4298 "def.y" /* yacc.c:1646  */
     {
-        // note that the defData->first T_STRING could be the keyword VPIN 
+        // note that the defData->first T_STRING could be the keyword VPIN
         if (defData->callbacks->NetCbk)
           defData->Subnet->addPin((yyvsp[-3].string), (yyvsp[-2].string), (yyvsp[-1].integer));
       }
@@ -9069,7 +9069,7 @@ yyreduce:
 
   case 811:
 #line 4313 "def.y" /* yacc.c:1646  */
-    {  
+    {
         if (defData->callbacks->NetCbk) defData->Subnet->addWire((yyvsp[0].string));
       }
 #line 9076 "def.tab.c" /* yacc.c:1646  */
@@ -9077,7 +9077,7 @@ yyreduce:
 
   case 812:
 #line 4317 "def.y" /* yacc.c:1646  */
-    {  
+    {
         defData->by_is_keyword = FALSE;
         defData->do_is_keyword = FALSE;
         defData->new_is_keyword = FALSE;
@@ -9354,7 +9354,7 @@ yyreduce:
 
   case 855:
 #line 4524 "def.y" /* yacc.c:1646  */
-    {      
+    {
         if (defData->validateMaskInput((int)(yyvsp[0].dval), defData->blockageWarnings, defData->settings->BlockageWarnings)) {
           defData->Blockage.setMask((int)(yyvsp[0].dval));
         }
@@ -9610,7 +9610,7 @@ yyreduce:
            } else {
              if (defData->callbacks->BlockageCbk){
                defData->Blockage.setPartial((yyvsp[0].dval));
-             } 
+             }
              if (defData->VersionNum < 5.8) {
                defData->hasBlkPlaceComp = 1;
              }
@@ -9887,7 +9887,7 @@ yyreduce:
 
   case 916:
 #line 4978 "def.y" /* yacc.c:1646  */
-    { 
+    {
         if (defData->validateMaskInput((int)(yyvsp[0].dval), defData->fillWarnings, defData->settings->FillWarnings)) {
              if (defData->callbacks->FillCbk) {
                 defData->Fill.setMask((int)(yyvsp[0].dval));
@@ -9899,7 +9899,7 @@ yyreduce:
 
   case 917:
 #line 4988 "def.y" /* yacc.c:1646  */
-    { 
+    {
         if (defData->validateMaskInput((int)(yyvsp[0].dval), defData->fillWarnings, defData->settings->FillWarnings)) {
              if (defData->callbacks->FillCbk) {
                 defData->Fill.setMask((int)(yyvsp[0].dval));
@@ -9911,7 +9911,7 @@ yyreduce:
 
   case 919:
 #line 5001 "def.y" /* yacc.c:1646  */
-    { 
+    {
         if (defData->VersionNum < 5.6) {
           if (defData->callbacks->NonDefaultStartCbk) {
             if (defData->nonDefaultWarnings++ < defData->settings->NonDefaultWarnings) {
@@ -9947,7 +9947,7 @@ yyreduce:
 #line 5027 "def.y" /* yacc.c:1646  */
     {
         if (defData->callbacks->NonDefaultCbk) {
-          defData->NonDefault.clear(); 
+          defData->NonDefault.clear();
           defData->NonDefault.setName((yyvsp[0].string));
         }
       }

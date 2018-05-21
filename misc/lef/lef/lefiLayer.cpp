@@ -1,25 +1,25 @@
 // *****************************************************************************
 // *****************************************************************************
 // Copyright 2012 - 2017, Cadence Design Systems
-// 
+//
 // This  file  is  part  of  the  Cadence  LEF/DEF  Open   Source
-// Distribution,  Product Version 5.8. 
-// 
+// Distribution,  Product Version 5.8.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 //    you may not use this file except in compliance with the License.
 //    You may obtain a copy of the License at
-// 
+//
 //        http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 //    Unless required by applicable law or agreed to in writing, software
 //    distributed under the License is distributed on an "AS IS" BASIS,
 //    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 //    implied. See the License for the specific language governing
 //    permissions and limitations under the License.
-// 
+//
 // For updates, support, or to become part of the LEF/DEF Community,
 // check www.openeda.org for details.
-// 
+//
 //  $Author: dell $
 //  $Revision: #1 $
 //  $Date: 2017/06/06 $
@@ -359,7 +359,7 @@ lefiParallel::addParallelWidth(double width)
             nws = (double*) lefMalloc(sizeof(double) * (numWidthAllocated_ *
                                                         numLength_));
         else {
-            // still want to move anything already there 
+            // still want to move anything already there
             nws = (double*) lefMalloc(sizeof(double) * numWidthAllocated_);
             numLength = 1;
         }
@@ -960,25 +960,25 @@ lefiAntennaModel::Destroy()
         lefFree((char*) (antennaDiffAreaRatioPWL_));
         antennaDiffAreaRatioPWL_ = 0;
     }
-    
+
     if (antennaCumDiffAreaRatioPWL_) {
         antennaCumDiffAreaRatioPWL_->Destroy();
         lefFree((char*) (antennaCumDiffAreaRatioPWL_));
         antennaCumDiffAreaRatioPWL_ = 0;
     }
-    
+
     if (antennaDiffSideAreaRatioPWL_) {
         antennaDiffSideAreaRatioPWL_->Destroy();
         lefFree((char*) (antennaDiffSideAreaRatioPWL_));
         antennaDiffSideAreaRatioPWL_ = 0;
     }
-    
+
     if (antennaCumDiffSideAreaRatioPWL_) {
         antennaCumDiffSideAreaRatioPWL_->Destroy();
         lefFree((char*) (antennaCumDiffSideAreaRatioPWL_));
         antennaCumDiffSideAreaRatioPWL_ = 0;
     }
-    
+
     if (antennaAreaDiffReducePWL_) {    // 5.7
         antennaAreaDiffReducePWL_->Destroy();
         lefFree((char*) (antennaAreaDiffReducePWL_));
@@ -1099,9 +1099,9 @@ lefiAntennaModel::setAntennaDUO(lefiAntennaEnum antennaType)
     }
 }
 
-// This function 'consumes' data of pwl pointer and send it to the new owner. 
-// After calling the function 'pwl' should be set to NULL or assigned a new 
-// value. 
+// This function 'consumes' data of pwl pointer and send it to the new owner.
+// After calling the function 'pwl' should be set to NULL or assigned a new
+// value.
 void
 lefiAntennaModel::setAntennaPWL(lefiAntennaEnum antennaType,
                                 lefiAntennaPWL  *pwl)
@@ -4296,7 +4296,7 @@ lefiLayer::addProp(const char   *name,
     // Look for . in the value
     //tvalue = (char*)value;
     //vlen = strlen(value);
-    //for (i = 0; i < vlen; i++) { 
+    //for (i = 0; i < vlen; i++) {
     //if (*tvalue == '.') {
     //types_[numProps_] = 'R';
     //break;
@@ -4666,7 +4666,7 @@ lefiLayer::addAntennaModel(int aOxide)
     for (int idx = 0; idx < aOxide - 1; idx++) {
         amo = antennaModel_[idx];
         if (!amo->antennaOxide()) {
-            amo->setAntennaModel(idx + 1);   
+            amo->setAntennaModel(idx + 1);
                 }
                 }
 
@@ -4684,7 +4684,7 @@ lefiLayer::addAntennaModel(int aOxide)
     amo->setAntennaModel(aOxide);
 
     currentAntennaModel_ = amo;
-    
+
     return;
 }
 
@@ -6006,7 +6006,7 @@ lefiLayer::parseSpacing(int index)
                                         if (twoEdges)
                                             setSpacingParTwoEdges();
                                         value = strtok(NULL, " ");
-                                        continue;                // with the while loop 
+                                        continue;                // with the while loop
                                     } else {
                                         // More rules, skip to ;
                                         while ((value) && (*value != ';') &&
@@ -6021,8 +6021,8 @@ lefiLayer::parseSpacing(int index)
                                     setSpacingMin(spValue);
                                     setSpacingEol(width, within);
                                     setSpacingParSW(pValue, pWithin);
-                                    value = strtok(NULL, " ");      // done with this 
-                                    continue;       // statement with the while loop 
+                                    value = strtok(NULL, " ");      // done with this
+                                    continue;       // statement with the while loop
                                 } else {
                                     // More rules, skip to ;
                                     while ((value) && (*value != ';') &&
@@ -6057,7 +6057,7 @@ lefiLayer::parseSpacing(int index)
                         // Save the data in lefiLayer lefData->first
                         setSpacingMin(spValue);
                         setSpacingEol(width, within);
-                        value = strtok(NULL, " ");      // done with this 
+                        value = strtok(NULL, " ");      // done with this
                         continue;
                     } else {
                         while ((value) && (*value != ';') && (*value != '\n'))
@@ -6146,7 +6146,7 @@ lefiLayer::parseArraySpacing(int index)
 
     while (strcmp(value, ";") != 0) {
         if (strcmp(value, "LONGARRAY") == 0) {
-            if (cutSpacing != 0) { // make sure syntax has correct order 
+            if (cutSpacing != 0) { // make sure syntax has correct order
                 /*
                 sprintf(msg, "ERROR (LEFPARS-1308): Incorrect syntax defined for property LEF57_ARRAYSPACING: %s.\nLONGARRAY is defined after CUTSPACING.\nCorrect syntax is ARRAYSPACING [LONGARRAY] [WIDTH viaWidth] CUTSPACING cutSpacing\n\tARRAYCUTS arrayCuts SPACING arraySpacing ...\n", values_[index]);
                 lefiError(msg);
@@ -6159,7 +6159,7 @@ lefiLayer::parseArraySpacing(int index)
             hasLongArray = 1;
             value = strtok(NULL, " ");
         } else if (strcmp(value, "WIDTH") == 0) {
-            if (cutSpacing != 0) { // make sure syntax has correct order 
+            if (cutSpacing != 0) { // make sure syntax has correct order
                 /*
                 sprintf(msg, "ERROR (LEFPARS-1309): Incorrect syntax defined for property LEF57_ARRAYSPACING: %s.\nWIDTH is defined after CUTSPACING.\nCorrect syntax is ARRAYSPACING [LONGARRAY] [WIDTH viaWidth] CUTSPACING cutSpacing\n\tARRAYCUTS arrayCuts SPACING arraySpacing ...\n", values_[index]);
                 lefiError(msg);
@@ -6173,7 +6173,7 @@ lefiLayer::parseArraySpacing(int index)
             viaWidth = atof(value);
             value = strtok(NULL, " ");
         } else if (strcmp(value, "CUTSPACING") == 0) {
-            if (cutSpacing != 0) { // make sure syntax has correct order 
+            if (cutSpacing != 0) { // make sure syntax has correct order
                 /*
                 sprintf(msg, "ERROR (LEFPARS-1310): Incorrect syntax defined for property LEF57_ARRAYSPACING: %s.\nCUTSPACING has defined more than once.\nCorrect syntax is ARRAYSPACING [LONGARRAY] [WIDTH viaWidth] CUTSPACING cutSpacing\n\tARRAYCUTS arrayCuts SPACING arraySpacing ...\n", values_[index]);
                 lefiError(msg);
@@ -6194,7 +6194,7 @@ lefiLayer::parseArraySpacing(int index)
             setArraySpacingCut(cutSpacing);
             value = strtok(NULL, " ");
         } else if (strcmp(value, "ARRAYCUTS") == 0) {
-            if (cutSpacing == 0) { // make sure cutSpacing is already set 
+            if (cutSpacing == 0) { // make sure cutSpacing is already set
                 /*
                 sprintf(msg, "ERROR (LEFPARS-1311): Incorrect syntax defined for property LEF57_ARRAYSPACING: %s.\nCUTSPACING which is required is either has not been defined or defined in a wrong location.\nCorrect syntax is ARRAYSPACING [LONGARRAY] [WIDTH viaWidth] CUTSPACING cutSpacing\n\tARRAYCUTS arrayCuts SPACING arraySpacing ...\n", values_[index]);
                 lefiError(msg);
@@ -6252,7 +6252,7 @@ lefiLayer::parseArraySpacing(int index)
 
 // PRIVATE 5.7
 // MINSTEP minStepLength
-// [MAXEDGES maxEdges] ; 
+// [MAXEDGES maxEdges] ;
 // Save the value lefData->first to make sure the syntax that is supported by the parser
 void
 lefiLayer::parseMinstep(int index)
@@ -6742,9 +6742,9 @@ lefiLayer::parseLayerType(int index)
     std::string firstToken = lefrSettings::getToken(propValue, tokenStart);
 
     // Wrong LEF58_TYPE syntax.
-    if (firstToken != "TYPE") { 
-        std::string msg = "Incorrect LEF58_TYPE property value syntax: '" + 
-                           propValue + 
+    if (firstToken != "TYPE") {
+        std::string msg = "Incorrect LEF58_TYPE property value syntax: '" +
+                           propValue +
                            "'. Correct syntax: 'TYPE <type> ;'.\n";
 
         lefError(1329, msg.c_str());
@@ -6756,7 +6756,7 @@ lefiLayer::parseLayerType(int index)
     std::string typesPair(lef58Type + " " + type);
 
     if (lefSettings->Lef58TypePairs.find(typesPair) != lefSettings->Lef58TypePairs.end()) {
-        // In parser LayerType == lef58 type. 
+        // In parser LayerType == lef58 type.
         setLayerType(lef58Type.c_str());
         return;
     }
@@ -6765,18 +6765,18 @@ lefiLayer::parseLayerType(int index)
 
     // Wrong/incompatible lef58 type.
     if (layerLef58Types.empty()) {
-        std::string msg = "Layers with TYPE " + 
+        std::string msg = "Layers with TYPE " +
                            type  + " cannot have LEF58_TYPE property.\n";
 
-        lefError(1328, msg.c_str());        
+        lefError(1328, msg.c_str());
     } else {
         std::string msg = "Property LEF58_TYPE has incorrect TYPE value: '" +
                           lef58Type + "'. For TYPE " +
                           type + " layers valid values are: " +
                           layerLef58Types + ".\n";
 
-        lefError(1327, msg.c_str());  
-    } 
+        lefError(1327, msg.c_str());
+    }
 }
 
 // 5.8

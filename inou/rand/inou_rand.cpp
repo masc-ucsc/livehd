@@ -155,11 +155,9 @@ std::vector<LGraph *> Inou_rand::generate() {
       connections.insert(conn);
       i++;
       timeout = 0;
-      std::cout << "added, ";
     } else {
       timeout++;
     }
-    std::cout << " checking " << (connections.find(conn) == connections.end()) << std::endl;
 
     if(timeout > 10000) {
       std::cout << "I was not able to add all the connections, giving up due to timeout." << std::endl;

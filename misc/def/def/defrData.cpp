@@ -1,25 +1,25 @@
 // *****************************************************************************
 // *****************************************************************************
 // Copyright 2013-2014, Cadence Design Systems
-// 
+//
 // This  file  is  part  of  the  Cadence  LEF/DEF  Open   Source
-// Distribution,  Product Version 5.8. 
-// 
+// Distribution,  Product Version 5.8.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 //    you may not use this file except in compliance with the License.
 //    You may obtain a copy of the License at
-// 
+//
 //        http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 //    Unless required by applicable law or agreed to in writing, software
 //    distributed under the License is distributed on an "AS IS" BASIS,
 //    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 //    implied. See the License for the specific language governing
 //    permissions and limitations under the License.
-// 
+//
 // For updates, support, or to become part of the LEF/DEF Community,
 // check www.openeda.org for details.
-// 
+//
 //  $Author: arakhman $
 //  $Revision: #6 $
 //  $Date: 2013/08/09 $
@@ -234,8 +234,8 @@ defrData::~defrData()
     }
 }
 
-void 
-defrData::defiError(int check, int msgNum, const char* mess) 
+void
+defrData::defiError(int check, int msgNum, const char* mess)
 {
   /* check is 1 if the caller function has checked totalMsgLimit, etc. */
 
@@ -260,25 +260,25 @@ defrData::defiError(int check, int msgNum, const char* mess)
   }
 }
 
-const char* 
-defrData::upperCase(const char* str) 
+const char*
+defrData::upperCase(const char* str)
 {
     const static char defiShift [] = {
      '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
      '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
      '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
      '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
-      ' ',  '!',  '"',  '#',  '$',  '%',  '&', '\'', 
-      '(',  ')',  '*',  '+',  ',',  '-',  '.',  '/', 
-      '0',  '1',  '2',  '3',  '4',  '5',  '6',  '7', 
-      '8',  '9',  ':',  ';',  '<',  '=',  '>',  '?', 
-      '@',  'A',  'B',  'C',  'D',  'E',  'F',  'G', 
-      'H',  'I',  'J',  'K',  'L',  'M',  'N',  'O', 
-      'P',  'Q',  'R',  'S',  'T',  'U',  'V',  'W', 
-      'X',  'Y',  'Z',  '[', '\\',  ']',  '^',  '_', 
-      '`',  'A',  'B',  'C',  'D',  'E',  'F',  'G', 
-      'H',  'I',  'J',  'K',  'l',  'M',  'N',  'O', 
-      'P',  'Q',  'R',  'S',  'T',  'U',  'V',  'W', 
+      ' ',  '!',  '"',  '#',  '$',  '%',  '&', '\'',
+      '(',  ')',  '*',  '+',  ',',  '-',  '.',  '/',
+      '0',  '1',  '2',  '3',  '4',  '5',  '6',  '7',
+      '8',  '9',  ':',  ';',  '<',  '=',  '>',  '?',
+      '@',  'A',  'B',  'C',  'D',  'E',  'F',  'G',
+      'H',  'I',  'J',  'K',  'L',  'M',  'N',  'O',
+      'P',  'Q',  'R',  'S',  'T',  'U',  'V',  'W',
+      'X',  'Y',  'Z',  '[', '\\',  ']',  '^',  '_',
+      '`',  'A',  'B',  'C',  'D',  'E',  'F',  'G',
+      'H',  'I',  'J',  'K',  'l',  'M',  'N',  'O',
+      'P',  'Q',  'R',  'S',  'T',  'U',  'V',  'W',
       'X',  'Y',  'Z',  '{',  '|',  '}',  '~', '\0',
      '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
      '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
@@ -325,8 +325,8 @@ defrData::upperCase(const char* str)
   return shiftBuf;
 }
 
-int 
-defrData::validateMaskInput(int input, int warningIndex, int getWarningsIndex) 
+int
+defrData::validateMaskInput(int input, int warningIndex, int getWarningsIndex)
 {
     if (VersionNum < 5.8 && input > 0) {
       if (warningIndex++ < getWarningsIndex) {
@@ -340,13 +340,13 @@ defrData::validateMaskInput(int input, int warningIndex, int getWarningsIndex)
           }
           return 0;
         }
-    }   
-    
-    return 1; 
+    }
+
+    return 1;
 }
 
-int 
-defrData::validateMaskShiftInput(const char* shiftMask, int warningIndex, int getWarningsIndex) 
+int
+defrData::validateMaskShiftInput(const char* shiftMask, int warningIndex, int getWarningsIndex)
 {
     int shiftMaskLength = strlen(shiftMask);
     int hasShiftData = 0;
@@ -355,7 +355,7 @@ defrData::validateMaskShiftInput(const char* shiftMask, int warningIndex, int ge
     // Verification of the mask string
     for (int i = 0; i < shiftMaskLength; i++) {
         int curShift = shiftMask[i];
-        
+
         if (curShift < '0' || curShift > '9') {
             hasError = 1;
         }
@@ -368,8 +368,8 @@ defrData::validateMaskShiftInput(const char* shiftMask, int warningIndex, int ge
     if (hasError) {
         char *msg = (char*)malloc(1000);
 
-        sprintf(msg, 
-                "The MASKSHIFT value '%s' is not valid. The value should be a string consisting of decimal digits ('0' - '9').", 
+        sprintf(msg,
+                "The MASKSHIFT value '%s' is not valid. The value should be a string consisting of decimal digits ('0' - '9').",
                 shiftMask);
         defError(7416, msg);
         free(msg);
@@ -385,20 +385,20 @@ defrData::validateMaskShiftInput(const char* shiftMask, int warningIndex, int ge
         if (warningIndex++ < getWarningsIndex) {
             char *msg = (char*)malloc(1000);
 
-            sprintf (msg, 
-                     "The MASKSHIFT statement can be used only in DEF version 5.8 and later. This DEF file version is '%g'.", 
+            sprintf (msg,
+                     "The MASKSHIFT statement can be used only in DEF version 5.8 and later. This DEF file version is '%g'.",
                      VersionNum);
             defError(7417, msg);
-            free(msg);            
+            free(msg);
             if (checkErrors()) {
                 return 1;
             }
         }
-          
+
         return 0;
-    }   
-    
-    return 1; 
+    }
+
+    return 1;
 }
 
 double
@@ -413,7 +413,7 @@ defrData::convert_defname2num(char *versionName)
     double version;
 
     sscanf(versionNm, "%[^.].%s", majorNm, minorNm);
-    
+
     char *p1 = strchr(minorNm, '.');
     if (p1) {
        subMinorNm = p1+1;
@@ -444,7 +444,7 @@ defrData::numIsInt (char* volt) {
        return 1;
 }
 
-int 
+int
 defrData::defValidNum(int values) {
     char *outMsg;
     switch (values) {
@@ -470,7 +470,7 @@ defrData::defValidNum(int values) {
                     free(outMsg);
                   }
                 }
-                
+
                 return 0;
              } else {
                 return 1;
