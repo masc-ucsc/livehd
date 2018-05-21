@@ -54,7 +54,7 @@ static std::map<Value_size, Index_ID> int_const_map;
 static std::map<std::string, uint32_t> used_names;
 #endif
 
-static void look_for_module_outputs(RTLIL::Module *module, std::string output_directory) {
+static void look_for_module_outputs(RTLIL::Module *module, const std::string& output_directory) {
 #ifdef DEBUG
   log("inou_yosys look_for_module_outputs pass for module %s:\n", module->name.c_str());
 #endif

@@ -11,9 +11,14 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <string>
+#include <vector>
 using std::map;
 using std::string;
 using std::vector;
+
+const int CFG_METADATA_COUNT = 5;
+
 Inou_cfg_options_pack::Inou_cfg_options_pack() {
 
   Options::get_desc()->add_options()("cfg_output,o", boost::program_options::value(&cfg_output), "cfg output <filename> for graph")("cfg_input,i", boost::program_options::value(&cfg_input), "cfg input <filename> for graph");
@@ -189,6 +194,9 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
     I.process 1st node
     only assign node type for first K in every line of cfg
   */
+
+  g->set_node_wirename(name2id[w1st], encode_cfg_data(dfg_data).c_str());
+
   if(name2id.count(w1st) == 0) { //if node has not been created before
     Node new_node = g->create_node();
     name2id[w1st] = new_node.get_nid();
@@ -196,7 +204,6 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
 
     fmt::print("create node:{}, nid:{}\n", w1st, name2id[w1st]);
 
-    g->set_node_wirename(new_node.get_nid(), dfg_data.c_str());
     g->node_loc_set(new_node.get_nid(), opack.cfg_input.c_str(), (uint32_t)std::stoi(w4th), (uint32_t)std::stoi(w5th));
 
     if(w6th == ".()")
@@ -210,7 +217,7 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
     else
       g->node_type_set(name2id[w1st], CfgAssign_Op);
   } else {
-    g->set_node_wirename(name2id[w1st], dfg_data.c_str());
+    
     g->node_loc_set(name2id[w1st], opack.cfg_input.c_str(), (uint32_t)std::stoi(w4th), (uint32_t)std::stoi(w5th));
 
     if(w6th == ".()")
@@ -434,6 +441,27 @@ void Inou_cfg::generate(vector<const LGraph *> &out) {
   }
 }
 
+std::string Inou_cfg::encode_cfg_data(const std::string &data) {
+  std::istringstream ss(data);
+  std::string buffer;
+
+  for (int i = 0; i < CFG_METADATA_COUNT; ) {       // the first few are metadata, and these reads should not fail or
+                                                    // we have a formatting issue
+    assert(ss >> buffer);
+
+    if (!buffer.empty())                          // only count non-empty tokens
+      i++;
+  }
+
+  std::string encoded;
+  while (ss >> buffer) {            // actually save the remaining
+    if (!buffer.empty())
+      encoded += buffer + ENCODING_DELIM;
+  }
+  
+  return encoded;
+}
+
 void Inou_cfg::cfg_2_dot(LGraph *g, const std::string &path) {
   FILE *dot = fopen(path.c_str(), "w");
 
@@ -445,7 +473,8 @@ void Inou_cfg::cfg_2_dot(LGraph *g, const std::string &path) {
     else if(g->is_graph_output(idx))
       fprintf(dot, "node%d[label =\"%d %%%s\"];\n", (int)idx, (int)idx, g->get_graph_output_name(idx));
     else
-      fprintf(dot, "node%d[label =\"%d %s\"];\n", (int)idx, (int)idx, g->node_type_get(idx).get_name().c_str());
+      fprintf(dot, "node%d[label =\"%d %s; %s\"];\n", (int)idx, (int)idx, g->node_type_get(idx).get_name().c_str(),
+          g->get_node_wirename(idx));
   }
 
   for(auto idx : g->fast()) {
