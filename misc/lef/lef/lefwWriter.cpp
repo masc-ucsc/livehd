@@ -1,22 +1,22 @@
 // *****************************************************************************
 // *****************************************************************************
 // Copyright 2012 - 2017, Cadence Design Systems
-// 
+//
 // This  file  is  part  of  the  Cadence  LEF/DEF  Open   Source
-// Distribution,  Product Version 5.8. 
-// 
+// Distribution,  Product Version 5.8.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 //    you may not use this file except in compliance with the License.
 //    You may obtain a copy of the License at
-// 
+//
 //        http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 //    Unless required by applicable law or agreed to in writing, software
 //    distributed under the License is distributed on an "AS IS" BASIS,
 //    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 //    implied. See the License for the specific language governing
 //    permissions and limitations under the License.
-// 
+//
 // For updates, support, or to become part of the LEF/DEF Community,
 // check www.openeda.org for details.
 // *****************************************************************************
@@ -478,7 +478,7 @@ lefwInit(FILE *f)
 {
     int i;
 
-    // Check if the user is valid 
+    // Check if the user is valid
     /* don't need anymore
     if (!lefiValidUser())
         exit(77);
@@ -812,11 +812,11 @@ lefwUseMinSpacing(const char    *type,
     // Can define more than once
     // if (lefwSynArray[LEFW_USEMINSPACING]) return LEFW_ALREADY_DEFINED;
     if (!type || (strcmp(type, "OBS") && strcmp(type, "PIN")))
-        return LEFW_BAD_DATA;   // has to be OBS or PIN 
+        return LEFW_BAD_DATA;   // has to be OBS or PIN
     if ((strcmp(type, "PIN") == 0) && (versionNum >= 5.6))
         return LEFW_OBSOLETE;
     if (!onOff || (strcmp(onOff, "ON") && strcmp(onOff, "OFF")))
-        return LEFW_BAD_DATA;   // has to be ON or OFF 
+        return LEFW_BAD_DATA;   // has to be ON or OFF
     if (versionNum < 5.4)
         return LEFW_WRONG_VERSION;
     if (lefwWriteEncrypt)
@@ -841,7 +841,7 @@ lefwClearanceMeasure(const char *type)
     if (lefwSynArray[LEFW_CLEARANCEMEASURE])
         return LEFW_ALREADY_DEFINED;
     if (!type || (strcmp(type, "MAXXY") && strcmp(type, "EUCLIDEAN")))
-        return LEFW_BAD_DATA;   // has to be MAXXY or EUCLIDEAN 
+        return LEFW_BAD_DATA;   // has to be MAXXY or EUCLIDEAN
     if (versionNum < 5.4)
         return LEFW_WRONG_VERSION;
     if (lefwWriteEncrypt)
@@ -874,13 +874,13 @@ lefwStartUnits()
 }
 
 int
-lefwUnits(double    time,        // optional 
-          double    capacitance, // optional 
-          double    resistance,  // optional 
-          double    power,       // optional 
-          double    current,     // optional 
-          double    voltage,     // optional 
-          double    database     // optional 
+lefwUnits(double    time,        // optional
+          double    capacitance, // optional
+          double    resistance,  // optional
+          double    power,       // optional
+          double    current,     // optional
+          double    voltage,     // optional
+          double    database     // optional
           )
 {
 
@@ -954,7 +954,7 @@ lefwUnits(double    time,        // optional
 
 int
 lefwUnitsFrequency(double frequency)
-{  // required since only by itself 
+{  // required since only by itself
 
     if (!lefwFile)
         return LEFW_UNINITIALIZED;
@@ -1060,7 +1060,7 @@ int
 lefwLayerCutSpacingCenterToCenter()
 {
     if (!lefwIsLayerCutSpacing)
-        return LEFW_BAD_ORDER; // has to be after 
+        return LEFW_BAD_ORDER; // has to be after
     // lefwLayerCutSpacing is called
     if (lefwWriteEncrypt)
         encPrint(lefwFile, (char*) "\n     CENTERTOCENTER");
@@ -1077,7 +1077,7 @@ int
 lefwLayerCutSpacingSameNet()
 {
     if (!lefwIsLayerCutSpacing)
-        return LEFW_BAD_ORDER; // has to be after 
+        return LEFW_BAD_ORDER; // has to be after
     // lefwLayerCutSpacing is called
     if (lefwWriteEncrypt)
         encPrint(lefwFile, (char*) "\n     SAMENET");
@@ -1093,9 +1093,9 @@ lefwLayerCutSpacingSameNet()
 int
 lefwLayerCutSpacingLayer(const char *name2,
                          int        stack)
-{   // optional 
+{   // optional
     if (!lefwIsLayerCutSpacing)
-        return LEFW_BAD_ORDER; // has to be after 
+        return LEFW_BAD_ORDER; // has to be after
     // lefwLayerCutSpacing is called
     if (lefwWriteEncrypt) {
         encPrint(lefwFile, (char*) "\n     LAYER %s", name2);
@@ -1114,12 +1114,12 @@ lefwLayerCutSpacingLayer(const char *name2,
 
 // 5.7
 int
-lefwLayerCutSpacingAdjacent(int     viaCuts,    // either 2, 3 or 4, optional 
+lefwLayerCutSpacingAdjacent(int     viaCuts,    // either 2, 3 or 4, optional
                             double  distance,
                             int     except)
-{ // optional 
+{ // optional
     if (!lefwIsLayerCutSpacing)
-        return LEFW_BAD_ORDER; // has to be after 
+        return LEFW_BAD_ORDER; // has to be after
     // lefwLayerCutSpacing is called
     if (lefwWriteEncrypt) {
         if (viaCuts < 2 && viaCuts > 4)
@@ -1148,7 +1148,7 @@ int
 lefwLayerCutSpacingParallel()
 {
     if (!lefwIsLayerCutSpacing)
-        return LEFW_BAD_ORDER; // has to be after 
+        return LEFW_BAD_ORDER; // has to be after
     // lefwLayerCutSpacing is called
     if (lefwWriteEncrypt) {
         encPrint(lefwFile, (char*) "\n     PARALLELOVERLAP");
@@ -1166,7 +1166,7 @@ int
 lefwLayerCutSpacingArea(double cutArea)
 {
     if (!lefwIsLayerCutSpacing)
-        return LEFW_BAD_ORDER; // has to be after 
+        return LEFW_BAD_ORDER; // has to be after
     // lefwLayerCutSpacing is called
     if (lefwWriteEncrypt) {
         encPrint(lefwFile, (char*) "\n     AREA %.11g", cutArea);
@@ -1184,7 +1184,7 @@ int
 lefwLayerCutSpacingEnd()
 {
     if (!lefwIsLayerCutSpacing)
-        return LEFW_BAD_ORDER; // has to be after 
+        return LEFW_BAD_ORDER; // has to be after
     // lefwLayerCutSpacing is called
     if (lefwWriteEncrypt) {
         encPrint(lefwFile, (char*) " ;\n");
@@ -1347,7 +1347,7 @@ lefwLayerEnclosure(const char   *location,
                    double       overhang1,
                    double       overhang2,
                    double       width)
-{         // optional 
+{         // optional
     if (!lefwFile)
         return LEFW_UNINITIALIZED;
     if (lefwState != LEFW_LAYER_START &&
@@ -1396,9 +1396,9 @@ int
 lefwLayerEnclosureWidth(const char  *location,
                         double      overhang1,
                         double      overhang2,
-                        double      width,               // optional 
+                        double      width,               // optional
                         double      cutWithin)
-{         // optional 
+{         // optional
     if (!lefwFile)
         return LEFW_UNINITIALIZED;
     if (lefwState != LEFW_LAYER_START &&
@@ -1454,7 +1454,7 @@ lefwLayerEnclosureLength(const char *location,
                          double     overhang1,
                          double     overhang2,
                          double     minLength)
-{         // optional 
+{         // optional
     if (!lefwFile)
         return LEFW_UNINITIALIZED;
     if (lefwState != LEFW_LAYER_START &&
@@ -1503,7 +1503,7 @@ lefwLayerPreferEnclosure(const char *location,
                          double     overhang1,
                          double     overhang2,
                          double     width)
-{         // optional 
+{         // optional
     if (!lefwFile)
         return LEFW_UNINITIALIZED;
     if (lefwState != LEFW_LAYER_START &&
@@ -3764,7 +3764,7 @@ lefwLayerAntennaCumSideAreaRatio(double value)
 
 // 11/25/2002 - bug fix: submitted by Craig Files (cfiles@ftc.agilent.com)
 // Renamed from lefwLayerAntennaCumSideDiffAreaRatio to match
-// the header  
+// the header
 int
 lefwLayerAntennaCumDiffSideAreaRatio(double value)
 {
@@ -4104,8 +4104,8 @@ int
 lefwIntPropDef(const char   *objType,
                const char   *propName,
                double       leftRange,
-               double       rightRange,    // optional 
-               int          propValue                        // optional 
+               double       rightRange,    // optional
+               int          propValue                        // optional
                )
 {
 
@@ -4156,8 +4156,8 @@ int
 lefwRealPropDef(const char  *objType,
                 const char  *propName,
                 double      leftRange,
-                double      rightRange,    // optional 
-                double      propValue                        // optional 
+                double      rightRange,    // optional
+                double      propValue                        // optional
                 )
 {
 
@@ -4205,8 +4205,8 @@ int
 lefwStringPropDef(const char    *objType,
                   const char    *propName,
                   double        leftRange,
-                  double        rightRange,    // optional 
-                  const char    *propValue                   // optional 
+                  double        rightRange,    // optional
+                  const char    *propValue                   // optional
                   )
 {
 
@@ -4289,7 +4289,7 @@ lefwEnd()
 int
 lefwStartVia(const char *viaName,
              const char *isDefault)
-{   // optional 
+{   // optional
     if (!lefwFile)
         return LEFW_UNINITIALIZED;
     if (!lefwDidInit)
@@ -4298,7 +4298,7 @@ lefwStartVia(const char *viaName,
         lefwState == LEFW_VIA)
         return LEFW_BAD_ORDER;
     if (lefwState != LEFW_INIT && lefwState < LEFW_END &&
-        (!lefwIsNonDefaultRule))  // via defined in nondefaultrule 
+        (!lefwIsNonDefaultRule))  // via defined in nondefaultrule
         return LEFW_BAD_ORDER;  // not of the ENDs
 
     if (lefwWriteEncrypt) {
@@ -4342,10 +4342,10 @@ lefwViaTopofstackonly()
 
 int
 lefwViaForeign(const char   *foreignName,
-               double       xl,          // optional 
-               double       yl,          // optional 
+               double       xl,          // optional
+               double       yl,          // optional
                int          orient)
-{        // optional 
+{        // optional
     lefwObsoleteNum = LEFW_VIAFOREIGN;
     if (!lefwFile)
         return LEFW_UNINITIALIZED;
@@ -4361,7 +4361,7 @@ lefwViaForeign(const char   *foreignName,
             encPrint(lefwFile, (char*) "%.11g %.11g ", xl, yl);
             if (orient >= 0 && orient <= 7)
                 encPrint(lefwFile, (char*) "%s ", lefwOrient(orient));
-        } else if (orient > 0 && orient <= 7) { // assume user has 0 0 for pt 
+        } else if (orient > 0 && orient <= 7) { // assume user has 0 0 for pt
             encPrint(lefwFile, (char*) "%.11g %.11g ", xl, yl);
             encPrint(lefwFile, (char*) "%s ", lefwOrient(orient));
         }
@@ -4372,7 +4372,7 @@ lefwViaForeign(const char   *foreignName,
             fprintf(lefwFile, "%.11g %.11g ", xl, yl);
             if (orient >= 0 && orient <= 7)
                 fprintf(lefwFile, "%s ", lefwOrient(orient));
-        } else if (orient > 0 && orient <= 7) { // assume user has 0 0 for pt 
+        } else if (orient > 0 && orient <= 7) { // assume user has 0 0 for pt
             fprintf(lefwFile, "%.11g %.11g ", xl, yl);
             fprintf(lefwFile, "%s ", lefwOrient(orient));
         }
@@ -4386,10 +4386,10 @@ lefwViaForeign(const char   *foreignName,
 
 int
 lefwViaForeignStr(const char    *foreignName,
-                  double        xl,            // optional 
-                  double        yl,            // optional 
+                  double        xl,            // optional
+                  double        yl,            // optional
                   const char    *orient)
-{  // optional 
+{  // optional
     lefwObsoleteNum = LEFW_VIAFOREIGN;
     if (!lefwFile)
         return LEFW_UNINITIALIZED;
@@ -4405,7 +4405,7 @@ lefwViaForeignStr(const char    *foreignName,
             encPrint(lefwFile, (char*) "%.11g %.11g ", xl, yl);
             if (orient && *orient != '\0')
                 encPrint(lefwFile, (char*) "%s ", orient);
-        } else if (orient && *orient != '\0') { // assume user has 0 0 for pt 
+        } else if (orient && *orient != '\0') { // assume user has 0 0 for pt
             encPrint(lefwFile, (char*) "%.11g %.11g ", xl, yl);
             encPrint(lefwFile, (char*) "%s ", orient);
         }
@@ -4416,7 +4416,7 @@ lefwViaForeignStr(const char    *foreignName,
             fprintf(lefwFile, "%.11g %.11g ", xl, yl);
             if (orient && *orient != '\0')
                 fprintf(lefwFile, "%s ", orient);
-        } else if (orient && *orient != '\0') { // assume user has 0 0 for pt 
+        } else if (orient && *orient != '\0') { // assume user has 0 0 for pt
             fprintf(lefwFile, "%.11g %.11g ", xl, yl);
             fprintf(lefwFile, "%s ", orient);
         }
@@ -4879,10 +4879,10 @@ int
 lefwViaRuleLayer(const char *layerName,
                  const char *direction,
                  double     minWidth,
-                 double     maxWidth,        // optional 
+                 double     maxWidth,        // optional
                  double     overhang,
                  double     metalOverhang)
-{ // optional 
+{ // optional
     int status;
 
     if (!lefwFile)
@@ -4992,10 +4992,10 @@ int
 lefwViaRuleGenLayer(const char  *layerName,
                     const char  *direction,
                     double      minWidth,
-                    double      maxWidth,        // optional 
+                    double      maxWidth,        // optional
                     double      overhang,
                     double      metalOverhang)
-{ // optional 
+{ // optional
     int status;
 
     if (!lefwFile)
@@ -5025,7 +5025,7 @@ lefwViaRuleGenLayerEnclosure(const char *layerName,
                              double     overhang2,
                              double     minWidth,
                              double     maxWidth)
-{       // optional 
+{       // optional
 
     if (!lefwFile)
         return LEFW_UNINITIALIZED;
@@ -5075,7 +5075,7 @@ lefwViaRuleGenLayer3(const char *layerName,
                      double     xSpacing,
                      double     ySpacing,
                      double     resistance)
-{    // optional 
+{    // optional
 
     if (!lefwFile)
         return LEFW_UNINITIALIZED;
@@ -5363,7 +5363,7 @@ lefwEndNonDefaultRule(const char *ruleName)
         lefwState != LEFW_NONDEFAULTRULE &&
         lefwState != LEFW_VIA_END && lefwState != LEFW_SPACING_END)
         return LEFW_BAD_ORDER;
-    // can be right after a via or spacing defined in nondefaultrule 
+    // can be right after a via or spacing defined in nondefaultrule
     if (lefwWriteEncrypt)
         encPrint(lefwFile, (char*) "END %s\n\n", ruleName);
     else
@@ -5405,7 +5405,7 @@ lefwSpacing(const char  *layerName1,
             const char  *layerName2,
             double      minSpace,
             const char  *stack)
-{  // optioanl 
+{  // optioanl
     lefwObsoleteNum = LEFW_SPACING;
     if (!lefwFile)
         return LEFW_UNINITIALIZED;
@@ -5783,7 +5783,7 @@ lefwMinFeature(double   x,
 //    if (lefwSynArray[LEFW_DIELECTRIC]) return LEFW_ALREADY_DEFINED;
 //    fprintf(lefwFile, "DIELECTRIC %.11g ;\n", dielectric);
 //    lefwSynArray[LEFW_DIELECTRIC] = 1;
-//    return LEFW_OK; 
+//    return LEFW_OK;
 //  }
 // ********************
 
@@ -6625,7 +6625,7 @@ lefwMacroForeign(const char *name,
                  double     xl,
                  double     yl,
                  int        orient)
-{    // optional 
+{    // optional
     if (!lefwFile)
         return LEFW_UNINITIALIZED;
     if (!lefwDidInit)
@@ -6641,7 +6641,7 @@ lefwMacroForeign(const char *name,
             encPrint(lefwFile, (char*) "%.11g %.11g ", xl, yl);
             if (orient >= 0 && orient <= 7)
                 encPrint(lefwFile, (char*) "%s ", lefwOrient(orient));
-        } else if (orient > 0 && orient <= 7) {  // assume user has 0, 0 pt 
+        } else if (orient > 0 && orient <= 7) {  // assume user has 0, 0 pt
             encPrint(lefwFile, (char*) "%.11g %.11g ", xl, yl);
             encPrint(lefwFile, (char*) "%s ", lefwOrient(orient));
         }
@@ -6652,7 +6652,7 @@ lefwMacroForeign(const char *name,
             fprintf(lefwFile, "%.11g %.11g ", xl, yl);
             if (orient >= 0 && orient <= 7)
                 fprintf(lefwFile, "%s ", lefwOrient(orient));
-        } else if (orient > 0 && orient <= 7) {  // assume user has 0, 0 pt 
+        } else if (orient > 0 && orient <= 7) {  // assume user has 0, 0 pt
             fprintf(lefwFile, "%.11g %.11g ", xl, yl);
             fprintf(lefwFile, "%s ", lefwOrient(orient));
         }
@@ -6685,7 +6685,7 @@ lefwMacroForeignStr(const char  *name,
             encPrint(lefwFile, (char*) "%.11g %.11g ", xl, yl);
             if (orient && *orient != '\0')
                 encPrint(lefwFile, (char*) "%s ", orient);
-        } else if (orient && *orient != '\0') {  // assume user has 0, 0 pt 
+        } else if (orient && *orient != '\0') {  // assume user has 0, 0 pt
             encPrint(lefwFile, (char*) "%.11g %.11g ", xl, yl);
             encPrint(lefwFile, (char*) "%s ", orient);
         }
@@ -6696,7 +6696,7 @@ lefwMacroForeignStr(const char  *name,
             fprintf(lefwFile, "%.11g %.11g ", xl, yl);
             if (orient && *orient != '\0')
                 fprintf(lefwFile, "%s ", orient);
-        } else if (orient && *orient != '\0') {  // assume user has 0, 0 pt 
+        } else if (orient && *orient != '\0') {  // assume user has 0, 0 pt
             fprintf(lefwFile, "%.11g %.11g ", xl, yl);
             fprintf(lefwFile, "%s ", orient);
         }
@@ -6711,7 +6711,7 @@ lefwMacroForeignStr(const char  *name,
 int
 lefwMacroOrigin(double  xl,
                 double  yl)
-{    // optional 
+{    // optional
     if (!lefwFile)
         return LEFW_UNINITIALIZED;
     if (!lefwDidInit)
@@ -7066,7 +7066,7 @@ lefwStartMacroPin(const char *pinName)
 
 int
 lefwMacroPinTaperRule(const char *ruleName)
-{ // opitonal 
+{ // opitonal
     if (!lefwFile)
         return LEFW_UNINITIALIZED;
     if (!lefwDidInit)
@@ -7090,7 +7090,7 @@ lefwMacroPinForeign(const char  *name,
                     double      xl,
                     double      yl,
                     int         orient)
-{ // optional 
+{ // optional
     lefwObsoleteNum = LEFW_MACRO_PINFOREIGN;
     if (!lefwFile)
         return LEFW_UNINITIALIZED;
@@ -7108,7 +7108,7 @@ lefwMacroPinForeign(const char  *name,
             encPrint(lefwFile, (char*) "STRUCTURE %.11g %.11g ", xl, yl);
             if (orient >= 0 && orient <= 7)
                 encPrint(lefwFile, (char*) "%s ", lefwOrient(orient));
-        } else if (orient > 0 && orient <= 7) { // assume user has 0 0 for pt 
+        } else if (orient > 0 && orient <= 7) { // assume user has 0 0 for pt
             encPrint(lefwFile, (char*) "STRUCTURE %.11g %.11g ", xl, yl);
             encPrint(lefwFile, (char*) "%s ", lefwOrient(orient));
         }
@@ -7119,7 +7119,7 @@ lefwMacroPinForeign(const char  *name,
             fprintf(lefwFile, "STRUCTURE %.11g %.11g ", xl, yl);
             if (orient >= 0 && orient <= 7)
                 fprintf(lefwFile, "%s ", lefwOrient(orient));
-        } else if (orient > 0 && orient <= 7) { // assume user has 0 0 for pt 
+        } else if (orient > 0 && orient <= 7) { // assume user has 0 0 for pt
             fprintf(lefwFile, "STRUCTURE %.11g %.11g ", xl, yl);
             fprintf(lefwFile, "%s ", lefwOrient(orient));
         }
@@ -7135,9 +7135,9 @@ lefwMacroPinForeign(const char  *name,
 int
 lefwMacroPinForeignStr(const char   *name,
                        double       xl,
-                       double       yl, // optional 
+                       double       yl, // optional
                        const char   *orient)
-{ // optional 
+{ // optional
     lefwObsoleteNum = LEFW_MACRO_PINFOREIGN;
     if (!lefwFile)
         return LEFW_UNINITIALIZED;
@@ -7155,7 +7155,7 @@ lefwMacroPinForeignStr(const char   *name,
             encPrint(lefwFile, (char*) "STRUCTURE %.11g %.11g ", xl, yl);
             if (orient && *orient != '\0')
                 encPrint(lefwFile, (char*) "%s ", orient);
-        } else if (orient && *orient != '\0') { // assume user has 0 0 for pt 
+        } else if (orient && *orient != '\0') { // assume user has 0 0 for pt
             encPrint(lefwFile, (char*) "STRUCTURE %.11g %.11g ", xl, yl);
             encPrint(lefwFile, (char*) "%s ", orient);
         }
@@ -7166,7 +7166,7 @@ lefwMacroPinForeignStr(const char   *name,
             fprintf(lefwFile, "STRUCTURE %.11g %.11g ", xl, yl);
             if (orient && *orient != '\0')
                 fprintf(lefwFile, "%s ", orient);
-        } else if (orient && *orient != '\0') { // assume user has 0 0 for pt 
+        } else if (orient && *orient != '\0') { // assume user has 0 0 for pt
             fprintf(lefwFile, "STRUCTURE %.11g %.11g ", xl, yl);
             fprintf(lefwFile, "%s ", orient);
         }
@@ -8210,7 +8210,7 @@ lefwEndMacroPin(const char *pinName)
 
 int
 lefwStartMacroPinPort(const char *classType)
-{    // optional 
+{    // optional
 
     if (!lefwFile)
         return LEFW_UNINITIALIZED;
@@ -8335,11 +8335,11 @@ lefwMacroPinPortLayerPath(int       num_paths,
                           double    *xl,
                           double    *yl,
                           int       numX,
-                          int       numY,           // optional 
+                          int       numY,           // optional
                           double    spaceX,
-                          double    spaceY, // optional 
+                          double    spaceY, // optional
                           int       mask)
-{                   // optional 
+{                   // optional
     int i, numItem;
 
     if (!lefwFile)
@@ -8441,11 +8441,11 @@ lefwMacroPinPortLayerRect(double    xl1,
                           double    xl2,
                           double    yl2,
                           int       numX,
-                          int       numY,             // optional 
+                          int       numY,             // optional
                           double    spaceX,
-                          double    spaceY,   // optional 
+                          double    spaceY,   // optional
                           int       mask)
-{                     // optional 
+{                     // optional
     if (!lefwFile)
         return LEFW_UNINITIALIZED;
     if (!lefwDidInit)
@@ -8517,11 +8517,11 @@ lefwMacroPinPortLayerPolygon(int    num_polys,
                              double *xl,
                              double *yl,
                              int    numX,
-                             int    numY,             // optional 
+                             int    numY,             // optional
                              double spaceX,
-                             double spaceY,   // optional 
+                             double spaceY,   // optional
                              int    mask)
-{                    // optional 
+{                    // optional
     int i;
 
     if (!lefwFile)
@@ -8618,11 +8618,11 @@ lefwMacroPinPortVia(double      xl,
                     double      yl,
                     const char  *viaName,
                     int         numX,
-                    int         numY,             // optional 
+                    int         numY,             // optional
                     double      spaceX,
-                    double      spaceY,   // optional 
+                    double      spaceY,   // optional
                     int         mask)
-{                     // optional 
+{                     // optional
     if (!lefwFile)
         return LEFW_UNINITIALIZED;
     if (!lefwDidInit)
@@ -8839,11 +8839,11 @@ lefwMacroObsLayerPath(int       num_paths,
                       double    *xl,
                       double    *yl,
                       int       numX,
-                      int       numY,             // optional 
+                      int       numY,             // optional
                       double    spaceX,
-                      double    spaceY,   // optional 
+                      double    spaceY,   // optional
                       int       mask)
-{                      // optional 
+{                      // optional
     int i, numItem;
 
     if (!lefwFile)
@@ -8944,11 +8944,11 @@ lefwMacroObsLayerRect(double    xl1,
                       double    xl2,
                       double    yl2,
                       int       numX,
-                      int       numY,             // optional 
+                      int       numY,             // optional
                       double    spaceX,
-                      double    spaceY,   // optional 
+                      double    spaceY,   // optional
                       int       mask)
-{                     // optional 
+{                     // optional
     if (!lefwFile)
         return LEFW_UNINITIALIZED;
     if (!lefwDidInit)
@@ -9019,11 +9019,11 @@ lefwMacroObsLayerPolygon(int    num_polys,
                          double *xl,
                          double *yl,
                          int    numX,
-                         int    numY,             // optional 
+                         int    numY,             // optional
                          double spaceX,
-                         double spaceY,   // optional 
+                         double spaceY,   // optional
                          int    mask)
-{                    // optional 
+{                    // optional
     int i;
 
     if (!lefwFile)
@@ -9118,11 +9118,11 @@ lefwMacroObsVia(double      xl,
                 double      yl,
                 const char  *viaName,
                 int         numX,
-                int         numY,             // optional 
+                int         numY,             // optional
                 double      spaceX,
-                double      spaceY,   // optional 
+                double      spaceY,   // optional
                 int         mask)
-{                     // optional 
+{                     // optional
     if (!lefwFile)
         return LEFW_UNINITIALIZED;
     if (!lefwDidInit)
@@ -9260,12 +9260,12 @@ lefwMacroTimingIntrinsic(const char *riseFall,
                          double     min,
                          double     max,
                          double     slewT1,
-                         double     slewT1Min,       // optional 
+                         double     slewT1Min,       // optional
                          double     slewT1Max,
-                         double     slewT2,       // optional 
+                         double     slewT2,       // optional
                          double     slewT2Min,
-                         double     slewT2Max,    // optional 
-                         double     slewT3,                         // optional 
+                         double     slewT2Max,    // optional
+                         double     slewT3,                         // optional
                          double     varMin,
                          double     varMax)
 {
@@ -9657,7 +9657,7 @@ lefwBeginextDate()
         lefwState != LEFW_BEGINEXT)
         return LEFW_BAD_ORDER;
 
-    todayTime = time(NULL);             // time in UTC 
+    todayTime = time(NULL);             // time in UTC
     rettime = ctime(&todayTime);        // convert to string
     rettime[strlen(rettime) - 1] = '\0';  // replace \n with \0
     if (lefwWriteEncrypt)

@@ -1,25 +1,25 @@
 // *****************************************************************************
 // *****************************************************************************
 // Copyright 2012 - 2017, Cadence Design Systems
-// 
+//
 // This  file  is  part  of  the  Cadence  LEF/DEF  Open   Source
-// Distribution,  Product Version 5.8. 
-// 
+// Distribution,  Product Version 5.8.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 //    you may not use this file except in compliance with the License.
 //    You may obtain a copy of the License at
-// 
+//
 //        http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 //    Unless required by applicable law or agreed to in writing, software
 //    distributed under the License is distributed on an "AS IS" BASIS,
 //    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 //    implied. See the License for the specific language governing
 //    permissions and limitations under the License.
-// 
+//
 // For updates, support, or to become part of the LEF/DEF Community,
 // check www.openeda.org for details.
-// 
+//
 //  $Author: arakhman $
 //  $Revision: #11 $
 //  $Date: 2013/04/23 $
@@ -39,7 +39,7 @@
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
-struct lefCompareCStrings 
+struct lefCompareCStrings
 {
     bool operator()(const char* lhs, const char* rhs) const {
         return std::strcmp(lhs, rhs) < 0;
@@ -53,14 +53,14 @@ typedef std::set<std::string>               StringSet;
 
 class lefrProps {
 public:
-    lefiPropType  lefrCompProp; 
-    lefiPropType  lefrLayerProp; 
-    lefiPropType  lefrLibProp; 
-    lefiPropType  lefrMacroProp; 
-    lefiPropType  lefrNondefProp; 
-    lefiPropType  lefrPinProp; 
-    lefiPropType  lefrViaProp; 
-    lefiPropType  lefrViaRuleProp; 
+    lefiPropType  lefrCompProp;
+    lefiPropType  lefrLayerProp;
+    lefiPropType  lefrLibProp;
+    lefiPropType  lefrMacroProp;
+    lefiPropType  lefrNondefProp;
+    lefiPropType  lefrPinProp;
+    lefiPropType  lefrViaProp;
+    lefiPropType  lefrViaRuleProp;
 };
 
 class lefrSettings {
@@ -69,7 +69,7 @@ public:
 
     void            init_symbol_table();
     static void     reset();
-    void            addLef58Type(const char *lef58Type, 
+    void            addLef58Type(const char *lef58Type,
                                  const char **layerType);
 
     std::string     getLayerLef58Types(const char *type) const;
@@ -79,10 +79,10 @@ public:
     void            enableAllMsgs();
     int             suppresMsg(int msgId);
 
-    static std::string     getToken(const std::string   &input, 
+    static std::string     getToken(const std::string   &input,
                                     int                 &startIdx);
 
-    lefKeywordMap       Keyword_set; 
+    lefKeywordMap       Keyword_set;
 
     char CommentChar;
     double VersionNum;
@@ -115,7 +115,7 @@ public:
     int OutputAntennaWarnings;
     int PinWarnings;
     LEFI_READ_FUNCTION ReadFunction;
-    int ReadEncrypted; 
+    int ReadEncrypted;
     int RegisterUnused;
     int RelaxMode;
     int ShiftCase;
@@ -142,7 +142,7 @@ public:
     int MsgLimit[MAX_LEF_MSGS];
 
     MsgsDisableMap msgsDisableMap;
-    int  dAllMsgs; 
+    int  dAllMsgs;
 
     lefrProps lefProps;
 };

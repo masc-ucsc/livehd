@@ -2495,8 +2495,10 @@ int main(int argc, char **argv) {
 
       status = lefwInit(fout); // initialize the lef writer,
       // need to be called 1st
-      if(status != LEFW_OK)
+      if(status != LEFW_OK) {
+        fclose(f);
         return 1;
+      }
 
       res = lefrRead(f, inFile[fileCt], (void *)userData);
 

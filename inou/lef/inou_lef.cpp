@@ -75,9 +75,9 @@ int lef_pin_cb(lefrCallbackType_e c, lefiPin *fpin, lefiUserData ud) {
 
   auto &tmp_cell = tlib->get_vec_cell_types()->back();
   if(is_input) {
-    tmp_cell.set_direction(tmp_cell.add_pin(fpin->name()), Tech_cell::Direction::input);
+    tmp_cell.add_pin(fpin->name(), Tech_cell::Direction::input);
   } else {
-    tmp_cell.set_direction(tmp_cell.add_pin(fpin->name()), Tech_cell::Direction::output);
+    tmp_cell.add_pin(fpin->name(), Tech_cell::Direction::output);
   }
 
   Tech_cell::Pin &pin_info = tmp_cell.get_vec_pins()->back();
@@ -113,13 +113,11 @@ int lef_layer_cb(lefrCallbackType_e c, lefiLayer *flayer, lefiUserData ud) {
   assert(c);
   auto *tlib = static_cast<Tech_library *>(ud);
 
-  int               i, j, k;
   lefiSpacingTable *spTable;
-  lefiParallel *    parallel;
+  lefiParallel *parallel;
 
-  if(strcmp(flayer->name(), "OVERLAP") == 0) {
+  if(strcmp(flayer->name(), "OVERLAP") == 0)
     return 0; //do nothing when layer name = OVERLAP
-  }
 
   tlib->increase_vec_layers_size();
   auto &tmp_layer = tlib->get_vec_layers()->back();
@@ -148,31 +146,30 @@ int lef_layer_cb(lefrCallbackType_e c, lefiLayer *flayer, lefiUserData ud) {
   tmp_layer.width = flayer->width();
 
   if(flayer->hasSpacingNumber()) {
-    for(i = 0; i < flayer->numSpacing(); i++) {
-      if(i == 0)
-        tmp_layer.spacing = flayer->spacing(i);
-      else if(flayer->hasSpacingEndOfLine(i)) {
-        tmp_layer.spacing_eol.push_back(flayer->spacing(i));
+    for(int i = 0; i < flayer->numSpacing(); i++) {
+      tmp_layer.spacing_eol.push_back(flayer->spacing(i));
+      if(i != 0 && flayer->hasSpacingEndOfLine(i)) {
         tmp_layer.spacing_eol.push_back(flayer->spacingEolWidth(i));
         tmp_layer.spacing_eol.push_back(flayer->spacingEolWithin(i));
       }
     }
   }
 
-  for(i = 0; i < flayer->numSpacingTable(); i++) {
+  for(int i = 0; i < flayer->numSpacingTable(); i++) {
     spTable = flayer->spacingTable(i);
     if(spTable->lefiSpacingTable::isParallel()) {
       parallel = spTable->lefiSpacingTable::parallel();
-      for(j = 0; j < parallel->lefiParallel::numLength(); j++)
+      for(int j = 0; j < parallel->lefiParallel::numLength(); j++)
         tmp_layer.spctb_prl = parallel->lefiParallel::length(j);
 
-      for(j = 0; j < parallel->lefiParallel::numWidth(); j++) {
+      for(int j = 0; j < parallel->lefiParallel::numWidth(); j++) {
         tmp_layer.spctb_width.push_back(parallel->lefiParallel::width(j));
-        for(k = 0; k < parallel->lefiParallel::numLength(); k++)
+        for(int k = 0; k < parallel->lefiParallel::numLength(); k++)
           tmp_layer.spctb_spacing.push_back(parallel->lefiParallel::widthSpacing(j, k));
       }
     }
   }
+
   return 0;
 }
 

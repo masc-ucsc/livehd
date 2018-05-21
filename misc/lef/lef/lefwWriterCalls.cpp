@@ -1,22 +1,22 @@
 // *****************************************************************************
 // *****************************************************************************
 // Copyright 2012 - 2013, Cadence Design Systems
-// 
+//
 // This  file  is  part  of  the  Cadence  LEF/DEF  Open   Source
-// Distribution,  Product Version 5.8. 
-// 
+// Distribution,  Product Version 5.8.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 //    you may not use this file except in compliance with the License.
 //    You may obtain a copy of the License at
-// 
+//
 //        http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 //    Unless required by applicable law or agreed to in writing, software
 //    distributed under the License is distributed on an "AS IS" BASIS,
 //    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 //    implied. See the License for the specific language governing
 //    permissions and limitations under the License.
-// 
+//
 // For updates, support, or to become part of the LEF/DEF Community,
 // check www.openeda.org for details.
 // *****************************************************************************
@@ -32,7 +32,7 @@
 // the required sections.
 //
 // Author: Wanda da Rosa
-// Date:   05/06/99 
+// Date:   05/06/99
 //
 // Revisions:
 
@@ -76,7 +76,7 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
 #define lefwExtCbk 28
 #define lefwEndLibCbk 29
 
-// NEW CALLBACK - then place it here. 
+// NEW CALLBACK - then place it here.
 
 int lefWRetVal;
 extern int lefwHasInit;
@@ -116,7 +116,7 @@ lefwVoidCbkFnType lefwCallbacksSeq[MAXCBS] = {
     0, // lefwManufacturingGridCbk
     0, // lefwUseMinSpacingCbk
     0, // lefwClearanceMeasureCbk
-    0, // lefwUnitsCbk 
+    0, // lefwUnitsCbk
     0, // lefwAntennaInputGateAreaCbk
     0, // lefwAntennaInOutDiffAreaCbk
     0, // lefwAntennaOutputDiffAreaCbk
@@ -303,7 +303,7 @@ lefwSetUnusedCallbacks(lefwVoidCbkFnType func)
     }
 }
 
-// These count up the number of times an unset callback is called... 
+// These count up the number of times an unset callback is called...
 static int lefwUnusedCount[100];
 
 int
@@ -439,7 +439,7 @@ lefwPrintUnusedCallbacks(FILE *f)
             case lefwEndLibCbkType:
                 fprintf(f, "End Library");
                 break;
-                // NEW CALLBACK  add the print here 
+                // NEW CALLBACK  add the print here
             default:
                 fprintf(f, "BOGUS ENTRY");
                 break;

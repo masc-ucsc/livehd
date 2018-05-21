@@ -45,6 +45,22 @@ bool Edge::is_last_output() const {
   return ((this + sz) >= node.get_output_end());
 }
 
+const Edge *Edge::find_edge(const Edge *bt, const Edge *et, Index_ID ptr_nid, Port_ID inp_pid, Port_ID out_pid) const {
+
+  const Edge *eit = bt;
+  while(eit != et) {
+    if(eit->get_idx() == ptr_nid && eit->get_inp_pid() == inp_pid && eit->get_out_pid() == out_pid)
+      return eit;
+
+    if(eit->is_snode())
+      eit++;
+    else
+      eit += 3;
+  }
+
+  return 0;
+}
+
 const Edge &Edge::get_reverse_for_deletion() const {
   Node_Internal *ptr_node = &Node_Internal::get(this);
   Index_ID       ptr_idx  = ptr_node->get_self_idx();
@@ -60,57 +76,21 @@ const Edge &Edge::get_reverse_for_deletion() const {
   ptr_inp->dump();
   fmt::print("\n");
 #endif
-  if(!input) {
-    // If it was an output, it has to be an input in the other side
-    do {
-      const Edge *eit = ptr_inp->get_input_begin();
-      while(eit != ptr_inp->get_input_end()) {
-#ifdef DEBUG
-        console->info("OUT:get_reverse {} {} {} vs {} {} sedge:{}", ptr_idx, ptr_nid, out_pid,
-                      eit->get_idx(), eit->get_inp_pid(), eit->is_snode());
-        eit->dump();
-        fmt::print(" {}\n", sizeof(Edge));
-#endif
-        if(eit->get_idx() == ptr_nid && eit->get_inp_pid() == out_pid && eit->get_out_pid() == inp_pid) {
-          return *eit;
-        }
-        if(eit->is_snode())
-          eit++;
-        else
-          eit += 3;
-      }
-      assert(!ptr_inp->is_last_state()); // Not found all over
+  do {
+    const Edge *eit;
+    if (!input)
+      eit = find_edge(ptr_inp->get_input_begin() , ptr_inp->get_input_end(), ptr_nid, inp_pid, out_pid);
+    else
+      eit = find_edge(ptr_inp->get_output_begin(), ptr_inp->get_output_end(), ptr_nid, inp_pid, out_pid);
 
-      ptr_inp = &ptr_node[ptr_inp->get_next() - ptr_idx];
-    } while(true);
+    if (eit)
+      return *eit;
+    assert(!ptr_inp->is_last_state()); // Not found all over
 
-  } else {
-
-    do {
-      const Edge *eit = ptr_inp->get_output_begin();
-      while(eit != ptr_inp->get_output_end()) {
-#ifdef DEBUG
-        console->info("INP:get_reverse {} {} {} vs {} {} sedge:{}", ptr_idx, ptr_nid, inp_pid,
-                      eit->get_idx(), eit->get_inp_pid(), eit->is_snode());
-        eit->dump();
-        fmt::print(" {}\n", sizeof(Edge));
-#endif
-        if(eit->get_idx() == ptr_nid && eit->get_inp_pid() == inp_pid && eit->get_out_pid() == out_pid) {
-          return *eit;
-        }
-        if(eit->is_snode())
-          eit++;
-        else
-          eit += 3;
-      }
-      assert(!ptr_inp->is_last_state()); // Not found all over
-
-      ptr_inp = &ptr_node[ptr_inp->get_next() - ptr_idx];
-    } while(true);
-  }
+    ptr_inp = &ptr_node[ptr_inp->get_next() - ptr_idx];
+  } while(true);
 
   assert(false);
-
   return ptr_inp->sedge[0]; // Any random thing
 }
 
