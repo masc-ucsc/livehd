@@ -6,6 +6,10 @@
 #include "inou_abc.hpp"
 #include <boost/filesystem.hpp>
 
+const static char ReadLib_Command[] = "read_library stdcells.genlib";
+const static char Synthesis_Command[] = "print_stats;cleanup;strash;ifraig;iresyn;dc2;strash;print_stats;";
+const static char Mapping_Command[] = "map;print_stats";
+
 static void gen_generic_lib() {
   std::string buffer = "stdcells.genlib";
   FILE *      f      = fopen(buffer.c_str(), "wt");
@@ -42,7 +46,7 @@ static void gen_generic_lib() {
  ***********************************************************************/
 Abc_Ntk_t *Inou_abc::to_abc(const LGraph *g) {
   Abc_Frame_t *pAbc = nullptr;
-  Abc_Ntk_t *  pAig;
+  Abc_Ntk_t *  pAig = nullptr;
   Abc_Start();
   pAbc        = Abc_FrameGetGlobalFrame();
   pAig        = Abc_NtkAlloc(ABC_NTK_NETLIST, ABC_FUNC_AIG, 1);
@@ -54,7 +58,8 @@ Abc_Ntk_t *Inou_abc::to_abc(const LGraph *g) {
     console->error("The AIG construction has failed.\n");
     Abc_NtkDelete(pAig);
     exit(-4);
-  } else {
+  }
+  else {
     char       Command[1000];
     Abc_Ntk_t *pTemp = pAig;
     pAig             = Abc_NtkToLogic(pTemp);
@@ -63,15 +68,11 @@ Abc_Ntk_t *Inou_abc::to_abc(const LGraph *g) {
     if(!opack.liberty_file.empty()) {
       sprintf(Command, "read_lib -w %s", opack.liberty_file.c_str());
       if(Cmd_CommandExecute(pAbc, Command)) {
-        fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
+        console->error("Cannot execute command {}",Command);
       }
     } else {
       gen_generic_lib();
-
-      sprintf(Command, "read_library stdcells.genlib");
-      if(Cmd_CommandExecute(pAbc, Command)) {
-        fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
-      }
+	  Cmd_CommandExecute(pAbc, ReadLib_Command);
     }
 
     std::string             path_name("abc_output");
@@ -81,50 +82,28 @@ Abc_Ntk_t *Inou_abc::to_abc(const LGraph *g) {
       boost::filesystem::create_directory(dir);
     }
 
-    sprintf(Command, "print_stats");
-    if(Cmd_CommandExecute(pAbc, Command)) {
-      fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
+    if(Cmd_CommandExecute(pAbc, Synthesis_Command)) {
+      console->error("Cannot execute command {}",Synthesis_Command);
     }
 
-    sprintf(Command, "cleanup;strash;write_blif %s/%s_pre.blif", path_name.c_str(), opack.graph_name.c_str());
+    sprintf(Command, "write_blif %s/%s_post.blif;write_verilog %s/%s_post.v;",
+			path_name.c_str(), opack.graph_name.c_str(),
+			path_name.c_str(), opack.graph_name.c_str());
     if(Cmd_CommandExecute(pAbc, Command)) {
-      fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
+      console->error("Cannot execute command {}",Command);
     }
 
-    sprintf(Command, "ifraig;iresyn;dc2;strash;");
-    if(Cmd_CommandExecute(pAbc, Command)) {
-      fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
+    if(Cmd_CommandExecute(pAbc, Mapping_Command)) {
+      console->error("Cannot execute command",Mapping_Command);
     }
 
-    sprintf(Command, "print_stats;");
+    sprintf(Command, "write_blif %s/%s_map.blif;write_verilog %s/%s_map.v",
+			path_name.c_str(), opack.graph_name.c_str(),
+			path_name.c_str(), opack.graph_name.c_str());
     if(Cmd_CommandExecute(pAbc, Command)) {
-      fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
+      console->error("Cannot execute command",Command);
     }
 
-    sprintf(Command, "write_blif %s/%s_post.blif", path_name.c_str(), opack.graph_name.c_str());
-    if(Cmd_CommandExecute(pAbc, Command)) {
-      fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
-    }
-
-    sprintf(Command, "write_verilog %s/%s_post.v", path_name.c_str(), opack.graph_name.c_str());
-    if(Cmd_CommandExecute(pAbc, Command)) {
-      fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
-    }
-
-    sprintf(Command, "map;print_stats;print_delay;");
-    if(Cmd_CommandExecute(pAbc, Command)) {
-      fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
-    }
-
-    sprintf(Command, "write_blif %s/%s_map.blif", path_name.c_str(), opack.graph_name.c_str());
-    if(Cmd_CommandExecute(pAbc, Command)) {
-      fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
-    }
-
-    sprintf(Command, "write_verilog %s/%s_map.v", path_name.c_str(), opack.graph_name.c_str());
-    if(Cmd_CommandExecute(pAbc, Command)) {
-      fprintf(stdout, "Cannot execute command \"%s\".\n", Command);
-    }
     assert(pAbc != nullptr);
   }
 
@@ -342,55 +321,54 @@ void Inou_abc::gen_comb_cell_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
 
     if(tcell->get_name() == "$_NOT_") {
       combinational_cell[idx] = LGraph_CreateNot(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_AND_") {
+    }
+    else if(tcell->get_name() == "$_AND_") {
       combinational_cell[idx] = LGraph_CreateAnd(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_OR_") {
+    }
+    else if(tcell->get_name() == "$_OR_") {
       combinational_cell[idx] = LGraph_CreateOr(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_XOR_") {
+    }
+    else if(tcell->get_name() == "$_XOR_") {
       combinational_cell[idx] = LGraph_CreateXor(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_NAND_") {
+    }
+    else if(tcell->get_name() == "$_NAND_") {
       combinational_cell[idx] = LGraph_CreateNand(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_NOR_") {
+    }
+    else if(tcell->get_name() == "$_NOR_") {
       combinational_cell[idx] = LGraph_CreateNor(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_XNOR_") {
+    }
+    else if(tcell->get_name() == "$_XNOR_") {
       combinational_cell[idx] = LGraph_CreateXnor(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_ANDNOT_") {
+    }
+    else if(tcell->get_name() == "$_ANDNOT_") {
       //assign Y = A & (~B);
       combinational_cell[idx] = LGraph_CreateAndnot(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_ORNOT_") {
+    }
+    else if(tcell->get_name() == "$_ORNOT_") {
       //assign Y = A | (~B);
       combinational_cell[idx] = LGraph_CreateOrnot(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_AOI3_") {
+    }
+    else if(tcell->get_name() == "$_AOI3_") {
       //assign Y = ~((A & B) | C);
       combinational_cell[idx] = LGraph_CreateAoi3(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_OAI3_") {
+    }
+    else if(tcell->get_name() == "$_OAI3_") {
       //assign Y = ~((A | B) & C);
       combinational_cell[idx] = LGraph_CreateOai3(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_AOI4_") {
+    }
+    else if(tcell->get_name() == "$_AOI4_") {
       //assign Y = ~((A & B) | (C & D));
       combinational_cell[idx] = LGraph_CreateAoi4(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_OAI4_") {
+    }
+    else if(tcell->get_name() == "$_OAI4_") {
       //assign Y = ~((A | B) & (C | D));
       combinational_cell[idx] = LGraph_CreateOai4(pAig);
-      continue;
-    } else if(tcell->get_name() == "$_MUX_") {
+    }
+    else if(tcell->get_name() == "$_MUX_") {
       combinational_cell[idx] = LGraph_CreateMUX(pAig);
-      continue;
-    } else {
+    }
+    else {
       console->error("Unknown cell type!!!!");
-      continue;
     }
   }
 }
@@ -448,6 +426,48 @@ Abc_Obj_t *Inou_abc::gen_const_from_lgraph(const LGraph *g, index_offset key, Ab
   }
 
   return pNet;
+}
+
+/************************************************************************
+ * Function:  Inou_abc::gen_pseudo_subgraph_input & gen_pseudo_memory_input
+ * --------------------
+ * input arg0 -> index_offset& inp
+ * input arg2 -> Abc_Ntk_t *pAig
+ *
+ * returns: Abc_Obj_t *
+ *
+ * description: create a pseduo_input net for subgraph & memory
+ ***********************************************************************/
+Abc_Obj_t * Inou_abc::gen_pseudo_subgraph_input( const index_offset& inp, Abc_Ntk_t *pAig) {
+  if(pseduo_record.end() == pseduo_record.find(subgraph_generated_output_wire[inp])) {
+	Abc_Obj_t *pseudo_subgraph_input = Abc_NtkCreatePi(pAig);
+	Abc_Obj_t *pNet                  = Abc_NtkCreateNet(pAig);
+	Abc_ObjAssignName(pNet, const_cast<char *>(subgraph_generated_output_wire[inp].c_str()), NULL);
+	Abc_ObjAddFanin(pNet, pseudo_subgraph_input);
+	pseduo_record[subgraph_generated_output_wire[inp]] = pNet;
+  }
+  Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
+  pbuf->pData      = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
+  Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
+  Abc_ObjAddFanin(pbuf, pseduo_record[subgraph_generated_output_wire[inp]]);
+  Abc_ObjAddFanin(pwire, pbuf);
+  return pwire;
+}
+
+Abc_Obj_t * Inou_abc::gen_pseudo_memory_input( const index_offset& inp, Abc_Ntk_t *pAig) {
+  if(pseduo_record.find(memory_generated_output_wire[inp]) == pseduo_record.end()) {
+	Abc_Obj_t *pseudo_memory_input = Abc_NtkCreatePi(pAig);
+	Abc_Obj_t *pNet                = Abc_NtkCreateNet(pAig);
+	Abc_ObjAssignName(pNet, const_cast<char *>(memory_generated_output_wire[inp].c_str()), NULL);
+	Abc_ObjAddFanin(pNet, pseudo_memory_input);
+	pseduo_record[memory_generated_output_wire[inp]] = pNet;
+  }
+  Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
+  pbuf->pData      = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
+  Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
+  Abc_ObjAddFanin(pbuf, pseduo_record[memory_generated_output_wire[inp]]);
+  Abc_ObjAddFanin(pwire, pbuf);
+  return pwire;
 }
 
 /************************************************************************
@@ -602,33 +622,9 @@ void Inou_abc::conn_primary_output(const LGraph *g, Abc_Ntk_t *pAig) {
       } else if(this_node_type == U32Const_Op || this_node_type == StrConst_Op) {
         Abc_ObjAddFanin(primary_output[lhs].PO, gen_const_from_lgraph(g, rhs, pAig));
       } else if(this_node_type == Memory_Op) {
-        if(pseduo_record.find(memory_generated_output_wire[inp]) == pseduo_record.end()) {
-          Abc_Obj_t *pseudo_memory_input = Abc_NtkCreatePi(pAig);
-          Abc_Obj_t *pNet                = Abc_NtkCreateNet(pAig);
-          Abc_ObjAssignName(pNet, const_cast<char *>(memory_generated_output_wire[inp].c_str()), NULL);
-          Abc_ObjAddFanin(pNet, pseudo_memory_input);
-          pseduo_record[memory_generated_output_wire[inp]] = pNet;
-        }
-        Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
-        pbuf->pData      = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
-        Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
-        Abc_ObjAddFanin(pbuf, pseduo_record[memory_generated_output_wire[inp]]);
-        Abc_ObjAddFanin(pwire, pbuf);
-        Abc_ObjAddFanin(primary_output[lhs].PO, pwire);
+        Abc_ObjAddFanin(primary_output[lhs].PO, gen_pseudo_memory_input(inp,pAig));
       } else if(this_node_type == SubGraph_Op) {
-        if(pseduo_record.find(subgraph_generated_output_wire[inp]) == pseduo_record.end()) {
-          Abc_Obj_t *pseudo_subgraph_input = Abc_NtkCreatePi(pAig);
-          Abc_Obj_t *pNet                  = Abc_NtkCreateNet(pAig);
-          Abc_ObjAssignName(pNet, const_cast<char *>(subgraph_generated_output_wire[inp].c_str()), NULL);
-          Abc_ObjAddFanin(pNet, pseudo_subgraph_input);
-          pseduo_record[subgraph_generated_output_wire[inp]] = pNet;
-        }
-        Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
-        pbuf->pData      = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
-        Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
-        Abc_ObjAddFanin(pbuf, pseduo_record[subgraph_generated_output_wire[inp]]);
-        Abc_ObjAddFanin(pwire, pbuf);
-        Abc_ObjAddFanin(primary_output[lhs].PO, pwire);
+        Abc_ObjAddFanin(primary_output[lhs].PO, gen_pseudo_subgraph_input(inp,pAig));
       } else {
         assert(false);
       }
@@ -757,38 +753,12 @@ void Inou_abc::conn_subgraph(const LGraph *g, Abc_Ntk_t *pAig) {
 
         else if(this_node_type == Memory_Op) {
           pseduo_subgraph_output = Abc_NtkCreatePo(pAig);
-          if(pseduo_record.find(memory_generated_output_wire[inp]) == pseduo_record.end()) {
-            Abc_Obj_t *pseudo_memory_input = Abc_NtkCreatePi(pAig);
-            Abc_Obj_t *pNet                = Abc_NtkCreateNet(pAig);
-            Abc_ObjAssignName(pNet, const_cast<char *>(memory_generated_output_wire[inp].c_str()), NULL);
-            Abc_ObjAddFanin(pNet, pseudo_memory_input);
-            pseduo_record[memory_generated_output_wire[inp]] = pNet;
-          }
-          Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
-          pbuf->pData      = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
-          Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
-          Abc_ObjAddFanin(pbuf, pseduo_record[memory_generated_output_wire[inp]]);
-          Abc_ObjAddFanin(pwire, pbuf);
-
-          Abc_ObjAddFanin(pseduo_subgraph_output, pwire);
+          Abc_ObjAddFanin(pseduo_subgraph_output, gen_pseudo_memory_input(inp,pAig));
         }
 
         else if(this_node_type == SubGraph_Op) {
           pseduo_subgraph_output = Abc_NtkCreatePo(pAig);
-          if(pseduo_record.find(subgraph_generated_output_wire[inp]) == pseduo_record.end()) {
-            Abc_Obj_t *pseudo_subgraph_input = Abc_NtkCreatePi(pAig);
-            Abc_Obj_t *pNet                  = Abc_NtkCreateNet(pAig);
-            Abc_ObjAssignName(pNet, const_cast<char *>(subgraph_generated_output_wire[inp].c_str()), NULL);
-            Abc_ObjAddFanin(pNet, pseudo_subgraph_input);
-            pseduo_record[subgraph_generated_output_wire[inp]] = pNet;
-          }
-          Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
-          pbuf->pData      = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
-          Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
-          Abc_ObjAddFanin(pbuf, pseduo_record[subgraph_generated_output_wire[inp]]);
-          Abc_ObjAddFanin(pwire, pbuf);
-
-          Abc_ObjAddFanin(pseduo_subgraph_output, pwire);
+          Abc_ObjAddFanin(pseduo_subgraph_output, gen_pseudo_subgraph_input(inp,pAig));
         } else {
           assert(false);
         }
@@ -855,36 +825,10 @@ void Inou_abc::conn_memory(const LGraph *g, Abc_Ntk_t *pAig) {
           Abc_ObjAddFanin(pseduo_memory_output, gen_const_from_lgraph(g, rhs, pAig));
         } else if(this_node_type == Memory_Op) {
           pseduo_memory_output = Abc_NtkCreatePo(pAig);
-          if(pseduo_record.find(memory_generated_output_wire[inp]) == pseduo_record.end()) {
-            Abc_Obj_t *pseudo_memory_input = Abc_NtkCreatePi(pAig);
-            Abc_Obj_t *pNet                = Abc_NtkCreateNet(pAig);
-            Abc_ObjAssignName(pNet, const_cast<char *>(memory_generated_output_wire[inp].c_str()), NULL);
-            Abc_ObjAddFanin(pNet, pseudo_memory_input);
-            pseduo_record[memory_generated_output_wire[inp]] = pNet;
-          }
-          Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
-          pbuf->pData      = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
-          Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
-          Abc_ObjAddFanin(pbuf, pseduo_record[memory_generated_output_wire[inp]]);
-          Abc_ObjAddFanin(pwire, pbuf);
-
-          Abc_ObjAddFanin(pseduo_memory_output, pwire);
+          Abc_ObjAddFanin(pseduo_memory_output, gen_pseudo_memory_input(inp,pAig));
         } else if(this_node_type == SubGraph_Op) {
           pseduo_memory_output = Abc_NtkCreatePo(pAig);
-          if(pseduo_record.find(subgraph_generated_output_wire[inp]) == pseduo_record.end()) {
-            Abc_Obj_t *pseudo_subgraph_input = Abc_NtkCreatePi(pAig);
-            Abc_Obj_t *pNet                  = Abc_NtkCreateNet(pAig);
-            Abc_ObjAssignName(pNet, const_cast<char *>(subgraph_generated_output_wire[inp].c_str()), NULL);
-            Abc_ObjAddFanin(pNet, pseudo_subgraph_input);
-            pseduo_record[subgraph_generated_output_wire[inp]] = pNet;
-          }
-          Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
-          pbuf->pData      = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
-          Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
-          Abc_ObjAddFanin(pbuf, pseduo_record[subgraph_generated_output_wire[inp]]);
-          Abc_ObjAddFanin(pwire, pbuf);
-
-          Abc_ObjAddFanin(pseduo_memory_output, pwire);
+          Abc_ObjAddFanin(pseduo_memory_output, gen_pseudo_subgraph_input(inp,pAig));
         } else {
           assert(false);
         }

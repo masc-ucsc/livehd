@@ -1,0 +1,387 @@
+
+ /----------------------------------------------------------------------------\
+ |                                                                            |
+ |  yosys -- Yosys Open SYnthesis Suite                                       |
+ |                                                                            |
+ |  Copyright (C) 2012 - 2015  Clifford Wolf <clifford@clifford.at>           |
+ |                                                                            |
+ |  Permission to use, copy, modify, and/or distribute this software for any  |
+ |  purpose with or without fee is hereby granted, provided that the above    |
+ |  copyright notice and this permission notice appear in all copies.         |
+ |                                                                            |
+ |  THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES  |
+ |  WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF          |
+ |  MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR   |
+ |  ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES    |
+ |  WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN     |
+ |  ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF   |
+ |  OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.            |
+ |                                                                            |
+ \----------------------------------------------------------------------------/
+
+ Yosys 0.5+ (git sha1 f13e387, gcc 5.2.1-22ubuntu2 -O2 -fstack-protector-strong -fPIC -Os)
+
+
+-- Parsing `add_rca_signed.v' using frontend `verilog' --
+
+1. Executing Verilog-2005 frontend.
+Parsing Verilog input from `add_rca_signed.v' to AST representation.
+Generating RTLIL representation for module `\add_rca_signed'.
+Successfully finished Verilog frontend.
+
+-- Parsing `full_adder.v' using frontend `verilog' --
+
+2. Executing Verilog-2005 frontend.
+Parsing Verilog input from `full_adder.v' to AST representation.
+Generating RTLIL representation for module `\full_adder'.
+Successfully finished Verilog frontend.
+
+-- Running command `proc ; opt ;  techmap -D ALU_RIPPLE;; opt  ;; abc -D 100 -liberty ./NanGate_15nm_OCL_typical_conditional_nldm.lib  -constr ./NanGate_15nm_OCL_typical_conditional_nldm.constr ; stat' --
+
+3. Executing PROC pass (convert processes to netlists).
+
+3.1. Executing PROC_CLEAN pass (remove empty switches from decision trees).
+Cleaned up 0 empty switches.
+
+3.2. Executing PROC_RMDEAD pass (remove dead branches from decision trees).
+Removed a total of 0 dead cases.
+
+3.3. Executing PROC_INIT pass (extract init attributes).
+
+3.4. Executing PROC_ARST pass (detect async resets in processes).
+
+3.5. Executing PROC_MUX pass (convert decision trees to multiplexers).
+Creating decoders for process `\full_adder.$proc$full_adder.v:11$22'.
+  creating decoder for signal `$0\cout[0:0]'.
+  creating decoder for signal `$0\sum[0:0]'.
+Creating decoders for process `\add_rca_signed.$proc$add_rca_signed.v:34$17'.
+  creating decoder for signal `$0\carry[0:0]'.
+
+3.6. Executing PROC_DLATCH pass (convert process syncs to latches).
+No latch inferred for signal `\full_adder.\sum' from process `\full_adder.$proc$full_adder.v:11$22'.
+No latch inferred for signal `\full_adder.\cout' from process `\full_adder.$proc$full_adder.v:11$22'.
+No latch inferred for signal `\add_rca_signed.\carry' from process `\add_rca_signed.$proc$add_rca_signed.v:34$17'.
+
+3.7. Executing PROC_DFF pass (convert process syncs to FFs).
+
+3.8. Executing PROC_CLEAN pass (remove empty switches from decision trees).
+Removing empty process `full_adder.$proc$full_adder.v:11$22'.
+Removing empty process `add_rca_signed.$proc$add_rca_signed.v:34$17'.
+Cleaned up 0 empty switches.
+
+4. Executing OPT pass (performing simple optimizations).
+
+4.1. Executing OPT_CONST pass (perform const folding).
+
+4.2. Executing OPT_SHARE pass (detect identical cells).
+Finding identical cells in module `\full_adder'.
+  Cell `$xor$full_adder.v:12$23' is identical to cell `$xor$full_adder.v:13$27'.
+    Redirecting output \Y: $xor$full_adder.v:12$23_Y = $xor$full_adder.v:13$27_Y
+    Removing $xor cell `$xor$full_adder.v:12$23' from module `\full_adder'.
+Finding identical cells in module `\add_rca_signed'.
+Removed a total of 1 cells.
+
+4.3. Executing OPT_MUXTREE pass (detect dead branches in mux trees).
+Running muxtree optimizier on module \full_adder..
+  Creating internal representation of mux trees.
+  No muxes found in this module.
+Running muxtree optimizier on module \add_rca_signed..
+  Creating internal representation of mux trees.
+  Evaluating internal representation of mux trees.
+    Root of a mux tree: $ternary$add_rca_signed.v:35$21 (pure)
+  Analyzing evaluation results.
+Removed 0 multiplexer ports.
+
+4.4. Executing OPT_REDUCE pass (consolidate $*mux and $reduce_* inputs).
+  Optimizing cells in module \full_adder.
+  Optimizing cells in module \add_rca_signed.
+Performed a total of 0 changes.
+
+4.5. Executing OPT_SHARE pass (detect identical cells).
+Finding identical cells in module `\full_adder'.
+Finding identical cells in module `\add_rca_signed'.
+Removed a total of 0 cells.
+
+4.6. Executing OPT_RMDFF pass (remove dff with constant values).
+Replaced 0 DFF cells.
+
+4.7. Executing OPT_CLEAN pass (remove unused cells and wires).
+Finding unused cells or wires in module \full_adder..
+Finding unused cells or wires in module \add_rca_signed..
+
+4.8. Executing OPT_CONST pass (perform const folding).
+
+4.9. Finished OPT passes. (There is nothing left to do.)
+
+5. Executing TECHMAP pass (map to technology primitives).
+
+5.1. Executing Verilog-2005 frontend.
+Parsing Verilog input from `<techmap.v>' to AST representation.
+Generating RTLIL representation for module `\_90_simplemap_bool_ops'.
+Generating RTLIL representation for module `\_90_simplemap_reduce_ops'.
+Generating RTLIL representation for module `\_90_simplemap_logic_ops'.
+Generating RTLIL representation for module `\_90_simplemap_compare_ops'.
+Generating RTLIL representation for module `\_90_simplemap_various'.
+Generating RTLIL representation for module `\_90_simplemap_registers'.
+Generating RTLIL representation for module `\_90_shift_ops_shr_shl_sshl_sshr'.
+Generating RTLIL representation for module `\_90_shift_shiftx'.
+Generating RTLIL representation for module `\_90_fa'.
+Generating RTLIL representation for module `\_90_lcu'.
+Generating RTLIL representation for module `\_90_alu'.
+Generating RTLIL representation for module `\_90_macc'.
+Generating RTLIL representation for module `\_90_alumacc'.
+Generating RTLIL representation for module `\$__div_mod_u'.
+Generating RTLIL representation for module `\$__div_mod'.
+Generating RTLIL representation for module `\_90_div'.
+Generating RTLIL representation for module `\_90_mod'.
+Generating RTLIL representation for module `\_90_pow'.
+Generating RTLIL representation for module `\_90_pmux'.
+Generating RTLIL representation for module `\_90_lut'.
+Successfully finished Verilog frontend.
+Mapping add_rca_signed.$ne$add_rca_signed.v:35$18 ($ne) with simplemap.
+Mapping add_rca_signed.$eq$add_rca_signed.v:35$19 ($eq) with simplemap.
+Mapping add_rca_signed.$ternary$add_rca_signed.v:35$20 ($mux) with simplemap.
+Mapping add_rca_signed.$ternary$add_rca_signed.v:35$21 ($mux) with simplemap.
+Mapping full_adder.$and$full_adder.v:12$24 ($and) with simplemap.
+Mapping full_adder.$and$full_adder.v:12$25 ($and) with simplemap.
+Mapping full_adder.$or$full_adder.v:12$26 ($or) with simplemap.
+Mapping full_adder.$xor$full_adder.v:13$27 ($xor) with simplemap.
+Mapping full_adder.$xor$full_adder.v:13$28 ($xor) with simplemap.
+No more expansions possible.
+Removed 62 unused cells and 3 unused wires.
+
+6. Executing OPT pass (performing simple optimizations).
+
+6.1. Executing OPT_CONST pass (perform const folding).
+Optimizing away select inverter for $_MUX_ cell `$auto$simplemap.cc:277:simplemap_mux$84' in module `add_rca_signed'.
+Replacing $_MUX_ cell `$auto$simplemap.cc:277:simplemap_mux$84' (01?) in module `\add_rca_signed' with constant driver `$ternary$add_rca_signed.v:35$20_Y [0] = $auto$simplemap.cc:250:simplemap_eqne$77'.
+
+6.2. Executing OPT_SHARE pass (detect identical cells).
+Finding identical cells in module `\add_rca_signed'.
+Finding identical cells in module `\full_adder'.
+Removed a total of 0 cells.
+
+6.3. Executing OPT_MUXTREE pass (detect dead branches in mux trees).
+Running muxtree optimizier on module \add_rca_signed..
+  Creating internal representation of mux trees.
+  No muxes found in this module.
+Running muxtree optimizier on module \full_adder..
+  Creating internal representation of mux trees.
+  No muxes found in this module.
+Removed 0 multiplexer ports.
+
+6.4. Executing OPT_REDUCE pass (consolidate $*mux and $reduce_* inputs).
+  Optimizing cells in module \add_rca_signed.
+  Optimizing cells in module \full_adder.
+Performed a total of 0 changes.
+
+6.5. Executing OPT_SHARE pass (detect identical cells).
+Finding identical cells in module `\add_rca_signed'.
+Finding identical cells in module `\full_adder'.
+Removed a total of 0 cells.
+
+6.6. Executing OPT_RMDFF pass (remove dff with constant values).
+Replaced 0 DFF cells.
+
+6.7. Executing OPT_CLEAN pass (remove unused cells and wires).
+Finding unused cells or wires in module \add_rca_signed..
+  removing unused `$_NOT_' cell `$auto$simplemap.cc:206:simplemap_lognot$83'.
+Finding unused cells or wires in module \full_adder..
+
+6.8. Executing OPT_CONST pass (perform const folding).
+
+6.9. Rerunning OPT passes. (Maybe there is more to do..)
+
+6.10. Executing OPT_MUXTREE pass (detect dead branches in mux trees).
+Running muxtree optimizier on module \add_rca_signed..
+  Creating internal representation of mux trees.
+  No muxes found in this module.
+Running muxtree optimizier on module \full_adder..
+  Creating internal representation of mux trees.
+  No muxes found in this module.
+Removed 0 multiplexer ports.
+
+6.11. Executing OPT_REDUCE pass (consolidate $*mux and $reduce_* inputs).
+  Optimizing cells in module \add_rca_signed.
+  Optimizing cells in module \full_adder.
+Performed a total of 0 changes.
+
+6.12. Executing OPT_SHARE pass (detect identical cells).
+Finding identical cells in module `\add_rca_signed'.
+Finding identical cells in module `\full_adder'.
+Removed a total of 0 cells.
+
+6.13. Executing OPT_RMDFF pass (remove dff with constant values).
+Replaced 0 DFF cells.
+
+6.14. Executing OPT_CLEAN pass (remove unused cells and wires).
+Finding unused cells or wires in module \add_rca_signed..
+Finding unused cells or wires in module \full_adder..
+
+6.15. Executing OPT_CONST pass (perform const folding).
+
+6.16. Finished OPT passes. (There is nothing left to do.)
+
+7. Executing ABC pass (technology mapping using ABC).
+
+7.1. Extracting gate netlist of module `\add_rca_signed' to `<abc-temp-dir>/input.blif'..
+Extracted 3 gates and 7 wires to a netlist network with 3 inputs and 1 outputs.
+
+7.1.1. Executing ABC.
+Running ABC command: <yosys-exe-dir>/berkeley-abc -s -f <abc-temp-dir>/abc.script 2>&1
+ABC: ABC command line: "source <abc-temp-dir>/abc.script".
+ABC: 
+ABC: + read_blif <abc-temp-dir>/input.blif 
+ABC: + read_lib -w /home/cmpe125/synth/./NanGate_15nm_OCL_typical_conditional_nldm.lib 
+ABC: Parsing finished successfully.  Parsing time =     0.04 sec
+ABC: Scl_LibertyReadGenlib() skipped cell "ANTENNA" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "CLKGATETST_X1" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "DFFRNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "DFFSNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped cell "FILLTIE" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X1" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X2" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X4" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X8" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X16" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "LHQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "SDFFRNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "SDFFSNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X1".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X2".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X4".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X8".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X12".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X16".
+ABC: Library "NanGate_15nm_OCL" from "/home/cmpe125/synth/./NanGate_15nm_OCL_typical_conditional_nldm.lib" has 57 cells (19 skipped: 5 seq; 6 tri-state; 8 no func).  Time =     0.06 sec
+ABC: Memory =    2.98 MB. Time =     0.06 sec
+ABC: Warning: Detected 2 multi-output gates (for example, "FA_X1").
+ABC: + read_constr -v /home/cmpe125/synth/./NanGate_15nm_OCL_typical_conditional_nldm.constr 
+ABC: Setting driving cell to be "BUF_X2".
+ABC: Setting driving cell to be 10.000000.
+ABC: + strash 
+ABC: + scorr 
+ABC: Error: The network is combinational (run "fraig" or "fraig_sweep").
+ABC: + ifraig 
+ABC: + retime -D 100 
+ABC: + strash 
+ABC: + dch -f 
+ABC: + map -D 100 
+ABC: + buffer 
+ABC: + upsize -D 100 
+ABC: Current delay (16.13 ps) does not exceed the target delay (100.00 ps). Upsizing is not performed.
+ABC: + dnsize -D 100 
+ABC: + stime -p 
+ABC: WireLoad = "none"  Gates =      3 (  0.0 %)   Cap =  2.9 ff (  0.0 %)   Area =        1.08 (100.0 %)   Delay =    21.10 ps  ( 66.7 %)               
+ABC: Path  0 --       2 : 0    2 pi       A =   0.00  Df =   1.3   -0.0 ps  S =   2.7 ps  Cin =  0.0 ff  Cout =   3.0 ff  Cmax =   0.0 ff  G =    0  
+ABC: Path  1 --       5 : 2    1 XNOR2_X1 A =   0.44  Df =   8.0   -0.0 ps  S =   2.1 ps  Cin =  1.4 ff  Cout =   0.7 ff  Cmax = 100.0 ff  G =   48  
+ABC: Path  2 --       7 : 2    1 NOR2_X1  A =   0.20  Df =  21.1   -5.5 ps  S =  25.0 ps  Cin =  0.8 ff  Cout =  10.0 ff  Cmax = 100.0 ff  G = 1327  
+ABC: Start-point = pi1.  End-point = po0.
+ABC: + write_blif <abc-temp-dir>/output.blif 
+
+7.1.2. Re-integrating ABC results.
+ABC RESULTS:           NOR2_X1 cells:        1
+ABC RESULTS:          XNOR2_X1 cells:        1
+ABC RESULTS:           XOR2_X1 cells:        1
+ABC RESULTS:        internal signals:        3
+ABC RESULTS:           input signals:        3
+ABC RESULTS:          output signals:        1
+Removing temp directory.
+
+7.2. Extracting gate netlist of module `\full_adder' to `<abc-temp-dir>/input.blif'..
+Extracted 5 gates and 8 wires to a netlist network with 3 inputs and 2 outputs.
+
+7.2.1. Executing ABC.
+Running ABC command: <yosys-exe-dir>/berkeley-abc -s -f <abc-temp-dir>/abc.script 2>&1
+ABC: ABC command line: "source <abc-temp-dir>/abc.script".
+ABC: 
+ABC: + read_blif <abc-temp-dir>/input.blif 
+ABC: + read_lib -w /home/cmpe125/synth/./NanGate_15nm_OCL_typical_conditional_nldm.lib 
+ABC: Parsing finished successfully.  Parsing time =     0.05 sec
+ABC: Scl_LibertyReadGenlib() skipped cell "ANTENNA" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "CLKGATETST_X1" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "DFFRNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "DFFSNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped cell "FILLTIE" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X1" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X2" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X4" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X8" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X16" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "LHQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "SDFFRNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "SDFFSNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X1".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X2".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X4".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X8".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X12".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X16".
+ABC: Library "NanGate_15nm_OCL" from "/home/cmpe125/synth/./NanGate_15nm_OCL_typical_conditional_nldm.lib" has 57 cells (19 skipped: 5 seq; 6 tri-state; 8 no func).  Time =     0.07 sec
+ABC: Memory =    2.98 MB. Time =     0.07 sec
+ABC: Warning: Detected 2 multi-output gates (for example, "FA_X1").
+ABC: + read_constr -v /home/cmpe125/synth/./NanGate_15nm_OCL_typical_conditional_nldm.constr 
+ABC: Setting driving cell to be "BUF_X2".
+ABC: Setting driving cell to be 10.000000.
+ABC: + strash 
+ABC: + scorr 
+ABC: Error: The network is combinational (run "fraig" or "fraig_sweep").
+ABC: + ifraig 
+ABC: + retime -D 100 
+ABC: + strash 
+ABC: + dch -f 
+ABC: + map -D 100 
+ABC: + buffer 
+ABC: + upsize -D 100 
+ABC: Current delay (23.22 ps) does not exceed the target delay (100.00 ps). Upsizing is not performed.
+ABC: + dnsize -D 100 
+ABC: + stime -p 
+ABC: WireLoad = "none"  Gates =      5 (  0.0 %)   Cap =  3.8 ff (  0.0 %)   Area =        1.47 (100.0 %)   Delay =    23.22 ps  ( 40.0 %)               
+ABC: Path  0 --       3 : 0    2 pi      A =   0.00  Df =   1.1   -0.0 ps  S =   2.4 ps  Cin =  0.0 ff  Cout =   2.4 ff  Cmax =   0.0 ff  G =    0  
+ABC: Path  1 --       6 : 2    2 XOR2_X1 A =   0.44  Df =   7.3   -0.2 ps  S =   8.4 ps  Cin =  1.4 ff  Cout =   2.0 ff  Cmax = 100.0 ff  G =  139  
+ABC: Path  2 --      10 : 2    1 XOR2_X1 A =   0.44  Df =  23.2   -3.1 ps  S =  26.1 ps  Cin =  1.4 ff  Cout =  10.0 ff  Cmax = 100.0 ff  G =  696  
+ABC: Start-point = pi2.  End-point = po1.
+ABC: + write_blif <abc-temp-dir>/output.blif 
+
+7.2.2. Re-integrating ABC results.
+ABC RESULTS:          NAND2_X1 cells:        3
+ABC RESULTS:           XOR2_X1 cells:        2
+ABC RESULTS:        internal signals:        3
+ABC RESULTS:           input signals:        3
+ABC RESULTS:          output signals:        2
+Removing temp directory.
+
+8. Printing statistics.
+
+=== add_rca_signed ===
+
+   Number of wires:                 15
+   Number of wire bits:            107
+   Number of public wires:           7
+   Number of public wire bits:      68
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                 19
+     NOR2_X1                         1
+     XNOR2_X1                        1
+     XOR2_X1                         1
+     full_adder                     16
+
+=== full_adder ===
+
+   Number of wires:                 16
+   Number of wire bits:             16
+   Number of public wires:           5
+   Number of public wire bits:       5
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                  5
+     NAND2_X1                        3
+     XOR2_X1                         2
+
+End of script. Logfile hash: dcee71206f
+CPU: user 0.04s system 0.00s, MEM: 34.89 MB total, 8.51 MB resident
+Yosys 0.5+ (git sha1 f13e387, gcc 5.2.1-22ubuntu2 -O2 -fstack-protector-strong -fPIC -Os)
+Time spent: 39% 3x read_verilog (0 sec), 19% 5x opt_const (0 sec), ...

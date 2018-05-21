@@ -40,7 +40,7 @@ protected:
 public:
   struct IndexID_Hash {
     inline std::size_t operator()(const Index_ID &k) const {
-      return (size_t) k;
+      return (size_t)k;
     }
   };
 
@@ -197,7 +197,7 @@ private:
     if(cell_name.find(flop) != std::string::npos) {
       return true;
     } else
-	  return cell_name.find(latch) != std::string::npos;
+      return cell_name.find(latch) != std::string::npos;
   }
 
   void find_cell_conn(const LGraph *g);
@@ -221,6 +221,10 @@ private:
   void gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig);
 
   void gen_comb_cell_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig);
+
+  Abc_Obj_t * gen_pseudo_subgraph_input( const index_offset& inp, Abc_Ntk_t *pAig);
+
+  Abc_Obj_t * gen_pseudo_memory_input( const index_offset& inp, Abc_Ntk_t *pAig);
 
   void conn_latch(const LGraph *g, Abc_Ntk_t *pAig);
 
@@ -254,7 +258,7 @@ private:
 
   Node_Pin create_pick_operator(LGraph *g, const Node_Pin &driver, int offset, int width);
 
-  void connect_constant(LGraph *g, uint32_t value, uint32_t size, Index_ID onid, Port_ID opid);
+  void connect_constant(LGraph *g, uint32_t value, uint32_t size, const Node_Pin &dst);
 
   void conn_latch(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
 

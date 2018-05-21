@@ -15,29 +15,31 @@
 vluint64_t global_time = 0;
 VerilatedVcdC* tfp = 0;
 
-uint64_t top_a;
-uint64_t top_b;
-unsigned __int128 top_ans;
+int64_t top_a;
+int64_t top_b;
+__int128 top_ans;
 
-string to_string_int128(unsigned __int128 var) {
+// please just use the binary print, this doesn't always work
+string to_string_int128(__int128 var) {
   string str = string("");
   int loop_size = 39;
   for (int i = 0; i < loop_size; i++) {
-    unsigned __int128 temp = var /
-      ((unsigned __int128) pow(10, loop_size - i - 1));
-    str += to_string((uint64_t) (temp % ((unsigned __int128) 10)));
+    __int128 temp = var /
+      ((__int128) pow(10, loop_size - i - 1));
+    str += to_string((uint64_t) (temp % ((__int128) 10)));
   }
   return str;
 }
 
-string to_string_int128_binary(unsigned __int128 var) {
+// please use this
+string to_string_int128_binary(__int128 var) {
   string str = string("");
-  unsigned __int128 bit_mask = 1;
+  __int128 bit_mask = 1;
   for (int i = 0; i < 128; i++) {
     str =
       to_string((uint64_t)
-          ((var & ((unsigned __int128)
-                  (bit_mask << ((unsigned __int128) i)))) == 0 ? 0 : 1))
+          ((var & ((__int128)
+                  (bit_mask << ((__int128) i)))) == 0 ? 0 : 1))
       + str;
   }
   return str;
@@ -94,12 +96,12 @@ int main(int argc, char **argv, char **env) {
 
   uint64_t val_a[NUM_TESTS] = {
     (uint64_t) ~0, 0, 0xAAAAAAAAAAAAAAAA, (uint64_t) 1 << 63, 2, 3, 8, 16, 32,
-    64, 10
+    64, 1
   };
 
   uint64_t val_b[NUM_TESTS] = {
     (uint64_t) ~0, 0, 0xAAAAAAAAAAAAAAAA, (uint64_t) 1 << 63, 2, 3, 8, 16, 32,
-    64, 10
+    64, 1
   };
 
 
@@ -115,20 +117,30 @@ int main(int argc, char **argv, char **env) {
   // initialize simulation inputs
   for (int i = 0; i < NUM_TESTS; i++) {
 
-    top_a = top->a = val_a[i];
-    top_b = top->b = val_b[i];
+    if (val_a[i] & ((uint64_t) 1 << 63)) {
+      top_a = (int64_t) -1 * (~val_a[i] + 1);
+    } else {
+      top_a = (int64_t) val_a[i];
+    }
+    if (val_b[i] & ((uint64_t) 1 << 63)) {
+      top_b = (int64_t) -1 * (~val_b[i] + 1);
+    } else {
+      top_b = (int64_t) val_b[i];
+    }
+    top->a = val_a[i];
+    top->b = val_b[i];
 
     advance_clock(top,1);
 
-    top_ans = ((unsigned __int128) top->ans[0]) +
-      ((unsigned __int128) top->ans[1] << 32) +
-      ((unsigned __int128) top->ans[2] << 64) +
-      ((unsigned __int128) top->ans[3] << 96);
+    top_ans = ((__int128) top->ans[0]) +
+      ((__int128) top->ans[1] << 32) +
+      ((__int128) top->ans[2] << 64) +
+      ((__int128) top->ans[3] << 96);
 
     // evaluate correctness
     printf("Test %d: ", i);
-    unsigned __int128 product = ((unsigned __int128) top_a) *
-      ((unsigned __int128) top_b);
+    __int128 product = ((__int128) top_a) *
+      ((__int128) top_b);
     if (product == top_ans) {
       printf("PASSED\n");
     } else {
