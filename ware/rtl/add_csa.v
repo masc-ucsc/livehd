@@ -1,6 +1,11 @@
+/*verilator lint_off UNOPTFLAT*/
+/*verilator lint_off UNUSED*/
 module add_csa
 #(parameter Bits=64)
 (
+  input             clk,
+  input             reset,
+  
   input [Bits-1:0]  a,
   input [Bits-1:0]  b,
   input [Bits-1:0]  c,
@@ -11,11 +16,11 @@ module add_csa
 
  reg [Bits-1:0]   si;
  reg [Bits-1:0]   si2;
- reg [Bits:0]     ci;
+ reg [Bits-1:0]     ci;
 
  genvar i;
  generate
-   for(i=0; i<Bits; i++)
+   for(i=0; i<Bits; i=i+1)
     begin
       full_adder fa
       (
@@ -29,15 +34,20 @@ module add_csa
  endgenerate
 
  assign sum[0] = si[0];
- si2           = si>>1;   //Shift si by 1 on right
- si2[Bits-1]   = 0;       //make top most bit os si2 as 0
+ assign si2           = si>>1;   //Shift si by 1 on right
+ assign si2[Bits-1]   = 0;       //make top most bit os si2 as 0
 
- add_rca #(.Bits(Bits)) rca
+ add_rca #(.Bits(64)) rca
  (
-   .a(si),
+   .clk(clk),
+   .reset(reset),
+   .a(si2),
    .b(ci),
-   .sum(sum[i+1]),
+   .sum(sum[64:1]),
    .carry(carry)
  );
 
- endmodule
+/*verilator lint_on UNOPTFLAT*/
+/*verilator lint_on UNUSED*/
+
+endmodule

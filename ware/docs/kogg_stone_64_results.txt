@@ -1,0 +1,594 @@
+
+ /----------------------------------------------------------------------------\
+ |                                                                            |
+ |  yosys -- Yosys Open SYnthesis Suite                                       |
+ |                                                                            |
+ |  Copyright (C) 2012 - 2015  Clifford Wolf <clifford@clifford.at>           |
+ |                                                                            |
+ |  Permission to use, copy, modify, and/or distribute this software for any  |
+ |  purpose with or without fee is hereby granted, provided that the above    |
+ |  copyright notice and this permission notice appear in all copies.         |
+ |                                                                            |
+ |  THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES  |
+ |  WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF          |
+ |  MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR   |
+ |  ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES    |
+ |  WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN     |
+ |  ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF   |
+ |  OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.            |
+ |                                                                            |
+ \----------------------------------------------------------------------------/
+
+ Yosys 0.5+ (git sha1 f13e387, gcc 5.2.1-22ubuntu2 -O2 -fstack-protector-strong -fPIC -Os)
+
+
+-- Parsing `kogg_stone_64.v' using frontend `verilog' --
+
+1. Executing Verilog-2005 frontend.
+Parsing Verilog input from `kogg_stone_64.v' to AST representation.
+Generating RTLIL representation for module `\kogg_stone_64'.
+Successfully finished Verilog frontend.
+
+-- Parsing `pref_op.v' using frontend `verilog' --
+
+2. Executing Verilog-2005 frontend.
+Parsing Verilog input from `pref_op.v' to AST representation.
+Generating RTLIL representation for module `\pref_op'.
+Successfully finished Verilog frontend.
+
+-- Parsing `diamond.v' using frontend `verilog' --
+
+3. Executing Verilog-2005 frontend.
+Parsing Verilog input from `diamond.v' to AST representation.
+Generating RTLIL representation for module `\diamond'.
+Successfully finished Verilog frontend.
+
+-- Parsing `square_op.v' using frontend `verilog' --
+
+4. Executing Verilog-2005 frontend.
+Parsing Verilog input from `square_op.v' to AST representation.
+Generating RTLIL representation for module `\square_op'.
+Successfully finished Verilog frontend.
+
+-- Parsing `buff.v' using frontend `verilog' --
+
+5. Executing Verilog-2005 frontend.
+Parsing Verilog input from `buff.v' to AST representation.
+Generating RTLIL representation for module `\buff'.
+Successfully finished Verilog frontend.
+
+-- Running command `proc ; opt ;  techmap -D ALU_RIPPLE;; opt  ;; abc -D 100 -liberty ./NanGate_15nm_OCL_typical_conditional_nldm.lib  -constr ./NanGate_15nm_OCL_typical_conditional_nldm.constr ; stat' --
+
+6. Executing PROC pass (convert processes to netlists).
+
+6.1. Executing PROC_CLEAN pass (remove empty switches from decision trees).
+Cleaned up 0 empty switches.
+
+6.2. Executing PROC_RMDEAD pass (remove dead branches from decision trees).
+Removed a total of 0 dead cases.
+
+6.3. Executing PROC_INIT pass (extract init attributes).
+
+6.4. Executing PROC_ARST pass (detect async resets in processes).
+
+6.5. Executing PROC_MUX pass (convert decision trees to multiplexers).
+Creating decoders for process `\buff.$proc$buff.v:10$491'.
+  creating decoder for signal `$0\C[0:0]'.
+  creating decoder for signal `$0\D[0:0]'.
+Creating decoders for process `\square_op.$proc$square_op.v:11$487'.
+  creating decoder for signal `$0\Pi[0:0]'.
+  creating decoder for signal `$0\Gi[0:0]'.
+  creating decoder for signal `$0\Hi[0:0]'.
+Creating decoders for process `\diamond.$proc$diamond.v:9$485'.
+  creating decoder for signal `$0\Si[0:0]'.
+Creating decoders for process `\pref_op.$proc$pref_op.v:13$481'.
+  creating decoder for signal `$0\go[0:0]'.
+  creating decoder for signal `$0\po[0:0]'.
+
+6.6. Executing PROC_DLATCH pass (convert process syncs to latches).
+No latch inferred for signal `\buff.\C' from process `\buff.$proc$buff.v:10$491'.
+No latch inferred for signal `\buff.\D' from process `\buff.$proc$buff.v:10$491'.
+No latch inferred for signal `\square_op.\Hi' from process `\square_op.$proc$square_op.v:11$487'.
+No latch inferred for signal `\square_op.\Pi' from process `\square_op.$proc$square_op.v:11$487'.
+No latch inferred for signal `\square_op.\Gi' from process `\square_op.$proc$square_op.v:11$487'.
+No latch inferred for signal `\diamond.\Si' from process `\diamond.$proc$diamond.v:9$485'.
+No latch inferred for signal `\pref_op.\go' from process `\pref_op.$proc$pref_op.v:13$481'.
+No latch inferred for signal `\pref_op.\po' from process `\pref_op.$proc$pref_op.v:13$481'.
+
+6.7. Executing PROC_DFF pass (convert process syncs to FFs).
+
+6.8. Executing PROC_CLEAN pass (remove empty switches from decision trees).
+Removing empty process `buff.$proc$buff.v:10$491'.
+Removing empty process `square_op.$proc$square_op.v:11$487'.
+Removing empty process `diamond.$proc$diamond.v:9$485'.
+Removing empty process `pref_op.$proc$pref_op.v:13$481'.
+Cleaned up 0 empty switches.
+
+7. Executing OPT pass (performing simple optimizations).
+
+7.1. Executing OPT_CONST pass (perform const folding).
+
+7.2. Executing OPT_SHARE pass (detect identical cells).
+Finding identical cells in module `\buff'.
+Finding identical cells in module `\square_op'.
+  Cell `$xor$square_op.v:12$488' is identical to cell `$xor$square_op.v:14$490'.
+    Redirecting output \Y: $xor$square_op.v:12$488_Y = $xor$square_op.v:14$490_Y
+    Removing $xor cell `$xor$square_op.v:12$488' from module `\square_op'.
+Finding identical cells in module `\diamond'.
+Finding identical cells in module `\pref_op'.
+Finding identical cells in module `\kogg_stone_64'.
+Removed a total of 1 cells.
+
+7.3. Executing OPT_MUXTREE pass (detect dead branches in mux trees).
+Running muxtree optimizier on module \buff..
+  Creating internal representation of mux trees.
+  No muxes found in this module.
+Running muxtree optimizier on module \square_op..
+  Creating internal representation of mux trees.
+  No muxes found in this module.
+Running muxtree optimizier on module \diamond..
+  Creating internal representation of mux trees.
+  No muxes found in this module.
+Running muxtree optimizier on module \pref_op..
+  Creating internal representation of mux trees.
+  No muxes found in this module.
+Running muxtree optimizier on module \kogg_stone_64..
+  Creating internal representation of mux trees.
+  No muxes found in this module.
+Removed 0 multiplexer ports.
+
+7.4. Executing OPT_REDUCE pass (consolidate $*mux and $reduce_* inputs).
+  Optimizing cells in module \buff.
+  Optimizing cells in module \square_op.
+  Optimizing cells in module \diamond.
+  Optimizing cells in module \pref_op.
+  Optimizing cells in module \kogg_stone_64.
+Performed a total of 0 changes.
+
+7.5. Executing OPT_SHARE pass (detect identical cells).
+Finding identical cells in module `\buff'.
+Finding identical cells in module `\square_op'.
+Finding identical cells in module `\diamond'.
+Finding identical cells in module `\pref_op'.
+Finding identical cells in module `\kogg_stone_64'.
+Removed a total of 0 cells.
+
+7.6. Executing OPT_RMDFF pass (remove dff with constant values).
+Replaced 0 DFF cells.
+
+7.7. Executing OPT_CLEAN pass (remove unused cells and wires).
+Finding unused cells or wires in module \buff..
+Finding unused cells or wires in module \square_op..
+Finding unused cells or wires in module \diamond..
+Finding unused cells or wires in module \pref_op..
+Finding unused cells or wires in module \kogg_stone_64..
+  removing unused `\pref_op' cell `\$genblock$kogg_stone_64.v:37$127[63].pref'.
+  removing unused `\pref_op' cell `\$genblock$kogg_stone_64.v:54$189[63].pref'.
+  removing unused `\pref_op' cell `\$genblock$kogg_stone_64.v:73$249[63].pref'.
+  removing unused `\pref_op' cell `\$genblock$kogg_stone_64.v:96$305[63].pref'.
+  removing unused `\pref_op' cell `\$genblock$kogg_stone_64.v:127$353[63].pref'.
+  removing unused `\pref_op' cell `\$genblock$kogg_stone_64.v:151$417[63].pref'.
+  removing unused non-port wire \c.
+  removed 1 unused temporary wires.
+
+7.8. Executing OPT_CONST pass (perform const folding).
+
+7.9. Rerunning OPT passes. (Maybe there is more to do..)
+
+7.10. Executing OPT_MUXTREE pass (detect dead branches in mux trees).
+Running muxtree optimizier on module \buff..
+  Creating internal representation of mux trees.
+  No muxes found in this module.
+Running muxtree optimizier on module \diamond..
+  Creating internal representation of mux trees.
+  No muxes found in this module.
+Running muxtree optimizier on module \kogg_stone_64..
+  Creating internal representation of mux trees.
+  No muxes found in this module.
+Running muxtree optimizier on module \pref_op..
+  Creating internal representation of mux trees.
+  No muxes found in this module.
+Running muxtree optimizier on module \square_op..
+  Creating internal representation of mux trees.
+  No muxes found in this module.
+Removed 0 multiplexer ports.
+
+7.11. Executing OPT_REDUCE pass (consolidate $*mux and $reduce_* inputs).
+  Optimizing cells in module \buff.
+  Optimizing cells in module \diamond.
+  Optimizing cells in module \kogg_stone_64.
+  Optimizing cells in module \pref_op.
+  Optimizing cells in module \square_op.
+Performed a total of 0 changes.
+
+7.12. Executing OPT_SHARE pass (detect identical cells).
+Finding identical cells in module `\buff'.
+Finding identical cells in module `\diamond'.
+Finding identical cells in module `\kogg_stone_64'.
+Finding identical cells in module `\pref_op'.
+Finding identical cells in module `\square_op'.
+Removed a total of 0 cells.
+
+7.13. Executing OPT_RMDFF pass (remove dff with constant values).
+Replaced 0 DFF cells.
+
+7.14. Executing OPT_CLEAN pass (remove unused cells and wires).
+Finding unused cells or wires in module \buff..
+Finding unused cells or wires in module \diamond..
+Finding unused cells or wires in module \kogg_stone_64..
+Finding unused cells or wires in module \pref_op..
+Finding unused cells or wires in module \square_op..
+
+7.15. Executing OPT_CONST pass (perform const folding).
+
+7.16. Finished OPT passes. (There is nothing left to do.)
+
+8. Executing TECHMAP pass (map to technology primitives).
+
+8.1. Executing Verilog-2005 frontend.
+Parsing Verilog input from `<techmap.v>' to AST representation.
+Generating RTLIL representation for module `\_90_simplemap_bool_ops'.
+Generating RTLIL representation for module `\_90_simplemap_reduce_ops'.
+Generating RTLIL representation for module `\_90_simplemap_logic_ops'.
+Generating RTLIL representation for module `\_90_simplemap_compare_ops'.
+Generating RTLIL representation for module `\_90_simplemap_various'.
+Generating RTLIL representation for module `\_90_simplemap_registers'.
+Generating RTLIL representation for module `\_90_shift_ops_shr_shl_sshl_sshr'.
+Generating RTLIL representation for module `\_90_shift_shiftx'.
+Generating RTLIL representation for module `\_90_fa'.
+Generating RTLIL representation for module `\_90_lcu'.
+Generating RTLIL representation for module `\_90_alu'.
+Generating RTLIL representation for module `\_90_macc'.
+Generating RTLIL representation for module `\_90_alumacc'.
+Generating RTLIL representation for module `\$__div_mod_u'.
+Generating RTLIL representation for module `\$__div_mod'.
+Generating RTLIL representation for module `\_90_div'.
+Generating RTLIL representation for module `\_90_mod'.
+Generating RTLIL representation for module `\_90_pow'.
+Generating RTLIL representation for module `\_90_pmux'.
+Generating RTLIL representation for module `\_90_lut'.
+Successfully finished Verilog frontend.
+Mapping diamond.$xor$diamond.v:10$486 ($xor) with simplemap.
+Mapping square_op.$and$square_op.v:13$489 ($and) with simplemap.
+Mapping square_op.$xor$square_op.v:14$490 ($xor) with simplemap.
+Mapping pref_op.$and$pref_op.v:14$482 ($and) with simplemap.
+Mapping pref_op.$or$pref_op.v:14$483 ($or) with simplemap.
+Mapping pref_op.$and$pref_op.v:15$484 ($and) with simplemap.
+No more expansions possible.
+
+9. Executing OPT pass (performing simple optimizations).
+
+9.1. Executing OPT_CONST pass (perform const folding).
+
+9.2. Executing OPT_SHARE pass (detect identical cells).
+Finding identical cells in module `\buff'.
+Finding identical cells in module `\diamond'.
+Finding identical cells in module `\kogg_stone_64'.
+Finding identical cells in module `\pref_op'.
+Finding identical cells in module `\square_op'.
+Removed a total of 0 cells.
+
+9.3. Executing OPT_MUXTREE pass (detect dead branches in mux trees).
+Running muxtree optimizier on module \buff..
+  Creating internal representation of mux trees.
+  No muxes found in this module.
+Running muxtree optimizier on module \diamond..
+  Creating internal representation of mux trees.
+  No muxes found in this module.
+Running muxtree optimizier on module \kogg_stone_64..
+  Creating internal representation of mux trees.
+  No muxes found in this module.
+Running muxtree optimizier on module \pref_op..
+  Creating internal representation of mux trees.
+  No muxes found in this module.
+Running muxtree optimizier on module \square_op..
+  Creating internal representation of mux trees.
+  No muxes found in this module.
+Removed 0 multiplexer ports.
+
+9.4. Executing OPT_REDUCE pass (consolidate $*mux and $reduce_* inputs).
+  Optimizing cells in module \buff.
+  Optimizing cells in module \diamond.
+  Optimizing cells in module \kogg_stone_64.
+  Optimizing cells in module \pref_op.
+  Optimizing cells in module \square_op.
+Performed a total of 0 changes.
+
+9.5. Executing OPT_SHARE pass (detect identical cells).
+Finding identical cells in module `\buff'.
+Finding identical cells in module `\diamond'.
+Finding identical cells in module `\kogg_stone_64'.
+Finding identical cells in module `\pref_op'.
+Finding identical cells in module `\square_op'.
+Removed a total of 0 cells.
+
+9.6. Executing OPT_RMDFF pass (remove dff with constant values).
+Replaced 0 DFF cells.
+
+9.7. Executing OPT_CLEAN pass (remove unused cells and wires).
+Finding unused cells or wires in module \buff..
+Finding unused cells or wires in module \diamond..
+Finding unused cells or wires in module \kogg_stone_64..
+Finding unused cells or wires in module \pref_op..
+Finding unused cells or wires in module \square_op..
+
+9.8. Executing OPT_CONST pass (perform const folding).
+
+9.9. Finished OPT passes. (There is nothing left to do.)
+
+10. Executing ABC pass (technology mapping using ABC).
+
+10.1. Extracting gate netlist of module `\buff' to `<abc-temp-dir>/input.blif'..
+Extracted 0 gates and 0 wires to a netlist network with 0 inputs and 0 outputs.
+Don't call ABC as there is nothing to map.
+Removing temp directory.
+
+10.2. Extracting gate netlist of module `\diamond' to `<abc-temp-dir>/input.blif'..
+Extracted 1 gates and 3 wires to a netlist network with 2 inputs and 1 outputs.
+
+10.2.1. Executing ABC.
+Running ABC command: <yosys-exe-dir>/berkeley-abc -s -f <abc-temp-dir>/abc.script 2>&1
+ABC: ABC command line: "source <abc-temp-dir>/abc.script".
+ABC: 
+ABC: + read_blif <abc-temp-dir>/input.blif 
+ABC: + read_lib -w /home/cmpe125/synth/./NanGate_15nm_OCL_typical_conditional_nldm.lib 
+ABC: Parsing finished successfully.  Parsing time =     0.04 sec
+ABC: Scl_LibertyReadGenlib() skipped cell "ANTENNA" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "CLKGATETST_X1" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "DFFRNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "DFFSNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped cell "FILLTIE" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X1" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X2" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X4" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X8" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X16" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "LHQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "SDFFRNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "SDFFSNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X1".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X2".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X4".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X8".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X12".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X16".
+ABC: Library "NanGate_15nm_OCL" from "/home/cmpe125/synth/./NanGate_15nm_OCL_typical_conditional_nldm.lib" has 57 cells (19 skipped: 5 seq; 6 tri-state; 8 no func).  Time =     0.06 sec
+ABC: Memory =    2.98 MB. Time =     0.06 sec
+ABC: Warning: Detected 2 multi-output gates (for example, "FA_X1").
+ABC: + read_constr -v /home/cmpe125/synth/./NanGate_15nm_OCL_typical_conditional_nldm.constr 
+ABC: Setting driving cell to be "BUF_X2".
+ABC: Setting driving cell to be 10.000000.
+ABC: + strash 
+ABC: + scorr 
+ABC: Error: The network is combinational (run "fraig" or "fraig_sweep").
+ABC: + ifraig 
+ABC: + retime -D 100 
+ABC: + strash 
+ABC: + dch -f 
+ABC: + map -D 100 
+ABC: + buffer 
+ABC: + upsize -D 100 
+ABC: Current delay (15.96 ps) does not exceed the target delay (100.00 ps). Upsizing is not performed.
+ABC: + dnsize -D 100 
+ABC: + stime -p 
+ABC: WireLoad = "none"  Gates =      1 (  0.0 %)   Cap =  4.3 ff (  0.0 %)   Area =        0.44 (100.0 %)   Delay =    15.96 ps  (100.0 %)               
+ABC: Path  0 --       2 : 0    1 pi      A =   0.00  Df =   0.8   -0.0 ps  S =   1.9 ps  Cin =  0.0 ff  Cout =   1.6 ff  Cmax =   0.0 ff  G =    0  
+ABC: Path  1 --       4 : 2    1 XOR2_X1 A =   0.44  Df =  16.0   -2.9 ps  S =  26.0 ps  Cin =  1.4 ff  Cout =  10.0 ff  Cmax = 100.0 ff  G =  696  
+ABC: Start-point = pi1.  End-point = po0.
+ABC: + write_blif <abc-temp-dir>/output.blif 
+
+10.2.2. Re-integrating ABC results.
+ABC RESULTS:           XOR2_X1 cells:        1
+ABC RESULTS:        internal signals:        0
+ABC RESULTS:           input signals:        2
+ABC RESULTS:          output signals:        1
+Removing temp directory.
+
+10.3. Extracting gate netlist of module `\kogg_stone_64' to `<abc-temp-dir>/input.blif'..
+Extracted 0 gates and 0 wires to a netlist network with 0 inputs and 0 outputs.
+Don't call ABC as there is nothing to map.
+Removing temp directory.
+
+10.4. Extracting gate netlist of module `\pref_op' to `<abc-temp-dir>/input.blif'..
+Extracted 3 gates and 7 wires to a netlist network with 4 inputs and 2 outputs.
+
+10.4.1. Executing ABC.
+Running ABC command: <yosys-exe-dir>/berkeley-abc -s -f <abc-temp-dir>/abc.script 2>&1
+ABC: ABC command line: "source <abc-temp-dir>/abc.script".
+ABC: 
+ABC: + read_blif <abc-temp-dir>/input.blif 
+ABC: + read_lib -w /home/cmpe125/synth/./NanGate_15nm_OCL_typical_conditional_nldm.lib 
+ABC: Parsing finished successfully.  Parsing time =     0.04 sec
+ABC: Scl_LibertyReadGenlib() skipped cell "ANTENNA" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "CLKGATETST_X1" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "DFFRNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "DFFSNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped cell "FILLTIE" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X1" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X2" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X4" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X8" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X16" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "LHQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "SDFFRNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "SDFFSNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X1".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X2".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X4".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X8".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X12".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X16".
+ABC: Library "NanGate_15nm_OCL" from "/home/cmpe125/synth/./NanGate_15nm_OCL_typical_conditional_nldm.lib" has 57 cells (19 skipped: 5 seq; 6 tri-state; 8 no func).  Time =     0.06 sec
+ABC: Memory =    2.98 MB. Time =     0.06 sec
+ABC: Warning: Detected 2 multi-output gates (for example, "FA_X1").
+ABC: + read_constr -v /home/cmpe125/synth/./NanGate_15nm_OCL_typical_conditional_nldm.constr 
+ABC: Setting driving cell to be "BUF_X2".
+ABC: Setting driving cell to be 10.000000.
+ABC: + strash 
+ABC: + scorr 
+ABC: Error: The network is combinational (run "fraig" or "fraig_sweep").
+ABC: + ifraig 
+ABC: + retime -D 100 
+ABC: + strash 
+ABC: + dch -f 
+ABC: + map -D 100 
+ABC: + buffer 
+ABC: + upsize -D 100 
+ABC: Current delay (11.24 ps) does not exceed the target delay (100.00 ps). Upsizing is not performed.
+ABC: + dnsize -D 100 
+ABC: + stime -p 
+ABC: WireLoad = "none"  Gates =      5 ( 40.0 %)   Cap =  2.9 ff ( 15.0 %)   Area =        1.08 ( 60.0 %)   Delay =    13.96 ps  ( 40.0 %)               
+ABC: Path  0 --       1 : 0    2 pi       A =   0.00  Df =   0.7   -0.1 ps  S =   1.8 ps  Cin =  0.0 ff  Cout =   1.5 ff  Cmax =   0.0 ff  G =    0  
+ABC: Path  1 --       7 : 2    1 NAND2_X1 A =   0.20  Df =   2.7   -0.4 ps  S =   2.6 ps  Cin =  0.8 ff  Cout =   0.7 ff  Cmax = 100.0 ff  G =   91  
+ABC: Path  2 --       9 : 2    1 NAND2_X1 A =   0.20  Df =  14.0   -2.7 ps  S =  21.9 ps  Cin =  0.8 ff  Cout =  10.0 ff  Cmax = 100.0 ff  G = 1332  
+ABC: Start-point = pi0.  End-point = po0.
+ABC: + write_blif <abc-temp-dir>/output.blif 
+
+10.4.2. Re-integrating ABC results.
+ABC RESULTS:           AND2_X1 cells:        1
+ABC RESULTS:            BUF_X2 cells:        1
+ABC RESULTS:            INV_X1 cells:        1
+ABC RESULTS:          NAND2_X1 cells:        2
+ABC RESULTS:        internal signals:        1
+ABC RESULTS:           input signals:        4
+ABC RESULTS:          output signals:        2
+Removing temp directory.
+
+10.5. Extracting gate netlist of module `\square_op' to `<abc-temp-dir>/input.blif'..
+Extracted 2 gates and 4 wires to a netlist network with 2 inputs and 2 outputs.
+
+10.5.1. Executing ABC.
+Running ABC command: <yosys-exe-dir>/berkeley-abc -s -f <abc-temp-dir>/abc.script 2>&1
+ABC: ABC command line: "source <abc-temp-dir>/abc.script".
+ABC: 
+ABC: + read_blif <abc-temp-dir>/input.blif 
+ABC: + read_lib -w /home/cmpe125/synth/./NanGate_15nm_OCL_typical_conditional_nldm.lib 
+ABC: Parsing finished successfully.  Parsing time =     0.04 sec
+ABC: Scl_LibertyReadGenlib() skipped cell "ANTENNA" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "CLKGATETST_X1" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "DFFRNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "DFFSNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped cell "FILLTIE" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X1" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X2" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X4" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X8" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X16" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "LHQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "SDFFRNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "SDFFSNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X1".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X2".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X4".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X8".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X12".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X16".
+ABC: Library "NanGate_15nm_OCL" from "/home/cmpe125/synth/./NanGate_15nm_OCL_typical_conditional_nldm.lib" has 57 cells (19 skipped: 5 seq; 6 tri-state; 8 no func).  Time =     0.06 sec
+ABC: Memory =    2.98 MB. Time =     0.06 sec
+ABC: Warning: Detected 2 multi-output gates (for example, "FA_X1").
+ABC: + read_constr -v /home/cmpe125/synth/./NanGate_15nm_OCL_typical_conditional_nldm.constr 
+ABC: Setting driving cell to be "BUF_X2".
+ABC: Setting driving cell to be 10.000000.
+ABC: + strash 
+ABC: + scorr 
+ABC: Error: The network is combinational (run "fraig" or "fraig_sweep").
+ABC: + ifraig 
+ABC: + retime -D 100 
+ABC: + strash 
+ABC: + dch -f 
+ABC: + map -D 100 
+ABC: + buffer 
+ABC: + upsize -D 100 
+ABC: Current delay (18.60 ps) does not exceed the target delay (100.00 ps). Upsizing is not performed.
+ABC: + dnsize -D 100 
+ABC: + stime -p 
+ABC: WireLoad = "none"  Gates =      4 ( 25.0 %)   Cap =  4.2 ff ( 18.8 %)   Area =        0.93 ( 50.0 %)   Delay =    25.57 ps  ( 75.0 %)               
+ABC: Path  0 --       2 : 0    2 pi      A =   0.00  Df =   0.8   -0.0 ps  S =   1.9 ps  Cin =  0.0 ff  Cout =   1.6 ff  Cmax =   0.0 ff  G =    0  
+ABC: Path  1 --       5 : 2    1 AND2_X1 A =   0.29  Df =   5.1   -0.7 ps  S =   2.1 ps  Cin =  0.8 ff  Cout =   0.9 ff  Cmax = 100.0 ff  G =  110  
+ABC: Path  2 --       6 : 1    2 BUF_X2  A =   0.25  Df =  12.3   -0.9 ps  S =   8.0 ps  Cin =  0.8 ff  Cout =  10.7 ff  Cmax = 200.0 ff  G = 1272  
+ABC: Path  3 --       8 : 2    1 NOR2_X1 A =   0.20  Df =  25.6   -4.2 ps  S =  25.0 ps  Cin =  0.8 ff  Cout =  10.0 ff  Cmax = 100.0 ff  G = 1327  
+ABC: Start-point = pi1.  End-point = po1.
+ABC: + write_blif <abc-temp-dir>/output.blif 
+
+10.5.2. Re-integrating ABC results.
+ABC RESULTS:           AND2_X1 cells:        1
+ABC RESULTS:            BUF_X2 cells:        1
+ABC RESULTS:           NOR2_X1 cells:        2
+ABC RESULTS:        internal signals:        0
+ABC RESULTS:           input signals:        2
+ABC RESULTS:          output signals:        2
+Removing temp directory.
+
+11. Printing statistics.
+
+=== buff ===
+
+   Number of wires:                  4
+   Number of wire bits:              4
+   Number of public wires:           4
+   Number of public wire bits:       4
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                  0
+
+=== diamond ===
+
+   Number of wires:                  6
+   Number of wire bits:              6
+   Number of public wires:           3
+   Number of public wire bits:       3
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                  1
+     XOR2_X1                         1
+
+=== kogg_stone_64 ===
+
+   Number of wires:                 20
+   Number of wire bits:           1154
+   Number of public wires:          20
+   Number of public wire bits:    1154
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                506
+     buff                           63
+     diamond                        64
+     pref_op                       315
+     square_op                      64
+
+=== pref_op ===
+
+   Number of wires:                 16
+   Number of wire bits:             16
+   Number of public wires:           6
+   Number of public wire bits:       6
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                  5
+     AND2_X1                         1
+     BUF_X2                          1
+     INV_X1                          1
+     NAND2_X1                        2
+
+=== square_op ===
+
+   Number of wires:                 11
+   Number of wire bits:             11
+   Number of public wires:           5
+   Number of public wire bits:       5
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                  4
+     AND2_X1                         1
+     BUF_X2                          1
+     NOR2_X1                         2
+
+End of script. Logfile hash: 3551b45456
+CPU: user 0.18s system 0.00s, MEM: 38.58 MB total, 12.13 MB resident
+Yosys 0.5+ (git sha1 f13e387, gcc 5.2.1-22ubuntu2 -O2 -fstack-protector-strong -fPIC -Os)
+Time spent: 36% 6x read_verilog (0 sec), 24% 3x opt_clean (0 sec), ...

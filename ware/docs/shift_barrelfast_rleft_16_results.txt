@@ -1,0 +1,463 @@
+
+ /----------------------------------------------------------------------------\
+ |                                                                            |
+ |  yosys -- Yosys Open SYnthesis Suite                                       |
+ |                                                                            |
+ |  Copyright (C) 2012 - 2015  Clifford Wolf <clifford@clifford.at>           |
+ |                                                                            |
+ |  Permission to use, copy, modify, and/or distribute this software for any  |
+ |  purpose with or without fee is hereby granted, provided that the above    |
+ |  copyright notice and this permission notice appear in all copies.         |
+ |                                                                            |
+ |  THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES  |
+ |  WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF          |
+ |  MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR   |
+ |  ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES    |
+ |  WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN     |
+ |  ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF   |
+ |  OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.            |
+ |                                                                            |
+ \----------------------------------------------------------------------------/
+
+ Yosys 0.5+ (git sha1 f13e387, gcc 5.2.1-22ubuntu2 -O2 -fstack-protector-strong -fPIC -Os)
+
+
+-- Parsing `shift_barrelfast_rleft.v' using frontend `verilog' --
+
+1. Executing Verilog-2005 frontend.
+Parsing Verilog input from `shift_barrelfast_rleft.v' to AST representation.
+Generating RTLIL representation for module `\shift_barrelfast_rleft'.
+Successfully finished Verilog frontend.
+
+-- Running command `proc ; opt ;  techmap -D ALU_RIPPLE;; opt -fast ;; abc -D 100 -liberty ./NanGate_15nm_OCL_typical_conditional_nldm.lib  -constr ./NanGate_15nm_OCL_typical_conditional_nldm.constr; stat' --
+
+2. Executing PROC pass (convert processes to netlists).
+
+2.1. Executing PROC_CLEAN pass (remove empty switches from decision trees).
+Cleaned up 0 empty switches.
+
+2.2. Executing PROC_RMDEAD pass (remove dead branches from decision trees).
+Removed 1 dead cases from process $proc$shift_barrelfast_rleft.v:28$18 in module shift_barrelfast_rleft.
+Removed a total of 1 dead cases.
+
+2.3. Executing PROC_INIT pass (extract init attributes).
+
+2.4. Executing PROC_ARST pass (detect async resets in processes).
+
+2.5. Executing PROC_MUX pass (convert decision trees to multiplexers).
+Creating decoders for process `\shift_barrelfast_rleft.$proc$shift_barrelfast_rleft.v:28$18'.
+  creating decoder for signal `$0$mem2reg_rd$$shift_barrelfast_rleft.v:29$17_ADDR[3:0]$19'.
+  creating decoder for signal `$0$mem2reg_rd$$shift_barrelfast_rleft.v:29$17_DATA[15:0]$20'.
+  creating decoder for signal `$0\b[15:0]'.
+  creating decoder for signal `$1$mem2reg_rd$$shift_barrelfast_rleft.v:29$17_DATA[15:0]$21'.
+
+2.6. Executing PROC_DLATCH pass (convert process syncs to latches).
+No latch inferred for signal `\shift_barrelfast_rleft.\b' from process `\shift_barrelfast_rleft.$proc$shift_barrelfast_rleft.v:28$18'.
+No latch inferred for signal `\shift_barrelfast_rleft.$mem2reg_rd$$shift_barrelfast_rleft.v:29$17_ADDR' from process `\shift_barrelfast_rleft.$proc$shift_barrelfast_rleft.v:28$18'.
+No latch inferred for signal `\shift_barrelfast_rleft.$mem2reg_rd$$shift_barrelfast_rleft.v:29$17_DATA' from process `\shift_barrelfast_rleft.$proc$shift_barrelfast_rleft.v:28$18'.
+
+2.7. Executing PROC_DFF pass (convert process syncs to FFs).
+
+2.8. Executing PROC_CLEAN pass (remove empty switches from decision trees).
+Found and cleaned up 1 empty switch in `\shift_barrelfast_rleft.$proc$shift_barrelfast_rleft.v:28$18'.
+Removing empty process `shift_barrelfast_rleft.$proc$shift_barrelfast_rleft.v:28$18'.
+Cleaned up 1 empty switch.
+
+3. Executing OPT pass (performing simple optimizations).
+
+3.1. Executing OPT_CONST pass (perform const folding).
+Replacing $eq cell `$procmux$86_CMP0' in module `shift_barrelfast_rleft' with $logic_not.
+
+3.2. Executing OPT_SHARE pass (detect identical cells).
+Finding identical cells in module `\shift_barrelfast_rleft'.
+Removed a total of 0 cells.
+
+3.3. Executing OPT_MUXTREE pass (detect dead branches in mux trees).
+Running muxtree optimizier on module \shift_barrelfast_rleft..
+  Creating internal representation of mux trees.
+  Evaluating internal representation of mux trees.
+    Root of a mux tree: $procmux$71 (pure)
+  Analyzing evaluation results.
+Removed 0 multiplexer ports.
+
+3.4. Executing OPT_REDUCE pass (consolidate $*mux and $reduce_* inputs).
+  Optimizing cells in module \shift_barrelfast_rleft.
+Performed a total of 0 changes.
+
+3.5. Executing OPT_SHARE pass (detect identical cells).
+Finding identical cells in module `\shift_barrelfast_rleft'.
+Removed a total of 0 cells.
+
+3.6. Executing OPT_RMDFF pass (remove dff with constant values).
+Replaced 0 DFF cells.
+
+3.7. Executing OPT_CLEAN pass (remove unused cells and wires).
+Finding unused cells or wires in module \shift_barrelfast_rleft..
+
+3.8. Executing OPT_CONST pass (perform const folding).
+
+3.9. Finished OPT passes. (There is nothing left to do.)
+
+4. Executing TECHMAP pass (map to technology primitives).
+
+4.1. Executing Verilog-2005 frontend.
+Parsing Verilog input from `<techmap.v>' to AST representation.
+Generating RTLIL representation for module `\_90_simplemap_bool_ops'.
+Generating RTLIL representation for module `\_90_simplemap_reduce_ops'.
+Generating RTLIL representation for module `\_90_simplemap_logic_ops'.
+Generating RTLIL representation for module `\_90_simplemap_compare_ops'.
+Generating RTLIL representation for module `\_90_simplemap_various'.
+Generating RTLIL representation for module `\_90_simplemap_registers'.
+Generating RTLIL representation for module `\_90_shift_ops_shr_shl_sshl_sshr'.
+Generating RTLIL representation for module `\_90_shift_shiftx'.
+Generating RTLIL representation for module `\_90_fa'.
+Generating RTLIL representation for module `\_90_lcu'.
+Generating RTLIL representation for module `\_90_alu'.
+Generating RTLIL representation for module `\_90_macc'.
+Generating RTLIL representation for module `\_90_alumacc'.
+Generating RTLIL representation for module `\$__div_mod_u'.
+Generating RTLIL representation for module `\$__div_mod'.
+Generating RTLIL representation for module `\_90_div'.
+Generating RTLIL representation for module `\_90_mod'.
+Generating RTLIL representation for module `\_90_pow'.
+Generating RTLIL representation for module `\_90_pmux'.
+Generating RTLIL representation for module `\_90_lut'.
+Successfully finished Verilog frontend.
+Mapping shift_barrelfast_rleft.$procmux$72_CMP0 ($eq) with simplemap.
+
+4.2. Executing AST frontend in derive mode using pre-parsed AST for module `\_90_pmux'.
+Parameter \WIDTH = 16
+Parameter \S_WIDTH = 15
+Generating RTLIL representation for module `$paramod\_90_pmux\WIDTH=16\S_WIDTH=15'.
+
+4.3. Continuing TECHMAP pass.
+Mapping shift_barrelfast_rleft.$procmux$71 using $paramod\_90_pmux\WIDTH=16\S_WIDTH=15.
+Mapping shift_barrelfast_rleft.$procmux$73_CMP0 ($eq) with simplemap.
+Mapping shift_barrelfast_rleft.$procmux$74_CMP0 ($eq) with simplemap.
+Mapping shift_barrelfast_rleft.$procmux$75_CMP0 ($eq) with simplemap.
+Mapping shift_barrelfast_rleft.$procmux$76_CMP0 ($eq) with simplemap.
+Mapping shift_barrelfast_rleft.$procmux$77_CMP0 ($eq) with simplemap.
+Mapping shift_barrelfast_rleft.$procmux$78_CMP0 ($eq) with simplemap.
+Mapping shift_barrelfast_rleft.$procmux$79_CMP0 ($eq) with simplemap.
+Mapping shift_barrelfast_rleft.$procmux$80_CMP0 ($eq) with simplemap.
+Mapping shift_barrelfast_rleft.$procmux$81_CMP0 ($eq) with simplemap.
+Mapping shift_barrelfast_rleft.$procmux$82_CMP0 ($eq) with simplemap.
+Mapping shift_barrelfast_rleft.$procmux$83_CMP0 ($eq) with simplemap.
+Mapping shift_barrelfast_rleft.$procmux$84_CMP0 ($eq) with simplemap.
+Mapping shift_barrelfast_rleft.$procmux$85_CMP0 ($eq) with simplemap.
+Mapping shift_barrelfast_rleft.$procmux$86_CMP0 ($logic_not) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$reduce_or$<techmap.v>:441$177 ($reduce_or) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$reduce_or$<techmap.v>:441$178 ($reduce_or) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$reduce_or$<techmap.v>:441$176 ($reduce_or) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$reduce_or$<techmap.v>:441$175 ($reduce_or) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$reduce_or$<techmap.v>:441$174 ($reduce_or) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$reduce_or$<techmap.v>:441$173 ($reduce_or) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$reduce_or$<techmap.v>:441$172 ($reduce_or) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$reduce_or$<techmap.v>:441$171 ($reduce_or) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$reduce_or$<techmap.v>:441$170 ($reduce_or) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$reduce_or$<techmap.v>:441$169 ($reduce_or) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$reduce_or$<techmap.v>:441$168 ($reduce_or) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$reduce_or$<techmap.v>:441$167 ($reduce_or) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$reduce_or$<techmap.v>:441$166 ($reduce_or) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$reduce_or$<techmap.v>:441$165 ($reduce_or) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$reduce_or$<techmap.v>:441$164 ($reduce_or) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$reduce_or$<techmap.v>:441$163 ($reduce_or) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$and$<techmap.v>:434$162 ($and) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$and$<techmap.v>:434$161 ($and) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$and$<techmap.v>:434$160 ($and) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$and$<techmap.v>:434$159 ($and) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$and$<techmap.v>:434$158 ($and) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$and$<techmap.v>:434$157 ($and) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$and$<techmap.v>:434$156 ($and) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$and$<techmap.v>:434$155 ($and) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$and$<techmap.v>:434$154 ($and) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$and$<techmap.v>:434$153 ($and) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$and$<techmap.v>:434$152 ($and) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$and$<techmap.v>:434$151 ($and) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$and$<techmap.v>:434$150 ($and) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$and$<techmap.v>:434$149 ($and) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$and$<techmap.v>:434$148 ($and) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$ternary$<techmap.v>:445$147 ($mux) with simplemap.
+Mapping shift_barrelfast_rleft.$techmap$procmux$71.$reduce_or$<techmap.v>:445$146 ($reduce_or) with simplemap.
+No more expansions possible.
+Removed 0 unused cells and 54 unused wires.
+
+5. Executing OPT pass (performing simple optimizations).
+
+5.1. Executing OPT_CONST pass (perform const folding).
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$133' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$131 [0] = \sh [0]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$182' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$179 [1] = \sh [1]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$196' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$194 [0] = \sh [0]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$197' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$194 [1] = \sh [1]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$213' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$209 [2] = \sh [2]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$226' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$224 [0] = \sh [0]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$228' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$224 [2] = \sh [2]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$242' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$239 [1] = \sh [1]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$243' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$239 [2] = \sh [2]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$256' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$254 [0] = \sh [0]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$257' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$254 [1] = \sh [1]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$258' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$254 [2] = \sh [2]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$274' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$269 [3] = \sh [3]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$286' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$284 [0] = \sh [0]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$289' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$284 [3] = \sh [3]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$302' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$299 [1] = \sh [1]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$304' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$299 [3] = \sh [3]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$316' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$314 [0] = \sh [0]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$317' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$314 [1] = \sh [1]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$319' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$314 [3] = \sh [3]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$333' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$329 [2] = \sh [2]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$334' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$329 [3] = \sh [3]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$346' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$344 [0] = \sh [0]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$348' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$344 [2] = \sh [2]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$349' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$344 [3] = \sh [3]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$362' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$359 [1] = \sh [1]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$363' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$359 [2] = \sh [2]'.
+Replacing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$364' (?0) in module `\shift_barrelfast_rleft' with constant driver `$auto$simplemap.cc:250:simplemap_eqne$359 [3] = \sh [3]'.
+
+5.2. Executing OPT_SHARE pass (detect identical cells).
+Finding identical cells in module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:136:simplemap_reduce$354' is identical to cell `$auto$simplemap.cc:136:simplemap_reduce$339'.
+    Redirecting output \Y: $auto$simplemap.cc:127:simplemap_reduce$352 [1] = $auto$simplemap.cc:127:simplemap_reduce$337 [1]
+    Removing $_OR_ cell `$auto$simplemap.cc:136:simplemap_reduce$354' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:136:simplemap_reduce$369' is identical to cell `$auto$simplemap.cc:136:simplemap_reduce$339'.
+    Redirecting output \Y: $auto$simplemap.cc:127:simplemap_reduce$367 [1] = $auto$simplemap.cc:127:simplemap_reduce$337 [1]
+    Removing $_OR_ cell `$auto$simplemap.cc:136:simplemap_reduce$369' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:177:logic_reduce$375' is identical to cell `$auto$simplemap.cc:136:simplemap_reduce$323'.
+    Redirecting output \Y: $auto$simplemap.cc:168:logic_reduce$374 [0] = $auto$simplemap.cc:127:simplemap_reduce$322 [0]
+    Removing $_OR_ cell `$auto$simplemap.cc:177:logic_reduce$375' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:177:logic_reduce$376' is identical to cell `$auto$simplemap.cc:136:simplemap_reduce$339'.
+    Redirecting output \Y: $auto$simplemap.cc:168:logic_reduce$374 [1] = $auto$simplemap.cc:127:simplemap_reduce$337 [1]
+    Removing $_OR_ cell `$auto$simplemap.cc:177:logic_reduce$376' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:85:simplemap_bitop$183' is identical to cell `$auto$simplemap.cc:85:simplemap_bitop$135'.
+    Redirecting output \Y: $auto$simplemap.cc:250:simplemap_eqne$179 [2] = $auto$simplemap.cc:250:simplemap_eqne$131 [2]
+    Removing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$183' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:85:simplemap_bitop$184' is identical to cell `$auto$simplemap.cc:85:simplemap_bitop$136'.
+    Redirecting output \Y: $auto$simplemap.cc:250:simplemap_eqne$179 [3] = $auto$simplemap.cc:250:simplemap_eqne$131 [3]
+    Removing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$184' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:85:simplemap_bitop$198' is identical to cell `$auto$simplemap.cc:85:simplemap_bitop$135'.
+    Redirecting output \Y: $auto$simplemap.cc:250:simplemap_eqne$194 [2] = $auto$simplemap.cc:250:simplemap_eqne$131 [2]
+    Removing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$198' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:85:simplemap_bitop$199' is identical to cell `$auto$simplemap.cc:85:simplemap_bitop$136'.
+    Redirecting output \Y: $auto$simplemap.cc:250:simplemap_eqne$194 [3] = $auto$simplemap.cc:250:simplemap_eqne$131 [3]
+    Removing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$199' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:85:simplemap_bitop$211' is identical to cell `$auto$simplemap.cc:85:simplemap_bitop$181'.
+    Redirecting output \Y: $auto$simplemap.cc:250:simplemap_eqne$209 [0] = $auto$simplemap.cc:250:simplemap_eqne$179 [0]
+    Removing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$211' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:85:simplemap_bitop$212' is identical to cell `$auto$simplemap.cc:85:simplemap_bitop$134'.
+    Redirecting output \Y: $auto$simplemap.cc:250:simplemap_eqne$209 [1] = $auto$simplemap.cc:250:simplemap_eqne$131 [1]
+    Removing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$212' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:136:simplemap_reduce$189' is identical to cell `$auto$simplemap.cc:136:simplemap_reduce$141'.
+    Redirecting output \Y: $auto$simplemap.cc:127:simplemap_reduce$187 [1] = $auto$simplemap.cc:127:simplemap_reduce$139 [1]
+    Removing $_OR_ cell `$auto$simplemap.cc:136:simplemap_reduce$189' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:85:simplemap_bitop$214' is identical to cell `$auto$simplemap.cc:85:simplemap_bitop$136'.
+    Redirecting output \Y: $auto$simplemap.cc:250:simplemap_eqne$209 [3] = $auto$simplemap.cc:250:simplemap_eqne$131 [3]
+    Removing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$214' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:85:simplemap_bitop$227' is identical to cell `$auto$simplemap.cc:85:simplemap_bitop$134'.
+    Redirecting output \Y: $auto$simplemap.cc:250:simplemap_eqne$224 [1] = $auto$simplemap.cc:250:simplemap_eqne$131 [1]
+    Removing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$227' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:136:simplemap_reduce$203' is identical to cell `$auto$simplemap.cc:136:simplemap_reduce$323'.
+    Redirecting output \Y: $auto$simplemap.cc:127:simplemap_reduce$202 [0] = $auto$simplemap.cc:127:simplemap_reduce$322 [0]
+    Removing $_OR_ cell `$auto$simplemap.cc:136:simplemap_reduce$203' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:85:simplemap_bitop$229' is identical to cell `$auto$simplemap.cc:85:simplemap_bitop$136'.
+    Redirecting output \Y: $auto$simplemap.cc:250:simplemap_eqne$224 [3] = $auto$simplemap.cc:250:simplemap_eqne$131 [3]
+    Removing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$229' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:85:simplemap_bitop$241' is identical to cell `$auto$simplemap.cc:85:simplemap_bitop$181'.
+    Redirecting output \Y: $auto$simplemap.cc:250:simplemap_eqne$239 [0] = $auto$simplemap.cc:250:simplemap_eqne$179 [0]
+    Removing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$241' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:136:simplemap_reduce$204' is identical to cell `$auto$simplemap.cc:136:simplemap_reduce$141'.
+    Redirecting output \Y: $auto$simplemap.cc:127:simplemap_reduce$202 [1] = $auto$simplemap.cc:127:simplemap_reduce$139 [1]
+    Removing $_OR_ cell `$auto$simplemap.cc:136:simplemap_reduce$204' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:85:simplemap_bitop$244' is identical to cell `$auto$simplemap.cc:85:simplemap_bitop$136'.
+    Redirecting output \Y: $auto$simplemap.cc:250:simplemap_eqne$239 [3] = $auto$simplemap.cc:250:simplemap_eqne$131 [3]
+    Removing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$244' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:85:simplemap_bitop$259' is identical to cell `$auto$simplemap.cc:85:simplemap_bitop$136'.
+    Redirecting output \Y: $auto$simplemap.cc:250:simplemap_eqne$254 [3] = $auto$simplemap.cc:250:simplemap_eqne$131 [3]
+    Removing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$259' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:85:simplemap_bitop$271' is identical to cell `$auto$simplemap.cc:85:simplemap_bitop$181'.
+    Redirecting output \Y: $auto$simplemap.cc:250:simplemap_eqne$269 [0] = $auto$simplemap.cc:250:simplemap_eqne$179 [0]
+    Removing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$271' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:85:simplemap_bitop$272' is identical to cell `$auto$simplemap.cc:85:simplemap_bitop$134'.
+    Redirecting output \Y: $auto$simplemap.cc:250:simplemap_eqne$269 [1] = $auto$simplemap.cc:250:simplemap_eqne$131 [1]
+    Removing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$272' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:85:simplemap_bitop$273' is identical to cell `$auto$simplemap.cc:85:simplemap_bitop$135'.
+    Redirecting output \Y: $auto$simplemap.cc:250:simplemap_eqne$269 [2] = $auto$simplemap.cc:250:simplemap_eqne$131 [2]
+    Removing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$273' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:136:simplemap_reduce$233' is identical to cell `$auto$simplemap.cc:136:simplemap_reduce$140'.
+    Redirecting output \Y: $auto$simplemap.cc:127:simplemap_reduce$232 [0] = $auto$simplemap.cc:127:simplemap_reduce$139 [0]
+    Removing $_OR_ cell `$auto$simplemap.cc:136:simplemap_reduce$233' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:136:simplemap_reduce$234' is identical to cell `$auto$simplemap.cc:136:simplemap_reduce$219'.
+    Redirecting output \Y: $auto$simplemap.cc:127:simplemap_reduce$232 [1] = $auto$simplemap.cc:127:simplemap_reduce$217 [1]
+    Removing $_OR_ cell `$auto$simplemap.cc:136:simplemap_reduce$234' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:85:simplemap_bitop$287' is identical to cell `$auto$simplemap.cc:85:simplemap_bitop$134'.
+    Redirecting output \Y: $auto$simplemap.cc:250:simplemap_eqne$284 [1] = $auto$simplemap.cc:250:simplemap_eqne$131 [1]
+    Removing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$287' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:85:simplemap_bitop$288' is identical to cell `$auto$simplemap.cc:85:simplemap_bitop$135'.
+    Redirecting output \Y: $auto$simplemap.cc:250:simplemap_eqne$284 [2] = $auto$simplemap.cc:250:simplemap_eqne$131 [2]
+    Removing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$288' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:85:simplemap_bitop$301' is identical to cell `$auto$simplemap.cc:85:simplemap_bitop$181'.
+    Redirecting output \Y: $auto$simplemap.cc:250:simplemap_eqne$299 [0] = $auto$simplemap.cc:250:simplemap_eqne$179 [0]
+    Removing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$301' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:136:simplemap_reduce$248' is identical to cell `$auto$simplemap.cc:136:simplemap_reduce$188'.
+    Redirecting output \Y: $auto$simplemap.cc:127:simplemap_reduce$247 [0] = $auto$simplemap.cc:127:simplemap_reduce$187 [0]
+    Removing $_OR_ cell `$auto$simplemap.cc:136:simplemap_reduce$248' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:85:simplemap_bitop$303' is identical to cell `$auto$simplemap.cc:85:simplemap_bitop$135'.
+    Redirecting output \Y: $auto$simplemap.cc:250:simplemap_eqne$299 [2] = $auto$simplemap.cc:250:simplemap_eqne$131 [2]
+    Removing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$303' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:136:simplemap_reduce$249' is identical to cell `$auto$simplemap.cc:136:simplemap_reduce$219'.
+    Redirecting output \Y: $auto$simplemap.cc:127:simplemap_reduce$247 [1] = $auto$simplemap.cc:127:simplemap_reduce$217 [1]
+    Removing $_OR_ cell `$auto$simplemap.cc:136:simplemap_reduce$249' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:136:simplemap_reduce$263' is identical to cell `$auto$simplemap.cc:136:simplemap_reduce$323'.
+    Redirecting output \Y: $auto$simplemap.cc:127:simplemap_reduce$262 [0] = $auto$simplemap.cc:127:simplemap_reduce$322 [0]
+    Removing $_OR_ cell `$auto$simplemap.cc:136:simplemap_reduce$263' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:85:simplemap_bitop$318' is identical to cell `$auto$simplemap.cc:85:simplemap_bitop$135'.
+    Redirecting output \Y: $auto$simplemap.cc:250:simplemap_eqne$314 [2] = $auto$simplemap.cc:250:simplemap_eqne$131 [2]
+    Removing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$318' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:136:simplemap_reduce$264' is identical to cell `$auto$simplemap.cc:136:simplemap_reduce$219'.
+    Redirecting output \Y: $auto$simplemap.cc:127:simplemap_reduce$262 [1] = $auto$simplemap.cc:127:simplemap_reduce$217 [1]
+    Removing $_OR_ cell `$auto$simplemap.cc:136:simplemap_reduce$264' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:85:simplemap_bitop$331' is identical to cell `$auto$simplemap.cc:85:simplemap_bitop$181'.
+    Redirecting output \Y: $auto$simplemap.cc:250:simplemap_eqne$329 [0] = $auto$simplemap.cc:250:simplemap_eqne$179 [0]
+    Removing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$331' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:85:simplemap_bitop$332' is identical to cell `$auto$simplemap.cc:85:simplemap_bitop$134'.
+    Redirecting output \Y: $auto$simplemap.cc:250:simplemap_eqne$329 [1] = $auto$simplemap.cc:250:simplemap_eqne$131 [1]
+    Removing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$332' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:136:simplemap_reduce$278' is identical to cell `$auto$simplemap.cc:136:simplemap_reduce$218'.
+    Redirecting output \Y: $auto$simplemap.cc:127:simplemap_reduce$277 [0] = $auto$simplemap.cc:127:simplemap_reduce$217 [0]
+    Removing $_OR_ cell `$auto$simplemap.cc:136:simplemap_reduce$278' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:85:simplemap_bitop$347' is identical to cell `$auto$simplemap.cc:85:simplemap_bitop$134'.
+    Redirecting output \Y: $auto$simplemap.cc:250:simplemap_eqne$344 [1] = $auto$simplemap.cc:250:simplemap_eqne$131 [1]
+    Removing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$347' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:136:simplemap_reduce$293' is identical to cell `$auto$simplemap.cc:136:simplemap_reduce$140'.
+    Redirecting output \Y: $auto$simplemap.cc:127:simplemap_reduce$292 [0] = $auto$simplemap.cc:127:simplemap_reduce$139 [0]
+    Removing $_OR_ cell `$auto$simplemap.cc:136:simplemap_reduce$293' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:85:simplemap_bitop$361' is identical to cell `$auto$simplemap.cc:85:simplemap_bitop$181'.
+    Redirecting output \Y: $auto$simplemap.cc:250:simplemap_eqne$359 [0] = $auto$simplemap.cc:250:simplemap_eqne$179 [0]
+    Removing $_XOR_ cell `$auto$simplemap.cc:85:simplemap_bitop$361' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:136:simplemap_reduce$294' is identical to cell `$auto$simplemap.cc:136:simplemap_reduce$279'.
+    Redirecting output \Y: $auto$simplemap.cc:127:simplemap_reduce$292 [1] = $auto$simplemap.cc:127:simplemap_reduce$277 [1]
+    Removing $_OR_ cell `$auto$simplemap.cc:136:simplemap_reduce$294' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:136:simplemap_reduce$308' is identical to cell `$auto$simplemap.cc:136:simplemap_reduce$188'.
+    Redirecting output \Y: $auto$simplemap.cc:127:simplemap_reduce$307 [0] = $auto$simplemap.cc:127:simplemap_reduce$187 [0]
+    Removing $_OR_ cell `$auto$simplemap.cc:136:simplemap_reduce$308' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:136:simplemap_reduce$353' is identical to cell `$auto$simplemap.cc:136:simplemap_reduce$140'.
+    Redirecting output \Y: $auto$simplemap.cc:127:simplemap_reduce$352 [0] = $auto$simplemap.cc:127:simplemap_reduce$139 [0]
+    Removing $_OR_ cell `$auto$simplemap.cc:136:simplemap_reduce$353' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:136:simplemap_reduce$309' is identical to cell `$auto$simplemap.cc:136:simplemap_reduce$324'.
+    Redirecting output \Y: $auto$simplemap.cc:127:simplemap_reduce$307 [1] = $auto$simplemap.cc:127:simplemap_reduce$322 [1]
+    Removing $_OR_ cell `$auto$simplemap.cc:136:simplemap_reduce$309' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:136:simplemap_reduce$368' is identical to cell `$auto$simplemap.cc:136:simplemap_reduce$188'.
+    Redirecting output \Y: $auto$simplemap.cc:127:simplemap_reduce$367 [0] = $auto$simplemap.cc:127:simplemap_reduce$187 [0]
+    Removing $_OR_ cell `$auto$simplemap.cc:136:simplemap_reduce$368' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:136:simplemap_reduce$218' is identical to cell `$auto$simplemap.cc:136:simplemap_reduce$338'.
+    Redirecting output \Y: $auto$simplemap.cc:127:simplemap_reduce$217 [0] = $auto$simplemap.cc:127:simplemap_reduce$337 [0]
+    Removing $_OR_ cell `$auto$simplemap.cc:136:simplemap_reduce$218' from module `\shift_barrelfast_rleft'.
+  Cell `$auto$simplemap.cc:136:simplemap_reduce$279' is identical to cell `$auto$simplemap.cc:136:simplemap_reduce$324'.
+    Redirecting output \Y: $auto$simplemap.cc:127:simplemap_reduce$277 [1] = $auto$simplemap.cc:127:simplemap_reduce$322 [1]
+    Removing $_OR_ cell `$auto$simplemap.cc:136:simplemap_reduce$279' from module `\shift_barrelfast_rleft'.
+Removed a total of 46 cells.
+
+5.3. Executing OPT_RMDFF pass (remove dff with constant values).
+Replaced 0 DFF cells.
+
+5.4. Executing OPT_CLEAN pass (remove unused cells and wires).
+Finding unused cells or wires in module \shift_barrelfast_rleft..
+
+5.5. Finished fast OPT passes.
+
+6. Executing ABC pass (technology mapping using ABC).
+
+6.1. Extracting gate netlist of module `\shift_barrelfast_rleft' to `<abc-temp-dir>/input.blif'..
+Extracted 536 gates and 557 wires to a netlist network with 20 inputs and 16 outputs.
+
+6.1.1. Executing ABC.
+Running ABC command: <yosys-exe-dir>/berkeley-abc -s -f <abc-temp-dir>/abc.script 2>&1
+ABC: ABC command line: "source <abc-temp-dir>/abc.script".
+ABC: 
+ABC: + read_blif <abc-temp-dir>/input.blif 
+ABC: + read_lib -w /home/cmpe125/synth/./NanGate_15nm_OCL_typical_conditional_nldm.lib 
+ABC: Parsing finished successfully.  Parsing time =     0.04 sec
+ABC: Scl_LibertyReadGenlib() skipped cell "ANTENNA" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "CLKGATETST_X1" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "DFFRNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "DFFSNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped cell "FILLTIE" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X1" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X2" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X4" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X8" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped cell "FILL_X16" without logic function.
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "LHQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "SDFFRNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped sequential cell "SDFFSNQ_X1".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X1".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X2".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X4".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X8".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X12".
+ABC: Scl_LibertyReadGenlib() skipped three-state cell "TBUF_X16".
+ABC: Library "NanGate_15nm_OCL" from "/home/cmpe125/synth/./NanGate_15nm_OCL_typical_conditional_nldm.lib" has 57 cells (19 skipped: 5 seq; 6 tri-state; 8 no func).  Time =     0.06 sec
+ABC: Memory =    2.98 MB. Time =     0.06 sec
+ABC: Warning: Detected 2 multi-output gates (for example, "FA_X1").
+ABC: + read_constr -v /home/cmpe125/synth/./NanGate_15nm_OCL_typical_conditional_nldm.constr 
+ABC: Setting driving cell to be "BUF_X2".
+ABC: Setting driving cell to be 10.000000.
+ABC: + strash 
+ABC: + scorr 
+ABC: Error: The network is combinational (run "fraig" or "fraig_sweep").
+ABC: + ifraig 
+ABC: + retime -D 100 
+ABC: + strash 
+ABC: + dch -f 
+ABC: + map -D 100 
+ABC: + buffer 
+ABC: + upsize -D 100 
+ABC: Current delay (40.11 ps) does not exceed the target delay (100.00 ps). Upsizing is not performed.
+ABC: + dnsize -D 100 
+ABC: + stime -p 
+ABC: WireLoad = "none"  Gates =    572 (  9.1 %)   Cap =  1.7 ff (  0.9 %)   Area =      113.05 ( 94.4 %)   Delay =    42.94 ps  ( 59.8 %)               
+ABC: Path  0 --       2 : 0    3 pi        A =   0.00  Df =   1.2   -0.0 ps  S =   2.5 ps  Cin =  0.0 ff  Cout =   2.5 ff  Cmax =   0.0 ff  G =    0  
+ABC: Path  1 --      38 : 1    2 INV_X1    A =   0.15  Df =   3.3   -0.0 ps  S =   2.6 ps  Cin =  0.8 ff  Cout =   1.6 ff  Cmax = 100.0 ff  G =  182  
+ABC: Path  2 --      47 : 2    4 NOR2_X1   A =   0.20  Df =   8.6   -2.0 ps  S =   8.6 ps  Cin =  0.8 ff  Cout =   3.1 ff  Cmax = 100.0 ff  G =  398  
+ABC: Path  3 --      85 : 2    7 NAND2_X1  A =   0.20  Df =  16.7   -4.8 ps  S =  12.4 ps  Cin =  0.8 ff  Cout =   5.1 ff  Cmax = 100.0 ff  G =  656  
+ABC: Path  4 --      86 : 1   10 CLKBUF_X2 A =   0.25  Df =  24.9   -6.0 ps  S =   6.1 ps  Cin =  0.8 ff  Cout =   7.3 ff  Cmax = 200.0 ff  G =  888  
+ABC: Path  5 --      88 : 2    1 NOR2_X1   A =   0.20  Df =  28.2   -7.0 ps  S =   4.0 ps  Cin =  0.8 ff  Cout =   0.8 ff  Cmax = 100.0 ff  G =  108  
+ABC: Path  6 --      89 : 2    1 NOR2_X1   A =   0.20  Df =  30.5   -6.4 ps  S =   3.4 ps  Cin =  0.8 ff  Cout =   0.8 ff  Cmax = 100.0 ff  G =  108  
+ABC: Path  7 --      90 : 2    1 NAND2_X1  A =   0.20  Df =  32.7   -5.9 ps  S =   3.1 ps  Cin =  0.8 ff  Cout =   0.8 ff  Cmax = 100.0 ff  G =  108  
+ABC: Path  8 --      91 : 2    1 NOR2_X1   A =   0.20  Df =  34.5   -5.0 ps  S =   3.2 ps  Cin =  0.8 ff  Cout =   0.7 ff  Cmax = 100.0 ff  G =   90  
+ABC: Path  9 --     137 : 2    1 NAND2_X1  A =   0.20  Df =  42.9   -1.5 ps  S =  21.9 ps  Cin =  0.8 ff  Cout =  10.0 ff  Cmax = 100.0 ff  G = 1332  
+ABC: Start-point = pi01.  End-point = po00.
+ABC: + write_blif <abc-temp-dir>/output.blif 
+
+6.1.2. Re-integrating ABC results.
+ABC RESULTS:            BUF_X2 cells:       16
+ABC RESULTS:         CLKBUF_X2 cells:       16
+ABC RESULTS:            INV_X1 cells:       20
+ABC RESULTS:          NAND2_X1 cells:       96
+ABC RESULTS:           NOR2_X1 cells:      424
+ABC RESULTS:        internal signals:      521
+ABC RESULTS:           input signals:       20
+ABC RESULTS:          output signals:       16
+Removing temp directory.
+
+7. Printing statistics.
+
+=== shift_barrelfast_rleft ===
+
+   Number of wires:                733
+   Number of wire bits:           1444
+   Number of public wires:          20
+   Number of public wire bits:     324
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                572
+     BUF_X2                         16
+     CLKBUF_X2                      16
+     INV_X1                         20
+     NAND2_X1                       96
+     NOR2_X1                       424
+
+End of script. Logfile hash: 43b4b065ff
+CPU: user 0.16s system 0.00s, MEM: 35.98 MB total, 9.67 MB resident
+Yosys 0.5+ (git sha1 f13e387, gcc 5.2.1-22ubuntu2 -O2 -fstack-protector-strong -fPIC -Os)
+Time spent: 23% 3x opt_share (0 sec), 16% 1x techmap (0 sec), ...

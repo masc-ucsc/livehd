@@ -21,7 +21,7 @@ class Char_Array {
 public:
   class Const_Char_Array_Iter {
   public:
-    Const_Char_Array_Iter(const uint16_t *ptr) : ptr(ptr) {}
+    explicit Const_Char_Array_Iter(const uint16_t *ptr) : ptr(ptr) {}
     Const_Char_Array_Iter operator++() {
       Const_Char_Array_Iter i(ptr);
       const uint16_t *      sz = ptr;
@@ -54,7 +54,7 @@ private:
 
   bool pending_clear_reload;
 
-  explicit Char_Array() { } // Not allowed
+  explicit Char_Array() = delete; // Not allowed
 public:
   explicit Char_Array(const std::string & path, const std::string & _name)
       : variable_internal(path + "/" + _name) {
