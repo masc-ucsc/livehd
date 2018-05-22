@@ -3,6 +3,7 @@
 
 #include <boost/program_options.hpp>
 #include <vector>
+#include <string>
 
 class Options_pack {
 private:
