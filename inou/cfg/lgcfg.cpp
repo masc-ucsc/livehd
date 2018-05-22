@@ -1,4 +1,3 @@
-
 #include "lgbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"

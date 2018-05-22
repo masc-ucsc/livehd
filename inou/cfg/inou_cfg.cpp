@@ -473,7 +473,8 @@ void Inou_cfg::cfg_2_dot(LGraph *g, const std::string &path) {
     else if(g->is_graph_output(idx))
       fprintf(dot, "node%d[label =\"%d %%%s\"];\n", (int)idx, (int)idx, g->get_graph_output_name(idx));
     else
-      fprintf(dot, "node%d[label =\"%d %s\"];\n", (int)idx, (int)idx, g->node_type_get(idx).get_name().c_str());
+      fprintf(dot, "node%d[label =\"%d %s; %s\"];\n", (int)idx, (int)idx, g->node_type_get(idx).get_name().c_str(),
+          g->get_node_wirename(idx));
   }
 
   for(auto idx : g->fast()) {
