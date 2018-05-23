@@ -1,10 +1,10 @@
-#include "Integer.hpp"
+#include "integer.hpp"
 using Pyrope::Integer;
 using Pyrope::pyrchunk;
 using Pyrope::pyrint;
 using Pyrope::pyrsize;
 
-#include "Exception.hpp"
+#include "exception.hpp"
 
 #include <cassert>
 #include <iomanip>
@@ -229,7 +229,7 @@ pyrsize Integer::highest_set_bit() const {
     }
   }
 
-  throw Pyrope::LogicError("highest_set_bit() called on 0");
+  throw Pyrope::Logic_Error("highest_set_bit() called on 0");
 }
 
 string Integer::x_string() const {

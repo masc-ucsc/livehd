@@ -1,8 +1,8 @@
 #ifndef OVERFLOW_POOL_H_
 #define OVERFLOW_POOL_H_
 
-#include "Integer.hpp"
-#include "lgraph/core/char_array.hpp"
+#include "integer.hpp"
+#include "char_array.hpp"
 #include <string>
 
 namespace Pyrope {
