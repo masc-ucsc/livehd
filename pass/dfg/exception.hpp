@@ -18,7 +18,7 @@ namespace Pyrope
   class Type_Error : public Exception
   {
     public:
-      TypeError(const std::string &msg) : Exception(msg) { }
+      Type_Error(const std::string &msg) : Exception(msg) { }
   };
 
   const std::string DEBUG_MSG = "Not implemented yet";
@@ -26,14 +26,14 @@ namespace Pyrope
   class Debug_Error : public Exception
   {
     public:
-      DebugError() : Exception(DEBUG_MSG) { }
-      DebugError(const std::string &msg) : Exception(DEBUG_MSG + ": " + msg) { }
+      Debug_Error() : Exception(DEBUG_MSG) { }
+      Debug_Error(const std::string &msg) : Exception(DEBUG_MSG + ": " + msg) { }
   };
 
   class Logic_Error : public Exception
   {
     public:
-      LogicError(const std::string &msg) : Exception(msg) { }
+      Logic_Error(const std::string &msg) : Exception(msg) { }
   };
 }
 
