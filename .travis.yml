@@ -7,6 +7,8 @@ before_install:
   - mkdir ~/debug
   - cd ~/debug
   - which clang
+  - export CXX=${COMPILER}
+  - export CC=${COMPILER}
   - cmake ~/build/masc-ucsc/lgraph
 
 install:
