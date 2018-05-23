@@ -26,12 +26,6 @@ int main(int argc, const char **argv) {
 
   std::vector<LGraph *> rvec = cfg.generate();
 
-  int ctr = 0;
-  for(auto *lg : rvec) {
-    const std::string fname = "cfg" + std::to_string(ctr++) + ".dot";
-    cfg.cfg_2_dot(lg, fname);
-  }
-
   //for (auto &g:rvec) {
   //	cfg.generate(g);
   //}

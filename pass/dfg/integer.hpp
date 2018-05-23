@@ -40,7 +40,7 @@ public:
     return bits;
   }
   pyrsize get_array_size() const {
-    return (bits >> 5) + ((bits & 0x1f != 0) ? 1 : 0);
+    return (bits >> 5) + (((bits & 0x1f) != 0) ? 1 : 0);
   }
   pyrsize highest_set_bit() const;
 

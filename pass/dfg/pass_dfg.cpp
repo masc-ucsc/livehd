@@ -7,6 +7,11 @@ using std::string;
 using std::unordered_map;
 using std::vector;
 
+void Pass_dfg::transform(LGraph *g)
+{
+
+}
+
 void Pass_dfg::cfg_2_dfg(LGraph *dfg, const LGraph *cfg)
 {
   Index_ID itr = find_root(cfg);
@@ -14,14 +19,14 @@ void Pass_dfg::cfg_2_dfg(LGraph *dfg, const LGraph *cfg)
 
   while (itr != 0) {
     process_node(dfg, cfg, last_refs, itr);
-
+    itr = get_child(cfg, itr);
   }
 }
 
 void Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, std::unordered_map<string, Index_ID> last_refs, Index_ID node)
 {
-  /*const WireName_ID data_str = cfg->get_node_wirename(node);
-  CFG_Node_Data data(cfg->node_type_get(node), data_str);
+  const char *data_str = cfg->get_node_wirename(node);
+  CFG_Node_Data data(cfg->node_type_get(node).op, data_str);
 
   switch (data.get_operator()) {
     case CfgAssign_Op:
@@ -32,7 +37,7 @@ void Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, std::unordered_map<s
       break;
     default:
       ;
-  }*/
+  }
 }
 
 void Pass_dfg::process_assign(LGraph *dfg, const LGraph *cfg, unordered_map<string, Index_ID> last_refs, const CFG_Node_Data &data, Index_ID node)
@@ -50,6 +55,8 @@ void Pass_dfg::process_assign(LGraph *dfg, const LGraph *cfg, unordered_map<stri
 
 void Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, unordered_map<string, Index_ID> last_refs, const CFG_Node_Data &data, Index_ID node)
 {
+  Index_ID cond = last_refs[data.get_target()];
+  
 
 }
 
@@ -65,7 +72,7 @@ void Pass_dfg::process_operands(LGraph *dfg, const LGraph *cfg, unordered_map<st
   }
 }
 
-Index_ID find_root(const LGraph *cfg)
+Index_ID Pass_dfg::find_root(const LGraph *cfg)
 {
   for (auto idx : cfg->fast()) {
     if (cfg->is_root(idx))
@@ -73,4 +80,45 @@ Index_ID find_root(const LGraph *cfg)
   }
 
   assert(false);
+}
+
+Index_ID Pass_dfg::get_child(const LGraph *cfg, Index_ID node)
+{
+  vector<Index_ID> children;
+
+  for (const auto &cedge : cfg->out_edges(node))
+    children.push_back(cedge.get_inp_pin().get_nid());
+
+  if (children.size() == 1)
+    return children[0];
+  else if (children.size() == 0)
+    return 0;
+  else
+    assert(false);  
+}
+
+Pass_dfg_options_pack::Pass_dfg_options_pack() : Options_pack() {
+
+  Options::get_desc()->add_options()(
+    "dfg_output,o", boost::program_options::value(&dfg_output),
+    "cfg output <filename> for graph")("cfg_input,i", boost::program_options::value(&cfg_input),
+    "cfg input <filename> for graph");
+
+  boost::program_options::variables_map vm;
+  boost::program_options::store(
+      boost::program_options::command_line_parser(Options::get_cargc(), Options::get_cargv()).options(*Options::get_desc()).allow_unregistered().run(), vm);
+
+  if(vm.count("dfg_output")) {
+    dfg_output = vm["dfg_output"].as<string>();
+  } else {
+    dfg_output = "output.dfg";
+  }
+
+  if(vm.count("cfg_input")) {
+    cfg_input = vm["cfg_input"].as<string>();
+  } else {
+    cfg_input = "test.cfg";
+  }
+
+  console->info("inou_cfg dfg_output:{} cfg_input:{} graph_name:{}", dfg_output, cfg_input, graph_name);
 }
