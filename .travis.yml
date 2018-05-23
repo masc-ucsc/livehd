@@ -1,0 +1,15 @@
+language: cpp
+
+before_install:
+  - mkdir debug
+  - cd debug
+  - cmake ../lgraph
+
+install:
+  - make
+
+before_script:
+  - make clean
+
+script:
+- make regression
