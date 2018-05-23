@@ -13,6 +13,17 @@ int main(int argc, const char **argv) {
   Inou_cfg cfg;
 
   Options::setup_lock();
+
+
+  //char str[] = "0b10001s8";
+  ////char str[] = "0xFF_f_fs32";
+  //bool v_signed;
+  //uint32_t bits;
+  //uint32_t explicit_bits;
+  //uint32_t val;
+
+  //prp_get_value(str, v_signed, bits, explicit_bits, val);
+
   std::vector<LGraph *> rvec = cfg.generate();
 
   int ctr = 0;
