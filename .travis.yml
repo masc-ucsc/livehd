@@ -12,4 +12,4 @@ before_script:
   - make clean
 
 script:
-- make regression
+- make test
