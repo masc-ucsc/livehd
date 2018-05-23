@@ -186,20 +186,20 @@ void Inou_abc::gen_latch_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
     for(const auto &output : g->out_edges(idx)) {
       // Latch is CI/CO
       if(g->get_node_wirename(idx) != nullptr) {
-        sprintf(namebuffer, "%s_r", g->get_node_wirename(idx));
+        sprintf(namebuffer, "%s_%%r", g->get_node_wirename(idx));
         Abc_ObjAssignName(pNet, namebuffer, NULL);
         break;
       } else if(g->node_type_get(output.get_idx()).op == Join_Op) {
         assert(g->get_bits(output.get_idx()) > 1);
         if(g->get_node_wirename(output.get_idx()) != nullptr) {
-          sprintf(namebuffer, "%s_%d_r", g->get_node_wirename(output.get_idx()), output.get_inp_pin().get_pid());
+          sprintf(namebuffer, "%s_%%r_%d", g->get_node_wirename(output.get_idx()), output.get_inp_pin().get_pid());
           Abc_ObjAssignName(pNet, namebuffer, NULL);
           break;
         }
       } else if(g->node_type_get(output.get_idx()).op == Pick_Op) {
         for(const auto &next_out : g->out_edges(output.get_idx())) {
           if(g->get_node_wirename(next_out.get_idx()) != nullptr) {
-            sprintf(namebuffer, "%s_r", g->get_node_wirename(next_out.get_idx()));
+            sprintf(namebuffer, "%s_%%r", g->get_node_wirename(next_out.get_idx()));
             Abc_ObjAssignName(pNet, namebuffer, NULL);
             break;
           }
@@ -207,7 +207,7 @@ void Inou_abc::gen_latch_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
         break;
       } else if(g->get_node_wirename(output.get_idx()) != nullptr) {
         assert(g->get_bits(output.get_idx()) == 1);
-        sprintf(namebuffer, "%s_r", g->get_node_wirename(output.get_idx()));
+        sprintf(namebuffer, "%s_%%r", g->get_node_wirename(output.get_idx()));
         Abc_ObjAssignName(pNet, namebuffer, NULL);
         break;
       } else {

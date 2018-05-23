@@ -127,7 +127,10 @@ public:
 
   void generate(std::vector<const LGraph *> &out) final;
 
+  void dump_blif(const LGraph *g,const std::string filename);
+
 private:
+
   /*store the idx by their type, dont iterate again and again*/
   std::vector<Index_ID> combinational_id;
   std::vector<Index_ID> latch_id;
@@ -265,6 +268,17 @@ private:
   void conn_primary_output(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
 
   void conn_combinational_cell(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
+
+  void gen_module(const LGraph *g, std::ofstream &fs);
+
+  void gen_io_conn(const LGraph *g, std::ofstream &fs);
+
+  void gen_cell_conn(const LGraph *g, std::ofstream &fs);
+
+  void gen_latch_conn(const LGraph *g, std::ofstream &fs);
+
+  void write_src_info(const LGraph *g, const Inou_abc::index_offset &inp,std::ofstream &fs);
+
 };
 
 #endif //LGRAPH_INOU_ABC_HPP
