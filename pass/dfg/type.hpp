@@ -4,7 +4,7 @@
 #include <cmath>
 #include <cstdint>
 
-#include "Overflow_Pool.hpp"
+#include "overflow_pool.hpp"
 
 namespace Pyrope {
 enum TypeName { NUMERIC,
@@ -131,12 +131,12 @@ protected:
   bool _is_register : 1;
   bool _is_private : 1;
 
-  bool _max_overflow : 1;
   bool _min_overflow : 1;
+  bool _max_overflow : 1;
   bool _len_overflow : 1;
 
-  bool _max_fixed : 1;
   bool _min_fixed : 1;
+  bool _max_fixed : 1;
   bool _len_fixed : 1;
 };
 

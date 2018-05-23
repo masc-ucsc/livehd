@@ -1,6 +1,6 @@
-#include "Type.hpp"
-#include "Context.hpp"
-#include "Exception.hpp"
+#include "type.hpp"
+#include "context.hpp"
+#include "exception.hpp"
 
 #include <string>
 using std::string;
@@ -19,18 +19,18 @@ void Type::merge(const Type &other) {
   switch(get_name()) {
   case LOGICAL: {
     if(other.get_name() != LOGICAL)
-      throw TypeError("Could not merge: " + to_string() + ", " + other.to_string());
+      throw Type_Error("Could not merge: " + to_string() + ", " + other.to_string());
 
     break;
   }
 
   case STRING: {
     if(other.get_name() != STRING)
-      throw TypeError("Could not merge: " + to_string() + ", " + other.to_string());
+      throw Type_Error("Could not merge: " + to_string() + ", " + other.to_string());
 
     if(compare_attributes(other.len, other._len_overflow, len, _len_overflow) > 0) { // other.len > t1.len
       if(_len_fixed)
-        throw TypeError("Could not increase fixed length");
+        throw Type_Error("Could not increase fixed length");
 
       len           = other.len;
       _len_overflow = other._len_overflow;
@@ -41,7 +41,7 @@ void Type::merge(const Type &other) {
 
   case NUMERIC: {
     if(other.get_name() != NUMERIC)
-      throw TypeError("Could not merge: " + to_string() + ", " + other.to_string());
+      throw Type_Error("Could not merge: " + to_string() + ", " + other.to_string());
 
     // take the larger of the two maxes and lengths, and the smaller of the two mins
     _max_overflow = merge_attribute(&max, _max_overflow, _max_fixed, other.max, other._max_overflow);
@@ -56,11 +56,11 @@ void Type::merge(const Type &other) {
 
   case MAP: {
     if(other.get_name() != MAP)
-      throw TypeError("Could not merge: " + to_string() + ", " + other.to_string());
+      throw Type_Error("Could not merge: " + to_string() + ", " + other.to_string());
   }
 
   default: {
-    throw DebugError();
+    throw Debug_Error();
   }
   }
 }
@@ -74,7 +74,7 @@ bool Type::merge_attribute(pyrint *attr1_out, bool attr1_overflow, bool attr1_fi
 
   if(cmp_result > 0) { // attr2 > attr1
     if(attr1_fixed)
-      throw TypeError("Could not expand fixed attribute");
+      throw Type_Error("Could not expand fixed attribute");
 
     *attr1_out = attr2;
     return attr2_overflow;
@@ -102,14 +102,14 @@ int Type::compare_attributes(pyrint attr1, bool attr1_overflow, pyrint attr2, bo
 pyrsize Type::bits() const {
   switch(name) {
   case UNDEF:
-    throw TypeError("bits() called on UNDEF type");
+    throw Type_Error("bits() called on UNDEF type");
 
   case LOGICAL:
     return 1;
 
   case STRING:
     if(len == 0)
-      throw TypeError("bits() called on string with undefined length");
+      throw Type_Error("bits() called on string with undefined length");
 
     return len * 8;
 
@@ -128,7 +128,7 @@ pyrsize Type::bits() const {
     }
 
   default:
-    throw DebugError("Not implemented yet");
+    throw Debug_Error("Not implemented yet");
   }
 }
 
@@ -187,7 +187,7 @@ string Type::to_string() const {
   case UNDEF:
     return "UNDEF";
   default:
-    throw DebugError("Not implemented yet");
+    throw Debug_Error("Not implemented yet");
   }
 }
 
