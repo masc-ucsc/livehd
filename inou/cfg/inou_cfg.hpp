@@ -29,26 +29,6 @@ private:
   void                     cfg_2_lgraph(char **, std::vector<LGraph *> &);
   std::string              encode_cfg_data(const std::string &);
 
-  // CFG 2 DFG conversion methods
-  Index_ID                 find_root(const LGraph *cfg);
-  void                     process_node(LGraph *dfg, const LGraph *cfg, std::unordered_map<std::string, Index_ID> last_refs, Index_ID node);
-  void                     process_assign(  LGraph *dfg,
-                                            const LGraph *cfg,
-                                            std::unordered_map<std::string, Index_ID> last_refs,
-                                            const CFG_Node_Data &data,
-                                            Index_ID node );
-  void                     process_if(      LGraph *dfg,
-                                            const LGraph *cfg,
-                                            std::unordered_map<std::string, Index_ID> last_refs,
-                                            const CFG_Node_Data &data,
-                                            Index_ID node );
-  void                     process_operands(LGraph *dfg,
-                                            const LGraph *cfg,
-                                            std::unordered_map<std::string, Index_ID> last_refs,
-                                            const CFG_Node_Data &data,
-                                            Index_ID node,
-                                            std::vector<Index_ID>& );
-
 protected:
   Inou_cfg_options_pack opack;
 
@@ -61,7 +41,6 @@ public:
   void                  cfg_2_dot(LGraph *, const std::string &path);
 
   void lgraph_2_cfg(const LGraph *g, const std::string &filename);
-  void cfg_2_dfg(LGraph *dfg, const LGraph *cfg);
 
   using Inou::generate;
 
