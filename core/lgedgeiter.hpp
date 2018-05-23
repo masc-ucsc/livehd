@@ -7,6 +7,9 @@
 #include <vector>
 
 #include "sparsehash/dense_hash_map"
+#include "sparsehash/sparse_hash_set"
+
+#include <set>
 
 #include "lgraph.hpp"
 #include "lgraphbase.hpp"
@@ -89,7 +92,7 @@ public:
 
 typedef google::dense_hash_map<Index_ID, int32_t> Frontier_type;
 typedef std::vector<Index_ID>                     Pending_type;
-typedef std::set<Index_ID>                        Deadcode_type;
+typedef google::sparse_hash_set<Index_ID>         Deadcode_type;
 
 class Edge_iterator_base {
 protected:
@@ -258,6 +261,8 @@ public:
 class Backward_edge_iterator {
 public:
   class CBackward_edge_iterator : public Edge_iterator_base {
+  private:
+    Deadcode_type global_visited;
   public:
     CBackward_edge_iterator(const Index_ID _nid, const LGraph *_g, Frontier_type *_frontier, Pending_type *_pending)
         : Edge_iterator_base(_nid, _g, _frontier, _pending) {
@@ -274,32 +279,39 @@ public:
 
     //find nodes not connected to output that are preventing the propagation
     //only use in case the backward fails
-    Deadcode_type find_dce_nodes(Index_ID idx) {
-      Pending_type discovered;
-      Pending_type visited;
+    void find_dce_nodes() {
+      Pending_type  discovered;
+      std::set<Index_ID> dc_visited;
+      std::set<Index_ID> floating;
+      //floating.set_empty_key(0);     // 0 is not allowed as key
+      //floating.set_deleted_key(0); // 128 is not allowed as key (4KB aligned)
 
-      floating.insert(idx);
-      discovered.push_back(idx);
-      while(discovered.size() > 0) {
-        Index_ID current = dicovered.back();
-        discovered.pop_back();
-        visited.insert(current);
-        for(const auto& c : g->out_edges(current)) {
-          floating.erase(current);
+      for(const auto& _idx : *frontier) {
+        Index_ID idx = _idx.first;
+        floating.insert(idx);
+        discovered.push_back(idx);
+        while(discovered.size() > 0) {
+          Index_ID current = discovered.back();
+          discovered.pop_back();
+          dc_visited.insert(current);
+          for(const auto& c : g->out_edges(current)) {
+            floating.erase(current);
 
-          if(visited.find(c.get_inp_pin().get_nid()) == visited.end()) {
-            discovered.push_back(c.get_inp_pin().get_nid());
+            if(dc_visited.find(c.get_inp_pin().get_nid()) == dc_visited.end() &&
+                global_visited.find(c.get_inp_pin().get_nid()) == global_visited.end()) {
+              discovered.push_back(c.get_inp_pin().get_nid());
+              floating.insert(c.get_inp_pin().get_nid());
+            }
           }
         }
       }
 
-      return floating;
-    }
-
-    bool check_frontier() {
-      //this means no pending node, it could either be a loop or a dce like
-      //node (ie no output). It may be hard to determine which, let us check for nodes with no outputs
-
+      if(floating.size() > 0) {
+        console->warn("graph {} is not DCE free, please run DCE pass\n", g->get_name());
+        for(const auto& idx : floating) {
+          pending->push_back(idx);
+        }
+      }
     }
 
     void add_node(Index_ID idx) {
@@ -315,7 +327,6 @@ public:
           int32_t noutputs = g->get_node_int(master_root_nid).get_num_outputs() - 1;
           assert(noutputs >= 0);
           if(noutputs == 0) { // Done already
-            assert(false); // is this a real case?
             pending->push_back(master_root_nid);
           } else {
             (*frontier)[master_root_nid] = noutputs;
@@ -335,7 +346,11 @@ public:
     CBackward_edge_iterator operator++() {
       assert(nid); // Do not call ++ after end
       CBackward_edge_iterator i(nid, g, frontier, pending);
+      global_visited.insert(nid);
       add_node(nid);
+      if(pending->empty()) {
+        find_dce_nodes();
+      }
       set_next_nid();
       return i;
     };
@@ -346,7 +361,6 @@ protected:
   const LGraph *g;
   Frontier_type frontier; // 2G inputs at most
   Pending_type  pending;  // vertex that cleared the frontier
-  Deadcode_type floating; // nodes without fanout
 
 public:
   Backward_edge_iterator() = delete;
@@ -368,7 +382,8 @@ public:
         pending.push_back(it.second.nid);
     }
     for(const auto &it : g->outputs2node) {
-      pending.push_back(it.second.nid);
+      if(!g->get_node_int(it.second.nid).has_outputs()) //do not add outputs with connections
+        pending.push_back(it.second.nid);
     }
 
     Index_ID b = 0;
