@@ -4,11 +4,10 @@ compiler:
     - clang
 
 before_install:
-  - pwd
   - mkdir ~/debug
   - cd ~/debug
-  - cmake ~/build/masc-ucsc/lgraph
   - which clang
+  - cmake ~/build/masc-ucsc/lgraph
 
 install:
   - make
