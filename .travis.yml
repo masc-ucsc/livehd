@@ -4,7 +4,7 @@ before_install:
   - pwd
   - mkdir ~/debug
   - cd ~/debug
-  - cmake ~/masc-ucsc/lgraph
+  - cmake ~/build/masc-ucsc/lgraph
 
 install:
   - make
