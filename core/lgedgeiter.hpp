@@ -89,6 +89,7 @@ public:
 
 typedef google::dense_hash_map<Index_ID, int32_t> Frontier_type;
 typedef std::vector<Index_ID>                     Pending_type;
+typedef std::set<Index_ID>                        Deadcode_type;
 
 class Edge_iterator_base {
 protected:
@@ -105,24 +106,31 @@ public:
   virtual void    add_node(Index_ID nid) = 0;
   const Index_ID &operator*() const { return nid; }
 
-  void set_next_nid() {
-    if(pending->empty()) {
-      bool pushed = false;
-      for(auto &it : *frontier) {
-        if(it.second > 0) {
-          if(g->node_type_get(it.first).is_pipelined()) {
-            pending->push_back(it.first);
-            it.second = -1; // Mark as pipelined, but keep not to visit twice
-            pushed    = true;
-          }
+  bool check_frontier() {
+    bool pushed = false;
+    for(auto &it : *frontier) {
+      if(it.second > 0) {
+        if(g->node_type_get(it.first).is_pipelined()) {
+          pending->push_back(it.first);
+          it.second = -1; // Mark as pipelined, but keep not to visit twice
+          pushed    = true;
         }
       }
-      if(!pushed) {
+    }
+    if(!pushed) {
+      return false;
+    }
+    return true;
+  }
+
+  void set_next_nid() {
+    if(pending->empty())
+      if(!check_frontier()) {
         nid = 0; // We are done
         return;
       }
-    }
-#if 1
+
+#if DEBUG
     // Benchmark pending and frontier sizes
     static size_t p_max_size = 0;
     static size_t f_max_size = 0;
@@ -263,11 +271,39 @@ public:
       return nid != 0;
     };
 
+
+    //find nodes not connected to output that are preventing the propagation
+    //only use in case the backward fails
+    Deadcode_type find_dce_nodes(Index_ID idx) {
+      Pending_type discovered;
+      Pending_type visited;
+
+      floating.insert(idx);
+      discovered.push_back(idx);
+      while(discovered.size() > 0) {
+        Index_ID current = dicovered.back();
+        discovered.pop_back();
+        visited.insert(current);
+        for(const auto& c : g->out_edges(current)) {
+          floating.erase(current);
+
+          if(visited.find(c.get_inp_pin().get_nid()) == visited.end()) {
+            discovered.push_back(c.get_inp_pin().get_nid());
+          }
+        }
+      }
+
+      return floating;
+    }
+
+    bool check_frontier() {
+      //this means no pending node, it could either be a loop or a dce like
+      //node (ie no output). It may be hard to determine which, let us check for nodes with no outputs
+
+    }
+
     void add_node(Index_ID idx) {
       assert(g->get_node_int(idx).is_master_root());
-
-      // FIXME: Backwards is wrong. It should have a "visited" and "pending" no frontier. It could
-      // be a BFS (beamer) traversing backwards and use the visited to handle loops
 
       for(const auto &c : g->inp_edges(idx)) {
         const auto &dst_node        = g->get_node_int(c.get_idx());
@@ -279,6 +315,7 @@ public:
           int32_t noutputs = g->get_node_int(master_root_nid).get_num_outputs() - 1;
           assert(noutputs >= 0);
           if(noutputs == 0) { // Done already
+            assert(false); // is this a real case?
             pending->push_back(master_root_nid);
           } else {
             (*frontier)[master_root_nid] = noutputs;
@@ -309,6 +346,7 @@ protected:
   const LGraph *g;
   Frontier_type frontier; // 2G inputs at most
   Pending_type  pending;  // vertex that cleared the frontier
+  Deadcode_type floating; // nodes without fanout
 
 public:
   Backward_edge_iterator() = delete;
