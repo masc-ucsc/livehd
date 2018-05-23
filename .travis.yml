@@ -1,8 +1,8 @@
 language: cpp
 
 before_install:
-  - mkdir debug
-  - cd debug
+  - mkdir ~/debug
+  - cd ~/debug
   - cmake ~/masc-ucsc/lgraph
 
 install:
