@@ -157,10 +157,12 @@ protected:
   const Edge &get_reverse_for_deletion() const;
 
 public:
-  //Edge() {};
+
   friend struct Node_Internal_Page;
   friend class Node_Internal;
   friend class LGraph_Base;
+  friend struct LEdge;
+  friend struct SEdge;
 
   int next_node_inc() const {
     if(is_snode())
@@ -231,6 +233,14 @@ public:
     LEdge_Internal *l = reinterpret_cast<LEdge_Internal *>(this);
     return l->set(_idx, _inp_pid, _input);
   }
+
+private: // all constructor&assignment should be marked as private
+  Edge() = default;
+  Edge(const Edge & rhs) = default;
+  Edge(Edge &&rhs) = delete;
+  ~Edge() = default;
+  Edge&operator=(const Edge & rhs) = default;
+  Edge&operator=(Edge && rhs) = delete;
 };
 
 struct __attribute__((packed)) LEdge : public Edge { // 6 bytes total
