@@ -93,7 +93,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
   vector<map<string, vector<string>>> chain_stks_gs(1); //chain_stacks for every graph, use vector to implement stack
   vector<string>                      nname_bg_gs(1);   //nname = node name
   vector<Index_ID>                    nid_ed_gs(1);
-  map<string, uint32_t>               nfirst2gid; //map for every sub-graph and its first node name
+  map<string, uint32_t>               nfirst2gid;       //map for every sub-graph and its first node name
   LGraph *                            gtop = lgs[0];
 
   bool gtop_bg_nname_recorded = false;
@@ -394,9 +394,6 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
 
 } //end of build_graph
 
-/*
- * create lgraph based on every first two nodes defined in CFG table
- */
 
 vector<string> Inou_cfg::split(const string &str) {
   typedef string::const_iterator iter;
@@ -473,7 +470,8 @@ void Inou_cfg::cfg_2_dot(LGraph *g, const std::string &path) {
     else if(g->is_graph_output(idx))
       fprintf(dot, "node%d[label =\"%d %%%s\"];\n", (int)idx, (int)idx, g->get_graph_output_name(idx));
     else
-      fprintf(dot, "node%d[label =\"%d %s\"];\n", (int)idx, (int)idx, g->node_type_get(idx).get_name().c_str());
+      fprintf(dot, "node%d[label =\"%d %s; %s\"];\n", (int)idx, (int)idx, g->node_type_get(idx).get_name().c_str(),
+          g->get_node_wirename(idx));
   }
 
   for(auto idx : g->fast()) {
@@ -486,59 +484,48 @@ void Inou_cfg::cfg_2_dot(LGraph *g, const std::string &path) {
   fclose(dot);
 }
 
-//tmp zone
-//str4num_1 = (*(words.begin())).substr(1);//get substring s[1:end]
-//int num1 = std::stoi(str4num_1);
-//fmt::print("num1 number is {}\n", num1);
 
-//str4num_2 = (*(words.begin()+1)).substr(1);//get substring s[1:end]
-//int num2 = std::stoi(str4num_2);
-//fmt::print("num2 number is {}\n", num2);
+bool prp_get_value(char *str, bool &v_signed, uint32_t &bits, uint32_t &explicit_bits, uint32_t &val){
+  //judge signed or unsigned
+  string str_tmp(str);
+  if (str_tmp.find('s') != std::string::npos)
+    v_signed = true;
 
-//for(vector<string>::size_type i = 0; i != words.size(); i++){
-//  if(i == words.size()-1)
-//    dfg_data = dfg_data + words[i];//no final space stored
-//  else
-//    dfg_data = dfg_data + words[i] + " ";
-//}
-/*
- * no need to care about target of if-end statement inside a loop
- * deal with it later in DFG
-//II. connect body end node to for end node
-for(auto i = 0; i< id_nbr_null.size(); i++){
-  fmt::print("con{}\n",id_nbr_null[i]);
-  src_nid = *(id_nbr_null.begin()+i);
-  dst_nid = name2id[w1st];//modify from w2nd to w1st
-  g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, i, true));
-  fmt::print("for statement, connect src_node {} to dst_node {} ----- 2\n", src_nid, dst_nid);
-}
-*/
 
-/*
-else if(w2nd != "null"){ //normal case:Kx->Ky, update stacks
-src_nid = name2id[w1st];
-dst_nid = name2id[w2nd];
-g->add_edge (Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
-fmt::print("normal case connection, connect src_node {} to dst_node {} ----- 5\n", src_nid, dst_nid);
+  char *token = strtok(str, "su");
+  vector<string> tokens;
 
-bool belong_tops = false;
-Index_ID target_stack_id = src_nid;
+  // Keep collecting tokens while one of the delimiters present in str[].
+  while (token != nullptr) {
+    tokens.push_back(token);
+    token = strtok(nullptr, "su");
+  }
 
-//check equivalence bt src_nid and every top of stacks
-for (auto const& x : stacks){
-if(src_nid == x.second.top()){
-belong_tops = true;
-target_stack_id = x.first;
-break;
-}
+#if DEBUG
+  for(const auto& i:tokens)
+    fmt::print("{}\n",i);
+#endif
+
+
+  if(tokens[0][1] == 'x') { //heximal
+    bits = 1; //To do
+    val  = 1; //To do
+  }
+  else if (tokens[0][1] == 'b') { // binary
+    bits = 2; //To do
+    val  = 2; //To do
+  }
+  else { //decimal
+    bits = 3;
+    val  = (uint32_t)std::stoi(tokens[0]);;
+  }
+
+  if(tokens.size() == 2)
+    explicit_bits = (uint32_t) std::stoi(tokens[1]); //explicit bits width
+  else
+    explicit_bits = 0;                               //implicit bits width
+
+
+  return true; //To do
 }
 
-if(!belong_tops){
-stacks[target_stack_id].push(src_nid);
-stacks[target_stack_id].push(dst_nid);
-}
-else
-stacks[target_stack_id].push(dst_nid);
-
-}
-*/
