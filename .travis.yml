@@ -8,6 +8,7 @@ before_install:
   - mkdir ~/debug
   - cd ~/debug
   - cmake ~/build/masc-ucsc/lgraph
+  - which clang
 
 install:
   - make
