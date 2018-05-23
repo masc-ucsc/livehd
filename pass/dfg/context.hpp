@@ -5,8 +5,8 @@
 #include <sparsehash/dense_hash_map>
 #include <string>
 
-#include "Overflow_Pool.hpp"
-#include "Type.hpp"
+#include "overflow_pool.hpp"
+#include "type.hpp"
 
 namespace Pyrope {
 typedef std::string                                       VarID;
