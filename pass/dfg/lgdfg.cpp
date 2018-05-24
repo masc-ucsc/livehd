@@ -4,8 +4,7 @@
 
 #include "pass/dfg/pass_dfg.hpp"
 
-int main(int argc, const char **argv)
-{
+int main(int argc, const char **argv) {
   LGBench b;
   Options::setup(argc, argv);
 
