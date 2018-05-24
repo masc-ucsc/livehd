@@ -1,6 +1,6 @@
 /*
  * Copyright © 2010 Aleksey Kunitskiy <alexey.kv@gmail.com>
- * 
+ *
  * This file is part of AlignedAllocator
  *
  * This program is free software: you can redistribute it and/or modify
@@ -159,7 +159,7 @@ void AlignedAllocator<T, align>::construct(pointer p, const_reference val)
 template <typename T, const unsigned align>
 void AlignedAllocator<T, align>::deallocate(pointer p, size_type n)
 {
-  // p is not permitted to be a null pointer. 
+  // p is not permitted to be a null pointer.
 
   assert(n); // Just to remove warning of unused argument
   ptrdiff_t _p = reinterpret_cast<ptrdiff_t>(p);

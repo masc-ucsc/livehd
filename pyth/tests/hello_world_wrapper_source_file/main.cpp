@@ -69,11 +69,11 @@ PYBIND11_MODULE(python_example2, m) {
 
   py::class_<speak, virtual_hello>(m, "speak")
       .def(py::init<>());
-    
+
   m.def("call_hello", &call_hello);
-  
-  
-  
+
+
+
   m.doc() = R"pbdoc(
         Pybind11 example2 plugin
         -----------------------
