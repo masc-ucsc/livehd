@@ -118,7 +118,7 @@ public:
   void          insertion(LGraph *g);
   void          elimination(LGraph *g);
   void          result_graph(LGraph *g);
-  void          transform(LGraph *orig) override final;
+  void          transform(LGraph *orig) final;
   void          traverse(LGraph *g, int round);
   Node_Pin_Plus lookup_op_leader(Node_Pin_Plus new_opnode);
   Node_Pin_Plus lookup_exp_leader(Index_ID idx, Expression_Node new_exp_enode);

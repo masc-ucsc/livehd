@@ -24,7 +24,7 @@ protected:
 public:
   Pass_cse();
   void traverse(LGraph *g, std::map<int, and_node_for_comp> &and_node_for_comp_map, int round);
-  void transform(LGraph *orig) override final;
+  void transform(LGraph *orig) final;
 };
 
 #endif
