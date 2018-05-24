@@ -612,6 +612,7 @@ std::set<Port_ID> visited_out_pids;
 
     to_dst_var(out, g, c.get_idx());
 
+    // FIXME? g->get_graph_output_name(idx) instead of using output_vars
     out << instancename << '.' << *i;
 
     i++;
