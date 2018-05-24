@@ -6,8 +6,8 @@
 #include <string>
 #include <vector>
 
-#include <bm.h>
-#include <bmsparsevec.h>
+#include "bm.h"
+#include "bmsparsevec.h"
 
 #include "dense.hpp"
 #include "lgconsts.hpp"
