@@ -5,10 +5,10 @@
 
 #include <iostream>
 #include <vector>
+#include <map>
 
 #include "dense.hpp"
 #include "lglog.hpp"
-// #include "AAlloc.h"
 
 #include "char_array.hpp"
 #include "lgedge.hpp"
