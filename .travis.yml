@@ -3,6 +3,10 @@ language: cpp
 compiler:
     - clang
 
+addons:
+    apt:
+      update: true
+
 before_install:
   - mkdir ~/debug
   - cd ~/debug
