@@ -3,6 +3,10 @@ language: cpp
 compiler:
     - clang
 
+matrix:
+    include:
+    - env: CXX=clang++ CC=clang
+
 addons:
     apt:
       update: true
