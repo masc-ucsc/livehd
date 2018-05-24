@@ -12,9 +12,6 @@
 
 #include "cfg_node_data.hpp"
 
-
-
-
 class Inou_cfg_options_pack : public Options_pack {
 public:
   Inou_cfg_options_pack();

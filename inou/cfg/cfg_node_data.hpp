@@ -11,7 +11,7 @@ const char ENCODING_DELIM = '|';        // deliminator used to encode CFG data i
 
 class CFG_Node_Data {
   public:
-    CFG_Node_Data(Node_Type_Op op, const char *data_str) : oper(op), operands(OPERANDS_INIT_SIZE) {
+    CFG_Node_Data(Node_Type_Op op, const char *data_str) : oper(op) {
       std::istringstream ss(data_str);
 
       assert(std::getline(ss, target, ENCODING_DELIM));     // the first var in the data_str is the target
