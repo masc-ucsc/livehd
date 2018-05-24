@@ -13,12 +13,12 @@ declare -a inputs=("trivial.v" "null_port.v" "simple_flop.v" "test.v" "shift.v"\
 TEMP=$(getopt -o p --long profile -n 'yosys.sh' -- "$@")
 eval set -- "$TEMP"
 
-YOSYS=./inou/yosys/lgyosys
+YOSYS=$(./inou/yosys/lgyosys)
 while true ; do
     case "$1" in
         -p|--profile)
           shift
-          YOSYS=./inou/yosys/lgyosys --profile
+          YOSYS=$(./inou/yosys/lgyosys --profile)
           ;;
         --)
           shift

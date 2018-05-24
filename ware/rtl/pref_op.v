@@ -2,7 +2,7 @@ module pref_op
 (
   input   gi,
   input   pi,
-  
+
   input   gk,
   input   pk,
 
