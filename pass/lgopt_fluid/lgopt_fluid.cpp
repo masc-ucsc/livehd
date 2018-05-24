@@ -2,8 +2,8 @@
 #include <iostream>
 #include <random>
 
-#include "lgraph.hpp"
 #include "lgbench.hpp"
+#include "lgraph.hpp"
 
 #include "inou.hpp"
 
@@ -14,7 +14,7 @@ int main(int argc, const char **argv) {
 
   Options::setup(argc, argv);
 
-  Pass_fluid fluid;
+  Pass_fluid   fluid;
   Inou_trivial inou;
 
   Options::setup_lock();
@@ -22,15 +22,14 @@ int main(int argc, const char **argv) {
   std::vector<LGraph *> lgs = inou.generate();
   b.sample("setup");
 
-  for(auto g:lgs) {
-    console->info("processing {}\n",g->get_name());
+  for(auto g : lgs) {
+    console->info("processing {}\n", g->get_name());
     fluid.transform(g);
   }
 
   b.sample("fluid_pass");
 
-  for(auto g:lgs) {
+  for(auto g : lgs) {
     g->sync();
   }
 }
-
