@@ -79,7 +79,7 @@ const Edge &Edge::get_reverse_for_deletion() const {
   do {
     const Edge *eit;
     if (!input)
-      eit = find_edge(ptr_inp->get_input_begin() , ptr_inp->get_input_end(), ptr_nid, inp_pid, out_pid);
+      eit = find_edge(ptr_inp->get_input_begin() , ptr_inp->get_input_end(), ptr_nid, out_pid, inp_pid);
     else
       eit = find_edge(ptr_inp->get_output_begin(), ptr_inp->get_output_end(), ptr_nid, inp_pid, out_pid);
 
