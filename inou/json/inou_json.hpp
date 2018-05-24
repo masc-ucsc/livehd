@@ -29,9 +29,9 @@ protected:
 
   bool is_int(std::string s);
 
-  void from_json(LGraph *g, rapidjson::Document& document);
+  void from_json(LGraph *g, rapidjson::Document &document);
 
-  void to_json(const LGraph *g, const std::string& filename) const;
+  void to_json(const LGraph *g, const std::string &filename) const;
 
 public:
   Inou_json();
