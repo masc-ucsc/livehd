@@ -1,8 +1,5 @@
-# Needed for the LLVM graph pass
-#if(NOT DEFINED ${CMAKE_CXX_COMPILER})
-#  SET(CMAKE_C_COMPILER   "/usr/bin/clang")
-#  SET(CMAKE_CXX_COMPILER "/usr/bin/clang++")
-#endif(NOT DEFINED ${CMAKE_CXX_COMPILER})
+SET(CMAKE_C_COMPILER   "/usr/bin/clang")
+SET(CMAKE_CXX_COMPILER "/usr/bin/clang++")
 
 cmake_minimum_required(VERSION 3.9)
 

@@ -27,7 +27,7 @@ protected:
   }
 
   explicit Graph_library(const std::string &_path)
-   : path(_path) 
+   : path(_path)
     , library_file("graph_library") {
 
     std::ifstream graph_list;
