@@ -7,7 +7,7 @@ before_install:
   - mkdir ~/debug
   - cd ~/debug
   - which clang
-  - cmake ~/build/masc-ucsc/lgraph -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+  - cmake ~/build/masc-ucsc/lgraph -DCMAKE_C_COMPILER=/usr/local/clang-5.0.0/bin/clang -DCMAKE_CXX_COMPILER=/usr/local/clang-5.0.0/bin/clang++
 
 install:
   - make
