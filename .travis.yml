@@ -1,0 +1,39 @@
+sudo: required
+
+language: cpp
+
+compiler:
+    - clang
+
+matrix:
+    include:
+    - env: CXX=clang++ CC=clang
+
+addons:
+    apt:
+      update: true
+
+before_install:
+  - git clone git@github.com:Tencent/rapidjson.git ~/json
+  - mkdir ~/json-build
+  - cd ~/json-build
+  - cmake ~/json
+  - make
+  - make install
+    #- sudo apt-get install rapidjson-dev
+  - mkdir ~/debug
+  - cd ~/debug
+  - which clang
+  - export CXX=/usr/local/clang-5.0.0/bin/clang++
+  - export CC=/usr/local/clang-5.0.0/bin/clang
+  - echo ${CXX}
+  - cmake ~/build/masc-ucsc/lgraph -DCMAKE_C_COMPILER=/usr/local/clang-5.0.0/bin/clang -DCMAKE_CXX_COMPILER=/usr/local/clang-5.0.0/bin/clang++
+
+install:
+  - make
+
+before_script:
+  - make clean
+
+script:
+- make test
