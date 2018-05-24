@@ -24,7 +24,7 @@ protected:
 public:
   Pass_vectorize();
 
-  void transform(LGraph *orig) override final;
+  void transform(LGraph *orig) final;
 };
 
 #endif
