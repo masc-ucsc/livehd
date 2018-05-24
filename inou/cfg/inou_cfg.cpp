@@ -195,8 +195,6 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
     only assign node type for first K in every line of cfg
   */
 
-  g->set_node_wirename(name2id[w1st], encode_cfg_data(dfg_data).c_str());
-
   if(name2id.count(w1st) == 0) { //if node has not been created before
     Node new_node = g->create_node();
     name2id[w1st] = new_node.get_nid();
@@ -235,7 +233,9 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
     }
   }
 
+  g->set_node_wirename(name2id[w1st], encode_cfg_data(dfg_data).c_str());
   /*
+
     II-0.process 2nd node and 9th node(if-else merging node)
   */
 

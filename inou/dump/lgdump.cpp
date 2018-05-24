@@ -85,7 +85,7 @@ int main(int argc, const char **argv) {
     g->print_stats();
     //g->dump();
 
-    //lgdump_digraph(g);
+    lgdump_digraph(g);
 #if 1
     for(Index_ID idx = 0; idx < g->size(); idx++) {
       //for(auto &idx : g->forward()) {
