@@ -683,7 +683,7 @@ Index_ID LGraph_Base::add_edge_int(Index_ID dst_nid, Port_ID inp_pid, Index_ID s
   // Do not insert twice check
   for(const auto &v : out_edges(src_nid)) {
     if(v.get_idx() == dst_nid && v.get_out_pid() == out_pid && v.get_inp_pid() == inp_pid) {
-      assert(false);
+      assert(false); //edge added twice
     }
   }
 #endif

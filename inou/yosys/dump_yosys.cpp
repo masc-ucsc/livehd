@@ -593,7 +593,6 @@ void Dump_yosys::to_yosys(const LGraph *g) {
       RTLIL::Wire *rstWire = nullptr;
       RTLIL::Wire *rstVal  = nullptr;
 
-      // WARNING: input edges dst_pid can go anywhere, must search reverse edge to see input
       for(const auto &c : g->inp_edges(idx)) {
         switch(c.get_inp_pin().get_pid()) {
         case 0:
@@ -843,19 +842,19 @@ void Dump_yosys::to_yosys(const LGraph *g) {
       for(const auto &c : g->inp_edges(idx)) {
         switch(c.get_inp_pin().get_pid()) {
         case 0:
+          if(sel != nullptr)
+            log_error("Internal Error: multiple wires assigned to same mux port\n");
+          sel = get_wire(c.get_idx(), c.get_out_pin().get_pid());
+          break;
+        case 1:
           if(aport != nullptr)
             log_error("Internal Error: multiple wires assigned to same mux port\n");
           aport = get_wire(c.get_idx(), c.get_out_pin().get_pid());
           break;
-        case 1:
+        case 2:
           if(bport != nullptr)
             log_error("Internal Error: multiple wires assigned to same mux port\n");
           bport = get_wire(c.get_idx(), c.get_out_pin().get_pid());
-          break;
-        case 2:
-          if(sel != nullptr)
-            log_error("Internal Error: multiple wires assigned to same mux port\n");
-          sel = get_wire(c.get_idx(), c.get_out_pin().get_pid());
           break;
         }
       }
@@ -962,14 +961,11 @@ void Dump_yosys::to_yosys(const LGraph *g) {
       break;
     }
     case SubGraph_Op: {
-      //FIXME: change this so that we can get the graph directly from the id
-      //FIXME: change this so that the graph can be requested from the library, not LGraph
-      //FIXME: change the library so that LGraphs are kept by id not by name
-      std::string subgraph_name = g->get_library()->get_name(g->subgraph_id_get(idx));
-      LGraph *    subgraph      = LGraph::find_graph(subgraph_name, g->get_path());
+      LGraph *    subgraph      = g->get_library()->get_graph(g->subgraph_id_get(idx));
       if(subgraph == nullptr) {
         //FIXME: prevent loading the whole graph just to read the IOs if
         //hierarchy is set to false
+        std::string subgraph_name = g->get_subgraph_name(idx);
         subgraph = LGraph::open_lgraph(g->get_path(), subgraph_name);
       }
       if(hierarchy) {
@@ -980,7 +976,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
       if(g->get_instance_name_id(idx) == 0 || std::string(g->get_node_instancename(idx)) == "") {
         instance_name = next_id();
 #ifdef DEBUG
-        fmt::print("inou_yosys got empty inst_name for cell type {}\n", subgraph_name);
+        fmt::print("inou_yosys got empty inst_name for cell type {}\n", subgraph->get_name());
 #endif
       } else {
         instance_name = RTLIL::IdString("\\" + std::string(g->get_node_instancename(idx)));
