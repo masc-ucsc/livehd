@@ -14,7 +14,13 @@ addons:
       update: true
 
 before_install:
-  - sudo apt-get install rapidjson-dev
+  - git clone git@github.com:Tencent/rapidjson.git ~/json
+  - mkdir ~/json-build
+  - cd ~/json-build
+  - cmake ~/json
+  - make
+  - make install
+    #- sudo apt-get install rapidjson-dev
   - mkdir ~/debug
   - cd ~/debug
   - which clang
