@@ -16,13 +16,13 @@ declare -a inputs=("trivial.v" "null_port.v" "simple_flop.v" "test.v" "shift.v"\
 TEMP=$(getopt -o ps:: --long profile,source:: -n 'yosys.sh' -- "$@")
 eval set -- "$TEMP"
 
-YOSYS=./inou/yosys/lgyosys
+YOSYS=$(./inou/yosys/lgyosys)
 OPT_LGRAPH=""
 while true ; do
     case "$1" in
         -p|--profile)
           shift
-          YOSYS=./inou/yosys/lgyosys --profile
+          YOSYS=$(./inou/yosys/lgyosys --profile)
           ;;
         -s|--source)
             case "$2" in
