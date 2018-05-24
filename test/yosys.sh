@@ -10,7 +10,7 @@ declare -a inputs=("trivial.v" "null_port.v" "simple_flop.v" "test.v" "shift.v"\
                    "offset.v" "submodule_offset.v" "mem.v" "mem2.v" "mem_offset.v" \
                    "params.v" "params_submodule.v" "iwls_adder.v")
 
-TEMP=`getopt -o p --long profile -n 'yosys.sh' -- "$@"`
+TEMP=$(getopt -o p --long profile -n 'yosys.sh' -- "$@")
 eval set -- "$TEMP"
 
 YOSYS=./inou/yosys/lgyosys
@@ -32,7 +32,7 @@ while true ; do
 done
 
 
-rm -rf ./lgdb/ ./logs ./yosys-test *.v *.json
+rm -rf ./lgdb/ ./logs ./yosys-test ./*.v ./*.json
 mkdir yosys-test/
 
 ./subs/yosys/bin/yosys -V
@@ -59,7 +59,7 @@ do
   ${YOSYS} -g${base} -h > ./yosys-test/log_to_yosys_${input} 2> ./yosys-test/err_to_yosys_${input}
 
   if [ $? -eq 0 ]; then
-    echo "Successfully created verilog from graph "${input}
+    echo "Successfully created verilog from graph ${input}"
   else
     echo ${YOSYS} -g${base} -h -d
     echo "FAIL: verilog generation terminated with an error (testcase ${input})"
