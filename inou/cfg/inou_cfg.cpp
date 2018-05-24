@@ -98,7 +98,9 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
 
   bool gtop_bg_nname_recorded = false;
 
-  char *p = strtok(*memblock, "\n\r\f");
+  char *str_ptr=0;
+
+  char *p = strtok_r(*memblock, "\n\r\f", &str_ptr);
 
   while(p) {
     vector<string> words = split(p);
@@ -134,7 +136,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
       build_graph(words, dfg_data, gtop, nfirst2gid, name2id_gs[0], chain_stks_gs[0], nid_ed_gs[0]);
 
     fmt::print("\n");
-    p = strtok(nullptr, "\n\r\f");
+    p = strtok_r(nullptr, "\n\r\f", &str_ptr);
   } //end while loop
 
   /*
@@ -489,13 +491,14 @@ bool prp_get_value(char *str, bool &v_signed, uint32_t &bits, uint32_t &explicit
   if(str_tmp.find('s') != std::string::npos)
     v_signed = true;
 
-  char *         token = strtok(str, "su");
+  char *str_ptr=0;
+  char *         token = strtok_r(str, "su",&str_ptr);
   vector<string> tokens;
 
   // Keep collecting tokens while one of the delimiters present in str[].
   while(token != nullptr) {
     tokens.push_back(token);
-    token = strtok(nullptr, "su");
+    token = strtok_r(nullptr, "su", &str_ptr);
   }
 
 #if DEBUG
