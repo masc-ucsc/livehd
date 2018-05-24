@@ -14,7 +14,7 @@ addons:
       update: true
 
 before_install:
-  - sudo apt-get install rapidjson-dev
+  - sudo apt-get install rapidjson
   - mkdir ~/debug
   - cd ~/debug
   - which clang
