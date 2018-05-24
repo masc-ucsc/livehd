@@ -12,7 +12,7 @@ module shift_barrelfast
 
  assign a_double = {a,a};
 
-// rotate right 
+// rotate right
  genvar i;
  generate
   for(i=0; i<Bits; i++)
@@ -23,6 +23,6 @@ module shift_barrelfast
 
  b = array[sh];
 
- // rotate right ends 
+ // rotate right ends
 
 endmodule

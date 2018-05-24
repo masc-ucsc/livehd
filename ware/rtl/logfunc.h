@@ -13,15 +13,15 @@
 //      All rights reserved.
 //
 //      This file is part of SCOORE.
-//      
+//
 //      SCOORE is free software; you can redistribute it and/or modify it under the
 //      terms of the GNU General Public License as published by the Free Software
 //      Foundation; either version 2, or (at your option) any later version.
-//      
+//
 //      SCOORE is distributed in the  hope that  it will  be  useful, but  WITHOUT ANY
 //      WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
 //      PARTICULAR PURPOSE.  See the GNU General Public License for more details.
-//      
+//
 //      You should  have received a copy of  the GNU General  Public License along with
 //      SCOORE; see the file COPYING.  If not, write to the  Free Software Foundation,
 //      59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
@@ -68,5 +68,5 @@
                    (n) <= (1<<24) ? 24 : (n) <= (1<<25) ? 25 :\
                    (n) <= (1<<26) ? 26 : (n) <= (1<<27) ? 27 :\
                    (n) <= (1<<28) ? 28 : (n) <= (1<<29) ? 29 :\
-                   (n) <= (1<<30) ? 30 : (n) <= (1<<31) ? 31 : 32) 
+                   (n) <= (1<<30) ? 30 : (n) <= (1<<31) ? 31 : 32)
 
