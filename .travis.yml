@@ -13,6 +13,7 @@ before_install:
   - which clang
   - export CXX=/usr/local/clang-5.0.0/bin/clang++
   - export CC=/usr/local/clang-5.0.0/bin/clang
+  - echo ${CXX}
   - cmake ~/build/masc-ucsc/lgraph -DCMAKE_C_COMPILER=/usr/local/clang-5.0.0/bin/clang -DCMAKE_CXX_COMPILER=/usr/local/clang-5.0.0/bin/clang++
 
 install:
