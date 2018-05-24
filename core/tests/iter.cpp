@@ -12,28 +12,28 @@ void generate_graphs(int n) {
     LGraph *g = new LGraph("lgdb", gname, true);
     std::vector<Index_ID> nodes;
 
-    int inps = 10+rand_r()%100;
+    int inps = 10+rand()%100;
     for(int j = 0; j < inps; j++) {
       //max 110 inputs, min 10
       Index_ID inp_id = g->add_graph_input(("i" + std::to_string(j)).c_str(), 0, 1);
       nodes.push_back(inp_id);
     }
-    int outs = 10+rand_r()%100;
+    int outs = 10+rand()%100;
     for(int j = 0; j < outs; j++) {
       //max 110 outs, min 10
       Index_ID out_id = g->add_graph_output(("o" + std::to_string(j)).c_str(), 0, 1);
       nodes.push_back(out_id);
     }
 
-    int nnodes = 100+rand_r()%1000;
+    int nnodes = 100+rand()%1000;
     for(int j = 0; j < nnodes; j++) {
       Index_ID nid    = g->create_node().get_nid();
-      Node_Type_Op op = (Node_Type_Op)(1+rand_r()%22); // regular node types range
+      Node_Type_Op op = (Node_Type_Op)(1+rand()%22); // regular node types range
       g->node_type_set(nid, op);
       nodes.push_back(nid);
     }
 
-    int nedges = 2000+rand_r()%5000;
+    int nedges = 2000+rand()%5000;
     std::set<std::pair<Index_ID, Index_ID> > edges;
     for(int j = 0; j < nedges; j++) {
       int counter  = 0;
@@ -41,10 +41,10 @@ void generate_graphs(int n) {
       Index_ID dst;
       do{
         do{
-          src = nodes[rand_r()%(nodes.size())];
+          src = nodes[rand()%(nodes.size())];
         } while(!g->is_graph_output(src));
         do {
-          dst = nodes[rand_r()%(nodes.size())];
+          dst = nodes[rand()%(nodes.size())];
         } while(!g->is_graph_input(dst));
         counter++;
       } while(!src && !dst &&
