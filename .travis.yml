@@ -14,7 +14,7 @@ addons:
       update: true
 
 before_install:
-  - git clone git@github.com:Tencent/rapidjson.git ~/json
+  - git clone https://github.com/Tencent/rapidjson.git
   - mkdir ~/json-build
   - cd ~/json-build
   - cmake ~/json
