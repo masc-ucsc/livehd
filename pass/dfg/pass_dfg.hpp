@@ -4,8 +4,12 @@
 #include "cfg_node_data.hpp"
 #include "options.hpp"
 #include "pass.hpp"
+#include "cfg_node_data.hpp"
+#include "lgedge.hpp"
 
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 class Pass_dfg_options_pack : public Options_pack {
 public:
@@ -14,10 +18,17 @@ public:
   bool        generate_dots_flag;
 };
 
-struct CF2DF_State {
+class CF2DF_State {
+public:
   std::unordered_map<std::string, Index_ID> last_refs;
   std::unordered_map<Index_ID, Index_ID>    node_mapping;
 };
+
+const char REGISTER_MARKER = '@';
+const char INPUT_MARKER = '$';
+const char OUTPUT_MARKER = '%';
+const Port_ID REG_INPUT = 'D';
+const Port_ID REG_OUTPUT = 'Q';
 
 class Pass_dfg : public Pass {
 public:
@@ -31,30 +42,37 @@ protected:
   Pass_dfg_options_pack opack;
 
 private:
-  // CFG 2 DFG conversion methods
-  Index_ID find_root(const LGraph *cfg);
-  void     process_node(LGraph *      dfg,
-                        const LGraph *cfg,
-                        CF2DF_State * state,
-                        Index_ID      node);
-  void     process_assign(LGraph *             dfg,
-                          const LGraph *       cfg,
-                          CF2DF_State *        state,
-                          const CFG_Node_Data &data,
-                          Index_ID             node);
-  void     process_if(LGraph *             dfg,
-                      const LGraph *       cfg,
-                      CF2DF_State *        state,
-                      const CFG_Node_Data &data,
-                      Index_ID             node);
-  void     process_operands(LGraph *             dfg,
-                            const LGraph *       cfg,
-                            CF2DF_State *        state,
-                            const CFG_Node_Data &data,
-                            Index_ID             node,
-                            std::vector<Index_ID> &);
-
+  Index_ID                 find_root(const LGraph *cfg);
+  void                     process_node(    LGraph *dfg,
+                                            const LGraph *cfg,
+                                            CF2DF_State *state,
+                                            Index_ID node);
+  void                     process_assign(  LGraph *dfg,
+                                            const LGraph *cfg,
+                                            CF2DF_State *state,
+                                            const CFG_Node_Data &data,
+                                            Index_ID node );
+  void                     process_if(      LGraph *dfg,
+                                            const LGraph *cfg,
+                                            CF2DF_State *state,
+                                            const CFG_Node_Data &data,
+                                            Index_ID node );
+  std::vector<Index_ID>    process_operands(LGraph *dfg,
+                                            const LGraph *cfg,
+                                            CF2DF_State *state,
+                                            const CFG_Node_Data &data,
+                                            Index_ID node );
+  
   Index_ID get_child(const LGraph *cfg, Index_ID node);
+
+  bool is_register(const std::string &v) { return v[0] == REGISTER_MARKER; }
+  bool is_input(const std::string &v) { return v[0] == INPUT_MARKER; }
+  bool is_output(const std::string &v) { return v[0] == OUTPUT_MARKER; }
+
+  Index_ID create_register(LGraph *g, CF2DF_State *state, const std::string &var_name);
+  Index_ID create_input(LGraph *g, CF2DF_State *state, const std::string &var_name);
+  Index_ID create_output(LGraph *g, CF2DF_State *state, const std::string &var_name);
+  Index_ID default_constant(LGraph *g);
 };
 
 #endif

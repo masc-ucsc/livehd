@@ -1,7 +1,7 @@
 #ifndef LGEDGE_H
 #define LGEDGE_H
 
-#include <stdint.h>
+#include <cstdint>
 
 #include <iostream>
 #include <vector>
