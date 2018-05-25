@@ -84,7 +84,7 @@ void Options::setup(std::string cmd) {
   //args.push_back(0);
 
   cargv = new char *[args.size() + 1];
-  for(int i = 0; i < args.size(); i++) {
+  for(size_t i = 0; i < args.size(); i++) {
     cargv[i] = args[i];
   }
   cargc        = args.size();

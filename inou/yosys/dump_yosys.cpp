@@ -975,7 +975,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
       RTLIL::IdString instance_name("\\tmp");
       if(g->get_instance_name_id(idx) == 0 || std::string(g->get_node_instancename(idx)) == "") {
         instance_name = next_id();
-#ifdef DEBUG
+#ifndef NDEBUG
         fmt::print("inou_yosys got empty inst_name for cell type {}\n", subgraph->get_name());
 #endif
       } else {
@@ -1002,7 +1002,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
       RTLIL::IdString instance_name("\\tmp");
       if(g->get_instance_name_id(idx) == 0 || std::string(g->get_node_instancename(idx)) == "") {
         instance_name = next_id();
-#ifdef DEBUG
+#ifndef NDEBUG
         fmt::print("inou_yosys got empty inst_name for cell type {}\n", tcell->get_name());
 #endif
       } else {
@@ -1056,7 +1056,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
       std::vector<std::string> output_names;
       RTLIL::Cell *            cell = module->addCell("\\" + instance_name, RTLIL::IdString("\\" + celltype));
       std::string              current_name;
-#ifdef DEBUG
+#ifndef NDEBUG
       int current_port = 0, def = 0;
 #endif
       bool is_param = false;
@@ -1066,7 +1066,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
             if(g->node_type_get(c.get_idx()).op != U32Const_Op)
               log_error("Internal Error: Could not define if input is parameter.\n");
             is_param = g->node_value_get(c.get_idx()) == 1;
-#ifdef DEBUG
+#ifndef NDEBUG
             assert(def == 0);
             def++;
             assert(current_port == 0);
@@ -1076,7 +1076,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
             if(g->node_type_get(c.get_idx()).op != StrConst_Op)
               log_error("Internal Error: BB input name not a string.\n");
             current_name = g->node_const_value_get(c.get_idx());
-#ifdef DEBUG
+#ifndef NDEBUG
             assert(def == 1);
             def += 1;
             assert(current_port == 0 || current_port == LGRAPH_BBOP_PORT_N(c.get_out_pin().get_pid()));
@@ -1099,7 +1099,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
                 cell->setPort("\\" + current_name, get_wire(c.get_idx(), c.get_out_pin().get_pid()));
               }
             }
-#ifdef DEBUG
+#ifndef NDEBUG
             assert(def == 2);
             assert(current_port == LGRAPH_BBOP_PORT_N(c.get_out_pin().get_pid()));
             current_port = 0;
@@ -1113,7 +1113,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
           }
         }
       }
-#ifdef DEBUG
+#ifndef NDEBUG
       current_port = 0, def = 0;
 #endif
       int i = 0;

@@ -624,7 +624,7 @@ public:
   uint32_t subgraph_id_get(Index_ID nid) const;
 
   void node_const_type_set(Index_ID nid, const std::string & value
-#ifdef DEBUG
+#ifndef NDEBUG
                            ,
                            bool enforce_bits = true
 #endif
