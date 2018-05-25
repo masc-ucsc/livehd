@@ -3,6 +3,7 @@
 #include "lgedge.hpp"
 #include "lgedgeiter.hpp"
 #include <cstdlib>
+#include <cassert>
 #include <vector>
 using std::string;
 using std::unordered_map;
@@ -54,8 +55,7 @@ void Pass_dfg::process_assign(LGraph *dfg, const LGraph *cfg, CF2DF_State *state
 
   dfg->node_type_set(dfnode, data.get_operator());
 
-  vector<Index_ID> operands(data.get_operands().size());
-  process_operands(dfg, cfg, state, data, node, operands);
+  vector<Index_ID> operands = process_operands(dfg, cfg, state, data, node);
 
   for(Index_ID id : operands)
     dfg->add_edge(Node_Pin(dfnode, 0, false), Node_Pin(state->node_mapping[id], 0, true));
@@ -65,19 +65,31 @@ void Pass_dfg::process_assign(LGraph *dfg, const LGraph *cfg, CF2DF_State *state
 
 void Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, const CFG_Node_Data &data, Index_ID node) {
   Index_ID cond = state->last_refs[data.get_target()];
+  
 }
 
-void Pass_dfg::process_operands(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, const CFG_Node_Data &data, Index_ID node,
-                                vector<Index_ID> &operands) {
+vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, const CFG_Node_Data &data, Index_ID node)
+{
+  const auto &dops = data.get_operands();
+  vector<Index_ID> ops(dops.size());
   auto last_refs = state->last_refs;
 
-  for(const auto &op : data.get_operands()) {
-    if(last_refs.find(op) != last_refs.end())
-      operands.push_back(last_refs[op]);
+  for (int i = 0; i < dops.size(); i++) {
+    if (last_refs.find(dops[i]) != last_refs.end())
+      ops[i] = last_refs[dops[i]];
     else {
-      // create an input or something else
+      if (is_register(dops[i]))
+        ops[i] = create_register(dfg, state, dops[i]);
+      else if (is_input(dops[i]))
+        ops[i] = create_input(dfg, state, dops[i]);
+      else if (is_output(dops[i]))
+        ops[i] = create_output(dfg, state, dops[i]);
+      else
+        ops[i] = default_constant(dfg);
     }
   }
+
+  return ops;
 }
 
 Index_ID Pass_dfg::find_root(const LGraph *cfg) {
@@ -101,6 +113,34 @@ Index_ID Pass_dfg::get_child(const LGraph *cfg, Index_ID node) {
     return 0;
   else
     assert(false);
+}
+
+Index_ID Pass_dfg::create_register(LGraph *g, CF2DF_State *state, const string &var_name) {
+  Index_ID nid = g->create_node().get_nid();
+  g->node_type_set(nid, Flop_Op);
+
+  return nid;
+}
+
+Index_ID Pass_dfg::create_input(LGraph *g, CF2DF_State *state, const string &var_name) {
+  Index_ID nid = g->create_node().get_nid();
+  g->add_graph_input(var_name.c_str(), nid);
+
+  return nid;
+}
+
+Index_ID Pass_dfg::create_output(LGraph *g, CF2DF_State *state, const string &var_name) {
+  Index_ID nid = g->create_node().get_nid();
+  g->add_graph_output(var_name.c_str(), nid);
+  
+  return nid;
+}
+
+Index_ID Pass_dfg::default_constant(LGraph *g) {
+  Index_ID nid = g->create_node().get_nid();
+  g->node_type_set(nid, U32Const_Op);
+
+  return nid;
 }
 
 Pass_dfg_options_pack::Pass_dfg_options_pack() : Options_pack() {
