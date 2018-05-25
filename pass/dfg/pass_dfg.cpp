@@ -10,17 +10,17 @@ using std::unordered_map;
 using std::vector;
 
 void Pass_dfg::transform() {
-  LGraph *dfg = new LGraph(opack.lgdb_path, opack.graph_name, false);
+  LGraph *dfg = new LGraph(opack.lgdb_path, opack.output_name, false);
   transform(dfg);
 }
 
-void Pass_dfg::transform(LGraph *cfg) {
+void Pass_dfg::transform(LGraph *dfg) {
   assert(!opack.graph_name.empty());
-  LGraph *dfg = new LGraph(opack.lgdb_path, opack.output_name, false);
+  LGraph *cfg = new LGraph(opack.lgdb_path, opack.graph_name, false);
 
   cfg_2_dfg(dfg, cfg);
 
-  if(opack.generate_dots_flag)
+  if (opack.generate_dots_flag)
     system(("./inou/dump/lgdump " + opack.output_name + " 2>" + opack.output_name + ".dot").c_str());
 }
 
@@ -28,17 +28,17 @@ void Pass_dfg::cfg_2_dfg(LGraph *dfg, const LGraph *cfg) {
   Index_ID    itr = find_root(cfg);
   CF2DF_State state;
 
-  while(itr != 0) {
+  while (itr != 0) {
     process_node(dfg, cfg, &state, itr);
     itr = get_child(cfg, itr);
   }
 }
 
 void Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, Index_ID node) {
-  const char *  data_str = cfg->get_node_wirename(node);
+  const char *data_str = cfg->get_node_wirename(node);
   CFG_Node_Data data(cfg->node_type_get(node).op, data_str);
 
-  switch(data.get_operator()) {
+  switch (data.get_operator()) {
   case CfgAssign_Op:
     process_assign(dfg, cfg, state, data, node);
     break;
@@ -57,8 +57,8 @@ void Pass_dfg::process_assign(LGraph *dfg, const LGraph *cfg, CF2DF_State *state
 
   vector<Index_ID> operands = process_operands(dfg, cfg, state, data, node);
 
-  for(Index_ID id : operands)
-    dfg->add_edge(Node_Pin(dfnode, 0, false), Node_Pin(state->node_mapping[id], 0, true));
+  for (Index_ID id : operands)
+    dfg->add_edge(Node_Pin(dfnode, 0, false), Node_Pin(id, 0, true));
 
   state->last_refs[data.get_target()] = dfnode;
 }
@@ -78,14 +78,18 @@ vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, const LGraph *cfg, CF2D
     if (last_refs.find(dops[i]) != last_refs.end())
       ops[i] = last_refs[dops[i]];
     else {
-      if (is_register(dops[i]))
+      if (is_constant(dops[i]))
+        ops[i] = default_constant(dfg, state);
+      else if (is_register(dops[i]))
         ops[i] = create_register(dfg, state, dops[i]);
       else if (is_input(dops[i]))
         ops[i] = create_input(dfg, state, dops[i]);
       else if (is_output(dops[i]))
         ops[i] = create_output(dfg, state, dops[i]);
       else
-        ops[i] = default_constant(dfg);
+        ops[i] = create_private(dfg, state, dops[i]);
+      
+      state->node_mapping[ops[i]] = ops[i];
     }
   }
 
@@ -118,6 +122,8 @@ Index_ID Pass_dfg::get_child(const LGraph *cfg, Index_ID node) {
 Index_ID Pass_dfg::create_register(LGraph *g, CF2DF_State *state, const string &var_name) {
   Index_ID nid = g->create_node().get_nid();
   g->node_type_set(nid, Flop_Op);
+  state->last_refs[var_name] = nid;
+  state->node_mapping[nid] = nid;
 
   return nid;
 }
@@ -125,6 +131,8 @@ Index_ID Pass_dfg::create_register(LGraph *g, CF2DF_State *state, const string &
 Index_ID Pass_dfg::create_input(LGraph *g, CF2DF_State *state, const string &var_name) {
   Index_ID nid = g->create_node().get_nid();
   g->add_graph_input(var_name.c_str(), nid);
+  state->last_refs[var_name] = nid;
+  state->node_mapping[nid] = nid;
 
   return nid;
 }
@@ -132,13 +140,27 @@ Index_ID Pass_dfg::create_input(LGraph *g, CF2DF_State *state, const string &var
 Index_ID Pass_dfg::create_output(LGraph *g, CF2DF_State *state, const string &var_name) {
   Index_ID nid = g->create_node().get_nid();
   g->add_graph_output(var_name.c_str(), nid);
+  state->last_refs[var_name] = nid;
+  state->node_mapping[nid] = nid;
   
   return nid;
 }
 
-Index_ID Pass_dfg::default_constant(LGraph *g) {
+Index_ID Pass_dfg::create_private(LGraph *g, CF2DF_State *state, const string &var_name) {
+  Index_ID nid = g->create_node().get_nid();
+  g->node_type_set(nid, CfgAssign_Op);
+  state->last_refs[var_name] = nid;
+  state->node_mapping[nid] = nid;
+
+  g->add_edge(Node_Pin(nid, 0, false), Node_Pin(default_constant(g, state), 0, true));
+ 
+  return nid;
+}
+
+Index_ID Pass_dfg::default_constant(LGraph *g, CF2DF_State *state) {
   Index_ID nid = g->create_node().get_nid();
   g->node_type_set(nid, U32Const_Op);
+  state->node_mapping[nid] = nid;
 
   return nid;
 }

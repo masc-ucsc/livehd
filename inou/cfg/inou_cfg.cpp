@@ -143,7 +143,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
     deal with GIO for every graph
   */
 
-  for(int i = 0; i < lgs.size(); i++) {
+  /*for(int i = 0; i < lgs.size(); i++) {
     //Graph input
     Node gio_node_bg = lgs[i]->create_node();
     fmt::print("create node:{}, nid:{}\n", "GIO", gio_node_bg.get_nid());
@@ -161,7 +161,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
     dst_nid = gio_node_ed.get_nid();
     ;
     lgs[i]->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
-  }
+  }*/
 
   for(int i = 0; i < chain_stks_gs.size(); i++) {
     for(auto &x : chain_stks_gs[i]) {
@@ -235,6 +235,7 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
     }
   }
 
+  printf("---------------- %ld ", name2id[w1st]);
   g->set_node_wirename(name2id[w1st], encode_cfg_data(dfg_data).c_str());
   /*
 
@@ -457,6 +458,7 @@ std::string Inou_cfg::encode_cfg_data(const std::string &data) {
       encoded += buffer + ENCODING_DELIM;
   }
 
+  printf(":::::::::::::::::::::::%s\n", encoded.c_str());
   return encoded;
 }
 
