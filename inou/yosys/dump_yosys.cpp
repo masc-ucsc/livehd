@@ -77,6 +77,38 @@ RTLIL::Wire *Dump_yosys::create_tree(const LGraph *g, std::vector<RTLIL::Wire *>
   return create_tree(g, next_level, mod, add_fnc, result_wire);
 }
 
+
+RTLIL::Wire* Dump_yosys::create_wire(const LGraph *g, const Index_ID idx, RTLIL::Module* module, bool input, bool output) {
+
+  RTLIL::IdString name;
+
+  if(input)
+    name = "\\" + std::string(g->get_graph_input_name(idx));
+  else if(output)
+    name = "\\" + std::string(g->get_graph_output_name(idx));
+  else if(g->get_wid(idx))
+    name = "\\" + std::string(g->get_node_wirename(idx));
+  else
+    name = "\\lgraph_cell_" + std::to_string(idx);
+
+#if DEBUG
+      fmt::print("adding wire to yosys module {}, name: {}\n", module->name.str(), name.str());
+#endif
+
+  RTLIL::Wire *new_wire = module->addWire(name, g->get_bits(idx));
+  new_wire->start_offset = g->get_offset(idx);
+
+  if(input || output) {
+    module->ports.push_back(name);
+    new_wire->port_id = module->ports.size();
+
+    new_wire->port_input   = input;
+    new_wire->port_output  = output;
+  }
+
+  return new_wire;
+}
+
 void Dump_yosys::to_yosys(const LGraph *g) {
   std::string name = g->get_name().substr(7);
 
@@ -88,37 +120,15 @@ void Dump_yosys::to_yosys(const LGraph *g) {
 
   // first create all the output wires
   for(auto idx : g->fast()) {
-    if(idx == 12)
-      fmt::print("foo\n");
     assert(g->is_root(idx));
     log("creating wire for node: %ld, width %d, type %s\n", idx, g->get_bits(idx), g->node_type_get(idx).get_name().c_str());
 
     if(g->is_graph_input(idx)) {
-      RTLIL::IdString name = "\\" + std::string(g->get_graph_input_name(idx));
-#if DEBUG
-      fmt::print("adding wire to yosys module {}, name: {}\n", module->name.str(), name.str());
-#endif
-      RTLIL::Wire *new_wire  = module->addWire(name, g->get_bits(idx));
-      new_wire->start_offset = g->get_offset(idx);
-      new_wire->port_input   = true;
-      module->ports.push_back(name);
-      new_wire->port_id = module->ports.size();
-      input_map[idx]    = new_wire;
+      input_map[idx]    = create_wire(g, idx, module, true, false);
       continue;
-    }
 
-    if(g->is_graph_output(idx)) {
-      RTLIL::IdString name = "\\" + std::string(g->get_graph_output_name(idx));
-#if DEBUG
-      fmt::print("adding wire to yosys module {}, name: {}\n", module->name.str(), name.str());
-#endif
-      RTLIL::Wire *new_wire  = module->addWire(name, g->get_bits(idx));
-      new_wire->start_offset = g->get_offset(idx);
-      new_wire->port_output  = true;
-      module->ports.push_back(name);
-      new_wire->port_id = module->ports.size();
-      output_map[idx]   = new_wire;
-
+    } else if(g->is_graph_output(idx)) {
+      output_map[idx]   = create_wire(g, idx, module, false, true);
       continue;
     }
 
