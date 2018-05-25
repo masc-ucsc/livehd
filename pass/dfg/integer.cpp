@@ -27,14 +27,12 @@ Integer::Integer(pyrint value) {
 }
 
 Integer::Integer(const Integer &other)
-    : bits(other.get_bits())
-    , data(new pyrchunk[get_array_size()]) {
+    : bits(other.get_bits()), data(new pyrchunk[get_array_size()]) {
   memcpy(data, other.const_data_ptr(), sizeof(pyrchunk) * get_array_size());
 }
 
 Integer::Integer(pyrint value, pyrsize bits)
-    : bits(bits)
-    , data(new pyrchunk[get_array_size()]) {
+    : bits(bits), data(new pyrchunk[get_array_size()]) {
   data[0] = (pyrchunk)value;
 
   if(value > PINT_CHUNK_MAX && get_array_size() > 1)

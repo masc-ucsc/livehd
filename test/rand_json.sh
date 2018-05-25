@@ -19,8 +19,8 @@ do
     exit 1
   fi
 
-	RES1=`grep idx: input.json  | sort | uniq -c | sort -t: -k1 -n | cut -d: -f1 | cksum`
-	RES2=`grep idx: output.json | sort | uniq -c | sort -t: -k1 -n | cut -d: -f1 | cksum`
+  RES1=$(grep idx: input.json  | sort | uniq -c | sort -t: -k1 -n | cut -d: -f1 | cksum)
+  RES2=$(grep idx: output.json | sort | uniq -c | sort -t: -k1 -n | cut -d: -f1 | cksum)
 	if [ "$RES1" != "$RES2" ]; then
 		echo "missmatch in the comparision after lgjson"
 		exit 3

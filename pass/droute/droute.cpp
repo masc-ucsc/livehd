@@ -2,13 +2,14 @@
 #include <iostream>
 #include <random>
 
-#include "lgraph.hpp"
 #include "lgbench.hpp"
+#include "lgraph.hpp"
 
 #include "inou.hpp"
 
 class Pass_options_pack : public Options_pack {
   std::set<std::string> enabled;
+
 public:
   std::vector<std::string> passes;
 
@@ -16,14 +17,11 @@ public:
 };
 
 Pass_options_pack::Pass_options_pack() {
-  assert(Options::get_cargc()!=0); // Options::setup(argc,argv) must be called before setup() is called
-
+  assert(Options::get_cargc() != 0); // Options::setup(argc,argv) must be called before setup() is called
 }
-
 
 // This pass performs detailed routing. It reads a lgraph and generates a
 // lpgrah with detailed routing information
-
 
 int main(int argc, const char **argv) {
   LGBench b;
@@ -42,4 +40,3 @@ int main(int argc, const char **argv) {
 
   fmt::print("Hello world\n");
 }
-

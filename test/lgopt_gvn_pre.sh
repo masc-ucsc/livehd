@@ -7,7 +7,7 @@ do
   ./inou/yosys/lgyosys ./pass/lgopt_gvn_pre/tests/${input}
 
   if [ $? -eq 0 ]; then
-    echo "Successfully created graph from "${input}
+    echo "Successfully created graph from ${input}"
   else
     echo "FAIL: lgyosys terminated with and error"
     exit 1
@@ -34,7 +34,7 @@ do
   ./inou/yosys/lgyosys -g${base}
 
   if [ $? -eq 0 ]; then
-    echo "Successfully created verilog from graph "${input}
+    echo "Successfully created verilog from graph ${input}"
   else
     echo "FAIL: lgyosys terminated with and error"
     exit 1
@@ -56,9 +56,9 @@ do
   ./subs/yosys/bin/yosys -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; equiv_status -assert" \
     2> /dev/null | grep "Equivalence successfully proven!"
   if [ $? -eq 0 ]; then
-    echo "Successfully matched generated verilog with original verilog ("${input}")"
+    echo "Successfully matched generated verilog with original verilog (${input})"
   else
-    echo "FAIL: circuits are not equivalent ("${input}")"
+    echo "FAIL: circuits are not equivalent (${input})"
     exit 1
   fi
 

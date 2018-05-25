@@ -1,6 +1,7 @@
 #ifndef PASS_DFG_HPP_
 #define PASS_DFG_HPP_
 
+#include "cfg_node_data.hpp"
 #include "options.hpp"
 #include "pass.hpp"
 #include "cfg_node_data.hpp"
@@ -14,13 +15,13 @@ class Pass_dfg_options_pack : public Options_pack {
 public:
   Pass_dfg_options_pack();
   std::string output_name;
-  bool generate_dots_flag;
+  bool        generate_dots_flag;
 };
 
 class CF2DF_State {
 public:
   std::unordered_map<std::string, Index_ID> last_refs;
-  std::unordered_map<Index_ID, Index_ID> node_mapping;
+  std::unordered_map<Index_ID, Index_ID>    node_mapping;
 };
 
 const char REGISTER_MARKER = '@';
@@ -31,17 +32,16 @@ const Port_ID REG_OUTPUT = 'Q';
 
 class Pass_dfg : public Pass {
 public:
-  Pass_dfg() : Pass("dfg") { }
+  Pass_dfg() : Pass("dfg") {}
 
-  void cfg_2_dfg(LGraph *dfg, const LGraph *cfg);
-  void transform();
+  void         cfg_2_dfg(LGraph *dfg, const LGraph *cfg);
+  void         transform();
   virtual void transform(LGraph *g);
 
 protected:
   Pass_dfg_options_pack opack;
 
 private:
-  // CFG 2 DFG conversion methods
   Index_ID                 find_root(const LGraph *cfg);
   void                     process_node(    LGraph *dfg,
                                             const LGraph *cfg,
@@ -62,7 +62,7 @@ private:
                                             CF2DF_State *state,
                                             const CFG_Node_Data &data,
                                             Index_ID node );
-
+  
   Index_ID get_child(const LGraph *cfg, Index_ID node);
 
   bool is_register(const std::string &v) { return v[0] == REGISTER_MARKER; }

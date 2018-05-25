@@ -238,7 +238,7 @@ void Inou_abc::gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, A
         if(old_graph->node_type_get(node_idx).op == U32Const_Op) {
           val = old_graph->node_value_get(node_idx);
         }
-        connect_constant(new_graph, val, width, Node_Pin(new_memory_idx, old_inp_pid,true));
+        connect_constant(new_graph, val, width, Node_Pin(new_memory_idx, old_inp_pid, true));
       } else if(old_inp_pid == LGRAPH_MEMOP_CLK) {
         for(const auto &sg : skew_group_map) {
           if(sg.second.find(old_idx) != sg.second.end()) {
@@ -388,7 +388,7 @@ void Inou_abc::conn_latch(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t 
                         Node_Pin(latch_new_idx, tcell->get_pin_id("D"), true));
 
     Abc_Obj_t * pNet = Abc_ObjFanout0(Abc_ObjFanout0(pLatch));
-	std::string latch_name(Abc_ObjName(pNet));
+    std::string latch_name(Abc_ObjName(pNet));
     std::string flop_name(latch_name);
     Index_ID    latch_old_idx = latchname2id[flop_name];
     for(const auto &sg : skew_group_map) {
@@ -406,16 +406,14 @@ void Inou_abc::conn_latch(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t 
       }
     }
 
-	std::regex  trap("(.*)_(%r)(.*)");
-	std::smatch flop_name_info;
-	std::regex_search(latch_name, flop_name_info, trap);
-	std::string reg_base_name(flop_name_info[1]);
-	std::string reg_offset(flop_name_info[3]);
-	std::string reg_name = reg_offset.empty() ? reg_base_name :
-						   reg_base_name+"["+(reg_offset.substr(1,reg_offset.length()))+"]";
+    std::regex  trap("(.*)_(%r)(.*)");
+    std::smatch flop_name_info;
+    std::regex_search(latch_name, flop_name_info, trap);
+    std::string reg_base_name(flop_name_info[1]);
+    std::string reg_offset(flop_name_info[3]);
+    std::string reg_name = reg_offset.empty() ? reg_base_name : reg_base_name + "[" + (reg_offset.substr(1, reg_offset.length())) + "]";
 
     new_graph->set_node_wirename(latch_new_idx, reg_name.c_str());
-
   }
 }
 
@@ -482,7 +480,7 @@ Node_Pin Inou_abc::create_pick_operator(LGraph *g, const Node_Pin &driver, int o
   g->node_type_set(pick_nid, Pick_Op);
   g->set_bits(pick_nid, width);
   g->add_edge(driver, Node_Pin(pick_nid, 0, true));
-  connect_constant(g, offset, 32, Node_Pin(pick_nid, 1,true));
+  connect_constant(g, offset, 32, Node_Pin(pick_nid, 1, true));
   picks.insert(std::make_pair(pick_id, Node_Pin(pick_nid, 0, false)));
   return picks.at(pick_id);
 }

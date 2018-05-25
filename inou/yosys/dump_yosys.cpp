@@ -263,7 +263,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
       }
       continue;
     }
-      //FIXME: prevent creating wires when driving the output
+    //FIXME: prevent creating wires when driving the output
 #if DEBUG
     fmt::print("adding wire to yosys module {}, name: {}\n", module->name.str(), name.str());
 #endif
@@ -614,7 +614,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
           log("[WARNING] DumpYosys: unrecognized wire connection pid=%d\n", c.get_out_pin().get_pid());
         }
       }
-      if (dWire)
+      if(dWire)
         log("adding flop_Op width = %d\n", dWire->width);
       //last argument is polarity
       switch(g->node_type_get(idx).op) {
@@ -961,12 +961,12 @@ void Dump_yosys::to_yosys(const LGraph *g) {
       break;
     }
     case SubGraph_Op: {
-      LGraph *    subgraph      = g->get_library()->get_graph(g->subgraph_id_get(idx));
+      LGraph *subgraph = g->get_library()->get_graph(g->subgraph_id_get(idx));
       if(subgraph == nullptr) {
         //FIXME: prevent loading the whole graph just to read the IOs if
         //hierarchy is set to false
         std::string subgraph_name = g->get_subgraph_name(idx);
-        subgraph = LGraph::open_lgraph(g->get_path(), subgraph_name);
+        subgraph                  = LGraph::open_lgraph(g->get_path(), subgraph_name);
       }
       if(hierarchy) {
         _subgraphs.insert(subgraph);

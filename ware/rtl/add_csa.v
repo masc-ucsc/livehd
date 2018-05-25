@@ -5,7 +5,7 @@ module add_csa
 (
   input             clk,
   input             reset,
-  
+
   input [Bits-1:0]  a,
   input [Bits-1:0]  b,
   input [Bits-1:0]  c,

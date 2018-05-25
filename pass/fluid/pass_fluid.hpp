@@ -93,7 +93,7 @@ public:
   void add_join_deadlock(LGraph *g);
   void add_join(LGraph *g);
   void result_graph(LGraph *g);
-  void transform(LGraph *orig) override final;
+  void transform(LGraph *orig) final;
   void traverse(LGraph *g, int round);
 };
 

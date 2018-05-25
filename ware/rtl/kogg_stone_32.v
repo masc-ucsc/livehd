@@ -47,7 +47,7 @@ genvar i;
    end
 
 //3rd BLOCK
-  
+
   buff bu2(.A(e[0]),.B(f[0]),.C(w[0]),.D(x[0]));
   buff bu3(.A(e[1]),.B(f[1]),.C(w[1]),.D(x[1]));
 
@@ -69,7 +69,7 @@ genvar i;
   buff bu5(.A(w[1]),.B(x[1]),.C(y[1]),.D(z[1]));
   buff bu6(.A(w[2]),.B(x[2]),.C(y[2]),.D(z[2]));
   buff bu7(.A(w[3]),.B(x[3]),.C(y[3]),.D(z[3]));
-  
+
   for(i=4; i<32; i=i+1) begin
      pref_op pref
      (
@@ -146,7 +146,7 @@ genvar i;
        .Hi(h[i]),
        .Ci(o[i-1]),
        .Si(s[i])
-     ); 
+     );
  end
 
 endmodule
