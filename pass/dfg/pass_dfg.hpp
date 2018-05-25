@@ -21,7 +21,7 @@ public:
 class CF2DF_State {
 public:
   std::unordered_map<std::string, Index_ID> last_refs;
-  std::unordered_map<Index_ID, Index_ID>    node_mapping;
+  std::unordered_map<std::string, Index_ID> registers;
 };
 
 const char REGISTER_MARKER = '@';
