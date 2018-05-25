@@ -2,9 +2,9 @@
 // Created by birdeclipse on 12/18/17.
 //
 
-#include "lgbench.hpp"
-#include "lgedgeiter.hpp"
-#include "lgraph.hpp"
+#include "core/lgbench.hpp"
+#include "core/lgedgeiter.hpp"
+#include "core/lgraph.hpp"
 
 #include "inou/json/inou_json.hpp"
 

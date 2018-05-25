@@ -1,8 +1,8 @@
 
 #include <iostream>
 
-#include "lgbench.hpp"
-#include "lgraph.hpp"
+#include "core/lgbench.hpp"
+#include "core/lgraph.hpp"
 
 #include "inou/json/inou_json.hpp"
 #include "inou/rand/inou_rand.hpp"

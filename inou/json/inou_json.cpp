@@ -3,8 +3,10 @@
 //
 
 #include "inou_json.hpp"
-#include "lgedgeiter.hpp"
-#include "lgraphbase.hpp"
+
+#include "core/lgedgeiter.hpp"
+#include "core/lgraphbase.hpp"
+
 #include "rapidjson/document.h"
 #include "rapidjson/error/en.h"
 #include "rapidjson/filereadstream.h"

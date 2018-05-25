@@ -32,7 +32,7 @@ private:
                                        std::map<std::string, Index_ID> &,
                                        std::map<std::string,
                             std::vector<std::string>> &,
-                                       int64_t &);
+                                       Index_ID &);
   void                     cfg_2_lgraph(char **, std::vector<LGraph *> &);
   std::string              encode_cfg_data(const std::string &);
 

@@ -173,7 +173,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
 }
 
 void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, map<string, uint32_t> &nfirst2gid,
-                           map<string, Index_ID> &name2id, map<string, vector<string>> &chain_stks, int64_t &nid_end) {
+                           map<string, Index_ID> &name2id, map<string, vector<string>> &chain_stks, Index_ID &nid_end) {
 
   fmt::print("dfg_data:{}\n", dfg_data);
   string w1st = *(words.begin());
