@@ -1,0 +1,13 @@
+pp
+tags
+cscope*
+*NBSD*
+*.swp
+*.swo
+*.swn
+*.pyc
+compile_commands.json
+.ycm_extra_conf.py
+bazel-*
+dist
+*.egg-info

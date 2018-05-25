@@ -49,7 +49,7 @@ private:
     return (uint16_t*)variable_internal.end();
   }
 
-  std::unordered_map<std::string, int> str2id;
+  std::unordered_map<std::string, Char_Array_ID> str2id;
 
   bool pending_clear_reload;
 
@@ -135,12 +135,12 @@ public:
     assert(len < 32768); // uint16_t for delta
 
     if(str2id.find(str) != str2id.end()) {
-      int start = str2id[str];
+      Char_Array_ID start = str2id[str];
 
       assert(variable_internal[start] == (len + sizeof(Data_Type)) / 2);
 
       uint16_t *x = (uint16_t *)&dt;
-      for(int i = 0; i < sizeof(Data_Type) / 2; i++) {
+      for(size_t i = 0; i < sizeof(Data_Type) / 2; i++) {
         variable_internal[start + len / 2 + i + 1] = x[i];
       }
 
@@ -149,7 +149,9 @@ public:
 
     len += sizeof(Data_Type);
     assert((sizeof(Data_Type) & 1) == 0); // multiple of 2 bytes storage
-    int start = variable_internal.size();
+    size_t t = variable_internal.size();
+    assert(t < 0x8FFFFFFF); // Just reserve some space
+    Char_Array_ID start = static_cast<Char_Array_ID>(t);
 
     variable_internal.push_back(len / 2);
 
@@ -160,12 +162,11 @@ public:
       variable_internal.emplace_back(val);
     }
     uint16_t *x = (uint16_t *)&dt;
-    for(int i = 0; i < sizeof(Data_Type) / 2;i++) {
+    for(size_t i = 0; i < sizeof(Data_Type) / 2;i++) {
       variable_internal.emplace_back(x[i]);
     }
 
     str2id[str] = start;
-    assert(start < 0xFFFFFFFF);
     return start;
   }
 
@@ -202,7 +203,7 @@ public:
   }
 
   void dump() const {
-    for(int i = 0; i < variable_internal.size(); i++) {
+    for(size_t i = 0; i < variable_internal.size(); i++) {
       fmt::print("{}", (char)variable_internal[i]);
       fmt::print("{}", (char)(variable_internal[i] >> 8));
     }

@@ -173,7 +173,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
 }
 
 void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, map<string, uint32_t> &nfirst2gid,
-                           map<string, Index_ID> &name2id, map<string, vector<string>> &chain_stks, int64_t &nid_end) {
+                           map<string, Index_ID> &name2id, map<string, vector<string>> &chain_stks, Index_ID &nid_end) {
 
   fmt::print("dfg_data:{}\n", dfg_data);
   string w1st = *(words.begin());
@@ -487,43 +487,85 @@ void Inou_cfg::cfg_2_dot(LGraph *g, const std::string &path) {
   fclose(dot);
 }
 
-bool prp_get_value(char *str, bool &v_signed, uint32_t &bits, uint32_t &explicit_bits, uint32_t &val) {
-  //judge signed or unsigned
-  string str_tmp(str);
-  if(str_tmp.find('s') != std::string::npos)
+bool prp_get_value(const string& str, bool &v_signed, uint32_t &explicit_bits, uint32_t &val){
+
+  string token1st, token2nd;
+  size_t s_pos = str.find('s'); //O(n)
+  size_t u_pos = 0;
+  int idx;
+
+  if(s_pos != string::npos){
+    token1st = str.substr(0,s_pos);
+    token2nd = str.substr(s_pos+1);
     v_signed = true;
-
-  char *str_ptr=0;
-  char *         token = strtok_r(str, "su",&str_ptr);
-  vector<string> tokens;
-
-  // Keep collecting tokens while one of the delimiters present in str[].
-  while(token != nullptr) {
-    tokens.push_back(token);
-    token = strtok_r(nullptr, "su", &str_ptr);
+  }
+  else{
+    u_pos = str.find('u'); //O(n)
+    if(u_pos != string::npos){
+      token1st = str.substr(0,u_pos);
+      token2nd = str.substr(u_pos+1);
+    }
+    else
+      token1st = str;
   }
 
-#if DEBUG
-  for(const auto &i : tokens)
-    fmt::print("{}\n", i);
-#endif
+  fmt::print("1st token:{}\n",token1st);
+  /*
+     check 32bit range
+      if size > 32 -> return false
+      else return decimal value
+   */
 
-  if(tokens[0][1] == 'x') {        //heximal
-    bits = 1;                      //To do
-    val  = 1;                      //To do
-  } else if(tokens[0][1] == 'b') { // binary
-    bits = 2;                      //To do
-    val  = 2;                      //To do
-  } else {                         //decimal
-    bits = 3;
-    val  = (uint32_t)std::stoi(tokens[0]);
-    ;
+  if(token1st[0] == '0' && token1st[1] == 'x'){
+    idx = 2;
+    while(token1st[idx]){
+      uint8_t byte = token1st[idx];
+      if (byte >= '0' && byte <= '9'){
+        byte = byte - '0';
+        val = val << 4 | (byte & 0xF);
+      }
+      else if (byte >= 'a' && byte <= 'f'){
+        byte = byte - 'a' + 10;
+        val = val << 4 | (byte & 0xF);
+      }
+      else if (byte >= 'A' && byte <= 'F'){
+        byte = byte - 'A' + 10;
+        val = val << 4 | (byte & 0xF);
+      }
+      idx++;
+    }
+  }
+  else if (token1st[0] == '0' && token1st[1] == 'b') {
+    idx = 2;
+    while(token1st[idx]){
+      uint8_t byte = token1st[idx];
+      if(byte >= '0' && byte <= '1'){
+        byte = byte - '0';
+        val = val << 1 | (byte & 0xF);
+      }
+      idx++;
+    }
+  }
+  else{//decimal
+    idx = 0;
+    if (token1st[0] == '-') {//negative number
+      idx = 1;
+      while(token1st[idx])
+        val = val*10 + (token1st[idx++] - '0');
+
+      val = (uint32_t)(-val);
+      v_signed = true;
+    }
+    else{
+      while(token1st[idx])
+        val = val*10 + (token1st[idx++] - '0');
+    }
   }
 
-  if(tokens.size() == 2)
-    explicit_bits = (uint32_t)std::stoi(tokens[1]); //explicit bits width
+  if(token2nd != "")
+    explicit_bits = (uint32_t) std::stoi(token2nd); //explicit bits width
   else
-    explicit_bits = 0; //implicit bits width
+    explicit_bits = 0;
 
   return true; //To do
 }

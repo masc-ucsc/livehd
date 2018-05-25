@@ -77,6 +77,38 @@ RTLIL::Wire *Dump_yosys::create_tree(const LGraph *g, std::vector<RTLIL::Wire *>
   return create_tree(g, next_level, mod, add_fnc, result_wire);
 }
 
+
+RTLIL::Wire* Dump_yosys::create_wire(const LGraph *g, const Index_ID idx, RTLIL::Module* module, bool input, bool output) {
+
+  RTLIL::IdString name;
+
+  if(input)
+    name = "\\" + std::string(g->get_graph_input_name(idx));
+  else if(output)
+    name = "\\" + std::string(g->get_graph_output_name(idx));
+  else if(g->get_wid(idx))
+    name = "\\" + std::string(g->get_node_wirename(idx));
+  else
+    name = "\\lgraph_cell_" + std::to_string(idx);
+
+#if DEBUG
+      fmt::print("adding wire to yosys module {}, name: {}\n", module->name.str(), name.str());
+#endif
+
+  RTLIL::Wire *new_wire = module->addWire(name, g->get_bits(idx));
+  new_wire->start_offset = g->get_offset(idx);
+
+  if(input || output) {
+    module->ports.push_back(name);
+    new_wire->port_id = module->ports.size();
+
+    new_wire->port_input   = input;
+    new_wire->port_output  = output;
+  }
+
+  return new_wire;
+}
+
 void Dump_yosys::to_yosys(const LGraph *g) {
   std::string name = g->get_name().substr(7);
 
@@ -88,37 +120,15 @@ void Dump_yosys::to_yosys(const LGraph *g) {
 
   // first create all the output wires
   for(auto idx : g->fast()) {
-    if(idx == 12)
-      fmt::print("foo\n");
     assert(g->is_root(idx));
     log("creating wire for node: %ld, width %d, type %s\n", idx, g->get_bits(idx), g->node_type_get(idx).get_name().c_str());
 
     if(g->is_graph_input(idx)) {
-      RTLIL::IdString name = "\\" + std::string(g->get_graph_input_name(idx));
-#if DEBUG
-      fmt::print("adding wire to yosys module {}, name: {}\n", module->name.str(), name.str());
-#endif
-      RTLIL::Wire *new_wire  = module->addWire(name, g->get_bits(idx));
-      new_wire->start_offset = g->get_offset(idx);
-      new_wire->port_input   = true;
-      module->ports.push_back(name);
-      new_wire->port_id = module->ports.size();
-      input_map[idx]    = new_wire;
+      input_map[idx]    = create_wire(g, idx, module, true, false);
       continue;
-    }
 
-    if(g->is_graph_output(idx)) {
-      RTLIL::IdString name = "\\" + std::string(g->get_graph_output_name(idx));
-#if DEBUG
-      fmt::print("adding wire to yosys module {}, name: {}\n", module->name.str(), name.str());
-#endif
-      RTLIL::Wire *new_wire  = module->addWire(name, g->get_bits(idx));
-      new_wire->start_offset = g->get_offset(idx);
-      new_wire->port_output  = true;
-      module->ports.push_back(name);
-      new_wire->port_id = module->ports.size();
-      output_map[idx]   = new_wire;
-
+    } else if(g->is_graph_output(idx)) {
+      output_map[idx]   = create_wire(g, idx, module, false, true);
       continue;
     }
 
@@ -975,7 +985,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
       RTLIL::IdString instance_name("\\tmp");
       if(g->get_instance_name_id(idx) == 0 || std::string(g->get_node_instancename(idx)) == "") {
         instance_name = next_id();
-#ifdef DEBUG
+#ifndef NDEBUG
         fmt::print("inou_yosys got empty inst_name for cell type {}\n", subgraph->get_name());
 #endif
       } else {
@@ -1002,7 +1012,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
       RTLIL::IdString instance_name("\\tmp");
       if(g->get_instance_name_id(idx) == 0 || std::string(g->get_node_instancename(idx)) == "") {
         instance_name = next_id();
-#ifdef DEBUG
+#ifndef NDEBUG
         fmt::print("inou_yosys got empty inst_name for cell type {}\n", tcell->get_name());
 #endif
       } else {
@@ -1056,7 +1066,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
       std::vector<std::string> output_names;
       RTLIL::Cell *            cell = module->addCell("\\" + instance_name, RTLIL::IdString("\\" + celltype));
       std::string              current_name;
-#ifdef DEBUG
+#ifndef NDEBUG
       int current_port = 0, def = 0;
 #endif
       bool is_param = false;
@@ -1066,7 +1076,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
             if(g->node_type_get(c.get_idx()).op != U32Const_Op)
               log_error("Internal Error: Could not define if input is parameter.\n");
             is_param = g->node_value_get(c.get_idx()) == 1;
-#ifdef DEBUG
+#ifndef NDEBUG
             assert(def == 0);
             def++;
             assert(current_port == 0);
@@ -1076,7 +1086,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
             if(g->node_type_get(c.get_idx()).op != StrConst_Op)
               log_error("Internal Error: BB input name not a string.\n");
             current_name = g->node_const_value_get(c.get_idx());
-#ifdef DEBUG
+#ifndef NDEBUG
             assert(def == 1);
             def += 1;
             assert(current_port == 0 || current_port == LGRAPH_BBOP_PORT_N(c.get_out_pin().get_pid()));
@@ -1099,7 +1109,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
                 cell->setPort("\\" + current_name, get_wire(c.get_idx(), c.get_out_pin().get_pid()));
               }
             }
-#ifdef DEBUG
+#ifndef NDEBUG
             assert(def == 2);
             assert(current_port == LGRAPH_BBOP_PORT_N(c.get_out_pin().get_pid()));
             current_port = 0;
@@ -1113,7 +1123,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
           }
         }
       }
-#ifdef DEBUG
+#ifndef NDEBUG
       current_port = 0, def = 0;
 #endif
       int i = 0;
