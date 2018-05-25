@@ -114,7 +114,7 @@ int lef_layer_cb(lefrCallbackType_e c, lefiLayer *flayer, lefiUserData ud) {
   auto *tlib = static_cast<Tech_library *>(ud);
 
   lefiSpacingTable *spTable;
-  lefiParallel *parallel;
+  lefiParallel *    parallel;
 
   if(strcmp(flayer->name(), "OVERLAP") == 0)
     return 0; //do nothing when layer name = OVERLAP

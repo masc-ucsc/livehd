@@ -18,7 +18,7 @@ module shift_barrelfast_sleft
  assign temp     = 0;
  assign a_double = {a,temp};
 
-// shift left 
+// shift left
  genvar i;
  generate
   for(i=0; i<Bits; i++)
@@ -31,7 +31,7 @@ module shift_barrelfast_sleft
   b = array[sh];
  end
 
- // shift left ends 
+ // shift left ends
 
 /*verilator lint_on UNOPTFLAT*/
 /*verilator lint_on UNUSED*/

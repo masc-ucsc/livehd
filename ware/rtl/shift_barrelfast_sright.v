@@ -25,7 +25,7 @@ module shift_barrelfast_sright
 
  assign a_double = {temp,a};
 
-// shift right 
+// shift right
  genvar i;
  generate
   for(i=0; i<Bits; i++)
@@ -41,6 +41,6 @@ module shift_barrelfast_sright
 /*verilator lint_on UNOPTFLAT*/
 /*verilator lint_on UNUSED*/
 
- // shift right ends 
+ // shift right ends
 
 endmodule

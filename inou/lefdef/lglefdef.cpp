@@ -42,7 +42,7 @@ int main(int argc, const char **argv) {
     else
       assert(false); // Unhandled direction option
 
-    tmp_cell.add_pin(iter_io->io_name,dir);
+    tmp_cell.add_pin(iter_io->io_name, dir);
     Tech_cell::Pin &tmp_pin = tmp_cell.get_vec_pins()->back();
 
     tmp_pin.phys.resize(tmp_pin.phys.size() + 1);

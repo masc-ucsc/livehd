@@ -7,7 +7,7 @@ do
   ./inou/yosys/lgyosys ./pass/lgopt_fluid/tests/${input}
 
   if [ $? -eq 0 ]; then
-    echo "Successfully created graph from "${input}
+    echo "Successfully created graph from ${input}"
   else
     echo "FAIL: lgyosys terminated with and error"
     exit 1

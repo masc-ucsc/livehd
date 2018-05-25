@@ -8,10 +8,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <string>
 #include <vector>
 using std::map;
 using std::string;
@@ -93,12 +93,14 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
   vector<map<string, vector<string>>> chain_stks_gs(1); //chain_stacks for every graph, use vector to implement stack
   vector<string>                      nname_bg_gs(1);   //nname = node name
   vector<Index_ID>                    nid_ed_gs(1);
-  map<string, uint32_t>               nfirst2gid;       //map for every sub-graph and its first node name
+  map<string, uint32_t>               nfirst2gid; //map for every sub-graph and its first node name
   LGraph *                            gtop = lgs[0];
 
   bool gtop_bg_nname_recorded = false;
 
-  char *p = strtok(*memblock, "\n\r\f");
+  char *str_ptr=0;
+
+  char *p = strtok_r(*memblock, "\n\r\f", &str_ptr);
 
   while(p) {
     vector<string> words = split(p);
@@ -134,7 +136,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
       build_graph(words, dfg_data, gtop, nfirst2gid, name2id_gs[0], chain_stks_gs[0], nid_ed_gs[0]);
 
     fmt::print("\n");
-    p = strtok(nullptr, "\n\r\f");
+    p = strtok_r(nullptr, "\n\r\f", &str_ptr);
   } //end while loop
 
   /*
@@ -215,7 +217,7 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
     else
       g->node_type_set(name2id[w1st], CfgAssign_Op);
   } else {
-    
+
     g->node_loc_set(name2id[w1st], opack.cfg_input.c_str(), (uint32_t)std::stoi(w4th), (uint32_t)std::stoi(w5th));
 
     if(w6th == ".()")
@@ -394,7 +396,6 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
 
 } //end of build_graph
 
-
 vector<string> Inou_cfg::split(const string &str) {
   typedef string::const_iterator iter;
   vector<string>                 ret;
@@ -440,22 +441,22 @@ void Inou_cfg::generate(vector<const LGraph *> &out) {
 
 std::string Inou_cfg::encode_cfg_data(const std::string &data) {
   std::istringstream ss(data);
-  std::string buffer;
+  std::string        buffer;
 
-  for (int i = 0; i < CFG_METADATA_COUNT; ) {       // the first few are metadata, and these reads should not fail or
-                                                    // we have a formatting issue
+  for(int i = 0; i < CFG_METADATA_COUNT;) { // the first few are metadata, and these reads should not fail or
+                                            // we have a formatting issue
     assert(ss >> buffer);
 
-    if (!buffer.empty())                          // only count non-empty tokens
+    if(!buffer.empty()) // only count non-empty tokens
       i++;
   }
 
   std::string encoded;
-  while (ss >> buffer) {            // actually save the remaining
-    if (!buffer.empty())
+  while(ss >> buffer) { // actually save the remaining
+    if(!buffer.empty())
       encoded += buffer + ENCODING_DELIM;
   }
-  
+
   return encoded;
 }
 
@@ -471,7 +472,7 @@ void Inou_cfg::cfg_2_dot(LGraph *g, const std::string &path) {
       fprintf(dot, "node%d[label =\"%d %%%s\"];\n", (int)idx, (int)idx, g->get_graph_output_name(idx));
     else
       fprintf(dot, "node%d[label =\"%d %s; %s\"];\n", (int)idx, (int)idx, g->node_type_get(idx).get_name().c_str(),
-          g->get_node_wirename(idx));
+              g->get_node_wirename(idx));
   }
 
   for(auto idx : g->fast()) {
@@ -484,48 +485,43 @@ void Inou_cfg::cfg_2_dot(LGraph *g, const std::string &path) {
   fclose(dot);
 }
 
-
-bool prp_get_value(char *str, bool &v_signed, uint32_t &bits, uint32_t &explicit_bits, uint32_t &val){
+bool prp_get_value(char *str, bool &v_signed, uint32_t &bits, uint32_t &explicit_bits, uint32_t &val) {
   //judge signed or unsigned
   string str_tmp(str);
-  if (str_tmp.find('s') != std::string::npos)
+  if(str_tmp.find('s') != std::string::npos)
     v_signed = true;
 
-
-  char *token = strtok(str, "su");
+  char *str_ptr=0;
+  char *         token = strtok_r(str, "su",&str_ptr);
   vector<string> tokens;
 
   // Keep collecting tokens while one of the delimiters present in str[].
-  while (token != nullptr) {
+  while(token != nullptr) {
     tokens.push_back(token);
-    token = strtok(nullptr, "su");
+    token = strtok_r(nullptr, "su", &str_ptr);
   }
 
 #if DEBUG
-  for(const auto& i:tokens)
-    fmt::print("{}\n",i);
+  for(const auto &i : tokens)
+    fmt::print("{}\n", i);
 #endif
 
-
-  if(tokens[0][1] == 'x') { //heximal
-    bits = 1; //To do
-    val  = 1; //To do
-  }
-  else if (tokens[0][1] == 'b') { // binary
-    bits = 2; //To do
-    val  = 2; //To do
-  }
-  else { //decimal
+  if(tokens[0][1] == 'x') {        //heximal
+    bits = 1;                      //To do
+    val  = 1;                      //To do
+  } else if(tokens[0][1] == 'b') { // binary
+    bits = 2;                      //To do
+    val  = 2;                      //To do
+  } else {                         //decimal
     bits = 3;
-    val  = (uint32_t)std::stoi(tokens[0]);;
+    val  = (uint32_t)std::stoi(tokens[0]);
+    ;
   }
 
   if(tokens.size() == 2)
-    explicit_bits = (uint32_t) std::stoi(tokens[1]); //explicit bits width
+    explicit_bits = (uint32_t)std::stoi(tokens[1]); //explicit bits width
   else
-    explicit_bits = 0;                               //implicit bits width
-
+    explicit_bits = 0; //implicit bits width
 
   return true; //To do
 }
-

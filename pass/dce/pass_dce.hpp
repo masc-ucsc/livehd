@@ -21,7 +21,7 @@ protected:
 public:
   Pass_dce();
 
-  void transform(LGraph *orig) override final;
+  void transform(LGraph *orig) final;
 };
 
 #endif
