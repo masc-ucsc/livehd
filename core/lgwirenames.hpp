@@ -59,7 +59,7 @@ public:
     assert(nid < wires.size());
     assert(node_internal[nid].is_node_state());
     assert(node_internal[nid].is_root());
-#ifdef DEBUG
+#ifndef NDEBUG
     console->info("set wirename idx: {} , name: {}, module {}\n", nid, name, get_name());
 
     //FIXME figure out IOs vs wirenames (see inou_yosys) and put this assertions back

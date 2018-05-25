@@ -17,7 +17,7 @@ before_install:
   - git clone https://github.com/Tencent/rapidjson.git
   - mkdir ~/json-build
   - cd ~/json-build
-  - cmake ~/json
+  - cmake ~/rapidjson
   - make
   - make install
     #- sudo apt-get install rapidjson-dev

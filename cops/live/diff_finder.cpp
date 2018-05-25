@@ -324,9 +324,9 @@ bool Diff_finder::compare_cone(const Graph_Node &start_boundary, const Graph_Nod
               continue;
             else if(previous == (cinp.get_out_pin().get_nid())) {
               previous_original = (cinp.get_out_pin().get_nid());
-            } else if(std::abs(previous - previous_original) < std::abs(previous - cinp.get_out_pin().get_nid())) {
+            } else if(std::abs(static_cast<int64_t>(previous) - static_cast<int64_t>(previous_original)) < std::abs(static_cast<int64_t>(previous) - static_cast<int64_t>(cinp.get_out_pin().get_nid()))) {
               previous_original = (cinp.get_out_pin().get_nid());
-            } else if(std::abs(previous - previous_original) > std::abs(previous - cinp.get_out_pin().get_nid())) {
+            } else if(std::abs(static_cast<int64_t>(previous) - static_cast<int64_t>(previous_original)) > std::abs(static_cast<int64_t>(previous) - static_cast<int64_t>(cinp.get_out_pin().get_nid()))) {
               continue;
             } else {
               //is there any way to distinguish?

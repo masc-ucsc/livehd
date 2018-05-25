@@ -14,15 +14,19 @@ int main(int argc, const char **argv) {
 
   Options::setup_lock();
 
-  //char str[] = "0b10001s8";
-  ////char str[] = "0xFF_f_fs32";
-  //bool v_signed;
-  //uint32_t bits;
-  //uint32_t explicit_bits;
-  //uint32_t val;
+  std::string str = "-128";
+  //std::string str        = "0xFFFFFFFFs";
+  bool v_signed          = false;
+  uint32_t explicit_bits = 0;
+  uint32_t val           = 0;
 
-  //prp_get_value(str, v_signed, bits, explicit_bits, val);
 
+  for(int i = 0; i<1 ; i++){
+    prp_get_value (str, v_signed, explicit_bits, val);
+    fmt::print("signed:{}\n",v_signed);
+    fmt::print("value:{}\n",val);
+    fmt::print("explicit_bits:{}\n",explicit_bits);
+  }
   std::vector<LGraph *> rvec = cfg.generate();
 
   //for (auto &g:rvec) {

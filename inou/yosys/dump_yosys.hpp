@@ -42,6 +42,7 @@ private:
   RTLIL::Wire *create_tree(const LGraph *g, std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod,
                            add_cell_fnc_sign add_cell, bool sign, RTLIL::Wire *result_wire);
 
+  RTLIL::Wire *create_wire(const LGraph* g, const Index_ID idx, RTLIL::Module* module, bool input, bool output);
 protected:
 public:
   Dump_yosys(RTLIL::Design *design, Options_pack opt, bool hier = false) : Inou_trivial(opt), design(design) {
