@@ -485,26 +485,25 @@ void Inou_cfg::cfg_2_dot(LGraph *g, const std::string &path) {
   fclose(dot);
 }
 
-bool prp_get_value(const string& str, bool &v_signed, uint32_t &explicit_bits, uint32_t &val){
+bool prp_get_value(const string& str_in, bool &v_signed, uint32_t &explicit_bits, uint32_t &val){
 
   string token1st, token2nd;
-  size_t s_pos = str.find('s'); //O(n)
+  size_t s_pos = str_in.find('s'); //O(n)
   size_t u_pos = 0;
-  int idx;
 
   if(s_pos != string::npos){
-    token1st = str.substr(0,s_pos);
-    token2nd = str.substr(s_pos+1);
+    token1st = str_in.substr(0,s_pos);
+    token2nd = str_in.substr(s_pos+1);
     v_signed = true;
   }
   else{
-    u_pos = str.find('u'); //O(n)
+    u_pos = str_in.find('u'); //O(n)
     if(u_pos != string::npos){
-      token1st = str.substr(0,u_pos);
-      token2nd = str.substr(u_pos+1);
+      token1st = str_in.substr(0,u_pos);
+      token2nd = str_in.substr(u_pos+1);
     }
     else
-      token1st = str;
+      token1st = str_in;
   }
 
   fmt::print("1st token:{}\n",token1st);
@@ -515,7 +514,33 @@ bool prp_get_value(const string& str, bool &v_signed, uint32_t &explicit_bits, u
    */
 
   if(token1st[0] == '0' && token1st[1] == 'x'){
-    idx = 2;
+    //detect the leading 1 and start from it
+    std::size_t idx = token1st.substr(2).find_first_not_of('0') + 2; //e.g. 0x000FFFFF, returns 5
+    fmt::print("idx:{}\n", idx);
+
+    //need to determine first character's bit width
+    uint8_t char1st_width = 0;
+    if(token1st[idx] == '1')
+      char1st_width = 1;
+    else if(token1st[idx] >= '2' && token1st[idx] <='3')
+      char1st_width = 2;
+    else if(token1st[idx] >= '4' && token1st[idx] <='7')
+      char1st_width = 3;
+    else if(token1st[idx] >= '8' && token1st[idx] <='9')
+      char1st_width = 4;
+    else if(token1st[idx] >= 'a' && token1st[idx] <='f')
+      char1st_width = 4;
+    else if(token1st[idx] >= 'A' && token1st[idx] <='F')
+      char1st_width = 4;
+
+
+    std::size_t bit_width = (token1st.size() - idx - 1) * 4 + char1st_width;
+    fmt::print("bit_width:{}\n", bit_width);
+    if(bit_width > 32){
+      fmt::print("out of range!!\n");
+      return false;
+    }
+
     while(token1st[idx]){
       uint8_t byte = token1st[idx];
       if (byte >= '0' && byte <= '9'){
@@ -534,7 +559,16 @@ bool prp_get_value(const string& str, bool &v_signed, uint32_t &explicit_bits, u
     }
   }
   else if (token1st[0] == '0' && token1st[1] == 'b') {
-    idx = 2;
+    std::size_t  idx = token1st.substr(2).find_first_not_of('0') + 2; //e.g. 0b00011111, returns 5
+
+    std::size_t bit_width = token1st.size() - idx;
+    fmt::print("bit_width:{}\n", bit_width);
+
+    if(bit_width > 32)
+      return false;
+
+
+
     while(token1st[idx]){
       uint8_t byte = token1st[idx];
       if(byte >= '0' && byte <= '1'){
@@ -545,7 +579,7 @@ bool prp_get_value(const string& str, bool &v_signed, uint32_t &explicit_bits, u
     }
   }
   else{//decimal
-    idx = 0;
+    std::size_t  idx = token1st.substr(2).find_first_not_of('0');
     if (token1st[0] == '-') {//negative number
       idx = 1;
       while(token1st[idx])

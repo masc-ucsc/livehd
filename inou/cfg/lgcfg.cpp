@@ -14,20 +14,21 @@ int main(int argc, const char **argv) {
 
   Options::setup_lock();
 
-  std::string str = "-128";
-  //std::string str        = "0xFFFFFFFFs";
+  //std::string str_in = "-128";
+  std::string str_in       = "0b00011111111111111111111111111111111s";
   bool v_signed          = false;
   uint32_t explicit_bits = 0;
   uint32_t val           = 0;
 
 
   for(int i = 0; i<1 ; i++){
-    prp_get_value (str, v_signed, explicit_bits, val);
+    prp_get_value (str_in, v_signed, explicit_bits, val);
+    fmt::print("out of range:{}\n",!prp_get_value (str_in, v_signed, explicit_bits, val));
     fmt::print("signed:{}\n",v_signed);
     fmt::print("value:{}\n",val);
     fmt::print("explicit_bits:{}\n",explicit_bits);
   }
-  std::vector<LGraph *> rvec = cfg.generate();
+  //std::vector<LGraph *> rvec = cfg.generate();
 
   //for (auto &g:rvec) {
   //	cfg.generate(g);
