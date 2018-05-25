@@ -68,11 +68,13 @@ private:
   bool is_register(const std::string &v) { return v[0] == REGISTER_MARKER; }
   bool is_input(const std::string &v) { return v[0] == INPUT_MARKER; }
   bool is_output(const std::string &v) { return v[0] == OUTPUT_MARKER; }
+  bool is_constant(const std::string &v) { return v[0] == '0'; }
 
   Index_ID create_register(LGraph *g, CF2DF_State *state, const std::string &var_name);
   Index_ID create_input(LGraph *g, CF2DF_State *state, const std::string &var_name);
   Index_ID create_output(LGraph *g, CF2DF_State *state, const std::string &var_name);
-  Index_ID default_constant(LGraph *g);
+  Index_ID create_private(LGraph *g, CF2DF_State *state, const std::string &var_name);
+  Index_ID default_constant(LGraph *g, CF2DF_State *state);
 };
 
 #endif
