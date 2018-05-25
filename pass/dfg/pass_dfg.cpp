@@ -32,6 +32,8 @@ void Pass_dfg::cfg_2_dfg(LGraph *dfg, const LGraph *cfg) {
     process_node(dfg, cfg, &state, itr);
     itr = get_child(cfg, itr);
   }
+
+  dfg->sync();
 }
 
 void Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, Index_ID node) {
@@ -51,10 +53,8 @@ void Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, 
 
 void Pass_dfg::process_assign(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, const CFG_Node_Data &data, Index_ID node) {
   Index_ID dfnode           = dfg->create_node().get_nid();
-  state->node_mapping[node] = dfnode;
 
   dfg->node_type_set(dfnode, data.get_operator());
-
   vector<Index_ID> operands = process_operands(dfg, cfg, state, data, node);
 
   for (Index_ID id : operands)
@@ -65,7 +65,7 @@ void Pass_dfg::process_assign(LGraph *dfg, const LGraph *cfg, CF2DF_State *state
 
 void Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, const CFG_Node_Data &data, Index_ID node) {
   Index_ID cond = state->last_refs[data.get_target()];
-  
+  assert(false);
 }
 
 vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, const CFG_Node_Data &data, Index_ID node)
@@ -88,8 +88,6 @@ vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, const LGraph *cfg, CF2D
         ops[i] = create_output(dfg, state, dops[i]);
       else
         ops[i] = create_private(dfg, state, dops[i]);
-      
-      state->node_mapping[ops[i]] = ops[i];
     }
   }
 
@@ -123,7 +121,7 @@ Index_ID Pass_dfg::create_register(LGraph *g, CF2DF_State *state, const string &
   Index_ID nid = g->create_node().get_nid();
   g->node_type_set(nid, Flop_Op);
   state->last_refs[var_name] = nid;
-  state->node_mapping[nid] = nid;
+  state->registers[var_name] = nid;
 
   return nid;
 }
@@ -132,7 +130,6 @@ Index_ID Pass_dfg::create_input(LGraph *g, CF2DF_State *state, const string &var
   Index_ID nid = g->create_node().get_nid();
   g->add_graph_input(var_name.c_str(), nid);
   state->last_refs[var_name] = nid;
-  state->node_mapping[nid] = nid;
 
   return nid;
 }
@@ -141,7 +138,6 @@ Index_ID Pass_dfg::create_output(LGraph *g, CF2DF_State *state, const string &va
   Index_ID nid = g->create_node().get_nid();
   g->add_graph_output(var_name.c_str(), nid);
   state->last_refs[var_name] = nid;
-  state->node_mapping[nid] = nid;
   
   return nid;
 }
@@ -150,7 +146,6 @@ Index_ID Pass_dfg::create_private(LGraph *g, CF2DF_State *state, const string &v
   Index_ID nid = g->create_node().get_nid();
   g->node_type_set(nid, CfgAssign_Op);
   state->last_refs[var_name] = nid;
-  state->node_mapping[nid] = nid;
 
   g->add_edge(Node_Pin(nid, 0, false), Node_Pin(default_constant(g, state), 0, true));
  
@@ -160,7 +155,6 @@ Index_ID Pass_dfg::create_private(LGraph *g, CF2DF_State *state, const string &v
 Index_ID Pass_dfg::default_constant(LGraph *g, CF2DF_State *state) {
   Index_ID nid = g->create_node().get_nid();
   g->node_type_set(nid, U32Const_Op);
-  state->node_mapping[nid] = nid;
 
   return nid;
 }
