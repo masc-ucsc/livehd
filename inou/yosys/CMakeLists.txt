@@ -15,8 +15,6 @@ execute_process(COMMAND ${YOSYS_CONFIG_LDF} OUTPUT_VARIABLE YOSYS_LDF OUTPUT_STR
 
 SET(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${YOSYS_LDF}")
 
-#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${YOSYS_CXX} -fPIC -D_YOSYS_")
-
 include_directories("${CMAKE_SOURCE_DIR}/subs/yosys")
 TARGET_LINK_LIBRARIES(inou_yosys core)
 TARGET_LINK_LIBRARIES(inou_yosys -Wl,-Bstatic ${BOOST_LIBS} -Wl,-Bdynamic -lrt -lpthread ${REQUIRED_LIBS})
@@ -24,7 +22,6 @@ TARGET_LINK_LIBRARIES(inou_yosys -Wl,-Bstatic ${BOOST_LIBS} -Wl,-Bdynamic -lrt -
 add_custom_command(TARGET inou_yosys PRE_BUILD COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/subs/yosys/techlibs/common/simcells.v ${PROJECT_BINARY_DIR}/simcell.v)
 add_custom_command(TARGET inou_yosys PRE_BUILD COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/lgyosys ${PROJECT_BINARY_DIR}/lgyosys)
 add_custom_command(TARGET inou_yosys PRE_BUILD COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/tests ${PROJECT_BINARY_DIR}/tests/)
-
 
 add_test(NAME extra_inou_yosys_parse COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/lgyosys --testdir=${CMAKE_CURRENT_SOURCE_DIR}/tests
   --logdir=${PROJECT_BINARY_DIR}/../../logs
