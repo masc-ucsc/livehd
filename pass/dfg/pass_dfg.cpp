@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cassert>
 #include <vector>
+#include <unordered_set>
 using std::string;
 using std::unordered_map;
 using std::vector;
@@ -28,55 +29,104 @@ void Pass_dfg::cfg_2_dfg(LGraph *dfg, const LGraph *cfg) {
   Index_ID    itr = find_root(cfg);
   CF2DF_State state;
 
-  while (itr != 0) {
-    process_node(dfg, cfg, &state, itr);
-    itr = get_child(cfg, itr);
-  }
+  process_cfg(dfg, cfg, &state, itr);
 
   dfg->sync();
 }
 
-void Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, Index_ID node) {
-  const char *data_str = cfg->get_node_wirename(node);
-  CFG_Node_Data data(cfg->node_type_get(node).op, data_str);
+void Pass_dfg::process_cfg(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, Index_ID top_node) {
+  Index_ID itr = top_node;
 
-  switch (data.get_operator()) {
+  while (itr != 0) {
+    process_node(dfg, cfg, state, itr);
+    itr = get_child(cfg, itr);
+  }
+}
+
+void Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, Index_ID node) {
+  CFG_Node_Data data(cfg, node);
+
+  switch (cfg->node_type_get(node).op) {
   case CfgAssign_Op:
     process_assign(dfg, cfg, state, data, node);
     break;
   case CfgIf_Op:
     process_if(dfg, cfg, state, data, node);
     break;
-  default:;
+  default:
+    ;
   }
 }
 
 void Pass_dfg::process_assign(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, const CFG_Node_Data &data, Index_ID node) {
   Index_ID dfnode           = dfg->create_node().get_nid();
 
-  dfg->node_type_set(dfnode, data.get_operator());
+  dfg->node_type_set(dfnode, CfgAssign_Op);
   vector<Index_ID> operands = process_operands(dfg, cfg, state, data, node);
 
   for (Index_ID id : operands)
     dfg->add_edge(Node_Pin(dfnode, 0, false), Node_Pin(id, 0, true));
 
-  state->last_refs[data.get_target()] = dfnode;
+  state->update_reference(data.get_target(), dfnode);
 }
 
 void Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, const CFG_Node_Data &data, Index_ID node) {
-  Index_ID cond = state->last_refs[data.get_target()];
-  assert(false);
+  Index_ID cond = state->get_reference(data.get_target());
+  const auto &operands = data.get_operands();
+
+  Index_ID tbranch = std::stol(operands[0]);
+  CF2DF_State tstate = state->copy();
+
+  Index_ID fbranch = std::stol(operands[1]);
+  CF2DF_State fstate = state->copy();
+
+  process_cfg(dfg, cfg, &tstate, tbranch);
+  process_cfg(dfg, cfg, &fstate, fbranch);
+
+  add_phis(dfg, cfg, state, &tstate, &fstate, cond);
+}
+
+void Pass_dfg::add_phis(LGraph *dfg, const LGraph *cfg, CF2DF_State *parent, CF2DF_State *tstate, CF2DF_State *fstate, Index_ID condition) {
+  std::unordered_set<string> phis_added;
+
+  for (const auto &pair : tstate->references()) {
+    add_phi(dfg, parent, tstate, fstate, condition, pair.first);
+    phis_added.insert(pair.first);
+  }
+
+  for (const auto &pair : fstate->references()) {
+    if (phis_added.find(pair.first) == phis_added.end())
+      add_phi(dfg, parent, tstate, fstate, condition, pair.first);
+  }
+}
+
+void Pass_dfg::add_phi(LGraph *dfg, CF2DF_State *parent, CF2DF_State *tstate, CF2DF_State *fstate, Index_ID condition, const string &variable) {
+  Index_ID tid = (tstate->has_reference(variable)) ? tstate->get_reference(variable) : parent->get_reference(variable);
+  Index_ID fid = (fstate->has_reference(variable)) ? fstate->get_reference(variable) : parent->get_reference(variable);
+
+  Index_ID phi = dfg->create_node().get_nid();
+  dfg->node_type_set(phi, Mux_Op);
+  auto tp = dfg->node_type_get(phi);
+
+  Port_ID tin = tp.get_input_match("B");
+  Port_ID fin = tp.get_input_match("A");
+  Port_ID cin = tp.get_input_match("S");
+
+  dfg->add_edge(Node_Pin(phi, tin, true), Node_Pin(tid, 0, false));
+  dfg->add_edge(Node_Pin(phi, fin, true), Node_Pin(fid, 0, false));
+  dfg->add_edge(Node_Pin(phi, cin, true), Node_Pin(condition, 0, false));
+
+  parent->update_reference(variable, phi);
 }
 
 vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, const CFG_Node_Data &data, Index_ID node)
 {
   const auto &dops = data.get_operands();
   vector<Index_ID> ops(dops.size());
-  auto last_refs = state->last_refs;
 
   for (int i = 0; i < dops.size(); i++) {
-    if (last_refs.find(dops[i]) != last_refs.end())
-      ops[i] = last_refs[dops[i]];
+    if (state->has_reference(dops[i]))
+      ops[i] = state->get_reference(dops[i]);
     else {
       if (is_constant(dops[i]))
         ops[i] = default_constant(dfg, state);
@@ -120,8 +170,8 @@ Index_ID Pass_dfg::get_child(const LGraph *cfg, Index_ID node) {
 Index_ID Pass_dfg::create_register(LGraph *g, CF2DF_State *state, const string &var_name) {
   Index_ID nid = g->create_node().get_nid();
   g->node_type_set(nid, Flop_Op);
-  state->last_refs[var_name] = nid;
-  state->registers[var_name] = nid;
+  state->update_reference(var_name, nid);
+  state->add_register(var_name, nid);
 
   return nid;
 }
@@ -129,7 +179,7 @@ Index_ID Pass_dfg::create_register(LGraph *g, CF2DF_State *state, const string &
 Index_ID Pass_dfg::create_input(LGraph *g, CF2DF_State *state, const string &var_name) {
   Index_ID nid = g->create_node().get_nid();
   g->add_graph_input(var_name.c_str(), nid);
-  state->last_refs[var_name] = nid;
+  state->update_reference(var_name, nid);
 
   return nid;
 }
@@ -137,7 +187,7 @@ Index_ID Pass_dfg::create_input(LGraph *g, CF2DF_State *state, const string &var
 Index_ID Pass_dfg::create_output(LGraph *g, CF2DF_State *state, const string &var_name) {
   Index_ID nid = g->create_node().get_nid();
   g->add_graph_output(var_name.c_str(), nid);
-  state->last_refs[var_name] = nid;
+  state->update_reference(var_name, nid);
   
   return nid;
 }
@@ -145,7 +195,7 @@ Index_ID Pass_dfg::create_output(LGraph *g, CF2DF_State *state, const string &va
 Index_ID Pass_dfg::create_private(LGraph *g, CF2DF_State *state, const string &var_name) {
   Index_ID nid = g->create_node().get_nid();
   g->node_type_set(nid, CfgAssign_Op);
-  state->last_refs[var_name] = nid;
+  state->update_reference(var_name, nid);
 
   g->add_edge(Node_Pin(nid, 0, false), Node_Pin(default_constant(g, state), 0, true));
  

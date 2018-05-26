@@ -35,6 +35,7 @@ private:
                                        Index_ID &);
   void                     cfg_2_lgraph(char **, std::vector<LGraph *> &);
   std::string              encode_cfg_data(const std::string &);
+  void                     update_ifs(std::vector<LGraph *> &lgs, std::vector<std::map<std::string, Index_ID>> &node_mappings);
 
 protected:
   Inou_cfg_options_pack opack;
