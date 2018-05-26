@@ -16,8 +16,9 @@ void lgdump_digraph(const LGraph *g) {
       fprintf(stderr, "node%d[label =\"%d $%s\"];\n", (int)idx, (int)idx, g->get_graph_input_name(idx));
     else if(g->is_graph_output(idx))
       fprintf(stderr, "node%d[label =\"%d %%%s\"];\n", (int)idx, (int)idx, g->get_graph_output_name(idx));
-    else
+    else {
       fprintf(stderr, "node%d[label =\"%d %s\"];\n", (int)idx, (int)idx, g->node_type_get(idx).get_name().c_str());
+    }
   }
 
 #if 1

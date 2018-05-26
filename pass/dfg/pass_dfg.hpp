@@ -21,7 +21,7 @@ public:
 class CF2DF_State {
 public:
   std::unordered_map<std::string, Index_ID> last_refs;
-  std::unordered_map<Index_ID, Index_ID>    node_mapping;
+  std::unordered_map<std::string, Index_ID> registers;
 };
 
 const char REGISTER_MARKER = '@';
@@ -68,11 +68,13 @@ private:
   bool is_register(const std::string &v) { return v[0] == REGISTER_MARKER; }
   bool is_input(const std::string &v) { return v[0] == INPUT_MARKER; }
   bool is_output(const std::string &v) { return v[0] == OUTPUT_MARKER; }
+  bool is_constant(const std::string &v) { return v[0] == '0'; }
 
   Index_ID create_register(LGraph *g, CF2DF_State *state, const std::string &var_name);
   Index_ID create_input(LGraph *g, CF2DF_State *state, const std::string &var_name);
   Index_ID create_output(LGraph *g, CF2DF_State *state, const std::string &var_name);
-  Index_ID default_constant(LGraph *g);
+  Index_ID create_private(LGraph *g, CF2DF_State *state, const std::string &var_name);
+  Index_ID default_constant(LGraph *g, CF2DF_State *state);
 };
 
 #endif

@@ -14,7 +14,8 @@ public:
   CFG_Node_Data(Node_Type_Op op, const char *data_str) : oper(op) {
     std::istringstream ss(data_str);
 
-    assert(std::getline(ss, target, ENCODING_DELIM)); // the first var in the data_str is the target
+    assert(std::getline(ss, target, ENCODING_DELIM)); // the first token is the operator, we don't need it
+    assert(std::getline(ss, target, ENCODING_DELIM)); // the 2nd var in the data_str is the target
                                                       // this read shouldn't fail
 
     std::string buffer;
