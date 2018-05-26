@@ -98,6 +98,8 @@ private:
                                             const std::string &variable);
 
   Index_ID get_child(const LGraph *cfg, Index_ID node);
+  Index_ID resolve_phi_branch(LGraph *dfg, CF2DF_State *parent, CF2DF_State *branch, const std::string &variable);
+  void attach_outputs(LGraph *dfg, CF2DF_State *state);
 
   bool is_register(const std::string &v) { return v[0] == REGISTER_MARKER; }
   bool is_input(const std::string &v) { return v[0] == INPUT_MARKER; }

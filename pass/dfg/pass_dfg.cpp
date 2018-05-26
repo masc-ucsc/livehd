@@ -30,6 +30,7 @@ void Pass_dfg::cfg_2_dfg(LGraph *dfg, const LGraph *cfg) {
   CF2DF_State state;
 
   process_cfg(dfg, cfg, &state, itr);
+  attach_outputs(dfg, &state);
 
   dfg->sync();
 }
@@ -54,7 +55,7 @@ void Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, 
     process_if(dfg, cfg, state, data, node);
     break;
   default:
-    ;
+    fmt::print("*************Unrecognized node type: {}", cfg->node_type_get(node).get_name());
   }
 }
 
@@ -65,7 +66,7 @@ void Pass_dfg::process_assign(LGraph *dfg, const LGraph *cfg, CF2DF_State *state
   vector<Index_ID> operands = process_operands(dfg, cfg, state, data, node);
 
   for (Index_ID id : operands)
-    dfg->add_edge(Node_Pin(dfnode, 0, false), Node_Pin(id, 0, true));
+    dfg->add_edge(Node_Pin(id, 0, false), Node_Pin(dfnode, 0, true));
 
   state->update_reference(data.get_target(), dfnode);
 }
@@ -101,8 +102,8 @@ void Pass_dfg::add_phis(LGraph *dfg, const LGraph *cfg, CF2DF_State *parent, CF2
 }
 
 void Pass_dfg::add_phi(LGraph *dfg, CF2DF_State *parent, CF2DF_State *tstate, CF2DF_State *fstate, Index_ID condition, const string &variable) {
-  Index_ID tid = (tstate->has_reference(variable)) ? tstate->get_reference(variable) : parent->get_reference(variable);
-  Index_ID fid = (fstate->has_reference(variable)) ? fstate->get_reference(variable) : parent->get_reference(variable);
+  Index_ID tid = resolve_phi_branch(dfg, parent, tstate, variable);
+  Index_ID fid = resolve_phi_branch(dfg, parent, fstate, variable);
 
   Index_ID phi = dfg->create_node().get_nid();
   dfg->node_type_set(phi, Mux_Op);
@@ -112,15 +113,29 @@ void Pass_dfg::add_phi(LGraph *dfg, CF2DF_State *parent, CF2DF_State *tstate, CF
   Port_ID fin = tp.get_input_match("A");
   Port_ID cin = tp.get_input_match("S");
 
-  dfg->add_edge(Node_Pin(phi, tin, true), Node_Pin(tid, 0, false));
-  dfg->add_edge(Node_Pin(phi, fin, true), Node_Pin(fid, 0, false));
-  dfg->add_edge(Node_Pin(phi, cin, true), Node_Pin(condition, 0, false));
+  dfg->add_edge(Node_Pin(tid, 0, false), Node_Pin(phi, tin, true));
+  dfg->add_edge(Node_Pin(fid, 0, false), Node_Pin(phi, fin, true));
+  dfg->add_edge(Node_Pin(condition, 0, false), Node_Pin(phi, cin, true));
 
   parent->update_reference(variable, phi);
 }
 
-vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, const CFG_Node_Data &data, Index_ID node)
-{
+Index_ID Pass_dfg::resolve_phi_branch(LGraph *dfg, CF2DF_State *parent, CF2DF_State *branch, const std::string &variable) {
+  if (branch->has_reference(variable))
+    return branch->get_reference(variable);
+  else if (parent->has_reference(variable))
+    return parent->get_reference(variable);
+  else if (is_register(variable))
+    return create_register(dfg, parent, variable);
+  else if (is_input(variable))
+    return create_input(dfg, parent, variable);
+  else if (is_output(variable))
+    return create_output(dfg, parent, variable);
+  else
+    return default_constant(dfg, parent);
+}
+
+vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, const CFG_Node_Data &data, Index_ID node) {
   const auto &dops = data.get_operands();
   vector<Index_ID> ops(dops.size());
 
@@ -142,6 +157,19 @@ vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, const LGraph *cfg, CF2D
   }
 
   return ops;
+}
+
+void Pass_dfg::attach_outputs(LGraph *dfg, CF2DF_State *state) {
+  for (const auto &pair : state->copy().references()) {
+    const auto &var = pair.first;
+
+    if (is_register(var) || is_output(var)) {
+      Index_ID lref = pair.second;
+
+      Index_ID oid = create_output(dfg, state, var);
+      dfg->add_edge(Node_Pin(lref, 0, false), Node_Pin(oid, 0, true));
+    }
+  }
 }
 
 Index_ID Pass_dfg::find_root(const LGraph *cfg) {
