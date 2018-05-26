@@ -7,6 +7,9 @@
 
 #include "inou.hpp"
 
+#include "pass/sample/pass_topological.hpp"
+#include "pass/sample/pass_fast.hpp"
+
 #include "pass/cse/pass_cse.hpp"
 #include "pass/vectorize/pass_vectorize.hpp"
 
@@ -39,8 +42,6 @@ void terminate(std::vector<LGraph *> lgs) {
   for(auto g : lgs) {
     g->sync();
   }
-
-  exit(0);
 }
 
 int main(int argc, const char **argv) {
@@ -66,6 +67,18 @@ int main(int argc, const char **argv) {
       } else if(pass_name == "vectorize") {
         Pass_vectorize vectorize;
         vectorize.transform(g);
+      } else if(pass_name == "fast") {
+        Pass_fast fast;
+        fast.transform(g);
+      b.sample(pass_name + " pass1");
+        fast.transform(g);
+      b.sample(pass_name + " pass2");
+      } else if(pass_name == "topological") {
+        Pass_topo topo;
+        topo.transform(g);
+      b.sample(pass_name + " pass1");
+        topo.transform(g);
+      b.sample(pass_name + " pass2");
       } else {
         fmt::print("ERROR: unknown {} pass\n", pass_name);
         terminate(lgs);
@@ -75,4 +88,6 @@ int main(int argc, const char **argv) {
   }
 
   terminate(lgs);
+
+  return 0;
 }
