@@ -485,11 +485,13 @@ void Inou_cfg::cfg_2_dot(LGraph *g, const std::string &path) {
   fclose(dot);
 }
 
-bool prp_get_value(const string& str_in, bool &v_signed, uint32_t &explicit_bits, uint32_t &val){
+bool prp_get_value(const string& str_in, string& str_out, bool &v_signed, uint32_t &explicit_bits, uint32_t &val){
 
   string token1st, token2nd;
-  size_t s_pos = str_in.find('s'); //O(n)
+  size_t s_pos = str_in.find('s');//O(n)
   size_t u_pos = 0;
+  size_t idx;
+  size_t bit_width;
 
   if(s_pos != string::npos){
     token1st = str_in.substr(0,s_pos);
@@ -497,7 +499,7 @@ bool prp_get_value(const string& str_in, bool &v_signed, uint32_t &explicit_bits
     v_signed = true;
   }
   else{
-    u_pos = str_in.find('u'); //O(n)
+    u_pos = str_in.find('u');//O(n)
     if(u_pos != string::npos){
       token1st = str_in.substr(0,u_pos);
       token2nd = str_in.substr(u_pos+1);
@@ -507,16 +509,17 @@ bool prp_get_value(const string& str_in, bool &v_signed, uint32_t &explicit_bits
   }
 
   fmt::print("1st token:{}\n",token1st);
-  /*
-     check 32bit range
-      if size > 32 -> return false
-      else return decimal value
-   */
 
-  if(token1st[0] == '0' && token1st[1] == 'x'){
+  //explicit bits width
+  if(token2nd != "")
+    explicit_bits = (uint32_t) std::stoi(token2nd);
+  else
+    explicit_bits = 0;
+
+
+  if(token1st[0] == '0' && token1st[1] == 'x'){ //hexadecimal
     //detect the leading 1 and start from it
-    std::size_t idx = token1st.substr(2).find_first_not_of('0') + 2; //e.g. 0x000FFFFF, returns 5
-    fmt::print("idx:{}\n", idx);
+    idx = token1st.substr(2).find_first_not_of('0') + 2; //e.g. 0x000FFFFF, returns 5
 
     //need to determine first character's bit width
     uint8_t char1st_width = 0;
@@ -534,10 +537,11 @@ bool prp_get_value(const string& str_in, bool &v_signed, uint32_t &explicit_bits
       char1st_width = 4;
 
 
-    std::size_t bit_width = (token1st.size() - idx - 1) * 4 + char1st_width;
+    bit_width = (token1st.size() - idx - 1) * 4 + char1st_width;
     fmt::print("bit_width:{}\n", bit_width);
     if(bit_width > 32){
-      fmt::print("out of range!!\n");
+      fmt::print("out of 32-bits range, stored in const string!!\n");
+      str_out = token1st;
       return false;
     }
 
@@ -558,16 +562,19 @@ bool prp_get_value(const string& str_in, bool &v_signed, uint32_t &explicit_bits
       idx++;
     }
   }
-  else if (token1st[0] == '0' && token1st[1] == 'b') {
-    std::size_t  idx = token1st.substr(2).find_first_not_of('0') + 2; //e.g. 0b00011111, returns 5
+  else if (token1st[0] == '0' && token1st[1] == 'b') {//binary
+    idx = token1st.substr(2).find_first_not_of('0') + 2; //e.g. 0b00011111, returns 5
 
-    std::size_t bit_width = token1st.size() - idx;
+    fmt::print("idx:{}\n", idx);
+    fmt::print("token1st size:{}\n", token1st.size());
+    bit_width = token1st.size() - idx;
     fmt::print("bit_width:{}\n", bit_width);
 
-    if(bit_width > 32)
+    if(bit_width > 32){
+      fmt::print("out of 32-bits range, stored in const string!!\n");
+      str_out = token1st;
       return false;
-
-
+    }
 
     while(token1st[idx]){
       uint8_t byte = token1st[idx];
@@ -578,10 +585,51 @@ bool prp_get_value(const string& str_in, bool &v_signed, uint32_t &explicit_bits
       idx++;
     }
   }
-  else{//decimal
-    std::size_t  idx = token1st.substr(2).find_first_not_of('0');
+  else{ //decimal
+    //find leading 1
+    if(token1st[0] == '-')
+      idx = token1st.substr(1).find_first_not_of('0') + 1;
+    else
+      idx = token1st.find_first_not_of('0');
+
+    string negative_max = "-2147483648";
+    string positive_max =  "2147483647"; // size = 10
+
+    if(token1st[0] == '-' && token1st.substr(idx).size() > 10){
+      fmt::print("out of 32-bits range, stored in const string!!\n");
+      str_out = token1st;
+      return false;
+    }
+    else if (token1st[0] != '-' && token1st.substr(idx).size() > 10){
+      fmt::print("out of 32-bits range, stored in const string!!\n");
+      str_out = token1st;
+      return false;
+    }
+    else if(token1st[0]  == '-' && token1st.substr(idx).size() == 10){
+      int i=0;
+      while(negative_max[i]){
+        if(token1st[i] > negative_max[i]){
+          fmt::print("out of 32-bits range, stored in const string!!\n");
+          str_out = token1st;
+          return false;
+        }
+        i++;
+      }
+    }
+    else if (token1st[0]  != '-' && token1st.substr(idx).size() == 10){
+      int i=0;
+      while(positive_max[i]){
+        if(token1st[i] > positive_max[i]){
+          fmt::print("out of 32-bits range, stored in const string!!\n");
+          str_out = token1st;
+          return false;
+        }
+        i++;
+      }
+    }
+
+
     if (token1st[0] == '-') {//negative number
-      idx = 1;
       while(token1st[idx])
         val = val*10 + (token1st[idx++] - '0');
 
@@ -594,10 +642,5 @@ bool prp_get_value(const string& str_in, bool &v_signed, uint32_t &explicit_bits
     }
   }
 
-  if(token2nd != "")
-    explicit_bits = (uint32_t) std::stoi(token2nd); //explicit bits width
-  else
-    explicit_bits = 0;
-
-  return true; //To do
+  return true;
 }
