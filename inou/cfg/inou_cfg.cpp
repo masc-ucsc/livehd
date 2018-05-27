@@ -13,6 +13,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <vector>
+#include <algorithm>
 using std::map;
 using std::string;
 using std::vector;
@@ -440,6 +441,7 @@ void Inou_cfg::cfg_2_dot(LGraph *g, const std::string &path) {
   fclose(dot);
 }
 
+// prp_get_value returns true if constant is within 32-bits; else returns string for const string in lgraph
 bool prp_get_value(const string& str_in, string& str_out, bool &v_signed, uint32_t &explicit_bits, uint32_t &val){
 
   string token1st, token2nd;
@@ -448,8 +450,12 @@ bool prp_get_value(const string& str_in, string& str_out, bool &v_signed, uint32
   size_t idx;
   size_t bit_width;
 
+  //decide 1st and 2nd tokens, delimiter: s or u
   if(s_pos != string::npos){
-    token1st = str_in.substr(0,s_pos);
+    char rm = '_';//remove _ in 0xF___FFFF
+    string str_sub = str_in.substr(0,s_pos);
+    str_sub.erase(std::remove(str_sub.begin(), str_sub.end(),rm), str_sub.end());
+    token1st = str_sub;
     token2nd = str_in.substr(s_pos+1);
     v_signed = true;
   }
@@ -463,7 +469,7 @@ bool prp_get_value(const string& str_in, string& str_out, bool &v_signed, uint32
       token1st = str_in;
   }
 
-  fmt::print("1st token:{}\n",token1st);
+  //fmt::print("1st token:{}\n",token1st);
 
   //explicit bits width
   if(token2nd != "")
@@ -493,9 +499,8 @@ bool prp_get_value(const string& str_in, string& str_out, bool &v_signed, uint32
 
 
     bit_width = (token1st.size() - idx - 1) * 4 + char1st_width;
-    fmt::print("bit_width:{}\n", bit_width);
+    //fmt::print("bit_width:{}\n", bit_width);
     if(bit_width > 32){
-      fmt::print("out of 32-bits range, stored in const string!!\n");
       str_out = token1st;
       return false;
     }
@@ -520,13 +525,12 @@ bool prp_get_value(const string& str_in, string& str_out, bool &v_signed, uint32
   else if (token1st[0] == '0' && token1st[1] == 'b') {//binary
     idx = token1st.substr(2).find_first_not_of('0') + 2; //e.g. 0b00011111, returns 5
 
-    fmt::print("idx:{}\n", idx);
-    fmt::print("token1st size:{}\n", token1st.size());
+    //fmt::print("idx:{}\n", idx);
+    //fmt::print("token1st size:{}\n", token1st.size());
     bit_width = token1st.size() - idx;
-    fmt::print("bit_width:{}\n", bit_width);
+    //fmt::print("bit_width:{}\n", bit_width);
 
     if(bit_width > 32){
-      fmt::print("out of 32-bits range, stored in const string!!\n");
       str_out = token1st;
       return false;
     }
@@ -551,12 +555,10 @@ bool prp_get_value(const string& str_in, string& str_out, bool &v_signed, uint32
     string positive_max =  "2147483647"; // size = 10
 
     if(token1st[0] == '-' && token1st.substr(idx).size() > 10){
-      fmt::print("out of 32-bits range, stored in const string!!\n");
       str_out = token1st;
       return false;
     }
     else if (token1st[0] != '-' && token1st.substr(idx).size() > 10){
-      fmt::print("out of 32-bits range, stored in const string!!\n");
       str_out = token1st;
       return false;
     }
@@ -564,7 +566,6 @@ bool prp_get_value(const string& str_in, string& str_out, bool &v_signed, uint32
       int i=0;
       while(negative_max[i]){
         if(token1st[i] > negative_max[i]){
-          fmt::print("out of 32-bits range, stored in const string!!\n");
           str_out = token1st;
           return false;
         }
@@ -575,7 +576,6 @@ bool prp_get_value(const string& str_in, string& str_out, bool &v_signed, uint32
       int i=0;
       while(positive_max[i]){
         if(token1st[i] > positive_max[i]){
-          fmt::print("out of 32-bits range, stored in const string!!\n");
           str_out = token1st;
           return false;
         }
