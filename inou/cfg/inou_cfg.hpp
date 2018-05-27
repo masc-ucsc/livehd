@@ -55,6 +55,6 @@ public:
   void generate(std::vector<const LGraph *> &out) final;
 };
 
-bool prp_get_value(const std::string& str, bool &v_signed, uint32_t &explicit_bits, uint32_t &val);
+bool prp_get_value(const std::string& str_in, std::string& str_out, bool &v_signed, uint32_t &explicit_bits, uint32_t &val);
 
 #endif //LGRAPH_MY_TEST_H
