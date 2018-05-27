@@ -11,6 +11,9 @@
 #include <unordered_map>
 #include <vector>
 
+const std::string READ_MARKER   = "pyrrd__";
+const std::string WRITE_MARKER  = "pyrwt__";
+
 class Pass_dfg_options_pack : public Options_pack {
 public:
   Pass_dfg_options_pack();
@@ -20,8 +23,8 @@ public:
 
 class CF2DF_State {
 public:
-  CF2DF_State() { }
-  CF2DF_State(const CF2DF_State &s) : last_refs(s.last_refs), registers(s.registers) { }
+  CF2DF_State(bool rwf = true) : add_rw_flags(rwf) { }
+  CF2DF_State(const CF2DF_State &s) : last_refs(s.last_refs), registers(s.registers), add_rw_flags(s.add_rw_flags) { }
   CF2DF_State copy() const { return CF2DF_State(*this); }
 
   void update_reference(const std::string &v, Index_ID n) { last_refs[v] = n; }
@@ -31,9 +34,12 @@ public:
 
   void add_register(const std::string &v, Index_ID n) { registers[v] = n; }
 
+  bool rw_flags() const { return add_rw_flags; }
+
 private:
   std::unordered_map<std::string, Index_ID> last_refs;
   std::unordered_map<std::string, Index_ID> registers;
+  bool add_rw_flags;
 };
 
 const char REGISTER_MARKER = '@';
@@ -101,6 +107,18 @@ private:
   Index_ID resolve_phi_branch(LGraph *dfg, CF2DF_State *parent, CF2DF_State *branch, const std::string &variable);
   void attach_outputs(LGraph *dfg, CF2DF_State *state);
 
+  void add_read_marker(LGraph *dfg, CF2DF_State *state, const std::string &v) { assign_to_true(dfg, state, read_marker(v)); }
+  std::string read_marker(const std::string &v) { return READ_MARKER + v; }
+  void add_write_marker(LGraph *dfg, CF2DF_State *state, const std::string &v) { assign_to_true(dfg, state, write_marker(v)); }
+  std::string write_marker(const std::string &v) { return WRITE_MARKER + v; }
+
+  void assign_to_true(LGraph *dfg, CF2DF_State *state, const std::string &v);
+
+  bool reference_changed(const CF2DF_State *parent, const CF2DF_State *branch, const std::string &v) {
+    if (!parent->has_reference(v)) return true;
+    return parent->get_reference(v) != branch->get_reference(v);
+  }
+
   bool is_register(const std::string &v) { return v[0] == REGISTER_MARKER; }
   bool is_input(const std::string &v) { return v[0] == INPUT_MARKER; }
   bool is_output(const std::string &v) { return v[0] == OUTPUT_MARKER; }
@@ -111,6 +129,7 @@ private:
   Index_ID create_output(LGraph *g, CF2DF_State *state, const std::string &var_name);
   Index_ID create_private(LGraph *g, CF2DF_State *state, const std::string &var_name);
   Index_ID default_constant(LGraph *g, CF2DF_State *state);
+  Index_ID true_constant(LGraph *g, CF2DF_State *state);
 };
 
 #endif
