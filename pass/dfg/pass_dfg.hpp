@@ -20,6 +20,18 @@ public:
 
 class CF2DF_State {
 public:
+  CF2DF_State() { }
+  CF2DF_State(const CF2DF_State &s) : last_refs(s.last_refs), registers(s.registers) { }
+  CF2DF_State copy() const { return CF2DF_State(*this); }
+
+  void update_reference(const std::string &v, Index_ID n) { last_refs[v] = n; }
+  Index_ID get_reference(const std::string &v) const { return last_refs.at(v); }
+  bool has_reference(const std::string &v) const { return last_refs.find(v) != last_refs.end(); }
+  const std::unordered_map<std::string, Index_ID> &references() const { return last_refs; }
+
+  void add_register(const std::string &v, Index_ID n) { registers[v] = n; }
+
+private:
   std::unordered_map<std::string, Index_ID> last_refs;
   std::unordered_map<std::string, Index_ID> registers;
 };
@@ -43,27 +55,51 @@ protected:
 
 private:
   Index_ID                 find_root(const LGraph *cfg);
+  void                     process_cfg(     LGraph *dfg,
+                                            const LGraph *cfg,
+                                            CF2DF_State *state,
+                                            Index_ID top_node);
+
   void                     process_node(    LGraph *dfg,
                                             const LGraph *cfg,
                                             CF2DF_State *state,
                                             Index_ID node);
+
   void                     process_assign(  LGraph *dfg,
                                             const LGraph *cfg,
                                             CF2DF_State *state,
                                             const CFG_Node_Data &data,
                                             Index_ID node );
+
   void                     process_if(      LGraph *dfg,
                                             const LGraph *cfg,
                                             CF2DF_State *state,
                                             const CFG_Node_Data &data,
                                             Index_ID node );
+
   std::vector<Index_ID>    process_operands(LGraph *dfg,
                                             const LGraph *cfg,
                                             CF2DF_State *state,
                                             const CFG_Node_Data &data,
                                             Index_ID node );
-  
+
+  void                     add_phis(        LGraph *dfg,
+                                            const LGraph *cfg,
+                                            CF2DF_State *parent,
+                                            CF2DF_State *tstate,
+                                            CF2DF_State *fstate,
+                                            Index_ID condition);
+
+  void                     add_phi(         LGraph *dfg,
+                                            CF2DF_State *parent,
+                                            CF2DF_State *tstate,
+                                            CF2DF_State *fstate,
+                                            Index_ID condition,
+                                            const std::string &variable);
+
   Index_ID get_child(const LGraph *cfg, Index_ID node);
+  Index_ID resolve_phi_branch(LGraph *dfg, CF2DF_State *parent, CF2DF_State *branch, const std::string &variable);
+  void attach_outputs(LGraph *dfg, CF2DF_State *state);
 
   bool is_register(const std::string &v) { return v[0] == REGISTER_MARKER; }
   bool is_input(const std::string &v) { return v[0] == INPUT_MARKER; }
