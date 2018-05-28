@@ -23,7 +23,7 @@ class get_pybind_include(object):
 
 ext_modules = [
     Extension(
-        'python_example2',
+        'lgraph',
         ['src/main.cpp'],
         include_dirs=[
             # Path to pybind11 headers
@@ -90,7 +90,7 @@ class BuildExt(build_ext):
         build_ext.build_extensions(self)
 
 setup(name='lgraph',
-      version='0.1.5',
+      version=__version__,
       description='LiveGraph for synthesis and Simulation',
       url='https://github.com/masc-ucsc/lgraph',
       author='MASC Group',
@@ -101,4 +101,8 @@ setup(name='lgraph',
           ],
       python_requires='>=3',
       packages=['lgraph'],
-      zip_safe=False)
+      ext_modules=ext_modules,
+      install_requires=['pybind11>=2.2'],
+      cmdclass={'build_ext': BuildExt},
+      zip_safe=False,
+)
