@@ -5,7 +5,6 @@
 #include "integer.hpp"
 #include <string>
 
-namespace Pyrope {
 class Overflow_Pool {
 public:
   Overflow_Pool(const std::string &path) : pool(path, "_ofp") {}
@@ -33,6 +32,5 @@ public:
 private:
   Char_Array<pyrsize> pool;
 };
-} // namespace Pyrope
 
 #endif
