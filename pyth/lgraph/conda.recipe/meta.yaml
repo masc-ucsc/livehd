@@ -1,5 +1,5 @@
 package:
-  name: python_example
+  name: lgraph
   version: {{ environ.get('GIT_DESCRIBE_TAG', 'dev') }}
 
 build:
@@ -25,7 +25,7 @@ requirements:
 
 test:
   imports:
-    - python_example
+    - lgraph
 
 about:
   summary: An example project built with pybind11.
