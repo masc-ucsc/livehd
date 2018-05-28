@@ -200,17 +200,19 @@ void lef_parsing(Tech_library *tlib, std::string lef_file_name) {
   const char *lef_file = lef_file_name.c_str();
   int         res;
   FILE *      fin;
-  //char* userData = NULL; //this is an example of userData, but I will not use this, in my case, the userData will be a data structure for lef information hierarchy
   lefrInit(); //initialize the reader, This routine must be called first
+
   fin = fopen(lef_file, "r");
   if(fin == NULL)
     std::cout << "Couldn't open input file" << std::endl;
+
   lefrSetMacroBeginCbk(lef_macro_begin_cb);
   lefrSetMacroCbk(lef_macro_cb);
   lefrSetPinCbk(lef_pin_cb);
   lefrSetLayerCbk(lef_layer_cb);
   lefrSetViaCbk(lef_via_cb);
   lefrReset();
+
   res = lefrRead(fin, lef_file, (void *)tlib); //Tech_file object is your userData, pass pointer of it into lefrRead(), and it will return as a argument in your user-defined callback routine
   fclose(fin);
 }
