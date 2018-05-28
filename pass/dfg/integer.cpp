@@ -1,9 +1,4 @@
 #include "integer.hpp"
-using Pyrope::Integer;
-using Pyrope::pyrchunk;
-using Pyrope::pyrint;
-using Pyrope::pyrsize;
-
 #include "exception.hpp"
 
 #include <cassert>
@@ -227,7 +222,7 @@ pyrsize Integer::highest_set_bit() const {
     }
   }
 
-  throw Pyrope::Logic_Error("highest_set_bit() called on 0");
+  throw Logic_Error("highest_set_bit() called on 0");
 }
 
 string Integer::x_string() const {
@@ -256,9 +251,9 @@ int Integer::cmp(const Integer &other) const {
   return 0;
 }
 
-bool Pyrope::operator>(const Integer &i1, const Integer &i2) {
+bool operator>(const Integer &i1, const Integer &i2) {
   return i1.cmp(i2) > 0;
 }
-bool Pyrope::operator<(const Integer &i1, const Integer &i2) {
+bool operator<(const Integer &i1, const Integer &i2) {
   return i1.cmp(i2) < 0;
 }

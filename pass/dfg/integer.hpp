@@ -5,7 +5,6 @@
 #include <cstring>
 #include <string>
 
-namespace Pyrope {
 typedef size_t   pyrsize;
 typedef uint32_t pyrchunk;
 typedef long     pyrint; // IMPORTANT: this must be larger than Char_Array_ID, defined in char_array.hpp, which is uint32_t
@@ -75,6 +74,5 @@ protected:
 
 bool operator>(const Integer &i1, const Integer &i2);
 bool operator<(const Integer &i1, const Integer &i2);
-} // namespace Pyrope
 
 #endif

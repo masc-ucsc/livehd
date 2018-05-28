@@ -1,12 +1,12 @@
 #include "type.hpp"
-#include "context.hpp"
+#include "symbol_table.hpp"
 #include "exception.hpp"
 
 #include <string>
 using std::string;
 
-namespace Pyrope {
-Context *Type::context = nullptr;
+Symbol_Table *Type::context = nullptr;
+const Type Type::undefined = Type();
 
 void Type::merge(const Type &other) {
   if(get_name() == UNDEF) {
@@ -225,4 +225,3 @@ bool operator==(const Type &t1, const Type &t2) {
 }
 
 bool operator!=(const Type &t1, const Type &t2) { return !(t1 == t2); }
-} // namespace Pyrope

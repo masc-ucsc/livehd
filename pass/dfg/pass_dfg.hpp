@@ -6,6 +6,7 @@
 #include "pass.hpp"
 #include "cfg_node_data.hpp"
 #include "lgedge.hpp"
+#include "symbol_table.hpp"
 
 #include <string>
 #include <unordered_map>
@@ -27,18 +28,18 @@ public:
   CF2DF_State(const CF2DF_State &s) : last_refs(s.last_refs), registers(s.registers), add_rw_flags(s.add_rw_flags) { }
   CF2DF_State copy() const { return CF2DF_State(*this); }
 
-  void update_reference(const std::string &v, Index_ID n) { last_refs[v] = n; }
+  void update_reference(const std::string &v, Index_ID n);
   Index_ID get_reference(const std::string &v) const { return last_refs.at(v); }
   bool has_reference(const std::string &v) const { return last_refs.find(v) != last_refs.end(); }
   const std::unordered_map<std::string, Index_ID> &references() const { return last_refs; }
 
   void add_register(const std::string &v, Index_ID n) { registers[v] = n; }
-
   bool rw_flags() const { return add_rw_flags; }
 
 private:
   std::unordered_map<std::string, Index_ID> last_refs;
   std::unordered_map<std::string, Index_ID> registers;
+  Symbol_Table table;
   bool add_rw_flags;
 };
 
@@ -128,6 +129,7 @@ private:
   Index_ID create_input(LGraph *g, CF2DF_State *state, const std::string &var_name);
   Index_ID create_output(LGraph *g, CF2DF_State *state, const std::string &var_name);
   Index_ID create_private(LGraph *g, CF2DF_State *state, const std::string &var_name);
+  Index_ID create_node(LGraph *g, CF2DF_State *state, const std::string &v);
   Index_ID default_constant(LGraph *g, CF2DF_State *state);
   Index_ID true_constant(LGraph *g, CF2DF_State *state);
 };
