@@ -310,6 +310,12 @@ int def_track_cb(defrCallbackType_e type, defiTrack *ftrack, defiUserData ud) {
   return 0;
 }
 
+int def_design_cb(defrCallbackType_e c, const char *string, defiUserData ud) {
+  Def_info &dinfo = *((Def_info *)ud);
+  dinfo.mod_name = string;
+  return 0;
+}
+
 int def_row_cb(defrCallbackType_e type, defiRow *frow, defiUserData ud) {
 
   Def_info &dinfo = *((Def_info *)ud);
@@ -346,6 +352,7 @@ void def_parsing(Def_info &dinfo, std::string def_file_name) {
   }
 
 
+  defrSetDesignCbk(def_design_cb);
   defrSetRowCbk(def_row_cb);
   defrSetTrackCbk(def_track_cb);
   defrSetComponentCbk(def_component_cb);
