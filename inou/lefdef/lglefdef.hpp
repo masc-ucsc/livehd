@@ -203,8 +203,10 @@ void lef_parsing(Tech_library *tlib, std::string lef_file_name) {
   lefrInit(); //initialize the reader, This routine must be called first
 
   fin = fopen(lef_file, "r");
-  if(fin == NULL)
-    std::cout << "Couldn't open input file" << std::endl;
+  if(fin == NULL) {
+    console->error("Couldn't open lef input file {}\n",lef_file_name);
+    exit(1);
+  }
 
   lefrSetMacroBeginCbk(lef_macro_begin_cb);
   lefrSetMacroCbk(lef_macro_cb);
@@ -335,11 +337,14 @@ void def_parsing(Def_info &dinfo, std::string def_file_name) {
   const char *def_file = def_file_name.c_str();
   int         res;
   FILE *      fin;
-  //char* userData = NULL; //this is an example of userData, but I will not use this, in my case, the userData will be a data structure for def information hierarchy
   defrInit(); //initialize the reader, This routine must be called first
+
   fin = fopen(def_file, "r");
-  if(fin == NULL)
-    std::cout << "Couldn't open input file" << std::endl;
+  if(fin == NULL) {
+    console->error("Couldn't open def input file {}\n",def_file_name);
+    exit(1);
+  }
+
 
   defrSetRowCbk(def_row_cb);
   defrSetTrackCbk(def_track_cb);

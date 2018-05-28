@@ -117,6 +117,7 @@ SET_TESTS_PROPERTIES(basic_inou_rand_json PROPERTIES DEPENDS core_done)
 add_test(NAME basic_inou_yosys         COMMAND  ${PROJECT_SOURCE_DIR}/test/yosys.sh)
 add_test(NAME basic_inou_synth_yosys   COMMAND  ${PROJECT_SOURCE_DIR}/test/synth.sh -s${PROJECT_SOURCE_DIR})
 add_test(NAME basic_inou_abc           COMMAND  ${PROJECT_SOURCE_DIR}/test/abc.sh)
+add_test(NAME basic_inou_lefdef        COMMAND  ${PROJECT_SOURCE_DIR}/test/lefdef.sh -s${PROJECT_SOURCE_DIR})
 add_test(NAME basic_lgopt_dce          COMMAND  ${PROJECT_SOURCE_DIR}/test/lgopt_dce.sh)
 add_test(NAME basic_lgopt_gvn_pre      COMMAND  ${PROJECT_SOURCE_DIR}/test/lgopt_gvn_pre.sh)
 
