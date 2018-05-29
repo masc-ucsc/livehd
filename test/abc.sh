@@ -20,7 +20,7 @@ for input in ${inputs[@]}
 do
 
   base=${input%.*}
-  rm -rf ./lgdb/ ./logs ./yosys-test *.json *.v *.blif
+  rm -rf ./lgdb/ ./logs ./yosys-test ./*.json ./*.v ./*.blif
 
   if ! ${YOSYS} --techmap ${input_root}/${input}
   then
@@ -40,15 +40,15 @@ do
     exit 1
   fi
 
-  if [[ $(${CHECK} golden.blif abc_output/${base}_post.blif | grep -c 'Successfully matched generated verilog with yosys elaborated verilog file') -eq 1 ]]
+  if [[ $(${CHECK} golden.blif mapped.blif | grep -c 'Successfully matched generated verilog with yosys elaborated verilog file') -eq 1 ]]
   then
-     rm -rf temp.blif
+     rm -rf ./temp.blif
      echo "Successfully matched generated verilog with yosys elaborated verilog file"
   else
-     rm -rf temp.blif
+     rm -rf ./temp.blif
      echo "FAIL: Equivalence check failed"
      exit 1
   fi
 done
-rm -rf *.genlib
+rm -rf ./*.genlib
 exit 0

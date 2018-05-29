@@ -5,7 +5,7 @@ module add_rca_signed
 (
   input              clk,
   input              reset,
-  
+
   input [Bits-1:0]   a,
 	input [Bits-1:0]   b,
 

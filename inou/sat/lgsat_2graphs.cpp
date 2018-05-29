@@ -541,13 +541,13 @@ int main(int argc, const char **argv) {
   satisfiable = sat.solve(modelVars, modelValues, sat_result_formula);
   print_results(satisfiable, modelValues);
 
-  /*    
+  /*
   Options::setup(argc, argv);
   //ezMiniSAT sat;
   //int lgraph_no=2;
   //int no=1;
-  
-  
+
+
     // Options::setup(argc, argv);
     //std::cout<<"Enter lgraph no: "<<no<<" and enter the command below"<<std::endl;
   std::vector<Destination>dest_list_1(313) ;
@@ -557,7 +557,7 @@ int main(int argc, const char **argv) {
    int sat_result_formula_1=0;
 
   Inou_trivial trivial_1;
- 
+
   Options::setup_lock();
 
   std::vector<LGraph *> rvec_1 = trivial_1.generate();
@@ -577,7 +577,7 @@ fprintf(stderr,"digraph fwd_%s {\n", g->get_name().c_str());
         fprintf(stderr,"node%d[label =\"%d %s\"];\n",(int)idx, (int)idx, g->node_type_get(idx).get_name().c_str());
     }
 
-     
+
     //lima is gifted from here..........!!!!
     for(auto idx:g->backward()) {
       //nodeA->nodeB
@@ -585,8 +585,8 @@ fprintf(stderr,"digraph fwd_%s {\n", g->get_name().c_str());
         fprintf(stderr,"node%d -> node%d TSTbck\n"
 		, (int)c.get_idx(), (int)idx);
 	// **************************************************
-	int node_A_ID= (int)c.get_idx();      
-	int node_parent_ID=node_A_ID; 
+	int node_A_ID= (int)c.get_idx();
+	int node_parent_ID=node_A_ID;
 	int node_B_ID=(int)idx;
         //A-->B
 	dest_list_1[node_A_ID].set_parent_ID(node_B_ID);
@@ -610,15 +610,15 @@ fprintf(stderr,"digraph fwd_%s {\n", g->get_name().c_str());
        if(g->is_graph_input(node_A_ID)) {
 	if(dest_list_1[node_B_ID].Get_Child_Cnt()==1||dest_list[node_B_ID].Get_Child_sat_Cnt()==1)
  	        dest_list_1[node_B_ID].set_is_operator_2nd_input(1);
-	  
+
 	 }
 
-       
+
        //SAT child cnt++ if 2 childs : operator and input
 
-       
+
        //int cur_parent_for_child=dest_list[node_A_ID].get_parent_ID();
-	 
+
        if(g->is_graph_input(node_A_ID)&& dest_list_1[node_B_ID].get_is_operator_1st_input())
 	 {      std::string input_A_string= g->get_graph_input_name(node_A_ID);
 
@@ -626,26 +626,26 @@ fprintf(stderr,"digraph fwd_%s {\n", g->get_name().c_str());
 	         dest_list_1[node_B_ID].Increment_Child_Sat();
 	         dest_list_1[node_B_ID].Set_2nd_Operand(input_A_string);
 		 dest_list_1[node_B_ID].set_is_input_2nd_operand_sat();
-		 
+
 	 }
 
 
 
-       
+
         //TODO sat recursive
 	if(g->is_graph_input(node_A_ID)) {
-         
+
 	  //A-->B
 	  std::string input_A= g->get_graph_input_name(node_A_ID);
 	   modelVars_1.push_back(sat.VAR(input_A));
 	  int operand_type_B=g->node_type_get(idx).op;
-	 
+
 	  int cur_parent=0;
 	  int sat_res=0;
 	  dest_list_1[node_B_ID].Increment_and_Add_Child_with_sat(node_B_ID, input_A, sat,operand_type_B );
-	 
+
           if( dest_list_1[node_B_ID].Get_Child_Cnt()==2) {
-	    
+
 	   cur_parent=dest_list_1[node_B_ID].get_parent_ID();
 	   std::cout<<"\n current parent child sat No for parentID:"<<cur_parent<<" is: "<<dest_list[cur_parent].Get_Child_sat_Cnt()<<std::endl;
 
@@ -661,48 +661,48 @@ fprintf(stderr,"digraph fwd_%s {\n", g->get_name().c_str());
 	    dest_list_1[cur_parent].Increment_Child_Sat();
 	    //dest_list[cur_parent].Set_2nd_Operand("SAT_RESULT");
             std::cout<<" GETting SAT RESULT for nodeID: "<< cur_parent<<sat.to_string(sat_res).c_str()<<std::endl;
-	    
+
 	    std::cout<<"\n current parent child sat(1) for "<<cur_parent<<" is :"<<dest_list[cur_parent].Get_Child_sat_Cnt()<<std::endl;
 	      }
-	  } 
+	  }
 	  if(dest_list_1[cur_parent].Get_Child_sat_Cnt()==0) {
 	    sat_res=dest_list_1[node_B_ID].Get_sat_result();//previous SAT_RESULT OF node_id B
 	    // std::cout<<" SAT result is: "<< sat.to_string(sat_res).c_str()<<std::endl;
 	    dest_list_1[cur_parent].Set_1st_Operand_sat(sat_res);
 	    int sat_17_res= dest_list_1[cur_parent].Get_1st_Operand_sat();
 	    std::cout<<" PRINTING 1st input sat for nodeID: "<<cur_parent<< sat.to_string(sat_17_res).c_str()<<std::endl;
-	   
+
 	    dest_list_1[cur_parent].Increment_Child_Sat();
 	     dest_list_1[cur_parent].Set_1st_Operand("SAT_RESULT");
 	    std::cout<<"\n current parent child sat(0) for "<<cur_parent<<" is :"<<dest_list_1[cur_parent].Get_Child_sat_Cnt()<<std::endl;
 
 	    std::cout<<" Set_1st_Operand....SAT_RESULT"<<std::endl;
 
-    
-	 
-	  
+
+
+
           }   //  if( dest_list[node_B_ID].Get_Child_Cnt()==2)
 
 
 	  }
-              	  
+
       	  if( IS_operator(operand_type_B)) {
 	    std::cout<<" Outside Loop Interation ......\n";
 	    int i=1;
 	    std::cout<<" child sat count of nodeID: "<<cur_parent<<" is: "<<dest_list[cur_parent].Get_Child_sat_Cnt()<<std::endl;
-	 
+
 	    while(dest_list_1[cur_parent].Get_Child_sat_Cnt()==2) {
 	      //std::cout<<" Inside Loop Interation ......\n";
 	        std::cout<<" When Current_Parent child sat count is "<<cur_parent<<":"<<dest_list[cur_parent].Get_Child_sat_Cnt()<<std::endl;
 		int  input1=0;
-	      
+
 	       if(dest_list_1[cur_parent].Get_1st_Operand()=="SAT_RESULT") {
 		 std::cout<<" PRINTING SAT_RESULT.............."<<std::endl;
-			 
+
 
 	       input1=dest_list_1[cur_parent].Get_1st_Operand_sat();
 
-								  //std::cout<<" PRINTING SAT_RESULT for node ID"<<cur_parent<<sat.to_string(input1).c_str()<<std::endl;						  
+								  //std::cout<<" PRINTING SAT_RESULT for node ID"<<cur_parent<<sat.to_string(input1).c_str()<<std::endl;
 	       int input2=dest_list_1[cur_parent].Get_2nd_Operand_sat();
 	       int oper_type_B=g->node_type_get(cur_parent).op;
 
@@ -710,7 +710,7 @@ fprintf(stderr,"digraph fwd_%s {\n", g->get_name().c_str());
 	       sat_result_formula_1= dest_list_1[cur_parent].sat_operator_internal(oper_type_B,input1,input2,sat);
 	       dest_list_1[cur_parent].Set_result(sat_result_formula_1);
                //dest_list[cur_parent].Set_1st_Operand("SAT_RESULT");
-	       
+
 		  }
 	       if(dest_list_1[cur_parent].Is_input_2nd_operand_sat())
 
@@ -724,9 +724,9 @@ fprintf(stderr,"digraph fwd_%s {\n", g->get_name().c_str());
 		   sat_result_formula_1= dest_list_1[cur_parent].sat_operator_internal_string_input(oper_type_B_str,input1,input2_str,sat);
 		   dest_list_1[cur_parent].Set_result(sat_result_formula_1);
 
-		   
+
 		 }
-	      
+
 	       cur_parent=dest_list_1[cur_parent].get_parent_ID();
 	       std::cout<<"Before Entering Current-parent child_sat no is "<<cur_parent<<":"<<dest_list_1[cur_parent].Get_Child_sat_Cnt()<<std::endl;
 
@@ -737,7 +737,7 @@ fprintf(stderr,"digraph fwd_%s {\n", g->get_name().c_str());
 		  dest_list_1[cur_parent].Set_1st_Operand_sat(sat_result_formula_1);
 		  dest_list_1[cur_parent].Increment_Child_Sat();
 	      }
-            
+
 
 
                   else { dest_list_1[cur_parent].Set_2nd_Operand_sat(sat_result_formula_1);
@@ -755,15 +755,15 @@ fprintf(stderr,"digraph fwd_%s {\n", g->get_name().c_str());
 
 
 
-		
-               if(dest_list[cur_parent].Get_Child_sat_Cnt()==0) 
+
+               if(dest_list[cur_parent].Get_Child_sat_Cnt()==0)
 		 {dest_list[cur_parent].Set_1st_Operand_sat(sat_result_formula_1);
 		   std::cout<<" Setting SAT result(0) :"<< sat.to_string(sat_result_formula_1).c_str()<<std::endl;
 		   dest_list[cur_parent].Increment_Child_Sat();
 		  //std::cout<<"Inside Current-parent child_sat no is "<<cur_parent<<":"<<dest_list[cur_parent].Get_Child_sat_Cnt()<<std::endl;
 		 }
-		   
-	      
+
+
 		  i++;
 	    }//while
 

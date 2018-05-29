@@ -5,7 +5,7 @@ module add_rca
 (
   input              clk,
   input              reset,
-  
+
   input [Bits-1:0]   a,
 	input [Bits-1:0]   b,
 
@@ -32,7 +32,7 @@ module add_rca
   endgenerate
 
   always @(*) begin
-   carry = c[Bits]; 
+   carry = c[Bits];
   end
 
 /*verilator lint_on UNOPTFLAT*/

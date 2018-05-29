@@ -19,11 +19,11 @@ int main(int argc, char **argv) {
   }
 
   int16_t  num = atoi(argv[1]);
-  int ctz = 0; 
+  int ctz = 0;
   int ones = 0;
 
   int clz = __builtin_clz(num);
-  printf("size is %d %d (%d)\n", round_power2(num), clz, 1<<(32-clz-1));  
+  printf("size is %d %d (%d)\n", round_power2(num), clz, 1<<(32-clz-1));
 
   return 0;
 }

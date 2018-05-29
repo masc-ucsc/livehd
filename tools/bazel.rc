@@ -1,0 +1,4 @@
+
+build --cxxopt="-std=c++17" --cxxopt="-Wno-unknown-pragmas"
+common --color=yes
+

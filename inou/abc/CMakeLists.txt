@@ -25,7 +25,7 @@ ADD_CUSTOM_COMMAND(
         COMMENT "Building libabc.a"
 )
 
-ADD_LIBRARY(inou_abc ${inou_abc_SOURCE} ${inou_abc_HEADER} dump_aig.cpp abc_cell.cpp abc_cell.hpp dump_lgraph.cpp)
+ADD_LIBRARY(inou_abc ${inou_abc_SOURCE} ${inou_abc_HEADER})
 add_dependencies(inou_abc libabc)
 TARGET_LINK_LIBRARIES(inou_abc core ${CMAKE_SOURCE_DIR}/subs/yosys/abc/libabc.a)
 TARGET_LINK_LIBRARIES(inou_abc -Wl,-Bstatic ${BOOST_LIBS} -Wl,-Bdynamic -lrt -lpthread ${REQUIRED_LIBS})

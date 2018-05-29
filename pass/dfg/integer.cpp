@@ -1,10 +1,5 @@
-#include "Integer.hpp"
-using Pyrope::Integer;
-using Pyrope::pyrchunk;
-using Pyrope::pyrint;
-using Pyrope::pyrsize;
-
-#include "Exception.hpp"
+#include "integer.hpp"
+#include "exception.hpp"
 
 #include <cassert>
 #include <iomanip>
@@ -27,14 +22,12 @@ Integer::Integer(pyrint value) {
 }
 
 Integer::Integer(const Integer &other)
-    : bits(other.get_bits())
-    , data(new pyrchunk[get_array_size()]) {
+    : bits(other.get_bits()), data(new pyrchunk[get_array_size()]) {
   memcpy(data, other.const_data_ptr(), sizeof(pyrchunk) * get_array_size());
 }
 
 Integer::Integer(pyrint value, pyrsize bits)
-    : bits(bits)
-    , data(new pyrchunk[get_array_size()]) {
+    : bits(bits), data(new pyrchunk[get_array_size()]) {
   data[0] = (pyrchunk)value;
 
   if(value > PINT_CHUNK_MAX && get_array_size() > 1)
@@ -229,7 +222,7 @@ pyrsize Integer::highest_set_bit() const {
     }
   }
 
-  throw Pyrope::LogicError("highest_set_bit() called on 0");
+  throw Logic_Error("highest_set_bit() called on 0");
 }
 
 string Integer::x_string() const {
@@ -258,9 +251,9 @@ int Integer::cmp(const Integer &other) const {
   return 0;
 }
 
-bool Pyrope::operator>(const Integer &i1, const Integer &i2) {
+bool operator>(const Integer &i1, const Integer &i2) {
   return i1.cmp(i2) > 0;
 }
-bool Pyrope::operator<(const Integer &i1, const Integer &i2) {
+bool operator<(const Integer &i1, const Integer &i2) {
   return i1.cmp(i2) < 0;
 }

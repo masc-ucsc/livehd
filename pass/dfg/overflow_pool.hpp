@@ -1,11 +1,10 @@
 #ifndef OVERFLOW_POOL_H_
 #define OVERFLOW_POOL_H_
 
-#include "Integer.hpp"
-#include "lgraph/core/char_array.hpp"
+#include "char_array.hpp"
+#include "integer.hpp"
 #include <string>
 
-namespace Pyrope {
 class Overflow_Pool {
 public:
   Overflow_Pool(const std::string &path) : pool(path, "_ofp") {}
@@ -33,6 +32,5 @@ public:
 private:
   Char_Array<pyrsize> pool;
 };
-} // namespace Pyrope
 
 #endif

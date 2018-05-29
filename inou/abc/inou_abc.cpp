@@ -70,6 +70,8 @@ void Inou_abc::generate(std::vector<const LGraph *> &out) {
       from_abc(Mapped_Lgraph, out[0], to_abc(out[0]));
       Mapped_Lgraph->sync();
       Mapped_Lgraph->print_stats();
+      Inou_abc blif_dumper;
+      blif_dumper.dump_blif(Mapped_Lgraph, "mapped.blif");
     }
   }
 }
@@ -371,8 +373,16 @@ void Inou_abc::recursive_find(const LGraph *g, const Edge *input, topology_info 
     if(opack.verbose == "true")
       fmt::print("\t NodeID:{},bit [{}:{}] portid : {} \n",
                  this_idx, 0, 0, input->get_out_pin().get_pid());
-    index_offset info = {this_idx, input->get_out_pin().get_pid(), {0, 0}};
-    pid.push_back(info);
+    const Tech_cell * tcell      = g->get_tlibrary()->get_const_cell(g->tmap_id_get(this_idx));
+    const std::string tcell_name = tcell->get_name();
+    if(tcell_name == "$_BUF_") {
+      for(const auto &pre_inp : g->inp_edges(this_idx)) {
+        recursive_find(g, &pre_inp, pid, bit_addr);
+      }
+    } else {
+      index_offset info = {this_idx, input->get_out_pin().get_pid(), {0, 0}};
+      pid.push_back(info);
+    }
   } else if(this_node_type == Join_Op) {
     int                       width      = 0;
     int                       width_pre  = 0;
@@ -449,7 +459,9 @@ bool Inou_abc::is_techmap(const LGraph *g) {
       if(is_latch(tcell)) {
         latch_id.push_back(idx);
       } else {
-        combinational_id.push_back(idx);
+        auto tcell_name = tcell->get_name();
+        if(tcell_name != "$_BUF_")
+          combinational_id.push_back(idx);
       }
       break;
     }

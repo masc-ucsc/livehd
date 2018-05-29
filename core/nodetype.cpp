@@ -196,13 +196,13 @@ uint32_t LGraph_Node_Type::node_value_get(Index_ID nid) const {
 }
 
 void LGraph_Node_Type::node_const_type_set(Index_ID nid, const std::string & value
-#ifdef DEBUG
+#ifndef NDEBUG
                                            ,
                                            bool enforce_bits
 #endif
 ) {
 
-#ifdef DEBUG
+#ifndef NDEBUG
   if(enforce_bits)
     for(auto &digit : value) {
       if(digit != '0' && digit != '1' && digit != 'z' && digit != 'x')

@@ -5,9 +5,10 @@
 #ifndef LGRAPH_MY_TEST_H
 #define LGRAPH_MY_TEST_H
 
-#include "inou.hpp"
-#include "options.hpp"
+#include "core/inou.hpp"
+#include "core/options.hpp"
 #include "rapidjson/document.h"
+
 #include <string>
 
 class Inou_json_options_pack : public Options_pack {
@@ -29,9 +30,9 @@ protected:
 
   bool is_int(std::string s);
 
-  void from_json(LGraph *g, rapidjson::Document& document);
+  void from_json(LGraph *g, rapidjson::Document &document);
 
-  void to_json(const LGraph *g, const std::string& filename) const;
+  void to_json(const LGraph *g, const std::string &filename) const;
 
 public:
   Inou_json();
