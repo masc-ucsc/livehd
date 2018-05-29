@@ -71,7 +71,7 @@ const Edge &Edge::get_reverse_for_deletion() const {
 
   Index_ID out_pid = get_out_pin().get_pid();
   Index_ID inp_pid = get_inp_pin().get_pid();
-#ifdef DEBUG
+#ifndef NDEBUG
   console->info("get_reverse {} {} {} node_master:{} inp_master:{} get_idx:{} io:{}", ptr_idx, ptr_nid, out_pid, ptr_node->get_root_nid(), ptr_inp->get_root_nid(), get_idx(), ptr_inp->is_graph_io());
   ptr_inp->dump();
   fmt::print("\n");
@@ -79,7 +79,7 @@ const Edge &Edge::get_reverse_for_deletion() const {
   do {
     const Edge *eit;
     if (!input)
-      eit = find_edge(ptr_inp->get_input_begin() , ptr_inp->get_input_end(), ptr_nid, inp_pid, out_pid);
+      eit = find_edge(ptr_inp->get_input_begin() , ptr_inp->get_input_end(), ptr_nid, out_pid, inp_pid);
     else
       eit = find_edge(ptr_inp->get_output_begin(), ptr_inp->get_output_end(), ptr_nid, inp_pid, out_pid);
 

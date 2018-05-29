@@ -88,12 +88,14 @@ void Inou_abc::gen_comb_cell_from_abc(LGraph *new_graph, const LGraph *old_graph
       Mio_Pin_t *pGatePin;
 
       std::string gate_name(Mio_GateReadName(pGate));
+
       for(pGatePin = Mio_GateReadPins(pGate), i = 0; pGatePin; pGatePin = Mio_PinReadNext(pGatePin), i++) {
         std::string fanin_pin_name((Mio_PinReadName(pGatePin)));
         std::string fanin_name((Abc_ObjName(Abc_ObjFanin(pObj, i))));
       }
-      std::string fanout_pin_name((Mio_GateReadOutName(pGate)));
-      std::string fanout_name((Abc_ObjName(Abc_ObjFanout0(pObj))));
+      //std::string fanout_pin_name((Mio_GateReadOutName(pGate)));
+      //std::string fanout_name((Abc_ObjName(Abc_ObjFanout0(pObj))));
+      //std::string gate_instance_name(Abc_ObjName(pObj));
 
       cell_idx = new_graph->create_node().get_nid();
       new_graph->set_bits(cell_idx, 1);
@@ -164,7 +166,6 @@ void Inou_abc::gen_latch_from_abc(LGraph *new_graph, const LGraph *old_graph, Ab
     new_graph->node_tmap_set(cell_idx, tcell->get_id());
     cell2id[pNet]          = cell_idx;
     cell_out_pid[cell_idx] = 0;
-    new_graph->set_node_wirename(cell_idx, latch_name.c_str());
     new_graph->set_bits(cell_idx, 1);
   }
 }
@@ -237,7 +238,7 @@ void Inou_abc::gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, A
         if(old_graph->node_type_get(node_idx).op == U32Const_Op) {
           val = old_graph->node_value_get(node_idx);
         }
-        connect_constant(new_graph, val, width, Node_Pin(new_memory_idx, old_inp_pid,true));
+        connect_constant(new_graph, val, width, Node_Pin(new_memory_idx, old_inp_pid, true));
       } else if(old_inp_pid == LGRAPH_MEMOP_CLK) {
         for(const auto &sg : skew_group_map) {
           if(sg.second.find(old_idx) != sg.second.end()) {
@@ -283,8 +284,6 @@ void Inou_abc::gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, A
         index_offset key                   = {new_memory_idx, out_pid, {offset, offset}};
         cell2id[memory_output_map[key]]    = pseudo_pin.get_nid();
         cell_out_pid[pseudo_pin.get_nid()] = 0;
-        //fmt::print("generated memory output idx : {} name is {}\n",
-        //           pseudo_pin.get_nid(),Abc_ObjName(memory_output_map[key]));
       }
     }
   }
@@ -388,7 +387,9 @@ void Inou_abc::conn_latch(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t 
     new_graph->add_edge(Node_Pin(cell2id[pNode], cell_out_pid[cell2id[pNode]]++, false),
                         Node_Pin(latch_new_idx, tcell->get_pin_id("D"), true));
 
-    std::string flop_name(new_graph->get_node_wirename(latch_new_idx));
+    Abc_Obj_t * pNet = Abc_ObjFanout0(Abc_ObjFanout0(pLatch));
+    std::string latch_name(Abc_ObjName(pNet));
+    std::string flop_name(latch_name);
     Index_ID    latch_old_idx = latchname2id[flop_name];
     for(const auto &sg : skew_group_map) {
       if(sg.second.find(latch_old_idx) != sg.second.end()) {
@@ -404,6 +405,15 @@ void Inou_abc::conn_latch(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t 
                             Node_Pin(latch_new_idx, tcell->get_pin_id("R"), true));
       }
     }
+
+    std::regex  trap("(.*)_(%r)(.*)");
+    std::smatch flop_name_info;
+    std::regex_search(latch_name, flop_name_info, trap);
+    std::string reg_base_name(flop_name_info[1]);
+    std::string reg_offset(flop_name_info[3]);
+    std::string reg_name = reg_offset.empty() ? reg_base_name : reg_base_name + "[" + (reg_offset.substr(1, reg_offset.length())) + "]";
+
+    new_graph->set_node_wirename(latch_new_idx, reg_name.c_str());
   }
 }
 
@@ -470,7 +480,7 @@ Node_Pin Inou_abc::create_pick_operator(LGraph *g, const Node_Pin &driver, int o
   g->node_type_set(pick_nid, Pick_Op);
   g->set_bits(pick_nid, width);
   g->add_edge(driver, Node_Pin(pick_nid, 0, true));
-  connect_constant(g, offset, 32, Node_Pin(pick_nid, 1,true));
+  connect_constant(g, offset, 32, Node_Pin(pick_nid, 1, true));
   picks.insert(std::make_pair(pick_id, Node_Pin(pick_nid, 0, false)));
   return picks.at(pick_id);
 }

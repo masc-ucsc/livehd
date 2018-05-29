@@ -1,4 +1,3 @@
-# Needed for the LLVM graph pass
 SET(CMAKE_C_COMPILER   "/usr/bin/clang")
 SET(CMAKE_CXX_COMPILER "/usr/bin/clang++")
 
@@ -91,6 +90,7 @@ ADD_SUBDIRECTORY(pass/lgopt_dce)
 ADD_SUBDIRECTORY(pass/lgopt_gvn_pre)
 ADD_SUBDIRECTORY(pass/lgopt_fluid)
 ADD_SUBDIRECTORY(pass/droute)
+ADD_SUBDIRECTORY(pass/dfg)
 ADD_SUBDIRECTORY(inou/lefdef)
 ADD_SUBDIRECTORY(inou/rand)
 ADD_SUBDIRECTORY(inou/yosys)

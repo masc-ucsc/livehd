@@ -55,7 +55,6 @@ int lef_pin_cb(lefrCallbackType_e c, lefiPin *fpin, lefiUserData ud) { //fpin me
 
   Tech_cell &tmp_cell = tlib->get_vec_cell_types()->back();
 
-
   Tech_cell::Direction dir = Tech_cell::Direction::input;
   if(fpin->hasDirection()) {
     if(strcmp(fpin->direction(), "INPUT") == 0)
@@ -67,7 +66,7 @@ int lef_pin_cb(lefrCallbackType_e c, lefiPin *fpin, lefiUserData ud) { //fpin me
     else
       assert(false); // Unknown option
   }
-  tmp_cell.add_pin(fpin->name(),dir);
+  tmp_cell.add_pin(fpin->name(), dir);
   Tech_cell::Pin &tmp_pin = tmp_cell.get_vec_pins()->back();
 
   if(fpin->hasUse())

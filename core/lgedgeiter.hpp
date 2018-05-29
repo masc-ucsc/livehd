@@ -7,6 +7,9 @@
 #include <vector>
 
 #include "sparsehash/dense_hash_map"
+#include "sparsehash/sparse_hash_set"
+
+#include <set>
 
 #include "lgraph.hpp"
 #include "lgraphbase.hpp"
@@ -89,6 +92,7 @@ public:
 
 typedef google::dense_hash_map<Index_ID, int32_t> Frontier_type;
 typedef std::vector<Index_ID>                     Pending_type;
+typedef google::sparse_hash_set<Index_ID>         Deadcode_type;
 
 class Edge_iterator_base {
 protected:
@@ -105,24 +109,31 @@ public:
   virtual void    add_node(Index_ID nid) = 0;
   const Index_ID &operator*() const { return nid; }
 
-  void set_next_nid() {
-    if(pending->empty()) {
-      bool pushed = false;
-      for(auto &it : *frontier) {
-        if(it.second > 0) {
-          if(g->node_type_get(it.first).is_pipelined()) {
-            pending->push_back(it.first);
-            it.second = -1; // Mark as pipelined, but keep not to visit twice
-            pushed    = true;
-          }
+  bool check_frontier() {
+    bool pushed = false;
+    for(auto &it : *frontier) {
+      if(it.second > 0) {
+        if(g->node_type_get(it.first).is_pipelined()) {
+          pending->push_back(it.first);
+          it.second = -1; // Mark as pipelined, but keep not to visit twice
+          pushed    = true;
         }
       }
-      if(!pushed) {
+    }
+    if(!pushed) {
+      return false;
+    }
+    return true;
+  }
+
+  void set_next_nid() {
+    if(pending->empty())
+      if(!check_frontier()) {
         nid = 0; // We are done
         return;
       }
-    }
-#if 1
+
+#if DEBUG
     // Benchmark pending and frontier sizes
     static size_t p_max_size = 0;
     static size_t f_max_size = 0;
@@ -250,6 +261,8 @@ public:
 class Backward_edge_iterator {
 public:
   class CBackward_edge_iterator : public Edge_iterator_base {
+  private:
+    Deadcode_type global_visited;
   public:
     CBackward_edge_iterator(const Index_ID _nid, const LGraph *_g, Frontier_type *_frontier, Pending_type *_pending)
         : Edge_iterator_base(_nid, _g, _frontier, _pending) {
@@ -263,11 +276,46 @@ public:
       return nid != 0;
     };
 
+
+    //find nodes not connected to output that are preventing the propagation
+    //only use in case the backward fails
+    void find_dce_nodes() {
+      Pending_type  discovered;
+      std::set<Index_ID> dc_visited;
+      std::set<Index_ID> floating;
+      //floating.set_empty_key(0);     // 0 is not allowed as key
+      //floating.set_deleted_key(0); // 128 is not allowed as key (4KB aligned)
+
+      for(const auto& _idx : *frontier) {
+        Index_ID idx = _idx.first;
+        floating.insert(idx);
+        discovered.push_back(idx);
+        while(discovered.size() > 0) {
+          Index_ID current = discovered.back();
+          discovered.pop_back();
+          dc_visited.insert(current);
+          for(const auto& c : g->out_edges(current)) {
+            floating.erase(current);
+
+            if(dc_visited.find(c.get_inp_pin().get_nid()) == dc_visited.end() &&
+                global_visited.find(c.get_inp_pin().get_nid()) == global_visited.end()) {
+              discovered.push_back(c.get_inp_pin().get_nid());
+              floating.insert(c.get_inp_pin().get_nid());
+            }
+          }
+        }
+      }
+
+      if(floating.size() > 0) {
+        console->warn("graph {} is not DCE free, please run DCE pass\n", g->get_name());
+        for(const auto& idx : floating) {
+          pending->push_back(idx);
+        }
+      }
+    }
+
     void add_node(Index_ID idx) {
       assert(g->get_node_int(idx).is_master_root());
-
-      // FIXME: Backwards is wrong. It should have a "visited" and "pending" no frontier. It could
-      // be a BFS (beamer) traversing backwards and use the visited to handle loops
 
       for(const auto &c : g->inp_edges(idx)) {
         const auto &dst_node        = g->get_node_int(c.get_idx());
@@ -298,7 +346,11 @@ public:
     CBackward_edge_iterator operator++() {
       assert(nid); // Do not call ++ after end
       CBackward_edge_iterator i(nid, g, frontier, pending);
+      global_visited.insert(nid);
       add_node(nid);
+      if(pending->empty()) {
+        find_dce_nodes();
+      }
       set_next_nid();
       return i;
     };
@@ -330,7 +382,8 @@ public:
         pending.push_back(it.second.nid);
     }
     for(const auto &it : g->outputs2node) {
-      pending.push_back(it.second.nid);
+      if(!g->get_node_int(it.second.nid).has_outputs()) //do not add outputs with connections
+        pending.push_back(it.second.nid);
     }
 
     Index_ID b = 0;

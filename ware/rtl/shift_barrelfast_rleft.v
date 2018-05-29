@@ -16,7 +16,7 @@ module shift_barrelfast_rleft
 
  assign a_double = {a,a};
 
-// rotate left 
+// rotate left
  genvar i;
  generate
   for(i=0; i<Bits; i=i+1)
@@ -32,6 +32,6 @@ module shift_barrelfast_rleft
 /*verilator lint_on UNOPTFLAT*/
 /*verilator lint_on UNUSED*/
 
-// rotate left ends 
+// rotate left ends
 
 endmodule

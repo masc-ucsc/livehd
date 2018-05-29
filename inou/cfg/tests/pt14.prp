@@ -1,0 +1,21 @@
+
+a as bits:32
+b as bits:32
+
+if $a == 1 {
+  %b = 1
+}else {
+  %c = $d + 1
+}
+if $b == 1 {
+  if $d == 5 {
+    %c = $a + $b
+  }
+  elif $e == 33 {
+    %c = $a * $b
+  }
+  else{
+    %c = $a - $b
+  }
+}
+

@@ -2,7 +2,7 @@ module diamond
 (
   input   Hi,
   input   Ci,
-  
+
   output   Si
 );
 

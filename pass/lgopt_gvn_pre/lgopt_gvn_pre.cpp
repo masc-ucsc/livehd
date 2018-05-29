@@ -2,8 +2,8 @@
 #include <iostream>
 #include <random>
 
-#include "lgraph.hpp"
 #include "lgbench.hpp"
+#include "lgraph.hpp"
 
 #include "inou.hpp"
 
@@ -22,15 +22,14 @@ int main(int argc, const char **argv) {
   std::vector<LGraph *> lgs = inou.generate();
   b.sample("setup");
 
-  for(auto g:lgs) {
-    console->info("processing {}\n",g->get_name());
+  for(auto g : lgs) {
+    console->info("processing {}\n", g->get_name());
     gvn_pre.transform(g);
   }
 
   b.sample("gvn_pre_pass");
 
-  for(auto g:lgs) {
+  for(auto g : lgs) {
     g->sync();
   }
 }
-

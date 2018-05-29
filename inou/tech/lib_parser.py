@@ -134,22 +134,22 @@ class pat_t:
     def is_found(self, line):
         '>> True/False' # {{{
         m = self.re.search(line)
-        if (m == None):
+        if (m is None):
             return False
-        else:
-            return True
+
+        return True
         # }}}
 
     def match(self, line):
         '>> None or ls_matched_string' # {{{
         m = self.re.match(line)
-        if (m == None):
+        if (m is None):
             return None
-        else:
-            ls = list()
-            for s in m.groups():
-                ls.append(s.strip('"'))
-            return ls
+
+        ls = list()
+        for s in m.groups():
+            ls.append(s.strip('"'))
+        return ls
         # }}}
 
 #===========================================================
@@ -182,12 +182,12 @@ class line_t:
             string = pat_comment.re.sub('', string)
         elif (pat_comment_begin.is_found(string)):
             # multi-line comment begin
-            assert (is_comment == False), 'Error: found multi-line comment begin while last multi-line comment has not ended @ line %d' % self.num
+            assert (!is_comment), 'Error: found multi-line comment begin while last multi-line comment has not ended @ line %d' % self.num
             self.is_comment_begin = True
             string = pat_comment_begin.re.sub('', string).strip()
         elif (pat_comment_end.is_found(string)):
             # multi-line comment end
-            assert (is_comment == True), 'Error: found multi-line comment end without comment begin @ line %d' % self.num
+            assert (is_comment), 'Error: found multi-line comment end without comment begin @ line %d' % self.num
             self.is_comment_end = True
             string = pat_comment_end.re.sub('', string).strip()
         elif (is_comment):

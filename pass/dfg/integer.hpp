@@ -5,7 +5,6 @@
 #include <cstring>
 #include <string>
 
-namespace Pyrope {
 typedef size_t   pyrsize;
 typedef uint32_t pyrchunk;
 typedef long     pyrint; // IMPORTANT: this must be larger than Char_Array_ID, defined in char_array.hpp, which is uint32_t
@@ -40,7 +39,7 @@ public:
     return bits;
   }
   pyrsize get_array_size() const {
-    return (bits >> 5) + ((bits & 0x1f != 0) ? 1 : 0);
+    return (bits >> 5) + (((bits & 0x1f) != 0) ? 1 : 0);
   }
   pyrsize highest_set_bit() const;
 
@@ -75,6 +74,5 @@ protected:
 
 bool operator>(const Integer &i1, const Integer &i2);
 bool operator<(const Integer &i1, const Integer &i2);
-} // namespace Pyrope
 
 #endif

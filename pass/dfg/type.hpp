@@ -4,20 +4,19 @@
 #include <cmath>
 #include <cstdint>
 
-#include "Overflow_Pool.hpp"
+#include "overflow_pool.hpp"
 
-namespace Pyrope {
 enum TypeName { NUMERIC,
                 LOGICAL,
                 MAP,
                 STRING,
                 UNDEF };
-class Context;
+
+class Symbol_Table;
 
 class Type {
 public:
   Type(TypeName n = UNDEF, pyrint mi = 0, pyrint ma = 0, pyrint l = 0) : name(n), min(mi), max(ma), len(l), _is_signed(false), _is_input(false), _is_output(false), _is_register(false), _is_private(false), _min_overflow(false), _max_overflow(false), _len_overflow(false), _min_fixed(false), _max_fixed(false), _len_fixed(false) {}
-
   Type(const Type &t) : name(t.name), min(t.min), max(t.max), len(t.len), _is_signed(t._is_signed), _is_input(t._is_input), _is_output(t._is_output), _is_register(t._is_register), _is_private(t._is_private), _min_overflow(t._min_overflow), _max_overflow(t._max_overflow), _len_overflow(t._len_overflow), _min_fixed(t._min_fixed), _max_fixed(t._max_fixed), _len_fixed(t._len_fixed) {}
 
   virtual ~Type() {}
@@ -106,8 +105,8 @@ public:
   std::string to_string() const;
   std::string type_name() const;
 
-  static Context *  context;   // set in Context
-  static const Type undefined; // undefined type
+  static Symbol_Table *context;   // set in Context
+  static const Type undefined;    // undefined type
 
 protected:
   // merge a generic attribute with another, return true if result overflows
@@ -131,17 +130,16 @@ protected:
   bool _is_register : 1;
   bool _is_private : 1;
 
-  bool _max_overflow : 1;
   bool _min_overflow : 1;
+  bool _max_overflow : 1;
   bool _len_overflow : 1;
 
-  bool _max_fixed : 1;
   bool _min_fixed : 1;
+  bool _max_fixed : 1;
   bool _len_fixed : 1;
 };
 
 bool operator==(const Type &t1, const Type &t2);
 bool operator!=(const Type &t1, const Type &t2);
-} // namespace Pyrope
 
 #endif
