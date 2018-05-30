@@ -78,8 +78,8 @@ struct __attribute__((packed)) SEdge_Internal { // 2 bytes total
       //fmt::print("P:{}\n",_inp_pid);
       return false;
     }
-    Index_ID abs_idx    = get_page_idx();
-    SIndex_ID delta_idx = _idx - abs_idx;
+    Index_ID abs_idx    = static_cast<SIndex_ID>(get_page_idx());
+    SIndex_ID delta_idx = static_cast<SIndex_ID>(_idx) - abs_idx;
     if(delta_idx >= ((1 << 11) - 1) || delta_idx < (-((1 << 11) - 1))) {
       //fmt::print("D:{}\n",delta_idx);
       return false;
