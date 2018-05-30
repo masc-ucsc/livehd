@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Defaults for configuration variables used by script
-: ${LGRAPH_SRC:=${HOME}/projs/esesc}
+: ${LGRAPH_SRC:=${HOME}/lgraph}
 : ${LGRAPH_BUILD_DIR:=${HOME}/build}
 : ${LGRAPH_BUILD_TYPE:=Debug}
 : ${LGRAPH_ENABLE_LIVE:=0}

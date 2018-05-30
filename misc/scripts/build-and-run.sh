@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Default for LGRAPH source code location
-: LGRAPH_SRC=${LGRAPH_SRC:=${HOME}/projs/esesc}
+: LGRAPH_SRC=${LGRAPH_SRC:=${HOME}/lgraph}
 
 if [ ! -e ${LGRAPH_SRC}/CMakeLists.txt ]; then
   echo "BUILD ERROR: '${LGRAPH_SRC}' does not contain LGRAPH source code"
