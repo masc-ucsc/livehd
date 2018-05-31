@@ -2,38 +2,20 @@ sudo: required
 
 language: cpp
 
-compiler:
-    - clang
+services:
+  - docker
 
-matrix:
-    include:
-    - env: CXX=clang++ CC=clang
-
-addons:
-    apt:
-      update: true
+env:
+  matrix:
+    - BUILD_TYPE=Release DOCKER=mascucsc/archlinux-masc
+    - BUILD_TYPE=Debug   DOCKER=mascucsc/archlinux-masc
+    - BUILD_TYPE=Release DOCKER=mascucsc/ubuntu-masc
+    - BUILD_TYPE=Debug   DOCKER=mascucsc/ubuntu-masc
 
 before_install:
-  - git clone https://github.com/Tencent/rapidjson.git
-  - mkdir ~/json-build
-  - cd ~/json-build
-  - cmake ~/rapidjson
-  - make
-  - make install
-    #- sudo apt-get install rapidjson-dev
-  - mkdir ~/debug
-  - cd ~/debug
-  - which clang
-  - export CXX=/usr/local/clang-5.0.0/bin/clang++
-  - export CC=/usr/local/clang-5.0.0/bin/clang
-  - echo ${CXX}
-  - cmake ~/build/masc-ucsc/lgraph -DCMAKE_C_COMPILER=/usr/local/clang-5.0.0/bin/clang -DCMAKE_CXX_COMPILER=/usr/local/clang-5.0.0/bin/clang++
-
-install:
-  - make
-
-before_script:
-  - make clean
+  - docker pull mascucsc/archlinux-masc
+  - docker pull mascucsc/ubuntu-masc
 
 script:
-- make test
+  - misc/scripts/run-docker-test.sh `pwd` $BUILD_TYPE $DOCKER
+
