@@ -302,3 +302,187 @@ Pass_dfg_options_pack::Pass_dfg_options_pack() : Options_pack() {
   output_name        = (vm.count("output") > 0) ? vm["output"].as<string>() : graph_name + "_df";
   console->info("inou_cfg graph_name:{}, gen-dots:{}", graph_name, generate_dots_flag);
 }
+
+
+//Sheng Zone
+void Pass_dfg::test_const_conversion() {
+  LGraph *tg = new LGraph(opack.lgdb_path, opack.output_name, false);
+  const std::string str_in = "128";
+  bool              is_signed = false;
+  bool              is_in32b = true;
+  uint32_t          val = 0;
+  uint32_t          explicit_bits = 0;
+
+  resolve_constant(tg, str_in, is_signed, is_in32b, val, explicit_bits);
+  fmt::print("out of 32 bits range? {}\n",!is_in32b);
+  fmt::print("signed: {}\n",is_signed);
+  fmt::print("stored value: {}\n",val);
+  fmt::print("explicit_bits: {}\n",explicit_bits);
+}
+
+
+Index_ID Pass_dfg::resolve_constant(LGraph *g, const std::string& str_in, bool& is_signed, bool& is_in32b, uint32_t& val, uint32_t& explicit_bits){
+
+  string token1st, token2nd;
+  size_t s_pos = str_in.find('s');//O(n)
+  size_t u_pos = 0;
+  size_t idx;
+  size_t bit_width;
+
+  //decide 1st and 2nd tokens, delimiter: s or u
+  if(s_pos != string::npos){
+    char rm = '_';//remove _ in 0xF___FFFF
+    string str_sub = str_in.substr(0,s_pos);
+    str_sub.erase(std::remove(str_sub.begin(), str_sub.end(),rm), str_sub.end());
+    token1st = str_sub;
+    token2nd = str_in.substr(s_pos+1);
+    is_signed = true;
+  }
+  else{
+    u_pos = str_in.find('u');//O(n)
+    if(u_pos != string::npos){
+      token1st = str_in.substr(0,u_pos);
+      token2nd = str_in.substr(u_pos+1);
+    }
+    else
+      token1st = str_in;
+  }
+
+  //fmt::print("1st token:{}\n",token1st);
+
+  //explicit bits width
+  if(token2nd != "")
+    explicit_bits = (uint32_t) std::stoi(token2nd);
+  else
+    explicit_bits = 0;
+
+
+  if(token1st[0] == '0' && token1st[1] == 'x'){ //hexadecimal
+    //detect the leading 1 and start from it
+    idx = token1st.substr(2).find_first_not_of('0') + 2; //e.g. 0x000FFFFF, returns 5
+
+    //need to know the bit width of 1st character's
+    uint8_t char1st_width = 0;
+    if(token1st[idx] == '1')
+      char1st_width = 1;
+    else if(token1st[idx] >= '2' && token1st[idx] <='3')
+      char1st_width = 2;
+    else if(token1st[idx] >= '4' && token1st[idx] <='7')
+      char1st_width = 3;
+    else if(token1st[idx] >= '8' && token1st[idx] <='9')
+      char1st_width = 4;
+    else if(token1st[idx] >= 'a' && token1st[idx] <='f')
+      char1st_width = 4;
+    else if(token1st[idx] >= 'A' && token1st[idx] <='F')
+      char1st_width = 4;
+
+
+    bit_width = (token1st.size() - idx - 1) * 4 + char1st_width;
+    //fmt::print("bit_width:{}\n", bit_width);
+    if(bit_width > 32){
+      //make
+      is_in32b = false;
+      return 1111;
+    }
+
+    while(token1st[idx]){
+      uint8_t byte = token1st[idx];
+      if (byte >= '0' && byte <= '9'){
+        byte = byte - '0';
+        val = val << 4 | (byte & 0xF);
+      }
+      else if (byte >= 'a' && byte <= 'f'){
+        byte = byte - 'a' + 10;
+        val = val << 4 | (byte & 0xF);
+      }
+      else if (byte >= 'A' && byte <= 'F'){
+        byte = byte - 'A' + 10;
+        val = val << 4 | (byte & 0xF);
+      }
+      idx++;
+    }
+  }
+  else if (token1st[0] == '0' && token1st[1] == 'b') {//binary
+    idx = token1st.substr(2).find_first_not_of('0') + 2; //e.g. 0b00011111, returns 5
+
+    //fmt::print("idx:{}\n", idx);
+    //fmt::print("token1st size:{}\n", token1st.size());
+    bit_width = token1st.size() - idx;
+    //fmt::print("bit_width:{}\n", bit_width);
+
+    if(bit_width > 32){
+      //str_out = token1st;
+      is_in32b = false;
+      return 1111;
+    }
+
+    while(token1st[idx]){
+      uint8_t byte = token1st[idx];
+      if(byte >= '0' && byte <= '1'){
+        byte = byte - '0';
+        val = val << 1 | (byte & 0xF);
+      }
+      idx++;
+    }
+  }
+  else{ //decimal
+    //find leading 1
+    if(token1st[0] == '-')
+      idx = token1st.substr(1).find_first_not_of('0') + 1;
+    else
+      idx = token1st.find_first_not_of('0');
+
+    string negative_max = "-2147483648";
+    string positive_max =  "2147483647"; // size = 10
+
+    if(token1st[0] == '-' && token1st.substr(idx).size() > 10){
+      //str_out = token1st;
+      is_in32b = false;
+      return 1111;
+    }
+    else if (token1st[0] != '-' && token1st.substr(idx).size() > 10){
+      //str_out = token1st;
+      is_in32b = false;
+      return 1111;
+    }
+    else if(token1st[0]  == '-' && token1st.substr(idx).size() == 10){
+      int i=0;
+      while(negative_max[i]){
+        if(token1st[i] > negative_max[i]){
+          //str_out = token1st;
+          is_in32b = false;
+          return 1111;
+        }
+        i++;
+      }
+    }
+    else if (token1st[0]  != '-' && token1st.substr(idx).size() == 10){
+      int i=0;
+      while(positive_max[i]){
+        if(token1st[i] > positive_max[i]){
+          //str_out = token1st;
+          is_in32b = false;
+          return 1111;
+        }
+        i++;
+      }
+    }
+
+
+    if (token1st[0] == '-') {//negative number
+      while(token1st[idx])
+        val = val*10 + (token1st[idx++] - '0');
+
+      val = (uint32_t)(-val);
+      is_signed = true;
+    }
+    else{
+      while(token1st[idx])
+        val = val*10 + (token1st[idx++] - '0');
+    }
+  }
+
+  is_in32b = true;
+  return 1111;
+}
+
