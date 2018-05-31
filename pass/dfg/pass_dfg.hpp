@@ -139,7 +139,12 @@ private:
   static unsigned int temp_counter;
 
   //Sheng zone
-  Index_ID resolve_constant(LGraph *g, const std::string& str_in, bool& is_signed, bool& is_in32b, uint32_t& val, uint32_t& explicit_bits);
+  Index_ID resolve_constant(LGraph *g, const std::string& str_in, bool& is_signed, bool& is_in32b, bool& is_explicit_signed, uint32_t& val, uint32_t& explicit_bits, size_t& bit_width);
+  Index_ID process_hex_val (LGraph *g, const std::string& token1st, const uint16_t & bit_width, uint32_t& val,  bool& is_in32b);
+  Index_ID process_bin_val (LGraph *g, const std::string& token1st, const uint16_t & bit_width, uint32_t& val,  bool& is_in32b);
+  Index_ID process_dec_val (LGraph *g, const std::string& token1st, const uint16_t & bit_width, uint32_t& val,  bool& is_in32b);
+  uint32_t cal_hex_32b(const std::string&);
+
 };
 
 #endif
