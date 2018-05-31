@@ -3,7 +3,7 @@ from setuptools.command.build_ext import build_ext
 import sys
 import setuptools
 
-__version__ = '0.1.6'
+__version__ = '0.1.7'
 
 
 class get_pybind_include(object):
@@ -92,11 +92,16 @@ class BuildExt(build_ext):
 setup(
     name='lgraph',
     version=__version__,
-    author='Sylvain Corlay',
-    author_email='sylvain.corlay@gmail.com',
-    url='https://github.com/pybind/python_example',
-    description='A test project using pybind11',
-    long_description='',
+    description='LiveGraph for synthesis and Simulation',
+    url='https://github.com/masc-ucsc/lgraph',
+    author='MASC Group',
+    author_email='lgraph-group@ucsc.edu',
+    license='BSD-3-Clause',
+    classifiers=['Development Status :: 3 - Alpha',
+        'Programming Language :: Python :: 3'
+        ],
+    python_requires='>=3',
+    packages=['lgraph'],
     ext_modules=ext_modules,
     install_requires=['pybind11>=2.2'],
     cmdclass={'build_ext': BuildExt},
