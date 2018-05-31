@@ -10,6 +10,8 @@ using std::string;
 using std::unordered_map;
 using std::vector;
 
+unsigned int Pass_dfg::temp_counter = 0;
+
 void Pass_dfg::transform() {
   LGraph *dfg = new LGraph(opack.lgdb_path, opack.output_name, false);
   transform(dfg);
@@ -35,27 +37,33 @@ void Pass_dfg::cfg_2_dfg(LGraph *dfg, const LGraph *cfg) {
   dfg->sync();
 }
 
-void Pass_dfg::process_cfg(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, Index_ID top_node) {
+Index_ID Pass_dfg::process_cfg(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, Index_ID top_node) {
   Index_ID itr = top_node;
+  Index_ID last_itr = 0;
 
   while (itr != 0) {
-    process_node(dfg, cfg, state, itr);
-    itr = get_child(cfg, itr);
+    last_itr = itr;
+    itr = process_node(dfg, cfg, state, itr);
   }
+
+  return last_itr;
 }
 
-void Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, Index_ID node) {
+Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, Index_ID node) {
   CFG_Node_Data data(cfg, node);
 
   switch (cfg->node_type_get(node).op) {
   case CfgAssign_Op:
     process_assign(dfg, cfg, state, data, node);
-    break;
+    return get_child(cfg, node);
   case CfgIf_Op:
-    process_if(dfg, cfg, state, data, node);
-    break;
+    return process_if(dfg, cfg, state, data, node);
+  case CfgIfMerge_Op:
+    return 0;
   default:
-    fmt::print("*************Unrecognized node type: {}", cfg->node_type_get(node).get_name());
+    fmt::print("*************Unrecognized node type[n={}]: {}\n",
+      node, cfg->node_type_get(node).get_name());
+    return get_child(cfg, node);
   }
 }
 
@@ -69,24 +77,30 @@ void Pass_dfg::process_assign(LGraph *dfg, const LGraph *cfg, CF2DF_State *state
   for (Index_ID id : operands)
     dfg->add_edge(Node_Pin(id, 0, false), Node_Pin(dfnode, 0, true));
   
-  if (state->rw_flags() && (is_output(target) || is_register(target)))
+  if (state->fluid_df() && (is_output(target) || is_register(target)))
     add_write_marker(dfg, state, target);
 }
 
-void Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, const CFG_Node_Data &data, Index_ID node) {
+Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, const CFG_Node_Data &data, Index_ID node) {
   Index_ID cond = state->get_reference(data.get_target());
   const auto &operands = data.get_operands();
 
   Index_ID tbranch = std::stol(operands[0]);
   CF2DF_State tstate = state->copy();
+  Index_ID tb_next = get_child(cfg, process_cfg(dfg, cfg, &tstate, tbranch));
 
   Index_ID fbranch = std::stol(operands[1]);
-  CF2DF_State fstate = state->copy();
 
-  process_cfg(dfg, cfg, &tstate, tbranch);
-  process_cfg(dfg, cfg, &fstate, fbranch);
+  if (fbranch != node) {                                // there is an 'else' clause
+    CF2DF_State fstate = state->copy();
+    Index_ID fb_next = get_child(cfg, process_cfg(dfg, cfg, &fstate, fbranch));
+    assert(tb_next == fb_next);
+    add_phis(dfg, cfg, state, &tstate, &fstate, cond);  
+  } else {
+    add_phis(dfg, cfg, state, &tstate, state, cond);    // if there's no else, the 'state' of the 'else' branch is the same as the parent
+  }
 
-  add_phis(dfg, cfg, state, &tstate, &fstate, cond);
+  return tb_next;
 }
 
 void Pass_dfg::add_phis(LGraph *dfg, const LGraph *cfg, CF2DF_State *parent, CF2DF_State *tstate, CF2DF_State *fstate, Index_ID condition) {
@@ -121,7 +135,6 @@ void Pass_dfg::add_phi(LGraph *dfg, CF2DF_State *parent, CF2DF_State *tstate, CF
   dfg->add_edge(Node_Pin(fid, 0, false), Node_Pin(phi, fin, true));
   dfg->add_edge(Node_Pin(condition, 0, false), Node_Pin(phi, cin, true));
 
-  dfg->set_node_wirename(phi, variable.c_str());
   parent->update_reference(variable, phi);
 }
 
@@ -160,7 +173,7 @@ vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, const LGraph *cfg, CF2D
         ops[i] = create_private(dfg, state, dops[i]);
     }
 
-    if (state->rw_flags() && is_input(dops[i]))
+    if (state->fluid_df() && is_input(dops[i]))
       add_read_marker(dfg, state, dops[i]);
   }
 
@@ -245,6 +258,7 @@ Index_ID Pass_dfg::create_private(LGraph *g, CF2DF_State *state, const string &v
 Index_ID Pass_dfg::default_constant(LGraph *g, CF2DF_State *state) {
   Index_ID nid = g->create_node().get_nid();
   g->node_type_set(nid, U32Const_Op);
+  g->node_u32type_set(nid, 0);
 
   return nid;
 }
@@ -252,6 +266,11 @@ Index_ID Pass_dfg::default_constant(LGraph *g, CF2DF_State *state) {
 Index_ID Pass_dfg::true_constant(LGraph *g, CF2DF_State *state) {
   Index_ID nid = g->create_node().get_nid();
   g->node_type_set(nid, U32Const_Op);
+  g->node_u32type_set(nid, 1);
+
+  string var_name = "__tmp" + std::to_string(temp_counter++);
+  g->set_node_wirename(nid, var_name.c_str());
+  state->symbol_table().add(var_name, Type::create_logical());
 
   return nid;
 }
