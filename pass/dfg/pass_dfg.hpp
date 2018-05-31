@@ -24,8 +24,8 @@ public:
 
 class CF2DF_State {
 public:
-  CF2DF_State(bool rwf = true) : add_rw_flags(rwf) { }
-  CF2DF_State(const CF2DF_State &s) : last_refs(s.last_refs), registers(s.registers), add_rw_flags(s.add_rw_flags) { }
+  CF2DF_State(bool rwf = true) : fluid(rwf) { }
+  CF2DF_State(const CF2DF_State &s) : last_refs(s.last_refs), registers(s.registers), fluid(s.fluid) { }
   CF2DF_State copy() const { return CF2DF_State(*this); }
 
   void update_reference(const std::string &v, Index_ID n);
@@ -34,13 +34,15 @@ public:
   const std::unordered_map<std::string, Index_ID> &references() const { return last_refs; }
 
   void add_register(const std::string &v, Index_ID n) { registers[v] = n; }
-  bool rw_flags() const { return add_rw_flags; }
+  bool fluid_df() const { return fluid; }
+
+  Symbol_Table &symbol_table() { return table; }
 
 private:
   std::unordered_map<std::string, Index_ID> last_refs;
   std::unordered_map<std::string, Index_ID> registers;
   Symbol_Table table;
-  bool add_rw_flags;
+  bool fluid;
 };
 
 const char REGISTER_MARKER = '@';
@@ -56,18 +58,19 @@ public:
   void         cfg_2_dfg(LGraph *dfg, const LGraph *cfg);
   void         transform();
   virtual void transform(LGraph *g);
+  void         test_const_conversion();
 
 protected:
   Pass_dfg_options_pack opack;
 
 private:
   Index_ID                 find_root(const LGraph *cfg);
-  void                     process_cfg(     LGraph *dfg,
+  Index_ID                 process_cfg(     LGraph *dfg,
                                             const LGraph *cfg,
                                             CF2DF_State *state,
                                             Index_ID top_node);
 
-  void                     process_node(    LGraph *dfg,
+  Index_ID                 process_node(    LGraph *dfg,
                                             const LGraph *cfg,
                                             CF2DF_State *state,
                                             Index_ID node);
@@ -78,7 +81,7 @@ private:
                                             const CFG_Node_Data &data,
                                             Index_ID node );
 
-  void                     process_if(      LGraph *dfg,
+  Index_ID                 process_if(      LGraph *dfg,
                                             const LGraph *cfg,
                                             CF2DF_State *state,
                                             const CFG_Node_Data &data,
@@ -132,6 +135,11 @@ private:
   Index_ID create_node(LGraph *g, CF2DF_State *state, const std::string &v);
   Index_ID default_constant(LGraph *g, CF2DF_State *state);
   Index_ID true_constant(LGraph *g, CF2DF_State *state);
+
+  static unsigned int temp_counter;
+
+  //Sheng zone
+  Index_ID resolve_constant(LGraph *g, const std::string& str_in, bool& is_signed, bool& is_in32b, uint32_t& val, uint32_t& explicit_bits);
 };
 
 #endif
