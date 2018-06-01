@@ -26,6 +26,7 @@ public:
   void         cfg_2_dfg(LGraph *dfg, const LGraph *cfg);
   void         transform();
   virtual void transform(LGraph *g);
+  void         test_const_conversion();
 
 protected:
   Pass_dfg_options_pack opack;
@@ -112,6 +113,15 @@ private:
   Index_ID true_constant(LGraph *g, CF2DF_State *state);
 
   static unsigned int temp_counter;
+
+  //Sheng zone
+  Index_ID resolve_constant(LGraph *g, const std::string& str_in, bool& is_signed, bool& is_in32b, bool& is_explicit_signed, uint32_t& val, uint32_t& explicit_bits, size_t& bit_width);
+  Index_ID process_hex_token (LGraph *g, const std::string& token1st, const uint16_t & bit_width, uint32_t& val,  bool& is_in32b);
+  Index_ID process_bin_token (LGraph *g, const std::string& token1st, const uint16_t & bit_width, uint32_t& val,  bool& is_in32b);
+  Index_ID process_dec_token (LGraph *g, const std::string& token1st, const uint16_t & bit_width, uint32_t& val,  bool& is_in32b);
+  uint32_t cal_hex_val_32b(const std::string&);
+  uint32_t cal_bin_val_32b(const std::string&);
+
 };
 
 #endif
