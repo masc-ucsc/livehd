@@ -306,9 +306,9 @@ Pass_dfg_options_pack::Pass_dfg_options_pack() : Options_pack() {
 
 //Sheng Zone
 void Pass_dfg::test_const_conversion() {
-  const std::string str_in = "0x0012345678_12345678_9As";//40 bits
   LGraph *tg = new LGraph(opack.lgdb_path, opack.output_name, false);
-  //const std::string str_in = "0b0001111_1111_1111_1111_1111_1111_1111_1111s";//buggy underscore
+  //const std::string str_in = "0x00_F234_5678_1234_5678_9A_u";//40 bits
+  const std::string str_in = "0b1111_1111_1111_1111_1111_1111_1111_1111";//buggy underscore
   //const std::string str_in = "0b00011111111111111111111111111111111s";
   //const std::string str_in = "-2147483647";
   //const std::string str_in = "128";
@@ -334,7 +334,7 @@ void Pass_dfg::test_const_conversion() {
 
 
 Index_ID Pass_dfg::resolve_constant(LGraph *g,
-                                    const std::string& str_in,
+                                    const std::string& str,
                                     bool&              is_signed,
                                     bool&              is_in32b,
                                     bool&              is_explicit_signed,
@@ -343,16 +343,16 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g,
                                     size_t&            bit_width)
 {
   string token1st, token2nd;
+  string str_in = str;
+  char rm = '_';//remove _ in 0xF___FFFF
+  str_in.erase(std::remove(str_in.begin(), str_in.end(),rm), str_in.end());
   size_t s_pos = str_in.find('s');//O(n)
   size_t u_pos = 0;
   size_t idx;
 
-  //decide 1st and 2nd tokens, delimiter: s or u
+  //extract 1st and 2nd tokens, delimiter: s or u
   if(s_pos != string::npos){
-    char rm = '_';//remove _ in 0xF___FFFF
-    string str_sub = str_in.substr(0,s_pos);
-    str_sub.erase(std::remove(str_sub.begin(), str_sub.end(),rm), str_sub.end());
-    token1st = str_sub;
+    token1st = str_in.substr(0,s_pos);
     token2nd = str_in.substr(s_pos+1);
     is_signed = true;
     is_explicit_signed = true;
@@ -367,8 +367,6 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g,
     else
       token1st = str_in;
   }
-
-  //fmt::print("1st token:{}\n",token1st);
 
   //explicit bits width
   if(token2nd != "")
@@ -400,30 +398,16 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g,
 
     bit_width = explicit_bits? explicit_bits : (token1st.size()-1)*4 + char1st_width;
 
-    return process_hex_val(g, token1st, (uint16_t)bit_width, val, is_in32b);
+    return process_hex_token(g, token1st, (uint16_t)bit_width, val, is_in32b);
   }
   else if (token1st[0] == '0' && token1st[1] == 'b') {//binary
-    idx = token1st.substr(2).find_first_not_of('0') + 2; //e.g. 0b00011111, returns 5
+    token1st = token1st.substr(2);//exclude leading bin 0b
+    idx = token1st.find_first_not_of('0') ; //detect the leading 1 and start from it, e.g. 000FF, returns 3
+    token1st = token1st.substr(idx);//exclude leading 0s
+    bit_width = explicit_bits ? explicit_bits : token1st.size();
 
-    //fmt::print("idx:{}\n", idx);
-    //fmt::print("token1st size:{}\n", token1st.size());
-    bit_width = explicit_bits ? explicit_bits : token1st.size() - idx;
-    //fmt::print("bit_width:{}\n", bit_width);
+    return process_bin_token(g, token1st, (uint16_t)bit_width, val, is_in32b);
 
-    if(bit_width > 32){
-      //str_out = token1st;
-      is_in32b = false;
-      return 1111;
-    }
-
-    while(token1st[idx]){
-      uint8_t byte = token1st[idx];
-      if(byte >= '0' && byte <= '1'){
-        byte = byte - '0';
-        val = val << 1 | (byte & 0xF);
-      }
-      idx++;
-    }
   }//end of binary
   else{ //decimal
     //find leading 1
@@ -486,7 +470,7 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g,
   return 1111;
 }
 
-Index_ID Pass_dfg::process_hex_val(LGraph *g, const std::string &token, const uint16_t &bit_width, uint32_t &val, bool& is_in32b) {
+Index_ID Pass_dfg::process_hex_token(LGraph *g, const std::string &token, const uint16_t &bit_width, uint32_t &val, bool& is_in32b) {
   if(bit_width > 32) {
     std::vector<Node_Pin> inp_pins;
     is_in32b = false;
@@ -501,7 +485,7 @@ Index_ID Pass_dfg::process_hex_val(LGraph *g, const std::string &token, const ui
 
     while(t_size-8*i > 0){
       fmt::print("@round{}, token_chunk:{}\n", i, token_chunk);
-      val_chunk = cal_hex_32b(token_chunk);
+      val_chunk = cal_hex_val_32b(token_chunk);
       Index_ID nid_const32 = g->create_node().get_nid();
       g->node_u32type_set(nid_const32,val_chunk);
       g->set_bits(nid_const32,32);
@@ -511,7 +495,7 @@ Index_ID Pass_dfg::process_hex_val(LGraph *g, const std::string &token, const ui
       else{
         token_chunk = token.substr(0,t_size-8*i);
         fmt::print("@round{}, token_chunk:{}\n", i+1, token_chunk);
-        val_chunk = cal_hex_32b(token_chunk);
+        val_chunk = cal_hex_val_32b(token_chunk);
         nid_const32 = g->create_node().get_nid();
         g->node_u32type_set(nid_const32,val_chunk);
         g->set_bits(nid_const32,32);
@@ -527,7 +511,7 @@ Index_ID Pass_dfg::process_hex_val(LGraph *g, const std::string &token, const ui
     return nid_join;
   }
   else{
-    val = cal_hex_32b(token);
+    val = cal_hex_val_32b(token);
     Index_ID nid_const32 = g->create_node().get_nid();
     g->node_u32type_set(nid_const32,val);
     g->set_bits(nid_const32,bit_width);
@@ -535,8 +519,56 @@ Index_ID Pass_dfg::process_hex_val(LGraph *g, const std::string &token, const ui
   }
 }
 
+Index_ID Pass_dfg::process_bin_token (LGraph *g, const std::string& token, const uint16_t & bit_width, uint32_t& val,  bool& is_in32b){
+  if(bit_width > 32){
+    std::vector<Node_Pin> inp_pins;
+    is_in32b = false;
+    int t_size = (int)token.size();
+    uint32_t val_chunk = 0;
+    Index_ID nid_join = g->create_node().get_nid();
+    g->node_type_set(nid_join, Join_Op);
+    g->set_bits(nid_join, t_size);
 
-uint32_t Pass_dfg::cal_hex_32b(const std::string& token){
+    int i = 1;
+    string token_chunk = token.substr(t_size-32*i,32);
+
+    while(t_size-32*i > 0){
+      fmt::print("@round{}, token_chunk:{}\n", i, token_chunk);
+      val_chunk = cal_bin_val_32b(token_chunk);
+      Index_ID nid_const32 = g->create_node().get_nid();
+      g->node_u32type_set(nid_const32,val_chunk);
+      g->set_bits(nid_const32,32);
+      inp_pins.push_back(Node_Pin(nid_const32, 0, false));
+      if(t_size-(32*(i+1)) > 0)
+        token_chunk = token.substr(t_size - 32*(i+1),32);
+      else{
+        token_chunk = token.substr(0,t_size-32*i);
+        fmt::print("@round{}, token_chunk:{}\n", i+1, token_chunk);
+        val_chunk = cal_bin_val_32b(token_chunk);
+        nid_const32 = g->create_node().get_nid();
+        g->node_u32type_set(nid_const32,val_chunk);
+        g->set_bits(nid_const32,32);
+        inp_pins.push_back(Node_Pin(nid_const32, 0, false));
+      }
+      i++;
+    }
+    int pid = 0;
+    for(auto &inp_pin : inp_pins) {
+      g->add_edge(inp_pin, Node_Pin(nid_join, pid, true));
+      pid++;
+    }
+    return nid_join;
+  }
+  else{
+    val = cal_bin_val_32b(token);
+    Index_ID nid_const32 = g->create_node().get_nid();
+    g->node_u32type_set(nid_const32,val);
+    g->set_bits(nid_const32,bit_width);
+    return nid_const32;
+  }
+}
+
+uint32_t Pass_dfg::cal_hex_val_32b(const std::string& token){
   uint16_t idx = 0;
   uint32_t val = 0;
   while (token[idx]) {
@@ -550,6 +582,19 @@ uint32_t Pass_dfg::cal_hex_32b(const std::string& token){
     } else if (byte >= 'A' && byte <= 'F') {
       byte = byte - 'A' + 10;
       val = val << 4 | (byte & 0xF);
+    }
+    idx++;
+  }
+  return val;
+}
+uint32_t Pass_dfg::cal_bin_val_32b(const std::string& token){
+  uint16_t idx = 0;
+  uint32_t val = 0;
+  while(token[idx]){
+    uint8_t byte = token[idx];
+    if(byte >= '0' && byte <= '1'){
+      byte = byte - '0';
+      val = val << 1 | (byte & 0xF);
     }
     idx++;
   }
