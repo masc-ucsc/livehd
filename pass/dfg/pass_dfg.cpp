@@ -22,14 +22,11 @@ void Pass_dfg::transform(LGraph *dfg) {
   LGraph *cfg = new LGraph(opack.lgdb_path, opack.graph_name, false);
 
   cfg_2_dfg(dfg, cfg);
-
-  if (opack.generate_dots_flag)
-    system(("./inou/dump/lgdump " + opack.output_name + " 2>" + opack.output_name + ".dot").c_str());
 }
 
 void Pass_dfg::cfg_2_dfg(LGraph *dfg, const LGraph *cfg) {
   Index_ID    itr = find_root(cfg);
-  CF2DF_State state;
+  CF2DF_State state(dfg);
 
   process_cfg(dfg, cfg, &state, itr);
   attach_outputs(dfg, &state);
@@ -199,6 +196,13 @@ void Pass_dfg::attach_outputs(LGraph *dfg, CF2DF_State *state) {
       dfg->add_edge(Node_Pin(lref, 0, false), Node_Pin(oid, 0, true));
     }
   }
+
+  if (state->fluid_df())
+    add_fluid_ports_and_logic(dfg, state);
+}
+
+void Pass_dfg::add_fluid_ports_and_logic(LGraph *dfg, CF2DF_State *state) {
+  
 }
 
 Index_ID Pass_dfg::find_root(const LGraph *cfg) {
@@ -283,22 +287,15 @@ Index_ID Pass_dfg::create_node(LGraph *g, CF2DF_State *state, const string &v) {
   return nid;
 }
 
-void CF2DF_State::update_reference(const string &v, Index_ID n) {
-  last_refs[v] = n;
-  if (!table.has(v)) table.add(v);
-}
-
 Pass_dfg_options_pack::Pass_dfg_options_pack() : Options_pack() {
 
   Options::get_desc()->add_options()(
-      "dot,d", boost::program_options::value(&generate_dots_flag), "dump dot files for LGraphs")(
       "output,o", boost::program_options::value(&output_name), "output graph-name");
 
   boost::program_options::variables_map vm;
   boost::program_options::store(
       boost::program_options::command_line_parser(Options::get_cargc(), Options::get_cargv()).options(*Options::get_desc()).allow_unregistered().run(), vm);
 
-  generate_dots_flag = vm.count("dot") > 0;
   output_name        = (vm.count("output") > 0) ? vm["output"].as<string>() : graph_name + "_df";
-  console->info("inou_cfg graph_name:{}, gen-dots:{}", graph_name, generate_dots_flag);
+  console->info("inou_cfg graph_name:{}, gen-dots:{}", graph_name);
 }
