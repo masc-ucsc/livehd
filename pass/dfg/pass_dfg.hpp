@@ -7,49 +7,17 @@
 #include "cfg_node_data.hpp"
 #include "lgedge.hpp"
 #include "symbol_table.hpp"
+#include "cf2df_state.hpp"
 
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-const std::string READ_MARKER   = "pyrrd__";
-const std::string WRITE_MARKER  = "pyrwt__";
-
 class Pass_dfg_options_pack : public Options_pack {
 public:
   Pass_dfg_options_pack();
   std::string output_name;
-  bool        generate_dots_flag;
 };
-
-class CF2DF_State {
-public:
-  CF2DF_State(bool rwf = true) : fluid(rwf) { }
-  CF2DF_State(const CF2DF_State &s) : last_refs(s.last_refs), registers(s.registers), fluid(s.fluid) { }
-  CF2DF_State copy() const { return CF2DF_State(*this); }
-
-  void update_reference(const std::string &v, Index_ID n);
-  Index_ID get_reference(const std::string &v) const { return last_refs.at(v); }
-  bool has_reference(const std::string &v) const { return last_refs.find(v) != last_refs.end(); }
-  const std::unordered_map<std::string, Index_ID> &references() const { return last_refs; }
-
-  void add_register(const std::string &v, Index_ID n) { registers[v] = n; }
-  bool fluid_df() const { return fluid; }
-
-  Symbol_Table &symbol_table() { return table; }
-
-private:
-  std::unordered_map<std::string, Index_ID> last_refs;
-  std::unordered_map<std::string, Index_ID> registers;
-  Symbol_Table table;
-  bool fluid;
-};
-
-const char REGISTER_MARKER = '@';
-const char INPUT_MARKER = '$';
-const char OUTPUT_MARKER = '%';
-const Port_ID REG_INPUT = 'D';
-const Port_ID REG_OUTPUT = 'Q';
 
 class Pass_dfg : public Pass {
 public:
@@ -109,11 +77,15 @@ private:
   Index_ID get_child(const LGraph *cfg, Index_ID node);
   Index_ID resolve_phi_branch(LGraph *dfg, CF2DF_State *parent, CF2DF_State *branch, const std::string &variable);
   void attach_outputs(LGraph *dfg, CF2DF_State *state);
+  void add_fluid_ports_and_logic(LGraph *dfg, CF2DF_State *state);
 
   void add_read_marker(LGraph *dfg, CF2DF_State *state, const std::string &v) { assign_to_true(dfg, state, read_marker(v)); }
-  std::string read_marker(const std::string &v) { return READ_MARKER + v; }
   void add_write_marker(LGraph *dfg, CF2DF_State *state, const std::string &v) { assign_to_true(dfg, state, write_marker(v)); }
+  
+  std::string read_marker(const std::string &v) { return READ_MARKER + v; }
   std::string write_marker(const std::string &v) { return WRITE_MARKER + v; }
+  std::string valid_marker(const std::string &v) { return VALID_MARKER + v; }
+  std::string retry_marker(const std::string &v) { return RETRY_MARKER + v; }
 
   void assign_to_true(LGraph *dfg, CF2DF_State *state, const std::string &v);
 
@@ -126,6 +98,10 @@ private:
   bool is_input(const std::string &v) { return v[0] == INPUT_MARKER; }
   bool is_output(const std::string &v) { return v[0] == OUTPUT_MARKER; }
   bool is_constant(const std::string &v) { return v[0] == '0'; }
+  bool is_read_marker(const std::string &v) { return v.substr(0, READ_MARKER.length()) == READ_MARKER; }
+  bool is_write_marker(const std::string &v) { return v.substr(0, WRITE_MARKER.length()) == WRITE_MARKER; }
+  bool is_valid_marker(const std::string &v) { return v.substr(0, VALID_MARKER.length()) == VALID_MARKER; }
+  bool is_retry_marker(const std::string &v) { return v.substr(0, RETRY_MARKER.length()) == RETRY_MARKER; }
 
   Index_ID create_register(LGraph *g, CF2DF_State *state, const std::string &var_name);
   Index_ID create_input(LGraph *g, CF2DF_State *state, const std::string &var_name);
