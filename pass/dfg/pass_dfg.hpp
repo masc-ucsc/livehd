@@ -8,7 +8,7 @@
 #include "lgedge.hpp"
 #include "symbol_table.hpp"
 #include "cf2df_state.hpp"
-
+#include "InfInt.hpp"
 #include <string>
 #include <unordered_map>
 #include <vector>
