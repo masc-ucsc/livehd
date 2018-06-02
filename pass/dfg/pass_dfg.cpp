@@ -305,10 +305,11 @@ Pass_dfg_options_pack::Pass_dfg_options_pack() : Options_pack() {
 void Pass_dfg::test_const_conversion() {
   LGraph *tg = new LGraph(opack.lgdb_path, opack.output_name, false);
   //const std::string str_in = "0x00_F234_5678_1234_5678_9A_u";//40 bits
-  const std::string str_in = "0b1111_1111_1111_1111_1111_1111_1111_1111";//buggy underscore
+  //const std::string str_in = "0b1111_1111_1111_1111_1111_1111_1111_1111";//buggy underscore
   //const std::string str_in = "0b00011111111111111111111111111111111s";
   //const std::string str_in = "-2147483647";
-  //const std::string str_in = "128";
+  //const std::string str_in = "-128";
+  const std::string str_in = "-4294967296";
 
   bool              is_signed          = false;
   bool              is_in32b           = true;
@@ -341,7 +342,7 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g,
 {
   string token1st, token2nd;
   string str_in = str;
-  char rm = '_';//remove _ in 0xF___FFFF
+  char rm = '_';//remove '_' in 0xF___FFFF
   str_in.erase(std::remove(str_in.begin(), str_in.end(),rm), str_in.end());
   size_t s_pos = str_in.find('s');//O(n)
   size_t u_pos = 0;
@@ -371,11 +372,11 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g,
   else
     explicit_bits = 0;
 
-
   //main process for bin/hex/dec
-  if(token1st[0] == '0' && token1st[1] == 'x'){ //hexadecimal
+  //hex
+  if(token1st[0] == '0' && token1st[1] == 'x'){
     token1st = token1st.substr(2);//exclude leading hex 0x
-    idx = token1st.find_first_not_of('0') ; //detect the leading 1 and start from it, e.g. 000FF, returns 3
+    idx = token1st.find_first_not_of('0') ;
     token1st = token1st.substr(idx);//exclude leading 0s
 
     //need to know the bit width of 1st character's
@@ -399,70 +400,39 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g,
   }
   else if (token1st[0] == '0' && token1st[1] == 'b') {//binary
     token1st = token1st.substr(2);//exclude leading bin 0b
-    idx = token1st.find_first_not_of('0') ; //detect the leading 1 and start from it, e.g. 000FF, returns 3
+    idx = token1st.find_first_not_of('0');
     token1st = token1st.substr(idx);//exclude leading 0s
     bit_width = explicit_bits ? explicit_bits : token1st.size();
 
     return process_bin_token(g, token1st, (uint16_t)bit_width, val, is_in32b);
 
-  }//end of binary
-  else{ //decimal
-    //find leading 1
-    if(token1st[0] == '-')
-      idx = token1st.substr(1).find_first_not_of('0') + 1;
-    else
-      idx = token1st.find_first_not_of('0');
-
-    string negative_max = "-2147483648";
-    string positive_max =  "2147483647"; // size = 10
-
-    if(token1st[0] == '-' && token1st.substr(idx).size() > 10){
-      //str_out = token1st;
-      is_in32b = false;
-      return 1111;
-    }
-    else if (token1st[0] != '-' && token1st.substr(idx).size() > 10){
-      //str_out = token1st;
-      is_in32b = false;
-      return 1111;
-    }
-    else if(token1st[0]  == '-' && token1st.substr(idx).size() == 10){
-      int i=0;
-      while(negative_max[i]){
-        if(token1st[i] > negative_max[i]){
-          //str_out = token1st;
-          is_in32b = false;
-          return 1111;
-        }
-        i++;
-      }
-    }
-    else if (token1st[0]  != '-' && token1st.substr(idx).size() == 10){
-      int i=0;
-      while(positive_max[i]){
-        if(token1st[i] > positive_max[i]){
-          //str_out = token1st;
-          is_in32b = false;
-          return 1111;
-        }
-        i++;
-      }
-    }
-
-
-    if (token1st[0] == '-') {//negative number
-      while(token1st[idx])
-        val = val*10 + (token1st[idx++] - '0');
-
-      val = (uint32_t)(-val);
+  }
+  else{//decimal
+    uint32_t big_int_length = 0;
+    if(token1st[0] == '-'){
+      is_explicit_signed = true;
       is_signed = true;
     }
-    else{
-      while(token1st[idx])
-        val = val*10 + (token1st[idx++] - '0');
-    }
-  }//end of decimal
 
+    InfInt big_int = token1st;
+
+    if(big_int > 0) {
+      while(big_int > 0){
+        big_int_length +=1;
+        big_int = big_int/2;
+      }
+    }
+    else{ // < 0
+      while(big_int < 0){
+        big_int_length +=1;
+        big_int = big_int/2;
+      }
+    }
+
+    bit_width = explicit_bits ? explicit_bits : big_int_length;
+    return process_dec_token(g, token1st, (uint16_t)bit_width, val, is_in32b);
+
+  }
   is_in32b = true;
   return 1111;
 }
@@ -597,3 +567,66 @@ uint32_t Pass_dfg::cal_bin_val_32b(const std::string& token){
   }
   return val;
 }
+
+
+Index_ID Pass_dfg::process_dec_token (LGraph *g, const std::string& token1st, const uint16_t& bit_width, uint32_t& val,  bool& is_in32b){
+  size_t idx = 0;
+  //find leading 1
+  if(token1st[0] == '-')
+    idx = token1st.substr(1).find_first_not_of('0') + 1;
+  else
+    idx = token1st.find_first_not_of('0');
+  //InfInt my_int  = "4294967297";
+  //InfInt my_int  = "-4294967296";
+  //my_int = my_int / 4294967296;//2^32
+  //std::cout<<"my_int = " << my_int << std::endl;
+
+
+  string negative_max = "-2147483648";
+  string positive_max =  "2147483647"; // size = 10
+
+  if(token1st[0] == '-' && token1st.substr(idx).size() > 10){
+    //str_out = token1st;
+    is_in32b = false;
+    return 1111;
+  }
+  else if (token1st[0] != '-' && token1st.substr(idx).size() > 10){
+    //str_out = token1st;
+    is_in32b = false;
+    return 1111;
+  }
+  else if(token1st[0]  == '-' && token1st.substr(idx).size() == 10){
+    int i=0;
+    while(negative_max[i]){
+      if(token1st[i] > negative_max[i]){
+        //str_out = token1st;
+        is_in32b = false;
+        return 1111;
+      }
+      i++;
+    }
+  }
+  else if (token1st[0]  != '-' && token1st.substr(idx).size() == 10){
+    int i=0;
+    while(positive_max[i]){
+      if(token1st[i] > positive_max[i]){
+        //str_out = token1st;
+        is_in32b = false;
+        return 1111;
+      }
+      i++;
+    }
+  }
+
+  if (token1st[0] == '-') {//negative number
+    while(token1st[idx])
+      val = val*10 + (token1st[idx++] - '0');
+
+    val = (uint32_t)(-val);
+  }
+  else{
+    while(token1st[idx])
+      val = val*10 + (token1st[idx++] - '0');
+  }
+}//end of decimal
+
