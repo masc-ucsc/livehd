@@ -130,7 +130,6 @@ exit" > fm_script_${gold_top}.tcl
 
 ${FM_SHELL} -64bit -f fm_script_${gold_top}.tcl | grep "Verification SUCCEEDED"
 
-if [ $? -eq 0 ]; then
   echo "Successfully matched ${GATE} with ${GOLD}"
   exit 0
 fi
