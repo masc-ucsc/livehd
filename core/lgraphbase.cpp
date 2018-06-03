@@ -198,20 +198,13 @@ bool LGraph_Base::is_graph_output(const char *name) const {
 bool LGraph_Base::is_graph_input(Index_ID idx) const {
   assert(static_cast<Index_ID>(node_internal.size()) > idx);
 
-#ifdef DEBUG
-  /*if (!node_internal[idx].is_master_root()) {
-    Index_ID nid = node_internal[idx].get_master_root_nid();
-    //assert(node_internal[nid].is_master_root() == node_internal[idx].is_master_root());
-  }*/
-#endif
-
   return node_internal[idx].is_graph_io_input();
 }
 
 bool LGraph_Base::is_graph_output(Index_ID idx) const {
   assert(static_cast<Index_ID>(node_internal.size()) > idx);
 
-#ifdef DEBUG
+#ifndef NDEBUG
   /*if (!node_internal[idx].is_master_root()) {
     Index_ID nid = node_internal[idx].get_master_root_nid();
     //assert(node_internal[nid].is_master_root() == node_internal[idx].is_master_root());
@@ -348,7 +341,7 @@ Index_ID LGraph_Base::create_node_space(Index_ID last_idx, Port_ID out_pid, Inde
     return idx2;
   }
 
-#ifdef DEBUG
+#ifndef NDEBUG
   const auto &dbg_master = node_internal[last_idx].get_master_root();
   int32_t     dbg_ni     = dbg_master.get_num_inputs();
   int32_t     dbg_no     = dbg_master.get_num_outputs();
@@ -655,7 +648,7 @@ Index_ID LGraph_Base::add_edge_int(Index_ID dst_nid, Port_ID inp_pid, Index_ID s
   // WARNING: Graph IO have alphabetical port IDs assigned to be mapped between
   // graphs. It should not use local port b
   if(node_internal[src_nid].is_graph_io()) {
-#ifdef DEBUG_OLD
+#ifndef NDEBUG_OLD
     if(!(out_pid == 0 || out_pid == node_internal[src_nid].get_out_pid()))
       dump();
     assert(out_pid == 0 || out_pid == node_internal[src_nid].get_out_pid());
@@ -667,7 +660,7 @@ Index_ID LGraph_Base::add_edge_int(Index_ID dst_nid, Port_ID inp_pid, Index_ID s
   }
 
   if(node_internal[dst_nid].is_graph_io()) {
-#ifdef DEBUG_OLD
+#ifndef NDEBUG_OLD
     if(!(inp_pid == 0 || inp_pid == node_internal[dst_nid].get_out_pid()))
       dump();
     assert(inp_pid == 0 || inp_pid == node_internal[dst_nid].get_out_pid());
@@ -681,7 +674,7 @@ Index_ID LGraph_Base::add_edge_int(Index_ID dst_nid, Port_ID inp_pid, Index_ID s
   assert(node_internal[dst_nid].is_node_state());
   assert(node_internal[src_nid].is_node_state());
 
-#ifdef DEBUG
+#ifndef NDEBUG
   // Do not insert twice check
   for(const auto &v : out_edges(src_nid)) {
     if(v.get_idx() == dst_nid && v.get_out_pid() == out_pid && v.get_inp_pid() == inp_pid) {
@@ -741,7 +734,7 @@ Index_ID LGraph_Base::add_edge_int(Index_ID dst_nid, Port_ID inp_pid, Index_ID s
     node_internal[idx].inc_inputs(true); // WARNING: after next_free_input_pos (increasing insert)
   }
 
-#ifdef DEBUG
+#ifndef NDEBUG
   Index_ID master_nid = src_nid;
   assert(node_internal[master_nid].is_master_root());
   Index_ID          j = master_nid;

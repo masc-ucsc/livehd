@@ -8,9 +8,9 @@
 
 #include "lglog.hpp"
 
-// FIXME2: unsigned, currently Must be signed (deltas are -+offsets). It looses one bit for max size
-typedef int64_t  Index_ID;
-typedef uint16_t Port_ID; // ports have a set order (a-b != b-a)
+typedef uint64_t Index_ID;
+typedef int64_t  SIndex_ID; // Short Edge must be signed +- offset
+typedef uint16_t Port_ID;   // ports have a set order (a-b != b-a)
 
 constexpr int Index_Bits = 34;
 constexpr int Port_Bits  = 12;
@@ -59,7 +59,7 @@ public:
 struct __attribute__((packed)) SEdge_Internal { // 2 bytes total
   bool     snode : 1;                           //  1 bit
   bool     input : 1;                           //  1 bit
-  Index_ID ridx : 12;                           //  relative
+  SIndex_ID ridx : 12;                          //  relative
   Port_ID  inp_pid : 2;                         //   2 bits ; abs
 
   bool     is_snode() const { return snode; }
@@ -78,8 +78,8 @@ struct __attribute__((packed)) SEdge_Internal { // 2 bytes total
       //fmt::print("P:{}\n",_inp_pid);
       return false;
     }
-    Index_ID abs_idx   = get_page_idx();
-    Index_ID delta_idx = _idx - abs_idx;
+    Index_ID abs_idx    = static_cast<SIndex_ID>(get_page_idx());
+    SIndex_ID delta_idx = static_cast<SIndex_ID>(_idx) - abs_idx;
     if(delta_idx >= ((1 << 11) - 1) || delta_idx < (-((1 << 11) - 1))) {
       //fmt::print("D:{}\n",delta_idx);
       return false;
@@ -452,7 +452,7 @@ public:
     assert(_nid < (1LL << Index_Bits));
     assert(!is_graph_io());
     nid = _nid;
-#ifdef DEBUG
+#ifndef NDEBUG
     if(nid == get_self_idx())
       assert(root);
 #endif

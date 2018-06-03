@@ -49,9 +49,9 @@ class AlignedAllocator {
 
   static  std::map<std::ptrdiff_t, std::ptrdiff_t> _ptrmap;
 
-#ifdef DEBUG
+#ifndef NDEBUG
   static  unsigned _reference_count;
-#endif // DEBUG
+#endif
 
   void erase(ptrmap_it it);
 
@@ -88,33 +88,33 @@ class AlignedAllocator {
 template <typename T, const unsigned align>
 std::map<ptrdiff_t, ptrdiff_t> AlignedAllocator<T, align>::_ptrmap;
 
-#ifdef DEBUG
+#ifndef NDEBUG
 template <typename T, const unsigned align>
 unsigned AlignedAllocator<T, align>::_reference_count = 0;
-#endif // DEBUG
+#endif
 
 template <typename T, const unsigned align>
 AlignedAllocator<T,align>::AlignedAllocator()
 {
-#ifdef DEBUG
+#ifndef NDEBUG
   if( (align & (align - 1)) != 0)
     throw std::runtime_error("AlignedAllocator : AlignedAllocator() template parameter align is not power of two");
 #ifdef OPENMP
   #pragma omp critical(ptrmap_modify)
 #endif // OPENMP
   ++_reference_count;
-#endif // DEBUG
+#endif
 }
 
 template <typename T, const unsigned align>
 AlignedAllocator<T,align>::AlignedAllocator(const AlignedAllocator&)
 {
-#ifdef DEBUG
+#ifndef NDEBUG
 #ifdef OPENMP
   #pragma omp critical(ptrmap_modify)
 #endif // OPENMP
   ++_reference_count;
-#endif // DEBUG
+#endif
 }
 
 template <typename T, const unsigned align>
@@ -172,10 +172,10 @@ void AlignedAllocator<T, align>::deallocate(pointer p, size_type n)
     {
       erase(p_it);
     }
-#ifdef DEBUG
+#ifndef NDEBUG
       else
         throw std::runtime_error("AlignedAllocator::deallocate : _ptrmap doesn't have mapped pointer");
-#endif // DEBUG
+#endif
 #ifdef OPENMP
   }
 #endif // OPENMP
@@ -184,7 +184,7 @@ void AlignedAllocator<T, align>::deallocate(pointer p, size_type n)
 template <typename T, const unsigned align>
 AlignedAllocator<T,align>::~AlignedAllocator()
 {
-#ifdef DEBUG
+#ifndef NDEBUG
 #ifdef OPENMP
   #pragma omp critical (ptrmap_modify)
   {
@@ -199,7 +199,7 @@ AlignedAllocator<T,align>::~AlignedAllocator()
 #ifdef OPENMP
   }
 #endif // OPENMP
-#endif // DEBUG
+#endif
 }
 
 } // namespace AAlloc
