@@ -12,8 +12,8 @@ int main(int argc, const char **argv) {
 
   Options::setup_lock();
 
-  dfg.test_const_conversion();
-  //dfg.transform();
+  //dfg.test_const_conversion();
+  dfg.transform();
 
   return 0;
 }
