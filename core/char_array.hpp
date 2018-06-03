@@ -93,6 +93,10 @@ public:
   Const_Char_Array_Iter begin() const { return Const_Char_Array_Iter(first()); }
   Const_Char_Array_Iter end() const { return Const_Char_Array_Iter(last()); }
 
+  Char_Array_ID create_id(const std::string &str) {
+    return create_id(str.c_str());
+  }
+
   Char_Array_ID create_id(const char *str) {
     assert(!pending_clear_reload);
 
@@ -121,6 +125,10 @@ public:
 
     str2id[str] = start;
     return start;
+  }
+
+  Char_Array_ID create_id(const std::string &str, Data_Type dt) {
+    return create_id(str.c_str(), dt);
   }
 
   Char_Array_ID create_id(const char *str, Data_Type dt) {

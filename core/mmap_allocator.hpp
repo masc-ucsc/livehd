@@ -10,7 +10,7 @@
 #include <cassert>
 #include <iostream>
 
-#define MMAPA_INIT_ENTRIES  (1ULL<<20)
+#define MMAPA_INIT_ENTRIES  (1ULL<<15)
 #define MMAPA_INCR_ENTRIES  (1ULL<<20)
 #define MMAPA_MAX_ENTRIES   (1ULL<<34)
 #define MMAPA_ALIGN_BITS    (12)
@@ -82,6 +82,7 @@ public:
         while(mmap_size < file_size) {
           mmap_size += MMAPA_INCR_ENTRIES;
         }
+      std::cout << "resizing\n";
         mmap_base = reinterpret_cast<uint64_t *>(mremap(mmap_base, old_size, mmap_size, MREMAP_MAYMOVE));
         if (mmap_base  == MAP_FAILED) {
           std::cerr << "ERROR: mmap could not allocate\n";

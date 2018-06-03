@@ -3,7 +3,7 @@
 #include "lgedgeiter.hpp"
 
 bool test0() {
-  LGraph* g = new LGraph("lgdb","test0", true);
+  LGraph* g = new LGraph("core_test_lgdb","test0", true);
 
   Index_ID idx1 = g->create_node().get_nid();
   g->create_node().get_nid();
@@ -19,7 +19,7 @@ bool test0() {
 }
 
 bool test1() {
-  LGraph* g = new LGraph("lgdb","test", true);
+  LGraph* g = new LGraph("core_test_lgdb","test", true);
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
@@ -54,7 +54,7 @@ bool test1() {
 }
 
 bool test20() {
-  LGraph* g = new LGraph("lgdb","test20", true);
+  LGraph* g = new LGraph("core_test_lgdb","test20", true);
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
@@ -82,7 +82,7 @@ bool test20() {
 
 bool test21() {
 
-  LGraph* g = new LGraph("lgdb","test21", true);
+  LGraph* g = new LGraph("core_test_lgdb","test21", true);
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
@@ -110,7 +110,7 @@ bool test21() {
 
 bool test2() {
 
-  LGraph* g = new LGraph("lgdb","test2", true);
+  LGraph* g = new LGraph("core_test_lgdb","test2", true);
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
@@ -138,7 +138,7 @@ bool test2() {
 
 bool test22() {
 
-  LGraph* g = new LGraph("lgdb","test22", true);
+  LGraph* g = new LGraph("core_test_lgdb","test22", true);
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
@@ -167,7 +167,7 @@ bool test22() {
 
 bool test3() {
 
-  LGraph* g = new LGraph("lgdb","test3", true);
+  LGraph* g = new LGraph("core_test_lgdb","test3", true);
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
@@ -200,7 +200,7 @@ bool test3() {
 
 bool test4() {
 
-  LGraph* g = new LGraph("lgdb","test4", true);
+  LGraph* g = new LGraph("core_test_lgdb","test4", true);
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
