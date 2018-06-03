@@ -21,6 +21,7 @@ TARGET_LINK_LIBRARIES(inou_yosys -Wl,-Bstatic ${BOOST_LIBS} -Wl,-Bdynamic -lrt -
 
 add_custom_command(TARGET inou_yosys PRE_BUILD COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/subs/yosys/techlibs/common/simcells.v ${PROJECT_BINARY_DIR}/simcell.v)
 add_custom_command(TARGET inou_yosys PRE_BUILD COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/lgyosys ${PROJECT_BINARY_DIR}/lgyosys)
+add_custom_command(TARGET inou_yosys PRE_BUILD COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/lgcheck ${PROJECT_BINARY_DIR}/lgcheck)
 add_custom_command(TARGET inou_yosys PRE_BUILD COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/tests ${PROJECT_BINARY_DIR}/tests/)
 
 add_test(NAME extra_inou_yosys_parse COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/lgyosys --testdir=${CMAKE_CURRENT_SOURCE_DIR}/tests
