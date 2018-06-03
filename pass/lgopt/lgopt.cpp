@@ -69,13 +69,17 @@ int main(int argc, const char **argv) {
         vectorize.transform(g);
       } else if(pass_name == "fast") {
         Pass_fast fast;
+        for(int i = 0; i < 2000; i++) {
         fast.transform(g);
+        }
       b.sample(pass_name + " pass1");
         fast.transform(g);
       b.sample(pass_name + " pass2");
       } else if(pass_name == "topological") {
         Pass_topo topo;
+        for(int i = 0; i < 50; i++) {
         topo.transform(g);
+        }
       b.sample(pass_name + " pass1");
         topo.transform(g);
       b.sample(pass_name + " pass2");

@@ -4,7 +4,6 @@
 #include <stdexcept>
 #include <string>
 
-namespace Pyrope {
 class Exception : public std::runtime_error {
 public:
   Exception(const std::string &m) : std::runtime_error(msg) {}
@@ -30,6 +29,5 @@ class Logic_Error : public Exception {
 public:
   Logic_Error(const std::string &msg) : Exception(msg) {}
 };
-} // namespace Pyrope
 
 #endif

@@ -13,11 +13,10 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <vector>
+#include <algorithm>
 using std::map;
 using std::string;
 using std::vector;
-
-const int CFG_METADATA_COUNT = 5;
 
 Inou_cfg_options_pack::Inou_cfg_options_pack() {
 
@@ -139,30 +138,6 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
     p = strtok_r(nullptr, "\n\r\f", &str_ptr);
   } //end while loop
 
-  /*
-    deal with GIO for every graph
-  */
-
-  for(int i = 0; i < lgs.size(); i++) {
-    //Graph input
-    Node gio_node_bg = lgs[i]->create_node();
-    fmt::print("create node:{}, nid:{}\n", "GIO", gio_node_bg.get_nid());
-    lgs[i]->node_type_set(gio_node_bg.get_nid(), GraphIO_Op);
-    Index_ID src_nid = gio_node_bg.get_nid();
-    Index_ID dst_nid = name2id_gs[i][nname_bg_gs[i]];
-    lgs[i]->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
-
-    //Graph output
-    Node gio_node_ed = lgs[i]->create_node();
-    fmt::print("create node:{}, nid:{}\n", "GIO", gio_node_ed.get_nid());
-    lgs[i]->node_type_set(gio_node_ed.get_nid(), GraphIO_Op);
-    src_nid = nid_ed_gs[i];
-    fmt::print("total node number:{}\n", name2id_gs[0].size());
-    dst_nid = gio_node_ed.get_nid();
-    ;
-    lgs[i]->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
-  }
-
   for(int i = 0; i < chain_stks_gs.size(); i++) {
     for(auto &x : chain_stks_gs[i]) {
       fmt::print("\ncurrent is chain_stks_gs[{}], vid {} content is\n", i, x.first);
@@ -170,10 +145,12 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
         fmt::print("{}\n", *j);
     }
   }
+
+  update_ifs(lgs, name2id_gs);
 }
 
 void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, map<string, uint32_t> &nfirst2gid,
-                           map<string, Index_ID> &name2id, map<string, vector<string>> &chain_stks, int64_t &nid_end) {
+                           map<string, Index_ID> &name2id, map<string, vector<string>> &chain_stks, Index_ID &nid_end) {
 
   fmt::print("dfg_data:{}\n", dfg_data);
   string w1st = *(words.begin());
@@ -235,7 +212,7 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
     }
   }
 
-  g->set_node_wirename(name2id[w1st], encode_cfg_data(dfg_data).c_str());
+  g->set_node_wirename(name2id[w1st], CFG_Node_Data(dfg_data).encode().c_str());
   /*
 
     II-0.process 2nd node and 9th node(if-else merging node)
@@ -439,27 +416,6 @@ void Inou_cfg::generate(vector<const LGraph *> &out) {
   }
 }
 
-std::string Inou_cfg::encode_cfg_data(const std::string &data) {
-  std::istringstream ss(data);
-  std::string        buffer;
-
-  for(int i = 0; i < CFG_METADATA_COUNT;) { // the first few are metadata, and these reads should not fail or
-                                            // we have a formatting issue
-    assert(ss >> buffer);
-
-    if(!buffer.empty()) // only count non-empty tokens
-      i++;
-  }
-
-  std::string encoded;
-  while(ss >> buffer) { // actually save the remaining
-    if(!buffer.empty())
-      encoded += buffer + ENCODING_DELIM;
-  }
-
-  return encoded;
-}
-
 void Inou_cfg::cfg_2_dot(LGraph *g, const std::string &path) {
   FILE *dot = fopen(path.c_str(), "w");
 
@@ -485,43 +441,184 @@ void Inou_cfg::cfg_2_dot(LGraph *g, const std::string &path) {
   fclose(dot);
 }
 
-bool prp_get_value(char *str, bool &v_signed, uint32_t &bits, uint32_t &explicit_bits, uint32_t &val) {
-  //judge signed or unsigned
-  string str_tmp(str);
-  if(str_tmp.find('s') != std::string::npos)
+// prp_get_value returns true if constant is within 32-bits; else returns string for const string in lgraph
+bool prp_get_value(const string& str_in, string& str_out, bool &v_signed, uint32_t &explicit_bits, uint32_t &val){
+
+  string token1st, token2nd;
+  size_t s_pos = str_in.find('s');//O(n)
+  size_t u_pos = 0;
+  size_t idx;
+  size_t bit_width;
+
+  //decide 1st and 2nd tokens, delimiter: s or u
+  if(s_pos != string::npos){
+    char rm = '_';//remove _ in 0xF___FFFF
+    string str_sub = str_in.substr(0,s_pos);
+    str_sub.erase(std::remove(str_sub.begin(), str_sub.end(),rm), str_sub.end());
+    token1st = str_sub;
+    token2nd = str_in.substr(s_pos+1);
     v_signed = true;
-
-  char *str_ptr=0;
-  char *         token = strtok_r(str, "su",&str_ptr);
-  vector<string> tokens;
-
-  // Keep collecting tokens while one of the delimiters present in str[].
-  while(token != nullptr) {
-    tokens.push_back(token);
-    token = strtok_r(nullptr, "su", &str_ptr);
+  }
+  else{
+    u_pos = str_in.find('u');//O(n)
+    if(u_pos != string::npos){
+      token1st = str_in.substr(0,u_pos);
+      token2nd = str_in.substr(u_pos+1);
+    }
+    else
+      token1st = str_in;
   }
 
-#if DEBUG
-  for(const auto &i : tokens)
-    fmt::print("{}\n", i);
-#endif
+  //fmt::print("1st token:{}\n",token1st);
 
-  if(tokens[0][1] == 'x') {        //heximal
-    bits = 1;                      //To do
-    val  = 1;                      //To do
-  } else if(tokens[0][1] == 'b') { // binary
-    bits = 2;                      //To do
-    val  = 2;                      //To do
-  } else {                         //decimal
-    bits = 3;
-    val  = (uint32_t)std::stoi(tokens[0]);
-    ;
-  }
-
-  if(tokens.size() == 2)
-    explicit_bits = (uint32_t)std::stoi(tokens[1]); //explicit bits width
+  //explicit bits width
+  if(token2nd != "")
+    explicit_bits = (uint32_t) std::stoi(token2nd);
   else
-    explicit_bits = 0; //implicit bits width
+    explicit_bits = 0;
 
-  return true; //To do
+
+  if(token1st[0] == '0' && token1st[1] == 'x'){ //hexadecimal
+    //detect the leading 1 and start from it
+    idx = token1st.substr(2).find_first_not_of('0') + 2; //e.g. 0x000FFFFF, returns 5
+
+    //need to determine first character's bit width
+    uint8_t char1st_width = 0;
+    if(token1st[idx] == '1')
+      char1st_width = 1;
+    else if(token1st[idx] >= '2' && token1st[idx] <='3')
+      char1st_width = 2;
+    else if(token1st[idx] >= '4' && token1st[idx] <='7')
+      char1st_width = 3;
+    else if(token1st[idx] >= '8' && token1st[idx] <='9')
+      char1st_width = 4;
+    else if(token1st[idx] >= 'a' && token1st[idx] <='f')
+      char1st_width = 4;
+    else if(token1st[idx] >= 'A' && token1st[idx] <='F')
+      char1st_width = 4;
+
+
+    bit_width = (token1st.size() - idx - 1) * 4 + char1st_width;
+    //fmt::print("bit_width:{}\n", bit_width);
+    if(bit_width > 32){
+      str_out = token1st;
+      return false;
+    }
+
+    while(token1st[idx]){
+      uint8_t byte = token1st[idx];
+      if (byte >= '0' && byte <= '9'){
+        byte = byte - '0';
+        val = val << 4 | (byte & 0xF);
+      }
+      else if (byte >= 'a' && byte <= 'f'){
+        byte = byte - 'a' + 10;
+        val = val << 4 | (byte & 0xF);
+      }
+      else if (byte >= 'A' && byte <= 'F'){
+        byte = byte - 'A' + 10;
+        val = val << 4 | (byte & 0xF);
+      }
+      idx++;
+    }
+  }
+  else if (token1st[0] == '0' && token1st[1] == 'b') {//binary
+    idx = token1st.substr(2).find_first_not_of('0') + 2; //e.g. 0b00011111, returns 5
+
+    //fmt::print("idx:{}\n", idx);
+    //fmt::print("token1st size:{}\n", token1st.size());
+    bit_width = token1st.size() - idx;
+    //fmt::print("bit_width:{}\n", bit_width);
+
+    if(bit_width > 32){
+      str_out = token1st;
+      return false;
+    }
+
+    while(token1st[idx]){
+      uint8_t byte = token1st[idx];
+      if(byte >= '0' && byte <= '1'){
+        byte = byte - '0';
+        val = val << 1 | (byte & 0xF);
+      }
+      idx++;
+    }
+  }
+  else{ //decimal
+    //find leading 1
+    if(token1st[0] == '-')
+      idx = token1st.substr(1).find_first_not_of('0') + 1;
+    else
+      idx = token1st.find_first_not_of('0');
+
+    string negative_max = "-2147483648";
+    string positive_max =  "2147483647"; // size = 10
+
+    if(token1st[0] == '-' && token1st.substr(idx).size() > 10){
+      str_out = token1st;
+      return false;
+    }
+    else if (token1st[0] != '-' && token1st.substr(idx).size() > 10){
+      str_out = token1st;
+      return false;
+    }
+    else if(token1st[0]  == '-' && token1st.substr(idx).size() == 10){
+      int i=0;
+      while(negative_max[i]){
+        if(token1st[i] > negative_max[i]){
+          str_out = token1st;
+          return false;
+        }
+        i++;
+      }
+    }
+    else if (token1st[0]  != '-' && token1st.substr(idx).size() == 10){
+      int i=0;
+      while(positive_max[i]){
+        if(token1st[i] > positive_max[i]){
+          str_out = token1st;
+          return false;
+        }
+        i++;
+      }
+    }
+
+
+    if (token1st[0] == '-') {//negative number
+      while(token1st[idx])
+        val = val*10 + (token1st[idx++] - '0');
+
+      val = (uint32_t)(-val);
+      v_signed = true;
+    }
+    else{
+      while(token1st[idx])
+        val = val*10 + (token1st[idx++] - '0');
+    }
+  }
+
+  return true;
 }
+
+void Inou_cfg::update_ifs(vector<LGraph *> &lgs, vector<map<string, Index_ID>> &node_mappings)
+{
+  for (int i = 0; i < lgs.size(); i++) {
+    LGraph *g = lgs[i];
+    auto &mapping = node_mappings[i];
+
+    for (auto idx : g->fast()) {
+      CFG_Node_Data data(g, idx);
+
+      if (data.get_operator() == COND_BR_MARKER) {
+        const auto &dops = data.get_operands();
+        vector<string> new_operands(dops.size());
+        
+        std::transform(dops.begin(), dops.end(), new_operands.begin(),
+          [&](const string &op) -> string { return std::to_string(mapping[(op[0] == '\'') ? op.substr(1) : op]); });
+        
+        g->set_node_wirename(idx, CFG_Node_Data(data.get_target(), new_operands, data.get_operator()).encode().c_str());
+      }
+    }
+  }
+}
+

@@ -8,30 +8,28 @@
 
 const int  OPERANDS_INIT_SIZE = 4;   // most CFG nodes will have 4 operands
 const char ENCODING_DELIM     = '|'; // deliminator used to encode CFG data into wirename field
+const int  CFG_METADATA_COUNT = 5;
+const std::string EMPTY_MARKER = "<none>";
+const std::string COND_BR_MARKER = "if";
 
 class CFG_Node_Data {
 public:
-  CFG_Node_Data(Node_Type_Op op, const char *data_str) : oper(op) {
-    std::istringstream ss(data_str);
+  CFG_Node_Data(const LGraph *g, Index_ID node);
+  CFG_Node_Data(const std::string &parser_raw);
+  CFG_Node_Data(const std::string &t, const std::vector<std::string> &ops, const std::string &ot)
+    : target(t), operands(ops), oper_text(ot) { }
+  CFG_Node_Data(const CFG_Node_Data &o) : target(o.get_target()), operands(o.get_operands()), oper_text(o.get_operator()) { }
 
-    assert(std::getline(ss, target, ENCODING_DELIM)); // the first var in the data_str is the target
-                                                      // this read shouldn't fail
+  std::string encode() const;
 
-    std::string buffer;
-    while(std::getline(ss, buffer, ENCODING_DELIM)) {
-      if(!buffer.empty())
-        operands.push_back(buffer);
-    }
-  }
-
-  Node_Type_Op                    get_operator() const { return oper; }
-  std::string                     get_target() const { return target; }
+  const std::string              &get_target() const { return target; }
+  const std::string              &get_operator() const { return oper_text; }
   const std::vector<std::string> &get_operands() const { return operands; }
 
 private:
-  Node_Type_Op             oper;
   std::string              target;
   std::vector<std::string> operands;
+  std::string              oper_text;
 };
 
 #endif

@@ -39,9 +39,9 @@ protected:
       graph_list >> n_graphs;
       id2name.resize(n_graphs);
 
-      for(int idx = 0; idx < n_graphs; ++idx) {
+      for(size_t idx = 0; idx < n_graphs; ++idx) {
         std::string name;
-        int         graph_id = 0;
+        size_t      graph_id = 0;
         graph_list >> name >> graph_id;
 
         // this is only true in case where we skip graph ids

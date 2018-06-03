@@ -50,12 +50,12 @@ static std::map<std::string, Index_ID>     const_map;
 typedef std::pair<uint32_t, uint32_t> Value_size;
 static std::map<Value_size, Index_ID> int_const_map;
 
-#ifdef DEBUG
+#ifndef NDEBUG
 static std::map<std::string, uint32_t> used_names;
 #endif
 
 static void look_for_module_outputs(RTLIL::Module *module, const std::string &output_directory) {
-#ifdef DEBUG
+#ifndef NDEBUG
   log("inou_yosys look_for_module_outputs pass for module %s:\n", module->name.c_str());
 #endif
   std::string name = &module->name.c_str()[1];
@@ -76,7 +76,7 @@ static void look_for_module_outputs(RTLIL::Module *module, const std::string &ou
       g->set_bits(io_idx, wire->width);
       g->node_type_set(io_idx, GraphIO_Op);
 
-#ifdef DEBUG
+#ifndef NDEBUG
       used_names.insert(std::make_pair(&wire->name.c_str()[1], io_idx));
 #endif
 
@@ -91,7 +91,7 @@ static void look_for_module_outputs(RTLIL::Module *module, const std::string &ou
       g->set_bits(io_idx, wire->width);
       g->node_type_set(io_idx, GraphIO_Op);
 
-#ifdef DEBUG
+#ifndef NDEBUG
       used_names.insert(std::make_pair(&wire->name.c_str()[1], io_idx));
 #endif
     }
@@ -189,7 +189,7 @@ static void set_bits_wirename(LGraph *g, const Index_ID idx, const RTLIL::Wire *
 
   if(!wire->port_input && !wire->port_output) {
 
-#ifdef DEBUG
+#ifndef NDEBUG
     if(g->get_wid(idx) != 0)
       assert(std::string(g->get_node_wirename(idx)) == wire->name.str().substr(1));
 #endif
@@ -230,7 +230,7 @@ static void set_bits_wirename(LGraph *g, const Index_ID idx, const RTLIL::Wire *
         //skip chisel generated names
         wire->name.str().substr(0, 5) != "_GEN_" &&
         wire->name.str().substr(0, 3) != "_T_")) {
-#ifdef DEBUG
+#ifndef NDEBUG
       if(g->get_wid(idx) == 0) {
         if(used_names.find(wire->name.str().substr(1)) != used_names.end())
           fmt::print("wirename {} already in used by idx {} (current idx = {})\n", wire->name.str(), used_names[wire->name.str().substr(1)], idx);
@@ -243,7 +243,7 @@ static void set_bits_wirename(LGraph *g, const Index_ID idx, const RTLIL::Wire *
   }
 
   if(!g->is_graph_input(idx) && !g->is_graph_output(idx)) {
-#ifdef DEBUG
+#ifndef NDEBUG
     if(g->get_bits(idx) != 0 && g->get_bits(idx) != wire->width)
       console->warn("A previous number of bits was assigned to node %ld (yosys wirename %s) and it differs from the number being assigned now\n", idx, &wire->name.c_str()[1]);
       //assert(g->get_bits(idx) == wire->width);
@@ -389,7 +389,7 @@ static void connect_string(LGraph *g, const char *value, Index_ID onid, Port_ID 
 
     Index_ID const_nid = g->create_node().get_nid();
     g->node_const_type_set(const_nid, std::string(value)
-#ifdef DEBUG
+#ifndef NDEBUG
                                           ,
                            false
 #endif
@@ -402,7 +402,7 @@ static void connect_string(LGraph *g, const char *value, Index_ID onid, Port_ID 
 
 static void look_for_cell_outputs(RTLIL::Module *module) {
 
-#ifdef DEBUG
+#ifndef NDEBUG
   log("inou_yosys look_for_cell_outputs pass for module %s:\n", module->name.c_str());
 #endif
 
@@ -455,9 +455,7 @@ static void look_for_cell_outputs(RTLIL::Module *module) {
 
       assert(cell->output(conn.first));
       if(blackbox) {
-#ifdef DEBUG
         assert(is_black_box_output(module, cell, conn.first));
-#endif
         connect_string(g, &(conn.first.c_str()[1]), nid, LGRAPH_BBOP_ONAME(blackbox_out++));
 
       } else if(sub_graph && !sub_graph->is_graph_output(&(conn.first.c_str()[1]))) {
@@ -567,7 +565,7 @@ static Node_Pin create_join_operator(LGraph *g, const RTLIL::SigSpec &ss) {
 
 // this function is called for each module in the design
 static LGraph *process_module(RTLIL::Module *module) {
-#ifdef DEBUG
+#ifndef NDEBUG
   log("inou_yosys pass for module %s:\n", module->name.c_str());
   printf("process_module %s\n", module->name.c_str());
 #endif
@@ -876,7 +874,7 @@ static LGraph *process_module(RTLIL::Module *module) {
         log_error("No clock found for memory.\n");
       }
 
-#ifdef DEBUG
+#ifndef NDEBUG
       if(g->get_wid(onid) == 0) {
         if(used_names.find(name) != used_names.end())
           fmt::print("wirename {} already in used by idx {} (current idx = {})\n", name, used_names[name], onid);
@@ -901,7 +899,7 @@ static LGraph *process_module(RTLIL::Module *module) {
       std::string inst_name = cell->name.str().substr(1);
       if(inst_name != "")
         g->set_node_instance_name(inid, inst_name.c_str());
-#ifdef DEBUG
+#ifndef NDEBUG
       else
         fmt::print("inou_yosys got empty inst_name for cell type {}\n", mod_name);
 #endif
@@ -972,7 +970,7 @@ static LGraph *process_module(RTLIL::Module *module) {
 
     } else {
       //blackbox addition
-#ifdef DEBUG
+#ifndef NDEBUG
       console->info("Black box addition from yosys frontend, cell type {} not found\n", cell->type.c_str());
 #endif
 
@@ -1244,14 +1242,16 @@ struct Inou_Yosys_Pass : public Pass {
     }
 
     for(auto &it : design->modules_) {
-#ifdef DEBUG
+#ifndef NDEBUG
       used_names.clear();
 #endif
       RTLIL::Module *module = it.second;
       if(design->selected_module(it.first)) {
-  log("inou_yosys look_for_cell_outputs pass for module %s:\n", module->name.c_str());
+#ifndef NDEBUG
+        log("inou_yosys look_for_cell_outputs pass for module %s:\n", module->name.c_str());
+        console->info("now processing module {}\n", module->name.str());
+#endif
         look_for_cell_outputs(module);
-  log("inou_yosys process_module pass for module %s:\n", module->name.c_str());
         LGraph *g = process_module(module);
 
         g->sync();

@@ -91,12 +91,26 @@ public:
 
   const std::string &get_name() const { return name; }
 
-  Port_ID get_input_match(const char *str) {
+  Port_ID get_input_match(const char *str) const {
     for(size_t i = 0; i < inputs.size(); i++) {
       if(strcasecmp(inputs[i], str) == 0) {
         return static_cast<Port_ID>(i);
       }
     }
+
+    assert(false); // No match found
+
+    return 0;
+  }
+
+  Port_ID get_output_match(const char *str) const {
+    for(size_t i = 0; i < inputs.size(); i++) {
+      if(strcasecmp(outputs[i], str) == 0) {
+        return static_cast<Port_ID>(i);
+      }
+    }
+
+    assert(false); // No match found
 
     return 0;
   }
@@ -624,7 +638,7 @@ public:
   uint32_t subgraph_id_get(Index_ID nid) const;
 
   void node_const_type_set(Index_ID nid, const std::string & value
-#ifdef DEBUG
+#ifndef NDEBUG
                            ,
                            bool enforce_bits = true
 #endif
