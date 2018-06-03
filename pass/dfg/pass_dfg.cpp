@@ -311,8 +311,10 @@ void Pass_dfg::test_const_conversion() {
   //const std::string str_in = "-128";
   //const std::string str_in = "-4294967295";
   //const std::string str_in = "-2147483648";
-  const std::string str_in = "-2147483649";
-  //const std::string str_in = "-1";
+  //const std::string str_in = "-2147483649";
+  const std::string str_in = "-4294967296";
+  //const std::string str_in = "2147483647";
+  //const std::string str_in = "-8";
 
   bool              is_signed          = false;
   bool              is_in32b           = true;
@@ -413,7 +415,7 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g,
 
   }
   else{//decimal
-    uint32_t big_int_length = 0;
+    string s_2scmp;
     if(token1st[0] == '-'){
       is_explicit_signed = true;
       is_signed = true;
@@ -421,25 +423,59 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g,
 
     InfInt big_int = token1st;
 
+    //first converting big_int(either positive or negative) to 2's complement form
+    //then you could analyze by process_bin_token
     if(big_int > 0) {
-      while(big_int > 0){
-        big_int_length +=1;
-        big_int = big_int/2;
+      while(big_int != 0){
+        s_2scmp += (big_int%2).toString();
+        big_int /=  2;
       }
+      reverse(s_2scmp.begin(), s_2scmp.end());
+      //while(big_int > 0){
+      //  big_int_length +=1;
+      //  big_int = big_int/2;
+      //}
     }
     else{// < 0
-      big_int_length = 32; //at least 32 bits
-      fmt::print("token1st           = {}\n", token1st);
-      fmt::print("big_int/2147483648 = {}\n\n\n", (big_int/2147483648).toInt());
-      while((big_int / 2147483648 ) <= -1){
-        big_int_length +=32;
-        big_int = big_int/2147483648;
+      fmt::print("token1st                            = {}\n", token1st);
+      InfInt pos_big_int = -big_int;
+      string s_binary;
+      while(pos_big_int != 0){
+        s_binary += (pos_big_int%2).toString();
+        pos_big_int /=  2;
       }
+      s_binary += '0'; //leading 0 before converting 2's complement
+      reverse(s_binary.begin(), s_binary.end());
+      fmt::print("before 2's complement, the s_binary = {}\n", s_binary);
+      for(auto i = 0; i< s_binary.length(); i++){
+        if(s_binary[i] == '0')
+          s_binary[i] = '1';
+        else
+          s_binary[i] = '0';
+      }
+      fmt::print("middle 2's complement, the s_binary = {}\n", s_binary);
+
+      int carry = 0;
+      int s_binary_size = s_binary.size();
+      fmt::print("s_binary_size = {}\n", s_binary_size);
+      // Add all bits one by one
+      for (int i = s_binary_size-1 ; i >= 0 ; i--)
+      {
+        int first_bit = s_binary.at(i) - '0';
+        int second_bit = (i==s_binary_size-1) ? 1 : 0;
+        // boolean expression for sum of 3 bits
+        int sum = (first_bit ^ second_bit ^ carry)+'0';
+
+        s_2scmp = (char)sum + s_2scmp;
+        // boolean expression for 3-bit addition
+        carry = (first_bit & second_bit) | (second_bit & carry) | (first_bit & carry);
+      }
+      fmt::print("after 2's complement, the s_binary = {}\n", s_2scmp);
     }
 
-    bit_width = explicit_bits ? explicit_bits : big_int_length;
+    bit_width = explicit_bits ? explicit_bits : s_2scmp.size();
     is_in32b = bit_width > 32 ? false : true;
-    return process_dec_token(g, token1st, (uint16_t)bit_width, val);
+    return process_bin_token(g, s_2scmp, (uint16_t)bit_width, val);
 
   }
 }
@@ -634,3 +670,40 @@ Index_ID Pass_dfg::process_dec_token (LGraph *g, const std::string& token1st, co
   }
 }//end of decimal
 
+
+
+
+
+
+
+#if 0
+big_int_length = 32; //at least 32 bits
+fmt::print("token1st           = {}\n", token1st);
+fmt::print("big_int/2147483648 = {}\n\n\n", (big_int/2147483648).toInt());
+while((big_int / 2147483648 ) <= -1){
+big_int_length +=32;
+big_int = big_int/2147483648;
+}
+
+
+
+    static const string hex_digits("0123456789ABCDEF");
+
+    string hex;
+    InfInt scratch = token1st;
+
+    while (scratch != 0)
+    {
+      fmt::print("scratch lsb 4bits is {}\n", (scratch%16).toString());
+      hex += hex_digits[(scratch % 16).toUnsignedInt()];
+      scratch /= 16;
+    }
+
+    reverse(hex.begin(), hex.end());
+    fmt::print("-------------------\n");
+    fmt::print("the converted hex string is: {}\n",hex);
+    fmt::print("-------------------\n");
+
+
+
+#endif
