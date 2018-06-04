@@ -46,6 +46,7 @@ enum Node_Type_Op : uint64_t {
   CfgFor_Op,
   CfgWhile_Op,
   CfgIfMerge_Op,
+  CfgBeenRead_Op,
   // Add here, operators needed
   SubGraph_Op,
   BlackBox_Op,
@@ -612,6 +613,16 @@ public:
     outputs.push_back("Y");
   };
 };
+
+
+class Node_Type_CfgBeenRead : public Node_Type {
+public:
+  Node_Type_CfgBeenRead() : Node_Type("cfg_been_read", CfgBeenRead_Op, false) {
+    inputs.push_back("A");
+    outputs.push_back("Y");
+  };
+};
+
 
 class LGraph_Node_Type : public LGraph_Consts,
                          virtual public LGraph_Base {
