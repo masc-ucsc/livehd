@@ -309,10 +309,10 @@ void Pass_dfg::test_const_conversion() {
   //const std::string str_in = "0b00011111111111111111111111111111111s";
   //const std::string str_in = "-2147483647";
   //const std::string str_in = "-128";
-  //const std::string str_in = "-4294967295";
+  const std::string str_in = "-4294967297";
   //const std::string str_in = "-2147483648";
-  const std::string str_in = "-2147483649";
-  //const std::string str_in = "-4294967298";
+  //const std::string str_in = "-2147483649";
+  //const std::string str_in = "-5294967298";
   //const std::string str_in = "2147483647";
   //const std::string str_in = "-8";
 
@@ -333,6 +333,7 @@ void Pass_dfg::test_const_conversion() {
   fmt::print("explicit_bits:          {}\n",explicit_bits);
   fmt::print("bit_width:              {}\n",bit_width);
   fmt::print("\n");
+  tg->sync();
 }
 
 
