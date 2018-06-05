@@ -1,12 +1,10 @@
 //
 // Created by birdeclipse on 1/30/18.
 //
-#include "cstring"
 #include "inou.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraphbase.hpp"
 #include "options.hpp"
-#include "tech_library.hpp"
 #include <string>
 
 #ifndef LGRAPH_INOU_ABC_HPP
