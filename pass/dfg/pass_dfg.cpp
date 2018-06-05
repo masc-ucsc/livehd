@@ -307,23 +307,26 @@ void Pass_dfg::test_const_conversion() {
   //const std::string str_in = "0x00_F234_5678_1234_5678_9A_u";//40 bits
   //const std::string str_in = "0b1111_1111_1111_1111_1111_1111_1111_1111";//buggy underscore
   //const std::string str_in = "0b00011111111111111111111111111111111s";
-  //const std::string str_in = "-2147483647";
-  //const std::string str_in = "-128";
-  const std::string str_in = "-4294967297";
-  //const std::string str_in = "-2147483648";
-  //const std::string str_in = "-2147483649";
-  //const std::string str_in = "-5294967298";
-  //const std::string str_in = "2147483647";
-  //const std::string str_in = "-8";
+  //const std::string str_in = "-0d2147483647";
+  //const std::string str_in = "-0d128";
+  //const std::string str_in = "-0d4294967297";
+  //const std::string str_in = "-0d2147483648";
+  //const std::string str_in = "-0d2147483649";
+  //const std::string str_in = "-0d5294967298";
+  const std::string str_in = "0b11101111_11101111_11101111_11101111_11101111???110?10";
+  //const std::string str_in = "0d2147483647";
+  //const std::string str_in = "-0d8";
 
   bool              is_signed          = false;
   bool              is_in32b           = true;
   bool              is_explicit_signed = false; //explicit assign the signed mark
+  bool              is_bool_dc         = false; //dc = don't care, ex: 0x100??101
+  bool              is_pure_dc         = false; //ex: ????
   uint32_t          val                = 0;
   uint32_t          explicit_bits      = 0;
   size_t            bit_width          = 0;
 
-  resolve_constant(tg, str_in, is_signed, is_in32b, is_explicit_signed, val, explicit_bits, bit_width);
+  resolve_constant(tg, str_in, is_signed, is_in32b, is_explicit_signed, is_bool_dc, is_pure_dc, val, explicit_bits, bit_width);
 
   fmt::print("\n");
   fmt::print("out of 32 bits range?   {}\n",!is_in32b);
@@ -342,6 +345,8 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g,
                                     bool&              is_signed,
                                     bool&              is_in32b,
                                     bool&              is_explicit_signed,
+                                    bool&              is_bool_dc,
+                                    bool&              is_pure_dc,
                                     uint32_t&          val,
                                     uint32_t&          explicit_bits,
                                     size_t&            bit_width)
@@ -405,14 +410,19 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g,
 
     return process_hex_token(g, token1st, (uint16_t)bit_width, val);
   }
-  else if (token1st[0] == '0' && token1st[1] == 'b') {//binary
+  //binary
+  else if (token1st[0] == '0' && token1st[1] == 'b') {
     token1st = token1st.substr(2);//exclude leading bin 0b
     idx = token1st.find_first_not_of('0');
     token1st = token1st.substr(idx);//exclude leading 0s
     bit_width = explicit_bits ? explicit_bits : token1st.size();
-
     is_in32b = bit_width > 32 ? false : true;
-    return process_bin_token(g, token1st, (uint16_t)bit_width, val);
+
+    size_t dc_pos = str_in.find('?'); //dc = don't care
+    if(dc_pos != string::npos)
+      return process_bin_token_with_dc(g, token1st);
+    else
+      return process_bin_token(g, token1st, (uint16_t)bit_width, val);
 
   }
   else{//decimal
@@ -420,7 +430,10 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g,
     if(token1st[0] == '-'){
       is_explicit_signed = true;
       is_signed = true;
+      token1st = token1st[0] + token1st.substr(3);//exclude middle "0d"
     }
+    else
+      token1st = token1st.substr(2);
 
     InfInt big_int = token1st;
 
@@ -611,3 +624,73 @@ Index_ID Pass_dfg::process_bin_token (LGraph *g, const std::string& token, const
   }
 }
 
+Index_ID Pass_dfg::process_bin_token_with_dc (LGraph *g, const std::string& token){
+  fmt::print("process binary with don't cares!\n");
+  std::vector<Node_Pin> inp_pins;
+  int t_size = (int)token.size();
+  Index_ID nid_join = g->create_node().get_nid();
+  g->node_type_set(nid_join, Join_Op);
+  g->set_bits(nid_join, t_size);
+
+  string sdc_buf; //continuous don't care characters
+  string sval_buf;//continuous val characters
+  int token_size = token.size();
+  for(int i = 0; i < token_size; i++){
+    if(token[i] == '?'){
+      if(sval_buf.size()){
+        Index_ID nid_const32 = create_const32_node(g, sval_buf, true, sval_buf.size());
+        inp_pins.push_back(Node_Pin(nid_const32, 0, false));
+        sval_buf.clear();
+      }
+      sdc_buf += '?';
+      if(i == token_size-1){
+        Index_ID nid_dc = create_dontcare_node(g,sdc_buf.size());
+        inp_pins.push_back(Node_Pin(nid_dc, 0, false));
+      }
+      else if(i+1 < token_size && token[i+1]!= '?'){
+        Index_ID nid_dc = create_dontcare_node(g,sdc_buf.size());
+        inp_pins.push_back(Node_Pin(nid_dc, 0, false));
+        sdc_buf.clear();
+      }
+    }
+    else{// token[i] = some value char
+      sval_buf += token[i];
+      if(sval_buf.size() == 32){
+        Index_ID nid_const32 = create_const32_node(g, sval_buf, true, 32);
+        inp_pins.push_back(Node_Pin(nid_const32, 0, false));
+        sval_buf = sval_buf.substr(32);
+      }
+      else if(i == token_size -1){
+        Index_ID nid_const32 = create_const32_node(g, sval_buf, true, sval_buf.size());
+        inp_pins.push_back(Node_Pin(nid_const32, 0, false));
+      }
+    }
+  }
+
+  int pid = 0;
+  for(auto &inp_pin : inp_pins) {
+    g->add_edge(inp_pin, Node_Pin(nid_join, pid, true));
+    pid++;
+  }
+  return nid_join;
+}
+
+Index_ID Pass_dfg::create_const32_node (LGraph *g, const std::string& val_str, bool is_bin, uint16_t node_bit_width ){
+  uint32_t  val_chunk;
+  if(is_bin)
+    val_chunk = cal_bin_val_32b(val_str);
+  else
+    val_chunk = cal_hex_val_32b(val_str);
+
+  Index_ID nid_const32 = g->create_node().get_nid();
+  g->node_u32type_set(nid_const32,val_chunk);
+  g->set_bits(nid_const32, node_bit_width);
+  return nid_const32;
+}
+
+Index_ID Pass_dfg::create_dontcare_node (LGraph *g, uint16_t node_bit_width ){
+  Index_ID nid_dc = g->create_node().get_nid();
+  g->node_type_set(nid_dc, CfgDontCare_Op);
+  g->set_bits(nid_dc, node_bit_width);
+  return nid_dc;
+}
