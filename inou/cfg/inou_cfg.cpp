@@ -191,6 +191,8 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
       g->node_type_set(name2id[w1st], CfgWhile_Op);
     else if(w6th == "if")
       g->node_type_set(name2id[w1st], CfgIf_Op);
+    else if(w6th == "RD")
+      g->node_type_set(name2id[w1st], CfgBeenRead_Op);
     else
       g->node_type_set(name2id[w1st], CfgAssign_Op);
   } else {
@@ -205,6 +207,8 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
       g->node_type_set(name2id[w1st], CfgWhile_Op);
     else if(w6th == "if")
       g->node_type_set(name2id[w1st], CfgIf_Op);
+    else if(w6th == "RD")
+      g->node_type_set(name2id[w1st], CfgBeenRead_Op);
     else if(w6th == "::{") {
       g->node_subgraph_set(name2id[w1st], nfirst2gid[w9th]); //use nfirst2gid to get sub-graph gid
     } else {

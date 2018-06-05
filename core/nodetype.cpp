@@ -49,6 +49,7 @@ Node_Type::_init::_init() {
   Node_Type::table[CfgFor_Op]          = new Node_Type_CfgFor();
   Node_Type::table[CfgWhile_Op]        = new Node_Type_CfgWhile();
   Node_Type::table[CfgIfMerge_Op]      = new Node_Type_CfgIfMerge();
+  Node_Type::table[CfgBeenRead_Op]     = new Node_Type_CfgBeenRead();
 
   for(int i = 0; i <= SubGraph_Op; i++) {
     assert(table[i]);

@@ -73,6 +73,9 @@ void Inou_abc::generate(std::vector<const LGraph *> &out) {
       Inou_abc blif_dumper;
       blif_dumper.dump_blif(Mapped_Lgraph, "mapped.blif");
     }
+  } else {
+    console->error("inou_abc supports a single graph only\n");
+    exit(1);
   }
 }
 

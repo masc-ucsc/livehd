@@ -7,16 +7,18 @@ Inou_def_options_pack ::Inou_def_options_pack() {
 
   boost::program_options::variables_map vm;
   boost::program_options::store(boost::program_options::command_line_parser(Options::get_cargc(), Options::get_cargv()).options(*Options::get_desc()).allow_unregistered().run(), vm);
-  if(vm.count("lef_input")) {
+  if(vm.count("lef_file")) {
     lef_file = vm["lef_file"].as<std::string>();
   } else {
-    lef_file = "lef_file";
+    console->error("lef_file is required\n");
+    assert(false);
   }
 
-  if(vm.count("def_input")) {
+  if(vm.count("def_file")) {
     def_file = vm["def_file"].as<std::string>();
   } else {
-    def_file = "def_file";
+    console->error("def_file is required\n");
+    assert(false);
   }
 
   console->info("lef_file:{} def_file:{} ", lef_file, def_file);
@@ -32,7 +34,8 @@ void Inou_def::set_def_info(Def_info &dinfo_in) {
 
 std::vector<LGraph *> Inou_def::generate() {
   std::vector<LGraph *> lgs;
-  auto *                g = new LGraph(opack.lgdb_path);
+  //clear since loading from def
+  auto *                g = new LGraph(opack.lgdb_path, dinfo.mod_name, true);
 
   const Tech_library *tlib            = g->get_tlibrary();
   const int           cell_types_size = tlib->get_cell_types_size();
@@ -74,7 +77,9 @@ std::vector<LGraph *> Inou_def::generate() {
     Port_ID               src_pid;
     std::vector<Index_ID> dst_nids;
     std::vector<Port_ID>  dst_pids;
-    bool                  has_drive = false; //deal with a net without drive/drived relationship, such as a net between memory D pin and a cell pin {(MEM D[1]) (inst533 A1)}
+
+    //deal with a net without drive/drived relationship, such as a net between memory D pin and a cell pin {(MEM D[1]) (inst533 A1)}
+    bool                  has_drive = false;
 
     //since the src_node will not appear in a determined order, we have parse all the connections in a net first, record src and dst nid and pids, then create our edges
     for(auto iter_conn = iter_net->conns.begin(); iter_conn != iter_net->conns.end(); ++iter_conn) { //determine src nid/pid and dst nids/pids
@@ -104,17 +109,23 @@ std::vector<LGraph *> Inou_def::generate() {
       }
     } //end iter_conn
 
-    //if(has_drive == false){ //corner case: deal with a net without drive/drived relationship, such as a net between memory D pin and a cell pin {(MEM D[1]) (inst533 A1)}
+    //if(has_drive == false){
+    //  //corner case: deal with a net without drive/drived relationship, such as a net between memory D pin and a cell pin {(MEM D[1]) (inst533 A1)}
     //    src_nid = dst_nids.back();
     //    src_pid = dst_pids.back();
     //    dst_nids.pop_back();
     //    dst_pids.pop_back();
     //}
 
-    for(int i = 0; i < dst_nids.size(); ++i) { //create N lgraph edge"s" to connect N fanout from 1 src pin
-      Node_Pin dst_pin(dst_nids[i], dst_pids[i], true);
-      Node_Pin src_pin(src_nid, src_pid, false);
-      g->add_edge(src_pin, dst_pin);
+    if(has_drive) {
+      for(int i = 0; i < dst_nids.size(); ++i) {
+        //create N lgraph edge"s" to connect N fanout from 1 src pin
+        assert(src_nid);
+        assert(dst_nids[i]);
+        Node_Pin dst_pin(dst_nids[i], dst_pids[i], true);
+        Node_Pin src_pin(src_nid, src_pid, false);
+        g->add_edge(src_pin, dst_pin);
+      }
     }
   }
 
