@@ -13,6 +13,16 @@ new_local_repository(
     path = "subs/spdlog/include",
     build_file = "subs/BUILD.spdlog",
 )
+new_local_repository(
+    name = "ffi",
+    path = "subs/ffi",
+    build_file = "subs/BUILD.ffi",
+)
+new_local_repository(
+    name = "yosys",
+    path = "subs/yosys",
+    build_file = "subs/BUILD.yosys",
+)
 
 # BOOST Libraries dependences
 git_repository(

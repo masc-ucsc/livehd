@@ -16,7 +16,6 @@ cc_binary(
     deps = [
         ":inou_json",
         "//core:core",
-        "@boost//:filesystem",
-        "@boost//:program_options",
+        "@boost//:filesystem", "@boost//:program_options",
     ],
 )

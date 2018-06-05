@@ -1,6 +1,6 @@
 cc_library(
    name = "headers",
-   hdrs = glob(["sparsehash/*hash*","sparsehash/internal/*.h"]),
+   hdrs = glob(["sparsehash/**","sparsehash/internal/*.h"]),
    includes = [ "." ], # Needed because some includes use <foo.h>
    visibility = ["//visibility:public"],
 )

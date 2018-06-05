@@ -5,8 +5,8 @@
 
 #include "bm.h"
 
+#include "core/lgraph.hpp"
 #include "inou_rand.hpp"
-#include "lgraph.hpp"
 
 Inou_rand::Inou_rand() {
 }
