@@ -12,7 +12,7 @@ void test0(int n) {
   }
   test1.create_id("c", 2);
 
-  assert(test1.get_fild("a") == 0x98769876);
+  assert(test1.get_field("a") == 0x98769876);
 }
 
 void test1(int n) {
@@ -25,7 +25,7 @@ void test1(int n) {
   }
   test1.create_id("c", 2);
 
-  assert(test1.get_fild("a") == n-1);
+  assert(test1.get_field("a") == n-1);
 }
 
 void test2(int n) {
