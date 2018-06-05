@@ -1,17 +1,17 @@
 #!/bin/bash
 
-TEMP=$(getopt -o o::,t:: --long gold::,gate:: -n 'yosys.sh' -- "$@")
+TEMP=$(getopt -o r::,i:: --long reference::,implementation:: -n 'yosys.sh' -- "$@")
 eval set -- "$TEMP"
 
 YOSYS=./subs/yosys/bin/yosys
 while true ; do
     case "$1" in
-        -g|--gold)
+        -r|--reference)
           case "$2" in
               "") shift 2 ;;
               *) GOLD=$2 ; shift 2 ;;
           esac ;;
-        -t|--gate)
+        -i|--implementation)
           case "$2" in
               "") shift 2 ;;
               *) GATE=$2 ; shift 2 ;;
@@ -27,23 +27,23 @@ while true ; do
     esac
 done
 
-if [ "${GOLD}" != "" ]; then
-  echo "gold circuit not provided"
+if [ "${GOLD}" == "" ]; then
+  echo "reference circuit not provided"
   exit 1
 fi
 
-if [ "${GATE}" != "" ]; then
-  echo "gate circuit not provided"
+if [ "${GATE}" == "" ]; then
+  echo "implementation circuit not provided"
   exit 1
 fi
 
 if [ ! -f ${GOLD} ]; then
-  echo "gold circuit file not found"
+  echo "reference circuit file not found"
   exit 1
 fi
 
 if [ ! -f ${GATE} ]; then
-  echo "gate circuit file not found"
+  echo "implementation circuit file not found"
   exit 1
 fi
 
@@ -52,11 +52,11 @@ if [ ! -f ${YOSYS} ]; then
   exit 1
 fi
 
-yosys_read="read_verilog -sv ${GOLD}; flatten; rename -top gold; design -stash gold;
-            read_verilog -sv ${GATE}; flatten; rename -top gate; design -stash gate;
+yosys_read="read_verilog -sv ${GOLD}; proc; hierarchy -auto-top; flatten; rename -top gold; design -stash gold;
+            read_verilog -sv ${GATE}; proc; hierarchy -auto-top; flatten; rename -top gate; design -stash gate;
             design -copy-from gold -as gold gold; design -copy-from gate -as gate gate"
 
-yosys_prep="flatten; proc; memory -nomap;  equiv_make gold gate equiv; prep -flatten -top equiv; hierarchy -top equiv; hierarchy -check; flatten; proc; opt_clean;"
+yosys_prep="equiv_make gold gate equiv; prep -flatten -top equiv; hierarchy -top equiv; hierarchy -check; flatten; proc; opt_clean;"
 
 yosys_equiv="equiv_simple;"
 yosys_equiv_extra="${yosys_simple}; equiv_simple -seq 5; equiv_induct -seq 5;"
@@ -93,10 +93,9 @@ if [ $? -eq 0 ]; then
 fi
 
 echo "WARN: Yosys failed to prove equivalency, trying to prove equivalency with Formality."
-echo "${YOSYS} -p \"${yosys_read}; memory -nomap; opt_expr -full; opt -purge; proc; opt -purge; opt_reduce -full; opt_expr -mux_undef; opt_reduce; opt_merge; opt_clean -purge; techmap -map +/adff2dff.v; ${yosys_prep}; opt -purge; proc; opt -purge; ${yosys_equiv_extra}; equiv_status -assert\""
 
-gate_top=`${YOSYS} -p "read_verilog ${GATE}; flatten; hierarchy -auto-top"  | grep "Top module" | tail -n1 | tr '\\' ' ' | awk '{print $3}'`
-gold_top=`${YOSYS} -p "read_verilog ${GOLD}; flatten; hierarchy -auto-top"  | grep "Top module" | tail -n1 | tr '\\' ' ' | awk '{print $3}'`
+gate_top=`${YOSYS} -p "read_verilog ${GATE}; hierarchy -auto-top"  | grep "Top module" | tail -n1 | tr '\\\\' ' ' | awk '{print $3}'`
+gold_top=`${YOSYS} -p "read_verilog ${GOLD}; hierarchy -auto-top"  | grep "Top module" | tail -n1 | tr '\\\\' ' ' | awk '{print $3}'`
 
 if [ -z $FM_SHELL ]; then
   FM_SHELL=`which fm_shell`
