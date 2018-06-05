@@ -18,12 +18,15 @@ FOREACH (EXE ${EXELIST})
 ENDFOREACH (EXE)
 
 
-ADD_CUSTOM_TARGET(libabc ALL)
-ADD_CUSTOM_COMMAND(
-        TARGET libabc
-        COMMAND make -C ${CMAKE_SOURCE_DIR}/subs/yosys/abc libabc.a ABC_USE_PIC=true
-        COMMENT "Building libabc.a"
-)
+ExternalProject_Add(libabc
+  SOURCE_DIR ${PROJECT_SOURCE_DIR}/subs/yosys/abc
+  CONFIGURE_COMMAND ""
+  BUILD_COMMAND make -C ${CMAKE_SOURCE_DIR}/subs/yosys/abc libabc.a ABC_USE_PIC=true
+  BUILD_IN_SOURCE 0
+  DOWNLOAD_COMMAND ""
+  INSTALL_COMMAND ""
+  )
+add_dependencies(libabc yosys)
 
 ADD_LIBRARY(inou_abc ${inou_abc_SOURCE} ${inou_abc_HEADER})
 add_dependencies(inou_abc libabc)
