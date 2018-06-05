@@ -203,8 +203,8 @@ private:
     bool equalizeSigns();
     void removeLeadingZeros();
 
-    std::vector<ELEM_TYPE> val; // number with base FACTOR
     bool pos; // true if number is positive
+    std::vector<ELEM_TYPE> val; // number with base FACTOR
 };
 
 inline InfInt::InfInt() : pos(true)
