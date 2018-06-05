@@ -45,7 +45,7 @@ do
   read_verilog -sv ./pass/lgopt_gvn_pre/tests/${base}.v; flatten; design -stash gate;
   design -copy-from gold -as gold ${base}; design -copy-from gate -as gate ${base}"
 
-  ${LGCHECK} --implementation=${base}.v --reference=./inou/pass/lgopt_gvn_pre/tests/${base}.v
+  ${LGCHECK} --implementation=${base}.v --reference=./pass/lgopt_gvn_pre/tests/${base}.v
   if [ $? -eq 0 ]; then
     echo "Successfully matched generated verilog with original verilog (${input})"
   else
