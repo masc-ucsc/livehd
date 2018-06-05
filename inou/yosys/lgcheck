@@ -1,0 +1,139 @@
+#!/bin/bash
+
+TEMP=$(getopt -o o::,t:: --long gold::,gate:: -n 'yosys.sh' -- "$@")
+eval set -- "$TEMP"
+
+YOSYS=./subs/yosys/bin/yosys
+while true ; do
+    case "$1" in
+        -g|--gold)
+          case "$2" in
+              "") shift 2 ;;
+              *) GOLD=$2 ; shift 2 ;;
+          esac ;;
+        -t|--gate)
+          case "$2" in
+              "") shift 2 ;;
+              *) GATE=$2 ; shift 2 ;;
+          esac ;;
+        --)
+          shift
+          break
+          ;;
+        *)
+          echo "Option $1 not recognized!"
+          exit 1
+          ;;
+    esac
+done
+
+if [ "${GOLD}" != "" ]; then
+  echo "gold circuit not provided"
+  exit 1
+fi
+
+if [ "${GATE}" != "" ]; then
+  echo "gate circuit not provided"
+  exit 1
+fi
+
+if [ ! -f ${GOLD} ]; then
+  echo "gold circuit file not found"
+  exit 1
+fi
+
+if [ ! -f ${GATE} ]; then
+  echo "gate circuit file not found"
+  exit 1
+fi
+
+if [ ! -f ${YOSYS} ]; then
+  echo "Yosys binary not found"
+  exit 1
+fi
+
+yosys_read="read_verilog -sv ${GOLD}; flatten; rename -top gold; design -stash gold;
+            read_verilog -sv ${GATE}; flatten; rename -top gate; design -stash gate;
+            design -copy-from gold -as gold gold; design -copy-from gate -as gate gate"
+
+yosys_prep="flatten; proc; memory -nomap;  equiv_make gold gate equiv; prep -flatten -top equiv; hierarchy -top equiv; hierarchy -check; flatten; proc; opt_clean;"
+
+yosys_equiv="equiv_simple;"
+yosys_equiv_extra="${yosys_simple}; equiv_simple -seq 5; equiv_induct -seq 5;"
+
+#try fast script first, if it fails, goes to more complex one
+${YOSYS} -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; equiv_status -assert" \
+    2> /dev/null | grep "Equivalence successfully proven!"
+
+if [ $? -eq 0 ]; then
+  echo "Successfully matched ${GATE} with ${GOLD}"
+  exit 0
+fi
+
+${YOSYS} -p "${yosys_read};
+    memory -nomap; opt_expr -full; opt -purge; proc; opt -purge;
+    opt_reduce -full; opt_expr -mux_undef; opt_reduce; opt_merge; opt_clean -purge;
+    ${yosys_prep}; opt -purge; proc; opt -purge; ${yosys_equiv}; equiv_status -assert" \
+    | grep "Equivalence successfully proven!"
+
+if [ $? -eq 0 ]; then
+  echo "Successfully matched ${GATE} with ${GOLD}"
+  exit 0
+fi
+
+${YOSYS} -p "${yosys_read};
+    memory -nomap; opt_expr -full; opt -purge; proc; opt -purge;
+    opt_reduce -full; opt_expr -mux_undef; opt_reduce; opt_merge; opt_clean -purge; techmap -map +/adff2dff.v;
+    ${yosys_prep}; opt -purge; proc; opt -purge; ${yosys_equiv_extra}; equiv_status -assert" \
+    | grep "Equivalence successfully proven!"
+
+if [ $? -eq 0 ]; then
+  echo "Successfully matched ${GATE} with ${GOLD}"
+  exit 0
+fi
+
+echo "WARN: Yosys failed to prove equivalency, trying to prove equivalency with Formality."
+echo "${YOSYS} -p \"${yosys_read}; memory -nomap; opt_expr -full; opt -purge; proc; opt -purge; opt_reduce -full; opt_expr -mux_undef; opt_reduce; opt_merge; opt_clean -purge; techmap -map +/adff2dff.v; ${yosys_prep}; opt -purge; proc; opt -purge; ${yosys_equiv_extra}; equiv_status -assert\""
+
+gate_top=`${YOSYS} -p "read_verilog ${GATE}; flatten; hierarchy -auto-top"  | grep "Top module" | tail -n1 | tr '\\' ' ' | awk '{print $3}'`
+gold_top=`${YOSYS} -p "read_verilog ${GOLD}; flatten; hierarchy -auto-top"  | grep "Top module" | tail -n1 | tr '\\' ' ' | awk '{print $3}'`
+
+if [ -z $FM_SHELL ]; then
+  FM_SHELL=`which fm_shell`
+  if [ $? -ne 0 ]; then
+    echo "fm_shell not found, make sure fm_shell is in your path, or define the FM_SHELL environment variable"
+    exit 1
+  fi
+fi
+
+if [ ! -f ${FM_SHELL} ]; then
+  echo "fm_shell not found, make sure fm_shell is in your path"
+  exit 1
+fi
+
+echo "
+    set_app_var synopsys_auto_setup true
+    set_app_var hdlin_ignore_parallel_case false
+    set_app_var hdlin_ignore_full_case false
+    read_sverilog -r  \"${GOLD}\"
+    set_top r:/WORK/${gold_top}
+    read_sverilog -i  \"${GATE}\"
+    set_top i:/WORK/${gate_top}
+    match
+    report_unmatched_points >> \"fm_${gold_top}_error.log\"
+    if { ![verify] }  {
+      report_failing_points >> \"fm_${gold_top}_error.log\"
+        report_aborted >> \"fm_${gold_top}_error.log\"
+        analyze_points -all >> \"fm_${gold_top}_error.log\"
+    }
+exit" > fm_script_${gold_top}.tcl
+
+${FM_SHELL} -64bit -f fm_script_${gold_top}.tcl | grep "Verification SUCCEEDED"
+
+if [ $? -eq 0 ]; then
+  echo "Successfully matched ${GATE} with ${GOLD}"
+  exit 0
+fi
+
+echo "FAIL: circuits are not equivalent (${input})"
+exit 1

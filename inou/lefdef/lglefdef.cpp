@@ -17,7 +17,8 @@ int main(int argc, const char **argv) {
   b.sample("setup");
 
   Tech_library *tlib = Tech_library::instance(def.get_opack().lgdb_path);
-  lef_parsing(tlib, def.get_opack().lef_file); //call global function lef_parsing(), which uses cadence api to parse lef information.
+  //call global function lef_parsing(), which uses cadence api to parse lef information.
+  lef_parsing(tlib, def.get_opack().lef_file);
 
   b.sample("lef-done");
 
