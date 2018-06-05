@@ -2,8 +2,9 @@
 #ifndef INOU_RAND_H
 #define INOU_RAND_H
 
-#include "inou.hpp"
 #include <string>
+
+#include "core/inou.hpp"
 
 class Inou_rand_options_pack : public Options_pack {
 public:
