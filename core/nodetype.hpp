@@ -47,6 +47,7 @@ enum Node_Type_Op : uint64_t {
   CfgWhile_Op,
   CfgIfMerge_Op,
   CfgBeenRead_Op,
+  CfgDontCare_Op,
   // Add here, operators needed
   SubGraph_Op,
   BlackBox_Op,
@@ -623,6 +624,12 @@ public:
   };
 };
 
+class Node_Type_CfgDontCare : public Node_Type {
+public:
+  Node_Type_CfgDontCare() : Node_Type("cfg_dont_care", CfgDontCare_Op, false) {
+    outputs.push_back("Y");
+  };
+};
 
 class LGraph_Node_Type : public LGraph_Consts,
                          virtual public LGraph_Base {
