@@ -2,6 +2,7 @@
 
 declare -a inputs=("common_sub.v")
 
+LGCHECK=./inou/yosys/lgcheck
 for input in ${inputs[@]}
 do
   ./inou/yosys/lgyosys ./pass/lgopt_gvn_pre/tests/${input}
@@ -44,17 +45,7 @@ do
   read_verilog -sv ./pass/lgopt_gvn_pre/tests/${base}.v; flatten; design -stash gate;
   design -copy-from gold -as gold ${base}; design -copy-from gate -as gate ${base}"
 
-  yosys_prep="flatten; proc; memory -nomap;
-  equiv_make gold gate equiv;
-  prep -flatten -top equiv;
-  hierarchy -top equiv; hierarchy -check; flatten; proc; opt_clean;"
-
-  yosys_equiv="equiv_simple;"
-  yosys_equiv_extra="${yosys_simple}; equiv_simple -seq 5; equiv_induct -seq 5;"
-
-  #try fast script first, if it fails, goes to more complex one
-  ./subs/yosys/bin/yosys -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; equiv_status -assert" \
-    2> /dev/null | grep "Equivalence successfully proven!"
+  ${LGCHECK} --implementation=${base}.v --reference=./pass/lgopt_gvn_pre/tests/${base}.v
   if [ $? -eq 0 ]; then
     echo "Successfully matched generated verilog with original verilog (${input})"
   else
