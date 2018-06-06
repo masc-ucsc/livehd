@@ -47,7 +47,7 @@ install:
     pip install --verbose dist/*.tar.gz
   elif [ -n "$CONDA" ]; then
     conda build conda.recipe
-    conda install --use-local python_example
+    conda install --use-local lgraph
   fi
 script:
 - python tests/test.py
