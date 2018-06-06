@@ -3,7 +3,6 @@ project(inou_sat)
 FILE(GLOB inou_sat_SOURCE *.cpp)
 FILE(GLOB inou_sat_HEADER *.hpp)
 
-#SET(EXELIST "lgsat_1bit")
 
 SET(EXELIST "lgsat_multibit")
 

@@ -1,12 +1,12 @@
-module  satsmall(input  a, input  b,
-  input  c,
+module  satpick(input [2:0] a, input [2:0] b,
+  input  [2:0]c,
  
-  output  out
+  output  [2:0] out
 );
 
    wire   out_1;
-   wire   out_2;
-   wire   out_3;
+   //wire   out_2;
+   //wire   out_3;
    
   assign out_1 = a + b;
   //assign out_2 = a - c;
