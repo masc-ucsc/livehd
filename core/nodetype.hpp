@@ -46,6 +46,8 @@ enum Node_Type_Op : uint64_t {
   CfgFor_Op,
   CfgWhile_Op,
   CfgIfMerge_Op,
+  CfgBeenRead_Op,
+  CfgDontCare_Op,
   // Add here, operators needed
   SubGraph_Op,
   BlackBox_Op,
@@ -609,6 +611,22 @@ class Node_Type_CfgIfMerge : public Node_Type {
 public:
   Node_Type_CfgIfMerge() : Node_Type("cfg_if_merge", CfgIfMerge_Op, false) {
     inputs.push_back("A");
+    outputs.push_back("Y");
+  };
+};
+
+
+class Node_Type_CfgBeenRead : public Node_Type {
+public:
+  Node_Type_CfgBeenRead() : Node_Type("cfg_been_read", CfgBeenRead_Op, false) {
+    inputs.push_back("A");
+    outputs.push_back("Y");
+  };
+};
+
+class Node_Type_CfgDontCare : public Node_Type {
+public:
+  Node_Type_CfgDontCare() : Node_Type("cfg_dont_care", CfgDontCare_Op, false) {
     outputs.push_back("Y");
   };
 };

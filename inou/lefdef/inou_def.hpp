@@ -78,6 +78,7 @@ class Def_info {
 private:
 protected:
 public:
+  std::string                mod_name;
   std::vector<Def_row>       rows;
   std::vector<Def_track>     tracks;
   std::vector<Def_component> compos;

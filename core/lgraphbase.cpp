@@ -366,7 +366,9 @@ Index_ID LGraph_Base::create_node_space(Index_ID last_idx, Port_ID out_pid, Inde
       if(node_internal[idx2].has_space(true))
         return idx2;
       // This can happen if 3 sedges transfered to 3 ledges in dest
+#ifdef DEBUG
       console->warn("transfer 3 sedges to 3 ledges {} to {}", last_idx, idx2);
+#endif
       return create_node_space(idx2, out_pid, master_nid, root_nid);
     }
     return last_idx;
