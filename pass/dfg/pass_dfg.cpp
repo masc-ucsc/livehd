@@ -305,7 +305,7 @@ Pass_dfg_options_pack::Pass_dfg_options_pack() : Options_pack() {
 void Pass_dfg::test_const_conversion() {
   LGraph *tg = new LGraph(opack.lgdb_path, opack.output_name, false);
 
-  const std::string str_in = "0d?";//24 bits
+  //const std::string str_in = "0d?";//24 bits
   //const std::string str_in = "0x00FFFF_FF_u";//24 bits
   //const std::string str_in = "0b1111u";//4 bits
   //const std::string str_in = "0xFFFF_FF_s";//24 bits
@@ -314,7 +314,7 @@ void Pass_dfg::test_const_conversion() {
   //const std::string str_in = "0b00011111111_11111111_11111111s";//legal but logic conflict declaration
   //const std::string str_in = "-0d2147483647";
   //const std::string str_in = "-0d128";
-  //const std::string str_in = "-0d4294967297";
+  const std::string str_in = "-0d4294967297";
   //const std::string str_in = "-0d2147483648";
   //const std::string str_in = "-0d2147483649";
   //const std::string str_in = "-0d5294967298";
@@ -453,10 +453,9 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g,
     //then you could analyze by process_bin_token
     if(big_int > 0) {
       while(big_int != 0){
-        s_2scmp += (big_int%2).toString();
+        s_2scmp = (big_int%2).toString() + s_2scmp;
         big_int /=  2;
       }
-      reverse(s_2scmp.begin(), s_2scmp.end());
     }
     else{// < 0
       fmt::print("token1st                            = {}\n", token1st);
@@ -464,13 +463,13 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g,
       string s_binary;
 
       while(pos_big_int != 0){
-        s_binary += (pos_big_int%2).toString();
+        s_binary = (pos_big_int%2).toString() + s_binary;
         pos_big_int /=  2;
       }
 
-      s_binary += '0'; //add leading 0 before converting 2's complement
-      reverse(s_binary.begin(), s_binary.end());
+      s_binary = '0' + s_binary; //add leading 0 before converting 2's complement
       fmt::print("before 2's complement, the s_binary = {}\n", s_binary);
+
       for(auto i = 0; i< s_binary.length(); i++){
         if(s_binary[i] == '0')
           s_binary[i] = '1';
