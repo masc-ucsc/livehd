@@ -2,8 +2,9 @@
 // Created by birdeclipse on 3/22/18.
 //
 
+#include "tech_library.hpp"
+
 #include "inou_lef.hpp"
-#include <core/tech_library.hpp>
 
 static int lef_macro_begin_cb(lefrCallbackType_e c, const char *macroName, lefiUserData ud);
 

@@ -1,6 +1,7 @@
+#include <string>
+
 #include "inou_def.hpp"
 #include "lgraph.hpp"
-#include <string>
 
 Inou_def_options_pack ::Inou_def_options_pack() {
   Options::get_desc()->add_options()("lef_file,l", boost::program_options::value(&lef_file), "lef input <filename> for graph")("def_file,d", boost::program_options::value(&def_file), "def input <filename> for graph");

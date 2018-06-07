@@ -1,3 +1,4 @@
+
 new_local_repository(
     name = "sparsehash",
     path = "subs/sparsehash-c11",

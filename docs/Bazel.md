@@ -9,6 +9,10 @@ Useful commands:
 
     bazel query 'inou/...'
 
+## List files needed for a given target
+
+   bazel query "deps(//inou/lefdef:lglefdef)" 
+
 ## Release vs fastbuild (default) vs debug
 
     # Debug

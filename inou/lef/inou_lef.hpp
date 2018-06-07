@@ -5,9 +5,10 @@
 #ifndef LGRAPH_INOU_LEF_HPP
 #define LGRAPH_INOU_LEF_HPP
 
-#include "inou.hpp"
 #include "lefiDefs.hpp"
 #include "lefrReader.hpp"
+
+#include "inou.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraphbase.hpp"
 #include "options.hpp"
