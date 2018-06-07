@@ -72,6 +72,9 @@ void Inou_abc::generate(std::vector<const LGraph *> &out) {
       Mapped_Lgraph->print_stats();
       Inou_abc blif_dumper;
       blif_dumper.dump_blif(Mapped_Lgraph, "mapped.blif");
+    } else {
+      console->error("inou_abc supports techmap graphs only\n");
+      exit(1);
     }
   } else {
     console->error("inou_abc supports a single graph only\n");
@@ -288,17 +291,22 @@ void Inou_abc::find_memory_conn(const LGraph *g) {
 
 void Inou_abc::find_cell_conn(const LGraph *g) {
 
+#ifndef NDEBUG
   fmt::print("\n******************************************************************\n");
   fmt::print("Begin Computing Netlist Topology Based On Lgraph\n");
   fmt::print("******************************************************************\n");
+#endif
   find_latch_conn(g);
   find_combinational_conn(g);
   find_graphio_output_conn(g);
   find_subgraph_conn(g);
   find_memory_conn(g);
+  fmt::print("rtp done find\n");
+#ifndef NDEBUG
   fmt::print("\n******************************************************************\n");
   fmt::print("Finish Computing Netlist Topology Based On Lgraph\n");
   fmt::print("******************************************************************\n");
+#endif
 }
 
 /************************************************************************
@@ -320,7 +328,9 @@ void Inou_abc::recursive_find(const LGraph *g, const Edge *input, topology_info 
 
   Index_ID     this_idx       = input->get_idx();
   Node_Type_Op this_node_type = g->node_type_get(this_idx).op;
+  fmt::print("rtp: recursive find\n");
   if(this_node_type == U32Const_Op) {
+  fmt::print("rtp: const\n");
     if(opack.verbose == "true")
       fmt::print("\t U32Const_Op_NodeID:{},bit [{}:{}] portid : {} \n",
                  input->get_idx(), bit_addr[0], bit_addr[1], input->get_out_pin().get_pid());
@@ -328,6 +338,7 @@ void Inou_abc::recursive_find(const LGraph *g, const Edge *input, topology_info 
     index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
     pid.push_back(info);
   } else if(this_node_type == StrConst_Op) {
+  fmt::print("rtp: sconst\n");
     if(opack.verbose == "true")
       fmt::print("\t StrConst_Op_NodeID:{},bit [{}:{}]  portid : {} \n",
                  this_idx, bit_addr[0], bit_addr[1], input->get_out_pin().get_pid());
@@ -335,6 +346,7 @@ void Inou_abc::recursive_find(const LGraph *g, const Edge *input, topology_info 
     index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
     pid.push_back(info);
   } else if(this_node_type == GraphIO_Op) {
+  fmt::print("rtp: io\n");
     if(g->is_graph_output(this_idx)) {
       for(const auto &pre_inp : g->inp_edges(this_idx)) {
         recursive_find(g, &pre_inp, pid, bit_addr);
@@ -347,6 +359,7 @@ void Inou_abc::recursive_find(const LGraph *g, const Edge *input, topology_info 
       pid.push_back(info);
     }
   } else if(this_node_type == Memory_Op) {
+  fmt::print("rtp: mem\n");
     char namebuffer[255];
     if(opack.verbose == "true")
       fmt::print("\t Memory_Op:{},bit [{}:{}] portid : {} \n",
@@ -360,6 +373,7 @@ void Inou_abc::recursive_find(const LGraph *g, const Edge *input, topology_info 
       memory_generated_output_wire[info] = std::string(namebuffer);
     }
   } else if(this_node_type == SubGraph_Op) {
+  fmt::print("rtp: subgraph\n");
     char namebuffer[255];
     if(opack.verbose == "true")
       fmt::print("\t SubGraph_Op:{},bit [{}:{}] portid : {} \n",
@@ -373,6 +387,7 @@ void Inou_abc::recursive_find(const LGraph *g, const Edge *input, topology_info 
       subgraph_generated_output_wire[info] = std::string(namebuffer);
     }
   } else if(this_node_type == TechMap_Op) {
+  fmt::print("rtp: tmap\n");
     if(opack.verbose == "true")
       fmt::print("\t NodeID:{},bit [{}:{}] portid : {} \n",
                  this_idx, 0, 0, input->get_out_pin().get_pid());
@@ -387,6 +402,7 @@ void Inou_abc::recursive_find(const LGraph *g, const Edge *input, topology_info 
       pid.push_back(info);
     }
   } else if(this_node_type == Join_Op) {
+  fmt::print("rtp: join\n");
     int                       width      = 0;
     int                       width_pre  = 0;
     uint32_t                  Join_width = g->get_bits(this_idx);
@@ -407,6 +423,7 @@ void Inou_abc::recursive_find(const LGraph *g, const Edge *input, topology_info 
       }
     }
   } else if(this_node_type == Pick_Op) {
+  fmt::print("rtp: pick\n");
     int width      = 0;
     int offset     = 0;
     int pick_width = g->get_bits(this_idx);
