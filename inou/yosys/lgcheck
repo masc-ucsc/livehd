@@ -66,11 +66,11 @@ if [ "${CELLLIB}" != "" ]; then
   lib="read_verilog ${CELLLIB}"
 fi
 
-yosys_read="read_verilog -sv ${GOLD}; proc; hierarchy -auto-top; flatten; rename -top gold; design -stash gold;
-            read_verilog -sv ${GATE}; proc; hierarchy -auto-top; flatten; rename -top gate; design -stash gate;
+yosys_read="read_verilog -sv ${GOLD}; hierarchy -auto-top; flatten; rename -top gold; design -stash gold;
+            read_verilog -sv ${GATE}; hierarchy -auto-top; flatten; rename -top gate; design -stash gate;
             design -copy-from gold -as gold gold; design -copy-from gate -as gate gate; ${lib};"
 
-yosys_prep="equiv_make gold gate equiv; prep -flatten -top equiv; hierarchy -top equiv; hierarchy -check; flatten; proc; opt_clean;"
+yosys_prep="proc; equiv_make gold gate equiv; prep -flatten -top equiv; hierarchy -top equiv; hierarchy -check; flatten; proc; opt_clean;"
 
 yosys_equiv="equiv_simple;"
 yosys_equiv_extra="${yosys_simple}; equiv_simple -seq 5; equiv_induct -seq 5;"
