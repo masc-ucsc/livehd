@@ -435,8 +435,10 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g,
   }
   else{//decimal
 
-    if(token1st[2] == '?') //case of pure question mark
-        return create_dontcare_node(g,0);
+    if(token1st[2] == '?') {//case of pure question mark
+      is_pure_dc = true;
+      return create_dontcare_node(g,0);
+    }
 
     string s_2scmp;
     if(token1st[0] == '-'){
