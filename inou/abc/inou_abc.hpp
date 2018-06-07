@@ -199,7 +199,42 @@ private:
     } else
       return cell_name.find(latch) != std::string::npos;
   }
-
+  void clear() {
+	combinational_id.clear();
+	latch_id.clear();
+	graphio_input_id.clear();
+	graphio_output_id.clear();
+	subgraph_id.clear();
+	memory_id.clear();
+	primary_output.clear();
+	primary_input.clear();
+	combinational_cell.clear();
+	latchname2id.clear();
+	sequential_cell.clear();
+	skew_group_map.clear();
+	clock_id.clear();
+	reset_group_map.clear();
+	reset_id.clear();
+	comb_conn.clear();
+	latch_conn.clear();
+	primary_output_conn.clear();
+	subgraph_conn.clear();
+	memory_conn.clear();
+	subgraph_generated_output_wire.clear();
+	subgraph_generated_input_wire.clear();
+	memory_generated_output_wire.clear();
+	memory_generated_input_wire.clear();
+	pseduo_record.clear();
+	ck_remap.clear();
+	rst_remap.clear();
+	io_remap.clear();
+	subgraph_remap.clear();
+	memory_remap.clear();
+	cell2id.clear();
+	cell_out_pid.clear();
+	int_const_map.clear();
+	picks.clear();
+  }
   void find_cell_conn(const LGraph *g);
 
   void find_latch_conn(const LGraph *g);
