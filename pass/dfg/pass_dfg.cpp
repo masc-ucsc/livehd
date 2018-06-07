@@ -305,8 +305,9 @@ Pass_dfg_options_pack::Pass_dfg_options_pack() : Options_pack() {
 void Pass_dfg::test_const_conversion() {
   LGraph *tg = new LGraph(opack.lgdb_path, opack.output_name, false);
 
+  const std::string str_in = "0d?";//24 bits
   //const std::string str_in = "0x00FFFF_FF_u";//24 bits
-  const std::string str_in = "0b1111u";//4 bits
+  //const std::string str_in = "0b1111u";//4 bits
   //const std::string str_in = "0xFFFF_FF_s";//24 bits
   //const std::string str_in = "0x00_7AFF_FFFF_FFFF_FFFF_FF_u";//40 bits
   //const std::string str_in = "0b1111_1111_1111_1111_1111_1111_1111_1111_1111";
@@ -433,6 +434,10 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g,
 
   }
   else{//decimal
+
+    if(token1st[2] == '?') //case of pure question mark
+        return create_dontcare_node(g,0);
+
     string s_2scmp;
     if(token1st[0] == '-'){
       is_explicit_signed = true;
@@ -538,7 +543,6 @@ Index_ID Pass_dfg::process_hex_token(LGraph *g, const std::string &token, const 
   if(bit_width > 32) {
     std::vector<Node_Pin> inp_pins;
     int t_size = (int)token.size();
-    uint32_t val_chunk = 0;
     Index_ID nid_join = g->create_node().get_nid();
     Index_ID nid_const32;
     g->node_type_set(nid_join, Join_Op);
