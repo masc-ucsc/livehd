@@ -14,9 +14,9 @@
 #include <set>
 #include <string>
 
-#include "core/inou.hpp"
-#include "core/lgedgeiter.hpp"
-#include "core/lgraph.hpp"
+#include "inou.hpp"
+#include "lgedgeiter.hpp"
+#include "lgraph.hpp"
 
 USING_YOSYS_NAMESPACE
 PRIVATE_NAMESPACE_BEGIN

@@ -1,8 +1,8 @@
 #ifndef DUMP_YOSYS_H_
 #define DUMP_YOSYS_H_
 
-#include "core/inou.hpp"
-#include "core/lgraph.hpp"
+#include "inou.hpp"
+#include "lgraph.hpp"
 
 #include "kernel/rtlil.h"
 #include "kernel/yosys.h"

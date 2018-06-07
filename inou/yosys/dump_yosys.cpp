@@ -2,7 +2,7 @@
 #include <math.h>
 #include <algorithm>
 
-#include "core/lgedgeiter.hpp"
+#include "lgedgeiter.hpp"
 #include "dump_yosys.hpp"
 
 RTLIL::Wire *Dump_yosys::get_wire(Index_ID idx, Port_ID pid, bool can_fail = false) {
