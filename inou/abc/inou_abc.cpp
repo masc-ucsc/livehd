@@ -70,8 +70,8 @@ void Inou_abc::generate(std::vector<const LGraph *> &out) {
       from_abc(Mapped_Lgraph, out[0], to_abc(out[0]));
       Mapped_Lgraph->sync();
       Mapped_Lgraph->print_stats();
-      Inou_abc blif_dumper;
-      blif_dumper.dump_blif(Mapped_Lgraph, "mapped.blif");
+      clear();
+      dump_blif(Mapped_Lgraph, "mapped.blif");
     } else {
       console->error("inou_abc supports techmap graphs only\n");
       exit(1);
