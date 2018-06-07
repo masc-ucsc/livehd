@@ -5,7 +5,6 @@ FILE(GLOB misc_def_HEADER *.hpp)
 FILE(GLOB bison_SOURCE *.y)
 
 SET(BisonOutput ${CMAKE_CURRENT_BINARY_DIR}/def.tab.cpp)
-#BISON_TARGET(def def.y ${CMAKE_CURRENT_BINARY_DIR}/def.tab.cpp)
 
 IF(BISON_FOUND)
     ADD_CUSTOM_COMMAND(
@@ -22,4 +21,4 @@ ENDIF()
 
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR} ${misc_def_SOURCE_DIR})
 
-ADD_LIBRARY(def ${misc_def_SOURCE} ${misc_def_HEADER})
+ADD_LIBRARY(def ${misc_def_SOURCE} ${BisonOutput} ${misc_def_HEADER})

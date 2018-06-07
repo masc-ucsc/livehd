@@ -15,7 +15,5 @@ cc_binary(
     #linkopts = ['-static', '-lpthread'],
     deps = [
         ":inou_json",
-        "//core:core",
-        "@boost//:filesystem", "@boost//:program_options",
     ],
 )

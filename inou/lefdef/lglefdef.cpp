@@ -1,9 +1,9 @@
-#include <core/tech_library.hpp>
 #include <iostream>
 #include <random>
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "tech_library.hpp"
 #include "inou_def.hpp"
 #include "lgbench.hpp"
 #include "lglefdef.hpp"
