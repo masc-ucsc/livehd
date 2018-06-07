@@ -1,1 +1,0 @@
-/usr/bin/ccache /usr/bin/clang++  -fPIC -Ofast -mtune=native -DNDEBUG -D_YOSYS_  -rdynamic CMakeFiles/lgsat.dir/lgsat.cpp.o  -o lgsat ../../misc/ezsat/libezsat.a ../../core/libcore.a ../../misc/bitscan/libbitscan.a -lboost_filesystem -lboost_program_options -lboost_system -lboost_iostreams -lboost_serialization -lpthread -lcryptominisat5 -lyaml-cpp 
