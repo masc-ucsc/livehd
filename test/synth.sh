@@ -71,6 +71,7 @@ ruby ${OPT_LGRAPH}/inou/tech/verilog_json.rb \
 for input in ${inputs[@]}
 do
 
+  base=${input%.*}
   synth_script="hierarchy -auto-top; clean; proc_arst; proc; opt -fast; pmuxtree; memory -nomap;
   hierarchy -check -auto-top; proc; flatten; synth -run coarse;
   memory_bram -rules +/xilinx/brams.txt; techmap -map +/xilinx/brams_map.v; memory_bram -rules +/xilinx/drams.txt; techmap -map +/xilinx/drams_map.v;
@@ -78,7 +79,7 @@ do
   techmap -map +/techmap.v -map +/xilinx/arith_map.v; opt -fast; techmap -D ALU_RIPPLE;
   opt -fast; abc -D 100;"
   ./subs/yosys/bin/yosys -m ./inou/yosys/libinou_yosys.so -p "read_verilog -sv ./inou/yosys/tests/${input};
-   ${synth_script}; write_verilog ${input}_synth.v; inou_yosys lgdb" > ./synth-test/log_from_yosys_${input} 2> ./synth-test/err_from_yosys_${input}
+   ${synth_script}; write_verilog ${base}_synth.v; inou_yosys lgdb" > ./synth-test/log_from_yosys_${input} 2> ./synth-test/err_from_yosys_${input}
 
 
   if [ $? -eq 0 ]; then
@@ -90,7 +91,6 @@ do
     exit 1
   fi
 
-  base=${input%.*}
   ./inou/json/lgjson  --graph_name ${base} --json_output ${base}.json > ./synth-test/log_json_${input} 2> ./synth-test/err_json_${input}
   if [ $? -ne 0 ]; then
     echo "WARN: Not able to create json for testcase ${input}"
