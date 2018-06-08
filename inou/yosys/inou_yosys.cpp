@@ -594,7 +594,7 @@ static LGraph *process_module(RTLIL::Module *module) {
         offset += chunk.width;
         if(lhs_wire->port_output) {
           Node_Pin output  = g->get_graph_output(&lhs_wire->name.c_str()[1]);
-          Node_Pin dst_pin = Node_Pin(output.get_nid(), output.get_pid(), true);
+          Node_Pin dst_pin = Node_Pin(output.get_nid(), 0, true);
           g->add_edge(src_pin, dst_pin, lhs_wire->width);
 
         } else {
@@ -1173,7 +1173,7 @@ static LGraph *process_module(RTLIL::Module *module) {
     if(wire->port_output && wire2lpin.find(wire) != wire2lpin.end()) {
 
       Node_Pin output  = g->get_graph_output(&wire->name.c_str()[1]);
-      Node_Pin dst_pin = Node_Pin(output.get_nid(), output.get_pid(), true);
+      Node_Pin dst_pin = Node_Pin(output.get_nid(), 0, true);
       Node_Pin src_pin = Node_Pin(wire2lpin[wire].nid, wire2lpin[wire].out_pid, false);
 #ifdef DEBUG
       log("  connecting module output %s %d %ld\n", wire->name.c_str(), src_pin.get_pid(), src_pin.get_nid());
