@@ -3,9 +3,10 @@ cc_library(
     srcs = glob(["*.cpp"]),
     hdrs = glob(["*.hpp"]),
     #alwayslink=1,
+    defines = ["_YOSYS_","YOSYS_ENABLE_PLUGINS"],
     visibility = ["//visibility:public"],
     deps = [
-        "@yosys//:yosyslib",
+        "@yosys//:yosysincludes",
         "//core:core",
     ],
 )

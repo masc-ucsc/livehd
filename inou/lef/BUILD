@@ -2,6 +2,7 @@ cc_library(
     name = "inou_lef",
     srcs = ["inou_lef.cpp"],
     hdrs = ["inou_lef.hpp"],
+    includes = ["."], # needed because other passes depend on this pass
     visibility = ["//visibility:public"],
     deps = [
         "//misc/lef/lef:lef",
