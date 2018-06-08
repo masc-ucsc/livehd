@@ -13,3 +13,6 @@
 [submodule "subs/spdlog"]
 	path = subs/spdlog
 	url = https://github.com/gabime/spdlog.git
+[submodule "subs/abc"]
+	path = subs/abc
+	url = https://github.com/berkeley-abc/abc.git
