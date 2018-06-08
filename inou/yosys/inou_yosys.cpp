@@ -449,26 +449,23 @@ static void look_for_cell_outputs(RTLIL::Module *module) {
 
     uint32_t blackbox_out = 0;
     for(const auto &conn : cell->connections()) {
+      //first faster filter but doesn't always work
       if(cell->input(conn.first))
         continue;
 
-      assert(cell->output(conn.first));
+      assert(cell->output(conn.first) || tcell || blackbox);
       if(blackbox) {
         assert(is_black_box_output(module, cell, conn.first));
         connect_string(g, &(conn.first.c_str()[1]), nid, LGRAPH_BBOP_ONAME(blackbox_out++));
 
       } else if(sub_graph && !sub_graph->is_graph_output(&(conn.first.c_str()[1]))) {
-        assert(false);
         continue;
       } else if(tcell && !tcell->is_output(&(conn.first.c_str()[1]))) {
-        assert(false);
         continue;
       } else if(!sub_graph && !tcell && !is_yosys_output(conn.first.c_str())) {
-        assert(false);
         continue;
       }
 
-      assert(cell->output(conn.first));
       const RTLIL::SigSpec ss = conn.second;
 
       if(sub_graph) {
