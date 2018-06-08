@@ -40,6 +40,7 @@ enum Node_Type_Op : uint64_t {
   ShiftRight_Op,
   ShiftLeft_Op,
   GraphIO_Op,
+  DontCare_Op,
   CfgAssign_Op,
   CfgIf_Op,
   CfgFunctionCall_Op,
@@ -47,7 +48,6 @@ enum Node_Type_Op : uint64_t {
   CfgWhile_Op,
   CfgIfMerge_Op,
   CfgBeenRead_Op,
-  CfgDontCare_Op,
   // Add here, operators needed
   SubGraph_Op,
   BlackBox_Op,
@@ -624,9 +624,9 @@ public:
   };
 };
 
-class Node_Type_CfgDontCare : public Node_Type {
+class Node_Type_DontCare : public Node_Type {
 public:
-  Node_Type_CfgDontCare() : Node_Type("cfg_dont_care", CfgDontCare_Op, false) {
+  Node_Type_DontCare() : Node_Type("don't_care", DontCare_Op, false) {
     outputs.push_back("Y");
   };
 };

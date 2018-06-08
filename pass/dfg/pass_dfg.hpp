@@ -132,7 +132,7 @@ private:
   uint32_t cal_bin_val_32b(const std::string&);
   Index_ID create_const32_node  (LGraph *g, const std::string&, bool is_hex, uint16_t node_bit_width, uint32_t& val);
   Index_ID create_dontcare_node (LGraph *g, uint16_t node_bit_width );
-
+  std::string hex_char_to_bin(char c);
 };
 
 #endif
