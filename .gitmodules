@@ -15,4 +15,4 @@
 	url = https://github.com/gabime/spdlog.git
 [submodule "subs/abc"]
 	path = subs/abc
-	url = git@github.com:berkeley-abc/abc.git
+	url = https://github.com:berkeley-abc/abc.git
