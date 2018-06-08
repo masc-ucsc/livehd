@@ -40,6 +40,7 @@ cc_library(
                exclude=["src/map/mio/mioForm.c",
                         "src/map/if/ifCheck.c",
                         "src/map/cov/covTest.c",
+                        "src/map/fpga/fpgaTruth.c",
               ])
         + glob(["src/misc/**/*.c"],
                exclude=["src/misc/parse/parseCore.c",
