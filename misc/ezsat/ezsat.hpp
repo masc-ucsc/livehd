@@ -254,7 +254,9 @@ public:
 
 	std::vector<int> vec_count(const std::vector<int> &vec, int numBits, bool clip = true);
 	std::vector<int> vec_add(const std::vector<int> &vec1, const std::vector<int> &vec2);
+        std::vector<int> vec_add_multiarg(const std::vector<std::vector<int>> &vec1);
 	std::vector<int> vec_sub(const std::vector<int> &vec1, const std::vector<int> &vec2);
+        std::vector<int> vec_sub_multiarg(const std::vector<std::vector<int>> &vec1);
 	std::vector<int> vec_neg(const std::vector<int> &vec);
 
 	void vec_cmp(const std::vector<int> &vec1, const std::vector<int> &vec2, int &carry, int &overflow, int &sign, int &zero);

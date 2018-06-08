@@ -1023,6 +1023,39 @@ std::vector<int> ezSAT::vec_add(const std::vector<int> &vec1, const std::vector<
 	return vec;
 }
 
+std::vector<int> ezSAT::vec_add_multiarg(const std::vector<std::vector<int>> &vec1)
+{
+  //assert(vec1.size() == vec2.size());
+  ;
+       std::vector<std::vector<int>> vec_arr(vec1.size());
+       vec_arr=vec1;
+
+	
+	int carry = CONST_FALSE;
+	int last_index_of_vec=int(vec1.size())-1;
+	for (int i = 1; i <= int(vec1.size()); i++){
+	  for (int col = 0; i < int(vec1[0].size()); col++){
+		fulladder(this, vec_arr[i-1][col], vec_arr[i][col], carry, carry, vec_arr[i][col]);
+	  }
+	}
+
+
+	
+#if 0
+	printf("ADD_multiarg> vec1=[");
+	for (int i = int(vec1.size())-1; i >= 0; i--)
+		printf("%s%s", to_string(vec1[i]).c_str(), i ? ", " : "");
+	printf("], vec2=[");
+	for (int i = int(vec2.size())-1; i >= 0; i--)
+		printf("%s%s", to_string(vec2[i]).c_str(), i ? ", " : "");
+	printf("], result=[");
+	for (int i = int(vec.size())-1; i >= 0; i--)
+		printf("%s%s", to_string(vec[i]).c_str(), i ? ", " : "");
+	printf("]\n");
+#endif
+
+	return vec_arr[last_index_of_vec];
+}
 
 
 
@@ -1051,6 +1084,39 @@ std::vector<int> ezSAT::vec_sub(const std::vector<int> &vec1, const std::vector<
 
 	return vec;
 }
+std::vector<int> ezSAT::vec_sub_multiarg(const std::vector<std::vector<int>> &vec1)
+{
+  //assert(vec1.size() == vec2.size());
+  
+        std::vector<std::vector<int>> vec_arr(vec1.size());
+        vec_arr=vec1;
+	int carry = CONST_TRUE;
+	int last_index_of_vec=int(vec1.size())-1;
+	for (int i = 1; i <= int(vec1.size()); i++){
+	  for (int col = 0; i < int(vec1[0].size()); col++){
+	    fulladder(this, vec_arr[i-1][col], NOT(vec_arr[i][col]), carry, carry, vec_arr[i][col]);
+	  }
+	}
+
+
+	
+#if 0
+	printf("SUB_multiarg> vec1=[");
+	for (int i = int(vec1.size())-1; i >= 0; i--)
+		printf("%s%s", to_string(vec1[i]).c_str(), i ? ", " : "");
+	printf("], vec2=[");
+	for (int i = int(vec2.size())-1; i >= 0; i--)
+		printf("%s%s", to_string(vec2[i]).c_str(), i ? ", " : "");
+	printf("], result=[");
+	for (int i = int(vec.size())-1; i >= 0; i--)
+		printf("%s%s", to_string(vec[i]).c_str(), i ? ", " : "");
+	printf("]\n");
+#endif
+
+	return vec_arr[last_index_of_vec];
+}
+
+
 
 std::vector<int> ezSAT::vec_neg(const std::vector<int> &vec)
 {
