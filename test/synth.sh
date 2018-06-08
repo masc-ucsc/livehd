@@ -85,7 +85,7 @@ do
     echo "Successfully created graph from ${input}"
   else
   echo "gdb --args ./subs/yosys/bin/yosys -m ./inou/yosys/libinou_yosys.so -p \"read_verilog -sv ./inou/yosys/tests/${input};
-    ${synth};  write_verilog ${input}_synth.v; inou_yosys lgdb\""
+    ${synth_script};  write_verilog ${input}_synth.v; inou_yosys lgdb\""
     echo "FAIL: lgyosys parsing terminated with an error (testcase ${input})"
     exit 1
   fi
