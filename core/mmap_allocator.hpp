@@ -82,7 +82,9 @@ public:
         while(mmap_size < file_size) {
           mmap_size += MMAPA_INCR_ENTRIES;
         }
-      std::cout << "resizing\n";
+
+        assert(mmap_size <= MMAPA_MAX_ENTRIES*sizeof(T));
+
         mmap_base = reinterpret_cast<uint64_t *>(mremap(mmap_base, old_size, mmap_size, MREMAP_MAYMOVE));
         if (mmap_base  == MAP_FAILED) {
           std::cerr << "ERROR: mmap could not allocate\n";
