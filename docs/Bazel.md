@@ -28,9 +28,12 @@ Useful commands:
 
 ## To create a fully static binary (for pip deployment?)
 
- In the cc_binary, add linkopts = ['-static']
+In the cc_binary, add linkopts = ['-static']
 
 ## To remove all the bazel (it should not be needed, but in case)
+
+This command is useful for benchmarking build time, and in rare cases that
+building in one machine breaks, and starts in another and it freezes.
 
     bazel clean --expunge
 

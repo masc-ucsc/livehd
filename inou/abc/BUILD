@@ -5,14 +5,16 @@ cc_library(
     hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
     deps = [
-        "//core:core"
+        "//core:core",
+        "//inou/lef:inou_lef",
+        "@abc//:abc",
     ],
 )
 
 cc_binary(
     name = "lgaig",
     srcs = ["lgaig.cpp"],
-    linkopts = ['-lpthread'],
+    linkopts = ['-ldl', '-lreadline','-lpthread'],
     #linkopts = ['-static', '-lpthread'],
     deps = [
         ":inou_abc",
