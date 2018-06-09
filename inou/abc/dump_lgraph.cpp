@@ -394,8 +394,13 @@ void Inou_abc::conn_latch(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t 
     for(const auto &sg : graph_info->skew_group_map) {
       if(sg.second.find(latch_old_idx) != sg.second.end()) {
         std::string ck_name = sg.first;
-        new_graph->add_edge(Node_Pin(graph_info->ck_remap[ck_name], graph_info->cell_out_pid[graph_info->ck_remap[ck_name]]++, false),
-                            Node_Pin(latch_new_idx, tcell->get_pin_id(trig_pin), true));
+        if(new_graph->is_graph_input(graph_info->ck_remap[ck_name])){
+          new_graph->add_edge(Node_Pin(graph_info->ck_remap[ck_name], 0, false),
+              Node_Pin(latch_new_idx, tcell->get_pin_id(trig_pin), true));
+        } else {
+          new_graph->add_edge(Node_Pin(graph_info->ck_remap[ck_name], graph_info->cell_out_pid[graph_info->ck_remap[ck_name]]++, false),
+              Node_Pin(latch_new_idx, tcell->get_pin_id(trig_pin), true));
+        }
       }
     }
     for(const auto &rg : graph_info->reset_group_map) {
@@ -448,8 +453,13 @@ void Inou_abc::conn_combinational_cell(LGraph *new_graph, const LGraph *old_grap
     for(pGatePin = Mio_GateReadPins(pGate), i = 0; pGatePin; pGatePin = Mio_PinReadNext(pGatePin), i++) {
       std::string fanin_pin_name((Mio_PinReadName(pGatePin)));
       Abc_Obj_t * pNet = Abc_ObjFanin(pObj, i);
-      new_graph->add_edge(Node_Pin(graph_info->cell2id[pNet], graph_info->cell_out_pid[graph_info->cell2id[pNet]]++, false),
-                          Node_Pin(graph_info->cell2id[Abc_ObjFanout0(pObj)], inpid++, true));
+      if(new_graph->is_graph_input(graph_info->cell2id[pNet])) {
+        new_graph->add_edge(Node_Pin(graph_info->cell2id[pNet], 0, false),
+            Node_Pin(graph_info->cell2id[Abc_ObjFanout0(pObj)], inpid++, true));
+      } else {
+        new_graph->add_edge(Node_Pin(graph_info->cell2id[pNet], graph_info->cell_out_pid[graph_info->cell2id[pNet]]++, false),
+            Node_Pin(graph_info->cell2id[Abc_ObjFanout0(pObj)], inpid++, true));
+      }
     }
   }
 }

@@ -52,9 +52,7 @@ Abc_Ntk_t *Inou_abc::to_abc(const LGraph *g) {
   pAig        = Abc_NtkAlloc(ABC_NTK_NETLIST, ABC_FUNC_AIG, 1);
   pAig->pName = Extra_UtilStrsav(opack.graph_name.c_str());
 
-  fmt::print("rtp toabc\n");
   gen_netList(g, pAig);
-  fmt::print("rtp netlist\n");
   Abc_NtkFinalizeRead(pAig);
   if(!Abc_NtkCheck(pAig)) {
     console->error("The AIG construction has failed.\n");
@@ -138,14 +136,11 @@ Abc_Ntk_t *Inou_abc::to_abc(const LGraph *g) {
  ***********************************************************************/
 void Inou_abc::gen_netList(const LGraph *g, Abc_Ntk_t *pAig) {
   console->info("Inou_abc::gen_primary_io_from_lgraph():Lgraph is calling ABC API to create Primary inputs & outputs");
-  fmt::print("rtp primary io {} {}\n", graph_info->graphio_output_id.size(), graph_info->graphio_input_id.size());
   gen_primary_io_from_lgraph(g, pAig);
   console->info("Inou_abc::gen_latch_from_lgraph():Lgraph is calling ABC API to create latches");
   gen_latch_from_lgraph(g, pAig);
   console->info("Inou_abc::gen_comb_cell_from_lgraph():Lgraph is calling ABC API to create combinational cells");
-  fmt::print("rtp com {}\n", graph_info->combinational_id.size());
   gen_comb_cell_from_lgraph(g, pAig);
-  fmt::print("rtp cells {}\n", pAig->nObjs);
 
   console->info("Inou_abc::conn_combinational_cell():Lgraph is calling ABC API to connect all combinational cells");
   conn_combinational_cell(g, pAig);
