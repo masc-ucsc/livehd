@@ -1,8 +1,9 @@
 
-#include "dump_yosys.hpp"
-#include "lgedgeiter.hpp"
-#include "math.h"
+#include <math.h>
 #include <algorithm>
+
+#include "lgedgeiter.hpp"
+#include "dump_yosys.hpp"
 
 RTLIL::Wire *Dump_yosys::get_wire(Index_ID idx, Port_ID pid, bool can_fail = false) {
   //std::pair<Index_ID,Port_ID> nid_pid = std::make_pair(inp_edge.get_idx(), inp_edge.get_out_pin().get_pid());

@@ -1,0 +1,77 @@
+cc_import(
+   name = "yosysincludes",
+   hdrs = glob(["kernel/*.h"]),
+   visibility = ["//visibility:public"],
+)
+
+#cc_library(
+#   name = "yosyskernel",
+#   srcs = glob(["kernel/*.cc"],exclude=["kernel/driver.cc"]),
+#   hdrs = glob(["kernel/*.h"]),
+#   defines = ["_YOSYS_","YOSYS_ENABLE_READLINE","YOSYS_ENABLE_PLUGINS","YOSYS_ENABLE_ABC","YOSYS_ENABLE_TCL"],
+#   visibility = ["//visibility:public"],
+#)
+
+#cc_library(
+#   name = "yosyslib",
+#   srcs = glob(["techlibs/common/*.cc","frontends/**/*.cc","passes/**/*.cc", "backends/**/*.cc"],
+#               exclude=["passes/techmap/libparse.cc",  # included
+#                        "frontends/verific/verificsva.cc", "frontends/verific/verific.cc", # no verific frontend
+#                       ]
+#              ),
+#   hdrs = glob(["techlibs/common/sim*.inc",
+#                "frontends/**/*.h","passes/**/*.h",
+#                "passes/techmap/libparse.cc",
+#                "passes/techmap/techmap.inc",
+#                "backends/**/*.h",
+#                ]),
+#   defines = ["_YOSYS_","YOSYS_ENABLE_READLINE","YOSYS_ENABLE_PLUGINS","YOSYS_ENABLE_ABC","YOSYS_ENABLE_TCL"],
+#   visibility = ["//visibility:public"],
+#    deps = [
+#        ":yosyskernel"
+#        ":bigint",
+#        ":sha1",
+#        ":ezsat",
+#        ":subcircuit",
+#        "@ffi//:ffi",
+#    ],
+#)
+#
+#
+#
+#cc_library(
+#   name = "bigint",
+#   srcs = glob(["libs/bigint/*.cc"],exclude=["libs/bigint/testsuite.cc","libs/bigint/sample.cc"]),
+#   hdrs = glob(["libs/bigint/*.hh"]),
+#   visibility = ["//visibility:public"],
+#)
+#
+#cc_library(
+#   name = "sha1",
+#   srcs = glob(["libs/sha1/*.cpp"]),
+#   hdrs = glob(["libs/sha1/*.h"]),
+#   visibility = ["//visibility:public"],
+#)
+#
+#cc_library(
+#   name = "ezsat",
+#   srcs = glob(["libs/ezsat/ez*.cc","libs/minisat/*.cc"]),
+#   hdrs = glob(["libs/ezsat/ez*.h","libs/minisat/*.h"]),
+#   visibility = ["//visibility:public"],
+#)
+#
+#cc_library(
+#   name = "subcircuit",
+#   srcs = glob(["libs/subcircuit/s*.cc"]),
+#   hdrs = glob(["libs/subcircuit/*.h"]),
+#   visibility = ["//visibility:public"],
+#)
+#
+#cc_binary(
+#    name = "yosys",
+#    srcs = ["kernel/driver.cc"],
+#    linkopts = ['-lreadline','-ltcl','-lpthread'],
+#    deps = [
+#        ":yosyslib",
+#    ],
+#)

@@ -9,8 +9,8 @@ env:
   matrix:
     - BUILD_TYPE=Release DOCKER=mascucsc/archlinux-masc
     - BUILD_TYPE=Debug   DOCKER=mascucsc/archlinux-masc
-    - BUILD_TYPE=Release DOCKER=mascucsc/ubuntu-masc
-    - BUILD_TYPE=Debug   DOCKER=mascucsc/ubuntu-masc
+      #- BUILD_TYPE=Release DOCKER=mascucsc/ubuntu-masc
+      #- BUILD_TYPE=Debug   DOCKER=mascucsc/ubuntu-masc
 
 before_install:
   - docker pull mascucsc/archlinux-masc

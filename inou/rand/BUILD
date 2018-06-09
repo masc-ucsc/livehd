@@ -11,7 +11,10 @@ cc_library(
 cc_binary(
     name = "lgrand",
     srcs = ["lgrand.cpp"],
+    linkopts = ['-lpthread'],
     deps = [
-        ":inou_rand", "//core:core", "//inou/json:inou_json"
+        ":inou_rand",
+        "//core:core", "//inou/json:inou_json",
+        "@boost//:filesystem", "@boost//:program_options",
     ],
 )

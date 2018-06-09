@@ -7,7 +7,6 @@
 : ${LGRAPH_HOST_PROCS:=$(nproc)}
 
 BUILD_DIR=${LGRAPH_BUILD_DIR}/${LGRAPH_BUILD_TYPE,,}
-RUN_DIR=${BUILD_DIR}
 
 if [ ! -e ${LGRAPH_SRC}/CMakeLists.txt ]; then
   echo "BUILD ERROR: '${LGRAPH_SRC}' does not contain LGraph source code"

@@ -3088,9 +3088,9 @@ snet_other_option: '+' net_type
         | '+' K_ESTCAP NUMBER
             { 
               // 11/12/2002 - this is obsolete in 5.5, & will be ignored 
-              if (defData->VersionNum < 5.5)
-                 if (defData->callbacks->SNetCbk) {defData->Net.setCap($3)};
-              else
+              if (defData->VersionNum < 5.5) {
+                 if (defData->callbacks->SNetCbk) { defData->Net.setCap($3); };
+              }else
                  defData->defWarning(7024, "The ESTCAP statement is obsolete in version 5.5 and later.\nThe DEF parser will ignore this statement.");
             }
  

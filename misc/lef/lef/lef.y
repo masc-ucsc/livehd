@@ -54,10 +54,11 @@
 #include <stdlib.h>
 #include <math.h>
 
-#include "lex.h"
 #include "lefiDefs.hpp"
 #include "lefiUser.hpp"
 #include "lefiUtil.hpp"
+
+#include "lex.h"
 
 #include "lefrData.hpp"
 #include "lefrCallBacks.hpp"
