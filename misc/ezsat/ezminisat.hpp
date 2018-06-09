@@ -33,33 +33,33 @@
 
 #include <cryptominisat5/cryptominisat.h>
 
-class ezMiniSAT : public ezSAT
-{
+class ezMiniSAT : public ezSAT {
 private:
-	typedef CMSat::SATSolver Solver;
-	Solver *minisatSolver;
-	std::vector<int> minisatVars;
-	bool foundContradiction;
+  typedef CMSat::SATSolver Solver;
+  Solver *                 minisatSolver;
+  std::vector<int>         minisatVars;
+  bool                     foundContradiction;
 
 #if EZMINISAT_SIMPSOLVER && EZMINISAT_INCREMENTAL
-	std::set<int> cnfFrozenVars;
+  std::set<int> cnfFrozenVars;
 #endif
 
 #ifndef _WIN32
-	static ezMiniSAT *alarmHandlerThis;
-	static clock_t alarmHandlerTimeout;
-	static void alarmHandler(int);
+  static ezMiniSAT *alarmHandlerThis;
+  static clock_t    alarmHandlerTimeout;
+  static void       alarmHandler(int);
 #endif
 
 public:
-	ezMiniSAT();
-	virtual ~ezMiniSAT();
-	virtual void clear();
+  ezMiniSAT();
+  virtual ~ezMiniSAT();
+  virtual void clear();
 #if EZMINISAT_SIMPSOLVER && EZMINISAT_INCREMENTAL
-	virtual void freeze(int id);
-	virtual bool eliminated(int idx);
+  virtual void freeze(int id);
+  virtual bool eliminated(int idx);
 #endif
-	virtual bool solver(const std::vector<int> &modelExpressions, std::vector<bool> &modelValues, const std::vector<int> &assumptions);
+  virtual bool solver(const std::vector<int> &modelExpressions, std::vector<bool> &modelValues,
+                      const std::vector<int> &assumptions);
 };
 
 #endif
