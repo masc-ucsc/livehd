@@ -1,3 +1,4 @@
+
 new_local_repository(
     name = "sparsehash",
     path = "subs/sparsehash-c11",
@@ -12,6 +13,21 @@ new_local_repository(
     name = "spdlog",
     path = "subs/spdlog/include",
     build_file = "subs/BUILD.spdlog",
+)
+#new_local_repository(
+#    name = "ffi",
+#    path = "subs/ffi",
+#    build_file = "subs/BUILD.ffi",
+#)
+new_local_repository(
+    name = "yosys",
+    path = "subs/yosys",
+    build_file = "subs/BUILD.yosys",
+)
+new_local_repository(
+    name = "abc",
+    path = "subs/abc",
+    build_file = "subs/BUILD.abc",
 )
 
 # BOOST Libraries dependences

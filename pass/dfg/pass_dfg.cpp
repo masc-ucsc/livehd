@@ -305,8 +305,9 @@ Pass_dfg_options_pack::Pass_dfg_options_pack() : Options_pack() {
 void Pass_dfg::test_const_conversion() {
   LGraph *tg = new LGraph(opack.lgdb_path, opack.output_name, false);
 
-  //const std::string str_in = "0x00FFFF_FF_u";//24 bits
-  const std::string str_in = "0b1111u";//4 bits
+  //const std::string str_in = "0d?";//24 bits
+  const std::string str_in = "0x00FF?FF_FF?_u";//24 bits
+  //const std::string str_in = "0b1111u";//4 bits
   //const std::string str_in = "0xFFFF_FF_s";//24 bits
   //const std::string str_in = "0x00_7AFF_FFFF_FFFF_FFFF_FF_u";//40 bits
   //const std::string str_in = "0b1111_1111_1111_1111_1111_1111_1111_1111_1111";
@@ -324,7 +325,7 @@ void Pass_dfg::test_const_conversion() {
   bool              is_signed          = false;
   bool              is_in32b           = true;
   bool              is_explicit_signed = false; //explicit assign the signed mark
-  bool              has_bool_dc         = false; //dc = don't care, ex: 0x100??101
+  bool              has_bool_dc        = false; //dc = don't care, ex: 0x100??101
   bool              is_pure_dc         = false; //ex: ????
   uint32_t          val                = 0;
   uint32_t          explicit_bits      = 0;
@@ -413,7 +414,17 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g,
     bit_width = explicit_bits? explicit_bits : (token1st.size()-1)*4 + char1st_width;
     is_in32b = bit_width > 32 ? false : true;
 
-    return process_hex_token(g, token1st, (uint16_t)bit_width, val);
+    size_t dc_pos = token1st.find('?'); //dc = don't care
+    if(dc_pos != string::npos){
+      has_bool_dc = true;
+      std::string h2b_token1st;
+      for(unsigned i = 0; i != token1st.length(); ++i)
+        h2b_token1st += hex_char_to_bin(token1st[i]);
+
+      return process_bin_token_with_dc(g, h2b_token1st);
+    }
+    else
+      return process_hex_token(g, token1st, (uint16_t)bit_width, val);
   }
   //binary
   else if (token1st[0] == '0' && token1st[1] == 'b') {
@@ -423,7 +434,7 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g,
     bit_width = explicit_bits ? explicit_bits : token1st.size();
     is_in32b = bit_width > 32 ? false : true;
 
-    size_t dc_pos = str_in.find('?'); //dc = don't care
+    size_t dc_pos = token1st.find('?'); //dc = don't care
     if(dc_pos != string::npos){
       has_bool_dc = true;
       return process_bin_token_with_dc(g, token1st);
@@ -433,6 +444,12 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g,
 
   }
   else{//decimal
+
+    if(token1st[2] == '?') {//case of pure question mark
+      is_pure_dc = true;
+      return create_dontcare_node(g,0);
+    }
+
     string s_2scmp;
     if(token1st[0] == '-'){
       is_explicit_signed = true;
@@ -448,10 +465,9 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g,
     //then you could analyze by process_bin_token
     if(big_int > 0) {
       while(big_int != 0){
-        s_2scmp += (big_int%2).toString();
+        s_2scmp = (big_int%2).toString() + s_2scmp;
         big_int /=  2;
       }
-      reverse(s_2scmp.begin(), s_2scmp.end());
     }
     else{// < 0
       fmt::print("token1st                            = {}\n", token1st);
@@ -459,13 +475,13 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g,
       string s_binary;
 
       while(pos_big_int != 0){
-        s_binary += (pos_big_int%2).toString();
+        s_binary = (pos_big_int%2).toString() + s_binary;
         pos_big_int /=  2;
       }
 
-      s_binary += '0'; //add leading 0 before converting 2's complement
-      reverse(s_binary.begin(), s_binary.end());
+      s_binary = '0' + s_binary; //add leading 0 before converting 2's complement
       fmt::print("before 2's complement, the s_binary = {}\n", s_binary);
+
       for(auto i = 0; i< s_binary.length(); i++){
         if(s_binary[i] == '0')
           s_binary[i] = '1';
@@ -538,7 +554,6 @@ Index_ID Pass_dfg::process_hex_token(LGraph *g, const std::string &token, const 
   if(bit_width > 32) {
     std::vector<Node_Pin> inp_pins;
     int t_size = (int)token.size();
-    uint32_t val_chunk = 0;
     Index_ID nid_join = g->create_node().get_nid();
     Index_ID nid_const32;
     g->node_type_set(nid_join, Join_Op);
@@ -685,7 +700,34 @@ Index_ID Pass_dfg::create_const32_node (LGraph *g, const std::string& val_str, b
 
 Index_ID Pass_dfg::create_dontcare_node (LGraph *g, uint16_t node_bit_width ){
   Index_ID nid_dc = g->create_node().get_nid();
-  g->node_type_set(nid_dc, CfgDontCare_Op);
+  g->node_type_set(nid_dc, DontCare_Op);
   g->set_bits(nid_dc, node_bit_width);
   return nid_dc;
 }
+
+
+std::string Pass_dfg::hex_char_to_bin(char c)
+{
+  switch(toupper(c))
+  {
+    case '0': return "0000";
+    case '1': return "0001";
+    case '2': return "0010";
+    case '3': return "0011";
+    case '4': return "0100";
+    case '5': return "0101";
+    case '6': return "0110";
+    case '7': return "0111";
+    case '8': return "1000";
+    case '9': return "1001";
+    case 'A': return "1010";
+    case 'B': return "1011";
+    case 'C': return "1100";
+    case 'D': return "1101";
+    case 'E': return "1110";
+    case 'F': return "1111";
+    case '?': return "????";
+    default: return "Error";
+  }
+}
+

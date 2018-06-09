@@ -170,7 +170,7 @@ void Inou_abc::gen_netList(const LGraph *g, Abc_Ntk_t *pAig) {
  ***********************************************************************/
 void Inou_abc::gen_latch_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
   char namebuffer[64];
-  for(const auto &idx : latch_id) {
+  for(const auto &idx : graph_info->latch_id) {
     Abc_Obj_t *pLatch, *pLatchInput, *pLatchOutput;
     pLatch       = Abc_NtkCreateLatch(pAig);
     pLatchInput  = Abc_NtkCreateBi(pAig);
@@ -215,9 +215,9 @@ void Inou_abc::gen_latch_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
       }
     }
     std::string latch_name(Abc_ObjName(pNet));
-    latchname2id[latch_name] = idx;
+	graph_info->latchname2id[latch_name] = idx;
     Abc_latch new_latch      = {pLatchInput, pNet};
-    sequential_cell[idx]     = new_latch;
+	graph_info->sequential_cell[idx]     = new_latch;
   }
 }
 
@@ -234,7 +234,7 @@ void Inou_abc::gen_latch_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
 void Inou_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
   Abc_Obj_t *pObj;
   char       namebuffer[255];
-  for(const auto &idx : graphio_output_id) {
+  for(const auto &idx : graph_info->graphio_output_id) {
     int width = g->get_bits(idx);
     if(width > 1) {
       for(int i = 0; i < width; i++) {
@@ -249,7 +249,7 @@ void Inou_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
         Abc_ObjAssignName(pwire, namebuffer, NULL);
         index_offset       key                = {idx, 0, {i, i}};
         Abc_primary_output new_primary_output = {pbuf, NULL};
-        primary_output[key]                   = new_primary_output;
+		graph_info->primary_output[key]                   = new_primary_output;
       }
     } else {
       Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
@@ -263,11 +263,11 @@ void Inou_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
       Abc_ObjAssignName(pwire, namebuffer, NULL);
       index_offset       key                = {idx, 0, {0, 0}};
       Abc_primary_output new_primary_output = {pbuf, NULL};
-      primary_output[key]                   = new_primary_output;
+	  graph_info->primary_output[key]                   = new_primary_output;
     }
   }
 
-  for(const auto &idx : graphio_input_id) {
+  for(const auto &idx : graph_info->graphio_input_id) {
     int width = g->get_bits(idx);
     if(width > 1) {
       for(int i = 0; i < width; i++) {
@@ -283,7 +283,7 @@ void Inou_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
         Abc_ObjAddFanin(pwire, pbuf);
         index_offset      key               = {idx, 0, {i, i}};
         Abc_primary_input new_primary_input = {pObj, pwire};
-        primary_input[key]                  = new_primary_input;
+		graph_info->primary_input[key]                  = new_primary_input;
       }
     } else {
       pObj            = Abc_NtkCreatePi(pAig);
@@ -298,7 +298,7 @@ void Inou_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
       Abc_ObjAddFanin(pwire, pbuf);
       index_offset      key               = {idx, 0, {0, 0}};
       Abc_primary_input new_primary_input = {pObj, pwire};
-      primary_input[key]                  = new_primary_input;
+	  graph_info->primary_input[key]                  = new_primary_input;
     }
   }
 }
@@ -315,43 +315,43 @@ void Inou_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
  ***********************************************************************/
 void Inou_abc::gen_comb_cell_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
 
-  for(const auto &idx : combinational_id) {
+  for(const auto &idx : graph_info->combinational_id) {
     const Tech_cell *tcell = g->get_tlibrary()->get_const_cell(g->tmap_id_get(idx));
 
     if(tcell->get_name() == "$_NOT_") {
-      combinational_cell[idx] = LGraph_CreateNot(pAig);
+	  graph_info->combinational_cell[idx] = LGraph_CreateNot(pAig);
     } else if(tcell->get_name() == "$_AND_") {
-      combinational_cell[idx] = LGraph_CreateAnd(pAig);
+	  graph_info->combinational_cell[idx] = LGraph_CreateAnd(pAig);
     } else if(tcell->get_name() == "$_OR_") {
-      combinational_cell[idx] = LGraph_CreateOr(pAig);
+	  graph_info->combinational_cell[idx] = LGraph_CreateOr(pAig);
     } else if(tcell->get_name() == "$_XOR_") {
-      combinational_cell[idx] = LGraph_CreateXor(pAig);
+	  graph_info->combinational_cell[idx] = LGraph_CreateXor(pAig);
     } else if(tcell->get_name() == "$_NAND_") {
-      combinational_cell[idx] = LGraph_CreateNand(pAig);
+	  graph_info->combinational_cell[idx] = LGraph_CreateNand(pAig);
     } else if(tcell->get_name() == "$_NOR_") {
-      combinational_cell[idx] = LGraph_CreateNor(pAig);
+	  graph_info->combinational_cell[idx] = LGraph_CreateNor(pAig);
     } else if(tcell->get_name() == "$_XNOR_") {
-      combinational_cell[idx] = LGraph_CreateXnor(pAig);
+	  graph_info->combinational_cell[idx] = LGraph_CreateXnor(pAig);
     } else if(tcell->get_name() == "$_ANDNOT_") {
       //assign Y = A & (~B);
-      combinational_cell[idx] = LGraph_CreateAndnot(pAig);
+	  graph_info->combinational_cell[idx] = LGraph_CreateAndnot(pAig);
     } else if(tcell->get_name() == "$_ORNOT_") {
       //assign Y = A | (~B);
-      combinational_cell[idx] = LGraph_CreateOrnot(pAig);
+	  graph_info->combinational_cell[idx] = LGraph_CreateOrnot(pAig);
     } else if(tcell->get_name() == "$_AOI3_") {
       //assign Y = ~((A & B) | C);
-      combinational_cell[idx] = LGraph_CreateAoi3(pAig);
+	  graph_info->combinational_cell[idx] = LGraph_CreateAoi3(pAig);
     } else if(tcell->get_name() == "$_OAI3_") {
       //assign Y = ~((A | B) & C);
-      combinational_cell[idx] = LGraph_CreateOai3(pAig);
+	  graph_info->combinational_cell[idx] = LGraph_CreateOai3(pAig);
     } else if(tcell->get_name() == "$_AOI4_") {
       //assign Y = ~((A & B) | (C & D));
-      combinational_cell[idx] = LGraph_CreateAoi4(pAig);
+	  graph_info->combinational_cell[idx] = LGraph_CreateAoi4(pAig);
     } else if(tcell->get_name() == "$_OAI4_") {
       //assign Y = ~((A | B) & (C | D));
-      combinational_cell[idx] = LGraph_CreateOai4(pAig);
+	  graph_info->combinational_cell[idx] = LGraph_CreateOai4(pAig);
     } else if(tcell->get_name() == "$_MUX_") {
-      combinational_cell[idx] = LGraph_CreateMUX(pAig);
+	  graph_info->combinational_cell[idx] = LGraph_CreateMUX(pAig);
     } else {
       console->error("Unknown cell type!!!!");
     }
@@ -424,33 +424,33 @@ Abc_Obj_t *Inou_abc::gen_const_from_lgraph(const LGraph *g, index_offset key, Ab
  * description: create a pseduo_input net for subgraph & memory
  ***********************************************************************/
 Abc_Obj_t *Inou_abc::gen_pseudo_subgraph_input(const index_offset &inp, Abc_Ntk_t *pAig) {
-  if(pseduo_record.end() == pseduo_record.find(subgraph_generated_output_wire[inp])) {
+  if(graph_info->pseduo_record.end() == graph_info->pseduo_record.find(graph_info->subgraph_generated_output_wire[inp])) {
     Abc_Obj_t *pseudo_subgraph_input = Abc_NtkCreatePi(pAig);
     Abc_Obj_t *pNet                  = Abc_NtkCreateNet(pAig);
-    Abc_ObjAssignName(pNet, const_cast<char *>(subgraph_generated_output_wire[inp].c_str()), NULL);
+    Abc_ObjAssignName(pNet, const_cast<char *>(graph_info->subgraph_generated_output_wire[inp].c_str()), NULL);
     Abc_ObjAddFanin(pNet, pseudo_subgraph_input);
-    pseduo_record[subgraph_generated_output_wire[inp]] = pNet;
+	graph_info->pseduo_record[graph_info->subgraph_generated_output_wire[inp]] = pNet;
   }
   Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
   pbuf->pData      = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
   Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
-  Abc_ObjAddFanin(pbuf, pseduo_record[subgraph_generated_output_wire[inp]]);
+  Abc_ObjAddFanin(pbuf, graph_info->pseduo_record[graph_info->subgraph_generated_output_wire[inp]]);
   Abc_ObjAddFanin(pwire, pbuf);
   return pwire;
 }
 
 Abc_Obj_t *Inou_abc::gen_pseudo_memory_input(const index_offset &inp, Abc_Ntk_t *pAig) {
-  if(pseduo_record.find(memory_generated_output_wire[inp]) == pseduo_record.end()) {
+  if(graph_info->pseduo_record.find(graph_info->memory_generated_output_wire[inp]) == graph_info->pseduo_record.end()) {
     Abc_Obj_t *pseudo_memory_input = Abc_NtkCreatePi(pAig);
     Abc_Obj_t *pNet                = Abc_NtkCreateNet(pAig);
-    Abc_ObjAssignName(pNet, const_cast<char *>(memory_generated_output_wire[inp].c_str()), NULL);
+    Abc_ObjAssignName(pNet, const_cast<char *>(graph_info->memory_generated_output_wire[inp].c_str()), NULL);
     Abc_ObjAddFanin(pNet, pseudo_memory_input);
-    pseduo_record[memory_generated_output_wire[inp]] = pNet;
+	graph_info->pseduo_record[graph_info->memory_generated_output_wire[inp]] = pNet;
   }
   Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
   pbuf->pData      = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
   Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
-  Abc_ObjAddFanin(pbuf, pseduo_record[memory_generated_output_wire[inp]]);
+  Abc_ObjAddFanin(pbuf, graph_info->pseduo_record[graph_info->memory_generated_output_wire[inp]]);
   Abc_ObjAddFanin(pwire, pbuf);
   return pwire;
 }
@@ -466,8 +466,8 @@ Abc_Obj_t *Inou_abc::gen_pseudo_memory_input(const index_offset &inp, Abc_Ntk_t 
  * description: connect all the combinational cell based on computed topology
  ***********************************************************************/
 void Inou_abc::conn_combinational_cell(const LGraph *g, Abc_Ntk_t *pAig) {
-  for(const auto &idx : combinational_id) {
-    auto src = comb_conn[idx];
+  for(const auto &idx : graph_info->combinational_id) {
+    auto src = graph_info->comb_conn[idx];
     for(const auto &inp : src) {
 
       Index_ID     src_idx        = inp.idx;
@@ -478,33 +478,33 @@ void Inou_abc::conn_combinational_cell(const LGraph *g, Abc_Ntk_t *pAig) {
       if(this_node_type == TechMap_Op) {
         const Tech_cell *tcell = g->get_tlibrary()->get_const_cell(g->tmap_id_get(src_idx));
         if(is_latch(tcell)) {
-          Abc_ObjAddFanin(combinational_cell[idx].pNodeInput, sequential_cell.at(inp.idx).pLatchOutput);
+          Abc_ObjAddFanin(graph_info->combinational_cell[idx].pNodeInput, graph_info->sequential_cell.at(inp.idx).pLatchOutput);
         } else {
-          Abc_ObjAddFanin(combinational_cell[idx].pNodeInput, combinational_cell.at(inp.idx).pNodeOutput);
+          Abc_ObjAddFanin(graph_info->combinational_cell[idx].pNodeInput, graph_info->combinational_cell.at(inp.idx).pNodeOutput);
         }
       } else if(this_node_type == GraphIO_Op) {
         assert(g->is_graph_input(src_idx)); // output is not allowed
-        Abc_ObjAddFanin(combinational_cell[idx].pNodeInput, primary_input[rhs].PIOut);
+        Abc_ObjAddFanin(graph_info->combinational_cell[idx].pNodeInput, graph_info->primary_input[rhs].PIOut);
       } else if(this_node_type == U32Const_Op || this_node_type == StrConst_Op) {
-        Abc_ObjAddFanin(combinational_cell[idx].pNodeInput, gen_const_from_lgraph(g, rhs, pAig));
+        Abc_ObjAddFanin(graph_info->combinational_cell[idx].pNodeInput, gen_const_from_lgraph(g, rhs, pAig));
       } else if(this_node_type == Memory_Op) {
-        if(pseduo_record.find(memory_generated_output_wire[inp]) == pseduo_record.end()) {
+        if(graph_info->pseduo_record.find(graph_info->memory_generated_output_wire[inp]) == graph_info->pseduo_record.end()) {
           Abc_Obj_t *pseudo_memory_input = Abc_NtkCreatePi(pAig);
           Abc_Obj_t *pNet                = Abc_NtkCreateNet(pAig);
-          Abc_ObjAssignName(pNet, const_cast<char *>(memory_generated_output_wire[inp].c_str()), NULL);
+          Abc_ObjAssignName(pNet, const_cast<char *>(graph_info->memory_generated_output_wire[inp].c_str()), NULL);
           Abc_ObjAddFanin(pNet, pseudo_memory_input);
-          pseduo_record[memory_generated_output_wire[inp]] = pNet;
+		  graph_info->pseduo_record[graph_info->memory_generated_output_wire[inp]] = pNet;
         }
-        Abc_ObjAddFanin(combinational_cell[idx].pNodeInput, pseduo_record[memory_generated_output_wire[inp]]);
+        Abc_ObjAddFanin(graph_info->combinational_cell[idx].pNodeInput, graph_info->pseduo_record[graph_info->memory_generated_output_wire[inp]]);
       } else if(this_node_type == SubGraph_Op) {
-        if(pseduo_record.find(subgraph_generated_output_wire[inp]) == pseduo_record.end()) {
+        if(graph_info->pseduo_record.find(graph_info->subgraph_generated_output_wire[inp]) == graph_info->pseduo_record.end()) {
           Abc_Obj_t *pseudo_subgraph_input = Abc_NtkCreatePi(pAig);
           Abc_Obj_t *pNet                  = Abc_NtkCreateNet(pAig);
-          Abc_ObjAssignName(pNet, const_cast<char *>(subgraph_generated_output_wire[inp].c_str()), NULL);
+          Abc_ObjAssignName(pNet, const_cast<char *>(graph_info->subgraph_generated_output_wire[inp].c_str()), NULL);
           Abc_ObjAddFanin(pNet, pseudo_subgraph_input);
-          pseduo_record[subgraph_generated_output_wire[inp]] = pNet;
+		  graph_info->pseduo_record[graph_info->subgraph_generated_output_wire[inp]] = pNet;
         }
-        Abc_ObjAddFanin(combinational_cell[idx].pNodeInput, pseduo_record[subgraph_generated_output_wire[inp]]);
+        Abc_ObjAddFanin(graph_info->combinational_cell[idx].pNodeInput, graph_info->pseduo_record[graph_info->subgraph_generated_output_wire[inp]]);
       } else {
         assert(false);
       }
@@ -523,8 +523,8 @@ void Inou_abc::conn_combinational_cell(const LGraph *g, Abc_Ntk_t *pAig) {
  * description: connect all the sequential cell based on computed topology
  ***********************************************************************/
 void Inou_abc::conn_latch(const LGraph *g, Abc_Ntk_t *pAig) {
-  for(const auto &idx : latch_id) {
-    auto src = latch_conn[idx];
+  for(const auto &idx : graph_info->latch_id) {
+    auto src = graph_info->latch_conn[idx];
     for(const auto &inp : src) {
       Index_ID     src_idx        = inp.idx;
       int          src_bits       = inp.offset[0];
@@ -534,33 +534,33 @@ void Inou_abc::conn_latch(const LGraph *g, Abc_Ntk_t *pAig) {
       if(this_node_type == TechMap_Op) {
         const Tech_cell *tcell = g->get_tlibrary()->get_const_cell(g->tmap_id_get(src_idx));
         if(is_latch(tcell)) {
-          Abc_ObjAddFanin(sequential_cell[idx].pLatchInput, sequential_cell[inp.idx].pLatchOutput);
+          Abc_ObjAddFanin(graph_info->sequential_cell[idx].pLatchInput, graph_info->sequential_cell[inp.idx].pLatchOutput);
         } else {
-          Abc_ObjAddFanin(sequential_cell[idx].pLatchInput, combinational_cell[inp.idx].pNodeOutput);
+          Abc_ObjAddFanin(graph_info->sequential_cell[idx].pLatchInput, graph_info->combinational_cell[inp.idx].pNodeOutput);
         }
       } else if(this_node_type == GraphIO_Op) {
         assert(g->is_graph_input(src_idx));
-        Abc_ObjAddFanin(sequential_cell[idx].pLatchInput, primary_input[rhs].PIOut);
+        Abc_ObjAddFanin(graph_info->sequential_cell[idx].pLatchInput, graph_info->primary_input[rhs].PIOut);
       } else if(this_node_type == U32Const_Op || this_node_type == StrConst_Op) {
-        Abc_ObjAddFanin(sequential_cell[idx].pLatchInput, gen_const_from_lgraph(g, rhs, pAig));
+        Abc_ObjAddFanin(graph_info->sequential_cell[idx].pLatchInput, gen_const_from_lgraph(g, rhs, pAig));
       } else if(this_node_type == Memory_Op) {
-        if(pseduo_record.find(memory_generated_output_wire[inp]) == pseduo_record.end()) {
+        if(graph_info->pseduo_record.find(graph_info->memory_generated_output_wire[inp]) == graph_info->pseduo_record.end()) {
           Abc_Obj_t *pseudo_memory_input = Abc_NtkCreatePi(pAig);
           Abc_Obj_t *pNet                = Abc_NtkCreateNet(pAig);
-          Abc_ObjAssignName(pNet, const_cast<char *>(memory_generated_output_wire[inp].c_str()), NULL);
+          Abc_ObjAssignName(pNet, const_cast<char *>(graph_info->memory_generated_output_wire[inp].c_str()), NULL);
           Abc_ObjAddFanin(pNet, pseudo_memory_input);
-          pseduo_record[memory_generated_output_wire[inp]] = pNet;
+		  graph_info->pseduo_record[graph_info->memory_generated_output_wire[inp]] = pNet;
         }
-        Abc_ObjAddFanin(sequential_cell[idx].pLatchInput, pseduo_record[memory_generated_output_wire[inp]]);
+        Abc_ObjAddFanin(graph_info->sequential_cell[idx].pLatchInput, graph_info->pseduo_record[graph_info->memory_generated_output_wire[inp]]);
       } else if(this_node_type == SubGraph_Op) {
-        if(pseduo_record.find(subgraph_generated_output_wire[inp]) == pseduo_record.end()) {
+        if(graph_info->pseduo_record.find(graph_info->subgraph_generated_output_wire[inp]) == graph_info->pseduo_record.end()) {
           Abc_Obj_t *pseudo_subgraph_input = Abc_NtkCreatePi(pAig);
           Abc_Obj_t *pNet                  = Abc_NtkCreateNet(pAig);
-          Abc_ObjAssignName(pNet, const_cast<char *>(subgraph_generated_output_wire[inp].c_str()), NULL);
+          Abc_ObjAssignName(pNet, const_cast<char *>(graph_info->subgraph_generated_output_wire[inp].c_str()), NULL);
           Abc_ObjAddFanin(pNet, pseudo_subgraph_input);
-          pseduo_record[subgraph_generated_output_wire[inp]] = pNet;
+		  graph_info->pseduo_record[graph_info->subgraph_generated_output_wire[inp]] = pNet;
         }
-        Abc_ObjAddFanin(sequential_cell[idx].pLatchInput, pseduo_record[subgraph_generated_output_wire[inp]]);
+        Abc_ObjAddFanin(graph_info->sequential_cell[idx].pLatchInput, graph_info->pseduo_record[graph_info->subgraph_generated_output_wire[inp]]);
       } else {
         assert(false);
       }
@@ -579,8 +579,8 @@ void Inou_abc::conn_latch(const LGraph *g, Abc_Ntk_t *pAig) {
  * description: connect all the primary output based on computed topology
  ***********************************************************************/
 void Inou_abc::conn_primary_output(const LGraph *g, Abc_Ntk_t *pAig) {
-  for(const auto &idx : graphio_output_id) {
-    auto src       = primary_output_conn[idx];
+  for(const auto &idx : graph_info->graphio_output_id) {
+    auto src       = graph_info->primary_output_conn[idx];
     int  bit_index = 0;
     for(const auto &inp : src) {
       Index_ID     src_idx        = inp.idx;
@@ -595,21 +595,21 @@ void Inou_abc::conn_primary_output(const LGraph *g, Abc_Ntk_t *pAig) {
           Abc_Obj_t *pbuf = Abc_NtkCreateNode(pAig);
           pbuf->pData     = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
           Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
-          Abc_ObjAddFanin(pbuf, sequential_cell[src_idx].pLatchOutput);
+          Abc_ObjAddFanin(pbuf, graph_info->sequential_cell[src_idx].pLatchOutput);
           Abc_ObjAddFanin(pNet, pbuf);
-          Abc_ObjAddFanin(primary_output[lhs].PO, pNet);
+          Abc_ObjAddFanin(graph_info->primary_output[lhs].PO, pNet);
         } else {
-          Abc_ObjAddFanin(primary_output[lhs].PO, combinational_cell[src_idx].pNodeOutput);
+          Abc_ObjAddFanin(graph_info->primary_output[lhs].PO, graph_info->combinational_cell[src_idx].pNodeOutput);
         }
       } else if(this_node_type == GraphIO_Op) {
         assert(g->is_graph_input(src_idx));
-        Abc_ObjAddFanin(primary_output[lhs].PO, primary_input[rhs].PIOut);
+        Abc_ObjAddFanin(graph_info->primary_output[lhs].PO, graph_info->primary_input[rhs].PIOut);
       } else if(this_node_type == U32Const_Op || this_node_type == StrConst_Op) {
-        Abc_ObjAddFanin(primary_output[lhs].PO, gen_const_from_lgraph(g, rhs, pAig));
+        Abc_ObjAddFanin(graph_info->primary_output[lhs].PO, gen_const_from_lgraph(g, rhs, pAig));
       } else if(this_node_type == Memory_Op) {
-        Abc_ObjAddFanin(primary_output[lhs].PO, gen_pseudo_memory_input(inp, pAig));
+        Abc_ObjAddFanin(graph_info->primary_output[lhs].PO, gen_pseudo_memory_input(inp, pAig));
       } else if(this_node_type == SubGraph_Op) {
-        Abc_ObjAddFanin(primary_output[lhs].PO, gen_pseudo_subgraph_input(inp, pAig));
+        Abc_ObjAddFanin(graph_info->primary_output[lhs].PO, gen_pseudo_subgraph_input(inp, pAig));
       } else {
         assert(false);
       }
@@ -629,18 +629,18 @@ void Inou_abc::conn_primary_output(const LGraph *g, Abc_Ntk_t *pAig) {
  * description: connect all generated reset signal
  ***********************************************************************/
 void Inou_abc::conn_reset(const LGraph *g, Abc_Ntk_t *pAig) {
-  for(const auto &rg : reset_group_map) {
+  for(const auto &rg : graph_info->reset_group_map) {
     std::string reset_name = rg.first;
     //check if this reset is the graph IO otherwise create it
-    Index_ID idx = reset_id[reset_name];
+    Index_ID idx = graph_info->reset_id[reset_name];
     if(!g->is_graph_input(idx)) {
       Abc_Obj_t *generated_reset = Abc_NtkCreatePo(pAig); // create generated reset here
       assert((g->node_type_get(idx).op == TechMap_Op));
       const Tech_cell *tcell = g->get_tlibrary()->get_const_cell(g->tmap_id_get(idx));
       if(is_latch(tcell)) {
-        Abc_ObjAddFanin(generated_reset, sequential_cell[idx].pLatchOutput);
+        Abc_ObjAddFanin(generated_reset, graph_info->sequential_cell[idx].pLatchOutput);
       } else {
-        Abc_ObjAddFanin(generated_reset, combinational_cell[idx].pNodeOutput);
+        Abc_ObjAddFanin(generated_reset, graph_info->combinational_cell[idx].pNodeOutput);
       }
       Abc_ObjAssignName(Abc_ObjFanin0Ntk(generated_reset), (char *)reset_name.c_str(), NULL);
     }
@@ -658,18 +658,18 @@ void Inou_abc::conn_reset(const LGraph *g, Abc_Ntk_t *pAig) {
  * description: connect all generated clock signal
  ***********************************************************************/
 void Inou_abc::conn_clock(const LGraph *g, Abc_Ntk_t *pAig) {
-  for(const auto &sg : skew_group_map) {
+  for(const auto &sg : graph_info->skew_group_map) {
     std::string clock_name = sg.first;
     //check if this clock is the graph IO otherwise create it
-    Index_ID idx = clock_id[clock_name];
+    Index_ID idx = graph_info->clock_id[clock_name];
     if(!g->is_graph_input(idx)) {
       Abc_Obj_t *generated_clock = Abc_NtkCreatePo(pAig); // create generated clock signal
       assert((g->node_type_get(idx).op == TechMap_Op));
       const Tech_cell *tcell = g->get_tlibrary()->get_const_cell(g->tmap_id_get(idx));
       if(is_latch(tcell)) {
-        Abc_ObjAddFanin(generated_clock, sequential_cell[idx].pLatchOutput);
+        Abc_ObjAddFanin(generated_clock, graph_info->sequential_cell[idx].pLatchOutput);
       } else {
-        Abc_ObjAddFanin(generated_clock, combinational_cell[idx].pNodeOutput);
+        Abc_ObjAddFanin(generated_clock, graph_info->combinational_cell[idx].pNodeOutput);
       }
       Abc_ObjAssignName(Abc_ObjFanin0Ntk(generated_clock), (char *)clock_name.c_str(), NULL);
     }
@@ -687,8 +687,8 @@ void Inou_abc::conn_clock(const LGraph *g, Abc_Ntk_t *pAig) {
  * description: connect all generated subgraph signal
  ***********************************************************************/
 void Inou_abc::conn_subgraph(const LGraph *g, Abc_Ntk_t *pAig) {
-  for(const auto &idx : subgraph_id) {
-    auto inp_info = subgraph_conn[idx];
+  for(const auto &idx : graph_info->subgraph_id) {
+    auto inp_info = graph_info->subgraph_conn[idx];
     for(const auto &src : inp_info) {
       Port_ID offset = 0;
       for(const auto &inp : src.second) {
@@ -706,12 +706,12 @@ void Inou_abc::conn_subgraph(const LGraph *g, Abc_Ntk_t *pAig) {
             Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
             pbuf->pData      = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
             Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
-            Abc_ObjAddFanin(pbuf, sequential_cell[src_idx].pLatchOutput);
+            Abc_ObjAddFanin(pbuf, graph_info->sequential_cell[src_idx].pLatchOutput);
             Abc_ObjAddFanin(pwire, pbuf);
 
             Abc_ObjAddFanin(pseduo_subgraph_output, pwire);
           } else {
-            Abc_ObjAddFanin(pseduo_subgraph_output, combinational_cell[src_idx].pNodeOutput);
+            Abc_ObjAddFanin(pseduo_subgraph_output, graph_info->combinational_cell[src_idx].pNodeOutput);
           }
         }
 
@@ -722,7 +722,7 @@ void Inou_abc::conn_subgraph(const LGraph *g, Abc_Ntk_t *pAig) {
           Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
           pbuf->pData      = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
           Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
-          Abc_ObjAddFanin(pbuf, primary_input[rhs].PIOut);
+          Abc_ObjAddFanin(pbuf, graph_info->primary_input[rhs].PIOut);
           Abc_ObjAddFanin(pwire, pbuf);
           Abc_ObjAddFanin(pseduo_subgraph_output, pwire);
 
@@ -751,7 +751,7 @@ void Inou_abc::conn_subgraph(const LGraph *g, Abc_Ntk_t *pAig) {
         sprintf(namebuffer, "%%subgraph_input_%ld_%d_%d%%", idx, src.first, offset);
         Abc_ObjAssignName(Abc_ObjFanin0Ntk(pseduo_subgraph_output), namebuffer, NULL);
         index_offset info                   = {idx, src.first, {offset, offset}};
-        subgraph_generated_input_wire[info] = std::string(namebuffer);
+		graph_info->subgraph_generated_input_wire[info] = std::string(namebuffer);
         offset++;
       }
     }
@@ -769,8 +769,8 @@ void Inou_abc::conn_subgraph(const LGraph *g, Abc_Ntk_t *pAig) {
  * description: connect all generated subgraph signal
  ***********************************************************************/
 void Inou_abc::conn_memory(const LGraph *g, Abc_Ntk_t *pAig) {
-  for(const auto &idx : memory_id) {
-    auto inp_info = memory_conn[idx];
+  for(const auto &idx : graph_info->memory_id) {
+    auto inp_info = graph_info->memory_conn[idx];
     for(const auto &src : inp_info) {
       Port_ID offset = 0;
       for(const auto &inp : src.second) {
@@ -788,12 +788,12 @@ void Inou_abc::conn_memory(const LGraph *g, Abc_Ntk_t *pAig) {
             Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
             pbuf->pData      = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
             Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
-            Abc_ObjAddFanin(pbuf, sequential_cell[src_idx].pLatchOutput);
+            Abc_ObjAddFanin(pbuf, graph_info->sequential_cell[src_idx].pLatchOutput);
             Abc_ObjAddFanin(pwire, pbuf);
 
             Abc_ObjAddFanin(pseduo_memory_output, pwire);
           } else {
-            Abc_ObjAddFanin(pseduo_memory_output, combinational_cell[src_idx].pNodeOutput);
+            Abc_ObjAddFanin(pseduo_memory_output, graph_info->combinational_cell[src_idx].pNodeOutput);
           }
         } else if(this_node_type == GraphIO_Op) {
           assert(g->is_graph_input(src_idx));
@@ -802,7 +802,7 @@ void Inou_abc::conn_memory(const LGraph *g, Abc_Ntk_t *pAig) {
           Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
           pbuf->pData      = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
           Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
-          Abc_ObjAddFanin(pbuf, primary_input[rhs].PIOut);
+          Abc_ObjAddFanin(pbuf, graph_info->primary_input[rhs].PIOut);
           Abc_ObjAddFanin(pwire, pbuf);
           Abc_ObjAddFanin(pseduo_memory_output, pwire);
         } else if(this_node_type == U32Const_Op || this_node_type == StrConst_Op) {
@@ -821,7 +821,7 @@ void Inou_abc::conn_memory(const LGraph *g, Abc_Ntk_t *pAig) {
         sprintf(namebuffer, "%%memory_input_%ld_%d_%d%%", idx, src.first, offset);
         Abc_ObjAssignName(Abc_ObjFanin0Ntk(pseduo_memory_output), namebuffer, NULL);
         index_offset info                 = {idx, src.first, {offset, offset}};
-        memory_generated_input_wire[info] = std::string(namebuffer);
+		graph_info->memory_generated_input_wire[info] = std::string(namebuffer);
         offset++;
       }
     }

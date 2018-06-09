@@ -1,14 +1,13 @@
 #ifndef GUARD_LGLEFDEF
 #define GUARD_LGLEFDEF
 
-#include "defrReader.hpp"
-#include "lefrReader.hpp"
-#include <core/tech_library.hpp>
 #include <fstream>
 #include <iostream>
 #include <string>
-//#include "lefiUtil.hpp"
-//#include "lefdef_json.hpp"
+
+#include "defrReader.hpp"
+#include "lefrReader.hpp"
+#include "tech_library.hpp"
 #include "inou_def.hpp"
 
 //***************************************************

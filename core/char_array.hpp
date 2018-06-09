@@ -206,7 +206,7 @@ public:
   }
 
   const Data_Type &get_field(const char *ptr) const {
-    int id = self_id(ptr);
+    int id = get_id(ptr);
     return get_field(id);
   }
 

@@ -1,8 +1,9 @@
 #ifndef GUARD_INOU_DEF
 #define GUARD_INOU_DEF
 
-#include "inou.hpp"
 #include <string>
+
+#include "inou.hpp"
 
 //************************************
 //***** Start Def Class Definition ***

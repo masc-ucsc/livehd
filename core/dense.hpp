@@ -37,7 +37,7 @@ public:
   typedef const value_type*   const_iterator;
 
   explicit Dense(const std::string& filename) : __allocator(filename) {
-    long sz = get_saved_size(filename);
+    size_t sz = get_saved_size(filename);
     if(sz > 0) {
       __buffer = __allocator.allocate(sz);
       __size   = sz;
@@ -134,16 +134,17 @@ private:
   value_type*     __buffer;
 
 
-  long get_saved_size(const std::string & filename) {
+  size_t get_saved_size(const std::string & filename) {
     int fd = open(filename.c_str(), O_RDONLY);
     if(fd < 0)
       return 0;
 
-    uint64_t size;
-    read(fd, &size, sizeof(uint64_t));
+    size_t size;
+    int ret = read(fd, &size, sizeof(uint64_t));
+    if(ret <= 0)
+      return 0;
 
     close(fd);
-
     return size;
   }
 };
