@@ -125,14 +125,13 @@ private:
                                       uint32_t& val,
                                       uint32_t& explicit_bits,
                                       size_t& bit_width);
-  Index_ID process_hex_token         (LGraph *g, const std::string& token1st, const uint16_t & bit_width, uint32_t& val);
   Index_ID process_bin_token         (LGraph *g, const std::string& token1st, const uint16_t & bit_width, uint32_t& val);
   Index_ID process_bin_token_with_dc (LGraph *g, const std::string& token1st);
-  uint32_t cal_hex_val_32b(const std::string&);
   uint32_t cal_bin_val_32b(const std::string&);
-  Index_ID create_const32_node  (LGraph *g, const std::string&, bool is_hex, uint16_t node_bit_width, uint32_t& val);
+  Index_ID create_const32_node  (LGraph *g, const std::string&, uint16_t node_bit_width, uint32_t& val);
   Index_ID create_dontcare_node (LGraph *g, uint16_t node_bit_width );
   std::string hex_char_to_bin(char c);
+  std::string hex_msb_char_to_bin(char c);
 };
 
 #endif
