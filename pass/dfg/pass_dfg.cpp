@@ -306,10 +306,10 @@ void Pass_dfg::test_const_conversion() {
   LGraph *tg = new LGraph(opack.lgdb_path, opack.output_name, false);
 
   //const std::string str_in = "0d?";//24 bits
-  const std::string str_in = "0x00FF?FF_FF?_u";//24 bits
+  //const std::string str_in = "0x00FF?FF_FF?_u";//24 bits
   //const std::string str_in = "0b1111u";//4 bits
   //const std::string str_in = "0xFFFF_FF_s";//24 bits
-  //const std::string str_in = "0x00_7AFF_FFFF_FFFF_FFFF_FF_u";//40 bits
+  const std::string str_in = "0x7AFF_FFFF_FFFF_FFFF_FF_s";//40 bits
   //const std::string str_in = "0b1111_1111_1111_1111_1111_1111_1111_1111_1111";
   //const std::string str_in = "0b00011111111_11111111_11111111s";//legal but logic conflict declaration
   //const std::string str_in = "-0d2147483647";
@@ -396,35 +396,21 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g,
     idx = token1st.find_first_not_of('0') ;
     token1st = token1st.substr(idx);//exclude leading 0s
 
-    //need to know the bit width of 1st character's
-    uint8_t char1st_width = 0;
-    if(token1st[0] == '1')
-      char1st_width = 1;
-    else if(token1st[0] >= '2' && token1st[0] <='3')
-      char1st_width = 2;
-    else if(token1st[0] >= '4' && token1st[0] <='7')
-      char1st_width = 3;
-    else if(token1st[0] >= '8' && token1st[0] <='9')
-      char1st_width = 4;
-    else if(token1st[0] >= 'a' && token1st[0] <='f')
-      char1st_width = 4;
-    else if(token1st[0] >= 'A' && token1st[0] <='F')
-      char1st_width = 4;
+    std::string h2b_token1st;
 
-    bit_width = explicit_bits? explicit_bits : (token1st.size()-1)*4 + char1st_width;
+    h2b_token1st += hex_msb_char_to_bin(token1st[0]); //deal with msb char
+    for(unsigned i = 1; i != token1st.length(); ++i)
+      h2b_token1st += hex_char_to_bin(token1st[i]);
+
+    bit_width = explicit_bits ? explicit_bits : h2b_token1st.size();
     is_in32b = bit_width > 32 ? false : true;
-
-    size_t dc_pos = token1st.find('?'); //dc = don't care
+    size_t dc_pos = h2b_token1st.find('?'); //dc = don't care
     if(dc_pos != string::npos){
       has_bool_dc = true;
-      std::string h2b_token1st;
-      for(unsigned i = 0; i != token1st.length(); ++i)
-        h2b_token1st += hex_char_to_bin(token1st[i]);
-
       return process_bin_token_with_dc(g, h2b_token1st);
     }
     else
-      return process_hex_token(g, token1st, (uint16_t)bit_width, val);
+      return process_bin_token(g, h2b_token1st, (uint16_t)bit_width, val);
   }
   //binary
   else if (token1st[0] == '0' && token1st[1] == 'b') {
@@ -515,26 +501,6 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g,
 }
 
 
-
-uint32_t Pass_dfg::cal_hex_val_32b(const std::string& token){
-  uint16_t idx = 0;
-  uint32_t val = 0;
-  while (token[idx]) {
-    uint8_t byte = token[idx];
-    if (byte >= '0' && byte <= '9') {
-      byte = byte - '0';
-      val = val << 4 | (byte & 0xF);
-    } else if (byte >= 'a' && byte <= 'f') {
-      byte = byte - 'a' + 10;
-      val = val << 4 | (byte & 0xF);
-    } else if (byte >= 'A' && byte <= 'F') {
-      byte = byte - 'A' + 10;
-      val = val << 4 | (byte & 0xF);
-    }
-    idx++;
-  }
-  return val;
-}
 uint32_t Pass_dfg::cal_bin_val_32b(const std::string& token){
   uint16_t idx = 0;
   uint32_t val = 0;
@@ -547,50 +513,6 @@ uint32_t Pass_dfg::cal_bin_val_32b(const std::string& token){
     idx++;
   }
   return val;
-}
-
-
-Index_ID Pass_dfg::process_hex_token(LGraph *g, const std::string &token, const uint16_t &bit_width, uint32_t &val) {
-  if(bit_width > 32) {
-    std::vector<Node_Pin> inp_pins;
-    int t_size = (int)token.size();
-    Index_ID nid_join = g->create_node().get_nid();
-    Index_ID nid_const32;
-    g->node_type_set(nid_join, Join_Op);
-    g->set_bits(nid_join, t_size*4);
-
-    int bw_local = bit_width;
-    int i = 1;
-    string token_chunk = token.substr(t_size-8*i,8);
-
-    while(t_size-8*i > 0){
-      fmt::print("@round{}, token_chunk:{}\n", i, token_chunk);
-      nid_const32 = create_const32_node(g, token_chunk, false, 32, val);
-      inp_pins.push_back(Node_Pin(nid_const32, 0, false));
-      bw_local = bw_local - 32;
-      if(t_size-(8*(i+1)) > 0)
-        token_chunk = token.substr(t_size - 8*(i+1),8);
-      else{
-        token_chunk = token.substr(0,t_size-8*i);
-        fmt::print("@round{}, token_chunk:{}\n", i+1, token_chunk);
-        nid_const32 = create_const32_node(g, token_chunk, false, bw_local, val);
-        inp_pins.push_back(Node_Pin(nid_const32, 0, false));
-      }
-      i++;
-    }
-    int pid = 0;
-    for(auto &inp_pin : inp_pins) {
-      g->add_edge(inp_pin, Node_Pin(nid_join, pid, true));
-      pid++;
-    }
-
-    val = 0;// val = 0 for values that are out of 32bit range
-    return nid_join;
-  }
-  else{
-    Index_ID nid_const32 = create_const32_node(g, token, false, bit_width, val);
-    return nid_const32;
-  }
 }
 
 
@@ -608,14 +530,14 @@ Index_ID Pass_dfg::process_bin_token (LGraph *g, const std::string& token, const
 
     while(t_size-32*i > 0){
       fmt::print("@round{}, token_chunk:                  {}\n", i, token_chunk);
-      nid_const32 = create_const32_node(g, token_chunk, true, 32, val);
+      nid_const32 = create_const32_node(g, token_chunk, 32, val);
       inp_pins.push_back(Node_Pin(nid_const32, 0, false));
       if(t_size-(32*(i+1)) > 0)
         token_chunk = token.substr(t_size - 32*(i+1),32);
       else{
         token_chunk = token.substr(0,t_size-32*i);
         fmt::print("@round{}, token_chunk:                 {}\n", i+1, token_chunk);
-        nid_const32 = create_const32_node(g, token_chunk, true, token_chunk.size(), val);
+        nid_const32 = create_const32_node(g, token_chunk, token_chunk.size(), val);
         inp_pins.push_back(Node_Pin(nid_const32, 0, false));
       }
       i++;
@@ -629,7 +551,7 @@ Index_ID Pass_dfg::process_bin_token (LGraph *g, const std::string& token, const
     return nid_join;
   }
   else{
-    Index_ID nid_const32 = create_const32_node(g, token, true, bit_width, val);
+    Index_ID nid_const32 = create_const32_node(g, token, bit_width, val);
     return nid_const32;
   }
 }
@@ -649,7 +571,7 @@ Index_ID Pass_dfg::process_bin_token_with_dc (LGraph *g, const std::string& toke
   for(int i = 0; i < token_size; i++){
     if(token[i] == '?'){
       if(sval_buf.size()){
-        Index_ID nid_const32 = create_const32_node(g, sval_buf, true, sval_buf.size(), val);
+        Index_ID nid_const32 = create_const32_node(g, sval_buf, sval_buf.size(), val);
         inp_pins.push_back(Node_Pin(nid_const32, 0, false));
         sval_buf.clear();
       }
@@ -667,12 +589,12 @@ Index_ID Pass_dfg::process_bin_token_with_dc (LGraph *g, const std::string& toke
     else{// token[i] = some value char
       sval_buf += token[i];
       if(sval_buf.size() == 32){
-        Index_ID nid_const32 = create_const32_node(g, sval_buf, true, 32, val);
+        Index_ID nid_const32 = create_const32_node(g, sval_buf, 32, val);
         inp_pins.push_back(Node_Pin(nid_const32, 0, false));
         sval_buf = sval_buf.substr(32);
       }
       else if(i == token_size -1){
-        Index_ID nid_const32 = create_const32_node(g, sval_buf, true, sval_buf.size(), val);
+        Index_ID nid_const32 = create_const32_node(g, sval_buf, sval_buf.size(), val);
         inp_pins.push_back(Node_Pin(nid_const32, 0, false));
       }
     }
@@ -686,11 +608,8 @@ Index_ID Pass_dfg::process_bin_token_with_dc (LGraph *g, const std::string& toke
   return nid_join;
 }
 
-Index_ID Pass_dfg::create_const32_node (LGraph *g, const std::string& val_str, bool is_bin, uint16_t node_bit_width, uint32_t& val){
-  if(is_bin)
+Index_ID Pass_dfg::create_const32_node (LGraph *g, const std::string& val_str, uint16_t node_bit_width, uint32_t& val){
     val = cal_bin_val_32b(val_str);
-  else
-    val = cal_hex_val_32b(val_str);
 
   Index_ID nid_const32 = g->create_node().get_nid();
   g->node_u32type_set(nid_const32,val);
@@ -705,29 +624,22 @@ Index_ID Pass_dfg::create_dontcare_node (LGraph *g, uint16_t node_bit_width ){
   return nid_dc;
 }
 
-
-std::string Pass_dfg::hex_char_to_bin(char c)
-{
-  switch(toupper(c))
-  {
-    case '0': return "0000";
-    case '1': return "0001";
-    case '2': return "0010";
-    case '3': return "0011";
-    case '4': return "0100";
-    case '5': return "0101";
-    case '6': return "0110";
-    case '7': return "0111";
-    case '8': return "1000";
-    case '9': return "1001";
-    case 'A': return "1010";
-    case 'B': return "1011";
-    case 'C': return "1100";
-    case 'D': return "1101";
-    case 'E': return "1110";
-    case 'F': return "1111";
-    case '?': return "????";
-    default: return "Error";
+std::string Pass_dfg::hex_char_to_bin(char c) {
+  switch(toupper(c)) {
+    case '0': return "0000"; case '1': return "0001"; case '2': return "0010"; case '3': return "0011";
+    case '4': return "0100"; case '5': return "0101"; case '6': return "0110"; case '7': return "0111";
+    case '8': return "1000"; case '9': return "1001"; case 'A': return "1010"; case 'B': return "1011";
+    case 'C': return "1100"; case 'D': return "1101"; case 'E': return "1110"; case 'F': return "1111";
+    case '?': return "????"; default : assert(false);
   }
 }
 
+std::string Pass_dfg::hex_msb_char_to_bin(char c) {
+  switch(toupper(c)) {
+    case '0': return "";     case '1': return "1";    case '2': return "10";   case '3': return "11";
+    case '4': return "100";  case '5': return "101";  case '6': return "110";  case '7': return "111";
+    case '8': return "1000"; case '9': return "1001"; case 'A': return "1010"; case 'B': return "1011";
+    case 'C': return "1100"; case 'D': return "1101"; case 'E': return "1110"; case 'F': return "1111";
+    case '?': return "????"; default : assert(false);
+  }
+}
