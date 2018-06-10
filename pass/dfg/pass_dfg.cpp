@@ -309,12 +309,12 @@ void Pass_dfg::test_const_conversion() {
   //const std::string str_in = "0x00FF?FF_FF?_u";//24 bits
   //const std::string str_in = "0b1111u";//4 bits
   //const std::string str_in = "0xFFFF_FF_s";//24 bits
-  const std::string str_in = "0x7AFF_FFFF_FFFF_FFFF_FF_s";//40 bits
+  //const std::string str_in = "0x7AFF_FFFF_FFFF_FFFF_FF_s";//40 bits
   //const std::string str_in = "0b1111_1111_1111_1111_1111_1111_1111_1111_1111";
   //const std::string str_in = "0b00011111111_11111111_11111111s";//legal but logic conflict declaration
   //const std::string str_in = "-0d2147483647";
   //const std::string str_in = "-0d128";
-  //const std::string str_in = "-0d4294967297";
+  const std::string str_in = "-0d4294967297";
   //const std::string str_in = "-0d2147483648";
   //const std::string str_in = "-0d2147483649";
   //const std::string str_in = "-0d5294967298";
@@ -346,16 +346,9 @@ void Pass_dfg::test_const_conversion() {
 }
 
 
-Index_ID Pass_dfg::resolve_constant(LGraph *g,
-                                    const std::string& str,
-                                    bool&              is_signed,
-                                    bool&              is_in32b,
-                                    bool&              is_explicit_signed,
-                                    bool&              has_bool_dc,
-                                    bool&              is_pure_dc,
-                                    uint32_t&          val,
-                                    uint32_t&          explicit_bits,
-                                    size_t&            bit_width)
+Index_ID Pass_dfg::resolve_constant(LGraph *g, const std::string& str, bool& is_signed, bool& is_in32b,
+                                    bool& is_explicit_signed, bool& has_bool_dc, bool& is_pure_dc, uint32_t& val,
+                                    uint32_t& explicit_bits, size_t& bit_width)
 {
   string token1st, token2nd;
   string str_in = str;
@@ -430,72 +423,95 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g,
 
   }
   else{//decimal
-
     if(token1st[2] == '?') {//case of pure question mark
       is_pure_dc = true;
       return create_dontcare_node(g,0);
     }
 
+    long long sum = 0;
+    string d2b_token1st;
     string s_2scmp;
+
     if(token1st[0] == '-'){
       is_explicit_signed = true;
       is_signed = true;
-      token1st = token1st[0] + token1st.substr(3);//exclude middle "0d"
-    }
-    else
-      token1st = token1st.substr(2);
+      //token1st = token1st[0] + token1st.substr(3);//exclude middle "0d"
+      token1st = token1st.substr(3);//exclude middle "-0d"
 
-    InfInt big_int = token1st;
-
-    //first converting big_int(either positive or negative) to 2's complement form
-    //then you could analyze by process_bin_token
-    if(big_int > 0) {
-      while(big_int != 0){
-        s_2scmp = (big_int%2).toString() + s_2scmp;
-        big_int /=  2;
-      }
-    }
-    else{// < 0
-      fmt::print("token1st                            = {}\n", token1st);
-      InfInt pos_big_int = -big_int;
-      string s_binary;
-
-      while(pos_big_int != 0){
-        s_binary = (pos_big_int%2).toString() + s_binary;
-        pos_big_int /=  2;
+      for(int i = 0; i < token1st.size(); i++){
+        sum = sum *10 + (token1st[i] - '0');
+        fmt::print("now is round {}, token1st[{}] is {}, sum is {}\n", i, i, token1st[i], sum);
+        if(sum >= 4294967296){
+          uint32_t tmp = sum- 4294967296;
+          int j = 0;
+          while(j <= 31){
+            s_2scmp = std::to_string(tmp%2) + s_2scmp;
+            tmp = tmp >> 1;
+            j ++;
+          }
+          sum = sum >> 32;
+        }
       }
 
-      s_binary = '0' + s_binary; //add leading 0 before converting 2's complement
-      fmt::print("before 2's complement, the s_binary = {}\n", s_binary);
+      while(sum != 0){
+        s_2scmp = std::to_string(sum%2) + s_2scmp;
+        sum = sum >> 1;
+      }
 
-      for(auto i = 0; i< s_binary.length(); i++){
-        if(s_binary[i] == '0')
-          s_binary[i] = '1';
+      s_2scmp = '0' + s_2scmp; //add leading 0 before converting 2's complement
+      fmt::print("before 2's complement, the s_binary = {}\n", s_2scmp);
+
+      for(auto i = 0; i< s_2scmp.length(); i++){
+        if(s_2scmp[i] == '0')
+          s_2scmp[i] = '1';
         else
-          s_binary[i] = '0';
+          s_2scmp[i] = '0';
       }
-      fmt::print("middle 2's complement, the s_binary = {}\n", s_binary);
+      fmt::print("middle 2's complement, the s_binary = {}\n", s_2scmp);
 
       int carry = 0;
-      int s_binary_size = s_binary.size();
+      int s_2scmp_size = s_2scmp.size();
       // Add all bits one by one
-      for (int i = s_binary_size-1 ; i >= 0 ; i--)
+      for (int i = s_2scmp_size-1 ; i >= 0 ; i--)
       {
-        int first_bit = s_binary.at(i) - '0';
-        int second_bit = (i==s_binary_size-1) ? 1 : 0;
+        int first_bit = s_2scmp.at(i) - '0';
+        int second_bit = (i==s_2scmp_size-1) ? 1 : 0;
         // boolean expression for sum of 3 bits
-        int sum = (first_bit ^ second_bit ^ carry)+'0';
+        int s = (first_bit ^ second_bit ^ carry)+'0';
 
-        s_2scmp = (char)sum + s_2scmp;
+        d2b_token1st = (char)s + d2b_token1st;
         // boolean expression for 3-bit addition
         carry = (first_bit & second_bit) | (second_bit & carry) | (first_bit & carry);
       }
-      fmt::print(" after 2's complement, the s_binary = {}\n", s_2scmp);
+      fmt::print(" after 2's complement, the s_binary = {}\n", d2b_token1st);
+    }
+    else{
+      token1st = token1st.substr(2);
+      for(int i = 0; i < token1st.size(); i++){
+        sum = sum *10 + (token1st[i] - '0');
+        fmt::print("now is round {}, token1st[{}] is {}, sum is {}\n", i, i, token1st[i], sum);
+        if(sum >= 4294967296){
+          uint32_t tmp = sum- 4294967296;
+          int j = 0;
+          while(j <= 31){
+            d2b_token1st = std::to_string(tmp%2) + d2b_token1st;
+            tmp = tmp >> 1;
+            j ++;
+          }
+          sum = sum >> 32;
+        }
+      }
+
+      while(sum != 0){
+        d2b_token1st = std::to_string(sum%2) + d2b_token1st;
+        sum = sum >> 1;
+      }
     }
 
-    bit_width = explicit_bits ? explicit_bits : s_2scmp.size();
+    bit_width = explicit_bits ? explicit_bits : d2b_token1st.size();
     is_in32b = bit_width > 32 ? false : true;
-    return process_bin_token(g, s_2scmp, (uint16_t)bit_width, val);
+
+    return process_bin_token(g, d2b_token1st, (uint16_t)bit_width, val);
 
   }
 }
