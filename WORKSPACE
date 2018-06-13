@@ -10,6 +10,16 @@ new_local_repository(
     build_file = "subs/BUILD.bm",
 )
 new_local_repository(
+    name = "pybind11",
+    path = "subs/pybind11/include",
+    build_file = "subs/BUILD.pybind11",
+)
+new_local_repository(
+    name = "python3",
+    path = "/usr/include/python3.6m", # use "pkg-config --cflags python3" to get path
+    build_file = "subs/BUILD.python3",
+)
+new_local_repository(
     name = "spdlog",
     path = "subs/spdlog/include",
     build_file = "subs/BUILD.spdlog",
@@ -39,4 +49,10 @@ git_repository(
 
 load("@com_github_nelhage_rules_boost//:boost/boost.bzl", "boost_deps")
 boost_deps()
+
+git_repository(
+    name = "subpar",
+    remote = "https://github.com/google/subpar",
+    tag = "1.3.0",
+)
 

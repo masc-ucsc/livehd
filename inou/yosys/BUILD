@@ -28,7 +28,7 @@ cc_library(
 load("//tools:linkso.bzl", "linkso")
 
 linkso(
-    name = "lgraph_yosys",
+    name = "liblgraph_yosys",
     srcs   = [":inou_yosys", "//core:core"],
     static = ["@boost//:system" , "@boost//:filesystem", "@boost//:program_options"],
 )

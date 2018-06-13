@@ -7,6 +7,8 @@ cc_library(
     includes = ["."],
     deps = ["@sparsehash//:headers",
             "@bm//:headers",
+            "@pybind11//:headers",
+            "@python3//:headers",
             "@spdlog//:headers",
             "@boost//:filesystem", "@boost//:program_options",
             ],

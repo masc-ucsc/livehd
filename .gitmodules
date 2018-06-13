@@ -16,3 +16,6 @@
 [submodule "subs/abc"]
 	path = subs/abc
 	url = https://github.com/berkeley-abc/abc.git
+[submodule "subs/pybind11"]
+	path = subs/pybind11
+	url = git@github.com:wjakob/pybind11.git

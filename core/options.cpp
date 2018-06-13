@@ -1,4 +1,7 @@
 
+#include <sys/stat.h>
+#include <sys/types.h>
+
 #include <iostream>
 #include <vector>
 
@@ -18,7 +21,7 @@ boost::program_options::options_description Options::desc("lgraph inout options 
 
 Options_pack::Options_pack() : lgdb_path("lgdb"),graph_name("") {
 
-  assert(Options::get_cargc() != 0); // Options::setup(argc,argv) must be called before setup() is called
+  // FIXME3 assert(Options::get_cargc() != 0); // Options::setup(argc,argv) must be called before setup() is called
 
   if(!initialized) {
 
@@ -103,4 +106,18 @@ void Options::setup(int argc, const char **argv) {
   }
   cargv[argc] = NULL;
   cargc       = argc;
+}
+
+void Py_options::set_val(const std::string &key, const py::handle &handle) {
+
+  if ( is_opt(key,"lgdb") ) {
+    const auto &val = handle.cast<std::string>();
+    lgdb = val;
+    mkdir(lgdb.c_str(), 0755); // boost works, but trying to remove dependency
+  }else if ( is_opt(key,"graph_name") ) {
+    const auto &val = handle.cast<std::string>();
+    graph_name = val;
+  }else{
+    fmt::print("WARNING: key {} is not recognized\n",key);
+  }
 }
