@@ -5,6 +5,7 @@ cc_library(
     hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
     includes = ["."],
+    linkopts = ['-lpython3.6m', '-lpthread'],
     deps = ["@sparsehash//:headers",
             "@bm//:headers",
             "@pybind11//:headers",
