@@ -15,6 +15,7 @@ pacman -S clang llvm
 pacman -S make
 pacman -S yaml-cpp tcl
 pacman -S mercurial
+sudo pip install ptpython
 ```
 
 # Documentation
