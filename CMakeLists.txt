@@ -18,7 +18,11 @@ FIND_PACKAGE(BISON REQUIRED)
 FIND_PACKAGE(TCL REQUIRED)
 FIND_PACKAGE(RapidJSON REQUIRED)
 
-SET(BOOST_LIBS "-lboost_filesystem -lboost_program_options -lboost_system -lboost_iostreams -lboost_serialization")
+find_package(PythonInterp 3.6 REQUIRED )
+find_package(PythonLibs 3.6 REQUIRED )
+
+SET(STATIC_BOOST_LIBS "-lboost_filesystem -lboost_program_options -lboost_system -lboost_iostreams -lboost_serialization")
+SET(BOOST_LIBS "-lboost_filesystem -lboost_program_options -lboost_system -lboost_iostreams -lboost_serialization ${PYTHON_LIBRARIES}")
 SET(REQUIRED_LIBS "")
 
 include(ExternalProject)
@@ -72,6 +76,8 @@ INCLUDE_DIRECTORIES(subs/sparsehash-c11)
 INCLUDE_DIRECTORIES(subs/BitMagic/src)
 INCLUDE_DIRECTORIES(subs/spdlog/include)
 INCLUDE_DIRECTORIES(subs/yosys)
+INCLUDE_DIRECTORIES(subs/pybind11/include)
+INCLUDE_DIRECTORIES(${PYTHON_INCLUDE_DIRS})
 
 # code and include libraries
 ADD_SUBDIRECTORY(core)
