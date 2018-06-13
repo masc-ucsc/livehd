@@ -1,7 +1,11 @@
 
 #include "lgraph.hpp"
 #include "inou_rand.hpp"
+<<<<<<< HEAD
 #include "inou_abc.hpp"
+=======
+//#include "pass_dfg.hpp"
+>>>>>>> a6fdaec0cc3bc52417695fd1b5ecdc37cff0f620
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -18,7 +22,11 @@ PYBIND11_MODULE(lgraph, m) {
 
 #include "py_lgraph.hpp"
 #include "py_inou_rand.hpp"
+<<<<<<< HEAD
 #include "py_inou_abc.hpp"
+=======
+//#include "py_pass_dfg.hpp"
+>>>>>>> a6fdaec0cc3bc52417695fd1b5ecdc37cff0f620
 
 }
 

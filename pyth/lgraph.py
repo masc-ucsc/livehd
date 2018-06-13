@@ -1,5 +1,10 @@
+from __future__ import unicode_literals
+
 import sys
 import os
+
+from ptpython.repl import embed
+from pyth import lgraph
 
 base_dir = os.path.dirname(sys.argv[0]) or '.'
 print('Base directory:', base_dir)
@@ -9,17 +14,9 @@ print('Base directory:', base_dir)
 package_dir_a = os.path.join(base_dir, '__main__')
 sys.path.insert(0, package_dir_a)
 
-from pyth import lgraph
+def main():
+    embed(globals(), locals(), vi_mode=False)
 
-l = lgraph.open_lgraph("lgdb","0")
-p = lgraph.Inou_rand()
+if __name__ == '__main__':
+    main()
 
-thisdict =	{
-  "lgdb": "lgdb",
-  "seed": 1023,
-  "eratio": 1.3,
-  "graph_name": "potato"
-}
-
-p.set(thisdict)
-p.generate()
