@@ -11,51 +11,6 @@
 Inou_rand::Inou_rand() {
 }
 
-Inou_rand_options_pack::Inou_rand_options_pack() {
-
-  assert(Options::get_cargc() != 0); // Options::setup(argc,argv) must be called before setup() is called
-
-  Options::get_desc()->add_options()("rand_seed", boost::program_options::value(&rand_seed), "rand seed value")("rand_type", boost::program_options::value(&rand_type), "rand graph type to generate")("rand_size", boost::program_options::value(&rand_size), "rand graph number of nodes")("rand_eratio", boost::program_options::value(&rand_eratio), "rand graph edges/nodes ratio")("rand_crate", boost::program_options::value(&rand_eratio), "percentage of nodes that are constants");
-
-  boost::program_options::variables_map vm;
-  boost::program_options::store(boost::program_options::command_line_parser(Options::get_cargc(), Options::get_cargv()).options(*Options::get_desc()).allow_unregistered().run(), vm);
-
-  if(vm.count("rand_seed")) {
-    rand_seed = vm["rand_seed"].as<int>();
-  } else {
-    rand_seed = time(0);
-  }
-
-  if(vm.count("rand_size")) {
-    rand_size = vm["rand_size"].as<int>();
-  } else {
-    rand_size = 1024;
-  }
-
-  if(vm.count("rand_type")) {
-    rand_type = vm["rand_type"].as<std::string>();
-  } else {
-    rand_type = "netlist";
-  }
-
-  if(rand_type == "netlist") {
-    rand_eratio = 3.2;
-  } else {
-    rand_eratio = 3.2;
-  }
-
-  if(vm.count("rand_eratio"))
-    rand_eratio = vm["rand_eratio"].as<double>();
-
-  if(rand_type == "rand_crate") {
-    rand_crate = vm["rand_crate"].as<int>();
-  } else {
-    rand_crate = 10;
-  }
-
-  console->info("inou_rand rand_seed={} rand_size={} rand_type={} rand_eratio={}", rand_seed, rand_size, rand_type, rand_eratio);
-}
-
 struct pin_pair_compare {
   bool operator()(const std::pair<Node_Pin, Node_Pin> &lhs, const std::pair<Node_Pin, Node_Pin> &rhs) const {
     if(lhs.first.get_nid() < rhs.first.get_nid())
@@ -80,7 +35,11 @@ std::vector<LGraph *> Inou_rand::generate() {
 
   std::vector<LGraph *> lgs;
 
-  auto *g = new LGraph(opack.lgdb_path);
+  LGraph *g=0;
+  if (opack.graph_name.empty())
+    g = new LGraph(opack.lgdb);
+  else
+    g = new LGraph(opack.lgdb, opack.graph_name, true); // clear graph
 
   std::mt19937 rnd;
   rnd.seed(opack.rand_seed);
@@ -177,4 +136,41 @@ void Inou_rand::generate(std::vector<const LGraph *> &out) {
   assert(0); // No method to randinly transform a graph, just to generate.
 
   out.clear();
+}
+
+Inou_rand::Inou_rand(const py::dict &dict) {
+  opack.set(dict);
+}
+
+void Inou_rand::py_set(const py::dict &dict) {
+  opack.set(dict);
+}
+
+void Inou_rand_options::set(const py::dict &dict) {
+  for (auto item : dict) {
+    const auto &key = item.first.cast<std::string>();
+
+    try {
+      if ( is_opt(key,"seed") ) {
+        const auto &val = item.second.cast<int>();
+        rand_seed = val;
+      }else if ( is_opt(key,"size") ) {
+        const auto &val = item.second.cast<int>();
+        rand_size = val;
+      }else if ( is_opt(key,"crate") ) {
+        const auto &val = item.second.cast<int>();
+        rand_crate = val;
+      }else if ( is_opt(key,"eratio") ) {
+        const auto &val = item.second.cast<double>();
+        rand_eratio = val;
+      }else{
+        set_val(key,item.second);
+      }
+    } catch (const std::invalid_argument& ia) {
+      fmt::print("ERROR: key {} has an invalid argument {}\n",key);
+    }
+  }
+  console->warn("inou_rand seed:{} size:{} crate:{} eratio:{} lgdb:{} graph_name:{}"
+      ,rand_seed, rand_size, rand_crate, rand_eratio
+      ,lgdb, graph_name);
 }
