@@ -26,6 +26,10 @@ Useful commands:
 
     bazel build -s //core
 
+## To run all the tests in the system
+
+    bazel test //...
+
 ## To create a fully static binary (for pip deployment?)
 
 In the cc_binary, add linkopts = ['-static']
