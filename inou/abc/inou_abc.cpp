@@ -46,6 +46,10 @@ Inou_abc::Inou_abc() {
   graph_info = new graph_topology;
 }
 
+Inou_abc::Inou_abc(const py::dict &dict) {
+  graph_info = new graph_topology;
+}
+
 Inou_abc::~Inou_abc() {
   delete graph_info;
 }

@@ -180,6 +180,9 @@ public:
 
   Inou_abc();
 
+  // Python interface
+  Inou_abc(const py::dict &dict);
+
   virtual ~Inou_abc();
 
   std::vector<LGraph *> generate() final;
@@ -189,6 +192,9 @@ public:
   void generate(std::vector<const LGraph *> &out) final;
 
   void dump_blif(const LGraph *g, const std::string filename);
+
+  std::vector<LGraph *> py_generate() { return generate(); };
+  void py_set(const py::dict &dict) { }
 
 private:
   graph_topology *graph_info;

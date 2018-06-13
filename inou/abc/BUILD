@@ -1,9 +1,10 @@
 
 cc_library(
     name = "inou_abc",
-    srcs = glob(["*.cpp"], exclude=["lgaig.cpp"]),
+    srcs = glob(["*.cpp"]),
     hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
+    includes = ["."],
     deps = [
         "//core:core",
         "//inou/lef:inou_lef",
@@ -11,12 +12,3 @@ cc_library(
     ],
 )
 
-cc_binary(
-    name = "lgaig",
-    srcs = ["lgaig.cpp"],
-    linkopts = ['-ldl', '-lreadline','-lpthread'],
-    #linkopts = ['-static', '-lpthread'],
-    deps = [
-        ":inou_abc",
-    ],
-)
