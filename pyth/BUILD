@@ -5,6 +5,8 @@ cc_library(
     deps = [
         "//core:core",
         "//inou/rand:inou_rand",
+        "//inou/cfg:inou_cfg",
+        "//pass/dfg:pass_dfg",
     ],
 )
 
@@ -12,7 +14,7 @@ load("//tools:linkso.bzl", "linkso")
 
 linkso(
     name = "lgraph.cpython-36m-x86_64-linux-gnu",
-    srcs   = [":py_lgraph","//inou/rand:inou_rand","//core:core"],
+    srcs   = [":py_lgraph","//pass/dfg:pass_dfg", "//inou/cfg:inou_cfg", "//inou/rand:inou_rand","//core:core"],
     static = ["@boost//:system" , "@boost//:filesystem", "@boost//:program_options"],
 )
 

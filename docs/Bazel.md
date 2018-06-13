@@ -30,6 +30,12 @@ Useful commands:
 
     bazel test //...
 
+## To create Python self contained par file
+
+    bazel build //pyth:lgraph.par
+
+Now, you can copy the bazel-bin/pyth/lgraph.par to any machine and it has all the python and libraries needed to run
+
 ## To create a fully static binary (for pip deployment?)
 
 In the cc_binary, add linkopts = ['-static']
