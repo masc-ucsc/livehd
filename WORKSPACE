@@ -1,25 +1,20 @@
 
 # third_party/subs
-new_local_repository(
-    name = "sparsehash",
-    path = "third_party/subs/sparsehash-c11",
-    build_file = "third_party/subs/BUILD.sparsehash",
-)
-new_local_repository(
-    name = "bm",
-    path = "third_party/subs/BitMagic/src",
-    build_file = "third_party/subs/BUILD.bm",
-)
-new_local_repository(
-    name = "pybind11",
-    path = "third_party/subs/pybind11/include",
-    build_file = "third_party/subs/BUILD.pybind11",
-)
-new_local_repository(
-    name = "spdlog",
-    path = "third_party/subs/spdlog/include",
-    build_file = "third_party/subs/BUILD.spdlog",
-)
+#new_local_repository(
+#    name = "sparsehash",
+#    path = "third_party/subs/sparsehash-c11",
+#    build_file = "third_party/subs/BUILD.sparsehash",
+#)
+#new_local_repository(
+    #name = "bm",
+    #path = "third_party/subs/BitMagic/src",
+    #build_file = "third_party/subs/BUILD.bm",
+#)
+#new_local_repository(
+#    name = "spdlog",
+#    path = "third_party/subs/spdlog/include",
+#    build_file = "third_party/subs/BUILD.spdlog",
+#)
 #new_local_repository(
     #name = "yosys",
     #path = "third_party/subs/yosys",
@@ -36,16 +31,43 @@ load("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
 new_git_repository(
     name = "abc",
     build_file = "BUILD.abc", # relative to external path
-    commit = "15939511df8ff1ce15f2112cee01d7693234f2a4",
+    commit = "15939511df8ff1ce15f2112cee01d7693234f2a4", # Jun 13, 2018
     remote = "https://github.com/berkeley-abc/abc.git",
     patches = ["//external:patch.abc"],
 )
 new_git_repository(
     name = "yosys",
     build_file = "BUILD.yosys", # relative to external path
-    commit = "57fc8dd58229d309ba56b374223802936444ecd4",
+    commit = "57fc8dd58229d309ba56b374223802936444ecd4", # Jun 13, 2018
     remote = "https://github.com/YosysHQ/yosys.git",
     #strip_prefix = "kernel",
+)
+new_git_repository(
+    name = "pybind11",
+    build_file = "BUILD.pybind11",
+    commit = "55dc131944c764ba7e30085b971a9d70531114b3", # Nov 14, 2017
+    remote = "https://github.com/pybind/pybind11.git",
+    strip_prefix = "include",
+)
+new_git_repository(
+    name = "spdlog",
+    build_file = "BUILD.spdlog",
+    commit = "032035e72f73b232e2fa087dc6021a3732c9f6ae", # June 10, 2018
+    remote = "https://github.com/gabime/spdlog.git",
+    strip_prefix = "include",
+)
+new_git_repository(
+    name = "sparsehash",
+    build_file = "BUILD.sparsehash",
+    commit = "5ca6de766db32b3fb08a040636423cd3988d2d4f", # Jun 8, 2018
+    remote = "https://github.com/sparsehash/sparsehash-c11.git",
+)
+new_git_repository(
+    name = "bm",
+    build_file = "BUILD.bm",
+    commit = "65b1f6d631473d694e7cedc42e755096db03e8e2", # June 13, 2018
+    remote = "https://github.com/tlk00/BitMagic.git",
+    strip_prefix = "src",
 )
 
 #load(
