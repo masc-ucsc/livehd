@@ -1,21 +1,21 @@
-[submodule "subs/yosys"]
-	path = subs/yosys
+[submodule "third_party/subs/yosys"]
+	path = third_party/subs/yosys
 	url = https://github.com/cliffordwolf/yosys.git
-[submodule "subs/sparsehash-c11"]
-	path = subs/sparsehash-c11
+[submodule "third_party/subs/sparsehash-c11"]
+	path = third_party/subs/sparsehash-c11
 	url = https://github.com/sparsehash/sparsehash-c11.git
-[submodule "subs/BitMagic"]
-	path = subs/BitMagic
+[submodule "third_party/subs/BitMagic"]
+	path = third_party/subs/BitMagic
 	url = https://github.com/tlk00/BitMagic.git
-[submodule "subs/anubis"]
-	path = subs/anubis
+[submodule "third_party/subs/anubis"]
+	path = third_party/subs/anubis
 	url = https://github.com/masc-ucsc/anubis.git
-[submodule "subs/spdlog"]
-	path = subs/spdlog
+[submodule "third_party/subs/spdlog"]
+	path = third_party/subs/spdlog
 	url = https://github.com/gabime/spdlog.git
-[submodule "subs/abc"]
-	path = subs/abc
+[submodule "third_party/subs/abc"]
+	path = third_party/subs/abc
 	url = https://github.com/berkeley-abc/abc.git
-[submodule "subs/pybind11"]
-	path = subs/pybind11
+[submodule "third_party/subs/pybind11"]
+	path = third_party/subs/pybind11
 	url = https://github.com/pybind/pybind11.git

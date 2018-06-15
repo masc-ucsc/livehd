@@ -1,3 +1,5 @@
+licenses(["notice"]) # Apache License 2.0
+
 load("//tools:lexyacc.bzl", "genlex", "genyacc")
 
 genyacc(

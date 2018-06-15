@@ -36,7 +36,7 @@ linkso(
 		        ":py_base",
 						"//pass/dfg:pass_dfg",
 						"@abc//:abc",
-						"//inou/lef:inou_lef", "//misc/lef/lef:lef",
+						"//inou/lef:inou_lef", "//third_party/misc/lef/lef:lef",
 						"//inou/abc:inou_abc",
 						"//inou/cfg:inou_cfg",
 						"//inou/rand:inou_rand",
