@@ -1,8 +1,10 @@
 #include "lgwirenames.hpp"
 
-LGraph_WireNames::LGraph_WireNames(const std::string & path, const std::string & name) noexcept
-    : LGraph_Base(path,name), names(path, name + "_wnames"),
-	  wires(path + "/" + name + "_wid"), offsets(path + "/" + name + "_offsets") {
+LGraph_WireNames::LGraph_WireNames(const std::string &path, const std::string &name) noexcept
+    : LGraph_Base(path, name)
+    , names(path, name + "_wnames")
+    , wires(path + "/" + name + "_wid")
+    , offsets(path + "/" + name + "_offsets") {
 }
 
 void LGraph_WireNames::clear() {
@@ -52,7 +54,7 @@ void LGraph_WireNames::set_node_wirename(Index_ID nid, WireName_ID wid) {
   assert(nid < wires.size());
   assert(node_internal[nid].is_node_state());
   assert(node_internal[nid].is_root());
-  //assert(node_internal[nid].get_nid() == nid);
+  // assert(node_internal[nid].get_nid() == nid);
 
   wires[nid] = wid;
 }

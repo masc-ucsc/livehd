@@ -5,7 +5,7 @@
 
 #include <iostream>
 
-//FIXME: is it possible to remove the dependency on ostr.h?
+// FIXME: is it possible to remove the dependency on ostr.h?
 //#include "spdlog/fmt/ostr.h"
 #ifndef console
 #define console spdlog::get("console")
@@ -29,7 +29,7 @@ inline int initialize_logger() {
   return 0;
 }
 
-//FIXME: come up with a C++14 friendly solution
+// FIXME: come up with a C++14 friendly solution
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wc++17-extensions"
 inline int               Console_init::_static_initializer = initialize_logger();

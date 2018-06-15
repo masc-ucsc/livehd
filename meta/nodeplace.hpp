@@ -17,16 +17,22 @@ protected:
   uint32_t posy;
 
 public:
-  Node_Place(uint32_t x = 0, uint32_t y = 0) : posx(x), posy(y){};
+  Node_Place(uint32_t x = 0, uint32_t y = 0)
+      : posx(x)
+      , posy(y){};
 
   void replace(uint32_t x, uint32_t y) {
     posx = x;
     posy = y;
   }
 
-  uint32_t x() { return posx; }
+  uint32_t x() {
+    return posx;
+  }
 
-  uint32_t y() { return posy; }
+  uint32_t y() {
+    return posy;
+  }
 };
 
 class LGraph_Node_Place : virtual public LGraph_Base {
@@ -38,7 +44,7 @@ protected:
 
 public:
   LGraph_Node_Place() = delete;
-  explicit LGraph_Node_Place(const std::string& path, const std::string& name) noexcept ;
+  explicit LGraph_Node_Place(const std::string &path, const std::string &name) noexcept;
   virtual ~LGraph_Node_Place(){};
 
   virtual void clear();

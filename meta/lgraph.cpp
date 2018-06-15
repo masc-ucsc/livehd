@@ -5,26 +5,26 @@
 #include <iostream>
 #include <set>
 
-#include "lgraph.hpp"
-#include "lgedgeiter.hpp"
 #include "graph_library.hpp"
+#include "lgedgeiter.hpp"
+#include "lgraph.hpp"
 
-uint32_t                                               LGraph::lgraph_counter = 0;
+uint32_t LGraph::lgraph_counter = 0;
 
 // FIXME: name2lgraph functionality should be moved to graph_library
 std::map<std::string, std::map<std::string, LGraph *>> LGraph::name2lgraph;
 
 LGraph::LGraph(const std::string &path)
-    : Lgraph_base_core(path, "lgraph_" + std::to_string(lgraph_counter)),
-    LGraph_Base(path, "lgraph_" + std::to_string(lgraph_counter)),
-	  LGraph_Node_Delay(path, "lgraph_" + std::to_string(lgraph_counter)),
-	  LGraph_Node_Src_Loc(path, "lgraph_" + std::to_string(lgraph_counter)),
-	  LGraph_WireNames(path, "lgraph_" + std::to_string(lgraph_counter)),
-	  LGraph_InstanceNames(path, "lgraph_" + std::to_string(lgraph_counter)),
-	  LGraph_Node_Place(path, "lgraph_" + std::to_string(lgraph_counter)) {
+    : Lgraph_base_core(path, "lgraph_" + std::to_string(lgraph_counter))
+    , LGraph_Base(path, "lgraph_" + std::to_string(lgraph_counter))
+    , LGraph_Node_Delay(path, "lgraph_" + std::to_string(lgraph_counter))
+    , LGraph_Node_Src_Loc(path, "lgraph_" + std::to_string(lgraph_counter))
+    , LGraph_WireNames(path, "lgraph_" + std::to_string(lgraph_counter))
+    , LGraph_InstanceNames(path, "lgraph_" + std::to_string(lgraph_counter))
+    , LGraph_Node_Place(path, "lgraph_" + std::to_string(lgraph_counter)) {
 
-  library                = Graph_library::instance(path);
-  tlibrary               = Tech_library::instance(path);
+  library  = Graph_library::instance(path);
+  tlibrary = Tech_library::instance(path);
 
   name2lgraph[path][name] = this;
   lgraph_counter++;
@@ -34,13 +34,13 @@ LGraph::LGraph(const std::string &path)
 }
 
 LGraph::LGraph(const std::string &path, const std::string &_name, bool _clear)
-    : Lgraph_base_core(path, "lgraph_" + _name),
-    LGraph_Base(path, "lgraph_" + _name),
-	  LGraph_Node_Delay(path, "lgraph_" + _name),
-	  LGraph_Node_Src_Loc(path, "lgraph_" + _name),
-	  LGraph_WireNames(path, "lgraph_" + _name),
-	  LGraph_InstanceNames(path, "lgraph_" + _name),
-	  LGraph_Node_Place(path, "lgraph_" + _name) {
+    : Lgraph_base_core(path, "lgraph_" + _name)
+    , LGraph_Base(path, "lgraph_" + _name)
+    , LGraph_Node_Delay(path, "lgraph_" + _name)
+    , LGraph_Node_Src_Loc(path, "lgraph_" + _name)
+    , LGraph_WireNames(path, "lgraph_" + _name)
+    , LGraph_InstanceNames(path, "lgraph_" + _name)
+    , LGraph_Node_Place(path, "lgraph_" + _name) {
 
   library  = Graph_library::instance(path);
   tlibrary = Tech_library::instance(path);
@@ -59,8 +59,7 @@ LGraph::LGraph(const std::string &path, const std::string &_name, bool _clear)
 
 LGraph *LGraph::find_graph(const std::string &gname, const std::string &path) {
 
-  if(name2lgraph.find(path) == name2lgraph.end() ||
-     name2lgraph[path].find("lgraph_" + gname) == name2lgraph[path].end()) {
+  if(name2lgraph.find(path) == name2lgraph.end() || name2lgraph[path].find("lgraph_" + gname) == name2lgraph[path].end()) {
     if(Graph_library::instance(path)->include(gname))
       return open_lgraph(path, gname);
 

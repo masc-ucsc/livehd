@@ -4,13 +4,13 @@
 #include <stdint.h>
 
 #include <iostream>
-#include <vector>
 #include <map>
+#include <vector>
 
 #include "lglog.hpp"
 
-#include "lgraph_base_core.hpp"
 #include "char_array.hpp"
+#include "lgraph_base_core.hpp"
 
 #include "nodetype.hpp"
 
@@ -18,7 +18,6 @@ class Edge_iterator;
 
 class LGraph_Base : public LGraph_Node_Type {
 protected:
-
   // std::vector<Node_Internal, AAlloc::AlignedAllocator<Node_Internal,4096> > node_internal;
   std::string name;
   std::string path;
@@ -66,7 +65,7 @@ protected:
 public:
   LGraph_Base() = delete;
 
-  explicit LGraph_Base(const std::string &path, const std::string &_name) noexcept ;
+  explicit LGraph_Base(const std::string &path, const std::string &_name) noexcept;
   virtual ~LGraph_Base(){};
 
   void each_input(std::function<void(Index_ID)> f1) const;
@@ -81,15 +80,23 @@ public:
 
   void dump() const;
 
-  const std::string &get_name() const { return name; }
-  const std::string &get_path() const { return path; }
+  const std::string &get_name() const {
+    return name;
+  }
+  const std::string &get_path() const {
+    return path;
+  }
 
   // Graph input/output functions
   bool is_graph_input(const char *str) const;
   bool is_graph_output(const char *str) const;
 
-  bool is_graph_input(const std::string &str) const { return is_graph_input(str.c_str()); }
-  bool is_graph_output(const std::string &str) const { return is_graph_output(str.c_str()); }
+  bool is_graph_input(const std::string &str) const {
+    return is_graph_input(str.c_str());
+  }
+  bool is_graph_output(const std::string &str) const {
+    return is_graph_output(str.c_str());
+  }
 
   bool is_graph_input(Index_ID idx) const;
   bool is_graph_output(Index_ID idx) const;
@@ -102,7 +109,7 @@ public:
   // get internal nid from given pid
   Index_ID get_graph_output_nid_from_pid(Port_ID pid) const;
 
-  //get external pid from internal nid
+  // get external pid from internal nid
   Port_ID get_graph_pid_from_nid(Index_ID nid) const;
 
   const char *get_graph_input_name_from_pid(Port_ID pid) const;
@@ -111,8 +118,12 @@ public:
   Node_Pin get_graph_input(const char *str) const;
   Node_Pin get_graph_output(const char *str) const;
 
-  Node_Pin get_graph_input(const std::string &str) const { return get_graph_input(str.c_str()); }
-  Node_Pin get_graph_output(const std::string &str) const { return get_graph_output(str.c_str()); }
+  Node_Pin get_graph_input(const std::string &str) const {
+    return get_graph_input(str.c_str());
+  }
+  Node_Pin get_graph_output(const std::string &str) const {
+    return get_graph_output(str.c_str());
+  }
 
   // get extra (non-master root) node for port_id pid
   // will allocate space if none is available
@@ -171,10 +182,16 @@ public:
     return node_internal[idx].is_root();
   }
 
-  static size_t max_size() { return (((size_t)1) << Index_Bits) - 1; }
-  size_t        size() const { return node_internal.size(); }
+  static size_t max_size() {
+    return (((size_t)1) << Index_Bits) - 1;
+  }
+  size_t size() const {
+    return node_internal.size();
+  }
 
-  bool empty() const { return node_internal.size() == 0; }
+  bool empty() const {
+    return node_internal.size() == 0;
+  }
 
   class _init {
   public:

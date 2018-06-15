@@ -13,10 +13,9 @@ protected:
   Dense<Node_Internal> node_internal;
 
   Lgraph_base_core() = delete;
-  explicit Lgraph_base_core(const std::string & path, const std::string & name)
-    : node_internal(path + "/" + name + "_nodes") {
-  };
-  virtual ~Lgraph_base_core() {};
+  explicit Lgraph_base_core(const std::string &path, const std::string &name)
+      : node_internal(path + "/" + name + "_nodes"){};
+  virtual ~Lgraph_base_core(){};
 
   Index_ID fast_next(Index_ID nid) const {
     while(true) {
@@ -32,9 +31,9 @@ protected:
   }
 
   friend Fast_edge_iterator;
+
 public:
   Fast_edge_iterator fast() const;
-
 };
 
 #endif
