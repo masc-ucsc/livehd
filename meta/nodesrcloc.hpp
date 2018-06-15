@@ -18,12 +18,17 @@ protected:
 
 public:
   File_Loc(uint32_t loc_start, uint32_t loc_length)
-      : length((uint8_t)loc_length),
-        start_hchunk((uint8_t)loc_start >> 16),
-        start_lchunk((uint16_t)loc_start) {}
+      : length((uint8_t)loc_length)
+      , start_hchunk((uint8_t)loc_start >> 16)
+      , start_lchunk((uint16_t)loc_start) {
+  }
 
-  uint32_t get_start() const { return (((uint32_t)start_hchunk) << 16) | start_lchunk; }
-  uint32_t get_length() const { return length; }
+  uint32_t get_start() const {
+    return (((uint32_t)start_hchunk) << 16) | start_lchunk;
+  }
+  uint32_t get_length() const {
+    return length;
+  }
 };
 
 class LGraph_Node_Src_Loc : virtual public LGraph_Base {
@@ -33,7 +38,7 @@ private:
 
 public:
   LGraph_Node_Src_Loc() = delete;
-  explicit LGraph_Node_Src_Loc(const std::string & path, const std::string & name) noexcept ;
+  explicit LGraph_Node_Src_Loc(const std::string &path, const std::string &name) noexcept;
   virtual ~LGraph_Node_Src_Loc(){};
 
   virtual void clear();

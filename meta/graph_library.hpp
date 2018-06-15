@@ -25,8 +25,8 @@ protected:
   }
 
   explicit Graph_library(const std::string &_path)
-   : path(_path)
-    , library_file("graph_library") {
+      : path(_path)
+      , library_file("graph_library") {
 
     std::ifstream graph_list;
     graph_library_clean = true;
@@ -101,23 +101,23 @@ public:
     return id2name.size();
   }
 
-  //adds the name if it doesn't exist yet
-  int get_id(const std::string & name) {
+  // adds the name if it doesn't exist yet
+  int get_id(const std::string &name) {
     if(name2id.find(name) != name2id.end()) {
       return name2id[name];
     }
     return add_name(name);
   }
 
-  int get_id_const(const std::string & name) const {
+  int get_id_const(const std::string &name) const {
     if(name2id.find(name) != name2id.end()) {
       return name2id.at(name);
     }
     return -1;
   }
 
-  //FIXME: replace this by a find / end when the iterator is working
-  bool include(const std::string & name) const {
+  // FIXME: replace this by a find / end when the iterator is working
+  bool include(const std::string &name) const {
     return name2id.find(name) != name2id.end();
   }
 
@@ -133,7 +133,7 @@ public:
   }
 };
 
-//FIXME: come up with a C++14 friendly solution
+// FIXME: come up with a C++14 friendly solution
 #pragma clang diagnostic push
 #pragma clang diagnostic                                ignored "-Wc++17-extensions"
 inline std::unordered_map<std::string, Graph_library *> Graph_library::instances;

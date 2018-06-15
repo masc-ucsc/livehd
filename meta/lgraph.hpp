@@ -1,39 +1,37 @@
 #ifndef LGRAPH_H
 #define LGRAPH_H
 
-
-#include "lgedge.hpp"
-#include "lgraphbase.hpp"
-#include "tech_library.hpp"
 #include "graph_library.hpp"
 #include "instance_names.hpp"
+#include "lgedge.hpp"
+#include "lgraphbase.hpp"
 #include "lgwirenames.hpp"
 #include "nodedelay.hpp"
 #include "nodeplace.hpp"
 #include "nodesrcloc.hpp"
 #include "nodetype.hpp"
+#include "tech_library.hpp"
 
 class Node;
 class ConstNode;
 class Edge_iterator;
 class Graph_library;
 
-class LGraph :
-	public LGraph_Node_Delay,
-	public LGraph_Node_Src_Loc,
-	public LGraph_WireNames,
-	public LGraph_InstanceNames,
-	public LGraph_Node_Place {
+class LGraph : public LGraph_Node_Delay,
+               public LGraph_Node_Src_Loc,
+               public LGraph_WireNames,
+               public LGraph_InstanceNames,
+               public LGraph_Node_Place {
 protected:
-  //FIXME: for live I need one instance per lgdb. Do it similar to library, or
-  //keep references to lgraphs in the library
+  // FIXME: for live I need one instance per lgdb. Do it similar to library, or
+  // keep references to lgraphs in the library
   static std::map<std::string, std::map<std::string, LGraph *>> name2lgraph;
   static uint32_t                                               lgraph_counter;
 
   // singleton object, assumes all graph within a program are in the same
   // directory
   Graph_library *library;
-  Tech_library  *tlibrary;
+  Tech_library * tlibrary;
 
   int lgraph_id;
 
@@ -51,7 +49,9 @@ public:
     fmt::print("lgraph destructor\n");
   }
 
-  int  lg_id() const { return lgraph_id; }
+  int lg_id() const {
+    return lgraph_id;
+  }
   void clear() override;
   void reload() override;
   void sync() override;
@@ -67,11 +67,17 @@ public:
   ConstNode get_dest_node(const Edge &edge) const;
   Node      get_dest_node(const Edge &edge);
 
-  const Graph_library *get_library() const { return library; }
+  const Graph_library *get_library() const {
+    return library;
+  }
   const std::string &get_subgraph_name(Index_ID nid) const;
 
-  const Tech_library *get_tlibrary() const { return tlibrary; }
-  Tech_library *      get_tech_library() { return tlibrary; }
+  const Tech_library *get_tlibrary() const {
+    return tlibrary;
+  }
+  Tech_library *get_tech_library() {
+    return tlibrary;
+  }
 
   void dump_lgwires() {
     fmt::print("lgwires {} \n", name);
@@ -105,18 +111,32 @@ public:
     return nid;
   }
 
-  Node_Type  type_get() const { return g->node_type_get(nid); }
-  float      delay_get() const { return g->node_delay_get(nid); }
-  Node_Place place_get() const { return g->node_place_get(nid); }
+  Node_Type type_get() const {
+    return g->node_type_get(nid);
+  }
+  float delay_get() const {
+    return g->node_delay_get(nid);
+  }
+  Node_Place place_get() const {
+    return g->node_place_get(nid);
+  }
 
-  uint16_t get_bits() const { return g->get_bits(nid); }
+  uint16_t get_bits() const {
+    return g->get_bits(nid);
+  }
 
   virtual const Edge_iterator inp_edges() const;
   virtual const Edge_iterator out_edges() const;
 
-  bool is_root() const { return g->is_root(nid); }
-  bool is_graph_input() const { return g->is_graph_input(nid); }
-  bool is_graph_output() const { return g->is_graph_output(nid); }
+  bool is_root() const {
+    return g->is_root(nid);
+  }
+  bool is_graph_input() const {
+    return g->is_graph_input(nid);
+  }
+  bool is_graph_output() const {
+    return g->is_graph_output(nid);
+  }
 };
 
 class Node : public ConstNode {
@@ -151,8 +171,8 @@ public:
     g->node_delay_set(nid, t);
   }
 
-  const Edge_iterator inp_edges() const override ;
-  const Edge_iterator out_edges() const override ;
+  const Edge_iterator inp_edges() const override;
+  const Edge_iterator out_edges() const override;
 };
 
 #endif

@@ -2,8 +2,11 @@
 #include "lgraph.hpp"
 #include "nodetype.hpp"
 
-LGraph_Node_Src_Loc::LGraph_Node_Src_Loc(const std::string & path, const std::string & name) noexcept
-    : LGraph_Base(path,name), src_files(path, name + "_src_files"), node_src_loc(path + "/" + name + "_src_locs") {}
+LGraph_Node_Src_Loc::LGraph_Node_Src_Loc(const std::string &path, const std::string &name) noexcept
+    : LGraph_Base(path, name)
+    , src_files(path, name + "_src_files")
+    , node_src_loc(path + "/" + name + "_src_locs") {
+}
 
 void LGraph_Node_Src_Loc::clear() {
   src_files.clear();
@@ -25,8 +28,7 @@ void LGraph_Node_Src_Loc::emplace_back() {
   node_src_loc[node_src_loc.size() - 1] = 0;
 }
 
-void LGraph_Node_Src_Loc::node_loc_set(Index_ID    nid,
-                                       const char *file_name, uint32_t offset, uint32_t length) {
+void LGraph_Node_Src_Loc::node_loc_set(Index_ID nid, const char *file_name, uint32_t offset, uint32_t length) {
   File_Loc loc(offset, length);
   int      loc_id   = src_files.create_id(file_name, loc);
   node_src_loc[nid] = loc_id;

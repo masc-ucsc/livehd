@@ -307,7 +307,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
     RTLIL::IdString yosys_op;
 
     uint16_t size   = 0;
-    bool     unsign = true;
+    bool     u_type = true;
 
     switch(g->node_type_get(idx).op) {
     case GraphIO_Op:
@@ -342,7 +342,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
         }
       }
 
-      unsign = (add_unsigned.size() > 0 || sub_unsigned.size() > 0);
+      u_type = (add_unsigned.size() > 0 || sub_unsigned.size() > 0);
 
       RTLIL::Wire *addu_result = nullptr;
       if(add_unsigned.size() > 1) {
@@ -445,7 +445,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
         }
       }
 
-      unsign                 = (m_unsigned.size() > 0);
+      u_type                 = (m_unsigned.size() > 0);
       RTLIL::Wire *mu_result = nullptr;
       RTLIL::Wire *ms_result = nullptr;
 
@@ -808,7 +808,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
         }
       }
 
-      unsign                 = (e_unsigned.size() > 0);
+      u_type                 = (e_unsigned.size() > 0);
       RTLIL::Wire *eu_result = nullptr;
       RTLIL::Wire *es_result = nullptr;
 

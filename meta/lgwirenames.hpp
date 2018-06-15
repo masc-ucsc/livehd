@@ -42,14 +42,14 @@ protected:
 
 public:
   LGraph_WireNames() = delete;
-  explicit LGraph_WireNames(const std::string & path, const std::string & name) noexcept ;
+  explicit LGraph_WireNames(const std::string &path, const std::string &name) noexcept;
   virtual ~LGraph_WireNames(){};
   virtual void clear();
   virtual void reload();
   virtual void sync();
   virtual void emplace_back();
 
-  //WireName_ID get_wirename_id(const char *wirename);
+  // WireName_ID get_wirename_id(const char *wirename);
   const char *get_wirename(WireName_ID wid) const;
 
   WireName_ID get_wid(Index_ID nid) const;
@@ -62,10 +62,10 @@ public:
 #ifndef NDEBUG
     console->info("set wirename idx: {} , name: {}, module {}\n", nid, name, get_name());
 
-    //FIXME figure out IOs vs wirenames (see inou_yosys) and put this assertions back
-    //assert(!has_name(name));
-    //assert(!is_graph_input(name) && (!is_graph_input(nid) || get_graph_input_name(nid) != name));
-    //assert(!is_graph_output(name) && (!is_graph_output(nid) || get_graph_output_name(nid) != name));
+    // FIXME figure out IOs vs wirenames (see inou_yosys) and put this assertions back
+    // assert(!has_name(name));
+    // assert(!is_graph_input(name) && (!is_graph_input(nid) || get_graph_input_name(nid) != name));
+    // assert(!is_graph_output(name) && (!is_graph_output(nid) || get_graph_output_name(nid) != name));
 #endif
     WireName_ID wid = names.create_id(name, nid);
     set_node_wirename(nid, wid);
@@ -83,12 +83,18 @@ public:
   }
 
   bool has_name(const char *name) const;
-  bool has_name(const std::string & name) const { return has_name(name.c_str()); }
+  bool has_name(const std::string &name) const {
+    return has_name(name.c_str());
+  }
 
   Index_ID get_node_id(const char *name) const;
-  Index_ID get_node_id(const std::string & name) const { return get_node_id(name.c_str()); }
+  Index_ID get_node_id(const std::string &name) const {
+    return get_node_id(name.c_str());
+  }
 
-  void dump() { names.dump(); }
+  void dump() {
+    names.dump();
+  }
 };
 
 #endif

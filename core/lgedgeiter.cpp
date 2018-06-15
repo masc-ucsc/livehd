@@ -55,7 +55,7 @@ Edge_iterator::CPod_iterator Edge_iterator::CPod_iterator::operator++() {
 
     if(root[delta].is_last_state()) {
       ptr = e;
-      //if ((root[delta].has_local_outputs() && !inputs)
+      // if ((root[delta].has_local_outputs() && !inputs)
       //   ||(root[delta].has_local_inputs() && inputs))
       assert(&node == &Node_Internal::get(ptr));
       break; // No more in this iterator

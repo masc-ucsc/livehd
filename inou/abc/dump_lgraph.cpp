@@ -261,7 +261,7 @@ void Inou_abc::gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, A
         auto dst_pin = Node_Pin(new_memory_idx, old_inp_pid, true);
         new_graph->add_edge(src_pin, dst_pin);
 
-        for(int offset = 0; offset < size; ++offset) {
+        for(size_t offset = 0; offset < size; ++offset) {
           index_offset info = {new_memory_idx, old_inp_pid, {offset, offset}};
           auto *       pObj = memory_input_map[info];
           new_graph->add_edge(Node_Pin(graph_info->cell2id[pObj], graph_info->cell_out_pid[graph_info->cell2id[pObj]]++, false),
@@ -354,7 +354,7 @@ void Inou_abc::gen_subgraph_from_abc(LGraph *new_graph, const LGraph *old_graph,
       auto src_pin = Node_Pin(join_id, 0, false);
       auto dst_pin = Node_Pin(new_subgraph_idx, old_inp_pid, true);
       new_graph->add_edge(src_pin, dst_pin);
-      for(int offset = 0; offset < size; ++offset) {
+      for(size_t offset = 0; offset < size; ++offset) {
         index_offset info = {new_subgraph_idx, old_inp_pid, {offset, offset}};
         auto *       pObj = subgraph_input_map[info];
         new_graph->add_edge(Node_Pin(graph_info->cell2id[pObj], graph_info->cell_out_pid[graph_info->cell2id[pObj]]++, false),

@@ -53,7 +53,7 @@ Node_Type::_init::_init() {
   Node_Type::table[CfgBeenRead_Op]     = new Node_Type_CfgBeenRead();
   Node_Type::table[DontCare_Op]        = new Node_Type_DontCare();
 
-  assert(Invalid_Op==0);
+  assert(Invalid_Op == 0);
   for(size_t i = Invalid_Op; i <= SubGraph_Op; i++) {
     assert(table[i]);
     name2node[table[i]->get_name()] = table[i];
@@ -74,19 +74,19 @@ Node_Type &Node_Type::get(Node_Type_Op op) {
   return *table[op];
 }
 
-Node_Type_Op Node_Type::get(const std::string & opname) {
+Node_Type_Op Node_Type::get(const std::string &opname) {
   assert(is_type(opname));
   return name2node[opname]->op;
 }
 
-bool Node_Type::is_type(const std::string & opname) {
+bool Node_Type::is_type(const std::string &opname) {
   return (name2node.find(opname) != name2node.end());
 }
 
-LGraph_Node_Type::LGraph_Node_Type(const std::string& path, const std::string & name) noexcept
-    : Lgraph_base_core(path,name),
-    consts(path,name),
-    node_type_table(path + "/" + name + "_type") {
+LGraph_Node_Type::LGraph_Node_Type(const std::string &path, const std::string &name) noexcept
+    : Lgraph_base_core(path, name)
+    , consts(path, name)
+    , node_type_table(path + "/" + name + "_type") {
 }
 
 Const_ID LGraph_Node_Type::get_constant_id(const char *constant) {
@@ -110,8 +110,8 @@ void LGraph_Node_Type::reload() {
   node_type_table.reload();
   consts.reload();
 
-  //Note: if you change this, make sure to change u32_type_set and
-  //const_type_set functions accordingly
+  // Note: if you change this, make sure to change u32_type_set and
+  // const_type_set functions accordingly
   for(const Index_ID &node : Lgraph_base_core::fast()) {
     if(node_type_get(node).op == U32Const_Op || node_type_get(node).op == StrConst_Op) {
       const_nodes.set_bit(node);
@@ -150,7 +150,7 @@ uint32_t LGraph_Node_Type::subgraph_id_get(Index_ID nid) const {
 
   assert(node_internal[nid].get_nid() < node_type_table.size());
 
-  //only supported for constants
+  // only supported for constants
   assert(node_type_table[node_internal[nid].get_nid()] >= SubGraphMin_Op);
   assert(node_type_table[node_internal[nid].get_nid()] <= SubGraphMax_Op);
 
@@ -173,7 +173,7 @@ uint32_t LGraph_Node_Type::tmap_id_get(Index_ID nid) const {
 
   assert(node_internal[nid].get_nid() < node_type_table.size());
 
-  //only supported for constants
+  // only supported for constants
   assert(node_type_table[node_internal[nid].get_nid()] >= TechMapMin_Op);
   assert(node_type_table[node_internal[nid].get_nid()] <= TechMapMax_Op);
 
@@ -187,13 +187,13 @@ void LGraph_Node_Type::node_u32type_set(Index_ID nid, uint32_t value) {
   assert(node_internal[nid].get_nid() < node_type_table.size());
   assert(value <= (uint32_t)(U32ConstMax_Op - U32ConstMin_Op));
 
-  //when a node is set as const, adds it to the const nodes list
-  //Note: if the lazy initialization is changed to something that is
-  //destructive, this needs to be changed
+  // when a node is set as const, adds it to the const nodes list
+  // Note: if the lazy initialization is changed to something that is
+  // destructive, this needs to be changed
   const_nodes.set_bit(nid);
 
   node_type_table[node_internal[nid].get_nid()] = (Node_Type_Op)(U32ConstMin_Op + value);
-  //console->info("u32const {}", node_type_table[node_internal[nid].get_nid()]);
+  // console->info("u32const {}", node_type_table[node_internal[nid].get_nid()]);
 }
 
 uint32_t LGraph_Node_Type::node_value_get(Index_ID nid) const {
@@ -202,14 +202,14 @@ uint32_t LGraph_Node_Type::node_value_get(Index_ID nid) const {
 
   assert(node_internal[nid].get_nid() < node_type_table.size());
 
-  //only supported for constants
+  // only supported for constants
   assert(node_type_table[node_internal[nid].get_nid()] >= U32ConstMin_Op);
   assert(node_type_table[node_internal[nid].get_nid()] <= U32ConstMax_Op);
 
   return (uint32_t)(node_type_table[node_internal[nid].get_nid()] - U32ConstMin_Op);
 }
 
-void LGraph_Node_Type::node_const_type_set(Index_ID nid, const std::string & value
+void LGraph_Node_Type::node_const_type_set(Index_ID nid, const std::string &value
 #ifndef NDEBUG
                                            ,
                                            bool enforce_bits
@@ -232,13 +232,13 @@ void LGraph_Node_Type::node_const_type_set(Index_ID nid, const std::string & val
   uint32_t char_id = get_constant_id(value.c_str());
   assert(char_id < (uint32_t)(StrConstMax_Op - StrConstMin_Op));
 
-  //when a node is set as const, adds it to the const nodes list
-  //Note: if the lazy initialization is changed to something that is
-  //destructive, this needs to be changed
+  // when a node is set as const, adds it to the const nodes list
+  // Note: if the lazy initialization is changed to something that is
+  // destructive, this needs to be changed
   const_nodes.set_bit(nid);
 
   node_type_table[node_internal[nid].get_nid()] = (Node_Type_Op)(StrConstMin_Op + char_id);
-  //console->info("u32const {}", node_type_table[node_internal[nid].get_nid()]);
+  // console->info("u32const {}", node_type_table[node_internal[nid].get_nid()]);
 }
 
 const std::string &LGraph_Node_Type::node_const_value_get(Index_ID nid) const {
@@ -247,7 +247,7 @@ const std::string &LGraph_Node_Type::node_const_value_get(Index_ID nid) const {
 
   assert(node_internal[nid].get_nid() < node_type_table.size());
 
-  //only supported for constants
+  // only supported for constants
   assert(node_type_table[node_internal[nid].get_nid()] >= StrConstMin_Op);
   assert(node_type_table[node_internal[nid].get_nid()] <= StrConstMax_Op);
 

@@ -15,13 +15,10 @@ public:
   typedef uint16_t pin_type;
   typedef float    pos_type;
 
-  typedef enum {
-    input,
-    output
-  } Direction;
+  typedef enum { input, output } Direction;
 
   typedef struct {
-    std::string metal_name; //FIXME make it an enum
+    std::string metal_name; // FIXME make it an enum
     pos_type    xl, yl, xh, yh;
   } Physical_pin;
 
@@ -29,7 +26,7 @@ public:
     std::vector<Physical_pin> phys;
     Direction                 dir;
     std::string               name;
-    std::string               use; //FIXME: make it an enum
+    std::string               use; // FIXME: make it an enum
     pin_type                  io_id;
   } Pin;
 
@@ -37,7 +34,7 @@ public:
 
 private:
   std::string cell_name;
-  std::string function; //FIXME: maybe we want to limit the possibilities here
+  std::string function; // FIXME: maybe we want to limit the possibilities here
 
   uint16_t id;
 
@@ -51,7 +48,7 @@ private:
 
   std::unordered_map<std::string, pin_type> pname2id;
 
-  //FIXME: technically, this should be a full table for each pair?
+  // FIXME: technically, this should be a full table for each pair?
   std::map<ppair, float> delay; // maps an (ipin x opin) to delay
 
   // BEGIN: Add placement-only information here
@@ -59,27 +56,42 @@ private:
   // END:
 
 public:
-  explicit Tech_cell(const std::string &name, uint16_t id) : cell_name(name), id(id), height(0), width(0) {}
+  explicit Tech_cell(const std::string &name, uint16_t id)
+      : cell_name(name)
+      , id(id)
+      , height(0)
+      , width(0) {
+  }
 
-  uint16_t          get_id() const { return id; }
-  const std::string get_name() const { return cell_name; }
+  uint16_t get_id() const {
+    return id;
+  }
+  const std::string get_name() const {
+    return cell_name;
+  }
 
-  const std::pair<double, double> get_cell_size() const { return std::make_pair(height, width); }
+  const std::pair<double, double> get_cell_size() const {
+    return std::make_pair(height, width);
+  }
 
   void set_cell_size(double _height, double _width) {
     height = _height;
     width  = _width;
   }
 
-  const std::string get_function() const { return function; }
-  void              set_function(const std::string &_function) { function = _function; }
+  const std::string get_function() const {
+    return function;
+  }
+  void set_function(const std::string &_function) {
+    function = _function;
+  }
 
   pin_type add_pin(const std::string &name, Direction dir) {
     pin_type id = pins.size();
     Pin      aPin;
     aPin.name = name;
     aPin.dir  = dir;
-    aPin.use = "";
+    aPin.use  = "";
     pins.push_back(aPin);
     pname2id.insert(std::make_pair(name, id));
 
@@ -103,9 +115,11 @@ public:
     return pname2id.find(name) != pname2id.end();
   }
 
-  //FIXME: remove this
-  //return a pointer point to "pins" vector, which is a type of std::vector<Pin>
-  std::vector<Pin> *get_vec_pins() { return &pins; }
+  // FIXME: remove this
+  // return a pointer point to "pins" vector, which is a type of std::vector<Pin>
+  std::vector<Pin> *get_vec_pins() {
+    return &pins;
+  }
 
   int n_inps() const {
     return inputs.size();
@@ -141,7 +155,9 @@ public:
     return pins[pin_id].io_id;
   }
 
-  const int get_pins_size() const { return pins.size(); };
+  const int get_pins_size() const {
+    return pins.size();
+  };
 
   const std::string &get_name(pin_type id) const {
     assert(pins.size() > id);
@@ -185,7 +201,7 @@ public:
     return outputs;
   }
 
-  //SH added phy_id, change x,y,width,height -> xl,yl,xh,yh representation
+  // SH added phy_id, change x,y,width,height -> xl,yl,xh,yh representation
 
   void set_position(pin_type id, pin_type phy_id, pos_type in_xl, pos_type in_yl, pos_type in_xh, pos_type in_yh) {
     assert(pins.size() > id);
@@ -200,7 +216,7 @@ public:
     return std::make_pair(pins[id].phys[phy_id].xl, pins[id].phys[phy_id].yl);
   }
 
-  //SH: not sure whether set_psize and get_psize function would be used, mark temporary
+  // SH: not sure whether set_psize and get_psize function would be used, mark temporary
   /*
     void set_psize(pin_type id,pin_type phy_id, pos_type height, pos_type width) {
       assert(pins.size() > id);
@@ -229,7 +245,7 @@ public:
   std::vector<double> spctb_width;   // width in spacing table
   std::vector<double> spctb_spacing; // spacing in spacing table
 
-  //void to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer>&) const;
+  // void to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer>&) const;
 } Tech_layer;
 
 typedef struct tech_rect_s_ {
@@ -247,7 +263,7 @@ typedef struct tech_via_s_ {
 public:
   std::string                 name;
   std::vector<Tech_via_layer> vlayers;
-  //void to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer>&) const;
+  // void to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer>&) const;
 } Tech_via;
 
 class Tech_library {
@@ -264,16 +280,17 @@ private:
   std::unordered_map<std::string, uint16_t> cname2id;
 
   explicit Tech_library(const std::string &_path)
-      : lgdb(_path), lib_file("tech_library") {
+      : lgdb(_path)
+      , lib_file("tech_library") {
 
     cname2id.clear();
     cell_types.clear();
     clean = true;
-    //load();
+    // load();
     load_json();
   }
 
-  //void to_yaml_cell(Tech_cell& cell) const;
+  // void to_yaml_cell(Tech_cell& cell) const;
   void from_yaml_inputs(Tech_cell *tcell);
 
   static std::unordered_map<std::string, Tech_library *> instances;
@@ -292,7 +309,7 @@ public:
 
   void sync() {
     if(!clean) {
-      //to_yaml();
+      // to_yaml();
       to_json();
       clean = true;
     }
@@ -313,7 +330,7 @@ public:
 
   const Tech_cell *get_const_cell(uint16_t cell_id) const;
 
-  //multiton pattern, one singleton per lgdb
+  // multiton pattern, one singleton per lgdb
   static Tech_library *instance(std::string path = "lgdb") {
     if(Tech_library::instances.find(path) == Tech_library::instances.end()) {
       Tech_library::instances.insert(std::make_pair(path, new Tech_library(path)));
@@ -321,25 +338,37 @@ public:
     return Tech_library::instances[path];
   }
 
-  //adding routing only member function here : layers and via
-  //return a pointer point to "cell_types" vector, which is a type of std::vector<Tech_layer>
-  //don't use pointer of vector, need to be modified
-  std::vector<Tech_cell> *get_vec_cell_types() { return &cell_types; }
+  // adding routing only member function here : layers and via
+  // return a pointer point to "cell_types" vector, which is a type of std::vector<Tech_layer>
+  // don't use pointer of vector, need to be modified
+  std::vector<Tech_cell> *get_vec_cell_types() {
+    return &cell_types;
+  }
 
-  int get_cell_types_size() const { return cell_types.size(); }
+  int get_cell_types_size() const {
+    return cell_types.size();
+  }
 
-  //return a pointer point to "layers" vector, which is a type of std::vector<Tech_layer>
-  std::vector<Tech_layer> *get_vec_layers() { return &layers; }
+  // return a pointer point to "layers" vector, which is a type of std::vector<Tech_layer>
+  std::vector<Tech_layer> *get_vec_layers() {
+    return &layers;
+  }
 
-  void increase_vec_layers_size() { layers.resize(layers.size() + 1); }
+  void increase_vec_layers_size() {
+    layers.resize(layers.size() + 1);
+  }
 
-  //return a pointer point to "layers" vector, which is a type of std::vector<Tech_via>
-  std::vector<Tech_via> *get_vec_vias() { return &vias; }
+  // return a pointer point to "layers" vector, which is a type of std::vector<Tech_via>
+  std::vector<Tech_via> *get_vec_vias() {
+    return &vias;
+  }
 
-  void increase_vec_vias_size() { vias.resize(vias.size() + 1); }
+  void increase_vec_vias_size() {
+    vias.resize(vias.size() + 1);
+  }
 };
 
-//FIXME: come up with a C++14 friendly solution
+// FIXME: come up with a C++14 friendly solution
 #pragma clang diagnostic push
 #pragma clang diagnostic                               ignored "-Wc++17-extensions"
 inline std::unordered_map<std::string, Tech_library *> Tech_library::instances;
