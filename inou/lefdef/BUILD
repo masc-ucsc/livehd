@@ -5,8 +5,8 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//meta:meta",
-        "//misc/lef/lef:lef",
-        "//misc/def/def:def",
+        "//third_party/misc/lef/lef:lef",
+        "//third_party/misc/def/def:def",
     ],
 )
 

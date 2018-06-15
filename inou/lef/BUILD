@@ -5,7 +5,7 @@ cc_library(
     includes = ["."], # needed because other passes depend on this pass
     visibility = ["//visibility:public"],
     deps = [
-        "//misc/lef/lef:lef",
+        "//third_party/misc/lef/lef:lef",
         "//meta:meta"
     ],
 )
