@@ -17,5 +17,5 @@ before_install:
   - docker pull mascucsc/ubuntu-masc
 
 script:
-  - misc/scripts/run-docker-test.sh `pwd` $BUILD_TYPE $DOCKER
+  - scripts/run-docker-test.sh `pwd` $BUILD_TYPE $DOCKER
 
