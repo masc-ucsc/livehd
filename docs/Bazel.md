@@ -1,6 +1,10 @@
 
 Useful commands:
 
+## To download the dependent packages and apply patches (abc)
+
+    bazel fetch ...
+
 ## List bazel targets starting from top directory
 
     bazel query '...'
