@@ -5,7 +5,8 @@ cc_library(
     visibility = ["//visibility:public"],
     includes = ["."],
     deps = [
-        "//core:core"
+        "//meta:meta",
+        "//pyth:py_base",
     ],
 )
 

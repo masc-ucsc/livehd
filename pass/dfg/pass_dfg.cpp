@@ -1,12 +1,14 @@
-#include "pass_dfg.hpp"
-#include "cfg_node_data.hpp"
-#include "lgedge.hpp"
-#include "lgedgeiter.hpp"
 #include <cstdlib>
 #include <cassert>
 #include <vector>
 #include <unordered_set>
-using std::string;
+
+#include "pass_dfg.hpp"
+#include "cfg_node_data.hpp"
+#include "lgedge.hpp"
+#include "lgedgeiter.hpp"
+
+using std::string; // FIXME: we use std::string and std::... all the time
 using std::unordered_map;
 using std::vector;
 

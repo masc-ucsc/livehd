@@ -1,6 +1,10 @@
 #ifndef PASS_DFG_HPP_
 #define PASS_DFG_HPP_
 
+#include <string>
+#include <unordered_map>
+#include <vector>
+
 #include "cfg_node_data.hpp"
 #include "options.hpp"
 #include "pass.hpp"
@@ -8,9 +12,6 @@
 #include "lgedge.hpp"
 #include "symbol_table.hpp"
 #include "cf2df_state.hpp"
-#include <string>
-#include <unordered_map>
-#include <vector>
 
 class Pass_dfg_options_pack : public Options_pack {
 public:

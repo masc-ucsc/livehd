@@ -1,19 +1,22 @@
 
-#include "inou_cfg.hpp"
-#include "lgedgeiter.hpp"
-#include "lgraphbase.hpp"
 #include <fcntl.h>
 #include <fstream>
 #include <stack>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <string>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+
+#include <string>
 #include <vector>
 #include <algorithm>
+
+#include "inou_cfg.hpp"
+#include "lgedgeiter.hpp"
+#include "cfg_node_data.hpp"
+
 using std::map;
 using std::string;
 using std::vector;

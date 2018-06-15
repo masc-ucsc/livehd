@@ -2,17 +2,19 @@
 #define NODETYPE_H
 
 #include <assert.h>
-
 #include <string>
 #include <vector>
+#include <map>
 
 #include "bm.h"
 #include "bmsparsevec.h"
-
 #include "dense.hpp"
-#include "lgconsts.hpp"
+#include "char_array.hpp"
 
-#include "lgraphbase.hpp"
+#include "lgraph_base_core.hpp"
+
+// nodetype should be at meta directory but the node type is needed all over in the base class. It may be good to integrate nodetype
+// as part of the lgnode itself to avoid extra cache misses
 
 enum Node_Type_Op : uint64_t {
   Invalid_Op,
@@ -64,8 +66,6 @@ enum Node_Type_Op : uint64_t {
   TechMapMax_Op = 4 * (1ULL << 32)
 };
 
-class LGraph;
-
 class Node_Type {
 private:
   static Node_Type *                        table[StrConst_Op + 1];
@@ -84,8 +84,6 @@ public:
 
   Node_Type(const std::string & _name, Node_Type_Op _op, bool _pipelined)
       : name(_name), pipelined(_pipelined), op(_op){};
-
-  static Node_Type &create_sub_graph(LGraph *g);
 
   static Node_Type &  get(Node_Type_Op op);
   static Node_Type_Op get(const std::string & opname);
@@ -631,21 +629,26 @@ public:
   };
 };
 
-class LGraph_Node_Type : public LGraph_Consts,
-                         virtual public LGraph_Base {
+typedef Char_Array_ID Const_ID;
+
+class LGraph_Node_Type : virtual public Lgraph_base_core {
 private:
-  Dense<Node_Type_Op> node_type_op;
-  bm::bvector<>       const_nodes;
+  Char_Array<Const_ID> consts;
+  Dense<Node_Type_Op>  node_type_table;
+  bm::bvector<>        const_nodes;
 
 public:
   LGraph_Node_Type() = delete;
   explicit LGraph_Node_Type(const std::string& path, const std::string& name) noexcept ;
   virtual ~LGraph_Node_Type(){};
 
-  virtual void clear();
-  virtual void reload();
-  virtual void sync();
-  virtual void emplace_back();
+  Const_ID    get_constant_id(const char *constant);
+  const char *get_constant(Const_ID const_id) const;
+
+  void clear();
+  void reload();
+  void sync();
+  void emplace_back();
 
   void node_type_set(Index_ID nid, Node_Type_Op op);
 
@@ -661,7 +664,7 @@ public:
                            bool enforce_bits = true
 #endif
   );
-  std::string node_const_value_get(Index_ID nid) const;
+  const std::string &node_const_value_get(Index_ID nid) const;
 
   void     node_tmap_set(Index_ID nid, uint32_t tmapid);
   uint32_t tmap_id_get(Index_ID nid) const;

@@ -11,7 +11,7 @@
 
 #include <set>
 
-#include "lgraph.hpp"
+//#include "lgraph.hpp"
 #include "lgraphbase.hpp"
 
 class Edge_iterator {
@@ -56,7 +56,7 @@ class Fast_edge_iterator {
 public:
   class CFast_edge_iterator {
   public:
-    CFast_edge_iterator(const Index_ID _nid, const LGraph_Base *_g) : nid(_nid), g(_g) {}
+    CFast_edge_iterator(const Index_ID _nid, const Lgraph_base_core *_g) : nid(_nid), g(_g) {}
     CFast_edge_iterator operator++() {
       CFast_edge_iterator i(nid, g);
 
@@ -72,17 +72,17 @@ public:
 
   private:
     Index_ID           nid;
-    const LGraph_Base *g;
+    const Lgraph_base_core *g;
   };
 
 private:
 protected:
-  const LGraph_Base *g;
+  const Lgraph_base_core *g;
   const Index_ID     b;
 
 public:
   Fast_edge_iterator() = delete;
-  explicit Fast_edge_iterator(const Index_ID _b, const LGraph_Base *_g)
+  explicit Fast_edge_iterator(const Index_ID _b, const Lgraph_base_core *_g)
       : g(_g), b(_b) {
   }
 
@@ -97,12 +97,12 @@ typedef google::sparse_hash_set<Index_ID>         Deadcode_type;
 class Edge_iterator_base {
 protected:
   Index_ID       nid;
-  const LGraph * g;
+  const LGraph_Base * g;
   Frontier_type *frontier; // 2G inputs at most
   Pending_type * pending;  // vertex that cleared the frontier
 
 public:
-  Edge_iterator_base(const Index_ID _nid, const LGraph *_g, Frontier_type *_frontier, Pending_type *_pending)
+  Edge_iterator_base(const Index_ID _nid, const LGraph_Base *_g, Frontier_type *_frontier, Pending_type *_pending)
       : nid(_nid), g(_g), frontier(_frontier), pending(_pending) {
   }
 
@@ -157,7 +157,7 @@ class Forward_edge_iterator {
 public:
   class CForward_edge_iterator : public Edge_iterator_base {
   public:
-    CForward_edge_iterator(const Index_ID _nid, const LGraph *_g, Frontier_type *_frontier, Pending_type *_pending)
+    CForward_edge_iterator(const Index_ID _nid, const LGraph_Base *_g, Frontier_type *_frontier, Pending_type *_pending)
         : Edge_iterator_base(_nid, _g, _frontier, _pending) {
     }
 
@@ -209,13 +209,13 @@ public:
 
 private:
 protected:
-  const LGraph *g;
+  const LGraph_Base *g;
   Frontier_type frontier; // 2G inputs at most
   Pending_type  pending;  // vertex that cleared the frontier
 
 public:
   Forward_edge_iterator() = delete;
-  explicit Forward_edge_iterator(const LGraph *_g)
+  explicit Forward_edge_iterator(const LGraph_Base *_g)
       : g(_g) {
     frontier.set_empty_key(0);     // 0 is not allowed as key
     frontier.set_deleted_key(128); // 128 is not allowed as key (4KB aligned)
@@ -236,7 +236,7 @@ public:
     }
 
     //for forward iteration we want to start from constants as well
-    const LGraph *lgr       = dynamic_cast<const LGraph *>(g);
+    const LGraph_Base *lgr       = dynamic_cast<const LGraph_Base *>(g);
     const auto &  constants = lgr->get_const_node_ids();
     Index_ID      cid       = constants.get_first();
     while(cid) {
@@ -264,7 +264,7 @@ public:
   private:
     Deadcode_type global_visited;
   public:
-    CBackward_edge_iterator(const Index_ID _nid, const LGraph *_g, Frontier_type *_frontier, Pending_type *_pending)
+    CBackward_edge_iterator(const Index_ID _nid, const LGraph_Base *_g, Frontier_type *_frontier, Pending_type *_pending)
         : Edge_iterator_base(_nid, _g, _frontier, _pending) {
     }
 
@@ -358,13 +358,13 @@ public:
 
 private:
 protected:
-  const LGraph *g;
+  const LGraph_Base *g;
   Frontier_type frontier; // 2G inputs at most
   Pending_type  pending;  // vertex that cleared the frontier
 
 public:
   Backward_edge_iterator() = delete;
-  explicit Backward_edge_iterator(const LGraph *_g)
+  explicit Backward_edge_iterator(const LGraph_Base *_g)
       : g(_g) {
     frontier.set_empty_key(0);     // 0 is not allowed as key
     frontier.set_deleted_key(128); // 128 is not allowed as key (4KB aligned)

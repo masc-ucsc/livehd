@@ -1,12 +1,11 @@
 cc_library(
-    name = "core",
+    name = "meta",
     srcs = glob(["*.cpp"]),
     hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
     includes = ["."],
-    linkopts = ['-lpthread'],
-    deps = ["@sparsehash//:headers",
-            "@bm//:headers",
-            "@spdlog//:headers",
+    deps = ["//core:core",
+            "@boost//:filesystem", "@boost//:program_options", # SOON TO BE GONE
             ],
 )
+

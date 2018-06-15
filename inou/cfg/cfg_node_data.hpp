@@ -1,10 +1,10 @@
 #ifndef CFG_NODE_DATA_H_
 #define CFG_NODE_DATA_H_
 
-#include "nodetype.hpp"
-#include <sstream>
 #include <string>
 #include <vector>
+
+#include "lgraph.hpp"
 
 const int  OPERANDS_INIT_SIZE = 4;   // most CFG nodes will have 4 operands
 const char ENCODING_DELIM     = '|'; // deliminator used to encode CFG data into wirename field

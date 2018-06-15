@@ -5,7 +5,7 @@ cc_library(
     hdrs = ["inou_pyrope.hpp"],
     visibility = ["//visibility:public"],
     deps = [
-        "//core:core"
+        "//meta:meta"
     ],
 )
 
@@ -15,7 +15,6 @@ cc_binary(
     linkopts = ['-lpthread'],
     deps = [
         ":inou_pyrope",
-        "//core:core",
         "@boost//:filesystem", "@boost//:program_options",
     ],
 )

@@ -30,6 +30,21 @@ Useful commands:
 
     bazel test //...
 
+## Debugging with bazel
+
+First run the tests to see the failing one. Then run with debug options
+the failing test. E.g:
+
+    bazel run -c dbg //pyth:test_core1
+
+If the test has python, you must call the gdb with python and then pass as
+argument the test. Sample session:
+
+    gdb `which pythong`
+    >r bazel-bin/pyth/test_core1
+    >b LGraph_Base::LGraph_Base
+    >r
+
 ## To create Python self contained par file
 
     bazel build //pyth:lgraph.par

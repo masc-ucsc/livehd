@@ -1,12 +1,11 @@
 #ifndef LGRAPH_H
 #define LGRAPH_H
 
-#include "graph_library.hpp"
-#include "tech_library.hpp"
 
 #include "lgedge.hpp"
 #include "lgraphbase.hpp"
-
+#include "tech_library.hpp"
+#include "graph_library.hpp"
 #include "instance_names.hpp"
 #include "lgwirenames.hpp"
 #include "nodedelay.hpp"
@@ -17,9 +16,9 @@
 class Node;
 class ConstNode;
 class Edge_iterator;
+class Graph_library;
 
 class LGraph :
-	public LGraph_Node_Type,
 	public LGraph_Node_Delay,
 	public LGraph_Node_Src_Loc,
 	public LGraph_WireNames,
@@ -28,13 +27,13 @@ class LGraph :
 protected:
   //FIXME: for live I need one instance per lgdb. Do it similar to library, or
   //keep references to lgraphs in the library
-  static std::map<std::string, std::map<std::string, LGraph *>> name2graph;
+  static std::map<std::string, std::map<std::string, LGraph *>> name2lgraph;
   static uint32_t                                               lgraph_counter;
 
   // singleton object, assumes all graph within a program are in the same
   // directory
   Graph_library *library;
-  Tech_library * tlibrary;
+  Tech_library  *tlibrary;
 
   int lgraph_id;
 
@@ -44,6 +43,9 @@ public:
   LGraph() = delete;
   explicit LGraph(const std::string &path);
   explicit LGraph(const std::string &path, const std::string &name, bool clear);
+
+  static LGraph *find_graph(const std::string &gname, const std::string &path);
+  static LGraph *open_lgraph(const std::string &path, const std::string &name);
 
   ~LGraph() {
     fmt::print("lgraph destructor\n");
@@ -66,25 +68,10 @@ public:
   Node      get_dest_node(const Edge &edge);
 
   const Graph_library *get_library() const { return library; }
-
-  const std::string get_subgraph_name(Index_ID nid) const {
-    assert(node_type_get(nid).op == SubGraph_Op);
-    return library->get_name(subgraph_id_get(nid));
-  }
+  const std::string &get_subgraph_name(Index_ID nid) const;
 
   const Tech_library *get_tlibrary() const { return tlibrary; }
   Tech_library *      get_tech_library() { return tlibrary; }
-
-  static LGraph *find_graph(const std::string &gname, const std::string &path);
-
-  static LGraph *open_lgraph(const std::string &path, const std::string &name) {
-    char cadena[4096];
-    snprintf(cadena, 4096, "%s/lgraph_%s_nodes", path.c_str(), name.c_str());
-    if(access(cadena, R_OK | W_OK) == -1) {
-      return nullptr;
-    }
-    return new LGraph(path, name, false);
-  }
 
   void dump_lgwires() {
     fmt::print("lgwires {} \n", name);

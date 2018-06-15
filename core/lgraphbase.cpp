@@ -9,8 +9,8 @@
 #include "lgraphbase.hpp"
 
 LGraph_Base::LGraph_Base(const std::string &_path, const std::string &_name) noexcept
-    : name(_name), path(_path),
-	  node_internal(_path + "/" + _name + "_nodes"),
+    : LGraph_Node_Type(_path, _name),
+    name(_name), path(_path),
 	  input_array(_path, _name + "_inputs"),
 	  output_array(_path, _name + "_outputs") {
 
@@ -40,6 +40,8 @@ void LGraph_Base::dump() const {
 }
 
 void LGraph_Base::clear() {
+  LGraph_Node_Type::clear();
+
   node_internal.clear();
   input_array.clear();
   output_array.clear();
@@ -48,9 +50,12 @@ void LGraph_Base::clear() {
   std::string lock = path + "/" + name + ".lock";
   unlink(lock.c_str());
   locked = false;
+
 }
 
 void LGraph_Base::sync() {
+  LGraph_Node_Type::sync();
+
   node_internal.sync();
   input_array.sync();
   output_array.sync();
@@ -68,6 +73,8 @@ void LGraph_Base::emplace_back() {
     new(&node_internal[nid]) Node_Internal(); // call constructor
     node_internal[nid].set_nid(nid);          // self by default
   }
+
+  LGraph_Node_Type::emplace_back();
 }
 
 void LGraph_Base::each_input(std::function<void(Index_ID)> f1) const {
@@ -117,6 +124,8 @@ void LGraph_Base::reload() {
   }
 
   recompute_io_ports();
+
+  LGraph_Node_Type::reload();
 }
 
 void LGraph_Base::recompute_io_ports() {
@@ -418,7 +427,7 @@ void LGraph_Base::print_stats() const {
   size_t n_nodes = 1;
   size_t n_extra = 1;
   size_t n_roots = 1;
-  for(int i = 0; i < node_internal.size(); i++) {
+  for(size_t i = 0; i < node_internal.size(); i++) {
     if(node_internal[i].is_node_state()) {
       n_nodes++;
       if(node_internal[i].is_root())
@@ -893,12 +902,4 @@ Edge_iterator LGraph_Base::inp_edges(Index_ID idx) const {
     e = s;
 
   return Edge_iterator(s, e, true);
-}
-
-// Fast does not use type of anything. It can be in base
-Fast_edge_iterator LGraph_Base::fast() const {
-  if(node_internal.empty())
-    return Fast_edge_iterator(0, this);
-
-  return Fast_edge_iterator(1, this);
 }

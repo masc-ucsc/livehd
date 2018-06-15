@@ -4,7 +4,7 @@ cc_library(
     hdrs = ["inou_json.hpp"],
     visibility = ["//visibility:public"],
     deps = [
-        "//core:core"
+        "//meta:meta"
     ],
 )
 
