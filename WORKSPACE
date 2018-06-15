@@ -1,4 +1,5 @@
 
+# third_party/subs
 new_local_repository(
     name = "sparsehash",
     path = "third_party/subs/sparsehash-c11",
@@ -24,11 +25,37 @@ new_local_repository(
     path = "third_party/subs/yosys",
     build_file = "third_party/subs/BUILD.yosys",
 )
-new_local_repository(
+#new_local_repository(
+#    name = "abc",
+#    path = "third_party/subs/abc",
+#    build_file = "third_party/subs/BUILD.abc",
+#)
+
+# third_party/fork
+load("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
+new_git_repository(
     name = "abc",
-    path = "third_party/subs/abc",
-    build_file = "third_party/subs/BUILD.abc",
+    build_file = "BUILD.abc", # relative to external path
+    commit = "15939511df8ff1ce15f2112cee01d7693234f2a4",
+    remote = "https://github.com/berkeley-abc/abc.git",
+    patches = ["patch.abc"],
 )
+
+#load(
+#    "//tools:externals.bzl",
+#    "new_patched_http_archive",
+#)
+#
+#new_patched_http_archive(
+#    name = "abc",
+#    build_file = "//third_party/fork:BUILD.abc",
+#    patch_file = "//third_party/fork:abc.patch",
+#    sha256 = "9164cb6044dcb6e430555721e3318d5a8f38871c2da9fd9256665746a69351e0",
+#    strip_prefix = "libdivsufsort-2.0.1",
+#    type = "tgz",
+#    url = "https://codeload.github.com/y-256/libdivsufsort/tar.gz/2.0.1",
+#)
+
 
 # Python system includes
 new_local_repository(
