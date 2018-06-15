@@ -35,7 +35,7 @@ OBJS="*.o"
 #export PATH=$PATH:/usr/bin
 CMD=$CC" -B/usr/bin -fuse-ld=gold -Wl,-no-as-needed -Wl,-z,relro,-z,now -fPIC -shared -o"$SOLIB" "$OBJS" "$REST
 
-echo $CMD
+#echo $CMD
 #echo $CMD >>$1
 $($CMD)
 exit $?

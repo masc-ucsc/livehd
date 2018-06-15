@@ -20,11 +20,11 @@ new_local_repository(
     path = "third_party/subs/spdlog/include",
     build_file = "third_party/subs/BUILD.spdlog",
 )
-new_local_repository(
-    name = "yosys",
-    path = "third_party/subs/yosys",
-    build_file = "third_party/subs/BUILD.yosys",
-)
+#new_local_repository(
+    #name = "yosys",
+    #path = "third_party/subs/yosys",
+    #build_file = "third_party/subs/BUILD.yosys",
+#)
 #new_local_repository(
 #    name = "abc",
 #    path = "third_party/subs/abc",
@@ -38,7 +38,14 @@ new_git_repository(
     build_file = "BUILD.abc", # relative to external path
     commit = "15939511df8ff1ce15f2112cee01d7693234f2a4",
     remote = "https://github.com/berkeley-abc/abc.git",
-    patches = ["patch.abc"],
+    patches = ["//external:patch.abc"],
+)
+new_git_repository(
+    name = "yosys",
+    build_file = "BUILD.yosys", # relative to external path
+    commit = "57fc8dd58229d309ba56b374223802936444ecd4",
+    remote = "https://github.com/YosysHQ/yosys.git",
+    #strip_prefix = "kernel",
 )
 
 #load(

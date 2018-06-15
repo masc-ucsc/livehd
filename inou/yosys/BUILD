@@ -6,24 +6,10 @@ cc_library(
     defines = ["_YOSYS_","YOSYS_ENABLE_PLUGINS"],
     visibility = ["//visibility:public"],
     deps = [
-        "@yosys//:yosysincludes",
         "//meta:meta",
+        "@yosys//:headers",
     ],
 )
-
-#genrule(
-#    name = "concat",
-#    output_to_bindir = 1,
-#    srcs = [
-#        "dump_yosys.cpp",
-#        ":inou_yosys",
-#        "//core:core",
-#        "@boost//:filesystem", "@boost//:program_options",
-#        "@boost//:system",
-#    ],
-#    outs = ["concatenated.txt"],
-#    cmd = "echo $(CC) $(CC_FLAGS) -fPIC -shared $(BINDIR)/inou/yosys/_objs/inou_yosys/inou/yosys/*.o $(locations //core:core) -Wl,-Bstatic $(locations @boost//:filesystem) $(locations @boost//:program_options) $(locations @boost//:system) -Wl,-Bdynamic -lrt -lpthread > $@",
-#)
 
 load("//tools:linkso.bzl", "linkso")
 
