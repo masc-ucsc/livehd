@@ -7,7 +7,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "@yosys//:yosysincludes",
-        "//core:core",
+        "//meta:meta",
     ],
 )
 
@@ -29,7 +29,7 @@ load("//tools:linkso.bzl", "linkso")
 
 linkso(
     name = "liblgraph_yosys",
-    srcs   = [":inou_yosys", "//core:core"],
+    srcs   = [":inou_yosys", "//core:core","//meta:meta"],
     static = ["@boost//:system" , "@boost//:filesystem", "@boost//:program_options"],
 )
 

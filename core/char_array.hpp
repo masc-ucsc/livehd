@@ -77,7 +77,7 @@ public:
     if (variable_internal.empty()) {
       variable_internal.emplace_back(0); // so that ID zero is not used
     }else{
-      for(int i=1;i<variable_internal.size()-1;) {
+      for(size_t i=1;i<variable_internal.size()-1;) {
         const char *str = (const char *)&variable_internal[i+1];
         str2id[str] = i;
         i += variable_internal[i];
@@ -111,17 +111,17 @@ public:
       return str2id[str];
     }
 
-    int start = variable_internal.size();
+    size_t start = variable_internal.size();
     variable_internal.emplace_back(len/2);
 
-    for(int i = 0; i < len; i += 2) {
+    for(size_t i = 0; i < len; i += 2) {
       uint16_t val = str[i + 1];
       val <<= 8;
       val  |= str[i];
       variable_internal.emplace_back(val);
     }
 
-    assert(start < 0xFFFFFFFF);
+    assert(start < 0xFFFFFFFFUL); // sizeof(Char_Array_ID) < sizeof(size_t);
 
     str2id[str] = start;
     return start;
@@ -134,11 +134,11 @@ public:
   Char_Array_ID create_id(const char *str, Data_Type dt) {
     assert(!pending_clear_reload);
 
-    int slen = strlen(str);
+    size_t slen = strlen(str);
     slen++;      // for zero
     if(slen & 1) // multiple of 2 bytes storage
       slen++;
-    int len = slen;
+    size_t len = slen;
 
     assert(len < 32768); // uint16_t for delta
 
@@ -163,7 +163,7 @@ public:
 
     variable_internal.push_back(len / 2);
 
-    for(int i = 0; i < slen; i += 2) {
+    for(size_t i = 0; i < slen; i += 2) {
       uint16_t val = str[i + 1];
       val <<= 8;
       val  |= str[i];
@@ -178,7 +178,7 @@ public:
     return start;
   }
 
-  const char *get_char(int id) const {
+  const char *get_char(Char_Array_ID id) const {
     assert(!pending_clear_reload);
     assert(id >= 0);
     assert(variable_internal.size() > (id + 1));
@@ -186,7 +186,7 @@ public:
     return (const char *)&variable_internal[id + 1];
   }
 
-  const Data_Type &get_field(int id) const {
+  const Data_Type &get_field(Char_Array_ID id) const {
     assert(!pending_clear_reload);
 
     const char *ptr = get_char(id);

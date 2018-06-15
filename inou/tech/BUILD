@@ -4,6 +4,6 @@ cc_binary(
     srcs = ["import_library.cpp"] + glob(["*.hpp"]),
     linkopts = ['-lpthread'],
     deps = [
-        "//core:core",
+        "//meta:meta",
     ],
 )

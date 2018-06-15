@@ -4,7 +4,7 @@ cc_library(
     hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
     deps = [
-        "//core:core",
+        "//meta:meta",
         "//misc/lef/lef:lef",
         "//misc/def/def:def",
     ],
@@ -16,7 +16,7 @@ cc_binary(
     linkopts = ['-lpthread'],
     deps = [
         ":inou_lefdef",
-        "//core:core", "//inou/json:inou_json",
+        "//inou/json:inou_json",
         "@boost//:filesystem", "@boost//:program_options",
     ],
 )
@@ -27,7 +27,7 @@ cc_binary(
     linkopts = ['-lpthread'],
     deps = [
         ":inou_lefdef",
-        "//core:core", "//inou/json:inou_json",
+        "//inou/json:inou_json",
     ],
 )
 
@@ -37,6 +37,6 @@ cc_binary(
     linkopts = ['-lpthread'],
     deps = [
         ":inou_lefdef",
-        "//core:core", "//inou/json:inou_json",
+        "//inou/json:inou_json",
     ],
 )

@@ -127,10 +127,6 @@ public:
 };
 
 class __attribute__((packed)) Edge { // 2 bytes total
-
-  //FIXME: can we disallow the copy constructor? They break the address
-  //dependent operations
-
 protected:
   uint64_t snode : 1;
   uint64_t input : 1; // Same position for SEdge and LEdge

@@ -14,14 +14,12 @@
 class LGraph;
 
 class Graph_library {
-
 protected:
   const std::string          path;
   const std::string          library_file;
   std::vector<std::string>   id2name;
   std::map<std::string, int> name2id;
   bool                       graph_library_clean;
-
 
   Graph_library() {
   }
@@ -93,7 +91,7 @@ public:
     return id;
   }
 
-  std::string get_name(int id) const {
+  const std::string &get_name(int id) const {
     return id2name[id];
   }
 

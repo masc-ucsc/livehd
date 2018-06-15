@@ -11,6 +11,8 @@
 #include "lgraphbase.hpp"
 #include "options.hpp"
 
+#include "py_options.hpp"
+
 #ifdef __cplusplus
 extern "C" {
 #endif

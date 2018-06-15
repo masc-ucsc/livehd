@@ -6,7 +6,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//misc/lef/lef:lef",
-        "//core:core"
+        "//meta:meta"
     ],
 )
 
@@ -16,7 +16,7 @@ cc_binary(
     linkopts = ['-lpthread'],
     deps = [
         ":inou_lef",
-        "//core:core", "//inou/json:inou_json",
+        "//inou/json:inou_json",
         "@boost//:filesystem", "@boost//:program_options",
     ],
 )

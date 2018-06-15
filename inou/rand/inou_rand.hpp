@@ -5,6 +5,7 @@
 #include <string>
 
 #include "inou.hpp"
+#include "py_options.hpp"
 
 class Inou_rand_options : public Py_options {
 public:

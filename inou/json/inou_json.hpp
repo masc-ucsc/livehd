@@ -5,8 +5,8 @@
 #ifndef LGRAPH_MY_TEST_H
 #define LGRAPH_MY_TEST_H
 
-#include "core/inou.hpp"
-#include "core/options.hpp"
+#include "inou.hpp"
+#include "options.hpp"
 #include "rapidjson/document.h"
 
 #include <string>

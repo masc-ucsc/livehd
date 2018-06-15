@@ -7,25 +7,22 @@
 #include <vector>
 #include <map>
 
-#include "dense.hpp"
 #include "lglog.hpp"
 
+#include "lgraph_base_core.hpp"
 #include "char_array.hpp"
-#include "lgedge.hpp"
 
-class Fast_edge_iterator;
-class Forward_edge_iterator;
-class Backward_edge_iterator;
+#include "nodetype.hpp"
+
 class Edge_iterator;
 
-class LGraph_Base {
+class LGraph_Base : public LGraph_Node_Type {
 protected:
+
   // std::vector<Node_Internal, AAlloc::AlignedAllocator<Node_Internal,4096> > node_internal;
   std::string name;
   std::string path;
   bool        locked;
-
-  Dense<Node_Internal> node_internal;
 
   Char_Array<Index_ID> input_array;
   Char_Array<Index_ID> output_array;
@@ -54,19 +51,6 @@ protected:
 
   Index_ID add_edge_int(Index_ID dst_nid, Port_ID out_pid, Index_ID src_nid, Port_ID inp_pid);
 
-  Index_ID fast_next(Index_ID nid) const {
-    while(true) {
-      nid++;
-      if(nid >= static_cast<Index_ID>(node_internal.size()))
-        return 0;
-      if(node_internal[nid].is_master_root())
-        return nid;
-      assert(!node_internal[nid].is_master_root());
-    }
-
-    return 0;
-  }
-
   void recompute_io_ports();
 
   Index_ID add_graph_input(const char *str, Index_ID nid = 0, uint16_t bits = 0);
@@ -76,12 +60,12 @@ protected:
 
   Index_ID find_idx_from_pid_int(Index_ID nid, Port_ID pid) const;
 
-  friend Fast_edge_iterator;
   friend Forward_edge_iterator;
   friend Backward_edge_iterator;
 
 public:
   LGraph_Base() = delete;
+
   explicit LGraph_Base(const std::string &path, const std::string &_name) noexcept ;
   virtual ~LGraph_Base(){};
 
@@ -169,8 +153,6 @@ public:
 
   Edge_iterator inp_edges(Index_ID nid) const;
   Edge_iterator out_edges(Index_ID nid) const;
-
-  Fast_edge_iterator fast() const;
 
   void print_stats() const;
 
