@@ -1,10 +1,6 @@
 
 Useful commands:
 
-## To download the dependent packages and apply patches (abc)
-
-    bazel fetch ...
-
 ## List bazel targets starting from top directory
 
     bazel query '...'
@@ -48,6 +44,14 @@ argument the test. Sample session:
     >r bazel-bin/pyth/test_core1
     >b LGraph_Base::LGraph_Base
     >r
+
+## To download the dependent packages and apply patches (abc)
+
+No need to run this, as the bazel build will do it.
+
+    bazel fetch ...
+
+The downloaded code would be at bazel-lgraph/external/abc/
 
 ## To create Python self contained par file
 
