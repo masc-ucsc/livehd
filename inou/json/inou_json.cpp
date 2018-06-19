@@ -2,10 +2,12 @@
 // Created by birdeclipse on 12/18/17.
 //
 
+#include <fstream>
+
 #include "inou_json.hpp"
 
-#include "core/lgedgeiter.hpp"
-#include "core/lgraphbase.hpp"
+#include "lgedgeiter.hpp"
+#include "lgraphbase.hpp"
 
 #include "rapidjson/document.h"
 #include "rapidjson/error/en.h"

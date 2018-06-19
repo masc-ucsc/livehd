@@ -1,24 +1,25 @@
 //
 // Created by birdeclipse on 1/30/18.
 //
-#include "cstring"
+#ifndef LGRAPH_INOU_ABC_HPP
+#define LGRAPH_INOU_ABC_HPP
+
+#include <string>
+
 #include "inou.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraphbase.hpp"
 #include "options.hpp"
-#include "tech_library.hpp"
-#include <string>
 
-#ifndef LGRAPH_INOU_ABC_HPP
-#define LGRAPH_INOU_ABC_HPP
+#include "py_options.hpp"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-#include <base/abc/abc.h>
-#include <base/main/abcapis.h>
-#include <base/main/main.h>
-#include <map/mio/mio.h>
+#include "base/abc/abc.h"
+#include "base/main/abcapis.h"
+#include "base/main/main.h"
+#include "map/mio/mio.h"
 #ifdef __cplusplus
 }
 #endif
@@ -117,7 +118,72 @@ public:
     }
   };
 
+  struct graph_topology {
+
+	using topology_info = std::vector<index_offset>;
+	using name2id       = std::unordered_map<std::string, Index_ID>;
+	using po_group      = std::map<index_offset, Abc_primary_output>;
+	using pi_group      = std::map<index_offset, Abc_primary_input>;
+	using cell_group    = std::unordered_map<Index_ID, Abc_comb, IndexID_Hash>;
+	using latch_group   = std::unordered_map<Index_ID, Abc_latch, IndexID_Hash>;
+	using skew_group    = std::map<std::string, std::set<Index_ID>>;
+	using reset_group   = std::map<std::string, std::set<Index_ID>>;
+	using node_conn     = std::unordered_map<Index_ID, topology_info, IndexID_Hash>;
+	using block_conn    = std::unordered_map<Index_ID, std::unordered_map<Port_ID, topology_info>, IndexID_Hash>;
+	using pseduo_name   = std::map<index_offset, std::string>;
+	using idremap       = std::unordered_map<Index_ID, Index_ID>;
+	using pidremap      = std::unordered_map<Index_ID, std::unordered_map<Port_ID, Index_ID>>;
+	using ptr2id        = std::unordered_map<Abc_Obj_t *, Index_ID>;
+	using id2pid        = std::unordered_map<Index_ID, Port_ID, IndexID_Hash>;
+	using value_size    = std::pair<uint32_t, uint32_t>;
+	using value2idx     = std::map<value_size, Index_ID>;
+	using picks2pin     = std::map<Pick_ID, Node_Pin>;
+	using record        = std::unordered_map<std::string, Abc_Obj_t *>;
+
+	std::vector<Index_ID> combinational_id;
+	std::vector<Index_ID> latch_id;
+	std::vector<Index_ID> graphio_input_id;
+	std::vector<Index_ID> graphio_output_id;
+	std::vector<Index_ID> subgraph_id;
+	std::vector<Index_ID> memory_id;
+
+	po_group    primary_output;
+	pi_group    primary_input;
+	cell_group  combinational_cell;
+	name2id     latchname2id;
+	latch_group sequential_cell;
+
+	skew_group  skew_group_map;
+	name2id     clock_id;
+	reset_group reset_group_map;
+	name2id     reset_id;
+
+	node_conn   comb_conn;
+	node_conn   latch_conn;
+	node_conn   primary_output_conn;
+	block_conn  subgraph_conn;
+	block_conn  memory_conn;
+	pseduo_name subgraph_generated_output_wire;
+	pseduo_name subgraph_generated_input_wire;
+	pseduo_name memory_generated_output_wire;
+	pseduo_name memory_generated_input_wire;
+	record      pseduo_record;
+
+	name2id   ck_remap;
+	name2id   rst_remap;
+	name2id   io_remap;
+	idremap   subgraph_remap;
+	idremap   memory_remap;
+	ptr2id    cell2id;
+	id2pid    cell_out_pid;
+	value2idx int_const_map;
+	picks2pin picks;
+  };
+
   Inou_abc();
+
+  // Python interface
+  Inou_abc(const py::dict &dict);
 
   virtual ~Inou_abc();
 
@@ -129,66 +195,11 @@ public:
 
   void dump_blif(const LGraph *g, const std::string filename);
 
+  std::vector<LGraph *> py_generate() { return generate(); };
+  void py_set(const py::dict &dict) { }
+
 private:
-  /*store the idx by their type, dont iterate again and again*/
-  std::vector<Index_ID> combinational_id;
-  std::vector<Index_ID> latch_id;
-  std::vector<Index_ID> graphio_input_id;
-  std::vector<Index_ID> graphio_output_id;
-  std::vector<Index_ID> subgraph_id;
-  std::vector<Index_ID> memory_id;
-
-  using topology_info = std::vector<index_offset>;
-  using name2id       = std::unordered_map<std::string, Index_ID>;
-  using po_group      = std::map<index_offset, Abc_primary_output>;
-  using pi_group      = std::map<index_offset, Abc_primary_input>;
-  using cell_group    = std::unordered_map<Index_ID, Abc_comb, IndexID_Hash>;
-  using latch_group   = std::unordered_map<Index_ID, Abc_latch, IndexID_Hash>;
-  using skew_group    = std::map<std::string, std::set<Index_ID>>;
-  using reset_group   = std::map<std::string, std::set<Index_ID>>;
-  using node_conn     = std::unordered_map<Index_ID, topology_info, IndexID_Hash>;
-  using block_conn    = std::unordered_map<Index_ID, std::unordered_map<Port_ID, topology_info>, IndexID_Hash>;
-  using pseduo_name   = std::map<index_offset, std::string>;
-  using idremap       = std::unordered_map<Index_ID, Index_ID>;
-  using pidremap      = std::unordered_map<Index_ID, std::unordered_map<Port_ID, Index_ID>>;
-  using ptr2id        = std::unordered_map<Abc_Obj_t *, Index_ID>;
-  using id2pid        = std::unordered_map<Index_ID, Port_ID, IndexID_Hash>;
-  using value_size    = std::pair<uint32_t, uint32_t>;
-  using value2idx     = std::map<value_size, Index_ID>;
-  using picks2pin     = std::map<Pick_ID, Node_Pin>;
-  using record        = std::unordered_map<std::string, Abc_Obj_t *>;
-
-  po_group    primary_output;
-  pi_group    primary_input;
-  cell_group  combinational_cell;
-  name2id     latchname2id;
-  latch_group sequential_cell;
-
-  skew_group  skew_group_map;
-  name2id     clock_id;
-  reset_group reset_group_map;
-  name2id     reset_id;
-
-  node_conn   comb_conn;
-  node_conn   latch_conn;
-  node_conn   primary_output_conn;
-  block_conn  subgraph_conn;
-  block_conn  memory_conn;
-  pseduo_name subgraph_generated_output_wire;
-  pseduo_name subgraph_generated_input_wire;
-  pseduo_name memory_generated_output_wire;
-  pseduo_name memory_generated_input_wire;
-  record      pseduo_record;
-
-  name2id   ck_remap;
-  name2id   rst_remap;
-  name2id   io_remap;
-  idremap   subgraph_remap;
-  idremap   memory_remap;
-  ptr2id    cell2id;
-  id2pid    cell_out_pid;
-  value2idx int_const_map;
-  picks2pin picks;
+  graph_topology *graph_info;
 
   bool is_techmap(const LGraph *g);
 
@@ -200,6 +211,11 @@ private:
       return true;
     } else
       return cell_name.find(latch) != std::string::npos;
+  }
+
+  void clear() {
+	delete graph_info;
+	graph_info = new graph_topology;
   }
 
   void find_cell_conn(const LGraph *g);
@@ -214,7 +230,7 @@ private:
 
   void find_memory_conn(const LGraph *g);
 
-  void recursive_find(const LGraph *g, const Edge *input, topology_info &pid, int *bit_addr);
+  void recursive_find(const LGraph *g, const Edge *input, graph_topology::topology_info &pid, int *bit_addr);
 
   Abc_Obj_t *gen_const_from_lgraph(const LGraph *g, index_offset key, Abc_Ntk_t *pAig);
 

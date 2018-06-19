@@ -1,17 +1,12 @@
 cc_library(
     name = "inou_rand",
     srcs = ["inou_rand.cpp"],
-    hdrs = ["inou_rand.hpp"],
+    hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
+    includes = ["."],
     deps = [
-        "//core:core"
+        "//meta:meta",
+        "//pyth:py_base",
     ],
 )
 
-cc_binary(
-    name = "lgrand",
-    srcs = ["lgrand.cpp"],
-    deps = [
-        ":inou_rand", "//core:core", "//inou/json:inou_json"
-    ],
-)

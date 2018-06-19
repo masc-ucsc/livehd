@@ -465,201 +465,15 @@ bool Inou_pyrope::to_pick(Out_string &w, const LGraph *g, Index_ID idx) const {
   return true;
 }
 
-bool Inou_pyrope::to_subgraph(Out_string &w, Out_string &out, const LGraph *g, Index_ID idx) const {
-
-  std::vector<LGraph *> lgs;
-
-  std::string subgraph_name = g->get_library()->get_name(g->subgraph_id_get(idx));
-
-  lgs.push_back(new LGraph(opack.lgdb_path, subgraph_name, false));
-
-  std::vector<const char *> output_vars;
-
-  for(const auto &sg : lgs) {
-    std::string prp_file;
-
-    size_t pos = sg->get_name().find("lgraph_");
-    if(pos != std::string::npos)
-      prp_file = sg->get_name().substr(pos + 7);
-    else
-      prp_file = sg->get_name();
-
-    w << subgraph_name << " :(";
-
-    for(const auto &c : sg->inp_edges(idx)) {
-      to_normal_var(w, sg, c.get_idx());
-    }
-
-    w << "):{\n";
-
-    for(auto &edge : sg->out_edges(idx)) {
-      //out << sg->get_graph_output_name_from_pid(edge.get_out_pin().get_pid());
-      //to_normal_var(w,sg,edge.get_idx());
-      w << sg->get_graph_output_name(edge.get_idx());
-    }
-
-    for(auto idx : sg->forward()) {
-
-      assert(sg->is_root(idx));
-
-      const auto op = sg->node_type_get(idx);
-      Out_string s;
-
-      bool dest;
-      switch(op.op) {
-      case GraphIO_Op:
-        dest = to_graphio(s, sg, idx);
-        if(g->is_graph_output(idx)) {
-          output_vars.push_back(sg->get_graph_output_name(idx));
-        }
-        break;
-      case And_Op:
-        dest = to_logical2(s, sg, idx, "&", "and");
-        break;
-      case Or_Op:
-        dest = to_logical2(s, sg, idx, "|", "or");
-        break;
-      case Xor_Op:
-        dest = to_logical2(s, sg, idx, "^", "xor");
-        break;
-      case LessThan_Op:
-        dest = to_logical2(s, sg, idx, "<", "<");
-        break;
-      case GreaterThan_Op:
-        dest = to_logical2(s, sg, idx, ">", ">");
-        break;
-      case Not_Op:
-        dest = to_logical1(s, sg, idx, "~", "not");
-        break;
-      case ShiftLeft_Op:
-        dest = to_shift(s, sg, idx, "<<");
-        break;
-      case ShiftRight_Op:
-        dest = to_shift(s, sg, idx, ">>");
-        break;
-      case Mux_Op:
-        dest = to_mux(s, sg, idx);
-        break;
-      case Sum_Op:
-        dest = to_sum(s, sg, idx);
-        break;
-      case Join_Op:
-        dest = to_join(s, sg, idx);
-        break;
-      case Flop_Op:
-        dest = to_flop(s, sg, idx);
-        break;
-        // case SubGraph_Op    : dest = to_subgraph(s,g,idx); break;
-      case U32Const_Op:
-        dest = to_const(s, sg, idx);
-        break;
-      case Equals_Op:
-        dest = to_equals(s, sg, idx);
-        break;
-      case Pick_Op:
-        dest = to_pick(s, sg, idx);
-        break;
-      default:
-        dest = false;
-        s << "# FIXME idx" << idx
-          << " " << op.get_name()
-          << " op:" << op.op;
-      }
-
-      if(true) {
-        if(dest)
-          to_dst_var(w, sg, idx);
-        w << s.str();
-        w << "\n";
-      } else {
-        // inline_stmt[idx] = s.str();
-      }
-    }
-  }
-  w << "}\n";
-
-  const auto instancename = g->get_node_instancename(idx);
-
-  out << " " << instancename << " = " << subgraph_name;
-
-  for(const auto &c : g->inp_edges(idx)) {
-    to_normal_var(out, g, c.get_idx());
-  }
-  /*
-  for (auto &edge:g->out_edges(idx)) {
-    out << g->get_graph_output_name_from_pid(edge.get_out_pin().get_pid());
-  }
-  for (auto &edge:g->inp_edges(idx)) {
-    out << g->get_graph_input_name_from_pid(edge.get_inp_pin().get_pid());
-  }*/
-  /*
-std::set<Port_ID> visited_out_pids;
-
-      for(auto &edge : g->out_edges(idx)) {
-        //only once per pid
-        if(visited_out_pids.find(edge.get_out_pin().get_pid()) != visited_out_pids.end())
-          continue;
-
-        visited_out_pids.insert(edge.get_out_pin().get_pid());
-        const char* out_name = subgraph->get_graph_output_name_from_pid(edge.get_out_pin().get_pid());
-        uint16_t    out_size = subgraph->get_bits(subgraph->get_graph_output(out_name).get_nid());
-*/
-
-  std::vector<const char *>::iterator i;
-  i = output_vars.begin();
-  for(const auto &c : g->out_edges(idx)) {
-    out << '\n';
-
-    to_dst_var(out, g, c.get_idx());
-
-    // FIXME? g->get_graph_output_name(idx) instead of using output_vars
-    out << instancename << '.' << *i;
-
-    i++;
-  }
-
-  return false;
-}
-
-void Inou_pyrope::to_pyrope(const LGraph *g, const std::string filename) {
-
-  std::string prp_file;
-
-  size_t pos = g->get_name().find("lgraph_");
-  if(pos != std::string::npos)
-    prp_file = g->get_name().substr(pos + 7);
-  else
-    prp_file = g->get_name();
-
-  Out_string w, sub;
-  w << "# " << prp_file << ".prp file from " << g->get_name() << "\n";
-
-  inline_stmt.clear();
-
-  // FIXME:
-  //
-  // Algorithm:
-  //
-  // 1-fast iterate, put all the input/output/register types "as ..."
-  //
-  // 2-Put all the logic (no flops, or outputs, or logic that uses reset/clk)
-  //
-  // 3-Connect the outputs and flops with tmps. If reset was there, connect correctly (no mux)
-  //
-
-  // to get subgraph names use pin ids and this is shown in dump_yosys.cpp!
-  // fix pick ops!
-  for(auto idx : g->forward()) {
-
-    assert(g->is_root(idx));
-
-    const auto op = g->node_type_get(idx);
-    Out_string s;
-
-    bool dest;
-    switch(op.op) {
+bool Inou_pyrope::to_op(Out_string &s, Out_string &sub, const LGraph *g, Index_ID idx, bool is_subgraph, std::vector<const char *> output_vars) const {
+  const auto op = g->node_type_get(idx);
+  bool dest;
+  switch(op.op) {
     case GraphIO_Op:
       dest = to_graphio(s, g, idx);
+      if(g->is_graph_output(idx) && is_subgraph) {
+        output_vars.push_back(g->get_graph_output_name(idx));
+      }
       break;
     case And_Op:
       dest = to_logical2(s, g, idx, "&", "and");
@@ -709,7 +523,6 @@ void Inou_pyrope::to_pyrope(const LGraph *g, const std::string filename) {
     case Pick_Op:
       dest = to_pick(s, g, idx);
       break;
-
     default:
       dest = false;
       s << "# FIXME idx" << idx
@@ -717,14 +530,139 @@ void Inou_pyrope::to_pyrope(const LGraph *g, const std::string filename) {
         << " op:" << op.op;
     }
 
-    if(true) {
+  return dest;
+}
+
+bool Inou_pyrope::to_subgraph(Out_string &w, Out_string &out, const LGraph *g, Index_ID idx) const {
+
+  std::vector<LGraph *> lgs;
+
+  const std::string subgraph_name = g->get_library()->get_name(g->subgraph_id_get(idx));
+
+  lgs.push_back(new LGraph(opack.lgdb_path, subgraph_name, false));
+
+  std::vector<const char *> output_vars;
+
+  for(const auto &sg : lgs) {
+    std::string prp_file;
+
+    size_t pos = sg->get_name().find("lgraph_");
+    if(pos != std::string::npos)
+      prp_file = sg->get_name().substr(pos + 7);
+    else
+      prp_file = sg->get_name();
+
+    w << subgraph_name << " :(";
+
+    for(const auto &c : sg->inp_edges(idx)) {
+      to_normal_var(w, sg, c.get_idx());
+    }
+
+    w << "):{\n";
+
+    for(auto &edge : sg->out_edges(idx)) {
+      w << sg->get_graph_output_name(edge.get_idx());
+    }
+
+    for(auto idx : sg->forward()) {
+      assert(sg->is_root(idx));
+      Out_string s;
+
+      bool dest = to_op(s, s,  sg, idx, true, output_vars);
+
       if(dest)
-        to_dst_var(w, g, idx);
+        to_dst_var(w, sg, idx);
       w << s.str();
       w << "\n";
-    } else {
-      inline_stmt[idx] = s.str();
     }
+  }
+  w << "}\n";
+
+  const auto instancename = g->get_node_instancename(idx);
+
+  out << " " << instancename << " = " << subgraph_name;
+
+  for(const auto &c : g->inp_edges(idx)) {
+    to_normal_var(out, g, c.get_idx());
+  }
+  /*
+  for (auto &edge:g->out_edges(idx)) {
+    out << g->get_graph_output_name_from_pid(edge.get_out_pin().get_pid());
+  }
+  for (auto &edge:g->inp_edges(idx)) {
+    out << g->get_graph_input_name_from_pid(edge.get_inp_pin().get_pid());
+  }*/
+  /*
+std::set<Port_ID> visited_out_pids;
+
+      for(auto &edge : g->out_edges(idx)) {
+        //only once per pid
+        if(visited_out_pids.find(edge.get_out_pin().get_pid()) != visited_out_pids.end())
+          continue;
+
+        visited_out_pids.insert(edge.get_out_pin().get_pid());
+        const char* out_name = subgraph->get_graph_output_name_from_pid(edge.get_out_pin().get_pid());
+        uint16_t    out_size = subgraph->get_bits(subgraph->get_graph_output(out_name).get_nid());
+*/
+
+  // find better way of getting output vars than this method below
+  std::vector<const char *>::iterator i;
+  i = output_vars.begin();
+  for(const auto &c : g->out_edges(idx)) {
+    out << '\n';
+
+    to_dst_var(out, g, c.get_idx());
+
+    // FIXME? g->get_graph_output_name(idx) instead of using output_vars
+    out << instancename << '.' << *i;
+
+    i++;
+  }
+
+  return false;
+}
+
+void Inou_pyrope::to_pyrope(const LGraph *g, const std::string filename) {
+
+  std::string prp_file;
+
+  size_t pos = g->get_name().find("lgraph_");
+  if(pos != std::string::npos)
+    prp_file = g->get_name().substr(pos + 7);
+  else
+    prp_file = g->get_name();
+
+  Out_string w, sub;
+  w << "# " << prp_file << ".prp file from " << g->get_name() << "\n";
+
+  inline_stmt.clear();
+
+  // FIXME:
+  //
+  // Algorithm:
+  //
+  // 1-fast iterate, put all the input/output/register types "as ..."
+  //
+  // 2-Put all the logic (no flops, or outputs, or logic that uses reset/clk)
+  //
+  // 3-Connect the outputs and flops with tmps. If reset was there, connect correctly (no mux)
+  //
+
+  // to get subgraph names use pin ids and this is shown in dump_yosys.cpp!
+  // fix pick ops!
+  std::vector<const char *> output_vars; //remove this later
+  for(auto idx : g->forward()) {
+
+    assert(g->is_root(idx));
+
+    Out_string s;
+
+    bool dest = to_op(s, sub, g, idx, false, output_vars);
+
+    if(dest)
+      to_dst_var(w, g, idx);
+    w << s.str();
+    w << "\n";
   }
 
   if(filename == "-" || filename == "") {

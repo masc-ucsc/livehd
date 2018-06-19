@@ -5,12 +5,11 @@
 #ifndef LGRAPH_MY_TEST_H
 #define LGRAPH_MY_TEST_H
 
-#include "inou.hpp"
-#include "options.hpp"
 #include <string>
 #include <vector>
 
-#include "cfg_node_data.hpp"
+#include "inou.hpp"
+#include "options.hpp"
 
 class Inou_cfg_options_pack : public Options_pack {
 public:

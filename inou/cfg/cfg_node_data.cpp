@@ -1,4 +1,9 @@
+#include <sstream>
+
 #include "inou_cfg.hpp"
+
+#include "cfg_node_data.hpp"
+
 using std::string;
 
 CFG_Node_Data::CFG_Node_Data(const LGraph *g, Index_ID node) {

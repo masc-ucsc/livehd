@@ -9,6 +9,10 @@ Useful commands:
 
     bazel query 'inou/...'
 
+## List files needed for a given target
+
+   bazel query "deps(//inou/lefdef:lglefdef)" 
+
 ## Release vs fastbuild (default) vs debug
 
     # Debug
@@ -22,11 +26,47 @@ Useful commands:
 
     bazel build -s //core
 
+## To run all the tests in the system
+
+    bazel test //...
+
+## Debugging with bazel
+
+First run the tests to see the failing one. Then run with debug options
+the failing test. E.g:
+
+    bazel run -c dbg //pyth:test_core1
+
+If the test has python, you must call the gdb with python and then pass as
+argument the test. Sample session:
+
+    gdb `which pythong`
+    >r bazel-bin/pyth/test_core1
+    >b LGraph_Base::LGraph_Base
+    >r
+
+## To download the dependent packages and apply patches (abc)
+
+No need to run this, as the bazel build will do it.
+
+    bazel fetch ...
+
+The downloaded code would be at bazel-lgraph/external/abc/
+
+## To create Python self contained par file
+
+    bazel build //pyth:lgraph.par
+
+Now, you can copy the bazel-bin/pyth/lgraph.par to any machine and it has all the python and libraries needed to run
+
 ## To create a fully static binary (for pip deployment?)
 
- In the cc_binary, add linkopts = ['-static']
+In the cc_binary, add linkopts = ['-static']
 
 ## To remove all the bazel (it should not be needed, but in case)
+
+This command is useful for benchmarking build time, and in rare cases that
+building in one machine breaks, and starts in another and it freezes.
 
     bazel clean --expunge
 

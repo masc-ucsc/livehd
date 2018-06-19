@@ -11,22 +11,30 @@
 
 #include <set>
 
-#include "lgraph.hpp"
+//#include "lgraph.hpp"
 #include "lgraphbase.hpp"
 
 class Edge_iterator {
 public:
   class CPod_iterator {
   public:
-    CPod_iterator(const Edge *_ptr, const Edge *_e, bool _inputs) : ptr(_ptr), e(_e), inputs(_inputs) {}
+    CPod_iterator(const Edge *_ptr, const Edge *_e, bool _inputs)
+        : ptr(_ptr)
+        , e(_e)
+        , inputs(_inputs) {
+    }
     CPod_iterator operator++();
     CPod_iterator operator--() {
       CPod_iterator i(ptr, e, inputs);
       ptr -= ptr->next_node_inc();
       return i;
     }
-    bool        operator!=(const CPod_iterator &other) { return ptr != other.ptr; }
-    const Edge &operator*() const { return *ptr; }
+    bool operator!=(const CPod_iterator &other) {
+      return ptr != other.ptr;
+    }
+    const Edge &operator*() const {
+      return *ptr;
+    }
 
   private:
     const Edge *ptr;
@@ -48,15 +56,22 @@ public:
     e = _e;
   }
 
-  CPod_iterator begin() const { return CPod_iterator(b, e, inputs); }
-  CPod_iterator end() const { return CPod_iterator(e, e, inputs); }
+  CPod_iterator begin() const {
+    return CPod_iterator(b, e, inputs);
+  }
+  CPod_iterator end() const {
+    return CPod_iterator(e, e, inputs);
+  }
 };
 
 class Fast_edge_iterator {
 public:
   class CFast_edge_iterator {
   public:
-    CFast_edge_iterator(const Index_ID _nid, const LGraph_Base *_g) : nid(_nid), g(_g) {}
+    CFast_edge_iterator(const Index_ID _nid, const Lgraph_base_core *_g)
+        : nid(_nid)
+        , g(_g) {
+    }
     CFast_edge_iterator operator++() {
       CFast_edge_iterator i(nid, g);
 
@@ -68,26 +83,33 @@ public:
       assert(g == other.g);
       return nid != other.nid;
     }
-    const Index_ID &operator*() const { return nid; }
+    const Index_ID &operator*() const {
+      return nid;
+    }
 
   private:
-    Index_ID           nid;
-    const LGraph_Base *g;
+    Index_ID                nid;
+    const Lgraph_base_core *g;
   };
 
 private:
 protected:
-  const LGraph_Base *g;
-  const Index_ID     b;
+  const Lgraph_base_core *g;
+  const Index_ID          b;
 
 public:
   Fast_edge_iterator() = delete;
-  explicit Fast_edge_iterator(const Index_ID _b, const LGraph_Base *_g)
-      : g(_g), b(_b) {
+  explicit Fast_edge_iterator(const Index_ID _b, const Lgraph_base_core *_g)
+      : g(_g)
+      , b(_b) {
   }
 
-  CFast_edge_iterator begin() const { return CFast_edge_iterator(b, g); }
-  CFast_edge_iterator end() const { return CFast_edge_iterator(0, g); } // 0 is end index for iterator
+  CFast_edge_iterator begin() const {
+    return CFast_edge_iterator(b, g);
+  }
+  CFast_edge_iterator end() const {
+    return CFast_edge_iterator(0, g);
+  } // 0 is end index for iterator
 };
 
 typedef google::dense_hash_map<Index_ID, int32_t> Frontier_type;
@@ -96,18 +118,23 @@ typedef google::sparse_hash_set<Index_ID>         Deadcode_type;
 
 class Edge_iterator_base {
 protected:
-  Index_ID       nid;
-  const LGraph * g;
-  Frontier_type *frontier; // 2G inputs at most
-  Pending_type * pending;  // vertex that cleared the frontier
+  Index_ID           nid;
+  const LGraph_Base *g;
+  Frontier_type *    frontier; // 2G inputs at most
+  Pending_type *     pending;  // vertex that cleared the frontier
 
 public:
-  Edge_iterator_base(const Index_ID _nid, const LGraph *_g, Frontier_type *_frontier, Pending_type *_pending)
-      : nid(_nid), g(_g), frontier(_frontier), pending(_pending) {
+  Edge_iterator_base(const Index_ID _nid, const LGraph_Base *_g, Frontier_type *_frontier, Pending_type *_pending)
+      : nid(_nid)
+      , g(_g)
+      , frontier(_frontier)
+      , pending(_pending) {
   }
 
   virtual void    add_node(Index_ID nid) = 0;
-  const Index_ID &operator*() const { return nid; }
+  const Index_ID &operator*() const {
+    return nid;
+  }
 
   bool check_frontier() {
     bool pushed = false;
@@ -157,7 +184,7 @@ class Forward_edge_iterator {
 public:
   class CForward_edge_iterator : public Edge_iterator_base {
   public:
-    CForward_edge_iterator(const Index_ID _nid, const LGraph *_g, Frontier_type *_frontier, Pending_type *_pending)
+    CForward_edge_iterator(const Index_ID _nid, const LGraph_Base *_g, Frontier_type *_frontier, Pending_type *_pending)
         : Edge_iterator_base(_nid, _g, _frontier, _pending) {
     }
 
@@ -209,18 +236,18 @@ public:
 
 private:
 protected:
-  const LGraph *g;
-  Frontier_type frontier; // 2G inputs at most
-  Pending_type  pending;  // vertex that cleared the frontier
+  const LGraph_Base *g;
+  Frontier_type      frontier; // 2G inputs at most
+  Pending_type       pending;  // vertex that cleared the frontier
 
 public:
   Forward_edge_iterator() = delete;
-  explicit Forward_edge_iterator(const LGraph *_g)
+  explicit Forward_edge_iterator(const LGraph_Base *_g)
       : g(_g) {
     frontier.set_empty_key(0);     // 0 is not allowed as key
     frontier.set_deleted_key(128); // 128 is not allowed as key (4KB aligned)
-    //frontier.resize(32+g->size()/16);
-    //pending.reserve(32+g->size()/128);
+    // frontier.resize(32+g->size()/16);
+    // pending.reserve(32+g->size()/128);
   }
 
   CForward_edge_iterator begin() {
@@ -235,10 +262,10 @@ public:
         pending.push_back(it.second.nid);
     }
 
-    //for forward iteration we want to start from constants as well
-    const LGraph *lgr       = dynamic_cast<const LGraph *>(g);
-    const auto &  constants = lgr->get_const_node_ids();
-    Index_ID      cid       = constants.get_first();
+    // for forward iteration we want to start from constants as well
+    const LGraph_Base *lgr       = dynamic_cast<const LGraph_Base *>(g);
+    const auto &       constants = lgr->get_const_node_ids();
+    Index_ID           cid       = constants.get_first();
     while(cid) {
       assert(cid);
       pending.push_back(cid);
@@ -255,7 +282,9 @@ public:
 
     return it;
   }
-  CForward_edge_iterator end() { return CForward_edge_iterator(0, g, &frontier, &pending); } // 0 is end index for iterator
+  CForward_edge_iterator end() {
+    return CForward_edge_iterator(0, g, &frontier, &pending);
+  } // 0 is end index for iterator
 };
 
 class Backward_edge_iterator {
@@ -263,8 +292,9 @@ public:
   class CBackward_edge_iterator : public Edge_iterator_base {
   private:
     Deadcode_type global_visited;
+
   public:
-    CBackward_edge_iterator(const Index_ID _nid, const LGraph *_g, Frontier_type *_frontier, Pending_type *_pending)
+    CBackward_edge_iterator(const Index_ID _nid, const LGraph_Base *_g, Frontier_type *_frontier, Pending_type *_pending)
         : Edge_iterator_base(_nid, _g, _frontier, _pending) {
     }
 
@@ -276,17 +306,16 @@ public:
       return nid != 0;
     };
 
-
-    //find nodes not connected to output that are preventing the propagation
-    //only use in case the backward fails
+    // find nodes not connected to output that are preventing the propagation
+    // only use in case the backward fails
     void find_dce_nodes() {
-      Pending_type  discovered;
+      Pending_type       discovered;
       std::set<Index_ID> dc_visited;
       std::set<Index_ID> floating;
-      //floating.set_empty_key(0);     // 0 is not allowed as key
-      //floating.set_deleted_key(0); // 128 is not allowed as key (4KB aligned)
+      // floating.set_empty_key(0);     // 0 is not allowed as key
+      // floating.set_deleted_key(0); // 128 is not allowed as key (4KB aligned)
 
-      for(const auto& _idx : *frontier) {
+      for(const auto &_idx : *frontier) {
         Index_ID idx = _idx.first;
         floating.insert(idx);
         discovered.push_back(idx);
@@ -294,11 +323,11 @@ public:
           Index_ID current = discovered.back();
           discovered.pop_back();
           dc_visited.insert(current);
-          for(const auto& c : g->out_edges(current)) {
+          for(const auto &c : g->out_edges(current)) {
             floating.erase(current);
 
             if(dc_visited.find(c.get_inp_pin().get_nid()) == dc_visited.end() &&
-                global_visited.find(c.get_inp_pin().get_nid()) == global_visited.end()) {
+               global_visited.find(c.get_inp_pin().get_nid()) == global_visited.end()) {
               discovered.push_back(c.get_inp_pin().get_nid());
               floating.insert(c.get_inp_pin().get_nid());
             }
@@ -308,7 +337,7 @@ public:
 
       if(floating.size() > 0) {
         console->warn("graph {} is not DCE free, please run DCE pass\n", g->get_name());
-        for(const auto& idx : floating) {
+        for(const auto &idx : floating) {
           pending->push_back(idx);
         }
       }
@@ -358,13 +387,13 @@ public:
 
 private:
 protected:
-  const LGraph *g;
-  Frontier_type frontier; // 2G inputs at most
-  Pending_type  pending;  // vertex that cleared the frontier
+  const LGraph_Base *g;
+  Frontier_type      frontier; // 2G inputs at most
+  Pending_type       pending;  // vertex that cleared the frontier
 
 public:
   Backward_edge_iterator() = delete;
-  explicit Backward_edge_iterator(const LGraph *_g)
+  explicit Backward_edge_iterator(const LGraph_Base *_g)
       : g(_g) {
     frontier.set_empty_key(0);     // 0 is not allowed as key
     frontier.set_deleted_key(128); // 128 is not allowed as key (4KB aligned)
@@ -382,7 +411,7 @@ public:
         pending.push_back(it.second.nid);
     }
     for(const auto &it : g->outputs2node) {
-      if(!g->get_node_int(it.second.nid).has_outputs()) //do not add outputs with connections
+      if(!g->get_node_int(it.second.nid).has_outputs()) // do not add outputs with connections
         pending.push_back(it.second.nid);
     }
 
@@ -396,7 +425,9 @@ public:
 
     return it;
   }
-  CBackward_edge_iterator end() { return CBackward_edge_iterator(0, g, &frontier, &pending); } // 0 is end index for iterator
+  CBackward_edge_iterator end() {
+    return CBackward_edge_iterator(0, g, &frontier, &pending);
+  } // 0 is end index for iterator
 };
 
 #endif

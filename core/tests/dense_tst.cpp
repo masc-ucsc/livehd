@@ -29,7 +29,7 @@ private:
     os << obj.get_charptr();
     return os;
   }
-Dense<CharPtr> vec("lgdb/str");
+Dense<CharPtr> vec("core_test_lgdb/str");
 
 int main (int argc, char **argv) {
 

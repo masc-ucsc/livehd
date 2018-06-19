@@ -1,0 +1,21 @@
+1. creating lgraph with several bit inputs and one multibit output(satsmall.v)
+mada0:~/build/lgraph$
+./inou/yosys/lgyosys ./inou/yosys/tests/satsmall.v
+
+2.mada0:~/build/lgraph$
+./inou/sat/lgsat_multibit --graph_name satsmall
+
+
+1. from the last gitpull the lgraph reproduction has changed greatly.
+Previously, the lgrapg was creating only the outputs of the whole module as a single lgraph. Now it is creating several disjuct outputs  inside one 1 lgraph. satsmall.v and satpick.v is producing the exact formula as we derive from the lgarph. However, the satpick.v has the 2nd pair of node pick which has no inputs. Soit is not giving the sat result.
+
+2. bits are taken automatocally, so it works both for multibit and singlebit likewise.
+
+
+3.Now satflop is not working under the change of the new graph reproduction.However, the logic was working correctly previously.
+
+TODO:
+
+1. implement ADD/SUB for multi arguments.
+2. all the other basic operations as shift
+3. You  can check  implemented functions as we discussed in ezsat/ezsat.cpp.

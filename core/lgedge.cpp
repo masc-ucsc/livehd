@@ -72,18 +72,19 @@ const Edge &Edge::get_reverse_for_deletion() const {
   Index_ID out_pid = get_out_pin().get_pid();
   Index_ID inp_pid = get_inp_pin().get_pid();
 #ifndef NDEBUG
-  console->info("get_reverse {} {} {} node_master:{} inp_master:{} get_idx:{} io:{}", ptr_idx, ptr_nid, out_pid, ptr_node->get_root_nid(), ptr_inp->get_root_nid(), get_idx(), ptr_inp->is_graph_io());
+  console->info("get_reverse {} {} {} node_master:{} inp_master:{} get_idx:{} io:{}", ptr_idx, ptr_nid, out_pid,
+                ptr_node->get_root_nid(), ptr_inp->get_root_nid(), get_idx(), ptr_inp->is_graph_io());
   ptr_inp->dump();
   fmt::print("\n");
 #endif
   do {
     const Edge *eit;
-    if (!input)
-      eit = find_edge(ptr_inp->get_input_begin() , ptr_inp->get_input_end(), ptr_nid, out_pid, inp_pid);
+    if(!input)
+      eit = find_edge(ptr_inp->get_input_begin(), ptr_inp->get_input_end(), ptr_nid, out_pid, inp_pid);
     else
       eit = find_edge(ptr_inp->get_output_begin(), ptr_inp->get_output_end(), ptr_nid, inp_pid, out_pid);
 
-    if (eit)
+    if(eit)
       return *eit;
     assert(!ptr_inp->is_last_state()); // Not found all over
 
@@ -333,7 +334,7 @@ void Node_Internal::del_output_int(const Edge &out_edge) {
 
   if(pos != (Num_SEdges - out_pos)) {
     for(int i = pos - 1; i >= Num_SEdges - out_pos; i--) {
-      //fmt::print("copy from {} to {}\n",i,i+sz);
+      // fmt::print("copy from {} to {}\n",i,i+sz);
       sedge[i + sz] = sedge[i];
     }
   }
@@ -420,8 +421,9 @@ void Node_Internal::assimilate_edges(Node_Internal &other) {
 
   for(int i = 0; i < other.inp_pos;) {
     if(other.sedge[other_pos].is_snode()) {
-      bool done = sedge[self_pos].set(other.sedge[other_pos].get_idx(), other.sedge[other_pos].get_inp_pid(), other_out_pid, true // input
-      );
+      bool done =
+          sedge[self_pos].set(other.sedge[other_pos].get_idx(), other.sedge[other_pos].get_inp_pid(), other_out_pid, true // input
+          );
       if(done) {
         self_pos++;
         inc_inputs(false);

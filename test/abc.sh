@@ -1,8 +1,7 @@
 #!/bin/bash
 declare -a inputs=("trivial.v" "test.v"\
                    "shift.v" "wires.v" "assigns.v" "consts.v" \
-                   "simple_add.v"  \
-                   "reduce.v" \
+                   "simple_add.v" "reduce.v" \
                    #"submodule.v" "multiport.v" "null_port.v" "trivial2.v" \
                    "gcd.v" "common_sub.v" "gcd_small.v" \
                    #"gcd_large.v" \

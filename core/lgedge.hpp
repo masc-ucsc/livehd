@@ -18,7 +18,9 @@ constexpr int Port_Bits  = 12;
 struct __attribute__((packed)) LEdge_Internal { // 6 bytes total
 
 protected:
-  Port_ID get_inp_pid() const { return inp_pid; }
+  Port_ID get_inp_pid() const {
+    return inp_pid;
+  }
 
 public:
   friend class Edge;
@@ -29,8 +31,12 @@ public:
   Index_ID idx : Index_Bits;    // abs (too much, 32 bits enough already not live)
   Port_ID  inp_pid : Port_Bits; // 10 bits ; abs
 
-  bool     is_snode() const { return snode; }
-  bool     is_input() const { return input; }
+  bool is_snode() const {
+    return snode;
+  }
+  bool is_input() const {
+    return input;
+  }
   Index_ID get_idx() const {
     assert(idx);
     return idx;
@@ -57,14 +63,20 @@ public:
 };
 
 struct __attribute__((packed)) SEdge_Internal { // 2 bytes total
-  bool     snode : 1;                           //  1 bit
-  bool     input : 1;                           //  1 bit
+  bool      snode : 1;                          //  1 bit
+  bool      input : 1;                          //  1 bit
   SIndex_ID ridx : 12;                          //  relative
-  Port_ID  inp_pid : 2;                         //   2 bits ; abs
+  Port_ID   inp_pid : 2;                        //   2 bits ; abs
 
-  bool     is_snode() const { return snode; }
-  bool     is_input() const { return input; }
-  Port_ID  get_inp_pid() const { return inp_pid; }
+  bool is_snode() const {
+    return snode;
+  }
+  bool is_input() const {
+    return input;
+  }
+  Port_ID get_inp_pid() const {
+    return inp_pid;
+  }
   Index_ID get_page_idx() const;
 
   Index_ID get_idx(Index_ID idx) const {
@@ -75,13 +87,13 @@ struct __attribute__((packed)) SEdge_Internal { // 2 bytes total
 
   bool set(Index_ID _idx, Port_ID _inp_pid, bool _input) {
     if(_inp_pid > 3) { // 2 bits
-      //fmt::print("P:{}\n",_inp_pid);
+      // fmt::print("P:{}\n",_inp_pid);
       return false;
     }
-    Index_ID abs_idx    = static_cast<SIndex_ID>(get_page_idx());
+    Index_ID  abs_idx   = static_cast<SIndex_ID>(get_page_idx());
     SIndex_ID delta_idx = static_cast<SIndex_ID>(_idx) - abs_idx;
     if(delta_idx >= ((1 << 11) - 1) || delta_idx < (-((1 << 11) - 1))) {
-      //fmt::print("D:{}\n",delta_idx);
+      // fmt::print("D:{}\n",delta_idx);
       return false;
     }
 
@@ -102,15 +114,27 @@ protected:
 
 public:
   Node_Pin(Index_ID _nid, Port_ID _pid, bool _input)
-      : nid(_nid), pid(_pid), input(_input) {
+      : nid(_nid)
+      , pid(_pid)
+      , input(_input) {
     assert(_nid);
   }
 
-  void     reset_as_output() { input = false; }
-  void     reset_as_input() { input = true; }
-  Index_ID get_nid() const { return nid; }
-  Port_ID  get_pid() const { return pid; }
-  bool     is_input() const { return input; }
+  void reset_as_output() {
+    input = false;
+  }
+  void reset_as_input() {
+    input = true;
+  }
+  Index_ID get_nid() const {
+    return nid;
+  }
+  Port_ID get_pid() const {
+    return pid;
+  }
+  bool is_input() const {
+    return input;
+  }
 
   bool operator==(const Node_Pin &other) const {
     return (nid == other.nid) && (pid == other.pid) && (input == other.input);
@@ -127,10 +151,6 @@ public:
 };
 
 class __attribute__((packed)) Edge { // 2 bytes total
-
-  //FIXME: can we disallow the copy constructor? They break the address
-  //dependent operations
-
 protected:
   uint64_t snode : 1;
   uint64_t input : 1; // Same position for SEdge and LEdge
@@ -141,7 +161,6 @@ protected:
   Index_ID get_page_idx() const;
 
   Port_ID get_out_pid() const;
-
 
   Port_ID get_inp_pid() const {
     const SEdge_Internal *s = reinterpret_cast<const SEdge_Internal *>(this);
@@ -157,7 +176,6 @@ protected:
   const Edge &get_reverse_for_deletion() const;
 
 public:
-
   friend struct Node_Internal_Page;
   friend class Node_Internal;
   friend class LGraph_Base;
@@ -172,9 +190,13 @@ public:
   bool is_last_input() const;
   bool is_last_output() const;
 
-  bool is_input() const { return input; }
+  bool is_input() const {
+    return input;
+  }
 
-  bool is_snode() const { return snode; }
+  bool is_snode() const {
+    return snode;
+  }
   void set_snode(bool s) {
     assert(snode == reinterpret_cast<const SEdge_Internal *>(this)->is_snode());
     snode = s;
@@ -235,12 +257,12 @@ public:
   }
 
 private: // all constructor&assignment should be marked as private
-  Edge() = default;
-  Edge(const Edge & rhs) = default;
-  Edge(Edge &&rhs) = delete;
-  ~Edge() = default;
-  Edge&operator=(const Edge & rhs) = default;
-  Edge&operator=(Edge && rhs) = delete;
+  Edge()                = default;
+  Edge(const Edge &rhs) = default;
+  Edge(Edge &&rhs)      = delete;
+  ~Edge()               = default;
+  Edge &operator=(const Edge &rhs) = default;
+  Edge &operator=(Edge &&rhs) = delete;
 };
 
 struct __attribute__((packed)) LEdge : public Edge { // 6 bytes total
@@ -276,7 +298,9 @@ struct alignas(32) Node_Internal_Page {
   uint8_t pad2[32 - 24];
 #pragma clang diagnostic pop
 
-  Index_ID get_idx() const { return idx; }
+  Index_ID get_idx() const {
+    return idx;
+  }
 
   static Node_Internal_Page &get(const SEdge_Internal *ptr) {
     // Every 1 Page a full Node is reserved for pointer keeping
@@ -337,9 +361,9 @@ private:
   void del_output_int(const Edge &out_edge);
 
   void del_output(const Edge &out_edge) {
-    //Node_Internal *ptr_node = &Node_Internal::get(&out_edge);
-    //Index_ID       ptr_idx  = ptr_node->get_self_idx();
-    //Index_ID       ptr_nid  = ptr_node->get_nid();
+    // Node_Internal *ptr_node = &Node_Internal::get(&out_edge);
+    // Index_ID       ptr_idx  = ptr_node->get_self_idx();
+    // Index_ID       ptr_nid  = ptr_node->get_nid();
 
     const Edge &inp_edge = out_edge.get_reverse_for_deletion();
     assert(inp_edge.is_input());
@@ -352,9 +376,9 @@ private:
   }
 
   void del_input(const Edge &inp_edge) {
-    //Node_Internal *ptr_node = &Node_Internal::get(&inp_edge);
-    //Index_ID       ptr_idx  = ptr_node->get_self_idx();
-    //Index_ID       ptr_nid  = ptr_node->get_nid();
+    // Node_Internal *ptr_node = &Node_Internal::get(&inp_edge);
+    // Index_ID       ptr_idx  = ptr_node->get_self_idx();
+    // Index_ID       ptr_nid  = ptr_node->get_nid();
 
     const Edge &out_edge = inp_edge.get_reverse_for_deletion();
     assert(inp_edge.is_input());
@@ -371,8 +395,12 @@ public:
     reset();
   }
 
-  uint8_t get_inp_pos() const { return inp_pos; }
-  uint8_t get_out_pos() const { return out_pos; }
+  uint8_t get_inp_pos() const {
+    return inp_pos;
+  }
+  uint8_t get_out_pos() const {
+    return out_pos;
+  }
 
   uint8_t get_num_local_inputs() const {
     uint8_t n = inp_pos;
@@ -407,7 +435,9 @@ public:
 
   Index_ID get_self_idx() const;
 
-  bool is_root() const { return root; }
+  bool is_root() const {
+    return root;
+  }
   bool is_master_root() const {
     bool ms = nid == get_self_idx();
     if(ms)
@@ -415,9 +445,15 @@ public:
 
     return ms;
   }
-  bool is_graph_io() const { return graph_io_input || graph_io_output; }
-  bool is_graph_io_input() const { return graph_io_input; }
-  bool is_graph_io_output() const { return graph_io_output; }
+  bool is_graph_io() const {
+    return graph_io_input || graph_io_output;
+  }
+  bool is_graph_io_input() const {
+    return graph_io_input;
+  }
+  bool is_graph_io_output() const {
+    return graph_io_output;
+  }
   void set_graph_io_input() {
     assert(!graph_io_output);
     graph_io_input = true;
@@ -427,15 +463,19 @@ public:
     graph_io_output = true;
   }
 
-  void set_root() { root = true; }
+  void set_root() {
+    root = true;
+  }
   void clear_root() {
     root            = false;
     graph_io_input  = false;
     graph_io_output = false;
   }
 
-  Port_ID get_out_pid() const { return out_pid; }
-  void    set_out_pid(Port_ID eid) {
+  Port_ID get_out_pid() const {
+    return out_pid;
+  }
+  void set_out_pid(Port_ID eid) {
     assert(eid < (1 << Port_Bits));
     out_pid = eid;
   }
@@ -514,11 +554,21 @@ public:
     assert(!root); // For the moment
     nid = 0;
   }
-  bool is_next_state() const { return state == Next_Node_State; }
-  bool is_free_state() const { return state == Free_Node_State; }
-  bool is_page_state() const { return state == Page_Node_State; }
-  bool is_last_state() const { return state == Last_Node_State; }
-  bool is_node_state() const { return is_next_state() || is_last_state(); }
+  bool is_next_state() const {
+    return state == Next_Node_State;
+  }
+  bool is_free_state() const {
+    return state == Free_Node_State;
+  }
+  bool is_page_state() const {
+    return state == Page_Node_State;
+  }
+  bool is_last_state() const {
+    return state == Last_Node_State;
+  }
+  bool is_node_state() const {
+    return is_next_state() || is_last_state();
+  }
   bool is_page_align() const {
     return ((((uint64_t)this) & 0xFFF) == 0); // page align.
   }
@@ -548,9 +598,13 @@ public:
       inp_pos++;
     }
   }
-  bool has_local_inputs() const { return inp_pos > 0; }
-  bool has_local_outputs() const { return out_pos > 0; }
-  int  get_space_available() const {
+  bool has_local_inputs() const {
+    return inp_pos > 0;
+  }
+  bool has_local_outputs() const {
+    return out_pos > 0;
+  }
+  int get_space_available() const {
     if(state == Last_Node_State)
       return (Num_SEdges - (inp_pos + out_pos));
     return (Num_SEdges - (inp_pos + out_pos + 2));
@@ -580,11 +634,19 @@ public:
     bits = _bits;
   }
 
-  const SEdge *get_input_begin() const { return &sedge[get_input_begin_pos_int()]; }
-  const SEdge *get_input_end() const { return &sedge[get_input_end_pos_int()]; }
+  const SEdge *get_input_begin() const {
+    return &sedge[get_input_begin_pos_int()];
+  }
+  const SEdge *get_input_end() const {
+    return &sedge[get_input_end_pos_int()];
+  }
 
-  const SEdge *get_output_begin() const { return &sedge[get_output_begin_pos_int() + 1]; }
-  const SEdge *get_output_end() const { return &sedge[Num_SEdges]; }
+  const SEdge *get_output_begin() const {
+    return &sedge[get_output_begin_pos_int() + 1];
+  }
+  const SEdge *get_output_end() const {
+    return &sedge[Num_SEdges];
+  }
 
   int next_free_input_pos() const {
     assert(has_space());

@@ -22,7 +22,7 @@ private:
     return i;
   }
 
-  int getValue() { //Note: this value is in KB!
+  int getValue() { // Note: this value is in KB!
     FILE *file   = fopen("/proc/self/status", "r");
     int result = -1;
     char line[128];
@@ -66,7 +66,7 @@ public:
     start_mem  = getValue();
   }
 
-  void sample(const std::string & name) {
+  void sample(const std::string &name) {
     Time_Sample s;
     s.tp   = std::chrono::system_clock::now();
     s.mem  = getValue();
