@@ -11,7 +11,7 @@ fi
 
 cd ${LGRAPH_SRC}
 
-bazer test -c ${LGRAPH_BUILD_MODE} //...
+bazel test -c ${LGRAPH_BUILD_MODE} //...
 
 if [ $? -eq 0 ]; then
   exit 0
