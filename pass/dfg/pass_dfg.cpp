@@ -69,6 +69,7 @@ void Pass_dfg::process_assign(LGraph *dfg, const LGraph *cfg, CF2DF_State *state
   Index_ID dfnode = create_node(dfg, state, target);
 
   dfg->node_type_set(dfnode, CfgAssign_Op);
+  dfg->set_node_instance(dfnode, data.get_operator());
   vector<Index_ID> operands = process_operands(dfg, cfg, state, data, node);
 
   for (Index_ID id : operands)
@@ -198,10 +199,48 @@ void Pass_dfg::attach_outputs(LGraph *dfg, CF2DF_State *state) {
   }
 
   if (state->fluid_df())
-    add_fluid_ports_and_logic(dfg, state);
+    add_fluid_behavior(dfg, state);
 }
 
-void Pass_dfg::add_fluid_ports_and_logic(LGraph *dfg, CF2DF_State *state) {
+void Pass_dfg::add_fluid_behavior(LGraph *dfg, CF2DF_State *state) {
+  vector<Index_ID> inputs, outputs;
+  add_fluid_ports(dfg, state, inputs, outputs);
+
+}
+
+void Pass_dfg::add_fluid_ports(LGraph *dfg, CF2DF_State *state, vector<Index_ID> &data_inputs, vector<Index_ID> &data_outputs) {
+  for (const auto &pair : state->outputs()) {
+    if (!is_valid_marker(pair.first) && !is_retry_marker(pair.first)) {
+      auto valid_output = valid_marker(pair.first);
+      auto retry_input = retry_marker(pair.first);
+      data_outputs.push_back(state->get_reference(pair.first));
+      
+      if (!state->has_reference(valid_output))
+        create_output(dfg, state, valid_output);
+      
+      if (!state->has_reference(retry_input))
+        create_input(dfg, state, retry_input);
+    }
+  }
+
+  for (const auto &pair : state->inputs()) {
+    if (!is_valid_marker(pair.first) && !is_retry_marker(pair.first)) {
+      auto valid_input = valid_marker(pair.first);
+      auto retry_output = retry_marker(pair.first);
+      data_inputs.push_back(state->get_reference(pair.first));
+      
+      if (!state->has_reference(valid_input))
+        create_input(dfg, state, valid_input);
+      
+      if (!state->has_reference(retry_output))
+        create_output(dfg, state, retry_output);
+    }
+  }
+}
+
+void Pass_dfg::add_fluid_logic(LGraph *dfg, CF2DF_State *state, const vector<Index_ID> &data_inputs, const vector<Index_ID> &data_outputs) {
+  Index_ID abort_id = add_abort_logic(dfg, state, data_inputs, data_outputs);
+
   
 }
 
@@ -272,7 +311,7 @@ Index_ID Pass_dfg::true_constant(LGraph *g, CF2DF_State *state) {
   g->node_type_set(nid, U32Const_Op);
   g->node_u32type_set(nid, 1);
 
-  string var_name = "__tmp" + std::to_string(temp_counter++);
+  string var_name = temp();
   g->set_node_wirename(nid, var_name.c_str());
   state->symbol_table().add(var_name, Type::create_logical());
 
@@ -286,6 +325,40 @@ Index_ID Pass_dfg::create_node(LGraph *g, CF2DF_State *state, const string &v) {
 
   return nid;
 }
+
+Index_ID Pass_dfg::create_AND(LGraph *g, CF2DF_State *state, Index_ID op1, Index_ID op2) {
+  return create_binary(g, state, op1, op2, LOGICAL_AND_OP);
+}
+
+Index_ID Pass_dfg::create_OR(LGraph *g, CF2DF_State *state, Index_ID op1, Index_ID op2) {
+  return create_binary(g, state, op1, op2, LOGICAL_OR_OP);
+}
+
+Index_ID Pass_dfg::create_binary(LGraph *g, CF2DF_State *state, Index_ID op1, Index_ID op2, const char *oper) {
+  auto target = temp();
+  Index_ID dfnode = create_node(g, state, target);
+
+  g->node_type_set(dfnode, CfgAssign_Op);
+  g->set_node_instance(dfnode, oper);
+
+  g->add_edge(Node_Pin(op1, 0, false), Node_Pin(dfnode, 0, true));
+  g->add_edge(Node_Pin(op2, 0, false), Node_Pin(dfnode, 0, true));
+
+  return dfnode;
+}
+
+Index_ID Pass_dfg::create_NOT(LGraph *g, CF2DF_State *state, Index_ID op1) {
+  auto target = temp();
+  Index_ID dfnode = create_node(g, state, target);
+
+  g->node_type_set(dfnode, CfgAssign_Op);
+  g->set_node_instance(dfnode, LOGICAL_NOT_OP);
+
+  g->add_edge(Node_Pin(op1, 0, false), Node_Pin(dfnode, 0, true));
+
+  return dfnode;
+}
+
 
 Pass_dfg_options_pack::Pass_dfg_options_pack() : Options_pack() {
 

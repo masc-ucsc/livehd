@@ -78,7 +78,10 @@ private:
   Index_ID get_child(const LGraph *cfg, Index_ID node);
   Index_ID resolve_phi_branch(LGraph *dfg, CF2DF_State *parent, CF2DF_State *branch, const std::string &variable);
   void attach_outputs(LGraph *dfg, CF2DF_State *state);
-  void add_fluid_ports_and_logic(LGraph *dfg, CF2DF_State *state);
+
+  void add_fluid_behavior(LGraph *dfg, CF2DF_State *state);
+  void add_fluid_ports(LGraph *dfg, CF2DF_State *state, std::vector<Index_ID> &data_inputs, std::vector<Index_ID> &data_outputs);
+  void add_fluid_logic(LGraph *dfg, CF2DF_State *state, const std::vector<Index_ID> &data_inputs, const std::vector<Index_ID> &data_outputs);
 
   void add_read_marker(LGraph *dfg, CF2DF_State *state, const std::string &v) { assign_to_true(dfg, state, read_marker(v)); }
   void add_write_marker(LGraph *dfg, CF2DF_State *state, const std::string &v) { assign_to_true(dfg, state, write_marker(v)); }
@@ -112,6 +115,12 @@ private:
   Index_ID default_constant(LGraph *g, CF2DF_State *state);
   Index_ID true_constant(LGraph *g, CF2DF_State *state);
 
+  Index_ID create_AND(LGraph *g, CF2DF_State *state, Index_ID op1, Index_ID op2);
+  Index_ID create_OR(LGraph *g, CF2DF_State *state, Index_ID op1, Index_ID op2);
+  Index_ID create_binary(LGraph *g, CF2DF_State *state, Index_ID op1, Index_ID op2, const char *oper);
+  Index_ID create_NOT(LGraph *g, CF2DF_State *state, Index_ID op1);
+
+  Index_ID temp() { return TEMP_MARKER + std::to_string(temp_counter++); }
   static unsigned int temp_counter;
 
   //Sheng zone
