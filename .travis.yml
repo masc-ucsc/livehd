@@ -7,15 +7,15 @@ services:
 
 env:
   matrix:
-    - BUILD_TYPE=Release DOCKER=mascucsc/archlinux-masc
-    - BUILD_TYPE=Debug   DOCKER=mascucsc/archlinux-masc
-      #- BUILD_TYPE=Release DOCKER=mascucsc/ubuntu-masc
-      #- BUILD_TYPE=Debug   DOCKER=mascucsc/ubuntu-masc
+    - BUILD_MODE=fastbuild DOCKER=mascucsc/archlinux-masc
+    - BUILD_MODE=dbg       DOCKER=mascucsc/archlinux-masc
+      #- BUILD_MODE=fastbuild DOCKER=mascucsc/ubuntu-masc
+      #- BUILD_MODE=dbg       DOCKER=mascucsc/ubuntu-masc
 
 before_install:
   - docker pull mascucsc/archlinux-masc
-  - docker pull mascucsc/ubuntu-masc
+    # - docker pull mascucsc/ubuntu-masc
 
 script:
-  - scripts/run-docker-test.sh `pwd` $BUILD_TYPE $DOCKER
+  - scripts/run-docker-test.sh `pwd` $BUILD_MODE $DOCKER
 
