@@ -21,5 +21,5 @@ docker run  \
   -v $LGRAPH_SRC:$DOCKER_LGRAPH_SRC \
   -e LGRAPH_SRC=${DOCKER_LGRAPH_SRC} \
   -e LGRAPH_BUILD_MODE=${LGRAPH_BUILD_MODE} \
-  ${DOCKER_IMAGE} ${DOCKER_LGRAPH_SRC}/misc/scripts/build-and-run.sh
+  ${DOCKER_IMAGE} ${DOCKER_LGRAPH_SRC}/scripts/build-and-run.sh
 

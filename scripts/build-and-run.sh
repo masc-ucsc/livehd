@@ -8,11 +8,11 @@ if [ ! -e ${LGRAPH_SRC}/WORKSPACE ]; then
   exit -1
 fi
 
-if ! ${LGRAPH_SRC}/misc/scripts/build.sh
+if ! ${LGRAPH_SRC}/scripts/build.sh
 then
   echo "LGRAPH build error"
   exit -1
 fi
 
-${LGRAPH_SRC}/misc/scripts/run-test.sh
+${LGRAPH_SRC}/scripts/run-test.sh
 
