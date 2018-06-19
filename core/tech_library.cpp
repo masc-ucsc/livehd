@@ -11,6 +11,8 @@
 #include "rapidjson/filewritestream.h"
 #include "rapidjson/prettywriter.h"
 
+std::unordered_map<std::string, Tech_library *> Tech_library::instances;
+
 bool Tech_library::include(const std::string &name) const {
   return cname2id.find(name) != cname2id.end();
 }
