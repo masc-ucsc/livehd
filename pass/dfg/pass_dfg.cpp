@@ -71,7 +71,7 @@ void Pass_dfg::process_assign(LGraph *dfg, const LGraph *cfg, CF2DF_State *state
   Index_ID dfnode = create_node(dfg, state, target);
 
   dfg->node_type_set(dfnode, CfgAssign_Op);
-  dfg->set_node_instance(dfnode, data.get_operator());
+  //dfg->set_node_instance(dfnode, data.get_operator());
   vector<Index_ID> operands = process_operands(dfg, cfg, state, data, node);
 
   for (Index_ID id : operands)
@@ -157,7 +157,7 @@ vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, const LGraph *cfg, CF2D
   const auto &dops = data.get_operands();
   vector<Index_ID> ops(dops.size());
 
-  for (int i = 0; i < dops.size(); i++) {
+  for (size_t i = 0; i < dops.size(); i++) {
     if (state->has_reference(dops[i]))
       ops[i] = state->get_reference(dops[i]);
     else {
@@ -241,9 +241,13 @@ void Pass_dfg::add_fluid_ports(LGraph *dfg, CF2DF_State *state, vector<Index_ID>
 }
 
 void Pass_dfg::add_fluid_logic(LGraph *dfg, CF2DF_State *state, const vector<Index_ID> &data_inputs, const vector<Index_ID> &data_outputs) {
-  Index_ID abort_id = add_abort_logic(dfg, state, data_inputs, data_outputs);
+  //Index_ID abort_id = add_abort_logic(dfg, state, data_inputs, data_outputs);
 
   
+}
+
+void Pass_dfg::add_abort_logic(LGraph *dfg, CF2DF_State *state, const vector<Index_ID> &data_inputs, const vector<Index_ID> &data_outputs) {
+
 }
 
 Index_ID Pass_dfg::find_root(const LGraph *cfg) {
@@ -341,7 +345,7 @@ Index_ID Pass_dfg::create_binary(LGraph *g, CF2DF_State *state, Index_ID op1, In
   Index_ID dfnode = create_node(g, state, target);
 
   g->node_type_set(dfnode, CfgAssign_Op);
-  g->set_node_instance(dfnode, oper);
+  //g->set_node_instance(dfnode, oper);
 
   g->add_edge(Node_Pin(op1, 0, false), Node_Pin(dfnode, 0, true));
   g->add_edge(Node_Pin(op2, 0, false), Node_Pin(dfnode, 0, true));
@@ -354,7 +358,7 @@ Index_ID Pass_dfg::create_NOT(LGraph *g, CF2DF_State *state, Index_ID op1) {
   Index_ID dfnode = create_node(g, state, target);
 
   g->node_type_set(dfnode, CfgAssign_Op);
-  g->set_node_instance(dfnode, LOGICAL_NOT_OP);
+  //g->set_node_instance(dfnode, LOGICAL_NOT_OP);
 
   g->add_edge(Node_Pin(op1, 0, false), Node_Pin(dfnode, 0, true));
 
@@ -513,7 +517,7 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g, const std::string& str, bool& is_
       //token1st = token1st[0] + token1st.substr(3);//exclude middle "0d"
       token1st = token1st.substr(3);//exclude middle "-0d"
 
-      for(int i = 0; i < token1st.size(); i++){
+      for(size_t i = 0; i < token1st.size(); i++){
         sum = sum *10 + (token1st[i] - '0');
         fmt::print("now is round {}, token1st[{}] is {}, sum is {}\n", i, i, token1st[i], sum);
         if(sum >= 4294967296){
@@ -536,7 +540,7 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g, const std::string& str, bool& is_
       s_2scmp = '0' + s_2scmp; //add leading 0 before converting 2's complement
       fmt::print("before 2's complement, the s_binary = {}\n", s_2scmp);
 
-      for(auto i = 0; i< s_2scmp.length(); i++){
+      for(size_t i = 0; i< s_2scmp.length(); i++){
         if(s_2scmp[i] == '0')
           s_2scmp[i] = '1';
         else
@@ -562,7 +566,7 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g, const std::string& str, bool& is_
     }
     else{
       token1st = token1st.substr(2);
-      for(int i = 0; i < token1st.size(); i++){
+      for(size_t i = 0; i < token1st.size(); i++){
         sum = sum *10 + (token1st[i] - '0');
         fmt::print("now is round {}, token1st[{}] is {}, sum is {}\n", i, i, token1st[i], sum);
         if(sum >= 4294967296){

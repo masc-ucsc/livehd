@@ -13,9 +13,13 @@ const std::string VALID_MARKER  = "pyrvd__";
 const std::string RETRY_MARKER  = "pyrrt__";
 const std::string TEMP_MARKER   = "tmp__";
 
-const char *LOGICAL_AND_OP = "AND";
-const char *LOGICAL_OR_OP  = "OR";
-const char *LOGICAL_NOT_OP = "NOT";
+//const char *LOGICAL_AND_OP = "AND";
+//const char *LOGICAL_OR_OP  = "OR";
+//const char *LOGICAL_NOT_OP = "NOT";
+
+#define LOGICAL_AND_OP "AND"
+#define LOGICAL_OR_OP  "OR"
+#define LOGICAL_NOT_OP "NOT"
 
 const char REGISTER_MARKER = '@';
 const char INPUT_MARKER = '$';
