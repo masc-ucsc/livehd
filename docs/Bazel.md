@@ -45,6 +45,12 @@ argument the test. Sample session:
     >b LGraph_Base::LGraph_Base
     >r
 
+## Code coverage for all the tests used
+
+    bazel build --collect_code_coverage ...
+    # or better with runs
+    bazel test --collect_code_coverage --test_output=all --nocache_test_results ...
+
 ## To download the dependent packages and apply patches (abc)
 
 No need to run this, as the bazel build will do it.
