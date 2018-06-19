@@ -119,7 +119,7 @@ std::vector<LGraph *> Inou_def::generate() {
     //}
 
     if(has_drive) {
-      for(int i = 0; i < dst_nids.size(); ++i) {
+      for(size_t i = 0; i < dst_nids.size(); ++i) {
         //create N lgraph edge"s" to connect N fanout from 1 src pin
         assert(src_nid);
         assert(dst_nids[i]);
