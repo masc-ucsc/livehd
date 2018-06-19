@@ -81,7 +81,7 @@ vector<LGraph *> Inou_cfg::generate() {
     cfg_2_lgraph(&memblock, lgs);
     ;
 
-    for(int i = 0; i < lgs.size(); i++) {
+    for(size_t i = 0; i < lgs.size(); i++) {
       lgs[i]->sync();
     }
     close(fd);
@@ -141,7 +141,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
     p = strtok_r(nullptr, "\n\r\f", &str_ptr);
   } //end while loop
 
-  for(int i = 0; i < chain_stks_gs.size(); i++) {
+  for(size_t i = 0; i < chain_stks_gs.size(); i++) {
     for(auto &x : chain_stks_gs[i]) {
       fmt::print("\ncurrent is chain_stks_gs[{}], vid {} content is\n", i, x.first);
       for(auto j = x.second.rbegin(); j != x.second.rend(); ++j)
@@ -609,7 +609,7 @@ bool prp_get_value(const string& str_in, string& str_out, bool &v_signed, uint32
 
 void Inou_cfg::update_ifs(vector<LGraph *> &lgs, vector<map<string, Index_ID>> &node_mappings)
 {
-  for (int i = 0; i < lgs.size(); i++) {
+  for (size_t i = 0; i < lgs.size(); i++) {
     LGraph *g = lgs[i];
     auto &mapping = node_mappings[i];
 
