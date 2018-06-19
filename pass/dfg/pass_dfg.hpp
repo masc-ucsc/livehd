@@ -1,6 +1,10 @@
 #ifndef PASS_DFG_HPP_
 #define PASS_DFG_HPP_
 
+#include <string>
+#include <unordered_map>
+#include <vector>
+
 #include "cfg_node_data.hpp"
 #include "options.hpp"
 #include "pass.hpp"
@@ -8,10 +12,6 @@
 #include "lgedge.hpp"
 #include "symbol_table.hpp"
 #include "cf2df_state.hpp"
-
-#include <string>
-#include <unordered_map>
-#include <vector>
 
 class Pass_dfg_options_pack : public Options_pack {
 public:
@@ -124,13 +124,23 @@ private:
   static unsigned int temp_counter;
 
   //Sheng zone
-  Index_ID resolve_constant(LGraph *g, const std::string& str_in, bool& is_signed, bool& is_in32b, bool& is_explicit_signed, uint32_t& val, uint32_t& explicit_bits, size_t& bit_width);
-  Index_ID process_hex_token (LGraph *g, const std::string& token1st, const uint16_t & bit_width, uint32_t& val,  bool& is_in32b);
-  Index_ID process_bin_token (LGraph *g, const std::string& token1st, const uint16_t & bit_width, uint32_t& val,  bool& is_in32b);
-  Index_ID process_dec_token (LGraph *g, const std::string& token1st, const uint16_t & bit_width, uint32_t& val,  bool& is_in32b);
-  uint32_t cal_hex_val_32b(const std::string&);
+  Index_ID resolve_constant          (LGraph *g,
+                                      const std::string& str_in,
+                                      bool& is_signed,
+                                      bool& is_in32b,
+                                      bool& is_explicit_signed,
+                                      bool& has_bool_dc,
+                                      bool& is_pure_dc,
+                                      uint32_t& val,
+                                      uint32_t& explicit_bits,
+                                      size_t& bit_width);
+  Index_ID process_bin_token         (LGraph *g, const std::string& token1st, const uint16_t & bit_width, uint32_t& val);
+  Index_ID process_bin_token_with_dc (LGraph *g, const std::string& token1st);
   uint32_t cal_bin_val_32b(const std::string&);
-
+  Index_ID create_const32_node  (LGraph *g, const std::string&, uint16_t node_bit_width, uint32_t& val);
+  Index_ID create_dontcare_node (LGraph *g, uint16_t node_bit_width );
+  std::string hex_char_to_bin(char c);
+  std::string hex_msb_char_to_bin(char c);
 };
 
 #endif

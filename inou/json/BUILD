@@ -4,7 +4,7 @@ cc_library(
     hdrs = ["inou_json.hpp"],
     visibility = ["//visibility:public"],
     deps = [
-        "//core:core"
+        "//meta:meta"
     ],
 )
 
@@ -15,8 +15,5 @@ cc_binary(
     #linkopts = ['-static', '-lpthread'],
     deps = [
         ":inou_json",
-        "//core:core",
-        "@boost//:filesystem",
-        "@boost//:program_options",
     ],
 )

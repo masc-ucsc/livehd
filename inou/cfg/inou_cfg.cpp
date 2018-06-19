@@ -1,19 +1,22 @@
 
-#include "inou_cfg.hpp"
-#include "lgedgeiter.hpp"
-#include "lgraphbase.hpp"
 #include <fcntl.h>
 #include <fstream>
 #include <stack>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <string>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+
+#include <string>
 #include <vector>
 #include <algorithm>
+
+#include "inou_cfg.hpp"
+#include "lgedgeiter.hpp"
+#include "cfg_node_data.hpp"
+
 using std::map;
 using std::string;
 using std::vector;
@@ -191,6 +194,8 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
       g->node_type_set(name2id[w1st], CfgWhile_Op);
     else if(w6th == "if")
       g->node_type_set(name2id[w1st], CfgIf_Op);
+    else if(w6th == "RD")
+      g->node_type_set(name2id[w1st], CfgBeenRead_Op);
     else
       g->node_type_set(name2id[w1st], CfgAssign_Op);
   } else {
@@ -205,6 +210,8 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
       g->node_type_set(name2id[w1st], CfgWhile_Op);
     else if(w6th == "if")
       g->node_type_set(name2id[w1st], CfgIf_Op);
+    else if(w6th == "RD")
+      g->node_type_set(name2id[w1st], CfgBeenRead_Op);
     else if(w6th == "::{") {
       g->node_subgraph_set(name2id[w1st], nfirst2gid[w9th]); //use nfirst2gid to get sub-graph gid
     } else {

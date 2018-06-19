@@ -1,11 +1,13 @@
 pp
 tags
+lgdb
 cscope*
 *NBSD*
 *.swp
 *.swo
 *.swn
 *.pyc
+*.o
 compile_commands.json
 .ycm_extra_conf.py
 bazel-*

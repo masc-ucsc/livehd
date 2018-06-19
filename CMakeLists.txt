@@ -12,6 +12,20 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+FIND_PACKAGE(Threads REQUIRED)
+FIND_PACKAGE(Boost REQUIRED)
+FIND_PACKAGE(BISON REQUIRED)
+FIND_PACKAGE(TCL REQUIRED)
+FIND_PACKAGE(RapidJSON REQUIRED)
+
+find_package(PythonInterp 3.6 REQUIRED )
+find_package(PythonLibs 3.6 REQUIRED )
+
+SET(STATIC_BOOST_LIBS "-lboost_filesystem -lboost_program_options -lboost_system -lboost_iostreams -lboost_serialization")
+SET(BOOST_LIBS "-lboost_filesystem -lboost_program_options -lboost_system -lboost_iostreams -lboost_serialization ${PYTHON_LIBRARIES}")
+SET(REQUIRED_LIBS "")
+
+include(ExternalProject)
 
 IF(CMAKE_BUILD_TYPE_INITIALIZED_TO_DEFAULT)
   SET(CMAKE_BUILD_TYPE Release)
@@ -21,6 +35,7 @@ IF(CMAKE_BUILD_TYPE MATCHES "Debug")
   MESSAGE("  -DCMAKE_BUILD_TYPE=Debug      debug compilation options")
   SET(CMAKE_CXX_FLAGS       "-DLIN64 -fPIC -g3 -Wall -Wno-overloaded-virtual -O0 -DDEBUG=1 -D_YOSYS_")
   SET(CMAKE_C_FLAGS         "-DLIN64 -fPIC -g3 -Wall -O0 -DDEBUG=1 -D_YOSYS_")
+  #set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 ELSE(CMAKE_BUILD_TYPE MATCHES "Release")
   MESSAGE("  -DCMAKE_BUILD_TYPE=Release    release compilation options (default)")
   SET(CMAKE_CXX_FLAGS       "-DLIN64 -fPIC -Ofast -mtune=native -DNDEBUG -D_YOSYS_")
@@ -28,22 +43,6 @@ ELSE(CMAKE_BUILD_TYPE MATCHES "Release")
   set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 ENDIF(CMAKE_BUILD_TYPE MATCHES "Debug")
 
-#SET(CMAKE_CXX_FLAGS_RELEASE "-g -ftest-coverage -fprofile-arcs")
-#SET(CMAKE_C_FLAGS_RELEASE "-g -ftest-coverage -fprofile-arcs")
-
-# -fPIC needed because Yosys uses lgraph as dynamic library
-
-
-FIND_PACKAGE(Threads REQUIRED)
-FIND_PACKAGE(Boost REQUIRED)
-FIND_PACKAGE(BISON REQUIRED)
-FIND_PACKAGE(TCL REQUIRED)
-FIND_PACKAGE(RapidJSON REQUIRED)
-
-SET(BOOST_LIBS "-lboost_filesystem -lboost_program_options -lboost_system -lboost_iostreams -lboost_serialization")
-SET(REQUIRED_LIBS "")
-
-include(ExternalProject)
 
 ##########################################################
 # MISC
@@ -77,9 +76,12 @@ INCLUDE_DIRECTORIES(subs/sparsehash-c11)
 INCLUDE_DIRECTORIES(subs/BitMagic/src)
 INCLUDE_DIRECTORIES(subs/spdlog/include)
 INCLUDE_DIRECTORIES(subs/yosys)
+INCLUDE_DIRECTORIES(subs/pybind11/include)
+INCLUDE_DIRECTORIES(${PYTHON_INCLUDE_DIRS})
 
 # code and include libraries
 ADD_SUBDIRECTORY(core)
+ADD_SUBDIRECTORY(pass/sample)
 ADD_SUBDIRECTORY(pass/dce)
 ADD_SUBDIRECTORY(pass/cse)
 ADD_SUBDIRECTORY(pass/gvn_pre)
@@ -116,6 +118,7 @@ SET_TESTS_PROPERTIES(basic_inou_rand_json PROPERTIES DEPENDS core_done)
 add_test(NAME basic_inou_yosys         COMMAND  ${PROJECT_SOURCE_DIR}/test/yosys.sh)
 add_test(NAME basic_inou_synth_yosys   COMMAND  ${PROJECT_SOURCE_DIR}/test/synth.sh -s${PROJECT_SOURCE_DIR})
 add_test(NAME basic_inou_abc           COMMAND  ${PROJECT_SOURCE_DIR}/test/abc.sh)
+add_test(NAME basic_inou_lefdef        COMMAND  ${PROJECT_SOURCE_DIR}/test/lefdef.sh -s${PROJECT_SOURCE_DIR})
 add_test(NAME basic_lgopt_dce          COMMAND  ${PROJECT_SOURCE_DIR}/test/lgopt_dce.sh)
 add_test(NAME basic_lgopt_gvn_pre      COMMAND  ${PROJECT_SOURCE_DIR}/test/lgopt_gvn_pre.sh)
 

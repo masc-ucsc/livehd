@@ -17,7 +17,6 @@
 #include "inou.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
-//#include "inou/yaml/inou_yaml.hpp"
 
 USING_YOSYS_NAMESPACE
 PRIVATE_NAMESPACE_BEGIN
@@ -66,7 +65,9 @@ static void look_for_module_outputs(RTLIL::Module *module, const std::string &ou
     Index_ID     io_idx;
     if(wire->port_input) {
       assert(!wire->port_output); //any bidirectional port?
+#ifdef DEBUG
       log(" adding global input  wire: %s width %d id=%x\n", wire->name.c_str(), wire->width, wire->hash());
+#endif
       assert(wire->name.c_str()[0] == '\\');
       io_idx = g->add_graph_input(&wire->name.c_str()[1], 0, wire->width, wire->start_offset);
       //FIXME: can we get rid of the dependency in the wirename for IOs?
@@ -79,7 +80,9 @@ static void look_for_module_outputs(RTLIL::Module *module, const std::string &ou
 #endif
 
     } else if(wire->port_output) {
+#ifdef DEBUG
       log(" adding global output wire: %s width %d id=%x\n", wire->name.c_str(), wire->width, wire->hash());
+#endif
       assert(wire->name.c_str()[0] == '\\');
       io_idx = g->add_graph_output(&wire->name.c_str()[1], 0, wire->width, wire->start_offset);
       //FIXME: can we get rid of the dependency in the wirename for IOs?
@@ -446,13 +449,13 @@ static void look_for_cell_outputs(RTLIL::Module *module) {
 
     uint32_t blackbox_out = 0;
     for(const auto &conn : cell->connections()) {
-      if(blackbox) {
-        if(is_black_box_input(module, cell, conn.first))
-          continue;
+      //first faster filter but doesn't always work
+      if(cell->input(conn.first))
+        continue;
 
-#ifndef NDEBUG
+      assert(cell->output(conn.first) || tcell || blackbox);
+      if(blackbox) {
         assert(is_black_box_output(module, cell, conn.first));
-#endif
         connect_string(g, &(conn.first.c_str()[1]), nid, LGRAPH_BBOP_ONAME(blackbox_out++));
 
       } else if(sub_graph && !sub_graph->is_graph_output(&(conn.first.c_str()[1]))) {
@@ -588,7 +591,7 @@ static LGraph *process_module(RTLIL::Module *module) {
         offset += chunk.width;
         if(lhs_wire->port_output) {
           Node_Pin output  = g->get_graph_output(&lhs_wire->name.c_str()[1]);
-          Node_Pin dst_pin = Node_Pin(output.get_nid(), output.get_pid(), true);
+          Node_Pin dst_pin = Node_Pin(output.get_nid(), 0, true);
           g->add_edge(src_pin, dst_pin, lhs_wire->width);
 
         } else {
@@ -1167,9 +1170,11 @@ static LGraph *process_module(RTLIL::Module *module) {
     if(wire->port_output && wire2lpin.find(wire) != wire2lpin.end()) {
 
       Node_Pin output  = g->get_graph_output(&wire->name.c_str()[1]);
-      Node_Pin dst_pin = Node_Pin(output.get_nid(), output.get_pid(), true);
+      Node_Pin dst_pin = Node_Pin(output.get_nid(), 0, true);
       Node_Pin src_pin = Node_Pin(wire2lpin[wire].nid, wire2lpin[wire].out_pid, false);
+#ifdef DEBUG
       log("  connecting module output %s %d %ld\n", wire->name.c_str(), src_pin.get_pid(), src_pin.get_nid());
+#endif
       g->add_edge(src_pin, dst_pin, wire->width);
     }
   }
@@ -1228,6 +1233,7 @@ struct Inou_Yosys_Pass : public Pass {
 
       auto *g            = new LGraph(output_directory, name, true); // Clear in yosys. Regen
       module2graph[name] = g;
+  log("inou_yosys look_for_module_outputs pass for module %s:\n", module->name.c_str());
       look_for_module_outputs(module, output_directory);
     }
 
@@ -1238,13 +1244,13 @@ struct Inou_Yosys_Pass : public Pass {
       RTLIL::Module *module = it.second;
       if(design->selected_module(it.first)) {
 #ifndef NDEBUG
+        log("inou_yosys look_for_cell_outputs pass for module %s:\n", module->name.c_str());
         console->info("now processing module {}\n", module->name.str());
 #endif
         look_for_cell_outputs(module);
         LGraph *g = process_module(module);
 
         g->sync();
-        //g->dump_lgwires();
       }
 
       wire2lpin.clear();

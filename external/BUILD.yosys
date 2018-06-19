@@ -1,0 +1,6 @@
+cc_library(
+   name = "headers",
+   hdrs = glob(["kernel/*.h"]),
+   visibility = ["//visibility:public"],
+)
+

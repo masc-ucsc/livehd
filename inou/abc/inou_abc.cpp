@@ -1,9 +1,10 @@
 //
 // Created by birdeclipse on 1/30/18.
 //
+#include <boost/filesystem.hpp>
+
 #include "inou_abc.hpp"
 #include "inou/lef/inou_lef.hpp"
-#include <boost/filesystem.hpp>
 
 Inou_abc_options_pack::Inou_abc_options_pack() {
   Options::get_desc()->add_options()("verbose,v", boost::program_options::value(&verbose), "verbose debug info : <true>/<false>");
@@ -42,9 +43,15 @@ Inou_abc_options_pack::Inou_abc_options_pack() {
 }
 
 Inou_abc::Inou_abc() {
+  graph_info = new graph_topology;
+}
+
+Inou_abc::Inou_abc(const py::dict &dict) {
+  graph_info = new graph_topology;
 }
 
 Inou_abc::~Inou_abc() {
+  delete graph_info;
 }
 
 std::vector<LGraph *> Inou_abc::generate() {
@@ -70,9 +77,15 @@ void Inou_abc::generate(std::vector<const LGraph *> &out) {
       from_abc(Mapped_Lgraph, out[0], to_abc(out[0]));
       Mapped_Lgraph->sync();
       Mapped_Lgraph->print_stats();
-      Inou_abc blif_dumper;
-      blif_dumper.dump_blif(Mapped_Lgraph, "mapped.blif");
+      clear();
+      dump_blif(Mapped_Lgraph, "mapped.blif");
+    } else {
+      console->error("inou_abc supports techmap graphs only\n");
+      exit(1);
     }
+  } else {
+    console->error("inou_abc supports a single graph only\n");
+    exit(1);
   }
 }
 
@@ -93,8 +106,8 @@ void Inou_abc::generate(std::vector<const LGraph *> &out) {
  ***********************************************************************/
 
 void Inou_abc::find_latch_conn(const LGraph *g) {
-  for(const auto &idx : latch_id) {
-    topology_info    pid;
+  for(const auto &idx : graph_info->latch_id) {
+	graph_topology::topology_info    pid;
     const Tech_cell *tcell = g->get_tlibrary()->get_const_cell(g->tmap_id_get(idx));
     if(opack.verbose == "true")
       fmt::print("\nLatch_Op_ID NodeID:{} has direct input from Node: \n", idx);
@@ -118,7 +131,7 @@ void Inou_abc::find_latch_conn(const LGraph *g) {
 				 * this build only support "clock(FF) or Enable(latch)" pin and "reset" pin
 				 *********************************************************************/
       else if(input.get_inp_pin().get_pid() == tcell->get_pin_id(trig_pin)) {
-        topology_info clock_pid;
+		graph_topology::topology_info clock_pid;
         int           bit_index[2] = {0, 0};
         recursive_find(g, &input, clock_pid, bit_index);
         Index_ID clk_idx = clock_pid[0].idx;
@@ -130,10 +143,10 @@ void Inou_abc::find_latch_conn(const LGraph *g) {
           sprintf(clk_name, "generated_clock_id_%ld", clk_idx);
         }
         std::string clock_name(clk_name);
-        clock_id[clock_name] = clk_idx;
-        skew_group_map[clock_name].insert(idx);
+		graph_info->clock_id[clock_name] = clk_idx;
+		graph_info->skew_group_map[clock_name].insert(idx);
       } else if(input.get_inp_pin().get_pid() == tcell->get_pin_id("R")) {
-        topology_info reset_pid;
+		graph_topology::topology_info reset_pid;
         int           bit_index[2] = {0, 0};
         recursive_find(g, &input, reset_pid, bit_index);
         Index_ID reset_idx = reset_pid[0].idx;
@@ -144,22 +157,22 @@ void Inou_abc::find_latch_conn(const LGraph *g) {
           sprintf(rst_name, "generated_reset_id_%ld", reset_idx);
         }
         std::string reset_name(rst_name);
-        reset_id[reset_name] = reset_idx;
-        reset_group_map[reset_name].insert(idx);
+		graph_info->reset_id[reset_name] = reset_idx;
+		graph_info->reset_group_map[reset_name].insert(idx);
       }
     }
     assert(pid.size() == 1); // ensure that D pin have fanin and only store D pin info
-    latch_conn[idx] = std::move(pid);
+    graph_info->latch_conn[idx] = std::move(pid);
   }
 }
 
 void Inou_abc::find_combinational_conn(const LGraph *g) {
 
-  for(const auto &idx : combinational_id) {
+  for(const auto &idx : graph_info->combinational_id) {
     if(opack.verbose == "true")
       fmt::print("\nComb_Op_ID NodeID:{} has direct input from Node: \n", idx);
     std::vector<const Edge *> inp_edges(16);
-    topology_info             pid;
+	graph_topology::topology_info             pid;
     const Tech_cell *         tcell      = g->get_tlibrary()->get_const_cell(g->tmap_id_get(idx));
     int                       port_count = 0;
     for(const auto &input : g->inp_edges(idx)) {
@@ -177,15 +190,15 @@ void Inou_abc::find_combinational_conn(const LGraph *g) {
       recursive_find(g, inp_edges[i], pid, bit_index);
     }
     assert(pid.size() == port_count); // ensure that every port have fanin
-    comb_conn[idx] = std::move(pid);
+	graph_info->comb_conn[idx] = std::move(pid);
   }
 }
 
 void Inou_abc::find_graphio_output_conn(const LGraph *g) {
-  for(const auto &idx : graphio_output_id) {
+  for(const auto &idx : graph_info->graphio_output_id) {
     if(opack.verbose == "true")
       fmt::print("\nGraphIO_output_ID NodeID:{} has direct input from Node: \n", idx);
-    topology_info pid;
+	graph_topology::topology_info pid;
     int           width = g->get_bits(idx);
     int           index = 0;
     for(const auto &input : g->inp_edges(idx)) {
@@ -195,17 +208,17 @@ void Inou_abc::find_graphio_output_conn(const LGraph *g) {
       }
     }
     assert(index == pid.size());
-    primary_output_conn[idx] = std::move(pid);
+	graph_info->primary_output_conn[idx] = std::move(pid);
   }
 }
 
 void Inou_abc::find_subgraph_conn(const LGraph *g) {
 
-  for(const auto &idx : subgraph_id) {
+  for(const auto &idx : graph_info->subgraph_id) {
     if(opack.verbose == "true")
       fmt::print("\nSubGraph_Op NodeID:{} has direct input from Node: \n", idx);
     std::map<Port_ID, const Edge *>            inp_edges;
-    std::unordered_map<Port_ID, topology_info> subgraph_pid;
+    std::unordered_map<Port_ID, graph_topology::topology_info> subgraph_pid;
 
     for(const auto &input : g->inp_edges(idx)) {
       Port_ID inp_id    = input.get_inp_pin().get_pid();
@@ -215,7 +228,7 @@ void Inou_abc::find_subgraph_conn(const LGraph *g) {
     for(const auto &input : inp_edges) {
       if(opack.verbose == "true")
         fmt::print("\n------------------------------------------------ \n", idx);
-      topology_info pid;
+	  graph_topology::topology_info pid;
       auto          node_idx = input.second->get_idx();
       auto          width    = g->get_bits(node_idx);
       int           index    = 0;
@@ -230,16 +243,16 @@ void Inou_abc::find_subgraph_conn(const LGraph *g) {
       }
       subgraph_pid[input.first] = std::move(pid);
     }
-    subgraph_conn[idx] = std::move(subgraph_pid);
+	graph_info->subgraph_conn[idx] = std::move(subgraph_pid);
   }
 }
 
 void Inou_abc::find_memory_conn(const LGraph *g) {
-  for(const auto &idx : memory_id) {
+  for(const auto &idx : graph_info->memory_id) {
     if(opack.verbose == "true")
       fmt::print("\nMemory_Op NodeID:{} has direct input from Node: \n", idx);
     std::map<Port_ID, const Edge *>            inp_edges;
-    std::unordered_map<Port_ID, topology_info> memory_pid;
+    std::unordered_map<Port_ID, graph_topology::topology_info> memory_pid;
     for(const auto &input : g->inp_edges(idx)) {
       Port_ID inp_id = input.get_inp_pin().get_pid();
       if(inp_id >= LGRAPH_MEMOP_CLK)
@@ -251,7 +264,7 @@ void Inou_abc::find_memory_conn(const LGraph *g) {
       Port_ID input_id = input.second->get_inp_pin().get_pid();
       if(opack.verbose == "true")
         fmt::print("\n-------------------{}---------------------- \n", input_id);
-      topology_info pid;
+	  graph_topology::topology_info pid;
       auto          node_idx = input.second->get_idx();
       auto          width    = g->get_bits(node_idx);
       int           index    = 0;
@@ -274,28 +287,32 @@ void Inou_abc::find_memory_conn(const LGraph *g) {
           sprintf(clk_name, "generated_clock_id_%ld", clk_idx);
         }
         std::string clock_name(clk_name);
-        clock_id[clock_name] = clk_idx;
-        skew_group_map[clock_name].insert(idx);
+		graph_info->clock_id[clock_name] = clk_idx;
+		graph_info->skew_group_map[clock_name].insert(idx);
       }
       memory_pid[input.first] = std::move(pid);
     }
-    memory_conn[idx] = std::move(memory_pid);
+	graph_info->memory_conn[idx] = std::move(memory_pid);
   }
 }
 
 void Inou_abc::find_cell_conn(const LGraph *g) {
 
+#ifndef NDEBUG
   fmt::print("\n******************************************************************\n");
   fmt::print("Begin Computing Netlist Topology Based On Lgraph\n");
   fmt::print("******************************************************************\n");
+#endif
   find_latch_conn(g);
   find_combinational_conn(g);
   find_graphio_output_conn(g);
   find_subgraph_conn(g);
   find_memory_conn(g);
+#ifndef NDEBUG
   fmt::print("\n******************************************************************\n");
   fmt::print("Finish Computing Netlist Topology Based On Lgraph\n");
   fmt::print("******************************************************************\n");
+#endif
 }
 
 /************************************************************************
@@ -313,7 +330,7 @@ void Inou_abc::find_cell_conn(const LGraph *g) {
  * 						FIXME: More Join & Pick Node means (a way to reduce ?)
  * 						"deeper" traverse depth and recursion
  ***********************************************************************/
-void Inou_abc::recursive_find(const LGraph *g, const Edge *input, topology_info &pid, int *bit_addr) {
+void Inou_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology::topology_info &pid, int *bit_addr) {
 
   Index_ID     this_idx       = input->get_idx();
   Node_Type_Op this_node_type = g->node_type_get(this_idx).op;
@@ -352,9 +369,9 @@ void Inou_abc::recursive_find(const LGraph *g, const Edge *input, topology_info 
     pid.push_back(info);
 
     sprintf(namebuffer, "%%memory_output_%ld_%d_%d%%", this_idx, input->get_out_pin().get_pid(), bit_addr[0]);
-    const auto it = memory_generated_output_wire.find(info);
-    if(it == memory_generated_output_wire.end()) {
-      memory_generated_output_wire[info] = std::string(namebuffer);
+    const auto it = graph_info->memory_generated_output_wire.find(info);
+    if(it == graph_info->memory_generated_output_wire.end()) {
+	  graph_info->memory_generated_output_wire[info] = std::string(namebuffer);
     }
   } else if(this_node_type == SubGraph_Op) {
     char namebuffer[255];
@@ -365,9 +382,9 @@ void Inou_abc::recursive_find(const LGraph *g, const Edge *input, topology_info 
     pid.push_back(info);
 
     sprintf(namebuffer, "%%subgraph_output_%ld_%d_%d%%", this_idx, input->get_out_pin().get_pid(), bit_addr[0]);
-    const auto it = subgraph_generated_output_wire.find(info);
-    if(it == subgraph_generated_output_wire.end()) {
-      subgraph_generated_output_wire[info] = std::string(namebuffer);
+    const auto it = graph_info->subgraph_generated_output_wire.find(info);
+    if(it == graph_info->subgraph_generated_output_wire.end()) {
+	  graph_info->subgraph_generated_output_wire[info] = std::string(namebuffer);
     }
   } else if(this_node_type == TechMap_Op) {
     if(opack.verbose == "true")
@@ -457,11 +474,11 @@ bool Inou_abc::is_techmap(const LGraph *g) {
     case TechMap_Op: {
       const Tech_cell *tcell = g->get_tlibrary()->get_const_cell(g->tmap_id_get(idx));
       if(is_latch(tcell)) {
-        latch_id.push_back(idx);
+		graph_info->latch_id.push_back(idx);
       } else {
         auto tcell_name = tcell->get_name();
         if(tcell_name != "$_BUF_")
-          combinational_id.push_back(idx);
+		  graph_info->combinational_id.push_back(idx);
       }
       break;
     }
@@ -544,17 +561,17 @@ bool Inou_abc::is_techmap(const LGraph *g) {
     }
     case GraphIO_Op: {
       if(g->is_graph_input(idx))
-        graphio_input_id.push_back(idx);
+		graph_info->graphio_input_id.push_back(idx);
       else
-        graphio_output_id.push_back(idx);
+		graph_info->graphio_output_id.push_back(idx);
       break;
     }
     case SubGraph_Op: {
-      subgraph_id.push_back(idx);
+	  graph_info->subgraph_id.push_back(idx);
       break;
     }
     case Memory_Op: {
-      memory_id.push_back(idx);
+	  graph_info->memory_id.push_back(idx);
       break;
     }
     default: {

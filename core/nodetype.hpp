@@ -2,17 +2,19 @@
 #define NODETYPE_H
 
 #include <assert.h>
-
+#include <map>
 #include <string>
 #include <vector>
 
 #include "bm.h"
 #include "bmsparsevec.h"
-
+#include "char_array.hpp"
 #include "dense.hpp"
-#include "lgconsts.hpp"
 
-#include "lgraphbase.hpp"
+#include "lgraph_base_core.hpp"
+
+// nodetype should be at meta directory but the node type is needed all over in the base class. It may be good to integrate nodetype
+// as part of the lgnode itself to avoid extra cache misses
 
 enum Node_Type_Op : uint64_t {
   Invalid_Op,
@@ -27,7 +29,7 @@ enum Node_Type_Op : uint64_t {
   Or_Op,
   Xor_Op,
   Flop_Op,
-  AFlop_Op, //async reset flop
+  AFlop_Op, // async reset flop
   Latch_Op,
   FFlop_Op,
   Memory_Op,
@@ -40,12 +42,14 @@ enum Node_Type_Op : uint64_t {
   ShiftRight_Op,
   ShiftLeft_Op,
   GraphIO_Op,
+  DontCare_Op,
   CfgAssign_Op,
   CfgIf_Op,
   CfgFunctionCall_Op,
   CfgFor_Op,
   CfgWhile_Op,
   CfgIfMerge_Op,
+  CfgBeenRead_Op,
   // Add here, operators needed
   SubGraph_Op,
   BlackBox_Op,
@@ -61,8 +65,6 @@ enum Node_Type_Op : uint64_t {
   TechMapMin_Op,
   TechMapMax_Op = 4 * (1ULL << 32)
 };
-
-class LGraph;
 
 class Node_Type {
 private:
@@ -80,16 +82,18 @@ protected:
 public:
   const Node_Type_Op op;
 
-  Node_Type(const std::string & _name, Node_Type_Op _op, bool _pipelined)
-      : name(_name), pipelined(_pipelined), op(_op){};
-
-  static Node_Type &create_sub_graph(LGraph *g);
+  Node_Type(const std::string &_name, Node_Type_Op _op, bool _pipelined)
+      : name(_name)
+      , pipelined(_pipelined)
+      , op(_op){};
 
   static Node_Type &  get(Node_Type_Op op);
-  static Node_Type_Op get(const std::string & opname);
-  static bool         is_type(const std::string & opname);
+  static Node_Type_Op get(const std::string &opname);
+  static bool         is_type(const std::string &opname);
 
-  const std::string &get_name() const { return name; }
+  const std::string &get_name() const {
+    return name;
+  }
 
   Port_ID get_input_match(const char *str) const {
     for(size_t i = 0; i < inputs.size(); i++) {
@@ -115,7 +119,9 @@ public:
     return 0;
   }
 
-  bool is_pipelined() const { return pipelined; } // Can create loops
+  bool is_pipelined() const {
+    return pipelined;
+  } // Can create loops
 
   class _init {
   public:
@@ -126,7 +132,8 @@ public:
 
 class Node_Type_Invalid : public Node_Type {
 public:
-  Node_Type_Invalid() : Node_Type("invalid", Invalid_Op, false){};
+  Node_Type_Invalid()
+      : Node_Type("invalid", Invalid_Op, false){};
 };
 
 // Y = (As+...+As+Au+...+Au) - (Bs+...+Bs+Bu+...+Bu)
@@ -134,7 +141,8 @@ public:
 // y = As + Au (is an unsigned add)
 class Node_Type_Sum : public Node_Type {
 public:
-  Node_Type_Sum() : Node_Type("sum", Sum_Op, false) {
+  Node_Type_Sum()
+      : Node_Type("sum", Sum_Op, false) {
     inputs.push_back("As"); // signed
     inputs.push_back("Au"); // unsigned
     inputs.push_back("Bs");
@@ -146,7 +154,8 @@ public:
 // Y = As*...*As * Au*...*Au
 class Node_Type_Mult : public Node_Type {
 public:
-  Node_Type_Mult() : Node_Type("mult", Mult_Op, false) {
+  Node_Type_Mult()
+      : Node_Type("mult", Mult_Op, false) {
     inputs.push_back("As");
     inputs.push_back("Au");
     outputs.push_back("Y");
@@ -156,7 +165,8 @@ public:
 // Y = (As|Au)/(Bs/Bu)
 class Node_Type_Div : public Node_Type {
 public:
-  Node_Type_Div() : Node_Type("div", Div_Op, false) {
+  Node_Type_Div()
+      : Node_Type("div", Div_Op, false) {
     inputs.push_back("As");
     inputs.push_back("Au");
     inputs.push_back("Bs");
@@ -168,7 +178,8 @@ public:
 // Y = (As|Au)%(Bs/Bu)
 class Node_Type_Mod : public Node_Type {
 public:
-  Node_Type_Mod() : Node_Type("mod", Mod_Op, false) {
+  Node_Type_Mod()
+      : Node_Type("mod", Mod_Op, false) {
     inputs.push_back("As");
     inputs.push_back("Au");
     inputs.push_back("Bs");
@@ -179,7 +190,8 @@ public:
 
 class Node_Type_Not : public Node_Type {
 public:
-  Node_Type_Not() : Node_Type("not", Not_Op, false) {
+  Node_Type_Not()
+      : Node_Type("not", Not_Op, false) {
     inputs.push_back("A");
     outputs.push_back("Y");
   };
@@ -188,7 +200,8 @@ public:
 // Y = {A,B,C,D,E....}
 class Node_Type_Join : public Node_Type {
 public:
-  Node_Type_Join() : Node_Type("join", Join_Op, false) {
+  Node_Type_Join()
+      : Node_Type("join", Join_Op, false) {
     inputs.push_back("A");
     inputs.push_back("B");
     inputs.push_back("C");
@@ -205,7 +218,8 @@ public:
 // j = offset + bits
 class Node_Type_Pick : public Node_Type {
 public:
-  Node_Type_Pick() : Node_Type("pick", Pick_Op, false) {
+  Node_Type_Pick()
+      : Node_Type("pick", Pick_Op, false) {
     inputs.push_back("A");
     inputs.push_back("offset");
     outputs.push_back("Y");
@@ -216,10 +230,11 @@ public:
 // Y1 = & {A, A, A...} //reduction
 class Node_Type_And : public Node_Type {
 public:
-  Node_Type_And() : Node_Type("and", And_Op, false) {
-    inputs.push_back("A");        //pid: 0
-    outputs.push_back("Y");       //pid: 0
-    outputs.push_back("Yreduce"); //pid: 1
+  Node_Type_And()
+      : Node_Type("and", And_Op, false) {
+    inputs.push_back("A");        // pid: 0
+    outputs.push_back("Y");       // pid: 0
+    outputs.push_back("Yreduce"); // pid: 1
   };
 };
 
@@ -227,7 +242,8 @@ public:
 // Y1 = | {A, A, A...} //reduction
 class Node_Type_Or : public Node_Type {
 public:
-  Node_Type_Or() : Node_Type("or", Or_Op, false) {
+  Node_Type_Or()
+      : Node_Type("or", Or_Op, false) {
     inputs.push_back("A");
     outputs.push_back("Y");
     outputs.push_back("Yreduce");
@@ -238,7 +254,8 @@ public:
 // Y1 = ^ {A, A, A...} //reduction
 class Node_Type_Xor : public Node_Type {
 public:
-  Node_Type_Xor() : Node_Type("xor", Xor_Op, false) {
+  Node_Type_Xor()
+      : Node_Type("xor", Xor_Op, false) {
     inputs.push_back("A");
     outputs.push_back("Y");
     outputs.push_back("Yreduce");
@@ -253,7 +270,8 @@ public:
 // LessThan A , (B C) means (LessThan A , B) and (LessThan A, C)
 class Node_Type_LessThan : public Node_Type {
 public:
-  Node_Type_LessThan() : Node_Type("lessthan", LessThan_Op, false) {
+  Node_Type_LessThan()
+      : Node_Type("lessthan", LessThan_Op, false) {
     inputs.push_back("As");
     inputs.push_back("Au");
     inputs.push_back("Bs");
@@ -265,7 +283,8 @@ public:
 // Y = (As|Au) > (Bs|Bu)
 class Node_Type_GreaterThan : public Node_Type {
 public:
-  Node_Type_GreaterThan() : Node_Type("greaterthan", GreaterThan_Op, false) {
+  Node_Type_GreaterThan()
+      : Node_Type("greaterthan", GreaterThan_Op, false) {
     inputs.push_back("As");
     inputs.push_back("Au");
     inputs.push_back("Bs");
@@ -277,7 +296,8 @@ public:
 // Y = (As|Au) >= (Bs|Bu)
 class Node_Type_GreaterEqualThan : public Node_Type {
 public:
-  Node_Type_GreaterEqualThan() : Node_Type("greaterequalthan", GreaterEqualThan_Op, false) {
+  Node_Type_GreaterEqualThan()
+      : Node_Type("greaterequalthan", GreaterEqualThan_Op, false) {
     inputs.push_back("As");
     inputs.push_back("Au");
     inputs.push_back("Bs");
@@ -289,7 +309,8 @@ public:
 // Y = (As|Au) <= (Bs|Bu)
 class Node_Type_LessEqualThan : public Node_Type {
 public:
-  Node_Type_LessEqualThan() : Node_Type("lessequalthan", LessEqualThan_Op, false) {
+  Node_Type_LessEqualThan()
+      : Node_Type("lessequalthan", LessEqualThan_Op, false) {
     inputs.push_back("As");
     inputs.push_back("Au");
     inputs.push_back("Bs");
@@ -301,7 +322,8 @@ public:
 // Y = (As|Au) == (As|Au) == ...
 class Node_Type_Equals : public Node_Type {
 public:
-  Node_Type_Equals() : Node_Type("equals", Equals_Op, false) {
+  Node_Type_Equals()
+      : Node_Type("equals", Equals_Op, false) {
     inputs.push_back("As");
     inputs.push_back("Au");
     outputs.push_back("Y");
@@ -311,7 +333,8 @@ public:
 // Y = ~SA + SB
 class Node_Type_Mux : public Node_Type {
 public:
-  Node_Type_Mux() : Node_Type("mux", Mux_Op, false) {
+  Node_Type_Mux()
+      : Node_Type("mux", Mux_Op, false) {
     inputs.push_back("S");
     inputs.push_back("A");
     inputs.push_back("B");
@@ -324,7 +347,8 @@ public:
 // S == 2: B is signed
 class Node_Type_ShiftRight : public Node_Type {
 public:
-  Node_Type_ShiftRight() : Node_Type("shr", ShiftRight_Op, false) {
+  Node_Type_ShiftRight()
+      : Node_Type("shr", ShiftRight_Op, false) {
     inputs.push_back("A");
     inputs.push_back("B");
     inputs.push_back("S");
@@ -335,7 +359,8 @@ public:
 // Y = A << B
 class Node_Type_ShiftLeft : public Node_Type {
 public:
-  Node_Type_ShiftLeft() : Node_Type("shl", ShiftLeft_Op, false) {
+  Node_Type_ShiftLeft()
+      : Node_Type("shl", ShiftLeft_Op, false) {
     inputs.push_back("A");
     inputs.push_back("B");
     outputs.push_back("Y");
@@ -344,7 +369,8 @@ public:
 
 class Node_Type_GraphIO : public Node_Type {
 public:
-  Node_Type_GraphIO() : Node_Type("graphio", GraphIO_Op, false) {
+  Node_Type_GraphIO()
+      : Node_Type("graphio", GraphIO_Op, false) {
     inputs.push_back("A");
     outputs.push_back("Y");
   };
@@ -352,7 +378,8 @@ public:
 
 class Node_Type_Flop : public Node_Type {
 public:
-  Node_Type_Flop() : Node_Type("flop", Flop_Op, true) {
+  Node_Type_Flop()
+      : Node_Type("flop", Flop_Op, true) {
     inputs.push_back("clk"); // clk
     inputs.push_back("D");
     inputs.push_back("E");
@@ -365,7 +392,8 @@ public:
 
 class Node_Type_AFlop : public Node_Type {
 public:
-  Node_Type_AFlop() : Node_Type("flop", AFlop_Op, true) {
+  Node_Type_AFlop()
+      : Node_Type("flop", AFlop_Op, true) {
     inputs.push_back("clk"); // clk
     inputs.push_back("D");
     inputs.push_back("E");
@@ -377,7 +405,8 @@ public:
 
 class Node_Type_Latch : public Node_Type {
 public:
-  Node_Type_Latch() : Node_Type("latch", Latch_Op, true) {
+  Node_Type_Latch()
+      : Node_Type("latch", Latch_Op, true) {
     inputs.push_back("D");
     inputs.push_back("EN");
     outputs.push_back("Q");
@@ -386,7 +415,8 @@ public:
 
 class Node_Type_FFlop : public Node_Type {
 public:
-  Node_Type_FFlop() : Node_Type("fflop", FFlop_Op, true) {
+  Node_Type_FFlop()
+      : Node_Type("fflop", FFlop_Op, true) {
     inputs.push_back("clk"); // clk
     inputs.push_back("D");
     inputs.push_back("Vi");   // valid in
@@ -431,21 +461,22 @@ public:
 // generic multiported memory object
 class Node_Type_Memory : public Node_Type {
 public:
-  Node_Type_Memory() : Node_Type("memory", Memory_Op, true) {
+  Node_Type_Memory()
+      : Node_Type("memory", Memory_Op, true) {
 
-    //parameters
-    inputs.push_back("size");           //number of words (parameter)
-    inputs.push_back("abits");          //address bits //FIXME: if input ports have sizes, it is possible to remove this
-    inputs.push_back("wr_ports");       //number of wr_ports (parameter)
-    inputs.push_back("rd_ports");       //number of rd_ports (parameter)
-    inputs.push_back("clk_polarity");   //clock polarity: 0 == posedge, 1 == negedge
-    inputs.push_back("rd_transparent"); //fwd writes to reads in the same address
+    // parameters
+    inputs.push_back("size");           // number of words (parameter)
+    inputs.push_back("abits");          // address bits //FIXME: if input ports have sizes, it is possible to remove this
+    inputs.push_back("wr_ports");       // number of wr_ports (parameter)
+    inputs.push_back("rd_ports");       // number of rd_ports (parameter)
+    inputs.push_back("clk_polarity");   // clock polarity: 0 == posedge, 1 == negedge
+    inputs.push_back("rd_transparent"); // fwd writes to reads in the same address
 
-    //shared ports
-    inputs.push_back("clk"); //single clock support only
-    inputs.push_back("ce");  //shared chip enable (no connection means always enable)
+    // shared ports
+    inputs.push_back("clk"); // single clock support only
+    inputs.push_back("ce");  // shared chip enable (no connection means always enable)
 
-    //wr / rd port 0
+    // wr / rd port 0
     inputs.push_back("wr0_addr");
     inputs.push_back("wr0_data");
     inputs.push_back("wr0_en");
@@ -453,7 +484,7 @@ public:
     inputs.push_back("rd0_addr");
     inputs.push_back("rd0_en");
 
-    //wr / rd port 1
+    // wr / rd port 1
     inputs.push_back("wr1_addr");
     inputs.push_back("wr1_data");
     inputs.push_back("wr1_en");
@@ -461,7 +492,7 @@ public:
     inputs.push_back("rd1_addr");
     inputs.push_back("rd1_en");
 
-    //wr / rd port 2
+    // wr / rd port 2
     inputs.push_back("wr2_addr");
     inputs.push_back("wr2_data");
     inputs.push_back("wr2_en");
@@ -469,7 +500,7 @@ public:
     inputs.push_back("rd2_addr");
     inputs.push_back("rd2_en");
 
-    //wr / rd port 3
+    // wr / rd port 3
     inputs.push_back("wr3_addr");
     inputs.push_back("wr3_data");
     inputs.push_back("wr3_en");
@@ -489,13 +520,15 @@ public:
 class Node_Type_SubGraph : public Node_Type {
 public:
   // TODO: Create 2 subgraphs? one pipelined and another not
-  Node_Type_SubGraph() : Node_Type("subgraph", SubGraph_Op, true){};
+  Node_Type_SubGraph()
+      : Node_Type("subgraph", SubGraph_Op, true){};
 };
 
 class Node_Type_TechMap : public Node_Type {
 public:
   // FIXME: Create 2 TechMaps to know if it is pipelined or not for loops
-  Node_Type_TechMap() : Node_Type("techmap", TechMap_Op, true){};
+  Node_Type_TechMap()
+      : Node_Type("techmap", TechMap_Op, true){};
 };
 
 #define LGRAPH_BBOP_TYPE 0
@@ -518,7 +551,8 @@ public:
 
 class Node_Type_BlackBox : public Node_Type {
 public:
-  Node_Type_BlackBox() : Node_Type("blackbox", BlackBox_Op, true) {
+  Node_Type_BlackBox()
+      : Node_Type("blackbox", BlackBox_Op, true) {
     inputs.push_back("type");
     inputs.push_back("instance_name");
 
@@ -534,7 +568,7 @@ public:
     inputs.push_back("port3_name");
     inputs.push_back("port3_connection");
 
-    //continues ...
+    // continues ...
     outputs.push_back("port1_name");
     outputs.push_back("port1_connection");
 
@@ -548,24 +582,27 @@ public:
 
 class Node_Type_U32Const : public Node_Type {
 public:
-  Node_Type_U32Const() : Node_Type("u32const", U32Const_Op, false) {
+  Node_Type_U32Const()
+      : Node_Type("u32const", U32Const_Op, false) {
     outputs.push_back("Y");
   };
 };
 
 class Node_Type_StrConst : public Node_Type {
 public:
-  Node_Type_StrConst() : Node_Type("strconst", StrConst_Op, false) {
+  Node_Type_StrConst()
+      : Node_Type("strconst", StrConst_Op, false) {
     outputs.push_back("Y");
   };
 };
 
-//start adding CFG node_types descriptions
+// start adding CFG node_types descriptions
 
 // Y1=(A==True), Y2=(A==False)
 class Node_Type_CfgIf : public Node_Type {
 public:
-  Node_Type_CfgIf() : Node_Type("cfg_if", CfgIf_Op, false) {
+  Node_Type_CfgIf()
+      : Node_Type("cfg_if", CfgIf_Op, false) {
     inputs.push_back("A");
     outputs.push_back("Y1");
     outputs.push_back("Y2");
@@ -575,7 +612,8 @@ public:
 // Y = A
 class Node_Type_CfgAssign : public Node_Type {
 public:
-  Node_Type_CfgAssign() : Node_Type("cfg_assign", CfgAssign_Op, false) {
+  Node_Type_CfgAssign()
+      : Node_Type("cfg_assign", CfgAssign_Op, false) {
     inputs.push_back("A");
     outputs.push_back("Y");
   };
@@ -583,7 +621,8 @@ public:
 
 class Node_Type_CfgFunctionCall : public Node_Type {
 public:
-  Node_Type_CfgFunctionCall() : Node_Type("cfg_func", CfgFunctionCall_Op, false) {
+  Node_Type_CfgFunctionCall()
+      : Node_Type("cfg_func", CfgFunctionCall_Op, false) {
     inputs.push_back("A");
     outputs.push_back("Y");
   };
@@ -591,7 +630,8 @@ public:
 
 class Node_Type_CfgFor : public Node_Type {
 public:
-  Node_Type_CfgFor() : Node_Type("cfg_for", CfgFor_Op, false) {
+  Node_Type_CfgFor()
+      : Node_Type("cfg_for", CfgFor_Op, false) {
     inputs.push_back("A");
     outputs.push_back("Y");
   };
@@ -599,7 +639,8 @@ public:
 
 class Node_Type_CfgWhile : public Node_Type {
 public:
-  Node_Type_CfgWhile() : Node_Type("cfg_while", CfgWhile_Op, false) {
+  Node_Type_CfgWhile()
+      : Node_Type("cfg_while", CfgWhile_Op, false) {
     inputs.push_back("A");
     outputs.push_back("Y");
   };
@@ -607,27 +648,50 @@ public:
 
 class Node_Type_CfgIfMerge : public Node_Type {
 public:
-  Node_Type_CfgIfMerge() : Node_Type("cfg_if_merge", CfgIfMerge_Op, false) {
+  Node_Type_CfgIfMerge()
+      : Node_Type("cfg_if_merge", CfgIfMerge_Op, false) {
     inputs.push_back("A");
     outputs.push_back("Y");
   };
 };
 
-class LGraph_Node_Type : public LGraph_Consts,
-                         virtual public LGraph_Base {
+class Node_Type_CfgBeenRead : public Node_Type {
+public:
+  Node_Type_CfgBeenRead()
+      : Node_Type("cfg_been_read", CfgBeenRead_Op, false) {
+    inputs.push_back("A");
+    outputs.push_back("Y");
+  };
+};
+
+class Node_Type_DontCare : public Node_Type {
+public:
+  Node_Type_DontCare()
+      : Node_Type("don't_care", DontCare_Op, false) {
+    outputs.push_back("Y");
+  };
+};
+
+typedef Char_Array_ID Const_ID;
+
+class LGraph_Node_Type : virtual public Lgraph_base_core {
 private:
-  Dense<Node_Type_Op> node_type_op;
-  bm::bvector<>       const_nodes;
+  Char_Array<Const_ID> consts;
+  Dense<Node_Type_Op>  node_type_table;
+  bm::bvector<>        const_nodes;
 
 public:
   LGraph_Node_Type() = delete;
-  explicit LGraph_Node_Type(const std::string& path, const std::string& name) noexcept ;
+  explicit LGraph_Node_Type(const std::string &path, const std::string &name) noexcept;
   virtual ~LGraph_Node_Type(){};
 
-  virtual void clear();
-  virtual void reload();
-  virtual void sync();
-  virtual void emplace_back();
+  Const_ID    get_constant_id(const char *constant);
+  const char *get_constant(Const_ID const_id) const;
+
+  void clear();
+  void reload();
+  void sync();
+  void emplace_back();
 
   void node_type_set(Index_ID nid, Node_Type_Op op);
 
@@ -637,20 +701,22 @@ public:
   void     node_subgraph_set(Index_ID nid, uint32_t subgraphid);
   uint32_t subgraph_id_get(Index_ID nid) const;
 
-  void node_const_type_set(Index_ID nid, const std::string & value
+  void node_const_type_set(Index_ID nid, const std::string &value
 #ifndef NDEBUG
                            ,
                            bool enforce_bits = true
 #endif
   );
-  std::string node_const_value_get(Index_ID nid) const;
+  const std::string &node_const_value_get(Index_ID nid) const;
 
   void     node_tmap_set(Index_ID nid, uint32_t tmapid);
   uint32_t tmap_id_get(Index_ID nid) const;
 
   const Node_Type &node_type_get(Index_ID nid) const;
 
-  const bm::bvector<> &get_const_node_ids() const { return const_nodes; };
+  const bm::bvector<> &get_const_node_ids() const {
+    return const_nodes;
+  };
 };
 
 #endif

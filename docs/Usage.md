@@ -15,6 +15,7 @@ pacman -S clang llvm
 pacman -S make
 pacman -S yaml-cpp tcl
 pacman -S mercurial
+sudo pip install ptpython
 ```
 
 # Documentation
@@ -47,22 +48,7 @@ git pull --recurse-submodules
 
 You need either debug or release, if you are developing, use the debug option.
 
-## Debug
-
-```bash
-mkdir -p ~/build/lgraphd
-cd ~/build/lgraphd
-cmake -DCMAKE_BUILD_TYPE=Debug ~/projs/lgraph
-make VERBOSE=1
-```
-
-## Release
-```bash
-mkdir -p ~/build/lgraph
-cd ~/build/lgraph
-cmake ~/projs/lgraph
-make
-```
+See Bazel.md for more details
 
 # Sample usage
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-TEMP=`getopt -o t::l::y::b::I::dhg:: --long testdir::,logdir::,inou::,binary::,incdir::debug,techmap,hierarchy,graph_name::,lgdb::,top::,lib:: -n 'lgyosys' -- "$@"`
+TEMP=`getopt -o t::l::y::b::I::dphg:: --long testdir::,logdir::,inou::,binary::,incdir::no_sv,debug,techmap,hierarchy,graph_name::,lgdb::,top::,lib:: -n 'lgyosys' -- "$@"`
 eval set -- "$TEMP"
 
 OPT_YOSYS="./subs/yosys/bin/yosys"
@@ -17,6 +17,8 @@ OPT_LIB=""
 OPT_INCDIR=""
 OPT_CELL="./inou/yosys/simcell.v"
 OPT_TOP=""
+OPT_PROFILE=0
+OPT_SYSTEMVERILOG=1
 
 while true ; do
     case "$1" in
@@ -59,6 +61,12 @@ while true ; do
         -d|--debug)
           shift 1 ;
           OPT_DEBUG=1 ;;
+        --no_sv)
+          shift 1 ;
+          OPT_SYSTEMVERILOG=0 ;;
+        -p)
+          shift 1 ;
+          OPT_PROFILE=1 ;;
         -m|--techmap)
           shift 1 ;
           OPT_TECHMAP=1 ;;
@@ -92,6 +100,15 @@ fi
 
 if [ $OPT_DEBUG -eq 1 ]; then
   OPT_YOSYS="gdb --args ${OPT_YOSYS}"
+fi
+
+if [ $OPT_PROFILE -eq 1 ]; then
+  OPT_YOSYS="${OPT_YOSYS} -d"
+fi
+
+OPT_READVERILOG="read_verilog"
+if [ $OPT_SYSTEMVERILOG -eq 1 ]; then
+  OPT_READVERILOG="${OPT_READVERILOG} -sv"
 fi
 
 if [ -f "${OPT_INOU_YOSYS}" ]; then
@@ -141,7 +158,7 @@ if [ ${OPT_TO_VERILOG} -eq 0 ]; then
 
 
   ${OPT_YOSYS} -ql ${OPT_LOGDIR}/${BASE}.log  -m $OPT_INOU_YOSYS -p "
-  ${OPT_INCDIR}; read_verilog -sv -nomeminit ${FILE_LIST};
+  ${OPT_INCDIR}; ${OPT_READVERILOG} -sv -nomeminit ${FILE_LIST};
   hierarchy ${top}; proc; pmuxtree; memory_dff; memory_collect; ${techmap}; ${lib};
   write_blif golden.blif; write_verilog golden.v ; inou_yosys ${OPT_LGDB}"
 

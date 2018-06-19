@@ -6,7 +6,7 @@
 #include "lgbench.hpp"
 #include "lgraph.hpp"
 
-#include "inou/pyrope/inou_pyrope.hpp"
+#include "inou_pyrope.hpp"
 
 int main(int argc, const char **argv) {
   LGBench b;

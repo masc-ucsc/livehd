@@ -32,7 +32,7 @@ int main(int argc, char* argv[]) {
   std::chrono::system_clock::time_point begin_time =
     std::chrono::system_clock::now();
 
-  Dense<potato> v("lgdb/rawvec");
+  Dense<potato> v("core_test_lgdb/rawvec");
   std::cout << "dump " << v.size() << " CODE1: ";
   for (size_t i=0;i<10;i++) {
     if (v.size() > i)

@@ -41,7 +41,8 @@ void Inou_abc::write_src_info(const LGraph *g, const index_offset &inp, std::ofs
 }
 
 void Inou_abc::dump_blif(const LGraph *g, const std::string filename) {
-  assert(is_techmap(g));
+  auto mapped = is_techmap(g);
+  assert(mapped);
   find_cell_conn(g);
 
   std::ofstream fs;
@@ -61,7 +62,7 @@ void Inou_abc::dump_blif(const LGraph *g, const std::string filename) {
 void Inou_abc::gen_module(const LGraph *g, std::ofstream &fs) {
   fs << ".model " << g->get_name() << "\n";
   fs << ".inputs ";
-  for(const auto &idx : graphio_input_id) {
+  for(const auto &idx : graph_info->graphio_input_id) {
     int width = g->get_bits(idx);
     if(width > 1) {
       for(int j = 0; j < width; j++) {
@@ -73,7 +74,7 @@ void Inou_abc::gen_module(const LGraph *g, std::ofstream &fs) {
   }
   fs << "\n";
   fs << ".outputs ";
-  for(const auto &idx : graphio_output_id) {
+  for(const auto &idx : graph_info->graphio_output_id) {
     int width = g->get_bits(idx);
     if(width > 1) {
       for(int j = 0; j < width; j++) {
@@ -91,8 +92,8 @@ void Inou_abc::gen_module(const LGraph *g, std::ofstream &fs) {
 }
 
 void Inou_abc::gen_io_conn(const LGraph *g, std::ofstream &fs) {
-  for(const auto &idx : graphio_output_id) {
-    auto src = primary_output_conn[idx];
+  for(const auto &idx : graph_info->graphio_output_id) {
+    auto src = graph_info->primary_output_conn[idx];
     assert(src.size() == 1);
     if(g->get_node_wirename(src[0].idx) != nullptr && strcmp(g->get_node_wirename(src[0].idx), g->get_graph_output_name(idx)) == 0)
       continue;
@@ -106,8 +107,8 @@ void Inou_abc::gen_io_conn(const LGraph *g, std::ofstream &fs) {
 }
 
 void Inou_abc::gen_cell_conn(const LGraph *g, std::ofstream &fs) {
-  for(const auto &idx : combinational_id) {
-    auto              src        = comb_conn[idx];
+  for(const auto &idx : graph_info->combinational_id) {
+    auto              src        = graph_info->comb_conn[idx];
     const Tech_cell * tcell      = g->get_tlibrary()->get_const_cell(g->tmap_id_get(idx));
     const std::string tcell_name = tcell->get_name();
     fs << ".names ";
@@ -152,8 +153,8 @@ void Inou_abc::gen_cell_conn(const LGraph *g, std::ofstream &fs) {
 }
 
 void Inou_abc::gen_latch_conn(const LGraph *g, std::ofstream &fs) {
-  for(const auto &idx : latch_id) {
-    auto src = latch_conn[idx];
+  for(const auto &idx : graph_info->latch_id) {
+    auto src = graph_info->latch_conn[idx];
     fs << ".latch ";
     for(const auto &inp : src) {
       write_src_info(g, inp, fs);
@@ -162,7 +163,7 @@ void Inou_abc::gen_latch_conn(const LGraph *g, std::ofstream &fs) {
        << "re ";
 
     std::string ck_name;
-    for(const auto &sg : skew_group_map) {
+    for(const auto &sg : graph_info->skew_group_map) {
       if(sg.second.find(idx) != sg.second.end()) {
         ck_name = sg.first;
         break;
