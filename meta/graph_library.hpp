@@ -136,7 +136,7 @@ public:
 // FIXME: come up with a C++14 friendly solution
 #pragma clang diagnostic push
 #pragma clang diagnostic                                ignored "-Wc++17-extensions"
-inline std::unordered_map<std::string, Graph_library *> Graph_library::instances;
+//inline std::unordered_map<std::string, Graph_library *> Graph_library::instances;
 #pragma clang diagnostic pop
 
 #endif

@@ -32,7 +32,7 @@ inline int initialize_logger() {
 // FIXME: come up with a C++14 friendly solution
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wc++17-extensions"
-inline int               Console_init::_static_initializer = initialize_logger();
+//inline int               Console_init::_static_initializer = initialize_logger();
 #pragma clang diagnostic pop
 
 #endif
