@@ -2,10 +2,11 @@ import sys
 import os
 
 base_dir = os.path.dirname(sys.argv[0]) or '.'
+sys.path.insert(1, base_dir)
 package_dir_a = os.path.join(base_dir, '__main__')
-sys.path.insert(0, package_dir_a)
+sys.path.insert(1, package_dir_a)
 
-from pyth import lgraph
+import lgraph
 
 opts =	{
   "lgdb": "lgdb",

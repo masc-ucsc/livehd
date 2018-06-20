@@ -10,6 +10,7 @@
 
 LGraph_Base::LGraph_Base(const std::string &_path, const std::string &_name) noexcept
     : LGraph_Node_Type(_path, _name)
+    , Lgraph_base_core(_path, _name)
     , name(_name)
     , path(_path)
     , input_array(_path, _name + "_inputs")

@@ -47,6 +47,9 @@ public:
     set_node_instance(nid, cid);
     return cid;
   }
+  Char_Array_ID set_node_instance_name(Index_ID nid, const std::string &name) {
+    return set_node_instance_name(nid,name.c_str());
+  }
 
   const char *get_node_instancename(Index_ID nid) const {
     assert(nid < instances.size());

@@ -4,6 +4,7 @@
 
 LGraph_Node_Src_Loc::LGraph_Node_Src_Loc(const std::string &path, const std::string &name) noexcept
     : LGraph_Base(path, name)
+    , Lgraph_base_core(path, name)
     , src_files(path, name + "_src_files")
     , node_src_loc(path + "/" + name + "_src_locs") {
 }

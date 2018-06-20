@@ -71,12 +71,13 @@ void Pass_dfg::process_assign(LGraph *dfg, const LGraph *cfg, CF2DF_State *state
   Index_ID dfnode = create_node(dfg, state, target);
 
   dfg->node_type_set(dfnode, CfgAssign_Op);
-  //dfg->set_node_instance(dfnode, data.get_operator());
+  dfg->set_node_instance_name(dfnode, data.get_operator()); // FIXME: this should be target
+  // FIXME: to set operator it should be dfg->node_type_set(dfnode, xxxx); xxx is the add/mult/....
   vector<Index_ID> operands = process_operands(dfg, cfg, state, data, node);
 
   for (Index_ID id : operands)
     dfg->add_edge(Node_Pin(id, 0, false), Node_Pin(dfnode, 0, true));
-  
+
   if (state->fluid_df() && (is_output(target) || is_register(target)))
     add_write_marker(dfg, state, target);
 }
