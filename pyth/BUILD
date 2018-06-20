@@ -49,8 +49,8 @@ linkso(
 load("@subpar//:subpar.bzl", "par_binary")
 
 par_binary(
-    name = 'lgraph',
-    srcs = ['lgraph.py'],
+    name = 'ptlgraph',
+    srcs = ['ptlgraph.py'],
     default_python_version = "PY3",
     data = ["lgraph.cpython-36m-x86_64-linux-gnu.so"],
     zip_safe = False,
@@ -59,12 +59,12 @@ par_binary(
 py_test(
     name = 'test_inou_rand',
     srcs = ['test_inou_rand.py'],
-    deps = [":lgraph"],
+    deps = [":ptlgraph"],
 )
 
 py_test(
     name = 'test_core1',
     srcs = ['test_core1.py'],
-    deps = [":lgraph"],
+    deps = [":ptlgraph"],
 )
 
