@@ -8,6 +8,6 @@ cc_library(
         "//meta:meta",
         "//pyth:py_base",
         "//inou/cfg:inou_cfg",
-    ],
+    ]
 )
 
