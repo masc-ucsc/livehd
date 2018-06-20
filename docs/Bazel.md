@@ -40,10 +40,16 @@ the failing test. E.g:
 If the test has python, you must call the gdb with python and then pass as
 argument the test. Sample session:
 
-    gdb `which pythong`
+    gdb `which python3`  # python3
     >r bazel-bin/pyth/test_core1
     >b LGraph_Base::LGraph_Base
     >r
+
+## Code coverage for all the tests used
+
+    bazel build --collect_code_coverage ...
+    # or better with runs
+    bazel test --collect_code_coverage --test_output=all --nocache_test_results ...
 
 ## To download the dependent packages and apply patches (abc)
 
@@ -55,9 +61,9 @@ The downloaded code would be at bazel-lgraph/external/abc/
 
 ## To create Python self contained par file
 
-    bazel build //pyth:lgraph.par
+    bazel build //pyth:ptlgraph.par
 
-Now, you can copy the bazel-bin/pyth/lgraph.par to any machine and it has all the python and libraries needed to run
+Now, you can copy the bazel-bin/pyth/ptlgraph.par to any machine and it has all the python and libraries needed to run
 
 ## To create a fully static binary (for pip deployment?)
 
