@@ -71,6 +71,6 @@ py_test(
 py_test(
     name = 'test_dfg',
     srcs = ['test_dfg.py'],
-    deps = [":lgraph"]
+    deps = [":ptlgraph"]
 )
 
