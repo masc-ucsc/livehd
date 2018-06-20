@@ -40,7 +40,7 @@ the failing test. E.g:
 If the test has python, you must call the gdb with python and then pass as
 argument the test. Sample session:
 
-    gdb `which pythong`
+    gdb `which python`  # python3
     >r bazel-bin/pyth/test_core1
     >b LGraph_Base::LGraph_Base
     >r
