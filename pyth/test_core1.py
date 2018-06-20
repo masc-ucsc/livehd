@@ -18,8 +18,8 @@ opts =	{
 p = lgraph.Inou_rand(opts).generate()
 print("ID = {}\n", p[0].lg_id())
 
-t1 = lgraph.find_lgraph("lgdb","potato") # Should succedd, but now it fails
-t2 = lgraph.find_lgraph("lgdb","weird")
+t1 = lgraph.find_graph("lgdb","potato") # Should succedd, but now it fails
+t2 = lgraph.find_graph("lgdb","weird")
 
 assert t1.lg_id() == p[0].lg_id()
 assert t2 is None
