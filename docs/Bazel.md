@@ -61,7 +61,7 @@ Now, you can copy the bazel-bin/pyth/lgraph.par to any machine and it has all th
 
 ## To create a fully static binary (for pip deployment?)
 
-In the cc_binary, add linkopts = ['-static']
+In the cc binary, add linkopts = ['-static']
 
 ## To remove all the bazel (it should not be needed, but in case)
 

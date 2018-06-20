@@ -33,7 +33,7 @@ load("//tools:linkso.bzl", "linkso")
 linkso(
     name = "lgraph.cpython-36m-x86_64-linux-gnu",
 		srcs   = [":py_lgraph",
-		        ":py_base",
+            ":py_base",
 						"//pass/dfg:pass_dfg",
 						"@abc//:abc",
 						"//inou/lef:inou_lef", "//third_party/misc/lef/lef:lef",
@@ -66,5 +66,11 @@ py_test(
     name = 'test_core1',
     srcs = ['test_core1.py'],
     deps = [":lgraph"],
+)
+
+py_test(
+    name = 'test_dfg',
+    srcs = ['test_dfg.py'],
+    deps = [":lgraph"]
 )
 
