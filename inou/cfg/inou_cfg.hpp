@@ -10,13 +10,14 @@
 
 #include "inou.hpp"
 #include "options.hpp"
+#include "py_options.hpp"
 
-class Inou_cfg_options_pack : public Options_pack {
+class Inou_cfg_options : public Py_options {
 public:
-  Inou_cfg_options_pack();
+  Inou_cfg_options() : Py_options() { }
+  void set(const py::dict &dict) final;
 
-  std::string cfg_output;
-  std::string cfg_input;
+  std::string src;
 };
 
 class Inou_cfg : public Inou {
@@ -37,21 +38,21 @@ private:
   void                     update_ifs(std::vector<LGraph *> &lgs, std::vector<std::map<std::string, Index_ID>> &node_mappings);
 
 protected:
-  Inou_cfg_options_pack opack;
+  Inou_cfg_options opack;
 
 public:
   Inou_cfg();
-
+  Inou_cfg(const py::dict &);
   virtual ~Inou_cfg();
 
   std::vector<LGraph *> generate() final;
-  void                  cfg_2_dot(LGraph *, const std::string &path);
-
+  std::vector<LGraph *> py_generate() { return generate(); };
   void lgraph_2_cfg(const LGraph *g, const std::string &filename);
 
   using Inou::generate;
 
-  void generate(std::vector<const LGraph *> &out) final;
+  virtual void generate(std::vector<const LGraph *> &out) final;
+  void py_set(const py::dict &dict) { opack.set(dict); }
 };
 
 bool prp_get_value(const std::string& str_in, std::string& str_out, bool &v_signed, uint32_t &explicit_bits, uint32_t &val);

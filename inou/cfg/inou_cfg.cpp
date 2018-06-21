@@ -21,72 +21,51 @@ using std::map;
 using std::string;
 using std::vector;
 
-Inou_cfg_options_pack::Inou_cfg_options_pack() {
+Inou_cfg::Inou_cfg() { }
+Inou_cfg::~Inou_cfg() { }
 
-  Options::get_desc()->add_options()("cfg_output,o", boost::program_options::value(&cfg_output), "cfg output <filename> for graph")("cfg_input,i", boost::program_options::value(&cfg_input), "cfg input <filename> for graph");
-
-  boost::program_options::variables_map vm;
-  boost::program_options::store(
-      boost::program_options::command_line_parser(Options::get_cargc(), Options::get_cargv()).options(*Options::get_desc()).allow_unregistered().run(), vm);
-  if(vm.count("cfg_output")) {
-    cfg_output = vm["cfg_output"].as<string>();
-  } else {
-    cfg_output = "output.cfg";
-  }
-
-  if(vm.count("cfg_input")) {
-    cfg_input = vm["cfg_input"].as<string>();
-  } else {
-    cfg_input = "test.cfg";
-  }
-
-  console->info("inou_cfg cfg_output:{} cfg_input:{} graph_name:{}", cfg_output, cfg_input, graph_name);
-}
-
-Inou_cfg::Inou_cfg() {
-}
-
-Inou_cfg::~Inou_cfg() {
-}
+Inou_cfg::Inou_cfg(const py::dict &dict) { opack.set(dict); }
 
 vector<LGraph *> Inou_cfg::generate() {
+  assert(!opack.graph_name.empty());
+  assert(!opack.src.empty());
 
   vector<LGraph *> lgs;
-  if(opack.graph_name != "") {
-    lgs.push_back(new LGraph(opack.lgdb_path, opack.graph_name, false)); // Do not clear
-                                                                         // No need to sync because it is a reload. Already sync
-  } else {
-    assert(opack.cfg_input != "");
 
-    lgs.push_back(new LGraph(opack.lgdb_path));
-    string cfg_file = opack.cfg_input;
+  lgs.push_back(new LGraph(opack.lgdb, opack.graph_name, false));
+  const auto &cfg_file = opack.src;
 
-    int fd = open(cfg_file.c_str(), O_RDONLY);
-    if(fd < 0) {
-      console->error("cannot find input file {}\n", cfg_file);
-      exit(-3);
-    }
+  int fd = open(cfg_file.c_str(), O_RDONLY);
 
-    struct stat sb;
-    fstat(fd, &sb);
-    //printf("Size: %lu\n", (uint64_t)sb.st_size);
-
-    char *memblock = (char *)mmap(nullptr, sb.st_size, PROT_WRITE, MAP_PRIVATE, fd, 0);
-    if(memblock == MAP_FAILED) {
-      console->error("error, mmap failed\n");
-      exit(-3);
-    }
-
-    //cfg_2_lgraph_bk(&memblock, lgs[0]);
-    cfg_2_lgraph(&memblock, lgs);
-    ;
-
-    for(size_t i = 0; i < lgs.size(); i++) {
-      lgs[i]->sync();
-    }
-    close(fd);
+  if(fd < 0) {
+    console->error("cannot find input file {}\n", cfg_file);
+    exit(-3);
   }
+
+  struct stat sb;
+  fstat(fd, &sb);
+
+  char *memblock = (char *)mmap(nullptr, sb.st_size, PROT_WRITE, MAP_PRIVATE, fd, 0);
+  if(memblock == MAP_FAILED) {
+    console->error("error, mmap failed\n");
+    exit(-3);
+  }
+
+  cfg_2_lgraph(&memblock, lgs);
+
+  for (LGraph *g : lgs)
+    g->sync();
+
+  close(fd);
+
   return lgs;
+}
+
+void Inou_cfg::generate(vector<const LGraph *> &lgs) {
+  vector<LGraph *> gend = generate();
+  
+  for (const LGraph *g : gend)
+    lgs.push_back(g);
 }
 
 void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
@@ -99,7 +78,6 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
   LGraph *                            gtop = lgs[0];
 
   bool gtop_bg_nname_recorded = false;
-
   char *str_ptr=0;
 
   char *p = strtok_r(*memblock, "\n\r\f", &str_ptr);
@@ -124,7 +102,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
     string dfg_data = p;
 
     if(w3rd != "0" && std::stoi(w3rd) >= lgs.size()) { //create sub-graph if different scope id
-      lgs.push_back(new LGraph(opack.lgdb_path));
+      lgs.push_back(new LGraph(opack.lgdb, opack.graph_name + std::to_string(lgs.size()), false));
       fmt::print("lgs size:{}", lgs.size());
       name2id_gs.resize(name2id_gs.size() + 1);
       chain_stks_gs.resize(chain_stks_gs.size() + 1);
@@ -184,7 +162,7 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
 
     fmt::print("create node:{}, nid:{}\n", w1st, name2id[w1st]);
 
-    g->node_loc_set(new_node.get_nid(), opack.cfg_input.c_str(), (uint32_t)std::stoi(w4th), (uint32_t)std::stoi(w5th));
+    g->node_loc_set(new_node.get_nid(), opack.src.c_str(), (uint32_t)std::stoi(w4th), (uint32_t)std::stoi(w5th));
 
     if(w6th == ".()")
       g->node_type_set(name2id[w1st], CfgFunctionCall_Op);
@@ -200,7 +178,7 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
       g->node_type_set(name2id[w1st], CfgAssign_Op);
   } else {
 
-    g->node_loc_set(name2id[w1st], opack.cfg_input.c_str(), (uint32_t)std::stoi(w4th), (uint32_t)std::stoi(w5th));
+    g->node_loc_set(name2id[w1st], opack.src.c_str(), (uint32_t)std::stoi(w4th), (uint32_t)std::stoi(w5th));
 
     if(w6th == ".()")
       g->node_type_set(name2id[w1st], CfgFunctionCall_Op);
@@ -412,42 +390,6 @@ void Inou_cfg::lgraph_2_cfg(const LGraph *g, const string &filename) {
   fmt::print("line_cnt = {}\n", line_cnt);
 }
 
-void Inou_cfg::generate(vector<const LGraph *> &out) {
-  if(out.size() == 1) {
-    lgraph_2_cfg(out[0], opack.cfg_output);
-  } else {
-    for(const auto &g : out) {
-      string file = g->get_name() + "_" + opack.cfg_output;
-      lgraph_2_cfg(g, file);
-    }
-  }
-}
-
-void Inou_cfg::cfg_2_dot(LGraph *g, const std::string &path) {
-  FILE *dot = fopen(path.c_str(), "w");
-
-  fprintf(dot, "digraph fwd_%s {\n", g->get_name().c_str());
-
-  for(auto idx : g->fast()) {
-    if(g->is_graph_input(idx))
-      fprintf(dot, "node%d[label =\"%d $%s\"];\n", (int)idx, (int)idx, g->get_graph_input_name(idx));
-    else if(g->is_graph_output(idx))
-      fprintf(dot, "node%d[label =\"%d %%%s\"];\n", (int)idx, (int)idx, g->get_graph_output_name(idx));
-    else
-      fprintf(dot, "node%d[label =\"%d %s; %s\"];\n", (int)idx, (int)idx, g->node_type_get(idx).get_name().c_str(),
-              g->get_node_wirename(idx));
-  }
-
-  for(auto idx : g->fast()) {
-    for(const auto &c : g->out_edges(idx)) {
-      fprintf(dot, "node%d -> node%d\n", (int)idx, (int)c.get_idx());
-    }
-  }
-
-  fprintf(dot, "}\n");
-  fclose(dot);
-}
-
 // prp_get_value returns true if constant is within 32-bits; else returns string for const string in lgraph
 bool prp_get_value(const string& str_in, string& str_out, bool &v_signed, uint32_t &explicit_bits, uint32_t &val){
 
@@ -629,3 +571,22 @@ void Inou_cfg::update_ifs(vector<LGraph *> &lgs, vector<map<string, Index_ID>> &
   }
 }
 
+void Inou_cfg_options::set(const py::dict &dict) {
+  for (auto item : dict) {
+    const auto &key = item.first.cast<std::string>();
+
+    try {
+      if (is_opt(key,"src") ) {
+        const auto &val = item.second.cast<string>();
+        src = val;
+      }else{
+        set_val(key,item.second);
+      }
+    } catch (const std::invalid_argument& ia) {
+      fmt::print("ERROR: key {} has an invalid argument {}\n",key);
+    }
+  }
+
+  console->warn("pass_dfg src:{} lgdb:{} graph_name:{}"
+      ,src,lgdb, graph_name);
+}
