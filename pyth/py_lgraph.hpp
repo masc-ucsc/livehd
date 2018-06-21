@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #ifdef PY_LGRAPH_H
 #error "python lgraph modules can be included only once in pyth/graph.cpp"
 #endif

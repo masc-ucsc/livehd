@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #ifndef CF2DF_STATE_H_
 #define CF2DF_STATE_H_
 

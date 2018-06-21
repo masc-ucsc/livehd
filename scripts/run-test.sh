@@ -1,4 +1,5 @@
 #!/bin/bash
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 # Defaults for configuration variables used by script
 : ${LGRAPH_SRC:=${HOME}/lgraph}

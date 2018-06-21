@@ -1,3 +1,4 @@
+#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 from __future__ import unicode_literals
 
 import sys

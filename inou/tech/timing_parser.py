@@ -1,3 +1,4 @@
+#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 '''This parser was developed inspired by lib_parser.py by Jim Wang from GitHub
 Usage: python timing_parser.py /path/to/file/filename.lib'''
 

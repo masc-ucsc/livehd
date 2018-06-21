@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include <llvm/ExecutionEngine/ExecutionEngine.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>

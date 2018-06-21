@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 
 #define CFG_ERR_1      "asdasdasd asd P{} asd asd"

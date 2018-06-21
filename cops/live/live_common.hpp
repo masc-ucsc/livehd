@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #ifndef LIVE_COMMON_H_
 #define LIVE_COMMON_H_
 

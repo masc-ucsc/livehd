@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #ifndef INSTANCE_NAME_H
 #define INSTANCE_NAME_H

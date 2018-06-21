@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 //serialization stuff
 #include <boost/archive/text_iarchive.hpp>

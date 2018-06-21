@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "instance_names.hpp"
 
 LGraph_InstanceNames::LGraph_InstanceNames(const std::string &path, const std::string &name) noexcept

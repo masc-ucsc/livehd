@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #ifndef CFG_NODE_DATA_H_
 #define CFG_NODE_DATA_H_
 

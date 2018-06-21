@@ -1,4 +1,5 @@
 #!/bin/bash
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 if [ "$#" -lt 1 ]; then
   echo "Usage: <lgraph_src_dir> [build_mode] [docker_image]"
