@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #ifndef PASS_DFG_HPP_
 #define PASS_DFG_HPP_
 

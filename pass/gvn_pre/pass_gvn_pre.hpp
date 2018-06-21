@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #ifndef PASS_gvn_pre_H
 #define PASS_gvn_pre_H

@@ -1,4 +1,5 @@
 #!/bin/bash
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 # Default for LGRAPH source code location
 : LGRAPH_SRC=${LGRAPH_SRC:=${HOME}/lgraph}

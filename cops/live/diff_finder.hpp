@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #ifndef DIFF_FINDER_H_
 #define DIFF_FINDER_H_
 

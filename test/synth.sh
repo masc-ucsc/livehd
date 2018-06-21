@@ -1,4 +1,5 @@
 #!/bin/bash
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #declare -a inputs=("trivial.v" "null_port.v" "simple_flop.v" "test.v" "shift.v"\
 #                   "wires.v" "reduce.v" "graphtest.v" "add.v"  "assigns.v" \

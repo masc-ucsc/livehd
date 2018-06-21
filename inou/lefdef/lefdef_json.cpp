@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "lefdef_json.hpp"
 
 //void Tech_file::to_json(){

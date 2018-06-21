@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #ifndef GUARD_LEFDEF_JSON
 #define GUARD_LEFDEF_JSON
 

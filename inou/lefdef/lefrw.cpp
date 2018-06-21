@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 // *****************************************************************************
 // *****************************************************************************
 // Copyright 2014 - 2017, Cadence Design Systems
