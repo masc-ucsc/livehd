@@ -10,7 +10,6 @@ LGRAPH has code owners for sections of the repository. When a new contribution i
 be accepted by the current code owner. Check [CODE_OWNERS.txt](CODE_OWNERS.txt) to know who must
 approve your pull request.
 
-
 Only code owners can do direct commits to the repository. Code owners are also in charge of
 accepting pull requests. External contributors can create pull requests to handle bugs, new
 features, and any other code change. We recommend to contact code owners to discuss before doing any
@@ -35,9 +34,9 @@ If you commit code for other user, update the [CREDITS.txt](CREDITS.txt) as requ
 ## License
 
 We intend to keep LGRAPH perpetually open source and to use a liberal open source
-[license](../LICENSE) (BSD-3). As a contributor to the project, you agree that any contributions be
-licensed under the terms of the BSD-3 license shown at the root directory. The BSD-3 license boils
-down to this:
+[license](../LICENSE) (BSD 3-Clause). As a contributor to the project, you agree that any
+contributions be licensed under the terms of the BSD 3-Clause license shown at the root directory.
+The BSD 3-Clause license boils down to this:
 
 * You can freely distribute LGRAPH.
 * You must retain the copyright notice if you redistribute LGRAPH.
@@ -46,9 +45,12 @@ down to this:
 * There’s no warranty on LGRAPH at all.
 
 We believe this fosters the widest adoption of LGRAPH because it allows commercial products to be
-derived from LGRAPH with few restrictions and without a requirement for making any derived works also
-open source (i.e. BSD-3 license is not a “copyleft” license like the GPL). We suggest that you read
-the License if further clarification is needed.
+derived from LGRAPH with few restrictions and without a requirement for making any derived works
+also open source (i.e. BSD 3-Clause license is not a “copyleft” license like the GPL). We suggest
+that you read the License if further clarification is needed.
+
+When you create a new code file, it should include "This file is distributed under the BSD 3-Clause
+License. See LICENSE for details." in the first line of the file.
 
 ## Patents
 

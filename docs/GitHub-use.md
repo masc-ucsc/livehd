@@ -71,7 +71,6 @@ Work in the lgraph-private repo, and commit to master branch
     git commit
     git push origin master
 
-
 To pull latest version of code from lgraph public repository
 
     cd lgraph
@@ -89,7 +88,6 @@ To push your edits to the main public lgraph repo (replace XXX by your github na
     git push origin pull_request_XXX
 
 Now create a [pull][pull] request through github, and the UCSC/MASC team will review it.
-
 
 [pull]: https://help.github.com/articles/creating-a-pull-request
 [masc]: http://masc.soe.ucsc.edu/

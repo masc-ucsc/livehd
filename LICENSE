@@ -44,3 +44,17 @@ this Software.
 
 The following pieces of software have additional or alternate copyrights,
 licenses, and/or restrictions:
+
+third_party/python: BSD-like license
+third_party/lef: Apache-2 license
+third_party/def: Apache-2 license
+third_party/ezsat: ISC license
+third_party/anubis: BSD 2-Clause license
+
+external/yosys: ISC license
+external/spdlog: MIT license
+external/sparsehash-c11: BSD 3-Clause
+external/pybind11: BSD style license
+external/bm: Apache-2 license
+external/abc: BSD style license
+
