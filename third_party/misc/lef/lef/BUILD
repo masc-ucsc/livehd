@@ -1,3 +1,4 @@
+#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 licenses(["notice"]) # Apache License 2.0
 
 load("//tools:lexyacc.bzl", "genlex", "genyacc")
