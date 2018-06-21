@@ -14,16 +14,24 @@ using std::vector;
 
 unsigned int Pass_dfg::temp_counter = 0;
 
-void Pass_dfg::transform() {
-  LGraph *dfg = new LGraph(opack.lgdb_path, opack.output_name, false);
-  transform(dfg);
+Pass_dfg::Pass_dfg(const py::dict &dict) : Pass("dfg") { opack.set(dict); }
+
+LGraph * Pass_dfg::transform() {
+  assert(!opack.src.empty());
+
+  LGraph *cfg = new LGraph(opack.lgdb, opack.src, false);
+  transform(cfg);
+
+  LGraph *dfg = new LGraph(opack.lgdb, opack.graph_name, false);
+  return dfg;
 }
 
-void Pass_dfg::transform(LGraph *dfg) {
+void Pass_dfg::transform(LGraph *cfg) {
   assert(!opack.graph_name.empty());
-  LGraph *cfg = new LGraph(opack.lgdb_path, opack.graph_name, false);
+  LGraph *dfg = new LGraph(opack.lgdb, opack.graph_name, false);
 
   cfg_2_dfg(dfg, cfg);
+  dfg->sync();
 }
 
 void Pass_dfg::cfg_2_dfg(LGraph *dfg, const LGraph *cfg) {
@@ -32,8 +40,6 @@ void Pass_dfg::cfg_2_dfg(LGraph *dfg, const LGraph *cfg) {
 
   process_cfg(dfg, cfg, &state, itr);
   attach_outputs(dfg, &state);
-
-  dfg->sync();
 }
 
 Index_ID Pass_dfg::process_cfg(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, Index_ID top_node) {
@@ -366,24 +372,9 @@ Index_ID Pass_dfg::create_NOT(LGraph *g, CF2DF_State *state, Index_ID op1) {
   return dfnode;
 }
 
-
-Pass_dfg_options_pack::Pass_dfg_options_pack() : Options_pack() {
-
-  Options::get_desc()->add_options()(
-      "output,o", boost::program_options::value(&output_name), "output graph-name");
-
-  boost::program_options::variables_map vm;
-  boost::program_options::store(
-      boost::program_options::command_line_parser(Options::get_cargc(), Options::get_cargv()).options(*Options::get_desc()).allow_unregistered().run(), vm);
-
-  output_name        = (vm.count("output") > 0) ? vm["output"].as<string>() : graph_name + "_df";
-  console->info("inou_cfg graph_name:{}, gen-dots:{}", graph_name);
-}
-
-
 //Sheng Zone
 void Pass_dfg::test_const_conversion() {
-  LGraph *tg = new LGraph(opack.lgdb_path, opack.output_name, false);
+  LGraph *tg = new LGraph(opack.lgdb, opack.graph_name, false);
 
   //const std::string str_in = "0d?";//24 bits
   //const std::string str_in = "0x00FF?FF_FF?_u";//24 bits
@@ -738,4 +729,24 @@ std::string Pass_dfg::hex_msb_char_to_bin(char c) {
     case 'C': return "1100"; case 'D': return "1101"; case 'E': return "1110"; case 'F': return "1111";
     case '?': return "????"; default : assert(false);
   }
+}
+
+void Pass_dfg_options::set(const py::dict &dict) {
+  for (auto item : dict) {
+    const auto &key = item.first.cast<std::string>();
+
+    try {
+      if (is_opt(key,"src") ) {
+        const auto &val = item.second.cast<string>();
+        src = val;
+      }else{
+        set_val(key,item.second);
+      }
+    } catch (const std::invalid_argument& ia) {
+      fmt::print("ERROR: key {} has an invalid argument {}\n",key);
+    }
+  }
+
+  console->warn("pass_dfg src:{} lgdb:{} graph_name:{}"
+      ,src,lgdb, graph_name);
 }

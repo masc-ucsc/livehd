@@ -12,24 +12,36 @@
 #include "lgedge.hpp"
 #include "symbol_table.hpp"
 #include "cf2df_state.hpp"
+#include "py_options.hpp"
 
-class Pass_dfg_options_pack : public Options_pack {
+class Pass_dfg_options : public Py_options {
 public:
-  Pass_dfg_options_pack();
-  std::string output_name;
+  Pass_dfg_options() { }
+  void set(const py::dict &dict) final;
+
+  std::string src;
 };
 
 class Pass_dfg : public Pass {
 public:
-  Pass_dfg() : Pass("dfg") {}
+  Pass_dfg() : Pass("dfg") { }
+  Pass_dfg(const py::dict &);
 
+  LGraph *     transform();
+  virtual void transform(LGraph *orig);
   void         cfg_2_dfg(LGraph *dfg, const LGraph *cfg);
-  void         transform();
-  virtual void transform(LGraph *g);
   void         test_const_conversion();
 
+  std::vector<LGraph *> py_generate() {
+    std::vector<LGraph *> lgs(1);
+    lgs[0] = transform();
+    return lgs;
+  }
+
+  void py_set(const py::dict &dict) { opack.set(dict); }
+
 protected:
-  Pass_dfg_options_pack opack;
+  Pass_dfg_options opack;
 
 private:
   Index_ID                 find_root(const LGraph *cfg);
