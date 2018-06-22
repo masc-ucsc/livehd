@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #ifndef PY_OPTIONS_H
 #define PY_OPTIONS_H
 

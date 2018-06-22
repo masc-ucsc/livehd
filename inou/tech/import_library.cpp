@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 // Imports a tech library to lgdb
 // Tech library can be in Verilog, LEF or LIB

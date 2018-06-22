@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "graph_library.hpp"
 #include "lgraph.hpp"

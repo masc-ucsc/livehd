@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #ifndef INVARIANT_FINDER_H_
 #define INVARIANT_FINDER_H_
 

@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include <pybind11/pybind11.h>
 #include <iostream>
 #include <string>

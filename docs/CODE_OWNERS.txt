@@ -1,0 +1,18 @@
+This file is a list of the people responsible for ensuring that patches for a
+particular part of LGRAPH are reviewed, either by themself or by someone else.
+They are also the gatekeepers for their part of LGRAPH, with the final word on
+what goes in or not.
+
+The list is sorted by email and formatted to allow easy grepping and
+beautification by scripts. People listed here must be also listed in the CREDITS.txt
+with matching email.  The fields are: name (N), email (E), bazel build targets owned (D).
+
+
+N: Haven Skinner
+E: hskinner@ucsc.edu
+D: //pass/dfg/...
+
+N: Jose Renau
+E: renau@ucsc.edu
+D: //...
+

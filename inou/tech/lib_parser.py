@@ -1,3 +1,4 @@
+#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #!/bin/python2.7
 
 '''This is lib_parser.py by Jim Wang from GitHub

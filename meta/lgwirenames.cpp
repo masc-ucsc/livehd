@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "lgwirenames.hpp"
 
 LGraph_WireNames::LGraph_WireNames(const std::string &path, const std::string &name) noexcept

@@ -1,3 +1,4 @@
+#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 # -*- coding: utf-8 -*-
 #
 # python_exameple documentation build configuration file, created by

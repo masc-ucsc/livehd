@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "stitch_options.hpp"
 #include "core/lglog.hpp"

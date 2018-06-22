@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #ifndef PYROPE_INTEGER_H_
 #define PYROPE_INTEGER_H_
 

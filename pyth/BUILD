@@ -1,3 +1,4 @@
+#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 cc_library(
     name = "py_base",
     srcs = ["py_options.cpp"],
