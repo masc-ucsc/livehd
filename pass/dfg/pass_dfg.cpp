@@ -80,7 +80,10 @@ void Pass_dfg::process_assign(LGraph *dfg, const LGraph *cfg, CF2DF_State *state
   Index_ID dfnode = create_node(dfg, state, target);
 
   dfg->node_type_set(dfnode, CfgAssign_Op);
-  dfg->set_node_instance_name(dfnode, data.get_operator()); // FIXME: this should be target
+  dfg->set_node_instance_name(dfnode, data.get_target());
+  
+  dfg->node_type_set(dfnode, node_type_from_text(data.get_operator()));
+
   // FIXME: to set operator it should be dfg->node_type_set(dfnode, xxxx); xxx is the add/mult/....
   vector<Index_ID> operands = process_operands(dfg, cfg, state, data, node);
 
