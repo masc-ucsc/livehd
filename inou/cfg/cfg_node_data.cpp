@@ -34,7 +34,7 @@ CFG_Node_Data::CFG_Node_Data(const string &parser_raw) {
 
   for (int i = 0; i < CFG_METADATA_COUNT; ) {   // the first few are metadata, and these reads should not fail or
                                                 // we have a formatting issue
-  
+
     assert(ss >> buffer);
 
     if (!buffer.empty()) // only count non-empty tokens
@@ -55,6 +55,6 @@ string CFG_Node_Data::encode() const {
 
   for (const auto &op : operands)
     encd += op + ENCODING_DELIM;
-  
+
   return encd;
 }

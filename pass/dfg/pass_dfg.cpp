@@ -81,7 +81,7 @@ void Pass_dfg::process_assign(LGraph *dfg, const LGraph *cfg, CF2DF_State *state
 
   dfg->node_type_set(dfnode, CfgAssign_Op);
   dfg->set_node_instance_name(dfnode, data.get_target());
-  
+
   dfg->node_type_set(dfnode, node_type_from_text(data.get_operator()));
 
   // FIXME: to set operator it should be dfg->node_type_set(dfnode, xxxx); xxx is the add/mult/....
@@ -108,7 +108,7 @@ Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, CF2DF_State *state
     CF2DF_State fstate = state->copy();
     Index_ID fb_next = get_child(cfg, process_cfg(dfg, cfg, &fstate, fbranch));
     assert(tb_next == fb_next);
-    add_phis(dfg, cfg, state, &tstate, &fstate, cond);  
+    add_phis(dfg, cfg, state, &tstate, &fstate, cond);
   } else {
     add_phis(dfg, cfg, state, &tstate, state, cond);    // if there's no else, the 'state' of the 'else' branch is the same as the parent
   }
@@ -229,10 +229,10 @@ void Pass_dfg::add_fluid_ports(LGraph *dfg, CF2DF_State *state, vector<Index_ID>
       auto valid_output = valid_marker(pair.first);
       auto retry_input = retry_marker(pair.first);
       data_outputs.push_back(state->get_reference(pair.first));
-      
+
       if (!state->has_reference(valid_output))
         create_output(dfg, state, valid_output);
-      
+
       if (!state->has_reference(retry_input))
         create_input(dfg, state, retry_input);
     }
@@ -243,10 +243,10 @@ void Pass_dfg::add_fluid_ports(LGraph *dfg, CF2DF_State *state, vector<Index_ID>
       auto valid_input = valid_marker(pair.first);
       auto retry_output = retry_marker(pair.first);
       data_inputs.push_back(state->get_reference(pair.first));
-      
+
       if (!state->has_reference(valid_input))
         create_input(dfg, state, valid_input);
-      
+
       if (!state->has_reference(retry_output))
         create_output(dfg, state, retry_output);
     }
@@ -256,7 +256,7 @@ void Pass_dfg::add_fluid_ports(LGraph *dfg, CF2DF_State *state, vector<Index_ID>
 void Pass_dfg::add_fluid_logic(LGraph *dfg, CF2DF_State *state, const vector<Index_ID> &data_inputs, const vector<Index_ID> &data_outputs) {
   //Index_ID abort_id = add_abort_logic(dfg, state, data_inputs, data_outputs);
 
-  
+
 }
 
 void Pass_dfg::add_abort_logic(LGraph *dfg, CF2DF_State *state, const vector<Index_ID> &data_inputs, const vector<Index_ID> &data_outputs) {
