@@ -3,11 +3,11 @@
 TEMP=`getopt -o t::l::y::b::I::dphg:: --long testdir::,logdir::,inou::,binary::,incdir::no_sv,debug,techmap,hierarchy,graph_name::,lgdb::,top::,lib:: -n 'lgyosys' -- "$@"`
 eval set -- "$TEMP"
 
-OPT_YOSYS="./subs/yosys/bin/yosys"
+OPT_YOSYS=$(which yosys)
 OPT_TESTDIR="./tests"
 OPT_LOGDIR="./logs"
 OPT_LGDB="./lgdb"
-OPT_INOU_YOSYS="./inou/yosys/libinou_yosys.so"
+OPT_INOU_YOSYS="./bazel-bin/inou/yosys/liblgraph_yosys.so"
 OPT_DEBUG=0
 OPT_TECHMAP=0
 OPT_TO_VERILOG=0
@@ -24,38 +24,37 @@ while true ; do
     case "$1" in
         -t|--testdir)
             case "$2" in
-                "") shift 2 ;;
+                "") shift 2 ; OPT_TESTDIR=$2 ; shift 2 ;;
                 *) OPT_TESTDIR=$2 ; shift 2 ;;
             esac ;;
         -b|--binary)
             case "$2" in
-                "") shift 2 ;;
+                "") shift 2 ; OPT_YOSYS=$2 ; shift 2 ;;
                 *) OPT_YOSYS=$2 ; shift 2 ;;
             esac ;;
         -l|--logdir)
             case "$2" in
-                "") shift 2 ;;
+                "") shift 2 ; OPT_LOGDIR=$2 ; shift 2 ;;
                 *) OPT_LOGDIR=$2 ; shift 2 ;;
             esac ;;
         -I|--incdir)
             case "$2" in
-                "") shift 2 ;;
-                *) OPT_INCDIR="verilog_defaults -add -I $2" ;
-                shift 2 ;;
+                "") shift 2 ; OPT_INCDIR="verilog_defaults -add -I $2" ; shift 2 ;;
+                *) OPT_INCDIR="verilog_defaults -add -I $2" ; shift 2 ;;
             esac ;;
         --lgdb)
             case "$2" in
-                "") shift 2 ;;
+                "") shift 2 ; OPT_LGDB=$2 ; shift 2 ;;
                 *) OPT_LGDB=$2 ; shift 2 ;;
             esac ;;
         --top)
             case "$2" in
-                "") shift 2 ;;
+                "") shift 2 ; OPT_TOP=$2 ; shift 2 ;;
                 *) OPT_TOP=$2 ; shift 2 ;;
             esac ;;
         --lib)
             case "$2" in
-                "") shift 2 ;;
+                "") shift 2 ; OPT_LIB=$2 ; shift 2 ;;
                 *) OPT_LIB=$2 ; shift 2 ;;
             esac ;;
         -d|--debug)
@@ -75,13 +74,13 @@ while true ; do
           OPT_HIERARCHY="-hierarchy" ;;
         -y|--inou)
             case "$2" in
-                "") shift 2 ;;
+                "") shift 2 ; OPT_INOU_YOSYS=$2 ; shift 2 ;;
                 *) OPT_INOU_YOSYS=$2 ; shift 2 ;;
             esac ;;
         -g|--graph_name)
           OPT_TO_VERILOG=1
             case "$2" in
-                "") shift 2 ;;
+                "") shift 2 ; OPT_GRAPH_INPUT=$2 ; shift 2 ;;
                 *) OPT_GRAPH_INPUT=$2 ; shift 2 ;;
             esac ;;
         --) shift ; break ;;
