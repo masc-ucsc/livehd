@@ -114,7 +114,7 @@ if [ -f "${OPT_INOU_YOSYS}" ]; then
   # Found library
   echo ""
 else
-  echo "Could not find libinou_yosys.so library in ${OPT_INOU_YOSYS}"
+  echo "Could not find liblgraph_yosys.so library in ${OPT_INOU_YOSYS}"
   exit 3
 fi
 
@@ -154,7 +154,6 @@ if [ ${OPT_TO_VERILOG} -eq 0 ]; then
   if [ "$OPT_LIB" != "" ]; then
     lib="techmap -D ALU_RIPPLE; abc -liberty ${OPT_LIB}; "
   fi
-
 
   ${OPT_YOSYS} -ql ${OPT_LOGDIR}/${BASE}.log  -m $OPT_INOU_YOSYS -p "
   ${OPT_INCDIR}; ${OPT_READVERILOG} -sv -nomeminit ${FILE_LIST};

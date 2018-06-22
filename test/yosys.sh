@@ -37,7 +37,7 @@ done
 rm -rf ./lgdb/ ./logs ./yosys-test ./*.v ./*.json
 mkdir yosys-test/
 
-./subs/yosys/bin/yosys -V
+yosys -V
 
 for input in ${inputs[@]}
 do
@@ -53,10 +53,10 @@ do
 
   base=${input%.*}
 
-  ./inou/json/lgjson  --graph_name ${base} --json_output ${base}.json > ./yosys-test/log_json_${input} 2> ./yosys-test/err_json_${input}
-  if [ $? -ne 0 ]; then
-    echo "WARN: Not able to create JSON for testcase ${input}"
-  fi
+  #./inou/json/lgjson  --graph_name ${base} --json_output ${base}.json > ./yosys-test/log_json_${input} 2> ./yosys-test/err_json_${input}
+  #if [ $? -ne 0 ]; then
+    #echo "WARN: Not able to create JSON for testcase ${input}"
+  #fi
 
   ${YOSYS} -g${base} -h > ./yosys-test/log_to_yosys_${input} 2> ./yosys-test/err_to_yosys_${input}
 

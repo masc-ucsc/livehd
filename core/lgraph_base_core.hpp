@@ -11,11 +11,19 @@ class Backward_edge_iterator;
 
 class Lgraph_base_core {
 protected:
+  class Setup_path {
+  public:
+    Setup_path(const std::string &path);
+  };
+  Setup_path p; // Must be first in base object
+
   Dense<Node_Internal> node_internal;
 
   Lgraph_base_core() = delete;
   explicit Lgraph_base_core(const std::string &path, const std::string &name)
-      : node_internal(path + "/" + name + "_nodes"){};
+      : p(path)
+      , node_internal(path + "/" + name + "_nodes") {
+      };
   virtual ~Lgraph_base_core(){};
 
   Index_ID fast_next(Index_ID nid) const {

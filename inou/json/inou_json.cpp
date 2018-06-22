@@ -231,8 +231,9 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
         if(g->node_type_get(idx).op == U32Const_Op) {
           writer.Uint64(g->node_value_get(idx));
         } else if(g->node_type_get(idx).op == StrConst_Op) {
-          std::string temp = "'" + g->node_const_value_get(idx);
-          writer.String(temp.c_str());
+          writer.String("'");
+          writer.String(g->node_const_value_get(idx));
+          writer.String("'");
         } else {
           /*normal operations*/
           if(g->node_type_get(idx).op == TechMap_Op) {

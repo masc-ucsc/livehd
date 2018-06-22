@@ -10,7 +10,6 @@
 #include "kernel/yosys.h"
 
 #include <assert.h>
-#include <boost/filesystem.hpp>
 #include <map>
 #include <set>
 #include <string>
@@ -70,12 +69,6 @@ struct Dump_Yosys_Pass : public Pass {
 
     // handle extra options (e.g. selection)
     extra_args(args, argidx, design);
-
-    boost::filesystem::path p(input_directory);
-
-    if(!boost::filesystem::exists(p)) {
-      log_cmd_error("Input directory %s does not exist.\n", input_directory.c_str());
-    }
 
     if(single_graph_mode) {
       if(!hierarchy) {
