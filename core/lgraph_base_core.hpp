@@ -12,6 +12,8 @@ class Backward_edge_iterator;
 class Lgraph_base_core {
 protected:
   class Setup_path {
+  private:
+    static std::string last_path; // Just try to optimize to avoid too many frequent syscalls
   public:
     Setup_path(const std::string &path);
   };
