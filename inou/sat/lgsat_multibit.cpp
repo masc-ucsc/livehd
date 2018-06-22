@@ -14,7 +14,7 @@
 int  get_child_edges_no( LGraph* g, int node_B_ID){
   int i=0;
   for(const auto &c:g->inp_edges(node_B_ID))
-    	i++;		
+    	i++;
      return i;
 
 }
@@ -107,7 +107,7 @@ int main(int argc, const char **argv) {
   if(g->is_graph_output(node_B_ID)){
     std::cout<<" Output node is :"<<node_B_ID<<std::endl;
  }
-	
+
   if(!g->is_graph_output(node_B_ID)){
     std::cout<<" Output@@@@@@@@@@@@2 node is :"<<node_B_ID<<std::endl;
         if(IS_operator(oprator_B)) {
@@ -116,7 +116,7 @@ int main(int argc, const char **argv) {
 
    if(IS_operator(oprator_A)) {
           dest_list[node_A_ID].Set_Operator(oprator_A);
-	
+
    }
 
 	//Is_graph_const_input:A-->B; B is a constant input
@@ -133,9 +133,9 @@ int main(int argc, const char **argv) {
         //A-->B
       std::string     input_A = g->get_graph_input_name(node_A_ID);
           bits=g->get_bits(node_A_ID);
-	
+
           input_names.push_back(input_A);
-	
+
       bool           input_duplicate = 0;
           sort(input_names.begin(), input_names.end());
 
@@ -151,11 +151,11 @@ int main(int argc, const char **argv) {
           } else {
             input_A_vec = sat.vec_var(input_A, bits);
           }
-	
+
       int          input_port_ID=0;
 	  input_port_ID=(int)c.get_inp_pin().get_pid();
 	  dest_list[node_B_ID].increment_and_add_edges_with_operation(node_B_ID, input_A_vec, sat, operand_type_B,g);
-	
+
           }//if(g->is_graph_input(node_A_ID)
 
 	 if((g->node_type_get(node_B_ID).op==Pick_Op)&&(dest_list[node_B_ID].get_operand_no()==get_child_edges_no(g,node_B_ID))){
@@ -167,9 +167,9 @@ int main(int argc, const char **argv) {
 	      dest_list[node_B_ID].set_SAT_RESULT_READY();
 	      //std::cout<<" Setting Pick operand "<<sat.to_string(sat_result_formula[0]).c_str() << std::endl;
 	      dest_list[node_B_ID].Set_result(sat_result_formula);
-	
+
 	      }
-		
+
         if(dest_list[node_B_ID].get_SAT_RESULT_READY()==1) {
            cur_parent = dest_list[node_B_ID].get_parent_ID();
 	   //std::cout<< "CURRENT PARENT IS "<<cur_parent<<std::endl;
@@ -179,9 +179,9 @@ int main(int argc, const char **argv) {
 	   //std::vector<int> get_operand=dest_list[cur_parent].get_1st_operand();
 	   //std::cout<<"  1st Operand for nodeID:"<<cur_parent<< "is"<<sat.to_string(get_operand[0]).c_str() << std::endl;
 	   //std::cout << " AFTER Setting operand for nodeID: " << cur_parent<<sat.to_string(sat_res[0]).c_str() << std::endl;
-	   dest_list[cur_parent].increment_operands();						
+	   dest_list[cur_parent].increment_operands();
            while((dest_list[cur_parent].get_operand_no()==get_child_edges_no(g,cur_parent)) && !(g->is_graph_output(cur_parent))) {
-	
+
 	     //std::cout<<" Inside While Loop Interation ......\n";
 	     //std::cout<<"get_operand_cnt is "<<dest_list[cur_parent].get_operand_no()<<" and get_child_cnt is :"<<get_child_edges_no(g,cur_parent)<<std::endl;
 	     //std::cout << " When Current_Parent child sat count is " << cur_parent << ":" << dest_list[cur_parent].Get_Child_Cnt() << std::endl;
@@ -190,7 +190,7 @@ int main(int argc, const char **argv) {
 	      std::vector<int> re={};
 	      re=dest_list[cur_parent].get_1st_operand();
 	      //std::cout<< " Inputs for nodeID :" << cur_parent<< "are : "<<sat.to_string(re[0]).c_str()<<std::endl;
-	
+
 	      if(g->node_type_get(cur_parent).op==Flop_Op){
                int                  oper_type_B = g->node_type_get(cur_parent).op;
 	       std::vector<int>     flop_result_formula={};
@@ -203,7 +203,7 @@ int main(int argc, const char **argv) {
               satisfiable_flop = sat.solve(modelVars_flop, modelValues_flop, flop_result_formula);
               print_results(satisfiable_flop, modelValues_flop);
 	      cur_parent = dest_list[cur_parent].get_parent_ID();
-	
+
 	      //set a new variable for the flop output
 	      std::string input_flop_var="abc";
 	      input_flop_vec_var= sat.vec_var(input_flop_var, bits);
@@ -212,7 +212,7 @@ int main(int argc, const char **argv) {
 	       dest_list[cur_parent].increment_operands();
 	      }//flop
 
-	
+
 	      if(g->node_type_get(cur_parent).op==Mult_Op||g->node_type_get(cur_parent).op==Sum_Op ){
 	      std::vector<int> input1 = {};
               std::vector<int> input2 = {};
@@ -226,8 +226,8 @@ int main(int argc, const char **argv) {
 	      cur_parent = dest_list[cur_parent].get_parent_ID();
 	      dest_list[cur_parent].increment_operands();
 	      dest_list[cur_parent].set_operand(sat_result_formula);
-	
-	
+
+
 	      }//Sum_Op
 	      std::cout<<" Before Entering Muxing.... ";
 	      if(g->node_type_get(cur_parent).op==Mux_Op) {
@@ -257,12 +257,12 @@ int main(int argc, const char **argv) {
 	     dest_list[cur_parent].increment_operands();
 	     std::cout<<" Setting Pick operand "<<sat.to_string(sat_result_formula[0]).c_str() << std::endl;
 	     dest_list[cur_parent].set_operand(sat_result_formula);
-	
-	
+
+
 	   }
 
 
-	
+
 
 	      if(g->is_graph_output(root)&&(g->node_type_get(cur_parent).op!=Flop_Op)){
 	         std::cout<< "OUTPUT NODE is :"<<cur_parent<<"*********************************";
@@ -275,13 +275,13 @@ int main(int argc, const char **argv) {
 
 
 	 }//while
-	
+
 
 	} //if READY
-	
+
 
     }//if !g->output
-	
+
       }// g->inp_edges(idx))
     }//g->backward())
   }

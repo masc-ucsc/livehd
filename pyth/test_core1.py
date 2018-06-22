@@ -26,3 +26,4 @@ t3 = lgraph.find_lgraph("lgdb2","potato") # It should flag a warning when it run
 assert t1.lg_id() == p[0].lg_id()
 assert t2 is None
 assert t3 is None
+

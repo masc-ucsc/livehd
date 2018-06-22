@@ -87,7 +87,7 @@ public:
   void  set_child_edges_cnt( LGraph* g, int node_B_ID){
     int i=0;
     for(const auto &c:g->inp_edges(node_B_ID))
-    	i++;		
+    	i++;
       	//std::cout<<" Child EDGE of node ID "<<node_B_ID<<" ################### "<< i<<std::endl;
        child_edges=i;
   std::cout<<" Child EDGE of node ID "<<node_B_ID<<" ################### "<<child_edges <<std::endl;
@@ -180,7 +180,7 @@ public:
 	{std::cout<<" \nInputs are "<<sat.to_string(operands_node[i][0]).c_str();
 	}
 	sat_result=sat.vec_or_multiarg(operands_node);
-	
+
 	//sat_result = sat.vec_and_multiarg(operands_name);
          SAT_RESULT_READY = 1;
 
@@ -319,7 +319,7 @@ public:
      }
        if((int)c.get_inp_pin().get_pid()==2){
 	 std::cout<<" PiD is:"<<(int)c.get_inp_pin().get_pid();
-	
+
 	 input2 = operands_node[(int)c.get_inp_pin().get_pid()] ;
 	 std::cout << "INPUT 2 is for nodeID " << node_B_ID << " is : " << sat.to_string(input2[0]).c_str() << std::endl;
      }
@@ -364,7 +364,7 @@ public:
        if((int)c.get_inp_pin().get_pid()==0) {
 	 std::cout<<" \nPiD is:"<<(int)c.get_inp_pin().get_pid();
 	 clk = operands_node[(int)c.get_inp_pin().get_pid()];
-	
+
 	 std::cout << "sel is for nodeID " << node_B_ID << " is : " << sat.to_string(clk[0]).c_str() << std::endl;
      }
 
@@ -385,7 +385,7 @@ public:
    if((int)c.get_inp_pin().get_pid()==4) {
 	 std::cout<<" PiD is:"<<(int)c.get_inp_pin().get_pid();
 	 Reset_value = operands_node[(int)c.get_inp_pin().get_pid()];
-	
+
 	 std::cout << "Reset Value is for nodeID " << node_B_ID << " is : " << sat.to_string(Reset_value[0]).c_str() << std::endl;
      }
  }

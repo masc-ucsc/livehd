@@ -25,3 +25,4 @@ t2 = lgraph.open_lgraph("lgdb","weird")
 
 assert t1.lg_id() == p[0].lg_id()
 assert t2 is None
+
