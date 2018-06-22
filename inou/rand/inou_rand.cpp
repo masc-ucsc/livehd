@@ -171,7 +171,7 @@ void Inou_rand_options::set(const py::dict &dict) {
       fmt::print("ERROR: key {} has an invalid argument {}\n",key);
     }
   }
-  console->warn("inou_rand seed:{} size:{} crate:{} eratio:{} lgdb:{} graph_name:{}"
+  console->info("inou_rand seed:{} size:{} crate:{} eratio:{} lgdb:{} graph_name:{}"
       ,rand_seed, rand_size, rand_crate, rand_eratio
       ,lgdb, graph_name);
 }

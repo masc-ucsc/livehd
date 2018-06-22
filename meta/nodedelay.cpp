@@ -4,8 +4,8 @@
 #include "lgraph.hpp"
 
 LGraph_Node_Delay::LGraph_Node_Delay(const std::string &path, const std::string &name) noexcept
-    : LGraph_Base(path, name)
-    , Lgraph_base_core(path, name)
+    : Lgraph_base_core(path, name)
+    , LGraph_Base(path, name)
     , node_delay(path + "/" + name + "_delay") {
 }
 

@@ -37,6 +37,11 @@ the failing test. E.g:
 
     bazel run -c dbg //pyth:test_core1
 
+Increase logging level if wanted
+
+    export LGRAPH_LOG=info
+    bazel run -c dbg //pyth:test_core1
+
 If the test has python, you must call the gdb with python and then pass as
 argument the test. Sample session:
 

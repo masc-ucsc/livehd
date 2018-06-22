@@ -2,8 +2,8 @@
 #include "lgwirenames.hpp"
 
 LGraph_WireNames::LGraph_WireNames(const std::string &path, const std::string &name) noexcept
-    : LGraph_Base(path, name)
-    , Lgraph_base_core(path, name)
+    : Lgraph_base_core(path, name)
+    , LGraph_Base(path, name)
     , names(path, name + "_wnames")
     , wires(path + "/" + name + "_wid")
     , offsets(path + "/" + name + "_offsets") {

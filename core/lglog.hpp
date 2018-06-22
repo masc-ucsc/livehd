@@ -24,16 +24,23 @@ class Console_init {
 inline int initialize_logger() {
   if(console == 0) {
     auto console1 = spdlog::stdout_color_mt("console");
-    console1->info("lg initialized to console with info level at core::lglog");
-    spdlog::set_level(spdlog::level::warn);
+    const char *log = getenv("LGRAPH_LOG");
+    if (log==0) {
+      spdlog::set_level(spdlog::level::warn);
+    }else if (strcasecmp(log,"warn")==0) {
+      spdlog::set_level(spdlog::level::warn);
+    }else if (strcasecmp(log,"err")==0) {
+      spdlog::set_level(spdlog::level::err);
+    }else if (strcasecmp(log,"debug")==0) {
+      spdlog::set_level(spdlog::level::debug);
+    }else if (strcasecmp(log,"info")==0) {
+      spdlog::set_level(spdlog::level::info);
+    }else{
+      spdlog::set_level(spdlog::level::info);
+      console->error("lglog.hpp: Invalid console login level {}. Available are warn, err, debug, info", log);
+    }
   }
   return 0;
 }
-
-// FIXME: come up with a C++14 friendly solution
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wc++17-extensions"
-//inline int               Console_init::_static_initializer = initialize_logger();
-#pragma clang diagnostic pop
 
 #endif

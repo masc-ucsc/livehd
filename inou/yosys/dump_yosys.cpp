@@ -169,7 +169,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
     } else if(g->node_type_get(idx).op == SubGraph_Op) {
       //FIXME: prevent creating wires when driving the output
       std::string subgraph_name = g->get_library()->get_name(g->subgraph_id_get(idx));
-      LGraph *    subgraph      = LGraph::find_graph(subgraph_name, g->get_path());
+      LGraph *    subgraph      = LGraph::find_lgraph(g->get_path(), subgraph_name);
       if(subgraph == nullptr) {
         assert(false); // can we remove this?
         //need to load graph into memory

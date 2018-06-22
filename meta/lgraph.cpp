@@ -1,6 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include <assert.h>
+#include <sys/types.h>
+#include <dirent.h>
 
 #include <fstream>
 #include <iostream>
@@ -58,16 +60,21 @@ LGraph::LGraph(const std::string &path, const std::string &_name, bool _clear)
   lgraph_id = library->get_id(_name);
 }
 
-LGraph *LGraph::find_graph(const std::string &gname, const std::string &path) {
+LGraph *LGraph::find_lgraph(const std::string &path, const std::string &name) {
 
-  if(name2lgraph.find(path) == name2lgraph.end() || name2lgraph[path].find("lgraph_" + gname) == name2lgraph[path].end()) {
-    if(Graph_library::instance(path)->include(gname))
-      return open_lgraph(path, gname);
+  if(name2lgraph.find(path) == name2lgraph.end() || name2lgraph[path].find("lgraph_" + name) == name2lgraph[path].end()) {
+    if(Graph_library::instance(path)->include(name))
+      return open_lgraph(path, name);
 
+    // Check that the path is valid. Otherwise, likely error of swaping path with name
+    DIR *dir = opendir(path.c_str());
+    if (!dir) {
+      console->warn("find_lgraph trying {} path which does not exit", path);
+    }
     return 0;
   }
 
-  return name2lgraph[path]["lgraph_" + gname];
+  return name2lgraph[path]["lgraph_" + name];
 }
 
 LGraph *LGraph::open_lgraph(const std::string &path, const std::string &name) {
