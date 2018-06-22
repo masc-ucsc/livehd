@@ -13,8 +13,9 @@ env:
     - BUILD_MODE=dbg       DOCKER=mascucsc/ubuntu-masc
 
 before_install:
-  - docker pull mascucsc/archlinux-masc
-    # - docker pull mascucsc/ubuntu-masc
+   - docker pull $DOCKER
+     # - docker pull mascucsc/archlinux-masc
+  # - docker pull mascucsc/ubuntu-masc
 
 script:
   - scripts/run-docker-test.sh `pwd` $BUILD_MODE $DOCKER
