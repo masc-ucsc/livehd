@@ -242,7 +242,7 @@ void LGraph_Node_Type::node_const_type_set(Index_ID nid, const std::string &valu
   // console->info("u32const {}", node_type_table[node_internal[nid].get_nid()]);
 }
 
-const std::string &LGraph_Node_Type::node_const_value_get(Index_ID nid) const {
+const char *LGraph_Node_Type::node_const_value_get(Index_ID nid) const {
   assert(nid < node_type_table.size());
   assert(node_internal[nid].is_node_state());
 
@@ -252,7 +252,7 @@ const std::string &LGraph_Node_Type::node_const_value_get(Index_ID nid) const {
   assert(node_type_table[node_internal[nid].get_nid()] >= StrConstMin_Op);
   assert(node_type_table[node_internal[nid].get_nid()] <= StrConstMax_Op);
 
-  return std::string(get_constant(node_type_table[node_internal[nid].get_nid()] - StrConstMin_Op));
+  return get_constant(node_type_table[node_internal[nid].get_nid()] - StrConstMin_Op);
 }
 
 const Node_Type &LGraph_Node_Type::node_type_get(Index_ID nid) const {

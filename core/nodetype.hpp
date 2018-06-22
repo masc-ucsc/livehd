@@ -708,7 +708,7 @@ public:
                            bool enforce_bits = true
 #endif
   );
-  const std::string &node_const_value_get(Index_ID nid) const;
+  const char *node_const_value_get(Index_ID nid) const;
 
   void     node_tmap_set(Index_ID nid, uint32_t tmapid);
   uint32_t tmap_id_get(Index_ID nid) const;

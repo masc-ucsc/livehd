@@ -155,7 +155,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
       continue;
 
     } else if(g->node_type_get(idx).op == StrConst_Op) {
-      std::string const_val = g->node_const_value_get(idx);
+      const std::string const_val = g->node_const_value_get(idx);
 #if DEBUG
       fmt::print("adding wire to yosys module {}, name: {}\n", module->name.str(), name.str());
 #endif

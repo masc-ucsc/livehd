@@ -3,7 +3,7 @@
 TEMP=$(getopt -o r::,i::,l:: --long reference::,implementation::,--cell_library:: -n 'lgcheck' -- "$@")
 eval set -- "$TEMP"
 
-YOSYS=./subs/yosys/bin/yosys
+YOSYS=$(which yosys)
 CELLLIB=""
 while true ; do
     case "$1" in

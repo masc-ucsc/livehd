@@ -93,6 +93,7 @@ public:
     aPin.name = name;
     aPin.dir  = dir;
     aPin.use  = "";
+    aPin.io_id = 0;
     pins.push_back(aPin);
     pname2id.insert(std::make_pair(name, id));
 
