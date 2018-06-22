@@ -20,3 +20,9 @@ linkso(
     static = ["@boost//:system" , "@boost//:filesystem", "@boost//:program_options"],
 )
 
+sh_test(
+    name = "yosys.sh",
+    srcs = ["tests/yosys.sh"],
+    data = ["liblgraph_yosys.so","lgyosys","lgcheck"] + glob(["tests/*.v"]),
+)
+

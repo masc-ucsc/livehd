@@ -20,6 +20,12 @@ OPT_TOP=""
 OPT_PROFILE=0
 OPT_SYSTEMVERILOG=1
 
+if [ -d "bazel-bin" ]; then
+  OPT_INOU_YOSYS="./bazel-bin/inou/yosys/liblgraph_yosys.so"
+else
+  OPT_INOU_YOSYS="./inou/yosys/liblgraph_yosys.so"
+fi
+
 while true ; do
     case "$1" in
         -t|--testdir)

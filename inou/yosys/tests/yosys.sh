@@ -14,6 +14,8 @@ declare -a inputs=("trivial.v" "null_port.v" "simple_flop.v" "test.v" "shift.v"\
 TEMP=$(getopt -o p --long profile -n 'yosys.sh' -- "$@")
 eval set -- "$TEMP"
 
+echo "yosys.sh running in "$(pwd)
+
 YOSYS=./inou/yosys/lgyosys
 LGCHECK=./inou/yosys/lgcheck
 while true ; do
