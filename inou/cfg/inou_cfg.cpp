@@ -64,7 +64,7 @@ vector<LGraph *> Inou_cfg::generate() {
 
 void Inou_cfg::generate(vector<const LGraph *> &lgs) {
   vector<LGraph *> gend = generate();
-  
+
   for (const LGraph *g : gend)
     lgs.push_back(g);
 }
@@ -562,10 +562,10 @@ void Inou_cfg::update_ifs(vector<LGraph *> &lgs, vector<map<string, Index_ID>> &
       if (data.get_operator() == COND_BR_MARKER) {
         const auto &dops = data.get_operands();
         vector<string> new_operands(dops.size());
-        
+
         std::transform(dops.begin(), dops.end(), new_operands.begin(),
           [&](const string &op) -> string { return std::to_string(mapping[(op[0] == '\'') ? op.substr(1) : op]); });
-        
+
         g->set_node_wirename(idx, CFG_Node_Data(data.get_target(), new_operands, data.get_operator()).encode().c_str());
       }
     }

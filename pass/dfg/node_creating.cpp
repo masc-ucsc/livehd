@@ -20,7 +20,7 @@ Index_ID Pass_dfg::create_input(LGraph *g, CF2DF_State *state, const std::string
 Index_ID Pass_dfg::create_output(LGraph *g, CF2DF_State *state, const std::string &var_name) {
   Index_ID nid = create_node(g, state, var_name);
   g->add_graph_output(var_name.c_str(), nid);
-  
+
   return nid;
 }
 
@@ -29,7 +29,7 @@ Index_ID Pass_dfg::create_private(LGraph *g, CF2DF_State *state, const std::stri
   g->node_type_set(nid, CfgAssign_Op);
 
   g->add_edge(Node_Pin(nid, 0, false), Node_Pin(default_constant(g, state), 0, true));
- 
+
   return nid;
 }
 

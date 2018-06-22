@@ -30,8 +30,8 @@ public:
     operand_no                =0;
     U32const_operand_val      =0;
     PICK_READY                =0;
-     
-    
+
+
   }
   std::vector<int> sat_operator_SUM(int node_B_ID,int oper,ezMiniSAT &sat, int nodeID);
   std::vector<int> sat_operator_with_Mux_Op(int oper,ezMiniSAT &sat, int nodeID, LGraph* g);
@@ -41,11 +41,11 @@ public:
   int              get_and_set_child_edges_sat_cnt( LGraph* g, int nodeID);
   void             increment_and_add_edges_with_operation(int node_B_ID, std::vector<int> input1,ezMiniSAT &sat, int operand_type, LGraph* g);
   bool             IS_all_inputs_per_node(LGraph* g, int nodeID);
-  
+
   void             set_const_operand(int input) {
                     U32const_operand_val=input;
   }
-                   
+
   int              get_const_operand() {
                   return    U32const_operand_val;
   }
@@ -86,11 +86,11 @@ public:
 
   void  set_child_edges_cnt( LGraph* g, int node_B_ID){
     int i=0;
-    for(const auto &c:g->inp_edges(node_B_ID)) 
+    for(const auto &c:g->inp_edges(node_B_ID))
     	i++;		
       	//std::cout<<" Child EDGE of node ID "<<node_B_ID<<" ################### "<< i<<std::endl;
        child_edges=i;
-  std::cout<<" Child EDGE of node ID "<<node_B_ID<<" ################### "<<child_edges <<std::endl;   
+  std::cout<<" Child EDGE of node ID "<<node_B_ID<<" ################### "<<child_edges <<std::endl;
 }
 
   int get_child_edges(){
@@ -99,13 +99,13 @@ public:
       }
 
   int get_sat_result_child_edges(){
-    return child_sat_result_edges; 
+    return child_sat_result_edges;
       }
 
   void set_sat_result_child_edges(int i){
-     child_sat_result_edges=i;; 
+     child_sat_result_edges=i;;
       }
- 
+
   int  get_parent_ID() {
     return parent_ID;
   }
@@ -165,7 +165,7 @@ public:
   }
 };
 
-  
+
   void Destination::set_parent_ID(int node_ID) {
     parent_ID = node_ID;
 }
@@ -180,19 +180,19 @@ public:
 	{std::cout<<" \nInputs are "<<sat.to_string(operands_node[i][0]).c_str();
 	}
 	sat_result=sat.vec_or_multiarg(operands_node);
-	 
+	
 	//sat_result = sat.vec_and_multiarg(operands_name);
          SAT_RESULT_READY = 1;
-     
+
       std::cout << "\n\nFormula is for nodeID " << node_B_ID << " is : " << sat.to_string(sat_result[0]).c_str() << std::endl;
       std::cout<<"Sum_Op "<<std::endl;
-     
+
       break;
     }
     case Mult_Op: {
       for(int i=0;i<operands_node.size();i++)
 	std::cout<<" \nInputs are "<<sat.to_string(operands_node[i][0]).c_str();
-      
+
       sat_result = sat.vec_and_multiarg(operands_node);
       SAT_RESULT_READY = 1;
       for(int i=0;i<operands_node.size();i++)
@@ -202,14 +202,14 @@ public:
         break;
     }
 
-   
+
     default:
       std::cout << " Unknown operation" << std::endl;
     }
     return sat_result;
   }
 
-     
+
   bool IS_operator(int oper) {
   if((oper == Sum_Op) || (oper == Mult_Op)) {
     return true;
@@ -220,7 +220,7 @@ public:
   int Destination::get_and_set_child_edges_sat_cnt( LGraph* g, int nodeID) {
     int i=0;
      for(const auto &c:g->inp_edges(nodeID)) {
-	int node_A_ID= (int)c.get_idx();      
+	int node_A_ID= (int)c.get_idx();
 	int node_B_ID=(int)nodeID;
 	//A--->B
     if( !g->is_graph_input(node_A_ID)) {
@@ -235,7 +235,7 @@ public:
   bool Destination::IS_all_inputs_per_node(LGraph* g, int nodeID){
     int i=0;
     for(const auto &c:g->inp_edges(nodeID)) {
-	int node_A_ID= (int)c.get_idx();      
+	int node_A_ID= (int)c.get_idx();
 	int node_B_ID=(int)nodeID;
 	//A--->B
     if( !g->is_graph_input(node_A_ID)) {
@@ -244,17 +244,17 @@ public:
        return false;
     }	}
 
-  
+
     return true;
-  
+
 }
 
 
-//for all input edges only:a+b+c 
+//for all input edges only:a+b+c
   void Destination::increment_and_add_edges_with_operation(int node_B_ID, std::vector<int> input_1, ezMiniSAT &sat, int operand_type, LGraph* g ) {
      std::cout << "INPUT is for nodeID " << node_B_ID << " is : " << sat.to_string(input_1[0]).c_str() << std::endl;
 
-  //std::vector<std::vector<int>> operands_name={}; 
+  //std::vector<std::vector<int>> operands_name={};
      set_child_edges_cnt(  g, node_B_ID );
     if(Get_Child_Cnt() <get_child_edges()) {
       std::cout << "\nInside INPUT is for nodeID " << node_B_ID << " is : " << sat.to_string(input_1[0]).c_str() << std::endl;
@@ -263,18 +263,18 @@ public:
       increment_operands();
   }
   std::cout << "Now child_cnt for " << node_B_ID << " is:" << Get_Child_Cnt() << std::endl;
-  
+
 
   // if(Get_Child_Cnt() == get_and_set_child_edges_cnt(  g,  node_B_ID)) {
 
   if(Get_Child_Cnt() == 2 && Get_Child_Cnt() == get_child_edges()&& IS_all_inputs_per_node( g, node_B_ID )) {
-   
+
     switch(operand_type) {
     case Sum_Op: {
       for(int i=0;i<operands_node.size();i++)
 	{std::cout<<" \nInputs are "<<sat.to_string(operands_node[i][0]).c_str();
 	}
-     
+
 	sat_result=sat.vec_or_multiarg(operands_node);
         SAT_RESULT_READY = 1;
         std::cout << "\n\nFormula is for nodeID " << node_B_ID << " is : " << sat.to_string(sat_result[0]).c_str() << std::endl;
@@ -293,11 +293,11 @@ public:
         break;
     }
 
-   
+
     default:
       std::cout << " Unknown operation " << std::endl;
 
-      
+
     }//case
    }//child_cnt==2
 }
@@ -307,10 +307,10 @@ public:
     std::vector<int> input1={};
     std::vector<int> input2={};
     std::vector<int> input3={};
-    
+
    if(operand_type==Mux_Op && get_operand_no()==get_child_edges()) {
 
-     for(const auto &c:g->inp_edges(node_B_ID)) { 
+     for(const auto &c:g->inp_edges(node_B_ID)) {
        if((int)c.get_inp_pin().get_pid()==0){
 	 std::cout<<" \nPiD is:"<<(int)c.get_inp_pin().get_pid();
 
@@ -321,7 +321,7 @@ public:
 	 std::cout<<" PiD is:"<<(int)c.get_inp_pin().get_pid();
 	
 	 input2 = operands_node[(int)c.get_inp_pin().get_pid()] ;
-	 std::cout << "INPUT 2 is for nodeID " << node_B_ID << " is : " << sat.to_string(input2[0]).c_str() << std::endl; 
+	 std::cout << "INPUT 2 is for nodeID " << node_B_ID << " is : " << sat.to_string(input2[0]).c_str() << std::endl;
      }
        if((int)c.get_inp_pin().get_pid()==1) {
 	 std::cout<<" PiD is:"<<(int)c.get_inp_pin().get_pid();
@@ -329,15 +329,15 @@ public:
 	  sel =input3[0];
 	 std::cout << "sel is for nodeID " << node_B_ID << " is : " << sat.to_string(sel).c_str() << std::endl;
      }
-   }//for loop 
+   }//for loop
      std::cout<<"Mux_Op2"<<std::endl;
      //std::cout << "INPUT 1 is for nodeID " << node_B_ID << " is : " << sat.to_string(input1[0]).c_str() << std::endl;
-  
+
      std::cout << "INPUT1  is for nodeID " << node_B_ID << " is : " << sat.to_string(input1[0]).c_str() << std::endl;
      std::cout << "sel is for nodeID " << node_B_ID << " is : " << sat.to_string(sel).c_str() << std::endl;
      std::cout << "INPUT 2 is for nodeID " << node_B_ID << " is : " << sat.to_string(input2[0]).c_str() << std::endl;
      //std::cout << "sel is for nodeID " << node_B_ID << " is : " << sat.to_string(sel).c_str() << std::endl;
-     
+
       std::cout<<"Mux_Op2"<<std::endl;
       sat_result =sat.vec_mux(input1, input2,sel);
       SAT_RESULT_READY = 1;
@@ -356,15 +356,15 @@ public:
     std::vector<int> Reset={};
     int              Reset_bit=0;
     int              R=0;
-    
+
    if(operand_type==Flop_Op && get_operand_no()==get_child_edges()) {
 
-     for(const auto &c:g->inp_edges(node_B_ID)) { 
-       
+     for(const auto &c:g->inp_edges(node_B_ID)) {
+
        if((int)c.get_inp_pin().get_pid()==0) {
 	 std::cout<<" \nPiD is:"<<(int)c.get_inp_pin().get_pid();
 	 clk = operands_node[(int)c.get_inp_pin().get_pid()];
-	  
+	
 	 std::cout << "sel is for nodeID " << node_B_ID << " is : " << sat.to_string(clk[0]).c_str() << std::endl;
      }
 
@@ -385,7 +385,7 @@ public:
    if((int)c.get_inp_pin().get_pid()==4) {
 	 std::cout<<" PiD is:"<<(int)c.get_inp_pin().get_pid();
 	 Reset_value = operands_node[(int)c.get_inp_pin().get_pid()];
-	  
+	
 	 std::cout << "Reset Value is for nodeID " << node_B_ID << " is : " << sat.to_string(Reset_value[0]).c_str() << std::endl;
      }
  }
@@ -398,21 +398,21 @@ public:
        }
      else
        result=D;
-     
+
      return result;
    }
 
-  
+
   else {
     std::cout << " BAD *************************" << std::endl;
     return {} ;
-   } 
+   }
  }
   std::vector<int>  Destination::sat_operator_with_Pick_Op(int node_B_ID,ezMiniSAT &sat, int operand_type, LGraph* g , int frombits, int pick_bits, std::vector<int> vec_pick) {
 
     std::cout<<" Entering Pick Function"<<std::endl;
     std::vector<int> input_vector={};
-  /*for(const auto &c:g->inp_edges(node_B_ID)) { 
+  /*for(const auto &c:g->inp_edges(node_B_ID)) {
 		   if((int)c.get_inp_pin().get_pid()==0) {
 		      std::cout<<" \nPiD is:"<<(int)c.get_inp_pin().get_pid();
 		       input_vector = operands_node[(int)c.get_inp_pin().get_pid()] ;

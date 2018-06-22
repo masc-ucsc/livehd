@@ -99,7 +99,7 @@ private:
 
   void add_read_marker(LGraph *dfg, CF2DF_State *state, const std::string &v) { assign_to_true(dfg, state, read_marker(v)); }
   void add_write_marker(LGraph *dfg, CF2DF_State *state, const std::string &v) { assign_to_true(dfg, state, write_marker(v)); }
-  
+
   std::string read_marker(const std::string &v) { return READ_MARKER + v; }
   std::string write_marker(const std::string &v) { return WRITE_MARKER + v; }
   std::string valid_marker(const std::string &v) { return VALID_MARKER + v; }
