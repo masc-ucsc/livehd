@@ -53,7 +53,7 @@ par_binary(
     srcs = ['ptlgraph.py'],
     default_python_version = "PY3",
     data = ["lgraph.cpython-36m-x86_64-linux-gnu.so"],
-    zip_safe = False,
+    zip_safe = False
 )
 
 py_test(
@@ -71,6 +71,7 @@ py_test(
 py_test(
     name = 'test_dfg',
     srcs = ['test_dfg.py'],
-    deps = [":ptlgraph"]
+    deps = [":ptlgraph"],
+    data = ["//inou/cfg:tests/pt1.cfg"]
 )
 
