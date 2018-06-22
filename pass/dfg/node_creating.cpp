@@ -1,4 +1,5 @@
 #include "pass_dfg.hpp"
+#include "nodetype.hpp"
 #include <string>
 
 Index_ID Pass_dfg::create_register(LGraph *g, CF2DF_State *state, const std::string &var_name) {
@@ -93,3 +94,15 @@ Index_ID Pass_dfg::create_NOT(LGraph *g, CF2DF_State *state, Index_ID op1) {
   return dfnode;
 }
 
+Node_Type_Op Pass_dfg::node_type_from_text(const std::string &op_text) {
+
+  if (op_text == "==") {
+    return Equals_Op;
+  } else if (op_text == "=") {
+    return Or_Op;
+  } else {
+    fmt::print("Operator: {}\n", op_text);
+    fflush(stdout);
+    assert(false);
+  }
+}

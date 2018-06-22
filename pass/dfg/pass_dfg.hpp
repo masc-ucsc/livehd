@@ -134,6 +134,8 @@ private:
   Index_ID create_binary(LGraph *g, CF2DF_State *state, Index_ID op1, Index_ID op2, const char *oper);
   Index_ID create_NOT(LGraph *g, CF2DF_State *state, Index_ID op1);
 
+  Node_Type_Op node_type_from_text(const std::string &op_text);
+
   std::string temp() { return TEMP_MARKER + std::to_string(temp_counter++); }
   static unsigned int temp_counter;
 
