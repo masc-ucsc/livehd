@@ -5,11 +5,19 @@
 #include "lgraph_base_core.hpp"
 #include "lgedgeiter.hpp"
 
+
+std::string Lgraph_base_core::Setup_path::last_path="";
+
 Lgraph_base_core::Setup_path::Setup_path(const std::string &path) {
+
+  if (last_path == path)
+    return;
 
   console->info("Lgraph_base_core.cpp: mkdir {}",path);
 
   mkdir(path.c_str(), 0755);
+
+  last_path = path;
 }
 
 Fast_edge_iterator Lgraph_base_core::fast() const {
