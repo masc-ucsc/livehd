@@ -13,7 +13,7 @@ dfg_name = "pt1_dfg"
 cfg_opts = {
   "lgdb": "lgdb",
   "graph_name": cfg_name,
-  "cfg_in": "../inou/cfg/test/%s.cfg" % cfg_name
+  "src": "inou/cfg/tests/%s.cfg" % cfg_name
 }
 
 cfg = lgraph.Inou_cfg(cfg_opts).generate()
