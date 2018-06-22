@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #ifndef LGRAPHBASE_CORE_H
 #define LGRAPHBASE_CORE_H
 

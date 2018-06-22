@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #ifndef INVARIANT_OPTIONS_H_
 #define INVARIANT_OPTIONS_H_
 

@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #ifndef PASS_fluid_H
 #define PASS_fluid_H
 

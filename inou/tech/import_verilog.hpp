@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #ifndef IMPORT_VERILOG_H
 #define IMPORT_VERILOG_H

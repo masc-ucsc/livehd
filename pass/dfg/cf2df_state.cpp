@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "cf2df_state.hpp"
 using std::unordered_map;
 using std::string;

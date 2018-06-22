@@ -1,3 +1,4 @@
+#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 import python_example2 as m
 
 assert m.__version__ == '0.0.1'

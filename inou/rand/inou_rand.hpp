@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #ifndef INOU_RAND_H
 #define INOU_RAND_H
