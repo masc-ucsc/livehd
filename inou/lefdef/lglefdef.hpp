@@ -198,11 +198,9 @@ void lef_parsing(Tech_library *tlib, std::string lef_file_name) {
   tlib->clear_tech_lib();
 
   const char *lef_file = lef_file_name.c_str();
-  int         res;
-  FILE *      fin;
   lefrInit(); //initialize the reader, This routine must be called first
 
-  fin = fopen(lef_file, "r");
+  FILE *fin = fopen(lef_file, "r");
   if(fin == NULL) {
     console->error("Couldn't open lef input file {}\n",lef_file_name);
     exit(1);
@@ -215,7 +213,7 @@ void lef_parsing(Tech_library *tlib, std::string lef_file_name) {
   lefrSetViaCbk(lef_via_cb);
   lefrReset();
 
-  res = lefrRead(fin, lef_file, (void *)tlib); //Tech_file object is your userData, pass pointer of it into lefrRead(), and it will return as a argument in your user-defined callback routine
+  lefrRead(fin, lef_file, (void *)tlib); //Tech_file object is your userData, pass pointer of it into lefrRead(), and it will return as a argument in your user-defined callback routine
   fclose(fin);
 }
 
@@ -341,16 +339,13 @@ int def_row_cb(defrCallbackType_e type, defiRow *frow, defiUserData ud) {
 
 void def_parsing(Def_info &dinfo, std::string def_file_name) {
   const char *def_file = def_file_name.c_str();
-  int         res;
-  FILE *      fin;
   defrInit(); //initialize the reader, This routine must be called first
 
-  fin = fopen(def_file, "r");
+  FILE *fin = fopen(def_file, "r");
   if(fin == NULL) {
     console->error("Couldn't open def input file {}\n",def_file_name);
     exit(1);
   }
-
 
   defrSetDesignCbk(def_design_cb);
   defrSetRowCbk(def_row_cb);
@@ -359,8 +354,9 @@ void def_parsing(Def_info &dinfo, std::string def_file_name) {
   defrSetPinCbk(def_io_cb);
   defrSetNetCbk(def_net_cb);
   defrReset();
-  res = defrRead(fin, def_file, (void *)&dinfo,
-                 1); //Def_info object is your userData, pass pointer of it into defrRead(), and it will return as a argument in your user-defined callback routine
+
+  //Def_info object is your userData, pass pointer of it into defrRead(), and it will return as a argument in your user-defined callback routine
+  defrRead(fin, def_file, (void *)&dinfo, 1);
   fclose(fin);
 }
 
