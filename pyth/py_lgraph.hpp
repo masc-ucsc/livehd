@@ -4,7 +4,7 @@
 #endif
 #define PY_LGRAPH_H
 
-  m.def("find_graph", &LGraph::find_graph, "Returns if exists or creates a new lgraph");
+  m.def("find_lgraph", &LGraph::find_lgraph, "Returns if exists or creates a new lgraph");
   m.def("open_lgraph", &LGraph::open_lgraph, "Open if exists or creates a new lgraph");
 
   py::class_<LGraph>(m, "LGraph")

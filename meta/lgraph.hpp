@@ -43,11 +43,11 @@ public:
   explicit LGraph(const std::string &path);
   explicit LGraph(const std::string &path, const std::string &name, bool clear);
 
-  static LGraph *find_graph(const std::string &gname, const std::string &path);
+  static LGraph *find_lgraph(const std::string &path, const std::string &name);
   static LGraph *open_lgraph(const std::string &path, const std::string &name);
 
   ~LGraph() {
-    fmt::print("lgraph destructor\n");
+    console->debug("lgraph destructor\n");
   }
 
   int lg_id() const {

@@ -4,8 +4,8 @@
 #include "lgraph.hpp"
 
 LGraph_Node_Place::LGraph_Node_Place(const std::string &path, const std::string &name) noexcept
-    : LGraph_Base(path, name)
-    , Lgraph_base_core(path, name)
+    : Lgraph_base_core(path, name)
+    , LGraph_Base(path, name)
     , node_place(path + "/" + name + "_place") {
 }
 

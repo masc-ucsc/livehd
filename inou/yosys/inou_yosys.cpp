@@ -422,7 +422,7 @@ static void look_for_cell_outputs(RTLIL::Module *module) {
     std::string mod_name = &(cell->type.c_str()[1]);
 
     if(cell->type.c_str()[0] == '\\' || cell->type.str().substr(0, 8) == "$paramod")
-      sub_graph = LGraph::find_graph(mod_name, g->get_path());
+      sub_graph = LGraph::find_lgraph(g->get_path(), mod_name);
 
     if(!sub_graph && tlib->include(cell->type.str())) {
       tcell = tlib->get_const_cell(tlib->get_cell_id(cell->type.str()));
@@ -887,7 +887,7 @@ static LGraph *process_module(RTLIL::Module *module) {
         size = cell->parameters["\\Y_WIDTH"].as_int();
       op = Invalid_Op;
 
-    } else if((sub_graph = LGraph::find_graph(&cell->type.c_str()[1], g->get_path()))) {
+    } else if((sub_graph = LGraph::find_lgraph(g->get_path(), &cell->type.c_str()[1]))) {
       // external graph reference
       const char *mod_name = &cell->type.c_str()[1];
       log("module name %s original was  %s\n", mod_name, cell->type.c_str());

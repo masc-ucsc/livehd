@@ -13,6 +13,20 @@ Make sure to configure your editor to use 2 spaces
 
 You can configure your text editor to do this automatically
 
+## Include order
+
+First do C includes, then an empty line with C++ includes, then an empty line
+followed with lgraph related includes. E.g:
+
+#include <sys/types.h>
+#include <dirent.h>
+
+#include <iostream>
+#include <set>
+
+#include "graph_library.hpp"
+#include "lgedgeiter.hpp"
+
 ## Keep column widths short
 
 - Less than 80 characters if at all possible (meaning not compromising
