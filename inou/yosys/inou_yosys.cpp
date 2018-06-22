@@ -24,8 +24,8 @@ PRIVATE_NAMESPACE_BEGIN
 
 struct GlobalPin {
   RTLIL::IdString      port;
-  const RTLIL::Module *module;
-  LGraph *             g;
+  //const RTLIL::Module *module;
+  //LGraph *             g;
   bool                 input;
 };
 

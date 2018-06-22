@@ -10,6 +10,8 @@ class Inou {
 private:
 protected:
 public:
+  Inou() {
+  }
   virtual std::vector<LGraph *> generate() = 0; // Input modules like random graph generation (must call console->sync at the end)
   virtual void                  generate(std::vector<const LGraph *> &out) = 0; // Output modules like to llvm target
 
