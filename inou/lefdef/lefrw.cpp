@@ -2203,11 +2203,11 @@ int doneCB(lefrCallbackType_e c, void *, lefiUserData) {
 }
 
 void errorCB(const char *msg) {
-  printf("%s : %s\n", lefrGetUserData(), msg);
+  printf("%s : %s\n", (const char *)lefrGetUserData(), msg);
 }
 
 void warningCB(const char *msg) {
-  printf("%s : %s\n", lefrGetUserData(), msg);
+  printf("%s : %s\n", (const char *)lefrGetUserData(), msg);
 }
 
 void *mallocCB(int size) {
@@ -2236,7 +2236,6 @@ int main(int argc, char **argv) {
   char *inFile[100];
   char *outFile;
   FILE *f;
-  int   res;
   int   noCalls = 0;
   //  long start_mem;
   int         num;
@@ -2501,7 +2500,7 @@ int main(int argc, char **argv) {
         return 1;
       }
 
-      res = lefrRead(f, inFile[fileCt], (void *)userData);
+      lefrRead(f, inFile[fileCt], (void *)userData);
 
       //if (res)
       //   fprintf(stderr, "Reader returns bad status.\n", inFile[fileCt]);
@@ -2562,7 +2561,7 @@ int main(int argc, char **argv) {
       if(status != LEFW_OK)
         return 1;
 
-      res = lefrRead(f, inFile[fileCt], (void *)userData);
+      lefrRead(f, inFile[fileCt], (void *)userData);
 
       //if (res)
       //   fprintf(stderr, "Reader returns bad status.\n", inFile[fileCt]);
@@ -2596,7 +2595,7 @@ int main(int argc, char **argv) {
         lefrSetLimitPerMsg(10000, 10000);
       }
 
-      res = lefrRead(f, inFile[fileCt], (void *)userData);
+      lefrRead(f, inFile[fileCt], (void *)userData);
 
       if(ccr1709089) {
         // CCR 1709089 test.
