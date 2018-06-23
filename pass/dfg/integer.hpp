@@ -6,9 +6,9 @@
 #include <cstring>
 #include <string>
 
-typedef size_t   pyrsize;
-typedef uint32_t pyrchunk;
-typedef long     pyrint; // IMPORTANT: this must be larger than Char_Array_ID, defined in char_array.hpp, which is uint32_t
+using pyrsize   = size_t;
+using pyrchunk  = uint32_t;
+using pyrint    = long;     // IMPORTANT: this must be larger than Char_Array_ID, defined in char_array.hpp, which is uint32_t
 
 const int      PINT_CHUNK_SIZE = 32;
 const pyrchunk PINT_CHUNK_MASK = 0xFFFFFFFF;
@@ -19,9 +19,11 @@ public:
   Integer(pyrint value);
   Integer(pyrint value, pyrsize size);
   Integer(const Integer &other);
+  Integer(Integer &&other);
   ~Integer();
 
   Integer &operator=(const Integer &other);
+  Integer &operator=(      Integer &&other);
   int      cmp(const Integer &other) const;
 
   pyrchunk get_chunk(pyrsize index) const {
@@ -53,6 +55,7 @@ public:
   }
 
   void invert();
+  Integer &inc();       // optimized to add one
   void set_value(const Integer &other, bool sign_extend = false);
 
   static Integer from_buffer(const pyrchunk *, pyrsize); // could not overload as constructor
