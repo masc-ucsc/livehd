@@ -75,4 +75,3 @@ py_test(
     deps = [":ptlgraph"],
     data = ["//inou/cfg:tests/pt1.cfg"]
 )
-

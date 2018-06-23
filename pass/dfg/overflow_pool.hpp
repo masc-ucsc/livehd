@@ -4,11 +4,14 @@
 
 #include "char_array.hpp"
 #include "integer.hpp"
+#include "lgraph.hpp"
 #include <string>
+
+const std::string OFP_PREFIX = "_ofp";
 
 class Overflow_Pool {
 public:
-  Overflow_Pool(const std::string &path) : pool(path, "_ofp") {}
+  Overflow_Pool(LGraph *g) : pool(g->get_path(), g->get_name() + OFP_PREFIX) { }
 
   Char_Array_ID save(const Integer &i) {
     auto  buffer_size = i.get_array_size() * sizeof(pyrchunk);
