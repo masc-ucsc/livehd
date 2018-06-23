@@ -35,6 +35,13 @@ Integer::Integer(pyrint value, pyrsize bits)
     data[1] = value >> PINT_CHUNK_SIZE;
 }
 
+Integer::Integer(Integer &&other) {
+  data = other.data;
+  bits = other.bits;
+  
+  other.data = nullptr;
+}
+
 Integer Integer::from_buffer(const pyrchunk *chunks, pyrsize bits) {
   Integer i(0, bits);
   memcpy(i.data_ptr(), chunks, i.get_array_size() * sizeof(pyrchunk));
@@ -42,9 +49,7 @@ Integer Integer::from_buffer(const pyrchunk *chunks, pyrsize bits) {
   return i;
 }
 
-Integer::~Integer() {
-  delete[] data;
-}
+Integer::~Integer() { if (data) delete[] data; }
 
 string Integer::str() const {
   std::ostringstream strm;
@@ -73,13 +78,25 @@ Integer &Integer::operator=(const Integer &other) {
   return *this;
 }
 
+Integer &Integer::operator=(Integer &&other) {
+  if (this != &other) {
+    delete[] data;
+    data = other.data;
+    bits = other.bits;
+
+    other.data = nullptr;
+  }
+
+  return *this;
+}
+
 int Integer::get_bit(pyrsize index) const {
   pyrsize arr_index = array_index(index);
-  pyrsize bit_index = chunk_bit_index(index);
 
   if(arr_index >= get_array_size())
     return 0;
 
+  pyrsize bit_index = chunk_bit_index(index);
   int masked = data[arr_index] & (1 << bit_index);
 
   return (masked == 0) ? 0 : 1;
@@ -126,20 +143,20 @@ void Integer::set_bit(pyrsize index, int value) {
 }
 
 void Integer::invert() {
-  unsigned int i;
-  auto         arr_size = get_array_size();
-
-  for(i = 0; i < arr_size; i++)
+  for (pyrsize i = 0; i < get_array_size(); i++)
     data[i] = ~data[i];
+  
+  inc();
+}
 
-  for(i = 0; i < arr_size; i++) {
-    if(data[i] == UINT32_MAX)
-      data[i] = 0;
-    else {
-      data[i] += 1;
-      break;
-    }
-  }
+Integer &Integer::inc() {
+  pyrsize itr = 0;
+
+  while (data[itr] == UINT32_MAX)         // add one, handling overflow
+    data[itr++] = 0;
+  
+  data[itr]++;
+  return *this;
 }
 
 void Integer::set_value(const Integer &other, bool sign_extend) {
