@@ -215,6 +215,8 @@ public:
     return (uint16_t *)ptr - first() + 1; // zero
   }
 
+  const Data_Type &get_field(const std::string &s) const { return get_field(s.c_str()); }
+
   const Data_Type &get_field(const char *ptr) const {
     int id = get_id(ptr);
     return get_field(id);
