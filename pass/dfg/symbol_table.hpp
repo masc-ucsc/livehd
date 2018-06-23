@@ -9,36 +9,43 @@
 #include "overflow_pool.hpp"
 #include "type.hpp"
 #include "lgedge.hpp"
+#include "lgraph.hpp"
 
-typedef google::dense_hash_map<std::string, Type> Symbols;
+const Index_ID      ST_EMPTY_KEY = 0;
+const Char_Array_ID VC_EMPTY_KEY = 0;
+const std::string   ST_PREFIX    = "_symbs";
 
-const std::string DEFAULT_POOL_DIR = ".";
-const std::string DHM_EMPTY_KEY    = "<empty>";
-const std::string DHM_DELETED_KEY  = "<deleted>";
+using Symbols = google::dense_hash_map<Index_ID, Type>;
+using Var2ID  = google::dense_hash_map<Char_Array_ID, Index_ID>;
 
 class Symbol_Table {
 public:
-  Symbol_Table() : pool(DEFAULT_POOL_DIR) {
-    symbols.set_empty_key(DHM_EMPTY_KEY);
-    symbols.set_deleted_key(DHM_DELETED_KEY);
-
+  Symbol_Table(LGraph *g) : gref(g), pool(gref), lgstrings(g->get_path(), g->get_name() + ST_PREFIX) {
     Type::context = this; // global static pointer for all Types
+
+    symbols.set_empty_key(ST_EMPTY_KEY);
+    cache.set_empty_key(VC_EMPTY_KEY);
   }
 
-  void        add(const std::string &var)                   { symbols[var] = Type::undefined; }
-  void        add(const std::string &var, const Type &type) { symbols[var] = type; }
-  const Type &get(const std::string &var)                   { return symbols[var]; } // can't read google::dense_hash_map from const member
-  bool        has(const std::string &var)                   { return symbols.find(var) != symbols.end(); }
+  void        add(const std::string &var, const Type &type = Type::undefined);
+  const Type &get(const std::string &var);
+  bool        has(const std::string &var);
 
   // these throw TypeErrors if the merge fails
-  void merge(const std::string &var, const std::string &other) { symbols[var].merge(symbols[other]); }
-  void merge(const std::string &var, const Type &other)        { symbols[var].merge(other); }
+  void merge(const std::string &var, const std::string &other);
+  void merge(const std::string &var, const Type &other);
 
+  Index_ID find_id(const std::string &var);
   Overflow_Pool *memory_pool() { return &pool; }
 
 private:
-  Overflow_Pool     pool;
-  Symbols           symbols;
+  Char_Array_ID str2id(const std::string &);
+
+  LGraph        *gref;
+  Overflow_Pool pool;
+  Symbols       symbols;
+  Var2ID        cache;
+  Char_Array<uint16_t> lgstrings;
 };
 
 #endif

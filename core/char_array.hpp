@@ -232,10 +232,14 @@ public:
     return str2id.find(str) != str2id.end();
   }
 
+  bool include(const std::string &str) const { return include(str.c_str()); }
+
   int get_id(const char *str) const {
     assert(include(str));
     return str2id.at(str);
   }
+
+  int get_id(const std::string &str) const { return get_id(str.c_str()); }
 };
 
 #endif
