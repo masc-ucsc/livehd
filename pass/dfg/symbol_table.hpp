@@ -21,6 +21,12 @@ public:
   Symbol_Table(LGraph *g) : gref(g), lgstrings(gref->get_path(), gref->get_name() + ST_PREFIX) {
     Type::context = this; // global static pointer for all Types
     symbols.set_empty_key(ST_EMPTY_KEY);
+    lgstrings.clear();
+    console->debug("Symbol_table {}/{} cleared", gref->get_path(), gref->get_name() + ST_PREFIX);
+  }
+  virtual ~Symbol_Table() {
+    lgstrings.sync();
+    console->debug("Symbol_table {}/{} sync", gref->get_path(), gref->get_name() + ST_PREFIX);
   }
 
   void        add(const std::string &var, const Type &type = Type::undefined);
@@ -33,6 +39,10 @@ public:
 
   Char_Array_ID save_integer(const Integer &i) { return lgstrings.create_id(i.hex_string()); }
   Integer load_integer(Char_Array_ID cid) { return Integer(lgstrings.get_char(cid)); }
+
+  void sync() {
+    lgstrings.sync();
+  };
 
 private:
   LGraph                *gref;

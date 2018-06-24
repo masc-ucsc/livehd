@@ -30,7 +30,7 @@ LGraph * Pass_dfg::transform() {
 
 void Pass_dfg::transform(LGraph *cfg) {
   assert(!opack.graph_name.empty());
-  LGraph *dfg = new LGraph(opack.lgdb, opack.graph_name, false);
+  LGraph *dfg = new LGraph(opack.lgdb, opack.graph_name, false); // true? should it clear the DFG?
 
   cfg_2_dfg(dfg, cfg);
   dfg->sync();
@@ -43,6 +43,9 @@ void Pass_dfg::cfg_2_dfg(LGraph *dfg, const LGraph *cfg) {
 
   process_cfg(dfg, cfg, &state, itr);
   attach_outputs(dfg, &state);
+
+  fmt::print("calling sync");
+  state.symbol_table().sync();
 }
 
 Index_ID Pass_dfg::process_cfg(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, Index_ID top_node) {
