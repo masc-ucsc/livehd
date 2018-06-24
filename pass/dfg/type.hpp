@@ -5,7 +5,7 @@
 #include <cmath>
 #include <cstdint>
 
-#include "overflow_pool.hpp"
+#include "integer.hpp"
 
 enum TypeName { NUMERIC,
                 LOGICAL,

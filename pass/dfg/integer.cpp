@@ -42,24 +42,45 @@ Integer::Integer(Integer &&other) {
   other.data = nullptr;
 }
 
-Integer Integer::from_buffer(const pyrchunk *chunks, pyrsize bits) {
-  Integer i(0, bits);
-  memcpy(i.data_ptr(), chunks, i.get_array_size() * sizeof(pyrchunk));
+Integer::Integer(const string &hex_string) {
+  bits = hex_string.length() * CHARS_IN_CHUNK;
+  auto array_len = get_array_size();
+  data = new pyrchunk[array_len];
 
-  return i;
+  auto sindex = hex_string.length() - CHARS_IN_CHUNK;
+  pyrsize dindex = 0;
+
+  while (sindex >= CHARS_IN_CHUNK) {
+    string str_chunk = hex_string.substr(sindex, CHARS_IN_CHUNK);
+    data[dindex++] = string_2_chunk(str_chunk);
+
+    sindex -= CHARS_IN_CHUNK;
+  }
+
+  if (sindex > 0)
+    data[dindex] = string_2_chunk(hex_string.substr(0, sindex));
 }
 
 Integer::~Integer() { if (data) delete[] data; }
 
-string Integer::str() const {
-  std::ostringstream strm;
+string Integer::hex_string() const {
+  static const char HEX_LIST[] = "0123456789ABCDEF";
 
-  for(long i = get_array_size() - 1; i >= 0; i--) {
-    pyrchunk sec = get_chunk(i);
-    strm << std::right << std::setfill('0') << std::setw(8) << std::hex << sec;
+  auto array_len = get_array_size();
+  string rtrn(array_len * 8, '0');
+
+  auto sindex = rtrn.length() - 1;
+  
+  for (pyrsize dindex = 0; dindex < array_len; dindex++) {
+    auto chunk = data[dindex];
+
+    for (int i = 0; i < CHARS_IN_CHUNK; i++) {
+      rtrn[sindex--] = HEX_LIST[chunk & 0xF];
+      chunk >>= 4;
+    }
   }
 
-  return strm.str();
+  return "0x" + rtrn;
 }
 
 Integer &Integer::operator=(const Integer &other) {
@@ -246,7 +267,7 @@ pyrsize Integer::highest_set_bit() const {
 string Integer::x_string() const {
   string xs;
 
-  for(int i = 0; i < get_array_size(); i++)
+  for(pyrsize i = 0; i < get_array_size(); i++)
     xs += "xxxxxxxx";
 
   return xs;
@@ -269,9 +290,22 @@ int Integer::cmp(const Integer &other) const {
   return 0;
 }
 
+pyrchunk Integer::string_2_chunk(const std::string &schunk) {
+  static auto hex2int = [](char c) { return (c >= '0' && c <= '9') ? c - '0' : c - 'A' + 10; };
+
+  pyrchunk chunk = hex2int(schunk.at(0));
+
+  for (size_t i = 1; i < schunk.length(); i++)
+    chunk = (chunk * 16) + hex2int(schunk.at(i));
+
+  return chunk;
+}
+
 bool operator>(const Integer &i1, const Integer &i2) {
   return i1.cmp(i2) > 0;
 }
+
 bool operator<(const Integer &i1, const Integer &i2) {
   return i1.cmp(i2) < 0;
 }
+
