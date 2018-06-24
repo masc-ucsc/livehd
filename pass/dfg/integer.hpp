@@ -11,6 +11,7 @@ using pyrchunk  = uint32_t;
 using pyrint    = long;     // IMPORTANT: this must be larger than Char_Array_ID, defined in char_array.hpp, which is uint32_t
 
 const int      PINT_CHUNK_SIZE = 32;
+const int      CHARS_IN_CHUNK  = PINT_CHUNK_SIZE >> 2;
 const pyrchunk PINT_CHUNK_MASK = 0xFFFFFFFF;
 const pyrchunk PINT_CHUNK_MAX  = 0xFFFFFFFF;
 
@@ -19,6 +20,7 @@ public:
   Integer(pyrint value);
   Integer(pyrint value, pyrsize size);
   Integer(const Integer &other);
+  Integer(const std::string &hex_string);
   Integer(Integer &&other);
   ~Integer();
 
@@ -46,7 +48,7 @@ public:
   }
   pyrsize highest_set_bit() const;
 
-  std::string     str() const;
+  std::string     str() const { return hex_string(); }
   const pyrchunk *const_data_ptr() const {
     return data;
   }
@@ -68,9 +70,11 @@ public:
   }
 
   std::string x_string() const;
+  std::string hex_string() const;       // return this number as a hex string
 
 protected:
   void write_upper_chunk_helper(pyrsize bits_to_write, pyrsize remaining_bits_to_write, int chunk_index, uint64_t value);
+  pyrchunk string_2_chunk(const std::string &);
 
   pyrsize   bits;
   pyrchunk *data;

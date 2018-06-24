@@ -86,8 +86,8 @@ bool Type::merge_attribute(pyrint *attr1_out, bool attr1_overflow, bool attr1_fi
 
 int Type::compare_attributes(pyrint attr1, bool attr1_overflow, pyrint attr2, bool attr2_overflow) {
   if(attr1_overflow || attr2_overflow) {
-    const Integer attr1_int = (attr1_overflow) ? context->memory_pool()->load((Char_Array_ID)attr1) : attr1;
-    const Integer attr2_int = (attr2_overflow) ? context->memory_pool()->load((Char_Array_ID)attr2) : attr2;
+    const Integer attr1_int = (attr1_overflow) ? context->load_integer((Char_Array_ID)attr1) : attr1;
+    const Integer attr2_int = (attr2_overflow) ? context->load_integer((Char_Array_ID)attr2) : attr2;
 
     if(attr1_int > attr2_int) // doing a normal subtraction would necessitate creating a new Integer
       return 1;
@@ -135,7 +135,7 @@ pyrsize Type::bits() const {
 
 pyrsize Type::signed_bits_required(pyrint attr, bool attr_overflow) {
   if(attr_overflow) {
-    Integer pint = context->memory_pool()->load((Char_Array_ID)attr);
+    Integer pint = context->load_integer((Char_Array_ID)attr);
 
     if(pint < 0)
       pint.invert();
@@ -151,7 +151,7 @@ pyrsize Type::signed_bits_required(pyrint attr, bool attr_overflow) {
 
 pyrsize Type::unsigned_bits_required(pyrint attr, bool attr_overflow) {
   if(attr_overflow) {
-    const Integer pint = context->memory_pool()->load((Char_Array_ID)attr);
+    const Integer pint = context->load_integer((Char_Array_ID)attr);
     return pint.highest_set_bit();
   } else {
     return log2(attr) + 1;
@@ -192,9 +192,9 @@ string Type::to_string() const {
   }
 }
 
-Integer Type::get_overflow_min() const { return context->memory_pool()->load((Char_Array_ID)min); }
-Integer Type::get_overflow_max() const { return context->memory_pool()->load((Char_Array_ID)max); }
-Integer Type::get_overflow_len() const { return context->memory_pool()->load((Char_Array_ID)len); }
+Integer Type::get_overflow_min() const { return context->load_integer((Char_Array_ID)min); }
+Integer Type::get_overflow_max() const { return context->load_integer((Char_Array_ID)max); }
+Integer Type::get_overflow_len() const { return context->load_integer((Char_Array_ID)len); }
 
 bool Type::flags_match(const Type &o) const {
   return (
