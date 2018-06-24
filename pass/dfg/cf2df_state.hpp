@@ -29,6 +29,9 @@ public:
   CF2DF_State(LGraph *l, bool rwf = true) : lgref(l), table(l), fluid(rwf) { }
   CF2DF_State(const CF2DF_State &s) : lgref(s.lgref), table(lgref), last_refs(s.last_refs), registers(s.registers), fluid(s.fluid) { }
   CF2DF_State copy() const { return CF2DF_State(*this); }
+  virtual ~CF2DF_State() {
+    table.sync(); // force Char_array to disk
+  }
 
   void update_reference(const std::string &v, Index_ID n);
   Index_ID get_reference(const std::string &v) const { return last_refs.at(v); }
