@@ -60,8 +60,6 @@ public:
   Integer &inc();       // optimized to add one
   void set_value(const Integer &other, bool sign_extend = false);
 
-  static Integer from_buffer(const pyrchunk *, pyrsize); // could not overload as constructor
-
   static pyrsize array_index(pyrsize bits) {
     return bits >> 5;
   }
