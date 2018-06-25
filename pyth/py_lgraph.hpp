@@ -9,5 +9,6 @@
 
   py::class_<LGraph>(m, "LGraph")
     .def(py::init<const std::string &>())
-    .def("lg_id", &LGraph::lg_id);
+    .def("lg_id", &LGraph::lg_id)
+    .def("dump",  &LGraph::dump, "Dumps to screen the graph. It can be lots of data!!");
 

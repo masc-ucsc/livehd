@@ -93,7 +93,8 @@ public:
     return get_node_id(name.c_str());
   }
 
-  void dump() {
+  void dump_lgwires() const {
+    fmt::print("lgwires {} \n", name);
     names.dump();
   }
 };

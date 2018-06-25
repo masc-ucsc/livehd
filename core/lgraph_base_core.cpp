@@ -27,4 +27,4 @@ Fast_edge_iterator Lgraph_base_core::fast() const {
   return Fast_edge_iterator(1, this);
 }
 
-int Console_init::_static_initializer = initialize_logger();
+int Console_init::_static_initializer = Console_init::initialize_logger();

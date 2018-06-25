@@ -1,4 +1,4 @@
 
 build --cxxopt="-std=c++17" --cxxopt="-Wno-unknown-pragmas"
 common --color=yes
-test --force_python py3 --python_path /usr/bin/python3
+test --cache_test_results=no --force_python py3 --python_path /usr/bin/python3
