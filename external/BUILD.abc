@@ -7,6 +7,7 @@
 
 cc_library(
    name = "abc",
+   copts = ["-w","-O2"],  # Always fast, no warnings to avoid spurious messages
    srcs = glob(["src/base/**/*.c"],
                exclude=["src/base/abci/abcDarUnfold2.c",
                         "src/base/abci/abciUnfold2.c",
