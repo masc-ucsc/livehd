@@ -17,6 +17,7 @@ genyacc(
 
 cc_library(
     name = "lef",
+    copts = ["-w","-O2"],  # Always fast, no warnings to avoid spurious messages
     #toolchains = ['//tools:clang-local'],
     srcs = [":lefyy"] + glob(["*.cpp"]),
     includes = ["."],

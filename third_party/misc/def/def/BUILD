@@ -17,7 +17,7 @@ genyacc(
 
 cc_library(
     name = "def",
-    #toolchains = ['//tools:clang-local'],
+    copts = ["-w","-O2"],  # Always fast, no warnings to avoid spurious messages
     srcs = [":defyy"] + glob(["*.cpp"]),
     hdrs = glob(["*.hpp"]) + ["lex.h"],
     includes = ["."],
