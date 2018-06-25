@@ -79,8 +79,6 @@ public:
   virtual void sync();
   virtual void emplace_back();
 
-  void dump() const;
-
   const std::string &get_name() const {
     return name;
   }

@@ -10,8 +10,8 @@
 #include "lgraphbase.hpp"
 
 LGraph_Base::LGraph_Base(const std::string &_path, const std::string &_name) noexcept
-    : LGraph_Node_Type(_path, _name)
-    , Lgraph_base_core(_path, _name)
+    : Lgraph_base_core(_path, _name)
+    , LGraph_Node_Type(_path, _name)
     , name(_name)
     , path(_path)
     , input_array(_path, _name + "_inputs")
@@ -22,24 +22,6 @@ LGraph_Base::LGraph_Base(const std::string &_path, const std::string &_name) noe
 
 LGraph_Base::_init::_init() {
   // Add here sequence of static initialization that may be needed
-}
-
-void LGraph_Base::dump() const {
-  fmt::print("lgraph name:{} size:{}\n", name, node_internal.size());
-
-  for(const auto &ent : inputs2node) {
-    fmt::print("input {} idx:{} pid:{}\n", ent.first, ent.second.nid, ent.second.pos);
-  }
-  for(const auto &ent : outputs2node) {
-    fmt::print("output {} idx:{} pid:{}\n", ent.first, ent.second.nid, ent.second.pos);
-  }
-
-#if 1
-  for(Index_ID i = 0; i < node_internal.size(); i++) {
-    fmt::print("{} ", i);
-    node_internal[i].dump();
-  }
-#endif
 }
 
 void LGraph_Base::clear() {
@@ -100,6 +82,7 @@ void LGraph_Base::get_lock() {
   int         err  = open(lock.c_str(), O_CREAT | O_EXCL, 420); // 644
   if(err < 0) {
     console->error("Could not get lock:{}. Already running? Unclear exit?", lock.c_str());
+    throw std::runtime_error("could not get lock");
     exit(-3);
   }
   close(err);
@@ -657,11 +640,6 @@ Index_ID LGraph_Base::add_edge_int(Index_ID dst_nid, Port_ID inp_pid, Index_ID s
   // WARNING: Graph IO have alphabetical port IDs assigned to be mapped between
   // graphs. It should not use local port b
   if(node_internal[src_nid].is_graph_io()) {
-#ifndef NDEBUG_OLD
-    if(!(out_pid == 0 || out_pid == node_internal[src_nid].get_out_pid()))
-      dump();
-    assert(out_pid == 0 || out_pid == node_internal[src_nid].get_out_pid());
-#endif
     // out_pid = node_internal[src_nid].get_out_pid();
     out_pid = 0;
   } else {
@@ -669,11 +647,6 @@ Index_ID LGraph_Base::add_edge_int(Index_ID dst_nid, Port_ID inp_pid, Index_ID s
   }
 
   if(node_internal[dst_nid].is_graph_io()) {
-#ifndef NDEBUG_OLD
-    if(!(inp_pid == 0 || inp_pid == node_internal[dst_nid].get_out_pid()))
-      dump();
-    assert(inp_pid == 0 || inp_pid == node_internal[dst_nid].get_out_pid());
-#endif
     // inp_pid = node_internal[dst_nid].get_out_pid();
     inp_pid = 0;
   } else {

@@ -80,17 +80,14 @@ public:
     return tlibrary;
   }
 
-  void dump_lgwires() {
-    fmt::print("lgwires {} \n", name);
-    LGraph_WireNames::dump();
-  }
-
   uint16_t get_offset(Index_ID nid) const override {
     return LGraph_WireNames::get_offset(nid);
   }
 
   Forward_edge_iterator  forward() const;
   Backward_edge_iterator backward() const;
+
+  void dump() const;
 };
 
 // Clean interface/iterator for most operations. It must call graph

@@ -233,3 +233,21 @@ Forward_edge_iterator LGraph::forward() const {
 Backward_edge_iterator LGraph::backward() const {
   return Backward_edge_iterator(this);
 }
+
+void LGraph::dump() const {
+  fmt::print("lgraph name:{} size:{}\n", name, node_internal.size());
+
+  for(const auto &ent : inputs2node) {
+    fmt::print("input {} idx:{} pid:{}\n", ent.first, ent.second.nid, ent.second.pos);
+  }
+  for(const auto &ent : outputs2node) {
+    fmt::print("output {} idx:{} pid:{}\n", ent.first, ent.second.nid, ent.second.pos);
+  }
+
+#if 1
+  for(Index_ID i = 0; i < node_internal.size(); i++) {
+    fmt::print("{} ", i);
+    node_internal[i].dump();
+  }
+#endif
+}

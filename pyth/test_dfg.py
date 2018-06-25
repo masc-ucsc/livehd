@@ -1,29 +1,53 @@
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 import sys
 import os
+import shutil
 
 base_dir = os.path.dirname(sys.argv[0]) or '.'
+sys.path.insert(1, base_dir)
 package_dir_a = os.path.join(base_dir, '__main__')
-sys.path.insert(0, package_dir_a)
+sys.path.insert(1, package_dir_a)
 
-from pyth import lgraph
+print("test running directory: ", os.getcwd())
+shutil.rmtree("lgdb", ignore_errors=True)  # remove previous garbage
 
-cfg_name = "pt1"
-dfg_name = "pt1_dfg"
+try:
+  import lgraph
 
-cfg_opts = {
-  "lgdb": "lgdb",
-  "graph_name": cfg_name,
-  "src": "inou/cfg/tests/%s.cfg" % cfg_name
-}
+  cfg_name = "pt1"
+  dfg_name = "pt1_dfg"
 
-cfg = lgraph.Inou_cfg(cfg_opts).generate()
+  cfg_opts = {
+        "lgdb": "lgdb",
+        "graph_name": cfg_name,
+        "src": "inou/cfg/tests/%s.cfg" % cfg_name
+        }
 
-dfg_opts = {
-  "lgdb": "lgdb",
-  "src": cfg_name,
-  "graph_name": dfg_name
-}
+  print("cfg pass...")
+  sys.stdout.flush()
+  cfg = lgraph.Inou_cfg(cfg_opts).generate()
 
-dfg = lgraph.Pass_dfg(dfg_opts).generate()
+  dfg_opts = {
+        "lgdb": "lgdb",
+        "src": cfg_name,
+        "graph_name": dfg_name
+        }
+
+  print("dfg pass...")
+  sys.stdout.flush()
+  dfg = lgraph.Pass_dfg(dfg_opts).generate()
+
+  assert not (dfg is None)
+  assert not (dfg[0] is None)
+
+  print("dump pass...")
+  sys.stdout.flush()
+  g = lgraph.find_lgraph("lgdb",dfg_name)
+  assert dfg[0].lg_id() == g.lg_id()
+  g.dump()
+
+except:
+  print("lgraph raised exception. Test fails")
+  assert(False)
+
 
