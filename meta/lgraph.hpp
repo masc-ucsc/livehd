@@ -11,6 +11,7 @@
 #include "nodeplace.hpp"
 #include "nodesrcloc.hpp"
 #include "nodetype.hpp"
+#include "symboltable.hpp"
 #include "tech_library.hpp"
 
 class Node;
@@ -22,7 +23,8 @@ class LGraph : public LGraph_Node_Delay,
                public LGraph_Node_Src_Loc,
                public LGraph_WireNames,
                public LGraph_InstanceNames,
-               public LGraph_Node_Place {
+               public LGraph_Node_Place,
+               public LGraph_Symbol_Table {
 protected:
   // FIXME: for live I need one instance per lgdb. Do it similar to library, or
   // keep references to lgraphs in the library

@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "integer.hpp"
 #include "exception.hpp"
+#include "lgraphbase.hpp"
 
 #include <cassert>
 #include <iomanip>
@@ -261,7 +262,8 @@ pyrsize Integer::highest_set_bit() const {
     }
   }
 
-  throw Logic_Error("highest_set_bit() called on 0");
+  fmt::print("highest_set_bit() called on 0");
+  assert(false);
 }
 
 string Integer::x_string() const {

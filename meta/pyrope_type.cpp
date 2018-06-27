@@ -1,15 +1,12 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#include "type.hpp"
-#include "symbol_table.hpp"
+#include "pyrope_type.hpp"
+#include "symboltable.hpp"
 #include "exception.hpp"
 
 #include <string>
 using std::string;
 
-Symbol_Table *Type::context = nullptr;
-const Type Type::undefined = Type();
-
-void Type::merge(const Type &other) {
+void Pyrope_Type::merge(LGraph_Symbol_Table *context, const Pyrope_Type &other) {
   if(get_name() == UNDEF) {
     *this = other;
     return;
@@ -29,7 +26,7 @@ void Type::merge(const Type &other) {
     if(other.get_name() != STRING)
       throw Type_Error("Could not merge: " + to_string() + ", " + other.to_string());
 
-    if(compare_attributes(other.len, other._len_overflow, len, _len_overflow) > 0) { // other.len > t1.len
+    if(compare_attributes(context, other.len, other._len_overflow, len, _len_overflow) > 0) { // other.len > t1.len
       if(_len_fixed)
         throw Type_Error("Could not increase fixed length");
 
@@ -45,9 +42,9 @@ void Type::merge(const Type &other) {
       throw Type_Error("Could not merge: " + to_string() + ", " + other.to_string());
 
     // take the larger of the two maxes and lengths, and the smaller of the two mins
-    _max_overflow = merge_attribute(&max, _max_overflow, _max_fixed, other.max, other._max_overflow);
-    _min_overflow = merge_attribute(&min, _min_overflow, _min_fixed, other.min, other._min_overflow, -1);
-    _len_overflow = merge_attribute(&len, _len_overflow, _len_fixed, other.len, other._len_overflow);
+    _max_overflow = merge_attribute(context, &max, _max_overflow, _max_fixed, other.max, other._max_overflow);
+    _min_overflow = merge_attribute(context, &min, _min_overflow, _min_fixed, other.min, other._min_overflow, -1);
+    _len_overflow = merge_attribute(context, &len, _len_overflow, _len_fixed, other.len, other._len_overflow);
 
     // set to signed if either is signed
     _is_signed |= other._is_signed;
@@ -66,11 +63,11 @@ void Type::merge(const Type &other) {
   }
 }
 
-bool Type::merge_attribute(pyrint *attr1_out, bool attr1_overflow, bool attr1_fixed,
+bool Pyrope_Type::merge_attribute(LGraph_Symbol_Table *context, pyrint *attr1_out, bool attr1_overflow, bool attr1_fixed,
                            pyrint attr2, bool attr2_overflow, int polarity)
-// merge a generic attribute of one type with another
+// merge a generic attribute of one Pyrope_Type with another
 {
-  int cmp_result = compare_attributes(*attr1_out, attr1_overflow, attr2, attr2_overflow);
+  int cmp_result = compare_attributes(context, *attr1_out, attr1_overflow, attr2, attr2_overflow);
   cmp_result *= polarity;
 
   if(cmp_result > 0) { // attr2 > attr1
@@ -84,7 +81,7 @@ bool Type::merge_attribute(pyrint *attr1_out, bool attr1_overflow, bool attr1_fi
   }
 }
 
-int Type::compare_attributes(pyrint attr1, bool attr1_overflow, pyrint attr2, bool attr2_overflow) {
+int Pyrope_Type::compare_attributes(LGraph_Symbol_Table *context, pyrint attr1, bool attr1_overflow, pyrint attr2, bool attr2_overflow) {
   if(attr1_overflow || attr2_overflow) {
     const Integer attr1_int = (attr1_overflow) ? context->load_integer((Char_Array_ID)attr1) : attr1;
     const Integer attr2_int = (attr2_overflow) ? context->load_integer((Char_Array_ID)attr2) : attr2;
@@ -100,10 +97,10 @@ int Type::compare_attributes(pyrint attr1, bool attr1_overflow, pyrint attr2, bo
   }
 }
 
-pyrsize Type::bits() const {
+pyrsize Pyrope_Type::bits(LGraph_Symbol_Table *context) const {
   switch(name) {
   case UNDEF:
-    throw Type_Error("bits() called on UNDEF type");
+    throw Type_Error("bits() called on UNDEF Pyrope_Type");
 
   case LOGICAL:
     return 1;
@@ -116,16 +113,16 @@ pyrsize Type::bits() const {
 
   case NUMERIC:
     if(_is_signed) {
-      if(compare_to_zero(min, _min_overflow) >= 0)
-        return signed_bits_required(min, _min_overflow);
+      if(compare_to_zero(context, min, _min_overflow) >= 0)
+        return signed_bits_required(context, min, _min_overflow);
       else {
-        auto pos_bits = signed_bits_required(max, _max_overflow);
-        auto neg_bits = signed_bits_required(min, _min_overflow);
+        auto pos_bits = signed_bits_required(context, max, _max_overflow);
+        auto neg_bits = signed_bits_required(context, min, _min_overflow);
 
         return (pos_bits >= neg_bits) ? pos_bits : neg_bits;
       }
     } else {
-      return unsigned_bits_required(max, _max_overflow);
+      return unsigned_bits_required(context, max, _max_overflow);
     }
 
   default:
@@ -133,7 +130,7 @@ pyrsize Type::bits() const {
   }
 }
 
-pyrsize Type::signed_bits_required(pyrint attr, bool attr_overflow) {
+pyrsize Pyrope_Type::signed_bits_required(LGraph_Symbol_Table *context, pyrint attr, bool attr_overflow) {
   if(attr_overflow) {
     Integer pint = context->load_integer((Char_Array_ID)attr);
 
@@ -149,16 +146,16 @@ pyrsize Type::signed_bits_required(pyrint attr, bool attr_overflow) {
   }
 }
 
-pyrsize Type::unsigned_bits_required(pyrint attr, bool attr_overflow) {
+pyrsize Pyrope_Type::unsigned_bits_required(LGraph_Symbol_Table *context, pyrint attr, bool attr_overflow) {
   if(attr_overflow) {
-    const Integer pint = context->load_integer((Char_Array_ID)attr);
+    Integer pint = context->load_integer((Char_Array_ID)attr);
     return pint.highest_set_bit();
   } else {
     return log2(attr) + 1;
   }
 }
 
-string Type::to_string() const {
+string Pyrope_Type::to_string() const {
   switch(name) {
   case NUMERIC:
     if(_is_signed) {
@@ -192,11 +189,11 @@ string Type::to_string() const {
   }
 }
 
-Integer Type::get_overflow_min() const { return context->load_integer((Char_Array_ID)min); }
-Integer Type::get_overflow_max() const { return context->load_integer((Char_Array_ID)max); }
-Integer Type::get_overflow_len() const { return context->load_integer((Char_Array_ID)len); }
+Integer Pyrope_Type::get_overflow_min(LGraph_Symbol_Table *context) const { return context->load_integer((Char_Array_ID)min); }
+Integer Pyrope_Type::get_overflow_max(LGraph_Symbol_Table *context) const { return context->load_integer((Char_Array_ID)max); }
+Integer Pyrope_Type::get_overflow_len(LGraph_Symbol_Table *context) const { return context->load_integer((Char_Array_ID)len); }
 
-bool Type::flags_match(const Type &o) const {
+bool Pyrope_Type::flags_match(const Pyrope_Type &o) const {
   return (
       _is_signed == o._is_signed &&
       _is_input == o._is_input &&
@@ -211,7 +208,7 @@ bool Type::flags_match(const Type &o) const {
       _len_fixed == o._len_fixed);
 }
 
-bool operator==(const Type &t1, const Type &t2) {
+bool operator==(const Pyrope_Type &t1, const Pyrope_Type &t2) {
   if(t1.get_name() != t2.get_name() || !t1.flags_match(t2))
     return false;
 
@@ -225,4 +222,4 @@ bool operator==(const Type &t1, const Type &t2) {
   }
 }
 
-bool operator!=(const Type &t1, const Type &t2) { return !(t1 == t2); }
+bool operator!=(const Pyrope_Type &t1, const Pyrope_Type &t2) { return !(t1 == t2); }

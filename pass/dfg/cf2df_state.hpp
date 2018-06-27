@@ -4,7 +4,6 @@
 
 #include "lgraph.hpp"
 #include "lgedge.hpp"
-#include "symbol_table.hpp"
 #include <string>
 #include <unordered_map>
 
@@ -26,11 +25,11 @@ const Port_ID REG_OUTPUT = 'Q';
 
 class CF2DF_State {
 public:
-  CF2DF_State(LGraph *l, bool rwf = true) : lgref(l), table(l), fluid(rwf) { }
-  CF2DF_State(const CF2DF_State &s) : lgref(s.lgref), last_refs(s.last_refs), registers(s.registers), table(lgref), fluid(s.fluid) { }
+  CF2DF_State(LGraph *l, bool rwf = true) : lgref(l), fluid(rwf) { }
+  CF2DF_State(const CF2DF_State &s) : lgref(s.lgref), last_refs(s.last_refs), registers(s.registers), fluid(s.fluid) { }
   CF2DF_State copy() const { return CF2DF_State(*this); }
   virtual ~CF2DF_State() {
-    table.sync(); // force Char_array to disk
+
   }
 
   void update_reference(const std::string &v, Index_ID n);
@@ -44,8 +43,6 @@ public:
   void add_register(const std::string &v, Index_ID n) { registers[v] = n; }
   bool fluid_df() const { return fluid; }
 
-  Symbol_Table &symbol_table() { return table; }
-
   bool is_input(const std::string &v) const { return lgref->is_graph_input(last_refs.at(v)); }
   bool is_output(const std::string &v) const { return lgref->is_graph_output(last_refs.at(v)); }
 
@@ -56,7 +53,6 @@ private:
   LGraph *lgref;
   std::unordered_map<std::string, Index_ID> last_refs;
   std::unordered_map<std::string, Index_ID> registers;
-  Symbol_Table table;
   bool fluid;
 };
 

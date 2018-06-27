@@ -11,7 +11,6 @@
 #include "pass.hpp"
 #include "cfg_node_data.hpp"
 #include "lgedge.hpp"
-#include "symbol_table.hpp"
 #include "cf2df_state.hpp"
 #include "py_options.hpp"
 
