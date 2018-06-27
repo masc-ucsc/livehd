@@ -5,7 +5,6 @@ using std::string;
 
 void CF2DF_State::update_reference(const string &v, Index_ID n) {
   last_refs[v] = n;
-  if (!table.has(v)) table.add(v);
 }
 
 unordered_map<string, Index_ID> CF2DF_State::inputs() const {

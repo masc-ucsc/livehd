@@ -48,7 +48,6 @@ Index_ID Pass_dfg::true_constant(LGraph *g, CF2DF_State *state) {
 
   std::string var_name = temp();
   g->set_node_wirename(nid, var_name.c_str());
-  state->symbol_table().add(var_name, Type::create_logical());
 
   return nid;
 }
