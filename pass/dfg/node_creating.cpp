@@ -26,9 +26,10 @@ Index_ID Pass_dfg::create_output(LGraph *g, CF2DF_State *state, const std::strin
 
 Index_ID Pass_dfg::create_private(LGraph *g, CF2DF_State *state, const std::string &var_name) {
   Index_ID nid = create_node(g, state, var_name);
-  g->node_type_set(nid, CfgAssign_Op);
+  g->node_type_set(nid, Or_Op);
 
   g->add_edge(Node_Pin(nid, 0, false), Node_Pin(default_constant(g, state), 0, true));
+  g->add_edge(Node_Pin(nid, 0, false), Node_Pin(false_constant(g, state), 0, true));
 
   return nid;
 }
@@ -52,6 +53,17 @@ Index_ID Pass_dfg::true_constant(LGraph *g, CF2DF_State *state) {
   return nid;
 }
 
+Index_ID Pass_dfg::false_constant(LGraph *g, CF2DF_State *state) {
+  Index_ID nid = g->create_node().get_nid();
+  g->node_type_set(nid, U32Const_Op);
+  g->node_u32type_set(nid, 0);
+
+  std::string var_name = temp();
+  g->set_node_wirename(nid, var_name.c_str());
+
+  return nid;
+}
+
 Index_ID Pass_dfg::create_node(LGraph *g, CF2DF_State *state, const std::string &v) {
   Index_ID nid = g->create_node().get_nid();
   state->update_reference(v, nid);
@@ -61,19 +73,18 @@ Index_ID Pass_dfg::create_node(LGraph *g, CF2DF_State *state, const std::string 
 }
 
 Index_ID Pass_dfg::create_AND(LGraph *g, CF2DF_State *state, Index_ID op1, Index_ID op2) {
-  return create_binary(g, state, op1, op2, LOGICAL_AND_OP);
+  return create_binary(g, state, op1, op2, And_Op);
 }
 
 Index_ID Pass_dfg::create_OR(LGraph *g, CF2DF_State *state, Index_ID op1, Index_ID op2) {
-  return create_binary(g, state, op1, op2, LOGICAL_OR_OP);
+  return create_binary(g, state, op1, op2, Or_Op);
 }
 
-Index_ID Pass_dfg::create_binary(LGraph *g, CF2DF_State *state, Index_ID op1, Index_ID op2, const char *oper) {
+Index_ID Pass_dfg::create_binary(LGraph *g, CF2DF_State *state, Index_ID op1, Index_ID op2, Node_Type_Op oper) {
   auto target = temp();
   Index_ID dfnode = create_node(g, state, target);
 
-  g->node_type_set(dfnode, CfgAssign_Op);
-  //g->set_node_instance(dfnode, oper);
+  g->node_type_set(dfnode, oper);
 
   g->add_edge(Node_Pin(op1, 0, false), Node_Pin(dfnode, 0, true));
   g->add_edge(Node_Pin(op2, 0, false), Node_Pin(dfnode, 0, true));
@@ -85,8 +96,7 @@ Index_ID Pass_dfg::create_NOT(LGraph *g, CF2DF_State *state, Index_ID op1) {
   auto target = temp();
   Index_ID dfnode = create_node(g, state, target);
 
-  g->node_type_set(dfnode, CfgAssign_Op);
-  //g->set_node_instance(dfnode, LOGICAL_NOT_OP);
+  g->node_type_set(dfnode, Not_Op);
 
   g->add_edge(Node_Pin(op1, 0, false), Node_Pin(dfnode, 0, true));
 

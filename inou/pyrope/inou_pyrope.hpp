@@ -7,6 +7,7 @@
 
 #include "inou.hpp"
 #include "options.hpp"
+#include "options.hpp"
 
 class Inou_pyrope_options_pack : public Options_pack {
 public:

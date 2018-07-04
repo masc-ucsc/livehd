@@ -24,6 +24,5 @@ PYBIND11_MODULE(lgraph, m) {
 #include "py_inou_abc.hpp"
 #include "py_pass_dfg.hpp"
 #include "py_inou_cfg.hpp"
-
 }
 
