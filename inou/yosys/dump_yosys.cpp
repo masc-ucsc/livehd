@@ -558,7 +558,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
 
       if(and_inps.size() == 1) {
         //reduce and: assign a = &b;
-        assert(cell_output_map.find(std::make_pair((idx,1))) != cell_output_map.end()); // single input and gate that is not used as a reduce and
+        assert(cell_output_map.find(std::make_pair(idx,1)) != cell_output_map.end()); // single input and gate that is not used as a reduce and
         module->addReduceAnd(next_id(), and_inps[0], cell_output_map[std::make_pair(idx, 1)]);
       } else {
         create_tree(g, and_inps, module, &RTLIL::Module::addAnd, false, cell_output_map[std::make_pair(idx, 0)]);
@@ -574,7 +574,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
 
       if(or_inps.size() == 1) {
         //reduce or: assign a = |b;
-        assert(cell_output_map.find(std::make_pair((idx,1))) != cell_output_map.end()); // single input or gate that is not used as a reduce or
+        assert(cell_output_map.find(std::make_pair(idx,1)) != cell_output_map.end()); // single input or gate that is not used as a reduce or
         module->addReduceOr(next_id(), or_inps[0], cell_output_map[std::make_pair(idx, 1)]);
       } else {
         create_tree(g, or_inps, module, &RTLIL::Module::addOr, false, cell_output_map[std::make_pair(idx, 0)]);
@@ -591,7 +591,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
 
       if(xor_inps.size() == 1) {
         //reduce xor: assign a = ^b;
-        assert(cell_output_map.find(std::make_pair((idx,1))) != cell_output_map.end()); // single input xor gate that is not used as a reduce xor
+        assert(cell_output_map.find(std::make_pair(idx,1)) != cell_output_map.end()); // single input xor gate that is not used as a reduce xor
         module->addReduceXor(next_id(), xor_inps[0], cell_output_map[std::make_pair(idx, 1)]);
       } else {
         create_tree(g, xor_inps, module, &RTLIL::Module::addXor, false, cell_output_map[std::make_pair(idx, 0)]);
