@@ -81,7 +81,6 @@ void Pass_dfg::process_assign(LGraph *dfg, const LGraph *cfg, CF2DF_State *state
   const auto &target = data.get_target();
   Index_ID dfnode = create_node(dfg, state, target);
 
-  dfg->node_type_set(dfnode, CfgAssign_Op);
   dfg->set_node_instance_name(dfnode, data.get_target());
 
   dfg->node_type_set(dfnode, node_type_from_text(data.get_operator()));
@@ -195,10 +194,10 @@ vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, const LGraph *cfg, CF2D
 
 void Pass_dfg::assign_to_true(LGraph *dfg, CF2DF_State *state, const std::string &v) {
   Index_ID node = create_node(dfg, state, v);
-  dfg->node_type_set(node, CfgAssign_Op);
+  dfg->node_type_set(node, Or_Op);
 
-  Index_ID tc = true_constant(dfg, state);
-  dfg->add_edge(Node_Pin(tc, 0, false), Node_Pin(node, 0, true));
+  dfg->add_edge(Node_Pin(true_constant(dfg, state), 0, false), Node_Pin(node, 0, true));
+  dfg->add_edge(Node_Pin(true_constant(dfg, state), 0, false), Node_Pin(node, 0, true));
 }
 
 void Pass_dfg::attach_outputs(LGraph *dfg, CF2DF_State *state) {

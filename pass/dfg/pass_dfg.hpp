@@ -127,10 +127,11 @@ private:
   Index_ID create_node(LGraph *g, CF2DF_State *state, const std::string &v);
   Index_ID default_constant(LGraph *g, CF2DF_State *state);
   Index_ID true_constant(LGraph *g, CF2DF_State *state);
+  Index_ID false_constant(LGraph *g, CF2DF_State *state);
 
   Index_ID create_AND(LGraph *g, CF2DF_State *state, Index_ID op1, Index_ID op2);
   Index_ID create_OR(LGraph *g, CF2DF_State *state, Index_ID op1, Index_ID op2);
-  Index_ID create_binary(LGraph *g, CF2DF_State *state, Index_ID op1, Index_ID op2, const char *oper);
+  Index_ID create_binary(LGraph *g, CF2DF_State *state, Index_ID op1, Index_ID op2, Node_Type_Op oper);
   Index_ID create_NOT(LGraph *g, CF2DF_State *state, Index_ID op1);
 
   Node_Type_Op node_type_from_text(const std::string &op_text);

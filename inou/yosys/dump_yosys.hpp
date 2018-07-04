@@ -64,6 +64,8 @@ public:
     }
   }
 
+  void py_generate(const LGraph *g) { to_yosys(g); }
+
   using Inou_trivial::generate;
 
   const std::set<LGraph *> subgraphs() const {
