@@ -73,5 +73,5 @@ py_test(
     name = 'test_dfg',
     srcs = ['test_dfg.py'],
     deps = [":ptlgraph"],
-    data = ["//inou/cfg:tests/pt1.cfg"]
+    data = ["//inou/cfg:tests/pt1.cfg", "//inou/cfg:tests/pt14.cfg"]
 )

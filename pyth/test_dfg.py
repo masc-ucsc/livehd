@@ -14,8 +14,8 @@ shutil.rmtree("lgdb", ignore_errors=True)  # remove previous garbage
 try:
   import lgraph
 
-  cfg_name = "pt1"
-  dfg_name = "pt1_dfg"
+  cfg_name = 'pt14'
+  dfg_name = cfg_name + '_dfg'
 
   cfg_opts = {
         "lgdb": "lgdb",
