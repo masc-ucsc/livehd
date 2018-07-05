@@ -163,7 +163,7 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
 
     fmt::print("create node:{}, nid:{}\n", w1st, name2id[w1st]);
 
-    g->node_loc_set(new_node.get_nid(), opack.src.c_str(), (uint32_t)std::stoi(w4th), (uint32_t)std::stoi(w5th));
+    g->node_loc_set(new_node.get_nid(), opack.src.c_str(), (uint32_t)std::stoi(w3rd), (uint32_t)std::stoi(w4th));
 
     if(w6th == ".()")
       g->node_type_set(name2id[w1st], CfgFunctionCall_Op);
@@ -179,7 +179,7 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
       g->node_type_set(name2id[w1st], CfgAssign_Op);
   } else {
 
-    g->node_loc_set(name2id[w1st], opack.src.c_str(), (uint32_t)std::stoi(w4th), (uint32_t)std::stoi(w5th));
+    g->node_loc_set(name2id[w1st], opack.src.c_str(), (uint32_t)std::stoi(w3rd), (uint32_t)std::stoi(w4th));
 
     if(w6th == ".()")
       g->node_type_set(name2id[w1st], CfgFunctionCall_Op);

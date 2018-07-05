@@ -77,8 +77,10 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g, const std::string& str, bool& is_
   }
 
   //explicit bits width
-  if(token2nd != "")
+  if(token2nd != "") {
+    fmt::print("{}::::::\n", token2nd);
     explicit_bits = (uint32_t) std::stoi(token2nd);
+  }
   else
     explicit_bits = 0;
 
