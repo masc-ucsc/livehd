@@ -111,10 +111,10 @@ private:
     return parent->get_reference(v) != branch->get_reference(v);
   }
 
-  bool is_register(const std::string &v) { return v[0] == REGISTER_MARKER; }
-  bool is_input(const std::string &v) { return v[0] == INPUT_MARKER; }
-  bool is_output(const std::string &v) { return v[0] == OUTPUT_MARKER; }
-  bool is_constant(const std::string &v) { return v[0] == '0'; }
+  bool is_register(const std::string &v) { return v.at(0) == REGISTER_MARKER; }
+  bool is_input(const std::string &v) { return v.at(0) == INPUT_MARKER; }
+  bool is_output(const std::string &v) { return v.at(0) == OUTPUT_MARKER; }
+  bool is_constant(const std::string &v) { return v.at(0) == '0'; }
   bool is_read_marker(const std::string &v) { return v.substr(0, READ_MARKER.length()) == READ_MARKER; }
   bool is_write_marker(const std::string &v) { return v.substr(0, WRITE_MARKER.length()) == WRITE_MARKER; }
   bool is_valid_marker(const std::string &v) { return v.substr(0, VALID_MARKER.length()) == VALID_MARKER; }
