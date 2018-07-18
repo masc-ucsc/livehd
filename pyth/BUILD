@@ -73,5 +73,18 @@ py_test(
     name = 'test_dfg',
     srcs = ['test_dfg.py'],
     deps = [":ptlgraph"],
-    data = ["//inou/cfg:tests/pt1.cfg", "//inou/cfg:tests/pt14.cfg"]
+    data = ["//inou/cfg:tests/pt1.cfg",
+            "//inou/cfg:tests/pt2.cfg",
+            "//inou/cfg:tests/pt3.cfg",
+            "//inou/cfg:tests/pt4.cfg",
+            "//inou/cfg:tests/pt5.cfg",
+            "//inou/cfg:tests/pt6.cfg",
+            "//inou/cfg:tests/pt7.cfg",
+            "//inou/cfg:tests/pt8.cfg",
+            "//inou/cfg:tests/pt9.cfg",
+            "//inou/cfg:tests/pt10.cfg",
+            "//inou/cfg:tests/pt11.cfg",
+            "//inou/cfg:tests/pt12.cfg",
+            "//inou/cfg:tests/pt13.cfg",
+            "//inou/cfg:tests/pt14.cfg"]
 )

@@ -11,4 +11,17 @@ cc_library(
     ],
 )
 
-exports_files(["tests/pt1.cfg", "tests/pt14.cfg"])
+exports_files(["tests/pt1.cfg",
+               "tests/pt2.cfg",
+               "tests/pt3.cfg",
+               "tests/pt4.cfg",
+               "tests/pt5.cfg",
+               "tests/pt6.cfg",
+               "tests/pt7.cfg",
+               "tests/pt8.cfg",
+               "tests/pt9.cfg",
+               "tests/pt10.cfg",
+               "tests/pt11.cfg",
+               "tests/pt12.cfg",
+               "tests/pt13.cfg",
+               "tests/pt14.cfg"])

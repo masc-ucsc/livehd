@@ -14,7 +14,7 @@ shutil.rmtree("lgdb", ignore_errors=True)  # remove previous garbage
 try:
   import lgraph
 
-  cfg_name = 'pt14'
+  cfg_name = 'pt13'
   dfg_name = cfg_name + '_dfg'
 
   cfg_opts = {
@@ -23,9 +23,9 @@ try:
         "src": "inou/cfg/tests/%s.cfg" % cfg_name
         }
 
-  print("cfg pass...")
   sys.stdout.flush()
   cfg = lgraph.Inou_cfg(cfg_opts).generate()
+  print("cfg pass...")
 
   dfg_opts = {
         "lgdb": "lgdb",
@@ -33,9 +33,9 @@ try:
         "graph_name": dfg_name
         }
 
-  print("dfg pass...")
   sys.stdout.flush()
   dfg = lgraph.Pass_dfg(dfg_opts).generate()
+  print("dfg pass...")
 
   assert not (dfg is None)
   assert not (dfg[0] is None)
