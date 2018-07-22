@@ -6,12 +6,12 @@
 #include <unordered_map>
 #include <vector>
 
+#include "cf2df_state.hpp"
 #include "cfg_node_data.hpp"
 #include "options.hpp"
 #include "pass.hpp"
 #include "cfg_node_data.hpp"
 #include "lgedge.hpp"
-#include "cf2df_state.hpp"
 #include "py_options.hpp"
 
 class Pass_dfg_options : public Py_options {
