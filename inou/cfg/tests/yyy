@@ -1,22 +1,3 @@
-K1	K2	0	1	13	:	tmp0	bits	0d32
-K2	K3	0	1	13	as	a	tmp0
-K3	K4	0	14	26	:	tmp1	bits	0d32
-K4	K5	0	14	26	as	b	tmp1
-K5	K6	0	28	73	==	tmp2	$a	0d1
-K8	null	0	28	73	=	%b	0d1
-K10	K11	0	28	73	+	tmp3	$d	0d1
-K11	null	0	28	73	=	%c	tmp3
-K6	K13	0	28	73	if	tmp2	K8	K10	'K6
-K13	K14	0	74	192	==	tmp4	$b	0d1
-K16	K17	0	74	192	==	tmp5	$d	0d5
-K19	K20	0	74	192	+	tmp6	$a	$b
-K20	null	0	74	192	=	%c	tmp6
-K22	K23	0	74	192	==	tmp7	$e	0d33
-K25	K26	0	74	192	*	tmp8	$a	$b
-K26	null	0	74	192	=	%c	tmp8
-K28	K29	0	74	192	-	tmp9	$a	$b
-K29	null	0	74	192	=	%c	tmp9
-K23	null	0	74	192	if	tmp7	K25	K28	'K17
-K17	null	0	74	192	if	tmp5	K19	K22	'K17
-K14	K31	0	74	192	if	tmp4	K16	null	'K14
+K1	K2	0	0	12	+	tmp0	@a	@b
+K2	K3	0	0	12	=	%s	tmp0
 END

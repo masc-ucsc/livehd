@@ -44,7 +44,7 @@ void Pass_dfg::cfg_2_dfg(LGraph *dfg, const LGraph *cfg) {
   process_cfg(dfg, cfg, &state, itr);
   attach_outputs(dfg, &state);
 
-  fmt::print("calling sync");
+  fmt::print("calling sync\n");
 }
 
 Index_ID Pass_dfg::process_cfg(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, Index_ID top_node) {
@@ -76,6 +76,7 @@ Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, CF2DF_State *sta
     return get_child(cfg, node);
   }
 }
+
 
 void Pass_dfg::process_assign(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, const CFG_Node_Data &data, Index_ID node) {
   const auto &target = data.get_target();

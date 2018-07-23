@@ -13,8 +13,4 @@ rm -f pt*.cfg
 ~/pyrope/parser/bin/prp pt12.prp > yyy && column -t yyy > xxx && mv xxx pt12.cfg
 ~/pyrope/parser/bin/prp pt13.prp > yyy && column -t yyy > xxx && mv xxx pt13.cfg
 ~/pyrope/parser/bin/prp pt14.prp > yyy && column -t yyy > xxx && mv xxx pt14.cfg
-#~/pyrope/parser/bin/prp pt15.prp > yyy && column -t yyy > xxx && mv xxx pt15.cfg
-#~/pyrope/parser/bin/prp pt16.prp > yyy && column -t yyy > xxx && mv xxx pt16.cfg
-#~/pyrope/parser/bin/prp pt17.prp > yyy && column -t yyy > xxx && mv xxx pt17.cfg
-#~/pyrope/parser/bin/prp pt18.prp > yyy && column -t yyy > xxx && mv xxx pt18.cfg
-#~/pyrope/parser/bin/prp pt19.prp > yyy && column -t yyy > xxx && mv xxx pt19.cfg
+~/pyrope/parser/bin/prp pt_simple_add.prp > yyy && column -t yyy > xxx && mv xxx pt_simple_add.cfg
