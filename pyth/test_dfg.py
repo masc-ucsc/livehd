@@ -14,7 +14,8 @@ shutil.rmtree("lgdb", ignore_errors=True)  # remove previous garbage
 try:
   import lgraph
 
-  cfg_name = 'pt14'
+  cfg_name = 'pt_simple_add'
+  # cfg_name = 'pt1'
   dfg_name = cfg_name + '_dfg'
 
   cfg_opts = {
@@ -25,7 +26,8 @@ try:
 
   sys.stdout.flush()
   cfg = lgraph.Inou_cfg(cfg_opts).generate()
-  print("cfg pass...")
+  sys.stdout.flush()
+  print("===================== cfg pass ======================")
 
   dfg_opts = {
         "lgdb": "lgdb",
@@ -33,18 +35,20 @@ try:
         "graph_name": dfg_name
         }
 
-  sys.stdout.flush()
   dfg = lgraph.Pass_dfg(dfg_opts).generate()
-  print("dfg pass...")
 
   assert not (dfg is None)
   assert not (dfg[0] is None)
-
-  print("dump pass...")
   sys.stdout.flush()
+  print("===================== dfg pass ======================")
+
+
   g = lgraph.find_lgraph("lgdb",dfg_name)
   assert dfg[0].lg_id() == g.lg_id()
   g.dump()
+  print("==================== dump pass ======================")
+
+
 
 except:
   print("lgraph raised exception. Test fails")

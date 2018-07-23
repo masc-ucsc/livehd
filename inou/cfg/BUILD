@@ -24,4 +24,5 @@ exports_files(["tests/pt1.cfg",
                "tests/pt11.cfg",
                "tests/pt12.cfg",
                "tests/pt13.cfg",
-               "tests/pt14.cfg"])
+               "tests/pt14.cfg",
+               "tests/pt_simple_add.cfg"])

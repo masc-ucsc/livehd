@@ -109,7 +109,9 @@ Node_Type_Op Pass_dfg::node_type_from_text(const std::string &op_text) {
     return Equals_Op;
   } else if (op_text == "=") {
     return Or_Op;
-  } else {
+  } else if (op_text == "+"){
+    return Sum_Op;
+  }else {
     fmt::print("Operator: {}\n", op_text);
     fflush(stdout);
     assert(false);
