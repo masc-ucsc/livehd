@@ -337,13 +337,13 @@ class __attribute__((packed)) Node_Internal {
 private:
   // BEGIN 10 Bytes common payload
   Node_State state : 3; // State must be the first thing (Node_Internal_Page)
-  uint16_t   bits : 11;
-  uint16_t   inp_pos : 4;
-  uint16_t   out_pos : 4;
   uint16_t   root : 1;
+  uint16_t   inp_pos : 4;
+  uint16_t   bits : 14;
   uint16_t   graph_io_input : 1;
   uint16_t   graph_io_output : 1;
-  uint16_t   next_lower5 : 5;
+  uint16_t   out_pos : 4;
+  uint16_t   next_lower2 : 2;
   uint16_t   inp_long : 2;
   // 4 bytes aligned
 public:
@@ -520,16 +520,16 @@ public:
     assert(is_next_state());
     uint32_t *idx_upp = (uint32_t *)(&sedge[0]);
     Index_ID  idx_val = *idx_upp;
-    idx_val <<= 5;
-    idx_val |= next_lower5;
+    idx_val <<= 2;
+    idx_val |= next_lower2;
     return idx_val;
   }
 
   void set_next_state(Index_ID _idx) {
     assert(is_next_state());
-    next_lower5       = _idx;
+    next_lower2       = _idx;
     uint32_t *idx_upp = (uint32_t *)(&sedge[0]);
-    *idx_upp          = _idx >> 5;
+    *idx_upp          = _idx >> 2;
   }
 
   void push_next_state(Index_ID _idx) {
