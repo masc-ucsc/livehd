@@ -43,10 +43,10 @@ try:
   print("===================== dfg pass ======================")
 
 
-  g = lgraph.find_lgraph("lgdb",dfg_name)
-  assert dfg[0].lg_id() == g.lg_id()
-  g.dump()
-  print("==================== dump pass ======================")
+  #g = lgraph.find_lgraph("lgdb",dfg_name)
+  #assert dfg[0].lg_id() == g.lg_id()
+  #g.dump()
+  #print("==================== dump pass ======================")
 
 
 

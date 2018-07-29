@@ -9,7 +9,6 @@
 #include "lgedge.hpp"
 #include "lgedgeiter.hpp"
 
-using std::string; // FIXME: we use std::string and std::... all the time
 using std::unordered_map;
 using std::vector;
 
@@ -54,6 +53,7 @@ Index_ID Pass_dfg::process_cfg(LGraph *dfg, const LGraph *cfg, CF2DF_State *stat
   while (itr != 0) {
     last_itr = itr;
     itr = process_node(dfg, cfg, state, itr);
+    fmt::print("node{} process finished!!\n\n", last_itr);
   }
 
   return last_itr;
@@ -61,6 +61,14 @@ Index_ID Pass_dfg::process_cfg(LGraph *dfg, const LGraph *cfg, CF2DF_State *stat
 
 Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, Index_ID node) {
   CFG_Node_Data data(cfg, node);
+
+  //sh dbg
+  fmt::print("now processing CFG node:{}\n", node);
+  fmt::print("target:{}, operators:{}, ", data.get_target(), data.get_operator());
+  for(const auto i:data.get_operands())
+    fmt::print("operands:{} ", i);
+  fmt::print("\n");
+
 
   switch (cfg->node_type_get(node).op) {
   case CfgAssign_Op:
@@ -71,7 +79,7 @@ Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, CF2DF_State *sta
   case CfgIfMerge_Op:
     return 0;
   default:
-    fmt::print("*************Unrecognized node type[n={}]: {}\n",
+    fmt::print("\n\n*************Unrecognized node type[n={}]: {}\n",
       node, cfg->node_type_get(node).get_name());
     return get_child(cfg, node);
   }
@@ -80,16 +88,29 @@ Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, CF2DF_State *sta
 
 void Pass_dfg::process_assign(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, const CFG_Node_Data &data, Index_ID node) {
   const auto &target = data.get_target();
-  Index_ID dfnode = create_node(dfg, state, target);
 
-  dfg->set_node_instance_name(dfnode, data.get_target());
 
-  dfg->node_type_set(dfnode, node_type_from_text(data.get_operator()));
-  vector<Index_ID> operands = process_operands(dfg, cfg, state, data, node);
+  if (is_output(target)){//sh dbg
+    Index_ID nid_o_target = create_output(dfg, state, target);//sh dbg
+    fmt::print("create node for output target:{} \n", target); //sh dbg
+    //To Do: need to connect this output node with sum op
+    //dfg->add_edge(Node_Pin(state->get_reference(target), 2, false),Node_Pin(nid_o_target,2,true)); //buggy source!!! 7/28/2018
+    vector<Index_ID> operands = process_operands(dfg, cfg, state, data, node);
+    for (Index_ID id : operands)
+      dfg->add_edge(Node_Pin(id, 0, false), Node_Pin(nid_o_target, 0, true));
+  }else{
+    Index_ID nid_target = create_node(dfg, state, target);
+    fmt::print("create node for internal target:{}\n", target);
+    dfg->set_node_instance_name(nid_target, target);
+    dfg->node_type_set(nid_target, node_type_from_text(data.get_operator()));
 
-  for (Index_ID id : operands)
-    dfg->add_edge(Node_Pin(id, 0, false), Node_Pin(dfnode, 0, true));
+    vector<Index_ID> operands = process_operands(dfg, cfg, state, data, node);
+    for (Index_ID id : operands)
+      dfg->add_edge(Node_Pin(id, 0, false), Node_Pin(nid_target, 1, true));
+  }
 
+
+  fmt::print("is_fluid:{}, is_output:{}, is_register:{}\n", state->fluid_df(),is_output(target), is_register(target));
   if (state->fluid_df() && (is_output(target) || is_register(target)))
     add_write_marker(dfg, state, target);
 }
@@ -117,7 +138,7 @@ Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, CF2DF_State *state
 }
 
 void Pass_dfg::add_phis(LGraph *dfg, const LGraph *cfg, CF2DF_State *parent, CF2DF_State *tstate, CF2DF_State *fstate, Index_ID condition) {
-  std::unordered_set<string> phis_added;
+  std::unordered_set<std::string> phis_added;
 
   for (const auto &pair : tstate->references()) {
     if (reference_changed(parent, tstate, pair.first)) {
@@ -132,7 +153,7 @@ void Pass_dfg::add_phis(LGraph *dfg, const LGraph *cfg, CF2DF_State *parent, CF2
   }
 }
 
-void Pass_dfg::add_phi(LGraph *dfg, CF2DF_State *parent, CF2DF_State *tstate, CF2DF_State *fstate, Index_ID condition, const string &variable) {
+void Pass_dfg::add_phi(LGraph *dfg, CF2DF_State *parent, CF2DF_State *tstate, CF2DF_State *fstate, Index_ID condition, const std::string &variable) {
   Index_ID tid = resolve_phi_branch(dfg, parent, tstate, variable);
   Index_ID fid = resolve_phi_branch(dfg, parent, fstate, variable);
 
@@ -167,23 +188,35 @@ Index_ID Pass_dfg::resolve_phi_branch(LGraph *dfg, CF2DF_State *parent, CF2DF_St
 }
 
 vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, const CFG_Node_Data &data, Index_ID node) {
-  const auto &dops = data.get_operands();
+  const vector<std::string> &dops = data.get_operands();
   vector<Index_ID> ops(dops.size());
 
   for (size_t i = 0; i < dops.size(); i++) {
-    if (state->has_reference(dops[i]))
+    if (state->has_reference(dops[i])){
       ops[i] = state->get_reference(dops[i]);
+      fmt::print("operand:{} has been created before\n", dops[i]);//sh dbg
+    }
     else {
-      if (is_constant(dops[i]))
+      if (is_constant(dops[i])){
         ops[i] = default_constant(dfg, state);
-      else if (is_register(dops[i]))
+        fmt::print("create node for default const operand:{}\n", dops[i]); //sh dbg
+      }
+      else if (is_register(dops[i])){
         ops[i] = create_register(dfg, state, dops[i]);
-      else if (is_input(dops[i]))
+        fmt::print("create node for register operand:{}\n", dops[i]); // sh dbg
+      }
+      else if (is_input(dops[i])){
         ops[i] = create_input(dfg, state, dops[i]);
-      else if (is_output(dops[i]))
+        fmt::print("create node for input operand:{}\n", dops[i]); // sh dbg
+      }
+      else if (is_output(dops[i])){
         ops[i] = create_output(dfg, state, dops[i]);
-      else
+        fmt::print("create node for output operand:{}\n", dops[i]); // sh dbg
+      }
+      else{
         ops[i] = create_private(dfg, state, dops[i]);
+        fmt::print("create node for private operand:{}\n", dops[i]); // sh dbg
+      }
     }
 
     if (state->fluid_df() && is_input(dops[i]))

@@ -11,15 +11,15 @@ Index_ID Pass_dfg::create_register(LGraph *g, CF2DF_State *state, const std::str
 }
 
 Index_ID Pass_dfg::create_input(LGraph *g, CF2DF_State *state, const std::string &var_name) {
-  Index_ID nid = create_node(g, state, var_name);
-  g->add_graph_input(var_name.c_str(), nid);
+  Index_ID nid = create_node(g, state, var_name.substr(1));//get rid of $ mark
+  g->add_graph_input(var_name.substr(1).c_str(), nid, 1/*bit*/);
 
   return nid;
 }
 
 Index_ID Pass_dfg::create_output(LGraph *g, CF2DF_State *state, const std::string &var_name) {
-  Index_ID nid = create_node(g, state, var_name);
-  g->add_graph_output(var_name.c_str(), nid);
+  Index_ID nid = create_node(g, state, var_name.substr(1));//get rid of % mark
+  g->add_graph_output(var_name.substr(1).c_str(), nid, 1/*bit*/);
 
   return nid;
 }
@@ -68,7 +68,7 @@ Index_ID Pass_dfg::create_node(LGraph *g, CF2DF_State *state, const std::string 
   Index_ID nid = g->create_node().get_nid();
   state->update_reference(v, nid);
   g->set_node_wirename(nid, v.c_str());
-
+  g->set_bits(nid,1);//sh dbg
   return nid;
 }
 
@@ -103,16 +103,16 @@ Index_ID Pass_dfg::create_NOT(LGraph *g, CF2DF_State *state, Index_ID op1) {
   return dfnode;
 }
 
-Node_Type_Op Pass_dfg::node_type_from_text(const std::string &op_text) {
+Node_Type_Op Pass_dfg::node_type_from_text(const std::string &operator_text) {
 
-  if (op_text == "==") {
+  if (operator_text == "==") {
     return Equals_Op;
-  } else if (op_text == "=") {
+  } else if (operator_text == "=") {
     return Or_Op;
-  } else if (op_text == "+"){
+  } else if (operator_text == "+"){
     return Sum_Op;
   }else {
-    fmt::print("Operator: {}\n", op_text);
+    fmt::print("Operator: {}\n", operator_text);
     fflush(stdout);
     assert(false);
   }

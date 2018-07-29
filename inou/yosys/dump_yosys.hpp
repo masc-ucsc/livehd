@@ -7,6 +7,7 @@
 
 #include "kernel/rtlil.h"
 #include "kernel/yosys.h"
+//#include "third_party/subs/anubis/yosys/kernel/rtlil.h"
 
 USING_YOSYS_NAMESPACE
 //PRIVATE_NAMESPACE_BEGIN
