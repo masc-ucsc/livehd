@@ -1,0 +1,65 @@
+
+ /----------------------------------------------------------------------------\
+ |                                                                            |
+ |  yosys -- Yosys Open SYnthesis Suite                                       |
+ |                                                                            |
+ |  Copyright (C) 2012 - 2018  Clifford Wolf <clifford@clifford.at>           |
+ |                                                                            |
+ |  Permission to use, copy, modify, and/or distribute this software for any  |
+ |  purpose with or without fee is hereby granted, provided that the above    |
+ |  copyright notice and this permission notice appear in all copies.         |
+ |                                                                            |
+ |  THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES  |
+ |  WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF          |
+ |  MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR   |
+ |  ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES    |
+ |  WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN     |
+ |  ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF   |
+ |  OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.            |
+ |                                                                            |
+ \----------------------------------------------------------------------------/
+
+ Yosys 0.7+627 (git sha1 e275692e, gcc 8.1.1 -march=x86-64 -mtune=generic -O2 -fstack-protector-strong -fno-plt -fPIC -Os)
+
+
+-- Running command `dump_yosys  -graph_name pt_simple_add_dfg; write_verilog pt_simple_add_dfg_dirty.v; opt -fast; opt_clean -purge; write_verilog pt_simple_add_dfg.v;' --
+
+1. Executing dump_yosys pass (convert from lgraph to yosys).
+converting graph pt_simple_add_dfg in directory lgdb
+.creating wire for node: 1, width 1, type sum
+creating wire for node: 2, width 1, type graphio
+creating wire for node: 3, width 1, type graphio
+creating wire for node: 5, width 1, type graphio
+adding Sum_Op
+
+2. Executing Verilog backend.
+Dumping module `\pt_simple_add_dfg'.
+
+3. Executing OPT pass (performing simple optimizations).
+
+3.1. Executing OPT_EXPR pass (perform const folding).
+
+3.2. Executing OPT_MERGE pass (detect identical cells).
+Finding identical cells in module `\pt_simple_add_dfg'.
+Removed a total of 0 cells.
+
+3.3. Executing OPT_RMDFF pass (remove dff with constant values).
+
+3.4. Executing OPT_CLEAN pass (remove unused cells and wires).
+Finding unused cells or wires in module \pt_simple_add_dfg..
+
+3.5. Finished fast OPT passes.
+
+4. Executing OPT_CLEAN pass (remove unused cells and wires).
+Finding unused cells or wires in module \pt_simple_add_dfg..
+  removing unused non-port wire \tmp0.
+  removed 1 unused temporary wires.
+Removed 0 unused cells and 1 unused wires.
+
+5. Executing Verilog backend.
+Dumping module `\pt_simple_add_dfg'.
+
+End of script. Logfile hash: e7e02cb7df
+CPU: user 0.02s system 0.02s, MEM: 46.11 MB total, 12.72 MB resident
+Yosys 0.7+627 (git sha1 e275692e, gcc 8.1.1 -march=x86-64 -mtune=generic -O2 -fstack-protector-strong -fno-plt -fPIC -Os)
+Time spent: 62% 1x dump_yosys (0 sec), 15% 2x opt_clean (0 sec), ...
