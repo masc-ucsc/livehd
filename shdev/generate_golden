@@ -1,0 +1,16 @@
+cd ../
+./inou/yosys/lgyosys ./shdev/trivial_add.v
+
+./bazel-bin/inou/json/lgjson --graph_name trivial_add --json_output trivial_add.json
+
+./inou/yosys/lgyosys -gtrivial_add
+
+rm -f golden*
+
+cp ./logs/*.* ./shdev/logs/
+mv *.json ./shdev
+
+
+cd ./shdev
+
+gvim -p ./logs/trivial*
