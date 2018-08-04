@@ -14,11 +14,16 @@ print("base_dir: " + base_dir)
 package_dir_a = os.path.join(base_dir, '__main__')
 sys.path.insert(1, package_dir_a)
 print("package_dir_a: " + package_dir_a)
-
 print("test running directory: ", os.getcwd())
 
+if not os.path.exists('./logs'):
+    os.mkdir('logs')
 
-shutil.rmtree("lgdb", ignore_errors=True)  # remove previous garbage
+if not os.path.exists('./verilog'):
+    os.mkdir('verilog')
+
+shutil.rmtree("lgdb",    ignore_errors=True)  # remove previous garbage
+
 
 try:
   import lgraph
@@ -70,10 +75,8 @@ try:
   yosys_cmds =  '" dump_yosys ' + opt_hierarchy + '-graph_name ' + opt_graph_input + '; ' + yosys_write_verilog + '"'
 
   bash_cmds =[ 'rm -f ' + opt_log_dir + "/*.*", 
-               'mkdir '  + opt_log_dir,
                 opt_yosys + ' -ql ' + yosys_log + ' -m  ' + opt_inou_yosys + ' -p  ' + yosys_cmds,
                'rm -f ' + opt_verilog_dir + "/*.*", 
-               'mkdir ' + opt_verilog_dir,
                'mv *.v ' + opt_verilog_dir
                 ]
 
