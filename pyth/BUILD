@@ -87,5 +87,7 @@ py_test(
             "//inou/cfg:tests/pt12.cfg",
             "//inou/cfg:tests/pt13.cfg",
             "//inou/cfg:tests/pt14.cfg",
-            "//inou/cfg:tests/pt_simple_add.cfg"]
+            "//inou/cfg:tests/simple_add.cfg",
+            "//inou/cfg:tests/top.cfg" 
+            ]
 )

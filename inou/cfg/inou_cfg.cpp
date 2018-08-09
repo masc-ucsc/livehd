@@ -75,7 +75,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
   vector<map<string, vector<string>>> chain_stks_gs(1); //chain_stacks for every graph, use vector to implement stack
   vector<string>                      nname_bg_gs(1);   //nname = node name
   vector<Index_ID>                    nid_ed_gs(1);
-  map<string, uint32_t>               nfirst2gid; //map for every sub-graph and its first node name
+  map<string, uint32_t>               nfirst2gid;       //map for every sub-graph and its first node name
   LGraph *                            gtop = lgs[0];
 
   bool gtop_bg_nname_recorded = false;
@@ -102,9 +102,9 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
 
     string dfg_data = p;
 
-    if(w3rd != "0" && std::stoi(w3rd) >= lgs.size()) { //create sub-graph if different scope id
+    if(w3rd != "0" && std::stoi(w3rd) >= lgs.size()) { //create new sub-graph if different scope id
       lgs.push_back(new LGraph(opack.lgdb, opack.graph_name + std::to_string(lgs.size()), false));
-      fmt::print("lgs size:{}", lgs.size());
+      fmt::print("lgs size:{}\n", lgs.size());
       name2id_gs.resize(name2id_gs.size() + 1);
       chain_stks_gs.resize(chain_stks_gs.size() + 1);
       nid_ed_gs.resize(nid_ed_gs.size() + 1);
@@ -119,6 +119,29 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
     fmt::print("\n");
     p = strtok_r(nullptr, "\n\r\f", &str_ptr);
   } //end while loop
+  /*
+    deal with GIO for every graph
+  */
+
+  for(int i = 0; i < lgs.size(); i++) {
+    //Graph input
+    Node gio_node_bg = lgs[i]->create_node();
+    fmt::print("create node:{}, nid:{}\n", "GIO", gio_node_bg.get_nid());
+    lgs[i]->node_type_set(gio_node_bg.get_nid(), GraphIO_Op);
+    Index_ID src_nid = gio_node_bg.get_nid();
+    Index_ID dst_nid = name2id_gs[i][nname_bg_gs[i]];
+    lgs[i]->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+
+    //Graph output
+    Node gio_node_ed = lgs[i]->create_node();
+    fmt::print("create node:{}, nid:{}\n", "GIO", gio_node_ed.get_nid());
+    lgs[i]->node_type_set(gio_node_ed.get_nid(), GraphIO_Op);
+    src_nid = nid_ed_gs[i];
+    fmt::print("total node number:{}\n", name2id_gs[0].size());
+    dst_nid = gio_node_ed.get_nid();
+    ;
+    lgs[i]->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+  }
 
   for(size_t i = 0; i < chain_stks_gs.size(); i++) {
     for(auto &x : chain_stks_gs[i]) {
@@ -131,8 +154,13 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
   update_ifs(lgs, name2id_gs);
 }
 
-void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, map<string, uint32_t> &nfirst2gid,
-                           map<string, Index_ID> &name2id, map<string, vector<string>> &chain_stks, Index_ID &nid_end) {
+void Inou_cfg::build_graph(vector<string>               &words,
+                           string                       &dfg_data,
+                           LGraph                       *g,
+                           map<string, uint32_t>        &nfirst2gid,
+                           map<string, Index_ID>        &name2id,
+                           map<string, vector<string>>  &chain_stks,
+                           Index_ID                     &nid_end) {
 
   fmt::print("dfg_data:{}\n", dfg_data);
   string w1st = *(words.begin());
@@ -150,6 +178,8 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
 
   if(w6th == "if")
     w10th = *(words.begin() + 9);
+
+  LGraph *     sub_graph = 0;
 
   /*
     I.process 1st node
@@ -177,8 +207,8 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
       g->node_type_set(name2id[w1st], CfgBeenRead_Op);
     else
       g->node_type_set(name2id[w1st], CfgAssign_Op);
-  } else {
-
+  }
+  else {
     g->node_loc_set(name2id[w1st], opack.src.c_str(), (uint32_t)std::stoi(w3rd), (uint32_t)std::stoi(w4th));
 
     if(w6th == ".()")
@@ -193,14 +223,15 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
       g->node_type_set(name2id[w1st], CfgBeenRead_Op);
     else if(w6th == "::{") {
       g->node_subgraph_set(name2id[w1st], nfirst2gid[w9th]); //use nfirst2gid to get sub-graph gid
+      fmt::print("set node:{} as subgraph, graph_id is {}\n", name2id[w1st], nfirst2gid[w9th]);
     } else {
       g->node_type_set(name2id[w1st], CfgAssign_Op);
     }
   }
 
   g->set_node_wirename(name2id[w1st], CFG_Node_Data(dfg_data).encode().c_str());
-  /*
 
+  /*
     II-0.process 2nd node and 9th node(if-else merging node)
   */
 
@@ -219,7 +250,6 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
     nid_end       = new_node.get_nid(); //keep update the latest final nid
     fmt::print("create node:{}, nid:{}\n", w2nd, name2id[w2nd]);
   }
-
   /*
     III.deal with edge connection
   */
@@ -311,10 +341,13 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
 
   else if(w6th == "::{") {
     //connect to the begin of function call
+    //To Do: there should be another way to take existing graphs as subgraph
+    sub_graph = LGraph::find_lgraph(g->get_path(),opack.graph_name + std::to_string(nfirst2gid[w9th]));
     src_nid = name2id[w1st];
     dst_nid = name2id[w9th];
-    g->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
     fmt::print("function call statement, connect src_node {} to dst_node {} ----- 1\n", src_nid, dst_nid);
+    g->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+    //dst_pid = sub_graph->get_graph_input(name).get_pid();
   } //end special case: ::{
 
   else if(w2nd == "null") { //no w2nd to create edge, only update chain_stks
