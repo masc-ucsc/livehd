@@ -120,7 +120,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
     p = strtok_r(nullptr, "\n\r\f", &str_ptr);
   } //end while loop
   /*
-    deal with GIO for every graph
+    create in/out GIO for every graph
   */
 
   for(int i = 0; i < lgs.size(); i++) {

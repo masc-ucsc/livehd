@@ -36,8 +36,8 @@ else:
 
 try:
   import lgraph
-  # cfg_files = ['simple_add', 'top']
-  cfg_files = ['simple_add']
+  cfg_files = ['simple_add', 'top']
+  # cfg_files = ['simple_add']
   
   for cfg_name in cfg_files:
       dfg_name = cfg_name + '_dfg'

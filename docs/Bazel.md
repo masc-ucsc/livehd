@@ -30,6 +30,11 @@ Useful commands:
 
     bazel test //...
 
+## To run specific python test
+    
+    bazel run //pyth:your_test.py
+    
+
 ## Debugging with bazel
 
 First run the tests to see the failing one. Then run with debug options
@@ -81,3 +86,6 @@ building in one machine breaks, and starts in another and it freezes.
 
     bazel clean --expunge
 
+## To solve python terminal message out of order issue, turn off stream buffer 
+
+    export PYTHONUNBUFFERED=1
