@@ -84,8 +84,11 @@ void Inou_json::from_json(LGraph *g, rapidjson::Document &document) {
           if(input_edge.HasMember("inp_nid")) {
             fmt::print("DEBUG:: inp_nid {} \n", input_edge["inp_nid"].GetUint64());
           }
-          if(input_edge.HasMember("inp_out_pid")) {
-            fmt::print("DEBUG:: inp_out_pid {} \n", input_edge["inp_out_pid"].GetUint64());
+          //if(input_edge.HasMember("inp_out_pid")) {
+          //  fmt::print("DEBUG:: inp_out_pid {} \n", input_edge["inp_out_pid"].GetUint64());
+          //}
+          if(input_edge.HasMember("inp_dst_pid")) {
+            fmt::print("DEBUG:: inp_dst_pid {} \n", input_edge["inp_dst_pid"].GetUint64());
           }
         }
       }
@@ -119,8 +122,11 @@ void Inou_json::from_json(LGraph *g, rapidjson::Document &document) {
         assert(nodes["outputs"].IsArray());
         for(const auto &output_edge : nodes["outputs"].GetArray()) {
           assert(output_edge.IsObject());
-          if(output_edge.HasMember("out_out_pid")) {
-            src_pid = output_edge["out_out_pid"].GetUint();
+          //if(output_edge.HasMember("out_out_pid")) {
+          //  src_pid = output_edge["out_out_pid"].GetUint();
+          //}
+          if(output_edge.HasMember("out_src_pid")) {
+            src_pid = output_edge["out_src_pid"].GetUint();
           }
           if(output_edge.HasMember("out_nid")) {
             dst_nid = output_edge["out_nid"].GetUint64();
@@ -129,8 +135,11 @@ void Inou_json::from_json(LGraph *g, rapidjson::Document &document) {
             }
             dst_nid = json_remap[dst_nid];
           }
-          if(output_edge.HasMember("out_inp_pid")) {
-            dst_pid = output_edge["out_inp_pid"].GetUint();
+          //if(output_edge.HasMember("out_inp_pid")) {
+          //  dst_pid = output_edge["out_inp_pid"].GetUint();
+          //}
+          if(output_edge.HasMember("out_dst_pid")) {
+            dst_pid = output_edge["out_dst_pid"].GetUint();
           }
           Node_Pin src_pin(last_nid, dst_pid, false);
           Node_Pin dst_pin(dst_nid, src_pid, true);
@@ -219,7 +228,8 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
           writer.StartObject();
           writer.Key("inp_nid");
           writer.Uint64((input_edge.get_idx()));
-          writer.Key("inp_out_pid");
+          //writer.Key("inp_out_pid");
+          writer.Key("inp_dst_pid");
           writer.Uint64(input_edge.get_inp_pin().get_pid());
           writer.EndObject();
         }
@@ -268,11 +278,13 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
       {
         for(const auto &out : g->out_edges(idx)) {
           writer.StartObject();
-          writer.Key("out_out_pid");
+          //writer.Key("out_out_pid");
+          writer.Key("out_src_pid");
           writer.Uint64(out.get_out_pin().get_pid());
           writer.Key("out_nid");
           writer.Uint64(out.get_idx());
-          writer.Key("out_inp_pid");
+          //writer.Key("out_inp_pid");
+          writer.Key("out_dst_pid");
           writer.Uint64(out.get_inp_pin().get_pid());
           if(out.is_root()) {
             auto  node_idx   = out.get_out_pin().get_nid();
