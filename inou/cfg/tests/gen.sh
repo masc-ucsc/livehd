@@ -1,3 +1,4 @@
+#!/bin/bash
 rm -f pt*.cfg
 ~/pyrope/parser/bin/prp pt1.prp  > yyy && column -t yyy > xxx && mv xxx pt1.cfg
 ~/pyrope/parser/bin/prp pt2.prp  > yyy && column -t yyy > xxx && mv xxx pt2.cfg

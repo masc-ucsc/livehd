@@ -18,19 +18,19 @@ public:
   CFG_Node_Data(const LGraph *g, Index_ID node);
   CFG_Node_Data(const std::string &parser_raw);
   CFG_Node_Data(const std::string &t, const std::vector<std::string> &ops, const std::string &ot)
-    : target(t), operands(ops), oper_text(ot) { }
-  CFG_Node_Data(const CFG_Node_Data &o) : target(o.get_target()), operands(o.get_operands()), oper_text(o.get_operator()) { }
+    : target(t), operands(ops), operator_txt(ot) { }
+  CFG_Node_Data(const CFG_Node_Data &o) : target(o.get_target()), operands(o.get_operands()), operator_txt(o.get_operator()) { }
 
   std::string encode() const;
 
   const std::string              &get_target() const { return target; }
-  const std::string              &get_operator() const { return oper_text; }
+  const std::string              &get_operator() const { return operator_txt; }
   const std::vector<std::string> &get_operands() const { return operands; }
 
 private:
   std::string              target;
   std::vector<std::string> operands;
-  std::string              oper_text;
+  std::string              operator_txt;
 };
 
 #endif

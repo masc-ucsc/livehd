@@ -1,2 +1,2 @@
 B as simple_add
-%out = B.s
+%out = B.(a:$a, b:$b)
