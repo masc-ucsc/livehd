@@ -13,7 +13,7 @@ CFG_Node_Data::CFG_Node_Data(const LGraph *g, Index_ID node) {
   if (data_str != nullptr) {
     std::istringstream ss(data_str);
 
-    assert(std::getline(ss, oper_text, ENCODING_DELIM)); // the first token is the operator, we don't need it
+    assert(std::getline(ss, operator_txt, ENCODING_DELIM)); // the first token is the operator, we don't need it
     assert(std::getline(ss, target, ENCODING_DELIM)); // the 2nd var in the data_str is the target
                                                       // this read shouldn't fail
 
@@ -24,7 +24,7 @@ CFG_Node_Data::CFG_Node_Data(const LGraph *g, Index_ID node) {
     }
   } else {
     target = EMPTY_MARKER;
-    oper_text = EMPTY_MARKER;
+    operator_txt = EMPTY_MARKER;
   }
 }
 
@@ -41,7 +41,7 @@ CFG_Node_Data::CFG_Node_Data(const string &parser_raw) {
       i++;
   }
 
-  ss >> oper_text;
+  ss >> operator_txt;
   ss >> target;
 
   while (ss >> buffer) { // actually save the remaining
@@ -51,7 +51,7 @@ CFG_Node_Data::CFG_Node_Data(const string &parser_raw) {
 }
 
 string CFG_Node_Data::encode() const {
-  string encd = oper_text + ENCODING_DELIM + target + ENCODING_DELIM;
+  string encd = operator_txt + ENCODING_DELIM + target + ENCODING_DELIM;
 
   for (const auto &op : operands)
     encd += op + ENCODING_DELIM;

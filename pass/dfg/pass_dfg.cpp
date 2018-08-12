@@ -74,13 +74,14 @@ Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, CF2DF_State *sta
   case CfgAssign_Op:
     process_assign(dfg, cfg, state, data, node);
     return get_child(cfg, node);
+  case CfgFunctionCall_Op:
+    //set node as subgraph
   case CfgIf_Op:
     return process_if(dfg, cfg, state, data, node);
   case CfgIfMerge_Op:
     return 0;
   default:
-    fmt::print("\n\n*************Unrecognized node type[n={}]: {}\n",
-      node, cfg->node_type_get(node).get_name());
+    fmt::print("\n\n*************Unrecognized node type[n={}]: {}\n", node, cfg->node_type_get(node).get_name());
     return get_child(cfg, node);
   }
 }
