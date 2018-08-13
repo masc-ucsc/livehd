@@ -4,7 +4,7 @@ cc_library(
     srcs = ["py_options.cpp"],
     hdrs = ["py_options.hpp"],
     visibility = ["//visibility:public"],
-    linkopts = ['-lpython3.6m', '-lpthread'],
+    linkopts = ['-lpython3.7m', '-lpthread'],
     includes = ["."],
     deps = [
         "//core:core",
@@ -32,7 +32,7 @@ cc_library(
 load("//tools:linkso.bzl", "linkso")
 
 linkso(
-    name = "lgraph.cpython-36m-x86_64-linux-gnu",
+    name = "lgraph.cpython-37m-x86_64-linux-gnu",
 		srcs   = [":py_lgraph",
             ":py_base",
 						"//pass/dfg:pass_dfg",
@@ -53,7 +53,7 @@ par_binary(
     name = 'ptlgraph',
     srcs = ['ptlgraph.py'],
     default_python_version = "PY3",
-    data = ["lgraph.cpython-36m-x86_64-linux-gnu.so"],
+    data = ["lgraph.cpython-37m-x86_64-linux-gnu.so"],
     zip_safe = False
 )
 

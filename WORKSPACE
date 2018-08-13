@@ -90,7 +90,7 @@ new_git_repository(
 # Python system includes
 new_local_repository(
     name = "python3",
-    path = "/usr/include/python3.6m", # use "pkg-config --cflags python3" to get path
+    path = "/usr/include/python3.7m",
     build_file = "third_party/BUILD.python3",
 )
 # BOOST Libraries dependences

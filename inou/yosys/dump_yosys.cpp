@@ -5,7 +5,6 @@
 
 #include "lgedgeiter.hpp"
 #include "dump_yosys.hpp"
-#include "third_party/subs/anubis/yosys/kernel/rtlil.h"
 //#include "third_party/subs/anubis/yosys/kernel/rtlil.h"
 
 RTLIL::Wire *Dump_yosys::get_wire(Index_ID idx, Port_ID pid, bool can_fail = false) {
