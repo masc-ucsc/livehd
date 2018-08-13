@@ -64,18 +64,22 @@ Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, CF2DF_State *sta
 
   //sh dbg
   fmt::print("now processing CFG node:{}\n", node);
-  fmt::print("target:{}, operators:{}, ", data.get_target(), data.get_operator());
+  fmt::print("target:[{}], operator:[{}], ", data.get_target(), data.get_operator());
+  fmt::print("operands:[");
   for(const auto i:data.get_operands())
-    fmt::print("operands:{} ", i);
+    fmt::print("{}, ", i);
+  fmt::print("]");
   fmt::print("\n");
 
+  std::vector<Index_ID> subgraph_nodes;
 
   switch (cfg->node_type_get(node).op) {
   case CfgAssign_Op:
     process_assign(dfg, cfg, state, data, node);
     return get_child(cfg, node);
   case CfgFunctionCall_Op:
-    //set node as subgraph
+    process_func_call(dfg, cfg, state, data, node);
+    return get_child(cfg, node);
   case CfgIf_Op:
     return process_if(dfg, cfg, state, data, node);
   case CfgIfMerge_Op:
@@ -86,37 +90,112 @@ Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, CF2DF_State *sta
   }
 }
 
+void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, const CFG_Node_Data &data, Index_ID node) {
+  fmt::print("process_func_call\n");
+  const auto &target = data.get_target();
+  const vector<std::string> &operands = data.get_operands();
+  const unordered_map<std::string, Index_ID > &name2id_subg = state->get_name2id_subg();
+  const unordered_map<Index_ID, Index_ID >    &id2id_subg   = state->get_id2id_subg();
+  LGraph* sub_graph = 0;
+  Index_ID sub_graph_root_nid;
+
+  if(sub_graph = LGraph::find_lgraph(cfg->get_path(), operands[0])){ //first time encounter the subgraph
+    Index_ID target_nid = create_node(dfg, state, target);
+    fmt::print("create node for func_call target:{}, nid:{}\n", target, target_nid);
+    dfg->node_subgraph_set(target_nid, sub_graph->lg_id());
+    fmt::print("set subgraph on nid:{}, sub_graph name:{}, sub_graph_id:{}\n", target_nid, operands[0], sub_graph->lg_id());
+  }else{
+    //find subgraph root node and connect operands to it
+    auto iter_name2id_subg = name2id_subg.find(operands[0]);
+    if(iter_name2id_subg != name2id_subg.end()){
+      auto iter_id2id_subg = id2id_subg.find(iter_name2id_subg->second);
+      sub_graph_root_nid = iter_id2id_subg->second;
+    }
+
+    vector<Index_ID> oprd_ids = process_operands(dfg, cfg, state, data, node); // all the operands should be created before, just get back oprd_ids
+
+    for(int i = 1; i<oprd_ids.size();i++ ){
+      Port_ID dst_pid = i-1; //dst_pid in sub-graph should be incremented
+      Port_ID src_pid = 0;
+      if(dfg->node_type_get(oprd_ids[i]).op == Or_Op) // create pure dummy assign op instead of reduced Or_op?
+        src_pid = 1;// output pid=1 for reduced Or_Op
+
+      dfg->add_edge(Node_Pin(oprd_ids[i], src_pid, false), Node_Pin(sub_graph_root_nid, dst_pid, true));
+    }
+
+    //create target node
+    Index_ID target_nid = create_node(dfg, state, target);
+    fmt::print("create node for internal target:{}, nid:{}\n", target, target_nid);
+    dfg->set_node_instance_name(target_nid, target);
+    dfg->node_type_set(target_nid, Or_Op); //temp directly assing node type
+
+    //connect func call target with first operand
+    Port_ID dst_pid = 0; //dst_pid in sub-graph should be incremented
+    Port_ID src_pid = 0;
+    if(dfg->node_type_get(oprd_ids[0]).op == Or_Op) // create pure dummy assign op instead of reduced Or_op?
+      src_pid = 1;// output pid=1 for reduced Or_Op
+
+    dfg->add_edge(Node_Pin(oprd_ids[0], src_pid, false), Node_Pin(target_nid, dst_pid, true));
+    fmt::print("create edge ({}->{})\n", dfg->get_node_wirename(oprd_ids[0]), dfg->get_node_wirename(target_nid));
+  }
+}
 
 void Pass_dfg::process_assign(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, const CFG_Node_Data &data, Index_ID node) {
+  fmt::print("process_assign\n");
   const auto &target = data.get_target();
 
-
-  if (is_output(target)){//sh dbg
+  if (is_output(target)){
     Index_ID nid_o_target = create_output(dfg, state, target);//sh dbg
-    fmt::print("create node for output target:{} \n", target); //sh dbg
+    fmt::print("create node for output target:{}, nid:{} \n", target, nid_o_target); //sh dbg
     //To Do: need to connect this output node with sum op
     //dfg->add_edge(Node_Pin(state->get_reference(target), 2, false),Node_Pin(nid_o_target,2,true)); //buggy source!!! 7/28/2018
-    vector<Index_ID> operands = process_operands(dfg, cfg, state, data, node);
-    for (Index_ID id : operands)
-      dfg->add_edge(Node_Pin(id, 0, false), Node_Pin(nid_o_target, 0, true));
+    vector<Index_ID> oprd_ids = process_operands(dfg, cfg, state, data, node);
+    for (Index_ID src_nid : oprd_ids){
+      Port_ID src_pid = 0;
+      Port_ID dst_pid = 0;
+      if(dfg->node_type_get(src_nid).op == Or_Op)// create pure dummy assign op instead of reduced Or_op?
+        src_pid = 1; // output pid=1 for reduced Or_Op
+      dfg->add_edge(Node_Pin(src_nid, src_pid, false), Node_Pin(nid_o_target, dst_pid, true));
+      fmt::print("create edge ({}->{})\n", dfg->get_node_wirename(src_nid), dfg->get_node_wirename(nid_o_target));
+    }
   }else{
-    Index_ID nid_target = create_node(dfg, state, target);
-    fmt::print("create node for internal target:{}\n", target);
-    dfg->set_node_instance_name(nid_target, target);
-    dfg->node_type_set(nid_target, node_type_from_text(data.get_operator()));
+    Index_ID target_nid = create_node(dfg, state, target);
+    fmt::print("create node for internal target:{}, nid:{}\n", target, target_nid);
+    dfg->set_node_instance_name(target_nid, target);
+    dfg->node_type_set(target_nid, node_type_from_text(data.get_operator()));
+    vector<Index_ID> oprd_ids = process_operands(dfg, cfg, state, data, node);
 
-    vector<Index_ID> operands = process_operands(dfg, cfg, state, data, node);
-    for (Index_ID id : operands)
-      dfg->add_edge(Node_Pin(id, 0, false), Node_Pin(nid_target, 1, true));
+    for (Index_ID src_nid : oprd_ids){
+      Port_ID src_pid = 0;
+      Port_ID dst_pid = 0;
+      if(dfg->node_type_get(src_nid).op == Or_Op)// create pure dummy assign op instead of reduced Or_op?
+        src_pid = 1; // output pid=1 for reduced Or_Op
+
+      if(data.get_operator() == ":" ){
+        if(src_nid != oprd_ids[0]){ //To Do:prevent connecting dummy node for function argument assignment. ex. tmp = a:$a
+          dfg->add_edge(Node_Pin(src_nid, src_pid, false), Node_Pin(target_nid, dst_pid, true));
+          fmt::print("create edge ({}->{})\n", dfg->get_node_wirename(src_nid), dfg->get_node_wirename(target_nid));}
+      }else if(data.get_operator() == "as"){
+        dfg->add_edge(Node_Pin(src_nid, src_pid, false), Node_Pin(target_nid, dst_pid, true));
+        fmt::print("create edge ({}->{})\n", dfg->get_node_wirename(src_nid), dfg->get_node_wirename(target_nid));
+        state->set_id2id_subg(target_nid,src_nid);
+        state->set_name2id_subg(target,target_nid);
+      }else{
+        dfg->add_edge(Node_Pin(src_nid, src_pid, false), Node_Pin(target_nid, dst_pid, true));
+        fmt::print("create edge ({}->{})\n", dfg->get_node_wirename(src_nid), dfg->get_node_wirename(target_nid));
+      }
+    }
   }
-
 
   fmt::print("is_fluid:{}, is_output:{}, is_register:{}\n", state->fluid_df(),is_output(target), is_register(target));
   if (state->fluid_df() && (is_output(target) || is_register(target)))
     add_write_marker(dfg, state, target);
 }
 
+
+
 Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, const CFG_Node_Data &data, Index_ID node) {
+  fmt::print("process_if\n");
   Index_ID cond = state->get_reference(data.get_target());
   const auto &operands = data.get_operands();
 
@@ -189,46 +268,58 @@ Index_ID Pass_dfg::resolve_phi_branch(LGraph *dfg, CF2DF_State *parent, CF2DF_St
 }
 
 vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, const CFG_Node_Data &data, Index_ID node) {
-  const vector<std::string> &dops = data.get_operands();
-  vector<Index_ID> ops(dops.size());
+  const vector<std::string> &oprds = data.get_operands();
+  vector<Index_ID> oprd_ids(oprds.size());
 
-  for (size_t i = 0; i < dops.size(); i++) {
-    if (state->has_reference(dops[i])){
-      ops[i] = state->get_reference(dops[i]);
-      fmt::print("operand:{} has been created before\n", dops[i]);//sh dbg
+  for (size_t i = 0; i < oprds.size(); i++) {
+    if (state->has_reference(oprds[i])){
+      oprd_ids[i] = state->get_reference(oprds[i]);
+      fmt::print("operand:{} has been created before\n", oprds[i]);//sh dbg
     }
     else {
-      if (is_constant(dops[i])){
-        ops[i] = default_constant(dfg, state);
-        fmt::print("create node for default const operand:{}\n", dops[i]); //sh dbg
+      if (is_constant(oprds[i])){
+        oprd_ids[i] = default_constant(dfg, state);
+        fmt::print("create node for constant operand:{}, nid:{}\n", oprds[i], oprd_ids[i]); //sh dbg
       }
-      else if (is_register(dops[i])){
-        ops[i] = create_register(dfg, state, dops[i]);
-        fmt::print("create node for register operand:{}\n", dops[i]); // sh dbg
+      else if (is_register(oprds[i])){
+        oprd_ids[i] = create_register(dfg, state, oprds[i]);
+        fmt::print("create node for register operand:{}, nid:{}\n", oprds[i], oprd_ids[i]); // sh dbg
       }
-      else if (is_input(dops[i])){
-        ops[i] = create_input(dfg, state, dops[i]);
-        fmt::print("create node for input operand:{}\n", dops[i]); // sh dbg
+      else if (is_input(oprds[i])){
+        oprd_ids[i] = create_input(dfg, state, oprds[i]);
+        fmt::print("create node for input operand:{}, nid:{}\n", oprds[i], oprd_ids[i]); // sh dbg
       }
-      else if (is_output(dops[i])){
-        ops[i] = create_output(dfg, state, dops[i]);
-        fmt::print("create node for output operand:{}\n", dops[i]); // sh dbg
+      else if (is_output(oprds[i])){
+        oprd_ids[i] = create_output(dfg, state, oprds[i]);
+        fmt::print("create node for output operand:{}, nid:{}\n", oprds[i], oprd_ids[i]); // sh dbg
       }
       else{
-        ops[i] = create_private(dfg, state, dops[i]);
-        fmt::print("create node for private operand:{}\n", dops[i]); // sh dbg
+        //undefined oprd_ids[0]!!!
+        //if(data.get_operator() == ":" ){
+        //  if(i != 0){ //prevent connecting dummy node for function argument assignment. ex. tmp = a:$a
+        //    oprd_ids[i] = create_private(dfg, state, oprds[i]);
+        //    fmt::print("create node for private operand:{}, nid:{}\n", oprds[i], oprd_ids[i]); // sh dbg
+        //  }
+        //}
+        //else{
+        //  oprd_ids[i] = create_private(dfg, state, oprds[i]);
+        //  fmt::print("create node for private operand:{}, nid:{}\n", oprds[i], oprd_ids[i]); // sh dbg
+        //}
+        oprd_ids[i] = create_private(dfg, state, oprds[i]);
+        fmt::print("create node for private operand:{}, nid:{}\n", oprds[i], oprd_ids[i]); // sh dbg
       }
     }
 
-    if (state->fluid_df() && is_input(dops[i]))
-      add_read_marker(dfg, state, dops[i]);
+    if (state->fluid_df() && is_input(oprds[i]))
+      add_read_marker(dfg, state, oprds[i]);
   }
 
-  return ops;
+  return oprd_ids;
 }
 
 void Pass_dfg::assign_to_true(LGraph *dfg, CF2DF_State *state, const std::string &v) {
   Index_ID node = create_node(dfg, state, v);
+  fmt::print("create node nid:{}\n", node);
   dfg->node_type_set(node, Or_Op);
 
   dfg->add_edge(Node_Pin(true_constant(dfg, state), 0, false), Node_Pin(node, 0, true));

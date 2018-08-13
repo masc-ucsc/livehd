@@ -45,47 +45,53 @@ protected:
 
 private:
   Index_ID                 find_root(const LGraph *cfg);
-  Index_ID                 process_cfg(     LGraph *dfg,
-                                            const LGraph *cfg,
-                                            CF2DF_State *state,
-                                            Index_ID top_node);
+  Index_ID                 process_cfg(        LGraph *dfg,
+                                               const LGraph *cfg,
+                                               CF2DF_State *state,
+                                               Index_ID top_node);
 
-  Index_ID                 process_node(    LGraph *dfg,
-                                            const LGraph *cfg,
-                                            CF2DF_State *state,
-                                            Index_ID node);
+  Index_ID                 process_node(       LGraph *dfg,
+                                               const LGraph *cfg,
+                                               CF2DF_State *state,
+                                               Index_ID node);
 
-  void                     process_assign(  LGraph *dfg,
-                                            const LGraph *cfg,
-                                            CF2DF_State *state,
-                                            const CFG_Node_Data &data,
-                                            Index_ID node );
+  void                     process_assign(     LGraph *dfg,
+                                               const LGraph *cfg,
+                                               CF2DF_State *state,
+                                               const CFG_Node_Data &data,
+                                               Index_ID node );
 
-  Index_ID                 process_if(      LGraph *dfg,
-                                            const LGraph *cfg,
-                                            CF2DF_State *state,
-                                            const CFG_Node_Data &data,
-                                            Index_ID node );
+  void                     process_func_call(  LGraph *dfg,
+                                               const LGraph *cfg,
+                                               CF2DF_State *state,
+                                               const CFG_Node_Data &data,
+                                               Index_ID node );
 
-  std::vector<Index_ID>    process_operands(LGraph *dfg,
-                                            const LGraph *cfg,
-                                            CF2DF_State *state,
-                                            const CFG_Node_Data &data,
-                                            Index_ID node );
+  Index_ID                 process_if(         LGraph *dfg,
+                                               const LGraph *cfg,
+                                               CF2DF_State *state,
+                                               const CFG_Node_Data &data,
+                                               Index_ID node );
 
-  void                     add_phis(        LGraph *dfg,
-                                            const LGraph *cfg,
-                                            CF2DF_State *parent,
-                                            CF2DF_State *tstate,
-                                            CF2DF_State *fstate,
-                                            Index_ID condition);
+  std::vector<Index_ID>    process_operands(   LGraph *dfg,
+                                               const LGraph *cfg,
+                                               CF2DF_State *state,
+                                               const CFG_Node_Data &data,
+                                               Index_ID node );
 
-  void                     add_phi(         LGraph *dfg,
-                                            CF2DF_State *parent,
-                                            CF2DF_State *tstate,
-                                            CF2DF_State *fstate,
-                                            Index_ID condition,
-                                            const std::string &variable);
+  void                     add_phis(           LGraph *dfg,
+                                               const LGraph *cfg,
+                                               CF2DF_State *parent,
+                                               CF2DF_State *tstate,
+                                               CF2DF_State *fstate,
+                                               Index_ID condition);
+
+  void                     add_phi(            LGraph *dfg,
+                                               CF2DF_State *parent,
+                                               CF2DF_State *tstate,
+                                               CF2DF_State *fstate,
+                                               Index_ID condition,
+                                               const std::string &variable);
 
   Index_ID get_child(const LGraph *cfg, Index_ID node);
   Index_ID resolve_phi_branch(LGraph *dfg, CF2DF_State *parent, CF2DF_State *branch, const std::string &variable);
