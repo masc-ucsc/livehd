@@ -47,15 +47,19 @@ public:
 
   bool is_input(const std::string &v) const { return lgref->is_graph_input(last_refs.at(v)); }
   bool is_output(const std::string &v) const { return lgref->is_graph_output(last_refs.at(v)); }
+  void set_id2id_subg   (const Index_ID &key, const Index_ID &value)    {       id2id_subg[key] = value;}
+  std::unordered_map<Index_ID, Index_ID >    get_id2id_subg()           {return id2id_subg;}
+  void set_name2id_subg (const std::string &key, const Index_ID &value) {       name2id_subg[key] = value;}
+  std::unordered_map<std::string, Index_ID > get_name2id_subg()         {return name2id_subg;}
 
-private:
-  typedef bool(*filter)(const CF2DF_State *, const std::string &);
+private:  typedef bool(*filter)(const CF2DF_State *, const std::string &);
   std::unordered_map<std::string, Index_ID> filter_util(filter fproc) const;
-
   LGraph *lgref;
   std::unordered_map<std::string, Index_ID> last_refs;
   std::unordered_map<std::string, Index_ID> registers;
   bool fluid;
+  std::unordered_map<Index_ID, Index_ID>    id2id_subg;
+  std::unordered_map<std::string, Index_ID> name2id_subg;
 };
 
 #endif

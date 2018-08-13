@@ -83,7 +83,7 @@ try:
 
       assert not (dfg is None)
       assert not (dfg[0] is None)
-      print("===================== generate dfg:{} pass! ======================\n".format(dfg_name), flush=True)
+      print("\n===================== generate dfg:{} pass! ======================\n".format(dfg_name), flush=True)
 
 
       g = lgraph.find_lgraph("lgdb",dfg_name)
@@ -101,7 +101,7 @@ try:
       opt_inou_yosys = '../../../inou/yosys/liblgraph_yosys.so' 
       opt_graph_input = dfg_name
       yosys_log = opt_log_dir + '/' + opt_graph_input + '_to_yosys.log' 
-      yosys_write_verilog = 'write_verilog ' + opt_graph_input + '_dirty.v; opt -fast; opt_clean -purge; write_verilog ' + opt_graph_input + '.v;' 
+      yosys_write_verilog = 'write_verilog ' + opt_graph_input[:-4] + '_dirty.v; opt -fast; opt_clean -purge; write_verilog ' + opt_graph_input[:-4] + '.v;' 
       yosys_cmds =  '" dump_yosys ' + opt_hierarchy + '-graph_name ' + opt_graph_input + '; ' + yosys_write_verilog + '"'
 
       bash_yosys_cmds =[  
