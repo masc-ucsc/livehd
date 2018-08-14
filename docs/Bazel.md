@@ -31,9 +31,8 @@ Useful commands:
     bazel test //...
 
 ## To run specific python test
-    
+
     bazel run //pyth:your_test.py
-    
 
 ## Debugging with bazel
 
@@ -54,6 +53,13 @@ argument the test. Sample session:
     >r bazel-bin/pyth/test_core1
     >b LGraph_Base::LGraph_Base
     >r
+
+## Python console
+
+You can run a lgraph python interactive console, but you must install the ptpython package
+
+    pip install ptpython
+
 
 ## Code coverage for all the tests used
 
