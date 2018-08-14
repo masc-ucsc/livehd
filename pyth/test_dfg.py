@@ -18,19 +18,19 @@ print("test running directory: ", os.getcwd())
 if not os.path.exists('./logs'):
     os.mkdir('logs')
 else:
-    files = glob.glob('./logs/*') 
+    files = glob.glob('./logs/*')
     for f in files:  os.remove(f)
 
 if not os.path.exists('./verilog'):
     os.mkdir('verilog')
 else:
-    files = glob.glob('./verilog/*') 
+    files = glob.glob('./verilog/*')
     for f in files:  os.remove(f)
 
 if not os.path.exists('./lgdb'):
     os.mkdir('lgdb')
 else:
-    files = glob.glob('./lgdb/*') 
+    files = glob.glob('./lgdb/*')
     for f in files:  os.remove(f)
 
 
@@ -38,7 +38,7 @@ try:
   import lgraph
   cfg_files = ['simple_add', 'top']
   # cfg_files = ['simple_add']
-  
+
   for cfg_name in cfg_files:
 
       cfg_opts = {
@@ -49,7 +49,7 @@ try:
 
       print("\n\n\n")
       cfg = lgraph.Inou_cfg(cfg_opts).generate()
-      
+
       #temporary start: wait for json dump integrate into pybind11 system
       bash_json_cmds = ['~/lgraph/bazel-bin/inou/json/lgjson --graph_name ' + cfg_name + ' --json_output ' + cfg_name + '.json ' + '&&' + 'mv *.json ./logs']
                         # need to find a way to create json files for build-in sub-graphs
