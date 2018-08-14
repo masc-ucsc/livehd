@@ -110,7 +110,7 @@ try:
                        ]
 
       for cmd in bash_yosys_cmds:
-          print('Executing bash cmd: ' + cmd)
+          print('Executing bash cmd:\n' + cmd)
           subprocess.run(cmd, shell=True)
 
       print("\n\n\n")
