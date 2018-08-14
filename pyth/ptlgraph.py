@@ -4,6 +4,11 @@ from __future__ import unicode_literals
 import sys
 import os
 
+base_dir = os.path.dirname(sys.argv[0]) or '.'
+sys.path.insert(1, base_dir)
+package_dir_a = os.path.join(os.getcwd(), '__main__')
+sys.path.insert(1, package_dir_a)
+
 from ptpython.repl import embed
 from pyth import lgraph
 
@@ -19,5 +24,14 @@ def main():
     embed(globals(), locals(), vi_mode=False)
 
 if __name__ == '__main__':
-    main()
+    if "get_ipython" in globals():
+        print("Hello")
+        try:
+            import IPython
+            IPython.embed()
+        except ImportError:
+            pass
+    else:
+        main()
+
 
