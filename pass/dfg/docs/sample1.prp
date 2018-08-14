@@ -1,0 +1,73 @@
+##################
+# a = 3
+1 = a 3
+
+##################
+# b = \a
+2 = b \a
+
+##################
+# %o1 = $in + b
+3 + tmp0 $in b
+4 = %o1 tmp0
+
+##################
+# xx = \inc
+# %o2 = xx.(lab:b)
+5 = xx \inc
+6 : tmp1 lab b
+7 .() tmp2 xx tmp1
+8 = %o2 tmp2
+
+##################
+##################
+Steps to do:
+
+LG: lgraph, ST: Symbol Table, AUX: Auxiliar non persistent table (one per lgraph)
+
+1-
+  LG:
+    a  U32Const (nid_0)
+  AUX:
+    a: nid_0
+
+2-
+  AUX:
+    b: nid_0 (b alias "a" nid_0)
+
+3-
+  LG:
+    + $in "a" (nid_1)
+  AUX:
+    tmp0: nid_1
+
+4-
+  AUX:
+    %o1: nid_1 (pending to connect output)
+
+5-
+  LG:
+   (inc does not exist in the AUX entry, so must create a get_lg_ref)
+   get_lg_ref "inc" as input (nid_3)
+  AUX:
+   xx: nid_3
+
+6-
+  LG:
+   copy node "tmp1.lab" (nid_4)
+  AUX:
+   tmp1: add field lab with nid_4
+
+7-
+  LG:
+   pending_lg, connect to nid_3 for name, and nid_4 for inputs (nid_5)
+  AUX:
+   tmp2: nid_5
+
+8-
+  AUX:
+   %o2: nid_5
+
+End step:
+  traverse the outputs from AUX, and connect to output in graph
+
