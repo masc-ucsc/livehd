@@ -29,13 +29,28 @@ WORKSPACE
  unzip ../bazel-bin/pth/ptlgraph.py
  ipython __main__/python/ptlgraph.py
 
-# Instructions to create/upload the Python package
+# Build a Python interface steps
 
+1-Create a pybind11 class interface in your pass directory. It must be named py_XXX.hpp
+were XXX is the pass name. Use a py_XXX.hpp as your starting point. E.g: py_inou_rand.hpp.
+
+2-Use the python options. Must include py_options.hpp in the main XXX.hpp file for the pass. E.g: inou_rand.hpp
+
+3-Create the constructor, py_set and py_generate methods as in the examples to get options from python.
+
+4-In the BUILD inside the XXX directory, add a //pyth:py_base dependence
+
+5-Add to pyth/py_lgraph.cpp your new include (py_XXX.hpp).
+
+6-Add the dependence in pyth/BUILD (check //inou/rand:inou_rand)
+
+7-Create a simple unit test that covers the basic functionality. The basic tests are named test_XXX.py, and they are located at pyth. If you have more extensive tests, you have more tests name them test_XXX1.py. If you have several input/output files for your tests, place them in XXX/tests where XXX is your pass directory. E.g: inou/yosys/tests/
+
+# Instructions to create/upload the Python package (DEPRECATED)
 
 The package contains binaries and libraries. To create a source distribution use:
 
    python setup.py sdist
-
 
 TODO: A binary bdist_wheel must be created because of lgraph dependence
 
