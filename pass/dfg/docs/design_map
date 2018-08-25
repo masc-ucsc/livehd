@@ -1,0 +1,52 @@
+----------------------------------------------------
+CfgAssign_Op:
+  format: 
+    operator | target | operand1 | operand2(opt)
+
+  operand: 
+    1. check AUX to decide whether create a new type of node or not
+    2. set AUX if creating node
+
+  target:
+    1. if % output
+         -> must create a new node since no alias for GIO
+         -> set AUX target
+    2. else if unary operator such as "=", "as" or "!" or ":"
+         -> means there is only one operand
+         -> set AUX target <-> operand as alias
+         -> note that I define ":" as unary since we actually ignore the first operand
+            ex:
+            b as __stage:true
+            -> : tmp0 __stage true 
+            -> we don't create node for "__stage"
+
+    3. else
+         -> create node with operator type
+         -> set AUX target
+
+  operator:
+    1. set as the type of target node
+
+
+  connection:
+    1. unary op  -> no need to connect, just set AUX
+    2. binary op -> connect operands to target
+
+-------------------------------------------------------
+
+CfgFunctionCall_Op:
+  format:
+    .() | tmp_x | B | tmp_y0 | tmp_y1 ... | tmpy2
+  
+  operand:
+    1. should be all in the AUX already
+  
+  target:
+    1. set alias tmp_x <-> B
+
+  note:
+    1. the whole function call should not create any new dfg nodes
+
+  connection:
+    1. reduce dummy node creation
+       -> connect operand[0] <-> target and operand[1,2,3,...]
