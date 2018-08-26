@@ -9,6 +9,9 @@
 #include "lgedge.hpp"
 #include "lgedgeiter.hpp"
 
+//todo: create a determine_dst_pid()
+//todo: what if signed operation of dst_pid determination?
+
 using std::unordered_map;
 
 unsigned int Pass_dfg::temp_counter = 0;
@@ -34,6 +37,31 @@ void Pass_dfg::transform(LGraph *cfg) {
   dfg->sync();
   delete dfg;
 }
+
+LGraph * Pass_dfg::optimize() {
+  assert(!opack.src.empty());
+  LGraph *dfg = new LGraph(opack.lgdb, opack.src, false);
+  optimize(dfg);
+  return dfg;
+}
+
+void Pass_dfg::optimize(LGraph *dfg) {
+  LGraph* sub_graph = nullptr;
+  for(auto nid : dfg->fast()) {
+    if(dfg->node_type_get(nid).op == DfgPendingGraph_Op){
+      if((sub_graph = LGraph::find_lgraph(dfg->get_path(), ((std::string)(dfg->get_node_wirename(nid))+"_dfg")))){
+        dfg->node_subgraph_set(nid, (uint32_t)sub_graph->lg_id());
+        fmt::print("resolve pending subgraph! nid:{}, sub_graph name:{}, sub_graph_id:{}\n", nid, dfg->get_node_wirename(nid), sub_graph->lg_id());
+      }
+      else{
+        fmt::print("cannot resolve pending subgraph!!\n");
+        assert(0);
+      }
+    }
+  }
+  dfg->sync();
+}
+
 
 void Pass_dfg::cfg_2_dfg(LGraph *dfg, const LGraph *cfg) {
   Index_ID    itr = find_root(cfg);
@@ -98,7 +126,7 @@ void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, CF2DF_State *st
   LGraph* sub_graph = nullptr;
   Index_ID subg_root_nid = state->get_alias(oprds[0]);
 
-  if((sub_graph = LGraph::find_lgraph(cfg->get_path(), ((std::string)(dfg->get_node_wirename(subg_root_nid))+"_dfg")))){ //first time encounter the subgraph
+  if((sub_graph = LGraph::find_lgraph(cfg->get_path(), ((std::string)(dfg->get_node_wirename(subg_root_nid))+"_dfg")))){
     dfg->node_subgraph_set(subg_root_nid, (uint32_t)sub_graph->lg_id());
     fmt::print("set subgraph on nid:{}, sub_graph name:{}, sub_graph_id:{}\n", subg_root_nid, dfg->get_node_wirename(subg_root_nid), sub_graph->lg_id());
   }else{
@@ -122,7 +150,7 @@ void Pass_dfg::process_assign(LGraph *dfg, CF2DF_State *state, const CFG_Node_Da
   const std::string &op = data.get_operator();
   bool is_unary_link_1st = (op == "=" || op == "as" || op == "!" || op == ".()");
   bool is_unary_link_2nd = (op == ":");
-  if(!is_output(target) && is_unary_link_1st) {
+  if(     !is_output(target) && is_unary_link_1st) {
     state->set_alias(target,oprd_ids[0]);
     return;
   }
@@ -151,18 +179,17 @@ void Pass_dfg::process_assign(LGraph *dfg, CF2DF_State *state, const CFG_Node_Da
 
 void Pass_dfg::process_connection(LGraph *dfg, const std::vector<Index_ID> &src_nids, const Index_ID &dst_nid){
   for (unsigned i = 0; i<src_nids.size();i++){
-    Index_ID src_nid = src_nids.at(i);
-    Port_ID src_pid = (dfg->node_type_get(src_nid).op == Or_Op) ? (uint16_t)1 : (uint16_t)0; // output pid=1 for reduced Or_Op
+    Index_ID src_nid =  src_nids.at(i);
+    Port_ID  src_pid = (dfg->node_type_get(src_nid).op == Or_Op) ? (uint16_t)1 : (uint16_t)0; // output pid=1 for reduced Or_Op
 
-    Port_ID dst_pid = (dfg->node_type_get(dst_nid).op == Sum_Op)      ? (uint16_t)1 :
-                      (dfg->node_type_get(dst_nid).op == SubGraph_Op) ? (uint16_t)i : (uint16_t)0;//todo: create a determin_dst_pid()
+    Port_ID  dst_pid = (dfg->node_type_get(dst_nid).op == Sum_Op            )? (uint16_t)1 :
+                       (dfg->node_type_get(dst_nid).op == DfgPendingGraph_Op)? (uint16_t)i :
+                       (dfg->node_type_get(dst_nid).op == SubGraph_Op       )? (uint16_t)i : (uint16_t)0;
 
     dfg->add_edge(Node_Pin(src_nid, src_pid, false), Node_Pin(dst_nid, dst_pid, true));
     fmt::print("create edge ({}->{})\n", dfg->get_node_wirename(src_nid), dfg->get_node_wirename(dst_nid));
   }
-
 }
-
 
 
 std::vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, CF2DF_State *state, const CFG_Node_Data &data) {
@@ -170,9 +197,9 @@ std::vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, CF2DF_State *state
   std::vector<Index_ID> oprd_ids(oprds.size());
   const std::string &op = data.get_operator();
 
-  for (size_t i = 0; i < oprds.size(); i++) {
-    if(i == 0 && op == ":") // patch for ":" -> don't do anything for 1st oprd
-      continue;
+  for (size_t i = 0 ; i <oprd_ids.size();i++) {
+    if(i == 0 && op == ":") //patch for lable ":" -> oprds[1st]<->oprds[2nd]
+      continue; //don't create dummy node for oprds[1st] when ":"
     else if (state->has_alias(oprds[i])){
       oprd_ids[i] = state->get_alias(oprds[i]);
       fmt::print("operand:{} has an alias:{}\n", oprds[i], oprd_ids[i]);
@@ -208,6 +235,9 @@ std::vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, CF2DF_State *state
       add_read_marker(dfg, state, oprds[i]);
   }
 
+  //patch for lable ":" -> oprds[1st]<->oprds[2nd]
+  if(op == ":")
+    state->set_alias(oprds[0],oprd_ids[1]);
   return oprd_ids;
 }
 
@@ -380,91 +410,3 @@ Index_ID Pass_dfg::get_child(const LGraph *cfg, Index_ID node) {
     assert(false);
 }
 
-// --------------- back up zone ------------------
-//// original, backup
-//if (is_output(target)){
-//  Index_ID nid_output = create_output(dfg, state, target);
-//  fmt::print("create node for output target:{}, nid:{} \n", target, nid_output);
-//  vector<Index_ID> oprd_ids = process_operands(dfg, state, data);
-//  for (Index_ID src_nid : oprd_ids){
-//    Port_ID src_pid = (dfg->node_type_get(src_nid).op == Or_Op) ? 1 : 0; // output pid=1 for reduced Or_Op
-//    Port_ID dst_pid = 0;
-//    dfg->add_edge(Node_Pin(src_nid, src_pid, false), Node_Pin(nid_output, dst_pid, true));
-//    fmt::print("create edge ({}->{})\n", dfg->get_node_wirename(src_nid), dfg->get_node_wirename(nid_output));
-//  }
-//}else{
-//  Index_ID target_nid = create_node(dfg, state, target);
-//  fmt::print("create node for internal target:{}, nid:{}\n", target, target_nid);
-//  dfg->set_node_instance_name(target_nid, target);
-//  dfg->node_type_set(target_nid, node_type_from_text(data.get_operator()));
-//  vector<Index_ID> oprd_ids = process_operands(dfg, state, data);
-
-//  for (Index_ID src_nid : oprd_ids){
-//    Port_ID src_pid = (dfg->node_type_get(src_nid).op == Or_Op) ? 1 : 0; // output pid=1 for reduced Or_Op
-//    Port_ID dst_pid = 0;
-
-//    if(data.get_operator() == ":" ){
-//      if(src_nid != oprd_ids[0]){ //To Do:prevent connecting dummy node for function argument assignment. ex. tmp = a:$a
-//        dfg->add_edge(Node_Pin(src_nid, src_pid, false), Node_Pin(target_nid, dst_pid, true));
-//        fmt::print("create edge ({}->{})\n", dfg->get_node_wirename(src_nid), dfg->get_node_wirename(target_nid));}
-//    }else if(data.get_operator() == "as"){
-//      dfg->add_edge(Node_Pin(src_nid, src_pid, false), Node_Pin(target_nid, dst_pid, true));
-//      fmt::print("create edge ({}->{})\n", dfg->get_node_wirename(src_nid), dfg->get_node_wirename(target_nid));
-//      state->set_id2id_subg(target_nid,src_nid);
-//      state->set_name2id_subg(target,target_nid);
-//    }else{
-//      dfg->add_edge(Node_Pin(src_nid, src_pid, false), Node_Pin(target_nid, dst_pid, true));
-//      fmt::print("create edge ({}->{})\n", dfg->get_node_wirename(src_nid), dfg->get_node_wirename(target_nid));
-//    }
-//  }
-//}
-
-//void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, const CFG_Node_Data &data) {
-//  fmt::print("process_func_call\n");
-//  const auto &target = data.get_target();
-//  const vector<std::string> &operands = data.get_operands();
-//  const unordered_map<std::string, Index_ID > &name2id_subg = state->get_name2id_subg();
-//  const unordered_map<Index_ID, Index_ID >    &id2id_subg   = state->get_id2id_subg();
-//  LGraph* sub_graph = nullptr;
-//  Index_ID sub_graph_root_nid;
-//
-//  if(sub_graph = LGraph::find_lgraph(cfg->get_path(), operands[0])){ //first time encounter the subgraph
-//    Index_ID target_nid = create_node(dfg, state, target);
-//    fmt::print("create node for func_call target:{}, nid:{}\n", target, target_nid);
-//    dfg->node_subgraph_set(target_nid, sub_graph->lg_id());
-//    fmt::print("set subgraph on nid:{}, sub_graph name:{}, sub_graph_id:{}\n", target_nid, operands[0], sub_graph->lg_id());
-//  }else{
-//    //find subgraph root node and connect operands to it
-//    auto iter_name2id_subg = name2id_subg.find(operands[0]);
-//    if(iter_name2id_subg != name2id_subg.end()){
-//      auto iter_id2id_subg = id2id_subg.find(iter_name2id_subg->second);
-//      sub_graph_root_nid = iter_id2id_subg->second;
-//    }
-//
-//    vector<Index_ID> oprd_ids = process_operands(dfg, state, data); // all the operands should be created before, just get back oprd_ids
-//
-//    for(int i = 1; i<oprd_ids.size();i++ ){
-//      Port_ID dst_pid = i-1; //dst_pid in sub-graph should be incremented
-//      Port_ID src_pid = 0;
-//      if(dfg->node_type_get(oprd_ids[i]).op == Or_Op)
-//        src_pid = 1;// output pid=1 for reduced Or_Op
-//
-//      dfg->add_edge(Node_Pin(oprd_ids[i], src_pid, false), Node_Pin(sub_graph_root_nid, dst_pid, true));
-//    }
-//
-//    //create target node
-//    Index_ID target_nid = create_node(dfg, state, target);
-//    fmt::print("create node for internal target:{}, nid:{}\n", target, target_nid);
-//    dfg->set_node_instance_name(target_nid, target);
-//    dfg->node_type_set(target_nid, Or_Op); //temp directly assing node type
-//
-//    //connect func call target with first operand
-//    Port_ID dst_pid = 0; //dst_pid in sub-graph should be incremented
-//    Port_ID src_pid = 0;
-//    if(dfg->node_type_get(oprd_ids[0]).op == Or_Op) // create pure dummy assign op instead of reduced Or_op?
-//      src_pid = 1;// output pid=1 for reduced Or_Op
-//
-//    dfg->add_edge(Node_Pin(oprd_ids[0], src_pid, false), Node_Pin(target_nid, dst_pid, true));
-//    fmt::print("create edge ({}->{})\n", dfg->get_node_wirename(oprd_ids[0]), dfg->get_node_wirename(target_nid));
-//  }
-//}
