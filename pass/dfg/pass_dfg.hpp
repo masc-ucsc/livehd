@@ -28,13 +28,21 @@ public:
   Pass_dfg(const py::dict &);
 
   LGraph *     transform();
+  LGraph *     optimize();
   virtual void transform(LGraph *orig);
+  virtual void optimize (LGraph *orig);
   void         cfg_2_dfg(LGraph *dfg, const LGraph *cfg);
   void         test_const_conversion();
 
-  std::vector<LGraph *> py_generate() {
+  std::vector<LGraph *> py_first_pass() {
     std::vector<LGraph *> lgs(1);
     lgs[0] = transform();
+    return lgs;
+  }
+
+  std::vector<LGraph *> py_second_pass() {
+    std::vector<LGraph *> lgs(1);
+    lgs[0] = optimize();
     return lgs;
   }
 
