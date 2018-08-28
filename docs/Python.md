@@ -32,7 +32,7 @@ WORKSPACE
 # Build a Python interface steps
 
 1-Create a pybind11 class interface in your pass directory. It must be named py_XXX.hpp
-were XXX is the pass name. Use a py_XXX.hpp as your starting point. E.g: py_inou_rand.hpp.
+where XXX is the pass name. Use a py_XXX.hpp as your starting point. E.g: py_inou_rand.hpp.
 
 2-Use the python options. Must include py_options.hpp in the main XXX.hpp file for the pass. E.g: inou_rand.hpp
 

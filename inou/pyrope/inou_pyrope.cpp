@@ -12,8 +12,8 @@
 
 Inou_pyrope::Inou_pyrope() {
 }
-
-Inou_pyrope_options_pack::Inou_pyrope_options_pack() {
+/*
+Inou_pyrope_options::Inou_pyrope_options() {
 
   Options::get_desc()->add_options()("pyrope_output,o", boost::program_options::value(&pyrope_output), "pyrope output <directory> for graph")("pyrope_input,i", boost::program_options::value(&pyrope_input), "pyrope input <directory> for graph");
 
@@ -38,8 +38,9 @@ Inou_pyrope_options_pack::Inou_pyrope_options_pack() {
   }
 
   console->info("inou_pyrope pyrope_output:{} pyrope_input:{} graph_name:{}", pyrope_output, pyrope_input, graph_name);
-}
 
+}
+*/
 std::vector<LGraph *> Inou_pyrope::generate() {
 
   std::vector<LGraph *> lgs;
@@ -651,6 +652,7 @@ void Inou_pyrope::to_pyrope(const LGraph *g, const std::string filename) {
 
   // to get subgraph names use pin ids and this is shown in dump_yosys.cpp!
   // fix pick ops!
+  // change name to lg2prp everywhere!
   std::vector<const char *> output_vars; //remove this later
   for(auto idx : g->forward()) {
 

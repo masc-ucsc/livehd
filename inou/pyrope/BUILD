@@ -3,10 +3,12 @@
 cc_library(
     name = "inou_pyrope",
     srcs = ["inou_pyrope.cpp"],
-    hdrs = ["inou_pyrope.hpp"],
+    hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
+    includes = ["."],
     deps = [
-        "//meta:meta"
+        "//meta:meta",
+        "//pyth:py_base"
     ],
 )
 
