@@ -1,0 +1,81 @@
+--------- source prp ----------
+a = 3
+b = 4u3bits
+$c as __bits:2
+$d
+$out = a + b + $c + $d
+
+--------- cfg table -----------
+K1      K2      0       0       5       =       a       0d3
+K2      K3      0       7       18      =       b       0d4u3
+K3      K4      0       19      33      :       tmp0    __bits  0d2
+K4      K5      0       19      33      as      $c      tmp0
+K5      K6      0       34      36      .()     $d                 ----------> #bug? ----> should be " = $d tmpx"
+K6      K7      0       37      59      +       tmp3    a       b
+K7      K8      0       37      59      +       tmp2    tmp3    $c
+K8      K9      0       37      59      +       tmp1    tmp2    $d
+K9      K10     0       37      59      =       %out    tmp1
+END
+
+--------- steps ---------------
+K1  LG: 
+      -resolve signed const 0d3
+      -create const node(0d3) nid0
+    AUX: 
+      -a <-> nid_0
+      -0d3 <-> nid_0? -> looks redundant
+
+K2  LG: 
+      -resolve unsigned const 0d4u3
+      -create const node(0d4u3) nid1
+    AUX: 
+      -b <-> nid_1
+
+K3  LG: 
+      -resolve const 0d2, set explicit bitwidth(already done inside resolve_const())
+      -create const node(0d2) nid2
+    AUX:
+      -tmp0 <-> nid_2
+
+K4  LG:
+      -create GIO $c node nid_3
+      -set_bits(nid_3, const value of tmp0 <-> nid_2)
+    AUX:
+      -$c <-> nid_3
+    Note:
+      -floating nid_2 
+
+K5  LG:
+      -create GIO $d node nid_4
+      -implicit 1 bit
+    AUX:
+      -$d <-> nid_4
+
+K6  LG:
+      -create sum node nid_5
+      -bit_width = max of (get_bit(get_nid(a)),get_bit(get_nid(b)))
+    AUX:
+      -tmp3 <-> nid_5
+    Edge:
+      -get_nid(a) -> nid_5
+      -get_nid(b) -> nid_5
+  
+  
+K7  LG:
+      -create sum node nid_6
+      -bit_width = max of (get_bit(get_nid(tmp3)),get_bit(get_nid($c)))
+    AUX:
+      -tmp2 <-> nid_6
+    Edge:
+      -get_nid(tmp3) -> nid_6
+      -get_nid($c) -> nid_6
+
+.
+.
+.
+.
+.
+.
+.
+.
+
