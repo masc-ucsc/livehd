@@ -23,6 +23,7 @@ cc_library(
     deps = [
         "//core:core",
         "//inou/rand:inou_rand",
+        "//inou/pyrope:inou_pyrope",
         "//inou/abc:inou_abc",
         "//inou/cfg:inou_cfg",
         "//pass/dfg:pass_dfg",
@@ -41,8 +42,9 @@ linkso(
 						"//inou/abc:inou_abc",
 						"//inou/cfg:inou_cfg",
 						"//inou/rand:inou_rand",
+            "//inou/pyrope:inou_pyrope",
 						"//core:core",
-						"//meta:meta",
+            "//meta:meta",
             ],
     static = ["@boost//:system" , "@boost//:filesystem", "@boost//:program_options"],
 )
@@ -88,6 +90,6 @@ py_test(
             "//inou/cfg:tests/pt13.cfg",
             "//inou/cfg:tests/pt14.cfg",
             "//inou/cfg:tests/simple_add.cfg",
-            "//inou/cfg:tests/top.cfg" 
+            "//inou/cfg:tests/top.cfg"
             ]
 )
