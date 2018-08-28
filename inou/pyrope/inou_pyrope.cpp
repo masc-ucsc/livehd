@@ -10,37 +10,21 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
+void Inou_pyrope_options::set(const py::dict &dict) {
+  for (auto item : dict) {
+    const auto &key = item.first.cast<std::string>();
+    try {
+      // No custom option for the moment
+      set_val(key,item.second);
+    } catch (const std::invalid_argument& ia) {
+      fmt::print("ERROR: key {} has an invalid argument {}\n",key);
+    }
+  }
+}
+
 Inou_pyrope::Inou_pyrope() {
 }
-/*
-Inou_pyrope_options::Inou_pyrope_options() {
 
-  Options::get_desc()->add_options()("pyrope_output,o", boost::program_options::value(&pyrope_output), "pyrope output <directory> for graph")("pyrope_input,i", boost::program_options::value(&pyrope_input), "pyrope input <directory> for graph");
-
-  boost::program_options::variables_map vm;
-  boost::program_options::store(boost::program_options::command_line_parser(Options::get_cargc(), Options::get_cargv()).options(*Options::get_desc()).allow_unregistered().run(), vm);
-
-  if(vm.count("pyrope_output")) {
-    pyrope_output = vm["pyrope_output"].as<std::string>();
-  } else {
-    pyrope_output = "pyrope";
-  }
-
-  if(vm.count("pyrope_input") && graph_name != "") {
-    console->error("inou_pyrope can only have a pyrope_input or a graph_name, not both\n");
-    exit(-3);
-  }
-
-  if(vm.count("pyrope_input")) {
-    pyrope_input = vm["pyrope_input"].as<std::string>();
-  } else {
-    pyrope_input = "pyrope";
-  }
-
-  console->info("inou_pyrope pyrope_output:{} pyrope_input:{} graph_name:{}", pyrope_output, pyrope_input, graph_name);
-
-}
-*/
 std::vector<LGraph *> Inou_pyrope::generate() {
 
   std::vector<LGraph *> lgs;
