@@ -63,6 +63,15 @@ an empty repository (lgraph-private), then run this to close lgraph
 
 The workflow in the [MASC lab][masc] is as follows:
 
+Suggested options for git first time users
+
+    # Rebase no merge by default
+    git config --global pull.rebase true
+    # Set your name and email
+    git config --global user.email "email@example.com"
+    git config --global user.name "Mona Lisa"
+
+
 Work in the lgraph-private repo, and commit to master branch
 
     git clone https://github.com/yourname/lgraph-private.git lgraph
