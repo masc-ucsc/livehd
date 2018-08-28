@@ -28,13 +28,21 @@ public:
   Pass_dfg(const py::dict &);
 
   LGraph *     transform();
+  LGraph *     optimize();
   virtual void transform(LGraph *orig);
+  virtual void optimize (LGraph *orig);
   void         cfg_2_dfg(LGraph *dfg, const LGraph *cfg);
   void         test_const_conversion();
 
-  std::vector<LGraph *> py_generate() {
+  std::vector<LGraph *> py_first_pass() {
     std::vector<LGraph *> lgs(1);
     lgs[0] = transform();
+    return lgs;
+  }
+
+  std::vector<LGraph *> py_second_pass() {
+    std::vector<LGraph *> lgs(1);
+    lgs[0] = optimize();
     return lgs;
   }
 
@@ -56,16 +64,16 @@ private:
                                                Index_ID node);
 
   void                     process_assign(     LGraph *dfg,
-                                               const LGraph *cfg,
                                                CF2DF_State *state,
-                                               const CFG_Node_Data &data,
-                                               Index_ID node );
+                                               const CFG_Node_Data &data);
+  void                     process_connection( LGraph *dfg,
+                                               const std::vector<Index_ID> &src_nids,
+                                               const Index_ID &dst_nid);
 
   void                     process_func_call(  LGraph *dfg,
                                                const LGraph *cfg,
                                                CF2DF_State *state,
-                                               const CFG_Node_Data &data,
-                                               Index_ID node );
+                                               const CFG_Node_Data &data);
 
   Index_ID                 process_if(         LGraph *dfg,
                                                const LGraph *cfg,
@@ -74,10 +82,8 @@ private:
                                                Index_ID node );
 
   std::vector<Index_ID>    process_operands(   LGraph *dfg,
-                                               const LGraph *cfg,
                                                CF2DF_State *state,
-                                               const CFG_Node_Data &data,
-                                               Index_ID node );
+                                               const CFG_Node_Data &data);
 
   void                     add_phis(           LGraph *dfg,
                                                const LGraph *cfg,
@@ -113,13 +119,14 @@ private:
   void assign_to_true(LGraph *dfg, CF2DF_State *state, const std::string &v);
 
   bool reference_changed(const CF2DF_State *parent, const CF2DF_State *branch, const std::string &v) {
-    if (!parent->has_reference(v)) return true;
-    return parent->get_reference(v) != branch->get_reference(v);
+    if (!parent->has_alias(v)) return true;
+    return parent->get_alias(v) != branch->get_alias(v);
   }
 
   bool is_register(const std::string &v) { return v.at(0) == REGISTER_MARKER; }
   bool is_input(const std::string &v) { return v.at(0) == INPUT_MARKER; }
   bool is_output(const std::string &v) { return v.at(0) == OUTPUT_MARKER; }
+  bool is_reference(const std::string &v) { return v.at(0) == REFERENCE_MARKER; }
   bool is_constant(const std::string &v) { return v.at(0) == '0'; }
   bool is_read_marker(const std::string &v) { return v.substr(0, READ_MARKER.length()) == READ_MARKER; }
   bool is_write_marker(const std::string &v) { return v.substr(0, WRITE_MARKER.length()) == WRITE_MARKER; }
@@ -130,10 +137,11 @@ private:
   Index_ID create_input(LGraph *g, CF2DF_State *state, const std::string &var_name);
   Index_ID create_output(LGraph *g, CF2DF_State *state, const std::string &var_name);
   Index_ID create_private(LGraph *g, CF2DF_State *state, const std::string &var_name);
+  Index_ID create_reference(LGraph *g, CF2DF_State *state, const std::string &var_name);
   Index_ID create_node(LGraph *g, CF2DF_State *state, const std::string &v);
-  Index_ID default_constant(LGraph *g, CF2DF_State *state);
-  Index_ID true_constant(LGraph *g, CF2DF_State *state);
-  Index_ID false_constant(LGraph *g, CF2DF_State *state);
+  Index_ID create_default_const(LGraph *g, CF2DF_State *state);
+  Index_ID create_true_const(LGraph *g, CF2DF_State *state);
+  Index_ID create_false_const(LGraph *g, CF2DF_State *state);
 
   Index_ID create_AND(LGraph *g, CF2DF_State *state, Index_ID op1, Index_ID op2);
   Index_ID create_OR(LGraph *g, CF2DF_State *state, Index_ID op1, Index_ID op2);

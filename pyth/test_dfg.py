@@ -36,7 +36,8 @@ else:
 
 try:
   import lgraph
-  cfg_files = ['simple_add', 'top']
+  # cfg_files = ['simple_add', 'top']
+  cfg_files = ['top', 'simple_add']
   # cfg_files = ['simple_add']
 
   for cfg_name in cfg_files:
@@ -69,10 +70,10 @@ try:
             "graph_name": dfg_name
             }
 
-      dfg = lgraph.Pass_dfg(dfg_opts).generate()
+      dfg = lgraph.Pass_dfg(dfg_opts).transform()
 
       #temporary start: wait for json dump integrate into pybind11 system
-      bash_json_cmds = ['~/lgraph/bazel-bin/inou/json/lgjson --graph_name ' + dfg_name + ' --json_output ' + dfg_name + '.json ' + '&&' + 'mv *.json ./logs']
+      bash_json_cmds = ['~/lgraph/bazel-bin/inou/json/lgjson --graph_name ' + dfg_name + ' --json_output ' + dfg_name + '_1st' + '.json ' + '&&' + 'mv *.json ./logs']
                         # need to find a way to create json files for build-in sub-graphs
                         # '~/lgraph/bazel-bin/inou/json/lgjson --graph_name ' + cfg_name + '1' + ' --json_output ' + cfg_name + '1' + '.json ' + '&&' + 'mv *.json ./logs',
                         # '~/lgraph/bazel-bin/inou/json/lgjson --graph_name ' + cfg_name + '2' + ' --json_output ' + cfg_name + '2' + '.json ' + '&&' + 'mv *.json ./logs']
@@ -83,14 +84,44 @@ try:
 
       assert not (dfg is None)
       assert not (dfg[0] is None)
-      print("\n===================== generate dfg:{} pass! ======================\n".format(dfg_name), flush=True)
+      print("\n===================== 1st: transform to dfg:{} pass! ======================\n".format(dfg_name), flush=True)
 
 
       g = lgraph.find_lgraph("lgdb",dfg_name)
       assert dfg[0].lg_id() == g.lg_id()
       # g.dump()
-      print("===================== dump {} pass ======================\n\n\n".format(dfg_name), flush=True)
+      print("===================== 1st: dump {} pass ======================\n\n\n".format(dfg_name), flush=True)
 
+
+  for cfg_name in cfg_files:
+      dfg_name = cfg_name + '_dfg'
+      dfg_opts = {
+            "lgdb": "lgdb",
+            "src": dfg_name,
+            "graph_name": dfg_name
+            }
+
+      dfg = lgraph.Pass_dfg(dfg_opts).optimize()
+
+      #temporary start: wait for json dump integrate into pybind11 system
+      bash_json_cmds = ['~/lgraph/bazel-bin/inou/json/lgjson --graph_name ' + dfg_name + ' --json_output ' + dfg_name + '_2nd' + '.json ' + '&&' + 'mv *.json ./logs']
+                        # need to find a way to create json files for build-in sub-graphs
+                        # '~/lgraph/bazel-bin/inou/json/lgjson --graph_name ' + cfg_name + '1' + ' --json_output ' + cfg_name + '1' + '.json ' + '&&' + 'mv *.json ./logs',
+                        # '~/lgraph/bazel-bin/inou/json/lgjson --graph_name ' + cfg_name + '2' + ' --json_output ' + cfg_name + '2' + '.json ' + '&&' + 'mv *.json ./logs']
+      for cmd in bash_json_cmds:
+          print('Executing bash json cmd: ' + cmd)
+          subprocess.run(cmd, shell=True)
+      #temporary end
+
+      assert not (dfg is None)
+      assert not (dfg[0] is None)
+      print("\n===================== 2nd: optimize dfg:{} pass! ======================\n".format(dfg_name), flush=True)
+
+
+      g = lgraph.find_lgraph("lgdb",dfg_name)
+      assert dfg[0].lg_id() == g.lg_id()
+      # g.dump()
+      print("===================== 2nd: dump {} pass ======================\n\n\n".format(dfg_name), flush=True)
 
       # Yosys related variables
       # don't forget extra space between command and /path/files
@@ -110,7 +141,7 @@ try:
                        ]
 
       for cmd in bash_yosys_cmds:
-          print('Executing bash cmd: ' + cmd)
+          print('Executing bash cmd:\n' + cmd)
           subprocess.run(cmd, shell=True)
 
       print("\n\n\n")
