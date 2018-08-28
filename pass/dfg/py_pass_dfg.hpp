@@ -7,6 +7,7 @@
   py::class_<Pass_dfg>(m, "Pass_dfg")
     .def(py::init<>())
     .def(py::init<const py::dict &>())
-    .def("generate", &Pass_dfg::py_generate, "Generate a Dataflow graph from a Control flow graph")
+    .def("transform", &Pass_dfg::py_first_pass, "Generate a Dataflow graph from a Control flow graph")
+    .def("optimize", &Pass_dfg::py_second_pass, "Generate a Dataflow graph from a Control flow graph")
     .def("set", &Pass_dfg::py_set, "set plugin options");
 

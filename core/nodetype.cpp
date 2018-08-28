@@ -53,6 +53,8 @@ Node_Type::_init::_init() {
   Node_Type::table[CfgIfMerge_Op]      = new Node_Type_CfgIfMerge();
   Node_Type::table[CfgBeenRead_Op]     = new Node_Type_CfgBeenRead();
   Node_Type::table[DontCare_Op]        = new Node_Type_DontCare();
+  Node_Type::table[DfgRef_Op]          = new Node_Type_DfgRef();
+  Node_Type::table[DfgPendingGraph_Op] = new Node_Type_DfgPendingGraph();
 
   assert(Invalid_Op == 0);
   for(size_t i = Invalid_Op; i <= SubGraph_Op; i++) {

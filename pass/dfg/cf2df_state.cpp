@@ -3,8 +3,9 @@
 using std::unordered_map;
 using std::string;
 
-void CF2DF_State::update_reference(const string &v, Index_ID n) {
-  last_refs[v] = n;
+void CF2DF_State::set_alias(const string &v, Index_ID n) {
+  auxtab[v] = n;
+  fmt::print("set alias {} <-> {}\n", v,n );
 }
 
 unordered_map<string, Index_ID> CF2DF_State::inputs() const {
@@ -18,7 +19,7 @@ unordered_map<string, Index_ID> CF2DF_State::outputs() const {
 unordered_map<string, Index_ID> CF2DF_State::filter_util(filter fproc) const {
   unordered_map<string, Index_ID> rtrn;
 
-  for (const auto &pair : references()) {
+  for (const auto &pair : get_auxtab()) {
     if (fproc(this, pair.first))
       rtrn[pair.first] = pair.second;
   }
