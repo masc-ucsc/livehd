@@ -51,6 +51,8 @@ enum Node_Type_Op : uint64_t {
   CfgWhile_Op,
   CfgIfMerge_Op,
   CfgBeenRead_Op,
+  DfgRef_Op,
+  DfgPendingGraph_Op,
   // Add here, operators needed
   SubGraph_Op,
   BlackBox_Op,
@@ -660,6 +662,24 @@ class Node_Type_CfgBeenRead : public Node_Type {
 public:
   Node_Type_CfgBeenRead()
       : Node_Type("cfg_been_read", CfgBeenRead_Op, false) {
+    inputs.push_back("A");
+    outputs.push_back("Y");
+  };
+};
+
+class Node_Type_DfgRef : public Node_Type {
+public:
+  Node_Type_DfgRef()
+    : Node_Type("dfg_ref", DfgRef_Op, false) {
+    inputs.push_back("A");
+    outputs.push_back("Y");
+  };
+};
+
+class Node_Type_DfgPendingGraph : public Node_Type {
+public:
+  Node_Type_DfgPendingGraph()
+    : Node_Type("dfg_pending_graph", DfgPendingGraph_Op, false) {
     inputs.push_back("A");
     outputs.push_back("Y");
   };

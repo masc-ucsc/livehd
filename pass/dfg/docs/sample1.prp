@@ -1,26 +1,26 @@
-##################
-# a = 3
-1 = a 3
+------------------
+  # a = 3
+1.  = a 3
 
-##################
-# b = \a
-2 = b \a
+------------------
+  # b = \a
+2.  = b \a
 
-##################
-# %o1 = $in + b
-3 + tmp0 $in b
-4 = %o1 tmp0
+------------------
+  # %o1 = $in + b
+3.  + tmp0 $in b
+4.  = %o1 tmp0
 
-##################
-# xx = \inc
-# %o2 = xx.(lab:b)
-5 = xx \inc
-6 : tmp1 lab b
-7 .() tmp2 xx tmp1
-8 = %o2 tmp2
+------------------
+  # xx = \inc
+  # %o2 = xx.(lab:b)
+5.  = xx \inc
+6.  : tmp1 lab b
+7.  .() tmp2 xx tmp1
+8.  = %o2 tmp2
 
-##################
-##################
+------------------
+------------------
 Steps to do:
 
 LG: lgraph, ST: Symbol Table, AUX: Auxiliar non persistent table (one per lgraph)
@@ -54,7 +54,7 @@ LG: lgraph, ST: Symbol Table, AUX: Auxiliar non persistent table (one per lgraph
 
 6-
   LG:
-   copy node "tmp1.lab" (nid_4)
+   create copy node "tmp1.lab" (nid_4)
   AUX:
    tmp1: add field lab with nid_4
 
