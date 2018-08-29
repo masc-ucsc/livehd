@@ -23,6 +23,17 @@ void Inou_pyrope_options::set(const py::dict &dict) {
 }
 
 Inou_pyrope::Inou_pyrope() {
+  fmt::print("1.Hello\n");
+}
+
+Inou_pyrope::Inou_pyrope(const py::dict &dict) {
+  fmt::print("2.Hello\n");
+  opack.set(dict);
+}
+
+void Inou_pyrope::py_set(const py::dict &dict) {
+  fmt::print("3.Hello\n");
+  opack.set(dict);
 }
 
 std::vector<LGraph *> Inou_pyrope::generate() {
@@ -32,7 +43,8 @@ std::vector<LGraph *> Inou_pyrope::generate() {
   if(opack.graph_name != "") {
     lgs.push_back(new LGraph(opack.lgdb_path, opack.graph_name, false)); // Do not clear
   } else {
-    assert(false); // Still not implemented
+    lgs.push_back(new LGraph("lgdb", "trivial", false)); // Do not clear
+    //FIXME: assert(false); // Still not implemented
   }
 
   return lgs;

@@ -72,6 +72,13 @@ py_test(
 )
 
 py_test(
+    name = 'test_pyrope',
+    srcs = ['test_pyrope.py'],
+    deps = [":ptlgraph"],
+)
+
+
+py_test(
     name = 'test_dfg',
     srcs = ['test_dfg.py'],
     deps = [":ptlgraph"],
