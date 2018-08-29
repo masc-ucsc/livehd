@@ -20,14 +20,14 @@ WORKSPACE
 
 # Instructions to run python console
 
- build pyth //...
- python bazel-bin/pth/ptlgraph.py
+ bazel build //...
+ python bazel-bin/pyth/ptlgraph.py
 
- build pyth //...
+ bazel build //...
  mkdir tmp
  cd tmp
- unzip ../bazel-bin/pth/ptlgraph.py
- ipython __main__/python/ptlgraph.py
+ unzip ../bazel-bin/pyth/ptlgraph.par
+ python __main__/pyth/ptlgraph.py
 
 # Build a Python interface steps
 
