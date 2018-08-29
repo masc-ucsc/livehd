@@ -12,8 +12,8 @@ class Inou_pyrope_options : public Py_options {
 public:
   std::string pyrope_output;
   std::string pyrope_input;
-  std::string graph_name;
-  std::string lgdb_path;
+//  std::string graph_name;
+//  std::string lgdb_path;
 
   Inou_pyrope_options() {
     pyrope_output = "pyrope_out";
