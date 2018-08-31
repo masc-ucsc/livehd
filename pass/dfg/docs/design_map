@@ -16,9 +16,9 @@ CfgAssign_Op:
          -> set AUX target <-> operand as alias
          -> note that I define ":" as unary since we actually ignore the first operand
             ex:
-            b as __stage:true
-            -> : tmp0 __stage true 
-            -> we don't create node for "__stage"
+            b as __fluid:true
+            -> : tmp0 __fluid true 
+            -> we don't create node for "__fluid", it's a attribute field for node tmp0
 
     3. else
          -> create node with operator type
@@ -36,13 +36,13 @@ CfgAssign_Op:
 
 CfgFunctionCall_Op:
   format:
-    .() | tmp_x | B | tmp_y0 | tmp_y1 ... | tmpy2
+    .() | tmp_x | Func_name | tmp_y0 | tmp_y1 ... | tmpy2
   
   operand:
     1. should be all in the AUX already
   
   target:
-    1. set alias tmp_x <-> B
+    1. set alias tmp_x <-> Func_name
 
   note:
     1. the whole function call should not create any new dfg nodes
