@@ -37,8 +37,9 @@ else:
 try:
   import lgraph
   # cfg_files = ['simple_add', 'top']
-  cfg_files = ['top', 'simple_add']
+  # cfg_files = ['top', 'simple_add']
   # cfg_files = ['simple_add']
+  cfg_files = ['const']
 
   for cfg_name in cfg_files:
 

@@ -152,18 +152,26 @@ void Pass_dfg::process_assign(LGraph *dfg, CF2DF_State *state, const CFG_Node_Da
 
   const auto &target = data.get_target();
   const std::string &op = data.get_operator();
-  bool      is_unary_link_1st = (op == "=" || op == "as" || op == "!" );
-  bool      is_unary_link_2nd = (op == ":");
+  //bool      is_unary_link_1st = (op == "=" || op == "as" || op == "!" );
+  //bool      is_unary_link_2nd = (op == ":");
   Index_ID  dst_nid;
 
   if(is_output(target)){
     dst_nid = create_output(dfg, state, target);
   }
-  else if(is_unary_link_1st){
+  else if(op == "="){
     state->set_alias(target,oprd_ids[0]);
     return; //just aux
   }
-  else if(is_unary_link_2nd){
+  else if(op == "!"){
+    state->set_alias(target,oprd_ids[0]);
+    return; //just aux
+  }
+  else if(op == "as"){
+    state->set_alias(target,oprd_ids[0]);
+    return; //just aux
+  }
+  else if(op == ":"){
     state->set_alias(target,oprd_ids[1]);
     return; //just aux
   }
@@ -213,7 +221,8 @@ std::vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, CF2DF_State *state
     }
     else {
       if (is_constant(oprds[i])){
-        oprd_ids[i] = create_default_const(dfg, state);
+        //oprd_ids[i] = create_default_const(dfg, state);
+        oprd_ids[i] = resolve_constant(dfg, state, oprds[i]);
         fmt::print("create node for constant operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
       }
       else if (is_register(oprds[i])){

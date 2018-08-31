@@ -127,7 +127,7 @@ private:
   bool is_input(const std::string &v) { return v.at(0) == INPUT_MARKER; }
   bool is_output(const std::string &v) { return v.at(0) == OUTPUT_MARKER; }
   bool is_reference(const std::string &v) { return v.at(0) == REFERENCE_MARKER; }
-  bool is_constant(const std::string &v) { return v.at(0) == '0'; }
+  bool is_constant(const std::string &v) { return (v.at(0) == '0' || v.at(0) == '-'); }
   bool is_read_marker(const std::string &v) { return v.substr(0, READ_MARKER.length()) == READ_MARKER; }
   bool is_write_marker(const std::string &v) { return v.substr(0, WRITE_MARKER.length()) == WRITE_MARKER; }
   bool is_valid_marker(const std::string &v) { return v.substr(0, VALID_MARKER.length()) == VALID_MARKER; }
@@ -154,16 +154,15 @@ private:
   static unsigned int temp_counter;
 
   //Sheng zone
-  Index_ID resolve_constant          (LGraph *g,
-                                      const std::string& str_in,
-                                      bool& is_signed,
-                                      bool& is_in32b,
-                                      bool& is_explicit_signed,
-                                      bool& has_bool_dc,
-                                      bool& is_pure_dc,
-                                      uint32_t& val,
-                                      uint32_t& explicit_bits,
-                                      size_t& bit_width);
+  Index_ID resolve_constant          (LGraph *g, CF2DF_State *state, const std::string& str_in);
+                                      //bool& is_signed,
+                                      //bool& is_in32b,
+                                      //bool& is_explicit_signed,
+                                      //bool& has_bool_dc,
+                                      //bool& is_pure_dc,
+                                      //uint32_t& val,
+                                      //uint32_t& explicit_bits,
+                                      //size_t& bit_width);
   Index_ID process_bin_token         (LGraph *g, const std::string& token1st, const uint16_t & bit_width, uint32_t& val);
   Index_ID process_bin_token_with_dc (LGraph *g, const std::string& token1st);
   uint32_t cal_bin_val_32b(const std::string&);
