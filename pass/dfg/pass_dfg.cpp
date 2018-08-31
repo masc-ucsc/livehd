@@ -119,6 +119,8 @@ Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, CF2DF_State *sta
 }
 
 void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, const CFG_Node_Data &data) {
+  //for func_call, all the node should be created before, you just connect them.
+  //no need to create node for target
   fmt::print("process_func_call\n");
   const auto &target = data.get_target();
   const auto &oprds  = data.get_operands();
@@ -136,32 +138,35 @@ void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, CF2DF_State *st
 
   state->set_alias(target, oprd_ids[0]);
 
-  std::vector<Index_ID> sub_oprd_ids(oprd_ids.begin()+1, oprd_ids.end());
   //connect 1st operand with [2nd,3rd,...] operands
+  std::vector<Index_ID> sub_oprd_ids(oprd_ids.begin()+1, oprd_ids.end());
   process_connection(dfg, sub_oprd_ids, subg_root_nid);
 }
 
 void Pass_dfg::process_assign(LGraph *dfg, CF2DF_State *state, const CFG_Node_Data &data) {
   fmt::print("process_assign\n");
+  //process operands
   auto oprd_ids = process_operands(dfg, state, data);
 
-  //process target
+  //process target: 1.% -> create node 2.unary_op -> set AUX 3. binary_op -> create target node
+
   const auto &target = data.get_target();
   const std::string &op = data.get_operator();
-  bool is_unary_link_1st = (op == "=" || op == "as" || op == "!" || op == ".()");
-  bool is_unary_link_2nd = (op == ":");
-  if(     !is_output(target) && is_unary_link_1st) {
-    state->set_alias(target,oprd_ids[0]);
-    return;
-  }
-  else if(!is_output(target) && is_unary_link_2nd){
-    state->set_alias(target,oprd_ids[1]);
-    return;
-  }
-
+  bool      is_unary_link_1st = (op == "=" || op == "as" || op == "!" );
+  bool      is_unary_link_2nd = (op == ":");
   Index_ID  dst_nid;
-  if(is_output(target))
+
+  if(is_output(target)){
     dst_nid = create_output(dfg, state, target);
+  }
+  else if(is_unary_link_1st){
+    state->set_alias(target,oprd_ids[0]);
+    return; //just aux
+  }
+  else if(is_unary_link_2nd){
+    state->set_alias(target,oprd_ids[1]);
+    return; //just aux
+  }
   else{//binary operator
     dst_nid = create_node(dfg, state, target);
     dfg->set_node_instance_name(dst_nid, target);
@@ -180,8 +185,10 @@ void Pass_dfg::process_assign(LGraph *dfg, CF2DF_State *state, const CFG_Node_Da
 void Pass_dfg::process_connection(LGraph *dfg, const std::vector<Index_ID> &src_nids, const Index_ID &dst_nid){
   for (unsigned i = 0; i<src_nids.size();i++){
     Index_ID src_nid =  src_nids.at(i);
-    Port_ID  src_pid = (dfg->node_type_get(src_nid).op == Or_Op) ? (uint16_t)1 : (uint16_t)0; // output pid=1 for reduced Or_Op
-
+    fmt::print("src_nid:{}\n", src_nid);
+    fmt::print("src_nids size:{}\n", src_nids.size());
+    //Port_ID  src_pid = (dfg->node_type_get(src_nid).op == Or_Op) ? (uint16_t)1 : (uint16_t)0; // output pid=1 for reduced Or_Op
+    Port_ID  src_pid = 0;
     Port_ID  dst_pid = (dfg->node_type_get(dst_nid).op == Sum_Op            )? (uint16_t)1 :
                        (dfg->node_type_get(dst_nid).op == DfgPendingGraph_Op)? (uint16_t)i :
                        (dfg->node_type_get(dst_nid).op == SubGraph_Op       )? (uint16_t)i : (uint16_t)0;
@@ -198,9 +205,9 @@ std::vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, CF2DF_State *state
   const std::string &op = data.get_operator();
 
   for (size_t i = 0 ; i <oprd_ids.size();i++) {
-    if(i == 0 && op == ":") //patch for lable ":" -> oprds[1st]<->oprds[2nd]
-      continue; //don't create dummy node for oprds[1st] when ":"
-    else if (state->has_alias(oprds[i])){
+    //if(i == 0 && op == ":") //patch for lable ":" -> oprds[1st]<->oprds[2nd]
+    //  continue; //don't create dummy node for oprds[1st] when ":"
+    if (state->has_alias(oprds[i])){
       oprd_ids[i] = state->get_alias(oprds[i]);
       fmt::print("operand:{} has an alias:{}\n", oprds[i], oprd_ids[i]);
     }
@@ -236,8 +243,8 @@ std::vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, CF2DF_State *state
   }
 
   //patch for lable ":" -> oprds[1st]<->oprds[2nd]
-  if(op == ":")
-    state->set_alias(oprds[0],oprd_ids[1]);
+  //if(op == ":")
+  //  state->set_alias(oprds[0],oprd_ids[1]);
   return oprd_ids;
 }
 
