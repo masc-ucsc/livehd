@@ -1,55 +1,19 @@
 #include "pass_dfg.hpp"
 #include <string>
 
-//Sheng Zone
-void Pass_dfg::test_const_conversion() {
-  LGraph *tg = new LGraph(opack.lgdb, opack.graph_name, false);
 
-  //const std::string str_in = "0d?";//24 bits
-  //const std::string str_in = "0x00FF?FF_FF?_u";//24 bits
-  //const std::string str_in = "0b1111u";//4 bits
-  //const std::string str_in = "0xFFFF_FF_s";//24 bits
-  //const std::string str_in = "0x7AFF_FFFF_FFFF_FFFF_FF_s";//40 bits
-  //const std::string str_in = "0b1111_1111_1111_1111_1111_1111_1111_1111_1111";
-  //const std::string str_in = "0b00011111111_11111111_11111111s";//legal but logic conflict declaration
-  //const std::string str_in = "-0d2147483647";
-  //const std::string str_in = "-0d128";
-  const std::string str_in = "-0d4294967297";
-  //const std::string str_in = "-0d2147483648";
-  //const std::string str_in = "-0d2147483649";
-  //const std::string str_in = "-0d5294967298";
-  //const std::string str_in = "0b11101111_11101111_11101111_11101111_11101111???110?10";
-  //const std::string str_in = "0d2147483647";
-  //const std::string str_in = "-0d8";
-
-  bool              is_signed          = false;
-  bool              is_in32b           = true;
-  bool              is_explicit_signed = false; //explicit assign the signed mark
-  bool              has_bool_dc        = false; //dc = don't care, ex: 0x100??101
-  bool              is_pure_dc         = false; //ex: ????
-  uint32_t          val                = 0;
-  uint32_t          explicit_bits      = 0;
-  size_t            bit_width          = 0;
-
-  resolve_constant(tg, str_in, is_signed, is_in32b, is_explicit_signed, has_bool_dc, is_pure_dc, val, explicit_bits, bit_width);
-
-  fmt::print("\n");
-  fmt::print("out of 32 bits range?      {}\n",!is_in32b);
-  fmt::print("signed:                    {}\n",is_signed);
-  fmt::print("explicit sign declaration: {}\n",is_explicit_signed);
-  fmt::print("has boolean don't care:    {}\n",has_bool_dc);
-  fmt::print("stored value:              {}\n",val);
-  fmt::print("explicit_bits:             {}\n",explicit_bits);
-  fmt::print("bit_width:                 {}\n",bit_width);
-  fmt::print("\n");
-  tg->sync();
-}
-
-
-Index_ID Pass_dfg::resolve_constant(LGraph *g, const std::string& str, bool& is_signed, bool& is_in32b,
-                                    bool& is_explicit_signed, bool& has_bool_dc, bool& is_pure_dc, uint32_t& val,
-                                    uint32_t& explicit_bits, size_t& bit_width)
+Index_ID Pass_dfg::resolve_constant(LGraph *g, CF2DF_State *state, const std::string& str)
 {
+  //arguments -> local variable
+  bool is_signed;
+  bool is_in32b;
+  bool is_explicit_signed;
+  bool has_bool_dc;
+  bool is_pure_dc;
+  uint32_t val;
+  uint32_t explicit_bits;
+  size_t bit_width;
+
   std::string token1st, token2nd;
   std::string str_in = str;
   char rm = '_';//remove '_' in 0xF___FFFF

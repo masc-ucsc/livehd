@@ -1,5 +1,4 @@
-----------------------------------------------------
-CfgAssign_Op:
+--------------- Cfg Assign_Op -----------------
   format: 
     operator | target | operand1 | operand2(opt)
 
@@ -32,9 +31,7 @@ CfgAssign_Op:
     1. unary op  -> no need to connect, just set AUX
     2. binary op -> connect operands to target
 
--------------------------------------------------------
-
-CfgFunctionCall_Op:
+---------------- Cfg Function Call Op ---------------------
   format:
     .() | tmp_x | Func_name | tmp_y0 | tmp_y1 ... | tmpy2
   
@@ -50,3 +47,11 @@ CfgFunctionCall_Op:
   connection:
     1. reduce dummy node creation
        -> connect operand[0] <-> target and operand[1,2,3,...]
+
+----------------- General Concept -------------------------
+  1. Lgraph is some kind of symble table already, there is a possibility 
+     to not use any additional symtab.
+  2. Aux table has exactly same function as reduced Or_op, you should avoid
+     using any Or_op since it's error prone and hard to debug
+     i.e. need to wait for whole graph consturction finished to see the result.
+
