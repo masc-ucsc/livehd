@@ -42,7 +42,6 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g, CF2DF_State *state, const std::st
 
   //explicit bits width
   if(token2nd != "") {
-    fmt::print("{}::::::\n", token2nd);
     explicit_bits = (uint32_t) std::stoi(token2nd);
   }
   else
@@ -106,7 +105,7 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g, CF2DF_State *state, const std::st
 
       for(size_t i = 0; i < token1st.size(); i++){
         sum = sum *10 + (token1st[i] - '0');
-        fmt::print("now is round {}, token1st[{}] is {}, sum is {}\n", i, i, token1st[i], sum);
+        //fmt::print("now is round {}, token1st[{}] is {}, sum is {}\n", i, i, token1st[i], sum);
         if(sum >= 4294967296){
           uint32_t tmp = sum- 4294967296;
           int j = 0;
@@ -125,7 +124,7 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g, CF2DF_State *state, const std::st
       }
 
       s_2scmp = '0' + s_2scmp; //add leading 0 before converting 2's complement
-      fmt::print("before 2's complement, the s_binary = {}\n", s_2scmp);
+      //fmt::print("before 2's complement, the s_binary = {}\n", s_2scmp);
 
       for(size_t i = 0; i< s_2scmp.length(); i++){
         if(s_2scmp[i] == '0')
@@ -133,7 +132,7 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g, CF2DF_State *state, const std::st
         else
           s_2scmp[i] = '0';
       }
-      fmt::print("middle 2's complement, the s_binary = {}\n", s_2scmp);
+      //fmt::print("middle 2's complement, the s_binary = {}\n", s_2scmp);
 
       int carry = 0;
       int s_2scmp_size = s_2scmp.size();
@@ -149,13 +148,13 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g, CF2DF_State *state, const std::st
         // boolean expression for 3-bit addition
         carry = (first_bit & second_bit) | (second_bit & carry) | (first_bit & carry);
       }
-      fmt::print(" after 2's complement, the s_binary = {}\n", d2b_token1st);
+      //fmt::print(" after 2's complement, the s_binary = {}\n", d2b_token1st);
     }
     else{
       token1st = token1st.substr(2);
       for(size_t i = 0; i < token1st.size(); i++){
         sum = sum *10 + (token1st[i] - '0');
-        fmt::print("now is round {}, token1st[{}] is {}, sum is {}\n", i, i, token1st[i], sum);
+        //fmt::print("now is round {}, token1st[{}] is {}, sum is {}\n", i, i, token1st[i], sum);
         if(sum >= 4294967296){
           uint32_t tmp = sum- 4294967296;
           int j = 0;
@@ -211,14 +210,14 @@ Index_ID Pass_dfg::process_bin_token (LGraph *g, const std::string& token, const
     std::string token_chunk = token.substr(t_size-32*i,32);
 
     while(t_size-32*i > 0){
-      fmt::print("@round{}, token_chunk:                  {}\n", i, token_chunk);
+      //fmt::print("@round{}, token_chunk:                  {}\n", i, token_chunk);
       nid_const32 = create_const32_node(g, token_chunk, 32, val);
       inp_pins.push_back(Node_Pin(nid_const32, 0, false));
       if(t_size-(32*(i+1)) > 0)
         token_chunk = token.substr(t_size - 32*(i+1),32);
       else{
         token_chunk = token.substr(0,t_size-32*i);
-        fmt::print("@round{}, token_chunk:                 {}\n", i+1, token_chunk);
+        //fmt::print("@round{}, token_chunk:                 {}\n", i+1, token_chunk);
         nid_const32 = create_const32_node(g, token_chunk, token_chunk.size(), val);
         inp_pins.push_back(Node_Pin(nid_const32, 0, false));
       }
@@ -239,7 +238,7 @@ Index_ID Pass_dfg::process_bin_token (LGraph *g, const std::string& token, const
 }
 
 Index_ID Pass_dfg::process_bin_token_with_dc (LGraph *g, const std::string& token){
-  fmt::print("process binary with don't cares!\n");
+  //fmt::print("process binary with don't cares!\n");
   uint32_t val;
   std::vector<Node_Pin> inp_pins;
   int t_size = (int)token.size();
@@ -338,7 +337,7 @@ void Pass_dfg_options::set(const py::dict &dict) {
         set_val(key,item.second);
       }
     } catch (const std::invalid_argument& ia) {
-      fmt::print("ERROR: key {} has an invalid argument {}\n",key);
+      //fmt::print("ERROR: key {} has an invalid argument {}\n",key);
     }
   }
 

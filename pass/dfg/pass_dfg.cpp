@@ -64,7 +64,7 @@ void Pass_dfg::optimize(LGraph *dfg) {
 
 
 void Pass_dfg::cfg_2_dfg(LGraph *dfg, const LGraph *cfg) {
-  Index_ID    itr = find_root(cfg);
+  Index_ID    itr = find_cfg_root(cfg);
   CF2DF_State state(dfg);
 
   process_cfg(dfg, cfg, &state, itr);
@@ -82,7 +82,6 @@ Index_ID Pass_dfg::process_cfg(LGraph *dfg, const LGraph *cfg, CF2DF_State *stat
     itr = process_node(dfg, cfg, state, itr);
     fmt::print("cfg nid:{} process finished!!\n\n", last_itr);
   }
-
 
   state->print_aux();
   return last_itr;
@@ -104,17 +103,17 @@ Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, CF2DF_State *sta
   switch (cfg->node_type_get(node).op) {
   case CfgAssign_Op:
     process_assign(dfg, state, data);
-    return get_child(cfg, node);
+    return get_cfg_child(cfg, node);
   case CfgFunctionCall_Op:
     process_func_call(dfg, cfg, state, data);
-    return get_child(cfg, node);
+    return get_cfg_child(cfg, node);
   case CfgIf_Op:
     return process_if(dfg, cfg, state, data, node);
   case CfgIfMerge_Op:
     return 0;
   default:
     fmt::print("\n\n*************Unrecognized node type[n={}]: {}\n", node, cfg->node_type_get(node).get_name());
-    return get_child(cfg, node);
+    return get_cfg_child(cfg, node);
   }
 }
 
@@ -124,7 +123,7 @@ void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, CF2DF_State *st
   fmt::print("process_func_call\n");
   const auto &target = data.get_target();
   const auto &oprds  = data.get_operands();
-  const auto &oprd_ids = process_operands(dfg, state, data); // all the operands should be created before, just get back oprd_ids
+  const auto &oprd_ids = process_operands_bk(dfg, state, data); // all the operands should be created before, just get back oprd_ids
   LGraph* sub_graph = nullptr;
   Index_ID subg_root_nid = state->get_alias(oprds[0]);
 
@@ -140,57 +139,77 @@ void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, CF2DF_State *st
 
   //connect 1st operand with [2nd,3rd,...] operands
   std::vector<Index_ID> sub_oprd_ids(oprd_ids.begin()+1, oprd_ids.end());
-  process_connection(dfg, sub_oprd_ids, subg_root_nid);
+  process_connections(dfg, sub_oprd_ids, subg_root_nid);
 }
 
-void Pass_dfg::process_assign(LGraph *dfg, CF2DF_State *state, const CFG_Node_Data &data) {
+
+void Pass_dfg::process_assign(LGraph *dfg, CF2DF_State *state, const CFG_Node_Data &data){
   fmt::print("process_assign\n");
-  //process operands
-  auto oprd_ids = process_operands(dfg, state, data);
-
-  //process target: 1.% -> create node 2.unary_op -> set AUX 3. binary_op -> create target node
-
-  const auto &target = data.get_target();
-  const std::string &op = data.get_operator();
-  //bool      is_unary_link_1st = (op == "=" || op == "as" || op == "!" );
-  //bool      is_unary_link_2nd = (op == ":");
-  Index_ID  dst_nid;
-
-  if(is_output(target)){
-    dst_nid = create_output(dfg, state, target);
+  const auto                     &target = data.get_target();
+  const std::vector<std::string> &oprds  = data.get_operands();
+  const std::string              &op     = data.get_operator();
+  Index_ID                       oprd_id0;
+  Index_ID                       oprd_id1;
+  if(is_pure_assign_op(op)){
+    if(is_output(target)) {
+      oprd_id0 = process_operand(dfg, state, oprds[0]);
+      auto bits = dfg->get_bits(oprd_id0);
+      std::vector<Index_ID> oprd_ids;
+      oprd_ids.push_back(oprd_id0);
+      Index_ID target_id = create_output(dfg, state, target, bits);
+      fmt::print("create node for output target:{}, nid:{}\n", target, target_id);
+      process_connections(dfg, oprd_ids, target_id);
+    }else{
+      oprd_id0 = process_operand(dfg, state, oprds[0]);
+      state->set_alias(target, oprd_id0);
+    }
   }
-  else if(op == "="){
-    state->set_alias(target,oprd_ids[0]);
-    return; //just aux
+  else if(is_label_op(op)){ //label_op is very very tricky!!!
+    if(oprds[0] == "__bits"){
+      //Index_ID floating_id = resolve_constant(dfg, state, oprds[1]);
+      Index_ID floating_id = process_operand(dfg, state, oprds[1]);
+      state->set_alias(target, floating_id);
+    }else if(oprds[0] == "__fluid"){
+      ;
+    }else{//function argument assign
+      oprd_id1 = process_operand(dfg, state, oprds[1]);
+      state->set_alias(target, oprd_id1);
+    }
   }
-  else if(op == "!"){
-    state->set_alias(target,oprd_ids[0]);
-    return; //just aux
+  else if(is_as_op(op)){
+    oprd_id0 = process_operand(dfg, state, oprds[0]);
+    //process target
+    if(is_input(target)){
+      assert(dfg->node_value_get(oprd_id0));
+      auto bits = dfg->node_value_get(oprd_id0);
+      Index_ID target_id = create_input(dfg, state, target, bits);
+      fmt::print("create node for input target:{}, nid:{}\n", target, target_id);
+    }else if(is_output(target)){
+      assert(dfg->node_value_get(oprd_id0));
+      auto bits = dfg->node_value_get(oprd_id0);
+      Index_ID target_id = create_output(dfg, state, target, bits);
+      fmt::print("create node for output target:{}, nid:{}\n", target, target_id);
+    }else
+      state->set_alias(target, oprd_id0);
   }
-  else if(op == "as"){
-    state->set_alias(target,oprd_ids[0]);
-    return; //just aux
+  else if(is_unary_op(op)){
+    oprd_id0 = process_operand(dfg, state, oprds[0]);
+    state->set_alias(target, oprd_id0);
   }
-  else if(op == ":"){
-    state->set_alias(target,oprd_ids[1]);
-    return; //just aux
+  else if(is_binary_op(op)){
+    std::vector<Index_ID> oprd_ids;
+    oprd_ids.push_back(process_operand(dfg, state, oprds[0]));
+    oprd_ids.push_back(process_operand(dfg, state, oprds[1]));
+    Index_ID target_id = create_node(dfg, state, target);
+    fmt::print("create node for internal target:{}, nid:{}\n", target, target_id);
+    dfg->node_type_set(target_id, node_type_from_text(op));
+    auto max_bits = std::max(dfg->get_bits(oprd_ids[0]),dfg->get_bits(oprd_ids[1])) + 1;
+    dfg->set_bits(target_id,max_bits);
+    process_connections(dfg, oprd_ids, target_id);
   }
-  else{//binary operator
-    dst_nid = create_node(dfg, state, target);
-    dfg->set_node_instance_name(dst_nid, target);
-    dfg->node_type_set(dst_nid, node_type_from_text(data.get_operator()));
-    fmt::print("create node for internal target:{}, nid:{}\n", target, dst_nid);
-  }
-
-  //process connection
-  process_connection(dfg, oprd_ids, dst_nid);
-
-  fmt::print("is_fluid:{}, is_output:{}, is_register:{}\n", state->fluid_df(),is_output(target), is_register(target));
-  if (state->fluid_df() && (is_output(target) || is_register(target)))
-    add_write_marker(dfg, state, target);
 }
 
-void Pass_dfg::process_connection(LGraph *dfg, const std::vector<Index_ID> &src_nids, const Index_ID &dst_nid){
+void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Index_ID> &src_nids, const Index_ID &dst_nid){
   for (unsigned i = 0; i<src_nids.size();i++){
     Index_ID src_nid =  src_nids.at(i);
     fmt::print("src_nid:{}\n", src_nid);
@@ -202,59 +221,53 @@ void Pass_dfg::process_connection(LGraph *dfg, const std::vector<Index_ID> &src_
                        (dfg->node_type_get(dst_nid).op == SubGraph_Op       )? (uint16_t)i : (uint16_t)0;
 
     dfg->add_edge(Node_Pin(src_nid, src_pid, false), Node_Pin(dst_nid, dst_pid, true));
-    fmt::print("create edge ({}->{})\n", dfg->get_node_wirename(src_nid), dfg->get_node_wirename(dst_nid));
+    //fmt::print("create edge ({}->{})\n", dfg->get_node_wirename(src_nid), dfg->get_node_wirename(dst_nid));
   }
 }
 
 
-std::vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, CF2DF_State *state, const CFG_Node_Data &data) {
-  const std::vector<std::string> &oprds = data.get_operands();
-  std::vector<Index_ID> oprd_ids(oprds.size());
-  const std::string &op = data.get_operator();
-
-  for (size_t i = 0 ; i <oprd_ids.size();i++) {
-    //if(i == 0 && op == ":") //patch for lable ":" -> oprds[1st]<->oprds[2nd]
-    //  continue; //don't create dummy node for oprds[1st] when ":"
-    if (state->has_alias(oprds[i])){
-      oprd_ids[i] = state->get_alias(oprds[i]);
-      fmt::print("operand:{} has an alias:{}\n", oprds[i], oprd_ids[i]);
+Index_ID Pass_dfg::process_operand(LGraph *dfg, CF2DF_State *state, const std::string oprd) {
+  Index_ID oprd_id;
+  if (state->has_alias(oprd)){
+    oprd_id = state->get_alias(oprd);
+    fmt::print("operand:{} has an alias:{}\n", oprd, oprd_id);
+  }
+  else {
+    if (is_constant(oprd)){
+      oprd_id = resolve_constant(dfg, state, oprd);
+      state->set_alias(oprd, oprd_id);
+      fmt::print("create node for constant operand:{}, nid:{}\n", oprd, oprd_id);
     }
-    else {
-      if (is_constant(oprds[i])){
-        //oprd_ids[i] = create_default_const(dfg, state);
-        oprd_ids[i] = resolve_constant(dfg, state, oprds[i]);
-        fmt::print("create node for constant operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
-      }
-      else if (is_register(oprds[i])){
-        oprd_ids[i] = create_register(dfg, state, oprds[i]);
-        fmt::print("create node for register operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
-      }
-      else if (is_input(oprds[i])){
-        oprd_ids[i] = create_input(dfg, state, oprds[i]);
-        fmt::print("create node for input operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
-      }
-      else if (is_output(oprds[i])){
-        oprd_ids[i] = create_output(dfg, state, oprds[i]);
-        fmt::print("create node for output operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
-      }
-      else if (is_reference(oprds[i])){
-        oprd_ids[i] = create_reference(dfg, state, oprds[i]);
-        fmt::print("create node for reference operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
-      }
-      else{
-        oprd_ids[i] = create_private(dfg, state, oprds[i]);
-        fmt::print("create node for private operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
-      }
+    else if (is_register(oprd)){
+      oprd_id = create_register(dfg, state, oprd);
+      state->set_alias(oprd, oprd_id);
+      fmt::print("create node for register operand:{}, nid:{}\n", oprd, oprd_id);
     }
-
-    if (state->fluid_df() && is_input(oprds[i]))
-      add_read_marker(dfg, state, oprds[i]);
+    else if (is_input(oprd)){
+      oprd_id = create_input(dfg, state, oprd);
+      state->set_alias(oprd, oprd_id);
+      fmt::print("create node for input operand:{}, nid:{}\n", oprd, oprd_id);
+    }
+    else if (is_output(oprd)){
+      oprd_id = create_output(dfg, state, oprd);
+      state->set_alias(oprd, oprd_id);
+      fmt::print("create node for output operand:{}, nid:{}\n", oprd, oprd_id);
+    }
+    else if (is_reference(oprd)){
+      oprd_id = create_reference(dfg, state, oprd);
+      state->set_alias(oprd, oprd_id);
+      fmt::print("create node for reference operand:{}, nid:{}\n", oprd, oprd_id);
+    }
+    else{
+      oprd_id = create_private(dfg, state, oprd);
+      state->set_alias(oprd, oprd_id);
+      fmt::print("create node for private operand:{}, nid:{}\n", oprd, oprd_id);
+    }
   }
 
-  //patch for lable ":" -> oprds[1st]<->oprds[2nd]
-  //if(op == ":")
-  //  state->set_alias(oprds[0],oprd_ids[1]);
-  return oprd_ids;
+  if (state->fluid_df() && is_input(oprd))
+    add_read_marker(dfg, state, oprd);
+  return oprd_id;
 }
 
 
@@ -265,13 +278,13 @@ Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, CF2DF_State *state
 
   Index_ID tbranch = std::stol(operands[0]);
   CF2DF_State tstate = state->copy();
-  Index_ID tb_next = get_child(cfg, process_cfg(dfg, cfg, &tstate, tbranch));
+  Index_ID tb_next = get_cfg_child(cfg, process_cfg(dfg, cfg, &tstate, tbranch));
 
   Index_ID fbranch = std::stol(operands[1]);
 
   if (fbranch != node) {                                // there is an 'else' clause
     CF2DF_State fstate = state->copy();
-    Index_ID fb_next = get_child(cfg, process_cfg(dfg, cfg, &fstate, fbranch));
+    Index_ID fb_next = get_cfg_child(cfg, process_cfg(dfg, cfg, &fstate, fbranch));
     assert(tb_next == fb_next);
     add_phis(dfg, cfg, state, &tstate, &fstate, cond);
   } else {
@@ -403,7 +416,7 @@ void Pass_dfg::add_abort_logic(LGraph *dfg, CF2DF_State *state, const std::vecto
 
 }
 
-Index_ID Pass_dfg::find_root(const LGraph *cfg) {
+Index_ID Pass_dfg::find_cfg_root(const LGraph *cfg) {
   for(auto idx : cfg->fast()) {
     if(cfg->is_root(idx))
       return idx;
@@ -412,7 +425,7 @@ Index_ID Pass_dfg::find_root(const LGraph *cfg) {
   assert(false);
 }
 
-Index_ID Pass_dfg::get_child(const LGraph *cfg, Index_ID node) {
+Index_ID Pass_dfg::get_cfg_child(const LGraph *cfg, Index_ID node) {
   std::vector<Index_ID> children;
 
   for(const auto &cedge : cfg->out_edges(node))
@@ -426,3 +439,94 @@ Index_ID Pass_dfg::get_child(const LGraph *cfg, Index_ID node) {
     assert(false);
 }
 
+std::vector<Index_ID> Pass_dfg::process_operands_bk(LGraph *dfg, CF2DF_State *state, const CFG_Node_Data &data) {
+  const std::vector<std::string> &oprds = data.get_operands();
+  std::vector<Index_ID> oprd_ids(oprds.size());
+  const std::string &op = data.get_operator();
+
+  for (size_t i = 0 ; i <oprd_ids.size();i++) {
+    if (state->has_alias(oprds[i])){
+      oprd_ids[i] = state->get_alias(oprds[i]);
+      fmt::print("operand:{} has an alias:{}\n", oprds[i], oprd_ids[i]);
+    }
+    else {
+      if (is_constant(oprds[i])){
+        //oprd_ids[i] = create_default_const(dfg, state);
+        oprd_ids[i] = resolve_constant(dfg, state, oprds[i]);
+        fmt::print("create node for constant operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
+      }
+      else if (is_register(oprds[i])){
+        oprd_ids[i] = create_register(dfg, state, oprds[i]);
+        fmt::print("create node for register operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
+      }
+      else if (is_input(oprds[i])){
+        oprd_ids[i] = create_input(dfg, state, oprds[i]);
+        fmt::print("create node for input operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
+      }
+      else if (is_output(oprds[i])){
+        oprd_ids[i] = create_output(dfg, state, oprds[i]);
+        fmt::print("create node for output operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
+      }
+      else if (is_reference(oprds[i])){
+        oprd_ids[i] = create_reference(dfg, state, oprds[i]);
+        fmt::print("create node for reference operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
+      }
+      else{
+        oprd_ids[i] = create_private(dfg, state, oprds[i]);
+        fmt::print("create node for private operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
+      }
+    }
+
+    if (state->fluid_df() && is_input(oprds[i]))
+      add_read_marker(dfg, state, oprds[i]);
+  }
+
+  return oprd_ids;
+}
+
+void Pass_dfg::process_assign_bk(LGraph *dfg, CF2DF_State *state, const CFG_Node_Data &data) {
+  fmt::print("process_assign\n");
+  //process operands
+  auto oprd_ids = process_operands_bk(dfg, state, data);
+
+  //process target: 1.% -> create node 2.unary_op -> set AUX 3. binary_op -> create target node
+
+  const auto &target = data.get_target();
+  const std::string &op = data.get_operator();
+  //bool      is_unary_link_1st = (op == "=" || op == "as" || op == "!" );
+  //bool      is_unary_link_2nd = (op == ":");
+  Index_ID  dst_nid;
+
+  if(is_output(target)){
+    dst_nid = create_output(dfg, state, target);
+  }
+  else if(op == "="){
+    state->set_alias(target,oprd_ids[0]);
+    return; //just aux
+  }
+  else if(op == "!"){
+    state->set_alias(target,oprd_ids[0]);
+    return; //just aux
+  }
+  else if(op == "as"){
+    state->set_alias(target,oprd_ids[0]);
+    return; //just aux
+  }
+  else if(op == ":"){
+    state->set_alias(target,oprd_ids[1]);
+    return; //just aux
+  }
+  else{//binary operator
+    dst_nid = create_node(dfg, state, target);
+    dfg->set_node_instance_name(dst_nid, target);
+    dfg->node_type_set(dst_nid, node_type_from_text(data.get_operator()));
+    fmt::print("create node for internal target:{}, nid:{}\n", target, dst_nid);
+  }
+
+  //process connection
+  process_connections(dfg, oprd_ids, dst_nid);
+
+  fmt::print("is_fluid:{}, is_output:{}, is_register:{}\n", state->fluid_df(),is_output(target), is_register(target));
+  if (state->fluid_df() && (is_output(target) || is_register(target)))
+    add_write_marker(dfg, state, target);
+}

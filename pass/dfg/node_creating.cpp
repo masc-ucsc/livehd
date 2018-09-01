@@ -16,16 +16,16 @@ Index_ID Pass_dfg::create_register(LGraph *g, CF2DF_State *state, const std::str
   return nid;
 }
 
-Index_ID Pass_dfg::create_input(LGraph *g, CF2DF_State *state, const std::string &var_name) {
-  Index_ID nid = create_node(g, state, var_name);
-  g->add_graph_input(var_name.substr(1).c_str(), nid, 1/*bit*/); //get rid of $mark
+Index_ID Pass_dfg::create_input(LGraph *g, CF2DF_State *state, const std::string &var_name, uint16_t bits) {
+  Index_ID nid = create_node(g, state, var_name, bits);
+  g->add_graph_input(var_name.substr(1).c_str(), nid, bits); //get rid of $mark
 
   return nid;
 }
 
-Index_ID Pass_dfg::create_output(LGraph *g, CF2DF_State *state, const std::string &var_name) {
+Index_ID Pass_dfg::create_output(LGraph *g, CF2DF_State *state, const std::string &var_name, uint16_t bits) {
   Index_ID nid = create_node(g, state, var_name);
-  g->add_graph_output(var_name.substr(1).c_str(), nid, 1);
+  g->add_graph_output(var_name.substr(1).c_str(), nid, bits);
 
   return nid;
 }
@@ -67,10 +67,10 @@ Index_ID Pass_dfg::create_false_const(LGraph *g, CF2DF_State *state) {
   return nid;
 }
 
-Index_ID Pass_dfg::create_node(LGraph *g, CF2DF_State *state, const std::string &v) {
+Index_ID Pass_dfg::create_node(LGraph *g, CF2DF_State *state, const std::string &v, const uint16_t bits) {
   Index_ID nid = g->create_node().get_nid();
   g->set_node_wirename(nid, v.c_str());
-  g->set_bits(nid,1);
+  g->set_bits(nid,bits);
   state->set_alias(v, nid);
   return nid;
 }
