@@ -226,15 +226,16 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
       {
         for(const auto &input_edge : g->inp_edges(idx)) {
           writer.StartObject();
-          writer.Key("inp_nid");
+          writer.Key("inp_nid ");
           writer.Uint64((input_edge.get_idx()));
           //writer.Key("inp_out_pid");
-          writer.Key("inp_dst_pid");
+          writer.Key("inp_dst_pid ");
           writer.Uint64(input_edge.get_inp_pin().get_pid());
           writer.EndObject();
         }
         writer.EndArray();
       }
+
 
       writer.Key("op");
       {
@@ -254,6 +255,13 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
           }
         }
       }
+
+      writer.Key("bits");
+      {
+        int node_width = g->get_bits(idx);
+        writer.Uint64(node_width);
+      }
+
       if(g->get_node_instancename(idx) != nullptr) {
         writer.Key("instance_name");
         writer.String(g->get_node_instancename(idx));
@@ -279,31 +287,28 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
         for(const auto &out : g->out_edges(idx)) {
           writer.StartObject();
           //writer.Key("out_out_pid");
-          writer.Key("out_src_pid");
+          writer.Key("out_src_pid ");
           writer.Uint64(out.get_out_pin().get_pid());
-          writer.Key("out_nid");
+          writer.Key("out_dst_nid ");
           writer.Uint64(out.get_idx());
           //writer.Key("out_inp_pid");
-          writer.Key("out_dst_pid");
+          writer.Key("out_dst_pid ");
           writer.Uint64(out.get_inp_pin().get_pid());
           if(out.is_root()) {
             auto  node_idx   = out.get_out_pin().get_nid();
             auto  node       = g->get_dest_node(out);
             float node_delay = node.delay_get();
             int   node_bits  = node.get_bits();
-            //auto node = g->get_dest_node(out);
-            //float node_delay = node.delay_get();
-            //int node_bits = node.get_bits();
             int node_width = g->get_bits(node_idx);
             if(node_delay != 0) {
               writer.Key("delay");
               writer.Double(node_delay);
             }
             if(node_bits != 0) {
-              writer.Key("bits");
+              writer.Key("out_src_bits");
               writer.Uint(node_bits);
             } else if(node_width != 0) {
-              writer.Key("bits");
+              writer.Key("out_src_bits");
               writer.Uint(node_width);
             }
           }
