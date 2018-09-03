@@ -256,7 +256,7 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
         }
       }
 
-      writer.Key("bits");
+      writer.Key("node bits");
       {
         int node_width = g->get_bits(idx);
         writer.Uint64(node_width);
