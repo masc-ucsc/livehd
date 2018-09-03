@@ -47,11 +47,12 @@ LGraph * Pass_dfg::optimize() {
 
 void Pass_dfg::optimize(LGraph *dfg) {
   LGraph* sub_graph = nullptr;
-  for(auto nid : dfg->fast()) {
-    if(dfg->node_type_get(nid).op == DfgPendingGraph_Op){
-      if((sub_graph = LGraph::find_lgraph(dfg->get_path(), ((std::string)(dfg->get_node_wirename(nid))+"_dfg")))){
-        dfg->node_subgraph_set(nid, (uint32_t)sub_graph->lg_id());
-        fmt::print("resolve pending subgraph! nid:{}, sub_graph name:{}, sub_graph_id:{}\n", nid, dfg->get_node_wirename(nid), sub_graph->lg_id());
+  //resolve pending graph
+  for(auto idx : dfg->fast()) {
+    if(dfg->node_type_get(idx).op == DfgPendingGraph_Op){
+      if((sub_graph = LGraph::find_lgraph(dfg->get_path(), ((std::string)(dfg->get_node_wirename(idx))+"_dfg")))){
+        dfg->node_subgraph_set(idx, (uint32_t)sub_graph->lg_id());
+        fmt::print("resolve pending subgraph! nid:{}, sub_graph name:{}, sub_graph_id:{}\n", idx, dfg->get_node_wirename(idx), sub_graph->lg_id());
       }
       else{
         fmt::print("cannot resolve pending subgraph!!\n");
@@ -59,6 +60,30 @@ void Pass_dfg::optimize(LGraph *dfg) {
       }
     }
   }
+
+  //bits inference
+  for(auto idx : dfg->fast()) {
+    for(const auto &out : dfg->out_edges(idx)) {
+      Index_ID src_nid      = idx;
+      Index_ID dst_nid      = out.get_idx();
+      Port_ID  src_pid      = out.get_out_pin().get_pid();
+      Port_ID  dst_pid      = out.get_inp_pin().get_pid();
+      uint16_t src_nid_size = dfg->get_bits(src_nid);
+      uint16_t dst_nid_size = dfg->get_bits(dst_nid);
+
+      if(dfg->node_type_get(idx).op == SubGraph_Op){
+        LGraph *subgraph = dfg->get_library()->get_graph(dfg->subgraph_id_get(idx));
+        const char *out_name = subgraph->get_graph_output_name_from_pid(src_pid);
+        uint16_t    out_size = subgraph->get_bits(subgraph->get_graph_output(out_name).get_nid());
+        dfg->set_bits(dst_nid,out_size);
+      }
+      else{
+        if(src_nid_size > dst_nid_size)
+          dfg->set_bits(dst_nid, src_nid_size);
+      }
+    }
+  }
+
   dfg->sync();
 }
 
@@ -138,8 +163,8 @@ void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, CF2DF_State *st
   state->set_alias(target, oprd_ids[0]);
 
   //connect 1st operand with [2nd,3rd,...] operands
-  std::vector<Index_ID> sub_oprd_ids(oprd_ids.begin()+1, oprd_ids.end());
-  process_connections(dfg, sub_oprd_ids, subg_root_nid);
+  std::vector<Index_ID> subg_input_ids(oprd_ids.begin()+1, oprd_ids.end());
+  process_connections(dfg, subg_input_ids, subg_root_nid);
 }
 
 
@@ -164,13 +189,13 @@ void Pass_dfg::process_assign(LGraph *dfg, CF2DF_State *state, const CFG_Node_Da
       state->set_alias(target, oprd_id0);
     }
   }
-  else if(is_label_op(op)){ //label_op is very very tricky!!!
+  else if(is_label_op(op)){
     if(oprds[0] == "__bits"){
       //Index_ID floating_id = resolve_constant(dfg, state, oprds[1]);
       Index_ID floating_id = process_operand(dfg, state, oprds[1]);
       state->set_alias(target, floating_id);
     }else if(oprds[0] == "__fluid"){
-      ;
+      ;//balabala
     }else{//function argument assign
       oprd_id1 = process_operand(dfg, state, oprds[1]);
       state->set_alias(target, oprd_id1);
