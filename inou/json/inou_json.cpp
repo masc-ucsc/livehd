@@ -50,7 +50,7 @@ Inou_json::~Inou_json() {
 }
 
 void Inou_json::from_json(LGraph *g, rapidjson::Document &document) {
-  fmt::print("DEBUG:: RapidJson Parsing Json file!");
+  fmt::print("DEBUG:: RapidJson Parsing Json file!\n");
   Index_ID last_nid = 0;
   Index_ID dst_nid  = 0;
   Port_ID  src_pid  = 0;
@@ -108,6 +108,11 @@ void Inou_json::from_json(LGraph *g, rapidjson::Document &document) {
           g->node_u32type_set(last_nid, val);
         }
       }
+
+      if(nodes.HasMember("node_bits")){
+        g->set_bits(last_nid, nodes["node_bits"].GetUint());
+      }
+
       if(nodes.HasMember("input_name")) {
         fmt::print("DEBUG:: input name is : {} \n", nodes["input_name"].GetString());
         g->add_graph_input(nodes["input_name"].GetString(), last_nid);
@@ -128,8 +133,8 @@ void Inou_json::from_json(LGraph *g, rapidjson::Document &document) {
           if(output_edge.HasMember("out_src_pid")) {
             src_pid = output_edge["out_src_pid"].GetUint();
           }
-          if(output_edge.HasMember("out_nid")) {
-            dst_nid = output_edge["out_nid"].GetUint64();
+          if(output_edge.HasMember("out_dst_nid")) {
+            dst_nid = output_edge["out_dst_nid"].GetUint64();
             if(json_remap.find(dst_nid) == json_remap.end()) {
               json_remap[dst_nid] = g->create_node().get_nid();
             }
@@ -143,8 +148,8 @@ void Inou_json::from_json(LGraph *g, rapidjson::Document &document) {
           }
           Node_Pin src_pin(last_nid, dst_pid, false);
           Node_Pin dst_pin(dst_nid, src_pid, true);
-          if(output_edge.HasMember("bits")) {
-            int bits = output_edge["bits"].GetInt();
+          if(output_edge.HasMember("out_src_bits")) {
+            int bits = output_edge["out_src_bits"].GetInt();
             g->add_edge(src_pin, dst_pin, bits);
           } else {
             g->add_edge(src_pin, dst_pin);
@@ -256,7 +261,7 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
         }
       }
 
-      writer.Key("node bits");
+      writer.Key("node_bits");
       {
         int node_width = g->get_bits(idx);
         writer.Uint64(node_width);
@@ -287,12 +292,12 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
         for(const auto &out : g->out_edges(idx)) {
           writer.StartObject();
           //writer.Key("out_out_pid");
-          writer.Key("out_src_pid ");
+          writer.Key("out_src_pid");
           writer.Uint64(out.get_out_pin().get_pid());
-          writer.Key("out_dst_nid ");
+          writer.Key("out_dst_nid");
           writer.Uint64(out.get_idx());
           //writer.Key("out_inp_pid");
-          writer.Key("out_dst_pid ");
+          writer.Key("out_dst_pid");
           writer.Uint64(out.get_inp_pin().get_pid());
           if(out.is_root()) {
             auto  node_idx   = out.get_out_pin().get_nid();
