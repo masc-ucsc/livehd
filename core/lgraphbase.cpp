@@ -67,9 +67,21 @@ void LGraph_Base::each_input(std::function<void(Index_ID)> f1) const {
   }
 }
 
+void LGraph_Base::each_input(std::function<void(Index_ID, Port_ID)> f1) const {
+  for(const auto &ent : inputs2node) {
+    f1(ent.second.nid,ent.second.pos);
+  }
+}
+
 void LGraph_Base::each_output(std::function<void(Index_ID)> f1) const {
   for(const auto &ent : outputs2node) {
     f1(ent.second.nid);
+  }
+}
+
+void LGraph_Base::each_output(std::function<void(Index_ID, Port_ID)> f1) const {
+  for(const auto &ent : outputs2node) {
+    f1(ent.second.nid,ent.second.pos);
   }
 }
 
