@@ -50,7 +50,7 @@ protected:
   bool to_const(Out_string &w, const LGraph *g, Index_ID idx) const;
   bool to_pick(Out_string &w, const LGraph *g, Index_ID idx) const;
 
-  bool to_op(Out_string &s, Out_string &sub, const LGraph *g, Index_ID idx, bool is_subgraph, std::vector<const char *> output_vars) const;
+  bool to_op(Out_string &s, Out_string &sub, const LGraph *g, Index_ID idx) const;
 public:
   Inou_pyrope();
 
