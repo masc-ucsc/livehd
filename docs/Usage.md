@@ -138,7 +138,7 @@ cat ./trivial.v
 ./inou/yaml/lgyaml --graph_name trivial --yaml_output trivial.yaml
 
 # read the graph and create a pyrope file
-./inou/pyrope/lgpyrope --graph_name trivial --pyrope_output trivial_py
+./inou/pyrope/lg2prp --graph_name trivial --pyrope_output trivial_py
 
 # check the output
 cat ./trivial_py

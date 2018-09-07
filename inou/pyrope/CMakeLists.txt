@@ -3,7 +3,7 @@ project(inou_pyrope)
 FILE(GLOB inou_pyrope_SOURCE *.cpp)
 FILE(GLOB inou_pyrope_HEADER *.hpp)
 
-SET(EXELIST "lgpyrope")
+SET(EXELIST "lg2prp")
 
 INCLUDE_DIRECTORIES(${core_SOURCE_DIR})
 

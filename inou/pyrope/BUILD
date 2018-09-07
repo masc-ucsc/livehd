@@ -13,8 +13,8 @@ cc_library(
 )
 
 cc_binary(
-    name = "lgpyrope",
-    srcs = ["lgpyrope.cpp"],
+    name = "lg2prp",
+    srcs = ["lg2prp.cpp"],
     linkopts = ['-lpthread'],
     deps = [
         ":inou_pyrope",
