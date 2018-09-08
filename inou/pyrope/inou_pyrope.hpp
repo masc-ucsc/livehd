@@ -46,10 +46,10 @@ protected:
   bool to_sum(Out_string &w, const LGraph *g, Index_ID idx) const;
   bool to_logical1(Out_string &w, const LGraph *g, Index_ID idx, const char *c_op, const char *s_op) const;
   bool to_subgraph(Out_string &w, Out_string &out, const LGraph *g, Index_ID idx) const;
-  bool to_equals(Out_string &w, const LGraph *g, Index_ID idx) const;
+  bool to_compare(Out_string &w, const LGraph *g, Index_ID idx, const char *op) const;
   bool to_const(Out_string &w, const LGraph *g, Index_ID idx) const;
   bool to_pick(Out_string &w, const LGraph *g, Index_ID idx) const;
-
+  bool to_latch(Out_string &w, const LGraph *g, Index_ID idx) const;
   bool to_op(Out_string &s, Out_string &sub, const LGraph *g, Index_ID idx) const;
 public:
   Inou_pyrope();
