@@ -22,6 +22,8 @@ void Inou_pyrope_options::set(const py::dict &dict) {
   }
 }
 
+// FIXME: latch.v, trivial2.v, submodule_offset.v 
+
 Inou_pyrope::Inou_pyrope() {
 }
 
@@ -40,7 +42,7 @@ std::vector<LGraph *> Inou_pyrope::generate() {
   if(opack.graph_name != "") {
     lgs.push_back(new LGraph(opack.lgdb, opack.graph_name, false)); // Do not clear
   } else {
-    lgs.push_back(new LGraph("lgdb", "submodule", false)); // Do not clear
+    lgs.push_back(new LGraph("lgdb", "operators", false)); // Do not clear
    // FIXME: assert(false); // Still not implemented
   }
 
@@ -139,21 +141,6 @@ void Inou_pyrope::to_src_var(Out_string &w, const LGraph *g, Index_ID idx) const
   }
 }
 
-void Inou_pyrope::to_normal_var(Out_string &w, const LGraph *g, Index_ID idx) const {
-  if(idx == 0) {
-    w << " FIXME" << idx;
-    return;
-  }
-  if(g->is_graph_input(idx)) {
-    w << " " << g->get_graph_input_name(idx);
-    return;
-  }
-  if(g->is_graph_output(idx)) {
-    w << " " << g->get_graph_output_name(idx);
-    return;
-  }
-}
-
 bool Inou_pyrope::to_mux(Out_string &w, const LGraph *g, Index_ID idx) const {
 
   Index_ID t_idx = 0;
@@ -162,15 +149,15 @@ bool Inou_pyrope::to_mux(Out_string &w, const LGraph *g, Index_ID idx) const {
 
   // WARNING: input edges dst_pid can go anywhere, must search reverse edge to see input
   for(const auto &c : g->inp_edges(idx)) {
-    switch(c.get_inp_pin().get_pid()) { // FIXME: Either c.get_inp_pid() or c.get_out_pid()??
+    switch(c.get_inp_pin().get_pid()) {
     case 0:
-      f_idx = c.get_idx();
+      c_idx = c.get_idx();
       break;
     case 1:
-      t_idx = c.get_idx();
+      f_idx = c.get_idx();
       break;
     case 2:
-      c_idx = c.get_idx();
+      t_idx = c.get_idx();
       break;
     default:
       assert(false);
@@ -224,17 +211,16 @@ bool Inou_pyrope::to_mux(Out_string &w, const LGraph *g, Index_ID idx) const {
   to_dst_var(w, g, idx);
   to_src_var(w, g, t_idx);
   // ----------- FALSE
-  w << "\n}else{\n   ";
+  w << "\n }else{\n   ";
   to_dst_var(w, g, idx);
   to_src_var(w, g, f_idx);
-  w << "\n}\n";
+  w << "\n }\n";
 
   return false;
 }
 
 bool Inou_pyrope::to_join(Out_string &w, const LGraph *g, Index_ID idx) const {
   Out_string tmp;
-  //const auto node = g->get_node_int(idx);
   int ninputs = 0;
   for(const auto &c : g->inp_edges(idx)) {
     ninputs++;
@@ -336,7 +322,9 @@ bool Inou_pyrope::to_logical2(Out_string &w, const LGraph *g, Index_ID idx, cons
 
   bool first = true;
   for(const auto &c : g->inp_edges(idx)) {
-    if(first) {
+    if (c.get_bits() == 0) {
+      w << " " << c_op; // for reduction ops
+    } else if(first) {
       first = false;
     } else {
       if(c.get_bits() == 1)
@@ -418,14 +406,14 @@ bool Inou_pyrope::to_logical1(Out_string &w, const LGraph *g, Index_ID idx, cons
   return true;
 }
 
-bool Inou_pyrope::to_equals(Out_string &w, const LGraph *g, Index_ID idx) const {
+bool Inou_pyrope::to_compare(Out_string &w, const LGraph *g, Index_ID idx, const char *op) const {
 
   bool first = true;
   for(const auto &c : g->inp_edges(idx)) {
     if(first) {
       first = false;
     } else {
-      w << " ==";
+      w << " " << op;
     }
     to_src_var(w, g, c.get_idx());
   }
@@ -460,6 +448,13 @@ bool Inou_pyrope::to_pick(Out_string &w, const LGraph *g, Index_ID idx) const {
   return true;
 }
 
+bool Inou_pyrope::to_latch(Out_string &w, const LGraph *g, Index_ID idx) const {
+
+  w << "FIXME LATCH_OP, idx=" << idx;
+
+  return false;
+}
+
 bool Inou_pyrope::to_op(Out_string &s, Out_string &sub, const LGraph *g, Index_ID idx) const {
   const auto op = g->node_type_get(idx);
   bool dest;
@@ -477,10 +472,19 @@ bool Inou_pyrope::to_op(Out_string &s, Out_string &sub, const LGraph *g, Index_I
       dest = to_logical2(s, g, idx, "^", "xor");
       break;
     case LessThan_Op:
-      dest = to_logical2(s, g, idx, "<", "<");
+      dest = to_compare(s, g, idx, "<");
       break;
     case GreaterThan_Op:
-      dest = to_logical2(s, g, idx, ">", ">");
+      dest = to_compare(s, g, idx, ">");
+      break;
+    case LessEqualThan_Op:
+      dest = to_compare(s, g, idx, "<=");
+      break;
+    case GreaterEqualThan_Op:
+      dest = to_compare(s, g, idx, ">=");
+      break;
+    case Equals_Op:
+      dest = to_compare(s, g, idx, "==");
       break;
     case Not_Op:
       dest = to_logical1(s, g, idx, "~", "not");
@@ -509,11 +513,11 @@ bool Inou_pyrope::to_op(Out_string &s, Out_string &sub, const LGraph *g, Index_I
     case U32Const_Op:
       dest = to_const(s, g, idx);
       break;
-    case Equals_Op:
-      dest = to_equals(s, g, idx);
-      break;
     case Pick_Op:
       dest = to_pick(s, g, idx);
+      break;
+    case Latch_Op:
+      dest = to_latch(s, g, idx);
       break;
     default:
       dest = false;
@@ -533,7 +537,7 @@ bool Inou_pyrope::to_subgraph(Out_string &w, Out_string &out, const LGraph *g, I
   const std::string subgraph_name = "inner";
 
   //FIXME: lgs.push_back(new LGraph(opack.lgdb, subgraph_name, false));
-  lgs.push_back(new LGraph("lgdb", "inner", false));
+  lgs.push_back(new LGraph("lgdb", "inner_mod", false));
 
   const char **subgraph_input_names;
   const char **subgraph_output_names;
@@ -659,9 +663,7 @@ void Inou_pyrope::to_pyrope(const LGraph *g, const std::string filename) {
   //
   // 3-Connect the outputs and flops with tmps. If reset was there, connect correctly (no mux)
   //
-  // to get subgraph names use pin ids and this is shown in dump_yosys.cpp!
   // fix pick ops!
-  // change name to lg2prp everywhere!
 
   for(auto idx : g->forward()) {
 
