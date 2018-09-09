@@ -16,7 +16,7 @@ public:
 //  std::string lgdb_path;
 
   Inou_pyrope_options() {
-    pyrope_output = "pyrope_out";
+    pyrope_output = "pyrope_out.prp";
     pyrope_input = "pyrope_in";
   }
   void set(const py::dict &dict) final;

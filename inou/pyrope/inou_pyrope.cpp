@@ -22,7 +22,8 @@ void Inou_pyrope_options::set(const py::dict &dict) {
   }
 }
 
-// FIXME: latch.v, trivial2.v, submodule_offset.v 
+// FIXME: latch.v, trivial2.v, submodule_offset.v
+// Join_Op? (assigns.v)
 
 Inou_pyrope::Inou_pyrope() {
 }
@@ -42,7 +43,7 @@ std::vector<LGraph *> Inou_pyrope::generate() {
   if(opack.graph_name != "") {
     lgs.push_back(new LGraph(opack.lgdb, opack.graph_name, false)); // Do not clear
   } else {
-    lgs.push_back(new LGraph("lgdb", "operators", false)); // Do not clear
+    lgs.push_back(new LGraph("lgdb", "assigns", false)); // Do not clear
    // FIXME: assert(false); // Still not implemented
   }
 
@@ -211,10 +212,14 @@ bool Inou_pyrope::to_mux(Out_string &w, const LGraph *g, Index_ID idx) const {
   to_dst_var(w, g, idx);
   to_src_var(w, g, t_idx);
   // ----------- FALSE
-  w << "\n }else{\n   ";
-  to_dst_var(w, g, idx);
-  to_src_var(w, g, f_idx);
-  w << "\n }\n";
+  if (t_idx == f_idx) {
+    w << "\n }\n";
+  } else {
+    w << "\n }else{\n   ";
+    to_dst_var(w, g, idx);
+    to_src_var(w, g, f_idx);
+    w << "\n }\n";
+  }
 
   return false;
 }
@@ -430,16 +435,15 @@ bool Inou_pyrope::to_const(Out_string &w, const LGraph *g, Index_ID idx) const {
 
 bool Inou_pyrope::to_pick(Out_string &w, const LGraph *g, Index_ID idx) const {
 
+  int upper = 0, lower = 0;
   bool first_val = true;
   for(const auto &c : g->inp_edges(idx)) {
     const auto op = g->node_type_get(c.get_idx());
     if(op.op == U32Const_Op) {
-      if(first_val) {
-        w << "[[" << g->node_value_get(c.get_idx());
-        first_val = false;
-      } else {
-        w << "..." << g->node_value_get(c.get_idx()) << "]]\n";
-      }
+      g->node_value_get(c.get_idx());
+      upper = lower + g->get_bits(idx) - 1;
+      assert(lower <= upper);
+      w << "[" << lower << ":" << upper << "]\n";
     } else {
       to_src_var(w, g, c.get_idx());
     }
@@ -450,7 +454,24 @@ bool Inou_pyrope::to_pick(Out_string &w, const LGraph *g, Index_ID idx) const {
 
 bool Inou_pyrope::to_latch(Out_string &w, const LGraph *g, Index_ID idx) const {
 
-  w << "FIXME LATCH_OP, idx=" << idx;
+  Index_ID latch_idx = 0, inp_idx = 0;
+
+  for(const auto &c : g->out_edges(idx)) {
+    latch_idx = c.get_idx();
+  }
+
+  for(const auto &c : g->inp_edges(idx)) {
+    inp_idx = c.get_idx();
+    break;
+  }
+
+  const auto &node = g->get_node_int(latch_idx);
+  if(!node.has_inputs())
+    return false; // Not driven used output
+
+  w << " @" << g->get_graph_output_name(latch_idx) << " as __fflop:false";
+  w << "\n @" << g->get_graph_output_name(latch_idx) << " =";
+  to_src_var(w, g, inp_idx);
 
   return false;
 }
@@ -537,7 +558,7 @@ bool Inou_pyrope::to_subgraph(Out_string &w, Out_string &out, const LGraph *g, I
   const std::string subgraph_name = "inner";
 
   //FIXME: lgs.push_back(new LGraph(opack.lgdb, subgraph_name, false));
-  lgs.push_back(new LGraph("lgdb", "inner_mod", false));
+  lgs.push_back(new LGraph("lgdb", "inner", false));
 
   const char **subgraph_input_names;
   const char **subgraph_output_names;
@@ -652,18 +673,6 @@ void Inou_pyrope::to_pyrope(const LGraph *g, const std::string filename) {
   w << "# " << prp_file << ".prp file from " << g->get_name() << "\n";
 
   inline_stmt.clear();
-
-  // FIXME:
-  //
-  // Algorithm:
-  //
-  // 1-fast iterate, put all the input/output/register types "as ..."
-  //
-  // 2-Put all the logic (no flops, or outputs, or logic that uses reset/clk)
-  //
-  // 3-Connect the outputs and flops with tmps. If reset was there, connect correctly (no mux)
-  //
-  // fix pick ops!
 
   for(auto idx : g->forward()) {
 
