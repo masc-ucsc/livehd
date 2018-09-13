@@ -263,7 +263,7 @@ void Inou_abc::gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, A
         new_graph->add_edge(src_pin, dst_pin);
 
         for(size_t offset = 0; offset < size; ++offset) {
-          index_offset info = {new_memory_idx, old_inp_pid, {offset, offset}};
+          index_offset info = {new_memory_idx, old_inp_pid, {static_cast<int>(offset), static_cast<int>(offset)}};
           auto *       pObj = memory_input_map[info];
           new_graph->add_edge(Node_Pin(graph_info->cell2id[pObj], graph_info->cell_out_pid[graph_info->cell2id[pObj]]++, false),
                               Node_Pin(join_id, offset, true));
@@ -356,7 +356,7 @@ void Inou_abc::gen_subgraph_from_abc(LGraph *new_graph, const LGraph *old_graph,
       auto dst_pin = Node_Pin(new_subgraph_idx, old_inp_pid, true);
       new_graph->add_edge(src_pin, dst_pin);
       for(size_t offset = 0; offset < size; ++offset) {
-        index_offset info = {new_subgraph_idx, old_inp_pid, {offset, offset}};
+        index_offset info = {new_subgraph_idx, old_inp_pid, {static_cast<int>(offset), static_cast<int>(offset)}};
         auto *       pObj = subgraph_input_map[info];
         new_graph->add_edge(Node_Pin(graph_info->cell2id[pObj], graph_info->cell_out_pid[graph_info->cell2id[pObj]]++, false),
                             Node_Pin(join_id, offset, true));
@@ -368,7 +368,7 @@ void Inou_abc::gen_subgraph_from_abc(LGraph *new_graph, const LGraph *old_graph,
       Node_Pin pick_pin = create_pick_operator(new_graph, Node_Pin(new_subgraph_idx, out_pid, false), 0, width);
       for(int offset = 0; offset < width; ++offset) {
         Node_Pin     pseudo_pin            = create_pick_operator(new_graph, Node_Pin(pick_pin.get_nid(), offset, false), offset, 1);
-        index_offset key                   = {new_subgraph_idx, out_pid, {offset, offset}};
+        index_offset key                   = {new_subgraph_idx, out_pid, {static_cast<int>(offset), static_cast<int>(offset)}};
 		graph_info->cell2id[subgraph_output_map[key]]  = pseudo_pin.get_nid();
 		graph_info->cell_out_pid[pseudo_pin.get_nid()] = 0;
       }
