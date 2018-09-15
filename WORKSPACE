@@ -70,6 +70,12 @@ new_git_repository(
     remote = "https://github.com/tlk00/BitMagic.git",
     strip_prefix = "src",
 )
+new_git_repository(
+    name = "gtest",
+    build_file = "BUILD.gtest",
+    remote = "https://github.com/google/googletest",
+    tag = "release-1.8.0",
+)
 
 #load(
 #    "//tools:externals.bzl",

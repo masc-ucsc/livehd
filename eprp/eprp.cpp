@@ -4,17 +4,199 @@
 
 #include "eprp.hpp"
 
+// rule_path = (\. | alnum | /)+
+bool Eprp::rule_path(std::string &path) {
 
-void Eprp_var::join(const Eprp_dict &_dict) {
+  assert(!scan_is_end());
+
+  if (!(scan_is_token(TOK_DOT)
+        || scan_is_token(TOK_ALNUM)
+        || scan_is_token(TOK_DIV)))
+    return false;
+
+  do {
+    scan_append(path); // Just get the raw text
+
+    bool done = scan_next();
+    if (!done)
+      break;
+
+  }while(scan_is_token(TOK_DOT)
+        || scan_is_token(TOK_ALNUM)
+        || scan_is_token(TOK_DIV));
+
+  return true;
+}
+
+// rule_label_path = label path
+bool Eprp::rule_label_path(const std::string &cmd_line, Eprp_var &next_var) {
+
+  if (!scan_is_token(TOK_LABEL))
+    return false;
+
+  std::string label = scan_text();
+
+  scan_next(); // Skip LABEL token
+
+  if (scan_is_end()) {
+    scan_error(fmt::format("the {} field in {} command has no argument", label, cmd_line));
+    return false;
+  }
+
+  std::string path;
+  bool ok = rule_path(path);
+  if (!ok) {
+    if (scan_is_token(TOK_REGISTER)) {
+      scan_error(fmt::format("could not pass a register {} to a method {}", scan_text(), cmd_line));
+    }else{
+      scan_error(fmt::format("field {} with invalid value in {} command", label, cmd_line));
+    }
+    return false;
+  }
+
+  next_var.add(label,path);
+
+  return true;
+}
+
+// rule_reg = reg+
+bool Eprp::rule_reg(bool first) {
+  if (!scan_is_token(TOK_REGISTER))
+    return false;
+
+  std::string var = scan_text();
+  if (first) { // First in line @a |> ...
+    if (variables.find(var) == variables.end()) {
+      scan_error(fmt::format("variable {} is empty", var));
+      return false;
+    }
+    last_cmd_var = variables[var];
+  }else{
+    variables[var] = last_cmd_var;
+  }
+
+  return true;
+}
+
+// rule_cmd_line = alnum (dot alnum)*
+bool Eprp::rule_cmd_line(std::string &path) {
+
+  assert(!scan_is_end());
+
+  if (!scan_is_token(TOK_ALNUM))
+    return false;
+
+  do {
+    scan_append(path); // Just get the raw text
+
+    bool done = scan_next();
+    if (!done)
+      break;
+
+  }while(scan_is_token(TOK_DOT) || scan_is_token(TOK_ALNUM));
+
+  return true;
+}
+
+// rule_cmd_full =rule_cmd_line rule_label_path*
+bool Eprp::rule_cmd_full() {
+
+  std::string cmd_line;
+
+  Eprp_var next_var;
+
+  bool cmd_found = rule_cmd_line(cmd_line);
+  if (!cmd_found)
+    return false;
+
+  while(rule_label_path(cmd_line, next_var))
+    ;
+
+  run_cmd(cmd_line, next_var);
+  return true;
+}
+
+// rule_pipe = |> rule_cmd_or_reg
+bool Eprp::rule_pipe() {
+
+  if (scan_is_end())
+    return false;
+
+  if (!scan_is_token(TOK_PIPE))
+    return false;
+
+  scan_next();
+
+  bool try_either = rule_cmd_or_reg(false);
+  if (try_either) {
+    scan_error(fmt::format("after a pipe there should be a register or a command"));
+    return false;
+  }
+
+  return true;
+}
+
+// rule_cmd_or_reg = rule_reg | rule_cmd_full
+bool Eprp::rule_cmd_or_reg(bool first) {
+
+  bool try_reg_rule = rule_reg(first);
+  if (try_reg_rule)
+    return true;
+
+  return rule_cmd_full();
+}
+
+// rule_top = rule_cmd_or_reg(first) rule_pipe+
+bool Eprp::rule_top() {
+
+  bool try_either = rule_cmd_or_reg(true);
+  if (!try_either) {
+    scan_error(fmt::format("statements start with a register or a command"));
+    return false;
+  }
+
+  bool try_pipe = rule_pipe();
+  if (!try_pipe) {
+    if (scan_is_token(TOK_OR)) {
+      scan_error(fmt::format("eprp pipe is |> not |"));
+    }else{
+      scan_error(fmt::format("missing pipe operation. At least @foo |> @bar"));
+    }
+    return false;
+  }
+
+  while(rule_pipe())
+    ;
+
+  return true;
+}
+
+// top = parse_top+
+void Eprp::elaborate() {
+
+  while(!scan_is_end()) {
+    bool cmd = rule_top();
+    if (!cmd)
+      return;
+  }
+
+};
+
+void Eprp_var::add(const Eprp_dict &_dict) {
   for (const auto& var : _dict) {
     add(var.first, var.second);
   }
 }
 
-void Eprp_var::join(const Eprp_lgs &_lgs) {
+void Eprp_var::add(const Eprp_lgs &_lgs) {
   for (const auto& lg : _lgs) {
     add(lg);
   }
+}
+
+void Eprp_var::add(const Eprp_var &_var) {
+  add(_var.lgs);
+  add(_var.dict);
 }
 
 void Eprp_var::add(LGraph *lg) {
@@ -23,182 +205,35 @@ void Eprp_var::add(LGraph *lg) {
 }
 
 void Eprp_var::add(const std::string &name, const std::string &value) {
-  if (dict.find(name) != dict.end())
-    fmt::print("ERROR: redundant {} field", name);
-  else
-    dict[name] = value;
+  if (name!="" && dict.find(name) != dict.end())
+    fmt::print("WARNING: redundant {} field", name);
+
+  dict[name] = value;
 }
 
-Eprp_var Eprp::run_cmd(const std::string &cmd, const Eprp_dict &dict) {
+const std::string &Eprp_var::get(const std::string &name) const {
+  const auto &elem = dict.find(name);
+  if (elem == dict.end()) {
+    static const std::string empty("");
+    return empty;
+  }
+  return elem->second;
+}
 
-  Eprp_var var;
+Eprp_var Eprp::run_cmd(const std::string &cmd, const Eprp_var &var) {
 
   if (methods.find(cmd) == methods.end()) {
-    fmt::print("ERROR: method {} not registered\n", cmd);
+    scan_error(fmt::format("method {} not registered", cmd));
 
     return var;
   }
 
-  var = methods[cmd](dict);
+  fmt::print("run_cmd({}...)\n",cmd);
 
-  last_cmd_var = var;
-  return var;
-}
+  last_cmd_var.add(var);
 
-void Eprp::readline(const char *line) {
+  last_cmd_var = methods[cmd](last_cmd_var);
 
-  int len=0;
-  const char *stop_at=0;
-
-
-  bool is_string = false;
-
-  bool cmd_finished  = false;
-  bool name_finished = false;
-
-  bool last_space = true;
-  bool in_quotes  = false;
-
-  char cmd[1024];
-  int  pos = 0;
-  char name[1024];
-  char value[1024];
-
-  Eprp_dict dict;
-
-  while(*line) {
-    if (pos>=1024) {
-      fmt::print("ERROR: {} name/variable is too long\n",line);
-      exit(-3);
-    }
-
-    if (in_quotes) {
-      is_string = true;
-      if (*line == '"' || *line == '\'') {
-        in_quotes = false;
-      }else{
-        if (!cmd_finished) {
-          cmd[pos++] = *line;
-        }else if (!name_finished) {
-          name[pos++] = *line;
-        }else{
-          value[pos++] = *line;
-        }
-      }
-    }else if (*line == '"' || *line == '\'') {
-      in_quotes = true;
-      is_string = true;
-    }else if (*line == '|' || *line == '\n') {
-      if (!cmd_finished) {
-        cmd[pos] = 0;
-      }else if (!name_finished) {
-        name[pos] = 0;
-        if (pos>0) {
-          std::string name_str;
-          if (is_string)
-            name_str = "." + std::string(name);
-          else
-            name_str = name;
-
-          dict[""] = name_str; // Only if name makes sense
-        }
-      }else{
-        value[pos] = 0;
-        if (pos>0) {
-          std::string value_str;
-          if (is_string)
-            value_str = "." + std::string(value);
-          else
-            value_str = value;
-          dict[name] = value_str;
-        }else{
-          std::string name_str;
-          if (is_string)
-            name_str = "." + std::string(name);
-          else
-            name_str = name;
-          dict[""] = name_str; // Only if name makes sense
-        }
-      }
-      run_cmd(cmd,dict);
-
-      dict.clear();
-      cmd_finished = false;
-      name_finished = false;
-      is_string    = false;
-      if (*line == '\n')
-        last_cmd_var.clear();
-      pos = 0;
-
-      last_space = true;
-    }else if (isspace(*line) || *line == ':') {
-      if (!last_space) {
-        if (!cmd_finished) {
-          cmd[pos] = 0;
-          cmd_finished = true;
-        }else if (!name_finished) {
-          name[pos] = 0;
-          name_finished = true;
-          is_string = false;
-        }else{
-          value[pos] = 0;
-
-          std::string value_str;
-          if (is_string)
-            value_str = "." + std::string(value);
-          else
-            value_str = value;
-
-          fmt::print("add1 {} {} {}\n",name,value_str, is_string);
-          dict[name] = value_str;
-          name_finished = false;
-          is_string = false;
-        }
-        pos = 0;
-      }
-
-      last_space = true;
-    }else{
-      if (!cmd_finished) {
-        cmd[pos++] = *line;
-      }else if (!name_finished) {
-        name[pos++] = *line;
-      }else{
-        value[pos++] = *line;
-      }
-
-      last_space = false;
-    }
-
-    line++;
-  }
-
-  if (pos>=1) {
-    if (!cmd_finished) {
-      cmd[pos] = 0;
-    }else if (!name_finished) {
-      name[pos] = 0;
-      std::string name_str;
-      if (is_string)
-        name_str = "." + std::string(name);
-      else
-        name_str = name;
-
-      dict[""] = name_str; // Only if name makes sense
-      fmt::print("add2 0 {}\n",name_str);
-    }else{
-      value[pos] = 0;
-      std::string value_str;
-      if (is_string)
-        value_str = "." + std::string(value);
-      else
-        value_str = value;
-
-      dict[name] = value_str;
-      fmt::print("add3 {} {}\n",name,value_str);
-    }
-    run_cmd(cmd,dict);
-  }
-  last_space = true;
+  return last_cmd_var;
 }
 
