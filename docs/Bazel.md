@@ -17,8 +17,11 @@ Useful commands:
 
     # Debug
     bazel build --compilation_mode=dbg //inou/json:lgjson
+    bazel build -c dbg //inou/json:lgjson
+
     # Release
     bazel build --compilation_mode=opt //inou/json:lgjson
+
     # Fast Build with assertions
     bazel build                        //inou/json:lgjson
 
@@ -39,26 +42,19 @@ Useful commands:
 First run the tests to see the failing one. Then run with debug options
 the failing test. E.g:
 
-    bazel run -c dbg //pyth:test_core1
+    bazel run -c dbg //eprp:all
 
 Increase logging level if wanted
 
     export LGRAPH_LOG=info
     bazel run -c dbg //pyth:test_core1
 
-If the test has python, you must call the gdb with python and then pass as
-argument the test. Sample session:
+To run with gdb
 
-    gdb `which python3`  # python3
-    >r bazel-bin/pyth/test_core1
-    >b LGraph_Base::LGraph_Base
+    bazel build -c dbg //eprp:eprp_test
+    gdb bazel-bin/eprp/eprp_test
+    >b Eprp::run
     >r
-
-## Python console
-
-You can run a lgraph python interactive console, but you must install the ptpython package
-
-    pip install ptpython
 
 
 ## Code coverage for all the tests used
@@ -75,12 +71,6 @@ No need to run this, as the bazel build will do it.
 
 The downloaded code would be at bazel-lgraph/external/abc/
 
-## To create Python self contained par file
-
-    bazel build //pyth:ptlgraph.par
-
-Now, you can copy the bazel-bin/pyth/ptlgraph.par to any machine and it has all the python and libraries needed to run
-
 ## To create a fully static binary (for pip deployment?)
 
 In the cc binary, add linkopts = ['-static']
@@ -92,6 +82,3 @@ building in one machine breaks, and starts in another and it freezes.
 
     bazel clean --expunge
 
-## To solve python terminal message out of order issue, turn off stream buffer 
-
-    export PYTHONUNBUFFERED=1
