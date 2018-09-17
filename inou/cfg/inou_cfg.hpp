@@ -12,12 +12,14 @@
 #include "inou.hpp"
 #include "options.hpp"
 
-class Inou_cfg_options : public Py_options {
+class Inou_cfg_options : public Options_base {
 public:
-  Inou_cfg_options() : Py_options() { }
-  void set(const py::dict &dict) final;
-
   std::string src;
+
+  Inou_cfg_options() {
+	}
+
+  void set(const std::string &key, const std::string &value);
 };
 
 class Inou_cfg : public Inou {
@@ -42,17 +44,18 @@ protected:
 
 public:
   Inou_cfg();
-  Inou_cfg(const py::dict &);
   virtual ~Inou_cfg();
 
   std::vector<LGraph *> generate() final;
-  std::vector<LGraph *> py_generate() { return generate(); };
   void lgraph_2_cfg(const LGraph *g, const std::string &filename);
 
   using Inou::generate;
 
   virtual void generate(std::vector<const LGraph *> &out) final;
-  void py_set(const py::dict &dict) { opack.set(dict); }
+
+  void set(const std::string &key, const std::string &value) {
+    opack.set(key,value);
+  }
 };
 
 bool prp_get_value(const std::string& str_in, std::string& str_out, bool &v_signed, uint32_t &explicit_bits, uint32_t &val);

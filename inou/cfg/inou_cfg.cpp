@@ -25,15 +25,13 @@ using std::vector;
 Inou_cfg::Inou_cfg() { }
 Inou_cfg::~Inou_cfg() { }
 
-Inou_cfg::Inou_cfg(const py::dict &dict) { opack.set(dict); }
-
 vector<LGraph *> Inou_cfg::generate() {
-  assert(!opack.graph_name.empty());
+  assert(!opack.name.empty());
   assert(!opack.src.empty());
 
   vector<LGraph *> lgs;
 
-  lgs.push_back(new LGraph(opack.lgdb, opack.graph_name, false));
+  lgs.push_back(new LGraph(opack.lgdb, opack.name, false));
   const auto &cfg_file = opack.src;
 
   int fd = open(cfg_file.c_str(), O_RDONLY);
@@ -103,7 +101,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
     string dfg_data = p;
 
     if(w3rd != "0" && std::stoi(w3rd) >= lgs.size()) { //create new sub-graph if different scope id
-      lgs.push_back(new LGraph(opack.lgdb, opack.graph_name + std::to_string(lgs.size()), false));
+      lgs.push_back(new LGraph(opack.lgdb, opack.name + std::to_string(lgs.size()), false));
       fmt::print("lgs size:{}\n", lgs.size());
       name2id_gs.resize(name2id_gs.size() + 1);
       chain_stks_gs.resize(chain_stks_gs.size() + 1);
@@ -342,7 +340,7 @@ void Inou_cfg::build_graph(vector<string>               &words,
   else if(w6th == "::{") {
     //connect to the begin of function call
     //To Do: there should be another way to take existing graphs as subgraph
-    sub_graph = LGraph::find_lgraph(g->get_path(),opack.graph_name + std::to_string(nfirst2gid[w9th]));
+    sub_graph = LGraph::find_lgraph(g->get_path(),opack.name + std::to_string(nfirst2gid[w9th]));
     src_nid = name2id[w1st];
     dst_nid = name2id[w9th];
     fmt::print("function call statement, connect src_node {} to dst_node {} ----- 1\n", src_nid, dst_nid);
@@ -605,22 +603,19 @@ void Inou_cfg::update_ifs(vector<LGraph *> &lgs, vector<map<string, Index_ID>> &
   }
 }
 
-void Inou_cfg_options::set(const py::dict &dict) {
-  for (auto item : dict) {
-    const auto &key = item.first.cast<std::string>();
+void Inou_cfg_options::set(const std::string &key, const std::string &value) {
 
-    try {
-      if (is_opt(key,"src") ) {
-        const auto &val = item.second.cast<string>();
-        src = val;
-      }else{
-        set_val(key,item.second);
-      }
-    } catch (const std::invalid_argument& ia) {
-      fmt::print("ERROR: key {} has an invalid argument {}\n",key);
+  try {
+    if (is_opt(key,"src") ) {
+      const auto &val = value;
+      src = val;
+    }else{
+      set_val(key,value);
     }
+  } catch (const std::invalid_argument& ia) {
+    fmt::print("ERROR: key {} has an invalid argument {}\n",key);
   }
 
-  console->warn("pass_dfg src:{} lgdb:{} graph_name:{}"
-      ,src,lgdb, graph_name);
+  console->warn("pass_dfg src:{} lgdb:{} name:{}"
+      ,src,lgdb, name);
 }
