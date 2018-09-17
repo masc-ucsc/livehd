@@ -138,9 +138,13 @@ void Eprp_scanner::parse(std::string name, const char *memblock, size_t sz) {
 
     last_c = c;
   }
+  if (t.tok) {
+    t.len = sz - t.pos;
+    add_token(t);
+  }
 
   if (&memblock[sz-1] != ptr_section)
-    chunked(ptr_section, (&memblock[sz-1] -ptr_section), ptr_section - memblock, nlines);
+    chunked(ptr_section, (&memblock[sz]-ptr_section), ptr_section - memblock, nlines);
 }
 
 Eprp_scanner::Eprp_scanner() {
@@ -167,7 +171,7 @@ void Eprp_scanner::chunked(const char *_buffer, size_t _buffer_sz, size_t _buffe
 }
 
 bool Eprp_scanner::scan_next() {
-  if ((scanner_pos+1) >= token_list.size())
+  if (scanner_pos >= token_list.size())
     return false;
 
   scanner_pos++;
@@ -201,7 +205,7 @@ int Eprp_scanner::scan_calc_lineno() const {
   return buffer_start_line + nlines;
 }
 
-void Eprp_scanner::scan_error(const std::string &text) const {
+void Eprp_scanner::scan_raw_msg(const std::string &cat, const std::string &text, bool third) const {
 
   // Look at buffer for previous line change
 
@@ -227,14 +231,17 @@ void Eprp_scanner::scan_error(const std::string &text) const {
   int line = scan_calc_lineno();
   int col  = token_list[scanner_pos].pos - line_pos_start;
 
-  std::string first_1 = fmt::format("{}:{}:{} error: {}", buffer_name, line, col, text);
+  std::string first_1 = fmt::format("{}:{}:{} {}: {}", buffer_name, line, col, cat, text);
   std::string second_1 = line_txt;
-
-  std::string third_1(col, ' ');
-  std::string third_2(token_list[scanner_pos].len, '^');
 
   fmt::print(first_1 + "\n");
   fmt::print(second_1 + "\n");
+
+  if (!third)
+    return;
+
+  std::string third_1(col, ' ');
+  std::string third_2(token_list[scanner_pos].len, '^');
   fmt::print(third_1 + third_2 + "\n");
 }
 
