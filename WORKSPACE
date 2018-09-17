@@ -100,13 +100,6 @@ new_git_repository(
 #    url = "https://codeload.github.com/y-256/libdivsufsort/tar.gz/2.0.1",
 #)
 
-
-# Python system includes
-new_local_repository(
-    name = "python3",
-    path = "/usr/include/python3.7m",
-    build_file = "third_party/BUILD.python3",
-)
 # BOOST Libraries dependences
 git_repository(
     name = "com_github_nelhage_rules_boost",
