@@ -75,7 +75,7 @@ public:
 class EPrpTest : public ::testing::Test {
 protected:
   Eprp eprp;
-  virtual void SetUp() override {
+  void SetUp() override {
     Eprp_method m1("test1.xyz.generate", "Generate a random test/method call to foo", &test1::foo);
     m1.add_label_required("lgdb","lgraph directory");
     m1.add_label_optional("graph_name","another super duper attribute");
