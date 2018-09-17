@@ -51,7 +51,7 @@ Abc_Ntk_t *Inou_abc::to_abc(const LGraph *g) {
   Abc_Start();
   pAbc        = Abc_FrameGetGlobalFrame();
   pAig        = Abc_NtkAlloc(ABC_NTK_NETLIST, ABC_FUNC_AIG, 1);
-  pAig->pName = Extra_UtilStrsav(opack.graph_name.c_str());
+  pAig->pName = Extra_UtilStrsav(opack.name.c_str());
 
   gen_netList(g, pAig);
   Abc_NtkFinalizeRead(pAig);
@@ -87,8 +87,8 @@ Abc_Ntk_t *Inou_abc::to_abc(const LGraph *g) {
     }
 
     sprintf(Command, "write_blif %s/%s_post.blif;write_verilog %s/%s_post.v;",
-            path_name.c_str(), opack.graph_name.c_str(),
-            path_name.c_str(), opack.graph_name.c_str());
+            path_name.c_str(), opack.name.c_str(),
+            path_name.c_str(), opack.name.c_str());
     if(Cmd_CommandExecute(pAbc, Command)) {
       console->error("Cannot execute command {}", Command);
     }
@@ -98,8 +98,8 @@ Abc_Ntk_t *Inou_abc::to_abc(const LGraph *g) {
     }
 
     sprintf(Command, "write_blif %s/%s_map.blif;write_verilog %s/%s_map.v",
-            path_name.c_str(), opack.graph_name.c_str(),
-            path_name.c_str(), opack.graph_name.c_str());
+            path_name.c_str(), opack.name.c_str(),
+            path_name.c_str(), opack.name.c_str());
     if(Cmd_CommandExecute(pAbc, Command)) {
       console->error("Cannot execute command", Command);
     }

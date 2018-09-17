@@ -12,8 +12,6 @@
 #include "lgraphbase.hpp"
 #include "options.hpp"
 
-#include "py_options.hpp"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -25,21 +23,26 @@ extern "C" {
 }
 #endif
 
-class Inou_abc_options_pack : public Options_pack {
+class Inou_abc_options : public Options_base {
 public:
-  Inou_abc_options_pack();
+  Inou_abc_options() {
+    verbose = false;
+  };
 
   std::string lef_file;
   std::string liberty_file;
-  std::string verbose;
+  bool verbose;
+
+  void set(const std::string &key, const std::string &value);
 };
 
 class Inou_abc : public Inou {
 
 protected:
-  Inou_abc_options_pack opack;
+  Inou_abc_options opack;
 
 public:
+
   struct IndexID_Hash {
     inline std::size_t operator()(const Index_ID &k) const {
       return (size_t)k;
@@ -183,22 +186,19 @@ public:
 
   Inou_abc();
 
-  // Python interface
-  Inou_abc(const py::dict &dict);
-
   virtual ~Inou_abc();
 
   std::vector<LGraph *> generate() final;
+
+  void set(const std::string &key, const std::string &value) {
+    opack.set(key,value);
+  }
 
   using Inou::generate;
 
   void generate(std::vector<const LGraph *> &out) final;
 
   void dump_blif(const LGraph *g, const std::string filename);
-
-  std::vector<LGraph *> py_generate() { return generate(); };
-  void py_set(const py::dict &dict) { }
-
 private:
   graph_topology *graph_info;
 
@@ -215,8 +215,8 @@ private:
   }
 
   void clear() {
-	delete graph_info;
-	graph_info = new graph_topology;
+    delete graph_info;
+    graph_info = new graph_topology;
   }
 
   void find_cell_conn(const LGraph *g);
@@ -294,6 +294,7 @@ private:
   void gen_latch_conn(const LGraph *g, std::ofstream &fs);
 
   void write_src_info(const LGraph *g, const Inou_abc::index_offset &inp, std::ofstream &fs);
+
 };
 
 #endif //LGRAPH_INOU_ABC_HPP

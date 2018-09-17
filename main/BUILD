@@ -10,6 +10,8 @@ cc_binary(
             "//meta:meta",
             "//inou/rand:inou_rand",
             "//inou/cfg:inou_cfg",
+            "//inou/abc:inou_abc",
     ],
+    linkopts = ["-ldl"],
 )
 
