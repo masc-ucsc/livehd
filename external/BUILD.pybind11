@@ -1,7 +1,0 @@
-#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-cc_library(
-   name = "headers",
-   hdrs = glob(["pybind11/**/*.h","pybind11/*.h"]),
-   includes = [ "." ], # Needed because some includes use <foo.h>
-   visibility = ["//visibility:public"],
-)

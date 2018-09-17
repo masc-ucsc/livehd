@@ -7,7 +7,6 @@ cc_library(
     includes = ["."],
     deps = [
         "//meta:meta",
-        "//pyth:py_base",
     ],
 )
 

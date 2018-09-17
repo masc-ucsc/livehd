@@ -11,7 +11,6 @@
 
 #include "inou.hpp"
 #include "options.hpp"
-#include "py_options.hpp"
 
 class Inou_cfg_options : public Py_options {
 public:
