@@ -13,6 +13,11 @@ protected:
       json.set(l.first,l.second);
     }
 
+    if(access(var.get("input").c_str(), R_OK) == -1) {
+      Main_api::error(fmt::format("inou.json. could not open json file named {}",var.get("input")));
+      return;
+    }
+
     std::vector<LGraph *> lgs = json.tolg();
 
     if (lgs.empty()) {
@@ -28,12 +33,6 @@ protected:
 
     for(const auto &l:var.dict) {
       json.set(l.first,l.second);
-    }
-
-    // FIXME: does not work
-    if(access(var.get("input").c_str(), R_OK) == -1) {
-      Main_api::error(fmt::format("inou.json.fromlg could not open json file named {}",var.get("input")));
-      return;
     }
 
     std::vector<const LGraph *> lgs;
