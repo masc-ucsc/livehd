@@ -1,11 +1,12 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 //
 // Created by birdeclipse on 4/25/18.
-//
-#include "inou_abc.hpp"
+
 #include <regex>
 
-void Inou_abc::from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
+#include "pass_abc.hpp"
+
+void Pass_abc::from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
 
   if(!Abc_NtkIsAigNetlist(pNtk) && !Abc_NtkIsMappedNetlist(pNtk)) {
     console->error("Io_WriteVerilog(): Can produce Verilog for mapped or AIG netlists only.\n");
@@ -23,7 +24,7 @@ void Inou_abc::from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *p
   conn_combinational_cell(new_graph, old_graph, pNtk);
 }
 
-void Inou_abc::gen_primary_io_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
+void Pass_abc::gen_primary_io_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
   assert(old_graph);
   Abc_Obj_t *pTerm = nullptr, *pNet = nullptr;
   int        i = 0;
@@ -74,7 +75,7 @@ void Inou_abc::gen_primary_io_from_abc(LGraph *new_graph, const LGraph *old_grap
   }
 }
 
-void Inou_abc::gen_comb_cell_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
+void Pass_abc::gen_comb_cell_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
   assert(old_graph);
   const Tech_library *tlib  = new_graph->get_tlibrary();
   const Tech_cell *   tcell = nullptr;
@@ -154,7 +155,7 @@ void Inou_abc::gen_comb_cell_from_abc(LGraph *new_graph, const LGraph *old_graph
   }
 }
 
-void Inou_abc::gen_latch_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
+void Pass_abc::gen_latch_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
   assert(old_graph);
   Abc_Obj_t *pLatch = nullptr;
   int        i      = 0;
@@ -171,7 +172,7 @@ void Inou_abc::gen_latch_from_abc(LGraph *new_graph, const LGraph *old_graph, Ab
   }
 }
 
-void Inou_abc::gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
+void Pass_abc::gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
   assert(old_graph);
   for(const auto &idx : graph_info->memory_id) {
     Index_ID new_memory_idx = new_graph->create_node().get_nid();
@@ -290,7 +291,7 @@ void Inou_abc::gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, A
   }
 }
 
-void Inou_abc::gen_subgraph_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
+void Pass_abc::gen_subgraph_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
   assert(old_graph);
   for(const auto &idx : graph_info->subgraph_id) {
 
@@ -376,7 +377,7 @@ void Inou_abc::gen_subgraph_from_abc(LGraph *new_graph, const LGraph *old_graph,
   }
 }
 
-void Inou_abc::conn_latch(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
+void Pass_abc::conn_latch(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
   Abc_Obj_t *pLatch = nullptr;
   int        i      = 0;
   Abc_NtkForEachLatch(pNtk, pLatch, i) {
@@ -423,7 +424,7 @@ void Inou_abc::conn_latch(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t 
   }
 }
 
-void Inou_abc::conn_primary_output(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
+void Pass_abc::conn_primary_output(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
   Abc_Obj_t *pTerm = nullptr;
   int        i     = 0;
   Abc_NtkForEachPo(pNtk, pTerm, i) {
@@ -443,7 +444,7 @@ void Inou_abc::conn_primary_output(LGraph *new_graph, const LGraph *old_graph, A
   }
 }
 
-void Inou_abc::conn_combinational_cell(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
+void Pass_abc::conn_combinational_cell(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
   Abc_Obj_t *pObj = nullptr;
   int        k    = 0;
   Abc_NtkForEachNode(pNtk, pObj, k) {
@@ -465,7 +466,7 @@ void Inou_abc::conn_combinational_cell(LGraph *new_graph, const LGraph *old_grap
   }
 }
 
-void Inou_abc::connect_constant(LGraph *g, uint32_t value, uint32_t size, const Node_Pin &dst) {
+void Pass_abc::connect_constant(LGraph *g, uint32_t value, uint32_t size, const Node_Pin &dst) {
   Index_ID const_idx;
   if(graph_info->int_const_map.end() == graph_info->int_const_map.find(std::make_pair(value, size))) {
     const_idx = g->create_node().get_nid();
@@ -479,7 +480,7 @@ void Inou_abc::connect_constant(LGraph *g, uint32_t value, uint32_t size, const 
   g->add_edge(const_pin, dst);
 }
 
-Node_Pin Inou_abc::create_pick_operator(LGraph *g, const Node_Pin &driver, int offset, int width) {
+Node_Pin Pass_abc::create_pick_operator(LGraph *g, const Node_Pin &driver, int offset, int width) {
   if(offset == 0 && g->get_bits_pid(driver.get_nid(), driver.get_pid()) == width)
     return driver;
 

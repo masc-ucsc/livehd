@@ -9,16 +9,18 @@
 class Pass {
 private:
 protected:
-  static std::map<std::string, Pass *> passes;
-
 public:
-  Pass(std::string name);
+  Pass() {
+  };
 
   // Transform enhance/changes the lgraph in-situ
-  virtual void    transform(LGraph *orig) = 0;
+  virtual void    trans(LGraph *orig) = 0;
 
   // regenerate, creates a new lgraph db
-  virtual LGraph *regenerate(const LGraph *orig) = 0;
+  virtual LGraph *regen(const LGraph *orig) = 0;
+
+  // Set options for the pass
+  virtual void set(const std::string &key, const std::string &value) = 0;
 };
 
 #endif

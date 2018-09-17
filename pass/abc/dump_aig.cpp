@@ -4,7 +4,7 @@
 //
 
 #include "abc_cell.hpp"
-#include "inou_abc.hpp"
+#include "pass_abc.hpp"
 #include <boost/filesystem.hpp>
 
 const static char ReadLib_Command[]   = "read_library stdcells.genlib";
@@ -37,7 +37,7 @@ static void gen_generic_lib() {
 }
 
 /************************************************************************
- * Function:  Inou_abc::to_abc()
+ * Function:  pass_abc::to_abc()
  * --------------------
  * input arg0 -> const LGraph *g
  *
@@ -45,7 +45,7 @@ static void gen_generic_lib() {
  *
  * description: feed to abc for comb synthesis and mapping
  ***********************************************************************/
-Abc_Ntk_t *Inou_abc::to_abc(const LGraph *g) {
+Abc_Ntk_t *Pass_abc::to_abc(const LGraph *g) {
   Abc_Frame_t *pAbc = nullptr;
   Abc_Ntk_t *  pAig = nullptr;
   Abc_Start();
@@ -126,7 +126,7 @@ Abc_Ntk_t *Inou_abc::to_abc(const LGraph *g) {
 }
 
 /************************************************************************
- * Function:  Inou_abc::gen_NetList()
+ * Function:  Pass_abc::gen_NetList()
  * --------------------
  * input arg0 -> const LGraph *g
  * input arg1 -> Abc_Ntk_t *pAig
@@ -135,32 +135,32 @@ Abc_Ntk_t *Inou_abc::to_abc(const LGraph *g) {
  *
  * description: build the netlist
  ***********************************************************************/
-void Inou_abc::gen_netList(const LGraph *g, Abc_Ntk_t *pAig) {
-  console->info("Inou_abc::gen_primary_io_from_lgraph():Lgraph is calling ABC API to create Primary inputs & outputs");
+void Pass_abc::gen_netList(const LGraph *g, Abc_Ntk_t *pAig) {
+  console->info("Pass_abc::gen_primary_io_from_lgraph():Lgraph is calling ABC API to create Primary inputs & outputs");
   gen_primary_io_from_lgraph(g, pAig);
-  console->info("Inou_abc::gen_latch_from_lgraph():Lgraph is calling ABC API to create latches");
+  console->info("Pass_abc::gen_latch_from_lgraph():Lgraph is calling ABC API to create latches");
   gen_latch_from_lgraph(g, pAig);
-  console->info("Inou_abc::gen_comb_cell_from_lgraph():Lgraph is calling ABC API to create combinational cells");
+  console->info("Pass_abc::gen_comb_cell_from_lgraph():Lgraph is calling ABC API to create combinational cells");
   gen_comb_cell_from_lgraph(g, pAig);
 
-  console->info("Inou_abc::conn_combinational_cell():Lgraph is calling ABC API to connect all combinational cells");
+  console->info("Pass_abc::conn_combinational_cell():Lgraph is calling ABC API to connect all combinational cells");
   conn_combinational_cell(g, pAig);
-  console->info("Inou_abc::conn_latch():Lgraph is calling ABC API to connect all latches");
+  console->info("Pass_abc::conn_latch():Lgraph is calling ABC API to connect all latches");
   conn_latch(g, pAig);
-  console->info("Inou_abc::conn_primary_output():Lgraph is calling ABC API to connect all primary outputs");
+  console->info("Pass_abc::conn_primary_output():Lgraph is calling ABC API to connect all primary outputs");
   conn_primary_output(g, pAig);
-  console->info("Inou_abc::conn_subgraph():Lgraph is calling ABC API to connect all subgraph");
+  console->info("Pass_abc::conn_subgraph():Lgraph is calling ABC API to connect all subgraph");
   conn_subgraph(g, pAig);
-  console->info("Inou_abc::conn_memory():Lgraph is calling ABC API to connect all memory");
+  console->info("Pass_abc::conn_memory():Lgraph is calling ABC API to connect all memory");
   conn_memory(g, pAig);
-  console->info("Inou_abc::conn_clock():Lgraph is calling ABC API to create clock network if generated clock exsit");
+  console->info("Pass_abc::conn_clock():Lgraph is calling ABC API to create clock network if generated clock exsit");
   conn_clock(g, pAig);
-  console->info("Inou_abc::conn_reset():Lgraph is calling ABC API to create reset network if generated clock exsit");
+  console->info("Pass_abc::conn_reset():Lgraph is calling ABC API to create reset network if generated clock exsit");
   conn_reset(g, pAig);
 }
 
 /************************************************************************
- * Function:  Inou_abc::gen_latch
+ * Function:  Pass_abc::gen_latch
  * --------------------
  * input arg0 -> const LGraph *g
  * input arg1 -> Abc_Ntk_t *pAig
@@ -169,7 +169,7 @@ void Inou_abc::gen_netList(const LGraph *g, Abc_Ntk_t *pAig) {
  *
  * description: create Latch nodes from Lgraph
  ***********************************************************************/
-void Inou_abc::gen_latch_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
+void Pass_abc::gen_latch_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
   char namebuffer[64];
   for(const auto &idx : graph_info->latch_id) {
     Abc_Obj_t *pLatch, *pLatchInput, *pLatchOutput;
@@ -212,7 +212,7 @@ void Inou_abc::gen_latch_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
         break;
       } else {
         console->error(
-            "Cannot find register name in the lgraph? check inou_yosys? Use random generated name from ABC\n");
+            "Cannot find register name in the lgraph? check Pass_yosys? Use random generated name from ABC\n");
       }
     }
     std::string latch_name(Abc_ObjName(pNet));
@@ -223,7 +223,7 @@ void Inou_abc::gen_latch_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
 }
 
 /************************************************************************
- * Function:  Inou_abc::gen_primary_io
+ * Function:  Pass_abc::gen_primary_io
  * --------------------
  * input arg0 -> const LGraph *g
  * input arg1 -> Abc_Ntk_t *pAig
@@ -232,7 +232,7 @@ void Inou_abc::gen_latch_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
  *
  * description: create Primary Input & output node from Lgraph
  ***********************************************************************/
-void Inou_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
+void Pass_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
   Abc_Obj_t *pObj;
   char       namebuffer[255];
   for(const auto &idx : graph_info->graphio_output_id) {
@@ -305,7 +305,7 @@ void Inou_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
 }
 
 /************************************************************************
- * Function:  Inou_abc::gen_combinational_cell
+ * Function:  Pass_abc::gen_combinational_cell
  * --------------------
  * input arg0 -> const LGraph *g
  * input arg1 -> Abc_Ntk_t *pAig
@@ -314,7 +314,7 @@ void Inou_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
  *
  * description: create All combinational cell from Lgraph
  ***********************************************************************/
-void Inou_abc::gen_comb_cell_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
+void Pass_abc::gen_comb_cell_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
 
   for(const auto &idx : graph_info->combinational_id) {
     const Tech_cell *tcell = g->get_tlibrary()->get_const_cell(g->tmap_id_get(idx));
@@ -360,7 +360,7 @@ void Inou_abc::gen_comb_cell_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
 }
 
 /************************************************************************
- * Function:  Inou_abc::gen_const
+ * Function:  Pass_abc::gen_const
  * --------------------
  * input arg0 -> const LGraph *g
  * input arg1 -> Abc_PIO key
@@ -372,7 +372,7 @@ void Inou_abc::gen_comb_cell_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
  * 							"key.bits" of the U32Const_Op/StrConst_Op
  * 							and return the node fanout net
  ***********************************************************************/
-Abc_Obj_t *Inou_abc::gen_const_from_lgraph(const LGraph *g, index_offset key, Abc_Ntk_t *pAig) {
+Abc_Obj_t *Pass_abc::gen_const_from_lgraph(const LGraph *g, index_offset key, Abc_Ntk_t *pAig) {
   Abc_Obj_t *pObj = nullptr;
   Abc_Obj_t *pNet = nullptr;
 
@@ -415,7 +415,7 @@ Abc_Obj_t *Inou_abc::gen_const_from_lgraph(const LGraph *g, index_offset key, Ab
 }
 
 /************************************************************************
- * Function:  Inou_abc::gen_pseudo_subgraph_input & gen_pseudo_memory_input
+ * Function:  Pass_abc::gen_pseudo_subgraph_input & gen_pseudo_memory_input
  * --------------------
  * input arg0 -> index_offset& inp
  * input arg2 -> Abc_Ntk_t *pAig
@@ -424,7 +424,7 @@ Abc_Obj_t *Inou_abc::gen_const_from_lgraph(const LGraph *g, index_offset key, Ab
  *
  * description: create a pseduo_input net for subgraph & memory
  ***********************************************************************/
-Abc_Obj_t *Inou_abc::gen_pseudo_subgraph_input(const index_offset &inp, Abc_Ntk_t *pAig) {
+Abc_Obj_t *Pass_abc::gen_pseudo_subgraph_input(const index_offset &inp, Abc_Ntk_t *pAig) {
   if(graph_info->pseduo_record.end() == graph_info->pseduo_record.find(graph_info->subgraph_generated_output_wire[inp])) {
     Abc_Obj_t *pseudo_subgraph_input = Abc_NtkCreatePi(pAig);
     Abc_Obj_t *pNet                  = Abc_NtkCreateNet(pAig);
@@ -440,7 +440,7 @@ Abc_Obj_t *Inou_abc::gen_pseudo_subgraph_input(const index_offset &inp, Abc_Ntk_
   return pwire;
 }
 
-Abc_Obj_t *Inou_abc::gen_pseudo_memory_input(const index_offset &inp, Abc_Ntk_t *pAig) {
+Abc_Obj_t *Pass_abc::gen_pseudo_memory_input(const index_offset &inp, Abc_Ntk_t *pAig) {
   if(graph_info->pseduo_record.find(graph_info->memory_generated_output_wire[inp]) == graph_info->pseduo_record.end()) {
     Abc_Obj_t *pseudo_memory_input = Abc_NtkCreatePi(pAig);
     Abc_Obj_t *pNet                = Abc_NtkCreateNet(pAig);
@@ -457,7 +457,7 @@ Abc_Obj_t *Inou_abc::gen_pseudo_memory_input(const index_offset &inp, Abc_Ntk_t 
 }
 
 /************************************************************************
- * Function:  Inou_abc::conn_combinational_cell
+ * Function:  Pass_abc::conn_combinational_cell
  * --------------------
  * input arg0 -> const LGraph *g
  * input arg2 -> Abc_Ntk_t *pAig
@@ -466,7 +466,7 @@ Abc_Obj_t *Inou_abc::gen_pseudo_memory_input(const index_offset &inp, Abc_Ntk_t 
  *
  * description: connect all the combinational cell based on computed topology
  ***********************************************************************/
-void Inou_abc::conn_combinational_cell(const LGraph *g, Abc_Ntk_t *pAig) {
+void Pass_abc::conn_combinational_cell(const LGraph *g, Abc_Ntk_t *pAig) {
   for(const auto &idx : graph_info->combinational_id) {
     auto src = graph_info->comb_conn[idx];
     for(const auto &inp : src) {
@@ -514,7 +514,7 @@ void Inou_abc::conn_combinational_cell(const LGraph *g, Abc_Ntk_t *pAig) {
 }
 
 /************************************************************************
- * Function:  Inou_abc::conn_latch
+ * Function:  Pass_abc::conn_latch
  * --------------------
  * input arg0 -> const LGraph *g
  * input arg2 -> Abc_Ntk_t *pAig
@@ -523,7 +523,7 @@ void Inou_abc::conn_combinational_cell(const LGraph *g, Abc_Ntk_t *pAig) {
  *
  * description: connect all the sequential cell based on computed topology
  ***********************************************************************/
-void Inou_abc::conn_latch(const LGraph *g, Abc_Ntk_t *pAig) {
+void Pass_abc::conn_latch(const LGraph *g, Abc_Ntk_t *pAig) {
   for(const auto &idx : graph_info->latch_id) {
     auto src = graph_info->latch_conn[idx];
     for(const auto &inp : src) {
@@ -570,7 +570,7 @@ void Inou_abc::conn_latch(const LGraph *g, Abc_Ntk_t *pAig) {
 }
 
 /************************************************************************
- * Function:  Inou_abc::conn_primary_output
+ * Function:  Pass_abc::conn_primary_output
  * --------------------
  * input arg0 -> const LGraph *g
  * input arg2 -> Abc_Ntk_t *pAig
@@ -579,7 +579,7 @@ void Inou_abc::conn_latch(const LGraph *g, Abc_Ntk_t *pAig) {
  *
  * description: connect all the primary output based on computed topology
  ***********************************************************************/
-void Inou_abc::conn_primary_output(const LGraph *g, Abc_Ntk_t *pAig) {
+void Pass_abc::conn_primary_output(const LGraph *g, Abc_Ntk_t *pAig) {
   for(const auto &idx : graph_info->graphio_output_id) {
     auto src       = graph_info->primary_output_conn[idx];
     int  bit_index = 0;
@@ -620,7 +620,7 @@ void Inou_abc::conn_primary_output(const LGraph *g, Abc_Ntk_t *pAig) {
 }
 
 /************************************************************************
- * Function:  Inou_abc::conn_reset
+ * Function:  Pass_abc::conn_reset
  * --------------------
  * input arg0 -> const LGraph *g
  * input arg2 -> Abc_Ntk_t *pAig
@@ -629,7 +629,7 @@ void Inou_abc::conn_primary_output(const LGraph *g, Abc_Ntk_t *pAig) {
  *
  * description: connect all generated reset signal
  ***********************************************************************/
-void Inou_abc::conn_reset(const LGraph *g, Abc_Ntk_t *pAig) {
+void Pass_abc::conn_reset(const LGraph *g, Abc_Ntk_t *pAig) {
   for(const auto &rg : graph_info->reset_group_map) {
     std::string reset_name = rg.first;
     //check if this reset is the graph IO otherwise create it
@@ -649,7 +649,7 @@ void Inou_abc::conn_reset(const LGraph *g, Abc_Ntk_t *pAig) {
 }
 
 /************************************************************************
- * Function:  Inou_abc::conn_clock
+ * Function:  Pass_abc::conn_clock
  * --------------------
  * input arg0 -> const LGraph *g
  * input arg2 -> Abc_Ntk_t *pAig
@@ -658,7 +658,7 @@ void Inou_abc::conn_reset(const LGraph *g, Abc_Ntk_t *pAig) {
  *
  * description: connect all generated clock signal
  ***********************************************************************/
-void Inou_abc::conn_clock(const LGraph *g, Abc_Ntk_t *pAig) {
+void Pass_abc::conn_clock(const LGraph *g, Abc_Ntk_t *pAig) {
   for(const auto &sg : graph_info->skew_group_map) {
     std::string clock_name = sg.first;
     //check if this clock is the graph IO otherwise create it
@@ -678,7 +678,7 @@ void Inou_abc::conn_clock(const LGraph *g, Abc_Ntk_t *pAig) {
 }
 
 /************************************************************************
- * Function:  Inou_abc::conn_subgraph
+ * Function:  Pass_abc::conn_subgraph
  * --------------------
  * input arg0 -> const LGraph *g
  * input arg2 -> Abc_Ntk_t *pAig
@@ -687,7 +687,7 @@ void Inou_abc::conn_clock(const LGraph *g, Abc_Ntk_t *pAig) {
  *
  * description: connect all generated subgraph signal
  ***********************************************************************/
-void Inou_abc::conn_subgraph(const LGraph *g, Abc_Ntk_t *pAig) {
+void Pass_abc::conn_subgraph(const LGraph *g, Abc_Ntk_t *pAig) {
   for(const auto &idx : graph_info->subgraph_id) {
     auto inp_info = graph_info->subgraph_conn[idx];
     for(const auto &src : inp_info) {
@@ -760,7 +760,7 @@ void Inou_abc::conn_subgraph(const LGraph *g, Abc_Ntk_t *pAig) {
 }
 
 /************************************************************************
- * Function:  Inou_abc::conn_memory
+ * Function:  Pass_abc::conn_memory
  * --------------------
  * input arg0 -> const LGraph *g
  * input arg2 -> Abc_Ntk_t *pAig
@@ -769,7 +769,7 @@ void Inou_abc::conn_subgraph(const LGraph *g, Abc_Ntk_t *pAig) {
  *
  * description: connect all generated subgraph signal
  ***********************************************************************/
-void Inou_abc::conn_memory(const LGraph *g, Abc_Ntk_t *pAig) {
+void Pass_abc::conn_memory(const LGraph *g, Abc_Ntk_t *pAig) {
   for(const auto &idx : graph_info->memory_id) {
     auto inp_info = graph_info->memory_conn[idx];
     for(const auto &src : inp_info) {

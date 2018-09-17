@@ -30,7 +30,6 @@ private:
 protected:
   Inou_lef_options opack;
 
-  static void lef_parsing(Tech_library *tlib, std::string &lef_file_name);
 public:
   Inou_lef();
 
@@ -43,6 +42,8 @@ public:
   void set(const std::string &key, const std::string &value) final {
     opack.set(key,value);
   }
+
+  static void lef_parsing(Tech_library *tlib, std::string &lef_file_name);
 };
 
 #endif //LGRAPH_INOU_LEF_HPP

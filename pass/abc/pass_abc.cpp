@@ -4,10 +4,10 @@
 //
 #include <boost/filesystem.hpp>
 
-#include "inou_abc.hpp"
-#include "inou/lef/inou_lef.hpp"
+#include "pass_abc.hpp"
+#include "inou_lef.hpp"
 
-void Inou_abc_options::set(const std::string &key, const std::string &value) {
+void Pass_abc_options::set(const std::string &key, const std::string &value) {
 
   try {
     if ( is_opt(key,"verbose") ) {
@@ -32,51 +32,48 @@ void Inou_abc_options::set(const std::string &key, const std::string &value) {
   console->info("verbose: {}; lef_file {}", verbose, lef_file);
 }
 
-Inou_abc::Inou_abc() {
+Pass_abc::Pass_abc() {
   graph_info = new graph_topology;
 }
 
-Inou_abc::~Inou_abc() {
+Pass_abc::~Pass_abc() {
   delete graph_info;
 }
 
-std::vector<LGraph *> Inou_abc::generate() {
-  std::vector<LGraph *> lgs;
-  if(opack.name != "") {
-    lgs.push_back(new LGraph(opack.path, opack.name, false)); // Do not clear
-    if(opack.lef_file != "") {
-      Inou_lef::lef_parsing(lgs[0]->get_tech_library(), opack.lef_file);
-      lgs[0]->sync(); // sync because Tech Library is loaded
-    }
-  } else {
-    console->error("Please specify the graph name!\n");
-    exit(-4);
+void Pass_abc::trans(LGraph *lg) {
+
+  if(opack.lef_file == "") {
+    console->error("pass_abc.trans needs a lef_def file\n"); 
+    return;
   }
-  return lgs;
+
+  Inou_lef::lef_parsing(lg->get_tech_library(), opack.lef_file);
+  lg->sync(); // sync because Tech Library is loaded
 }
 
-void Inou_abc::generate(std::vector<const LGraph *> &out) {
-  if(out.size() == 1) {
-    if(is_techmap(out[0])) {
-      find_cell_conn(out[0]);
-      LGraph *Mapped_Lgraph = new LGraph(opack.path, opack.name + "_mapped", true);
-      from_abc(Mapped_Lgraph, out[0], to_abc(out[0]));
-      Mapped_Lgraph->sync();
-      Mapped_Lgraph->print_stats();
-      clear();
-      dump_blif(Mapped_Lgraph, "mapped.blif");
-    } else {
-      console->error("inou_abc supports techmap graphs only\n");
-      exit(1);
-    }
-  } else {
-    console->error("inou_abc supports a single graph only\n");
-    exit(1);
+LGraph *Pass_abc::regen(const LGraph *lg) {
+
+  if(!is_techmap(lg)) {
+    console->error("pass_abc.regen supports techmap graphs only\n");
+    return 0;
   }
+
+  find_cell_conn(lg);
+  LGraph *mapped = new LGraph(opack.path, opack.name + "_mapped", true);
+  from_abc(mapped, lg, to_abc(lg));
+  mapped->sync();
+  if (opack.verbose)
+    mapped->print_stats();
+  clear();
+
+  if (!opack.blif_file.empty())
+    dump_blif(mapped, opack.blif_file);
+
+  return mapped;
 }
 
 /************************************************************************
- * Function:  Inou_abc::find_cell_conn()
+ * Function:  Pass_abc::find_cell_conn()
  * --------------------
  * input arg0 -> const LGraph *g
  *
@@ -91,7 +88,7 @@ void Inou_abc::generate(std::vector<const LGraph *> &out) {
  * 							block_conn memory_conn;
  ***********************************************************************/
 
-void Inou_abc::find_latch_conn(const LGraph *g) {
+void Pass_abc::find_latch_conn(const LGraph *g) {
   for(const auto &idx : graph_info->latch_id) {
 	graph_topology::topology_info    pid;
     const Tech_cell *tcell = g->get_tlibrary()->get_const_cell(g->tmap_id_get(idx));
@@ -152,7 +149,7 @@ void Inou_abc::find_latch_conn(const LGraph *g) {
   }
 }
 
-void Inou_abc::find_combinational_conn(const LGraph *g) {
+void Pass_abc::find_combinational_conn(const LGraph *g) {
 
   for(const auto &idx : graph_info->combinational_id) {
     if(opack.verbose)
@@ -180,7 +177,7 @@ void Inou_abc::find_combinational_conn(const LGraph *g) {
   }
 }
 
-void Inou_abc::find_graphio_output_conn(const LGraph *g) {
+void Pass_abc::find_graphio_output_conn(const LGraph *g) {
   for(const auto &idx : graph_info->graphio_output_id) {
     if(opack.verbose)
       fmt::print("\nGraphIO_output_ID NodeID:{} has direct input from Node: \n", idx);
@@ -198,7 +195,7 @@ void Inou_abc::find_graphio_output_conn(const LGraph *g) {
   }
 }
 
-void Inou_abc::find_subgraph_conn(const LGraph *g) {
+void Pass_abc::find_subgraph_conn(const LGraph *g) {
 
   for(const auto &idx : graph_info->subgraph_id) {
     if(opack.verbose)
@@ -233,7 +230,7 @@ void Inou_abc::find_subgraph_conn(const LGraph *g) {
   }
 }
 
-void Inou_abc::find_memory_conn(const LGraph *g) {
+void Pass_abc::find_memory_conn(const LGraph *g) {
   for(const auto &idx : graph_info->memory_id) {
     if(opack.verbose)
       fmt::print("\nMemory_Op NodeID:{} has direct input from Node: \n", idx);
@@ -282,7 +279,7 @@ void Inou_abc::find_memory_conn(const LGraph *g) {
   }
 }
 
-void Inou_abc::find_cell_conn(const LGraph *g) {
+void Pass_abc::find_cell_conn(const LGraph *g) {
 
 #ifndef NDEBUG
   fmt::print("\n******************************************************************\n");
@@ -302,7 +299,7 @@ void Inou_abc::find_cell_conn(const LGraph *g) {
 }
 
 /************************************************************************
- * Function:  Inou_abc::recursive_find()
+ * Function:  Pass_abc::recursive_find()
  * --------------------
  * input arg0 -> const LGraph *g
  * input arg1 -> const Edge *input
@@ -316,7 +313,7 @@ void Inou_abc::find_cell_conn(const LGraph *g) {
  * 						FIXME: More Join & Pick Node means (a way to reduce ?)
  * 						"deeper" traverse depth and recursion
  ***********************************************************************/
-void Inou_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology::topology_info &pid, int *bit_addr) {
+void Pass_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology::topology_info &pid, int *bit_addr) {
 
   Index_ID     this_idx       = input->get_idx();
   Node_Type_Op this_node_type = g->node_type_get(this_idx).op;
@@ -442,7 +439,7 @@ void Inou_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology
 }
 
 /************************************************************************
- * Function:  Inou_abc::is_techmap
+ * Function:  Pass_abc::is_techmap
  * --------------------
  * input arg0 -> const LGraph *g
  *
@@ -451,7 +448,7 @@ void Inou_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology
  * description: iterate the lgraph to see it is a valid graph to pass abc
  *
  ***********************************************************************/
-bool Inou_abc::is_techmap(const LGraph *g) {
+bool Pass_abc::is_techmap(const LGraph *g) {
 
   bool is_valid_input = true;
 
