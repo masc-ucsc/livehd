@@ -14,7 +14,11 @@ protected:
 public:
   Pass(std::string name);
 
-  virtual void transform(LGraph *orig) = 0;
+  // Transform enhance/changes the lgraph in-situ
+  virtual void    transform(LGraph *orig) = 0;
+
+  // regenerate, creates a new lgraph db
+  virtual LGraph *regenerate(const LGraph *orig) = 0;
 };
 
 #endif

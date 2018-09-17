@@ -7,6 +7,22 @@
 
 #include "inou_lef.hpp"
 
+void Inou_lef_options::set(const std::string &key, const std::string &value) {
+
+  try {
+    if ( is_opt(key,"lef_file") ) {
+      lef_file = value;
+    }else{
+      set_val(key,value);
+    }
+  } catch (const std::invalid_argument& ia) {
+    fmt::print("ERROR: key {} has an invalid argument {}\n",key);
+  }
+
+  console->info("inou_lef lef_file:{} path:{} name:{}"
+      ,lef_file, path, name);
+}
+
 static int lef_macro_begin_cb(lefrCallbackType_e c, const char *macroName, lefiUserData ud);
 
 static int lef_macro_cb(lefrCallbackType_e c, lefiMacro *fmacro, lefiUserData ud);
@@ -17,20 +33,6 @@ static int lef_layer_cb(lefrCallbackType_e c, lefiLayer *flayer, lefiUserData ud
 
 static int lef_via_cb(lefrCallbackType_e c, lefiVia *fvia, lefiUserData ud);
 
-Inou_lef_options_pack::Inou_lef_options_pack() {
-  Options::get_desc()->add_options()("lef_file,l", boost::program_options::value(&lef_file),
-                                     "lef_file <filename> for graph");
-
-  boost::program_options::variables_map vm;
-  boost::program_options::store(
-      boost::program_options::command_line_parser(Options::get_cargc(), Options::get_cargv()).options(*Options::get_desc()).allow_unregistered().run(), vm);
-  if(vm.count("lef_file")) {
-    lef_file = vm["lef_file"].as<std::string>();
-  } else {
-    lef_file = "";
-  }
-  console->info("lef_input {}", lef_file);
-}
 
 Inou_lef::Inou_lef() {}
 
@@ -47,11 +49,11 @@ int lef_macro_begin_cb(lefrCallbackType_e c, const char *macroName, lefiUserData
 int lef_macro_cb(lefrCallbackType_e c, lefiMacro *fmacro, lefiUserData ud) {
   assert(c);
   auto *tlib     = static_cast<Tech_library *>(ud);
-  auto &tmp_cell = tlib->get_vec_cell_types()->back();
 
   if(fmacro->hasSize()) {
     assert(false);
 #if 0
+    auto &tmp_cell = tlib->get_vec_cell_types()->back();
     FIXME???
 		tmp_cell.set_dimentions(static_cast<float>(fmacro->sizeX()), static_cast<float>(fmacro->sizeY()));
 #endif
@@ -218,10 +220,10 @@ void Inou_lef::lef_parsing(Tech_library *tlib, std::string &lef_file_name) {
   fclose(fin);
 }
 
-std::vector<LGraph *> Inou_lef::generate() {
+std::vector<LGraph *> Inou_lef::tolg() {
   std::vector<LGraph *> lgs;
-  if(opack.graph_name != "") {
-    lgs.push_back(new LGraph(opack.lgdb_path, opack.graph_name, false));
+  if(opack.name != "") {
+    lgs.push_back(new LGraph(opack.path, opack.name, false));
     lef_parsing(lgs[0]->get_tech_library(), opack.lef_file);
     lgs[0]->sync();
   } else {
@@ -231,8 +233,6 @@ std::vector<LGraph *> Inou_lef::generate() {
   return lgs;
 }
 
-void Inou_lef::generate(std::vector<const LGraph *> &out) {
-  if(out.size() != 0) {
-    fmt::print("lef file synced into tech library!\n");
-  }
+void Inou_lef::fromlg(std::vector<const LGraph *> &out) {
+  assert(false); // TODO: dump lef from lgraph
 }

@@ -15,9 +15,12 @@
 #include "options.hpp"
 #include "tech_library.hpp"
 
-class Inou_lef_options_pack : public Options_pack {
+class Inou_lef_options : public Options_base {
 public:
-  Inou_lef_options_pack();
+  Inou_lef_options() {
+  };
+
+  void set(const std::string &label, const std::string &value) final;
 
   std::string lef_file;
 };
@@ -25,20 +28,21 @@ public:
 class Inou_lef : public Inou {
 private:
 protected:
-  Inou_lef_options_pack opack;
+  Inou_lef_options opack;
 
+  static void lef_parsing(Tech_library *tlib, std::string &lef_file_name);
 public:
   Inou_lef();
 
   virtual ~Inou_lef();
 
-  std::vector<LGraph *> generate() final;
+  std::vector<LGraph *> tolg() final;
 
-  using Inou::generate;
+  void fromlg(std::vector<const LGraph *> &out) final;
 
-  void generate(std::vector<const LGraph *> &out) final;
-
-  static void lef_parsing(Tech_library *tlib, std::string &lef_file_name);
+  void set(const std::string &key, const std::string &value) final {
+    opack.set(key,value);
+  }
 };
 
 #endif //LGRAPH_INOU_LEF_HPP

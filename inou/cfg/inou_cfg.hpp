@@ -1,10 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 //
 // Created by sheng hong  on 4/14/18.
-//
 
-#ifndef LGRAPH_MY_TEST_H
-#define LGRAPH_MY_TEST_H
+#ifndef INOU_CFG_H
+#define INOU_CFG_H
 
 #include <string>
 #include <vector>
@@ -42,22 +41,20 @@ private:
 protected:
   Inou_cfg_options opack;
 
+  void lgraph_2_cfg(const LGraph *g, const std::string &filename);
+
 public:
   Inou_cfg();
   virtual ~Inou_cfg();
 
-  std::vector<LGraph *> generate() final;
-  void lgraph_2_cfg(const LGraph *g, const std::string &filename);
-
-  using Inou::generate;
-
-  virtual void generate(std::vector<const LGraph *> &out) final;
-
-  void set(const std::string &key, const std::string &value) {
+  std::vector<LGraph *> tolg() final;
+  void fromlg(std::vector<const LGraph *> &out) final;
+  void set(const std::string &key, const std::string &value) final {
     opack.set(key,value);
   }
 };
 
+// FIXME: no un-named method in this file
 bool prp_get_value(const std::string& str_in, std::string& str_out, bool &v_signed, uint32_t &explicit_bits, uint32_t &val);
 
-#endif //LGRAPH_MY_TEST_H
+#endif
