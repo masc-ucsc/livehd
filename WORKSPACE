@@ -44,13 +44,6 @@ new_git_repository(
     #strip_prefix = "kernel",
 )
 new_git_repository(
-    name = "pybind11",
-    build_file = "BUILD.pybind11",
-    commit = "55dc131944c764ba7e30085b971a9d70531114b3", # Nov 14, 2017
-    remote = "https://github.com/pybind/pybind11.git",
-    strip_prefix = "include",
-)
-new_git_repository(
     name = "spdlog",
     build_file = "BUILD.spdlog",
     commit = "032035e72f73b232e2fa087dc6021a3732c9f6ae", # June 10, 2018
