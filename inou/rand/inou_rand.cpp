@@ -141,25 +141,25 @@ void Inou_rand::generate(std::vector<const LGraph *> &out) {
 
 void Inou_rand_options::set(const std::string &key, const std::string &value) {
 
-    try {
-      if ( is_opt(key,"seed") ) {
-        const auto &val = std::stoi(value);
-        rand_seed = val;
-      }else if ( is_opt(key,"size") ) {
-        const auto &val = std::stoi(value);
-        rand_size = val;
-      }else if ( is_opt(key,"crate") ) {
-        const auto &val = std::stoi(value);
-        rand_crate = val;
-      }else if ( is_opt(key,"eratio") ) {
-        const auto &val = std::stod(value);
-        rand_eratio = val;
-      }else{
-        set_val(key,value);
-      }
-    } catch (const std::invalid_argument& ia) {
-      fmt::print("ERROR: key {} has an invalid argument {}\n",key);
+  try {
+    if ( is_opt(key,"seed") ) {
+      const auto &val = std::stoi(value);
+      rand_seed = val;
+    }else if ( is_opt(key,"size") ) {
+      const auto &val = std::stoi(value);
+      rand_size = val;
+    }else if ( is_opt(key,"crate") ) {
+      const auto &val = std::stoi(value);
+      rand_crate = val;
+    }else if ( is_opt(key,"eratio") ) {
+      const auto &val = std::stod(value);
+      rand_eratio = val;
+    }else{
+      set_val(key,value);
     }
+  } catch (const std::invalid_argument& ia) {
+    fmt::print("ERROR: key {} has an invalid argument {}\n",key);
+  }
 
   console->info("inou_rand seed:{} size:{} crate:{} eratio:{} lgdb:{} name:{}"
       ,rand_seed, rand_size, rand_crate, rand_eratio, lgdb, name);

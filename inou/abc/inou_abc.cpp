@@ -7,34 +7,23 @@
 #include "inou_abc.hpp"
 #include "inou/lef/inou_lef.hpp"
 
-Inou_abc_options_pack::Inou_abc_options_pack() {
-  Options::get_desc()->add_options()("verbose,v", boost::program_options::value(&verbose), "verbose debug info : <true>/<false>");
+void Inou_abc_options::set(const std::string &key, const std::string &value) {
 
-  Options::get_desc()->add_options()("lef_file,lef", boost::program_options::value(&lef_file),
-                                     "lef_file <filename> for graph");
-
-  Options::get_desc()->add_options()("liberty_file,lib", boost::program_options::value(&liberty_file),
-                                     "liberty_file <filename> for graph");
-
-  boost::program_options::variables_map vm;
-  boost::program_options::store(
-      boost::program_options::command_line_parser(Options::get_cargc(), Options::get_cargv()).options(*Options::get_desc()).allow_unregistered().run(), vm);
-  if(vm.count("verbose")) {
-    verbose = vm["verbose"].as<std::string>();
-  } else {
-    verbose = "false";
-  }
-
-  if(vm.count("lef_file")) {
-    lef_file = vm["lef_file"].as<std::string>();
-  } else {
-    lef_file = "";
-  }
-
-  if(vm.count("liberty_file")) {
-    liberty_file = vm["liberty_file"].as<std::string>();
-  } else {
-    liberty_file = "";
+  try {
+    if ( is_opt(key,"verbose") ) {
+      if (value == "true")
+        verbose = true;
+      else
+        verbose = false;
+    }else if ( is_opt(key,"liberty_file") ) {
+      liberty_file = value;
+    }else if ( is_opt(key,"lef_file") ) {
+      lef_file = value;
+    }else{
+      set_val(key,value);
+    }
+  } catch (const std::invalid_argument& ia) {
+    fmt::print("ERROR: key {} has an invalid argument {}\n",key);
   }
 
   if(lef_file.empty())
@@ -47,18 +36,14 @@ Inou_abc::Inou_abc() {
   graph_info = new graph_topology;
 }
 
-Inou_abc::Inou_abc(const py::dict &dict) {
-  graph_info = new graph_topology;
-}
-
 Inou_abc::~Inou_abc() {
   delete graph_info;
 }
 
 std::vector<LGraph *> Inou_abc::generate() {
   std::vector<LGraph *> lgs;
-  if(opack.graph_name != "") {
-    lgs.push_back(new LGraph(opack.lgdb_path, opack.graph_name, false)); // Do not clear
+  if(opack.name != "") {
+    lgs.push_back(new LGraph(opack.lgdb, opack.name, false)); // Do not clear
     if(opack.lef_file != "") {
       Inou_lef::lef_parsing(lgs[0]->get_tech_library(), opack.lef_file);
       lgs[0]->sync(); // sync because Tech Library is loaded
@@ -74,7 +59,7 @@ void Inou_abc::generate(std::vector<const LGraph *> &out) {
   if(out.size() == 1) {
     if(is_techmap(out[0])) {
       find_cell_conn(out[0]);
-      LGraph *Mapped_Lgraph = new LGraph(opack.lgdb_path, opack.graph_name + "_mapped", true);
+      LGraph *Mapped_Lgraph = new LGraph(opack.lgdb, opack.name + "_mapped", true);
       from_abc(Mapped_Lgraph, out[0], to_abc(out[0]));
       Mapped_Lgraph->sync();
       Mapped_Lgraph->print_stats();
@@ -110,12 +95,12 @@ void Inou_abc::find_latch_conn(const LGraph *g) {
   for(const auto &idx : graph_info->latch_id) {
 	graph_topology::topology_info    pid;
     const Tech_cell *tcell = g->get_tlibrary()->get_const_cell(g->tmap_id_get(idx));
-    if(opack.verbose == "true")
+    if(opack.verbose)
       fmt::print("\nLatch_Op_ID NodeID:{} has direct input from Node: \n", idx);
     std::string trig_pin = tcell->pin_name_exist("C") ? "C" : "E";
     for(const auto &input : g->inp_edges(idx)) {
       if(input.get_inp_pin().get_pid() == tcell->get_pin_id("D")) {
-        if(opack.verbose == "true")
+        if(opack.verbose)
           fmt::print("{} pin input port ID {}", tcell->get_name(input.get_inp_pin().get_pid()),
                      input.get_inp_pin().get_pid());
         int bit_index[2] = {0, 0};
@@ -170,7 +155,7 @@ void Inou_abc::find_latch_conn(const LGraph *g) {
 void Inou_abc::find_combinational_conn(const LGraph *g) {
 
   for(const auto &idx : graph_info->combinational_id) {
-    if(opack.verbose == "true")
+    if(opack.verbose)
       fmt::print("\nComb_Op_ID NodeID:{} has direct input from Node: \n", idx);
     std::vector<const Edge *> inp_edges(16);
 	graph_topology::topology_info             pid;
@@ -184,7 +169,7 @@ void Inou_abc::find_combinational_conn(const LGraph *g) {
     for(int i = 0; i < port_count; i++) {
       if(inp_edges[i] == nullptr)
         break;
-      if(opack.verbose == "true")
+      if(opack.verbose)
         fmt::print("{} pin input port ID {}", tcell->get_name(inp_edges[i]->get_inp_pin().get_pid()),
                    inp_edges[i]->get_inp_pin().get_pid());
       int bit_index[2] = {0, 0};
@@ -197,7 +182,7 @@ void Inou_abc::find_combinational_conn(const LGraph *g) {
 
 void Inou_abc::find_graphio_output_conn(const LGraph *g) {
   for(const auto &idx : graph_info->graphio_output_id) {
-    if(opack.verbose == "true")
+    if(opack.verbose)
       fmt::print("\nGraphIO_output_ID NodeID:{} has direct input from Node: \n", idx);
 	graph_topology::topology_info pid;
     int           width = g->get_bits(idx);
@@ -216,7 +201,7 @@ void Inou_abc::find_graphio_output_conn(const LGraph *g) {
 void Inou_abc::find_subgraph_conn(const LGraph *g) {
 
   for(const auto &idx : graph_info->subgraph_id) {
-    if(opack.verbose == "true")
+    if(opack.verbose)
       fmt::print("\nSubGraph_Op NodeID:{} has direct input from Node: \n", idx);
     std::map<Port_ID, const Edge *>            inp_edges;
     std::unordered_map<Port_ID, graph_topology::topology_info> subgraph_pid;
@@ -227,7 +212,7 @@ void Inou_abc::find_subgraph_conn(const LGraph *g) {
     }
 
     for(const auto &input : inp_edges) {
-      if(opack.verbose == "true")
+      if(opack.verbose)
         fmt::print("\n------------------------------------------------ \n", idx);
 	  graph_topology::topology_info pid;
       auto          node_idx = input.second->get_idx();
@@ -250,7 +235,7 @@ void Inou_abc::find_subgraph_conn(const LGraph *g) {
 
 void Inou_abc::find_memory_conn(const LGraph *g) {
   for(const auto &idx : graph_info->memory_id) {
-    if(opack.verbose == "true")
+    if(opack.verbose)
       fmt::print("\nMemory_Op NodeID:{} has direct input from Node: \n", idx);
     std::map<Port_ID, const Edge *>            inp_edges;
     std::unordered_map<Port_ID, graph_topology::topology_info> memory_pid;
@@ -263,7 +248,7 @@ void Inou_abc::find_memory_conn(const LGraph *g) {
     }
     for(const auto &input : inp_edges) {
       Port_ID input_id = input.second->get_inp_pin().get_pid();
-      if(opack.verbose == "true")
+      if(opack.verbose)
         fmt::print("\n-------------------{}---------------------- \n", input_id);
 	  graph_topology::topology_info pid;
       auto          node_idx = input.second->get_idx();
@@ -336,14 +321,14 @@ void Inou_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology
   Index_ID     this_idx       = input->get_idx();
   Node_Type_Op this_node_type = g->node_type_get(this_idx).op;
   if(this_node_type == U32Const_Op) {
-    if(opack.verbose == "true")
+    if(opack.verbose)
       fmt::print("\t U32Const_Op_NodeID:{},bit [{}:{}] portid : {} \n",
                  input->get_idx(), bit_addr[0], bit_addr[1], input->get_out_pin().get_pid());
 
     index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
     pid.push_back(info);
   } else if(this_node_type == StrConst_Op) {
-    if(opack.verbose == "true")
+    if(opack.verbose)
       fmt::print("\t StrConst_Op_NodeID:{},bit [{}:{}]  portid : {} \n",
                  this_idx, bit_addr[0], bit_addr[1], input->get_out_pin().get_pid());
 
@@ -355,7 +340,7 @@ void Inou_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology
         recursive_find(g, &pre_inp, pid, bit_addr);
       }
     } else {
-      if(opack.verbose == "true")
+      if(opack.verbose)
         fmt::print("\t GraphIO_Op_NodeID:{},bit [{}:{}] portid : {} \n",
                    this_idx, bit_addr[0], bit_addr[1], input->get_out_pin().get_pid());
       index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
@@ -363,7 +348,7 @@ void Inou_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology
     }
   } else if(this_node_type == Memory_Op) {
     char namebuffer[255];
-    if(opack.verbose == "true")
+    if(opack.verbose)
       fmt::print("\t Memory_Op:{},bit [{}:{}] portid : {} \n",
                  this_idx, bit_addr[0], bit_addr[1], input->get_out_pin().get_pid());
     index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
@@ -376,7 +361,7 @@ void Inou_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology
     }
   } else if(this_node_type == SubGraph_Op) {
     char namebuffer[255];
-    if(opack.verbose == "true")
+    if(opack.verbose)
       fmt::print("\t SubGraph_Op:{},bit [{}:{}] portid : {} \n",
                  this_idx, bit_addr[0], bit_addr[1], input->get_out_pin().get_pid());
     index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
@@ -388,7 +373,7 @@ void Inou_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology
 	  graph_info->subgraph_generated_output_wire[info] = std::string(namebuffer);
     }
   } else if(this_node_type == TechMap_Op) {
-    if(opack.verbose == "true")
+    if(opack.verbose)
       fmt::print("\t NodeID:{},bit [{}:{}] portid : {} \n",
                  this_idx, 0, 0, input->get_out_pin().get_pid());
     const Tech_cell * tcell      = g->get_tlibrary()->get_const_cell(g->tmap_id_get(this_idx));
