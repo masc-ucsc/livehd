@@ -2,6 +2,7 @@
 #include <ctype.h>
 #include <algorithm>
 
+#include "spdlog/spdlog.h"
 #include "eprp.hpp"
 
 // rule_path = (\. | alnum | /)+
@@ -17,8 +18,8 @@ bool Eprp::rule_path(std::string &path) {
   do {
     scan_append(path); // Just get the raw text
 
-    bool done = scan_next();
-    if (!done)
+    bool ok = scan_next();
+    if (!ok)
       break;
 
   }while(scan_is_token(TOK_DOT)
@@ -75,13 +76,16 @@ bool Eprp::rule_reg(bool first) {
     variables[var] = last_cmd_var;
   }
 
+  scan_next();
+
   return true;
 }
 
 // rule_cmd_line = alnum (dot alnum)*
 bool Eprp::rule_cmd_line(std::string &path) {
 
-  assert(!scan_is_end());
+  if(scan_is_end())
+    return false;
 
   if (!scan_is_token(TOK_ALNUM))
     return false;
@@ -89,8 +93,8 @@ bool Eprp::rule_cmd_line(std::string &path) {
   do {
     scan_append(path); // Just get the raw text
 
-    bool done = scan_next();
-    if (!done)
+    bool ok = scan_next();
+    if (!ok)
       break;
 
   }while(scan_is_token(TOK_DOT) || scan_is_token(TOK_ALNUM));
@@ -113,6 +117,7 @@ bool Eprp::rule_cmd_full() {
     ;
 
   run_cmd(cmd_line, next_var);
+
   return true;
 }
 
@@ -128,7 +133,7 @@ bool Eprp::rule_pipe() {
   scan_next();
 
   bool try_either = rule_cmd_or_reg(false);
-  if (try_either) {
+  if (!try_either) {
     scan_error(fmt::format("after a pipe there should be a register or a command"));
     return false;
   }
@@ -180,60 +185,63 @@ void Eprp::elaborate() {
       return;
   }
 
+  last_cmd_var.clear();
 };
 
-void Eprp_var::add(const Eprp_dict &_dict) {
-  for (const auto& var : _dict) {
-    add(var.first, var.second);
-  }
-}
+void Eprp::run_cmd(const std::string &cmd, Eprp_var &var) {
 
-void Eprp_var::add(const Eprp_lgs &_lgs) {
-  for (const auto& lg : _lgs) {
-    add(lg);
-  }
-}
-
-void Eprp_var::add(const Eprp_var &_var) {
-  add(_var.lgs);
-  add(_var.dict);
-}
-
-void Eprp_var::add(LGraph *lg) {
-  if (std::find(lgs.begin(), lgs.end(), lg) != lgs.end())
-    lgs.push_back(lg);
-}
-
-void Eprp_var::add(const std::string &name, const std::string &value) {
-  if (name!="" && dict.find(name) != dict.end())
-    fmt::print("WARNING: redundant {} field", name);
-
-  dict[name] = value;
-}
-
-const std::string &Eprp_var::get(const std::string &name) const {
-  const auto &elem = dict.find(name);
-  if (elem == dict.end()) {
-    static const std::string empty("");
-    return empty;
-  }
-  return elem->second;
-}
-
-Eprp_var Eprp::run_cmd(const std::string &cmd, const Eprp_var &var) {
-
-  if (methods.find(cmd) == methods.end()) {
-    scan_error(fmt::format("method {} not registered", cmd));
-
-    return var;
+  const auto &it = methods.find(cmd);
+  if (it == methods.end()) {
+    parser_error(fmt::format("method {} not registered", cmd));
+    return ;
   }
 
-  fmt::print("run_cmd({}...)\n",cmd);
+  const auto &m = it->second;
 
   last_cmd_var.add(var);
 
-  last_cmd_var = methods[cmd](last_cmd_var);
+  std::string err_msg = m.check_labels(last_cmd_var);
+  if (!err_msg.empty()) {
+    parser_error(err_msg);
+    return;
+  }
 
-  return last_cmd_var;
+#if 0
+  for(const auto v:var.dict) {
+    if (!m.has_label(v.first)) {
+      parser_warn(fmt::format("method {} does not have passed label {}", cmd, v.first));
+    }
+  }
+#endif
+
+  m.method(last_cmd_var);
 }
 
+const std::string &Eprp::get_command_help(const std::string &cmd) const {
+  const auto &it = methods.find(cmd);
+  if (it == methods.end()) {
+    static const std::string empty = "";
+    return empty;
+  }
+
+  return it->second.help;
+}
+
+void Eprp::get_commands(std::function<void(const std::string &, const std::string &)> fn) const {
+  for(const auto v:methods) {
+    fn(v.first,v.second.help);
+  }
+}
+
+void Eprp::get_labels(const std::string &cmd, std::function<void(const std::string &, const std::string &, bool required)> fn) const {
+  const auto &it = methods.find(cmd);
+  if (it == methods.end())
+    return;
+
+  for(const auto v:it->second.labels) {
+    fn(v.first, v.second.help, v.second.required);
+  }
+}
+
+Eprp::Eprp() {
+}

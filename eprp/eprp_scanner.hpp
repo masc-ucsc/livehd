@@ -80,20 +80,26 @@ private:
 
   void chunked(const char *_buffer, size_t _buffer_sz, size_t _buffer_start_pos, size_t _buffer_start_line);
 
+  void scan_raw_msg(const std::string &cat, const std::string &text, bool third) const;
 public:
   Eprp_scanner();
 
-  void scan_error(const std::string &text) const;
+  void scan_error(const std::string &text) const { scan_raw_msg("error", text, true); };
+  void scan_warn(const std::string &text) const { scan_raw_msg("warning", text, true); };
+
+  void parser_error(const std::string &text) const { scan_raw_msg("error", text, false); };
+  void parser_warn(const std::string &text) const { scan_raw_msg("warning", text, false); };
 
   bool scan_next();
 
   bool scan_is_end() const {
-    return (scanner_pos+1) >= token_list.size();
+    return scanner_pos >= token_list.size();
   }
 
   bool scan_is_token(Token_id tok) const {
-    assert(scanner_pos< token_list.size());
-    return token_list[scanner_pos].tok == tok;
+    if(scanner_pos< token_list.size())
+      return token_list[scanner_pos].tok == tok;
+    return false;
   }
 
   void scan_append(std::string &text) const;
@@ -113,6 +119,9 @@ public:
   }
 
   void parse(std::string name, const char *memblock, size_t sz);
+  void parse(std::string name, const std::string &str) {
+    parse(name,str.c_str(),str.size());
+  }
 
   virtual void elaborate() = 0;
 };

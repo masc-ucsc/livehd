@@ -6,9 +6,9 @@
 #include <string>
 
 #include "inou.hpp"
-#include "py_options.hpp"
+#include "options.hpp"
 
-class Inou_rand_options : public Py_options {
+class Inou_rand_options : public Options_base {
 public:
   int         rand_seed;
   int         rand_size;
@@ -21,7 +21,7 @@ public:
      rand_crate  = 10;
      rand_eratio = 4;
   }
-  void set(const py::dict &dict) final;
+  void set(const std::string &key, const std::string &value);
 };
 
 class Inou_rand : public Inou {
@@ -36,11 +36,9 @@ public:
   using Inou::generate;
   void generate(std::vector<const LGraph *> &out) final;
 
-  // Python interface
-  Inou_rand(const py::dict &dict);
-
-  std::vector<LGraph *> py_generate() { return generate(); };
-  void py_set(const py::dict &dict);
+  void set(const std::string &key, const std::string &value) {
+    opack.set(key,value);
+  }
 };
 
 #endif

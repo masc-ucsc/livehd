@@ -37,10 +37,10 @@ std::vector<LGraph *> Inou_rand::generate() {
   std::vector<LGraph *> lgs;
 
   LGraph *g=0;
-  if (opack.graph_name.empty())
+  if (opack.name.empty())
     g = new LGraph(opack.lgdb);
   else
-    g = new LGraph(opack.lgdb, opack.graph_name, true); // clear graph
+    g = new LGraph(opack.lgdb, opack.name, true); // clear graph
 
   std::mt19937 rnd;
   rnd.seed(opack.rand_seed);
@@ -134,44 +134,34 @@ std::vector<LGraph *> Inou_rand::generate() {
 
 void Inou_rand::generate(std::vector<const LGraph *> &out) {
 
-  assert(0); // No method to randinly transform a graph, just to generate.
+  assert(0); // No method to randomly transform a graph, just to generate.
 
   out.clear();
 }
 
-Inou_rand::Inou_rand(const py::dict &dict) {
-  opack.set(dict);
-}
-
-void Inou_rand::py_set(const py::dict &dict) {
-  opack.set(dict);
-}
-
-void Inou_rand_options::set(const py::dict &dict) {
-  for (auto item : dict) {
-    const auto &key = item.first.cast<std::string>();
+void Inou_rand_options::set(const std::string &key, const std::string &value) {
 
     try {
       if ( is_opt(key,"seed") ) {
-        const auto &val = item.second.cast<int>();
+        const auto &val = std::stoi(value);
         rand_seed = val;
       }else if ( is_opt(key,"size") ) {
-        const auto &val = item.second.cast<int>();
+        const auto &val = std::stoi(value);
         rand_size = val;
       }else if ( is_opt(key,"crate") ) {
-        const auto &val = item.second.cast<int>();
+        const auto &val = std::stoi(value);
         rand_crate = val;
       }else if ( is_opt(key,"eratio") ) {
-        const auto &val = item.second.cast<double>();
+        const auto &val = std::stod(value);
         rand_eratio = val;
       }else{
-        set_val(key,item.second);
+        set_val(key,value);
       }
     } catch (const std::invalid_argument& ia) {
       fmt::print("ERROR: key {} has an invalid argument {}\n",key);
     }
-  }
-  console->info("inou_rand seed:{} size:{} crate:{} eratio:{} lgdb:{} graph_name:{}"
-      ,rand_seed, rand_size, rand_crate, rand_eratio
-      ,lgdb, graph_name);
+
+  console->info("inou_rand seed:{} size:{} crate:{} eratio:{} lgdb:{} name:{}"
+      ,rand_seed, rand_size, rand_crate, rand_eratio, lgdb, name);
 }
+

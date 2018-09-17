@@ -70,6 +70,14 @@ new_git_repository(
     remote = "https://github.com/tlk00/BitMagic.git",
     strip_prefix = "src",
 )
+
+new_git_repository(
+    name = "replxx",
+    build_file = "BUILD.replxx",
+    commit = "228038cbca2532a35cf3fb596eda0d8335fab212", # September 15, 2018
+    remote = "https://github.com/AmokHuginnsson/replxx.git",
+)
+
 new_git_repository(
     name = "gtest",
     build_file = "BUILD.gtest",

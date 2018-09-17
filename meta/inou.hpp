@@ -2,6 +2,7 @@
 #ifndef INOU_H
 #define INOU_H
 
+#include "lglog.hpp"
 #include "lgraph.hpp"
 #include "options.hpp"
 

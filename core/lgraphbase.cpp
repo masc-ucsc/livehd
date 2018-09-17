@@ -21,6 +21,7 @@ LGraph_Base::LGraph_Base(const std::string &_path, const std::string &_name) noe
 }
 
 LGraph_Base::_init::_init() {
+  fmt::print("LGraph_Base static init done\n");
   // Add here sequence of static initialization that may be needed
 }
 
@@ -438,12 +439,13 @@ void LGraph_Base::print_stats() const {
   // bytes += node_type_op.size() * sizeof(Node_Type_Op);
   // bytes += node_delay.size()    * sizeof(Node_Delay);
 
-  fmt::print("size:{} kbytes:{} bytes/size:{}\n", node_internal.size(), bytes / 1024, bytes / node_internal.size());
-  fmt::print("total root:{} node:{} extra:{}\n", n_roots, n_nodes, n_extra);
-  fmt::print("total bytes/root:{} bytes/node:{} bytes/extra:{}\n", bytes / n_roots, bytes / n_nodes, bytes / n_extra);
+  fmt::print("path:{} name:{}\n", path, name);
+  fmt::print("  size:{} kbytes:{} bytes/size:{}\n", node_internal.size(), bytes / 1024, bytes / node_internal.size());
+  fmt::print("  total root:{} node:{} extra:{}\n", n_roots, n_nodes, n_extra);
+  fmt::print("  total bytes/root:{} bytes/node:{} bytes/extra:{}\n", bytes / n_roots, bytes / n_nodes, bytes / n_extra);
 
   bytes = node_internal.size() * sizeof(Node_Internal);
-  fmt::print("edges bytes/root:{} bytes/node:{} bytes/extra:{}\n", bytes / n_roots, bytes / n_nodes, bytes / n_extra);
+  fmt::print("  edges bytes/root:{} bytes/node:{} bytes/extra:{}\n", bytes / n_roots, bytes / n_nodes, bytes / n_extra);
 }
 
 Index_ID LGraph_Base::get_space_output_pin(Index_ID master_nid, Index_ID start_nid, Port_ID out_pid, Index_ID root_nid) {
