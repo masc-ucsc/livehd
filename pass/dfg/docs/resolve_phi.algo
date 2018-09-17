@@ -1,0 +1,100 @@
+"+ tmp0 $a 0d1"
+    create_node $a
+    create_node 0d1
+    create_node tmp0
+    node_type   tmp0 +
+    connect     $a   tmp0
+    connect     0d1  tmp0
+    set_aux     $a   nid_$a    (auxG)
+    set_aux     0d1  nid_0d1   (auxG) 
+    set_aux     tmp0 nid_tmp0  (auxG)
+    
+"= %o tmp0"
+    get_alias   tmp0 nid_tmp0
+    create_node %o
+    set_aux     %o   nid_%o    (auxG) (x)
+    set_aux     %o   nid_tmp0  (auxG) (o)
+
+"== tmp1 $a 0d5"
+    get_alias   $a   nid_$a
+    create_node 0d5  
+    create_node tmp1
+    node_type   tmp1 ==
+    set_aux     0d5  nid_0d5   (auxG)
+    set_aux     tmp1 nid_tmp1  (auxG)
+    connect     $a   tmp1
+    connect     0d5  tmp1
+
+
+"if tmp1 K6 K9 'K4"
+    cp auxG  -> auxT
+    cp auxG  -> auxF
+    set condition node = tmp1
+
+go BRT:
+"+ tmp2 $a 0d2"
+    get_alias   $a   nid_$a
+    create_node 0d2
+    create_node tmp2
+    node_type   tmp2 +
+    set_aux     0d2  nid_0d2   (auxT)
+    set_aux     tmp2 nid_tmp2  (auxT)
+    connect     $a   tmp2
+    connect     0d2  tmp2
+
+"= %o tmp2"
+    get_alias   tmp2 nid_tmp2
+    set_alias   %o   nid_tmp2  (auxT)
+
+    #BRT will stop at if-merge node
+
+go BRF:
+"+ tmp3 $a 0d3"
+    get_alias   $a   nid_$a
+    create_node 0d3
+    create_node tmp3
+    node_type   tmp3 +
+    set_aux     0d3  nid_0d3   (auxF)
+    set_aux     tmp3 nid_tmp3  (auxF)
+    connect     $a   tmp3
+    connect     0d2  tmp3
+
+"= %o tmp3"
+    get_alias   tmp3 nid_tmp3
+    set_alias   %o   nid_tmp3  (auxF)
+
+    #BRF will stop at if-merge node
+
+
+"at cfg if-merge-node"
+
+#resolve_phi(auxG, auxT, auxF) or (auxG, auxT, auxG)
+
+if(BRF)
+  add_phis(auxG, auxT, auxF)
+else
+  add_phis(auxG, auxT, auxG)
+
+add_phis(auxG, auxT, auxF){
+  for(pairs in auxT)
+    if( (pair changed bt auxG and auxT) or new pair in auxT)
+      add_phi(auxG, auxT, auxF, pair.first)
+      phis_add.insert(alias)
+
+  for(pairs in auxF)
+    if( ((alias changed bt auxG and auxT) or new alias in auxT) and this phi has not been created before )
+      add_phi(auxG, auxT, auxF, pair.first)
+}
+
+  
+add_phi(auxG, auxT, auxF, string var){
+  create mux node
+  mux_i1 = auxT.get_alias(var)
+  mux_i2 = auxF.get_alias(var)
+  mux_sel = condition_node
+
+  auxG->set_alias(var, mux_nid);
+
+}
+
+
