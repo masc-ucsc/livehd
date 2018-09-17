@@ -21,7 +21,7 @@ public:
      rand_crate  = 10;
      rand_eratio = 4;
   }
-  void set(const std::string &key, const std::string &value);
+  void set(const std::string &key, const std::string &value) final;
 };
 
 class Inou_rand : public Inou {

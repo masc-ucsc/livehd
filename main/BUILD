@@ -9,9 +9,10 @@ cc_binary(
             "//eprp:eprp",
             "//meta:meta",
 
-            "//inou/rand:inou_rand",
             "//inou/cfg:inou_cfg",
+            "//inou/json:inou_json",
             "//inou/lef:inou_lef",
+            "//inou/rand:inou_rand",
 
             "//pass/abc:pass_abc",
     ],

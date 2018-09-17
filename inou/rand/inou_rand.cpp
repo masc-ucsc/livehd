@@ -145,17 +145,13 @@ void Inou_rand_options::set(const std::string &key, const std::string &value) {
 
   try {
     if ( is_opt(key,"seed") ) {
-      const auto &val = std::stoi(value);
-      rand_seed = val;
+      rand_seed = std::stoi(value);
     }else if ( is_opt(key,"size") ) {
-      const auto &val = std::stoi(value);
-      rand_size = val;
+      rand_size  = std::stoi(value);
     }else if ( is_opt(key,"crate") ) {
-      const auto &val = std::stoi(value);
-      rand_crate = val;
+      rand_crate = std::stoi(value);
     }else if ( is_opt(key,"eratio") ) {
-      const auto &val = std::stod(value);
-      rand_eratio = val;
+      rand_eratio = std::stod(value);
     }else{
       set_val(key,value);
     }

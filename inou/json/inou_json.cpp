@@ -16,31 +16,22 @@
 #include "rapidjson/filewritestream.h"
 #include "rapidjson/prettywriter.h"
 
-Inou_json_options_pack::Inou_json_options_pack() {
+void Inou_json_options::set(const std::string &key, const std::string &value) {
 
-  Options::get_desc()->add_options()("json_output,o", boost::program_options::value(&json_output), "json output <filename> for graph")("json_input,i", boost::program_options::value(&json_input), "json input <filename> for graph");
-
-  boost::program_options::variables_map vm;
-  boost::program_options::store(
-      boost::program_options::command_line_parser(Options::get_cargc(), Options::get_cargv()).options(*Options::get_desc()).allow_unregistered().run(), vm);
-  if(vm.count("json_output")) {
-    json_output = vm["json_output"].as<std::string>();
-  } else {
-    json_output = "output.json";
+  try {
+    if ( is_opt(key,"input") ) {
+      json_input = value;
+    }else if ( is_opt(key,"output") ) {
+      json_output = value;
+    }else{
+      set_val(key,value);
+    }
+  } catch (const std::invalid_argument& ia) {
+    fmt::print("ERROR: key {} has an invalid argument {}\n",key);
   }
 
-  if(vm.count("json_input") && graph_name != "") {
-    console->error("inou_json can only have a json_input or a graph_name, not both\n");
-    exit(-3);
-  }
-
-  if(vm.count("json_input")) {
-    json_input = vm["json_input"].as<std::string>();
-  } else {
-    json_input = "input.json";
-  }
-
-  console->info("inou_json json_output:{} json_input:{} graph_name:{}", json_output, json_input, graph_name);
+  console->info("inou_json input:{} output:{} path:{} name:{}"
+      ,json_input, json_output, path, name);
 }
 
 Inou_json::Inou_json() {
@@ -164,34 +155,34 @@ void Inou_json::from_json(LGraph *g, rapidjson::Document &document) {
   }
 }
 
-std::vector<LGraph *> Inou_json::generate() {
+std::vector<LGraph *> Inou_json::tolg() {
 
   std::vector<LGraph *> lgs;
-
-  if(opack.graph_name != "") {
-    lgs.push_back(new LGraph(opack.lgdb_path, opack.graph_name, false)); // Do not clear
-                                                                         // No need to sync because it is a reload. Already sync
-  } else {
-    assert(opack.json_input != "");
-
-    lgs.push_back(new LGraph(opack.lgdb_path));
-
-    std::string json_file = opack.json_input;
-
-    FILE *                    pFile = fopen(json_file.c_str(), "rb");
-    char                      buffer[65536];
-    rapidjson::FileReadStream is(pFile, buffer, sizeof(buffer));
-    rapidjson::Document       document;
-    document.ParseStream<0, rapidjson::UTF8<>, rapidjson::FileReadStream>(is);
-
-    from_json(lgs[0], document);
-    lgs[0]->sync();
+  if(opack.name.empty()) {
+    console->error("inou_json::tolg no graph name provided");
+    return lgs;
   }
+
+  lgs.push_back(new LGraph(opack.path, opack.name, false)); // Do not clear
+
+  // No need to sync because it is a reload. Already sync
+  assert(opack.json_input != "");
+
+  std::string json_file = opack.json_input;
+
+  FILE *                    pFile = fopen(json_file.c_str(), "rb");
+  char                      buffer[65536];
+  rapidjson::FileReadStream is(pFile, buffer, sizeof(buffer));
+  rapidjson::Document       document;
+  document.ParseStream<0, rapidjson::UTF8<>, rapidjson::FileReadStream>(is);
+
+  from_json(lgs[0], document);
+  lgs[0]->sync();
 
   return lgs;
 }
 
-void Inou_json::generate(std::vector<const LGraph *> &out) {
+void Inou_json::fromlg(std::vector<const LGraph *> &out) {
   if(out.size() == 1) {
     to_json(out[0], opack.json_output);
   } else {
