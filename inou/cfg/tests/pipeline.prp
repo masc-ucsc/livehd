@@ -1,9 +1,0 @@
-comb_a as simple_add
-stage_b as simple_add
-stage_b as __stage:true
-
-s1 = comb_a.(a:$a, b:$b) 
-s2 = stage_b.(a:s1.sum, b:3)
-
-%total = s2.sum
-
