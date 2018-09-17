@@ -7,17 +7,6 @@ cc_library(
     visibility = ["//visibility:public"],
     includes = ["."],
     deps = [
-        "//meta:meta",
-        "//pyth:py_base"
-    ],
-)
-
-cc_binary(
-    name = "lg2prp",
-    srcs = ["lg2prp.cpp"],
-    linkopts = ['-lpthread'],
-    deps = [
-        ":inou_pyrope",
-        "@boost//:filesystem", "@boost//:program_options",
+        "//meta:meta"
     ],
 )

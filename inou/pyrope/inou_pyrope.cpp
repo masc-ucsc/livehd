@@ -10,16 +10,22 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
-void Inou_pyrope_options::set(const py::dict &dict) {
-  for (auto item : dict) {
-    const auto &key = item.first.cast<std::string>();
-    try {
-      // No custom option for the moment
-      set_val(key,item.second);
-    } catch (const std::invalid_argument& ia) {
-      fmt::print("ERROR: key {} has an invalid argument {}\n",key);
+void Inou_pyrope_options::set(const std::string &key, const std::string &value) {
+
+  try {
+    if (is_opt(key, "input")) {
+      pyrope_input = value;
+    } else if (is_opt(key, "output")) {
+      pyrope_output = value;
+    } else {
+      set_val(key, value);
     }
+  } catch (const std::invalid_argument& ia) {
+    fmt::print("ERROR: key {} has an invalid argument {}\n", key);
   }
+
+  console->info("inou_pyrope input:{} output:{} path:{} name:{}"
+      ,pyrope_input, pyrope_output, path, name);
 }
 
 // FIXME: latch.v, trivial2.v, submodule_offset.v
@@ -28,29 +34,34 @@ void Inou_pyrope_options::set(const py::dict &dict) {
 Inou_pyrope::Inou_pyrope() {
 }
 
-Inou_pyrope::Inou_pyrope(const py::dict &dict) {
+Inou_pyrope::~Inou_pyrope() {
+}
+
+/*Inou_pyrope::Inou_pyrope(const py::dict &dict) {
   opack.set(dict);
 }
 
 void Inou_pyrope::py_set(const py::dict &dict) {
   opack.set(dict);
-}
+}*/
 
-std::vector<LGraph *> Inou_pyrope::generate() {
+std::vector<LGraph *> Inou_pyrope::tolg() {
 
   std::vector<LGraph *> lgs;
 
-  if(opack.graph_name != "") {
-    lgs.push_back(new LGraph(opack.lgdb, opack.graph_name, false)); // Do not clear
+  if(opack.name != "") {
+    lgs.push_back(new LGraph(opack.path, opack.name, false)); // Do not clear
   } else {
-    lgs.push_back(new LGraph("lgdb", "assigns", false)); // Do not clear
+    lgs.push_back(new LGraph("lgdb", "submodule", false)); // Do not clear
    // FIXME: assert(false); // Still not implemented
+   // console->error("inou_pyrope::tolg no graph name provided");
+   // return lgs;
   }
 
   return lgs;
 }
 
-void Inou_pyrope::generate(std::vector<const LGraph *> &out) {
+void Inou_pyrope::fromlg(std::vector<const LGraph *> &out) {
   for(const auto &g : out) {
     to_pyrope(g, opack.pyrope_output);
   }
@@ -207,7 +218,7 @@ bool Inou_pyrope::to_mux(Out_string &w, const LGraph *g, Index_ID idx) const {
 
   w << " if ";
   to_src_var(w, g, c_idx);
-  w << "{ \n   ";
+  w << " { \n   ";
   // ----------- TRUE
   to_dst_var(w, g, idx);
   to_src_var(w, g, t_idx);
@@ -215,7 +226,7 @@ bool Inou_pyrope::to_mux(Out_string &w, const LGraph *g, Index_ID idx) const {
   if (t_idx == f_idx) {
     w << "\n }\n";
   } else {
-    w << "\n }else{\n   ";
+    w << "\n } else {\n   ";
     to_dst_var(w, g, idx);
     to_src_var(w, g, f_idx);
     w << "\n }\n";
@@ -436,7 +447,6 @@ bool Inou_pyrope::to_const(Out_string &w, const LGraph *g, Index_ID idx) const {
 bool Inou_pyrope::to_pick(Out_string &w, const LGraph *g, Index_ID idx) const {
 
   int upper = 0, lower = 0;
-  bool first_val = true;
   for(const auto &c : g->inp_edges(idx)) {
     const auto op = g->node_type_get(c.get_idx());
     if(op.op == U32Const_Op) {
@@ -558,7 +568,7 @@ bool Inou_pyrope::to_subgraph(Out_string &w, Out_string &out, const LGraph *g, I
   const std::string subgraph_name = "inner";
 
   //FIXME: lgs.push_back(new LGraph(opack.lgdb, subgraph_name, false));
-  lgs.push_back(new LGraph("lgdb", "inner", false));
+  lgs.push_back(new LGraph("lgdb", subgraph_name, false));
 
   const char **subgraph_input_names;
   const char **subgraph_output_names;
