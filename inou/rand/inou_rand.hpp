@@ -32,11 +32,10 @@ protected:
 public:
   Inou_rand();
 
-  std::vector<LGraph *> generate() final;
-  using Inou::generate;
-  void generate(std::vector<const LGraph *> &out) final;
+  std::vector<LGraph *> tolg() final;
+  void fromlg(std::vector<const LGraph *> &out) final;
 
-  void set(const std::string &key, const std::string &value) {
+  void set(const std::string &key, const std::string &value) final {
     opack.set(key,value);
   }
 };

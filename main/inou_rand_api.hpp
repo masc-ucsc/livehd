@@ -4,17 +4,17 @@
 
 class Inou_rand_api {
 protected:
-  static void generate(Eprp_var &var) {
+  static void tolg(Eprp_var &var) {
     Inou_rand rand;
 
     for(const auto &l:var.dict) {
       rand.set(l.first,l.second);
     }
 
-    std::vector<LGraph *> lgs = rand.generate();
+    std::vector<LGraph *> lgs = rand.tolg();
 
     if (lgs.empty()) {
-      Main_api::warn(fmt::format("inou.rand.generate could not create a random {} lgraph in {} path", var.get("name"), var.get("path")));
+      Main_api::warn(fmt::format("inou.rand could not create a random {} lgraph in {} path", var.get("name"), var.get("path")));
     }else{
       assert(lgs.size()==1); // rand only generated one graph at a time
       var.add(lgs[0]);
@@ -23,7 +23,7 @@ protected:
 
 public:
   static void setup(Eprp &eprp) {
-    Eprp_method m1("inou.rand", "generate a random lgraph", &Inou_rand_api::generate);
+    Eprp_method m1("inou.rand", "generate a random lgraph", &Inou_rand_api::tolg);
     m1.add_label_optional("path","lgraph path");
     m1.add_label_required("name","lgraph name");
 

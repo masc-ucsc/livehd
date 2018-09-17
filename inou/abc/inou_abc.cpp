@@ -43,7 +43,7 @@ Inou_abc::~Inou_abc() {
 std::vector<LGraph *> Inou_abc::generate() {
   std::vector<LGraph *> lgs;
   if(opack.name != "") {
-    lgs.push_back(new LGraph(opack.lgdb, opack.name, false)); // Do not clear
+    lgs.push_back(new LGraph(opack.path, opack.name, false)); // Do not clear
     if(opack.lef_file != "") {
       Inou_lef::lef_parsing(lgs[0]->get_tech_library(), opack.lef_file);
       lgs[0]->sync(); // sync because Tech Library is loaded
@@ -59,7 +59,7 @@ void Inou_abc::generate(std::vector<const LGraph *> &out) {
   if(out.size() == 1) {
     if(is_techmap(out[0])) {
       find_cell_conn(out[0]);
-      LGraph *Mapped_Lgraph = new LGraph(opack.lgdb, opack.name + "_mapped", true);
+      LGraph *Mapped_Lgraph = new LGraph(opack.path, opack.name + "_mapped", true);
       from_abc(Mapped_Lgraph, out[0], to_abc(out[0]));
       Mapped_Lgraph->sync();
       Mapped_Lgraph->print_stats();

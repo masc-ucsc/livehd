@@ -25,13 +25,13 @@ using std::vector;
 Inou_cfg::Inou_cfg() { }
 Inou_cfg::~Inou_cfg() { }
 
-vector<LGraph *> Inou_cfg::generate() {
+vector<LGraph *> Inou_cfg::tolg() {
   assert(!opack.name.empty());
   assert(!opack.src.empty());
 
   vector<LGraph *> lgs;
 
-  lgs.push_back(new LGraph(opack.lgdb, opack.name, false));
+  lgs.push_back(new LGraph(opack.path, opack.name, false));
   const auto &cfg_file = opack.src;
 
   int fd = open(cfg_file.c_str(), O_RDONLY);
@@ -60,11 +60,8 @@ vector<LGraph *> Inou_cfg::generate() {
   return lgs;
 }
 
-void Inou_cfg::generate(vector<const LGraph *> &lgs) {
-  vector<LGraph *> gend = generate();
-
-  for (const LGraph *g : gend)
-    lgs.push_back(g);
+void Inou_cfg::fromlg(vector<const LGraph *> &lgs) {
+  assert(false); // Maybe in the future, we can generate a CFG from a cfg lgraph. Still not there
 }
 
 void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
@@ -101,7 +98,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
     string dfg_data = p;
 
     if(w3rd != "0" && std::stoi(w3rd) >= lgs.size()) { //create new sub-graph if different scope id
-      lgs.push_back(new LGraph(opack.lgdb, opack.name + std::to_string(lgs.size()), false));
+      lgs.push_back(new LGraph(opack.path, opack.name + std::to_string(lgs.size()), false));
       fmt::print("lgs size:{}\n", lgs.size());
       name2id_gs.resize(name2id_gs.size() + 1);
       chain_stks_gs.resize(chain_stks_gs.size() + 1);
@@ -616,6 +613,6 @@ void Inou_cfg_options::set(const std::string &key, const std::string &value) {
     fmt::print("ERROR: key {} has an invalid argument {}\n",key);
   }
 
-  console->warn("pass_dfg src:{} lgdb:{} name:{}"
-      ,src,lgdb, name);
+  console->warn("pass_dfg src:{} path:{} name:{}"
+      ,src,path, name);
 }

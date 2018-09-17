@@ -4,6 +4,8 @@
 #include <string>
 #include <time.h>
 
+#include <set>
+
 #include "bm.h"
 
 #include "lgraph.hpp"
@@ -32,15 +34,15 @@ struct pin_pair_compare {
   }
 };
 
-std::vector<LGraph *> Inou_rand::generate() {
+std::vector<LGraph *> Inou_rand::tolg() {
 
   std::vector<LGraph *> lgs;
 
   LGraph *g=0;
   if (opack.name.empty())
-    g = new LGraph(opack.lgdb);
+    g = new LGraph(opack.path);
   else
-    g = new LGraph(opack.lgdb, opack.name, true); // clear graph
+    g = new LGraph(opack.path, opack.name, true); // clear graph
 
   std::mt19937 rnd;
   rnd.seed(opack.rand_seed);
@@ -132,7 +134,7 @@ std::vector<LGraph *> Inou_rand::generate() {
   return lgs;
 }
 
-void Inou_rand::generate(std::vector<const LGraph *> &out) {
+void Inou_rand::fromlg(std::vector<const LGraph *> &out) {
 
   assert(0); // No method to randomly transform a graph, just to generate.
 
@@ -161,7 +163,7 @@ void Inou_rand_options::set(const std::string &key, const std::string &value) {
     fmt::print("ERROR: key {} has an invalid argument {}\n",key);
   }
 
-  console->info("inou_rand seed:{} size:{} crate:{} eratio:{} lgdb:{} name:{}"
-      ,rand_seed, rand_size, rand_crate, rand_eratio, lgdb, name);
+  console->info("inou_rand seed:{} size:{} crate:{} eratio:{} path:{} name:{}"
+      ,rand_seed, rand_size, rand_crate, rand_eratio, path, name);
 }
 
