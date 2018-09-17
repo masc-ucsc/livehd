@@ -2,12 +2,12 @@
 //
 // Created by birdeclipse on 1/30/18.
 //
-#ifndef LGRAPH_INOU_ABC_HPP
-#define LGRAPH_INOU_ABC_HPP
+#ifndef LGRAPH_PASS_ABC_HPP
+#define LGRAPH_PASS_ABC_HPP
 
 #include <string>
 
-#include "inou.hpp"
+#include "pass.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraphbase.hpp"
 #include "options.hpp"
@@ -23,23 +23,24 @@ extern "C" {
 }
 #endif
 
-class Inou_abc_options : public Options_base {
+class Pass_abc_options : public Options_base {
 public:
-  Inou_abc_options() {
+  Pass_abc_options() {
     verbose = false;
   };
 
   std::string lef_file;
   std::string liberty_file;
+  std::string blif_file;
   bool verbose;
 
   void set(const std::string &key, const std::string &value);
 };
 
-class Inou_abc : public Inou {
+class Pass_abc : public Pass {
 
 protected:
-  Inou_abc_options opack;
+  Pass_abc_options opack;
 
 public:
 
@@ -184,21 +185,18 @@ public:
 	picks2pin picks;
   };
 
-  Inou_abc();
+  Pass_abc();
 
-  virtual ~Inou_abc();
+  virtual ~Pass_abc();
 
-  std::vector<LGraph *> generate() final;
+  LGraph *regen(const LGraph *lg) final;
+  void    trans(LGraph *lg) final;
 
-  void set(const std::string &key, const std::string &value) {
+  void set(const std::string &key, const std::string &value) final {
     opack.set(key,value);
   }
 
-  using Inou::generate;
-
-  void generate(std::vector<const LGraph *> &out) final;
-
-  void dump_blif(const LGraph *g, const std::string filename);
+  void dump_blif(const LGraph *g, const std::string &filename);
 private:
   graph_topology *graph_info;
 
@@ -293,8 +291,9 @@ private:
 
   void gen_latch_conn(const LGraph *g, std::ofstream &fs);
 
-  void write_src_info(const LGraph *g, const Inou_abc::index_offset &inp, std::ofstream &fs);
+  void write_src_info(const LGraph *g, const Pass_abc::index_offset &inp, std::ofstream &fs);
 
 };
 
-#endif //LGRAPH_INOU_ABC_HPP
+#endif
+

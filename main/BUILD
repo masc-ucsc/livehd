@@ -8,10 +8,12 @@ cc_binary(
             "@replxx//:replxx",
             "//eprp:eprp",
             "//meta:meta",
+
             "//inou/rand:inou_rand",
             "//inou/cfg:inou_cfg",
             "//inou/lef:inou_lef",
-            "//inou/abc:inou_abc",
+
+            "//pass/abc:pass_abc",
     ],
     linkopts = ["-ldl"],
 )
