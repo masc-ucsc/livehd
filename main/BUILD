@@ -12,6 +12,7 @@ cc_binary(
             "//inou/cfg:inou_cfg",
             "//inou/json:inou_json",
             "//inou/lef:inou_lef",
+            "//inou/pyrope:inou_pyrope",
             "//inou/rand:inou_rand",
 
             "//pass/abc:pass_abc",

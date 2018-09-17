@@ -1,30 +1,27 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#ifndef INOU_pyrope_H
-#define INOU_pyrope_H
+#ifndef INOU_PYROPE_H
+#define INOU_PYROPE_H
 
 #include <sstream>
 #include <string>
 
 #include "inou.hpp"
-#include "py_options.hpp"
+#include "options.hpp"
 
-class Inou_pyrope_options : public Py_options {
+class Inou_pyrope_options : public Options_base {
 public:
   std::string pyrope_output;
   std::string pyrope_input;
-//  std::string graph_name;
-//  std::string lgdb_path;
 
   Inou_pyrope_options() {
     pyrope_output = "pyrope_out.prp";
     pyrope_input = "pyrope_in";
   }
-  void set(const py::dict &dict) final;
+  void set(const std::string &key, const std::string &value) final;
 };
 
 class Inou_pyrope : public Inou {
 private:
-
   std::map<Index_ID, std::string> inline_stmt;
 
   typedef std::ostringstream Out_string;
@@ -35,8 +32,7 @@ protected:
   void to_pyrope(const LGraph *g, const std::string filename);
   void to_src_var(Out_string &w, const LGraph *g, Index_ID idx) const;
   void to_dst_var(Out_string &w, const LGraph *g, Index_ID idx) const;
-  void to_normal_var(Out_string &w, const LGraph *g, Index_ID idx) const;
-
+  //void to_normal_var(Out_string &w, const LGraph *g, Index_ID idx) const;
   bool to_mux(Out_string &w, const LGraph *g, Index_ID idx) const;
   bool to_join(Out_string &w, const LGraph *g, Index_ID idx) const;
   bool to_flop(Out_string &w, const LGraph *g, Index_ID idx) const;
@@ -51,18 +47,17 @@ protected:
   bool to_pick(Out_string &w, const LGraph *g, Index_ID idx) const;
   bool to_latch(Out_string &w, const LGraph *g, Index_ID idx) const;
   bool to_op(Out_string &s, Out_string &sub, const LGraph *g, Index_ID idx) const;
+
 public:
   Inou_pyrope();
+  virtual ~Inou_pyrope();
 
-  std::vector<LGraph *> generate() final;
-  using Inou::generate;
-  void generate(std::vector<const LGraph *> &out) final;
+  std::vector<LGraph *> tolg() final;
+  void fromlg(std::vector<const LGraph *> &out) final;
 
-  // Python interface
-  Inou_pyrope(const py::dict &dict);
-
-  std::vector<LGraph *> py_generate() { return generate(); };
-  void py_set(const py::dict &dict);
+  void set(const std::string &key, const std::string &value) final {
+    opack.set(key, value);
+  }
 };
 
 #endif
