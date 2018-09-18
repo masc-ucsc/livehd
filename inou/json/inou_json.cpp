@@ -30,8 +30,7 @@ void Inou_json_options::set(const std::string &key, const std::string &value) {
     fmt::print("ERROR: key {} has an invalid argument {}\n",key);
   }
 
-  console->info("inou_json input:{} output:{} path:{} name:{}"
-      ,json_input, json_output, path, name);
+  console->info("inou_json input:{} output:{} path:{} name:{}", json_input, json_output, path, name);
 }
 
 Inou_json::Inou_json() {

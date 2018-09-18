@@ -14,9 +14,7 @@
 class Inou_cfg_options : public Options_base {
 public:
   std::string src;
-
-  Inou_cfg_options() {
-	}
+  Inou_cfg_options() { }
 
   void set(const std::string &key, const std::string &value);
 };
@@ -29,19 +27,19 @@ private:
   void                     build_graph(std::vector<std::string> &,
                                        std::string &, LGraph *,
                                        std::map<std::string,
-                            uint32_t> &,
+                                       uint32_t> &,
                                        std::map<std::string, Index_ID> &,
                                        std::map<std::string,
-                            std::vector<std::string>> &,
+                                       std::vector<std::string>> &,
                                        Index_ID &);
   void                     cfg_2_lgraph(char **, std::vector<LGraph *> &);
   std::string              encode_cfg_data(const std::string &);
   void                     update_ifs(std::vector<LGraph *> &lgs, std::vector<std::map<std::string, Index_ID>> &node_mappings);
 
 protected:
-  Inou_cfg_options opack;
+  Inou_cfg_options         opack;
 
-  void lgraph_2_cfg(const LGraph *g, const std::string &filename);
+  void                     lgraph_2_cfg(const LGraph *g, const std::string &filename);
 
 public:
   Inou_cfg();

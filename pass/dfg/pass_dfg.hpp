@@ -6,47 +6,50 @@
 #include <unordered_map>
 #include <vector>
 
+#include "pass.hpp"
+#include "lgedge.hpp"
+#include "options.hpp"
+#include "options.hpp"
 #include "cf2df_state.hpp"
 #include "cfg_node_data.hpp"
-#include "options.hpp"
-#include "pass.hpp"
 #include "cfg_node_data.hpp"
-#include "lgedge.hpp"
-#include "py_options.hpp"
 
-class Pass_dfg_options : public Py_options {
+class Pass_dfg_options : public Options_base {
 public:
-  Pass_dfg_options() { }
-  void set(const py::dict &dict) final;
-
   std::string src;
+  Pass_dfg_options() { }
+
+  void set(const std::string &key, const std::string &value);
+
 };
 
 class Pass_dfg : public Pass {
 public:
-  Pass_dfg() : Pass("dfg") { }
-  Pass_dfg(const py::dict &);
+  Pass_dfg():Pass() { }
+  Pass_dfg(const std::string &key, const std::string &value);
 
-  LGraph *     transform();
-  LGraph *     optimize();
-  virtual void transform(LGraph *orig);
-  virtual void optimize (LGraph *orig);
+  LGraph *     generate_dfg(); //calls regen() to generate dfg from cfg
+  LGraph *     regen(const LGraph *orig);
+  void         optimize();     //calls trans() to perform optimization
+  void         trans(LGraph *orig);
   void         cfg_2_dfg(LGraph *dfg, const LGraph *cfg);
   void         test_const_conversion();
 
-  std::vector<LGraph *> py_first_pass() {
-    std::vector<LGraph *> lgs(1);
-    lgs[0] = transform();
-    return lgs;
-  }
+  //std::vector<LGraph *> py_first_pass() {
+  //  std::vector<LGraph *> lgs(1);
+  //  lgs[0] = transform();
+  //  return lgs;
+  //}
 
-  std::vector<LGraph *> py_second_pass() {
-    std::vector<LGraph *> lgs(1);
-    lgs[0] = optimize();
-    return lgs;
-  }
+  //std::vector<LGraph *> py_second_pass() {
+  //  std::vector<LGraph *> lgs(1);
+  //  lgs[0] = optimize();
+  //  return lgs;
+  //}
 
-  void py_set(const py::dict &dict) { opack.set(dict); }
+  void set(const std::string &key, const std::string &value) final {
+    opack.set(key,value);
+  }
 
 protected:
   Pass_dfg_options opack;
@@ -64,9 +67,6 @@ private:
                                                Index_ID node);
 
   void                     process_assign(     LGraph *dfg,
-                                               CF2DF_State *state,
-                                               const CFG_Node_Data &data);
-  void                     process_assign_bk(     LGraph *dfg,
                                                CF2DF_State *state,
                                                const CFG_Node_Data &data);
   void                     process_connections(LGraph *dfg,
@@ -89,8 +89,8 @@ private:
                                                const std::string oprd);
 
   std::vector<Index_ID>    process_operands_bk(   LGraph *dfg,
-                                               CF2DF_State *state,
-                                               const CFG_Node_Data &data);
+                                                  CF2DF_State *state,
+                                                  const CFG_Node_Data &data);
 
   void                     add_phis(           LGraph *dfg,
                                                const LGraph *cfg,

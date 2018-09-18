@@ -603,16 +603,14 @@ void Inou_cfg::update_ifs(vector<LGraph *> &lgs, vector<map<string, Index_ID>> &
 void Inou_cfg_options::set(const std::string &key, const std::string &value) {
 
   try {
-    if (is_opt(key,"src") ) {
-      const auto &val = value;
-      src = val;
-    }else{
+    if (is_opt(key,"src") )
+      src = value;
+    else
       set_val(key,value);
-    }
+
   } catch (const std::invalid_argument& ia) {
     fmt::print("ERROR: key {} has an invalid argument {}\n",key);
   }
 
-  console->warn("pass_dfg src:{} path:{} name:{}"
-      ,src,path, name);
+  console->warn("inou_cfg src:{} path:{} name:{}", src, path, name);
 }

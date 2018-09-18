@@ -16,6 +16,7 @@ cc_binary(
             "//inou/rand:inou_rand",
 
             "//pass/abc:pass_abc",
+            "//pass/dfg:pass_dfg",
     ],
     linkopts = ["-ldl"],
 )

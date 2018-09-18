@@ -16,8 +16,8 @@ protected:
     if (lgs.empty()) {
       Main_api::warn(fmt::format("inou.cfg could not create a {} lgraph in {} path", var.get("name"), var.get("path")));
     }else{
-      for(const auto &l:lgs) {
-        var.add(l);
+      for(const auto &lg:lgs) {
+        var.add(lg);
       }
     }
   }
