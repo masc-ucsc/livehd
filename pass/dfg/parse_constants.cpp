@@ -325,22 +325,22 @@ std::string Pass_dfg::hex_msb_char_to_bin(char c) {
   }
 }
 
-void Pass_dfg_options::set(const py::dict &dict) {
-  for (auto item : dict) {
-    const auto &key = item.first.cast<std::string>();
-
-    try {
-      if (is_opt(key,"src") ) {
-        const auto &val = item.second.cast<std::string>();
-        src = val;
-      }else{
-        set_val(key,item.second);
-      }
-    } catch (const std::invalid_argument& ia) {
-      //fmt::print("ERROR: key {} has an invalid argument {}\n",key);
-    }
-  }
-
-  console->warn("pass_dfg src:{} lgdb:{} graph_name:{}"
-      ,src,lgdb, graph_name);
-}
+//void Pass_dfg_options::set(const py::dict &dict) {
+//  for (auto item : dict) {
+//    const auto &key = item.first.cast<std::string>();
+//
+//    try {
+//      if (is_opt(key,"src") ) {
+//        const auto &val = item.second.cast<std::string>();
+//        src = val;
+//      }else{
+//        set_val(key,item.second);
+//      }
+//    } catch (const std::invalid_argument& ia) {
+//      //fmt::print("ERROR: key {} has an invalid argument {}\n",key);
+//    }
+//  }
+//
+//  console->warn("pass_dfg src:{} lgdb:{} graph_name:{}"
+//      ,src,lgdb, graph_name);
+//}

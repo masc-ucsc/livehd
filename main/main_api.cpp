@@ -8,6 +8,7 @@
 #include "inou_pyrope_api.hpp"
 #include "inou_rand_api.hpp"
 #include "pass_abc_api.hpp"
+#include "pass_dfg_api.hpp"
 
 Eprp Main_api::eprp;
 
@@ -21,5 +22,6 @@ void Main_api::init() {
   Inou_rand_api::setup(eprp);
 
   Pass_abc_api::setup(eprp);
+  Pass_dfg_api::setup(eprp);
 }
 

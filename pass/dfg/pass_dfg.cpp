@@ -9,43 +9,41 @@
 #include "lgedge.hpp"
 #include "lgedgeiter.hpp"
 
-//todo: create a determine_dst_pid()
-//todo: what if signed operation of dst_pid determination?
 
 using std::unordered_map;
 
 unsigned int Pass_dfg::temp_counter = 0;
 
-Pass_dfg::Pass_dfg(const py::dict &dict) : Pass("dfg") { opack.set(dict); }
+Pass_dfg::Pass_dfg(const std::string &key, const std::string &value) : Pass() { opack.set(key,value); }
 
-LGraph * Pass_dfg::transform() {
+LGraph * Pass_dfg::generate_dfg() {
   assert(!opack.src.empty());
 
-  LGraph *cfg = new LGraph(opack.lgdb, opack.src, false);
-  transform(cfg);
+  //LGraph *cfg = new LGraph(opack.path, opack.src, false);
+  const LGraph *cfg = new LGraph(opack.path, opack.src, false);
+  regen(cfg);
   delete cfg;
 
-  LGraph *dfg = new LGraph(opack.lgdb, opack.graph_name, false);
+  LGraph *dfg = new LGraph(opack.path, opack.name, false);
   return dfg;
 }
 
-void Pass_dfg::transform(LGraph *cfg) {
-  assert(!opack.graph_name.empty());
-  LGraph *dfg = new LGraph(opack.lgdb, opack.graph_name, false); // true? should it clear the DFG?
+LGraph *Pass_dfg::regen(const LGraph *cfg) {
+  assert(!opack.name.empty());
+  LGraph *dfg = new LGraph(opack.path, opack.name, false); // true? should it clear the DFG?
 
   cfg_2_dfg(dfg, cfg);
   dfg->sync();
   delete dfg;
 }
 
-LGraph * Pass_dfg::optimize() {
+void  Pass_dfg::optimize() {
   assert(!opack.src.empty());
-  LGraph *dfg = new LGraph(opack.lgdb, opack.src, false);
-  optimize(dfg);
-  return dfg;
+  LGraph *dfg = new LGraph(opack.path, opack.src, false);
+  trans(dfg);
 }
 
-void Pass_dfg::optimize(LGraph *dfg) {
+void Pass_dfg::trans(LGraph *dfg) {
   LGraph* sub_graph = nullptr;
   //resolve pending graph
   for(auto idx : dfg->fast()) {
@@ -509,49 +507,21 @@ std::vector<Index_ID> Pass_dfg::process_operands_bk(LGraph *dfg, CF2DF_State *st
   return oprd_ids;
 }
 
-void Pass_dfg::process_assign_bk(LGraph *dfg, CF2DF_State *state, const CFG_Node_Data &data) {
-  fmt::print("process_assign\n");
-  //process operands
-  auto oprd_ids = process_operands_bk(dfg, state, data);
 
-  //process target: 1.% -> create node 2.unary_op -> set AUX 3. binary_op -> create target node
 
-  const auto &target = data.get_target();
-  const std::string &op = data.get_operator();
-  //bool      is_unary_link_1st = (op == "=" || op == "as" || op == "!" );
-  //bool      is_unary_link_2nd = (op == ":");
-  Index_ID  dst_nid;
 
-  if(is_output(target)){
-    dst_nid = create_output(dfg, state, target);
-  }
-  else if(op == "="){
-    state->set_alias(target,oprd_ids[0]);
-    return; //just aux
-  }
-  else if(op == "!"){
-    state->set_alias(target,oprd_ids[0]);
-    return; //just aux
-  }
-  else if(op == "as"){
-    state->set_alias(target,oprd_ids[0]);
-    return; //just aux
-  }
-  else if(op == ":"){
-    state->set_alias(target,oprd_ids[1]);
-    return; //just aux
-  }
-  else{//binary operator
-    dst_nid = create_node(dfg, state, target);
-    dfg->set_node_instance_name(dst_nid, target);
-    dfg->node_type_set(dst_nid, node_type_from_text(data.get_operator()));
-    fmt::print("create node for internal target:{}, nid:{}\n", target, dst_nid);
+
+void Pass_dfg_options::set(const std::string &key, const std::string &value) {
+  try {
+    if (is_opt(key,"src") )
+      src = value;
+    else
+      set_val(key,value);
+
+  } catch (const std::invalid_argument& ia) {
+    fmt::print("ERROR: key {} has an invalid argument {}\n",key);
   }
 
-  //process connection
-  process_connections(dfg, oprd_ids, dst_nid);
-
-  fmt::print("is_fluid:{}, is_output:{}, is_register:{}\n", state->fluid_df(),is_output(target), is_register(target));
-  if (state->fluid_df() && (is_output(target) || is_register(target)))
-    add_write_marker(dfg, state, target);
+  console->warn("pass_dfg src:{} path:{} name:{}", src, path, name);
 }
+
