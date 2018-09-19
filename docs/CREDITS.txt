@@ -24,5 +24,6 @@ E: rpossign@ucsc.edu
 D: Lead UCSC student for LGRAPH
 Y: 2016-
 
-
+N: Google LLC
+Y: 2018-
 

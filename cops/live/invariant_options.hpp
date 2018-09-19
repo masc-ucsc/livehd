@@ -1,4 +1,3 @@
-//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #ifndef INVARIANT_OPTIONS_H_
 #define INVARIANT_OPTIONS_H_
 
@@ -12,6 +11,12 @@ public:
   std::string elab_lgdb;
   std::string synth_lgdb;
   std::string invariant_file;
+  std::string hierarchical_separator;
+
+  //cluster related options
+  std::string cluster_dir;
+  int         clusters;
+  bool        do_cluster;
 
   Invariant_find_pack();
 };

@@ -1,4 +1,3 @@
-//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include <fstream>
 #include <iostream>
@@ -19,22 +18,24 @@ int main(int argc, const char **argv) {
 
   Options::setup_lock();
 
+  fmt::print("running lginvariant with separator {}\n", pack.hierarchical_separator);
+
   b.sample("setup");
   LGraph *    elab           = LGraph::open_lgraph(pack.elab_lgdb, pack.top);
   LGraph *    synth          = LGraph::open_lgraph(pack.synth_lgdb, pack.top);
   std::string invariant_file = pack.invariant_file;
 
   if(!elab) {
-    console->error("I was not able to open elab netlist {} in {}\n", pack.top.c_str(), pack.elab_lgdb.c_str());
+    console->error("I was not able to open elab netlist {} in {}\n", pack.top, pack.elab_lgdb);
     exit(1);
   }
   if(!synth) {
-    console->error("I was not able to open synth netlist {} in {}\n", pack.top.c_str(), pack.synth_lgdb.c_str());
+    console->error("I was not able to open synth netlist {} in {}\n", pack.top, pack.synth_lgdb);
     exit(1);
   }
   b.sample("read_graphs");
 
-  Invariant_finder     worker(elab, synth);
+  Invariant_finder     worker(elab, synth, pack.hierarchical_separator);
   Invariant_boundaries fibs = worker.get_boundaries();
 
   b.sample("found_invariants");
