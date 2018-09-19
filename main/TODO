@@ -1,0 +1,33 @@
+
+cmd all:
+  support comma separated list
+    dump a:1,2,3,4
+
+cmd echo:
+  rename dump to echo
+
+cmd files:
+  files [path:xx] match:*.v |> echo
+    files:foo1.v,foo2.v,xxx.v  # alphabetical order
+
+cmd rename:
+  echo foo:a |> rename src: foo dst:bar |> echo
+    bar:a
+
+cmd filter:
+  lgraph.open [path:lgdb] [match:*foo] |> filter match:*_flat |> echo
+  open all the lgraphs in path that have a name match
+
+cmd inou.yosys.tolg
+  files match:tes_t*.v |> inou.yosys.tolg [techmap:alumac|full] [path:lgdb] [script:inou_yosys_read.ys] [yosys:yosys]
+
+cmd inou.yosys.fromlg
+  inou.yosys.fromlg [path:lgdb] [dest_path:.] [name:foo] [hierarchy:true]
+
+cmd pass.flatten.regen [path:lgdb] [extension:_flat]
+
+cmd pass.partition.regen [path:lgdb] [extension:_part]
+  create many lgraphs out of a lgraph
+
+cmd
+  file/dir auto completion when *path: *file: script:
