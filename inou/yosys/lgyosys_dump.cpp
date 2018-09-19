@@ -4,9 +4,9 @@
 #include <algorithm>
 
 #include "lgedgeiter.hpp"
-#include "dump_yosys.hpp"
+#include "lgyosys_dump.hpp"
 
-RTLIL::Wire *Dump_yosys::get_wire(Index_ID idx, Port_ID pid, bool can_fail = false) {
+RTLIL::Wire *Lgyosys_dump::get_wire(Index_ID idx, Port_ID pid, bool can_fail = false) {
   //std::pair<Index_ID,Port_ID> nid_pid = std::make_pair(inp_edge.get_idx(), inp_edge.get_out_pin().get_pid());
   std::pair<Index_ID, Port_ID> nid_pid = std::make_pair(idx, pid);
   if(input_map.find(idx) != input_map.end()) {
@@ -27,7 +27,7 @@ RTLIL::Wire *Dump_yosys::get_wire(Index_ID idx, Port_ID pid, bool can_fail = fal
   }
 }
 
-RTLIL::Wire *Dump_yosys::create_tree(const LGraph *g, std::vector<RTLIL::Wire *> &wires,
+RTLIL::Wire *Lgyosys_dump::create_tree(const LGraph *g, std::vector<RTLIL::Wire *> &wires,
                                      RTLIL::Module *mod, add_cell_fnc_sign add_fnc, bool sign, RTLIL::Wire *result_wire) {
 
   if(wires.size() == 0)
@@ -53,7 +53,7 @@ RTLIL::Wire *Dump_yosys::create_tree(const LGraph *g, std::vector<RTLIL::Wire *>
   return create_tree(g, next_level, mod, add_fnc, sign, result_wire);
 }
 
-RTLIL::Wire *Dump_yosys::create_tree(const LGraph *g, std::vector<RTLIL::Wire *> &wires,
+RTLIL::Wire *Lgyosys_dump::create_tree(const LGraph *g, std::vector<RTLIL::Wire *> &wires,
                                      RTLIL::Module *mod, add_cell_fnc add_fnc, RTLIL::Wire *result_wire) {
 
   if(wires.size() == 0)
@@ -80,7 +80,7 @@ RTLIL::Wire *Dump_yosys::create_tree(const LGraph *g, std::vector<RTLIL::Wire *>
 }
 
 
-RTLIL::Wire* Dump_yosys::create_wire(const LGraph *g, const Index_ID idx, RTLIL::Module* module, bool input, bool output) {
+RTLIL::Wire* Lgyosys_dump::create_wire(const LGraph *g, const Index_ID idx, RTLIL::Module* module, bool input, bool output) {
 
   RTLIL::IdString name;
 
@@ -111,7 +111,7 @@ RTLIL::Wire* Dump_yosys::create_wire(const LGraph *g, const Index_ID idx, RTLIL:
   return new_wire;
 }
 
-void Dump_yosys::to_yosys(const LGraph *g) {
+void Lgyosys_dump::to_yosys(const LGraph *g) {
   std::string name = g->get_name().substr(7);
 
   RTLIL::Module *module = design->addModule("\\" + name);
@@ -1137,7 +1137,7 @@ void Dump_yosys::to_yosys(const LGraph *g) {
     }
 
     default:
-      log_error("Operation %s (node = %ld) not supported, please add to dump_yosys.\n", g->node_type_get(idx).get_name().c_str(), idx);
+      log_error("Operation %s (node = %ld) not supported, please add to lgyosys_dump.\n", g->node_type_get(idx).get_name().c_str(), idx);
       break;
     }
   }

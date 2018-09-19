@@ -151,7 +151,7 @@ bool Eprp::rule_cmd_or_reg(bool first) {
   return rule_cmd_full();
 }
 
-// rule_top = rule_cmd_or_reg(first) rule_pipe+
+// rule_top = rule_cmd_or_reg(first) rule_pipe*
 bool Eprp::rule_top() {
 
   bool try_either = rule_cmd_or_reg(true);
@@ -164,10 +164,13 @@ bool Eprp::rule_top() {
   if (!try_pipe) {
     if (scan_is_token(TOK_OR)) {
       scan_error(fmt::format("eprp pipe is |> not |"));
+      return false;
+    }else if (scan_is_end()) {
+      return true;
     }else{
-      scan_error(fmt::format("missing pipe operation. At least @foo |> @bar"));
+      scan_error(fmt::format("invalid command"));
+      return false;
     }
-    return false;
   }
 
   while(rule_pipe())
