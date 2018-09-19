@@ -1,4 +1,3 @@
-//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #ifndef INVARIANT_H_
 #define INVARIANT_H_
 
@@ -43,8 +42,11 @@ public:
   std::map<Gate_ID, uint32_t> gate_appearances; //shared_gates
 
   std::string top;
+  std::string hierarchical_separator;
 
   Invariant_boundaries() {}
+
+  Invariant_boundaries(const std::string &hier_sep) : hierarchical_separator(hier_sep) {}
 
   static void                  serialize(Invariant_boundaries *ib, std::ostream &ofs);
   static Invariant_boundaries *deserialize(std::istream &ifs);
@@ -56,11 +58,11 @@ public:
     return g->get_name();
   }
 
-  static LGraph *get_graph(Graph_ID id, std::string lgdb) {
+  static LGraph *get_graph(Graph_ID id, const std::string& lgdb) {
     return LGraph::find_graph(id, lgdb);
   }
 
-  bool is_invariant_boundary(Net_ID net) {
+  bool is_invariant_boundary(Net_ID net) const {
     if(net.first == 0)
       return false;
 

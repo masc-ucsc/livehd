@@ -1,6 +1,4 @@
-//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-//serialization stuff
 #include <boost/archive/text_iarchive.hpp>
 #include <boost/archive/text_oarchive.hpp>
 #include <boost/serialization/base_object.hpp>
@@ -128,6 +126,7 @@ Invariant_boundaries *Invariant_boundaries::deserialize(std::istream &ifs) {
 template <class Archive>
 void Invariant_boundaries::serialize(Archive &ar, const unsigned int version) {
   ar &top;
+  ar &hierarchical_separator;
   ar &hierarchy_tree;
   ar &gate_appearances;
   ar &instance_collection;
