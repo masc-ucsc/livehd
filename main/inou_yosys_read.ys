@@ -1,0 +1,14 @@
+# This is the default yosys script used to read from yosys to lgraph (yosys2lg)
+
+read_verilog -sv FILE_LIST
+hierarchy -top TOP
+proc
+pmuxtree
+memory_dff
+memory_collect
+#alumacc
+#techmap -map techmap.v
+#abc
+#maccmap -unmap
+#write_verilog f4.v
+
