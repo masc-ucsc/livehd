@@ -19,10 +19,8 @@
 void Inou_json_options::set(const std::string &key, const std::string &value) {
 
   try {
-    if ( is_opt(key,"input") ) {
-      json_input = value;
-    }else if ( is_opt(key,"output") ) {
-      json_output = value;
+    if ( is_opt(key,"file") ) {
+      json_file = value;
     }else{
       set_val(key,value);
     }
@@ -30,7 +28,7 @@ void Inou_json_options::set(const std::string &key, const std::string &value) {
     fmt::print("ERROR: key {} has an invalid argument {}\n",key);
   }
 
-  console->info("inou_json input:{} output:{} path:{} name:{}", json_input, json_output, path, name);
+  console->info("inou_json file:{} path:{} name:{}" ,json_file, path, name);
 }
 
 Inou_json::Inou_json() {
@@ -165,9 +163,8 @@ std::vector<LGraph *> Inou_json::tolg() {
   lgs.push_back(new LGraph(opack.path, opack.name, false)); // Do not clear
 
   // No need to sync because it is a reload. Already sync
-  assert(opack.json_input != "");
 
-  std::string json_file = opack.json_input;
+  const std::string &json_file = opack.json_file;
 
   FILE *                    pFile = fopen(json_file.c_str(), "rb");
   char                      buffer[65536];
@@ -183,10 +180,10 @@ std::vector<LGraph *> Inou_json::tolg() {
 
 void Inou_json::fromlg(std::vector<const LGraph *> &out) {
   if(out.size() == 1) {
-    to_json(out[0], opack.json_output);
+    to_json(out[0], opack.json_file);
   } else {
     for(const auto &g : out) {
-      std::string file = g->get_name() + "_" + opack.json_output;
+      std::string file = g->get_name() + "_" + opack.json_file;
       to_json(g, file);
     }
   }

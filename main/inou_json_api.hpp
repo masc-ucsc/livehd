@@ -13,7 +13,7 @@ protected:
       json.set(l.first,l.second);
     }
 
-    if(access(var.get("input").c_str(), R_OK) == -1) {
+    if(access(var.get("file").c_str(), R_OK) == -1) {
       Main_api::error(fmt::format("inou.json. could not open json file named {}",var.get("input")));
       return;
     }
@@ -39,6 +39,21 @@ protected:
     for(const auto &l:var.lgs) {
       lgs.push_back(l);
     }
+    const std::string &name = var.get("name");
+    if (name.empty() && lgs.empty()) {
+      Main_api::warn(fmt::format("inou.json.fromlg needs an input lgraph. Either name or |> from lgraph.open"));
+      return;
+    }if (!name.empty() && lgs.empty()) {
+      std::string path = var.get("path");
+      if (path.empty())
+        path = "lgdb";
+      LGraph *lg = LGraph::open_lgraph(path, name);
+      if (lg==0) {
+        Main_api::warn(fmt::format("inou.json.fromlg could not open {}/{} lgraph",path,name));
+        return;
+      }
+      lgs.push_back(lg);
+    }
 
     json.fromlg(lgs);
   }
@@ -49,7 +64,7 @@ public:
     m1.add_label_optional("path","lgraph path");
     m1.add_label_required("name","lgraph name");
 
-    m1.add_label_optional("input","json input file");
+    m1.add_label_optional("file","json input file");
 
     eprp.register_method(m1);
 
@@ -57,7 +72,7 @@ public:
     m2.add_label_optional("path","lgraph path");
     m2.add_label_required("name","lgraph name");
 
-    m2.add_label_optional("output","json output file");
+    m2.add_label_optional("file","json output file");
 
     eprp.register_method(m2);
   }

@@ -1,8 +1,8 @@
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 cc_library(
-    name = "inou_yosys",
-    srcs = glob(["*.cpp"]),
-    hdrs = glob(["*.hpp"]),
+    name = "lgyosys",
+    srcs = glob(["lgyosys*.cpp"]),
+    hdrs = glob(["lgyosys*.hpp"]),
     #alwayslink=1,
     defines = ["_YOSYS_","YOSYS_ENABLE_PLUGINS"],
     visibility = ["//visibility:public"],
@@ -16,7 +16,7 @@ load("//tools:linkso.bzl", "linkso")
 
 linkso(
     name = "liblgraph_yosys",
-    srcs   = [":inou_yosys", "//core:core","//meta:meta"],
+    srcs   = [":lgyosys", "//core:core","//meta:meta"],
     static = ["@boost//:system" , "@boost//:filesystem", "@boost//:program_options"],
 )
 

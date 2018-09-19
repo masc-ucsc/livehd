@@ -53,12 +53,12 @@ static std::map<Value_size, Index_ID> int_const_map;
 static std::map<std::string, uint32_t> used_names;
 #endif
 
-static void look_for_module_outputs(RTLIL::Module *module, const std::string &output_directory) {
+static void look_for_module_outputs(RTLIL::Module *module, const std::string &path) {
 #ifndef NDEBUG
-  log("inou_yosys look_for_module_outputs pass for module %s:\n", module->name.c_str());
+  log("yosys2lg look_for_module_outputs pass for module %s:\n", module->name.c_str());
 #endif
   std::string name = &module->name.c_str()[1];
-  auto *      g    = module2graph[name];
+  auto          *g = module2graph[name];
 
   for(auto &wire_iter : module->wires_) {
     RTLIL::Wire *wire = wire_iter.second;
@@ -392,7 +392,7 @@ static void connect_string(LGraph *g, const char *value, Index_ID onid, Port_ID 
 static void look_for_cell_outputs(RTLIL::Module *module) {
 
 #ifndef NDEBUG
-  log("inou_yosys look_for_cell_outputs pass for module %s:\n", module->name.c_str());
+  log("yosys2lg look_for_cell_outputs pass for module %s:\n", module->name.c_str());
 #endif
 
   auto *              g    = module2graph[&module->name.c_str()[1]];
@@ -552,7 +552,7 @@ static Node_Pin create_join_operator(LGraph *g, const RTLIL::SigSpec &ss) {
 // this function is called for each module in the design
 static LGraph *process_module(RTLIL::Module *module) {
 #ifndef NDEBUG
-  log("inou_yosys pass for module %s:\n", module->name.c_str());
+  log("yosys2lg pass for module %s:\n", module->name.c_str());
   printf("process_module %s\n", module->name.c_str());
 #endif
 
@@ -887,7 +887,7 @@ static LGraph *process_module(RTLIL::Module *module) {
         g->set_node_instance_name(inid, inst_name.c_str());
 #ifndef NDEBUG
       else
-        fmt::print("inou_yosys got empty inst_name for cell type {}\n", mod_name);
+        fmt::print("yosys2lg got empty inst_name for cell type {}\n", mod_name);
 #endif
 
     } else if(tlib->include(cell->type.str())) {
@@ -951,7 +951,7 @@ static LGraph *process_module(RTLIL::Module *module) {
               std::strncmp(cell->type.c_str(), "$_DFF_PN", 8) == 0) {
 
       //FIXME: add support for those DFF types
-      log_error("Found complex yosys DFFs, run `techmap -map +/adff2dff.v` before calling the inou_yosys pass\n");
+      log_error("Found complex yosys DFFs, run `techmap -map +/adff2dff.v` before calling the yosys2lg pass\n");
       assert(false);
 
     } else {
@@ -1173,26 +1173,39 @@ static LGraph *process_module(RTLIL::Module *module) {
 }
 
 // each pass contains a singleton object that is derived from Pass
-struct Inou_Yosys_Pass : public Pass {
-  Inou_Yosys_Pass() : Pass("inou_yosys") {}
+struct Yosys2lg_Pass : public Pass {
+  Yosys2lg_Pass() : Pass("yosys2lg") {}
   virtual void help() {
     //   |---v---|---v---|---v---|---v---|---v---|---v---|---v---|---v---|---v---|---v---|
     log("\n");
-    log("    inou_yosys [options] output_file\n");
+    log("    yosys2lg [options]\n");
     log("\n");
-    log("Write an lgraph from the selected modules.\n");
+    log("Write multiple lgraph from the selected modules.\n");
+    log("\n");
+    log("    -path [default=lgdb]\n");
+    log("        Specify from which path to read\n");
     log("\n");
     log("\n");
   }
 
   virtual void execute(std::vector<std::string> args, RTLIL::Design *design) {
     // variables to mirror information from passed options
-    log_header(design, "Executing inou_yosys pass (convert from yosys to lgraph).\n");
+    log_header(design, "Executing yosys2lg pass (convert from yosys to lgraph).\n");
 
-    std::string output_directory = "lgdb";
+    // parse options
+    size_t      argidx;
+    std::string path = "lgdb";
+
+    for(argidx = 1; argidx < args.size(); argidx++) {
+      if(args[argidx] == "-path") {
+        path = args[++argidx];
+        continue;
+      }
+      break;
+    }
 
     // handle extra options (e.g. selection)
-    extra_args(args, 2, design);
+    extra_args(args, argidx, design);
 
     module2graph.clear();
 
@@ -1201,10 +1214,10 @@ struct Inou_Yosys_Pass : public Pass {
       std::string    name   = &module->name.c_str()[1];
       assert(module2graph.find(name) == module2graph.end());
 
-      auto *g            = new LGraph(output_directory, name, true); // Clear in yosys. Regen
+      auto *g            = new LGraph(path, name, true); // Clear in yosys. Regen
       module2graph[name] = g;
-  log("inou_yosys look_for_module_outputs pass for module %s:\n", module->name.c_str());
-      look_for_module_outputs(module, output_directory);
+      log("yosys2lg look_for_module_outputs pass for module %s:\n", module->name.c_str());
+      look_for_module_outputs(module, path);
     }
 
     for(auto &it : design->modules_) {
@@ -1212,9 +1225,10 @@ struct Inou_Yosys_Pass : public Pass {
       used_names.clear();
 #endif
       RTLIL::Module *module = it.second;
+        log("yosys2lg NOT look_for_cell_outputs pass for module %s:\n", module->name.c_str());
       if(design->selected_module(it.first)) {
 #ifndef NDEBUG
-        log("inou_yosys look_for_cell_outputs pass for module %s:\n", module->name.c_str());
+        log("yosys2lg look_for_cell_outputs pass for module %s:\n", module->name.c_str());
         console->info("now processing module {}\n", module->name.str());
 #endif
         look_for_cell_outputs(module);
@@ -1232,6 +1246,6 @@ struct Inou_Yosys_Pass : public Pass {
       picks.clear();
     }
   }
-} Inou_Yosys_Pass;
+} Yosys2lg_Pass;
 
 PRIVATE_NAMESPACE_END

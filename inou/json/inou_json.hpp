@@ -14,13 +14,11 @@
 
 class Inou_json_options : public Options_base {
 public:
-  Inou_json_options() {
-    json_output = "output.json";
-    json_input  = "input.json";
+  Inou_json_options()
+    : json_file("file.json") {
   }
 
-  std::string json_output;
-  std::string json_input;
+  std::string json_file;
 
   void set(const std::string &key, const std::string &value) final;
 };

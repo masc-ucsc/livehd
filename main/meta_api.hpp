@@ -28,7 +28,7 @@ protected:
     LGraph *lg = LGraph::open_lgraph(path,name);
 
     if (lg==0) {
-      Main_api::error(fmt::format("lgraph.open could not create {} lgraph in {} path", name, path));
+      Main_api::error(fmt::format("lgraph.open could not open {} lgraph in {} path", name, path));
       return;
     }
 
@@ -37,7 +37,6 @@ protected:
 
   static void stats(Eprp_var &var) {
 
-      fmt::print("2.stats\n");
     for(const auto &lg:var.lgs) {
       assert(lg);
       lg->print_stats();

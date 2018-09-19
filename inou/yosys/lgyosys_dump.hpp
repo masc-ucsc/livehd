@@ -7,12 +7,11 @@
 
 #include "kernel/rtlil.h"
 #include "kernel/yosys.h"
-//#include "third_party/subs/anubis/yosys/kernel/rtlil.h"
 
 USING_YOSYS_NAMESPACE
 //PRIVATE_NAMESPACE_BEGIN
 
-class Dump_yosys : public Inou_trivial {
+class Lgyosys_dump : public Inou {
 private:
   RTLIL::Design *design;
   RTLIL::Wire *  get_wire(Index_ID idx, Port_ID pid, bool can_fail);
@@ -24,7 +23,7 @@ private:
   std::map<std::pair<Index_ID, Port_ID>, RTLIL::Wire *> cell_output_map;
   std::map<Index_ID, std::vector<RTLIL::SigChunk>>      mem_output_map;
 
-  std::set<LGraph *> _subgraphs;
+  std::set<const LGraph *> _subgraphs;
 
   uint64_t ids = 0;
 
@@ -47,31 +46,36 @@ private:
   RTLIL::Wire *create_wire(const LGraph* g, const Index_ID idx, RTLIL::Module* module, bool input, bool output);
 protected:
 public:
-  Dump_yosys(RTLIL::Design *design, Options_pack opt, bool hier = false) : Inou_trivial(opt), design(design) {
+  Lgyosys_dump(RTLIL::Design *design, bool hier = false) : design(design) {
     hierarchy = hier;
   };
 
-  void generate(std::vector<const LGraph *> &out) final {
+  void fromlg(std::vector<const LGraph *> &out) final {
     for(const auto &g : out) {
       std::cout << g->get_name() << std::endl;
       to_yosys(g);
     }
   }
 
+  std::vector<LGraph *> tolg() final {
+    assert(false);
+  };
+
+  /*
   void generate(std::vector<LGraph *> out) {
     for(auto &g : out) {
       std::cout << g->get_name() << std::endl;
       to_yosys(const_cast<LGraph *>(g));
     }
-  }
+  }*/
 
-  void py_generate(const LGraph *g) { to_yosys(g); }
-
-  using Inou_trivial::generate;
-
-  const std::set<LGraph *> subgraphs() const {
+  const std::set<const LGraph *> subgraphs() const {
     return _subgraphs;
   }
+
+  virtual void set(const std::string &key, const std::string &value) final {
+    assert(false); // No main_api interface for this module as it uses yosys plug-ins
+  };
 };
 
 //PRIVATE_NAMESPACE_END

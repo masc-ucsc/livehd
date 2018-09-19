@@ -164,7 +164,7 @@ if [ ${OPT_TO_VERILOG} -eq 0 ]; then
   ${OPT_YOSYS} -ql ${OPT_LOGDIR}/${BASE}.log  -m $OPT_INOU_YOSYS -p "
   ${OPT_INCDIR}; ${OPT_READVERILOG} -sv -nomeminit ${FILE_LIST};
   hierarchy ${top}; proc; pmuxtree; memory_dff; memory_collect; ${techmap}; ${lib};
-  write_blif golden.blif; write_verilog golden.v ; inou_yosys ${OPT_LGDB}"
+  write_blif golden.blif; write_verilog golden.v ; yosys2lg -path ${OPT_LGDB}"
 
   if [ $? -eq 0 ]; then
     echo "Successfully parsed yosys file "$a
@@ -176,7 +176,7 @@ if [ ${OPT_TO_VERILOG} -eq 0 ]; then
 else
 
     BASE=${OPT_GRAPH_INPUT}_to_yosys
-    ${OPT_YOSYS} -ql ${OPT_LOGDIR}/${BASE}.log  -m $OPT_INOU_YOSYS -p "dump_yosys ${OPT_HIERARCHY} -graph_name ${OPT_GRAPH_INPUT}; write_verilog ${OPT_GRAPH_INPUT}_dirty.v; opt -fast; opt_clean -purge; write_verilog ${OPT_GRAPH_INPUT}.v;"
+    ${OPT_YOSYS} -ql ${OPT_LOGDIR}/${BASE}.log  -m $OPT_INOU_YOSYS -p "lg2yosys ${OPT_HIERARCHY} -name ${OPT_GRAPH_INPUT}; write_verilog ${OPT_GRAPH_INPUT}_dirty.v; opt -fast; opt_clean -purge; write_verilog ${OPT_GRAPH_INPUT}.v;"
     if [ $? -eq 0 ]; then
       echo "Successfully generated verilog file ${OPT_GRAPH_INPUT}.v"
     else
