@@ -261,8 +261,6 @@ const Node_Type &LGraph_Node_Type::node_type_get(Index_ID nid) const {
   assert(nid < node_type_table.size());
   assert(node_internal[nid].is_node_state());
   assert(node_internal[nid].is_root());
-  assert(node_internal[nid].get_nid() == nid);
-
   assert(node_internal[nid].get_nid() < node_type_table.size());
 
   Node_Type_Op op = node_type_table[node_internal[nid].get_nid()];
