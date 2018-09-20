@@ -186,6 +186,7 @@ static void set_bits_wirename(LGraph *g, const Index_ID idx, const RTLIL::Wire *
   if(!wire)
     return;
 
+  std::regex dc_name("(\\|/)n(\\d\\+)|^N(\\d\\+)");
   if(!wire->port_input && !wire->port_output) {
 
 #ifndef NDEBUG
@@ -225,6 +226,9 @@ static void set_bits_wirename(LGraph *g, const Index_ID idx, const RTLIL::Wire *
         wire->name.str().substr(0, 9) != "$procmux$" &&
         wire->name.str().substr(0, 9) != "$ternary$" &&
         wire->name.str().substr(0, 8) != "$extend$" &&
+
+        //dc generated names
+        !std::regex_match(wire->name.str(), dc_name) &&
 
         //skip chisel generated names
         wire->name.str().substr(0, 5) != "_GEN_" &&
@@ -290,6 +294,9 @@ static bool is_black_box_output(const RTLIL::Module *module, const RTLIL::Cell *
 
   //global input
   if(wire->port_input)
+    return false;
+
+  if(wire2lpin.find(wire) != wire2lpin.end())
     return false;
 
   assert(false); // FIXME: is it possible to resolve this case?
@@ -464,6 +471,9 @@ static void look_for_cell_outputs(RTLIL::Module *module) {
         pid = tcell->get_out_id(&(conn.first.c_str()[1]));
       }
       Index_ID port_nid = g->get_idx_from_pid(nid, pid);
+
+      if(ss.chunks().size() > 1)
+        g->set_bits(port_nid, ss.size());
 
       uint32_t offset = 0;
       for(auto &chunk : ss.chunks()) {
