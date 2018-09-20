@@ -28,22 +28,14 @@ void Inou_pyrope_options::set(const std::string &key, const std::string &value) 
       ,pyrope_input, pyrope_output, path, name);
 }
 
-// FIXME: latch.v, trivial2.v, submodule_offset.v
-// Join_Op? (assigns.v)
+// FIXME: latch.v (optimize lgraph to fix), trivial2.v, submodule_offset.v
+// Join_Op: assigns.v
 
 Inou_pyrope::Inou_pyrope() {
 }
 
 Inou_pyrope::~Inou_pyrope() {
 }
-
-/*Inou_pyrope::Inou_pyrope(const py::dict &dict) {
-  opack.set(dict);
-}
-
-void Inou_pyrope::py_set(const py::dict &dict) {
-  opack.set(dict);
-}*/
 
 std::vector<LGraph *> Inou_pyrope::tolg() {
 
@@ -52,10 +44,8 @@ std::vector<LGraph *> Inou_pyrope::tolg() {
   if(opack.name != "") {
     lgs.push_back(new LGraph(opack.path, opack.name, false)); // Do not clear
   } else {
-    lgs.push_back(new LGraph("lgdb", "submodule", false)); // Do not clear
-   // FIXME: assert(false); // Still not implemented
-   // console->error("inou_pyrope::tolg no graph name provided");
-   // return lgs;
+    console->error("inou_pyrope::tolg no graph name provided");
+    return lgs;
   }
 
   return lgs;
@@ -317,18 +307,6 @@ bool Inou_pyrope::to_graphio(Out_string &w, const LGraph *g, Index_ID idx) const
         << " as __bits:"
         << bits;
     }
-  } else {
-    assert(g->is_graph_output(idx));
-
-    const auto &node = g->get_node_int(idx);
-    if(!node.has_inputs())
-      return false; // Not driven used output
-    if(bits) {
-      w << " %"
-        << g->get_graph_output_name(idx)
-        << " as __bits:"
-        << bits;
-    }
   }
 
   return false;
@@ -355,8 +333,6 @@ bool Inou_pyrope::to_logical2(Out_string &w, const LGraph *g, Index_ID idx, cons
 }
 
 bool Inou_pyrope::to_shift(Out_string &w, const LGraph *g, Index_ID idx, const char *c_op) const {
-
-  // How to differentiate between ">>" and ">>>"?
 
   bool first = true, done = false;
   for(const auto &c : g->inp_edges(idx)) {
