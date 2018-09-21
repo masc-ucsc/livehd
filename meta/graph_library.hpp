@@ -51,6 +51,7 @@ public:
   }
 
   const std::string &get_name(int id) const {
+    assert(id2name.size() > id);
     return id2name[id];
   }
 
