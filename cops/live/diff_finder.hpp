@@ -3,7 +3,10 @@
 #define DIFF_FINDER_H_
 
 #include "invariant.hpp"
+#include "live_common.hpp"
 #include "lgraph.hpp"
+
+using namespace Live;
 
 class Diff_finder {
 
@@ -13,30 +16,6 @@ private:
   Invariant_boundaries *boundaries;
 
   std::string hier_sep;
-
-  class Graph_Node {
-  public:
-    LGraph *    module;
-    Index_ID    idx;
-    uint32_t    bit;
-    std::string instance;
-    //we need to take into account PIDs for subgraphs
-    //for primitives, it doesn't matter since most have a single output
-    Port_ID pid;
-
-    Graph_Node(LGraph *module, Index_ID idx, uint32_t bit, const std::string &instance, Port_ID pid) : module(module), idx(idx), bit(bit), instance(instance), pid(pid) {
-    }
-
-    Graph_Node() {}
-
-    bool operator<(const Graph_Node &rhs) const {
-      return (module < rhs.module) ||
-             (module == rhs.module && idx < rhs.idx) ||
-             (module == rhs.module && idx == rhs.idx && pid < rhs.pid) ||
-             (module == rhs.module && idx == rhs.idx && pid == rhs.pid && bit < rhs.bit) ||
-             (module == rhs.module && idx == rhs.idx && pid == rhs.pid && bit == rhs.bit && instance < rhs.instance);
-    }
-  };
 
   std::map<Graph_Node, std::set<Graph_Node>> cones;
   std::map<Graph_Node, bool>                 different;

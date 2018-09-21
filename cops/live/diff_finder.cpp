@@ -4,7 +4,6 @@
 #include "lgedgeiter.hpp"
 
 #include "graph_library.hpp"
-#include "live_common.hpp"
 #include "stdlib.h"
 
 using namespace Live;
