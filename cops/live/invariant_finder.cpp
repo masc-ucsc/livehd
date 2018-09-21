@@ -48,7 +48,7 @@ void Invariant_finder::get_topology() {
         }
 
         if(prefix != "") {
-          instance_name = prefix + hier_separator + current->get_node_instancename(idx);
+          instance_name = prefix + boundaries.hierarchical_separator + current->get_node_instancename(idx);
         } else {
           instance_name = current->get_node_instancename(idx);
         }
@@ -67,25 +67,40 @@ void Invariant_finder::propagate_until_boundary(Index_ID nid, uint32_t bit_selec
 
   Node_bit nid_bit = std::make_pair(nid, bit_selection);
 
+  assert(synth_graph->get_bits(nid) > bit_selection);
+
+  Index_ID master_id = synth_graph->get_master_nid(nid);
+  if(synth_graph->is_graph_input(nid) ||
+     synth_graph->node_type_get(master_id).op == U32Const_Op ||
+     synth_graph->node_type_get(master_id).op == StrConst_Op) {
+    return;
+  }
+
   if(partial_endpoints.find(nid_bit) != partial_endpoints.end()) {
+    return;
+  }
+
+  Node_bit mnid_bit = std::make_pair(master_id, bit_selection);
+  if(partial_endpoints.find(mnid_bit) != partial_endpoints.end()) {
+    partial_endpoints[nid_bit] = partial_endpoints[mnid_bit];
+    partial_cone_cells[nid_bit] = partial_cone_cells[mnid_bit];
+    cached.insert(nid_bit);
     return;
   }
 
   assert(partial_endpoints.find(nid_bit) == partial_endpoints.end());
   assert(partial_cone_cells.find(nid_bit) == partial_cone_cells.end());
 
+#ifndef NDEBUG
+  assert(deleted.find(nid_bit) == deleted.end());
+#endif
+
   partial_endpoints[nid_bit]  = Net_set();
   partial_cone_cells[nid_bit] = Gate_set();
 
   stack.set_bit(nid);
 
-  if(synth_graph->is_graph_input(nid) ||
-     synth_graph->node_type_get(nid).op == U32Const_Op ||
-     synth_graph->node_type_get(nid).op == StrConst_Op) {
-    return;
-  }
-
-  for(auto &edge : synth_graph->inp_edges(nid)) {
+  for(auto &edge : synth_graph->inp_edges(master_id)) {
 
     //in cases like join/pick we only propagate to a specific bit
     std::set<uint32_t> bit_selections;
@@ -114,6 +129,7 @@ void Invariant_finder::propagate_until_boundary(Index_ID nid, uint32_t bit_selec
         propagate_until_boundary(driver_cell, t_bit_selection);
         partial_endpoints[nid_bit].insert(partial_endpoints[driver_bit].begin(), partial_endpoints[driver_bit].end());
         partial_cone_cells[nid_bit].insert(partial_cone_cells[driver_bit].begin(), partial_cone_cells[driver_bit].end());
+
         continue;
       } else {
         partial_endpoints[nid_bit].insert(driver_bit);
@@ -121,25 +137,60 @@ void Invariant_finder::propagate_until_boundary(Index_ID nid, uint32_t bit_selec
     }
   }
 
+  cached.insert(nid_bit);
+  for(auto &edge : synth_graph->inp_edges(master_id)) {
+    for(uint32_t t_bit_selection = 0; t_bit_selection < synth_graph->get_bits(edge.get_out_pin().get_nid()); t_bit_selection++) {
+      Index_ID driver_cell = edge.get_out_pin().get_nid();
+      Node_bit driver_bit  = std::make_pair(driver_cell, t_bit_selection);
+      clear_cache(driver_bit);
+    }
+  }
+
   stack.clear_bit(nid);
+}
+
+
+void Invariant_finder::clear_cache(const Node_bit &entry) {
+
+  if(partial_endpoints.find(entry) == partial_endpoints.end() || stack.get_bit(entry.first))
+    return;
+
+  for(auto & oedge : synth_graph->out_edges(entry.first)) {
+    Index_ID port_id = synth_graph->get_idx_from_pid(entry.first, oedge.get_out_pin().get_pid());
+    for(uint32_t bit = 0; bit < synth_graph->get_bits(port_id); bit++) {
+      if(cached.find(std::make_pair(port_id, bit)) == cached.end())
+        return;
+    }
+
+    for(uint32_t bit = 0; bit < synth_graph->get_bits(oedge.get_inp_pin().get_nid()); bit++) {
+      if(cached.find(std::make_pair(oedge.get_inp_pin().get_nid(), bit)) == cached.end())
+        return;
+    }
+  }
+  partial_endpoints[entry].clear();
+  partial_endpoints.erase(entry);
+  partial_cone_cells.erase(entry);
+
+#ifndef NDEBUG
+  deleted.insert(entry);
+#endif
 }
 
 void Invariant_finder::find_invariant_boundaries() {
   std::string path = elab_graph->get_path();
   get_topology();
 
+  std::map<Net_ID, Index_ID> invariant_boundaries;
   for(auto &_inst : boundaries.instance_type_map) {
     Instance_name inst = _inst.first;
     if(inst == "##TOP##")
       inst = "";
     else
-      inst = inst + hier_separator;
+      inst = inst + boundaries.hierarchical_separator;
 
     LGraph *lg = Invariant_boundaries::get_graph(_inst.second, path);
-    fmt::print("going over module {} instance name {}\n", _inst.second, _inst.first);
 
-    std::map<Net_ID, Index_ID> invariant_boundaries;
-    for(auto &node : lg->fast()) {
+    for(auto &node : lg->forward()) {
       std::string net_name;
 
       //FIXME: when testing with synopsys, bit gets merged into name, we need to
@@ -162,7 +213,7 @@ void Invariant_finder::find_invariant_boundaries() {
         idx     = synth_graph->get_node_id(hierarchical_name.c_str());
         wire_id = synth_graph->get_wid(idx);
 
-#ifdef DEBUG
+#ifndef NDEBUG
       } else {
         assert(!synth_graph->has_name(("\\" + hierarchical_name).c_str()));
 #endif
@@ -173,32 +224,27 @@ void Invariant_finder::find_invariant_boundaries() {
         Net_ID id                      = std::make_pair(wire_id, bit);
         boundaries.invariant_cones[id] = Net_set();
         invariant_boundaries.insert(std::make_pair(id, idx));
-        fmt::print("invariant {}[{}] net {}\n", wire_id, bit, hierarchical_name);
-      }
-    }
-
-    for(auto &invar : invariant_boundaries) {
-
-      fmt::print("invar boundary {} nid {} bit{} \n", invar.first.first, invar.second, invar.first.second);
-
-      Index_ID idx = invar.second;
-      //WireName_ID wire_id = invar.first.first;
-      uint32_t bit = invar.first.second;
-
-      propagate_until_boundary(idx, bit);
-
-      Node_bit nid_bit = std::make_pair(idx, bit);
-
-      boundaries.invariant_cones[invar.first].insert(partial_endpoints[nid_bit].begin(), partial_endpoints[nid_bit].end());
-      boundaries.invariant_cone_cells[invar.first].insert(partial_cone_cells[nid_bit].begin(), partial_cone_cells[nid_bit].end());
-
-      for(auto &cell : partial_cone_cells[nid_bit]) {
-        if(boundaries.gate_appearances.find(cell) == boundaries.gate_appearances.end()) {
-          boundaries.gate_appearances[cell] = 0;
-        }
-        boundaries.gate_appearances[cell]++;
       }
     }
   }
-  fmt::print("RTP END fibs\n");
+
+  for(auto &invar : invariant_boundaries) {
+
+    Index_ID idx = invar.second;
+    uint32_t bit = invar.first.second;
+
+    propagate_until_boundary(idx, bit);
+
+    Node_bit nid_bit = std::make_pair(idx, bit);
+
+    boundaries.invariant_cones[invar.first].insert(partial_endpoints[nid_bit].begin(), partial_endpoints[nid_bit].end());
+    boundaries.invariant_cone_cells[invar.first].insert(partial_cone_cells[nid_bit].begin(), partial_cone_cells[nid_bit].end());
+
+    for(auto &cell : partial_cone_cells[nid_bit]) {
+      if(boundaries.gate_appearances.find(cell) == boundaries.gate_appearances.end()) {
+        boundaries.gate_appearances[cell] = 0;
+      }
+      boundaries.gate_appearances[cell]++;
+    }
+  }
 }
