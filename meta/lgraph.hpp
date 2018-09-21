@@ -86,6 +86,10 @@ public:
     return LGraph_WireNames::get_offset(nid);
   }
 
+  Index_ID get_master_nid(Index_ID idx) const {
+    return node_internal[idx].get_master_root_nid();
+  }
+
   Forward_edge_iterator  forward() const;
   Backward_edge_iterator backward() const;
 
@@ -161,9 +165,6 @@ public:
   }
 
   void set_bits(uint16_t bits) {
-
-    if(nid == 12450)
-      fmt::print("foo");
     g->set_bits(nid, bits);
   }
 
