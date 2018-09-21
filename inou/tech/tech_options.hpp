@@ -12,7 +12,7 @@ typedef enum {
   Liberty
 } Tech_file_type;
 
-class Tech_options_pack : public Options_pack {
+class Tech_options_pack : public Options_base {
 public:
   std::string    file_path;
   std::string    tech_type;
