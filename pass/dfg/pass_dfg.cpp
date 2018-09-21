@@ -9,7 +9,6 @@
 #include "lgedge.hpp"
 #include "lgedgeiter.hpp"
 
-
 using std::unordered_map;
 
 unsigned int Pass_dfg::temp_counter = 0;
@@ -34,13 +33,15 @@ LGraph *Pass_dfg::regen(const LGraph *cfg) {
 
   cfg_2_dfg(dfg, cfg);
   dfg->sync();
-  delete dfg;
+  return dfg;
+  //delete dfg;//do we need to manually delete it?
 }
 
 void  Pass_dfg::optimize() {
   assert(!opack.src.empty());
   LGraph *dfg = new LGraph(opack.path, opack.src, false);
   trans(dfg);
+  dfg->sync();
 }
 
 void Pass_dfg::trans(LGraph *dfg) {
@@ -82,7 +83,6 @@ void Pass_dfg::trans(LGraph *dfg) {
     }
   }
 
-  dfg->sync();
 }
 
 
