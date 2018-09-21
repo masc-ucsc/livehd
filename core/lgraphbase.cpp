@@ -366,14 +366,16 @@ Index_ID LGraph_Base::create_node_space(Index_ID last_idx, Port_ID out_pid, Inde
 
     node_internal[last_idx].push_next_state(idx2);
 
+#ifndef NDEBUG
     assert(dbg_master.get_num_inputs() == dbg_ni);
     assert(dbg_master.get_num_outputs() == dbg_no);
+#endif
 
     if(!node_internal[last_idx].has_space(true)) {
       if(node_internal[idx2].has_space(true))
         return idx2;
         // This can happen if 3 sedges transfered to 3 ledges in dest
-#ifdef DEBUG
+#ifndef NDEBUG
       console->warn("transfer 3 sedges to 3 ledges {} to {}", last_idx, idx2);
 #endif
       return create_node_space(idx2, out_pid, master_nid, root_nid);
@@ -412,8 +414,10 @@ Index_ID LGraph_Base::create_node_space(Index_ID last_idx, Port_ID out_pid, Inde
   assert(node_internal[idx3].get_master_root_nid() == master_nid);
   assert(node_internal[idx2].get_master_root_nid() == master_nid);
 
-  assert(dbg_master.get_num_inputs() == dbg_ni);
-  assert(dbg_master.get_num_outputs() == dbg_no);
+#ifndef NDEBUG
+  assert(node_internal[last_idx].get_master_root().get_num_inputs() == dbg_ni);
+  assert(node_internal[last_idx].get_master_root().get_num_outputs() == dbg_no);
+#endif
 
   assert(node_internal[idx2].has_space(true));
   return idx2;
