@@ -866,6 +866,8 @@ Edge_iterator LGraph_Base::inp_edges(Index_ID idx) const {
     if(node_internal[idx].has_local_inputs())
       break;
     Index_ID idx2 = node_internal[idx].get_next();
+    if(idx2 >= node_internal.size())
+      break;
     assert(node_internal[idx2].get_master_root_nid() == node_internal[idx].get_master_root_nid());
     idx = idx2;
   }
