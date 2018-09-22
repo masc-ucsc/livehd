@@ -86,29 +86,31 @@ void Pass_dfg::trans(LGraph *dfg) {
 
 void Pass_dfg::cfg_2_dfg(LGraph *dfg, const LGraph *cfg) {
   Index_ID    itr = find_cfg_root(cfg);
-  CF2DF_State state(dfg);
+  //Aux_node auxnd(dfg);
 
-  process_cfg(dfg, cfg, &state, itr);
-  attach_outputs(dfg, &state);
+  Aux_node auxnd_global;
+  Aux_tree  aux_tree(&auxnd_global);
+  process_cfg(dfg, cfg, &auxnd_global, itr);
+  //attach_outputs(dfg, &auxnd);
 
   fmt::print("calling sync\n");
 }
 
-Index_ID Pass_dfg::process_cfg(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, Index_ID top_node) {
+Index_ID Pass_dfg::process_cfg(LGraph *dfg, const LGraph *cfg, Aux_node *auxnd, Index_ID top_node) {
   Index_ID itr = top_node;
   Index_ID last_itr = 0;
 
   while (itr != 0) {
     last_itr = itr;
-    itr = process_node(dfg, cfg, state, itr);
+    itr = process_node(dfg, cfg, auxnd, itr);
     fmt::print("cfg nid:{} process finished!!\n\n", last_itr);
   }
 
-  state->print_aux();
+  auxnd->print_aux();
   return last_itr;
 }
 
-Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, Index_ID node) {
+Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, Aux_node *auxnd, Index_ID node) {
   CFG_Node_Data data(cfg, node);
 
   //sh dbg
@@ -123,13 +125,13 @@ Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, CF2DF_State *sta
 
   switch (cfg->node_type_get(node).op) {
   case CfgAssign_Op:
-    process_assign(dfg, state, data);
+    process_assign(dfg, auxnd, data);
     return get_cfg_child(cfg, node);
   case CfgFunctionCall_Op:
-    process_func_call(dfg, cfg, state, data);
+    process_func_call(dfg, cfg, auxnd, data);
     return get_cfg_child(cfg, node);
   case CfgIf_Op:
-    return process_if(dfg, cfg, state, data, node);
+    return process_if(dfg, cfg, auxnd, data, node);
   case CfgIfMerge_Op:
     return 0;
   default:
@@ -138,15 +140,15 @@ Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, CF2DF_State *sta
   }
 }
 
-void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, const CFG_Node_Data &data) {
+void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, Aux_node *auxnd, const CFG_Node_Data &data) {
   //for func_call, all the node should be created before, you just connect them.
   //no need to create node for target
   fmt::print("process_func_call\n");
   const auto &target = data.get_target();
   const auto &oprds  = data.get_operands();
-  const auto &oprd_ids = process_operands_bk(dfg, state, data); // all the operands should be created before, just get back oprd_ids
+  const auto &oprd_ids = process_operands(dfg, auxnd, data); // all the operands should be created before, just get back oprd_ids
   LGraph* sub_graph = nullptr;
-  Index_ID subg_root_nid = state->get_alias(oprds[0]);
+  Index_ID subg_root_nid = auxnd->get_alias(oprds[0]);
 
   if((sub_graph = LGraph::find_lgraph(cfg->get_path(), ((std::string)(dfg->get_node_wirename(subg_root_nid))+"_dfg")))){
     dfg->node_subgraph_set(subg_root_nid, (uint32_t)sub_graph->lg_id());
@@ -156,7 +158,7 @@ void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, CF2DF_State *st
     fmt::print("set pending graph on nid:{}, sub_graph name should be:{}\n", subg_root_nid, dfg->get_node_wirename(subg_root_nid));
   }
 
-  state->set_alias(target, oprd_ids[0]);
+  auxnd->set_alias(target, oprd_ids[0]);
 
   //connect 1st operand with [2nd,3rd,...] operands
   std::vector<Index_ID> subg_input_ids(oprd_ids.begin()+1, oprd_ids.end());
@@ -164,7 +166,7 @@ void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, CF2DF_State *st
 }
 
 
-void Pass_dfg::process_assign(LGraph *dfg, CF2DF_State *state, const CFG_Node_Data &data){
+void Pass_dfg::process_assign(LGraph *dfg, Aux_node *auxnd, const CFG_Node_Data &data){
   fmt::print("process_assign\n");
   const auto                     &target = data.get_target();
   const std::vector<std::string> &oprds  = data.get_operands();
@@ -173,55 +175,55 @@ void Pass_dfg::process_assign(LGraph *dfg, CF2DF_State *state, const CFG_Node_Da
   Index_ID                       oprd_id1;
   if(is_pure_assign_op(op)){
     if(is_output(target)) {
-      oprd_id0 = process_operand(dfg, state, oprds[0]);
+      oprd_id0 = process_operand(dfg, auxnd, oprds[0]);
       auto bits = dfg->get_bits(oprd_id0);
       std::vector<Index_ID> oprd_ids;
       oprd_ids.push_back(oprd_id0);
-      Index_ID target_id = create_output(dfg, state, target, bits);
+      Index_ID target_id = create_output(dfg, auxnd, target, bits);
       fmt::print("create node for output target:{}, nid:{}\n", target, target_id);
       process_connections(dfg, oprd_ids, target_id);
     }else{
-      oprd_id0 = process_operand(dfg, state, oprds[0]);
-      state->set_alias(target, oprd_id0);
+      oprd_id0 = process_operand(dfg, auxnd, oprds[0]);
+      auxnd->set_alias(target, oprd_id0);
     }
   }
   else if(is_label_op(op)){
     if(oprds[0] == "__bits"){
-      //Index_ID floating_id = resolve_constant(dfg, state, oprds[1]);
-      Index_ID floating_id = process_operand(dfg, state, oprds[1]);
-      state->set_alias(target, floating_id);
+      //Index_ID floating_id = resolve_constant(dfg, auxnd, oprds[1]);
+      Index_ID floating_id = process_operand(dfg, auxnd, oprds[1]);
+      auxnd->set_alias(target, floating_id);
     }else if(oprds[0] == "__fluid"){
       ;//balabala
     }else{//function argument assign
-      oprd_id1 = process_operand(dfg, state, oprds[1]);
-      state->set_alias(target, oprd_id1);
+      oprd_id1 = process_operand(dfg, auxnd, oprds[1]);
+      auxnd->set_alias(target, oprd_id1);
     }
   }
   else if(is_as_op(op)){
-    oprd_id0 = process_operand(dfg, state, oprds[0]);
+    oprd_id0 = process_operand(dfg, auxnd, oprds[0]);
     //process target
     if(is_input(target)){
       assert(dfg->node_value_get(oprd_id0));
       auto bits = dfg->node_value_get(oprd_id0);
-      Index_ID target_id = create_input(dfg, state, target, bits);
+      Index_ID target_id = create_input(dfg, auxnd, target, bits);
       fmt::print("create node for input target:{}, nid:{}\n", target, target_id);
     }else if(is_output(target)){
       assert(dfg->node_value_get(oprd_id0));
       auto bits = dfg->node_value_get(oprd_id0);
-      Index_ID target_id = create_output(dfg, state, target, bits);
+      Index_ID target_id = create_output(dfg, auxnd, target, bits);
       fmt::print("create node for output target:{}, nid:{}\n", target, target_id);
     }else
-      state->set_alias(target, oprd_id0);
+      auxnd->set_alias(target, oprd_id0);
   }
   else if(is_unary_op(op)){
-    oprd_id0 = process_operand(dfg, state, oprds[0]);
-    state->set_alias(target, oprd_id0);
+    oprd_id0 = process_operand(dfg, auxnd, oprds[0]);
+    auxnd->set_alias(target, oprd_id0);
   }
   else if(is_binary_op(op)){
     std::vector<Index_ID> oprd_ids;
-    oprd_ids.push_back(process_operand(dfg, state, oprds[0]));
-    oprd_ids.push_back(process_operand(dfg, state, oprds[1]));
-    Index_ID target_id = create_node(dfg, state, target);
+    oprd_ids.push_back(process_operand(dfg, auxnd, oprds[0]));
+    oprd_ids.push_back(process_operand(dfg, auxnd, oprds[1]));
+    Index_ID target_id = create_node(dfg, auxnd, target);
     fmt::print("create node for internal target:{}, nid:{}\n", target, target_id);
     dfg->node_type_set(target_id, node_type_from_text(op));
     auto max_bits = std::max(dfg->get_bits(oprd_ids[0]),dfg->get_bits(oprd_ids[1])) + 1;
@@ -247,193 +249,196 @@ void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Index_ID> &src
 }
 
 
-Index_ID Pass_dfg::process_operand(LGraph *dfg, CF2DF_State *state, const std::string oprd) {
+Index_ID Pass_dfg::process_operand(LGraph *dfg, Aux_node *auxnd, const std::string oprd) {
   Index_ID oprd_id;
-  if (state->has_alias(oprd)){
-    oprd_id = state->get_alias(oprd);
+  if (auxnd->has_alias(oprd)){
+    oprd_id = auxnd->get_alias(oprd);
     fmt::print("operand:{} has an alias:{}\n", oprd, oprd_id);
   }
   else {
     if (is_constant(oprd)){
-      oprd_id = resolve_constant(dfg, state, oprd);
-      state->set_alias(oprd, oprd_id);
+      oprd_id = resolve_constant(dfg, auxnd, oprd);
+      auxnd->set_alias(oprd, oprd_id);
       fmt::print("create node for constant operand:{}, nid:{}\n", oprd, oprd_id);
     }
-    else if (is_register(oprd)){
-      oprd_id = create_register(dfg, state, oprd);
-      state->set_alias(oprd, oprd_id);
-      fmt::print("create node for register operand:{}, nid:{}\n", oprd, oprd_id);
-    }
+    //else if (is_register(oprd)){
+    //  //oprd_id = create_register(dfg, auxnd, oprd);
+    //  //auxnd->set_alias(oprd, oprd_id);
+    //  //fmt::print("create node for register operand:{}, nid:{}\n", oprd, oprd_id);
+    //}
     else if (is_input(oprd)){
-      oprd_id = create_input(dfg, state, oprd);
-      state->set_alias(oprd, oprd_id);
+      oprd_id = create_input(dfg, auxnd, oprd);
+      auxnd->set_alias(oprd, oprd_id);
       fmt::print("create node for input operand:{}, nid:{}\n", oprd, oprd_id);
     }
     else if (is_output(oprd)){
-      oprd_id = create_output(dfg, state, oprd);
-      state->set_alias(oprd, oprd_id);
+      oprd_id = create_output(dfg, auxnd, oprd);
+      auxnd->set_alias(oprd, oprd_id);
       fmt::print("create node for output operand:{}, nid:{}\n", oprd, oprd_id);
     }
     else if (is_reference(oprd)){
-      oprd_id = create_reference(dfg, state, oprd);
-      state->set_alias(oprd, oprd_id);
+      oprd_id = create_reference(dfg, auxnd, oprd);
+      auxnd->set_alias(oprd, oprd_id);
       fmt::print("create node for reference operand:{}, nid:{}\n", oprd, oprd_id);
     }
     else{
-      oprd_id = create_private(dfg, state, oprd);
-      state->set_alias(oprd, oprd_id);
+      oprd_id = create_private(dfg, auxnd, oprd);
+      auxnd->set_alias(oprd, oprd_id);
       fmt::print("create node for private operand:{}, nid:{}\n", oprd, oprd_id);
     }
   }
 
-  if (state->fluid_df() && is_input(oprd))
-    add_read_marker(dfg, state, oprd);
+  //if (auxnd->fluid_df() && is_input(oprd))
+  //  add_read_marker(dfg, auxnd, oprd);
+
   return oprd_id;
 }
 
 
-Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, CF2DF_State *state, const CFG_Node_Data &data, Index_ID node) {
-  fmt::print("process_if\n");
-  Index_ID cond = state->get_alias(data.get_target());
-  const auto &operands = data.get_operands();
+Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, Aux_node *auxnd, const CFG_Node_Data &data, Index_ID node) {
+  //fmt::print("process_if\n");
+  //Index_ID cond = auxnd->get_alias(data.get_target());
+  //const auto &operands = data.get_operands();
 
-  Index_ID tbranch = std::stol(operands[0]);
-  CF2DF_State tstate = state->copy();
-  Index_ID tb_next = get_cfg_child(cfg, process_cfg(dfg, cfg, &tstate, tbranch));
+  //Index_ID tbranch = std::stol(operands[0]);
+  //Aux_node tauxnd = auxnd->copy();
+  //Index_ID tb_next = get_cfg_child(cfg, process_cfg(dfg, cfg, &tauxnd, tbranch));
 
-  Index_ID fbranch = std::stol(operands[1]);
+  //Index_ID fbranch = std::stol(operands[1]);
 
-  if (fbranch != node) {                                // there is an 'else' clause
-    CF2DF_State fstate = state->copy();
-    Index_ID fb_next = get_cfg_child(cfg, process_cfg(dfg, cfg, &fstate, fbranch));
-    assert(tb_next == fb_next);
-    add_phis(dfg, cfg, state, &tstate, &fstate, cond);
-  } else {
-    add_phis(dfg, cfg, state, &tstate, state, cond);    // if there's no else, the 'state' of the 'else' branch is the same as the parent
-  }
+  //if (fbranch != node) {                                // there is an 'else' clause
+  //  Aux_node fauxnd = auxnd->copy();
+  //  Index_ID fb_next = get_cfg_child(cfg, process_cfg(dfg, cfg, &fauxnd, fbranch));
+  //  assert(tb_next == fb_next);
+  //  add_phis(dfg, cfg, auxnd, &tauxnd, &fauxnd, cond);
+  //} else {
+  //  add_phis(dfg, cfg, auxnd, &tauxnd, auxnd, cond);    // if there's no else, the 'auxnd' of the 'else' branch is the same as the parent
+  //}
 
-  return tb_next;
+  //return tb_next;
+  return 0;
 }
 
-void Pass_dfg::add_phis(LGraph *dfg, const LGraph *cfg, CF2DF_State *parent, CF2DF_State *tstate, CF2DF_State *fstate, Index_ID condition) {
-  std::unordered_set<std::string> phis_added;
+void Pass_dfg::add_phis(LGraph *dfg, const LGraph *cfg, Aux_node *parent, Aux_node *tauxnd, Aux_node *fauxnd, Index_ID condition) {
+  //std::unordered_set<std::string> phis_added;
 
-  for (const auto &pair : tstate->get_auxtab()) {
-    if (reference_changed(parent, tstate, pair.first)) {
-      add_phi(dfg, parent, tstate, fstate, condition, pair.first);
-      phis_added.insert(pair.first);
-    }
-  }
+  //for (const auto &pair : tauxnd->get_auxtab()) {
+  //  if (reference_changed(parent, tauxnd, pair.first)) {
+  //    add_phi(dfg, parent, tauxnd, fauxnd, condition, pair.first);
+  //    phis_added.insert(pair.first);
+  //  }
+  //}
 
-  for (const auto &pair : fstate->get_auxtab()) {
-    if (phis_added.find(pair.first) == phis_added.end() && reference_changed(parent, fstate, pair.first))
-      add_phi(dfg, parent, tstate, fstate, condition, pair.first);
-  }
+  //for (const auto &pair : fauxnd->get_auxtab()) {
+  //  if (phis_added.find(pair.first) == phis_added.end() && reference_changed(parent, fauxnd, pair.first))
+  //    add_phi(dfg, parent, tauxnd, fauxnd, condition, pair.first);
+  //}
 }
 
-void Pass_dfg::add_phi(LGraph *dfg, CF2DF_State *parent, CF2DF_State *tstate, CF2DF_State *fstate, Index_ID condition, const std::string &variable) {
-  Index_ID tid = resolve_phi_branch(dfg, parent, tstate, variable);
-  Index_ID fid = resolve_phi_branch(dfg, parent, fstate, variable);
+void Pass_dfg::add_phi(LGraph *dfg, Aux_node *parent, Aux_node *tauxnd, Aux_node *fauxnd, Index_ID condition, const std::string &variable) {
+  //Index_ID tid = resolve_phi_branch(dfg, parent, tauxnd, variable);
+  //Index_ID fid = resolve_phi_branch(dfg, parent, fauxnd, variable);
 
-  Index_ID phi = dfg->create_node().get_nid();
-  dfg->node_type_set(phi, Mux_Op);
-  auto tp = dfg->node_type_get(phi);
+  //Index_ID phi = dfg->create_node().get_nid();
+  //dfg->node_type_set(phi, Mux_Op);
+  //auto tp = dfg->node_type_get(phi);
 
-  Port_ID tin = tp.get_input_match("B");
-  Port_ID fin = tp.get_input_match("A");
-  Port_ID cin = tp.get_input_match("S");
+  //Port_ID tin = tp.get_input_match("B");
+  //Port_ID fin = tp.get_input_match("A");
+  //Port_ID cin = tp.get_input_match("S");
 
-  dfg->add_edge(Node_Pin(tid, 0, false), Node_Pin(phi, tin, true));
-  dfg->add_edge(Node_Pin(fid, 0, false), Node_Pin(phi, fin, true));
-  dfg->add_edge(Node_Pin(condition, 0, false), Node_Pin(phi, cin, true));
+  //dfg->add_edge(Node_Pin(tid, 0, false), Node_Pin(phi, tin, true));
+  //dfg->add_edge(Node_Pin(fid, 0, false), Node_Pin(phi, fin, true));
+  //dfg->add_edge(Node_Pin(condition, 0, false), Node_Pin(phi, cin, true));
 
-  parent->set_alias(variable, phi);
+  //parent->set_alias(variable, phi);
 }
 
-Index_ID Pass_dfg::resolve_phi_branch(LGraph *dfg, CF2DF_State *parent, CF2DF_State *branch, const std::string &variable) {
-  if (branch->has_alias(variable))
-    return branch->get_alias(variable);
-  else if (parent->has_alias(variable))
-    return parent->get_alias(variable);
-  else if (is_register(variable))
-    return create_register(dfg, parent, variable);
-  else if (is_input(variable))
-    return create_input(dfg, parent, variable);
-  else if (is_output(variable))
-    return create_output(dfg, parent, variable);
-  else
-    return create_default_const(dfg, parent);
+Index_ID Pass_dfg::resolve_phi_branch(LGraph *dfg, Aux_node *parent, Aux_node *branch, const std::string &variable) {
+  //if (branch->has_alias(variable))
+  //  return branch->get_alias(variable);
+  //else if (parent->has_alias(variable))
+  //  return parent->get_alias(variable);
+  //else if (is_register(variable))
+  //  return create_register(dfg, parent, variable);
+  //else if (is_input(variable))
+  //  return create_input(dfg, parent, variable);
+  //else if (is_output(variable))
+  //  return create_output(dfg, parent, variable);
+  //else
+  //  return create_default_const(dfg, parent);
+  return 0;
 }
 
 
-void Pass_dfg::assign_to_true(LGraph *dfg, CF2DF_State *state, const std::string &v) {
-  Index_ID node = create_node(dfg, state, v);
+void Pass_dfg::assign_to_true(LGraph *dfg, Aux_node *auxnd, const std::string &v) {
+  Index_ID node = create_node(dfg, auxnd, v);
   fmt::print("create node nid:{}\n", node);
   dfg->node_type_set(node, Or_Op);
 
-  dfg->add_edge(Node_Pin(create_true_const(dfg, state), 0, false), Node_Pin(node, 0, true));
-  dfg->add_edge(Node_Pin(create_true_const(dfg, state), 0, false), Node_Pin(node, 0, true));
+  dfg->add_edge(Node_Pin(create_true_const(dfg, auxnd), 0, false), Node_Pin(node, 0, true));
+  dfg->add_edge(Node_Pin(create_true_const(dfg, auxnd), 0, false), Node_Pin(node, 0, true));
 }
 
-void Pass_dfg::attach_outputs(LGraph *dfg, CF2DF_State *state) {
-  for (const auto &pair : state->copy().get_auxtab()) {
-    const auto &var = pair.first;
+void Pass_dfg::attach_outputs(LGraph *dfg, Aux_node *auxnd) {
+//  for (const auto &pair : auxnd->copy().get_auxtab()) {
+//    const auto &var = pair.first;
+//
+//    if (is_register(var) || is_output(var)) {
+//      Index_ID lref = pair.second;
+//
+//      Index_ID oid = create_output(dfg, auxnd, var);
+//      dfg->add_edge(Node_Pin(lref, 0, false), Node_Pin(oid, 0, true));
+//    }
+//  }
 
-    if (is_register(var) || is_output(var)) {
-      Index_ID lref = pair.second;
-
-      Index_ID oid = create_output(dfg, state, var);
-      dfg->add_edge(Node_Pin(lref, 0, false), Node_Pin(oid, 0, true));
-    }
-  }
-
-  if (state->fluid_df())
-    add_fluid_behavior(dfg, state);
+//  if (auxnd->fluid_df())
+//    add_fluid_behavior(dfg, auxnd);
 }
 
-void Pass_dfg::add_fluid_behavior(LGraph *dfg, CF2DF_State *state) {
+void Pass_dfg::add_fluid_behavior(LGraph *dfg, Aux_node *auxnd) {
   std::vector<Index_ID> inputs, outputs;
-  add_fluid_ports(dfg, state, inputs, outputs);
+  add_fluid_ports(dfg, auxnd, inputs, outputs);
 
 }
 
-void Pass_dfg::add_fluid_ports(LGraph *dfg, CF2DF_State *state, std::vector<Index_ID> &data_inputs, std::vector<Index_ID> &data_outputs) {
-  for (const auto &pair : state->outputs()) {
-    if (!is_valid_marker(pair.first) && !is_retry_marker(pair.first)) {
-      auto valid_output = valid_marker(pair.first);
-      auto retry_input = retry_marker(pair.first);
-      data_outputs.push_back(state->get_alias(pair.first));
+void Pass_dfg::add_fluid_ports(LGraph *dfg, Aux_node *auxnd, std::vector<Index_ID> &data_inputs, std::vector<Index_ID> &data_outputs) {
+  //for (const auto &pair : auxnd->outputs()) {
+  //  if (!is_valid_marker(pair.first) && !is_retry_marker(pair.first)) {
+  //    auto valid_output = valid_marker(pair.first);
+  //    auto retry_input = retry_marker(pair.first);
+  //    data_outputs.push_back(auxnd->get_alias(pair.first));
 
-      if (!state->has_alias(valid_output))
-        create_output(dfg, state, valid_output);
+  //    if (!auxnd->has_alias(valid_output))
+  //      create_output(dfg, auxnd, valid_output);
 
-      if (!state->has_alias(retry_input))
-        create_input(dfg, state, retry_input);
-    }
-  }
+  //    if (!auxnd->has_alias(retry_input))
+  //      create_input(dfg, auxnd, retry_input);
+  //  }
+  //}
 
-  for (const auto &pair : state->inputs()) {
-    if (!is_valid_marker(pair.first) && !is_retry_marker(pair.first)) {
-      auto valid_input = valid_marker(pair.first);
-      auto retry_output = retry_marker(pair.first);
-      data_inputs.push_back(state->get_alias(pair.first));
+  //for (const auto &pair : auxnd->inputs()) {
+  //  if (!is_valid_marker(pair.first) && !is_retry_marker(pair.first)) {
+  //    auto valid_input = valid_marker(pair.first);
+  //    auto retry_output = retry_marker(pair.first);
+  //    data_inputs.push_back(auxnd->get_alias(pair.first));
 
-      if (!state->has_alias(valid_input))
-        create_input(dfg, state, valid_input);
+  //    if (!auxnd->has_alias(valid_input))
+  //      create_input(dfg, auxnd, valid_input);
 
-      if (!state->has_alias(retry_output))
-        create_output(dfg, state, retry_output);
-    }
-  }
+  //    if (!auxnd->has_alias(retry_output))
+  //      create_output(dfg, auxnd, retry_output);
+  //  }
+  //}
 }
 
-void Pass_dfg::add_fluid_logic(LGraph *dfg, CF2DF_State *state, const std::vector<Index_ID> &data_inputs, const std::vector<Index_ID> &data_outputs) {
-  //Index_ID abort_id = add_abort_logic(dfg, state, data_inputs, data_outputs);
+void Pass_dfg::add_fluid_logic(LGraph *dfg, Aux_node *auxnd, const std::vector<Index_ID> &data_inputs, const std::vector<Index_ID> &data_outputs) {
+  //Index_ID abort_id = add_abort_logic(dfg, auxnd, data_inputs, data_outputs);
 
 
 }
 
-void Pass_dfg::add_abort_logic(LGraph *dfg, CF2DF_State *state, const std::vector<Index_ID> &data_inputs, const std::vector<Index_ID> &data_outputs) {
+void Pass_dfg::add_abort_logic(LGraph *dfg, Aux_node *auxnd, const std::vector<Index_ID> &data_inputs, const std::vector<Index_ID> &data_outputs) {
 
 }
 
@@ -460,46 +465,46 @@ Index_ID Pass_dfg::get_cfg_child(const LGraph *cfg, Index_ID node) {
     assert(false);
 }
 
-std::vector<Index_ID> Pass_dfg::process_operands_bk(LGraph *dfg, CF2DF_State *state, const CFG_Node_Data &data) {
+std::vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, Aux_node *auxnd, const CFG_Node_Data &data) {
   const std::vector<std::string> &oprds = data.get_operands();
   std::vector<Index_ID> oprd_ids(oprds.size());
   const std::string &op = data.get_operator();
 
   for (size_t i = 0 ; i <oprd_ids.size();i++) {
-    if (state->has_alias(oprds[i])){
-      oprd_ids[i] = state->get_alias(oprds[i]);
+    if (auxnd->has_alias(oprds[i])){
+      oprd_ids[i] = auxnd->get_alias(oprds[i]);
       fmt::print("operand:{} has an alias:{}\n", oprds[i], oprd_ids[i]);
     }
     else {
       if (is_constant(oprds[i])){
-        //oprd_ids[i] = create_default_const(dfg, state);
-        oprd_ids[i] = resolve_constant(dfg, state, oprds[i]);
+        //oprd_ids[i] = create_default_const(dfg, auxnd);
+        oprd_ids[i] = resolve_constant(dfg, auxnd, oprds[i]);
         fmt::print("create node for constant operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
       }
-      else if (is_register(oprds[i])){
-        oprd_ids[i] = create_register(dfg, state, oprds[i]);
-        fmt::print("create node for register operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
-      }
+      //else if (is_register(oprds[i])){
+      //  //oprd_ids[i] = create_register(dfg, auxnd, oprds[i]);
+      //  //fmt::print("create node for register operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
+      //}
       else if (is_input(oprds[i])){
-        oprd_ids[i] = create_input(dfg, state, oprds[i]);
+        oprd_ids[i] = create_input(dfg, auxnd, oprds[i]);
         fmt::print("create node for input operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
       }
       else if (is_output(oprds[i])){
-        oprd_ids[i] = create_output(dfg, state, oprds[i]);
+        oprd_ids[i] = create_output(dfg, auxnd, oprds[i]);
         fmt::print("create node for output operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
       }
       else if (is_reference(oprds[i])){
-        oprd_ids[i] = create_reference(dfg, state, oprds[i]);
+        oprd_ids[i] = create_reference(dfg, auxnd, oprds[i]);
         fmt::print("create node for reference operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
       }
       else{
-        oprd_ids[i] = create_private(dfg, state, oprds[i]);
+        oprd_ids[i] = create_private(dfg, auxnd, oprds[i]);
         fmt::print("create node for private operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
       }
     }
 
-    if (state->fluid_df() && is_input(oprds[i]))
-      add_read_marker(dfg, state, oprds[i]);
+    //if (auxnd->fluid_df() && is_input(oprds[i]))
+    //  add_read_marker(dfg, auxnd, oprds[i]);
   }
 
   return oprd_ids;
@@ -516,7 +521,7 @@ void Pass_dfg_options::set(const std::string &key, const std::string &value) {
     else
       set_val(key,value);
 
-  } catch (const std::invalid_argument& ia) {
+  }catch (const std::invalid_argument& ia) {
     fmt::print("ERROR: key {} has an invalid argument {}\n",key);
   }
 

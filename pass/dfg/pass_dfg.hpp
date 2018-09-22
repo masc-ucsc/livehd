@@ -10,7 +10,8 @@
 #include "lgedge.hpp"
 #include "options.hpp"
 #include "options.hpp"
-#include "cf2df_state.hpp"
+//#include "cf2df_state.hpp"
+#include "aux_tree.hpp"
 #include "cfg_node_data.hpp"
 #include "cfg_node_data.hpp"
 
@@ -58,16 +59,16 @@ private:
   Index_ID                 find_cfg_root(const LGraph *cfg);
   Index_ID                 process_cfg(        LGraph *dfg,
                                                const LGraph *cfg,
-                                               CF2DF_State *state,
+                                               Aux_node *auxnd,
                                                Index_ID top_node);
 
   Index_ID                 process_node(       LGraph *dfg,
                                                const LGraph *cfg,
-                                               CF2DF_State *state,
+                                               Aux_node *auxnd,
                                                Index_ID node);
 
   void                     process_assign(     LGraph *dfg,
-                                               CF2DF_State *state,
+                                               Aux_node *auxnd,
                                                const CFG_Node_Data &data);
   void                     process_connections(LGraph *dfg,
                                                const std::vector<Index_ID> &src_nids,
@@ -75,57 +76,57 @@ private:
 
   void                     process_func_call(  LGraph *dfg,
                                                const LGraph *cfg,
-                                               CF2DF_State *state,
+                                               Aux_node *auxnd,
                                                const CFG_Node_Data &data);
 
   Index_ID                 process_if       (  LGraph *dfg,
                                                const LGraph *cfg,
-                                               CF2DF_State *state,
+                                               Aux_node *auxnd,
                                                const CFG_Node_Data &data,
                                                Index_ID node );
 
   Index_ID                 process_operand    (    LGraph *dfg,
-                                               CF2DF_State *state,
+                                               Aux_node *auxnd,
                                                const std::string oprd);
 
-  std::vector<Index_ID>    process_operands_bk(   LGraph *dfg,
-                                                  CF2DF_State *state,
+  std::vector<Index_ID>    process_operands   (   LGraph *dfg,
+                                                  Aux_node *auxnd,
                                                   const CFG_Node_Data &data);
 
   void                     add_phis(           LGraph *dfg,
                                                const LGraph *cfg,
-                                               CF2DF_State *parent,
-                                               CF2DF_State *tstate,
-                                               CF2DF_State *fstate,
+                                               Aux_node *parent,
+                                               Aux_node *tnode,
+                                               Aux_node *fnode,
                                                Index_ID condition);
 
   void                     add_phi(            LGraph *dfg,
-                                               CF2DF_State *parent,
-                                               CF2DF_State *tstate,
-                                               CF2DF_State *fstate,
+                                               Aux_node *parent,
+                                               Aux_node *tnode,
+                                               Aux_node *fnode,
                                                Index_ID condition,
                                                const std::string &variable);
 
   Index_ID get_cfg_child(const LGraph *cfg, Index_ID node);
-  Index_ID resolve_phi_branch(LGraph *dfg, CF2DF_State *parent, CF2DF_State *branch, const std::string &variable);
-  void attach_outputs(LGraph *dfg, CF2DF_State *state);
+  Index_ID resolve_phi_branch(LGraph *dfg, Aux_node *parent, Aux_node *branch, const std::string &variable);
+  void attach_outputs(LGraph *dfg, Aux_node *auxnd);
 
-  void add_fluid_behavior(LGraph *dfg, CF2DF_State *state);
-  void add_fluid_ports(LGraph *dfg, CF2DF_State *state, std::vector<Index_ID> &data_inputs, std::vector<Index_ID> &data_outputs);
-  void add_fluid_logic(LGraph *dfg, CF2DF_State *state, const std::vector<Index_ID> &data_inputs, const std::vector<Index_ID> &data_outputs);
-  void add_abort_logic(LGraph *dfg, CF2DF_State *state, const std::vector<Index_ID> &data_inputs, const std::vector<Index_ID> &data_outputs);
+  void add_fluid_behavior(LGraph *dfg, Aux_node *auxnd);
+  void add_fluid_ports(LGraph *dfg, Aux_node *auxnd, std::vector<Index_ID> &data_inputs, std::vector<Index_ID> &data_outputs);
+  void add_fluid_logic(LGraph *dfg, Aux_node *auxnd, const std::vector<Index_ID> &data_inputs, const std::vector<Index_ID> &data_outputs);
+  void add_abort_logic(LGraph *dfg, Aux_node *auxnd, const std::vector<Index_ID> &data_inputs, const std::vector<Index_ID> &data_outputs);
 
-  void add_read_marker(LGraph *dfg, CF2DF_State *state, const std::string &v) { assign_to_true(dfg, state, read_marker(v)); }
-  void add_write_marker(LGraph *dfg, CF2DF_State *state, const std::string &v) { assign_to_true(dfg, state, write_marker(v)); }
+  void add_read_marker(LGraph *dfg, Aux_node *auxnd, const std::string &v) { assign_to_true(dfg, auxnd, read_marker(v)); }
+  void add_write_marker(LGraph *dfg, Aux_node *auxnd, const std::string &v) { assign_to_true(dfg, auxnd, write_marker(v)); }
 
   std::string read_marker(const std::string &v) { return READ_MARKER + v; }
   std::string write_marker(const std::string &v) { return WRITE_MARKER + v; }
   std::string valid_marker(const std::string &v) { return VALID_MARKER + v; }
   std::string retry_marker(const std::string &v) { return RETRY_MARKER + v; }
 
-  void assign_to_true(LGraph *dfg, CF2DF_State *state, const std::string &v);
+  void assign_to_true(LGraph *dfg, Aux_node *auxnd, const std::string &v);
 
-  bool reference_changed(const CF2DF_State *parent, const CF2DF_State *branch, const std::string &v) {
+  bool reference_changed(const Aux_node *parent, const Aux_node *branch, const std::string &v) {
     if (!parent->has_alias(v)) return true;
     return parent->get_alias(v) != branch->get_alias(v);
   }
@@ -146,20 +147,20 @@ private:
   bool is_unary_op      (const std::string &v) {return (v == "!")||(v == "not");}
   bool is_binary_op     (const std::string &v) {return  v == "+";}
 
-  Index_ID create_register(LGraph *g, CF2DF_State *state, const std::string &var_name);
-  Index_ID create_input(LGraph *g, CF2DF_State *state, const std::string &var_name, uint16_t bits=1);
-  Index_ID create_output(LGraph *g, CF2DF_State *state, const std::string &var_name, uint16_t bits=1);
-  Index_ID create_private(LGraph *g, CF2DF_State *state, const std::string &var_name);
-  Index_ID create_reference(LGraph *g, CF2DF_State *state, const std::string &var_name);
-  Index_ID create_node(LGraph *g, CF2DF_State *state, const std::string &v, const uint16_t bits=1);
-  Index_ID create_default_const(LGraph *g, CF2DF_State *state);
-  Index_ID create_true_const(LGraph *g, CF2DF_State *state);
-  Index_ID create_false_const(LGraph *g, CF2DF_State *state);
+  //Index_ID create_register(LGraph *g, Aux_node *auxnd, const std::string &var_name);
+  Index_ID create_input(LGraph *g, Aux_node *auxnd, const std::string &var_name, uint16_t bits=1);
+  Index_ID create_output(LGraph *g, Aux_node *auxnd, const std::string &var_name, uint16_t bits=1);
+  Index_ID create_private(LGraph *g, Aux_node *auxnd, const std::string &var_name);
+  Index_ID create_reference(LGraph *g, Aux_node *auxnd, const std::string &var_name);
+  Index_ID create_node(LGraph *g, Aux_node *auxnd, const std::string &v, const uint16_t bits=1);
+  Index_ID create_default_const(LGraph *g, Aux_node *auxnd);
+  Index_ID create_true_const(LGraph *g, Aux_node *auxnd);
+  Index_ID create_false_const(LGraph *g, Aux_node *auxnd);
 
-  Index_ID create_AND(LGraph *g, CF2DF_State *state, Index_ID op1, Index_ID op2);
-  Index_ID create_OR(LGraph *g, CF2DF_State *state, Index_ID op1, Index_ID op2);
-  Index_ID create_binary(LGraph *g, CF2DF_State *state, Index_ID op1, Index_ID op2, Node_Type_Op oper);
-  Index_ID create_NOT(LGraph *g, CF2DF_State *state, Index_ID op1);
+  Index_ID create_AND(LGraph *g, Aux_node *auxnd, Index_ID op1, Index_ID op2);
+  Index_ID create_OR(LGraph *g, Aux_node *auxnd, Index_ID op1, Index_ID op2);
+  Index_ID create_binary(LGraph *g, Aux_node *auxnd, Index_ID op1, Index_ID op2, Node_Type_Op oper);
+  Index_ID create_NOT(LGraph *g, Aux_node *auxnd, Index_ID op1);
 
   Node_Type_Op node_type_from_text(const std::string &operator_text);
 
@@ -167,7 +168,7 @@ private:
   static unsigned int temp_counter;
 
   //Sheng zone
-  Index_ID resolve_constant          (LGraph *g, CF2DF_State *state, const std::string& str_in);
+  Index_ID resolve_constant          (LGraph *g, Aux_node *auxnd, const std::string& str_in);
                                       //bool& is_signed,
                                       //bool& is_in32b,
                                       //bool& is_explicit_signed,

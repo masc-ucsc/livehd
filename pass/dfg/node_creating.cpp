@@ -2,42 +2,42 @@
 #include "nodetype.hpp"
 #include <string>
 
-Index_ID Pass_dfg::create_reference(LGraph *g, CF2DF_State *state, const std::string &var_name) {
-  Index_ID nid = create_node(g, state, var_name.substr(1));
+Index_ID Pass_dfg::create_reference(LGraph *g, Aux_node *auxnd, const std::string &var_name) {
+  Index_ID nid = create_node(g, auxnd, var_name.substr(1));
   fmt::print("create node nid:{}\n", nid);
   g->node_type_set(nid, DfgRef_Op);
   return nid;
 }
-Index_ID Pass_dfg::create_register(LGraph *g, CF2DF_State *state, const std::string &var_name) {
-  Index_ID nid = create_node(g, state, var_name);
-  fmt::print("create node nid:{}\n", nid);
-  g->node_type_set(nid, Flop_Op);
-  state->add_register(var_name, nid);
-  return nid;
-}
+//Index_ID Pass_dfg::create_register(LGraph *g, Aux_node *auxnd, const std::string &var_name) {
+//  Index_ID nid = create_node(g, auxnd, var_name);
+//  fmt::print("create node nid:{}\n", nid);
+//  g->node_type_set(nid, Flop_Op);
+//  auxnd->add_register(var_name, nid);
+//  return nid;
+//}
 
-Index_ID Pass_dfg::create_input(LGraph *g, CF2DF_State *state, const std::string &var_name, uint16_t bits) {
-  Index_ID nid = create_node(g, state, var_name, bits);
+Index_ID Pass_dfg::create_input(LGraph *g, Aux_node *auxnd, const std::string &var_name, uint16_t bits) {
+  Index_ID nid = create_node(g, auxnd, var_name, bits);
   g->add_graph_input(var_name.substr(1).c_str(), nid, bits); //get rid of $mark
 
   return nid;
 }
 
-Index_ID Pass_dfg::create_output(LGraph *g, CF2DF_State *state, const std::string &var_name, uint16_t bits) {
-  Index_ID nid = create_node(g, state, var_name);
+Index_ID Pass_dfg::create_output(LGraph *g, Aux_node *auxnd, const std::string &var_name, uint16_t bits) {
+  Index_ID nid = create_node(g, auxnd, var_name);
   g->add_graph_output(var_name.substr(1).c_str(), nid, bits);
 
   return nid;
 }
 
-Index_ID Pass_dfg::create_private(LGraph *g, CF2DF_State *state, const std::string &var_name) {
-  Index_ID nid = create_node(g, state, var_name);
+Index_ID Pass_dfg::create_private(LGraph *g, Aux_node *auxnd, const std::string &var_name) {
+  Index_ID nid = create_node(g, auxnd, var_name);
   g->node_type_set(nid, Or_Op);
 
   return nid;
 }
 
-Index_ID Pass_dfg::create_default_const(LGraph *g, CF2DF_State *state) {
+Index_ID Pass_dfg::create_default_const(LGraph *g, Aux_node *auxnd) {
   Index_ID nid = g->create_node().get_nid();
   g->node_type_set(nid, U32Const_Op);
   g->node_u32type_set(nid, 0);
@@ -45,7 +45,7 @@ Index_ID Pass_dfg::create_default_const(LGraph *g, CF2DF_State *state) {
   return nid;
 }
 
-Index_ID Pass_dfg::create_true_const(LGraph *g, CF2DF_State *state) {
+Index_ID Pass_dfg::create_true_const(LGraph *g, Aux_node *auxnd) {
   Index_ID nid = g->create_node().get_nid();
   g->node_type_set(nid, U32Const_Op);
   g->node_u32type_set(nid, 1);
@@ -56,7 +56,7 @@ Index_ID Pass_dfg::create_true_const(LGraph *g, CF2DF_State *state) {
   return nid;
 }
 
-Index_ID Pass_dfg::create_false_const(LGraph *g, CF2DF_State *state) {
+Index_ID Pass_dfg::create_false_const(LGraph *g, Aux_node *auxnd) {
   Index_ID nid = g->create_node().get_nid();
   g->node_type_set(nid, U32Const_Op);
   g->node_u32type_set(nid, 0);
@@ -67,25 +67,25 @@ Index_ID Pass_dfg::create_false_const(LGraph *g, CF2DF_State *state) {
   return nid;
 }
 
-Index_ID Pass_dfg::create_node(LGraph *g, CF2DF_State *state, const std::string &v, const uint16_t bits) {
+Index_ID Pass_dfg::create_node(LGraph *g, Aux_node *auxnd, const std::string &v, const uint16_t bits) {
   Index_ID nid = g->create_node().get_nid();
   g->set_node_wirename(nid, v.c_str());
   g->set_bits(nid,bits);
-  state->set_alias(v, nid);
+  auxnd->set_alias(v, nid);
   return nid;
 }
 
-Index_ID Pass_dfg::create_AND(LGraph *g, CF2DF_State *state, Index_ID op1, Index_ID op2) {
-  return create_binary(g, state, op1, op2, And_Op);
+Index_ID Pass_dfg::create_AND(LGraph *g, Aux_node *auxnd, Index_ID op1, Index_ID op2) {
+  return create_binary(g, auxnd, op1, op2, And_Op);
 }
 
-Index_ID Pass_dfg::create_OR(LGraph *g, CF2DF_State *state, Index_ID op1, Index_ID op2) {
-  return create_binary(g, state, op1, op2, Or_Op);
+Index_ID Pass_dfg::create_OR(LGraph *g, Aux_node *auxnd, Index_ID op1, Index_ID op2) {
+  return create_binary(g, auxnd, op1, op2, Or_Op);
 }
 
-Index_ID Pass_dfg::create_binary(LGraph *g, CF2DF_State *state, Index_ID op1, Index_ID op2, Node_Type_Op oper) {
+Index_ID Pass_dfg::create_binary(LGraph *g, Aux_node *auxnd, Index_ID op1, Index_ID op2, Node_Type_Op oper) {
   auto target = temp();
-  Index_ID dfnode = create_node(g, state, target);
+  Index_ID dfnode = create_node(g, auxnd, target);
 
   g->node_type_set(dfnode, oper);
 
@@ -95,9 +95,9 @@ Index_ID Pass_dfg::create_binary(LGraph *g, CF2DF_State *state, Index_ID op1, In
   return dfnode;
 }
 
-Index_ID Pass_dfg::create_NOT(LGraph *g, CF2DF_State *state, Index_ID op1) {
+Index_ID Pass_dfg::create_NOT(LGraph *g, Aux_node *auxnd, Index_ID op1) {
   auto target = temp();
-  Index_ID dfnode = create_node(g, state, target);
+  Index_ID dfnode = create_node(g, auxnd, target);
 
   g->node_type_set(dfnode, Not_Op);
 

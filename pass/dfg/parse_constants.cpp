@@ -2,7 +2,7 @@
 #include <string>
 
 
-Index_ID Pass_dfg::resolve_constant(LGraph *g, CF2DF_State *state, const std::string& str)
+Index_ID Pass_dfg::resolve_constant(LGraph *g, Aux_node *auxnd, const std::string& str)
 {
   //arguments -> local variable
   bool is_signed;
