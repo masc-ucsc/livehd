@@ -1,0 +1,88 @@
+---------------------------------------
+the stage test1.prp
+---------------------------------------
+
+%o1 = $a + 3
+if($a > 3){
+  %o2 = $a + $b
+}
+@cycle += 1
+@cycle as __bist:10
+
+---------------------------------------
+create test1_comb lgraph
+---------------------------------------
+
+---------------------------------------
+create test1_fluid lgraph
+---------------------------------------
+
+---------------------------------------
+the generated pseudo-verilog-code
+when the block is instantiated as fluid
+---------------------------------------
+
+inputs:  a, b, a_valid, b_valid, o1_stop, o2_stop
+outputs: o1, o2, a_stop, b_stop, o1_valid, o2_valid
+
+a_rd = 0
+b_rd = 0
+o1_wr = 0
+o2_wr = 0
+
+o1_next = $a + 3
+a_rd = 1
+o1_wr = 1
+
+if($a > 3){
+  o2_next = $a + $b
+  o2_wr = 1
+  b_rd = 1
+}
+
+cycle_next = @cycle + 1
+
+abort = false
+if(a_rd && !$a.valid){
+  abort = true
+}
+if(b_rd && !$b.valid){
+  abort = true
+}
+if(o1_wr && o1_stop_internal){
+  abort = true
+}
+if(o2_wr && o2_stop_internal){
+  abort = true
+}
+
+//Isolation: 
+//aborted stages do not consume any inputs, generate any valid output,
+//or make any other changes to its state
+//DO NOT UPDATE ANY @ in this cycle, abort reg updates too.
+if(abort){
+  o1_valid_internal = false
+  o2_valid_internal = false
+  a_stop = true
+  b_stop = true
+}else{
+  o1_valid_internal = o1_wr
+  o2_valid_internal = o2_wr
+  a_stop = false
+  b_stop = false
+}
+
+flop (.enable(!abort), .din(cycle_next), .q(cycle));
+fflop(.din(o1_next), 
+      .q(o1), 
+      .dinValid(o1_valid_internal), 
+      .qValid(o1_valid),
+      .dinStop(o1_stop_internal), 
+      .qStop(o1_stop));
+
+fflop(.din(o2_next), 
+      .q(o2), 
+      .dinValid(o2_valid_internal), 
+      .qValid(o2_valid),
+      .dinStop(o2_stop_internal), 
+      .qStop(o2_stop));
