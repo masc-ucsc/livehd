@@ -91,9 +91,27 @@ void Pass_dfg::cfg_2_dfg(LGraph *dfg, const LGraph *cfg) {
   Aux_node auxnd_global;
   Aux_tree  aux_tree(&auxnd_global);
   process_cfg(dfg, cfg, &auxnd_global, itr);
-  //attach_outputs(dfg, &auxnd);
 
+  finalize_gconnect(dfg, &auxnd_global);
+
+  //attach_outputs(dfg, &auxnd);
   fmt::print("calling sync\n");
+}
+
+void Pass_dfg::finalize_gconnect(LGraph *dfg, const Aux_node *auxnd_global) {
+  for (const auto &pair : auxnd_global->get_auxtab()) {
+    if (is_output(pair.first)){
+      fmt::print("hello\n");
+      Index_ID dst_nid = dfg->get_graph_output(pair.first.substr(1)).get_nid();
+      Index_ID src_nid = pair.second;
+      fmt::print("hello2\n");
+      dfg->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+      fmt::print("hello3\n");
+    }
+    else if(is_register(pair.first)){
+      ;//balabala
+    }
+  }
 }
 
 Index_ID Pass_dfg::process_cfg(LGraph *dfg, const LGraph *cfg, Aux_node *auxnd, Index_ID top_node) {
@@ -117,7 +135,7 @@ Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, Aux_node *auxnd,
   fmt::print("Processing CFG node:{}\n", node);
   fmt::print("target:[{}], operator:[{}], ", data.get_target(), data.get_operator());
   fmt::print("operands:[");
-  for(const auto i:data.get_operands())
+  for(const auto &i:data.get_operands())
     fmt::print("{}, ", i);
   fmt::print("]");
   fmt::print("\n");
@@ -179,9 +197,11 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_node *auxnd, const CFG_Node_Data 
       auto bits = dfg->get_bits(oprd_id0);
       std::vector<Index_ID> oprd_ids;
       oprd_ids.push_back(oprd_id0);
-      Index_ID target_id = create_output(dfg, auxnd, target, bits);
-      fmt::print("create node for output target:{}, nid:{}\n", target, target_id);
-      process_connections(dfg, oprd_ids, target_id);
+      create_output(dfg, auxnd, target, bits);
+      //Index_ID target_id = create_output(dfg, auxnd, target, bits);
+      //fmt::print("create node for output target:{}, nid:{}\n", target, target_id);
+      //process_connections(dfg, oprd_ids, target_id);
+      auxnd->set_alias(target, oprd_id0);
     }else{
       oprd_id0 = process_operand(dfg, auxnd, oprds[0]);
       auxnd->set_alias(target, oprd_id0);

@@ -56,56 +56,58 @@ protected:
   Pass_dfg_options opack;
 
 private:
-  Index_ID                 find_cfg_root(const LGraph *cfg);
-  Index_ID                 process_cfg(        LGraph *dfg,
-                                               const LGraph *cfg,
-                                               Aux_node *auxnd,
-                                               Index_ID top_node);
+  Index_ID                 find_cfg_root(        const LGraph *cfg);
+  Index_ID                 process_cfg(          LGraph *dfg,
+                                                 const LGraph *cfg,
+                                                 Aux_node *auxnd,
+                                                 Index_ID top_node);
 
-  Index_ID                 process_node(       LGraph *dfg,
-                                               const LGraph *cfg,
-                                               Aux_node *auxnd,
-                                               Index_ID node);
+  Index_ID                 process_node(         LGraph *dfg,
+                                                 const LGraph *cfg,
+                                                 Aux_node *auxnd,
+                                                 Index_ID node);
 
-  void                     process_assign(     LGraph *dfg,
-                                               Aux_node *auxnd,
-                                               const CFG_Node_Data &data);
-  void                     process_connections(LGraph *dfg,
-                                               const std::vector<Index_ID> &src_nids,
-                                               const Index_ID &dst_nid);
+  void                     process_assign(       LGraph *dfg,
+                                                 Aux_node *auxnd,
+                                                 const CFG_Node_Data &data);
+  void                     finalize_gconnect(    LGraph *dfg,
+                                                 const Aux_node *auxand_global);
+  void                     process_connections(  LGraph *dfg,
+                                                 const std::vector<Index_ID> &src_nids,
+                                                 const Index_ID &dst_nid);
 
-  void                     process_func_call(  LGraph *dfg,
-                                               const LGraph *cfg,
-                                               Aux_node *auxnd,
-                                               const CFG_Node_Data &data);
+  void                     process_func_call(    LGraph *dfg,
+                                                 const LGraph *cfg,
+                                                 Aux_node *auxnd,
+                                                 const CFG_Node_Data &data);
 
-  Index_ID                 process_if       (  LGraph *dfg,
-                                               const LGraph *cfg,
-                                               Aux_node *auxnd,
-                                               const CFG_Node_Data &data,
-                                               Index_ID node );
+  Index_ID                 process_if(           LGraph *dfg,
+                                                 const LGraph *cfg,
+                                                 Aux_node *auxnd,
+                                                 const CFG_Node_Data &data,
+                                                 Index_ID node );
 
-  Index_ID                 process_operand    (    LGraph *dfg,
-                                               Aux_node *auxnd,
-                                               const std::string oprd);
+  Index_ID                 process_operand(      LGraph *dfg,
+                                                 Aux_node *auxnd,
+                                                 const std::string oprd);
 
-  std::vector<Index_ID>    process_operands   (   LGraph *dfg,
-                                                  Aux_node *auxnd,
-                                                  const CFG_Node_Data &data);
+  std::vector<Index_ID>    process_operands(     LGraph *dfg,
+                                                 Aux_node *auxnd,
+                                                 const CFG_Node_Data &data);
 
-  void                     add_phis(           LGraph *dfg,
-                                               const LGraph *cfg,
-                                               Aux_node *parent,
-                                               Aux_node *tnode,
-                                               Aux_node *fnode,
-                                               Index_ID condition);
+  void                     add_phis(             LGraph *dfg,
+                                                 const LGraph *cfg,
+                                                 Aux_node *parent,
+                                                 Aux_node *tnode,
+                                                 Aux_node *fnode,
+                                                 Index_ID condition);
 
-  void                     add_phi(            LGraph *dfg,
-                                               Aux_node *parent,
-                                               Aux_node *tnode,
-                                               Aux_node *fnode,
-                                               Index_ID condition,
-                                               const std::string &variable);
+  void                     add_phi(              LGraph *dfg,
+                                                 Aux_node *parent,
+                                                 Aux_node *tnode,
+                                                 Aux_node *fnode,
+                                                 Index_ID condition,
+                                                 const std::string &variable);
 
   Index_ID get_cfg_child(const LGraph *cfg, Index_ID node);
   Index_ID resolve_phi_branch(LGraph *dfg, Aux_node *parent, Aux_node *branch, const std::string &variable);

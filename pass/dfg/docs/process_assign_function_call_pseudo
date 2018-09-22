@@ -1,4 +1,6 @@
-main body #the goal is try not connect any thing until end of cfg->dfg tranformation
+# the goal is only create hardware(gates) with inputs connected 
+# but finallize connection with output of each hardware at the finnal step.
+main body 
 if(op == "=")
   e.g. a = tmp0
   don't create node for target unless it's gio
@@ -36,7 +38,9 @@ else if(op == binary)
   process_operand(oprd[1])
   process_operand(target)
   node_type_set(target)
-
+else if(op == funcation call)
+  # function call should act analogous to binary op
+  # need to connect the inputs
 
 
 
