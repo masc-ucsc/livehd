@@ -37,12 +37,12 @@ Aux_node* Aux_tree:: get_parent(Aux_node *child){
 
 void Aux_tree::delete_child(Aux_node *parent, bool branch){
   if(branch){
-    assert(parent->lchild->auxtab.empty());
+    assert(parent->lchild->get_auxtab().empty());
     delete parent->lchild;
     parent->lchild = nullptr;
   }
   else{
-    assert(!parent->rchild->auxtab.empty());
+    assert(!parent->rchild->get_auxtab().empty());
     delete parent->rchild;
     parent->rchild = nullptr;
   }
