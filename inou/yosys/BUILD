@@ -18,6 +18,7 @@ linkso(
     name = "liblgraph_yosys",
     srcs   = [":lgyosys", "//core:core","//meta:meta"],
     static = ["@boost//:system" , "@boost//:filesystem", "@boost//:program_options"],
+    visibility = ["//visibility:public"],
 )
 
 sh_test(

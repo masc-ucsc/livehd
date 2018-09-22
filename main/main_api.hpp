@@ -8,6 +8,7 @@
 class Main_api {
 protected:
   static Eprp eprp;
+  static std::string main_path;
 
 public:
   static void error(const std::string msg) {
@@ -36,6 +37,8 @@ public:
   static void get_labels(const std::string &cmd, std::function<void(const std::string &, const std::string &, bool required)> fn) {
     eprp.get_labels(cmd,fn);
   }
+
+  static const std::string &get_main_path() { return main_path; }
 
   static void init();
 };

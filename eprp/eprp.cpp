@@ -5,13 +5,14 @@
 #include "spdlog/spdlog.h"
 #include "eprp.hpp"
 
-// rule_path = (\. | alnum | /)+
+// rule_path = (\. | alnum | / | "asdad..")+
 bool Eprp::rule_path(std::string &path) {
 
   assert(!scan_is_end());
 
   if (!(scan_is_token(TOK_DOT)
         || scan_is_token(TOK_ALNUM)
+        || scan_is_token(TOK_STRING)
         || scan_is_token(TOK_DIV)))
     return false;
 
@@ -24,6 +25,7 @@ bool Eprp::rule_path(std::string &path) {
 
   }while(scan_is_token(TOK_DOT)
         || scan_is_token(TOK_ALNUM)
+        || scan_is_token(TOK_STRING)
         || scan_is_token(TOK_DIV));
 
   return true;

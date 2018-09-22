@@ -112,11 +112,11 @@ Replxx::hints_t hook_hint(std::string const& context, int index, Replxx::Color& 
 
 int real_len( std::string const& s ) {
 	int len( 0 );
-	char m4( 128 + 64 + 32 + 16 );
-	char m3( 128 + 64 + 32 );
-	char m2( 128 + 64 );
+	uint8_t m4( 128 + 64 + 32 + 16 );
+	uint8_t m3( 128 + 64 + 32 );
+	uint8_t m2( 128 + 64 );
 	for ( int i( 0 ); i < static_cast<int>( s.length() ); ++ i, ++ len ) {
-		char c( s[i] );
+		uint8_t c( s[i] );
 		if ( ( c & m4 ) == m4 ) {
 			i += 3;
 		} else if ( ( c & m3 ) == m3 ) {

@@ -24,6 +24,7 @@ void Eprp_scanner::setup_translate() {
   translate['.'] = TOK_DOT;
   translate['>'] = TOK_GT  | TOK_TRYMERGE;  // TOK_PIPE
   translate['/'] = TOK_DIV;
+  translate['"'] = TOK_STRING | TOK_TRYMERGE;  // Anything else until other TOK_STRING
 
   translate['@'] = TOK_AT;
   translate['$'] = TOK_DOLLAR;
@@ -33,35 +34,55 @@ void Eprp_scanner::setup_translate() {
 
 void Eprp_scanner::add_token(Token t) {
 
+  // Handle strings, even before empty as spaces are legal
+  if (!token_list.empty()) {
+    Token last_tok = token_list.back();
+    if (last_tok.tok == (TOK_STRING|TOK_TRYMERGE)) {
+      if (t.tok == (TOK_STRING|TOK_TRYMERGE)) {
+        token_list.back().tok = TOK_STRING; // Remove TOK_TRYMERGE (closing ")
+        //token_list.back().len += t.len;  Do not include " in string
+      }else{
+        token_list.back().len += t.len;
+      }
+      return;
+    }
+  }
+
   if (!t.tok) {
     token_list_spaced = true;
     return;
   }
 
   if (t.tok & TOK_TRYMERGE) {
-    t.tok &= ~TOK_TRYMERGE;
-    if (!token_list.empty() && !token_list_spaced) {
-      Token last_tok = token_list.back();
-      if (last_tok.tok == TOK_OR && t.tok == TOK_GT) {
-        token_list.back().tok = TOK_PIPE;
-        token_list.back().len += t.len;
-        return;
-      }else if (last_tok.tok == TOK_AT && t.tok == TOK_ALNUM) {
-        token_list.back().tok = TOK_REGISTER;
-        token_list.back().len += t.len;
-        return;
-      }else if (last_tok.tok == TOK_PERCENT && t.tok == TOK_ALNUM) {
-        token_list.back().tok = TOK_OUTPUT;
-        token_list.back().len += t.len;
-        return;
-      }else if (last_tok.tok == TOK_DOLLAR && t.tok == TOK_ALNUM) {
-        token_list.back().tok = TOK_INPUT;
-        token_list.back().len += t.len;
-        return;
-      }else if (last_tok.tok == TOK_ALNUM && t.tok == TOK_COLON) {
-        token_list.back().tok = TOK_LABEL;
-        // token_list.back().len += t.len;
-        return;
+    if (t.tok == (TOK_TRYMERGE | TOK_STRING)) {
+      t.pos++;   // Skip the first " in the string
+      t.len = 0;
+    }else{
+      t.tok &= ~TOK_TRYMERGE;
+      if (!token_list.empty() && !token_list_spaced) {
+        Token last_tok = token_list.back();
+
+        if (last_tok.tok == TOK_OR && t.tok == TOK_GT) {
+          token_list.back().tok = TOK_PIPE;
+          token_list.back().len += t.len;
+          return;
+        }else if (last_tok.tok == TOK_AT && t.tok == TOK_ALNUM) {
+          token_list.back().tok = TOK_REGISTER;
+          token_list.back().len += t.len;
+          return;
+        }else if (last_tok.tok == TOK_PERCENT && t.tok == TOK_ALNUM) {
+          token_list.back().tok = TOK_OUTPUT;
+          token_list.back().len += t.len;
+          return;
+        }else if (last_tok.tok == TOK_DOLLAR && t.tok == TOK_ALNUM) {
+          token_list.back().tok = TOK_INPUT;
+          token_list.back().len += t.len;
+          return;
+        }else if (last_tok.tok == TOK_ALNUM && t.tok == TOK_COLON) {
+          token_list.back().tok = TOK_LABEL;
+          // token_list.back().len += t.len;
+          return;
+        }
       }
     }
   }

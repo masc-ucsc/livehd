@@ -18,6 +18,9 @@ cc_binary(
             "//pass/abc:pass_abc",
             "//pass/dfg:pass_dfg",
     ],
+    data = ["//inou/yosys:liblgraph_yosys.so",   # A bit special as only libraries are used in yosys -m XXX
+            "inou_yosys_read.ys",
+    ],
     linkopts = ["-ldl"],
 )
 
