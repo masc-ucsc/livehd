@@ -47,6 +47,8 @@
 #define TOK_DOT        0x11
 // /
 #define TOK_DIV        0x12
+// "asd23*.v" string (double quote)
+#define TOK_STRING     0x13
 
 #define TOK_TRYMERGE   0x80
 

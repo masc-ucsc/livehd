@@ -1,14 +1,12 @@
 
+parse the in inou_yosys_read.ys with https://github.com/kainjow/Mustache
+
 cmd all:
   support comma separated list
     dump a:1,2,3,4
 
 cmd echo:
   rename dump to echo
-
-cmd files:
-  files [path:xx] match:*.v |> echo
-    files:foo1.v,foo2.v,xxx.v  # alphabetical order
 
 cmd rename:
   echo foo:a |> rename src: foo dst:bar |> echo
