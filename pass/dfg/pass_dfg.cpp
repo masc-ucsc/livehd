@@ -43,7 +43,6 @@ void  Pass_dfg::optimize() {
   trans(dfg);
   dfg->sync();
 }
-
 void Pass_dfg::trans(LGraph *dfg) {
   LGraph* sub_graph = nullptr;
   //resolve pending graph
@@ -84,7 +83,6 @@ void Pass_dfg::trans(LGraph *dfg) {
   }
 
 }
-
 
 void Pass_dfg::cfg_2_dfg(LGraph *dfg, const LGraph *cfg) {
   Index_ID    itr = find_cfg_root(cfg);

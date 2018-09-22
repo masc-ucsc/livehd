@@ -2,10 +2,11 @@
 #ifndef CF2DF_STATE_H_
 #define CF2DF_STATE_H_
 
-#include "lgraph.hpp"
-#include "lgedge.hpp"
 #include <string>
 #include <unordered_map>
+
+#include "lgraph.hpp"
+#include "lgedge.hpp"
 
 const std::string READ_MARKER   = "pyrrd__";
 const std::string WRITE_MARKER  = "pyrwt__";
@@ -49,12 +50,6 @@ public:
 
   bool is_input(const std::string &v) const { return lgref->is_graph_input(auxtab.at(v)); }
   bool is_output(const std::string &v) const { return lgref->is_graph_output(auxtab.at(v)); }
-  //void set_id2id_subg   (const Index_ID &key, const Index_ID &value)     {id2id_subg[key] = value;}
-  //void set_name2id_subg (const std::string &key, const Index_ID &value)  {name2id_subg[key] = value;}
-  //void set_auxtab       (const std::string &key, const Index_ID &value)  {aux_table[key] = value;}
-  //const std::unordered_map<Index_ID, Index_ID>&     get_id2id_subg()           {return id2id_subg;}
-  //const std::unordered_map<std::string, Index_ID>&  get_name2id_subg()         {return name2id_subg;}
-  //const std::unordered_map<std::string, Index_ID>&  get_auxtab()               {return aux_table;}
 
 
 private:  typedef bool(*filter)(const CF2DF_State *, const std::string &);
@@ -63,10 +58,6 @@ private:  typedef bool(*filter)(const CF2DF_State *, const std::string &);
   std::unordered_map<std::string, Index_ID> auxtab;
   std::unordered_map<std::string, Index_ID> registers;
   bool fluid;
-  //std::unordered_map<Index_ID, Index_ID>    id2id_subg;
-  //std::unordered_map<std::string, Index_ID> name2id_subg;
-  //new 2018/08/23
-  //std::unordered_map<std::string, Index_ID> aux_table;
 };
 
 #endif
