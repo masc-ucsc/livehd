@@ -81,7 +81,6 @@ void Pass_dfg::trans(LGraph *dfg) {
       }
     }
   }
-
 }
 
 void Pass_dfg::cfg_2_dfg(LGraph *dfg, const LGraph *cfg) {
@@ -101,12 +100,11 @@ void Pass_dfg::cfg_2_dfg(LGraph *dfg, const LGraph *cfg) {
 void Pass_dfg::finalize_gconnect(LGraph *dfg, const Aux_node *auxnd_global) {
   for (const auto &pair : auxnd_global->get_auxtab()) {
     if (is_output(pair.first)){
-      fmt::print("hello\n");
       Index_ID dst_nid = dfg->get_graph_output(pair.first.substr(1)).get_nid();
       Index_ID src_nid = pair.second;
-      fmt::print("hello2\n");
+      auto bits = dfg->get_bits(src_nid);
+      dfg->set_bits(dst_nid,bits);
       dfg->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
-      fmt::print("hello3\n");
     }
     else if(is_register(pair.first)){
       ;//balabala
@@ -159,8 +157,7 @@ Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, Aux_node *auxnd,
 }
 
 void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, Aux_node *auxnd, const CFG_Node_Data &data) {
-  //for func_call, all the node should be created before, you just connect them.
-  //no need to create node for target
+  //for func_call, all the node should be created before, you just connect them. No need to create target node
   fmt::print("process_func_call\n");
   const auto &target = data.get_target();
   const auto &oprds  = data.get_operands();
@@ -194,10 +191,11 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_node *auxnd, const CFG_Node_Data 
   if(is_pure_assign_op(op)){
     if(is_output(target)) {
       oprd_id0 = process_operand(dfg, auxnd, oprds[0]);
-      auto bits = dfg->get_bits(oprd_id0);
+      //auto bits = dfg->get_bits(oprd_id0);
       std::vector<Index_ID> oprd_ids;
       oprd_ids.push_back(oprd_id0);
-      create_output(dfg, auxnd, target, bits);
+      //create_output(dfg, auxnd, target, bits);
+      create_output(dfg, auxnd, target);
       //Index_ID target_id = create_output(dfg, auxnd, target, bits);
       //fmt::print("create node for output target:{}, nid:{}\n", target, target_id);
       //process_connections(dfg, oprd_ids, target_id);
@@ -264,7 +262,7 @@ void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Index_ID> &src
                        (dfg->node_type_get(dst_nid).op == SubGraph_Op       )? (uint16_t)i : (uint16_t)0;
 
     dfg->add_edge(Node_Pin(src_nid, src_pid, false), Node_Pin(dst_nid, dst_pid, true));
-    //fmt::print("create edge ({}->{})\n", dfg->get_node_wirename(src_nid), dfg->get_node_wirename(dst_nid));
+    //fmt::print("add_edge {}->{}\n", dfg->get_node_wirename(src_nid), dfg->get_node_wirename(dst_nid));
   }
 }
 
@@ -316,24 +314,26 @@ Index_ID Pass_dfg::process_operand(LGraph *dfg, Aux_node *auxnd, const std::stri
 
 
 Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, Aux_node *auxnd, const CFG_Node_Data &data, Index_ID node) {
-  //fmt::print("process_if\n");
-  //Index_ID cond = auxnd->get_alias(data.get_target());
-  //const auto &operands = data.get_operands();
+  fmt::print("process_if\n");
+  Index_ID cond = auxnd->get_alias(data.get_target());
+  const auto &operands = data.get_operands();
 
-  //Index_ID tbranch = std::stol(operands[0]);
+  Index_ID tbranch = std::stol(operands[0]);
   //Aux_node tauxnd = auxnd->copy();
-  //Index_ID tb_next = get_cfg_child(cfg, process_cfg(dfg, cfg, &tauxnd, tbranch));
+  Aux_node tauxnd;
+  Index_ID tb_next = get_cfg_child(cfg, process_cfg(dfg, cfg, &tauxnd, tbranch));
 
-  //Index_ID fbranch = std::stol(operands[1]);
+  Aux_node faxund;
+  Index_ID fbranch = std::stol(operands[1]);
 
-  //if (fbranch != node) {                                // there is an 'else' clause
-  //  Aux_node fauxnd = auxnd->copy();
-  //  Index_ID fb_next = get_cfg_child(cfg, process_cfg(dfg, cfg, &fauxnd, fbranch));
-  //  assert(tb_next == fb_next);
-  //  add_phis(dfg, cfg, auxnd, &tauxnd, &fauxnd, cond);
-  //} else {
-  //  add_phis(dfg, cfg, auxnd, &tauxnd, auxnd, cond);    // if there's no else, the 'auxnd' of the 'else' branch is the same as the parent
-  //}
+  if (fbranch != node) {                                // there is an 'else' clause
+    Aux_node fauxnd;
+    Index_ID fb_next = get_cfg_child(cfg, process_cfg(dfg, cfg, &fauxnd, fbranch));
+    assert(tb_next == fb_next);
+    add_phis(dfg, cfg, auxnd, &tauxnd, &fauxnd, cond);
+  } else {
+    add_phis(dfg, cfg, auxnd, &tauxnd, auxnd, cond);    // if there's no else, the 'auxnd' of the 'else' branch is the same as the parent
+  }
 
   //return tb_next;
   return 0;
