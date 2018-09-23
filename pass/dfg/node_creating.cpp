@@ -23,7 +23,7 @@ Index_ID Pass_dfg::create_input(LGraph *g, Aux_node *auxnd, const std::string &v
   return nid;
 }
 
-Index_ID Pass_dfg::create_output(LGraph *g, Aux_node *auxnd, const std::string &var_name, uint16_t bits) {
+Index_ID Pass_dfg::create_output(LGraph *g, Aux_node *auxnd, const std::string &var_name, uint17_t bits) {
   Index_ID nid = create_node(g, auxnd, var_name);
   g->add_graph_output(var_name.substr(1).c_str(), nid, bits);
 
