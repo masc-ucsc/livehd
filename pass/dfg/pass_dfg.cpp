@@ -88,8 +88,8 @@ void Pass_dfg::cfg_2_dfg(LGraph *dfg, const LGraph *cfg) {
   //Aux_node auxnd(dfg);
 
   Aux_node auxnd_global;
-  Aux_tree  aux_tree(&auxnd_global);
-  process_cfg(dfg, cfg, &auxnd_global, itr);
+  Aux_tree aux_tree(&auxnd_global);
+  process_cfg(dfg, cfg, &aux_tree, itr);
 
   finalize_gconnect(dfg, &auxnd_global);
 
@@ -112,21 +112,20 @@ void Pass_dfg::finalize_gconnect(LGraph *dfg, const Aux_node *auxnd_global) {
   }
 }
 
-Index_ID Pass_dfg::process_cfg(LGraph *dfg, const LGraph *cfg, Aux_node *auxnd, Index_ID top_node) {
+Index_ID Pass_dfg::process_cfg(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, Index_ID top_node) {
   Index_ID itr = top_node;
   Index_ID last_itr = 0;
 
   while (itr != 0) {
     last_itr = itr;
-    itr = process_node(dfg, cfg, auxnd, itr);
+    itr = process_node(dfg, cfg, aux_tree, itr);
     fmt::print("cfg nid:{} process finished!!\n\n", last_itr);
   }
-
-  auxnd->print_aux();
+  //aux_tree->print_aux();
   return last_itr;
 }
 
-Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, Aux_node *auxnd, Index_ID node) {
+Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, Index_ID node) {
   CFG_Node_Data data(cfg, node);
 
   //sh dbg
@@ -141,13 +140,13 @@ Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, Aux_node *auxnd,
 
   switch (cfg->node_type_get(node).op) {
   case CfgAssign_Op:
-    process_assign(dfg, auxnd, data);
+    process_assign(dfg, aux_tree, data);
     return get_cfg_child(cfg, node);
   case CfgFunctionCall_Op:
-    process_func_call(dfg, cfg, auxnd, data);
+    process_func_call(dfg, cfg, aux_tree, data);
     return get_cfg_child(cfg, node);
   case CfgIf_Op:
-    return process_if(dfg, cfg, auxnd, data, node);
+    return process_if(dfg, cfg, aux_tree, data, node);
   case CfgIfMerge_Op:
     return 0;
   default:
@@ -156,14 +155,14 @@ Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, Aux_node *auxnd,
   }
 }
 
-void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, Aux_node *auxnd, const CFG_Node_Data &data) {
+void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data) {
   //for func_call, all the node should be created before, you just connect them. No need to create target node
   fmt::print("process_func_call\n");
   const auto &target = data.get_target();
   const auto &oprds  = data.get_operands();
-  const auto &oprd_ids = process_operands(dfg, auxnd, data); // all the operands should be created before, just get back oprd_ids
+  const auto &oprd_ids = process_operands(dfg, aux_tree, data); // all the operands should be created before, just get back oprd_ids
   LGraph* sub_graph = nullptr;
-  Index_ID subg_root_nid = auxnd->get_alias(oprds[0]);
+  Index_ID subg_root_nid = aux_tree->get_alias(oprds[0]);
 
   if((sub_graph = LGraph::find_lgraph(cfg->get_path(), ((std::string)(dfg->get_node_wirename(subg_root_nid))+"_dfg")))){
     dfg->node_subgraph_set(subg_root_nid, (uint32_t)sub_graph->lg_id());
@@ -173,7 +172,7 @@ void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, Aux_node *auxnd
     fmt::print("set pending graph on nid:{}, sub_graph name should be:{}\n", subg_root_nid, dfg->get_node_wirename(subg_root_nid));
   }
 
-  auxnd->set_alias(target, oprd_ids[0]);
+  aux_tree->set_alias(target, oprd_ids[0]);
 
   //connect 1st operand with [2nd,3rd,...] operands
   std::vector<Index_ID> subg_input_ids(oprd_ids.begin()+1, oprd_ids.end());
@@ -181,7 +180,7 @@ void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, Aux_node *auxnd
 }
 
 
-void Pass_dfg::process_assign(LGraph *dfg, Aux_node *auxnd, const CFG_Node_Data &data){
+void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Data &data){
   fmt::print("process_assign\n");
   const auto                     &target = data.get_target();
   const std::vector<std::string> &oprds  = data.get_operands();
@@ -190,58 +189,58 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_node *auxnd, const CFG_Node_Data 
   Index_ID                       oprd_id1;
   if(is_pure_assign_op(op)){
     if(is_output(target)) {
-      oprd_id0 = process_operand(dfg, auxnd, oprds[0]);
+      oprd_id0 = process_operand(dfg, aux_tree, oprds[0]);
       //auto bits = dfg->get_bits(oprd_id0);
       std::vector<Index_ID> oprd_ids;
       oprd_ids.push_back(oprd_id0);
-      //create_output(dfg, auxnd, target, bits);
-      create_output(dfg, auxnd, target);
-      //Index_ID target_id = create_output(dfg, auxnd, target, bits);
+      //create_output(dfg, aux_tree, target, bits);
+      create_output(dfg, aux_tree, target);
+      //Index_ID target_id = create_output(dfg, aux_tree, target, bits);
       //fmt::print("create node for output target:{}, nid:{}\n", target, target_id);
       //process_connections(dfg, oprd_ids, target_id);
-      auxnd->set_alias(target, oprd_id0);
+      aux_tree->set_alias(target, oprd_id0);
     }else{
-      oprd_id0 = process_operand(dfg, auxnd, oprds[0]);
-      auxnd->set_alias(target, oprd_id0);
+      oprd_id0 = process_operand(dfg, aux_tree, oprds[0]);
+      aux_tree->set_alias(target, oprd_id0);
     }
   }
   else if(is_label_op(op)){
     if(oprds[0] == "__bits"){
-      //Index_ID floating_id = resolve_constant(dfg, auxnd, oprds[1]);
-      Index_ID floating_id = process_operand(dfg, auxnd, oprds[1]);
-      auxnd->set_alias(target, floating_id);
+      //Index_ID floating_id = resolve_constant(dfg, aux_tree, oprds[1]);
+      Index_ID floating_id = process_operand(dfg, aux_tree, oprds[1]);
+      aux_tree->set_alias(target, floating_id);
     }else if(oprds[0] == "__fluid"){
       ;//balabala
     }else{//function argument assign
-      oprd_id1 = process_operand(dfg, auxnd, oprds[1]);
-      auxnd->set_alias(target, oprd_id1);
+      oprd_id1 = process_operand(dfg, aux_tree, oprds[1]);
+      aux_tree->set_alias(target, oprd_id1);
     }
   }
   else if(is_as_op(op)){
-    oprd_id0 = process_operand(dfg, auxnd, oprds[0]);
+    oprd_id0 = process_operand(dfg, aux_tree, oprds[0]);
     //process target
     if(is_input(target)){
       assert(dfg->node_value_get(oprd_id0));
       auto bits = dfg->node_value_get(oprd_id0);
-      Index_ID target_id = create_input(dfg, auxnd, target, bits);
+      Index_ID target_id = create_input(dfg, aux_tree, target, bits);
       fmt::print("create node for input target:{}, nid:{}\n", target, target_id);
     }else if(is_output(target)){
       assert(dfg->node_value_get(oprd_id0));
       auto bits = dfg->node_value_get(oprd_id0);
-      Index_ID target_id = create_output(dfg, auxnd, target, bits);
+      Index_ID target_id = create_output(dfg, aux_tree, target, bits);
       fmt::print("create node for output target:{}, nid:{}\n", target, target_id);
     }else
-      auxnd->set_alias(target, oprd_id0);
+      aux_tree->set_alias(target, oprd_id0);
   }
   else if(is_unary_op(op)){
-    oprd_id0 = process_operand(dfg, auxnd, oprds[0]);
-    auxnd->set_alias(target, oprd_id0);
+    oprd_id0 = process_operand(dfg, aux_tree, oprds[0]);
+    aux_tree->set_alias(target, oprd_id0);
   }
   else if(is_binary_op(op)){
     std::vector<Index_ID> oprd_ids;
-    oprd_ids.push_back(process_operand(dfg, auxnd, oprds[0]));
-    oprd_ids.push_back(process_operand(dfg, auxnd, oprds[1]));
-    Index_ID target_id = create_node(dfg, auxnd, target);
+    oprd_ids.push_back(process_operand(dfg, aux_tree, oprds[0]));
+    oprd_ids.push_back(process_operand(dfg, aux_tree, oprds[1]));
+    Index_ID target_id = create_node(dfg, aux_tree, target);
     fmt::print("create node for internal target:{}, nid:{}\n", target, target_id);
     dfg->node_type_set(target_id, node_type_from_text(op));
     auto max_bits = std::max(dfg->get_bits(oprd_ids[0]),dfg->get_bits(oprd_ids[1])) + 1;
@@ -267,97 +266,99 @@ void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Index_ID> &src
 }
 
 
-Index_ID Pass_dfg::process_operand(LGraph *dfg, Aux_node *auxnd, const std::string oprd) {
+Index_ID Pass_dfg::process_operand(LGraph *dfg, Aux_tree *aux_tree, const std::string oprd) {
   Index_ID oprd_id;
-  if (auxnd->has_alias(oprd)){
-    oprd_id = auxnd->get_alias(oprd);
+  if (aux_tree->has_alias(oprd)){
+    oprd_id = aux_tree->get_alias(oprd);
     fmt::print("operand:{} has an alias:{}\n", oprd, oprd_id);
   }
   else {
     if (is_constant(oprd)){
-      oprd_id = resolve_constant(dfg, auxnd, oprd);
-      auxnd->set_alias(oprd, oprd_id);
+      oprd_id = resolve_constant(dfg, aux_tree, oprd);
+      aux_tree->set_alias(oprd, oprd_id);
       fmt::print("create node for constant operand:{}, nid:{}\n", oprd, oprd_id);
     }
     //else if (is_register(oprd)){
-    //  //oprd_id = create_register(dfg, auxnd, oprd);
-    //  //auxnd->set_alias(oprd, oprd_id);
+    //  //oprd_id = create_register(dfg, aux_tree, oprd);
+    //  //aux_tree->set_alias(oprd, oprd_id);
     //  //fmt::print("create node for register operand:{}, nid:{}\n", oprd, oprd_id);
     //}
     else if (is_input(oprd)){
-      oprd_id = create_input(dfg, auxnd, oprd);
-      auxnd->set_alias(oprd, oprd_id);
+      oprd_id = create_input(dfg, aux_tree, oprd);
+      aux_tree->set_alias(oprd, oprd_id);
       fmt::print("create node for input operand:{}, nid:{}\n", oprd, oprd_id);
     }
     else if (is_output(oprd)){
-      oprd_id = create_output(dfg, auxnd, oprd);
-      auxnd->set_alias(oprd, oprd_id);
+      oprd_id = create_output(dfg, aux_tree, oprd);
+      aux_tree->set_alias(oprd, oprd_id);
       fmt::print("create node for output operand:{}, nid:{}\n", oprd, oprd_id);
     }
     else if (is_reference(oprd)){
-      oprd_id = create_reference(dfg, auxnd, oprd);
-      auxnd->set_alias(oprd, oprd_id);
+      oprd_id = create_reference(dfg, aux_tree, oprd);
+      aux_tree->set_alias(oprd, oprd_id);
       fmt::print("create node for reference operand:{}, nid:{}\n", oprd, oprd_id);
     }
     else{
-      oprd_id = create_private(dfg, auxnd, oprd);
-      auxnd->set_alias(oprd, oprd_id);
+      oprd_id = create_private(dfg, aux_tree, oprd);
+      aux_tree->set_alias(oprd, oprd_id);
       fmt::print("create node for private operand:{}, nid:{}\n", oprd, oprd_id);
     }
   }
 
-  //if (auxnd->fluid_df() && is_input(oprd))
-  //  add_read_marker(dfg, auxnd, oprd);
+  //if (aux_tree->fluid_df() && is_input(oprd))
+  //  add_read_marker(dfg, aux_tree, oprd);
 
   return oprd_id;
 }
 
 
-Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, Aux_node *auxnd, const CFG_Node_Data &data, Index_ID node) {
+Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data, Index_ID node) {
   fmt::print("process_if\n");
-  Index_ID cond = auxnd->get_alias(data.get_target());
+  Index_ID cond = aux_tree->get_alias(data.get_target());
   const auto &operands = data.get_operands();
 
   Index_ID tbranch = std::stol(operands[0]);
-  //Aux_node tauxnd = auxnd->copy();
+  //Aux_node taux_tree = aux_tree->copy();
   Aux_node tauxnd;
-  Index_ID tb_next = get_cfg_child(cfg, process_cfg(dfg, cfg, &tauxnd, tbranch));
+  aux_tree->set_child(aux_tree->get_latest_aux(), &tauxnd, true);
+  Index_ID tb_next = get_cfg_child(cfg, process_cfg(dfg, cfg, aux_tree, tbranch));
 
-  Aux_node faxund;
+  Aux_node fauxnd;
+  aux_tree->set_child(aux_tree->get_latest_aux(), &fauxnd, false);
   Index_ID fbranch = std::stol(operands[1]);
 
   if (fbranch != node) {                                // there is an 'else' clause
-    Aux_node fauxnd;
-    Index_ID fb_next = get_cfg_child(cfg, process_cfg(dfg, cfg, &fauxnd, fbranch));
+    Aux_node faux_tree;
+    Index_ID fb_next = get_cfg_child(cfg, process_cfg(dfg, cfg, aux_tree, fbranch));
     assert(tb_next == fb_next);
-    add_phis(dfg, cfg, auxnd, &tauxnd, &fauxnd, cond);
+    //add_phis(dfg, cfg, aux_tree, &aux_tree, &faux_tree, cond);
   } else {
-    add_phis(dfg, cfg, auxnd, &tauxnd, auxnd, cond);    // if there's no else, the 'auxnd' of the 'else' branch is the same as the parent
+    //add_phis(dfg, cfg, aux_tree, &aux_tree, aux_tree, cond);    // if there's no else, the 'aux_tree' of the 'else' branch is the same as the parent
   }
 
   //return tb_next;
   return 0;
 }
 
-void Pass_dfg::add_phis(LGraph *dfg, const LGraph *cfg, Aux_node *parent, Aux_node *tauxnd, Aux_node *fauxnd, Index_ID condition) {
+void Pass_dfg::add_phis(LGraph *dfg, const LGraph *cfg, Aux_node *parent, Aux_node *taux_tree, Aux_node *faux_tree, Index_ID condition) {
   //std::unordered_set<std::string> phis_added;
 
-  //for (const auto &pair : tauxnd->get_auxtab()) {
-  //  if (reference_changed(parent, tauxnd, pair.first)) {
-  //    add_phi(dfg, parent, tauxnd, fauxnd, condition, pair.first);
+  //for (const auto &pair : taux_tree->get_auxtab()) {
+  //  if (reference_changed(parent, taux_tree, pair.first)) {
+  //    add_phi(dfg, parent, taux_tree, faux_tree, condition, pair.first);
   //    phis_added.insert(pair.first);
   //  }
   //}
 
-  //for (const auto &pair : fauxnd->get_auxtab()) {
-  //  if (phis_added.find(pair.first) == phis_added.end() && reference_changed(parent, fauxnd, pair.first))
-  //    add_phi(dfg, parent, tauxnd, fauxnd, condition, pair.first);
+  //for (const auto &pair : faux_tree->get_auxtab()) {
+  //  if (phis_added.find(pair.first) == phis_added.end() && reference_changed(parent, faux_tree, pair.first))
+  //    add_phi(dfg, parent, taux_tree, faux_tree, condition, pair.first);
   //}
 }
 
-void Pass_dfg::add_phi(LGraph *dfg, Aux_node *parent, Aux_node *tauxnd, Aux_node *fauxnd, Index_ID condition, const std::string &variable) {
-  //Index_ID tid = resolve_phi_branch(dfg, parent, tauxnd, variable);
-  //Index_ID fid = resolve_phi_branch(dfg, parent, fauxnd, variable);
+void Pass_dfg::add_phi(LGraph *dfg, Aux_node *parent, Aux_node *taux_tree, Aux_node *faux_tree, Index_ID condition, const std::string &variable) {
+  //Index_ID tid = resolve_phi_branch(dfg, parent, taux_tree, variable);
+  //Index_ID fid = resolve_phi_branch(dfg, parent, faux_tree, variable);
 
   //Index_ID phi = dfg->create_node().get_nid();
   //dfg->node_type_set(phi, Mux_Op);
@@ -391,74 +392,74 @@ Index_ID Pass_dfg::resolve_phi_branch(LGraph *dfg, Aux_node *parent, Aux_node *b
 }
 
 
-void Pass_dfg::assign_to_true(LGraph *dfg, Aux_node *auxnd, const std::string &v) {
-  Index_ID node = create_node(dfg, auxnd, v);
+void Pass_dfg::assign_to_true(LGraph *dfg, Aux_tree *aux_tree, const std::string &v) {
+  Index_ID node = create_node(dfg, aux_tree, v);
   fmt::print("create node nid:{}\n", node);
   dfg->node_type_set(node, Or_Op);
 
-  dfg->add_edge(Node_Pin(create_true_const(dfg, auxnd), 0, false), Node_Pin(node, 0, true));
-  dfg->add_edge(Node_Pin(create_true_const(dfg, auxnd), 0, false), Node_Pin(node, 0, true));
+  dfg->add_edge(Node_Pin(create_true_const(dfg, aux_tree), 0, false), Node_Pin(node, 0, true));
+  dfg->add_edge(Node_Pin(create_true_const(dfg, aux_tree), 0, false), Node_Pin(node, 0, true));
 }
 
-void Pass_dfg::attach_outputs(LGraph *dfg, Aux_node *auxnd) {
-//  for (const auto &pair : auxnd->copy().get_auxtab()) {
+void Pass_dfg::attach_outputs(LGraph *dfg, Aux_tree *aux_tree) {
+//  for (const auto &pair : aux_tree->copy().get_auxtab()) {
 //    const auto &var = pair.first;
 //
 //    if (is_register(var) || is_output(var)) {
 //      Index_ID lref = pair.second;
 //
-//      Index_ID oid = create_output(dfg, auxnd, var);
+//      Index_ID oid = create_output(dfg, aux_tree, var);
 //      dfg->add_edge(Node_Pin(lref, 0, false), Node_Pin(oid, 0, true));
 //    }
 //  }
 
-//  if (auxnd->fluid_df())
-//    add_fluid_behavior(dfg, auxnd);
+//  if (aux_tree->fluid_df())
+//    add_fluid_behavior(dfg, aux_tree);
 }
 
-void Pass_dfg::add_fluid_behavior(LGraph *dfg, Aux_node *auxnd) {
+void Pass_dfg::add_fluid_behavior(LGraph *dfg, Aux_tree *aux_tree) {
   std::vector<Index_ID> inputs, outputs;
-  add_fluid_ports(dfg, auxnd, inputs, outputs);
+  add_fluid_ports(dfg, aux_tree, inputs, outputs);
 
 }
 
-void Pass_dfg::add_fluid_ports(LGraph *dfg, Aux_node *auxnd, std::vector<Index_ID> &data_inputs, std::vector<Index_ID> &data_outputs) {
-  //for (const auto &pair : auxnd->outputs()) {
+void Pass_dfg::add_fluid_ports(LGraph *dfg, Aux_tree *aux_tree, std::vector<Index_ID> &data_inputs, std::vector<Index_ID> &data_outputs) {
+  //for (const auto &pair : aux_tree->outputs()) {
   //  if (!is_valid_marker(pair.first) && !is_retry_marker(pair.first)) {
   //    auto valid_output = valid_marker(pair.first);
   //    auto retry_input = retry_marker(pair.first);
-  //    data_outputs.push_back(auxnd->get_alias(pair.first));
+  //    data_outputs.push_back(aux_tree->get_alias(pair.first));
 
-  //    if (!auxnd->has_alias(valid_output))
-  //      create_output(dfg, auxnd, valid_output);
+  //    if (!aux_tree->has_alias(valid_output))
+  //      create_output(dfg, aux_tree, valid_output);
 
-  //    if (!auxnd->has_alias(retry_input))
-  //      create_input(dfg, auxnd, retry_input);
+  //    if (!aux_tree->has_alias(retry_input))
+  //      create_input(dfg, aux_tree, retry_input);
   //  }
   //}
 
-  //for (const auto &pair : auxnd->inputs()) {
+  //for (const auto &pair : aux_tree->inputs()) {
   //  if (!is_valid_marker(pair.first) && !is_retry_marker(pair.first)) {
   //    auto valid_input = valid_marker(pair.first);
   //    auto retry_output = retry_marker(pair.first);
-  //    data_inputs.push_back(auxnd->get_alias(pair.first));
+  //    data_inputs.push_back(aux_tree->get_alias(pair.first));
 
-  //    if (!auxnd->has_alias(valid_input))
-  //      create_input(dfg, auxnd, valid_input);
+  //    if (!aux_tree->has_alias(valid_input))
+  //      create_input(dfg, aux_tree, valid_input);
 
-  //    if (!auxnd->has_alias(retry_output))
-  //      create_output(dfg, auxnd, retry_output);
+  //    if (!aux_tree->has_alias(retry_output))
+  //      create_output(dfg, aux_tree, retry_output);
   //  }
   //}
 }
 
-void Pass_dfg::add_fluid_logic(LGraph *dfg, Aux_node *auxnd, const std::vector<Index_ID> &data_inputs, const std::vector<Index_ID> &data_outputs) {
-  //Index_ID abort_id = add_abort_logic(dfg, auxnd, data_inputs, data_outputs);
+void Pass_dfg::add_fluid_logic(LGraph *dfg, Aux_tree *aux_tree, const std::vector<Index_ID> &data_inputs, const std::vector<Index_ID> &data_outputs) {
+  //Index_ID abort_id = add_abort_logic(dfg, aux_tree, data_inputs, data_outputs);
 
 
 }
 
-void Pass_dfg::add_abort_logic(LGraph *dfg, Aux_node *auxnd, const std::vector<Index_ID> &data_inputs, const std::vector<Index_ID> &data_outputs) {
+void Pass_dfg::add_abort_logic(LGraph *dfg, Aux_tree *aux_tree, const std::vector<Index_ID> &data_inputs, const std::vector<Index_ID> &data_outputs) {
 
 }
 
@@ -485,46 +486,46 @@ Index_ID Pass_dfg::get_cfg_child(const LGraph *cfg, Index_ID node) {
     assert(false);
 }
 
-std::vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, Aux_node *auxnd, const CFG_Node_Data &data) {
+std::vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Data &data) {
   const std::vector<std::string> &oprds = data.get_operands();
   std::vector<Index_ID> oprd_ids(oprds.size());
   const std::string &op = data.get_operator();
 
   for (size_t i = 0 ; i <oprd_ids.size();i++) {
-    if (auxnd->has_alias(oprds[i])){
-      oprd_ids[i] = auxnd->get_alias(oprds[i]);
+    if (aux_tree->has_alias(oprds[i])){
+      oprd_ids[i] = aux_tree->get_alias(oprds[i]);
       fmt::print("operand:{} has an alias:{}\n", oprds[i], oprd_ids[i]);
     }
     else {
       if (is_constant(oprds[i])){
-        //oprd_ids[i] = create_default_const(dfg, auxnd);
-        oprd_ids[i] = resolve_constant(dfg, auxnd, oprds[i]);
+        //oprd_ids[i] = create_default_const(dfg, aux_tree);
+        oprd_ids[i] = resolve_constant(dfg, aux_tree, oprds[i]);
         fmt::print("create node for constant operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
       }
       //else if (is_register(oprds[i])){
-      //  //oprd_ids[i] = create_register(dfg, auxnd, oprds[i]);
+      //  //oprd_ids[i] = create_register(dfg, aux_tree, oprds[i]);
       //  //fmt::print("create node for register operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
       //}
       else if (is_input(oprds[i])){
-        oprd_ids[i] = create_input(dfg, auxnd, oprds[i]);
+        oprd_ids[i] = create_input(dfg, aux_tree, oprds[i]);
         fmt::print("create node for input operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
       }
       else if (is_output(oprds[i])){
-        oprd_ids[i] = create_output(dfg, auxnd, oprds[i]);
+        oprd_ids[i] = create_output(dfg, aux_tree, oprds[i]);
         fmt::print("create node for output operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
       }
       else if (is_reference(oprds[i])){
-        oprd_ids[i] = create_reference(dfg, auxnd, oprds[i]);
+        oprd_ids[i] = create_reference(dfg, aux_tree, oprds[i]);
         fmt::print("create node for reference operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
       }
       else{
-        oprd_ids[i] = create_private(dfg, auxnd, oprds[i]);
+        oprd_ids[i] = create_private(dfg, aux_tree, oprds[i]);
         fmt::print("create node for private operand:{}, nid:{}\n", oprds[i], oprd_ids[i]);
       }
     }
 
-    //if (auxnd->fluid_df() && is_input(oprds[i]))
-    //  add_read_marker(dfg, auxnd, oprds[i]);
+    //if (aux_tree->fluid_df() && is_input(oprds[i]))
+    //  add_read_marker(dfg, aux_tree, oprds[i]);
   }
 
   return oprd_ids;
