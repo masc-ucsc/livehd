@@ -59,16 +59,16 @@ private:
   Index_ID                 find_cfg_root(        const LGraph *cfg);
   Index_ID                 process_cfg(          LGraph *dfg,
                                                  const LGraph *cfg,
-                                                 Aux_node *auxnd,
+                                                 Aux_tree *aux_tree,
                                                  Index_ID top_node);
 
   Index_ID                 process_node(         LGraph *dfg,
                                                  const LGraph *cfg,
-                                                 Aux_node *auxnd,
+                                                 Aux_tree *aux_tree,
                                                  Index_ID node);
 
   void                     process_assign(       LGraph *dfg,
-                                                 Aux_node *auxnd,
+                                                 Aux_tree *aux_tree,
                                                  const CFG_Node_Data &data);
   void                     finalize_gconnect(    LGraph *dfg,
                                                  const Aux_node *auxand_global);
@@ -78,21 +78,21 @@ private:
 
   void                     process_func_call(    LGraph *dfg,
                                                  const LGraph *cfg,
-                                                 Aux_node *auxnd,
+                                                 Aux_tree *aux_tree,
                                                  const CFG_Node_Data &data);
 
   Index_ID                 process_if(           LGraph *dfg,
                                                  const LGraph *cfg,
-                                                 Aux_node *auxnd,
+                                                 Aux_tree *aux_tree,
                                                  const CFG_Node_Data &data,
                                                  Index_ID node );
 
   Index_ID                 process_operand(      LGraph *dfg,
-                                                 Aux_node *auxnd,
+                                                 Aux_tree *aux_tree,
                                                  const std::string oprd);
 
   std::vector<Index_ID>    process_operands(     LGraph *dfg,
-                                                 Aux_node *auxnd,
+                                                 Aux_tree *aux_tree,
                                                  const CFG_Node_Data &data);
 
   void                     add_phis(             LGraph *dfg,
@@ -111,22 +111,22 @@ private:
 
   Index_ID get_cfg_child(const LGraph *cfg, Index_ID node);
   Index_ID resolve_phi_branch(LGraph *dfg, Aux_node *parent, Aux_node *branch, const std::string &variable);
-  void attach_outputs(LGraph *dfg, Aux_node *auxnd);
+  void attach_outputs(LGraph *dfg, Aux_tree *aux_tree);
 
-  void add_fluid_behavior(LGraph *dfg, Aux_node *auxnd);
-  void add_fluid_ports(LGraph *dfg, Aux_node *auxnd, std::vector<Index_ID> &data_inputs, std::vector<Index_ID> &data_outputs);
-  void add_fluid_logic(LGraph *dfg, Aux_node *auxnd, const std::vector<Index_ID> &data_inputs, const std::vector<Index_ID> &data_outputs);
-  void add_abort_logic(LGraph *dfg, Aux_node *auxnd, const std::vector<Index_ID> &data_inputs, const std::vector<Index_ID> &data_outputs);
+  void add_fluid_behavior(LGraph *dfg, Aux_tree *aux_tree);
+  void add_fluid_ports(LGraph *dfg, Aux_tree *aux_tree, std::vector<Index_ID> &data_inputs, std::vector<Index_ID> &data_outputs);
+  void add_fluid_logic(LGraph *dfg, Aux_tree *aux_tree, const std::vector<Index_ID> &data_inputs, const std::vector<Index_ID> &data_outputs);
+  void add_abort_logic(LGraph *dfg, Aux_tree *aux_tree, const std::vector<Index_ID> &data_inputs, const std::vector<Index_ID> &data_outputs);
 
-  void add_read_marker(LGraph *dfg, Aux_node *auxnd, const std::string &v) { assign_to_true(dfg, auxnd, read_marker(v)); }
-  void add_write_marker(LGraph *dfg, Aux_node *auxnd, const std::string &v) { assign_to_true(dfg, auxnd, write_marker(v)); }
+  void add_read_marker(LGraph *dfg, Aux_tree *aux_tree, const std::string &v) { assign_to_true(dfg, aux_tree, read_marker(v)); }
+  void add_write_marker(LGraph *dfg, Aux_tree *aux_tree, const std::string &v) { assign_to_true(dfg, aux_tree, write_marker(v)); }
 
   std::string read_marker(const std::string &v) { return READ_MARKER + v; }
   std::string write_marker(const std::string &v) { return WRITE_MARKER + v; }
   std::string valid_marker(const std::string &v) { return VALID_MARKER + v; }
   std::string retry_marker(const std::string &v) { return RETRY_MARKER + v; }
 
-  void assign_to_true(LGraph *dfg, Aux_node *auxnd, const std::string &v);
+  void assign_to_true(LGraph *dfg, Aux_tree *aux_tree, const std::string &v);
 
   bool reference_changed(const Aux_node *parent, const Aux_node *branch, const std::string &v) {
     if (!parent->has_alias(v)) return true;
@@ -149,20 +149,20 @@ private:
   bool is_unary_op      (const std::string &v) {return (v == "!")||(v == "not");}
   bool is_binary_op     (const std::string &v) {return  v == "+";}
 
-  //Index_ID create_register(LGraph *g, Aux_node *auxnd, const std::string &var_name);
-  Index_ID create_input(LGraph *g, Aux_node *auxnd, const std::string &var_name, uint16_t bits=1);
-  Index_ID create_output(LGraph *g, Aux_node *auxnd, const std::string &var_name, uint16_t bits=1);
-  Index_ID create_private(LGraph *g, Aux_node *auxnd, const std::string &var_name);
-  Index_ID create_reference(LGraph *g, Aux_node *auxnd, const std::string &var_name);
-  Index_ID create_node(LGraph *g, Aux_node *auxnd, const std::string &v, const uint16_t bits=1);
-  Index_ID create_default_const(LGraph *g, Aux_node *auxnd);
-  Index_ID create_true_const(LGraph *g, Aux_node *auxnd);
-  Index_ID create_false_const(LGraph *g, Aux_node *auxnd);
+  //Index_ID create_register(LGraph *g, Aux_tree *aux_tree, const std::string &var_name);
+  Index_ID create_input(LGraph *g, Aux_tree *aux_tree, const std::string &var_name, uint16_t bits=1);
+  Index_ID create_output(LGraph *g, Aux_tree *aux_tree, const std::string &var_name, uint16_t bits=1);
+  Index_ID create_private(LGraph *g, Aux_tree *aux_tree, const std::string &var_name);
+  Index_ID create_reference(LGraph *g, Aux_tree *aux_tree, const std::string &var_name);
+  Index_ID create_node(LGraph *g, Aux_tree *aux_tree, const std::string &v, const uint16_t bits=1);
+  Index_ID create_default_const(LGraph *g, Aux_tree *aux_tree);
+  Index_ID create_true_const(LGraph *g, Aux_tree *aux_tree);
+  Index_ID create_false_const(LGraph *g, Aux_tree *aux_tree);
 
-  Index_ID create_AND(LGraph *g, Aux_node *auxnd, Index_ID op1, Index_ID op2);
-  Index_ID create_OR(LGraph *g, Aux_node *auxnd, Index_ID op1, Index_ID op2);
-  Index_ID create_binary(LGraph *g, Aux_node *auxnd, Index_ID op1, Index_ID op2, Node_Type_Op oper);
-  Index_ID create_NOT(LGraph *g, Aux_node *auxnd, Index_ID op1);
+  Index_ID create_AND(LGraph *g, Aux_tree *aux_tree, Index_ID op1, Index_ID op2);
+  Index_ID create_OR(LGraph *g, Aux_tree *aux_tree, Index_ID op1, Index_ID op2);
+  Index_ID create_binary(LGraph *g, Aux_tree *aux_tree, Index_ID op1, Index_ID op2, Node_Type_Op oper);
+  Index_ID create_NOT(LGraph *g, Aux_tree *aux_tree, Index_ID op1);
 
   Node_Type_Op node_type_from_text(const std::string &operator_text);
 
@@ -170,7 +170,7 @@ private:
   static unsigned int temp_counter;
 
   //Sheng zone
-  Index_ID resolve_constant          (LGraph *g, Aux_node *auxnd, const std::string& str_in);
+  Index_ID resolve_constant          (LGraph *g, Aux_tree *aux_tree, const std::string& str_in);
                                       //bool& is_signed,
                                       //bool& is_in32b,
                                       //bool& is_explicit_signed,

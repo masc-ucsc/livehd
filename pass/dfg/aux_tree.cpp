@@ -81,10 +81,6 @@ void Aux_tree::delete_child(Aux_node *parent, bool branch){
   }
 }
 
-void Aux_tree::set_alias(const std::string &v, Index_ID n){
-  Aux_node* cur_auxnd = get_latest_aux();
-  cur_auxnd->set_alias(v,n);
-}
 
 //check_global_alias() only checks "chain of patent auxtabs" and don't check sibling auxtab
 bool Aux_tree::check_global_alias(const Aux_node *auxnd, const std::string &v) const{
@@ -107,6 +103,11 @@ Index_ID Aux_tree::get_global_alias(const Aux_node *auxnd, const std::string &v)
 
   return get_global_alias(get_parent(auxnd),v);
 };
+
+void Aux_tree::set_alias(const std::string &v, Index_ID n){
+  Aux_node* cur_auxnd = get_latest_aux();
+  cur_auxnd->set_alias(v,n);
+}
 
 bool Aux_tree::has_alias(const std::string &v) const {
   const Aux_node* cur_auxnd = get_latest_aux();
