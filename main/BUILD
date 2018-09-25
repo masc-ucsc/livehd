@@ -6,6 +6,7 @@ cc_binary(
           +glob(["*_api.hpp"]),
     deps = ["@spdlog//:headers",
             "@replxx//:replxx",
+            "@mustache//:headers",
             "//eprp:eprp",
             "//meta:meta",
 

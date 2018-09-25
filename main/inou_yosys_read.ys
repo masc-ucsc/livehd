@@ -1,14 +1,38 @@
 # This is the default yosys script used to read from yosys to lgraph (yosys2lg)
+#
+# It uses a mustache syntax to replace files, and inou.yosys arguments
 
-#read_verilog -sv LIST
+###########################
+# read verilog files
+{{#filelist}}
+read_verilog -sv {{file}}
+{{/filelist}}
+
+# single file, no hierarchy needed
+#hierarchy -top TOP
 proc
 pmuxtree
 memory_dff
 memory_collect
-write_verilog foo.v
-#alumacc
-#techmap -map techmap.v
-#abc
-#maccmap -unmap
-#write_verilog f4.v
+
+###########################
+# Techmap
+{{#techmap_alumacc}}
+alumacc
+techmap -map techmap.v
+{{/techmap_alumacc}}
+{{#techmap_full}}
+techmap
+{{/techmap_full}}
+opt
+
+{{#abc_in_yosys}}
+abc
+{{/abc_in_yosys}}
+
+{{#techmap_alumacc}}
+maccmap -unmap
+{{/techmap_alumacc}}
+
+yosys2lg path:{{path}}
 

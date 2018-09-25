@@ -44,6 +44,13 @@ new_git_repository(
     #strip_prefix = "kernel",
 )
 new_git_repository(
+    name = "mustache",
+    build_file = "BUILD.mustache", # relative to external path
+    commit = "2c37b240f6d9147b4a7639c433fdde2f31b6868f", # Sep 22, 2018
+    remote = "https://github.com/kainjow/Mustache.git",
+    #strip_prefix = "kernel",
+)
+new_git_repository(
     name = "spdlog",
     build_file = "BUILD.spdlog",
     commit = "032035e72f73b232e2fa087dc6021a3732c9f6ae", # June 10, 2018
