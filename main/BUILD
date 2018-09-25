@@ -21,6 +21,7 @@ cc_binary(
     ],
     data = ["//inou/yosys:liblgraph_yosys.so",   # A bit special as only libraries are used in yosys -m XXX
             "inou_yosys_read.ys",
+            "inou_yosys_write.ys",
     ],
     linkopts = ["-ldl"],
 )
