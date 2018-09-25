@@ -318,6 +318,7 @@ static bool is_black_box_input(const RTLIL::Module *module, const RTLIL::Cell *c
   if(wire->port_input)
     return true;
 
+  log_error("unknown port %s at module %s cell %s\n", port_name.c_str(), module->name.c_str(), cell->type.c_str());
   assert(false); // FIXME: is it possible to resolve this case?
   return false;
 }

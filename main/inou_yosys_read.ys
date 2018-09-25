@@ -6,6 +6,7 @@ read_verilog -sv {{file}}
 
 # single file, no hierarchy needed
 #hierarchy -top TOP
+hierarchy
 proc
 pmuxtree
 memory_dff
@@ -28,5 +29,6 @@ abc
 maccmap -unmap
 {{/techmap_alumacc}}
 
-yosys2lg path:{{path}}
+# write_verilog dump.v
+yosys2lg -path {{path}}
 
