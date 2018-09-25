@@ -19,17 +19,12 @@ using namespace kainjow;
 
 class Inou_yosys_api {
 protected:
-static void tolg(Eprp_var &var) {
+static void set_script_liblg(Eprp_var &var, std::string &script_file, std::string &liblg, bool do_read) {
 
-  const std::string path    = var.get("path","lgdb");
   const std::string script  = var.get("script");
-  const std::string yosys   = var.get("yosys","yosys");
-  const std::string techmap = var.get("techmap","alumac");
-  const std::string abc     = var.get("abc","false");
-  const std::string files   = var.get("files");
 
   const auto &main_path = Main_api::get_main_path();
-  std::string liblg = main_path + "/lgraph.runfiles/__main__/inou/yosys/liblgraph_yosys.so";
+  liblg = main_path + "/lgraph.runfiles/__main__/inou/yosys/liblgraph_yosys.so";
   if(access(liblg.c_str(), X_OK) == -1) {
     // Maybe it is installed in /usr/local/bin/lgraph and /usr/local/share/lgraph/inou/yosys/liblgrapth...
     const std::string liblg2 = main_path + "/../share/lgraph/inou/yosys/liblgraph_yosys.so";
@@ -40,13 +35,18 @@ static void tolg(Eprp_var &var) {
     liblg = liblg2;
   }
 
-  std::string script_file;
   if (script.empty()) {
-    script_file = main_path + "/lgraph.runfiles/__main__/main/inou_yosys_read.ys";
+    std::string do_read_str;
+    if (do_read)
+      do_read_str = "inou_yosys_read.ys";
+    else
+      do_read_str = "inou_yosys_write.ys";
+
+    script_file = main_path + "/lgraph.runfiles/__main__/main/" + do_read_str;
     if(access(script_file.c_str(), R_OK) == -1) {
       // Maybe it is installed in /usr/local/bin/lgraph and /usr/local/share/lgraph/inou/yosys/liblgrapth...
-      const std::string script_file2 = main_path + "/../share/lgraph/main/inou_yosys_read.ys";
-      if(access(script_file2.c_str(), X_OK) == -1) {
+      const std::string script_file2 = main_path + "/../share/lgraph/main/" + do_read_str;
+      if(access(script_file2.c_str(), R_OK) == -1) {
         Main_api::error(fmt::format("could not find the default script:{} file", script_file));
         return;
       }
@@ -59,31 +59,9 @@ static void tolg(Eprp_var &var) {
     }
     script_file = script;
   }
+}
 
-  if (files.empty()) {
-    Main_api::error(fmt::format("inou.yosys.tolg: no files provided"));
-    return;
-  }
-
-  char seps[] = ",";
-  char *token;
-
-  std::vector<std::string> raw_file_list;
-
-  char *files_char = (char *)alloca(files.size());
-  strcpy(files_char,files.c_str());
-  token = std::strtok(files_char, seps);
-  while( token != NULL ) {
-    /* Do your thing */
-    if(access(token, R_OK) == -1) {
-      Main_api::error(fmt::format("inou.yosys.tolf: could not open file {} {} {}", token, files_char,files));
-      return;
-    }
-    raw_file_list.push_back(token);
-
-    token = std::strtok( NULL, seps );
-  }
-
+static void do_work(const std::string &yosys, const std::string &liblg, const std::string &script_file, mustache::data &vars) {
 
   std::ifstream inFile;
   inFile.open(script_file);
@@ -92,34 +70,6 @@ static void tolg(Eprp_var &var) {
   strStream << inFile.rdbuf(); //read the whole file
 
   mustache::mustache tmpl(strStream.str());
-  mustache::data vars;
-
-  mustache::data filelist{mustache::data::type::list};
-  for(const auto &f:raw_file_list) {
-    filelist << mustache::data{"file", f};
-  }
-
-  vars.set("filelist",filelist);
-
-  if (strcasecmp(techmap.c_str(),"alumacc") == 0) {
-    vars.set("techmap_alumacc", mustache::data::type::bool_true);
-  }else if (strcasecmp(techmap.c_str(),"full") == 0) {
-    vars.set("techmap_full", mustache::data::type::bool_true);
-  }else if (strcasecmp(techmap.c_str(),"none") == 0) {
-    // Nothing
-  }else{
-    Main_api::error(fmt::format("inou.yosys.tolf: unrecognized techmap {} option. Either full or alumacc", techmap));
-    return;
-  }
-  if (strcasecmp(abc.c_str(),"true") == 0) {
-    vars.set("abc_in_yosys", mustache::data::type::bool_true);
-  }else if (strcasecmp(abc.c_str(),"false") == 0) {
-    // Nothing to do
-  }else{
-    Main_api::error(fmt::format("inou.yosys.tolf: unrecognized abc {} option. Either true or false", techmap));
-  }
-
-  vars.set("path",path);
 
   int pipefd[2];
   pipe(pipefd);
@@ -140,8 +90,6 @@ static void tolg(Eprp_var &var) {
     //dup2(fd, 1); // stdout
 
     char *argv[] = { strdup(yosys.c_str()), strdup("-q"), strdup("-m"), strdup(liblg.c_str()), 0};
-    std::string command = fmt::format("CMD: {} -q -m {}", yosys, liblg);
-    std::cout << command << std::endl;
 
     if (execvp(yosys.c_str(), argv) < 0) {
       Main_api::error(fmt::format("inou.yosys.tolf: execvp fail with {}", strerror(errno)));
@@ -181,6 +129,93 @@ static void tolg(Eprp_var &var) {
 
 }
 
+static void tolg(Eprp_var &var) {
+
+  const std::string path    = var.get("path","lgdb");
+  const std::string yosys   = var.get("yosys","yosys");
+  const std::string techmap = var.get("techmap","alumac");
+  const std::string abc     = var.get("abc","false");
+  const std::string files   = var.get("files");
+
+  std::string script_file;
+  std::string liblg;
+  set_script_liblg(var, script_file, liblg, true);
+
+  if (files.empty()) {
+    Main_api::error(fmt::format("inou.yosys.tolg: no files provided"));
+    return;
+  }
+
+  char seps[] = ",";
+  char *token;
+
+  std::vector<std::string> raw_file_list;
+
+  char *files_char = (char *)alloca(files.size());
+  strcpy(files_char,files.c_str());
+  token = std::strtok(files_char, seps);
+  while( token != NULL ) {
+    /* Do your thing */
+    if(access(token, R_OK) == -1) {
+      Main_api::error(fmt::format("inou.yosys.tolf: could not open file {} {} {}", token, files_char,files));
+      return;
+    }
+    raw_file_list.push_back(token);
+
+    token = std::strtok( NULL, seps );
+  }
+
+  mustache::data vars;
+
+  vars.set("path",path);
+
+  mustache::data filelist{mustache::data::type::list};
+  for(const auto &f:raw_file_list) {
+    filelist << mustache::data{"file", f};
+  }
+
+  vars.set("filelist",filelist);
+
+  if (strcasecmp(techmap.c_str(),"alumacc") == 0) {
+    vars.set("techmap_alumacc", mustache::data::type::bool_true);
+  }else if (strcasecmp(techmap.c_str(),"full") == 0) {
+    vars.set("techmap_full", mustache::data::type::bool_true);
+  }else if (strcasecmp(techmap.c_str(),"none") == 0) {
+    // Nothing
+  }else{
+    Main_api::error(fmt::format("inou.yosys.tolf: unrecognized techmap {} option. Either full or alumacc", techmap));
+    return;
+  }
+  if (strcasecmp(abc.c_str(),"true") == 0) {
+    vars.set("abc_in_yosys", mustache::data::type::bool_true);
+  }else if (strcasecmp(abc.c_str(),"false") == 0) {
+    // Nothing to do
+  }else{
+    Main_api::error(fmt::format("inou.yosys.tolf: unrecognized abc {} option. Either true or false", techmap));
+  }
+
+  do_work(yosys, liblg, script_file, vars);
+}
+
+static void fromlg(Eprp_var &var) {
+  const std::string path    = var.get("path","lgdb");
+  const std::string yosys   = var.get("yosys","yosys");
+  const std::string file    = var.get("file");
+  const std::string name    = var.get("name");
+
+  std::string script_file;
+  std::string liblg;
+  set_script_liblg(var, script_file, liblg, false);
+
+  mustache::data vars;
+
+  vars.set("path", path);
+  vars.set("file", file);
+  vars.set("name", name);
+
+  do_work(yosys, liblg, script_file, vars);
+}
+
 
   Inou_yosys_api() {
   }
@@ -196,6 +231,15 @@ public:
     m1.add_label_optional("yosys","path for yosys command");
 
     eprp.register_method(m1);
+
+    Eprp_method m2("inou.yosys.fromlg", "write verilog using yosys from lgraph", &Inou_yosys_api::fromlg);
+    m2.add_label_required("file","verilog files to write");
+    m2.add_label_required("name","name of the top level file");
+    m2.add_label_optional("path","path to read the lgraph[s]");
+    m2.add_label_optional("script","alternative custom inou_yosys_write.ys command");
+    m2.add_label_optional("yosys","path for yosys command");
+
+    eprp.register_method(m2);
   }
 
 };
