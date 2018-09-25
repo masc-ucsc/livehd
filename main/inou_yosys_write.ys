@@ -1,0 +1,6 @@
+# default lg2yosys script inou_yosys_write.ys
+
+lg2yosys -path {{path}} -name {{name}}
+
+write_verilog {{file}}
+
