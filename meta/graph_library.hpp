@@ -134,6 +134,8 @@ public:
   void sync() {
     clean_library();
   }
+
+	void reload();
 };
 
 #endif
