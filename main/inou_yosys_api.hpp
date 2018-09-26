@@ -179,17 +179,20 @@ static void tolg(Eprp_var &var) {
 
   int max_version = gl->get_max_version();
 
+  gl->sync(); // Before calling remote thread in do_work
+
   do_work(yosys, liblg, script_file, vars);
+
+  gl->reload(); // after the do_work
 
   std::vector<LGraph *> lgs;
   gl->each_graph([&lgs, gl, max_version](const std::string &name, int id) {
-      if (gl->get_version(id) >= max_version) {
+      if (gl->get_version(id) > max_version) {
         lgs.push_back(gl->get_graph(id));
       }
     });
 
   var.add(lgs);
-
 }
 
 static void fromlg(Eprp_var &var) {

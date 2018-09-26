@@ -13,13 +13,12 @@ LGraph *Graph_library::get_graph(int id) const {
   return LGraph::find_lgraph(path,id2name[id]);
 }
 
-Graph_library::Graph_library(const std::string &_path)
-  : path(_path)
-  , library_file("graph_library") {
+void Graph_library::reload() {
+
+	assert(graph_library_clean);
 
   max_version = 0;
   std::ifstream graph_list;
-  graph_library_clean = true;
 
   graph_list.open(path + "/" + library_file);
 
@@ -69,6 +68,14 @@ Graph_library::Graph_library(const std::string &_path)
   }
 
   graph_list.close();
+}
+
+Graph_library::Graph_library(const std::string &_path)
+  : path(_path)
+  , library_file("graph_library") {
+
+	graph_library_clean = true;
+  reload();
 }
 
 void Graph_library::clean_library() {
