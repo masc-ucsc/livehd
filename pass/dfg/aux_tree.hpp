@@ -2,7 +2,6 @@
 #define AUX_TREE_H_
 
 #include <string>
-#include <nih/macros.h>
 #include "meta/lgraph.hpp"
 #include "core/lgedge.hpp"
 
@@ -53,7 +52,7 @@ public:
   void               delete_child            (Aux_node *parent, bool branch);
   bool               is_root_aux             (const Aux_node *auxtab) const;// for chained parents aux_tabs checking
   Aux_node *         get_root                ();
-  Aux_node *         get_latest_aux          () const;
+  Aux_node *         get_cur_auxnd           () const;
   void               set_alias               (const std::string &v, Index_ID n);
   bool               has_alias               (const std::string &v) const;
   Index_ID           get_alias               (const std::string &v) const;

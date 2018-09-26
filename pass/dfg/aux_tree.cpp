@@ -23,11 +23,11 @@ void Aux_node::print_aux(){
 //  return auxes_stack;
 //}
 
-Aux_node * Aux_tree::get_latest_aux() const{
+Aux_node * Aux_tree::get_cur_auxnd() const{
   return auxes_stack.back();
 }
 
-//Aux_node * Aux_tree::get_latest_aux_const() const{
+//Aux_node * Aux_tree::get_cur_auxnd_const() const{
 //  return auxes_stack.back();
 //}
 
@@ -105,18 +105,18 @@ Index_ID Aux_tree::get_global_alias(const Aux_node *auxnd, const std::string &v)
 };
 
 void Aux_tree::set_alias(const std::string &v, Index_ID n){
-  Aux_node* cur_auxnd = get_latest_aux();
+  Aux_node* cur_auxnd = get_cur_auxnd();
   cur_auxnd->set_alias(v,n);
 }
 
 bool Aux_tree::has_alias(const std::string &v) const {
-  const Aux_node* cur_auxnd = get_latest_aux();
+  const Aux_node* cur_auxnd = get_cur_auxnd();
   //recursive check on parents
   return check_global_alias(cur_auxnd,v);
 }
 
 Index_ID Aux_tree::get_alias(const std::string &v) const {
-  const Aux_node* cur_auxnd = get_latest_aux();
+  const Aux_node* cur_auxnd = get_cur_auxnd();
   //recursive check on parents
   return get_global_alias(cur_auxnd,v);
 }

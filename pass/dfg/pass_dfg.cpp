@@ -121,15 +121,15 @@ Index_ID Pass_dfg::process_cfg(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tre
     itr = process_node(dfg, cfg, aux_tree, itr);
     fmt::print("cfg nid:{} process finished!!\n\n", last_itr);
   }
-  //aux_tree->print_aux();
+  //aux_tree->print_cur_aux();
   return last_itr;
 }
 
-Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, Index_ID node) {
-  CFG_Node_Data data(cfg, node);
+Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, Index_ID cfg_node) {
+  CFG_Node_Data data(cfg, cfg_node);
 
   //sh dbg
-  fmt::print("Processing CFG node:{}\n", node);
+  fmt::print("Processing CFG node:{}\n", cfg_node);
   fmt::print("target:[{}], operator:[{}], ", data.get_target(), data.get_operator());
   fmt::print("operands:[");
   for(const auto &i:data.get_operands())
@@ -138,20 +138,20 @@ Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tr
   fmt::print("\n");
 
 
-  switch (cfg->node_type_get(node).op) {
+  switch (cfg->node_type_get(cfg_node).op) {
   case CfgAssign_Op:
     process_assign(dfg, aux_tree, data);
-    return get_cfg_child(cfg, node);
+    return get_cfg_child(cfg, cfg_node);
   case CfgFunctionCall_Op:
     process_func_call(dfg, cfg, aux_tree, data);
-    return get_cfg_child(cfg, node);
+    return get_cfg_child(cfg, cfg_node);
   case CfgIf_Op:
-    return process_if(dfg, cfg, aux_tree, data, node);
+    return process_if(dfg, cfg, aux_tree, data, cfg_node);
   case CfgIfMerge_Op:
     return 0;
   default:
-    fmt::print("\n\n*************Unrecognized node type[n={}]: {}\n", node, cfg->node_type_get(node).get_name());
-    return get_cfg_child(cfg, node);
+    fmt::print("\n\n*************Unrecognized cfg_node type[n={}]: {}\n", cfg_node, cfg->node_type_get(cfg_node).get_name());
+    return get_cfg_child(cfg, cfg_node);
   }
 }
 
@@ -160,7 +160,7 @@ void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_t
   fmt::print("process_func_call\n");
   const auto &target = data.get_target();
   const auto &oprds  = data.get_operands();
-  const auto &oprd_ids = process_operands(dfg, aux_tree, data); // all the operands should be created before, just get back oprd_ids
+  const auto &oprd_ids = process_operands(dfg, aux_tree, data);// all the operands should be created before, just get back oprd_ids
   LGraph* sub_graph = nullptr;
   Index_ID subg_root_nid = aux_tree->get_alias(oprds[0]);
 
@@ -312,7 +312,7 @@ Index_ID Pass_dfg::process_operand(LGraph *dfg, Aux_tree *aux_tree, const std::s
 }
 
 
-Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data, Index_ID node) {
+Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data, Index_ID cfg_node) {
   fmt::print("process_if\n");
   Index_ID cond = aux_tree->get_alias(data.get_target());
   const auto &operands = data.get_operands();
@@ -320,15 +320,14 @@ Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree
   Index_ID tbranch = std::stol(operands[0]);
   //Aux_node taux_tree = aux_tree->copy();
   Aux_node tauxnd;
-  aux_tree->set_child(aux_tree->get_latest_aux(), &tauxnd, true);
+  aux_tree->set_child(aux_tree->get_cur_auxnd(), &tauxnd, true);
   Index_ID tb_next = get_cfg_child(cfg, process_cfg(dfg, cfg, aux_tree, tbranch));
 
-  Aux_node fauxnd;
-  aux_tree->set_child(aux_tree->get_latest_aux(), &fauxnd, false);
   Index_ID fbranch = std::stol(operands[1]);
 
-  if (fbranch != node) {                                // there is an 'else' clause
-    Aux_node faux_tree;
+  if (fbranch != cfg_node) {                                // there is an 'else' clause
+    Aux_node fauxnd;
+    aux_tree->set_child(aux_tree->get_cur_auxnd(), &fauxnd, false);
     Index_ID fb_next = get_cfg_child(cfg, process_cfg(dfg, cfg, aux_tree, fbranch));
     assert(tb_next == fb_next);
     //add_phis(dfg, cfg, aux_tree, &aux_tree, &faux_tree, cond);
@@ -530,10 +529,6 @@ std::vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, Aux_tree *aux_tree
 
   return oprd_ids;
 }
-
-
-
-
 
 void Pass_dfg_options::set(const std::string &key, const std::string &value) {
   try {
