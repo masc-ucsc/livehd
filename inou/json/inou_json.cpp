@@ -19,7 +19,9 @@
 void Inou_json_options::set(const std::string &key, const std::string &value) {
 
   try {
-    if ( is_opt(key,"file") ) {
+    if ( is_opt(key,"input") ) {
+      json_file = value;
+    }else if ( is_opt(key,"output") ) {
       json_file = value;
     }else{
       set_val(key,value);
