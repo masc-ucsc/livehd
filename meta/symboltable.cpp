@@ -2,8 +2,8 @@
 
 LGraph_Symbol_Table::LGraph_Symbol_Table(const std::string &path, const std::string &name) noexcept
   : Lgraph_base_core(path, name), LGraph_Base(path, name)
-  , symbols(path, name + LGRAPH_SYMBOL_TABLE_SYM_FLAG)
-  , types(path + "/" + name + LGRAPH_SYMBOL_TABLE_TYP_FLAG) { }
+  , symbols(path + "/lgraph_" + name + LGRAPH_SYMBOL_TABLE_SYM_FLAG)
+  , types(path + "/lgraph_" + name + LGRAPH_SYMBOL_TABLE_TYP_FLAG) { }
 
 LGraph_Symbol_Table::~LGraph_Symbol_Table() {
   symbols.sync();

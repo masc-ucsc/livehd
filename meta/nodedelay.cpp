@@ -6,7 +6,7 @@
 LGraph_Node_Delay::LGraph_Node_Delay(const std::string &path, const std::string &name) noexcept
     : Lgraph_base_core(path, name)
     , LGraph_Base(path, name)
-    , node_delay(path + "/" + name + "_delay") {
+    , node_delay(path + "/lgraph_" + name + "_delay") {
 }
 
 void LGraph_Node_Delay::clear() {

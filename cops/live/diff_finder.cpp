@@ -402,7 +402,7 @@ void Diff_finder::add_ios_up(LGraph *module, Index_ID nid, std::map<std::string,
 
       uint32_t subgraph_id = nparent->subgraph_id_get(node);
 
-      if(subgraph_id == nparent->get_library()->get_id_const(module_name))
+      if(subgraph_id == nparent->get_library()->get_id(module_name))
         parent_ids.insert(node);
     }
 

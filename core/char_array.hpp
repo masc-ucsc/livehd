@@ -61,8 +61,8 @@ private:
 
   explicit Char_Array() = delete; // Not allowed
 public:
-  explicit Char_Array(const std::string &path, const std::string &_name)
-      : variable_internal(path + "/" + _name) {
+  explicit Char_Array(const std::string &long_name)
+      : variable_internal(long_name) {
 
     pending_clear_reload = true;
   }

@@ -20,6 +20,7 @@ class Edge_iterator;
 class LGraph_Base : public LGraph_Node_Type {
 protected:
   // std::vector<Node_Internal, AAlloc::AlignedAllocator<Node_Internal,4096> > node_internal;
+  std::string long_name;
   std::string name;
   std::string path;
   bool        locked;
@@ -82,6 +83,7 @@ public:
   virtual void emplace_back();
 
   const std::string &get_name() const {
+    assert(long_name == "lgraph_" + name);
     return name;
   }
   const std::string &get_path() const {

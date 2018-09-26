@@ -4,8 +4,8 @@
 LGraph_InstanceNames::LGraph_InstanceNames(const std::string &path, const std::string &name) noexcept
     : Lgraph_base_core(path, name)
     , LGraph_Base(path, name)
-    , names(path, name + "_inst_names")
-    , instances(path + "/" + name + "_inst") {
+    , names(path + "/lgraph_" +  name + "_inst_names")
+    , instances(path + "/lgraph_" + name + "_inst") {
 }
 
 void LGraph_InstanceNames::clear() {

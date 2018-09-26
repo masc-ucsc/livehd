@@ -1,6 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <sys/types.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "lgraph_base_core.hpp"
 #include "lgedgeiter.hpp"
@@ -25,6 +27,17 @@ Fast_edge_iterator Lgraph_base_core::fast() const {
     return Fast_edge_iterator(0, this);
 
   return Fast_edge_iterator(1, this);
+}
+
+bool Lgraph_base_core::is_path_ok(const std::string &path) {
+  struct stat info;
+
+  if( stat( path.c_str(), &info ) != 0 )
+    return false;
+  else if( info.st_mode & S_IFDIR )
+    return true;
+
+  return false;
 }
 
 int Console_init::_static_initializer = Console_init::initialize_logger();

@@ -12,10 +12,11 @@
 LGraph_Base::LGraph_Base(const std::string &_path, const std::string &_name) noexcept
     : Lgraph_base_core(_path, _name)
     , LGraph_Node_Type(_path, _name)
+    , long_name("lgraph_" + _name)
     , name(_name)
     , path(_path)
-    , input_array(_path, _name + "_inputs")
-    , output_array(_path, _name + "_outputs") {
+    , input_array(_path + "/lgraph_" + _name + "_inputs")
+    , output_array(_path + "/lgraph_" + _name + "_outputs") {
 
   locked = false;
 }
@@ -33,7 +34,7 @@ void LGraph_Base::clear() {
   output_array.clear();
 
   // whenever we clean, we unlock
-  std::string lock = path + "/" + name + ".lock";
+  std::string lock = path + "/" + long_name + ".lock";
   unlink(lock.c_str());
   locked = false;
 }
@@ -45,7 +46,7 @@ void LGraph_Base::sync() {
   input_array.sync();
   output_array.sync();
 
-  std::string lock = path + "/" + name + ".lock";
+  std::string lock = path + "/" + long_name + ".lock";
   unlink(lock.c_str());
   locked = false;
 }
@@ -91,7 +92,7 @@ void LGraph_Base::get_lock() {
   if(locked)
     return;
 
-  std::string lock = path + "/" + name + ".lock";
+  std::string lock = path + "/" + long_name + ".lock";
   int         err  = open(lock.c_str(), O_CREAT | O_EXCL, 420); // 644
   if(err < 0) {
     console->error("Could not get lock:{}. Already running? Unclear exit?", lock.c_str());

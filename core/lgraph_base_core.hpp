@@ -24,7 +24,7 @@ protected:
   Lgraph_base_core() = delete;
   explicit Lgraph_base_core(const std::string &path, const std::string &name)
       : p(path)
-      , node_internal(path + "/" + name + "_nodes") {
+      , node_internal(path + "/lgraph_" + name + "_nodes") {
       };
   virtual ~Lgraph_base_core(){};
 
@@ -42,6 +42,8 @@ protected:
   }
 
   friend Fast_edge_iterator;
+
+  static bool is_path_ok(const std::string &path);
 
 public:
   Fast_edge_iterator fast() const;
