@@ -7,52 +7,48 @@
 class Inou_json_api {
 protected:
   static void tolg(Eprp_var &var) {
+    const std::string files   = var.get("files");
+    const std::string path    = var.get("path","lgdb");
+
     Inou_json json;
 
-    for(const auto &l:var.dict) {
-      json.set(l.first,l.second);
-    }
+    json.set("path",path);
 
-    if(access(var.get("file").c_str(), R_OK) == -1) {
-      Main_api::error(fmt::format("inou.json. could not open json file named {}",var.get("input")));
+    if (files.empty()) {
+      Main_api::error(fmt::format("inou.jsno.tolg: no files provided"));
       return;
     }
 
-    std::vector<LGraph *> lgs = json.tolg();
+    for(const auto &f:Main_api::parse_files(files,"inou.json.tolg")) {
+      json.set("input",f);
+      std::vector<LGraph *> lgs = json.tolg();
 
-    if (lgs.empty()) {
-      Main_api::warn(fmt::format("inou.json.tolg could not import from json to {} lgraph in {} path", var.get("name"), var.get("path")));
-    }else{
-      assert(lgs.size()==1);
-      var.add(lgs[0]);
+      if (lgs.empty()) {
+        Main_api::warn(fmt::format("inou.json.tolg could not import from json to {} lgraph in {} path", var.get("name"), var.get("path")));
+      }else{
+        assert(lgs.size()==1);
+        var.add(lgs[0]);
+      }
     }
   }
 
   static void fromlg(Eprp_var &var) {
+    const std::string output  = var.get("output");
+    const std::string path    = var.get("path","lgdb");
+
     Inou_json json;
 
-    for(const auto &l:var.dict) {
-      json.set(l.first,l.second);
-    }
+    json.set("path",path);
+    json.set("output",output);
 
     std::vector<const LGraph *> lgs;
     for(const auto &l:var.lgs) {
       lgs.push_back(l);
     }
-    const std::string &name = var.get("name");
-    if (name.empty() && lgs.empty()) {
+
+    if (lgs.empty()) {
       Main_api::warn(fmt::format("inou.json.fromlg needs an input lgraph. Either name or |> from lgraph.open"));
       return;
-    }if (!name.empty() && lgs.empty()) {
-      std::string path = var.get("path");
-      if (path.empty())
-        path = "lgdb";
-      LGraph *lg = LGraph::open_lgraph(path, name);
-      if (lg==0) {
-        Main_api::warn(fmt::format("inou.json.fromlg could not open {}/{} lgraph",path,name));
-        return;
-      }
-      lgs.push_back(lg);
     }
 
     json.fromlg(lgs);
@@ -62,17 +58,13 @@ public:
   static void setup(Eprp &eprp) {
     Eprp_method m1("inou.json.tolg", "import from json to lgraph", &Inou_json_api::tolg);
     m1.add_label_optional("path","lgraph path");
-    m1.add_label_required("name","lgraph name");
-
-    m1.add_label_optional("file","json input file");
+    m1.add_label_required("files","json input file[s] to create lgraph[s]");
 
     eprp.register_method(m1);
 
     Eprp_method m2("inou.json.fromlg", "export from lgraph to json", &Inou_json_api::fromlg);
     m2.add_label_optional("path","lgraph path");
-    m2.add_label_required("name","lgraph name");
-
-    m2.add_label_optional("file","json output file");
+    m2.add_label_required("output","json output file from lgraphs");
 
     eprp.register_method(m2);
   }
