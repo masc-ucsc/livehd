@@ -43,3 +43,25 @@ void Main_api::init() {
   main_path = std::string(exePath,0,len);
 }
 
+std::vector<std::string> Main_api::parse_files(const std::string &files, const std::string &module) {
+  char seps[] = ",";
+  char *token;
+
+  std::vector<std::string> raw_file_list;
+
+  char *files_char = (char *)alloca(files.size());
+  strcpy(files_char,files.c_str());
+  token = std::strtok(files_char, seps);
+  while( token != NULL ) {
+    /* Do your thing */
+    if(access(token, R_OK) == -1) {
+      Main_api::error(fmt::format("{}: could not open file {} {} {}", module, token, files_char, files));
+    }else{
+      raw_file_list.push_back(token);
+    }
+
+    token = std::strtok( NULL, seps );
+  }
+
+  return raw_file_list;
+}

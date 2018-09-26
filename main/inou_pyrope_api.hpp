@@ -5,60 +5,52 @@
 
 class Inou_pyrope_api {
 protected:
-  static void tolg(Eprp_var &var) {
-    Inou_pyrope pyrope;
+static void tolg(Eprp_var &var) {
 
-    for(const auto &l:var.dict) {
-      pyrope.set(l.first,l.second);
-    }
+  const std::string path    = var.get("path","lgdb");
+  const std::string files   = var.get("files");
 
-    if(access(var.get("input").c_str(), R_OK) == -1) {
-      Main_api::error(fmt::format("inou.pyrope could not open pyrope file named {}",var.get("input")));
-      return;
-    }
+  Inou_pyrope pyrope;
 
+  pyrope.set("path",path);
+
+  for(const auto &f:Main_api::parse_files(files,"inou.pyrope.tolg")) {
+    pyrope.set("input",f);
     std::vector<LGraph *> lgs = pyrope.tolg();
-
-    if (lgs.empty()) {
-      Main_api::warn(fmt::format("inou.pyrope.tolg could not import from pyrope to {} lgraph in {} path", var.get("name"), var.get("path")));
-    }else{
-      assert(lgs.size()==1);
-      var.add(lgs[0]);
+    for(const auto &lg:lgs) {
+      var.add(lg);
     }
   }
+}
 
-  static void fromlg(Eprp_var &var) {
-    Inou_pyrope pyrope;
+static void fromlg(Eprp_var &var) {
+  const std::string output   = var.get("output");
 
-    for(const auto &l:var.dict) {
-      pyrope.set(l.first,l.second);
-    }
+  Inou_pyrope pyrope;
 
-    std::vector<const LGraph *> lgs;
-    for(const auto &l:var.lgs) {
-      lgs.push_back(l);
-    }
+  pyrope.set("output",output);
 
-    pyrope.fromlg(lgs);
+  std::vector<const LGraph *> lgs;
+  for(const auto &l:var.lgs) {
+    lgs.push_back(l);
   }
+
+  pyrope.fromlg(lgs);
+}
 
 public:
-  static void setup(Eprp &eprp) {
-    Eprp_method m1("inou.pyrope.tolg", "import from pyrope to lgraph", &Inou_pyrope_api::tolg);
-    m1.add_label_optional("path","lgraph path");
-    m1.add_label_required("name","lgraph name");
+static void setup(Eprp &eprp) {
+  Eprp_method m1("inou.pyrope.tolg", "import from pyrope to lgraph", &Inou_pyrope_api::tolg);
+  m1.add_label_optional("path","lgraph path");
 
-    m1.add_label_optional("input","pyrope input file");
+  m1.add_label_required("files","pyrope input file[s]");
 
-    eprp.register_method(m1);
+  eprp.register_method(m1);
 
-    Eprp_method m2("inou.pyrope.fromlg", "export from lgraph to pyrope", &Inou_pyrope_api::fromlg);
-    m2.add_label_optional("path","lgraph path");
-    m2.add_label_required("name","lgraph name");
+  Eprp_method m2("inou.pyrope.fromlg", "export from lgraph to pyrope", &Inou_pyrope_api::fromlg);
+  m2.add_label_required("output","pyrope output file");
 
-    m2.add_label_optional("output","pyrope output file");
-
-    eprp.register_method(m2);
-  }
+  eprp.register_method(m2);
+}
 
 };
