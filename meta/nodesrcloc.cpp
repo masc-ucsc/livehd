@@ -6,8 +6,8 @@
 LGraph_Node_Src_Loc::LGraph_Node_Src_Loc(const std::string &path, const std::string &name) noexcept
     : Lgraph_base_core(path, name)
     , LGraph_Base(path, name)
-    , src_files(path, name + "_src_files")
-    , node_src_loc(path + "/" + name + "_src_locs") {
+    , src_files(path + "/lgraph_" + name + "_src_files")
+    , node_src_loc(path + "/lgraph_" + name + "_src_locs") {
 }
 
 void LGraph_Node_Src_Loc::clear() {

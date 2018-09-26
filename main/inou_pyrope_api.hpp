@@ -16,10 +16,8 @@ static void tolg(Eprp_var &var) {
 
   for(const auto &f:Main_api::parse_files(files,"inou.pyrope.tolg")) {
     pyrope.set("input",f);
-    std::vector<LGraph *> lgs = pyrope.tolg();
-    for(const auto &lg:lgs) {
-      var.add(lg);
-    }
+
+    var.add(pyrope.tolg());
   }
 }
 

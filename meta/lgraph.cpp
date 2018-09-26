@@ -18,37 +18,40 @@ uint32_t LGraph::lgraph_counter = 0;
 std::map<std::string, std::map<std::string, LGraph *>> LGraph::name2lgraph;
 
 LGraph::LGraph(const std::string &path)
-    : Lgraph_base_core(path, "lgraph_" + std::to_string(lgraph_counter))
-    , LGraph_Base(path, "lgraph_" + std::to_string(lgraph_counter))
-    , LGraph_Node_Delay(path, "lgraph_" + std::to_string(lgraph_counter))
-    , LGraph_Node_Src_Loc(path, "lgraph_" + std::to_string(lgraph_counter))
-    , LGraph_WireNames(path, "lgraph_" + std::to_string(lgraph_counter))
-    , LGraph_InstanceNames(path, "lgraph_" + std::to_string(lgraph_counter))
-    , LGraph_Node_Place(path, "lgraph_" + std::to_string(lgraph_counter))
-    , LGraph_Symbol_Table(path, "lgraph_" + std::to_string(lgraph_counter)) {
+    : Lgraph_base_core(path, "lg" + std::to_string(lgraph_counter))
+    , LGraph_Base(path, "lg" + std::to_string(lgraph_counter))
+    , LGraph_Node_Delay(path, "lg" + std::to_string(lgraph_counter))
+    , LGraph_Node_Src_Loc(path, "lg" + std::to_string(lgraph_counter))
+    , LGraph_WireNames(path, "lg" + std::to_string(lgraph_counter))
+    , LGraph_InstanceNames(path, "lg" + std::to_string(lgraph_counter))
+    , LGraph_Node_Place(path, "lg" + std::to_string(lgraph_counter))
+    , LGraph_Symbol_Table(path, "lg" + std::to_string(lgraph_counter)) {
 
   library  = Graph_library::instance(path);
   tlibrary = Tech_library::instance(path);
 
   name2lgraph[path][name] = this;
-  lgraph_counter++;
+  lgraph_counter++; // Only for unnamed graphs
   lgraph_id = library->get_id(std::to_string(lgraph_counter));
 
   clear();
 }
 
 LGraph::LGraph(const std::string &path, const std::string &_name, bool _clear)
-    : Lgraph_base_core(path, "lgraph_" + _name)
-    , LGraph_Base(path, "lgraph_" + _name)
-    , LGraph_Node_Delay(path, "lgraph_" + _name)
-    , LGraph_Node_Src_Loc(path, "lgraph_" + _name)
-    , LGraph_WireNames(path, "lgraph_" + _name)
-    , LGraph_InstanceNames(path, "lgraph_" + _name)
-    , LGraph_Node_Place(path, "lgraph_" + _name)
-    , LGraph_Symbol_Table(path, "lgraph_" + _name) {
+    : Lgraph_base_core(path, _name)
+    , LGraph_Base(path, _name)
+    , LGraph_Node_Delay(path, _name)
+    , LGraph_Node_Src_Loc(path, _name)
+    , LGraph_WireNames(path, _name)
+    , LGraph_InstanceNames(path, _name)
+    , LGraph_Node_Place(path, _name)
+    , LGraph_Symbol_Table(path, _name) {
 
   library  = Graph_library::instance(path);
   tlibrary = Tech_library::instance(path);
+
+  name2lgraph[path][name] = this;
+  lgraph_id = library->reset_id(_name); // May keep same ID
 
   if(_clear) {
     clear();
@@ -56,27 +59,21 @@ LGraph::LGraph(const std::string &path, const std::string &_name, bool _clear)
   } else {
     reload();
   }
-
-  name2lgraph[path][name] = this;
-  lgraph_counter++;
-  lgraph_id = library->get_id(_name);
 }
 
 LGraph *LGraph::find_lgraph(const std::string &path, const std::string &name) {
 
-  if(name2lgraph.find(path) == name2lgraph.end() || name2lgraph[path].find("lgraph_" + name) == name2lgraph[path].end()) {
+  if(name2lgraph.find(path) == name2lgraph.end() || name2lgraph[path].find(name) == name2lgraph[path].end()) {
     if(Graph_library::instance(path)->include(name))
       return open_lgraph(path, name);
 
-    // Check that the path is valid. Otherwise, likely error of swaping path with name
-    DIR *dir = opendir(path.c_str());
-    if (!dir) {
+    if (!is_path_ok(path)) {
       console->warn("find_lgraph trying {} path which does not exit", path);
     }
     return 0;
   }
 
-  return name2lgraph[path]["lgraph_" + name];
+  return name2lgraph[path][name];
 }
 
 LGraph *LGraph::open_lgraph(const std::string &path, const std::string &name) {
@@ -116,6 +113,8 @@ void LGraph::sync() {
 
   library->sync();
   tlibrary->sync();
+
+  library->update(name);
 
   LGraph_Base::sync(); // last. Removes lock at the end
 }

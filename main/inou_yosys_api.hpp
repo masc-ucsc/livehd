@@ -175,7 +175,21 @@ static void tolg(Eprp_var &var) {
     Main_api::error(fmt::format("inou.yosys.tolf: unrecognized abc {} option. Either true or false", techmap));
   }
 
+  auto gl = Graph_library::instance(path);
+
+  int max_version = gl->get_max_version();
+
   do_work(yosys, liblg, script_file, vars);
+
+  std::vector<LGraph *> lgs;
+  gl->each_graph([&lgs, gl, max_version](const std::string &name, int id) {
+      if (gl->get_version(id) >= max_version) {
+        lgs.push_back(gl->get_graph(id));
+      }
+    });
+
+  var.add(lgs);
+
 }
 
 static void fromlg(Eprp_var &var) {

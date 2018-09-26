@@ -24,5 +24,6 @@ cc_binary(
             "inou_yosys_write.ys",
     ],
     linkopts = ["-ldl"],
+    # linkopts = ["-ldl,", '-static']
 )
 
