@@ -248,8 +248,8 @@ int main() {
 	std::cout
 	<< "Welcome to lgraph\n"
 	//<< "Press 'tab' to view autocompletions\n"
-	<< "Type '.help' for help\n"
-	<< "Type '.quit' or '.exit' to exit\n\n";
+	<< "Type 'help' for help\n"
+	<< "Type 'quit' or 'exit' to exit\n\n";
 
 	// set the repl prompt
 	std::string prompt {"\x1b[1;32mlgraph\x1b[0m> "};
