@@ -10,12 +10,12 @@
 
 class Inou_pyrope_options : public Options_base {
 public:
-  std::string pyrope_output;
-  std::string pyrope_input;
+  std::string output;
+  std::string input;
 
-  Inou_pyrope_options() {
-    pyrope_output = "pyrope_out.prp";
-    pyrope_input = "pyrope_in";
+  Inou_pyrope_options()
+    :output("")
+     ,input("") {
   }
   void set(const std::string &key, const std::string &value) final;
 };

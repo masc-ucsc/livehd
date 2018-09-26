@@ -40,6 +40,9 @@ public:
 
   static const std::string &get_main_path() { return main_path; }
 
+
+  static std::vector<std::string> parse_files(const std::string &files, const std::string &module);
+
   static void init();
 };
 

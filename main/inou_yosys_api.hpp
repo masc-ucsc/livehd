@@ -133,7 +133,7 @@ static void tolg(Eprp_var &var) {
 
   const std::string path    = var.get("path","lgdb");
   const std::string yosys   = var.get("yosys","yosys");
-  const std::string techmap = var.get("techmap","alumac");
+  const std::string techmap = var.get("techmap","alumacc");
   const std::string abc     = var.get("abc","false");
   const std::string files   = var.get("files");
 
@@ -146,32 +146,13 @@ static void tolg(Eprp_var &var) {
     return;
   }
 
-  char seps[] = ",";
-  char *token;
-
-  std::vector<std::string> raw_file_list;
-
-  char *files_char = (char *)alloca(files.size());
-  strcpy(files_char,files.c_str());
-  token = std::strtok(files_char, seps);
-  while( token != NULL ) {
-    /* Do your thing */
-    if(access(token, R_OK) == -1) {
-      Main_api::error(fmt::format("inou.yosys.tolf: could not open file {} {} {}", token, files_char,files));
-      return;
-    }
-    raw_file_list.push_back(token);
-
-    token = std::strtok( NULL, seps );
-  }
-
   mustache::data vars;
 
   vars.set("path",path);
 
   mustache::data filelist{mustache::data::type::list};
-  for(const auto &f:raw_file_list) {
-    filelist << mustache::data{"file", f};
+  for(const auto &f:Main_api::parse_files(files,"inou.yosys.tolg")) {
+    filelist << mustache::data{"input", f};
   }
 
   vars.set("filelist",filelist);
@@ -200,7 +181,7 @@ static void tolg(Eprp_var &var) {
 static void fromlg(Eprp_var &var) {
   const std::string path    = var.get("path","lgdb");
   const std::string yosys   = var.get("yosys","yosys");
-  const std::string file    = var.get("file");
+  const std::string output  = var.get("output");
   const std::string name    = var.get("name");
 
   std::string script_file;
@@ -210,7 +191,7 @@ static void fromlg(Eprp_var &var) {
   mustache::data vars;
 
   vars.set("path", path);
-  vars.set("file", file);
+  vars.set("output", output);
   vars.set("name", name);
 
   do_work(yosys, liblg, script_file, vars);
@@ -233,7 +214,7 @@ public:
     eprp.register_method(m1);
 
     Eprp_method m2("inou.yosys.fromlg", "write verilog using yosys from lgraph", &Inou_yosys_api::fromlg);
-    m2.add_label_required("file","verilog files to write");
+    m2.add_label_required("output","output verilog file to write");
     m2.add_label_required("name","name of the top level file");
     m2.add_label_optional("path","path to read the lgraph[s]");
     m2.add_label_optional("script","alternative custom inou_yosys_write.ys command");

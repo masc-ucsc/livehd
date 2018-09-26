@@ -14,9 +14,9 @@ void Inou_pyrope_options::set(const std::string &key, const std::string &value) 
 
   try {
     if (is_opt(key, "input")) {
-      pyrope_input = value;
+      input = value;
     } else if (is_opt(key, "output")) {
-      pyrope_output = value;
+      output = value;
     } else {
       set_val(key, value);
     }
@@ -25,7 +25,7 @@ void Inou_pyrope_options::set(const std::string &key, const std::string &value) 
   }
 
   console->info("inou_pyrope input:{} output:{} path:{} name:{}"
-      ,pyrope_input, pyrope_output, path, name);
+      ,input, output, path, name);
 }
 
 // FIXME: latch.v (optimize lgraph to fix), trivial2.v, submodule_offset.v
@@ -41,19 +41,14 @@ std::vector<LGraph *> Inou_pyrope::tolg() {
 
   std::vector<LGraph *> lgs;
 
-  if(opack.name != "") {
-    lgs.push_back(new LGraph(opack.path, opack.name, false)); // Do not clear
-  } else {
-    console->error("inou_pyrope::tolg no graph name provided");
-    return lgs;
-  }
+  console->error("inou_pyrope::tolg not implemented");
 
   return lgs;
 }
 
 void Inou_pyrope::fromlg(std::vector<const LGraph *> &out) {
   for(const auto &g : out) {
-    to_pyrope(g, opack.pyrope_output);
+    to_pyrope(g, opack.output);
   }
 }
 
