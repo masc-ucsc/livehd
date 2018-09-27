@@ -111,10 +111,11 @@ void LGraph::sync() {
   LGraph_WireNames::sync();
   LGraph_InstanceNames::sync();
 
+  if (locked)
+    library->update(name);
+
   library->sync();
   tlibrary->sync();
-
-  library->update(name);
 
   LGraph_Base::sync(); // last. Removes lock at the end
 }
