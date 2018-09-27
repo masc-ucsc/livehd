@@ -11,18 +11,8 @@ maintaining a private lgraph repo and integrating changes with the public repo
 that is hosted on GitHub.  Other groups may choose to adapt this technique for
 their own use.
 
-The document also explains how to add new submodules
-
-## lgraph submodules
-
-All the submodules are located in subs directory. The goal is to clone there
-code with no code changes. Examples are ABC or YOSYS. If a subproject requires
-code change, we place it in misc/xxx.
-
-To add a submodule, use the submodule command
-
-   # Example of adding abc
-   git submodule add git@github.com:berkeley-abc/abc.git subs/abc
+lgraph uses bazel as a build system, as a result, we no longer use submodules.
+Instead we use the built-in bazel support to pull specific repositories.
 
 ## Public lgraph GitHub Repo
 
@@ -44,8 +34,15 @@ will push them to the public one.
 ## Synchronizing Public and Private Repos
 
 This section describes how we synchronize the public and private lgraph repos.
-Most users can ignore it and simply work on the appropriate public or private 
+Most users can ignore it and simply work on the appropriate public or private
 repo.
+
+## Rebase vs Merge
+
+To have a cleaner git history, we tend to avoid merge, and we operate in rebase. This is not
+a strong requirement, but a recommendation. To enable rebase by default:
+
+    git config --global pull.rebase true
 
 ### Create Private lgraph repo for first time
 

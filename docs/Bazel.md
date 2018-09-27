@@ -33,10 +33,6 @@ Useful commands:
 
     bazel test //...
 
-## To run specific python test
-
-    bazel run //pyth:your_test.py
-
 ## Debugging with bazel
 
 First run the tests to see the failing one. Then run with debug options
@@ -47,7 +43,7 @@ the failing test. E.g:
 Increase logging level if wanted
 
     export LGRAPH_LOG=info
-    bazel run -c dbg //pyth:test_core1
+    bazel run -c dbg //eprp:all
 
 To run with gdb
 
@@ -56,24 +52,26 @@ To run with gdb
     >b Eprp::run
     >r
 
-
 ## Code coverage for all the tests used
 
     bazel build --collect_code_coverage ...
     # or better with runs
     bazel test --collect_code_coverage --test_output=all --nocache_test_results ...
 
-## To download the dependent packages and apply patches (abc)
+## To download the dependent packages and apply patches (abc, bm,...)
 
 No need to run this, as the bazel build will do it.
 
     bazel fetch ...
 
-The downloaded code would be at bazel-lgraph/external/abc/
+The downloaded code would be at bazel-lgraph/external/
 
-## To create a fully static binary (for pip deployment?)
+## To create a fully static binary
 
 In the cc binary, add linkopts = ['-static']
+
+Notice that the lgshell still needs the directory inside
+bazel-bin/main/lgshell.runfiles when using inou.yosys.\*
 
 ## To remove all the bazel (it should not be needed, but in case)
 

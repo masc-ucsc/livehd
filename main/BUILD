@@ -1,7 +1,7 @@
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 cc_binary(
-    name = "lgraph",
+    name = "lgshell",
     srcs = glob(["*.cpp"],exclude=["*test*.cpp"])
           +glob(["*_api.hpp"]),
     deps = ["@spdlog//:headers",
@@ -23,8 +23,7 @@ cc_binary(
             "inou_yosys_read.ys",
             "inou_yosys_write.ys",
     ],
-    linkopts = ["-ldl"],
-    # linkopts = ["-ldl,", '-static']
+    # linkopts = ['-static']
 )
 
 cc_binary(
