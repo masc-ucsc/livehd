@@ -133,7 +133,7 @@ static void tolg(Eprp_var &var) {
 
   const std::string path    = var.get("path","lgdb");
   const std::string yosys   = var.get("yosys","yosys");
-  const std::string techmap = var.get("techmap","alumacc");
+  const std::string techmap = var.get("techmap","none");
   const std::string abc     = var.get("abc","false");
   const std::string files   = var.get("files");
 
