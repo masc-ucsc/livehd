@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <fcntl.h>
+#include <dirent.h>
 
 #include <regex>
 #include <string>
@@ -44,9 +45,15 @@ Replxx::completions_t hook_completion(std::string const& context, int index, voi
   int last_cmd_start = context.size();
   int last_cmd_end   = context.size();
   bool skipping_word = true;
+
+  int last_label_start = context.size();
+  bool last_label_found = false;
+  bool last_label_done  = false;
+
   for(int i=context.size();i>=0;i--) {
     if (context[i] == ' ') {
       skipping_word = false;
+      last_label_done = true;
       continue;
     }
     if (context[i] == '>')
@@ -55,6 +62,14 @@ Replxx::completions_t hook_completion(std::string const& context, int index, voi
       last_cmd_start = i;
       last_cmd_end = i;
       skipping_word = true;
+      if (!last_label_found && !last_label_done) {
+        last_label_found = true;
+      }else{
+        last_label_done = true;
+      }
+    }
+    if (last_label_found && !last_label_done) {
+      last_label_start = i;
     }
     if (!skipping_word) {
       last_cmd_start = i;
@@ -63,7 +78,63 @@ Replxx::completions_t hook_completion(std::string const& context, int index, voi
 
   std::vector<std::string> fields;
 
-  if (last_cmd_start< last_cmd_end) {
+  std::string prefix {context.substr(index)};
+
+  std::string prefix_add = "";
+
+  if (last_label_found && last_label_done) {
+    std::string label = context.substr(last_label_start,context.size());
+    std::string full_filename = "";
+    auto pos = label.find_last_of(":");
+    if (pos != std::string::npos) {
+
+      auto pos2 = label.find_last_of(',');
+      if (pos2 == std::string::npos) {
+        pos2 = pos;
+      }
+      full_filename = label.substr(pos2+1);
+      prefix_add = label.substr(0,pos2+1);
+      prefix     = full_filename; // Overwrite beginning of the match
+      label = label.substr(0,pos);
+    }
+    bool label_files  = strcasecmp(label.c_str(),"files")==0;
+    bool label_output = strcasecmp(label.c_str(),"output")==0;
+    bool label_path   = strcasecmp(label.c_str(),"path")==0;
+    if (label_files || label_output || label_path) {
+      std::string path = ".";
+      auto pos = full_filename.find_last_of('/');
+      std::string filename;
+      if (pos != std::string::npos) {
+        path = full_filename.substr(0,pos);
+        filename = full_filename.substr(pos+1);
+        prefix_add += path + "/";
+        prefix      = filename;
+      }else{
+        filename = full_filename;
+      }
+      //fmt::print("label[{}] full_filename[{}] path[{}] filename[{}] prefix[{}] add[{}]\n", label, full_filename, path, filename, prefix, prefix_add);
+      DIR* dirp = opendir(path.c_str());
+      if (dirp) {
+        std::vector<std::string> sort_files;
+        struct dirent * dp;
+        while ((dp = readdir(dirp)) != NULL) {
+          if (dp->d_type != DT_DIR && label_path)
+            continue;
+          //fmt::print("preadding {}\n",dp->d_name);
+          if (strncasecmp(dp->d_name,filename.c_str(),filename.size())==0 || filename.empty()) {
+            //fmt::print("adding {}\n",dp->d_name);
+            sort_files.push_back(dp->d_name);
+          }
+        }
+        closedir(dirp);
+        if (!sort_files.empty()) {
+          std::sort(sort_files.begin(), sort_files.end());
+          fields = sort_files;
+        }
+      }
+      examples = &fields;
+    }
+  }else if (last_cmd_start < last_cmd_end) {
     std::string cmd = context.substr(last_cmd_start,last_cmd_end);
     auto pos = cmd.find(" ");
     if (pos != std::string::npos) {
@@ -77,12 +148,24 @@ Replxx::completions_t hook_completion(std::string const& context, int index, voi
       examples = &fields;
   }
 
-	std::string prefix {context.substr(index)};
 	for (auto const& e : *examples) {
-		if (e.compare(0, prefix.size(), prefix) == 0) {
+    //fmt::print("checking {} vs {}\n",e, prefix);
+    if (strncasecmp(prefix.c_str(), e.c_str(), prefix.size())==0) {
+      //fmt::print("match {}\n",e);
 			completions.emplace_back(e.c_str());
 		}
 	}
+
+#if 1
+  if (completions.size() == 1 && !prefix_add.empty()) {
+    // find last / as completions seem to work upto last char
+    auto pos = prefix_add.find_last_of('/');
+    if (pos != std::string::npos) {
+      prefix_add = prefix_add.substr(pos+1);
+    }
+    completions[0] = prefix_add + completions[0];
+  }
+#endif
 
 	return completions;
 }
