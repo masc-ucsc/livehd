@@ -72,6 +72,13 @@ new_git_repository(
 )
 
 new_git_repository(
+    name = "httplib",
+    build_file = "BUILD.httplib",
+    commit = "4d7cee81eb106c502738b8a9980422a93dba148a", # Sep 25, 2018
+    remote = "https://github.com/yhirose/cpp-httplib.git",
+)
+
+new_git_repository(
     name = "replxx",
     build_file = "BUILD.replxx",
     commit = "228038cbca2532a35cf3fb596eda0d8335fab212", # September 15, 2018

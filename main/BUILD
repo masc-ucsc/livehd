@@ -27,3 +27,20 @@ cc_binary(
     # linkopts = ["-ldl,", '-static']
 )
 
+cc_binary(
+    name = "uclient_test",
+    srcs = ["uclient_test.cpp"],
+    deps = ["@httplib//:headers",
+    ],
+    #linkopts = ["-ldl"],
+    # linkopts = ["-ldl,", '-static']
+)
+
+cc_binary(
+    name = "userver_test",
+    srcs = ["userver_test.cpp"],
+    deps = ["@httplib//:headers",
+    ],
+    linkopts = ["-lpthread"],
+    # linkopts = ["-ldl,", '-static']
+)
