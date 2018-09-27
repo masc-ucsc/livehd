@@ -74,7 +74,7 @@ cc_library(
         ,
    includes = ["src"],
    visibility = ["//visibility:public"],
-   defines = ["LIN64","SIZEOF_VOID_P=8","SIZEOF_LONG=8","SIZEOF_INT=4","ABC_USE_CUDD=1","ABC_USE_PTHREADS"],
+   defines = ["ABC_NO_DYNAMIC_LINKING=1","LIN64","SIZEOF_VOID_P=8","SIZEOF_LONG=8","SIZEOF_INT=8","ABC_USE_CUDD=1","ABC_USE_PTHREADS"],
 )
 
 #cc_library(
