@@ -217,8 +217,12 @@ std::string Eprp_scanner::scan_text() const {
 
 int Eprp_scanner::scan_calc_lineno() const {
 
+  size_t max_pos = scanner_pos;
+  if (max_pos>=token_list.size())
+    max_pos = token_list.size()-1;
+
   int nlines = 0;
-  for(size_t i=0;i<token_list[scanner_pos].pos;i++) {
+  for(size_t i=0;i<token_list[max_pos].pos;i++) {
     char c = buffer[i];
     nlines += (c == '\n' || c == '\r' || c == '\f')?1:0;
   }
@@ -230,8 +234,12 @@ void Eprp_scanner::scan_raw_msg(const std::string &cat, const std::string &text,
 
   // Look at buffer for previous line change
 
+  size_t max_pos = scanner_pos;
+  if (max_pos>=token_list.size())
+    max_pos = token_list.size()-1;
+
   int line_pos_start = 0;
-  for(int i=token_list[scanner_pos].pos;i>0;i--) {
+  for(int i=token_list[max_pos].pos;i>0;i--) {
     char c = buffer[i];
     if (c == '\n' || c == '\r' || c == '\f') {
       line_pos_start = i;
@@ -239,7 +247,7 @@ void Eprp_scanner::scan_raw_msg(const std::string &cat, const std::string &text,
     }
   }
   int line_pos_end = buffer_sz;
-  for(size_t i=token_list[scanner_pos].pos;i<buffer_sz;i++) {
+  for(size_t i=token_list[max_pos].pos;i<buffer_sz;i++) {
     char c = buffer[i];
     if (c == '\n' || c == '\r' || c == '\f') {
       line_pos_end = i;
@@ -250,7 +258,7 @@ void Eprp_scanner::scan_raw_msg(const std::string &cat, const std::string &text,
   std::string line_txt(&buffer[line_pos_start],line_pos_end-line_pos_start);
 
   int line = scan_calc_lineno();
-  int col  = token_list[scanner_pos].pos - line_pos_start;
+  int col  = token_list[max_pos].pos - line_pos_start;
 
   std::string first_1 = fmt::format("{}:{}:{} {}: {}", buffer_name, line, col, cat, text);
   std::string second_1 = line_txt;
@@ -262,7 +270,7 @@ void Eprp_scanner::scan_raw_msg(const std::string &cat, const std::string &text,
     return;
 
   std::string third_1(col, ' ');
-  std::string third_2(token_list[scanner_pos].len, '^');
+  std::string third_2(token_list[max_pos].len, '^');
   fmt::print(third_1 + third_2 + "\n");
 }
 
