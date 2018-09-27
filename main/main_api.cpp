@@ -3,6 +3,7 @@
 
 #include "top_api.hpp"
 #include "meta_api.hpp"
+#include "cloud_api.hpp"
 #include "inou_cfg_api.hpp"
 #include "inou_lef_api.hpp"
 #include "inou_json_api.hpp"
@@ -19,6 +20,7 @@ void Main_api::init() {
   Top_api::setup(eprp);        // *
 
   Meta_api::setup(eprp);       // lgraph.*
+  Cloud_api::setup(eprp);      // cloud.*
 
   Inou_cfg_api::setup(eprp);   // inou.cfg.*
   Inou_lef_api::setup(eprp);   // inou.lef.*
