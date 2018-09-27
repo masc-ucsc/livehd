@@ -5,14 +5,17 @@ what goes in or not.
 
 The list is sorted by email and formatted to allow easy grepping and
 beautification by scripts. People listed here must be also listed in the CREDITS.txt
-with matching email.  The fields are: name (N), email (E), bazel build targets owned (D).
+with matching email.  The fields are: name (N), email (E), bazel build targets owned (D),
+(T) Time were the person was code owner in quarters (1Q17-present)
 
 
 N: Haven Skinner
 E: hskinner@ucsc.edu
 D: //pass/dfg/...
+T: 2Q18-3Q18
 
 N: Jose Renau
 E: renau@ucsc.edu
 D: //...
+T: 1Q18-present
 
