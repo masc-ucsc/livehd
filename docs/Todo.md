@@ -136,23 +136,6 @@
 * L6 - [Rafael] Closed loop tests with sat solvers
 
 
-
-## 6. Python interface
-
-* T1 - [?] Basic interactive Python interface
-  1. User can type any basic command (ls, time, exit, print, shell, ...)
-    * No dependencies
-  2. Commands for lgraph operations (read\_verilog, write\_verilog, pass dce,
-     ...)
-    * Depends on T1.i
-  3. Help command to find commands and help to each command
-* T2 - [?] Batch mode
-  1. Pass tcl file to the interpreter
-    * Depends on T1
-* T3 - [?] Autocomplete function for commands and file names
-  1. When hitting tab, show a list of possible commands or complete if only one
-    * Depends on T1
-
 Extra TODOs:
 
 LLVM:
