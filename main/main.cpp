@@ -38,7 +38,7 @@ Replxx::completions_t hook_completion(std::string const& context, int index, voi
 Replxx::hints_t hook_hint(std::string const& context, int index, Replxx::Color& color, void* user_data);
 void hook_color(std::string const& str, Replxx::colors_t& colors, void* user_data);
 
-Replxx::completions_t hook_completion(std::string const& context, int index, void* user_data) {
+Replxx::completions_t hook_shared(std::string const& context, int index, void* user_data, bool add_all) {
 	auto* examples = static_cast<std::vector<std::string>*>(user_data);
 	Replxx::completions_t completions;
 
@@ -152,12 +152,15 @@ Replxx::completions_t hook_completion(std::string const& context, int index, voi
     //fmt::print("checking {} vs {}\n",e, prefix);
     if (strncasecmp(prefix.c_str(), e.c_str(), prefix.size())==0) {
       //fmt::print("match {}\n",e);
-			completions.emplace_back(e.c_str());
+      if (add_all)
+        completions.emplace_back((prefix_add + e).c_str());
+      else
+        completions.emplace_back(e.c_str());
 		}
 	}
 
 #if 1
-  if (completions.size() == 1 && !prefix_add.empty()) {
+  if (!add_all && completions.size() == 1 && !prefix_add.empty()) {
     // find last / as completions seem to work upto last char
     auto pos = prefix_add.find_last_of('/');
     if (pos != std::string::npos) {
@@ -170,19 +173,34 @@ Replxx::completions_t hook_completion(std::string const& context, int index, voi
 	return completions;
 }
 
+Replxx::completions_t hook_completion(std::string const& context, int index, void* user_data) {
+
+  return hook_shared(context, index, user_data, false);
+
+}
+
 Replxx::hints_t hook_hint(std::string const& context, int index, Replxx::Color& color, void* user_data) {
-	auto* examples = static_cast<std::vector<std::string>*>(user_data);
 	Replxx::hints_t hints;
 
 	// only show hint if prefix is at least 'n' chars long
 	// or if prefix begins with a specific character
 	std::string prefix {context.substr(index)};
-	if (prefix.size() >= 2 || (! prefix.empty() && prefix.at(0) == '.')) {
+	if (prefix.size() >= 2 || (! prefix.empty() && prefix.at(0) == '!')) {
+    auto opts = hook_shared(context, index, user_data, true);
+#if 1
+		for (auto const& e : opts) {
+			//if (strncasecmp(e.c_str(), prefix.c_str(), prefix.size()) == 0 ) {
+				hints.emplace_back(e.substr(prefix.size()).c_str());
+			//}
+		}
+#else
+    auto* examples = static_cast<std::vector<std::string>*>(user_data);
 		for (auto const& e : *examples) {
 			if (e.compare(0, prefix.size(), prefix) == 0) {
 				hints.emplace_back(e.substr(prefix.size()).c_str());
 			}
 		}
+#endif
 	}
 
 	// set hint color to green if single match found
@@ -321,7 +339,7 @@ int main() {
 
 	rx.set_max_history_size(8192);
 	rx.set_max_line_size(128);
-	rx.set_max_hint_rows(16);
+	rx.set_max_hint_rows(6);
 
 	rx.set_highlighter_callback(hook_color, static_cast<void*>(&regex_color));
 
