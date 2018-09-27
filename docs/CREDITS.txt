@@ -27,3 +27,7 @@ Y: 2016-
 N: Google LLC
 Y: 2018-
 
+N: Sheng Hong Wang
+E: swang203@ucsc.edu
+D: UCSC student for LGRAPH
+Y: 2018-
