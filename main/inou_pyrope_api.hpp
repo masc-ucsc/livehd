@@ -22,11 +22,11 @@ static void tolg(Eprp_var &var) {
 }
 
 static void fromlg(Eprp_var &var) {
-  const std::string output   = var.get("output");
+  const std::string odir   = var.get("odir");
 
   Inou_pyrope pyrope;
 
-  pyrope.set("output",output);
+  pyrope.set("odir",odir);
 
   std::vector<const LGraph *> lgs;
   for(const auto &l:var.lgs) {
@@ -46,7 +46,7 @@ static void setup(Eprp &eprp) {
   eprp.register_method(m1);
 
   Eprp_method m2("inou.pyrope.fromlg", "export from lgraph to pyrope", &Inou_pyrope_api::fromlg);
-  m2.add_label_required("output","pyrope output file");
+  m2.add_label_required("odir","pyrope output directory");
 
   eprp.register_method(m2);
 }

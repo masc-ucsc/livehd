@@ -19,3 +19,12 @@ E.g: dead-code-elimination (dce) does a regen. A flattening of the lgraph pass (
 
  +Copy and edit, inou_rand_api.hpp to inou_foo_api.hpp or pass_abc_api.hpp to pass_foo_api.hpp
 
+## Common variables
+
+ One of the main goals is to have a uniform set of passes in lgshell. lgshell should use this common
+variable names when possible
+
+    name:foo        lgraph name
+    path:lgdb       lgraph database path (lgdb)
+    files:foo,var   comma separated list of files used for INPUT
+    odir:.          output directory to generate files like verilog/pyrope...

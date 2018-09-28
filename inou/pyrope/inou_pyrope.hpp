@@ -10,11 +10,11 @@
 
 class Inou_pyrope_options : public Options_base {
 public:
-  std::string output;
+  std::string odir;
   std::string input;
 
   Inou_pyrope_options()
-    :output("")
+    :odir(".")
      ,input("") {
   }
   void set(const std::string &key, const std::string &value) final;

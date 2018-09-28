@@ -65,9 +65,9 @@ mkdir logs
 mkdir lgdb
 
 ruby ${OPT_LGRAPH}/inou/tech/verilog_json.rb \
-  ${OPT_LGRAPH}/subs/yosys/techlibs/common/simcells.v  \
-  ${OPT_LGRAPH}/subs/yosys/techlibs/xilinx/cells_sim.v \
-  ${OPT_LGRAPH}/subs/yosys/techlibs/xilinx/brams_bb.v > lgdb/tech_library
+  /usr/local/share/yosys/simcells.v  \
+  /usr/local/share/yosys/xilinx/cells_sim.v \
+  /usr/local/share/yosys/xilinx/brams_bb.v > lgdb/tech_library
 
 for input in ${inputs[@]}
 do
@@ -79,23 +79,23 @@ do
   opt -fast -full; memory_map; dffsr2dff; dff2dffe; opt -full;
   techmap -map +/techmap.v -map +/xilinx/arith_map.v; opt -fast; techmap -D ALU_RIPPLE;
   opt -fast; abc -D 100;"
-  ./subs/yosys/bin/yosys -m ./inou/yosys/libinou_yosys.so -p "read_verilog -sv ./inou/yosys/tests/${input};
-   ${synth_script}; write_verilog ${base}_synth.v; inou_yosys lgdb" > ./synth-test/log_from_yosys_${input} 2> ./synth-test/err_from_yosys_${input}
+  yosys -m bazel-bin/inou/yosys/liblgraph_yosys.so -p "read_verilog -sv ./inou/yosys/tests/${input};
+   ${synth_script}; write_verilog ${base}_synth.v; yosys2lg -path lgdb" > ./synth-test/log_from_yosys_${input} 2> ./synth-test/err_from_yosys_${input}
 
 
   if [ $? -eq 0 ]; then
     echo "Successfully created graph from ${input}"
   else
-  echo "gdb --args ./subs/yosys/bin/yosys -m ./inou/yosys/libinou_yosys.so -p \"read_verilog -sv ./inou/yosys/tests/${input};
-    ${synth_script};  write_verilog ${input}_synth.v; inou_yosys lgdb\""
+  echo "gdb --args yosys -m bazel-bin/inou/yosys/liblgraph_yosys.so -p \"read_verilog -sv ./inou/yosys/tests/${input};
+    ${synth_script};  write_verilog ${input}_synth.v; yosys2lg -path lgdb\""
     echo "FAIL: lgyosys parsing terminated with an error (testcase ${input})"
     exit 1
   fi
 
-  ./inou/json/lgjson  --graph_name ${base} --json_output ${base}.json > ./synth-test/log_json_${input} 2> ./synth-test/err_json_${input}
-  if [ $? -ne 0 ]; then
-    echo "WARN: Not able to create json for testcase ${input}"
-  fi
+  #./inou/json/lgjson  --graph_name ${base} --json_output ${base}.json > ./synth-test/log_json_${input} 2> ./synth-test/err_json_${input}
+  #if [ $? -ne 0 ]; then
+    #echo "WARN: Not able to create json for testcase ${input}"
+  #fi
 
   ${YOSYS} -g${base} -h > ./synth-test/log_to_yosys_${input} 2> ./synth-test/err_to_yosys_${input}
 

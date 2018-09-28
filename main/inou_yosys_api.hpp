@@ -76,7 +76,7 @@ static void do_work(const std::string &yosys, const std::string &liblg, const st
 
   int pid = fork();
   if (pid<0) {
-    Main_api::error(fmt::format("inou.yosys.tolf: unable to fork??"));
+    Main_api::error(fmt::format("inou.yosys: unable to fork??"));
     return;
   }
 
@@ -92,7 +92,7 @@ static void do_work(const std::string &yosys, const std::string &liblg, const st
     char *argv[] = { strdup(yosys.c_str()), strdup("-q"), strdup("-m"), strdup(liblg.c_str()), 0};
 
     if (execvp(yosys.c_str(), argv) < 0) {
-      Main_api::error(fmt::format("inou.yosys.tolf: execvp fail with {}", strerror(errno)));
+      Main_api::error(fmt::format("inou.yosys: execvp fail with {}", strerror(errno)));
     }
 
     exit(0);
@@ -109,7 +109,7 @@ static void do_work(const std::string &yosys, const std::string &liblg, const st
   do {
     int w = waitpid(pid, &wstatus, WUNTRACED | WCONTINUED);
     if (w == -1) {
-      Main_api::error(fmt::format("inou.yosys.tolf: waitpid fail with {}", strerror(errno)));
+      Main_api::error(fmt::format("inou.yosys: waitpid fail with {}", strerror(errno)));
       return;
     }
 
@@ -196,49 +196,52 @@ static void tolg(Eprp_var &var) {
 }
 
 static void fromlg(Eprp_var &var) {
-  const std::string path    = var.get("path","lgdb");
-  const std::string yosys   = var.get("yosys","yosys");
-  const std::string output  = var.get("output");
-  const std::string name    = var.get("name");
+  const std::string path  = var.get("path","lgdb");
+  const std::string yosys = var.get("yosys","yosys");
+  const std::string odir  = var.get("odir",".");
 
   std::string script_file;
   std::string liblg;
   set_script_liblg(var, script_file, liblg, false);
 
-  mustache::data vars;
+  for(auto &lg:var.lgs) {
+    mustache::data vars;
 
-  vars.set("path", path);
-  vars.set("output", output);
-  vars.set("name", name);
+    vars.set("path", path);
+    vars.set("odir", odir);
 
-  do_work(yosys, liblg, script_file, vars);
+    std::string file = odir + "/" + lg->get_name() + ".v";
+    vars.set("file", file);
+    vars.set("name", lg->get_name());
+
+    do_work(yosys, liblg, script_file, vars);
+  }
 }
 
 
-  Inou_yosys_api() {
-  }
+Inou_yosys_api() {
+}
 public:
 
-  static void setup(Eprp &eprp) {
-    Eprp_method m1("inou.yosys.tolg", "read verilog using yosys to lgraph", &Inou_yosys_api::tolg);
-    m1.add_label_required("files","verilog files to process (comma separated)");
-    m1.add_label_optional("path","path to build the lgraph[s]");
-    m1.add_label_optional("techmap","Either full or alumac techmap or none from yosys");
-    m1.add_label_optional("abc","run ABC inside yosys before loading lgraph");
-    m1.add_label_optional("script","alternative custom inou_yosys_read.ys command");
-    m1.add_label_optional("yosys","path for yosys command");
+static void setup(Eprp &eprp) {
+  Eprp_method m1("inou.yosys.tolg", "read verilog using yosys to lgraph", &Inou_yosys_api::tolg);
+  m1.add_label_required("files","verilog files to process (comma separated)");
+  m1.add_label_optional("path","path to build the lgraph[s]");
+  m1.add_label_optional("techmap","Either full or alumac techmap or none from yosys");
+  m1.add_label_optional("abc","run ABC inside yosys before loading lgraph");
+  m1.add_label_optional("script","alternative custom inou_yosys_read.ys command");
+  m1.add_label_optional("yosys","path for yosys command");
 
-    eprp.register_method(m1);
+  eprp.register_method(m1);
 
-    Eprp_method m2("inou.yosys.fromlg", "write verilog using yosys from lgraph", &Inou_yosys_api::fromlg);
-    m2.add_label_required("output","output verilog file to write");
-    m2.add_label_required("name","name of the top level file");
-    m2.add_label_optional("path","path to read the lgraph[s]");
-    m2.add_label_optional("script","alternative custom inou_yosys_write.ys command");
-    m2.add_label_optional("yosys","path for yosys command");
+  Eprp_method m2("inou.yosys.fromlg", "write verilog using yosys from lgraph", &Inou_yosys_api::fromlg);
+  m2.add_label_optional("path","path to read the lgraph[s]");
+  m2.add_label_optional("odir","output directory for generated verilog files");
+  m2.add_label_optional("script","alternative custom inou_yosys_write.ys command");
+  m2.add_label_optional("yosys","path for yosys command");
 
-    eprp.register_method(m2);
-  }
+  eprp.register_method(m2);
+}
 
 };
 

@@ -15,8 +15,8 @@ void Inou_pyrope_options::set(const std::string &key, const std::string &value) 
   try {
     if (is_opt(key, "input")) {
       input = value;
-    } else if (is_opt(key, "output")) {
-      output = value;
+    } else if (is_opt(key, "odir")) {
+      odir = value;
     } else {
       set_val(key, value);
     }
@@ -24,8 +24,8 @@ void Inou_pyrope_options::set(const std::string &key, const std::string &value) 
     fmt::print("ERROR: key {} has an invalid argument {}\n", key);
   }
 
-  console->info("inou_pyrope input:{} output:{} path:{} name:{}"
-      ,input, output, path, name);
+  console->info("inou_pyrope input:{} odir:{} path:{} name:{}"
+      ,input, odir, path, name);
 }
 
 // FIXME: latch.v (optimize lgraph to fix), trivial2.v, submodule_offset.v
@@ -48,7 +48,8 @@ std::vector<LGraph *> Inou_pyrope::tolg() {
 
 void Inou_pyrope::fromlg(std::vector<const LGraph *> &out) {
   for(const auto &g : out) {
-    to_pyrope(g, opack.output);
+    std::string filename = opack.odir + "/" + g->get_name() + ".prp";
+    to_pyrope(g, filename);
   }
 }
 
