@@ -36,18 +36,6 @@ public:
   void         cfg_2_dfg(LGraph *dfg, const LGraph *cfg);
   void         test_const_conversion();
 
-  //std::vector<LGraph *> py_first_pass() {
-  //  std::vector<LGraph *> lgs(1);
-  //  lgs[0] = transform();
-  //  return lgs;
-  //}
-
-  //std::vector<LGraph *> py_second_pass() {
-  //  std::vector<LGraph *> lgs(1);
-  //  lgs[0] = optimize();
-  //  return lgs;
-  //}
-
   void set(const std::string &key, const std::string &value) final {
     opack.set(key,value);
   }

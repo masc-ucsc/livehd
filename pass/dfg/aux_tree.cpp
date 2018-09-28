@@ -99,7 +99,7 @@ Index_ID Aux_tree::get_global_alias(const Aux_node *auxnd, const std::string &v)
     return auxnd->get_auxtab().at(v);
 
   if(is_root_aux(auxnd))
-    assert(false);//must has a alias in chain of parents since it passes has_alias()
+    assert(false);//must has a alias in chain of parents since it has passed has_alias()
 
   return get_global_alias(get_parent(auxnd),v);
 };

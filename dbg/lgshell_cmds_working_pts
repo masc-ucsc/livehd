@@ -1,0 +1,29 @@
+inou.cfg src:./inou/cfg/tests/top.cfg    name:top_cfg     |> @a             
+inou.cfg src:./inou/cfg/tests/sp_add.cfg name:sp_add_cfg  |> @a             
+inou.cfg src:./inou/cfg/tests/const.cfg  name:const_cfg   |> @a             
+
+lgraph.open name:sp_add_cfg  |> inou.json.fromlg output:sp_add_cfg.json
+lgraph.open name:top_cfg     |> inou.json.fromlg output:top_cfg.json
+lgraph.open name:const_cfg   |> inou.json.fromlg output:const_cfg.json
+
+
+pass.dfg.generate src:const_cfg   name:const_dfg      
+pass.dfg.generate src:top_cfg     name:top_ooo_dfg      
+pass.dfg.generate src:sp_add_cfg  name:sp_add_dfg      
+pass.dfg.generate src:top_cfg     name:top_dfg      
+lgraph.open name:const_dfg   |> inou.json.fromlg output:const_dfg_pre.json
+lgraph.open name:top_ooo_dfg |> inou.json.fromlg output:top_dfg_ooo_pre.json
+lgraph.open name:sp_add_dfg  |> inou.json.fromlg output:sp_add_dfg_pre.json
+lgraph.open name:top_dfg     |> inou.json.fromlg output:top_dfg_ino_pre.json
+
+
+pass.dfg.optimize src:const_dfg   |> @b                                     
+pass.dfg.optimize src:top_ooo_dfg |> @b                                     
+pass.dfg.optimize src:sp_add_dfg  |> @b                                     
+pass.dfg.optimize src:top_dfg |> @b                                     
+
+lgraph.open name:const_dfg   |> inou.json.fromlg output:const_dfg.json
+lgraph.open name:top_ooo_dfg |> inou.json.fromlg output:top_ooo_dfg.json
+lgraph.open name:sp_add_dfg  |> inou.json.fromlg output:sp_add_dfg.json
+lgraph.open name:top_dfg     |> inou.json.fromlg output:top_ino_dfg.json
+
