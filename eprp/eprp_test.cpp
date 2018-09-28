@@ -40,7 +40,7 @@ public:
 
     EXPECT_EQ(var.get("lgdb"), var.get("check1"));
 
-    EXPECT_EQ(var.get("graph_name"), var.get("check2"));
+    EXPECT_STREQ(var.get("graph_name").c_str(), "chacha");
 
     EXPECT_STRNE(var.get("lgdb").c_str(), "");
 
@@ -102,7 +102,7 @@ TEST_F(EPrpTest, SimpleReadlinePipe) {
   EXPECT_TRUE(is_equal_called);
   is_equal_called=false;
 
-  buffer =" test1.pass check2:chacha  check1:./lgdb  lgdb:./lgdb |> @a";
+  buffer =" test1.pass graph_name:chacha check2:chacha  check1:./lgdb  lgdb:./lgdb test1_foo:field1 |> @a";
   eprp.parse("inline", buffer, strlen(buffer));
 
   buffer ="@a |> test1.fff.test";
