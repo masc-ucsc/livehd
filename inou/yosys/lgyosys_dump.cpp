@@ -112,7 +112,7 @@ RTLIL::Wire* Lgyosys_dump::create_wire(const LGraph *g, const Index_ID idx, RTLI
 }
 
 void Lgyosys_dump::to_yosys(const LGraph *g) {
-  std::string name = g->get_name().substr(7);
+  std::string name = g->get_name();
 
   RTLIL::Module *module = design->addModule("\\" + name);
 
