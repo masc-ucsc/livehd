@@ -100,7 +100,8 @@ Replxx::completions_t hook_shared(std::string const& context, int index, void* u
     bool label_files  = strcasecmp(label.c_str(),"files")==0;
     bool label_output = strcasecmp(label.c_str(),"output")==0;
     bool label_path   = strcasecmp(label.c_str(),"path")==0;
-    if (label_files || label_output || label_path) {
+    bool label_odir   = strcasecmp(label.c_str(),"odir")==0;
+    if (label_files || label_output || label_path || label_odir) {
       std::string path = ".";
       auto pos = full_filename.find_last_of('/');
       std::string filename;
@@ -118,7 +119,7 @@ Replxx::completions_t hook_shared(std::string const& context, int index, void* u
         std::vector<std::string> sort_files;
         struct dirent * dp;
         while ((dp = readdir(dirp)) != NULL) {
-          if (dp->d_type != DT_DIR && label_path)
+          if (dp->d_type != DT_DIR && (label_path||label_odir))
             continue;
           //fmt::print("preadding {}\n",dp->d_name);
           if (strncasecmp(dp->d_name,filename.c_str(),filename.size())==0 || filename.empty()) {
@@ -152,9 +153,13 @@ Replxx::completions_t hook_shared(std::string const& context, int index, void* u
     //fmt::print("checking {} vs {}\n",e, prefix);
     if (strncasecmp(prefix.c_str(), e.c_str(), prefix.size())==0) {
       //fmt::print("match {}\n",e);
-      if (add_all)
+      if (add_all) {
+        auto pos = prefix_add.find_last_of('/');
+        if (pos != std::string::npos) {
+          prefix_add = prefix_add.substr(pos+1);
+        }
         completions.emplace_back((prefix_add + e).c_str());
-      else
+      }else
         completions.emplace_back(e.c_str());
 		}
 	}
@@ -189,6 +194,7 @@ Replxx::hints_t hook_hint(std::string const& context, int index, Replxx::Color& 
     auto opts = hook_shared(context, index, user_data, true);
 #if 1
 		for (auto const& e : opts) {
+      //fmt::print("prefix[{}] e[{}]\n",prefix,e);
 			//if (strncasecmp(e.c_str(), prefix.c_str(), prefix.size()) == 0 ) {
 				hints.emplace_back(e.substr(prefix.size()).c_str());
 			//}

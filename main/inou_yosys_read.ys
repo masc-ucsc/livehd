@@ -6,7 +6,7 @@ read_verilog -sv {{input}}
 
 # single file, no hierarchy needed
 #hierarchy -top TOP
-hierarchy
+hierarchy -auto-top
 proc
 pmuxtree
 memory_dff
