@@ -46,23 +46,25 @@ public:
   explicit           Aux_tree                (Aux_node *auxnd):root_auxnd(auxnd)   {
     auxes_stack.push_back(auxnd);
   };
-  void               set_child               (Aux_node *parent, Aux_node *child, bool branch);
+  void               set_parent_child        (Aux_node *parent, Aux_node *child, bool branch);
   void               set_parent              (Aux_node *parent, Aux_node *child);
   const Aux_node *   get_parent              (const Aux_node *child) const;
-  void               delete_child            (Aux_node *parent, bool branch);
+  void               delete_child            (Aux_node *parent, Aux_node *child, bool branch);
   bool               is_root_aux             (const Aux_node *auxtab) const;// for chained parents aux_tabs checking
   Aux_node *         get_root                ();
   Aux_node *         get_cur_auxnd           () const;
   void               set_alias               (const std::string &v, Index_ID n);
   bool               has_alias               (const std::string &v) const;
   Index_ID           get_alias               (const std::string &v) const;
+  void               print_cur_aux           ();
+  void               auxes_stack_pop         (){auxes_stack.pop_back();};
   //std::vector<Aux_node *>  pre_order_trans   (Aux_node *node, std::vector<Aux_node*> &auxes_stack);
 
 private:
   Aux_node               *root_auxnd;
   std::vector<Aux_node*>  auxes_stack; //for tracking latest aux_node
-  bool         check_global_alias      (const Aux_node *auxnd, const std::string &v) const;
-  Index_ID     get_global_alias        (const Aux_node *auxnd, const std::string &v) const;
+  bool                    check_global_alias (const Aux_node *auxnd, const std::string &v) const;
+  Index_ID                get_global_alias   (const Aux_node *auxnd, const std::string &v) const;
 };
 
 

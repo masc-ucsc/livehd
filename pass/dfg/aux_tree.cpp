@@ -23,7 +23,7 @@ void Aux_node::print_aux(){
 //  return auxes_stack;
 //}
 
-Aux_node * Aux_tree::get_cur_auxnd() const{
+Aux_node* Aux_tree::get_cur_auxnd() const{
   return auxes_stack.back();
 }
 
@@ -39,20 +39,23 @@ Aux_node* Aux_tree::get_root(){
   return root_auxnd;
 }
 
-void Aux_tree::set_child(Aux_node *parent, Aux_node *child, bool branch) {
+void Aux_tree::set_parent_child(Aux_node *parent, Aux_node *new_child, bool branch) {
+  assert(parent!=nullptr && new_child!= nullptr);
   if(branch){
     assert(parent->lchild == nullptr);
-    auxes_stack.push_back(child);
-    parent->lchild = child;
-    child ->lchild = nullptr;
-    child ->rchild = nullptr;
+    auxes_stack.push_back(new_child);
+    parent->lchild     = new_child;
+    new_child ->parent = parent;
+    new_child ->lchild = nullptr;
+    new_child ->rchild = nullptr;
   }
   else{
     assert(parent->lchild == nullptr);
-    auxes_stack.push_back(child);
-    parent->rchild = child;
-    child ->lchild = nullptr;
-    child ->rchild = nullptr;
+    auxes_stack.push_back(new_child);
+    parent->rchild     = new_child;
+    new_child ->parent = parent;
+    new_child ->lchild = nullptr;
+    new_child ->rchild = nullptr;
   }
 }
 
@@ -68,30 +71,21 @@ const Aux_node* Aux_tree::get_parent(const Aux_node *child) const{
     return child;
 }
 
-void Aux_tree::delete_child(Aux_node *parent, bool branch){
+void Aux_tree::delete_child(Aux_node *parent, Aux_node *child, bool branch){
+  //assert(child->get_auxtab().empty()); //put back later when resolving phi
   if(branch){
-    assert(parent->lchild->get_auxtab().empty());
-    delete parent->lchild;
+    delete child;
     parent->lchild = nullptr;
+    fmt::print("delete branch true auxtab\n");
   }
   else{
-    assert(!parent->rchild->get_auxtab().empty());
-    delete parent->rchild;
+    delete child;
     parent->rchild = nullptr;
+    fmt::print("delete branch false auxtab\n");
   }
 }
 
 
-//check_global_alias() only checks "chain of patent auxtabs" and don't check sibling auxtab
-bool Aux_tree::check_global_alias(const Aux_node *auxnd, const std::string &v) const{
-  if (auxnd == nullptr)
-    return false;
-
-  if(auxnd->get_auxtab().find(v) != auxnd->get_auxtab().end())
-    return true;
-
-  return check_global_alias(auxnd->parent,v);
-};
 
 //get_global_alias() only gets "chain of patent auxtabs" and don't get sibling auxtab
 Index_ID Aux_tree::get_global_alias(const Aux_node *auxnd, const std::string &v) const{
@@ -115,8 +109,26 @@ bool Aux_tree::has_alias(const std::string &v) const {
   return check_global_alias(cur_auxnd,v);
 }
 
+//check_global_alias() only checks "chain of patent auxtabs" and don't check sibling auxtab
+bool Aux_tree::check_global_alias(const Aux_node *auxnd, const std::string &v) const{
+  if (auxnd == nullptr)
+    return false;
+
+  if(auxnd->get_auxtab().find(v) != auxnd->get_auxtab().end())
+    return true;
+
+  return check_global_alias(auxnd->parent,v);
+};
+
 Index_ID Aux_tree::get_alias(const std::string &v) const {
   const Aux_node* cur_auxnd = get_cur_auxnd();
   //recursive check on parents
   return get_global_alias(cur_auxnd,v);
+}
+
+void Aux_tree::print_cur_aux() {
+  const Aux_node* cur_auxnd = get_cur_auxnd();
+  for(const auto &iter : get_cur_auxnd()->get_auxtab()){
+    fmt::print("auxtab:{:>10} -> {}\n", iter.first, iter.second);
+  }
 }
