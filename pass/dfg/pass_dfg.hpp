@@ -135,7 +135,7 @@ private:
   bool is_label_op      (const std::string &v) {return  v == ":";}
   bool is_as_op         (const std::string &v) {return  v == "as";}
   bool is_unary_op      (const std::string &v) {return (v == "!")||(v == "not");}
-  bool is_binary_op     (const std::string &v) {return  v == "+";}
+  bool is_binary_op     (const std::string &v) {return (v == "+")||(v == "==");}
 
   //Index_ID create_register(LGraph *g, Aux_tree *aux_tree, const std::string &var_name);
   Index_ID create_input(LGraph *g, Aux_tree *aux_tree, const std::string &var_name, uint16_t bits=1);
