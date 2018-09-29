@@ -49,6 +49,10 @@
 #define TOK_DIV        0x12
 // "asd23*.v" string (double quote)
 #define TOK_STRING     0x13
+// ;
+#define TOK_SEMICOLON  0x14
+// ,
+#define TOK_COMMA      0x15
 
 #define TOK_TRYMERGE   0x80
 
@@ -76,6 +80,11 @@ private:
   size_t buffer_start_pos;
   size_t buffer_start_line;
 
+  int max_errors;
+  int max_warnings;
+  int n_errors;
+  int n_warnings;
+
   void setup_translate();
 
   void add_token(Token t);
@@ -83,16 +92,25 @@ private:
   void chunked(const char *_buffer, size_t _buffer_sz, size_t _buffer_start_pos, size_t _buffer_start_line);
 
   void scan_raw_msg(const std::string &cat, const std::string &text, bool third) const;
+
+  void lex_error(const std::string &text);
 public:
   Eprp_scanner();
 
-  void scan_error(const std::string &text) const { scan_raw_msg("error", text, true); };
-  void scan_warn(const std::string &text) const { scan_raw_msg("warning", text, true); };
+  void scan_error(const std::string &text);
+  void scan_warn(const std::string &text);
 
-  void parser_error(const std::string &text) const { scan_raw_msg("error", text, false); };
-  void parser_warn(const std::string &text) const { scan_raw_msg("warning", text, false); };
+  void parser_error(const std::string &text);
+  void parser_warn(const std::string &text);
 
   bool scan_next();
+
+  void set_max_errors(int n) {
+    max_errors = n;
+  }
+  void set_max_warning(int n) {
+    max_warnings = n;
+  }
 
   bool scan_is_end() const {
     return scanner_pos >= token_list.size();
@@ -105,6 +123,8 @@ public:
   }
 
   void scan_append(std::string &text) const;
+  void scan_prev_append(std::string &text) const;
+
   std::string scan_text() const;
   int scan_calc_lineno() const;
 
@@ -120,7 +140,7 @@ public:
     return token_list[scanner_pos+1].tok == tok;
   }
 
-  void parse(std::string name, const char *memblock, size_t sz);
+  void parse(std::string name, const char *memblock, size_t sz, bool chunking=false);
   void parse(std::string name, const std::string &str) {
     parse(name,str.c_str(),str.size());
   }

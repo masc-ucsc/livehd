@@ -5,6 +5,8 @@
 
 #include "eprp_scanner.hpp"
 
+#define VERILOG
+
 void Eprp_scanner::setup_translate() {
 
   translate.resize(256);
@@ -22,6 +24,8 @@ void Eprp_scanner::setup_translate() {
   translate[':'] = TOK_COLON | TOK_TRYMERGE; // TOK_LABEL
   translate['|'] = TOK_OR;
   translate['.'] = TOK_DOT;
+  translate[';'] = TOK_SEMICOLON;
+  translate[','] = TOK_COMMA;
   translate['>'] = TOK_GT  | TOK_TRYMERGE;  // TOK_PIPE
   translate['/'] = TOK_DIV;
   translate['"'] = TOK_STRING | TOK_TRYMERGE;  // Anything else until other TOK_STRING
@@ -91,7 +95,7 @@ void Eprp_scanner::add_token(Token t) {
   token_list.push_back(t);
 }
 
-void Eprp_scanner::parse(std::string name, const char *memblock, size_t sz) {
+void Eprp_scanner::parse(std::string name, const char *memblock, size_t sz, bool chunking) {
 
   buffer_name = name;
   buffer = 0;
@@ -102,11 +106,10 @@ void Eprp_scanner::parse(std::string name, const char *memblock, size_t sz) {
 
   int  nlines                = 0;
   int  nchunks               = 1;
-  int  nopen                 = 0;
   char last_c                = 0;
   bool in_comment            = false;
   bool in_singleline_comment = false;
-  bool in_multiline_comment  = false;
+  int  in_multiline_comment  = 0; // Nesting support
 
   const char *ptr_section = memblock;
 
@@ -114,9 +117,46 @@ void Eprp_scanner::parse(std::string name, const char *memblock, size_t sz) {
   t.pos = 0;
   t.tok = TOK_NOP;
 
+  buffer = memblock; // To allow error reporting before chunking
+
   for(size_t i = 0; i < sz; i++) {
     char c = memblock[i];
     int pos = (&memblock[i] - ptr_section);
+#ifdef VERILOG
+    if(last_c == '/' && c == '/') {
+      if (t.tok!= TOK_COMMENT && t.tok) {
+        t.len = pos - t.pos;
+        add_token(t);
+        t.pos = pos;
+        t.tok = TOK_COMMENT;
+      }
+      in_singleline_comment = true;
+      in_comment = true;
+    }else if(last_c == '/' && c == '*') {
+      if (t.tok!= TOK_COMMENT && t.tok) {
+        t.len = pos - t.pos;
+        add_token(t);
+        t.pos = pos;
+        t.tok = TOK_COMMENT;
+      }
+      in_multiline_comment++;
+      in_comment = true;
+    }else if(last_c == '*' && c == '/') {
+      if (t.tok!= TOK_COMMENT && t.tok) {
+        t.len = pos - t.pos;
+        add_token(t);
+        t.pos = pos;
+        t.tok = TOK_COMMENT;
+      }
+      in_multiline_comment--;
+      if (in_multiline_comment < 0) {
+        lex_error(fmt::format("{}:{} found end of comment without matching beginning of comment", name, nlines));
+      }else{
+        in_singleline_comment = false;
+        in_comment = false;
+      }
+    }
+#else
     if(c == '#') {
       if (t.tok!= TOK_COMMENT && t.tok) {
         t.len = pos - t.pos;
@@ -129,7 +169,9 @@ void Eprp_scanner::parse(std::string name, const char *memblock, size_t sz) {
       else
         in_singleline_comment = true;
       in_comment = in_singleline_comment | in_multiline_comment;
-    } else if(c == '\n' || c == '\r' || c == '\f') {
+    }
+#endif
+    else if(c == '\n' || c == '\r' || c == '\f') {
       nlines++;
       in_singleline_comment = false;
       in_comment            = in_singleline_comment | in_multiline_comment;
@@ -141,7 +183,7 @@ void Eprp_scanner::parse(std::string name, const char *memblock, size_t sz) {
       }
 
       // At least MIN_CHUNK_SIZE characters, and not close to the end of file
-      if(nopen == 0 && (ptr_section + MIN_CHUNK_SIZE) < &memblock[i] && !in_comment && (last_c == '\n' || last_c == '\r' || last_c == '\f') &&
+      if(chunking && (ptr_section + MIN_CHUNK_SIZE) < &memblock[i] && !in_comment && (last_c == '\n' || last_c == '\r' || last_c == '\f') &&
          ((i + MIN_CHUNK_SIZE) < sz) && !token_list.empty()) {
         chunked(ptr_section, (&memblock[i] -ptr_section), ptr_section - memblock, nlines);
         ptr_section = &memblock[i + 1];
@@ -170,6 +212,10 @@ void Eprp_scanner::parse(std::string name, const char *memblock, size_t sz) {
 
 Eprp_scanner::Eprp_scanner() {
   setup_translate();
+  max_errors   = 1;
+  max_warnings = 1024;
+  n_errors = 0;
+  n_warnings = 0;
 }
 
 void Eprp_scanner::chunked(const char *_buffer, size_t _buffer_sz, size_t _buffer_start_pos, size_t _buffer_start_line) {
@@ -207,6 +253,16 @@ void Eprp_scanner::scan_append(std::string &text) const {
   text.append(&buffer[token_list[scanner_pos].pos], token_list[scanner_pos].len);
 }
 
+void Eprp_scanner::scan_prev_append(std::string &text) const {
+
+  assert(scanner_pos < token_list.size());
+  int p = scanner_pos-1;
+  if (p<0)
+    p = 0;
+
+  text.append(&buffer[token_list[p].pos], token_list[p].len);
+}
+
 std::string Eprp_scanner::scan_text() const {
   std::string text;
 
@@ -228,6 +284,42 @@ int Eprp_scanner::scan_calc_lineno() const {
   }
 
   return buffer_start_line + nlines;
+}
+
+void Eprp_scanner::lex_error(const std::string &text) {
+  // lexer can not look at token list
+
+  fmt::print(text + "\n");
+  n_errors++;
+  if (n_errors>max_errors)
+    exit(-3);
+}
+void Eprp_scanner::scan_error(const std::string &text) {
+  scan_raw_msg("error", text, true);
+  n_errors++;
+  if (n_errors>max_errors)
+    exit(-3);
+}
+
+void Eprp_scanner::scan_warn(const std::string &text) {
+  scan_raw_msg("warning", text, true);
+  n_warnings++;
+  if (n_warnings>max_warnings)
+    exit(-3);
+}
+
+void Eprp_scanner::parser_error(const std::string &text) {
+  scan_raw_msg("error", text, false);
+  n_errors++;
+  if (n_errors>max_errors)
+    exit(-3);
+}
+
+void Eprp_scanner::parser_warn(const std::string &text) {
+  scan_raw_msg("warning", text, false);
+  n_warnings++;
+  if (n_warnings>max_warnings)
+    exit(-3);
 }
 
 void Eprp_scanner::scan_raw_msg(const std::string &cat, const std::string &text, bool third) const {
