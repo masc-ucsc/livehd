@@ -27,3 +27,12 @@ cc_binary(
         ":eprp",
     ],
 )
+
+cc_binary(
+    name = "eprp_verilog_test",
+    srcs = ["eprp_verilog_test.cpp"],
+    # args = ["$(location tests/synth1.eprp)"],
+    deps = [
+        ":eprp",
+    ],
+)
