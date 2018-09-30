@@ -5,11 +5,6 @@ void Aux_node::set_alias(const std::string &v, Index_ID n) {
   fmt::print("set alias {} <-> {}\n", v,n );
 }
 
-void Aux_node::print_aux(){
-  for(const auto &iter:auxtab)
-    fmt::print("auxtab:{:>10} -> {}\n",iter.first, iter.second);
-}
-
 
 //Aux_tree member_functions
 //std::vector<Aux_node *>  Aux_tree::pre_order_trans(Aux_node* node, std::vector<Aux_node*> &auxes_stack){
@@ -85,19 +80,6 @@ void Aux_tree::delete_child(Aux_node *parent, Aux_node *child, bool branch){
   }
 }
 
-
-
-//get_global_alias() only gets "chain of patent auxtabs" and don't get sibling auxtab
-Index_ID Aux_tree::get_global_alias(const Aux_node *auxnd, const std::string &v) const{
-  if(auxnd->get_auxtab().find(v) != auxnd->get_auxtab().end())
-    return auxnd->get_auxtab().at(v);
-
-  if(is_root_aux(auxnd))
-    assert(false);//must has a alias in chain of parents since it has passed has_alias()
-
-  return get_global_alias(get_parent(auxnd),v);
-};
-
 void Aux_tree::set_alias(const std::string &v, Index_ID n){
   Aux_node* cur_auxnd = get_cur_auxnd();
   cur_auxnd->set_alias(v,n);
@@ -122,12 +104,21 @@ bool Aux_tree::check_global_alias(const Aux_node *auxnd, const std::string &v) c
 
 Index_ID Aux_tree::get_alias(const std::string &v) const {
   const Aux_node* cur_auxnd = get_cur_auxnd();
-  //recursive check on parents
+  //recursive search through parents
   return get_global_alias(cur_auxnd,v);
 }
 
-void Aux_tree::print_cur_aux() {
-  const Aux_node* cur_auxnd = get_cur_auxnd();
+//get_global_alias() only gets "chain of patent auxtabs" and don't get sibling auxtab
+Index_ID Aux_tree::get_global_alias(const Aux_node *auxnd, const std::string &v) const{
+  if(auxnd->get_auxtab().find(v) != auxnd->get_auxtab().end())
+    return auxnd->get_auxtab().at(v);
+
+  if(is_root_aux(auxnd))
+    assert(false);//must has a alias in chain of parents since it has passed has_alias()
+
+  return get_global_alias(get_parent(auxnd),v);
+};
+void Aux_tree::print_cur_auxnd() {
   for(const auto &iter : get_cur_auxnd()->get_auxtab()){
     fmt::print("auxtab:{:>10} -> {}\n", iter.first, iter.second);
   }
