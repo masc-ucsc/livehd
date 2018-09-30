@@ -83,24 +83,27 @@ private:
                                                  Aux_tree *aux_tree,
                                                  const CFG_Node_Data &data);
 
-  void                     add_phis(             LGraph *dfg,
-                                                 const LGraph *cfg,
-                                                 Aux_node *parent,
-                                                 Aux_node *tnode,
-                                                 Aux_node *fnode,
-                                                 Index_ID condition);
+//  void                     add_phis(             LGraph *dfg,
+//                                                 const LGraph *cfg,
+//                                                 Aux_node *parent,
+//                                                 Aux_node *tnode,
+//                                                 Aux_node *fnode,
+//                                                 Index_ID condition);
 
-  void                     add_phi(              LGraph *dfg,
-                                                 Aux_node *parent,
-                                                 Aux_node *tnode,
-                                                 Aux_node *fnode,
-                                                 Index_ID condition,
-                                                 const std::string &variable);
+//  void                     add_phi(              LGraph *dfg,
+//                                                 Aux_node *parent,
+//                                                 Aux_node *tnode,
+//                                                 Aux_node *fnode,
+//                                                 Index_ID condition,
+//                                                 const std::string &variable);
 
   Index_ID get_cfg_child(const LGraph *cfg, Index_ID node);
-  Index_ID resolve_phi_branch(LGraph *dfg, Aux_node *parent, Aux_node *branch, const std::string &variable);
-  void attach_outputs(LGraph *dfg, Aux_tree *aux_tree);
+  //Index_ID resolve_phi_branch(LGraph *dfg, Aux_node *parent, Aux_node *branch, const std::string &variable);
 
+  void resolve_phis(LGraph *dfg, Aux_node *pauxnd, Aux_node *tauxnd, Aux_node *fauxnd, Index_ID cond);
+  void create_mux(LGraph *dfg, Aux_node *pauxnd, Index_ID tid, Index_ID fid, Index_ID cond, const std::string &var);
+
+  void attach_outputs(LGraph *dfg, Aux_tree *aux_tree);
   void add_fluid_behavior(LGraph *dfg, Aux_tree *aux_tree);
   void add_fluid_ports(LGraph *dfg, Aux_tree *aux_tree, std::vector<Index_ID> &data_inputs, std::vector<Index_ID> &data_outputs);
   void add_fluid_logic(LGraph *dfg, Aux_tree *aux_tree, const std::vector<Index_ID> &data_inputs, const std::vector<Index_ID> &data_outputs);
@@ -135,7 +138,8 @@ private:
   bool is_label_op      (const std::string &v) {return  v == ":";}
   bool is_as_op         (const std::string &v) {return  v == "as";}
   bool is_unary_op      (const std::string &v) {return (v == "!")||(v == "not");}
-  bool is_binary_op     (const std::string &v) {return (v == "+")||(v == "==");}
+  bool is_compute_op    (const std::string &v) {return (v == "+");}
+  bool is_compare_op    (const std::string &v) {return (v == "==")||(v == ">")||(v == ">=")||(v == "<")||(v == "<=") ;}
 
   //Index_ID create_register(LGraph *g, Aux_tree *aux_tree, const std::string &var_name);
   Index_ID create_input(LGraph *g, Aux_tree *aux_tree, const std::string &var_name, uint16_t bits=1);
@@ -169,11 +173,11 @@ private:
                                       //size_t& bit_width);
   Index_ID process_bin_token         (LGraph *g, const std::string& token1st, const uint16_t & bit_width, uint32_t& val);
   Index_ID process_bin_token_with_dc (LGraph *g, const std::string& token1st);
-  uint32_t cal_bin_val_32b(const std::string&);
-  Index_ID create_const32_node  (LGraph *g, const std::string&, uint16_t node_bit_width, uint32_t& val);
-  Index_ID create_dontcare_node (LGraph *g, uint16_t node_bit_width );
-  std::string hex_char_to_bin(char c);
-  std::string hex_msb_char_to_bin(char c);
+  uint32_t cal_bin_val_32b           (const std::string&);
+  Index_ID create_const32_node       (LGraph *g, const std::string&, uint16_t node_bit_width, uint32_t& val);
+  Index_ID create_dontcare_node      (LGraph *g, uint16_t node_bit_width );
+  std::string hex_char_to_bin        (char c);
+  std::string hex_msb_char_to_bin    (char c);
 };
 
 #endif

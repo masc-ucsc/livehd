@@ -74,8 +74,11 @@ void Pass_dfg::trans(LGraph *dfg) {
         const char *out_name = subgraph->get_graph_output_name_from_pid(src_pid);
         uint16_t    out_size = subgraph->get_bits(subgraph->get_graph_output(out_name).get_nid());
         dfg->set_bits(dst_nid,out_size);
-      }
-      else{
+      }else if(dfg->node_type_get(dst_nid).op == Mux_Op){
+        ;//don't infetence when dst is a mux, it is handle at the mux construction step
+      }else if(dfg->node_type_get(dst_nid).op == Equals_Op){
+        ;//don't infetence when dst is a comparator, the result should be a bool
+      }else{
         if(src_nid_size > dst_nid_size)
           dfg->set_bits(dst_nid, src_nid_size);
       }
@@ -86,11 +89,9 @@ void Pass_dfg::trans(LGraph *dfg) {
 void Pass_dfg::cfg_2_dfg(LGraph *dfg, const LGraph *cfg) {
   Index_ID    itr = find_cfg_root(cfg);
   //Aux_node auxnd(dfg);
-
   Aux_node auxnd_global;
   Aux_tree aux_tree(&auxnd_global);
   process_cfg(dfg, cfg, &aux_tree, itr);
-  fmt::print("hihihi\n");
   finalize_gconnect(dfg, &auxnd_global);
 
   //attach_outputs(dfg, &auxnd);
@@ -121,7 +122,8 @@ Index_ID Pass_dfg::process_cfg(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tre
     itr = process_node(dfg, cfg, aux_tree, itr);
     fmt::print("cfg nid:{} process finished!!\n\n", last_itr);
   }
-  aux_tree->print_cur_aux();
+  aux_tree->print_cur_auxnd();
+  fmt::print("\n\n");
   return last_itr;
 }
 
@@ -224,7 +226,7 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
     oprd_id0 = process_operand(dfg, aux_tree, oprds[0]);
     aux_tree->set_alias(target, oprd_id0);
   }
-  else if(is_binary_op(op)){
+  else if(is_compute_op(op)){
     std::vector<Index_ID> oprd_ids;
     oprd_ids.push_back(process_operand(dfg, aux_tree, oprds[0]));
     oprd_ids.push_back(process_operand(dfg, aux_tree, oprds[1]));
@@ -235,6 +237,17 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
     dfg->set_bits(target_id,max_bits);
     process_connections(dfg, oprd_ids, target_id);
   }
+  else if(is_compare_op(op)){
+    std::vector<Index_ID> oprd_ids;
+    oprd_ids.push_back(process_operand(dfg, aux_tree, oprds[0]));
+    oprd_ids.push_back(process_operand(dfg, aux_tree, oprds[1]));
+    Index_ID target_id = create_node(dfg, aux_tree, target);
+    fmt::print("create node for internal target:{}, nid:{}\n", target, target_id);
+    dfg->node_type_set(target_id, node_type_from_text(op));
+    //dfg->set_bits(target_id,max_bits);
+    process_connections(dfg, oprd_ids, target_id);
+  }
+
 }
 
 void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Index_ID> &src_nids, const Index_ID &dst_nid){
@@ -305,29 +318,27 @@ Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree
   assert(aux_tree->has_alias(data.get_target()));
   Index_ID cond = aux_tree->get_alias(data.get_target());
   const auto &operands = data.get_operands();
-  Aux_node *tauxnd = new Aux_node;
-  Aux_node *fauxnd = new Aux_node;
+  auto *tauxnd = new Aux_node;
+  auto *fauxnd = new Aux_node;
+  auto *pauxnd = aux_tree->get_cur_auxnd(); //parent aux
 
-  Index_ID tbranch = std::stol(operands[0]);
-  //Aux_node taux_tree = aux_tree->copy();
-  aux_tree->set_parent_child(aux_tree->get_cur_auxnd(), tauxnd, true);
+  Index_ID tbranch = (Index_ID)std::stol(operands[0]);
+  Index_ID fbranch = (Index_ID)std::stol(operands[1]);
+
+  aux_tree->set_parent_child(pauxnd, tauxnd, true);
   Index_ID tb_next = get_cfg_child(cfg, process_cfg(dfg, cfg, aux_tree, tbranch));
   fmt::print("branch true finish! tb_next:{}\n", tb_next);
 
-  Index_ID fbranch = std::stol(operands[1]);
   //if (fbranch != cfg_node) {                       // original, buggy
-  if (fbranch != 0) {                                // there is an 'else' clause
-    aux_tree->set_parent_child(aux_tree->get_cur_auxnd(),  fauxnd, false);
+  if (fbranch != 0){                                 // there is an 'else' clause
+    aux_tree->set_parent_child(pauxnd,  fauxnd, false);
     Index_ID fb_next = get_cfg_child(cfg, process_cfg(dfg, cfg, aux_tree, fbranch));
     assert(tb_next == fb_next);
     fmt::print("branch false finish! tb_next:{}\n", tb_next);
-    //add_phis(dfg, cfg, aux_tree, &aux_tree, &faux_tree, cond);
-  } else {
-    //add_phis(dfg, cfg, aux_tree, &aux_tree, aux_tree, cond);    // if there's no else, the 'aux_tree' of the 'else' branch is the same as the parent
   }
 
-  //after resolving phis, the auxT and auxF should be empty and be deleted
-  //create a clean up method of these actions
+  resolve_phis (dfg, pauxnd, tauxnd, fauxnd, cond);//the auxT,F should be empty and are safe to be deleted after
+
   if(fbranch != 0){
     aux_tree->delete_child(aux_tree->get_cur_auxnd(),  fauxnd, false);
     aux_tree->auxes_stack_pop();
@@ -340,7 +351,7 @@ Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree
   //return 0;
 }
 
-void Pass_dfg::add_phis(LGraph *dfg, const LGraph *cfg, Aux_node *parent, Aux_node *taux_tree, Aux_node *faux_tree, Index_ID condition) {
+//void Pass_dfg::add_phis(LGraph *dfg, const LGraph *cfg, Aux_node *parent, Aux_node *taux_tree, Aux_node *faux_tree, Index_ID condition) {
   //std::unordered_set<std::string> phis_added;
 
   //for (const auto &pair : taux_tree->get_auxtab()) {
@@ -354,9 +365,9 @@ void Pass_dfg::add_phis(LGraph *dfg, const LGraph *cfg, Aux_node *parent, Aux_no
   //  if (phis_added.find(pair.first) == phis_added.end() && reference_changed(parent, faux_tree, pair.first))
   //    add_phi(dfg, parent, taux_tree, faux_tree, condition, pair.first);
   //}
-}
+//}
 
-void Pass_dfg::add_phi(LGraph *dfg, Aux_node *parent, Aux_node *taux_tree, Aux_node *faux_tree, Index_ID condition, const std::string &variable) {
+//void Pass_dfg::add_phi(LGraph *dfg, Aux_node *parent, Aux_node *taux_tree, Aux_node *faux_tree, Index_ID condition, const std::string &variable) {
   //Index_ID tid = resolve_phi_branch(dfg, parent, taux_tree, variable);
   //Index_ID fid = resolve_phi_branch(dfg, parent, faux_tree, variable);
 
@@ -373,9 +384,9 @@ void Pass_dfg::add_phi(LGraph *dfg, Aux_node *parent, Aux_node *taux_tree, Aux_n
   //dfg->add_edge(Node_Pin(condition, 0, false), Node_Pin(phi, cin, true));
 
   //parent->set_alias(variable, phi);
-}
+//}
 
-Index_ID Pass_dfg::resolve_phi_branch(LGraph *dfg, Aux_node *parent, Aux_node *branch, const std::string &variable) {
+//Index_ID Pass_dfg::resolve_phi_branch(LGraph *dfg, Aux_node *parent, Aux_node *branch, const std::string &variable) {
   //if (branch->has_alias(variable))
   //  return branch->get_alias(variable);
   //else if (parent->has_alias(variable))
@@ -388,8 +399,8 @@ Index_ID Pass_dfg::resolve_phi_branch(LGraph *dfg, Aux_node *parent, Aux_node *b
   //  return create_output(dfg, parent, variable);
   //else
   //  return create_default_const(dfg, parent);
-  return 0;
-}
+//  return 0;
+//}
 
 
 void Pass_dfg::assign_to_true(LGraph *dfg, Aux_tree *aux_tree, const std::string &v) {
@@ -529,6 +540,66 @@ std::vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, Aux_tree *aux_tree
   }
 
   return oprd_ids;
+}
+
+void Pass_dfg::resolve_phis(LGraph *dfg, Aux_node *pauxnd, Aux_node *tauxnd, Aux_node *fauxnd, Index_ID cond){
+  fmt::print("resolve phis");
+  //resolve phi in branch true
+  for(auto &iter : tauxnd->get_auxtab()){
+    if(fauxnd && fauxnd->has_alias(iter.first)){
+      Index_ID tid = iter.second;
+      Index_ID fid = fauxnd->get_alias(iter.first); //return Index_ID
+      fauxnd->del_alias(iter.first);
+      create_mux(dfg, pauxnd, tid, fid, cond, iter.first);
+    }else if(pauxnd->has_alias(iter.first)){
+      fmt::print("hello\n");
+      Index_ID tid = iter.second;
+      Index_ID fid = pauxnd->get_alias(iter.first);
+      pauxnd->del_alias(iter.first);
+      create_mux(dfg, pauxnd, tid, fid, cond, iter.first);
+    }else{//design later
+      //Index_ID tid = iter.second;
+      //Index_ID fid = default_node; //or search through all parents?
+      //create_mux(dfg, pauxnd, tid, fid, cond, iter.first);
+    }
+    tauxnd->del_alias(iter.first);
+  }
+
+  //resolve phi in branch false
+  for(auto &iter : fauxnd->get_auxtab()){
+    if(pauxnd->has_alias(iter.first)){
+      Index_ID tid  = pauxnd->get_alias(iter.first);
+      Index_ID fid  = iter.second;
+      pauxnd->del_alias(iter.first);
+      create_mux(dfg, pauxnd, tid, fid, cond, iter.first);
+    }else{//design later
+      //Index_ID tid  = default_node;
+      //Index_ID fid  = iter.second; //or search through all parents?
+      //create_mux(dfg, pauxnd, tid, fid, cond, iter.first);
+    }
+    fauxnd->del_alias(iter.first);
+  }
+  //so far the tauxnd and fauxnd should be empty
+}
+
+void Pass_dfg::create_mux(LGraph *dfg, Aux_node *pauxnd, Index_ID tid, Index_ID fid, Index_ID cond, const std::string &var){
+  Index_ID phi = dfg->create_node().get_nid();
+  dfg->node_type_set(phi, Mux_Op);
+  auto tp = dfg->node_type_get(phi);
+
+  Port_ID tin = tp.get_input_match("B");
+  Port_ID fin = tp.get_input_match("A");
+  Port_ID cin = tp.get_input_match("S");
+
+  auto max_bits = std::max(dfg->get_bits(tid),dfg->get_bits(fid));
+  dfg->set_bits(tid,max_bits);
+  dfg->set_bits(fid,max_bits);
+  dfg->set_bits(phi,max_bits);
+
+  dfg->add_edge(Node_Pin(tid,  0, false), Node_Pin(phi, tin, true));
+  dfg->add_edge(Node_Pin(fid,  0, false), Node_Pin(phi, fin, true));
+  dfg->add_edge(Node_Pin(cond, 0, false), Node_Pin(phi, cin, true));
+  pauxnd->set_alias(var, phi);
 }
 
 void Pass_dfg_options::set(const std::string &key, const std::string &value) {
