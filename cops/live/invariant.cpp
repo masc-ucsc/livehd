@@ -1,19 +1,11 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include <boost/archive/text_iarchive.hpp>
-#include <boost/archive/text_oarchive.hpp>
-#include <boost/serialization/base_object.hpp>
-#include <boost/serialization/map.hpp>
-#include <boost/serialization/set.hpp>
-#include <boost/serialization/vector.hpp>
 #include <iostream>
 
 #include "invariant.hpp"
 
 void Invariant_boundaries::serialize(Invariant_boundaries *ib, std::ostream &ofs) {
-  boost::archive::text_oarchive oa(ofs);
-  oa << *ib;
-  /*ofs << "Invatiant_boundaries: " << ib->top << std::endl;
+  ofs << "Invariant_boundaries: " << ib->top << " ##sep: " << ib->hierarchical_separator << std::endl;
   ofs << ib->invariant_cones.size() << std::endl;
   for(auto& c : ib->invariant_cones) {
     ofs << c.first.first << " " << c.first.second << " " << c.second.size() << std::endl;
@@ -56,16 +48,15 @@ void Invariant_boundaries::serialize(Invariant_boundaries *ib, std::ostream &ofs
   ofs << ib->gate_appearances.size() << std::endl;
   for(auto inst : ib->gate_appearances) {
     ofs << inst.first << " " << inst.second << std::endl;
-  }*/
+  }
 }
 
 Invariant_boundaries *Invariant_boundaries::deserialize(std::istream &ifs) {
   Invariant_boundaries *        ib = new Invariant_boundaries;
-  boost::archive::text_iarchive ia(ifs);
-  ia >> *ib;
-  /*std::string tmp1, tmp2;
+  std::string tmp1, tmp2;
   int size1, size2, tmp;
   ifs >> tmp1 >> ib->top;
+  ifs >> tmp1 >> ib->hierarchical_separator;
   ifs >> size1;
   WireName_ID tmpid;
   uint32_t    bit;
@@ -120,18 +111,6 @@ Invariant_boundaries *Invariant_boundaries::deserialize(std::istream &ifs) {
   for(int i = 0; i < size1; i++) {
     ifs >> tmp_idx >> tmp;
     ib->gate_appearances[tmp_idx] = tmp;
-  }*/
+  }
   return ib;
-}
-
-template <class Archive>
-void Invariant_boundaries::serialize(Archive &ar, const unsigned int version) {
-  ar &top;
-  ar &hierarchical_separator;
-  ar &hierarchy_tree;
-  ar &gate_appearances;
-  ar &instance_collection;
-  ar &instance_type_map;
-  ar &invariant_cones;
-  ar &invariant_cone_cells;
 }

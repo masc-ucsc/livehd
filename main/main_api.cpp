@@ -12,6 +12,7 @@
 #include "inou_yosys_api.hpp"
 #include "pass_abc_api.hpp"
 #include "pass_dfg_api.hpp"
+#include "cops_live_api.hpp"
 
 Eprp Main_api::eprp;
 std::string Main_api::main_path;
@@ -31,6 +32,8 @@ void Main_api::init() {
 
   Pass_abc_api::setup(eprp);   // pass.abc.*
   Pass_dfg_api::setup(eprp);   // pass.dfg.*
+
+  Cops_live_api::setup(eprp);   // pass.dfg.*
 
   char exePath[PATH_MAX];
   int len = readlink("/proc/self/exe", exePath, PATH_MAX);

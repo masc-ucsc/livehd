@@ -4,7 +4,6 @@
 #define INVARIANT_H_
 
 #include "lgraph.hpp"
-#include <boost/serialization/access.hpp>
 #include <map>
 #include <set>
 
@@ -28,11 +27,6 @@ typedef std::set<Gate_ID> Gate_set;
 
 using namespace Live_synth;
 class Invariant_boundaries {
-private:
-  friend class boost::serialization::access;
-
-  template <class Archive>
-  void serialize(Archive &ar, const unsigned int version);
 
 public:
   std::map<Net_ID, Net_set>         invariant_cones;      //sips
@@ -61,7 +55,7 @@ public:
   }
 
   static LGraph *get_graph(Graph_ID id, const std::string& lgdb) {
-    return LGraph::find_graph(id, lgdb);
+    return LGraph::find_lgraph(id, lgdb);
   }
 
   bool is_invariant_boundary(Net_ID net) const {
