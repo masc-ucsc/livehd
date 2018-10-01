@@ -37,7 +37,7 @@ Index_ID Pass_dfg::create_private(LGraph *g, Aux_tree *aux_tree, const std::stri
   return nid;
 }
 
-Index_ID Pass_dfg::create_default_const(LGraph *g, Aux_tree *aux_tree) {
+Index_ID Pass_dfg::create_default_const(LGraph *g) {
   Index_ID nid = g->create_node().get_nid();
   g->node_type_set(nid, U32Const_Op);
   g->node_u32type_set(nid, 0);

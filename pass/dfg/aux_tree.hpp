@@ -30,15 +30,21 @@ public:
   Aux_node* rchild;
   Aux_node* parent;
 
-  void      set_alias(const std::string &v, Index_ID n);
-  Index_ID  get_alias(const std::string &v) const { return auxtab.at(v); }
-  bool      has_alias(const std::string &v) const { return auxtab.find(v) != auxtab.end();}
-  void      del_alias(const std::string &v)       { auxtab.erase(v);}
+  void      set_alias    (const std::string &v, Index_ID n);
+  Index_ID  get_alias    (const std::string &v) const { return auxtab.at(v); }
+  bool      has_alias    (const std::string &v) const { return auxtab.find(v) != auxtab.end();}
+  void      del_alias    (const std::string &v)       { auxtab.erase(v);}
+  void      set_pending  (const std::string &v, Index_ID n);
+  Index_ID  get_pending  (const std::string &v) const { return pendtab.at(v); }
+  bool      has_pending  (const std::string &v) const { return pendtab.find(v) != pendtab.end();}
+  void      del_pending  (const std::string &v)       { pendtab.erase(v);}
   void      print_aux();
-  const std::unordered_map<std::string, Index_ID> &get_auxtab() const { return auxtab; }
+  const std::unordered_map<std::string, Index_ID> &get_auxtab() const  { return auxtab; }
+  const std::unordered_map<std::string, Index_ID> &get_pendtab() const { return pendtab; }
 
 private:
   std::unordered_map<std::string, Index_ID> auxtab;
+  std::unordered_map<std::string, Index_ID> pendtab;
 };
 
 class Aux_tree{
@@ -55,14 +61,19 @@ public:
   void             set_alias        (const std::string &v, Index_ID n);
   bool             has_alias        (const std::string &v) const;
   Index_ID         get_alias        (const std::string &v) const;
+  void             set_pending      (const std::string &v, Index_ID n);
+  bool             has_pending      (const std::string &v) const;
+  Index_ID         get_pending      (const std::string &v) const;
   void             print_cur_auxnd  ();
   void             auxes_stack_pop  (){auxes_stack.pop_back();};
 
 private:
   Aux_node               *root_auxnd;
   std::vector<Aux_node*>  auxes_stack; //for tracking latest aux_node
-  bool                    check_global_alias (const Aux_node *auxnd, const std::string &v) const;
-  Index_ID                get_global_alias   (const Aux_node *auxnd, const std::string &v) const;
+  bool                    check_global_alias   (const Aux_node *auxnd, const std::string &v) const;
+  Index_ID                get_global_alias     (const Aux_node *auxnd, const std::string &v) const;
+  bool                    check_global_pending (const Aux_node *auxnd, const std::string &v) const;
+  Index_ID                get_global_pending   (const Aux_node *auxnd, const std::string &v) const;
 };
 
 
