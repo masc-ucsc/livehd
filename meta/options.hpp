@@ -3,6 +3,7 @@
 #define OPTIONS_H
 
 #include <string>
+#include <strings.h>
 
 class Options_base {
 protected:

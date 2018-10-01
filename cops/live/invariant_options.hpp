@@ -3,10 +3,9 @@
 #ifndef INVARIANT_OPTIONS_H_
 #define INVARIANT_OPTIONS_H_
 
-#include "core/options.hpp"
-#include <boost/program_options.hpp>
+#include "options.hpp"
 
-class Invariant_find_pack {
+class Invariant_find_options : public Options_base {
 
 public:
   std::string top;
@@ -20,7 +19,11 @@ public:
   int         clusters;
   bool        do_cluster;
 
-  Invariant_find_pack();
+  Invariant_find_options() : top(""), elab_lgdb("lgdb"), synth_lgdb("synth-lgdb"),
+              invariant_file("boundaries"), hierarchical_separator("."), clusters(0),
+              do_cluster(false), cluster_dir("") { }
+
+  void set(const std::string &key, const std::string &value) final;
 };
 
 #endif

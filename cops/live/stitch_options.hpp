@@ -2,10 +2,9 @@
 #ifndef STITCH_OPTIONS_H_
 #define STITCH_OPTIONS_H_
 
-#include "core/options.hpp"
-#include <boost/program_options.hpp>
+#include "options.hpp"
 
-class Stitch_pass_pack {
+class Stitch_pass_options : public Options_base {
 
 public:
   typedef enum {
@@ -21,7 +20,11 @@ public:
 
   Live_method method;
 
-  Stitch_pass_pack(int argc, const char **argv);
+  Stitch_pass_options() : osynth_lgdb("lgdb"), nsynth_lgdb("lgdb-stitch"),
+                          boundaries_name("boundaries"), diff_file("diff"),
+                          method(Live_method::LiveSynth)  { }
+
+  void set(const std::string &key, const std::string &value) final;
 };
 
 #endif
