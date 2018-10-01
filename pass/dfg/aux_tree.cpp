@@ -5,6 +5,10 @@ void Aux_node::set_alias(const std::string &v, Index_ID n) {
   fmt::print("set alias {} <-> {}\n", v,n );
 }
 
+void Aux_node::set_pending(const std::string &v, Index_ID n) {
+  pendtab[v] = n;
+  fmt::print("set pending {} <-> {}\n", v,n );
+}
 
 //Aux_tree member_functions
 //std::vector<Aux_node *>  Aux_tree::pre_order_trans(Aux_node* node, std::vector<Aux_node*> &auxes_stack){
@@ -45,7 +49,7 @@ void Aux_tree::set_parent_child(Aux_node *parent, Aux_node *new_child, bool bran
     new_child ->rchild = nullptr;
   }
   else{
-    assert(parent->lchild == nullptr);
+    assert(parent->rchild == nullptr);
     auxes_stack.push_back(new_child);
     parent->rchild     = new_child;
     new_child ->parent = parent;
@@ -78,6 +82,11 @@ void Aux_tree::delete_child(Aux_node *parent, Aux_node *child, bool branch){
     parent->rchild = nullptr;
     fmt::print("delete branch false auxtab\n");
   }
+}
+
+void Aux_tree::set_pending(const std::string &v, Index_ID n){
+  Aux_node* cur_auxnd = get_cur_auxnd();
+  cur_auxnd->set_pending(v,n);
 }
 
 void Aux_tree::set_alias(const std::string &v, Index_ID n){
@@ -118,6 +127,42 @@ Index_ID Aux_tree::get_global_alias(const Aux_node *auxnd, const std::string &v)
 
   return get_global_alias(get_parent(auxnd),v);
 };
+
+
+bool Aux_tree::has_pending(const std::string &v) const {
+  const Aux_node* cur_auxnd = get_cur_auxnd()->parent;
+  //recursive check on parents
+  return check_global_pending(cur_auxnd,v);
+}
+
+//check_global_pending() only checks "chain of patent pendtabs" and don't check sibling pendtab
+bool Aux_tree::check_global_pending(const Aux_node *auxnd, const std::string &v) const{
+  if (auxnd == nullptr)
+    return false;
+
+  if(auxnd->get_pendtab().find(v) != auxnd->get_pendtab().end())
+    return true;
+
+  return check_global_pending(auxnd->parent,v);
+};
+
+Index_ID Aux_tree::get_pending(const std::string &v) const {
+  const Aux_node* cur_auxnd = get_cur_auxnd();
+  //recursive search through parents
+  return get_global_pending(cur_auxnd,v);
+}
+
+//get_global_pending() only gets "chain of patent pendtabs" and don't get sibling pendtab
+Index_ID Aux_tree::get_global_pending(const Aux_node *auxnd, const std::string &v) const{
+  if(auxnd->get_pendtab().find(v) != auxnd->get_pendtab().end())
+    return auxnd->get_pendtab().at(v);
+
+  if(is_root_aux(auxnd))
+    assert(false);//must has a pending in chain of parents since it has passed has_pending()
+
+  return get_global_pending(get_parent(auxnd),v);
+};
+
 void Aux_tree::print_cur_auxnd() {
   for(const auto &iter : get_cur_auxnd()->get_auxtab()){
     fmt::print("auxtab:{:>10} -> {}\n", iter.first, iter.second);

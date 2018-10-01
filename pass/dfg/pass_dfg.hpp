@@ -100,7 +100,7 @@ private:
   Index_ID get_cfg_child(const LGraph *cfg, Index_ID node);
   //Index_ID resolve_phi_branch(LGraph *dfg, Aux_node *parent, Aux_node *branch, const std::string &variable);
 
-  void resolve_phis(LGraph *dfg, Aux_node *pauxnd, Aux_node *tauxnd, Aux_node *fauxnd, Index_ID cond);
+  void resolve_phis(LGraph *dfg, Aux_tree *aux_tee, Aux_node *pauxnd, Aux_node *tauxnd, Aux_node *fauxnd, Index_ID cond);
   void create_mux(LGraph *dfg, Aux_node *pauxnd, Index_ID tid, Index_ID fid, Index_ID cond, const std::string &var);
 
   void attach_outputs(LGraph *dfg, Aux_tree *aux_tree);
@@ -147,7 +147,7 @@ private:
   Index_ID create_private(LGraph *g, Aux_tree *aux_tree, const std::string &var_name);
   Index_ID create_reference(LGraph *g, Aux_tree *aux_tree, const std::string &var_name);
   Index_ID create_node(LGraph *g, Aux_tree *aux_tree, const std::string &v, const uint16_t bits=1);
-  Index_ID create_default_const(LGraph *g, Aux_tree *aux_tree);
+  Index_ID create_default_const(LGraph *g);
   Index_ID create_true_const(LGraph *g, Aux_tree *aux_tree);
   Index_ID create_false_const(LGraph *g, Aux_tree *aux_tree);
 
