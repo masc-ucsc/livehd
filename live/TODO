@@ -4,11 +4,17 @@
 // Long time setup
 live.setup files:foo.v,bar.prp,xxx.v verilog_elab:yosys synth:abc place:vivado route:vivado |> @c1
 
-@c1 |> live.
+// Extract the top level lgraph that must be used to generate bitstream/GDS
+@c1 |> live.final |> @lg
+
+@lg |> inou.vivado.bitstream odir:fpga
 
 // Some way to authentificate
 @c1 |> cloud.live.push url:foo.bar.com/mycheck1
 
 cloud.live.pull url:foo.bar.com/mycheck1 |> @c2
 
-@c2 |> live.add files:foo.v,yyy.v
+@c2 |> live.add files:foo.v,yyy.v |> @c3
+
+@c3 |> live.final |> inou.vivado.bitstream odir:urgent_fpga
+
