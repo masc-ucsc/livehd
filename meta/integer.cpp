@@ -1,6 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "integer.hpp"
-#include "exception.hpp"
+//#include "exception.hpp"
 #include "lgraphbase.hpp"
 
 #include <cassert>
@@ -39,7 +39,7 @@ Integer::Integer(pyrint value, pyrsize bits)
 Integer::Integer(Integer &&other) {
   data = other.data;
   bits = other.bits;
-  
+
   other.data = nullptr;
 }
 

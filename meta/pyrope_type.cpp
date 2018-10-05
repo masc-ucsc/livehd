@@ -1,9 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "pyrope_type.hpp"
 #include "symboltable.hpp"
-#include "exception.hpp"
+//#include "exception.hpp"
 
 #include <string>
+
 using std::string;
 
 void Pyrope_Type::merge(LGraph_Symbol_Table *context, const Pyrope_Type &other) {
