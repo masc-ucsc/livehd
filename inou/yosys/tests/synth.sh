@@ -53,8 +53,8 @@ if [ ! -d "$OPT_LGRAPH" ]; then
   exit 1
 fi
 
-if [ ! -f "${OPT_LGRAPH}/inou/tech/verilog.rb" ]; then
-  echo "verilog.rb not found on ${OPT_LGRAPH}"
+if [ ! -f "./inou/tech/verilog.rb" ]; then
+  echo "verilog.rb not found on `pwd`./inou/tech/"
   exit 1
 fi
 
