@@ -62,6 +62,8 @@
 #define TOK_POUND      0x18
 // *
 #define TOK_MUL        0x19
+// 0123123 or 123123 or 0123ubits
+#define TOK_NUM        0x1a
 
 #define TOK_KEYWORD_FIRST   0x40
 #define TOK_KEYWORD_LAST    0x7F
@@ -152,7 +154,7 @@ public:
     return token_list[scanner_pos+pos].tok == tok;
   }
 
-  void patch_keywords(const std::map<std::string, uint8_t> &keywords);
+  void patch_pass(const std::map<std::string, uint8_t> &keywords);
 
   void parse(std::string name, const char *memblock, size_t sz, bool chunking=false);
   void parse(std::string name, const std::string &str) {
