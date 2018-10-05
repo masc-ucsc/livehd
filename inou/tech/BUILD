@@ -3,7 +3,8 @@
 sh_library(
     name = "tech_gens",
     srcs = [
-        "verilog.rb"
+        "verilog.rb",
+        "verilog_json.rb",
     ],
     visibility = ["//visibility:public"],
 )

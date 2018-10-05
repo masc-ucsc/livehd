@@ -19,7 +19,7 @@ eval set -- "$TEMP"
 
 YOSYS=./inou/yosys/lgyosys
 LGCHECK=./inou/yosys/lgcheck
-OPT_LGRAPH=""
+OPT_LGRAPH="./"
 while true ; do
     case "$1" in
         -p|--profile)
@@ -43,6 +43,8 @@ while true ; do
     esac
 done
 
+pwd
+
 if [ -z "${OPT_LGRAPH}" ] ; then
   echo "ERROR: -s|--source required and needs to point to lgraph root"
   exit 1
@@ -53,7 +55,7 @@ if [ ! -d "$OPT_LGRAPH" ]; then
   exit 1
 fi
 
-if [ ! -f "./inou/tech/verilog.rb" ]; then
+if [ ! -f "./inou/tech/verilog_json.rb" ]; then
   echo "verilog.rb not found on `pwd`./inou/tech/"
   exit 1
 fi
