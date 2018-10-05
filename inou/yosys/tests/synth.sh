@@ -43,7 +43,19 @@ while true ; do
     esac
 done
 
-pwd
+
+YOSYS_BIN=`which yosys`
+YOSYS_LIB="/usr/local/share/yosys/"
+
+if [ ! -f ${YOSYS_BIN} ]; then
+  echo "ERROR: could not find yosys binary in path"
+  exit 1
+fi
+
+if [ ! -d ${YOSYS_LIB} ]; then
+  echo "ERROR: could not find yosys library files installed"
+  exit 1
+fi
 
 if [ -z "${OPT_LGRAPH}" ] ; then
   echo "ERROR: -s|--source required and needs to point to lgraph root"
@@ -62,7 +74,6 @@ fi
 
 OPT_INOU_YOSYS=""
 if [ -f "${OPT_INOU_YOSYS}" ]; then
-  # Found library
   echo ""
 elif [ -d "bazel-bin" && -f "./bazel-bin/inou/yosys/liblgraph_yosys.so" ]; then
   OPT_INOU_YOSYS="./bazel-bin/inou/yosys/liblgraph_yosys.so"
@@ -79,9 +90,9 @@ mkdir logs
 mkdir lgdb
 
 ruby ${OPT_LGRAPH}/inou/tech/verilog_json.rb \
-  /usr/local/share/yosys/simcells.v  \
-  /usr/local/share/yosys/xilinx/cells_sim.v \
-  /usr/local/share/yosys/xilinx/brams_bb.v > lgdb/tech_library
+  ${YOSYS_LIB}/simcells.v  \
+  ${YOSYS_LIB}/xilinx/cells_sim.v \
+  ${YOSYS_LIB}/xilinx/brams_bb.v > lgdb/tech_library
 
 for input in ${inputs[@]}
 do
@@ -121,7 +132,7 @@ do
     exit 1
   fi
 
-  ${LGCHECK} --implementation=${base}.v --reference=${OPT_LGRAPH}/inou/yosys/tests/${base}.v -l${OPT_LGRAPH}/subs/yosys/techlibs/xilinx/cells_sim.v
+  ${LGCHECK} --implementation=${base}.v --reference=${OPT_LGRAPH}/inou/yosys/tests/${base}.v -l${YOSYS_LIB}/xilinx/cells_sim.v
   if [ $? -eq 0 ]; then
     echo "Successfully matched generated verilog with original verilog (${input})"
   else
