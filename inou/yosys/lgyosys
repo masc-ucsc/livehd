@@ -110,16 +110,13 @@ if [ $OPT_SYSTEMVERILOG -eq 1 ]; then
   OPT_READVERILOG="${OPT_READVERILOG} -sv"
 fi
 
-echo  "${OPT_INOU_YOSYS}"
 if [ -f "${OPT_INOU_YOSYS}" ]; then
   # Found library
   echo ""
 elif [ -d "bazel-bin" && -f "./bazel-bin/inou/yosys/liblgraph_yosys.so" ]; then
   OPT_INOU_YOSYS="./bazel-bin/inou/yosys/liblgraph_yosys.so"
-echo  "found on ${OPT_INOU_YOSYS}"
 elif [ -f "./inou/yosys/liblgraph_yosys.so" ]; then
   OPT_INOU_YOSYS="./inou/yosys/liblgraph_yosys.so"
-echo  "found on ${OPT_INOU_YOSYS}"
 else
   echo "Could not find liblgraph_yosys.so library in ${OPT_INOU_YOSYS}"
   exit 3
