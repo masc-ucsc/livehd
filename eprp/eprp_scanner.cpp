@@ -5,6 +5,13 @@
 
 #include "eprp_scanner.hpp"
 
+#ifndef likely
+#define likely(x)       __builtin_expect((x),1)
+#endif
+#ifndef unlikely
+#define unlikely(x)     __builtin_expect((x),0)
+#endif
+
 void Eprp_scanner::setup_translate() {
 
   translate.resize(256);
@@ -97,11 +104,15 @@ void Eprp_scanner::add_token(Token t) {
   token_list.push_back(t);
 }
 
-void Eprp_scanner::patch_keywords(const std::map<std::string, uint8_t> &keywords) {
+void Eprp_scanner::patch_pass(const std::map<std::string, uint8_t> &keywords) {
   for(auto &t:token_list) {
     if (t.tok != TOK_ALNUM)
       continue;
 
+    if (isdigit(buffer[t.pos])) {
+      t.tok = TOK_NUM;
+      continue;
+    }
     std::string alnum(&buffer[t.pos], t.len);
     auto it = keywords.find(alnum);
     if (it == keywords.end())
@@ -142,22 +153,43 @@ void Eprp_scanner::parse(std::string name, const char *memblock, size_t sz, bool
   bool finishing_comment=false; // Only for comments to avoid /*/* nested back to back */*/
   for(size_t i = 0; i < sz; i++) {
     char c = memblock[i];
-    int pos = (&memblock[i] - ptr_section);
-    if(last_c == '/' && c == '/') {
+    int pos = (&memblock[i] - ptr_section); // same as "i" unless chunking
+    if(c == '\n' || c == '\r' || c == '\f') {
+      nlines++;
+      if (!in_comment && t.tok) {
+        t.len = pos - t.pos;
+        add_token(t);
+        t.tok = TOK_NOP;
+        t.pos = pos;
+
+        // At least MIN_CHUNK_SIZE characters, and not close to the end of file
+        if(unlikely(chunking && (ptr_section + MIN_CHUNK_SIZE) < &memblock[i] && (last_c == '\n' || last_c == '\r' || last_c == '\f') &&
+            ((i + MIN_CHUNK_SIZE) < sz) && !token_list.empty())) {
+          chunked(ptr_section, (&memblock[i] -ptr_section), ptr_section - memblock, nlines);
+          ptr_section = &memblock[i + 1];
+          nchunks++;
+        }
+      }else{
+        starting_comment  = false;
+        finishing_comment = false;
+        in_singleline_comment = false;
+        in_comment            = in_singleline_comment | in_multiline_comment;
+      }
+    }else if(unlikely(last_c == '/' && c == '/')) {
       t.len = pos - t.pos;
       t.tok = TOK_COMMENT;
       in_singleline_comment = true;
       in_comment = true;
-      starting_comment = false;
-      finishing_comment = false;
-    }else if(!finishing_comment && ((last_c == '/' && c == '*') || (last_c == '(' && c == '*'))) {
+      assert(!starting_comment);
+      assert(!finishing_comment);
+    }else if(unlikely(!finishing_comment && ((last_c == '/' && c == '*') || (last_c == '(' && c == '*')))) {
       t.len = pos - t.pos;
       t.tok = TOK_COMMENT;
       in_multiline_comment++;
       in_comment = true;
       starting_comment  = true;
-      finishing_comment = false;
-    }else if (in_multiline_comment && !starting_comment && ((last_c == '*' && c == '/') || (last_c == '*' && c == ')'))) {
+      assert(!finishing_comment);
+    }else if (unlikely(!starting_comment && ((last_c == '*' && c == '/') || (last_c == '*' && c == ')')))) {
       t.len = pos - t.pos;
       t.tok = TOK_COMMENT;
       in_multiline_comment--;
@@ -167,28 +199,8 @@ void Eprp_scanner::parse(std::string name, const char *memblock, size_t sz, bool
         in_singleline_comment = false;
         in_comment = false;
       }
-      starting_comment  = false;
+      assert(!starting_comment);
       finishing_comment = true;
-    }else if(c == '\n' || c == '\r' || c == '\f') {
-      nlines++;
-      in_singleline_comment = false;
-      in_comment            = in_singleline_comment | in_multiline_comment;
-      starting_comment  = false;
-      finishing_comment = false;
-      if (!in_comment && t.tok) {
-        t.len = pos - t.pos;
-        add_token(t);
-        t.tok = TOK_NOP;
-        t.pos = pos;
-      }
-
-      // At least MIN_CHUNK_SIZE characters, and not close to the end of file
-      if(chunking && (ptr_section + MIN_CHUNK_SIZE) < &memblock[i] && !in_comment && (last_c == '\n' || last_c == '\r' || last_c == '\f') &&
-         ((i + MIN_CHUNK_SIZE) < sz) && !token_list.empty()) {
-        chunked(ptr_section, (&memblock[i] -ptr_section), ptr_section - memblock, nlines);
-        ptr_section = &memblock[i + 1];
-        nchunks++;
-      }
     }else if(in_comment) {
       starting_comment  = false;
       finishing_comment = false;
