@@ -5,8 +5,6 @@
 
 #include "eprp_scanner.hpp"
 
-#define VERILOG
-
 void Eprp_scanner::setup_translate() {
 
   translate.resize(256);
@@ -26,7 +24,11 @@ void Eprp_scanner::setup_translate() {
   translate['.'] = TOK_DOT;
   translate[';'] = TOK_SEMICOLON;
   translate[','] = TOK_COMMA;
+  translate['('] = TOK_OP;
+  translate[')'] = TOK_CP;
+  translate['#'] = TOK_POUND;
   translate['>'] = TOK_GT  | TOK_TRYMERGE;  // TOK_PIPE
+  translate['*'] = TOK_MUL;
   translate['/'] = TOK_DIV;
   translate['"'] = TOK_STRING | TOK_TRYMERGE;  // Anything else until other TOK_STRING
 
@@ -95,6 +97,23 @@ void Eprp_scanner::add_token(Token t) {
   token_list.push_back(t);
 }
 
+void Eprp_scanner::patch_keywords(const std::map<std::string, uint8_t> &keywords) {
+  for(auto &t:token_list) {
+    if (t.tok != TOK_ALNUM)
+      continue;
+
+    std::string alnum(&buffer[t.pos], t.len);
+    auto it = keywords.find(alnum);
+    if (it == keywords.end())
+      continue;
+
+    assert(it->second >= TOK_KEYWORD_FIRST);
+    assert(it->second <= TOK_KEYWORD_LAST);
+
+    t.tok = it->second;
+  }
+}
+
 void Eprp_scanner::parse(std::string name, const char *memblock, size_t sz, bool chunking) {
 
   buffer_name = name;
@@ -119,62 +138,43 @@ void Eprp_scanner::parse(std::string name, const char *memblock, size_t sz, bool
 
   buffer = memblock; // To allow error reporting before chunking
 
+  bool starting_comment=false; // Only for comments to avoid /*/* nested back to back */*/
+  bool finishing_comment=false; // Only for comments to avoid /*/* nested back to back */*/
   for(size_t i = 0; i < sz; i++) {
     char c = memblock[i];
     int pos = (&memblock[i] - ptr_section);
-#ifdef VERILOG
     if(last_c == '/' && c == '/') {
-      if (t.tok!= TOK_COMMENT && t.tok) {
-        t.len = pos - t.pos;
-        add_token(t);
-        t.pos = pos;
-        t.tok = TOK_COMMENT;
-      }
+      t.len = pos - t.pos;
+      t.tok = TOK_COMMENT;
       in_singleline_comment = true;
       in_comment = true;
-    }else if(last_c == '/' && c == '*') {
-      if (t.tok!= TOK_COMMENT && t.tok) {
-        t.len = pos - t.pos;
-        add_token(t);
-        t.pos = pos;
-        t.tok = TOK_COMMENT;
-      }
+      starting_comment = false;
+      finishing_comment = false;
+    }else if(!finishing_comment && ((last_c == '/' && c == '*') || (last_c == '(' && c == '*'))) {
+      t.len = pos - t.pos;
+      t.tok = TOK_COMMENT;
       in_multiline_comment++;
       in_comment = true;
-    }else if(last_c == '*' && c == '/') {
-      if (t.tok!= TOK_COMMENT && t.tok) {
-        t.len = pos - t.pos;
-        add_token(t);
-        t.pos = pos;
-        t.tok = TOK_COMMENT;
-      }
+      starting_comment  = true;
+      finishing_comment = false;
+    }else if (in_multiline_comment && !starting_comment && ((last_c == '*' && c == '/') || (last_c == '*' && c == ')'))) {
+      t.len = pos - t.pos;
+      t.tok = TOK_COMMENT;
       in_multiline_comment--;
       if (in_multiline_comment < 0) {
         lex_error(fmt::format("{}:{} found end of comment without matching beginning of comment", name, nlines));
-      }else{
+      }else if (in_multiline_comment==0) {
         in_singleline_comment = false;
         in_comment = false;
       }
-    }
-#else
-    if(c == '#') {
-      if (t.tok!= TOK_COMMENT && t.tok) {
-        t.len = pos - t.pos;
-        add_token(t);
-        t.pos = pos;
-        t.tok = TOK_COMMENT;
-      }
-      if(!in_comment && sz > (i + 2) && memblock[i + 1] == '#' && memblock[i + 2] == '#')
-        in_multiline_comment = !in_multiline_comment;
-      else
-        in_singleline_comment = true;
-      in_comment = in_singleline_comment | in_multiline_comment;
-    }
-#endif
-    else if(c == '\n' || c == '\r' || c == '\f') {
+      starting_comment  = false;
+      finishing_comment = true;
+    }else if(c == '\n' || c == '\r' || c == '\f') {
       nlines++;
       in_singleline_comment = false;
       in_comment            = in_singleline_comment | in_multiline_comment;
+      starting_comment  = false;
+      finishing_comment = false;
       if (!in_comment && t.tok) {
         t.len = pos - t.pos;
         add_token(t);
@@ -189,7 +189,10 @@ void Eprp_scanner::parse(std::string name, const char *memblock, size_t sz, bool
         ptr_section = &memblock[i + 1];
         nchunks++;
       }
-    } if(!in_comment) {
+    }else if(in_comment) {
+      starting_comment  = false;
+      finishing_comment = false;
+    }else{
       Token_id nt = translate[static_cast<uint8_t>(c)];
       if (t.tok != nt) {
         t.len = pos - t.pos;
@@ -259,6 +262,16 @@ void Eprp_scanner::scan_prev_append(std::string &text) const {
   int p = scanner_pos-1;
   if (p<0)
     p = 0;
+
+  text.append(&buffer[token_list[p].pos], token_list[p].len);
+}
+
+void Eprp_scanner::scan_next_append(std::string &text) const {
+
+  assert(scanner_pos < token_list.size());
+  size_t p = scanner_pos+1;
+  if (p>=token_list.size())
+    p = token_list.size()-1;;
 
   text.append(&buffer[token_list[p].pos], token_list[p].len);
 }
@@ -364,5 +377,15 @@ void Eprp_scanner::scan_raw_msg(const std::string &cat, const std::string &text,
   std::string third_1(col, ' ');
   std::string third_2(token_list[max_pos].len, '^');
   fmt::print(third_1 + third_2 + "\n");
+}
+
+void Eprp_scanner::dump_token() const {
+  size_t pos = scanner_pos;
+  if (pos>=token_list.size())
+    pos = token_list.size();
+
+  auto &t = token_list[pos];
+  std::string raw(&buffer[t.pos], t.len);
+  fmt::print("tok:{} pos:{} len:{} raw:{}\n",t.tok, t.pos, t.len, raw);
 }
 

@@ -6,6 +6,7 @@
 #include <cassert>
 #include <string>
 #include <vector>
+#include <map>
 
 #include "spdlog/spdlog.h"
 
@@ -53,7 +54,17 @@
 #define TOK_SEMICOLON  0x14
 // ,
 #define TOK_COMMA      0x15
+// (
+#define TOK_OP         0x16
+// )
+#define TOK_CP         0x17
+// #
+#define TOK_POUND      0x18
+// *
+#define TOK_MUL        0x19
 
+#define TOK_KEYWORD_FIRST   0x40
+#define TOK_KEYWORD_LAST    0x7F
 #define TOK_TRYMERGE   0x80
 
 class Eprp_scanner {
@@ -117,13 +128,14 @@ public:
   }
 
   bool scan_is_token(Token_id tok) const {
-    if(scanner_pos< token_list.size())
+    if(scanner_pos < token_list.size())
       return token_list[scanner_pos].tok == tok;
     return false;
   }
 
   void scan_append(std::string &text) const;
   void scan_prev_append(std::string &text) const;
+  void scan_next_append(std::string &text) const;
 
   std::string scan_text() const;
   int scan_calc_lineno() const;
@@ -134,16 +146,20 @@ public:
     assert(scanner_pos< token_list.size());
     return token_list[scanner_pos-1].tok == tok;
   }
-  bool scan_is_next_token(Token_id tok) const {
-    if (scanner_pos>=token_list.size())
+  bool scan_is_next_token(int pos, Token_id tok) const {
+    if ((scanner_pos+pos)>=token_list.size())
       return false;
-    return token_list[scanner_pos+1].tok == tok;
+    return token_list[scanner_pos+pos].tok == tok;
   }
+
+  void patch_keywords(const std::map<std::string, uint8_t> &keywords);
 
   void parse(std::string name, const char *memblock, size_t sz, bool chunking=false);
   void parse(std::string name, const std::string &str) {
     parse(name,str.c_str(),str.size());
   }
+
+  void dump_token() const;
 
   virtual void elaborate() = 0;
 };
