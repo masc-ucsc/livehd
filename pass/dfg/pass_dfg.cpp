@@ -173,7 +173,7 @@ void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_t
   LGraph* sub_graph = nullptr;
   Index_ID subg_root_nid = aux_tree->get_alias(oprds[0]);
 
-  if((sub_graph = LGraph::find_lgraph(cfg->get_path(), ((std::string)(dfg->get_node_wirename(subg_root_nid))+"_dfg")))){
+  if((sub_graph = LGraph::find_lgraph(cfg->get_path(), ((std::string)(dfg->get_node_wirename(subg_root_nid)))))){
     dfg->node_subgraph_set(subg_root_nid, (uint32_t)sub_graph->lg_id());
     fmt::print("set subgraph on nid:{}, sub_graph name:{}, sub_graph_id:{}\n", subg_root_nid, dfg->get_node_wirename(subg_root_nid), sub_graph->lg_id());
   }else{
