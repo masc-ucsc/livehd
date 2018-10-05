@@ -2,8 +2,14 @@
 
 cc_library(
     name = "pass_abc",
-    srcs = glob(["*.cpp"]),
-    hdrs = glob(["*.hpp"]),
+    srcs = glob(["*.cpp"],
+                exclude = [
+                    "dump_aig.cpp",
+                    ]),
+    hdrs = glob(["*.hpp"],
+                exclude = [
+                    "dump_aig.hpp",
+                    ]),
     visibility = ["//visibility:public"],
     includes = ["."],
     deps = [
