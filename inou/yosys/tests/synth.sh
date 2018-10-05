@@ -50,16 +50,28 @@ if [ -z "${OPT_LGRAPH}" ] ; then
   exit 1
 fi
 
-if [ ! -d "$OPT_LGRAPH" ]; then
+if [ ! -d "${OPT_LGRAPH}" ]; then
   echo "Lgraph not found on ${OPT_LGRAPH}"
   exit 1
 fi
 
-if [ ! -f "./inou/tech/verilog_json.rb" ]; then
+if [ ! -f "${OPT_LGRAPH}/inou/tech/verilog_json.rb" ]; then
   echo "verilog.rb not found on `pwd`./inou/tech/"
   exit 1
 fi
 
+OPT_INOU_YOSYS=""
+if [ -f "${OPT_INOU_YOSYS}" ]; then
+  # Found library
+  echo ""
+elif [ -d "bazel-bin" && -f "./bazel-bin/inou/yosys/liblgraph_yosys.so" ]; then
+  OPT_INOU_YOSYS="./bazel-bin/inou/yosys/liblgraph_yosys.so"
+elif [ -f "./inou/yosys/liblgraph_yosys.so" ]; then
+  OPT_INOU_YOSYS="./inou/yosys/liblgraph_yosys.so"
+else
+  echo "Could not find liblgraph_yosys.so library in ${OPT_INOU_YOSYS}"
+  exit 3
+fi
 
 rm -rf ./lgdb/ ./logs ./synth-test ./*.json ./*.v
 mkdir synth-test/
@@ -81,14 +93,14 @@ do
   opt -fast -full; memory_map; dffsr2dff; dff2dffe; opt -full;
   techmap -map +/techmap.v -map +/xilinx/arith_map.v; opt -fast; techmap -D ALU_RIPPLE;
   opt -fast; abc -D 100;"
-  yosys -m bazel-bin/inou/yosys/liblgraph_yosys.so -p "read_verilog -sv ./inou/yosys/tests/${input};
+  yosys -m ${OPT_INOU_YOSYS} -p "read_verilog -sv ${OPT_LGRAPH}/inou/yosys/tests/${input};
    ${synth_script}; write_verilog ${base}_synth.v; yosys2lg -path lgdb" > ./synth-test/log_from_yosys_${input} 2> ./synth-test/err_from_yosys_${input}
 
 
   if [ $? -eq 0 ]; then
     echo "Successfully created graph from ${input}"
   else
-  echo "gdb --args yosys -m bazel-bin/inou/yosys/liblgraph_yosys.so -p \"read_verilog -sv ./inou/yosys/tests/${input};
+  echo "gdb --args yosys -m ${OPT_INOU_YOSYS} -p \"read_verilog -sv ${OPT_LGRAPH}/inou/yosys/tests/${input};
     ${synth_script};  write_verilog ${input}_synth.v; yosys2lg -path lgdb\""
     echo "FAIL: lgyosys parsing terminated with an error (testcase ${input})"
     exit 1
@@ -109,7 +121,7 @@ do
     exit 1
   fi
 
-  ${LGCHECK} --implementation=${base}.v --reference=./inou/yosys/tests/${base}.v -l${OPT_LGRAPH}/subs/yosys/techlibs/xilinx/cells_sim.v
+  ${LGCHECK} --implementation=${base}.v --reference=${OPT_LGRAPH}/inou/yosys/tests/${base}.v -l${OPT_LGRAPH}/subs/yosys/techlibs/xilinx/cells_sim.v
   if [ $? -eq 0 ]; then
     echo "Successfully matched generated verilog with original verilog (${input})"
   else
