@@ -11,13 +11,14 @@ cc_library(
     ],
 )
 
-cc_binary(
-    name = "lglef",
-    srcs = ["lglef.cpp"],
-    linkopts = ['-lpthread'],
-    deps = [
-        ":inou_lef",
-        "//inou/json:inou_json",
-        "@boost//:filesystem", "@boost//:program_options",
-    ],
-)
+#deprecated
+#cc_binary(
+#    name = "lglef",
+#    srcs = ["lglef.cpp"],
+#    linkopts = ['-lpthread'],
+#    deps = [
+#        ":inou_lef",
+#        "//inou/json:inou_json",
+#        "@boost//:filesystem", "@boost//:program_options",
+#    ],
+#)

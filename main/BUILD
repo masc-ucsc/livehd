@@ -25,7 +25,6 @@ cc_binary(
             "inou_yosys_read.ys",
             "inou_yosys_write.ys",
     ],
-    # linkopts = ['-static']
 )
 
 cc_binary(
@@ -33,8 +32,6 @@ cc_binary(
     srcs = ["uclient_test.cpp"],
     deps = ["@httplib//:headers",
     ],
-    #linkopts = ["-ldl"],
-    # linkopts = ["-ldl,", '-static']
 )
 
 cc_binary(
@@ -43,5 +40,4 @@ cc_binary(
     deps = ["@httplib//:headers",
     ],
     linkopts = ["-lpthread"],
-    # linkopts = ["-ldl,", '-static']
 )
