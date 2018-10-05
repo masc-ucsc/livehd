@@ -11,33 +11,33 @@ cc_library(
     ],
 )
 
-cc_binary(
-    name = "lglefdef",
-    srcs = ["lglefdef.cpp"],
-    linkopts = ['-lpthread'],
-    deps = [
-        ":inou_lefdef",
-        "//inou/json:inou_json",
-        "@boost//:filesystem", "@boost//:program_options",
-    ],
-)
-
-cc_binary(
-    name = "defrw",
-    srcs = ["defrw.cpp"],
-    linkopts = ['-lpthread'],
-    deps = [
-        ":inou_lefdef",
-        "//inou/json:inou_json",
-    ],
-)
-
-cc_binary(
-    name = "lefrw",
-    srcs = ["lefrw.cpp"],
-    linkopts = ['-lpthread'],
-    deps = [
-        ":inou_lefdef",
-        "//inou/json:inou_json",
-    ],
-)
+#cc_binary(
+#    name = "lglefdef",
+#    srcs = ["lglefdef.cpp"],
+#    linkopts = ['-lpthread'],
+#    deps = [
+#        ":inou_lefdef",
+#        "//inou/json:inou_json",
+#        "@boost//:filesystem", "@boost//:program_options",
+#    ],
+#)
+#
+#cc_binary(
+#    name = "defrw",
+#    srcs = ["defrw.cpp"],
+#    linkopts = ['-lpthread'],
+#    deps = [
+#        ":inou_lefdef",
+#        "//inou/json:inou_json",
+#    ],
+#)
+#
+#cc_binary(
+#    name = "lefrw",
+#    srcs = ["lefrw.cpp"],
+#    linkopts = ['-lpthread'],
+#    deps = [
+#        ":inou_lefdef",
+#        "//inou/json:inou_json",
+#    ],
+#)
