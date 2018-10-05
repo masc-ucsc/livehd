@@ -92,9 +92,13 @@ public:
 //***** End of Def Class Definition ***
 //*************************************
 
-class Inou_def_options_pack : public Options_pack {
+//TODO: Options_pack has been deprecated this needs to be updated to the new
+//eprp format.
+class Inou_def_options_pack { //: public Options_pack {
 public:
   Inou_def_options_pack();
+
+  std::string lgdb_path;
 
   std::string lef_file;
   std::string def_file;
@@ -112,14 +116,10 @@ public:
   Inou_def();
 
   Inou_def_options_pack get_opack() { return opack; }
-
-  std::vector<LGraph *> generate() final;
-
   void set_def_info(Def_info &);
 
-  using Inou::generate;
-
-  void generate(std::vector<const LGraph *> &out) final;
+  std::vector<LGraph *> generate(); // final;
+  void generate(std::vector<const LGraph *> &out); // final;
 };
 
 #endif
