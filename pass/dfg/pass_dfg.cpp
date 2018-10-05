@@ -48,7 +48,7 @@ void Pass_dfg::trans(LGraph *dfg) {
   //resolve pending graph
   for(auto idx : dfg->fast()) {
     if(dfg->node_type_get(idx).op == DfgPendingGraph_Op){
-      if((sub_graph = LGraph::find_lgraph(dfg->get_path(), ((std::string)(dfg->get_node_wirename(idx))+"_dfg")))){
+      if((sub_graph = LGraph::find_lgraph(dfg->get_path(), ((std::string)(dfg->get_node_wirename(idx)))))){
         dfg->node_subgraph_set(idx, (uint32_t)sub_graph->lg_id());
         fmt::print("resolve pending subgraph! nid:{}, sub_graph name:{}, sub_graph_id:{}\n", idx, dfg->get_node_wirename(idx), sub_graph->lg_id());
       }
@@ -77,6 +77,14 @@ void Pass_dfg::trans(LGraph *dfg) {
       }else if(dfg->node_type_get(dst_nid).op == Mux_Op){
         ;//don't infetence when dst is a mux, it is handle at the mux construction step
       }else if(dfg->node_type_get(dst_nid).op == Equals_Op){
+        ;//don't infetence when dst is a comparator, the result should be a bool
+      }else if(dfg->node_type_get(dst_nid).op == GreaterEqualThan_Op){
+        ;//don't infetence when dst is a comparator, the result should be a bool
+      }else if(dfg->node_type_get(dst_nid).op == GreaterThan_Op){
+        ;//don't infetence when dst is a comparator, the result should be a bool
+      }else if(dfg->node_type_get(dst_nid).op == LessEqualThan_Op){
+        ;//don't infetence when dst is a comparator, the result should be a bool
+      }else if(dfg->node_type_get(dst_nid).op == LessThan_Op){
         ;//don't infetence when dst is a comparator, the result should be a bool
       }else{
         if(src_nid_size > dst_nid_size)
@@ -238,6 +246,7 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
     process_connections(dfg, oprd_ids, target_id);
   }
   else if(is_compare_op(op)){
+    fmt::print("{} is compare op\n", op);
     std::vector<Index_ID> oprd_ids;
     oprd_ids.push_back(process_operand(dfg, aux_tree, oprds[0]));
     oprd_ids.push_back(process_operand(dfg, aux_tree, oprds[1]));
@@ -251,15 +260,23 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
 }
 
 void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Index_ID> &src_nids, const Index_ID &dst_nid){
+  fmt::print("src_nids size:{}\n", src_nids.size());
   for (unsigned i = 0; i<src_nids.size();i++){
     Index_ID src_nid =  src_nids.at(i);
     fmt::print("src_nid:{}\n", src_nid);
-    fmt::print("src_nids size:{}\n", src_nids.size());
     //Port_ID  src_pid = (dfg->node_type_get(src_nid).op == Or_Op) ? (uint16_t)1 : (uint16_t)0; // output pid=1 for reduced Or_Op
     Port_ID  src_pid = 0;
-    Port_ID  dst_pid = (dfg->node_type_get(dst_nid).op == Sum_Op            )? (uint16_t)1 :
-                       (dfg->node_type_get(dst_nid).op == DfgPendingGraph_Op)? (uint16_t)i :
-                       (dfg->node_type_get(dst_nid).op == SubGraph_Op       )? (uint16_t)i : (uint16_t)0;
+    Port_ID  dst_pid = (dfg->node_type_get(dst_nid).op == Sum_Op                      )? (uint16_t)1 :
+                       (dfg->node_type_get(dst_nid).op == LessThan_Op         && i==0 )? (uint16_t)0 :
+                       (dfg->node_type_get(dst_nid).op == LessThan_Op         && i==1 )? (uint16_t)2 :
+                       (dfg->node_type_get(dst_nid).op == GreaterThan_Op      && i==0 )? (uint16_t)0 :
+                       (dfg->node_type_get(dst_nid).op == GreaterThan_Op      && i==1 )? (uint16_t)2 :
+                       (dfg->node_type_get(dst_nid).op == LessEqualThan_Op    && i==0 )? (uint16_t)0 :
+                       (dfg->node_type_get(dst_nid).op == LessEqualThan_Op    && i==1 )? (uint16_t)2 :
+                       (dfg->node_type_get(dst_nid).op == GreaterEqualThan_Op && i==0 )? (uint16_t)0 :
+                       (dfg->node_type_get(dst_nid).op == GreaterEqualThan_Op && i==1 )? (uint16_t)2 :
+                       (dfg->node_type_get(dst_nid).op == DfgPendingGraph_Op          )? (uint16_t)i :
+                       (dfg->node_type_get(dst_nid).op == SubGraph_Op                 )? (uint16_t)i : (uint16_t)0;
 
     dfg->add_edge(Node_Pin(src_nid, src_pid, false), Node_Pin(dst_nid, dst_pid, true));
     //fmt::print("add_edge {}->{}\n", dfg->get_node_wirename(src_nid), dfg->get_node_wirename(dst_nid));

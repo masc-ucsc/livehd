@@ -110,6 +110,14 @@ Node_Type_Op Pass_dfg::node_type_from_text(const std::string &operator_text) {
 
   if (operator_text == "==") {
     return Equals_Op;
+  } else if (operator_text == ">="){
+    return GreaterEqualThan_Op;
+  } else if (operator_text == ">"){
+    return GreaterThan_Op;
+  } else if (operator_text == "<="){
+    return LessEqualThan_Op;
+  } else if (operator_text == ">"){
+    return LessThan_Op;
   } else if (operator_text == "=" || operator_text =="as" || operator_text == ":") {
     return Or_Op; //reduction or
   } else if (operator_text == "+"){
