@@ -995,7 +995,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         instance_name = RTLIL::IdString("\\" + std::string(g->get_node_instancename(idx)));
       }
 
-      RTLIL::Cell *new_cell = module->addCell(instance_name, "\\" + subgraph->get_name().substr(7));
+      RTLIL::Cell *new_cell = module->addCell(instance_name, "\\" + subgraph->get_name());
       for(const auto &c : g->inp_edges(idx)) {
         std::string  port  = subgraph->get_graph_input_name_from_pid(c.get_inp_pin().get_pid());
         RTLIL::Wire *input = get_wire(c.get_idx(), c.get_out_pin().get_pid());
