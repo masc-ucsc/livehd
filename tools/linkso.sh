@@ -16,7 +16,7 @@ do
 done
 STATIC_FOUND=0
 ## Start from 4 because ARGS array starts from 0 unlike $@
-for ((i=2;i<$#;i++)); do
+for ((i=3;i<$#;i++)); do
     #DEBUG echo $i" ${ARGS[$i]}" >>$1
     if [ "${ARGS[$i]}" = "-Wl,-Bstatic" ]; then
       STATIC_FOUND=1
@@ -24,10 +24,13 @@ for ((i=2;i<$#;i++)); do
     if [ $STATIC_FOUND -eq 1 ]; then
       REST+=" ${ARGS[$i]}"
     else
+      #echo "1.POTATO" ${ARGS[$i]}
       $($AR -x ${ARGS[$i]})
+      #echo "2.POTATO"
     fi
 done
 
+#echo "ASDASDA"
 #DEBUG echo "2---" >>$1
 OBJS="*.o"
 
