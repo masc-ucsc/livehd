@@ -70,6 +70,13 @@ new_git_repository(
     remote = "https://github.com/tlk00/BitMagic.git",
     strip_prefix = "src",
 )
+new_git_repository(
+    name = "rapidjson",
+    build_file = "BUILD.rapidjson",
+    commit = "663f076c7b44ce96526d1acfda3fa46971c8af31", # October 6, 2018
+    remote = "https://github.com/Tencent/rapidjson.git",
+    strip_prefix = "include",
+)
 
 new_git_repository(
     name = "httplib",
