@@ -2,6 +2,6 @@
 cc_library(
     name = "headers",
     hdrs = glob(["include/rapidjson/**/*.h"]),
-    #includes = ["include"],
+    includes = ["include"],
     visibility = ["//visibility:public"],
 )
