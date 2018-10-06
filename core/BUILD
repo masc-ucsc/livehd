@@ -8,6 +8,7 @@ cc_library(
     linkopts = ['-lpthread'],
     deps = ["@sparsehash//:headers",
             "@bm//:headers",
+            "@rapidjson//:headers",
             "@spdlog//:headers",
             ],
 )
