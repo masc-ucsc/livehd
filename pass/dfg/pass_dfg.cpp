@@ -59,7 +59,7 @@ void Pass_dfg::trans(LGraph *dfg) {
     }
   }
 
-  //bits inference
+  //bits inference: first round: deal with src bw > dst bw
   for(auto idx : dfg->fast()) {
     for(const auto &out : dfg->out_edges(idx)) {
       Index_ID src_nid      = idx;
@@ -75,7 +75,7 @@ void Pass_dfg::trans(LGraph *dfg) {
         uint16_t    out_size = subgraph->get_bits(subgraph->get_graph_output(out_name).get_nid());
         dfg->set_bits(dst_nid,out_size);
       }else if(dfg->node_type_get(dst_nid).op == Mux_Op){
-        ;//don't infetence when dst is a mux, it is handle at the mux construction step
+        ;
       }else if(dfg->node_type_get(dst_nid).op == Equals_Op){
         ;//don't infetence when dst is a comparator, the result should be a bool
       }else if(dfg->node_type_get(dst_nid).op == GreaterEqualThan_Op){
@@ -92,6 +92,36 @@ void Pass_dfg::trans(LGraph *dfg) {
       }
     }
   }
+  //bits inference: second round: deal with src bw < dst bw
+  for(auto idx : dfg->backward()) {
+    for(const auto &out : dfg->out_edges(idx)) {
+      Index_ID src_nid      = idx;
+      Index_ID dst_nid      = out.get_idx();
+      Port_ID  src_pid      = out.get_out_pin().get_pid();
+      Port_ID  dst_pid      = out.get_inp_pin().get_pid();
+      uint16_t src_nid_size = dfg->get_bits(src_nid);
+      uint16_t dst_nid_size = dfg->get_bits(dst_nid);
+      if(dfg->node_type_get(src_nid).op == GraphIO_Op){
+        ;
+      }else if(dfg->node_type_get(src_nid).op == Equals_Op){
+        ;//don't infetence when src is a comparator, the result should be a bool
+      }else if(dfg->node_type_get(src_nid).op == GreaterEqualThan_Op){
+        ;//don't infetence when src is a comparator, the result should be a bool
+      }else if(dfg->node_type_get(src_nid).op == GreaterThan_Op){
+        ;//don't infetence when src is a comparator, the result should be a bool
+      }else if(dfg->node_type_get(src_nid).op == LessEqualThan_Op){
+        ;//don't infetence when src is a comparator, the result should be a bool
+      }else if(dfg->node_type_get(src_nid).op == LessThan_Op){
+        ;//don't infetence when src is a comparator, the result should be a bool
+      }else{
+        if(src_nid_size < dst_nid_size)
+          dfg->set_bits(src_nid, dst_nid_size);
+      }
+    }
+  }
+
+
+
 }
 
 void Pass_dfg::cfg_2_dfg(LGraph *dfg, const LGraph *cfg) {
@@ -107,6 +137,7 @@ void Pass_dfg::cfg_2_dfg(LGraph *dfg, const LGraph *cfg) {
 }
 
 void Pass_dfg::finalize_gconnect(LGraph *dfg, const Aux_node *auxnd_global) {
+  fmt::print("finalize global connect\n");
   for (const auto &pair : auxnd_global->get_pendtab()) {
     if (is_output(pair.first)){
       Index_ID dst_nid = dfg->get_graph_output(pair.first.substr(1)).get_nid();
@@ -154,8 +185,10 @@ Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tr
   case CfgFunctionCall_Op:
     process_func_call(dfg, cfg, aux_tree, data);
     return get_cfg_child(cfg, cfg_node);
-  case CfgIf_Op:
+  case CfgIf_Op:{
+    aux_tree->print_cur_auxnd();
     return process_if(dfg, cfg, aux_tree, data, cfg_node);
+  }
   case CfgIfMerge_Op:
     return 0;
   default:
@@ -243,6 +276,7 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
     dfg->node_type_set(target_id, node_type_from_text(op));
     auto max_bits = std::max(dfg->get_bits(oprd_ids[0]),dfg->get_bits(oprd_ids[1])) + 1;
     dfg->set_bits(target_id,max_bits);
+    fmt::print("nid:{} set {}bits\n", target_id, max_bits);
     process_connections(dfg, oprd_ids, target_id);
   }
   else if(is_compare_op(op)){
@@ -331,7 +365,7 @@ Index_ID Pass_dfg::process_operand(LGraph *dfg, Aux_tree *aux_tree, const std::s
 
 
 Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data, Index_ID cfg_node) {
-  fmt::print("process_if\n");
+  fmt::print("process if start\n");
   assert(aux_tree->has_alias(data.get_target()));
   Index_ID cond = aux_tree->get_alias(data.get_target());
   const auto &operands = data.get_operands();
@@ -363,6 +397,7 @@ Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree
   aux_tree->delete_child(aux_tree->get_cur_auxnd(),  tauxnd, true);
   aux_tree->auxes_stack_pop();
 
+  fmt::print("process if done!!\n");
   return tb_next;
 }
 
@@ -512,7 +547,7 @@ void Pass_dfg::resolve_phis(LGraph *dfg, Aux_tree *aux_tree, Aux_node *pauxnd, A
   //resolve phi in branch true
   auto iter = tauxnd->get_pendtab().begin();
   while(iter != tauxnd->get_pendtab().end()){
-    fmt::print("key is:{}", iter->first);
+    fmt::print("key is:{}, ", iter->first);
     if(fauxnd && fauxnd->has_pending(iter->first)){
       fmt::print("has same pend in fault\n");
       Index_ID tid = iter->second;
