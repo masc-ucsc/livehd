@@ -1,17 +1,16 @@
-%pp = $a + 1
-if ($a == 55){
-  if ($a == 66){
-    %pp = $a + 2
+if ($a >= 128){
+  if ($a == 255){
+    %out1 = $a + 10
   }
-  else{
-    %pp = $a + 3
+  else {
+    %out2 = $a + 11
   }
 }
 else {
-  if ($a == 77){
-    %o = $a + 4
+  if ($a <= 127){
+    %out3 = $a + 12
   }
   else {
-    %o = $a + 5
+    %out1 = $a + 13
   }
 }
