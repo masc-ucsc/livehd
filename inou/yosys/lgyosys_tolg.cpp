@@ -65,7 +65,7 @@ static void look_for_module_outputs(RTLIL::Module *module, const std::string &pa
     Index_ID     io_idx;
     if(wire->port_input) {
       assert(!wire->port_output); //any bidirectional port?
-#ifdef DEBUG
+#ifndef NDEBUG
       log(" adding global input  wire: %s width %d id=%x\n", wire->name.c_str(), wire->width, wire->hash());
 #endif
       assert(wire->name.c_str()[0] == '\\');
@@ -80,7 +80,7 @@ static void look_for_module_outputs(RTLIL::Module *module, const std::string &pa
 #endif
 
     } else if(wire->port_output) {
-#ifdef DEBUG
+#ifndef NDEBUG
       log(" adding global output wire: %s width %d id=%x\n", wire->name.c_str(), wire->width, wire->hash());
 #endif
       assert(wire->name.c_str()[0] == '\\');
@@ -631,12 +631,12 @@ static LGraph *process_module(RTLIL::Module *module) {
     }
   }
 
-#if DEBUG
+#ifndef NDEBUG
   log("INOU/YOSYS processing module %s, ncells %lu, nwires %lu\n", module->name.c_str(), module->cells().size(), module->wires().size());
 #endif
 
   for(auto cell : module->cells()) {
-#if DEBUG
+#ifndef NDEBUG
     log("Looking for cell %s:\n", cell->type.c_str());
 #endif
 
@@ -1173,7 +1173,7 @@ static LGraph *process_module(RTLIL::Module *module) {
       Node_Pin output  = g->get_graph_output(&wire->name.c_str()[1]);
       Node_Pin dst_pin = Node_Pin(output.get_nid(), 0, true);
       Node_Pin src_pin = Node_Pin(wire2lpin[wire].nid, wire2lpin[wire].out_pid, false);
-#ifdef DEBUG
+#ifndef NDEBUG
       log("  connecting module output %s %d %ld\n", wire->name.c_str(), src_pin.get_pid(), src_pin.get_nid());
 #endif
       g->add_edge(src_pin, dst_pin, wire->width);

@@ -93,8 +93,8 @@ RTLIL::Wire* Lgyosys_dump::create_wire(const LGraph *g, const Index_ID idx, RTLI
   else
     name = "\\lgraph_cell_" + std::to_string(idx);
 
-#if DEBUG
-      fmt::print("adding wire to yosys module {}, name: {}\n", module->name.str(), name.str());
+#ifndef NDEBUG
+      fmt::print("1.adding wire to yosys module {}, name: {} idx:{}\n", module->name.str(), name.str(), idx);
 #endif
 
   RTLIL::Wire *new_wire = module->addWire(name, g->get_bits(idx));
@@ -144,8 +144,8 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
     }
 
     if(g->node_type_get(idx).op == U32Const_Op) {
-#if DEBUG
-      fmt::print("adding wire to yosys module {}, name: {}\n", module->name.str(), name.str());
+#ifndef NDEBUG
+      fmt::print("2.adding wire to yosys module {}, name: {} idx:{}\n", module->name.str(), name.str(), idx);
 #endif
       RTLIL::Wire *new_wire = module->addWire(name, g->get_bits(idx));
 
@@ -156,8 +156,8 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
 
     } else if(g->node_type_get(idx).op == StrConst_Op) {
       const std::string const_val = g->node_const_value_get(idx);
-#if DEBUG
-      fmt::print("adding wire to yosys module {}, name: {}\n", module->name.str(), name.str());
+#ifndef NDEBUG
+      fmt::print("3.adding wire to yosys module {}, name: {} idx:{}\n", module->name.str(), name.str(), idx);
 #endif
       RTLIL::Wire *new_wire = module->addWire(name, const_val.size());
 
@@ -195,8 +195,8 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
 
         std::string full_name = name.str() + std::string(out_name);
 
-#if DEBUG
-        fmt::print("adding wire to yosys module {}, name: {}\n", module->name.str(), full_name);
+#ifndef NDEBUG
+        fmt::print("4.adding wire to yosys module {}, name: {} idx:{}\n", module->name.str(), full_name, idx);
 #endif
         RTLIL::Wire *new_wire                                              = module->addWire(full_name, out_size);
         cell_output_map[std::make_pair(idx, edge.get_out_pin().get_pid())] = new_wire;
@@ -231,8 +231,8 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
           full_name = name.str().substr(1) + std::string(out_name);
         }
 
-#if DEBUG
-        fmt::print("adding wire to yosys module {}, name: {}\n", module->name.str(), full_name);
+#ifndef NDEBUG
+        fmt::print("5.adding wire to yosys module {}, name: {} idx:{}\n", module->name.str(), full_name, idx);
 #endif
         RTLIL::Wire *new_wire                                              = module->addWire("\\" + full_name, out_size);
         cell_output_map[std::make_pair(idx, edge.get_out_pin().get_pid())] = new_wire;
@@ -266,8 +266,8 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
           //reduce operator have 1 bit
           if(edge.get_out_pin().get_pid() == 1)
             out_size = 1;
-#if DEBUG
-          fmt::print("adding wire to yosys module {}, name: {}\n", module->name.str(), name.str());
+#ifndef NDEBUG
+          fmt::print("6.adding wire to yosys module {}, name: {} idx:{}\n", module->name.str(), name.str(),idx);
 #endif
           RTLIL::Wire *new_wire                                              = module->addWire(name, out_size);
           cell_output_map[std::make_pair(idx, edge.get_out_pin().get_pid())] = new_wire;
@@ -276,8 +276,8 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       continue;
     }
     //FIXME: prevent creating wires when driving the output
-#if DEBUG
-    fmt::print("adding wire to yosys module {}, name: {}\n", module->name.str(), name.str());
+#ifndef NDEBUG
+    fmt::print("7.adding wire to yosys module {}, name: {} idx:{}\n", module->name.str(), name.str(),idx);
 #endif
     RTLIL::Wire *result                     = module->addWire(name, g->get_bits(idx));
     cell_output_map[std::make_pair(idx, 0)] = result;
