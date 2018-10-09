@@ -5,5 +5,5 @@ test --cache_test_results=no
 
 # Future remote buildfarm for bazel
 # add the following line to lgraph/.bazelrc to enable remote builds
-# build --spawn_strategy=remote --genrule_strategy=remote --strategy=Javac=remote --strategy=Closure=remote --remote_executor=mada1.soe.ucsc.edu:8980
+# build --jobs=50 --spawn_strategy=remote --genrule_strategy=remote --strategy=Javac=remote --strategy=Closure=remote --remote_executor=mada1.soe.ucsc.edu:8980
 
