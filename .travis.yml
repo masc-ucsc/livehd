@@ -9,7 +9,7 @@ env:
   matrix:
     - BUILD_MODE=fastbuild DOCKER=mascucsc/archlinux-masc
     - BUILD_MODE=dbg       DOCKER=mascucsc/archlinux-masc
-    - BUILD_MODE=fastbuild DOCKER=mascucsc/alpine-masc
+    - BUILD_MODE=fastbuild DOCKER=mascucsc/alpine-masc    DOCKER_LGRAPH_SRC=/home/user/lgraph
     - BUILD_MODE=dbg       DOCKER=mascucsc/ubuntu-masc
 
 before_install:
@@ -18,5 +18,5 @@ before_install:
   # - docker pull mascucsc/ubuntu-masc
 
 script:
-  - scripts/run-docker-test.sh `pwd` $BUILD_MODE $DOCKER
+  - scripts/run-docker-test.sh `pwd` $BUILD_MODE $DOCKER $DOCKER_LGRAPH_SRC
 

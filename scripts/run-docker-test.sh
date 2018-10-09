@@ -10,7 +10,8 @@ LGRAPH_SRC=$1
 LGRAPH_BUILD_MODE=${2:fastbuild} # opt dbg fastbuild
 DOCKER_IMAGE=${3:-mascucsc/archlinux-masc:latest}
 
-DOCKER_LGRAPH_SRC='/root/lgraph'
+DOCKER_LGRAPH_SRC=${4:-/root/lgraph}
+#DOCKER_LGRAPH_SRC='/root/lgraph'
 
 if [ ! -e ${LGRAPH_SRC}/WORKSPACE ]; then
   echo "BUILD ERROR: '${LGRAPH_SRC}' does not contain LGRAPH source code"
