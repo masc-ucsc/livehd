@@ -39,8 +39,8 @@ Replxx::hints_t hook_hint(std::string const& context, int index, Replxx::Color& 
 void hook_color(std::string const& str, Replxx::colors_t& colors, void* user_data);
 
 Replxx::completions_t hook_shared(std::string const& context, int index, void* user_data, bool add_all) {
-	auto* examples = static_cast<std::vector<std::string>*>(user_data);
-	Replxx::completions_t completions;
+  auto* examples = static_cast<std::vector<std::string>*>(user_data);
+  Replxx::completions_t completions;
 
   int last_cmd_start = context.size();
   int last_cmd_end   = context.size();
@@ -149,7 +149,7 @@ Replxx::completions_t hook_shared(std::string const& context, int index, void* u
       examples = &fields;
   }
 
-	for (auto const& e : *examples) {
+  for (auto const& e : *examples) {
     //fmt::print("checking {} vs {}\n",e, prefix);
     if (strncasecmp(prefix.c_str(), e.c_str(), prefix.size())==0) {
       //fmt::print("match {}\n",e);
@@ -161,8 +161,8 @@ Replxx::completions_t hook_shared(std::string const& context, int index, void* u
         completions.emplace_back((prefix_add + e).c_str());
       }else
         completions.emplace_back(e.c_str());
-		}
-	}
+    }
+  }
 
 #if 1
   if (!add_all && completions.size() == 1 && !prefix_add.empty()) {
@@ -175,7 +175,7 @@ Replxx::completions_t hook_shared(std::string const& context, int index, void* u
   }
 #endif
 
-	return completions;
+  return completions;
 }
 
 Replxx::completions_t hook_completion(std::string const& context, int index, void* user_data) {
@@ -185,78 +185,78 @@ Replxx::completions_t hook_completion(std::string const& context, int index, voi
 }
 
 Replxx::hints_t hook_hint(std::string const& context, int index, Replxx::Color& color, void* user_data) {
-	Replxx::hints_t hints;
+  Replxx::hints_t hints;
 
-	// only show hint if prefix is at least 'n' chars long
-	// or if prefix begins with a specific character
-	std::string prefix {context.substr(index)};
-	if (prefix.size() >= 2 || (! prefix.empty() && prefix.at(0) == '!')) {
+  // only show hint if prefix is at least 'n' chars long
+  // or if prefix begins with a specific character
+  std::string prefix {context.substr(index)};
+  if (prefix.size() >= 2 || (! prefix.empty() && prefix.at(0) == '!')) {
     auto opts = hook_shared(context, index, user_data, true);
 #if 1
-		for (auto const& e : opts) {
+    for (auto const& e : opts) {
       //fmt::print("prefix[{}] e[{}]\n",prefix,e);
-			//if (strncasecmp(e.c_str(), prefix.c_str(), prefix.size()) == 0 ) {
-				hints.emplace_back(e.substr(prefix.size()).c_str());
-			//}
-		}
+      //if (strncasecmp(e.c_str(), prefix.c_str(), prefix.size()) == 0 ) {
+        hints.emplace_back(e.substr(prefix.size()).c_str());
+      //}
+    }
 #else
     auto* examples = static_cast<std::vector<std::string>*>(user_data);
-		for (auto const& e : *examples) {
-			if (e.compare(0, prefix.size(), prefix) == 0) {
-				hints.emplace_back(e.substr(prefix.size()).c_str());
-			}
-		}
+    for (auto const& e : *examples) {
+      if (e.compare(0, prefix.size(), prefix) == 0) {
+        hints.emplace_back(e.substr(prefix.size()).c_str());
+      }
+    }
 #endif
-	}
+  }
 
-	// set hint color to green if single match found
-	if (hints.size() == 1) {
-		color = Replxx::Color::GREEN;
-	}
+  // set hint color to green if single match found
+  if (hints.size() == 1) {
+    color = Replxx::Color::GREEN;
+  }
 
-	return hints;
+  return hints;
 }
 
 int real_len( std::string const& s ) {
-	int len( 0 );
-	uint8_t m4( 128 + 64 + 32 + 16 );
-	uint8_t m3( 128 + 64 + 32 );
-	uint8_t m2( 128 + 64 );
-	for ( int i( 0 ); i < static_cast<int>( s.length() ); ++ i, ++ len ) {
-		uint8_t c( s[i] );
-		if ( ( c & m4 ) == m4 ) {
-			i += 3;
-		} else if ( ( c & m3 ) == m3 ) {
-			i += 2;
-		} else if ( ( c & m2 ) == m2 ) {
-			i += 1;
-		}
-	}
-	return ( len );
+  int len( 0 );
+  uint8_t m4( 128 + 64 + 32 + 16 );
+  uint8_t m3( 128 + 64 + 32 );
+  uint8_t m2( 128 + 64 );
+  for ( int i( 0 ); i < static_cast<int>( s.length() ); ++ i, ++ len ) {
+    uint8_t c( s[i] );
+    if ( ( c & m4 ) == m4 ) {
+      i += 3;
+    } else if ( ( c & m3 ) == m3 ) {
+      i += 2;
+    } else if ( ( c & m2 ) == m2 ) {
+      i += 1;
+    }
+  }
+  return ( len );
 }
 
 void hook_color(std::string const& context, Replxx::colors_t& colors, void* user_data) {
-	auto* regex_color = static_cast<std::vector<std::pair<std::string, Replxx::Color>>*>(user_data);
+  auto* regex_color = static_cast<std::vector<std::pair<std::string, Replxx::Color>>*>(user_data);
 
-	// highlight matching regex sequences
-	for (auto const& e : *regex_color) {
-		size_t pos {0};
-		std::string str = context;
-		std::smatch match;
+  // highlight matching regex sequences
+  for (auto const& e : *regex_color) {
+    size_t pos {0};
+    std::string str = context;
+    std::smatch match;
 
-		while(std::regex_search(str, match, std::regex(e.first))) {
-			std::string c {match[0]};
-			pos += real_len( match.prefix() );
-			int len( real_len( c ) );
+    while(std::regex_search(str, match, std::regex(e.first))) {
+      std::string c {match[0]};
+      pos += real_len( match.prefix() );
+      int len( real_len( c ) );
 
-			for (int i = 0; i < len; ++i) {
-				colors.at(pos + i) = e.second;
-			}
+      for (int i = 0; i < len; ++i) {
+        colors.at(pos + i) = e.second;
+      }
 
-			pos += len;
-			str = match.suffix();
-		}
-	}
+      pos += len;
+      str = match.suffix();
+    }
+  }
 }
 
 int main(int argc, char **argv) {
@@ -268,43 +268,43 @@ int main(int argc, char **argv) {
       option_quiet = true;
   }
 
-	using cl = Replxx::Color;
-	std::vector<std::pair<std::string, cl>> regex_color {
-		// pipe operator
-		{"\\|\\>", cl::BRIGHTCYAN},
+  using cl = Replxx::Color;
+  std::vector<std::pair<std::string, cl>> regex_color {
+    // pipe operator
+    {"\\|\\>", cl::BRIGHTCYAN},
 
-		// method keywords
-		{"color_blue", cl::CYAN},
+    // method keywords
+    {"color_blue", cl::CYAN},
 
-		// commands
-		{"help", cl::BRIGHTMAGENTA},
-		{"history", cl::BRIGHTMAGENTA},
-		{"quit", cl::BRIGHTMAGENTA},
-		{"exit", cl::BRIGHTMAGENTA},
-		{"clear", cl::BRIGHTMAGENTA},
-		{"prompt", cl::BRIGHTMAGENTA},
+    // commands
+    {"help", cl::BRIGHTMAGENTA},
+    {"history", cl::BRIGHTMAGENTA},
+    {"quit", cl::BRIGHTMAGENTA},
+    {"exit", cl::BRIGHTMAGENTA},
+    {"clear", cl::BRIGHTMAGENTA},
+    {"prompt", cl::BRIGHTMAGENTA},
 
-		// numbers
-		{"[\\-|+]{0,1}[0-9]+", cl::CYAN}, // integers
-		{"[\\-|+]{0,1}[0-9]*\\.[0-9]+", cl::CYAN}, // decimals
-		{"[\\-|+]{0,1}[0-9]+e[\\-|+]{0,1}[0-9]+", cl::CYAN}, // scientific notation
+    // numbers
+    {"[\\-|+]{0,1}[0-9]+", cl::CYAN}, // integers
+    {"[\\-|+]{0,1}[0-9]*\\.[0-9]+", cl::CYAN}, // decimals
+    {"[\\-|+]{0,1}[0-9]+e[\\-|+]{0,1}[0-9]+", cl::CYAN}, // scientific notation
 
-		// registers
-		{"\\@\\w+", cl::MAGENTA},
+    // registers
+    {"\\@\\w+", cl::MAGENTA},
 
-		// labels
-		{"\\w+\\:", cl::YELLOW},
+    // labels
+    {"\\w+\\:", cl::YELLOW},
 
-	};
+  };
 
-	// init the repl
-	Replxx rx;
-	rx.install_window_change_handler();
+  // init the repl
+  Replxx rx;
+  rx.install_window_change_handler();
 
-	// words to be completed
-	std::vector<std::string> examples {
-		"help", "history", "quit", "exit", "clear", "prompt ",
-	};
+  // words to be completed
+  std::vector<std::string> examples {
+    "help", "history", "quit", "exit", "clear", "prompt ",
+  };
 
   // init all the lgraph libraries used
   Main_api::init();
@@ -314,50 +314,55 @@ int main(int argc, char **argv) {
       });
 
   const char *env_home = std::getenv("HOME");
+  bool history = true;
   if(env_home==0) {
-    std::cerr << "error: unset HOME directory??\n";
-    exit(-3);
+    console->warn("unset HOME directory, not loading history file\n");
+    history = false;
   }
-	// the path to the history file
-	std::string history_file(env_home);
-  history_file.append("/.config/lgraph/history.txt");
+  // the path to the history file
+  std::string history_file;
 
-  if ( access( history_file.c_str(), F_OK ) == -1 ) {
-    std::cout << "Setting history file to $HOME/.config/lgraph/history.txt\n";
-    std::string lgraph_path(env_home);
-    lgraph_path.append("/.config");
-    if ( access( lgraph_path.c_str(), F_OK ) == -1 ) {
-      int ok = mkdir(lgraph_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+  if(history){
+    history_file = std::string(env_home);
+    history_file.append("/.config/lgraph/history.txt");
+
+    if ( access( history_file.c_str(), F_OK ) == -1 ) {
+      std::cout << "Setting history file to $HOME/.config/lgraph/history.txt\n";
+      std::string lgraph_path(env_home);
+      lgraph_path.append("/.config");
+      if ( access( lgraph_path.c_str(), F_OK ) == -1 ) {
+        int ok = mkdir(lgraph_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+        if (ok<0) {
+          std::cerr << "error: could not create " << lgraph_path << " directory for history.txt\n";
+          exit(-3);
+        }
+      }
+      lgraph_path.append("/lgraph");
+      if ( access( lgraph_path.c_str(), F_OK ) == -1 ) {
+        int ok = mkdir(lgraph_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+        if (ok<0) {
+          std::cerr << "error: could not create " << lgraph_path << " directory for history.txt\n";
+          exit(-3);
+        }
+      }
+      int ok = creat(history_file.c_str(), S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
       if (ok<0) {
-        std::cerr << "error: could not create " << lgraph_path << " directory for history.txt\n";
+        std::cerr << "error: could not create " << history_file << "\n";
         exit(-3);
       }
     }
-    lgraph_path.append("/lgraph");
-    if ( access( lgraph_path.c_str(), F_OK ) == -1 ) {
-      int ok = mkdir(lgraph_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-      if (ok<0) {
-        std::cerr << "error: could not create " << lgraph_path << " directory for history.txt\n";
-        exit(-3);
-      }
-    }
-    int ok = creat(history_file.c_str(), S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-    if (ok<0) {
-      std::cerr << "error: could not create " << history_file << "\n";
-      exit(-3);
-    }
+
+    rx.history_load(history_file);
   }
 
-	rx.history_load(history_file);
+  rx.set_max_history_size(8192);
+  rx.set_max_line_size(128);
+  rx.set_max_hint_rows(6);
 
-	rx.set_max_history_size(8192);
-	rx.set_max_line_size(128);
-	rx.set_max_hint_rows(6);
+  rx.set_highlighter_callback(hook_color, static_cast<void*>(&regex_color));
 
-	rx.set_highlighter_callback(hook_color, static_cast<void*>(&regex_color));
-
-	rx.set_completion_callback(hook_completion, static_cast<void*>(&examples));
-	rx.set_hint_callback(hook_hint, static_cast<void*>(&examples));
+  rx.set_completion_callback(hook_completion, static_cast<void*>(&examples));
+  rx.set_hint_callback(hook_hint, static_cast<void*>(&examples));
 
   if (!option_quiet) {
     std::cout
@@ -367,38 +372,38 @@ int main(int argc, char **argv) {
       << "Type 'quit' or 'exit' to exit\n\n";
   }
 
-	// set the repl prompt
-	std::string prompt {"\x1b[1;32mlgraph\x1b[0m> "};
+  // set the repl prompt
+  std::string prompt {"\x1b[1;32mlgraph\x1b[0m> "};
 
-	// main repl loop
-	for (;;) {
-		// display the prompt and retrieve input from the user
-		char const *cinput{ nullptr };
+  // main repl loop
+  for (;;) {
+    // display the prompt and retrieve input from the user
+    char const *cinput{ nullptr };
 
-		do {
-			cinput = rx.input(prompt);
-		} while ( ( cinput == nullptr ) && ( errno == EAGAIN ) );
+    do {
+      cinput = rx.input(prompt);
+    } while ( ( cinput == nullptr ) && ( errno == EAGAIN ) );
 
-		if (cinput == nullptr) {
-			break;
+    if (cinput == nullptr) {
+      break;
     }
-		if (cinput[0]==0) {
-			continue; // Empty line
+    if (cinput[0]==0) {
+      continue; // Empty line
     }
 
-		std::string input {cinput};
+    std::string input {cinput};
 
-		if (input.compare(0, 4, "quit") == 0 || input.compare(0, 4, "exit") == 0) {
+    if (input.compare(0, 4, "quit") == 0 || input.compare(0, 4, "exit") == 0) {
 
-			rx.history_add(input);
-			break;
+      rx.history_add(input);
+      break;
 
-		}else if (input.compare(0, 4, "help") == 0) {
-			auto pos = input.find(" ");
+    }else if (input.compare(0, 4, "help") == 0) {
+      auto pos = input.find(" ");
       while(input[pos+1] == ' ')
         pos++;
 
-			if (pos == std::string::npos) {
+      if (pos == std::string::npos) {
         help("help [str]","this output, or for a specific command");
         help("quit","exit lgraph");
         help("exit","exit lgraph");
@@ -407,7 +412,7 @@ int main(int argc, char **argv) {
         help("prompt <str>","change the current prompt");
 
         Main_api::get_commands(help);
-			} else {
+      } else {
         std::string cmd = input.substr(pos + 1);
         auto pos2 = cmd.find(" ");
         if (pos2 != std::string::npos)
@@ -415,54 +420,55 @@ int main(int argc, char **argv) {
 
         help(cmd,Main_api::get_command_help(cmd));
         Main_api::get_labels(cmd, help_labels);
-			}
+      }
 
-			rx.history_add(input);
-			continue;
+      rx.history_add(input);
+      continue;
 
-		}else if (input.compare(0, 6, "prompt") == 0) {
-			// set the repl prompt text
-			auto pos = input.find(" ");
-			if (pos == std::string::npos) {
-				std::cout << "Error: 'prompt' missing argument\n";
-			} else {
-				prompt = input.substr(pos + 1) + " ";
-			}
+    }else if (input.compare(0, 6, "prompt") == 0) {
+      // set the repl prompt text
+      auto pos = input.find(" ");
+      if (pos == std::string::npos) {
+        std::cout << "Error: 'prompt' missing argument\n";
+      } else {
+        prompt = input.substr(pos + 1) + " ";
+      }
 
-			rx.history_add(input);
-			continue;
+      rx.history_add(input);
+      continue;
 
-		}else if (input.compare(0, 7, "history") == 0) {
-			// display the current history
-			for (size_t i = 0, sz = rx.history_size(); i < sz; ++i) {
-				std::cout << std::setw(4) << i << ": " << rx.history_line(i) << "\n";
-			}
+    }else if (input.compare(0, 7, "history") == 0) {
+      // display the current history
+      for (size_t i = 0, sz = rx.history_size(); i < sz; ++i) {
+        std::cout << std::setw(4) << i << ": " << rx.history_line(i) << "\n";
+      }
 
-			rx.history_add(input);
-			continue;
+      rx.history_add(input);
+      continue;
 
-		}else if (input.compare(0, 5, "clear") == 0) {
-			// clear the screen
-			rx.clear_screen();
+    }else if (input.compare(0, 5, "clear") == 0) {
+      // clear the screen
+      rx.clear_screen();
 
-			rx.history_add(input);
-			continue;
+      rx.history_add(input);
+      continue;
 
-		}else{
-			// default action
-			std::cout << input << "\n";
+    }else{
+      // default action
+      std::cout << input << "\n";
 
       Main_api::parse(input);
 
-			rx.history_add(input);
-			continue;
-		}
-	}
+      rx.history_add(input);
+      continue;
+    }
+  }
 
   if (!option_quiet)
     std::cerr << "See you soon\n";
 
-	rx.history_save(history_file);
+  if(history)
+    rx.history_save(history_file);
 
-	return 0;
+  return 0;
 }
