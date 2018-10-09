@@ -1,0 +1,15 @@
+
+BoomConfig
+  create jar [success] Total time: 37 s, completed Oct 9, 2018 12:02:16 PM
+  elaboration [success] Total time: 46 s, completed Oct 9, 2018 12:03:14 PM
+  Total FIRRTL Compile Time: 147.988 s
+
+BoomConfig 2 cores
+  create jar [success] Total time: 4 s, completed Oct 9, 2018 12:17:56 PM
+  elaboration [success] Total time: 112 s, completed Oct 9, 2018 12:19:55 PM
+  Total FIRRTL Compile Time: 195.935 s
+
+ExampleBoomSystem is the top level module with 1 or 2 cores
+BoomCore is just the core (no caches)
+BoomTile is the core and the L1 caches
+
