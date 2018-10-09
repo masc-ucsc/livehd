@@ -84,7 +84,7 @@ while true ; do
                 *) OPT_GRAPH_INPUT=$2 ; shift 2 ;;
             esac ;;
         --) shift ; break ;;
-        *) echo "Internal error!" ; exit 1 ;;
+        *) echo "lgyosys parameter not recognized $1 $2" ; exit 1 ;;
     esac
 done
 OPT_FILES=$*
@@ -162,7 +162,7 @@ if [ ${OPT_TO_VERILOG} -eq 0 ]; then
   ${OPT_YOSYS} -ql ${OPT_LOGDIR}/${BASE}.log  -m $OPT_INOU_YOSYS -p "
   ${OPT_INCDIR}; ${OPT_READVERILOG} -sv -nomeminit ${FILE_LIST};
   hierarchy ${top}; proc; pmuxtree; memory_dff; memory_collect; ${techmap}; ${lib};
-  write_blif golden.blif; write_verilog golden.v ; yosys2lg -path ${OPT_LGDB}"
+  write_blif ${OPT_TOP}.blif; write_verilog ${OPT_TOP}.v; yosys2lg -path ${OPT_LGDB}"
 
   if [ $? -eq 0 ]; then
     echo "Successfully parsed yosys file "$a

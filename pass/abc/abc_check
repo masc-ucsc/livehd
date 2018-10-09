@@ -2,7 +2,7 @@
 golden=$1
 mapped=$2
 script="cec $mapped $golden"
-abc_binary="./subs/yosys/bin/yosys-abc"
+abc_binary="yosys-abc"
 ${abc_binary} -c "${script}" | grep "Networks are equivalent."
 if [ $? -eq 0 ]; then
    echo "Successfully matched generated verilog with yosys elaborated verilog file"

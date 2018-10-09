@@ -62,27 +62,27 @@ void Pass_abc::dump_blif(const LGraph *g, const std::string &filename) {
 
 void Pass_abc::gen_module(const LGraph *g, std::ofstream &fs) {
   fs << ".model " << g->get_name() << "\n";
-  fs << ".inputs ";
+  fs << ".inputs";
   for(const auto &idx : graph_info->graphio_input_id) {
     int width = g->get_bits(idx);
     if(width > 1) {
       for(int j = 0; j < width; j++) {
-        fs << g->get_graph_input_name(idx) << "[" << j << "] ";
+        fs << " " << g->get_graph_input_name(idx) << "[" << j << "]";
       }
     } else {
-      fs << g->get_graph_input_name(idx) << " ";
+      fs << " " << g->get_graph_input_name(idx);
     }
   }
   fs << "\n";
-  fs << ".outputs ";
+  fs << ".outputs";
   for(const auto &idx : graph_info->graphio_output_id) {
     int width = g->get_bits(idx);
     if(width > 1) {
       for(int j = 0; j < width; j++) {
-        fs << g->get_graph_output_name(idx) << "[" << j << "] ";
+        fs << " " << g->get_graph_output_name(idx) << "[" << j << "]";
       }
     } else {
-      fs << g->get_graph_output_name(idx) << " ";
+      fs << " " << g->get_graph_output_name(idx);
     }
   }
   fs << "\n";
