@@ -30,6 +30,12 @@
 # third_party/fork
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
 new_git_repository(
+    name = "ot",
+    build_file = "BUILD.ot", # relative to external path
+    commit = "931b2fbe867e2a5241d86d45fea26a07c1f8b0d6", #Oct 8, 2018
+    remote = "https://github.com/OpenTimer/OpenTimer.git",
+)
+new_git_repository(
     name = "abc",
     build_file = "BUILD.abc", # relative to external path
     commit = "15939511df8ff1ce15f2112cee01d7693234f2a4", # Jun 13, 2018
