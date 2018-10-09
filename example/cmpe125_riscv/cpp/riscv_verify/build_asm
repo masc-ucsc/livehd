@@ -1,0 +1,15 @@
+#!/bin/bash
+
+c_file=$1
+base_name=${c_file%.*}
+base_name=${base_name##*/}
+
+# RV64I does not have multiply/div 
+riscv64-unknown-linux-gnu-gcc -march=rv64i -mabi=lp64 -fPIC -O1 -c $c_file
+riscv64-unknown-linux-gnu-gcc -c boot2.S
+riscv64-unknown-linux-gnu-gcc -c div.S
+riscv64-unknown-linux-gnu-gcc -c muldi3.S
+riscv64-unknown-linux-gnu-gcc -c multi3.S
+riscv64-unknown-linux-gnu-ld -T rv128test.lds boot2.o $base_name.o div.o multi3.o muldi3.o -o $base_name
+riscv64-unknown-linux-gnu-objcopy -S -O binary $base_name $2".bin"
+#riscv64-unknown-linux-gnu-objcopy -S -j .text -O binary $base_name test_$2".bin"
