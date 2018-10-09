@@ -1,15 +1,24 @@
 
-BoomConfig
+boom.system.TestHarness.BoomConfig.v
+  BoomConfig
   create jar [success] Total time: 37 s, completed Oct 9, 2018 12:02:16 PM
   elaboration [success] Total time: 46 s, completed Oct 9, 2018 12:03:14 PM
   Total FIRRTL Compile Time: 147.988 s
 
-BoomConfig 2 cores
+boom.system.TestHarness.BoomConfig2core.v
+  BoomConfig 2 cores
   create jar [success] Total time: 4 s, completed Oct 9, 2018 12:17:56 PM
   elaboration [success] Total time: 112 s, completed Oct 9, 2018 12:19:55 PM
   Total FIRRTL Compile Time: 195.935 s
 
-ExampleBoomSystem is the top level module with 1 or 2 cores
-BoomCore is just the core (no caches)
-BoomTile is the core and the L1 caches
+  ExampleBoomSystem is the top level module with 1 or 2 cores
+  BoomCore is just the core (no caches)
+  BoomTile is the core and the L1 caches
+
+example.TestHarness.DefaultExampleConfig.v
+  Firesim 1 rocket core
+  elaboration [success] Total time: 185 s, completed Oct 9, 2018 1:44:15 PM
+  Total FIRRTL Compile Time: 45500.0 ms
+
+  RocketTile is the core and L1 caches
 

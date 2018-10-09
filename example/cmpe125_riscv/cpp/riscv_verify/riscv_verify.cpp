@@ -8,7 +8,7 @@ using RISCV_Verify::inst_debug_text;
 #include <string>
 using std::string;
 
-#include "../riscvdis/disasm.h"
+#include "riscvdis/disasm.h"
 
 ////////////////////////////////////////////////////////////////////////////
 // RISCV checker backend
