@@ -499,7 +499,7 @@ static struct option options[] = {
 
 void help(void)
 {
-    printf("riscvemu version " CONFIG_VERSION ", Copyright (c) 2016-2017 Fabrice Bellard\n"
+    printf("riscvemu version cmpe125_lab, Copyright (c) 2016-2017 Fabrice Bellard\n"
            "usage: riscvemu [options] [kernel.bin|url] [hdimage.bin|filesystem_path]...\n"
            "options are:\n"
 #ifdef CONFIG_CPU_RISCV
