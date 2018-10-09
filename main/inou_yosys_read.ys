@@ -1,7 +1,7 @@
 # default yosys2lg script inou_yosys_read.ys
 
 {{#filelist}}
-read_verilog -sv {{input}}
+read_verilog -sv -nomeminit {{input}}
 {{/filelist}}
 
 # single file, no hierarchy needed

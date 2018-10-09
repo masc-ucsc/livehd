@@ -75,7 +75,7 @@ fi
 OPT_INOU_YOSYS=""
 if [ -f "${OPT_INOU_YOSYS}" ]; then
   echo ""
-elif [ -d "bazel-bin" && -f "./bazel-bin/inou/yosys/liblgraph_yosys.so" ]; then
+elif [ -d "bazel-bin" ] && [ -f "./bazel-bin/inou/yosys/liblgraph_yosys.so" ]; then
   OPT_INOU_YOSYS="./bazel-bin/inou/yosys/liblgraph_yosys.so"
 elif [ -f "./inou/yosys/liblgraph_yosys.so" ]; then
   OPT_INOU_YOSYS="./inou/yosys/liblgraph_yosys.so"

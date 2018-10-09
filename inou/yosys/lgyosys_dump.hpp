@@ -25,12 +25,17 @@ private:
 
   std::set<const LGraph *> _subgraphs;
 
-  uint64_t ids = 0;
+  uint64_t ids        = 0;
+  uint64_t spare_wire = 0;
 
   bool hierarchy;
 
   RTLIL::IdString next_id() {
     return RTLIL::IdString("\\lgraph_id_" + std::to_string(ids++));
+  }
+
+  const char * next_wire() {
+    return ("lgraph_spare_wire_" + std::to_string(spare_wire++)).c_str();
   }
 
   //FIXME: any way of merging these two?
@@ -44,6 +49,10 @@ private:
                            add_cell_fnc_sign add_cell, bool sign, RTLIL::Wire *result_wire);
 
   RTLIL::Wire *create_wire(const LGraph* g, const Index_ID idx, RTLIL::Module* module, bool input, bool output);
+
+
+  void create_wires(const LGraph *g, RTLIL::Module* module);
+
 protected:
 public:
   Lgyosys_dump(RTLIL::Design *design, bool hier = false) : design(design) {
