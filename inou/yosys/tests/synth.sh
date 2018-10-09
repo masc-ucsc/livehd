@@ -24,7 +24,7 @@ while true ; do
     case "$1" in
         -p|--profile)
           shift
-          YOSYS=./inou/yosys/lgyosys --profile
+          YOSYS="./inou/yosys/lgyosys --profile"
           ;;
         -s|--source)
             case "$2" in
@@ -44,7 +44,7 @@ while true ; do
 done
 
 
-YOSYS_BIN=`which yosys`
+YOSYS_BIN=$(which yosys)
 YOSYS_LIB="/usr/local/share/yosys/"
 
 if [ ! -f ${YOSYS_BIN} ]; then
@@ -68,7 +68,7 @@ if [ ! -d "${OPT_LGRAPH}" ]; then
 fi
 
 if [ ! -f "${OPT_LGRAPH}/inou/tech/verilog_json.rb" ]; then
-  echo "verilog.rb not found on `pwd`./inou/tech/"
+  echo "verilog.rb not found on $(pwd)/inou/tech/"
   exit 1
 fi
 

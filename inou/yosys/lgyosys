@@ -89,6 +89,7 @@ while true ; do
 done
 OPT_FILES=$*
 
+echo "foo"
 if [ -f "${OPT_YOSYS}" ]; then
   echo ""
 else
@@ -113,7 +114,7 @@ fi
 if [ -f "${OPT_INOU_YOSYS}" ]; then
   # Found library
   echo ""
-elif [ -d "bazel-bin" && -f "./bazel-bin/inou/yosys/liblgraph_yosys.so" ]; then
+elif [ -d "bazel-bin" ] && [ -f "./bazel-bin/inou/yosys/liblgraph_yosys.so" ]; then
   OPT_INOU_YOSYS="./bazel-bin/inou/yosys/liblgraph_yosys.so"
 elif [ -f "./inou/yosys/liblgraph_yosys.so" ]; then
   OPT_INOU_YOSYS="./inou/yosys/liblgraph_yosys.so"
@@ -142,8 +143,8 @@ if [ ${OPT_TO_VERILOG} -eq 0 ]; then
 
   techmap=""
   mkdir -p ${OPT_LOGDIR}
+
   if [ $OPT_TECHMAP -eq 1 ]; then
-    mkdir -p ${OPT_LOGDIR}
     mkdir -p ${OPT_LGDB}
     ruby ./inou/tech/verilog_json.rb ${OPT_CELL} > ./${OPT_LGDB}/tech_library
     techmap="techmap; opt_expr -full; "
@@ -156,6 +157,8 @@ if [ ${OPT_TO_VERILOG} -eq 0 ]; then
 
   lib=""
   if [ "$OPT_LIB" != "" ]; then
+    mkdir -p ${OPT_LGDB}
+    ruby ./inou/tech/fun_liberty_json.sh  ${OPT_LIB} > ${OPT_LGDB}
     lib="techmap -D ALU_RIPPLE; abc -liberty ${OPT_LIB}; "
   fi
 

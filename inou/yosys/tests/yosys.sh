@@ -23,7 +23,7 @@ while true ; do
     case "$1" in
         -p|--profile)
           shift
-          YOSYS=./inou/yosys/lgyosys --profile
+          YOSYS="./inou/yosys/lgyosys --profile"
           ;;
         --)
           shift
@@ -39,8 +39,6 @@ done
 
 rm -rf ./lgdb/ ./logs ./yosys-test ./*.v ./*.json
 mkdir yosys-test/
-
-yosys -V
 
 for input in ${inputs[@]}
 do

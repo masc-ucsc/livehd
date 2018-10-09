@@ -31,6 +31,7 @@ sh_library(
         "lgyosys",
         "lgcheck",
     ],
+    visibility = ["//visibility:public"],
 )
 
 filegroup(
@@ -38,6 +39,7 @@ filegroup(
     srcs = glob([
         "tests/*.v",
     ]),
+    visibility = ["//visibility:public"],
 )
 
 sh_test(

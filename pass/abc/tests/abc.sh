@@ -16,7 +16,16 @@ LGSHELL=./bazel-bin/main/lgshell
 CHECK=./pass/abc/abc_check
 json=./inou/json/lgjson
 
+if [ ! -f ${LGSHELL} ]; then
+  if [ -f ./main/lgshell ]; then
+    LGSHELL=./main/lgshell
+  else
+    echo "could not find lgshell on $(pwd)"
+    exit 1
+  fi
+fi
 
+pwd
 for input in ${inputs[@]}
 do
 
