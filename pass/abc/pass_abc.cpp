@@ -17,12 +17,12 @@ void Pass_abc_options::set(const std::string &key, const std::string &value) {
     if ( is_opt(key,"verbose") ) {
       if (value == "true")
         verbose = true;
-      else
-        verbose = false;
     }else if ( is_opt(key,"liberty_file") ) {
       liberty_file = value;
     }else if ( is_opt(key,"lef_file") ) {
       lef_file = value;
+    }else if ( is_opt(key,"blif_file") ) {
+      blif_file = value;
     }else{
       set_val(key,value);
     }
@@ -33,7 +33,6 @@ void Pass_abc_options::set(const std::string &key, const std::string &value) {
   if(lef_file.empty())
     assert(liberty_file.empty()); //ensure lef are loaded into tech library first
 
-  console->info("verbose: {}; lef_file {}", verbose, lef_file);
 }
 
 Pass_abc::Pass_abc() {
@@ -50,7 +49,7 @@ Pass_abc::~Pass_abc() {
 void Pass_abc::trans(LGraph *lg) {
 
   if(opack.lef_file == "") {
-    console->error("pass_abc.trans needs a lef_def file\n"); 
+    console->error("pass_abc.trans needs a lef_def file\n");
     return;
   }
 
@@ -551,17 +550,17 @@ bool Pass_abc::is_techmap(const LGraph *g) {
     }
     case GraphIO_Op: {
       if(g->is_graph_input(idx))
-		graph_info->graphio_input_id.push_back(idx);
+        graph_info->graphio_input_id.push_back(idx);
       else
-		graph_info->graphio_output_id.push_back(idx);
+        graph_info->graphio_output_id.push_back(idx);
       break;
     }
     case SubGraph_Op: {
-	  graph_info->subgraph_id.push_back(idx);
+        graph_info->subgraph_id.push_back(idx);
       break;
     }
     case Memory_Op: {
-	  graph_info->memory_id.push_back(idx);
+      graph_info->memory_id.push_back(idx);
       break;
     }
     default: {

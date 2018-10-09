@@ -12,8 +12,8 @@ declare -a inputs=("trivial.v" "test.v"\
                    )
 input_root=./inou/yosys/tests
 YOSYS=./inou/yosys/lgyosys
-ABC=./inou/abc/lgaig
-CHECK=./inou/abc/abc_check
+LGSHELL=./bazel-bin/main/lgshell
+CHECK=./pass/abc/abc_check
 json=./inou/json/lgjson
 
 
@@ -21,35 +21,38 @@ for input in ${inputs[@]}
 do
 
   base=${input%.*}
-  rm -rf ./lgdb/ ./logs ./yosys-test ./*.json ./*.v ./*.blif
 
-  if ! ${YOSYS} --techmap ${input_root}/${input}
-  then
-    echo "failed"
+  echo "${YOSYS} --techmap --top=${base} ${input_root}/${input}"
+  ${YOSYS} --techmap --top=${base} ${input_root}/${input}
+
+  if [ ! $? -eq 0 ]; then
+    echo "yosys2lg failed ${base}"
     exit 1
   fi
 
-  if ! ${ABC} --lgdb ./lgdb --graph_name ${base}
-  then
-    echo "failed"
+  echo "lgraph.find path:lgdb name:${base} |> pass.abc blif_file:${base}_map.blif" | ${LGSHELL}
+
+  if [ ! $? -eq 0 ]; then
+    echo "lg2abc failed ${base}"
     exit 1
   fi
 
-  if ! ${json} --lgdb ./lgdb --graph_name ${base}_mapped
-  then
-    echo "failed"
-    exit 1
-  fi
+  #if ! ${json} --lgdb ./lgdb --graph_name ${base}_mapped
+  #then
+  #  echo "I was not able to generate json for ${base}"
+  #fi
 
-  if [[ $(${CHECK} golden.blif mapped.blif | grep -c 'Successfully matched generated verilog with yosys elaborated verilog file') -eq 1 ]]
+  if [[ $(${CHECK} ${base}.blif ${base}_map.blif | grep -c 'Successfully matched generated verilog with yosys elaborated verilog file') -eq 1 ]]
   then
      rm -rf ./temp.blif
      echo "Successfully matched generated verilog with yosys elaborated verilog file"
   else
      rm -rf ./temp.blif
-     echo "FAIL: Equivalence check failed"
+     echo "FAIL: Equivalence check failed ${base}"
      exit 1
   fi
 done
+
 rm -rf ./*.genlib
-exit 0
+rm -rf ./lgdb/ ./logs ./yosys-test ./*.json ./*.v ./*.blif
+
