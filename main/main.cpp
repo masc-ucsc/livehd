@@ -259,7 +259,14 @@ void hook_color(std::string const& context, Replxx::colors_t& colors, void* user
 	}
 }
 
-int main() {
+int main(int argc, char **argv) {
+
+  bool option_quiet = false;
+
+  if (argc>1) {
+    if (strcasecmp(argv[1],"-q")==0)
+      option_quiet = true;
+  }
 
 	using cl = Replxx::Color;
 	std::vector<std::pair<std::string, cl>> regex_color {
@@ -352,11 +359,13 @@ int main() {
 	rx.set_completion_callback(hook_completion, static_cast<void*>(&examples));
 	rx.set_hint_callback(hook_hint, static_cast<void*>(&examples));
 
-	std::cout
-	<< "Welcome to lgraph\n"
-	//<< "Press 'tab' to view autocompletions\n"
-	<< "Type 'help' for help\n"
-	<< "Type 'quit' or 'exit' to exit\n\n";
+  if (!option_quiet) {
+    std::cout
+      << "Welcome to lgraph\n"
+      << "Press 'tab' to view autocompletions\n"
+      << "Type 'help' for help\n"
+      << "Type 'quit' or 'exit' to exit\n\n";
+  }
 
 	// set the repl prompt
 	std::string prompt {"\x1b[1;32mlgraph\x1b[0m> "};
@@ -450,7 +459,8 @@ int main() {
 		}
 	}
 
-  std::cerr << "See you soon\n";
+  if (!option_quiet)
+    std::cerr << "See you soon\n";
 
 	rx.history_save(history_file);
 
