@@ -28,7 +28,6 @@ void Pass_dce::transform(LGraph *g) {
     Index_ID current = *(pending.begin());
     pending.erase(current);
     output_used.set_bit(current);
-    fmt::print("dce using {}\n", current);
 
     for(auto &c : g->inp_edges(current)) {
       if(output_used.get_bit(c.get_out_pin().get_nid()))
@@ -49,7 +48,6 @@ void Pass_dce::transform(LGraph *g) {
   for(auto idx : g->fast()) {
     if(output_used.get_bit(idx))
       continue;
-    fmt::print("dce removing {}\n", idx);
 
     g->del_node(idx);
   }
