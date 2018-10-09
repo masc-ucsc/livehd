@@ -24,10 +24,12 @@ static void set_script_liblg(Eprp_var &var, std::string &script_file, std::strin
   const std::string script  = var.get("script");
 
   const auto &main_path = Main_api::get_main_path();
-  liblg = main_path + "/lgraph.runfiles/__main__/inou/yosys/liblgraph_yosys.so";
+  liblg = main_path + "/lgshell.runfiles/__main__/inou/yosys/liblgraph_yosys.so";
+  fmt::print("1.yosys path:{} liblg:{}\n", main_path, liblg);
   if(access(liblg.c_str(), X_OK) == -1) {
     // Maybe it is installed in /usr/local/bin/lgraph and /usr/local/share/lgraph/inou/yosys/liblgrapth...
     const std::string liblg2 = main_path + "/../share/lgraph/inou/yosys/liblgraph_yosys.so";
+    fmt::print("1.yosys path:{} liblg:{}\n", main_path, liblg2);
     if(access(liblg2.c_str(), X_OK) == -1) {
       Main_api::error(fmt::format("could not find liblgraph_yosys.so, the {} is not executable", liblg));
       return;
@@ -42,7 +44,7 @@ static void set_script_liblg(Eprp_var &var, std::string &script_file, std::strin
     else
       do_read_str = "inou_yosys_write.ys";
 
-    script_file = main_path + "/lgraph.runfiles/__main__/main/" + do_read_str;
+    script_file = main_path + "/lgshell.runfiles/__main__/main/" + do_read_str;
     if(access(script_file.c_str(), R_OK) == -1) {
       // Maybe it is installed in /usr/local/bin/lgraph and /usr/local/share/lgraph/inou/yosys/liblgrapth...
       const std::string script_file2 = main_path + "/../share/lgraph/main/" + do_read_str;

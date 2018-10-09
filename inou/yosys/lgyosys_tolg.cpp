@@ -227,6 +227,8 @@ static void set_bits_wirename(LGraph *g, const Index_ID idx, const RTLIL::Wire *
         wire->name.str().substr(0, 9) != "$ternary$" &&
         wire->name.str().substr(0, 8) != "$extend$" &&
 
+        wire->name.str().substr(0, 12) != "lgraph_cell_" &&
+        wire->name.str().substr(0, 18) != "lgraph_spare_wire_" &&
         //dc generated names
         !std::regex_match(wire->name.str(), dc_name) &&
 

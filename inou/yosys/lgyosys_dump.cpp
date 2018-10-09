@@ -111,14 +111,7 @@ RTLIL::Wire* Lgyosys_dump::create_wire(const LGraph *g, const Index_ID idx, RTLI
   return new_wire;
 }
 
-void Lgyosys_dump::to_yosys(const LGraph *g) {
-  std::string name = g->get_name();
-
-  RTLIL::Module *module = design->addModule("\\" + name);
-
-  input_map.clear();
-  output_map.clear();
-  cell_output_map.clear();
+void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module* module) {
 
   // first create all the output wires
   for(auto idx : g->fast()) {
@@ -134,13 +127,23 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       continue;
     }
 
+    if(idx == 195)
+      fmt::print("foo\n");
+
     RTLIL::IdString name;
     RTLIL::IdString yosys_op;
     const char *    wname = nullptr;
     if((wname = g->get_node_wirename(idx))) {
       name = RTLIL::IdString("\\" + std::string(wname));
     } else {
-      name = RTLIL::IdString("\\lgraph_cell_" + std::to_string(idx));
+      if(!g->has_name("lgraph_cell_" + std::to_string(idx)))
+         name = RTLIL::IdString("\\lgraph_cell_" + std::to_string(idx));
+      else {
+        do {
+          wname = next_wire();
+        } while(g->has_name(wname));
+        name = RTLIL::IdString("\\" + std::string(wname));
+      }
     }
 
     if(g->node_type_get(idx).op == U32Const_Op) {
@@ -279,9 +282,23 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
 #ifndef NDEBUG
     fmt::print("7.adding wire to yosys module {}, name: {} idx:{}\n", module->name.str(), name.str(),idx);
 #endif
+
+
     RTLIL::Wire *result                     = module->addWire(name, g->get_bits(idx));
     cell_output_map[std::make_pair(idx, 0)] = result;
   }
+}
+
+void Lgyosys_dump::to_yosys(const LGraph *g) {
+  std::string name = g->get_name();
+
+  RTLIL::Module *module = design->addModule("\\" + name);
+
+  input_map.clear();
+  output_map.clear();
+  cell_output_map.clear();
+
+  create_wires(g, module);
 
   // now create nodes and make connections
   for(auto idx : g->fast()) {
