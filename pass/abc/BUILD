@@ -19,3 +19,25 @@ cc_library(
     ],
 )
 
+sh_library(
+    name = "scripts",
+    srcs = [
+        "abc_check",
+    ],
+)
+
+sh_test(
+    name = "abc.sh",
+    srcs = ["tests/abc.sh"],
+    data = [
+        "//inou/yosys:liblgraph_yosys.so",
+        "//inou/yosys:verilog_tests",
+        "//main:lgshell",
+        ],
+    deps = [
+        "//inou/yosys:scripts",
+        "//inou/tech:tech_gens",
+        ":scripts",
+    ]
+)
+

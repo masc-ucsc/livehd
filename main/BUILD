@@ -26,6 +26,7 @@ cc_binary(
             "inou_yosys_read.ys",
             "inou_yosys_write.ys",
     ],
+    visibility = ["//visibility:public"],
 )
 
 cc_binary(

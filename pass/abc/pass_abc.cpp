@@ -158,46 +158,45 @@ void Pass_abc::find_latch_conn(const LGraph *g) {
 void Pass_abc::find_combinational_conn(const LGraph *g) {
 
   for(const auto &idx : graph_info->combinational_id) {
-    if(opack.verbose)
-      fmt::print("\nComb_Op_ID NodeID:{} has direct input from Node: \n", idx);
     std::vector<const Edge *> inp_edges(16);
-	graph_topology::topology_info             pid;
+    graph_topology::topology_info             pid;
     const Tech_cell *         tcell      = g->get_tlibrary()->get_const_cell(g->tmap_id_get(idx));
-    int                       port_count = 0;
+    uint32_t                  port_count = 0;
     for(const auto &input : g->inp_edges(idx)) {
       assert(input.get_inp_pin().get_pid() < 16);
       inp_edges[input.get_inp_pin().get_pid()] = &input;
       port_count++;
     }
+
     for(int i = 0; i < port_count; i++) {
       if(inp_edges[i] == nullptr)
         break;
-      if(opack.verbose)
-        fmt::print("{} pin input port ID {}", tcell->get_name(inp_edges[i]->get_inp_pin().get_pid()),
-                   inp_edges[i]->get_inp_pin().get_pid());
-      int bit_index[2] = {0, 0};
+
+      int bit_index[2] = {0, 0}; //changed withing recursive find
       recursive_find(g, inp_edges[i], pid, bit_index);
     }
+
     assert(pid.size() == port_count); // ensure that every port have fanin
-	graph_info->comb_conn[idx] = std::move(pid);
+    graph_info->comb_conn[idx] = std::move(pid);
   }
 }
 
 void Pass_abc::find_graphio_output_conn(const LGraph *g) {
   for(const auto &idx : graph_info->graphio_output_id) {
-    if(opack.verbose)
-      fmt::print("\nGraphIO_output_ID NodeID:{} has direct input from Node: \n", idx);
-	graph_topology::topology_info pid;
-    int           width = g->get_bits(idx);
-    int           index = 0;
+    graph_topology::topology_info pid;
+
+    uint32_t      width = g->get_bits(idx);
+    uint32_t      index = 0;
+
     for(const auto &input : g->inp_edges(idx)) {
       for(index = 0; index < width; index++) {
         int bit_index[2] = {index, index};
         recursive_find(g, &input, pid, bit_index);
       }
     }
+
     assert(index == pid.size());
-	graph_info->primary_output_conn[idx] = std::move(pid);
+    graph_info->primary_output_conn[idx] = std::move(pid);
   }
 }
 
