@@ -1,4 +1,8 @@
 
 build --cxxopt="-std=c++17" --cxxopt="-Wno-unknown-pragmas"
 common --color=yes
-test --cache_test_results=no --force_python py3 --python_path /usr/bin/python3
+test --cache_test_results=no
+
+# Future remote buildfarm for bazel
+# build --spawn_strategy=remote --genrule_strategy=remote --strategy=Javac=remote --strategy=Closure=remote --remote_executor=mada1.soe.ucsc.edu:8980
+
