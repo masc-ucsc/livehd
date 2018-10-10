@@ -1,0 +1,32 @@
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' include/verilated_config.h include/verilated_config.h
+--- include/verilated_config.h	1969-12-31 16:00:00.000000000 -0800
++++ include/verilated_config.h	2018-10-10 10:44:08.885184036 -0700
+@@ -0,0 +1,28 @@
++// -*- mode: C++; c-file-style: "cc-mode" -*-
++//*************************************************************************
++//
++// Copyright 2003-2018 by Wilson Snyder. This program is free software; you can
++// redistribute it and/or modify it under the terms of either the GNU
++// Lesser General Public License Version 3 or the Perl Artistic License.
++// Version 2.0.
++//
++// Verilator is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++// GNU General Public License for more details.
++//
++//*************************************************************************
++///
++/// \file
++/// \brief Verilator: Auto version information include for all Verilated C files
++///
++/// Code available from: http://www.veripool.org/verilator
++///
++//*************************************************************************
++
++
++///**** Product and Version name
++
++// Autoconf substitutes this with the strings from AC_INIT.
++#define VERILATOR_PRODUCT    "Verilator"
++#define VERILATOR_VERSION    "4.005 devel"
