@@ -20,7 +20,7 @@ LDFLAGS=-LDFLAGS "$(LIB_DEPS) -L."
 
 
 dut: $(CPP_FILES) $(VERILOG_FILES) cpp/riscv_verify/libriscv_checker.a
-	verilator -I./rtl $(VERILATOR_ARGS) $(LIB_OBJS) --cc --trace $(VERILOG_FILES) --exe $(CPP_FILES) -CFLAGS "$(CFLAGS)" ../cpp/riscv_verify/libriscv_checker.a ../cpp/riscv_verify/riscvdis/disasm.o ../cpp/riscv_verify/riscvdis/regnames.o $(LDFLAGS)
+	verilator -I./rtl $(VERILATOR_ARGS) --cc --trace $(VERILOG_FILES) --exe $(CPP_FILES) -CFLAGS "$(CFLAGS)" ../cpp/riscv_verify/libriscv_checker.a ../cpp/riscv_verify/riscvdis/disasm.o ../cpp/riscv_verify/riscvdis/regnames.o $(LDFLAGS)
 	make -C obj_dir/ -f Vpipe.mk Vpipe
 	cp -f obj_dir/Vpipe dut
 
