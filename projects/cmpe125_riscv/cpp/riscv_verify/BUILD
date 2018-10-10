@@ -2,13 +2,13 @@
 cc_library(
     name = "riscv_verify",
     srcs = glob(["*.cpp"])
-         + glob(["riscvdis/*.c"])
-         + glob(["rscvemu/*.c"],
-                exclude=[ "aes.c",
-                         "build_filelist.c",
-                         "jsemu.c",
-                         "verification_harness.c",
-                         "x86_machine.c",
+         + glob(["riscvdis/*.cc"])
+         + glob(["riscvemu/*.c"],
+                exclude=[ "riscvemu/aes.c",
+                         "riscvemu/build_filelist.c",
+                         "riscvemu/jsemu.c",
+                         "riscvemu/verification_harness.c",
+                         "riscvemu/x86_machine.c",
                          ])
     ,
     hdrs = glob(["*.h"])
@@ -17,5 +17,6 @@ cc_library(
     ,
     visibility = ["//visibility:public"],
     includes = [".","riscvemu"],
+    defines = ["VERIFICATION"],
 )
 

@@ -44,10 +44,8 @@ bool verify_cycle(Emulator *emulator, Vpipe *pipe);
 int cycles = 0;
 int inst_ctr = 0;
 
-int main(int argc, char **argv)
+void dut_main()
 {
-  Verilated::commandArgs(argc, argv);
-
   Vpipe *cliff = new Vpipe;
 #ifdef TRACE
   // init trace dump
@@ -71,8 +69,6 @@ int main(int argc, char **argv)
   do_terminate();
 
   delete cliff;
-
-  return 0;
 }
 
 bool verify_cycle(Emulator *emulator, Vpipe *pipe)
