@@ -266,20 +266,51 @@ static void resolve_memory(LGraph *g, RTLIL::Cell *cell) {
     RTLIL::SigSpec ss       = cell->getPort("\\RD_DATA").extract(rdport * bits, bits);
     Index_ID       port_nid = g->get_idx_from_pid(nid, rdport);
 
-    assert(ss.chunks().size() == 1);
-    RTLIL::SigChunk chunk = ss.chunks()[0];
-    RTLIL::Wire *   wire  = chunk.wire;
+    uint32_t offset = 0;
+    for(auto &chunk : ss.chunks()) {
+      const RTLIL::Wire *wire = chunk.wire;
 
-    Node_Pin pick_pin = create_pick_operator(g, Node_Pin(nid, rdport, false), chunk.offset, chunk.width);
+      //disconnected output
+      if(wire == 0)
+        continue;
 
-    if(wire->width == ss.size()) {
-      set_bits_wirename(g, port_nid, wire);
-    } else {
-      g->set_bits(port_nid, chunk.width);
+      if(chunk.width == wire->width) {
+        assert(wire2lpin.find(wire) == wire2lpin.end());
+
+        if(chunk.width == ss.size()) {
+          //output port drives a single wire
+          wire2lpin[wire].nid     = nid;
+          wire2lpin[wire].out_pid = rdport;
+          set_bits_wirename(g, port_nid, wire);
+        } else {
+          //output port drives multiple wires
+          Node_Pin pick_pin       = create_pick_operator(g, Node_Pin(nid, rdport, false), offset, chunk.width);
+          wire2lpin[wire].nid     = pick_pin.get_nid();
+          wire2lpin[wire].out_pid = pick_pin.get_pid();
+          set_bits_wirename(g, pick_pin.get_nid(), wire);
+        }
+        offset += chunk.width;
+      } else {
+        if(partially_assigned.find(wire) == partially_assigned.end()) {
+          std::vector<Node_Pin *> nodes(wire->width);
+          partially_assigned.insert(std::pair<const RTLIL::Wire *, std::vector<Node_Pin *>>(wire, nodes));
+
+          assert(wire2lpin.find(wire) == wire2lpin.end());
+          wire2lpin[wire].nid     = g->create_node().get_nid();
+          wire2lpin[wire].out_pid = 0;
+          g->set_bits(wire2lpin[wire].nid, wire->width);
+
+          g->node_type_set(wire2lpin[wire].nid, Join_Op);
+        }
+        g->set_bits(port_nid, ss.size());
+
+        Node_Pin *src_pin = new Node_Pin(create_pick_operator(g, Node_Pin(nid, rdport, false), offset, chunk.width));
+        offset += chunk.width;
+        for(int i = 0; i < chunk.width; i++) {
+          partially_assigned[wire][chunk.offset + i] = src_pin;
+        }
+      }
     }
-
-    wire2lpin[wire].nid     = pick_pin.get_nid();
-    wire2lpin[wire].out_pid = pick_pin.get_pid();
   }
 }
 
