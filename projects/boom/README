@@ -32,6 +32,9 @@ boom.system.TestHarness.BoomConfig2core_bug1.v
     // TODO check for xcpt_if and verify that never happens on non-speculative instructions.
     val mem_xcpt_valid = Reg(next=((pf_ld || pf_st || ae_ld || ae_st) ||
 
+  The bug generates lots of lane code change, but mostly because it changes the comments. If comments
+are removed, the difference is around 7K LoC changes in verilog. Most of the changes is just renumbering of wires in the lsu module. Excluding this, it is just a few wires that really change.
+
 example.TestHarness.DefaultExampleConfig.v
   Firesim 1 rocket core
   elaboration [success] Total time: 185 s, completed Oct 9, 2018 1:44:15 PM
