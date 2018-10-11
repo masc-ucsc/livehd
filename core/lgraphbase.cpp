@@ -22,7 +22,7 @@ LGraph_Base::LGraph_Base(const std::string &_path, const std::string &_name) noe
 }
 
 LGraph_Base::_init::_init() {
-  fmt::print("LGraph_Base static init done\n");
+  //fmt::print("LGraph_Base static init done\n");
   // Add here sequence of static initialization that may be needed
 }
 

@@ -23,11 +23,16 @@ void Inou_json_options::set(const std::string &key, const std::string &value) {
       json_file = value;
     }else if ( is_opt(key,"output") ) {
       json_file = value;
+    }else if ( is_opt(key,"name") ) {
+      fmt::print("name {}\n",value);
+      name = value;
+    }else if ( is_opt(key,"path") ) {
+      path = value;
     }else{
       set_val(key,value);
     }
   } catch (const std::invalid_argument& ia) {
-    fmt::print("ERROR: key {} has an invalid argument {}\n",key);
+    console->warn("WARNING: key {} has an invalid argument {}\n",key);
   }
 
   console->info("inou_json file:{} path:{} name:{}" ,json_file, path, name);
@@ -40,11 +45,11 @@ Inou_json::~Inou_json() {
 }
 
 void Inou_json::from_json(LGraph *g, rapidjson::Document &document) {
-  fmt::print("DEBUG:: RapidJson Parsing Json file!\n");
   Index_ID last_nid = 0;
   Index_ID dst_nid  = 0;
   Port_ID  src_pid  = 0;
   Port_ID  dst_pid  = 0;
+
   if(document.HasParseError()) {
     fprintf(stderr, "\nError(offset %u): %s\n",
             static_cast<unsigned>(document.GetErrorOffset()),
@@ -320,7 +325,7 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
 
   fs.open(filename, std::ios::out | std::ios::trunc);
   if(!fs.is_open()) {
-    std::cerr << "ERROR: could not open json file [" << filename << "]";
+    console->error("ERROR: could not open json file [{}]\n", filename);
     exit(-4);
   }
   fs << s.GetString() << std::endl;
