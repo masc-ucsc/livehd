@@ -3,7 +3,7 @@ all: dut
 LIB_DEPS=-lrt -lcurl -lcrypto
 
 
-VERILOG_FILES=./rtl/pipe.sv rtl/decode_block_data.sv   rtl/pyrm_execute_block.sv	rtl/pyrm_write_back_block.sv rtl/fetch_block_icache.sv  rtl/pyrm_decode_block.sv  rtl/pyrm_fetch_block.sv	rtl/write_back_block_dcache.sv
+VERILOG_FILES=./rtl/pipe.sv rtl/decode_block_data.sv   rtl/pyrm_execute_block.sv	rtl/pyrm_write_back_block.sv rtl/fetch_block_icache.sv  rtl/pyrm_decode_block.sv  rtl/pyrm_fetch_block.sv	rtl/write_back_block_dcache.sv rtl/fflop.v
 
 VERILATOR_ARGS=-O3 -I. -Irtl -Icpp/riscv_verify
 
@@ -12,7 +12,7 @@ CFLAGS=-DTRACE=1 -DVL_DEBUG=1 -std=c++11 -O3 $(USR_FLAGS) -DPYR_VERILOG -I. -I..
 CFLAGS+=-I../cpp/riscv_verify $(LIB_DEPS)
 
 
-CPP_FILES=cpp/dut_main_verilator.cpp
+CPP_FILES=cpp/dut_main_verilator.cpp cpp/dut_bootstrap.cpp
 
 
 
