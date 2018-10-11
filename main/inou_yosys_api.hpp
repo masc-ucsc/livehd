@@ -198,6 +198,7 @@ static void tolg(Eprp_var &var) {
       }
     });
 
+  fmt::print("rtp debug lgs {} max_version {}\n", lgs.size(), max_version);
   var.add(lgs);
 }
 
