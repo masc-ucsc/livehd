@@ -12,10 +12,11 @@ protected:
 
     Inou_json json;
 
+    json.set("name",var.get("name"));
     json.set("path",path);
 
     if (files.empty()) {
-      Main_api::error(fmt::format("inou.jsno.tolg: no files provided"));
+      Main_api::error(fmt::format("inou.json.tolg: no files provided"));
       return;
     }
 
@@ -59,6 +60,7 @@ public:
     Eprp_method m1("inou.json.tolg", "import from json to lgraph", &Inou_json_api::tolg);
     m1.add_label_optional("path","lgraph path");
     m1.add_label_required("files","json input file[s] to create lgraph[s]");
+    m1.add_label_required("name","name for lgraph generated");
 
     eprp.register_method(m1);
 

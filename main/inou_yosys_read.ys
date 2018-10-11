@@ -5,8 +5,11 @@ read_verilog -sv -nomeminit {{input}}
 {{/filelist}}
 
 # single file, no hierarchy needed
-#hierarchy -top TOP
+{{#hierarhcy}}
+hierarchy -top {{path}}
 #hierarchy -auto-top
+{{/hierarchy}}
+
 proc
 pmuxtree
 memory_dff
