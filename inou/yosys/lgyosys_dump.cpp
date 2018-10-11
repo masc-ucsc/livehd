@@ -23,7 +23,7 @@ RTLIL::Wire *Lgyosys_dump::get_wire(Index_ID idx, Port_ID pid, bool can_fail = f
       return nullptr;
 
     log("trying to get wire for nid %ld, %hu\n", nid_pid.first, nid_pid.second);
-    log_error("Failed to get a wire for nid %ld\n", idx);
+    log_error("Failed to get a wire for nid %ld, pid %hu\n", idx, pid);
   }
 }
 
@@ -93,10 +93,6 @@ RTLIL::Wire* Lgyosys_dump::create_wire(const LGraph *g, const Index_ID idx, RTLI
   else
     name = "\\lgraph_cell_" + std::to_string(idx);
 
-#ifndef NDEBUG
-      fmt::print("1.adding wire to yosys module {}, name: {} idx:{}\n", module->name.str(), name.str(), idx);
-#endif
-
   RTLIL::Wire *new_wire = module->addWire(name, g->get_bits(idx));
   new_wire->start_offset = g->get_offset(idx);
 
@@ -116,7 +112,6 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module* module) {
   // first create all the output wires
   for(auto idx : g->fast()) {
     assert(g->is_root(idx));
-    log("creating wire for node: %ld, width %d, type %s\n", idx, g->get_bits(idx), g->node_type_get(idx).get_name().c_str());
 
     if(g->is_graph_input(idx)) {
       input_map[idx]    = create_wire(g, idx, module, true, false);
@@ -126,9 +121,6 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module* module) {
       output_map[idx]   = create_wire(g, idx, module, false, true);
       continue;
     }
-
-    if(idx == 195)
-      fmt::print("foo\n");
 
     RTLIL::IdString name;
     RTLIL::IdString yosys_op;
@@ -147,9 +139,6 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module* module) {
     }
 
     if(g->node_type_get(idx).op == U32Const_Op) {
-#ifndef NDEBUG
-      fmt::print("2.adding wire to yosys module {}, name: {} idx:{}\n", module->name.str(), name.str(), idx);
-#endif
       RTLIL::Wire *new_wire = module->addWire(name, g->get_bits(idx));
 
       // constants treated as inputs
@@ -159,9 +148,6 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module* module) {
 
     } else if(g->node_type_get(idx).op == StrConst_Op) {
       const std::string const_val = g->node_const_value_get(idx);
-#ifndef NDEBUG
-      fmt::print("3.adding wire to yosys module {}, name: {} idx:{}\n", module->name.str(), name.str(), idx);
-#endif
       RTLIL::Wire *new_wire = module->addWire(name, const_val.size());
 
       // constants treated as inputs
@@ -170,21 +156,9 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module* module) {
       continue;
 
     } else if(g->node_type_get(idx).op == SubGraph_Op) {
-      //FIXME: prevent creating wires when driving the output
       std::string subgraph_name = g->get_library()->get_name(g->subgraph_id_get(idx));
       LGraph *    subgraph      = LGraph::find_lgraph(g->get_path(), subgraph_name);
-      if(subgraph == nullptr) {
-        assert(false); // can we remove this?
-        //need to load graph into memory
-        char cadena[4096];
-        snprintf(cadena, 4096, "%s/lgraph_%s_nodes", g->get_path().c_str(), subgraph_name.c_str());
-        if(access(cadena, R_OK | W_OK) == -1) {
-          console->error("ERROR: graph_name {} can not be opened in lgdb {}", subgraph_name, g->get_path());
-          exit(-1);
-        }
-        //FIXME: prevent loading the whole graph just to read the IOs.
-        subgraph = new LGraph(g->get_path(), subgraph_name, false);
-      }
+      assert(subgraph);
       std::set<Port_ID> visited_out_pids;
 
       for(auto &edge : g->out_edges(idx)) {
@@ -192,15 +166,16 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module* module) {
         if(visited_out_pids.find(edge.get_out_pin().get_pid()) != visited_out_pids.end())
           continue;
 
+        fmt::print("rtp sub idx {}, pid {}, idx_pid {}\n",
+            edge.get_out_pin().get_nid(), edge.get_out_pin().get_pid(),
+            g->find_idx_from_pid(edge.get_out_pin().get_nid(), edge.get_out_pin().get_pid()));
+
         visited_out_pids.insert(edge.get_out_pin().get_pid());
         const char *out_name = subgraph->get_graph_output_name_from_pid(edge.get_out_pin().get_pid());
         uint16_t    out_size = subgraph->get_bits(subgraph->get_graph_output(out_name).get_nid());
 
         std::string full_name = name.str() + std::string(out_name);
 
-#ifndef NDEBUG
-        fmt::print("4.adding wire to yosys module {}, name: {} idx:{}\n", module->name.str(), full_name, idx);
-#endif
         RTLIL::Wire *new_wire                                              = module->addWire(full_name, out_size);
         cell_output_map[std::make_pair(idx, edge.get_out_pin().get_pid())] = new_wire;
       }
@@ -234,9 +209,6 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module* module) {
           full_name = name.str().substr(1) + std::string(out_name);
         }
 
-#ifndef NDEBUG
-        fmt::print("5.adding wire to yosys module {}, name: {} idx:{}\n", module->name.str(), full_name, idx);
-#endif
         RTLIL::Wire *new_wire                                              = module->addWire("\\" + full_name, out_size);
         cell_output_map[std::make_pair(idx, edge.get_out_pin().get_pid())] = new_wire;
       }
@@ -256,7 +228,6 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module* module) {
       continue;
     } else if(g->node_type_get(idx).op == And_Op || g->node_type_get(idx).op == Or_Op ||
               g->node_type_get(idx).op == Xor_Op) {
-      //FIXME: prevent creating wires when driving the output
       // This differentiates between binary and unary Ands, Ors, Xors
       int count = 0;
       for(const auto &edge : g->out_edges(idx)) {
@@ -269,20 +240,12 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module* module) {
           //reduce operator have 1 bit
           if(edge.get_out_pin().get_pid() == 1)
             out_size = 1;
-#ifndef NDEBUG
-          fmt::print("6.adding wire to yosys module {}, name: {} idx:{}\n", module->name.str(), name.str(),idx);
-#endif
           RTLIL::Wire *new_wire                                              = module->addWire(name, out_size);
           cell_output_map[std::make_pair(idx, edge.get_out_pin().get_pid())] = new_wire;
         }
       }
       continue;
     }
-    //FIXME: prevent creating wires when driving the output
-#ifndef NDEBUG
-    fmt::print("7.adding wire to yosys module {}, name: {} idx:{}\n", module->name.str(), name.str(),idx);
-#endif
-
 
     RTLIL::Wire *result                     = module->addWire(name, g->get_bits(idx));
     cell_output_map[std::make_pair(idx, 0)] = result;
@@ -1020,7 +983,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       }
       for(const auto &c : g->out_edges(idx)) {
         std::string  port   = subgraph->get_graph_output_name_from_pid(c.get_out_pin().get_pid());
-        RTLIL::Wire *output = get_wire(c.get_out_pin().get_nid(), c.get_out_pin().get_pid());
+        RTLIL::Wire *output = get_wire(g->get_master_nid(c.get_out_pin().get_nid()), c.get_out_pin().get_pid());
         new_cell->setPort(("\\" + port).c_str(), output);
       }
       break;
