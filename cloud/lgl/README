@@ -1,0 +1,44 @@
+
+lgl: Live Graph Launcher
+
+ This is a potential project for Live Graph (still under consideration)
+
+ The goal is to have a cloud based incremental hermetic parallel builder for
+lgraph. The main "under consideration" reason is that it would replicate quite
+a bit of functionality from bazel.
+
+ Basic Flow
+
+ -The build system creates "at runtime" a dependence graph. Each node in the
+graph has many inputs and many outputs. The inputs and outputs are labeled like
+in bazel/pants/buck, but unlike make/buck/pants?, the number of outputs is
+unknown until the node is executed.
+
+ -Given the same set of inputs, the system generates always the same set of
+outputs.
+
+ -The inputs are large binary "blobs" only understood by the dependence node
+execution program.
+
+ Why not to use bazel?
+
+ -bazel inputs tend to be srcs/hdrs. In synthesis, it is all about large
+"blobs" in binary form.
+
+ -Bazel allows to find the outputs at node execution by creating a directory,
+but the contents on the directory only seems to work for cpp and h files.
+
+ -The inputs/outputs are BIG in synthesis. Transferring all that data will kill
+network parallelism.  A model were computation (node execution program) is
+moved to the "replicated" data nodes may be more scalable.
+
+ -Since the inputs are large, computing the signature (e.g: SHA256) could be
+fairly slow. The blobs already have a "version/signature" inside, no need to
+recompute if version did not change.
+
+ -The node execution can create not only new outputs, but new subgraphs (add
+new graph node rule firing). E.g: when a node is a "synthesis" it can do
+several parallel tasks, then combine. The number of subtasks and iterations
+depends on the inputs and intermediate results.
+
+
