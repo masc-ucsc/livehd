@@ -5,10 +5,6 @@ read_verilog -sv -nomeminit {{input}}
 {{/filelist}}
 
 # single file, no hierarchy needed
-{{#hierarhcy}}
-hierarchy -top {{path}}
-#hierarchy -auto-top
-{{/hierarchy}}
 
 proc
 pmuxtree
