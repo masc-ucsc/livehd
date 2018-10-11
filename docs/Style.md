@@ -45,7 +45,7 @@ You can configure your text editor to highlight them
 class Sweet_potato {
 ```
 
-## Use C++11 iterators not ::iterator
+## Use C++14 iterators not ::iterator
 
 ```cpp
 for(auto idx:g->unordered()) {
