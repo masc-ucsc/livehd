@@ -89,10 +89,7 @@ while true ; do
 done
 OPT_FILES=$*
 
-echo "foo"
-if [ -f "${OPT_YOSYS}" ]; then
-  echo ""
-else
+if [ ! -f "${OPT_YOSYS}" ]; then
   echo $PWD
   echo "Could not find yosys binary in ${OPT_YOSYS}"
   exit 3
@@ -111,16 +108,15 @@ if [ $OPT_SYSTEMVERILOG -eq 1 ]; then
   OPT_READVERILOG="${OPT_READVERILOG} -sv"
 fi
 
-if [ -f "${OPT_INOU_YOSYS}" ]; then
-  # Found library
-  echo ""
-elif [ -d "bazel-bin" ] && [ -f "./bazel-bin/inou/yosys/liblgraph_yosys.so" ]; then
-  OPT_INOU_YOSYS="./bazel-bin/inou/yosys/liblgraph_yosys.so"
-elif [ -f "./inou/yosys/liblgraph_yosys.so" ]; then
-  OPT_INOU_YOSYS="./inou/yosys/liblgraph_yosys.so"
-else
-  echo "Could not find liblgraph_yosys.so library in ${OPT_INOU_YOSYS}"
-  exit 3
+if [ ! -f "${OPT_INOU_YOSYS}" ]; then
+  if [ -d "bazel-bin" ] && [ -f "./bazel-bin/inou/yosys/liblgraph_yosys.so" ]; then
+    OPT_INOU_YOSYS="./bazel-bin/inou/yosys/liblgraph_yosys.so"
+  elif [ -f "./inou/yosys/liblgraph_yosys.so" ]; then
+    OPT_INOU_YOSYS="./inou/yosys/liblgraph_yosys.so"
+  else
+    echo "Could not find liblgraph_yosys.so library in ${OPT_INOU_YOSYS}"
+    exit 3
+  fi
 fi
 
 if [ ${OPT_TO_VERILOG} -eq 0 ]; then

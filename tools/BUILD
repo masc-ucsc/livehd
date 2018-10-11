@@ -5,3 +5,4 @@ sh_binary(
     srcs = ["linkso.sh"],
     visibility = ["//visibility:public"],
 )
+

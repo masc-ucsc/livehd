@@ -1,34 +1,8 @@
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-# third_party/subs
-#new_local_repository(
-#    name = "sparsehash",
-#    path = "third_party/subs/sparsehash-c11",
-#    build_file = "third_party/subs/BUILD.sparsehash",
-#)
-#new_local_repository(
-    #name = "bm",
-    #path = "third_party/subs/BitMagic/src",
-    #build_file = "third_party/subs/BUILD.bm",
-#)
-#new_local_repository(
-#    name = "spdlog",
-#    path = "third_party/subs/spdlog/include",
-#    build_file = "third_party/subs/BUILD.spdlog",
-#)
-#new_local_repository(
-    #name = "yosys",
-    #path = "third_party/subs/yosys",
-    #build_file = "third_party/subs/BUILD.yosys",
-#)
-#new_local_repository(
-#    name = "abc",
-#    path = "third_party/subs/abc",
-#    build_file = "third_party/subs/BUILD.abc",
-#)
 
-# third_party/fork
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
+
 new_git_repository(
     name = "OpenTimer",
     build_file = "BUILD.OpenTimer", # relative to external path
@@ -77,34 +51,38 @@ new_git_repository(
     strip_prefix = "src",
 )
 new_git_repository(
+    name = "verilator",
+    build_file = "BUILD.verilator",
+    commit = "97d89cce35142d1a1f4c08571d436d5a65e34901", # October 10, 2018
+    remote = "http://git.veripool.org/git/verilator",
+    patches = ["//external:patch.verilator"],
+    #strip_prefix = "include",
+)
+new_git_repository(
     name = "rapidjson",
     build_file = "BUILD.rapidjson",
     commit = "663f076c7b44ce96526d1acfda3fa46971c8af31", # October 6, 2018
     remote = "https://github.com/Tencent/rapidjson.git",
     strip_prefix = "include",
 )
-
 new_git_repository(
     name = "httplib",
     build_file = "BUILD.httplib",
     commit = "4d7cee81eb106c502738b8a9980422a93dba148a", # Sep 25, 2018
     remote = "https://github.com/yhirose/cpp-httplib.git",
 )
-
 new_git_repository(
     name = "replxx",
     build_file = "BUILD.replxx",
     commit = "228038cbca2532a35cf3fb596eda0d8335fab212", # September 15, 2018
     remote = "https://github.com/AmokHuginnsson/replxx.git",
 )
-
 new_git_repository(
     name = "gtest",
     build_file = "BUILD.gtest",
     remote = "https://github.com/google/googletest",
     tag = "release-1.8.0",
 )
-
 #load(
 #    "//tools:externals.bzl",
 #    "new_patched_http_archive",
@@ -121,19 +99,18 @@ new_git_repository(
 #)
 
 # BOOST Libraries dependences
-git_repository(
-    name = "com_github_nelhage_rules_boost",
-    commit = "96ba810e48f4a28b85ee9c922f0b375274a97f98",
-    # commit = "239ce40e42ab0e3fe7ce84c2e9303ff8a277c41a",
-    remote = "https://github.com/nelhage/rules_boost",
-)
+#git_repository(
+    #name = "com_github_nelhage_rules_boost",
+    #commit = "96ba810e48f4a28b85ee9c922f0b375274a97f98",
+    #remote = "https://github.com/nelhage/rules_boost",
+#)
 
-load("@com_github_nelhage_rules_boost//:boost/boost.bzl", "boost_deps")
-boost_deps()
+#load("@com_github_nelhage_rules_boost//:boost/boost.bzl", "boost_deps")
+#boost_deps()
 
-git_repository(
-    name = "subpar",
-    remote = "https://github.com/google/subpar",
-    tag = "1.3.0",
-)
+#git_repository(
+    #name = "subpar",
+    #remote = "https://github.com/google/subpar",
+    #tag = "1.3.0",
+#)
 
