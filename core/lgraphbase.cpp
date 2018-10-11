@@ -113,13 +113,15 @@ void LGraph_Base::reload() {
   // Reload the fast hash tables from the stored data (maps are not dumped to disk)
 
   for(const auto &str : input_array) {
-    Index_ID nid         = input_array.get_field(str);
-    inputs2node[str].nid = nid;
+    io_t nid_original             = input_array.get_field(str);
+    inputs2node[str].nid          = nid_original.first;
+    inputs2node[str].original_pos = nid_original.second;
   }
 
   for(const auto &str : output_array) {
-    Index_ID nid          = output_array.get_field(str);
-    outputs2node[str].nid = nid;
+    io_t nid_original              = output_array.get_field(str);
+    outputs2node[str].nid          = nid_original.first;
+    outputs2node[str].original_pos = nid_original.second;
   }
 
   recompute_io_ports();
@@ -140,7 +142,7 @@ void LGraph_Base::recompute_io_ports() {
   }
 }
 
-Index_ID LGraph_Base::add_graph_input(const char *str, Index_ID nid, uint16_t bits) {
+Index_ID LGraph_Base::add_graph_input(const char *str, Index_ID nid, uint16_t bits, Port_ID original_pos) {
 
   if(nid == 0)
     nid = create_node_int();
@@ -150,13 +152,29 @@ Index_ID LGraph_Base::add_graph_input(const char *str, Index_ID nid, uint16_t bi
   if(bits != 0)
     set_bits(nid, bits);
 
-  int string_id = input_array.create_id(str, nid);
+  if(original_pos == 0)
+    original_pos = io_nums;
+  io_nums++;
+
+  int string_id = input_array.create_id(str, std::make_pair(nid, original_pos));
 
   str = input_array.get_char(string_id); // the input str may be deallocated, do not strdup again
 
   assert(inputs2node.find(str) == inputs2node.end()); // No name replication allowed
+  //assert(outputs2node.find(str) == outputs2node.end()); //No name replication allowed
 
-  inputs2node[str].nid = nid;
+#ifndef NDEBUG
+  //for(auto & inps : inputs2node) {
+  //  assert(inps.second.original_pos != original_pos); // position is unique
+  //}
+  //for(auto & outs : outputs2node) {
+  //  assert(outs.second.original_pos != original_pos); // position is unique
+  //}
+#endif
+
+  inputs2node[str].nid          = nid;
+  inputs2node[str].original_pos = original_pos;
+
 
   recompute_io_ports();
 
@@ -167,7 +185,7 @@ Index_ID LGraph_Base::add_graph_input(const char *str, Index_ID nid, uint16_t bi
   return nid;
 }
 
-Index_ID LGraph_Base::add_graph_output(const char *str, Index_ID nid, uint16_t bits) {
+Index_ID LGraph_Base::add_graph_output(const char *str, Index_ID nid, uint16_t bits, Port_ID original_pos) {
 
   if(nid == 0)
     nid = create_node_int();
@@ -176,13 +194,29 @@ Index_ID LGraph_Base::add_graph_output(const char *str, Index_ID nid, uint16_t b
   if(bits != 0)
     set_bits(nid, bits);
 
-  int string_id = output_array.create_id(str, nid);
+  if(original_pos == 0)
+    original_pos = io_nums;
+  io_nums++;
+
+  int string_id = output_array.create_id(str, std::make_pair(nid, original_pos));
 
   str = output_array.get_char(string_id); // the input str may be deallocated, do not strdup again
 
+  //assert(inputs2node.find(str) == inputs2node.end()); // No name replication allowed
   assert(outputs2node.find(str) == outputs2node.end()); // No name replication allowed
 
-  outputs2node[str].nid = nid;
+#ifndef NDEBUG
+  //for(auto & inps : inputs2node) {
+  //  assert(inps.second.original_pos != original_pos); // position is unique
+  //}
+  //for(auto & outs : outputs2node) {
+  //  assert(outs.second.original_pos != original_pos); // position is unique
+  //}
+#endif
+
+
+  outputs2node[str].nid          = nid;
+  outputs2node[str].original_pos = original_pos;
 
   recompute_io_ports();
 

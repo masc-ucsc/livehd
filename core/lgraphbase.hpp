@@ -24,9 +24,12 @@ protected:
   std::string name;
   std::string path;
   bool        locked;
+  Port_ID     io_nums = 1;
 
-  Char_Array<Index_ID> input_array;
-  Char_Array<Index_ID> output_array;
+  typedef std::pair<Index_ID, Port_ID> io_t; // node id and position at verilog
+
+  Char_Array<io_t> input_array;
+  Char_Array<io_t> output_array;
 
   struct str_cmp_i { // case insensitive string compare for IO
     bool operator()(char const *a, char const *b) const {
@@ -37,6 +40,7 @@ protected:
   struct IO_port {
     Index_ID nid;
     Port_ID  pos;
+    Port_ID  original_pos;
   };
 
   typedef std::map<const char *, IO_port, str_cmp_i> Graph_IO_map;
@@ -54,8 +58,8 @@ protected:
 
   void recompute_io_ports();
 
-  Index_ID add_graph_input(const char *str, Index_ID nid = 0, uint16_t bits = 0);
-  Index_ID add_graph_output(const char *str, Index_ID nid = 0, uint16_t bits = 0);
+  Index_ID add_graph_input(const char *str, Index_ID nid = 0, uint16_t bits = 0, Port_ID original_pos = 0);
+  Index_ID add_graph_output(const char *str, Index_ID nid = 0, uint16_t bits = 0, Port_ID original_pos = 0);
 
   void del_int_node(Index_ID idx);
 
