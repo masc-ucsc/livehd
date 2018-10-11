@@ -65,6 +65,8 @@ static void set_script_liblg(Eprp_var &var, std::string &script_file, std::strin
 
 static void do_work(const std::string &yosys, const std::string &liblg, const std::string &script_file, mustache::data &vars) {
 
+  fmt::print("yosys do work {} -m {} using {}",yosys, liblg, script_file);
+
   std::ifstream inFile;
   inFile.open(script_file);
 
