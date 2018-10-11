@@ -5,6 +5,10 @@ boom.system.TestHarness.BoomConfig.v
   elaboration [success] Total time: 46 s, completed Oct 9, 2018 12:03:14 PM
   Total FIRRTL Compile Time: 147.988 s
 
+boom.system.TestHarness.BoomConfig_bug1.v
+  BoomConfig + bug1
+  elaboration [success] Total time: 51 s, completed Oct 11, 2018 2:17:37 PM
+  Total FIRRTL Compile Time: 179.246 s
 
 boom.system.TestHarness.BoomConfig2core.v
   BoomConfig 2 cores
@@ -17,6 +21,7 @@ boom.system.TestHarness.BoomConfig2core.v
   BoomTile is the core and the L1 caches
 
 boom.system.TestHarness.BoomConfig2core_bug1.v
+  BoomConfig 2 cores + bug1
   elaborate [success] Total time: 101 s, completed Oct 11, 2018 1:43:01 PM
   Total FIRRTL Compile Time: 189.363 s
   One line code change (patch in lsu.scala)
