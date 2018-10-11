@@ -59,20 +59,16 @@ Some sample usages for the various functions implemented.
 To read a verilog with yosys and create an lgraph
 
 ```bash
-./inou/yosys/lgyosys ./inou/yosys/tests/simple_add.v
+$./inou/yosys/lgyosys ./inou/yosys/tests/simple_add.v
 
-
-LGraph_Base static init done
 process_module \simple_add
 Successfully parsed yosys file ./inou/yosys/tests/simple_add.v
 ```
 
 To dump an lgraph (and submodules) to verilog
 ```bash
-mada0:~/projs/lgraph$./inou/yosys/lgyosys -gsimple_add
+$./inou/yosys/lgyosys -gsimple_add
 
-
-LGraph_Base static init done
 lgraph_simple_add
 Successfully generated verilog file simple_add.v
 ```

@@ -10,3 +10,11 @@ cc_library(
     ],
 )
 
+
+sh_test(
+    name = "rand_json.sh",
+    srcs = ["tests/rand_json.sh"],
+    data = [
+        "//main:lgshell",
+        ],
+)

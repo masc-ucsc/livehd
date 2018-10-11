@@ -87,10 +87,6 @@ static void do_work(const std::string &yosys, const std::string &liblg, const st
     dup2(pipefd[0], 0); // stdin
     close(pipefd[1]);   // unused
 
-    //int fd = creat("yosys.log", 0644);
-    //close(1);
-    //dup2(fd, 1); // stdout
-
     char *argv[] = { strdup(yosys.c_str()), strdup("-q"), strdup("-m"), strdup(liblg.c_str()), 0};
 
     if (execvp(yosys.c_str(), argv) < 0) {
@@ -138,6 +134,7 @@ static void tolg(Eprp_var &var) {
   const std::string techmap = var.get("techmap","none");
   const std::string abc     = var.get("abc","false");
   const std::string files   = var.get("files");
+  const std::string top   = var.get("top","");
 
   std::string script_file;
   std::string liblg;
@@ -151,6 +148,11 @@ static void tolg(Eprp_var &var) {
   mustache::data vars;
 
   vars.set("path",path);
+
+  if(!top.empty()) {
+    vars.set("hierarchy", mustache::data::type::bool_true);
+    vars.set("top",top);
+  }
 
   mustache::data filelist{mustache::data::type::list};
   for(const auto &f:Main_api::parse_files(files,"inou.yosys.tolg")) {
@@ -233,6 +235,7 @@ static void setup(Eprp &eprp) {
   m1.add_label_optional("abc","run ABC inside yosys before loading lgraph");
   m1.add_label_optional("script","alternative custom inou_yosys_read.ys command");
   m1.add_label_optional("yosys","path for yosys command");
+  m1.add_label_optional("top","define top module, will call yosys hierarchy pass");
 
   eprp.register_method(m1);
 
