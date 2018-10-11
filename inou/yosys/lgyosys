@@ -160,7 +160,8 @@ if [ ${OPT_TO_VERILOG} -eq 0 ]; then
 
   ${OPT_YOSYS} -ql ${OPT_LOGDIR}/${BASE}.log  -m $OPT_INOU_YOSYS -p "
   ${OPT_INCDIR}; ${OPT_READVERILOG} -sv -nomeminit ${FILE_LIST};
-  hierarchy ${top}; proc; pmuxtree; memory_dff; memory_collect; ${techmap}; ${lib};
+  hierarchy ${top}; proc; pmuxtree; memory_dff; memory_collect; ${techmap};
+  ${lib}; opt;
   write_blif ${OPT_TOP}.blif; write_verilog ${OPT_TOP}.v; yosys2lg -path ${OPT_LGDB}"
 
   #${OPT_YOSYS} -ql ${OPT_LOGDIR}/${BASE}.log  -m $OPT_INOU_YOSYS -p "
