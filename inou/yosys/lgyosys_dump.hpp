@@ -34,8 +34,8 @@ private:
     return RTLIL::IdString("\\lgraph_id_" + std::to_string(ids++));
   }
 
-  const char * next_wire() {
-    return ("lgraph_spare_wire_" + std::to_string(spare_wire++)).c_str();
+  std::string next_wire() {
+    return ("lgraph_spare_wire_" + std::to_string(spare_wire++));
   }
 
   //FIXME: any way of merging these two?
