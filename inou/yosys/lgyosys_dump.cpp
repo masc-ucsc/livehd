@@ -131,10 +131,11 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module* module) {
       if(!g->has_name("lgraph_cell_" + std::to_string(idx)))
          name = RTLIL::IdString("\\lgraph_cell_" + std::to_string(idx));
       else {
+        std::string tmp;
         do {
-          wname = next_wire();
-        } while(g->has_name(wname));
-        name = RTLIL::IdString("\\" + std::string(wname));
+          tmp = next_wire().c_str();
+        } while(g->has_name(tmp));
+        name = RTLIL::IdString("\\" + tmp);
       }
     }
 
@@ -165,10 +166,6 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module* module) {
         //only once per pid
         if(visited_out_pids.find(edge.get_out_pin().get_pid()) != visited_out_pids.end())
           continue;
-
-        fmt::print("rtp sub idx {}, pid {}, idx_pid {}\n",
-            edge.get_out_pin().get_nid(), edge.get_out_pin().get_pid(),
-            g->find_idx_from_pid(edge.get_out_pin().get_nid(), edge.get_out_pin().get_pid()));
 
         visited_out_pids.insert(edge.get_out_pin().get_pid());
         const char *out_name = subgraph->get_graph_output_name_from_pid(edge.get_out_pin().get_pid());
@@ -215,14 +212,14 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module* module) {
       continue;
     } else if(g->node_type_get(idx).op == Memory_Op) {
       for(auto &edge : g->out_edges(idx)) {
-        RTLIL::Wire *new_wire                                              = module->addWire(next_id(), g->get_bits(edge.get_idx()));
+        RTLIL::Wire *new_wire                                              = module->addWire(next_id(), g->get_bits(edge.get_out_pin().get_nid()));
         cell_output_map[std::make_pair(idx, edge.get_out_pin().get_pid())] = new_wire;
         mem_output_map[idx].push_back(RTLIL::SigChunk(new_wire));
       }
       continue;
     } else if(g->node_type_get(idx).op == BlackBox_Op) {
       for(auto &edge : g->out_edges(idx)) {
-        RTLIL::Wire *new_wire                                              = module->addWire(next_id(), g->get_bits(edge.get_idx()));
+        RTLIL::Wire *new_wire                                              = module->addWire(next_id(), g->get_bits(edge.get_out_pin().get_nid()));
         cell_output_map[std::make_pair(idx, edge.get_out_pin().get_pid())] = new_wire;
       }
       continue;
@@ -482,7 +479,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       uint32_t width      = 0;
       bool     has_inputs = false;
       for(const auto &c : g->inp_edges(idx)) {
-        RTLIL::Wire *join                       = get_wire(c.get_idx(), c.get_out_pin().get_pid());
+        RTLIL::Wire *join                       = get_wire(c.get_out_pin().get_nid(), c.get_out_pin().get_pid());
         joined_wires[c.get_inp_pin().get_pid()] = RTLIL::SigChunk(join);
         width += join->width;
         has_inputs = true;
@@ -491,7 +488,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       if(!has_inputs) {
         continue;
       }
-      assert(width == (cell_output_map[std::make_pair(idx, 0)]->width));
+      assert(width == (uint32_t)(cell_output_map[std::make_pair(idx, 0)]->width));
       module->connect(cell_output_map[std::make_pair(idx, 0)], RTLIL::SigSpec(joined_wires));
 
       break;
@@ -533,7 +530,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       for(const auto &c : g->inp_edges(idx)) {
         RTLIL::Wire *current = get_wire(c.get_idx(), c.get_out_pin().get_pid());
         and_inps.push_back(current);
-        width = (width < current->width) ? current->width : width;
+        width = (width < (uint32_t)current->width) ? current->width : width;
       }
 
       if(and_inps.size() == 1) {
@@ -933,20 +930,20 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       memory->setParam("\\RD_CLK_ENABLE", RTLIL::Const(RTLIL::State::S1, memory->getParam("\\RD_PORTS").as_int()));
       memory->setParam("\\WR_CLK_ENABLE", RTLIL::Const(RTLIL::State::S1, memory->getParam("\\WR_PORTS").as_int()));
 
-      memory->setParam("\\INIT", RTLIL::Const::from_string("x"));
+      memory->setParam("\\INIT",   RTLIL::Const::from_string("x"));
       memory->setParam("\\OFFSET", RTLIL::Const(0));
 
       memory->setParam("\\RD_CLK_POLARITY", RTLIL::Const(posedge, memory->getParam("\\RD_PORTS").as_int()));
       memory->setParam("\\WR_CLK_POLARITY", RTLIL::Const(posedge, memory->getParam("\\WR_PORTS").as_int()));
-      memory->setParam("\\RD_TRANSPARENT", RTLIL::Const(transp, memory->getParam("\\RD_PORTS").as_int()));
+      memory->setParam("\\RD_TRANSPARENT",  RTLIL::Const(transp,  memory->getParam("\\RD_PORTS").as_int()));
 
       memory->setPort("\\WR_DATA", wr_data);
       memory->setPort("\\WR_ADDR", wr_addr);
-      memory->setPort("\\WR_EN", wr_en);
+      memory->setPort("\\WR_EN",   wr_en);
 
       memory->setPort("\\RD_DATA", RTLIL::SigSpec(mem_output_map[idx]));
       memory->setPort("\\RD_ADDR", rd_addr);
-      memory->setPort("\\RD_EN", rd_en);
+      memory->setPort("\\RD_EN",   rd_en);
 
       memory->setPort("\\WR_CLK", RTLIL::SigSpec(RTLIL::SigBit(clk), memory->getParam("\\WR_PORTS").as_int()));
       memory->setPort("\\RD_CLK", RTLIL::SigSpec(RTLIL::SigBit(clk), memory->getParam("\\RD_PORTS").as_int()));
@@ -1101,7 +1098,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
           } else if(LGRAPH_BBOP_ISONAME(c.get_out_pin().get_pid())) {
             if(g->node_type_get(c.get_idx()).op != StrConst_Op)
               log_error("Internal Error: BB output name is not a string.\n");
-            assert(output_names.size() == LGRAPH_BBOP_PORT_N(c.get_out_pin().get_pid()));
+            assert(output_names.size() == (uint32_t)LGRAPH_BBOP_PORT_N(c.get_out_pin().get_pid()));
             output_names.push_back(g->node_const_value_get(c.get_idx()));
           }
         }

@@ -182,11 +182,12 @@ static Node_Pin create_pick_operator(LGraph *g, const RTLIL::Wire *wire, int off
   return create_pick_operator(g, get_edge_pin(g, wire), offset, width);
 }
 
+const std::regex dc_name("(\\|/)n(\\d\\+)|^N(\\d\\+)");
+
 static void set_bits_wirename(LGraph *g, const Index_ID idx, const RTLIL::Wire *wire) {
   if(!wire)
     return;
 
-  std::regex dc_name("(\\|/)n(\\d\\+)|^N(\\d\\+)");
   if(!wire->port_input && !wire->port_output) {
 
 #ifndef NDEBUG
@@ -195,46 +196,17 @@ static void set_bits_wirename(LGraph *g, const Index_ID idx, const RTLIL::Wire *
 #endif
     //we don't want to keep internal abc/yosys wire names
     //FIXME: is there a more efficient and complete way of doing this?
-    if(wire->name.c_str()[0] != '$' ||
-       (wire->name.str().substr(0, 5) != "$abc$" &&
-        wire->name.str().substr(0, 6) != "$auto$" &&
-        wire->name.str().substr(0, 9) != "$techmap$" &&
-        wire->name.str().substr(0, 4) != "$or$" &&
-        wire->name.str().substr(0, 5) != "$and$" &&
-        wire->name.str().substr(0, 5) != "$xor$" &&
-        wire->name.str().substr(0, 5) != "$not$" &&
-        wire->name.str().substr(0, 5) != "$add$" &&
-        wire->name.str().substr(0, 5) != "$sub$" &&
-        wire->name.str().substr(0, 10) != "$logic_or$" &&
-        wire->name.str().substr(0, 11) != "$logic_and$" &&
-        wire->name.str().substr(0, 11) != "$logic_not$" &&
-        wire->name.str().substr(0, 12) != "$logic_bool$" &&
-        wire->name.str().substr(0, 11) != "$reduce_or$" &&
-        wire->name.str().substr(0, 12) != "$reduce_and$" &&
-        wire->name.str().substr(0, 12) != "$reduce_xor$" &&
-        wire->name.str().substr(0, 13) != "$reduce_bool$" &&
-        wire->name.str().substr(0, 4) != "$ne$" &&
-        wire->name.str().substr(0, 4) != "$ge$" &&
-        wire->name.str().substr(0, 4) != "$le$" &&
-        wire->name.str().substr(0, 4) != "$gt$" &&
-        wire->name.str().substr(0, 4) != "$lt$" &&
-        wire->name.str().substr(0, 4) != "$eq$" &&
-        wire->name.str().substr(0, 5) != "$shl$" &&
-        wire->name.str().substr(0, 5) != "$shr$" &&
-        wire->name.str().substr(0, 6) != "$sshl$" &&
-        wire->name.str().substr(0, 6) != "$sshr$" &&
-        wire->name.str().substr(0, 9) != "$procmux$" &&
-        wire->name.str().substr(0, 9) != "$ternary$" &&
-        wire->name.str().substr(0, 8) != "$extend$" &&
+    if(wire->name.c_str()[0] != '$' &&
 
-        wire->name.str().substr(0, 12) != "lgraph_cell_" &&
-        wire->name.str().substr(0, 18) != "lgraph_spare_wire_" &&
+        wire->name.str().substr(0, 13) != "\\lgraph_cell_" &&
+        wire->name.str().substr(0, 19) != "\\lgraph_spare_wire_" &&
+
         //dc generated names
         !std::regex_match(wire->name.str(), dc_name) &&
 
         //skip chisel generated names
-        wire->name.str().substr(0, 5) != "_GEN_" &&
-        wire->name.str().substr(0, 3) != "_T_")) {
+        wire->name.str().substr(0, 6) != "\\_GEN_" &&
+        wire->name.str().substr(0, 4) != "\\_T_") {
 #ifndef NDEBUG
       if(g->get_wid(idx) == 0) {
         if(used_names.find(wire->name.str().substr(1)) != used_names.end())
@@ -251,7 +223,6 @@ static void set_bits_wirename(LGraph *g, const Index_ID idx, const RTLIL::Wire *
 #ifndef NDEBUG
     if(g->get_bits(idx) != 0 && g->get_bits(idx) != wire->width)
       console->warn("A previous number of bits was assigned to node %ld (yosys wirename %s) and it differs from the number being assigned now\n", idx, &wire->name.c_str()[1]);
-      //assert(g->get_bits(idx) == wire->width);
 #endif
     g->set_bits(idx, wire->width);
   }
@@ -593,19 +564,7 @@ static Node_Pin create_join_operator(LGraph *g, const RTLIL::SigSpec &ss) {
   return src_pin;
 }
 
-// this function is called for each module in the design
-static LGraph *process_module(RTLIL::Module *module) {
-#ifndef NDEBUG
-  log("yosys2lg pass for module %s:\n", module->name.c_str());
-  printf("process_module %s\n", module->name.c_str());
-#endif
-
-  std::string name = &module->name.c_str()[1];
-  assert(module2graph.find(name) != module2graph.end());
-  auto *              g     = module2graph[name];
-  const Tech_library *tlib  = g->get_tlibrary();
-  const Tech_cell *   tcell = nullptr;
-
+static void process_assigns(RTLIL::Module *module, LGraph* g) {
   for(const auto &conn : module->connections()) {
     const RTLIL::SigSpec lhs = conn.first;
     const RTLIL::SigSpec rhs = conn.second;
@@ -663,6 +622,22 @@ static LGraph *process_module(RTLIL::Module *module) {
       }
     }
   }
+}
+
+// this function is called for each module in the design
+static LGraph *process_module(RTLIL::Module *module) {
+#ifndef NDEBUG
+  log("yosys2lg pass for module %s:\n", module->name.c_str());
+  printf("process_module %s\n", module->name.c_str());
+#endif
+
+  std::string name = &module->name.c_str()[1];
+  assert(module2graph.find(name) != module2graph.end());
+  auto *              g     = module2graph[name];
+  const Tech_library *tlib  = g->get_tlibrary();
+  const Tech_cell *   tcell = nullptr;
+
+  process_assigns(module, g);
 
 #ifndef NDEBUG
   log("INOU/YOSYS processing module %s, ncells %lu, nwires %lu\n", module->name.c_str(), module->cells().size(), module->wires().size());
@@ -686,7 +661,6 @@ static LGraph *process_module(RTLIL::Module *module) {
          yosys_tech            = false;
     uint32_t              size = 0;
     uint32_t              rdports, wrports, abits = 0;
-    const RTLIL::SigSpec *output = nullptr;
     RTLIL::Wire *         clock  = nullptr;
 
     // Note that $_AND_ and $_NOT_ format are exclusive for aigmap
@@ -696,29 +670,24 @@ static LGraph *process_module(RTLIL::Module *module) {
       op = And_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      output = &cell->getPort("\\Y");
     } else if(std::strncmp(cell->type.c_str(), "$not", 4) == 0 ||
               std::strncmp(cell->type.c_str(), "$logic_not", 10) == 0) {
       op = Not_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      output = &cell->getPort("\\Y");
     } else if(std::strncmp(cell->type.c_str(), "$or", 4) == 0 || std::strncmp(cell->type.c_str(), "$logic_or", 9) == 0 ||
               std::strncmp(cell->type.c_str(), "$reduce_or", 10) == 0 || std::strncmp(cell->type.c_str(), "$reduce_bool", 12) == 0) {
       op = Or_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      output = &cell->getPort("\\Y");
     } else if(std::strncmp(cell->type.c_str(), "$xor", 5) == 0 || std::strncmp(cell->type.c_str(), "$reduce_xor", 11) == 0) {
       op = Xor_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      output = &cell->getPort("\\Y");
     } else if(std::strncmp(cell->type.c_str(), "$xnor", 5) == 0 || std::strncmp(cell->type.c_str(), "$reduce_xnor", 11) == 0) {
       op = Xor_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      output = &cell->getPort("\\Y");
 
       inid = g->create_node().get_nid();
       g->set_bits(inid, size);
@@ -733,90 +702,73 @@ static LGraph *process_module(RTLIL::Module *module) {
       op = Flop_Op;
       if(cell->parameters.find("\\WIDTH") != cell->parameters.end())
         size = cell->parameters["\\WIDTH"].as_int();
-      output = &cell->getPort("\\Q");
     } else if(std::strncmp(cell->type.c_str(), "$adff", 4) == 0) {
       op = AFlop_Op;
       if(cell->parameters.find("\\WIDTH") != cell->parameters.end())
         size = cell->parameters["\\WIDTH"].as_int();
-      output = &cell->getPort("\\Q");
     } else if(std::strncmp(cell->type.c_str(), "$dlatch", 7) == 0) {
       op = Latch_Op;
       if(cell->parameters.find("\\WIDTH") != cell->parameters.end())
         size = cell->parameters["\\WIDTH"].as_int();
-      output = &cell->getPort("\\Q");
     } else if(std::strncmp(cell->type.c_str(), "$gt", 3) == 0) {
       op = GreaterThan_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      output = &cell->getPort("\\Y");
     } else if(std::strncmp(cell->type.c_str(), "$lt", 3) == 0) {
       op = LessThan_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      output = &cell->getPort("\\Y");
     } else if(std::strncmp(cell->type.c_str(), "$ge", 3) == 0) {
       op = GreaterEqualThan_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      output = &cell->getPort("\\Y");
     } else if(std::strncmp(cell->type.c_str(), "$le", 3) == 0) {
       op = LessEqualThan_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      output = &cell->getPort("\\Y");
     } else if(std::strncmp(cell->type.c_str(), "$mux", 4) == 0) {
       op = Mux_Op;
       if(cell->parameters.find("\\WIDTH") != cell->parameters.end())
         size = cell->parameters["\\WIDTH"].as_int();
-      output = &cell->getPort("\\Y");
     } else if(std::strncmp(cell->type.c_str(), "$add", 4) == 0) {
       op = Sum_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      output = &cell->getPort("\\Y");
     } else if(std::strncmp(cell->type.c_str(), "$mul", 4) == 0) {
       op = Mult_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      output = &cell->getPort("\\Y");
     } else if(std::strncmp(cell->type.c_str(), "$div", 4) == 0) {
       op = Div_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      output = &cell->getPort("\\Y");
     } else if(std::strncmp(cell->type.c_str(), "$mod", 4) == 0) {
       op = Mod_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      output = &cell->getPort("\\Y");
     } else if(std::strncmp(cell->type.c_str(), "$sub", 4) == 0) {
       op = Sum_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      output      = &cell->getPort("\\Y");
       subtraction = true;
     } else if(std::strncmp(cell->type.c_str(), "$neg", 4) == 0) {
       op = Sum_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      output  = &cell->getPort("\\Y");
       negonly = true;
     } else if(std::strncmp(cell->type.c_str(), "$pos", 4) == 0) {
       //FIXME: prevent the genereration of the join and simply connect wires
       op = Join_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      output = &cell->getPort("\\Y");
     } else if(std::strncmp(cell->type.c_str(), "$eq", 3) == 0) {
       op = Equals_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      output = &cell->getPort("\\Y");
     } else if(std::strncmp(cell->type.c_str(), "$ne", 3) == 0) {
       op = Equals_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      output = &cell->getPort("\\Y");
       inid   = g->create_node().get_nid();
       g->set_bits(inid, size);
 
@@ -828,26 +780,22 @@ static LGraph *process_module(RTLIL::Module *module) {
       op = ShiftRight_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      output = &cell->getPort("\\Y");
     } else if(std::strncmp(cell->type.c_str(), "$shiftx", 6) == 0 && cell->parameters["\\B_SIGNED"].as_bool()) {
       op = ShiftRight_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      output = &cell->getPort("\\Y");
       connect_constant(g, 2, 1, onid, 2);
 
     } else if(std::strncmp(cell->type.c_str(), "$sshr", 5) == 0) {
       op = ShiftRight_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      output = &cell->getPort("\\Y");
       connect_constant(g, 1, 1, onid, 2);
 
     } else if(std::strncmp(cell->type.c_str(), "$shl", 4) == 0 || std::strncmp(cell->type.c_str(), "$sshl", 5) == 0) {
       op = ShiftLeft_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      output = &cell->getPort("\\Y");
 
     } else if(std::strncmp(cell->type.c_str(), "$mem", 4) == 0) {
       op = Memory_Op;
@@ -878,7 +826,7 @@ static LGraph *process_module(RTLIL::Module *module) {
       //assert(rd_clkp[0] == wr_clkp[0]);
 
       //lgraph has reversed convention compared to yosys.
-      rd_clkp = RTLIL::Const(rd_clkp[0]).as_int() ? RTLIL::Const(0, 1) : RTLIL::Const(1, 1);
+    rd_clkp = RTLIL::Const(rd_clkp[0]).as_int() ? RTLIL::Const(0, 1) : RTLIL::Const(1, 1);
 
       size = width;
 
@@ -969,24 +917,20 @@ static LGraph *process_module(RTLIL::Module *module) {
       op = And_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      output = &cell->getPort("\\Y");
 
     } else if(std::strncmp(cell->type.c_str(), "$_NOT_", 6) == 0) {
       op = Not_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      output = &cell->getPort("\\Y");
 
     } else if(std::strncmp(cell->type.c_str(), "$_DFF_P_", 8) == 0) {
       op = Flop_Op;
       if(cell->parameters.find("\\WIDTH") != cell->parameters.end())
         size = cell->parameters["\\WIDTH"].as_int();
-      output = &cell->getPort("\\Q");
     } else if(std::strncmp(cell->type.c_str(), "$_DFF_N_", 8) == 0) {
       op = Flop_Op;
       if(cell->parameters.find("\\WIDTH") != cell->parameters.end())
         size = cell->parameters["\\WIDTH"].as_int();
-      output = &cell->getPort("\\Q");
       connect_constant(g, 0, 1, onid, 5);
 
     } else if(std::strncmp(cell->type.c_str(), "$_DFF_NN", 8) == 0 ||
