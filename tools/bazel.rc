@@ -1,5 +1,5 @@
 
-build --cxxopt="-std=c++17" --cxxopt="-Wno-unknown-pragmas"
+build --cxxopt="-std=c++17" --cxxopt="-Wno-unknown-pragmas" --force_pic
 common --color=yes
 test --cache_test_results=no
 

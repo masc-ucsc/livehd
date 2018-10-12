@@ -190,7 +190,7 @@ void Pass_abc::find_graphio_output_conn(const LGraph *g) {
 
     for(const auto &input : g->inp_edges(idx)) {
       for(index = 0; index < width; index++) {
-        int bit_index[2] = {index, index};
+        int bit_index[2] = {static_cast<int>(index), static_cast<int>(index)};
         recursive_find(g, &input, pid, bit_index);
       }
     }
