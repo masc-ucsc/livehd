@@ -33,8 +33,16 @@ std::vector<LGraph *> Inou_ramgen::tolg() {
   assert(false); // generates SRAMs from a lgraph, not
 }
 
-void Inou_ramgen::fromlg(std::vector<const LGraph *> &out) {
+void Inou_ramgen::fromlg(std::vector<const LGraph *> &lgs) {
 
   assert(!opack.odir.empty());
+
+  int total = 0;
+  for(const auto g : lgs) {
+    for(auto idx : g->fast()) {
+      total++;
+    }
+  }
+  fmt::print("total {}\n",total);
 
 }
