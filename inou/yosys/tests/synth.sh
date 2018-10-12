@@ -12,7 +12,9 @@
 
 declare -a inputs=("trivial.v" "null_port.v" "simple_flop.v" "test.v" "shift.v"\
                    "simple_add.v" \
-                  "wires.v" "reduce.v" "add.v"  "assigns.v")
+                   "offset.v" "submodule_offset.v" "mem.v" "mem2.v" \
+                  "wires.v" "reduce.v" "add.v"  "assigns.v" \
+                  )
 
 TEMP=$(getopt -o ps:: --long profile,source:: -n 'yosys.sh' -- "$@")
 eval set -- "$TEMP"
