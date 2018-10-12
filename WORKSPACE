@@ -12,7 +12,7 @@ new_git_repository(
 new_git_repository(
     name = "abc",
     build_file = "BUILD.abc", # relative to external path
-    commit = "15939511df8ff1ce15f2112cee01d7693234f2a4", # Jun 13, 2018
+    commit = "af62d29d5e4a8336b7a9d81d17f647cf3ce3b4b8", # Oct 11, 2018
     remote = "https://github.com/berkeley-abc/abc.git",
     patches = ["//external:patch.abc"],
 )
@@ -33,7 +33,7 @@ new_git_repository(
 new_git_repository(
     name = "spdlog",
     build_file = "BUILD.spdlog",
-    commit = "032035e72f73b232e2fa087dc6021a3732c9f6ae", # June 10, 2018
+    commit = "226d5a1d36ff310a0bd0f30a73a9421d02156483", # Oct 11, 2018 
     remote = "https://github.com/gabime/spdlog.git",
     strip_prefix = "include",
 )
@@ -46,7 +46,7 @@ new_git_repository(
 new_git_repository(
     name = "bm",
     build_file = "BUILD.bm",
-    commit = "65b1f6d631473d694e7cedc42e755096db03e8e2", # June 13, 2018
+    commit = "4d4dc0f01d296b25b245b16e7d2d9897d7d54f8c", # Oct 11, 2018
     remote = "https://github.com/tlk00/BitMagic.git",
     strip_prefix = "src",
 )

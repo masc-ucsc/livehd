@@ -2,6 +2,7 @@
 #include <exception>
 
 #include "lglog.hpp"
+#include "spdlog/sinks/stdout_color_sinks.h"
 
 int Console_init::initialize_logger() {
 
