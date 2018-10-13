@@ -489,6 +489,8 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       break;
     }
     case Join_Op: {
+      if(idx == 1378)
+        fmt::print("foo\n");
       std::vector<RTLIL::SigChunk> joined_wires;
       joined_wires.resize(cell_output_map[std::make_pair(idx, 0)]->width);
       uint32_t width      = 0;
