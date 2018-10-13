@@ -724,9 +724,9 @@ std::vector<int> ezSAT::vec_and(const std::vector<int> &vec1, const std::vector<
 std::vector<int> ezSAT::vec_and_multiarg(const std::vector<std::vector<int>> &vec1)
 
 {
-  for(int i = 1; i < vec1.size(); i++) {
+  for(size_t i = 1; i < vec1.size(); i++) {
     // assert all the operands are same size
-    // assert(vec1[i-1].size() == vec1[i].size());
+    assert(vec1[i-1].size() == vec1[i].size());
   }
   std::vector<int> vec_res(vec1[0].size());     // no of column
   std::vector<int> vec_col_result(vec1.size()); // no of row
@@ -755,15 +755,15 @@ std::vector<int> ezSAT::vec_or(const std::vector<int> &vec1, const std::vector<i
 
   assert(vec1.size() == vec2.size());
   std::vector<int> vec(vec1.size());
-  for(int i = 0; i < int(vec1.size()); i++)
+  for(size_t i = 0; i < vec1.size(); i++)
     vec[i] = OR(vec1[i], vec2[i]);
   return vec;
 }
 
 std::vector<int> ezSAT::vec_or_multiarg(const std::vector<std::vector<int>> &vec1) {
-  for(int i = 1; i < vec1.size(); i++) {
+  for(size_t i = 1; i < vec1.size(); i++) {
     // assert all the operands are same size
-    // assert(vec1[i-1].size() == vec1[i].size());
+    assert(vec1[i-1].size() == vec1[i].size());
   }
   std::vector<int> vec_res(vec1[0].size());
   std::vector<int> vec_col_result(vec1.size());
@@ -796,9 +796,9 @@ std::vector<int> ezSAT::vec_xor(const std::vector<int> &vec1, const std::vector<
 }
 
 std::vector<int> ezSAT::vec_xor_multiarg(const std::vector<std::vector<int>> &vec1) {
-  for(int i = 1; i < vec1.size(); i++) {
+  for(size_t i = 1; i < vec1.size(); i++) {
     // assert all the operands are same size
-    // assert(vec1[i-1].size() == vec1[i].size());
+    assert(vec1[i-1].size() == vec1[i].size());
   }
   std::vector<int> vec_res(vec1[0].size());
   std::vector<int> vec_col_result(vec1.size());
@@ -1222,8 +1222,8 @@ std::vector<int> ezSAT::vec_shift_left(const std::vector<int> &vec1, const std::
 
 void ezSAT::vec_join_multiarg(std::vector<int> &vec, const std::vector<std::vector<int>> &vec1) {
 
-  for(int i = 0; i < int(vec1.size()); i++) {
-    for(int j = 0; j < vec1[i].size(); j++) {
+  for(size_t i = 0; i < vec1.size(); i++) {
+    for(size_t j = 0; j < vec1[i].size(); j++) {
       vec.push_back(vec1[i][j]);
     }
   }
