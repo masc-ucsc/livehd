@@ -51,11 +51,11 @@ new_git_repository(
     strip_prefix = "src",
 )
 new_git_repository(
-    name = "verilator",
-    build_file = "BUILD.verilator",
-    commit = "97d89cce35142d1a1f4c08571d436d5a65e34901", # October 10, 2018
-    remote = "http://git.veripool.org/git/verilator",
-    patches = ["//external:patch.verilator"],
+    name = "cryptominisat",
+    build_file = "BUILD.cryptominisat",
+    commit = "4c26a766aab2a452aed9a8fe6f28f4171bcb8690", # October 10, 2018
+    remote = "https://github.com/msoos/cryptominisat.git",
+    patches = ["//external:patch.cryptominisat"],
     #strip_prefix = "include",
 )
 new_git_repository(
@@ -82,6 +82,14 @@ new_git_repository(
     build_file = "BUILD.gtest",
     remote = "https://github.com/google/googletest",
     tag = "release-1.8.0",
+)
+new_git_repository(
+    name = "verilator",
+    build_file = "BUILD.verilator",
+    commit = "97d89cce35142d1a1f4c08571d436d5a65e34901", # October 10, 2018
+    remote = "http://git.veripool.org/git/verilator",
+    patches = ["//external:patch.verilator"],
+    #strip_prefix = "include",
 )
 #load(
 #    "//tools:externals.bzl",
