@@ -7,7 +7,7 @@ cc_library(
    hdrs = glob(["src/*.h"])
    ,
    linkopts = ["-lpthread"],
-   includes = ["src"],
+   includes = ["src","include"],
    visibility = ["//visibility:public"],
    defines = ["USE_GAUSS"],
 )
