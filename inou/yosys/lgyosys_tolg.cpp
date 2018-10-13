@@ -110,6 +110,7 @@ static Node_Pin get_edge_pin(LGraph *g, const RTLIL::Wire *wire) {
     return Node_Pin(g->get_graph_output(&wire->name.c_str()[1]).get_nid(), 0, false);
   }
   if(wire2lpin.find(wire) != wire2lpin.end()) {
+    assert(wire->width == g->get_bits_pid(wire2lpin[wire].nid, wire2lpin[wire].out_pid));
     return Node_Pin(wire2lpin[wire].nid, wire2lpin[wire].out_pid, false);
   }
 
@@ -413,7 +414,6 @@ static void look_for_cell_outputs(RTLIL::Module *module) {
 
     //pre-allocates nodes for each cell
     Index_ID nid = g->create_node().get_nid();
-    //assert(cell2nid.find(cell) == cell2nid.end());
     cell2nid[cell] = nid;
 
     LGraph *         sub_graph = nullptr;
@@ -592,7 +592,7 @@ static void process_assigns(RTLIL::Module *module, LGraph* g) {
             wire2lpin[lhs_wire].out_pid = src_pin.get_pid();
             wire2lpin[lhs_wire].nid     = src_pin.get_nid();
           } else {
-            g->set_bits(wire2lpin[lhs_wire].nid, g->get_bits(src_pin.get_nid()));
+            g->set_bits(wire2lpin[lhs_wire].nid, g->get_bits_pid(src_pin.get_nid(), src_pin.get_pid()));
             g->add_edge(src_pin, Node_Pin(wire2lpin[lhs_wire].nid, wire2lpin[lhs_wire].out_pid, true));
           }
         }
