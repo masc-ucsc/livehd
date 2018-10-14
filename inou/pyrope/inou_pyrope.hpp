@@ -31,7 +31,7 @@ protected:
 
   void to_pyrope(const LGraph *g, const std::string filename);
   void to_src_var(Out_string &w, const LGraph *g, Index_ID idx) const;
-  void to_dst_var(Out_string &w, const LGraph *g, Index_ID idx) const;
+  bool to_dst_var(Out_string &w, const LGraph *g, Index_ID idx) const;
   bool to_mux(Out_string &w, const LGraph *g, Index_ID idx) const;
   bool to_join(Out_string &w, const LGraph *g, Index_ID idx) const;
   bool to_flop(Out_string &w, const LGraph *g, Index_ID idx) const;
@@ -45,6 +45,7 @@ protected:
   bool to_const(Out_string &w, const LGraph *g, Index_ID idx) const;
   bool to_pick(Out_string &w, const LGraph *g, Index_ID idx) const;
   bool to_latch(Out_string &w, const LGraph *g, Index_ID idx) const;
+  bool to_strconst(Out_string &w, const LGraph *g, Index_ID idx) const;
   bool to_op(Out_string &s, Out_string &sub, const LGraph *g, Index_ID idx) const;
 
 public:
