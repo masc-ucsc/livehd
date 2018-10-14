@@ -10,6 +10,10 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
+//FIX_ME: We'll eventually need to rethink this data structure.
+#define tmp_size 10000
+std::string tmp_values[tmp_size];
+
 void Inou_pyrope_options::set(const std::string &key, const std::string &value) {
 
   try {
@@ -53,7 +57,7 @@ void Inou_pyrope::fromlg(std::vector<const LGraph *> &out) {
   }
 }
 
-void Inou_pyrope::to_dst_var(Out_string &w, const LGraph *g, Index_ID idx) const {
+/*HC_C: void*/ bool Inou_pyrope::to_dst_var(Out_string &w, const LGraph *g, Index_ID idx) const {
   Index_ID direct_to_register = 0;
   for(const auto &c : g->out_edges(idx)) {
     const auto op = g->node_type_get(c.get_idx());
@@ -87,10 +91,12 @@ void Inou_pyrope::to_dst_var(Out_string &w, const LGraph *g, Index_ID idx) const
       << direct_to_register
       << " = ";
   } else {
-    w << " tmp"
+    /*HC_R: w << " tmp"
       << idx
-      << " = ";
+      << " = ";*/
+    return true;
   }
+  return false;
 }
 
 void Inou_pyrope::to_src_var(Out_string &w, const LGraph *g, Index_ID idx) const {
@@ -99,7 +105,7 @@ void Inou_pyrope::to_src_var(Out_string &w, const LGraph *g, Index_ID idx) const
     return;
   }
   if(g->is_graph_input(idx)) {
-    w << " $" << g->get_graph_input_name(idx);
+    w << "$" << g->get_graph_input_name(idx);
     return;
   }
 
@@ -127,15 +133,16 @@ void Inou_pyrope::to_src_var(Out_string &w, const LGraph *g, Index_ID idx) const
   }
 
   if(direct_to_output) {
-    w << " %" << g->get_graph_output_name(direct_to_output);
+    w << "%" << g->get_graph_output_name(direct_to_output);
   } else if(direct_to_register) {
-    w << " @tmp" << direct_to_register;
+    w << "@tmp" << direct_to_register;
   } else if(inline_stmt.find(idx) != inline_stmt.end()) {
     w << " (" << inline_stmt.at(idx) << ")";
   } else if(const_val) {
     w << " " << const_val;
   } else {
-    w << " tmp" << idx;
+    //HC_C: w << " tmp" << idx;
+    w << tmp_values[idx];
   }
 }
 
@@ -193,7 +200,7 @@ bool Inou_pyrope::to_mux(Out_string &w, const LGraph *g, Index_ID idx) const {
         << direct_to_register
         << " ";
     }
-    w << " __reset:";
+    w << " __reset: ";
     to_src_var(w, g, t_idx);
     w << "\n";
 
@@ -202,21 +209,33 @@ bool Inou_pyrope::to_mux(Out_string &w, const LGraph *g, Index_ID idx) const {
     return true;
   }
 
+  //HC_R: All this is the initial way to do if-else! Slight modifications.
   w << " if ";
   to_src_var(w, g, c_idx);
   w << " { \n   ";
   // ----------- TRUE
-  to_dst_var(w, g, idx);
+  bool is_tmp;//HC_A
+  is_tmp = to_dst_var(w, g, idx);
+  if(is_tmp) {
+    w << "tmp" << idx << " = ";
+  }
   to_src_var(w, g, t_idx);
   // ----------- FALSE
   if (t_idx == f_idx) {
     w << "\n }\n";
   } else {
     w << "\n } else {\n   ";
-    to_dst_var(w, g, idx);
+    is_tmp = to_dst_var(w, g, idx);
+    if(is_tmp) {
+      w << "Stmp" << idx << " = ";
+    }
     to_src_var(w, g, f_idx);
     w << "\n }\n";
   }
+
+  Out_string tmpOut;
+  tmpOut << "tmp" << idx;
+  tmp_values[idx] = tmpOut.str();
 
   return false;
 }
@@ -250,14 +269,14 @@ bool Inou_pyrope::to_flop(Out_string &w, const LGraph *g, Index_ID idx) const {
     if(g->get_bits(direct_to_output) == 0) {
       w << " %"
         << g->get_graph_output_name(direct_to_output)
-        << " as __bits:"
+        << " as __bits: "
         << g->get_bits(idx)
         << "\n";
     }
   } else {
     w << " @tmp"
       << idx
-      << " as __bits:"
+      << " as __bits: "
       << g->get_bits(idx)
       << "\n";
   }
@@ -300,7 +319,7 @@ bool Inou_pyrope::to_graphio(Out_string &w, const LGraph *g, Index_ID idx) const
     if(bits) {
       w << " $"
         << g->get_graph_input_name(idx)
-        << " as __bits:"
+        << " as __bits: "
         << bits;
     }
   }
@@ -318,9 +337,9 @@ bool Inou_pyrope::to_logical2(Out_string &w, const LGraph *g, Index_ID idx, cons
       first = false;
     } else {
       if(c.get_bits() == 1)
-        w << " " << s_op;
+        w << " " << s_op << " ";//HC_C: Added last space
       else
-        w << " " << c_op;
+        w << " " << c_op << " ";//HC_C: Added last space
     }
     to_src_var(w, g, c.get_idx());
   }
@@ -355,7 +374,7 @@ bool Inou_pyrope::to_sum(Out_string &w, const LGraph *g, Index_ID idx) const {
       if(first) {
         first = false;
       } else {
-        w << " +";
+        w << " + ";
       }
       to_src_var(w, g, c.get_idx());
     }
@@ -366,7 +385,7 @@ bool Inou_pyrope::to_sum(Out_string &w, const LGraph *g, Index_ID idx) const {
       if(first) {
         first = false;
       } else {
-        w << " -";
+        w << " - ";
       }
       to_src_var(w, g, c.get_idx());
     }
@@ -382,9 +401,9 @@ bool Inou_pyrope::to_logical1(Out_string &w, const LGraph *g, Index_ID idx, cons
     if(first) {
       first = false;
       if(c.get_bits() == 1)
-        w << " " << s_op;
+        w << /*" " <<*/ s_op << " ";//HC_C: Changed spacing
       else
-        w << " " << c_op;
+        w << /*" " <<*/ c_op << " ";//HC_C: Changed spacing
     } else {
       assert(false); // Should not happen with operations like NOT
     }
@@ -401,7 +420,7 @@ bool Inou_pyrope::to_compare(Out_string &w, const LGraph *g, Index_ID idx, const
     if(first) {
       first = false;
     } else {
-      w << " " << op;
+      w << " " << op << " ";
     }
     to_src_var(w, g, c.get_idx());
   }
@@ -454,6 +473,21 @@ bool Inou_pyrope::to_latch(Out_string &w, const LGraph *g, Index_ID idx) const {
   w << " @" << g->get_graph_output_name(latch_idx) << " as __fflop:false";
   w << "\n @" << g->get_graph_output_name(latch_idx) << " =";
   to_src_var(w, g, inp_idx);
+
+  return false;
+}
+
+bool Inou_pyrope::to_strconst(Out_string &w, const LGraph *g, Index_ID idx) const {
+
+  if(g->is_graph_input(idx)) {
+    w << " $" << g->get_graph_input_name(idx) << " = "
+      << g->node_const_value_get(idx);
+  } else if(g->is_graph_output(idx)) {
+    w << " %" << g->get_graph_output_name(idx) << " = "
+      << g->node_const_value_get(idx);
+  } else {
+    tmp_values[idx] = g->node_const_value_get(idx);
+  }
 
   return false;
 }
@@ -522,11 +556,16 @@ bool Inou_pyrope::to_op(Out_string &s, Out_string &sub, const LGraph *g, Index_I
     case Latch_Op:
       dest = to_latch(s, g, idx);
       break;
+    case StrConst_Op:
+      dest = to_strconst(s, g, idx);
+      //tmp_values[idx] = "HELLO";//g->node_const_value_get(idx);
+      break;
     default:
       dest = false;
       s << "# FIXME idx" << idx
         << " " << op.get_name()
         << " op:" << op.op;
+      tmp_values[idx] = "0";//HC_A
     }
 
   return dest;
@@ -560,6 +599,7 @@ bool Inou_pyrope::to_subgraph(Out_string &w, Out_string &out, const LGraph *g, I
 
     int iter = 0;
     for(const auto &c : sg->inp_edges(idx)) {
+      w << " ";
       to_src_var(w, sg, c.get_idx());
       iter++;
     }
@@ -598,11 +638,17 @@ bool Inou_pyrope::to_subgraph(Out_string &w, Out_string &out, const LGraph *g, I
       Out_string s;
 
       bool dest = to_op(s, s,  sg, idx);
+      bool is_tmp = false;//HC_A
 
       if(dest)
-        to_dst_var(w, sg, idx);
-      w << s.str();
-      w << "\n";
+        is_tmp = to_dst_var(w, sg, idx);
+
+      if(is_tmp)
+        tmp_values[idx] = "(" + s.str() + ")";
+      else {
+        w << s.str();
+        w << "\n";
+      }
     }
   }
   w << "}\n";
@@ -663,11 +709,23 @@ void Inou_pyrope::to_pyrope(const LGraph *g, const std::string filename) {
     Out_string s;
 
     bool dest = to_op(s, sub, g, idx);
+    bool is_tmp = false;//HC: I think putting false here is okay.
 
     if(dest)
-      to_dst_var(w, g, idx);
-    w << s.str();
-    w << "\n";
+      is_tmp = to_dst_var(w, g, idx);
+    //else
+    //  w << "ELSE OCCURRED:";//HC_F: REMOVE ME
+
+    if(is_tmp) {
+      if(s.str().length() != 1)//FIXME_HC: Should instead count # of spaces, if > 0, then do this. If = 0, then no parentheses!
+        tmp_values[idx] = "(" + s.str() + ")";//HC_F: Find way to only do paren. on tmp's that need it, not things like (0)
+      else
+        tmp_values[idx] = s.str();//HC_A
+      //w << "Detected a tmp:";  //HC_F: REMOVE ME
+    } else {
+      w << s.str();
+      w << "\n";
+    }
   }
 
   if(filename == "-" || filename == "") {
