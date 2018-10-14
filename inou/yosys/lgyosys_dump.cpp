@@ -268,6 +268,20 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
   // now create nodes and make connections
   for(auto idx : g->fast()) {
 
+    if(g->is_graph_output(idx)) {
+
+      RTLIL::SigSpec lhs  = RTLIL::SigSpec(output_map[idx]);
+      uint8_t        inps = 0;
+      for(const auto &c : g->inp_edges(idx)) {
+        ++inps;
+        assert(inps == 1);
+
+        RTLIL::SigSpec rhs = RTLIL::SigSpec(get_wire(c.get_idx(), c.get_out_pin().get_pid()));
+        module->connect(lhs, rhs);
+      }
+      continue;
+    }
+
     // if the gate has no output, skip it
     bool has_out = false;
     for(auto& c : g->out_edges(idx)) {
@@ -277,24 +291,6 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
     }
     if(!has_out && g->node_type_get(idx).op != Memory_Op && g->node_type_get(idx).op != SubGraph_Op)
       continue;
-
-    if(g->is_graph_output(idx)) {
-
-      RTLIL::SigSpec lhs  = RTLIL::SigSpec(output_map[idx]);
-      uint8_t        inps = 0;
-      for(const auto &c : g->inp_edges(idx)) {
-        ++inps;
-        if(inps != 1) {
-          break;
-          //FIXME: revert back to assertion
-          assert(inps == 1); //is there a multidriver output?
-        }
-
-        RTLIL::SigSpec rhs = RTLIL::SigSpec(get_wire(c.get_idx(), c.get_out_pin().get_pid()));
-        module->connect(lhs, rhs);
-      }
-      continue;
-    }
 
     RTLIL::IdString name = RTLIL::IdString("\\lgraph_cell_" + std::to_string(idx));
     RTLIL::IdString yosys_op;
@@ -309,7 +305,6 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       continue;
 
     case Sum_Op: {
-      log("adding Sum_Op\n");
       std::vector<RTLIL::Wire *> add_unsigned;
       std::vector<RTLIL::Wire *> add_signed;
       std::vector<RTLIL::Wire *> sub_unsigned;
@@ -539,7 +534,6 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       break;
     }
     case And_Op: {
-      log("adding And_Op\n");
       std::vector<RTLIL::Wire *> and_inps;
       uint32_t                   width = 0;
       for(const auto &c : g->inp_edges(idx)) {
@@ -559,7 +553,6 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       break;
     }
     case Or_Op: {
-      log("adding Or_Op\n");
       std::vector<RTLIL::Wire *> or_inps;
       for(const auto &c : g->inp_edges(idx)) {
         or_inps.push_back(get_wire(c.get_idx(), c.get_out_pin().get_pid()));
