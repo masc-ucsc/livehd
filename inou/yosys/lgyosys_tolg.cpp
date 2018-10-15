@@ -97,7 +97,7 @@ static void look_for_module_outputs(RTLIL::Module *module, const std::string &pa
   }
 }
 
-static bool is_yosys_output(const std::string idstring) {
+static bool is_yosys_output(const std::string &idstring) {
   return idstring == "\\Y" || idstring == "\\Q" || idstring == "\\RD_DATA";
 }
 

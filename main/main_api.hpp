@@ -11,10 +11,10 @@ protected:
   static std::string main_path;
 
 public:
-  static void error(const std::string msg) {
+  static void error(const std::string &msg) {
     eprp.parser_error(msg);
   }
-  static void warn(const std::string msg) {
+  static void warn(const std::string &msg) {
     eprp.parser_warn(msg);
   }
 
