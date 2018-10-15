@@ -42,6 +42,9 @@ protected:
 
 public:
   LGraph() = delete;
+
+  LGraph(const LGraph&) = delete;
+
   explicit LGraph(const std::string &path);
   explicit LGraph(const std::string &path, const std::string &name, bool clear);
 
