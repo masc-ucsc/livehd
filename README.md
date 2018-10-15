@@ -92,11 +92,11 @@ Port_ID  // 10bits, per node input/output port identifier
 There are 3 types of iterators available over node is LGRAPH:
 
 ```cpp
-for(auto nid : g->fast()) { } // unordered but very fast traversal
+for(auto nid : g->fast())     { } // unordered but very fast traversal
 
-for(auto nid : g->forward()) { }// propagates forward from each input/constant
+for(auto nid : g->forward())  { } // propagates forward from each input/constant
 
-for(auto nid : g->backward()) { }// propagates backward from each output
+for(auto nid : g->backward()) { } // propagates backward from each output
 ```
 
 Whenever possible, fast should be used. The type of `nid` is `Index_ID`.
@@ -145,9 +145,10 @@ LGRAPH.
 
 ## Style
 
-For coding, please follow the coding styles from [Style.md](Style.md). To contribute,
-check [Policy.md](Policy.md) document that explains how to create pull requests
-and more details about license and copyrights.
+For coding, please follow the coding styles from [docs/Style.md](Style.md). To contribute,
+check [docs/Policy.md](Policy.md) document that explains how to create pull requests
+and more details about license and copyrights. Also, contributors to LGRAPH are
+expected to adhere to the [docs/CODE_OF_CONDUCT.md](Code of Conduct).
 
 ## Code Organization
 
@@ -185,5 +186,5 @@ Always target warning free compilation. It is okay to commit code that triggers
 warning during development, but remember to clean up afterwards.
 
 If you are not one of the code owners, you need to create a pull request as
-indicated in [Policy.md](Policy.md) and [Github-use.md](Github-use.md).
+indicated in [docs/Policy.md](Policy.md) and [docs/Github-use.md](Github-use.md).
 
