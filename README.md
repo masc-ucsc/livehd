@@ -186,5 +186,5 @@ Always target warning free compilation. It is okay to commit code that triggers
 warning during development, but remember to clean up afterwards.
 
 If you are not one of the code owners, you need to create a pull request as
-indicated in [Policy.md](docs/Policy.md) and [Github-use.md](docs/Github-use.md).
+indicated in [Policy.md](docs/Policy.md) and [GitHub-use.md](docs/GitHub-use.md).
 
