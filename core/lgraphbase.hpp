@@ -71,6 +71,8 @@ protected:
 public:
   LGraph_Base() = delete;
 
+  LGraph_Base(const LGraph_Base&) = delete;
+
   explicit LGraph_Base(const std::string &path, const std::string &_name) noexcept;
   virtual ~LGraph_Base(){};
 
