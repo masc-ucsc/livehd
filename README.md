@@ -80,7 +80,7 @@ or distance per edge. If this becomes necessary, a potential solution would be
 to modify the graph so that at most an output edge is inserted for each
 `Index_ID`.
 
-```cpp
+```
 Index_ID // 37 bit index. Either a Outp_ID, Node_ID, or additional storage
 Outp_ID  // 37 bit index, uniquely identifies a node/port pair
 Node_ID  // 37 bit index, uniquely identifies a node
