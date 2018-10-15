@@ -82,7 +82,7 @@ public:
     return _subgraphs;
   }
 
-  virtual void set(const std::string &key, const std::string &value) final {
+  void set(const std::string &key, const std::string &value) final {
     assert(false); // No main_api interface for this module as it uses yosys plug-ins
   };
 };
