@@ -92,11 +92,11 @@ Port_ID  // 10bits, per node input/output port identifier
 There are 3 types of iterators available over node is LGRAPH:
 
 ```cpp
-for(auto nid : g->fast()) // unordered but very fast traversal
+for(auto nid : g->fast()) { } // unordered but very fast traversal
 
-for(auto nid : g->forward()) // propagates forward from each input/constant
+for(auto nid : g->forward()) { }// propagates forward from each input/constant
 
-for(auto nid : g->backward()) // propagates backward from each output
+for(auto nid : g->backward()) { }// propagates backward from each output
 ```
 
 Whenever possible, fast should be used. The type of `nid` is `Index_ID`.
