@@ -125,7 +125,7 @@ void Eprp_scanner::patch_pass(const std::map<std::string, uint8_t> &keywords) {
   }
 }
 
-void Eprp_scanner::parse(std::string name, const char *memblock, size_t sz, bool chunking) {
+void Eprp_scanner::parse(const std::string &name, const char *memblock, size_t sz, bool chunking) {
 
   buffer_name = name;
   buffer = 0;

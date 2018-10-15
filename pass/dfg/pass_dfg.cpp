@@ -318,7 +318,7 @@ void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Index_ID> &src
 }
 
 
-Index_ID Pass_dfg::process_operand(LGraph *dfg, Aux_tree *aux_tree, const std::string oprd) {
+Index_ID Pass_dfg::process_operand(LGraph *dfg, Aux_tree *aux_tree, const std::string &oprd) {
   Index_ID oprd_id;
   if (aux_tree->has_alias(oprd)){
     oprd_id = aux_tree->get_alias(oprd);

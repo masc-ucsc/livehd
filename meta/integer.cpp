@@ -71,7 +71,7 @@ string Integer::hex_string() const {
   string rtrn(array_len * 8, '0');
 
   auto sindex = rtrn.length() - 1;
-  
+
   for (pyrsize dindex = 0; dindex < array_len; dindex++) {
     auto chunk = data[dindex];
 

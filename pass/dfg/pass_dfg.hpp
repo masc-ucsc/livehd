@@ -77,7 +77,7 @@ private:
 
   Index_ID                 process_operand(      LGraph *dfg,
                                                  Aux_tree *aux_tree,
-                                                 const std::string oprd);
+                                                 const std::string &oprd);
 
   std::vector<Index_ID>    process_operands(     LGraph *dfg,
                                                  Aux_tree *aux_tree,
