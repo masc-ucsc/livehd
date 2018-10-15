@@ -12,7 +12,7 @@
 
 class CharPtr {
 public:
-  CharPtr(const std::string str) {
+  CharPtr(const std::string &str) {
     ptr = str.c_str(); // FIXME: Allocate in dense
     std::cout << "1.CharPtr constructor\n";
   }

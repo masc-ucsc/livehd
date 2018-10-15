@@ -30,13 +30,13 @@ public:
     dict.clear();
     lgs.clear();
   }
-  Eprp_var(const Eprp_dict &_dict) {
-    dict = _dict;
+  Eprp_var(const Eprp_dict &_dict)
+    :dict(_dict) {
     lgs.clear();
   }
-  Eprp_var(const Eprp_lgs _lgs) {
+  Eprp_var(const Eprp_lgs &_lgs)
+    :lgs(_lgs) {
     dict.clear();
-    lgs = _lgs;
   }
 
   void add(const Eprp_dict &_dict);
