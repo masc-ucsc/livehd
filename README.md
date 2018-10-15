@@ -145,10 +145,10 @@ LGRAPH.
 
 ## Style
 
-For coding, please follow the coding styles from [docs/Style.md](Style.md). To contribute,
-check [docs/Policy.md](Policy.md) document that explains how to create pull requests
+For coding, please follow the coding styles from [Style.md](docs/Style.md). To contribute,
+check [Policy.md](docs/Policy.md) document that explains how to create pull requests
 and more details about license and copyrights. Also, contributors to LGRAPH are
-expected to adhere to the [docs/CODE_OF_CONDUCT.md](Code of Conduct).
+expected to adhere to the [Code of Conduct](docs/CODE_OF_CONDUCT.md).
 
 ## Code Organization
 
@@ -186,5 +186,5 @@ Always target warning free compilation. It is okay to commit code that triggers
 warning during development, but remember to clean up afterwards.
 
 If you are not one of the code owners, you need to create a pull request as
-indicated in [docs/Policy.md](Policy.md) and [docs/Github-use.md](Github-use.md).
+indicated in [Policy.md](docs/Policy.md) and [Github-use.md](docs/Github-use.md).
 
