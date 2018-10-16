@@ -9,8 +9,7 @@
 #include "lgraph.hpp"
 #include "pass_dce.hpp"
 
-Pass_dce::Pass_dce()
-    : Pass("dce") {
+Pass_dce::Pass_dce() {
 }
 
 void Pass_dce::trans(LGraph *g) {

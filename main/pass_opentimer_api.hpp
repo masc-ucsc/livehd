@@ -1,21 +1,22 @@
 
-#include "pass_opentimer.hpp"
+//#include "pass_opentimer.hpp"
 #include "main_api.hpp"
 
 class Pass_opentimer_api {
 protected:
   static void tmap(Eprp_var &var) {
-    Pass_opentimer pass;
+    /*Pass_opentimer pass;
     for(const auto &l:var.dict) {
       pass.set(l.first,l.second);
     }
 
     for(const auto &l:var.lgs) {
       pass.trans(l);
-    }
+    }*/
   }
 
   static void optimize(Eprp_var &var) {
+    /*
     Pass_opentimer pass;
     for(const auto &l:var.dict) {
       pass.set(l.first,l.second);
@@ -24,7 +25,7 @@ protected:
     for(const auto &l:var.lgs) {
       LGraph *lg = pass.regen(l);
       var.add(lg);
-    }
+    }*/
   }
 
 
