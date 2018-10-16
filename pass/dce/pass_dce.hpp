@@ -10,6 +10,9 @@
 
 class Pass_dce_options_pack : public Options_base {
 public:
+  void set(const std::string &label, const std::string &value) {
+    //nothing to do
+  }
 };
 
 class Pass_dce : public Pass {
