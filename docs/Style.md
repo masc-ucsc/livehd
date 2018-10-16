@@ -60,6 +60,22 @@ for(auto idx:g->unordered()) {
   for(const auto &c:g->out_edges(idx)) {
 ```
 
+## Strings must be passed as const references
+
+```cpp
+void print(const std::string& message)
+```
+
+## Pass by reference and use "const" when possible
+
+```cpp
+void print(const LGraph& g); //or
+
+void print(LGraph& g);
+```
+
+Note that older code still uses pointers, this is no longer allowed.
+
 ## Use fmt::print to print messages for debugging
 
 ```cpp
