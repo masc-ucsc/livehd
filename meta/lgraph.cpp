@@ -196,7 +196,7 @@ const std::string &LGraph::get_subgraph_name(Index_ID nid) const {
 
 Index_ID LGraph::create_node_int() {
 
-  get_lock();
+  get_lock(); // FIXME: change to Copy on Write permissions (mmap exception, and remap)
   emplace_back();
 
   if(node_internal.back().is_page_align()) {
