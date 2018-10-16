@@ -393,7 +393,8 @@ int main(int argc, char **argv) {
 
     std::string input {cinput};
 
-    if (input.compare(0, 4, "quit") == 0 || input.compare(0, 4, "exit") == 0) {
+    if (input.compare(0, 4, "quit") == 0 || input.compare(0, 4, "exit") == 0 ||
+        input.compare(0, 1, "q") == 0 || input.compare(0, 1, "x") == 0) {
 
       rx.history_add(input);
       break;

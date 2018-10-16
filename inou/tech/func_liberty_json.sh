@@ -2,6 +2,7 @@
 
 if [ "$#" -ne 1 ]; then
   echo "usage func_liberty_json.sh <library.lib> #exactly one argument required"
+  echo $1 $2 $3
   exit 1
 fi
 
