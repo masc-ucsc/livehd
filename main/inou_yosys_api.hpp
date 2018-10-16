@@ -63,11 +63,42 @@ static void set_script_liblg(Eprp_var &var, std::string &script_file, std::strin
   }
 }
 
+static int create_lib(const std::string &lib_file, const std::string& lgdb) {
+
+  std::string ofile = lgdb + "/tech_library";
+
+  fmt::print("creating tech_library file for {} in {}",lib_file, ofile);
+  int fail = 0;
+
+  int pid = fork();
+  if (pid<0) {
+    Main_api::error(fmt::format("inou.yosys: unable to fork??"));
+    return -1;
+  }
+
+  if (pid==0) { // Child
+    mkdir(lgdb.c_str(), 0755);
+
+    //redirect stdout to tech_file
+    int output = open(ofile.c_str(), O_WRONLY | O_CREAT, S_IRWXU);
+    dup2 (output, STDOUT_FILENO);
+
+    std::string tech_parser = "./inou/tech/func_liberty_json.sh";
+    char *argv[] = { strdup(tech_parser.c_str()), strdup(lib_file.c_str()), 0};
+
+    if (execvp(tech_parser.c_str(), argv) < 0) {
+      Main_api::error(fmt::format("tech_library generation failed for {} in {}, will not call yosys",lib_file, ofile));
+    }
+    exit(0);
+  }
+
+  waitpid(pid, &fail, WUNTRACED | WCONTINUED);
+  return fail;
+}
+
 static int do_work(const std::string &yosys, const std::string &liblg, const std::string &script_file, mustache::data &vars) {
 
   fmt::print("yosys do work {} -m {} using {}",yosys, liblg, script_file);
-
-  int fail = 0;
 
   std::ifstream inFile;
   inFile.open(script_file);
@@ -95,7 +126,6 @@ static int do_work(const std::string &yosys, const std::string &liblg, const std
 
     if (execvp(yosys.c_str(), argv) < 0) {
       Main_api::error(fmt::format("inou.yosys: execvp fail with {}", strerror(errno)));
-      fail = errno;
     }
 
     exit(0);
@@ -104,7 +134,6 @@ static int do_work(const std::string &yosys, const std::string &liblg, const std
   close(pipefd[0]); // unsused
 
   const std::string rendered = tmpl.render(vars);
-  fmt::print("rtp {}\n", rendered);
   write(pipefd[1],rendered.c_str(), rendered.size());
   close(pipefd[1]); // Force flush
 
@@ -131,7 +160,7 @@ static int do_work(const std::string &yosys, const std::string &liblg, const std
   wait(&wstatus);
 #endif
 
-  return fail;
+  return wstatus;
 }
 
 static void tolg(Eprp_var &var) {
@@ -183,6 +212,8 @@ static void tolg(Eprp_var &var) {
     if(!lib.empty()) {
       vars.set("liberty_tmap", mustache::data::type::bool_true);
       vars.set("liberty_file", lib);
+
+      create_lib(lib, path);
 
     } else {
       // Nothing
