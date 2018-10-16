@@ -5,6 +5,7 @@
 
 #include "inou_ramgen.hpp"
 
+#include "lgbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraphbase.hpp"
 
@@ -37,12 +38,42 @@ void Inou_ramgen::fromlg(std::vector<const LGraph *> &lgs) {
 
   assert(!opack.odir.empty());
 
+  LGBench b;
+
   int total = 0;
   for(const auto g : lgs) {
     for(auto idx : g->fast()) {
       total++;
     }
   }
-  fmt::print("total {}\n",total);
+  fmt::print("1. total {}\n",total);
+  b.sample("warmup");
+
+  total = 0;
+  for(const auto g : lgs) {
+    for(auto idx : g->fast()) {
+      total++;
+    }
+  }
+  fmt::print("3. total {}\n",total);
+  b.sample("for   ");
+
+  total = 0;
+  for(const auto g : lgs) {
+    g->each_node_fast( [&total](Index_ID idx) {
+        total++;
+        });
+  }
+  fmt::print("2. total {}\n",total);
+  b.sample("warmup");
+
+  total = 0;
+  for(const auto g : lgs) {
+    g->each_node_fast( [&total](Index_ID idx) {
+        total++;
+        });
+  }
+  fmt::print("2. total {}\n",total);
+  b.sample("each  ");
 
 }
