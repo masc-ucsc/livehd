@@ -15,6 +15,13 @@
 
 #include "nodetype.hpp"
 
+#ifndef likely
+#define likely(x)       __builtin_expect((x),1)
+#endif
+#ifndef unlikely
+#define unlikely(x)     __builtin_expect((x),0)
+#endif
+
 class Edge_iterator;
 
 class LGraph_Base : public LGraph_Node_Type {
@@ -80,6 +87,8 @@ public:
   void each_input(std::function<void(Index_ID, Port_ID)> f1) const;
   void each_output(std::function<void(Index_ID)> f1) const;
   void each_output(std::function<void(Index_ID, Port_ID)> f1) const;
+
+  void each_node_fast(std::function<void(Index_ID)> f1) const;
 
   void get_lock();
   // Method called after the char_arrays and node_internal are reloaded
