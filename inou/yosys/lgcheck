@@ -55,8 +55,13 @@ if [ ! -f ${GOLD} ]; then
 fi
 
 if [ ! -f ${GATE} ]; then
-  echo "implementation circuit file not found"
-  exit 1
+  if [ -d ${GATE} ] ; then
+    GATE=${GATE}/*
+    echo "using directory ${GATE}"
+  else
+    echo "implementation circuit file not found"
+    exit 1
+  fi
 fi
 
 if [ ! -f ${YOSYS} ]; then
@@ -91,7 +96,7 @@ ${YOSYS} -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; equiv_status -assert"
     2> /dev/null | grep "Equivalence successfully proven!"
 
 if [ $? -eq 0 ]; then
-  echo "Successfully matched ${GATE} with ${GOLD}"
+  echo "Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
   exit 0
 fi
 
@@ -102,7 +107,7 @@ ${YOSYS} -p "${yosys_read};
     | grep "Equivalence successfully proven!"
 
 if [ $? -eq 0 ]; then
-  echo "Successfully matched ${GATE} with ${GOLD}"
+  echo "Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
   exit 0
 fi
 
@@ -113,7 +118,7 @@ ${YOSYS} -p "${yosys_read};
     | grep "Equivalence successfully proven!"
 
 if [ $? -eq 0 ]; then
-  echo "Successfully matched ${GATE} with ${GOLD}"
+  echo "Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
   exit 0
 fi
 
@@ -155,7 +160,7 @@ exit" > fm_script_${gold_top}.tcl
 ${FM_SHELL} -64bit -f fm_script_${gold_top}.tcl | grep "Verification SUCCEEDED"
 
 if [ $? -eq 0 ]; then
-  echo "Successfully matched ${GATE} with ${GOLD}"
+  echo "Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
   exit 0
 fi
 
