@@ -19,6 +19,7 @@ cc_binary(
 
             "//pass/abc:pass_abc",
             "//pass/dfg:pass_dfg",
+            "//pass/dce:pass_dce",
 
             "//cops/live:cops_live",
     ],
