@@ -8,7 +8,7 @@
 
 #include <string>
 
-class Pass_dce_options_pack : public Options_pack {
+class Pass_dce_options_pack : public Options_base {
 public:
 };
 
@@ -22,7 +22,16 @@ protected:
 public:
   Pass_dce();
 
-  void transform(LGraph *orig) final;
+  void trans(LGraph *orig) final;
+
+  // regenerate, creates a new lgraph db
+  LGraph *regen(const LGraph *orig) {
+    //only inplace available
+    assert(false);
+  }
+
+  // no options needed
+  void set(const std::string &key, const std::string &value) { }
 };
 
 #endif

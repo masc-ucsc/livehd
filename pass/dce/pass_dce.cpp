@@ -3,7 +3,7 @@
 #include <string>
 #include <time.h>
 
-#include <bm.h>
+#include "bm.h"
 
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
@@ -13,7 +13,7 @@ Pass_dce::Pass_dce()
     : Pass("dce") {
 }
 
-void Pass_dce::transform(LGraph *g) {
+void Pass_dce::trans(LGraph *g) {
 
   bm::bvector<>      output_used;
   std::set<Index_ID> pending;
