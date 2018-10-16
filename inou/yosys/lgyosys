@@ -154,7 +154,7 @@ if [ ${OPT_TO_VERILOG} -eq 0 ]; then
   lib=""
   if [ "$OPT_LIB" != "" ]; then
     mkdir -p ${OPT_LGDB}
-    ruby ./inou/tech/fun_liberty_json.sh  ${OPT_LIB} > ${OPT_LGDB}
+    sh ./inou/tech/func_liberty_json.sh  ${OPT_LIB} > ${OPT_LGDB}/tech_library
     lib="techmap -D ALU_RIPPLE; abc -liberty ${OPT_LIB}; "
   fi
 
