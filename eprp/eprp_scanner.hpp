@@ -156,8 +156,8 @@ public:
 
   void patch_pass(const std::map<std::string, uint8_t> &keywords);
 
-  void parse(std::string name, const char *memblock, size_t sz, bool chunking=false);
-  void parse(std::string name, const std::string &str) {
+  void parse(const std::string &name, const char *memblock, size_t sz, bool chunking=false);
+  void parse(const std::string &name, const std::string &str) {
     parse(name,str.c_str(),str.size());
   }
 
