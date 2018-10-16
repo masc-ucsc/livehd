@@ -63,9 +63,11 @@ static void set_script_liblg(Eprp_var &var, std::string &script_file, std::strin
   }
 }
 
-static void do_work(const std::string &yosys, const std::string &liblg, const std::string &script_file, mustache::data &vars) {
+static int do_work(const std::string &yosys, const std::string &liblg, const std::string &script_file, mustache::data &vars) {
 
   fmt::print("yosys do work {} -m {} using {}",yosys, liblg, script_file);
+
+  int fail = 0;
 
   std::ifstream inFile;
   inFile.open(script_file);
@@ -81,7 +83,7 @@ static void do_work(const std::string &yosys, const std::string &liblg, const st
   int pid = fork();
   if (pid<0) {
     Main_api::error(fmt::format("inou.yosys: unable to fork??"));
-    return;
+    return -1;
   }
 
   if (pid==0) { // Child
@@ -93,6 +95,7 @@ static void do_work(const std::string &yosys, const std::string &liblg, const st
 
     if (execvp(yosys.c_str(), argv) < 0) {
       Main_api::error(fmt::format("inou.yosys: execvp fail with {}", strerror(errno)));
+      fail = errno;
     }
 
     exit(0);
@@ -101,6 +104,7 @@ static void do_work(const std::string &yosys, const std::string &liblg, const st
   close(pipefd[0]); // unsused
 
   const std::string rendered = tmpl.render(vars);
+  fmt::print("rtp {}\n", rendered);
   write(pipefd[1],rendered.c_str(), rendered.size());
   close(pipefd[1]); // Force flush
 
@@ -110,7 +114,7 @@ static void do_work(const std::string &yosys, const std::string &liblg, const st
     int w = waitpid(pid, &wstatus, WUNTRACED | WCONTINUED);
     if (w == -1) {
       Main_api::error(fmt::format("inou.yosys: waitpid fail with {}", strerror(errno)));
-      return;
+      return errno;
     }
 
     if (WIFEXITED(wstatus)) {
@@ -127,6 +131,7 @@ static void do_work(const std::string &yosys, const std::string &liblg, const st
   wait(&wstatus);
 #endif
 
+  return fail;
 }
 
 static void tolg(Eprp_var &var) {
@@ -152,11 +157,6 @@ static void tolg(Eprp_var &var) {
 
   vars.set("path",path);
 
-  if(!top.empty()) {
-    vars.set("hierarchy", mustache::data::type::bool_true);
-    vars.set("top",top);
-  }
-
   mustache::data filelist{mustache::data::type::list};
   for(const auto &f:Main_api::parse_files(files,"inou.yosys.tolg")) {
     filelist << mustache::data{"input", f};
@@ -164,12 +164,29 @@ static void tolg(Eprp_var &var) {
 
   vars.set("filelist",filelist);
 
+  if(!top.empty()) {
+    vars.set("hierarchy", mustache::data::type::bool_true);
+    if(top != "-auto-top") {
+      vars.set("top","-top " + top);
+    } else {
+      vars.set("top",top);
+    }
+  } else {
+    vars.set("hierarchy", mustache::data::type::bool_false);
+  }
+
   if (strcasecmp(techmap.c_str(),"alumacc") == 0) {
     vars.set("techmap_alumacc", mustache::data::type::bool_true);
   }else if (strcasecmp(techmap.c_str(),"full") == 0) {
     vars.set("techmap_full", mustache::data::type::bool_true);
   }else if (strcasecmp(techmap.c_str(),"none") == 0) {
-    // Nothing
+    if(!lib.empty()) {
+      vars.set("liberty_tmap", mustache::data::type::bool_true);
+      vars.set("liberty_file", lib);
+
+    } else {
+      // Nothing
+    }
   }else{
     Main_api::error(fmt::format("inou.yosys.tolf: unrecognized techmap {} option. Either full or alumacc", techmap));
     return;
@@ -235,11 +252,11 @@ static void setup(Eprp &eprp) {
   m1.add_label_required("files","verilog files to process (comma separated)");
   m1.add_label_optional("path","path to build the lgraph[s]");
   m1.add_label_optional("techmap","Either full or alumac techmap or none from yosys. Cannot be used with liberty");
-  m1.add_label_optional("liberty","Liberty file for technology mapping. Cannot be used with techmap");
+  m1.add_label_optional("liberty","Liberty file for technology mapping. Cannot be used with techmap, will call abc for tmap");
   m1.add_label_optional("abc","run ABC inside yosys before loading lgraph");
   m1.add_label_optional("script","alternative custom inou_yosys_read.ys command");
   m1.add_label_optional("yosys","path for yosys command");
-  m1.add_label_optional("top","define top module, will call yosys hierarchy pass");
+  m1.add_label_optional("top","define top module, will call yosys hierarchy pass (-auto-top allowed)");
 
   eprp.register_method(m1);
 

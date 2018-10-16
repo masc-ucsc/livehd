@@ -5,6 +5,9 @@ read_verilog -sv -nomeminit {{input}}
 {{/filelist}}
 
 # single file, no hierarchy needed
+{{#hierarchy}}
+hierarchy {{top}}
+{{/hierarchy}}
 
 proc
 pmuxtree
@@ -18,6 +21,10 @@ techmap -map techmap.v
 {{#techmap_full}}
 techmap
 {{/techmap_full}}
+{{#liberty_tmap}}
+techmap -D ALU_RIPPLE
+abc -liberty {{liberty_file}}
+{{/liberty_tmap}}
 opt
 
 {{#abc_in_yosys}}
