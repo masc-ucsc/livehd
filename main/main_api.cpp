@@ -12,30 +12,34 @@
 #include "inou_rand_api.hpp"
 #include "inou_yosys_api.hpp"
 #include "pass_abc_api.hpp"
+#include "pass_dce_api.hpp"
 #include "pass_dfg_api.hpp"
+#include "pass_opentimer_api.hpp"
 #include "cops_live_api.hpp"
 
 Eprp Main_api::eprp;
 std::string Main_api::main_path;
 
 void Main_api::init() {
-  Top_api::setup(eprp);        // *
+  Top_api::setup(eprp);              // *
 
-  Meta_api::setup(eprp);       // lgraph.*
-  Cloud_api::setup(eprp);      // cloud.*
+  Meta_api::setup(eprp);             // lgraph.*
+  Cloud_api::setup(eprp);            // cloud.*
 
-  Inou_cfg_api::setup(eprp);   // inou.cfg.*
-  Inou_lef_api::setup(eprp);   // inou.lef.*
-  Inou_json_api::setup(eprp);  // inou.json.*
-  Inou_pyrope_api::setup(eprp);// inou.pyrope.*
-  Inou_ramgen_api::setup(eprp);// inou.ramgen.*
-  Inou_rand_api::setup(eprp);  // inou.rand.*
-  Inou_yosys_api::setup(eprp); // inou.yosys.*
+  Inou_cfg_api::setup(eprp);         // inou.cfg.*
+  Inou_lef_api::setup(eprp);         // inou.lef.*
+  Inou_json_api::setup(eprp);        // inou.json.*
+  Inou_pyrope_api::setup(eprp);      // inou.pyrope.*
+  Inou_ramgen_api::setup(eprp);      // inou.ramgen.*
+  Inou_rand_api::setup(eprp);        // inou.rand.*
+  Inou_yosys_api::setup(eprp);       // inou.yosys.*
 
-  Pass_abc_api::setup(eprp);   // pass.abc.*
-  Pass_dfg_api::setup(eprp);   // pass.dfg.*
+  Pass_abc_api::setup(eprp);         // pass.abc.*
+  Pass_dce_api::setup(eprp);         // pass.dce.*
+  Pass_dfg_api::setup(eprp);         // pass.dfg.*
+  Pass_opentimer_api::setup(eprp);   // pass.opentimer.*
 
-  Cops_live_api::setup(eprp);   // pass.dfg.*
+  Cops_live_api::setup(eprp);        // pass.dfg.*
 
   char exePath[PATH_MAX];
   int len = readlink("/proc/self/exe", exePath, PATH_MAX);
