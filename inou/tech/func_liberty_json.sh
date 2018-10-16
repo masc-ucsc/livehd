@@ -21,7 +21,7 @@ cat $1 | sed s/"cell("/"cell ("/ | sed s/"pin("/"pin ("/ | awk 'BEGIN{print "{\n
     print "{\n\"cell\": "$2",";
     cell=1
  };
- if($0 ~ / pin /) {
+ if($0 ~ /\spin /) {
    name=$2;
  };
  if($0 ~ /direction/) {
