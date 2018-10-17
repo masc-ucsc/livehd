@@ -53,6 +53,7 @@ class Thread_pool {
     while( !finishing) {
       while( !queue.empty() ) {
         next_job()();
+        jobs_left--;
       }
     }
   }
@@ -66,9 +67,10 @@ class Thread_pool {
 
     bool has_work = queue.dequeue(res);
     if (has_work) {
-      jobs_left--;
       return res;
     }
+
+    jobs_left++; // To not affect the jobs left
 
     return []{}; // Nothing to do
   }
@@ -133,12 +135,12 @@ class Thread_pool {
 #endif
 
   void wait_all() {
-    while(!queue.empty()) {
+    while(jobs_left>0) {
       std::function<void(void)> res;
       bool has_work = queue.dequeue(res);
       if (has_work) {
-        jobs_left--;
         res();
+        jobs_left--;
       }
     }
     assert(jobs_left==0);

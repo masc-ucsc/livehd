@@ -2,14 +2,6 @@
 
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
 
-git_repository(
-    name = "hchauvin_bazel_coverage_report",
-    remote = "https://github.com/hchauvin/bazel-coverage-report.git",
-    commit = "7ca9e5775a69cc0115caf58974c2a7bc55bcf17b",
-)
-load("@hchauvin_bazel_coverage_report//report:defs.bzl", "bazel_coverage_report_repositories")
-bazel_coverage_report_repositories()  # lcov, ...
-
 new_git_repository(
     name = "Open_timer",
     build_file = "BUILD.Open_timer", # relative to external path
