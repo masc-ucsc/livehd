@@ -207,6 +207,7 @@ void Eprp_scanner::parse(const std::string &name, const char *memblock, size_t s
     }else{
       Token_id nt = translate[static_cast<uint8_t>(c)];
       if (t.tok != nt) {
+        finishing_comment = false;
         t.len = pos - t.pos;
         add_token(t);
         t.tok = nt;
