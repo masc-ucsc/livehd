@@ -5,10 +5,10 @@
 #include "meta/lgraph.hpp"
 #include "core/lgedge.hpp"
 
-const std::string READ_MARKER   = "pyrrd__";
-const std::string WRITE_MARKER  = "pyrwt__";
-const std::string VALID_MARKER  = "pyrvd__";
-const std::string RETRY_MARKER  = "pyrrt__";
+const std::string READ_MARKER   = "prprd__";
+const std::string WRITE_MARKER  = "prpwt__";
+const std::string VALID_MARKER  = "prpvd__";
+const std::string RETRY_MARKER  = "prprt__";
 const std::string TEMP_MARKER   = "tmp__";
 
 #define LOGICAL_AND_OP "AND"
