@@ -11,7 +11,7 @@ def _impl(ctx):
   #print(ctx.fragments.cpp.compiler_executable)
   #print(ctx.fragments.cpp.ar_executable)
 
-  args = [output.path] + [ctx.fragments.cpp.compiler_executable] + [ctx.fragments.cpp.ar_executable] + [f.path for f in src_libs] + ["-Wl,-Bstatic"] + [f.path for f in static_libs] + ["-lstdc++"] + ["-Wl,-Bdynamic"] + ["-lrt", "-lpthread"]
+  args = [output.path] + [ctx.fragments.cpp.compiler_executable] + [ctx.fragments.cpp.ar_executable] + [f.path for f in src_libs] + ["-Wl,-Bstatic"] + [f.path for f in static_libs] + ["-lstdc++"] + ["-Wl,-Bdynamic"] + ["-lrt", "-lgcov", "-lpthread"]
 
   ctx.actions.run(
       inputs=static_libs + src_libs,
