@@ -97,6 +97,16 @@ public:
   Backward_edge_iterator backward() const;
 
   void dump() const;
+
+  // Iterators defined in the lgraph_each.cpp
+
+  void each_input(std::function<void(Index_ID)> f1) const;
+  void each_input(std::function<void(Index_ID, Port_ID)> f1) const;
+  void each_output(std::function<void(Index_ID)> f1) const;
+  void each_output(std::function<void(Index_ID, Port_ID)> f1) const;
+
+  void each_master_root_fast(std::function<void(Index_ID)> f1) const;
+  //void each_master_root_fast(std::function<void(Index_ID)> f1) const;
 };
 
 // Clean interface/iterator for most operations. It must call graph

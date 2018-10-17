@@ -2,6 +2,7 @@
 //
 
 #include <fstream>
+#include <atomic>
 
 #include "inou_ramgen.hpp"
 
@@ -32,6 +33,9 @@ Inou_ramgen::~Inou_ramgen() {
 
 std::vector<LGraph *> Inou_ramgen::tolg() {
   assert(false); // generates SRAMs from a lgraph, not
+
+  static std::vector<LGraph *> empty;
+  return empty;
 }
 
 void Inou_ramgen::fromlg(std::vector<const LGraph *> &lgs) {
@@ -40,6 +44,8 @@ void Inou_ramgen::fromlg(std::vector<const LGraph *> &lgs) {
 
   LGBench b;
 
+#if 0
+  //std::atomic<int> total = 0;
   int total = 0;
   for(const auto g : lgs) {
     for(auto idx : g->fast()) {
@@ -58,22 +64,21 @@ void Inou_ramgen::fromlg(std::vector<const LGraph *> &lgs) {
   fmt::print("3. total {}\n",total);
   b.sample("for   ");
 
+#else
+
   total = 0;
   for(const auto g : lgs) {
-    g->each_node_fast( [&total](Index_ID idx) {
-        total++;
-        });
+    g->each_master_root_fast([this](auto a1) { inc_total(a1); });
   }
   fmt::print("2. total {}\n",total);
   b.sample("warmup");
 
   total = 0;
   for(const auto g : lgs) {
-    g->each_node_fast( [&total](Index_ID idx) {
-        total++;
-        });
+    g->each_master_root_fast([this](auto a1) { inc_total(a1); });
   }
   fmt::print("2. total {}\n",total);
   b.sample("each  ");
+#endif
 
 }

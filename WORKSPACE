@@ -86,6 +86,12 @@ new_git_repository(
     tag = "release-1.8.0",
 )
 new_git_repository(
+    name = "taskflow",
+    build_file = "BUILD.taskflow",
+    commit = "ee47ebeb07e2f40cedece7eedb68eb0cde7ca27c", # October 16, 2018
+    remote = "https://github.com/cpp-taskflow/cpp-taskflow.git",
+)
+new_git_repository(
     name = "verilator",
     build_file = "BUILD.verilator",
     commit = "97d89cce35142d1a1f4c08571d436d5a65e34901", # October 10, 2018

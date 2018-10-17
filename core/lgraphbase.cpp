@@ -63,40 +63,6 @@ void LGraph_Base::emplace_back() {
   LGraph_Node_Type::emplace_back();
 }
 
-void LGraph_Base::each_input(std::function<void(Index_ID)> f1) const {
-  for(const auto &ent : inputs2node) {
-    f1(ent.second.nid);
-  }
-}
-
-void LGraph_Base::each_input(std::function<void(Index_ID, Port_ID)> f1) const {
-  for(const auto &ent : inputs2node) {
-    f1(ent.second.nid,ent.second.pos);
-  }
-}
-
-void LGraph_Base::each_output(std::function<void(Index_ID)> f1) const {
-  for(const auto &ent : outputs2node) {
-    f1(ent.second.nid);
-  }
-}
-
-void LGraph_Base::each_output(std::function<void(Index_ID, Port_ID)> f1) const {
-  for(const auto &ent : outputs2node) {
-    f1(ent.second.nid,ent.second.pos);
-  }
-}
-
-void LGraph_Base::each_node_fast(std::function<void(Index_ID)> f1) const {
-  for(const auto &ni: node_internal) {
-    if (!ni.is_master_root())
-      continue;
-
-    assert(ni.is_node_state());
-    f1(ni.get_nid());
-  }
-}
-
 void LGraph_Base::get_lock() {
 
   if(locked)
