@@ -4,10 +4,11 @@
 #ifndef INOU_RAMGEN_H
 #define INOU_RAMGEN_H
 
+#include <atomic>
+#include <string>
+
 #include "inou.hpp"
 #include "options.hpp"
-
-#include <string>
 
 class Inou_ramgen_options : public Options_base {
 public:
@@ -24,6 +25,11 @@ class Inou_ramgen : public Inou {
 private:
 protected:
   Inou_ramgen_options opack;
+
+  std::atomic<int> total;
+  void inc_total(Index_ID idx) {
+    total++;
+  };
 
 public:
   Inou_ramgen();
