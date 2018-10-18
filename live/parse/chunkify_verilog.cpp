@@ -25,7 +25,12 @@ void Chunkify_verilog::elaborate() {
   bool last_output = false;
 
   std::string module;
+
+  std::string not_in_module_text; // This has to be cut&pasted to each file
+  std::string in_module_text;
+
   while(!scan_is_end()) {
+    bool endmodule_found=false;
     if (scan_is_token(TOK_ALNUM)) {
       std::string token;
       scan_append(token);
@@ -43,8 +48,7 @@ void Chunkify_verilog::elaborate() {
       }else if (strcasecmp(token.c_str(),"endmodule")==0) {
         if (in_module) {
           in_module = false;
-          fmt::print("{}={}\n", token, module);
-          module.clear();
+          endmodule_found = true;
         }else{
           scan_error(fmt::format("found endmodule without corresponding module"));
         }
@@ -62,6 +66,20 @@ void Chunkify_verilog::elaborate() {
         }
         last_input = false;
         last_output = false;
+      }
+    }else if (scan_is_token(TOK_COMMENT)) {
+      // Drop comment, to avoid unneded recompilations
+      scan_next();
+      continue;
+    }
+    if (!in_module && !endmodule_found) {
+      scan_format_append(not_in_module_text);
+    }else{
+      scan_format_append(in_module_text);
+      if (endmodule_found) {
+        fmt::print("module: {}\n{}\n{}\n", module, not_in_module_text, in_module_text);
+        module.clear();
+        in_module_text.clear();
       }
     }
 
