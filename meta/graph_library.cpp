@@ -9,7 +9,7 @@
 std::unordered_map<std::string, Graph_library *> Graph_library::instances;
 
 LGraph *Graph_library::get_graph(int id) const {
-  assert(id2name.size() > id);
+  assert(id2name.size() > (size_t)id);
   return LGraph::find_lgraph(path,id2name[id]);
 }
 
