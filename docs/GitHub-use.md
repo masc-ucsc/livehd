@@ -56,7 +56,21 @@ an empty repository (lgraph-private), then run this to close lgraph
     cd ..
     rm -rf lgraph.git
 
-### Typical usage
+### Simple contribution flow
+
+The simplest way to contribute to LGraph is to create a fork, and a pull request. The overall flow is:
+
+1. Fork it ( https://github.com/masc-ucsc/lgraph/fork )
+
+2. Create your feature branch (git checkout -b my-nice-patch)
+
+3. Commit your changes (git commit -am 'Solve issue-x with bla bla')
+
+4. Push to the branch (git push origin my-nice-patch)
+
+5. Create new [pull][pull] request
+
+### Typical usage for frequent contributors
 
 The workflow in the [MASC lab][masc] is as follows:
 
