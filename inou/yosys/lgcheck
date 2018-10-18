@@ -1,11 +1,12 @@
 #!/bin/bash
 
-TEMP=$(getopt -o r::,i::,l:: --long reference::,implementation::,cell_library::,top:: -n 'lgcheck' -- "$@")
+TEMP=$(getopt -o r::,i::,l::,d --long reference::,implementation::,cell_library::,top:: -n 'lgcheck' -- "$@")
 eval set -- "$TEMP"
 
 YOSYS=$(which yosys)
 CELLLIB=""
 OPT_TOP=""
+OPT_DEBUG=""
 while true ; do
     case "$1" in
         -r|--reference)
@@ -28,6 +29,9 @@ while true ; do
               "") shift 2 ;;
               *) OPT_TOP=$2 ; shift 2 ;;
           esac ;;
+        -d)
+          shift 1 ;
+          OPT_DEBUG=1 ;;
         --)
           shift
           break
@@ -82,8 +86,8 @@ if [ "${CELLLIB}" != "" ]; then
   lib="read_verilog ${CELLLIB}"
 fi
 
-yosys_read="read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; proc; flatten; rename -top gold; design -stash gold;
-            read_verilog -sv ${GATE}; hierarchy ${TOP_STR}; proc; flatten; rename -top gate; design -stash gate;
+yosys_read="read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; proc; memory -nomap; flatten; rename -top gold; design -stash gold;
+            read_verilog -sv ${GATE}; hierarchy ${TOP_STR}; proc; memory -nomap; flatten; rename -top gate; design -stash gate;
             design -copy-from gold -as gold gold; design -copy-from gate -as gate gate; ${lib};"
 
 yosys_prep="proc; equiv_make gold gate equiv; prep -flatten -top equiv; hierarchy -top equiv; hierarchy -check; flatten; proc; opt_clean;"
@@ -92,6 +96,9 @@ yosys_equiv="equiv_simple; equiv_struct; equiv_simple; equiv_struct -icells; equ
 yosys_equiv_extra="${yosys_simple}; equiv_simple -seq 5; equiv_induct -seq 5;"
 
 #try fast script first, if it fails, goes to more complex one
+if [ "$OPT_DEBUG" != "" ]; then
+  echo "${YOSYS} -p \"${yosys_read}; ${yosys_prep}; ${yosys_equiv}; equiv_status -assert\""
+fi
 ${YOSYS} -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; equiv_status -assert" \
     2> /dev/null | grep "Equivalence successfully proven!"
 
@@ -101,7 +108,7 @@ if [ $? -eq 0 ]; then
 fi
 
 ${YOSYS} -p "${yosys_read};
-    memory -nomap; opt_expr -full; opt -purge; proc; opt -purge;
+    proc; memory -nomap; opt_expr -full; opt -purge; opt -purge;
     opt_reduce -full; opt_expr -mux_undef; opt_reduce; opt_merge; opt_clean -purge;
     ${yosys_prep}; opt -purge; proc; opt -purge; ${yosys_equiv}; equiv_status -assert" \
     | grep "Equivalence successfully proven!"
