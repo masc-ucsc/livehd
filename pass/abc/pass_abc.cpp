@@ -160,7 +160,7 @@ void Pass_abc::find_combinational_conn(const LGraph *g) {
   for(const auto &idx : graph_info->combinational_id) {
     std::vector<const Edge *> inp_edges(16);
     graph_topology::topology_info             pid;
-    const Tech_cell *         tcell      = g->get_tlibrary()->get_const_cell(g->tmap_id_get(idx));
+    //const Tech_cell *         tcell      = g->get_tlibrary()->get_const_cell(g->tmap_id_get(idx));
     uint32_t                  port_count = 0;
     for(const auto &input : g->inp_edges(idx)) {
       assert(input.get_inp_pin().get_pid() < 16);
@@ -168,7 +168,7 @@ void Pass_abc::find_combinational_conn(const LGraph *g) {
       port_count++;
     }
 
-    for(int i = 0; i < port_count; i++) {
+    for(uint32_t i = 0; i < port_count; i++) {
       if(inp_edges[i] == nullptr)
         break;
 

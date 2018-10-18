@@ -63,6 +63,8 @@ static void set_script_liblg(Eprp_var &var, std::string &script_file, std::strin
   }
 }
 
+
+//TODO: this should go once we have a proper lib file in c++
 static int create_lib(const std::string &lib_file, const std::string& lgdb) {
 
   std::string ofile = lgdb + "/tech_library";

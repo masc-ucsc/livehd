@@ -59,8 +59,8 @@ public:
   }
 
   const std::string &get_name(int id) const {
-    assert(id>0); // 0 is invalid id
-    assert(id2name.size() > id);
+    assert(id > 0); // 0 is invalid id
+    assert(id2name.size() > (size_t) id);
     return id2name[id];
   }
 
@@ -70,12 +70,12 @@ public:
     return id2name.size();
   }
 
-  int get_id(const std::string &name) const {
+  uint32_t get_id(const std::string &name) const {
     const auto &it = attribute.find(name);
     if(it != attribute.end()) {
       return it->second.id;
     }
-    return -1; // -1 is invalid ID
+    return 0; // -1 is invalid ID
   }
 
   void update(const std::string &name) {
