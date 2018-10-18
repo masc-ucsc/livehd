@@ -1,3 +1,4 @@
+#!/bin/sh
 
 bazel coverage -k //...
 ./inou/yosys/tests/yosys.sh
