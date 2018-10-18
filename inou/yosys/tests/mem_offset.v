@@ -8,7 +8,7 @@ module mem_offset
     output reg [32-1:0] dout
     );
 
-   reg [32-1:0]     mem[(1<<32)-1:0];
+   reg [32-1:0] mem [5:50];
 
   always @(posedge clk) begin
     mem[waddr] <= din;

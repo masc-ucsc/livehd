@@ -801,11 +801,12 @@ static LGraph *process_module(RTLIL::Module *module) {
       op = Memory_Op;
 
       //int parameters
-      uint32_t width = cell->parameters["\\WIDTH"].as_int();
-      uint32_t depth = cell->parameters["\\SIZE"].as_int();
-      abits          = cell->parameters["\\ABITS"].as_int();
-      rdports        = cell->parameters["\\RD_PORTS"].as_int();
-      wrports        = cell->parameters["\\WR_PORTS"].as_int();
+      uint32_t width  = cell->parameters["\\WIDTH"].as_int();
+      uint32_t depth  = cell->parameters["\\SIZE"].as_int();
+      uint32_t offset = cell->parameters["\\OFFSET"].as_int();
+      abits           = cell->parameters["\\ABITS"].as_int();
+      rdports         = cell->parameters["\\RD_PORTS"].as_int();
+      wrports         = cell->parameters["\\WR_PORTS"].as_int();
 
       //string parameters
       RTLIL::Const transp  = cell->parameters["\\RD_TRANSPARENT"];
@@ -826,11 +827,12 @@ static LGraph *process_module(RTLIL::Module *module) {
       //assert(rd_clkp[0] == wr_clkp[0]);
 
       //lgraph has reversed convention compared to yosys.
-    rd_clkp = RTLIL::Const(rd_clkp[0]).as_int() ? RTLIL::Const(0, 1) : RTLIL::Const(1, 1);
+      rd_clkp = RTLIL::Const(rd_clkp[0]).as_int() ? RTLIL::Const(0, 1) : RTLIL::Const(1, 1);
 
       size = width;
 
       connect_constant(g, depth, 32, onid, LGRAPH_MEMOP_SIZE);
+      connect_constant(g, offset, 32, onid, LGRAPH_MEMOP_OFFSET);
       connect_constant(g, abits, 32, onid, LGRAPH_MEMOP_ABITS);
       connect_constant(g, wrports, 32, onid, LGRAPH_MEMOP_WRPORT);
       connect_constant(g, rdports, 32, onid, LGRAPH_MEMOP_RDPORT);
@@ -839,8 +841,6 @@ static LGraph *process_module(RTLIL::Module *module) {
       connect_constant(g, transp.as_int(), 1, onid, LGRAPH_MEMOP_RDTRAN);
 
       //FIXME: get a test case to patch
-      /*if(cell->parameters.find("\\OFFSET") != cell->parameters.end())
-        assert(cell->parameters["\\OFFSET"].as_int() == 0);*/
       if(cell->parameters.find("\\INIT") != cell->parameters.end())
         assert(cell->parameters["\\INIT"].as_string() == "x");
 
