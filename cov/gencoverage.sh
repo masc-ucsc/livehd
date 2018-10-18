@@ -1,5 +1,7 @@
 #!/bin/sh
 
+rm -f cov/coverage.*
+bazel clean
 bazel coverage -k //...
 ./inou/yosys/tests/yosys.sh
 ./inou/yosys/tests/synth.sh
