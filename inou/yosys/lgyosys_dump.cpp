@@ -897,6 +897,11 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
             log_error("Internal Error: Mem size is not a constant.\n");
           memory->setParam("\\SIZE", RTLIL::Const(g->node_value_get(c.get_idx())));
 
+        } else if(input_pin == LGRAPH_MEMOP_OFFSET) {
+          if(g->node_type_get(c.get_idx()).op != U32Const_Op)
+            log_error("Internal Error: Mem size is not a constant.\n");
+          memory->setParam("\\OFFSET", RTLIL::Const(g->node_value_get(c.get_idx())));
+
         } else if(input_pin == LGRAPH_MEMOP_ABITS) {
           if(g->node_type_get(c.get_idx()).op != U32Const_Op)
             log_error("Internal Error: Mem addr bits is not a constant.\n");
@@ -955,7 +960,6 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       memory->setParam("\\WR_CLK_ENABLE", RTLIL::Const(RTLIL::State::S1, memory->getParam("\\WR_PORTS").as_int()));
 
       memory->setParam("\\INIT",   RTLIL::Const::from_string("x"));
-      memory->setParam("\\OFFSET", RTLIL::Const(0));
 
       memory->setParam("\\RD_CLK_POLARITY", RTLIL::Const(posedge, memory->getParam("\\RD_PORTS").as_int()));
       memory->setParam("\\WR_CLK_POLARITY", RTLIL::Const(posedge, memory->getParam("\\WR_PORTS").as_int()));
