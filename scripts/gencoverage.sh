@@ -1,5 +1,6 @@
 #!/bin/sh
 
+mkdir cov
 rm -f cov/coverage.*
 bazel clean
 bazel coverage -k //...
