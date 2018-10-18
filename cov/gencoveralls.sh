@@ -6,7 +6,6 @@ do
 echo $a
 done
 
-
 LCOV_ADD=""
 for a in cloud cops core eprp inou live main meta pass
 do

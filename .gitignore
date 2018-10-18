@@ -8,6 +8,10 @@ cscope*
 *.swn
 *.pyc
 *.o
+*.log
+fm_*.tcl
+perf.data*
+coverage*.info
 compile_commands.json
 .ycm_extra_conf.py
 bazel-*
