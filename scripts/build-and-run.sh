@@ -17,7 +17,7 @@ fi
 
 ${LGRAPH_SRC}/scripts/run-test.sh
 
-if [ -f /usr/bin/lcov ]; then
+if [ $(which lcov) ]; then
   cd $LGRAPH_SRC
   ./cov/gencoverage.sh
   ./cov/gencoveralls.sh
