@@ -43,6 +43,8 @@ void Eprp_scanner::setup_translate() {
   translate['$'] = TOK_DOLLAR;
   translate['%'] = TOK_PERCENT;
 
+  translate['`'] = TOK_BACKTICK;
+
 }
 
 void Eprp_scanner::add_token(Token t) {
@@ -207,6 +209,7 @@ void Eprp_scanner::parse(const std::string &name, const char *memblock, size_t s
     }else{
       Token_id nt = translate[static_cast<uint8_t>(c)];
       if (t.tok != nt) {
+        finishing_comment = false;
         t.len = pos - t.pos;
         add_token(t);
         t.tok = nt;
@@ -266,6 +269,19 @@ void Eprp_scanner::scan_append(std::string &text) const {
   assert(scanner_pos < token_list.size());
 
   text.append(&buffer[token_list[scanner_pos].pos], token_list[scanner_pos].len);
+}
+
+void Eprp_scanner::scan_format_append(std::string &text) const {
+  assert(scanner_pos < token_list.size());
+
+  int start_pos = token_list[scanner_pos].pos;
+  int len = token_list[scanner_pos].len;
+  if (scanner_pos>0) {
+    int last_end_pos = token_list[scanner_pos-1].pos+token_list[scanner_pos-1].len;
+    len += (start_pos - last_end_pos);
+    start_pos = last_end_pos;
+  }
+  text.append(&buffer[start_pos], len);
 }
 
 void Eprp_scanner::scan_prev_append(std::string &text) const {

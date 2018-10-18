@@ -64,6 +64,8 @@
 #define TOK_MUL        0x19
 // 0123123 or 123123 or 0123ubits
 #define TOK_NUM        0x1a
+// 0123123 or 123123 or 0123ubits
+#define TOK_BACKTICK   0x1b
 
 #define TOK_KEYWORD_FIRST   0x40
 #define TOK_KEYWORD_LAST    0x7F
@@ -134,6 +136,8 @@ public:
       return token_list[scanner_pos].tok == tok;
     return false;
   }
+
+  void scan_format_append(std::string &text) const;
 
   void scan_append(std::string &text) const;
   void scan_prev_append(std::string &text) const;
