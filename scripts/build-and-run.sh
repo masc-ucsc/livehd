@@ -9,17 +9,20 @@ if [ ! -e ${LGRAPH_SRC}/WORKSPACE ]; then
   exit -1
 fi
 
-if ! ${LGRAPH_SRC}/scripts/build.sh
-then
+if [ ! -x ${LGRAPH_SRC}/scripts/build.sh ]; then
   echo "LGRAPH build error"
   exit -1
 fi
-
-${LGRAPH_SRC}/scripts/run-test.sh
 
 if [ $(which lcov) ]; then
   cd $LGRAPH_SRC
   ./cov/gencoverage.sh
   ./cov/gencoveralls.sh
+  if [ ! -f ./cov/coverage.info ]; then
+    echo "LGRAPH coverage build error"
+    exit -1
+  fi
+else
+  ${LGRAPH_SRC}/scripts/run-test.sh
 fi
 
