@@ -1,22 +1,20 @@
 sudo: required
 
-language: cpp
+language: ruby
 
 services:
   - docker
 
 env:
   matrix:
-    - BUILD_MODE=fastbuild DOCKER=mascucsc/archlinux-masc
-    - BUILD_MODE=dbg       DOCKER=mascucsc/archlinux-masc
-    - BUILD_MODE=fastbuild DOCKER=mascucsc/alpine-masc    DOCKER_LGRAPH_SRC=/home/user/lgraph
-    - BUILD_MODE=dbg       DOCKER=mascucsc/ubuntu-masc
+    - BUILD_MODE=fastbuild DOCKER=mascucsc/archlinux-masc DOCKER_LGRAPH_SRC=/root/lgraph      LGRAPH_COMPILER=g++
+    - BUILD_MODE=dbg       DOCKER=mascucsc/archlinux-masc DOCKER_LGRAPH_SRC=/root/lgraph      LGRAPH_COMPILER=clang++
+    - BUILD_MODE=fastbuild DOCKER=mascucsc/alpine-masc    DOCKER_LGRAPH_SRC=/home/user/lgraph LGRAPH_COMPILER=g++
+    - BUILD_MODE=dbg       DOCKER=mascucsc/ubuntu-masc    DOCKER_LGRAPH_SRC=/root/lgraph      LGRAPH_COMPILER=g++
 
 before_install:
    - docker pull $DOCKER
-     # - docker pull mascucsc/archlinux-masc
-  # - docker pull mascucsc/ubuntu-masc
 
 script:
-  - scripts/run-docker-test.sh `pwd` $BUILD_MODE $DOCKER $DOCKER_LGRAPH_SRC
+  - scripts/run-docker-test.sh `pwd` $BUILD_MODE $DOCKER $DOCKER_LGRAPH_SRC $LGRAPH_COMPILER
 

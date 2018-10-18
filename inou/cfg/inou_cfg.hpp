@@ -33,7 +33,6 @@ private:
                                        std::vector<std::string>> &,
                                        Index_ID &);
   void                     cfg_2_lgraph(char **, std::vector<LGraph *> &);
-  std::string              encode_cfg_data(const std::string &);
   void                     update_ifs(std::vector<LGraph *> &lgs, std::vector<std::map<std::string, Index_ID>> &node_mappings);
 
 protected:
@@ -52,7 +51,5 @@ public:
   }
 };
 
-// FIXME: no un-named method in this file
-bool prp_get_value(const std::string& str_in, std::string& str_out, bool &v_signed, uint32_t &explicit_bits, uint32_t &val);
 
 #endif
