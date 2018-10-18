@@ -48,7 +48,7 @@ int lef_macro_begin_cb(lefrCallbackType_e c, const char *macroName, lefiUserData
 
 int lef_macro_cb(lefrCallbackType_e c, lefiMacro *fmacro, lefiUserData ud) {
   assert(c);
-  auto *tlib     = static_cast<Tech_library *>(ud);
+  //auto *tlib     = static_cast<Tech_library *>(ud);
 
   if(fmacro->hasSize()) {
     assert(false);

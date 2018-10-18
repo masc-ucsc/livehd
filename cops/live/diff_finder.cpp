@@ -228,8 +228,6 @@ bool Diff_finder::compare_cone(const Graph_Node &start_boundary, const Graph_Nod
 
   stack.insert(start_boundary);
 
-  assert(original_idx != -1);
-
   assert(current_original->node_type_get(original_idx).op != TechMap_Op);
   assert(current->node_type_get(idx).op != TechMap_Op);
 

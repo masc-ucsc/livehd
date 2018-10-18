@@ -65,7 +65,7 @@ void Pass_dfg::trans(LGraph *dfg) {
       Index_ID src_nid      = idx;
       Index_ID dst_nid      = out.get_idx();
       Port_ID  src_pid      = out.get_out_pin().get_pid();
-      Port_ID  dst_pid      = out.get_inp_pin().get_pid();
+      //Port_ID  dst_pid      = out.get_inp_pin().get_pid();
       uint16_t src_nid_size = dfg->get_bits(src_nid);
       uint16_t dst_nid_size = dfg->get_bits(dst_nid);
 
@@ -97,8 +97,8 @@ void Pass_dfg::trans(LGraph *dfg) {
     for(const auto &out : dfg->out_edges(idx)) {
       Index_ID src_nid      = idx;
       Index_ID dst_nid      = out.get_idx();
-      Port_ID  src_pid      = out.get_out_pin().get_pid();
-      Port_ID  dst_pid      = out.get_inp_pin().get_pid();
+      //Port_ID  src_pid      = out.get_out_pin().get_pid();
+      //Port_ID  dst_pid      = out.get_inp_pin().get_pid();
       uint16_t src_nid_size = dfg->get_bits(src_nid);
       uint16_t dst_nid_size = dfg->get_bits(dst_nid);
       if(dfg->node_type_get(src_nid).op == GraphIO_Op){
@@ -500,7 +500,7 @@ Index_ID Pass_dfg::get_cfg_child(const LGraph *cfg, Index_ID node) {
 std::vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Data &data) {
   const std::vector<std::string> &oprds = data.get_operands();
   std::vector<Index_ID> oprd_ids(oprds.size());
-  const std::string &op = data.get_operator();
+  //const std::string &op = data.get_operator();
 
   for (size_t i = 0 ; i <oprd_ids.size();i++) {
     if (aux_tree->has_alias(oprds[i])){
