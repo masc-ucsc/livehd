@@ -15,11 +15,30 @@ public:
 };
 
 #include "eprp.hpp"
+#include "eprp_utils.hpp"
 
 static bool is_equal_called = false;
 
 class test1{
 public:
+  static void files2(Eprp_var &var) {
+    const std::string files = var.get("files");
+
+    std::vector<std::string> svector = Eprp_utils::parse_files(files,"test1.files2");
+
+    for (const auto& v : svector) {
+      fmt::print(" {}",v);
+    }
+    fmt::print("\n");
+
+    EXPECT_EQ(svector.size(),4);
+
+    EXPECT_STREQ(svector[0].c_str(), "g3xx");
+    EXPECT_STREQ(svector[1].c_str(), "./f1/f1.v");
+    EXPECT_STREQ(svector[2].c_str(), "xotato/../bar.prp");
+    EXPECT_STREQ(svector[3].c_str(), "potato/bar.v");
+  }
+
   static void foo(Eprp_var &var) {
     fmt::print("test1.foo");
     for (const auto& v : var.dict) {
@@ -92,6 +111,23 @@ protected:
     eprp.register_method(m3);
   }
 };
+
+class EPrpFiles : public ::testing::Test {
+protected:
+  Eprp eprp;
+  void SetUp() override {
+    Eprp_method m1("test1.files2", "Generate a random test/method call to foo", &test1::files2);
+    m1.add_label_required("files","list of files");
+
+    eprp.register_method(m1);
+  }
+};
+
+TEST_F(EPrpFiles, ParseFiles) {
+  const char *buffer =" test1.files2 match:\"nothing\" files:g3xx,./f1/f1.v,xotato/../bar.prp,,potato/bar.v";
+
+  eprp.parse("parsefiles", buffer, strlen(buffer));
+}
 
 TEST_F(EPrpTest, SimpleReadlinePipe) {
   is_equal_called = false;

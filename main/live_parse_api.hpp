@@ -3,6 +3,7 @@
 
 #include "chunkify_verilog.hpp"
 #include "main_api.hpp"
+#include "eprp_utils.hpp"
 
 class Live_parse_api {
 protected:
@@ -19,7 +20,7 @@ protected:
       return;
     }
 
-    for(const auto &f:Main_api::parse_files(files,"live.parse")) {
+    for(const auto &f:Eprp_utils::parse_files(files,"live.parse")) {
       int fd = open(f.c_str(), O_RDONLY);
       if(fd < 0) {
         Main_api::error(fmt::format("could not open {}", f.c_str()));

@@ -2,6 +2,7 @@
 
 #include "inou_pyrope.hpp"
 #include "main_api.hpp"
+#include "eprp_utils.hpp"
 
 class Inou_pyrope_api {
 protected:
@@ -14,7 +15,7 @@ static void tolg(Eprp_var &var) {
 
   pyrope.set("path",path);
 
-  for(const auto &f:Main_api::parse_files(files,"inou.pyrope.tolg")) {
+  for(const auto &f:Eprp_utils::parse_files(files,"inou.pyrope.tolg")) {
     pyrope.set("input",f);
 
     var.add(pyrope.tolg());

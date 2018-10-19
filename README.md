@@ -5,7 +5,7 @@
 
 Code quality: [![CodeFactor](https://www.codefactor.io/repository/github/masc-ucsc/lgraph/badge)](https://www.codefactor.io/repository/github/masc-ucsc/lgraph)
 [![Codacy Badge](https://api.codacy.com/project/badge/Grade/4cae3de3de714e13b6003002f74b7375)](https://www.codacy.com/app/renau/lgraph?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=masc-ucsc/lgraph&amp;utm_campaign=Badge_Grade)
-[![Coverage Status](https://coveralls.io/repos/github/masc-ucsc/lgraph/badge.svg?branch=master)](https://coveralls.io/github/masc-ucsc/lgraph?branch=master)
+[![Coverage Status](https://coveralls.io/repos/github/masc-ucsc/lgraph/badge.svg?branch=HEAD)](https://coveralls.io/github/masc-ucsc/lgraph?branch=HEAD)
 
 LGRAPH is a graph optimized for live synthesis (Live Synthesizes Graph or
 LGRAPH for short). By live, we mean that small changes in the design should

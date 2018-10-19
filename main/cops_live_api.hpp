@@ -1,5 +1,6 @@
 #include <unistd.h>
 
+#include "eprp_utils.hpp"
 #include "diff_finder.hpp"
 #include "invariant_finder.hpp"
 #include "structural.hpp"
@@ -17,7 +18,7 @@ static void invariant_finder(Eprp_var &var) {
 
   pyrope.set("path",path);
 
-  for(const auto &f:Main_api::parse_files(files,"inou.pyrope.tolg")) {
+  for(const auto &f:Eprp_utils::parse_files(files,"inou.pyrope.tolg")) {
     pyrope.set("input",f);
 
     var.add(pyrope.tolg());
