@@ -44,6 +44,8 @@ protected:
       for(const auto &s:sort_files) {
         if (!files.empty())
           files.append(",");
+        files.append(path);
+        files.append("/");
         files.append(s);
       }
 
