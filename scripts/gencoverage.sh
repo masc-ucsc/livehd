@@ -9,6 +9,7 @@ bazel coverage -k //...
 ./inou/json/tests/rand_json.sh
 ./inou/cfg/tests/pyrope.sh
 ./pass/abc/tests/abc.sh
+./pass/dce/tests/dce.sh
 ./bazel-bin/eprp/eprp_test
 ./bazel-bin/core/thread_pool_test
 ./bazel-bin/third_party/misc/ezsat/testbench
