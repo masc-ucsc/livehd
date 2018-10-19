@@ -17,3 +17,12 @@ cc_test(
     ],
 )
 
+sh_test(
+    name = "chunkify_test.sh",
+    srcs = ["tests/chunkify_test.sh"],
+    data = [
+        "//main:lgshell",
+        "//inou/yosys:verilog_tests",
+        "//projects/boom:firesim_boom",
+        ],
+)

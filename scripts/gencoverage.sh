@@ -13,6 +13,7 @@ bazel coverage -k //...
 ./bazel-bin/core/thread_pool_test
 ./bazel-bin/third_party/misc/ezsat/testbench
 ./bazel-bin/live/parse/chunkify_verilog_test
+./live/parse/tests/chunkify_test.sh
 
 echo " live.parse files:./test/benchmarks/boom/boombase.v path:tmp2 " | ./bazel-bin/main/lgshell
 echo "files path:./inou/yosys/tests/ match:"\.v$" |> live.parse path:tmp2" | ./bazel-bin/main/lgshell
