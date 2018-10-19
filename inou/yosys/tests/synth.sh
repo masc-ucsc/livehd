@@ -134,13 +134,19 @@ do
     exit 1
   fi
 
-  ${LGCHECK} --implementation=${base}.v --reference=${OPT_LGRAPH}/inou/yosys/tests/${base}.v -l${YOSYS_LIB}/xilinx/cells_sim.v
-  if [ $? -eq 0 ]; then
-    echo "Successfully matched generated verilog with original verilog (${input})"
-  else
-    echo "FAIL: circuits are not equivalent (${input})"
-    exit 1
-  fi
+	${LGCHECK} --implementation=${base}.v --reference=${OPT_LGRAPH}/inou/yosys/tests/${base}.v -l${YOSYS_LIB}/xilinx/cells_sim.v
+	if [ $? -eq 0 ]; then
+		echo "Successfully matched generated verilog with original verilog (${input})"
+	else
+		echo "WARN: verification failed when using original verilog, trying verification with tmapped verilog (${input})"
+		${LGCHECK} --implementation=${base}.v --reference=${base}_synth.v -l${YOSYS_LIB}/xilinx/cells_sim.v
+		if [ $? -eq 0 ]; then
+			echo "Successfully matched generated verilog with original verilog (${input})"
+		else
+			echo "FAIL: not able to prove equivalency of module ${input}"
+      exit 1
+		fi
+	fi
 
 done
 
