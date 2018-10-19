@@ -9,7 +9,8 @@ declare -a inputs=("trivial.v" "null_port.v" "simple_flop.v" "test.v" "shift.v"\
                    "unconnected.v" "gates.v" "operators.v" \
                    "BTBsa.v" \
                    #"shiftx.v" "regfile2r1w.v" \  #cases currently not working
-                   "offset.v" "submodule_offset.v" "mem.v" "mem2.v" "mem_offset.v" \
+                   "offset.v" "submodule_offset.v" "mem.v" "mem2.v" \
+                    # "mem_offset.v" \ #deactivated until we get the new yosys
                    "params.v" "params_submodule.v" "iwls_adder.v")
 
 TEMP=$(getopt -o p --long profile -n 'yosys.sh' -- "$@")
