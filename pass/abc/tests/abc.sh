@@ -14,7 +14,6 @@ input_root=./inou/yosys/tests
 YOSYS=./inou/yosys/lgyosys
 LGSHELL=./bazel-bin/main/lgshell
 CHECK=./pass/abc/abc_check
-json=./inou/json/lgjson
 
 if [ ! -f ${LGSHELL} ]; then
   if [ -f ./main/lgshell ]; then
@@ -30,8 +29,6 @@ for input in ${inputs[@]}
 do
 
   base=${input%.*}
-
-  echo "${YOSYS} --techmap --top=${base} ${input_root}/${input}"
   ${YOSYS} --techmap --top=${base} ${input_root}/${input}
 
   if [ ! $? -eq 0 ]; then
@@ -46,11 +43,6 @@ do
     exit 1
   fi
 
-  #if ! ${json} --lgdb ./lgdb --graph_name ${base}_mapped
-  #then
-  #  echo "I was not able to generate json for ${base}"
-  #fi
-
   if [[ $(${CHECK} ${base}.blif ${base}_map.blif | grep -c 'Successfully matched generated verilog with yosys elaborated verilog file') -eq 1 ]]
   then
      rm -rf ./temp.blif
@@ -63,5 +55,5 @@ do
 done
 
 rm -rf ./*.genlib
-rm -rf ./lgdb/ ./logs ./yosys-test ./*.json ./*.v ./*.blif
+rm -rf ./lgdb/ ./logs ./yosys-test ./*.v ./*.blif
 
