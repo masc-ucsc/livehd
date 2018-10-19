@@ -80,7 +80,7 @@ void Eprp_scanner::add_token(Token t) {
     {
       t.tok &= ~TOK_TRYMERGE;
       if (!token_list.empty() && !token_list_spaced) {
-        Token last_tok = token_list.back();
+        Token &last_tok = token_list.back();
 
         if (last_tok.tok == TOK_OR && t.tok == TOK_GT) {
           token_list.back().tok = TOK_PIPE;
@@ -99,7 +99,7 @@ void Eprp_scanner::add_token(Token t) {
           token_list.back().len += t.len;
           return;
         }else if (last_tok.tok == TOK_ALNUM && t.tok == TOK_COLON) {
-          token_list.back().tok = TOK_LABEL;
+          last_tok.tok = TOK_LABEL;
           // token_list.back().len += t.len;
           return;
         }
@@ -172,16 +172,27 @@ void Eprp_scanner::parse(const std::string &name, const char *memblock, size_t s
         in_singleline_comment = false;
         in_comment            = in_singleline_comment | in_multiline_comment;
       }
-      in_string_pos = -1;
-    }else if(unlikely(c == '"') && last_c != '\\') {
-      if (in_string_pos>=0) {
-        in_string_pos = -1;
+      if(in_string_pos>=0) {
         t.len = pos - in_string_pos;
-      }else{
-        t.tok = TOK_STRING;
+        add_token(t);
+        t.tok = TOK_NOP;
         t.pos = pos;
-        in_string_pos = pos;
+        in_string_pos = -1;
       }
+    }else if(in_string_pos>=0) {
+      if(c == '"' && last_c != '\\') {
+        t.len = pos - in_string_pos;
+        add_token(t);
+        t.tok = TOK_NOP;
+        t.pos = pos;
+        in_string_pos = -1;
+      }
+    }else if(c == '"' && last_c != '\\') {
+      t.len = pos - t.pos;
+      add_token(t);
+      t.tok = TOK_STRING;
+      t.pos = pos + 1;
+      in_string_pos = pos + 1;
     }else if(unlikely(last_c == '/' && c == '/')) {
       t.len = pos - t.pos;
       t.tok = TOK_COMMENT;

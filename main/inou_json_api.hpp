@@ -3,6 +3,7 @@
 
 #include "inou_json.hpp"
 #include "main_api.hpp"
+#include "eprp_utils.hpp"
 
 class Inou_json_api {
 protected:
@@ -20,7 +21,7 @@ protected:
       return;
     }
 
-    for(const auto &f:Main_api::parse_files(files,"inou.json.tolg")) {
+    for(const auto &f:Eprp_utils::parse_files(files,"inou.json.tolg")) {
       json.set("input",f);
       std::vector<LGraph *> lgs = json.tolg();
 
