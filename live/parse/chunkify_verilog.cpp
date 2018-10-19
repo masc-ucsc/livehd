@@ -48,13 +48,10 @@ void Chunkify_verilog::write_file(const std::string &filename, const std::string
 }
 
 void Chunkify_verilog::write_file(const std::string &filename, const char *text, int sz) {
-  fmt::print("1.done {}\n",sz);
 
   int fd = open_write_file(filename);
   if (fd<0)
     return;
-
-  fmt::print("2.done {}\n",fd);
 
   int sz2 = write(fd,text,sz);
   if (sz2 != sz) {

@@ -30,9 +30,10 @@
 #ifndef __MPMC_BOUNDED_QUEUE_INCLUDED__
 #define __MPMC_BOUNDED_QUEUE_INCLUDED__
 
-#include <stdio.h>
-#include <stdlib.h>
 #include <assert.h>
+
+#include <cstddef>
+#include <cstdlib>
 
 #include <atomic>
 
@@ -43,7 +44,8 @@ public:
   mpmc(size_t size) :
     _size(size),
     _mask(size - 1),
-    _buffer(reinterpret_cast<node_t *>(aligned_alloc(4096,sizeof(node_t)*(_size + 1)))), // page align needed for muslc (alpine)
+    //_buffer(reinterpret_cast<node_t *>(aligned_alloc(128,sizeof(node_t)*(_size + 1)))), // page align needed for muslc (alpine)
+    _buffer(reinterpret_cast<node_t *>(std::aligned_alloc(8*alignof(std::max_align_t),sizeof(node_t)*(_size + 1)))), // page align needed for muslc (alpine)
     _head_seq(0),
     _tail_seq(0)
   {
@@ -56,7 +58,7 @@ public:
   }
 
   ~mpmc() {
-    free(_buffer);
+    std::free(_buffer);
   }
 
   bool enqueue( const T& data) {

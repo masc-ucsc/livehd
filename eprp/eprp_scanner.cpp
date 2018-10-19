@@ -200,14 +200,15 @@ void Eprp_scanner::parse(const std::string &name, const char *memblock, size_t s
       in_comment = true;
       assert(!starting_comment);
       assert(!finishing_comment);
-    }else if(unlikely(!finishing_comment && ((last_c == '/' && c == '*') || (last_c == '(' && c == '*')))) {
+    }else if(unlikely(!finishing_comment && ((last_c == '/' && c == '*') /* || (last_c == '(' && c == '*'))*/ ))) {
       t.len = pos - t.pos;
       t.tok = TOK_COMMENT;
       in_multiline_comment++;
       in_comment = true;
       starting_comment  = true;
       assert(!finishing_comment);
-    }else if (unlikely(!starting_comment && ((last_c == '*' && c == '/') || (last_c == '*' && c == ')')))) {
+      // The (* foo *) are attributes - not comments - in verilog. Must be handled in the grammar
+    }else if (unlikely(!starting_comment && ((last_c == '*' && c == '/') /* || (last_c == '*' && c == ')')*/ ))) {
       t.len = pos - t.pos;
       t.tok = TOK_COMMENT;
       in_multiline_comment--;
