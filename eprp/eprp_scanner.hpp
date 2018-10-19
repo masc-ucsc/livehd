@@ -82,18 +82,23 @@ protected:
   };
   typedef std::vector<Token> Token_list;
 
+  std::string buffer_name;
+  const char *buffer;
+  uint32_t buffer_sz; // Token.pos is uint32_t 4GB per chunk...
+  Token_list token_list;
+
+  void scan_token_append(Token_list &toklist) const {
+    assert(scanner_pos < token_list.size());
+    toklist.push_back(token_list[scanner_pos]);
+  }
+
+
 private:
   std::vector<Token_id> translate;
   bool token_list_spaced = true;
-  Token_list token_list;
 
   // Fields updated for each chunk processed
   size_t scanner_pos;
-  std::string buffer_name;
-  const char *buffer;
-  uint32_t buffer_sz; // Token.pos is uint32_t to save space. 4GB per chunk...
-  size_t buffer_start_pos;
-  size_t buffer_start_line;
 
   int max_errors;
   int max_warnings;
@@ -104,7 +109,7 @@ private:
 
   void add_token(Token t);
 
-  void chunked(const char *_buffer, size_t _buffer_sz, size_t _buffer_start_pos, size_t _buffer_start_line);
+  void chunked(const char *_buffer, size_t _buffer_sz);
 
   void scan_raw_msg(const std::string &cat, const std::string &text, bool third) const;
 
