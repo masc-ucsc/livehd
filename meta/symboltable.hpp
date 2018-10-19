@@ -30,7 +30,7 @@ class LGraph_Symbol_Table : virtual public LGraph_Base {
 
     Char_Array_ID save_integer(const Integer &);
     Integer load_integer(Char_Array_ID) const;
-  
+
     virtual void clear();
     virtual void reload();
     virtual void sync();

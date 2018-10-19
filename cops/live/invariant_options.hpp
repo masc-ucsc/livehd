@@ -15,13 +15,13 @@ public:
   std::string hierarchical_separator;
 
   //cluster related options
-  std::string cluster_dir;
-  int         clusters;
-  bool        do_cluster;
+  //std::string cluster_dir;
+  //int         clusters;
+  //bool        do_cluster;
 
   Invariant_find_options() : top(""), elab_lgdb("lgdb"), synth_lgdb("synth-lgdb"),
-              invariant_file("boundaries"), hierarchical_separator("."), clusters(0),
-              do_cluster(false), cluster_dir("") { }
+              invariant_file("boundaries"), hierarchical_separator(".")/*, clusters(0),
+              do_cluster(false), cluster_dir("")*/ { }
 
   void set(const std::string &key, const std::string &value) final;
 };

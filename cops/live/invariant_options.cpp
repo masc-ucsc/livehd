@@ -16,11 +16,11 @@ void Invariant_find_options::set(const std::string &key, const std::string &valu
       invariant_file = value;
     } else if (is_opt(key, "hier_sep")) {
       hierarchical_separator = value;
-    } else if (is_opt(key, "clusters")) {
+/*    } else if (is_opt(key, "clusters")) {
       clusters   = std::stoi(value);
       do_cluster = true;
     } else if (is_opt(key, "cluster_dir")) {
-      cluster_dir = value;
+      cluster_dir = value;*/
     } else {
       set_val(key, value);
     }
