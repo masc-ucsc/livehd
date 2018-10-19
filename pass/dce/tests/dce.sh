@@ -18,6 +18,7 @@ if [ ! -f ${LGSHELL} ]; then
   fi
 fi
 
+mkdir -p dce
 for input in ${inputs[@]}
 do
   base=${input%.*}
