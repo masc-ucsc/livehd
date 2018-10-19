@@ -4,10 +4,21 @@
 declare -a inputs=("common_sub.v")
 
 LGCHECK=./inou/yosys/lgcheck
+YOSYS=./inou/yosys/lgyosys
+LGSHELL=./bazel-bin/main/lgshell
+
+if [ ! -f ${LGSHELL} ]; then
+  if [ -f ./main/lgshell ]; then
+    LGSHELL=./main/lgshell
+  else
+    echo "could not find lgshell on $(pwd)"
+    exit 1
+  fi
+fi
 
 for input in ${inputs[@]}
 do
-  ./inou/yosys/lgyosys ./pass/lgopt_dce/tests/${input}
+  ${YOSYS} ./pass/lgopt_dce/tests/${input}
 
   if [ $? -eq 0 ]; then
     echo "Successfully created graph from ${input}"
@@ -16,30 +27,19 @@ do
     exit 1
   fi
 
-  ./inou/json/lgjson --lgdb lgdb --graph_name common_sub --json_output dce_eg.json
+  echo "lgraph.open name:common_sub |> inou.json.fromlg output:dce_eg.json" |${LGSHELL}
 
   if [ $? -eq 0 ]; then
-    echo "Successfully lgyaml file "$a
+    echo "Successfully generated json file "$a
   else
-    echo "FAIL: lgyaml terminated with and error"
-    exit 1
+    echo "WARN: json generation terminated with and error"
   fi
 
-  ./pass/lgopt_dce/lgopt_dce --lgdb lgdb --graph_name common_sub
+  echo "lgraph.open name:common_sub |> pass.dce |> inou.yosys.fromlgi odir: dce" |${LGSHELL}
   if [ $? -eq 0 ]; then
-    echo "Successfully ran lgopt_dce file "$a
+    echo "Successfully ran dce on $a"
   else
-    echo "FAIL: lgopt_dce terminated with and error"
-    exit 1
-  fi
-
-   base=${input%.*}
-  ./inou/yosys/lgyosys -g${base}
-
-  if [ $? -eq 0 ]; then
-    echo "Successfully created verilog from graph ${input}"
-  else
-    echo "FAIL: lgyosys terminated with and error"
+    echo "FAIL: dce terminated with and error $a"
     exit 1
   fi
 
@@ -50,8 +50,6 @@ do
     echo "FAIL: circuits are not equivalent (${input})"
     exit 1
   fi
-
-
 
 done
 
