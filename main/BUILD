@@ -17,6 +17,8 @@ cc_binary(
             "//inou/ramgen:inou_ramgen",
             "//inou/rand:inou_rand",
 
+            "//live/parse:chunkify",
+
             "//pass/abc:pass_abc",
             "//pass/dfg:pass_dfg",
             "//pass/dce:pass_dce",
