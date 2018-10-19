@@ -11,3 +11,25 @@ cc_library(
     ]
 )
 
+filegroup(
+    name = "verilog_tests",
+    srcs = glob([
+        "tests/*.v",
+    ]),
+    visibility = ["//visibility:public"],
+)
+
+sh_test(
+    name = "dce.sh",
+    srcs = ["tests/dce.sh"],
+    data = [
+        "//inou/yosys:liblgraph_yosys.so",
+        "//main:lgshell",
+        "//inou/yosys:scripts",
+        ":verilog_tests",
+        ],
+    deps = [
+        "//inou/yosys:scripts",
+    ]
+)
+
