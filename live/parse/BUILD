@@ -13,7 +13,7 @@ cc_test(
     srcs = ["chunkify_verilog_test.cpp"],
     deps = [
         "@gtest//:gtest_main",
-        ":parse",
+        ":chunkify",
     ],
 )
 
