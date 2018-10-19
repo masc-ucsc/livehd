@@ -47,7 +47,8 @@ TEST_F(VTest1, interface) {
 
   chunker.parse("test1.v", test1_verilog.c_str(), test1_verilog.size());
 
-  EXPECT_NE(access("test1_moda.v", R_OK), -1);
-  EXPECT_NE(access("test1_modb.v", R_OK), -1);
+  EXPECT_NE(access("./parse/file_test1.v", R_OK), -1);
+  EXPECT_NE(access("./parse/chunk_test1.v:test1_moda", R_OK), -1);
+  EXPECT_NE(access("./parse/chunk_test1.v:test1_modb", R_OK), -1);
 }
 

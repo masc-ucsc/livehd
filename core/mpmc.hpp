@@ -43,14 +43,13 @@ public:
   mpmc(size_t size) :
     _size(size),
     _mask(size - 1),
-    _buffer(reinterpret_cast<node_t *>(aligned_alloc(128,sizeof(node_t)*(_size + 1)))), // need one extra element for a guard
+    _buffer(reinterpret_cast<node_t *>(aligned_alloc(4096,sizeof(node_t)*(_size + 1)))), // page align needed for muslc (alpine)
     _head_seq(0),
     _tail_seq(0)
   {
     // make sure it's a power of 2
     assert((_size != 0) && ((_size & (~_size + 1)) == _size));
 
-    // populate the sequence initial values
     for (size_t i = 0; i < _size; ++i) {
       _buffer[i].seq.store(i, std::memory_order_relaxed);
     }
@@ -70,21 +69,13 @@ public:
       size_t   node_seq = node->seq.load(std::memory_order_acquire);
       intptr_t dif      = (intptr_t) node_seq - (intptr_t) head_seq;
 
-      // if seq and head_seq are the same then it means this slot is empty
       if (dif == 0) {
-        // claim our spot by moving head
-        // if head isn't the same as we last checked then that means someone beat us to the punch
-        // weak compare is faster, but can return spurious results
-        // which in this instance is OK, because it's in the loop
         if (_head_seq.compare_exchange_weak(head_seq, head_seq + 1, std::memory_order_relaxed)) {
-          // set the data
           node->data = data;
-          // increment the sequence so that the tail knows it's accessible
           node->seq.store(head_seq + 1, std::memory_order_release);
           return true;
         }
       }else if (dif < 0) {
-        // if seq is less than head seq then it means this slot is full and therefore the buffer is full
         return false;
       }else {
         // under normal circumstances this branch should never be taken
@@ -104,25 +95,15 @@ public:
       size_t   node_seq = node->seq.load(std::memory_order_acquire);
       intptr_t dif      = (intptr_t) node_seq - (intptr_t)(tail_seq + 1);
 
-      // if seq and head_seq are the same then it means this slot is empty
       if (dif == 0) {
-        // claim our spot by moving head
-        // if head isn't the same as we last checked then that means someone beat us to the punch
-        // weak compare is faster, but can return spurious results
-        // which in this instance is OK, because it's in the loop
         if (_tail_seq.compare_exchange_weak(tail_seq, tail_seq + 1, std::memory_order_relaxed)) {
-          // set the output
           data = node->data;
-          // set the sequence to what the head sequence should be next time around
           node->seq.store(tail_seq + _mask + 1, std::memory_order_release);
           return true;
         }
-      }
-      else if (dif < 0) {
-        // if seq is less than head seq then it means this slot is full and therefore the buffer is full
+      }else if (dif < 0) {
         return false;
-      }
-      else {
+      }else {
         // under normal circumstances this branch should never be taken
         tail_seq = _tail_seq.load(std::memory_order_relaxed);
       }
@@ -141,15 +122,17 @@ private:
     std::atomic<size_t>   seq;
   };
 
-  typedef char cache_line_pad_t[64]; // it's either 32 or 64 so 64 is good enough
+  typedef char cache_line_pad_t[128]; // Some CPUs could have 128 cache line in LLC
 
-  cache_line_pad_t    _pad0;
+  // Mostly read only data
   const size_t        _size;
   const size_t        _mask;
   node_t* const       _buffer;
   cache_line_pad_t    _pad1;
+  // Mostly enqueue thread call
   std::atomic<size_t> _head_seq;
   cache_line_pad_t    _pad2;
+  // Mostly dequeue thread call
   std::atomic<size_t> _tail_seq;
   cache_line_pad_t    _pad3;
 
