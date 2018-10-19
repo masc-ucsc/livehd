@@ -1,18 +1,9 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#declare -a inputs=("trivial.v" "null_port.v" "simple_flop.v" "test.v" "shift.v"\
-#                   "wires.v" "reduce.v" "graphtest.v" "add.v"  "assigns.v" \
-#                   "submodule.v"\
-#                   "gcd.v" "common_sub.v" "trivial2.v" "consts.v" "async.v"\
-#                   "unconnected.v" "gates.v" "operators.v" \
-#                   #"shiftx.v" "regfile2r1w.v" \  #cases currently not working
-#                   "offset.v" "submodule_offset.v" "mem.v" "mem2.v" \
-#                   "params.v" "params_submodule.v" "iwls_adder.v")
-
 declare -a inputs=("trivial.v" "null_port.v" "simple_flop.v" "test.v" "shift.v"\
                    "simple_add.v" \
-                   "offset.v" "submodule_offset.v" "mem.v" "mem2.v" \
+                   "offset.v" "submodule_offset.v" "mem.v" \
                   "wires.v" "reduce.v" "add.v"  "assigns.v" \
                   )
 
