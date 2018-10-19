@@ -97,7 +97,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
 
     string dfg_data = p;
 
-    if(w3rd != "0" && std::stoi(w3rd) >= lgs.size()) { //create new sub-graph if different scope id
+    if(gsub_id != 0 && gsub_id >= lgs.size()) { //create new sub-graph if different scope id
       lgs.push_back(new LGraph(opack.path, opack.name + std::to_string(lgs.size()), false));
       fmt::print("lgs size:{}\n", lgs.size());
       name2id_gs.resize(name2id_gs.size() + 1);
@@ -106,7 +106,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
       nname_bg_gs.push_back(w1st);
       nfirst2gid[w1st] = gsub_id;
       build_graph(words, dfg_data, lgs[gsub_id], nfirst2gid, name2id_gs[gsub_id], chain_stks_gs[gsub_id], nid_ed_gs[gsub_id]);
-    } else if(w3rd != "0") //construct sub-graph for function definition
+    } else if(gsub_id != 0) //construct sub-graph for function definition
       build_graph(words, dfg_data, lgs[gsub_id], nfirst2gid, name2id_gs[gsub_id], chain_stks_gs[gsub_id], nid_ed_gs[gsub_id]);
     else //build top graph
       build_graph(words, dfg_data, gtop, nfirst2gid, name2id_gs[0], chain_stks_gs[0], nid_ed_gs[0]);
@@ -118,7 +118,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
     create in/out GIO for every graph
   */
 
-  for(int i = 0; i < lgs.size(); i++) {
+  for(uint32_t i = 0; i < lgs.size(); i++) {
     //Graph input
     Node gio_node_bg = lgs[i]->create_node();
     fmt::print("create node:{}, nid:{}\n", "GIO", gio_node_bg.get_nid());
@@ -174,7 +174,7 @@ void Inou_cfg::build_graph(vector<string>               &words,
   if(w6th == "if")
     w10th = *(words.begin() + 9);
 
-  LGraph *     sub_graph = 0;
+  //LGraph *     sub_graph = 0;
 
   /*
     I.process 1st node
@@ -337,7 +337,7 @@ void Inou_cfg::build_graph(vector<string>               &words,
   else if(w6th == "::{") {
     //connect to the begin of function call
     //To Do: there should be another way to take existing graphs as subgraph
-    sub_graph = LGraph::find_lgraph(g->get_path(),opack.name + std::to_string(nfirst2gid[w9th]));
+    //sub_graph = LGraph::find_lgraph(g->get_path(),opack.name + std::to_string(nfirst2gid[w9th]));
     src_nid = name2id[w1st];
     dst_nid = name2id[w9th];
     fmt::print("function call statement, connect src_node {} to dst_node {} ----- 1\n", src_nid, dst_nid);
