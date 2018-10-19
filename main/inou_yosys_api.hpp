@@ -14,6 +14,7 @@
 #include "lgraph.hpp"
 #include "main_api.hpp"
 #include "mustache.hpp"
+#include "eprp_utils.hpp"
 
 using namespace kainjow;
 
@@ -189,7 +190,7 @@ static void tolg(Eprp_var &var) {
   vars.set("path",path);
 
   mustache::data filelist{mustache::data::type::list};
-  for(const auto &f:Main_api::parse_files(files,"inou.yosys.tolg")) {
+  for(const auto &f:Eprp_utils::parse_files(files,"inou.yosys.tolg")) {
     filelist << mustache::data{"input", f};
   }
 
