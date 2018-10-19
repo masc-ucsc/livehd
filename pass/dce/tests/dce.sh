@@ -18,6 +18,7 @@ if [ ! -f ${LGSHELL} ]; then
   fi
 fi
 
+pwd
 mkdir -p dce
 for input in ${inputs[@]}
 do
@@ -39,7 +40,7 @@ do
     echo "WARN: json generation terminated with and error"
   fi
 
-  echo "lgraph.open name:common_sub |> pass.dce |> inou.yosys.fromlg odir: dce" |${LGSHELL}
+  echo "lgraph.open name:common_sub |> pass.dce |> inou.yosys.fromlg odir: dce" | ${LGSHELL}
   if [ $? -eq 0 ]; then
     echo "Successfully ran dce on $input"
   else

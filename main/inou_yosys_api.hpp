@@ -32,10 +32,19 @@ static void set_script_liblg(Eprp_var &var, std::string &script_file, std::strin
     const std::string liblg2 = main_path + "/../share/lgraph/inou/yosys/liblgraph_yosys.so";
     fmt::print("1.yosys path:{} liblg:{}\n", main_path, liblg2);
     if(access(liblg2.c_str(), X_OK) == -1) {
-      Main_api::error(fmt::format("could not find liblgraph_yosys.so, the {} is not executable", liblg));
-      return;
+
+      //sandbox path
+      const std::string liblg3 = main_path + "/inou/yosys/liblgraph_yosys.so";
+      fmt::print("1.yosys path:{} liblg:{}\n", main_path, liblg2);
+      if(access(liblg3.c_str(), X_OK) == -1) {
+        Main_api::error(fmt::format("could not find liblgraph_yosys.so, the {} is not executable", liblg));
+        return;
+      } else {
+        liblg = liblg3;
+      }
+    } else {
+      liblg = liblg2;
     }
-    liblg = liblg2;
   }
 
   if (script.empty()) {
