@@ -1,3 +1,19 @@
+diff --git src/bdd/cudd/cuddInt.h src/bdd/cudd/cuddInt.h
+index 2ccf86a7..c549a931 100644
+--- src/bdd/cudd/cuddInt.h
++++ src/bdd/cudd/cuddInt.h
+@@ -784,9 +784,9 @@ typedef struct DdLevelQueue {
+    (unsigned)(ptruint)(g)) * DD_P2))
+ #else
+ #define ddCHash2(o,f,g,s) \
+-(((((unsigned)(f) + (unsigned)(o)) * DD_P1 + (unsigned)(g)) * DD_P2) >> (s))
++(((((unsigned long)(f) + (unsigned long)(o)) * DD_P1 + (unsigned long)(g)) * DD_P2) >> (s))
+ #define ddCHash2_(o,f,g) \
+-(((((unsigned)(f) + (unsigned)(o)) * DD_P1 + (unsigned)(g)) * DD_P2))
++(((((unsigned long)(f) + (unsigned long)(o)) * DD_P1 + (unsigned long)(g)) * DD_P2))
+ #endif
+ 
+ 
 diff --git src/map/fpga/fpgaTruth.c src/map/fpga/fpgaTruth.c
 index 2965f9f6..5b0b5790 100644
 --- src/map/fpga/fpgaTruth.c
