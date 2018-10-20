@@ -1,19 +1,19 @@
+jobs:
+  - job: ArchDebug
+    displayName: run archlinux-masc with debug and g++
 
-- job: ArchDebug
-  displayName: run archlinux-masc with debug and g++
+    pool:
+      vmImage: 'Ubuntu 16.04'
 
-  pool:
-    vmImage: 'Ubuntu 16.04'
+    steps:
+      - bash: ./scripts/run-docker-test.sh `pwd` dbg mascucsc/archlinux-masc /root/lgraph g++
 
-  steps:
-    - bash: ./scripts/run-docker-test.sh `pwd` dbg mascucsc/archlinux-masc /root/lgraph g++
+  - job: AlpineDebug
+    displayName: run alpine-masc with opt and g++
 
-- job: AlpineDebug
-  displayName: run alpine-masc with opt and g++
+    pool:
+      vmImage: 'Ubuntu 16.04'
 
-  pool:
-    vmImage: 'Ubuntu 16.04'
-
-  steps:
-    - bash: ./scripts/run-docker-test.sh `pwd` opt mascucsc/alpine-masc /home/user/lgraph g++
+    steps:
+      - bash: ./scripts/run-docker-test.sh `pwd` opt mascucsc/alpine-masc /home/user/lgraph g++
 
