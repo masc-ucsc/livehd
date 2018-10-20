@@ -17,11 +17,13 @@ cd ${LGRAPH_SRC}
 if [ $LGRAPH_COMPILER == "g++" ]; then
   CXX=g++ CC=gcc bazel build -c ${LGRAPH_BUILD_MODE} //...
   if [ $? -eq 0 ]; then
+    echo "build.sh: g++ build completed correctly"
     exit 0
   fi
 elif [ $LGRAPH_COMPILER == "clang++" ]; then
   CXX=clang++ CC=clang bazel build -c ${LGRAPH_BUILD_MODE} //...
   if [ $? -eq 0 ]; then
+    echo "build.sh: clang++ build completed correctly"
     exit 0
   fi
 else
