@@ -1,3 +1,16 @@
+diff --git src/bdd/cudd/cuddBddCorr.c src/bdd/cudd/cuddBddCorr.c
+index 72c57c95..aae36dba 100644
+--- src/bdd/cudd/cuddBddCorr.c
++++ src/bdd/cudd/cuddBddCorr.c
+@@ -474,7 +474,7 @@ CorrelHash(
+ #if SIZEOF_VOID_P == 8 && SIZEOF_INT == 4
+     val = ((int) ((long)entry->f))*997 + ((int) ((long)entry->g));
+ #else
+-    val = ((int) entry->f)*997 + ((int) entry->g);
++    val = ((unsigned long) entry->f)*997 + ((unsigned long) entry->g);
+ #endif
+ 
+     return ((val < 0) ? -val : val) % modulus;
 diff --git src/bdd/cudd/cuddInt.h src/bdd/cudd/cuddInt.h
 index 2ccf86a7..c549a931 100644
 --- src/bdd/cudd/cuddInt.h
@@ -11,6 +24,32 @@ index 2ccf86a7..c549a931 100644
  #define ddCHash2_(o,f,g) \
 -(((((unsigned)(f) + (unsigned)(o)) * DD_P1 + (unsigned)(g)) * DD_P2))
 +(((((unsigned long)(f) + (unsigned long)(o)) * DD_P1 + (unsigned long)(g)) * DD_P2))
+ #endif
+ 
+ 
+diff --git src/bdd/cudd/cuddLCache.c src/bdd/cudd/cuddLCache.c
+index f5bcfd66..2de3fcaf 100644
+--- src/bdd/cudd/cuddLCache.c
++++ src/bdd/cudd/cuddLCache.c
+@@ -124,7 +124,7 @@ static char rcsid[] DD_UNUSED = "$Id: cuddLCache.c,v 1.24 2009/03/08 02:49:02 fa
+    (unsigned)(ptruint)(g)) * DD_P2) >> (shift))
+ #else
+ #define ddLCHash2(f,g,shift) \
+-((((unsigned)(f) * DD_P1 + (unsigned)(g)) * DD_P2) >> (shift))
++((((unsigned long)(f) * DD_P1 + (unsigned long)(g)) * DD_P2) >> (shift))
+ #endif
+ 
+ 
+diff --git src/bdd/cudd/cuddLevelQ.c src/bdd/cudd/cuddLevelQ.c
+index 5a88b772..17f602e2 100644
+--- src/bdd/cudd/cuddLevelQ.c
++++ src/bdd/cudd/cuddLevelQ.c
+@@ -126,7 +126,7 @@ static char rcsid[] DD_UNUSED = "$Id: cuddLevelQ.c,v 1.13 2009/03/08 02:49:02 fa
+ (((unsigned)(ptruint)(key) * DD_P1) >> (shift))
+ #else
+ #define lqHash(key,shift) \
+-(((unsigned)(key) * DD_P1) >> (shift))
++(((unsigned long)(key) * DD_P1) >> (shift))
  #endif
  
  
