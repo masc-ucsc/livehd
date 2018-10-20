@@ -13,14 +13,14 @@ new_git_repository(
 new_git_repository(
     name = "abc",
     build_file = "BUILD.abc", # relative to external path
-    commit = "af62d29d5e4a8336b7a9d81d17f647cf3ce3b4b8", # Oct 11, 2018
+    commit = "14d985a8c4597bc70765cb889be160b7af5fa128", # Oct 20, 2018
     remote = "https://github.com/berkeley-abc/abc.git",
     patches = ["//external:patch.abc"],
 )
 new_git_repository(
     name = "yosys",
     build_file = "BUILD.yosys", # relative to external path
-    commit = "57fc8dd58229d309ba56b374223802936444ecd4", # Jun 13, 2018
+    commit = "11c8a9eb960fdb0a412fabcfbe787cbf5cc3a67d", # Oct 20, 2018 0.7+ 57fc8dd58229d309ba56b374223802936444ecd4", # Jun 13, 2018
     remote = "https://github.com/YosysHQ/yosys.git",
     #strip_prefix = "kernel",
 )

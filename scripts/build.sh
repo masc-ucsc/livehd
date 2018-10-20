@@ -12,7 +12,14 @@ if [ ! -e ${LGRAPH_SRC}/WORKSPACE ]; then
 fi
 
 echo "build.sh: Building....."
-echo "build.sh: Getting sub directories..."
 cd ${LGRAPH_SRC}
-CXX=${LGRAPH_COMPILER} CC=${LGRAPH_COMPILER} bazel build -c ${LGRAPH_BUILD_MODE} //...
+
+if [ $LGRAPH_COMPILER == "g++" ]; then
+  CXX=g++ CC=gcc bazel build -c ${LGRAPH_BUILD_MODE} //...
+elif [ $LGRAPH_COMPILER == "clang++" ]; then
+  CXX=clang++ CC=clang bazel build -c ${LGRAPH_BUILD_MODE} //...
+else
+  echo "build.sh: ERROR, unrecognized $LGRAPH_COMPILER option"
+  exit -4
+fi
 
