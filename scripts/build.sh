@@ -16,10 +16,18 @@ cd ${LGRAPH_SRC}
 
 if [ $LGRAPH_COMPILER == "g++" ]; then
   CXX=g++ CC=gcc bazel build -c ${LGRAPH_BUILD_MODE} //...
+  if [ $? -eq 0 ]; then
+    exit 0
+  fi
 elif [ $LGRAPH_COMPILER == "clang++" ]; then
   CXX=clang++ CC=clang bazel build -c ${LGRAPH_BUILD_MODE} //...
+  if [ $? -eq 0 ]; then
+    exit 0
+  fi
 else
   echo "build.sh: ERROR, unrecognized $LGRAPH_COMPILER option"
   exit -4
 fi
 
+echo "build.sh: Build had an exit code condition"
+exit 2
