@@ -6,7 +6,6 @@ rm -f  ./lgshell_cmds
 rm -f  ./lgshell_cmds_opt
 mkdir logs
 
-bazel build //...
 pts='sp_add top constant sp_if_0 top_ooo sp_add_ooo nested_if_0 nested_if_1 nested_if_2'
 # pts='sp_add top'
 
