@@ -3,16 +3,35 @@
 #define PASS_TOPO_H
 
 #include "pass.hpp"
+#include "options.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
+#include <string>
 //sample pass that counts number of nodes, but traverses the graph in
 //topological order from inputs to output
-class Pass_topo : public Pass {
+class Pass_topological_options_pack : public Options_base {
 public:
-  Pass_topo() : Pass("topological") { }
+  void set(const std::string &label, const std::string &value) {
+    //nothing to do???
+  }
+};
 
-  void transform(LGraph *orig) final;
+class Pass_topo : public Pass {
+protected:
+  Pass_topological_options_pack opack;
+public:
+  //Pass_topo() : Pass("topological") { }
+  Pass_topo();
+
+  void trans(LGraph *orig) final;
+
+  LGraph *regen(const LGraph *orig) {
+    //only inplace available??
+    assert(false);
+  }
+  //no options needed??
+  void set(const std::string &key, const std::string &value) { }
 };
 
 #endif
