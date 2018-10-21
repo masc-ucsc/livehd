@@ -16,10 +16,10 @@ unsigned int Pass_dfg::temp_counter = 0;
 Pass_dfg::Pass_dfg(const std::string &key, const std::string &value) : Pass() { opack.set(key,value); }
 
 LGraph * Pass_dfg::generate_dfg() {
-  assert(!opack.src.empty());
+  assert(!opack.file.empty());
 
   //LGraph *cfg = new LGraph(opack.path, opack.src, false);
-  const LGraph *cfg = new LGraph(opack.path, opack.src, false);
+  const LGraph *cfg = new LGraph(opack.path, opack.file, false);
   regen(cfg);
   delete cfg;
 
@@ -38,8 +38,8 @@ LGraph *Pass_dfg::regen(const LGraph *cfg) {
 }
 
 void  Pass_dfg::optimize() {
-  assert(!opack.src.empty());
-  LGraph *dfg = new LGraph(opack.path, opack.src, false);
+  assert(!opack.file.empty());
+  LGraph *dfg = new LGraph(opack.path, opack.file, false);
   trans(dfg);
   dfg->sync();
 }
@@ -610,8 +610,8 @@ void Pass_dfg::create_mux(LGraph *dfg, Aux_node *pauxnd, Index_ID tid, Index_ID 
 
 void Pass_dfg_options::set(const std::string &key, const std::string &value) {
   try {
-    if (is_opt(key,"src") )
-      src = value;
+    if (is_opt(key,"file") )
+      file = value;
     else
       set_val(key,value);
 
@@ -619,6 +619,6 @@ void Pass_dfg_options::set(const std::string &key, const std::string &value) {
     fmt::print("ERROR: key {} has an invalid argument {}\n",key);
   }
 
-  console->warn("pass_dfg src:{} path:{} name:{}", src, path, name);
+  console->warn("pass_dfg file:{} path:{} name:{}", file, path, name);
 }
 

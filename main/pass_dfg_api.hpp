@@ -37,17 +37,17 @@ protected:
 
 public:
   static void setup(Eprp &eprp) {
-    Eprp_method m1("pass.dfg.generate", "generate a cfg lgraph to a dfg lgraph", &Pass_dfg_api::generate);
+    Eprp_method m1("pass.dfg.generate", "generate a dfg lgraph from a dfg lgraph", &Pass_dfg_api::generate);
     m1.add_label_optional("path","lgraph path");
     m1.add_label_required("name","lgraph name");
-    m1.add_label_required("src","src cfg lgraph file");
+    m1.add_label_required("file","src cfg lgraph file");
 
     eprp.register_method(m1);
 
     Eprp_method m2("pass.dfg.optimize", "optimize a dfg lgraph", &Pass_dfg_api::optimize);
     m2.add_label_optional("path","lgraph path");
     m2.add_label_optional("name","lgraph name");
-    m2.add_label_required("src","src dfg lgraph file");
+    m2.add_label_required("file","src dfg lgraph file");
 
     eprp.register_method(m2);
   }
