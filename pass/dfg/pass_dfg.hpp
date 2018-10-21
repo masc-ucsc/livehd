@@ -17,7 +17,7 @@
 
 class Pass_dfg_options : public Options_base {
 public:
-  std::string src;
+  std::string file;
   Pass_dfg_options() { }
 
   void set(const std::string &key, const std::string &value);
