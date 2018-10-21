@@ -31,6 +31,7 @@
 #define __MPMC_BOUNDED_QUEUE_INCLUDED__
 
 #include <assert.h>
+#include <strings.h>
 
 #include <cstddef>
 #include <cstdlib>
@@ -43,12 +44,14 @@ public:
 
   mpmc(size_t size) :
     _size(size),
-    _mask(size - 1),
     //_buffer(reinterpret_cast<node_t *>(aligned_alloc(128,sizeof(node_t)*(_size + 1)))), // page align needed for muslc (alpine)
     _buffer(reinterpret_cast<node_t *>(std::aligned_alloc(8*alignof(std::max_align_t),sizeof(node_t)*(_size + 1)))), // page align needed for muslc (alpine)
+    _mask(size - 1),
     _head_seq(0),
     _tail_seq(0)
   {
+    //bzero(_buffer,sizeof(node_t)*(_size + 1));
+
     // make sure it's a power of 2
     assert((_size != 0) && ((_size & (~_size + 1)) == _size));
 
@@ -128,15 +131,15 @@ private:
 
   // Mostly read only data
   const size_t        _size;
+  node_t* const         _buffer;
   const size_t        _mask;
-  node_t* const       _buffer;
-  cache_line_pad_t    _pad1;
+  cache_line_pad_t      _pad1;
   // Mostly enqueue thread call
   std::atomic<size_t> _head_seq;
-  cache_line_pad_t    _pad2;
+  cache_line_pad_t      _pad2;
   // Mostly dequeue thread call
   std::atomic<size_t> _tail_seq;
-  cache_line_pad_t    _pad3;
+  cache_line_pad_t      _pad3;
 
   mpmc(const mpmc&) {}
   void operator=(const mpmc&) {}
