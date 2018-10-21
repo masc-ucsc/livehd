@@ -13,7 +13,7 @@
 
 class Inou_cfg_options : public Options_base {
 public:
-  std::string src;
+  std::string file;
   Inou_cfg_options() { }
 
   void set(const std::string &key, const std::string &value);

@@ -17,7 +17,7 @@
 
 class Pass_dfg_options : public Options_base {
 public:
-  std::string src;
+  std::string file;
   Pass_dfg_options() { }
 
   void set(const std::string &key, const std::string &value);
@@ -29,9 +29,9 @@ public:
   Pass_dfg():Pass() { }
   Pass_dfg(const std::string &key, const std::string &value);
 
-  LGraph *     generate_dfg(); //calls regen() to generate dfg from cfg
+  LGraph *     generate_dfg(const LGraph * &cfg); //calls regen() to generate dfg from cfg
   LGraph *     regen(const LGraph *orig);
-  void         optimize();     //calls trans() to perform optimization
+  void         optimize(LGraph * &ori_dfg);     //calls trans() to perform optimization
   void         trans(LGraph *orig);
   void         cfg_2_dfg(LGraph *dfg, const LGraph *cfg);
   void         test_const_conversion();

@@ -27,12 +27,12 @@ Inou_cfg::~Inou_cfg() { }
 
 vector<LGraph *> Inou_cfg::tolg() {
   assert(!opack.name.empty());
-  assert(!opack.src.empty());
+  assert(!opack.file.empty());
 
   vector<LGraph *> lgs;
 
   lgs.push_back(new LGraph(opack.path, opack.name, false));
-  const auto &cfg_file = opack.src;
+  const auto &cfg_file = opack.file;
 
   int fd = open(cfg_file.c_str(), O_RDONLY);
 
@@ -188,7 +188,7 @@ void Inou_cfg::build_graph(vector<string>               &words,
 
     fmt::print("create node:{}, nid:{}\n", w1st, name2id[w1st]);
 
-    g->node_loc_set(new_node.get_nid(), opack.src.c_str(), (uint32_t)std::stoi(w3rd), (uint32_t)std::stoi(w4th));
+    g->node_loc_set(new_node.get_nid(), opack.file.c_str(), (uint32_t)std::stoi(w3rd), (uint32_t)std::stoi(w4th));
 
     if(w6th == ".()")
       g->node_type_set(name2id[w1st], CfgFunctionCall_Op);
@@ -204,7 +204,7 @@ void Inou_cfg::build_graph(vector<string>               &words,
       g->node_type_set(name2id[w1st], CfgAssign_Op);
   }
   else {
-    g->node_loc_set(name2id[w1st], opack.src.c_str(), (uint32_t)std::stoi(w3rd), (uint32_t)std::stoi(w4th));
+    g->node_loc_set(name2id[w1st], opack.file.c_str(), (uint32_t)std::stoi(w3rd), (uint32_t)std::stoi(w4th));
 
     if(w6th == ".()")
       g->node_type_set(name2id[w1st], CfgFunctionCall_Op);
@@ -445,8 +445,8 @@ void Inou_cfg::update_ifs(vector<LGraph *> &lgs, vector<map<string, Index_ID>> &
 void Inou_cfg_options::set(const std::string &key, const std::string &value) {
 
   try {
-    if (is_opt(key,"src") )
-      src = value;
+    if (is_opt(key,"file") )
+      file = value;
     else
       set_val(key,value);
 
@@ -454,5 +454,5 @@ void Inou_cfg_options::set(const std::string &key, const std::string &value) {
     fmt::print("ERROR: key {} has an invalid argument {}\n",key);
   }
 
-  console->warn("inou_cfg src:{} path:{} name:{}", src, path, name);
+  console->warn("inou_cfg file:{} path:{} name:{}", file, path, name);
 }
