@@ -15,21 +15,19 @@ unsigned int Pass_dfg::temp_counter = 0;
 
 Pass_dfg::Pass_dfg(const std::string &key, const std::string &value) : Pass() { opack.set(key,value); }
 
-LGraph * Pass_dfg::generate_dfg() {
-  assert(!opack.file.empty());
-
-  //LGraph *cfg = new LGraph(opack.path, opack.src, false);
-  const LGraph *cfg = new LGraph(opack.path, opack.file, false);
+LGraph * Pass_dfg::generate_dfg(const LGraph * &cfg) {
+  //assert(!opack.file.empty());
   regen(cfg);
-  delete cfg;
-
   LGraph *dfg = new LGraph(opack.path, opack.name, false);
   return dfg;
+  //const LGraph *cfg = new LGraph(opack.path, opack.file, false);
+  //regen(cfg);
+  //delete cfg;
 }
 
-LGraph *Pass_dfg::regen(const LGraph *cfg) {
+LGraph* Pass_dfg::regen(const LGraph *cfg) {
   assert(!opack.name.empty());
-  LGraph *dfg = new LGraph(opack.path, opack.name, false); // true? should it clear the DFG?
+  LGraph *dfg = new LGraph(opack.path, opack.name, false);
 
   cfg_2_dfg(dfg, cfg);
   dfg->sync();
@@ -37,11 +35,14 @@ LGraph *Pass_dfg::regen(const LGraph *cfg) {
   //delete dfg;//do we need to manually delete it?
 }
 
-void  Pass_dfg::optimize() {
-  assert(!opack.file.empty());
-  LGraph *dfg = new LGraph(opack.path, opack.file, false);
-  trans(dfg);
-  dfg->sync();
+void  Pass_dfg::optimize(LGraph * &ori_dfg) {
+  //assert(!opack.file.empty());
+  //LGraph *dfg = new LGraph(opack.path, opack.file, false);
+  fmt::print("hello\n");
+  fmt::print("hello\n");
+  fmt::print("hello\n");
+  trans(ori_dfg);
+  ori_dfg->sync();
 }
 void Pass_dfg::trans(LGraph *dfg) {
   LGraph* sub_graph = nullptr;

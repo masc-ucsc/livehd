@@ -6,7 +6,9 @@ rm -f  ./lgshell_cmds
 rm -f  ./lgshell_cmds_opt
 mkdir logs
 
+bazel build //...
 pts='sp_add top constant sp_if_0 top_ooo sp_add_ooo nested_if_0 nested_if_1 nested_if_2'
+# pts='sp_add top'
 
 LGSHELL=./bazel-bin/main/lgshell
 
@@ -31,9 +33,10 @@ do
     exit 1
   fi
 
-  echo "inou.cfg.tolg  file:./inou/cfg/tests/"$pt".cfg  name:"$pt"_cfg  |> @a"      >> lgshell_cmds 
+  echo "inou.cfg.tolg  file:./inou/cfg/tests/"$pt".cfg  name:"$pt"_cfg  |> @a">> lgshell_cmds 
   echo "lgraph.open name:"$pt"_cfg |> inou.json.fromlg output:"$pt"_cfg.json" >> lgshell_cmds 
-  echo "pass.dfg.generate file:"$pt"_cfg  name:"$pt""                          >> lgshell_cmds      
+  echo "lgraph.open name:"$pt"_cfg |> pass.dfg.generate name:"$pt""           >> lgshell_cmds 
+  # echo "pass.dfg.generate file:"$pt"_cfg  name:"$pt""                          >> lgshell_cmds      
   echo "lgraph.open name:"$pt" |> inou.json.fromlg output:"$pt"_pre.json"     >> lgshell_cmds
 done
 
@@ -45,8 +48,9 @@ echo ""
 
 for pt in $pts
 do
-  echo "pass.dfg.optimize file:"$pt" |> @b"                                >> lgshell_cmds_opt      
+  echo "lgraph.open name:"$pt" |> pass.dfg.optimize"                      >> lgshell_cmds_opt 
   echo "lgraph.open name:"$pt" |> inou.json.fromlg output:"$pt".json"     >> lgshell_cmds_opt
+  # echo "pass.dfg.optimize file:"$pt" |> @b"                               >> lgshell_cmds_opt      
 done
 
 cat lgshell_cmds_opt | ${LGSHELL}
@@ -93,6 +97,8 @@ done
 
 
 mv *.json ./logs
-rm *_dirty.v
-rm *_gld.v
+rm -f *_dirty.v
+rm -f *_gld.v
 mv *.v    ./logs
+rm -f fm_* 
+rm -f formality.log
