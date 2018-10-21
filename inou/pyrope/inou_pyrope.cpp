@@ -57,7 +57,7 @@ void Inou_pyrope::fromlg(std::vector<const LGraph *> &out) {
   }
 }
 
-/*HC_C: void*/ bool Inou_pyrope::to_dst_var(Out_string &w, const LGraph *g, Index_ID idx) const {
+bool Inou_pyrope::to_dst_var(Out_string &w, const LGraph *g, Index_ID idx) const {
   Index_ID direct_to_register = 0;
   for(const auto &c : g->out_edges(idx)) {
     const auto op = g->node_type_get(c.get_idx());
@@ -91,7 +91,7 @@ void Inou_pyrope::fromlg(std::vector<const LGraph *> &out) {
       << direct_to_register
       << " = ";
   } else {
-    /*HC_R: w << " tmp"
+    /*w << " tmp"
       << idx
       << " = ";*/
     return true;
@@ -141,7 +141,6 @@ void Inou_pyrope::to_src_var(Out_string &w, const LGraph *g, Index_ID idx) const
   } else if(const_val) {
     w << " " << const_val;
   } else {
-    //HC_C: w << " tmp" << idx;
     w << tmp_values[idx];
   }
 }
@@ -209,7 +208,6 @@ bool Inou_pyrope::to_mux(Out_string &w, const LGraph *g, Index_ID idx) const {
     return true;
   }
 
-  //HC_R: All this is the initial way to do if-else! Slight modifications.
   w << " if ";
   to_src_var(w, g, c_idx);
   w << " { \n   ";
@@ -337,9 +335,9 @@ bool Inou_pyrope::to_logical2(Out_string &w, const LGraph *g, Index_ID idx, cons
       first = false;
     } else {
       if(c.get_bits() == 1)
-        w << " " << s_op << " ";//HC_C: Added last space
+        w << " " << s_op << " ";
       else
-        w << " " << c_op << " ";//HC_C: Added last space
+        w << " " << c_op << " ";
     }
     to_src_var(w, g, c.get_idx());
   }
@@ -401,9 +399,9 @@ bool Inou_pyrope::to_logical1(Out_string &w, const LGraph *g, Index_ID idx, cons
     if(first) {
       first = false;
       if(c.get_bits() == 1)
-        w << /*" " <<*/ s_op << " ";//HC_C: Changed spacing
+        w << s_op << " ";
       else
-        w << /*" " <<*/ c_op << " ";//HC_C: Changed spacing
+        w << c_op << " ";
     } else {
       assert(false); // Should not happen with operations like NOT
     }
@@ -558,14 +556,13 @@ bool Inou_pyrope::to_op(Out_string &s, Out_string &sub, const LGraph *g, Index_I
       break;
     case StrConst_Op:
       dest = to_strconst(s, g, idx);
-      //tmp_values[idx] = "HELLO";//g->node_const_value_get(idx);
       break;
     default:
       dest = false;
       s << "# FIXME idx" << idx
         << " " << op.get_name()
         << " op:" << op.op;
-      tmp_values[idx] = "0";//HC_A
+      tmp_values[idx] = "0";
     }
 
   return dest;
@@ -709,19 +706,16 @@ void Inou_pyrope::to_pyrope(const LGraph *g, const std::string filename) {
     Out_string s;
 
     bool dest = to_op(s, sub, g, idx);
-    bool is_tmp = false;//HC: I think putting false here is okay.
+    bool is_tmp = false;//I think putting false here is okay.
 
     if(dest)
       is_tmp = to_dst_var(w, g, idx);
-    //else
-    //  w << "ELSE OCCURRED:";//HC_F: REMOVE ME
 
     if(is_tmp) {
-      if(s.str().length() != 1)//FIXME_HC: Should instead count # of spaces, if > 0, then do this. If = 0, then no parentheses!
-        tmp_values[idx] = "(" + s.str() + ")";//HC_F: Find way to only do paren. on tmp's that need it, not things like (0)
+      if(s.str().length() != 1)//FIXME: Should instead count # of spaces, if > 0, then do this. If = 0, then no parentheses!
+        tmp_values[idx] = "(" + s.str() + ")";
       else
-        tmp_values[idx] = s.str();//HC_A
-      //w << "Detected a tmp:";  //HC_F: REMOVE ME
+        tmp_values[idx] = s.str();
     } else {
       w << s.str();
       w << "\n";
