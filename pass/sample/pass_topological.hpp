@@ -13,7 +13,7 @@
 class Pass_topological_options_pack : public Options_base {
 public:
   void set(const std::string &label, const std::string &value) {
-    //nothing to do???
+    //nothing to do?
   }
 };
 
@@ -21,16 +21,15 @@ class Pass_topo : public Pass {
 protected:
   Pass_topological_options_pack opack;
 public:
-  //Pass_topo() : Pass("topological") { }
   Pass_topo();
 
   void trans(LGraph *orig) final;
 
   LGraph *regen(const LGraph *orig) {
-    //only inplace available??
     assert(false);
   }
-  //no options needed??
+
+  //no options needed
   void set(const std::string &key, const std::string &value) { }
 };
 
