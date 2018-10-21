@@ -2,11 +2,14 @@
 
 #include "pass_topological.hpp"
 
-void Pass_topo::transform(LGraph *orig) {
+Pass_topo::Pass_topo() {
+}
+
+void Pass_topo::trans(LGraph *orig) {
   int cells = 0;
   for(const auto& idx : orig->forward()) {
     (void)idx;
     cells++;
   }
-  fmt::print("cells {}\n",cells);
+  fmt::print("Pass: cells {}\n",cells);
 }
