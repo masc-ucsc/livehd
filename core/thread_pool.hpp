@@ -12,7 +12,12 @@
 #include <condition_variable>
 #include <type_traits>
 
+//#define MPMC
+#ifdef MPMC
 #include "mpmc.hpp"
+#else
+#include "spmc.hpp"
+#endif
 
 template<class Func,class ... Args>
 inline auto forward_as_lambda(Func &&func,Args &&...args) {
@@ -39,7 +44,11 @@ inline auto forward_as_lambda2(Func &&func, T &&first, Args &&...args) {
 class Thread_pool {
 
   std::vector<std::thread> threads;
+#ifdef MPMC
   mpmc<std::function<void(void)>> queue;
+#else
+  spmc256<std::function<void(void)>> queue;
+#endif
 
   std::atomic<int>        jobs_left;
   std::atomic<bool>       finishing;
@@ -87,12 +96,15 @@ class Thread_pool {
 
   public:
   Thread_pool(int _thread_count=0)
-    : queue(64)
-      , jobs_left( 0 )
-      , finishing( false ) {
+    : 
+#ifdef MPMC
+      queue(256),
+#endif
+      jobs_left( 0 )
+    , finishing( false ) {
 
     thread_count = _thread_count;
-    int lim = (std::thread::hardware_concurrency()-1)/2;
+    size_t lim = (std::thread::hardware_concurrency()-1)/2;
 
     if (thread_count > lim)
       thread_count = lim;

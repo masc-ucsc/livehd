@@ -52,3 +52,12 @@ TEST_F(VTest1, interface) {
   EXPECT_NE(access("./parse/chunk_test1.v:test1_modb", R_OK), -1);
 }
 
+TEST_F(VTest1, noaccess) {
+  std::string test2_verilog = "";
+
+  Chunkify_verilog chunker("/proc");
+  chunker.parse("test1.v", test2_verilog.c_str(), test2_verilog.size());
+
+  EXPECT_TRUE(true); // it if did not creep out, it is fine
+}
+
