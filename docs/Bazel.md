@@ -33,6 +33,11 @@ Useful commands:
 
     bazel test //...
 
+To debug errors in the testing environment, you may want to keep the sandbox
+files to check what may be going wrong. Use:
+
+    bazel test //... --sandbox_debug --keep_state_after_build
+
 ## Debugging with bazel
 
 First run the tests to see the failing one. Then run with debug options
