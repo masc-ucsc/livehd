@@ -262,8 +262,6 @@ void Eprp_scanner::chunked(const char *_buffer, size_t _buffer_sz) {
   buffer = _buffer;
   buffer_sz = static_cast<uint32_t>(_buffer_sz);
 
-  assert(token_list.size());
-
   elaborate();
 
   token_list.clear();
@@ -381,6 +379,14 @@ void Eprp_scanner::parser_warn(const std::string &text) {
 void Eprp_scanner::scan_raw_msg(const std::string &cat, const std::string &text, bool third) const {
 
   // Look at buffer for previous line change
+
+  if (token_list.empty()) {
+    fmt::print(fmt::format("{}:{}:{} {}: {}\n", buffer_name, 0, 0, cat, text));
+    fmt::print("\n");
+    if (third)
+      fmt::print("^\n");
+    return;
+  }
 
   size_t max_pos = scanner_pos;
   if (max_pos>=token_list.size())
