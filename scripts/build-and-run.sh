@@ -11,7 +11,7 @@ fi
 
 ${LGRAPH_SRC}/scripts/build.sh
 if [ $? -ne 0 ]; then
-  echo "LGRAPH build error"
+  echo "build-and-run.sh: build error"
   exit -1
 fi
 
@@ -20,10 +20,16 @@ if [[ $(which lcov) && $LGRAPH_BUILD_MODE == "fastbuild" ]]; then
   ./scripts/gencoverage.sh
   ./scripts/gencoveralls.sh
   if [ ! -f ./cov/coverage.info ]; then
-    echo "LGRAPH coverage build error"
+    echo "build-and-run.sh: coverage error"
     exit -1
   fi
 else
   ${LGRAPH_SRC}/scripts/run-test.sh
+  if [ $? -ne 0 ]; then
+    echo "build-and-run.sh: test error"
+    exit -1
+  fi
 fi
+
+exit 0
 

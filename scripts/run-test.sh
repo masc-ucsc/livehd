@@ -13,10 +13,8 @@ fi
 cd ${LGRAPH_SRC}
 
 bazel test -c ${LGRAPH_BUILD_MODE} //...
-
-if [ $? -eq 0 ]; then
-  exit 0
-else
+if [ $? -ne 0 ]; then
   exit $?
 fi
 
+exit 0
