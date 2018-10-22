@@ -18,6 +18,3 @@ before_install:
 script:
   - scripts/run-docker-test.sh `pwd` $BUILD_MODE $DOCKER $DOCKER_LGRAPH_SRC $LGRAPH_COMPILER
 
-cache:
-  directories:
-    - $HOME/.cache/bazel
