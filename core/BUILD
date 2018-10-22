@@ -16,6 +16,7 @@ cc_library(
 cc_test(
     name = "thread_pool_test",
     srcs = ["thread_pool_test.cpp"],
+    tags = ["long1"], # Run only with long1 set of tests
     deps = [
         "@gtest//:gtest_main",
         ":core",
