@@ -1,5 +1,8 @@
 
-Useful commands:
+Bazel is a relatively new build system open sourced by google. The main difference
+with traditional Makefiles is that it checks to make sure that dependences are not
+lost and the builds are reproducible and hermetic. This document explains how
+to use Bazel in the LGraph project.
 
 ## List bazel targets starting from top directory
 
@@ -53,6 +56,10 @@ tests.
 There are up to 8 long tests categories (long1, long2, long3...). Each of those
 tests groups should last less than 4 hours when running in a dual core machine
 (travis or azure).
+
+To list the tests under each tag. E.g., to list all the tests with long1 tag.
+
+    bazel query 'attr(tags, long1, tests(//...))'
 
 ## Debugging with bazel
 
