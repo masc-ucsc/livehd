@@ -725,8 +725,7 @@ public:
 
   void node_const_type_set(Index_ID nid, const std::string &value
 #ifndef NDEBUG
-                           ,
-                           bool enforce_bits = true
+                     , bool enforce_bits = true
 #endif
   );
   const char *node_const_value_get(Index_ID nid) const;

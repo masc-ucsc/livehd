@@ -13,10 +13,8 @@ class char_alloc : public mmap_allocator<char> {
 };
 
 int vector_mmap() {
-  mmap_allocator<char> alloc("core_test_lgdb/foo");
+  mmap_allocator<char> alloc("foo");
   std::vector<char, mmap_allocator<char>> foo (alloc);
-
-  //assert(foo.get_allocator() == alloc);
 
   uint32_t sz = 1024;
 
@@ -40,7 +38,7 @@ int vector_mmap() {
 
 int simply_mmap() {
   uint32_t sz = 1024;
-  char_alloc alloc("core_test_lgdb/mmaloc_test");
+  char_alloc alloc("mmaloc_test");
   char* foo = alloc.allocate(sz);
 
   assert(alloc.capacity() == sz);

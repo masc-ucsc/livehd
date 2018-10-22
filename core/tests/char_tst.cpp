@@ -4,7 +4,7 @@
 #include <string>
 
 void test0(int n) {
-  Char_Array<int> test1("core_test_lgdb", "test0");
+  Char_Array<int> test1("test0");
   test1.clear();
   std::string foo = "a";
 
@@ -17,7 +17,7 @@ void test0(int n) {
 }
 
 void test1(int n) {
-  Char_Array<uint64_t> test1("core_test_lgdb", "test1");
+  Char_Array<uint64_t> test1("test1");
   test1.clear();
   std::string foo = "a";
 
@@ -30,7 +30,7 @@ void test1(int n) {
 }
 
 void test2(int n) {
-  Char_Array<uint64_t> test1("core_test_lgdb", "test2");
+  Char_Array<uint64_t> test1("test2");
   test1.clear();
   std::string foo = "a";
 
@@ -42,7 +42,7 @@ void test2(int n) {
 }
 
 void test3(int n) {
-  Char_Array<int> test1("core_test_lgdb", "test3");
+  Char_Array<int> test1("test3");
   test1.clear();
   std::string foo = "a";
 
