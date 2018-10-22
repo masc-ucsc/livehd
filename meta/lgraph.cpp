@@ -25,7 +25,7 @@ LGraph::LGraph(const std::string &path)
     , LGraph_WireNames(path, "lg" + std::to_string(lgraph_counter))
     , LGraph_InstanceNames(path, "lg" + std::to_string(lgraph_counter))
     , LGraph_Node_Place(path, "lg" + std::to_string(lgraph_counter))
-    , LGraph_Symbol_Table(path, "lg" + std::to_string(lgraph_counter)) {
+{
 
   library  = Graph_library::instance(path);
   tlibrary = Tech_library::instance(path);
@@ -45,7 +45,7 @@ LGraph::LGraph(const std::string &path, const std::string &_name, bool _clear)
     , LGraph_WireNames(path, _name)
     , LGraph_InstanceNames(path, _name)
     , LGraph_Node_Place(path, _name)
-    , LGraph_Symbol_Table(path, _name) {
+{
 
   library  = Graph_library::instance(path);
   tlibrary = Tech_library::instance(path);
