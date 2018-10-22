@@ -14,14 +14,14 @@ cd ${LGRAPH_SRC}
 
 bazel test -c ${LGRAPH_BUILD_MODE} //...
 if [ $? -ne 0 ]; then
-  exit $?
+  exit 1
 fi
 
 if [ "$TRAVIS_EVENT_TYPE" == "cron" ]; then
   bazel test --test_tag_filters "long1" //...
 
   if [ $? -ne 0 ]; then
-    exit $?
+    exit 1
   fi
 fi
 
