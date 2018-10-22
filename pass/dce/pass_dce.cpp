@@ -36,14 +36,6 @@ void Pass_dce::trans(LGraph *g) {
     }
   }
 
-  /*for(auto idx:g->backward()) {
-    output_used.set_bit(idx);
-    for(const auto &c:g->inp_edges(idx)) {
-      output_used.set_bit(c.get_idx());
-    }
-    fmt::print("dce using {}\n",idx);
-  }*/
-
   for(auto idx : g->fast()) {
     if(output_used.get_bit(idx))
       continue;

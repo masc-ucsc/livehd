@@ -20,3 +20,14 @@ else
   exit $?
 fi
 
+
+if [ "$TRAVIS_EVENT_TYPE" == "cron" ]; then
+  bazel test --test_tag_filters "long1" //...
+fi
+
+if [ $? -eq 0 ]; then
+  exit 0
+else
+  exit $?
+fi
+

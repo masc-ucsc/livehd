@@ -8,19 +8,10 @@
 
 #include <string>
 
-class Pass_dce_options_pack : public Options_base {
-public:
-  void set(const std::string &label, const std::string &value) {
-    //nothing to do
-  }
-};
-
 class Pass_dce : public Pass {
 private:
 protected:
   std::string dce_type;
-
-  Pass_dce_options_pack opack;
 
 public:
   Pass_dce();
@@ -29,12 +20,13 @@ public:
 
   // regenerate, creates a new lgraph db
   LGraph *regen(const LGraph *orig) {
-    //only inplace available
     assert(false);
+    return nullptr;
   }
 
   // no options needed
-  void set(const std::string &key, const std::string &value) { }
+  void set(const std::string &key, const std::string &value) {
+  }
 };
 
 #endif
