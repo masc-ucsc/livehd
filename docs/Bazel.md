@@ -29,7 +29,11 @@ Useful commands:
 
     bazel build -s //core
 
-## To run all the tests in the system
+## To run SHORT tests
+
+The SHORT tests should have less than 15 minutes execution time for each
+individual test. Those tests are used to gate commits to the main repo,
+and to generate coverage reports.
 
     bazel test //...
 
@@ -37,6 +41,18 @@ To debug errors in the testing environment, you may want to keep the sandbox
 files to check what may be going wrong. Use:
 
     bazel test //... --sandbox_debug --keep_state_after_build
+
+## To run LONG tests
+
+In addition to the short tests, there are sets of long tests that are run frequently
+but not before every push to main line. The reason is that those are multi-hour
+tests.
+
+    bazel test --test_tag_filters "long1" //...
+
+There are up to 8 long tests categories (long1, long2, long3...). Each of those
+tests groups should last less than 4 hours when running in a dual core machine
+(travis or azure).
 
 ## Debugging with bazel
 
