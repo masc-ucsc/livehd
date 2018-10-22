@@ -136,12 +136,12 @@ bool simple() {
   g->node_u32type_set(const0, 1);
   g->node_u32type_set(const1, 21);
   g->node_const_type_set(const2, "xxx"
-#if DEBUG
+#ifndef NDEBUG
       ,false
 #endif
       );
   g->node_const_type_set(const3, "yyy"
-#if DEBUG
+#ifndef NDEBUG
       ,false
 #endif
       );
@@ -156,13 +156,14 @@ bool simple() {
   g->create_node().get_nid();  // 20
   g->create_node().get_nid();  // 20
 
-  //     1     2     3     4     9     10     11    12
+  /*     1     2     3     4     9     10     11    12
   //       \  /       \   /  \    \   /       |   /   \
   //        13         14     15   16          17     18
   //        | \       / \           \        /  \   /   \
   //        |  \     /   \           \      20   19     21
   //        |   \   /     \           \   /
   //        5     6        7            8
+  */
 
 
   g->add_edge(Node_Pin(1,0,false),  Node_Pin(13,0,true));
