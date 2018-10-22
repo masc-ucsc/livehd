@@ -65,27 +65,36 @@ public:
 #if 0
 #include <iostream>
 #include <pthread.h>
-#define MPMC 1
+//#define MPMC 1
+//#define SPSC 1
 
 #ifdef MPMC
 #include "mpmc.hpp"
 
 mpmc<uint32_t> cf(256);
 #else
+#ifdef SPSC
+#include "spsc.hpp"
+
+spsc<uint32_t> cf(256);
+#else
 spmc256<uint32_t> cf;
 #endif
+#endif
 
-#define NUM_ITERATIONS 10000000
+#define NUM_ITERATIONS 100000000
 
+int total=0;
 extern "C" void *consumer(void *threadargs) {
 
-  for(uint32_t i=0;i<(NUM_ITERATIONS/4);i++) {
+  for(uint32_t i=0;i<(NUM_ITERATIONS);i++) {
     while(cf.empty()) {
       ;
     }
     uint32_t j;
     while(!cf.dequeue(j))
       ;
+    total += j;
   }
 
   return 0;
@@ -95,17 +104,20 @@ extern "C" void *consumer(void *threadargs) {
 int main() {
 
   pthread_t c1;
+  pthread_create(&c1,0,&consumer,(void *) 0);
+
+#if 0
   pthread_t c2;
   pthread_t c3;
   pthread_t c4;
 
-  pthread_create(&c1,0,&consumer,(void *) 0);
   pthread_create(&c2,0,&consumer,(void *) 0);
   pthread_create(&c3,0,&consumer,(void *) 0);
   pthread_create(&c4,0,&consumer,(void *) 0);
+#endif
 
   // Producer
-  for(uint32_t i=0;i<10000000;i++) {
+  for(uint32_t i=0;i<NUM_ITERATIONS;i++) {
     while(!cf.enqueue(i))
       ;
 #if 0
@@ -114,6 +126,8 @@ int main() {
     }
 #endif
   }
+
+  std::cout << "total:" << total << std::endl;
 
   return 0;
 }
