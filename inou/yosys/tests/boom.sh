@@ -5,7 +5,7 @@ LGCHECK=./inou/yosys/lgcheck
 
 BENCH_DIR=./projects/boom/
 TEST_CASE=boom.system.TestHarness.BoomConfig.v
-BOOM_FILE=${BENCH_DIR}/${TEST_CASE}
+BOOM_FILE=${BENCH_DIR}${TEST_CASE}
 
 if [ ! -f ${OPT_LGSHELL} ]; then
   echo "boom test could not find lgshell"
@@ -35,10 +35,10 @@ for i in lgdb/parse/*; do
   fi
 done
 
+filename="chunk_`echo ${BOOM_FILE} | tr '/' '.'`"
 for i in tmp/*; do
-  name=`basename ${i%.*}`i
-  filename="chunk_..`echo ${BOOM_FILE} | tr '/' '.'`"
-  ${LGCHECK} --reference=./lgdb/parse/chunk_..${filename}:${name} --implementation=./tmp/${i} --top=$name
+  name=`basename ${i%.*}`
+  ${LGCHECK} --reference=./lgdb/parse/${filename}:${name} --implementation=${i} --top=$name
 
   if [ $? -ne 0 ]; then
     echo "Module $i does not match"
