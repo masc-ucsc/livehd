@@ -44,7 +44,7 @@ done
 filename="chunk_`echo ${BOOM_FILE} | tr '/' '.'`"
 for i in boom_test/*; do
   name=`basename ${i%.*}`
-  ${LGCHECK} --reference=./lgdb/parse/${filename}:${name} --implementation=${i} --top=$name
+  ${LGCHECK} --reference=./lgdb/parse/${filename}:${name} --implementation=${i} --top=$name 2> /dev/null > /dev/null
 
   if [ $? -ne 0 ]; then
     echo "ERROR: Module $i does not match"

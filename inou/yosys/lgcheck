@@ -95,7 +95,7 @@ yosys_read="read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; proc; flatten; renam
             read_verilog -sv ${GATE}; hierarchy ${TOP_STR}; proc; flatten; rename -top gate; design -stash gate;
             design -copy-from gold -as gold gold; design -copy-from gate -as gate gate; ${lib};"
 
-yosys_prep="proc; memory; equiv_make gold gate equiv; prep -flatten -top equiv; hierarchy -top equiv; hierarchy -check; flatten; proc; opt_clean;"
+yosys_prep="proc; memory -nomap; equiv_make gold gate equiv; prep -flatten -top equiv; hierarchy -top equiv; hierarchy -check; flatten; proc; opt_clean;"
 yosys_prep_bb="proc; equiv_make gold gate equiv; hierarchy -top equiv; flatten; proc; opt_clean;"
 
 yosys_equiv="equiv_simple; equiv_struct; equiv_simple; equiv_struct -icells; equiv_simple;"
