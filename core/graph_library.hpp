@@ -11,6 +11,16 @@
 #include <iostream>
 #include <unordered_map>
 
+#include "lglog.hpp"
+
+// Description:
+//
+// Graph_library is the base class to keep track of lgraph names, input, outputs.
+//
+// It can handle multiple lgraph directories at the same time, but it does NOT allow to link across lgraph directories.
+//
+// The lgraph_ids are unique per lgraph directory
+
 class LGraph;
 
 class Graph_library {
@@ -40,9 +50,12 @@ protected:
     clean_library();
   }
 
-  static std::unordered_map<std::string, Graph_library *> instances;
+  static std::unordered_map<std::string, Graph_library *> global_instances;
+  static std::map<std::string, std::map<std::string, LGraph *>> global_name2lgraph;
 
 public:
+  static LGraph *find_lgraph(const std::string &path, const std::string &name);
+
   int add_name(const std::string &name) {
     assert(attribute.find(name) == attribute.end());
 
@@ -88,6 +101,7 @@ public:
     it->second.version = ++max_version;
   }
 
+  // FIXME: change to int32_t (32 bits at most for subgraph id
   int reset_id(const std::string &name) {
     const auto &it = attribute.find(name);
     if(it != attribute.end()) {
@@ -113,10 +127,10 @@ public:
   }
 
   static Graph_library *instance(std::string path) {
-    if(Graph_library::instances.find(path) == Graph_library::instances.end()) {
-      Graph_library::instances.insert(std::make_pair(path, new Graph_library(path)));
+    if(Graph_library::global_instances.find(path) == Graph_library::global_instances.end()) {
+      Graph_library::global_instances.insert(std::make_pair(path, new Graph_library(path)));
     }
-    return Graph_library::instances[path];
+    return Graph_library::global_instances[path];
   }
 
   const std::vector<std::string> &list_all() const {
@@ -129,6 +143,20 @@ public:
     for(Attribute_type::const_iterator it=attribute.begin();it!=attribute.end();it++) {
       f1(it->first, it->second.id);
     }
+  }
+
+  int register_lgraph(const std::string &name, LGraph *lg) {
+    global_name2lgraph[path][name] = lg;
+
+    return reset_id(name);
+  }
+
+  void unregister_lgraph(const std::string &name, int lgid, const LGraph *lg) {
+    assert(id2name.size() > (size_t) lgid);
+    assert(id2name[lgid] == name);
+    assert(global_name2lgraph[path][name] == lg);
+
+    fmt::print("TODO: garbage collect lgraph {}\n", name);
   }
 
   void sync() {

@@ -22,6 +22,14 @@ Lgraph_base_core::Setup_path::Setup_path(const std::string &path) {
   last_path = path;
 }
 
+Lgraph_base_core::Lgraph_base_core(const std::string &_path, const std::string &_name)
+  : p(_path)
+  , path(_path)
+    , name(_name)
+    , long_name("lgraph_" + _name)
+    , node_internal(path + "/lgraph_" + name + "_nodes") {
+    };
+
 Fast_edge_iterator Lgraph_base_core::fast() const {
   if(node_internal.empty())
     return Fast_edge_iterator(0, this);

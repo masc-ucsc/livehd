@@ -4,13 +4,30 @@
 #include <dirent.h>
 
 #include "graph_library.hpp"
-#include "lgraph.hpp"
 
-std::unordered_map<std::string, Graph_library *> Graph_library::instances;
+std::unordered_map<std::string, Graph_library *> Graph_library::global_instances;
+
+std::map<std::string, std::map<std::string, LGraph *>> Graph_library::global_name2lgraph;
 
 LGraph *Graph_library::get_graph(int id) const {
   assert(id2name.size() > (size_t)id);
-  return LGraph::find_lgraph(path,id2name[id]);
+
+  const std::string &name = id2name[id];
+
+  return find_lgraph(path, name);
+}
+
+LGraph *Graph_library::find_lgraph(const std::string &path, const std::string &name) {
+
+  if(global_name2lgraph.find(path) != global_name2lgraph.end() && global_name2lgraph[path].find(name) != global_name2lgraph[path].end()) {
+    LGraph *lg = global_name2lgraph[path][name];
+    assert(global_instances.find(path) != global_instances.end());
+    global_instances[path]->register_lgraph(name, lg);
+
+    return lg;
+  }
+
+  return nullptr;
 }
 
 void Graph_library::reload() {

@@ -49,14 +49,12 @@ void Pass_dfg::trans(LGraph *dfg) {
   //resolve pending graph
   for(auto idx : dfg->fast()) {
     if(dfg->node_type_get(idx).op == DfgPendingGraph_Op){
-      if((sub_graph = LGraph::find_lgraph(dfg->get_path(), ((std::string)(dfg->get_node_wirename(idx)))))){
-        dfg->node_subgraph_set(idx, (uint32_t)sub_graph->lg_id());
-        fmt::print("resolve pending subgraph! nid:{}, sub_graph name:{}, sub_graph_id:{}\n", idx, dfg->get_node_wirename(idx), sub_graph->lg_id());
-      }
-      else{
-        fmt::print("cannot resolve pending subgraph!!\n");
-        assert(0);
-      }
+      const std::string wirename = dfg->get_node_wirename(idx);
+      sub_graph = LGraph::find_lgraph(dfg->get_path(), wirename);
+      assert(sub_graph);
+
+      dfg->node_subgraph_set(idx, (uint32_t)sub_graph->lg_id());
+      fmt::print("resolve pending subgraph! nid:{}, sub_graph name:{}, sub_graph_id:{}\n", idx, dfg->get_node_wirename(idx), sub_graph->lg_id());
     }
   }
 
