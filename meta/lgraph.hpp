@@ -2,7 +2,6 @@
 #ifndef LGRAPH_H
 #define LGRAPH_H
 
-#include "graph_library.hpp"
 #include "instance_names.hpp"
 #include "lgedge.hpp"
 #include "lgraphbase.hpp"
@@ -11,12 +10,10 @@
 #include "nodeplace.hpp"
 #include "nodesrcloc.hpp"
 #include "nodetype.hpp"
-#include "tech_library.hpp"
 
 class Node;
 class ConstNode;
 class Edge_iterator;
-class Graph_library;
 
 class LGraph :  public LGraph_Node_Delay
               , public LGraph_Node_Src_Loc
@@ -25,38 +22,31 @@ class LGraph :  public LGraph_Node_Delay
               , public LGraph_Node_Place
                {
 protected:
-  // FIXME: for live I need one instance per lgdb. Do it similar to library, or
-  // keep references to lgraphs in the library
-  static std::map<std::string, std::map<std::string, LGraph *>> name2lgraph;
-  static uint32_t                                               lgraph_counter;
-
-  // singleton object, assumes all graph within a program are in the same
-  // directory
-  Graph_library *library;
-  Tech_library * tlibrary;
-
-  int lgraph_id;
+  //static uint32_t                                               lgraph_counter;
+  int         lgraph_id;
 
   Index_ID create_node_int() final;
 
 public:
   LGraph() = delete;
-
   LGraph(const LGraph&) = delete;
 
-  explicit LGraph(const std::string &path);
+  //explicit LGraph(const std::string &path);
   explicit LGraph(const std::string &path, const std::string &name, bool clear);
 
-  static LGraph *find_lgraph(const std::string &path, const std::string &name);
+  virtual ~LGraph();
+
+  // NOTE: open "registers" the lgraph. Remember to close to allow garbage collection
   static LGraph *open_lgraph(const std::string &path, const std::string &name);
+  void close_lgraph() {
+    library->unregister_lgraph(name, lgraph_id, this);
+  };
 
-  ~LGraph() {
-    console->debug("lgraph destructor\n");
-  }
+  static LGraph *find_lgraph(const std::string &path, const std::string &name);
 
-  int lg_id() const {
-    return lgraph_id;
-  }
+
+  int lg_id() const { return lgraph_id; }
+
   void clear() override;
   void reload() override;
   void sync() override;
@@ -71,18 +61,6 @@ public:
 
   ConstNode get_dest_node(const Edge &edge) const;
   Node      get_dest_node(const Edge &edge);
-
-  const Graph_library *get_library() const {
-    return library;
-  }
-  const std::string &get_subgraph_name(Index_ID nid) const;
-
-  const Tech_library *get_tlibrary() const {
-    return tlibrary;
-  }
-  Tech_library *get_tech_library() {
-    return tlibrary;
-  }
 
   uint16_t get_offset(Index_ID nid) const override {
     return LGraph_WireNames::get_offset(nid);

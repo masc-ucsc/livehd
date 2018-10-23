@@ -14,18 +14,19 @@ protected:
   class Setup_path {
   private:
     static std::string last_path; // Just try to optimize to avoid too many frequent syscalls
+
   public:
     Setup_path(const std::string &path);
   };
   Setup_path p; // Must be first in base object
+  const std::string path;
+  const std::string name;
+  const std::string long_name;
 
   Dense<Node_Internal> node_internal;
 
   Lgraph_base_core() = delete;
-  explicit Lgraph_base_core(const std::string &path, const std::string &name)
-      : p(path)
-      , node_internal(path + "/lgraph_" + name + "_nodes") {
-      };
+  explicit Lgraph_base_core(const std::string &_path, const std::string &_name);
   virtual ~Lgraph_base_core(){};
 
   Index_ID fast_next(Index_ID nid) const {
@@ -46,6 +47,14 @@ protected:
   static bool is_path_ok(const std::string &path);
 
 public:
+  const std::string &get_name() const {
+    assert(long_name == "lgraph_" + name);
+    return name;
+  }
+  const std::string &get_path() const {
+    return path;
+  }
+
   Fast_edge_iterator fast() const;
 };
 
