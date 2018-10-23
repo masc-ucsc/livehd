@@ -12,28 +12,40 @@ cc_library(
 
 cc_test(
     name = "eprp_test",
-    srcs = ["eprp_test.cpp"],
+    srcs = ["tests/eprp_test.cpp"],
     deps = [
         "@gtest//:gtest_main",
         ":eprp",
     ],
 )
 
-cc_binary(
+filegroup(
+    name = "eprp_scripts",
+    srcs = ["tests/synth1.eprp"],
+)
+
+cc_test(
     name = "eprp_scanner_test",
-    srcs = ["eprp_scanner_test.cpp"],
-    # args = ["$(location tests/synth1.eprp)"],
+    srcs = ["tests/eprp_scanner_test.cpp"],
+    args = ["$(location :eprp_scripts)"],
     deps = [
+        "@gtest//:gtest_main",
         ":eprp",
+    ],
+    data = [
+        ":eprp_scripts",
     ],
 )
 
-cc_binary(
+cc_test(
     name = "eprp_verilog_test",
-    srcs = ["eprp_verilog_test.cpp"],
-    # args = ["$(location tests/synth1.eprp)"],
+    srcs = ["tests/eprp_verilog_test.cpp"],
+    args = ["$(location :eprp_scripts)"],
     deps = [
         ":eprp",
+    ],
+    data = [
+        ":eprp_scripts",
     ],
 )
 
