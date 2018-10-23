@@ -6,9 +6,8 @@ Code quality: [![CodeFactor](https://www.codefactor.io/repository/github/masc-uc
 [![Codacy Badge](https://api.codacy.com/project/badge/Grade/4cae3de3de714e13b6003002f74b7375)](https://www.codacy.com/app/renau/lgraph?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=masc-ucsc/lgraph&amp;utm_campaign=Badge_Grade)
 [![Coverage Status](https://coveralls.io/repos/github/masc-ucsc/lgraph/badge.svg?branch=HEAD)](https://coveralls.io/github/masc-ucsc/lgraph?branch=HEAD)
 
-Short CI with travis: [![Build Status](https://travis-ci.org/masc-ucsc/lgraph.svg?branch=master)](https://travis-ci.org/masc-ucsc/lgraph)
-
-Long CI with Azure: [![Build Status](https://dev.azure.com/renau0400/renau/_apis/build/status/masc-ucsc.lgraph)](https://dev.azure.com/renau0400/renau/_build/latest?definitionId=1)
+Short CI: [![Build Status](https://travis-ci.org/masc-ucsc/lgraph.svg?branch=master)](https://travis-ci.org/masc-ucsc/lgraph)
+Long CI: [![Build Status](https://dev.azure.com/renau0400/renau/_apis/build/status/masc-ucsc.lgraph)](https://dev.azure.com/renau0400/renau/_build/latest?definitionId=1)
 
 LGRAPH is a graph optimized for live synthesis (Live Synthesizes Graph or
 LGRAPH for short). By live, we mean that small changes in the design should
