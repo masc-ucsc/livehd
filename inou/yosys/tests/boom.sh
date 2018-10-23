@@ -32,14 +32,11 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-for i in lgdb/parse/*; do
-  echo "inou.yosys.tolg files:${i} |> inou.yosys.fromlg odir:boom_test" | ${LGSHELL}
-
-  if [ $? -ne 0 ]; then
-    echo "Failed to read/write verilog for module $i"
-    exit 1
-  fi
-done
+echo "inou.yosys.tolg files:lgdb/parse/\"chunk_*\" |> inou.yosys.fromlg odir:boom_test" | ${LGSHELL}
+if [ $? -ne 0 ]; then
+  echo "Failed to read/write verilog for module $i"
+  exit 1
+fi
 
 filename="chunk_`echo ${BOOM_FILE} | tr '/' '.'`"
 for i in boom_test/*; do
