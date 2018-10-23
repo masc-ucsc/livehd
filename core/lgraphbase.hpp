@@ -8,12 +8,12 @@
 #include <map>
 #include <vector>
 
-#include "lglog.hpp"
-
 #include "char_array.hpp"
+#include "graph_library.hpp"
+#include "lglog.hpp"
 #include "lgraph_base_core.hpp"
-
 #include "nodetype.hpp"
+#include "tech_library.hpp"
 
 #ifndef likely
 #define likely(x)       __builtin_expect((x),1)
@@ -27,9 +27,6 @@ class Edge_iterator;
 class LGraph_Base : public LGraph_Node_Type {
 protected:
   // std::vector<Node_Internal, AAlloc::AlignedAllocator<Node_Internal,4096> > node_internal;
-  std::string long_name;
-  std::string name;
-  std::string path;
   bool        locked;
   Port_ID     io_nums = 1;
 
@@ -37,6 +34,10 @@ protected:
 
   Char_Array<io_t> input_array;
   Char_Array<io_t> output_array;
+
+  // Integrate graph and tech library?
+  Graph_library *library;
+  Tech_library * tlibrary;
 
   struct str_cmp_i { // case insensitive string compare for IO
     bool operator()(char const *a, char const *b) const {
@@ -81,7 +82,14 @@ public:
   LGraph_Base(const LGraph_Base&) = delete;
 
   explicit LGraph_Base(const std::string &path, const std::string &_name) noexcept;
-  virtual ~LGraph_Base(){};
+  virtual ~LGraph_Base();
+
+  const Graph_library *get_library() const { return library; }
+
+  const Tech_library *get_tlibrary() const { return tlibrary; }
+  Tech_library *get_tech_library() { return tlibrary; }
+
+  const std::string &get_subgraph_name(Index_ID nid) const;
 
   void get_lock();
   // Method called after the char_arrays and node_internal are reloaded
@@ -89,14 +97,6 @@ public:
   virtual void clear();
   virtual void sync();
   virtual void emplace_back();
-
-  const std::string &get_name() const {
-    assert(long_name == "lgraph_" + name);
-    return name;
-  }
-  const std::string &get_path() const {
-    return path;
-  }
 
   // Graph input/output functions
   bool is_graph_input(const char *str) const;

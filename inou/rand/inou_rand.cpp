@@ -36,13 +36,10 @@ struct pin_pair_compare {
 
 std::vector<LGraph *> Inou_rand::tolg() {
 
-  std::vector<LGraph *> lgs;
+  assert(!opack.name.empty());
 
-  LGraph *g=0;
-  if (opack.name.empty())
-    g = new LGraph(opack.path);
-  else
-    g = new LGraph(opack.path, opack.name, true); // clear graph
+
+  LGraph *g = new LGraph(opack.path, opack.name, true); // clear graph
 
   std::mt19937 rnd;
   rnd.seed(opack.rand_seed);
@@ -129,6 +126,7 @@ std::vector<LGraph *> Inou_rand::tolg() {
 
   g->sync();
 
+  std::vector<LGraph *> lgs;
   lgs.push_back(g);
 
   return lgs;

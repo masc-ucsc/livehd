@@ -1,5 +1,4 @@
 
-#include "graph_library.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 

@@ -12,18 +12,26 @@
 LGraph_Base::LGraph_Base(const std::string &_path, const std::string &_name) noexcept
     : Lgraph_base_core(_path, _name)
     , LGraph_Node_Type(_path, _name)
-    , long_name("lgraph_" + _name)
-    , name(_name)
-    , path(_path)
     , input_array(_path + "/lgraph_" + _name + "_inputs")
     , output_array(_path + "/lgraph_" + _name + "_outputs") {
 
+  library  = Graph_library::instance(path);
+  tlibrary = Tech_library::instance(path);
+
   locked = false;
+}
+
+LGraph_Base::~LGraph_Base() {
 }
 
 LGraph_Base::_init::_init() {
   //fmt::print("LGraph_Base static init done\n");
   // Add here sequence of static initialization that may be needed
+}
+
+const std::string &LGraph_Base::get_subgraph_name(Index_ID nid) const {
+  assert(node_type_get(nid).op == SubGraph_Op);
+  return library->get_name(subgraph_id_get(nid));
 }
 
 void LGraph_Base::clear() {
@@ -40,6 +48,13 @@ void LGraph_Base::clear() {
 }
 
 void LGraph_Base::sync() {
+
+  if (locked)
+    library->update(name);
+
+  library->sync();
+  tlibrary->sync();
+
   LGraph_Node_Type::sync();
 
   node_internal.sync();
@@ -150,7 +165,6 @@ Index_ID LGraph_Base::add_graph_input(const char *str, Index_ID nid, uint16_t bi
 
   inputs2node[str].nid          = nid;
   inputs2node[str].original_pos = original_pos;
-
 
   recompute_io_ports();
 
