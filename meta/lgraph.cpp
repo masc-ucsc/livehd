@@ -12,10 +12,9 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
-uint32_t LGraph::lgraph_counter = 0;
-
-// FIXME: name2lgraph functionality should be moved to graph_library
-std::map<std::string, std::map<std::string, LGraph *>> LGraph::name2lgraph;
+#if 0
+uint32_t LGraph::lgraph_counter = 0; // FIXME: This does not guarantee unique name
+// FIXME: do we even allow unnamed graphs????
 
 LGraph::LGraph(const std::string &path)
     : Lgraph_base_core(path, "lg" + std::to_string(lgraph_counter))
@@ -26,16 +25,11 @@ LGraph::LGraph(const std::string &path)
     , LGraph_InstanceNames(path, "lg" + std::to_string(lgraph_counter))
     , LGraph_Node_Place(path, "lg" + std::to_string(lgraph_counter))
 {
-
-  library  = Graph_library::instance(path);
-  tlibrary = Tech_library::instance(path);
-
-  name2lgraph[path][name] = this;
   lgraph_counter++; // Only for unnamed graphs
-  lgraph_id = library->get_id(std::to_string(lgraph_counter));
 
   clear();
 }
+#endif
 
 LGraph::LGraph(const std::string &path, const std::string &_name, bool _clear)
     : Lgraph_base_core(path, _name)
@@ -47,11 +41,7 @@ LGraph::LGraph(const std::string &path, const std::string &_name, bool _clear)
     , LGraph_Node_Place(path, _name)
 {
 
-  library  = Graph_library::instance(path);
-  tlibrary = Tech_library::instance(path);
-
-  name2lgraph[path][name] = this;
-  lgraph_id = library->reset_id(_name); // May keep same ID
+  lgraph_id = library->register_lgraph(name, this);
 
   if(_clear) {
     clear();
@@ -61,27 +51,35 @@ LGraph::LGraph(const std::string &path, const std::string &_name, bool _clear)
   }
 }
 
-LGraph *LGraph::find_lgraph(const std::string &path, const std::string &name) {
-
-  if(name2lgraph.find(path) == name2lgraph.end() || name2lgraph[path].find(name) == name2lgraph[path].end()) {
-    if(Graph_library::instance(path)->include(name))
-      return open_lgraph(path, name);
-
-    if (!is_path_ok(path)) {
-      console->warn("find_lgraph trying {} path which does not exit", path);
-    }
-    return 0;
-  }
-
-  return name2lgraph[path][name];
+LGraph::~LGraph() {
+  console->debug("lgraph destructor\n");
+  library->unregister_lgraph(name, lgraph_id, this);
 }
 
+// FIXME: rename to ::create
 LGraph *LGraph::open_lgraph(const std::string &path, const std::string &name) {
-  char cadena[4096];
-  snprintf(cadena, 4096, "%s/lgraph_%s_nodes", path.c_str(), name.c_str());
-  if(access(cadena, R_OK | W_OK) == -1) {
-    return nullptr;
+  LGraph *lg = Graph_library::find_lgraph(path,name);
+  if (lg) {
+    assert(Graph_library::instance(path));
+    Graph_library::instance(path)->register_lgraph(name, lg);
+    return lg;
   }
+
+  return new LGraph(path, name, false);
+}
+
+// FIXME: rename to ::open
+LGraph *LGraph::find_lgraph(const std::string &path, const std::string &name) {
+  LGraph *lg = Graph_library::find_lgraph(path,name);
+  if (lg) {
+    assert(Graph_library::instance(path));
+    Graph_library::instance(path)->register_lgraph(name, lg);
+    return lg;
+  }
+
+  if (!Graph_library::instance(path)->include(name))
+    return 0;
+
   return new LGraph(path, name, false);
 }
 
@@ -110,12 +108,6 @@ void LGraph::sync() {
   LGraph_Node_Src_Loc::sync();
   LGraph_WireNames::sync();
   LGraph_InstanceNames::sync();
-
-  if (locked)
-    library->update(name);
-
-  library->sync();
-  tlibrary->sync();
 
   LGraph_Base::sync(); // last. Removes lock at the end
 }
@@ -187,11 +179,6 @@ ConstNode LGraph::get_dest_node(const Edge &edge) const {
   assert(is_root(idx)); // get_dest_node can only be called for root nodes
 
   return ConstNode(this, idx);
-}
-
-const std::string &LGraph::get_subgraph_name(Index_ID nid) const {
-  assert(node_type_get(nid).op == SubGraph_Op);
-  return library->get_name(subgraph_id_get(nid));
 }
 
 Index_ID LGraph::create_node_int() {
