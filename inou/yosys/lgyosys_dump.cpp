@@ -277,6 +277,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         assert(inps == 1);
 
         RTLIL::SigSpec rhs = RTLIL::SigSpec(get_wire(c.get_idx(), c.get_out_pin().get_pid()));
+        assert(rhs != lhs);
         module->connect(lhs, rhs);
       }
       continue;
@@ -740,6 +741,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
 
       bool sign   = false;
       bool b_sign = false;
+      bool a_sign = false;
 
       for(const auto &c : g->inp_edges(idx)) {
         size = (c.get_bits() > size) ? c.get_bits() : size;
@@ -761,8 +763,9 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         case 2:
           if(g->node_type_get(c.get_idx()).op != U32Const_Op)
             log_error("Internal Error: Shift sign is not a constant.\n");
-          sign   = (g->node_value_get(c.get_idx()) == 1);
+          sign   = (g->node_value_get(c.get_idx())%2 ==1);
           b_sign = (g->node_value_get(c.get_idx()) == 2);
+          a_sign = (g->node_value_get(c.get_idx()) >  2);
           break;
         }
       }
@@ -772,11 +775,11 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         log_error("Internal Error: did not find a wire to be shifted.\n");
 
       if(sign)
-        module->addSshr(next_id(), shifted_wire, shift_amount, cell_output_map[std::make_pair(idx, 0)], false);
+        module->addSshr(next_id(), shifted_wire, shift_amount, cell_output_map[std::make_pair(idx, 0)], a_sign);
       else if(b_sign)
-        module->addShiftx(next_id(), shifted_wire, shift_amount, cell_output_map[std::make_pair(idx, 0)], false);
+        module->addShiftx(next_id(), shifted_wire, shift_amount, cell_output_map[std::make_pair(idx, 0)], a_sign);
       else
-        module->addShr(next_id(), shifted_wire, shift_amount, cell_output_map[std::make_pair(idx, 0)], false);
+        module->addShr(next_id(), shifted_wire, shift_amount, cell_output_map[std::make_pair(idx, 0)], a_sign);
       break;
     }
     case Equals_Op: {

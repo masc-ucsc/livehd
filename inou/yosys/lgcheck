@@ -179,6 +179,7 @@ echo "
 exit" > fm_script_${gold_top}.tcl
 
 #${FM_SHELL} -64bit -f fm_script_${gold_top}.tcl | grep "Verification SUCCEEDED"
+exit 1
 
 if [ $? -eq 0 ]; then
   echo "Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
