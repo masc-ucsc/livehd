@@ -452,10 +452,11 @@ static void look_for_cell_outputs(RTLIL::Module *module) {
     uint32_t blackbox_out = 0;
     for(const auto &conn : cell->connections()) {
       //first faster filter but doesn't always work
-      if(cell->input(conn.first))
+      if(cell->input(conn.first) || (sub_graph && sub_graph->is_graph_input(&(conn.first.c_str()[1]))))
         continue;
 
-      assert(cell->output(conn.first) || tcell || blackbox);
+      assert(cell->output(conn.first) || tcell || blackbox ||
+          (sub_graph && sub_graph->is_graph_output(&(conn.first.c_str()[1]))));
       if(blackbox) {
         assert(is_black_box_output(module, cell, conn.first));
         connect_string(g, &(conn.first.c_str()[1]), nid, LGRAPH_BBOP_ONAME(blackbox_out++));
@@ -1226,7 +1227,9 @@ struct Yosys2lg_Pass : public Pass {
         look_for_cell_outputs(module);
         LGraph *g = process_module(module);
 
+        std::cout << "rtp closing " << module->name.str() << std::endl;
         g->sync();
+        g->close();
       }
 
       wire2lpin.clear();
