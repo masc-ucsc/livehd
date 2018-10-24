@@ -33,6 +33,15 @@ cc_binary(
     visibility = ["//visibility:public"],
 )
 
+sh_test(
+    name = "lgshell_test",
+    srcs = ["tests/shell_test.sh"],
+    data = [
+        "//inou/yosys:liblgraph_yosys.so",
+        "//inou/yosys:verilog_tests",
+    ],
+)
+
 cc_binary(
     name = "uclient_test",
     srcs = ["uclient_test.cpp"],
