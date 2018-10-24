@@ -43,3 +43,8 @@ std::string Eprp_utils::get_exe_path() {
 
   return std::string(exePath,0,len);
 }
+
+bool Eprp_utils::ends_with(const std::string &s, const std::string &suffix) {
+  return s.rfind(suffix) == (s.size()-suffix.size());
+}
+

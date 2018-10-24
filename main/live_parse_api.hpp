@@ -7,9 +7,6 @@
 
 class Live_parse_api {
 protected:
-  static bool ends_with(const std::string &s, const std::string &suffix) {
-    return s.rfind(suffix) == (s.size()-suffix.size());
-  }
 
   static void tolg(Eprp_var &var) {
     const std::string files   = var.get("files");
@@ -37,10 +34,10 @@ protected:
         return;
       }
 
-      if (ends_with(f,".v") || ends_with(f,".sv")) {
+      if (Eprp_utils::ends_with(f,".v") || Eprp_utils::ends_with(f,".sv")) {
         Chunkify_verilog chunker(path);
         chunker.parse(f, memblock, sb.st_size);
-      }else if (ends_with(f,".prp")) {
+      }else if (Eprp_utils::ends_with(f,".prp")) {
         Main_api::error(fmt::format("pyrope chunkify NOT implemented for {}", f));
         close(fd);
         munmap(memblock, sb.st_size);

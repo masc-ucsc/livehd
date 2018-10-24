@@ -1,13 +1,10 @@
 
+#include "eprp_utils.hpp"
 #include "pass_dfg.hpp"
 #include "main_api.hpp"
 
 class Pass_dfg_api {
 protected:
-  static bool ends_with(std::string const & value, std::string const & ending) {
-    if (ending.size() > value.size()) return false;
-    return std::equal(ending.rbegin(), ending.rend(), value.rbegin());
-  }
 
   static void generate(Eprp_var &var) {
     Pass_dfg pass_dfg;
@@ -17,7 +14,7 @@ protected:
 
     std::vector<LGraph *> lgs;
     for(auto &g:var.lgs) {
-      if (ends_with(g->get_name(),std::string("_cfg"))) {
+      if (Eprp_utils::ends_with(g->get_name(),std::string("_cfg"))) {
         g = pass_dfg.regen(g);
       }
       lgs.push_back(g);
