@@ -222,14 +222,12 @@ void Inou_lef::lef_parsing(Tech_library *tlib, std::string &lef_file_name) {
 
 std::vector<LGraph *> Inou_lef::tolg() {
   std::vector<LGraph *> lgs;
-  if(opack.name != "") {
-    lgs.push_back(new LGraph(opack.path, opack.name, false));
-    lef_parsing(lgs[0]->get_tech_library(), opack.lef_file);
-    lgs[0]->sync();
-  } else {
-    console->error("please specify the graph name!\n");
-    exit(-4);
-  }
+  assert(opack.name != "");
+
+  lgs.push_back(LGraph::create(opack.path, opack.name));
+  lef_parsing(lgs[0]->get_tech_library(), opack.lef_file);
+  lgs[0]->sync();
+
   return lgs;
 }
 

@@ -167,7 +167,7 @@ std::vector<LGraph *> Inou_json::tolg() {
     return lgs;
   }
 
-  lgs.push_back(new LGraph(opack.path, opack.name, false)); // Do not clear
+  lgs.push_back(LGraph::create(opack.path, opack.name));
 
   // No need to sync because it is a reload. Already sync
 

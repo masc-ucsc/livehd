@@ -59,10 +59,10 @@ auto Diff_finder::go_down(const Graph_Node &boundary, bool output) {
   Port_ID  pid     = boundary.pid;
 
   std::string subgraph_name = current->get_library()->get_name(current->subgraph_id_get(idx));
-  LGraph *    child         = LGraph::find_lgraph(subgraph_name, current->get_path());
+  LGraph *    child         = LGraph::open(subgraph_name, current->get_path());
 
   if(!child) {
-    child = LGraph::find_lgraph(subgraph_name, original->get_path());
+    child = LGraph::open(subgraph_name, original->get_path());
   }
 
   assert(child);
@@ -459,7 +459,7 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
       fmt::print("creating graph for {}\n", name);
       if(name.substr(0, 6) == "lgraph")
         name = name.substr(7);
-      name2graph[original->get_name()] = new LGraph(out_lgdb, name, true);
+      name2graph[original->get_name()] = LGraph::create(out_lgdb, name);
     }
     LGraph *new_module = name2graph[original->get_name()];
 
@@ -545,7 +545,7 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
           std::string subgraph_name = new_module->get_subgraph_name(old2newidx[node.module][inp.get_inp_pin().get_nid()]);
           assert(name2graph.find(subgraph_name) != name2graph.end());
           LGraph * nsubgraph = name2graph[subgraph_name];
-          LGraph * osubgraph = LGraph::find_lgraph(subgraph_name, node.module->get_path());
+          LGraph * osubgraph = LGraph::open(subgraph_name, node.module->get_path());
           Index_ID inpnid    = osubgraph->get_graph_input_nid_from_pid(inp.get_inp_pin().get_pid());
           assert(inpnid);
 
@@ -561,7 +561,7 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
           std::string subgraph_name = new_module->get_subgraph_name(old2newidx[node.module][inp.get_out_pin().get_nid()]);
           assert(name2graph.find(subgraph_name) != name2graph.end());
           LGraph * nsubgraph = name2graph[subgraph_name];
-          LGraph * osubgraph = LGraph::find_lgraph(subgraph_name, node.module->get_path());
+          LGraph * osubgraph = LGraph::open(subgraph_name, node.module->get_path());
           Index_ID outnid    = osubgraph->get_graph_output_nid_from_pid(inp.get_out_pin().get_pid());
 
           assert(outnid);
@@ -608,7 +608,7 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
           std::string subgraph_name =
               new_module->get_subgraph_name(old2newidx[node.module][inp.get_inp_pin().get_nid()]);
           assert(name2graph.find(subgraph_name) != name2graph.end());
-          LGraph *osubgraph = LGraph::find_lgraph(subgraph_name, node.module->get_path());
+          LGraph *osubgraph = LGraph::open(subgraph_name, node.module->get_path());
           LGraph *nsubgraph = name2graph[subgraph_name];
 
           Index_ID subgraph_innid = osubgraph->get_graph_input_nid_from_pid(inp.get_inp_pin().get_pid());
@@ -684,7 +684,7 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
         std::string subgraph_name = new_module->get_library()->get_name(new_module->subgraph_id_get(old2newidx[node.module][node.idx]));
         assert(name2graph.find(subgraph_name) != name2graph.end());
         LGraph *nsubgraph = name2graph[subgraph_name];
-        LGraph *osubgraph = LGraph::find_lgraph(subgraph_name, node.module->get_path());
+        LGraph *osubgraph = LGraph::open(subgraph_name, node.module->get_path());
         if(!nsubgraph->is_graph_output(osubgraph->get_graph_output_name_from_pid(out.get_out_pin().get_pid()))) {
           continue;
         }
@@ -780,7 +780,7 @@ void Diff_finder::generate_delta(const std::string &modified_lgdb, const std::st
             Graph_Node bound(current, ridx, bit, instance, pid);
 
             assert(current->get_name().substr(7) != "lgraph_");
-            LGraph *current_original = LGraph::find_lgraph(current->get_name(), original->get_path());
+            LGraph *current_original = LGraph::open(current->get_name(), original->get_path());
             assert(current_original);
 
             if(is_invariant(bound)) {
@@ -816,7 +816,7 @@ void Diff_finder::generate_delta(const std::string &modified_lgdb, const std::st
       visited_boundaries.insert(bound);
 
       assert(bound.module->get_name().substr(7) != "lgraph_");
-      LGraph *current_original = LGraph::find_lgraph(bound.module->get_name(), original->get_path());
+      LGraph *current_original = LGraph::open(bound.module->get_name(), original->get_path());
       assert(current_original);
 
       Graph_Node orig(current_original, current_original->get_node_id(bound2net[bound]), bound.bit, bound.instance, bound.pid);

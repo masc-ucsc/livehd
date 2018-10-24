@@ -4,13 +4,13 @@
 
 class Meta_api {
 protected:
-  static void find(Eprp_var &var) {
+  static void open(Eprp_var &var) {
 
     const std::string path = var.get("path","lgdb");
     const std::string name = var.get("name");
     assert(!name.empty());
 
-    LGraph *lg = LGraph::find_lgraph(path,name);
+    LGraph *lg = LGraph::open(path,name);
 
     if (lg==0) {
       Main_api::warn(fmt::format("lgraph.find could not find {} lgraph in {} path", name, path));
@@ -19,13 +19,13 @@ protected:
     }
   }
 
-  static void open(Eprp_var &var) {
+  static void create(Eprp_var &var) {
 
     const std::string path = var.get("path","lgdb");
     const std::string name = var.get("name");
     assert(!name.empty());
 
-    LGraph *lg = LGraph::open_lgraph(path,name);
+    LGraph *lg = LGraph::create(path,name);
 
     if (lg==0) {
       Main_api::error(fmt::format("lgraph.open could not open {} lgraph in {} path", name, path));
@@ -60,14 +60,14 @@ protected:
   }
 public:
   static void setup(Eprp &eprp) {
-    Eprp_method m1("lgraph.find", "find an lgraph, do not create", &Meta_api::find);
+    Eprp_method m1("lgraph.open", "open an lgraph if it exists", &Meta_api::open);
     m1.add_label_optional("path","lgraph path");
     m1.add_label_required("name","lgraph name");
 
     eprp.register_method(m1);
 
     //---------------------
-    Eprp_method m2("lgraph.open", "open an lgraph, create if not found", &Meta_api::open);
+    Eprp_method m2("lgraph.create", "create a new lgraph", &Meta_api::create);
     m2.add_label_optional("path","lgraph path");
     m2.add_label_required("name","lgraph name");
 

@@ -65,7 +65,7 @@ LGraph *Pass_abc::regen(const LGraph *lg) {
   }
 
   find_cell_conn(lg);
-  LGraph *mapped = new LGraph(opack.path, opack.name + "_mapped", true);
+  LGraph *mapped = LGraph::create(opack.path, opack.name + "_mapped");
   from_abc(mapped, lg, to_abc(lg));
   mapped->sync();
   if (opack.verbose)

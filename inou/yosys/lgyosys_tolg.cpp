@@ -423,7 +423,7 @@ static void look_for_cell_outputs(RTLIL::Module *module) {
     std::string mod_name = &(cell->type.c_str()[1]);
 
     if(cell->type.c_str()[0] == '\\' || cell->type.str().substr(0, 8) == "$paramod")
-      sub_graph = LGraph::find_lgraph(g->get_path(), mod_name);
+      sub_graph = LGraph::open(g->get_path(), mod_name);
 
     if(!sub_graph && tlib->include(cell->type.str())) {
       tcell = tlib->get_const_cell(tlib->get_cell_id(cell->type.str()));
@@ -868,7 +868,7 @@ static LGraph *process_module(RTLIL::Module *module) {
         size = cell->parameters["\\Y_WIDTH"].as_int();
       op = Invalid_Op;
 
-    } else if((sub_graph = LGraph::find_lgraph(g->get_path(), &cell->type.c_str()[1]))) {
+    } else if((sub_graph = LGraph::open(g->get_path(), &cell->type.c_str()[1]))) {
       // external graph reference
       const char *mod_name = &cell->type.c_str()[1];
       log("module name %s original was  %s\n", mod_name, cell->type.c_str());
@@ -1202,7 +1202,7 @@ struct Yosys2lg_Pass : public Pass {
       std::string    name   = &module->name.c_str()[1];
       assert(module2graph.find(name) == module2graph.end());
 
-      auto *g            = new LGraph(path, name, true); // Clear in yosys. Regen
+      auto *g            = LGraph::create(path, name);
       module2graph[name] = g;
       log("yosys2lg look_for_module_outputs pass for module %s:\n", module->name.c_str());
       look_for_module_outputs(module, path);

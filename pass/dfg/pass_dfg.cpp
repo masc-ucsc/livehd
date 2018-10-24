@@ -15,19 +15,9 @@ unsigned int Pass_dfg::temp_counter = 0;
 
 Pass_dfg::Pass_dfg(const std::string &key, const std::string &value) : Pass() { opack.set(key,value); }
 
-LGraph * Pass_dfg::generate_dfg(const LGraph * &cfg) {
-  //assert(!opack.file.empty());
-  regen(cfg);
-  LGraph *dfg = new LGraph(opack.path, opack.name, false);
-  return dfg;
-  //const LGraph *cfg = new LGraph(opack.path, opack.file, false);
-  //regen(cfg);
-  //delete cfg;
-}
-
 LGraph* Pass_dfg::regen(const LGraph *cfg) {
   assert(!opack.name.empty());
-  LGraph *dfg = new LGraph(opack.path, opack.name, false);
+  LGraph *dfg = LGraph::create(opack.path, opack.name);
 
   cfg_2_dfg(dfg, cfg);
   dfg->sync();
@@ -50,7 +40,7 @@ void Pass_dfg::trans(LGraph *dfg) {
   for(auto idx : dfg->fast()) {
     if(dfg->node_type_get(idx).op == DfgPendingGraph_Op){
       const std::string wirename = dfg->get_node_wirename(idx);
-      sub_graph = LGraph::find_lgraph(dfg->get_path(), wirename);
+      sub_graph = LGraph::open(dfg->get_path(), wirename);
       assert(sub_graph);
 
       dfg->node_subgraph_set(idx, (uint32_t)sub_graph->lg_id());
@@ -205,7 +195,7 @@ void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_t
   LGraph* sub_graph = nullptr;
   Index_ID subg_root_nid = aux_tree->get_alias(oprds[0]);
 
-  if((sub_graph = LGraph::find_lgraph(cfg->get_path(), ((std::string)(dfg->get_node_wirename(subg_root_nid)))))){
+  if((sub_graph = LGraph::open(cfg->get_path(), ((std::string)(dfg->get_node_wirename(subg_root_nid)))))){
     dfg->node_subgraph_set(subg_root_nid, (uint32_t)sub_graph->lg_id());
     fmt::print("set subgraph on nid:{}, sub_graph name:{}, sub_graph_id:{}\n", subg_root_nid, dfg->get_node_wirename(subg_root_nid), sub_graph->lg_id());
   }else{
