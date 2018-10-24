@@ -49,9 +49,6 @@ void LGraph_Base::clear() {
 
 void LGraph_Base::sync() {
 
-  if (locked)
-    library->update(name);
-
   library->sync();
   tlibrary->sync();
 

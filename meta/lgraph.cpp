@@ -21,7 +21,6 @@ LGraph::LGraph(const std::string &path, const std::string &_name, bool _clear)
     , LGraph_InstanceNames(path, _name)
     , LGraph_Node_Place(path, _name)
 {
-
   lgraph_id = library->register_lgraph(name, this);
 
   if(_clear) {
@@ -41,8 +40,11 @@ LGraph *LGraph::create(const std::string &path, const std::string &name) {
   LGraph *lg = Graph_library::find_lgraph(path,name);
   if (lg) {
     assert(Graph_library::instance(path));
-    Graph_library::instance(path)->register_lgraph(name, lg);
-    return lg;
+    // Overwriting old lgraph. Delete old pointer (but better be sure that nobody has it)
+    lg->close();
+    bool done = Graph_library::instance(path)->expunge_lgraph(name, lg);
+    if (done)
+      delete lg;
   }
 
   return new LGraph(path, name, false);
@@ -63,8 +65,12 @@ LGraph *LGraph::open(const std::string &path, const std::string &name) {
 }
 
 void LGraph::close() {
-	sync();
 	library->unregister_lgraph(name, lgraph_id, this);
+
+  if (locked)
+    library->update(lgraph_id);
+
+	sync();
 }
 
 void LGraph::reload() {
