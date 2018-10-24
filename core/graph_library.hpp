@@ -119,7 +119,7 @@ public:
   }
 
   void update(uint32_t lgid) {
-    assert(attribute.size() < lgid);
+    assert(lgid < attribute.size());
 
     if (attribute[lgid].version == max_version)
       return;
