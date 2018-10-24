@@ -5,11 +5,11 @@
 Index_ID Pass_dfg::resolve_constant(LGraph *g, Aux_tree *aux_tree, const std::string& str)
 {
   //arguments -> local variable
-  bool is_signed;
-  bool is_in32b;
-  bool is_explicit_signed;
-  bool has_bool_dc;
-  bool is_pure_dc;
+  //bool is_signed;
+  //bool is_in32b;
+  //bool is_explicit_signed;
+  //bool has_bool_dc;
+  //bool is_pure_dc;
   uint32_t val;
   uint32_t explicit_bits;
   size_t bit_width;
@@ -26,15 +26,15 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g, Aux_tree *aux_tree, const std::st
   if(s_pos != std::string::npos){
     token1st = str_in.substr(0,s_pos);
     token2nd = str_in.substr(s_pos+1);
-    is_signed = true;
-    is_explicit_signed = true;
+    //is_signed = true;
+    //is_explicit_signed = true;
   }
   else{
     u_pos = str_in.find('u');//O(n)
     if(u_pos != std::string::npos){
       token1st = str_in.substr(0,u_pos);
       token2nd = str_in.substr(u_pos+1);
-      is_explicit_signed = true;
+      //is_explicit_signed = true;
     }
     else
       token1st = str_in;
@@ -61,10 +61,10 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g, Aux_tree *aux_tree, const std::st
       h2b_token1st += hex_char_to_bin(token1st[i]);
 
     bit_width = explicit_bits ? explicit_bits : h2b_token1st.size();
-    is_in32b = bit_width > 32 ? false : true;
+    //is_in32b = bit_width > 32 ? false : true;
     size_t dc_pos = h2b_token1st.find('?'); //dc = don't care
     if(dc_pos != std::string::npos){
-      has_bool_dc = true;
+      //has_bool_dc = true;
       return process_bin_token_with_dc(g, h2b_token1st);
     }
     else
@@ -76,11 +76,11 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g, Aux_tree *aux_tree, const std::st
     idx = token1st.find_first_not_of('0');
     token1st = token1st.substr(idx);//exclude leading 0s
     bit_width = explicit_bits ? explicit_bits : token1st.size();
-    is_in32b = bit_width > 32 ? false : true;
+    //is_in32b = bit_width > 32 ? false : true;
 
     size_t dc_pos = token1st.find('?'); //dc = don't care
     if(dc_pos != std::string::npos){
-      has_bool_dc = true;
+      //has_bool_dc = true;
       return process_bin_token_with_dc(g, token1st);
     }
     else
@@ -89,7 +89,7 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g, Aux_tree *aux_tree, const std::st
   }
   else{//decimal
     if(token1st[2] == '?') {//case of pure question mark
-      is_pure_dc = true;
+      //is_pure_dc = true;
       return create_dontcare_node(g,0);
     }
 
@@ -98,8 +98,8 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g, Aux_tree *aux_tree, const std::st
     std::string s_2scmp;
 
     if(token1st[0] == '-'){
-      is_explicit_signed = true;
-      is_signed = true;
+      //is_explicit_signed = true;
+      //is_signed = true;
       //token1st = token1st[0] + token1st.substr(3);//exclude middle "0d"
       token1st = token1st.substr(3);//exclude middle "-0d"
 
@@ -174,7 +174,7 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g, Aux_tree *aux_tree, const std::st
     }
 
     bit_width = explicit_bits ? explicit_bits : d2b_token1st.size();
-    is_in32b = bit_width > 32 ? false : true;
+    //is_in32b = bit_width > 32 ? false : true;
 
     return process_bin_token(g, d2b_token1st, (uint16_t)bit_width, val);
 
