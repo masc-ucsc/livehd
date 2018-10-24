@@ -790,7 +790,11 @@ static LGraph *process_module(RTLIL::Module *module) {
       op = ShiftRight_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      connect_constant(g, 1, 1, onid, 2);
+
+      if(cell->parameters["\\A_SIGNED"].as_bool())
+        connect_constant(g, 3, 1, onid, 2);
+      else
+        connect_constant(g, 1, 1, onid, 2);
 
     } else if(std::strncmp(cell->type.c_str(), "$shl", 4) == 0 || std::strncmp(cell->type.c_str(), "$sshl", 5) == 0) {
       op = ShiftLeft_Op;
