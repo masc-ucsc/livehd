@@ -32,11 +32,24 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-echo "inou.yosys.tolg files:lgdb/parse/\"chunk_*\" |> inou.yosys.fromlg odir:boom_test" | ${LGSHELL}
+for i in AsyncResetReg; do
+  echo "inou.yosys.tolg files:${BENCH_DIR}${i}.v |> inou.yosys.fromlg odir:boom_test" | ${LGSHELL}
+  ${LGCHECK} --reference=${BENCH_DIR}/${i}.v --implementation=boom_test/${i}.v --top=$i 2> /dev/null > /dev/null
+
+  if [ $? -ne 0 ]; then
+    echo "ERROR: Module $i does not match"
+    #exit 1
+  else
+    echo "SUCCESS: Module $i matches"
+  fi
+done
+
+echo "inou.yosys.tolg files:\"lgdb/parse/chunk_\*\" |> inou.yosys.fromlg odir:boom_test" | ${LGSHELL}
 if [ $? -ne 0 ]; then
   echo "Failed to read/write verilog for module $i"
   exit 1
 fi
+
 
 filename="chunk_`echo ${BOOM_FILE} | tr '/' '.'`"
 for i in boom_test/*; do
