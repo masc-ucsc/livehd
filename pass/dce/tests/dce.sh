@@ -18,8 +18,9 @@ if [ ! -f ${LGSHELL} ]; then
   fi
 fi
 
+TEST_OUT=test_dce
 pwd
-mkdir -p dce
+mkdir -p ${TEST_OUT}
 for input in ${inputs[@]}
 do
   base=${input%.*}
@@ -40,7 +41,7 @@ do
     echo "WARN: json generation terminated with and error"
   fi
 
-  echo "lgraph.open name:common_sub |> pass.dce |> inou.yosys.fromlg odir: dce" | ${LGSHELL}
+  echo "lgraph.open name:common_sub |> pass.dce |> inou.yosys.fromlg odir:${TEST_OUT}" | ${LGSHELL}
   if [ $? -eq 0 ]; then
     echo "Successfully ran dce on $input"
   else
@@ -48,7 +49,7 @@ do
     exit 1
   fi
 
-  ${LGCHECK} --implementation=dce/${base}.v --reference=${TEST_DIR}/${base}.v
+  ${LGCHECK} --implementation=${TEST_OUT}/${base}.v --reference=${TEST_DIR}/${base}.v
   if [ $? -eq 0 ]; then
     echo "Successfully matched generated verilog with original verilog (${input})"
   else

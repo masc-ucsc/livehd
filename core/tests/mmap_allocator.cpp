@@ -26,7 +26,7 @@ int vector_mmap() {
   assert(foo.capacity() == sz);
   assert(foo.size() == sz);
 
-  for(int i = 0; i < sz; i++) {
+  for(size_t i = 0; i < sz; i++) {
     char a = i%256 < '!' ? '!' : i%256 > '~' ? '~' : i%256;
     foo[i] = a;
   }
@@ -47,7 +47,7 @@ int simply_mmap() {
   auto base_p = reinterpret_cast<uint64_t> (base) >> (MMAPA_ALIGN_BITS) & MMAPA_ALIGN_MASK;
   assert(foo_p == base_p || base_p + 1 == foo_p);
 
-  for(int i = 0; i < sz; i++) {
+  for(size_t i = 0; i < sz; i++) {
     char a = i%256 < '!' ? '!' : i%256 > '~' ? '~' : i%256;
     foo[i] = a;
   }

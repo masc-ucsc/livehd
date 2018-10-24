@@ -177,7 +177,6 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g, Aux_tree *aux_tree, const std::st
     //is_in32b = bit_width > 32 ? false : true;
 
     return process_bin_token(g, d2b_token1st, (uint16_t)bit_width, val);
-
   }
 }
 

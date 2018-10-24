@@ -36,7 +36,7 @@ int resolve_bit(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID pin, 
     uint32_t offset = 0;
     int      last   = -1;
     for(auto &ps : port_size) {
-      assert(last + 1 == ps.first); // need to traverse in order
+      assert(last + 1 == (int)ps.first); // need to traverse in order
       last = ps.first;
       if(offset + ps.second > current_bit) {
         if(ps.first != pin)

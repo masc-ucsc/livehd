@@ -1,7 +1,7 @@
 // See LICENSE.SiFive for license details.
 //VCS coverage exclude_file
 
-/*import "DPI-C" function int debug_tick
+import "DPI-C" function int debug_tick
 (
   output bit     debug_req_valid,
   input  bit     debug_req_ready,
@@ -13,7 +13,7 @@
   output bit        debug_resp_ready,
   input  int        debug_resp_bits_resp,
   input  int        debug_resp_bits_data
-);*/
+);
 
 module SimDTM(
   input clk,
@@ -35,24 +35,24 @@ module SimDTM(
 
   bit r_reset;
 
-  wire #0.1 __debug_req_ready = debug_req_ready;
-  wire #0.1 __debug_resp_valid = debug_resp_valid;
-  wire [31:0] #0.1 __debug_resp_bits_resp = {30'b0, debug_resp_bits_resp};
-  wire [31:0] #0.1 __debug_resp_bits_data = debug_resp_bits_data;
+  wire __debug_req_ready = debug_req_ready;
+  wire __debug_resp_valid = debug_resp_valid;
+  wire [31:0] __debug_resp_bits_resp = {30'b0, debug_resp_bits_resp};
+  wire [31:0] __debug_resp_bits_data = debug_resp_bits_data;
 
   bit __debug_req_valid;
-  int __debug_req_bits_addr;
-  int __debug_req_bits_op;
-  int __debug_req_bits_data;
+  wire [31:0] __debug_req_bits_addr;
+  wire [31:0] __debug_req_bits_op;
+  wire [31:0] __debug_req_bits_data;
   bit __debug_resp_ready;
-  int __exit;
+  wire [31:0] __exit;
 
-  assign #0.1 debug_req_valid = __debug_req_valid;
-  assign #0.1 debug_req_bits_addr = __debug_req_bits_addr[6:0];
-  assign #0.1 debug_req_bits_op = __debug_req_bits_op[1:0];
-  assign #0.1 debug_req_bits_data = __debug_req_bits_data[31:0];
-  assign #0.1 debug_resp_ready = __debug_resp_ready;
-  assign #0.1 exit = __exit;
+  assign debug_req_valid = __debug_req_valid;
+  assign debug_req_bits_addr = __debug_req_bits_addr[6:0];
+  assign debug_req_bits_op = __debug_req_bits_op[1:0];
+  assign debug_req_bits_data = __debug_req_bits_data[31:0];
+  assign debug_resp_ready = __debug_resp_ready;
+  assign exit = __exit;
 
   always @(posedge clk)
   begin
