@@ -27,23 +27,18 @@ protected:
 
   Index_ID create_node_int() final;
 
+  //explicit LGraph(const std::string &path);
+  explicit LGraph(const std::string &path, const std::string &name, bool clear);
+
 public:
   LGraph() = delete;
   LGraph(const LGraph&) = delete;
 
-  //explicit LGraph(const std::string &path);
-  explicit LGraph(const std::string &path, const std::string &name, bool clear);
-
   virtual ~LGraph();
 
-  // NOTE: open "registers" the lgraph. Remember to close to allow garbage collection
-  static LGraph *open_lgraph(const std::string &path, const std::string &name);
-  void close_lgraph() {
-    library->unregister_lgraph(name, lgraph_id, this);
-  };
-
-  static LGraph *find_lgraph(const std::string &path, const std::string &name);
-
+  static LGraph *create(const std::string &path, const std::string &name);
+  static LGraph *open(const std::string &path, const std::string &name);
+  void close();
 
   int lg_id() const { return lgraph_id; }
 

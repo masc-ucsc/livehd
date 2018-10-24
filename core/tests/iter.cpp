@@ -12,7 +12,7 @@ void generate_graphs(int n) {
 
   for(int i = 0; i < n; i++) {
     std::string gname = "test_" + std::to_string(i);
-    LGraph *g = new LGraph("core_test_lgdb", gname, true);
+    LGraph *g = LGraph::create("core_test_lgdb", gname);
     std::vector<Index_ID> nodes;
 
     int inps = 10+rand_r(&rseed)%100;
@@ -65,15 +65,16 @@ void generate_graphs(int n) {
 
     }
 
-    g->sync();
-
+    g->close();
   }
 }
 
 bool fwd(int n) {
   for(int i = 0; i < n; i++) {
     std::string gname = "test_" + std::to_string(i);
-    LGraph *g = new LGraph("core_test_lgdb", gname, false);
+    LGraph *g = LGraph::open("core_test_lgdb", gname);
+    if (g==0)
+      return false;
 
     std::set<Index_ID> visited;
     for(auto &idx : g->forward()) {
@@ -88,14 +89,19 @@ bool fwd(int n) {
 
       visited.insert(idx);
     }
+
+    g->close();
   }
+
   return true;
 }
 
 bool bwd(int n){
   for(int i = 0; i < n; i++) {
     std::string gname = "test_" + std::to_string(i);
-    LGraph *g = new LGraph("core_test_lgdb", gname, false);
+    LGraph *g = LGraph::open("core_test_lgdb", gname);
+    if (g==0)
+      return false;
 
     std::set<Index_ID> visited;
     for(auto &idx : g->backward()) {
@@ -110,13 +116,15 @@ bool bwd(int n){
 
       visited.insert(idx);
     }
+
+    g->close();
   }
   return true;
 }
 
 bool simple() {
   std::string gname = "simple_iter";
-  LGraph *g = new LGraph("core_test_lgdb", gname, true);
+  LGraph *g = LGraph::create("core_test_lgdb", gname);
 
   g->add_graph_input("i0", 0, 1);  // 1
   g->add_graph_input("i1", 0, 1);  // 2
@@ -204,6 +212,8 @@ bool simple() {
   }
 
   printf("\n\n%s\n\n%s\n\n",fwd.c_str(),bwd.c_str());
+
+  g->close();
 
   return true;
 }

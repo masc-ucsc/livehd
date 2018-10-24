@@ -14,9 +14,12 @@ public:
   };
 
   // Transform enhance/changes the lgraph in-situ
+  // FIXME: maybe call it "transform"
   virtual void    trans(LGraph *orig) = 0;
 
   // regenerate, creates a new lgraph db
+  // FIXME: it should get a set of lgraphs and return a new set of lgraphs
+  // FIXME: the names are not clear. Maybe call "replace"
   virtual LGraph *regen(const LGraph *orig) = 0;
 
   // Set options for the pass

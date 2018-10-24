@@ -12,25 +12,6 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
-#if 0
-uint32_t LGraph::lgraph_counter = 0; // FIXME: This does not guarantee unique name
-// FIXME: do we even allow unnamed graphs????
-
-LGraph::LGraph(const std::string &path)
-    : Lgraph_base_core(path, "lg" + std::to_string(lgraph_counter))
-    , LGraph_Base(path, "lg" + std::to_string(lgraph_counter))
-    , LGraph_Node_Delay(path, "lg" + std::to_string(lgraph_counter))
-    , LGraph_Node_Src_Loc(path, "lg" + std::to_string(lgraph_counter))
-    , LGraph_WireNames(path, "lg" + std::to_string(lgraph_counter))
-    , LGraph_InstanceNames(path, "lg" + std::to_string(lgraph_counter))
-    , LGraph_Node_Place(path, "lg" + std::to_string(lgraph_counter))
-{
-  lgraph_counter++; // Only for unnamed graphs
-
-  clear();
-}
-#endif
-
 LGraph::LGraph(const std::string &path, const std::string &_name, bool _clear)
     : Lgraph_base_core(path, _name)
     , LGraph_Base(path, _name)
@@ -56,8 +37,7 @@ LGraph::~LGraph() {
   library->unregister_lgraph(name, lgraph_id, this);
 }
 
-// FIXME: rename to ::create
-LGraph *LGraph::open_lgraph(const std::string &path, const std::string &name) {
+LGraph *LGraph::create(const std::string &path, const std::string &name) {
   LGraph *lg = Graph_library::find_lgraph(path,name);
   if (lg) {
     assert(Graph_library::instance(path));
@@ -68,8 +48,7 @@ LGraph *LGraph::open_lgraph(const std::string &path, const std::string &name) {
   return new LGraph(path, name, false);
 }
 
-// FIXME: rename to ::open
-LGraph *LGraph::find_lgraph(const std::string &path, const std::string &name) {
+LGraph *LGraph::open(const std::string &path, const std::string &name) {
   LGraph *lg = Graph_library::find_lgraph(path,name);
   if (lg) {
     assert(Graph_library::instance(path));
@@ -81,6 +60,11 @@ LGraph *LGraph::find_lgraph(const std::string &path, const std::string &name) {
     return 0;
 
   return new LGraph(path, name, false);
+}
+
+void LGraph::close() {
+	sync();
+	library->unregister_lgraph(name, lgraph_id, this);
 }
 
 void LGraph::reload() {

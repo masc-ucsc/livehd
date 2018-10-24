@@ -296,11 +296,12 @@ void Pass_abc::gen_subgraph_from_abc(LGraph *new_graph, const LGraph *old_graph,
   for(const auto &idx : graph_info->subgraph_id) {
 
     std::string subgraph_name(old_graph->get_library()->get_name(old_graph->subgraph_id_get(idx)));
-    LGraph *    sub_graph        = LGraph::find_lgraph(old_graph->get_path(), subgraph_name);
     Index_ID    new_subgraph_idx = new_graph->create_node().get_nid();
 	graph_info->subgraph_remap[idx]          = new_subgraph_idx;
     new_graph->node_type_set(new_subgraph_idx, SubGraph_Op);
     new_graph->set_node_instance_name(new_subgraph_idx, old_graph->get_node_instancename(idx));
+
+    LGraph *    sub_graph        = LGraph::open(old_graph->get_path(), subgraph_name);
     new_graph->node_subgraph_set(new_subgraph_idx, sub_graph->lg_id());
   }
   Abc_Obj_t *pTerm = nullptr, *pNet = nullptr;

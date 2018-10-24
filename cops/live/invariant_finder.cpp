@@ -34,7 +34,8 @@ void Invariant_finder::get_topology() {
       if(current->node_type_get(idx).op != SubGraph_Op)
         continue;
 
-      LGraph *subgraph = LGraph::find_lgraph(current->get_subgraph_name(idx), current->get_path());
+      LGraph *subgraph = LGraph::open(current->get_subgraph_name(idx), current->get_path());
+      assert(subgraph);
 
       boundaries.hierarchy_tree[Invariant_boundaries::get_graphID(subgraph)].insert(Invariant_boundaries::get_graphID(current));
 

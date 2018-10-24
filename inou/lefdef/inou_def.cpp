@@ -40,7 +40,7 @@ void Inou_def::set_def_info(Def_info &dinfo_in) {
 std::vector<LGraph *> Inou_def::generate() {
   std::vector<LGraph *> lgs;
   //clear since loading from def
-  auto *                g = new LGraph(opack.lgdb_path, dinfo.mod_name, true);
+  auto *                g = LGraph::create(opack.lgdb_path, dinfo.mod_name);
 
   const Tech_library *tlib            = g->get_tlibrary();
   const int           cell_types_size = tlib->get_cell_types_size();
