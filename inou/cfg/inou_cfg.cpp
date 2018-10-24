@@ -48,7 +48,7 @@ vector<LGraph *> Inou_cfg::tolg() {
 
   vector<LGraph *> lgs;
 
-  lgs.push_back(LGraph::create(opack.path, opack.name + "_cfg"));
+  lgs.push_back(LGraph::create(opack.path, opack.name));
 
   cfg_2_lgraph(&memblock, lgs);
 
