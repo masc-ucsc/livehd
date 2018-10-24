@@ -575,8 +575,7 @@ bool Inou_pyrope::to_subgraph(Out_string &w, Out_string &out, const LGraph *g, I
   //FIXME: const std::string subgraph_name = g->get_library()->get_name(g->subgraph_id_get(idx));
   const std::string subgraph_name = "inner";
 
-  //FIXME: lgs.push_back(new LGraph(opack.lgdb, subgraph_name, false));
-  lgs.push_back(new LGraph("lgdb", subgraph_name, false));
+  lgs.push_back(LGraph::create("lgdb", subgraph_name));
 
   const char **subgraph_input_names;
   const char **subgraph_output_names;

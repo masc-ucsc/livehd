@@ -36,7 +36,7 @@ do
     exit 1
   fi
 
-  echo "lgraph.find path:lgdb name:${base} |> pass.abc blif_file:${base}_map.blif" | ${LGSHELL}
+  echo "lgraph.open path:lgdb name:${base} |> pass.abc blif_file:${base}_map.blif" | ${LGSHELL}
 
   if [ ! $? -eq 0 ]; then
     echo "lg2abc failed ${base}"

@@ -4,7 +4,7 @@
 #include "lgedgeiter.hpp"
 
 bool test0() {
-  LGraph* g = new LGraph("core_test_lgdb","test0", true);
+  LGraph* g = LGraph::create("core_test_lgdb","test0");
 
   Index_ID idx1 = g->create_node().get_nid();
   g->create_node().get_nid();
@@ -16,11 +16,13 @@ bool test0() {
     (void) out; //just to silence the warning
   }
 
+  g->close();
+
   return true;
 }
 
 bool test1() {
-  LGraph* g = new LGraph("core_test_lgdb","test", true);
+  LGraph* g = LGraph::create("core_test_lgdb","test");
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
@@ -39,7 +41,6 @@ bool test1() {
     assert(out.get_inp_pin().is_input() == true);
   }
 
-
   for(auto & inp : g->inp_edges(idx2)) {
     assert(inp.get_inp_pin().get_nid() == idx2);
     assert(inp.get_out_pin().get_nid() == idx1);
@@ -51,11 +52,13 @@ bool test1() {
     assert(inp.get_inp_pin().is_input() == true);
   }
 
+  g->close();
+
   return true;
 }
 
 bool test20() {
-  LGraph* g = new LGraph("core_test_lgdb","test20", true);
+  LGraph* g = LGraph::create("core_test_lgdb","test20");
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
@@ -77,13 +80,15 @@ bool test20() {
     assert(false);
     (void) out; //just to silence the warning
   }
+
+  g->close();
 
   return true;
 }
 
 bool test21() {
 
-  LGraph* g = new LGraph("core_test_lgdb","test21", true);
+  LGraph* g = LGraph::create("core_test_lgdb","test21");
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
@@ -106,12 +111,14 @@ bool test21() {
     (void) out; //just to silence the warning
   }
 
+  g->close();
+
   return true;
 }
 
 bool test2() {
 
-  LGraph* g = new LGraph("core_test_lgdb","test2", true);
+  LGraph* g = LGraph::create("core_test_lgdb","test2");
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
@@ -134,12 +141,14 @@ bool test2() {
     (void) out; //just to silence the warning
   }
 
+  g->close();
+
   return true;
 }
 
 bool test22() {
 
-  LGraph* g = new LGraph("core_test_lgdb","test22", true);
+  LGraph* g = LGraph::create("core_test_lgdb","test22");
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
@@ -161,6 +170,8 @@ bool test22() {
     assert(false);
     (void) out; //just to silence the warning
   }
+
+  g->close();
 
   return true;
 }
@@ -168,7 +179,7 @@ bool test22() {
 
 bool test3() {
 
-  LGraph* g = new LGraph("core_test_lgdb","test3", true);
+  LGraph* g = LGraph::create("core_test_lgdb","test3");
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
@@ -196,12 +207,14 @@ bool test3() {
     assert(nid != idx2);
   }
 
+  g->close();
+
   return true;
 }
 
 bool test4() {
 
-  LGraph* g = new LGraph("core_test_lgdb","test4", true);
+  LGraph* g = LGraph::create("core_test_lgdb","test4");
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
@@ -214,6 +227,8 @@ bool test4() {
   for(auto nid : g->fast()) {
     assert(nid != idx2);
   }
+
+  g->close();
 
   return true;
 }

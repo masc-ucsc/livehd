@@ -322,7 +322,7 @@ int main(int argc, char **argv) {
   // the path to the history file
   std::string history_file;
 
-  if(history){
+  if(history) {
     history_file = std::string(env_home);
     history_file.append("/.config/lgraph/history.txt");
 

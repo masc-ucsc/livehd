@@ -9,10 +9,10 @@ std::unordered_map<std::string, Graph_library *> Graph_library::global_instances
 
 std::map<std::string, std::map<std::string, LGraph *>> Graph_library::global_name2lgraph;
 
-LGraph *Graph_library::get_graph(int id) const {
-  assert(id2name.size() > (size_t)id);
+LGraph *Graph_library::get_graph(uint32_t id) const {
+  assert(attribute.size() > (size_t)id);
 
-  const std::string &name = id2name[id];
+  const std::string &name = attribute[id].name;
 
   return find_lgraph(path, name);
 }
@@ -39,7 +39,8 @@ void Graph_library::reload() {
 
   graph_list.open(path + "/" + library_file);
 
-  id2name.push_back(""); // reserved for 0
+  name2id.clear();
+  attribute.resize(1); // 0 is not a valid ID
 
   if(!graph_list.is_open()) {
     DIR *dir = opendir(path.c_str());
@@ -64,7 +65,7 @@ void Graph_library::reload() {
 
   uint32_t n_graphs = 0;
   graph_list >> n_graphs;
-  id2name.resize(n_graphs+1);
+  attribute.resize(n_graphs+1);
 
   for(size_t idx = 0; idx < n_graphs; ++idx) {
     std::string name;
@@ -76,12 +77,14 @@ void Graph_library::reload() {
     if (graph_version>=max_version)
       max_version = graph_version;
 
+    name2id[name] = graph_id;
+
     // this is only true in case where we skip graph ids
-    if(id2name.size() <= graph_id)
-      id2name.resize(graph_id + 1);
-    id2name[graph_id] = name;
-    attribute[name].id  = graph_id;
-    attribute[name].version  = graph_version;
+    if(attribute.size() <= graph_id)
+      attribute.resize(graph_id + 1);
+
+    attribute[graph_id].name     = name;
+    attribute[graph_id].version  = graph_version;
   }
 
   graph_list.close();
@@ -103,8 +106,10 @@ void Graph_library::clean_library() {
 
   graph_list.open(path + "/" + library_file);
   graph_list << attribute.size() << std::endl;
+  uint32_t id=0;
   for(const auto &it : attribute) {
-    graph_list << it.first << " " << it.second.id << " " << it.second.version << std::endl;
+    graph_list << it.name << " " << id << " " << it.version << std::endl;
+    id++;
   }
 
   graph_list.close();

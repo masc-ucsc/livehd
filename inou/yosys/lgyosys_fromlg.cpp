@@ -72,7 +72,7 @@ struct LG2Yosys_Pass : public Pass {
 
     std::vector<const LGraph *> lgs;
     if(single_graph_mode) {
-      const LGraph *lg = LGraph::open_lgraph(path,name);
+      const LGraph *lg = LGraph::create(path,name);
       lgs.push_back(lg);
       if(!hierarchy) {
         log("converting graph %s in path %s\n.", name.c_str(), path.c_str());
