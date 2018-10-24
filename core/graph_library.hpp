@@ -25,16 +25,27 @@ class LGraph;
 
 class Graph_library {
 protected:
-  int   max_version;
+  uint32_t   max_version;
   const std::string          path;
   const std::string          library_file;
   struct Graph_attributes {
-    int id;
+    std::string name; // NOTE: No const as names can change (reload)
     int version; // In which sequence order were the graphs last modified
+    int nopen;
+    Graph_attributes() {
+      clear();
+    }
+    void clear() {
+      name = "INVALID";
+      nopen = 0;
+      version = 0;
+    }
   };
-  std::vector<std::string>   id2name;
+  std::map<std::string, uint32_t>   name2id;
+  std::vector<uint32_t>        recycled_id;
 
-  typedef std::map<std::string, Graph_attributes> Attribute_type;
+  // WARNING: Not from name (id) because names can happen many times (multiple create)
+  typedef std::vector<Graph_attributes> Attribute_type;
   Attribute_type attribute;
   bool                       graph_library_clean;
 
@@ -53,77 +64,80 @@ protected:
   static std::unordered_map<std::string, Graph_library *> global_instances;
   static std::map<std::string, std::map<std::string, LGraph *>> global_name2lgraph;
 
+  uint32_t reset_id(const std::string &name) {
+    const auto &it = name2id.find(name);
+    if(it != name2id.end()) {
+      graph_library_clean = false;
+      attribute[it->second].version = ++max_version;
+      return it->second;
+    }
+    return add_name(name);
+  }
 public:
   static LGraph *find_lgraph(const std::string &path, const std::string &name);
 
-  int add_name(const std::string &name) {
-    assert(attribute.find(name) == attribute.end());
+  uint32_t add_name(const std::string &name) {
 
-    int id = id2name.size();
+    uint32_t id = attribute.size();
+    if (!recycled_id.empty()) {
+      assert(id>recycled_id.back());
+      id = recycled_id.back();
+      recycled_id.pop_back();
+    }else{
+      attribute.resize(id+1);
+    }
 
     graph_library_clean = false;
-    attribute[name].id  = id;
-    attribute[name].version  = ++max_version;
-    id2name.push_back(name);
+    attribute[id].name  = name;
+    attribute[id].version  = ++max_version;
+    attribute[id].nopen  = 0;
 
-    assert(id2name[id] == name);
+    assert(name2id.find(name) == name2id.end());
+    name2id[name] = id;
 
     return id;
   }
 
-  const std::string &get_name(int id) const {
-    assert(id > 0); // 0 is invalid id
-    assert(id2name.size() > (size_t) id);
-    return id2name[id];
+  const std::string &get_name(uint32_t lgid) const {
+    assert(lgid > 0); // 0 is invalid lgid
+    assert(attribute.size() > (size_t) lgid);
+    return attribute[lgid].name;
   }
 
-  LGraph *get_graph(int id) const;
+  LGraph *get_graph(uint32_t lgid) const;
 
   int lgraph_count() const {
-    return id2name.size();
+    return attribute.size();
   }
 
   uint32_t get_id(const std::string &name) const {
-    const auto &it = attribute.find(name);
-    if(it != attribute.end()) {
-      return it->second.id;
+    const auto &it = name2id.find(name);
+    if(it != name2id.end()) {
+      return it->second;
     }
     return 0; // -1 is invalid ID
   }
 
-  void update(const std::string &name) {
-    const auto &it = attribute.find(name);
-    assert(it != attribute.end());
-    if (it->second.version == max_version)
+  void update(uint32_t lgid) {
+    assert(attribute.size() < lgid);
+
+    if (attribute[lgid].version == max_version)
       return;
 
     graph_library_clean = false;
-    it->second.version = ++max_version;
+    attribute[lgid].version = ++max_version;
   }
 
-  // FIXME: change to int32_t (32 bits at most for subgraph id
-  int reset_id(const std::string &name) {
-    const auto &it = attribute.find(name);
-    if(it != attribute.end()) {
-      graph_library_clean = false;
-      it->second.version = ++max_version;
-      return it->second.id;
-    }
-    return add_name(name);
-  }
+  int get_version(uint32_t lgid) const {
+    if (attribute.size() >= lgid)
+      return 0; // Invalid ID
 
-  int get_version(int id) const {
-    auto &name = get_name(id);
-    const auto &it = attribute.find(name);
-    if(it != attribute.end()) {
-      return it->second.version;
-    }
-    return 0; // 0 is invalid ID
+    return attribute[lgid].version;
   }
 
   // FIXME: replace this by a find / end when the iterator is working
   bool include(const std::string &name) const {
-    return attribute.find(name) != attribute.end();
+    return name2id.find(name) != name2id.end();
   }
 
   static Graph_library *instance(std::string path) {
@@ -133,30 +147,64 @@ public:
     return Graph_library::global_instances[path];
   }
 
-  const std::vector<std::string> &list_all() const {
-    return id2name;
-  }
-
   int get_max_version() const { return max_version; }
 
-  void each_graph(std::function<void(const std::string &,int id)> f1) const {
-    for(Attribute_type::const_iterator it=attribute.begin();it!=attribute.end();it++) {
-      f1(it->first, it->second.id);
+  void each_graph(std::function<void(const std::string &, uint32_t lgid)> f1) const {
+    for (const std::pair<const std::string, uint32_t> entry : name2id) {
+      f1(entry.first, entry.second);
     }
   }
 
-  int register_lgraph(const std::string &name, LGraph *lg) {
-    global_name2lgraph[path][name] = lg;
+  bool expunge_lgraph(const std::string &name, const LGraph *lg) {
+    if (global_name2lgraph[path][name] == lg) {
+      console->warn("graph_library::delete_lgraph({}) for a wrong graph??? path:{}", name, path);
+      return true;
+    }
+    global_name2lgraph[path].erase(global_name2lgraph[path].find(name));
+    uint32_t id = name2id[name];
+    name2id[name] = 0;
 
-    return reset_id(name);
+    if (attribute[id].nopen == 0) {
+      attribute[id].clear();
+      recycled_id.push_back(id);
+      return true;
+    }
+
+    // WARNING: Do not recycle attribute (multiple ::create, and overwrite existing name)
+    return false;
   }
 
-  void unregister_lgraph(const std::string &name, int lgid, const LGraph *lg) {
-    assert(id2name.size() > (size_t) lgid);
-    assert(id2name[lgid] == name);
-    assert(global_name2lgraph[path][name] == lg);
+  uint32_t register_lgraph(const std::string &name, LGraph *lg) {
+    global_name2lgraph[path][name] = lg;
 
-    fmt::print("TODO: garbage collect lgraph {}\n", name);
+    uint32_t id = reset_id(name);
+
+    const auto &it = name2id.find(name);
+    assert(it != name2id.end());
+    attribute[id].nopen++;
+
+    return id;
+  }
+
+  bool unregister_lgraph(const std::string &name, uint32_t lgid, const LGraph *lg) {
+    assert(attribute.size() > (size_t) lgid);
+
+    // WARNING: NOT ALWAYS, it can ::create multiple times before calling unregister 
+    // assert(name2id[name] == lgid);
+    // assert(global_name2lgraph[path][name] == lg);
+
+    attribute[lgid].nopen--;
+
+    if (attribute[lgid].nopen==0) {
+      fmt::print("TODO: garbage collect lgraph {}\n", name);
+      bool done = expunge_lgraph(name, lg);
+      if (done)
+        return true;
+      recycled_id.push_back(lgid);
+      return true;
+    }
+
+    return false;
   }
 
   void sync() {

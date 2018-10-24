@@ -29,13 +29,9 @@ vector<LGraph *> Inou_cfg::tolg() {
   assert(!opack.name.empty());
   assert(!opack.file.empty());
 
-  vector<LGraph *> lgs;
-
-  lgs.push_back(new LGraph(opack.path, opack.name, false));
   const auto &cfg_file = opack.file;
 
   int fd = open(cfg_file.c_str(), O_RDONLY);
-
   if(fd < 0) {
     console->error("cannot find input file {}\n", cfg_file);
     exit(-3);
@@ -49,6 +45,10 @@ vector<LGraph *> Inou_cfg::tolg() {
     console->error("error, mmap failed\n");
     exit(-3);
   }
+
+  vector<LGraph *> lgs;
+
+  lgs.push_back(LGraph::create(opack.path, opack.name + "_cfg"));
 
   cfg_2_lgraph(&memblock, lgs);
 
@@ -98,8 +98,11 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
     string dfg_data = p;
 
     if(gsub_id != 0 && gsub_id >= lgs.size()) { //create new sub-graph if different scope id
-      lgs.push_back(new LGraph(opack.path, opack.name + std::to_string(lgs.size()), false));
+      LGraph *lg = LGraph::create(opack.path, opack.name + std::to_string(lgs.size()) + "_cfg");
+      lgs.push_back(lg);
+
       fmt::print("lgs size:{}\n", lgs.size());
+
       name2id_gs.resize(name2id_gs.size() + 1);
       chain_stks_gs.resize(chain_stks_gs.size() + 1);
       nid_ed_gs.resize(nid_ed_gs.size() + 1);

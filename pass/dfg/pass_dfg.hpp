@@ -25,11 +25,11 @@ public:
 };
 
 class Pass_dfg : public Pass {
+protected:
 public:
   Pass_dfg():Pass() { }
   Pass_dfg(const std::string &key, const std::string &value);
 
-  LGraph *     generate_dfg(const LGraph * &cfg); //calls regen() to generate dfg from cfg
   LGraph *     regen(const LGraph *orig);
   void         optimize(LGraph * &ori_dfg);     //calls trans() to perform optimization
   void         trans(LGraph *orig);

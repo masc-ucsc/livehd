@@ -158,7 +158,7 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module* module) {
 
     } else if(g->node_type_get(idx).op == SubGraph_Op) {
       std::string subgraph_name = g->get_library()->get_name(g->subgraph_id_get(idx));
-      LGraph *    subgraph      = LGraph::find_lgraph(g->get_path(), subgraph_name);
+      LGraph *    subgraph      = LGraph::open(g->get_path(), subgraph_name);
       assert(subgraph);
       std::set<Port_ID> visited_out_pids;
 
@@ -987,7 +987,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         //FIXME: prevent loading the whole graph just to read the IOs if
         //hierarchy is set to false
         std::string subgraph_name = g->get_subgraph_name(idx);
-        subgraph                  = LGraph::open_lgraph(g->get_path(), subgraph_name);
+        subgraph                  = LGraph::create(g->get_path(), subgraph_name);
       }
       if(hierarchy) {
         _subgraphs.insert(subgraph);
