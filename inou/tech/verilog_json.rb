@@ -8,13 +8,8 @@ if ARGV.size < 1
 end
 
 scanner = StringScanner.new("")
-srcline = 0
-wirename = /\s*(\\?[\-\d\w\\:_\$\.\/\[\]]+)\s*/  #FIXME: do we need to discard the $0??
-cellname = /([$_\.\/:\w\-\d\\\[\]]+)\s*/
-celltype = /([\.$\w=\-\\']+)\s*/
 
 inmod     = false
-incomment = false
 modname = nil
 
 inputs = []

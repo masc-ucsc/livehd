@@ -1228,7 +1228,7 @@ struct Yosys2lg_Pass : public Pass {
       used_names.clear();
 #endif
       RTLIL::Module *module = it.second;
-        log("yosys2lg NOT look_for_cell_outputs pass for module %s:\n", module->name.c_str());
+      log("yosys2lg NOT look_for_cell_outputs pass for module %s:\n", module->name.c_str());
       if(design->selected_module(it.first)) {
 #ifndef NDEBUG
         log("yosys2lg look_for_cell_outputs pass for module %s:\n", module->name.c_str());
@@ -1237,7 +1237,6 @@ struct Yosys2lg_Pass : public Pass {
         look_for_cell_outputs(module);
         LGraph *g = process_module(module);
 
-        std::cout << "rtp closing " << module->name.str() << std::endl;
         g->sync();
         g->close();
       }

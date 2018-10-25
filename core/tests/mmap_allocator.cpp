@@ -6,7 +6,7 @@
 
 class char_alloc : public mmap_allocator<char> {
   public:
-    char_alloc(const std::string & filename) : mmap_allocator<char>(filename) { }
+    explicit char_alloc(const std::string & filename) : mmap_allocator<char>(filename) { }
     size_t file_size() { return mmap_allocator<char>::file_size; }
     uint64_t * mmap_base() { return mmap_allocator<char>::mmap_base; }
     size_t mmap_size() {  return mmap_allocator<char>::mmap_size; }
