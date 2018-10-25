@@ -51,7 +51,7 @@ do
   fi
 
   echo "shell_test.sh: name:${base} odir:${SHELL_ODIR}"
-  echo "lgraph.open name:${base} |> inou.yosys.fromlg odir:${SHELL_ODIR}" | ${LGSHELL}
+  echo "lgraph.open name:${base} |> dump |> inou.yosys.fromlg odir:${SHELL_ODIR}" | ${LGSHELL}
 
   if [ $? -eq 0 ] && [ -f ${SHELL_ODIR}/${base}.v ]; then
     echo "Successfully created verilog from graph ${file}"
