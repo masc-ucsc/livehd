@@ -13,7 +13,7 @@ protected:
     LGraph *lg = LGraph::open(path,name);
 
     if (lg==0) {
-      Main_api::warn(fmt::format("lgraph.find could not find {} lgraph in {} path", name, path));
+      Main_api::warn(fmt::format("lgraph.open could not find {} lgraph in {} path", name, path));
     }else{
       var.add(lg);
     }
@@ -28,7 +28,7 @@ protected:
     LGraph *lg = LGraph::create(path,name);
 
     if (lg==0) {
-      Main_api::error(fmt::format("lgraph.open could not open {} lgraph in {} path", name, path));
+      Main_api::error(fmt::format("lgraph.create could not open {} lgraph in {} path", name, path));
       return;
     }
 

@@ -37,6 +37,7 @@ public:
   virtual ~LGraph();
 
   static LGraph *create(const std::string &path, const std::string &name);
+  static LGraph *open(const std::string &path, int lgid);
   static LGraph *open(const std::string &path, const std::string &name);
   void close();
 

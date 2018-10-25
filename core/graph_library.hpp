@@ -67,7 +67,7 @@ protected:
   uint32_t reset_id(const std::string &name);
 
 public:
-  static LGraph *find_lgraph(const std::string &path, const std::string &name);
+  static LGraph *try_find_lgraph(const std::string &path, const std::string &name);
 
   uint32_t add_name(const std::string &name);
 
@@ -77,10 +77,8 @@ public:
     return attribute[lgid].name;
   }
 
-  LGraph *get_graph(uint32_t lgid) const;
-
   int lgraph_count() const {
-    return attribute.size();
+    return attribute.size()-1;
   }
 
   uint32_t get_id(const std::string &name) const {
@@ -105,6 +103,7 @@ public:
     return name2id.find(name) != name2id.end();
   }
 
+  // FIXME: Change to Graph_library &instance...
   static Graph_library *instance(std::string path) {
     if(Graph_library::global_instances.find(path) == Graph_library::global_instances.end()) {
       Graph_library::global_instances.insert(std::make_pair(path, new Graph_library(path)));
@@ -112,7 +111,7 @@ public:
     return Graph_library::global_instances[path];
   }
 
-  int get_max_version() const { return max_version; }
+  int get_max_version() const { return max_version-1; }
 
   void each_graph(std::function<void(const std::string &, uint32_t lgid)> f1) const;
 
