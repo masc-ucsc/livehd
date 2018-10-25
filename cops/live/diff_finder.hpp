@@ -41,7 +41,8 @@ private:
 
 public:
   //FIXME: can we remove the dependency on the synthesized graph?
-  Diff_finder(LGraph *original, LGraph *synth, Invariant_boundaries *boundaries, std::string hier_sep = ".") : original(original), synth(synth), boundaries(boundaries), hier_sep(hier_sep) {
+  Diff_finder(LGraph *original, LGraph *synth, Invariant_boundaries *boundaries, const std::string& hier_sep = ".") : 
+    original(original), synth(synth), boundaries(boundaries), hier_sep(hier_sep) {
   }
 
   void generate_delta(const std::string &mod_lgdb, const std::string &out_lgdb, std::set<Net_ID> &diffs);
