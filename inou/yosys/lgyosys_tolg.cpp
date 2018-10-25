@@ -671,11 +671,21 @@ static LGraph *process_module(RTLIL::Module *module) {
       op = And_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-    } else if(std::strncmp(cell->type.c_str(), "$not", 4) == 0 ||
-              std::strncmp(cell->type.c_str(), "$logic_not", 10) == 0) {
+    } else if(std::strncmp(cell->type.c_str(), "$not", 4) == 0) {
       op = Not_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
+    } else if(std::strncmp(cell->type.c_str(), "$logic_not", 10) == 0) {
+      op = Or_Op;
+
+      inid = g->create_node().get_nid();
+      size = cell->parameters["\\Y_WIDTH"].as_int();
+      g->set_bits(inid, size);
+      g->add_edge(Node_Pin(inid, 1, false), Node_Pin(onid, 0, true));
+
+      g->node_type_set(onid, Not_Op);
+      g->set_bits(onid, 1);
+
     } else if(std::strncmp(cell->type.c_str(), "$or", 4) == 0 || std::strncmp(cell->type.c_str(), "$logic_or", 9) == 0 ||
               std::strncmp(cell->type.c_str(), "$reduce_or", 10) == 0 || std::strncmp(cell->type.c_str(), "$reduce_bool", 12) == 0) {
       op = Or_Op;
