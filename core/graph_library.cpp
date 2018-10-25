@@ -205,11 +205,10 @@ void Graph_library::clean_library() {
   std::ofstream graph_list;
 
   graph_list.open(path + "/" + library_file);
-  graph_list << attribute.size() << std::endl;
-  uint32_t id=0;
-  for(const auto &it : attribute) {
+  graph_list << (attribute.size()-1) << std::endl;
+  for(size_t id=1;id<attribute.size();id++) {
+    const auto &it = attribute[id];
     graph_list << it.name << " " << id << " " << it.version << std::endl;
-    id++;
   }
 
   graph_list.close();

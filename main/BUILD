@@ -39,6 +39,7 @@ sh_test(
     data = [
         "//inou/yosys:liblgraph_yosys.so",
         "//inou/yosys:verilog_tests",
+        ":lgshell",
     ],
 )
 
