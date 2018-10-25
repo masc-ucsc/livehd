@@ -1,11 +1,11 @@
 
 # Introduction
 
-This is a high level description of how to compile lgraph and use it
+This is a high level description of how to compile LGraph and use it
 
 # Requirements
 
-lgraph is heavily tested with the latest arch linux distributions. This is the list of packages needed:
+LGraph is heavily tested with the latest arch linux distributions. This is the list of packages needed:
 
 # Arch Linux: (64bit)
 
@@ -38,69 +38,71 @@ pandoc -S -N -V geometry:margin=1in ./docs/Usage.md -o ./docs/Usage.pdf
 ```bash
 # Clone the directory the first time
 git clone  git@github.com:masc-ucsc/lgraph.git
-# Must clone submodules like yosys too
-git submodule update --init --recursive
-
-# If you cloned already, use this to update submodules
-# This command will update the submodules to the commit specified in lgraph
-git pull --recurse-submodules
 ```
 
 You need either debug or release, if you are developing, use the debug option.
 
 See Bazel.md for more details
 
+For a simple release build, simply type:
+
+```
+bazel build //main:lgshell
+```
+
+A binary will be created in:
+
+```
+$ ls ./bazel-bin/main/lgshell
+```
+
 # Sample usage
 
 Some sample usages for the various functions implemented.
 
-## Read and Write verilog files in/out of lgraph
-
-To read a verilog with yosys and create an lgraph
-
-```bash
-$./inou/yosys/lgyosys ./inou/yosys/tests/simple_add.v
-
-process_module \simple_add
-Successfully parsed yosys file ./inou/yosys/tests/simple_add.v
-```
-
-To dump an lgraph (and submodules) to verilog
-```bash
-$./inou/yosys/lgyosys -gsimple_add
-
-lgraph_simple_add
-Successfully generated verilog file simple_add.v
-```
+In this section we differentiate between the bash prompt ($) and the LGraph prompt (lgraph>).
 
 ## To use the lgraph comand line
 
 ```bash
-./bazel-bin/main/lgraph
+./bazel-bin/main/lgshell
 lgraph> help
+```
+
+
+## Read and Write verilog files in/out of LGraph
+
+To read a verilog with yosys and create an LGraph
+
+```bash
+$ ./bazel-bin/main/lgshell
+lgraph> inou.yosys.tolg files:./inou/yosys/tests/simple_add.v
+lgraph> exit
+$ ls lgdb
+```
+
+
+To dump an lgraph (and submodules) to verilog
+```bash
+$ ./bazel-bin/main/lgshell
+lgraph> lgraph.open name:simple_add |> inou.yosys.fromlg odir:lgdb
+lgraph> exit
+$ ls lgdb/*.v
 ```
 
 ## Generating a pyrope file from a graph
 
 ```bash
-# create a graph from verilog
-./inou/yosys/lgyosys ./inou/yosys/tests/trivial.v
+$ mkdir pyrope_out
+$ ./bazel-bin/main/lgshell
 
-# create a yaml representation (optional)
-./inou/yaml/lgyaml --graph_name trivial --yaml_output trivial.yaml
+lgraph> inou.yosys.tolg files:./inou/yosys/tests/trivial.v |> @a
+lgraph> @a |> inou.json.fromlg output:trivial.json
+lgraph> @a |> inou.pyrope.fromlg odir:pyrope_out
+lgraph> exit
 
-# read the graph and create a pyrope file
-./inou/pyrope/lg2prp --graph_name trivial --pyrope_output trivial_py
-
-# check the output
-cat ./trivial_py
+$ ls trivial.json
+$ ls pyrope_output
 ```
 
-## Creating and traversing a graph from the code interface
-
-If you are a developer for lgraph, you will likely have to create graph objects
-from the code.
-
-```cpp
-```
 

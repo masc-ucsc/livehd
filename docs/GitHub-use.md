@@ -14,37 +14,20 @@ their own use.
 lgraph uses bazel as a build system, as a result, we no longer use submodules.
 Instead we use the built-in bazel support to pull specific repositories.
 
-## Public lgraph GitHub Repo
+## lgraph GitHub Repo
 
-If you do not need the private repo, just get the public repo by executing:
+You can clone the repository from:
 
     git clone https://github.com/masc-ucsc/lgraph
 
-## Private lgraph MASC Lab Repo
-
 If you are working on lgraph at UC Santa Cruz, contact [Jose Renau](http://users.soe.ucsc.edu/~renau/)
-to get access to the private lgraph repo used by the MASC lab. The clone the private lgraph Repo:
+to be added to the MASC organization on GitHub so that you have write access to
+the repo.
 
-    git clone git@github.com:masc-ucsc/lgraph-private.git
+External contributions are welcome through pull-requests (see bellow).
 
-If you are not tasked with synchronizing your work with the public repo then
-you can simply push/pull changes to/from the private repo and someone else
-will push them to the public one.
 
-## Synchronizing Public and Private Repos
-
-This section describes how we synchronize the public and private lgraph repos.
-Most users can ignore it and simply work on the appropriate public or private
-repo.
-
-## Rebase vs Merge
-
-To have a cleaner git history, we tend to avoid merge, and we operate in rebase. This is not
-a strong requirement, but a recommendation. To enable rebase by default:
-
-    git config --global pull.rebase true
-
-### Create Private lgraph repo for first time
+### Create Private lgraph repo for personal use / contributions
 
 If you work outside UCSC, you should clone the pubic lgraph repo. First, create
 an empty repository (lgraph-private), then run this to close lgraph
