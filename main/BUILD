@@ -34,11 +34,12 @@ cc_binary(
 )
 
 sh_test(
-    name = "lgshell_test",
-    srcs = ["tests/shell_test.sh"],
+    name = "lgshell_test.sh",
+    srcs = ["tests/lgshell_test.sh"],
     data = [
         "//inou/yosys:liblgraph_yosys.so",
         "//inou/yosys:verilog_tests",
+        ":lgshell",
     ],
 )
 

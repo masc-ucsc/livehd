@@ -37,7 +37,7 @@ LGraph::~LGraph() {
 }
 
 LGraph *LGraph::create(const std::string &path, const std::string &name) {
-  LGraph *lg = Graph_library::find_lgraph(path,name);
+  LGraph *lg = Graph_library::try_find_lgraph(path,name);
   if (lg) {
     assert(Graph_library::instance(path));
     // Overwriting old lgraph. Delete old pointer (but better be sure that nobody has it)
@@ -50,8 +50,14 @@ LGraph *LGraph::create(const std::string &path, const std::string &name) {
   return new LGraph(path, name, false);
 }
 
+LGraph *LGraph::open(const std::string &path, int lgid) {
+  const std::string &name = Graph_library::instance(path)->get_name(lgid);
+
+  return open(path,name);
+}
+
 LGraph *LGraph::open(const std::string &path, const std::string &name) {
-  LGraph *lg = Graph_library::find_lgraph(path,name);
+  LGraph *lg = Graph_library::try_find_lgraph(path,name);
   if (lg) {
     assert(Graph_library::instance(path));
     Graph_library::instance(path)->register_lgraph(name, lg);

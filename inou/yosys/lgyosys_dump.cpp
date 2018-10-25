@@ -982,7 +982,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       break;
     }
     case SubGraph_Op: {
-      LGraph *subgraph = g->get_library()->get_graph(g->subgraph_id_get(idx));
+      LGraph *subgraph = LGraph::open(g->get_path(), g->subgraph_id_get(idx));
       if(subgraph == nullptr) {
         //FIXME: prevent loading the whole graph just to read the IOs if
         //hierarchy is set to false

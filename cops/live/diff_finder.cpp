@@ -743,11 +743,20 @@ void Diff_finder::generate_delta(const std::string &modified_lgdb, const std::st
   std::set<Graph_Node> discovered_boundaries, visited_boundaries, all_diff;
 
   Graph_library *modified_library = Graph_library::instance(modified_lgdb);
+#if 0
   for(int id = 0; id < modified_library->lgraph_count(); id++) {
     assert(modified_library->get_graph(id));
     discovered_modules.insert(modified_library->get_graph(id));
     fmt::print("discovered module {} \n", modified_library->get_graph(id)->get_name());
   }
+#else
+  modified_library->each_graph([&discovered_modules, modified_lgdb](const std::string &name, int id) {
+        LGraph *lg = LGraph::open(modified_lgdb, name);
+        assert(lg);
+        discovered_modules.insert(lg);
+        fmt::print("discovered module {} \n", name);
+      });
+#endif
 
   while(discovered_modules.size() > 0) {
     LGraph *current = *(discovered_modules.begin());

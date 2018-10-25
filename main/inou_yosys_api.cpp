@@ -249,11 +249,16 @@ void Inou_yosys_api::tolg(Eprp_var &var) {
   gl->reload(); // after the do_work
 
   std::vector<LGraph *> lgs;
-  gl->each_graph([&lgs, gl, max_version](const std::string &name, int id) {
+  gl->each_graph([&lgs, gl, max_version, path](const std::string &name, int id) {
       if (gl->get_version(id) > max_version) {
-      lgs.push_back(gl->get_graph(id));
+        LGraph *lg = LGraph::open(path, id);
+        if (lg==0) {
+          Main_api::warn(fmt::format("could not open graph {}", name));
+        }else{
+          lgs.push_back(lg);
+        }
       }
-      });
+    });
 
   var.add(lgs);
 }

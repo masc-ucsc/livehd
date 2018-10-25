@@ -19,7 +19,7 @@ uint32_t Graph_library::reset_id(const std::string &name) {
   return add_name(name);
 }
 
-LGraph *Graph_library::find_lgraph(const std::string &path, const std::string &name) {
+LGraph *Graph_library::try_find_lgraph(const std::string &path, const std::string &name) {
 
   if(global_name2lgraph.find(path) != global_name2lgraph.end() && global_name2lgraph[path].find(name) != global_name2lgraph[path].end()) {
     LGraph *lg = global_name2lgraph[path][name];
@@ -52,14 +52,6 @@ uint32_t Graph_library::add_name(const std::string &name) {
   name2id[name] = id;
 
   return id;
-}
-
-LGraph *Graph_library::get_graph(uint32_t id) const {
-  assert(attribute.size() > (size_t)id);
-
-  const std::string &name = attribute[id].name;
-
-  return find_lgraph(path, name);
 }
 
 void Graph_library::update(uint32_t lgid) {
@@ -205,11 +197,10 @@ void Graph_library::clean_library() {
   std::ofstream graph_list;
 
   graph_list.open(path + "/" + library_file);
-  graph_list << attribute.size() << std::endl;
-  uint32_t id=0;
-  for(const auto &it : attribute) {
+  graph_list << (attribute.size()-1) << std::endl;
+  for(size_t id=1;id<attribute.size();id++) {
+    const auto &it = attribute[id];
     graph_list << it.name << " " << id << " " << it.version << std::endl;
-    id++;
   }
 
   graph_list.close();
