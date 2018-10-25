@@ -683,7 +683,7 @@ bool Inou_pyrope::to_subgraph(Out_string &w, Out_string &out, const LGraph *g, I
   return false;
 }
 
-void Inou_pyrope::to_pyrope(const LGraph *g, const std::string filename) {
+void Inou_pyrope::to_pyrope(const LGraph *g, const std::string& filename) {
 
   std::string prp_file;
 

@@ -29,7 +29,7 @@ private:
 protected:
   Inou_pyrope_options opack;
 
-  void to_pyrope(const LGraph *g, const std::string filename);
+  void to_pyrope(const LGraph *g, const std::string& filename);
   void to_src_var(Out_string &w, const LGraph *g, Index_ID idx) const;
   bool to_dst_var(Out_string &w, const LGraph *g, Index_ID idx) const;
   bool to_mux(Out_string &w, const LGraph *g, Index_ID idx) const;
