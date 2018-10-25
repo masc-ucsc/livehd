@@ -59,7 +59,7 @@ void Pass_dfg::trans(LGraph *dfg) {
       uint16_t dst_nid_size = dfg->get_bits(dst_nid);
 
       if(dfg->node_type_get(idx).op == SubGraph_Op){
-        LGraph *subgraph = dfg->get_library()->get_graph(dfg->subgraph_id_get(idx));
+        LGraph *subgraph = LGraph::open(dfg->get_path(), dfg->subgraph_id_get(idx));
         const char *out_name = subgraph->get_graph_output_name_from_pid(src_pid);
         uint16_t    out_size = subgraph->get_bits(subgraph->get_graph_output(out_name).get_nid());
         dfg->set_bits(dst_nid,out_size);

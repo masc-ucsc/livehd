@@ -19,7 +19,7 @@ uint32_t Graph_library::reset_id(const std::string &name) {
   return add_name(name);
 }
 
-LGraph *Graph_library::find_lgraph(const std::string &path, const std::string &name) {
+LGraph *Graph_library::try_find_lgraph(const std::string &path, const std::string &name) {
 
   if(global_name2lgraph.find(path) != global_name2lgraph.end() && global_name2lgraph[path].find(name) != global_name2lgraph[path].end()) {
     LGraph *lg = global_name2lgraph[path][name];
@@ -52,14 +52,6 @@ uint32_t Graph_library::add_name(const std::string &name) {
   name2id[name] = id;
 
   return id;
-}
-
-LGraph *Graph_library::get_graph(uint32_t id) const {
-  assert(attribute.size() > (size_t)id);
-
-  const std::string &name = attribute[id].name;
-
-  return find_lgraph(path, name);
 }
 
 void Graph_library::update(uint32_t lgid) {
