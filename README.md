@@ -101,11 +101,11 @@ Port_ID  // 10bits, per node input/output port identifier
 There are 3 types of iterators available over node is LGraph:
 
 ```cpp
-for(auto nid : g->fast())     { } // unordered but very fast traversal
+for(auto nid : g.fast())     { } // unordered but very fast traversal
 
-for(auto nid : g->forward())  { } // propagates forward from each input/constant
+for(auto nid : g.forward())  { } // propagates forward from each input/constant
 
-for(auto nid : g->backward()) { } // propagates backward from each output
+for(auto nid : g.backward()) { } // propagates backward from each output
 ```
 
 Whenever possible, fast should be used. The type of `nid` is `Index_ID`.
@@ -116,13 +116,13 @@ Whenever possible, fast should be used. The type of `nid` is `Index_ID`.
 To iterate over the input edges of node `nid` simply call:
 
 ```cpp
-for(auto& edge : g->inp_edges(nid))
+for(auto& edge : g.inp_edges(nid))
 ```
 
 And for output edges:
 
 ```cpp
-for(auto& edge : g->out_edges(nid))
+for(auto& edge : g.out_edges(nid))
 ```
 
 Note that you *have* to use reference here (`&` required) since LGraph is

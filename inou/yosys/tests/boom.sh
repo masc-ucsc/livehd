@@ -45,11 +45,20 @@ for i in AsyncResetReg; do
   fi
 done
 
-echo "files path:./lgdb/parse match:\"chunk.*\" |> inou.yosys.tolg |> inou.yosys.fromlg odir:boom_test" | ${LGSHELL}
+#echo "files path:./lgdb/parse match:\"chunk.*\" |> inou.yosys.tolg |> inou.yosys.fromlg odir:boom_test" | ${LGSHELL}
+echo "files path:./lgdb/parse match:\"chunk.*\" |> inou.yosys.tolg" | ${LGSHELL}
 if [ $? -ne 0 ]; then
   echo "Failed to read/write verilog for module $i"
   exit 1
 fi
+
+for i in lgdb/parse/chunk*; do
+  name=${i##*:};
+  echo "lgraph.open name:${name} |> inou.yosys.fromlg odir:boom_test" | ${LGSHELL}
+  if [ $? -ne 0 ]; then
+    echo "Failed to read/write verilog for module $name"
+  fi
+done
 
 filename="chunk_`echo ${BOOM_FILE} | tr '/' '.'`"
 for i in ${TEST_OUT}/*; do
@@ -63,3 +72,4 @@ for i in ${TEST_OUT}/*; do
     echo "SUCCESS: Module $name matches"
   fi
 done
+
