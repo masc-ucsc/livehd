@@ -14,19 +14,19 @@ to use Bazel in the LGraph project.
 
 ## List files needed for a given target
 
-   bazel query "deps(//inou/lefdef:lglefdef)" 
+   bazel query "deps(//inou/lefdef:lglefdef)"
 
 ## Release vs fastbuild (default) vs debug
 
     # Debug
-    bazel build --compilation_mode=dbg //inou/json:lgjson
-    bazel build -c dbg //inou/json:lgjson
+    bazel build --compilation_mode=dbg //inou/json:inou_json
+    bazel build -c dbg //inou/json:inou_json
 
     # Release
-    bazel build --compilation_mode=opt //inou/json:lgjson
+    bazel build --compilation_mode=opt //inou/json:inou_json
 
     # Fast Build with assertions
-    bazel build                        //inou/json:lgjson
+    bazel build                        //inou/json:inou_json
 
 ## See the command line executed
 
