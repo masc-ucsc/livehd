@@ -14,7 +14,6 @@ cc_library(
     includes = ["."],
     deps = [
         "//meta:meta",
-        "//inou/lef:inou_lef",
         "@abc//:abc",
     ],
 )
