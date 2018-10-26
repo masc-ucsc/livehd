@@ -57,3 +57,17 @@ cc_binary(
     ],
     linkopts = ["-lpthread"],
 )
+
+cc_test(
+    name = "main_test",
+    srcs = ["main_test.cpp"],
+    deps = [
+        "@gtest//:gtest_main",
+    ],
+    data = [
+        ":lgshell",
+    ],
+    linkopts = ["-lutil"],
+    local = 1, # Weird fork error due to forkpty otherwise
+)
+
