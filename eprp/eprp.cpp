@@ -5,8 +5,15 @@
 #include "spdlog/spdlog.h"
 #include "eprp.hpp"
 
+
+void Eprp::eat_comments() {
+  while(scan_is_token(TOK_COMMENT) && !scan_is_end())
+    scan_next();
+}
+
 // rule_path = (\. | alnum | / | "asdad.." | \,)+
 bool Eprp::rule_path(std::string &path) {
+
 
   assert(!scan_is_end());
 
@@ -22,6 +29,7 @@ bool Eprp::rule_path(std::string &path) {
     bool ok = scan_next();
     if (!ok)
       break;
+    eat_comments();
 
   }while(scan_is_token(TOK_DOT)
         || scan_is_token(TOK_ALNUM)
@@ -35,12 +43,14 @@ bool Eprp::rule_path(std::string &path) {
 // rule_label_path = label path
 bool Eprp::rule_label_path(const std::string &cmd_line, Eprp_var &next_var) {
 
+
   if (!scan_is_token(TOK_LABEL))
     return false;
 
   std::string label = scan_text();
 
   scan_next(); // Skip LABEL token
+  eat_comments();
 
   if (scan_is_end()) {
     scan_error(fmt::format("the {} field in {} command has no argument", label, cmd_line));
@@ -80,6 +90,7 @@ bool Eprp::rule_reg(bool first) {
   }
 
   scan_next();
+  eat_comments();
 
   return true;
 }
@@ -99,6 +110,7 @@ bool Eprp::rule_cmd_line(std::string &path) {
     bool ok = scan_next();
     if (!ok)
       break;
+    eat_comments();
 
   }while(scan_is_token(TOK_DOT) || scan_is_token(TOK_ALNUM));
 
@@ -134,6 +146,7 @@ bool Eprp::rule_pipe() {
     return false;
 
   scan_next();
+  eat_comments();
 
   bool try_either = rule_cmd_or_reg(false);
   if (!try_either) {
@@ -186,6 +199,9 @@ bool Eprp::rule_top() {
 void Eprp::elaborate() {
 
   while(!scan_is_end()) {
+    eat_comments();
+    if (scan_is_end())
+      return;
     bool cmd = rule_top();
     if (!cmd)
       return;

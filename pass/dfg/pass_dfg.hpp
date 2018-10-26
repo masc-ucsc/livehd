@@ -128,11 +128,11 @@ private:
   bool is_compare_op    (const std::string &v) {return (v == "==")||(v == ">")||(v == ">=")||(v == "<")||(v == "<=") ;}
 
   //Index_ID create_register(LGraph *g, Aux_tree *aux_tree, const std::string &var_name);
-  Index_ID create_input(LGraph *g, Aux_tree *aux_tree, const std::string &var_name, uint16_t bits=1);
-  Index_ID create_output(LGraph *g, Aux_tree *aux_tree, const std::string &var_name, uint16_t bits=1);
+  Index_ID create_input(LGraph *g, Aux_tree *aux_tree, const std::string &var_name, uint16_t bits=0);
+  Index_ID create_output(LGraph *g, Aux_tree *aux_tree, const std::string &var_name, uint16_t bits=0);
   Index_ID create_private(LGraph *g, Aux_tree *aux_tree, const std::string &var_name);
   Index_ID create_reference(LGraph *g, Aux_tree *aux_tree, const std::string &var_name);
-  Index_ID create_node(LGraph *g, Aux_tree *aux_tree, const std::string &v, const uint16_t bits=1);
+  Index_ID create_node(LGraph *g, Aux_tree *aux_tree, const std::string &v, const uint16_t bits=0);
   Index_ID create_default_const(LGraph *g);
   Index_ID create_true_const(LGraph *g, Aux_tree *aux_tree);
   Index_ID create_false_const(LGraph *g, Aux_tree *aux_tree);
