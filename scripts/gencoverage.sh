@@ -18,6 +18,7 @@ bazel coverage -k //...
 ./bazel-bin/core/edge_test
 ./bazel-bin/core/dense_test
 ./bazel-bin/core/char_test
+./bazel-bin/main/main_test
 ./bazel-bin/third_party/misc/ezsat/testbench
 ./bazel-bin/live/parse/chunkify_verilog_test
 

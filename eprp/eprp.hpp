@@ -15,6 +15,8 @@ protected:
 
   void elaborate() final;
 
+  void eat_comments();
+
   bool rule_path(std::string &path);
   bool rule_label_path(const std::string &cmd_line, Eprp_var &next_var);
   bool rule_reg(bool first);

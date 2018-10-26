@@ -32,11 +32,10 @@ do
     exit 1
   fi
 
-  echo "inou.cfg.tolg  file:./inou/cfg/tests/"$pt".cfg  name:"$pt"_cfg  |> @a">> lgshell_cmds
-  echo "lgraph.open name:"$pt"_cfg |> inou.json.fromlg output:"$pt"_cfg.json" >> lgshell_cmds
-  echo "lgraph.open name:"$pt"_cfg |> pass.dfg.generate name:"$pt""           >> lgshell_cmds
-  # echo "pass.dfg.generate file:"$pt"_cfg  name:"$pt""                          >> lgshell_cmds
-  echo "lgraph.open name:"$pt" |> inou.json.fromlg output:"$pt"_pre.json"     >> lgshell_cmds
+  echo "inou.cfg.tolg  file:./inou/cfg/tests/"$pt".cfg  name:"$pt"_cfg  |> @a" >> lgshell_cmds
+  echo "lgraph.open name:"$pt"_cfg |> inou.json.fromlg output:"$pt"_cfg.json"  >> lgshell_cmds
+  echo "lgraph.open name:"$pt"_cfg |> pass.dfg.generate name:"$pt""            >> lgshell_cmds
+  echo "lgraph.open name:"$pt" |> inou.json.fromlg output:"$pt"_pre.json"      >> lgshell_cmds
 done
 
 cat lgshell_cmds | ${LGSHELL}
@@ -49,7 +48,6 @@ for pt in $pts
 do
   echo "lgraph.open name:"$pt" |> pass.dfg.optimize"                      >> lgshell_cmds_opt 
   echo "lgraph.open name:"$pt" |> inou.json.fromlg output:"$pt".json"     >> lgshell_cmds_opt
-  # echo "pass.dfg.optimize file:"$pt" |> @b"                               >> lgshell_cmds_opt      
 done
 
 cat lgshell_cmds_opt | ${LGSHELL}
