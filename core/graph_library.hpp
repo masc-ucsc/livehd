@@ -41,13 +41,14 @@ protected:
       version = 0;
     }
   };
-  std::map<std::string, uint32_t>   name2id;
-  std::vector<uint32_t>        recycled_id;
+  std::map<std::string, uint32_t>  name2id;
+  std::vector<uint32_t>            recycled_id;
 
   // WARNING: Not from name (id) because names can happen many times (multiple create)
   typedef std::vector<Graph_attributes> Attribute_type;
   Attribute_type attribute;
-  bool                       graph_library_clean;
+
+  bool           graph_library_clean;
 
   Graph_library() {
     max_version = 0;

@@ -22,16 +22,22 @@ void Inou_yosys_api::set_script_liblg(Eprp_var &var, std::string &script_file, s
 
   const auto &main_path = Main_api::get_main_path();
   liblg = main_path + "/lgshell.runfiles/__main__/inou/yosys/liblgraph_yosys.so";
+#ifndef NDEBUF
   fmt::print("1.yosys path:{} liblg:{}\n", main_path, liblg);
+#endif
   if(access(liblg.c_str(), X_OK) == -1) {
     // Maybe it is installed in /usr/local/bin/lgraph and /usr/local/share/lgraph/inou/yosys/liblgrapth...
     const std::string liblg2 = main_path + "/../share/lgraph/inou/yosys/liblgraph_yosys.so";
+#ifndef NDEBUF
     fmt::print("1.yosys path:{} liblg:{}\n", main_path, liblg2);
+#endif
     if(access(liblg2.c_str(), X_OK) == -1) {
 
       //sandbox path
       const std::string liblg3 = main_path + "/inou/yosys/liblgraph_yosys.so";
+#ifndef NDEBUF
       fmt::print("1.yosys path:{} liblg:{}\n", main_path, liblg2);
+#endif
       if(access(liblg3.c_str(), X_OK) == -1) {
         Main_api::error(fmt::format("could not find liblgraph_yosys.so, the {} is not executable", liblg));
         return;
@@ -116,9 +122,6 @@ int Inou_yosys_api::do_work(const std::string &yosys, const std::string &liblg, 
 
   mustache::mustache tmpl(strStream.str());
 
-  int pipefd[2];
-  pipe(pipefd);
-
   int pid = fork();
   if (pid<0) {
     Main_api::error(fmt::format("inou.yosys: unable to fork??"));
@@ -126,11 +129,8 @@ int Inou_yosys_api::do_work(const std::string &yosys, const std::string &liblg, 
   }
 
   if (pid==0) { // Child
-
-    dup2(pipefd[0], 0); // stdin
-    close(pipefd[1]);   // unused
-
-    char *argv[] = { strdup(yosys.c_str()), strdup("-q"), strdup("-m"), strdup(liblg.c_str()), 0};
+    const std::string yosys_cmd = tmpl.render(vars);
+    char *argv[] = { strdup(yosys.c_str()), strdup("-q"), strdup("-m"), strdup(liblg.c_str()), strdup("-p"), strdup(yosys_cmd.c_str()), 0};
 
     if (execvp(yosys.c_str(), argv) < 0) {
       Main_api::error(fmt::format("inou.yosys: execvp fail with {}", strerror(errno)));
@@ -138,12 +138,6 @@ int Inou_yosys_api::do_work(const std::string &yosys, const std::string &liblg, 
 
     exit(0);
   }
-  // parent
-  close(pipefd[0]); // unsused
-
-  const std::string rendered = tmpl.render(vars);
-  write(pipefd[1],rendered.c_str(), rendered.size());
-  close(pipefd[1]); // Force flush
 
   int wstatus;
 #if 1
