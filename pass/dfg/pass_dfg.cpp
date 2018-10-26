@@ -26,11 +26,6 @@ LGraph* Pass_dfg::regen(const LGraph *cfg) {
 }
 
 void  Pass_dfg::optimize(LGraph * &ori_dfg) {
-  //assert(!opack.file.empty());
-  //LGraph *dfg = new LGraph(opack.path, opack.file, false);
-  fmt::print("hello\n");
-  fmt::print("hello\n");
-  fmt::print("hello\n");
   trans(ori_dfg);
   ori_dfg->sync();
 }
@@ -131,8 +126,8 @@ void Pass_dfg::finalize_gconnect(LGraph *dfg, const Aux_node *auxnd_global) {
     if (is_output(pair.first)){
       Index_ID dst_nid = dfg->get_graph_output(pair.first.substr(1)).get_nid();
       Index_ID src_nid = pair.second;
-      auto bits = dfg->get_bits(src_nid);
-      dfg->set_bits(dst_nid,bits);
+      /* auto bits = dfg->get_bits(src_nid); */
+      /* dfg->set_bits(dst_nid,bits); */
       dfg->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
     }
     else if(is_register(pair.first)){
@@ -226,7 +221,6 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
   }
   else if(is_label_op(op)){
     if(oprds[0] == "__bits"){
-      //Index_ID floating_id = resolve_constant(dfg, aux_tree, oprds[1]);
       Index_ID floating_id = process_operand(dfg, aux_tree, oprds[1]);
       aux_tree->set_alias(target, floating_id);
     }else if(oprds[0] == "__fluid"){
@@ -263,9 +257,9 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
     Index_ID target_id = create_node(dfg, aux_tree, target);
     fmt::print("create node for internal target:{}, nid:{}\n", target, target_id);
     dfg->node_type_set(target_id, node_type_from_text(op));
-    auto max_bits = std::max(dfg->get_bits(oprd_ids[0]),dfg->get_bits(oprd_ids[1])) + 1;
-    dfg->set_bits(target_id,max_bits);
-    fmt::print("nid:{} set {}bits\n", target_id, max_bits);
+    /* auto max_bits = std::max(dfg->get_bits(oprd_ids[0]),dfg->get_bits(oprd_ids[1])) + 1; */
+    /* dfg->set_bits(target_id,max_bits); */
+    /* fmt::print("nid:{} set {}bits\n", target_id, max_bits); */
     process_connections(dfg, oprd_ids, target_id);
   }
   else if(is_compare_op(op)){
@@ -314,7 +308,7 @@ Index_ID Pass_dfg::process_operand(LGraph *dfg, Aux_tree *aux_tree, const std::s
     fmt::print("operand:{} has an alias:{}\n", oprd, oprd_id);
   }
   else {
-    if (is_constant(oprd)){
+    if (is_constant(oprd)){ //as __bits is processed here!
       oprd_id = resolve_constant(dfg, aux_tree, oprd);
       aux_tree->set_alias(oprd, oprd_id);
       fmt::print("create node for constant operand:{}, nid:{}\n", oprd, oprd_id);
@@ -585,10 +579,10 @@ void Pass_dfg::create_mux(LGraph *dfg, Aux_node *pauxnd, Index_ID tid, Index_ID 
   Port_ID fin = tp.get_input_match("A");
   Port_ID cin = tp.get_input_match("S");
 
-  auto max_bits = std::max(dfg->get_bits(tid),dfg->get_bits(fid));
-  dfg->set_bits(tid,max_bits);
-  dfg->set_bits(fid,max_bits);
-  dfg->set_bits(phi,max_bits);
+  /* auto max_bits = std::max(dfg->get_bits(tid),dfg->get_bits(fid)); */
+  /* dfg->set_bits(tid,max_bits); */
+  /* dfg->set_bits(fid,max_bits); */
+  /* dfg->set_bits(phi,max_bits); */
 
   dfg->add_edge(Node_Pin(tid,  0, false), Node_Pin(phi, tin, true));
   dfg->add_edge(Node_Pin(fid,  0, false), Node_Pin(phi, fin, true));

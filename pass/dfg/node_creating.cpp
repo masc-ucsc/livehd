@@ -70,7 +70,7 @@ Index_ID Pass_dfg::create_false_const(LGraph *g, Aux_tree *aux_tree) {
 Index_ID Pass_dfg::create_node(LGraph *g, Aux_tree *aux_tree, const std::string &v, const uint16_t bits) {
   Index_ID nid = g->create_node().get_nid();
   g->set_node_wirename(nid, v.c_str());
-  g->set_bits(nid,bits);
+  //g->set_bits(nid,bits);
   aux_tree->set_alias(v, nid);
   return nid;
 }
