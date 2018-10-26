@@ -29,7 +29,6 @@ public:
     verbose = false;
   };
 
-  std::string lef_file;
   std::string liberty_file;
   std::string blif_file;
   bool verbose;

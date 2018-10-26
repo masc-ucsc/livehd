@@ -9,7 +9,6 @@
 
 #include "abc_cell.hpp"
 #include "pass_abc.hpp"
-#include "inou_lef.hpp"
 
 void Pass_abc_options::set(const std::string &key, const std::string &value) {
 
@@ -19,8 +18,6 @@ void Pass_abc_options::set(const std::string &key, const std::string &value) {
         verbose = true;
     }else if ( is_opt(key,"liberty_file") ) {
       liberty_file = value;
-    }else if ( is_opt(key,"lef_file") ) {
-      lef_file = value;
     }else if ( is_opt(key,"blif_file") ) {
       blif_file = value;
     }else{
@@ -29,9 +26,6 @@ void Pass_abc_options::set(const std::string &key, const std::string &value) {
   } catch (const std::invalid_argument& ia) {
     fmt::print("ERROR: key {} has an invalid argument {}\n",key);
   }
-
-  if(lef_file.empty())
-    assert(liberty_file.empty()); //ensure lef are loaded into tech library first
 
 }
 
@@ -47,13 +41,6 @@ Pass_abc::~Pass_abc() {
 }
 
 void Pass_abc::trans(LGraph *lg) {
-
-  if(opack.lef_file == "") {
-    console->error("pass_abc.trans needs a lef_def file\n");
-    return;
-  }
-
-  Inou_lef::lef_parsing(lg->get_tech_library(), opack.lef_file);
   lg->sync(); // sync because Tech Library is loaded
 }
 
