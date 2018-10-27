@@ -46,7 +46,7 @@ for i in AsyncResetReg; do
 done
 
 #echo "files path:./lgdb/parse match:\"chunk.*\" |> inou.yosys.tolg |> inou.yosys.fromlg odir:boom_test" | ${LGSHELL}
-echo "files path:./lgdb/parse match:\"chunk.*\" |> inou.yosys.tolg" | ${LGSHELL}
+echo "files path:./lgdb/parse match:\"chunk.*\" |> inou.yosys.tolg top:ExampleBoomSystem" | ${LGSHELL}
 if [ $? -ne 0 ]; then
   echo "Failed to read/write verilog for module $i"
   exit 1
