@@ -7,8 +7,8 @@ rm -f  ./lgshell_cmds_opt
 mkdir logs
 echo "sandbox path is:"
 echo "$(pwd)"
-pts='sp_add_nb      top_nb         constant_nb 
-     sp_if_0_nb     top_ooo_nb     sp_add_ooo_nb 
+pts='top_ooo_nb     sp_add_nb  constant_nb 
+     sp_if_0_nb     top_nb      
      nested_if_0_nb nested_if_1_nb nested_if_2_nb'
 # pts='sp_add top'
 
