@@ -1,0 +1,2 @@
+B as sp_add
+%out = B.(a:$a, b:$b)

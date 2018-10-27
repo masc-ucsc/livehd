@@ -5,8 +5,11 @@ rm -f  ./logs/*.log
 rm -f  ./lgshell_cmds
 rm -f  ./lgshell_cmds_opt
 mkdir logs
-
-pts='sp_add top constant sp_if_0 top_ooo sp_add_ooo nested_if_0 nested_if_1 nested_if_2'
+echo "sandbox path is:"
+echo "$(pwd)"
+pts='sp_add_nb      top_nb         constant_nb 
+     sp_if_0_nb     top_ooo_nb     sp_add_ooo_nb 
+     nested_if_0_nb nested_if_1_nb nested_if_2_nb'
 # pts='sp_add top'
 
 LGSHELL=./bazel-bin/main/lgshell
@@ -40,57 +43,57 @@ done
 
 cat lgshell_cmds | ${LGSHELL}
 
-echo ""
-echo "2nd round: DFG optimization"
-echo ""
+# echo ""
+# echo "2nd round: DFG optimization"
+# echo ""
 
-for pt in $pts
-do
-  echo "lgraph.open name:"$pt" |> pass.dfg.optimize"                      >> lgshell_cmds_opt 
-  echo "lgraph.open name:"$pt" |> inou.json.fromlg output:"$pt".json"     >> lgshell_cmds_opt
-done
+# for pt in $pts
+# do
+#   echo "lgraph.open name:"$pt" |> pass.dfg.optimize"                      >> lgshell_cmds_opt 
+#   echo "lgraph.open name:"$pt" |> inou.json.fromlg output:"$pt".json"     >> lgshell_cmds_opt
+# done
 
-cat lgshell_cmds_opt | ${LGSHELL}
+# cat lgshell_cmds_opt | ${LGSHELL}
 
-echo ""
-echo "Verilog code generation"
-echo ""
-for pt in $pts
-do
-  ./inou/yosys/lgyosys -g"$pt"
-  if [ $? -eq 0 ]; then
-    echo "Successfully created verilog:"$pt".v"
-  else
-    echo "FAIL: verilog generation terminated with an error (testcase "$pt".v)"
-    exit 1
-  fi
-done
+# echo ""
+# echo "Verilog code generation"
+# echo ""
+# for pt in $pts
+# do
+#   ./inou/yosys/lgyosys -g"$pt"
+#   if [ $? -eq 0 ]; then
+#     echo "Successfully created verilog:"$pt".v"
+#   else
+#     echo "FAIL: verilog generation terminated with an error (testcase "$pt".v)"
+#     exit 1
+#   fi
+# done
 
-echo ""
-echo "Logic Equivalence Check"
-echo ""
-cp ./inou/cfg/tests/verilog_gld/*.* ./
+# echo ""
+# echo "Logic Equivalence Check"
+# echo ""
+# cp ./inou/cfg/tests/verilog_gld/*.* ./
 
-for pt in $pts
-do
-  if [ "$pt" = "top" ]; then
-    ./inou/yosys/lgcheck -r"top_gld.v sp_add_gld.v"  -i"top.v sp_add.v"
+# for pt in $pts
+# do
+#   if [ "$pt" = "top" ]; then
+#     ./inou/yosys/lgcheck -r"top_gld.v sp_add_gld.v"  -i"top.v sp_add.v"
 
-  elif [ "$pt" = "top_ooo" ]; then
-    ./inou/yosys/lgcheck -r"top_ooo_gld.v sp_add_ooo_gld.v"  -i"top_ooo.v sp_add_ooo.v"
+#   elif [ "$pt" = "top_ooo" ]; then
+#     ./inou/yosys/lgcheck -r"top_ooo_gld.v sp_add_ooo_gld.v"  -i"top_ooo.v sp_add_ooo.v"
 
-  else
-    ./inou/yosys/lgcheck -r"$pt"_gld.v -i"$pt".v
-  fi
+#   else
+#     ./inou/yosys/lgcheck -r"$pt"_gld.v -i"$pt".v
+#   fi
 
 
-  if [ $? -eq 0 ]; then
-    echo "Successfully pass logic equivilence check!"
-  else
-    echo "FAIL: "$pt".v !== "$pt"_gld.v"
-    exit 1
-  fi
-done
+#   if [ $? -eq 0 ]; then
+#     echo "Successfully pass logic equivilence check!"
+#   else
+#     echo "FAIL: "$pt".v !== "$pt"_gld.v"
+#     exit 1
+#   fi
+# done
 
 
 mv *.json ./logs
