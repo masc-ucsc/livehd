@@ -4,7 +4,7 @@
 #include <string>
 
 void test0(int n) {
-  Char_Array<int> test1("test0");
+  Char_Array<uint32_t> test1("test0");
   test1.clear();
   std::string foo = "a";
 
@@ -17,7 +17,7 @@ void test0(int n) {
 }
 
 void test1(int n) {
-  Char_Array<uint64_t> test1("test1");
+  Char_Array<int64_t> test1("test1");
   test1.clear();
   std::string foo = "a";
 

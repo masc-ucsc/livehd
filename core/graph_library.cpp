@@ -13,7 +13,7 @@ uint32_t Graph_library::reset_id(const std::string &name) {
   const auto &it = name2id.find(name);
   if(it != name2id.end()) {
     graph_library_clean = false;
-    attribute[it->second].version = ++max_version;
+    attribute[it->second].version = max_next_version++;
     return it->second;
   }
   return add_name(name);
@@ -45,7 +45,7 @@ uint32_t Graph_library::add_name(const std::string &name) {
 
   graph_library_clean = false;
   attribute[id].name  = name;
-  attribute[id].version  = ++max_version;
+  attribute[id].version  = max_next_version++;
   attribute[id].nopen  = 0;
 
   assert(name2id.find(name) == name2id.end());
@@ -57,18 +57,18 @@ uint32_t Graph_library::add_name(const std::string &name) {
 void Graph_library::update(uint32_t lgid) {
   assert(lgid < attribute.size());
 
-  if (attribute[lgid].version == max_version)
+  if (attribute[lgid].version == (max_next_version-1))
     return;
 
   graph_library_clean = false;
-  attribute[lgid].version = ++max_version;
+  attribute[lgid].version = max_next_version++;
 }
 
 void Graph_library::reload() {
 
 	assert(graph_library_clean);
 
-  max_version = 0;
+  max_next_version = 1;
   std::ifstream graph_list;
 
   graph_list.open(path + "/" + library_file);
@@ -103,13 +103,13 @@ void Graph_library::reload() {
 
   for(size_t idx = 0; idx < n_graphs; ++idx) {
     std::string name;
-    int         graph_version;
+    uint32_t    graph_version;
     size_t      graph_id;
 
     graph_list >> name >> graph_id >> graph_version;
 
-    if (graph_version>=max_version)
-      max_version = graph_version;
+    if (graph_version>=max_next_version)
+      max_next_version = graph_version+1;
 
     name2id[name] = graph_id;
 
