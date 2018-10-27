@@ -50,6 +50,7 @@ private:
 
   RTLIL::Wire *create_wire(const LGraph* g, const Index_ID idx, RTLIL::Module* module, bool input, bool output);
 
+  void create_blackbox(const LGraph& subgraph, RTLIL::Design* design);
 
   void create_wires(const LGraph *g, RTLIL::Module* module);
 
@@ -61,6 +62,10 @@ public:
 
   void fromlg(std::vector<const LGraph *> &out) final {
     for(const auto &g : out) {
+      if (!g) {
+        console->warn("lgraph not found\n");
+        continue;
+      }
       std::cout << g->get_name() << std::endl;
       to_yosys(g);
     }
