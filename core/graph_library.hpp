@@ -25,12 +25,12 @@ class LGraph;
 
 class Graph_library {
 protected:
-  uint32_t   max_version;
+  uint32_t   max_next_version;
   const std::string          path;
   const std::string          library_file;
   struct Graph_attributes {
     std::string name; // NOTE: No const as names can change (reload)
-    int version; // In which sequence order were the graphs last modified
+    uint32_t version; // In which sequence order were the graphs last modified
     int nopen;
     Graph_attributes() {
       clear();
@@ -51,7 +51,7 @@ protected:
   bool           graph_library_clean;
 
   Graph_library() {
-    max_version = 0;
+    max_next_version = 1;
   }
 
   explicit Graph_library(const std::string &_path);
@@ -92,7 +92,7 @@ public:
 
   void update(uint32_t lgid);
 
-  int get_version(uint32_t lgid) const {
+  uint32_t get_version(uint32_t lgid) const {
     if (attribute.size() >= lgid)
       return 0; // Invalid ID
 
@@ -112,7 +112,7 @@ public:
     return Graph_library::global_instances[path];
   }
 
-  int get_max_version() const { return max_version-1; }
+  uint32_t get_max_version() const { assert(max_next_version>0); return max_next_version-1; }
 
   void each_graph(std::function<void(const std::string &, uint32_t lgid)> f1) const;
 

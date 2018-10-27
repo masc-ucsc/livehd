@@ -193,12 +193,17 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module* module) {
           continue;
 
         visited_out_pids.insert(edge.get_out_pin().get_pid());
-        const char *out_name = subgraph->get_graph_output_name_from_pid(edge.get_out_pin().get_pid());
-        uint16_t    out_size = subgraph->get_bits(subgraph->get_graph_output(out_name).get_nid());
 
-        std::string full_name = name.str() + std::string(out_name);
+        Index_ID port_nid = g->find_idx_from_pid(idx, edge.get_out_pin().get_pid());
+        if (g->get_wid(port_nid)) {
+          name = "\\" + std::string(g->get_node_wirename(port_nid));
+        } else {
+          const char *out_name = subgraph->get_graph_output_name_from_pid(edge.get_out_pin().get_pid());
+          name = name.str() + std::string(out_name);
+        }
+        uint16_t    out_size = g->get_bits(port_nid);
 
-        RTLIL::Wire *new_wire                                              = module->addWire(full_name, out_size);
+        RTLIL::Wire *new_wire                                              = module->addWire(name, out_size);
         cell_output_map[std::make_pair(idx, edge.get_out_pin().get_pid())] = new_wire;
       }
       continue;
