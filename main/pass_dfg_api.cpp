@@ -1,4 +1,3 @@
-
 #include "eprp_utils.hpp"
 #include "pass_dfg.hpp"
 #include "main_api.hpp"
@@ -48,19 +47,28 @@ void Pass_dfg_api::optimize(Eprp_var &var) {
   pass_dfg.optimize(var.lgs[0]);
 }
 
+void Pass_dfg_api::pseudo_bitwidth(Eprp_var &var) {
+  Pass_dfg pass_dfg;
+  pass_dfg.pseudo_bitwidth(var.lgs[0]);
+}
+
 void Pass_dfg_api::setup(Eprp &eprp) {
   Eprp_method m1("pass.dfg.generate", "generate a dfg lgraph from a cfg lgraph", &Pass_dfg_api::generate);
   m1.add_label_optional("path","lgraph path");
   m1.add_label_required("name","lgraph name");
-  /* m1.add_label_required("file","src cfg lgraph file"); */
 
   eprp.register_method(m1);
 
   Eprp_method m2("pass.dfg.optimize", "optimize a dfg lgraph", &Pass_dfg_api::optimize);
   m2.add_label_optional("path","lgraph path");
   m2.add_label_optional("name","lgraph name");
-  /* m2.add_label_required("file","src dfg lgraph file"); */
 
   eprp.register_method(m2);
+
+  Eprp_method m3("pass.dfg.pseudo_bitwidth", "patch fake bitwidth for a dfg lgraph", &Pass_dfg_api::pseudo_bitwidth);
+  m3.add_label_optional("path","lgraph path");
+  m3.add_label_optional("name","lgraph name");
+
+  eprp.register_method(m3);
 }
 

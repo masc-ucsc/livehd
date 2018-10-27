@@ -34,8 +34,7 @@ public:
   void         optimize(LGraph * &ori_dfg);     //calls trans() to perform optimization
   void         trans(LGraph *orig);
   void         cfg_2_dfg(LGraph *dfg, const LGraph *cfg);
-  void         test_const_conversion();
-
+  void         pseudo_bitwidth(LGraph *dfg);
   void set(const std::string &key, const std::string &value) final {
     opack.set(key,value);
   }
