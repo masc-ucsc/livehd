@@ -234,7 +234,7 @@ void Inou_yosys_api::tolg(Eprp_var &var) {
 
   auto gl = Graph_library::instance(path);
 
-  int max_version = gl->get_max_version();
+  uint32_t max_version = gl->get_max_version();
 
   gl->sync(); // Before calling remote thread in do_work
 

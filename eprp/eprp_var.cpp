@@ -28,6 +28,12 @@ void Eprp_var::add(const std::string &name, const std::string &value) {
   dict[name] = value;
 }
 
+void Eprp_var::delete_label(const std::string &name) {
+  auto it = dict.find(name);
+  if (it != dict.end())
+    dict.erase(it);
+}
+
 const std::string Eprp_var::get(const std::string &name) const {
   const auto &elem = dict.find(name);
   if (elem == dict.end()) {
