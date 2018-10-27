@@ -107,6 +107,31 @@ RTLIL::Wire* Lgyosys_dump::create_wire(const LGraph *g, const Index_ID idx, RTLI
   return new_wire;
 }
 
+void Lgyosys_dump::create_blackbox(const LGraph& subgraph, RTLIL::Design *design) {
+
+  RTLIL::Module *mod = new RTLIL::Module;
+  mod->name = "\\" + subgraph.get_name();
+  mod->attributes["\\blackbox"] = RTLIL::Const(1);
+  design->add(mod);
+
+  uint32_t port_idx = 0;
+  for (auto &idx : subgraph.fast()) {
+    if (subgraph.node_type_get(idx).op != GraphIO_Op)
+      continue;
+    std::string name = "\\";
+    if (subgraph.is_graph_input(idx)) {
+     name += subgraph.get_graph_input_name(idx);
+    } else {
+     name += subgraph.get_graph_output_name(idx);
+    }
+    RTLIL::Wire *wire = mod->addWire(name, subgraph.get_bits(idx));
+    wire->port_id = port_idx++; //FIXME: update to get from graph
+    wire->port_input = subgraph.is_graph_input(idx);
+    wire->port_output = subgraph.is_graph_output(idx);
+  }
+  mod->fixup_ports();
+}
+
 void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module* module) {
 
   // first create all the output wires
@@ -991,6 +1016,8 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       }
       if(hierarchy) {
         _subgraphs.insert(subgraph);
+      } else {
+        create_blackbox(*subgraph, module->design);
       }
 
       RTLIL::IdString instance_name("\\tmp");
