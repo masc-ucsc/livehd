@@ -1,2 +1,5 @@
 B as sp_add
+$a as __bits:1
+$b as __bits:1
+%out as __bits:2
 %out = B.(a:$a, b:$b)
