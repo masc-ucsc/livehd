@@ -47,7 +47,7 @@ LGraph *LGraph::create(const std::string &path, const std::string &name) {
       delete lg;
   }
 
-  return new LGraph(path, name, false);
+  return new LGraph(path, name, true);
 }
 
 LGraph *LGraph::open(const std::string &path, int lgid) {
