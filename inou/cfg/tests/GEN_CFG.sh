@@ -1,5 +1,5 @@
 #!/bin/bash
-#rm -f *.cfg
+rm -f *.cfg
 ~/pyrope/parser/bin/prp sp_add.prp          > yyy && column -t yyy > xxx && mv xxx sp_add.cfg
 ~/pyrope/parser/bin/prp top.prp             > yyy && column -t yyy > xxx && mv xxx top.cfg
 ~/pyrope/parser/bin/prp constant.prp        > yyy && column -t yyy > xxx && mv xxx constant.cfg
@@ -19,3 +19,8 @@
 ~/pyrope/parser/bin/prp nested_if_2_nb.prp  > yyy && column -t yyy > xxx && mv xxx nested_if_2_nb.cfg && rm -f yyy
 ~/pyrope/parser/bin/prp nested_if_3_nb.prp  > yyy && column -t yyy > xxx && mv xxx nested_if_3_nb.cfg && rm -f yyy
 ~/pyrope/parser/bin/prp if_elif_else_nb.prp > yyy && column -t yyy > xxx && mv xxx if_elif_else_nb.cfg && rm -f yyy
+
+cp top.cfg        top_ooo.cfg
+cp top_nb.cfg     top_ooo_nb.cfg
+
+
