@@ -23,7 +23,7 @@
 #include "pass_dce_api.hpp"
 #include "pass_dfg_api.hpp"
 #include "pass_opentimer_api.hpp"
-#include "pass_topological_api.hpp"
+#include "pass_sample_api.hpp"
 
 #include "eprp_utils.hpp"
 
@@ -50,7 +50,7 @@ void Main_api::init() {
   Pass_dce_api::setup(eprp);         // pass.dce.*
   Pass_dfg_api::setup(eprp);         // pass.dfg.*
   Pass_opentimer_api::setup(eprp);   // pass.opentimer.*
-  Pass_topological_api::setup(eprp); // pass.topological.*
+  Pass_sample_api::setup(eprp);      // pass.sample.*
 
   Cops_live_api::setup(eprp);        // pass.dfg.*
 

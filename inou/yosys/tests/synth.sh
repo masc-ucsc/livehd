@@ -3,7 +3,8 @@
 
 declare -a inputs=("trivial.v" "null_port.v" "simple_flop.v" "test.v" "shift.v"\
                    "simple_add.v" \
-                   "offset.v" "submodule_offset.v" "mem.v" \
+                   #"offset.v" "submodule_offset.v" "mem.v" \
+                   "offset.v" "submodule_offset.v" \
                   "wires.v" "reduce.v" "add.v"  "assigns.v" \
                   )
 
