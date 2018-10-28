@@ -22,7 +22,7 @@ cc_binary(
             "//pass/abc:pass_abc",
             "//pass/dfg:pass_dfg",
             "//pass/dce:pass_dce",
-            "//pass/sample:pass_topological",
+            "//pass/sample:pass_sample",
 
             "//cops/live:cops_live",
     ],
