@@ -121,7 +121,7 @@ fi
 
 if [ ${OPT_TO_VERILOG} -eq 0 ]; then
 
-  if [ -d "${OPT_TESTDIR}" ]; then
+  if [ -f "${OPT_TESTDIR}/trivial.v" ]; then
     FILE_LIST=${OPT_TESTDIR}/*.v
     BASE=$(basename $OPT_TESTDIR)
   elif [ "${OPT_FILES}" != "" ]; then

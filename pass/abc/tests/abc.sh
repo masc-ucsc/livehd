@@ -10,7 +10,7 @@ declare -a inputs=("trivial.v" "test.v"\
                    "gates.v" "operators.v" \
                    #"offset.v" "submodule_offset.v" "mem.v" "mem2.v" \
                    )
-input_root=./inou/yosys/tests
+INPUT_ROOT=./inou/yosys/tests
 YOSYS=./inou/yosys/lgyosys
 LGSHELL=./bazel-bin/main/lgshell
 CHECK=./pass/abc/abc_check
@@ -24,12 +24,13 @@ if [ ! -f ${LGSHELL} ]; then
   fi
 fi
 
-pwd
 for input in ${inputs[@]}
 do
-
   base=${input%.*}
-  ${YOSYS} --techmap --top=${base} ${input_root}/${input}
+
+  echo "checking ${INPUT_ROOT}/${input} base:${base}"
+
+  ${YOSYS} --techmap --top=${base} ${INPUT_ROOT}/${input}
 
   if [ ! $? -eq 0 ]; then
     echo "yosys2lg failed ${base}"
@@ -55,5 +56,5 @@ do
 done
 
 rm -rf ./*.genlib
-rm -rf ./lgdb/ ./logs ./yosys-test ./*.v ./*.blif
+rm -rf ./lgdb/ ./logs ./yosys-test
 
