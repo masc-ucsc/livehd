@@ -131,16 +131,14 @@ TEST_F(MainTest, MultiComments) {
   std::string l2 = read_line_plain(); // files:
   std::string l3 = read_line_plain(); // files:
   std::string l4 = read_line_plain(); // match:xxx$
-  std::string l5 = read_line_plain(); // path:.
-  std::string l6 = read_line_plain(); // path:.
+  std::string l5 = read_line_plain(); // dump
 
   EXPECT_THAT(l0, HasSubstr("dump")); // It has escape characters, just match a word
   EXPECT_THAT(l1, HasSubstr("dump"));
   EXPECT_THAT(l2, HasSubstr("lgraph.dump labels:"));
   EXPECT_THAT(l3, HasSubstr("files:"));
   EXPECT_THAT(l4, HasSubstr("match:xxx$"));
-  EXPECT_THAT(l5, HasSubstr("path:."));
-  EXPECT_THAT(l6, HasSubstr("lgraph.dump lgraphs:"));
+  EXPECT_THAT(l5, HasSubstr("lgraph.dump lgraphs:"));
 }
 
 TEST_F(MainTest, Autocomplete) {

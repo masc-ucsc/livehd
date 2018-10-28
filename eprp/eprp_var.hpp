@@ -45,6 +45,9 @@ public:
 
   void add(LGraph *lg);
   void add(const std::string &name, const std::string &value);
+
+  void delete_label(const std::string &name);
+
   bool has_label(const std::string &name) const { return dict.find(name) != dict.end(); };
   const std::string get(const std::string &name) const;
   const std::string get(const std::string &name, const std::string &def_val) const;
