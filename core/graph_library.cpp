@@ -139,8 +139,8 @@ void Graph_library::each_graph(std::function<void(const std::string &, uint32_t 
 }
 
 bool Graph_library::expunge_lgraph(const std::string &name, const LGraph *lg) {
-  if (global_name2lgraph[path][name] == lg) {
-    console->warn("graph_library::delete_lgraph({}) for a wrong graph??? path:{}", name, path);
+  if (global_name2lgraph[path][name] != lg) {
+    console->warn("graph_library::expunge_lgraph({}) for a wrong graph??? path:{}", name, path);
     return true;
   }
   global_name2lgraph[path].erase(global_name2lgraph[path].find(name));
@@ -179,11 +179,7 @@ bool Graph_library::unregister_lgraph(const std::string &name, uint32_t lgid, co
   attribute[lgid].nopen--;
 
   if (attribute[lgid].nopen==0) {
-    fmt::print("TODO: garbage collect lgraph {}\n", name);
-    bool done = expunge_lgraph(name, lg);
-    if (done)
-      return true;
-    recycled_id.push_back(lgid);
+    fmt::print("TODO: garbage collect lgraph mmaps {}\n", name);
     return true;
   }
 

@@ -10,3 +10,13 @@ cc_library(
         "//core:core",
     ]
 )
+
+sh_test(
+    name = "pass_test1.sh",
+    srcs = ["tests/pass_test1.sh"],
+    data = [
+        "//inou/yosys:liblgraph_yosys.so",
+        "//main:lgshell",
+        ],
+)
+
