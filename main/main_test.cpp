@@ -59,7 +59,9 @@ protected:
     std::string line;
     char buffer;
     while(1) {
+      //std::cout << "y\n";
       int sz = read(master,&buffer,1);
+      //std::cout << "xx[" << buffer <<  "]\n";
       if (sz != 1)
         break;
 
@@ -121,7 +123,7 @@ TEST_F(MainTest, MultiComments) {
 
   drain_stdin();
   //std::string subcmd = "/* ERROR */ files path:. /* COMMENT */ match:\"xxx$\" |> dump // more #";
-  std::string subcmd = "/*asdasd */ files path:. /*zzz*/ match:\"xxx$\" |> dump // more #";
+  std::string subcmd = "/*asdasd */ fil\t path:. /*zzz*/ match:\"xxx$\" |> dump // more #";
   std::string cmd = subcmd + "\n";
 
   write(master,cmd.c_str(),cmd.size());
@@ -154,6 +156,24 @@ TEST_F(MainTest, Autocomplete) {
   EXPECT_THAT(l0, HasSubstr("fil")); // It has escape colors, just match word
   EXPECT_THAT(l1, HasSubstr("files"));
 }
+
+#if 0
+TEST_F(MainTest, LabelsComplete) {
+
+  drain_stdin();
+  std::string cmd = "files pa\t:nothing#\n";
+
+  write(master,cmd.c_str(),cmd.size());
+
+  std::string l0 = read_line();
+  std::string l1 = read_line();
+  std::cout << "labels:" << l0 << std::endl;
+  std::cout << "labels:" << l1 << std::endl;
+
+  EXPECT_THAT(l0, HasSubstr("path:"));
+  EXPECT_THAT(l0, HasSubstr("nothing"));
+}
+#endif
 
 TEST_F(MainTest, Help) {
 
