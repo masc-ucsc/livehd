@@ -7,10 +7,11 @@ rm -f  ./lgshell_cmds_opt
 mkdir logs
 echo "sandbox path is:"
 echo "$(pwd)"
-pts='top_ooo_nb     sp_add_nb  constant_nb 
-     sp_if_0_nb     top_nb      
-     nested_if_0_nb nested_if_1_nb nested_if_2_nb'
-# pts='sp_add top'
+
+
+pts='top_ooo  sp_add  constant  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2  if_elif_else'
+# pts='top_ooo  sp_add  constant  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2 '
+# pts='nested_if_2'
 
 LGSHELL=./bazel-bin/main/lgshell
 
@@ -42,32 +43,35 @@ do
 done
 
 cat lgshell_cmds | ${LGSHELL}
+mv *.json ./logs
 
-# echo ""
-# echo "2nd round: DFG optimization"
-# echo ""
+ echo ""
+ echo "2nd round: DFG optimization"
+ echo ""
 
-# for pt in $pts
-# do
-#   echo "lgraph.open name:"$pt" |> pass.dfg.optimize"                      >> lgshell_cmds_opt 
-#   echo "lgraph.open name:"$pt" |> inou.json.fromlg output:"$pt".json"     >> lgshell_cmds_opt
-# done
+ for pt in $pts
+ do
+   echo "lgraph.open name:"$pt" |> pass.dfg.optimize"                      >> lgshell_cmds_opt 
+   echo "lgraph.open name:"$pt" |> pass.dfg.pseudo_bitwidth"               >> lgshell_cmds_opt 
+   echo "lgraph.open name:"$pt" |> inou.json.fromlg output:"$pt".json"     >> lgshell_cmds_opt
+ done
 
-# cat lgshell_cmds_opt | ${LGSHELL}
+cat lgshell_cmds_opt | ${LGSHELL}
+mv *.json ./logs
 
-# echo ""
-# echo "Verilog code generation"
-# echo ""
-# for pt in $pts
-# do
-#   ./inou/yosys/lgyosys -g"$pt"
-#   if [ $? -eq 0 ]; then
-#     echo "Successfully created verilog:"$pt".v"
-#   else
-#     echo "FAIL: verilog generation terminated with an error (testcase "$pt".v)"
-#     exit 1
-#   fi
-# done
+echo ""
+echo "Verilog code generation"
+echo ""
+for pt in $pts
+do
+  ./inou/yosys/lgyosys -g"$pt"
+  if [ $? -eq 0 ]; then
+    echo "Successfully created verilog:"$pt".v"
+  else
+    echo "FAIL: verilog generation terminated with an error (testcase "$pt".v)"
+    exit 1
+  fi
+done
 
 # echo ""
 # echo "Logic Equivalence Check"
@@ -96,7 +100,6 @@ cat lgshell_cmds | ${LGSHELL}
 # done
 
 
-mv *.json ./logs
 rm -f *_dirty.v
 rm -f *_gld.v
 mv *.v    ./logs

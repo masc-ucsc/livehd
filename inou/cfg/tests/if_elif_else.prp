@@ -1,13 +1,13 @@
 $a as __bits:2
 %o as __bits:3
 
-%o = 1
-if $a == 1 {
-  %o = 2
+%o = 4
+if $a == 2 {
+  %o = 5
 }
-elif $a == 2 {
-  %o = 3
+elif $a == 3 {
+  %o = 6
 }
 else{
-  %o = 4
+  %o = 7
 }
