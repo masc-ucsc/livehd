@@ -60,7 +60,7 @@ LGraph *LGraph::open(const std::string &path, const std::string &name) {
   LGraph *lg = Graph_library::try_find_lgraph(path,name);
   if (lg) {
     assert(Graph_library::instance(path));
-    Graph_library::instance(path)->register_lgraph(name, lg);
+    lg->lgraph_id = Graph_library::instance(path)->register_lgraph(name, lg);
     return lg;
   }
 
@@ -71,10 +71,10 @@ LGraph *LGraph::open(const std::string &path, const std::string &name) {
 }
 
 void LGraph::close() {
+
 	library->unregister_lgraph(name, lgraph_id, this);
 
-  if (locked)
-    library->update(lgraph_id);
+  LGraph_Base::close();
 
 	sync();
 }

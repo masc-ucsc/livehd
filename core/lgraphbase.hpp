@@ -29,6 +29,7 @@ protected:
   // std::vector<Node_Internal, AAlloc::AlignedAllocator<Node_Internal,4096> > node_internal;
   bool        locked;
   Port_ID     io_nums = 1;
+  int         lgraph_id;
 
   typedef std::pair<Index_ID, Port_ID> io_t; // node id and position at verilog
 
@@ -83,6 +84,10 @@ public:
 
   explicit LGraph_Base(const std::string &path, const std::string &_name) noexcept;
   virtual ~LGraph_Base();
+
+  void close();
+
+  int lg_id() const { return lgraph_id; }
 
   const Graph_library *get_library() const { return library; }
 

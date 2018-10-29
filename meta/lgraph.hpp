@@ -22,12 +22,9 @@ class LGraph :  public LGraph_Node_Delay
               , public LGraph_Node_Place
                {
 protected:
-  //static uint32_t                                               lgraph_counter;
-  int         lgraph_id;
 
   Index_ID create_node_int() final;
 
-  //explicit LGraph(const std::string &path);
   explicit LGraph(const std::string &path, const std::string &name, bool clear);
 
 public:
@@ -40,8 +37,6 @@ public:
   static LGraph *open(const std::string &path, int lgid);
   static LGraph *open(const std::string &path, const std::string &name);
   void close();
-
-  int lg_id() const { return lgraph_id; }
 
   void clear() override;
   void reload() override;

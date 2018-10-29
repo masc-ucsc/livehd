@@ -8,12 +8,14 @@
 
 #include "lgedgeiter.hpp"
 #include "lgraphbase.hpp"
+#include "graph_library.hpp"
 
 LGraph_Base::LGraph_Base(const std::string &_path, const std::string &_name) noexcept
     : Lgraph_base_core(_path, _name)
     , LGraph_Node_Type(_path, _name)
     , input_array(_path + "/lgraph_" + _name + "_inputs")
     , output_array(_path + "/lgraph_" + _name + "_outputs") {
+
 
   library  = Graph_library::instance(path);
   tlibrary = Tech_library::instance(path);
@@ -22,6 +24,12 @@ LGraph_Base::LGraph_Base(const std::string &_path, const std::string &_name) noe
 }
 
 LGraph_Base::~LGraph_Base() {
+}
+
+void LGraph_Base::close() {
+
+  if (locked)
+    library->update(lgraph_id);
 }
 
 LGraph_Base::_init::_init() {
@@ -44,10 +52,16 @@ void LGraph_Base::clear() {
   // whenever we clean, we unlock
   std::string lock = path + "/" + long_name + ".lock";
   unlink(lock.c_str());
+
+  library->update_nentries(lg_id(), 0);
+
   locked = false;
 }
 
 void LGraph_Base::sync() {
+
+  if (locked)
+    library->update_nentries(lg_id(), node_internal.size());
 
   library->sync();
   tlibrary->sync();
@@ -64,6 +78,9 @@ void LGraph_Base::sync() {
 }
 
 void LGraph_Base::emplace_back() {
+
+  assert(locked);
+
   node_internal.emplace_back();
 
   Index_ID nid = node_internal.size() - 1;
@@ -81,13 +98,13 @@ void LGraph_Base::get_lock() {
     return;
 
   std::string lock = path + "/" + long_name + ".lock";
-  int         err  = open(lock.c_str(), O_CREAT | O_EXCL, 420); // 644
+  int         err  = ::open(lock.c_str(), O_CREAT | O_EXCL, 420); // 644
   if(err < 0) {
     console->error("Could not get lock:{}. Already running? Unclear exit?", lock.c_str());
     throw std::runtime_error("could not get lock");
     exit(-3);
   }
-  close(err);
+  ::close(err);
 
   locked = true;
 }
