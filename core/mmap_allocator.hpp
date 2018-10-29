@@ -147,13 +147,16 @@ public:
 
     *mmap_base = size;
     file_size  = sizeof(T) * size + MMAPA_ALIGN_SIZE;
-    // file_size  = sizeof(T)*size;
-    // file_size  = sizeof(T)*size+MMAPA_ALIGN_SIZE;
+
     msync(mmap_base, file_size, MS_SYNC);
   }
 
   size_t capacity() const {
     return mmap_capacity;
+  }
+
+  const std::string &get_filename() const {
+    return mmap_name;
   }
 
 protected:

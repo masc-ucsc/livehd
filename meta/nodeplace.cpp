@@ -14,7 +14,8 @@ void LGraph_Node_Place::clear() {
 }
 
 void LGraph_Node_Place::reload() {
-  node_place.reload();
+  uint64_t sz = library->get_nentries(lgraph_id);
+  node_place.reload(sz);
 }
 
 void LGraph_Node_Place::sync() {

@@ -26,7 +26,6 @@ class Edge_iterator;
 
 class LGraph_Base : public LGraph_Node_Type {
 protected:
-  // std::vector<Node_Internal, AAlloc::AlignedAllocator<Node_Internal,4096> > node_internal;
   bool        locked;
   Port_ID     io_nums = 1;
   int         lgraph_id;

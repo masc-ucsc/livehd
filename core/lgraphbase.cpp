@@ -111,7 +111,9 @@ void LGraph_Base::get_lock() {
 
 void LGraph_Base::reload() {
 
-  node_internal.reload();
+  auto sz = library->get_nentries(lgraph_id);
+
+  node_internal.reload(sz);
   input_array.reload();
   output_array.reload();
 
@@ -131,7 +133,7 @@ void LGraph_Base::reload() {
 
   recompute_io_ports();
 
-  LGraph_Node_Type::reload();
+  LGraph_Node_Type::reload(sz);
 }
 
 void LGraph_Base::recompute_io_ports() {
