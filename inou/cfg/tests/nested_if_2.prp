@@ -1,11 +1,11 @@
 $a    as __bits:8
-%out1 as __bits:9
-%out2 as __bits:9
+%out1 as __bits:8
+%out2 as __bits:8
 %out3 as __bits:8
 
 
-if ($a >= 128){
-  if ($a == 255){
+if ($a > 200){
+  if ($a == 201){
     %out1 = $a + 10
   }
   else {
@@ -13,10 +13,10 @@ if ($a >= 128){
   }
 }
 else {
-  if ($a <= 127){
+  if ($a == 128){
     %out3 = $a + 12
   }
   else {
-    %out1 = $a + 13
+    %out1 = $a + 1
   }
 }

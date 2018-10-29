@@ -33,17 +33,17 @@ void Pass_dfg::trans(LGraph *dfg) {
   LGraph* sub_graph = nullptr;
   //resolve pending graph
   for(auto idx : dfg->fast()) {
-    if(dfg->node_type_get(idx).op == DfgPendingGraph_Op){
+    if (dfg->node_type_get(idx).op == DfgPendingGraph_Op) {
       const std::string wirename = dfg->get_node_wirename(idx);
       sub_graph = LGraph::open(dfg->get_path(), wirename);
       assert(sub_graph);
 
-      dfg->node_subgraph_set(idx, (uint32_t)sub_graph->lg_id());
-      fmt::print("resolve pending subgraph! nid:{}, sub_graph name:{}, sub_graph_id:{}\n", idx, dfg->get_node_wirename(idx), sub_graph->lg_id());
+      dfg->node_subgraph_set(idx, (uint32_t) sub_graph->lg_id());
+      fmt::print("resolve pending subG! nid:{}, subG name:{}\n", idx, dfg->get_node_wirename(idx));
     }
   }
 
-//first round: if Equals_Op -> set bit_width = 1
+
   for(auto idx : dfg->fast()) {
     for(const auto &out : dfg->out_edges(idx)) {
       Index_ID src_nid      = idx;
@@ -53,6 +53,7 @@ void Pass_dfg::trans(LGraph *dfg) {
       uint16_t src_nid_size = dfg->get_bits(src_nid);
       uint16_t dst_nid_size = dfg->get_bits(dst_nid);
 
+      //if Equals_Op -> set bit_width = 1
       if(dfg->node_type_get(idx).op == Mux_Op){
         ;
       }else if(dfg->node_type_get(idx).op == Equals_Op){
@@ -71,34 +72,74 @@ void Pass_dfg::trans(LGraph *dfg) {
     }
   }
 }
-
 void Pass_dfg::pseudo_bitwidth(LGraph *dfg) {
-  //first round: looking for bitwidth 0 and set to 13
+  //bits inference: first round: deal with src bw > dst bw
   for(auto idx : dfg->fast()) {
     for(const auto &out : dfg->out_edges(idx)) {
       Index_ID src_nid      = idx;
       Index_ID dst_nid      = out.get_idx();
       Port_ID  src_pid      = out.get_out_pin().get_pid();
-      Port_ID  dst_pid      = out.get_inp_pin().get_pid();
+      //Port_ID  dst_pid      = out.get_inp_pin().get_pid();
       uint16_t src_nid_size = dfg->get_bits(src_nid);
       uint16_t dst_nid_size = dfg->get_bits(dst_nid);
 
-      if(dfg->get_bits(src_nid) == 0)
-        dfg->set_bits(src_nid,13);
-
-      if(dfg->get_bits(dst_nid) == 0)
-        dfg->set_bits(dst_nid,13);
-
-      if(dfg->node_type_get(dst_nid).op == Mux_Op){
-        switch(dst_pid){
-          case 0:break;
-          case 1:dfg->get_bits_pid(dst_nid, 2); //To do 10/27
-          case 2:;
-          default:break;
-        }
+      if(dfg->node_type_get(idx).op == SubGraph_Op){
+        LGraph *subgraph = LGraph::open(dfg->get_path(), dfg->subgraph_id_get(idx));
+        const char *out_name = subgraph->get_graph_output_name_from_pid(src_pid);
+        uint16_t    out_size = subgraph->get_bits(subgraph->get_graph_output(out_name).get_nid());
+        dfg->set_bits(dst_nid,out_size);
+      }else if(dfg->node_type_get(dst_nid).op == Mux_Op){
+        ;
+      }else if(dfg->node_type_get(dst_nid).op == Equals_Op){
+        ;//don't infetence when dst is a comparator, the result should be a bool
+      }else if(dfg->node_type_get(dst_nid).op == GreaterEqualThan_Op){
+        ;//don't infetence when dst is a comparator, the result should be a bool
+      }else if(dfg->node_type_get(dst_nid).op == GreaterThan_Op){
+        ;//don't infetence when dst is a comparator, the result should be a bool
+      }else if(dfg->node_type_get(dst_nid).op == LessEqualThan_Op){
+        ;//don't infetence when dst is a comparator, the result should be a bool
+      }else if(dfg->node_type_get(dst_nid).op == LessThan_Op){
+        ;//don't infetence when dst is a comparator, the result should be a bool
+      }else{
+        if(src_nid_size > dst_nid_size)
+          dfg->set_bits(dst_nid, src_nid_size);
       }
     }
   }
+  //bits inference: second round: deal with src bw < dst bw
+  for(auto idx : dfg->backward()) {
+    for(const auto &out : dfg->out_edges(idx)) {
+      Index_ID src_nid      = idx;
+      Index_ID dst_nid      = out.get_idx();
+      //Port_ID  src_pid      = out.get_out_pin().get_pid();
+      //Port_ID  dst_pid      = out.get_inp_pin().get_pid();
+      uint16_t src_nid_size = dfg->get_bits(src_nid);
+      uint16_t dst_nid_size = dfg->get_bits(dst_nid);
+      if(dfg->node_type_get(src_nid).op == GraphIO_Op){
+        ;
+      }else if(dfg->node_type_get(src_nid).op == Equals_Op){
+        ;//don't infetence when src is a comparator, the result should be a bool
+      }else if(dfg->node_type_get(src_nid).op == GreaterEqualThan_Op){
+        ;//don't infetence when src is a comparator, the result should be a bool
+      }else if(dfg->node_type_get(src_nid).op == GreaterThan_Op){
+        ;//don't infetence when src is a comparator, the result should be a bool
+      }else if(dfg->node_type_get(src_nid).op == LessEqualThan_Op){
+        ;//don't infetence when src is a comparator, the result should be a bool
+      }else if(dfg->node_type_get(src_nid).op == LessThan_Op){
+        ;//don't infetence when src is a comparator, the result should be a bool
+      }else{
+        if(src_nid_size < dst_nid_size)
+          dfg->set_bits(src_nid, dst_nid_size);
+      }
+    }
+  }
+  //for(auto idx : dfg->fast()) {
+  //  //for now sum_op.size should be max(a.bits, b.bits)--> make it to max(a.bits, b.bits)+1 as a conservative algo.
+  //  if(dfg->node_type_get(idx).op == Sum_Op){
+  //    uint16_t idx_size = dfg->get_bits(idx);
+  //    dfg->set_bits(idx, idx_size+1);
+  //  }
+  //}
 }
 
 
@@ -599,65 +640,6 @@ void Pass_dfg_options::set(const std::string &key, const std::string &value) {
   console->warn("pass_dfg file:{} path:{} name:{}", file, path, name);
 }
 
-//bits inference: first round: deal with src bw > dst bw
-//for(auto idx : dfg->fast()) {
-//  for(const auto &out : dfg->out_edges(idx)) {
-//    Index_ID src_nid      = idx;
-//    Index_ID dst_nid      = out.get_idx();
-//    Port_ID  src_pid      = out.get_out_pin().get_pid();
-//    //Port_ID  dst_pid      = out.get_inp_pin().get_pid();
-//    uint16_t src_nid_size = dfg->get_bits(src_nid);
-//    uint16_t dst_nid_size = dfg->get_bits(dst_nid);
 
-//    if(dfg->node_type_get(idx).op == SubGraph_Op){
-//      LGraph *subgraph = LGraph::open(dfg->get_path(), dfg->subgraph_id_get(idx));
-//      const char *out_name = subgraph->get_graph_output_name_from_pid(src_pid);
-//      uint16_t    out_size = subgraph->get_bits(subgraph->get_graph_output(out_name).get_nid());
-//      dfg->set_bits(dst_nid,out_size);
-//    }else if(dfg->node_type_get(dst_nid).op == Mux_Op){
-//      ;
-//    }else if(dfg->node_type_get(dst_nid).op == Equals_Op){
-//      ;//don't infetence when dst is a comparator, the result should be a bool
-//    }else if(dfg->node_type_get(dst_nid).op == GreaterEqualThan_Op){
-//      ;//don't infetence when dst is a comparator, the result should be a bool
-//    }else if(dfg->node_type_get(dst_nid).op == GreaterThan_Op){
-//      ;//don't infetence when dst is a comparator, the result should be a bool
-//    }else if(dfg->node_type_get(dst_nid).op == LessEqualThan_Op){
-//      ;//don't infetence when dst is a comparator, the result should be a bool
-//    }else if(dfg->node_type_get(dst_nid).op == LessThan_Op){
-//      ;//don't infetence when dst is a comparator, the result should be a bool
-//    }else{
-//      if(src_nid_size > dst_nid_size)
-//        dfg->set_bits(dst_nid, src_nid_size);
-//    }
-//  }
-//}
-////bits inference: second round: deal with src bw < dst bw
-//for(auto idx : dfg->backward()) {
-//  for(const auto &out : dfg->out_edges(idx)) {
-//    Index_ID src_nid      = idx;
-//    Index_ID dst_nid      = out.get_idx();
-//    //Port_ID  src_pid      = out.get_out_pin().get_pid();
-//    //Port_ID  dst_pid      = out.get_inp_pin().get_pid();
-//    uint16_t src_nid_size = dfg->get_bits(src_nid);
-//    uint16_t dst_nid_size = dfg->get_bits(dst_nid);
-//    if(dfg->node_type_get(src_nid).op == GraphIO_Op){
-//      ;
-//    }else if(dfg->node_type_get(src_nid).op == Equals_Op){
-//      ;//don't infetence when src is a comparator, the result should be a bool
-//    }else if(dfg->node_type_get(src_nid).op == GreaterEqualThan_Op){
-//      ;//don't infetence when src is a comparator, the result should be a bool
-//    }else if(dfg->node_type_get(src_nid).op == GreaterThan_Op){
-//      ;//don't infetence when src is a comparator, the result should be a bool
-//    }else if(dfg->node_type_get(src_nid).op == LessEqualThan_Op){
-//      ;//don't infetence when src is a comparator, the result should be a bool
-//    }else if(dfg->node_type_get(src_nid).op == LessThan_Op){
-//      ;//don't infetence when src is a comparator, the result should be a bool
-//    }else{
-//      if(src_nid_size < dst_nid_size)
-//        dfg->set_bits(src_nid, dst_nid_size);
-//    }
-//  }
-//}
 
 

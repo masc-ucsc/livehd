@@ -2,4 +2,5 @@ a = 3
 b = 4u3bits
 $c as __bits:2
 $d as __bits:1
+%out as __bits:4
 %out = a + b + $c + $d

@@ -1,20 +1,20 @@
-$a    as __bits:4
+$a    as __bits:5
 %out1 as __bits:5
 %out2 as __bits:5
 %out3 as __bits:5
 %out4 as __bits:5
-%out5 as __bits:6
+%out5 as __bits:5
 
-%out1 = $a + 10
-%out3 = $a + 11
-%out5 = $a + 17
+%out1 = 16
+%out3 = 17
+%out5 = 18
 if ($a == 15){
-  %out1 = $a + 1
-  %out2 = $a + 2
-  %out5 = $a + 3
+  %out1 = 19
+  %out2 = 20
+  %out5 = 21
 }
 else{
-  %out3 = $a + 4
-  %out4 = $a + 5
-  %out5 = $a + 6
+  %out3 = 22
+  %out4 = 23
+  %out5 = 24
 }
