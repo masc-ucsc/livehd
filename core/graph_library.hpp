@@ -29,6 +29,7 @@ protected:
   const std::string          path;
   const std::string          library_file;
   struct Graph_attributes {
+    uint64_t    nentries;
     std::string name; // NOTE: No const as names can change (reload)
     uint32_t version; // In which sequence order were the graphs last modified
     int nopen;
@@ -36,9 +37,10 @@ protected:
       clear();
     }
     void clear() {
-      name = "INVALID";
-      nopen = 0;
-      version = 0;
+      name     = "INVALID";
+      nopen    = 0;
+      version  = 0;
+      nentries = 0;
     }
   };
   std::map<std::string, uint32_t>  name2id;
@@ -120,6 +122,8 @@ public:
 
   uint32_t register_lgraph(const std::string &name, LGraph *lg);
   bool     unregister_lgraph(const std::string &name, uint32_t lgid, const LGraph *lg);
+
+  void update_nentries(uint32_t lgid, uint64_t nentries);
 
   void sync() {
     clean_library();

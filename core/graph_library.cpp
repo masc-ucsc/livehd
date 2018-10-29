@@ -3,6 +3,7 @@
 #include <sys/types.h>
 #include <dirent.h>
 
+#include "nodetype.hpp"
 #include "graph_library.hpp"
 
 std::unordered_map<std::string, Graph_library *> Graph_library::global_instances;
@@ -46,7 +47,6 @@ uint32_t Graph_library::add_name(const std::string &name) {
   graph_library_clean = false;
   attribute[id].name  = name;
   attribute[id].version  = max_next_version++;
-  attribute[id].nopen  = 0;
 
   assert(name2id.find(name) == name2id.end());
   name2id[name] = id;
@@ -62,6 +62,15 @@ void Graph_library::update(uint32_t lgid) {
 
   graph_library_clean = false;
   attribute[lgid].version = max_next_version++;
+}
+
+void Graph_library::update_nentries(uint32_t lgid, uint64_t nentries) {
+  assert(lgid < attribute.size());
+
+  if (attribute[lgid].nentries != nentries) {
+    graph_library_clean = false;
+    attribute[lgid].nentries = nentries;
+  }
 }
 
 void Graph_library::reload() {
@@ -90,7 +99,16 @@ void Graph_library::reload() {
           continue;
         std::string name(dent->d_name + 7, len-5-7); 
 
-        add_name(name);
+        uint32_t lgid = add_name(name);
+        {
+          struct stat st;
+          std::string fname = path;
+          fname.append("/");
+          fname.append(dent->d_name);
+          int r = stat(fname.c_str(), &st);
+          assert(r==0);
+          attribute[lgid].nentries = st.st_size/sizeof(Node_Type_Op);
+        }
       }
       closedir(dir);
     }
@@ -105,8 +123,9 @@ void Graph_library::reload() {
     std::string name;
     uint32_t    graph_version;
     size_t      graph_id;
+    size_t      nentries;
 
-    graph_list >> name >> graph_id >> graph_version;
+    graph_list >> name >> graph_id >> graph_version >> nentries;
 
     if (graph_version>=max_next_version)
       max_next_version = graph_version+1;
@@ -119,6 +138,7 @@ void Graph_library::reload() {
 
     attribute[graph_id].name     = name;
     attribute[graph_id].version  = graph_version;
+    attribute[graph_id].nentries = nentries;
   }
 
   graph_list.close();
@@ -196,7 +216,7 @@ void Graph_library::clean_library() {
   graph_list << (attribute.size()-1) << std::endl;
   for(size_t id=1;id<attribute.size();id++) {
     const auto &it = attribute[id];
-    graph_list << it.name << " " << id << " " << it.version << std::endl;
+    graph_list << it.name << " " << id << " " << it.version << " " << it.nentries << std::endl;
   }
 
   graph_list.close();
