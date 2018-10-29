@@ -17,7 +17,8 @@ void LGraph_Node_Src_Loc::clear() {
 
 void LGraph_Node_Src_Loc::reload() {
   src_files.reload();
-  node_src_loc.reload();
+  uint64_t sz = library->get_nentries(lgraph_id);
+  node_src_loc.reload(sz);
 }
 
 void LGraph_Node_Src_Loc::sync() {

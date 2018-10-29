@@ -124,6 +124,11 @@ public:
   bool     unregister_lgraph(const std::string &name, uint32_t lgid, const LGraph *lg);
 
   void update_nentries(uint32_t lgid, uint64_t nentries);
+  uint64_t get_nentries(uint32_t lgid) const {
+    assert(attribute.size() >= lgid);
+
+    return attribute[lgid].nentries;
+  };
 
   void sync() {
     clean_library();

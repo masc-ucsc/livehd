@@ -44,6 +44,7 @@ public:
   };
 
 private:
+  // FIXME: CHANGE TO GOOGLE DENSE TO AVOID THE DIFFERENT RELOAD SIZE
   Dense<uint16_t> variable_internal;
 
   const uint16_t *first() const {
@@ -77,6 +78,8 @@ public:
   }
 
   void reload() {
+    variable_internal.reload(0);
+
     assert(pending_clear_reload); // called once
     pending_clear_reload = false;
 

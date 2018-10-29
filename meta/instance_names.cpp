@@ -15,7 +15,8 @@ void LGraph_InstanceNames::clear() {
 
 void LGraph_InstanceNames::reload() {
   names.reload();
-  instances.reload();
+  uint64_t sz = library->get_nentries(lgraph_id);
+  instances.reload(sz);
 }
 
 void LGraph_InstanceNames::sync() {

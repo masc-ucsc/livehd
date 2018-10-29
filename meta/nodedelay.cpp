@@ -14,7 +14,8 @@ void LGraph_Node_Delay::clear() {
 }
 
 void LGraph_Node_Delay::reload() {
-  node_delay.reload();
+  uint64_t sz = library->get_nentries(lgraph_id);
+  node_delay.reload(sz);
 }
 
 void LGraph_Node_Delay::sync() {

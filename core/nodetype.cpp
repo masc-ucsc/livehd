@@ -109,8 +109,8 @@ void LGraph_Node_Type::clear() {
   consts.clear();
 }
 
-void LGraph_Node_Type::reload() {
-  node_type_table.reload();
+void LGraph_Node_Type::reload(uint64_t sz) {
+  node_type_table.reload(sz);
   consts.reload();
 
   // Note: if you change this, make sure to change u32_type_set and

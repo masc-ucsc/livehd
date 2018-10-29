@@ -99,16 +99,8 @@ void Graph_library::reload() {
           continue;
         std::string name(dent->d_name + 7, len-5-7); 
 
-        uint32_t lgid = add_name(name);
-        {
-          struct stat st;
-          std::string fname = path;
-          fname.append("/");
-          fname.append(dent->d_name);
-          int r = stat(fname.c_str(), &st);
-          assert(r==0);
-          attribute[lgid].nentries = st.st_size/sizeof(Node_Type_Op);
-        }
+        console->error("missing {}/graph_library at reload", path);
+        exit(0);
       }
       closedir(dir);
     }
