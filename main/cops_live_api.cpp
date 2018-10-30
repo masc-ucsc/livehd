@@ -2,77 +2,81 @@
 #include <unistd.h>
 
 #include "eprp_utils.hpp"
+#include "lgbench.hpp"
+
+#include "cops_live_api.hpp"
 #include "diff_finder.hpp"
 #include "invariant_finder.hpp"
+#include "invariant_options.hpp"
+#include "live_options.hpp"
 #include "structural.hpp"
 #include "stitcher.hpp"
-#include "cops_live_api.hpp"
 
 void Cops_live_api::invariant_finder(Eprp_var &var) {
 
-  /*
-     const std::string path    = var.get("path","lgdb");
-     const std::string files   = var.get("files");
+  LGBench b;
+  Invariant_find_options pack;
+  for(const auto &l:var.dict) {
+    pack.set(l.first,l.second);
+  }
 
-     Inou_pyrope pyrope;
+  Invariant_finder     worker(pack);
+  b.sample("cops.live.inv_finder.setup");
 
-     pyrope.set("path",path);
+  Invariant_boundaries fibs = worker.get_boundaries();
+  b.sample("cops.live.inv_finder.work");
 
-     for(const auto &f:Eprp_utils::parse_files(files,"inou.pyrope.tolg")) {
-     pyrope.set("input",f);
-
-     var.add(pyrope.tolg());
-     }*/
-  fmt::print("invariant\n");
+  std::ofstream of(pack.invariant_file);
+  Invariant_boundaries::serialize(&fibs, of);
+  of.close();
+  b.sample("cops.live.inv_finder.output");
 }
 
 void Cops_live_api::diff_finder(Eprp_var &var) {
+  LGBench b;
 
-  /*
-     const std::string odir   = var.get("odir",".");
+  Live_pass_options pack;
+  for(const auto &l:var.dict) {
+    pack.set(l.first,l.second);
+  }
 
-     Inou_pyrope pyrope;
+  Diff_finder      worker(pack);
+  b.sample("cops.diff.setup");
 
-     pyrope.set("odir",odir);
+  std::set<Net_ID> diffs;
+  worker.generate_delta(pack.modified_lgdb, pack.delta_lgdb, diffs);
 
-     std::vector<const LGraph *> lgs;
-     for(const auto &l:var.lgs) {
-     lgs.push_back(l);
-     }
+  b.sample("find_diffs");
 
-     pyrope.fromlg(lgs);
-     */
-  fmt::print("diff\n");
+  std::ofstream of(pack.diff_file);
+  for(auto &diff_ : diffs) {
+    of << diff_.first << "\t" << diff_.second << std::endl;
+  }
+  of.close();
+
+  b.sample("write_diff");
 }
 
 void Cops_live_api::netlist_merge(Eprp_var &var) {
-  /*
-     const std::string odir   = var.get("odir",".");
-
-     Inou_pyrope pyrope;
-
-     pyrope.set("odir",odir);
-
-     std::vector<const LGraph *> lgs;
-     for(const auto &l:var.lgs) {
-     lgs.push_back(l);
-     }
-
-     pyrope.fromlg(lgs);
-     */
-  fmt::print("merge\n");
 }
 
 void Cops_live_api::setup(Eprp &eprp) {
-  Eprp_method m1("live.invariant_find", "find invariant boundaries between post-synthesis and post-elaboration lgraphs", &Cops_live_api::invariant_finder);
-  //m1.add_label_optional("path","lgraph path");
-  //m1.add_label_required("files","pyrope input file[s]");
+  Eprp_method inv_find("live.invariant_find", "find invariant boundaries between post-synthesis and post-elaboration lgraphs", &Cops_live_api::invariant_finder);
+  inv_find.add_label_required("top", "lgraph path");
+  inv_find.add_label_required("elab_lgdb","lgdb path of the elaborated netlist");
+  inv_find.add_label_required("synth_lgdb","lgdb path of the synthesized netlist");
+  inv_find.add_label_required("invariant_file","file to serialize the invariant boundaries object (used by diff)");
+  inv_find.add_label_required("hier_sep","hierarchical separator used in names by the synthesis tool");
 
-  eprp.register_method(m1);
+  eprp.register_method(inv_find);
 
-  Eprp_method m2("live.diff_finder", "find cones that changed between two post-elaboration lgraphs", &Cops_live_api::diff_finder);
-  //m2.add_label_optional("odir","pyrope output directory");
-  eprp.register_method(m2);
+  Eprp_method diff_find("live.diff_finder", "find cones that changed between two post-elaboration lgraphs", &Cops_live_api::diff_finder);
+  diff_find.add_label_required("top", "lgraph path");
+  diff_find.add_label_required("elab_lgdb","lgdb path of the elaborated netlist");
+  diff_find.add_label_required("synth_lgdb","lgdb path of the synthesized netlist");
+  diff_find.add_label_required("invariant_file","file to serialize the invariant boundaries object (used by diff)");
+  diff_find.add_label_required("hier_sep","hierarchical separator used in names by the synthesis tool");
+  eprp.register_method(diff_find);
 
   Eprp_method m3("live.merge_changes", "merge synthesized delta into the original synthesized netlist", &Cops_live_api::netlist_merge);
   //m2.add_label_optional("odir","pyrope output directory");

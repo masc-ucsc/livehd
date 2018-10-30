@@ -6,6 +6,7 @@
 #include "bm.h"
 
 #include "invariant.hpp"
+#include "invariant_options.hpp"
 #include "lgraph.hpp"
 
 class Invariant_finder {
@@ -43,15 +44,17 @@ public:
     synth_graph = synth;
   }
 
+  Invariant_finder(const Invariant_find_options &pack) : boundaries(pack.hierarchical_separator) {
+    processed   = false;
+    elab_graph  = LGraph::open(pack.elab_lgdb, pack.top);
+    synth_graph = LGraph::open(pack.synth_lgdb, pack.top);
+  }
+
   const Invariant_boundaries& get_boundaries() {
     if(!processed) {
       find_invariant_boundaries();
     }
     return boundaries;
-  }
-
-  ~Invariant_finder() {
-    fmt::print("IF destructor\n");
   }
 };
 
