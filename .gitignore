@@ -17,4 +17,3 @@ compile_commands.json
 bazel-*
 dist
 *.egg-info
-.bazelrc
