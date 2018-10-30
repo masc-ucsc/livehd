@@ -236,6 +236,12 @@ void Eprp::run_cmd(const std::string &cmd, Eprp_var &var) {
   }
 #endif
 
+  for (const auto & label : m.labels) {
+    if (!label.second.default_value.empty() &&
+        !last_cmd_var.has_label(label.first))
+      last_cmd_var.add(label.first, label.second.default_value);
+  }
+
   m.method(last_cmd_var);
 }
 
