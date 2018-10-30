@@ -4,6 +4,7 @@
 #include <functional>
 
 #include "eprp.hpp"
+#include "spdlog/spdlog.h"
 
 class Main_api {
 protected:
@@ -16,6 +17,16 @@ public:
   }
   static void warn(const std::string &msg) {
     eprp.parser_warn(msg);
+  }
+
+  template<typename Arg1, typename... Args>
+  static void error(const char *fmt, const Arg1 &, const Args &... args) {
+    eprp.parser_error(fmt::format(fmt, args...));
+  }
+
+  template<typename Arg1, typename... Args>
+  static void warn(const char *fmt, const Arg1 &, const Args &... args) {
+    eprp.parser_warn(fmt::format(fmt, args...));
   }
 
   static void setup(std::function<void(Eprp &)> fn) {
