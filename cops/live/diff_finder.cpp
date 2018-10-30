@@ -8,6 +8,35 @@
 
 using namespace Live;
 
+
+Diff_finder::Diff_finder(Live_pass_options pack) {
+
+  std::ifstream  invariant_file(pack.boundaries_name);
+  if(!invariant_file.good()) {
+    console->error("Error reading boundaries file {}\n", pack.boundaries_name);
+    exit(1);
+  }
+
+  try {
+    boundaries = Invariant_boundaries::deserialize(invariant_file);
+  } catch(const std::exception &e) {
+    console->warn("There was an error de-serializing the boundaries file {}\n", pack.boundaries_name);
+  }
+  invariant_file.close();
+
+  original = LGraph::open(pack.original_lgdb, boundaries->top);
+  synth    = LGraph::open(pack.synth_lgdb, boundaries->top);
+
+  if(!original) {
+    console->error("I was not able to open original netlist {} in {}\n", boundaries->top, pack.original_lgdb);
+    exit(1);
+  }
+  if(!synth) {
+    console->error("I was not able to open synthesized netlist {} in {}\n", boundaries->top, pack.synth_lgdb);
+    exit(1);
+  }
+}
+
 auto Diff_finder::go_up(const Graph_Node &boundary) {
 
   Graph_Node bound;
