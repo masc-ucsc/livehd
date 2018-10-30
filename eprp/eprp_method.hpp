@@ -7,14 +7,16 @@ class Eprp_method {
 private:
 protected:
   struct Label_attr {
-    Label_attr(const std::string &_help, bool _required)
+    Label_attr(const std::string &_help, bool _required, const std::string &_value)
       :help(_help)
-       ,required(_required) {
+      ,default_value(_value)
+      ,required(_required) {
        };
     const std::string help;
+    const std::string default_value;
     const bool required;
   };
-  void add_label(const std::string &attr, const std::string &help, bool required);
+  void add_label(const std::string &attr, const std::string &help, bool required, const std::string& default_value = "");
 public:
   std::map<std::string, Label_attr, eprp_casecmp_str> labels;
   const std::string name;
@@ -27,7 +29,7 @@ public:
 
   bool has_label(const std::string &label) const;
   void add_label_optional(const std::string &attr, const std::string &help, const std::string &default_value = "") {
-    add_label(attr,help,false);
+    add_label(attr,help,false, default_value);
   };
   void add_label_required(const std::string &attr, const std::string &help) {
     add_label(attr,help,true);

@@ -103,7 +103,6 @@ void Cops_live_api::setup(Eprp &eprp) {
   inv_find.add_label_required("synth_lgdb","lgdb path of the synthesized netlist");
   inv_find.add_label_required("invariant_file","file to serialize the invariant boundaries object (used by diff)");
   inv_find.add_label_required("hier_sep","hierarchical separator used in names by the synthesis tool");
-
   eprp.register_method(inv_find);
 
   Eprp_method diff_find("live.diff_finder", "find cones that changed between two post-elaboration lgraphs", &Cops_live_api::diff_finder);

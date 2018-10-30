@@ -12,8 +12,8 @@ bool Eprp_method::has_label(const std::string &label) const {
   return labels.find(label) != labels.end();
 }
 
-void Eprp_method::add_label(const std::string &attr, const std::string &help, bool required) {
-  labels.insert({attr, {help, required} });
+void Eprp_method::add_label(const std::string &attr, const std::string &help, bool required, const std::string& default_value) {
+  labels.insert({attr, {help, required, default_value} });
 }
 
 const std::string &Eprp_method::get_label_help(const std::string &label) const {
