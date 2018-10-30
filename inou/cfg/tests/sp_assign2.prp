@@ -9,12 +9,6 @@ m1 = ::{
   return 11u4bits
 }
 
-//method construct? as?
-m2 as ::{
-  return 12u4bits
-}
-
-
 m3 as counter
 
 m4 = 13u4bits
@@ -26,6 +20,11 @@ aaa = 3u2bits
 %o4 = m4    //value assignment, how to diff with m3?
 %o5 = m5    //value assignment, compile error
 %o6 = m6    //function call, w/o previous defined
+
+//method construct? as?
+m2 as ::{
+  return 12u4bits
+}
 
 m6 = ::{
   return 14u4bits
