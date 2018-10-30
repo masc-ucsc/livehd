@@ -26,7 +26,7 @@ public:
   std::string check_labels(const Eprp_var &var) const; // return not const string because it creates error messages
 
   bool has_label(const std::string &label) const;
-  void add_label_optional(const std::string &attr, const std::string &help) {
+  void add_label_optional(const std::string &attr, const std::string &help, const std::string &default_value = "") {
     add_label(attr,help,false);
   };
   void add_label_required(const std::string &attr, const std::string &help) {
