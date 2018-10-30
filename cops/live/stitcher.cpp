@@ -3,7 +3,28 @@
 #include "stitcher.hpp"
 #include "lgedgeiter.hpp"
 
-void Live_stitcher::stitch(LGraph *nsynth, std::set<Net_ID> diffs) {
+Live_stitcher::Live_stitcher(Stitch_pass_options &pack) {
+
+  std::ifstream    invariant_file(pack.boundaries_name);
+
+  if(!invariant_file.good()) {
+    console->error("Error reading boundaries file {}\n", pack.boundaries_name);
+    exit(1);
+  }
+
+  boundaries = Invariant_boundaries::deserialize(invariant_file);
+  invariant_file.close();
+
+  original = LGraph::open(pack.osynth_lgdb, boundaries->top);
+
+  if(!original) {
+    console->error("I was not able to open original synthesized netlist {} in {}\n", boundaries->top, pack.osynth_lgdb);
+    exit(1);
+  }
+}
+
+
+void Live_stitcher::stitch(LGraph *nsynth, const std::set<Net_ID>& diffs) {
 
   std::map<Index_ID, Index_ID> nsynth2originalid;
   std::map<Index_ID, Index_ID> inp2originalid;
