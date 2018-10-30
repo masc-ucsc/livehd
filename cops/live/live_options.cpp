@@ -6,11 +6,11 @@
 void Live_pass_options::set(const std::string &key, const std::string &value) {
 
   try {
-    if (is_opt(key, "original_lgdb")) {
+    if (is_opt(key, "olgdb")) {
       original_lgdb = value;
-    } else if (is_opt(key, "modified_lgdb")) {
+    } else if (is_opt(key, "mlgdb")) {
       modified_lgdb = value;
-    } else if (is_opt(key, "synth_lgdb")) {
+    } else if (is_opt(key, "slgdb")) {
       synth_lgdb = value;
     } else if (is_opt(key, "boundaries_name")) {
       boundaries_name = value;

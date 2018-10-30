@@ -5,9 +5,26 @@
 #include <functional>
 #include <queue>
 
-/*bool operator<(const queue_element& lhs, const queue_element& rhs) {
-  return lhs.priority < rhs.priority;
-}*/
+Live_structural::Live_structural(Stitch_pass_options &pack) {
+
+  std::ifstream    invariant_file(pack.boundaries_name);
+
+  if(!invariant_file.good()) {
+    console->error("Error reading boundaries file {}\n", pack.boundaries_name);
+    exit(1);
+  }
+
+  boundaries = Invariant_boundaries::deserialize(invariant_file);
+  invariant_file.close();
+
+  original = LGraph::open(pack.osynth_lgdb, boundaries->top);
+
+  if(!original) {
+    console->error("I was not able to open original synthesized netlist {} in {}\n", boundaries->top, pack.osynth_lgdb);
+    exit(1);
+  }
+}
+
 
 Node_Pin Live_structural::get_inp_edge(LGraph *current, Index_ID nid, Port_ID pid) {
   Node_Pin candidate(1, 1, false);

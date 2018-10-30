@@ -3,6 +3,7 @@
 #define LIVE_STITCHER_H_
 
 #include "invariant.hpp"
+#include "stitch_options.hpp"
 
 class Live_stitcher {
 
@@ -15,7 +16,14 @@ public:
   Live_stitcher(LGraph *original, Invariant_boundaries *boundaries) : original(original), boundaries(boundaries) {
   }
 
-  void stitch(LGraph *nsynth, std::set<Net_ID> diffs);
+  Live_stitcher(Stitch_pass_options &pack);
+
+  void stitch(const std::string& nsynth, const std::set<Net_ID> &diffs) {
+    LGraph* synth = LGraph::open(nsynth, boundaries->top);
+    stitch(synth, diffs);
+  }
+
+  void stitch(LGraph *nsynth, const std::set<Net_ID> &diffs);
 };
 
 #endif

@@ -3,6 +3,7 @@
 #define LIVE_STRUCTURAL_H_
 
 #include "invariant.hpp"
+#include "stitch_options.hpp"
 #include <set>
 
 class queue_element {
@@ -25,8 +26,8 @@ struct Compare {
 class Live_structural {
 
 private:
-  LGraph *original;
-  //Invariant_boundaries* boundaries;
+  const LGraph *original;
+  const Invariant_boundaries* boundaries;
 
   Index_ID get_candidate(Index_ID newid, LGraph *nsynth) {
     if(nsynth->get_wid(newid) == 0)
@@ -46,8 +47,15 @@ public:
     assert(boundaries);
   }
 
+  Live_structural(Stitch_pass_options& pack);
+
   //void replace(LGraph* nsynth, std::set<Net_ID>& diffs);
   void replace(LGraph *nsynth);
+
+  void replace(const std::string &nsynth) {
+    LGraph *synth = LGraph::open(nsynth, boundaries->top);
+    replace(synth);
+  }
 };
 
 #endif
