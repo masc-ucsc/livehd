@@ -11,12 +11,9 @@
 #include <cassert>
 #include <iostream>
 
-#define MMAPA_INIT_ENTRIES (1ULL << 15)
+#define MMAPA_INIT_ENTRIES (1ULL << 14)
 #define MMAPA_INCR_ENTRIES (1ULL << 20)
 #define MMAPA_MAX_ENTRIES (1ULL << 34)
-#define MMAPA_ALIGN_BITS (12)
-#define MMAPA_ALIGN_MASK ((1 << MMAPA_ALIGN_BITS) - 1)
-#define MMAPA_ALIGN_SIZE (MMAPA_ALIGN_MASK + 1)
 
 template <typename T> class mmap_allocator {
 public:
@@ -40,15 +37,13 @@ public:
   }
 
   T *allocate(size_t n) {
-    alloc++; // FIXME: delete?
-    // std::cout << "Allocating file " << mmap_name << " with size " << n << std::endl;
+    alloc++;
 
     if(n < 1024)
       n = 1024;
 
     if(mmap_fd < 0) {
-      assert(MMAPA_ALIGN_SIZE == getpagesize());
-      // std::cout << "Allocating swap file " << mmap_name << " with size " << n << std::endl;
+
       mmap_fd = open(mmap_name.c_str(), O_RDWR | O_CREAT, 0644);
       if(mmap_fd < 0) {
         std::cerr << "ERROR: Could not mmap file " << mmap_name << std::endl;
@@ -64,7 +59,7 @@ public:
       }
       file_size = s.st_size;
 
-      mmap_size = MMAPA_INIT_ENTRIES * sizeof(T) + MMAPA_ALIGN_SIZE;
+      mmap_size = MMAPA_INIT_ENTRIES * sizeof(T);
       if(file_size > mmap_size)
         mmap_size = file_size;
       mmap_base = reinterpret_cast<uint64_t *>(mmap(0, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, mmap_fd, 0));
@@ -74,8 +69,9 @@ public:
         exit(-1);
       }
     }
-    if(file_size < sizeof(T) * n + MMAPA_ALIGN_SIZE) {
-      file_size = sizeof(T) * n + MMAPA_ALIGN_SIZE;
+
+    if(file_size < sizeof(T) * n) {
+      file_size = sizeof(T) * n;
 
       if(mmap_size < file_size) {
         size_t old_size = mmap_size;
@@ -96,23 +92,10 @@ public:
       assert(file_size < MMAPA_MAX_ENTRIES * sizeof(T));
       ftruncate(mmap_fd, file_size);
     }
-    // 64KB Page aligned
-    uint64_t b = (uint64_t)(mmap_base + 8);
-    uint64_t a = b;
-    if((a & MMAPA_ALIGN_MASK) != 0) {
-      a = a >> MMAPA_ALIGN_BITS;
-      a++;
-      a = a << MMAPA_ALIGN_BITS;
-    }
 
-    /*int64_t sz = (file_size-8+a-b)/sizeof(T);
-      if (sz<0)
-      mmap_capacity = 0;
-      else
-      mmap_capacity = sz;*/
     mmap_capacity = n;
 
-    return (T *)(a);
+    return (T *)(mmap_base);
   }
 
   virtual void clear() {
@@ -145,8 +128,7 @@ public:
     if(mmap_base == 0)
       return;
 
-    *mmap_base = size;
-    file_size  = sizeof(T) * size + MMAPA_ALIGN_SIZE;
+    file_size  = sizeof(T) * size;
 
     msync(mmap_base, file_size, MS_SYNC);
   }

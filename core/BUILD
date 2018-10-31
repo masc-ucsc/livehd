@@ -49,14 +49,6 @@ cc_test(
 )
 
 cc_test(
-    name = "mmap_test",
-    srcs = ["tests/mmap_allocator.cpp"],
-    deps = [
-        ":core",
-    ],
-)
-
-cc_test(
     name = "iter_test",
     srcs = ["tests/iter.cpp"],
     deps = [
