@@ -24,6 +24,7 @@
 #include "pass_dfg_api.hpp"
 #include "pass_opentimer_api.hpp"
 #include "pass_sample_api.hpp"
+#include "pass_bitwidth_api.hpp"
 
 #include "eprp_utils.hpp"
 
@@ -51,6 +52,7 @@ void Main_api::init() {
   Pass_dfg_api::setup(eprp);         // pass.dfg.*
   Pass_opentimer_api::setup(eprp);   // pass.opentimer.*
   Pass_sample_api::setup(eprp);      // pass.sample.*
+  Pass_bitwidth_api::setup(eprp);    // pass.bitwidth.*
 
   Cops_live_api::setup(eprp);        // pass.dfg.*
 
