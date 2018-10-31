@@ -209,8 +209,10 @@ void Inou_cfg::build_graph(vector<string>               &words,
   else {
     g->node_loc_set(name2id[w1st], opack.file.c_str(), (uint32_t)std::stoi(w3rd), (uint32_t)std::stoi(w4th));
 
-    if(w6th == ".()")
+    if(w6th == ".()"){
+      //need to find a way to back trace to check if .() is really a functioncall
       g->node_type_set(name2id[w1st], CfgFunctionCall_Op);
+    }
     else if(w6th == "for")
       g->node_type_set(name2id[w1st], CfgFor_Op);
     else if(w6th == "while")
