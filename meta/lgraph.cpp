@@ -229,6 +229,8 @@ void LGraph::dump() const {
     fmt::print("output {} idx:{} pid:{}\n", ent.first, ent.second.nid, ent.second.pos);
   }
 
+  dump_lgwires();
+
 #if 1
   for(Index_ID i = 0; i < node_internal.size(); i++) {
     fmt::print("{} ", i);

@@ -55,6 +55,15 @@ protected:
     }
   }
 
+  static void lgdump(Eprp_var &var) {
+
+    fmt::print("lgraph.dump lgraphs:\n");
+    for(const auto &l:var.lgs) {
+      fmt::print(fmt::format("  {}/{}\n",l->get_path(), l->get_name()));
+      l->dump();
+    }
+  }
+
 
   Meta_api() {
   }
@@ -79,8 +88,13 @@ public:
     eprp.register_method(m3);
 
     //---------------------
-    Eprp_method m4("dump", "dump labels and lgraphs passed", &Meta_api::dump);
+    Eprp_method m4("lgraph.dump", "verbose insides for lgraph ", &Meta_api::lgdump);
+
     eprp.register_method(m4);
+
+    //---------------------
+    Eprp_method m5("dump", "dump labels and lgraphs passed", &Meta_api::dump);
+    eprp.register_method(m5);
   }
 
 };
