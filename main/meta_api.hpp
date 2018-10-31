@@ -6,7 +6,7 @@ class Meta_api {
 protected:
   static void open(Eprp_var &var) {
 
-    const std::string path = var.get("path","lgdb");
+    const std::string path = var.get("path");
     const std::string name = var.get("name");
     assert(!name.empty());
 
@@ -21,7 +21,7 @@ protected:
 
   static void create(Eprp_var &var) {
 
-    const std::string path = var.get("path","lgdb");
+    const std::string path = var.get("path");
     const std::string name = var.get("name");
     assert(!name.empty());
 
@@ -70,14 +70,14 @@ protected:
 public:
   static void setup(Eprp &eprp) {
     Eprp_method m1("lgraph.open", "open an lgraph if it exists", &Meta_api::open);
-    m1.add_label_optional("path","lgraph path");
+    m1.add_label_optional("path","lgraph path","lgdb");
     m1.add_label_required("name","lgraph name");
 
     eprp.register_method(m1);
 
     //---------------------
     Eprp_method m2("lgraph.create", "create a new lgraph", &Meta_api::create);
-    m2.add_label_optional("path","lgraph path");
+    m2.add_label_optional("path","lgraph path","lgdb");
     m2.add_label_required("name","lgraph name");
 
     eprp.register_method(m2);

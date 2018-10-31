@@ -50,7 +50,7 @@ public:
 
   bool has_label(const std::string &name) const { return dict.find(name) != dict.end(); };
   const std::string get(const std::string &name) const;
-  const std::string get(const std::string &name, const std::string &def_val) const;
+  //const std::string get(const std::string &name, const std::string &def_val) const;
 
   void clear() {
     dict.clear();

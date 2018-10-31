@@ -6,8 +6,8 @@ class Cloud_api {
 protected:
   static void server(Eprp_var &var) {
 
-    const std::string host = var.get("host","localhost");
-    const std::string port = var.get("port","80");
+    const std::string host = var.get("host");
+    const std::string port = var.get("port");
 
     Main_api::warn(fmt::format("Still not implemented host:{} port:{}", host, port));
   }
@@ -17,8 +17,8 @@ protected:
 public:
   static void setup(Eprp &eprp) {
     Eprp_method m1("cloud.server", "setup a lgshell server", &Cloud_api::server);
-    m1.add_label_optional("host","host name for the cloud setup");
-    m1.add_label_optional("port","port to use for the http request");
+    m1.add_label_optional("host","host name for the cloud setup","localhost");
+    m1.add_label_optional("port","port to use for the http request","80");
 
     eprp.register_method(m1);
   }

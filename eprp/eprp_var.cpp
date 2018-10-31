@@ -43,11 +43,12 @@ const std::string Eprp_var::get(const std::string &name) const {
   return elem->second;
 }
 
+/*
 const std::string Eprp_var::get(const std::string &name, const std::string &def_val) const {
   const auto &elem = dict.find(name);
   if (elem == dict.end()) {
     return def_val;
   }
   return elem->second;
-}
+}*/
 

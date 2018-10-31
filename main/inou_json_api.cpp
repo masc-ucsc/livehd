@@ -8,7 +8,7 @@
 
 void Inou_json_api::tolg(Eprp_var &var) {
   const std::string files   = var.get("files");
-  const std::string path    = var.get("path","lgdb");
+  const std::string path    = var.get("path");
 
   Inou_json json;
 
@@ -35,7 +35,7 @@ void Inou_json_api::tolg(Eprp_var &var) {
 
 void Inou_json_api::fromlg(Eprp_var &var) {
   const std::string output  = var.get("output");
-  const std::string path    = var.get("path","lgdb");
+  const std::string path    = var.get("path");
 
   Inou_json json;
 
@@ -57,14 +57,14 @@ void Inou_json_api::fromlg(Eprp_var &var) {
 
 void Inou_json_api::setup(Eprp &eprp) {
   Eprp_method m1("inou.json.tolg", "import from json to lgraph", &Inou_json_api::tolg);
-  m1.add_label_optional("path","lgraph path");
+  m1.add_label_optional("path","lgraph path","lgdb");
   m1.add_label_required("files","json input file[s] to create lgraph[s]");
   m1.add_label_required("name","name for lgraph generated");
 
   eprp.register_method(m1);
 
   Eprp_method m2("inou.json.fromlg", "export from lgraph to json", &Inou_json_api::fromlg);
-  m2.add_label_optional("path","lgraph path");
+  m2.add_label_optional("path","lgraph path","lgdb");
   m2.add_label_required("output","json output file from lgraphs");
 
   eprp.register_method(m2);

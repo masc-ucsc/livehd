@@ -8,7 +8,7 @@ class Inou_pyrope_api {
 protected:
 static void tolg(Eprp_var &var) {
 
-  const std::string path    = var.get("path","lgdb");
+  const std::string path    = var.get("path");
   const std::string files   = var.get("files");
 
   Inou_pyrope pyrope;
@@ -23,7 +23,7 @@ static void tolg(Eprp_var &var) {
 }
 
 static void fromlg(Eprp_var &var) {
-  const std::string odir   = var.get("odir",".");
+  const std::string odir   = var.get("odir");
 
   Inou_pyrope pyrope;
 
@@ -40,13 +40,13 @@ static void fromlg(Eprp_var &var) {
 public:
 static void setup(Eprp &eprp) {
   Eprp_method m1("inou.pyrope.tolg", "import from pyrope to lgraph", &Inou_pyrope_api::tolg);
-  m1.add_label_optional("path","lgraph path");
+  m1.add_label_optional("path","lgraph path","lgdb");
   m1.add_label_required("files","pyrope input file[s]");
 
   eprp.register_method(m1);
 
   Eprp_method m2("inou.pyrope.fromlg", "export from lgraph to pyrope", &Inou_pyrope_api::fromlg);
-  m2.add_label_optional("odir","pyrope output directory");
+  m2.add_label_optional("odir","pyrope output directory",".");
 
   eprp.register_method(m2);
 }

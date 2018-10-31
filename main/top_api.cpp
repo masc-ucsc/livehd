@@ -12,7 +12,7 @@
 
 void Top_api::files(Eprp_var &var) {
 
-  const std::string path  = var.get("path",".");
+  const std::string path  = var.get("path");
   const std::string match = var.get("match");
 
   try {
@@ -57,7 +57,7 @@ void Top_api::files(Eprp_var &var) {
 void Top_api::setup(Eprp &eprp) {
   // Alphabetical order sorted to avoid undeterminism in different file orders
   Eprp_method m1("files", "match file names in alphabetical order. Like `ls {path} | grep -E {match} | sort`", &Top_api::files);
-  m1.add_label_optional("path","path to match the search . by default");
+  m1.add_label_optional("path","path to match the search . by default",".");
   m1.add_label_optional("match","quoted string of regex to match . E.g: match:\"\\.v$\" for verilog files.");
 
   eprp.register_method(m1);
