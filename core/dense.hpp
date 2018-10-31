@@ -38,19 +38,8 @@ public:
 
   explicit Dense(const std::string &filename)
       : __allocator(filename) {
-#if 0
-    size_t sz = get_saved_size(filename);
-    if(sz > 0) {
-      __buffer = __allocator.allocate(sz);
-      __size   = sz;
-    } else {
       __buffer = 0;
       __size   = 0;
-    }
-#else
-      __buffer = 0;
-      __size   = 0;
-#endif
   }
 
   virtual ~Dense() {
@@ -62,16 +51,9 @@ public:
   }
 
   void reload(uint64_t sz) {
-    if (sz==0) {
-      sz = get_saved_size(__allocator.get_filename());
-    }
-    if (sz>0) {
-      __buffer = __allocator.allocate(sz);
-      __size   = sz;
-    }else{
-      __buffer = 0;
-      __size   = 0;
-    }
+    assert(sz);
+    __buffer = __allocator.allocate(sz);
+    __size   = sz;
   }
 
   void resize(size_t sz) {
@@ -176,20 +158,6 @@ private:
   size_t         __size;
 
   value_type *__buffer;
-
-  size_t get_saved_size(const std::string &filename) {
-    int fd = open(filename.c_str(), O_RDONLY);
-    if(fd < 0)
-      return 0;
-
-    size_t size;
-    int    ret = read(fd, &size, sizeof(uint64_t));
-    if(ret <= 0)
-      return 0;
-
-    close(fd);
-    return size;
-  }
 };
 
 #endif
