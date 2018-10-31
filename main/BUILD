@@ -23,6 +23,7 @@ cc_binary(
             "//pass/dfg:pass_dfg",
             "//pass/dce:pass_dce",
             "//pass/sample:pass_sample",
+            "//pass/bitwidth:pass_bitwidth",
 
             "//cops/live:cops_live",
     ],
