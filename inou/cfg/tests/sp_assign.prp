@@ -9,7 +9,8 @@ m1 = ::{
   return 11u4bits
 }
 
-//method construct? as?
+//method construct as?
+//as means ones it is defined, it cannot be assigned to other value or function
 m2 as ::{
   return 12u4bits
 }
