@@ -298,7 +298,7 @@ void Inou_yosys_api::setup(Eprp &eprp) {
   m2.add_label_optional("path","path to read the lgraph[s]","lgdb");
   m2.add_label_optional("odir","output directory for generated verilog files",".");
   m2.add_label_optional("script","alternative custom inou_yosys_write.ys command");
-  m2.add_label_optional("yosys","path for yosys command","yosys");
+  m2.add_label_optional("yosys","path for yosys command",yosys);
 
   eprp.register_method(m2);
 }
