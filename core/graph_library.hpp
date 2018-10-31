@@ -95,7 +95,7 @@ public:
   void update(uint32_t lgid);
 
   uint32_t get_version(uint32_t lgid) const {
-    if (attribute.size() >= lgid)
+    if (attribute.size() < lgid)
       return 0; // Invalid ID
 
     return attribute[lgid].version;
