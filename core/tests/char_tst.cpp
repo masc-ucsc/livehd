@@ -74,7 +74,6 @@ void test3(int n) {
 
 void test4(int n) {
   Char_Array<uint32_t> test("test3"); // Read test 3
-  test.reload();
 
   for(int i = 0; i < n; i++) {
     uint32_t val = 0xdead0000 | (n&0xFFFF);
