@@ -88,7 +88,7 @@ bool Node_Type::is_type(const std::string &opname) {
 
 LGraph_Node_Type::LGraph_Node_Type(const std::string &path, const std::string &name) noexcept
     : Lgraph_base_core(path, name)
-    , consts(path + "/lgraph_"  + name)
+    , consts(path + "/lgraph_"  + name + "_consts")
     , node_type_table(path + "/lgraph_" + name + "_type") {
 }
 
