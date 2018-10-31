@@ -272,6 +272,16 @@ void Inou_yosys_api::fromlg(Eprp_var &var) {
 }
 
 void Inou_yosys_api::setup(Eprp &eprp) {
+
+  std::string yosys;
+  yosys = "/usr/bin/yosys";
+  if (access(yosys.c_str(), X_OK) == -1) {
+    yosys = "/usr/local/bin/yosys";
+    if (access(yosys.c_str(), X_OK) == -1) {
+      yosys = "yosys";
+    }
+  }
+
   Eprp_method m1("inou.yosys.tolg", "read verilog using yosys to lgraph", &Inou_yosys_api::tolg);
   m1.add_label_required("files","verilog files to process (comma separated)");
   m1.add_label_optional("path","path to build the lgraph[s]","lgdb");
@@ -279,8 +289,8 @@ void Inou_yosys_api::setup(Eprp &eprp) {
   m1.add_label_optional("liberty","Liberty file for technology mapping. Cannot be used with techmap, will call abc for tmap","");
   m1.add_label_optional("abc","run ABC inside yosys before loading lgraph","false");
   m1.add_label_optional("script","alternative custom inou_yosys_read.ys command");
-  m1.add_label_optional("yosys","path for yosys command","yosys");
-  m1.add_label_optional("top","define top module, will call yosys hierarchy pass (-auto-top allowed)","");
+  m1.add_label_optional("yosys","path for yosys command", yosys);
+  m1.add_label_optional("top","define top module, will call yosys hierarchy pass (-auto-top allowed)");
 
   eprp.register_method(m1);
 
