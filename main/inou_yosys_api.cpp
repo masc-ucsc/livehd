@@ -22,22 +22,13 @@ void Inou_yosys_api::set_script_liblg(Eprp_var &var, std::string &script_file, s
 
   const auto &main_path = Main_api::get_main_path();
   liblg = main_path + "/lgshell.runfiles/__main__/inou/yosys/liblgraph_yosys.so";
-#ifndef NDEBUF
-  fmt::print("1.yosys path:{} liblg:{}\n", main_path, liblg);
-#endif
   if(access(liblg.c_str(), X_OK) == -1) {
     // Maybe it is installed in /usr/local/bin/lgraph and /usr/local/share/lgraph/inou/yosys/liblgrapth...
     const std::string liblg2 = main_path + "/../share/lgraph/inou/yosys/liblgraph_yosys.so";
-#ifndef NDEBUF
-    fmt::print("1.yosys path:{} liblg:{}\n", main_path, liblg2);
-#endif
     if(access(liblg2.c_str(), X_OK) == -1) {
 
       //sandbox path
       const std::string liblg3 = main_path + "/inou/yosys/liblgraph_yosys.so";
-#ifndef NDEBUF
-      fmt::print("1.yosys path:{} liblg:{}\n", main_path, liblg2);
-#endif
       if(access(liblg3.c_str(), X_OK) == -1) {
         Main_api::error(fmt::format("could not find liblgraph_yosys.so, the {} is not executable", liblg));
         return;
@@ -297,7 +288,7 @@ void Inou_yosys_api::setup(Eprp &eprp) {
   m2.add_label_optional("path","path to read the lgraph[s]","lgdb");
   m2.add_label_optional("odir","output directory for generated verilog files",".");
   m2.add_label_optional("script","alternative custom inou_yosys_write.ys command");
-  m2.add_label_optional("yosys","path for yosys command"),"yosys";
+  m2.add_label_optional("yosys","path for yosys command","yosys");
 
   eprp.register_method(m2);
 }
