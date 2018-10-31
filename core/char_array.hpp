@@ -154,7 +154,7 @@ private:
     }
     if (failed) {
       variable_internal.emplace_back(0); // so that ID zero is not used
-      console->warn("char_array:reload for {} failed, creating empty",long_name);
+      console->info("char_array:reload for {} failed, creating empty",long_name);
     }
   }
 

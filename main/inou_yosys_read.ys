@@ -25,7 +25,7 @@ techmap
 techmap -D ALU_RIPPLE
 abc -liberty {{liberty_file}}
 {{/liberty_tmap}}
-opt
+# opt
 
 {{#abc_in_yosys}}
 abc
