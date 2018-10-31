@@ -1,41 +1,58 @@
-%o1 as __bits:2
+$i  as __bits:2
+%o1 as __bits:4
 %o2 as __bits:4
 %o3 as __bits:4
 %o4 as __bits:4
 %o5 as __bits:4
+%o6 as __bits:4
+%o7 as __bits:4
+%o8 as __bits:4
 
-//method construct
-m1 = ::{
-  return 11u4bits
+
+m3 = ::{
+  return 13u4bits
 }
 
-m3 as counter
+m4 = 14u4bits
 
-m4 = 13u4bits
-
-aaa = 3u2bits
-%o1 = m1    //function call, w/ previous defined
-%o2 = m2    //function call? w/ previous defined 
-%o3 = m3    //function call, defined @ other files
-%o4 = m4    //value assignment, how to diff with m3?
-%o5 = m5    //value assignment, compile error
-%o6 = m6    //function call, w/o previous defined
-
-//method construct? as?
-m2 as ::{
-  return 12u4bits
+if $i == 0 {
+  m1 = ::{
+    return 11u4bits
+  }
+}elif $i == 1 {
+  m1 = 9
+}elif $i == 2 {
+  m1 = mcnt
+}else{
+  m2 = ::{
+    return 12u4bits;
+  }
+  m3 = ::{
+    return $0
+  }
 }
 
-m6 = ::{
-  return 14u4bits
+m7 = 11u4bits
+m7 = mcnt
+
+m8 = mcnt
+m8 = 11u4bits
+
+m9 = $a + $b
+
+%o1 = m1
+%o2 = m2
+%o3 = m3 13u4bits
+%o4 = m4
+%o5 = m5
+%o6 = mcnt
+%o7 = m7
+%o8 = m8
+%o9 = m9
+
+m5 = ::{
+  return 15u4bits
 }
 
-
-//if (function declared before) 
-//    good! real func
-//else if (function declared after)
-//    fine! travers back and forth 
-//else
-//    --> pure value assignment(ex. m4)
-//    --> function declared @ other file (ex. counter)
-//    --> cannot differentiate these 2 cases!
+//I m2 == 0 or m2 == 33
+//I m1 == 0 or m1 == 11 or m1 == 123
