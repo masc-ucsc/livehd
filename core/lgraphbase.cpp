@@ -114,11 +114,10 @@ void LGraph_Base::reload() {
   auto sz = library->get_nentries(lgraph_id);
 
   node_internal.reload(sz);
-  input_array.reload();
-  output_array.reload();
+  // Lazy input_array.reload();
+  // Lazy output_array.reload();
 
   // Reload the fast hash tables from the stored data (maps are not dumped to disk)
-
   for(const auto &str : input_array) {
     io_t nid_original             = input_array.get_field(str);
     inputs2node[str].nid          = nid_original.first;

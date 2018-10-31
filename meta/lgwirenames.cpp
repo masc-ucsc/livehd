@@ -16,7 +16,7 @@ void LGraph_WireNames::clear() {
 }
 
 void LGraph_WireNames::reload() {
-  names.reload();
+  // Lazy names.reload();
   uint64_t sz = library->get_nentries(lgraph_id);
   wires.reload(sz);
   offsets.reload(sz);

@@ -10,6 +10,8 @@
 #include <vector>
 
 #include "sparsehash/dense_hash_map"
+
+#include "lglog.hpp"
 #include "dense.hpp"
 
 typedef int32_t Char_Array_ID;
@@ -71,7 +73,10 @@ public:
 
 private:
   const std::string long_name;
-  Dense<uint16_t> variable_internal;
+  mutable Dense<uint16_t> variable_internal;
+  mutable google::dense_hash_map<Hash_sign, Char_Array_ID> hash2id;
+  mutable bool pending_clear_reload;
+  mutable bool synced;
 
   const uint16_t *first() const {
     if(variable_internal.size() <= 1)
@@ -81,11 +86,6 @@ private:
   const uint16_t *last() const {
     return (uint16_t *)variable_internal.end();
   }
-
-  google::dense_hash_map<Hash_sign, Char_Array_ID> hash2id;
-
-  bool pending_clear_reload;
-  bool synced;
 
   explicit Char_Array() = delete; // Not allowed
 
@@ -119,15 +119,8 @@ private:
 
     auto it = hash2id.find(c_hash);
     if (it != hash2id.end()) {
-      int conta = 0;
-      while(1) {
+      while(true) {
         Char_Array_ID cid = it->second;
-
-        if (cid<0)
-          std::cout << "1conflict " << conta << ":" << c_hash << " " << key << " vs " << get_char(-cid) << std::endl;
-        else
-          std::cout << "2conflict " << conta << ":" << c_hash << " " << key << " vs " << get_char(cid) << std::endl;
-        conta++;
 
         if (cid>0)
           it->second = -cid; // Negative means re-hash entry
@@ -142,17 +135,40 @@ private:
     return c_hash;
   }
 
+  void reload() const { // NO CONST, but called from many places to hot-reload
+    assert(pending_clear_reload); // called once
+    pending_clear_reload = false;
+    synced = true;
+
+    FILE* fp_in = fopen((long_name + "_map").c_str(), "r");
+    bool failed = false;
+    if(fp_in) {
+      size_t sz;
+      if (fread(&sz, sizeof(size_t), 1, fp_in) != 1) // first is variable_internal size
+        failed = true;
+      failed = !hash2id.unserialize(MapSerializer<Hash_sign, Char_Array_ID>(), fp_in);
+      fclose(fp_in);
+      variable_internal.reload(sz);
+    }else{
+      failed = true;
+    }
+    if (failed) {
+      variable_internal.emplace_back(0); // so that ID zero is not used
+      console->warn("char_array:reload for {} failed, creating empty",long_name);
+    }
+  }
+
 public:
   explicit Char_Array(const std::string &long_name_)
     : long_name(long_name_)
     ,variable_internal(long_name_) {
 
-    variable_internal.reload(0);
-
     hash2id.set_empty_key(0);
 
     pending_clear_reload = true;
     synced = true;
+
+    reload();
   }
 
   virtual ~Char_Array() {
@@ -160,7 +176,6 @@ public:
   }
 
   void clear() {
-    assert(pending_clear_reload); // called once
     pending_clear_reload = false;
 
     variable_internal.clear();
@@ -169,32 +184,23 @@ public:
     synced = false;
   }
 
-  void reload() {
-    assert(pending_clear_reload); // called once
-    pending_clear_reload = false;
-    synced = true;
-
-    if(variable_internal.empty()) {
-      variable_internal.emplace_back(0); // so that ID zero is not used
-    } else {
-      FILE* fp_in = fopen((long_name + "_map").c_str(), "r");
-      if(fp_in) {
-        hash2id.unserialize(MapSerializer<Hash_sign, Char_Array_ID>(), fp_in);
-        fclose(fp_in);
-      }
-    }
-  }
-
   void sync() {
     if (synced)
       return;
 
+    assert(!pending_clear_reload);
+
     synced = true;
     variable_internal.sync();
     FILE *fp = fopen((long_name + "_map").c_str(), "w");
-    assert(fp);
-    hash2id.serialize(MapSerializer<Hash_sign, Char_Array_ID>(), fp);
-    fclose(fp);
+    if (fp) {
+      size_t sz = variable_internal.size();
+      fwrite(&sz, sizeof(size_t), 1, fp);
+      hash2id.serialize(MapSerializer<Hash_sign, Char_Array_ID>(), fp);
+      fclose(fp);
+    }else{
+      console->error("char_array::sync could not sync {}",long_name);
+    }
   }
 
   Const_Char_Array_Iter begin() const {
@@ -210,7 +216,8 @@ public:
 
   Char_Array_ID create_id(const char *str, Data_type dt=0) {
     synced = false;
-    assert(!pending_clear_reload);
+    if(pending_clear_reload)
+      reload();
 
     Char_Array_ID start = get_id(str);
     if(start) {
@@ -290,7 +297,9 @@ public:
   }
 
   const char *get_char(Char_Array_ID id) const {
-    assert(!pending_clear_reload);
+    if(pending_clear_reload)
+      reload();
+
     assert(id >= 0);
     assert(variable_internal.size() > (id + 1 + (sizeof(Data_type) + sizeof(Hash_sign))/sizeof(uint16_t)));
 
@@ -299,7 +308,9 @@ public:
   }
 
   const Data_type &get_field(Char_Array_ID id) const {
-    assert(!pending_clear_reload);
+    if(pending_clear_reload)
+      reload();
+
     assert(id >= 0);
     assert(variable_internal.size() > (id + 1 + (sizeof(Data_type) + sizeof(Hash_sign))/sizeof(uint16_t)));
 
@@ -308,7 +319,9 @@ public:
   }
 
   const Hash_sign &get_hash(Char_Array_ID id) const {
-    assert(!pending_clear_reload);
+    if(pending_clear_reload)
+      reload();
+
     assert(id >= 0);
     assert(variable_internal.size() > (id + 1 + sizeof(Hash_sign)/sizeof(uint16_t)));
 
@@ -317,6 +330,9 @@ public:
   }
 
   int self_id(const char *ptr) const {
+    if(pending_clear_reload)
+      reload();
+
     ptr -= 2;                             // Pos for the ptr
     return (uint16_t *)ptr - first() + 1; // skip zero
   }
@@ -324,6 +340,7 @@ public:
   const Data_type &get_field(const std::string &s) const { return get_field(s.c_str()); }
 
   const Data_type &get_field(const char *ptr) const {
+    assert(!pending_clear_reload);
     int id = get_id(ptr);
     return get_field(id);
   }
@@ -338,6 +355,8 @@ public:
   }
 
   int get_id(const char *str) const {
+    if(pending_clear_reload)
+      reload();
 
     const std::string key(str);
     Hash_sign seed=0;
