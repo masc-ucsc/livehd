@@ -9,7 +9,7 @@
 
 void Live_parse_api::tolg(Eprp_var &var) {
   const std::string files   = var.get("files");
-  const std::string path    = var.get("path","lgdb");
+  const std::string path    = var.get("path");
 
   if (files.empty()) {
     Main_api::error(fmt::format("live.parse: no files provided"));
@@ -55,7 +55,7 @@ void Live_parse_api::tolg(Eprp_var &var) {
 
 void Live_parse_api::setup(Eprp &eprp) {
   Eprp_method m1("live.parse", "parse and chunkify verilog/pyrope files", &Live_parse_api::tolg);
-  m1.add_label_optional("path","lgraph path");
+  m1.add_label_optional("path","lgraph path","lgdb");
   m1.add_label_required("files","json input file[s] to create lgraph[s]");
 
   eprp.register_method(m1);
