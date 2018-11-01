@@ -10,9 +10,9 @@ LCOV_ADD=""
 for a in cloud cops core eprp inou live main meta pass
 do
   if [ -s cov/coverage_${a}.info ]; then
-    LCOV_ADD=$LCOV_ADD" --add-tracefile cov/coverage_"${a}".info"
+    LCOV_ADD="${LCOV_ADD} --add-tracefile cov/coverage_${a}.info"
   else
-    echo "Empty coverage file cov/coverage_"${a}".info"
+    echo "Empty coverage file cov/coverage_${a}.info"
   fi
 done
 
