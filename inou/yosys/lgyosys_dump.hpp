@@ -49,10 +49,12 @@ private:
                            add_cell_fnc_sign add_cell, bool sign, RTLIL::Wire *result_wire);
 
   RTLIL::Wire *create_wire(const LGraph* g, const Index_ID idx, RTLIL::Module* module, bool input, bool output);
+  void create_wires(const LGraph *g, RTLIL::Module* module);
 
   void create_blackbox(const LGraph& subgraph, RTLIL::Design* design);
-
-  void create_wires(const LGraph *g, RTLIL::Module* module);
+  void create_subgraph_outputs(const LGraph *g, RTLIL::Module* module, Index_ID idx);
+  void create_subgraph(const LGraph *g, RTLIL::Module* module, Index_ID idx);
+  void create_memory(const LGraph *g, RTLIL::Module* module, Index_ID idx);
 
 protected:
 public:
