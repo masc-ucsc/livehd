@@ -51,7 +51,10 @@ public:
   }
 
   void reload(uint64_t sz) {
-    assert(sz);
+    if (sz==0) {
+      assert(__size==0);
+      return; // Nothing to do. Do not create mmap for empty lgraphs
+    }
     __buffer = __allocator.allocate(sz);
     __size   = sz;
   }

@@ -42,6 +42,11 @@ do
 done
 
 cat lgshell_cmds | ${LGSHELL}
+if [ $? -ne 0 ]; then
+  echo "pyrope.sh failed 1st round"
+  exit 3
+fi
+
 mv *.json ./logs
 
  echo ""
@@ -56,6 +61,10 @@ mv *.json ./logs
  done
 
 cat lgshell_cmds_opt | ${LGSHELL}
+if [ $? -ne 0 ]; then
+  echo "pyrope.sh failed 2nd round"
+  exit 3
+fi
 mv *.json ./logs
 
 echo ""
