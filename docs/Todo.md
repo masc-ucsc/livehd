@@ -1,16 +1,10 @@
+# List of projects / features that are needed in LGraph
 
-
-# List of projects / features that are needed in LGraph:
-
-## 1.Synthesis:
+## 1.Synthesis
 
 * S01 - Liberty Reader / TMap
   1. [Rohan] Find a Liberty parser or write one
-  2. [Rohan] Standard cells (from the library) will be added as types in a specific
-    range of cell types
-  3. [Rohan] Read cell delays
-  4. [Yuxun] Use abc to technology map the graph
-  5. [Yuxun] Read back the cells using the types from the liberty file
+  2. [Rohan] Read cell delays
 * S02 - OpenTimer
   1. [Rohan?] First iteration:
       * Initially, add "fake" cell delays
@@ -56,25 +50,17 @@
       * Depends on S01
   2. This would be a rough estimation before physical implementation
 
-## 2. Physical Design:
+## 2. Physical Design
 
 * P01 - Placement:
-  1. [Sheng] Add new fields for each node: xy coordinates, height width
-  2. [?] Use yosys quadratic placement (qwp) to populate coordinates (need to
+  1. [?] Use yosys quadratic placement (qwp) to populate coordinates (need to
     patch yosys to read placement info)
       * Depends on P01.i
-  3. [Sheng] Integrate LEF/DEF inou (read and write)
-      * Find *good* LEF/DEF parsers/writers and integrate into the graph
-      * Depends on P01.i
-  4. [Sheng?] Populate heigh/width fields with info from LEF
-      * Depends on P01.iii
-      * LEF and LIB should complete each other, but we should try to infer as
-    much as possible from each
-  6. [Rafael?] Integrate opensource placer?
+  2. [Rafael?] Integrate opensource placer?
       * Depends on P01.i, P01.iii
-  7. [Rafael] Implement Analytical Placement
+  3. [Rafael] Implement Analytical Placement
       * Depends on P01.i
-  8. [?] Integrate open source legalization
+  4. [?] Integrate open source legalization
       * Depends on P01.i, P01.iii
 * P03 - Placement metrics:
   1. [Rafael?] Wirelength estimation
@@ -98,7 +84,7 @@
   3. [Sheng?] Implement SAT based router
 * P07 - CTS / PDN?
 
-## 3. Simulation:
+## 3. Simulation
 * L1 - LLVM inou
 * L2 - Testbench1 generation (from C/C++)
 * L3 - Testbench2 verilog (using yosys and synthesizable verilog only)
@@ -106,34 +92,24 @@
 * L5 - Physical Simulation: It should not be that hard to pass physical information once we have it
 
 ## 4. Pyrope:
-* H1 - Pyrope input
-  1. [Akash] Pyrope parser
-  2. [Blake] Pyrope compiler
-* H2 - Pyrope tb
+* H1 - Pyrope tb
   1. [?]  (will they go through the graph?)
       * Depends on H1
-* H3 - Pyrope inou test
-  1. [Zach] Read verilog, write pyrope, read pyrope, write verilog, sat
+* H2 - Pyrope inou test
+  1. [Zach?] Read verilog, write pyrope, read pyrope, write verilog, sat
      solve
       * Depends on H1
 
 ## 5. Live:
-* L1 - [Rafael] Port DAC paper
-  1. Port setup
-  2. Port diff
-  3. Port Stitch
-* L2 - [Rafael] Structural Diff
-  1. Replaces stitch, change LUT logic instead of replacing subgraph
-      * Depends on L1
-* L3 - [Rafael] Logic Decomposition
+* L1 - [Rafael?] Logic Decomposition
   1. Reduced the subgraph size
       * Depends on L1
-* L4 - [Rafael] Incremental Placement
+* L2 - [Rafael?] Incremental Placement
   1. Use partially solved matrix for analytical replacement
   2. Fix position of cells not replaced
       * Depends on L1, P01
-* L5 - [Rafael] Make sure to add live on regression
-* L6 - [Rafael] Closed loop tests with sat solvers
+* L3 - [Rafael] Make sure to add live on regression
+* L4 - [Rafael?] Closed loop tests with sat solvers
 
 
 Extra TODOs:
@@ -162,7 +138,7 @@ the upper bits
     - eg: shift amount, shift sign extension, pick offset, pick width
     - memory parameters, so forth
 
-# Known bugs and other maintenance needs:
+# Known bugs and other maintenance needs
 
 ## Memory Usage
 
@@ -194,8 +170,6 @@ the upper bits
 * Complete json description to take into account extra fields
     - Some missing fields: node delay, wirename, subgraph id, ...
 
-* Discontinue YAML support
-
 * Closed loop json test
     - Go to json, back to lgraph and compare lgraphs
 
@@ -225,9 +199,6 @@ the upper bits
 
 ## Plugin like extension
 
-* data directory?
-  - Maybe create a "data" directory that has the nodetype, nodeloc... files.
-
 * Instead of extending Graph\_base, we create a plug in interface, and to access
 the individual fields, we have a "vector-like" interface.
   - How to handle multiple graphs cleanly? node\_type::get(g)[nid], is it slow?
@@ -242,11 +213,6 @@ the individual fields, we have a "vector-like" interface.
 
 ## General
 
-* Make graph names compatible
-    - Right now a lgraph\_\* is added to the graph name upon creation
-    - However, when using lgraph-\>get\_name to try to locate a graph it doesn't
-      work because the graph is kept without the prefix in some places.
-
 * Delete char\_array entries
     - We want to be able to remove a char\_array entry
     - If possible, we want to be able to reuse the space to prevent leakage
@@ -258,12 +224,6 @@ an exception.
 
 * lgrand
     - add the option to randomly add/delete edges and do iterations. A way to create a benchmark
-
-* Store table sizes in a separate table
-    - One thing is that most have 8K because the mmap is 4K aligned, and we need 8
-  bytes to store the size. It may make sense to have the sizes for all the
-  tables in a separate mmap file. Since we have 11 mmap files, this would save
-  11x4K per graph (nearly 1/2 reduction).
 
 * use catch (catch-lib) for unit testing. Looks nicer and more in tune with our Pyrope style
 
