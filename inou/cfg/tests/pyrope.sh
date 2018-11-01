@@ -8,7 +8,7 @@ rm -f  ./lgshell_cmds
 rm -f  ./lgshell_cmds_opt
 mkdir logs
 echo "sandbox path is:"
-echo "$(pwd)"
+pwd
 
 
 # pts='top_ooo  sp_add  constant  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2  if_elif_else'
@@ -42,7 +42,7 @@ do
   echo "lgraph.open name:${pt}_cfg |> pass.dfg.generate name:${pt}"            >> lgshell_cmds
   echo "lgraph.open name:${pt} |> inou.json.fromlg output:${pt}_pre.json"      >> lgshell_cmds
 
-  cat lgshell_cmds | ${LGSHELL}
+  ${LGSHELL} < lgshell_cmds
   if [ $? -ne 0 ]; then
     echo "pyrope.sh failed @ 1st round: cfg to dfg (${pt})"
     exit 3
@@ -62,7 +62,7 @@ mv *.json ./logs
    echo "lgraph.open name:${pt} |> pass.dfg.pseudo_bitwidth"               >> lgshell_cmds_opt
    echo "lgraph.open name:${pt} |> inou.json.fromlg output:${pt}.json"     >> lgshell_cmds_opt
 
-   cat lgshell_cmds_opt | ${LGSHELL}
+  ${LGSHELL} < lgshell_cmds_opt
    if [ $? -ne 0 ]; then
      echo "pyrope.sh failed 2nd round: optimizie dfg ${pt}"
      exit 3
