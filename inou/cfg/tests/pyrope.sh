@@ -1,3 +1,5 @@
+#!/bin/bash
+
 rm -rf ./lgdb
 rm -f  ./logs/*.json
 rm -f  ./logs/*.v
@@ -30,8 +32,8 @@ echo ""
 
 for pt in $pts
 do
-  if [ ! -f ./inou/cfg/tests/"$pt".cfg ]; then
-    echo "could not find "$pt".cfg in ./inou/cfg/tests/"
+  if [ ! -f ./inou/cfg/tests/${pt}.cfg ]; then
+    echo "could not find ${pt}.cfg in ./inou/cfg/tests/"
     exit 1
   fi
 

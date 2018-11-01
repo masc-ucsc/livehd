@@ -1,11 +1,8 @@
+#!/bin/bash
 
 declare -a inputs=("trivial.v" "null_port.v" "simple_flop.v")
 
-LGCHECK=./inou/yosys/lgcheck
-YOSYS=./inou/yosys/lgyosys
 LGSHELL=./bazel-bin/main/lgshell
-
-TEST_DIR=./pass/dce/tests
 
 if [ ! -f ${LGSHELL} ]; then
   if [ -f ./main/lgshell ]; then
