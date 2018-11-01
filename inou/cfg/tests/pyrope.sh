@@ -9,8 +9,8 @@ echo "sandbox path is:"
 echo "$(pwd)"
 
 
-pts='top_ooo  sp_add  constant  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2  if_elif_else'
-# pts='top_ooo  sp_add  constant  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2 '
+# pts='top_ooo  sp_add  constant  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2  if_elif_else'
+pts='top_ooo  sp_add  constant  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2 '
 
 LGSHELL=./bazel-bin/main/lgshell
 
@@ -43,7 +43,7 @@ done
 
 cat lgshell_cmds | ${LGSHELL}
 if [ $? -ne 0 ]; then
-  echo "pyrope.sh failed 1st round"
+  echo "pyrope.sh failed @ 1st round: cfg to dfg"
   exit 3
 fi
 
@@ -62,7 +62,7 @@ mv *.json ./logs
 
 cat lgshell_cmds_opt | ${LGSHELL}
 if [ $? -ne 0 ]; then
-  echo "pyrope.sh failed 2nd round"
+  echo "pyrope.sh failed 2nd round: optimizie dfg"
   exit 3
 fi
 mv *.json ./logs
