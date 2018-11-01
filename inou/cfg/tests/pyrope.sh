@@ -50,8 +50,8 @@ mv *.json ./logs
 
  for pt in $pts
  do
-   echo "lgraph.open name:"$pt" |> pass.dfg.optimize"                      >> lgshell_cmds_opt 
-   echo "lgraph.open name:"$pt" |> pass.dfg.pseudo_bitwidth"               >> lgshell_cmds_opt 
+   echo "lgraph.open name:"$pt" |> pass.dfg.optimize"                      >> lgshell_cmds_opt
+   echo "lgraph.open name:"$pt" |> pass.dfg.pseudo_bitwidth"               >> lgshell_cmds_opt
    echo "lgraph.open name:"$pt" |> inou.json.fromlg output:"$pt".json"     >> lgshell_cmds_opt
  done
 

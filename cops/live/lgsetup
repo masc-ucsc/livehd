@@ -1,6 +1,6 @@
 #!/bin/bash
 
-TEMP=`getopt -o t::l::y::b::I::d --long testdir::,logdir::,inou::,binary::,incdir::,debug,s_lgdb::,e_lgdb::,bounds::,top::,lib::,constr::,freq:: -n 'lgsetup' -- "$@"`
+TEMP=$(getopt -o t::l::y::b::I::d --long testdir::,logdir::,inou::,binary::,incdir::,debug,s_lgdb::,e_lgdb::,bounds::,top::,lib::,constr::,freq:: -n 'lgsetup' -- "$@")
 eval set -- "$TEMP"
 
 OPT_YOSYS="./misc/yosys/bin/yosys"
@@ -95,10 +95,10 @@ OPT_FILES=$*
 OPT_INVARIANT=./cops/live/lginvariant
 
 if [ -d "${OPT_TESTDIR}" ]; then
-  FILE_LIST=`find ${OPT_TESTDIR} -name '*.v' -o -name '*.vh' -o -name '*.sv' | awk '{print "read_verilog -sv -nomeminit "$1";"}'`
+  FILE_LIST=$(find ${OPT_TESTDIR} -name '*.v' -o -name '*.vh' -o -name '*.sv' | awk '{print "read_verilog -sv -nomeminit "$1";"}')
 	BASE=$(basename ${OPT_TESTDIR})
 elif [ "${OPT_FILES}" != "" ]; then
-	FILE_LIST=`echo $OPT_FILES | tr ' ' '\n' | awk '{print "read_verilog -sv -nomeminit "$1";"}'`
+	FILE_LIST=$(echo $OPT_FILES | tr ' ' '\n' | awk '{print "read_verilog -sv -nomeminit "$1";"}')
 	for a in ${OPT_FILES}; do
 		if [ ! -f "${a}" ]; then
 			echo "Could not open source file: ${OPT_FILES}"
@@ -120,7 +120,7 @@ mkdir -p ${OPT_LOGDIR}
 
 tmap=""
 
-src=`cat ./inou/tech/src`
+src=$(cat ./inou/tech/src)
 
 if [ "$OPT_LIB" == "fpga" ]; then
   libfiles="read_verilog -lib +/xilinx/cells_sim.v; read_verilog -lib +/xilinx/cells_xtra.v; read_verilog -lib +/xilinx/brams_bb.v; read_verilog -lib +/xilinx/drams_bb.v ;"
