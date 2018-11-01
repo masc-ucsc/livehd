@@ -35,17 +35,18 @@ do
     exit 1
   fi
 
-  echo "inou.cfg.tolg  file:./inou/cfg/tests/"$pt".cfg  name:"$pt"_cfg  |> @a" >> lgshell_cmds
-  echo "lgraph.open name:"$pt"_cfg |> inou.json.fromlg output:"$pt"_cfg.json"  >> lgshell_cmds
-  echo "lgraph.open name:"$pt"_cfg |> pass.dfg.generate name:"$pt""            >> lgshell_cmds
-  echo "lgraph.open name:"$pt" |> inou.json.fromlg output:"$pt"_pre.json"      >> lgshell_cmds
+  echo "inou.cfg.tolg  file:./inou/cfg/tests/${pt}.cfg  name:${pt}_cfg  |> @a" >  lgshell_cmds
+  echo "lgraph.open name:${pt}_cfg |> inou.json.fromlg output:${pt}_cfg.json"  >> lgshell_cmds
+  echo "lgraph.open name:${pt}_cfg |> pass.dfg.generate name:${pt}"            >> lgshell_cmds
+  echo "lgraph.open name:${pt} |> inou.json.fromlg output:${pt}_pre.json"      >> lgshell_cmds
+
+  cat lgshell_cmds | ${LGSHELL}
+  if [ $? -ne 0 ]; then
+    echo "pyrope.sh failed @ 1st round: cfg to dfg (${pt})"
+    exit 3
+  fi
 done
 
-cat lgshell_cmds | ${LGSHELL}
-if [ $? -ne 0 ]; then
-  echo "pyrope.sh failed @ 1st round: cfg to dfg"
-  exit 3
-fi
 
 mv *.json ./logs
 
@@ -55,17 +56,18 @@ mv *.json ./logs
 
  for pt in $pts
  do
-   echo "lgraph.open name:"$pt" |> pass.dfg.optimize"                      >> lgshell_cmds_opt
-   echo "lgraph.open name:"$pt" |> pass.dfg.pseudo_bitwidth"               >> lgshell_cmds_opt
-   echo "lgraph.open name:"$pt" |> inou.json.fromlg output:"$pt".json"     >> lgshell_cmds_opt
+   echo "lgraph.open name:${pt} |> pass.dfg.optimize"                      >  lgshell_cmds_opt
+   echo "lgraph.open name:${pt} |> pass.dfg.pseudo_bitwidth"               >> lgshell_cmds_opt
+   echo "lgraph.open name:${pt} |> inou.json.fromlg output:${pt}.json"     >> lgshell_cmds_opt
+
+   cat lgshell_cmds_opt | ${LGSHELL}
+   if [ $? -ne 0 ]; then
+     echo "pyrope.sh failed 2nd round: optimizie dfg ${pt}"
+     exit 3
+   fi
  done
 
-cat lgshell_cmds_opt | ${LGSHELL}
-if [ $? -ne 0 ]; then
-  echo "pyrope.sh failed 2nd round: optimizie dfg"
-  exit 3
-fi
-mv *.json ./logs
+ mv *.json ./logs
 
 echo ""
 echo "Verilog code generation"
@@ -74,9 +76,9 @@ for pt in $pts
 do
   ./inou/yosys/lgyosys -g"$pt"
   if [ $? -eq 0 ]; then
-    echo "Successfully created verilog:"$pt".v"
+    echo "Successfully created verilog:${pt}.v"
   else
-    echo "FAIL: verilog generation terminated with an error (testcase "$pt".v)"
+    echo "FAIL: verilog generation terminated with an error (testcase ${pt}.v)"
     exit 1
   fi
 done
@@ -111,5 +113,6 @@ done
 rm -f *_dirty.v
 rm -f *_gld.v
 mv *.v    ./logs
-rm -f fm_* 
+rm -f fm_*
 rm -f formality.log
+
