@@ -26,24 +26,7 @@ void Pass_dfg_api::generate(Eprp_var &var) {
 
 void Pass_dfg_api::optimize(Eprp_var &var) {
   Pass_dfg pass_dfg;
-  /* for(const auto &l:var.dict) { */
-  /*   pass_dfg.set(l.first,l.second); */
-  /* } */
 
-  //std::vector<const LGraph *> lgs;
-  //for(const auto &lg:var.lgs) {
-  //  lgs.push_back(lg);
-  //}
-  //for now, just make dfg setted by src name
-  /* std::vector<LGraph *> lgs; */
-  /* for(const auto &l:var.lgs) { */
-  /*   lgs.push_back(l); */
-  /* } */
-
-  /* if (lgs.empty()) { */
-  /*   Main_api::warn(fmt::format("pass.dfg.optimize needs an input dfg lgraph. Either name or |> from lgraph.open")); */
-  /*   return; */
-  /* } */
   pass_dfg.optimize(var.lgs[0]);
 }
 
