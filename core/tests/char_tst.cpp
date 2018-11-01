@@ -80,6 +80,10 @@ void test4(int n) {
     assert(test.get_field(std::to_string(i)) == val);
   }
   assert(test.get_field("c") == 2);
+
+  assert(test.get_id("c") != 0);
+  test.clear();
+  assert(test.get_id("c") == 0);
 }
 
 //stress test on the char array
