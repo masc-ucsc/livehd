@@ -67,6 +67,12 @@ LGraph *LGraph::open(const std::string &path, const std::string &name) {
   if (!Graph_library::instance(path)->include(name))
     return 0;
 
+  std::string lock = path + "/lgraph_" + name + ".lock";
+  if (access(lock.c_str(),R_OK)!=-1) {
+    console->error("trying to open a locked {} (broken?) graph {}", lock, name);
+    return 0;
+  }
+
   return new LGraph(path, name, false);
 }
 
