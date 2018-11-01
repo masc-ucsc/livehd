@@ -44,8 +44,6 @@ protected:
 
   friend Fast_edge_iterator;
 
-  static bool is_path_ok(const std::string &path);
-
 public:
   const std::string &get_name() const {
     assert(long_name == "lgraph_" + name);
