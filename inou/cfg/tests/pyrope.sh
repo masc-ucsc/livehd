@@ -58,11 +58,11 @@ mv *.json ./logs
  do
    echo "lgraph.open name:${pt} |> pass.dfg.optimize"                      >  lgshell_cmds_opt
    echo "lgraph.open name:${pt} |> pass.dfg.pseudo_bitwidth"               >> lgshell_cmds_opt
-   echo "lgraph.open name:${pt} |> inou.json.fromlg output:"$pt".json"     >> lgshell_cmds_opt
+   echo "lgraph.open name:${pt} |> inou.json.fromlg output:${pt}.json"     >> lgshell_cmds_opt
 
    cat lgshell_cmds_opt | ${LGSHELL}
    if [ $? -ne 0 ]; then
-     echo "pyrope.sh failed 2nd round: optimizie dfg $pt"
+     echo "pyrope.sh failed 2nd round: optimizie dfg ${pt}"
      exit 3
    fi
  done
