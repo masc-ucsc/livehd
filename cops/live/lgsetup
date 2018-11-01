@@ -114,22 +114,37 @@ if [ $OPT_DEBUG -eq 1 ]; then
   OPT_YOSYS="gdb --args ${OPT_YOSYS}"
 fi
 
+
+YOSYS_LIB="/usr/local/share/yosys/"
+if [ ! -d ${YOSYS_LIB} ]; then
+  echo "ERROR: could not find yosys library files installed"
+  exit 1
+fi
+
+LGSHELL=./bazel-bin/main/lgshell
+if [ ! -f ${LGSHELL} ]; then
+  if [ -f ./main/lgshell ]; then
+    LGSHELL=./main/lgshell
+  else
+    echo "could not find lgshell on $(pwd)"
+    exit 1
+  fi
+fi
+
 mkdir -p ${OPT_ELGDB}
 mkdir -p ${OPT_SLGDB}
 mkdir -p ${OPT_LOGDIR}
 
 tmap=""
 
-src=$(cat ./inou/tech/src)
-
 if [ "$OPT_LIB" == "fpga" ]; then
   libfiles="read_verilog -lib +/xilinx/cells_sim.v; read_verilog -lib +/xilinx/cells_xtra.v; read_verilog -lib +/xilinx/brams_bb.v; read_verilog -lib +/xilinx/drams_bb.v ;"
   tmap="memory_bram -rules +/xilinx/brams.txt; techmap -map +/xilinx/brams_map.v; memory_bram -rules +/xilinx/drams.txt; techmap -map +/xilinx/drams_map.v; opt -fast -full; memory_map; dffsr2dff; dff2dffe; opt -full; techmap -map +/techmap.v -map +/xilinx/arith_map.v; opt  -fast; techmap -D ALU_RIPPLE; opt -fast; abc -D 100 ${OPT_FREQ};"
 
-  ruby ./inou/tech/verilog_json.rb ${src}/../../misc/yosys/techlibs/common/simcells.v   \
-                                   ${src}/../../misc/yosys/techlibs/xilinx/cells_sim.v  \
-                                   ${src}/../../misc/yosys/techlibs/xilinx/brams_bb.v   \
-                                   ${src}/../../misc/yosys/techlibs/xilinx/drams_bb.v > ${OPT_SLGDB}/tech_library
+  ruby ./inou/tech/verilog_json.rb ${YOSYS_LIB}/techlibs/common/simcells.v   \
+                                   ${YOSYS_LIB}/techlibs/xilinx/cells_sim.v  \
+                                   ${YOSYS_LIB}/techlibs/xilinx/brams_bb.v   \
+                                   ${YOSYS_LIB}/techlibs/xilinx/drams_bb.v > ${OPT_SLGDB}/tech_library
 
 elif [ "$OPT_LIB" != "" ]; then
   sh   ./inou/tech/func_liberty_json.sh ${OPT_LIB} > ${OPT_SLGDB}/tech_library
@@ -161,8 +176,8 @@ else
 fi
 
 
-echo "gdb --args ${OPT_INVARIANT} --elab_lgdb ${OPT_ELGDB}/ --synth_lgdb=${OPT_SLGDB}/ --top=${OPT_TOP} --invariant_file ${OPT_BOUNDS}" > ${OPT_LOGDIR}/${BASE}_invariant_cmd
-${OPT_INVARIANT} --elab_lgdb ${OPT_ELGDB}/ --synth_lgdb=${OPT_SLGDB}/ --top=${OPT_TOP} --invariant_file ${OPT_BOUNDS} > ${OPT_LOGDIR}/invariant_log 2>${OPT_LOGDIR}/invariant_err
+echo "echo \"live.invariant_find elab_lgdb:${OPT_ELGDB} synth_lgdb:${OPT_SLGDB} top:${OPT_TOP} invariant_file:${OPT_BOUNDS} hier_sep:\\\".\\\"\" | ${LGSHELL}" > ${OPT_LOGDIR}/${BASE}_invariant_cmd
+echo "live.invariant_find elab_lgdb:${OPT_ELGDB} synth_lgdb:${OPT_SLGDB} top:${OPT_TOP} invariant_file:${OPT_BOUNDS} hier_sep:\".\"" | ${LGSHELL}
 
 if [ $? -ne 0 ]; then
   echo "FAILED: was not able to run setup for ${BASE}"
