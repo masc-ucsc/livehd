@@ -130,8 +130,8 @@ TEST_F(MainTest, MultiComments) {
 
   std::string l0 = read_line(); // typed line
   std::string l1 = read_line(); // cut&paste command echo
-  std::string l2 = read_line(); // files:
-  std::string l3 = read_line(); // files:
+  read_line(); // files:
+  read_line(); // files:
   std::string l4 = read_line_plain(); // files:
   std::string l5 = read_line_plain(); // match:xxx$
   std::string l6 = read_line_plain(); // dump
@@ -199,9 +199,9 @@ TEST_F(MainTest, HelpPass) {
   write(master,cmd.c_str(),cmd.size());
 
   std::string l0 = read_line();
-  std::string l1 = read_line();
-  std::string l2 = read_line();
-  std::string l3 = read_line_plain();
+  read_line();
+  read_line();
+  read_line_plain();
   std::string l4 = read_line_plain();
   std::string l5 = read_line_plain();
 
