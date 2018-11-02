@@ -153,6 +153,8 @@ public:
 
 class __attribute__((packed)) Edge { // 2 bytes total
 protected:
+  friend class LGraph;
+
   uint64_t snode : 1;
   uint64_t input : 1; // Same position for SEdge and LEdge
 #pragma clang diagnostic push
@@ -418,6 +420,8 @@ public:
   }
   bool    has_inputs() const;
   bool    has_outputs() const;
+  bool    has_pid_inputs() const;
+  bool    has_pid_outputs() const;
   int32_t get_num_inputs() const;
   int32_t get_num_outputs() const;
 

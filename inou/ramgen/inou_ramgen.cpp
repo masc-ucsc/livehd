@@ -66,19 +66,19 @@ void Inou_ramgen::fromlg(std::vector<const LGraph *> &lgs) {
 
 #else
 
-  total = 0;
   for(const auto g : lgs) {
-    g->each_master_root_fast([this](auto a1) { inc_total(a1); });
-  }
-  fmt::print("2. total {}\n",total);
-  b.sample("warmup");
+    //fmt::print("digraph {\n");
+    std::cout << "digraph {\n";
+    g->each_master_root_fast([g](Index_ID src_nid) {
+      const auto &node = g->node_type_get(src_nid);
+      fmt::print(" {} [label=\"{}:{}\"];\n", src_nid, src_nid, node.get_name());
+    });
 
-  total = 0;
-  for(const auto g : lgs) {
-    g->each_master_root_fast([this](auto a1) { inc_total(a1); });
+    g->each_output_edge_fast([](Index_ID src_nid, Port_ID src_pid, Index_ID dst_nid, Port_ID dst_pid) {
+      fmt::print(" {} -> {}[label=\"{}:{}\"];\n", src_nid, dst_nid, src_pid, dst_pid);
+    });
+    std::cout << "}\n";
   }
-  fmt::print("2. total {}\n",total);
-  b.sample("each  ");
 #endif
 
 }

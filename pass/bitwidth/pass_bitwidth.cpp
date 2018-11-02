@@ -224,13 +224,7 @@ void Pass_bitwidth::iterate_arith(const LGraph *lg, Index_ID idx) {
   for(const auto &inp : lg->inp_edges(idx)) {
     Index_ID inp_idx = inp.get_idx();
 
-    fmt::print("1.iterate {} ",idx);
-    bw[inp_idx].i.dump();
-    fmt::print("\n");
     updated |= bw[idx].i.expand(bw[inp_idx].i, false);
-    fmt::print("2.iterate {} ",idx);
-    bw[idx].i.dump();
-    fmt::print("\n");
   }
 
   if(updated) {
@@ -242,21 +236,20 @@ void Pass_bitwidth::iterate_pick(const LGraph *lg, Index_ID idx) {
 
   // At most like inputs, but constrain on output (pick can drop bits)
 
-  auto imp = bw[idx].i;
-
-  bw[idx].set_implicit();
+  Pass_bitwidth::Node_properties::Implicit_range imp;
 
   for(const auto &inp : lg->inp_edges(idx)) {
     Index_ID inp_idx = inp.get_idx();
 
-    bw[idx].i.expand(bw[inp_idx].i,true);
+    imp.expand(bw[inp_idx].i,true);
   }
 
-  bw[idx].i.pick(bw[idx].e);
+  imp.pick(bw[idx].e);
 
   if (imp.max != bw[idx].i.max ||
       imp.min != bw[idx].i.min ||
       imp.sign != bw[idx].i.sign) {
+    bw[idx].i = imp;
     mark_all_outputs(lg,idx);
   }
 
@@ -267,7 +260,7 @@ void Pass_bitwidth::iterate_pick(const LGraph *lg, Index_ID idx) {
 
 void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
 
-  lg->each_root_fast([this,lg](Index_ID idx) {
+  lg->each_output_root_fast([this,lg](Index_ID idx, Port_ID pid) {
 
     if (lg->get_bits(idx)==0)
       return;
@@ -294,12 +287,6 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
         bw[idx].e.set_sbits(lg->get_bits(idx));
       else
         bw[idx].e.set_ubits(lg->get_bits(idx));
-
-      if (node.op == Sum_Op) {
-        fmt::print("1.setup {} bits:{}",idx,lg->get_bits(idx));
-        bw[idx].e.dump();
-        fmt::print("\n");
-      }
     }
 
     bw[idx].set_implicit();
@@ -380,15 +367,27 @@ void Pass_bitwidth::iterate_node(LGraph *lg, Index_ID idx) {
 
 void Pass_bitwidth::bw_pass_dump(LGraph *lg) {
 
-  lg->each_root_fast([this,lg](Index_ID idx) {
+  lg->each_input_root_fast([this,lg](Index_ID idx, Port_ID pid) {
 
     const auto &node = lg->node_type_get(idx);
 
-    fmt::print("{} {} ", idx, node.get_name());
+    fmt::print("inp {}:{} {} ", idx, pid, node.get_name());
     bw[idx].i.dump();
     fmt::print("\n  ");
     bw[idx].e.dump();
     fmt::print("\n");
+
+  });
+
+  lg->each_output_root_fast([this,lg](Index_ID idx, Port_ID pid) {
+
+    const auto &node = lg->node_type_get(idx);
+
+    fmt::print("out {}:{} {} ", idx, pid, node.get_name());
+    bw[idx].i.dump();
+    fmt::print("\n  ");
+    bw[idx].e.dump();
+    fmt::print(" ({})\n",bw[idx].niters);
 
   });
 

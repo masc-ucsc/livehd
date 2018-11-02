@@ -44,12 +44,24 @@ protected:
 
     class Implicit_range {
     public:
-      int64_t max = 0;
-      int64_t min = 0;
+      int64_t max;
+      int64_t min;
 
-      bool sign = false;
-      bool overflow = false;
+      bool sign;
+      bool overflow;
 
+      Implicit_range() {
+        max = 0;
+        min = 0;
+        sign = false;
+        overflow = false;
+      }
+      Implicit_range(const Implicit_range &i) {
+        max = i.max;
+        min = i.min;
+        sign = i.sign;
+        overflow = i.overflow;
+      }
       void dump() const;
       int64_t round_power2(int64_t x) const;
       bool expand(const Implicit_range &i, bool round2);
@@ -68,6 +80,7 @@ protected:
       i.sign = !e.is_unsigned();
       i.overflow = e.overflow;
     }
+
   };
 
   std::vector<Node_properties> bw;
