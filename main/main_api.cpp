@@ -13,7 +13,7 @@
 #include "inou_lef_api.hpp"
 #include "inou_json_api.hpp"
 #include "inou_pyrope_api.hpp"
-#include "inou_ramgen_api.hpp"
+#include "inou_graphviz_api.hpp"
 #include "inou_rand_api.hpp"
 #include "inou_yosys_api.hpp"
 
@@ -41,7 +41,7 @@ void Main_api::init() {
   Inou_lef_api::setup(eprp);         // inou.lef.*
   Inou_json_api::setup(eprp);        // inou.json.*
   Inou_pyrope_api::setup(eprp);      // inou.pyrope.*
-  Inou_ramgen_api::setup(eprp);      // inou.ramgen.*
+  Inou_graphviz_api::setup(eprp);    // inou.graphviz.*
   Inou_rand_api::setup(eprp);        // inou.rand.*
   Inou_yosys_api::setup(eprp);       // inou.yosys.*
 
