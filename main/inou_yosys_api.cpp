@@ -85,7 +85,7 @@ int Inou_yosys_api::create_lib(const std::string &lib_file, const std::string& l
     mkdir(lgdb.c_str(), 0755);
 
     //redirect stdout to tech_file
-    int output = open(ofile.c_str(), O_WRONLY | O_CREAT, S_IRWXU);
+    int output = open(ofile.c_str(), O_WRONLY | O_CREAT | O_TRUNC, S_IRWXU);
     dup2 (output, STDOUT_FILENO);
 
     std::string tech_parser = "./inou/tech/func_liberty_json.sh";

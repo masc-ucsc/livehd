@@ -19,7 +19,7 @@ Chunkify_verilog::Chunkify_verilog(const std::string &_path)
 
 
 int Chunkify_verilog::open_write_file(const std::string &filename) {
-  int fd = open(filename.c_str(), O_WRONLY|O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+  int fd = open(filename.c_str(), O_WRONLY|O_CREAT|O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
   if (fd<0) {
     scan_error(fmt::format("could not open {} for output", filename));
     return -1;
