@@ -55,7 +55,7 @@ public:
   }
 
   static LGraph *get_graph(Graph_ID id, const std::string& lgdb) {
-    return LGraph::open(id, lgdb);
+    return LGraph::open(lgdb, id);
   }
 
   bool is_invariant_boundary(Net_ID net) const {

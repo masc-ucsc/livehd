@@ -190,6 +190,7 @@ void Invariant_finder::find_invariant_boundaries() {
       inst = inst + boundaries.hierarchical_separator;
 
     LGraph *lg = Invariant_boundaries::get_graph(_inst.second, path);
+    assert(lg);
 
     for(auto &node : lg->forward()) {
       std::string net_name;
