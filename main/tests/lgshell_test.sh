@@ -45,7 +45,7 @@ do
     exit 3
   fi
 
-  echo "lgraph.open name:${base} |> dump |> inou.yosys.fromlg odir:${SHELL_ODIR}" | ${LGSHELL}
+  echo "lgraph.open name:${base} |> dump |> inou.yosys.fromlg odir:${SHELL_ODIR} |> inou.graphviz" | ${LGSHELL}
 
   if [ $? -eq 0 ] && [ -f ${SHELL_ODIR}/${base}.v ]; then
     echo "Successfully created verilog from graph ${file}"
