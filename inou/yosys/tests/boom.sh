@@ -1,4 +1,4 @@
-#!/bin.bash
+#!/bin/bash
 
 LGSHELL=./bazel-bin/main/lgshell
 YOSYS=./inou/yosys/lgyosys
