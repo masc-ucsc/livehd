@@ -32,6 +32,7 @@ cc_binary(
             "inou_yosys_write.ys",
     ],
     visibility = ["//visibility:public"],
+    linkopts = ["-static"],
 )
 
 sh_test(
