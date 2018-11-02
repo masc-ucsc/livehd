@@ -18,7 +18,7 @@ N1=$(grep module inou/yosys/tests/*.v | grep -v endmodule | wc -l)
 N2=$(grep module tmp1/parse/chunk* | grep -v endmodule | wc -l)
 
 if [ $N1 -ne $N2 ]; then
-  echo "FAILED: yosys/tests inconsistent number of modules detected by live parse orig:"$N1" vs live:"$N2
+  echo "FAILED: yosys/tests inconsistent number of modules detected by live parse orig:${N1} vs live:${N2}"
   exit -3
 else
   echo "PASS: yosys/tests live parse orig:"$N1" vs live:"$N2
@@ -36,16 +36,16 @@ N1=$(grep module projects/boom/boom.system.TestHarness.BoomConfig.v | grep -v en
 N2=$(grep module tmp2/parse/chunk* | grep -v endmodule | wc -l)
 
 if [ $N1 -ne $N2 ]; then
-  echo "FAILED: boom inconsistent number of modules detected by live parse orig:"$N1" vs live:"$N2
+  echo "FAILED: boom inconsistent number of modules detected by live parse orig:${N1} vs live:${N2}"
   exit -3
 else
-  echo "PASS: boom live parse orig:"$N1" vs live:"$N2
+  echo "PASS: boom live parse orig:${N1} vs live:${N2}"
 fi
 
 N1=$(ls -al tmp2/parse/file* | wc -l)
 N2="1"
 if [ $N1 -ne $N2 ]; then
-  echo "FAILED: boom inconsistent number of files. It should be "$N2", not "$N1
+  echo "FAILED: boom inconsistent number of files. It should be ${N2}, not ${N1}"
   exit -3
 fi
 
