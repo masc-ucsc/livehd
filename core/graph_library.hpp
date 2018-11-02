@@ -89,7 +89,7 @@ public:
     if(it != name2id.end()) {
       return it->second;
     }
-    return 0; // -1 is invalid ID
+    return 0; // Invalid ID
   }
 
   void update(uint32_t lgid);
@@ -101,7 +101,6 @@ public:
     return attribute[lgid].version;
   }
 
-  // FIXME: replace this by a find / end when the iterator is working
   bool include(const std::string &name) const {
     return name2id.find(name) != name2id.end();
   }

@@ -1,3 +1,4 @@
+#!/bin.bash
 
 LGSHELL=./bazel-bin/main/lgshell
 YOSYS=./inou/yosys/lgyosys
@@ -60,9 +61,9 @@ for i in lgdb/parse/chunk*; do
   fi
 done
 
-filename="chunk_`echo ${BOOM_FILE} | tr '/' '.'`"
+filename="chunk_$(echo ${BOOM_FILE} | tr '/' '.')"
 for i in ${TEST_OUT}/*; do
-  name=`basename ${i%.*}`
+  name=$(basename ${i%.*})
   ${LGCHECK} --reference=./lgdb/parse/${filename}:${name} --implementation=${i} --top=$name 2> /dev/null > /dev/null
 
   if [ $? -ne 0 ]; then

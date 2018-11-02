@@ -97,7 +97,7 @@ void Graph_library::reload() {
         int len = strlen(dent->d_name);
         if (strcmp(dent->d_name + len - 5,"_type") != 0) // and finish with _type
           continue;
-        std::string name(dent->d_name + 7, len-5-7); 
+        std::string name(dent->d_name + 7, len-5-7);
 
         console->error("missing {}/graph_library at reload", path);
         exit(0);
