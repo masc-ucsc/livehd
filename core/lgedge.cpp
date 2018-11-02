@@ -117,8 +117,11 @@ bool Node_Internal::has_inputs() const {
   assert(is_master_root());
 
   int32_t total = get_num_local_inputs();
+  if(total)
+    return true;
+
   if(is_last_state())
-    return total != 0;
+    return false;
 
   const Node_Internal *node = this;
   do {
@@ -131,18 +134,65 @@ bool Node_Internal::has_inputs() const {
   return false;
 }
 
+bool Node_Internal::has_pid_inputs() const {
+  assert(is_root());
+
+  int32_t total = get_num_local_inputs();
+  if(total)
+    return true;
+
+  if(is_last_state())
+    return false;
+
+  Port_ID pid = get_out_pid();
+  const Node_Internal *node = this;
+  do {
+    node  = &get(node->get_next());
+    total = node->get_num_local_inputs();
+    if(total && node->get_out_pid() == pid)
+      return true;
+  } while(!node->is_last_state());
+
+  return false;
+}
+
 bool Node_Internal::has_outputs() const {
   assert(is_master_root());
 
   int32_t total = get_num_local_outputs();
+  if(total)
+    return true;
+
   if(is_last_state())
-    return total != 0;
+    return false;
 
   const Node_Internal *node = this;
   do {
     node  = &get(node->get_next());
     total = node->get_num_local_outputs();
     if(total)
+      return true;
+  } while(!node->is_last_state());
+
+  return false;
+}
+
+bool Node_Internal::has_pid_outputs() const {
+  assert(is_root());
+
+  int32_t total = get_num_local_outputs();
+  if(total)
+    return true;
+
+  if(is_last_state())
+    return false;
+
+  Port_ID pid = get_out_pid();
+  const Node_Internal *node = this;
+  do {
+    node  = &get(node->get_next());
+    total = node->get_num_local_outputs();
+    if(total && node->get_out_pid() == pid)
       return true;
   } while(!node->is_last_state());
 

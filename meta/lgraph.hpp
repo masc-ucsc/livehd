@@ -76,6 +76,11 @@ public:
   void each_master_root_fast(std::function<void(Index_ID)> f1) const;
   void each_root_fast(std::function<void(Index_ID)> f1) const;
 
+  void each_input_root_fast(std::function<void(Index_ID, Port_ID)> f1) const;
+  void each_output_root_fast(std::function<void(Index_ID, Port_ID)> f1) const;
+
+  void each_output_edge_fast(std::function<void(Index_ID, Port_ID, Index_ID, Port_ID)> f1) const;
+
 };
 
 // Clean interface/iterator for most operations. It must call graph
