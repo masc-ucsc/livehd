@@ -104,11 +104,9 @@ public:
 
   void deallocate(T *p, size_t) {
     alloc--;
-    // std::cout << "mmap_allocator::deallocate\n";
     if(alloc != 0)
       return;
 
-    p = nullptr;
     if(mmap_base)
       munmap(mmap_base, file_size);
     if(mmap_fd >= 0)
@@ -116,10 +114,6 @@ public:
     mmap_fd       = -1;
     mmap_base     = 0;
     mmap_capacity = 0;
-  }
-
-  virtual ~mmap_allocator() {
-    // std::cout << "destroy mmap_allocator\n";
   }
 
   void save_size(uint64_t size) {
