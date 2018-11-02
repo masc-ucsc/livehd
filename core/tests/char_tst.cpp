@@ -5,7 +5,7 @@
 #include "char_array.hpp"
 
 void test0(int n) {
-  Char_Array<unsigned int> test("test0");
+  Char_Array<unsigned int> test("/tmp/test0");
   test.clear();
   std::string foo = "a";
 
@@ -27,7 +27,7 @@ void test0(int n) {
 }
 
 void test1(int n) {
-  Char_Array<int64_t> test("test1");
+  Char_Array<int64_t> test("/tmp/test1");
   test.clear();
   std::string foo = "a";
 
@@ -40,7 +40,7 @@ void test1(int n) {
 }
 
 void test2(int n) {
-  Char_Array<uint64_t> test("test2");
+  Char_Array<uint64_t> test("/tmp/test2");
   test.clear();
   std::string foo = "a";
 
@@ -55,7 +55,7 @@ void test2(int n) {
 }
 
 void test3(int n) {
-  Char_Array<uint32_t> test("test3");
+  Char_Array<uint32_t> test("/tmp/test3");
   test.clear();
   std::string foo = "a";
 
@@ -73,7 +73,7 @@ void test3(int n) {
 }
 
 void test4(int n) {
-  Char_Array<uint32_t> test("test3"); // Read test 3
+  Char_Array<uint32_t> test("/tmp/test3"); // Read test 3
 
   for(int i = 0; i < n; i++) {
     uint32_t val = 0xdead0000 | (n&0xFFFF);
