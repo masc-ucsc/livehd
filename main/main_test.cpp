@@ -61,15 +61,15 @@ protected:
     while(1) {
       //std::cout << "y\n";
       int sz = read(master,&buffer,1);
-      //std::cout << "xx[" << buffer <<  "]\n";
       if (sz != 1)
         break;
 
       if (buffer == '\x1B' ) {
         line = ""; // We are still in a escaped text
-        read_line(); // consume until the end again
+        //read_line(); // consume until the end again
         continue;
       }
+      //std::cout << "xx[" << buffer <<  "]\n";
 
       if ((buffer == '\n' || buffer == '\r' || buffer == ' ') && line.empty())
         continue;
@@ -130,17 +130,19 @@ TEST_F(MainTest, MultiComments) {
 
   std::string l0 = read_line(); // typed line
   std::string l1 = read_line(); // cut&paste command echo
-  std::string l2 = read_line_plain(); // files:
-  std::string l3 = read_line_plain(); // files:
-  std::string l4 = read_line_plain(); // match:xxx$
-  std::string l5 = read_line_plain(); // dump
+  std::string l2 = read_line(); // files:
+  std::string l3 = read_line(); // files:
+  std::string l4 = read_line_plain(); // files:
+  std::string l5 = read_line_plain(); // match:xxx$
+  std::string l6 = read_line_plain(); // dump
+  std::string l7 = read_line_plain(); // dump
 
   EXPECT_THAT(l0, HasSubstr("dump")); // It has escape characters, just match a word
   EXPECT_THAT(l1, HasSubstr("dump"));
-  EXPECT_THAT(l2, HasSubstr("lgraph.dump labels:"));
-  EXPECT_THAT(l3, HasSubstr("files:"));
-  EXPECT_THAT(l4, HasSubstr("match:xxx$"));
-  EXPECT_THAT(l5, HasSubstr("lgraph.dump lgraphs:"));
+  EXPECT_THAT(l4, HasSubstr("lgraph.dump labels:"));
+  EXPECT_THAT(l5, HasSubstr("files:"));
+  EXPECT_THAT(l6, HasSubstr("match:xxx$"));
+  EXPECT_THAT(l7, HasSubstr("lgraph.dump lgraphs:"));
 }
 
 TEST_F(MainTest, Autocomplete) {
@@ -189,6 +191,25 @@ TEST_F(MainTest, Help) {
   EXPECT_THAT(l1, HasSubstr("help"));
 }
 
+TEST_F(MainTest, HelpPass) {
+
+  drain_stdin();
+  std::string cmd = "help inou.graphviz #\n "; // # is a marker for the stupid espace lines
+
+  write(master,cmd.c_str(),cmd.size());
+
+  std::string l0 = read_line();
+  std::string l1 = read_line();
+  std::string l2 = read_line();
+  std::string l3 = read_line_plain();
+  std::string l4 = read_line_plain();
+  std::string l5 = read_line_plain();
+
+  EXPECT_THAT(l0, HasSubstr("help"));
+  EXPECT_THAT(l4, HasSubstr("dot format"));
+  EXPECT_THAT(l5, HasSubstr("odir"));
+}
+
 TEST_F(MainTest, Quit) {
 
   drain_stdin();
@@ -200,7 +221,7 @@ TEST_F(MainTest, Quit) {
   std::string l1 = read_line_plain();
 
   EXPECT_THAT(l0, HasSubstr("qui")); // It has escape colors, just match word
-  if (!l1.empty()) {
+  if (!l1.empty() && l1[0] != '[') {
     EXPECT_THAT(l1, HasSubstr("unset HOME")); // sanbox unsets HOME variable
   }
 }
