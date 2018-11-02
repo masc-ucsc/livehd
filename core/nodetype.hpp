@@ -81,14 +81,36 @@ protected:
   // Both inputs/outputs sorted in alphabetical order
   std::vector<const char *> inputs;
   std::vector<const char *> outputs;
+  std::vector<bool> inputs_sign;
 
-public:
-  const Node_Type_Op op;
+  bool may_gen_sign;
 
   Node_Type(const std::string &_name, Node_Type_Op _op, bool _pipelined)
       : name(_name)
       , pipelined(_pipelined)
-      , op(_op){};
+      , op(_op){
+
+        may_gen_sign = false;
+      };
+
+
+  void setup_signs(bool can_sign) {
+    may_gen_sign = can_sign;
+
+    inputs_sign.resize(inputs.size());
+
+    for(size_t i = 0; i < inputs.size(); i++) {
+      auto len = strlen(inputs[i]);
+      assert(len>0);
+      inputs_sign[i] = (inputs[i][len-1] == 's');
+    }
+
+  }
+
+public:
+  const Node_Type_Op op;
+
+  bool has_may_gen_sign() const { return may_gen_sign; }
 
   static Node_Type &  get(Node_Type_Op op);
   static Node_Type_Op get(const std::string &opname);
@@ -122,6 +144,12 @@ public:
     return 0;
   }
 
+  bool is_input_signed(Port_ID pid) const {
+    if(inputs_sign.size()<pid)
+      return inputs_sign[pid];
+    return false;
+  }
+
   bool is_pipelined() const {
     return pipelined;
   } // Can create loops
@@ -151,6 +179,8 @@ public:
     inputs.push_back("Bs");
     inputs.push_back("Bu");
     outputs.push_back("Y");
+
+    setup_signs(true);
   };
 };
 
@@ -162,6 +192,8 @@ public:
     inputs.push_back("As");
     inputs.push_back("Au");
     outputs.push_back("Y");
+
+    setup_signs(true);
   };
 };
 
@@ -175,6 +207,8 @@ public:
     inputs.push_back("Bs");
     inputs.push_back("Bu");
     outputs.push_back("Y");
+
+    setup_signs(true);
   };
 };
 
@@ -188,6 +222,8 @@ public:
     inputs.push_back("Bs");
     inputs.push_back("Bu");
     outputs.push_back("Y");
+
+    setup_signs(true);
   };
 };
 
@@ -280,6 +316,8 @@ public:
     inputs.push_back("Bs");
     inputs.push_back("Bu");
     outputs.push_back("Y");
+
+    setup_signs(false);
   };
 };
 
@@ -293,6 +331,8 @@ public:
     inputs.push_back("Bs");
     inputs.push_back("Bu");
     outputs.push_back("Y");
+
+    setup_signs(false);
   };
 };
 
@@ -306,6 +346,8 @@ public:
     inputs.push_back("Bs");
     inputs.push_back("Bu");
     outputs.push_back("Y");
+
+    setup_signs(false);
   };
 };
 
@@ -319,6 +361,8 @@ public:
     inputs.push_back("Bs");
     inputs.push_back("Bu");
     outputs.push_back("Y");
+
+    setup_signs(false);
   };
 };
 
@@ -330,6 +374,8 @@ public:
     inputs.push_back("As");
     inputs.push_back("Au");
     outputs.push_back("Y");
+
+    setup_signs(false);
   };
 };
 

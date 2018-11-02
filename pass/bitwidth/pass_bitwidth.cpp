@@ -11,333 +11,444 @@
 #include <algorithm>
 #include <math.h>
 
+void Pass_bitwidth_options_pack::set(const std::string &label, const std::string &value) {
+
+  max_iterations = 10; // FIXME: pass argument from cmd
+}
+
 Pass_bitwidth::Pass_bitwidth() {
 }
 
 
-//NOTE:  This class stores information for each node.
-//         Needs to be readjusted so that it focuses
-//         on outputs of nodes and not nodes(?).
-//FIXME: Need to change for Implicit/Explicit discussion.
-class node_properties {
-public://Change this later. For now makes accessing stuff easier.
-  bool used;//Indicates whether this node has been touched yet or not.
-  bool is_signed;
-  int calculated_max, calculated_min;
-  int hardset_max, hardset_min;
-  bool is_hardset_max, is_hardset_min;
-  bool drop;//for dropping bits; ignore for now, told to wait for Sheng
-//public:
-  node_properties();
-};
-
-node_properties::node_properties () {
-  used = false;
-  is_signed = false;
-  calculated_max = 0;
-  calculated_min = 0;
-  hardset_max = 0;
-  hardset_min = 0;
-  is_hardset_max = false;
-  is_hardset_min = false;
-  drop = false;
+void Pass_bitwidth::Node_properties::Explicit_range::dump() const {
+  fmt::print("max{}:{} min{}:{} sign{}:{} {}"
+      ,max_set?"_set":"",max
+      ,min_set?"_set":"",min
+      ,sign_set?"_set":"",sign
+      ,overflow?"overflow":"");
 }
 
+bool Pass_bitwidth::Node_properties::Explicit_range::is_unsigned() const {
+  return !sign_set || (sign_set && !sign);
+}
 
-//------------------------------------------------------------------
-//Helper Functions (Forward Traversal)
-//NOTE: These functions give ranges (<min,max>) during the initial
-//        forward traversal, wherever possible.
+void Pass_bitwidth::Node_properties::Explicit_range::set_sbits(uint16_t size) {
+  sign_set = true;
+  sign     = true;
 
-void to_graphio(const LGraph *g, Index_ID idx, node_properties arr[50]) {
-  fmt::print("I found an IO");
-  if(g->is_graph_input(idx)) {
-    fmt::print(" (${})", g->get_graph_input_name(idx));
-  } else if (g->is_graph_output(idx)) {
-    fmt::print(" (%{})", g->get_graph_output_name(idx));
+  if (size==0) {
+    overflow = false;
+    max_set  = false;
+    min_set  = false;
+    return;
+  }
+  assert(size);
+
+  max_set = true;
+  min_set = true;
+
+  if (size>63) {
+    overflow = true;
+    max = size-1;  // Use bits in overflow mode
+    min = -(size-1); // Use bits
+  }else{
+    overflow = false;
+    max = pow(2,size-1) - 1;
+    min = -pow(2,size-1);
+  }
+}
+
+void Pass_bitwidth::Node_properties::Explicit_range::set_uconst(uint32_t val) {
+  sign_set = true;
+  sign     = false;
+
+  max_set = true;
+  min_set = true;
+  max     = val;
+  min     = val;
+}
+
+void Pass_bitwidth::Node_properties::Explicit_range::set_ubits(uint16_t size) {
+  sign_set = false;
+  sign     = false;
+
+  if (size==0) {
+    overflow = false;
+    max_set  = false;
+    min_set  = false;
+    return;
+  }
+  assert(size);
+
+  max_set = true;
+  min_set = true;
+  min     = 0;
+
+  if (size>63) {
+    overflow = true;
+    max = size; // Use bits in overflow mode
+  }else{
+    overflow = false;
+    max = pow(2,size) - 1;
+  }
+}
+
+void Pass_bitwidth::Node_properties::Implicit_range::dump() const {
+  fmt::print("max:{} min:{} sign:{} {}",max,min,sign,overflow?"overflow":"");
+}
+
+int64_t Pass_bitwidth::Node_properties::Implicit_range::round_power2(int64_t x) const {
+  uint64_t ux = abs(x);
+  uint64_t ux_r = 1ULL<<(sizeof(uint64_t) * 8 - __builtin_clzll(ux));
+  if (ux==static_cast<uint64_t>(x))
+    return ux_r;
+
+  return -ux_r;
+}
+
+bool Pass_bitwidth::Node_properties::Implicit_range::expand(const Implicit_range &i, bool round2) {
+
+  bool updated = false;
+
+  if (sign & !i.sign)
+    updated = true;
+
+  sign = sign & i.sign;
+
+  if (!i.overflow && overflow) {
+    // Nothing to do (!overflow is always smaller than overflow)
+  }else if (i.overflow && !overflow) {
+    overflow = true;
+    updated = true;
+    max = i.max;
+    min = i.min;
+  }else{
+    auto tmp = std::max(max,i.max);
+    if (round2 && !overflow) {
+      tmp = round_power2(tmp);
+      if (sign)
+        tmp--;
+    }
+    updated |= (tmp!=max);
+    max = tmp;
+
+    if (sign) {
+      tmp = -max-1;
+    }else{
+      tmp = 0;
+    }
+    if (round2 && !overflow)
+      tmp = round_power2(tmp);
+    updated |= (tmp!=min);
+    min = tmp;
   }
 
-  int size = g->get_bits(idx);
-  arr[idx].calculated_min = 0;
-  arr[idx].calculated_max = pow(2,size) - 1;
-  arr[idx].used = true;
+  return updated;
 }
 
-void to_and(const LGraph *g, Index_ID idx, node_properties arr[50]) {
-  int input_node = 0;
-  fmt::print("I found an AND ... Inp. Nodes:");
-  int size[2];
-  int tmp = 0;
-  for(const auto &p : g->inp_edges(idx)) {
-    input_node = p.get_idx();
-    fmt::print(" {}/b{}", input_node, g->get_bits(input_node));
-    size[tmp] = g->get_bits(input_node);
-    tmp++;
+void Pass_bitwidth::Node_properties::Implicit_range::pick(const Explicit_range &e) {
+
+  if (!e.overflow && !overflow) {
+    if (e.sign && sign) {
+    }else if (e.sign && !sign) {
+      max = max/2;
+      min = -min/2;
+    }else if (!e.sign && sign) {
+      //max = max;
+      min = 0;
+    }
+
+    if (max>e.max)
+      max = e.max;
+
+    if (min<e.min)
+      min = e.min;
+  }else if (e.overflow && overflow) {
+    if (e.sign && sign) {
+    }else if (e.sign && !sign) {
+      max = max-1;
+      min = min+1;
+    }else if (!e.sign && sign) {
+      //max = max;
+      min = 0;
+    }
+
+    if (max>e.max)
+      max = e.max;
+
+    if (min<e.min)
+      min = e.min;
+  }else if (e.overflow && !overflow) {
+  }else if (!e.overflow && overflow) {
+    overflow = e.overflow;
+    max = e.max;
+    min = e.min;
+  }
+}
+
+void Pass_bitwidth::mark_all_outputs(const LGraph *lg, Index_ID idx) {
+
+  for(const auto &out : lg->out_edges(idx)) {
+    Index_ID dest_idx = out.get_idx();
+    assert(lg->is_root(dest_idx));
+
+    next_pending.set_bit(dest_idx);
   }
 
-  arr[idx].calculated_min = 0;
-  arr[idx].calculated_max = pow(2,g->get_bits(idx)) - 1;
-  arr[idx].used = true;
-
-  /*if(size[0] == size[1]) {
-    fmt::print(" ...SAME");
-  } else if (size[0] > size[1]) {
-    fmt::print(" ...DIFF: reduce size of first node");
-  } else {
-    fmt::print(" ...DIFF: reduce size of second node");
-  }*/
 }
 
-void to_sum(const LGraph *g, Index_ID idx, node_properties arr[50]) {
-  fmt::print("I found a SUM ... Inp. Nodes:");
-  int n_idx[2];
-  int tmp = 0;
-  for(const auto &p : g->inp_edges(idx)) {
-    n_idx[tmp] = p.get_idx();
-    fmt::print(" {}/b{}", n_idx[tmp], g->get_bits(p.get_idx()));
-    tmp++;
+void Pass_bitwidth::iterate_graphio(const LGraph *lg, Index_ID idx) {
+
+  // This should be called only if we do cross module propagation
+
+  mark_all_outputs(lg,idx);
+}
+
+void Pass_bitwidth::iterate_logic(const LGraph *lg, Index_ID idx) {
+
+  bool updated = false;
+  for(const auto &inp : lg->inp_edges(idx)) {
+    Index_ID inp_idx = inp.get_idx();
+
+    updated |= bw[idx].i.expand(bw[inp_idx].i, true);
   }
 
-  //Set SUM node's min/max values.
-  arr[idx].calculated_max = arr[n_idx[0]].calculated_max + arr[n_idx[1]].calculated_max;
-  arr[idx].calculated_min = arr[n_idx[0]].calculated_min + arr[n_idx[1]].calculated_min;
-  arr[idx].used = true;
-  //fmt::print("\tNode min: {}, max: {}", arr[idx].calculated_min, arr[idx].calculated_max);
+  if(updated) {
+    mark_all_outputs(lg,idx);
+  }
 }
 
-void to_pick(const LGraph *g, Index_ID idx, node_properties arr[50]) {
-  //FIXME: This is incorrect, but it works for now.
-  fmt::print("I found a PICK ... Inp. Nodes:");
-  int nodes[2];
-  int tmp = 0;
-  for(const auto &p : g->inp_edges(idx)) {
-    nodes[tmp] = p.get_idx();
-    fmt::print(" {}/b{}", p.get_idx(), g->get_bits(p.get_idx()));
-    tmp++;
+void Pass_bitwidth::iterate_arith(const LGraph *lg, Index_ID idx) {
+
+  bool updated = false;
+  for(const auto &inp : lg->inp_edges(idx)) {
+    Index_ID inp_idx = inp.get_idx();
+
+    fmt::print("1.iterate {} ",idx);
+    bw[inp_idx].i.dump();
+    fmt::print("\n");
+    updated |= bw[idx].i.expand(bw[inp_idx].i, false);
+    fmt::print("2.iterate {} ",idx);
+    bw[idx].i.dump();
+    fmt::print("\n");
   }
 
-  arr[idx].calculated_min = 0;
-  arr[idx].calculated_max = arr[nodes[0]].calculated_max;
-  arr[idx].used = true;
-  //fmt::print("\tNode min: {}, max: {}", arr[idx].calculated_min, arr[idx].calculated_max);
-}
-
-void to_const(const LGraph *g, Index_ID idx, node_properties arr[50]) {
-  //Constant value's min/max values are just what it's assigned to. Cannot vary.
-  int val = g->node_value_get(idx);
-  fmt::print("I found a U32CONST ({})", val);
-
-  arr[idx].calculated_min = val;
-  arr[idx].calculated_max = val;
-  arr[idx].used = true;
-}
-
-void to_not(const LGraph *g, Index_ID idx, node_properties arr[50]) {
-  //FIXME: This is wrong and needs to change. Will depend on signage. For now, fine.
-  fmt::print("I found a NOT");
-  int inp_idx;
-  for(const auto &p : g->inp_edges(idx)) {
-    inp_idx = p.get_idx();
-    fmt::print(" {}/b{} ... Inp. Node:", inp_idx, g->get_bits(p.get_idx()));
+  if(updated) {
+    mark_all_outputs(lg,idx);
   }
-  arr[idx].calculated_max = arr[inp_idx].calculated_max;
-  arr[idx].calculated_min = arr[inp_idx].calculated_min;
-  arr[idx].used = true;
-  //fmt::print("... {} ... {}", arr[idx].calculated_min, arr[idx].calculated_max);
+}
+
+void Pass_bitwidth::iterate_pick(const LGraph *lg, Index_ID idx) {
+
+  // At most like inputs, but constrain on output (pick can drop bits)
+
+  auto imp = bw[idx].i;
+
+  bw[idx].set_implicit();
+
+  for(const auto &inp : lg->inp_edges(idx)) {
+    Index_ID inp_idx = inp.get_idx();
+
+    bw[idx].i.expand(bw[inp_idx].i,true);
+  }
+
+  bw[idx].i.pick(bw[idx].e);
+
+  if (imp.max != bw[idx].i.max ||
+      imp.min != bw[idx].i.min ||
+      imp.sign != bw[idx].i.sign) {
+    mark_all_outputs(lg,idx);
+  }
+
 }
 
 //------------------------------------------------------------------
 //MIT Algorithm
 
+void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
 
-void Pass_bitwidth::trans(LGraph *orig) {
+  lg->each_root_fast([this,lg](Index_ID idx) {
+
+    if (lg->get_bits(idx)==0)
+      return;
+
+    const auto &node = lg->node_type_get(idx);
+    bool sign = false;
+    if (node.op == U32Const_Op) {
+      uint32_t val = lg->node_value_get(idx);
+      bw[idx].e.set_uconst(val);
+    }else {
+      if (node.has_may_gen_sign()) {
+        bool all_signed = true;
+        for(const auto &inp : lg->inp_edges(idx)) {
+          if (node.is_input_signed(inp.get_inp_pin().get_pid()))
+            continue;
+
+          all_signed = false;
+          break;
+        }
+        sign = all_signed;
+      }
+
+      if (sign)
+        bw[idx].e.set_sbits(lg->get_bits(idx));
+      else
+        bw[idx].e.set_ubits(lg->get_bits(idx));
+
+      if (node.op == Sum_Op) {
+        fmt::print("1.setup {} bits:{}",idx,lg->get_bits(idx));
+        bw[idx].e.dump();
+        fmt::print("\n");
+      }
+    }
+
+    bw[idx].set_implicit();
+    assert(idx);
+    pending.set_bit(idx);
+  });
+}
+
+void Pass_bitwidth::iterate_node(LGraph *lg, Index_ID idx) {
+
+  const auto &op = lg->node_type_get(idx);
+
+  switch(op.op) {
+    case GraphIO_Op:
+      iterate_graphio(lg, idx);
+      break;
+    case And_Op:
+    case Or_Op:
+    case Xor_Op:
+    case Not_Op:
+      iterate_logic(lg, idx);
+      break;
+    case Sum_Op:
+    case Div_Op:
+    case Mult_Op:
+    case Mod_Op:
+      iterate_arith(lg, idx);
+      break;
+    case Pick_Op:
+      iterate_pick(lg, idx);
+      break;
+    case U32Const_Op:
+      // No need to iterate
+      break;
+    case LessThan_Op:
+      fmt::print("I found a L.T.");
+      break;
+    case GreaterThan_Op:
+      fmt::print("I found a G.T.");
+      break;
+    case LessEqualThan_Op:
+      fmt::print("I found a L.E.T.");
+      break;
+    case GreaterEqualThan_Op:
+      fmt::print("I found a G.E.T.");
+      break;
+    case Equals_Op:
+      fmt::print("I found an EQUALS");
+      break;
+    case ShiftLeft_Op:
+      fmt::print("I found a SHIFT_LEFT");
+      break;
+    case ShiftRight_Op:
+      fmt::print("I found a SHIFT_RIGHT");
+      break;
+    case Mux_Op:
+      fmt::print("I found a MUX");
+      break;
+    case Join_Op:
+      fmt::print("I found a JOIN");
+      break;
+    case Flop_Op:
+      fmt::print("I found a FLOP");
+      break;
+    case SubGraph_Op:
+      fmt::print("I found a SUBGRAPH");
+      break;
+    case Latch_Op:
+      fmt::print("I found a LATCH");
+      break;
+    case StrConst_Op:
+      fmt::print("I found a STRING");
+      break;
+    default:
+      fmt::print("FIXME! op not found");
+  }
+}
+
+void Pass_bitwidth::bw_pass_dump(LGraph *lg) {
+
+  lg->each_root_fast([this,lg](Index_ID idx) {
+
+    const auto &node = lg->node_type_get(idx);
+
+    fmt::print("{} {} ", idx, node.get_name());
+    bw[idx].i.dump();
+    fmt::print("\n  ");
+    bw[idx].e.dump();
+    fmt::print("\n");
+
+  });
+
+}
+
+bool Pass_bitwidth::bw_pass_iterate(LGraph *lg) {
+
+  int iterations = 0;
+
+  do{
+    assert(next_pending.none());
+
+    Index_ID idx = pending.get_first();
+    pending.clear_bit(idx);
+    bw[idx].niters++;
+    if (bw[idx].niters>opack.max_iterations) {
+      fmt::print("bw_pass_iterate abort {}\n",iterations);
+      return false;
+    }
+
+    do{
+      iterate_node(lg, idx);
+      idx = pending.extract_next(idx);
+    }while(idx);
+
+    assert(pending.none());
+    if (next_pending.none()) {
+      fmt::print("bw_pass_iterate pass {}\n",iterations);
+      return true;
+    }
+
+    pending.swap(next_pending);
+
+    iterations++;
+
+  }while(true);
+
+  assert(false);
+
+  return false;
+}
+
+void Pass_bitwidth::trans(LGraph *lg) {
   LGBench b;
 
-  fmt::print ("\n");
-  //std::vector<node_properties> testVector;
-  node_properties arr[50];//The size of this is arbitrary. We use 50 for now so we don't have to worry about size for trivial cases. Elements are indexed by their node #.
+  bw.resize(lg->size());  // FIXME: this should be moved to table like nodedelay.cpp
 
+  bw_pass_setup(lg);
 
-  //First forward pass.
-  for(auto idx : orig->forward()) {
-    const auto op = orig->node_type_get(idx);
-    fmt::print("Node {}:\t\t", idx);
+  b.sample("bitwidth setup");
 
-    switch(op.op) {
-      case GraphIO_Op:
-         to_graphio(orig, idx, arr);
-        break;
-      case And_Op:
-        to_and(orig, idx, arr);
-        break;
-      case Or_Op:
-        fmt::print("I found an OR");
-        break;
-      case Xor_Op:
-        fmt::print("I found an XOR");
-        break;
-      case LessThan_Op:
-        fmt::print("I found a L.T.");
-        break;
-      case GreaterThan_Op:
-        fmt::print("I found a G.T.");
-        break;
-      case LessEqualThan_Op:
-        fmt::print("I found a L.E.T.");
-        break;
-      case GreaterEqualThan_Op:
-        fmt::print("I found a G.E.T.");
-        break;
-      case Equals_Op:
-        fmt::print("I found an EQUALS");
-        break;
-      case Not_Op:
-        to_not(orig, idx, arr);
-        break;
-      case ShiftLeft_Op:
-        fmt::print("I found a SHIFT_LEFT");
-        break;
-      case ShiftRight_Op:
-        fmt::print("I found a SHIFT_RIGHT");
-        break;
-      case Mux_Op:
-        fmt::print("I found a MUX");
-        break;
-      case Sum_Op:
-        to_sum(orig, idx, arr);
-        break;
-      case Join_Op:
-        fmt::print("I found a JOIN");
-        break;
-      case Flop_Op:
-        fmt::print("I found a FLOP");
-        break;
-      case SubGraph_Op:
-        fmt::print("I found a SUBGRAPH");
-        break;
-      case U32Const_Op:
-        to_const(orig, idx, arr);
-        break;
-      case Pick_Op:
-        to_pick(orig, idx, arr);
-        break;
-      case Latch_Op:
-        fmt::print("I found a LATCH");
-        break;
-      case StrConst_Op:
-        fmt::print("I found a STRING");
-        break;
-      default:
-        fmt::print("FIXME! op not found");
-    }
-
-    fmt::print("\n");
+  bool done = bw_pass_iterate(lg);
+  if (!done) {
+    console->error("could not converge in the iterations FIXME: dump nice message on why\n");
   }
 
-  //Print table after first forward pass.
-  fmt::print("\nTable after forward traversal:\n\tN_ID \t C_MIN \t C_MAX\n");
-  for(int i = 1; i < 50; i++) {
-    if(arr[i].used == true)
-      fmt::print("\t{} \t {} \t {}\n", i, arr[i].calculated_min, arr[i].calculated_max);
-  }
-  //fmt::print("{} \t {} \t {}\n", 12, arr[12].calculated_min, arr[12].calculated_max);
-  fmt::print("\n\n");
+  b.sample("bitwidth iterate");
 
+  bw_pass_dump(lg);
 
-  //Start doing backwards pass.
-  for(auto b_idx : orig->backward()) {
-    fmt::print("Node {}:\t\t", b_idx);
-
-    const auto op = orig->node_type_get(b_idx);
-    //These if-else will be refactored into subroutines later. For now, keep
-    //  like this for ease.
-    if (op.op == Sum_Op) {
-      fmt::print("I found a SUM!");
-      int input[2];
-      int temp = 0;
-      int output;
-      for(const auto &i : orig->inp_edges(b_idx)) {
-        fmt::print(" {}i", i.get_idx());
-        input[temp] = i.get_idx();
-        temp++;
-      }
-      for(const auto &o : orig->out_edges(b_idx)) {
-        fmt::print(" {}o", o.get_idx());
-        output = o.get_idx();
-      }
-      //----------------
-      int min_i1 = arr[input[0]].calculated_min;
-      int min_i2 = arr[input[1]].calculated_min;
-      int min_o  = arr[output].calculated_min;
-      int max_i1 = arr[input[0]].calculated_max;
-      int max_i2 = arr[input[1]].calculated_max;
-      int max_o  = arr[output].calculated_max;
-
-      //fmt::print("\t{},{},{}, {} . {} . {} . {} . {} . {}",input[0],input[1],output, min_i1, min_i2, min_o, max_i1, max_i2, max_o);
-
-
-      //Readjusting min/max of inputs/outputs, if need be.
-      arr[output].calculated_max =   std::min(max_o, max_i1 + max_i2);
-      arr[output].calculated_min =   std::max(min_o, min_i1 + min_i2);
-      arr[input[0]].calculated_max = std::min(max_i1, max_o - min_i2);
-      arr[input[0]].calculated_min = std::max(min_i1, min_o - max_i2);
-      arr[input[1]].calculated_max = std::min(max_i2, max_o - min_i1);
-      arr[input[1]].calculated_min = std::max(min_i2, min_o - max_i1);
-      //----------------
-    } else if (op.op == And_Op) {
-      fmt::print("I found an AND!");
-      int input[2];
-      int temp = 0;
-      int output;
-      for(const auto &i : orig->inp_edges(b_idx)) {
-        fmt::print(" {}i", i.get_idx());
-        input[temp] = i.get_idx();
-        temp++;
-      }
-      for(const auto &o : orig->out_edges(b_idx)) {
-        fmt::print(" {}o", o.get_idx());
-        output = o.get_idx();
-      }
-      ///---------------
-      int min_o  = arr[output].calculated_min;
-      int max_o  = arr[output].calculated_max;
-
-      int min_inp_bitwidth = std::min(orig->get_bits(input[0]), orig->get_bits(input[1]));
-      if(arr[output].is_signed == false) {
-        fmt::print("\tNot signed");
-        //Range is <min_o, max_o> INTERSECT <0, 2^n - 1>
-        arr[output].calculated_min = std::max(min_o, 0);
-        arr[output].calculated_max = std::min(max_o, (int)(pow(2,min_inp_bitwidth))-1);
-      } else {
-        fmt::print("\tIs signed");
-        //Range is <min_o, max_o> INTERSECT <-2^(n-1), 2^(n-1) - 1>
-        arr[output].calculated_min = std::max(min_o, (int)(pow(-2,min_inp_bitwidth-1)));
-        arr[output].calculated_max = std::min(max_o, (int)(pow(2,min_inp_bitwidth-1))-1);
-      }
-      //fmt::print("\t{} ... {}", arr[output].calculated_min, arr[output].calculated_max);
-    } else if (op.op == Pick_Op) {
-      //This will need to change. For now just pass <min,max> of PICK to its outputs.
-      fmt::print("I found an PICK!");
-      int output;
-      for(const auto &o : orig->out_edges(b_idx)) {
-        fmt::print(" {}o", o.get_idx());
-        output = o.get_idx();
-      }
-      arr[output].calculated_min = arr[b_idx].calculated_min;
-      arr[output].calculated_max = arr[b_idx].calculated_max;
-
-    }
-    fmt::print("\n");
-  }
-
-  //Table after first backwards pass.
-  fmt::print("\nTable after backwards traversal:\n\tN_ID \t C_MIN \t C_MAX\n");
-  for(int i = 1; i < 50; i++) {
-    if(arr[i].used == true)
-      fmt::print("\t{} \t {} \t {}\n", i, arr[i].calculated_min, arr[i].calculated_max);
-  }
-  fmt::print("\n");
-
-
-  b.sample("pass_bitwidth");
+  b.sample("pass_dump");
 }
+
