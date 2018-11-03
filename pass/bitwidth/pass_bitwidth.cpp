@@ -431,23 +431,19 @@ bool Pass_bitwidth::bw_pass_iterate(LGraph *lg) {
 }
 
 void Pass_bitwidth::trans(LGraph *lg) {
-  LGBench b;
+  {
+    LGBench b("pass.bitwidth");
 
-  bw.resize(lg->size());  // FIXME: this should be moved to table like nodedelay.cpp
+    bw.resize(lg->size());  // FIXME: this should be moved to table like nodedelay.cpp
 
-  bw_pass_setup(lg);
+    bw_pass_setup(lg);
 
-  b.sample("bitwidth setup");
-
-  bool done = bw_pass_iterate(lg);
-  if (!done) {
-    console->error("could not converge in the iterations FIXME: dump nice message on why\n");
+    bool done = bw_pass_iterate(lg);
+    if (!done) {
+      console->error("could not converge in the iterations FIXME: dump nice message on why\n");
+    }
   }
 
-  b.sample("bitwidth iterate");
-
   bw_pass_dump(lg);
-
-  b.sample("pass_dump");
 }
 
