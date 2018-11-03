@@ -1,11 +1,14 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <sys/stat.h>
+#include <sys/types.h>
+
 #include <string>
 
 #include "char_array.hpp"
 
 void test0(int n) {
-  Char_Array<unsigned int> test("/tmp/test0");
+  Char_Array<unsigned int> test("char_tst_mmap/test0");
   test.clear();
   std::string foo = "a";
 
@@ -27,7 +30,7 @@ void test0(int n) {
 }
 
 void test1(int n) {
-  Char_Array<int64_t> test("/tmp/test1");
+  Char_Array<int64_t> test("char_tst_mmap/test1");
   test.clear();
   std::string foo = "a";
 
@@ -40,7 +43,7 @@ void test1(int n) {
 }
 
 void test2(int n) {
-  Char_Array<uint64_t> test("/tmp/test2");
+  Char_Array<uint64_t> test("char_tst_mmap/test2");
   test.clear();
   std::string foo = "a";
 
@@ -55,7 +58,7 @@ void test2(int n) {
 }
 
 void test3(int n) {
-  Char_Array<uint32_t> test("/tmp/test3");
+  Char_Array<uint32_t> test("char_tst_mmap/test3");
   test.clear();
   std::string foo = "a";
 
@@ -73,7 +76,7 @@ void test3(int n) {
 }
 
 void test4(int n) {
-  Char_Array<uint32_t> test("/tmp/test3"); // Read test 3
+  Char_Array<uint32_t> test("char_tst_mmap/test3"); // Read test 3
 
   for(int i = 0; i < n; i++) {
     uint32_t val = 0xdead0000 | (n&0xFFFF);
@@ -96,6 +99,9 @@ int main(int argc, char** argv) {
   } else {
     n = atoi(argv[1]);
   }
+
+  mkdir("char_tst_mmap",0755);
+
   test0(n);
   test1(n);
   test2(n);
