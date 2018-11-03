@@ -13,17 +13,21 @@ public:
   Pass() {
   };
 
-  // Transform enhance/changes the lgraph in-situ
-  // FIXME: maybe call it "transform"
-  virtual void    trans(LGraph *orig) = 0;
+  // Either trans or regen called
 
-  // regenerate, creates a new lgraph db
-  // FIXME: it should get a set of lgraphs and return a new set of lgraphs
-  // FIXME: the names are not clear. Maybe call "replace"
-  virtual LGraph *regen(const LGraph *orig) = 0;
+  virtual void    trans(LGraph *orig) {
+    assert(false);
+  }
+
+  virtual LGraph *regen(const LGraph *orig) {
+    assert(false);
+    return 0;
+  }
 
   // Set options for the pass
-  virtual void set(const std::string &key, const std::string &value) = 0;
+  virtual void set(const std::string &key, const std::string &value) {
+    assert(false); // Overload if used
+  };
 };
 
 #endif

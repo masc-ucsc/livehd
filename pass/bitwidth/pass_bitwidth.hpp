@@ -104,13 +104,6 @@ public:
   Pass_bitwidth();
 
   void trans(LGraph *orig) final;
-
-  LGraph *regen(const LGraph *orig) {
-    assert(false);
-  }
-
-  //no options needed?
-  void set(const std::string &key, const std::string &value) { }
 };
 
 #endif

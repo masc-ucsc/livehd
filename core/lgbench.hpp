@@ -52,7 +52,7 @@ protected:
   bool                     end_called;
 
 public:
-  LGBench(const std::string &name)
+  explicit LGBench(const std::string &name)
    : sample_name(name) {
     end_called = false;
     start();

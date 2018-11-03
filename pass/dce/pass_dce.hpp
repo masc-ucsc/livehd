@@ -17,16 +17,6 @@ public:
   Pass_dce();
 
   void trans(LGraph *orig) final;
-
-  // regenerate, creates a new lgraph db
-  LGraph *regen(const LGraph *orig) {
-    assert(false);
-    return nullptr;
-  }
-
-  // no options needed
-  void set(const std::string &key, const std::string &value) {
-  }
 };
 
 #endif
