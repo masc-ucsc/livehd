@@ -15,7 +15,8 @@
 
 void Cops_live_api::invariant_finder(Eprp_var &var) {
 
-  LGBench b;
+  LGBench b("cops.live.inv_finder");
+
   Invariant_find_options pack;
   for(const auto &l:var.dict) {
     pack.set(l.first,l.second);
@@ -34,7 +35,7 @@ void Cops_live_api::invariant_finder(Eprp_var &var) {
 }
 
 void Cops_live_api::diff_finder(Eprp_var &var) {
-  LGBench b;
+  LGBench b("cops.live.diff");
 
   Live_pass_options pack;
   for(const auto &l:var.dict) {
@@ -59,7 +60,7 @@ void Cops_live_api::diff_finder(Eprp_var &var) {
 }
 
 void Cops_live_api::netlist_merge(Eprp_var &var) {
-  LGBench b;
+  LGBench b("cops.live.stitch");
 
   Stitch_pass_options pack;
   for(const auto &l:var.dict) {
