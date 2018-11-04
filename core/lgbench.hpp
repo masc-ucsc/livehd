@@ -46,12 +46,14 @@ protected:
     std::string name;
   };
   std::vector<Time_Sample> record;
+  const std::string        sample_name;
   Time_Point               start_time;
   int                      start_mem;
   bool                     end_called;
 
 public:
-  LGBench() {
+  explicit LGBench(const std::string &name)
+   : sample_name(name) {
     end_called = false;
     start();
   };
@@ -77,7 +79,7 @@ public:
   }
 
   void end() {
-    sample("end");
+    sample(sample_name);
 
     Time_Point prev     = start_time;
     int        prev_mem = start_mem;

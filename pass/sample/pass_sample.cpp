@@ -10,7 +10,7 @@ Pass_sample::Pass_sample() {
 
 void Pass_sample::trans(LGraph *orig) {
 
-  LGBench b;
+  LGBench b("pass.sample");
 
   int cells = 0;
   for(const auto& idx : orig->forward()) {
@@ -20,5 +20,4 @@ void Pass_sample::trans(LGraph *orig) {
 
   fmt::print("Pass: cells {}\n",cells);
 
-  b.sample("pass_sample");
 }

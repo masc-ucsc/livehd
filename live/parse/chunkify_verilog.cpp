@@ -10,6 +10,8 @@
 #include <set>
 #include <string>
 
+#include "lgbench.hpp"
+
 #include "chunkify_verilog.hpp"
 
 Chunkify_verilog::Chunkify_verilog(const std::string &_path)
@@ -63,6 +65,8 @@ void Chunkify_verilog::write_file(const std::string &filename, const char *text,
 }
 
 void Chunkify_verilog::elaborate() {
+
+  LGBench bench("live.parse");
 
   std::string format_name(buffer_name);
   for(size_t i=0;i<buffer_name.size();i++) {
@@ -158,7 +162,7 @@ void Chunkify_verilog::elaborate() {
       scan_format_append(in_module_text);
       scan_token_append(in_module_token);
       if (endmodule_found) {
-        fmt::print("{}  {}\n",module,in_module_token.back().pos);
+        // fmt::print("{}  {}\n",module,in_module_token.back().pos);
         write_file(path + "/parse/chunk_" + format_name + ":" + module, not_in_module_text, in_module_text);
         module.clear();
         in_module_text.clear();
@@ -168,7 +172,6 @@ void Chunkify_verilog::elaborate() {
 
     scan_next();
   }
-
 
 }
 
