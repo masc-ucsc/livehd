@@ -1,14 +1,14 @@
 #!/bin/bash
 
-TEMP=$(getopt -o t::l::y::b::I::d --long testdir::,logdir::,inou::,binary::,incdir::,debug,s_lgdb::,e_lgdb::,bounds::,top::,lib::,constr::,freq:: -n 'lgsetup' -- "$@")
+TEMP=$(getopt -o t::l::y::b::I::d --long testdir::,logdir::,inou::,binary::,incdir::,debug,s_lgdb::,e_lgdb::,bounds::,top::,lib::,constr::,freq::,lgraph:: -n 'lgsetup' -- "$@")
 eval set -- "$TEMP"
 
-OPT_YOSYS="./misc/yosys/bin/yosys"
+OPT_YOSYS="yosys"
 OPT_TESTDIR="./tests"
 OPT_LOGDIR="./logs"
 OPT_SLGDB="./lgdb_synth"
 OPT_ELGDB="./lgdb_elab"
-OPT_INOU_YOSYS="./inou/yosys/libinou_yosys.so"
+OPT_INOU_YOSYS="./inou/yosys/liblgraph_yosys.so"
 OPT_DEBUG=0
 OPT_TO_VERILOG=0
 OPT_GRAPH_INPUT=""
@@ -19,6 +19,7 @@ OPT_CELL="./inou/yosys/simcell.v"
 OPT_TOP=""
 OPT_FREQ="100"
 OPT_BOUNDS="${OPT_LOGDIR}/bounds"
+OPT_LGRAPH="."
 
 while true ; do
     case "$1" in
@@ -41,6 +42,12 @@ while true ; do
             case "$2" in
                 "") shift 2 ;;
                 *) OPT_INCDIR="verilog_defaults -add -I$2" ;
+                shift 2 ;;
+            esac ;;
+        --lgraph)
+            case "$2" in
+                "") shift 2 ;;
+                *) OPT_LGRAPH=$2;
                 shift 2 ;;
             esac ;;
         --s_lgdb)
@@ -92,8 +99,6 @@ while true ; do
 done
 OPT_FILES=$*
 
-OPT_INVARIANT=./cops/live/lginvariant
-
 if [ -d "${OPT_TESTDIR}" ]; then
   FILE_LIST=$(find ${OPT_TESTDIR} -name '*.v' -o -name '*.vh' -o -name '*.sv' | awk '{print "read_verilog -sv -nomeminit "$1";"}')
 	BASE=$(basename ${OPT_TESTDIR})
@@ -121,14 +126,18 @@ if [ ! -d ${YOSYS_LIB} ]; then
   exit 1
 fi
 
-LGSHELL=./bazel-bin/main/lgshell
+LGSHELL=${OPT_LGRAPH}/bazel-bin/main/lgshell
 if [ ! -f ${LGSHELL} ]; then
-  if [ -f ./main/lgshell ]; then
-    LGSHELL=./main/lgshell
+  if [ -f ${OPT_LGRAPH}/main/lgshell ]; then
+    LGSHELL=${OPT_LGRAPH}/main/lgshell
   else
     echo "could not find lgshell on $(pwd)"
     exit 1
   fi
+fi
+
+if [ ! -f ${OPT_INOU_YOSYS} ]; then
+  OPT_INOU_YOSYS="${OPT_LGRAPH}/bazel-bin/inou/yosys/liblgraph_yosys.so"
 fi
 
 mkdir -p ${OPT_ELGDB}
@@ -141,13 +150,13 @@ if [ "$OPT_LIB" == "fpga" ]; then
   libfiles="read_verilog -lib +/xilinx/cells_sim.v; read_verilog -lib +/xilinx/cells_xtra.v; read_verilog -lib +/xilinx/brams_bb.v; read_verilog -lib +/xilinx/drams_bb.v ;"
   tmap="memory_bram -rules +/xilinx/brams.txt; techmap -map +/xilinx/brams_map.v; memory_bram -rules +/xilinx/drams.txt; techmap -map +/xilinx/drams_map.v; opt -fast -full; memory_map; dffsr2dff; dff2dffe; opt -full; techmap -map +/techmap.v -map +/xilinx/arith_map.v; opt  -fast; techmap -D ALU_RIPPLE; opt -fast; abc -D 100 ${OPT_FREQ};"
 
-  ruby ./inou/tech/verilog_json.rb ${YOSYS_LIB}/techlibs/common/simcells.v   \
-                                   ${YOSYS_LIB}/techlibs/xilinx/cells_sim.v  \
-                                   ${YOSYS_LIB}/techlibs/xilinx/brams_bb.v   \
-                                   ${YOSYS_LIB}/techlibs/xilinx/drams_bb.v > ${OPT_SLGDB}/tech_library
+  ruby ${OPT_LGRAPH}/inou/tech/verilog_json.rb ${YOSYS_LIB}/simcells.v   \
+                                               ${YOSYS_LIB}/xilinx/cells_sim.v  \
+                                               ${YOSYS_LIB}/xilinx/brams_bb.v   \
+                                               ${YOSYS_LIB}/xilinx/drams_map.v > ${OPT_SLGDB}/tech_library
 
 elif [ "$OPT_LIB" != "" ]; then
-  sh   ./inou/tech/func_liberty_json.sh ${OPT_LIB} > ${OPT_SLGDB}/tech_library
+  sh   ${OPT_LGRAPH}/inou/tech/func_liberty_json.sh ${OPT_LIB} > ${OPT_SLGDB}/tech_library
   abc_script="-D ${OPT_FREQ} -liberty ${OPT_LIB} -constr ${constraint_file}"
   tmap="dffsr2dff; techmap -map +/techmap.v; opt -fast; dfflibmap -liberty ${OPT_LIB}; memory; dfflibmap -liberty ${OPT_LIB};  opt -fast; opt -full; techmap -D ALU_RIPPLE; abc ${abc_script}"
 
@@ -161,8 +170,8 @@ elab_script="hierarchy -top ${OPT_TOP}; select -assert-any ${OPT_TOP}; select -c
 synth_script="hierarchy -check -top ${OPT_TOP}; proc; flatten; opt -fast; synth -run coarse; opt -fast; opt;  ${tmap}; opt -fast; stat"
 
 yosys_cmd="${OPT_INCDIR}; ${FILE_LIST};
-       ${elab_script}; write_verilog ${OPT_ELGDB}/${BASE}_elab.v; inou_yosys ${OPT_ELGDB} ;
-       ${synth_script}; inou_yosys ${OPT_SLGDB};
+       ${elab_script}; write_verilog ${OPT_ELGDB}/${BASE}_elab.v; yosys2lg -path ${OPT_ELGDB} ;
+       ${synth_script}; yosys2lg -path ${OPT_SLGDB};
        setundef -zero; write_verilog -noattr ${OPT_SLGDB}/${BASE}_synth.v"
 
 echo "${OPT_YOSYS} -ql ${OPT_LOGDIR}/${BASE}_lgsetup.log -m ${OPT_INOU_YOSYS} -p \"${yosys_cmd}\"" > ${OPT_LOGDIR}/${BASE}_synth_cmd
