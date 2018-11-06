@@ -3,8 +3,9 @@
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 OPT_LGRAPH_DIR=./
-OPT_ANUBIS=third_party/subs/anubis/
+OPT_ANUBIS=external/anubis/
 
+pwd
 
 declare -a benchmarks=("dlx" "alpha" "fpu" "mor1kx" "or1200")
 declare -a benchmarks=("dlx" "alpha")
@@ -37,6 +38,7 @@ for input in ${benchmarks[@]}; do
   e_lgdb=lgdb_elab_${input}
   s_lgdb=lgdb_synth_${input}
 
+  echo  "${OPT_LGRAPH_DIR}/cops/live/lgsetup --bounds=${bounds} --top=${top} --freq=${freq} --testdir=$dir --logdir=${logdir} --e_lgdb=${e_lgdb} --s_lgdb=${s_lgdb} --incdir=${include} --lib=fpga"
   ${OPT_LGRAPH_DIR}/cops/live/lgsetup --bounds=${bounds} --top=${top} --freq=${freq} --testdir=$dir --logdir=${logdir} --e_lgdb=${e_lgdb} --s_lgdb=${s_lgdb} --incdir=${include} --lib=fpga
 
 done
