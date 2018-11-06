@@ -70,15 +70,15 @@ const Aux_node* Aux_tree::get_parent(const Aux_node *child) const{
     return child;
 }
 
-void Aux_tree::delete_child(Aux_node *parent, Aux_node *child, bool branch){
+void Aux_tree::disconnect_child(Aux_node *parent, Aux_node *child, bool branch){
   //assert(child->get_auxtab().empty()); //put back later when resolving phi
   if(branch){
-    delete child;
+    //delete child; //buggy to have a function delete a pointer that was passed to it!
     parent->lchild = nullptr;
     fmt::print("delete branch true auxtab\n");
   }
   else{
-    delete child;
+    //delete child;
     parent->rchild = nullptr;
     fmt::print("delete branch false auxtab\n");
   }
