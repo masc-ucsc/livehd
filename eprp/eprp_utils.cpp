@@ -7,6 +7,8 @@
 #include <cstring>
 #include <cassert>
 
+#include <iostream>
+
 #include "eprp_utils.hpp"
 
 std::vector<std::string> Eprp_utils::parse_files(const std::string &files, const std::string &module) {
@@ -31,7 +33,7 @@ std::vector<std::string> Eprp_utils::parse_files(const std::string &files, const
 }
 
 std::string Eprp_utils::get_exe_path() {
-  char exePath[PATH_MAX];
+  char exePath[PATH_MAX] = {0,};
   int len = readlink("/proc/self/exe", exePath, PATH_MAX);
   assert(len > 0 && len < PATH_MAX);
   for(int p=len-1;p>=0;p--) {
@@ -41,7 +43,8 @@ std::string Eprp_utils::get_exe_path() {
     }
   }
 
-  return std::string(exePath,0,len);
+  std::string path(exePath,0,len);
+  return path;
 }
 
 bool Eprp_utils::ends_with(const std::string &s, const std::string &suffix) {
