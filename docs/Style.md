@@ -4,7 +4,7 @@
 ## No camelCase. Use underscores to separate words:
 
 ```cpp
-foo_bar = new Foo_bar(3);
+foo_bar = Foo_bar(3);
 ```
 
 ## No tabs, indentation is 2 spaces
@@ -71,10 +71,24 @@ void print(const std::string& message)
 ```cpp
 void print(const LGraph& g); //or
 
-void print(LGraph& g);
+void edit(LGraph& g);
 ```
 
 Note that older code still uses pointers, this is no longer allowed.
+
+## Do not use dynamic allocation
+
+Use:
+
+```cpp
+foo = Sweet_potato(3, 7)
+```
+
+instead of
+
+```cpp
+foo = new Sweet_potato(3, 7)
+```
 
 ## Use fmt::print to print messages for debugging
 
