@@ -25,7 +25,7 @@ const Port_ID REG_OUTPUT = 'Q';
 class Aux_node{
 public:
   Aux_node():lchild(nullptr),rchild(nullptr),parent(nullptr) {};
-  virtual ~Aux_node(){}
+  virtual ~Aux_node(){};
   Aux_node* lchild;
   Aux_node* rchild;
   Aux_node* parent;
@@ -50,11 +50,12 @@ private:
 class Aux_tree{
 public:
   Aux_tree():root_auxnd(nullptr){};
+  virtual ~Aux_tree(){};
   explicit         Aux_tree         (Aux_node *auxnd):root_auxnd(auxnd){ auxes_stack.push_back(auxnd); };
   void             set_parent_child (Aux_node *parent, Aux_node *child, bool branch);
   void             set_parent       (Aux_node *parent, Aux_node *child);
   const Aux_node  *get_parent       (const Aux_node *child) const;
-  void             delete_child     (Aux_node *parent, Aux_node *child, bool branch);
+  void             disconnect_child (Aux_node *parent, Aux_node *child, bool branch);
   bool             is_root_aux      (const Aux_node *auxtab) const;// for chained parents aux_tabs checking
   Aux_node *       get_root         ();
   Aux_node *       get_cur_auxnd    () const;
