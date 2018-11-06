@@ -319,7 +319,7 @@ public:
   const Tech_cell *get_const_cell(uint16_t cell_id) const;
 
   const std::string& get_cell_name(uint16_t cell_id) const {
-    return get_cell(cell_id)->get_name();
+    return get_const_cell(cell_id)->get_name();
   }
 
   // multiton pattern, one singleton per lgdb
