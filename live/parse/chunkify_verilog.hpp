@@ -1,8 +1,8 @@
 #pragma once
 
-#include "eprp_scanner.hpp"
+#include "elab_scanner.hpp"
 
-class Chunkify_verilog : public Eprp_scanner {
+class Chunkify_verilog : public Elab_scanner {
 protected:
   const std::string path;
 
