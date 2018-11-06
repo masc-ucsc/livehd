@@ -98,6 +98,14 @@ new_git_repository(
     patches = ["//external:patch.verilator"],
     #strip_prefix = "include",
 )
+new_git_repository(
+    name = "anubis",
+    build_file = "BUILD.anubis",
+    commit = "93088bd3c05407ccd871e8d5067d024f812aeeaa", # November 06, 2018
+    remote = "https://github.com/masc-ucsc/anubis.git"
+    #patches = ["//external:patch.verilator"],
+    #strip_prefix = "include",
+)
 #load(
 #    "//tools:externals.bzl",
 #    "new_patched_http_archive",

@@ -15,3 +15,25 @@ cc_library(
         "//meta:meta",
     ],
 )
+
+sh_library(
+    name = "scripts",
+    srcs = [
+        "lgsetup",
+        "lglivesynth",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+sh_test(
+    name = "invariant",
+    srcs = ["tests/invariant.sh"],
+    deps = [
+        ":scripts",
+    ],
+    data = [
+        "//inou/yosys:liblgraph_yosys.so",
+        "//main:lgshell",
+        "@anubis//:anubis",
+    ],
+)
