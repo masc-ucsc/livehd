@@ -7,6 +7,7 @@ cc_binary(
     deps = ["@spdlog//:headers",
             "@replxx//:replxx",
             "@mustache//:headers",
+            "//elab:elab",
             "//eprp:eprp",
             "//meta:meta",
 

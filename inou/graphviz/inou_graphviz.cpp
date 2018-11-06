@@ -41,15 +41,12 @@ std::vector<LGraph *> Inou_graphviz::tolg() {
 void Inou_graphviz::fromlg(std::vector<const LGraph *> &lgs) {
 
   assert(!opack.odir.empty());
-
   mkdir(opack.odir.c_str(),0755);
 
   for(const auto g : lgs) {
 
-    std::string data;
+    std::string data = "digraph {\n";
 
-    //fmt::print("digraph {\n");
-    data = "digraph {\n";
     g->each_master_root_fast([g,&data](Index_ID src_nid) {
       const auto &node = g->node_type_get(src_nid);
       data += fmt::format(" {} [label=\"{}:{}\"];\n", src_nid, src_nid, node.get_name());
@@ -62,10 +59,12 @@ void Inou_graphviz::fromlg(std::vector<const LGraph *> &lgs) {
 
     std::string file = opack.odir + "/" + g->get_name() + ".dot";
     int fd = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
-    if (fd>=0) {
-      write(fd,data.c_str(),data.size());
-      close(fd);
+    if (fd<0) {
+      console->error("inou.graphviz unable to create {}", file);
+      return;
     }
+    write(fd,data.c_str(),data.size());
+    close(fd);
   }
 }
 

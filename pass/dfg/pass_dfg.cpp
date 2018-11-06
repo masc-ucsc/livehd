@@ -177,7 +177,11 @@ Index_ID Pass_dfg::process_cfg(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tre
 
   while (itr != 0) {
     last_itr = itr;
-    itr = process_node(dfg, cfg, aux_tree, itr);
+
+    Index_ID tmp = process_node(dfg, cfg, aux_tree, itr);
+    fmt::print("hello~\n");
+    fmt::print("process_node return cfg_nid:{}!!\n\n", tmp);
+    itr = tmp;
     fmt::print("cfg nid:{} process finished!!\n\n", last_itr);
   }
   aux_tree->print_cur_auxnd();
@@ -186,7 +190,7 @@ Index_ID Pass_dfg::process_cfg(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tre
 }
 
 Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, Index_ID cfg_node) {
-  CFG_Node_Data data(cfg, cfg_node);
+  const CFG_Node_Data data(cfg, cfg_node);
 
   //sh dbg
   fmt::print("Processing CFG node:{}\n", cfg_node);
@@ -206,7 +210,8 @@ Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tr
     return get_cfg_child(cfg, cfg_node);
   case CfgIf_Op:{
     aux_tree->print_cur_auxnd();
-    return process_if(dfg, cfg, aux_tree, data, cfg_node);
+    Index_ID tmp = process_if(dfg, cfg, aux_tree, data, cfg_node);
+    return tmp;
   }
   case CfgIfMerge_Op:
     return 0;
@@ -223,6 +228,7 @@ void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_t
   const auto &oprds  = data.get_operands();
   const auto &oprd_ids = process_operands(dfg, aux_tree, data);// all the operands should be created before, just get back oprd_ids
   LGraph* sub_graph = nullptr;
+  assert(!oprds.empty());
   Index_ID subg_root_nid = aux_tree->get_alias(oprds[0]);
 
   if((sub_graph = LGraph::open(cfg->get_path(), ((std::string)(dfg->get_node_wirename(subg_root_nid)))))){
@@ -247,6 +253,7 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
   const std::string              &op     = data.get_operator();
   Index_ID                       oprd_id0;
   Index_ID                       oprd_id1;
+  assert(oprds.size() > 0);
   if(is_pure_assign_op(op)){
     if(is_output(target) && !dfg->is_graph_output(target.substr(1)))
       create_output(dfg, aux_tree, target);
@@ -255,6 +262,7 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
     aux_tree->set_pending(target, oprd_id0);
   }
   else if(is_label_op(op)){
+  assert(oprds.size() > 1);
     if(oprds[0] == "__bits"){
       Index_ID floating_id = process_operand(dfg, aux_tree, oprds[1]);
       aux_tree->set_alias(target, floating_id);
@@ -286,6 +294,7 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
     aux_tree->set_alias(target, oprd_id0);
   }
   else if(is_compute_op(op)){
+  assert(oprds.size() > 1);
     std::vector<Index_ID> oprd_ids;
     oprd_ids.push_back(process_operand(dfg, aux_tree, oprds[0]));
     oprd_ids.push_back(process_operand(dfg, aux_tree, oprds[1]));
@@ -298,6 +307,7 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
     process_connections(dfg, oprd_ids, target_id);
   }
   else if(is_compare_op(op)){
+  assert(oprds.size() > 1);
     fmt::print("{} is compare op\n", op);
     std::vector<Index_ID> oprd_ids;
     oprd_ids.push_back(process_operand(dfg, aux_tree, oprds[0]));
@@ -391,6 +401,7 @@ Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree
   auto *fauxnd = new Aux_node;
   auto *pauxnd = aux_tree->get_cur_auxnd(); //parent aux
 
+  assert(operands.size() > 1);
   Index_ID tbranch = (Index_ID)std::stol(operands[0]);
   Index_ID fbranch = (Index_ID)std::stol(operands[1]);
 
@@ -405,17 +416,17 @@ Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree
     assert(tb_next == fb_next);
     fmt::print("branch false finish! tb_next:{}\n", tb_next);
   }
-  resolve_phis (dfg, aux_tree, pauxnd, tauxnd, fauxnd, cond);//the auxT,F should be empty and are safe to be deleted after
+
+  //the auxT,F should be empty and are safe to be deleted after
+  resolve_phis (dfg, aux_tree, pauxnd, tauxnd, fauxnd, cond);
 
   if(fbranch != 0) {
-    aux_tree->delete_child(aux_tree->get_cur_auxnd(),  fauxnd, false);
-    //aux_tree->auxes_stack_pop();
-    //assert(pauxnd == aux_tree->get_cur_auxnd());
+    aux_tree->disconnect_child(aux_tree->get_cur_auxnd(),  fauxnd, false);
+    aux_tree->auxes_stack_pop();
   }
 
-  aux_tree->delete_child(aux_tree->get_cur_auxnd(),  tauxnd, true);
+  aux_tree->disconnect_child(aux_tree->get_cur_auxnd(),  tauxnd, true);
   aux_tree->auxes_stack_pop();
-  assert(pauxnd == aux_tree->get_cur_auxnd());
 
   fmt::print("process if done!!\n");
   return tb_next;
@@ -504,17 +515,10 @@ Index_ID Pass_dfg::find_cfg_root(const LGraph *cfg) {
 }
 
 Index_ID Pass_dfg::get_cfg_child(const LGraph *cfg, Index_ID node) {
-  std::vector<Index_ID> children;
-
   for(const auto &cedge : cfg->out_edges(node))
-    children.push_back(cedge.get_inp_pin().get_nid());
+    return cedge.get_inp_pin().get_nid();
 
-  if(children.size() == 1)
-    return children[0];
-  else if(children.size() == 0)//reach end of cfg
-    return 0;
-  else
-    assert(false);
+  return 0;
 }
 
 std::vector<Index_ID> Pass_dfg::process_operands(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Data &data) {
