@@ -1,11 +1,11 @@
 #ifndef EPRP_H
 #define EPRP_H
 
-#include "eprp_scanner.hpp"
+#include "elab_scanner.hpp"
 #include "eprp_var.hpp"
 #include "eprp_method.hpp"
 
-class Eprp : public Eprp_scanner {
+class Eprp : public Elab_scanner {
 protected:
   std::map<std::string, Eprp_method, eprp_casecmp_str> methods;
 

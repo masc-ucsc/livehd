@@ -1,5 +1,5 @@
-#ifndef EPRP_SCANNER_H
-#define EPRP_SCANNER_H
+#ifndef ELAB_SCANNER_H
+#define ELAB_SCANNER_H
 
 #include <stdint.h>
 
@@ -71,7 +71,7 @@
 #define TOK_KEYWORD_LAST    0x7F
 #define TOK_TRYMERGE   0x80
 
-class Eprp_scanner {
+class Elab_scanner {
 protected:
   typedef uint8_t Token_id;
 
@@ -115,7 +115,7 @@ private:
 
   void lex_error(const std::string &text);
 public:
-  Eprp_scanner();
+  Elab_scanner();
 
   void scan_error(const std::string &text);
   void scan_warn(const std::string &text);

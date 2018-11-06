@@ -7,11 +7,11 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#include "eprp_scanner.hpp"
+#include "elab_scanner.hpp"
 
 #define DUMP_SCANNER
 
-class Test_scanner : public Eprp_scanner {
+class Test_scanner : public Elab_scanner {
 public:
   void elaborate() {
 

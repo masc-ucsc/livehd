@@ -16,8 +16,8 @@ filegroup(
 )
 
 cc_test(
-    name = "eprp_scanner_test",
-    srcs = ["tests/eprp_scanner_test.cpp"],
+    name = "elab_scanner_test",
+    srcs = ["tests/elab_scanner_test.cpp"],
     args = ["$(location :elab_scripts)"],
     deps = [
         "@gtest//:gtest_main",
@@ -29,8 +29,8 @@ cc_test(
 )
 
 cc_test(
-    name = "eprp_verilog_test",
-    srcs = ["tests/eprp_verilog_test.cpp"],
+    name = "elab_verilog_test",
+    srcs = ["tests/elab_verilog_test.cpp"],
     args = ["$(location :elab_scripts)"],
     deps = [
         ":elab",
@@ -41,9 +41,9 @@ cc_test(
 )
 
 cc_binary(
-    name = "eprp_pyrope_test",
-    srcs = ["eprp_pyrope_test.cpp"],
-    # args = ["$(location tests/synth1.eprp)"],
+    name = "elab_pyrope_test",
+    srcs = ["elab_pyrope_test.cpp"],
+    # args = ["$(location tests/synth1.elab)"],
     deps = [
         ":elab",
     ],

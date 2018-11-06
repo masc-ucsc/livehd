@@ -10,9 +10,9 @@
 #include <set>
 #include <string>
 
-#include "eprp_scanner.hpp"
+#include "elab_scanner.hpp"
 
-class Verilog_scanner : public Eprp_scanner {
+class Verilog_scanner : public Elab_scanner {
   std::set<std::string> verilog_keyword;
 public:
   Verilog_scanner() {

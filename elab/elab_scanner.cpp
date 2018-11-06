@@ -3,7 +3,7 @@
 
 #include <limits>
 
-#include "eprp_scanner.hpp"
+#include "elab_scanner.hpp"
 
 #ifndef likely
 #define likely(x)       __builtin_expect((x),1)
@@ -12,7 +12,7 @@
 #define unlikely(x)     __builtin_expect((x),0)
 #endif
 
-void Eprp_scanner::setup_translate() {
+void Elab_scanner::setup_translate() {
 
   translate.resize(256);
 
@@ -47,7 +47,7 @@ void Eprp_scanner::setup_translate() {
 
 }
 
-void Eprp_scanner::add_token(Token t) {
+void Elab_scanner::add_token(Token t) {
 
 #if 0
   // Handle strings, even before empty as spaces are legal
@@ -111,7 +111,7 @@ void Eprp_scanner::add_token(Token t) {
   token_list.push_back(t);
 }
 
-void Eprp_scanner::patch_pass(const std::map<std::string, uint8_t> &keywords) {
+void Elab_scanner::patch_pass(const std::map<std::string, uint8_t> &keywords) {
   for(auto &t:token_list) {
     if (t.tok != TOK_ALNUM)
       continue;
@@ -132,7 +132,7 @@ void Eprp_scanner::patch_pass(const std::map<std::string, uint8_t> &keywords) {
   }
 }
 
-void Eprp_scanner::parse(const std::string &name, const char *memblock, size_t sz, bool chunking) {
+void Elab_scanner::parse(const std::string &name, const char *memblock, size_t sz, bool chunking) {
 
   buffer_name = name;
   buffer = 0;
@@ -245,7 +245,7 @@ void Eprp_scanner::parse(const std::string &name, const char *memblock, size_t s
     chunked(ptr_section, sz);
 }
 
-Eprp_scanner::Eprp_scanner() {
+Elab_scanner::Elab_scanner() {
   setup_translate();
   max_errors   = 1;
   max_warnings = 1024;
@@ -253,7 +253,7 @@ Eprp_scanner::Eprp_scanner() {
   n_warnings = 0;
 }
 
-void Eprp_scanner::chunked(const char *_buffer, size_t _buffer_sz) {
+void Elab_scanner::chunked(const char *_buffer, size_t _buffer_sz) {
 
   assert(_buffer_sz < std::numeric_limits<uint32_t>::max());
 
@@ -268,7 +268,7 @@ void Eprp_scanner::chunked(const char *_buffer, size_t _buffer_sz) {
   scanner_pos = 0;
 }
 
-bool Eprp_scanner::scan_next() {
+bool Elab_scanner::scan_next() {
   if (scanner_pos >= token_list.size())
     return false;
 
@@ -277,14 +277,14 @@ bool Eprp_scanner::scan_next() {
   return true;
 }
 
-void Eprp_scanner::scan_append(std::string &text) const {
+void Elab_scanner::scan_append(std::string &text) const {
 
   assert(scanner_pos < token_list.size());
 
   text.append(&buffer[token_list[scanner_pos].pos], token_list[scanner_pos].len);
 }
 
-void Eprp_scanner::scan_format_append(std::string &text) const {
+void Elab_scanner::scan_format_append(std::string &text) const {
   assert(scanner_pos < token_list.size());
 
   int start_pos = token_list[scanner_pos].pos;
@@ -297,7 +297,7 @@ void Eprp_scanner::scan_format_append(std::string &text) const {
   text.append(&buffer[start_pos], len);
 }
 
-void Eprp_scanner::scan_prev_append(std::string &text) const {
+void Elab_scanner::scan_prev_append(std::string &text) const {
 
   assert(scanner_pos < token_list.size());
   int p = scanner_pos-1;
@@ -307,7 +307,7 @@ void Eprp_scanner::scan_prev_append(std::string &text) const {
   text.append(&buffer[token_list[p].pos], token_list[p].len);
 }
 
-void Eprp_scanner::scan_next_append(std::string &text) const {
+void Elab_scanner::scan_next_append(std::string &text) const {
 
   assert(scanner_pos < token_list.size());
   size_t p = scanner_pos+1;
@@ -317,7 +317,7 @@ void Eprp_scanner::scan_next_append(std::string &text) const {
   text.append(&buffer[token_list[p].pos], token_list[p].len);
 }
 
-std::string Eprp_scanner::scan_text() const {
+std::string Elab_scanner::scan_text() const {
   std::string text;
 
   scan_append(text);
@@ -325,7 +325,7 @@ std::string Eprp_scanner::scan_text() const {
   return text;
 }
 
-int Eprp_scanner::scan_calc_lineno() const {
+int Elab_scanner::scan_calc_lineno() const {
 
   size_t max_pos = scanner_pos;
   if (max_pos>=token_list.size())
@@ -340,7 +340,7 @@ int Eprp_scanner::scan_calc_lineno() const {
   return nlines;
 }
 
-void Eprp_scanner::lex_error(const std::string &text) {
+void Elab_scanner::lex_error(const std::string &text) {
   // lexer can not look at token list
 
   fmt::print(text + "\n");
@@ -348,35 +348,35 @@ void Eprp_scanner::lex_error(const std::string &text) {
   if (n_errors>max_errors)
     exit(-3);
 }
-void Eprp_scanner::scan_error(const std::string &text) {
+void Elab_scanner::scan_error(const std::string &text) {
   scan_raw_msg("error", text, true);
   n_errors++;
   if (n_errors>max_errors)
     exit(-3);
 }
 
-void Eprp_scanner::scan_warn(const std::string &text) {
+void Elab_scanner::scan_warn(const std::string &text) {
   scan_raw_msg("warning", text, true);
   n_warnings++;
   if (n_warnings>max_warnings)
     exit(-3);
 }
 
-void Eprp_scanner::parser_error(const std::string &text) {
+void Elab_scanner::parser_error(const std::string &text) {
   scan_raw_msg("error", text, false);
   n_errors++;
   if (n_errors>max_errors)
     exit(-3);
 }
 
-void Eprp_scanner::parser_warn(const std::string &text) {
+void Elab_scanner::parser_warn(const std::string &text) {
   scan_raw_msg("warning", text, false);
   n_warnings++;
   if (n_warnings>max_warnings)
     exit(-3);
 }
 
-void Eprp_scanner::scan_raw_msg(const std::string &cat, const std::string &text, bool third) const {
+void Elab_scanner::scan_raw_msg(const std::string &cat, const std::string &text, bool third) const {
 
   // Look at buffer for previous line change
 
@@ -428,7 +428,7 @@ void Eprp_scanner::scan_raw_msg(const std::string &cat, const std::string &text,
   fmt::print(third_1 + third_2 + "\n");
 }
 
-void Eprp_scanner::dump_token() const {
+void Elab_scanner::dump_token() const {
   size_t pos = scanner_pos;
   if (pos>=token_list.size())
     pos = token_list.size();

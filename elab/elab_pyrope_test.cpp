@@ -10,7 +10,7 @@
 #include <set>
 #include <string>
 
-#include "eprp_scanner.hpp"
+#include "elab_scanner.hpp"
 
 // Control
 #define TOK_KEY_IF        0x40
@@ -47,7 +47,7 @@
 #define TOK_KEY_BY        0x64
 
 
-class Pyrope_scanner : public Eprp_scanner {
+class Pyrope_scanner : public Elab_scanner {
   std::map<std::string, uint8_t> pyrope_keyword;
 public:
   Pyrope_scanner() {
