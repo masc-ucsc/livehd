@@ -24,8 +24,9 @@ public:
   CFG_Node_Data(const std::string &parser_raw);
   CFG_Node_Data(const std::string &t, const std::vector<std::string> &ops, const std::string &ot)
     : target(t), operands(ops), operator_txt(ot) { }
-  CFG_Node_Data(const CFG_Node_Data &o) : target(o.get_target()), operands(o.get_operands()), operator_txt(o.get_operator()) { }
+  //CFG_Node_Data(const CFG_Node_Data &o) : target(o.get_target()), operands(o.get_operands()), operator_txt(o.get_operator()) { }
 
+  //~CFG_Node_Data(){};//dbg
   std::string encode() const;
 
   const std::string              &get_target() const { return target; }

@@ -177,7 +177,10 @@ Index_ID Pass_dfg::process_cfg(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tre
 
   while (itr != 0) {
     last_itr = itr;
+
     Index_ID tmp = process_node(dfg, cfg, aux_tree, itr);
+    fmt::print("hello~\n");
+    fmt::print("process_node return cfg_nid:{}!!\n\n", tmp);
     itr = tmp;
     fmt::print("cfg nid:{} process finished!!\n\n", last_itr);
   }
@@ -208,7 +211,6 @@ Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tr
   case CfgIf_Op:{
     aux_tree->print_cur_auxnd();
     Index_ID tmp = process_if(dfg, cfg, aux_tree, data, cfg_node);
-
     return tmp;
   }
   case CfgIfMerge_Op:
@@ -414,17 +416,17 @@ Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree
     assert(tb_next == fb_next);
     fmt::print("branch false finish! tb_next:{}\n", tb_next);
   }
-  resolve_phis (dfg, aux_tree, pauxnd, tauxnd, fauxnd, cond);//the auxT,F should be empty and are safe to be deleted after
+
+  //the auxT,F should be empty and are safe to be deleted after
+  resolve_phis (dfg, aux_tree, pauxnd, tauxnd, fauxnd, cond);
 
   if(fbranch != 0) {
-    aux_tree->delete_child(aux_tree->get_cur_auxnd(),  fauxnd, false);
-    //aux_tree->auxes_stack_pop();
-    //assert(pauxnd == aux_tree->get_cur_auxnd());
+    aux_tree->disconnect_child(aux_tree->get_cur_auxnd(),  fauxnd, false);
+    aux_tree->auxes_stack_pop();
   }
 
-  aux_tree->delete_child(aux_tree->get_cur_auxnd(),  tauxnd, true);
+  aux_tree->disconnect_child(aux_tree->get_cur_auxnd(),  tauxnd, true);
   aux_tree->auxes_stack_pop();
-  //assert(pauxnd == aux_tree->get_cur_auxnd());
 
   fmt::print("process if done!!\n");
   return tb_next;
