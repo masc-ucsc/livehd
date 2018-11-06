@@ -14,45 +14,16 @@ CFG_Node_Data::CFG_Node_Data(const LGraph *g, Index_ID node) {
     return;
   }
 
-#if 1
-  std::string s = data_str;
-  int ndiscard = 2;
-  size_t pos = 0;
-  std::string tmp;
-  std::string delimiter = "|";
-
-  while ((pos = s.find(delimiter)) != std::string::npos) {
-    tmp = s.substr(0, pos);
-
-    if (ndiscard==0) {
-      operands.push_back(strdup(tmp.c_str()));
-    }else{
-      if(ndiscard==2) {
-        operator_txt = tmp;
-      } else {
-        target = tmp;
-      }
-      ndiscard--;
-    }
-    s.erase(0, pos + delimiter.length());
-  }
-  std::cout << s << std::endl;
-
-
-#elif 0
-
   int len =0;
   const char *start = data_str;
   int ndiscard = 2;
 
   while(*data_str) {
-    if (*(data_str+len) == '|') {
+    if (*(data_str+len) == ENCODING_DELIM) {
       assert(ndiscard>=0);
       std::string tmp(start,len);
       if (ndiscard==0) {
-        char *tmp1 = strdup(tmp.c_str());
-        operands.push_back(tmp1);
-        free(tmp1);
+        operands.push_back(tmp);
       }else{
         if(ndiscard==2) {
           operator_txt = tmp;
@@ -69,21 +40,6 @@ CFG_Node_Data::CFG_Node_Data(const LGraph *g, Index_ID node) {
       len++;
     }
   }
-
-#else
-  std::istringstream ss(data_str);
-
-  std::getline(ss, operator_txt, ENCODING_DELIM);
-  assert(!operator_txt.empty());
-
-  std::getline(ss, target, ENCODING_DELIM);
-  assert(!target.empty());
-
-  for(std::string buffer; std::getline(ss, buffer, ENCODING_DELIM);) {
-    if (!buffer.empty())
-      operands.push_back(strdup(buffer.c_str()));
-  }
-#endif
 }
 
 CFG_Node_Data::CFG_Node_Data(const std::string &parser_raw) {
@@ -93,7 +49,7 @@ CFG_Node_Data::CFG_Node_Data(const std::string &parser_raw) {
   for (int i = 0; i < CFG_METADATA_COUNT; ) {   // the first few are metadata, and these reads should not fail or
                                                 // we have a formatting issue
 
-    assert(ss >> buffer);
+    ss >> buffer;
 
     if (!buffer.empty()) // only count non-empty tokens
       i++;
