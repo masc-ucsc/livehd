@@ -423,13 +423,15 @@ Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree
   }
   resolve_phis (dfg, aux_tree, pauxnd, tauxnd, fauxnd, cond);//the auxT,F should be empty and are safe to be deleted after
 
-  if(fbranch != 0){
+  if(fbranch != 0) {
     aux_tree->delete_child(aux_tree->get_cur_auxnd(),  fauxnd, false);
-    aux_tree->auxes_stack_pop();
+    //aux_tree->auxes_stack_pop();
+    //assert(pauxnd == aux_tree->get_cur_auxnd());
   }
 
   aux_tree->delete_child(aux_tree->get_cur_auxnd(),  tauxnd, true);
   aux_tree->auxes_stack_pop();
+  assert(pauxnd == aux_tree->get_cur_auxnd());
 
   fmt::print("process if done!!\n");
   fmt::print("rtp if next:{}\n", tb_next);
