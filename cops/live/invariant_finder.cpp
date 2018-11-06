@@ -114,6 +114,12 @@ void Invariant_finder::propagate_until_boundary(Index_ID nid, uint32_t bit_selec
       Node_bit driver_bit  = std::make_pair(driver_cell, t_bit_selection);
       Net_ID   net_bit     = std::make_pair(synth_graph->get_wid(driver_cell), t_bit_selection);
 
+      if(synth_graph->get_bits(driver_cell) <= t_bit_selection &&
+          synth_graph->get_bits(driver_cell) == 1) {
+        //FIXME: is there a better way to detect control signals on multibit cells? (eg memory, registers)
+        t_bit_selection = 0;
+      }
+
       partial_cone_cells[nid_bit].insert(driver_cell);
 
       // FIXME: for registers don't propagate through clk, rst, enable
@@ -123,8 +129,6 @@ void Invariant_finder::propagate_until_boundary(Index_ID nid, uint32_t bit_selec
         continue;
       }
 
-      if(driver_cell == 1 && !boundaries.is_invariant_boundary(net_bit))
-        fmt::print("rtp\n");
       // no net name set, thus this is not a invariant boundary
       if(synth_graph->get_wid(driver_cell) == 0 ||
          !boundaries.is_invariant_boundary(net_bit)) {

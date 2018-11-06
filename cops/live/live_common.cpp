@@ -25,11 +25,9 @@ int resolve_bit(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID pin, 
     assert(graph->node_type_get(offset).op == U32Const_Op);
     assert(graph->node_value_get(offset) + current_bit <= graph->get_bits(picked));
     bits.insert(graph->node_value_get(offset) + current_bit);
-    return 0; //graph->node_value_get(offset) + current_bit;
+    return 0;
   } else if(graph->node_type_get(idx).op == Join_Op) {
     std::map<Index_ID, uint32_t> port_size;
-    if(idx == 15501)
-      std::cout << "debug" << std::endl;
     for(auto &c : graph->inp_edges(idx)) {
       port_size[c.get_inp_pin().get_pid()] = graph->get_bits_pid(c.get_out_pin().get_nid(), c.get_out_pin().get_pid());
     }
@@ -47,9 +45,8 @@ int resolve_bit(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID pin, 
       }
       offset += ps.second;
     }
-    return -1;
-    //FIXME: add assertion back and figure out why it is happening for mor1kx
     assert(false); // internal error in join
+    return -1;
   } else if(graph->node_type_get(idx).op == Mux_Op) {
     if(pin == 2) {
       bits.insert(1);
@@ -119,12 +116,15 @@ int resolve_bit(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID pin, 
             graph->node_type_get(idx).op == GreaterThan_Op ||
             graph->node_type_get(idx).op == GreaterEqualThan_Op ||
             graph->node_type_get(idx).op == LessEqualThan_Op ||
-            graph->node_type_get(idx).op == LessThan_Op) {
+            graph->node_type_get(idx).op == LessThan_Op ||
+            graph->node_type_get(idx).op == TechMap_Op
+            ) {
     Index_ID relevant_port = 0;
 
     for(auto &c : graph->inp_edges(idx)) {
       if(c.get_inp_pin().get_pid() == pin) {
         relevant_port = c.get_idx();
+        break;
       }
     }
     for(int bit = 0; bit < graph->get_bits(relevant_port); bit++) {
