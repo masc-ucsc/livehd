@@ -52,10 +52,6 @@ private:
   // FIXME: technically, this should be a full table for each pair?
   std::map<ppair, float> delay; // maps an (ipin x opin) to delay
 
-  // BEGIN: Add placement-only information here
-
-  // END:
-
 public:
   explicit Tech_cell(const std::string &name, uint16_t id)
       : cell_name(name)
@@ -203,8 +199,6 @@ public:
     return outputs;
   }
 
-  // SH added phy_id, change x,y,width,height -> xl,yl,xh,yh representation
-
   void set_position(pin_type id, pin_type phy_id, pos_type in_xl, pos_type in_yl, pos_type in_xh, pos_type in_yh) {
     assert(pins.size() > id);
     pins[id].phys[phy_id].xl = in_xl;
@@ -292,17 +286,10 @@ private:
     load_json();
   }
 
-  // void to_yaml_cell(Tech_cell& cell) const;
-  void from_yaml_inputs(Tech_cell *tcell);
-
   static std::unordered_map<std::string, Tech_library *> instances;
 
   void to_yaml() const;
   void to_json() const;
-
-  ~Tech_library() {
-    fmt::print("tech lib dest\n");
-  }
 
 public:
   std::string test_str;
@@ -311,7 +298,6 @@ public:
 
   void sync() {
     if(!clean) {
-      // to_yaml();
       to_json();
       clean = true;
     }
@@ -331,6 +317,10 @@ public:
   Tech_cell *get_cell(uint16_t cell_id);
 
   const Tech_cell *get_const_cell(uint16_t cell_id) const;
+
+  const std::string& get_cell_name(uint16_t cell_id) const {
+    return get_cell(cell_id)->get_name();
+  }
 
   // multiton pattern, one singleton per lgdb
   static Tech_library *instance(std::string path = "lgdb") {
@@ -369,11 +359,5 @@ public:
     vias.resize(vias.size() + 1);
   }
 };
-
-// FIXME: come up with a C++14 friendly solution
-#pragma clang diagnostic push
-#pragma clang diagnostic                               ignored "-Wc++17-extensions"
-//inline std::unordered_map<std::string, Tech_library *> Tech_library::instances;
-#pragma clang diagnostic pop
 
 #endif

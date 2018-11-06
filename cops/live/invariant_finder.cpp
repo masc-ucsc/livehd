@@ -123,6 +123,8 @@ void Invariant_finder::propagate_until_boundary(Index_ID nid, uint32_t bit_selec
         continue;
       }
 
+      if(driver_cell == 1 && !boundaries.is_invariant_boundary(net_bit))
+        fmt::print("rtp\n");
       // no net name set, thus this is not a invariant boundary
       if(synth_graph->get_wid(driver_cell) == 0 ||
          !boundaries.is_invariant_boundary(net_bit)) {
