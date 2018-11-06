@@ -14,6 +14,11 @@ const std::string EMPTY_MARKER = "<none>";
 const std::string COND_BR_MARKER = "if";
 
 class CFG_Node_Data {
+private:
+  std::string              target;
+  std::vector<std::string> operands;
+  std::string              operator_txt;
+
 public:
   CFG_Node_Data(const LGraph *g, Index_ID node);
   CFG_Node_Data(const std::string &parser_raw);
@@ -27,10 +32,12 @@ public:
   const std::string              &get_operator() const { return operator_txt; }
   const std::vector<std::string> &get_operands() const { return operands; }
 
-private:
-  std::string              target;
-  std::vector<std::string> operands;
-  std::string              operator_txt;
+  ~CFG_Node_Data() {
+      fmt::print("rtp ~ size {}\n", operands.size());
+      for(auto op : operands) {
+        fmt::print("rtp op {}\n", op);
+      }
+  }
 };
 
 #endif

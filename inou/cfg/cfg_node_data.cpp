@@ -5,32 +5,90 @@
 
 #include "cfg_node_data.hpp"
 
-using std::string;
-
 CFG_Node_Data::CFG_Node_Data(const LGraph *g, Index_ID node) {
   const char *data_str = g->get_node_wirename(node);
 
-  if (data_str != nullptr) {
-    std::istringstream ss(data_str);
-
-    assert(std::getline(ss, operator_txt, ENCODING_DELIM)); // the first token is the operator, we don't need it
-    assert(std::getline(ss, target, ENCODING_DELIM)); // the 2nd var in the data_str is the target
-                                                      // this read shouldn't fail
-
-    string buffer;
-    while (std::getline(ss, buffer, ENCODING_DELIM)) {
-      if (!buffer.empty())
-        operands.push_back(buffer);
-    }
-  } else {
+  if (data_str == nullptr) {
     target = EMPTY_MARKER;
     operator_txt = EMPTY_MARKER;
+    return;
   }
+
+#if 1
+  std::string s = data_str;
+  int ndiscard = 2;
+  size_t pos = 0;
+  std::string tmp;
+  std::string delimiter = "|";
+
+  while ((pos = s.find(delimiter)) != std::string::npos) {
+    tmp = s.substr(0, pos);
+
+    if (ndiscard==0) {
+      operands.push_back(strdup(tmp.c_str()));
+    }else{
+      if(ndiscard==2) {
+        operator_txt = tmp;
+      } else {
+        target = tmp;
+      }
+      ndiscard--;
+    }
+    s.erase(0, pos + delimiter.length());
+  }
+  std::cout << s << std::endl;
+
+
+#elif 0
+
+  int len =0;
+  const char *start = data_str;
+  int ndiscard = 2;
+
+  while(*data_str) {
+    if (*(data_str+len) == '|') {
+      assert(ndiscard>=0);
+      std::string tmp(start,len);
+      if (ndiscard==0) {
+        char *tmp1 = strdup(tmp.c_str());
+        operands.push_back(tmp1);
+        free(tmp1);
+      }else{
+        if(ndiscard==2) {
+          operator_txt = tmp;
+        } else {
+          target = tmp;
+        }
+        ndiscard--;
+      }
+
+      data_str += len+1;
+      start = data_str;
+      len = 0;
+    }else{
+      len++;
+    }
+  }
+
+#else
+  std::istringstream ss(data_str);
+
+  std::getline(ss, operator_txt, ENCODING_DELIM);
+  assert(!operator_txt.empty());
+
+  std::getline(ss, target, ENCODING_DELIM);
+  assert(!target.empty());
+
+  for(std::string buffer; std::getline(ss, buffer, ENCODING_DELIM);) {
+    if (!buffer.empty())
+      operands.push_back(strdup(buffer.c_str()));
+  }
+#endif
 }
 
-CFG_Node_Data::CFG_Node_Data(const string &parser_raw) {
+CFG_Node_Data::CFG_Node_Data(const std::string &parser_raw) {
   std::istringstream ss(parser_raw);
-  string buffer;
+  std::string buffer;
 
   for (int i = 0; i < CFG_METADATA_COUNT; ) {   // the first few are metadata, and these reads should not fail or
                                                 // we have a formatting issue
@@ -50,8 +108,8 @@ CFG_Node_Data::CFG_Node_Data(const string &parser_raw) {
   }
 }
 
-string CFG_Node_Data::encode() const {
-  string encd = operator_txt + ENCODING_DELIM + target + ENCODING_DELIM;
+std::string CFG_Node_Data::encode() const {
+  std::string encd = operator_txt + ENCODING_DELIM + target + ENCODING_DELIM;
 
   for (const auto &op : operands)
     encd += op + ENCODING_DELIM;
