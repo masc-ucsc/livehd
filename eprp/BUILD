@@ -6,7 +6,7 @@ cc_library(
     visibility = ["//visibility:public"],
     includes = ["."],
     deps = ["@spdlog//:headers",
-    #"//core:core",
+            "//elab:elab",
     ]
 )
 
@@ -19,41 +19,3 @@ cc_test(
     ],
 )
 
-filegroup(
-    name = "eprp_scripts",
-    srcs = ["tests/synth1.eprp"],
-)
-
-cc_test(
-    name = "eprp_scanner_test",
-    srcs = ["tests/eprp_scanner_test.cpp"],
-    args = ["$(location :eprp_scripts)"],
-    deps = [
-        "@gtest//:gtest_main",
-        ":eprp",
-    ],
-    data = [
-        ":eprp_scripts",
-    ],
-)
-
-cc_test(
-    name = "eprp_verilog_test",
-    srcs = ["tests/eprp_verilog_test.cpp"],
-    args = ["$(location :eprp_scripts)"],
-    deps = [
-        ":eprp",
-    ],
-    data = [
-        ":eprp_scripts",
-    ],
-)
-
-cc_binary(
-    name = "eprp_pyrope_test",
-    srcs = ["eprp_pyrope_test.cpp"],
-    # args = ["$(location tests/synth1.eprp)"],
-    deps = [
-        ":eprp",
-    ],
-)
