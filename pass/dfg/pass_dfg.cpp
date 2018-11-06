@@ -178,7 +178,6 @@ Index_ID Pass_dfg::process_cfg(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tre
   while (itr != 0) {
     last_itr = itr;
     Index_ID tmp = process_node(dfg, cfg, aux_tree, itr);
-  fmt::print("rtp procnode {}\n", tmp);
     itr = tmp;
     fmt::print("cfg nid:{} process finished!!\n\n", last_itr);
   }
@@ -201,26 +200,20 @@ Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tr
 
   switch (cfg->node_type_get(cfg_node).op) {
   case CfgAssign_Op:
-  fmt::print("rtp assign\n");
     process_assign(dfg, aux_tree, data);
     return get_cfg_child(cfg, cfg_node);
   case CfgFunctionCall_Op:
-  fmt::print("rtp fcall\n");
     process_func_call(dfg, cfg, aux_tree, data);
     return get_cfg_child(cfg, cfg_node);
   case CfgIf_Op:{
-  fmt::print("rtp if \n");
     aux_tree->print_cur_auxnd();
     Index_ID tmp = process_if(dfg, cfg, aux_tree, data, cfg_node);
 
-  fmt::print("rtp procnode in tmp:{} cfg_node:{}\n", tmp, cfg_node);
     return tmp;
   }
   case CfgIfMerge_Op:
-  fmt::print("rtp ifmerge\n");
     return 0;
   default:
-  fmt::print("rtp defaul\n");
     fmt::print("\n\n*************Unrecognized cfg_node type[n={}]: {}\n", cfg_node, cfg->node_type_get(cfg_node).get_name());
     return get_cfg_child(cfg, cfg_node);
   }
@@ -431,10 +424,9 @@ Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree
 
   aux_tree->delete_child(aux_tree->get_cur_auxnd(),  tauxnd, true);
   aux_tree->auxes_stack_pop();
-  assert(pauxnd == aux_tree->get_cur_auxnd());
+  //assert(pauxnd == aux_tree->get_cur_auxnd());
 
   fmt::print("process if done!!\n");
-  fmt::print("rtp if next:{}\n", tb_next);
   return tb_next;
 }
 

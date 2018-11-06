@@ -32,12 +32,6 @@ public:
   const std::string              &get_operator() const { return operator_txt; }
   const std::vector<std::string> &get_operands() const { return operands; }
 
-  ~CFG_Node_Data() {
-      fmt::print("rtp ~ size {}\n", operands.size());
-      for(auto op : operands) {
-        fmt::print("rtp op {}\n", op);
-      }
-  }
 };
 
 #endif
