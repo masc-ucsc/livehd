@@ -2,16 +2,22 @@
 
 cc_library(
     name = "cops_live",
-    srcs = glob(["*.cpp"],
-                exclude = [
-                    "lginvariant.cpp",
-                    "lglive.cpp",
-                    "lgstitch.cpp",
-                ],),
+    srcs = glob(["*.cpp"]),
     hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
     includes = ["."],
     deps = [
+        "//meta:meta",
+    ],
+)
+
+cc_binary(
+    name = "invariant_stats",
+    srcs = glob(["tests/invariant_stats.cpp"]),
+    visibility = ["//visibility:public"],
+    includes = ["."],
+    deps = [
+        ":cops_live",
         "//meta:meta",
     ],
 )

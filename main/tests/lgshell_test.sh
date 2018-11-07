@@ -1,7 +1,5 @@
 #!/bin/bash
 
-declare -a inputs=("trivial.v" "null_port.v" "simple_flop.v")
-
 LGSHELL=./bazel-bin/main/lgshell
 
 if [ ! -f ${LGSHELL} ]; then
@@ -13,10 +11,36 @@ if [ ! -f ${LGSHELL} ]; then
   fi
 fi
 
+
+#basic testing
+echo "exit" | ${LGSHELL}
+if [ $? -ne 0 ] ; then
+  exit 1
+fi
+
+echo "exit" | ${LGSHELL} -q
+if [ $? -ne 0 ] ; then
+  exit 1
+fi
+
+declare -a pass_cmds=("quit" "help" "help inou.yosys.tolg" "shell pwd")
+
+for cmd in ${pass_cmd[@]}
+do
+echo "${pass_cmd}" | ${LGSHELL} -q
+if [ $? -ne 0 ] ; then
+  exit 1
+fi
+done
+
+
+# call inous / passes
+
 SHELL_ODIR=./shell_test/
 rm -rf ${SHELL_ODIR}
 mkdir ${SHELL_ODIR}
 
+declare -a inputs=("trivial.v" "null_port.v" "simple_flop.v")
 for input in ${inputs[@]}
 do
   base=${input%.*}
