@@ -21,6 +21,8 @@ bazel coverage -k //...
 
 ./live/parse/tests/chunkify_test.sh
 
+./cops/live/tests/invariant.sh
+
 ./main/tests/lgshell_test.sh
 
 ./bazel-bin/eprp/eprp_test
@@ -36,6 +38,7 @@ bazel coverage -k //...
 ./bazel-bin/third_party/misc/ezsat/testbench
 
 ./bazel-bin/live/parse/chunkify_verilog_test
+
 
 echo " live.parse files:./test/benchmarks/boom/boombase.v path:tmp2 " | ./bazel-bin/main/lgshell
 echo "files path:./inou/yosys/tests/ match:"\.v$" |> live.parse path:tmp2" | ./bazel-bin/main/lgshell
