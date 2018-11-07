@@ -33,6 +33,7 @@ sh_test(
     ],
     data = [
         "//inou/yosys:liblgraph_yosys.so",
+        "//inou/tech:tech_gens",
         "//main:lgshell",
         "@anubis//:anubis",
     ],
