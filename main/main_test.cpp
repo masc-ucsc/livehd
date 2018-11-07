@@ -207,7 +207,7 @@ TEST_F(MainTest, HelpPass) {
 
   EXPECT_THAT(l0, HasSubstr("help"));
   EXPECT_THAT(l4, HasSubstr("dot format"));
-  EXPECT_THAT(l5, HasSubstr("odir"));
+  EXPECT_THAT(l5, HasSubstr("files"));
 }
 
 TEST_F(MainTest, Quit) {

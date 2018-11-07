@@ -10,40 +10,44 @@
 #include "lgedgeiter.hpp"
 #include "lgraphbase.hpp"
 
-void Inou_graphviz_options::set(const std::string &key, const std::string &value) {
 
-  try {
-    if ( is_opt(key,"odir") ) {
-      odir = value;
-    }else{
-      set_val(key,value);
-    }
-  } catch (const std::invalid_argument& ia) {
-    fmt::print("ERROR: key {} has an invalid argument {}\n",key);
+void setup_inou_graphviz() {
+  Inou_graphviz p;
+  p.setup();
+}
+
+void Inou_graphviz::setup() {
+
+  Eprp_method m2("inou.graphviz", "export lgraph to graphviz dot format", &Inou_graphviz::fromlg);
+
+  register_inou(m2);
+}
+
+Inou_graphviz::Inou_graphviz()
+ :Pass("graphviz") {
+}
+
+void Inou_graphviz::fromlg(Eprp_var &var) {
+  const std::string odir   = var.get("odir");
+
+  Inou_graphviz p;
+
+  p.odir = var.get("odir");
+
+  if (odir != ".")
+    mkdir(odir.c_str(),0755);
+
+  std::vector<const LGraph *> lgs;
+  for(const auto &l:var.lgs) {
+    lgs.push_back(l);
   }
 
-  console->info("inou_graphviz odir:{}", odir);
+  p.do_fromlg(lgs);
 }
 
-Inou_graphviz::Inou_graphviz() {
-}
+void Inou_graphviz::do_fromlg(std::vector<const LGraph *> &lgs) {
 
-Inou_graphviz::~Inou_graphviz() {
-}
-
-std::vector<LGraph *> Inou_graphviz::tolg() {
-  assert(false); // generates SRAMs from a lgraph, not
-
-  static std::vector<LGraph *> empty;
-  return empty;
-}
-
-void Inou_graphviz::fromlg(std::vector<const LGraph *> &lgs) {
-
-  assert(!opack.odir.empty());
-  mkdir(opack.odir.c_str(),0755);
-
-  for(const auto g : lgs) {
+  for(const auto g:lgs) {
 
     std::string data = "digraph {\n";
 
@@ -57,7 +61,7 @@ void Inou_graphviz::fromlg(std::vector<const LGraph *> &lgs) {
     });
     data += "}\n";
 
-    std::string file = opack.odir + "/" + g->get_name() + ".dot";
+    std::string file = odir + "/" + g->get_name() + ".dot";
     int fd = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
     if (fd<0) {
       console->error("inou.graphviz unable to create {}", file);
