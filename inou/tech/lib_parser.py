@@ -1,4 +1,5 @@
-#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+# This file is copyrithed by Jim Wang and distributed under the Apache License 2.0.
+# see the original repo for details https://github.com/phdbreak99/lib_parser.py 
 #!/bin/python2.7
 
 '''This is lib_parser.py by Jim Wang from GitHub
