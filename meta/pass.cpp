@@ -19,12 +19,18 @@ void Pass::register_inou(Eprp_method &method) {
     method.add_label_required("files","input file[s]");
   }else if(method.get_name() == std::string{"inou." + name + ".fromlg"}) {
     method.add_label_optional("odir","output directory",".");
+  }else if(method.get_name() == std::string{"inou." + name}) {
+    method.add_label_optional("path","lgraph path","lgdb");
+    method.add_label_optional("files","input file[s]");
+    method.add_label_optional("odir","output directory",".");
   }else{
     assert(false);
-    // inou methods should be inou.name.tolg or inou.name.fromlg
+    // inou methods should be inou.name.tolg or inou.name.fromlg or inou.name generic for passes that handle one way only
     //
     // Possible to have submothods like inou.name.tolg.foobar
   }
+
+  eprp.register_method(method);
 }
 
 Pass::Pass(const std::string &name_)

@@ -12,16 +12,16 @@ if [ ! -f $LGSHELL ]; then
   fi
 fi
 
-echo "files path:inou/yosys/tests match:\"v$\" |> live.parse path:tmp1" | $LGSHELL
+echo "files path:inou/yosys/tests match:\"v$\" |> inou.liveparse path:tmp1" | $LGSHELL
 
 N1=$(grep module inou/yosys/tests/*.v | grep -v endmodule | wc -l)
 N2=$(grep module tmp1/parse/chunk* | grep -v endmodule | wc -l)
 
 if [ $N1 -ne $N2 ]; then
-  echo "FAILED: yosys/tests inconsistent number of modules detected by live parse orig:${N1} vs live:${N2}"
+  echo "FAILED: yosys/tests inconsistent number of modules detected by inou.liveparse orig:${N1} vs live:${N2}"
   exit -3
 else
-  echo "PASS: yosys/tests live parse orig:"$N1" vs live:"$N2
+  echo "PASS: yosys/tests inou.liveparse orig:"$N1" vs live:"$N2
 fi
 
 N1=$(ls -al tmp1/parse/file* | wc -l)
@@ -31,15 +31,15 @@ if [ $N1 -ne $N2 ]; then
   exit -3
 fi
 
-echo "live.parse files:projects/boom/boom.system.TestHarness.BoomConfig.v path:tmp2" | $LGSHELL
+echo "inou.liveparse files:projects/boom/boom.system.TestHarness.BoomConfig.v path:tmp2" | $LGSHELL
 N1=$(grep module projects/boom/boom.system.TestHarness.BoomConfig.v | grep -v endmodule | wc -l)
 N2=$(grep module tmp2/parse/chunk* | grep -v endmodule | wc -l)
 
 if [ $N1 -ne $N2 ]; then
-  echo "FAILED: boom inconsistent number of modules detected by live parse orig:${N1} vs live:${N2}"
+  echo "FAILED: boom inconsistent number of modules detected by inou.liveparse orig:${N1} vs live:${N2}"
   exit -3
 else
-  echo "PASS: boom live parse orig:${N1} vs live:${N2}"
+  echo "PASS: boom inou.liveparse orig:${N1} vs live:${N2}"
 fi
 
 N1=$(ls -al tmp2/parse/file* | wc -l)

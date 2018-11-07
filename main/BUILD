@@ -18,7 +18,7 @@ cc_binary(
             "//inou/graphviz:inou_graphviz",
             "//inou/rand:inou_rand",
 
-            "//live/parse:chunkify",
+            "//inou/liveparse:inou_liveparse",
 
             "//pass/abc:pass_abc",
             "//pass/dfg:pass_dfg",
