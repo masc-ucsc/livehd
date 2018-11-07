@@ -9,6 +9,7 @@ pwd
 
 declare -a benchmarks=("dlx" "alpha" "fpu" "mor1kx" "or1200")
 declare -a benchmarks=("dlx" "alpha")
+declare -a benchmarks=("dlx")
 
 for input in ${benchmarks[@]}; do
   dir=${OPT_ANUBIS}/$input
