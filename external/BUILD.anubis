@@ -4,6 +4,7 @@ filegroup(
     name = "anubis",
     srcs = glob([
         "alpha/*.v",
+        "alpha/*.vh",
         "dlx/*.v",
         "fpu/rtl/*.v",
         "or1200/rtl/verilog/*.v",
