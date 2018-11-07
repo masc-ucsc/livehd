@@ -17,8 +17,6 @@
 #include "inou_rand_api.hpp"
 #include "inou_yosys_api.hpp"
 
-#include "live_parse_api.hpp"
-
 #include "eprp_utils.hpp"
 
 std::string Main_api::main_path;
@@ -29,12 +27,16 @@ void setup_pass_dce();
 void setup_pass_dfg();
 void setup_pass_sample();
 
+void setup_inou_liveparse();
+
 void Main_api::init() {
   setup_pass_abc();
   setup_pass_bitwidth();
   setup_pass_dce();
   setup_pass_dfg();
   setup_pass_sample();
+
+  setup_inou_liveparse();
 
   Top_api::setup(Pass::eprp);              // *
 
@@ -49,7 +51,6 @@ void Main_api::init() {
   Inou_rand_api::setup(Pass::eprp);        // inou.rand.*
   Inou_yosys_api::setup(Pass::eprp);       // inou.yosys.*
 
-  Live_parse_api::setup(Pass::eprp);       // live.parse.*
 
   Cops_live_api::setup(Pass::eprp);        // pass.dfg.*
 
