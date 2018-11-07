@@ -94,7 +94,7 @@ void Pass_abc::gen_comb_cell_from_abc(LGraph *new_graph, const LGraph *old_graph
       std::string gate_name(Mio_GateReadName(pGate));
 
       for(pGatePin = Mio_GateReadPins(pGate), i = 0; pGatePin; pGatePin = Mio_PinReadNext(pGatePin), i++) {
-        std::string fanin_pin_name((Mio_PinReadName(pGatePin)));
+        //std::string fanin_pin_name((Mio_PinReadName(pGatePin)));
         std::string fanin_name((Abc_ObjName(Abc_ObjFanin(pObj, i))));
       }
       //std::string fanout_pin_name((Mio_GateReadOutName(pGate)));
@@ -456,7 +456,7 @@ void Pass_abc::conn_combinational_cell(LGraph *new_graph, const LGraph *old_grap
     Mio_Pin_t * pGatePin;
     Port_ID     inpid = 0;
     for(pGatePin = Mio_GateReadPins(pGate), i = 0; pGatePin; pGatePin = Mio_PinReadNext(pGatePin), i++) {
-      std::string fanin_pin_name((Mio_PinReadName(pGatePin)));
+      //std::string fanin_pin_name((Mio_PinReadName(pGatePin)));
       Abc_Obj_t * pNet = Abc_ObjFanin(pObj, i);
       if(new_graph->is_graph_input(graph_info->cell2id[pNet])) {
         new_graph->add_edge(Node_Pin(graph_info->cell2id[pNet], 0, false),

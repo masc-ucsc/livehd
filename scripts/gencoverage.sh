@@ -19,7 +19,6 @@ bazel coverage -k //...
 ./bazel-bin/pass/sample/sample_test2
 ./bazel-bin/pass/sample/tests/sample_test1.sh
 
-./live/parse/tests/chunkify_test.sh
 
 ./cops/live/tests/invariant.sh
 
@@ -37,7 +36,8 @@ bazel coverage -k //...
 
 ./bazel-bin/third_party/misc/ezsat/testbench
 
-./bazel-bin/live/parse/chunkify_verilog_test
+./bazel-bin/inou/liveparse/chunkify_verilog_test
+./inou/liveparse/tests/chunkify_test.sh
 
 
 echo " live.parse files:./test/benchmarks/boom/boombase.v path:tmp2 " | ./bazel-bin/main/lgshell
