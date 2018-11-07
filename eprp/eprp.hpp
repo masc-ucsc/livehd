@@ -30,8 +30,8 @@ public:
   Eprp();
 
   void register_method(const Eprp_method &method) {
-    assert(methods.find(method.name) == methods.end());
-    methods.insert({method.name,method});
+    assert(methods.find(method.get_name()) == methods.end());
+    methods.insert({method.get_name(),method});
   }
 
   bool has_method(const std::string &cmd) const {

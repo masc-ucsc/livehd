@@ -9,22 +9,85 @@
 #include "lgedge.hpp"
 #include "lgedgeiter.hpp"
 
-using std::unordered_map;
+#include "eprp_utils.hpp"
 
-unsigned int Pass_dfg::temp_counter = 0;
-
-Pass_dfg::Pass_dfg(const std::string &key, const std::string &value) : Pass() { opack.set(key,value); }
-
-LGraph* Pass_dfg::regen(const LGraph *cfg) {
-  assert(!opack.name.empty());
-  LGraph *dfg = LGraph::create(opack.path, opack.name);
-
-  cfg_2_dfg(dfg, cfg);
-  dfg->sync();
-  return dfg;
+void setup_pass_dfg() {
+  Pass_dfg p;
+  p.setup();
 }
 
-void  Pass_dfg::optimize(LGraph * &ori_dfg) {
+void Pass_dfg::generate(Eprp_var &var) {
+  Pass_dfg p;
+
+  std::vector<LGraph *> lgs;
+  for(auto &g:var.lgs) {
+    if (Eprp_utils::ends_with(g->get_name(),std::string("_cfg"))) {
+
+      const std::string name = g->get_name().substr(0,g->get_name().size()-4);
+      const std::string path = var.get("path");
+
+      LGraph *dfg = LGraph::create(path, name);
+      assert(dfg);
+      p.do_generate(g,dfg);
+      lgs.push_back(dfg);
+    }
+  }
+
+  if (lgs.empty()) {
+    warn(fmt::format("pass.dfg.generate needs an input cfg lgraph. Either name or |> from lgraph.open"));
+    return;
+  }
+
+}
+
+void Pass_dfg::optimize(Eprp_var &var) {
+
+  for(auto &g:var.lgs) {
+    Pass_dfg p;
+    p.do_optimize(g);
+  }
+}
+
+void Pass_dfg::pseudo_bitwidth(Eprp_var &var) {
+
+  for(auto &g:var.lgs) {
+    Pass_dfg p;
+    p.do_pseudo_bitwidth(g);
+  }
+}
+
+void Pass_dfg::setup() {
+  Eprp_method m1("pass.dfg.generate", "generate a dfg lgraph from a cfg lgraph", &Pass_dfg::generate);
+  m1.add_label_optional("path","lgraph path");
+  m1.add_label_required("name","lgraph name");
+
+  register_pass(m1);
+
+  Eprp_method m2("pass.dfg.optimize", "optimize a dfg lgraph", &Pass_dfg::optimize);
+  m2.add_label_optional("path","lgraph path");
+  m2.add_label_optional("name","lgraph name");
+
+  register_pass(m2);
+
+  Eprp_method m3("pass.dfg.pseudo_bitwidth", "patch fake bitwidth for a dfg lgraph", &Pass_dfg::pseudo_bitwidth);
+  m3.add_label_optional("path","lgraph path");
+  m3.add_label_optional("name","lgraph name");
+
+  register_pass(m3);
+}
+
+Pass_dfg::Pass_dfg()
+  : Pass("dfg") {
+
+}
+
+void Pass_dfg::do_generate(const LGraph *cfg, LGraph *dfg) {
+
+  cfg_2_dfg(cfg, dfg);
+  dfg->sync();
+}
+
+void  Pass_dfg::do_optimize(LGraph * &ori_dfg) {
   trans(ori_dfg);
   ori_dfg->sync();
 }
@@ -72,7 +135,7 @@ void Pass_dfg::trans(LGraph *dfg) {
     }
   }
 }
-void Pass_dfg::pseudo_bitwidth(LGraph *dfg) {
+void Pass_dfg::do_pseudo_bitwidth(LGraph *dfg) {
   //bits inference: first round: deal with src bw > dst bw
   for(auto idx : dfg->fast()) {
     for(const auto &out : dfg->out_edges(idx)) {
@@ -142,8 +205,7 @@ void Pass_dfg::pseudo_bitwidth(LGraph *dfg) {
   //}
 }
 
-
-void Pass_dfg::cfg_2_dfg(LGraph *dfg, const LGraph *cfg) {
+bool Pass_dfg::cfg_2_dfg(const LGraph *cfg, LGraph *dfg) {
   Index_ID    itr = find_cfg_root(cfg);
   //Aux_node auxnd(dfg);
   Aux_node auxnd_global;
@@ -153,6 +215,8 @@ void Pass_dfg::cfg_2_dfg(LGraph *dfg, const LGraph *cfg) {
 
   //attach_outputs(dfg, &auxnd);
   fmt::print("calling sync\n");
+
+  return true; // FIXME: FALSE == failure in dfg generation
 }
 
 void Pass_dfg::finalize_gconnect(LGraph *dfg, const Aux_node *auxnd_global) {
@@ -632,19 +696,6 @@ void Pass_dfg::create_mux(LGraph *dfg, Aux_node *pauxnd, Index_ID tid, Index_ID 
   pauxnd->set_pending(var, phi);
 }
 
-void Pass_dfg_options::set(const std::string &key, const std::string &value) {
-  try {
-    if (is_opt(key,"file") )
-      file = value;
-    else
-      set_val(key,value);
-
-  }catch (const std::invalid_argument& ia) {
-    fmt::print("ERROR: key {} has an invalid argument {}\n",key);
-  }
-
-  console->warn("pass_dfg file:{} path:{} name:{}", file, path, name);
-}
 
 
 

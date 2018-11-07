@@ -12,39 +12,40 @@
 #include "lgraphbase.hpp"
 #include "options.hpp"
 
-#ifdef __cplusplus
 extern "C" {
-#endif
 #include "base/abc/abc.h"
 #include "base/main/abcapis.h"
 #include "base/main/main.h"
 #include "map/mio/mio.h"
-#ifdef __cplusplus
 }
-#endif
-
-class Pass_abc_options : public Options_base {
-public:
-  Pass_abc_options() {
-    verbose = false;
-  };
-
-  std::string liberty_file;
-  std::string blif_file;
-  bool verbose;
-
-  void set(const std::string &key, const std::string &value);
-};
 
 class Pass_abc : public Pass {
 
 protected:
+  class Pass_abc_options {
+  public:
+    Pass_abc_options() {
+      verbose = false;
+      odir = ".";
+    };
+
+    std::string liberty_file;
+    std::string blif_file;
+    std::string odir;
+    bool verbose;
+  };
   Pass_abc_options opack;
 
   std::string mapping_command;
   std::string readlib_command;
   std::string synthesis_command;
 
+  static void tmap(Eprp_var &var);
+  static void optimize(Eprp_var &var);
+
+  LGraph *regen(const LGraph *lg) ;
+  void    trans(LGraph *lg);
+  void    dump_blif(const LGraph *g, const std::string &filename);
 public:
 
   struct IndexID_Hash {
@@ -190,16 +191,10 @@ public:
 
   Pass_abc();
 
+  void setup() final;
+
   virtual ~Pass_abc();
 
-  LGraph *regen(const LGraph *lg) final;
-  void    trans(LGraph *lg) final;
-
-  void set(const std::string &key, const std::string &value) final {
-    opack.set(key,value);
-  }
-
-  void dump_blif(const LGraph *g, const std::string &filename);
 private:
   graph_topology *graph_info;
 

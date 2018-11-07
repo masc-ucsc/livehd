@@ -3,23 +3,18 @@
 #define PASS_SAMPLE_H
 
 #include "pass.hpp"
-#include "options.hpp"
-#include "lgraph.hpp"
-
-class Pass_sample_options_pack : public Options_base {
-public:
-  void set(const std::string &label, const std::string &value) {
-    //nothing to do?
-  }
-};
 
 class Pass_sample : public Pass {
 protected:
-  Pass_sample_options_pack opack;
+
+  static void work(Eprp_var &var);
+
 public:
   Pass_sample();
 
-  void trans(LGraph *orig) final;
+  void setup() final;
+
+  void do_work(const LGraph *g);
 };
 
 #endif

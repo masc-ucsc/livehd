@@ -1,7 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 //
 // Created by birdeclipse on 5/23/18.
-//
+
+#include "lgraph.hpp"
+
 #include "pass_abc.hpp"
 
 void Pass_abc::write_src_info(const LGraph *g, const index_offset &inp, std::ofstream &fs) {
