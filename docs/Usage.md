@@ -1,13 +1,12 @@
-
-# Introduction
+# Usage
 
 This is a high level description of how to compile LGraph and use it
 
-# Requirements
+## Requirements
 
 LGraph is heavily tested with the latest arch linux distributions. This is the list of packages needed:
 
-# Arch Linux: (64bit)
+### Arch Linux: (64bit)
 
 ```bash
 pacman -S cmake
@@ -18,7 +17,7 @@ pacman -S mercurial
 sudo pip install ptpython
 ```
 
-# Documentation
+## Documentation
 
 The documentation is written in markdown. To generate PDFs any markdown converter
 can be used. We recommend pandoc, to install pandoc:
@@ -33,7 +32,7 @@ To generate PDFs:
 pandoc -S -N -V geometry:margin=1in ./docs/Usage.md -o ./docs/Usage.pdf
 ```
 
-# Build/clone
+## Build/clone
 
 ```bash
 # Clone the directory the first time
@@ -56,21 +55,20 @@ A binary will be created in:
 $ ls ./bazel-bin/main/lgshell
 ```
 
-# Sample usage
+## Sample usage
 
 Some sample usages for the various functions implemented.
 
 In this section we differentiate between the bash prompt ($) and the LGraph prompt (lgraph>).
 
-## To use the lgraph comand line
+### To use the lgraph comand line
 
 ```bash
 ./bazel-bin/main/lgshell
 lgraph> help
 ```
 
-
-## Read and Write verilog files in/out of LGraph
+### Read and Write verilog files in/out of LGraph
 
 To read a verilog with yosys and create an LGraph
 
@@ -81,7 +79,6 @@ lgraph> exit
 $ ls lgdb
 ```
 
-
 To dump an lgraph (and submodules) to verilog
 ```bash
 $ ./bazel-bin/main/lgshell
@@ -90,7 +87,7 @@ lgraph> exit
 $ ls lgdb/*.v
 ```
 
-## Generating a pyrope file from a graph
+### Generating a pyrope file from a graph
 
 ```bash
 $ mkdir pyrope_out
@@ -104,5 +101,3 @@ lgraph> exit
 $ ls trivial.json
 $ ls pyrope_output
 ```
-
-
