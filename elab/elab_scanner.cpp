@@ -251,6 +251,8 @@ Elab_scanner::Elab_scanner() {
   max_warnings = 1024;
   n_errors = 0;
   n_warnings = 0;
+
+  buffer = 0; // just to be clean
 }
 
 void Elab_scanner::chunked(const char *_buffer, size_t _buffer_sz) {
@@ -266,6 +268,7 @@ void Elab_scanner::chunked(const char *_buffer, size_t _buffer_sz) {
 
   token_list.clear();
   scanner_pos = 0;
+  buffer = 0;
 }
 
 bool Elab_scanner::scan_next() {

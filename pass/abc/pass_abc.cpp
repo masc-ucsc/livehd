@@ -60,16 +60,13 @@ void Pass_abc::setup() {
 }
 
 Pass_abc::Pass_abc()
-  :Pass("abc") {
-
-  // TODO: Move to static? or string_view constexpr
-  mapping_command   = "map;print_stats";
-  synthesis_command = "print_stats;cleanup;strash;ifraig;iresyn;dc2;strash;print_stats;";
-  readlib_command   = "read_library stdcells.genlib";
-
+  :Pass("abc")
+  ,mapping_command("map;print_stats")
+  ,readlib_command("read_library stdcells.genlib")
+  ,synthesis_command("print_stats;cleanup;strash;ifraig;iresyn;dc2;strash;print_stats;")
+{
   graph_info = new graph_topology;
 }
-
 
 Pass_abc::~Pass_abc() {
   delete graph_info;

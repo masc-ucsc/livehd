@@ -47,7 +47,7 @@ public:
   spsc(size_t size) :
     _size(size),
     _mask(size - 1),
-    _buffer(reinterpret_cast<T*>(aligned_alloc(128,sizeof(T)*(_size + 1)))), // need one extra element for a guard
+    _buffer(reinterpret_cast<T*>(aligned_alloc(128,sizeof(T)*(size + 1)))), // need one extra element for a guard
     _head(0),
     _tail(0) {
 
