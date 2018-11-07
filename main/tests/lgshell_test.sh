@@ -25,9 +25,9 @@ fi
 
 declare -a pass_cmds=("quit" "help" "help inou.yosys.tolg" "shell pwd")
 
-for cmd in ${pass_cmd[@]}
+for cmd in ${pass_cmds[@]}
 do
-echo "${pass_cmd}" | ${LGSHELL} -q
+echo "${cmd}" | ${LGSHELL} -q
 if [ $? -ne 0 ] ; then
   exit 1
 fi
