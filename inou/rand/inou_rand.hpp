@@ -4,16 +4,16 @@
 #define INOU_RAND_H
 
 #include <string>
+#include "pass.hpp"
 
-#include "inou.hpp"
-#include "options.hpp"
-
-class Inou_rand_options : public Options_base {
+class Inou_rand_options {
 public:
   int         rand_seed;
   int         rand_size;
   int         rand_crate;
   double      rand_eratio;
+  std::string name;
+  std::string path;
 
   Inou_rand_options() {
      rand_seed   = std::rand();
@@ -21,23 +21,20 @@ public:
      rand_crate  = 10;
      rand_eratio = 4;
   }
-  void set(const std::string &key, const std::string &value) final;
 };
 
-class Inou_rand : public Inou {
+class Inou_rand : public Pass {
 private:
 protected:
   Inou_rand_options opack;
 
+  std::vector<LGraph *> do_tolg();
+  static void tolg(Eprp_var &var);
+
 public:
   Inou_rand();
 
-  std::vector<LGraph *> tolg() final;
-  void fromlg(std::vector<const LGraph *> &out) final;
-
-  void set(const std::string &key, const std::string &value) final {
-    opack.set(key,value);
-  }
+  void setup() final;
 };
 
 #endif

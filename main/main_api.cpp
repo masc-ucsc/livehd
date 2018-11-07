@@ -14,7 +14,6 @@
 #include "inou_json_api.hpp"
 #include "inou_pyrope_api.hpp"
 #include "inou_graphviz_api.hpp"
-#include "inou_rand_api.hpp"
 #include "inou_yosys_api.hpp"
 
 #include "eprp_utils.hpp"
@@ -28,6 +27,7 @@ void setup_pass_dfg();
 void setup_pass_sample();
 
 void setup_inou_liveparse();
+void setup_inou_rand();
 
 void Main_api::init() {
   setup_pass_abc();
@@ -48,7 +48,6 @@ void Main_api::init() {
   Inou_json_api::setup(Pass::eprp);        // inou.json.*
   Inou_pyrope_api::setup(Pass::eprp);      // inou.pyrope.*
   Inou_graphviz_api::setup(Pass::eprp);    // inou.graphviz.*
-  Inou_rand_api::setup(Pass::eprp);        // inou.rand.*
   Inou_yosys_api::setup(Pass::eprp);       // inou.yosys.*
 
 

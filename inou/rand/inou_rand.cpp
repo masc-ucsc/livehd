@@ -11,7 +11,49 @@
 #include "lgraph.hpp"
 #include "inou_rand.hpp"
 
-Inou_rand::Inou_rand() {
+void setup_inou_rand() {
+  Inou_rand p;
+  p.setup();
+}
+
+void Inou_rand::setup() {
+  Eprp_method m1("inou.rand", "generate a random lgraph", &Inou_rand::tolg);
+
+  m1.add_label_optional("seed","random seed");
+  m1.add_label_optional("size","lgraph size");
+  m1.add_label_optional("eratio","edge ratio for random");
+  m1.add_label_required("name","lgraph name");
+
+  register_inou(m1);
+}
+
+Inou_rand::Inou_rand()
+ :Pass("rand") {
+}
+
+void Inou_rand::tolg(Eprp_var &var) {
+  Inou_rand p;
+
+  p.opack.path = var.get("path");
+  p.opack.name = var.get("name");
+
+  if (var.has_label("seed"))
+    p.opack.rand_seed = std::stoi(var.get("seed"));
+
+  if (var.has_label("crate"))
+    p.opack.rand_crate = std::stoi(var.get("crate"));
+
+  if (var.has_label("eratio"))
+    p.opack.rand_eratio = std::stod(var.get("eratio"));
+
+  std::vector<LGraph *> lgs = p.do_tolg();
+
+  if (lgs.empty()) {
+    warn(fmt::format("inou.rand could not create a random {} lgraph in {} path", var.get("name"), var.get("path")));
+  }else{
+    assert(lgs.size()==1); // rand only generated one graph at a time
+    var.add(lgs[0]);
+  }
 }
 
 struct pin_pair_compare {
@@ -34,7 +76,7 @@ struct pin_pair_compare {
   }
 };
 
-std::vector<LGraph *> Inou_rand::tolg() {
+std::vector<LGraph *> Inou_rand::do_tolg() {
 
   assert(!opack.name.empty());
 
@@ -131,32 +173,4 @@ std::vector<LGraph *> Inou_rand::tolg() {
   return lgs;
 }
 
-void Inou_rand::fromlg(std::vector<const LGraph *> &out) {
-
-  assert(0); // No method to randomly transform a graph, just to generate.
-
-  out.clear();
-}
-
-void Inou_rand_options::set(const std::string &key, const std::string &value) {
-
-  try {
-    if ( is_opt(key,"seed") ) {
-      rand_seed = std::stoi(value);
-    }else if ( is_opt(key,"size") ) {
-      rand_size  = std::stoi(value);
-    }else if ( is_opt(key,"crate") ) {
-      rand_crate = std::stoi(value);
-    }else if ( is_opt(key,"eratio") ) {
-      rand_eratio = std::stod(value);
-    }else{
-      set_val(key,value);
-    }
-  } catch (const std::invalid_argument& ia) {
-    fmt::print("ERROR: key {} has an invalid argument {}\n",key);
-  }
-
-  console->info("inou_rand seed:{} size:{} crate:{} eratio:{} path:{} name:{}"
-      ,rand_seed, rand_size, rand_crate, rand_eratio, path, name);
-}
 
