@@ -4,6 +4,8 @@
 
 #include <regex>
 
+#include "lgraph.hpp"
+
 #include "pass_abc.hpp"
 
 void Pass_abc::from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {

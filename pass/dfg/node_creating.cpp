@@ -51,8 +51,11 @@ Index_ID Pass_dfg::create_true_const(LGraph *g, Aux_tree *aux_tree) {
   g->node_type_set(nid, U32Const_Op);
   g->node_u32type_set(nid, 1);
 
+#if 0
+  // Better not to assign temps. Use space, waste time and space. Only if strictly needed
   std::string var_name = temp();
   g->set_node_wirename(nid, var_name.c_str());
+#endif
 
   return nid;
 }
@@ -62,17 +65,22 @@ Index_ID Pass_dfg::create_false_const(LGraph *g, Aux_tree *aux_tree) {
   g->node_type_set(nid, U32Const_Op);
   g->node_u32type_set(nid, 0);
 
+#if 0
   std::string var_name = temp();
   g->set_node_wirename(nid, var_name.c_str());
+#endif
 
   return nid;
 }
 
 Index_ID Pass_dfg::create_node(LGraph *g, Aux_tree *aux_tree, const std::string &v, const uint16_t bits) {
+
+  assert(!v.empty());
+
   Index_ID nid = g->create_node().get_nid();
   g->set_node_wirename(nid, v.c_str());
-  //g->set_bits(nid,bits);
   aux_tree->set_alias(v, nid);
+
   return nid;
 }
 
@@ -85,8 +93,8 @@ Index_ID Pass_dfg::create_OR(LGraph *g, Aux_tree *aux_tree, Index_ID op1, Index_
 }
 
 Index_ID Pass_dfg::create_binary(LGraph *g, Aux_tree *aux_tree, Index_ID op1, Index_ID op2, Node_Type_Op oper) {
-  auto target = temp();
-  Index_ID dfnode = create_node(g, aux_tree, target);
+
+  Index_ID dfnode = g->create_node().get_nid();
 
   g->node_type_set(dfnode, oper);
 
@@ -97,8 +105,8 @@ Index_ID Pass_dfg::create_binary(LGraph *g, Aux_tree *aux_tree, Index_ID op1, In
 }
 
 Index_ID Pass_dfg::create_NOT(LGraph *g, Aux_tree *aux_tree, Index_ID op1) {
-  auto target = temp();
-  Index_ID dfnode = create_node(g, aux_tree, target);
+
+  Index_ID dfnode = g->create_node().get_nid();
 
   g->node_type_set(dfnode, Not_Op);
 

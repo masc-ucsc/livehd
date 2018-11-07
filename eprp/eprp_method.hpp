@@ -17,15 +17,19 @@ protected:
     const bool required;
   };
   void add_label(const std::string &attr, const std::string &help, bool required, const std::string& default_value = "");
+  const std::string name;
+
 public:
   std::map<std::string, Label_attr, eprp_casecmp_str> labels;
-  const std::string name;
+
+  const std::string &get_name() const { return name; }
+
   const std::string help;
   const std::function<void(Eprp_var &var)> method;
 
   Eprp_method(const std::string &_name, const std::string &_help, std::function<void(Eprp_var &var)> _method);
 
-  std::string check_labels(const Eprp_var &var) const; // return not const string because it creates error messages
+  bool check_labels(const Eprp_var &var, std::string &err_msg) const;
 
   bool has_label(const std::string &label) const;
   void add_label_optional(const std::string &attr, const std::string &help, const std::string &default_value = "") {

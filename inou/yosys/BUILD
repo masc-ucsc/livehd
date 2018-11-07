@@ -21,6 +21,8 @@ linkso(
         ":lgyosys-lib",
         "//core:core",
         "//meta:meta",
+        "//eprp:eprp",
+        "//elab:elab",
     ],
     static = [" "],
     visibility = ["//visibility:public"],

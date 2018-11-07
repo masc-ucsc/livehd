@@ -19,42 +19,39 @@
 
 #include "live_parse_api.hpp"
 
-#include "pass_abc_api.hpp"
-#include "pass_dce_api.hpp"
-#include "pass_dfg_api.hpp"
-#include "pass_opentimer_api.hpp"
-#include "pass_sample_api.hpp"
-#include "pass_bitwidth_api.hpp"
-
 #include "eprp_utils.hpp"
 
-Eprp Main_api::eprp;
 std::string Main_api::main_path;
 
+void setup_pass_abc();
+void setup_pass_bitwidth();
+void setup_pass_dce();
+void setup_pass_dfg();
+void setup_pass_sample();
+
 void Main_api::init() {
-  Top_api::setup(eprp);              // *
+  setup_pass_abc();
+  setup_pass_bitwidth();
+  setup_pass_dce();
+  setup_pass_dfg();
+  setup_pass_sample();
 
-  Meta_api::setup(eprp);             // lgraph.*
-  Cloud_api::setup(eprp);            // cloud.*
+  Top_api::setup(Pass::eprp);              // *
 
-  Inou_cfg_api::setup(eprp);         // inou.cfg.*
-  Inou_lef_api::setup(eprp);         // inou.lef.*
-  Inou_json_api::setup(eprp);        // inou.json.*
-  Inou_pyrope_api::setup(eprp);      // inou.pyrope.*
-  Inou_graphviz_api::setup(eprp);    // inou.graphviz.*
-  Inou_rand_api::setup(eprp);        // inou.rand.*
-  Inou_yosys_api::setup(eprp);       // inou.yosys.*
+  Meta_api::setup(Pass::eprp);             // lgraph.*
+  Cloud_api::setup(Pass::eprp);            // cloud.*
 
-  Live_parse_api::setup(eprp);       // live.parse.*
+  Inou_cfg_api::setup(Pass::eprp);         // inou.cfg.*
+  Inou_lef_api::setup(Pass::eprp);         // inou.lef.*
+  Inou_json_api::setup(Pass::eprp);        // inou.json.*
+  Inou_pyrope_api::setup(Pass::eprp);      // inou.pyrope.*
+  Inou_graphviz_api::setup(Pass::eprp);    // inou.graphviz.*
+  Inou_rand_api::setup(Pass::eprp);        // inou.rand.*
+  Inou_yosys_api::setup(Pass::eprp);       // inou.yosys.*
 
-  Pass_abc_api::setup(eprp);         // pass.abc.*
-  Pass_dce_api::setup(eprp);         // pass.dce.*
-  Pass_dfg_api::setup(eprp);         // pass.dfg.*
-  Pass_opentimer_api::setup(eprp);   // pass.opentimer.*
-  Pass_sample_api::setup(eprp);      // pass.sample.*
-  Pass_bitwidth_api::setup(eprp);    // pass.bitwidth.*
+  Live_parse_api::setup(Pass::eprp);       // live.parse.*
 
-  Cops_live_api::setup(eprp);        // pass.dfg.*
+  Cops_live_api::setup(Pass::eprp);        // pass.dfg.*
 
   main_path = Eprp_utils::get_exe_path();
 }

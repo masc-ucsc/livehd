@@ -9,32 +9,67 @@
 
 #include "abc_cell.hpp"
 #include "pass_abc.hpp"
+#include "lgraph.hpp"
 
-void Pass_abc_options::set(const std::string &key, const std::string &value) {
+void setup_pass_abc() {
+  Pass_abc p;
 
-  try {
-    if ( is_opt(key,"verbose") ) {
-      if (value == "true")
-        verbose = true;
-    }else if ( is_opt(key,"liberty_file") ) {
-      liberty_file = value;
-    }else if ( is_opt(key,"blif_file") ) {
-      blif_file = value;
-    }else{
-      set_val(key,value);
-    }
-  } catch (const std::invalid_argument& ia) {
-    fmt::print("ERROR: key {} has an invalid argument {}\n",key);
-  }
-
+  p.setup();
 }
 
-Pass_abc::Pass_abc() {
-  graph_info = new graph_topology;
+void Pass_abc::tmap(Eprp_var &var) {
+  Pass_abc pass;
+
+  pass.opack.verbose      = var.get("verbose") == "true";
+
+  for(const auto &l:var.lgs) {
+    pass.trans(l);
+  }
+}
+
+void Pass_abc::optimize(Eprp_var &var) {
+  Pass_abc pass;
+
+  pass.opack.liberty_file = var.get("liberty_file");
+  pass.opack.blif_file    = var.get("blif_file");
+  pass.opack.odir         = var.get("odir");
+  pass.opack.verbose      = var.get("verbose") == "true";
+
+  for(const auto &l:var.lgs) {
+    LGraph *lg = pass.regen(l);
+    var.add(lg);
+  }
+}
+
+void Pass_abc::setup() {
+
+  Eprp_method m1("pass.abc", "optimize an lgraph with a abc, gen _mapped", &Pass_abc::optimize);
+
+  m1.add_label_optional("verbose","verbose output true|false","false");
+  m1.add_label_optional("liberty_file","liberty file for synthesis");
+  m1.add_label_optional("blif_file","generate a blif file for debugging");
+  m1.add_label_optional("odir","output directory for blif for debugging",".");
+
+  register_pass(m1);
+
+  Eprp_method m2("pass.abc.tmap", "tmap an lgraph with a abc", &Pass_abc::tmap);
+
+  m2.add_label_optional("verbose","verbose output true|false");
+
+  register_pass(m2);
+}
+
+Pass_abc::Pass_abc()
+  :Pass("abc") {
+
+  // TODO: Move to static? or string_view constexpr
   mapping_command   = "map;print_stats";
   synthesis_command = "print_stats;cleanup;strash;ifraig;iresyn;dc2;strash;print_stats;";
   readlib_command   = "read_library stdcells.genlib";
+
+  graph_info = new graph_topology;
 }
+
 
 Pass_abc::~Pass_abc() {
   delete graph_info;
@@ -52,7 +87,7 @@ LGraph *Pass_abc::regen(const LGraph *lg) {
   }
 
   find_cell_conn(lg);
-  LGraph *mapped = LGraph::create(opack.path, opack.name + "_mapped");
+  LGraph *mapped = LGraph::create(lg->get_path(), lg->get_name() + "_mapped");
   from_abc(mapped, lg, to_abc(lg));
   mapped->sync();
   if (opack.verbose)
@@ -575,7 +610,7 @@ Abc_Ntk_t *Pass_abc::to_abc(const LGraph *g) {
   Abc_Start();
   pAbc        = Abc_FrameGetGlobalFrame();
   pAig        = Abc_NtkAlloc(ABC_NTK_NETLIST, ABC_FUNC_AIG, 1);
-  pAig->pName = Extra_UtilStrsav(opack.name.c_str());
+  pAig->pName = Extra_UtilStrsav(g->get_name().c_str());
 
   gen_netList(g, pAig);
   Abc_NtkFinalizeRead(pAig);
@@ -583,54 +618,54 @@ Abc_Ntk_t *Pass_abc::to_abc(const LGraph *g) {
     console->error("The AIG construction has failed.\n");
     Abc_NtkDelete(pAig);
     exit(-4);
-  } else {
-    char       Command[1000];
-    Abc_Ntk_t *pTemp = pAig;
-    pAig             = Abc_NtkToLogic(pTemp);
-    Abc_FrameClearVerifStatus(pAbc);
-    Abc_FrameSetCurrentNetwork(pAbc, pAig);
-    if(!opack.liberty_file.empty()) {
-      sprintf(Command, "read_lib -w %s", opack.liberty_file.c_str());
-      if(Cmd_CommandExecute(pAbc, Command)) {
-        console->error("Cannot execute command {}", Command);
-      }
-    } else {
-      gen_generic_lib("stdcells.genlib");
-      Cmd_CommandExecute(pAbc, readlib_command.c_str());
-    }
+  }
 
-    std::string path_name("abc_output");
-    struct stat output_status;
-    stat(path_name.c_str(), &output_status);
-
-    if(!(output_status.st_mode & S_IFDIR)) {
-      mkdir(path_name.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-    }
-
-    if(Cmd_CommandExecute(pAbc, synthesis_command.c_str())) {
-      console->error("Cannot execute command {}", synthesis_command);
-    }
-
-    sprintf(Command, "write_blif %s/%s_post.blif;write_verilog %s/%s_post.v;",
-            path_name.c_str(), opack.name.c_str(),
-            path_name.c_str(), opack.name.c_str());
+  char       Command[1000]; // FIXME: use string (no limit)
+  Abc_Ntk_t *pTemp = pAig;
+  pAig             = Abc_NtkToLogic(pTemp);
+  Abc_FrameClearVerifStatus(pAbc);
+  Abc_FrameSetCurrentNetwork(pAbc, pAig);
+  if(!opack.liberty_file.empty()) {
+    sprintf(Command, "read_lib -w %s", opack.liberty_file.c_str());
     if(Cmd_CommandExecute(pAbc, Command)) {
       console->error("Cannot execute command {}", Command);
     }
-
-    if(Cmd_CommandExecute(pAbc, mapping_command.c_str())) {
-      console->error("Cannot execute command", mapping_command);
-    }
-
-    sprintf(Command, "write_blif %s/%s_map.blif;write_verilog %s/%s_map.v",
-            path_name.c_str(), opack.name.c_str(),
-            path_name.c_str(), opack.name.c_str());
-    if(Cmd_CommandExecute(pAbc, Command)) {
-      console->error("Cannot execute command", Command);
-    }
-
-    assert(pAbc != nullptr);
+  } else {
+    gen_generic_lib("stdcells.genlib");
+    Cmd_CommandExecute(pAbc, readlib_command.c_str());
   }
+
+  const std::string &path_name = opack.odir;
+  struct stat output_status;
+  stat(path_name.c_str(), &output_status);
+
+  if(!(output_status.st_mode & S_IFDIR)) {
+    mkdir(path_name.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+  }
+
+  if(Cmd_CommandExecute(pAbc, synthesis_command.c_str())) {
+    console->error("Cannot execute command {}", synthesis_command);
+  }
+
+  sprintf(Command, "write_blif %s/%s_post.blif;write_verilog %s/%s_post.v;",
+      path_name.c_str(), g->get_name().c_str(),
+      path_name.c_str(), g->get_name().c_str());
+  if(Cmd_CommandExecute(pAbc, Command)) {
+    console->error("Cannot execute command {}", Command);
+  }
+
+  if(Cmd_CommandExecute(pAbc, mapping_command.c_str())) {
+    console->error("Cannot execute command", mapping_command);
+  }
+
+  sprintf(Command, "write_blif %s/%s_map.blif;write_verilog %s/%s_map.v",
+      path_name.c_str(), g->get_name().c_str(),
+      path_name.c_str(), g->get_name().c_str());
+  if(Cmd_CommandExecute(pAbc, Command)) {
+    console->error("Cannot execute command", Command);
+  }
+
+  assert(pAbc != nullptr);
 
   Abc_Ntk_t *pNtkMapped = nullptr;
   pNtkMapped            = Abc_NtkToNetlist(Abc_FrameReadNtk(pAbc));

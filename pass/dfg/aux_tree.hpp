@@ -2,14 +2,16 @@
 #define AUX_TREE_H_
 
 #include <string>
+#include <string_view>
+
 #include "meta/lgraph.hpp"
 #include "core/lgedge.hpp"
 
-const std::string READ_MARKER   = "prprd__";
-const std::string WRITE_MARKER  = "prpwt__";
-const std::string VALID_MARKER  = "prpvd__";
-const std::string RETRY_MARKER  = "prprt__";
-const std::string TEMP_MARKER   = "tmp__";
+constexpr std::string_view READ_MARKER   = "prprd__";
+constexpr std::string_view WRITE_MARKER  = "prpwt__";
+constexpr std::string_view VALID_MARKER  = "prpvd__";
+constexpr std::string_view RETRY_MARKER  = "prprt__";
+constexpr std::string_view TEMP_MARKER   = "tmp__";
 
 #define LOGICAL_AND_OP "AND"
 #define LOGICAL_OR_OP  "OR"

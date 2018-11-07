@@ -3,20 +3,21 @@
 #ifndef PASS_DCE_H
 #define PASS_DCE_H
 
-#include "options.hpp"
-#include "pass.hpp"
-
 #include <string>
+
+#include "pass.hpp"
 
 class Pass_dce : public Pass {
 private:
 protected:
-  std::string dce_type;
+  static void optimize(Eprp_var &var);
 
+  void trans(LGraph *orig);
 public:
   Pass_dce();
 
-  void trans(LGraph *orig) final;
+  void setup() final;
+
 };
 
 #endif

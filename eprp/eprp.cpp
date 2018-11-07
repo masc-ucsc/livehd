@@ -222,8 +222,9 @@ void Eprp::run_cmd(const std::string &cmd, Eprp_var &var) {
 
   last_cmd_var.add(var);
 
-  std::string err_msg = m.check_labels(last_cmd_var);
-  if (!err_msg.empty()) {
+  std::string err_msg;
+  bool err = m.check_labels(last_cmd_var, err_msg);
+  if (err) {
     parser_error(err_msg);
     return;
   }

@@ -1,24 +1,52 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <string>
+#include <vector>
+#include <algorithm>
+#include <math.h>
+
 #include "lgedgeiter.hpp"
 #include "lgbench.hpp"
 #include "lgraph.hpp"
 
 #include "pass_bitwidth.hpp"
 
-#include <string>
-#include <vector>
-#include <algorithm>
-#include <math.h>
-
-void Pass_bitwidth_options_pack::set(const std::string &label, const std::string &value) {
-
-  max_iterations = 10; // FIXME: pass argument from cmd
+void setup_pass_bitwidth() {
+  Pass_bitwidth p;
+  p.setup();
 }
 
-Pass_bitwidth::Pass_bitwidth() {
+void Pass_bitwidth::setup() {
+  Eprp_method m1("pass.bitwidth", "MIT algorithm... FIXME", &Pass_bitwidth::trans);
+
+  m1.add_label_optional("max_iterations","maximum number of iterations to try","10");
+
+  register_pass(m1);
 }
 
+Pass_bitwidth::Pass_bitwidth()
+ :Pass("bitwidth") {
+
+}
+
+
+
+void Pass_bitwidth::trans(Eprp_var &var) {
+
+  Pass_bitwidth pass;
+
+  pass.opack.max_iterations = std::stoi(var.get("max_iterations"));
+  if (pass.opack.max_iterations == 0) {
+    error(fmt::format("pass.bitwidth max_iterations:{} should be bigger than zero", var.get("max_iterations")));
+    return;
+  }
+
+  std::vector<const LGraph *> lgs;
+  for(const auto &l:var.lgs) {
+    pass.do_trans(l);
+  }
+
+}
 
 void Pass_bitwidth::Node_properties::Explicit_range::dump() const {
   fmt::print("max{}:{} min{}:{} sign{}:{} {}"
@@ -430,7 +458,7 @@ bool Pass_bitwidth::bw_pass_iterate(LGraph *lg) {
   return false;
 }
 
-void Pass_bitwidth::trans(LGraph *lg) {
+void Pass_bitwidth::do_trans(LGraph *lg) {
   {
     LGBench b("pass.bitwidth");
 

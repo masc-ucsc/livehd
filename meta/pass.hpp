@@ -2,32 +2,42 @@
 #ifndef PASS_H
 #define PASS_H
 
-#include "lgraph.hpp"
-#include "options.hpp"
+#include <string>
 
-// Abstract class that any Pass block must support
+#include "eprp.hpp"
+
 class Pass {
 private:
+
+  const std::string name;
+
 protected:
+  void register_pass(Eprp_method &method);
+  void register_inou(Eprp_method &method);
+
+  Pass(const std::string &name_);
+
+  static void error(const std::string &msg) {
+    eprp.parser_error(msg);
+  }
+  static void warn(const std::string &msg) {
+    eprp.parser_warn(msg);
+  }
+
+  template<typename Arg1, typename... Args>
+  void error(const char *fmt, const Arg1 &, const Args &... args) {
+    eprp.parser_error(fmt::format(fmt, args...));
+  }
+
+  template<typename Arg1, typename... Args>
+  void warn(const char *fmt, const Arg1 &, const Args &... args) {
+    eprp.parser_warn(fmt::format(fmt, args...));
+  }
 public:
-  Pass() {
-  };
+  // FIXME: NASTY until we move all the pass/inou to the new pass interface
+  static Eprp eprp; // TODO: Shared with inou
 
-  // Either trans or regen called
-
-  virtual void    trans(LGraph *orig) {
-    assert(false);
-  }
-
-  virtual LGraph *regen(const LGraph *orig) {
-    assert(false);
-    return 0;
-  }
-
-  // Set options for the pass
-  virtual void set(const std::string &key, const std::string &value) {
-    assert(false); // Overload if used
-  };
+  virtual void setup() = 0;
 };
 
 #endif

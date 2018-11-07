@@ -1,9 +1,11 @@
+
 #include <string>
+#include "gtest/gtest.h"
+#include "gmock/gmock.h"
 
 #include "pass_sample.hpp"
+#include "lgraph.hpp"
 
-#include "gtest/gtest.h"
-#include <gmock/gmock.h>
 
 using testing::HasSubstr;
 
@@ -20,7 +22,7 @@ TEST_F(SampleMainTest, EmptyLGraph) {
 
   Pass_sample pass;
 
-  pass.trans(g);
+  pass.do_work(g);
 
   EXPECT_TRUE(true);
 }

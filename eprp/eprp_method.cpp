@@ -26,17 +26,18 @@ const std::string &Eprp_method::get_label_help(const std::string &label) const {
   return it->second.help;
 }
 
-std::string Eprp_method::check_labels(const Eprp_var &var) const {
+bool Eprp_method::check_labels(const Eprp_var &var, std::string &err_msg) const {
 
   for(const auto &l:labels) {
     if (!l.second.required)
       continue;
 
     if (!var.has_label(l.first)) {
-      return fmt::format("method {} requires label {}, but it is missing", name, l.first);
+      err_msg = fmt::format("method {} requires label {}, but it is missing", name, l.first);
+      return true;
     }
   }
 
-  return std::string("");
+  return false;
 }
 

@@ -3,44 +3,26 @@
 #define PASS_DFG_HPP_
 
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "pass.hpp"
-#include "lgedge.hpp"
-#include "options.hpp"
-#include "options.hpp"
-//#include "cf2df_state.hpp"
+#include "lgraph.hpp"
+
 #include "aux_tree.hpp"
 #include "cfg_node_data.hpp"
-#include "cfg_node_data.hpp"
-
-class Pass_dfg_options : public Options_base {
-public:
-  std::string file;
-  Pass_dfg_options() { }
-
-  void set(const std::string &key, const std::string &value);
-
-};
 
 class Pass_dfg : public Pass {
 protected:
-public:
-  Pass_dfg():Pass() { }
-  Pass_dfg(const std::string &key, const std::string &value);
+  static void generate(Eprp_var &var);
+  static void optimize(Eprp_var &var);
+  static void pseudo_bitwidth(Eprp_var &var);
 
-  LGraph *     regen(const LGraph *orig);
-  void         optimize(LGraph * &ori_dfg);     //calls trans() to perform optimization
-  void         trans(LGraph *orig);
-  void         cfg_2_dfg(LGraph *dfg, const LGraph *cfg);
-  void         pseudo_bitwidth(LGraph *dfg);
-  void set(const std::string &key, const std::string &value) final {
-    opack.set(key,value);
-  }
+  void  do_generate(const LGraph *cfg, LGraph *dfg);
+  void  do_optimize(LGraph * &ori_dfg);     //calls trans() to perform optimization
+  void  do_pseudo_bitwidth(LGraph *dfg);
 
-protected:
-  Pass_dfg_options opack;
+  void  trans(LGraph *orig);
+  bool  cfg_2_dfg(const LGraph *cfg, LGraph *dfg);
 
 private:
   Index_ID                 find_cfg_root(        const LGraph *cfg);
@@ -97,10 +79,11 @@ private:
   void add_read_marker(LGraph *dfg, Aux_tree *aux_tree, const std::string &v) { assign_to_true(dfg, aux_tree, read_marker(v)); }
   void add_write_marker(LGraph *dfg, Aux_tree *aux_tree, const std::string &v) { assign_to_true(dfg, aux_tree, write_marker(v)); }
 
-  std::string read_marker(const std::string &v) { return READ_MARKER + v; }
-  std::string write_marker(const std::string &v) { return WRITE_MARKER + v; }
-  std::string valid_marker(const std::string &v) { return VALID_MARKER + v; }
-  std::string retry_marker(const std::string &v) { return RETRY_MARKER + v; }
+  // TODO: This code us not used, but if it were it should be string_view (all const, no memory alloc)
+  std::string read_marker(const std::string &v)  const { return std::string(READ_MARKER) + v; }
+  std::string write_marker(const std::string &v) const { return std::string(WRITE_MARKER) + v; }
+  std::string valid_marker(const std::string &v) const { return std::string(VALID_MARKER) + v; }
+  std::string retry_marker(const std::string &v) const { return std::string(RETRY_MARKER) + v; }
 
   void assign_to_true(LGraph *dfg, Aux_tree *aux_tree, const std::string &v);
 
@@ -143,19 +126,7 @@ private:
 
   Node_Type_Op node_type_from_text(const std::string &operator_text);
 
-  std::string temp() { return TEMP_MARKER + std::to_string(temp_counter++); }
-  static unsigned int temp_counter;
-
-  //Sheng zone
   Index_ID resolve_constant          (LGraph *g, Aux_tree *aux_tree, const std::string& str_in);
-                                      //bool& is_signed,
-                                      //bool& is_in32b,
-                                      //bool& is_explicit_signed,
-                                      //bool& has_bool_dc,
-                                      //bool& is_pure_dc,
-                                      //uint32_t& val,
-                                      //uint32_t& explicit_bits,
-                                      //size_t& bit_width);
   Index_ID process_bin_token         (LGraph *g, const std::string& token1st, const uint16_t & bit_width, uint32_t& val);
   Index_ID process_bin_token_with_dc (LGraph *g, const std::string& token1st);
   uint32_t cal_bin_val_32b           (const std::string&);
@@ -163,6 +134,11 @@ private:
   Index_ID create_dontcare_node      (LGraph *g, uint16_t node_bit_width );
   std::string hex_char_to_bin        (char c);
   std::string hex_msb_char_to_bin    (char c);
+
+public:
+  Pass_dfg();
+
+  void setup() final;
 };
 
 #endif

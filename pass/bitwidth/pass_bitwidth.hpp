@@ -7,19 +7,15 @@
 #include "bm.h"
 
 #include "pass.hpp"
-#include "options.hpp"
-#include "lgraph.hpp"
-
-class Pass_bitwidth_options_pack : public Options_base {
-public:
-  int max_iterations = 10;
-
-  void set(const std::string &label, const std::string &value);
-};
 
 class Pass_bitwidth : public Pass {
 protected:
+  class Pass_bitwidth_options_pack {
+  public:
+    int max_iterations;
+  };
   Pass_bitwidth_options_pack opack;
+
   class Node_properties {
   public:
     class Explicit_range {
@@ -100,10 +96,12 @@ protected:
   void bw_pass_dump(LGraph *lg);
   bool bw_pass_iterate(LGraph *lg);
 
+  static void trans(Eprp_var &var);
+  void do_trans(LGraph *orig);
 public:
   Pass_bitwidth();
 
-  void trans(LGraph *orig) final;
+  void setup() final;
 };
 
 #endif
