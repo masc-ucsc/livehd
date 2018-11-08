@@ -4,11 +4,12 @@
 #include <fstream>
 #include <atomic>
 
-#include "inou_graphviz.hpp"
-
 #include "lgbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraphbase.hpp"
+#include "eprp_utils.hpp"
+
+#include "inou_graphviz.hpp"
 
 
 void setup_inou_graphviz() {
@@ -28,14 +29,15 @@ Inou_graphviz::Inou_graphviz()
 }
 
 void Inou_graphviz::fromlg(Eprp_var &var) {
-  const std::string odir   = var.get("odir");
 
   Inou_graphviz p;
 
   p.odir = var.get("odir");
-
-  if (odir != ".")
-    mkdir(odir.c_str(),0755);
+  bool ok = Eprp_utils::setup_directory(p.odir);
+  if (!ok) {
+    error(fmt::format("inou.graphviz.fromlg could not setup {} directory",p.odir));
+    return;
+  }
 
   std::vector<const LGraph *> lgs;
   for(const auto &l:var.lgs) {

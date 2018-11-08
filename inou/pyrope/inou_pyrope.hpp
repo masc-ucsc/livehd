@@ -2,33 +2,19 @@
 #ifndef INOU_PYROPE_H
 #define INOU_PYROPE_H
 
-#include <sstream>
 #include <string>
+#include <iostream>
 
-#include "inou.hpp"
-#include "options.hpp"
+#include "lgraph.hpp"
+#include "pass.hpp"
 
-class Inou_pyrope_options : public Options_base {
-public:
-  std::string odir;
-  std::string input;
-
-  Inou_pyrope_options()
-    :odir(".")
-     ,input("") {
-  }
-  void set(const std::string &key, const std::string &value) final;
-};
-
-class Inou_pyrope : public Inou {
+class Inou_pyrope : public Pass {
 private:
   std::map<Index_ID, std::string> inline_stmt;
 
   typedef std::ostringstream Out_string;
 
 protected:
-  Inou_pyrope_options opack;
-
   void to_pyrope(const LGraph *g, const std::string& filename);
   void to_src_var(Out_string &w, const LGraph *g, Index_ID idx) const;
   bool to_dst_var(Out_string &w, const LGraph *g, Index_ID idx) const;
@@ -48,16 +34,13 @@ protected:
   bool to_strconst(Out_string &w, const LGraph *g, Index_ID idx) const;
   bool to_op(Out_string &s, Out_string &sub, const LGraph *g, Index_ID idx) const;
 
+  static void fromlg(Eprp_var &var);
+
 public:
   Inou_pyrope();
-  virtual ~Inou_pyrope();
 
-  std::vector<LGraph *> tolg() final;
-  void fromlg(std::vector<const LGraph *> &out) final;
+  void setup() final;
 
-  void set(const std::string &key, const std::string &value) final {
-    opack.set(key, value);
-  }
 };
 
 #endif

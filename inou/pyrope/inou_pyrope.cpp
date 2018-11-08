@@ -5,56 +5,47 @@
 #include <string>
 #include <strings.h>
 
+#include "lgedgeiter.hpp"
+#include "eprp_utils.hpp"
 #include "inou_pyrope.hpp"
 
-#include "lgedgeiter.hpp"
-#include "lgraph.hpp"
 
-//FIX_ME: We'll eventually need to rethink this data structure.
+//FIXME: We'll eventually need to rethink this data structure.
 #define tmp_size 10000
 std::string tmp_values[tmp_size];
 
-void Inou_pyrope_options::set(const std::string &key, const std::string &value) {
+void setup_inou_pyrope() {
+  Inou_pyrope p;
+  p.setup();
+}
 
-  try {
-    if (is_opt(key, "input")) {
-      input = value;
-    } else if (is_opt(key, "odir")) {
-      odir = value;
-    } else {
-      set_val(key, value);
-    }
-  } catch (const std::invalid_argument& ia) {
-    fmt::print("ERROR: key {} has an invalid argument {}\n", key);
+Inou_pyrope::Inou_pyrope()
+  :Pass("pyrope") {
+
+}
+
+void Inou_pyrope::setup() {
+  Eprp_method m1("inou.pyrope.fromlg", "generate a pyrope output", &Inou_pyrope::fromlg);
+
+  register_inou(m1);
+}
+
+void Inou_pyrope::fromlg(Eprp_var &var) {
+
+  Inou_pyrope p;
+
+  const std::string odir = var.get("odir");
+  bool ok = Eprp_utils::setup_directory(odir);
+  if (!ok) {
+    error(fmt::format("inou.pyrope.fromlg could not setup {} directory",odir));
+    return;
   }
 
-  console->info("inou_pyrope input:{} odir:{} path:{} name:{}"
-      ,input, odir, path, name);
-}
-
-// FIXME: latch.v (optimize lgraph to fix), trivial2.v, submodule_offset.v
-// Join_Op: assigns.v
-
-Inou_pyrope::Inou_pyrope() {
-}
-
-Inou_pyrope::~Inou_pyrope() {
-}
-
-std::vector<LGraph *> Inou_pyrope::tolg() {
-
-  std::vector<LGraph *> lgs;
-
-  console->error("inou_pyrope::tolg not implemented");
-
-  return lgs;
-}
-
-void Inou_pyrope::fromlg(std::vector<const LGraph *> &out) {
-  for(const auto &g : out) {
-    std::string filename = opack.odir + "/" + g->get_name() + ".prp";
-    to_pyrope(g, filename);
+  for(const auto &g:var.lgs) {
+    std::string filename = odir + "/" + g->get_name() + ".prp";
+    p.to_pyrope(g, filename);
   }
+
 }
 
 bool Inou_pyrope::to_dst_var(Out_string &w, const LGraph *g, Index_ID idx) const {

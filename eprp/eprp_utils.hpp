@@ -13,5 +13,7 @@ public:
 
   static bool ends_with(const std::string &s, const std::string &suffix);
 
+  static bool setup_directory(const std::string &dir);
+
 };
 
