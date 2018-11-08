@@ -41,6 +41,8 @@ void Inou_json::from_json(LGraph *g, rapidjson::Document &document) {
   Port_ID  src_pid  = 0;
   Port_ID  dst_pid  = 0;
 
+  json_remap.clear();
+
   if(document.HasParseError()) {
     fprintf(stderr, "\nError(offset %u): %s\n",
             static_cast<unsigned>(document.GetErrorOffset()),
@@ -85,7 +87,10 @@ void Inou_json::from_json(LGraph *g, rapidjson::Document &document) {
             g->node_type_set(last_nid, Node_Type::get(op));
           } else if(is_const_op(op)) {
             fmt::print("DEBUG:: const op : {} \n", op);
-            g->node_const_type_set(last_nid, op);
+            assert(op.size() > 2);
+            assert(op[op.size()-1] == '\'');
+            assert(op[op.size()-1] == '\'');
+            g->node_const_type_set(last_nid, op.substr(1,op.size()-3));
           } else {
             fmt::print("DEBUG:: HOW TO GET HERE?? \n ");
           }
@@ -151,7 +156,6 @@ void Inou_json::from_json(LGraph *g, rapidjson::Document &document) {
 }
 
 void Inou_json::fromlg(Eprp_var &var) {
-  const std::string path    = var.get("path");
   const std::string odir    = var.get("odir");
 
   Inou_json p;
@@ -184,7 +188,13 @@ void Inou_json::tolg(Eprp_var &var) {
   std::vector<LGraph *> lgs;
   for(const auto &f:Eprp_utils::parse_files(files,"inou.yosys.tolg")) {
 
-    const std::string name = f.substr(f.find_last_of("/\\") + 1);
+    std::string name = f.substr(f.find_last_of("/\\") + 1);
+    if (Eprp_utils::ends_with(name,".json")) {
+      name = name.substr(0,name.size()-5); // remove .json
+    }else{
+      error(fmt::format("inou.json.tolg unknown file extension {}, expected .json", name));
+      continue;
+    }
 
     LGraph *lg = LGraph::create(path, name);
 
@@ -247,9 +257,8 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
         if(g->node_type_get(idx).op == U32Const_Op) {
           writer.Uint64(g->node_value_get(idx));
         } else if(g->node_type_get(idx).op == StrConst_Op) {
-          writer.String("'");
-          writer.String(g->node_const_value_get(idx));
-          writer.String("'");
+          const std::string tmp = (std::string("'") + g->node_const_value_get(idx) + "'");
+          writer.String(tmp.c_str());
         } else {
           /*normal operations*/
           if(g->node_type_get(idx).op == TechMap_Op) {
