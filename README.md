@@ -163,15 +163,15 @@ expected to adhere to the [Code of Conduct](docs/CODE_OF_CONDUCT.md).
 
 The code is organized as:
 
-- core/ # All the core classes of LGraph (nodes, edges, iterators, field tables, ...)
-- meta/ # All the additional fields added to the nodes
-- inou/ # All the inputs and outputs to and from LGraph
-- pass/ # Transformations over LGraph
-- cops/ # Combine operations, ie. take N graphs and creates another graph
-- misc/ # External libraries and other misc code
-- test/ # Testing code, scripts, cases and infrastructure (Note: unit tests
+- [`core/`](./core) - All the core classes of LGraph (nodes, edges, iterators, field tables, ...)
+- [`meta/`](./meta) - All the additional fields added to the nodes
+- [`inou/`](./inou) - All the inputs and outputs to and from LGraph
+- [`pass/`](./pass) - Transformations over LGraph
+- [`cops/`](./cops) - Combine operations, ie. take N graphs and creates another graph
+- [`misc/`](./misc) - External libraries and other misc code
+- [`test/`](./test) - Testing code, scripts, cases and infrastructure (Note: unit tests
   should be placed inside the corresponding subfolder)
-- docs/ # Documentation of LGraph
+- [`docs/`](./docs) - Documentation of LGraph
 
 ## Git Policies
 
