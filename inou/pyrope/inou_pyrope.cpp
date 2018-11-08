@@ -35,11 +35,9 @@ void Inou_pyrope::fromlg(Eprp_var &var) {
   Inou_pyrope p;
 
   const std::string odir = var.get("odir");
-  bool ok = Eprp_utils::setup_directory(odir);
-  if (!ok) {
-    error(fmt::format("inou.pyrope.fromlg could not setup {} directory",odir));
+  bool ok = p.setup_directory(odir);
+  if (!ok)
     return;
-  }
 
   for(const auto &g:var.lgs) {
     std::string filename = odir + "/" + g->get_name() + ".prp";

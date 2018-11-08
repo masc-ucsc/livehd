@@ -1,11 +1,10 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-
 LGSHELL=./bazel-bin/main/lgshell
 
-if [ ! -f $LGSHELL ]; then
-  if [ -f ./main/lgshell ]; then
+if [ ! -x $LGSHELL ]; then
+  if [ -x ./main/lgshell ]; then
     LGSHELL=./main/lgshell
   else
     echo "FAILED: could not find lgshell binary in $(pwd)";
@@ -14,28 +13,23 @@ fi
 
 for a in 1 4 20 100
 do
-	echo "inou.rand eratio:$a seed:$a name:rand_$a |> inou.json.fromlg output:output.json" | ${LGSHELL}
-
-  if [ $? -eq 0 ]; then
-    echo "Successfully lgrand file "$a
-  else
-    echo "FAIL: lgrand terminated with and error"
+	echo "inou.rand eratio:$a seed:$a name:rand_$a |> inou.json.fromlg odir:tmp" | ${LGSHELL}
+  if [ $? -ne 0 ]; then
+    echo "FAIL: inou.json.fromlg rand_${a} terminated with and error"
     exit 1
   fi
 
-	cp output.json input.json
-  echo "inou.json.tolg file:input.json " | ${LGSHELL}
-  if [ $? -eq 0 ]; then
-    echo "Successfully lgjson file "$a
-  else
-    echo "FAIL: lgjson terminated with and error"
+	cp tmp/rand_${a}.json tmp/tmp.json
+  echo "inou.json.tolg files:tmp/tmp.json " | ${LGSHELL}
+  if [ $? -ne 0 ]; then
+    echo "FAIL: inou.json.tolg terminated with and error"
     exit 1
   fi
 
-  RES1=$(grep idx: input.json  | sort | uniq -c | sort -t: -k1 -n | cut -d: -f1 | cksum)
-  RES2=$(grep idx: output.json | sort | uniq -c | sort -t: -k1 -n | cut -d: -f1 | cksum)
+  RES1=$(grep idx: tmp/tmp.json  | sort | uniq -c | sort -t: -k1 -n | cut -d: -f1 | cksum)
+  RES2=$(grep idx: tmp/rand_${a}.json | sort | uniq -c | sort -t: -k1 -n | cut -d: -f1 | cksum)
 	if [ "$RES1" != "$RES2" ]; then
-		echo "mismatch in the comparison after lgjson"
+		echo "mismatch in the comparison after lgjson for rand_${a}"
 		exit 3
 	fi
 done

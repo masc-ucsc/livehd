@@ -33,11 +33,9 @@ void Inou_graphviz::fromlg(Eprp_var &var) {
   Inou_graphviz p;
 
   p.odir = var.get("odir");
-  bool ok = Eprp_utils::setup_directory(p.odir);
-  if (!ok) {
-    error(fmt::format("inou.graphviz.fromlg could not setup {} directory",p.odir));
+  bool ok = p.setup_directory(p.odir);
+  if (!ok)
     return;
-  }
 
   std::vector<const LGraph *> lgs;
   for(const auto &l:var.lgs) {

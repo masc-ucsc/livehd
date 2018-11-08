@@ -50,6 +50,8 @@ public:
 
   static const std::string &get_main_path() { return main_path; }
 
+  static bool has_errors() { return Pass::eprp.has_errors(); }
+
   static void init();
 };
 

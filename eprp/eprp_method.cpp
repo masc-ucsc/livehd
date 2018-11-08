@@ -33,7 +33,7 @@ bool Eprp_method::check_labels(const Eprp_var &var, std::string &err_msg) const 
       continue;
 
     if (!var.has_label(l.first)) {
-      err_msg = fmt::format("method {} requires label {}, but it is missing", name, l.first);
+      err_msg = fmt::format("method {} requires label {}:, but it is missing", name, l.first);
       return true;
     }
   }

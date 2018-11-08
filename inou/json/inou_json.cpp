@@ -5,43 +5,34 @@
 
 #include <fstream>
 
-#include "inou_json.hpp"
-
-#include "lgedgeiter.hpp"
-#include "lgraphbase.hpp"
-
 #include "rapidjson/document.h"
 #include "rapidjson/error/en.h"
 #include "rapidjson/filereadstream.h"
 #include "rapidjson/filewritestream.h"
 #include "rapidjson/prettywriter.h"
 
-void Inou_json_options::set(const std::string &key, const std::string &value) {
+#include "lgedgeiter.hpp"
+#include "lgraph.hpp"
+#include "eprp_utils.hpp"
 
-  try {
-    if ( is_opt(key,"input") ) {
-      json_file = value;
-    }else if ( is_opt(key,"output") ) {
-      json_file = value;
-    }else if ( is_opt(key,"name") ) {
-      fmt::print("name {}\n",value);
-      name = value;
-    }else if ( is_opt(key,"path") ) {
-      path = value;
-    }else{
-      set_val(key,value);
-    }
-  } catch (const std::invalid_argument& ia) {
-    console->warn("WARNING: key {} has an invalid argument {}\n",key);
-  }
+#include "inou_json.hpp"
 
-  console->info("inou_json file:{} path:{} name:{}" ,json_file, path, name);
+void setup_inou_json() {
+  Inou_json p;
+  p.setup();
 }
 
-Inou_json::Inou_json() {
+Inou_json::Inou_json()
+  :Pass("json") {
+
 }
 
-Inou_json::~Inou_json() {
+void Inou_json::setup() {
+  Eprp_method m1("inou.json.tolg", "import from json to lgraph", &Inou_json::tolg);
+  register_inou(m1);
+
+  Eprp_method m2("inou.json.fromlg", "export from lgraph to json", &Inou_json::fromlg);
+  register_inou(m2);
 }
 
 void Inou_json::from_json(LGraph *g, rapidjson::Document &document) {
@@ -159,50 +150,65 @@ void Inou_json::from_json(LGraph *g, rapidjson::Document &document) {
   }
 }
 
-std::vector<LGraph *> Inou_json::tolg() {
+void Inou_json::fromlg(Eprp_var &var) {
+  const std::string path    = var.get("path");
+  const std::string odir    = var.get("odir");
+
+  Inou_json p;
+
+  bool ok = p.setup_directory(odir);
+  if (!ok)
+    return;
+
+  for(const auto &g:var.lgs) {
+    const std::string file = odir + "/" + g->get_name() + ".json";
+    p.to_json(g, file);
+  }
+}
+
+void Inou_json::tolg(Eprp_var &var) {
+
+  const std::string files   = var.get("files");
+  if (files.empty()) {
+    error(fmt::format("inou.json.tolg: no files provided"));
+    return;
+  }
+
+  Inou_json p;
+
+  const std::string path   = var.get("path");
+  bool ok = p.setup_directory(path);
+  if (!ok)
+    return;
 
   std::vector<LGraph *> lgs;
-  if(opack.name.empty()) {
-    console->error("inou_json::tolg no graph name provided");
-    return lgs;
+  for(const auto &f:Eprp_utils::parse_files(files,"inou.yosys.tolg")) {
+
+    const std::string name = f.substr(f.find_last_of("/\\") + 1);
+
+    LGraph *lg = LGraph::create(path, name);
+
+    FILE *                    pFile = fopen(f.c_str(), "rb");
+    char                      buffer[65536];
+    rapidjson::FileReadStream is(pFile, buffer, sizeof(buffer));
+    rapidjson::Document       document;
+    document.ParseStream<0, rapidjson::UTF8<>, rapidjson::FileReadStream>(is);
+
+    p.from_json(lg, document);
+    lg->sync();
+    lgs.push_back(lg);
   }
 
-  lgs.push_back(LGraph::create(opack.path, opack.name));
-
-  // No need to sync because it is a reload. Already sync
-
-  const std::string &json_file = opack.json_file;
-
-  FILE *                    pFile = fopen(json_file.c_str(), "rb");
-  char                      buffer[65536];
-  rapidjson::FileReadStream is(pFile, buffer, sizeof(buffer));
-  rapidjson::Document       document;
-  document.ParseStream<0, rapidjson::UTF8<>, rapidjson::FileReadStream>(is);
-
-  from_json(lgs[0], document);
-  lgs[0]->sync();
-
-  return lgs;
+  var.add(lgs);
 }
 
-void Inou_json::fromlg(std::vector<const LGraph *> &out) {
-  if(out.size() == 1) {
-    to_json(out[0], opack.json_file);
-  } else {
-    for(const auto &g : out) {
-      std::string file = g->get_name() + "_" + opack.json_file;
-      to_json(g, file);
-    }
-  }
+bool Inou_json::is_const_op(const std::string &s) const {
+  return std::find_if(s.begin(), s.end(), [](const char c) {
+      return (c != '\'' && c != '0' && c != '1' && c != 'x' && c != 'z');
+      }) == s.end();
 }
 
-bool Inou_json::is_const_op(std::string s) {
-  return !s.empty() && s[0] == '\'' && std::find_if(s.substr(1).begin(), s.end(), [](char c) {
-                                         return !(c != '0' && c != '1' && c != 'x' && c != 'z');
-                                       }) == s.end();
-}
-
-bool Inou_json::is_int(std::string s) {
+bool Inou_json::is_int(const std::string &s) const {
   return !s.empty() && std::find_if(s.begin(), s.end(), [](char c) { return !std::isdigit(c); }) == s.end();
 }
 
