@@ -11,6 +11,7 @@ bazel coverage -k //...
 ./inou/json/tests/rand_json.sh
 
 ./inou/cfg/tests/pyrope.sh
+./inou/pyrope/tests/pyrope_test.sh
 
 ./pass/abc/tests/abc.sh
 
