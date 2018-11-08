@@ -10,3 +10,22 @@ cc_library(
         "//meta:meta"
     ],
 )
+
+filegroup(
+    name = "pyrope_tests",
+    srcs = glob([
+        "tests/*.prp",
+    ]),
+    visibility = ["//visibility:public"],
+)
+
+sh_test(
+    name = "pyrope_test.sh",
+    srcs = ["tests/pyrope_test.sh"],
+    data = [
+        "//inou/yosys:liblgraph_yosys.so",
+        "//main:lgshell",
+        ":pyrope_tests",
+        "//inou/yosys:verilog_tests",
+        ],
+)

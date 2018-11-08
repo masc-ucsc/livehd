@@ -10,12 +10,11 @@ cc_library(
     ],
 )
 
-
-sh_library(
+filegroup(
     name = "cfg_pts",
     srcs = glob(["tests/*.cfg", "tests/verilog_gld/*.v"]),
+    visibility = ["//visibility:public"],
 )
-
 
 sh_test(
     name = "pyrope.sh",
@@ -24,10 +23,10 @@ sh_test(
     data = [
         "//inou/yosys:liblgraph_yosys.so",
         "//main:lgshell",
+        ":cfg_pts"
         ],
     deps = [
         "//inou/yosys:scripts",
-        ":cfg_pts"
     ]
 )
 
