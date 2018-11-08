@@ -23,14 +23,14 @@ if [ $? -ne 0 ] ; then
   exit 1
 fi
 
-declare -a pass_cmds=("quit" "help" "help inou.yosys.tolg" "shell pwd")
 
-for cmd in ${pass_cmds[@]}
+for cmd in "quit" "help" "help inou.yosys.tolg"
 do
-echo "${cmd}" | ${LGSHELL} -q
-if [ $? -ne 0 ] ; then
-  exit 1
-fi
+  echo "${cmd}" | ${LGSHELL} -q
+  if [ $? -ne 0 ] ; then
+    echo "lgshell_test.sh ${cmd} failed"
+    exit 1
+  fi
 done
 
 
@@ -79,4 +79,6 @@ do
   fi
 
 done
+
+exit 0
 

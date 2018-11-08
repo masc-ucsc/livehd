@@ -471,5 +471,8 @@ int main(int argc, char **argv) {
   if(history)
     rx.history_save(history_file);
 
+  if (Main_api::has_errors())
+    return 1;
+
   return 0;
 }

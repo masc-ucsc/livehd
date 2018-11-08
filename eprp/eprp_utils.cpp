@@ -48,21 +48,6 @@ std::string Eprp_utils::get_exe_path() {
   return path;
 }
 
-bool Eprp_utils::setup_directory(const std::string &dir) {
-
-  if (dir == ".")
-    return true;
-
-  struct stat sb;
-
-  if (stat(dir.c_str(), &sb) == 0 && S_ISDIR(sb.st_mode))
-    return true;
-
-  int e = mkdir(dir.c_str(),0755);
-
-  return e>=0;
-}
-
 bool Eprp_utils::ends_with(const std::string &s, const std::string &suffix) {
   return s.rfind(suffix) == (s.size()-suffix.size());
 }

@@ -173,6 +173,8 @@ public:
   void dump_token() const;
 
   virtual void elaborate() = 0;
+
+  bool has_errors() const { return n_errors > 0; }
 };
 
 #endif

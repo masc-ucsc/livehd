@@ -6,48 +6,32 @@
 #ifndef INOU_JSON_H
 #define INOU_JSON_H
 
-#include "inou.hpp"
-#include "options.hpp"
-#include "rapidjson/document.h"
-
 #include <string>
 
-class Inou_json_options : public Options_base {
-public:
-  Inou_json_options()
-    : json_file("file.json") {
-  }
+#include "rapidjson/document.h"
 
-  std::string json_file;
+#include "pass.hpp"
 
-  void set(const std::string &key, const std::string &value) final;
-};
-
-class Inou_json : public Inou {
+class Inou_json : public Pass {
 private:
 protected:
-  Inou_json_options opack;
 
   std::map<Index_ID, Index_ID> json_remap;
 
-  bool is_const_op(std::string s);
-
-  bool is_int(std::string s);
+  bool is_const_op(const std::string &s) const;
+  bool is_int(const std::string &s) const;
 
   void from_json(LGraph *g, rapidjson::Document &document);
-
   void to_json(const LGraph *g, const std::string &filename) const;
+
+  static void tolg(Eprp_var &var);
+  static void fromlg(Eprp_var &var);
 
 public:
   Inou_json();
-  virtual ~Inou_json();
 
-  std::vector<LGraph *> tolg() final;
-  void fromlg(std::vector<const LGraph *> &out) final;
+  void setup() final;
 
-  void set(const std::string &key, const std::string &value) final {
-    opack.set(key,value);
-  }
 };
 
 #endif
