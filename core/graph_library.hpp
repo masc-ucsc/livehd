@@ -71,6 +71,7 @@ protected:
 
 public:
   static LGraph *try_find_lgraph(const std::string &path, const std::string &name);
+  LGraph *try_find_lgraph(const std::string &name);
 
   uint32_t add_name(const std::string &name);
 

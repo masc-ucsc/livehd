@@ -167,16 +167,6 @@ Index_ID LGraph_Base::add_graph_input(const char *str, Index_ID nid, uint16_t bi
   str = input_array.get_char(string_id); // the input str may be deallocated, do not strdup again
 
   assert(inputs2node.find(str) == inputs2node.end()); // No name replication allowed
-  //assert(outputs2node.find(str) == outputs2node.end()); //No name replication allowed
-
-#ifndef NDEBUG
-  //for(auto & inps : inputs2node) {
-  //  assert(inps.second.original_pos != original_pos); // position is unique
-  //}
-  //for(auto & outs : outputs2node) {
-  //  assert(outs.second.original_pos != original_pos); // position is unique
-  //}
-#endif
 
   inputs2node[str].nid          = nid;
   inputs2node[str].original_pos = original_pos;
@@ -218,7 +208,6 @@ Index_ID LGraph_Base::add_graph_output(const char *str, Index_ID nid, uint16_t b
   //  assert(outs.second.original_pos != original_pos); // position is unique
   //}
 #endif
-
 
   outputs2node[str].nid          = nid;
   outputs2node[str].original_pos = original_pos;

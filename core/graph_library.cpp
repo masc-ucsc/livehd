@@ -33,6 +33,22 @@ LGraph *Graph_library::try_find_lgraph(const std::string &path, const std::strin
   return nullptr;
 }
 
+LGraph *Graph_library::try_find_lgraph(const std::string &name) {
+
+  if(global_name2lgraph.find(path) == global_name2lgraph.end())
+    return 0;
+
+  if(global_name2lgraph[path].find(name) != global_name2lgraph[path].end()) {
+    LGraph *lg = global_name2lgraph[path][name];
+    assert(global_instances.find(path) != global_instances.end());
+    global_instances[path]->register_lgraph(name, lg);
+
+    return lg;
+  }
+
+  return nullptr;
+}
+
 uint32_t Graph_library::add_name(const std::string &name) {
 
   uint32_t id = attribute.size();
@@ -188,8 +204,10 @@ bool Graph_library::unregister_lgraph(const std::string &name, uint32_t lgid, co
   // assert(name2id[name] == lgid);
   // assert(global_name2lgraph[path][name] == lg);
 
-  attribute[lgid].nopen--;
+  if (attribute[lgid].nopen==0)
+    return true;
 
+  attribute[lgid].nopen--;
   if (attribute[lgid].nopen==0) {
     fmt::print("TODO: garbage collect lgraph mmaps {}\n", name);
     return true;
