@@ -78,10 +78,13 @@ void Chunkify_verilog::add_io(bool input, const std::string &mod_name, const std
 
   fmt::print("add_io {}:{} pos:{}\n",mod_name, io_name, original_pos);
 
-  if (input)
-    lg->add_graph_input(io_name.c_str(), 0, 0, original_pos);
-  else
-    lg->add_graph_output(io_name.c_str(), 0, 0, original_pos);
+  if (input) {
+    if (!lg->is_graph_input(io_name.c_str()))
+      lg->add_graph_input(io_name.c_str(), 0, 0, original_pos);
+  }else{
+    if (!lg->is_graph_output(io_name.c_str()))
+      lg->add_graph_output(io_name.c_str(), 0, 0, original_pos);
+  }
 
   library->unregister_lgraph(mod_name, lg->lg_id(), lg);
 }
