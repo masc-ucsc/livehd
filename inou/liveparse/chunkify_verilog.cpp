@@ -12,10 +12,14 @@
 
 #include "lgbench.hpp"
 
+#include "lgraph.hpp"
+#include "graph_library.hpp"
 #include "chunkify_verilog.hpp"
 
 Chunkify_verilog::Chunkify_verilog(const std::string &_path)
   :path(_path) {
+
+  library  = Graph_library::instance(path);
 
 }
 
@@ -64,6 +68,24 @@ void Chunkify_verilog::write_file(const std::string &filename, const char *text,
   close(fd);
 }
 
+void Chunkify_verilog::add_io(bool input, const std::string &mod_name, const std::string &io_name, Port_ID original_pos) {
+
+  LGraph *lg = library->try_find_lgraph(mod_name);
+  if (lg==0) {
+    fmt::print("chunkify_verilog::add_io create module {}\n",mod_name);
+    lg = LGraph::create(path, mod_name);
+  }
+
+  fmt::print("add_io {}:{} pos:{}\n",mod_name, io_name, original_pos);
+
+  if (input)
+    lg->add_graph_input(io_name.c_str(), 0, 0, original_pos);
+  else
+    lg->add_graph_output(io_name.c_str(), 0, 0, original_pos);
+
+  library->unregister_lgraph(mod_name, lg->lg_id(), lg);
+}
+
 void Chunkify_verilog::elaborate() {
 
   LGBench bench("live.parse");
@@ -94,6 +116,7 @@ void Chunkify_verilog::elaborate() {
   bool last_output = false;
 
   std::string module;
+  Port_ID module_io_pos = 0;
 
   // This has to be cut&pasted to each file
   std::string not_in_module_text;
@@ -108,6 +131,7 @@ void Chunkify_verilog::elaborate() {
   in_module_text.reserve(buffer_sz);
   in_module_token.reserve(token_list.size());
 
+
   while(!scan_is_end()) {
     bool endmodule_found=false;
     if (scan_is_token(TOK_ALNUM)) {
@@ -121,6 +145,7 @@ void Chunkify_verilog::elaborate() {
         scan_token_append(in_module_token);
         scan_next();
         scan_append(module);
+        module_io_pos = 0;
         in_module = true;
       }else if (strcasecmp(token.c_str(),"input")==0) {
         last_input = true;
@@ -140,12 +165,10 @@ void Chunkify_verilog::elaborate() {
           std::string label;
           scan_prev_append(label);
 
-#if 0
-          if (last_input)
-            fmt::print("{}  inp {}\n",module,label);
-          else
-            fmt::print("{}  out {}\n",module,label);
-#endif
+          add_io(last_input, module, label, module_io_pos);
+
+          module_io_pos++;
+
         }
         last_input = false;
         last_output = false;

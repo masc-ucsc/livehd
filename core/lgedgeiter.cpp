@@ -12,8 +12,6 @@
 #include "lgedgeiter.hpp"
 #include "lgraphbase.hpp"
 
-google::dense_hash_map<int64_t, uint32_t> nid2inputs;
-
 Edge_iterator::CPod_iterator Edge_iterator::CPod_iterator::operator++() {
   CPod_iterator i(ptr, e, inputs);
   const auto &  node = Node_Internal::get(ptr);
