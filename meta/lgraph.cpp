@@ -56,6 +56,16 @@ LGraph *LGraph::open(const std::string &path, int lgid) {
   return open(path,name);
 }
 
+void LGraph::rename(const std::string &path, const std::string &orig, const std::string &dest) {
+  LGraph *lg = Graph_library::try_find_lgraph(path,orig);
+  if (lg) {
+    console->error("lgraph::rename failed for {}/{} because the lgraph is open",path,orig);
+    return;
+  }
+
+  Graph_library::instance(path)->rename_name(orig, dest);
+}
+
 LGraph *LGraph::open(const std::string &path, const std::string &name) {
   LGraph *lg = Graph_library::try_find_lgraph(path,name);
   if (lg) {
