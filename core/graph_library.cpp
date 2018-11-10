@@ -70,6 +70,60 @@ uint32_t Graph_library::add_name(const std::string &name) {
   return id;
 }
 
+bool Graph_library::rename_name(const std::string &orig, const std::string &dest) {
+
+  auto it = name2id.find(orig);
+  if (it == name2id.end())
+    return false;
+  uint32_t id = it->second;
+
+  // The dest name should not exist. Call expunge_lgraph/delete if it does
+  assert(global_name2lgraph[path].find(dest) == global_name2lgraph[path].end());
+  assert(name2id.find(dest) == name2id.end());
+
+  // The orig name should exist, BUT the lgraph should be in CLOSE state
+  assert(global_name2lgraph[path].find(orig) == global_name2lgraph[path].end()); // No orig open
+  assert(global_name2lgraph[path].find(dest) == global_name2lgraph[path].end()); // No dest open
+
+  name2id.erase(it); // Erase orig
+
+  name2id[dest] = id;
+
+  graph_library_clean = false;
+  attribute[id].name  = dest;
+  attribute[id].version  = max_next_version++;
+
+  DIR *dir = opendir(path.c_str());
+  assert(dir);
+
+  struct dirent *dent;
+  while((dent=readdir(dir))!=NULL) {
+    if (dent->d_type != DT_REG) // Only regular files
+      continue;
+
+    if (strncmp(dent->d_name,"lgraph_", 7) != 0) // only if starts with lgraph_
+      continue;
+
+    const std::string name(dent->d_name + 7);
+    auto pos = name.find(orig + "_");
+    if (pos == std::string::npos)
+      continue;
+    const std::string ext(dent->d_name + 7 + orig.size() + 1);
+
+    const std::string dest_file(path + "/lgraph_" + dest + "_" + ext);
+    const std::string orig_file(path + "/lgraph_" + orig + "_" + ext);
+
+    fmt::print("renaming {} to {}\n", orig_file, dest_file);
+    int s = rename(orig_file.c_str(), dest_file.c_str());
+    assert(s>=0);
+  }
+  closedir(dir);
+
+  clean_library();
+
+  return id;
+}
+
 void Graph_library::update(uint32_t lgid) {
   assert(lgid < attribute.size());
 

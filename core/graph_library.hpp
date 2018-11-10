@@ -74,6 +74,7 @@ public:
   LGraph *try_find_lgraph(const std::string &name);
 
   uint32_t add_name(const std::string &name);
+  bool rename_name(const std::string &orig, const std::string &dest);
 
   const std::string &get_name(uint32_t lgid) const {
     assert(lgid > 0); // 0 is invalid lgid

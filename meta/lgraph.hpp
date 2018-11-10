@@ -36,6 +36,7 @@ public:
   static LGraph *create(const std::string &path, const std::string &name);
   static LGraph *open(const std::string &path, int lgid);
   static LGraph *open(const std::string &path, const std::string &name);
+  static void rename(const std::string &path, const std::string &orig, const std::string &dest);
   void close();
 
   void clear() override;

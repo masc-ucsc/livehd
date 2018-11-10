@@ -35,6 +35,16 @@ protected:
     var.add(lg);
   }
 
+  static void rename(Eprp_var &var) {
+
+    const std::string path = var.get("path");
+    const std::string name = var.get("name");
+    const std::string dest = var.get("dest");
+    assert(!name.empty());
+
+    LGraph::rename(path,name,dest);
+  }
+
   static void stats(Eprp_var &var) {
 
     for(const auto &lg:var.lgs) {
@@ -95,6 +105,14 @@ public:
     //---------------------
     Eprp_method m5("dump", "dump labels and lgraphs passed", &Meta_api::dump);
     eprp.register_method(m5);
+
+    //---------------------
+    Eprp_method m6("lgraph.rename", "rename a lgraph", &Meta_api::rename);
+    m6.add_label_optional("path","lgraph path","lgdb");
+    m6.add_label_required("name","lgraph name");
+    m6.add_label_required("dest","lgraph destination name");
+
+    eprp.register_method(m6);
   }
 
 };
