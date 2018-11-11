@@ -26,8 +26,8 @@ private:
   std::vector<std::string> split(const std::string &str);
   void                     build_graph(std::vector<std::string> &,
                                        std::string &, LGraph *,
-                                       std::map<std::string,
-                                       uint32_t> &,
+                                       std::map<std::string, uint32_t> &,
+                                       std::map<std::string, std::string>&,
                                        std::map<std::string, Index_ID> &,
                                        std::map<std::string,
                                        std::vector<std::string>> &,

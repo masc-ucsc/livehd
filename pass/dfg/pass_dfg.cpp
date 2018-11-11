@@ -243,7 +243,6 @@ Index_ID Pass_dfg::process_cfg(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tre
     last_itr = itr;
 
     Index_ID tmp = process_node(dfg, cfg, aux_tree, itr);
-    fmt::print("hello~\n");
     fmt::print("process_node return cfg_nid:{}!!\n\n", tmp);
     itr = tmp;
     fmt::print("cfg nid:{} process finished!!\n\n", last_itr);
