@@ -1,15 +1,19 @@
 %o1 as __bits:4
-%o2 as __bits:4
+//%o2 as __bits:4
 
 m1 = ::{
-  return 11u4bits
+  var as __bits:4
+  var = 11u4bits
+  return var
 }
 
-m2 as ::{
-  return 12u4bits
-}
+//m2 as ::{
+//  var2 as __bits:4
+//  var2 = 11u4bits
+//  return var2
+//}
 
 %o1 = m1    
-%o2 = m2    
+//%o2 = m2    
 
 
