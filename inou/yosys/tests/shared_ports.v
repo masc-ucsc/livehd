@@ -1,7 +1,7 @@
 // expect-wr-ports 1
 // expect-rd-ports 1
 
-module test(
+module shared_ports(
 	input clk,
 	input wr_en1, wr_en2, wr_en3,
 	input [3:0] wr_addr1, wr_addr2, wr_addr3,
