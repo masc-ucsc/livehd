@@ -44,5 +44,3 @@ bazel coverage -k //...
 echo " live.parse files:./test/benchmarks/boom/boombase.v path:tmp2 " | ./bazel-bin/main/lgshell
 echo "files path:./inou/yosys/tests/ match:"\.v$" |> live.parse path:tmp2" | ./bazel-bin/main/lgshell
 
-#gcovr -r .  bazel-out/k8-fastbuild/bin/core bazel-out/k8-fastbuild/bin/meta bazel-out/k8-fastbuild/bin/cops bazel-out/k8-fastbuild/bin/main bazel-out/k8-fastbuild/bin/inou bazel-out/k8-fastbuild/bin/pass --html-details --html -o cov/coverage.html
-

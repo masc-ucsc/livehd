@@ -8,14 +8,14 @@ E.g: dead-code-elimination
 
 Use one of the sample passes as starting point (inou/rand or pass/dce) and
  make sure to use the Options_base and inherit from Inou or Pass
- 
- ## Create a pass
- 
+
+## Create a pass
+
 * Create pass/<my_pass> directory
 
 In the file pass/<my_pass>/my_pass.hpp:
 
-```
+```cpp
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #ifndef <MYPASS>_HPP_
@@ -27,7 +27,7 @@ In the file pass/<my_pass>/my_pass.hpp:
 class <My_pass> : public Pass {
   private:
     void do_work(const LGraph& g);
-    
+
   public:
   <My_pass>() : Pass("my_pass") {
   }
@@ -42,7 +42,7 @@ class <My_pass> : public Pass {
 
 In the file pass/<my_pass>/my_pass.cpp:
 
-```
+```cpp
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "<my_pass>.hpp"
@@ -59,7 +59,7 @@ void <My_pass>::setup() {
 
 void <My_pass>::pass(Eprp_var &var) {
   <My_pass> pass;
-  
+
   for(auto &l:var.lgs) {
     pass.do_work(l);
   }
@@ -77,7 +77,7 @@ void <My_pass>::trans(LGraph &g) {
 
 Finally, in the pass/<my_pass>/BUILD
 
-```
+```cpp
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 cc_library(
@@ -94,8 +94,8 @@ cc_library(
 
 * Register the newly created command in the lgshell interface
 
-    * Add a dependency in main/BUILD
-    
+* Add a dependency in main/BUILD
+
 ```
 #....
             "//cops/live:cops_live",
