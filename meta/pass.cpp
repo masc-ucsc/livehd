@@ -7,7 +7,8 @@ void Pass::register_pass(Eprp_method &method) {
   eprp.register_method(method);
 
   // All the passses should start with pass.*
-  assert(method.get_name().compare(0,name.size()+5,std::string{"pass." + name})==0);
+  assert(method.get_name().substr(0,5) == "pass." ||
+         method.get_name().substr(0,5) == "live.");
 }
 
 void Pass::register_inou(Eprp_method &method) {
