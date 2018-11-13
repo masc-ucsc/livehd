@@ -8,6 +8,7 @@ cc_library(
     includes = ["."],
     deps = [
         "//meta:meta",
+        "//eprp:eprp",
     ],
 )
 
