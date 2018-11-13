@@ -11,9 +11,9 @@ Use one of the sample passes as starting point (inou/rand or pass/dce) and
 
 ## Create a pass
 
-* Create pass/<my_pass> directory
+* Create pass/<my\_pass> directory
 
-In the file pass/<my_pass>/my_pass.hpp:
+In the file pass/<my\_pass>/my\_pass.hpp:
 
 ```cpp
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
@@ -40,7 +40,7 @@ class <My_pass> : public Pass {
 #endif
 ```
 
-In the file pass/<my_pass>/my_pass.cpp:
+In the file pass/<my\_pass>/my\_pass.cpp:
 
 ```cpp
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
@@ -75,7 +75,7 @@ void <My_pass>::trans(LGraph &g) {
 }
 ```
 
-Finally, in the pass/<my_pass>/BUILD
+Finally, in the pass/<my\_pass>/BUILD
 
 ```cpp
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
@@ -107,7 +107,8 @@ cc_library(
 
 ```
 
-    * Add the hook for the setup on main/main_api.cpp
+    * Add the hook for the setup on main/main\_api.cpp
+
 ```
 //....
 void setup_cops_live();
@@ -125,20 +126,22 @@ void Main_api::init() {
 //....
 ```
 
-
 ## Pass Parameters and Common variables
 
  One of the main goals is to have a uniform set of passes in lgshell. lgshell should use this common
 variable names when possible
 
+```bash
     name:foo        lgraph name
     path:lgdb       lgraph database path (lgdb)
     files:foo,var   comma separated list of files used for INPUT
     odir:.          output directory to generate files like verilog/pyrope...
+```
 
-To add parameters to your pass, simply add parameters to the Eprp_method declaration:
+To add parameters to your pass, simply add parameters to the Eprp\_method declaration:
 
-In the pass_<my_pass>.cpp file:
+In the pass\_<my_pass>.cpp file:
+
 ```
   Eprp_method <my_other_pass>("pass.<my_other_pass>", "some useful description", &<My_pass>::pass2);
   <my_other_pass>.add_label_required("name","lgraph name");
