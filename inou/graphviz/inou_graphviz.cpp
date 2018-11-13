@@ -21,11 +21,15 @@ void Inou_graphviz::setup() {
 
   Eprp_method m2("inou.graphviz", "export lgraph to graphviz dot format", &Inou_graphviz::fromlg);
 
+  m2.add_label_optional("bits","dump bits (true/false)","false");
+
   register_inou(m2);
 }
 
 Inou_graphviz::Inou_graphviz()
  :Pass("graphviz") {
+
+ bits = false;
 }
 
 void Inou_graphviz::fromlg(Eprp_var &var) {
@@ -33,6 +37,8 @@ void Inou_graphviz::fromlg(Eprp_var &var) {
   Inou_graphviz p;
 
   p.odir = var.get("odir");
+  p.bits = var.get("bits") == "true";
+
   bool ok = p.setup_directory(p.odir);
   if (!ok)
     return;
@@ -56,8 +62,12 @@ void Inou_graphviz::do_fromlg(std::vector<const LGraph *> &lgs) {
       data += fmt::format(" {} [label=\"{}:{}\"];\n", src_nid, src_nid, node.get_name());
     });
 
-    g->each_output_edge_fast([&data](Index_ID src_nid, Port_ID src_pid, Index_ID dst_nid, Port_ID dst_pid) {
-      data += fmt::format(" {} -> {}[label=\"{}:{}\"];\n", src_nid, dst_nid, src_pid, dst_pid);
+    g->each_output_edge_fast([this,g,&data](Index_ID src_nid, Port_ID src_pid, Index_ID dst_nid, Port_ID dst_pid) {
+      std::string bits_str ="";
+      if (bits)
+        bits_str = " " + std::to_string(g->get_bits_pid(src_nid, src_pid));
+
+      data += fmt::format(" {} -> {}[label=\"{}:{}{}\"];\n", src_nid, dst_nid, src_pid, dst_pid, bits_str);
     });
     data += "}\n";
 
