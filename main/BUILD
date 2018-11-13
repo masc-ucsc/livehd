@@ -27,6 +27,8 @@ cc_binary(
             "//pass/bitwidth:pass_bitwidth",
 
             "//cops/live:cops_live",
+
+            #add dependencies to new passes here
     ],
     data = ["//inou/yosys:liblgraph_yosys.so",   # A bit special as only libraries are used in yosys -m XXX
             "inou_yosys_read.ys",
