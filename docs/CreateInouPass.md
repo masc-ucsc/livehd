@@ -1,9 +1,9 @@
 # Select between inou and pass
 
-  * inou: reads from external (non-LGraph) to create an LGraph, or exports external from a LGraph.
+* inou: reads from external (non-LGraph) to create an LGraph, or exports external from a LGraph.
 Examples, inou/json
 
-  * pass: optimizes or regenerates a LGraph, or generated a new set of LGraphs from a given LGraph.
+* pass: optimizes or regenerates a LGraph, or generated a new set of LGraphs from a given LGraph.
 E.g: dead-code-elimination
 
 Use one of the sample passes as starting point (inou/rand or pass/dce) and
@@ -11,7 +11,7 @@ Use one of the sample passes as starting point (inou/rand or pass/dce) and
 
 ## Create a pass
 
-  * Create pass/<my\_pass> directory
+* Create pass/<my\_pass> directory
 
 In the file pass/<my\_pass>/my\_pass.hpp:
 
@@ -92,8 +92,8 @@ cc_library(
 )
 ```
 
-  * Register the newly created command in the lgshell interface
-  * Add a dependency in main/BUILD
+* Register the newly created command in the lgshell interface
+* Add a dependency in main/BUILD
 
 ```
 #....
