@@ -29,8 +29,6 @@ Pass_bitwidth::Pass_bitwidth()
 
 }
 
-
-
 void Pass_bitwidth::trans(Eprp_var &var) {
 
   Pass_bitwidth pass;
@@ -45,7 +43,6 @@ void Pass_bitwidth::trans(Eprp_var &var) {
   for(const auto &l:var.lgs) {
     pass.do_trans(l);
   }
-
 }
 
 void Pass_bitwidth::Node_properties::Explicit_range::dump() const {
@@ -261,9 +258,7 @@ void Pass_bitwidth::iterate_arith(const LGraph *lg, Index_ID idx) {
 }
 
 void Pass_bitwidth::iterate_pick(const LGraph *lg, Index_ID idx) {
-
   // At most like inputs, but constrain on output (pick can drop bits)
-
   Pass_bitwidth::Node_properties::Implicit_range imp;
 
   for(const auto &inp : lg->inp_edges(idx)) {
@@ -285,7 +280,6 @@ void Pass_bitwidth::iterate_pick(const LGraph *lg, Index_ID idx) {
 
 //------------------------------------------------------------------
 //MIT Algorithm
-
 void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
 
   lg->each_output_root_fast([this,lg](Index_ID idx, Port_ID pid) {

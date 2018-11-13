@@ -11,6 +11,7 @@ class Inou_graphviz : public Pass {
 private:
 protected:
   std::string odir;
+  bool bits;
 
   std::atomic<int> total;
   void inc_total(Index_ID idx) {
