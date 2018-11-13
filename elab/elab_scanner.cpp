@@ -351,28 +351,28 @@ void Elab_scanner::lex_error(const std::string &text) {
   if (n_errors>max_errors)
     exit(-3);
 }
-void Elab_scanner::scan_error(const std::string &text) {
+void Elab_scanner::scan_error(const std::string &text) const {
   scan_raw_msg("error", text, true);
   n_errors++;
   if (n_errors>max_errors)
     exit(-3);
 }
 
-void Elab_scanner::scan_warn(const std::string &text) {
+void Elab_scanner::scan_warn(const std::string &text) const {
   scan_raw_msg("warning", text, true);
   n_warnings++;
   if (n_warnings>max_warnings)
     exit(-3);
 }
 
-void Elab_scanner::parser_error(const std::string &text) {
+void Elab_scanner::parser_error(const std::string &text) const {
   scan_raw_msg("error", text, false);
   n_errors++;
   if (n_errors>max_errors)
     exit(-3);
 }
 
-void Elab_scanner::parser_warn(const std::string &text) {
+void Elab_scanner::parser_warn(const std::string &text) const {
   scan_raw_msg("warning", text, false);
   n_warnings++;
   if (n_warnings>max_warnings)

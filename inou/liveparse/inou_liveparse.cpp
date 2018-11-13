@@ -15,6 +15,8 @@ void setup_inou_liveparse() {
 void Inou_liveparse::setup() {
   Eprp_method m1("inou.liveparse", "liveparse and chunkify verilog/pyrope files", &Inou_liveparse::tolg);
 
+  m1.add_label_optional("elab_path","elaborate (setup) lgdb path");
+
   register_inou(m1);
 }
 
@@ -25,6 +27,7 @@ Inou_liveparse::Inou_liveparse()
 void Inou_liveparse::tolg(Eprp_var &var) {
   const std::string files   = var.get("files");
   const std::string path    = var.get("path");
+  const std::string elab_path = var.get("elab_path");
 
   if (files.empty()) {
     error(fmt::format("inou.liveparse: no files provided"));
@@ -49,7 +52,7 @@ void Inou_liveparse::tolg(Eprp_var &var) {
     }
 
     if (Eprp_utils::ends_with(f,".v") || Eprp_utils::ends_with(f,".sv")) {
-      Chunkify_verilog chunker(path);
+      Chunkify_verilog chunker(path, elab_path);
       chunker.parse(f, memblock, sb.st_size);
     }else if (Eprp_utils::ends_with(f,".prp")) {
       error(fmt::format("inou.liveparse pyrope chunkify NOT implemented for {}", f));
