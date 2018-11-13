@@ -45,9 +45,9 @@
 ****************************************************************************/
 
 `define FLOP_RETRY_USE_FLOPS 1
-`define USE_SELF_W2R1 1
+//`define USE_SELF_W2R1 1
 
-module fflop
+module ja_fflop // Use the fflop.v not the ja_fflop
   #(parameter Size=0)
     (input                     clk
      ,input                    reset
