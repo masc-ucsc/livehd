@@ -1,4 +1,6 @@
 
+#pragma once
+
 #include "pass.hpp"
 
 class Inou_liveparse : public Pass {

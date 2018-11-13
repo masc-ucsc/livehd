@@ -12,19 +12,24 @@
 
 #include "lgbench.hpp"
 
+#include "inou_liveparse.hpp"
 #include "lgraph.hpp"
 #include "graph_library.hpp"
 #include "chunkify_verilog.hpp"
 
-Chunkify_verilog::Chunkify_verilog(const std::string &_path)
-  :path(_path) {
+Chunkify_verilog::Chunkify_verilog(const std::string &_path, const std::string &_elab_path)
+  :path(_path)
+  ,elab_path(_elab_path) {
 
   library  = Graph_library::instance(path);
 
+  if (elab_path.empty())
+    elab_library = 0;
+  else
+    elab_library  = Graph_library::instance(elab_path);
 }
 
-
-int Chunkify_verilog::open_write_file(const std::string &filename) {
+int Chunkify_verilog::open_write_file(const std::string &filename) const {
   int fd = open(filename.c_str(), O_WRONLY|O_CREAT|O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
   if (fd<0) {
     scan_error(fmt::format("could not open {} for output", filename));
@@ -34,7 +39,45 @@ int Chunkify_verilog::open_write_file(const std::string &filename) {
   return fd;
 }
 
-void Chunkify_verilog::write_file(const std::string &filename, const std::string &text1, const std::string &text2) {
+bool Chunkify_verilog::is_same_file(const std::string &module, const std::string &text1, const std::string &text2) const {
+
+  if (elab_path.empty())
+    return false;
+
+  const std::string elab_filename = elab_path + "/parse/chunk_" + module + ".v";
+
+  int fd = open(elab_filename.c_str(), O_RDONLY);
+  if (fd<0)
+    return false;
+
+  struct stat sb;
+  fstat(fd, &sb);
+
+  if (static_cast<size_t>(sb.st_size) != static_cast<size_t>(text1.size() + text2.size())) {
+    close(fd);
+    return false;
+  }
+
+  char *memblock = (char *)mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0); // Read only mmap
+  if(memblock == MAP_FAILED) {
+    Inou_liveparse::error(fmt::format("mmap failed?? for {}", module));
+    close(fd);
+    return false;
+  }
+
+  int n = memcmp(memblock, text1.data(), text1.size());
+  if (n) {
+    close(fd);
+    munmap(memblock, sb.st_size);
+  }
+  n = memcmp(&memblock[text1.size()], text2.data(), text2.size());
+  close(fd);
+  munmap(memblock, sb.st_size);
+
+  return n==0; // same file if n==0
+}
+
+void Chunkify_verilog::write_file(const std::string &filename, const std::string &text1, const std::string &text2) const {
   int fd = open_write_file(filename);
   if (fd<0)
     return;
@@ -53,7 +96,7 @@ void Chunkify_verilog::write_file(const std::string &filename, const std::string
   close(fd);
 }
 
-void Chunkify_verilog::write_file(const std::string &filename, const char *text, int sz) {
+void Chunkify_verilog::write_file(const std::string &filename, const char *text, int sz) const {
 
   int fd = open_write_file(filename);
   if (fd<0)
@@ -189,7 +232,10 @@ void Chunkify_verilog::elaborate() {
       scan_token_append(in_module_token);
       if (endmodule_found) {
         // fmt::print("{}  {}\n",module,in_module_token.back().pos);
-        write_file(path + "/parse/chunk_" + format_name + ":" + module, not_in_module_text, in_module_text);
+        //
+        bool same = is_same_file(module, not_in_module_text, in_module_text);
+        if (!same)
+          write_file(path + "/parse/chunk_" + module + ".v", not_in_module_text, in_module_text);
         module.clear();
         in_module_text.clear();
         in_module_token.clear();
@@ -198,6 +244,5 @@ void Chunkify_verilog::elaborate() {
 
     scan_next();
   }
-
 }
 
