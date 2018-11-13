@@ -102,8 +102,8 @@ private:
 
   int max_errors;
   int max_warnings;
-  int n_errors;
-  int n_warnings;
+  mutable int n_errors;   // NOTE: mutable to allow const methods for error/warning reporting
+  mutable int n_warnings;
 
   void setup_translate();
 
@@ -117,11 +117,11 @@ private:
 public:
   Elab_scanner();
 
-  void scan_error(const std::string &text);
-  void scan_warn(const std::string &text);
+  void scan_error(const std::string &text) const; // Not really const, but to allow to be used by const methods
+  void scan_warn(const std::string &text) const;
 
-  void parser_error(const std::string &text);
-  void parser_warn(const std::string &text);
+  void parser_error(const std::string &text) const;
+  void parser_warn(const std::string &text) const;
 
   bool scan_next();
 
