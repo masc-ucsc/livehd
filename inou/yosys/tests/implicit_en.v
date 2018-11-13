@@ -1,7 +1,7 @@
 // expect-wr-ports 1
 // expect-rd-ports 1
 
-module test(clk, rd_addr, rd_data, wr_addr, wr_en, wr_data);
+module implicit_en(clk, rd_addr, rd_data, wr_addr, wr_en, wr_data);
 
 input clk;
 

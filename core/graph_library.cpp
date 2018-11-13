@@ -263,7 +263,7 @@ bool Graph_library::unregister_lgraph(const std::string &name, uint32_t lgid, co
 
   attribute[lgid].nopen--;
   if (attribute[lgid].nopen==0) {
-    fmt::print("TODO: garbage collect lgraph mmaps {}\n", name);
+    //fmt::print("TODO: garbage collect lgraph mmaps {}\n", name);
     return true;
   }
 
