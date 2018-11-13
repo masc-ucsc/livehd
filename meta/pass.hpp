@@ -17,6 +17,13 @@ protected:
 
   Pass(const std::string &name_);
 
+  bool setup_directory(const std::string &dir) const;
+public:
+  // FIXME: NASTY until we move all the pass/inou to the new pass interface
+  static Eprp eprp; // TODO: Shared with inou
+
+  virtual void setup() = 0;
+
   static void error(const std::string &msg) {
     eprp.parser_error(msg);
   }
@@ -33,13 +40,7 @@ protected:
   void warn(const char *fmt, const Arg1 &, const Args &... args) {
     eprp.parser_warn(fmt::format(fmt, args...));
   }
-  
-  bool setup_directory(const std::string &dir) const;
-public:
-  // FIXME: NASTY until we move all the pass/inou to the new pass interface
-  static Eprp eprp; // TODO: Shared with inou
 
-  virtual void setup() = 0;
 };
 
 #endif

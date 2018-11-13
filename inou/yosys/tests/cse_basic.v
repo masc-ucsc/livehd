@@ -1,4 +1,4 @@
-module common_sub (
+module cse_basic (
   output reg y, z, w, x,
   input a, b, c, d,e, 
   clk
