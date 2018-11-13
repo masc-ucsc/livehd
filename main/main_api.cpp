@@ -29,6 +29,9 @@ void setup_inou_rand();
 
 void setup_cops_live();
 
+// add new setup function prototypes here
+
+
 void Main_api::init() {
   setup_pass_abc();
   setup_pass_bitwidth();
@@ -43,6 +46,12 @@ void Main_api::init() {
   setup_inou_rand();
 
   setup_cops_live();
+
+  // call the new setup function here
+
+
+
+  // do not touch anything beyond this point
 
   Top_api::setup(Pass::eprp);              // *
 
