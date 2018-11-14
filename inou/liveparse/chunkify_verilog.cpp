@@ -17,6 +17,8 @@
 #include "graph_library.hpp"
 #include "chunkify_verilog.hpp"
 
+//#include "progress_bar.hpp"
+
 Chunkify_verilog::Chunkify_verilog(const std::string &_path, const std::string &_elab_path)
   :path(_path)
   ,elab_path(_elab_path) {
@@ -115,11 +117,11 @@ void Chunkify_verilog::add_io(bool input, const std::string &mod_name, const std
 
   LGraph *lg = library->try_find_lgraph(mod_name);
   if (lg==0) {
-    fmt::print("chunkify_verilog::add_io create module {}\n",mod_name);
+    //fmt::print("chunkify_verilog::add_io create module {}\n",mod_name);
     lg = LGraph::create(path, mod_name);
   }
 
-  fmt::print("add_io {}:{} pos:{}\n",mod_name, io_name, original_pos);
+  //fmt::print("add_io {}:{} pos:{}\n",mod_name, io_name, original_pos);
 
   if (input) {
     if (!lg->is_graph_input(io_name.c_str()))
@@ -155,6 +157,8 @@ void Chunkify_verilog::elaborate() {
     return;
   }
 
+  //ProgressBar bar(buffer_sz,"liveparse");
+
   write_file(path + "/parse/file_" + format_name, buffer, buffer_sz);
 
   bool in_module=false;
@@ -176,7 +180,6 @@ void Chunkify_verilog::elaborate() {
 
   in_module_text.reserve(buffer_sz);
   in_module_token.reserve(token_list.size());
-
 
   while(!scan_is_end()) {
     bool endmodule_found=false;
@@ -231,8 +234,9 @@ void Chunkify_verilog::elaborate() {
       scan_format_append(in_module_text);
       scan_token_append(in_module_token);
       if (endmodule_found) {
-        // fmt::print("{}  {}\n",module,in_module_token.back().pos);
-        //
+        //bar.Progressed(in_module_token.back().pos);
+
+        //fmt::print("{}  {} {}\n",module,in_module_token.back().pos, buffer_sz);
         bool same = is_same_file(module, not_in_module_text, in_module_text);
         if (!same)
           write_file(path + "/parse/chunk_" + module + ".v", not_in_module_text, in_module_text);

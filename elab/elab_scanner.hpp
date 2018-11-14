@@ -151,6 +151,13 @@ public:
   std::string scan_text() const;
   int scan_calc_lineno() const;
 
+  size_t get_token_pos() const {
+    if (scanner_pos==0)
+      return 0;
+    assert(scanner_pos< token_list.size());
+    return token_list[scanner_pos-1].pos;
+  }
+
   bool scan_is_prev_token(Token_id tok) const {
     if (scanner_pos==0)
       return false;
