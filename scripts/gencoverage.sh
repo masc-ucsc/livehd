@@ -21,8 +21,6 @@ bazel coverage -k //...
 ./bazel-bin/pass/sample/tests/sample_test1.sh
 
 
-./cops/live/tests/invariant.sh
-
 ./main/tests/lgshell_test.sh
 
 ./bazel-bin/eprp/eprp_test
@@ -44,3 +42,5 @@ bazel coverage -k //...
 echo " live.parse files:./test/benchmarks/boom/boombase.v path:tmp2 " | ./bazel-bin/main/lgshell
 echo "files path:./inou/yosys/tests/ match:"\.v$" |> live.parse path:tmp2" | ./bazel-bin/main/lgshell
 
+
+bazel test -c dbg //cops/live:invariant
