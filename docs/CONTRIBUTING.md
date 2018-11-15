@@ -1,5 +1,5 @@
 
-# Policy
+# Contributions or Policy
 
 This document explains the policy to handle contributions to the LGraph project. Most of this
 document is inspired in LLVM developers policy.
