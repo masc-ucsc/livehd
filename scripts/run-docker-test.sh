@@ -16,6 +16,12 @@ LGRAPH_COMPILER=${5:g++}
 
 COVERAGE_RUN=$6
 
+RUN_TYPE=$7
+
+if [ "${TRAVIS_EVENT_TYPE}" == "cron" ]; then
+  RUN_TYPE=long
+fi
+
 if [ ! -e ${LGRAPH_SRC}/WORKSPACE ]; then
   echo "BUILD ERROR: '${LGRAPH_SRC}' does not contain LGRAPH source code"
   exit -1
@@ -28,6 +34,6 @@ docker run  \
   -e LGRAPH_BUILD_MODE=${LGRAPH_BUILD_MODE} \
   -e LGRAPH_COMPILER=${LGRAPH_COMPILER} \
   -e COVERAGE_RUN=${COVERAGE_RUN} \
-  -e TRAVIS_EVENT_TYPE=${TRAVIS_EVENT_TYPE} \
+  -e RUN_TYPE=${RUN_TYPE} \
   ${DOCKER_IMAGE} ${DOCKER_LGRAPH_SRC}/scripts/build-and-run.sh
 
