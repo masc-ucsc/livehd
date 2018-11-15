@@ -38,8 +38,5 @@ bazel coverage -k //...
 ./bazel-bin/inou/liveparse/chunkify_verilog_test
 ./inou/liveparse/tests/chunkify_test.sh
 
-#echo "inou.liveparse files:./test/benchmarks/boom/boombase.v path:tmp2 " | ./bazel-bin/main/lgshell
-#echo "files path:./inou/yosys/tests/ match:"\.v$" |> inou.liveparse path:tmp2" | ./bazel-bin/main/lgshell
-
-./cops/live/tests/invariant.sh
+./cops/live/tests/invariant.sh long
 

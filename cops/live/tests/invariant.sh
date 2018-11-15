@@ -13,11 +13,12 @@ if [ ! -d ${OPT_ANUBIS} ]; then
   fi
 fi
 
-pwd
-
-declare -a benchmarks=("dlx" "alpha" "fpu" "mor1kx" "or1200")
-declare -a benchmarks=("dlx" "alpha")
-declare -a benchmarks=("dlx")
+if [ "$1" == "long" ] ; then
+  declare -a benchmarks=("dlx" "alpha" "fpu" "mor1kx" "or1200")
+  declare -a benchmarks=("dlx" "alpha")
+else
+  declare -a benchmarks=("dlx")
+fi
 
 for input in ${benchmarks[@]}; do
   dir=${OPT_ANUBIS}/$input/

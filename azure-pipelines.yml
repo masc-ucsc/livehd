@@ -1,6 +1,6 @@
 jobs:
   - job: ArchDebug
-    displayName: run archlinux-masc with debug and g++
+    displayName: run coverage (archlinux, dbg, g++)
 
     pool:
       vmImage: 'Ubuntu 16.04'
