@@ -6,6 +6,7 @@
 #include "lgedge.hpp"
 #include "lgraphbase.hpp"
 #include "lgwirenames.hpp"
+#include "nodebitwidth.hpp"
 #include "nodedelay.hpp"
 #include "nodeplace.hpp"
 #include "nodesrcloc.hpp"
@@ -16,6 +17,7 @@ class ConstNode;
 class Edge_iterator;
 
 class LGraph :  public LGraph_Node_Delay
+              , public LGraph_Node_bitwidth
               , public LGraph_Node_Src_Loc
               , public LGraph_WireNames
               , public LGraph_InstanceNames
