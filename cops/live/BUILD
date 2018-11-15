@@ -53,6 +53,7 @@ sh_test(
         ":scripts",
     ],
     tags = ["long1"],
+    size = "large",
     args = ["long"],
     data = [
         "//inou/yosys:liblgraph_yosys.so",
