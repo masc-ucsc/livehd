@@ -45,3 +45,19 @@ sh_test(
         "@anubis//:anubis",
     ],
 )
+
+sh_test(
+    name = "invariant-long",
+    srcs = ["tests/invariant.sh"],
+    deps = [
+        ":scripts",
+    ],
+    tags = ["long1"],
+    args = ["long"],
+    data = [
+        "//inou/yosys:liblgraph_yosys.so",
+        "//inou/tech:tech_gens",
+        "//main:lgshell",
+        "@anubis//:anubis",
+    ],
+)
