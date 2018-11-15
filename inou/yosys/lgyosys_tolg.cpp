@@ -713,7 +713,7 @@ static LGraph *process_module(RTLIL::Module *module) {
         g->add_edge(Node_Pin(inid, 1, false), Node_Pin(onid, 0, true));
 
     } else if(std::strncmp(cell->type.c_str(), "$dff", 4) == 0) {
-      op = Flop_Op;
+      op = SFlop_Op;
       if(cell->parameters.find("\\WIDTH") != cell->parameters.end())
         size = cell->parameters["\\WIDTH"].as_int();
     } else if(std::strncmp(cell->type.c_str(), "$adff", 4) == 0) {
@@ -942,11 +942,11 @@ static LGraph *process_module(RTLIL::Module *module) {
         size = cell->parameters["\\Y_WIDTH"].as_int();
 
     } else if(std::strncmp(cell->type.c_str(), "$_DFF_P_", 8) == 0) {
-      op = Flop_Op;
+      op = SFlop_Op;
       if(cell->parameters.find("\\WIDTH") != cell->parameters.end())
         size = cell->parameters["\\WIDTH"].as_int();
     } else if(std::strncmp(cell->type.c_str(), "$_DFF_N_", 8) == 0) {
-      op = Flop_Op;
+      op = SFlop_Op;
       if(cell->parameters.find("\\WIDTH") != cell->parameters.end())
         size = cell->parameters["\\WIDTH"].as_int();
       connect_constant(g, 0, 1, onid, 5);
@@ -1015,7 +1015,7 @@ static LGraph *process_module(RTLIL::Module *module) {
         if(is_yosys_output(conn.first.c_str()))
           continue; // Just go over the inputs
 
-        if(op == Flop_Op || op == Mux_Op || op == ShiftRight_Op || op == ShiftLeft_Op) {
+        if(op == SFlop_Op || op == Mux_Op || op == ShiftRight_Op || op == ShiftLeft_Op) {
           dst_pid = Node_Type::get(op).get_input_match(&conn.first.c_str()[1]);
         } else if(op == AFlop_Op) {
           if(conn.first.str() == "\\ARST")

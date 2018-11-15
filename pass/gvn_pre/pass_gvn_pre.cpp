@@ -170,7 +170,7 @@ void Pass_gvn_pre::build_sets(LGraph *g) {
     case Invalid_Op:
     case Sum_Op:
     case Mult_Op:
-    case Flop_Op:
+    case SFlop_Op:
     case LessThan_Op:
     case GreaterThan_Op:
     case Equals_Op:

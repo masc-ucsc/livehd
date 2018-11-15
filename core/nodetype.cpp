@@ -24,7 +24,7 @@ Node_Type::_init::_init() {
   Node_Type::table[And_Op]              = new Node_Type_And();
   Node_Type::table[Or_Op]               = new Node_Type_Or();
   Node_Type::table[Xor_Op]              = new Node_Type_Xor();
-  Node_Type::table[Flop_Op]             = new Node_Type_Flop();
+  Node_Type::table[SFlop_Op]            = new Node_Type_Flop();
   Node_Type::table[AFlop_Op]            = new Node_Type_AFlop();
   Node_Type::table[Latch_Op]            = new Node_Type_Latch();
   Node_Type::table[FFlop_Op]            = new Node_Type_FFlop();
