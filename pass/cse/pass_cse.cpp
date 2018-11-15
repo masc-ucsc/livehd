@@ -316,8 +316,8 @@ void Pass_cse::traverse(LGraph *g, std::map<int, and_node_for_comp> &and_node_fo
     case Xor_Op:
       fmt::print("Xor_Op.\n");
       break;
-    case Flop_Op:
-      fmt::print("Flop_Op.\n");
+    case SFlop_Op:
+      fmt::print("SFlop_Op.\n");
       break;
     case LessThan_Op:
       fmt::print("LessThan_Op.\n");

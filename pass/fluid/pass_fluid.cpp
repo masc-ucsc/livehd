@@ -28,7 +28,7 @@ void Pass_fluid::find_join(LGraph *g) {
     for(const auto &inp_edge : g->inp_edges(idx)) {
       Node_Pin_P new_node_pin = inp_edge.get_out_pin();
       Index_ID   inp_idx      = new_node_pin.get_nid();
-      if(g->node_type_get(inp_idx).op == Flop_Op) {
+      if(g->node_type_get(inp_idx).op == SFlop_Op) {
 #ifdef PRINT_INFO
         fmt::print("Has a flop as its input.\n");
         new_node_pin.print_info();
@@ -56,7 +56,7 @@ void Pass_fluid::find_join(LGraph *g) {
         }
       }
     } // end of for loop
-    if(g->node_type_get(idx).op == Flop_Op) {
+    if(g->node_type_get(idx).op == SFlop_Op) {
       // the current node is flop
       if(join_index_has_flop_map[idx]) {
         for(auto flop : join_index_flop_map[idx]) {
@@ -80,7 +80,7 @@ void Pass_fluid::find_fork(LGraph *g) {
     for(const auto &out_edge : g->out_edges(idx)) {
       Node_Pin_P new_node_pin = out_edge.get_inp_pin();
       Index_ID   out_idx      = new_node_pin.get_nid();
-      if(g->node_type_get(out_idx).op == Flop_Op) {
+      if(g->node_type_get(out_idx).op == SFlop_Op) {
         Port_ID flop_pid = out_edge.get_inp_pin().get_pid();
 #ifdef PRINT_INFO
         fmt::print("Has a flop as its output.\n");
@@ -116,7 +116,7 @@ void Pass_fluid::find_fork(LGraph *g) {
       }
     } // end of for loop
 
-    if(g->node_type_get(idx).op == Flop_Op) {
+    if(g->node_type_get(idx).op == SFlop_Op) {
       // the current node is flop
       if(fork_index_has_flop_map[idx]) {
         for(auto flop : fork_index_flop_map[idx]) {
@@ -188,7 +188,7 @@ void Pass_fluid::add_fork(LGraph *g) {
       fmt::print("Printing edge from nid{} pid{} to nid{} pid{}.\n", out_edge.get_self_nid(), out_edge.get_out_pin().get_pid(), out_edge.get_idx(), out_edge.get_inp_pin().get_pid());
     }
 
-    if(g->node_type_get(idx).op == Flop_Op) {
+    if(g->node_type_get(idx).op == SFlop_Op) {
       // change the node type to fflop
       g->node_type_set(idx, FFlop_Op);
 
@@ -418,7 +418,7 @@ void Pass_fluid::add_fork_deadlock(LGraph *g) {
       fmt::print("Printing edge from nid{} pid{} to nid{} pid{}.\n", out_edge.get_self_nid(), out_edge.get_out_pin().get_pid(), out_edge.get_idx(), out_edge.get_inp_pin().get_pid());
     }
 
-    if(g->node_type_get(idx).op == Flop_Op) {
+    if(g->node_type_get(idx).op == SFlop_Op) {
       // change the node type to fflop
       g->node_type_set(idx, FFlop_Op);
       if(find(in_flop_vec.begin(), in_flop_vec.end(), idx) != in_flop_vec.end()) {
