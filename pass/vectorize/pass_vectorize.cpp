@@ -42,7 +42,7 @@ void Pass_vectorize::collapse_reset(LGraph *g) {
 
     for(const auto &c2 : g->out_edges(c1.get_idx())) {
       const auto op = g->node_type_get(c2.get_idx());
-      if(op.op != Flop_Op)
+      if(op.op != SFlop_Op)
         continue;
       flop_idx = c2.get_idx();
     }
@@ -52,11 +52,11 @@ void Pass_vectorize::collapse_reset(LGraph *g) {
     bool reset_set = false;
     for(const auto &c : g->inp_edges(flop_idx)) {
       //const auto &re = c.get_reverse_edge();
-      if(c.get_inp_pin().get_pid() == Node_Type::get(Flop_Op).get_input_match("R")) {
+      if(c.get_inp_pin().get_pid() == Node_Type::get(SFlop_Op).get_input_match("R")) {
         reset_set = true;
         break; // Can not handle 2 resets
       }
-      if(c.get_inp_pin().get_pid() == Node_Type::get(Flop_Op).get_input_match("Rval")) {
+      if(c.get_inp_pin().get_pid() == Node_Type::get(SFlop_Op).get_input_match("Rval")) {
         reset_set = true;
         break; // Can not handle 2 resets
       }
@@ -85,15 +85,15 @@ void Pass_vectorize::collapse_reset(LGraph *g) {
     g->del_node(mux_idx);
 
     Node_Pin src_d(mux_b_idx, mux_b_pid, false);
-    Node_Pin dst_d(flop_idx, Node_Type::get(Flop_Op).get_input_match("D"), true);
+    Node_Pin dst_d(flop_idx, Node_Type::get(SFlop_Op).get_input_match("D"), true);
     g->add_edge(src_d, dst_d);
 
     Node_Pin src_val(mux_a_idx, mux_a_pid, false);
-    Node_Pin dst_val(flop_idx, Node_Type::get(Flop_Op).get_input_match("Rval"), true);
+    Node_Pin dst_val(flop_idx, Node_Type::get(SFlop_Op).get_input_match("Rval"), true);
     g->add_edge(src_val, dst_val);
 
     Node_Pin src_r(reset_idx, reset_pid, false);
-    Node_Pin dst_r(flop_idx, Node_Type::get(Flop_Op).get_input_match("R"), true);
+    Node_Pin dst_r(flop_idx, Node_Type::get(SFlop_Op).get_input_match("R"), true);
     g->add_edge(src_r, dst_r);
   }
 }

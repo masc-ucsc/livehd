@@ -762,7 +762,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       }
       break;
     }
-    case Flop_Op:
+    case SFlop_Op:
     case AFlop_Op: {
       RTLIL::Wire *enWire  = nullptr;
       RTLIL::Wire *dWire   = nullptr;
@@ -792,10 +792,10 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         }
       }
       if(dWire)
-        log("adding flop_Op width = %d\n", dWire->width);
+        log("adding sflop_Op width = %d\n", dWire->width);
       //last argument is polarity
       switch(g->node_type_get(idx).op) {
-      case Flop_Op:
+      case SFlop_Op:
         if(enWire == nullptr && clkWire != nullptr && dWire != nullptr && rstWire == nullptr && rstVal == nullptr) {
           module->addDff(next_id(), clkWire, dWire, cell_output_map[std::make_pair(idx, 0)], true);
         } else {

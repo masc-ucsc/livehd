@@ -11,7 +11,7 @@ Index_ID Pass_dfg::create_reference(LGraph *g, Aux_tree *aux_tree, const std::st
 //Index_ID Pass_dfg::create_register(LGraph *g, Aux_tree *aux_tree, const std::string &var_name) {
 //  Index_ID nid = create_node(g, aux_tree, var_name);
 //  fmt::print("create node nid:{}\n", nid);
-//  g->node_type_set(nid, Flop_Op);
+//  g->node_type_set(nid, SFlop_Op);
 //  aux_tree->add_register(var_name, nid);
 //  return nid;
 //}

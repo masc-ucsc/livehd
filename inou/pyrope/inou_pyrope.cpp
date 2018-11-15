@@ -50,7 +50,7 @@ bool Inou_pyrope::to_dst_var(Out_string &w, const LGraph *g, Index_ID idx) const
   Index_ID direct_to_register = 0;
   for(const auto &c : g->out_edges(idx)) {
     const auto op = g->node_type_get(c.get_idx());
-    if(op.op == Flop_Op) {
+    if(op.op == SFlop_Op) {
       direct_to_register = c.get_idx();
       break;
     }
@@ -101,7 +101,7 @@ void Inou_pyrope::to_src_var(Out_string &w, const LGraph *g, Index_ID idx) const
   Index_ID   direct_to_register = 0;
   int        const_val          = 0;
   const auto op                 = g->node_type_get(idx);
-  if(op.op == Flop_Op) {
+  if(op.op == SFlop_Op) {
     direct_to_register = idx;
   } else if(op.op == U32Const_Op) {
     const_val = g->node_value_get(idx);
@@ -163,7 +163,7 @@ bool Inou_pyrope::to_mux(Out_string &w, const LGraph *g, Index_ID idx) const {
 
       for(const auto &c : g->out_edges(idx)) {
         const auto op = g->node_type_get(c.get_idx());
-        if(op.op == Flop_Op) {
+        if(op.op == SFlop_Op) {
           direct_to_register = c.get_idx();
           break;
         }
@@ -528,7 +528,7 @@ bool Inou_pyrope::to_op(Out_string &s, Out_string &sub, const LGraph *g, Index_I
     case Join_Op:
       dest = to_join(s, g, idx);
       break;
-    case Flop_Op:
+    case SFlop_Op:
       dest = to_flop(s, g, idx);
       break;
     case SubGraph_Op:

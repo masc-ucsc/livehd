@@ -29,7 +29,7 @@ enum Node_Type_Op : uint64_t {
   And_Op,
   Or_Op,
   Xor_Op,
-  Flop_Op,
+  SFlop_Op, // sync reset flop
   AFlop_Op, // async reset flop
   Latch_Op,
   FFlop_Op,
@@ -428,7 +428,7 @@ public:
 class Node_Type_Flop : public Node_Type {
 public:
   Node_Type_Flop()
-      : Node_Type("flop", Flop_Op, true) {
+      : Node_Type("sflop", SFlop_Op, true) {
     inputs.push_back("clk"); // clk
     inputs.push_back("D");
     inputs.push_back("E");

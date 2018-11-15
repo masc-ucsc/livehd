@@ -370,7 +370,7 @@ void Pass_bitwidth::iterate_node(LGraph *lg, Index_ID idx) {
     case Join_Op:
       fmt::print("I found a JOIN");
       break;
-    case Flop_Op:
+    case SFlop_Op:
       fmt::print("I found a FLOP");
       break;
     case SubGraph_Op:
