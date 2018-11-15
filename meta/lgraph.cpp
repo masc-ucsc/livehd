@@ -16,6 +16,7 @@ LGraph::LGraph(const std::string &path, const std::string &_name, bool _clear)
     : Lgraph_base_core(path, _name)
     , LGraph_Base(path, _name)
     , LGraph_Node_Delay(path, _name)
+    , LGraph_Node_bitwidth(path, _name)
     , LGraph_Node_Src_Loc(path, _name)
     , LGraph_WireNames(path, _name)
     , LGraph_InstanceNames(path, _name)
@@ -99,6 +100,7 @@ void LGraph::reload() {
   LGraph_Base::reload();
   LGraph_Node_Place::reload();
   LGraph_Node_Delay::reload();
+  LGraph_Node_bitwidth::reload();
   LGraph_Node_Src_Loc::reload();
   LGraph_WireNames::reload();
   LGraph_InstanceNames::reload();
@@ -107,6 +109,7 @@ void LGraph::reload() {
 void LGraph::clear() {
   LGraph_Node_Place::clear();
   LGraph_Node_Delay::clear();
+  LGraph_Node_bitwidth::clear();
   LGraph_Node_Src_Loc::clear();
   LGraph_WireNames::clear();
   LGraph_InstanceNames::clear();
@@ -117,6 +120,7 @@ void LGraph::clear() {
 void LGraph::sync() {
   LGraph_Node_Place::sync();
   LGraph_Node_Delay::sync();
+  LGraph_Node_bitwidth::sync();
   LGraph_Node_Src_Loc::sync();
   LGraph_WireNames::sync();
   LGraph_InstanceNames::sync();
@@ -128,6 +132,7 @@ void LGraph::emplace_back() {
   LGraph_Base::emplace_back();
   LGraph_Node_Place::emplace_back();
   LGraph_Node_Delay::emplace_back();
+  LGraph_Node_bitwidth::emplace_back();
   LGraph_Node_Src_Loc::emplace_back();
   LGraph_WireNames::emplace_back();
   LGraph_InstanceNames::emplace_back();
