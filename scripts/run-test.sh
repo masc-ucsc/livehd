@@ -25,5 +25,4 @@ if [ "$RUN_TYPE" == "long" ]; then
   fi
 fi
 
-
 exit 0
