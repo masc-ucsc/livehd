@@ -14,7 +14,7 @@ DOCKER_LGRAPH_SRC=${4:-/root/lgraph}
 #DOCKER_LGRAPH_SRC='/root/lgraph'
 LGRAPH_COMPILER=${5:g++}
 
-COVERAGE_RUN=${6:""}
+COVERAGE_RUN=${6:.}
 
 if [ ! -e ${LGRAPH_SRC}/WORKSPACE ]; then
   echo "BUILD ERROR: '${LGRAPH_SRC}' does not contain LGRAPH source code"
