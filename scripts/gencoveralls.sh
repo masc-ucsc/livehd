@@ -19,8 +19,11 @@ done
 echo $LCOV_ADD
 lcov $LCOV_ADD --output-file cov/coverage.info
 
+echo "rtp"
 if [ -s cov/coverage.info ]; then
   coveralls-lcov --repo-token Z2cNEUdoWLokSj16laePFXdCWIwckDRHK cov/coverage.info >/dev/null
+
+  echo "coverall"
   curl -s https://codecov.io/bash >cov/codecov
   chmod 755 cov/codecov
   ./cov/codecov -f 'cov/coverage.info' -t becc0c47-6817-4ba5-966c-3fc4dbb376ff >/dev/null

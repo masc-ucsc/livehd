@@ -17,8 +17,8 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-if [ "$TRAVIS_EVENT_TYPE" == "cron" ]; then
-  bazel test --test_tag_filters "long1" //...
+if [ "$RUN_TYPE" == "cron" ]; then
+  bazel test --test_tag_filters "-long1,-long2,-long3,-long4,-long5,-long6,-long7,-long8,-manual" //...
 
   if [ $? -ne 0 ]; then
     exit 1
