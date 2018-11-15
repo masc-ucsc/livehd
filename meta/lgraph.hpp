@@ -71,16 +71,47 @@ public:
 
   void each_input(std::function<void(Index_ID)> f1) const;
   void each_input(std::function<void(Index_ID, Port_ID)> f1) const;
+  template<class Func,class T>
+    void each_input(Func &&func, T *first) const {
+      each_input(std::bind(func, first, std::placeholders::_1, std::placeholders::_2));
+    }
+
   void each_output(std::function<void(Index_ID)> f1) const;
   void each_output(std::function<void(Index_ID, Port_ID)> f1) const;
+  template<class Func,class T>
+    void each_output(Func &&func, T *first) const {
+      each_output(std::bind(func, first, std::placeholders::_1, std::placeholders::_2));
+    }
 
   void each_master_root_fast(std::function<void(Index_ID)> f1) const;
+  template<class Func,class T>
+    void each_master_root_fast(Func &&func, T *first) const {
+      each_master_root_fast(std::bind(func, first, std::placeholders::_1));
+    }
+
   void each_root_fast(std::function<void(Index_ID)> f1) const;
+  template<class Func,class T>
+    void each_root_fast(Func &&func, T *first) const {
+      each_root_fast(std::bind(func, first, std::placeholders::_1));
+    }
 
   void each_input_root_fast(std::function<void(Index_ID, Port_ID)> f1) const;
+  template<class Func,class T>
+    void each_input_root_fast(Func &&func, T *first) const {
+      each_input_root_fast(std::bind(func, first, std::placeholders::_1, std::placeholders::_2));
+    }
+
   void each_output_root_fast(std::function<void(Index_ID, Port_ID)> f1) const;
+  template<class Func,class T>
+    void each_output_root_fast(Func &&func, T *first) const {
+      each_output_root_fast(std::bind(func, first, std::placeholders::_1, std::placeholders::_2));
+    }
 
   void each_output_edge_fast(std::function<void(Index_ID, Port_ID, Index_ID, Port_ID)> f1) const;
+  template<class Func,class T>
+    void each_output_edge_fast(Func &&func, T *first) const {
+      each_output_edge_fast(std::bind(func, first, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
+    }
 
 };
 

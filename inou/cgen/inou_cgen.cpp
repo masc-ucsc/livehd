@@ -53,8 +53,6 @@ void Inou_cgen::iterate_declarations(Index_ID idx, Port_ID pid) {
   if (!wn)
     return;
 
-  fmt::print("trying {}\n",wn);
-
   Declaration d;
   d.name  = wn;
   d.pos   = lg->node_file_loc_get(idx).get_start();
@@ -62,11 +60,11 @@ void Inou_cgen::iterate_declarations(Index_ID idx, Port_ID pid) {
   d.bits  = lg->get_bits(idx);
   d.is_signed = false; // Could change after the traversal
 
-  if (lg->is_graph_input(idx))
+  if (lg->is_graph_input(idx)) {
     d.type = Decl_inp;
-  else if (lg->is_graph_output(idx))
+  }else if (lg->is_graph_output(idx)) {
     d.type = Decl_out;
-  else {
+  }else if (pid ==0) { // Only pid ==0 is the Q output from flops/latches
     const auto &nt = lg->node_type_get(idx);
     switch(nt.op) {
       case SFlop_Op: d.type = Decl_sflop; break;
@@ -75,6 +73,8 @@ void Inou_cgen::iterate_declarations(Index_ID idx, Port_ID pid) {
       case Latch_Op: d.type = Decl_latch; break;
       default: d.type = Decl_local;
     }
+  }else{
+    d.type = Decl_local;
   }
 
   declaration.push_back(d);
@@ -94,7 +94,8 @@ void Inou_cgen::setup_declarations() {
   declaration_root.clear();
 
   //lg->each_output_root_fast([this](Index_ID idx, Port_ID pid) { iterate_declarations(idx,pid); });
-  lg->each_output_root_fast(std::bind(&Inou_cgen::iterate_declarations, this, std::placeholders::_1, std::placeholders::_2));
+  //lg->each_output_root_fast(std::bind(&Inou_cgen::iterate_declarations, this, std::placeholders::_1, std::placeholders::_2));
+  lg->each_output_root_fast(&Inou_cgen::iterate_declarations, this);
 }
 
 void Inou_cgen::to_pyrope(const LGraph *g, const std::string& odir) {
