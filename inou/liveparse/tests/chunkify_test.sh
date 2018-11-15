@@ -53,5 +53,17 @@ if [ $N1 -ne $N2 ]; then
   exit -3
 fi
 
+echo "inou.liveparse files:./test/benchmarks/boom/boombase.v path:tmp2 " | ./bazel-bin/main/lgshell
+if [ $? -ne 0 ]; then
+  echo "FAILED: liveparse error"
+  exit -3
+fi
+
+echo "files path:./inou/yosys/tests/ match:"\.v$" |> inou.liveparse path:tmp2" | ./bazel-bin/main/lgshell
+if [ $? -ne 0 ]; then
+  echo "FAILED: liveparse error"
+  exit -3
+fi
+
 exit 0
 
