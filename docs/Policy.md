@@ -1,7 +1,7 @@
 
 # Policy
 
-This document explains the policy to handle contributions to the lgraph project. Most of this
+This document explains the policy to handle contributions to the LGraph project. Most of this
 document is inspired in LLVM developers policy.
 
 ## Submit of Contribution
