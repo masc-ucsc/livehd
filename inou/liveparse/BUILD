@@ -26,5 +26,6 @@ sh_test(
         "//main:lgshell",
         "//inou/yosys:verilog_tests",
         "//projects/boom:firesim_boom",
+        "//tests/benchmarks/boom:boombase",
         ],
 )
