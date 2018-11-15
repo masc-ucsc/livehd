@@ -74,7 +74,7 @@ void LGraph::each_output_root_fast(std::function<void(Index_ID, Port_ID)> f1) co
       continue;
     if (!ni.is_root())
       continue;
-    if (!ni.has_pid_outputs())
+    if (!ni.has_pid_outputs() && !ni.is_graph_io_output())
       continue;
 
     f1(ni.get_nid(), ni.get_out_pid());
