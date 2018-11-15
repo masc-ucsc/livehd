@@ -15,7 +15,7 @@ if [ $? -ne 0 ]; then
   exit -1
 fi
 
-if [[ $(which lcov) && $LGRAPH_BUILD_MODE == "fastbuild" ]]; then
+if [[ $(which lcov) && $LGRAPH_BUILD_MODE == "fastbuild" ]] || [ ${COVERAGE_RUN} == "coverage" ] ; then
   cd $LGRAPH_SRC
   ./scripts/gencoverage.sh
   ./scripts/gencoveralls.sh
