@@ -69,7 +69,7 @@ void Inou_cgen::iterate_declarations(Index_ID idx, Port_ID pid) {
   else {
     const auto &nt = lg->node_type_get(idx);
     switch(nt.op) {
-      case Flop_Op:  d.type = Decl_sflop; break;
+      case SFlop_Op: d.type = Decl_sflop; break;
       case AFlop_Op: d.type = Decl_aflop; break;
       case FFlop_Op: d.type = Decl_fflop; break;
       case Latch_Op: d.type = Decl_latch; break;
