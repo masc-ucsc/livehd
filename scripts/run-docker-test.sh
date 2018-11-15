@@ -21,8 +21,6 @@ if [ ! -e ${LGRAPH_SRC}/WORKSPACE ]; then
   exit -1
 fi
 
-echo "rtp ${COVERAGE_RUN}"
-
 # possibly add back -t command later
 docker run  \
   -v $LGRAPH_SRC:$DOCKER_LGRAPH_SRC \
