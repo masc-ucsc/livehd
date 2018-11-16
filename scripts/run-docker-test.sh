@@ -28,7 +28,7 @@ if [ ! -e ${LGRAPH_SRC}/WORKSPACE ]; then
 fi
 
 # possibly add back -t command later
-docker run  \
+docker run \
   -v $LGRAPH_SRC:$DOCKER_LGRAPH_SRC \
   -e LGRAPH_SRC=${DOCKER_LGRAPH_SRC} \
   -e LGRAPH_BUILD_MODE=${LGRAPH_BUILD_MODE} \
