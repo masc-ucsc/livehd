@@ -36,6 +36,7 @@ int main (int argc, char **argv) {
 
   std::string str = "p" + std::to_string(vec.size()) + "x";
 
+  vec.emplace_back(CharPtr("potato"));
   std::cout << "1.last = " << &vec.back() << std::endl;
   vec.emplace_back(CharPtr(str.c_str()));
   std::cout << "2.last = " << &vec.back() << std::endl;

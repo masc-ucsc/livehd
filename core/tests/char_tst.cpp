@@ -63,13 +63,15 @@ void test3(int n) {
   std::string foo = "a";
 
   for(int i = 0; i < n; i++) {
-    uint32_t val = 0xdead0000 | (n&0xFFFF);
+    uint32_t val = 0xdead0000 | (i&0xFFFF);
+    if (i == 2174)
+      std::cout <<"OOPS\n";
     test.create_id(std::to_string(i), val);
   }
   test.create_id("c", 2);
 
   for(int i = 0; i < n; i++) {
-    uint32_t val = 0xdead0000 | (n&0xFFFF);
+    uint32_t val = 0xdead0000 | (i&0xFFFF);
     assert(test.get_field(std::to_string(i)) == val);
   }
   assert(test.get_field("c") == 2);
@@ -79,7 +81,7 @@ void test4(int n) {
   Char_Array<uint32_t> test("char_tst_mmap/test3"); // Read test 3
 
   for(int i = 0; i < n; i++) {
-    uint32_t val = 0xdead0000 | (n&0xFFFF);
+    uint32_t val = 0xdead0000 | (i&0xFFFF);
     assert(test.get_field(std::to_string(i)) == val);
   }
   assert(test.get_field("c") == 2);

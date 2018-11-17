@@ -191,7 +191,7 @@ public:
     assert(!pending_clear_reload);
 
     synced = true;
-    variable_internal.sync();
+    //variable_internal.sync();
     FILE *fp = fopen((long_name + "_map").c_str(), "w");
     if (fp) {
       size_t sz = variable_internal.size();
