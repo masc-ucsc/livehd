@@ -113,15 +113,9 @@ void Chunkify_verilog::write_file(const std::string &filename, const char *text,
   close(fd);
 }
 
-void Chunkify_verilog::add_io(bool input, const std::string &mod_name, const std::string &io_name, Port_ID original_pos) {
+void Chunkify_verilog::add_io(LGraph *lg, bool input, const std::string &io_name, Port_ID original_pos) {
 
-  LGraph *lg = library->try_find_lgraph(mod_name);
-  if (lg==0) {
-    //fmt::print("chunkify_verilog::add_io create module {}\n",mod_name);
-    lg = LGraph::create(path, mod_name);
-  }
-
-  //fmt::print("add_io {}:{} pos:{}\n",mod_name, io_name, original_pos);
+  assert(lg);
 
   if (input) {
     if (!lg->is_graph_input(io_name.c_str()))
@@ -131,8 +125,6 @@ void Chunkify_verilog::add_io(bool input, const std::string &mod_name, const std
       lg->add_graph_output(io_name.c_str(), 0, 0, original_pos);
   }
 
-  library->unregister_lgraph(mod_name, lg->lg_id(), lg);
-  lg->sync();
 }
 
 void Chunkify_verilog::elaborate() {
@@ -182,6 +174,8 @@ void Chunkify_verilog::elaborate() {
   in_module_text.reserve(buffer_sz);
   in_module_token.reserve(token_list.size());
 
+  LGraph *lg=0;
+
   while(!scan_is_end()) {
     bool endmodule_found=false;
     if (scan_is_token(TOK_ALNUM)) {
@@ -197,6 +191,13 @@ void Chunkify_verilog::elaborate() {
         scan_append(module);
         module_io_pos = 0;
         in_module = true;
+
+        lg = library->try_find_lgraph(module);
+        if (lg==0) {
+          //fmt::print("chunkify_verilog::add_io create module {}\n",mod_name);
+          lg = LGraph::create(path, module);
+        }
+
       }else if (strcasecmp(token.c_str(),"input")==0) {
         last_input = true;
       }else if (strcasecmp(token.c_str(),"output")==0) {
@@ -215,7 +216,7 @@ void Chunkify_verilog::elaborate() {
           std::string label;
           scan_prev_append(label);
 
-          add_io(last_input, module, label, module_io_pos);
+          add_io(lg, last_input, label, module_io_pos);
 
           module_io_pos++;
 
@@ -239,8 +240,14 @@ void Chunkify_verilog::elaborate() {
 
         //fmt::print("{}  {} {}\n",module,in_module_token.back().pos, buffer_sz);
         bool same = is_same_file(module, not_in_module_text, in_module_text);
-        if (!same)
+        if (!same) {
           write_file(path + "/parse/chunk_" + module + ".v", not_in_module_text, in_module_text);
+        }
+        if (lg) {
+          library->unregister_lgraph(module, lg->lg_id(), lg);
+          lg->sync();
+          lg = 0;
+        }
         module.clear();
         in_module_text.clear();
         in_module_token.clear();

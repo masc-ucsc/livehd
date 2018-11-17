@@ -65,7 +65,6 @@ public:
   }
 
   ~Dense() {
-    sync();
     __size   = 0; // No need but nice
   }
 
@@ -76,7 +75,6 @@ public:
     }
 
     if (__buffer) {
-      __allocator.sync();
       __allocator.deallocate(__buffer, __size);
       __buffer = 0;
     }

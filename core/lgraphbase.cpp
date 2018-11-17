@@ -60,8 +60,10 @@ void LGraph_Base::clear() {
 
 void LGraph_Base::sync() {
 
-  if (locked)
-    library->update_nentries(lg_id(), node_internal.size());
+  if (!locked)
+    return;
+
+  library->update_nentries(lg_id(), node_internal.size());
 
   library->sync();
   tlibrary->sync();
