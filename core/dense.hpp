@@ -26,9 +26,31 @@
 #include "mmap_allocator.hpp"
 #include <unistd.h>
 
+#ifndef likely
+#define likely(x)       __builtin_expect((x),1)
+#endif
+#ifndef unlikely
+#define unlikely(x)     __builtin_expect((x),0)
+#endif
+
 template <typename T> class Dense {
 private:
   explicit Dense() = delete;
+
+  void reserve(size_t sz) {
+    if (__buffer) {
+      __buffer = __allocator.reserve(sz);
+    }else{
+      __buffer = __allocator.reallocate(sz);
+    }
+  }
+
+  void resize(size_t sz) {
+    assert(false); // It should reduce size too
+    if(sz > __size) {
+      reserve(sz);
+    }
+  }
 
 public:
   typedef T                 value_type;
@@ -42,36 +64,45 @@ public:
       __size   = 0;
   }
 
-  virtual ~Dense() {
-    __allocator.save_size(this->size());
+  ~Dense() {
+    sync();
+    __size   = 0; // No need but nice
   }
 
   void sync() {
-    __allocator.save_size(this->size());
+    if (__size==0) {
+      assert(__buffer==0);
+      return;
+    }
+
+    if (__buffer) {
+      __allocator.sync();
+      __allocator.deallocate(__buffer, __size);
+      __buffer = 0;
+    }
+    // WARNING: do not reset __size, lazy open later, must preserve __size
   }
 
   void reload(uint64_t sz) {
     if (sz==0) {
       assert(__size==0);
-      return; // Nothing to do. Do not create mmap for empty lgraphs
+      return; // Nothing to do. Do not create mmap for empty lgraphs or alredy loaded lgraphs
     }
-    __buffer = __allocator.allocate(sz);
+    if (__buffer) {
+      __buffer = __allocator.reallocate(sz);
+    }
     __size   = sz;
   }
 
-  void resize(size_t sz) {
-    if(sz > __size) {
-      reserve(sz);
-    }
-    __size = sz;
-  }
-
   void clear() noexcept {
+    __allocator.clear();
     __size = 0;
   }
 
   void push_back(const value_type &x) {
-    if(__size >= capacity()) {
+    if (unlikely(__buffer==0)) {
+      __buffer = __allocator.reallocate(__size+1);
+    }else if(unlikely(__size >= capacity())) {
       reserve(__size + 1);
     }
     __buffer[__size] = x;
@@ -79,7 +110,9 @@ public:
   }
 
   template <class... Args> void emplace_back(Args &&... args) {
-    if(__size >= capacity()) {
+    if (unlikely(__buffer==0)) {
+      __buffer = __allocator.reallocate(__size+1);
+    }else if(unlikely(__size >= capacity())) {
       reserve(__size + 1);
     }
     __buffer[__size] = value_type(std::forward<Args>(args)...);
@@ -96,63 +129,87 @@ public:
     return __size == 0;
   }
 
-  void reserve(size_t sz) {
-    value_type *new_buffer = __allocator.allocate(sz);
-    // since we are using mmap with memremap, we do not need to worry about the
-    // old buffer pointer, since the OS will move it and thus deallocate the old
-    // memory
-    __buffer = new_buffer;
-  }
-
   value_type &operator[](const size_t idx) {
     assert(idx < __size);
+    if (unlikely(__buffer==0))
+      __buffer = __allocator.reallocate(__size);
     return __buffer[idx];
   }
 
   const value_type &operator[](const size_t idx) const {
     assert(idx < __size);
+    if (unlikely(__buffer==0))
+      __buffer = __allocator.reallocate(__size);
     return __buffer[idx];
   }
 
   value_type &back() {
+    assert(__size);
+    if (unlikely(__buffer==0))
+      __buffer = __allocator.reallocate(__size);
     return __buffer[__size - 1];
   }
   const value_type &back() const {
+    assert(__size);
+    if (unlikely(__buffer==0))
+      __buffer = __allocator.reallocate(__size);
     return __buffer[__size - 1];
   }
 
   value_type *data() noexcept {
+    assert(__size);
+    if (unlikely(__buffer==0))
+      __buffer = __allocator.reallocate(__size);
     return __buffer;
   }
   const value_type *data() const noexcept {
+    assert(__size);
+    if (unlikely(__buffer==0))
+      __buffer = __allocator.reallocate(__size);
     return __buffer;
   }
 
   iterator begin() {
+    if (unlikely(__buffer==0))
+      __buffer = __allocator.reallocate(__size);
     return __buffer;
   }
   iterator end() {
+    if (unlikely(__buffer==0))
+      __buffer = __allocator.reallocate(__size);
     return __buffer + __size;
   }
 
   const_iterator cbegin() {
+    if (unlikely(__buffer==0))
+      __buffer = __allocator.reallocate(__size);
     return __buffer;
   }
   const_iterator cend() {
+    if (unlikely(__buffer==0))
+      __buffer = __allocator.reallocate(__size);
     return __buffer + __size;
   }
 
   const_iterator begin() const {
+    if (unlikely(__buffer==0))
+      __buffer = __allocator.reallocate(__size);
     return __buffer;
   }
   const_iterator end() const {
+    if (unlikely(__buffer==0))
+      __buffer = __allocator.reallocate(__size);
     return __buffer + __size;
   }
 
   const_iterator cbegin() const {
+    if (unlikely(__buffer==0))
+      __buffer = __allocator.reallocate(__size);
     return __buffer;
   }
   const_iterator cend() const {
+    if (unlikely(__buffer==0))
+      __buffer = __allocator.reallocate(__size);
     return __buffer + __size;
   }
 
@@ -160,7 +217,7 @@ private:
   allocator_type __allocator;
   size_t         __size;
 
-  value_type *__buffer;
+  mutable value_type *__buffer; // mutable needed to handle the lazy load/unload
 };
 
 #endif

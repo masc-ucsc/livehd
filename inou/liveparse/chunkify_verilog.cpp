@@ -132,6 +132,7 @@ void Chunkify_verilog::add_io(bool input, const std::string &mod_name, const std
   }
 
   library->unregister_lgraph(mod_name, lg->lg_id(), lg);
+  lg->sync();
 }
 
 void Chunkify_verilog::elaborate() {
