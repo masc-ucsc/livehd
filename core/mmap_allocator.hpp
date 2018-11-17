@@ -116,15 +116,6 @@ public:
     mmap_capacity = 0;
   }
 
-  void sync() const {
-    if(mmap_fd < 0)
-      return;
-    if(mmap_base == 0)
-      return;
-
-    msync(mmap_base, mmap_size, MS_SYNC);
-  }
-
   size_t capacity() const {
     return mmap_capacity;
   }
