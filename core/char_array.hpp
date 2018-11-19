@@ -213,7 +213,7 @@ public:
     assert(!pending_clear_reload);
 
     synced = true;
-    //variable_internal.sync(); // FIXME: The mmap can change location
+    variable_internal.sync(); // FIXME: The mmap can change location
     FILE *fp = fopen((long_name + "_map").c_str(), "w");
     if (fp) {
       size_t sz = variable_internal.size();
