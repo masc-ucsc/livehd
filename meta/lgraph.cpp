@@ -243,11 +243,13 @@ Backward_edge_iterator LGraph::backward() const {
 void LGraph::dump() const {
   fmt::print("lgraph name:{} size:{}\n", name, node_internal.size());
 
-  for(const auto &ent : inputs2node) {
-    fmt::print("input {} idx:{} pid:{}\n", ent.first, ent.second.nid, ent.second.pos);
+  for(auto it = input_array.begin(); it!=input_array.end(); ++it ) {
+    const auto &p = it.get_field();
+    fmt::print("inp {} idx:{} pid:{}\n", it.get_char(), p.nid, p.pos);
   }
-  for(const auto &ent : outputs2node) {
-    fmt::print("output {} idx:{} pid:{}\n", ent.first, ent.second.nid, ent.second.pos);
+  for(auto it = output_array.begin(); it!=output_array.end(); ++it ) {
+    const auto &p = it.get_field();
+    fmt::print("out {} idx:{} pid:{}\n", it.get_char(), p.nid, p.pos);
   }
 
   dump_lgwires();

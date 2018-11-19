@@ -30,15 +30,6 @@ protected:
   Port_ID     io_nums = 1;
   int         lgraph_id;
 
-  typedef std::pair<Index_ID, Port_ID> io_t; // node id and position at verilog
-
-  Char_Array<io_t> input_array;
-  Char_Array<io_t> output_array;
-
-  // Integrate graph and tech library?
-  Graph_library *library;
-  Tech_library * tlibrary;
-
   struct str_cmp_i { // case insensitive string compare for IO
     bool operator()(char const *a, char const *b) const {
       return strcasecmp(a, b) < 0;
@@ -49,12 +40,22 @@ protected:
     Index_ID nid;
     Port_ID  pos;
     Port_ID  original_pos;
+
+    IO_port(Index_ID _nid, Port_ID _opos)
+      :nid(_nid)
+      ,pos(0)
+      ,original_pos(_opos) {
+    };
   };
 
-  typedef std::map<const char *, IO_port, str_cmp_i> Graph_IO_map;
+  //typedef std::pair<Index_ID, Port_ID> io_t; // node id and position at verilog
 
-  Graph_IO_map inputs2node;
-  Graph_IO_map outputs2node;
+  Char_Array<IO_port> input_array;
+  Char_Array<IO_port> output_array;
+
+  // Integrate graph and tech library?
+  Graph_library *library;
+  Tech_library * tlibrary;
 
   Index_ID         create_node_space(Index_ID idx, Port_ID out_pid, Index_ID master_nid, Index_ID root_nid);
   Index_ID         get_space_output_pin(Index_ID idx, Port_ID out_pid, Index_ID &root_nid);

@@ -252,15 +252,16 @@ public:
   }
 
   CForward_edge_iterator begin() {
-    for(const auto &it : g->inputs2node) {
-      pending.push_back(it.second.nid);
+    for(auto it = g->input_array.begin(); it!=g->input_array.end(); ++it ) {
+      pending.push_back(it.get_field().nid);
     }
+
     // FIXME: output insertion should be moved to nid==0 (otherwise, and output with some logic but
     // still disconnected would not be generated)
 
-    for(const auto &it : g->outputs2node) {
-      if(!g->get_node_int(it.second.nid).has_inputs())
-        pending.push_back(it.second.nid);
+    for(auto it = g->output_array.begin(); it!=g->output_array.end(); ++it ) {
+      if(!g->get_node_int(it.get_field().nid).has_inputs())
+        pending.push_back(it.get_field().nid);
     }
 
     // for forward iteration we want to start from constants as well
@@ -407,13 +408,13 @@ public:
     // FIXME: This may need to be moved to nid==0. If any input not visited, then add it (but only
     // if full input/output)
 
-    for(const auto &it : g->inputs2node) { // inputs without connection to preserve them
-      if(!g->get_node_int(it.second.nid).has_outputs())
-        pending.push_back(it.second.nid);
+    for(auto it = g->input_array.begin(); it!=g->input_array.end(); ++it ) { // inputs without connection to preserve them
+      if(!g->get_node_int(it.get_field().nid).has_outputs())
+        pending.push_back(it.get_field().nid);
     }
-    for(const auto &it : g->outputs2node) {
-      if(!g->get_node_int(it.second.nid).has_outputs()) // do not add outputs with connections
-        pending.push_back(it.second.nid);
+    for(auto it = g->output_array.begin(); it!=g->output_array.end(); ++it ) {
+      if(!g->get_node_int(it.get_field().nid).has_outputs()) // do not add outputs with connections
+        pending.push_back(it.get_field().nid);
     }
 
     Index_ID b = 0;

@@ -116,21 +116,8 @@ void LGraph_Base::reload() {
   auto sz = library->get_nentries(lgraph_id);
 
   node_internal.reload(sz);
-  // Lazy input_array.reload();
-  // Lazy output_array.reload();
-
-  // Reload the fast hash tables from the stored data (maps are not dumped to disk)
-  for(const auto &str : input_array) {
-    io_t nid_original             = input_array.get_field(str);
-    inputs2node[str].nid          = nid_original.first;
-    inputs2node[str].original_pos = nid_original.second;
-  }
-
-  for(const auto &str : output_array) {
-    io_t nid_original              = output_array.get_field(str);
-    outputs2node[str].nid          = nid_original.first;
-    outputs2node[str].original_pos = nid_original.second;
-  }
+  // lazy input_array.reload();
+  // lazy output_array.reload();
 
   recompute_io_ports();
 
@@ -139,14 +126,30 @@ void LGraph_Base::reload() {
 
 void LGraph_Base::recompute_io_ports() {
 
+  // Reassign inputs in alphabetical order
+  std::map<const char *, int, str_cmp_i> ordered;
   Port_ID pos = 0;
-  for(auto &it : inputs2node) {
-    it.second.pos = pos++;
+
+  for(auto it = input_array.begin(); it!=input_array.end(); ++it ) {
+    ordered[it.get_char()] = it.get_id();
   }
 
+  for(auto &it : ordered) {
+    auto &p = input_array.get_field(it.second);
+    p.pos = pos++;
+  }
+
+  // Reassign outputs in alphabetical order
+  ordered.clear();
   pos = 0;
-  for(auto &it : outputs2node) {
-    it.second.pos = pos++;
+
+  for(auto it = output_array.begin(); it!=output_array.end(); ++it ) {
+    ordered[it.get_char()] = it.get_id();
+  }
+
+  for(auto &it : ordered) {
+    auto &p = output_array.get_field(it.second);
+    p.pos = pos++;
   }
 }
 
@@ -154,7 +157,6 @@ Index_ID LGraph_Base::add_graph_input(const char *str, Index_ID nid, uint16_t bi
 
   if(nid == 0)
     nid = create_node_int();
-
   node_internal[nid].set_graph_io_input();
 
   if(bits != 0)
@@ -164,14 +166,10 @@ Index_ID LGraph_Base::add_graph_input(const char *str, Index_ID nid, uint16_t bi
     original_pos = io_nums;
   io_nums++;
 
-  int string_id = input_array.create_id(str, std::make_pair(nid, original_pos));
+  assert(input_array.get_id(str) == 0); // No name dupliation
 
-  str = input_array.get_char(string_id); // the input str may be deallocated, do not strdup again
-
-  assert(inputs2node.find(str) == inputs2node.end()); // No name replication allowed
-
-  inputs2node[str].nid          = nid;
-  inputs2node[str].original_pos = original_pos;
+  IO_port p(nid,original_pos);
+  input_array.create_id(str, p);
 
   recompute_io_ports();
 
@@ -195,24 +193,10 @@ Index_ID LGraph_Base::add_graph_output(const char *str, Index_ID nid, uint16_t b
     original_pos = io_nums;
   io_nums++;
 
-  int string_id = output_array.create_id(str, std::make_pair(nid, original_pos));
+  assert(output_array.get_id(str) == 0); // No name dupliation
 
-  str = output_array.get_char(string_id); // the input str may be deallocated, do not strdup again
-
-  //assert(inputs2node.find(str) == inputs2node.end()); // No name replication allowed
-  assert(outputs2node.find(str) == outputs2node.end()); // No name replication allowed
-
-#ifndef NDEBUG
-  //for(auto & inps : inputs2node) {
-  //  assert(inps.second.original_pos != original_pos); // position is unique
-  //}
-  //for(auto & outs : outputs2node) {
-  //  assert(outs.second.original_pos != original_pos); // position is unique
-  //}
-#endif
-
-  outputs2node[str].nid          = nid;
-  outputs2node[str].original_pos = original_pos;
+  IO_port p(nid,original_pos);
+  output_array.create_id(str, p);
 
   recompute_io_ports();
 
@@ -224,13 +208,11 @@ Index_ID LGraph_Base::add_graph_output(const char *str, Index_ID nid, uint16_t b
 }
 
 bool LGraph_Base::is_graph_input(const char *name) const {
-
-  return inputs2node.find(name) != inputs2node.end();
+  return input_array.get_id(name) != 0;
 }
 
 bool LGraph_Base::is_graph_output(const char *name) const {
-
-  return outputs2node.find(name) != outputs2node.end();
+  return output_array.get_id(name) != 0;
 }
 
 bool LGraph_Base::is_graph_input(Index_ID idx) const {
@@ -257,9 +239,10 @@ const char *LGraph_Base::get_graph_input_name(Index_ID nid) const {
   assert(node_internal[nid].is_graph_io_input());
   assert(node_internal[nid].is_master_root());
 
-  for(auto const &ent : inputs2node) {
-    if(ent.second.nid == nid)
-      return ent.first;
+  for(auto it = input_array.begin(); it!=input_array.end(); ++it ) {
+    const auto &p = it.get_field();
+    if(p.nid == nid)
+      return it.get_char();
   }
 
   return "unknown name";
@@ -270,41 +253,49 @@ const char *LGraph_Base::get_graph_output_name(Index_ID nid) const {
   assert(node_internal[nid].is_graph_io_output());
   assert(node_internal[nid].is_master_root());
 
-  for(auto const &ent : outputs2node) {
-    if(ent.second.nid == nid)
-      return ent.first;
+  for(auto it = output_array.begin(); it!=output_array.end(); ++it ) {
+    const auto &p = it.get_field();
+    if(p.nid == nid)
+      return it.get_char();
   }
 
   return "unknown name";
 }
 
 Port_ID LGraph_Base::get_graph_pid_from_nid(Index_ID nid) const {
-  for(auto const &ent : inputs2node) {
-    if(ent.second.nid == nid)
-      return ent.second.pos;
+
+  for(auto it = input_array.begin(); it!=input_array.end(); ++it ) {
+    const auto &p = it.get_field();
+    if (p.nid == nid)
+      return p.pos;
   }
 
-  for(auto const &ent : outputs2node) {
-    if(ent.second.nid == nid)
-      return ent.second.pos;
+  for(auto it = output_array.begin(); it!=output_array.end(); ++it ) {
+    const auto &p = it.get_field();
+    if (p.nid == nid)
+      return p.pos;
   }
 
   return 0;
 }
 
 Index_ID LGraph_Base::get_graph_input_nid_from_pid(Port_ID pid) const {
-  for(auto const &ent : inputs2node) {
-    if(ent.second.pos == pid)
-      return ent.second.nid;
+
+  for(auto it = input_array.begin(); it!=input_array.end(); ++it ) {
+    const auto &p = it.get_field();
+    if (p.pos == pid)
+      return p.nid;
   }
 
   return 0;
 }
 
 Index_ID LGraph_Base::get_graph_output_nid_from_pid(Port_ID pid) const {
-  for(auto const &ent : outputs2node) {
-    if(ent.second.pos == pid)
-      return ent.second.nid;
+
+  for(auto it = output_array.begin(); it!=output_array.end(); ++it ) {
+    const auto &p = it.get_field();
+    if (p.pos == pid)
+      return p.nid;
   }
 
   return 0;
@@ -312,9 +303,10 @@ Index_ID LGraph_Base::get_graph_output_nid_from_pid(Port_ID pid) const {
 
 const char *LGraph_Base::get_graph_input_name_from_pid(Port_ID pid) const {
 
-  for(auto const &ent : inputs2node) {
-    if(ent.second.pos == pid)
-      return ent.first;
+  for(auto it = input_array.begin(); it!=input_array.end(); ++it ) {
+    const auto &p = it.get_field();
+    if (p.pos == pid)
+      return it.get_char();
   }
 
   return "unknown name";
@@ -322,9 +314,10 @@ const char *LGraph_Base::get_graph_input_name_from_pid(Port_ID pid) const {
 
 const char *LGraph_Base::get_graph_output_name_from_pid(Port_ID pid) const {
 
-  for(auto const &ent : outputs2node) {
-    if(ent.second.pos == pid)
-      return ent.first;
+  for(auto it = output_array.begin(); it!=output_array.end(); ++it ) {
+    const auto &p = it.get_field();
+    if (p.pos == pid)
+      return it.get_char();
   }
 
   return "unknown name";
@@ -332,20 +325,18 @@ const char *LGraph_Base::get_graph_output_name_from_pid(Port_ID pid) const {
 
 Node_Pin LGraph_Base::get_graph_input(const char *str) const {
 
-  Graph_IO_map::const_iterator it = inputs2node.find(str);
+  assert(input_array.get_id(str)!=0);
 
-  assert(it != inputs2node.end()); // No name replication allowed
-
-  return Node_Pin(it->second.nid, it->second.pos, true);
+  const auto &p = input_array.get_field(str);
+  return Node_Pin(p.nid, p.pos, true);
 }
 
 Node_Pin LGraph_Base::get_graph_output(const char *str) const {
 
-  Graph_IO_map::const_iterator it = outputs2node.find(str);
+  assert(output_array.get_id(str)!=0);
 
-  assert(it != outputs2node.end()); // No name replication allowed
-
-  return Node_Pin(it->second.nid, it->second.pos, false);
+  const auto &p = output_array.get_field(str);
+  return Node_Pin(p.nid, p.pos, false);
 }
 
 Index_ID LGraph_Base::create_node_space(Index_ID last_idx, Port_ID out_pid, Index_ID master_nid, Index_ID root_nid) {

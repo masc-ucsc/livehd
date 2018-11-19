@@ -64,8 +64,6 @@ void test3(int n) {
 
   for(int i = 0; i < n; i++) {
     uint32_t val = 0xdead0000 | (i&0xFFFF);
-    if (i == 2174)
-      std::cout <<"OOPS\n";
     test.create_id(std::to_string(i), val);
   }
   test.create_id("c", 2);
@@ -91,8 +89,55 @@ void test4(int n) {
   assert(test.get_id("c") == 0);
 }
 
+void test5(size_t n) {
+  struct Test5_data {
+    uint32_t potato;
+    size_t id;
+    uint64_t banana;
+  };
+  Char_Array<Test5_data> test("char_tst_mmap/test5"); // Read test 3
+
+  std::vector<Char_Array_ID> idlist;
+
+  for(size_t i = 0; i < n; i++) {
+    Test5_data d;
+    d.potato = 0xdead0000 | (i&0xFFFF);
+    d.banana = 0xbeef0000 | (i&0xFFFF);
+    d.id = i;
+    auto cid = test.create_id(std::to_string(i), d);
+    idlist.push_back(cid);
+  }
+
+  for(size_t i = 0; i < n; i++) {
+    const Test5_data &d = test.get_field(std::to_string(i));
+    assert(d.potato == (0xdead0000 | (i&0xFFFF)));
+    assert(d.banana == (0xbeef0000 | (i&0xFFFF)));
+    assert(d.id == i);
+
+    assert(idlist[i] == test.get_id(std::to_string(i)));
+  }
+
+  size_t conta=0;
+  for(auto it = test.begin(); it!=test.end(); ++it ) {
+    assert(idlist.size()>conta);
+
+    assert(idlist[conta] == it.get_id());
+
+    const char *str = it.get_char();
+    assert(atoi(str) == static_cast<int>(conta));
+
+    const auto &d = it.get_field();
+    assert(d.potato == (0xdead0000 | (conta&0xFFFF)));
+    assert(d.banana == (0xbeef0000 | (conta&0xFFFF)));
+    assert(d.id == conta);
+
+    conta++;
+  }
+
+}
+
 //stress test on the char array
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
 
   int n = 0;
   if(argc < 2) {
@@ -109,6 +154,7 @@ int main(int argc, char** argv) {
   test2(n);
   test3(n);
   test4(n);
+  test5(n);
 
   return 0;
 }

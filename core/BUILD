@@ -15,7 +15,7 @@ cc_library(
 
 cc_test(
     name = "thread_pool_test",
-    srcs = ["thread_pool_test.cpp"],
+    srcs = ["tests/thread_pool_test.cpp"],
     # tags = ["long1"], # Run only with long1 set of tests
     deps = [
         "@gtest//:gtest_main",
@@ -25,7 +25,7 @@ cc_test(
 
 cc_test(
     name = "dense_test",
-    srcs = ["tests/dense_tst.cpp"],
+    srcs = ["tests/dense_test.cpp"],
     deps = [
         ":core",
     ],
@@ -33,7 +33,7 @@ cc_test(
 
 cc_test(
     name = "char_test",
-    srcs = ["tests/char_tst.cpp"],
+    srcs = ["tests/char_test.cpp"],
     deps = [
         ":core",
     ],
@@ -41,7 +41,7 @@ cc_test(
 
 cc_test(
     name = "edge_test",
-    srcs = ["tests/edge.cpp"],
+    srcs = ["tests/edge_test.cpp"],
     deps = [
         ":core",
         "//meta:meta",
@@ -50,7 +50,7 @@ cc_test(
 
 cc_test(
     name = "iter_test",
-    srcs = ["tests/iter.cpp"],
+    srcs = ["tests/iter_test.cpp"],
     deps = [
         ":core",
         "//meta:meta",
