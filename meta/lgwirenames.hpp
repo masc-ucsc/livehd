@@ -95,8 +95,8 @@ public:
 
   void dump_lgwires() const {
     fmt::print("lgwires {} \n", name);
-    for(const auto &n:names) {
-      fmt::print(" {}\n", n);
+    for(auto it=names.begin(); it!=names.end(); ++it) {
+      fmt::print(" {}\n", it.get_char());
     }
   }
 };

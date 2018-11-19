@@ -30,7 +30,7 @@ do
   fi
   diff -bBdNrw inou/pyrope/tests/${tst}.prp tmp/${tst}.prp
   if [ $? -ne 0 ]; then
-    echo "pyrope_test.sh generated code differs for ${tst} test"
+    echo "pyrope_test.sh generated code inou/pyrope/tests/${tst}.prp differs for tmp/${tst}.prp test"
     exit 2
   fi
 done

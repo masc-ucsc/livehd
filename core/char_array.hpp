@@ -48,11 +48,11 @@ public:
 
   class Const_Char_Array_Iter {
   public:
-    explicit Const_Char_Array_Iter(const uint16_t *ptr)
-        : ptr(ptr) {
+    explicit Const_Char_Array_Iter(const uint16_t *_first, const uint16_t *_ptr)
+        : first(_first), ptr(_ptr) {
     }
     Const_Char_Array_Iter operator++() {
-      Const_Char_Array_Iter i(ptr);
+      Const_Char_Array_Iter i(first,ptr);
       const uint16_t *sz = ptr;
       ptr += (*sz + 1); // +1 for the size itself
       return i;
@@ -64,10 +64,32 @@ public:
     bool operator!=(const Const_Char_Array_Iter &other) {
       return ptr != other.ptr;
     }
+
+#if 0
+    // Legal, but a bit confusing. Better just to use the self_* interface
     const char *operator*() const {
       return (const char *)(&ptr[1 + (sizeof(Data_type)+sizeof(Hash_sign))/sizeof(uint16_t)]);
     } // [3?] to skip ptr and Hash_sign
+#endif
+
+    Char_Array_ID get_id() const {
+      return (uint16_t *)ptr - first + 1; // distance with first which was 1 (hence + 1 for id)
+    }
+
+    const Data_type &get_field() const {
+      return *(const Data_type *)&ptr[1+(sizeof(Hash_sign))/sizeof(uint16_t)]; // Skip signature
+    }
+
+    Data_type &get_field() {
+      return *(Data_type *)&ptr[1+(sizeof(Hash_sign))/sizeof(uint16_t)]; // Skip signature
+    }
+
+    const char *get_char() const {
+      return (const char *)&ptr[1+(sizeof(Data_type) + sizeof(Hash_sign))/sizeof(uint16_t)];
+    }
+
   private:
+    const uint16_t * const first;
     const uint16_t *ptr;
   };
 
@@ -135,7 +157,7 @@ private:
     return c_hash;
   }
 
-  void reload() const { // NO CONST, but called from many places to hot-reload
+  void reload() const { // WARNING: NO REAL CONST, but called from many places to hot-reload
     assert(pending_clear_reload); // called once
     pending_clear_reload = false;
     synced = true;
@@ -191,7 +213,7 @@ public:
     assert(!pending_clear_reload);
 
     synced = true;
-    //variable_internal.sync();
+    //variable_internal.sync(); // FIXME: The mmap can change location
     FILE *fp = fopen((long_name + "_map").c_str(), "w");
     if (fp) {
       size_t sz = variable_internal.size();
@@ -204,17 +226,17 @@ public:
   }
 
   Const_Char_Array_Iter begin() const {
-    return Const_Char_Array_Iter(first());
+    return Const_Char_Array_Iter(first(),first());
   }
   Const_Char_Array_Iter end() const {
-    return Const_Char_Array_Iter(last());
+    return Const_Char_Array_Iter(first(),last());
   }
 
-  Char_Array_ID create_id(const std::string &str, Data_type dt=0) {
+  Char_Array_ID create_id(const std::string &str, const Data_type &dt=0) {
     return create_id(str.c_str(), dt);
   }
 
-  Char_Array_ID create_id(const char *str, Data_type dt=0) {
+  Char_Array_ID create_id(const char *str, const Data_type &dt=0) {
     synced = false;
     if(pending_clear_reload)
       reload();
@@ -318,6 +340,17 @@ public:
     return *(const Data_type *)&variable_internal[id + 1 + (sizeof(Hash_sign))/sizeof(uint16_t)];
   }
 
+  Data_type &get_field(Char_Array_ID id) {
+    if(pending_clear_reload)
+      reload();
+
+    assert(id >= 0);
+    assert(variable_internal.size() > (id + 1 + (sizeof(Data_type) + sizeof(Hash_sign))/sizeof(uint16_t)));
+
+    // SKIP Len + Hash
+    return *(Data_type *)&variable_internal[id + 1 + (sizeof(Hash_sign))/sizeof(uint16_t)];
+  }
+
   const Hash_sign &get_hash(Char_Array_ID id) const {
     if(pending_clear_reload)
       reload();
@@ -329,17 +362,15 @@ public:
     return *(const Hash_sign *)&variable_internal[id + 1];
   }
 
-  int self_id(const char *ptr) const {
-    if(pending_clear_reload)
-      reload();
-
-    ptr -= 2;                             // Pos for the ptr
-    return (uint16_t *)ptr - first() + 1; // skip zero
-  }
-
   const Data_type &get_field(const std::string &s) const { return get_field(s.c_str()); }
 
   const Data_type &get_field(const char *ptr) const {
+    assert(!pending_clear_reload);
+    int id = get_id(ptr);
+    return get_field(id);
+  }
+
+  Data_type &get_field(const char *ptr) {
     assert(!pending_clear_reload);
     int id = get_id(ptr);
     return get_field(id);
