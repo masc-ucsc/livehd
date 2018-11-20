@@ -45,13 +45,6 @@ private:
     }
   }
 
-  void resize(size_t sz) {
-    assert(false); // It should reduce size too
-    if(sz > __size) {
-      reserve(sz);
-    }
-  }
-
 public:
   typedef T                 value_type;
   typedef mmap_allocator<T> allocator_type;
@@ -66,6 +59,21 @@ public:
 
   ~Dense() {
     __size   = 0; // No need but nice
+  }
+
+  void emplace_back() {
+    if(__buffer) {
+      reserve(__size+1);
+    }
+    __size = __size + 1;
+  }
+
+  void resize(size_t sz) {
+    assert(sz>=__size); // Shrink still not implemented
+    if(sz > __size && __buffer) {
+      reserve(sz);
+    }
+    __size = sz;
   }
 
   void sync() {

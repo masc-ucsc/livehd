@@ -11,8 +11,8 @@
 #include <cassert>
 #include <iostream>
 
-#define MMAPA_MIN_SIZE    (1ULL << 14)
-#define MMAPA_INCR_SIZE   (1ULL << 20)
+#define MMAPA_MIN_SIZE    (1ULL << 10)
+#define MMAPA_INCR_SIZE   (1ULL << 12)
 #define MMAPA_MAX_ENTRIES (1ULL << 34)
 
 template <typename T> class mmap_allocator {

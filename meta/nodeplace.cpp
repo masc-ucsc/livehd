@@ -24,7 +24,7 @@ void LGraph_Node_Place::sync() {
 
 void LGraph_Node_Place::emplace_back() {
   node_place.emplace_back();
-  node_place[node_place.size() - 1] = Node_Place();
+  //node_place[node_place.size() - 1] = Node_Place();
 }
 
 void LGraph_Node_Place::node_place_emplace_back() {

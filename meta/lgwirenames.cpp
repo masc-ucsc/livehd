@@ -30,10 +30,10 @@ void LGraph_WireNames::sync() {
 
 void LGraph_WireNames::emplace_back() {
   wires.emplace_back();
-  wires[wires.size() - 1] = 0;
+  //wires[wires.size() - 1] = 0;
 
   offsets.emplace_back();
-  offsets[offsets.size() - 1] = 0;
+  //offsets[offsets.size() - 1] = 0;
 }
 
 /*WireName_ID LGraph_WireNames::get_wirename_id(const char *wirename) {

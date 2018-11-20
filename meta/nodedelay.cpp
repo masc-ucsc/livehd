@@ -24,7 +24,7 @@ void LGraph_Node_Delay::sync() {
 
 void LGraph_Node_Delay::emplace_back() {
   node_delay.emplace_back();
-  node_delay[node_delay.size() - 1] = Node_Delay();
+  //node_delay[node_delay.size() - 1] = Node_Delay();
 }
 void LGraph_Node_Delay::node_delay_set(Index_ID nid, float t) {
   assert(nid < node_delay.size());
