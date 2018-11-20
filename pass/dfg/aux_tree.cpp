@@ -10,25 +10,11 @@ void Aux_node::set_pending(const std::string &v, Index_ID n) {
   fmt::print("set pending {} <-> {}\n", v,n );
 }
 
-//Aux_tree member_functions
-//std::vector<Aux_node *>  Aux_tree::pre_order_trans(Aux_node* node, std::vector<Aux_node*> &auxes_stack){
-//  if (node == nullptr)
-//    return auxes_stack;
-//
-//  auxes_stack.push_back(node);
-//  pre_order_trans(node->lchild, auxes_stack);
-//  pre_order_trans(node->rchild, auxes_stack);
-//
-//  return auxes_stack;
-//}
 
 Aux_node* Aux_tree::get_cur_auxnd() const{
   return auxes_stack.back();
 }
 
-//Aux_node * Aux_tree::get_cur_auxnd_const() const{
-//  return auxes_stack.back();
-//}
 
 bool Aux_tree::is_root_aux(const Aux_node *auxnd) const{
   assert(auxnd != nullptr);
@@ -47,8 +33,7 @@ void Aux_tree::set_parent_child(Aux_node *parent, Aux_node *new_child, bool bran
     new_child ->parent = parent;
     new_child ->lchild = nullptr;
     new_child ->rchild = nullptr;
-  }
-  else{
+  }else{
     assert(parent->rchild == nullptr);
     auxes_stack.push_back(new_child);
     parent->rchild     = new_child;
@@ -76,8 +61,7 @@ void Aux_tree::disconnect_child(Aux_node *parent, Aux_node *child, bool branch){
     //delete child; //buggy to have a function delete a pointer that was passed to it!
     parent->lchild = nullptr;
     fmt::print("delete branch true auxtab\n");
-  }
-  else{
+  }else{
     //delete child;
     parent->rchild = nullptr;
     fmt::print("delete branch false auxtab\n");
@@ -131,8 +115,7 @@ Index_ID Aux_tree::get_global_alias(const Aux_node *auxnd, const std::string &v)
 
 bool Aux_tree::has_pending(const std::string &v) const {
   const Aux_node* cur_auxnd = get_cur_auxnd()->parent;
-  //recursive check on parents
-  return check_global_pending(cur_auxnd,v);
+  return check_global_pending(cur_auxnd,v);//recursive check on parents
 }
 
 //check_global_pending() only checks "chain of patent pendtabs" and don't check sibling pendtab
@@ -140,7 +123,7 @@ bool Aux_tree::check_global_pending(const Aux_node *auxnd, const std::string &v)
   if (auxnd == nullptr)
     return false;
 
-  if(auxnd->get_pendtab().find(v) != auxnd->get_pendtab().end())
+  if (auxnd->get_pendtab().find(v) != auxnd->get_pendtab().end())
     return true;
 
   return check_global_pending(auxnd->parent,v);
@@ -148,8 +131,7 @@ bool Aux_tree::check_global_pending(const Aux_node *auxnd, const std::string &v)
 
 Index_ID Aux_tree::get_pending(const std::string &v) const {
   const Aux_node* cur_auxnd = get_cur_auxnd();
-  //recursive search through parents
-  return get_global_pending(cur_auxnd,v);
+  return get_global_pending(cur_auxnd,v);//recursive search through parents
 }
 
 //get_global_pending() only gets "chain of patent pendtabs" and don't get sibling pendtab
