@@ -28,7 +28,7 @@ void LGraph_Node_Src_Loc::sync() {
 
 void LGraph_Node_Src_Loc::emplace_back() {
   node_src_loc.emplace_back();
-  node_src_loc[node_src_loc.size() - 1] = 0;
+  //node_src_loc[node_src_loc.size() - 1] = 0;
 }
 
 void LGraph_Node_Src_Loc::node_loc_set(Index_ID nid, const char *file_name, uint32_t offset, uint32_t length) {

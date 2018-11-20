@@ -175,7 +175,7 @@ private:
       failed = true;
     }
     if (failed) {
-      variable_internal.emplace_back(0); // so that ID zero is not used
+      variable_internal.emplace_back(); //); // so that ID zero is not used
       console->info("char_array:reload for {} failed, creating empty",long_name);
     }
   }
@@ -201,13 +201,13 @@ public:
     pending_clear_reload = false;
 
     variable_internal.clear();
-    variable_internal.emplace_back(0); // so that ID zero is not used
+    variable_internal.emplace_back(); // so that ID zero is not used
     hash2id.clear();
     synced = false;
   }
 
   void sync() {
-    if (synced)
+    if (synced || hash2id.empty())
       return;
 
     assert(!pending_clear_reload);

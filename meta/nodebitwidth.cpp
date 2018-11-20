@@ -190,7 +190,7 @@ void LGraph_Node_bitwidth::sync() {
 
 void LGraph_Node_bitwidth::emplace_back() {
   node_bitwidth.emplace_back();
-  node_bitwidth[node_bitwidth.size() - 1] = Node_bitwidth();
+  //node_bitwidth[node_bitwidth.size() - 1] = Node_bitwidth();
 }
 
 void LGraph_Node_bitwidth::node_bitwidth_set(Index_ID nid, const Node_bitwidth &t) {

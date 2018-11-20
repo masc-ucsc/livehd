@@ -26,7 +26,7 @@ void LGraph_InstanceNames::sync() {
 
 void LGraph_InstanceNames::emplace_back() {
   instances.emplace_back();
-  instances[instances.size() - 1] = 0;
+  //instances[instances.size() - 1] = 0;
 }
 
 const char *LGraph_InstanceNames::get_instancename(Char_Array_ID cid) const {
