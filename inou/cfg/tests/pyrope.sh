@@ -12,7 +12,9 @@ pwd
 
 
 # pts='top_ooo  sp_add  constant  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2  if_elif_else'
-pts='top_ooo  sp_add  constant  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2 '
+# pts='top_ooo  sp_add  constant  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2 '
+pts='constant '
+# pts='top_ooo sp_add'
 # pts='sp_assign'
 
 LGSHELL=./bazel-bin/main/lgshell

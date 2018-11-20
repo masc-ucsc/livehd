@@ -78,6 +78,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
 
   char *p = strtok_r(*memblock, "\n\r\f", &str_ptr);
   uint32_t gsub_id_pre = 0;
+
   while(p) {
     vector<string> words = split(p);
 
