@@ -137,6 +137,7 @@ void LGraph_Base::recompute_io_ports() {
       p.pos = p.original_pos;
       if (p.original_pos>=fixed.size())
         fixed.resize(p.original_pos+1);
+      assert(fixed[p.original_pos] == 0); // original_pos must be unique
       fixed[p.original_pos] = it.get_id();
     }else{
       ordered[it.get_char()] = it.get_id();
@@ -164,6 +165,7 @@ void LGraph_Base::recompute_io_ports() {
       p.pos = p.original_pos;
       if (p.original_pos>=fixed.size())
         fixed.resize(p.original_pos+1);
+      assert(fixed[p.original_pos] == 0); // original_pos must be unique
       fixed[p.original_pos] = it.get_id();
     }else{
       ordered[it.get_char()] = it.get_id();
@@ -182,7 +184,7 @@ void LGraph_Base::recompute_io_ports() {
   }
 }
 
-Index_ID LGraph_Base::add_graph_input(const char *str, Index_ID nid, uint16_t bits, Port_ID original_pos) {
+Index_ID LGraph_Base::add_graph_input_int(const char *str, Index_ID nid, uint16_t bits, Port_ID original_pos) {
 
   if(nid == 0)
     nid = create_node_int();
@@ -196,16 +198,16 @@ Index_ID LGraph_Base::add_graph_input(const char *str, Index_ID nid, uint16_t bi
   IO_port p(nid,original_pos);
   input_array.create_id(str, p);
 
-  recompute_io_ports();
-
   node_internal[nid].set_out_pid(0);
-
   assert(node_internal[nid].is_master_root());
+
+  if (original_pos==0)
+    recompute_io_ports();
 
   return nid;
 }
 
-Index_ID LGraph_Base::add_graph_output(const char *str, Index_ID nid, uint16_t bits, Port_ID original_pos) {
+Index_ID LGraph_Base::add_graph_output_int(const char *str, Index_ID nid, uint16_t bits, Port_ID original_pos) {
 
   if(nid == 0)
     nid = create_node_int();
@@ -219,11 +221,11 @@ Index_ID LGraph_Base::add_graph_output(const char *str, Index_ID nid, uint16_t b
   IO_port p(nid,original_pos);
   output_array.create_id(str, p);
 
-  recompute_io_ports();
-
   node_internal[nid].set_out_pid(0);
-
   assert(node_internal[nid].is_master_root());
+
+  if (original_pos==0)
+    recompute_io_ports();
 
   return nid;
 }

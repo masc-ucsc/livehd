@@ -264,6 +264,8 @@ void Elab_scanner::chunked(const char *_buffer, size_t _buffer_sz) {
   buffer = _buffer;
   buffer_sz = static_cast<uint32_t>(_buffer_sz);
 
+  token_list.reserve(buffer_sz/4); // An average of a token each 4 characters?
+
   elaborate();
 
   token_list.clear();

@@ -18,13 +18,13 @@ void generate_graphs(int n) {
     int inps = 10+rand_r(&rseed)%100;
     for(int j = 0; j < inps; j++) {
       //max 110 inputs, min 10
-      Index_ID inp_id = g->add_graph_input(("i" + std::to_string(j)).c_str(), 0, 1);
+      Index_ID inp_id = g->add_graph_input(("i" + std::to_string(j)).c_str(), 0, 1, 0);
       nodes.push_back(inp_id);
     }
     int outs = 10+rand_r(&rseed)%100;
     for(int j = 0; j < outs; j++) {
       //max 110 outs, min 10
-      Index_ID out_id = g->add_graph_output(("o" + std::to_string(j)).c_str(), 0, 1);
+      Index_ID out_id = g->add_graph_output(("o" + std::to_string(j)).c_str(), 0, 1, 0);
       nodes.push_back(out_id);
     }
 
@@ -126,15 +126,15 @@ bool simple() {
   std::string gname = "simple_iter";
   LGraph *g = LGraph::create("core_test_lgdb", gname);
 
-  g->add_graph_input("i0", 0, 1);  // 1
-  g->add_graph_input("i1", 0, 1);  // 2
-  g->add_graph_input("i2", 0, 1);  // 3
-  g->add_graph_input("i3", 0, 1);  // 4
+  g->add_graph_input("i0", 0, 1, 0);  // 1
+  g->add_graph_input("i1", 0, 1, 0);  // 2
+  g->add_graph_input("i2", 0, 1, 0);  // 3
+  g->add_graph_input("i3", 0, 1, 0);  // 4
 
-  g->add_graph_output("o0", 0, 1); // 5
-  g->add_graph_output("o1", 0, 1); // 6
-  g->add_graph_output("o2", 0, 1); // 7
-  g->add_graph_output("o3", 0, 1); // 8
+  g->add_graph_output("o0", 0, 1, 0); // 5
+  g->add_graph_output("o1", 0, 1, 0); // 6
+  g->add_graph_output("o2", 0, 1, 0); // 7
+  g->add_graph_output("o3", 0, 1, 0); // 8
 
   Index_ID const0 = g->create_node().get_nid(); //  9
   Index_ID const1 = g->create_node().get_nid(); //  10

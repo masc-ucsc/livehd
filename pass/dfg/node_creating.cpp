@@ -18,14 +18,14 @@ Index_ID Pass_dfg::create_reference(LGraph *g, Aux_tree *aux_tree, const std::st
 
 Index_ID Pass_dfg::create_input(LGraph *g, Aux_tree *aux_tree, const std::string &var_name, uint16_t bits) {
   Index_ID nid = create_node(g, aux_tree, var_name, bits);
-  g->add_graph_input(var_name.substr(1).c_str(), nid, bits); //get rid of $mark
+  g->add_graph_input(var_name.substr(1).c_str(), nid, bits, 0); //get rid of $mark
 
   return nid;
 }
 
 Index_ID Pass_dfg::create_output(LGraph *g, Aux_tree *aux_tree, const std::string &var_name, uint16_t bits) {
   Index_ID nid = create_node(g, aux_tree, var_name);
-  g->add_graph_output(var_name.substr(1).c_str(), nid, bits);
+  g->add_graph_output(var_name.substr(1).c_str(), nid, bits, 0);
 
   return nid;
 }
