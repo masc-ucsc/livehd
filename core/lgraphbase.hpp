@@ -27,7 +27,6 @@ class Edge_iterator;
 class LGraph_Base : public LGraph_Node_Type {
 protected:
   bool        locked;
-  Port_ID     io_nums = 1;
   int         lgraph_id;
 
   struct str_cmp_i { // case insensitive string compare for IO
