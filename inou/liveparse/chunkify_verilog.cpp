@@ -212,7 +212,7 @@ void Chunkify_verilog::elaborate() {
       }
     }else if (scan_is_token(TOK_COMMA) ||scan_is_token(TOK_SEMICOLON) || scan_is_token(TOK_CP)) {
       if (last_input || last_output) {
-        if (scan_is_prev_token(TOK_ALNUM)) {
+        if (in_module && scan_is_prev_token(TOK_ALNUM)) {
           std::string label;
           scan_prev_append(label);
 
