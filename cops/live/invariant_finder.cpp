@@ -66,22 +66,27 @@ void Invariant_finder::get_topology() {
 
 void Invariant_finder::propagate_until_boundary(Index_ID nid, uint32_t bit_selection) {
 
-  Node_bit nid_bit = std::make_pair(nid, bit_selection);
-
   assert(synth_graph->get_bits(nid) > bit_selection);
 
   Index_ID master_id = synth_graph->get_master_nid(nid);
+#if 1
+  const auto &op = synth_graph->node_type_get(master_id).op;
+  if (op == GraphIO_Op || op == U32Const_Op || op == StrConst_Op)
+    return;
+#else
   if(synth_graph->is_graph_input(nid) ||
      synth_graph->node_type_get(master_id).op == U32Const_Op ||
      synth_graph->node_type_get(master_id).op == StrConst_Op) {
     return;
   }
+#endif
 
+  const Node_bit nid_bit = std::make_pair(nid, bit_selection);
   if(partial_endpoints.find(nid_bit) != partial_endpoints.end()) {
     return;
   }
 
-  Node_bit mnid_bit = std::make_pair(master_id, bit_selection);
+  const Node_bit mnid_bit = std::make_pair(master_id, bit_selection);
   if(partial_endpoints.find(mnid_bit) != partial_endpoints.end()) {
     partial_endpoints[nid_bit] = partial_endpoints[mnid_bit];
     partial_cone_cells[nid_bit] = partial_cone_cells[mnid_bit];
