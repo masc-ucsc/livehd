@@ -126,30 +126,59 @@ void LGraph_Base::reload() {
 
 void LGraph_Base::recompute_io_ports() {
 
-  // Reassign inputs in alphabetical order
+  // Reassign inputs in alphabetical order (preserve original_pos if present)
   std::map<const char *, int, str_cmp_i> ordered;
-  Port_ID pos = 0;
+  std::vector<int> fixed;
+  Port_ID pos = 1;
 
   for(auto it = input_array.begin(); it!=input_array.end(); ++it ) {
-    ordered[it.get_char()] = it.get_id();
+    auto &p = it.get_field();
+    if (p.original_pos) {
+      p.pos = p.original_pos;
+      if (p.original_pos>=fixed.size())
+        fixed.resize(p.original_pos+1);
+      fixed[p.original_pos] = it.get_id();
+    }else{
+      ordered[it.get_char()] = it.get_id();
+    }
   }
 
+  while(fixed.size()>pos && fixed[pos]) {
+    pos++;
+  }
   for(auto &it : ordered) {
     auto &p = input_array.get_field(it.second);
     p.pos = pos++;
+    while(fixed.size()>pos && fixed[pos]) {
+      pos++;
+    }
   }
 
   // Reassign outputs in alphabetical order
   ordered.clear();
-  pos = 0;
+  pos = 1;
 
   for(auto it = output_array.begin(); it!=output_array.end(); ++it ) {
-    ordered[it.get_char()] = it.get_id();
+    auto &p = it.get_field();
+    if (p.original_pos) {
+      p.pos = p.original_pos;
+      if (p.original_pos>=fixed.size())
+        fixed.resize(p.original_pos+1);
+      fixed[p.original_pos] = it.get_id();
+    }else{
+      ordered[it.get_char()] = it.get_id();
+    }
   }
 
+  while(fixed.size()>pos && fixed[pos]) {
+    pos++;
+  }
   for(auto &it : ordered) {
     auto &p = output_array.get_field(it.second);
     p.pos = pos++;
+    while(fixed.size()>pos && fixed[pos]) {
+      pos++;
+    }
   }
 }
 
@@ -161,10 +190,6 @@ Index_ID LGraph_Base::add_graph_input(const char *str, Index_ID nid, uint16_t bi
 
   if(bits != 0)
     set_bits(nid, bits);
-
-  if(original_pos == 0)
-    original_pos = io_nums;
-  io_nums++;
 
   assert(input_array.get_id(str) == 0); // No name dupliation
 
@@ -188,10 +213,6 @@ Index_ID LGraph_Base::add_graph_output(const char *str, Index_ID nid, uint16_t b
 
   if(bits != 0)
     set_bits(nid, bits);
-
-  if(original_pos == 0)
-    original_pos = io_nums;
-  io_nums++;
 
   assert(output_array.get_id(str) == 0); // No name dupliation
 

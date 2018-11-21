@@ -189,7 +189,7 @@ void Chunkify_verilog::elaborate() {
         scan_token_append(in_module_token);
         scan_next();
         scan_append(module);
-        module_io_pos = 0;
+        module_io_pos = 1; // pos 0 means I do not care
         in_module = true;
 
         lg = library->try_find_lgraph(module);
