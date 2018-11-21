@@ -42,7 +42,7 @@ protected:
 
     IO_port(Index_ID _nid, Port_ID _opos)
       :nid(_nid)
-      ,pos(0)
+      ,pos(_opos)
       ,original_pos(_opos) {
     };
   };
@@ -66,8 +66,8 @@ protected:
 
   void recompute_io_ports();
 
-  Index_ID add_graph_input(const char *str, Index_ID nid = 0, uint16_t bits = 0, Port_ID original_pos = 0);
-  Index_ID add_graph_output(const char *str, Index_ID nid = 0, uint16_t bits = 0, Port_ID original_pos = 0);
+  Index_ID add_graph_input_int(const char *str, Index_ID nid, uint16_t bits, Port_ID original_pos = 0);
+  Index_ID add_graph_output_int(const char *str, Index_ID nid, uint16_t bits, Port_ID original_pos = 0);
 
   void del_int_node(Index_ID idx);
 

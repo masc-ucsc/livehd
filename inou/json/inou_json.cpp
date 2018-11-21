@@ -106,12 +106,12 @@ void Inou_json::from_json(LGraph *g, rapidjson::Document &document) {
 
       if(nodes.HasMember("input_name")) {
         fmt::print("DEBUG:: input name is : {} \n", nodes["input_name"].GetString());
-        g->add_graph_input(nodes["input_name"].GetString(), last_nid);
+        g->add_graph_input(nodes["input_name"].GetString(), last_nid, 0, 0);// FIXME: set original_pos and bits
       }
 
       if(nodes.HasMember("output_name")) {
         fmt::print("DEBUG:: output name is : {} \n", nodes["output_name"].GetString());
-        g->add_graph_output(nodes["output_name"].GetString(), last_nid);
+        g->add_graph_output(nodes["output_name"].GetString(), last_nid, 0, 0); //FIXME: must remember original_pos and set bits
       }
 
       if(nodes.HasMember("outputs")) {

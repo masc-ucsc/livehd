@@ -66,10 +66,10 @@ static void look_for_module_outputs(RTLIL::Module *module, const std::string &pa
     if(wire->port_input) {
       assert(!wire->port_output); //any bidirectional port?
 #ifndef NDEBUG
-      log(" adding global input  wire: %s width %d id=%x\n", wire->name.c_str(), wire->width, wire->hash());
+      log(" adding global input  wire: %s width %d id=%x original_pos=%d\n", wire->name.c_str(), wire->width, wire->hash(), wire->port_id);
 #endif
       assert(wire->name.c_str()[0] == '\\');
-      io_idx = g->add_graph_input(&wire->name.c_str()[1], 0, wire->width, wire->start_offset);
+      io_idx = g->add_graph_input(&wire->name.c_str()[1], 0, wire->width, wire->start_offset, wire->port_id);
       //FIXME: can we get rid of the dependency in the wirename for IOs?
       g->set_node_wirename(io_idx, &wire->name.c_str()[1]);
       g->set_bits(io_idx, wire->width);
@@ -84,7 +84,7 @@ static void look_for_module_outputs(RTLIL::Module *module, const std::string &pa
       log(" adding global output wire: %s width %d id=%x\n", wire->name.c_str(), wire->width, wire->hash());
 #endif
       assert(wire->name.c_str()[0] == '\\');
-      io_idx = g->add_graph_output(&wire->name.c_str()[1], 0, wire->width, wire->start_offset);
+      io_idx = g->add_graph_output(&wire->name.c_str()[1], 0, wire->width, wire->start_offset, wire->port_id);
       //FIXME: can we get rid of the dependency in the wirename for IOs?
       g->set_node_wirename(io_idx, &wire->name.c_str()[1]);
       g->set_bits(io_idx, wire->width);
