@@ -829,12 +829,15 @@ void LGraph_Base::del_edge(const Edge &edge) {
 void LGraph_Base::del_node(Index_ID idx) {
   // TODO: do this more effiently (no need to build iterator)
 
+  fmt::print("del_node {}\n",idx);
+
   assert(node_internal[idx].is_master_root());
   // Deleting can break the iterator. Restart each time
   bool deleted;
   do {
     deleted = false;
     for(auto &c : inp_edges(idx)) {
+      fmt::print("del_node {} inp {}\n",idx, c.get_self_idx());
       assert(Node_Internal::get(&c).get_master_root_nid() == idx);
       node_internal[c.get_self_idx()].del(c);
       deleted = true;
@@ -845,8 +848,9 @@ void LGraph_Base::del_node(Index_ID idx) {
   do {
     deleted = false;
     for(auto &c : out_edges(idx)) {
-      assert(Node_Internal::get(&c).get_self_idx() == idx);
-      node_internal[idx].del(c);
+      fmt::print("del_node {} out {}\n",idx, c.get_self_idx());
+      assert(Node_Internal::get(&c).get_master_root_nid() == idx);
+      node_internal[c.get_self_idx()].del(c);
       deleted = true;
       break;
     }
