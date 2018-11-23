@@ -84,6 +84,7 @@ public:
 
   void clear() {
     if (mmap_fd<0) {
+      unlink(mmap_name.c_str());
       assert(mmap_base==0);
       assert(alloc==0);
       return;
@@ -118,6 +119,10 @@ public:
 
   size_t capacity() const {
     return mmap_capacity;
+  }
+
+  size_t size() const {
+    return mmap_size/sizeof(T);
   }
 
   const std::string &get_filename() const {
