@@ -324,7 +324,6 @@ void Node_Internal::try_recycle() {
 
     set_free_state();
     assert(root[-root_idx].is_page_state());
-    assert(root[-root_idx].get_nid() == 0);
 
     Node_Internal_Page master_page = Node_Internal_Page::get(root[-root_idx].sedge);
 
