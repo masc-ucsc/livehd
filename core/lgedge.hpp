@@ -442,9 +442,11 @@ public:
   Index_ID get_self_idx() const;
 
   bool is_root() const {
+    assert(is_node_state());
     return root;
   }
   bool is_master_root() const {
+    assert(is_node_state());
     bool ms = nid == get_self_idx();
     if(ms)
       assert(root);

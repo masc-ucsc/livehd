@@ -107,7 +107,12 @@ void Lgyosys_dump::create_blackbox(const LGraph& subgraph, RTLIL::Design *design
   RTLIL::Module *mod = new RTLIL::Module;
   mod->name = "\\" + subgraph.get_name();
   mod->attributes["\\blackbox"] = RTLIL::Const(1);
-  design->add(mod);
+
+  static std::set<string> created_blackboxes;
+  if (created_blackboxes.find(subgraph.get_name()) == created_blackboxes.end()) {
+    design->add(mod);
+    created_blackboxes.insert(subgraph.get_name());
+  }
 
   uint32_t port_idx = 0;
   for (auto &idx : subgraph.fast()) {
