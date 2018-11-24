@@ -849,6 +849,8 @@ static LGraph *process_module(RTLIL::Module *module) {
 
       size = width;
 
+      fmt::print("name:{} depth:{} wrports:{} rdports:{}\n", name, depth, wrports, rdports);
+
       connect_constant(g, depth, 32, onid, LGRAPH_MEMOP_SIZE);
       connect_constant(g, offset, 32, onid, LGRAPH_MEMOP_OFFSET);
       connect_constant(g, abits, 32, onid, LGRAPH_MEMOP_ABITS);

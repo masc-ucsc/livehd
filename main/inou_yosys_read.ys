@@ -12,6 +12,7 @@ hierarchy {{top}}
 proc
 pmuxtree
 memory_dff
+memory_share
 memory_collect
 
 {{#techmap_alumacc}}
