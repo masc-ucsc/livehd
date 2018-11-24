@@ -34,9 +34,10 @@ protected:
       nid++;
       if(nid >= static_cast<Index_ID>(node_internal.size()))
         return 0;
+      if(!node_internal[nid].is_node_state())
+        continue;
       if(node_internal[nid].is_master_root())
         return nid;
-      assert(!node_internal[nid].is_master_root());
     }
 
     return 0;

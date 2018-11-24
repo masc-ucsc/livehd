@@ -40,10 +40,7 @@ Lgraph_base_core::Lgraph_base_core(const std::string &_path, const std::string &
     };
 
 Fast_edge_iterator Lgraph_base_core::fast() const {
-  if(node_internal.empty())
-    return Fast_edge_iterator(0, this);
-
-  return Fast_edge_iterator(1, this);
+  return Fast_edge_iterator(fast_next(0), this); // Skip after 1, but first may be deleted, so fast_next
 }
 
 int Console_init::_static_initializer = Console_init::initialize_logger();
