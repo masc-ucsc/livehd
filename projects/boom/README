@@ -6,9 +6,14 @@ boom.system.TestHarness.BoomConfig.v
   Total FIRRTL Compile Time: 147.988 s
 
 boom.system.TestHarness.BoomConfig_bug1.v
-  BoomConfig + bug1
+  BoomConfig + bug1 (lsu)
   elaboration [success] Total time: 51 s, completed Oct 11, 2018 2:17:37 PM
   Total FIRRTL Compile Time: 179.246 s
+
+boom.system.TestHarness.BoomConfig_bug2.v
+  BoomConfig + bug2 (icache assoc)
+  elaboration [success] Total time: 50 s, completed Nov 24, 2018 10:39:12 AM
+  Total FIRRTL Compile Time: 174.410 s
 
 boom.system.TestHarness.BoomConfig2core.v
   BoomConfig 2 cores
@@ -40,10 +45,30 @@ boom.system.TestHarness.BoomConfig2core_bug1.v
   The bug generates lots of lane code change, but mostly because it changes the comments. If comments
 are removed, the difference is around 7K LoC changes in verilog. Most of the changes is just renumbering of wires in the lsu module. Excluding this, it is just a few wires that really change.
 
+boom.system.TestHarness.BoomConfig2core_bug2.v
+  BoomConfig 2 core + bug2 
+  elaboration [success] Total time: 114 s, completed Nov 24, 2018 10:48:46 AM
+  Total FIRRTL Compile Time: 193.792 s
+
 example.TestHarness.DefaultExampleConfig.v
   Firesim 1 rocket core
   elaboration [success] Total time: 185 s, completed Oct 9, 2018 1:44:15 PM
   Total FIRRTL Compile Time: 45500.0 ms
 
   RocketTile is the core and L1 caches
+
+
+############################
+
+Sample delta setup
+
+inou.liveparse files:projects/boom/boom.system.TestHarness.BoomConfig.v        path:lgdb_1core_setup
+inou.liveparse files:projects/boom/boom.system.TestHarness.BoomConfig2core.v   path:lgdb_2core_setup
+
+inou.liveparse files:projects/boom/boom.system.TestHarness.BoomConfig_bug1.v   elab_path:lgdb_1core_setup path:lgdb_1core_bug1
+inou.liveparse files:projects/boom/boom.system.TestHarness.BoomConfig_bug2.v   elab_path:lgdb_1core_setup path:lgdb_1core_bug2
+inou.liveparse files:projects/boom/boom.system.TestHarness.BoomConfig2core.v   elab_path:lgdb_1core_setup path:lgdb_2core
+
+inou.liveparse files:projects/boom/boom.system.TestHarness.BoomConfig2core_bug1.v   elab_path:lgdb_2core_setup path:lgdb_2core_bug1
+inou.liveparse files:projects/boom/boom.system.TestHarness.BoomConfig2core_bug2.v   elab_path:lgdb_2core_setup path:lgdb_2core_bug2
 
