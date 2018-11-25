@@ -1,3 +1,7 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
+#include <string>
+#include <regex>
 
 #include "lgraph.hpp"
 #include "main_api.hpp"
@@ -43,6 +47,40 @@ protected:
     assert(!name.empty());
 
     LGraph::rename(path,name,dest);
+  }
+
+  static void match(Eprp_var &var) {
+
+    const std::string path  = var.get("path");
+    const std::string match = var.get("match");
+
+    const auto *library = Graph_library::instance(path);
+    if (library==0) {
+      Main_api::warn(fmt::format("lgraph.match could not open {} path", path));
+      return;
+    }
+
+    std::vector<LGraph *> lgs;
+
+    try {
+      const std::regex txt_regex(match);
+
+      library->each_graph([&lgs,path,txt_regex](const std::string &name, uint32_t lgid) {
+          if (std::regex_search(name.c_str(), txt_regex)) {
+            LGraph *lg = LGraph::open(path,name);
+            if (lg) {
+              lgs.push_back(lg);
+            }
+          }
+        });
+
+    } catch (const std::regex_error& e) {
+      Main_api::error(fmt::format("invalid match:{} regex. It is a FULL regex unlike bash. To test, try: `ls path | grep -E \"match\"`", match));
+    }
+
+    for(LGraph *lg:lgs) {
+      var.add(lg);
+    }
   }
 
   static void stats(Eprp_var &var) {
@@ -113,6 +151,13 @@ public:
     m6.add_label_required("dest","lgraph destination name");
 
     eprp.register_method(m6);
+
+    //---------------------
+    Eprp_method m7("lgraph.match", "open many lgraphs (match regex)", &Meta_api::match);
+    m7.add_label_optional("path","lgraph path","lgdb");
+    m7.add_label_optional("match","quoted string of regex to match . E.g: match:\"\\.v$\" for verilog files.",".*");
+
+    eprp.register_method(m7);
   }
 
 };
