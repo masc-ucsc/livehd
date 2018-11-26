@@ -111,7 +111,6 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs, unordered_ma
       lgs.push_back(lg);
 
       fmt::print("lgs size:{}\n", lgs.size());
-
       nname2nid_lgs.resize(nname2nid_lgs.size() + 1);
       chain_stks_lgs.resize(chain_stks_lgs.size() + 1);
       nid_end_lgs.resize(nid_end_lgs.size() + 1);
@@ -119,19 +118,11 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs, unordered_ma
       n1st2gid[w1st] = gsub_id;
       n1st2lgname[w1st] = "sub_method" + std::to_string(gsub_id);
       build_graph(words, dfg_data, lgs[gsub_id], n1st2gid, n1st2lgname, nname2nid_lgs[gsub_id], chain_stks_lgs[gsub_id], rename_tab, nid_end_lgs[gsub_id]);
-      gsub_id_pre = gsub_id;
-    }else if(gsub_id != 0){
+    }else if(gsub_id != 0)
       build_graph(words, dfg_data, lgs[gsub_id], n1st2gid, n1st2lgname, nname2nid_lgs[gsub_id], chain_stks_lgs[gsub_id], rename_tab, nid_end_lgs[gsub_id]);
-      gsub_id_pre = gsub_id;
-    }else{//build top graph; sync and close previous lgraphs for later lgraph_renaming
-      if(gsub_id_pre != gsub_id){
-        fmt::print("gsub_id is:{}, gsub_id_pre is:{}\n",gsub_id, gsub_id_pre);
-        fmt::print("lgs size:{}\n",lgs.size());
-        lgs[gsub_id_pre]->sync();
-        lgs[gsub_id_pre]->close();
-      }
+     else
       build_graph(words, dfg_data, gtop, n1st2gid, n1st2lgname, nname2nid_lgs[0], chain_stks_lgs[0], rename_tab, nid_end_lgs[0]);
-    }
+
 
     fmt::print("\n");
     p = strtok_r(nullptr, "\n\r\f", &str_ptr);
@@ -192,7 +183,7 @@ void Inou_cfg::build_graph(vector<string>               &words,
   string w8th = *(words.begin() + 7);
   string w9th ; //2018/11/24
   string w10th;
-  if(w6th == "if" || w6th == "::{")
+  if(w6th == "if" || w6th == "::{" || words.size()>=9)
     w9th = *(words.begin() + 8);
 
   if(w6th == "if")
@@ -452,7 +443,6 @@ void Inou_cfg::remove_fake_fcall(LGraph *g){
   std::set<std::string> drive_tab;
   std::set<Index_ID>    true_fcall_tab;
   std::unordered_map<std::string, Index_ID> name2id;
-  fmt::print("remove_fake_fcall()\n");
   //1st pass
   for(auto idx : g->fast()){
     if(g->node_type_get(idx).op == Invalid_Op)
