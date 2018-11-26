@@ -64,7 +64,11 @@ void LGraph::rename(const std::string &path, const std::string &orig, const std:
     return;
   }
 
-  Graph_library::instance(path)->rename_name(orig, dest);
+  bool valid = Graph_library::instance(path)->rename_name(orig, dest);
+  if(valid)
+    console->warn("find original graph {} in path {}", orig, path);
+  else
+    console->error("cannot find original graph {} in path {}", orig, path);
 }
 
 LGraph *LGraph::open(const std::string &path, const std::string &name) {

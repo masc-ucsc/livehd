@@ -1,6 +1,6 @@
 #!/bin/bash
 
-rm -rf ./lgdb
+rm -rf ./lgdb 
 rm -f  ./logs/*.json
 rm -f  ./logs/*.v
 rm -f  ./logs/*.log
@@ -13,9 +13,10 @@ pwd
 
 # pts='top_ooo  sp_add  constant  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2  if_elif_else'
 # pts='top_ooo  sp_add  constant  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2 '
-pts='constant '
+# pts='constant '
 # pts='top_ooo sp_add'
-# pts='sp_assign'
+pts='sp_assign'
+# pts='sp_if_0'
 
 LGSHELL=./bazel-bin/main/lgshell
 
@@ -41,9 +42,9 @@ do
   fi
 
   echo "inou.cfg.tolg  file:./inou/cfg/tests/${pt}.cfg  name:${pt}_cfg  |> @a" >  lgshell_cmds
-  echo "lgraph.open name:${pt}_cfg |> inou.json.fromlg output:${pt}_cfg.json"  >> lgshell_cmds
-  echo "lgraph.open name:${pt}_cfg |> pass.dfg.generate name:${pt}"            >> lgshell_cmds
-  echo "lgraph.open name:${pt} |> inou.json.fromlg output:${pt}_pre.json"      >> lgshell_cmds
+  # echo "lgraph.open name:${pt}_cfg |> inou.json.fromlg output:${pt}_cfg.json"  >> lgshell_cmds
+  # echo "lgraph.open name:${pt}_cfg |> pass.dfg.generate name:${pt}"            >> lgshell_cmds
+  # echo "lgraph.open name:${pt} |> inou.json.fromlg output:${pt}_pre.json"      >> lgshell_cmds
 
   ${LGSHELL} < lgshell_cmds
   if [ $? -ne 0 ]; then
@@ -55,38 +56,38 @@ done
 
 mv *.json ./logs
 
- echo ""
- echo "2nd round: DFG optimization"
- echo ""
+# echo ""
+# echo "2nd round: DFG optimization"
+# echo ""
 
- for pt in $pts
- do
-   echo "lgraph.open name:${pt} |> pass.dfg.optimize"                      >  lgshell_cmds_opt
-   echo "lgraph.open name:${pt} |> pass.dfg.pseudo_bitwidth"               >> lgshell_cmds_opt
-   echo "lgraph.open name:${pt} |> inou.json.fromlg output:${pt}.json"     >> lgshell_cmds_opt
+# for pt in $pts
+# do
+#   echo "lgraph.open name:${pt} |> pass.dfg.optimize"                      >  lgshell_cmds_opt
+#   echo "lgraph.open name:${pt} |> pass.dfg.pseudo_bitwidth"               >> lgshell_cmds_opt
+#   echo "lgraph.open name:${pt} |> inou.json.fromlg output:${pt}.json"     >> lgshell_cmds_opt
 
-  ${LGSHELL} < lgshell_cmds_opt
-   if [ $? -ne 0 ]; then
-     echo "pyrope.sh failed 2nd round: optimizie dfg ${pt}"
-     exit 3
-   fi
- done
+#  ${LGSHELL} < lgshell_cmds_opt
+#   if [ $? -ne 0 ]; then
+#     echo "pyrope.sh failed 2nd round: optimizie dfg ${pt}"
+#     exit 3
+#   fi
+# done
 
- mv *.json ./logs
+# mv *.json ./logs
 
-echo ""
-echo "Verilog code generation"
-echo ""
-for pt in $pts
-do
-  ./inou/yosys/lgyosys -g"$pt"
-  if [ $? -eq 0 ]; then
-    echo "Successfully created verilog:${pt}.v"
-  else
-    echo "FAIL: verilog generation terminated with an error (testcase ${pt}.v)"
-    exit 1
-  fi
-done
+# echo ""
+# echo "Verilog code generation"
+# echo ""
+# for pt in $pts
+# do
+#   ./inou/yosys/lgyosys -g"$pt"
+#   if [ $? -eq 0 ]; then
+#     echo "Successfully created verilog:${pt}.v"
+#   else
+#     echo "FAIL: verilog generation terminated with an error (testcase ${pt}.v)"
+#     exit 1
+#   fi
+# done
 
 # echo ""
 # echo "Logic Equivalence Check"
