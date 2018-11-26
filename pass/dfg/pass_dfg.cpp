@@ -148,6 +148,7 @@ void Pass_dfg::do_pseudo_bitwidth(LGraph *dfg) {
       if(dfg->node_type_get(idx).op == SubGraph_Op){
         LGraph *subgraph = LGraph::open(dfg->get_path(), dfg->subgraph_id_get(idx));
         const char *out_name = subgraph->get_graph_output_name_from_pid(src_pid);
+        fmt::print("out_name:{}\n", out_name);
         uint16_t    out_size = subgraph->get_bits(subgraph->get_graph_output(out_name).get_nid());
         dfg->set_bits(dst_nid,out_size);
       }else if(dfg->node_type_get(dst_nid).op == Mux_Op){
