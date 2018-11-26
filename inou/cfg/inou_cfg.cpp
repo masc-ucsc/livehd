@@ -19,6 +19,7 @@
 #include "cfg_node_data.hpp"
 
 using std::map;
+using std::unordered_map;
 using std::string;
 using std::vector;
 
@@ -28,6 +29,7 @@ Inou_cfg::~Inou_cfg() { }
 vector<LGraph *> Inou_cfg::tolg() {
   assert(!opack.name.empty());
   assert(!opack.file.empty());
+  unordered_map<std::string, std::string> rename_tab;
 
   const auto &cfg_file = opack.file;
   int fd = open(cfg_file.c_str(), O_RDONLY);
@@ -47,14 +49,20 @@ vector<LGraph *> Inou_cfg::tolg() {
   vector<LGraph *> lgs;
   lgs.push_back(LGraph::create(opack.path, opack.name));
 
-  cfg_2_lgraph(&memblock, lgs);
+  cfg_2_lgraph(&memblock, lgs, rename_tab);
+
+  for(LGraph *g : lgs)
+    remove_fake_fcall(g);
 
   for (LGraph *g : lgs)
     g->sync();
 
+  for (const auto& it : rename_tab){
+    fmt::print("Try to rename lgraph!\n");
+    fmt::print("original subg_name:{}, new name:{}\n",it.first, it.second);
+    LGraph::rename("./" + opack.path, it.first, it.second);
+  }
 
-  //fmt::print("opack.path is:{}\n",opack.path);
-  //LGraph::rename("./" + opack.path, "sub_method1", "foo");
   close(fd);
   return lgs;
 }
@@ -63,7 +71,7 @@ void Inou_cfg::fromlg(vector<const LGraph *> &lgs) {
   assert(false); // Maybe in the future, we can generate a CFG from a cfg lgraph. Still not there
 }
 
-void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
+void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs, unordered_map<std::string, std::string>& rename_tab) {
   string                              s;
   vector<map<string, Index_ID>>       nname2nid_lgs(1);  //lgs = graphs
   vector<map<string, vector<string>>> chain_stks_lgs(1); //chain_stacks for every graph, use vector to implement stack
@@ -110,54 +118,54 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs) {
       nname_begn_lgs.push_back(w1st);
       n1st2gid[w1st] = gsub_id;
       n1st2lgname[w1st] = "sub_method" + std::to_string(gsub_id);
-      build_graph(words, dfg_data, lgs[gsub_id], n1st2gid, n1st2lgname, nname2nid_lgs[gsub_id], chain_stks_lgs[gsub_id], nid_end_lgs[gsub_id]);
+      build_graph(words, dfg_data, lgs[gsub_id], n1st2gid, n1st2lgname, nname2nid_lgs[gsub_id], chain_stks_lgs[gsub_id], rename_tab, nid_end_lgs[gsub_id]);
       gsub_id_pre = gsub_id;
     }else if(gsub_id != 0){
-      build_graph(words, dfg_data, lgs[gsub_id], n1st2gid, n1st2lgname, nname2nid_lgs[gsub_id], chain_stks_lgs[gsub_id], nid_end_lgs[gsub_id]);
+      build_graph(words, dfg_data, lgs[gsub_id], n1st2gid, n1st2lgname, nname2nid_lgs[gsub_id], chain_stks_lgs[gsub_id], rename_tab, nid_end_lgs[gsub_id]);
       gsub_id_pre = gsub_id;
     }else{//build top graph; sync and close previous lgraphs for later lgraph_renaming
       if(gsub_id_pre != gsub_id){
-        fmt::print("gsub_id_pre is:{}\n",gsub_id_pre);
+        fmt::print("gsub_id is:{}, gsub_id_pre is:{}\n",gsub_id, gsub_id_pre);
+        fmt::print("lgs size:{}\n",lgs.size());
         lgs[gsub_id_pre]->sync();
         lgs[gsub_id_pre]->close();
       }
-      build_graph(words, dfg_data, gtop, n1st2gid, n1st2lgname, nname2nid_lgs[0], chain_stks_lgs[0], nid_end_lgs[0]);
+      build_graph(words, dfg_data, gtop, n1st2gid, n1st2lgname, nname2nid_lgs[0], chain_stks_lgs[0], rename_tab, nid_end_lgs[0]);
     }
 
     fmt::print("\n");
     p = strtok_r(nullptr, "\n\r\f", &str_ptr);
-  } //end while loop
+  }
+
   /*
     create in/out GIO for every graph
   */
+  //I don't think we need to create GIO for CFG
+  //for(uint32_t i = 0; i < lgs.size(); i++) {
+  //  fmt::print("now process loop:{}\n", i);
+  //  //Graph input
+  //  Node gio_node_begn = lgs[i]->create_node();
+  //  lgs[i]->add_graph_input("ginp", gio_node_begn.get_nid(), 0, 0);
+  //  Index_ID src_nid = gio_node_begn.get_nid();
+  //  Index_ID dst_nid = nname2nid_lgs[i][nname_begn_lgs[i]];
+  //  lgs[i]->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
 
-  for(uint32_t i = 0; i < lgs.size(); i++) {
-    //Graph input
-    Node gio_node_begn = lgs[i]->create_node();
-    fmt::print("create node:{}, nid:{}\n", "GIO", gio_node_begn.get_nid());
-    lgs[i]->node_type_set(gio_node_begn.get_nid(), GraphIO_Op);
-    Index_ID src_nid = gio_node_begn.get_nid();
-    Index_ID dst_nid = nname2nid_lgs[i][nname_begn_lgs[i]];
-    lgs[i]->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+  //  //Graph output
+  //  Node gio_node_ed = lgs[i]->create_node();
+  //  lgs[i]->add_graph_output("gout", gio_node_ed.get_nid(), 0, 0);
+  //  src_nid = nid_end_lgs[i];
+  //  fmt::print("total node number:{}\n", nname2nid_lgs[0].size());
+  //  dst_nid = gio_node_ed.get_nid();
+  //  lgs[i]->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+  //}
 
-    //Graph output
-    Node gio_node_ed = lgs[i]->create_node();
-    fmt::print("create node:{}, nid:{}\n", "GIO", gio_node_ed.get_nid());
-    lgs[i]->node_type_set(gio_node_ed.get_nid(), GraphIO_Op);
-    src_nid = nid_end_lgs[i];
-    fmt::print("total node number:{}\n", nname2nid_lgs[0].size());
-    dst_nid = gio_node_ed.get_nid();
-    ;
-    lgs[i]->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
-  }
-
-  for(size_t i = 0; i < chain_stks_lgs.size(); i++) {
-    for(auto &x : chain_stks_lgs[i]) {
-      fmt::print("\ncurrent is chain_stks_lgs[{}], vid {} content is\n", i, x.first);
-      for(auto j = x.second.rbegin(); j != x.second.rend(); ++j)
-        fmt::print("{}\n", *j);
-    }
-  }
+  //for(size_t i = 0; i < chain_stks_lgs.size(); i++) {
+  //  for(auto &x : chain_stks_lgs[i]) {
+  //    fmt::print("\ncurrent is chain_stks_lgs[{}], vid {} content is\n", i, x.first);
+  //    for(auto j = x.second.rbegin(); j != x.second.rend(); ++j)
+  //      fmt::print("{}\n", *j);
+  //  }
+  //}
 
   update_ifs(lgs, nname2nid_lgs);
 }
@@ -169,6 +177,7 @@ void Inou_cfg::build_graph(vector<string>               &words,
                            map<string, string>          &n1st2lgname,
                            map<string, Index_ID>        &name2id,
                            map<string, vector<string>>  &chain_stks,
+                           unordered_map<string, string>&rename_tab,
                            Index_ID                     &nid_end) {
 
   fmt::print("dfg_data:{}\n", dfg_data);
@@ -181,7 +190,7 @@ void Inou_cfg::build_graph(vector<string>               &words,
   string w6th = *(words.begin() + 5);
   string w7th = *(words.begin() + 6);
   string w8th = *(words.begin() + 7);
-  string w9th;
+  string w9th ; //2018/11/24
   string w10th;
   if(w6th == "if" || w6th == "::{")
     w9th = *(words.begin() + 8);
@@ -191,22 +200,16 @@ void Inou_cfg::build_graph(vector<string>               &words,
 
   static string   subg_name;
   static bool     has_func_defined;
-
   //method subgraph renaming
   if(has_func_defined){
-    fmt::print("try to rename lgraph!\n");
-    fmt::print("subg_name:{}\n",subg_name);
-    LGraph::rename("./" + opack.path, subg_name, w7th);
+    rename_tab[subg_name] = w7th;
     subg_name = "";
     has_func_defined = false;
   }
-
-
   /*
     I.process 1st node
     only assign node type for first K in every line of cfg
   */
-
   if(name2id.count(w1st) == 0) { //if node has not been created before
     Node new_node = g->create_node();
     name2id[w1st] = new_node.get_nid();
@@ -217,7 +220,6 @@ void Inou_cfg::build_graph(vector<string>               &words,
   else
     g->node_loc_set(name2id[w1st], opack.file.c_str(), (uint32_t)std::stoi(w3rd), (uint32_t)std::stoi(w4th));
 
-  //todo: need to find a way to back trace to check if .() is really a function call
   if(w6th == ".()")
     g->node_type_set(name2id[w1st], CfgFunctionCall_Op);
   else if(w6th == "for")
@@ -236,8 +238,8 @@ void Inou_cfg::build_graph(vector<string>               &words,
   }else
     g->node_type_set(name2id[w1st], CfgAssign_Op);
 
-  g->set_node_wirename(name2id[w1st], CFG_Node_Data(dfg_data).encode().c_str());
 
+  g->set_node_wirename(name2id[w1st], CFG_Node_Data(dfg_data).encode().c_str());
 
   /*
     II-0.process 2nd node and 9th node(if-else merging node)
@@ -258,6 +260,7 @@ void Inou_cfg::build_graph(vector<string>               &words,
     nid_end       = new_node.get_nid(); //keep update the latest final nid
     fmt::print("create node:{}, nid:{}\n", w2nd, name2id[w2nd]);
   }
+  collect_fcall_info(g, name2id[w1st], w7th, w8th, w9th);//collect target and 1st operand for fake fcall analysis later
   /*
     III.deal with edge connection
   */
@@ -269,7 +272,6 @@ void Inou_cfg::build_graph(vector<string>               &words,
     dst_nid = name2id[w8th];
     g->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
     fmt::print("if statement, connect src_node {} to dst_node {} ----- 1\n", src_nid, dst_nid);
-
     //III-2. connect if node to the begin of "false chunk" statement
     if(w9th != "null") {
       src_nid = name2id[w1st];
@@ -299,7 +301,6 @@ void Inou_cfg::build_graph(vector<string>               &words,
       g->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
       fmt::print("if statement, connect src_node {} to dst_node {} ----- 5\n", src_nid, dst_nid);
     }
-
     //III-4. if it is an outer if statement, link w10th to w2nd
     if(w2nd != "null") {
       src_nid = name2id[w10th];
@@ -307,7 +308,6 @@ void Inou_cfg::build_graph(vector<string>               &words,
       g->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
       fmt::print("if statement, connect src_node {} to dst_node {} ----- 6\n", src_nid, dst_nid);
     }
-
     //III-5. figure out which stack w1st is belong to and push w10th into that stack
     for(auto const &x : chain_stks) {
       if(w1st == x.second.back()) {
@@ -315,9 +315,7 @@ void Inou_cfg::build_graph(vector<string>               &words,
         break;
       }
     }
-  } //end special case: if
-
-  else if(w6th == "for") {
+  }else if(w6th == "for") {
     //I. True: connect for node to body
     src_nid = name2id[w1st];
     dst_nid = name2id[w8th];
@@ -328,9 +326,7 @@ void Inou_cfg::build_graph(vector<string>               &words,
     dst_nid = name2id[w2nd];
     g->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
     fmt::print("for statement, connect src_node {} to dst_node {}\n", src_nid, dst_nid);
-  } //end special case: for
-
-  else if(w6th == "while") {
+  }else if(w6th == "while") {
     //I. connect while node to body
     src_nid = name2id[w1st];
     dst_nid = name2id[w8th];
@@ -342,15 +338,11 @@ void Inou_cfg::build_graph(vector<string>               &words,
     dst_nid = name2id[w2nd];
     g->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
     fmt::print("while statement, connect src_node {} to dst_node {}\n", src_nid, dst_nid);
-  } //end special case: while
-
-  else if(w6th == "::{") {
+  }else if(w6th == "::{") {
     src_nid = name2id[w1st];
     dst_nid = name2id[w2nd];
     g->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
-  } //end special case ::{
-
-  else if(w2nd == "null") { //no w2nd to create edge, only update chain_stks
+  }else if(w2nd == "null") { //no w2nd to create edge, only update chain_stks
     bool   belong_tops   = false;
     string target_vec_id = w1st;
 
@@ -387,14 +379,14 @@ void Inou_cfg::build_graph(vector<string>               &words,
       chain_stks[target_vec_id].push_back(w2nd);
     } else
       chain_stks[target_vec_id].push_back(w2nd);
-  }
+  }//end of edge connection
 } //end of build_graph
 
 vector<string> Inou_cfg::split(const string &str) {
   typedef string::const_iterator iter;
   vector<string>                 ret;
-
   iter i = str.begin();
+
   while(i != str.end()) {
     i = find_if(i, str.end(), not_space);
     // find end of next word
@@ -437,15 +429,78 @@ void Inou_cfg::update_ifs(vector<LGraph *> &lgs, vector<map<string, Index_ID>> &
 
         std::transform(dops.begin(), dops.end(), new_operands.begin(),
           [&](const string &op) -> string { return std::to_string(mapping[(op[0] == '\'') ? op.substr(1) : op]); });
-
         g->set_node_wirename(idx, CFG_Node_Data(data.get_target(), new_operands, data.get_operator()).encode().c_str());
       }
     }
   }
 }
 
-void Inou_cfg_options::set(const std::string &key, const std::string &value) {
+void Inou_cfg::collect_fcall_info(LGraph *g, Index_ID new_node, const std::string &w7th, const std::string &w8th, const std::string &w9th){
+  Index_ID pin_node1 = g->get_idx_from_pid(new_node,1);
+  Index_ID pin_node2 = g->get_idx_from_pid(new_node,2);
+  Index_ID pin_node3 = g->get_idx_from_pid(new_node,3);
+  g->set_node_wirename(pin_node1, w7th.c_str());
+  g->set_node_wirename(pin_node2, w8th.c_str());
+  g->set_node_wirename(pin_node3, w9th.c_str());
+  fmt::print("pin_node1:{}, wirename:{}\n", pin_node1, g->get_node_wirename(pin_node1));
+  fmt::print("pin_node2:{}, wirename:{}\n", pin_node2, g->get_node_wirename(pin_node2));
+  fmt::print("pin_node3:{}, wirename:{}\n", pin_node3, g->get_node_wirename(pin_node3));
+}
 
+void Inou_cfg::remove_fake_fcall(LGraph *g){
+  std::set<std::string> func_dcl_tab;
+  std::set<std::string> drive_tab;
+  std::set<Index_ID>    true_fcall_tab;
+  std::unordered_map<std::string, Index_ID> name2id;
+  fmt::print("remove_fake_fcall()\n");
+  //1st pass
+  for(auto idx : g->fast()){
+    if(g->node_type_get(idx).op == Invalid_Op)
+      break;
+
+    //fmt::print("node:{}, pid names:{},{},{}\n", idx, pid1_wn, pid2_wn, pid3_wn);
+    if(g->node_type_get(idx).op == SubGraph_Op){
+      for(const auto &out : g->out_edges(idx)){
+        if(out.get_out_pin().get_pid() == 0){ //src_pid == 0
+          Index_ID dst_nid = out.get_idx();
+          auto pid1_wn = g->get_node_wirename(g->get_idx_from_pid(dst_nid,1));
+          func_dcl_tab.insert(pid1_wn);
+          fmt::print("push {} into func_dcl_tab\n", pid1_wn);
+          break;
+        }
+      }
+    }
+    else if(g->node_type_get(idx).op == CfgFunctionCall_Op){
+      auto pid2_wn = g->get_node_wirename(g->get_idx_from_pid(idx,2));
+      auto pid3_wn = g->get_node_wirename(g->get_idx_from_pid(idx,3));
+      if(strcmp(pid3_wn,"") == 0){//oprd num = 1
+        drive_tab.insert(pid2_wn);
+        name2id[pid2_wn] = idx;
+      }else{                      //oprd num >=1
+        fmt::print("push {} into true_fcall_tab\n", idx);
+        true_fcall_tab.insert(idx);
+      }
+    }
+  }
+  for(const auto &i : drive_tab){
+    fmt::print("in drive_tab:{}\n",i);
+    if(func_dcl_tab.find((i))!=func_dcl_tab.end()){
+      true_fcall_tab.insert(name2id[i]);
+      fmt::print("insert nid {} to true fcall table\n", name2id[i]);
+    }
+  }
+
+  //2nd pass
+  for(auto idx : g->fast()){
+    if(g->node_type_get(idx).op == CfgFunctionCall_Op && true_fcall_tab.find(idx)== true_fcall_tab.end()){
+      g->node_type_set(idx, CfgAssign_Op);
+      fmt::print("find out fake function call!!!!!!\n");
+      fmt::print("change idx:{} to CfgAssign_Op\n",idx);
+    }
+  }
+}
+
+void Inou_cfg_options::set(const std::string &key, const std::string &value) {
   try {
     if (is_opt(key,"file") )
       file = value;
@@ -455,6 +510,5 @@ void Inou_cfg_options::set(const std::string &key, const std::string &value) {
   } catch (const std::invalid_argument& ia) {
     fmt::print("ERROR: key {} has an invalid argument {}\n",key);
   }
-
   console->warn("inou_cfg file:{} path:{} name:{}", file, path, name);
 }

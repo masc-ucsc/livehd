@@ -445,8 +445,10 @@ Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree
   assert(aux_tree->has_alias(data.get_target()));
   Index_ID cond = aux_tree->get_alias(data.get_target());
   const auto &operands = data.get_operands();
-  Aux_node *tauxnd ;
-  Aux_node *fauxnd ;
+  auto *tauxnd = new Aux_node;
+  auto *fauxnd = new Aux_node;
+  //Aux_node *tauxnd ; //todo: segmentation fault here? why?
+  //Aux_node *fauxnd ;
   auto *pauxnd = aux_tree->get_cur_auxnd(); //parent aux
 
   assert(operands.size() > 1);
