@@ -494,6 +494,9 @@ void Inou_cfg::remove_fake_fcall(LGraph *g){
   for(auto idx : g->fast()){
     if(g->node_type_get(idx).op == CfgFunctionCall_Op && true_fcall_tab.find(idx)== true_fcall_tab.end()){
       g->node_type_set(idx, CfgAssign_Op);
+      string wn = g->get_node_wirename(idx);
+      wn = "=" + wn.substr(3);
+      g->set_node_wirename(idx, wn.c_str());
       fmt::print("find out fake function call!!!!!!\n");
       fmt::print("change idx:{} to CfgAssign_Op\n",idx);
     }

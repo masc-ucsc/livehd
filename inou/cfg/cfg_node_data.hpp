@@ -28,8 +28,8 @@ public:
 
   //~CFG_Node_Data(){};//dbg
   std::string encode() const;
-
-  const std::string              &get_target() const { return target; }
+  void                            modify_operator(std::string new_op) {operator_txt = new_op;}
+  const std::string              &get_target()   const { return target; }
   const std::string              &get_operator() const { return operator_txt; }
   const std::vector<std::string> &get_operands() const { return operands; }
 
