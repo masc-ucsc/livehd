@@ -55,10 +55,12 @@ public:
 typedef std::vector<Node_Pin_P> Node_Pin_Vec;
 typedef std::vector<Index_ID>   Flop_Indx_Vec;
 
-typedef std::map<Index_ID, Flop_Indx_Vec> IndexFlopMap;    // Each Key is a node idx which locates the accumulated Flops pass through that node idx
-typedef std::map<Index_ID, bool>          IndexHasFlopMap; // Each Key is a node idx which indicates whether there is any accumulated Flops pass through that node idx
-typedef std::vector<Index_ID>             IOFlopVec;       // Each Key is a node idx which indicates whether the node is a flop
-typedef std::map<Index_ID, Index_ID>      FlopToVqMap;     // Each Key is a node idx that locates the node id which contains its vq or sin
+typedef std::map<Index_ID, Flop_Indx_Vec>
+    IndexFlopMap; // Each Key is a node idx which locates the accumulated Flops pass through that node idx
+typedef std::map<Index_ID, bool>
+                                     IndexHasFlopMap; // Each Key is a node idx which indicates whether there is any accumulated Flops pass through that node idx
+typedef std::vector<Index_ID>        IOFlopVec;   // Each Key is a node idx which indicates whether the node is a flop
+typedef std::map<Index_ID, Index_ID> FlopToVqMap; // Each Key is a node idx that locates the node id which contains its vq or sin
 
 class Pass_fluid : public Pass {
 private:

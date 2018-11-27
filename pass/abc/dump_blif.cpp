@@ -36,8 +36,7 @@ void Pass_abc::write_src_info(const LGraph *g, const index_offset &inp, std::ofs
     break;
   }
   default: {
-    fmt::print("not supported operator after mapped lgraph! {}\n",
-               g->node_type_get(src_idx).get_name());
+    fmt::print("not supported operator after mapped lgraph! {}\n", g->node_type_get(src_idx).get_name());
     break;
   }
   }

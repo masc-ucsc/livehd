@@ -9,11 +9,11 @@
 
 #include <regex>
 
-//FIXME: consider replacing with a simple lex/yacc parser?
-//This only parses
+// FIXME: consider replacing with a simple lex/yacc parser?
+// This only parses
 void Import_verilog::update() {
 
-  assert(false); //not implemented
+  assert(false); // not implemented
 
   fmt::print("update\n");
   std::ifstream input_file(opack.file_path);

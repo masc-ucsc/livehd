@@ -282,12 +282,12 @@ struct __attribute__((packed)) SEdge : public Edge { // 2 bytes total
 };
 
 enum Node_State {
-  Invalid_State   = 0,    // No used or initialized
+  Invalid_State = 0, // No used or initialized
   // bit3 == 1 is_node_state
-  Free_Node_State = 1,   // Node was deleted, it is in a free list
-  Page_Node_State = 2,   // No node in use, page info (page align)
-  Next_Node_State = 6,   // Entry in use, but it is an extension from another root, but there are more in the list
-  Last_Node_State = 7    // Entry in use, but it is an extension from another, and it is the last in the list
+  Free_Node_State = 1, // Node was deleted, it is in a free list
+  Page_Node_State = 2, // No node in use, page info (page align)
+  Next_Node_State = 6, // Entry in use, but it is an extension from another root, but there are more in the list
+  Last_Node_State = 7  // Entry in use, but it is an extension from another, and it is the last in the list
 };
 
 class Node_Internal;
@@ -575,8 +575,8 @@ public:
     return state == Last_Node_State;
   }
   bool is_node_state() const {
-    assert(!((is_next_state() || is_last_state()) ^ ((state>>2)&1))); // Same upper bit
-    return (state>>2)&1;
+    assert(!((is_next_state() || is_last_state()) ^ ((state >> 2) & 1))); // Same upper bit
+    return (state >> 2) & 1;
   }
   bool is_page_align() const {
     return ((((uint64_t)this) & 0xFFF) == 0); // page align.

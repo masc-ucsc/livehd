@@ -11,8 +11,8 @@
 #include <cassert>
 #include <iostream>
 
-#define MMAPA_MIN_SIZE    (1ULL << 10)
-#define MMAPA_INCR_SIZE   (1ULL << 12)
+#define MMAPA_MIN_SIZE (1ULL << 10)
+#define MMAPA_INCR_SIZE (1ULL << 12)
 #define MMAPA_MAX_ENTRIES (1ULL << 34)
 
 template <typename T> class mmap_allocator {
@@ -36,7 +36,7 @@ public:
   }
 
   T *reserve(size_t n) const {
-    if (mmap_base==0) {
+    if(mmap_base == 0) {
       allocate_int(n);
     }
     assert(mmap_base);
@@ -55,7 +55,7 @@ public:
       while(mmap_size <= req_size) {
         mmap_size += MMAPA_INCR_SIZE;
       }
-      mmap_capacity = mmap_size/sizeof(T);
+      mmap_capacity = mmap_size / sizeof(T);
 
       assert(mmap_size <= MMAPA_MAX_ENTRIES * sizeof(T));
 
@@ -83,16 +83,16 @@ public:
   }
 
   void clear() {
-    if (mmap_fd<0) {
+    if(mmap_fd < 0) {
       unlink(mmap_name.c_str());
-      assert(mmap_base==0);
-      assert(alloc==0);
+      assert(mmap_base == 0);
+      assert(alloc == 0);
       return;
     }
 
-    assert(alloc==1);
+    assert(alloc == 1);
     alloc = 0;
-    if (mmap_base) {
+    if(mmap_base) {
       munmap(mmap_base, mmap_size);
     }
     close(mmap_fd);
@@ -122,7 +122,7 @@ public:
   }
 
   size_t size() const {
-    return mmap_size/sizeof(T);
+    return mmap_size / sizeof(T);
   }
 
   const std::string &get_filename() const {
@@ -153,11 +153,11 @@ protected:
       }
       size_t file_size = s.st_size;
 
-      mmap_size = n * sizeof(T);
+      mmap_size     = n * sizeof(T);
       mmap_capacity = n;
       if(file_size > mmap_size) {
-        mmap_size = file_size;
-        mmap_capacity = file_size/sizeof(T);
+        mmap_size     = file_size;
+        mmap_capacity = file_size / sizeof(T);
       }
       mmap_base = reinterpret_cast<uint64_t *>(mmap(0, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, mmap_fd, 0));
       if(mmap_base == MAP_FAILED) {
@@ -173,11 +173,11 @@ protected:
 
     return reserve(n);
   }
-  mutable uint64_t *  mmap_base;
-  mutable size_t      mmap_size;
-  mutable size_t      mmap_capacity; // size/sizeof - space_control
-  mutable int         mmap_fd;
-  mutable int         alloc;
-  std::string mmap_name;
+  mutable uint64_t *mmap_base;
+  mutable size_t    mmap_size;
+  mutable size_t    mmap_capacity; // size/sizeof - space_control
+  mutable int       mmap_fd;
+  mutable int       alloc;
+  std::string       mmap_name;
 };
 #endif

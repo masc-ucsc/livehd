@@ -17,8 +17,7 @@
 
 class Inou_lef_options : public Options_base {
 public:
-  Inou_lef_options() {
-  };
+  Inou_lef_options(){};
 
   void set(const std::string &label, const std::string &value) final;
 
@@ -40,10 +39,10 @@ public:
   void fromlg(std::vector<const LGraph *> &out) final;
 
   void set(const std::string &key, const std::string &value) final {
-    opack.set(key,value);
+    opack.set(key, value);
   }
 
   static void lef_parsing(Tech_library *tlib, std::string &lef_file_name);
 };
 
-#endif //LGRAPH_INOU_LEF_HPP
+#endif // LGRAPH_INOU_LEF_HPP

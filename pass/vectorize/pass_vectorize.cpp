@@ -51,7 +51,7 @@ void Pass_vectorize::collapse_reset(LGraph *g) {
 
     bool reset_set = false;
     for(const auto &c : g->inp_edges(flop_idx)) {
-      //const auto &re = c.get_reverse_edge();
+      // const auto &re = c.get_reverse_edge();
       if(c.get_inp_pin().get_pid() == Node_Type::get(SFlop_Op).get_input_match("R")) {
         reset_set = true;
         break; // Can not handle 2 resets
@@ -69,7 +69,7 @@ void Pass_vectorize::collapse_reset(LGraph *g) {
     Index_ID mux_b_idx = 0;
     Index_ID mux_b_pid = 0;
     for(const auto &c : g->inp_edges(mux_idx)) {
-      //const auto &re = c.get_reverse_edge();
+      // const auto &re = c.get_reverse_edge();
       if(c.get_inp_pin().get_pid() == Node_Type::get(Mux_Op).get_input_match("A")) {
         mux_a_idx = c.get_idx();
         mux_a_pid = c.get_out_pin().get_pid();
@@ -111,7 +111,7 @@ void Pass_vectorize::collapse_join(LGraph *g) {
     Index_ID src_idx = 0;
     Port_ID  src_pid = 0;
     for(const auto &c : g->inp_edges(idx)) {
-      //const auto &re = c.get_reverse_edge();
+      // const auto &re = c.get_reverse_edge();
       src_idx = c.get_idx();
       src_pid = c.get_out_pin().get_pid();
     }

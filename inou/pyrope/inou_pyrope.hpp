@@ -2,8 +2,8 @@
 #ifndef INOU_PYROPE_H
 #define INOU_PYROPE_H
 
-#include <string>
 #include <iostream>
+#include <string>
 
 #include "lgraph.hpp"
 #include "pass.hpp"
@@ -15,7 +15,7 @@ private:
   typedef std::ostringstream Out_string;
 
 protected:
-  void to_pyrope(const LGraph *g, const std::string& filename);
+  void to_pyrope(const LGraph *g, const std::string &filename);
   void to_src_var(Out_string &w, const LGraph *g, Index_ID idx) const;
   bool to_dst_var(Out_string &w, const LGraph *g, Index_ID idx) const;
   bool to_mux(Out_string &w, const LGraph *g, Index_ID idx) const;
@@ -40,7 +40,6 @@ public:
   Inou_pyrope();
 
   void setup() final;
-
 };
 
 #endif

@@ -22,8 +22,8 @@ protected:
   void write_file(const std::string &filename, const char *text, int sz) const;
 
   void add_io(LGraph *lg, bool input, const std::string &io_name, Port_ID original_pos);
+
 public:
   Chunkify_verilog(const std::string &outd, const std::string &_elab_path);
   void elaborate();
 };
-

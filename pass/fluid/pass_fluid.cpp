@@ -185,7 +185,8 @@ void Pass_fluid::add_fork(LGraph *g) {
     fmt::print("\n*****Visiting idx:{}\n", idx);
     fmt::print("{}\n", g->node_type_get(idx).get_name());
     for(const auto &out_edge : g->out_edges(idx)) {
-      fmt::print("Printing edge from nid{} pid{} to nid{} pid{}.\n", out_edge.get_self_nid(), out_edge.get_out_pin().get_pid(), out_edge.get_idx(), out_edge.get_inp_pin().get_pid());
+      fmt::print("Printing edge from nid{} pid{} to nid{} pid{}.\n", out_edge.get_self_nid(), out_edge.get_out_pin().get_pid(),
+                 out_edge.get_idx(), out_edge.get_inp_pin().get_pid());
     }
 
     if(g->node_type_get(idx).op == SFlop_Op) {
@@ -327,8 +328,7 @@ void Pass_fluid::add_fork(LGraph *g) {
 
           if(join_after_fork) {
             // map them to the join map and fork map (TODO may be not?)
-            for(int i = 0; i < flop_count; i++) {
-            }
+            for(int i = 0; i < flop_count; i++) {}
           }
           flop_to_vq_map[idx]  = and_nid;
           flop_to_sin_map[idx] = or_nid;
@@ -352,7 +352,8 @@ void Pass_fluid::add_fork(LGraph *g) {
     fmt::print("{}\n", g->node_type_get(idx).get_name());
 
     for(const auto &out_edge : g->out_edges(idx)) {
-      fmt::print("Printing edge from nid{} pid{} to nid{} pid{}.\n", out_edge.get_self_nid(), out_edge.get_out_pin().get_pid(), out_edge.get_idx(), out_edge.get_inp_pin().get_pid());
+      fmt::print("Printing edge from nid{} pid{} to nid{} pid{}.\n", out_edge.get_self_nid(), out_edge.get_out_pin().get_pid(),
+                 out_edge.get_idx(), out_edge.get_inp_pin().get_pid());
     }
   }
 
@@ -415,7 +416,8 @@ void Pass_fluid::add_fork_deadlock(LGraph *g) {
     fmt::print("\n*****Visiting idx:{}\n", idx);
     fmt::print("{}\n", g->node_type_get(idx).get_name());
     for(const auto &out_edge : g->out_edges(idx)) {
-      fmt::print("Printing edge from nid{} pid{} to nid{} pid{}.\n", out_edge.get_self_nid(), out_edge.get_out_pin().get_pid(), out_edge.get_idx(), out_edge.get_inp_pin().get_pid());
+      fmt::print("Printing edge from nid{} pid{} to nid{} pid{}.\n", out_edge.get_self_nid(), out_edge.get_out_pin().get_pid(),
+                 out_edge.get_idx(), out_edge.get_inp_pin().get_pid());
     }
 
     if(g->node_type_get(idx).op == SFlop_Op) {
@@ -513,7 +515,8 @@ void Pass_fluid::add_fork_deadlock(LGraph *g) {
     fmt::print("{}\n", g->node_type_get(idx).get_name());
 
     for(const auto &out_edge : g->out_edges(idx)) {
-      fmt::print("Printing edge from nid{} pid{} to nid{} pid{}.\n", out_edge.get_self_nid(), out_edge.get_out_pin().get_pid(), out_edge.get_idx(), out_edge.get_inp_pin().get_pid());
+      fmt::print("Printing edge from nid{} pid{} to nid{} pid{}.\n", out_edge.get_self_nid(), out_edge.get_out_pin().get_pid(),
+                 out_edge.get_idx(), out_edge.get_inp_pin().get_pid());
     }
   }
 
@@ -669,8 +672,7 @@ void Pass_fluid::add_join_deadlock(LGraph *g) {
   }
 }
 
-void Pass_fluid::traverse(LGraph *g,
-                          int     round) {
+void Pass_fluid::traverse(LGraph *g, int round) {
   std::cout << "RTP 2" << std::endl;
   find_join(g);
   std::cout << "RTP 3" << std::endl;
@@ -680,7 +682,7 @@ void Pass_fluid::traverse(LGraph *g,
   std::cout << "RTP 5" << std::endl;
   add_join_deadlock(g);
   std::cout << "RTP 6" << std::endl;
-  //result_graph(g);
+  // result_graph(g);
 }
 void Pass_fluid::transform(LGraph *g) {
   traverse(g, 1);

@@ -8,7 +8,7 @@
 class Sat_pass_pack {
 
 public:
-  //input related options
+  // input related options
   std::string sat_lgdb;
   Sat_pass_pack(int argc, const char **argv);
 };

@@ -1,5 +1,5 @@
-#include "pass_dfg.hpp"
 #include "nodetype.hpp"
+#include "pass_dfg.hpp"
 #include <string>
 
 Index_ID Pass_dfg::create_reference(LGraph *g, Aux_tree *aux_tree, const std::string &var_name) {
@@ -8,7 +8,7 @@ Index_ID Pass_dfg::create_reference(LGraph *g, Aux_tree *aux_tree, const std::st
   g->node_type_set(nid, DfgRef_Op);
   return nid;
 }
-//Index_ID Pass_dfg::create_register(LGraph *g, Aux_tree *aux_tree, const std::string &var_name) {
+// Index_ID Pass_dfg::create_register(LGraph *g, Aux_tree *aux_tree, const std::string &var_name) {
 //  Index_ID nid = create_node(g, aux_tree, var_name);
 //  fmt::print("create node nid:{}\n", nid);
 //  g->node_type_set(nid, SFlop_Op);
@@ -18,7 +18,7 @@ Index_ID Pass_dfg::create_reference(LGraph *g, Aux_tree *aux_tree, const std::st
 
 Index_ID Pass_dfg::create_input(LGraph *g, Aux_tree *aux_tree, const std::string &var_name, uint16_t bits) {
   Index_ID nid = create_node(g, aux_tree, var_name, bits);
-  g->add_graph_input(var_name.substr(1).c_str(), nid, bits, 0); //get rid of $mark
+  g->add_graph_input(var_name.substr(1).c_str(), nid, bits, 0); // get rid of $mark
 
   return nid;
 }
@@ -41,7 +41,7 @@ Index_ID Pass_dfg::create_default_const(LGraph *g) {
   Index_ID nid = g->create_node().get_nid();
   g->node_type_set(nid, U32Const_Op);
   g->node_u32type_set(nid, 0);
-  g->set_bits(nid,1);
+  g->set_bits(nid, 1);
 
   return nid;
 }
@@ -117,21 +117,21 @@ Index_ID Pass_dfg::create_NOT(LGraph *g, Aux_tree *aux_tree, Index_ID op1) {
 
 Node_Type_Op Pass_dfg::node_type_from_text(const std::string &operator_text) {
 
-  if (operator_text == "==") {
+  if(operator_text == "==") {
     return Equals_Op;
-  } else if (operator_text == ">="){
+  } else if(operator_text == ">=") {
     return GreaterEqualThan_Op;
-  } else if (operator_text == ">"){
+  } else if(operator_text == ">") {
     return GreaterThan_Op;
-  } else if (operator_text == "<="){
+  } else if(operator_text == "<=") {
     return LessEqualThan_Op;
-  } else if (operator_text == ">"){
+  } else if(operator_text == ">") {
     return LessThan_Op;
-  } else if (operator_text == "=" || operator_text =="as" || operator_text == ":") {
-    return Or_Op; //reduction or
-  } else if (operator_text == "+"){
+  } else if(operator_text == "=" || operator_text == "as" || operator_text == ":") {
+    return Or_Op; // reduction or
+  } else if(operator_text == "+") {
     return Sum_Op;
-  }else {
+  } else {
     fmt::print("Operator: {}\n", operator_text);
     fflush(stdout);
     assert(false);

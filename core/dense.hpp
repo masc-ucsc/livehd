@@ -27,10 +27,10 @@
 #include <unistd.h>
 
 #ifndef likely
-#define likely(x)       __builtin_expect((x),1)
+#define likely(x) __builtin_expect((x), 1)
 #endif
 #ifndef unlikely
-#define unlikely(x)     __builtin_expect((x),0)
+#define unlikely(x) __builtin_expect((x), 0)
 #endif
 
 template <typename T> class Dense {
@@ -38,9 +38,9 @@ private:
   explicit Dense() = delete;
 
   void reserve(size_t sz) {
-    if (__buffer) {
+    if(__buffer) {
       __buffer = __allocator.reserve(sz);
-    }else{
+    } else {
       __buffer = __allocator.reallocate(sz);
     }
   }
@@ -53,23 +53,23 @@ public:
 
   explicit Dense(const std::string &filename)
       : __allocator(filename) {
-      __buffer = 0;
-      __size   = 0;
+    __buffer = 0;
+    __size   = 0;
   }
 
   ~Dense() {
-    __size   = 0; // No need but nice
+    __size = 0; // No need but nice
   }
 
   void emplace_back() {
     if(__buffer) {
-      reserve(__size+1);
+      reserve(__size + 1);
     }
     __size = __size + 1;
   }
 
   void resize(size_t sz) {
-    assert(sz>=__size); // Shrink still not implemented
+    assert(sz >= __size); // Shrink still not implemented
     if(sz > __size && __buffer) {
       reserve(sz);
     }
@@ -77,12 +77,12 @@ public:
   }
 
   void sync() {
-    if (__size==0) {
-      assert(__buffer==0);
+    if(__size == 0) {
+      assert(__buffer == 0);
       return;
     }
 
-    if (__buffer) {
+    if(__buffer) {
       __allocator.deallocate(__buffer, __size);
       __buffer = 0;
     }
@@ -90,14 +90,14 @@ public:
   }
 
   void reload(uint64_t sz) {
-    if (sz==0) {
-      assert(__size==0);
+    if(sz == 0) {
+      assert(__size == 0);
       return; // Nothing to do. Do not create mmap for empty lgraphs or alredy loaded lgraphs
     }
-    if (__buffer) {
+    if(__buffer) {
       __buffer = __allocator.reallocate(sz);
     }
-    __size   = sz;
+    __size = sz;
   }
 
   void clear() noexcept {
@@ -106,9 +106,9 @@ public:
   }
 
   void push_back(const value_type &x) {
-    if (unlikely(__buffer==0)) {
-      __buffer = __allocator.reallocate(__size+1);
-    }else if(unlikely(__size >= capacity())) {
+    if(unlikely(__buffer == 0)) {
+      __buffer = __allocator.reallocate(__size + 1);
+    } else if(unlikely(__size >= capacity())) {
       reserve(__size + 1);
     }
     __buffer[__size] = x;
@@ -116,9 +116,9 @@ public:
   }
 
   template <class... Args> void emplace_back(Args &&... args) {
-    if (unlikely(__buffer==0)) {
-      __buffer = __allocator.reallocate(__size+1);
-    }else if(unlikely(__size >= capacity())) {
+    if(unlikely(__buffer == 0)) {
+      __buffer = __allocator.reallocate(__size + 1);
+    } else if(unlikely(__size >= capacity())) {
       reserve(__size + 1);
     }
     __buffer[__size] = value_type(std::forward<Args>(args)...);
@@ -137,84 +137,84 @@ public:
 
   value_type &operator[](const size_t idx) {
     assert(idx < __size);
-    if (unlikely(__buffer==0))
+    if(unlikely(__buffer == 0))
       __buffer = __allocator.reallocate(__size);
     return __buffer[idx];
   }
 
   const value_type &operator[](const size_t idx) const {
     assert(idx < __size);
-    if (unlikely(__buffer==0))
+    if(unlikely(__buffer == 0))
       __buffer = __allocator.reallocate(__size);
     return __buffer[idx];
   }
 
   value_type &back() {
     assert(__size);
-    if (unlikely(__buffer==0))
+    if(unlikely(__buffer == 0))
       __buffer = __allocator.reallocate(__size);
     return __buffer[__size - 1];
   }
   const value_type &back() const {
     assert(__size);
-    if (unlikely(__buffer==0))
+    if(unlikely(__buffer == 0))
       __buffer = __allocator.reallocate(__size);
     return __buffer[__size - 1];
   }
 
   value_type *data() noexcept {
     assert(__size);
-    if (unlikely(__buffer==0))
+    if(unlikely(__buffer == 0))
       __buffer = __allocator.reallocate(__size);
     return __buffer;
   }
   const value_type *data() const noexcept {
     assert(__size);
-    if (unlikely(__buffer==0))
+    if(unlikely(__buffer == 0))
       __buffer = __allocator.reallocate(__size);
     return __buffer;
   }
 
   iterator begin() {
-    if (unlikely(__buffer==0))
+    if(unlikely(__buffer == 0))
       __buffer = __allocator.reallocate(__size);
     return __buffer;
   }
   iterator end() {
-    if (unlikely(__buffer==0))
+    if(unlikely(__buffer == 0))
       __buffer = __allocator.reallocate(__size);
     return __buffer + __size;
   }
 
   const_iterator cbegin() {
-    if (unlikely(__buffer==0))
+    if(unlikely(__buffer == 0))
       __buffer = __allocator.reallocate(__size);
     return __buffer;
   }
   const_iterator cend() {
-    if (unlikely(__buffer==0))
+    if(unlikely(__buffer == 0))
       __buffer = __allocator.reallocate(__size);
     return __buffer + __size;
   }
 
   const_iterator begin() const {
-    if (unlikely(__buffer==0))
+    if(unlikely(__buffer == 0))
       __buffer = __allocator.reallocate(__size);
     return __buffer;
   }
   const_iterator end() const {
-    if (unlikely(__buffer==0))
+    if(unlikely(__buffer == 0))
       __buffer = __allocator.reallocate(__size);
     return __buffer + __size;
   }
 
   const_iterator cbegin() const {
-    if (unlikely(__buffer==0))
+    if(unlikely(__buffer == 0))
       __buffer = __allocator.reallocate(__size);
     return __buffer;
   }
   const_iterator cend() const {
-    if (unlikely(__buffer==0))
+    if(unlikely(__buffer == 0))
       __buffer = __allocator.reallocate(__size);
     return __buffer + __size;
   }

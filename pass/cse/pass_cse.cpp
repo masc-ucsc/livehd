@@ -17,19 +17,19 @@ enum comp_result {
   subset,  // this is subset of that
   superset // this is superset of that
 };
-//haha
+// haha
 
 class and_node_for_comp {
   //  Node_Type_Op node_type_op;
 public:
   int idx;
-  //int next_avail_pid;
-  bool                              need_modify;
-  typedef std::pair<Node_Pin, int>  NPPair;       // <the node pin, to be replaced by idx>
-  typedef std::map<int, int>        CoverByNPMap; // key (idx) is covered by value (idx)
-  CoverByNPMap                      cover_by_np_map;
-  typedef std::vector<NPPair>       NPPairVec;
-  typedef std::vector<int>          CoveredPos;    //covered node pin positions in the np_pair_vec>
+  // int next_avail_pid;
+  bool                             need_modify;
+  typedef std::pair<Node_Pin, int> NPPair;       // <the node pin, to be replaced by idx>
+  typedef std::map<int, int>       CoverByNPMap; // key (idx) is covered by value (idx)
+  CoverByNPMap                     cover_by_np_map;
+  typedef std::vector<NPPair>      NPPairVec;
+  typedef std::vector<int> CoveredPos;             // covered node pin positions in the np_pair_vec>
   typedef std::map<int, CoveredPos> CoveredPosMap; // <idx, covered node pin positions in the np_pair_vec> key covers value
   CoveredPosMap                     covered_pos_map;
   NPPairVec                         np_pair_vec; // <Node Pins: int != -1 means to be removed, it's the new idx which replaces it>
@@ -43,7 +43,7 @@ public:
     NPPairVec                             A = this->np_pair_vec;
     NPPairVec                             B = that_node.np_pair_vec;
     typedef std::vector<std::vector<int>> Matrix;
-    //typedef vector<int> Row;
+    // typedef vector<int> Row;
 
     Matrix LCS;
     //    int **LCS = new int[A.size() + 1][B.size() + 1];
@@ -62,8 +62,7 @@ public:
     int i = 1, j = 1;
     for(const auto &a : A) {
       for(const auto &b : B) {
-        if(a.first.get_nid() == b.first.get_nid() &&
-           a.first.get_pid() == b.first.get_pid()) {
+        if(a.first.get_nid() == b.first.get_nid() && a.first.get_pid() == b.first.get_pid()) {
           LCS[i][j] = LCS[i - 1][j - 1] + 1;
         } else {
           LCS[i][j] = std::max(LCS[i - 1][j], LCS[i][j - 1]);
@@ -91,8 +90,8 @@ public:
     //  std::vector<pair<Node_Pin(), int>>::const_iterator i; // new challenger
     auto j     = this->np_pair_vec.begin();
     int  int_i = 0;
-    //int start = -1;
-    //int end = 0;
+    // int start = -1;
+    // int end = 0;
     int              cover_count = 0;
     int              rep_count   = 0;
     int              overlap     = 0; // # of overlap with previous replacing node
@@ -101,7 +100,8 @@ public:
     std::vector<int> conflict_idx_vec;
     NPPair           last_pair = std::make_pair(dummy_node, -1);
     for(auto i = that_node.np_pair_vec.begin(); i != that_node.np_pair_vec.end(); ++i) {
-      fmt::print("j.nid:{}, i.nid:{}, j.pid:{}, i.pid:{}\n", j->first.get_nid(), i->first.get_nid(), j->first.get_pid(), i->first.get_pid());
+      fmt::print("j.nid:{}, i.nid:{}, j.pid:{}, i.pid:{}\n", j->first.get_nid(), i->first.get_nid(), j->first.get_pid(),
+                 i->first.get_pid());
       if(j->first.get_nid() == i->first.get_nid() && j->first.get_pid() == i->first.get_pid()) {
         // Replace could happen
         cover_count++;
@@ -116,8 +116,7 @@ public:
             conflict_idx_vec.push_back(j->second);
           }
         }
-        if(int_i > 0 &&
-           j->first.get_nid() == last_pair.first.get_nid() &&
+        if(int_i > 0 && j->first.get_nid() == last_pair.first.get_nid() &&
            j->first.get_pid() == last_pair.first.get_pid()) { // consecutive repetitive nodes
           rep_count++;
         } else {
@@ -126,8 +125,8 @@ public:
         j++;
       } else { // j i dont match
         if(cover_count > 0) {
-          if(cover_count == rep_count && int_i > 0 &&
-             j->first.get_nid() == last_pair.first.get_nid() && j->first.get_pid() == last_pair.first.get_pid()) {
+          if(cover_count == rep_count && int_i > 0 && j->first.get_nid() == last_pair.first.get_nid() &&
+             j->first.get_pid() == last_pair.first.get_pid()) {
             // repeating from the beginning; dont inc any count, just continue
             // continue
           } else {
@@ -146,7 +145,7 @@ public:
 
     fmt::print("idx:{}, cover:{}, this:{}, that:{}\n", idx, cover_count, this->np_pair_vec.size(), that_node.np_pair_vec.size());
 
-    //haha
+    // haha
     if(overlap > 0) {
       if(cover_count < overlap && cover_count > 0) {
         return (none);
@@ -228,7 +227,7 @@ public:
   }
   //  node_for_comp () {};
 };
-//haha/
+// haha/
 
 void Pass_cse::traverse(LGraph *g, std::map<int, and_node_for_comp> &and_node_for_comp_map, int round) {
   for(auto idx : g->forward()) {
@@ -253,7 +252,7 @@ void Pass_cse::traverse(LGraph *g, std::map<int, and_node_for_comp> &and_node_fo
     case And_Op: {
       fmt::print("And_Op.\n");
       if(round == 1) {
-        //haha
+        // haha
         comp_result       result;
         and_node_for_comp new_node_for_comp;
         new_node_for_comp.idx = idx;
@@ -282,10 +281,10 @@ void Pass_cse::traverse(LGraph *g, std::map<int, and_node_for_comp> &and_node_fo
           fmt::print("result is {}.\n", to_print);
         }
         and_node_for_comp_map.insert(std::make_pair(idx, new_node_for_comp));
-        //haha//
+        // haha//
       } else if(round == 2) {
         for(const auto &in_edge : g->inp_edges(idx)) {
-          //haha
+          // haha
           and_node_for_comp   new_node_for_comp = and_node_for_comp_map[idx];
           Node_Pin            out_pin           = in_edge.get_out_pin();
           std::map<int, bool> local_map; // <idx, exist>
@@ -302,11 +301,12 @@ void Pass_cse::traverse(LGraph *g, std::map<int, and_node_for_comp> &and_node_fo
             // rm old edges
             new_node_for_comp.cover_by_np_map.erase(it);
             fmt::print("Removing edge from {} to {}.\n", in_edge.get_idx(), idx);
-            fmt::print("IN EDGE idx:{}, in_pid:{}, out_pid:{}\n", in_edge.get_idx(), in_edge.get_inp_pin().get_pid(), in_edge.get_out_pin().get_pid());
+            fmt::print("IN EDGE idx:{}, in_pid:{}, out_pid:{}\n", in_edge.get_idx(), in_edge.get_inp_pin().get_pid(),
+                       in_edge.get_out_pin().get_pid());
             g->del_edge(in_edge);
             fmt::print("Edge deleted\n");
           }
-          //haha*/
+          // haha*/
         }
       }
     } break;
@@ -341,7 +341,8 @@ void Pass_cse::traverse(LGraph *g, std::map<int, and_node_for_comp> &and_node_fo
       fmt::print("Undefined OP.\n");
     } // end of switch
     for(const auto &in_edge : g->inp_edges(idx)) {
-      fmt::print("IN EDGE idx:{}, in_pid:{}, out_pid:{}\n", in_edge.get_idx(), in_edge.get_inp_pin().get_pid(), in_edge.get_out_pin().get_pid());
+      fmt::print("IN EDGE idx:{}, in_pid:{}, out_pid:{}\n", in_edge.get_idx(), in_edge.get_inp_pin().get_pid(),
+                 in_edge.get_out_pin().get_pid());
     }
   } // end of for loop: for(auto idx:g->forward())
 }

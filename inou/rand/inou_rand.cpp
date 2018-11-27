@@ -8,8 +8,8 @@
 
 #include "bm.h"
 
-#include "lgraph.hpp"
 #include "inou_rand.hpp"
+#include "lgraph.hpp"
 
 void setup_inou_rand() {
   Inou_rand p;
@@ -19,16 +19,16 @@ void setup_inou_rand() {
 void Inou_rand::setup() {
   Eprp_method m1("inou.rand", "generate a random lgraph", &Inou_rand::tolg);
 
-  m1.add_label_optional("seed","random seed");
-  m1.add_label_optional("size","lgraph size");
-  m1.add_label_optional("eratio","edge ratio for random");
-  m1.add_label_required("name","lgraph name");
+  m1.add_label_optional("seed", "random seed");
+  m1.add_label_optional("size", "lgraph size");
+  m1.add_label_optional("eratio", "edge ratio for random");
+  m1.add_label_required("name", "lgraph name");
 
   register_inou(m1);
 }
 
 Inou_rand::Inou_rand()
- :Pass("rand") {
+    : Pass("rand") {
 }
 
 void Inou_rand::tolg(Eprp_var &var) {
@@ -37,21 +37,21 @@ void Inou_rand::tolg(Eprp_var &var) {
   p.opack.path = var.get("path");
   p.opack.name = var.get("name");
 
-  if (var.has_label("seed"))
+  if(var.has_label("seed"))
     p.opack.rand_seed = std::stoi(var.get("seed"));
 
-  if (var.has_label("crate"))
+  if(var.has_label("crate"))
     p.opack.rand_crate = std::stoi(var.get("crate"));
 
-  if (var.has_label("eratio"))
+  if(var.has_label("eratio"))
     p.opack.rand_eratio = std::stod(var.get("eratio"));
 
   std::vector<LGraph *> lgs = p.do_tolg();
 
-  if (lgs.empty()) {
+  if(lgs.empty()) {
     warn(fmt::format("inou.rand could not create a random {} lgraph in {} path", var.get("name"), var.get("path")));
-  }else{
-    assert(lgs.size()==1); // rand only generated one graph at a time
+  } else {
+    assert(lgs.size() == 1); // rand only generated one graph at a time
     var.add(lgs[0]);
   }
 }
@@ -133,7 +133,7 @@ std::vector<LGraph *> Inou_rand::do_tolg() {
     }
     Index_ID  dst_nid  = created[rnd_created(rnd)];
     Node_Type dst_type = g->node_type_get(dst_nid);
-    //if constant, we don't allow inputs to node
+    // if constant, we don't allow inputs to node
     if(dst_type.op > U32Const_Op && dst_type.op <= U32ConstMax_Op)
       continue;
 
@@ -148,7 +148,7 @@ std::vector<LGraph *> Inou_rand::do_tolg() {
     Node_Pin dst_pin(dst_nid, dst_port, true);
     Node_Pin src_pin(src_nid, rnd_4(rnd), false);
 
-    //prevent adding same edge twice
+    // prevent adding same edge twice
     std::pair<Node_Pin, Node_Pin> conn(src_pin, dst_pin);
     if(connections.find(conn) == connections.end()) {
       g->add_edge(src_pin, dst_pin, rbits);
@@ -172,5 +172,3 @@ std::vector<LGraph *> Inou_rand::do_tolg() {
 
   return lgs;
 }
-
-
