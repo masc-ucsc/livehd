@@ -6,11 +6,7 @@
 #include "options.hpp"
 #include <boost/filesystem.hpp>
 
-typedef enum {
-  Verilog,
-  LEF,
-  Liberty
-} Tech_file_type;
+typedef enum { Verilog, LEF, Liberty } Tech_file_type;
 
 class Tech_options_pack : public Options_base {
 public:
@@ -20,10 +16,16 @@ public:
 
   Tech_options_pack() {
 
-    Options::get_desc()->add_options()("tech_file,f", boost::program_options::value(&file_path), "tech library file <filename> to be loaded")("tech_type,t", boost::program_options::value(&tech_type), "tech library format (Verilog|LEF|LIB) of the file");
+    Options::get_desc()->add_options()("tech_file,f", boost::program_options::value(&file_path),
+                                       "tech library file <filename> to be loaded")(
+        "tech_type,t", boost::program_options::value(&tech_type), "tech library format (Verilog|LEF|LIB) of the file");
 
     boost::program_options::variables_map vm;
-    boost::program_options::store(boost::program_options::command_line_parser(Options::get_cargc(), Options::get_cargv()).options(*Options::get_desc()).allow_unregistered().run(), vm);
+    boost::program_options::store(boost::program_options::command_line_parser(Options::get_cargc(), Options::get_cargv())
+                                      .options(*Options::get_desc())
+                                      .allow_unregistered()
+                                      .run(),
+                                  vm);
 
     if(vm.count("tech_file")) {
       file_path = vm["tech_file"].as<std::string>();

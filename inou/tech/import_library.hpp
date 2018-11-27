@@ -11,7 +11,8 @@ protected:
   Tech_options_pack opack;
 
 public:
-  Import_library(Tech_options_pack opack) : opack(opack) {
+  Import_library(Tech_options_pack opack)
+      : opack(opack) {
   }
 
   // read tech file and updates the tech library

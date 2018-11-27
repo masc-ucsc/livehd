@@ -7,8 +7,8 @@
 
 #include <cassert>
 
-#include "mmap_allocator.hpp"
 #include "dense.hpp"
+#include "mmap_allocator.hpp"
 
 class CharPtr {
 public:
@@ -23,16 +23,17 @@ public:
   const char *get_charptr() const {
     return ptr;
   }
+
 private:
   const char *ptr;
 };
-  std::ostream& operator<<(std::ostream& os, const CharPtr& obj) {
-    os << obj.get_charptr();
-    return os;
-  }
+std::ostream &operator<<(std::ostream &os, const CharPtr &obj) {
+  os << obj.get_charptr();
+  return os;
+}
 Dense<CharPtr> vec("str");
 
-int main (int argc, char **argv) {
+int main(int argc, char **argv) {
 
   std::string str = "p" + std::to_string(vec.size()) + "x";
 
@@ -47,7 +48,7 @@ int main (int argc, char **argv) {
 
   std::cout << "size=" << vec.size() << " base=" << vec.data() << std::endl;
 
-  for(const auto &v:vec) {
+  for(const auto &v : vec) {
     std::cout << v;
   }
   std::cout << std::endl;

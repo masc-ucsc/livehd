@@ -21,14 +21,13 @@ void Pass_dce::setup() {
 }
 
 Pass_dce::Pass_dce()
- : Pass("dce") {
-
+    : Pass("dce") {
 }
 
 void Pass_dce::optimize(Eprp_var &var) {
   Pass_dce pass;
 
-  for(auto &l:var.lgs) {
+  for(auto &l : var.lgs) {
     pass.trans(l);
   }
 }

@@ -8,18 +8,18 @@
 #include <string>
 #include <vector>
 
-//class Tech_rect{
+// class Tech_rect{
 //  public:
 //    double xl,yl,xh,yh;
 //};
 //
-//class Tech_port{
+// class Tech_port{
 //  public:
 //    std::string metal_name;
 //    std::vector<Tech_rect> rects; //rectangles
 //};
 //
-//class Tech_pin{
+// class Tech_pin{
 //  public:
 //  bool                   has_port;
 //  std::string            pin_name;
@@ -28,7 +28,7 @@
 //  std::vector<Tech_port> ports;
 //};
 //
-//class Tech_macro{
+// class Tech_macro{
 //  public:
 //  std::string               name;
 //  std::vector<double>       size; //size[0] =x, size[1] =y
@@ -37,7 +37,7 @@
 //  void to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer>&) const;
 //};
 
-//class Tech_file{
+// class Tech_file{
 //  public:
 //  std::string str;
 //  std::vector<Tech_layer> layers;

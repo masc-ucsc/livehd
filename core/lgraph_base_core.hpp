@@ -18,7 +18,7 @@ protected:
   public:
     Setup_path(const std::string &path);
   };
-  Setup_path p; // Must be first in base object
+  Setup_path        p; // Must be first in base object
   const std::string path;
   const std::string name;
   const std::string long_name;

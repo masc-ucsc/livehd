@@ -88,7 +88,7 @@ bool Node_Type::is_type(const std::string &opname) {
 
 LGraph_Node_Type::LGraph_Node_Type(const std::string &path, const std::string &name) noexcept
     : Lgraph_base_core(path, name)
-    , consts(path + "/lgraph_"  + name + "_consts")
+    , consts(path + "/lgraph_" + name + "_consts")
     , node_type_table(path + "/lgraph_" + name + "_type") {
 }
 
@@ -213,7 +213,8 @@ uint32_t LGraph_Node_Type::node_value_get(Index_ID nid) const {
 
 void LGraph_Node_Type::node_const_type_set(Index_ID nid, const std::string &value
 #ifndef NDEBUG
-                                    , bool enforce_bits
+                                           ,
+                                           bool enforce_bits
 #endif
 ) {
 

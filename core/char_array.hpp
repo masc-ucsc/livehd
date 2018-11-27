@@ -11,29 +11,28 @@
 
 #include "sparsehash/dense_hash_map"
 
-#include "lglog.hpp"
 #include "dense.hpp"
+#include "lglog.hpp"
 
 typedef int32_t Char_Array_ID;
 
-template<typename KeyType, typename Data_type>
-struct MapSerializer {
-  bool operator()(FILE* fp, std::pair<const KeyType, Data_type> const& value) const {
+template <typename KeyType, typename Data_type> struct MapSerializer {
+  bool operator()(FILE *fp, std::pair<const KeyType, Data_type> const &value) const {
 
-    if (fwrite(&value.first, sizeof(value.first), 1, fp) != 1)
+    if(fwrite(&value.first, sizeof(value.first), 1, fp) != 1)
       return false;
 
-    if (fwrite(&value.second, sizeof(value.second), 1, fp) != 1)
+    if(fwrite(&value.second, sizeof(value.second), 1, fp) != 1)
       return false;
 
     return true;
   }
-  bool operator()(FILE* fp, std::pair<const KeyType, Data_type>* value) const {
+  bool operator()(FILE *fp, std::pair<const KeyType, Data_type> *value) const {
 
-    if (fread(const_cast<KeyType*>(&value->first), sizeof(value->first), 1, fp) != 1)
+    if(fread(const_cast<KeyType *>(&value->first), sizeof(value->first), 1, fp) != 1)
       return false;
 
-    if (fread(const_cast<Data_type*>(&value->second), sizeof(value->second), 1, fp) != 1)
+    if(fread(const_cast<Data_type *>(&value->second), sizeof(value->second), 1, fp) != 1)
       return false;
 
     return true;
@@ -43,17 +42,18 @@ struct MapSerializer {
 template <typename Data_type> class Char_Array {
 public:
   typedef uint32_t Hash_sign;
-  enum {sign_nok = (sizeof(Hash_sign)>=2) && !(sizeof(Hash_sign) & (sizeof(Hash_sign) - 1))};
+  enum { sign_nok = (sizeof(Hash_sign) >= 2) && !(sizeof(Hash_sign) & (sizeof(Hash_sign) - 1)) };
   static_assert(sign_nok, "should use a power2 and bigger than 2 for the Hash_sign size");
 
   class Const_Char_Array_Iter {
   public:
     explicit Const_Char_Array_Iter(const uint16_t *_first, const uint16_t *_ptr)
-        : first(_first), ptr(_ptr) {
+        : first(_first)
+        , ptr(_ptr) {
     }
     Const_Char_Array_Iter operator++() {
-      Const_Char_Array_Iter i(first,ptr);
-      const uint16_t *sz = ptr;
+      Const_Char_Array_Iter i(first, ptr);
+      const uint16_t *      sz = ptr;
       ptr += (*sz + 1); // +1 for the size itself
       return i;
     }
@@ -77,28 +77,28 @@ public:
     }
 
     const Data_type &get_field() const {
-      return *(const Data_type *)&ptr[1+(sizeof(Hash_sign))/sizeof(uint16_t)]; // Skip signature
+      return *(const Data_type *)&ptr[1 + (sizeof(Hash_sign)) / sizeof(uint16_t)]; // Skip signature
     }
 
     Data_type &get_field() {
-      return *(Data_type *)&ptr[1+(sizeof(Hash_sign))/sizeof(uint16_t)]; // Skip signature
+      return *(Data_type *)&ptr[1 + (sizeof(Hash_sign)) / sizeof(uint16_t)]; // Skip signature
     }
 
     const char *get_char() const {
-      return (const char *)&ptr[1+(sizeof(Data_type) + sizeof(Hash_sign))/sizeof(uint16_t)];
+      return (const char *)&ptr[1 + (sizeof(Data_type) + sizeof(Hash_sign)) / sizeof(uint16_t)];
     }
 
   private:
-    const uint16_t * const first;
-    const uint16_t *ptr;
+    const uint16_t *const first;
+    const uint16_t *      ptr;
   };
 
 private:
-  const std::string long_name;
-  mutable Dense<uint16_t> variable_internal;
+  const std::string                                        long_name;
+  mutable Dense<uint16_t>                                  variable_internal;
   mutable google::dense_hash_map<Hash_sign, Char_Array_ID> hash2id;
-  mutable bool pending_clear_reload;
-  mutable bool synced;
+  mutable bool                                             pending_clear_reload;
+  mutable bool                                             synced;
 
   const uint16_t *first() const {
     if(variable_internal.size() <= 1)
@@ -112,44 +112,44 @@ private:
   explicit Char_Array() = delete; // Not allowed
 
   Hash_sign prepare_hash(const char *str, uint16_t str_len) {
-    const std::string key(str,str_len);
+    const std::string key(str, str_len);
     return prepare_hash(key);
   }
 
   Hash_sign re_hash(Hash_sign c_hash, Hash_sign seed) const {
     c_hash += seed;
-    if (c_hash==0)
+    if(c_hash == 0)
       c_hash = 1023;
     return c_hash;
   }
 
   Hash_sign seed_hash(const std::string &key, Hash_sign &seed) const {
     std::size_t str_hash = std::hash<std::string>{}(key);
-    Hash_sign c_hash = str_hash ^ (str_hash>>32);
-    if (c_hash==0)
+    Hash_sign   c_hash   = str_hash ^ (str_hash >> 32);
+    if(c_hash == 0)
       c_hash = 1023;
 
-    seed = str_hash>>13;
+    seed = str_hash >> 13;
 
     return c_hash;
   }
 
   Hash_sign prepare_hash(const std::string &key) {
 
-    Hash_sign seed=0;
+    Hash_sign seed   = 0;
     Hash_sign c_hash = seed_hash(key, seed);
 
     auto it = hash2id.find(c_hash);
-    if (it != hash2id.end()) {
+    if(it != hash2id.end()) {
       while(true) {
         Char_Array_ID cid = it->second;
 
-        if (cid>0)
+        if(cid > 0)
           it->second = -cid; // Negative means re-hash entry
-        c_hash  = re_hash(c_hash, seed);
+        c_hash = re_hash(c_hash, seed);
 
         it = hash2id.find(c_hash);
-        if (it == hash2id.end())
+        if(it == hash2id.end())
           break;
       }
     }
@@ -157,38 +157,38 @@ private:
     return c_hash;
   }
 
-  void reload() const { // WARNING: NO REAL CONST, but called from many places to hot-reload
+  void reload() const {           // WARNING: NO REAL CONST, but called from many places to hot-reload
     assert(pending_clear_reload); // called once
     pending_clear_reload = false;
-    synced = true;
+    synced               = true;
 
-    FILE* fp_in = fopen((long_name + "_map").c_str(), "r");
+    FILE *fp_in  = fopen((long_name + "_map").c_str(), "r");
     bool failed = false;
     if(fp_in) {
       size_t sz;
-      if (fread(&sz, sizeof(size_t), 1, fp_in) != 1) // first is variable_internal size
+      if(fread(&sz, sizeof(size_t), 1, fp_in) != 1) // first is variable_internal size
         failed = true;
       failed = !hash2id.unserialize(MapSerializer<Hash_sign, Char_Array_ID>(), fp_in);
       fclose(fp_in);
       variable_internal.reload(sz);
-    }else{
+    } else {
       failed = true;
     }
-    if (failed) {
+    if(failed) {
       variable_internal.emplace_back(); //); // so that ID zero is not used
-      console->info("char_array:reload for {} failed, creating empty",long_name);
+      console->info("char_array:reload for {} failed, creating empty", long_name);
     }
   }
 
 public:
   explicit Char_Array(const std::string &long_name_)
-    : long_name(long_name_)
-    ,variable_internal(long_name_) {
+      : long_name(long_name_)
+      , variable_internal(long_name_) {
 
     hash2id.set_empty_key(0);
 
     pending_clear_reload = true;
-    synced = true;
+    synced               = true;
 
     reload();
   }
@@ -207,7 +207,7 @@ public:
   }
 
   void sync() {
-    if (synced || hash2id.empty())
+    if(synced || hash2id.empty())
       return;
 
     assert(!pending_clear_reload);
@@ -215,28 +215,28 @@ public:
     synced = true;
     variable_internal.sync(); // FIXME: The mmap can change location
     FILE *fp = fopen((long_name + "_map").c_str(), "w");
-    if (fp) {
+    if(fp) {
       size_t sz = variable_internal.size();
       fwrite(&sz, sizeof(size_t), 1, fp);
       hash2id.serialize(MapSerializer<Hash_sign, Char_Array_ID>(), fp);
       fclose(fp);
-    }else{
-      console->error("char_array::sync could not sync {}",long_name);
+    } else {
+      console->error("char_array::sync could not sync {}", long_name);
     }
   }
 
   Const_Char_Array_Iter begin() const {
-    return Const_Char_Array_Iter(first(),first());
+    return Const_Char_Array_Iter(first(), first());
   }
   Const_Char_Array_Iter end() const {
-    return Const_Char_Array_Iter(first(),last());
+    return Const_Char_Array_Iter(first(), last());
   }
 
-  Char_Array_ID create_id(const std::string &str, const Data_type &dt=0) {
+  Char_Array_ID create_id(const std::string &str, const Data_type &dt = 0) {
     return create_id(str.c_str(), dt);
   }
 
-  Char_Array_ID create_id(const char *str, const Data_type &dt=0) {
+  Char_Array_ID create_id(const char *str, const Data_type &dt = 0) {
     synced = false;
     if(pending_clear_reload)
       reload();
@@ -258,7 +258,7 @@ public:
       uint16_t *x = (uint16_t *)&dt;
       for(size_t i = 0; i < sizeof(Data_type) / sizeof(uint16_t); i++) {
         // SKIP: ptr + hash
-        variable_internal[start + 1 + sizeof(Hash_sign)/sizeof(uint16_t) + i] = x[i];
+        variable_internal[start + 1 + sizeof(Hash_sign) / sizeof(uint16_t) + i] = x[i];
       }
 
       return start;
@@ -272,7 +272,7 @@ public:
     start = static_cast<Char_Array_ID>(t);
 
     size_t slen = strlen(str);
-    size_t len = slen;
+    size_t len  = slen;
     len++;      // for zero
     if(len & 1) // multiple of 2 bytes storage
       len++;
@@ -285,7 +285,7 @@ public:
     variable_internal.push_back(len / 2);
 
     //--------------------- SIGNATURE
-    Hash_sign c_hash = prepare_hash(str,slen);
+    Hash_sign c_hash = prepare_hash(str, slen);
     assert(hash2id.find(c_hash) == hash2id.end());
     hash2id[c_hash] = start;
     {
@@ -302,12 +302,12 @@ public:
     }
 
     // String
-    slen++; // OK to increase to add zero
+    slen++;      // OK to increase to add zero
     if(slen & 1) // multiple of 2 bytes storage
       slen++;
     for(size_t i = 0; i < slen; i += 2) {
       uint16_t val = 0;
-      if (str[i] != 0) { // Do not go over limit
+      if(str[i] != 0) { // Do not go over limit
         val = str[i + 1];
         val <<= 8;
       }
@@ -323,10 +323,10 @@ public:
       reload();
 
     assert(id >= 0);
-    assert(variable_internal.size() > (id + 1 + (sizeof(Data_type) + sizeof(Hash_sign))/sizeof(uint16_t)));
+    assert(variable_internal.size() > (id + 1 + (sizeof(Data_type) + sizeof(Hash_sign)) / sizeof(uint16_t)));
 
     // SKIP len + hash + data
-    return (const char *)&variable_internal[id + 1 + (sizeof(Data_type) + sizeof(Hash_sign))/sizeof(uint16_t)];
+    return (const char *)&variable_internal[id + 1 + (sizeof(Data_type) + sizeof(Hash_sign)) / sizeof(uint16_t)];
   }
 
   const Data_type &get_field(Char_Array_ID id) const {
@@ -334,10 +334,10 @@ public:
       reload();
 
     assert(id >= 0);
-    assert(variable_internal.size() > (id + 1 + (sizeof(Data_type) + sizeof(Hash_sign))/sizeof(uint16_t)));
+    assert(variable_internal.size() > (id + 1 + (sizeof(Data_type) + sizeof(Hash_sign)) / sizeof(uint16_t)));
 
     // SKIP Len + Hash
-    return *(const Data_type *)&variable_internal[id + 1 + (sizeof(Hash_sign))/sizeof(uint16_t)];
+    return *(const Data_type *)&variable_internal[id + 1 + (sizeof(Hash_sign)) / sizeof(uint16_t)];
   }
 
   Data_type &get_field(Char_Array_ID id) {
@@ -345,10 +345,10 @@ public:
       reload();
 
     assert(id >= 0);
-    assert(variable_internal.size() > (id + 1 + (sizeof(Data_type) + sizeof(Hash_sign))/sizeof(uint16_t)));
+    assert(variable_internal.size() > (id + 1 + (sizeof(Data_type) + sizeof(Hash_sign)) / sizeof(uint16_t)));
 
     // SKIP Len + Hash
-    return *(Data_type *)&variable_internal[id + 1 + (sizeof(Hash_sign))/sizeof(uint16_t)];
+    return *(Data_type *)&variable_internal[id + 1 + (sizeof(Hash_sign)) / sizeof(uint16_t)];
   }
 
   const Hash_sign &get_hash(Char_Array_ID id) const {
@@ -356,13 +356,15 @@ public:
       reload();
 
     assert(id >= 0);
-    assert(variable_internal.size() > (id + 1 + sizeof(Hash_sign)/sizeof(uint16_t)));
+    assert(variable_internal.size() > (id + 1 + sizeof(Hash_sign) / sizeof(uint16_t)));
 
     // SKIP Len
     return *(const Hash_sign *)&variable_internal[id + 1];
   }
 
-  const Data_type &get_field(const std::string &s) const { return get_field(s.c_str()); }
+  const Data_type &get_field(const std::string &s) const {
+    return get_field(s.c_str());
+  }
 
   const Data_type &get_field(const char *ptr) const {
     assert(!pending_clear_reload);
@@ -382,7 +384,7 @@ public:
   }
 
   bool include(const std::string &str) const {
-    return get_id(str.c_str())!=0;
+    return get_id(str.c_str()) != 0;
   }
 
   int get_id(const char *str) const {
@@ -390,36 +392,38 @@ public:
       reload();
 
     const std::string key(str);
-    Hash_sign seed=0;
-    Hash_sign c_hash = seed_hash(key,seed);
-    auto it = hash2id.find(c_hash);
-    if (it == hash2id.end())
+    Hash_sign         seed   = 0;
+    Hash_sign         c_hash = seed_hash(key, seed);
+    auto              it     = hash2id.find(c_hash);
+    if(it == hash2id.end())
       return 0;
     Char_Array_ID cid = it->second;
-    if (cid>0) {
-      if(strcmp(get_char(cid),str)==0)
+    if(cid > 0) {
+      if(strcmp(get_char(cid), str) == 0)
         return cid;
       return 0;
     }
 
     while(cid < 0) {
       cid = -cid;
-      if (strcmp(get_char(cid),str)==0)
+      if(strcmp(get_char(cid), str) == 0)
         return cid;
 
-      c_hash = re_hash(c_hash, seed);
+      c_hash  = re_hash(c_hash, seed);
       auto it = hash2id.find(c_hash);
-      if (it == hash2id.end())
+      if(it == hash2id.end())
         return 0;
       cid = it->second;
     }
 
-    if (strcmp(get_char(cid),str)==0)
+    if(strcmp(get_char(cid), str) == 0)
       return cid;
     return 0;
   }
 
-  int get_id(const std::string &str) const { return get_id(str.c_str()); }
+  int get_id(const std::string &str) const {
+    return get_id(str.c_str());
+  }
 };
 
 #endif

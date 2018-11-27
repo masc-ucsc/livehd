@@ -6,7 +6,6 @@
 
 class Pass_sample : public Pass {
 protected:
-
   static void work(Eprp_var &var);
 
 public:

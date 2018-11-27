@@ -7,9 +7,9 @@
 #include <string>
 
 #include "defrReader.hpp"
+#include "inou_def.hpp"
 #include "lefrReader.hpp"
 #include "tech_library.hpp"
-#include "inou_def.hpp"
 
 //***************************************************
 //************LEF FILE PARSING START!****************
@@ -17,26 +17,27 @@
 
 // user supplied callback routines
 
-//FIXME: remove any non-class method from the hpp file. They should be in the
-//cpp file where they are used.
+// FIXME: remove any non-class method from the hpp file. They should be in the
+// cpp file where they are used.
 
-// collect macro lef information by using "three" user-defined call function, this usage first looked strange, this is due to cadence api architecture. no other way if you want to use cadence parser.
+// collect macro lef information by using "three" user-defined call function, this usage first looked strange, this is due to
+// cadence api architecture. no other way if you want to use cadence parser.
 int lef_macro_begin_cb(lefrCallbackType_e c, const char *macroName, lefiUserData ud) {
   Tech_library *tlib = (Tech_library *)ud;
 
-  //in create_cell_id(), it will create a new cell type for vector cell_types
+  // in create_cell_id(), it will create a new cell type for vector cell_types
   tlib->create_cell_id(macroName);
   return 0;
 }
 
-//fmacro means macro information from lef file
+// fmacro means macro information from lef file
 int lef_macro_cb(lefrCallbackType_e c, lefiMacro *fmacro, lefiUserData ud) {
   Tech_library *tlib = (Tech_library *)ud;
 
-  //note!! you "have to" create a new cell type in "lef_macro_begin_cb" callback function, or the cell will not really create for the sub-sequence cb,e.g. macro_cb and pin_cb
-  //tlib->create_cell_id(fmacro->name());
+  // note!! you "have to" create a new cell type in "lef_macro_begin_cb" callback function, or the cell will not really create for
+  // the sub-sequence cb,e.g. macro_cb and pin_cb tlib->create_cell_id(fmacro->name());
 
-  //and then use tmp_cell as reference of Tech_library::cell_types.back() to retrieve out the lef
+  // and then use tmp_cell as reference of Tech_library::cell_types.back() to retrieve out the lef
   Tech_cell &tmp_cell = tlib->get_vec_cell_types()->back();
   if(fmacro->hasSize()) {
     tmp_cell.set_cell_size(fmacro->sizeX(), fmacro->sizeY());
@@ -44,14 +45,14 @@ int lef_macro_cb(lefrCallbackType_e c, lefiMacro *fmacro, lefiUserData ud) {
   return 0;
 }
 
-int lef_pin_cb(lefrCallbackType_e c, lefiPin *fpin, lefiUserData ud) { //fpin means pin information from lef file
+int lef_pin_cb(lefrCallbackType_e c, lefiPin *fpin, lefiUserData ud) { // fpin means pin information from lef file
 
   Tech_library *tlib = (Tech_library *)ud;
 
-  //if(strcmp(fpin->use(), "GROUND") == 0) return 0 ; //should we ignore POWER and GROUND pin?
-  //if(strcmp(fpin->use(), "POWER") == 0) return 0 ;
+  // if(strcmp(fpin->use(), "GROUND") == 0) return 0 ; //should we ignore POWER and GROUND pin?
+  // if(strcmp(fpin->use(), "POWER") == 0) return 0 ;
 
-  int pn; //variable for port number
+  int pn; // variable for port number
 
   Tech_cell &tmp_cell = tlib->get_vec_cell_types()->back();
 
@@ -61,7 +62,7 @@ int lef_pin_cb(lefrCallbackType_e c, lefiPin *fpin, lefiUserData ud) { //fpin me
       dir = Tech_cell::Direction::input;
     else if(strcmp(fpin->direction(), "OUTPUT") == 0)
       dir = Tech_cell::Direction::output;
-    else if(strcmp(fpin->direction(), "INOUT") == 0) //we will set inout as input in lgraph
+    else if(strcmp(fpin->direction(), "INOUT") == 0) // we will set inout as input in lgraph
       dir = Tech_cell::Direction::input;
     else
       assert(false); // Unknown option
@@ -77,12 +78,12 @@ int lef_pin_cb(lefrCallbackType_e c, lefiPin *fpin, lefiUserData ud) { //fpin me
 
     for(int i = 0; i < geometry->numItems(); i++) {
 
-      //if(geometry->itemType(i) == lefiGeomLayerE){
+      // if(geometry->itemType(i) == lefiGeomLayerE){
       //  tmp_phy.metal_name = geometry->lefiGeometries::getLayer(i);
       //}
 
       if(geometry->itemType(i) == lefiGeomRectE) {
-        tmp_pin.phys.resize(tmp_pin.phys.size() + 1); //create a temporary object inline
+        tmp_pin.phys.resize(tmp_pin.phys.size() + 1); // create a temporary object inline
         Tech_cell::Physical_pin &tmp_phy = tmp_pin.phys.back();
         const lefiGeomRect *     rect    = geometry->getRect(i);
 
@@ -91,33 +92,35 @@ int lef_pin_cb(lefrCallbackType_e c, lefiPin *fpin, lefiUserData ud) { //fpin me
           tmp_phy.metal_name = geometry->lefiGeometries::getLayer(i - 1);
         else
           tmp_phy.metal_name = geometry->lefiGeometries::getLayer(0);
-        //tmp_pin.phy.rects.resize(tmp_pin.phy.rects.size()+1);
-        //Tech_cell::Rect& tmp_rect = tmp_pin.phy.rects.back();
+        // tmp_pin.phy.rects.resize(tmp_pin.phy.rects.size()+1);
+        // Tech_cell::Rect& tmp_rect = tmp_pin.phy.rects.back();
         tmp_phy.xl = rect->xl;
         tmp_phy.yl = rect->yl;
         tmp_phy.xh = rect->xh;
         tmp_phy.yh = rect->yh;
       }
-    } //end inner for
-  }   //end outer for
+    } // end inner for
+  }   // end outer for
 
-  //pin ports parsing end
+  // pin ports parsing end
   return 0;
 }
 
-int lef_layer_cb(lefrCallbackType_e c, lefiLayer *flayer, lefiUserData ud) { //flayer means layer information from lef file
-  auto *tlib = (Tech_library *)ud;                                               //convert void* into Tech_library*
-  int i, j, k;
+int lef_layer_cb(lefrCallbackType_e c, lefiLayer *flayer, lefiUserData ud) { // flayer means layer information from lef file
+  auto *tlib = (Tech_library *)ud;                                               // convert void* into Tech_library*
+  inti, j, k;
   lefiSpacingTable *spTable;
   lefiParallel *parallel;
 
   if(strcmp(flayer->name(), "OVERLAP") == 0) {
-    return 0; //do nothing when layer name = OVERLAP
+    return 0; // do nothing when layer name = OVERLAP
   }
 
-  tlib->increase_vec_layers_size(); //whenever user-defined routine(layerCb) is called, the data member Tech_library::layers will increase size by one to be ready to contain new info.
+  tlib->increase_vec_layers_size(); // whenever user-defined routine(layerCb) is called, the data member Tech_library::layers will
+                                    // increase size by one to be ready to contain new info.
 
-  Tech_layer &tmp_layer = tlib->get_vec_layers()->back(); //and then use tmp_layer as reference of Tech_library::layers.back() to retrieve out the lef data the callback routine returned
+  Tech_layer &tmp_layer = tlib->get_vec_layers()->back(); // and then use tmp_layer as reference of Tech_library::layers.back() to
+                                                          // retrieve out the lef data the callback routine returned
 
   tmp_layer.name = flayer->name();
 
@@ -141,7 +144,7 @@ int lef_layer_cb(lefrCallbackType_e c, lefiLayer *flayer, lefiUserData ud) { //f
     tmp_layer.pitches.push_back(flayer->pitchY());
   }
 
-  tmp_layer.width = flayer->width(); //if (flayer->hasWidth()) //bugy with Layer Via width detection, so remove condition judgement
+  tmp_layer.width = flayer->width(); // if (flayer->hasWidth()) //bugy with Layer Via width detection, so remove condition judgement
 
   if(flayer->hasSpacingNumber()) {
     for(i = 0; i < flayer->numSpacing(); i++) {
@@ -152,7 +155,7 @@ int lef_layer_cb(lefrCallbackType_e c, lefiLayer *flayer, lefiUserData ud) { //f
         tmp_layer.spacing_eol.push_back(flayer->spacingEolWidth(i));
         tmp_layer.spacing_eol.push_back(flayer->spacingEolWithin(i));
       }
-    } //end for
+    } // end for
   }
 
   for(i = 0; i < flayer->numSpacingTable(); i++) {
@@ -167,16 +170,18 @@ int lef_layer_cb(lefrCallbackType_e c, lefiLayer *flayer, lefiUserData ud) { //f
         for(k = 0; k < parallel->lefiParallel::numLength(); k++)
           tmp_layer.spctb_spacing.push_back(parallel->lefiParallel::widthSpacing(j, k));
       }
-    } //end if
+    } // end if
   }
   return 0;
 }
 
-int lef_via_cb(lefrCallbackType_e c, lefiVia *fvia, lefiUserData ud) { //fvia means via information from lef file
-  Tech_library *tlib = (Tech_library *)ud;                                         //convert void* into Tech_library*
+int lef_via_cb(lefrCallbackType_e c, lefiVia *fvia, lefiUserData ud) { // fvia means via information from lef file
+  Tech_library *tlib = (Tech_library *)ud;                                         // convert void* into Tech_library*
 
-  tlib->increase_vec_vias_size();           //whenever user-defined routine(layerCb) is called, the data member Tech_library::vias will increase size by one to be ready to contain new info.
-  Tech_via &tmp_via = tlib->get_vec_vias()->back(); //and then use tmp_via as reference of Tech_library::vias.back() to retrieve out the lef data the callback routine returned
+  tlib->increase_vec_vias_size(); // whenever user-defined routine(layerCb) is called, the data member Tech_library::vias will
+                                  // increase size by one to be ready to contain new info.
+  Tech_via &tmp_via = tlib->get_vec_vias()->back(); // and then use tmp_via as reference of Tech_library::vias.back() to retrieve
+                                                    // out the lef data the callback routine returned
 
   tmp_via.name = fvia->name();
 
@@ -198,11 +203,11 @@ void lef_parsing(Tech_library *tlib, std::string lef_file_name) {
   tlib->clear_tech_lib();
 
   const char *lef_file = lef_file_name.c_str();
-  lefrInit(); //initialize the reader, This routine must be called first
+  lefrInit(); // initialize the reader, This routine must be called first
 
   FILE *fin = fopen(lef_file, "r");
   if(fin == NULL) {
-    console->error("Couldn't open lef input file {}\n",lef_file_name);
+    console->error("Couldn't open lef input file {}\n", lef_file_name);
     exit(1);
   }
 
@@ -213,7 +218,8 @@ void lef_parsing(Tech_library *tlib, std::string lef_file_name) {
   lefrSetViaCbk(lef_via_cb);
   lefrReset();
 
-  lefrRead(fin, lef_file, (void *)tlib); //Tech_file object is your userData, pass pointer of it into lefrRead(), and it will return as a argument in your user-defined callback routine
+  lefrRead(fin, lef_file, (void *)tlib); // Tech_file object is your userData, pass pointer of it into lefrRead(), and it will
+                                         // return as a argument in your user-defined callback routine
   fclose(fin);
 }
 
@@ -232,11 +238,11 @@ int def_net_cb(defrCallbackType_e type, defiNet *fnet, defiUserData ud) {
     tmp_conn.pin_name   = fnet->pin(i);
     tmp_conn.compo_name = fnet->instance(i);
   }
-  //cout << tmp_net.name << endl;
-  //for(int i = 0 ; i < fnet->numConnections(); i++){
+  // cout << tmp_net.name << endl;
+  // for(int i = 0 ; i < fnet->numConnections(); i++){
   //  cout << " ( " << tmp_net.conns[i].compo_name << " " << tmp_net.conns[i].pin_name << " ) ";
   //}
-  //cout<<endl;
+  // cout<<endl;
   return 0;
 }
 
@@ -253,10 +259,12 @@ int def_component_cb(defrCallbackType_e type, defiComponent *fcompo, defiUserDat
   tmp_compo.is_fixed    = fcompo->isFixed();
   tmp_compo.is_placed   = fcompo->isPlaced();
 
-  //if(tmp_compo.is_fixed)
-  //  cout << " - " << tmp_compo.name << " " << tmp_compo.macro_name << " + " << "FIXED" << " ( " << tmp_compo.posx << " " << tmp_compo.posy << " ) " << tmp_compo.orientation << endl;
-  //if(tmp_compo.is_placed)
-  //  cout << " - " << tmp_compo.name << " " << tmp_compo.macro_name << " + " << "PLACED" << " ( " << tmp_compo.posx << " " << tmp_compo.posy << " ) " << tmp_compo.orientation << endl;
+  // if(tmp_compo.is_fixed)
+  //  cout << " - " << tmp_compo.name << " " << tmp_compo.macro_name << " + " << "FIXED" << " ( " << tmp_compo.posx << " " <<
+  //  tmp_compo.posy << " ) " << tmp_compo.orientation << endl;
+  // if(tmp_compo.is_placed)
+  //  cout << " - " << tmp_compo.name << " " << tmp_compo.macro_name << " + " << "PLACED" << " ( " << tmp_compo.posx << " " <<
+  //  tmp_compo.posy << " ) " << tmp_compo.orientation << endl;
 
   return 0;
 }
@@ -286,7 +294,7 @@ int def_io_cb(defrCallbackType_e type, defiPin *fpin, defiUserData ud) {
     tmp_io.phy.yl = yl;
     tmp_io.phy.yh = yh;
   }
-  //cout << "io name = " << tmp_io.io_name << " direction = " << tmp_io.dir << endl;
+  // cout << "io name = " << tmp_io.io_name << " direction = " << tmp_io.dir << endl;
   return 0;
 }
 
@@ -303,14 +311,15 @@ int def_track_cb(defrCallbackType_e type, defiTrack *ftrack, defiUserData ud) {
   for(int i = 0; i < ftrack->numLayers(); i++)
     tmp_track.layers.push_back(ftrack->layer(i));
 
-  //cout << "TRACKS" << tmp_track.direction << " " << tmp_track.location << " DO " << tmp_track.num_tracks << " STEP " << tmp_track.space <<" LAYER " << tmp_track.layers.back() << endl;
+  // cout << "TRACKS" << tmp_track.direction << " " << tmp_track.location << " DO " << tmp_track.num_tracks << " STEP " <<
+  // tmp_track.space <<" LAYER " << tmp_track.layers.back() << endl;
 
   return 0;
 }
 
 int def_design_cb(defrCallbackType_e c, const char *string, defiUserData ud) {
   Def_info &dinfo = *((Def_info *)ud);
-  dinfo.mod_name = string;
+  dinfo.mod_name  = string;
   return 0;
 }
 
@@ -331,7 +340,7 @@ int def_row_cb(defrCallbackType_e type, defiRow *frow, defiUserData ud) {
     tmp_row.stepx = frow->xStep();
     tmp_row.stepy = frow->yStep();
   }
-  //cout << "ROW " << tmp_row.name << " " << tmp_row.site << " " << tmp_row.origx
+  // cout << "ROW " << tmp_row.name << " " << tmp_row.site << " " << tmp_row.origx
   //     << " "    << tmp_row.origy<< " " << tmp_row.orient << " DO " << tmp_row.numx
   //     << " BY "  << tmp_row.numy << " STEP " << tmp_row.stepx << " " << tmp_row.stepy << endl;
   return 0;
@@ -339,11 +348,11 @@ int def_row_cb(defrCallbackType_e type, defiRow *frow, defiUserData ud) {
 
 void def_parsing(Def_info &dinfo, std::string def_file_name) {
   const char *def_file = def_file_name.c_str();
-  defrInit(); //initialize the reader, This routine must be called first
+  defrInit(); // initialize the reader, This routine must be called first
 
   FILE *fin = fopen(def_file, "r");
   if(fin == NULL) {
-    console->error("Couldn't open def input file {}\n",def_file_name);
+    console->error("Couldn't open def input file {}\n", def_file_name);
     exit(1);
   }
 
@@ -355,7 +364,8 @@ void def_parsing(Def_info &dinfo, std::string def_file_name) {
   defrSetNetCbk(def_net_cb);
   defrReset();
 
-  //Def_info object is your userData, pass pointer of it into defrRead(), and it will return as a argument in your user-defined callback routine
+  // Def_info object is your userData, pass pointer of it into defrRead(), and it will return as a argument in your user-defined
+  // callback routine
   defrRead(fin, def_file, (void *)&dinfo, 1);
   fclose(fin);
 }

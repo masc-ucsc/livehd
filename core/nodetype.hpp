@@ -18,13 +18,7 @@
 // as part of the lgnode itself to avoid extra cache misses
 
 struct Node_type {
-  enum Node_type_op : uint8_t {
-    Invalid_Op,
-    Sum_Op,
-    Mult_Op,
-    Div_Op,
-    Mod_Op
-  } op;
+  enum Node_type_op : uint8_t { Invalid_Op, Sum_Op, Mult_Op, Div_Op, Mod_Op } op;
   uint32_t meta;
 } __attribute__((packed));
 
@@ -92,18 +86,17 @@ protected:
   // Both inputs/outputs sorted in alphabetical order
   std::vector<const char *> inputs;
   std::vector<const char *> outputs;
-  std::vector<bool> inputs_sign;
+  std::vector<bool>         inputs_sign;
 
   bool may_gen_sign;
 
   Node_Type(const std::string &_name, Node_Type_Op _op, bool _pipelined)
       : name(_name)
       , pipelined(_pipelined)
-      , op(_op){
+      , op(_op) {
 
-        may_gen_sign = false;
-      };
-
+    may_gen_sign = false;
+  };
 
   void setup_signs(bool can_sign) {
     may_gen_sign = can_sign;
@@ -112,16 +105,17 @@ protected:
 
     for(size_t i = 0; i < inputs.size(); i++) {
       auto len = strlen(inputs[i]);
-      assert(len>0);
-      inputs_sign[i] = (inputs[i][len-1] == 's');
+      assert(len > 0);
+      inputs_sign[i] = (inputs[i][len - 1] == 's');
     }
-
   }
 
 public:
   const Node_Type_Op op;
 
-  bool has_may_gen_sign() const { return may_gen_sign; }
+  bool has_may_gen_sign() const {
+    return may_gen_sign;
+  }
 
   static Node_Type &  get(Node_Type_Op op);
   static Node_Type_Op get(const std::string &opname);
@@ -156,7 +150,7 @@ public:
   }
 
   bool is_input_signed(Port_ID pid) const {
-    if(inputs_sign.size()<pid)
+    if(inputs_sign.size() < pid)
       return inputs_sign[pid];
     return false;
   }
@@ -490,9 +484,9 @@ public:
 };
 
 // Parameters
-#define LGRAPH_MEMOP_SIZE   0
+#define LGRAPH_MEMOP_SIZE 0
 #define LGRAPH_MEMOP_OFFSET 1
-#define LGRAPH_MEMOP_ABITS  2
+#define LGRAPH_MEMOP_ABITS 2
 #define LGRAPH_MEMOP_WRPORT 3
 #define LGRAPH_MEMOP_RDPORT 4
 #define LGRAPH_MEMOP_CLKPOL 5
@@ -500,7 +494,7 @@ public:
 
 // Shared signals
 #define LGRAPH_MEMOP_CLK 7
-#define LGRAPH_MEMOP_CE  8
+#define LGRAPH_MEMOP_CE 8
 
 // Port specific signals
 #define LGRAPH_MEMOP_POFFSET (LGRAPH_MEMOP_CE + 1)
@@ -728,7 +722,7 @@ public:
 class Node_Type_DfgRef : public Node_Type {
 public:
   Node_Type_DfgRef()
-    : Node_Type("dfg_ref", DfgRef_Op, false) {
+      : Node_Type("dfg_ref", DfgRef_Op, false) {
     inputs.push_back("A");
     outputs.push_back("Y");
   };
@@ -737,7 +731,7 @@ public:
 class Node_Type_DfgPendingGraph : public Node_Type {
 public:
   Node_Type_DfgPendingGraph()
-    : Node_Type("dfg_pending_graph", DfgPendingGraph_Op, false) {
+      : Node_Type("dfg_pending_graph", DfgPendingGraph_Op, false) {
     inputs.push_back("A");
     outputs.push_back("Y");
   };
@@ -782,7 +776,8 @@ public:
 
   void node_const_type_set(Index_ID nid, const std::string &value
 #ifndef NDEBUG
-                     , bool enforce_bits = true
+                           ,
+                           bool enforce_bits = true
 #endif
   );
   const char *node_const_value_get(Index_ID nid) const;

@@ -4,23 +4,24 @@
 
 #include <atomic>
 
-#include "pass.hpp"
 #include "lgraph.hpp"
+#include "pass.hpp"
 
 class Inou_graphviz : public Pass {
 private:
 protected:
   std::string odir;
-  bool bits;
+  bool        bits;
 
   std::atomic<int> total;
-  void inc_total(Index_ID idx) {
+  void             inc_total(Index_ID idx) {
     total++;
   };
 
   static void fromlg(Eprp_var &var);
 
   void do_fromlg(std::vector<const LGraph *> &out);
+
 public:
   Inou_graphviz();
 
