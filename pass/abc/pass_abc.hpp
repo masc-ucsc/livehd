@@ -7,10 +7,10 @@
 
 #include <string>
 
-#include "pass.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraphbase.hpp"
 #include "options.hpp"
+#include "pass.hpp"
 
 extern "C" {
 #include "base/abc/abc.h"
@@ -26,13 +26,13 @@ protected:
   public:
     Pass_abc_options() {
       verbose = false;
-      odir = ".";
+      odir    = ".";
     };
 
     std::string liberty_file;
     std::string blif_file;
     std::string odir;
-    bool verbose;
+    bool        verbose;
   };
   Pass_abc_options opack;
 
@@ -43,11 +43,11 @@ protected:
   static void tmap(Eprp_var &var);
   static void optimize(Eprp_var &var);
 
-  LGraph *regen(const LGraph *lg) ;
+  LGraph *regen(const LGraph *lg);
   void    trans(LGraph *lg);
   void    dump_blif(const LGraph *g, const std::string &filename);
-public:
 
+public:
   struct IndexID_Hash {
     inline std::size_t operator()(const Index_ID &k) const {
       return (size_t)k;
@@ -56,22 +56,22 @@ public:
 
   struct Abc_primary_input {
     Abc_Obj_t *PI;    // PI node
-    Abc_Obj_t *PIOut; //Fanout of this node type: nets
+    Abc_Obj_t *PIOut; // Fanout of this node type: nets
   };
 
   struct Abc_primary_output {
     Abc_Obj_t *PO;    // PI node
-    Abc_Obj_t *POOut; //Fanout of this node type: nets
+    Abc_Obj_t *POOut; // Fanout of this node type: nets
   };
 
   struct Abc_latch {
     Abc_Obj_t *pLatchInput;  // Node itself is the fanin
-    Abc_Obj_t *pLatchOutput; //Fanout of this node type: nets
+    Abc_Obj_t *pLatchOutput; // Fanout of this node type: nets
   };
 
   struct Abc_comb {
     Abc_Obj_t *pNodeInput;  // Node it self is the fanin
-    Abc_Obj_t *pNodeOutput; //Fanout of this node type: nets
+    Abc_Obj_t *pNodeOutput; // Fanout of this node type: nets
   };
 
   struct index_offset {
@@ -118,7 +118,10 @@ public:
     int      offset;
     int      width;
 
-    Pick_ID(Node_Pin driver, int offset, int width) : driver(driver), offset(offset), width(width) {
+    Pick_ID(Node_Pin driver, int offset, int width)
+        : driver(driver)
+        , offset(offset)
+        , width(width) {
     }
 
     bool operator<(const Pick_ID other) const {
@@ -129,64 +132,64 @@ public:
 
   struct graph_topology {
 
-	using topology_info = std::vector<index_offset>;
-	using name2id       = std::unordered_map<std::string, Index_ID>;
-	using po_group      = std::map<index_offset, Abc_primary_output>;
-	using pi_group      = std::map<index_offset, Abc_primary_input>;
-	using cell_group    = std::unordered_map<Index_ID, Abc_comb, IndexID_Hash>;
-	using latch_group   = std::unordered_map<Index_ID, Abc_latch, IndexID_Hash>;
-	using skew_group    = std::map<std::string, std::set<Index_ID>>;
-	using reset_group   = std::map<std::string, std::set<Index_ID>>;
-	using node_conn     = std::unordered_map<Index_ID, topology_info, IndexID_Hash>;
-	using block_conn    = std::unordered_map<Index_ID, std::unordered_map<Port_ID, topology_info>, IndexID_Hash>;
-	using pseduo_name   = std::map<index_offset, std::string>;
-	using idremap       = std::unordered_map<Index_ID, Index_ID>;
-	using pidremap      = std::unordered_map<Index_ID, std::unordered_map<Port_ID, Index_ID>>;
-	using ptr2id        = std::unordered_map<Abc_Obj_t *, Index_ID>;
-	using id2pid        = std::unordered_map<Index_ID, Port_ID, IndexID_Hash>;
-	using value_size    = std::pair<uint32_t, uint32_t>;
-	using value2idx     = std::map<value_size, Index_ID>;
-	using picks2pin     = std::map<Pick_ID, Node_Pin>;
-	using record        = std::unordered_map<std::string, Abc_Obj_t *>;
+    using topology_info = std::vector<index_offset>;
+    using name2id       = std::unordered_map<std::string, Index_ID>;
+    using po_group      = std::map<index_offset, Abc_primary_output>;
+    using pi_group      = std::map<index_offset, Abc_primary_input>;
+    using cell_group    = std::unordered_map<Index_ID, Abc_comb, IndexID_Hash>;
+    using latch_group   = std::unordered_map<Index_ID, Abc_latch, IndexID_Hash>;
+    using skew_group    = std::map<std::string, std::set<Index_ID>>;
+    using reset_group   = std::map<std::string, std::set<Index_ID>>;
+    using node_conn     = std::unordered_map<Index_ID, topology_info, IndexID_Hash>;
+    using block_conn    = std::unordered_map<Index_ID, std::unordered_map<Port_ID, topology_info>, IndexID_Hash>;
+    using pseduo_name   = std::map<index_offset, std::string>;
+    using idremap       = std::unordered_map<Index_ID, Index_ID>;
+    using pidremap      = std::unordered_map<Index_ID, std::unordered_map<Port_ID, Index_ID>>;
+    using ptr2id        = std::unordered_map<Abc_Obj_t *, Index_ID>;
+    using id2pid        = std::unordered_map<Index_ID, Port_ID, IndexID_Hash>;
+    using value_size    = std::pair<uint32_t, uint32_t>;
+    using value2idx     = std::map<value_size, Index_ID>;
+    using picks2pin     = std::map<Pick_ID, Node_Pin>;
+    using record        = std::unordered_map<std::string, Abc_Obj_t *>;
 
-	std::vector<Index_ID> combinational_id;
-	std::vector<Index_ID> latch_id;
-	std::vector<Index_ID> graphio_input_id;
-	std::vector<Index_ID> graphio_output_id;
-	std::vector<Index_ID> subgraph_id;
-	std::vector<Index_ID> memory_id;
+    std::vector<Index_ID> combinational_id;
+    std::vector<Index_ID> latch_id;
+    std::vector<Index_ID> graphio_input_id;
+    std::vector<Index_ID> graphio_output_id;
+    std::vector<Index_ID> subgraph_id;
+    std::vector<Index_ID> memory_id;
 
-	po_group    primary_output;
-	pi_group    primary_input;
-	cell_group  combinational_cell;
-	name2id     latchname2id;
-	latch_group sequential_cell;
+    po_group    primary_output;
+    pi_group    primary_input;
+    cell_group  combinational_cell;
+    name2id     latchname2id;
+    latch_group sequential_cell;
 
-	skew_group  skew_group_map;
-	name2id     clock_id;
-	reset_group reset_group_map;
-	name2id     reset_id;
+    skew_group  skew_group_map;
+    name2id     clock_id;
+    reset_group reset_group_map;
+    name2id     reset_id;
 
-	node_conn   comb_conn;
-	node_conn   latch_conn;
-	node_conn   primary_output_conn;
-	block_conn  subgraph_conn;
-	block_conn  memory_conn;
-	pseduo_name subgraph_generated_output_wire;
-	pseduo_name subgraph_generated_input_wire;
-	pseduo_name memory_generated_output_wire;
-	pseduo_name memory_generated_input_wire;
-	record      pseduo_record;
+    node_conn   comb_conn;
+    node_conn   latch_conn;
+    node_conn   primary_output_conn;
+    block_conn  subgraph_conn;
+    block_conn  memory_conn;
+    pseduo_name subgraph_generated_output_wire;
+    pseduo_name subgraph_generated_input_wire;
+    pseduo_name memory_generated_output_wire;
+    pseduo_name memory_generated_input_wire;
+    record      pseduo_record;
 
-	name2id   ck_remap;
-	name2id   rst_remap;
-	name2id   io_remap;
-	idremap   subgraph_remap;
-	idremap   memory_remap;
-	ptr2id    cell2id;
-	id2pid    cell_out_pid;
-	value2idx int_const_map;
-	picks2pin picks;
+    name2id   ck_remap;
+    name2id   rst_remap;
+    name2id   io_remap;
+    idremap   subgraph_remap;
+    idremap   memory_remap;
+    ptr2id    cell2id;
+    id2pid    cell_out_pid;
+    value2idx int_const_map;
+    picks2pin picks;
   };
 
   Pass_abc();
@@ -291,8 +294,8 @@ private:
 
   void write_src_info(const LGraph *g, const Pass_abc::index_offset &inp, std::ofstream &fs);
 
-  void gen_generic_lib(const std::string& buffer) {
-    FILE *      f      = fopen(buffer.c_str(), "wt");
+  void gen_generic_lib(const std::string &buffer) {
+    FILE *f = fopen(buffer.c_str(), "wt");
     if(f == NULL)
       console->error("Opening {} for writing failed: {}\n", buffer.c_str(), strerror(errno));
     fprintf(f, "GATE ZERO    1 Y=CONST0;\n");
@@ -317,4 +320,3 @@ private:
 };
 
 #endif
-

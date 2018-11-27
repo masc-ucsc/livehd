@@ -55,18 +55,15 @@ public:
 typedef std::vector<Node_Pin_Plus> Node_Pin_Vec;
 class Expression_Node {
 public:
-  enum task_enum {
-    build_sets_enum,
-    insertion_enum,
-    elimination_enum
-  };
+  enum task_enum { build_sets_enum, insertion_enum, elimination_enum };
   Node_Type_Op node_type_op;
   //  Node_Pin_Plus node_pin;
   Node_Pin_Vec node_pin_vec;
   Expression_Node(
-      //Node_Pin_Plus _node_pin= Node_Pin_Plus(-1, -1, false),
+      // Node_Pin_Plus _node_pin= Node_Pin_Plus(-1, -1, false),
       Node_Type_Op _node_type_op = Invalid_Op, Node_Pin_Vec _node_pin_vec = Node_Pin_Vec())
-      : node_type_op(_node_type_op), node_pin_vec(_node_pin_vec)
+      : node_type_op(_node_type_op)
+      , node_pin_vec(_node_pin_vec)
   //    ,node_pin(_node_pin)
   {
     for(auto &node_pin : node_pin_vec) {
@@ -99,8 +96,10 @@ public:
     }
   }
 };
-typedef std::map<Expression_Node, Node_Pin_Plus> ExpLeaderMap; // Expression leader map; key:expression is led by leader:operand(has specific operation type)
-typedef std::map<Node_Pin_Plus, Node_Pin_Plus>   OpLeaderMap;  // Operand leader map; key:(invalid type) operand is led by leader:operand(has specific operation type)
+typedef std::map<Expression_Node, Node_Pin_Plus>
+    ExpLeaderMap; // Expression leader map; key:expression is led by leader:operand(has specific operation type)
+typedef std::map<Node_Pin_Plus, Node_Pin_Plus>
+    OpLeaderMap; // Operand leader map; key:(invalid type) operand is led by leader:operand(has specific operation type)
 class Pass_gvn_pre : public Pass {
 private:
 protected:

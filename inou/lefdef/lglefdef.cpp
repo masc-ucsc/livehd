@@ -4,10 +4,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "tech_library.hpp"
 #include "inou_def.hpp"
 #include "lgbench.hpp"
 #include "lglefdef.hpp"
+#include "tech_library.hpp"
 
 int main(int argc, const char **argv) {
   LGBench b;
@@ -18,7 +18,7 @@ int main(int argc, const char **argv) {
   b.sample("setup");
 
   Tech_library *tlib = Tech_library::instance(def.get_opack().lgdb_path);
-  //call global function lef_parsing(), which uses cadence api to parse lef information.
+  // call global function lef_parsing(), which uses cadence api to parse lef information.
   lef_parsing(tlib, def.get_opack().lef_file);
 
   b.sample("lef-done");
@@ -30,7 +30,7 @@ int main(int argc, const char **argv) {
 
   b.sample("def-parse");
 
-  //Temp!! test idea of a giant node with chip_frame type
+  // Temp!! test idea of a giant node with chip_frame type
   tlib->create_cell_id("chip_frame");
   Tech_cell &tmp_cell = tlib->get_vec_cell_types()->back();
 
@@ -54,7 +54,7 @@ int main(int argc, const char **argv) {
     tmp_phy.xl                       = iter_io->phy.xl;
     tmp_phy.yh                       = iter_io->phy.yh;
     tmp_phy.yl                       = iter_io->phy.yl;
-  } //end for
+  } // end for
 
   b.sample("chip-level");
 
@@ -64,9 +64,9 @@ int main(int argc, const char **argv) {
   b.sample("def-done");
 
   /*r(auto &g:vgen){
-		g->print_stats();
-		json.generate(g);
-	}*/
+    g->print_stats();
+    json.generate(g);
+  }*/
 
   return 0;
 }

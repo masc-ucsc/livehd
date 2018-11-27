@@ -1,11 +1,10 @@
 
-#include <string>
-#include "gtest/gtest.h"
 #include "gmock/gmock.h"
+#include "gtest/gtest.h"
+#include <string>
 
-#include "pass_sample.hpp"
 #include "lgraph.hpp"
-
+#include "pass_sample.hpp"
 
 using testing::HasSubstr;
 
@@ -14,7 +13,6 @@ protected:
   void SetUp() override {
   }
 };
-
 
 TEST_F(SampleMainTest, EmptyLGraph) {
 
@@ -26,4 +24,3 @@ TEST_F(SampleMainTest, EmptyLGraph) {
 
   EXPECT_TRUE(true);
 }
-

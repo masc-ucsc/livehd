@@ -13,12 +13,11 @@ protected:
   static void optimize(Eprp_var &var);
 
   void trans(LGraph *orig);
+
 public:
   Pass_dce();
 
   void setup() final;
-
 };
 
 #endif
-

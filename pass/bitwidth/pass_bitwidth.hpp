@@ -16,8 +16,8 @@ protected:
   };
   Pass_bitwidth_options_pack opack;
 
-  bm::bvector<>      pending;
-  bm::bvector<>      next_pending;
+  bm::bvector<> pending;
+  bm::bvector<> next_pending;
 
   void mark_all_outputs(const LGraph *lg, Index_ID idx);
 
@@ -33,7 +33,8 @@ protected:
   bool bw_pass_iterate(LGraph *lg);
 
   static void trans(Eprp_var &var);
-  void do_trans(LGraph *orig);
+  void        do_trans(LGraph *orig);
+
 public:
   Pass_bitwidth();
 

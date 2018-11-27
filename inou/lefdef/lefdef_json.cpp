@@ -1,7 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "lefdef_json.hpp"
 
-//void Tech_file::to_json(){
+// void Tech_file::to_json(){
 //  rapidjson::StringBuffer s;
 //  rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(s);
 //
@@ -57,16 +57,13 @@ void Tech_macro::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer>& write
             writer.Key("ports");
             writer.StartObject();
             {//deal with ports of a single pin
-              for(vector<Tech_port>::const_iterator iter_port = (*iter_pin).ports.begin(); iter_port != (*iter_pin).ports.end(); ++iter_port){
-                writer.Key("layer");
-                writer.String((*iter_port).metal_name.c_str());
+              for(vector<Tech_port>::const_iterator iter_port = (*iter_pin).ports.begin(); iter_port != (*iter_pin).ports.end();
+++iter_port){ writer.Key("layer"); writer.String((*iter_port).metal_name.c_str());
 
                 writer.Key("rects");
                   writer.StartObject();//deal with rectangles of a single port
-                  for(vector<Tech_rect>::const_iterator iter_rect = (*iter_port).rects.begin(); iter_rect != (*iter_port).rects.end(); ++iter_rect){
-                    writer.StartArray();
-                    writer.Double((*iter_rect).xl);
-                    writer.Double((*iter_rect).yl);
+                  for(vector<Tech_rect>::const_iterator iter_rect = (*iter_port).rects.begin(); iter_rect !=
+(*iter_port).rects.end(); ++iter_rect){ writer.StartArray(); writer.Double((*iter_rect).xl); writer.Double((*iter_rect).yl);
                     writer.Double((*iter_rect).xh);
                     writer.Double((*iter_rect).yh);
                     writer.EndArray();
@@ -88,7 +85,7 @@ void Tech_macro::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer>& write
 }
 */
 
-//void Tech_layer::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer>& writer) const {
+// void Tech_layer::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer>& writer) const {
 //  if(strncmp(name.c_str(), "Metal", 5) ==0) { //Layer type is Metal
 //    writer.StartObject();
 //    writer.Key("layer");
@@ -163,7 +160,7 @@ void Tech_macro::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer>& write
 //  }
 //}
 //
-//void Tech_via::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer>& writer) const {
+// void Tech_via::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer>& writer) const {
 //  writer.StartObject();
 //  writer.Key("via");
 //  {

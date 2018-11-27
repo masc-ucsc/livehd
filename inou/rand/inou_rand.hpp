@@ -3,8 +3,8 @@
 #ifndef INOU_RAND_H
 #define INOU_RAND_H
 
-#include <string>
 #include "pass.hpp"
+#include <string>
 
 class Inou_rand_options {
 public:
@@ -16,10 +16,10 @@ public:
   std::string path;
 
   Inou_rand_options() {
-     rand_seed   = std::rand();
-     rand_size   = 8192;
-     rand_crate  = 10;
-     rand_eratio = 4;
+    rand_seed   = std::rand();
+    rand_size   = 8192;
+    rand_crate  = 10;
+    rand_eratio = 4;
   }
 };
 
@@ -29,7 +29,7 @@ protected:
   Inou_rand_options opack;
 
   std::vector<LGraph *> do_tolg();
-  static void tolg(Eprp_var &var);
+  static void           tolg(Eprp_var &var);
 
 public:
   Inou_rand();

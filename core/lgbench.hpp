@@ -53,7 +53,7 @@ protected:
 
 public:
   explicit LGBench(const std::string &name)
-   : sample_name(name) {
+      : sample_name(name) {
     end_called = false;
     start();
   };

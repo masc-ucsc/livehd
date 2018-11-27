@@ -252,14 +252,14 @@ public:
   }
 
   CForward_edge_iterator begin() {
-    for(auto it = g->input_array.begin(); it!=g->input_array.end(); ++it ) {
+    for(auto it = g->input_array.begin(); it != g->input_array.end(); ++it) {
       pending.push_back(it.get_field().nid);
     }
 
     // FIXME: output insertion should be moved to nid==0 (otherwise, and output with some logic but
     // still disconnected would not be generated)
 
-    for(auto it = g->output_array.begin(); it!=g->output_array.end(); ++it ) {
+    for(auto it = g->output_array.begin(); it != g->output_array.end(); ++it) {
       if(!g->get_node_int(it.get_field().nid).has_inputs())
         pending.push_back(it.get_field().nid);
     }
@@ -408,11 +408,11 @@ public:
     // FIXME: This may need to be moved to nid==0. If any input not visited, then add it (but only
     // if full input/output)
 
-    for(auto it = g->input_array.begin(); it!=g->input_array.end(); ++it ) { // inputs without connection to preserve them
+    for(auto it = g->input_array.begin(); it != g->input_array.end(); ++it) { // inputs without connection to preserve them
       if(!g->get_node_int(it.get_field().nid).has_outputs())
         pending.push_back(it.get_field().nid);
     }
-    for(auto it = g->output_array.begin(); it!=g->output_array.end(); ++it ) {
+    for(auto it = g->output_array.begin(); it != g->output_array.end(); ++it) {
       if(!g->get_node_int(it.get_field().nid).has_outputs()) // do not add outputs with connections
         pending.push_back(it.get_field().nid);
     }

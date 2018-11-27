@@ -4,12 +4,12 @@
 //
 //#include <boost/filesystem.hpp>
 
-#include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 
 #include "abc_cell.hpp"
-#include "pass_abc.hpp"
 #include "lgraph.hpp"
+#include "pass_abc.hpp"
 
 void setup_pass_abc() {
   Pass_abc p;
@@ -20,9 +20,9 @@ void setup_pass_abc() {
 void Pass_abc::tmap(Eprp_var &var) {
   Pass_abc pass;
 
-  pass.opack.verbose      = var.get("verbose") == "true";
+  pass.opack.verbose = var.get("verbose") == "true";
 
-  for(const auto &l:var.lgs) {
+  for(const auto &l : var.lgs) {
     pass.trans(l);
   }
 }
@@ -35,7 +35,7 @@ void Pass_abc::optimize(Eprp_var &var) {
   pass.opack.odir         = var.get("odir");
   pass.opack.verbose      = var.get("verbose") == "true";
 
-  for(const auto &l:var.lgs) {
+  for(const auto &l : var.lgs) {
     LGraph *lg = pass.regen(l);
     var.add(lg);
   }
@@ -45,26 +45,25 @@ void Pass_abc::setup() {
 
   Eprp_method m1("pass.abc", "optimize an lgraph with a abc, gen _mapped", &Pass_abc::optimize);
 
-  m1.add_label_optional("verbose","verbose output true|false","false");
-  m1.add_label_optional("liberty_file","liberty file for synthesis");
-  m1.add_label_optional("blif_file","generate a blif file for debugging");
-  m1.add_label_optional("odir","output directory for blif for debugging",".");
+  m1.add_label_optional("verbose", "verbose output true|false", "false");
+  m1.add_label_optional("liberty_file", "liberty file for synthesis");
+  m1.add_label_optional("blif_file", "generate a blif file for debugging");
+  m1.add_label_optional("odir", "output directory for blif for debugging", ".");
 
   register_pass(m1);
 
   Eprp_method m2("pass.abc.tmap", "tmap an lgraph with a abc", &Pass_abc::tmap);
 
-  m2.add_label_optional("verbose","verbose output true|false");
+  m2.add_label_optional("verbose", "verbose output true|false");
 
   register_pass(m2);
 }
 
 Pass_abc::Pass_abc()
-  :Pass("abc")
-  ,mapping_command("map;print_stats")
-  ,readlib_command("read_library stdcells.genlib")
-  ,synthesis_command("print_stats;cleanup;strash;ifraig;iresyn;dc2;strash;print_stats;")
-{
+    : Pass("abc")
+    , mapping_command("map;print_stats")
+    , readlib_command("read_library stdcells.genlib")
+    , synthesis_command("print_stats;cleanup;strash;ifraig;iresyn;dc2;strash;print_stats;") {
   graph_info = new graph_topology;
 }
 
@@ -87,11 +86,11 @@ LGraph *Pass_abc::regen(const LGraph *lg) {
   LGraph *mapped = LGraph::create(lg->get_path(), lg->get_name() + "_mapped");
   from_abc(mapped, lg, to_abc(lg));
   mapped->sync();
-  if (opack.verbose)
+  if(opack.verbose)
     mapped->print_stats();
   clear();
 
-  if (!opack.blif_file.empty())
+  if(!opack.blif_file.empty())
     dump_blif(mapped, opack.blif_file);
 
   return mapped;
@@ -115,32 +114,31 @@ LGraph *Pass_abc::regen(const LGraph *lg) {
 
 void Pass_abc::find_latch_conn(const LGraph *g) {
   for(const auto &idx : graph_info->latch_id) {
-	graph_topology::topology_info    pid;
-    const Tech_cell *tcell = g->get_tlibrary()->get_const_cell(g->tmap_id_get(idx));
+    graph_topology::topology_info pid;
+    const Tech_cell *             tcell = g->get_tlibrary()->get_const_cell(g->tmap_id_get(idx));
     if(opack.verbose)
       fmt::print("\nLatch_Op_ID NodeID:{} has direct input from Node: \n", idx);
     std::string trig_pin = tcell->pin_name_exist("C") ? "C" : "E";
     for(const auto &input : g->inp_edges(idx)) {
       if(input.get_inp_pin().get_pid() == tcell->get_pin_id("D")) {
         if(opack.verbose)
-          fmt::print("{} pin input port ID {}", tcell->get_name(input.get_inp_pin().get_pid()),
-                     input.get_inp_pin().get_pid());
+          fmt::print("{} pin input port ID {}", tcell->get_name(input.get_inp_pin().get_pid()), input.get_inp_pin().get_pid());
         int bit_index[2] = {0, 0};
         recursive_find(g, &input, pid, bit_index);
       }
       /*********************************************************************
-				 * The following code is to keep the clock nets and reset nets that
-				 * fanin to the flops
-				 * ABC treats all sequential cells as Latches
-				 * ABC cannot handle these signals
-				 * Although industrial standard flops usually have more pins such as
-				 * scan_en, si, etc..,
-				 * Due to the limitation of ABC synthesis,
-				 * this build only support "clock(FF) or Enable(latch)" pin and "reset" pin
-				 *********************************************************************/
+       * The following code is to keep the clock nets and reset nets that
+       * fanin to the flops
+       * ABC treats all sequential cells as Latches
+       * ABC cannot handle these signals
+       * Although industrial standard flops usually have more pins such as
+       * scan_en, si, etc..,
+       * Due to the limitation of ABC synthesis,
+       * this build only support "clock(FF) or Enable(latch)" pin and "reset" pin
+       *********************************************************************/
       else if(input.get_inp_pin().get_pid() == tcell->get_pin_id(trig_pin)) {
-		graph_topology::topology_info clock_pid;
-        int           bit_index[2] = {0, 0};
+        graph_topology::topology_info clock_pid;
+        int                           bit_index[2] = {0, 0};
         recursive_find(g, &input, clock_pid, bit_index);
         Index_ID clk_idx = clock_pid[0].idx;
 
@@ -151,11 +149,11 @@ void Pass_abc::find_latch_conn(const LGraph *g) {
           sprintf(clk_name, "generated_clock_id_%ld", clk_idx);
         }
         std::string clock_name(clk_name);
-		graph_info->clock_id[clock_name] = clk_idx;
-		graph_info->skew_group_map[clock_name].insert(idx);
+        graph_info->clock_id[clock_name] = clk_idx;
+        graph_info->skew_group_map[clock_name].insert(idx);
       } else if(input.get_inp_pin().get_pid() == tcell->get_pin_id("R")) {
-		graph_topology::topology_info reset_pid;
-        int           bit_index[2] = {0, 0};
+        graph_topology::topology_info reset_pid;
+        int                           bit_index[2] = {0, 0};
         recursive_find(g, &input, reset_pid, bit_index);
         Index_ID reset_idx = reset_pid[0].idx;
         char     rst_name[100];
@@ -165,8 +163,8 @@ void Pass_abc::find_latch_conn(const LGraph *g) {
           sprintf(rst_name, "generated_reset_id_%ld", reset_idx);
         }
         std::string reset_name(rst_name);
-		graph_info->reset_id[reset_name] = reset_idx;
-		graph_info->reset_group_map[reset_name].insert(idx);
+        graph_info->reset_id[reset_name] = reset_idx;
+        graph_info->reset_group_map[reset_name].insert(idx);
       }
     }
     assert(pid.size() == 1); // ensure that D pin have fanin and only store D pin info
@@ -177,10 +175,10 @@ void Pass_abc::find_latch_conn(const LGraph *g) {
 void Pass_abc::find_combinational_conn(const LGraph *g) {
 
   for(const auto &idx : graph_info->combinational_id) {
-    std::vector<const Edge *> inp_edges(16);
-    graph_topology::topology_info             pid;
-    //const Tech_cell *         tcell      = g->get_tlibrary()->get_const_cell(g->tmap_id_get(idx));
-    uint32_t                  port_count = 0;
+    std::vector<const Edge *>     inp_edges(16);
+    graph_topology::topology_info pid;
+    // const Tech_cell *         tcell      = g->get_tlibrary()->get_const_cell(g->tmap_id_get(idx));
+    uint32_t port_count = 0;
     for(const auto &input : g->inp_edges(idx)) {
       assert(input.get_inp_pin().get_pid() < 16);
       inp_edges[input.get_inp_pin().get_pid()] = &input;
@@ -191,7 +189,7 @@ void Pass_abc::find_combinational_conn(const LGraph *g) {
       if(inp_edges[i] == nullptr)
         break;
 
-      int bit_index[2] = {0, 0}; //changed withing recursive find
+      int bit_index[2] = {0, 0}; // changed withing recursive find
       recursive_find(g, inp_edges[i], pid, bit_index);
     }
 
@@ -204,8 +202,8 @@ void Pass_abc::find_graphio_output_conn(const LGraph *g) {
   for(const auto &idx : graph_info->graphio_output_id) {
     graph_topology::topology_info pid;
 
-    uint32_t      width = g->get_bits(idx);
-    uint32_t      index = 0;
+    uint32_t width = g->get_bits(idx);
+    uint32_t index = 0;
 
     for(const auto &input : g->inp_edges(idx)) {
       for(index = 0; index < width; index++) {
@@ -224,7 +222,7 @@ void Pass_abc::find_subgraph_conn(const LGraph *g) {
   for(const auto &idx : graph_info->subgraph_id) {
     if(opack.verbose)
       fmt::print("\nSubGraph_Op NodeID:{} has direct input from Node: \n", idx);
-    std::map<Port_ID, const Edge *>            inp_edges;
+    std::map<Port_ID, const Edge *>                            inp_edges;
     std::unordered_map<Port_ID, graph_topology::topology_info> subgraph_pid;
 
     for(const auto &input : g->inp_edges(idx)) {
@@ -235,10 +233,10 @@ void Pass_abc::find_subgraph_conn(const LGraph *g) {
     for(const auto &input : inp_edges) {
       if(opack.verbose)
         fmt::print("\n------------------------------------------------ \n", idx);
-	  graph_topology::topology_info pid;
-      auto          node_idx = input.second->get_idx();
-      auto          width    = g->get_bits(node_idx);
-      int           index    = 0;
+      graph_topology::topology_info pid;
+      auto                          node_idx = input.second->get_idx();
+      auto                          width    = g->get_bits(node_idx);
+      int                           index    = 0;
       if(width > 1) {
         for(index = 0; index < width; index++) {
           int bit_index[2] = {index, index};
@@ -250,7 +248,7 @@ void Pass_abc::find_subgraph_conn(const LGraph *g) {
       }
       subgraph_pid[input.first] = std::move(pid);
     }
-	graph_info->subgraph_conn[idx] = std::move(subgraph_pid);
+    graph_info->subgraph_conn[idx] = std::move(subgraph_pid);
   }
 }
 
@@ -258,7 +256,7 @@ void Pass_abc::find_memory_conn(const LGraph *g) {
   for(const auto &idx : graph_info->memory_id) {
     if(opack.verbose)
       fmt::print("\nMemory_Op NodeID:{} has direct input from Node: \n", idx);
-    std::map<Port_ID, const Edge *>            inp_edges;
+    std::map<Port_ID, const Edge *>                            inp_edges;
     std::unordered_map<Port_ID, graph_topology::topology_info> memory_pid;
     for(const auto &input : g->inp_edges(idx)) {
       Port_ID inp_id = input.get_inp_pin().get_pid();
@@ -271,10 +269,10 @@ void Pass_abc::find_memory_conn(const LGraph *g) {
       Port_ID input_id = input.second->get_inp_pin().get_pid();
       if(opack.verbose)
         fmt::print("\n-------------------{}---------------------- \n", input_id);
-	  graph_topology::topology_info pid;
-      auto          node_idx = input.second->get_idx();
-      auto          width    = g->get_bits(node_idx);
-      int           index    = 0;
+      graph_topology::topology_info pid;
+      auto                          node_idx = input.second->get_idx();
+      auto                          width    = g->get_bits(node_idx);
+      int                           index    = 0;
       if(width > 1) {
         for(index = 0; index < width; index++) {
           int bit_index[2] = {index, index};
@@ -294,12 +292,12 @@ void Pass_abc::find_memory_conn(const LGraph *g) {
           sprintf(clk_name, "generated_clock_id_%ld", clk_idx);
         }
         std::string clock_name(clk_name);
-		graph_info->clock_id[clock_name] = clk_idx;
-		graph_info->skew_group_map[clock_name].insert(idx);
+        graph_info->clock_id[clock_name] = clk_idx;
+        graph_info->skew_group_map[clock_name].insert(idx);
       }
       memory_pid[input.first] = std::move(pid);
     }
-	graph_info->memory_conn[idx] = std::move(memory_pid);
+    graph_info->memory_conn[idx] = std::move(memory_pid);
   }
 }
 
@@ -343,15 +341,15 @@ void Pass_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology
   Node_Type_Op this_node_type = g->node_type_get(this_idx).op;
   if(this_node_type == U32Const_Op) {
     if(opack.verbose)
-      fmt::print("\t U32Const_Op_NodeID:{},bit [{}:{}] portid : {} \n",
-                 input->get_idx(), bit_addr[0], bit_addr[1], input->get_out_pin().get_pid());
+      fmt::print("\t U32Const_Op_NodeID:{},bit [{}:{}] portid : {} \n", input->get_idx(), bit_addr[0], bit_addr[1],
+                 input->get_out_pin().get_pid());
 
     index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
     pid.push_back(info);
   } else if(this_node_type == StrConst_Op) {
     if(opack.verbose)
-      fmt::print("\t StrConst_Op_NodeID:{},bit [{}:{}]  portid : {} \n",
-                 this_idx, bit_addr[0], bit_addr[1], input->get_out_pin().get_pid());
+      fmt::print("\t StrConst_Op_NodeID:{},bit [{}:{}]  portid : {} \n", this_idx, bit_addr[0], bit_addr[1],
+                 input->get_out_pin().get_pid());
 
     index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
     pid.push_back(info);
@@ -362,41 +360,39 @@ void Pass_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology
       }
     } else {
       if(opack.verbose)
-        fmt::print("\t GraphIO_Op_NodeID:{},bit [{}:{}] portid : {} \n",
-                   this_idx, bit_addr[0], bit_addr[1], input->get_out_pin().get_pid());
+        fmt::print("\t GraphIO_Op_NodeID:{},bit [{}:{}] portid : {} \n", this_idx, bit_addr[0], bit_addr[1],
+                   input->get_out_pin().get_pid());
       index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
       pid.push_back(info);
     }
   } else if(this_node_type == Memory_Op) {
     char namebuffer[255];
     if(opack.verbose)
-      fmt::print("\t Memory_Op:{},bit [{}:{}] portid : {} \n",
-                 this_idx, bit_addr[0], bit_addr[1], input->get_out_pin().get_pid());
+      fmt::print("\t Memory_Op:{},bit [{}:{}] portid : {} \n", this_idx, bit_addr[0], bit_addr[1], input->get_out_pin().get_pid());
     index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
     pid.push_back(info);
 
     sprintf(namebuffer, "%%memory_output_%ld_%d_%d%%", this_idx, input->get_out_pin().get_pid(), bit_addr[0]);
     const auto it = graph_info->memory_generated_output_wire.find(info);
     if(it == graph_info->memory_generated_output_wire.end()) {
-	  graph_info->memory_generated_output_wire[info] = std::string(namebuffer);
+      graph_info->memory_generated_output_wire[info] = std::string(namebuffer);
     }
   } else if(this_node_type == SubGraph_Op) {
     char namebuffer[255];
     if(opack.verbose)
-      fmt::print("\t SubGraph_Op:{},bit [{}:{}] portid : {} \n",
-                 this_idx, bit_addr[0], bit_addr[1], input->get_out_pin().get_pid());
+      fmt::print("\t SubGraph_Op:{},bit [{}:{}] portid : {} \n", this_idx, bit_addr[0], bit_addr[1],
+                 input->get_out_pin().get_pid());
     index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
     pid.push_back(info);
 
     sprintf(namebuffer, "%%subgraph_output_%ld_%d_%d%%", this_idx, input->get_out_pin().get_pid(), bit_addr[0]);
     const auto it = graph_info->subgraph_generated_output_wire.find(info);
     if(it == graph_info->subgraph_generated_output_wire.end()) {
-	  graph_info->subgraph_generated_output_wire[info] = std::string(namebuffer);
+      graph_info->subgraph_generated_output_wire[info] = std::string(namebuffer);
     }
   } else if(this_node_type == TechMap_Op) {
     if(opack.verbose)
-      fmt::print("\t NodeID:{},bit [{}:{}] portid : {} \n",
-                 this_idx, 0, 0, input->get_out_pin().get_pid());
+      fmt::print("\t NodeID:{},bit [{}:{}] portid : {} \n", this_idx, 0, 0, input->get_out_pin().get_pid());
     const Tech_cell * tcell      = g->get_tlibrary()->get_const_cell(g->tmap_id_get(this_idx));
     const std::string tcell_name = tcell->get_name();
     if(tcell_name == "$_BUF_") {
@@ -481,11 +477,11 @@ bool Pass_abc::is_techmap(const LGraph *g) {
     case TechMap_Op: {
       const Tech_cell *tcell = g->get_tlibrary()->get_const_cell(g->tmap_id_get(idx));
       if(is_latch(tcell)) {
-		graph_info->latch_id.push_back(idx);
+        graph_info->latch_id.push_back(idx);
       } else {
         auto tcell_name = tcell->get_name();
         if(tcell_name != "$_BUF_")
-		  graph_info->combinational_id.push_back(idx);
+          graph_info->combinational_id.push_back(idx);
       }
       break;
     }
@@ -518,44 +514,40 @@ bool Pass_abc::is_techmap(const LGraph *g) {
       int width = g->get_bits(idx);
       if(width > 1) {
         /**********************************************************************************************
-					 * If a Join_Op node has output width > 1:
-					 * 	1. MUST NOT be the fanin of a TechMap_Op node (it should traverse through a Pick_OP!!)
-					 * 	2. MUST NOT be the fanin of U32Const_Op | StrConst_Op node (undefined behavior!!)
-					 * 	3. The width of GraphIO_Op nodes MUST Match (it should traverse through a Pick_OP!!)
-					 **********************************************************************************************/
+         * If a Join_Op node has output width > 1:
+         * 	1. MUST NOT be the fanin of a TechMap_Op node (it should traverse through a Pick_OP!!)
+         * 	2. MUST NOT be the fanin of U32Const_Op | StrConst_Op node (undefined behavior!!)
+         * 	3. The width of GraphIO_Op nodes MUST Match (it should traverse through a Pick_OP!!)
+         **********************************************************************************************/
         for(const auto &out : g->out_edges(idx)) {
           switch(g->node_type_get(out.get_idx()).op) {
           case TechMap_Op: {
             const Tech_cell *tcell     = g->get_tlibrary()->get_const_cell(g->tmap_id_get(out.get_idx()));
             std::string      cell_name = tcell->get_name();
-            console->error("nodeID:{} type:Join_Op has output to idx:{} cell_name: {}; mismatch in data width!\n",
-                           idx, out.get_idx(), cell_name);
+            console->error("nodeID:{} type:Join_Op has output to idx:{} cell_name: {}; mismatch in data width!\n", idx,
+                           out.get_idx(), cell_name);
             is_valid_input = false;
             break;
           }
           case U32Const_Op: {
-            console->error("nodeID:{} type:Join_Op has output to a U32ConstNode:{}; undefined behavior!\n",
-                           idx, out.get_idx());
+            console->error("nodeID:{} type:Join_Op has output to a U32ConstNode:{}; undefined behavior!\n", idx, out.get_idx());
             is_valid_input = false;
             break;
           }
           case StrConst_Op: {
-            console->error("nodeID:{} type:Join_Op has output to a StrConstNode:{}; undefined behavior!\n",
-                           idx, out.get_idx());
+            console->error("nodeID:{} type:Join_Op has output to a StrConstNode:{}; undefined behavior!\n", idx, out.get_idx());
             is_valid_input = false;
             break;
           }
           case GraphIO_Op: {
             if(g->get_bits(out.get_idx()) != width) {
-              console->error("nodeID:{} type:Join_Op has output to a GraphIONode:{}; mismatch in data width!\n",
-                             idx, out.get_idx());
+              console->error("nodeID:{} type:Join_Op has output to a GraphIONode:{}; mismatch in data width!\n", idx,
+                             out.get_idx());
               is_valid_input = false;
             }
             break;
           }
-          default: {
-            break;
-          }
+          default: { break; }
           }
         }
       }
@@ -574,7 +566,7 @@ bool Pass_abc::is_techmap(const LGraph *g) {
       break;
     }
     case SubGraph_Op: {
-        graph_info->subgraph_id.push_back(idx);
+      graph_info->subgraph_id.push_back(idx);
       break;
     }
     case Memory_Op: {
@@ -582,8 +574,7 @@ bool Pass_abc::is_techmap(const LGraph *g) {
       break;
     }
     default: {
-      console->error("nodeID:{} op is not supported, opType is {}\n",
-                     idx, g->node_type_get(idx).get_name().c_str());
+      console->error("nodeID:{} op is not supported, opType is {}\n", idx, g->node_type_get(idx).get_name().c_str());
       is_valid_input = false;
       break;
     }
@@ -633,7 +624,7 @@ Abc_Ntk_t *Pass_abc::to_abc(const LGraph *g) {
   }
 
   const std::string &path_name = opack.odir;
-  struct stat output_status;
+  struct stat        output_status;
   stat(path_name.c_str(), &output_status);
 
   if(!(output_status.st_mode & S_IFDIR)) {
@@ -644,9 +635,8 @@ Abc_Ntk_t *Pass_abc::to_abc(const LGraph *g) {
     console->error("Cannot execute command {}", synthesis_command);
   }
 
-  sprintf(Command, "write_blif %s/%s_post.blif;write_verilog %s/%s_post.v;",
-      path_name.c_str(), g->get_name().c_str(),
-      path_name.c_str(), g->get_name().c_str());
+  sprintf(Command, "write_blif %s/%s_post.blif;write_verilog %s/%s_post.v;", path_name.c_str(), g->get_name().c_str(),
+          path_name.c_str(), g->get_name().c_str());
   if(Cmd_CommandExecute(pAbc, Command)) {
     console->error("Cannot execute command {}", Command);
   }
@@ -655,9 +645,8 @@ Abc_Ntk_t *Pass_abc::to_abc(const LGraph *g) {
     console->error("Cannot execute command", mapping_command);
   }
 
-  sprintf(Command, "write_blif %s/%s_map.blif;write_verilog %s/%s_map.v",
-      path_name.c_str(), g->get_name().c_str(),
-      path_name.c_str(), g->get_name().c_str());
+  sprintf(Command, "write_blif %s/%s_map.blif;write_verilog %s/%s_map.v", path_name.c_str(), g->get_name().c_str(),
+          path_name.c_str(), g->get_name().c_str());
   if(Cmd_CommandExecute(pAbc, Command)) {
     console->error("Cannot execute command", Command);
   }
@@ -775,8 +764,8 @@ void Pass_abc::conn_memory(const LGraph *g, Abc_Ntk_t *pAig) {
         assert(pseduo_memory_output != nullptr);
         sprintf(namebuffer, "%%memory_input_%ld_%d_%d%%", idx, src.first, offset);
         Abc_ObjAssignName(Abc_ObjFanin0Ntk(pseduo_memory_output), namebuffer, NULL);
-        index_offset info                 = {idx, src.first, {offset, offset}};
-		graph_info->memory_generated_input_wire[info] = std::string(namebuffer);
+        index_offset info                             = {idx, src.first, {offset, offset}};
+        graph_info->memory_generated_input_wire[info] = std::string(namebuffer);
         offset++;
       }
     }
@@ -857,8 +846,8 @@ void Pass_abc::conn_subgraph(const LGraph *g, Abc_Ntk_t *pAig) {
         assert(pseduo_subgraph_output != nullptr);
         sprintf(namebuffer, "%%subgraph_input_%ld_%d_%d%%", idx, src.first, offset);
         Abc_ObjAssignName(Abc_ObjFanin0Ntk(pseduo_subgraph_output), namebuffer, NULL);
-        index_offset info                   = {idx, src.first, {offset, offset}};
-		graph_info->subgraph_generated_input_wire[info] = std::string(namebuffer);
+        index_offset info                               = {idx, src.first, {offset, offset}};
+        graph_info->subgraph_generated_input_wire[info] = std::string(namebuffer);
         offset++;
       }
     }
@@ -917,14 +906,13 @@ void Pass_abc::gen_latch_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
         Abc_ObjAssignName(pNet, namebuffer, NULL);
         break;
       } else {
-        console->error(
-            "Cannot find register name in the lgraph? check Pass_yosys? Use random generated name from ABC\n");
+        console->error("Cannot find register name in the lgraph? check Pass_yosys? Use random generated name from ABC\n");
       }
     }
     std::string latch_name(Abc_ObjName(pNet));
-	graph_info->latchname2id[latch_name] = idx;
-    Abc_latch new_latch      = {pLatchInput, pNet};
-	graph_info->sequential_cell[idx]     = new_latch;
+    graph_info->latchname2id[latch_name] = idx;
+    Abc_latch new_latch                  = {pLatchInput, pNet};
+    graph_info->sequential_cell[idx]     = new_latch;
   }
 }
 
@@ -956,7 +944,7 @@ void Pass_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
         Abc_ObjAssignName(pwire, namebuffer, NULL);
         index_offset       key                = {idx, 0, {i, i}};
         Abc_primary_output new_primary_output = {pbuf, NULL};
-		graph_info->primary_output[key]                   = new_primary_output;
+        graph_info->primary_output[key]       = new_primary_output;
       }
     } else {
       Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
@@ -970,7 +958,7 @@ void Pass_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
       Abc_ObjAssignName(pwire, namebuffer, NULL);
       index_offset       key                = {idx, 0, {0, 0}};
       Abc_primary_output new_primary_output = {pbuf, NULL};
-	  graph_info->primary_output[key]                   = new_primary_output;
+      graph_info->primary_output[key]       = new_primary_output;
     }
   }
 
@@ -990,7 +978,7 @@ void Pass_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
         Abc_ObjAddFanin(pwire, pbuf);
         index_offset      key               = {idx, 0, {i, i}};
         Abc_primary_input new_primary_input = {pObj, pwire};
-		graph_info->primary_input[key]                  = new_primary_input;
+        graph_info->primary_input[key]      = new_primary_input;
       }
     } else {
       pObj            = Abc_NtkCreatePi(pAig);
@@ -1005,7 +993,7 @@ void Pass_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
       Abc_ObjAddFanin(pwire, pbuf);
       index_offset      key               = {idx, 0, {0, 0}};
       Abc_primary_input new_primary_input = {pObj, pwire};
-	  graph_info->primary_input[key]                  = new_primary_input;
+      graph_info->primary_input[key]      = new_primary_input;
     }
   }
 }
@@ -1026,39 +1014,39 @@ void Pass_abc::gen_comb_cell_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
     const Tech_cell *tcell = g->get_tlibrary()->get_const_cell(g->tmap_id_get(idx));
 
     if(tcell->get_name() == "$_NOT_") {
-	  graph_info->combinational_cell[idx] = LGraph_CreateNot(pAig);
+      graph_info->combinational_cell[idx] = LGraph_CreateNot(pAig);
     } else if(tcell->get_name() == "$_AND_") {
-	  graph_info->combinational_cell[idx] = LGraph_CreateAnd(pAig);
+      graph_info->combinational_cell[idx] = LGraph_CreateAnd(pAig);
     } else if(tcell->get_name() == "$_OR_") {
-	  graph_info->combinational_cell[idx] = LGraph_CreateOr(pAig);
+      graph_info->combinational_cell[idx] = LGraph_CreateOr(pAig);
     } else if(tcell->get_name() == "$_XOR_") {
-	  graph_info->combinational_cell[idx] = LGraph_CreateXor(pAig);
+      graph_info->combinational_cell[idx] = LGraph_CreateXor(pAig);
     } else if(tcell->get_name() == "$_NAND_") {
-	  graph_info->combinational_cell[idx] = LGraph_CreateNand(pAig);
+      graph_info->combinational_cell[idx] = LGraph_CreateNand(pAig);
     } else if(tcell->get_name() == "$_NOR_") {
-	  graph_info->combinational_cell[idx] = LGraph_CreateNor(pAig);
+      graph_info->combinational_cell[idx] = LGraph_CreateNor(pAig);
     } else if(tcell->get_name() == "$_XNOR_") {
-	  graph_info->combinational_cell[idx] = LGraph_CreateXnor(pAig);
+      graph_info->combinational_cell[idx] = LGraph_CreateXnor(pAig);
     } else if(tcell->get_name() == "$_ANDNOT_") {
-      //assign Y = A & (~B);
-	  graph_info->combinational_cell[idx] = LGraph_CreateAndnot(pAig);
+      // assign Y = A & (~B);
+      graph_info->combinational_cell[idx] = LGraph_CreateAndnot(pAig);
     } else if(tcell->get_name() == "$_ORNOT_") {
-      //assign Y = A | (~B);
-	  graph_info->combinational_cell[idx] = LGraph_CreateOrnot(pAig);
+      // assign Y = A | (~B);
+      graph_info->combinational_cell[idx] = LGraph_CreateOrnot(pAig);
     } else if(tcell->get_name() == "$_AOI3_") {
-      //assign Y = ~((A & B) | C);
-	  graph_info->combinational_cell[idx] = LGraph_CreateAoi3(pAig);
+      // assign Y = ~((A & B) | C);
+      graph_info->combinational_cell[idx] = LGraph_CreateAoi3(pAig);
     } else if(tcell->get_name() == "$_OAI3_") {
-      //assign Y = ~((A | B) & C);
-	  graph_info->combinational_cell[idx] = LGraph_CreateOai3(pAig);
+      // assign Y = ~((A | B) & C);
+      graph_info->combinational_cell[idx] = LGraph_CreateOai3(pAig);
     } else if(tcell->get_name() == "$_AOI4_") {
-      //assign Y = ~((A & B) | (C & D));
-	  graph_info->combinational_cell[idx] = LGraph_CreateAoi4(pAig);
+      // assign Y = ~((A & B) | (C & D));
+      graph_info->combinational_cell[idx] = LGraph_CreateAoi4(pAig);
     } else if(tcell->get_name() == "$_OAI4_") {
-      //assign Y = ~((A | B) & (C | D));
-	  graph_info->combinational_cell[idx] = LGraph_CreateOai4(pAig);
+      // assign Y = ~((A | B) & (C | D));
+      graph_info->combinational_cell[idx] = LGraph_CreateOai4(pAig);
     } else if(tcell->get_name() == "$_MUX_") {
-	  graph_info->combinational_cell[idx] = LGraph_CreateMUX(pAig);
+      graph_info->combinational_cell[idx] = LGraph_CreateMUX(pAig);
     } else {
       console->error("Unknown cell type!!!!");
     }
@@ -1136,7 +1124,7 @@ Abc_Obj_t *Pass_abc::gen_pseudo_subgraph_input(const index_offset &inp, Abc_Ntk_
     Abc_Obj_t *pNet                  = Abc_NtkCreateNet(pAig);
     Abc_ObjAssignName(pNet, const_cast<char *>(graph_info->subgraph_generated_output_wire[inp].c_str()), NULL);
     Abc_ObjAddFanin(pNet, pseudo_subgraph_input);
-	graph_info->pseduo_record[graph_info->subgraph_generated_output_wire[inp]] = pNet;
+    graph_info->pseduo_record[graph_info->subgraph_generated_output_wire[inp]] = pNet;
   }
   Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
   pbuf->pData      = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
@@ -1152,7 +1140,7 @@ Abc_Obj_t *Pass_abc::gen_pseudo_memory_input(const index_offset &inp, Abc_Ntk_t 
     Abc_Obj_t *pNet                = Abc_NtkCreateNet(pAig);
     Abc_ObjAssignName(pNet, const_cast<char *>(graph_info->memory_generated_output_wire[inp].c_str()), NULL);
     Abc_ObjAddFanin(pNet, pseudo_memory_input);
-	graph_info->pseduo_record[graph_info->memory_generated_output_wire[inp]] = pNet;
+    graph_info->pseduo_record[graph_info->memory_generated_output_wire[inp]] = pNet;
   }
   Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
   pbuf->pData      = Hop_IthVar((Hop_Man_t *)pAig->pManFunc, 0);
@@ -1200,18 +1188,20 @@ void Pass_abc::conn_combinational_cell(const LGraph *g, Abc_Ntk_t *pAig) {
           Abc_Obj_t *pNet                = Abc_NtkCreateNet(pAig);
           Abc_ObjAssignName(pNet, const_cast<char *>(graph_info->memory_generated_output_wire[inp].c_str()), NULL);
           Abc_ObjAddFanin(pNet, pseudo_memory_input);
-		  graph_info->pseduo_record[graph_info->memory_generated_output_wire[inp]] = pNet;
+          graph_info->pseduo_record[graph_info->memory_generated_output_wire[inp]] = pNet;
         }
-        Abc_ObjAddFanin(graph_info->combinational_cell[idx].pNodeInput, graph_info->pseduo_record[graph_info->memory_generated_output_wire[inp]]);
+        Abc_ObjAddFanin(graph_info->combinational_cell[idx].pNodeInput,
+                        graph_info->pseduo_record[graph_info->memory_generated_output_wire[inp]]);
       } else if(this_node_type == SubGraph_Op) {
         if(graph_info->pseduo_record.find(graph_info->subgraph_generated_output_wire[inp]) == graph_info->pseduo_record.end()) {
           Abc_Obj_t *pseudo_subgraph_input = Abc_NtkCreatePi(pAig);
           Abc_Obj_t *pNet                  = Abc_NtkCreateNet(pAig);
           Abc_ObjAssignName(pNet, const_cast<char *>(graph_info->subgraph_generated_output_wire[inp].c_str()), NULL);
           Abc_ObjAddFanin(pNet, pseudo_subgraph_input);
-		  graph_info->pseduo_record[graph_info->subgraph_generated_output_wire[inp]] = pNet;
+          graph_info->pseduo_record[graph_info->subgraph_generated_output_wire[inp]] = pNet;
         }
-        Abc_ObjAddFanin(graph_info->combinational_cell[idx].pNodeInput, graph_info->pseduo_record[graph_info->subgraph_generated_output_wire[inp]]);
+        Abc_ObjAddFanin(graph_info->combinational_cell[idx].pNodeInput,
+                        graph_info->pseduo_record[graph_info->subgraph_generated_output_wire[inp]]);
       } else {
         assert(false);
       }
@@ -1256,18 +1246,20 @@ void Pass_abc::conn_latch(const LGraph *g, Abc_Ntk_t *pAig) {
           Abc_Obj_t *pNet                = Abc_NtkCreateNet(pAig);
           Abc_ObjAssignName(pNet, const_cast<char *>(graph_info->memory_generated_output_wire[inp].c_str()), NULL);
           Abc_ObjAddFanin(pNet, pseudo_memory_input);
-		  graph_info->pseduo_record[graph_info->memory_generated_output_wire[inp]] = pNet;
+          graph_info->pseduo_record[graph_info->memory_generated_output_wire[inp]] = pNet;
         }
-        Abc_ObjAddFanin(graph_info->sequential_cell[idx].pLatchInput, graph_info->pseduo_record[graph_info->memory_generated_output_wire[inp]]);
+        Abc_ObjAddFanin(graph_info->sequential_cell[idx].pLatchInput,
+                        graph_info->pseduo_record[graph_info->memory_generated_output_wire[inp]]);
       } else if(this_node_type == SubGraph_Op) {
         if(graph_info->pseduo_record.find(graph_info->subgraph_generated_output_wire[inp]) == graph_info->pseduo_record.end()) {
           Abc_Obj_t *pseudo_subgraph_input = Abc_NtkCreatePi(pAig);
           Abc_Obj_t *pNet                  = Abc_NtkCreateNet(pAig);
           Abc_ObjAssignName(pNet, const_cast<char *>(graph_info->subgraph_generated_output_wire[inp].c_str()), NULL);
           Abc_ObjAddFanin(pNet, pseudo_subgraph_input);
-		  graph_info->pseduo_record[graph_info->subgraph_generated_output_wire[inp]] = pNet;
+          graph_info->pseduo_record[graph_info->subgraph_generated_output_wire[inp]] = pNet;
         }
-        Abc_ObjAddFanin(graph_info->sequential_cell[idx].pLatchInput, graph_info->pseduo_record[graph_info->subgraph_generated_output_wire[inp]]);
+        Abc_ObjAddFanin(graph_info->sequential_cell[idx].pLatchInput,
+                        graph_info->pseduo_record[graph_info->subgraph_generated_output_wire[inp]]);
       } else {
         assert(false);
       }
@@ -1338,7 +1330,7 @@ void Pass_abc::conn_primary_output(const LGraph *g, Abc_Ntk_t *pAig) {
 void Pass_abc::conn_reset(const LGraph *g, Abc_Ntk_t *pAig) {
   for(const auto &rg : graph_info->reset_group_map) {
     std::string reset_name = rg.first;
-    //check if this reset is the graph IO otherwise create it
+    // check if this reset is the graph IO otherwise create it
     Index_ID idx = graph_info->reset_id[reset_name];
     if(!g->is_graph_input(idx)) {
       Abc_Obj_t *generated_reset = Abc_NtkCreatePo(pAig); // create generated reset here
@@ -1367,7 +1359,7 @@ void Pass_abc::conn_reset(const LGraph *g, Abc_Ntk_t *pAig) {
 void Pass_abc::conn_clock(const LGraph *g, Abc_Ntk_t *pAig) {
   for(const auto &sg : graph_info->skew_group_map) {
     std::string clock_name = sg.first;
-    //check if this clock is the graph IO otherwise create it
+    // check if this clock is the graph IO otherwise create it
     Index_ID idx = graph_info->clock_id[clock_name];
     if(!g->is_graph_input(idx)) {
       Abc_Obj_t *generated_clock = Abc_NtkCreatePo(pAig); // create generated clock signal

@@ -9,7 +9,7 @@
 #include "kernel/yosys.h"
 
 USING_YOSYS_NAMESPACE
-//PRIVATE_NAMESPACE_BEGIN
+// PRIVATE_NAMESPACE_BEGIN
 
 class Lgyosys_dump : public Inou {
 private:
@@ -38,33 +38,36 @@ private:
     return ("lgraph_spare_wire_" + std::to_string(spare_wire++));
   }
 
-  //FIXME: any way of merging these two?
-  typedef RTLIL::Cell *(RTLIL::Module::*add_cell_fnc_sign)(RTLIL::IdString, RTLIL::SigSpec, RTLIL::SigSpec, RTLIL::SigSpec, bool, const std::string &);
-  typedef RTLIL::Cell *(RTLIL::Module::*add_cell_fnc)(RTLIL::IdString, RTLIL::SigSpec, RTLIL::SigSpec, RTLIL::SigSpec, const std::string &);
+  // FIXME: any way of merging these two?
+  typedef RTLIL::Cell *(RTLIL::Module::*add_cell_fnc_sign)(RTLIL::IdString, RTLIL::SigSpec, RTLIL::SigSpec, RTLIL::SigSpec, bool,
+                                                           const std::string &);
+  typedef RTLIL::Cell *(RTLIL::Module::*add_cell_fnc)(RTLIL::IdString, RTLIL::SigSpec, RTLIL::SigSpec, RTLIL::SigSpec,
+                                                      const std::string &);
 
-  RTLIL::Wire *create_tree(const LGraph *g, std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod,
-                           add_cell_fnc add_cell, RTLIL::Wire *result_wire);
+  RTLIL::Wire *create_tree(const LGraph *g, std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod, add_cell_fnc add_cell,
+                           RTLIL::Wire *result_wire);
 
-  RTLIL::Wire *create_tree(const LGraph *g, std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod,
-                           add_cell_fnc_sign add_cell, bool sign, RTLIL::Wire *result_wire);
+  RTLIL::Wire *create_tree(const LGraph *g, std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod, add_cell_fnc_sign add_cell,
+                           bool sign, RTLIL::Wire *result_wire);
 
-  RTLIL::Wire *create_wire(const LGraph* g, const Index_ID idx, RTLIL::Module* module, bool input, bool output);
-  void create_wires(const LGraph *g, RTLIL::Module* module);
+  RTLIL::Wire *create_wire(const LGraph *g, const Index_ID idx, RTLIL::Module *module, bool input, bool output);
+  void         create_wires(const LGraph *g, RTLIL::Module *module);
 
-  void create_blackbox(const LGraph& subgraph, RTLIL::Design* design);
-  void create_subgraph_outputs(const LGraph *g, RTLIL::Module* module, Index_ID idx);
-  void create_subgraph(const LGraph *g, RTLIL::Module* module, Index_ID idx);
-  void create_memory(const LGraph *g, RTLIL::Module* module, Index_ID idx);
+  void create_blackbox(const LGraph &subgraph, RTLIL::Design *design);
+  void create_subgraph_outputs(const LGraph *g, RTLIL::Module *module, Index_ID idx);
+  void create_subgraph(const LGraph *g, RTLIL::Module *module, Index_ID idx);
+  void create_memory(const LGraph *g, RTLIL::Module *module, Index_ID idx);
 
 protected:
 public:
-  Lgyosys_dump(RTLIL::Design *design, bool hier = false) : design(design) {
+  Lgyosys_dump(RTLIL::Design *design, bool hier = false)
+      : design(design) {
     hierarchy = hier;
   };
 
   void fromlg(std::vector<const LGraph *> &out) final {
     for(const auto &g : out) {
-      if (!g) {
+      if(!g) {
         console->warn("lgraph not found\n");
         continue;
       }
@@ -94,6 +97,6 @@ public:
   };
 };
 
-//PRIVATE_NAMESPACE_END
+// PRIVATE_NAMESPACE_END
 
 #endif

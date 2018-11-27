@@ -10,17 +10,14 @@
 void Inou_lef_options::set(const std::string &key, const std::string &value) {
 
   try {
-    if ( is_opt(key,"lef_file") ) {
+    if(is_opt(key, "lef_file")) {
       lef_file = value;
-    }else{
-      set_val(key,value);
+    } else {
+      set_val(key, value);
     }
-  } catch (const std::invalid_argument& ia) {
-    fmt::print("ERROR: key {} has an invalid argument {}\n",key);
-  }
+  } catch(const std::invalid_argument &ia) { fmt::print("ERROR: key {} has an invalid argument {}\n", key); }
 
-  console->info("inou_lef lef_file:{} path:{} name:{}"
-      ,lef_file, path, name);
+  console->info("inou_lef lef_file:{} path:{} name:{}", lef_file, path, name);
 }
 
 static int lef_macro_begin_cb(lefrCallbackType_e c, const char *macroName, lefiUserData ud);
@@ -33,10 +30,11 @@ static int lef_layer_cb(lefrCallbackType_e c, lefiLayer *flayer, lefiUserData ud
 
 static int lef_via_cb(lefrCallbackType_e c, lefiVia *fvia, lefiUserData ud);
 
+Inou_lef::Inou_lef() {
+}
 
-Inou_lef::Inou_lef() {}
-
-Inou_lef::~Inou_lef() {}
+Inou_lef::~Inou_lef() {
+}
 
 int lef_macro_begin_cb(lefrCallbackType_e c, const char *macroName, lefiUserData ud) {
   assert(c);
@@ -48,7 +46,7 @@ int lef_macro_begin_cb(lefrCallbackType_e c, const char *macroName, lefiUserData
 
 int lef_macro_cb(lefrCallbackType_e c, lefiMacro *fmacro, lefiUserData ud) {
   assert(c);
-  //auto *tlib     = static_cast<Tech_library *>(ud);
+  // auto *tlib     = static_cast<Tech_library *>(ud);
 
   if(fmacro->hasSize()) {
     assert(false);
@@ -121,7 +119,7 @@ int lef_layer_cb(lefrCallbackType_e c, lefiLayer *flayer, lefiUserData ud) {
   lefiParallel *    parallel;
 
   if(strcmp(flayer->name(), "OVERLAP") == 0)
-    return 0; //do nothing when layer name = OVERLAP
+    return 0; // do nothing when layer name = OVERLAP
 
   tlib->increase_vec_layers_size();
   auto &tmp_layer = tlib->get_vec_layers()->back();

@@ -147,8 +147,7 @@ int compf(defrCallbackType_e c, defiComponent *co, defiUserData ud) {
     if(ud != userData)
       dataError();
     //  missing GENERATE, FOREIGN
-    fprintf(fout, "- %s %s ", co->id(),
-            co->name());
+    fprintf(fout, "- %s %s ", co->id(), co->name());
     //    co->changeIdAndName("idName", "modelName");
     //    fprintf(fout, "%s %s ", co->id(),
     //            co->name());
@@ -157,36 +156,23 @@ int compf(defrCallbackType_e c, defiComponent *co, defiUserData ud) {
         fprintf(fout, "%s ", co->net(i));
     }
     if(co->isFixed())
-      fprintf(fout, "+ FIXED %d %d %s ",
-              co->placementX(),
-              co->placementY(),
-              //orientStr(co->placementOrient()));
+      fprintf(fout, "+ FIXED %d %d %s ", co->placementX(), co->placementY(),
+              // orientStr(co->placementOrient()));
               co->placementOrientStr());
     if(co->isCover())
-      fprintf(fout, "+ COVER %d %d %s ",
-              co->placementX(),
-              co->placementY(),
-              orientStr(co->placementOrient()));
+      fprintf(fout, "+ COVER %d %d %s ", co->placementX(), co->placementY(), orientStr(co->placementOrient()));
     if(co->isPlaced())
-      fprintf(fout, "+ PLACED %d %d %s ",
-              co->placementX(),
-              co->placementY(),
-              orientStr(co->placementOrient()));
+      fprintf(fout, "+ PLACED %d %d %s ", co->placementX(), co->placementY(), orientStr(co->placementOrient()));
     if(co->isUnplaced()) {
       fprintf(fout, "+ UNPLACED ");
-      if((co->placementX() != -1) ||
-         (co->placementY() != -1))
-        fprintf(fout, "%d %d %s ",
-                co->placementX(),
-                co->placementY(),
-                orientStr(co->placementOrient()));
+      if((co->placementX() != -1) || (co->placementY() != -1))
+        fprintf(fout, "%d %d %s ", co->placementX(), co->placementY(), orientStr(co->placementOrient()));
     }
     if(co->hasSource())
       fprintf(fout, "+ SOURCE %s ", co->source());
     if(co->hasGenerate()) {
       fprintf(fout, "+ GENERATE %s ", co->generateName());
-      if(co->macroName() &&
-         *(co->macroName()))
+      if(co->macroName() && *(co->macroName()))
         fprintf(fout, "%s ", co->macroName());
     }
     if(co->hasWeight())
@@ -200,8 +186,7 @@ int compf(defrCallbackType_e c, defiComponent *co, defiUserData ud) {
       int  size;
       co->regionBounds(&size, &xl, &yl, &xh, &yh);
       for(i = 0; i < size; i++) {
-        fprintf(fout, "+ REGION %d %d %d %d \n",
-                xl[i], yl[i], xh[i], yh[i]);
+        fprintf(fout, "+ REGION %d %d %d %d \n", xl[i], yl[i], xh[i], yh[i]);
       }
     }
     if(co->maskShiftSize()) {
@@ -221,19 +206,15 @@ int compf(defrCallbackType_e c, defiComponent *co, defiUserData ud) {
       fprintf(fout, "%d %d %d %d\n", left, bottom, right, top);
     }
     if(co->hasRouteHalo()) {
-      fprintf(fout, "+ ROUTEHALO %d %s %s\n", co->haloDist(),
-              co->minLayer(), co->maxLayer());
+      fprintf(fout, "+ ROUTEHALO %d %s %s\n", co->haloDist(), co->minLayer(), co->maxLayer());
     }
     if(co->hasForeignName()) {
-      fprintf(fout, "+ FOREIGN %s %d %d %s %d ",
-              co->foreignName(), co->foreignX(),
-              co->foreignY(), co->foreignOri(),
+      fprintf(fout, "+ FOREIGN %s %d %d %s %d ", co->foreignName(), co->foreignX(), co->foreignY(), co->foreignOri(),
               co->foreignOrient());
     }
     if(co->numProps()) {
       for(i = 0; i < co->numProps(); i++) {
-        fprintf(fout, "+ PROPERTY %s %s ", co->propName(i),
-                co->propValue(i));
+        fprintf(fout, "+ PROPERTY %s %s ", co->propName(i), co->propValue(i));
         switch(co->propType(i)) {
         case 'R':
           fprintf(fout, "REAL ");
@@ -328,8 +309,7 @@ int netf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
       fprintf(fout, "\n");
       count = 0;
     }
-    fprintf(fout, "( %s %s ) ", net->instance(i),
-            net->pin(i));
+    fprintf(fout, "( %s %s ) ", net->instance(i), net->pin(i));
     //      net->changeInstance("newInstance", i);
     //      net->changePin("newPin", i);
     //      fprintf(fout, "( %s %s ) ", net->instance(i),
@@ -346,8 +326,7 @@ int netf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
     fprintf(fout, "  + %s", vpin->name());
     if(vpin->layer())
       fprintf(fout, " %s", vpin->layer());
-    fprintf(fout, " %d %d %d %d", vpin->xl(), vpin->yl(), vpin->xh(),
-            vpin->yh());
+    fprintf(fout, " %d %d %d %d", vpin->xl(), vpin->yl(), vpin->xh(), vpin->yh());
     if(vpin->status() != ' ') {
       fprintf(fout, " %c", vpin->status());
       fprintf(fout, " %d %d", vpin->xLoc(), vpin->yLoc());
@@ -386,17 +365,13 @@ int netf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
             fprintf(fout, "MASK %d ", p->getMask());
             break;
           case DEFIPATH_VIAMASK:
-            fprintf(fout, "MASK %d%d%d ",
-                    p->getViaTopMask(),
-                    p->getViaCutMask(),
-                    p->getViaBottomMask());
+            fprintf(fout, "MASK %d%d%d ", p->getViaTopMask(), p->getViaCutMask(), p->getViaBottomMask());
             break;
           case DEFIPATH_VIA:
             fprintf(fout, "%s ", ignoreViaNames ? "XXX" : p->getVia());
             break;
           case DEFIPATH_VIAROTATION:
-            fprintf(fout, "%s ",
-                    orientStr(p->getViaRotation()));
+            fprintf(fout, "%s ", orientStr(p->getViaRotation()));
             break;
           case DEFIPATH_RECT:
             p->getViaRect(&w, &x, &y, &z);
@@ -506,8 +481,7 @@ int netf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
         else
           fprintf(fout, "  + SUBNET %s ", s->name());
         for(j = 0; j < s->numConnections(); j++)
-          fprintf(fout, " ( %s %s )\n", s->instance(j),
-                  s->pin(j));
+          fprintf(fout, " ( %s %s )\n", s->instance(j), s->pin(j));
 
         // regularWiring
         if(s->numWires()) {
@@ -532,15 +506,13 @@ int netf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
                     fprintf(fout, "%s ", p->getLayer());
                     newLayer = 1;
                   } else
-                    fprintf(fout, "NEW %s ",
-                            p->getLayer());
+                    fprintf(fout, "NEW %s ", p->getLayer());
                   break;
                 case DEFIPATH_VIA:
                   fprintf(fout, "%s ", ignoreViaNames ? "XXX" : p->getVia());
                   break;
                 case DEFIPATH_VIAROTATION:
-                  fprintf(fout, "%s ",
-                          p->getViaRotationStr());
+                  fprintf(fout, "%s ", p->getViaRotationStr());
                   break;
                 case DEFIPATH_WIDTH:
                   fprintf(fout, "%d ", p->getWidth());
@@ -557,12 +529,10 @@ int netf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
                   fprintf(fout, "TAPER ");
                   break;
                 case DEFIPATH_TAPERRULE:
-                  fprintf(fout, "TAPERRULE  %s ",
-                          p->getTaperRule());
+                  fprintf(fout, "TAPERRULE  %s ", p->getTaperRule());
                   break;
                 case DEFIPATH_STYLE:
-                  fprintf(fout, "STYLE  %d ",
-                          p->getStyle());
+                  fprintf(fout, "STYLE  %d ", p->getStyle());
                   break;
                 }
               }
@@ -650,8 +620,7 @@ int snetpath(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
       fprintf(fout, "\n");
       count = 0;
     }
-    fprintf(fout, "( %s %s ) ", ppath->instance(i),
-            ppath->pin(i));
+    fprintf(fout, "( %s %s ) ", ppath->instance(i), ppath->pin(i));
     if(ppath->pinIsSynthesized(i))
       fprintf(fout, "+ SYNTHESIZED ");
   }
@@ -670,9 +639,7 @@ int snetpath(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
   // RECT
   if(ppath->numRectangles()) {
     for(i = 0; i < ppath->numRectangles(); i++) {
-      fprintf(fout, "\n  + RECT %s %d %d %d %d", ppath->rectName(i),
-              ppath->xl(i), ppath->yl(i),
-              ppath->xh(i), ppath->yh(i));
+      fprintf(fout, "\n  + RECT %s %d %d %d %d", ppath->rectName(i), ppath->xl(i), ppath->yl(i), ppath->xh(i), ppath->yh(i));
     }
   }
 
@@ -707,13 +674,11 @@ int snetpath(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
             fprintf(fout, "%s ", ignoreViaNames ? "XXX" : p->getVia());
             break;
           case DEFIPATH_VIAROTATION:
-            fprintf(fout, "%s ",
-                    orientStr(p->getViaRotation()));
+            fprintf(fout, "%s ", orientStr(p->getViaRotation()));
             break;
           case DEFIPATH_VIADATA:
             p->getViaData(&numX, &numY, &stepX, &stepY);
-            fprintf(fout, "DO %d BY %d STEP %d %d ", numX, numY,
-                    stepX, stepY);
+            fprintf(fout, "DO %d BY %d STEP %d %d ", numX, numY, stepX, stepY);
             break;
           case DEFIPATH_WIDTH:
             fprintf(fout, "%d ", p->getWidth());
@@ -722,10 +687,7 @@ int snetpath(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
             fprintf(fout, "MASK %d ", p->getMask());
             break;
           case DEFIPATH_VIAMASK:
-            fprintf(fout, "MASK %d%d%d ",
-                    p->getViaTopMask(),
-                    p->getViaCutMask(),
-                    p->getViaBottomMask());
+            fprintf(fout, "MASK %d%d%d ", p->getViaTopMask(), p->getViaCutMask(), p->getViaBottomMask());
             break;
           case DEFIPATH_POINT:
             p->getPoint(&x, &y);
@@ -761,8 +723,7 @@ int snetpath(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
         else
           fprintf(fout, "- %s ", s->name());
         for(j = 0; j < s->numConnections(); j++) {
-          fprintf(fout, " ( %s %s )\n", s->instance(j),
-                  s->pin(j));
+          fprintf(fout, " ( %s %s )\n", s->instance(j), s->pin(j));
         }
       }
 
@@ -783,11 +744,9 @@ int snetpath(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
   if(ppath->numProps()) {
     for(i = 0; i < ppath->numProps(); i++) {
       if(ppath->propIsString(i))
-        fprintf(fout, "  + PROPERTY %s %s ", ppath->propName(i),
-                ppath->propValue(i));
+        fprintf(fout, "  + PROPERTY %s %s ", ppath->propName(i), ppath->propValue(i));
       if(ppath->propIsNumber(i))
-        fprintf(fout, "  + PROPERTY %s %g ", ppath->propName(i),
-                ppath->propNumber(i));
+        fprintf(fout, "  + PROPERTY %s %g ", ppath->propName(i), ppath->propNumber(i));
       switch(ppath->propType(i)) {
       case 'R':
         fprintf(fout, "REAL ");
@@ -840,11 +799,9 @@ int snetpath(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
             break;
           case DEFIPATH_VIAROTATION:
             if(newLayer)
-              fprintf(fout, "%s ",
-                      orientStr(p->getViaRotation()));
+              fprintf(fout, "%s ", orientStr(p->getViaRotation()));
             else
-              fprintf(fout, "Str %s ",
-                      p->getViaRotationStr());
+              fprintf(fout, "Str %s ", p->getViaRotationStr());
             break;
           case DEFIPATH_WIDTH:
             fprintf(fout, "%d ", p->getWidth());
@@ -853,10 +810,7 @@ int snetpath(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
             fprintf(fout, "MASK %d ", p->getMask());
             break;
           case DEFIPATH_VIAMASK:
-            fprintf(fout, "MASK %d%d%d ",
-                    p->getViaTopMask(),
-                    p->getViaCutMask(),
-                    p->getViaBottomMask());
+            fprintf(fout, "MASK %d%d%d ", p->getViaTopMask(), p->getViaCutMask(), p->getViaBottomMask());
             break;
           case DEFIPATH_POINT:
             p->getPoint(&x, &y);
@@ -895,8 +849,7 @@ int snetpath(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
       if(left == right)
         fprintf(fout, "\n  + SPACING %s %g ", layerName, dist);
       else
-        fprintf(fout, "\n  + SPACING %s %g RANGE %g %g ",
-                layerName, dist, left, right);
+        fprintf(fout, "\n  + SPACING %s %g RANGE %g %g ", layerName, dist, left, right);
     }
   }
 
@@ -957,16 +910,13 @@ int snetwire(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
   }
   if(ppath->numRectangles()) {
     for(i = 0; i < ppath->numRectangles(); i++) {
-      fprintf(fout, "\n  + RECT %s %d %d %d %d", ppath->rectName(i),
-              ppath->xl(i), ppath->yl(i),
-              ppath->xh(i), ppath->yh(i));
+      fprintf(fout, "\n  + RECT %s %d %d %d %d", ppath->rectName(i), ppath->xl(i), ppath->yl(i), ppath->xh(i), ppath->yh(i));
     }
   }
   // VIA
   if(ppath->numViaSpecs()) {
     for(i = 0; i < ppath->numViaSpecs(); i++) {
-      fprintf(fout, "\n  + VIA %s ", ppath->viaName(i)),
-          fprintf(fout, " %s", ppath->viaOrientStr(i));
+      fprintf(fout, "\n  + VIA %s ", ppath->viaName(i)), fprintf(fout, " %s", ppath->viaOrientStr(i));
 
       defiPoints points = ppath->getViaPts(i);
 
@@ -1007,13 +957,11 @@ int snetwire(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
             fprintf(fout, "%s ", ignoreViaNames ? "XXX" : p->getVia());
             break;
           case DEFIPATH_VIAROTATION:
-            fprintf(fout, "%s ",
-                    orientStr(p->getViaRotation()));
+            fprintf(fout, "%s ", orientStr(p->getViaRotation()));
             break;
           case DEFIPATH_VIADATA:
             p->getViaData(&numX, &numY, &stepX, &stepY);
-            fprintf(fout, "DO %d BY %d STEP %d %d ", numX, numY,
-                    stepX, stepY);
+            fprintf(fout, "DO %d BY %d STEP %d %d ", numX, numY, stepX, stepY);
             break;
           case DEFIPATH_WIDTH:
             fprintf(fout, "%d ", p->getWidth());
@@ -1022,10 +970,7 @@ int snetwire(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
             fprintf(fout, "MASK %d ", p->getMask());
             break;
           case DEFIPATH_VIAMASK:
-            fprintf(fout, "MASK %d%d%d ",
-                    p->getViaTopMask(),
-                    p->getViaCutMask(),
-                    p->getViaBottomMask());
+            fprintf(fout, "MASK %d%d%d ", p->getViaTopMask(), p->getViaCutMask(), p->getViaBottomMask());
             break;
           case DEFIPATH_POINT:
             p->getPoint(&x, &y);
@@ -1077,8 +1022,7 @@ int snetwire(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
             fprintf(fout, "%s ", ignoreViaNames ? "XXX" : p->getVia());
             break;
           case DEFIPATH_VIAROTATION:
-            fprintf(fout, "%s ",
-                    orientStr(p->getViaRotation()));
+            fprintf(fout, "%s ", orientStr(p->getViaRotation()));
             break;
           case DEFIPATH_WIDTH:
             fprintf(fout, "%d ", p->getWidth());
@@ -1087,10 +1031,7 @@ int snetwire(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
             fprintf(fout, "MASK %d ", p->getMask());
             break;
           case DEFIPATH_VIAMASK:
-            fprintf(fout, "MASK %d%d%d ",
-                    p->getViaTopMask(),
-                    p->getViaCutMask(),
-                    p->getViaBottomMask());
+            fprintf(fout, "MASK %d%d%d ", p->getViaTopMask(), p->getViaCutMask(), p->getViaBottomMask());
             break;
           case DEFIPATH_POINT:
             p->getPoint(&x, &y);
@@ -1150,8 +1091,7 @@ int snetf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
       fprintf(fout, "\n");
       count = 0;
     }
-    fprintf(fout, "( %s %s ) ", net->instance(i),
-            net->pin(i));
+    fprintf(fout, "( %s %s ) ", net->instance(i), net->pin(i));
     if(net->pinIsSynthesized(i))
       fprintf(fout, "+ SYNTHESIZED ");
   }
@@ -1190,13 +1130,11 @@ int snetf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
               fprintf(fout, "%s ", ignoreViaNames ? "XXX" : p->getVia());
               break;
             case DEFIPATH_VIAROTATION:
-              fprintf(fout, "%s ",
-                      orientStr(p->getViaRotation()));
+              fprintf(fout, "%s ", orientStr(p->getViaRotation()));
               break;
             case DEFIPATH_VIADATA:
               p->getViaData(&numX, &numY, &stepX, &stepY);
-              fprintf(fout, "DO %d BY %d STEP %d %d ", numX, numY,
-                      stepX, stepY);
+              fprintf(fout, "DO %d BY %d STEP %d %d ", numX, numY, stepX, stepY);
               break;
             case DEFIPATH_WIDTH:
               fprintf(fout, "%d ", p->getWidth());
@@ -1205,10 +1143,7 @@ int snetf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
               fprintf(fout, "MASK %d ", p->getMask());
               break;
             case DEFIPATH_VIAMASK:
-              fprintf(fout, "MASK %d%d%d ",
-                      p->getViaTopMask(),
-                      p->getViaCutMask(),
-                      p->getViaBottomMask());
+              fprintf(fout, "MASK %d%d%d ", p->getViaTopMask(), p->getViaCutMask(), p->getViaBottomMask());
               break;
             case DEFIPATH_POINT:
               p->getPoint(&x, &y);
@@ -1253,8 +1188,7 @@ int snetf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
         }
       }
       if(net->polyMask(i)) {
-        fprintf(fout, "\n  + MASK %d + POLYGON %s ", net->polyMask(i),
-                net->polygonName(i));
+        fprintf(fout, "\n  + MASK %d + POLYGON %s ", net->polyMask(i), net->polygonName(i));
       } else {
         fprintf(fout, "\n  + POLYGON %s ", net->polygonName(i));
       }
@@ -1279,17 +1213,10 @@ int snetf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
         }
       }
       if(net->rectMask(i)) {
-        fprintf(fout, "\n  + MASK %d + RECT %s %d %d %d %d",
-                net->rectMask(i), net->rectName(i),
-                net->xl(i), net->yl(i), net->xh(i),
+        fprintf(fout, "\n  + MASK %d + RECT %s %d %d %d %d", net->rectMask(i), net->rectName(i), net->xl(i), net->yl(i), net->xh(i),
                 net->yh(i));
       } else {
-        fprintf(fout, "\n  + RECT %s %d %d %d %d",
-                net->rectName(i),
-                net->xl(i),
-                net->yl(i),
-                net->xh(i),
-                net->yh(i));
+        fprintf(fout, "\n  + RECT %s %d %d %d %d", net->rectName(i), net->xl(i), net->yl(i), net->xh(i), net->yh(i));
       }
     }
   }
@@ -1306,9 +1233,7 @@ int snetf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
         fprintf(fout, "\n  + SHAPE %s ", net->viaShapeType(i));
       }
       if(net->topMaskNum(i) || net->cutMaskNum(i) || net->bottomMaskNum(i)) {
-        fprintf(fout, "\n  + MASK %d%d%d + VIA %s ", net->topMaskNum(i),
-                net->cutMaskNum(i),
-                net->bottomMaskNum(i),
+        fprintf(fout, "\n  + MASK %d%d%d + VIA %s ", net->topMaskNum(i), net->cutMaskNum(i), net->bottomMaskNum(i),
                 net->viaName(i));
       } else {
         fprintf(fout, "\n  + VIA %s ", net->viaName(i));
@@ -1333,8 +1258,7 @@ int snetf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
         else
           fprintf(fout, "- %s ", s->name());
         for(j = 0; j < s->numConnections(); j++) {
-          fprintf(fout, " ( %s %s )\n", s->instance(j),
-                  s->pin(j));
+          fprintf(fout, " ( %s %s )\n", s->instance(j), s->pin(j));
         }
       }
 
@@ -1355,11 +1279,9 @@ int snetf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
   if(net->numProps()) {
     for(i = 0; i < net->numProps(); i++) {
       if(net->propIsString(i))
-        fprintf(fout, "  + PROPERTY %s %s ", net->propName(i),
-                net->propValue(i));
+        fprintf(fout, "  + PROPERTY %s %s ", net->propName(i), net->propValue(i));
       if(net->propIsNumber(i))
-        fprintf(fout, "  + PROPERTY %s %g ", net->propName(i),
-                net->propNumber(i));
+        fprintf(fout, "  + PROPERTY %s %g ", net->propName(i), net->propNumber(i));
       switch(net->propType(i)) {
       case 'R':
         fprintf(fout, "REAL ");
@@ -1411,8 +1333,7 @@ int snetf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
             fprintf(fout, "%s ", ignoreViaNames ? "XXX" : p->getVia());
             break;
           case DEFIPATH_VIAROTATION:
-            fprintf(fout, "%s ",
-                    orientStr(p->getViaRotation()));
+            fprintf(fout, "%s ", orientStr(p->getViaRotation()));
             break;
           case DEFIPATH_WIDTH:
             fprintf(fout, "%d ", p->getWidth());
@@ -1421,10 +1342,7 @@ int snetf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
             fprintf(fout, "MASK %d ", p->getMask());
             break;
           case DEFIPATH_VIAMASK:
-            fprintf(fout, "MASK %d%d%d ",
-                    p->getViaTopMask(),
-                    p->getViaCutMask(),
-                    p->getViaBottomMask());
+            fprintf(fout, "MASK %d%d%d ", p->getViaTopMask(), p->getViaCutMask(), p->getViaBottomMask());
             break;
           case DEFIPATH_POINT:
             p->getPoint(&x, &y);
@@ -1464,8 +1382,7 @@ int snetf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
       if(left == right)
         fprintf(fout, "\n  + SPACING %s %g ", layerName, dist);
       else
-        fprintf(fout, "\n  + SPACING %s %g RANGE %g %g ",
-                layerName, dist, left, right);
+        fprintf(fout, "\n  + SPACING %s %g RANGE %g %g ", layerName, dist, left, right);
     }
   }
 
@@ -1511,8 +1428,7 @@ int ndr(defrCallbackType_e c, defiNonDefault *nd, defiUserData ud) {
     fprintf(fout, "   + LAYER %s", nd->layerName(i));
     fprintf(fout, " WIDTH %d", nd->layerWidthVal(i));
     if(nd->hasLayerDiagWidth(i))
-      fprintf(fout, " DIAGWIDTH %d",
-              nd->layerDiagWidthVal(i));
+      fprintf(fout, " DIAGWIDTH %d", nd->layerDiagWidthVal(i));
     if(nd->hasLayerSpacing(i))
       fprintf(fout, " SPACING %d", nd->layerSpacingVal(i));
     if(nd->hasLayerWireExt(i))
@@ -1524,11 +1440,9 @@ int ndr(defrCallbackType_e c, defiNonDefault *nd, defiUserData ud) {
   for(i = 0; i < nd->numViaRules(); i++)
     fprintf(fout, "   + VIARULE %s\n", ignoreViaNames ? "XXX" : nd->viaRuleName(i));
   for(i = 0; i < nd->numMinCuts(); i++)
-    fprintf(fout, "   + MINCUTS %s %d\n", nd->cutLayerName(i),
-            nd->numCuts(i));
+    fprintf(fout, "   + MINCUTS %s %d\n", nd->cutLayerName(i), nd->numCuts(i));
   for(i = 0; i < nd->numProps(); i++) {
-    fprintf(fout, "   + PROPERTY %s %s ", nd->propName(i),
-            nd->propValue(i));
+    fprintf(fout, "   + PROPERTY %s %s ", nd->propName(i), nd->propValue(i));
     switch(nd->propType(i)) {
     case 'R':
       fprintf(fout, "REAL\n");
@@ -1689,12 +1603,10 @@ void operand(defrCallbackType_e c, defiAssertion *a, int ind) {
           fprintf(fout, ", "); // print , as separator
         fprintf(fout, "NET %s ", netName);
       } else if(a->isPath(i)) {
-        a->path(i, &fromInst, &fromPin, &toInst,
-                &toPin);
+        a->path(i, &fromInst, &fromPin, &toInst, &toPin);
         if(!first)
           fprintf(fout, ", ");
-        fprintf(fout, "PATH %s %s %s %s ", fromInst, fromPin, toInst,
-                toPin);
+        fprintf(fout, "PATH %s %s %s %s ", fromInst, fromPin, toInst, toPin);
       } else if(isSumSet) {
         // SUM within SUM, reset the flag
         a->setSum();
@@ -1782,8 +1694,7 @@ int prop(defrCallbackType_e c, defiProp *p, defiUserData ud) {
   if(p->dataType() == 'Q')
     fprintf(fout, "STRING ");
   if(p->hasRange()) {
-    fprintf(fout, "RANGE %g %g ", p->left(),
-            p->right());
+    fprintf(fout, "RANGE %g %g ", p->left(), p->right());
   }
   if(p->hasNumber())
     fprintf(fout, "%g ", p->number());
@@ -1919,36 +1830,22 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
 
   case defrSiteCbkType:
     site = (defiSite *)cl;
-    fprintf(fout, "SITE %s %g %g %s ", site->name(),
-            site->x_orig(), site->y_orig(),
-            orientStr(site->orient()));
-    fprintf(fout, "DO %g BY %g STEP %g %g ;\n",
-            site->x_num(), site->y_num(),
-            site->x_step(), site->y_step());
+    fprintf(fout, "SITE %s %g %g %s ", site->name(), site->x_orig(), site->y_orig(), orientStr(site->orient()));
+    fprintf(fout, "DO %g BY %g STEP %g %g ;\n", site->x_num(), site->y_num(), site->x_step(), site->y_step());
     break;
   case defrCanplaceCbkType:
     site = (defiSite *)cl;
-    fprintf(fout, "CANPLACE %s %g %g %s ", site->name(),
-            site->x_orig(), site->y_orig(),
-            orientStr(site->orient()));
-    fprintf(fout, "DO %g BY %g STEP %g %g ;\n",
-            site->x_num(), site->y_num(),
-            site->x_step(), site->y_step());
+    fprintf(fout, "CANPLACE %s %g %g %s ", site->name(), site->x_orig(), site->y_orig(), orientStr(site->orient()));
+    fprintf(fout, "DO %g BY %g STEP %g %g ;\n", site->x_num(), site->y_num(), site->x_step(), site->y_step());
     break;
   case defrCannotOccupyCbkType:
     site = (defiSite *)cl;
-    fprintf(fout, "CANNOTOCCUPY %s %g %g %s ",
-            site->name(), site->x_orig(),
-            site->y_orig(), orientStr(site->orient()));
-    fprintf(fout, "DO %g BY %g STEP %g %g ;\n",
-            site->x_num(), site->y_num(),
-            site->x_step(), site->y_step());
+    fprintf(fout, "CANNOTOCCUPY %s %g %g %s ", site->name(), site->x_orig(), site->y_orig(), orientStr(site->orient()));
+    fprintf(fout, "DO %g BY %g STEP %g %g ;\n", site->x_num(), site->y_num(), site->x_step(), site->y_step());
     break;
   case defrDieAreaCbkType:
     box = (defiBox *)cl;
-    fprintf(fout, "DIEAREA %d %d %d %d ;\n",
-            box->xl(), box->yl(), box->xh(),
-            box->yh());
+    fprintf(fout, "DIEAREA %d %d %d %d ;\n", box->xl(), box->yl(), box->xh(), box->yh());
     fprintf(fout, "DIEAREA ");
     points = box->getPoint();
     for(i = 0; i < points.numPoints; i++)
@@ -1960,8 +1857,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
     if(testDebugPrint) {
       pc->print(fout);
     } else {
-      fprintf(fout, "MINPINS %d WIRECAP %g ;\n",
-              pc->pin(), pc->cap());
+      fprintf(fout, "MINPINS %d WIRECAP %g ;\n", pc->pin(), pc->cap());
       --numObjs;
       if(numObjs <= 0)
         fprintf(fout, "END DEFAULTCAP\n");
@@ -1972,8 +1868,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
     if(testDebugPrint) {
       pin->print(fout);
     } else {
-      fprintf(fout, "- %s + NET %s ", pin->pinName(),
-              pin->netName());
+      fprintf(fout, "- %s + NET %s ", pin->pinName(), pin->netName());
       //         pin->changePinName("pinName");
       //         fprintf(fout, "%s ", pin->pinName());
       if(pin->hasDirection())
@@ -1983,55 +1878,40 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       if(pin->hasNetExpr())
         fprintf(fout, "+ NETEXPR \"%s\" ", pin->netExpr());
       if(pin->hasSupplySensitivity())
-        fprintf(fout, "+ SUPPLYSENSITIVITY %s ",
-                pin->supplySensitivity());
+        fprintf(fout, "+ SUPPLYSENSITIVITY %s ", pin->supplySensitivity());
       if(pin->hasGroundSensitivity())
-        fprintf(fout, "+ GROUNDSENSITIVITY %s ",
-                pin->groundSensitivity());
+        fprintf(fout, "+ GROUNDSENSITIVITY %s ", pin->groundSensitivity());
       if(pin->hasLayer()) {
         struct defiPoints points;
         for(i = 0; i < pin->numLayer(); i++) {
           fprintf(fout, "\n  + LAYER %s ", pin->layer(i));
           if(pin->layerMask(i))
-            fprintf(fout, "MASK %d ",
-                    pin->layerMask(i));
+            fprintf(fout, "MASK %d ", pin->layerMask(i));
           if(pin->hasLayerSpacing(i))
-            fprintf(fout, "SPACING %d ",
-                    pin->layerSpacing(i));
+            fprintf(fout, "SPACING %d ", pin->layerSpacing(i));
           if(pin->hasLayerDesignRuleWidth(i))
-            fprintf(fout, "DESIGNRULEWIDTH %d ",
-                    pin->layerDesignRuleWidth(i));
+            fprintf(fout, "DESIGNRULEWIDTH %d ", pin->layerDesignRuleWidth(i));
           pin->bounds(i, &xl, &yl, &xh, &yh);
           fprintf(fout, "%d %d %d %d ", xl, yl, xh, yh);
         }
         for(i = 0; i < pin->numPolygons(); i++) {
-          fprintf(fout, "\n  + POLYGON %s ",
-                  pin->polygonName(i));
+          fprintf(fout, "\n  + POLYGON %s ", pin->polygonName(i));
           if(pin->polygonMask(i))
-            fprintf(fout, "MASK %d ",
-                    pin->polygonMask(i));
+            fprintf(fout, "MASK %d ", pin->polygonMask(i));
           if(pin->hasPolygonSpacing(i))
-            fprintf(fout, "SPACING %d ",
-                    pin->polygonSpacing(i));
+            fprintf(fout, "SPACING %d ", pin->polygonSpacing(i));
           if(pin->hasPolygonDesignRuleWidth(i))
-            fprintf(fout, "DESIGNRULEWIDTH %d ",
-                    pin->polygonDesignRuleWidth(i));
+            fprintf(fout, "DESIGNRULEWIDTH %d ", pin->polygonDesignRuleWidth(i));
           points = pin->getPolygon(i);
           for(j = 0; j < points.numPoints; j++)
             fprintf(fout, "%d %d ", points.x[j], points.y[j]);
         }
         for(i = 0; i < pin->numVias(); i++) {
           if(pin->viaTopMask(i) || pin->viaCutMask(i) || pin->viaBottomMask(i)) {
-            fprintf(fout, "\n  + VIA %s MASK %d%d%d %d %d ",
-                    pin->viaName(i),
-                    pin->viaTopMask(i),
-                    pin->viaCutMask(i),
-                    pin->viaBottomMask(i),
-                    pin->viaPtX(i),
-                    pin->viaPtY(i));
+            fprintf(fout, "\n  + VIA %s MASK %d%d%d %d %d ", pin->viaName(i), pin->viaTopMask(i), pin->viaCutMask(i),
+                    pin->viaBottomMask(i), pin->viaPtX(i), pin->viaPtY(i));
           } else {
-            fprintf(fout, "\n  + VIA %s %d %d ", pin->viaName(i),
-                    pin->viaPtX(i), pin->viaPtY(i));
+            fprintf(fout, "\n  + VIA %s %d %d ", pin->viaName(i), pin->viaPtX(i), pin->viaPtY(i));
           }
         }
       }
@@ -2042,73 +1922,48 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
           port = pin->pinPort(j);
           fprintf(fout, "\n  + PORT");
           for(i = 0; i < port->numLayer(); i++) {
-            fprintf(fout, "\n     + LAYER %s ",
-                    port->layer(i));
+            fprintf(fout, "\n     + LAYER %s ", port->layer(i));
             if(port->layerMask(i))
-              fprintf(fout, "MASK %d ",
-                      port->layerMask(i));
+              fprintf(fout, "MASK %d ", port->layerMask(i));
             if(port->hasLayerSpacing(i))
-              fprintf(fout, "SPACING %d ",
-                      port->layerSpacing(i));
+              fprintf(fout, "SPACING %d ", port->layerSpacing(i));
             if(port->hasLayerDesignRuleWidth(i))
-              fprintf(fout, "DESIGNRULEWIDTH %d ",
-                      port->layerDesignRuleWidth(i));
+              fprintf(fout, "DESIGNRULEWIDTH %d ", port->layerDesignRuleWidth(i));
             port->bounds(i, &xl, &yl, &xh, &yh);
             fprintf(fout, "%d %d %d %d ", xl, yl, xh, yh);
           }
           for(i = 0; i < port->numPolygons(); i++) {
-            fprintf(fout, "\n     + POLYGON %s ",
-                    port->polygonName(i));
+            fprintf(fout, "\n     + POLYGON %s ", port->polygonName(i));
             if(port->polygonMask(i))
-              fprintf(fout, "MASK %d ",
-                      port->polygonMask(i));
+              fprintf(fout, "MASK %d ", port->polygonMask(i));
             if(port->hasPolygonSpacing(i))
-              fprintf(fout, "SPACING %d ",
-                      port->polygonSpacing(i));
+              fprintf(fout, "SPACING %d ", port->polygonSpacing(i));
             if(port->hasPolygonDesignRuleWidth(i))
-              fprintf(fout, "DESIGNRULEWIDTH %d ",
-                      port->polygonDesignRuleWidth(i));
+              fprintf(fout, "DESIGNRULEWIDTH %d ", port->polygonDesignRuleWidth(i));
             points = port->getPolygon(i);
             for(k = 0; k < points.numPoints; k++)
               fprintf(fout, "( %d %d ) ", points.x[k], points.y[k]);
           }
           for(i = 0; i < port->numVias(); i++) {
             if(port->viaTopMask(i) || port->viaCutMask(i) || port->viaBottomMask(i)) {
-              fprintf(fout, "\n     + VIA %s MASK %d%d%d ( %d %d ) ",
-                      port->viaName(i),
-                      port->viaTopMask(i),
-                      port->viaCutMask(i),
-                      port->viaBottomMask(i),
-                      port->viaPtX(i),
-                      port->viaPtY(i));
+              fprintf(fout, "\n     + VIA %s MASK %d%d%d ( %d %d ) ", port->viaName(i), port->viaTopMask(i), port->viaCutMask(i),
+                      port->viaBottomMask(i), port->viaPtX(i), port->viaPtY(i));
             } else {
-              fprintf(fout, "\n     + VIA %s ( %d %d ) ",
-                      port->viaName(i),
-                      port->viaPtX(i),
-                      port->viaPtY(i));
+              fprintf(fout, "\n     + VIA %s ( %d %d ) ", port->viaName(i), port->viaPtX(i), port->viaPtY(i));
             }
           }
           if(port->hasPlacement()) {
             if(port->isPlaced()) {
               fprintf(fout, "\n     + PLACED ");
-              fprintf(fout, "( %d %d ) %s ",
-                      port->placementX(),
-                      port->placementY(),
-                      orientStr(port->orient()));
+              fprintf(fout, "( %d %d ) %s ", port->placementX(), port->placementY(), orientStr(port->orient()));
             }
             if(port->isCover()) {
               fprintf(fout, "\n     + COVER ");
-              fprintf(fout, "( %d %d ) %s ",
-                      port->placementX(),
-                      port->placementY(),
-                      orientStr(port->orient()));
+              fprintf(fout, "( %d %d ) %s ", port->placementX(), port->placementY(), orientStr(port->orient()));
             }
             if(port->isFixed()) {
               fprintf(fout, "\n     + FIXED ");
-              fprintf(fout, "( %d %d ) %s ",
-                      port->placementX(),
-                      port->placementY(),
-                      orientStr(port->orient()));
+              fprintf(fout, "( %d %d ) %s ", port->placementX(), port->placementY(), orientStr(port->orient()));
             }
           }
         }
@@ -2116,21 +1971,15 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       if(pin->hasPlacement()) {
         if(pin->isPlaced()) {
           fprintf(fout, "+ PLACED ");
-          fprintf(fout, "( %d %d ) %s ", pin->placementX(),
-                  pin->placementY(),
-                  orientStr(pin->orient()));
+          fprintf(fout, "( %d %d ) %s ", pin->placementX(), pin->placementY(), orientStr(pin->orient()));
         }
         if(pin->isCover()) {
           fprintf(fout, "+ COVER ");
-          fprintf(fout, "( %d %d ) %s ", pin->placementX(),
-                  pin->placementY(),
-                  orientStr(pin->orient()));
+          fprintf(fout, "( %d %d ) %s ", pin->placementX(), pin->placementY(), orientStr(pin->orient()));
         }
         if(pin->isFixed()) {
           fprintf(fout, "+ FIXED ");
-          fprintf(fout, "( %d %d ) %s ", pin->placementX(),
-                  pin->placementY(),
-                  orientStr(pin->orient()));
+          fprintf(fout, "( %d %d ) %s ", pin->placementX(), pin->placementY(), orientStr(pin->orient()));
         }
         if(pin->isUnplaced())
           fprintf(fout, "+ UNPLACED ");
@@ -2140,21 +1989,17 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       }
       if(pin->hasAPinPartialMetalArea()) {
         for(i = 0; i < pin->numAPinPartialMetalArea(); i++) {
-          fprintf(fout, "ANTENNAPINPARTIALMETALAREA %d",
-                  pin->APinPartialMetalArea(i));
+          fprintf(fout, "ANTENNAPINPARTIALMETALAREA %d", pin->APinPartialMetalArea(i));
           if(*(pin->APinPartialMetalAreaLayer(i)))
-            fprintf(fout, " LAYER %s",
-                    pin->APinPartialMetalAreaLayer(i));
+            fprintf(fout, " LAYER %s", pin->APinPartialMetalAreaLayer(i));
           fprintf(fout, "\n");
         }
       }
       if(pin->hasAPinPartialMetalSideArea()) {
         for(i = 0; i < pin->numAPinPartialMetalSideArea(); i++) {
-          fprintf(fout, "ANTENNAPINPARTIALMETALSIDEAREA %d",
-                  pin->APinPartialMetalSideArea(i));
+          fprintf(fout, "ANTENNAPINPARTIALMETALSIDEAREA %d", pin->APinPartialMetalSideArea(i));
           if(*(pin->APinPartialMetalSideAreaLayer(i)))
-            fprintf(fout, " LAYER %s",
-                    pin->APinPartialMetalSideAreaLayer(i));
+            fprintf(fout, " LAYER %s", pin->APinPartialMetalSideAreaLayer(i));
           fprintf(fout, "\n");
         }
       }
@@ -2168,8 +2013,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       }
       if(pin->hasAPinPartialCutArea()) {
         for(i = 0; i < pin->numAPinPartialCutArea(); i++) {
-          fprintf(fout, "ANTENNAPINPARTIALCUTAREA %d",
-                  pin->APinPartialCutArea(i));
+          fprintf(fout, "ANTENNAPINPARTIALCUTAREA %d", pin->APinPartialCutArea(i));
           if(*(pin->APinPartialCutAreaLayer(i)))
             fprintf(fout, " LAYER %s", pin->APinPartialCutAreaLayer(i));
           fprintf(fout, "\n");
@@ -2179,50 +2023,37 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       for(j = 0; j < pin->numAntennaModel(); j++) {
         aModel = pin->antennaModel(j);
 
-        fprintf(fout, "ANTENNAMODEL %s\n",
-                aModel->antennaOxide());
+        fprintf(fout, "ANTENNAMODEL %s\n", aModel->antennaOxide());
 
         if(aModel->hasAPinGateArea()) {
-          for(i = 0; i < aModel->numAPinGateArea();
-              i++) {
-            fprintf(fout, "ANTENNAPINGATEAREA %d",
-                    aModel->APinGateArea(i));
+          for(i = 0; i < aModel->numAPinGateArea(); i++) {
+            fprintf(fout, "ANTENNAPINGATEAREA %d", aModel->APinGateArea(i));
             if(aModel->hasAPinGateAreaLayer(i))
               fprintf(fout, " LAYER %s", aModel->APinGateAreaLayer(i));
             fprintf(fout, "\n");
           }
         }
         if(aModel->hasAPinMaxAreaCar()) {
-          for(i = 0;
-              i < aModel->numAPinMaxAreaCar(); i++) {
-            fprintf(fout, "ANTENNAPINMAXAREACAR %d",
-                    aModel->APinMaxAreaCar(i));
+          for(i = 0; i < aModel->numAPinMaxAreaCar(); i++) {
+            fprintf(fout, "ANTENNAPINMAXAREACAR %d", aModel->APinMaxAreaCar(i));
             if(aModel->hasAPinMaxAreaCarLayer(i))
-              fprintf(fout,
-                      " LAYER %s", aModel->APinMaxAreaCarLayer(i));
+              fprintf(fout, " LAYER %s", aModel->APinMaxAreaCarLayer(i));
             fprintf(fout, "\n");
           }
         }
         if(aModel->hasAPinMaxSideAreaCar()) {
-          for(i = 0;
-              i < aModel->numAPinMaxSideAreaCar();
-              i++) {
-            fprintf(fout, "ANTENNAPINMAXSIDEAREACAR %d",
-                    aModel->APinMaxSideAreaCar(i));
+          for(i = 0; i < aModel->numAPinMaxSideAreaCar(); i++) {
+            fprintf(fout, "ANTENNAPINMAXSIDEAREACAR %d", aModel->APinMaxSideAreaCar(i));
             if(aModel->hasAPinMaxSideAreaCarLayer(i))
-              fprintf(fout,
-                      " LAYER %s", aModel->APinMaxSideAreaCarLayer(i));
+              fprintf(fout, " LAYER %s", aModel->APinMaxSideAreaCarLayer(i));
             fprintf(fout, "\n");
           }
         }
         if(aModel->hasAPinMaxCutCar()) {
-          for(i = 0; i < aModel->numAPinMaxCutCar();
-              i++) {
-            fprintf(fout, "ANTENNAPINMAXCUTCAR %d",
-                    aModel->APinMaxCutCar(i));
+          for(i = 0; i < aModel->numAPinMaxCutCar(); i++) {
+            fprintf(fout, "ANTENNAPINMAXCUTCAR %d", aModel->APinMaxCutCar(i));
             if(aModel->hasAPinMaxCutCarLayer(i))
-              fprintf(fout, " LAYER %s",
-                      aModel->APinMaxCutCarLayer(i));
+              fprintf(fout, " LAYER %s", aModel->APinMaxCutCarLayer(i));
             fprintf(fout, "\n");
           }
         }
@@ -2240,24 +2071,19 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
     break;
   case defrRowCbkType:
     row = (defiRow *)cl;
-    fprintf(fout, "ROW %s %s %g %g %s ", ignoreRowNames ? "XXX" : row->name(),
-            row->macro(), row->x(), row->y(),
+    fprintf(fout, "ROW %s %s %g %g %s ", ignoreRowNames ? "XXX" : row->name(), row->macro(), row->x(), row->y(),
             orientStr(row->orient()));
     if(row->hasDo()) {
-      fprintf(fout, "DO %g BY %g ",
-              row->xNum(), row->yNum());
+      fprintf(fout, "DO %g BY %g ", row->xNum(), row->yNum());
       if(row->hasDoStep())
-        fprintf(fout, "STEP %g %g ;\n",
-                row->xStep(), row->yStep());
+        fprintf(fout, "STEP %g %g ;\n", row->xStep(), row->yStep());
       else
         fprintf(fout, ";\n");
     } else
       fprintf(fout, ";\n");
     if(row->numProps() > 0) {
       for(i = 0; i < row->numProps(); i++) {
-        fprintf(fout, "  + PROPERTY %s %s ",
-                row->propName(i),
-                row->propValue(i));
+        fprintf(fout, "  + PROPERTY %s %s ", row->propName(i), row->propValue(i));
         switch(row->propType(i)) {
         case 'R':
           fprintf(fout, "REAL ");
@@ -2283,20 +2109,14 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
     track = (defiTrack *)cl;
     if(track->firstTrackMask()) {
       if(track->sameMask()) {
-        fprintf(fout, "TRACKS %s %g DO %g STEP %g MASK %d SAMEMASK LAYER ",
-                track->macro(), track->x(),
-                track->xNum(), track->xStep(),
-                track->firstTrackMask());
+        fprintf(fout, "TRACKS %s %g DO %g STEP %g MASK %d SAMEMASK LAYER ", track->macro(), track->x(), track->xNum(),
+                track->xStep(), track->firstTrackMask());
       } else {
-        fprintf(fout, "TRACKS %s %g DO %g STEP %g MASK %d LAYER ",
-                track->macro(), track->x(),
-                track->xNum(), track->xStep(),
+        fprintf(fout, "TRACKS %s %g DO %g STEP %g MASK %d LAYER ", track->macro(), track->x(), track->xNum(), track->xStep(),
                 track->firstTrackMask());
       }
     } else {
-      fprintf(fout, "TRACKS %s %g DO %g STEP %g LAYER ",
-              track->macro(), track->x(),
-              track->xNum(), track->xStep());
+      fprintf(fout, "TRACKS %s %g DO %g STEP %g LAYER ", track->macro(), track->x(), track->xNum(), track->xStep());
     }
     for(i = 0; i < track->numLayers(); i++)
       fprintf(fout, "%s ", track->layer(i));
@@ -2304,9 +2124,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
     break;
   case defrGcellGridCbkType:
     gcg = (defiGcellGrid *)cl;
-    fprintf(fout, "GCELLGRID %s %d DO %d STEP %g ;\n",
-            gcg->macro(), gcg->x(),
-            gcg->xNum(), gcg->xStep());
+    fprintf(fout, "GCELLGRID %s %d DO %d STEP %g ;\n", gcg->macro(), gcg->x(), gcg->xNum(), gcg->xStep());
     break;
   case defrViaCbkType:
     via = (defiVia *)cl;
@@ -2321,11 +2139,9 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
         int rectMask = via->rectMask(i);
 
         if(rectMask) {
-          fprintf(fout, "+ RECT %s + MASK %d %d %d %d %d \n",
-                  name, rectMask, xl, yl, xh, yh);
+          fprintf(fout, "+ RECT %s + MASK %d %d %d %d %d \n", name, rectMask, xl, yl, xh, yh);
         } else {
-          fprintf(fout, "+ RECT %s %d %d %d %d \n",
-                  name, xl, yl, xh, yh);
+          fprintf(fout, "+ RECT %s %d %d %d %d \n", name, xl, yl, xh, yh);
         }
       }
       // POLYGON
@@ -2335,8 +2151,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
           int polyMask = via->polyMask(i);
 
           if(polyMask) {
-            fprintf(fout, "\n  + POLYGON %s + MASK %d ",
-                    via->polygonName(i), polyMask);
+            fprintf(fout, "\n  + POLYGON %s + MASK %d ", via->polygonName(i), polyMask);
           } else {
             fprintf(fout, "\n  + POLYGON %s ", via->polygonName(i));
           }
@@ -2350,8 +2165,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
         char *vrn, *bl, *cl, *tl;
         int   xs, ys, xcs, ycs, xbe, ybe, xte, yte;
         int   cr, cc, xo, yo, xbo, ybo, xto, yto;
-        (void)via->viaRule(&vrn, &xs, &ys, &bl, &cl, &tl, &xcs,
-                           &ycs, &xbe, &ybe, &xte, &yte);
+        (void)via->viaRule(&vrn, &xs, &ys, &bl, &cl, &tl, &xcs, &ycs, &xbe, &ybe, &xte, &yte);
         fprintf(fout, "+ VIARULE '%s'\n", ignoreViaNames ? "XXX" : vrn);
         fprintf(fout, "  + CUTSIZE %d %d\n", xs, ys);
         fprintf(fout, "  + LAYERS %s %s %s\n", bl, cl, tl);
@@ -2381,15 +2195,12 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
     re = (defiRegion *)cl;
     fprintf(fout, "- %s ", re->name());
     for(i = 0; i < re->numRectangles(); i++)
-      fprintf(fout, "%d %d %d %d \n", re->xl(i),
-              re->yl(i), re->xh(i),
-              re->yh(i));
+      fprintf(fout, "%d %d %d %d \n", re->xl(i), re->yl(i), re->xh(i), re->yh(i));
     if(re->hasType())
       fprintf(fout, "+ TYPE %s\n", re->type());
     if(re->numProps()) {
       for(i = 0; i < re->numProps(); i++) {
-        fprintf(fout, "+ PROPERTY %s %s ", re->propName(i),
-                re->propValue(i));
+        fprintf(fout, "+ PROPERTY %s %s ", re->propName(i), re->propValue(i));
         switch(re->propType(i)) {
         case 'R':
           fprintf(fout, "REAL ");
@@ -2438,8 +2249,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
     if(group->hasMaxX() | group->hasMaxY() | group->hasPerim()) {
       fprintf(fout, "\n  + SOFT ");
       if(group->hasPerim())
-        fprintf(fout, "MAXHALFPERIMETER %d ",
-                group->perim());
+        fprintf(fout, "MAXHALFPERIMETER %d ", group->perim());
       if(group->hasMaxX())
         fprintf(fout, "MAXX %d ", group->maxX());
       if(group->hasMaxY())
@@ -2452,14 +2262,11 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       int  size;
       group->regionRects(&size, &gxl, &gyl, &gxh, &gyh);
       for(i = 0; i < size; i++)
-        fprintf(fout, "REGION %d %d %d %d ", gxl[i], gyl[i],
-                gxh[i], gyh[i]);
+        fprintf(fout, "REGION %d %d %d %d ", gxl[i], gyl[i], gxh[i], gyh[i]);
     }
     if(group->numProps()) {
       for(i = 0; i < group->numProps(); i++) {
-        fprintf(fout, "\n  + PROPERTY %s %s ",
-                group->propName(i),
-                group->propValue(i));
+        fprintf(fout, "\n  + PROPERTY %s %s ", group->propName(i), group->propValue(i));
         switch(group->propType(i)) {
         case 'R':
           fprintf(fout, "REAL ");
@@ -2495,8 +2302,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       sc->stop(&a1, &b1);
       fprintf(fout, "  + STOP %s %s\n", a1, b1);
     }
-    if(sc->hasCommonInPin() ||
-       sc->hasCommonOutPin()) {
+    if(sc->hasCommonInPin() || sc->hasCommonOutPin()) {
       fprintf(fout, "  + COMMONSCANPINS ");
       if(sc->hasCommonInPin())
         fprintf(fout, " ( IN %s ) ", sc->commonInPin());
@@ -2522,8 +2328,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
 
     if(sc->hasOrdered()) {
       for(i = 0; i < sc->numOrderedLists(); i++) {
-        sc->ordered(i, &size, &inst, &inPin, &outPin,
-                    &bits);
+        sc->ordered(i, &size, &inst, &inPin, &outPin, &bits);
         if(size > 0)
           fprintf(fout, "  + ORDERED\n");
         for(j = 0; j < size; j++) {
@@ -2540,11 +2345,9 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
     }
 
     if(sc->hasPartition()) {
-      fprintf(fout, "  + PARTITION %s ",
-              sc->partitionName());
+      fprintf(fout, "  + PARTITION %s ", sc->partitionName());
       if(sc->hasPartitionMaxBits())
-        fprintf(fout, "MAXBITS %d ",
-                sc->partitionMaxBits());
+        fprintf(fout, "MAXBITS %d ", sc->partitionMaxBits());
     }
     fprintf(fout, ";\n");
     --numObjs;
@@ -2553,39 +2356,25 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
     break;
   case defrIOTimingCbkType:
     iot = (defiIOTiming *)cl;
-    fprintf(fout, "- ( %s %s )\n", iot->inst(),
-            iot->pin());
+    fprintf(fout, "- ( %s %s )\n", iot->inst(), iot->pin());
     if(iot->hasSlewRise())
-      fprintf(fout, "  + RISE SLEWRATE %g %g\n",
-              iot->slewRiseMin(),
-              iot->slewRiseMax());
+      fprintf(fout, "  + RISE SLEWRATE %g %g\n", iot->slewRiseMin(), iot->slewRiseMax());
     if(iot->hasSlewFall())
-      fprintf(fout, "  + FALL SLEWRATE %g %g\n",
-              iot->slewFallMin(),
-              iot->slewFallMax());
+      fprintf(fout, "  + FALL SLEWRATE %g %g\n", iot->slewFallMin(), iot->slewFallMax());
     if(iot->hasVariableRise())
-      fprintf(fout, "  + RISE VARIABLE %g %g\n",
-              iot->variableRiseMin(),
-              iot->variableRiseMax());
+      fprintf(fout, "  + RISE VARIABLE %g %g\n", iot->variableRiseMin(), iot->variableRiseMax());
     if(iot->hasVariableFall())
-      fprintf(fout, "  + FALL VARIABLE %g %g\n",
-              iot->variableFallMin(),
-              iot->variableFallMax());
+      fprintf(fout, "  + FALL VARIABLE %g %g\n", iot->variableFallMin(), iot->variableFallMax());
     if(iot->hasCapacitance())
-      fprintf(fout, "  + CAPACITANCE %g\n",
-              iot->capacitance());
+      fprintf(fout, "  + CAPACITANCE %g\n", iot->capacitance());
     if(iot->hasDriveCell()) {
-      fprintf(fout, "  + DRIVECELL %s ",
-              iot->driveCell());
+      fprintf(fout, "  + DRIVECELL %s ", iot->driveCell());
       if(iot->hasFrom())
-        fprintf(fout, "  FROMPIN %s ",
-                iot->from());
+        fprintf(fout, "  FROMPIN %s ", iot->from());
       if(iot->hasTo())
-        fprintf(fout, "  TOPIN %s ",
-                iot->to());
+        fprintf(fout, "  TOPIN %s ", iot->to());
       if(iot->hasParallel())
-        fprintf(fout, "PARALLEL %g",
-                iot->parallel());
+        fprintf(fout, "PARALLEL %g", iot->parallel());
       fprintf(fout, "\n");
     }
     fprintf(fout, ";\n");
@@ -2627,33 +2416,19 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
   case defrTimingDisableCbkType:
     td = (defiTimingDisable *)cl;
     if(td->hasFromTo())
-      fprintf(fout, "- FROMPIN %s %s %s %s",
-              td->fromInst(),
-              td->fromPin(),
-              td->toInst(),
-              td->toPin());
+      fprintf(fout, "- FROMPIN %s %s %s %s", td->fromInst(), td->fromPin(), td->toInst(), td->toPin());
     if(td->hasThru())
-      fprintf(fout, "- THRUPIN %s %s ",
-              td->thruInst(),
-              td->thruPin());
+      fprintf(fout, "- THRUPIN %s %s ", td->thruInst(), td->thruPin());
     if(td->hasMacroFromTo())
-      fprintf(fout, "- MACRO %s FROMPIN %s %s ",
-              td->macroName(),
-              td->fromPin(),
-              td->toPin());
+      fprintf(fout, "- MACRO %s FROMPIN %s %s ", td->macroName(), td->fromPin(), td->toPin());
     if(td->hasMacroThru())
-      fprintf(fout, "- MACRO %s THRUPIN %s ",
-              td->macroName(),
-              td->fromPin());
+      fprintf(fout, "- MACRO %s THRUPIN %s ", td->macroName(), td->fromPin());
     fprintf(fout, ";\n");
     break;
   case defrPartitionCbkType:
     part = (defiPartition *)cl;
     fprintf(fout, "- %s ", part->name());
-    if(part->isSetupRise() |
-       part->isSetupFall() |
-       part->isHoldRise() |
-       part->isHoldFall()) {
+    if(part->isSetupRise() | part->isSetupFall() | part->isHoldRise() | part->isHoldFall()) {
       // has turnoff
       fprintf(fout, "TURNOFF ");
       if(part->isSetupRise())
@@ -2669,42 +2444,26 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
     dir   = part->direction();
     if(strcmp(itemT, "CLOCK") == 0) {
       if(dir == 'T') // toclockpin
-        fprintf(fout, "+ TOCLOCKPIN %s %s ",
-                part->instName(),
-                part->pinName());
+        fprintf(fout, "+ TOCLOCKPIN %s %s ", part->instName(), part->pinName());
       if(dir == 'F') // fromclockpin
-        fprintf(fout, "+ FROMCLOCKPIN %s %s ",
-                part->instName(),
-                part->pinName());
+        fprintf(fout, "+ FROMCLOCKPIN %s %s ", part->instName(), part->pinName());
       if(part->hasMin())
-        fprintf(fout, "MIN %g %g ",
-                part->partitionMin(),
-                part->partitionMax());
+        fprintf(fout, "MIN %g %g ", part->partitionMin(), part->partitionMax());
       if(part->hasMax())
-        fprintf(fout, "MAX %g %g ",
-                part->partitionMin(),
-                part->partitionMax());
+        fprintf(fout, "MAX %g %g ", part->partitionMin(), part->partitionMax());
       fprintf(fout, "PINS ");
       for(i = 0; i < part->numPins(); i++)
         fprintf(fout, "%s ", part->pin(i));
     } else if(strcmp(itemT, "IO") == 0) {
       if(dir == 'T') // toiopin
-        fprintf(fout, "+ TOIOPIN %s %s ",
-                part->instName(),
-                part->pinName());
+        fprintf(fout, "+ TOIOPIN %s %s ", part->instName(), part->pinName());
       if(dir == 'F') // fromiopin
-        fprintf(fout, "+ FROMIOPIN %s %s ",
-                part->instName(),
-                part->pinName());
+        fprintf(fout, "+ FROMIOPIN %s %s ", part->instName(), part->pinName());
     } else if(strcmp(itemT, "COMP") == 0) {
       if(dir == 'T') // tocomppin
-        fprintf(fout, "+ TOCOMPPIN %s %s ",
-                part->instName(),
-                part->pinName());
+        fprintf(fout, "+ TOCOMPPIN %s %s ", part->instName(), part->pinName());
       if(dir == 'F') // fromcomppin
-        fprintf(fout, "+ FROMCOMPPIN %s %s ",
-                part->instName(),
-                part->pinName());
+        fprintf(fout, "+ FROMCOMPPIN %s %s ", part->instName(), part->pinName());
     }
     fprintf(fout, ";\n");
     --numObjs;
@@ -2717,15 +2476,11 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
     if(pprop->isPin())
       fprintf(fout, "- PIN %s ", pprop->pinName());
     else
-      fprintf(fout, "- %s %s ",
-              pprop->instName(),
-              pprop->pinName());
+      fprintf(fout, "- %s %s ", pprop->instName(), pprop->pinName());
     fprintf(fout, ";\n");
     if(pprop->numProps() > 0) {
       for(i = 0; i < pprop->numProps(); i++) {
-        fprintf(fout, "  + PROPERTY %s %s ",
-                pprop->propName(i),
-                pprop->propValue(i));
+        fprintf(fout, "  + PROPERTY %s %s ", pprop->propName(i), pprop->propValue(i));
         switch(pprop->propType(i)) {
         case 'R':
           fprintf(fout, "REAL ");
@@ -2758,8 +2513,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       if(block->hasLayer()) {
         fprintf(fout, "- LAYER %s\n", block->layerName());
         if(block->hasComponent())
-          fprintf(fout, "   + COMPONENT %s\n",
-                  block->layerComponentName());
+          fprintf(fout, "   + COMPONENT %s\n", block->layerComponentName());
         if(block->hasSlots())
           fprintf(fout, "   + SLOTS\n");
         if(block->hasFills())
@@ -2771,29 +2525,23 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
         if(block->hasMask())
           fprintf(fout, "   + MASK %d\n", block->mask());
         if(block->hasSpacing())
-          fprintf(fout, "   + SPACING %d\n",
-                  block->minSpacing());
+          fprintf(fout, "   + SPACING %d\n", block->minSpacing());
         if(block->hasDesignRuleWidth())
-          fprintf(fout, "   + DESIGNRULEWIDTH %d\n",
-                  block->designRuleWidth());
+          fprintf(fout, "   + DESIGNRULEWIDTH %d\n", block->designRuleWidth());
       } else if(block->hasPlacement()) {
         fprintf(fout, "- PLACEMENT\n");
         if(block->hasSoft())
           fprintf(fout, "   + SOFT\n");
         if(block->hasPartial())
-          fprintf(fout, "   + PARTIAL %g\n",
-                  block->placementMaxDensity());
+          fprintf(fout, "   + PARTIAL %g\n", block->placementMaxDensity());
         if(block->hasComponent())
-          fprintf(fout, "   + COMPONENT %s\n",
-                  block->placementComponentName());
+          fprintf(fout, "   + COMPONENT %s\n", block->placementComponentName());
         if(block->hasPushdown())
           fprintf(fout, "   + PUSHDOWN\n");
       }
 
       for(i = 0; i < block->numRectangles(); i++) {
-        fprintf(fout, "   RECT %d %d %d %d\n",
-                block->xl(i), block->yl(i),
-                block->xh(i), block->yh(i));
+        fprintf(fout, "   RECT %d %d %d %d\n", block->xl(i), block->yl(i), block->xh(i), block->yh(i));
       }
 
       for(i = 0; i < block->numPolygons(); i++) {
@@ -2815,9 +2563,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       fprintf(fout, "- LAYER %s\n", slots->layerName());
 
     for(i = 0; i < slots->numRectangles(); i++) {
-      fprintf(fout, "   RECT %d %d %d %d\n",
-              slots->xl(i), slots->yl(i),
-              slots->xh(i), slots->yh(i));
+      fprintf(fout, "   RECT %d %d %d %d\n", slots->xl(i), slots->yl(i), slots->xh(i), slots->yh(i));
     }
     for(i = 0; i < slots->numPolygons(); i++) {
       fprintf(fout, "   POLYGON ");
@@ -2846,9 +2592,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
         fprintf(fout, "\n");
 
         for(i = 0; i < fills->numRectangles(); i++) {
-          fprintf(fout, "   RECT %d %d %d %d\n",
-                  fills->xl(i), fills->yl(i),
-                  fills->xh(i), fills->yh(i));
+          fprintf(fout, "   RECT %d %d %d %d\n", fills->xl(i), fills->yl(i), fills->xh(i), fills->yh(i));
         }
         for(i = 0; i < fills->numPolygons(); i++) {
           fprintf(fout, "   POLYGON ");
@@ -2863,10 +2607,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       if(fills->hasVia()) {
         fprintf(fout, "- VIA %s", fills->viaName());
         if(fills->viaTopMask() || fills->viaCutMask() || fills->viaBottomMask()) {
-          fprintf(fout, " + MASK %d%d%d",
-                  fills->viaTopMask(),
-                  fills->viaCutMask(),
-                  fills->viaBottomMask());
+          fprintf(fout, " + MASK %d%d%d", fills->viaTopMask(), fills->viaCutMask(), fills->viaBottomMask());
         }
         if(fills->hasViaOpc())
           fprintf(fout, " + OPC");
@@ -3117,8 +2858,8 @@ int main(int argc, char **argv) {
     argv++;
   }
 
-  //defrSetLogFunction(myLogFunction);
-  //defrSetWarningLogFunction(myWarningLogFunction);
+  // defrSetLogFunction(myLogFunction);
+  // defrSetWarningLogFunction(myWarningLogFunction);
 
   if(isSessionless) {
     defrInitSession(0);
@@ -3259,7 +3000,7 @@ int main(int argc, char **argv) {
     defrSetReallocFunction(reallocCB);
     defrSetFreeFunction(freeCB);
 
-    //defrSetRegisterUnusedCallbacks();
+    // defrSetRegisterUnusedCallbacks();
 
     // Testing to set the number of warnings
     defrSetAssertionWarnings(3);
@@ -3308,7 +3049,7 @@ int main(int argc, char **argv) {
       res = defrRead(f, inFile[fileCt], userData, 1);
 
       if(res)
-        //fprintf(stderr, "Reader returns bad status.\n", inFile[fileCt]);
+        // fprintf(stderr, "Reader returns bad status.\n", inFile[fileCt]);
         fprintf(stderr, "Reader returns bad status.\n");
 
       (void)defrPrintUnusedCallbacks(fout);
@@ -3325,7 +3066,7 @@ int main(int argc, char **argv) {
     // 2nd will enable 7016 by calling defrEnableParserMsgs
     // 3rd enable all msgs by call defrEnableAllMsgs
 
-    //int nMsgs = 2;
+    // int nMsgs = 2;
     int dMsgs[2];
 
     for(fileCt = 0; fileCt < numInFile; fileCt++) {
@@ -3347,7 +3088,7 @@ int main(int argc, char **argv) {
       res = defrRead(f, inFile[fileCt], userData, 1);
 
       if(res)
-        //fprintf(stderr, "Reader returns bad status.\n", inFile[fileCt]);
+        // fprintf(stderr, "Reader returns bad status.\n", inFile[fileCt]);
         fprintf(stderr, "Reader returns bad status.\n");
 
       (void)defrPrintUnusedCallbacks(fout);
@@ -3370,7 +3111,7 @@ int main(int argc, char **argv) {
       res = defrRead(f, inFile[fileCt], userData, 1);
 
       if(res)
-        //fprintf(stderr, "Reader returns bad status.\n", inFile[fileCt]);
+        // fprintf(stderr, "Reader returns bad status.\n", inFile[fileCt]);
         fprintf(stderr, "Reader returns bad status.\n");
 
       // Testing the aliases API.

@@ -107,7 +107,7 @@ private:
 
   void setup_translate();
 
-  void add_token(Token t);
+  void add_token(Token &t);
 
   void chunked(const char *_buffer, size_t _buffer_sz);
 
