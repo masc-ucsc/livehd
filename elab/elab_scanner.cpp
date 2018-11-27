@@ -47,7 +47,7 @@ void Elab_scanner::setup_translate() {
 
 }
 
-void Elab_scanner::add_token(Token t) {
+void Elab_scanner::add_token(Token &t) {
 
 #if 0
   // Handle strings, even before empty as spaces are legal
@@ -133,6 +133,9 @@ void Elab_scanner::patch_pass(const std::map<std::string, uint8_t> &keywords) {
 }
 
 void Elab_scanner::parse(const std::string &name, const char *memblock, size_t sz, bool chunking) {
+
+  token_list.clear();
+  token_list.reserve(buffer_sz/4); // An average of a token each 4 characters?
 
   buffer_name = name;
   buffer = 0;
@@ -241,8 +244,7 @@ void Elab_scanner::parse(const std::string &name, const char *memblock, size_t s
     add_token(t);
   }
 
-  if (&memblock[sz-1] != ptr_section)
-    chunked(ptr_section, sz);
+  chunked(ptr_section, sz);
 }
 
 Elab_scanner::Elab_scanner() {
@@ -263,8 +265,6 @@ void Elab_scanner::chunked(const char *_buffer, size_t _buffer_sz) {
 
   buffer = _buffer;
   buffer_sz = static_cast<uint32_t>(_buffer_sz);
-
-  token_list.reserve(buffer_sz/4); // An average of a token each 4 characters?
 
   elaborate();
 
