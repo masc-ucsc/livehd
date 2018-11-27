@@ -144,7 +144,7 @@ bool Node_Internal::has_pid_inputs() const {
   if(is_last_state())
     return false;
 
-  Port_ID pid = get_out_pid();
+  Port_ID              pid  = get_out_pid();
   const Node_Internal *node = this;
   do {
     node  = &get(node->get_next());
@@ -187,7 +187,7 @@ bool Node_Internal::has_pid_outputs() const {
   if(is_last_state())
     return false;
 
-  Port_ID pid = get_out_pid();
+  Port_ID              pid  = get_out_pid();
   const Node_Internal *node = this;
   do {
     node  = &get(node->get_next());

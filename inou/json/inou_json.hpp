@@ -15,7 +15,6 @@
 class Inou_json : public Pass {
 private:
 protected:
-
   std::map<Index_ID, Index_ID> json_remap;
 
   bool is_const_op(const std::string &s) const;
@@ -31,7 +30,6 @@ public:
   Inou_json();
 
   void setup() final;
-
 };
 
 #endif

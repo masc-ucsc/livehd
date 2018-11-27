@@ -15,7 +15,7 @@ int main(int argc, const char **argv) {
 
   Options::setup_lock();
 
-  //testing prp_get_value function
+  // testing prp_get_value function
 #if 0
   //std::string str_in = "-128";
   //std::string str_in = "0b0001111_1111_1111_1111_1111_1111_1111_1111s";//buggy underscore
@@ -40,7 +40,7 @@ int main(int argc, const char **argv) {
 #endif
   std::vector<LGraph *> rvec = cfg.generate();
 
-  //for (auto &g:rvec) {
+  // for (auto &g:rvec) {
   //	cfg.generate(g);
   //}
 }

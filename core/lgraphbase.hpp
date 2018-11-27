@@ -16,18 +16,18 @@
 #include "tech_library.hpp"
 
 #ifndef likely
-#define likely(x)       __builtin_expect((x),1)
+#define likely(x) __builtin_expect((x), 1)
 #endif
 #ifndef unlikely
-#define unlikely(x)     __builtin_expect((x),0)
+#define unlikely(x) __builtin_expect((x), 0)
 #endif
 
 class Edge_iterator;
 
 class LGraph_Base : public LGraph_Node_Type {
 protected:
-  bool        locked;
-  int         lgraph_id;
+  bool locked;
+  int  lgraph_id;
 
   struct str_cmp_i { // case insensitive string compare for IO
     bool operator()(char const *a, char const *b) const {
@@ -41,13 +41,12 @@ protected:
     Port_ID  original_pos;
 
     IO_port(Index_ID _nid, Port_ID _opos)
-      :nid(_nid)
-      ,pos(_opos)
-      ,original_pos(_opos) {
-    };
+        : nid(_nid)
+        , pos(_opos)
+        , original_pos(_opos){};
   };
 
-  //typedef std::pair<Index_ID, Port_ID> io_t; // node id and position at verilog
+  // typedef std::pair<Index_ID, Port_ID> io_t; // node id and position at verilog
 
   Char_Array<IO_port> input_array;
   Char_Array<IO_port> output_array;
@@ -79,19 +78,27 @@ protected:
 public:
   LGraph_Base() = delete;
 
-  LGraph_Base(const LGraph_Base&) = delete;
+  LGraph_Base(const LGraph_Base &) = delete;
 
   explicit LGraph_Base(const std::string &path, const std::string &_name) noexcept;
   virtual ~LGraph_Base();
 
   void close();
 
-  int lg_id() const { return lgraph_id; }
+  int lg_id() const {
+    return lgraph_id;
+  }
 
-  const Graph_library *get_library() const { return library; }
+  const Graph_library *get_library() const {
+    return library;
+  }
 
-  const Tech_library *get_tlibrary() const { return tlibrary; }
-  Tech_library *get_tech_library() { return tlibrary; }
+  const Tech_library *get_tlibrary() const {
+    return tlibrary;
+  }
+  Tech_library *get_tech_library() {
+    return tlibrary;
+  }
 
   const std::string &get_subgraph_name(Index_ID nid) const;
 

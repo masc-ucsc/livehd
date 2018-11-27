@@ -34,22 +34,21 @@
 #ifndef __SPSC_BOUNDED_QUEUE_INCLUDED__
 #define __SPSC_BOUNDED_QUEUE_INCLUDED__
 
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <assert.h>
 
 #include <atomic>
 
-template<typename T>
-class spsc {
+template <typename T> class spsc {
 public:
-
-  spsc(size_t size) :
-    _size(size),
-    _mask(size - 1),
-    _buffer(reinterpret_cast<T*>(aligned_alloc(128,sizeof(T)*(size + 1)))), // need one extra element for a guard
-    _head(0),
-    _tail(0) {
+  spsc(size_t size)
+      : _size(size)
+      , _mask(size - 1)
+      , _buffer(reinterpret_cast<T *>(aligned_alloc(128, sizeof(T) * (size + 1))))
+      , // need one extra element for a guard
+      _head(0)
+      , _tail(0) {
 
     // make sure it's a power of 2
     assert((_size != 0) && ((_size & (~_size + 1)) == _size));
@@ -59,12 +58,14 @@ public:
     free(_buffer);
   }
 
-  bool empty() const { return _head == _tail; }
+  bool empty() const {
+    return _head == _tail;
+  }
 
-  bool enqueue( T& input) {
+  bool enqueue(T &input) {
     const size_t head = _head.load(std::memory_order_relaxed);
 
-    if (((_tail.load(std::memory_order_acquire) - (head + 1)) & _mask) >= 1) {
+    if(((_tail.load(std::memory_order_acquire) - (head + 1)) & _mask) >= 1) {
       _buffer[head & _mask] = input;
       _head.store(head + 1, std::memory_order_release);
       return true;
@@ -72,10 +73,10 @@ public:
     return false;
   }
 
-  bool dequeue( T& output) {
+  bool dequeue(T &output) {
     const size_t tail = _tail.load(std::memory_order_relaxed);
 
-    if (((_head.load(std::memory_order_acquire) - tail) & _mask) >= 1) {
+    if(((_head.load(std::memory_order_acquire) - tail) & _mask) >= 1) {
       output = _buffer[_tail & _mask];
       _tail.store(tail + 1, std::memory_order_release);
       return true;
@@ -83,15 +84,13 @@ public:
     return false;
   }
 
-
 private:
-
   typedef char cache_line_pad_t[64];
 
-  cache_line_pad_t    _pad0;
-  const size_t        _size;
-  const size_t        _mask;
-  T* const            _buffer;
+  cache_line_pad_t _pad0;
+  const size_t     _size;
+  const size_t     _mask;
+  T *const         _buffer;
 
   cache_line_pad_t    _pad1;
   std::atomic<size_t> _head;
@@ -99,8 +98,10 @@ private:
   cache_line_pad_t    _pad2;
   std::atomic<size_t> _tail;
 
-  spsc(const spsc&) {}
-  void operator=(const spsc&) {}
+  spsc(const spsc &) {
+  }
+  void operator=(const spsc &) {
+  }
 };
 
 #endif

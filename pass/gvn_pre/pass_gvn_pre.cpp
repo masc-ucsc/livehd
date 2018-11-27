@@ -156,7 +156,7 @@ void Pass_gvn_pre::build_sets(LGraph *g) {
         }
         */
       // make exception for IO, make the op type as invalid for general
-      //Expression_Node new_enode(g->node_type_get(idx).op, new_pin_vec);
+      // Expression_Node new_enode(g->node_type_get(idx).op, new_pin_vec);
       if(op_leader_map.count(new_pin)) {
         console->error("Error: this IO was enmaped.\n");
         new_pin.print_info();
@@ -247,7 +247,7 @@ void Pass_gvn_pre::traverse(LGraph *g, int round) {
   insertion(g);
   elimination(g);
   g->sync();
-  //result_graph(g);
+  // result_graph(g);
 }
 void Pass_gvn_pre::transform(LGraph *g) {
   traverse(g, 1);

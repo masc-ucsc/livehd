@@ -1,19 +1,19 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "lgraph.hpp"
 #include "lgedgeiter.hpp"
+#include "lgraph.hpp"
 
 bool test0() {
-  LGraph* g = LGraph::create("core_test_lgdb","test0");
+  LGraph *g = LGraph::create("core_test_lgdb", "test0");
 
   Index_ID idx1 = g->create_node().get_nid();
   g->create_node().get_nid();
 
   g->get_idx_from_pid(idx1, 20);
 
-  for(auto & out : g->out_edges(idx1)) {
+  for(auto &out : g->out_edges(idx1)) {
     assert(false);
-    (void) out; //just to silence the warning
+    (void)out; // just to silence the warning
   }
 
   g->close();
@@ -22,15 +22,14 @@ bool test0() {
 }
 
 bool test1() {
-  LGraph* g = LGraph::create("core_test_lgdb","test");
+  LGraph *g = LGraph::create("core_test_lgdb", "test");
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
 
-  g->add_edge(Node_Pin(idx1, 20, false),
-              Node_Pin(idx2, 25, true));
+  g->add_edge(Node_Pin(idx1, 20, false), Node_Pin(idx2, 25, true));
 
-  for(auto & out : g->out_edges(idx1)) {
+  for(auto &out : g->out_edges(idx1)) {
     assert(out.get_inp_pin().get_nid() == idx2);
     assert(out.get_out_pin().get_nid() == idx1);
 
@@ -41,7 +40,7 @@ bool test1() {
     assert(out.get_inp_pin().is_input() == true);
   }
 
-  for(auto & inp : g->inp_edges(idx2)) {
+  for(auto &inp : g->inp_edges(idx2)) {
     assert(inp.get_inp_pin().get_nid() == idx2);
     assert(inp.get_out_pin().get_nid() == idx1);
 
@@ -58,27 +57,25 @@ bool test1() {
 }
 
 bool test20() {
-  LGraph* g = LGraph::create("core_test_lgdb","test20");
+  LGraph *g = LGraph::create("core_test_lgdb", "test20");
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
 
-  g->add_edge(Node_Pin(idx1, 0, false),
-              Node_Pin(idx2, 0, true));
+  g->add_edge(Node_Pin(idx1, 0, false), Node_Pin(idx2, 0, true));
 
-
-  for(auto & inp : g->inp_edges(idx2)) {
+  for(auto &inp : g->inp_edges(idx2)) {
     g->del_edge(inp);
   }
 
-  for(auto& inp : g->inp_edges(idx2)) {
+  for(auto &inp : g->inp_edges(idx2)) {
     assert(false);
-    (void) inp; //just to silence the warning
+    (void)inp; // just to silence the warning
   }
 
-  for(auto& out : g->out_edges(idx1)) {
+  for(auto &out : g->out_edges(idx1)) {
     assert(false);
-    (void) out; //just to silence the warning
+    (void)out; // just to silence the warning
   }
 
   g->close();
@@ -88,27 +85,25 @@ bool test20() {
 
 bool test21() {
 
-  LGraph* g = LGraph::create("core_test_lgdb","test21");
+  LGraph *g = LGraph::create("core_test_lgdb", "test21");
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
 
-  g->add_edge(Node_Pin(idx1, 0, false),
-              Node_Pin(idx2, 0, true));
+  g->add_edge(Node_Pin(idx1, 0, false), Node_Pin(idx2, 0, true));
 
-
-  for(auto & out : g->out_edges(idx1)) {
+  for(auto &out : g->out_edges(idx1)) {
     g->del_edge(out);
   }
 
-  for(auto& inp : g->inp_edges(idx2)) {
+  for(auto &inp : g->inp_edges(idx2)) {
     assert(false);
-    (void) inp; //just to silence the warning
+    (void)inp; // just to silence the warning
   }
 
-  for(auto& out : g->out_edges(idx1)) {
+  for(auto &out : g->out_edges(idx1)) {
     assert(false);
-    (void) out; //just to silence the warning
+    (void)out; // just to silence the warning
   }
 
   g->close();
@@ -118,27 +113,25 @@ bool test21() {
 
 bool test2() {
 
-  LGraph* g = LGraph::create("core_test_lgdb","test2");
+  LGraph *g = LGraph::create("core_test_lgdb", "test2");
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
 
-  g->add_edge(Node_Pin(idx1, 20, false),
-              Node_Pin(idx2, 25, true));
+  g->add_edge(Node_Pin(idx1, 20, false), Node_Pin(idx2, 25, true));
 
-
-  for(auto & inp : g->inp_edges(idx2)) {
+  for(auto &inp : g->inp_edges(idx2)) {
     g->del_edge(inp);
   }
 
-  for(auto& inp : g->inp_edges(idx2)) {
+  for(auto &inp : g->inp_edges(idx2)) {
     assert(false);
-    (void) inp; //just to silence the warning
+    (void)inp; // just to silence the warning
   }
 
-  for(auto& out : g->out_edges(idx1)) {
+  for(auto &out : g->out_edges(idx1)) {
     assert(false);
-    (void) out; //just to silence the warning
+    (void)out; // just to silence the warning
   }
 
   g->close();
@@ -148,27 +141,25 @@ bool test2() {
 
 bool test22() {
 
-  LGraph* g = LGraph::create("core_test_lgdb","test22");
+  LGraph *g = LGraph::create("core_test_lgdb", "test22");
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
 
-  g->add_edge(Node_Pin(idx1, 20, false),
-              Node_Pin(idx2, 25, true));
+  g->add_edge(Node_Pin(idx1, 20, false), Node_Pin(idx2, 25, true));
 
-
-  for(auto & out : g->out_edges(idx1)) {
+  for(auto &out : g->out_edges(idx1)) {
     g->del_edge(out);
   }
 
-  for(auto& inp : g->inp_edges(idx2)) {
+  for(auto &inp : g->inp_edges(idx2)) {
     assert(false);
-    (void) inp; //just to silence the warning
+    (void)inp; // just to silence the warning
   }
 
-  for(auto& out : g->out_edges(idx1)) {
+  for(auto &out : g->out_edges(idx1)) {
     assert(false);
-    (void) out; //just to silence the warning
+    (void)out; // just to silence the warning
   }
 
   g->close();
@@ -176,29 +167,27 @@ bool test22() {
   return true;
 }
 
-
 bool test3() {
 
-  LGraph* g = LGraph::create("core_test_lgdb","test3");
+  LGraph *g = LGraph::create("core_test_lgdb", "test3");
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
 
-  g->add_edge(Node_Pin(idx1, 20, false),
-              Node_Pin(idx2, 25, true));
+  g->add_edge(Node_Pin(idx1, 20, false), Node_Pin(idx2, 25, true));
 
-  for(auto & inp : g->inp_edges(idx2)) {
+  for(auto &inp : g->inp_edges(idx2)) {
     g->del_edge(inp);
   }
 
-  for(auto& inp : g->inp_edges(idx2)) {
+  for(auto &inp : g->inp_edges(idx2)) {
     assert(false);
-    (void) inp; //just to silence the warning
+    (void)inp; // just to silence the warning
   }
 
-  for(auto& out : g->out_edges(idx1)) {
+  for(auto &out : g->out_edges(idx1)) {
     assert(false);
-    (void) out; //just to silence the warning
+    (void)out; // just to silence the warning
   }
 
   g->del_node(idx2);
@@ -214,13 +203,12 @@ bool test3() {
 
 bool test4() {
 
-  LGraph* g = LGraph::create("core_test_lgdb","test4");
+  LGraph *g = LGraph::create("core_test_lgdb", "test4");
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
 
-  g->add_edge(Node_Pin(idx1, 20, false),
-              Node_Pin(idx2, 25, true));
+  g->add_edge(Node_Pin(idx1, 20, false), Node_Pin(idx2, 25, true));
 
   g->del_node(idx2);
 
@@ -245,5 +233,3 @@ int main() {
 
   return 0;
 }
-
-

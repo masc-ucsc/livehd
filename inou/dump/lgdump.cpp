@@ -52,19 +52,23 @@ void lgdump_digraph(const LGraph *g) {
 
   for(auto idx : g->backward()) {
     for(const auto &c : g->inp_edges(idx)) {
-      fprintf(stderr, "node%d:%d -> node%d:%d TSTbck\n", (int)c.get_idx(), (int)c.get_inp_pin().get_pid(), (int)idx, (int)c.get_out_pin().get_pid());
-      fprintf(stderr, "node%d:%d -> node%d:%d TSTrbck\n", (int)c.get_self_nid(), (int)c.get_inp_pin().get_pid(), (int)c.get_idx(), (int)c.get_out_pin().get_pid());
+      fprintf(stderr, "node%d:%d -> node%d:%d TSTbck\n", (int)c.get_idx(), (int)c.get_inp_pin().get_pid(), (int)idx,
+              (int)c.get_out_pin().get_pid());
+      fprintf(stderr, "node%d:%d -> node%d:%d TSTrbck\n", (int)c.get_self_nid(), (int)c.get_inp_pin().get_pid(), (int)c.get_idx(),
+              (int)c.get_out_pin().get_pid());
     }
   }
 
   for(auto idx : g->forward()) {
     for(const auto &c : g->out_edges(idx)) {
-      fprintf(stderr, "node%d:%d -> node%d:%d TSTfwd\n", (int)idx, (int)c.get_inp_pin().get_pid(), (int)c.get_idx(), (int)c.get_out_pin().get_pid());
+      fprintf(stderr, "node%d:%d -> node%d:%d TSTfwd\n", (int)idx, (int)c.get_inp_pin().get_pid(), (int)c.get_idx(),
+              (int)c.get_out_pin().get_pid());
     }
   }
   for(auto idx : g->fast()) {
     for(const auto &c : g->out_edges(idx)) {
-      fprintf(stderr, "node%d:%d -> node%d:%d TSTfast\n", (int)idx, (int)c.get_inp_pin().get_pid(), (int)c.get_idx(), (int)c.get_out_pin().get_pid());
+      fprintf(stderr, "node%d:%d -> node%d:%d TSTfast\n", (int)idx, (int)c.get_inp_pin().get_pid(), (int)c.get_idx(),
+              (int)c.get_out_pin().get_pid());
     }
   }
 }
@@ -85,12 +89,12 @@ int main(int argc, const char **argv) {
 
   for(auto &g : rvec) {
     g->print_stats();
-    //g->dump();
+    // g->dump();
 
     lgdump_digraph(g);
 #if 1
     for(Index_ID idx = 0; idx < g->size(); idx++) {
-      //for(auto &idx : g->forward()) {
+      // for(auto &idx : g->forward()) {
       const auto &node = g->get_node_int(idx);
 
       if(node.is_page_align()) {
@@ -105,7 +109,8 @@ int main(int argc, const char **argv) {
           str = "r";
         }
 
-        fmt::print("{} {}:{} {} {} {} {}\n", idx, node.get_master_root_nid(), node.get_out_pid(), str, node.get_inp_pos(), node.get_out_pos(), node.get_space_available());
+        fmt::print("{} {}:{} {} {} {} {}\n", idx, node.get_master_root_nid(), node.get_out_pid(), str, node.get_inp_pos(),
+                   node.get_out_pos(), node.get_space_available());
         if(node.is_master_root()) {
           for(const auto &c : g->out_edges(idx)) {
             fmt::print("O {} {} {} ", (int)idx, (int)c.get_idx(), (int)c.get_idx() - (int)idx);

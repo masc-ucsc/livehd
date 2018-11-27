@@ -6,16 +6,15 @@
 #include <iostream>
 #include <set>
 
+#include "graph_library.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraphbase.hpp"
-#include "graph_library.hpp"
 
 LGraph_Base::LGraph_Base(const std::string &_path, const std::string &_name) noexcept
     : Lgraph_base_core(_path, _name)
     , LGraph_Node_Type(_path, _name)
     , input_array(_path + "/lgraph_" + _name + "_inputs")
     , output_array(_path + "/lgraph_" + _name + "_outputs") {
-
 
   library  = Graph_library::instance(path);
   tlibrary = Tech_library::instance(path);
@@ -28,12 +27,12 @@ LGraph_Base::~LGraph_Base() {
 
 void LGraph_Base::close() {
 
-  if (locked)
+  if(locked)
     library->update(lgraph_id);
 }
 
 LGraph_Base::_init::_init() {
-  //fmt::print("LGraph_Base static init done\n");
+  // fmt::print("LGraph_Base static init done\n");
   // Add here sequence of static initialization that may be needed
 }
 
@@ -60,7 +59,7 @@ void LGraph_Base::clear() {
 
 void LGraph_Base::sync() {
 
-  if (!locked)
+  if(!locked)
     return;
 
   library->update_nentries(lg_id(), node_internal.size());
@@ -128,29 +127,29 @@ void LGraph_Base::recompute_io_ports() {
 
   // Reassign inputs in alphabetical order (preserve original_pos if present)
   std::map<const char *, int, str_cmp_i> ordered;
-  std::vector<int> fixed;
-  Port_ID pos = 1;
+  std::vector<int>                       fixed;
+  Port_ID                                pos = 1;
 
-  for(auto it = input_array.begin(); it!=input_array.end(); ++it ) {
+  for(auto it = input_array.begin(); it != input_array.end(); ++it) {
     auto &p = it.get_field();
-    if (p.original_pos) {
+    if(p.original_pos) {
       p.pos = p.original_pos;
-      if (p.original_pos>=fixed.size())
-        fixed.resize(p.original_pos+1);
+      if(p.original_pos >= fixed.size())
+        fixed.resize(p.original_pos + 1);
       assert(fixed[p.original_pos] == 0); // original_pos must be unique
       fixed[p.original_pos] = it.get_id();
-    }else{
+    } else {
       ordered[it.get_char()] = it.get_id();
     }
   }
 
-  while(fixed.size()>pos && fixed[pos]) {
+  while(fixed.size() > pos && fixed[pos]) {
     pos++;
   }
   for(auto &it : ordered) {
     auto &p = input_array.get_field(it.second);
-    p.pos = pos++;
-    while(fixed.size()>pos && fixed[pos]) {
+    p.pos   = pos++;
+    while(fixed.size() > pos && fixed[pos]) {
       pos++;
     }
   }
@@ -159,26 +158,26 @@ void LGraph_Base::recompute_io_ports() {
   ordered.clear();
   pos = 1;
 
-  for(auto it = output_array.begin(); it!=output_array.end(); ++it ) {
+  for(auto it = output_array.begin(); it != output_array.end(); ++it) {
     auto &p = it.get_field();
-    if (p.original_pos) {
+    if(p.original_pos) {
       p.pos = p.original_pos;
-      if (p.original_pos>=fixed.size())
-        fixed.resize(p.original_pos+1);
+      if(p.original_pos >= fixed.size())
+        fixed.resize(p.original_pos + 1);
       assert(fixed[p.original_pos] == 0); // original_pos must be unique
       fixed[p.original_pos] = it.get_id();
-    }else{
+    } else {
       ordered[it.get_char()] = it.get_id();
     }
   }
 
-  while(fixed.size()>pos && fixed[pos]) {
+  while(fixed.size() > pos && fixed[pos]) {
     pos++;
   }
   for(auto &it : ordered) {
     auto &p = output_array.get_field(it.second);
-    p.pos = pos++;
-    while(fixed.size()>pos && fixed[pos]) {
+    p.pos   = pos++;
+    while(fixed.size() > pos && fixed[pos]) {
       pos++;
     }
   }
@@ -195,13 +194,13 @@ Index_ID LGraph_Base::add_graph_input_int(const char *str, Index_ID nid, uint16_
 
   assert(input_array.get_id(str) == 0); // No name dupliation
 
-  IO_port p(nid,original_pos);
+  IO_port p(nid, original_pos);
   input_array.create_id(str, p);
 
   node_internal[nid].set_out_pid(0);
   assert(node_internal[nid].is_master_root());
 
-  if (original_pos==0)
+  if(original_pos == 0)
     recompute_io_ports();
 
   return nid;
@@ -218,13 +217,13 @@ Index_ID LGraph_Base::add_graph_output_int(const char *str, Index_ID nid, uint16
 
   assert(output_array.get_id(str) == 0); // No name dupliation
 
-  IO_port p(nid,original_pos);
+  IO_port p(nid, original_pos);
   output_array.create_id(str, p);
 
   node_internal[nid].set_out_pid(0);
   assert(node_internal[nid].is_master_root());
 
-  if (original_pos==0)
+  if(original_pos == 0)
     recompute_io_ports();
 
   return nid;
@@ -262,7 +261,7 @@ const char *LGraph_Base::get_graph_input_name(Index_ID nid) const {
   assert(node_internal[nid].is_graph_io_input());
   assert(node_internal[nid].is_master_root());
 
-  for(auto it = input_array.begin(); it!=input_array.end(); ++it ) {
+  for(auto it = input_array.begin(); it != input_array.end(); ++it) {
     const auto &p = it.get_field();
     if(p.nid == nid)
       return it.get_char();
@@ -276,7 +275,7 @@ const char *LGraph_Base::get_graph_output_name(Index_ID nid) const {
   assert(node_internal[nid].is_graph_io_output());
   assert(node_internal[nid].is_master_root());
 
-  for(auto it = output_array.begin(); it!=output_array.end(); ++it ) {
+  for(auto it = output_array.begin(); it != output_array.end(); ++it) {
     const auto &p = it.get_field();
     if(p.nid == nid)
       return it.get_char();
@@ -287,15 +286,15 @@ const char *LGraph_Base::get_graph_output_name(Index_ID nid) const {
 
 Port_ID LGraph_Base::get_graph_pid_from_nid(Index_ID nid) const {
 
-  for(auto it = input_array.begin(); it!=input_array.end(); ++it ) {
+  for(auto it = input_array.begin(); it != input_array.end(); ++it) {
     const auto &p = it.get_field();
-    if (p.nid == nid)
+    if(p.nid == nid)
       return p.pos;
   }
 
-  for(auto it = output_array.begin(); it!=output_array.end(); ++it ) {
+  for(auto it = output_array.begin(); it != output_array.end(); ++it) {
     const auto &p = it.get_field();
-    if (p.nid == nid)
+    if(p.nid == nid)
       return p.pos;
   }
 
@@ -304,9 +303,9 @@ Port_ID LGraph_Base::get_graph_pid_from_nid(Index_ID nid) const {
 
 Index_ID LGraph_Base::get_graph_input_nid_from_pid(Port_ID pid) const {
 
-  for(auto it = input_array.begin(); it!=input_array.end(); ++it ) {
+  for(auto it = input_array.begin(); it != input_array.end(); ++it) {
     const auto &p = it.get_field();
-    if (p.pos == pid)
+    if(p.pos == pid)
       return p.nid;
   }
 
@@ -315,9 +314,9 @@ Index_ID LGraph_Base::get_graph_input_nid_from_pid(Port_ID pid) const {
 
 Index_ID LGraph_Base::get_graph_output_nid_from_pid(Port_ID pid) const {
 
-  for(auto it = output_array.begin(); it!=output_array.end(); ++it ) {
+  for(auto it = output_array.begin(); it != output_array.end(); ++it) {
     const auto &p = it.get_field();
-    if (p.pos == pid)
+    if(p.pos == pid)
       return p.nid;
   }
 
@@ -326,9 +325,9 @@ Index_ID LGraph_Base::get_graph_output_nid_from_pid(Port_ID pid) const {
 
 const char *LGraph_Base::get_graph_input_name_from_pid(Port_ID pid) const {
 
-  for(auto it = input_array.begin(); it!=input_array.end(); ++it ) {
+  for(auto it = input_array.begin(); it != input_array.end(); ++it) {
     const auto &p = it.get_field();
-    if (p.pos == pid)
+    if(p.pos == pid)
       return it.get_char();
   }
 
@@ -337,9 +336,9 @@ const char *LGraph_Base::get_graph_input_name_from_pid(Port_ID pid) const {
 
 const char *LGraph_Base::get_graph_output_name_from_pid(Port_ID pid) const {
 
-  for(auto it = output_array.begin(); it!=output_array.end(); ++it ) {
+  for(auto it = output_array.begin(); it != output_array.end(); ++it) {
     const auto &p = it.get_field();
-    if (p.pos == pid)
+    if(p.pos == pid)
       return it.get_char();
   }
 
@@ -348,7 +347,7 @@ const char *LGraph_Base::get_graph_output_name_from_pid(Port_ID pid) const {
 
 Node_Pin LGraph_Base::get_graph_input(const char *str) const {
 
-  assert(input_array.get_id(str)!=0);
+  assert(input_array.get_id(str) != 0);
 
   const auto &p = input_array.get_field(str);
   return Node_Pin(p.nid, p.pos, true);
@@ -356,7 +355,7 @@ Node_Pin LGraph_Base::get_graph_input(const char *str) const {
 
 Node_Pin LGraph_Base::get_graph_output(const char *str) const {
 
-  assert(output_array.get_id(str)!=0);
+  assert(output_array.get_id(str) != 0);
 
   const auto &p = output_array.get_field(str);
   return Node_Pin(p.nid, p.pos, false);
@@ -829,7 +828,7 @@ void LGraph_Base::del_edge(const Edge &edge) {
 void LGraph_Base::del_node(Index_ID idx) {
   // TODO: do this more effiently (no need to build iterator)
 
-  fmt::print("del_node {}\n",idx);
+  fmt::print("del_node {}\n", idx);
 
   assert(node_internal[idx].is_master_root());
   // Deleting can break the iterator. Restart each time
@@ -837,7 +836,7 @@ void LGraph_Base::del_node(Index_ID idx) {
   do {
     deleted = false;
     for(auto &c : inp_edges(idx)) {
-      fmt::print("del_node {} inp {}\n",idx, c.get_self_idx());
+      fmt::print("del_node {} inp {}\n", idx, c.get_self_idx());
       assert(Node_Internal::get(&c).get_master_root_nid() == idx);
       node_internal[c.get_self_idx()].del(c);
       deleted = true;
@@ -848,7 +847,7 @@ void LGraph_Base::del_node(Index_ID idx) {
   do {
     deleted = false;
     for(auto &c : out_edges(idx)) {
-      fmt::print("del_node {} out {}\n",idx, c.get_self_idx());
+      fmt::print("del_node {} out {}\n", idx, c.get_self_idx());
       assert(Node_Internal::get(&c).get_master_root_nid() == idx);
       node_internal[c.get_self_idx()].del(c);
       deleted = true;

@@ -86,9 +86,9 @@ public:
   pin_type add_pin(const std::string &name, Direction dir) {
     pin_type id = pins.size();
     Pin      aPin;
-    aPin.name = name;
-    aPin.dir  = dir;
-    aPin.use  = "";
+    aPin.name  = name;
+    aPin.dir   = dir;
+    aPin.use   = "";
     aPin.io_id = 0;
     pins.push_back(aPin);
     pname2id.insert(std::make_pair(name, id));
