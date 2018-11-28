@@ -100,7 +100,8 @@ void Pass_dfg::trans(LGraph *dfg) {
       assert(sub_graph);
 
       dfg->node_subgraph_set(idx, (uint32_t)sub_graph->lg_id());
-      fmt::print("resolve pending subG! nid:{}, subG name:{}\n", idx, dfg->get_node_wirename(idx));
+
+      fmt::print("resolve pending subG! lg_id:{}, nid:{}, subG name:{}\n", (uint32_t)sub_graph->lg_id(), idx, dfg->get_node_wirename(idx));
     }
   }
 
@@ -139,14 +140,20 @@ void Pass_dfg::do_pseudo_bitwidth(LGraph *dfg) {
       Index_ID src_nid = idx;
       Index_ID dst_nid = out.get_idx();
       Port_ID  src_pid = out.get_out_pin().get_pid();
-      // Port_ID  dst_pid      = out.get_inp_pin().get_pid();
+      //Port_ID  dst_pid = out.get_inp_pin().get_pid();
       uint16_t src_nid_size = dfg->get_bits(src_nid);
       uint16_t dst_nid_size = dfg->get_bits(dst_nid);
 
       if(dfg->node_type_get(idx).op == SubGraph_Op) {
         LGraph *    subgraph = LGraph::open(dfg->get_path(), dfg->subgraph_id_get(idx));
-        const char *out_name = subgraph->get_graph_output_name_from_pid(src_pid);
-        fmt::print("out_name:{}\n", out_name);
+        assert(subgraph);
+        fmt::print("node_wirename:{}\n",dfg->get_node_wirename(idx));
+        dfg->set_node_instance_name(idx, dfg->get_node_wirename(idx));//problem2: it seems fail and trigger char_array assertion fail
+        fmt::print("has instance name:{}\n", dfg->has_instance_name(dfg->get_node_wirename(idx)));
+        fmt::print("get instance name:{}\n", dfg->get_node_instancename(idx));
+        //const char *out_name = subgraph->get_graph_output_name_from_pid(1);//problem1:make source pid = 1 will work, but this is not a true pid
+        const char *out_name = subgraph->get_graph_output_name_from_pid(src_pid);//src_pid = 0 will fail, is it a new bug!?
+        fmt::print("nid:{}, subgraph_lg_id:{}, out_name:{}\n", idx, (uint32_t)subgraph->lg_id(), out_name);
         uint16_t    out_size = subgraph->get_bits(subgraph->get_graph_output(out_name).get_nid());
         dfg->set_bits(dst_nid, out_size);
       } else if(dfg->node_type_get(dst_nid).op == Mux_Op) {
