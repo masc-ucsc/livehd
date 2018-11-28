@@ -132,7 +132,7 @@ void LGraph_Base::recompute_io_ports() {
 
   for(auto it = input_array.begin(); it != input_array.end(); ++it) {
     auto &p = it.get_field();
-    if(p.original_pos) {
+    if(p.original_set) {
       p.pos = p.original_pos;
       if(p.original_pos >= fixed.size())
         fixed.resize(p.original_pos + 1);
@@ -160,7 +160,7 @@ void LGraph_Base::recompute_io_ports() {
 
   for(auto it = output_array.begin(); it != output_array.end(); ++it) {
     auto &p = it.get_field();
-    if(p.original_pos) {
+    if(p.original_set) {
       p.pos = p.original_pos;
       if(p.original_pos >= fixed.size())
         fixed.resize(p.original_pos + 1);
@@ -183,7 +183,7 @@ void LGraph_Base::recompute_io_ports() {
   }
 }
 
-Index_ID LGraph_Base::add_graph_input_int(const char *str, Index_ID nid, uint16_t bits, Port_ID original_pos) {
+Index_ID LGraph_Base::add_graph_io_common(const char *str, Index_ID nid, uint16_t bits) {
 
   if(nid == 0)
     nid = create_node_int();
@@ -192,39 +192,56 @@ Index_ID LGraph_Base::add_graph_input_int(const char *str, Index_ID nid, uint16_
   if(bits != 0)
     set_bits(nid, bits);
 
-  assert(input_array.get_id(str) == 0); // No name dupliation
-
-  IO_port p(nid, original_pos);
-  input_array.create_id(str, p);
-
   node_internal[nid].set_out_pid(0);
   assert(node_internal[nid].is_master_root());
 
-  if(original_pos == 0)
-    recompute_io_ports();
+  return nid;
+}
+
+Index_ID LGraph_Base::add_graph_input_int(const char *str, Index_ID nid, uint16_t bits) {
+  assert(input_array.get_id(str) == 0); // No name dupliation
+
+  nid = add_graph_io_common(str,nid,bits);
+
+  IO_port p(nid, 0, false);
+  input_array.create_id(str, p);
+
+  recompute_io_ports();
+
+  return nid;
+}
+
+Index_ID LGraph_Base::add_graph_input_int(const char *str, Index_ID nid, uint16_t bits, Port_ID original_pos) {
+  assert(input_array.get_id(str) == 0); // No name dupliation
+
+  nid = add_graph_io_common(str,nid,bits);
+
+  IO_port p(nid, original_pos, true);
+  input_array.create_id(str, p);
+
+  return nid;
+}
+
+Index_ID LGraph_Base::add_graph_output_int(const char *str, Index_ID nid, uint16_t bits) {
+  assert(output_array.get_id(str) == 0); // No name dupliation
+
+  nid = add_graph_io_common(str,nid,bits);
+
+  IO_port p(nid, 0, false);
+  output_array.create_id(str, p);
+
+  recompute_io_ports();
 
   return nid;
 }
 
 Index_ID LGraph_Base::add_graph_output_int(const char *str, Index_ID nid, uint16_t bits, Port_ID original_pos) {
-
-  if(nid == 0)
-    nid = create_node_int();
-  node_internal[nid].set_graph_io_output();
-
-  if(bits != 0)
-    set_bits(nid, bits);
-
   assert(output_array.get_id(str) == 0); // No name dupliation
 
-  IO_port p(nid, original_pos);
+  nid = add_graph_io_common(str,nid,bits);
+
+  IO_port p(nid, original_pos, true);
   output_array.create_id(str, p);
-
-  node_internal[nid].set_out_pid(0);
-  assert(node_internal[nid].is_master_root());
-
-  if(original_pos == 0)
-    recompute_io_ports();
 
   return nid;
 }

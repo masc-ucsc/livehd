@@ -142,6 +142,20 @@ void LGraph::emplace_back() {
   LGraph_InstanceNames::emplace_back();
 }
 
+Index_ID LGraph::add_graph_input(const char *str, Index_ID nid, uint16_t bits, uint16_t offset) {
+
+#if DEBUG
+  assert(!is_graph_output(str));
+  assert(!has_name(str));
+#endif
+
+  Index_ID idx = LGraph_Base::add_graph_input_int(str, nid, bits);
+  LGraph_WireNames::set_offset(idx, offset);
+  node_type_set(idx, GraphIO_Op);
+
+  return idx;
+}
+
 Index_ID LGraph::add_graph_input(const char *str, Index_ID nid, uint16_t bits, uint16_t offset, Port_ID original_pos) {
 
 #if DEBUG
@@ -150,6 +164,20 @@ Index_ID LGraph::add_graph_input(const char *str, Index_ID nid, uint16_t bits, u
 #endif
 
   Index_ID idx = LGraph_Base::add_graph_input_int(str, nid, bits, original_pos);
+  LGraph_WireNames::set_offset(idx, offset);
+  node_type_set(idx, GraphIO_Op);
+
+  return idx;
+}
+
+Index_ID LGraph::add_graph_output(const char *str, Index_ID nid, uint16_t bits, uint16_t offset) {
+
+#if DEBUG
+  assert(!is_graph_input(str));
+  assert(!has_name(str));
+#endif
+
+  Index_ID idx = LGraph_Base::add_graph_output_int(str, nid, bits);
   LGraph_WireNames::set_offset(idx, offset);
   node_type_set(idx, GraphIO_Op);
 

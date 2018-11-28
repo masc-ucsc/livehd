@@ -139,7 +139,8 @@ void Pass_dfg::do_pseudo_bitwidth(LGraph *dfg) {
     for(const auto &out : dfg->out_edges(idx)) {
       Index_ID src_nid = idx;
       Index_ID dst_nid = out.get_idx();
-      Port_ID  src_pid = out.get_out_pin().get_pid();
+      Port_ID  src_pid = out.get_inp_pin().get_pid();
+      fmt::print("do_pseudo_bit idx:{} pid1:{} pid2:{}\n", idx, out.get_out_pin().get_pid(), out.get_inp_pin().get_pid());
       //Port_ID  dst_pid = out.get_inp_pin().get_pid();
       uint16_t src_nid_size = dfg->get_bits(src_nid);
       uint16_t dst_nid_size = dfg->get_bits(dst_nid);
@@ -147,10 +148,11 @@ void Pass_dfg::do_pseudo_bitwidth(LGraph *dfg) {
       if(dfg->node_type_get(idx).op == SubGraph_Op) {
         LGraph *    subgraph = LGraph::open(dfg->get_path(), dfg->subgraph_id_get(idx));
         assert(subgraph);
-        fmt::print("node_wirename:{}\n",dfg->get_node_wirename(idx));
-        dfg->set_node_instance_name(idx, dfg->get_node_wirename(idx));//problem2: it seems fail and trigger char_array assertion fail
-        fmt::print("has instance name:{}\n", dfg->has_instance_name(dfg->get_node_wirename(idx)));
-        fmt::print("get instance name:{}\n", dfg->get_node_instancename(idx));
+        //fmt::print("node_wirename:{}\n",dfg->get_node_wirename(idx));
+        //problem2: inou_yosys got empty inst_name for cell type sp_add
+        //dfg->set_node_instance_name(idx, dfg->get_node_wirename(idx));//problem3: it seems fail and trigger char_array assertion fail
+        //fmt::print("has instance name:{}\n", dfg->has_instance_name(dfg->get_node_wirename(idx)));
+        //fmt::print("get instance name:{}\n", dfg->get_node_instancename(idx));
         //const char *out_name = subgraph->get_graph_output_name_from_pid(1);//problem1:make source pid = 1 will work, but this is not a true pid
         const char *out_name = subgraph->get_graph_output_name_from_pid(src_pid);//src_pid = 0 will fail, is it a new bug!?
         fmt::print("nid:{}, subgraph_lg_id:{}, out_name:{}\n", idx, (uint32_t)subgraph->lg_id(), out_name);
@@ -389,9 +391,12 @@ void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Index_ID> &src
     Index_ID src_nid = src_nids.at(i);
     fmt::print("src_nid:{}\n", src_nid);
     Port_ID src_pid = 0;
+
+    //assert(Node_Type_Sum::get_input_match("Au") == 1);
+    //assert(dfg->node_type_get(dst_nid).op != SubGraph_Op); // Handled separate as it is a more complicated case
+
     Port_ID dst_pid =
-        (dfg->node_type_get(dst_nid).op == Sum_Op)
-            ? (uint16_t)1
+        (dfg->node_type_get(dst_nid).op == Sum_Op) ? (uint16_t)1
             : (dfg->node_type_get(dst_nid).op == LessThan_Op && i == 0)
                   ? (uint16_t)0
                   : (dfg->node_type_get(dst_nid).op == LessThan_Op && i == 1)
