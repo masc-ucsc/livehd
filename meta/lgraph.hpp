@@ -46,8 +46,10 @@ public:
   void sync() override;
   void emplace_back() override;
 
-  Index_ID add_graph_input(const char *str, Index_ID nid , uint16_t bits, uint16_t offset, Port_ID origininal_pos = 0);
-  Index_ID add_graph_output(const char *str, Index_ID nid , uint16_t bits , uint16_t offset, Port_ID origininal_pos = 0);
+  Index_ID add_graph_input(const char *str, Index_ID nid , uint16_t bits, uint16_t offset);
+  Index_ID add_graph_output(const char *str, Index_ID nid , uint16_t bits , uint16_t offset);
+  Index_ID add_graph_input(const char *str, Index_ID nid , uint16_t bits, uint16_t offset, Port_ID origininal_pos);
+  Index_ID add_graph_output(const char *str, Index_ID nid , uint16_t bits , uint16_t offset, Port_ID origininal_pos);
 
   Node            create_node();
   Node            get_node(Index_ID nid);

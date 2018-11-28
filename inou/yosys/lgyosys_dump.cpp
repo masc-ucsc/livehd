@@ -253,12 +253,13 @@ void Lgyosys_dump::create_subgraph(const LGraph *g, RTLIL::Module *module, Index
   }
 
   RTLIL::IdString instance_name("\\tmp");
-  if(g->get_instance_name_id(idx) == 0 || std::string(g->get_node_instancename(idx)) == "") {
+  if(g->get_instance_name_id(idx) == 0) {
     instance_name = next_id();
 #ifndef NDEBUG
     fmt::print("inou_yosys got empty inst_name for cell type {}\n", subgraph->get_name());
 #endif
   } else {
+    assert(std::string(g->get_node_instancename(idx)) != "");
     instance_name = RTLIL::IdString("\\" + std::string(g->get_node_instancename(idx)));
   }
 

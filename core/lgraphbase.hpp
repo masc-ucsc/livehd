@@ -25,6 +25,9 @@
 class Edge_iterator;
 
 class LGraph_Base : public LGraph_Node_Type {
+private:
+  Index_ID add_graph_io_common(const char *str, Index_ID nid, uint16_t bits);
+
 protected:
   bool locked;
   int  lgraph_id;
@@ -39,11 +42,13 @@ protected:
     Index_ID nid;
     Port_ID  pos;
     Port_ID  original_pos;
+    bool     original_set;
 
-    IO_port(Index_ID _nid, Port_ID _opos)
+    IO_port(Index_ID _nid, Port_ID _opos, bool force)
         : nid(_nid)
         , pos(_opos)
-        , original_pos(_opos){};
+        , original_pos(_opos)
+        , original_set(force) {};
   };
 
   // typedef std::pair<Index_ID, Port_ID> io_t; // node id and position at verilog
@@ -65,8 +70,10 @@ protected:
 
   void recompute_io_ports();
 
-  Index_ID add_graph_input_int(const char *str, Index_ID nid, uint16_t bits, Port_ID original_pos = 0);
-  Index_ID add_graph_output_int(const char *str, Index_ID nid, uint16_t bits, Port_ID original_pos = 0);
+  Index_ID add_graph_input_int(const char *str, Index_ID nid, uint16_t bits); // Don't 
+  Index_ID add_graph_output_int(const char *str, Index_ID nid, uint16_t bits);
+  Index_ID add_graph_input_int(const char *str, Index_ID nid, uint16_t bits, Port_ID original_pos);
+  Index_ID add_graph_output_int(const char *str, Index_ID nid, uint16_t bits, Port_ID original_pos);
 
   void del_int_node(Index_ID idx);
 
