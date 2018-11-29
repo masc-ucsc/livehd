@@ -37,11 +37,9 @@ void Pass_dce::trans(LGraph *g) {
   bm::bvector<>      output_used;
   std::set<Index_ID> pending;
 
-  for(auto idx : g->fast()) {
-    if(g->is_graph_output(idx)) {
+  g->each_output([&pending](Index_ID idx) {
       pending.insert(idx);
-    }
-  }
+    });
 
   while(!pending.empty()) {
     Index_ID current = *(pending.begin());

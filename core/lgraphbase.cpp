@@ -187,7 +187,6 @@ Index_ID LGraph_Base::add_graph_io_common(const char *str, Index_ID nid, uint16_
 
   if(nid == 0)
     nid = create_node_int();
-  node_internal[nid].set_graph_io_input();
 
   if(bits != 0)
     set_bits(nid, bits);
@@ -202,6 +201,7 @@ Index_ID LGraph_Base::add_graph_input_int(const char *str, Index_ID nid, uint16_
   assert(input_array.get_id(str) == 0); // No name dupliation
 
   nid = add_graph_io_common(str,nid,bits);
+  node_internal[nid].set_graph_io_input();
 
   IO_port p(nid, 0, false);
   input_array.create_id(str, p);
@@ -215,6 +215,7 @@ Index_ID LGraph_Base::add_graph_input_int(const char *str, Index_ID nid, uint16_
   assert(input_array.get_id(str) == 0); // No name dupliation
 
   nid = add_graph_io_common(str,nid,bits);
+  node_internal[nid].set_graph_io_input();
 
   IO_port p(nid, original_pos, true);
   input_array.create_id(str, p);
@@ -226,6 +227,7 @@ Index_ID LGraph_Base::add_graph_output_int(const char *str, Index_ID nid, uint16
   assert(output_array.get_id(str) == 0); // No name dupliation
 
   nid = add_graph_io_common(str,nid,bits);
+  node_internal[nid].set_graph_io_output();
 
   IO_port p(nid, 0, false);
   output_array.create_id(str, p);
@@ -239,6 +241,7 @@ Index_ID LGraph_Base::add_graph_output_int(const char *str, Index_ID nid, uint16
   assert(output_array.get_id(str) == 0); // No name dupliation
 
   nid = add_graph_io_common(str,nid,bits);
+  node_internal[nid].set_graph_io_output();
 
   IO_port p(nid, original_pos, true);
   output_array.create_id(str, p);
