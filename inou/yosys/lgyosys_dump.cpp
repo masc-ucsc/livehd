@@ -484,14 +484,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       continue;
     }
 
-    // if the gate has no output, skip it
-    bool has_out = false;
-    for(auto &c : g->out_edges(idx)) {
-      (void)c;
-      has_out = true;
-      break;
-    }
-    if(!has_out && g->node_type_get(idx).op != Memory_Op && g->node_type_get(idx).op != SubGraph_Op)
+    if(g->node_type_get(idx).op != Memory_Op && g->node_type_get(idx).op != SubGraph_Op && !g->has_outputs(idx))
       continue;
 
     RTLIL::IdString name = RTLIL::IdString("\\lgraph_cell_" + std::to_string(idx));
