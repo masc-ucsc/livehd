@@ -21,7 +21,7 @@ PRIVATE_NAMESPACE_BEGIN
 
 // each pass contains a singleton object that is derived from Pass
 // note that this is a frontend to yosys
-struct LG2Yosys_Pass : public Pass {
+struct LG2Yosys_Pass : public Yosys::Pass {
   LG2Yosys_Pass()
       : Pass("lg2yosys", "converts lgraph to yosys") {
   }

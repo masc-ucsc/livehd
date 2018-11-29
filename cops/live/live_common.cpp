@@ -100,7 +100,7 @@ int resolve_bit(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID pin, 
       if(pin == 1)
         bits.insert(0);
       else if(pin == 0) {
-        assert(current_bit >= const_shift);
+        assert(current_bit >= static_cast<uint32_t>(const_shift));
         bits.insert(current_bit - const_shift);
       } else {
         assert(false);
@@ -209,7 +209,7 @@ int resolve_bit_fwd(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID p
     if(const_shift >= 0 && (!sign || current_bit != graph->get_bits(idx) - 1)) {
       //if there is sign extension, MSB affects all bits
       //bits lower than shift amount do no affect any bit
-      if(current_bit >= const_shift)
+      if(current_bit >= static_cast<uint32_t>(const_shift))
         bits.insert(current_bit - const_shift);
     } else {
       for(int bit = graph->get_bits(idx) - 1; bit >= 0; bit--) {

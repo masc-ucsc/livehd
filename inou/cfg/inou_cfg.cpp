@@ -49,9 +49,9 @@ vector<LGraph *> Inou_cfg::tolg() {
   }
 
   vector<LGraph *> lgs;
-  lgs.push_back(LGraph::create(opack.path, opack.name));
+  lgs.push_back(LGraph::create(opack.path, opack.name, cfg_file));
 
-  cfg_2_lgraph(&memblock, lgs, rename_tab);
+  cfg_2_lgraph(&memblock, lgs, rename_tab, cfg_file);
 
   for(LGraph *g : lgs)
     remove_fake_fcall(g);
@@ -73,7 +73,7 @@ void Inou_cfg::fromlg(vector<const LGraph *> &lgs) {
   assert(false); // Maybe in the future, we can generate a CFG from a cfg lgraph. Still not there
 }
 
-void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs, unordered_map<std::string, std::string> &rename_tab) {
+void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs, unordered_map<std::string, std::string> &rename_tab, const std::string &source) {
   string                              s;
   vector<map<string, Index_ID>>       nname2nid_lgs(1);  // lgs = graphs
   vector<map<string, vector<string>>> chain_stks_lgs(1); // chain_stacks for every graph, use vector to implement stack
@@ -87,7 +87,6 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs, unordered_ma
   char *str_ptr                  = nullptr;
 
   char *   p           = strtok_r(*memblock, "\n\r\f", &str_ptr);
-  uint32_t gsub_id_pre = 0;
 
   while(p) {
     vector<string> words = split(p);
@@ -109,7 +108,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs, unordered_ma
     string dfg_data = p;
 
     if(gsub_id != 0 && gsub_id >= lgs.size()) { // create new sub-graph if different scope id
-      LGraph *lg = LGraph::create(opack.path, "sub_method" + std::to_string(gsub_id));
+      LGraph *lg = LGraph::create(opack.path, "sub_method" + std::to_string(gsub_id), source);
       lgs.push_back(lg);
 
       fmt::print("lgs size:{}\n", lgs.size());

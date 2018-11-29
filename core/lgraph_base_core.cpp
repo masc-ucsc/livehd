@@ -15,8 +15,6 @@ Lgraph_base_core::Setup_path::Setup_path(const std::string &path) {
     return;
   last_path = path;
 
-  console->info("Lgraph_base_core.cpp: mkdir {}", path);
-
   struct stat info;
 
   if(stat(path.c_str(), &info) == 0) {

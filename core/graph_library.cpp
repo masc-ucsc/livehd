@@ -4,31 +4,31 @@
 #include <sys/types.h>
 
 #include "graph_library.hpp"
+#include "pass.hpp"
 #include "nodetype.hpp"
 
 std::unordered_map<std::string, Graph_library *> Graph_library::global_instances;
 
 std::map<std::string, std::map<std::string, LGraph *>> Graph_library::global_name2lgraph;
 
-uint32_t Graph_library::reset_id(const std::string &name) {
+uint32_t Graph_library::reset_id(const std::string &name, const std::string &source) {
   const auto &it = name2id.find(name);
   if(it != name2id.end()) {
     graph_library_clean           = false;
     attribute[it->second].version = max_next_version++;
+    if (attribute[it->second].source != source) {
+      Pass::error(fmt::format("No overwrite lgraph:{} because it changed source from {} to {} (LGraph::delete first)",name, attribute[it->second].source, source));
+    }
     return it->second;
   }
-  return add_name(name);
+  return add_name(name, source);
 }
 
 LGraph *Graph_library::try_find_lgraph(const std::string &path, const std::string &name) {
 
   if(global_name2lgraph.find(path) != global_name2lgraph.end() &&
      global_name2lgraph[path].find(name) != global_name2lgraph[path].end()) {
-    LGraph *lg = global_name2lgraph[path][name];
-    assert(global_instances.find(path) != global_instances.end());
-    global_instances[path]->register_lgraph(name, lg);
-
-    return lg;
+    return global_instances[path]->try_find_lgraph(name);
   }
 
   return nullptr;
@@ -37,12 +37,13 @@ LGraph *Graph_library::try_find_lgraph(const std::string &path, const std::strin
 LGraph *Graph_library::try_find_lgraph(const std::string &name) {
 
   if(global_name2lgraph.find(path) == global_name2lgraph.end())
-    return 0;
+    return nullptr;
 
   if(global_name2lgraph[path].find(name) != global_name2lgraph[path].end()) {
     LGraph *lg = global_name2lgraph[path][name];
     assert(global_instances.find(path) != global_instances.end());
-    global_instances[path]->register_lgraph(name, lg);
+    assert(get_id(name)!=0);
+    register_lgraph(name, attribute[get_id(name)].source, lg);
 
     return lg;
   }
@@ -50,20 +51,26 @@ LGraph *Graph_library::try_find_lgraph(const std::string &name) {
   return nullptr;
 }
 
-uint32_t Graph_library::add_name(const std::string &name) {
+uint32_t Graph_library::add_name(const std::string &name, const std::string &source) {
 
   uint32_t id = attribute.size();
   if(!recycled_id.empty()) {
     assert(id > recycled_id.back());
     id = recycled_id.back();
     recycled_id.pop_back();
+    attribute[id].name    = name;
+    assert(source!="");
+    attribute[id].source  = source;
+    attribute[id].version = max_next_version++;
   } else {
-    attribute.resize(id + 1);
+    Graph_attributes a;
+    a.name = name;
+    a.source = source;
+    a.version = max_next_version++;
+    attribute.emplace_back(a);
   }
 
   graph_library_clean   = false;
-  attribute[id].name    = name;
-  attribute[id].version = max_next_version++;
 
   assert(name2id.find(name) == name2id.end());
   name2id[name] = id;
@@ -93,6 +100,7 @@ bool Graph_library::rename_name(const std::string &orig, const std::string &dest
   graph_library_clean   = false;
   attribute[id].name    = dest;
   attribute[id].version = max_next_version++;
+  assert(attribute[id].source != ""); // Keep source
 
   DIR *dir = opendir(path.c_str());
   assert(dir);
@@ -170,7 +178,7 @@ void Graph_library::reload() {
           continue;
         std::string name(dent->d_name + 7, len - 5 - 7);
 
-        console->error("missing {}/graph_library at reload", path);
+        Pass::error(fmt::format("missing {}/graph_library at reload", path));
         exit(0);
       }
       closedir(dir);
@@ -184,11 +192,13 @@ void Graph_library::reload() {
 
   for(size_t idx = 0; idx < n_graphs; ++idx) {
     std::string name;
+    std::string source;
     uint32_t    graph_version;
     size_t      graph_id;
     size_t      nentries;
 
     graph_list >> name >> graph_id >> graph_version >> nentries;
+    graph_list >> source;
 
     if(graph_version >= max_next_version)
       max_next_version = graph_version + 1;
@@ -200,6 +210,7 @@ void Graph_library::reload() {
       attribute.resize(graph_id + 1);
 
     attribute[graph_id].name     = name;
+    attribute[graph_id].source   = source;
     attribute[graph_id].version  = graph_version;
     attribute[graph_id].nentries = nentries;
   }
@@ -223,7 +234,7 @@ void Graph_library::each_graph(std::function<void(const std::string &, uint32_t 
 
 bool Graph_library::expunge_lgraph(const std::string &name, const LGraph *lg) {
   if(global_name2lgraph[path][name] != lg) {
-    console->warn("graph_library::expunge_lgraph({}) for a wrong graph??? path:{}", name, path);
+    Pass::warn(fmt::format("graph_library::expunge_lgraph({}) for a wrong graph??? path:{}", name, path));
     return true;
   }
   global_name2lgraph[path].erase(global_name2lgraph[path].find(name));
@@ -240,10 +251,10 @@ bool Graph_library::expunge_lgraph(const std::string &name, const LGraph *lg) {
   return false;
 }
 
-uint32_t Graph_library::register_lgraph(const std::string &name, LGraph *lg) {
+uint32_t Graph_library::register_lgraph(const std::string &name, const std::string &source, LGraph *lg) {
   global_name2lgraph[path][name] = lg;
 
-  uint32_t id = reset_id(name);
+  uint32_t id = reset_id(name, source);
 
   const auto &it = name2id.find(name);
   assert(it != name2id.end());
@@ -281,7 +292,7 @@ void Graph_library::clean_library() {
   graph_list << (attribute.size() - 1) << std::endl;
   for(size_t id = 1; id < attribute.size(); id++) {
     const auto &it = attribute[id];
-    graph_list << it.name << " " << id << " " << it.version << " " << it.nentries << std::endl;
+    graph_list << it.name << " " << id << " " << it.version << " " << it.nentries << " " << it.source << std::endl;
   }
 
   graph_list.close();

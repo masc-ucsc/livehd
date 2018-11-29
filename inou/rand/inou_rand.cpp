@@ -80,7 +80,7 @@ std::vector<LGraph *> Inou_rand::do_tolg() {
 
   assert(!opack.name.empty());
 
-  LGraph *g = LGraph::create(opack.path, opack.name);
+  LGraph *g = LGraph::create(opack.path, opack.name, "inou_rand");
 
   std::mt19937 rnd;
   rnd.seed(opack.rand_seed);
