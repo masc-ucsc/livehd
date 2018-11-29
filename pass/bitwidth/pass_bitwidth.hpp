@@ -24,6 +24,7 @@ protected:
   void iterate_graphio(const LGraph *lg, Index_ID idx);
   void iterate_logic(const LGraph *lg, Index_ID idx);
   void iterate_arith(const LGraph *lg, Index_ID idx);
+  void iterate_shift_left(const LGraph *lg, Index_ID idx);
   void iterate_pick(const LGraph *lg, Index_ID idx);
 
   void iterate_node(LGraph *lg, Index_ID idx);

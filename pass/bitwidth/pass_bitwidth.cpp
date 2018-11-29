@@ -11,6 +11,8 @@
 
 #include "pass_bitwidth.hpp"
 
+#define DEBUG_STATEMENTS
+
 void setup_pass_bitwidth() {
   Pass_bitwidth p;
   p.setup();
@@ -81,13 +83,72 @@ void Pass_bitwidth::iterate_logic(const LGraph *lg, Index_ID idx) {
 void Pass_bitwidth::iterate_arith(const LGraph *lg, Index_ID idx) {
 
   bool updated = false;
+
+  int64_t max = 0;
+  int64_t min = 0;
+  //FIXME: Perhaps declare an Implicit Range and grow that.
   for(const auto &inp : lg->inp_edges(idx)) {
     Index_ID inp_idx = inp.get_idx();
 
     auto &      nb_output = lg->node_bitwidth_get(idx);
     const auto &nb_input  = lg->node_bitwidth_get(inp_idx);
 
+    //Wrong!!
+    min += nb_input.i.min;
+    max += nb_input.i.max;
+
+    //TEST CODE
+    if(inp.get_inp_pin().get_pid() == 0 || inp.get_inp_pin().get_pid() == 1) {
+      //Have a "+"
+      fmt::print("\n\t\tFOUND A PLUS {} {}", min, max);
+    } else {
+      //Have a "-"
+      fmt::print("\n\t\tFOUND A MINUS {} {}", min, max);
+    }
+
     updated |= nb_output.i.expand(nb_input.i, false);
+  }
+  fmt::print("\nDone!");
+
+  if(updated) {
+    mark_all_outputs(lg,idx);
+  }
+}
+
+void Pass_bitwidth::iterate_shift_left(const LGraph *lg, Index_ID idx) {
+  //FIXME: Come back to this. I think it's working but double check.
+  bool updated = false;
+
+  int pos = 0;
+  //I will assume that both of these will be properly instantiated.
+  int64_t val_to_shift_min, val_to_shift_max, shift_by_min, shift_by_max;
+  for (const auto &inp : lg->inp_edges(idx)) {
+    Index_ID inp_idx = inp.get_idx();
+
+    if (pos == 0) {
+      auto &nb_input = lg->node_bitwidth_get(inp_idx);
+      val_to_shift_min = nb_input.i.min;
+      val_to_shift_max = nb_input.i.max;
+
+      #ifdef DEBUG_STATEMENTS
+        fmt::print("\t\tFirst go: {} {}", val_to_shift_min, val_to_shift_max);
+      #endif
+    } else {
+      auto nb_input = lg->node_bitwidth_get(inp_idx);
+      auto &nb_output = lg->node_bitwidth_get(idx);
+      shift_by_min = nb_input.i.min;
+      shift_by_max = nb_input.i.max;
+
+      nb_input.i.min = val_to_shift_min << shift_by_min;
+      nb_input.i.max = val_to_shift_max << shift_by_max;
+
+      #ifdef DEBUG_STATEMENTS
+        fmt::print("\t\tSecond go: {} {} {} {}", shift_by_min, shift_by_max, nb_input.i.min, nb_input.i.max);
+      #endif
+      updated |= nb_output.i.expand(nb_input.i, false);
+    }
+
+    pos++;
   }
 
   if(updated) {
@@ -161,6 +222,7 @@ void Pass_bitwidth::iterate_node(LGraph *lg, Index_ID idx) {
   const auto &op = lg->node_type_get(idx);
 
   switch(op.op) {
+/*<<<<<<< HEAD
   case GraphIO_Op:
     iterate_graphio(lg, idx);
     break;
@@ -223,7 +285,73 @@ void Pass_bitwidth::iterate_node(LGraph *lg, Index_ID idx) {
     break;
   default:
     fmt::print("FIXME! op not found");
+=======*/
+    case GraphIO_Op:
+      iterate_graphio(lg, idx);
+      break;
+    case And_Op:
+    case Or_Op:
+    case Xor_Op:
+    case Not_Op:
+      iterate_logic(lg, idx);
+      break;
+    case Sum_Op:
+    case Div_Op:
+    case Mult_Op:
+    case Mod_Op:
+      iterate_arith(lg, idx);
+      break;
+    case Pick_Op:
+      iterate_pick(lg, idx);
+      break;
+    case U32Const_Op:
+      // No need to iterate
+      break;
+    case LessThan_Op:
+      fmt::print("I found a L.T.");
+      break;
+    case GreaterThan_Op:
+      fmt::print("I found a G.T.");
+      break;
+    case LessEqualThan_Op:
+      fmt::print("I found a L.E.T.");
+      break;
+    case GreaterEqualThan_Op:
+      fmt::print("I found a G.E.T.");
+      break;
+    case Equals_Op:
+      fmt::print("I found an EQUALS");
+      break;
+    case ShiftLeft_Op:
+      fmt::print("I found a SHIFT_LEFT");
+      iterate_shift_left(lg, idx);
+      break;
+    case ShiftRight_Op:
+      fmt::print("I found a SHIFT_RIGHT");
+      break;
+    case Mux_Op:
+      fmt::print("I found a MUX");
+      break;
+    case Join_Op:
+      fmt::print("I found a JOIN");
+      break;
+    case SFlop_Op:
+      fmt::print("I found a FLOP");
+      break;
+    case SubGraph_Op:
+      fmt::print("I found a SUBGRAPH");
+      break;
+    case Latch_Op:
+      fmt::print("I found a LATCH");
+      break;
+    case StrConst_Op:
+      fmt::print("I found a STRING");
+      break;
+    default:
+      fmt::print("FIXME! op not found");
+//>>>>>>> Match with current
   }
+  fmt::print("\n");
 }
 
 void Pass_bitwidth::bw_pass_dump(LGraph *lg) {
@@ -239,7 +367,14 @@ void Pass_bitwidth::bw_pass_dump(LGraph *lg) {
     fmt::print("\n");
   });
 
+/*<<<<<<< HEAD
   lg->each_output_root_fast([this, lg](Index_ID idx, Port_ID pid) {
+=======*/
+  fmt::print("\n");
+
+  lg->each_output_root_fast([this,lg](Index_ID idx, Port_ID pid) {
+
+//>>>>>>> Match with current
     const auto &node = lg->node_type_get(idx);
     const auto &nb   = lg->node_bitwidth_get(idx);
 
@@ -255,7 +390,12 @@ bool Pass_bitwidth::bw_pass_iterate(LGraph *lg) {
 
   int iterations = 0;
 
-  do {
+//<<<<<<< HEAD
+//  do {
+//=======
+  do{
+    //fmt::print("\nSTART\n");
+//>>>>>>> Match with current
     assert(next_pending.none());
 
     Index_ID idx = pending.get_first();
