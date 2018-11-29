@@ -139,8 +139,7 @@ void Pass_dfg::do_pseudo_bitwidth(LGraph *dfg) {
     for(const auto &out : dfg->out_edges(idx)) {
       Index_ID src_nid = idx;
       Index_ID dst_nid = out.get_idx();
-      Port_ID  src_pid = out.get_inp_pin().get_pid();
-      fmt::print("do_pseudo_bit idx:{} pid1:{} pid2:{}\n", idx, out.get_out_pin().get_pid(), out.get_inp_pin().get_pid());
+      Port_ID  src_pid = out.get_out_pin().get_pid();
       //Port_ID  dst_pid = out.get_inp_pin().get_pid();
       uint16_t src_nid_size = dfg->get_bits(src_nid);
       uint16_t dst_nid_size = dfg->get_bits(dst_nid);
