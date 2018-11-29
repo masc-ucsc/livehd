@@ -38,10 +38,10 @@ void Inou_def::set_def_info(Def_info &dinfo_in) {
 std::vector<LGraph *> Inou_def::generate() {
   std::vector<LGraph *> lgs;
   // clear since loading from def
-  auto *g = LGraph::create(opack.lgdb_path, dinfo.mod_name);
+  auto *g = LGraph::create(opack.lgdb_path, dinfo.mod_name, opack.def_file);
 
-  const Tech_library *tlib            = g->get_tlibrary();
-  const int           cell_types_size = tlib->get_cell_types_size();
+  const Tech_library &tlib            = g->get_tlibrary();
+  const int           cell_types_size = tlib.get_cell_types_size();
 
   std::unordered_map<std::string, Index_ID> ht_comp2nid;
 
@@ -55,12 +55,12 @@ std::vector<LGraph *> Inou_def::generate() {
     // g->node_place_set(compo_nid, iter_compo->posx, iter_compo->posy);
     // cout<< "node_place of nid " << compo_nid << " is " << g->get_x(compo_nid) << " " << g->get_y(compo_nid) << endl;
     for(int cell_id = 0; cell_id < cell_types_size; cell_id++) { // decide component's cell_type
-      std::string cell_type_name = tlib->get_const_cell(cell_id)->get_name();
+      std::string cell_type_name = tlib.get_const_cell(cell_id)->get_name();
       if(iter_compo->macro_name == cell_type_name)
         g->node_tmap_set(compo_nid, cell_id); // node nid's cell type is cell_id.
                                               // for debugging
     }
-    // const Tech_cell* cell_type = tlib->get_const_cell(g->tmap_id_get(compo_nid));
+    // const Tech_cell* cell_type = tlib.get_const_cell(g->tmap_id_get(compo_nid));
     // cout << "node_type of nid "  << compo_nid << " is " << cell_type->get_name()<< endl;
     // cout << "total pin nunber is " << cell_type->get_pins_size() << endl;
     // for(int i = 0 ; i< cell_type->get_pins_size(); ++i)
@@ -71,7 +71,7 @@ std::vector<LGraph *> Inou_def::generate() {
   Node     cf_node = g->create_node(); // cf = chip_frame_node
   Index_ID cf_nid  = cf_node.get_nid();
   for(int cell_id = 0; cell_id < cell_types_size; cell_id++) { // decide chip_frame_node's cell_type
-    std::string cell_type_name = tlib->get_const_cell(cell_id)->get_name();
+    std::string cell_type_name = tlib.get_const_cell(cell_id)->get_name();
     if(cell_type_name == "chip_frame")
       g->node_tmap_set(cf_nid, cell_id); // node nid's cell type is cell_id.
   }
@@ -91,7 +91,7 @@ std::vector<LGraph *> Inou_def::generate() {
     for(auto iter_conn = iter_net->conns.begin(); iter_conn != iter_net->conns.end();
         ++iter_conn) {                     // determine src nid/pid and dst nids/pids
       if(iter_conn->compo_name == "PIN") { // compo type is an io pin
-        const Tech_cell *cell_type = tlib->get_const_cell(g->tmap_id_get(cf_nid));
+        const Tech_cell *cell_type = tlib.get_const_cell(g->tmap_id_get(cf_nid));
         Port_ID          pid       = cell_type->get_pin_id(iter_conn->pin_name);
         if(cell_type->is_output(iter_conn->pin_name)) {
           src_nid = cf_nid;
@@ -102,7 +102,7 @@ std::vector<LGraph *> Inou_def::generate() {
         }
       } else { // compo type is not an io pin, i.e. regular cell
         Index_ID         compo_nid = ht_comp2nid[iter_conn->compo_name];
-        const Tech_cell *cell_type = tlib->get_const_cell(g->tmap_id_get(compo_nid));
+        const Tech_cell *cell_type = tlib.get_const_cell(g->tmap_id_get(compo_nid));
         Port_ID          pid       = cell_type->get_pin_id(iter_conn->pin_name);
 
         if(cell_type->is_output(iter_conn->pin_name)) {

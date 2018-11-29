@@ -12,7 +12,7 @@
 #include "sparsehash/dense_hash_map"
 
 #include "dense.hpp"
-#include "lglog.hpp"
+#include "pass.hpp"
 
 typedef int32_t Char_Array_ID;
 
@@ -176,7 +176,6 @@ private:
     }
     if(failed) {
       variable_internal.emplace_back(); //); // so that ID zero is not used
-      console->info("char_array:reload for {} failed, creating empty", long_name);
     }
   }
 
@@ -221,7 +220,7 @@ public:
       hash2id.serialize(MapSerializer<Hash_sign, Char_Array_ID>(), fp);
       fclose(fp);
     } else {
-      console->error("char_array::sync could not sync {}", long_name);
+      Pass::error(fmt::format("char_array::sync could not sync {}", long_name));
     }
   }
 

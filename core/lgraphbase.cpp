@@ -6,6 +6,7 @@
 #include <iostream>
 #include <set>
 
+#include "pass.hpp"
 #include "graph_library.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraphbase.hpp"
@@ -101,9 +102,8 @@ void LGraph_Base::get_lock() {
   std::string lock = path + "/" + long_name + ".lock";
   int         err  = ::open(lock.c_str(), O_CREAT | O_EXCL, 420); // 644
   if(err < 0) {
-    console->error("Could not get lock:{}. Already running? Unclear exit?", lock.c_str());
-    throw std::runtime_error("could not get lock");
-    exit(-3);
+    Pass::error(fmt::format("Could not get lock:{}. Already running? Unclear exit?", lock.c_str()));
+    assert(false); // ::error raises an exception
   }
   ::close(err);
 
@@ -200,7 +200,7 @@ Index_ID LGraph_Base::add_graph_io_common(const char *str, Index_ID nid, uint16_
 Index_ID LGraph_Base::add_graph_input_int(const char *str, Index_ID nid, uint16_t bits) {
   assert(input_array.get_id(str) == 0); // No name dupliation
 
-  nid = add_graph_io_common(str,nid,bits);
+  nid = add_graph_io_common(str, nid, bits);
   node_internal[nid].set_graph_io_input();
 
   IO_port p(nid, 0, false);
@@ -214,7 +214,7 @@ Index_ID LGraph_Base::add_graph_input_int(const char *str, Index_ID nid, uint16_
 Index_ID LGraph_Base::add_graph_input_int(const char *str, Index_ID nid, uint16_t bits, Port_ID original_pos) {
   assert(input_array.get_id(str) == 0); // No name dupliation
 
-  nid = add_graph_io_common(str,nid,bits);
+  nid = add_graph_io_common(str, nid, bits);
   node_internal[nid].set_graph_io_input();
 
   IO_port p(nid, original_pos, true);
@@ -226,7 +226,7 @@ Index_ID LGraph_Base::add_graph_input_int(const char *str, Index_ID nid, uint16_
 Index_ID LGraph_Base::add_graph_output_int(const char *str, Index_ID nid, uint16_t bits) {
   assert(output_array.get_id(str) == 0); // No name dupliation
 
-  nid = add_graph_io_common(str,nid,bits);
+  nid = add_graph_io_common(str, nid, bits);
   node_internal[nid].set_graph_io_output();
 
   IO_port p(nid, 0, false);
@@ -240,7 +240,7 @@ Index_ID LGraph_Base::add_graph_output_int(const char *str, Index_ID nid, uint16
 Index_ID LGraph_Base::add_graph_output_int(const char *str, Index_ID nid, uint16_t bits, Port_ID original_pos) {
   assert(output_array.get_id(str) == 0); // No name dupliation
 
-  nid = add_graph_io_common(str,nid,bits);
+  nid = add_graph_io_common(str, nid, bits);
   node_internal[nid].set_graph_io_output();
 
   IO_port p(nid, original_pos, true);
@@ -439,9 +439,6 @@ Index_ID LGraph_Base::create_node_space(Index_ID last_idx, Port_ID out_pid, Inde
       if(node_internal[idx2].has_space(true))
         return idx2;
         // This can happen if 3 sedges transfered to 3 ledges in dest
-#ifndef NDEBUG
-      console->warn("transfer 3 sedges to 3 ledges {} to {}", last_idx, idx2);
-#endif
       return create_node_space(idx2, out_pid, master_nid, root_nid);
     }
     return last_idx;
@@ -524,8 +521,6 @@ Index_ID LGraph_Base::get_space_output_pin(Index_ID master_nid, Index_ID start_n
   if(node_internal[start_nid].has_space(true) && node_internal[start_nid].get_out_pid() == out_pid) {
     return start_nid;
   }
-
-  // console->debug("get_space_output_pin idx:{} out_pid:{}", start_nid, out_pid);
 
   // Look for space
   Index_ID idx = start_nid;
@@ -626,8 +621,6 @@ Index_ID LGraph_Base::get_space_output_pin(Index_ID start_nid, Port_ID out_pid, 
     return start_nid;
   }
 
-  console->debug("get_space_output_pin idx:{} out_pid:{}", start_nid, out_pid);
-
   // Look for space
   Index_ID idx = start_nid;
   root_nid     = 0;
@@ -677,10 +670,7 @@ Index_ID LGraph_Base::get_space_input_pin(Index_ID start_nid, Index_ID idx, bool
   if(node_internal[idx].has_space(large))
     return idx;
 
-  console->debug("get_space_input_pin idx:{}", start_nid);
-
   // Look for space
-
   while(true) {
     if(node_internal[idx].has_space(large))
       return idx;
@@ -703,8 +693,6 @@ Index_ID LGraph_Base::get_space_input_pin(Index_ID start_nid, Index_ID idx, bool
 
 Index_ID LGraph_Base::add_edge_int(Index_ID dst_nid, Port_ID inp_pid, Index_ID src_nid, Port_ID out_pid) {
 
-  console->info("add_edge_int dst_nid:{} out_pid:{} src_nid{} inp_pid:{}", dst_nid, out_pid, src_nid, inp_pid);
-
   bool            sused;
   SEdge_Internal *sedge;
   LEdge_Internal *ledge;
@@ -716,8 +704,10 @@ Index_ID LGraph_Base::add_edge_int(Index_ID dst_nid, Port_ID inp_pid, Index_ID s
   assert(node_internal[dst_nid].is_master_root());
   assert(node_internal[src_nid].is_master_root());
 
+#ifndef NDEBUG
   if(dst_nid == src_nid)
-    console->warn("add_edge_int to itself dst_nid:{} out_pid:{} src_nid{} inp_pid:{}", dst_nid, out_pid, src_nid, inp_pid);
+    Pass::warn(fmt::format("add_edge_int to itself dst_nid:{} out_pid:{} src_nid{} inp_pid:{}", dst_nid, out_pid, src_nid, inp_pid));
+#endif
 
   // WARNING: Graph IO have alphabetical port IDs assigned to be mapped between
   // graphs. It should not use local port b
@@ -759,7 +749,6 @@ Index_ID LGraph_Base::add_edge_int(Index_ID dst_nid, Port_ID inp_pid, Index_ID s
 
   sedge = (SEdge_Internal *)&node_internal[idx].sedge[o];
   sused = sedge->set(dst_nid, inp_pid, false);
-  console->info("output at nid:{} dst_nid:{} pos:{} sused:{}", idx, dst_nid, o, sused);
 
   if(sused) {
     node_internal[idx].inc_outputs();
@@ -785,7 +774,6 @@ Index_ID LGraph_Base::add_edge_int(Index_ID dst_nid, Port_ID inp_pid, Index_ID s
 
   sedge = (SEdge_Internal *)&node_internal[idx].sedge[i];
   sused = sedge->set(src_nid, out_pid, true);
-  console->info("input  at nid:{} src_nid:{} pos:{} sused:{}", idx, src_nid, i, sused);
 
   if(sused) {
     node_internal[idx].inc_inputs();
@@ -830,19 +818,7 @@ Index_ID LGraph_Base::add_edge_int(Index_ID dst_nid, Port_ID inp_pid, Index_ID s
 }
 
 void LGraph_Base::del_edge(const Edge &edge) {
-
-  auto &n = Node_Internal::get(&edge);
-
-  const Node_Pin src     = edge.get_out_pin();
-  const Node_Pin dst     = edge.get_inp_pin();
-  Index_ID       src_nid = src.get_nid();
-  Port_ID        src_pid = src.get_pid();
-  Index_ID       dst_nid = dst.get_nid();
-  Port_ID        dst_pid = dst.get_pid();
-
-  console->info("del_edge_int node src_nid:{} src_pid:{} dst_nid:{} dst_pid:{}", src_nid, src_pid, dst_nid, dst_pid);
-
-  n.del(edge);
+  Node_Internal::get(&edge).del(edge);
 }
 
 void LGraph_Base::del_node(Index_ID idx) {

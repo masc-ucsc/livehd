@@ -10,9 +10,11 @@
 
 #include "graph_library.hpp"
 #include "lgedgeiter.hpp"
+#include "pass.hpp"
+
 #include "lgraph.hpp"
 
-LGraph::LGraph(const std::string &path, const std::string &_name, bool _clear)
+LGraph::LGraph(const std::string &path, const std::string &_name, const std::string &_source, bool _clear)
     : Lgraph_base_core(path, _name)
     , LGraph_Base(path, _name)
     , LGraph_Node_Delay(path, _name)
@@ -22,7 +24,7 @@ LGraph::LGraph(const std::string &path, const std::string &_name, bool _clear)
     , LGraph_InstanceNames(path, _name)
     , LGraph_Node_Place(path, _name)
 {
-  lgraph_id = library->register_lgraph(name, this);
+  lgraph_id = library->register_lgraph(name, _source, this);
 
   if(_clear) {
     clear();
@@ -33,11 +35,10 @@ LGraph::LGraph(const std::string &path, const std::string &_name, bool _clear)
 }
 
 LGraph::~LGraph() {
-  console->debug("lgraph destructor\n");
   library->unregister_lgraph(name, lgraph_id, this);
 }
 
-LGraph *LGraph::create(const std::string &path, const std::string &name) {
+LGraph *LGraph::create(const std::string &path, const std::string &name, const std::string &source) {
   LGraph *lg = Graph_library::try_find_lgraph(path,name);
   if (lg) {
     assert(Graph_library::instance(path));
@@ -48,34 +49,35 @@ LGraph *LGraph::create(const std::string &path, const std::string &name) {
       delete lg;
   }
 
-  return new LGraph(path, name, true);
+  return new LGraph(path, name, source, true);
 }
 
 LGraph *LGraph::open(const std::string &path, int lgid) {
   const std::string &name = Graph_library::instance(path)->get_name(lgid);
 
-  return open(path,name);
+  return open(path, name);
 }
 
 void LGraph::rename(const std::string &path, const std::string &orig, const std::string &dest) {
   LGraph *lg = Graph_library::try_find_lgraph(path,orig);
   if (lg) {
-    console->error("lgraph::rename failed for {}/{} because the lgraph is open",path,orig);
+    Pass::error(fmt::format("lgraph::rename failed for {}/{} because the lgraph is open",path,orig));
     return;
   }
 
   bool valid = Graph_library::instance(path)->rename_name(orig, dest);
   if(valid)
-    console->warn("find original graph {} in path {}", orig, path);
+    Pass::warn(fmt::format("lgraph::rename find original graph {} in path {}", orig, path));
   else
-    console->error("cannot find original graph {} in path {}", orig, path);
+    Pass::error(fmt::format("cannot find original graph {} in path {}", orig, path));
 }
 
 LGraph *LGraph::open(const std::string &path, const std::string &name) {
   LGraph *lg = Graph_library::try_find_lgraph(path,name);
   if (lg) {
     assert(Graph_library::instance(path));
-    lg->lgraph_id = Graph_library::instance(path)->register_lgraph(name, lg);
+    const auto &source = Graph_library::instance(path)->get_source(name);
+    lg->lgraph_id = Graph_library::instance(path)->register_lgraph(name, source, lg);
     return lg;
   }
 
@@ -84,11 +86,12 @@ LGraph *LGraph::open(const std::string &path, const std::string &name) {
 
   std::string lock = path + "/lgraph_" + name + ".lock";
   if (access(lock.c_str(),R_OK)!=-1) {
-    console->error("trying to open a locked {} (broken?) graph {}", lock, name);
+    Pass::error(fmt::format("trying to open a locked {} (broken?) graph {}", lock, name));
     return 0;
   }
+  const auto &source = Graph_library::instance(path)->get_source(name);
 
-  return new LGraph(path, name, false);
+  return new LGraph(path, name, source, false);
 }
 
 void LGraph::close() {
@@ -201,8 +204,6 @@ Index_ID LGraph::add_graph_output(const char *str, Index_ID nid, uint16_t bits, 
 Node LGraph::create_node() {
   Index_ID nid = create_node_int();
 
-  console->debug("create_node nid:{}", nid);
-
   return Node(this, nid);
 }
 
@@ -243,7 +244,6 @@ Index_ID LGraph::create_node_int() {
   }
 
   assert(node_internal[node_internal.size() - 1].get_out_pid() == 0);
-  console->debug("create_node_int nid:{}", node_internal[node_internal.size() - 1].get_nid());
 
   return node_internal[node_internal.size() - 1].get_nid();
 }

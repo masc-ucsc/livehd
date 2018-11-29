@@ -27,7 +27,7 @@ protected:
 
   Index_ID create_node_int() final;
 
-  explicit LGraph(const std::string &path, const std::string &name, bool clear);
+  explicit LGraph(const std::string &path, const std::string &name, const std::string &source, bool clear);
 
 public:
   LGraph() = delete;
@@ -35,7 +35,7 @@ public:
 
   virtual ~LGraph();
 
-  static LGraph *create(const std::string &path, const std::string &name);
+  static LGraph *create(const std::string &path, const std::string &name, const std::string &source);
   static LGraph *open(const std::string &path, int lgid);
   static LGraph *open(const std::string &path, const std::string &name);
   static void rename(const std::string &path, const std::string &orig, const std::string &dest);

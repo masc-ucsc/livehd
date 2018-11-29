@@ -11,5 +11,7 @@ public:
   static std::string get_exe_path();
 
   static bool ends_with(const std::string &s, const std::string &suffix);
+
+  static void clean_dir(const std::string &dir);
 };
 

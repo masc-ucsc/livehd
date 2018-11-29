@@ -11,7 +11,7 @@ void Pass_abc::write_src_info(const LGraph *g, const index_offset &inp, std::ofs
   auto src_type = g->node_type_get(src_idx).op;
   switch(src_type) {
   case TechMap_Op: {
-    const Tech_cell *tcell = g->get_tlibrary()->get_const_cell(g->tmap_id_get(src_idx));
+    const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(src_idx));
     if(is_latch(tcell)) {
       fs << g->get_node_wirename(src_idx) << " ";
     } else {
@@ -111,7 +111,7 @@ void Pass_abc::gen_io_conn(const LGraph *g, std::ofstream &fs) {
 void Pass_abc::gen_cell_conn(const LGraph *g, std::ofstream &fs) {
   for(const auto &idx : graph_info->combinational_id) {
     auto              src        = graph_info->comb_conn[idx];
-    const Tech_cell * tcell      = g->get_tlibrary()->get_const_cell(g->tmap_id_get(idx));
+    const Tech_cell * tcell      = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
     const std::string tcell_name = tcell->get_name();
     fs << ".names ";
     for(const auto &inp : src) {

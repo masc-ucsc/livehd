@@ -195,7 +195,6 @@ void LGraph_Node_Type::node_u32type_set(Index_ID nid, uint32_t value) {
   const_nodes.set_bit(nid);
 
   node_type_table[node_internal[nid].get_nid()] = (Node_Type_Op)(U32ConstMin_Op + value);
-  // console->info("u32const {}", node_type_table[node_internal[nid].get_nid()]);
 }
 
 uint32_t LGraph_Node_Type::node_value_get(Index_ID nid) const {
@@ -240,7 +239,6 @@ void LGraph_Node_Type::node_const_type_set(Index_ID nid, const std::string &valu
   const_nodes.set_bit(nid);
 
   node_type_table[node_internal[nid].get_nid()] = (Node_Type_Op)(StrConstMin_Op + char_id);
-  // console->info("u32const {}", node_type_table[node_internal[nid].get_nid()]);
 }
 
 const char *LGraph_Node_Type::node_const_value_get(Index_ID nid) const {

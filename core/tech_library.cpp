@@ -3,13 +3,15 @@
 #include <fstream>
 #include <iostream>
 
-#include "tech_library.hpp"
-
 #include "rapidjson/document.h"
 #include "rapidjson/error/en.h"
 #include "rapidjson/filereadstream.h"
 #include "rapidjson/filewritestream.h"
 #include "rapidjson/prettywriter.h"
+
+#include "pass.hpp"
+
+#include "tech_library.hpp"
 
 std::unordered_map<std::string, Tech_library *> Tech_library::instances;
 
@@ -54,8 +56,6 @@ void Tech_library::load() {
   std::ifstream tech_lib_f(full_path.c_str());
 
   if(!tech_lib_f.good()) {
-    //console->error("ERROR: could not open internal techlib file {}\n", full_path);
-    console->info("Internal techlib file not loaded\n");
     return;
   }
   tech_lib_f.close();
@@ -111,13 +111,15 @@ void Tech_library::load() {
 }
 #endif
 
-void Tech_library::load_json() {
+void Tech_library::try_load_json() {
   std::string full_path = (lgdb + "/" + lib_file);
-  FILE *      pFile     = fopen(full_path.c_str(), "rb");
+
+  FILE *pFile = fopen(full_path.c_str(), "rb");
   if(!pFile) {
-    console->info("Internal techlib file not loaded\n");
+    // ok
     return;
   }
+
   char                      buffer[65536];
   rapidjson::FileReadStream is(pFile, buffer, sizeof(buffer));
   rapidjson::Document       document;

@@ -87,7 +87,7 @@ auto Diff_finder::go_down(const Graph_Node &boundary, bool output) {
   Index_ID idx     = boundary.idx;
   Port_ID  pid     = boundary.pid;
 
-  std::string subgraph_name = current->get_library()->get_name(current->subgraph_id_get(idx));
+  std::string subgraph_name = current->get_library().get_name(current->subgraph_id_get(idx));
   LGraph *    child         = LGraph::open(subgraph_name, current->get_path());
 
   if(!child) {
@@ -429,7 +429,7 @@ void Diff_finder::add_ios_up(LGraph *module, Index_ID nid, std::map<std::string,
 
       uint32_t subgraph_id = nparent->subgraph_id_get(node);
 
-      if(subgraph_id == nparent->get_library()->get_id(module_name))
+      if(subgraph_id == nparent->get_library().get_id(module_name))
         parent_ids.insert(node);
     }
 
@@ -484,11 +484,13 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
     }
     visited_idx.insert(std::make_pair(original, node.idx));
     if(name2graph.find(original->get_name()) == name2graph.end()) {
-      std::string name = original->get_name();
+      const std::string name = original->get_name();
+      const std::string source = original->get_library().get_source(name);
       fmt::print("creating graph for {}\n", name);
-      if(name.substr(0, 6) == "lgraph")
-        name = name.substr(7);
-      name2graph[original->get_name()] = LGraph::create(out_lgdb, name);
+
+      assert(name.substr(0, 6) != "lgraph");
+
+      name2graph[original->get_name()] = LGraph::create(out_lgdb, name, source);
     }
     LGraph *new_module = name2graph[original->get_name()];
 
@@ -710,7 +712,7 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
     for(auto &out : node.module->out_edges(node.idx)) {
       if(node.module->node_type_get(node.idx).op == SubGraph_Op) {
         //if node is a subgraph, I need to first check if the output port is in the delta
-        std::string subgraph_name = new_module->get_library()->get_name(new_module->subgraph_id_get(old2newidx[node.module][node.idx]));
+        std::string subgraph_name = new_module->get_library().get_name(new_module->subgraph_id_get(old2newidx[node.module][node.idx]));
         assert(name2graph.find(subgraph_name) != name2graph.end());
         LGraph *nsubgraph = name2graph[subgraph_name];
         LGraph *osubgraph = LGraph::open(subgraph_name, node.module->get_path());

@@ -531,10 +531,11 @@ bool Inou_pyrope::to_subgraph(Out_string &w, Out_string &out, const LGraph *g, I
 
   std::vector<LGraph *> lgs;
 
-  // FIXME: const std::string subgraph_name = g->get_library()->get_name(g->subgraph_id_get(idx));
+  // FIXME: const std::string subgraph_name = g->get_library().get_name(g->subgraph_id_get(idx));
   const std::string subgraph_name = "inner";
 
-  lgs.push_back(LGraph::create(g->get_path(), subgraph_name));
+  const auto &source = g->get_library().get_source(g->get_name());
+  lgs.push_back(LGraph::create(g->get_path(), subgraph_name, source));
 
   const char **subgraph_input_names;
   const char **subgraph_output_names;
