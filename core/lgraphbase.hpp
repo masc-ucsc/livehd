@@ -191,6 +191,17 @@ public:
     return idx;
   }
 
+  bool has_outputs(Index_ID idx) const {
+    assert(idx < node_internal.size());
+    assert(node_internal[idx].is_root());
+    return node_internal[idx].has_outputs();
+  }
+  bool has_inputs(Index_ID idx) const {
+    assert(idx < node_internal.size());
+    assert(node_internal[idx].is_root());
+    return node_internal[idx].has_inputs();
+  }
+
   Edge_iterator inp_edges(Index_ID nid) const;
   Edge_iterator out_edges(Index_ID nid) const;
 
