@@ -47,6 +47,7 @@ public:
     void dump() const;
     int64_t round_power2(int64_t x) const;
     bool expand(const Implicit_range &i, bool round2);
+    bool shift_left(const Implicit_range &i);
     void pick(const Explicit_range &e);
   };
 
