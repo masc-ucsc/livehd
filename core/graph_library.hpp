@@ -31,6 +31,7 @@ protected:
   struct Graph_attributes {
     uint64_t    nentries;
     std::string name;    // NOTE: No const as names can change (reload)
+    std::string source;  // File were this module came from. If file updated (all the associated lgraphs must be deleted)
     uint32_t    version; // In which sequence order were the graphs last modified
     int         nopen;
     Graph_attributes() {
@@ -41,6 +42,7 @@ protected:
       nopen    = 0;
       version  = 0;
       nentries = 0;
+      source   = "";
     }
   };
   std::map<std::string, uint32_t> name2id;
@@ -67,23 +69,19 @@ protected:
   static std::unordered_map<std::string, Graph_library *>       global_instances;
   static std::map<std::string, std::map<std::string, LGraph *>> global_name2lgraph;
 
-  uint32_t reset_id(const std::string &name);
+  uint32_t reset_id(const std::string &name, const std::string &source);
 
 public:
   static LGraph *try_find_lgraph(const std::string &path, const std::string &name);
   LGraph *       try_find_lgraph(const std::string &name);
 
-  uint32_t add_name(const std::string &name);
+  uint32_t add_name(const std::string &name, const std::string &source);
   bool     rename_name(const std::string &orig, const std::string &dest);
 
   const std::string &get_name(uint32_t lgid) const {
     assert(lgid > 0); // 0 is invalid lgid
     assert(attribute.size() > (size_t)lgid);
     return attribute[lgid].name;
-  }
-
-  int lgraph_count() const {
-    return attribute.size() - 1;
   }
 
   uint32_t get_id(const std::string &name) const {
@@ -93,6 +91,21 @@ public:
     }
     return 0; // Invalid ID
   }
+
+  const std::string &get_source(uint32_t lgid) const {
+    assert(lgid > 0); // 0 is invalid lgid
+    assert(attribute.size() > (size_t)lgid);
+    return attribute[lgid].source;
+  }
+
+  const std::string &get_source(const std::string &name) const {
+    return get_source(get_id(name));
+  }
+
+  int lgraph_count() const {
+    return attribute.size() - 1;
+  }
+
 
   void update(uint32_t lgid);
 
@@ -124,7 +137,7 @@ public:
 
   bool expunge_lgraph(const std::string &name, const LGraph *lg);
 
-  uint32_t register_lgraph(const std::string &name, LGraph *lg);
+  uint32_t register_lgraph(const std::string &name, const std::string &source, LGraph *lg);
   bool     unregister_lgraph(const std::string &name, uint32_t lgid, const LGraph *lg);
 
   void     update_nentries(uint32_t lgid, uint64_t nentries);

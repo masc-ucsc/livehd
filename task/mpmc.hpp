@@ -38,6 +38,7 @@
 #include <atomic>
 
 template <typename T> class mpmc {
+  mpmc() = delete;
 public:
   mpmc(size_t size)
       : _size(size)

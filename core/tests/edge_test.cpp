@@ -4,7 +4,7 @@
 #include "lgraph.hpp"
 
 bool test0() {
-  LGraph *g = LGraph::create("core_test_lgdb", "test0");
+  LGraph *g = LGraph::create("core_test_lgdb", "test0", "test");
 
   Index_ID idx1 = g->create_node().get_nid();
   g->create_node().get_nid();
@@ -22,7 +22,7 @@ bool test0() {
 }
 
 bool test1() {
-  LGraph *g = LGraph::create("core_test_lgdb", "test");
+  LGraph *g = LGraph::create("core_test_lgdb", "test", "test");
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
@@ -57,7 +57,7 @@ bool test1() {
 }
 
 bool test20() {
-  LGraph *g = LGraph::create("core_test_lgdb", "test20");
+  LGraph *g = LGraph::create("core_test_lgdb", "test20", "test");
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
@@ -85,7 +85,7 @@ bool test20() {
 
 bool test21() {
 
-  LGraph *g = LGraph::create("core_test_lgdb", "test21");
+  LGraph *g = LGraph::create("core_test_lgdb", "test21", "test");
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
@@ -113,7 +113,7 @@ bool test21() {
 
 bool test2() {
 
-  LGraph *g = LGraph::create("core_test_lgdb", "test2");
+  LGraph *g = LGraph::create("core_test_lgdb", "test2", "test");
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
@@ -141,7 +141,7 @@ bool test2() {
 
 bool test22() {
 
-  LGraph *g = LGraph::create("core_test_lgdb", "test22");
+  LGraph *g = LGraph::create("core_test_lgdb", "test22", "test");
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
@@ -169,7 +169,7 @@ bool test22() {
 
 bool test3() {
 
-  LGraph *g = LGraph::create("core_test_lgdb", "test3");
+  LGraph *g = LGraph::create("core_test_lgdb", "test3", "test");
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();
@@ -203,7 +203,7 @@ bool test3() {
 
 bool test4() {
 
-  LGraph *g = LGraph::create("core_test_lgdb", "test4");
+  LGraph *g = LGraph::create("core_test_lgdb", "test4", "test");
 
   Index_ID idx1 = g->create_node().get_nid();
   Index_ID idx2 = g->create_node().get_nid();

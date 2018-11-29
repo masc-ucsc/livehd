@@ -338,7 +338,7 @@ public:
       }
 
       if(floating.size() > 0) {
-        console->warn("graph {} is not DCE free, please run DCE pass\n", g->get_name());
+        Pass::warn(fmt::format("graph {} is not DCE free, consider running the DCE pass\n", g->get_name()));
         for(const auto &idx : floating) {
           pending->push_back(idx);
         }

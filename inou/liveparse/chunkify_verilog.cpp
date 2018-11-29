@@ -11,13 +11,12 @@
 #include <string>
 
 #include "lgbench.hpp"
-
-#include "chunkify_verilog.hpp"
+#include "eprp_utils.hpp"
 #include "graph_library.hpp"
 #include "inou_liveparse.hpp"
 #include "lgraph.hpp"
 
-//#include "progress_bar.hpp"
+#include "chunkify_verilog.hpp"
 
 Chunkify_verilog::Chunkify_verilog(const std::string &_path, const std::string &_elab_path)
     : path(_path)
@@ -46,8 +45,7 @@ bool Chunkify_verilog::is_same_file(const std::string &module, const std::string
   if(elab_path.empty())
     return false;
 
-  const std::string elab_filename = elab_path + "/parse/chunk_" + module + ".v";
-
+  const std::string elab_filename = elab_chunk_dir + "/" + module + ".v";
   int fd = open(elab_filename.c_str(), O_RDONLY);
   if(fd < 0)
     return false;
@@ -152,6 +150,13 @@ void Chunkify_verilog::elaborate() {
   // ProgressBar bar(buffer_sz,"liveparse");
 
   write_file(path + "/parse/file_" + format_name, buffer, buffer_sz);
+  chunk_dir = path + "/parse/chunk_" + format_name;
+  Eprp_utils::clean_dir(chunk_dir);
+
+  if (elab_path.empty())
+    elab_chunk_dir.clear();
+  else
+    elab_chunk_dir = elab_path + "/parse/chunk_" + format_name;
 
   bool in_module   = false;
   bool last_input  = false;
@@ -194,7 +199,8 @@ void Chunkify_verilog::elaborate() {
         lg = library->try_find_lgraph(module);
         if(lg == 0) {
           // fmt::print("chunkify_verilog::add_io create module {}\n",mod_name);
-          lg = LGraph::create(path, module);
+          const auto &source = chunk_dir + "/" + module + ".v";
+          lg = LGraph::create(path, module, source);
         }
 
       } else if(strcasecmp(token.c_str(), "input") == 0) {
@@ -239,7 +245,7 @@ void Chunkify_verilog::elaborate() {
         // fmt::print("{}  {} {}\n",module,in_module_token.back().pos, buffer_sz);
         bool same = is_same_file(module, not_in_module_text, in_module_text);
         if(!same) {
-          write_file(path + "/parse/chunk_" + module + ".v", not_in_module_text, in_module_text);
+          write_file(chunk_dir + "/" + module + ".v", not_in_module_text, in_module_text);
         }
         if(lg) {
           library->unregister_lgraph(module, lg->lg_id(), lg);

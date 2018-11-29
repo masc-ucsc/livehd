@@ -32,7 +32,7 @@ private:
   void                     build_graph(std::vector<std::string> &, std::string &, LGraph *, std::map<std::string, uint32_t> &,
                                        std::map<std::string, std::string> &, std::map<std::string, Index_ID> &,
                                        std::map<std::string, std::vector<std::string>> &, std::unordered_map<std::string, std::string> &, Index_ID &);
-  void                     cfg_2_lgraph(char **, std::vector<LGraph *> &, std::unordered_map<std::string, std::string> &);
+  void                     cfg_2_lgraph(char **, std::vector<LGraph *> &, std::unordered_map<std::string, std::string> &, const std::string &);
   void                     remove_fake_fcall(LGraph *g);
   void collect_fcall_info(LGraph *g, Index_ID new_node, const std::string &w7, const std::string &w8, const std::string &w9);
   void update_ifs(std::vector<LGraph *> &lgs, std::vector<std::map<std::string, Index_ID>> &node_mappings);
