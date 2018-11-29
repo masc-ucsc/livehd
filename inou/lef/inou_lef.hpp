@@ -42,7 +42,7 @@ public:
     opack.set(key, value);
   }
 
-  static void lef_parsing(Tech_library *tlib, std::string &lef_file_name);
+  static void lef_parsing(Tech_library &tlib, std::string &lef_file_name);
 };
 
 #endif // LGRAPH_INOU_LEF_HPP

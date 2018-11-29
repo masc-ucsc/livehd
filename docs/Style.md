@@ -99,8 +99,8 @@ fmt::print("This is a debug message, name = {}, id = {}\n",g->get_name(), idx);
 ## Use console log lg to report errors/warnings/info
 
 ```cpp
-console->error("inou_yaml can only have a yaml_input or a graph_name, not both\n");
-console->info("inou_yaml output:{} input:{} graph:{}", output, input, graph_name);
+Pass::error("inou_yaml can only have a yaml_input or a graph_name, not both");
+Pass::warn(fmt::format("inou_yaml output:{} input:{} graph:{}", output, input, graph_name));
 ```
 
 ## Use bitarray class to have a compact bitvector marker

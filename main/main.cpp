@@ -316,7 +316,7 @@ int main(int argc, char **argv) {
   const char *env_home = std::getenv("HOME");
   bool history = true;
   if(env_home==0) {
-    console->warn("unset HOME directory, not loading history file\n");
+    Pass::warn("unset HOME directory, not loading history file");
     history = false;
   }
   // the path to the history file

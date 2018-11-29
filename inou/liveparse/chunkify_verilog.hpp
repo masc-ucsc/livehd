@@ -11,6 +11,9 @@ protected:
   const std::string path;
   const std::string elab_path;
 
+  std::string chunk_dir;
+  std::string elab_chunk_dir;
+
   Graph_library *library;
   Graph_library *elab_library;
 

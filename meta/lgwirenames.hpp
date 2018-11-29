@@ -60,14 +60,6 @@ public:
     assert(nid < wires.size());
     assert(node_internal[nid].is_node_state());
     assert(node_internal[nid].is_root());
-#ifndef NDEBUG
-    console->info("set wirename idx: {} , name: {}, module {}\n", nid, name, get_name());
-
-    // FIXME figure out IOs vs wirenames (see inou_yosys) and put this assertions back
-    // assert(!has_name(name));
-    // assert(!is_graph_input(name) && (!is_graph_input(nid) || get_graph_input_name(nid) != name));
-    // assert(!is_graph_output(name) && (!is_graph_output(nid) || get_graph_output_name(nid) != name));
-#endif
     WireName_ID wid = names.create_id(name, nid);
     set_node_wirename(nid, wid);
     return wid;

@@ -372,6 +372,7 @@ void Elab_scanner::parser_error(const std::string &text) const {
   n_errors++;
   if (n_errors>max_errors)
     exit(-3);
+  throw std::runtime_error(text);
 }
 
 void Elab_scanner::parser_warn(const std::string &text) const {

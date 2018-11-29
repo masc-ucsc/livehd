@@ -29,7 +29,7 @@ protected:
     const std::string name = var.get("name");
     assert(!name.empty());
 
-    LGraph *lg = LGraph::create(path,name);
+    LGraph *lg = LGraph::create(path,name,"lgshell");
 
     if (lg==0) {
       Main_api::error(fmt::format("lgraph.create could not open {} lgraph in {} path", name, path));

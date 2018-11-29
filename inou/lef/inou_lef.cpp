@@ -45,17 +45,10 @@ int lef_macro_begin_cb(lefrCallbackType_e c, const char *macroName, lefiUserData
 }
 
 int lef_macro_cb(lefrCallbackType_e c, lefiMacro *fmacro, lefiUserData ud) {
-  assert(c);
-  // auto *tlib     = static_cast<Tech_library *>(ud);
 
-  if(fmacro->hasSize()) {
-    assert(false);
-#if 0
-    auto &tmp_cell = tlib->get_vec_cell_types()->back();
-    FIXME???
-		tmp_cell.set_dimentions(static_cast<float>(fmacro->sizeX()), static_cast<float>(fmacro->sizeY()));
-#endif
-  }
+  assert(c);
+  assert(!fmacro->hasSize());
+
   return 0;
 }
 
@@ -199,7 +192,7 @@ int lef_via_cb(lefrCallbackType_e c, lefiVia *fvia, lefiUserData ud) {
   return 0;
 }
 
-void Inou_lef::lef_parsing(Tech_library *tlib, std::string &lef_file_name) {
+void Inou_lef::lef_parsing(Tech_library &tlib, std::string &lef_file_name) {
   fmt::print("lefile is {}", lef_file_name);
   FILE *fin;
   lefrInit();
@@ -214,7 +207,7 @@ void Inou_lef::lef_parsing(Tech_library *tlib, std::string &lef_file_name) {
   lefrSetLayerCbk(lef_layer_cb);
   lefrSetViaCbk(lef_via_cb);
   lefrReset();
-  lefrRead(fin, lef_file_name.c_str(), static_cast<lefiUserData>(tlib));
+  lefrRead(fin, lef_file_name.c_str(), static_cast<lefiUserData>(&tlib));
   fclose(fin);
 }
 
@@ -222,7 +215,7 @@ std::vector<LGraph *> Inou_lef::tolg() {
   std::vector<LGraph *> lgs;
   assert(opack.name != "");
 
-  lgs.push_back(LGraph::create(opack.path, opack.name));
+  lgs.push_back(LGraph::create(opack.path, opack.name, opack.lef_file));
   lef_parsing(lgs[0]->get_tech_library(), opack.lef_file);
   lgs[0]->sync();
 
