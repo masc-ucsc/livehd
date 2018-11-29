@@ -1,0 +1,17 @@
+$a   as __bits:2
+$b   as __bits:2
+$ci  as __bits:1
+%s   as __bits:2
+%co  as __bits:1
+x = fa.(a:$a[[0]], b:$b[[0]], ci:$ci)  //first instance?
+y = fa.(a:$a[[1]], b:$b[[1]], ci:x.co) //second instance?
+
+//more intuitive for Veriloger
+//fa_inst1 as fa
+//fa_inst2 as fa
+//x = fa_inst1.(a:$a[[0]], b:$b[[0]], ci:$ci)  //first instance?
+//y = fa_inst2.(a:$a[[1]], b:$b[[1]], ci:x.co) //second instance?
+
+%s[[0]] = x.s
+%s[[1]] = y.s
+%co = y.co
