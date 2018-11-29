@@ -133,32 +133,33 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs, unordered_ma
   /*
     create in/out GIO for every graph
   */
-  // I don't think we need to create GIO for CFG
-  // for(uint32_t i = 0; i < lgs.size(); i++) {
-  //  fmt::print("now process loop:{}\n", i);
-  //  //Graph input
-  //  Node gio_node_begn = lgs[i]->create_node();
-  //  lgs[i]->add_graph_input("ginp", gio_node_begn.get_nid(), 0, 0);
-  //  Index_ID src_nid = gio_node_begn.get_nid();
-  //  Index_ID dst_nid = nname2nid_lgs[i][nname_begn_lgs[i]];
-  //  lgs[i]->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+   for(uint32_t i = 0; i < lgs.size(); i++) {
+    fmt::print("now process loop:{}\n", i);
+    //Graph input
+    Node gio_node_begn = lgs[i]->create_node();
+    lgs[i]->add_graph_input("ginp", gio_node_begn.get_nid(), 0, 0);
+    Index_ID src_nid = gio_node_begn.get_nid();
+    Index_ID dst_nid = nname2nid_lgs[i][nname_begn_lgs[i]];
+    lgs[i]->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
 
-  //  //Graph output
-  //  Node gio_node_ed = lgs[i]->create_node();
-  //  lgs[i]->add_graph_output("gout", gio_node_ed.get_nid(), 0, 0);
-  //  src_nid = nid_end_lgs[i];
-  //  fmt::print("total node number:{}\n", nname2nid_lgs[0].size());
-  //  dst_nid = gio_node_ed.get_nid();
-  //  lgs[i]->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
-  //}
+    //Graph output
+    Node gio_node_ed = lgs[i]->create_node();
+    lgs[i]->add_graph_output("gout", gio_node_ed.get_nid(), 0, 0);
+    src_nid = nid_end_lgs[i];
+    fmt::print("total node number:{}\n", nname2nid_lgs[0].size());
+    dst_nid = gio_node_ed.get_nid();
+    lgs[i]->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+  }
 
-  // for(size_t i = 0; i < chain_stks_lgs.size(); i++) {
-  //  for(auto &x : chain_stks_lgs[i]) {
-  //    fmt::print("\ncurrent is chain_stks_lgs[{}], vid {} content is\n", i, x.first);
-  //    for(auto j = x.second.rbegin(); j != x.second.rend(); ++j)
-  //      fmt::print("{}\n", *j);
-  //  }
-  //}
+#if 0
+   for(size_t i = 0; i < chain_stks_lgs.size(); i++) {
+     for(auto &x : chain_stks_lgs[i]) {
+       fmt::print("\ncurrent is chain_stks_lgs[{}], vid {} content is\n", i, x.first);
+       for(auto j = x.second.rbegin(); j != x.second.rend(); ++j)
+         fmt::print("{}\n", *j);
+     }
+   }
+#endif
 
   update_ifs(lgs, nname2nid_lgs);
 }
