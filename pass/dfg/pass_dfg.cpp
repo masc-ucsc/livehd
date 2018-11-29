@@ -573,6 +573,8 @@ void Pass_dfg::add_abort_logic(LGraph *dfg, Aux_tree *aux_tree, const std::vecto
 }
 
 Index_ID Pass_dfg::find_cfg_root(const LGraph *cfg) {
+  // FIXME: This is VERY inneficient. Why is not the input from the graph?
+  // cfg->each_input([&idx] { ....
   for(auto idx : cfg->fast()) {
     if(cfg->is_root(idx))
       return idx;
