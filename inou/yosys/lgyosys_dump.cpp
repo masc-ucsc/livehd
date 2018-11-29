@@ -113,6 +113,25 @@ void Lgyosys_dump::create_blackbox(const LGraph &subgraph, RTLIL::Design *design
     created_blackboxes.insert(subgraph.get_name());
   }
 
+#if 1
+  subgraph.each_output([mod,&subgraph](Index_ID idx, Port_ID pid) {
+    std::string name = "\\";
+    name += subgraph.get_graph_output_name(idx);
+    RTLIL::Wire *wire = mod->addWire(name, subgraph.get_bits(idx));
+    wire->port_id     = pid;
+    wire->port_input  = false;
+    wire->port_output = true;
+  });
+
+  subgraph.each_input([mod,&subgraph](Index_ID idx, Port_ID pid) {
+    std::string name = "\\";
+    name += subgraph.get_graph_input_name(idx);
+    RTLIL::Wire *wire = mod->addWire(name, subgraph.get_bits(idx));
+    wire->port_id     = pid;
+    wire->port_input  = true;
+    wire->port_output = false;
+  });
+#else
   uint32_t port_idx = 0;
   for(auto &idx : subgraph.fast()) {
     if(subgraph.node_type_get(idx).op != GraphIO_Op)
@@ -128,6 +147,7 @@ void Lgyosys_dump::create_blackbox(const LGraph &subgraph, RTLIL::Design *design
     wire->port_input  = subgraph.is_graph_input(idx);
     wire->port_output = subgraph.is_graph_output(idx);
   }
+#endif
   mod->fixup_ports();
 }
 
