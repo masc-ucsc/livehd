@@ -49,9 +49,9 @@ vector<LGraph *> Inou_cfg::tolg() {
   }
 
   vector<LGraph *> lgs;
-  lgs.push_back(LGraph::create(opack.path, opack.name));
+  lgs.push_back(LGraph::create(opack.path, opack.name, cfg_file));
 
-  cfg_2_lgraph(&memblock, lgs, rename_tab);
+  cfg_2_lgraph(&memblock, lgs, rename_tab, cfg_file);
 
   for(LGraph *g : lgs)
     remove_fake_fcall(g);
@@ -73,7 +73,7 @@ void Inou_cfg::fromlg(vector<const LGraph *> &lgs) {
   assert(false); // Maybe in the future, we can generate a CFG from a cfg lgraph. Still not there
 }
 
-void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs, unordered_map<std::string, std::string> &rename_tab) {
+void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs, unordered_map<std::string, std::string> &rename_tab, const std::string &source) {
   string                              s;
   vector<map<string, Index_ID>>       nname2nid_lgs(1);  // lgs = graphs
   vector<map<string, vector<string>>> chain_stks_lgs(1); // chain_stacks for every graph, use vector to implement stack
@@ -87,7 +87,6 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs, unordered_ma
   char *str_ptr                  = nullptr;
 
   char *   p           = strtok_r(*memblock, "\n\r\f", &str_ptr);
-  uint32_t gsub_id_pre = 0;
 
   while(p) {
     vector<string> words = split(p);
@@ -109,7 +108,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs, unordered_ma
     string dfg_data = p;
 
     if(gsub_id != 0 && gsub_id >= lgs.size()) { // create new sub-graph if different scope id
-      LGraph *lg = LGraph::create(opack.path, "sub_method" + std::to_string(gsub_id));
+      LGraph *lg = LGraph::create(opack.path, "sub_method" + std::to_string(gsub_id), source);
       lgs.push_back(lg);
 
       fmt::print("lgs size:{}\n", lgs.size());
@@ -133,32 +132,33 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs, unordered_ma
   /*
     create in/out GIO for every graph
   */
-  // I don't think we need to create GIO for CFG
-  // for(uint32_t i = 0; i < lgs.size(); i++) {
-  //  fmt::print("now process loop:{}\n", i);
-  //  //Graph input
-  //  Node gio_node_begn = lgs[i]->create_node();
-  //  lgs[i]->add_graph_input("ginp", gio_node_begn.get_nid(), 0, 0);
-  //  Index_ID src_nid = gio_node_begn.get_nid();
-  //  Index_ID dst_nid = nname2nid_lgs[i][nname_begn_lgs[i]];
-  //  lgs[i]->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+   for(uint32_t i = 0; i < lgs.size(); i++) {
+    fmt::print("now process loop:{}\n", i);
+    //Graph input
+    Node gio_node_begn = lgs[i]->create_node();
+    lgs[i]->add_graph_input("ginp", gio_node_begn.get_nid(), 0, 0);
+    Index_ID src_nid = gio_node_begn.get_nid();
+    Index_ID dst_nid = nname2nid_lgs[i][nname_begn_lgs[i]];
+    lgs[i]->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
 
-  //  //Graph output
-  //  Node gio_node_ed = lgs[i]->create_node();
-  //  lgs[i]->add_graph_output("gout", gio_node_ed.get_nid(), 0, 0);
-  //  src_nid = nid_end_lgs[i];
-  //  fmt::print("total node number:{}\n", nname2nid_lgs[0].size());
-  //  dst_nid = gio_node_ed.get_nid();
-  //  lgs[i]->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
-  //}
+    //Graph output
+    Node gio_node_ed = lgs[i]->create_node();
+    lgs[i]->add_graph_output("gout", gio_node_ed.get_nid(), 0, 0);
+    src_nid = nid_end_lgs[i];
+    fmt::print("total node number:{}\n", nname2nid_lgs[0].size());
+    dst_nid = gio_node_ed.get_nid();
+    lgs[i]->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+  }
 
-  // for(size_t i = 0; i < chain_stks_lgs.size(); i++) {
-  //  for(auto &x : chain_stks_lgs[i]) {
-  //    fmt::print("\ncurrent is chain_stks_lgs[{}], vid {} content is\n", i, x.first);
-  //    for(auto j = x.second.rbegin(); j != x.second.rend(); ++j)
-  //      fmt::print("{}\n", *j);
-  //  }
-  //}
+#if 0
+   for(size_t i = 0; i < chain_stks_lgs.size(); i++) {
+     for(auto &x : chain_stks_lgs[i]) {
+       fmt::print("\ncurrent is chain_stks_lgs[{}], vid {} content is\n", i, x.first);
+       for(auto j = x.second.rbegin(); j != x.second.rend(); ++j)
+         fmt::print("{}\n", *j);
+     }
+   }
+#endif
 
   update_ifs(lgs, nname2nid_lgs);
 }

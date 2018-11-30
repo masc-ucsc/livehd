@@ -5,11 +5,15 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <dirent.h>
+#include <ftw.h>
+#include <string.h>
 
 #include <cstring>
 #include <cassert>
 #include <iostream>
 
+#include "thread_pool.hpp"
 #include "eprp_utils.hpp"
 
 std::vector<std::string> Eprp_utils::parse_files(const std::string &files, const std::string &module) {
@@ -50,5 +54,37 @@ std::string Eprp_utils::get_exe_path() {
 
 bool Eprp_utils::ends_with(const std::string &s, const std::string &suffix) {
   return s.rfind(suffix) == (s.size()-suffix.size());
+}
+
+static int rm_file(const char *pathname, const struct stat *sbuf, int type, struct FTW *ftwb) {
+  remove(pathname);
+  return 0;
+}
+
+static void clean_dir_thread(char *path) {
+  nftw(path, rm_file,10, FTW_DEPTH|FTW_MOUNT|FTW_PHYS);
+  free(path);
+}
+
+void Eprp_utils::clean_dir(const std::string &dir) {
+
+  const char *path = dir.c_str();
+
+  DIR* dirp = opendir(path);
+  if (dirp==0) {
+    mkdir(path,0755);
+    return;
+  }
+
+  // Rename, and allow a slow thread to delete it
+  char dtemp[] = "deleting_dir.XXXXXX";
+  char *dtemp2 = strdup(mkdtemp(dtemp));
+  rename(path,dtemp2);
+
+  mkdir(path,0755); // Create clean directory again
+
+  static Thread_pool tp(2); // Keep pool running for frequent calls
+
+  tp.add(clean_dir_thread,dtemp2);
 }
 

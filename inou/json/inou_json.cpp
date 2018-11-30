@@ -194,9 +194,13 @@ void Inou_json::tolg(Eprp_var &var) {
       continue;
     }
 
-    LGraph *lg = LGraph::create(path, name);
+    LGraph *lg = LGraph::create(path, name, f);
 
     FILE *                    pFile = fopen(f.c_str(), "rb");
+    if (pFile==0) {
+      Pass::error(fmt::format("Inou_json::tolg could not open {} file",f));
+      continue;
+    }
     char                      buffer[65536];
     rapidjson::FileReadStream is(pFile, buffer, sizeof(buffer));
     rapidjson::Document       document;
@@ -258,7 +262,7 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
         } else {
           /*normal operations*/
           if(g->node_type_get(idx).op == TechMap_Op) {
-            const Tech_cell *tcell = g->get_tlibrary()->get_const_cell(g->tmap_id_get(idx));
+            const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
             writer.String(tcell->get_name().c_str());
           } else {
             writer.String((g->node_type_get(idx).get_name().c_str()));

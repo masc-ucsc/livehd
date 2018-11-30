@@ -8,7 +8,6 @@
 
 class Pass {
 private:
-
   const std::string name;
 
 protected:
@@ -19,8 +18,7 @@ protected:
 
   bool setup_directory(const std::string &dir) const;
 public:
-  // FIXME: NASTY until we move all the pass/inou to the new pass interface
-  static Eprp eprp; // TODO: Shared with inou
+  static Eprp eprp;
 
   virtual void setup() = 0;
 

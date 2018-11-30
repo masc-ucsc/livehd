@@ -96,15 +96,16 @@ public:
     return lgraph_id;
   }
 
-  const Graph_library *get_library() const {
-    return library;
+  const Graph_library &get_library() const {
+    return *library;
   }
 
-  const Tech_library *get_tlibrary() const {
-    return tlibrary;
+  const Tech_library &get_tlibrary() const {
+    return *tlibrary;
   }
-  Tech_library *get_tech_library() {
-    return tlibrary;
+
+  Tech_library &get_tech_library() {
+    return *tlibrary;
   }
 
   const std::string &get_subgraph_name(Index_ID nid) const;

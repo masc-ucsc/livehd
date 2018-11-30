@@ -97,9 +97,9 @@ public:
       , finishing(false) {
 
     thread_count = _thread_count;
-    size_t lim   = (std::thread::hardware_concurrency() - 1) / 2;
+    size_t lim   = (std::thread::hardware_concurrency() - 1); // -1 for calling thread
 
-    if(thread_count > lim)
+    if(thread_count > lim || thread_count == 0)
       thread_count = lim;
     else if(thread_count < 1)
       thread_count = 1;
@@ -113,7 +113,10 @@ public:
   ~Thread_pool() {
     wait_all();
 
-    finishing = true;
+    {
+      std::lock_guard<std::mutex> lock(queue_mutex);
+      finishing = true;
+    }
     job_available_var.notify_all();
 
     for(auto &x : threads)
@@ -144,7 +147,6 @@ public:
         jobs_left--;
       }
     }
-    assert(jobs_left == 0);
   }
 };
 

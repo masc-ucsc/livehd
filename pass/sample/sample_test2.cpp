@@ -16,7 +16,7 @@ protected:
 
 TEST_F(SampleMainTest, EmptyLGraph) {
 
-  LGraph *g = LGraph::create("pass_test_lgdb", "empty");
+  LGraph *g = LGraph::create("pass_test_lgdb", "empty", "nosource");
 
   Pass_sample pass;
 

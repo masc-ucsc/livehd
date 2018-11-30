@@ -283,7 +283,7 @@ private:
     cell_types.clear();
     clean = true;
     // load();
-    load_json();
+    try_load_json();
   }
 
   static std::unordered_map<std::string, Tech_library *> instances;
@@ -294,7 +294,7 @@ private:
 public:
   std::string test_str;
   void        load();
-  void        load_json();
+  void        try_load_json();
 
   void sync() {
     if(!clean) {

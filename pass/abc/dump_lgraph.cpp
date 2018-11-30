@@ -79,7 +79,7 @@ void Pass_abc::gen_primary_io_from_abc(LGraph *new_graph, const LGraph *old_grap
 
 void Pass_abc::gen_comb_cell_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
   assert(old_graph);
-  const Tech_library *tlib  = new_graph->get_tlibrary();
+  const Tech_library &tlib  = new_graph->get_tlibrary();
   const Tech_cell *   tcell = nullptr;
   Abc_Obj_t *         pObj  = nullptr;
   int                 i, k = 0;
@@ -106,35 +106,35 @@ void Pass_abc::gen_comb_cell_from_abc(LGraph *new_graph, const LGraph *old_graph
 
       if(opack.liberty_file.empty()) {
         if(gate_name == ("BUF"))
-          tcell = tlib->get_const_cell(tlib->get_cell_id("$_BUF_"));
+          tcell = tlib.get_const_cell(tlib.get_cell_id("$_BUF_"));
         else if(gate_name == ("NOT"))
-          tcell = tlib->get_const_cell(tlib->get_cell_id("$_NOT_"));
+          tcell = tlib.get_const_cell(tlib.get_cell_id("$_NOT_"));
         else if(gate_name == ("AND"))
-          tcell = tlib->get_const_cell(tlib->get_cell_id("$_AND_"));
+          tcell = tlib.get_const_cell(tlib.get_cell_id("$_AND_"));
         else if(gate_name == ("NAND"))
-          tcell = tlib->get_const_cell(tlib->get_cell_id("$_NAND_"));
+          tcell = tlib.get_const_cell(tlib.get_cell_id("$_NAND_"));
         else if(gate_name == ("OR"))
-          tcell = tlib->get_const_cell(tlib->get_cell_id("$_OR_"));
+          tcell = tlib.get_const_cell(tlib.get_cell_id("$_OR_"));
         else if(gate_name == ("NOR"))
-          tcell = tlib->get_const_cell(tlib->get_cell_id("$_NOR_"));
+          tcell = tlib.get_const_cell(tlib.get_cell_id("$_NOR_"));
         else if(gate_name == ("XOR"))
-          tcell = tlib->get_const_cell(tlib->get_cell_id("$_XOR_"));
+          tcell = tlib.get_const_cell(tlib.get_cell_id("$_XOR_"));
         else if(gate_name == ("XNOR"))
-          tcell = tlib->get_const_cell(tlib->get_cell_id("$_XNOR_"));
+          tcell = tlib.get_const_cell(tlib.get_cell_id("$_XNOR_"));
         else if(gate_name == ("ANDNOT"))
-          tcell = tlib->get_const_cell(tlib->get_cell_id("$_ANDNOT_"));
+          tcell = tlib.get_const_cell(tlib.get_cell_id("$_ANDNOT_"));
         else if(gate_name == ("ORNOT"))
-          tcell = tlib->get_const_cell(tlib->get_cell_id("$_ORNOT_"));
+          tcell = tlib.get_const_cell(tlib.get_cell_id("$_ORNOT_"));
         else if(gate_name == ("AOI3"))
-          tcell = tlib->get_const_cell(tlib->get_cell_id("$_AOI3_"));
+          tcell = tlib.get_const_cell(tlib.get_cell_id("$_AOI3_"));
         else if(gate_name == ("OAI3"))
-          tcell = tlib->get_const_cell(tlib->get_cell_id("$_OAI3_"));
+          tcell = tlib.get_const_cell(tlib.get_cell_id("$_OAI3_"));
         else if(gate_name == ("AOI4"))
-          tcell = tlib->get_const_cell(tlib->get_cell_id("$_AOI4_"));
+          tcell = tlib.get_const_cell(tlib.get_cell_id("$_AOI4_"));
         else if(gate_name == ("OAI4"))
-          tcell = tlib->get_const_cell(tlib->get_cell_id("$_OAI4_"));
+          tcell = tlib.get_const_cell(tlib.get_cell_id("$_OAI4_"));
         else if(gate_name == ("MUX"))
-          tcell = tlib->get_const_cell(tlib->get_cell_id("$_MUX_"));
+          tcell = tlib.get_const_cell(tlib.get_cell_id("$_MUX_"));
         else if(gate_name == ("ONE")) {
           constnode = true;
         } else if(gate_name == ("ZERO")) {
@@ -142,7 +142,7 @@ void Pass_abc::gen_comb_cell_from_abc(LGraph *new_graph, const LGraph *old_graph
         } else
           assert(false);
       } else
-        tcell = tlib->get_const_cell(tlib->get_cell_id(gate_name));
+        tcell = tlib.get_const_cell(tlib.get_cell_id(gate_name));
 
       if(constnode) {
         std::string op = (gate_name == ("ONE")) ? "1" : "0";
@@ -166,7 +166,7 @@ void Pass_abc::gen_latch_from_abc(LGraph *new_graph, const LGraph *old_graph, Ab
     std::string latch_name(Abc_ObjName(pNet));
     Index_ID    cell_idx = new_graph->create_node().get_nid();
     new_graph->set_bits(cell_idx, 1);
-    auto tcell = old_graph->get_tlibrary()->get_const_cell(old_graph->tmap_id_get(graph_info->latchname2id[latch_name]));
+    auto tcell = old_graph->get_tlibrary().get_const_cell(old_graph->tmap_id_get(graph_info->latchname2id[latch_name]));
     new_graph->node_tmap_set(cell_idx, tcell->get_id());
     graph_info->cell2id[pNet]          = cell_idx;
     graph_info->cell_out_pid[cell_idx] = 0;
@@ -297,7 +297,7 @@ void Pass_abc::gen_subgraph_from_abc(LGraph *new_graph, const LGraph *old_graph,
   assert(old_graph);
   for(const auto &idx : graph_info->subgraph_id) {
 
-    std::string subgraph_name(old_graph->get_library()->get_name(old_graph->subgraph_id_get(idx)));
+    std::string subgraph_name(old_graph->get_library().get_name(old_graph->subgraph_id_get(idx)));
     Index_ID    new_subgraph_idx    = new_graph->create_node().get_nid();
     graph_info->subgraph_remap[idx] = new_subgraph_idx;
     new_graph->node_type_set(new_subgraph_idx, SubGraph_Op);
@@ -385,7 +385,7 @@ void Pass_abc::conn_latch(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t 
   int        i      = 0;
   Abc_NtkForEachLatch(pNtk, pLatch, i) {
     Index_ID         latch_new_idx = graph_info->cell2id[Abc_ObjFanout0(Abc_ObjFanout0(pLatch))];
-    const Tech_cell *tcell         = new_graph->get_tlibrary()->get_const_cell(new_graph->tmap_id_get(latch_new_idx));
+    const Tech_cell *tcell         = new_graph->get_tlibrary().get_const_cell(new_graph->tmap_id_get(latch_new_idx));
     std::string      trig_pin      = tcell->pin_name_exist("C") ? "C" : "E";
     Abc_Obj_t *      pNode         = Abc_ObjFanin0(Abc_ObjFanin0(pLatch));
 
