@@ -11,8 +11,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include "lglog.hpp"
-
 // Description:
 //
 // Graph_library is the base class to keep track of lgraph names, input, outputs.

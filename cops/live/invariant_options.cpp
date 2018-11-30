@@ -1,7 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+
+#include "pass.hpp"
+
 #include "invariant_options.hpp"
-#include "core/lglog.hpp"
 
 void Invariant_find_options::set(const std::string &key, const std::string &value) {
 
@@ -24,7 +26,7 @@ void Invariant_find_options::set(const std::string &key, const std::string &valu
     } else {
       set_val(key, value);
     }
-  } catch (const std::invalid_argument& ia) {
-    fmt::print("ERROR: key {} has an invalid argument {}\n", key);
+  } catch (const std::invalid_argument &ia) {
+    Pass::error(fmt::format("key {} has an invalid argument", key));
   }
 }

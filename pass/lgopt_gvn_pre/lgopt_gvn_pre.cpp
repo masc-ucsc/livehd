@@ -24,7 +24,6 @@ int main(int argc, const char **argv) {
   b.sample("setup");
 
   for(auto g : lgs) {
-    console->info("processing {}\n", g->get_name());
     gvn_pre.transform(g);
   }
 

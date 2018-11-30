@@ -102,7 +102,7 @@ void LGraph_Base::get_lock() {
   std::string lock = path + "/" + long_name + ".lock";
   int         err  = ::open(lock.c_str(), O_CREAT | O_EXCL, 420); // 644
   if(err < 0) {
-    Pass::error(fmt::format("Could not get lock:{}. Already running? Unclear exit?", lock.c_str()));
+    Pass::error("Could not get lock:{}. Already running? Unclear exit?", lock.c_str());
     assert(false); // ::error raises an exception
   }
   ::close(err);
@@ -706,7 +706,7 @@ Index_ID LGraph_Base::add_edge_int(Index_ID dst_nid, Port_ID inp_pid, Index_ID s
 
 #ifndef NDEBUG
   if(dst_nid == src_nid)
-    Pass::warn(fmt::format("add_edge_int to itself dst_nid:{} out_pid:{} src_nid{} inp_pid:{}", dst_nid, out_pid, src_nid, inp_pid));
+    Pass::warn("add_edge_int to itself dst_nid:{} out_pid:{} src_nid{} inp_pid:{}", dst_nid, out_pid, src_nid, inp_pid);
 #endif
 
   // WARNING: Graph IO have alphabetical port IDs assigned to be mapped between

@@ -49,74 +49,11 @@ const Tech_cell *Tech_library::get_const_cell(uint16_t cell_id) const {
   return &(cell_types.at(cell_id));
 }
 
-#if 0
-void Tech_library::load() {
-
-  std::string full_path = (lgdb + "/" + lib_file);
-  std::ifstream tech_lib_f(full_path.c_str());
-
-  if(!tech_lib_f.good()) {
-    return;
-  }
-  tech_lib_f.close();
-
-  YAML::Node yfile;
-  try {
-    yfile = YAML::LoadFile(full_path);
-  } catch(YAML::ParserException& e) {
-    std::cerr << e.what() << std::endl;
-    console->error("ERROR: invalid syntax in the internal techlib file {}\n", full_path);
-  }
-
-  std::vector<std::string> inputs;
-  std::vector<std::string> outputs;
-  Tech_cell* tcell;
-  for(const auto &node:yfile) {
-    assert(node.Type() == YAML::NodeType::Map);
-
-    for(YAML::const_iterator it2=node.begin();it2!=node.end();++it2) {
-      std::string key = it2->first.as<std::string>();
-
-      if(key == "cell") {
-        // FIXME: Put cell names in a sorted array first. Then populate calling create_cell_id. The
-        // reason is that no matter the order of the names, the cell id should be the same (or
-        // problems in mapping would happen)
-
-        tcell = get_cell(create_cell_id(it2->second.as<std::string>()));
-      } else if(key == "inps") {
-        for(const auto &inp : it2->second) {
-          inputs.push_back(inp.as<std::string>());
-        }
-      } else if(key == "outs") {
-        for(const auto &oup : it2->second) {
-          outputs.push_back(oup.as<std::string>());
-        }
-      } else {
-        console->error("Error parsing internal tech library, unrecognized option {}\n", key);
-      }
-    }
-    for(const auto& inp : inputs) {
-      tcell->set_direction(tcell->add_pin(inp), Tech_cell::Direction::input);
-    }
-    for(const auto& oup : outputs) {
-      tcell->set_direction(tcell->add_pin(oup), Tech_cell::Direction::output);
-    }
-    tcell = nullptr;
-    inputs.clear();
-    outputs.clear();
-  }
-
-  tech_lib_f.close();
-  clean = true;
-}
-#endif
-
 void Tech_library::try_load_json() {
   std::string full_path = (lgdb + "/" + lib_file);
 
   FILE *pFile = fopen(full_path.c_str(), "rb");
   if(!pFile) {
-    // ok
     return;
   }
 
@@ -125,47 +62,49 @@ void Tech_library::try_load_json() {
   rapidjson::Document       document;
   document.ParseStream<0, rapidjson::UTF8<>, rapidjson::FileReadStream>(is);
   if(document.HasParseError()) {
-    console->error("TechLibrary reading error \"{}\", offset: {}\n", rapidjson::GetParseError_En(document.GetParseError()),
-                   static_cast<unsigned>(document.GetErrorOffset()));
-    exit(-1);
+    Pass::error(fmt::format("TechLibrary reading error \"{}\", offset: {}"
+          , rapidjson::GetParseError_En(document.GetParseError())
+          , static_cast<unsigned>(document.GetErrorOffset())));
+    return;
 
-  } else {
-    std::vector<std::string> inputs;
-    std::vector<std::string> outputs;
-    Tech_cell *              tcell;
-    assert(document.HasMember("cells"));
-    const rapidjson::Value &nodeArray = document["cells"];
-
-    assert(nodeArray.IsArray());
-    for(const auto &nodes : nodeArray.GetArray()) {
-      assert(nodes.IsObject());
-
-      assert(nodes.HasMember("cell"));
-      tcell = get_cell(create_cell_id(nodes["cell"].GetString()));
-      if(nodes.HasMember("inps")) {
-        assert(nodes["inps"].IsArray());
-        for(const auto &inp : nodes["inps"].GetArray()) {
-          inputs.emplace_back(inp.GetString());
-        }
-      }
-      if(nodes.HasMember("outs")) {
-        assert(nodes["outs"].IsArray());
-        for(const auto &oup : nodes["outs"].GetArray()) {
-          outputs.emplace_back(oup.GetString());
-        }
-      }
-
-      for(const auto &inp : inputs) {
-        tcell->add_pin(inp, Tech_cell::Direction::input);
-      }
-      for(const auto &oup : outputs) {
-        tcell->add_pin(oup, Tech_cell::Direction::output);
-      }
-
-      inputs.clear();
-      outputs.clear();
-    }
   }
+
+  std::vector<std::string> inputs;
+  std::vector<std::string> outputs;
+  Tech_cell *              tcell;
+  assert(document.HasMember("cells"));
+  const rapidjson::Value &nodeArray = document["cells"];
+
+  assert(nodeArray.IsArray());
+  for(const auto &nodes : nodeArray.GetArray()) {
+    assert(nodes.IsObject());
+
+    assert(nodes.HasMember("cell"));
+    tcell = get_cell(create_cell_id(nodes["cell"].GetString()));
+    if(nodes.HasMember("inps")) {
+      assert(nodes["inps"].IsArray());
+      for(const auto &inp : nodes["inps"].GetArray()) {
+        inputs.emplace_back(inp.GetString());
+      }
+    }
+    if(nodes.HasMember("outs")) {
+      assert(nodes["outs"].IsArray());
+      for(const auto &oup : nodes["outs"].GetArray()) {
+        outputs.emplace_back(oup.GetString());
+      }
+    }
+
+    for(const auto &inp : inputs) {
+      tcell->add_pin(inp, Tech_cell::Direction::input);
+    }
+    for(const auto &oup : outputs) {
+      tcell->add_pin(oup, Tech_cell::Direction::output);
+    }
+
+    inputs.clear();
+    outputs.clear();
+  }
+
   fclose(pFile);
   clean = true;
 }

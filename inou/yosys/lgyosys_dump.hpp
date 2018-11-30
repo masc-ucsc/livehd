@@ -68,7 +68,7 @@ public:
   void fromlg(std::vector<const LGraph *> &out) final {
     for(const auto &g : out) {
       if(!g) {
-        console->warn("lgraph not found\n");
+        ::Pass::warn("null lgraph (ignoring)");
         continue;
       }
       std::cout << g->get_name() << std::endl;

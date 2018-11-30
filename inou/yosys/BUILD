@@ -23,6 +23,7 @@ linkso(
         "//meta:meta",
         "//eprp:eprp",
         "//elab:elab",
+        "@fmt//:fmt",
     ],
     static = [" "],
     visibility = ["//visibility:public"],

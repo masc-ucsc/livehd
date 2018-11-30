@@ -503,7 +503,7 @@ void Pass_bitwidth::do_trans(LGraph *lg) {
 
     bool done = bw_pass_iterate(lg);
     if(!done) {
-      console->error("could not converge in the iterations FIXME: dump nice message on why\n");
+      Pass::error("could not converge in the iterations FIXME: dump nice message on why");
     }
   }
 

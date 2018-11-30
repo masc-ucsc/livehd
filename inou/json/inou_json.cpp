@@ -340,8 +340,8 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
 
   fs.open(filename, std::ios::out | std::ios::trunc);
   if(!fs.is_open()) {
-    console->error("ERROR: could not open json file [{}]\n", filename);
-    exit(-4);
+    Pass::error("ERROR: could not open json file {}", filename);
+    return;
   }
   fs << s.GetString() << std::endl;
   fs.close();

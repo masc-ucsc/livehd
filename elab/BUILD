@@ -5,8 +5,7 @@ cc_library(
     hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
     includes = ["."],
-    deps = ["@spdlog//:headers",
-    #"//core:core",
+    deps = ["@fmt//:fmt",
     ]
 )
 

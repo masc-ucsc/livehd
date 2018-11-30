@@ -8,8 +8,8 @@ Live_stitcher::Live_stitcher(Stitch_pass_options &pack) {
   std::ifstream    invariant_file(pack.boundaries_name);
 
   if(!invariant_file.good()) {
-    console->error("Error reading boundaries file {}\n", pack.boundaries_name);
-    exit(1);
+    Pass::error(fmt::format("Live_stitcher: Error reading boundaries file {}", pack.boundaries_name));
+    return;
   }
 
   boundaries = Invariant_boundaries::deserialize(invariant_file);
@@ -18,8 +18,7 @@ Live_stitcher::Live_stitcher(Stitch_pass_options &pack) {
   original = LGraph::open(pack.osynth_lgdb, boundaries->top);
 
   if(!original) {
-    console->error("I was not able to open original synthesized netlist {} in {}\n", boundaries->top, pack.osynth_lgdb);
-    exit(1);
+    Pass::error(fmt::format("Live_stitcher: I was not able to open original synthesized netlist {} in {}", boundaries->top, pack.osynth_lgdb));
   }
 }
 
@@ -49,7 +48,7 @@ void Live_stitcher::stitch(LGraph *nsynth, const std::set<Net_ID>& diffs) {
       } else if(original->has_name(name)) {
         inp2originalid[idx] = original->get_node_id(name);
       } else {
-        //console->error("Wire {} not found in original synthesized graph\n",name);
+        //Pass::>error("Wire {} not found in original synthesized graph\n",name);
       }
 
     } else {
@@ -73,7 +72,7 @@ void Live_stitcher::stitch(LGraph *nsynth, const std::set<Net_ID>& diffs) {
         break;
 
       default:
-        console->error("Unsupported synthesized type\n");
+        Pass::error("live.stitcher: unsupported synthesized type");
       }
     }
   }

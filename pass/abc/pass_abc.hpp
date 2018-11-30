@@ -294,29 +294,7 @@ private:
 
   void write_src_info(const LGraph *g, const Pass_abc::index_offset &inp, std::ofstream &fs);
 
-  void gen_generic_lib(const std::string &buffer) {
-    FILE *f = fopen(buffer.c_str(), "wt");
-    if(f == NULL)
-      console->error("Opening {} for writing failed: {}\n", buffer.c_str(), strerror(errno));
-    fprintf(f, "GATE ZERO    1 Y=CONST0;\n");
-    fprintf(f, "GATE ONE     1 Y=CONST1;\n");
-    fprintf(f, "GATE BUF    1 Y=A;                  PIN * NONINV  1 999 1 0 1 0\n");
-    fprintf(f, "GATE NOT    2 Y=!A;                 PIN * INV     1 999 1 0 1 0\n");
-    fprintf(f, "GATE AND    4 Y=A*B;                PIN * NONINV  1 999 1 0 1 0\n");
-    fprintf(f, "GATE NAND   4 Y=!(A*B);             PIN * INV     1 999 1 0 1 0\n");
-    fprintf(f, "GATE OR     4 Y=A+B;                PIN * NONINV  1 999 1 0 1 0\n");
-    fprintf(f, "GATE NOR    4 Y=!(A+B);             PIN * INV     1 999 1 0 1 0\n");
-    fprintf(f, "GATE XOR    8 Y=(A*!B)+(!A*B);      PIN * UNKNOWN 1 999 1 0 1 0\n");
-    fprintf(f, "GATE XNOR   8 Y=(A*B)+(!A*!B);      PIN * UNKNOWN 1 999 1 0 1 0\n");
-    fprintf(f, "GATE ANDNOT 4 Y=A*!B;               PIN * UNKNOWN 1 999 1 0 1 0\n");
-    fprintf(f, "GATE ORNOT  4 Y=A+!B;               PIN * UNKNOWN 1 999 1 0 1 0\n");
-    fprintf(f, "GATE AOI3   6 Y=!((A*B)+C);         PIN * INV     1 999 1 0 1 0\n");
-    fprintf(f, "GATE OAI3   6 Y=!((A+B)*C);         PIN * INV     1 999 1 0 1 0\n");
-    fprintf(f, "GATE AOI4   8 Y=!((A*B)+(C*D));     PIN * INV     1 999 1 0 1 0\n");
-    fprintf(f, "GATE OAI4   8 Y=!((A+B)*(C+D));     PIN * INV     1 999 1 0 1 0\n");
-    fprintf(f, "GATE MUX    4 Y=(A*B)+(S*B)+(!S*A); PIN * UNKNOWN 1 999 1 0 1 0\n");
-    fclose(f);
-  }
+  void gen_generic_lib(const std::string &buffer) const;
 };
 
 #endif

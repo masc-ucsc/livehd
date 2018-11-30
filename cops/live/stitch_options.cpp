@@ -1,7 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "pass.hpp"
+
 #include "stitch_options.hpp"
-#include "core/lglog.hpp"
 
 void Stitch_pass_options::set(const std::string &key, const std::string &value) {
 
@@ -18,8 +19,7 @@ void Stitch_pass_options::set(const std::string &key, const std::string &value) 
       else if(value == "Structural")
         method = Live_method::Structural;
       else {
-        console->error("Unrecognized option for stitch operation in incremental flow {}\n",value);
-        exit(-1);
+        Pass::error(fmt::format("Unrecognized option for stitch operation in incremental flow",value));
       }
     } else if (is_opt(key, "diff")) {
       diff_file = value;
@@ -27,6 +27,6 @@ void Stitch_pass_options::set(const std::string &key, const std::string &value) 
       set_val(key, value);
     }
   } catch (const std::invalid_argument& ia) {
-    fmt::print("ERROR: key {} has an invalid argument {}\n", key);
+    Pass::error(fmt::format("ERROR: key {} has an invalid argument {}", key));
   }
 }

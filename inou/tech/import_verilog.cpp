@@ -19,7 +19,7 @@ void Import_verilog::update() {
   std::ifstream input_file(opack.file_path);
 
   if(!input_file.good()) {
-    console->error("Unable to open technology file {}\n", opack.file_path);
+    Pass::error("Import_verilog: unable to open technology file {}", opack.file_path);
   }
 
   input_file.close();

@@ -10,7 +10,6 @@
 
 #include "char_array.hpp"
 #include "graph_library.hpp"
-#include "lglog.hpp"
 #include "lgraph_base_core.hpp"
 #include "nodetype.hpp"
 #include "tech_library.hpp"

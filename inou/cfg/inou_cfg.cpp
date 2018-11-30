@@ -36,7 +36,7 @@ vector<LGraph *> Inou_cfg::tolg() {
   const auto &cfg_file = opack.file;
   int         fd       = open(cfg_file.c_str(), O_RDONLY);
   if(fd < 0) {
-    console->error("cannot find input file {}\n", cfg_file);
+    Pass::error("cannot find input file {}", cfg_file);
     exit(-3);
   }
   struct stat sb;
@@ -44,7 +44,7 @@ vector<LGraph *> Inou_cfg::tolg() {
 
   char *memblock = (char *)mmap(nullptr, sb.st_size, PROT_WRITE, MAP_PRIVATE, fd, 0);
   if(memblock == MAP_FAILED) {
-    console->error("error, mmap failed\n");
+    Pass::error("error, mmap failed");
     exit(-3);
   }
 
@@ -494,5 +494,5 @@ void Inou_cfg_options::set(const std::string &key, const std::string &value) {
       set_val(key, value);
 
   } catch(const std::invalid_argument &ia) { fmt::print("ERROR: key {} has an invalid argument {}\n", key); }
-  console->warn("inou_cfg file:{} path:{} name:{}", file, path, name);
+  Pass::warn("inou_cfg file:{} path:{} name:{}", file, path, name);
 }

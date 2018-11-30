@@ -11,7 +11,7 @@
 void Pass_abc::from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
 
   if(!Abc_NtkIsAigNetlist(pNtk) && !Abc_NtkIsMappedNetlist(pNtk)) {
-    console->error("Io_WriteVerilog(): Can produce Verilog for mapped or AIG netlists only.\n");
+    Pass::error("Io_WriteVerilog(): Can produce Verilog for mapped or AIG netlists only.");
     return;
   }
 

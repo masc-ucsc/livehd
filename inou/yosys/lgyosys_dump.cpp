@@ -900,7 +900,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         module->addMod(next_id(), lhs, rhs, cell_output_map[std::make_pair(idx, 0)], sign);
         break;
       default:
-        console->error("Internal Error!");
+        ::Pass::error("lgyosys_dump: internal error!");
       }
       break;
     }

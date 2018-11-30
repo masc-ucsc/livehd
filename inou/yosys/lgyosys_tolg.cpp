@@ -226,8 +226,8 @@ static void set_bits_wirename(LGraph *g, const Index_ID idx, const RTLIL::Wire *
   if(!g->is_graph_input(idx) && !g->is_graph_output(idx)) {
 #ifndef NDEBUG
     if(g->get_bits(idx) != 0 && g->get_bits(idx) != wire->width)
-      console->warn("A previous number of bits was assigned to node %ld (yosys wirename %s) and it differs from the number being "
-                    "assigned now\n",
+      ::Pass::warn("A previous number of bits was assigned to node %ld (yosys wirename %s) and it differs from the number being "
+                    "assigned now",
                     idx, &wire->name.c_str()[1]);
 #endif
     g->set_bits(idx, wire->width);
@@ -309,8 +309,8 @@ static bool is_black_box_output(const RTLIL::Module *module, const RTLIL::Cell *
   if(wire2lpin.find(wire) != wire2lpin.end())
     return false;
 
-  console->error("Could not find a definition for module {}, treating as a blackbox but could not determine whether {} is an input "
-                 "or an output\n",
+  ::Pass::error("Could not find a definition for module {}, treating as a blackbox but could not determine whether {} is an input "
+                 "or an output",
                  cell->type.str(), port_name.str());
   log_error("unknown port %s at module %s cell %s\n", port_name.c_str(), module->name.c_str(), cell->type.c_str());
   assert(false); // FIXME: is it possible to resolve this case?
@@ -332,8 +332,8 @@ static bool is_black_box_input(const RTLIL::Module *module, const RTLIL::Cell *c
   if(wire->port_input)
     return true;
 
-  console->error("Could not find a definition for module {}, treating as a blackbox but could not determine whether {} is an input "
-                 "or an output\n",
+  ::Pass::error("Could not find a definition for module {}, treating as a blackbox but could not determine whether {} is an input "
+                 "or an output",
                  cell->type.str(), port_name.str());
   log_error("unknown port %s at module %s cell %s\n", port_name.c_str(), module->name.c_str(), cell->type.c_str());
   assert(false); // FIXME: is it possible to resolve this case?
@@ -967,9 +967,7 @@ static LGraph *process_module(RTLIL::Module *module) {
 
     } else {
       // blackbox addition
-#ifndef NDEBUG
-      console->info("Black box addition from yosys frontend, cell type {} not found\n", cell->type.c_str());
-#endif
+      ::Pass::info("Black box addition from yosys frontend, cell type {} not found", cell->type.c_str());
 
       op = BlackBox_Op;
       connect_string(g, &(cell->type.c_str()[1]), onid, 0);
@@ -1241,10 +1239,6 @@ struct Yosys2lg_Pass : public Yosys::Pass {
       RTLIL::Module *module = it.second;
       log("yosys2lg NOT look_for_cell_outputs pass for module %s:\n", module->name.c_str());
       if(design->selected_module(it.first)) {
-#ifndef NDEBUG
-        log("yosys2lg look_for_cell_outputs pass for module %s:\n", module->name.c_str());
-        console->info("now processing module {}\n", module->name.str());
-#endif
         look_for_cell_outputs(module);
         LGraph *g = process_module(module);
 

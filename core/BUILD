@@ -8,7 +8,6 @@ cc_library(
     deps = ["@sparsehash//:headers",
             "@bm//:headers",
             "@rapidjson//:headers",
-            "@spdlog//:headers",
             "//eprp:eprp",
             ],
 )

@@ -1,26 +1,26 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "diff_finder.hpp"
-#include "lgedgeiter.hpp"
-
-#include "graph_library.hpp"
 #include "stdlib.h"
+#include "lgedgeiter.hpp"
+#include "graph_library.hpp"
+#include "pass.hpp"
 
-using namespace Live;
+#include "diff_finder.hpp"
 
+using namespace Live; // REVIEW: NOT so nice to use "using namespace"
 
 Diff_finder::Diff_finder(Live_pass_options pack) {
 
   std::ifstream  invariant_file(pack.boundaries_name);
   if(!invariant_file.good()) {
-    console->error("Error reading boundaries file {}\n", pack.boundaries_name);
-    exit(1);
+    Pass::error("Diff_finder: Error reading boundaries file {}", pack.boundaries_name);
+    return;
   }
 
   try {
     boundaries = Invariant_boundaries::deserialize(invariant_file);
   } catch(const std::exception &e) {
-    console->warn("There was an error de-serializing the boundaries file {}\n", pack.boundaries_name);
+    Pass::warn("Diff_finder: There was an error de-serializing the boundaries file {}", pack.boundaries_name);
   }
   invariant_file.close();
 
@@ -28,12 +28,12 @@ Diff_finder::Diff_finder(Live_pass_options pack) {
   synth    = LGraph::open(pack.synth_lgdb, boundaries->top);
 
   if(!original) {
-    console->error("I was not able to open original netlist {} in {}\n", boundaries->top, pack.original_lgdb);
-    exit(1);
+    Pass::error("Diff_finder: not able to open original netlist {} in {}", boundaries->top, pack.original_lgdb);
+    return;
   }
   if(!synth) {
-    console->error("I was not able to open synthesized netlist {} in {}\n", boundaries->top, pack.synth_lgdb);
-    exit(1);
+    Pass::error("Diff_finder: not able to open synthesized netlist {} in {}", boundaries->top, pack.synth_lgdb);
+    return;
   }
 }
 
@@ -538,7 +538,7 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
           new_module->node_const_type_set(idx, original->node_const_value_get(node.idx));
           break;
         default:
-          console->error("Node type unrecognized {}\n", original->node_type_get(node.idx).op);
+          Pass::error("Diff_finder::generate_modules: node type unrecognized {}", original->node_type_get(node.idx).op);
           break;
         }
       }

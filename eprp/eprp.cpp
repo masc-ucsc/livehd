@@ -2,9 +2,7 @@
 #include <ctype.h>
 #include <algorithm>
 
-#include "spdlog/spdlog.h"
 #include "eprp.hpp"
-
 
 void Eprp::eat_comments() {
   while(scan_is_token(TOK_COMMENT) && !scan_is_end())

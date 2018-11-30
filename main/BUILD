@@ -4,7 +4,7 @@ cc_binary(
     name = "lgshell",
     srcs = glob(["*.cpp"],exclude=["*test*.cpp"])
           +glob(["*_api.hpp"]),
-    deps = ["@spdlog//:headers",
+    deps = [
             "@replxx//:replxx",
             "@mustache//:headers",
             "//elab:elab",
