@@ -263,8 +263,9 @@ void Lgyosys_dump::create_subgraph(const LGraph *g, RTLIL::Module *module, Index
   if(subgraph == nullptr) {
     // FIXME: prevent loading the whole graph just to read the IOs if
     // hierarchy is set to false
-    std::string subgraph_name = g->get_subgraph_name(idx);
-    subgraph                  = LGraph::create(g->get_path(), subgraph_name);
+    const std::string &subgraph_name = g->get_subgraph_name(idx);
+    const std::string &source = g->get_library().get_source(subgraph_name);
+    subgraph                  = LGraph::create(g->get_path(), subgraph_name, source);
   }
   if(hierarchy) {
     _subgraphs.insert(subgraph);
@@ -299,7 +300,7 @@ void Lgyosys_dump::create_subgraph(const LGraph *g, RTLIL::Module *module, Index
 void Lgyosys_dump::create_subgraph_outputs(const LGraph *g, RTLIL::Module *module, Index_ID idx) {
   assert(g->node_type_get(idx).op == SubGraph_Op);
 
-  std::string subgraph_name = g->get_library()->get_name(g->subgraph_id_get(idx));
+  std::string subgraph_name = g->get_library().get_name(g->subgraph_id_get(idx));
   LGraph *    subgraph      = LGraph::open(g->get_path(), subgraph_name);
   assert(subgraph);
   std::set<Port_ID> visited_out_pids;
@@ -383,7 +384,7 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module *module) {
 
     } else if(g->node_type_get(idx).op == TechMap_Op) {
 
-      const Tech_cell *tcell = g->get_tlibrary()->get_const_cell(g->tmap_id_get(idx));
+      const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
 
       std::set<Port_ID> visited_out_pids;
 
@@ -1086,7 +1087,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
     }
     case TechMap_Op: {
 
-      const Tech_cell *tcell = g->get_tlibrary()->get_const_cell(g->tmap_id_get(idx));
+      const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
 
       RTLIL::IdString instance_name("\\tmp");
       if(g->get_instance_name_id(idx) == 0 || std::string(g->get_node_instancename(idx)) == "") {

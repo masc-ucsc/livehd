@@ -421,7 +421,7 @@ static void look_for_cell_outputs(RTLIL::Module *module) {
 #endif
 
   auto *              g    = module2graph[&module->name.c_str()[1]];
-  const Tech_library *tlib = g->get_tlibrary();
+  const Tech_library &tlib = g->get_tlibrary();
   for(auto cell : module->cells()) {
 
     // pre-allocates nodes for each cell
@@ -437,16 +437,16 @@ static void look_for_cell_outputs(RTLIL::Module *module) {
     if(cell->type.c_str()[0] == '\\' || cell->type.str().substr(0, 8) == "$paramod")
       sub_graph = LGraph::open(g->get_path(), mod_name);
 
-    if(!sub_graph && tlib->include(cell->type.str())) {
-      tcell = tlib->get_const_cell(tlib->get_cell_id(cell->type.str()));
+    if(!sub_graph && tlib.include(cell->type.str())) {
+      tcell = tlib.get_const_cell(tlib.get_cell_id(cell->type.str()));
     }
 
-    if(!sub_graph && !tcell && tlib->include(mod_name)) {
-      tcell = tlib->get_const_cell(tlib->get_cell_id(mod_name));
+    if(!sub_graph && !tcell && tlib.include(mod_name)) {
+      tcell = tlib.get_const_cell(tlib.get_cell_id(mod_name));
     }
 
-    if(!sub_graph && !tcell && tlib->include(mod_name.substr(1))) {
-      tcell = tlib->get_const_cell(tlib->get_cell_id(mod_name.substr(1)));
+    if(!sub_graph && !tcell && tlib.include(mod_name.substr(1))) {
+      tcell = tlib.get_const_cell(tlib.get_cell_id(mod_name.substr(1)));
     }
 
     blackbox = (!sub_graph) && (!tcell) && (cell->type.c_str()[0] == '\\');
@@ -646,7 +646,7 @@ static LGraph *process_module(RTLIL::Module *module) {
   std::string name = &module->name.c_str()[1];
   assert(module2graph.find(name) != module2graph.end());
   auto *              g     = module2graph[name];
-  const Tech_library *tlib  = g->get_tlibrary();
+  const Tech_library &tlib  = g->get_tlibrary();
   const Tech_cell *   tcell = nullptr;
 
   process_assigns(module, g);
@@ -910,28 +910,28 @@ static LGraph *process_module(RTLIL::Module *module) {
         fmt::print("yosys2lg got empty inst_name for cell type {}\n", mod_name);
 #endif
 
-    } else if(tlib->include(cell->type.str())) {
+    } else if(tlib.include(cell->type.str())) {
       std::string ttype = cell->type.str();
       op                = TechMap_Op;
-      tcell             = tlib->get_const_cell(tlib->get_cell_id(ttype));
+      tcell             = tlib.get_const_cell(tlib.get_cell_id(ttype));
 
       std::string inst_name = cell->name.str().substr(1);
       if(inst_name != "" && inst_name.substr(0, 5) != "auto$" && inst_name.substr(0, 4) != "abc$")
         g->set_node_instance_name(inid, inst_name.c_str());
 
-    } else if(tlib->include(cell->type.str().substr(1))) {
+    } else if(tlib.include(cell->type.str().substr(1))) {
       std::string ttype = cell->type.str().substr(1);
       op                = TechMap_Op;
-      tcell             = tlib->get_const_cell(tlib->get_cell_id(ttype));
+      tcell             = tlib.get_const_cell(tlib.get_cell_id(ttype));
 
       std::string inst_name = cell->name.str().substr(1);
       if(inst_name != "" && inst_name.substr(0, 5) != "auto$" && inst_name.substr(0, 4) != "abc$")
         g->set_node_instance_name(inid, inst_name.c_str());
 
-    } else if(tlib->include(cell->type.str().substr(2))) {
+    } else if(tlib.include(cell->type.str().substr(2))) {
       std::string ttype = cell->type.str().substr(2);
       op                = TechMap_Op;
-      tcell             = tlib->get_const_cell(tlib->get_cell_id(ttype));
+      tcell             = tlib.get_const_cell(tlib.get_cell_id(ttype));
 
       std::string inst_name = cell->name.str().substr(1);
       if(inst_name != "" && inst_name.substr(0, 5) != "auto$" && inst_name.substr(0, 4) != "abc$")
@@ -1185,7 +1185,7 @@ static LGraph *process_module(RTLIL::Module *module) {
 }
 
 // each pass contains a singleton object that is derived from Pass
-struct Yosys2lg_Pass : public Pass {
+struct Yosys2lg_Pass : public Yosys::Pass {
   Yosys2lg_Pass()
       : Pass("yosys2lg") {
   }
@@ -1228,7 +1228,7 @@ struct Yosys2lg_Pass : public Pass {
       std::string    name   = &module->name.c_str()[1];
       assert(module2graph.find(name) == module2graph.end());
 
-      auto *g            = LGraph::create(path, name);
+      auto *g            = LGraph::create(path, name, "yosys");
       module2graph[name] = g;
       log("yosys2lg look_for_module_outputs pass for module %s:\n", module->name.c_str());
       look_for_module_outputs(module, path);

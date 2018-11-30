@@ -7,6 +7,7 @@ cc_library(
     includes = ["."],
     deps = ["@spdlog//:headers",
             "//elab:elab",
+            "//task:task",
     ]
 )
 

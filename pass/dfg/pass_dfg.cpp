@@ -21,16 +21,16 @@ void Pass_dfg::generate(Eprp_var &var) {
 
   std::vector<LGraph *> lgs;
   for(auto &g : var.lgs) {
-    if(Eprp_utils::ends_with(g->get_name(), std::string("_cfg"))) {
+    if(!Eprp_utils::ends_with(g->get_name(), std::string("_cfg")))
+      continue;
 
-      const std::string name = g->get_name().substr(0, g->get_name().size() - 4);
-      const std::string path = var.get("path");
+    const std::string name = g->get_name().substr(0, g->get_name().size() - 4);
+    const std::string path = var.get("path");
 
-      LGraph *dfg = LGraph::create(path, name);
-      assert(dfg);
-      p.do_generate(g, dfg);
-      lgs.push_back(dfg);
-    }
+    LGraph *dfg = LGraph::create(path, name, g->get_name());
+    assert(dfg);
+    p.do_generate(g, dfg);
+    lgs.push_back(dfg);
   }
 
   if(lgs.empty()) {
@@ -107,12 +107,11 @@ void Pass_dfg::trans(LGraph *dfg) {
 
   for(auto idx : dfg->fast()) {
     for(const auto &out : dfg->out_edges(idx)) {
-      Index_ID src_nid = idx;
-      Index_ID dst_nid = out.get_idx();
-      Port_ID  src_pid = out.get_out_pin().get_pid();
-      // Port_ID  dst_pid      = out.get_inp_pin().get_pid();
-      uint16_t src_nid_size = dfg->get_bits(src_nid);
-      uint16_t dst_nid_size = dfg->get_bits(dst_nid);
+      //Index_ID dst_nid = out.get_idx();
+      //Port_ID  src_pid = out.get_out_pin().get_pid();
+      //Port_ID  dst_pid      = out.get_inp_pin().get_pid();
+      //uint16_t src_nid_size = dfg->get_bits(idx);
+      //uint16_t dst_nid_size = dfg->get_bits(dst_nid);
 
       // if Equals_Op -> set bit_width = 1
       if(dfg->node_type_get(idx).op == Mux_Op) {
@@ -139,8 +138,7 @@ void Pass_dfg::do_pseudo_bitwidth(LGraph *dfg) {
     for(const auto &out : dfg->out_edges(idx)) {
       Index_ID src_nid = idx;
       Index_ID dst_nid = out.get_idx();
-      Port_ID  src_pid = out.get_inp_pin().get_pid();
-      fmt::print("do_pseudo_bit idx:{} pid1:{} pid2:{}\n", idx, out.get_out_pin().get_pid(), out.get_inp_pin().get_pid());
+      Port_ID  src_pid = out.get_out_pin().get_pid();
       //Port_ID  dst_pid = out.get_inp_pin().get_pid();
       uint16_t src_nid_size = dfg->get_bits(src_nid);
       uint16_t dst_nid_size = dfg->get_bits(dst_nid);

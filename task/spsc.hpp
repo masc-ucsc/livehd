@@ -41,6 +41,7 @@
 #include <atomic>
 
 template <typename T> class spsc {
+  spsc() = delete;
 public:
   spsc(size_t size)
       : _size(size)

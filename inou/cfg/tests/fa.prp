@@ -1,0 +1,8 @@
+$a  as __bits:1
+$b  as __bits:1
+$ci as __bits:1
+%s  as __bits:1
+%co as __bits:1
+
+%s = $a xor $b xor $ci
+%co = ($a and $b) or ($ci and ($a xor $b))

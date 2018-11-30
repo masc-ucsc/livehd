@@ -13,7 +13,6 @@ protected:
 public:
   Inou() { }
 
-  // Input modules like random graph generation (must call console->sync at the end)
   virtual std::vector<LGraph *> tolg() = 0;
   // Output modules like to verilog target
   virtual void                  fromlg(std::vector<const LGraph *> &out) = 0;

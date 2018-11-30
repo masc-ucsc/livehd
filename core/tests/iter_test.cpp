@@ -11,7 +11,7 @@ void generate_graphs(int n) {
 
   for(int i = 0; i < n; i++) {
     std::string           gname = "test_" + std::to_string(i);
-    LGraph *              g     = LGraph::create("core_test_lgdb", gname);
+    LGraph *              g     = LGraph::create("core_test_lgdb", gname, "test");
     std::vector<Index_ID> nodes;
 
     int inps = 10 + rand_r(&rseed) % 100;
@@ -122,7 +122,7 @@ bool bwd(int n) {
 
 bool simple() {
   std::string gname = "simple_iter";
-  LGraph *    g     = LGraph::create("core_test_lgdb", gname);
+  LGraph *    g     = LGraph::create("core_test_lgdb", gname, "test");
 
   g->add_graph_input("i0", 0, 1, 0); // 1
   g->add_graph_input("i1", 0, 1, 0); // 2
