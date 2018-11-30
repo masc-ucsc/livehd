@@ -13,7 +13,6 @@ fm_*.tcl
 perf.data*
 coverage*.info
 compile_commands.json
-.ycm_extra_conf.py
 bazel-*
 dist
 *.egg-info
