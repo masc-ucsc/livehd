@@ -40,7 +40,7 @@ int main(int argc, const char **argv) {
     Import_verilog worker(opack);
     worker.update();
   } else {
-    console->error("Tech file type not supported yet!\n");
+    Pass::error("import_library: tech file type not supported yet!");
   }
 
   return 0;

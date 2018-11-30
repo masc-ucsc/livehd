@@ -28,16 +28,38 @@ public:
   static void warn(const std::string &msg) {
     eprp.parser_warn(msg);
   }
-
-  template<typename Arg1, typename... Args>
-  void error(const char *fmt, const Arg1 &, const Args &... args) {
-    eprp.parser_error(fmt::format(fmt, args...));
+  static void info(const std::string &msg) {
+#ifndef NDEBUG
+    eprp.parser_info(msg);
+#endif
   }
 
-  template<typename Arg1, typename... Args>
-  void warn(const char *fmt, const Arg1 &, const Args &... args) {
-    eprp.parser_warn(fmt::format(fmt, args...));
+  static void error(const char *msg) {
+    eprp.parser_error(std::string(msg));
   }
+  static void warn(const char *msg) {
+    eprp.parser_warn(std::string(msg));
+  }
+  static void info(const char *msg) {
+#ifndef NDEBUG
+    eprp.parser_info(std::string(msg));
+#endif
+  }
+
+  template <typename... Args>
+    static void error(const char *format, const Args & ... args) {
+      eprp.parser_error(fmt::vformat(format, fmt::make_format_args(args...)));
+    }
+
+  template <typename... Args>
+    static void warn(const char *format, const Args & ... args) {
+      eprp.parser_warn(fmt::vformat(format, fmt::make_format_args(args...)));
+    }
+
+  template <typename... Args>
+    static void info(const char *format, const Args & ... args) {
+      eprp.parser_info(fmt::vformat(format, fmt::make_format_args(args...)));
+    }
 
 };
 

@@ -116,7 +116,7 @@ void Pass_gvn_pre::build_sets(LGraph *g) {
       int          i = 1;
       for(const auto &in_edge : g->inp_edges(idx)) {
         if(i > 1) {
-          console->error("Error: This Not Op node has more than 1 input.\n");
+          Pass::error("pass_gvn_pre: This Not Op node has more than 1 input");
           assert(0);
         } else {
           // for each operand
@@ -158,7 +158,7 @@ void Pass_gvn_pre::build_sets(LGraph *g) {
       // make exception for IO, make the op type as invalid for general
       // Expression_Node new_enode(g->node_type_get(idx).op, new_pin_vec);
       if(op_leader_map.count(new_pin)) {
-        console->error("Error: this IO was enmaped.\n");
+        Pass::error("gnv_pre: this IO was enmaped");
         new_pin.print_info();
         assert(0);
       } else {
@@ -180,7 +180,7 @@ void Pass_gvn_pre::build_sets(LGraph *g) {
     case StrConst_Op:
       break;
     default:
-      console->warn("Unsuported OP {}.\n", g->node_type_get(idx).get_name());
+      Pass::error("gvn_pre: Unsuported OP {}", g->node_type_get(idx).get_name());
     }
   }
 }

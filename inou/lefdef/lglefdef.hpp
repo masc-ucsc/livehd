@@ -207,8 +207,8 @@ void lef_parsing(Tech_library *tlib, std::string lef_file_name) {
 
   FILE *fin = fopen(lef_file, "r");
   if(fin == NULL) {
-    console->error("Couldn't open lef input file {}\n", lef_file_name);
-    exit(1);
+    Pass::error("lglefdef: could not open lef input file {}", lef_file_name);
+    return;
   }
 
   lefrSetMacroBeginCbk(lef_macro_begin_cb);
@@ -352,8 +352,8 @@ void def_parsing(Def_info &dinfo, std::string def_file_name) {
 
   FILE *fin = fopen(def_file, "r");
   if(fin == NULL) {
-    console->error("Couldn't open def input file {}\n", def_file_name);
-    exit(1);
+    Pass::error("lglefdef: could not open def input file {}", def_file_name);
+    return;
   }
 
   defrSetDesignCbk(def_design_cb);

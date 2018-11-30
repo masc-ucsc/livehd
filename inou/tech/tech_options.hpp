@@ -2,9 +2,9 @@
 #ifndef TECH_OPTIONS_H
 #define TECH_OPTIONS_H
 
-#include "lglog.hpp"
+#include "pass.hpp"
+
 #include "options.hpp"
-#include <boost/filesystem.hpp>
 
 typedef enum { Verilog, LEF, Liberty } Tech_file_type;
 
@@ -30,7 +30,7 @@ public:
     if(vm.count("tech_file")) {
       file_path = vm["tech_file"].as<std::string>();
     } else {
-      console->error("tech_file is required\n");
+      Pass::error("tech_file is required");
     }
 
     if(vm.count("tech_type")) {
@@ -43,22 +43,22 @@ public:
       } else if(stype == "lef" || stype == "LEF") {
         type = Tech_file_type::LEF;
       } else {
-        console->error("The file type specified {} is not supported.\n", vm["tech_type"].as<std::string>());
+        Pass::error("The file type specified {} is not supported", vm["tech_type"].as<std::string>());
       }
     } else {
       std::string extension = boost::filesystem::extension(file_path);
 
       if(extension == ".v" || extension == ".sv") {
         type = Tech_file_type::Verilog;
-        console->info("A tech file type was not specified, from the file extension, assuming it is Verilog\n");
+        Pass::info("A tech file type was not specified, from the file extension, assuming it is Verilog");
       } else if(extension == ".lib") {
         type = Tech_file_type::Liberty;
-        console->info("A tech file type was not specified, from the file extension, assuming it is LIberty\n");
+        Pass::info("A tech file type was not specified, from the file extension, assuming it is LIberty");
       } else if(extension == ".lef") {
         type = Tech_file_type::LEF;
-        console->info("A tech file type was not specified, from the file extension, assuming it is LEF\n");
+        Pass::info("A tech file type was not specified, from the file extension, assuming it is LEF");
       } else {
-        console->error("A tech file type was not specified and it was not possible to infer a type from the file extension\n");
+        Pass::error("A tech file type was not specified and it was not possible to infer a type from the file extension");
       }
     }
   }

@@ -24,8 +24,8 @@ Sat_pass_pack::Sat_pass_pack(int argc, const char **argv) {
     sat_lgdb = vm["sat_lgdb"].as<std::string>();
     std::cout << " after sat......" << std::endl;
   } else {
-    console->error("sat_lgdb is required\n");
-    exit(-1);
+    Pass::error("sat_lgdb is required");
+    return;
   }
   std::cout << " before lock....." << std::endl;
   Options::setup_lock();

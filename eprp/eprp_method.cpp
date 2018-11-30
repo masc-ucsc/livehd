@@ -1,5 +1,6 @@
 
-#include "spdlog/spdlog.h"
+#include "elab_scanner.hpp"
+
 #include "eprp_method.hpp"
 
 Eprp_method::Eprp_method(const std::string &_name, const std::string &_help, std::function<void(Eprp_var &var)> _method)

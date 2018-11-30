@@ -42,9 +42,7 @@ void Invariant_finder::get_topology() {
       for(auto &prefix : boundaries.instance_collection[Invariant_boundaries::get_graphID(current)]) {
         std::string instance_name;
         if(current->get_instance_name_id(idx) == 0) {
-#ifdef DEBUG
-          console->info("RTP got node with no instance name {}\n", idx);
-#endif
+          Pass::info("RTP got node with no instance name {}", idx);
           continue;
         }
 

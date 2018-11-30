@@ -6,10 +6,10 @@
 #include <algorithm>
 #include <string>
 
+#include <cassert>
 #include <map>
 #include <unordered_map>
-
-#include "lglog.hpp"
+#include <vector>
 
 class Tech_cell {
 public:

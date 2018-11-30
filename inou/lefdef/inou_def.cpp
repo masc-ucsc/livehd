@@ -5,26 +5,6 @@
 #include "lgraph.hpp"
 
 Inou_def_options_pack ::Inou_def_options_pack() {
-  // TODO this needs to be converted to the new eprp options
-  /*
-  Options::get_desc()->add_options()("lef_file,l", boost::program_options::value(&lef_file), "lef input <filename> for
-  graph")("def_file,d", boost::program_options::value(&def_file), "def input <filename> for graph");
-
-  boost::program_options::variables_map vm;
-  boost::program_options::store(boost::program_options::command_line_parser(Options::get_cargc(),
-  Options::get_cargv()).options(*Options::get_desc()).allow_unregistered().run(), vm); if(vm.count("lef_file")) { lef_file =
-  vm["lef_file"].as<std::string>(); } else { console->error("lef_file is required\n"); assert(false);
-  }
-
-  if(vm.count("def_file")) {
-    def_file = vm["def_file"].as<std::string>();
-  } else {
-    console->error("def_file is required\n");
-    assert(false);
-  }
-
-  console->info("lef_file:{} def_file:{} ", lef_file, def_file);
-  */
 }
 
 Inou_def::Inou_def() {

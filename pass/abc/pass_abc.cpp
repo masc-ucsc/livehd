@@ -78,7 +78,7 @@ void Pass_abc::trans(LGraph *lg) {
 LGraph *Pass_abc::regen(const LGraph *lg) {
 
   if(!is_techmap(lg)) {
-    console->error("pass_abc.regen supports techmap graphs only\n");
+    Pass::error("pass_abc.regen: supports techmap graphs only");
     return 0;
   }
 
@@ -525,25 +525,23 @@ bool Pass_abc::is_techmap(const LGraph *g) {
           case TechMap_Op: {
             const Tech_cell *tcell     = g->get_tlibrary().get_const_cell(g->tmap_id_get(out.get_idx()));
             std::string      cell_name = tcell->get_name();
-            console->error("nodeID:{} type:Join_Op has output to idx:{} cell_name: {}; mismatch in data width!\n", idx,
-                           out.get_idx(), cell_name);
+            Pass::error("nodeID:{} type:Join_Op has output to idx:{} cell_name: {}; mismatch in data width!" , idx, out.get_idx(), cell_name);
             is_valid_input = false;
             break;
           }
           case U32Const_Op: {
-            console->error("nodeID:{} type:Join_Op has output to a U32ConstNode:{}; undefined behavior!\n", idx, out.get_idx());
+            Pass::error("nodeID:{} type:Join_Op has output to a U32ConstNode:{}; undefined behavior!", idx, out.get_idx());
             is_valid_input = false;
             break;
           }
           case StrConst_Op: {
-            console->error("nodeID:{} type:Join_Op has output to a StrConstNode:{}; undefined behavior!\n", idx, out.get_idx());
+            Pass::error("nodeID:{} type:Join_Op has output to a StrConstNode:{}; undefined behavior!", idx, out.get_idx());
             is_valid_input = false;
             break;
           }
           case GraphIO_Op: {
             if(g->get_bits(out.get_idx()) != width) {
-              console->error("nodeID:{} type:Join_Op has output to a GraphIONode:{}; mismatch in data width!\n", idx,
-                             out.get_idx());
+              Pass::error("nodeID:{} type:Join_Op has output to a GraphIONode:{}; mismatch in data width!", idx, out.get_idx());
               is_valid_input = false;
             }
             break;
@@ -575,7 +573,7 @@ bool Pass_abc::is_techmap(const LGraph *g) {
       break;
     }
     default: {
-      console->error("nodeID:{} op is not supported, opType is {}\n", idx, g->node_type_get(idx).get_name().c_str());
+      Pass::error("Pass_abc: nodeID:{} op is not supported, opType is {}", idx, g->node_type_get(idx).get_name().c_str());
       is_valid_input = false;
       break;
     }
@@ -604,20 +602,20 @@ Abc_Ntk_t *Pass_abc::to_abc(const LGraph *g) {
   gen_netList(g, pAig);
   Abc_NtkFinalizeRead(pAig);
   if(!Abc_NtkCheck(pAig)) {
-    console->error("The AIG construction has failed.\n");
+    Pass::error("Pass_abc.to_abc: AIG construction has failed");
     Abc_NtkDelete(pAig);
     exit(-4);
   }
 
-  char       Command[1000]; // FIXME: use string (no limit)
+  char       command[8192]; // FIXME: use string (no limit)
   Abc_Ntk_t *pTemp = pAig;
   pAig             = Abc_NtkToLogic(pTemp);
   Abc_FrameClearVerifStatus(pAbc);
   Abc_FrameSetCurrentNetwork(pAbc, pAig);
   if(!opack.liberty_file.empty()) {
-    sprintf(Command, "read_lib -w %s", opack.liberty_file.c_str());
-    if(Cmd_CommandExecute(pAbc, Command)) {
-      console->error("Cannot execute command {}", Command);
+    sprintf(command, "read_lib -w %s", opack.liberty_file.c_str());
+    if(Cmd_CommandExecute(pAbc, command)) {
+      Pass::error("Pass_abc.to_abc: Cannot execute read_lib command {}", command);
     }
   } else {
     gen_generic_lib("stdcells.genlib");
@@ -633,23 +631,23 @@ Abc_Ntk_t *Pass_abc::to_abc(const LGraph *g) {
   }
 
   if(Cmd_CommandExecute(pAbc, synthesis_command.c_str())) {
-    console->error("Cannot execute command {}", synthesis_command);
+    Pass::error("Pass_abc.to_abc: Cannot execute synthesis command {}", synthesis_command);
   }
 
-  sprintf(Command, "write_blif %s/%s_post.blif;write_verilog %s/%s_post.v;", path_name.c_str(), g->get_name().c_str(),
+  sprintf(command, "write_blif %s/%s_post.blif;write_verilog %s/%s_post.v;", path_name.c_str(), g->get_name().c_str(),
           path_name.c_str(), g->get_name().c_str());
-  if(Cmd_CommandExecute(pAbc, Command)) {
-    console->error("Cannot execute command {}", Command);
+  if(Cmd_CommandExecute(pAbc, command)) {
+    Pass::error("Pass_abc.to_abc: Cannot execute write_blif command {}", command);
   }
 
   if(Cmd_CommandExecute(pAbc, mapping_command.c_str())) {
-    console->error("Cannot execute command", mapping_command);
+    Pass::error("Pass_abc.to_abc: Cannot execute mapping command {}", mapping_command);
   }
 
-  sprintf(Command, "write_blif %s/%s_map.blif;write_verilog %s/%s_map.v", path_name.c_str(), g->get_name().c_str(),
+  sprintf(command, "write_blif %s/%s_map.blif;write_verilog %s/%s_map.v", path_name.c_str(), g->get_name().c_str(),
           path_name.c_str(), g->get_name().c_str());
-  if(Cmd_CommandExecute(pAbc, Command)) {
-    console->error("Cannot execute command", Command);
+  if(Cmd_CommandExecute(pAbc, command)) {
+    Pass::error("Pass_abc.to_abc: Cannot execute mapping command {}", command);
   }
 
   assert(pAbc != nullptr);
@@ -657,8 +655,8 @@ Abc_Ntk_t *Pass_abc::to_abc(const LGraph *g) {
   Abc_Ntk_t *pNtkMapped = nullptr;
   pNtkMapped            = Abc_NtkToNetlist(Abc_FrameReadNtk(pAbc));
   if(pNtkMapped == nullptr) {
-    console->error("Converting to netlist has failed.\n");
-    exit(-4);
+    Pass::error("pass_abc.to_abc: converting to netlist has failed");
+    return pNtkMapped;
   }
   if(!Abc_NtkHasAig(pNtkMapped) && !Abc_NtkHasMapping(pNtkMapped)) {
     Abc_NtkToAig(pNtkMapped);
@@ -680,26 +678,17 @@ Abc_Ntk_t *Pass_abc::to_abc(const LGraph *g) {
  * description: build the netlist
  ***********************************************************************/
 void Pass_abc::gen_netList(const LGraph *g, Abc_Ntk_t *pAig) {
-  console->info("Pass_abc::gen_primary_io_from_lgraph():Lgraph is calling ABC API to create Primary inputs & outputs");
+
   gen_primary_io_from_lgraph(g, pAig);
-  console->info("Pass_abc::gen_latch_from_lgraph():Lgraph is calling ABC API to create latches");
   gen_latch_from_lgraph(g, pAig);
-  console->info("Pass_abc::gen_comb_cell_from_lgraph():Lgraph is calling ABC API to create combinational cells");
   gen_comb_cell_from_lgraph(g, pAig);
 
-  console->info("Pass_abc::conn_combinational_cell():Lgraph is calling ABC API to connect all combinational cells");
   conn_combinational_cell(g, pAig);
-  console->info("Pass_abc::conn_latch():Lgraph is calling ABC API to connect all latches");
   conn_latch(g, pAig);
-  console->info("Pass_abc::conn_primary_output():Lgraph is calling ABC API to connect all primary outputs");
   conn_primary_output(g, pAig);
-  console->info("Pass_abc::conn_subgraph():Lgraph is calling ABC API to connect all subgraph");
   conn_subgraph(g, pAig);
-  console->info("Pass_abc::conn_memory():Lgraph is calling ABC API to connect all memory");
   conn_memory(g, pAig);
-  console->info("Pass_abc::conn_clock():Lgraph is calling ABC API to create clock network if generated clock exsit");
   conn_clock(g, pAig);
-  console->info("Pass_abc::conn_reset():Lgraph is calling ABC API to create reset network if generated clock exsit");
   conn_reset(g, pAig);
 }
 
@@ -907,7 +896,7 @@ void Pass_abc::gen_latch_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
         Abc_ObjAssignName(pNet, namebuffer, NULL);
         break;
       } else {
-        console->error("Cannot find register name in the lgraph? check Pass_yosys? Use random generated name from ABC\n");
+        Pass::error("Cannot find register name in the lgraph? check Pass_yosys? Use random generated name from ABC");
       }
     }
     std::string latch_name(Abc_ObjName(pNet));
@@ -1049,7 +1038,7 @@ void Pass_abc::gen_comb_cell_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
     } else if(tcell->get_name() == "$_MUX_") {
       graph_info->combinational_cell[idx] = LGraph_CreateMUX(pAig);
     } else {
-      console->error("Unknown cell type!!!!");
+      Pass::error("pass_abc: unknown cell {} type!", tcell->get_name());
     }
   }
 }
@@ -1374,4 +1363,31 @@ void Pass_abc::conn_clock(const LGraph *g, Abc_Ntk_t *pAig) {
       Abc_ObjAssignName(Abc_ObjFanin0Ntk(generated_clock), (char *)clock_name.c_str(), NULL);
     }
   }
+}
+
+void Pass_abc::gen_generic_lib(const std::string &buffer) const {
+
+  FILE *f = fopen(buffer.c_str(), "wt");
+  if(f == NULL)
+    Pass::error("Opening {} for writing failed: {}", buffer.c_str(), strerror(errno));
+
+  fprintf(f, "GATE ZERO    1 Y=CONST0;\n");
+  fprintf(f, "GATE ONE     1 Y=CONST1;\n");
+  fprintf(f, "GATE BUF    1 Y=A;                  PIN * NONINV  1 999 1 0 1 0\n");
+  fprintf(f, "GATE NOT    2 Y=!A;                 PIN * INV     1 999 1 0 1 0\n");
+  fprintf(f, "GATE AND    4 Y=A*B;                PIN * NONINV  1 999 1 0 1 0\n");
+  fprintf(f, "GATE NAND   4 Y=!(A*B);             PIN * INV     1 999 1 0 1 0\n");
+  fprintf(f, "GATE OR     4 Y=A+B;                PIN * NONINV  1 999 1 0 1 0\n");
+  fprintf(f, "GATE NOR    4 Y=!(A+B);             PIN * INV     1 999 1 0 1 0\n");
+  fprintf(f, "GATE XOR    8 Y=(A*!B)+(!A*B);      PIN * UNKNOWN 1 999 1 0 1 0\n");
+  fprintf(f, "GATE XNOR   8 Y=(A*B)+(!A*!B);      PIN * UNKNOWN 1 999 1 0 1 0\n");
+  fprintf(f, "GATE ANDNOT 4 Y=A*!B;               PIN * UNKNOWN 1 999 1 0 1 0\n");
+  fprintf(f, "GATE ORNOT  4 Y=A+!B;               PIN * UNKNOWN 1 999 1 0 1 0\n");
+  fprintf(f, "GATE AOI3   6 Y=!((A*B)+C);         PIN * INV     1 999 1 0 1 0\n");
+  fprintf(f, "GATE OAI3   6 Y=!((A+B)*C);         PIN * INV     1 999 1 0 1 0\n");
+  fprintf(f, "GATE AOI4   8 Y=!((A*B)+(C*D));     PIN * INV     1 999 1 0 1 0\n");
+  fprintf(f, "GATE OAI4   8 Y=!((A+B)*(C+D));     PIN * INV     1 999 1 0 1 0\n");
+  fprintf(f, "GATE MUX    4 Y=(A*B)+(S*B)+(!S*A); PIN * UNKNOWN 1 999 1 0 1 0\n");
+  fclose(f);
+
 }

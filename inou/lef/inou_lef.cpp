@@ -15,9 +15,11 @@ void Inou_lef_options::set(const std::string &key, const std::string &value) {
     } else {
       set_val(key, value);
     }
-  } catch(const std::invalid_argument &ia) { fmt::print("ERROR: key {} has an invalid argument {}\n", key); }
+  } catch(const std::invalid_argument &ia) {
+    Pass::error("inou_lef: key {} has an invalid argument {}", key);
+  }
 
-  console->info("inou_lef lef_file:{} path:{} name:{}", lef_file, path, name);
+  Pass::info("inou_lef lef_file:{} path:{} name:{}", lef_file, path, name);
 }
 
 static int lef_macro_begin_cb(lefrCallbackType_e c, const char *macroName, lefiUserData ud);
@@ -198,8 +200,8 @@ void Inou_lef::lef_parsing(Tech_library &tlib, std::string &lef_file_name) {
   lefrInit();
   fin = fopen(lef_file_name.c_str(), "rb");
   if(fin == nullptr) {
-    console->error("could not open lef_file {}", lef_file_name);
-    exit(-4);
+    Pass::error("Inou_lef: could not open lef_file {}", lef_file_name);
+    return;
   }
   lefrSetMacroBeginCbk(lef_macro_begin_cb);
   lefrSetMacroCbk(lef_macro_cb);

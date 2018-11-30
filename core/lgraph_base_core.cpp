@@ -40,4 +40,3 @@ Fast_edge_iterator Lgraph_base_core::fast() const {
   return Fast_edge_iterator(fast_next(0), this); // Skip after 1, but first may be deleted, so fast_next
 }
 
-int Console_init::_static_initializer = Console_init::initialize_logger();

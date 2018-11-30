@@ -4,7 +4,6 @@
 #include <functional>
 
 #include "pass.hpp"
-#include "spdlog/spdlog.h"
 
 class Main_api {
 protected:

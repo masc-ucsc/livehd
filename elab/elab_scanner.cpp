@@ -367,6 +367,10 @@ void Elab_scanner::scan_warn(const std::string &text) const {
     exit(-3);
 }
 
+void Elab_scanner::parser_info(const std::string &text) const {
+  scan_raw_msg("info", text, true);
+}
+
 void Elab_scanner::parser_error(const std::string &text) const {
   scan_raw_msg("error", text, false);
   n_errors++;

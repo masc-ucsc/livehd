@@ -61,15 +61,15 @@ LGraph *LGraph::open(const std::string &path, int lgid) {
 void LGraph::rename(const std::string &path, const std::string &orig, const std::string &dest) {
   LGraph *lg = Graph_library::try_find_lgraph(path,orig);
   if (lg) {
-    Pass::error(fmt::format("lgraph::rename failed for {}/{} because the lgraph is open",path,orig));
+    Pass::error("lgraph::rename failed for {}/{} because the lgraph is open",path,orig);
     return;
   }
 
   bool valid = Graph_library::instance(path)->rename_name(orig, dest);
   if(valid)
-    Pass::warn(fmt::format("lgraph::rename find original graph {} in path {}", orig, path));
+    Pass::warn("lgraph::rename find original graph {} in path {}", orig, path);
   else
-    Pass::error(fmt::format("cannot find original graph {} in path {}", orig, path));
+    Pass::error("cannot find original graph {} in path {}", orig, path);
 }
 
 LGraph *LGraph::open(const std::string &path, const std::string &name) {
@@ -86,7 +86,7 @@ LGraph *LGraph::open(const std::string &path, const std::string &name) {
 
   std::string lock = path + "/lgraph_" + name + ".lock";
   if (access(lock.c_str(),R_OK)!=-1) {
-    Pass::error(fmt::format("trying to open a locked {} (broken?) graph {}", lock, name));
+    Pass::error("trying to open a locked {} (broken?) graph {}", lock, name);
     return 0;
   }
   const auto &source = Graph_library::instance(path)->get_source(name);

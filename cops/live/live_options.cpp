@@ -1,7 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "pass.hpp"
+
 #include "live_options.hpp"
-#include "core/lglog.hpp"
 
 void Live_pass_options::set(const std::string &key, const std::string &value) {
 
@@ -22,6 +23,6 @@ void Live_pass_options::set(const std::string &key, const std::string &value) {
       set_val(key, value);
     }
   } catch (const std::invalid_argument& ia) {
-    fmt::print("ERROR: key {} has an invalid argument {}\n", key);
+    Pass::error(fmt::format("Live_pass_options: key {} has an invalid argument", key));
   }
 }

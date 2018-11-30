@@ -73,7 +73,7 @@ void Inou_graphviz::do_fromlg(std::vector<const LGraph *> &lgs) {
     std::string file = odir + "/" + g->get_name() + ".dot";
     int         fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
     if(fd < 0) {
-      console->error("inou.graphviz unable to create {}", file);
+      Pass::error("inou.graphviz unable to create {}", file);
       return;
     }
     write(fd, data.c_str(), data.size());

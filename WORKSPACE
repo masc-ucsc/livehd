@@ -32,11 +32,11 @@ new_git_repository(
     #strip_prefix = "kernel",
 )
 new_git_repository(
-    name = "spdlog",
-    build_file = "BUILD.spdlog",
-    commit = "226d5a1d36ff310a0bd0f30a73a9421d02156483", # Oct 11, 2018 
-    remote = "https://github.com/gabime/spdlog.git",
-    strip_prefix = "include",
+    name = "fmt",
+    build_file = "BUILD.fmt",
+    commit = "a084495d7e35436304e9ad0df999e06b2faf2a0b", # Nov 29, 2018
+    remote = "https://github.com/fmtlib/fmt.git",
+    #strip_prefix = "include",
 )
 new_git_repository(
     name = "sparsehash",

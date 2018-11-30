@@ -1,17 +1,19 @@
 
+#include "pass.hpp"
+
 #include "invariant.hpp"
 
 int main(int argc, char** argv) {
 
   if(argc != 2) {
-    console->error("invariant stats takes exactly one argument\n");
+    Pass::error("invariant stats takes exactly one argument");
     exit(1);
   }
   std::string bounds_name = argv[1];
 
   std::ifstream ifs(bounds_name);
   if(!ifs.good()) {
-    console->error("there was an issue opening the file {}\n", bounds_name);
+    Pass::error(fmt::format("there was an issue opening the file {}", bounds_name));
     exit(2);
   }
 

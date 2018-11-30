@@ -3,11 +3,11 @@
 #define LGEDGE_H
 
 #include <cstdint>
-
 #include <iostream>
 #include <vector>
 
-#include "lglog.hpp"
+#define FMT_STRING_ALIAS 1
+#include "fmt/format.h"
 
 typedef uint64_t Index_ID;
 typedef int64_t  SIndex_ID; // Short Edge must be signed +- offset

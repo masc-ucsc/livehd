@@ -10,8 +10,8 @@ Live_structural::Live_structural(Stitch_pass_options &pack) {
   std::ifstream    invariant_file(pack.boundaries_name);
 
   if(!invariant_file.good()) {
-    console->error("Error reading boundaries file {}\n", pack.boundaries_name);
-    exit(1);
+    Pass::error(fmt::format("Error reading boundaries file {}", pack.boundaries_name));
+    return;
   }
 
   boundaries = Invariant_boundaries::deserialize(invariant_file);
@@ -20,8 +20,7 @@ Live_structural::Live_structural(Stitch_pass_options &pack) {
   original = LGraph::open(pack.osynth_lgdb, boundaries->top);
 
   if(!original) {
-    console->error("I was not able to open original synthesized netlist {} in {}\n", boundaries->top, pack.osynth_lgdb);
-    exit(1);
+    Pass::error(fmt::format("I was not able to open original synthesized netlist {} in {}", boundaries->top, pack.osynth_lgdb));
   }
 }
 

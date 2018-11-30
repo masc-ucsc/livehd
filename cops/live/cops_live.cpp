@@ -97,7 +97,7 @@ void Cops_live::netlist_merge(Eprp_var &var) {
     worker.replace(pack.nsynth_lgdb);
 
   } else {
-    console->error("Unsupported stitch method {}\n", pack.method);
+    Pass::error(fmt::format("cops.live: unsupported stitch method {}", pack.method));
     return;
   }
 

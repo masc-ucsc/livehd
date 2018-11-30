@@ -8,7 +8,8 @@
 #include <vector>
 #include <map>
 
-#include "spdlog/spdlog.h"
+#define FMT_STRING_ALIAS 1
+#include "fmt/format.h"
 
 #define MIN_CHUNK_SIZE 4
 
@@ -122,6 +123,7 @@ public:
 
   void parser_error(const std::string &text) const;
   void parser_warn(const std::string &text) const;
+  void parser_info(const std::string &text) const;
 
   bool scan_next();
 
