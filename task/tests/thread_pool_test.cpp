@@ -32,7 +32,7 @@ TEST_F(GTest1, interface) {
   total = 0;
 
   Thread_pool pool;
-  int         JOB_COUNT = 8000000;
+  int         JOB_COUNT = 200000;
 
   Test1 t1;
   t1.a = 0;
