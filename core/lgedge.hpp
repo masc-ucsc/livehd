@@ -163,7 +163,7 @@ protected:
 #pragma clang diagnostic pop
   Index_ID get_page_idx() const;
 
-  Port_ID get_out_pid() const;
+  Port_ID get_dst_pid() const;
 
   Port_ID get_inp_pid() const {
     const SEdge_Internal *s = reinterpret_cast<const SEdge_Internal *>(this);
@@ -174,7 +174,7 @@ protected:
     return l->get_inp_pid();
   }
 
-  const Edge *find_edge(const Edge *bt, const Edge *et, Index_ID ptr_nid, Port_ID inp_pod, Port_ID out_pid) const;
+  const Edge *find_edge(const Edge *bt, const Edge *et, Index_ID ptr_nid, Port_ID inp_pod, Port_ID dst_pid) const;
 
   const Edge &get_reverse_for_deletion() const;
 
@@ -206,17 +206,17 @@ public:
     assert(snode == reinterpret_cast<const SEdge_Internal *>(this)->is_snode());
   }
 
-  // Output edge: inp (self_nid, out_pid) -> out (idx, inp_pid)
-  // Input edge : inp (idx, out_pid)      -> out (self_nid, inp_pid)
+  // Output edge: inp (self_nid, dst_pid) -> out (idx, inp_pid)
+  // Input edge : inp (idx, dst_pid)      -> out (self_nid, inp_pid)
   Node_Pin get_out_pin() const {
     if(is_input())
       return Node_Pin(get_idx(), get_inp_pid(), false);
     else
-      return Node_Pin(get_self_nid(), get_out_pid(), false);
+      return Node_Pin(get_self_nid(), get_dst_pid(), false);
   };
   Node_Pin get_inp_pin() const {
     if(is_input())
-      return Node_Pin(get_self_nid(), get_out_pid(), true);
+      return Node_Pin(get_self_nid(), get_dst_pid(), true);
     else
       return Node_Pin(get_idx(), get_inp_pid(), true);
   };
@@ -247,9 +247,9 @@ public:
     return ((((uint64_t)this) & 0xFFF) == 0); // page align.
   }
 
-  bool set(Index_ID _idx, Port_ID _inp_pid, Port_ID _out_pid, bool _input) {
+  bool set(Index_ID _idx, Port_ID _inp_pid, Port_ID _dst_pid, bool _input) {
     assert(!is_page_align());
-    assert(get_out_pid() == _out_pid);
+    assert(get_dst_pid() == _dst_pid);
 
     SEdge_Internal *s = reinterpret_cast<SEdge_Internal *>(this);
     if(is_snode()) {
@@ -356,7 +356,7 @@ public:
   SEdge                sedge[Num_SEdges];   // WARNING: Must not be the last field in struct or iterators fail
 private:
   Index_ID nid : Index_Bits;    // 36bits, 4 byte aligned
-  Port_ID  out_pid : Port_Bits; // Not well aligned
+  Port_ID  dst_pid : Port_Bits; // Not well aligned
   uint16_t out_long : 2;
   // END 10 Bytes common payload
 
@@ -427,7 +427,7 @@ public:
 
   void reset() {
     bits            = 0;
-    out_pid         = 0;
+    dst_pid         = 0;
     root            = 1;
     graph_io_input  = false;
     graph_io_output = false;
@@ -480,12 +480,12 @@ public:
     graph_io_output = false;
   }
 
-  Port_ID get_out_pid() const {
-    return out_pid;
+  Port_ID get_dst_pid() const {
+    return dst_pid;
   }
-  void set_out_pid(Port_ID eid) {
+  void set_dst_pid(Port_ID eid) {
     assert(eid < (1 << Port_Bits));
-    out_pid = eid;
+    dst_pid = eid;
   }
   Index_ID get_nid() const {
     assert(nid);

@@ -69,7 +69,7 @@ void LGraph::each_input_root_fast(std::function<void(Index_ID, Port_ID)> f1) con
     if (!ni.has_pid_inputs())
       continue;
 
-    f1(ni.get_nid(), ni.get_out_pid());
+    f1(ni.get_nid(), ni.get_dst_pid());
   }
 
 }
@@ -84,7 +84,7 @@ void LGraph::each_output_root_fast(std::function<void(Index_ID, Port_ID)> f1) co
     if (!ni.has_pid_outputs() && !ni.is_graph_io_output())
       continue;
 
-    f1(ni.get_nid(), ni.get_out_pid());
+    f1(ni.get_nid(), ni.get_dst_pid());
   }
 
 }
@@ -101,7 +101,7 @@ void LGraph::each_output_edge_fast(std::function<void(Index_ID, Port_ID, Index_I
 
     const Edge *edge = ni.get_output_begin();
     do{
-      f1(ni.get_nid(), ni.get_out_pid(), edge->get_idx(), edge->get_inp_pid());
+      f1(ni.get_nid(), ni.get_dst_pid(), edge->get_idx(), edge->get_inp_pid());
       edge += edge->next_node_inc();
     }while(edge != ni.get_output_end());
   }

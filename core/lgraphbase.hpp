@@ -59,13 +59,13 @@ protected:
   Graph_library *library;
   Tech_library * tlibrary;
 
-  Index_ID         create_node_space(Index_ID idx, Port_ID out_pid, Index_ID master_nid, Index_ID root_nid);
-  Index_ID         get_space_output_pin(Index_ID idx, Port_ID out_pid, Index_ID &root_nid);
-  Index_ID         get_space_output_pin(Index_ID master_nid, Index_ID idx, Port_ID out_pid, Index_ID root_nid);
+  Index_ID         create_node_space(Index_ID idx, Port_ID dst_pid, Index_ID master_nid, Index_ID root_nid);
+  Index_ID         get_space_output_pin(Index_ID idx, Port_ID dst_pid, Index_ID &root_nid);
+  Index_ID         get_space_output_pin(Index_ID master_nid, Index_ID idx, Port_ID dst_pid, Index_ID root_nid);
   Index_ID         get_space_input_pin(Index_ID master_nid, Index_ID idx, bool large = false);
   virtual Index_ID create_node_int() = 0;
 
-  Index_ID add_edge_int(Index_ID dst_nid, Port_ID out_pid, Index_ID src_nid, Port_ID inp_pid);
+  Index_ID add_edge_int(Index_ID dst_nid, Port_ID dst_pid, Index_ID src_nid, Port_ID inp_pid);
 
   void recompute_io_ports();
 

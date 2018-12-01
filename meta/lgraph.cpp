@@ -243,7 +243,7 @@ Index_ID LGraph::create_node_int() {
     emplace_back();
   }
 
-  assert(node_internal[node_internal.size() - 1].get_out_pid() == 0);
+  assert(node_internal[node_internal.size() - 1].get_dst_pid() == 0);
 
   return node_internal[node_internal.size() - 1].get_nid();
 }
