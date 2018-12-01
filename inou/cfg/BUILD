@@ -19,7 +19,7 @@ filegroup(
 sh_test(
     name = "pyrope.sh",
     srcs = ["tests/pyrope.sh"],
-    # tags = ["manual"],
+    tags = ["manual"],
     data = [
         "//inou/yosys:liblgraph_yosys.so",
         "//main:lgshell",
