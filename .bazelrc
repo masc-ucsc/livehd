@@ -1,7 +1,7 @@
 
 build --cxxopt="-std=c++17" --cxxopt="-Wno-unknown-pragmas" --force_pic --remote_http_cache=http://mada2.cse.ucsc.edu:8082
 common --color=yes
-test --cache_test_results=no  --test_tag_filters "-long1,-long2,-long3,-long4,-long5,-long6,-long7,-long8,-manual"
+test --cache_test_results=no -cxxpt=" + -copt="+bazel32+Optimize) -D --test_tag_filters "-long1,-long2,-long3,-long4,-long5,-long6,-long7,-long8,-manual"
 
 # Future remote buildfarm for bazel
 # add the following line to lgraph/.bazelrc to enable remote builds

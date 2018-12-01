@@ -3,4 +3,6 @@ cc_library(
    name = "headers",
    hdrs = glob(["*.h"]),
    visibility = ["//visibility:public"],
+   #defines = [ "BMAVX2OPT" ],  # AVX2
+   #defines = [ "BMSSE42OPT" ], # SSE 4.2
 )
