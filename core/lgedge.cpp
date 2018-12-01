@@ -46,11 +46,11 @@ bool Edge::is_last_output() const {
   return ((this + sz) >= node.get_output_end());
 }
 
-const Edge *Edge::find_edge(const Edge *bt, const Edge *et, Index_ID ptr_nid, Port_ID inp_pid, Port_ID out_pid) const {
+const Edge *Edge::find_edge(const Edge *bt, const Edge *et, Index_ID ptr_nid, Port_ID inp_pid, Port_ID dst_pid) const {
 
   const Edge *eit = bt;
   while(eit != et) {
-    if(eit->get_idx() == ptr_nid && eit->get_inp_pid() == inp_pid && eit->get_out_pid() == out_pid)
+    if(eit->get_idx() == ptr_nid && eit->get_inp_pid() == inp_pid && eit->get_dst_pid() == dst_pid)
       return eit;
 
     if(eit->is_snode())
@@ -70,14 +70,14 @@ const Edge &Edge::get_reverse_for_deletion() const {
   Index_ID       dst_idx = get_idx();
   Node_Internal *ptr_inp = &ptr_node[dst_idx - ptr_idx];
 
-  Index_ID out_pid = get_out_pin().get_pid();
+  Index_ID dst_pid = get_out_pin().get_pid();
   Index_ID inp_pid = get_inp_pin().get_pid();
   do {
     const Edge *eit;
     if(!input)
-      eit = find_edge(ptr_inp->get_input_begin(), ptr_inp->get_input_end(), ptr_nid, out_pid, inp_pid);
+      eit = find_edge(ptr_inp->get_input_begin(), ptr_inp->get_input_end(), ptr_nid, dst_pid, inp_pid);
     else
-      eit = find_edge(ptr_inp->get_output_begin(), ptr_inp->get_output_end(), ptr_nid, inp_pid, out_pid);
+      eit = find_edge(ptr_inp->get_output_begin(), ptr_inp->get_output_end(), ptr_nid, inp_pid, dst_pid);
 
     if(eit)
       return *eit;
@@ -138,12 +138,12 @@ bool Node_Internal::has_pid_inputs() const {
   if(is_last_state())
     return false;
 
-  Port_ID              pid  = get_out_pid();
+  Port_ID              pid  = get_dst_pid();
   const Node_Internal *node = this;
   do {
     node  = &get(node->get_next());
     total = node->get_num_local_inputs();
-    if(total && node->get_out_pid() == pid)
+    if(total && node->get_dst_pid() == pid)
       return true;
   } while(!node->is_last_state());
 
@@ -181,12 +181,12 @@ bool Node_Internal::has_pid_outputs() const {
   if(is_last_state())
     return false;
 
-  Port_ID              pid  = get_out_pid();
+  Port_ID              pid  = get_dst_pid();
   const Node_Internal *node = this;
   do {
     node  = &get(node->get_next());
     total = node->get_num_local_outputs();
-    if(total && node->get_out_pid() == pid)
+    if(total && node->get_dst_pid() == pid)
       return true;
   } while(!node->is_last_state());
 
@@ -395,7 +395,7 @@ void Node_Internal::del(const Edge &edge) {
 }
 
 void Node_Internal::dump() const {
-  fmt::print("nid:{} pid:{} state:{} inp_pos:{} out_pos:{} root:{}\n", nid, out_pid, state, inp_pos, out_pos, root);
+  fmt::print("nid:{} pid:{} state:{} inp_pos:{} out_pos:{} root:{}\n", nid, dst_pid, state, inp_pos, out_pos, root);
 
   const Edge *out = get_output_begin();
   while(out != get_output_end()) {
@@ -440,7 +440,7 @@ void Node_Internal::dump_full() const {
 void Node_Internal::assimilate_edges(Node_Internal &other) {
   assert(inp_pos == 0);
   assert(out_pos == 0);
-  assert(out_pid == other.out_pid);
+  assert(dst_pid == other.dst_pid);
   assert(is_last_state());
   assert(!is_root()); // Could not be root if it is assimulating
 
@@ -459,14 +459,14 @@ void Node_Internal::assimilate_edges(Node_Internal &other) {
 
   int self_pos = 0;
 
-  Port_ID other_out_pid = other.get_out_pid();
+  Port_ID other_dst_pid = other.get_dst_pid();
 
   int other_inp_long_removed = 0;
 
   for(int i = 0; i < other.inp_pos;) {
     if(other.sedge[other_pos].is_snode()) {
       bool done =
-          sedge[self_pos].set(other.sedge[other_pos].get_idx(), other.sedge[other_pos].get_inp_pid(), other_out_pid, true // input
+          sedge[self_pos].set(other.sedge[other_pos].get_idx(), other.sedge[other_pos].get_inp_pid(), other_dst_pid, true // input
           );
       if(done) {
         self_pos++;
@@ -519,7 +519,7 @@ void Node_Internal::assimilate_edges(Node_Internal &other) {
 
       int self_pos = next_free_output_pos();
       assert(self_pos < Num_SEdges);
-      bool done = sedge[self_pos].set(other_out->get_idx(), other_out->get_inp_pid(), other_out_pid, false // output
+      bool done = sedge[self_pos].set(other_out->get_idx(), other_out->get_inp_pid(), other_dst_pid, false // output
       );
 
       if(done) {
@@ -544,8 +544,8 @@ void Node_Internal::assimilate_edges(Node_Internal &other) {
   }
 }
 
-Port_ID Edge::get_out_pid() const {
-  return Node_Internal::get(this).get_out_pid();
+Port_ID Edge::get_dst_pid() const {
+  return Node_Internal::get(this).get_dst_pid();
 }
 
 Index_ID Edge::get_self_nid() const {

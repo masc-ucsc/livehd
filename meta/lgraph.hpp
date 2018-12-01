@@ -177,12 +177,6 @@ public:
     g = _g;
   };
 
-  void add_input(Node &src, uint16_t bits, Port_ID inp_pid = 0, Port_ID out_pid = 0) {
-    Node_Pin src_pin(src.nid, out_pid, false);
-    Node_Pin dst_pin(nid, inp_pid, true);
-    g->add_edge(src_pin, dst_pin, bits);
-  };
-
   void set(const Node_Type_Op op) {
     g->node_type_set(nid, op);
   }

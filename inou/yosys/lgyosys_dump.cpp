@@ -314,6 +314,7 @@ void Lgyosys_dump::create_subgraph_outputs(const LGraph *g, RTLIL::Module *modul
 
     std::string name;
     Index_ID    port_nid = g->find_idx_from_pid(idx, edge.get_out_pin().get_pid());
+    assert(port_nid == edge.get_idx());
     if(g->get_wid(port_nid)) {
       name = "\\" + std::string(g->get_node_wirename(port_nid));
     } else {
