@@ -104,12 +104,13 @@ protected:
 
     Eprp_var var;
     std::string txt;
-    EXPECT_FALSE(m1.check_labels(var, txt));
-    EXPECT_TRUE(txt.empty());
+    EXPECT_TRUE(m1.check_labels(var, txt));
+    EXPECT_FALSE(txt.empty());
 
     var.add("lgdb","potato");
-    EXPECT_TRUE(m1.check_labels(var, txt));
-    EXPECT_TRUE(!txt.empty());
+    txt.clear();
+    EXPECT_FALSE(m1.check_labels(var, txt));
+    EXPECT_TRUE(txt.empty());
 
     Eprp_method m2("test1.fff.test","fff::is_equal call", &test1::is_equal);
     m2.add_label_required("lgdb","lgraph directory");
