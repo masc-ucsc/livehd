@@ -77,6 +77,11 @@ protected:
   typedef uint8_t Token_id;
 
   struct Token {
+    Token() {
+      tok = TOK_NOP;
+      pos = 0;
+      len = 0;
+    }
     Token_id tok; // Token (identifier, if, while...)
     uint32_t pos; // Position in buffer
     uint16_t len; // length in buffer
