@@ -99,6 +99,18 @@ protected:
     m1.add_label_required("lgdb","lgraph directory");
     m1.add_label_optional("graph_name","another super duper attribute");
 
+    EXPECT_TRUE(m1.has_label("graph_name"));
+    EXPECT_FALSE(m1.has_label("graph_name_not_there"));
+
+    Eprp_var var;
+    std::string txt;
+    EXPECT_FALSE(m1.check_labels(var, txt));
+    EXPECT_TRUE(txt.empty());
+
+    var.add("lgdb","potato");
+    EXPECT_TRUE(m1.check_labels(var, txt));
+    EXPECT_TRUE(!txt.empty());
+
     Eprp_method m2("test1.fff.test","fff::is_equal call", &test1::is_equal);
     m2.add_label_required("lgdb","lgraph directory");
     m2.add_label_required("check1","check1 super duper attribute");

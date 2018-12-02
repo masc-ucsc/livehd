@@ -17,7 +17,7 @@ uint32_t Graph_library::reset_id(const std::string &name, const std::string &sou
     graph_library_clean           = false;
     attribute[it->second].version = max_next_version++;
     if (attribute[it->second].source != source) {
-      Pass::error(fmt::format("No overwrite lgraph:{} because it changed source from {} to {} (LGraph::delete first)",name, attribute[it->second].source, source));
+      Pass::error("No overwrite lgraph:{} because it changed source from {} to {} (LGraph::delete first)",name, attribute[it->second].source, source); // LCOV_EXCL_LINE
     }
     return it->second;
   }
@@ -176,10 +176,12 @@ void Graph_library::reload() {
         int len = strlen(dent->d_name);
         if(strcmp(dent->d_name + len - 5, "_type") != 0) // and finish with _type
           continue;
+        // LCOV_EXCL_START
         std::string name(dent->d_name + 7, len - 5 - 7);
 
-        Pass::error(fmt::format("missing {}/graph_library at reload", path));
+        Pass::error("missing {}/graph_library at reload", path);
         exit(0);
+        // LCOV_EXCL_STOP
       }
       closedir(dir);
     }

@@ -286,44 +286,42 @@ Index_ID Node_Internal::get_root_nid() const {
 }
 
 void Node_Internal::try_recycle() {
+
   if(out_pos != 0 || inp_pos != 0)
     return;
   assert(!is_free_state());
 
   // Recycle nid
 
-  if(is_root()) {
-    // Keep node
-    fmt::print("Deleted all edges from a root, keep until delete node\n");
-  } else {
+  if(is_root())
+    return; // Keep node
 
-    Node_Internal *root     = (Node_Internal *)&get_root();
-    Index_ID       root_idx = root->get_nid();
-    assert(root_idx == root->get_self_idx());
+  Node_Internal *root     = (Node_Internal *)&get_root();
+  Index_ID       root_idx = root->get_nid();
+  assert(root_idx == root->get_self_idx());
 
-    Index_ID self_idx = get_self_idx();
-    Index_ID prev_idx = root_idx;
-    assert(prev_idx != self_idx); // because it is not a root
+  Index_ID self_idx = get_self_idx();
+  Index_ID prev_idx = root_idx;
+  assert(prev_idx != self_idx); // because it is not a root
 
-    while(root[prev_idx - root_idx].get_next() != self_idx) {
-      assert(root[prev_idx - root_idx].is_next_state());
-      prev_idx = root[prev_idx - root_idx].get_next();
-    }
-
-    if(is_next_state()) {
-      root[prev_idx - root_idx].set_next_state(get_next());
-    } else {
-      root[prev_idx - root_idx].set_last_state();
-    }
-
-    set_free_state();
-    assert(root[-root_idx].is_page_state());
-
-    Node_Internal_Page master_page = Node_Internal_Page::get(root[-root_idx].sedge);
-
-    nid                  = master_page.free_idx;
-    master_page.free_idx = self_idx;
+  while(root[prev_idx - root_idx].get_next() != self_idx) {
+    assert(root[prev_idx - root_idx].is_next_state());
+    prev_idx = root[prev_idx - root_idx].get_next();
   }
+
+  if(is_next_state()) {
+    root[prev_idx - root_idx].set_next_state(get_next());
+  } else {
+    root[prev_idx - root_idx].set_last_state();
+  }
+
+  set_free_state();
+  assert(root[-root_idx].is_page_state());
+
+  Node_Internal_Page master_page = Node_Internal_Page::get(root[-root_idx].sedge);
+
+  nid                  = master_page.free_idx;
+  master_page.free_idx = self_idx;
 }
 
 void Node_Internal::del_input_int(const Edge &inp_edge) {
@@ -394,6 +392,7 @@ void Node_Internal::del(const Edge &edge) {
     del_output(edge);
 }
 
+// LCOV_EXCL_START
 void Node_Internal::dump() const {
   fmt::print("nid:{} pid:{} state:{} inp_pos:{} out_pos:{} root:{}\n", nid, dst_pid, state, inp_pos, out_pos, root);
 
@@ -415,7 +414,9 @@ void Node_Internal::dump() const {
       out += 3;
   }
 }
+// LCOV_EXCL_STOP
 
+// LCOV_EXCL_START
 void Node_Internal::dump_full() const {
 
   Node_Internal *root = (Node_Internal *)&get_root();
@@ -436,6 +437,7 @@ void Node_Internal::dump_full() const {
       return;
   }
 }
+// LCOV_EXCL_STOP
 
 void Node_Internal::assimilate_edges(Node_Internal &other) {
   assert(inp_pos == 0);
