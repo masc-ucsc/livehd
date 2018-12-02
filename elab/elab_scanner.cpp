@@ -49,22 +49,6 @@ void Elab_scanner::setup_translate() {
 
 void Elab_scanner::add_token(Token &t) {
 
-#if 0
-  // Handle strings, even before empty as spaces are legal
-  if (!token_list.empty()) {
-    Token last_tok = token_list.back();
-    if (last_tok.tok == (TOK_STRING|TOK_TRYMERGE)) {
-      if (t.tok == (TOK_STRING|TOK_TRYMERGE)) {
-        token_list.back().tok = TOK_STRING; // Remove TOK_TRYMERGE (closing ")
-        //token_list.back().len += t.len;  Do not include " in string
-      }else{
-        token_list.back().len += t.len;
-      }
-      return;
-    }
-  }
-#endif
-
   if (!t.tok) {
     token_list_spaced = true;
     return;
@@ -135,7 +119,7 @@ void Elab_scanner::patch_pass(const std::map<std::string, uint8_t> &keywords) {
 void Elab_scanner::parse(const std::string &name, const char *memblock, size_t sz, bool chunking) {
 
   token_list.clear();
-  token_list.reserve(buffer_sz/4); // An average of a token each 4 characters?
+  //token_list.reserve(buffer_sz/4); // An average of a token each 4 characters?
 
   buffer_name = name;
   buffer = 0;
