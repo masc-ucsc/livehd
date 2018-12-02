@@ -22,7 +22,7 @@ std::vector<std::string> Eprp_utils::parse_files(const std::string &files, const
 
   std::vector<std::string> raw_file_list;
 
-  char *files_char = (char *)alloca(files.size());
+  char *files_char = (char *)alloca(files.size()+1);
   strcpy(files_char,files.c_str());
   token = std::strtok(files_char, seps);
   while( token != NULL ) {
