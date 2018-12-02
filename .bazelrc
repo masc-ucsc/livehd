@@ -1,5 +1,5 @@
 
-# Address sanitizer
+# Address sanitizer: WARNING: Anything calling YOSYS will fail (no static version of libusan in gcc by default)
 # To use it: bazel build --config asan1
 build:asan1 --strip=never
 build:asan1 --copt -fsanitize=shift
@@ -20,7 +20,9 @@ build:asan1 --linkopt -fsanitize=builtin
 build:asan1 --linkopt -fstack-protector-all
 
 build --cxxopt="-std=c++17" --cxxopt="-Wno-unknown-pragmas" --force_pic --remote_http_cache=http://mada2.cse.ucsc.edu:8082
-common --color=yes
+# Some weird bazel/gcc mixes (ubuntu) trigger missing gcc/clang includes
+build  --action_env=CPLUS_INCLUDE_PATH=/usr/lib/gcc/ --action_env=CPLUS_INCLUDE_PATH=/usr/lib/clang
+# not great for vim: common --color=yes
 test --cache_test_results=no --test_tag_filters "-long1,-long2,-long3,-long4,-long5,-long6,-long7,-long8,-manual"
 
 # Future remote buildfarm for bazel
