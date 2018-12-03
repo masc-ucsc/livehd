@@ -220,7 +220,6 @@ void Graph_library::reload() {
       continue;
 
     std::string name(&dent->d_name[7],len-7-5);
-    fmt::print("name_end[{}] name[{}]\n", dent->d_name + len - 5, name);
     assert(lg_found.find(name) == lg_found.end());
     lg_found.insert(name);
 
