@@ -2,6 +2,7 @@
 
 #include <dirent.h>
 #include <sys/types.h>
+#include <set>
 
 #include "graph_library.hpp"
 #include "pass.hpp"
@@ -164,29 +165,8 @@ void Graph_library::reload() {
   name2id.clear();
   attribute.resize(1); // 0 is not a valid ID
 
-  if(!graph_list.is_open()) {
-    DIR *dir = opendir(path.c_str());
-    if(dir) {
-      struct dirent *dent;
-      while((dent = readdir(dir)) != NULL) {
-        if(dent->d_type != DT_REG) // Only regular files
-          continue;
-        if(strncmp(dent->d_name, "lgraph_", 7) != 0) // only if starts with lgraph_
-          continue;
-        int len = strlen(dent->d_name);
-        if(strcmp(dent->d_name + len - 5, "_type") != 0) // and finish with _type
-          continue;
-        // LCOV_EXCL_START
-        std::string name(dent->d_name + 7, len - 5 - 7);
-
-        Pass::error("missing {}/graph_library at reload", path);
-        exit(0);
-        // LCOV_EXCL_STOP
-      }
-      closedir(dir);
-    }
+  if(!graph_list.is_open())
     return;
-  }
 
   uint32_t n_graphs = 0;
   graph_list >> n_graphs;
@@ -218,6 +198,43 @@ void Graph_library::reload() {
   }
 
   graph_list.close();
+
+  DIR *dir = opendir(path.c_str());
+  if(!dir) {
+    Pass::error("graph_library.reload: could not open {} directory",path);
+    return;
+  }
+  struct dirent *dent;
+
+  std::set<std::string> lg_found;
+
+  while((dent = readdir(dir)) != NULL) {
+    if(dent->d_type != DT_REG) // Only regular files
+      continue;
+    if(strncmp(dent->d_name, "lgraph_", 7) != 0) // only if starts with lgraph_
+      continue;
+    int len = strlen(dent->d_name);
+    if (len <= (7+5))
+      continue;
+    if(strcmp(dent->d_name + len - 5, "_type") != 0) // and finish with _type
+      continue;
+
+    std::string name(&dent->d_name[7],len-7-5);
+    fmt::print("name_end[{}] name[{}]\n", dent->d_name + len - 5, name);
+    assert(lg_found.find(name) == lg_found.end());
+    lg_found.insert(name);
+
+    if (name2id.find(name) == name2id.end()) {
+      Pass::warn("graph_library does not have {} but {} directory has it", name, path);
+    }
+  }
+  closedir(dir);
+
+  for(auto it=name2id.begin(); it != name2id.end() ; ++it) {
+    if (lg_found.find(it->first) == lg_found.end()) {
+      Pass::error("graph_library has {} but {} the directory does not have it", it->first, path);
+    }
+  }
 }
 
 Graph_library::Graph_library(const std::string &_path)
@@ -236,7 +253,7 @@ void Graph_library::each_graph(std::function<void(const std::string &, uint32_t 
 
 bool Graph_library::expunge_lgraph(const std::string &name, const LGraph *lg) {
   if(global_name2lgraph[path][name] != lg) {
-    Pass::warn(fmt::format("graph_library::expunge_lgraph({}) for a wrong graph??? path:{}", name, path));
+    Pass::warn("graph_library::expunge_lgraph({}) for a wrong graph??? path:{}", name, path);
     return true;
   }
   global_name2lgraph[path].erase(global_name2lgraph[path].find(name));

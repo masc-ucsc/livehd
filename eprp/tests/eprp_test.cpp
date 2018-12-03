@@ -99,6 +99,7 @@ protected:
     m1.add_label_required("lgdb","lgraph directory");
     m1.add_label_optional("graph_name","another super duper attribute");
 
+    EXPECT_STREQ(m1.get_label_help("lgdb").c_str(),"lgraph directory");
     EXPECT_TRUE(m1.has_label("graph_name"));
     EXPECT_FALSE(m1.has_label("graph_name_not_there"));
 
