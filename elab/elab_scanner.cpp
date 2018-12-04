@@ -3,6 +3,8 @@
 
 #include <limits>
 #include <iostream>
+#include <string>
+#include <cctype>
 
 #include "elab_scanner.hpp"
 
@@ -179,8 +181,8 @@ void Elab_scanner::parse(const std::string &name, const char *memblock, size_t s
       t.tok = TOK_COMMENT;
       // in the works!!
       if (!in_comment) {
-        constexpr int len1 = strlen("synopsys ");
-        int npos=pos+1;
+        constexpr size_t len1 = std::char_traits<char>::length("synopsys ");
+        size_t npos=pos+1;
         while(buffer[npos] == ' ' && npos<sz)
           npos++;
         if ((npos+len1)<sz) {
