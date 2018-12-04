@@ -229,7 +229,11 @@ void Chunkify_verilog::elaborate() {
         last_output = false;
       }
     } else if(scan_is_token(TOK_COMMENT)) {
-      // Drop comment, to avoid unneded recompilations
+      // Drop comment, to avoid unneeded recompilations
+      if (in_module)
+        in_module_text.append("\n");
+      else
+        not_in_module_text.append("\n");
       scan_next();
       continue;
     }

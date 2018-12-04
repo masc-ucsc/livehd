@@ -46,9 +46,9 @@ do
     exit 3
   fi
 
-  echo "inou.yosys.tolg files:${file}" | ${LGSHELL}
+  echo "inou.yosys.tolg files:${file} path:mlgdb" | ${LGSHELL}
 
-  if [ $? -eq 0 ] && [ -f lgdb/lgraph_${base}_nodes ]; then
+  if [ $? -eq 0 ] && [ -f mlgdb/lgraph_${base}_nodes ]; then
     echo "Successfully created graph from ${input}"
   else
     echo "FAIL: lgyosys parsing terminated with an error (testcase ${file})"
@@ -65,7 +65,7 @@ do
     exit 3
   fi
 
-  echo "lgraph.open name:${base} |> dump |> inou.yosys.fromlg odir:${SHELL_ODIR} |> inou.graphviz" | ${LGSHELL}
+  echo "lgraph.open name:${base} path:mlgdb |> dump |> inou.yosys.fromlg odir:${SHELL_ODIR} |> inou.graphviz" | ${LGSHELL}
 
   if [ $? -eq 0 ] && [ -f ${SHELL_ODIR}/${base}.v ]; then
     echo "Successfully created verilog from graph ${file}"
@@ -75,23 +75,23 @@ do
   fi
 done
 
-echo "lgraph.open name:simple_flop |> lgraph.stats" | ${LGSHELL}
+echo "lgraph.open name:simple_flop path:mlgdb |> lgraph.stats" | ${LGSHELL}
 if [ $? -ne 0 ]; then
   echo "FAIL: it should open simple_flop"
   exit 1
 fi
 
-touch lgdb/lgraph_potato_type
-echo "lgraph.open name:simple_flop |> lgraph.stats" | ${LGSHELL} | grep warning: >lgdb/pp
-if [ $(wc -l lgdb/pp) -lt 1 ]; then
+touch mlgdb/lgraph_potato_type
+echo "lgraph.open name:simple_flop path:mlgdb |> lgraph.stats" | ${LGSHELL} | grep warning: >mlgdb/pp
+if [ $(wc -l mlgdb/pp) -lt 1 ]; then
   echo "FAIL: (1) it should open simple_flop, but return error for corrupted graph_library"
   exit 1
 fi
 
-rm lgdb/lgraph_potato_type
-rm lgdb/lgraph_trivial_type
-ls lgdb/lgraph*type
-echo "lgraph.open name:simple_flop |> lgraph.stats" | ${LGSHELL}
+rm mlgdb/lgraph_potato_type
+rm mlgdb/lgraph_trivial_type
+ls mlgdb/lgraph*type
+echo "lgraph.open name:simple_flop path:mlgdb |> lgraph.stats" | ${LGSHELL}
 if [ $? -eq 0 ]; then
   echo "FAIL: (2) it should open simple_flop, but return error for corrupted graph_library"
   exit 1
