@@ -67,6 +67,8 @@
 #define TOK_NUM        0x1a
 // 0123123 or 123123 or 0123ubits
 #define TOK_BACKTICK   0x1b
+// synopsys... directive in comment
+#define TOK_SYNOPSYS   0x1c
 
 #define TOK_KEYWORD_FIRST   0x40
 #define TOK_KEYWORD_LAST    0x7F
