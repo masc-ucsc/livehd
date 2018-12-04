@@ -166,23 +166,26 @@ void Elab_scanner::parse(const std::string &name, const char *memblock, size_t s
         t.pos = pos;
         in_string_pos = -1;
       }
-    }else if(in_string_pos>=0) {
-      if(c == '"' && last_c != '\\') {
-        t.len = pos - in_string_pos;
-        add_token(t);
-        t.tok = TOK_NOP;
-        t.pos = pos;
-        in_string_pos = -1;
-      }
-    }else if(c == '"' && last_c != '\\') {
-      t.len = pos - t.pos;
-      add_token(t);
-      t.tok = TOK_STRING;
-      t.pos = pos + 1;
-      in_string_pos = pos + 1;
     }else if(unlikely(last_c == '/' && c == '/')) {
       t.len = pos - t.pos;
       t.tok = TOK_COMMENT;
+#if 0
+      // in the works!!
+      if (!in_comment) {
+        constexpr int len1 = strlen("synopsys ");
+        int npos=pos+1;
+        while(buffer[npos] == ' ' && npos<sz)
+          npos++;
+        if ((npos+len1)<sz) {
+          if (strncmp(&buffer[npos], "synopsys ",len1)==0) {
+            int endnpos=npos;
+            while(buffer[endnpos] != '\n' && endnpos<sz)
+              endnpos++;
+            fmt::print("synopsys directive {}\n",std::string(&buffer[npos+len1],endnpos+len1-npos));
+          }
+        }
+      }
+#endif
       in_singleline_comment = true;
       in_comment = true;
       assert(!starting_comment);
@@ -210,6 +213,21 @@ void Elab_scanner::parse(const std::string &name, const char *memblock, size_t s
     }else if(in_comment) {
       starting_comment  = false;
       finishing_comment = false;
+      t.len = pos - t.pos;
+    }else if(in_string_pos>=0) {
+      if(c == '"' && last_c != '\\') {
+        t.len = pos - in_string_pos;
+        add_token(t);
+        t.tok = TOK_NOP;
+        t.pos = pos;
+        in_string_pos = -1;
+      }
+    }else if(c == '"' && last_c != '\\') {
+      t.len = pos - t.pos;
+      add_token(t);
+      t.tok = TOK_STRING;
+      t.pos = pos + 1;
+      in_string_pos = pos + 1;
     }else{
       Token_id nt = translate[static_cast<uint8_t>(c)];
       if (t.tok != nt) {

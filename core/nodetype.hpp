@@ -17,9 +17,15 @@
 // nodetype should be at meta directory but the node type is needed all over in the base class. It may be good to integrate nodetype
 // as part of the lgnode itself to avoid extra cache misses
 
-struct Node_type {
-  enum Node_type_op : uint8_t { Invalid_Op, Sum_Op, Mult_Op, Div_Op, Mod_Op } op;
+enum Node_type_op : uint8_t { XxxInvalid_Op, XxxMux_Op, XxxSum_Op, XxxMult_Op, XxxDiv_Op, XxxMod_Op };
+struct Node_type_op2 {
+  const Node_type_op op;
   uint32_t meta;
+  Node_type_op2() = delete;
+  Node_type_op2(Node_type_op _op, uint32_t _meta)
+    : op(_op)
+     ,meta(_meta) {
+  }
 } __attribute__((packed));
 
 enum Node_Type_Op : uint64_t {
@@ -392,8 +398,16 @@ public:
     inputs.push_back("S");
     inputs.push_back("A");
     inputs.push_back("B");
+    inputs.push_back("C");
+    inputs.push_back("D");
+    inputs.push_back("E"); // Keeps going
     outputs.push_back("Y");
   };
+
+  static Node_type_op2 create() {
+    Node_type_op2 op2(XxxMux_Op, 0);
+    return op2;
+  }
 };
 
 // Y = (A >> B)
