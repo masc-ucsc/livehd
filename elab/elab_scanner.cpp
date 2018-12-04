@@ -2,6 +2,7 @@
 #include <ctype.h>
 
 #include <limits>
+#include <iostream>
 
 #include "elab_scanner.hpp"
 
@@ -122,8 +123,8 @@ void Elab_scanner::parse(const std::string &name, const char *memblock, size_t s
   //token_list.reserve(buffer_sz/4); // An average of a token each 4 characters?
 
   buffer_name = name;
-  buffer = 0;
-  buffer_sz = 0;
+  buffer = memblock; // To allow error reporting before chunking
+  buffer_sz = sz;
   scanner_pos = 0;
 
   int  nlines                = 0;
@@ -139,7 +140,6 @@ void Elab_scanner::parse(const std::string &name, const char *memblock, size_t s
   t.pos = 0;
   t.tok = TOK_NOP;
 
-  buffer = memblock; // To allow error reporting before chunking
 
   bool starting_comment=false; // Only for comments to avoid /*/* nested back to back */*/
   bool finishing_comment=false; // Only for comments to avoid /*/* nested back to back */*/
@@ -158,6 +158,14 @@ void Elab_scanner::parse(const std::string &name, const char *memblock, size_t s
         finishing_comment = false;
         in_singleline_comment = false;
         in_comment            = in_singleline_comment | in_multiline_comment;
+        if (!in_comment) {
+          add_token(t);
+          if (t.tok == TOK_SYNOPSYS) {
+            scan_warn("synopsys directive (most likely ignored)");
+          }
+          t.tok = TOK_NOP;
+          t.pos = pos;
+        }
       }
       if(in_string_pos>=0) {
         t.len = pos - in_string_pos;
@@ -169,7 +177,6 @@ void Elab_scanner::parse(const std::string &name, const char *memblock, size_t s
     }else if(unlikely(last_c == '/' && c == '/')) {
       t.len = pos - t.pos;
       t.tok = TOK_COMMENT;
-#if 0
       // in the works!!
       if (!in_comment) {
         constexpr int len1 = strlen("synopsys ");
@@ -178,14 +185,10 @@ void Elab_scanner::parse(const std::string &name, const char *memblock, size_t s
           npos++;
         if ((npos+len1)<sz) {
           if (strncmp(&buffer[npos], "synopsys ",len1)==0) {
-            int endnpos=npos;
-            while(buffer[endnpos] != '\n' && endnpos<sz)
-              endnpos++;
-            fmt::print("synopsys directive {}\n",std::string(&buffer[npos+len1],endnpos+len1-npos));
+            t.tok = TOK_SYNOPSYS;
           }
         }
       }
-#endif
       in_singleline_comment = true;
       in_comment = true;
       assert(!starting_comment);
@@ -401,7 +404,7 @@ void Elab_scanner::scan_raw_msg(const std::string &cat, const std::string &text,
   }
 
   size_t max_pos = scanner_pos;
-  if (max_pos>=token_list.size())
+  if (max_pos>=token_list.size() || scanner_pos==0)
     max_pos = token_list.size()-1;
 
   int line_pos_start = 0;
@@ -421,16 +424,30 @@ void Elab_scanner::scan_raw_msg(const std::string &cat, const std::string &text,
     }
   }
 
-  std::string line_txt(&buffer[line_pos_start],line_pos_end-line_pos_start);
-
   int line = scan_calc_lineno();
   int col  = token_list[max_pos].pos - line_pos_start;
 
-  std::string first_1 = fmt::format("{}:{}:{} {}: {}", buffer_name, line, col, cat, text);
-  std::string second_1 = line_txt;
+  std::string line_txt;
 
-  fmt::print(first_1 + "\n");
-  fmt::print(second_1 + "\n");
+  int xtra_col=0;
+  for(size_t i=0;i<(line_pos_end-line_pos_start);i++) {
+    if (buffer[line_pos_start+i]=='\t') {
+      line_txt += "  "; // 2 spaces
+      if (i<=col)
+        xtra_col++;
+    }else{
+      line_txt += buffer[line_pos_start+i];
+    }
+  }
+  col += xtra_col;
+
+  fmt::print("{}:{}:{} {}: ", buffer_name, line, col, cat);
+  std::cout << text; // NOTE: no fmt::print because it can contain {}
+
+  assert(line_pos_end>line_pos_start);
+  std::cout << line_txt << "\n";
+  // NOTE: line_pos_start points to the last return
+  // NOTE: no fmt::print because the text can contain {}
 
   if (!third)
     return;

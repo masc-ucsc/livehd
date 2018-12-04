@@ -13,6 +13,10 @@ if [ ! -f $LGSHELL ]; then
 fi
 
 echo "files path:inou/yosys/tests match:\"v$\" |> inou.liveparse path:tmp1" | $LGSHELL
+if [ $? -ne 0 ]; then
+  echo "FAILED: liveparse error tmp1"
+  exit -3
+fi
 
 N1=$(grep ^[[:blank:]]*module inou/yosys/tests/*.v | grep -v endmodule | wc -l)
 N2=$(grep ^[[:blank:]]*module tmp1/parse/chunk*/*.v | grep -v endmodule | wc -l)
@@ -36,6 +40,11 @@ if [ $N1 -ne $N2 ]; then
 fi
 
 echo "inou.liveparse files:projects/boom/boom.system.TestHarness.BoomConfig.v path:tmp2" | $LGSHELL
+if [ $? -ne 0 ]; then
+  echo "FAILED: liveparse error tmp2"
+  exit -3
+fi
+
 N1=$(grep ^[[:blank:]]*module projects/boom/boom.system.TestHarness.BoomConfig.v | grep -v endmodule | wc -l)
 N2=$(grep ^[[:blank:]]*module tmp2/parse/chunk*/*.v | grep -v endmodule | wc -l)
 
