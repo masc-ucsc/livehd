@@ -83,11 +83,18 @@ void Node_bitwidth::Implicit_range::dump() const {
 int64_t Node_bitwidth::Implicit_range::round_power2(int64_t x) const {
   uint64_t ux = abs(x);
 
+  if (x == 0) {
+    return 0;
+  }
+
   // This finds the number of bits in "ux" minus the number of leading 0s.
   uint64_t ux_r = 1ULL<<(sizeof(uint64_t) * 8 - __builtin_clzll(ux));
-  if (ux==static_cast<uint64_t>(x))
-    return ux_r;
 
+  if (ux==static_cast<uint64_t>(x)) {
+    return ux_r-1;//I need to subtract one since 4 bits gives us 0 to 15, not 0 to 2^4.
+  }
+
+  //FIXME: Above I subtract one. Do I need to do this for negatives? I'd assume not.
   return -ux_r;
 }
 
@@ -127,21 +134,6 @@ bool Node_bitwidth::Implicit_range::expand(const Implicit_range &i, bool round2)
     updated |= (tmp!=min);
     min = tmp;
   }
-
-  return updated;
-}
-
-bool Node_bitwidth::Implicit_range::shift_left(const Implicit_range &i) {
-
-  bool updated = false;
-
-  auto tmp1 = min << i.min;
-  auto tmp2 = max << i.max;
-
-  min = tmp1;
-  max = tmp2;
-  updated |= (tmp1!=min);
-  updated |= (tmp2!=max);
 
   return updated;
 }
