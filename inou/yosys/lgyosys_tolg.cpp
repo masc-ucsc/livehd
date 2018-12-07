@@ -1226,7 +1226,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
       std::string    name   = &module->name.c_str()[1];
       assert(module2graph.find(name) == module2graph.end());
 
-      auto *g            = LGraph::create(path, name, "yosys");
+      auto *g            = LGraph::create(path, name, ""); // No source, unable to track
       module2graph[name] = g;
       log("yosys2lg look_for_module_outputs pass for module %s:\n", module->name.c_str());
       look_for_module_outputs(module, path);
