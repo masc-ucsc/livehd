@@ -18,10 +18,10 @@ uint32_t Graph_library::reset_id(const std::string &name, const std::string &sou
     graph_library_clean           = false;
     attribute[it->second].version = max_next_version++;
     if (attribute[it->second].source != source) {
-      if (attribute[it->second].source.empty()) {
+      if (attribute[it->second].source == "-") {
         attribute[it->second].source = source;
-        Pass::warn("overwrite lgraph:{} empty source to {}",name, source); // LCOV_EXCL_LINE
-      }else if (source.empty()) {
+        Pass::warn("overwrite lgraph:{} source from {} to {}",name, attribute[it->second].source, source); // LCOV_EXCL_LINE
+      }else if (source == "-") {
         Pass::warn("keeping lgraph:{} source {}",name, attribute[it->second].source); // LCOV_EXCL_LINE
       }else{
         Pass::error("No overwrite lgraph:{} because it changed source from {} to {} (LGraph::delete first)",name, attribute[it->second].source, source); // LCOV_EXCL_LINE
