@@ -142,12 +142,11 @@ void Elab_scanner::parse(const std::string &name, const char *memblock, size_t s
   t.pos = 0;
   t.tok = TOK_NOP;
 
-
   bool starting_comment=false; // Only for comments to avoid /*/* nested back to back */*/
   bool finishing_comment=false; // Only for comments to avoid /*/* nested back to back */*/
-  for(size_t i = 0; i < sz; i++) {
-    char c = memblock[i];
-    int pos = (&memblock[i] - ptr_section); // same as "i" unless chunking
+  for(size_t pos = 0; pos < sz; pos++) {
+    char c = memblock[pos];
+    //int pos = (&memblock[i] - ptr_section); // same as "i" unless chunking
     if(c == '\n' || c == '\r' || c == '\f') {
       nlines++;
       if (!in_comment && t.tok) {
@@ -156,6 +155,7 @@ void Elab_scanner::parse(const std::string &name, const char *memblock, size_t s
         t.tok = TOK_NOP;
         t.pos = pos;
       }else{
+        t.len = pos - t.pos;
         starting_comment  = false;
         finishing_comment = false;
         in_singleline_comment = false;
@@ -306,7 +306,8 @@ void Elab_scanner::scan_format_append(std::string &text) const {
     len += (start_pos - last_end_pos);
     start_pos = last_end_pos;
   }
-  text.append(&buffer[start_pos], len);
+  if (len>0)
+    text.append(&buffer[start_pos], len);
 }
 
 void Elab_scanner::scan_prev_append(std::string &text) const {
