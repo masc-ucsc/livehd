@@ -27,6 +27,8 @@ protected:
   void iterate_shift(const LGraph *lg, Index_ID idx);
   void iterate_comparison(const LGraph *lg, Index_ID idx);
   void iterate_pick(const LGraph *lg, Index_ID idx);
+  void iterate_mux(const LGraph *lg, Index_ID idx);
+  void iterate_subgraph(const LGraph *lg, Index_ID idx);
 
   void iterate_node(LGraph *lg, Index_ID idx);
 

@@ -60,16 +60,33 @@ void Pass_bitwidth::iterate_graphio(const LGraph *lg, Index_ID idx) {
 
   // This should be called only if we do cross module propagation
 
+  //This helps us detect if the IO node is an output.
+  //  If it is an output, we cascade range info down into it.
+  bool updated = false;
+  for(const auto &inp : lg->inp_edges(idx)) {
+    //An input node should have nothing as its input.
+    //is_output_node = true;
+    Index_ID inp_idx = inp.get_idx();
+    const auto &op = lg->node_type_get(inp_idx);
+
+    if(op.op == SubGraph_Op) {
+      //No changes should be necessary, handled in iterate_subgraph.
+    } else {
+      auto &nb_output = lg->node_bitwidth_get(idx);
+      const auto &nb_input  = lg->node_bitwidth_get(inp_idx);
+      nb_output.i = nb_input.i;
+    }
+
+  }
   mark_all_outputs(lg, idx);
 }
 
 void Pass_bitwidth::iterate_logic(const LGraph *lg, Index_ID idx) {
 
   bool updated = false;
+  auto &nb_output = lg->node_bitwidth_get(idx);
   for(const auto &inp : lg->inp_edges(idx)) {
     Index_ID inp_idx = inp.get_idx();
-
-    auto &      nb_output = lg->node_bitwidth_get(idx);
     const auto &nb_input  = lg->node_bitwidth_get(inp_idx);
 
     updated |= nb_output.i.expand(nb_input.i, true);
@@ -83,20 +100,16 @@ void Pass_bitwidth::iterate_logic(const LGraph *lg, Index_ID idx) {
 void Pass_bitwidth::iterate_arith(const LGraph *lg, Index_ID idx) {
 
   bool updated = false;
-
   int64_t max = 0;
   int64_t min = 0;
 
   bool first = true;
   bool add;
   Node_bitwidth::Implicit_range imp;
-
-  auto &      nb_output = lg->node_bitwidth_get(idx);
+  auto &nb_output = lg->node_bitwidth_get(idx);
 
   for(const auto &inp : lg->inp_edges(idx)) {
     Index_ID inp_idx = inp.get_idx();
-
-    //auto &      nb_output = lg->node_bitwidth_get(idx);
     const auto &nb_input  = lg->node_bitwidth_get(inp_idx);
 
     const auto &op = lg->node_type_get(idx);
@@ -110,8 +123,7 @@ void Pass_bitwidth::iterate_arith(const LGraph *lg, Index_ID idx) {
           }
           min = nb_input.i.min;
           max = nb_input.i.max;
-          imp.sign |= nb_input.i.sign;
-
+          imp.sign = nb_input.i.sign;
           first = false;
         } else {
           if (add) {
@@ -121,7 +133,7 @@ void Pass_bitwidth::iterate_arith(const LGraph *lg, Index_ID idx) {
             imp.min = nb_input.i.min - max;
             imp.max = nb_input.i.max - min;
           }
-          imp.sign |= nb_input.i.sign;
+          imp.sign &= nb_input.i.sign;
         }
         break;
 
@@ -129,46 +141,50 @@ void Pass_bitwidth::iterate_arith(const LGraph *lg, Index_ID idx) {
         if (first) {
           min = nb_input.i.min;
           max = nb_input.i.max;
+          imp.sign = nb_input.i.sign;
           first = false;
         } else {
           imp.min = nb_input.i.min * min;
           imp.max = nb_input.i.max * max;
+          imp.sign &= nb_input.i.sign;
         }
-        imp.sign |= nb_input.i.sign;
         break;
 
-      //FIXME: Divide by zero error.
+      // In Verilator if I divide x by 0, the output is 0. We use that assumption here.
       case Div_Op:
         if (first) {
           min = nb_input.i.min;
           max = nb_input.i.max;
+          imp.sign = nb_input.i.sign;
           first = false;
         } else {
-          imp.min = (int64_t)floor((double)nb_input.i.min / (double)max);
-          imp.max = (int64_t)floor((double)nb_input.i.max / (double)min);
+          if (max == 0) {
+            imp.min = 0;
+          } else {
+            imp.min = (int64_t)floor((double)nb_input.i.min / (double)max);
+          }
+
+          if (min == 0) {
+            if (max == 0) {
+              imp.max = 0;
+            } else {
+              imp.max = nb_input.i.max;
+            }
+          } else {
+            imp.max = (int64_t)floor((double)nb_input.i.max / (double)min);
+          }
+          imp.sign &= nb_input.i.sign;
         }
-        imp.sign |= nb_input.i.sign;
         break;
 
-      //FIXME: Mod by zero error.
-      //FIXME: How we calculate modulo ranges here is wrong.
+      //FIXME: We have to make conservative estimates since modulo is hard to restrict range.
       case Mod_Op:
-        if (first) {
-          min = nb_input.i.min;
-          max = nb_input.i.max;
-          first = false;
-        } else {
-          imp.min = nb_input.i.min % max;
-          imp.max = nb_input.i.max % min;
-        }
-        imp.sign |= nb_input.i.sign;
+        updated |= imp.expand(nb_input.i, false);
         break;
 
       default:
         fmt::print("FIXME! op not found!");
     }
-
-    //updated |= nb_output.i.expand(nb_input.i, false);
   }
   updated |= nb_output.i.expand(imp, false);
 
@@ -178,8 +194,7 @@ void Pass_bitwidth::iterate_arith(const LGraph *lg, Index_ID idx) {
 }
 
 void Pass_bitwidth::iterate_shift(const LGraph *lg, Index_ID idx) {
-  //FIXME: This does not work for >>> currently.
-  //       Also, perhaps replace "pos" with "first" bool. Might mess with above issue.
+  //FIXME: This does not work for >>> currently. Only looks at first two node values.
   bool updated = false;
 
   int pos = 0;
@@ -221,7 +236,8 @@ void Pass_bitwidth::iterate_shift(const LGraph *lg, Index_ID idx) {
 }
 
 void Pass_bitwidth::iterate_comparison(const LGraph *lg, Index_ID idx) {
-  //NOTE: The system will take care of constant values such as (a >= 4'b0) or (4'b1111 > 4'b0111).
+  //NOTE: The system will take care of constant values such as (a >= 4'b0) or (4'b1111 > 4'b0111)
+  //      behind the scenes.
   int64_t min1, max1;
   bool first = true;
   bool updated = false;
@@ -229,7 +245,6 @@ void Pass_bitwidth::iterate_comparison(const LGraph *lg, Index_ID idx) {
   auto &nb_output = lg->node_bitwidth_get(idx);
   for (const auto &inp : lg->inp_edges(idx)) {
     Index_ID inp_idx = inp.get_idx();
-
     const auto &nb_input  = lg->node_bitwidth_get(inp_idx);
 
     if (first) {
@@ -238,8 +253,7 @@ void Pass_bitwidth::iterate_comparison(const LGraph *lg, Index_ID idx) {
       first = false;
     } else {
       const auto &op = lg->node_type_get(idx);
-      //NOTE: Need a data set to test on. I believe these functions are correct.
-      //FIXME: Can I just do it this way? Seems incorrect.
+      //NOTE: Need a data set to test on. I believe this functions are correct.
       switch(op.op) {
         case LessThan_Op:
           if (nb_input.i.max < min1) {
@@ -310,7 +324,7 @@ void Pass_bitwidth::iterate_pick(const LGraph *lg, Index_ID idx) {
 
   for(const auto &inp : lg->inp_edges(idx)) {
     Index_ID inp_idx = inp.get_idx();
-    auto &   nb      = lg->node_bitwidth_get(inp_idx);
+    auto &nb      = lg->node_bitwidth_get(inp_idx);
 
     imp.expand(nb.i, true);
   }
@@ -325,6 +339,73 @@ void Pass_bitwidth::iterate_pick(const LGraph *lg, Index_ID idx) {
   }
 }
 
+void Pass_bitwidth::iterate_mux(const LGraph *lg, Index_ID idx) {
+  Node_bitwidth::Implicit_range imp;
+
+  bool updated = false;
+  bool first = true;
+  auto &nb_output = lg->node_bitwidth_get(idx);
+  for(const auto &inp : lg->inp_edges(idx)) {
+    Index_ID inp_idx = inp.get_idx();
+    auto       &nb_output = lg->node_bitwidth_get(idx);
+    const auto &nb_input  = lg->node_bitwidth_get(inp_idx);
+    if (first) {
+      //Selector value.
+      first = false;
+    } else {
+      updated |= nb_output.i.expand(nb_input.i, false);
+    }
+  }
+
+  if(updated) {
+    mark_all_outputs(lg,idx);
+  }
+}
+
+void Pass_bitwidth::iterate_subgraph(const LGraph *lg, Index_ID idx) {
+
+  std::vector<LGraph *> lgs;
+  bool updated = false;
+
+  const std::string subgraph_name = lg->get_library().get_name(lg->subgraph_id_get(idx));
+  LGraph *sg = LGraph::open(lg->get_path(), subgraph_name);
+
+  //Here we populate our vector with all the subgraph's IO indices.
+  //FIXME: There has to be a better way to find just the subgraph's graphio nodes.
+  std::vector<Index_ID> sg_io_idx;
+  lg->each_output_root_fast([this, sg, &sg_io_idx](Index_ID idx, Port_ID pid) {
+    const auto &op = sg->node_type_get(idx);
+    if (op.op == GraphIO_Op) {
+      sg_io_idx.push_back(idx);
+    }
+  });
+
+  do_trans(sg);
+  //Here we detect which indices of our main graph feed into/out of the
+  //  subgraph.
+  for(const auto &inp : lg->inp_edges(idx)) {
+    Index_ID inp_idx = inp.get_idx();
+    auto tmp = sg_io_idx.at(sg_io_idx.size() - inp.get_inp_pin().get_pid());
+    const auto &lg_node  = lg->node_bitwidth_get(inp_idx);
+    auto       &sg_node  = sg->node_bitwidth_get(tmp);
+
+    updated |= sg_node.i.expand(lg_node.i, false);
+  }
+
+  for(const auto &out : lg->out_edges(idx)) {
+    Index_ID out_idx = out.get_idx();
+    auto tmp = sg_io_idx.at(sg_io_idx.size() - out.get_out_pin().get_pid());
+    const auto &sg_node = sg->node_bitwidth_get(tmp);
+    auto       &lg_node = lg->node_bitwidth_get(out_idx);
+
+    updated |= lg_node.i.expand(sg_node.i, false);
+  }
+
+  if(updated) {
+    mark_all_outputs(lg,idx);
+  }
+}
+
 //------------------------------------------------------------------
 // MIT Algorithm
 void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
@@ -334,7 +415,7 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
       return;
 
     const auto &node = lg->node_type_get(idx);
-    auto &      nb   = lg->node_bitwidth_get(idx);
+    auto       &nb   = lg->node_bitwidth_get(idx);
 
     bool sign = false;
     if(node.op == U32Const_Op) {
@@ -359,7 +440,29 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
         nb.e.set_ubits(lg->get_bits(idx));
     }
 
-    nb.set_implicit();
+    //Note: I don't think I'd just want to do set_implicit for all.
+    //  This causes an issue when I want to restrict the range using
+    //  "expand" since if the range is smaller than current then
+    //  expand ignores it.
+    //FIXME: These should be the generic types that cannot mess with bounds.
+    //  However, I'm having all non-modified types put here right now. When
+    //  I create their function (if need be) then delete them from here.
+    //  i.e. Join_Op should not be here, it should have some logic for min-max.
+    if(node.op == GraphIO_Op) {
+      //If node is an input GRAPHIO, set implicit range. Don't for output.
+      for(const auto &out : lg->out_edges(idx)) {
+        int count = 0;
+        //If count > 0, then it is an input-only node
+        for(const auto &inp : lg->inp_edges(idx)) {
+          count++;
+        }
+        if(count == 0) {
+          nb.set_implicit();
+        }
+      }
+    } else if((node.op == U32Const_Op) | (node.op == Join_Op)) {
+      nb.set_implicit();
+    }
     assert(idx);
     pending.set_bit(idx);
   });
@@ -405,7 +508,7 @@ void Pass_bitwidth::iterate_node(LGraph *lg, Index_ID idx) {
       iterate_shift(lg, idx);
       break;
     case Mux_Op:
-      fmt::print("I found a MUX");
+      iterate_mux(lg, idx);
       break;
     case Join_Op:
       fmt::print("I found a JOIN");
@@ -414,7 +517,7 @@ void Pass_bitwidth::iterate_node(LGraph *lg, Index_ID idx) {
       fmt::print("I found a FLOP");
       break;
     case SubGraph_Op:
-      fmt::print("I found a SUBGRAPH");
+      iterate_subgraph(lg, idx);
       break;
     case Latch_Op:
       fmt::print("I found a LATCH");
@@ -460,7 +563,6 @@ bool Pass_bitwidth::bw_pass_iterate(LGraph *lg) {
   int iterations = 0;
 
   do{
-    //fmt::print("\nSTART\n");
     assert(next_pending.none());
 
     Index_ID idx = pending.get_first();
@@ -469,7 +571,7 @@ bool Pass_bitwidth::bw_pass_iterate(LGraph *lg) {
     pending.clear_bit(idx);
     nb.niters++;
     if(nb.niters > opack.max_iterations) {
-      fmt::print("bw_pass_iterate abort {}\n", iterations);
+      fmt::print("\nbw_pass_iterate abort {}\n", iterations);
       return false;
     }
 
@@ -480,7 +582,7 @@ bool Pass_bitwidth::bw_pass_iterate(LGraph *lg) {
 
     assert(pending.none());
     if(next_pending.none()) {
-      fmt::print("bw_pass_iterate pass {}\n", iterations);
+      fmt::print("\nbw_pass_iterate pass {}\n", iterations);
       return true;
     }
 
@@ -503,7 +605,7 @@ void Pass_bitwidth::do_trans(LGraph *lg) {
 
     bool done = bw_pass_iterate(lg);
     if(!done) {
-      Pass::error("could not converge in the iterations FIXME: dump nice message on why");
+      Pass::error("could not converge in the iterations FIXME: dump nice message on why\n");
     }
   }
 
