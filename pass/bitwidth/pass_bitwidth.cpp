@@ -339,6 +339,20 @@ void Pass_bitwidth::iterate_pick(const LGraph *lg, Index_ID idx) {
   }
 }
 
+void Pass_bitwidth::iterate_equals(const LGraph *lg, Index_ID idx) {
+  bool updated;
+  for(const auto &inp : lg->inp_edges(idx)) {
+    Index_ID inp_idx = inp.get_idx();
+    auto       &nb_output = lg->node_bitwidth_get(idx);
+    const auto &nb_input  = lg->node_bitwidth_get(inp_idx);
+    updated |= nb_output.i.expand(nb_input.i,false);
+  }
+
+  if(updated) {
+    mark_all_outputs(lg,idx);
+  }
+}
+
 void Pass_bitwidth::iterate_mux(const LGraph *lg, Index_ID idx) {
   Node_bitwidth::Implicit_range imp;
 
@@ -501,7 +515,7 @@ void Pass_bitwidth::iterate_node(LGraph *lg, Index_ID idx) {
       iterate_comparison(lg, idx);
       break;
     case Equals_Op:
-      fmt::print("I found an EQUALS");
+      iterate_equals(lg, idx);
       break;
     case ShiftLeft_Op:
     case ShiftRight_Op:
@@ -511,19 +525,19 @@ void Pass_bitwidth::iterate_node(LGraph *lg, Index_ID idx) {
       iterate_mux(lg, idx);
       break;
     case Join_Op:
-      fmt::print("I found a JOIN");
+      //fmt::print("I found a JOIN");
       break;
     case SFlop_Op:
-      fmt::print("I found a FLOP");
+      fmt::print("I found a FLOP...not supported yet");
       break;
     case SubGraph_Op:
       iterate_subgraph(lg, idx);
       break;
     case Latch_Op:
-      fmt::print("I found a LATCH");
+      fmt::print("I found a LATCH...not supported yet");
       break;
     case StrConst_Op:
-      fmt::print("I found a STRING");
+      fmt::print("I found a STRING...not supported yet");
       break;
     default:
       fmt::print("FIXME! op not found");
