@@ -195,7 +195,10 @@ void Elab_scanner::parse(const std::string &name, const char *memblock, size_t s
       in_comment = true;
       assert(!starting_comment);
       assert(!finishing_comment);
-    }else if(unlikely(!finishing_comment && ((last_c == '/' && c == '*') /* || (last_c == '(' && c == '*'))*/ ))) {
+    }else if(unlikely(!finishing_comment
+          && ( (last_c == '/' && c == '*')
+            || (last_c == '(' && c == '*' && (sz > pos) && buffer[pos+1] != ')' && token_list.size() && token_list.back().tok != TOK_AT)
+              ))) {
       t.len = pos - t.pos;
       t.tok = TOK_COMMENT;
       in_multiline_comment++;
@@ -203,12 +206,12 @@ void Elab_scanner::parse(const std::string &name, const char *memblock, size_t s
       starting_comment  = true;
       assert(!finishing_comment);
       // The (* foo *) are attributes - not comments - in verilog. Must be handled in the grammar
-    }else if (unlikely(!starting_comment && ((last_c == '*' && c == '/') /* || (last_c == '*' && c == ')')*/ ))) {
+    }else if (unlikely(!starting_comment && ((last_c == '*' && c == '/') || (in_comment && last_c == '*' && c == ')') ))) {
       t.len = pos - t.pos;
       t.tok = TOK_COMMENT;
       in_multiline_comment--;
       if (in_multiline_comment < 0) {
-        lex_error(fmt::format("{}:{} found end of comment without matching beginning of comment", name, nlines));
+        scan_error(fmt::format("{}:{} found end of comment without matching beginning of comment", name, nlines));
       }else if (in_multiline_comment==0) {
         in_singleline_comment = false;
         in_comment = false;
@@ -249,6 +252,10 @@ void Elab_scanner::parse(const std::string &name, const char *memblock, size_t s
   if (t.tok) {
     t.len = sz - t.pos;
     add_token(t);
+  }
+
+  if (in_multiline_comment) {
+    scan_error("scanner reached end of file with a multi-line comment");
   }
 
   chunked(ptr_section, sz);
@@ -410,7 +417,7 @@ void Elab_scanner::scan_raw_msg(const std::string &cat, const std::string &text,
   if (max_pos>=token_list.size() || scanner_pos==0)
     max_pos = token_list.size()-1;
 
-  int line_pos_start = 0;
+  size_t line_pos_start = 0;
   for(int i=token_list[max_pos].pos;i>0;i--) {
     char c = buffer[i];
     if (c == '\n' || c == '\r' || c == '\f') {
@@ -418,7 +425,7 @@ void Elab_scanner::scan_raw_msg(const std::string &cat, const std::string &text,
       break;
     }
   }
-  int line_pos_end = buffer_sz;
+  size_t line_pos_end = buffer_sz;
   for(size_t i=token_list[max_pos].pos;i<buffer_sz;i++) {
     char c = buffer[i];
     if (c == '\n' || c == '\r' || c == '\f') {
@@ -436,7 +443,7 @@ void Elab_scanner::scan_raw_msg(const std::string &cat, const std::string &text,
   for(size_t i=0;i<(line_pos_end-line_pos_start);i++) {
     if (buffer[line_pos_start+i]=='\t') {
       line_txt += "  "; // 2 spaces
-      if (i<=col)
+      if (static_cast<int>(i)<=col)
         xtra_col++;
     }else{
       line_txt += buffer[line_pos_start+i];
@@ -458,8 +465,12 @@ void Elab_scanner::scan_raw_msg(const std::string &cat, const std::string &text,
   if (!third)
     return;
 
+  int len = token_list[max_pos].len;
+  if ((token_list[max_pos].pos + len) > line_pos_end)
+    len = line_pos_end - token_list[max_pos].pos;
+
   std::string third_1(col, ' ');
-  std::string third_2(token_list[max_pos].len, '^');
+  std::string third_2(len, '^');
   fmt::print(third_1 + third_2 + "\n");
 }
 
