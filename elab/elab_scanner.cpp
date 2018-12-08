@@ -41,13 +41,21 @@ void Elab_scanner::setup_translate() {
   translate['*'] = TOK_MUL;
   translate['/'] = TOK_DIV;
   translate['"'] = TOK_STRING; // | TOK_TRYMERGE;  // Anything else until other TOK_STRING
+  translate['+'] = TOK_PLUS;
+  translate['-'] = TOK_MINUS;
+  translate['!'] = TOK_BANG;
+  translate['<'] = TOK_LT;
+  translate['='] = TOK_EQ | TOK_TRYMERGE; // <= >= == 
+  translate['&'] = TOK_AND;
+  translate['^'] = TOK_XOR;
+  translate['?'] = TOK_QMARK;
+  translate['\''] = TOK_TICK;
 
   translate['@'] = TOK_AT;
   translate['$'] = TOK_DOLLAR;
   translate['%'] = TOK_PERCENT;
 
   translate['`'] = TOK_BACKTICK;
-
 }
 
 void Elab_scanner::add_token(Token &t) {
@@ -57,40 +65,60 @@ void Elab_scanner::add_token(Token &t) {
     return;
   }
 
-  if (t.tok & TOK_TRYMERGE) {
-#if 0
-    if (t.tok == (TOK_TRYMERGE | TOK_STRING)) {
-      t.pos++;   // Skip the first " in the string
-      t.len = 0;
-    }else
-#endif
-    {
-      t.tok &= ~TOK_TRYMERGE;
-      if (!token_list.empty() && !token_list_spaced) {
-        Token &last_tok = token_list.back();
+  if (likely(!(t.tok & TOK_TRYMERGE))) {
+    token_list_spaced = false;
+    token_list.push_back(t);
+    return;
+  }
 
-        if (last_tok.tok == TOK_OR && t.tok == TOK_GT) {
-          token_list.back().tok = TOK_PIPE;
-          token_list.back().len += t.len;
-          return;
-        }else if (last_tok.tok == TOK_AT && t.tok == TOK_ALNUM) {
-          token_list.back().tok = TOK_REGISTER;
-          token_list.back().len += t.len;
-          return;
-        }else if (last_tok.tok == TOK_PERCENT && t.tok == TOK_ALNUM) {
-          token_list.back().tok = TOK_OUTPUT;
-          token_list.back().len += t.len;
-          return;
-        }else if (last_tok.tok == TOK_DOLLAR && t.tok == TOK_ALNUM) {
-          token_list.back().tok = TOK_INPUT;
-          token_list.back().len += t.len;
-          return;
-        }else if (last_tok.tok == TOK_ALNUM && t.tok == TOK_COLON) {
-          last_tok.tok = TOK_LABEL;
-          // token_list.back().len += t.len;
-          return;
-        }
+  t.tok &= ~TOK_TRYMERGE;
+  if (!token_list.empty() && !token_list_spaced) {
+    Token &last_tok = token_list.back();
+
+    if (last_tok.tok == TOK_OR && t.tok == TOK_GT) {
+      token_list.back().tok = TOK_PIPE;
+      token_list.back().len += t.len;
+      return;
+    }else if (t.tok == TOK_EQ) { // <=
+      if (last_tok.tok == TOK_LT) { // <=
+        token_list.back().tok = TOK_LE;
+        token_list.back().len += t.len;
+        return;
+      }else if (last_tok.tok == TOK_GT) { // >=
+        token_list.back().tok = TOK_GE;
+        token_list.back().len += t.len;
+        return;
+      }else if (last_tok.tok == TOK_EQ) { // ==
+        token_list.back().tok = TOK_SAME;
+        token_list.back().len += t.len;
+        return;
+      }else if (last_tok.tok == TOK_BANG) { // !=
+        token_list.back().tok = TOK_DIFF;
+        token_list.back().len += t.len;
+        return;
+      }else if (last_tok.tok == TOK_COLON ) { // :=
+        token_list.back().tok = TOK_COLONEQ;
+        token_list.back().len += t.len;
+        return;
       }
+    }else if (t.tok == TOK_ALNUM) {
+      if (last_tok.tok == TOK_AT) { // @foo
+        token_list.back().tok = TOK_REGISTER;
+        token_list.back().len += t.len;
+        return;
+      }else if (last_tok.tok == TOK_PERCENT) { // %foo
+        token_list.back().tok = TOK_OUTPUT;
+        token_list.back().len += t.len;
+        return;
+      }else if (last_tok.tok == TOK_DOLLAR) { // $foo
+        token_list.back().tok = TOK_INPUT;
+        token_list.back().len += t.len;
+        return;
+      }
+    }else if (last_tok.tok == TOK_ALNUM && t.tok == TOK_COLON) {
+      last_tok.tok = TOK_LABEL;
+      // token_list.back().len += t.len;
+      return;
     }
   }
 
