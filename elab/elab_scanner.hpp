@@ -69,6 +69,34 @@
 #define TOK_BACKTICK   0x1b
 // synopsys... directive in comment
 #define TOK_SYNOPSYS   0x1c
+// +
+#define TOK_PLUS       0x1d
+// -
+#define TOK_MINUS      0x1e
+// !
+#define TOK_BANG       0x1d
+// <
+#define TOK_LT         0x1e
+// =
+#define TOK_EQ         0x1f
+// ==
+#define TOK_SAME       0x20
+// !=
+#define TOK_DIFF       0x21
+// :=
+#define TOK_COLONEQ    0x22
+// >=
+#define TOK_GE         0x23
+// <=
+#define TOK_LE         0x24
+// &
+#define TOK_AND        0x25
+// ^
+#define TOK_XOR        0x26
+// ?
+#define TOK_QMARK      0x27
+// '
+#define TOK_TICK       0x27
 
 #define TOK_KEYWORD_FIRST   0x40
 #define TOK_KEYWORD_LAST    0x7F

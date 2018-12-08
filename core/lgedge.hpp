@@ -639,7 +639,7 @@ public:
   }
   void set_bits(uint16_t _bits) {
     assert(is_root());
-    assert(_bits < (1 << 11));
+    assert(_bits < (1 << 14));
     bits = _bits;
   }
 
