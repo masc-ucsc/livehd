@@ -29,7 +29,7 @@ void Elab_scanner::setup_translate() {
 
   translate['{'] = TOK_OB;
   translate['}'] = TOK_CB;
-  translate[':'] = TOK_COLON | TOK_TRYMERGE; // TOK_LABEL
+  translate[':'] = TOK_COLON; // TOK_LABEL
   translate['|'] = TOK_OR;
   translate['.'] = TOK_DOT;
   translate[';'] = TOK_SEMICOLON;
@@ -56,6 +56,9 @@ void Elab_scanner::setup_translate() {
   translate['%'] = TOK_PERCENT;
 
   translate['`'] = TOK_BACKTICK;
+
+  translate['['] = TOK_OBR;
+  translate[']'] = TOK_CBR;
 }
 
 void Elab_scanner::add_token(Token &t) {

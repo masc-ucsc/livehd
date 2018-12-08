@@ -28,16 +28,21 @@ cc_test(
 )
 
 cc_test(
-    name = "elab_verilog_test",
-    srcs = ["tests/elab_verilog_test.cpp"],
-    args = ["$(location :elab_scripts)"],
-    deps = [
-        ":elab",
-    ],
-    data = [
-        ":elab_scripts",
-    ],
+  name = "elab_verilog_test",
+  srcs = ["tests/VerilogParser_test.cpp"],
+  deps = [":elab"],
 )
+# cc_test(
+#     name = "elab_verilog_test",
+#     srcs = ["tests/elab_verilog_test.cpp"],
+#     args = ["$(location :elab_scripts)"],
+#     deps = [
+#         ":elab",
+#     ],
+#     data = [
+#         ":elab_scripts",
+#     ],
+# )
 
 cc_binary(
     name = "elab_pyrope_test",

@@ -97,6 +97,10 @@
 #define TOK_QMARK      0x27
 // '
 #define TOK_TICK       0x27
+// [
+#define TOK_OBR        0x28
+// ]
+#define TOK_CBR        0x29
 
 #define TOK_KEYWORD_FIRST   0x40
 #define TOK_KEYWORD_LAST    0x7F
@@ -212,6 +216,10 @@ public:
   void parse(const std::string &name, const char *memblock, size_t sz, bool chunking=false);
   void parse(const std::string &name, const std::string &str) {
     parse(name,str.c_str(),str.size());
+  }
+
+  uint8_t get_token_id() const {
+    return this->token_list[this->scanner_pos].tok;
   }
 
   void dump_token() const;
