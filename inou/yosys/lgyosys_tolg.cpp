@@ -8,6 +8,7 @@
 
 #include "kernel/sigtools.h"
 #include "kernel/yosys.h"
+#include "kernel/celltypes.h"
 
 #include <assert.h>
 #include <map>
@@ -27,6 +28,10 @@ struct GlobalPin {
   LGraph *             g;
   bool                 input;
 };
+
+static CellTypes ct_all;
+static std::set<std::string> cell_port_inputs;
+static std::set<std::string> cell_port_outputs;
 
 struct Local_pin {
   Port_ID out_pid;
@@ -292,7 +297,7 @@ static void resolve_memory(LGraph *g, RTLIL::Cell *cell) {
 }
 
 static bool is_black_box_output(const RTLIL::Module *module, const RTLIL::Cell *cell, const RTLIL::IdString &port_name) {
-  const RTLIL::Wire *wire = cell->getPort(port_name).chunks()[0].wire;
+  const RTLIL::Wire *wire  = cell->getPort(port_name).chunks()[0].wire;
 
   // constant
   if(!wire)
@@ -306,12 +311,23 @@ static bool is_black_box_output(const RTLIL::Module *module, const RTLIL::Cell *
   if(wire->port_input)
     return false;
 
-  if(wire2lpin.find(wire) != wire2lpin.end())
-    return false;
+  //if(wire2lpin.find(wire) != wire2lpin.end())
+  //  return false;
 
-  ::Pass::error("Could not find a definition for module {}, treating as a blackbox but could not determine whether {} is an input "
-                 "or an output",
+  std::string cell_port = cell->type.str() + "_:_" + port_name.str();
+
+  if (cell_port_outputs.count(cell_port)>0) {
+    //std::cout << "1.output " << cell_port << std::endl;
+    return true;
+  }
+  if (cell_port_inputs.count(cell_port)>0) {
+    //std::cout << "1.input " << cell_port << std::endl;
+    return false;
+  }
+
+  ::Pass::error("Could not find a definition for module {}, treating as a blackbox but could not determine whether {} is an output",
                  cell->type.str(), port_name.str());
+
   log_error("unknown port %s at module %s cell %s\n", port_name.c_str(), module->name.c_str(), cell->type.c_str());
   assert(false); // FIXME: is it possible to resolve this case?
   return false;
@@ -332,9 +348,21 @@ static bool is_black_box_input(const RTLIL::Module *module, const RTLIL::Cell *c
   if(wire->port_input)
     return true;
 
-  ::Pass::error("Could not find a definition for module {}, treating as a blackbox but could not determine whether {} is an input "
-                 "or an output",
+  std::string cell_port = cell->type.str() + "_:_" + port_name.str();
+
+  // Opposite of is_black_box_output
+  if (cell_port_outputs.count(cell_port)>0) {
+    //std::cout << "2.output " << cell_port << std::endl;
+    return false;
+  }
+  if (cell_port_inputs.count(cell_port)>0) {
+    //std::cout << "2.input " << cell_port << std::endl;
+    return true;
+  }
+
+  ::Pass::error("Could not find a definition for module {}, treating as a blackbox but could not determine whether {} is an input",
                  cell->type.str(), port_name.str());
+
   log_error("unknown port %s at module %s cell %s\n", port_name.c_str(), module->name.c_str(), cell->type.c_str());
   assert(false); // FIXME: is it possible to resolve this case?
   return false;
@@ -468,10 +496,9 @@ static void look_for_cell_outputs(RTLIL::Module *module) {
         continue;
 
       assert(cell->output(conn.first) || tcell || blackbox || (sub_graph && sub_graph->is_graph_output(&(conn.first.c_str()[1]))));
-      if(blackbox) {
-        assert(is_black_box_output(module, cell, conn.first));
+      if(blackbox && !is_black_box_output(module, cell, conn.first)) {
         connect_string(g, &(conn.first.c_str()[1]), nid, LGRAPH_BBOP_ONAME(blackbox_out++));
-
+        continue;
       } else if(sub_graph && !sub_graph->is_graph_output(&(conn.first.c_str()[1]))) {
         continue;
       } else if(tcell && !tcell->is_output(&(conn.first.c_str()[1]))) {
@@ -967,7 +994,7 @@ static LGraph *process_module(RTLIL::Module *module) {
 
     } else {
       // blackbox addition
-      ::Pass::info("Black box addition from yosys frontend, cell type {} not found", cell->type.c_str());
+      ::Pass::info("Black box addition from yosys frontend, cell type {} not found instance {}", cell->type.c_str(), cell->name.c_str());
 
       op = BlackBox_Op;
       connect_string(g, &(cell->type.c_str()[1]), onid, 0);
@@ -1012,6 +1039,11 @@ static LGraph *process_module(RTLIL::Module *module) {
           dst_pid = LGRAPH_BBOP_CONNECT(blackbox_port);
           blackbox_port++;
         } else {
+          bool o = is_black_box_output(module, cell, conn.first);
+          bool i = is_black_box_input(module, cell, conn.first);
+          ::Pass::error("Could not find a definition for module {}, treating as a blackbox but could not determine whether {} is an input"
+              "or an output {} {}",
+              cell->type.str(), conn.first.c_str(), i, o);
           assert(false); // not able to distinguish if blackbox input or output
         }
       } else {
@@ -1220,11 +1252,72 @@ struct Yosys2lg_Pass : public Yosys::Pass {
     extra_args(args, argidx, design);
 
     module2graph.clear();
+		ct_all.setup(design);
 
     for(auto &it : design->modules_) {
       RTLIL::Module *module = it.second;
       std::string    name   = &module->name.c_str()[1];
       assert(module2graph.find(name) == module2graph.end());
+
+      std::set<size_t> driven_signals;
+      SigMap sigmap(module);
+
+      for (auto wire : module->wires()) {
+        if (wire->port_input)
+          driven_signals.insert(wire->hash());
+      }
+
+      for (auto it : module->connections()) {
+        for(auto &chunk : it.first.chunks()) {
+          const RTLIL::Wire *wire = chunk.wire;
+          if (wire)
+            driven_signals.insert(wire->hash());
+        }
+      }
+
+      for (auto cell : module->cells()) {
+        if (ct_all.cell_known(cell->type)) {
+          for (auto &conn : cell->connections()) {
+            if (ct_all.cell_output(cell->type, conn.first)) {
+              for(auto &chunk : conn.second.chunks()) {
+                const RTLIL::Wire *wire = chunk.wire;
+                if (wire)
+                  driven_signals.insert(wire->hash());
+              }
+            }
+          }
+        }
+      }
+
+      for (auto cell : module->cells()) {
+        if (!ct_all.cell_known(cell->type)) {
+          for (auto &conn : cell->connections()) {
+            for(auto &chunk : conn.second.chunks()) {
+              const RTLIL::Wire *wire = chunk.wire;
+              if (wire == nullptr)
+                continue;
+
+              bool is_input  = wire->port_input  || driven_signals.count(wire->hash())>0;
+              bool is_output = wire->port_output || driven_signals.count(wire->hash())==0;
+
+#if 0
+              std::cout << "unknown cell_type:" << cell->type.str() << " cell_instance:" << cell->name.str() << " port_name:" << conn.first.str() << " wire_name:" << wire->name.str()
+                << " sig:" << wire->hash()
+                << " io:" << (is_input?"I":"") << (is_output?"O":"")
+                << "\n";
+#endif
+
+              std::string cell_port = cell->type.str() + "_:_" + conn.first.str();
+              if (is_input)
+                cell_port_inputs.insert(cell_port);
+              if (is_output)
+                cell_port_outputs.insert(cell_port);
+            }
+          }
+        }
+      }
+
+
 
       auto *g            = LGraph::create(path, name, "-"); // No source, unable to track
       module2graph[name] = g;
