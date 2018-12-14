@@ -2,6 +2,8 @@
 //
 // Created by birdeclipse on 5/23/18.
 
+#include <fstream>
+
 #include "lgraph.hpp"
 
 #include "pass_abc.hpp"

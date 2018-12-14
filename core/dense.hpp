@@ -102,7 +102,8 @@ public:
 
   void clear() noexcept {
     __allocator.clear();
-    __size = 0;
+    __size   = 0;
+    __buffer = 0;
   }
 
   void push_back(const value_type &x) {

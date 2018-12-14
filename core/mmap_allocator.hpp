@@ -11,6 +11,8 @@
 #include <cassert>
 #include <iostream>
 
+#include "graph_library.hpp"
+
 #define MMAPA_MIN_SIZE (1ULL << 10)
 #define MMAPA_INCR_SIZE (1ULL << 12)
 #define MMAPA_MAX_ENTRIES (1ULL << 34)
@@ -38,8 +40,10 @@ public:
   T *reserve(size_t n) const {
     if(mmap_base == 0) {
       allocate_int(n);
+      assert(mmap_base);
+      assert(mmap_size > (sizeof(T) * n));
+      return (T *)(mmap_base);
     }
-    assert(mmap_base);
 
     if(mmap_size > (sizeof(T) * n)) {
       return (T *)(mmap_base);
@@ -103,15 +107,26 @@ public:
     mmap_size     = 0;
   }
 
-  void deallocate(T *p, size_t) {
+  void deallocate(T *p, size_t sz) {
     alloc--;
     if(alloc != 0)
       return;
 
-    if(mmap_base)
+    bool can_delete_when_all_zeroes=false;
+    if(mmap_base) {
+      if (sz<=16) { // Common in char_arrays
+        assert(mmap_size>16);
+        uint64_t *t=static_cast<uint64_t *>(mmap_base);
+        can_delete_when_all_zeroes = t[0] == 0 && t[1] == 0;
+      }
       munmap(mmap_base, mmap_size);
+    }
     if(mmap_fd >= 0)
       close(mmap_fd);
+
+    if(can_delete_when_all_zeroes)
+      unlink(mmap_name.c_str());
+
     mmap_fd       = -1;
     mmap_base     = 0;
     mmap_capacity = 0;
@@ -140,8 +155,14 @@ protected:
 
       mmap_fd = open(mmap_name.c_str(), O_RDWR | O_CREAT, 0644);
       if(mmap_fd < 0) {
-        std::cerr << "ERROR: Could not mmap file " << mmap_name << std::endl;
-        exit(-4);
+        Graph_library::sync_all(); // Garbage collect all the lgraph mmaps
+
+        mmap_fd = open(mmap_name.c_str(), O_RDWR | O_CREAT, 0644);
+        if (mmap_fd<0) {
+          std::cerr << "ERROR: Could not mmap file " << mmap_name << std::endl;
+          assert(false);
+          exit(-4);
+        }
       }
 
       /* Get the size of the file. */
@@ -166,7 +187,8 @@ protected:
         exit(-1);
       }
 
-      ftruncate(mmap_fd, mmap_size);
+      if (mmap_size != file_size)
+        ftruncate(mmap_fd, mmap_size);
 
       return (T *)(mmap_base);
     }

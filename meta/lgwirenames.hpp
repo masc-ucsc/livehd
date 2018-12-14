@@ -70,9 +70,11 @@ public:
     assert(node_internal[nid].is_node_state());
     assert(node_internal[nid].is_root());
 
-    if(get_wid(nid) == 0)
+
+    WireName_ID wid = get_wid(nid);
+    if(wid == 0)
       return nullptr;
-    return get_wirename(get_wid(nid));
+    return get_wirename(wid);
   }
 
   bool has_name(const char *name) const;

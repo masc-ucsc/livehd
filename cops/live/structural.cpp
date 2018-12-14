@@ -1,9 +1,12 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "structural.hpp"
-#include "lgedgeiter.hpp"
 #include <functional>
+#include <fstream>
 #include <queue>
+
+#include "lgedgeiter.hpp"
+
+#include "structural.hpp"
 
 Live_structural::Live_structural(Stitch_pass_options &pack) {
 

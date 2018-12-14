@@ -1,7 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "stitcher.hpp"
+#include <fstream>
+
 #include "lgedgeiter.hpp"
+
+#include "stitcher.hpp"
 
 Live_stitcher::Live_stitcher(Stitch_pass_options &pack) {
 

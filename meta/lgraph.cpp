@@ -38,6 +38,10 @@ LGraph::~LGraph() {
   library->unregister_lgraph(name, lgraph_id, this);
 }
 
+bool LGraph::exists(const std::string &path, const std::string &name) {
+  return Graph_library::try_find_lgraph(path,name);
+}
+
 LGraph *LGraph::create(const std::string &path, const std::string &name, const std::string &source) {
   LGraph *lg = Graph_library::try_find_lgraph(path,name);
   if (lg) {

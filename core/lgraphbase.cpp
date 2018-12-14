@@ -60,6 +60,12 @@ void LGraph_Base::clear() {
 
 void LGraph_Base::sync() {
 
+  LGraph_Node_Type::sync();
+  node_internal.sync();
+
+  input_array.sync();
+  output_array.sync();
+
   if(!locked)
     return;
 
@@ -67,12 +73,6 @@ void LGraph_Base::sync() {
 
   library->sync();
   tlibrary->sync();
-
-  LGraph_Node_Type::sync();
-
-  node_internal.sync();
-  input_array.sync();
-  output_array.sync();
 
   std::string lock = path + "/" + long_name + ".lock";
   unlink(lock.c_str());

@@ -1,7 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "cops_live.hpp"
-
+#include <fstream>
 
 #include "lgedgeiter.hpp"
 #include "lgbench.hpp"
@@ -14,6 +13,8 @@
 #include "structural.hpp"
 #include "stitcher.hpp"
 #include "stitch_options.hpp"
+
+#include "cops_live.hpp"
 
 void setup_cops_live() {
   Cops_live p;

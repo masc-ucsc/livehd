@@ -6,7 +6,6 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <unordered_map>
 #include <vector>
 
 #include "sparsehash/dense_hash_map"
@@ -97,8 +96,6 @@ private:
   const std::string                                        long_name;
   mutable Dense<uint16_t>                                  variable_internal;
   mutable google::dense_hash_map<Hash_sign, Char_Array_ID> hash2id;
-  mutable bool                                             pending_clear_reload;
-  mutable bool                                             synced;
 
   const uint16_t *first() const {
     if(variable_internal.size() <= 1)
@@ -158,25 +155,28 @@ private:
   }
 
   void reload() const {           // WARNING: NO REAL CONST, but called from many places to hot-reload
-    assert(pending_clear_reload); // called once
-    pending_clear_reload = false;
-    synced               = true;
+    assert(variable_internal.size()==0);
 
     FILE *fp_in  = fopen((long_name + "_map").c_str(), "r");
-    bool failed = false;
     if(fp_in) {
+      bool failed=false;
       size_t sz;
-      if(fread(&sz, sizeof(size_t), 1, fp_in) != 1) // first is variable_internal size
+      if(fread(&sz, sizeof(size_t), 1, fp_in) != 1) // first is empty
         failed = true;
-      failed = !hash2id.unserialize(MapSerializer<Hash_sign, Char_Array_ID>(), fp_in);
+      failed |= !hash2id.unserialize(MapSerializer<Hash_sign, Char_Array_ID>(), fp_in);
       fclose(fp_in);
       variable_internal.reload(sz);
-    } else {
-      failed = true;
+
+      if (failed) {
+        Pass::error(fmt::format("char_array::sync could reload {}", long_name));
+      }
     }
-    if(failed) {
-      variable_internal.emplace_back(); //); // so that ID zero is not used
+
+    if(variable_internal.size() == 0) {
+      variable_internal.emplace_back(); // so that ID zero is not used
     }
+
+    variable_internal.sync();
   }
 
 public:
@@ -186,9 +186,6 @@ public:
 
     hash2id.set_empty_key(0);
 
-    pending_clear_reload = true;
-    synced               = true;
-
     reload();
   }
 
@@ -197,22 +194,18 @@ public:
   }
 
   void clear() {
-    pending_clear_reload = false;
-
     variable_internal.clear();
-    variable_internal.emplace_back(); // so that ID zero is not used
+    variable_internal.emplace_back();
     hash2id.clear();
-    synced = false;
   }
 
   void sync() {
-    if(synced || hash2id.empty())
+    variable_internal.sync();
+
+    if(hash2id.empty()) {
       return;
+    }
 
-    assert(!pending_clear_reload);
-
-    synced = true;
-    variable_internal.sync(); // FIXME: The mmap can change location
     FILE *fp = fopen((long_name + "_map").c_str(), "w");
     if(fp) {
       size_t sz = variable_internal.size();
@@ -236,10 +229,6 @@ public:
   }
 
   Char_Array_ID create_id(const char *str, const Data_type &dt = 0) {
-    synced = false;
-    if(pending_clear_reload)
-      reload();
-
     Char_Array_ID start = get_id(str);
     if(start) {
 
@@ -264,6 +253,8 @@ public:
     }
 
     size_t t = variable_internal.size();
+    assert(t);
+
     assert(t < 0x8FFFFFFF); // Just reserve some space
     // NOTE: If we need more space. We could create a separate table that does
     // id2internal. The internal can grow to 64 bits, and still keep the id as
@@ -318,9 +309,6 @@ public:
   }
 
   const char *get_char(Char_Array_ID id) const {
-    if(pending_clear_reload)
-      reload();
-
     assert(id >= 0);
     assert(variable_internal.size() > (id + 1 + (sizeof(Data_type) + sizeof(Hash_sign)) / sizeof(uint16_t)));
 
@@ -329,9 +317,6 @@ public:
   }
 
   const Data_type &get_field(Char_Array_ID id) const {
-    if(pending_clear_reload)
-      reload();
-
     assert(id >= 0);
     assert(variable_internal.size() > (id + 1 + (sizeof(Data_type) + sizeof(Hash_sign)) / sizeof(uint16_t)));
 
@@ -340,9 +325,6 @@ public:
   }
 
   Data_type &get_field(Char_Array_ID id) {
-    if(pending_clear_reload)
-      reload();
-
     assert(id >= 0);
     assert(variable_internal.size() > (id + 1 + (sizeof(Data_type) + sizeof(Hash_sign)) / sizeof(uint16_t)));
 
@@ -351,9 +333,6 @@ public:
   }
 
   const Hash_sign &get_hash(Char_Array_ID id) const {
-    if(pending_clear_reload)
-      reload();
-
     assert(id >= 0);
     assert(variable_internal.size() > (id + 1 + sizeof(Hash_sign) / sizeof(uint16_t)));
 
@@ -366,13 +345,11 @@ public:
   }
 
   const Data_type &get_field(const char *ptr) const {
-    assert(!pending_clear_reload);
     int id = get_id(ptr);
     return get_field(id);
   }
 
   Data_type &get_field(const char *ptr) {
-    assert(!pending_clear_reload);
     int id = get_id(ptr);
     return get_field(id);
   }
@@ -387,9 +364,6 @@ public:
   }
 
   int get_id(const char *str) const {
-    if(pending_clear_reload)
-      reload();
-
     const std::string key(str);
     Hash_sign         seed   = 0;
     Hash_sign         c_hash = seed_hash(key, seed);

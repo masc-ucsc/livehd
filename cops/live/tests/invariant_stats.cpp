@@ -1,4 +1,6 @@
 
+#include <fstream>
+
 #include "pass.hpp"
 
 #include "invariant.hpp"
