@@ -496,10 +496,6 @@ static void look_for_cell_outputs(RTLIL::Module *module) {
       pid = 1;
     }
 
-    if (sub_graph) {
-      ::Pass::info("open {}",sub_graph->get_name());
-    }
-
     uint32_t blackbox_out = 0;
     for(const auto &conn : cell->connections()) {
       // first faster filter but doesn't always work
@@ -579,7 +575,6 @@ static void look_for_cell_outputs(RTLIL::Module *module) {
     }
 
     if (sub_graph) { // To do not leave too many mmaps open
-      ::Pass::info("close {}",sub_graph->get_name());
       sub_graph->close();
       sub_graph = nullptr;
     }
