@@ -1,5 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <fstream>
+
 #include "stdlib.h"
 #include "lgedgeiter.hpp"
 #include "graph_library.hpp"

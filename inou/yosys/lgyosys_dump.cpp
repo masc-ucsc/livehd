@@ -350,8 +350,9 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module *module) {
 
     RTLIL::IdString name;
     RTLIL::IdString yosys_op;
-    const char *    wname = nullptr;
-    if((wname = g->get_node_wirename(idx))) {
+    const char *    wname = g->get_node_wirename(idx);
+    if(wname) {
+      fmt::print("wname[{}]\n",wname);
       name = RTLIL::IdString("\\" + std::string(wname));
     } else {
       if(!g->has_name("lgraph_cell_" + std::to_string(idx)))
@@ -361,6 +362,7 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module *module) {
         do {
           tmp = next_wire().c_str();
         } while(g->has_name(tmp));
+        fmt::print("2.wname[{}]\n",wname);
         name = RTLIL::IdString("\\" + tmp);
       }
     }

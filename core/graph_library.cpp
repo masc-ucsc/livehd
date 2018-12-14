@@ -2,15 +2,17 @@
 
 #include <dirent.h>
 #include <sys/types.h>
+
+#include <fstream>
 #include <set>
 
-#include "graph_library.hpp"
 #include "pass.hpp"
 #include "nodetype.hpp"
 
-std::unordered_map<std::string, Graph_library *> Graph_library::global_instances;
+#include "graph_library.hpp"
 
-std::map<std::string, std::map<std::string, LGraph *>> Graph_library::global_name2lgraph;
+std::unordered_map<std::string, Graph_library *> Graph_library::global_instances;
+std::unordered_map<std::string, std::unordered_map<std::string, LGraph *>> Graph_library::global_name2lgraph;
 
 uint32_t Graph_library::reset_id(const std::string &name, const std::string &source) {
   const auto &it = name2id.find(name);
@@ -40,6 +42,13 @@ LGraph *Graph_library::try_find_lgraph(const std::string &path, const std::strin
   }
 
   return nullptr;
+}
+
+bool Graph_library::exists(const std::string &path, const std::string &name) {
+
+  const Graph_library *lib = instance(path);
+
+  return lib->name2id.find(name) != lib->name2id.end();
 }
 
 LGraph *Graph_library::try_find_lgraph(const std::string &name) {
@@ -172,8 +181,10 @@ void Graph_library::reload() {
   name2id.clear();
   attribute.resize(1); // 0 is not a valid ID
 
-  if(!graph_list.is_open())
+  if(!graph_list.is_open()) { // No reload, just empty
+    mkdir(path.c_str(), 0755); // At least make sure directory exists for future
     return;
+  }
 
   uint32_t n_graphs = 0;
   graph_list >> n_graphs;
@@ -305,6 +316,17 @@ bool Graph_library::unregister_lgraph(const std::string &name, uint32_t lgid, co
   }
 
   return false;
+}
+
+void Graph_library::sync_all() {
+  assert(false); // FIXME: to implement, once we migrate lgraph.cpp to core
+#if 0
+  for(auto &it:global_name2lgraph) {
+    for(auto &it2:it.second) {
+      it2.second->sync();
+    }
+  }
+#endif
 }
 
 void Graph_library::clean_library() {

@@ -70,10 +70,7 @@ static void look_for_module_outputs(RTLIL::Module *module, const std::string &pa
     Index_ID     io_idx;
     if(wire->port_input) {
       assert(!wire->port_output); // any bidirectional port?
-#ifndef NDEBUG
-      log(" adding global input  wire: %s width %d id=%x original_pos=%d\n", wire->name.c_str(), wire->width, wire->hash(),
-          wire->port_id);
-#endif
+      //log(" adding global input  wire: %s width %d id=%x original_pos=%d\n", wire->name.c_str(), wire->width, wire->hash(), wire->port_id);
       assert(wire->name.c_str()[0] == '\\');
       io_idx = g->add_graph_input(&wire->name.c_str()[1], 0, wire->width, wire->start_offset, wire->port_id);
       // FIXME: can we get rid of the dependency in the wirename for IOs?
@@ -86,9 +83,7 @@ static void look_for_module_outputs(RTLIL::Module *module, const std::string &pa
 #endif
 
     } else if(wire->port_output) {
-#ifndef NDEBUG
-      log(" adding global output wire: %s width %d id=%x\n", wire->name.c_str(), wire->width, wire->hash());
-#endif
+      //log(" adding global output wire: %s width %d id=%x\n", wire->name.c_str(), wire->width, wire->hash());
       assert(wire->name.c_str()[0] == '\\');
       io_idx = g->add_graph_output(&wire->name.c_str()[1], 0, wire->width, wire->start_offset, wire->port_id);
       // FIXME: can we get rid of the dependency in the wirename for IOs?
@@ -101,6 +96,9 @@ static void look_for_module_outputs(RTLIL::Module *module, const std::string &pa
 #endif
     }
   }
+
+  if (module2graph.size()>10) // More than 10 different subgraphs
+    g->sync(); // Not needed, but to free-up mmaps...
 }
 
 static bool is_yosys_output(const std::string &idstring) {
@@ -444,9 +442,7 @@ static void connect_string(LGraph *g, const char *value, Index_ID onid, Port_ID 
 
 static void look_for_cell_outputs(RTLIL::Module *module) {
 
-#ifndef NDEBUG
-  log("yosys2lg look_for_cell_outputs pass for module %s:\n", module->name.c_str());
-#endif
+  //log("yosys2lg look_for_cell_outputs pass for module %s:\n", module->name.c_str());
 
   auto *              g    = module2graph[&module->name.c_str()[1]];
   const Tech_library &tlib = g->get_tlibrary();
@@ -458,7 +454,6 @@ static void look_for_cell_outputs(RTLIL::Module *module) {
 
     LGraph *         sub_graph = nullptr;
     const Tech_cell *tcell     = nullptr;
-    bool             blackbox  = false;
 
     std::string mod_name = &(cell->type.c_str()[1]);
 
@@ -477,7 +472,19 @@ static void look_for_cell_outputs(RTLIL::Module *module) {
       tcell = tlib.get_const_cell(tlib.get_cell_id(mod_name.substr(1)));
     }
 
-    blackbox = (!sub_graph) && (!tcell) && (cell->type.c_str()[0] == '\\');
+    bool blackbox = false;
+    if ((!sub_graph) && (!tcell)) {
+      if (cell->type.c_str()[0] == '\\')
+        blackbox = true;
+      else if (!ct_all.cell_known(cell->type))
+        blackbox = true;
+
+#if 0
+      if (blackbox) {
+        ::Pass::info("blackbox {} identified",cell->type.str());
+      }
+#endif
+    }
 
     if(cell->type == "$mem") {
       resolve_memory(g, cell);
@@ -487,6 +494,10 @@ static void look_for_cell_outputs(RTLIL::Module *module) {
     int pid = 0;
     if(std::strncmp(cell->type.c_str(), "$reduce_", 8) == 0 && cell->type.str() != "$reduce_xnor") {
       pid = 1;
+    }
+
+    if (sub_graph) {
+      ::Pass::info("open {}",sub_graph->get_name());
     }
 
     uint32_t blackbox_out = 0;
@@ -565,6 +576,12 @@ static void look_for_cell_outputs(RTLIL::Module *module) {
           }
         }
       }
+    }
+
+    if (sub_graph) { // To do not leave too many mmaps open
+      ::Pass::info("close {}",sub_graph->get_name());
+      sub_graph->close();
+      sub_graph = nullptr;
     }
   }
 }
@@ -691,10 +708,11 @@ static LGraph *process_module(RTLIL::Module *module) {
     Index_ID onid, inid;
     assert(cell2nid.find(cell) != cell2nid.end());
     onid                   = cell2nid[cell];
-    LGraph *     sub_graph = 0;
     Node_Type_Op op;
 
     inid = onid;
+
+    LGraph *sub_graph = nullptr;
 
     bool         subtraction = false, negonly = false, yosys_tech = false;
     uint32_t     size = 0;
@@ -923,8 +941,10 @@ static LGraph *process_module(RTLIL::Module *module) {
         size = cell->parameters["\\Y_WIDTH"].as_int();
       op = Invalid_Op;
 
-    } else if((sub_graph = LGraph::open(g->get_path(), &cell->type.c_str()[1]))) {
+    } else if((LGraph::exists(g->get_path(), &cell->type.c_str()[1]))) {
       // external graph reference
+      sub_graph = LGraph::open(g->get_path(), &cell->type.c_str()[1]);
+      assert(sub_graph);
       const char *mod_name = &cell->type.c_str()[1];
       log("module name %s original was  %s\n", mod_name, cell->type.c_str());
       op = SubGraph_Op;
@@ -936,6 +956,7 @@ static LGraph *process_module(RTLIL::Module *module) {
       else
         fmt::print("yosys2lg got empty inst_name for cell type {}\n", mod_name);
 #endif
+
 
     } else if(tlib.include(cell->type.str())) {
       std::string ttype = cell->type.str();
@@ -1021,6 +1042,7 @@ static LGraph *process_module(RTLIL::Module *module) {
       // Go over cells with multiple inputs that map to something different than A
       if(op == SubGraph_Op) {
         const char *name = &conn.first.c_str()[1];
+        assert(sub_graph);
         if(sub_graph->is_graph_output(name))
           continue;
         dst_pid = sub_graph->get_graph_input(name).get_pid();
@@ -1143,6 +1165,12 @@ static LGraph *process_module(RTLIL::Module *module) {
         added_edges.insert(std::make_pair(src_pin, dst_pin));
       }
     }
+
+    if (sub_graph) {
+      sub_graph->close(); // to avoid output leak
+      sub_graph = nullptr;
+    }
+
   }
 
   for(auto &kv : partially_assigned) {
@@ -1204,9 +1232,7 @@ static LGraph *process_module(RTLIL::Module *module) {
       Node_Pin output  = g->get_graph_output(&wire->name.c_str()[1]);
       Node_Pin dst_pin = Node_Pin(output.get_nid(), 0, true);
       Node_Pin src_pin = Node_Pin(wire2lpin[wire].nid, wire2lpin[wire].out_pid, false);
-#ifndef NDEBUG
-      log("  connecting module output %s %d %ld\n", wire->name.c_str(), src_pin.get_pid(), src_pin.get_nid());
-#endif
+      //log("  connecting module output %s %d %ld\n", wire->name.c_str(), src_pin.get_pid(), src_pin.get_nid());
       g->add_edge(src_pin, dst_pin, wire->width);
     }
   }

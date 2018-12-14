@@ -435,9 +435,6 @@ void Elab_scanner::scan_raw_msg(const std::string &cat, const std::string &text,
 
   if (token_list.empty()) {
     fmt::print(fmt::format("{}:{}:{} {}: {}\n", buffer_name, 0, 0, cat, text));
-    fmt::print("\n");
-    if (third)
-      fmt::print("^\n");
     return;
   }
 

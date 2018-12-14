@@ -1,13 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#ifndef GRAPHLIBRARY_H
-#define GRAPHLIBRARY_H
+#pragma once
 
 #include <cassert>
-#include <fstream>
 #include <functional>
-#include <iostream>
-#include <map>
 #include <unordered_map>
 #include <vector>
 
@@ -43,7 +39,7 @@ protected:
       source   = "";
     }
   };
-  std::map<std::string, uint32_t> name2id;
+  std::unordered_map<std::string, uint32_t> name2id;
   std::vector<uint32_t>           recycled_id;
 
   // WARNING: Not from name (id) because names can happen many times (multiple create)
@@ -65,11 +61,12 @@ protected:
   }
 
   static std::unordered_map<std::string, Graph_library *>       global_instances;
-  static std::map<std::string, std::map<std::string, LGraph *>> global_name2lgraph;
+  static std::unordered_map<std::string, std::unordered_map<std::string, LGraph *>> global_name2lgraph;
 
   uint32_t reset_id(const std::string &name, const std::string &source);
 
 public:
+  static bool    exists(const std::string &path, const std::string &name);
   static LGraph *try_find_lgraph(const std::string &path, const std::string &name);
   LGraph *       try_find_lgraph(const std::string &name);
 
@@ -149,7 +146,8 @@ public:
     clean_library();
   }
 
+  static void sync_all(); // Called when running out of mmaps
+
   void reload();
 };
 
-#endif

@@ -35,6 +35,7 @@ public:
 
   virtual ~LGraph();
 
+  static bool    exists(const std::string &path, const std::string &name);
   static LGraph *create(const std::string &path, const std::string &name, const std::string &source);
   static LGraph *open(const std::string &path, int lgid);
   static LGraph *open(const std::string &path, const std::string &name);
