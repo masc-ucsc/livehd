@@ -10,6 +10,12 @@ new_git_repository(
     #strip_prefix = "ot", OpenTimer uses ot/... so, we have to keep it
     patches = ["//external:patch.Open_timer"],
 )
+new_git_repository( # Open_timer user taskflow
+    name = "taskflow",
+    build_file = "BUILD.taskflow",
+    commit = "c8a12caed111977c92497c6b5338aacf29e715f9", # Dec 20, 2018
+    remote = "https://github.com/cpp-taskflow/cpp-taskflow.git",
+)
 new_git_repository(
     name = "abc",
     build_file = "BUILD.abc", # relative to external path
@@ -83,12 +89,6 @@ new_git_repository(
     build_file = "BUILD.gtest",
     remote = "https://github.com/google/googletest",
     tag = "release-1.8.0",
-)
-new_git_repository(
-    name = "taskflow",
-    build_file = "BUILD.taskflow",
-    commit = "ee47ebeb07e2f40cedece7eedb68eb0cde7ca27c", # October 16, 2018
-    remote = "https://github.com/cpp-taskflow/cpp-taskflow.git",
 )
 new_git_repository(
     name = "verilator",
