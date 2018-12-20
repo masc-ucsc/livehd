@@ -1,6 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#ifndef LGRAPHBASE_H
-#define LGRAPHBASE_H
+#pragma once
 
 #include <stdint.h>
 
@@ -14,14 +13,9 @@
 #include "nodetype.hpp"
 #include "tech_library.hpp"
 
-#ifndef likely
-#define likely(x) __builtin_expect((x), 1)
-#endif
-#ifndef unlikely
-#define unlikely(x) __builtin_expect((x), 0)
-#endif
-
 class Edge_iterator;
+class Forward_edge_iterator;
+class Backward_edge_iterator;
 
 class LGraph_Base : public LGraph_Node_Type {
 private:
@@ -239,4 +233,3 @@ public:
   } _static_initializer;
 };
 
-#endif

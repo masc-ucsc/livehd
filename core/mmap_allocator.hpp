@@ -1,6 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#ifndef MMAP_ALLOCATOR_H
-#define MMAP_ALLOCATOR_H
+#pragma once
 
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -202,4 +201,4 @@ protected:
   mutable int       alloc;
   std::string       mmap_name;
 };
-#endif
+

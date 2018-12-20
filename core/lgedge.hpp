@@ -1,12 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#ifndef LGEDGE_H
-#define LGEDGE_H
+#pragma once
 
-#include <cstdint>
-#include <iostream>
-#include <vector>
+#include <cassert>
 
-#define FMT_STRING_ALIAS 1
 #include "fmt/format.h"
 
 typedef uint64_t Index_ID;
@@ -692,4 +688,3 @@ private:
   }
 };
 
-#endif

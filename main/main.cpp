@@ -356,7 +356,7 @@ int main(int argc, char **argv) {
   }
 
   rx.set_max_history_size(8192);
-  rx.set_max_line_size(32768);
+  //rx.set_max_line_size(32768);
   rx.set_max_hint_rows(6);
 
   rx.set_highlighter_callback(hook_color, static_cast<void*>(&regex_color));

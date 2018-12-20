@@ -1,14 +1,11 @@
-#ifndef ELAB_SCANNER_H
-#define ELAB_SCANNER_H
+#pragma once
 
-#include <stdint.h>
-
+#include <cstdint>
 #include <cassert>
 #include <string>
 #include <vector>
 #include <map>
 
-#define FMT_STRING_ALIAS 1
 #include "fmt/format.h"
 
 #define MIN_CHUNK_SIZE 4
@@ -221,4 +218,3 @@ public:
   bool has_errors() const { return n_errors > 0; }
 };
 
-#endif

@@ -1,4 +1,6 @@
 
+#include "fmt/format.h"
+
 #include "gtest/gtest.h"
 
 // Fake lgraph class for testing

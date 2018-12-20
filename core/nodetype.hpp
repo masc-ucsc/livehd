@@ -1,8 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#ifndef NODETYPE_H
-#define NODETYPE_H
+#pragma once
 
-#include <assert.h>
+#include <cassert>
 #include <map>
 #include <string>
 #include <vector>
@@ -806,4 +805,3 @@ public:
   };
 };
 
-#endif

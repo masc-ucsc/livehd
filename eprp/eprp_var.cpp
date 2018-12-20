@@ -1,4 +1,7 @@
 
+#include <algorithm>
+#include <utility>
+
 #include "eprp_var.hpp"
 
 void Eprp_var::add(const Eprp_dict &_dict) {

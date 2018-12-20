@@ -1,14 +1,14 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include <dirent.h>
-#include <sys/types.h>
+#include <sys/stat.h>
 
 #include <fstream>
 #include <set>
 
-#include "pass.hpp"
-#include "nodetype.hpp"
+#include "fmt/format.h"
 
+#include "pass.hpp"
 #include "graph_library.hpp"
 
 std::unordered_map<std::string, Graph_library *> Graph_library::global_instances;
@@ -123,7 +123,7 @@ bool Graph_library::rename_name(const std::string &orig, const std::string &dest
   assert(dir);
 
   struct dirent *dent;
-  while((dent = readdir(dir)) != NULL) {
+  while((dent = readdir(dir)) != nullptr) {
     if(dent->d_type != DT_REG) // Only regular files
       continue;
 
@@ -226,7 +226,7 @@ void Graph_library::reload() {
 
   std::set<std::string> lg_found;
 
-  while((dent = readdir(dir)) != NULL) {
+  while((dent = readdir(dir)) != nullptr) {
     if(dent->d_type != DT_REG) // Only regular files
       continue;
     if(strncmp(dent->d_name, "lgraph_", 7) != 0) // only if starts with lgraph_

@@ -1,11 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#ifndef CHAR_ARRAY_H
-#define CHAR_ARRAY_H
+#pragma once
 
-#include <assert.h>
 #include <stdint.h>
 #include <string.h>
 
+#include <cassert>
 #include <vector>
 
 #include "sparsehash/dense_hash_map"
@@ -399,4 +398,3 @@ public:
   }
 };
 
-#endif
