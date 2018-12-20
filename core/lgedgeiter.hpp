@@ -1,16 +1,12 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#ifndef LGEDGEITER_H
-#define LGEDGEITER_H
+#pragma once
 
-#include <stdint.h>
-
-#include <iostream>
+#include <cassert>
 #include <vector>
+#include <set>
 
 #include "sparsehash/dense_hash_map"
 #include "sparsehash/sparse_hash_set"
-
-#include <set>
 
 //#include "lgraph.hpp"
 #include "lgraphbase.hpp"
@@ -432,4 +428,3 @@ public:
   } // 0 is end index for iterator
 };
 
-#endif

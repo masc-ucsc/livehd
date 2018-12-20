@@ -1,10 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include <assert.h>
-
-#include <fstream>
-#include <iostream>
-#include <set>
+#include <cassert>
 
 #include "lgedge.hpp"
 
@@ -422,13 +418,12 @@ void Node_Internal::dump_full() const {
   Node_Internal *root = (Node_Internal *)&get_root();
 
   Index_ID             root_idx = root->get_nid();
-  Index_ID             idx      = get_nid();
   const Node_Internal *node     = this;
 
   node->dump();
   while(true) {
 
-    idx  = node->get_next();
+    Index_ID idx  = node->get_next();
     node = &root[idx - root_idx];
 
     node->dump();

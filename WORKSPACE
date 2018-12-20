@@ -5,7 +5,7 @@ load("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
 new_git_repository(
     name = "Open_timer",
     build_file = "BUILD.Open_timer", # relative to external path
-    commit = "931b2fbe867e2a5241d86d45fea26a07c1f8b0d6", # Oct 8, 2018
+    commit = "4040d90a471a76998b3985de7827df413a5e8652", # Dec 8, 2018
     remote = "https://github.com/OpenTimer/OpenTimer.git",
     #strip_prefix = "ot", OpenTimer uses ot/... so, we have to keep it
     patches = ["//external:patch.Open_timer"],
@@ -20,7 +20,7 @@ new_git_repository(
 new_git_repository(
     name = "yosys",
     build_file = "BUILD.yosys", # relative to external path
-    commit = "11c8a9eb960fdb0a412fabcfbe787cbf5cc3a67d", # Oct 20, 2018 0.7+ 57fc8dd58229d309ba56b374223802936444ecd4", # Jun 13, 2018
+    commit = "93d44bb9a613b46a80642b8ce71295db18fadbc5", # Dec 20, 2018
     remote = "https://github.com/YosysHQ/yosys.git",
     #strip_prefix = "kernel",
 )
@@ -47,7 +47,7 @@ new_git_repository(
 new_git_repository(
     name = "bm",
     build_file = "BUILD.bm",
-    commit = "54c25c764dc316c9df31293e8120b53c394602ac", # Nov 30, 2018
+    commit = "f55368e8f0eac62c96c5b13218d132fa27a04c58", # Dec 20, 2018
     remote = "https://github.com/tlk00/BitMagic.git",
     strip_prefix = "src",
 )
@@ -69,13 +69,13 @@ new_git_repository(
 new_git_repository(
     name = "httplib",
     build_file = "BUILD.httplib",
-    commit = "4d7cee81eb106c502738b8a9980422a93dba148a", # Sep 25, 2018
+    commit = "b5927aec123351dcf796e1fba8a6a1805d294cbe", # Dec 20, 2018
     remote = "https://github.com/yhirose/cpp-httplib.git",
 )
 new_git_repository(
     name = "replxx",
     build_file = "BUILD.replxx",
-    commit = "228038cbca2532a35cf3fb596eda0d8335fab212", # September 15, 2018
+    commit = "04aa0ec326be427ff351bf0daafbd5ff5933968e", # Dec 10, 2018 (NEXT requires patch)
     remote = "https://github.com/AmokHuginnsson/replxx.git",
 )
 new_git_repository(

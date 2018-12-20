@@ -1,13 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#ifndef LGRAPHBASE_CORE_H
-#define LGRAPHBASE_CORE_H
+#pragma once
 
 #include "dense.hpp"
 #include "lgedge.hpp"
 
 class Fast_edge_iterator;
-class Forward_edge_iterator;
-class Backward_edge_iterator;
 
 class Lgraph_base_core {
 protected:
@@ -57,4 +54,3 @@ public:
   Fast_edge_iterator fast() const;
 };
 
-#endif

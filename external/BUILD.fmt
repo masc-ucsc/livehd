@@ -5,4 +5,5 @@ cc_library(
    srcs = glob(["src/*.cc"]),
    includes = ["include"],
    visibility = ["//visibility:public"],
+   defines = ["FMT_STRING_ALIAS"],
 )
