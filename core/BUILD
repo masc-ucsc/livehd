@@ -21,6 +21,15 @@ cc_test(
 )
 
 cc_test(
+    name = "dense_bench",
+    srcs = ["tests/dense_bench.cpp"],
+    deps = [
+        ":core",
+        "@yas//:headers",
+    ],
+)
+
+cc_test(
     name = "char_test",
     srcs = ["tests/char_test.cpp"],
     deps = [

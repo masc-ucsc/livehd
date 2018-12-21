@@ -106,6 +106,10 @@ public:
     __buffer = 0;
   }
 
+  size_t capacity() const {
+    return __allocator.capacity();
+  }
+
   void push_back(const value_type &x) {
     if(unlikely(__buffer == 0)) {
       __buffer = __allocator.reallocate(__size + 1);
@@ -128,9 +132,6 @@ public:
 
   size_t size() const {
     return __size;
-  }
-  size_t capacity() const {
-    return __allocator.capacity();
   }
   bool empty() const {
     return __size == 0;
@@ -224,7 +225,7 @@ private:
   allocator_type __allocator;
   size_t         __size;
 
-  mutable value_type *__buffer; // mutable needed to handle the lazy load/unload
+  mutable value_type *__restrict__ __buffer; // mutable needed to handle the lazy load/unload
 };
 
 #endif
