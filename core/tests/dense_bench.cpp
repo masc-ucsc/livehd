@@ -10,7 +10,7 @@
 #include "yas/serialize.hpp"
 #include "yas/std_types.hpp"
 
-void run_dense() {
+void run_dense(int test_size) {
 
   LGBench b("dense.vector");
 
@@ -20,12 +20,12 @@ void run_dense() {
     // unnecessary? unlink(filename);
     Dense<int> array(filename);
 
-    for(int i=0;i<40000000;i++) {
+    for(int i=0;i<test_size;i++) {
       array.emplace_back(i);
     }
 
     int total=0;
-    for(int i=0;i<40000000;i+=237) {
+    for(int i=0;i<test_size;i+=237) {
       total += array[i];
     }
 
@@ -42,26 +42,26 @@ void run_dense() {
   b.sample("unserialize");
 
   int total=0;
-  for(int i=0;i<40000000;i+=237) {
+  for(int i=0;i<test_size;i+=237) {
     total += array2[i];
   }
 
   std::cout << "dense.check:" << total << std::endl;
 }
 
-void run_yas() {
+void run_yas(int test_size) {
 
   LGBench b("yas.vector");
 
   std::vector<int> array;
   std::vector<int> array2;
 
-  for(int i=0;i<40000000;i++) {
+  for(int i=0;i<test_size;i++) {
     array.push_back(i);
   }
 
   int total=0;
-  for(int i=0;i<40000000;i+=237) {
+  for(int i=0;i<test_size;i+=237) {
     total += array[i];
   }
 
@@ -102,7 +102,7 @@ void run_yas() {
   b.sample("unserialize");
 
   total=0;
-  for(int i=0;i<40000000;i+=237) {
+  for(int i=0;i<test_size;i+=237) {
     total += array2[i];
   }
 
@@ -111,13 +111,18 @@ void run_yas() {
 
 int main() {
 
-  run_yas();
+  for(int i=0;i<32;i++) {
+    run_yas(4000);
+    run_dense(4000);
+  }
 
-  run_dense();
+  for(int i=0;i<4;i++) {
+    run_yas(4000000);
+    run_dense(4000000);
+  }
 
-  run_yas();
-
-  run_dense();
+  run_yas(60000000);
+  run_dense(60000000);
 
   return 0;
 }

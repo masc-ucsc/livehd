@@ -181,24 +181,25 @@ protected:
 
       mmap_size     = n * sizeof(T);
       mmap_capacity = n;
-      if(file_size > mmap_size) {
+      if(file_size > mmap_size && (file_size < (4*mmap_size))) {
+        // If the mmap was there, reuse as long as it was not huge
         mmap_size     = file_size;
         mmap_capacity = file_size / sizeof(T);
       }
+      if (mmap_size != file_size) {
+        int ret = ftruncate(mmap_fd, mmap_size);
+        if(ret<0) {
+          std::cerr << "ERROR: ftruncate could not resize  " << mmap_name << " to " << mmap_size << "\n";
+          mmap_base = 0;
+          exit(-1);
+        }
+      }
+
       mmap_base = reinterpret_cast<uint64_t *>(mmap(0, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, mmap_fd, 0));
       if(mmap_base == MAP_FAILED) {
         std::cerr << "ERROR: mmap could not adjust\n";
         mmap_base = 0;
         exit(-1);
-      }
-
-      if (mmap_size != file_size) {
-        int ret = ftruncate(mmap_fd, mmap_size);
-        if(ret<0) {
-          std::cerr << "ERROR: ftruncate could not adjust " << mmap_name << " to " << mmap_size << "\n";
-          mmap_base = 0;
-          exit(-1);
-        }
       }
 
       return (T *)(mmap_base);
