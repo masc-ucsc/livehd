@@ -49,8 +49,8 @@ protected:
 
 public:
   struct IndexID_Hash {
-    inline std::size_t operator()(const Index_ID &k) const {
-      return (size_t)k;
+    inline std::size_t operator()(const Index_ID k) const {
+      return (size_t)k.value;
     }
   };
 
@@ -133,31 +133,31 @@ public:
   struct graph_topology {
 
     using topology_info = std::vector<index_offset>;
-    using name2id       = std::unordered_map<std::string, Index_ID>;
+    using name2id       = std::unordered_map<std::string, uint64_t>;
     using po_group      = std::map<index_offset, Abc_primary_output>;
     using pi_group      = std::map<index_offset, Abc_primary_input>;
-    using cell_group    = std::unordered_map<Index_ID, Abc_comb, IndexID_Hash>;
-    using latch_group   = std::unordered_map<Index_ID, Abc_latch, IndexID_Hash>;
-    using skew_group    = std::map<std::string, std::set<Index_ID>>;
-    using reset_group   = std::map<std::string, std::set<Index_ID>>;
-    using node_conn     = std::unordered_map<Index_ID, topology_info, IndexID_Hash>;
-    using block_conn    = std::unordered_map<Index_ID, std::unordered_map<Port_ID, topology_info>, IndexID_Hash>;
+    using cell_group    = std::unordered_map<uint64_t, Abc_comb, IndexID_Hash>;
+    using latch_group   = std::unordered_map<uint64_t, Abc_latch, IndexID_Hash>;
+    using skew_group    = std::map<std::string, std::set<uint64_t>>;
+    using reset_group   = std::map<std::string, std::set<uint64_t>>;
+    using node_conn     = std::unordered_map<uint64_t, topology_info, IndexID_Hash>;
+    using block_conn    = std::unordered_map<uint64_t, std::unordered_map<Port_ID, topology_info>, IndexID_Hash>;
     using pseduo_name   = std::map<index_offset, std::string>;
-    using idremap       = std::unordered_map<Index_ID, Index_ID>;
-    using pidremap      = std::unordered_map<Index_ID, std::unordered_map<Port_ID, Index_ID>>;
-    using ptr2id        = std::unordered_map<Abc_Obj_t *, Index_ID>;
-    using id2pid        = std::unordered_map<Index_ID, Port_ID, IndexID_Hash>;
+    using idremap       = std::unordered_map<uint64_t, uint64_t>;
+    using pidremap      = std::unordered_map<uint64_t, std::unordered_map<Port_ID, uint64_t>>;
+    using ptr2id        = std::unordered_map<Abc_Obj_t *, uint64_t>;
+    using id2pid        = std::unordered_map<uint64_t, Port_ID, IndexID_Hash>;
     using value_size    = std::pair<uint32_t, uint32_t>;
-    using value2idx     = std::map<value_size, Index_ID>;
+    using value2idx     = std::map<value_size, uint64_t>;
     using picks2pin     = std::map<Pick_ID, Node_Pin>;
     using record        = std::unordered_map<std::string, Abc_Obj_t *>;
 
-    std::vector<Index_ID> combinational_id;
-    std::vector<Index_ID> latch_id;
-    std::vector<Index_ID> graphio_input_id;
-    std::vector<Index_ID> graphio_output_id;
-    std::vector<Index_ID> subgraph_id;
-    std::vector<Index_ID> memory_id;
+    std::vector<uint64_t> combinational_id;
+    std::vector<uint64_t> latch_id;
+    std::vector<uint64_t> graphio_input_id;
+    std::vector<uint64_t> graphio_output_id;
+    std::vector<uint64_t> subgraph_id;
+    std::vector<uint64_t> memory_id;
 
     po_group    primary_output;
     pi_group    primary_input;

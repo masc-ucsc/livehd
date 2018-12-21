@@ -291,7 +291,7 @@ void LGraph::dump() const {
   dump_lgwires();
 
 #if 1
-  for(Index_ID i = 0; i < node_internal.size(); i++) {
+  for(Index_ID i = 0; i < node_internal.size(); i.value++) {
     fmt::print("{} ", i);
     node_internal[i].dump();
   }
