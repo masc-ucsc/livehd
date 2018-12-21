@@ -99,9 +99,9 @@ void Pass_dfg::trans(LGraph *dfg) {
       sub_graph                  = LGraph::open(dfg->get_path(), wirename);
       assert(sub_graph);
 
-      dfg->node_subgraph_set(idx, (uint32_t)sub_graph->lg_id());
+      dfg->node_subgraph_set(idx, sub_graph->lg_id());
 
-      fmt::print("resolve pending subG! lg_id:{}, nid:{}, subG name:{}\n", (uint32_t)sub_graph->lg_id(), idx, dfg->get_node_wirename(idx));
+      fmt::print("resolve pending subG! lg_id:{}, nid:{}, subG name:{}\n", sub_graph->lg_id(), idx, dfg->get_node_wirename(idx));
     }
   }
 
@@ -153,7 +153,7 @@ void Pass_dfg::do_pseudo_bitwidth(LGraph *dfg) {
         //fmt::print("get instance name:{}\n", dfg->get_node_instancename(idx));
         //const char *out_name = subgraph->get_graph_output_name_from_pid(1);//problem1:make source pid = 1 will work, but this is not a true pid
         const char *out_name = subgraph->get_graph_output_name_from_pid(src_pid);//src_pid = 0 will fail, is it a new bug!?
-        fmt::print("nid:{}, subgraph_lg_id:{}, out_name:{}\n", idx, (uint32_t)subgraph->lg_id(), out_name);
+        fmt::print("nid:{}, subgraph_lg_id:{}, out_name:{}\n", idx, subgraph->lg_id(), out_name);
         uint16_t    out_size = subgraph->get_bits(subgraph->get_graph_output(out_name).get_nid());
         dfg->set_bits(dst_nid, out_size);
       } else if(dfg->node_type_get(dst_nid).op == Mux_Op) {
@@ -299,7 +299,7 @@ void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_t
   Index_ID subg_root_nid = aux_tree->get_alias(oprds[0]);
 
   if((sub_graph = LGraph::open(cfg->get_path(), ((std::string)(dfg->get_node_wirename(subg_root_nid)))))) {
-    dfg->node_subgraph_set(subg_root_nid, (uint32_t)sub_graph->lg_id());
+    dfg->node_subgraph_set(subg_root_nid, sub_graph->lg_id());
     fmt::print("set subgraph on nid:{}, sub_graph name:{}, sub_graph_id:{}\n", subg_root_nid, dfg->get_node_wirename(subg_root_nid),
                sub_graph->lg_id());
   } else {

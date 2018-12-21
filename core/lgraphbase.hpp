@@ -23,7 +23,7 @@ private:
 
 protected:
   bool locked;
-  int  lgraph_id;
+  Lg_type_id  lgraph_id;
 
   struct str_cmp_i { // case insensitive string compare for IO
     bool operator()(char const *a, char const *b) const {
@@ -85,7 +85,7 @@ public:
 
   void close();
 
-  int lg_id() const {
+  Lg_type_id lg_id() const {
     return lgraph_id;
   }
 
