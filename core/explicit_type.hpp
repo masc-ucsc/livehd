@@ -17,6 +17,7 @@ struct Explicit_type
 
   //! The actual fundamental value.
   T value;
+  typedef T type;
 };
 
 #if 0
