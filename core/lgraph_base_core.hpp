@@ -28,7 +28,7 @@ protected:
 
   Index_ID fast_next(Index_ID nid) const {
     while(true) {
-      nid++;
+      nid.value++;
       if(nid >= static_cast<Index_ID>(node_internal.size()))
         return 0;
       if(!node_internal[nid].is_node_state())

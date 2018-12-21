@@ -85,7 +85,7 @@ std::vector<LGraph *> Inou_rand::do_tolg() {
   std::mt19937 rnd;
   rnd.seed(opack.rand_seed);
 
-  std::uniform_int_distribution<Index_ID> rnd_created(0, opack.rand_size - 1);
+  std::uniform_int_distribution<uint64_t> rnd_created(0, opack.rand_size - 1);
   std::uniform_int_distribution<Port_ID>  rnd_4(0, 4);
   std::uniform_int_distribution<uint16_t> rnd_bits1(1, 32);
   std::uniform_int_distribution<uint16_t> rnd_bits2(1, 512);
@@ -93,7 +93,7 @@ std::vector<LGraph *> Inou_rand::do_tolg() {
   std::uniform_int_distribution<uint32_t> rnd_u32op(0, (uint32_t)(U32ConstMax_Op - U32ConstMin_Op));
   std::uniform_int_distribution<uint8_t>  rnd_const(0, 100);
 
-  std::vector<Index_ID> created;
+  std::vector<uint64_t> created;
 
   Index_ID max_nid = 0;
   for(int i = 0; i < opack.rand_size; i++) {

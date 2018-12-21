@@ -93,7 +93,11 @@
 // ?
 #define TOK_QMARK      0x27
 // '
-#define TOK_TICK       0x27
+#define TOK_TICK       0x28
+// [
+#define TOK_OBR        0x29
+// ]
+#define TOK_CBR        0x30
 
 #define TOK_KEYWORD_FIRST   0x40
 #define TOK_KEYWORD_LAST    0x7F
