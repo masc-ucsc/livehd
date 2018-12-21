@@ -2,6 +2,7 @@
 #ifndef DUMP_YOSYS_H_
 #define DUMP_YOSYS_H_
 
+#include "pass.hpp"
 #include "inou.hpp"
 #include "lgraph.hpp"
 

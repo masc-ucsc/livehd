@@ -7,18 +7,26 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <functional>
 #include <cassert>
 #include <iostream>
-
-#include "graph_library.hpp"
 
 #define MMAPA_MIN_SIZE (1ULL << 10)
 #define MMAPA_INCR_SIZE (1ULL << 14)
 #define MMAPA_MAX_ENTRIES (1ULL << 34)
 
 template <typename T> class mmap_allocator {
+
 public:
   typedef T value_type;
+
+  static void global_garbage_collect(std::function<void(void)> gc) {
+    static std::function<void(void)> g_collect;
+    if (gc)
+      g_collect = gc;
+    else
+      g_collect();
+  }
 
   explicit mmap_allocator(const std::string &filename)
       : mmap_base(0)
@@ -160,7 +168,8 @@ protected:
 
       mmap_fd = open(mmap_name.c_str(), O_RDWR | O_CREAT, 0644);
       if(mmap_fd < 0) {
-        Graph_library::sync_all(); // Garbage collect all the lgraph mmaps
+        std::function<void(void)> fn_void;
+        global_garbage_collect(fn_void);
 
         mmap_fd = open(mmap_name.c_str(), O_RDWR | O_CREAT, 0644);
         if (mmap_fd<0) {
