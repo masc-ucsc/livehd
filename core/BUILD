@@ -5,36 +5,12 @@ cc_library(
     hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
     includes = ["."],
-    deps = ["@sparsehash//:headers",
-            "@bm//:headers",
+    deps = ["@bm//:headers",
             "@rapidjson//:headers",
             "//eprp:eprp",
+            "//lmms:headers",
+            "//bench:headers",
             ],
-)
-
-cc_test(
-    name = "dense_test",
-    srcs = ["tests/dense_test.cpp"],
-    deps = [
-        ":core",
-    ],
-)
-
-cc_test(
-    name = "dense_bench",
-    srcs = ["tests/dense_bench.cpp"],
-    deps = [
-        ":core",
-        "@yas//:headers",
-    ],
-)
-
-cc_test(
-    name = "char_test",
-    srcs = ["tests/char_test.cpp"],
-    deps = [
-        ":core",
-    ],
 )
 
 cc_test(
@@ -54,3 +30,4 @@ cc_test(
         "//meta:meta",
     ],
 )
+

@@ -5,6 +5,8 @@
 #include <vector>
 #include <set>
 
+#include "pass.hpp"
+
 #include "sparsehash/dense_hash_map"
 #include "sparsehash/sparse_hash_set"
 

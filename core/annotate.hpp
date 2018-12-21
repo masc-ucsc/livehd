@@ -20,6 +20,9 @@ using Index_ID = size_t;
 // children, this data structure may change, but keep same API
 
 class Annotate_hierarchy {
+  // FIXME: MOVE THIS TO lgraph_library
+  // FIXME: the add_child should be removed. As it should request the info to the lgraph (avoid replication)
+
   struct Track_parent {
     Char_Array_ID parent_cid;  // 0 if no name id (annonymous)
     size_t        next_parent; // 0 no parent
