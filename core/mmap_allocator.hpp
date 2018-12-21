@@ -13,7 +13,7 @@
 #include "graph_library.hpp"
 
 #define MMAPA_MIN_SIZE (1ULL << 10)
-#define MMAPA_INCR_SIZE (1ULL << 12)
+#define MMAPA_INCR_SIZE (1ULL << 14)
 #define MMAPA_MAX_ENTRIES (1ULL << 34)
 
 template <typename T> class mmap_allocator {
@@ -22,8 +22,8 @@ public:
 
   explicit mmap_allocator(const std::string &filename)
       : mmap_base(0)
-      , mmap_size(0)
       , mmap_capacity(0)
+      , mmap_size(0)
       , mmap_fd(-1)
       , alloc(0)
       , mmap_name(filename) {
@@ -55,6 +55,7 @@ public:
 
     if(mmap_size <= req_size) {
       size_t old_size = mmap_size;
+      mmap_size += mmap_size / 2; // 1.5 every time
       while(mmap_size <= req_size) {
         mmap_size += MMAPA_INCR_SIZE;
       }
@@ -64,11 +65,16 @@ public:
 
       mmap_base = reinterpret_cast<uint64_t *>(mremap(mmap_base, old_size, mmap_size, MREMAP_MAYMOVE));
       if(mmap_base == MAP_FAILED) {
-        std::cerr << "ERROR: mmap could not allocate\n";
+        std::cerr << "ERROR: mmap could not allocate" << mmap_name << "\n";
         mmap_base = 0;
         exit(-1);
       }
-      ftruncate(mmap_fd, mmap_size);
+      int ret = ftruncate(mmap_fd, mmap_size);
+      if(ret<0) {
+        std::cerr << "ERROR: ftruncate could not allocate " << mmap_name << " to " << mmap_size << "\n";
+        mmap_base = 0;
+        exit(-1);
+      }
     }
 
     return (T *)(mmap_base);
@@ -131,7 +137,7 @@ public:
     mmap_capacity = 0;
   }
 
-  size_t capacity() const {
+  inline size_t capacity() const {
     return mmap_capacity;
   }
 
@@ -181,22 +187,29 @@ protected:
       }
       mmap_base = reinterpret_cast<uint64_t *>(mmap(0, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, mmap_fd, 0));
       if(mmap_base == MAP_FAILED) {
-        std::cerr << "ERROR: mmap could not allocate\n";
+        std::cerr << "ERROR: mmap could not adjust\n";
         mmap_base = 0;
         exit(-1);
       }
 
-      if (mmap_size != file_size)
-        ftruncate(mmap_fd, mmap_size);
+      if (mmap_size != file_size) {
+        int ret = ftruncate(mmap_fd, mmap_size);
+        if(ret<0) {
+          std::cerr << "ERROR: ftruncate could not adjust " << mmap_name << " to " << mmap_size << "\n";
+          mmap_base = 0;
+          exit(-1);
+        }
+      }
 
       return (T *)(mmap_base);
     }
 
     return reserve(n);
   }
-  mutable uint64_t *mmap_base;
-  mutable size_t    mmap_size;
+
+  mutable uint64_t *__restrict__ mmap_base;
   mutable size_t    mmap_capacity; // size/sizeof - space_control
+  mutable size_t    mmap_size;
   mutable int       mmap_fd;
   mutable int       alloc;
   std::string       mmap_name;

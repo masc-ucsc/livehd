@@ -73,6 +73,13 @@ new_git_repository(
     strip_prefix = "include",
 )
 new_git_repository(
+    name = "yas",
+    build_file = "BUILD.yas",
+    commit = "f705a06735b87fd97e4f785c31c5791a907f155a", # Dec 21, 2018
+    remote = "https://github.com/niXman/yas.git",
+    strip_prefix = "include",
+)
+new_git_repository(
     name = "httplib",
     build_file = "BUILD.httplib",
     commit = "b5927aec123351dcf796e1fba8a6a1805d294cbe", # Dec 20, 2018
