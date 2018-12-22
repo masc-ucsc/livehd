@@ -938,3 +938,16 @@ Edge_iterator LGraph_Base::inp_edges(Index_ID idx) const {
 
   return Edge_iterator(s, e, true);
 }
+
+void LGraph_Base::each_root_fast(std::function<void(Index_ID)> f1) const {
+
+  for(const auto &ni: node_internal) {
+    if (!ni.is_node_state())
+      continue;
+    if (!ni.is_root())
+      continue;
+
+    f1(ni.get_nid());
+  }
+
+}

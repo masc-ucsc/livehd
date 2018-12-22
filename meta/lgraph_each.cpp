@@ -46,19 +46,6 @@ void LGraph::each_master_root_fast(std::function<void(Index_ID)> f1) const {
 
 }
 
-void LGraph::each_root_fast(std::function<void(Index_ID)> f1) const {
-
-  for(const auto &ni: node_internal) {
-    if (!ni.is_node_state())
-      continue;
-    if (!ni.is_root())
-      continue;
-
-    f1(ni.get_nid());
-  }
-
-}
-
 void LGraph::each_input_root_fast(std::function<void(Index_ID, Port_ID)> f1) const {
 
   for(const auto &ni: node_internal) {
