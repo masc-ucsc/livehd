@@ -126,6 +126,8 @@ void LGraph_Node_Type::reload(uint64_t sz) {
 void LGraph_Node_Type::sync() {
   node_type_table.sync();
   consts.sync();
+
+  // FIXME: const_nodes and sub_graph_nodes SERIALIZATION???
 }
 
 void LGraph_Node_Type::node_type_set(Index_ID nid, Node_Type_Op op) {

@@ -232,8 +232,8 @@ public:
     _init();
   } _static_initializer;
 
-  void each_sub_graph_fast(std::function<bool(Index_ID)> f1) const;
-  void each_sub_graph_fast(std::function<void(Index_ID)> f1) const;
+  void each_sub_graph_fast(std::function<bool(Index_ID, Lg_type_id, const std::string &)> f1) const;
+  void each_sub_graph_fast(std::function<void(Index_ID, Lg_type_id, const std::string &)> f1) const;
 
   void each_root_fast(std::function<bool(Index_ID)> f1) const;
   void each_root_fast(std::function<void(Index_ID)> f1) const;
