@@ -262,12 +262,6 @@ Graph_library::Graph_library(const std::string &_path)
   reload();
 }
 
-void Graph_library::each_graph(std::function<void(const std::string &, Lg_type_id lgid)> f1) const {
-  for(const std::pair<const std::string, Lg_type_id> entry : name2id) {
-    f1(entry.first, entry.second);
-  }
-}
-
 Lg_type_id Graph_library::try_get_recycled_id() {
   if(recycled_id.none())
     return 0;
@@ -377,16 +371,32 @@ void Graph_library::clean_library() {
   graph_library_clean = true;
 }
 
+void Graph_library::each_type(std::function<void(Lg_type_id, const std::string &)> f1) const {
+
+  for(const std::pair<const std::string, Lg_type_id> entry : name2id) {
+    f1(entry.second, entry.first);
+  }
+
+}
 void Graph_library::each_type(std::function<bool(Lg_type_id, const std::string &)> f1) const {
 
-  for(size_t id = 1; id < attribute.size(); ++id) {
-    const auto &it = attribute[id];
-    if (it.version==0) // Clear/delete sets version to zero
-      continue;
-
-    bool cont = f1(id, it.name);
+  for(const std::pair<const std::string, Lg_type_id> entry : name2id) {
+    bool cont = f1(entry.second, entry.first);
     if (!cont)
       break;
+  }
+
+}
+
+void Graph_library::each_type(const std::string &match, std::function<void(Lg_type_id, const std::string &)> f1) const {
+
+  const std::regex txt_regex(match);
+
+  for(const std::pair<const std::string, Lg_type_id> entry : name2id) {
+    if (!std::regex_search(entry.first, txt_regex))
+      continue;
+
+    f1(entry.second, entry.first);
   }
 
 }
@@ -395,17 +405,13 @@ void Graph_library::each_type(const std::string &match, std::function<bool(Lg_ty
 
   const std::regex txt_regex(match);
 
-  for(size_t id = 1; id < attribute.size(); ++id) {
-    const auto &it = attribute[id];
-    if (it.version==0) // Clear/delete sets version to zero
-      continue;
-    if (!std::regex_search(it.name, txt_regex))
+  for(const std::pair<const std::string, Lg_type_id> entry : name2id) {
+    if (!std::regex_search(entry.first, txt_regex))
       continue;
 
-    bool cont = f1(id, it.name);
+    bool cont = f1(entry.second, entry.first);
     if (!cont)
       break;
   }
 
 }
-
