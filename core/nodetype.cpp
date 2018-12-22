@@ -117,6 +117,8 @@ void LGraph_Node_Type::reload(uint64_t sz) {
   for(const Index_ID &node : Lgraph_base_core::fast()) {
     if(node_type_get(node).op == U32Const_Op || node_type_get(node).op == StrConst_Op) {
       const_nodes.set_bit(node);
+    }else if(node_type_get(node).op == SubGraph_Op) {
+      sub_graph_nodes.set_bit(node);
     }
   }
 }
@@ -142,6 +144,8 @@ void LGraph_Node_Type::node_subgraph_set(Index_ID nid, uint32_t subgraphid) {
 
   assert(node_internal[nid].get_nid() < node_type_table.size());
   assert(subgraphid <= (uint32_t)(SubGraphMax_Op - SubGraphMin_Op));
+
+  sub_graph_nodes.set_bit(node_internal[nid].get_nid());
 
   node_type_table[node_internal[nid].get_nid()] = (Node_Type_Op)(SubGraphMin_Op + subgraphid);
 }

@@ -765,6 +765,7 @@ private:
   Char_Array<Const_ID> consts;
   Dense<Node_Type_Op>  node_type_table;
   bm::bvector<>        const_nodes;
+  bm::bvector<>        sub_graph_nodes;
 
 public:
   LGraph_Node_Type() = delete;
@@ -802,6 +803,10 @@ public:
 
   const bm::bvector<> &get_const_node_ids() const {
     return const_nodes;
+  };
+
+  const bm::bvector<> &get_sub_graph_ids() const {
+    return sub_graph_nodes;
   };
 };
 
