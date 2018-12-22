@@ -3,6 +3,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 
+#include <regex>
 #include <fstream>
 #include <set>
 
@@ -70,21 +71,20 @@ LGraph *Graph_library::try_find_lgraph(const std::string &name) {
 
 Lg_type_id Graph_library::add_name(const std::string &name, const std::string &source) {
 
-  Lg_type_id id = attribute.size();
-  if(!recycled_id.empty()) {
-    assert(id > recycled_id.back());
-    id = recycled_id.back();
-    recycled_id.pop_back();
-    attribute[id].name    = name;
-    assert(source!="");
-    attribute[id].source  = source;
-    attribute[id].version = max_next_version.value++;
-  } else {
-    Graph_attributes a;
-    a.name = name;
-    a.source = source;
-    a.version = max_next_version.value++;
+  assert(source!="");
+
+  Graph_attributes a;
+  a.name = name;
+  a.source = source;
+  a.version = max_next_version.value++;
+
+  Lg_type_id id = try_get_recycled_id();
+  if (id==0) {
+    id = attribute.size();
     attribute.emplace_back(a);
+  }else{
+    assert(id<attribute.size());
+    attribute[id] = a;
   }
 
   graph_library_clean   = false;
@@ -268,6 +268,34 @@ void Graph_library::each_graph(std::function<void(const std::string &, Lg_type_i
   }
 }
 
+Lg_type_id Graph_library::try_get_recycled_id() {
+  if(recycled_id.none())
+    return 0;
+
+  Lg_type_id lgid = recycled_id.get_first();
+  assert(lgid<=attribute.size());
+  recycled_id.clear(lgid);
+
+  return lgid;
+}
+
+void Graph_library::recycle_id(Lg_type_id lgid) {
+
+  if (lgid < attribute.size()) {
+    recycled_id.set_bit(lgid);
+    return;
+  }
+
+  size_t end_pos = attribute.size();
+  while(attribute.back().version==0) {
+    attribute.pop_back();
+    if (attribute.empty())
+      break;
+  }
+
+  recycled_id.set_range(attribute.size(), end_pos, false);
+}
+
 bool Graph_library::expunge_lgraph(const std::string &name, const LGraph *lg) {
   if(global_name2lgraph[path][name] != lg) {
     Pass::warn("graph_library::expunge_lgraph({}) for a wrong graph??? path:{}", name, path);
@@ -279,7 +307,7 @@ bool Graph_library::expunge_lgraph(const std::string &name, const LGraph *lg) {
 
   if(attribute[id].nopen == 0) {
     attribute[id].clear();
-    recycled_id.push_back(id);
+    recycle_id(id);
     return true;
   }
 
@@ -337,8 +365,10 @@ void Graph_library::clean_library() {
 
   graph_list.open(path + "/" + library_file);
   graph_list << (attribute.size() - 1) << std::endl;
-  for(size_t id = 1; id < attribute.size(); id++) {
+  for(size_t id = 1; id < attribute.size(); ++id) {
     const auto &it = attribute[id];
+    if (it.version==0) // Clear/delete sets version to zero
+      continue;
     graph_list << it.name << " " << id << " " << it.version << " " << it.nentries << " " << it.source << std::endl;
   }
 
@@ -346,3 +376,36 @@ void Graph_library::clean_library() {
 
   graph_library_clean = true;
 }
+
+void Graph_library::each_type(std::function<bool(Lg_type_id, const std::string &)> f1) const {
+
+  for(size_t id = 1; id < attribute.size(); ++id) {
+    const auto &it = attribute[id];
+    if (it.version==0) // Clear/delete sets version to zero
+      continue;
+
+    bool cont = f1(id, it.name);
+    if (!cont)
+      break;
+  }
+
+}
+
+void Graph_library::each_type(const std::string &match, std::function<bool(Lg_type_id, const std::string &)> f1) const {
+
+  const std::regex txt_regex(match);
+
+  for(size_t id = 1; id < attribute.size(); ++id) {
+    const auto &it = attribute[id];
+    if (it.version==0) // Clear/delete sets version to zero
+      continue;
+    if (!std::regex_search(it.name, txt_regex))
+      continue;
+
+    bool cont = f1(id, it.name);
+    if (!cont)
+      break;
+  }
+
+}
+
