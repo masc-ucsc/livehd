@@ -11,6 +11,8 @@
 #include <utility>
 #include <vector>
 
+#include "bm.h"
+
 #include "explicit_type.hpp"
 
 // Description:
@@ -47,7 +49,8 @@ protected:
     }
   };
   std::unordered_map<std::string, Lg_type_id::type> name2id;
-  std::vector<Lg_type_id::type>           recycled_id;
+  typedef bm::bvector<> Recycled_id;
+  Recycled_id recycled_id;
 
   // WARNING: Not from name (id) because names can happen many times (multiple create)
   typedef std::vector<Graph_attributes> Attribute_type;
@@ -71,6 +74,9 @@ protected:
   static std::unordered_map<std::string, std::unordered_map<std::string, LGraph *>> global_name2lgraph;
 
   Lg_type_id reset_id(const std::string &name, const std::string &source);
+
+  Lg_type_id try_get_recycled_id();
+  void recycle_id(Lg_type_id lgid);
 
 public:
   static bool    exists(const std::string &path, const std::string &name);
@@ -154,6 +160,11 @@ public:
   }
 
   static void sync_all(); // Called when running out of mmaps
+
+  void each_type(std::function<bool(Lg_type_id, const std::string &)> fn) const;
+  void each_type(const std::string &match, std::function<bool(Lg_type_id, const std::string &)> fn) const;
+  //void each_type(const std::string &type, std::function<bool(Lg_type_id,Name_id)> fn) const;
+  //void each_name(const std::string &type, std::function<bool(Lg_type_id,Name_id)> fn) const;
 
   void reload();
 };
