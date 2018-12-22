@@ -141,8 +141,6 @@ public:
     return max_next_version - 1;
   }
 
-  void each_graph(std::function<void(const std::string &, Lg_type_id lgid)> f1) const;
-
   bool expunge_lgraph(const std::string &name, const LGraph *lg);
 
   Lg_type_id register_lgraph(const std::string &name, const std::string &source, LGraph *lg);
@@ -161,7 +159,9 @@ public:
 
   static void sync_all(); // Called when running out of mmaps
 
+  void each_type(std::function<void(Lg_type_id, const std::string &)> fn) const;
   void each_type(std::function<bool(Lg_type_id, const std::string &)> fn) const;
+  void each_type(const std::string &match, std::function<void(Lg_type_id, const std::string &)> fn) const;
   void each_type(const std::string &match, std::function<bool(Lg_type_id, const std::string &)> fn) const;
   //void each_type(const std::string &type, std::function<bool(Lg_type_id,Name_id)> fn) const;
   //void each_name(const std::string &type, std::function<bool(Lg_type_id,Name_id)> fn) const;
