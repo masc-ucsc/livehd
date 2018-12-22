@@ -764,8 +764,8 @@ class LGraph_Node_Type : virtual public Lgraph_base_core {
 private:
   Char_Array<Const_ID> consts;
   Dense<Node_Type_Op>  node_type_table;
-  bm::bvector<>        const_nodes;
-  bm::bvector<>        sub_graph_nodes;
+  bm::bvector<>        const_nodes;      // FIXME: migrate to structure in node_intenral (otherwise, big meory as more nodes...
+  bm::bvector<>        sub_graph_nodes;  // FIXME: migrate to structure in node_intenral (otherwise, big meory as more nodes...
 
 public:
   LGraph_Node_Type() = delete;
@@ -790,8 +790,7 @@ public:
 
   void node_const_type_set(Index_ID nid, const std::string &value
 #ifndef NDEBUG
-                           ,
-                           bool enforce_bits = true
+                           , bool enforce_bits = true
 #endif
   );
   const char *node_const_value_get(Index_ID nid) const;

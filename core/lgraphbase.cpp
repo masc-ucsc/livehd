@@ -939,7 +939,7 @@ Edge_iterator LGraph_Base::inp_edges(Index_ID idx) const {
   return Edge_iterator(s, e, true);
 }
 
-void LGraph_Base::each_sub_graph_fast(std::function<bool(Index_ID)> f1) const {
+void LGraph_Base::each_sub_graph_fast(std::function<bool(Index_ID, Lg_type_id, const std::string &)> f1) const {
 
   const bm::bvector<> &bm = get_sub_graph_ids();
   Index_ID            cid = bm.get_first();
@@ -948,7 +948,9 @@ void LGraph_Base::each_sub_graph_fast(std::function<bool(Index_ID)> f1) const {
     assert(node_internal[cid].is_node_state());
     assert(node_internal[cid].is_root());
 
-    bool cont = f1(cid);
+    Lg_type_id lgid = subgraph_id_get(cid);
+
+    bool cont = f1(cid, lgid, "FIXME"); // FIXME: use lgwirenames (move to core)
     if (!cont)
       return;
 
@@ -956,7 +958,7 @@ void LGraph_Base::each_sub_graph_fast(std::function<bool(Index_ID)> f1) const {
   }
 }
 
-void LGraph_Base::each_sub_graph_fast(std::function<void(Index_ID)> f1) const {
+void LGraph_Base::each_sub_graph_fast(std::function<void(Index_ID, Lg_type_id, const std::string &)> f1) const {
 
   const bm::bvector<> &bm = get_sub_graph_ids();
   Index_ID            cid = bm.get_first();
@@ -965,7 +967,9 @@ void LGraph_Base::each_sub_graph_fast(std::function<void(Index_ID)> f1) const {
     assert(node_internal[cid].is_node_state());
     assert(node_internal[cid].is_root());
 
-    f1(cid);
+    Lg_type_id lgid = subgraph_id_get(cid);
+
+    f1(cid, lgid, "FIXME"); // FIXME: use lgwirenames (move to core)
 
     cid = bm.get_next(cid);
   }
