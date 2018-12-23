@@ -26,7 +26,7 @@ protected:
 
 public:
   LGraph_Node_Delay() = delete;
-  explicit LGraph_Node_Delay(const std::string &path, const std::string &name) noexcept;
+  explicit LGraph_Node_Delay(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept;
   virtual ~LGraph_Node_Delay(){};
 
   virtual void clear();

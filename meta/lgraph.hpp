@@ -2,7 +2,6 @@
 #ifndef LGRAPH_H
 #define LGRAPH_H
 
-#include "instance_names.hpp"
 #include "lgedge.hpp"
 #include "lgraphbase.hpp"
 #include "lgwirenames.hpp"
@@ -20,7 +19,6 @@ class LGraph :  public LGraph_Node_Delay
               , public LGraph_Node_bitwidth
               , public LGraph_Node_Src_Loc
               , public LGraph_WireNames
-              , public LGraph_InstanceNames
               , public LGraph_Node_Place
                {
 protected:

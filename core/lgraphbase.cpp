@@ -9,30 +9,28 @@
 #include "lgedgeiter.hpp"
 #include "lgraphbase.hpp"
 
-LGraph_Base::LGraph_Base(const std::string &_path, const std::string &_name) noexcept
-    : Lgraph_base_core(_path, _name)
-    , LGraph_Node_Type(_path, _name)
+LGraph_Base::LGraph_Base(const std::string &_path, const std::string &_name, Lg_type_id lgid) noexcept
+    : Lgraph_base_core(_path, _name, lgid)
+    , LGraph_Node_Type(_path, _name, lgid)
+    , LGraph_InstanceNames(path, _name, lgid)
     , input_array(_path + "/lgraph_" + _name + "_inputs")
     , output_array(_path + "/lgraph_" + _name + "_outputs") {
 
-  library  = Graph_library::instance(path);
-  tlibrary = Tech_library::instance(path);
+  assert(lgid); // No id zero allowed
 
-  locked = false;
 }
 
 LGraph_Base::~LGraph_Base() {
 }
 
-void LGraph_Base::close() {
-
-  if(locked)
-    library->update(lgraph_id);
-}
-
 LGraph_Base::_init::_init() {
   // fmt::print("LGraph_Base static init done\n");
   // Add here sequence of static initialization that may be needed
+}
+
+void LGraph_Base::close() {
+
+  Lgraph_base_core::close();
 }
 
 const std::string &LGraph_Base::get_subgraph_name(Index_ID nid) const {
@@ -42,39 +40,26 @@ const std::string &LGraph_Base::get_subgraph_name(Index_ID nid) const {
 
 void LGraph_Base::clear() {
   LGraph_Node_Type::clear();
+  LGraph_InstanceNames::clear();
 
   node_internal.clear();
   input_array.clear();
   output_array.clear();
 
-  // whenever we clean, we unlock
-  std::string lock = path + "/" + long_name + ".lock";
-  unlink(lock.c_str());
-
-  library->update_nentries(lg_id(), 0);
-
-  locked = false;
+  Lgraph_base_core::clear();
 }
 
 void LGraph_Base::sync() {
 
   LGraph_Node_Type::sync();
+  LGraph_InstanceNames::sync();
+
   node_internal.sync();
 
   input_array.sync();
   output_array.sync();
 
-  if(!locked)
-    return;
-
-  library->update_nentries(lg_id(), node_internal.size());
-
-  library->sync();
-  tlibrary->sync();
-
-  std::string lock = path + "/" + long_name + ".lock";
-  unlink(lock.c_str());
-  locked = false;
+  Lgraph_base_core::sync();
 }
 
 void LGraph_Base::emplace_back() {
@@ -90,22 +75,7 @@ void LGraph_Base::emplace_back() {
   }
 
   LGraph_Node_Type::emplace_back();
-}
-
-void LGraph_Base::get_lock() {
-
-  if(locked)
-    return;
-
-  std::string lock = path + "/" + long_name + ".lock";
-  int         err  = ::open(lock.c_str(), O_CREAT | O_EXCL, 420); // 644
-  if(err < 0) {
-    Pass::error("Could not get lock:{}. Already running? Unclear exit?", lock.c_str());
-    assert(false); // ::error raises an exception
-  }
-  ::close(err);
-
-  locked = true;
+  LGraph_InstanceNames::emplace_back();
 }
 
 void LGraph_Base::reload() {
@@ -119,6 +89,7 @@ void LGraph_Base::reload() {
   recompute_io_ports();
 
   LGraph_Node_Type::reload(sz);
+  LGraph_InstanceNames::reload();
 }
 
 void LGraph_Base::recompute_io_ports() {
@@ -948,11 +919,14 @@ void LGraph_Base::each_sub_graph_fast(std::function<bool(Index_ID, Lg_type_id, c
     assert(node_internal[cid].is_node_state());
     assert(node_internal[cid].is_root());
 
-    Lg_type_id lgid = subgraph_id_get(cid);
+    const char *iname = get_node_instancename(cid);
+    if (iname) {
+      Lg_type_id lgid = subgraph_id_get(cid);
 
-    bool cont = f1(cid, lgid, "FIXME"); // FIXME: use lgwirenames (move to core)
-    if (!cont)
-      return;
+      bool cont = f1(cid, lgid, iname);
+      if (!cont)
+        return;
+    }
 
     cid = bm.get_next(cid);
   }
