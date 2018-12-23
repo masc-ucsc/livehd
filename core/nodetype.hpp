@@ -769,7 +769,7 @@ private:
 
 public:
   LGraph_Node_Type() = delete;
-  explicit LGraph_Node_Type(const std::string &path, const std::string &name) noexcept;
+  explicit LGraph_Node_Type(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept;
   virtual ~LGraph_Node_Type(){};
 
   Const_ID    get_constant_id(const char *constant);

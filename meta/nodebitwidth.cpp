@@ -178,9 +178,9 @@ void Node_bitwidth::Implicit_range::pick(const Explicit_range &e) {
   }
 }
 
-LGraph_Node_bitwidth::LGraph_Node_bitwidth(const std::string &path, const std::string &name) noexcept
-    : Lgraph_base_core(path, name)
-    , LGraph_Base(path, name)
+LGraph_Node_bitwidth::LGraph_Node_bitwidth(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept
+    : Lgraph_base_core(path, name, lgid)
+    , LGraph_Base(path, name, lgid)
     , node_bitwidth(path + "/lgraph_" + name + "_bitwidth") {
 }
 

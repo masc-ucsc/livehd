@@ -86,8 +86,8 @@ bool Node_Type::is_type(const std::string &opname) {
   return (name2node.find(opname) != name2node.end());
 }
 
-LGraph_Node_Type::LGraph_Node_Type(const std::string &path, const std::string &name) noexcept
-    : Lgraph_base_core(path, name)
+LGraph_Node_Type::LGraph_Node_Type(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept
+    : Lgraph_base_core(path, name, lgid)
     , consts(path + "/lgraph_" + name + "_consts")
     , node_type_table(path + "/lgraph_" + name + "_type") {
 }

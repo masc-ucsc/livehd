@@ -1,9 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "lgwirenames.hpp"
 
-LGraph_WireNames::LGraph_WireNames(const std::string &path, const std::string &name) noexcept
-    : Lgraph_base_core(path, name)
-    , LGraph_Base(path, name)
+LGraph_WireNames::LGraph_WireNames(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept
+    : Lgraph_base_core(path, name, lgid)
+    , LGraph_Base(path, name, lgid)
     , names(path + "/lgraph_" + name + "_wnames")
     , wires(path + "/lgraph_" + name + "_wid")
     , offsets(path + "/lgraph_" + name + "_offsets") {
