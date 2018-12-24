@@ -776,7 +776,7 @@ public:
   const char *get_constant(Const_ID const_id) const;
 
   void clear();
-  void reload(uint64_t sz);
+  void reload(size_t sz);
   void sync();
   void emplace_back();
 

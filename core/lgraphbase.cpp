@@ -89,7 +89,7 @@ void LGraph_Base::reload() {
   recompute_io_ports();
 
   LGraph_Node_Type::reload(sz);
-  LGraph_InstanceNames::reload();
+  LGraph_InstanceNames::reload(sz);
 }
 
 void LGraph_Base::recompute_io_ports() {
@@ -910,7 +910,7 @@ Edge_iterator LGraph_Base::inp_edges(Index_ID idx) const {
   return Edge_iterator(s, e, true);
 }
 
-void LGraph_Base::each_sub_graph_fast(std::function<bool(Index_ID, Lg_type_id, const std::string &)> f1) const {
+void LGraph_Base::each_sub_graph_fast_direct(const std::function<bool(const Index_ID &, const Lg_type_id &, const std::string &)> fn) const {
 
   const bm::bvector<> &bm = get_sub_graph_ids();
   Index_ID            cid = bm.get_first();
@@ -923,33 +923,17 @@ void LGraph_Base::each_sub_graph_fast(std::function<bool(Index_ID, Lg_type_id, c
     if (iname) {
       Lg_type_id lgid = subgraph_id_get(cid);
 
-      bool cont = f1(cid, lgid, iname);
-      if (!cont)
+      bool cont = fn(cid, lgid, iname);
+      if (!cont) {
         return;
+      }
     }
 
     cid = bm.get_next(cid);
   }
 }
 
-void LGraph_Base::each_sub_graph_fast(std::function<void(Index_ID, Lg_type_id, const std::string &)> f1) const {
-
-  const bm::bvector<> &bm = get_sub_graph_ids();
-  Index_ID            cid = bm.get_first();
-  while(cid) {
-    assert(cid);
-    assert(node_internal[cid].is_node_state());
-    assert(node_internal[cid].is_root());
-
-    Lg_type_id lgid = subgraph_id_get(cid);
-
-    f1(cid, lgid, "FIXME"); // FIXME: use lgwirenames (move to core)
-
-    cid = bm.get_next(cid);
-  }
-}
-
-void LGraph_Base::each_root_fast(std::function<bool(Index_ID)> f1) const {
+void LGraph_Base::each_root_fast_direct(std::function<bool(const Index_ID &)> f1) const {
 
   for(const auto &ni: node_internal) {
     if (!ni.is_node_state())
@@ -960,18 +944,6 @@ void LGraph_Base::each_root_fast(std::function<bool(Index_ID)> f1) const {
     bool cont = f1(ni.get_nid());
     if (!cont)
       return;
-  }
-}
-
-void LGraph_Base::each_root_fast(std::function<void(Index_ID)> f1) const {
-
-  for(const auto &ni: node_internal) {
-    if (!ni.is_node_state())
-      continue;
-    if (!ni.is_root())
-      continue;
-
-    f1(ni.get_nid());
   }
 }
 

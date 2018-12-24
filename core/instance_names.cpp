@@ -12,9 +12,8 @@ void LGraph_InstanceNames::clear() {
   instances.clear();
 }
 
-void LGraph_InstanceNames::reload() {
+void LGraph_InstanceNames::reload(size_t sz) {
   // Lazy names.reload();
-  uint64_t sz = library->get_nentries(lgraph_id);
   instances.reload(sz);
 }
 
@@ -25,7 +24,6 @@ void LGraph_InstanceNames::sync() {
 
 void LGraph_InstanceNames::emplace_back() {
   instances.emplace_back();
-  //instances[instances.size() - 1] = 0;
 }
 
 const char *LGraph_InstanceNames::get_instancename(Char_Array_ID cid) const {
