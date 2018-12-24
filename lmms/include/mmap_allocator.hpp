@@ -125,12 +125,12 @@ public:
     if(alloc != 0)
       return;
 
-    bool can_delete_when_all_zeroes=false;
+    bool can_delete_when_all_zeroes=(sz==0);
     if(mmap_base) {
-      if (sz<=16) { // Common in char_arrays
-        assert(mmap_size>16);
+      if ((sizeof(T)*sz)<=32 && sz) { // Common in char_arrays
+        assert(mmap_size>32);
         uint64_t *t=static_cast<uint64_t *>(mmap_base);
-        can_delete_when_all_zeroes = t[0] == 0 && t[1] == 0;
+        can_delete_when_all_zeroes = t[0] == 0 && t[1] == 0 && t[2] == 0 && t[3] == 0;
       }
       munmap(mmap_base, mmap_size);
     }

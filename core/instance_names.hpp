@@ -23,10 +23,10 @@ public:
   explicit LGraph_InstanceNames(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept;
   virtual ~LGraph_InstanceNames(){};
 
-  virtual void clear();
-  virtual void reload();
-  virtual void sync();
-  virtual void emplace_back();
+  void clear();
+  void reload(size_t sz);
+  void sync();
+  void emplace_back();
 
   const char *get_instancename(Char_Array_ID wid) const;
 

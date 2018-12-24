@@ -53,7 +53,7 @@ new_git_repository(
 new_git_repository(
     name = "bm",
     build_file = "BUILD.bm",
-    commit = "f55368e8f0eac62c96c5b13218d132fa27a04c58", # Dec 20, 2018
+    commit = "28466673dac932b5b14bf866b9b85a018c7d764b", # Dec 23, 2018
     remote = "https://github.com/tlk00/BitMagic.git",
     strip_prefix = "src",
 )

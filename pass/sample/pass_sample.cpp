@@ -31,6 +31,47 @@ void Pass_sample::work(Eprp_var &var) {
 void Pass_sample::do_work(const LGraph *g) {
   LGBench b("pass.sample");
 
+#if 0
+  g->each_sub_graph_fast([g](Index_ID idx, Lg_type_id lgid, const std::string &iname) {
+    fmt::print("1.base:{} idx:{} lgid:{} iname:{}\n",g->get_name(), idx, lgid, iname);
+    return true;
+  });
+
+  g->each_sub_graph_fast([g](Index_ID idx, Lg_type_id lgid, const std::string &iname) {
+    fmt::print("3.base:{} idx:{} lgid:{} iname:{}\n",g->get_name(), idx, lgid, iname);
+    return true;
+  });
+
+  g->each_sub_graph_fast([g](const Index_ID &idx, const Lg_type_id &lgid, const std::string &iname) {
+    fmt::print("3.base:{} idx:{} lgid:{} iname:{}\n",g->get_name(), idx, lgid, iname);
+  });
+
+  g->each_sub_graph_fast([g](const Index_ID &idx, const Lg_type_id &lgid) {
+    fmt::print("1.base:{} idx:{} lgid:{}\n",g->get_name(), idx, lgid);
+  });
+
+  g->each_sub_graph_fast([g](const Index_ID &idx, const Lg_type_id &lgid) {
+    fmt::print("1.base:{} idx:{} lgid:{}\n",g->get_name(), idx, lgid);
+    return false;
+  });
+
+  std::function<void(const Index_ID &, const Lg_type_id &, const std::string &)> fn = [g](const Index_ID &idx, const Lg_type_id &lgid, const std::string &iname) {
+    fmt::print("2.base:{} idx:{} lgid:{} iname:{}\n",g->get_name(), idx, lgid, iname);
+  };
+  g->each_sub_graph_fast(fn);
+
+  std::function fn2 = [g](const Index_ID &idx, const Lg_type_id &lgid, const std::string &iname) {
+    fmt::print("2.base:{} idx:{} lgid:{} iname:{}\n",g->get_name(), idx, lgid, iname);
+    return false;
+  };
+  g->each_sub_graph_fast(fn2);
+
+  auto fn3 = [g](const Index_ID &idx, const Lg_type_id &lgid) {
+    fmt::print("2.base:{} idx:{} lgid:{}\n",g->get_name(), idx, lgid);
+  };
+  g->each_sub_graph_fast(fn3);
+
+#else
   std::map<std::string, int> histogram;
 
   int cells = 0;
@@ -55,4 +96,5 @@ void Pass_sample::do_work(const LGraph *g) {
   }
 
   fmt::print("Pass: cells {}\n", cells);
+#endif
 }

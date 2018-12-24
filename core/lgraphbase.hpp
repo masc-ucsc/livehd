@@ -1,11 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include <stdint.h>
-
 #include <iostream>
 #include <map>
 #include <vector>
+#include <type_traits>
 
 #include "instance_names.hpp"
 #include "char_array.hpp"
@@ -209,10 +208,39 @@ public:
     _init();
   } _static_initializer;
 
-  void each_sub_graph_fast(std::function<bool(Index_ID, Lg_type_id, const std::string &)> f1) const;
-  void each_sub_graph_fast(std::function<void(Index_ID, Lg_type_id, const std::string &)> f1) const;
+  void each_sub_graph_fast_direct(const std::function<bool(const Index_ID &, const Lg_type_id &, const std::string &)>) const;
 
-  void each_root_fast(std::function<bool(Index_ID)> f1) const;
-  void each_root_fast(std::function<void(Index_ID)> f1) const;
+  template<typename FN>
+    void each_sub_graph_fast(const FN f1) const {
+      if constexpr (std::is_invocable_r_v<bool, FN&, const Index_ID&, const Lg_type_id&, const std::string&>) { // WARNING: bool must be before void
+        each_sub_graph_fast_direct(f1);
+      }else if constexpr (std::is_invocable_r_v<void, FN&, const Index_ID&, const Lg_type_id&, const std::string&>) {
+        auto f2 = [&f1](const Index_ID &idx, const Lg_type_id &lgid, const std::string &iname) { f1(idx,lgid,iname); return true; };
+        each_sub_graph_fast_direct(f2);
+      }else if constexpr (std::is_invocable_r_v<bool, FN&, const Index_ID&, const Lg_type_id&>) {
+        auto f2 = [&f1](const Index_ID &idx, const Lg_type_id &lgid, const std::string &iname) { return f1(idx,lgid); };
+        each_sub_graph_fast_direct(f2);
+      }else if constexpr (std::is_invocable_r_v<void, FN&, const Index_ID&, const Lg_type_id&>) {
+        auto f2 = [&f1](const Index_ID &idx, const Lg_type_id &lgid, const std::string &iname) { f1(idx,lgid); return true; };
+        each_sub_graph_fast_direct(f2);
+      }else{
+        assert(false);
+        each_sub_graph_fast_direct(f1); //Better error message if I keep this
+      }
+    };
+
+  void each_root_fast_direct(std::function<bool(const Index_ID&)> f1) const;
+  template<typename FN>
+    void each_root_fast(const FN f1) const {
+      if constexpr (std::is_invocable_r_v<bool, FN&, const Index_ID&>) { // WARNING: bool must be before void
+        each_root_direct(f1);
+      }else if constexpr (std::is_invocable_r_v<void, FN&, const Index_ID&>) {
+        auto f2 = [&f1](const Index_ID &idx) { f1(idx); return true; };
+        each_root_direct(f2);
+      }else{
+        assert(false);
+        each_root_direct(f1); //Better error message if I keep this
+      }
+    };
 };
 
