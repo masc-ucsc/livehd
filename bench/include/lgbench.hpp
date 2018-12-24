@@ -28,7 +28,7 @@ private:
     int result = -1;
     char line[128];
 
-    while(fgets(line, 128, file) != NULL) {
+    while(fgets(line, 128, file) != nullptr) {
       if(strncmp(line, "VmRSS:", 6) == 0) {
         result = parseLine(line);
         break;
@@ -79,10 +79,12 @@ public:
   }
 
   void end() {
-    sample(sample_name);
+
+    Time_Point tp = std::chrono::system_clock::now();
 
     Time_Point prev     = start_time;
     int        prev_mem = start_mem;
+
     for(const auto &s : record) {
       std::chrono::duration<double> t = s.tp - prev;
 
@@ -100,6 +102,9 @@ public:
       prev     = s.tp;
       prev_mem = s.mem;
     }
+
+    std::chrono::duration<double> t = tp - start_time;
+    std::cerr << sample_name << " in " << t.count() << " secs total\n";
   }
 };
 #endif

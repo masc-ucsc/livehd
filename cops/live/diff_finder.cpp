@@ -783,7 +783,7 @@ void Diff_finder::generate_delta(const std::string &modified_lgdb, const std::st
     fmt::print("discovered module {} \n", modified_library->get_graph(id)->get_name());
   }
 #else
-  modified_library->each_graph([&discovered_modules, modified_lgdb](const std::string &name, int id) {
+  modified_library->each_type([&discovered_modules, modified_lgdb](Lg_type_id id, const std::string &name) {
         LGraph *lg = LGraph::open(modified_lgdb, name);
         assert(lg);
         discovered_modules.insert(lg);

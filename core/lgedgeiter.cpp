@@ -1,16 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include <assert.h>
-
-#include "sparsehash/dense_hash_map"
-
-#include <fstream>
-#include <iostream>
-#include <set>
+#include <cassert>
 
 #include "lgedge.hpp"
 #include "lgedgeiter.hpp"
-#include "lgraphbase.hpp"
 
 Edge_iterator::CPod_iterator Edge_iterator::CPod_iterator::operator++() {
   CPod_iterator i(ptr, e, inputs);

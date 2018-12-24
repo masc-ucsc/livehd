@@ -1,30 +1,26 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#ifndef INSTANCE_NAME_H
-#define INSTANCE_NAME_H
+#pragma once
 
-#include <assert.h>
-
-#include "dense.hpp"
+#include <cassert>
 #include <map>
 #include <string>
 
-#include "lgraphbase.hpp"
-#include <string>
+#include "dense.hpp"
+#include "char_array.hpp"
 
-class LGraph;
+#include "lgraph_base_core.hpp"
 
-class LGraph_InstanceNames : virtual public LGraph_Base {
+class LGraph_InstanceNames : virtual public Lgraph_base_core {
 private:
   Char_Array<Index_ID> names;
   Dense<Index_ID>      instances;
 
 protected:
-  friend LGraph;
 
 public:
   LGraph_InstanceNames() = delete;
-  explicit LGraph_InstanceNames(const std::string &path, const std::string &name) noexcept;
+  explicit LGraph_InstanceNames(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept;
   virtual ~LGraph_InstanceNames(){};
 
   virtual void clear();
@@ -68,4 +64,3 @@ public:
   Index_ID get_node_from_instance_name(const char *name) const;
 };
 
-#endif

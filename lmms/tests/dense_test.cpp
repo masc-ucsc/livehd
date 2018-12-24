@@ -1,14 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include <iostream>
-#include <vector>
-
 #include <string>
 
-#include <cassert>
-
 #include "dense.hpp"
-#include "mmap_allocator.hpp"
 
 class CharPtr {
 public:

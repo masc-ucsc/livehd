@@ -711,7 +711,9 @@ static LGraph *process_module(RTLIL::Module *module) {
 
     bool         subtraction = false, negonly = false, yosys_tech = false;
     uint32_t     size = 0;
-    uint32_t     rdports, wrports, abits = 0;
+    uint32_t     rdports = 0;
+    uint32_t     wrports = 0;
+    uint32_t     abits = 0;
     RTLIL::Wire *clock = nullptr;
 
     // Note that $_AND_ and $_NOT_ format are exclusive for aigmap

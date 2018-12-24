@@ -1,14 +1,11 @@
-#ifndef ELAB_SCANNER_H
-#define ELAB_SCANNER_H
+#pragma once
 
-#include <stdint.h>
-
+#include <cstdint>
 #include <cassert>
 #include <string>
 #include <vector>
 #include <map>
 
-#define FMT_STRING_ALIAS 1
 #include "fmt/format.h"
 
 #define MIN_CHUNK_SIZE 4
@@ -96,7 +93,11 @@
 // ?
 #define TOK_QMARK      0x27
 // '
-#define TOK_TICK       0x27
+#define TOK_TICK       0x28
+// [
+#define TOK_OBR        0x29
+// ]
+#define TOK_CBR        0x30
 
 #define TOK_KEYWORD_FIRST   0x40
 #define TOK_KEYWORD_LAST    0x7F
@@ -221,4 +222,3 @@ public:
   bool has_errors() const { return n_errors > 0; }
 };
 
-#endif

@@ -1,8 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#ifndef NODETYPE_H
-#define NODETYPE_H
+#pragma once
 
-#include <assert.h>
+#include <cassert>
 #include <map>
 #include <string>
 #include <vector>
@@ -765,11 +764,12 @@ class LGraph_Node_Type : virtual public Lgraph_base_core {
 private:
   Char_Array<Const_ID> consts;
   Dense<Node_Type_Op>  node_type_table;
-  bm::bvector<>        const_nodes;
+  bm::bvector<>        const_nodes;      // FIXME: migrate to structure in node_intenral (otherwise, big meory as more nodes...
+  bm::bvector<>        sub_graph_nodes;  // FIXME: migrate to structure in node_intenral (otherwise, big meory as more nodes...
 
 public:
   LGraph_Node_Type() = delete;
-  explicit LGraph_Node_Type(const std::string &path, const std::string &name) noexcept;
+  explicit LGraph_Node_Type(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept;
   virtual ~LGraph_Node_Type(){};
 
   Const_ID    get_constant_id(const char *constant);
@@ -790,8 +790,7 @@ public:
 
   void node_const_type_set(Index_ID nid, const std::string &value
 #ifndef NDEBUG
-                           ,
-                           bool enforce_bits = true
+                           , bool enforce_bits = true
 #endif
   );
   const char *node_const_value_get(Index_ID nid) const;
@@ -804,6 +803,9 @@ public:
   const bm::bvector<> &get_const_node_ids() const {
     return const_nodes;
   };
+
+  const bm::bvector<> &get_sub_graph_ids() const {
+    return sub_graph_nodes;
+  };
 };
 
-#endif

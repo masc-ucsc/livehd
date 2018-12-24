@@ -56,6 +56,9 @@ void Elab_scanner::setup_translate() {
   translate['%'] = TOK_PERCENT;
 
   translate['`'] = TOK_BACKTICK;
+
+  translate['['] = TOK_OBR;
+  translate[']'] = TOK_CBR;
 }
 
 void Elab_scanner::add_token(Token &t) {

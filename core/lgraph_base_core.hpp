@@ -1,13 +1,12 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#ifndef LGRAPHBASE_CORE_H
-#define LGRAPHBASE_CORE_H
+#pragma once
 
 #include "dense.hpp"
 #include "lgedge.hpp"
+#include "graph_library.hpp"
+#include "tech_library.hpp"
 
 class Fast_edge_iterator;
-class Forward_edge_iterator;
-class Backward_edge_iterator;
 
 class Lgraph_base_core {
 protected:
@@ -22,16 +21,23 @@ protected:
   const std::string path;
   const std::string name;
   const std::string long_name;
+  const Lg_type_id  lgraph_id;
 
   Dense<Node_Internal> node_internal;
 
+  bool locked;
+
+  // Integrate graph and tech library?
+  Graph_library *library;
+  Tech_library  *tlibrary;
+
   Lgraph_base_core() = delete;
-  explicit Lgraph_base_core(const std::string &_path, const std::string &_name);
+  explicit Lgraph_base_core(const std::string &_path, const std::string &_name, Lg_type_id lgid);
   virtual ~Lgraph_base_core(){};
 
   Index_ID fast_next(Index_ID nid) const {
     while(true) {
-      nid++;
+      nid.value++;
       if(nid >= static_cast<Index_ID>(node_internal.size()))
         return 0;
       if(!node_internal[nid].is_node_state())
@@ -46,15 +52,20 @@ protected:
   friend Fast_edge_iterator;
 
 public:
-  const std::string &get_name() const {
-    assert(long_name == "lgraph_" + name);
-    return name;
-  }
-  const std::string &get_path() const {
-    return path;
-  }
+  void get_lock();
+
+  virtual void close();
+  virtual void clear();
+  virtual void sync();
+
+  const std::string &get_name() const { return name; }
+  const Lg_type_id lg_id() const { return lgraph_id; }
+
+  const std::string   &get_path() const { return path; }
+  const Graph_library &get_library() const { return *library; }
+  const Tech_library  &get_tlibrary() const { return *tlibrary; }
+  Tech_library        &get_tech_library() { return *tlibrary; }
 
   Fast_edge_iterator fast() const;
 };
 
-#endif

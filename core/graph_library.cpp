@@ -1,24 +1,25 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include <dirent.h>
-#include <sys/types.h>
+#include <sys/stat.h>
 
+#include <regex>
 #include <fstream>
 #include <set>
 
-#include "pass.hpp"
-#include "nodetype.hpp"
+#include "fmt/format.h"
 
+#include "pass.hpp"
 #include "graph_library.hpp"
 
 std::unordered_map<std::string, Graph_library *> Graph_library::global_instances;
 std::unordered_map<std::string, std::unordered_map<std::string, LGraph *>> Graph_library::global_name2lgraph;
 
-uint32_t Graph_library::reset_id(const std::string &name, const std::string &source) {
+Lg_type_id Graph_library::reset_id(const std::string &name, const std::string &source) {
   const auto &it = name2id.find(name);
   if(it != name2id.end()) {
     graph_library_clean           = false;
-    attribute[it->second].version = max_next_version++;
+    attribute[it->second].version = max_next_version.value++;
     if (attribute[it->second].source != source) {
       if (attribute[it->second].source == "-") {
         attribute[it->second].source = source;
@@ -68,23 +69,22 @@ LGraph *Graph_library::try_find_lgraph(const std::string &name) {
   return nullptr;
 }
 
-uint32_t Graph_library::add_name(const std::string &name, const std::string &source) {
+Lg_type_id Graph_library::add_name(const std::string &name, const std::string &source) {
 
-  uint32_t id = attribute.size();
-  if(!recycled_id.empty()) {
-    assert(id > recycled_id.back());
-    id = recycled_id.back();
-    recycled_id.pop_back();
-    attribute[id].name    = name;
-    assert(source!="");
-    attribute[id].source  = source;
-    attribute[id].version = max_next_version++;
-  } else {
-    Graph_attributes a;
-    a.name = name;
-    a.source = source;
-    a.version = max_next_version++;
+  assert(source!="");
+
+  Graph_attributes a;
+  a.name = name;
+  a.source = source;
+  a.version = max_next_version.value++;
+
+  Lg_type_id id = try_get_recycled_id();
+  if (id==0) {
+    id = attribute.size();
     attribute.emplace_back(a);
+  }else{
+    assert(id<attribute.size());
+    attribute[id] = a;
   }
 
   graph_library_clean   = false;
@@ -100,7 +100,7 @@ bool Graph_library::rename_name(const std::string &orig, const std::string &dest
   auto it = name2id.find(orig);
   if(it == name2id.end())
     return false;
-  uint32_t id = it->second;
+  Lg_type_id id = it->second;
 
   // The dest name should not exist. Call expunge_lgraph/delete if it does
   assert(global_name2lgraph[path].find(dest) == global_name2lgraph[path].end());
@@ -116,14 +116,14 @@ bool Graph_library::rename_name(const std::string &orig, const std::string &dest
 
   graph_library_clean   = false;
   attribute[id].name    = dest;
-  attribute[id].version = max_next_version++;
+  attribute[id].version = max_next_version.value++;
   assert(attribute[id].source != ""); // Keep source
 
   DIR *dir = opendir(path.c_str());
   assert(dir);
 
   struct dirent *dent;
-  while((dent = readdir(dir)) != NULL) {
+  while((dent = readdir(dir)) != nullptr) {
     if(dent->d_type != DT_REG) // Only regular files
       continue;
 
@@ -150,17 +150,17 @@ bool Graph_library::rename_name(const std::string &orig, const std::string &dest
   return id;
 }
 
-void Graph_library::update(uint32_t lgid) {
+void Graph_library::update(Lg_type_id lgid) {
   assert(lgid < attribute.size());
 
   if(attribute[lgid].version == (max_next_version - 1))
     return;
 
   graph_library_clean     = false;
-  attribute[lgid].version = max_next_version++;
+  attribute[lgid].version = max_next_version.value++;
 }
 
-void Graph_library::update_nentries(uint32_t lgid, uint64_t nentries) {
+void Graph_library::update_nentries(Lg_type_id lgid, uint64_t nentries) {
   assert(lgid < attribute.size());
 
   if(attribute[lgid].nentries != nentries) {
@@ -186,22 +186,22 @@ void Graph_library::reload() {
     return;
   }
 
-  uint32_t n_graphs = 0;
+  size_t n_graphs = 0;
   graph_list >> n_graphs;
   attribute.resize(n_graphs + 1);
 
   for(size_t idx = 0; idx < n_graphs; ++idx) {
     std::string name;
     std::string source;
-    uint32_t    graph_version;
+    Lg_type_id    graph_version;
     size_t      graph_id;
     size_t      nentries;
 
-    graph_list >> name >> graph_id >> graph_version >> nentries;
+    graph_list >> name >> graph_id >> graph_version.value >> nentries;
     graph_list >> source;
 
     if(graph_version >= max_next_version)
-      max_next_version = graph_version + 1;
+      max_next_version = graph_version.value + 1;
 
     name2id[name] = graph_id;
 
@@ -226,7 +226,7 @@ void Graph_library::reload() {
 
   std::set<std::string> lg_found;
 
-  while((dent = readdir(dir)) != NULL) {
+  while((dent = readdir(dir)) != nullptr) {
     if(dent->d_type != DT_REG) // Only regular files
       continue;
     if(strncmp(dent->d_name, "lgraph_", 7) != 0) // only if starts with lgraph_
@@ -262,10 +262,32 @@ Graph_library::Graph_library(const std::string &_path)
   reload();
 }
 
-void Graph_library::each_graph(std::function<void(const std::string &, uint32_t lgid)> f1) const {
-  for(const std::pair<const std::string, uint32_t> entry : name2id) {
-    f1(entry.first, entry.second);
+Lg_type_id Graph_library::try_get_recycled_id() {
+  if(recycled_id.none())
+    return 0;
+
+  Lg_type_id lgid = recycled_id.get_first();
+  assert(lgid<=attribute.size());
+  recycled_id.clear(lgid);
+
+  return lgid;
+}
+
+void Graph_library::recycle_id(Lg_type_id lgid) {
+
+  if (lgid < attribute.size()) {
+    recycled_id.set_bit(lgid);
+    return;
   }
+
+  size_t end_pos = attribute.size();
+  while(attribute.back().version==0) {
+    attribute.pop_back();
+    if (attribute.empty())
+      break;
+  }
+
+  recycled_id.set_range(attribute.size(), end_pos, false);
 }
 
 bool Graph_library::expunge_lgraph(const std::string &name, const LGraph *lg) {
@@ -274,12 +296,12 @@ bool Graph_library::expunge_lgraph(const std::string &name, const LGraph *lg) {
     return true;
   }
   global_name2lgraph[path].erase(global_name2lgraph[path].find(name));
-  uint32_t id   = name2id[name];
+  Lg_type_id id   = name2id[name];
   name2id[name] = 0;
 
   if(attribute[id].nopen == 0) {
     attribute[id].clear();
-    recycled_id.push_back(id);
+    recycle_id(id);
     return true;
   }
 
@@ -287,10 +309,10 @@ bool Graph_library::expunge_lgraph(const std::string &name, const LGraph *lg) {
   return false;
 }
 
-uint32_t Graph_library::register_lgraph(const std::string &name, const std::string &source, LGraph *lg) {
+Lg_type_id Graph_library::register_lgraph(const std::string &name, const std::string &source, LGraph *lg) {
   global_name2lgraph[path][name] = lg;
 
-  uint32_t id = reset_id(name, source);
+  Lg_type_id id = reset_id(name, source);
 
   const auto &it = name2id.find(name);
   assert(it != name2id.end());
@@ -299,7 +321,7 @@ uint32_t Graph_library::register_lgraph(const std::string &name, const std::stri
   return id;
 }
 
-bool Graph_library::unregister_lgraph(const std::string &name, uint32_t lgid, const LGraph *lg) {
+bool Graph_library::unregister_lgraph(const std::string &name, Lg_type_id lgid, const LGraph *lg) {
   assert(attribute.size() > (size_t)lgid);
 
   // WARNING: NOT ALWAYS, it can ::create multiple times before calling unregister
@@ -337,12 +359,59 @@ void Graph_library::clean_library() {
 
   graph_list.open(path + "/" + library_file);
   graph_list << (attribute.size() - 1) << std::endl;
-  for(size_t id = 1; id < attribute.size(); id++) {
+  for(size_t id = 1; id < attribute.size(); ++id) {
     const auto &it = attribute[id];
+    if (it.version==0) // Clear/delete sets version to zero
+      continue;
     graph_list << it.name << " " << id << " " << it.version << " " << it.nentries << " " << it.source << std::endl;
   }
 
   graph_list.close();
 
   graph_library_clean = true;
+}
+
+void Graph_library::each_type(std::function<void(Lg_type_id, const std::string &)> f1) const {
+
+  for(const std::pair<const std::string, Lg_type_id> entry : name2id) {
+    f1(entry.second, entry.first);
+  }
+
+}
+void Graph_library::each_type(std::function<bool(Lg_type_id, const std::string &)> f1) const {
+
+  for(const std::pair<const std::string, Lg_type_id> entry : name2id) {
+    bool cont = f1(entry.second, entry.first);
+    if (!cont)
+      break;
+  }
+
+}
+
+void Graph_library::each_type(const std::string &match, std::function<void(Lg_type_id, const std::string &)> f1) const {
+
+  const std::regex txt_regex(match);
+
+  for(const std::pair<const std::string, Lg_type_id> entry : name2id) {
+    if (!std::regex_search(entry.first, txt_regex))
+      continue;
+
+    f1(entry.second, entry.first);
+  }
+
+}
+
+void Graph_library::each_type(const std::string &match, std::function<bool(Lg_type_id, const std::string &)> f1) const {
+
+  const std::regex txt_regex(match);
+
+  for(const std::pair<const std::string, Lg_type_id> entry : name2id) {
+    if (!std::regex_search(entry.first, txt_regex))
+      continue;
+
+    bool cont = f1(entry.second, entry.first);
+    if (!cont)
+      break;
+  }
+
 }

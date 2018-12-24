@@ -1,8 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#ifndef PASS_H
-#define PASS_H
+#pragma once
 
 #include <string>
+
+#include "fmt/format.h"
 
 #include "eprp.hpp"
 
@@ -63,4 +64,3 @@ public:
 
 };
 
-#endif

@@ -15,17 +15,14 @@
 #include "lgraph.hpp"
 
 LGraph::LGraph(const std::string &path, const std::string &_name, const std::string &_source, bool _clear)
-    : Lgraph_base_core(path, _name)
-    , LGraph_Base(path, _name)
-    , LGraph_Node_Delay(path, _name)
-    , LGraph_Node_bitwidth(path, _name)
-    , LGraph_Node_Src_Loc(path, _name)
-    , LGraph_WireNames(path, _name)
-    , LGraph_InstanceNames(path, _name)
-    , LGraph_Node_Place(path, _name)
+    : Lgraph_base_core(path, _name, Graph_library::instance(path)->register_lgraph(_name, _source, this))
+    , LGraph_Base(path, _name, lg_id())
+    , LGraph_Node_Delay(path, _name, lg_id())
+    , LGraph_Node_bitwidth(path, _name, lg_id())
+    , LGraph_Node_Src_Loc(path, _name, lg_id())
+    , LGraph_WireNames(path, _name, lg_id())
+    , LGraph_Node_Place(path, _name, lg_id())
 {
-  lgraph_id = library->register_lgraph(name, _source, this);
-
   if(_clear) {
     clear();
     sync();
@@ -81,7 +78,9 @@ LGraph *LGraph::open(const std::string &path, const std::string &name) {
   if (lg) {
     assert(Graph_library::instance(path));
     const auto &source = Graph_library::instance(path)->get_source(name);
-    lg->lgraph_id = Graph_library::instance(path)->register_lgraph(name, source, lg);
+    auto lgid = Graph_library::instance(path)->register_lgraph(name, source, lg);
+    assert(lg->lgraph_id == lgid);
+
     return lg;
   }
 
@@ -102,9 +101,9 @@ void LGraph::close() {
 
 	library->unregister_lgraph(name, lgraph_id, this);
 
-  LGraph_Base::close();
-
 	sync();
+
+  LGraph_Base::close();
 }
 
 void LGraph::reload() {
@@ -114,7 +113,6 @@ void LGraph::reload() {
   LGraph_Node_bitwidth::reload();
   LGraph_Node_Src_Loc::reload();
   LGraph_WireNames::reload();
-  LGraph_InstanceNames::reload();
 }
 
 void LGraph::clear() {
@@ -123,7 +121,6 @@ void LGraph::clear() {
   LGraph_Node_bitwidth::clear();
   LGraph_Node_Src_Loc::clear();
   LGraph_WireNames::clear();
-  LGraph_InstanceNames::clear();
 
   LGraph_Base::clear(); // last. Removes lock at the end
 }
@@ -134,7 +131,6 @@ void LGraph::sync() {
   LGraph_Node_bitwidth::sync();
   LGraph_Node_Src_Loc::sync();
   LGraph_WireNames::sync();
-  LGraph_InstanceNames::sync();
 
   LGraph_Base::sync(); // last. Removes lock at the end
 }
@@ -146,7 +142,6 @@ void LGraph::emplace_back() {
   LGraph_Node_bitwidth::emplace_back();
   LGraph_Node_Src_Loc::emplace_back();
   LGraph_WireNames::emplace_back();
-  LGraph_InstanceNames::emplace_back();
 }
 
 Index_ID LGraph::add_graph_input(const char *str, Index_ID nid, uint16_t bits, uint16_t offset) {
@@ -291,7 +286,7 @@ void LGraph::dump() const {
   dump_lgwires();
 
 #if 1
-  for(Index_ID i = 0; i < node_internal.size(); i++) {
+  for(Index_ID i = 0; i < node_internal.size(); i.value++) {
     fmt::print("{} ", i);
     node_internal[i].dump();
   }
