@@ -2,11 +2,11 @@
 
 #include <fstream>
 #include <iostream>
+#include <cassert>
 
 #include "rapidjson/document.h"
 #include "rapidjson/error/en.h"
 #include "rapidjson/filereadstream.h"
-#include "rapidjson/filewritestream.h"
 #include "rapidjson/prettywriter.h"
 
 #include "pass.hpp"

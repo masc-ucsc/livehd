@@ -86,8 +86,8 @@ bool Node_Type::is_type(const std::string &opname) {
   return (name2node.find(opname) != name2node.end());
 }
 
-LGraph_Node_Type::LGraph_Node_Type(const std::string &path, const std::string &name) noexcept
-    : Lgraph_base_core(path, name)
+LGraph_Node_Type::LGraph_Node_Type(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept
+    : Lgraph_base_core(path, name, lgid)
     , consts(path + "/lgraph_" + name + "_consts")
     , node_type_table(path + "/lgraph_" + name + "_type") {
 }
@@ -117,6 +117,8 @@ void LGraph_Node_Type::reload(uint64_t sz) {
   for(const Index_ID &node : Lgraph_base_core::fast()) {
     if(node_type_get(node).op == U32Const_Op || node_type_get(node).op == StrConst_Op) {
       const_nodes.set_bit(node);
+    }else if(node_type_get(node).op == SubGraph_Op) {
+      sub_graph_nodes.set_bit(node);
     }
   }
 }
@@ -124,6 +126,8 @@ void LGraph_Node_Type::reload(uint64_t sz) {
 void LGraph_Node_Type::sync() {
   node_type_table.sync();
   consts.sync();
+
+  // FIXME: const_nodes and sub_graph_nodes SERIALIZATION???
 }
 
 void LGraph_Node_Type::node_type_set(Index_ID nid, Node_Type_Op op) {
@@ -142,6 +146,8 @@ void LGraph_Node_Type::node_subgraph_set(Index_ID nid, uint32_t subgraphid) {
 
   assert(node_internal[nid].get_nid() < node_type_table.size());
   assert(subgraphid <= (uint32_t)(SubGraphMax_Op - SubGraphMin_Op));
+
+  sub_graph_nodes.set_bit(node_internal[nid].get_nid());
 
   node_type_table[node_internal[nid].get_nid()] = (Node_Type_Op)(SubGraphMin_Op + subgraphid);
 }

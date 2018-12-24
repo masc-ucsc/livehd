@@ -1,16 +1,14 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#ifndef LGEDGEITER_H
-#define LGEDGEITER_H
+#pragma once
 
-#include <stdint.h>
-
-#include <iostream>
+#include <cassert>
 #include <vector>
+#include <set>
+
+#include "pass.hpp"
 
 #include "sparsehash/dense_hash_map"
 #include "sparsehash/sparse_hash_set"
-
-#include <set>
 
 //#include "lgraph.hpp"
 #include "lgraphbase.hpp"
@@ -113,9 +111,9 @@ public:
   } // 0 is end index for iterator
 };
 
-typedef google::dense_hash_map<Index_ID, int32_t> Frontier_type;
-typedef std::vector<Index_ID>                     Pending_type;
-typedef google::sparse_hash_set<Index_ID>         Deadcode_type;
+typedef google::dense_hash_map<uint64_t, int32_t> Frontier_type;
+typedef std::vector<uint64_t>                     Pending_type;
+typedef google::sparse_hash_set<uint64_t>         Deadcode_type;
 
 class Edge_iterator_base {
 protected:
@@ -432,4 +430,3 @@ public:
   } // 0 is end index for iterator
 };
 
-#endif

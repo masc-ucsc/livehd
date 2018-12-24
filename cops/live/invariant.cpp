@@ -93,7 +93,7 @@ Invariant_boundaries *Invariant_boundaries::deserialize(std::istream &ifs) {
     ifs >> tmpid >> bit >> size2;
     Net_ID net = std::make_pair(tmpid, bit);
     for(int j = 0; j < size2; j++) {
-      ifs >> tmp_idx;
+      ifs >> tmp_idx.value;
       ib->invariant_cone_cells[net].insert(tmp_idx);
     }
   }
@@ -109,7 +109,7 @@ Invariant_boundaries *Invariant_boundaries::deserialize(std::istream &ifs) {
 
   ifs >> size1;
   for(int i = 0; i < size1; i++) {
-    ifs >> tmp_idx >> tmp;
+    ifs >> tmp_idx.value >> tmp;
     ib->gate_appearances[tmp_idx] = tmp;
   }
   return ib;

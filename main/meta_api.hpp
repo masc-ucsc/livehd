@@ -63,17 +63,12 @@ protected:
     std::vector<LGraph *> lgs;
 
     try {
-      const std::regex txt_regex(match);
-
-      library->each_graph([&lgs,path,txt_regex](const std::string &name, uint32_t lgid) {
-          if (std::regex_search(name.c_str(), txt_regex)) {
-            LGraph *lg = LGraph::open(path,name);
-            if (lg) {
-              lgs.push_back(lg);
-            }
+      library->each_type(match, [&lgs,path](Lg_type_id lgid, const std::string &name) {
+          LGraph *lg = LGraph::open(path,name);
+          if (lg) {
+            lgs.push_back(lg);
           }
         });
-
     } catch (const std::regex_error& e) {
       Main_api::error(fmt::format("invalid match:{} regex. It is a FULL regex unlike bash. To test, try: `ls path | grep -E \"match\"`", match));
     }

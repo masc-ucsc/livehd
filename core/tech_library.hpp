@@ -1,7 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-
-#ifndef TECHLIBRARY_H
-#define TECHLIBRARY_H
+#pragma once
 
 #include <algorithm>
 #include <string>
@@ -360,4 +358,3 @@ public:
   }
 };
 
-#endif

@@ -1,15 +1,14 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#ifndef LGEDGE_H
-#define LGEDGE_H
+#pragma once
 
-#include <cstdint>
-#include <iostream>
-#include <vector>
+#include <cassert>
 
-#define FMT_STRING_ALIAS 1
 #include "fmt/format.h"
 
-typedef uint64_t Index_ID;
+#include "explicit_type.hpp"
+
+using Index_ID = Explicit_type<uint64_t, struct Index_ID_struct>;
+
 typedef int64_t  SIndex_ID; // Short Edge must be signed +- offset
 typedef uint16_t Port_ID;   // ports have a set order (a-b != b-a)
 
@@ -29,7 +28,7 @@ public:
   // TODO: the snode and input can be avoided by accessing the Node_Internal information
   bool     snode : 1;           // 1 bit
   bool     input : 1;           // 1 bit
-  Index_ID idx : Index_Bits;    // abs (too much, 32 bits enough already not live)
+  uint64_t raw_idx : Index_Bits;// abs (too much, 32 bits enough already not live)
   Port_ID  inp_pid : Port_Bits; // 10 bits ; abs
 
   bool is_snode() const {
@@ -39,8 +38,8 @@ public:
     return input;
   }
   Index_ID get_idx() const {
-    assert(idx);
-    return idx;
+    assert(raw_idx);
+    return raw_idx;
   }
 
   bool set(Index_ID _idx, Port_ID _inp_pid, bool _input) {
@@ -50,7 +49,7 @@ public:
 
     snode   = 0;
     input   = _input;
-    idx     = _idx;
+    raw_idx = _idx.value;
     inp_pid = _inp_pid;
 
     return true;
@@ -59,7 +58,7 @@ public:
   void set_idx(Index_ID _idx) {
     assert(snode == 0);
     assert(_idx < ((1LL << Index_Bits) - 1));
-    idx = _idx;
+    raw_idx = _idx.value;
   }
 };
 
@@ -109,8 +108,8 @@ struct __attribute__((packed)) SEdge_Internal { // 2 bytes total
 
 class Node_Pin {
 protected:
-  Index_ID nid : Index_Bits;
-  Port_ID  pid : Port_Bits;
+  Index_ID nid;
+  Port_ID  pid;
   bool     input;
 
 public:
@@ -355,7 +354,7 @@ public:
   static constexpr int Num_SEdges = 16 - 5; // 5 entries for the 80 bits (10 bytes)
   SEdge                sedge[Num_SEdges];   // WARNING: Must not be the last field in struct or iterators fail
 private:
-  Index_ID nid : Index_Bits;    // 36bits, 4 byte aligned
+  uint64_t nid : Index_Bits;    // 36bits, 4 byte aligned
   Port_ID  dst_pid : Port_Bits; // Not well aligned
   uint16_t out_long : 2;
   // END 10 Bytes common payload
@@ -447,7 +446,7 @@ public:
   }
   bool is_master_root() const {
     assert(is_node_state());
-    bool ms = nid == get_self_idx();
+    bool ms = nid == get_self_idx().value;
     if(ms)
       assert(root);
 
@@ -499,16 +498,16 @@ public:
   void set_nid(Index_ID _nid) {
     assert(_nid < (1LL << Index_Bits));
     assert(!is_graph_io());
-    nid = _nid;
+    nid = _nid.value;
 #ifndef NDEBUG
-    if(nid == get_self_idx())
+    if(nid == get_self_idx().value)
       assert(root);
 #endif
   }
 
   const Node_Internal &get(Index_ID idx2) const {
     const Node_Internal *root_n = this;
-    return root_n[idx2 - get_self_idx()];
+    return root_n[idx2.value - get_self_idx().value];
   }
 
   static Node_Internal &get(const Edge *ptr) {
@@ -526,7 +525,7 @@ public:
   Index_ID get_next() const {
     assert(is_next_state());
     uint32_t *idx_upp = (uint32_t *)(&sedge[0]);
-    Index_ID  idx_val = *idx_upp;
+    uint64_t  idx_val = *idx_upp;
     idx_val <<= 2;
     idx_val |= next_lower2;
     return idx_val;
@@ -534,9 +533,9 @@ public:
 
   void set_next_state(Index_ID _idx) {
     assert(is_next_state());
-    next_lower2       = _idx;
+    next_lower2       = _idx.value;
     uint32_t *idx_upp = (uint32_t *)(&sedge[0]);
-    *idx_upp          = _idx >> 2;
+    *idx_upp          = _idx.value >> 2;
   }
 
   void push_next_state(Index_ID _idx) {
@@ -692,4 +691,3 @@ private:
   }
 };
 
-#endif

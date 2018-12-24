@@ -2,6 +2,8 @@
 #include <ctype.h>
 #include <algorithm>
 
+#include "fmt/format.h"
+
 #include "eprp.hpp"
 
 void Eprp::eat_comments() {

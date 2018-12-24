@@ -5,10 +5,16 @@ load("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
 new_git_repository(
     name = "Open_timer",
     build_file = "BUILD.Open_timer", # relative to external path
-    commit = "931b2fbe867e2a5241d86d45fea26a07c1f8b0d6", # Oct 8, 2018
+    commit = "4040d90a471a76998b3985de7827df413a5e8652", # Dec 8, 2018
     remote = "https://github.com/OpenTimer/OpenTimer.git",
     #strip_prefix = "ot", OpenTimer uses ot/... so, we have to keep it
     patches = ["//external:patch.Open_timer"],
+)
+new_git_repository( # Open_timer user taskflow
+    name = "taskflow",
+    build_file = "BUILD.taskflow",
+    commit = "c8a12caed111977c92497c6b5338aacf29e715f9", # Dec 20, 2018
+    remote = "https://github.com/cpp-taskflow/cpp-taskflow.git",
 )
 new_git_repository(
     name = "abc",
@@ -20,7 +26,7 @@ new_git_repository(
 new_git_repository(
     name = "yosys",
     build_file = "BUILD.yosys", # relative to external path
-    commit = "11c8a9eb960fdb0a412fabcfbe787cbf5cc3a67d", # Oct 20, 2018 0.7+ 57fc8dd58229d309ba56b374223802936444ecd4", # Jun 13, 2018
+    commit = "93d44bb9a613b46a80642b8ce71295db18fadbc5", # Dec 20, 2018
     remote = "https://github.com/YosysHQ/yosys.git",
     #strip_prefix = "kernel",
 )
@@ -47,7 +53,7 @@ new_git_repository(
 new_git_repository(
     name = "bm",
     build_file = "BUILD.bm",
-    commit = "54c25c764dc316c9df31293e8120b53c394602ac", # Nov 30, 2018
+    commit = "f55368e8f0eac62c96c5b13218d132fa27a04c58", # Dec 20, 2018
     remote = "https://github.com/tlk00/BitMagic.git",
     strip_prefix = "src",
 )
@@ -67,15 +73,22 @@ new_git_repository(
     strip_prefix = "include",
 )
 new_git_repository(
+    name = "yas",
+    build_file = "BUILD.yas",
+    commit = "f705a06735b87fd97e4f785c31c5791a907f155a", # Dec 21, 2018
+    remote = "https://github.com/niXman/yas.git",
+    strip_prefix = "include",
+)
+new_git_repository(
     name = "httplib",
     build_file = "BUILD.httplib",
-    commit = "4d7cee81eb106c502738b8a9980422a93dba148a", # Sep 25, 2018
+    commit = "b5927aec123351dcf796e1fba8a6a1805d294cbe", # Dec 20, 2018
     remote = "https://github.com/yhirose/cpp-httplib.git",
 )
 new_git_repository(
     name = "replxx",
     build_file = "BUILD.replxx",
-    commit = "228038cbca2532a35cf3fb596eda0d8335fab212", # September 15, 2018
+    commit = "04aa0ec326be427ff351bf0daafbd5ff5933968e", # Dec 10, 2018 (NEXT requires patch)
     remote = "https://github.com/AmokHuginnsson/replxx.git",
 )
 new_git_repository(
@@ -83,12 +96,6 @@ new_git_repository(
     build_file = "BUILD.gtest",
     remote = "https://github.com/google/googletest",
     tag = "release-1.8.0",
-)
-new_git_repository(
-    name = "taskflow",
-    build_file = "BUILD.taskflow",
-    commit = "ee47ebeb07e2f40cedece7eedb68eb0cde7ca27c", # October 16, 2018
-    remote = "https://github.com/cpp-taskflow/cpp-taskflow.git",
 )
 new_git_repository(
     name = "verilator",

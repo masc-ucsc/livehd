@@ -1,6 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#ifndef LGRAPHBASE_H
-#define LGRAPHBASE_H
+#pragma once
 
 #include <stdint.h>
 
@@ -8,28 +7,20 @@
 #include <map>
 #include <vector>
 
+#include "instance_names.hpp"
 #include "char_array.hpp"
-#include "graph_library.hpp"
 #include "lgraph_base_core.hpp"
 #include "nodetype.hpp"
-#include "tech_library.hpp"
-
-#ifndef likely
-#define likely(x) __builtin_expect((x), 1)
-#endif
-#ifndef unlikely
-#define unlikely(x) __builtin_expect((x), 0)
-#endif
 
 class Edge_iterator;
+class Forward_edge_iterator;
+class Backward_edge_iterator;
 
-class LGraph_Base : public LGraph_Node_Type {
+class LGraph_Base : public LGraph_Node_Type
+                  , public LGraph_InstanceNames
+{
 private:
   Index_ID add_graph_io_common(const char *str, Index_ID nid, uint16_t bits);
-
-protected:
-  bool locked;
-  int  lgraph_id;
 
   struct str_cmp_i { // case insensitive string compare for IO
     bool operator()(char const *a, char const *b) const {
@@ -37,6 +28,7 @@ protected:
     }
   };
 
+protected:
   struct IO_port {
     Index_ID nid;
     Port_ID  pos;
@@ -54,10 +46,6 @@ protected:
 
   Char_Array<IO_port> input_array;
   Char_Array<IO_port> output_array;
-
-  // Integrate graph and tech library?
-  Graph_library *library;
-  Tech_library * tlibrary;
 
   Index_ID         create_node_space(Index_ID idx, Port_ID dst_pid, Index_ID master_nid, Index_ID root_nid);
   Index_ID         get_space_output_pin(Index_ID idx, Port_ID dst_pid, Index_ID &root_nid);
@@ -86,34 +74,17 @@ public:
 
   LGraph_Base(const LGraph_Base &) = delete;
 
-  explicit LGraph_Base(const std::string &path, const std::string &_name) noexcept;
+  explicit LGraph_Base(const std::string &path, const std::string &_name, Lg_type_id lgid) noexcept;
   virtual ~LGraph_Base();
 
   void close();
 
-  int lg_id() const {
-    return lgraph_id;
-  }
-
-  const Graph_library &get_library() const {
-    return *library;
-  }
-
-  const Tech_library &get_tlibrary() const {
-    return *tlibrary;
-  }
-
-  Tech_library &get_tech_library() {
-    return *tlibrary;
-  }
-
   const std::string &get_subgraph_name(Index_ID nid) const;
 
-  void get_lock();
-  // Method called after the char_arrays and node_internal are reloaded
-  virtual void reload();
   virtual void clear();
   virtual void sync();
+
+  virtual void reload();
   virtual void emplace_back();
 
   // Graph input/output functions
@@ -237,6 +208,11 @@ public:
   public:
     _init();
   } _static_initializer;
+
+  void each_sub_graph_fast(std::function<bool(Index_ID, Lg_type_id, const std::string &)> f1) const;
+  void each_sub_graph_fast(std::function<void(Index_ID, Lg_type_id, const std::string &)> f1) const;
+
+  void each_root_fast(std::function<bool(Index_ID)> f1) const;
+  void each_root_fast(std::function<void(Index_ID)> f1) const;
 };
 
-#endif

@@ -1,17 +1,16 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#ifndef CHAR_ARRAY_H
-#define CHAR_ARRAY_H
+#pragma once
 
-#include <assert.h>
 #include <stdint.h>
 #include <string.h>
 
+#include <stdexcept>
+#include <cassert>
 #include <vector>
 
 #include "sparsehash/dense_hash_map"
 
 #include "dense.hpp"
-#include "pass.hpp"
 
 typedef int32_t Char_Array_ID;
 
@@ -167,9 +166,12 @@ private:
       fclose(fp_in);
       variable_internal.reload(sz);
 
-      if (failed) {
-        Pass::error(fmt::format("char_array::sync could reload {}", long_name));
-      }
+      if (!failed)
+        return;
+
+      std::string msg = "char_array::reload for is inconsistent for ";
+      msg.append(long_name + "_map");
+      throw std::runtime_error(msg);
     }
 
     if(variable_internal.size() == 0) {
@@ -212,9 +214,12 @@ public:
       fwrite(&sz, sizeof(size_t), 1, fp);
       hash2id.serialize(MapSerializer<Hash_sign, Char_Array_ID>(), fp);
       fclose(fp);
-    } else {
-      Pass::error(fmt::format("char_array::sync could not sync {}", long_name));
+      return;
     }
+
+    std::string msg = "char_array::sync for is inconsistent for ";
+    msg.append(long_name + "_map");
+    throw std::runtime_error(msg);
   }
 
   Const_Char_Array_Iter begin() const {
@@ -399,4 +404,3 @@ public:
   }
 };
 
-#endif

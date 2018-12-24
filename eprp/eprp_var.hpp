@@ -2,11 +2,12 @@
 #define EPRP_VAR_H
 
 #include <strings.h>
-#include <vector>
-#include <map>
+
+#include <algorithm>
 #include <functional>
-#include <cassert>
+#include <map>
 #include <string>
+#include <vector>
 
 struct eprp_casecmp_str : public std::binary_function<const std::string, const std::string, bool> {
     bool operator()(const std::string &lhs, const std::string &rhs) const {

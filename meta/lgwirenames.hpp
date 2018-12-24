@@ -43,7 +43,7 @@ protected:
 
 public:
   LGraph_WireNames() = delete;
-  explicit LGraph_WireNames(const std::string &path, const std::string &name) noexcept;
+  explicit LGraph_WireNames(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept;
   virtual ~LGraph_WireNames(){};
   virtual void clear();
   virtual void reload();

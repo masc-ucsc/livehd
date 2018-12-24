@@ -171,7 +171,7 @@ int resolve_bit_fwd(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID p
     uint32_t offset = 0;
     int      last   = -1;
     for(auto &ps : port_size) {
-      assert(last + 1 == ps.first); // need to traverse in order
+      assert(last + 1 == static_cast<int>(ps.first)); // need to traverse in order
       last = ps.first;
       offset += ps.second;
     }
@@ -206,7 +206,7 @@ int resolve_bit_fwd(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID p
         sign = (graph->node_value_get(c.get_idx()) == 2);
       }
     }
-    if(const_shift >= 0 && (!sign || current_bit != graph->get_bits(idx) - 1)) {
+    if(const_shift >= 0 && (!sign || static_cast<int>(current_bit) != graph->get_bits(idx) - 1)) {
       //if there is sign extension, MSB affects all bits
       //bits lower than shift amount do no affect any bit
       if(current_bit >= static_cast<uint32_t>(const_shift))

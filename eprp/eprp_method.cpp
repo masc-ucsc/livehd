@@ -1,4 +1,6 @@
 
+#include "fmt/format.h"
+
 #include "elab_scanner.hpp"
 
 #include "eprp_method.hpp"

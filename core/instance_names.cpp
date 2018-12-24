@@ -1,9 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "instance_names.hpp"
 
-LGraph_InstanceNames::LGraph_InstanceNames(const std::string &path, const std::string &name) noexcept
-    : Lgraph_base_core(path, name)
-    , LGraph_Base(path, name)
+LGraph_InstanceNames::LGraph_InstanceNames(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept
+    : Lgraph_base_core(path, name, lgid)
     , names(path + "/lgraph_" +  name + "_inst_names")
     , instances(path + "/lgraph_" + name + "_inst") {
 }
