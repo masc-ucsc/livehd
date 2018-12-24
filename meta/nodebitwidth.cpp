@@ -41,16 +41,6 @@ void Node_bitwidth::Explicit_range::set_sbits(uint16_t size) {
   }
 }
 
-void Node_bitwidth::Explicit_range::set_uconst(uint32_t val) {
-  sign_set = true;
-  sign     = false;
-
-  max_set = true;
-  min_set = true;
-  max     = val;
-  min     = val;
-}
-
 void Node_bitwidth::Explicit_range::set_ubits(uint16_t size) {
   sign_set = false;
   sign     = false;
@@ -75,6 +65,26 @@ void Node_bitwidth::Explicit_range::set_ubits(uint16_t size) {
     max = pow(2,size) - 1;
   }
 }
+void Node_bitwidth::Explicit_range::set_uconst(uint32_t val) {
+  sign_set = true;
+  sign     = false;
+
+  max_set = true;
+  min_set = true;
+  max     = val;
+  min     = val;
+}
+
+void Node_bitwidth::Explicit_range::set_sconst(uint32_t val) {
+  sign_set = true;
+  sign     = true;
+
+  max_set = true;
+  min_set = true;
+  max     = static_cast<int32_t>(val); //calculate 2's complement, ex. B = 1011 = -5
+  min     = static_cast<int32_t>(val);
+}
+
 
 void Node_bitwidth::Implicit_range::dump() const {
   fmt::print("max:{} min:{} sign:{} {}",max,min,sign,overflow?"overflow":"");

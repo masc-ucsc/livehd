@@ -1,5 +1,7 @@
 #!/bin/bash
 
+OPT_MITBW=1
+
 rm -rf ./lgdb 
 rm -f  ./logs/*.json
 rm -f  ./logs/*.v
@@ -11,11 +13,13 @@ echo "sandbox path is:"
 pwd
 
 
+
+
 # pts='top_ooo  sp_add  constant  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2  if_elif_else'
 # pts='top_ooo  sp_add  constant  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2 '
 # pts='constant '
 # pts='top sp_add'
-pts='sp_add top'
+pts='constant'
 # pts='sp_assign'
 # pts='sp_if_0'
 
@@ -64,7 +68,12 @@ echo ""
 for pt in $pts
 do
   echo "lgraph.open name:${pt} |> pass.dfg.optimize"                      >  lgshell_cmds_opt
-  echo "lgraph.open name:${pt} |> pass.dfg.pseudo_bitwidth"               >> lgshell_cmds_opt
+
+  if [ $OPT_MITBW -eq 1 ]; then
+    echo "lgraph.open name:${pt} |> pass.bitwidth"                        >> lgshell_cmds_opt
+  fi
+  echo "lgraph.open name:${pt} |> pass.dfg.finalize_bitwidth"             >> lgshell_cmds_opt
+
   echo "lgraph.open name:${pt} |> inou.json.fromlg output:${pt}.json"     >> lgshell_cmds_opt
 
  ${LGSHELL} < lgshell_cmds_opt

@@ -47,11 +47,11 @@ void Pass_dfg::optimize(Eprp_var &var) {
   }
 }
 
-void Pass_dfg::pseudo_bitwidth(Eprp_var &var) {
+void Pass_dfg::finalize_bitwidth(Eprp_var &var) {
 
   for(auto &g : var.lgs) {
     Pass_dfg p;
-    p.do_pseudo_bitwidth(g);
+    p.do_finalize_bitwidth(g);
   }
 }
 
@@ -68,7 +68,7 @@ void Pass_dfg::setup() {
 
   register_pass(m2);
 
-  Eprp_method m3("pass.dfg.pseudo_bitwidth", "patch fake bitwidth for a dfg lgraph", &Pass_dfg::pseudo_bitwidth);
+  Eprp_method m3("pass.dfg.finalize_bitwidth", "patch fake bitwidth for a dfg lgraph", &Pass_dfg::finalize_bitwidth);
   m3.add_label_optional("path", "lgraph path");
   m3.add_label_optional("name", "lgraph name");
 
@@ -106,17 +106,8 @@ void Pass_dfg::trans(LGraph *dfg) {
   }
 
   for(auto idx : dfg->fast()) {
-    for(const auto &out : dfg->out_edges(idx)) {
-      //Index_ID dst_nid = out.get_idx();
-      //Port_ID  src_pid = out.get_out_pin().get_pid();
-      //Port_ID  dst_pid      = out.get_inp_pin().get_pid();
-      //uint16_t src_nid_size = dfg->get_bits(idx);
-      //uint16_t dst_nid_size = dfg->get_bits(dst_nid);
-
       // if Equals_Op -> set bit_width = 1
-      if(dfg->node_type_get(idx).op == Mux_Op) {
-        ;
-      } else if(dfg->node_type_get(idx).op == Equals_Op) {
+      if(dfg->node_type_get(idx).op == Equals_Op) {
         dfg->set_bits(idx, 1);
       } else if(dfg->node_type_get(idx).op == GreaterEqualThan_Op) {
         dfg->set_bits(idx, 1);
@@ -129,11 +120,19 @@ void Pass_dfg::trans(LGraph *dfg) {
       } else {
         ;
       }
-    }
   }
 }
-void Pass_dfg::do_pseudo_bitwidth(LGraph *dfg) {
+void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
+  for(auto idx : dfg->fast()){
+    uint16_t nid_size = dfg->get_bits(idx);
+    if(nid_size == 0){
+      Node_bitwidth &nb = dfg->node_bitwidth_get(idx);
+      fmt::print("nid:{},max:{}\n",idx, nb.i.max);
+      dfg->set_bits(idx, (uint16_t)ceil(log2(nb.i.max)));
+    }
+  }
   // bits inference: first round: deal with src bw > dst bw
+  /*
   for(auto idx : dfg->fast()) {
     for(const auto &out : dfg->out_edges(idx)) {
       Index_ID src_nid = idx;
@@ -201,13 +200,7 @@ void Pass_dfg::do_pseudo_bitwidth(LGraph *dfg) {
       }
     }
   }
-  // for(auto idx : dfg->fast()) {
-  //  //for now sum_op.size should be max(a.bits, b.bits)--> make it to max(a.bits, b.bits)+1 as a conservative algo.
-  //  if(dfg->node_type_get(idx).op == Sum_Op){
-  //    uint16_t idx_size = dfg->get_bits(idx);
-  //    dfg->set_bits(idx, idx_size+1);
-  //  }
-  //}
+  */
 }
 
 bool Pass_dfg::cfg_2_dfg(const LGraph *cfg, LGraph *dfg) {
@@ -378,7 +371,8 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
     Index_ID target_id = create_node(dfg, aux_tree, target);
     fmt::print("create node for internal target:{}, nid:{}\n", target, target_id);
     dfg->node_type_set(target_id, node_type_from_text(op));
-    // dfg->set_bits(target_id,max_bits);
+    /* dfg->set_bits(target_id,max_bits); */
+    /* dfg->set_bits(target_id,max_bits); */
     process_connections(dfg, oprd_ids, target_id);
   }
 }
@@ -394,27 +388,17 @@ void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Index_ID> &src
     //assert(dfg->node_type_get(dst_nid).op != SubGraph_Op); // Handled separate as it is a more complicated case
 
     Port_ID dst_pid =
-        (dfg->node_type_get(dst_nid).op == Sum_Op) ? (uint16_t)1
-            : (dfg->node_type_get(dst_nid).op == LessThan_Op && i == 0)
-                  ? (uint16_t)0
-                  : (dfg->node_type_get(dst_nid).op == LessThan_Op && i == 1)
-                        ? (uint16_t)2
-                        : (dfg->node_type_get(dst_nid).op == GreaterThan_Op && i == 0)
-                              ? (uint16_t)0
-                              : (dfg->node_type_get(dst_nid).op == GreaterThan_Op && i == 1)
-                                    ? (uint16_t)2
-                                    : (dfg->node_type_get(dst_nid).op == LessEqualThan_Op && i == 0)
-                                          ? (uint16_t)0
-                                          : (dfg->node_type_get(dst_nid).op == LessEqualThan_Op && i == 1)
-                                                ? (uint16_t)2
-                                                : (dfg->node_type_get(dst_nid).op == GreaterEqualThan_Op && i == 0)
-                                                      ? (uint16_t)0
-                                                      : (dfg->node_type_get(dst_nid).op == GreaterEqualThan_Op && i == 1)
-                                                            ? (uint16_t)2
-                                                            : (dfg->node_type_get(dst_nid).op == DfgPendingGraph_Op)
-                                                                  ? (uint16_t)i
-                                                                  : (dfg->node_type_get(dst_nid).op == SubGraph_Op) ? (uint16_t)i
-                                                                                                                    : (uint16_t)0;
+        (dfg->node_type_get(dst_nid).op == Sum_Op)                        ? (uint16_t)0 :
+        (dfg->node_type_get(dst_nid).op == LessThan_Op && i == 0)         ? (uint16_t)0 :
+        (dfg->node_type_get(dst_nid).op == LessThan_Op && i == 1)         ? (uint16_t)2 :
+        (dfg->node_type_get(dst_nid).op == GreaterThan_Op && i == 0)      ? (uint16_t)0 :
+        (dfg->node_type_get(dst_nid).op == GreaterThan_Op && i == 1)      ? (uint16_t)2 :
+        (dfg->node_type_get(dst_nid).op == LessEqualThan_Op && i == 0)    ? (uint16_t)0 :
+        (dfg->node_type_get(dst_nid).op == LessEqualThan_Op && i == 1)    ? (uint16_t)2 :
+        (dfg->node_type_get(dst_nid).op == GreaterEqualThan_Op && i == 0) ? (uint16_t)0 :
+        (dfg->node_type_get(dst_nid).op == GreaterEqualThan_Op && i == 1) ? (uint16_t)2 :
+        (dfg->node_type_get(dst_nid).op == DfgPendingGraph_Op)            ? (uint16_t)i :
+        (dfg->node_type_get(dst_nid).op == SubGraph_Op)                   ? (uint16_t)i : (uint16_t)0;
 
     dfg->add_edge(Node_Pin(src_nid, src_pid, false), Node_Pin(dst_nid, dst_pid, true));
   }

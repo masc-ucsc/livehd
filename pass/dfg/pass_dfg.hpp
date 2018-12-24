@@ -15,11 +15,11 @@ class Pass_dfg : public Pass {
 protected:
   static void generate(Eprp_var &var);
   static void optimize(Eprp_var &var);
-  static void pseudo_bitwidth(Eprp_var &var);
+  static void finalize_bitwidth(Eprp_var &var);
 
   void do_generate(const LGraph *cfg, LGraph *dfg);
   void do_optimize(LGraph *&ori_dfg); // calls trans() to perform optimization
-  void do_pseudo_bitwidth(LGraph *dfg);
+  void do_finalize_bitwidth(LGraph *dfg);
 
   void trans(LGraph *orig);
   bool cfg_2_dfg(const LGraph *cfg, LGraph *dfg);
@@ -149,10 +149,10 @@ private:
   Node_Type_Op node_type_from_text(const std::string &operator_text);
 
   Index_ID    resolve_constant(LGraph *g, Aux_tree *aux_tree, const std::string &str_in);
-  Index_ID    process_bin_token(LGraph *g, const std::string &token1st, const uint16_t &bit_width, uint32_t &val);
-  Index_ID    process_bin_token_with_dc(LGraph *g, const std::string &token1st);
+  Index_ID    process_bin_token(LGraph *g, const std::string &token1st, const uint16_t &bit_width, bool is_signed);
+  Index_ID    process_bin_token_with_dc(LGraph *g, const std::string &token1st,bool is_signed);
   uint32_t    cal_bin_val_32b(const std::string &);
-  Index_ID    create_const32_node(LGraph *g, const std::string &, uint16_t node_bit_width, uint32_t &val);
+  Index_ID    create_const32_node(LGraph *g, const std::string &, uint16_t node_bit_width, bool is_signed);
   Index_ID    create_dontcare_node(LGraph *g, uint16_t node_bit_width);
   std::string hex_char_to_bin(char c);
   std::string hex_msb_char_to_bin(char c);
