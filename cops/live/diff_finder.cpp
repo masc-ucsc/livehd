@@ -99,10 +99,11 @@ auto Diff_finder::go_down(const Graph_Node &boundary, bool output) {
   assert(child);
 
   bound.module = child;
+
+  bound.instance.clear();
   if(boundary.instance != "")
-    bound.instance = boundary.instance + hier_sep + current->get_node_instancename(boundary.idx);
-  else
-    bound.instance = current->get_node_instancename(boundary.idx);
+    bound.instance = boundary.instance + hier_sep;
+  bound.instance.append(current->get_node_instancename(boundary.idx));
 
   Index_ID nid = 0;
   if(output)
