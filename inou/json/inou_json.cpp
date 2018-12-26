@@ -278,7 +278,7 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
 
       if(g->get_node_instancename(idx) != nullptr) {
         writer.Key("instance_name");
-        writer.String(g->get_node_instancename(idx));
+        writer.String(std::string(g->get_node_instancename(idx)).c_str()); // rapidjson does not support string_view
       }
 
       if(g->get_node_wirename(idx) != nullptr) {

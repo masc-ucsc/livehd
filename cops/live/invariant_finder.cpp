@@ -40,17 +40,17 @@ void Invariant_finder::get_topology() {
       boundaries.hierarchy_tree[Invariant_boundaries::get_graphID(subgraph)].insert(Invariant_boundaries::get_graphID(current));
 
       for(auto &prefix : boundaries.instance_collection[Invariant_boundaries::get_graphID(current)]) {
-        std::string instance_name;
         if(current->get_instance_name_id(idx) == 0) {
           Pass::info("RTP got node with no instance name {}", idx);
           continue;
         }
 
+        std::string instance_name;
         if(prefix != "") {
-          instance_name = prefix + boundaries.hierarchical_separator + current->get_node_instancename(idx);
-        } else {
-          instance_name = current->get_node_instancename(idx);
+          instance_name = prefix + boundaries.hierarchical_separator;
         }
+        instance_name.append(current->get_node_instancename(idx));
+
         boundaries.instance_collection[Invariant_boundaries::get_graphID(subgraph)].insert(instance_name);
         boundaries.instance_type_map[instance_name] = Invariant_boundaries::get_graphID(subgraph);
       }
