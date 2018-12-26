@@ -199,8 +199,8 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
           dfg->set_bits(src_nid, dst_nid_size);
       }
     }
-  }
-  */
+  }*/
+
 }
 
 bool Pass_dfg::cfg_2_dfg(const LGraph *cfg, LGraph *dfg) {
@@ -378,17 +378,22 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
 }
 
 void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Index_ID> &src_nids, const Index_ID &dst_nid) {
-  fmt::print("src_nids size:{}\n", src_nids.size());
+  bool one_srcs_is_signed = false;
+  for(const auto& i:src_nids ){
+    if(dfg->node_bitwidth_get(i).e.sign){
+      one_srcs_is_signed = true;
+      break;
+    }
+  }
+
   for(unsigned i = 0; i < src_nids.size(); i++) {
     Index_ID src_nid = src_nids.at(i);
-    fmt::print("src_nid:{}\n", src_nid);
     Port_ID src_pid = 0;
-
     //assert(Node_Type_Sum::get_input_match("Au") == 1);
     //assert(dfg->node_type_get(dst_nid).op != SubGraph_Op); // Handled separate as it is a more complicated case
-
     Port_ID dst_pid =
-        (dfg->node_type_get(dst_nid).op == Sum_Op)                        ? (uint16_t)0 :
+        (dfg->node_type_get(dst_nid).op == Sum_Op &&  one_srcs_is_signed) ? (uint16_t)0 :
+        (dfg->node_type_get(dst_nid).op == Sum_Op && !one_srcs_is_signed) ? (uint16_t)1 :
         (dfg->node_type_get(dst_nid).op == LessThan_Op && i == 0)         ? (uint16_t)0 :
         (dfg->node_type_get(dst_nid).op == LessThan_Op && i == 1)         ? (uint16_t)2 :
         (dfg->node_type_get(dst_nid).op == GreaterThan_Op && i == 0)      ? (uint16_t)0 :
