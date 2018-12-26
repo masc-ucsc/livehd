@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <string_view>
 #include <stdexcept>
 #include <cassert>
 #include <vector>
@@ -233,6 +234,10 @@ public:
     return create_id(str.c_str(), dt);
   }
 
+  Char_Array_ID create_id(std::string_view str, const Data_type &dt = 0) {
+    return create_id(std::string(str).c_str(), dt); // FIXME: BAD PERFORMANCE, but to bring interface up
+  }
+
   Char_Array_ID create_id(const char *str, const Data_type &dt = 0) {
     Char_Array_ID start = get_id(str);
     if(start) {
@@ -321,6 +326,10 @@ public:
     return (const char *)&variable_internal[id + 1 + (sizeof(Data_type) + sizeof(Hash_sign)) / sizeof(uint16_t)];
   }
 
+  std::string_view get_name(Char_Array_ID id) const {
+    return get_char(id);
+  }
+
   const Data_type &get_field(Char_Array_ID id) const {
     assert(id >= 0);
     assert(variable_internal.size() > (id + 1 + (sizeof(Data_type) + sizeof(Hash_sign)) / sizeof(uint16_t)));
@@ -368,6 +377,10 @@ public:
     return get_id(str.c_str()) != 0;
   }
 
+  bool include(std::string_view str) const {
+    return get_id(std::string(str).c_str()) != 0; // FIXME: remove all the const char *and use string_view
+  }
+
   int get_id(const char *str) const {
     const std::string key(str);
     Hash_sign         seed   = 0;
@@ -397,6 +410,10 @@ public:
     if(strcmp(get_char(cid), str) == 0)
       return cid;
     return 0;
+  }
+
+  int get_id(std::string_view str) const {
+    return get_id(std::string(str).c_str()); // FIXME:
   }
 
   int get_id(const std::string &str) const {

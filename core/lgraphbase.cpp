@@ -919,15 +919,12 @@ void LGraph_Base::each_sub_graph_fast_direct(const std::function<bool(const Inde
     assert(node_internal[cid].is_node_state());
     assert(node_internal[cid].is_root());
 
-    const char *iname = get_node_instancename(cid);
-    if (iname) {
-      Lg_type_id lgid = subgraph_id_get(cid);
+    auto iname = get_node_instancename(cid);
+    Lg_type_id lgid = subgraph_id_get(cid);
 
-      bool cont = fn(cid, lgid, iname);
-      if (!cont) {
-        return;
-      }
-    }
+    bool cont = fn(cid, lgid, std::string(iname)); // FIXME: once we move out of const char *
+    if (!cont)
+      return;
 
     cid = bm.get_next(cid);
   }
