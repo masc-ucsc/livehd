@@ -6,7 +6,8 @@ rm -f *.cfg
 ~/pyrope/parser/bin/prp sp_assign.prp    > yyy && column -t yyy > xxx && mv xxx sp_assign.cfg
 ~/pyrope/parser/bin/prp sp_assign2.prp   > yyy && column -t yyy > xxx && mv xxx sp_assign2.cfg
 ~/pyrope/parser/bin/prp top.prp          > yyy && column -t yyy > xxx && mv xxx top.cfg
-~/pyrope/parser/bin/prp constant.prp     > yyy && column -t yyy > xxx && mv xxx constant.cfg
+~/pyrope/parser/bin/prp constant_pos.prp > yyy && column -t yyy > xxx && mv xxx constant_pos.cfg
+~/pyrope/parser/bin/prp constant_neg.prp > yyy && column -t yyy > xxx && mv xxx constant_neg.cfg
 ~/pyrope/parser/bin/prp sp_if_0.prp      > yyy && column -t yyy > xxx && mv xxx sp_if_0.cfg       
 ~/pyrope/parser/bin/prp nested_if_0.prp  > yyy && column -t yyy > xxx && mv xxx nested_if_0.cfg 
 ~/pyrope/parser/bin/prp nested_if_1.prp  > yyy && column -t yyy > xxx && mv xxx nested_if_1.cfg 
