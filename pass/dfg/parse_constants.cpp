@@ -8,7 +8,6 @@ Index_ID Pass_dfg::resolve_constant(LGraph *g, Aux_tree *aux_tree, const std::st
   // bool has_bool_dc;
   // bool is_pure_dc;
   bool     is_signed = false;
-  uint32_t val;
   uint32_t explicit_bits;
   size_t   bit_width;
 
@@ -271,11 +270,12 @@ Index_ID Pass_dfg::process_bin_token_with_dc(LGraph *g, const std::string &token
 }
 
 Index_ID Pass_dfg::create_const32_node(LGraph *g, const std::string &val_str, uint16_t node_bit_width, bool is_signed) {
-  uint32_t val;
-  val = cal_bin_val_32b(val_str);
+  uint32_t val = cal_bin_val_32b(val_str);
   Index_ID nid_const32 = g->create_node().get_nid();
+
   g->node_u32type_set(nid_const32, val);
   g->set_bits(nid_const32, node_bit_width); //maybe not setup bits now, do it after MIT algo. analysis
+
   Node_bitwidth &nb = g->node_bitwidth_get(nid_const32);
   if(is_signed)
     nb.e.set_sconst(val);

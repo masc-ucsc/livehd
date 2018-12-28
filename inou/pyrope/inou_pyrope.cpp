@@ -32,14 +32,18 @@ void Inou_pyrope::fromlg(Eprp_var &var) {
 
   Inou_pyrope p;
 
-  const std::string odir = var.get("odir");
+  auto odir = var.get("odir");
   bool              ok   = p.setup_directory(odir);
   if(!ok)
     return;
 
   for(const auto &g : var.lgs) {
-    std::string filename = odir + "/" + g->get_name() + ".prp";
-    p.to_pyrope(g, filename);
+    std::string f;
+    f.append(odir);
+    f.append("/");
+    f.append(g->get_name());
+    f.append(".prp");
+    p.to_pyrope(g, f);
   }
 }
 
@@ -152,7 +156,7 @@ bool Inou_pyrope::to_mux(Out_string &w, const LGraph *g, Index_ID idx) const {
 
   Index_ID direct_to_register = 0;
   if(g->is_graph_input(c_idx)) {
-    if(strcasecmp(g->get_graph_input_name(c_idx), "reset") == 0) {
+    if(is_reset(g->get_graph_input_name(c_idx))) {
 
       for(const auto &c : g->out_edges(idx)) {
         const auto op = g->node_type_get(c.get_idx());
@@ -251,12 +255,13 @@ bool Inou_pyrope::to_flop(Out_string &w, const LGraph *g, Index_ID idx) const {
 
   for(const auto &c : g->inp_edges(idx)) {
     const auto op = g->node_type_get(c.get_idx());
-    if(op.op == Mux_Op) {
-      for(const auto &c2 : g->inp_edges(c.get_idx())) {
-        if(g->is_graph_input(c2.get_idx())) {
-          if(strcasecmp(g->get_graph_input_name(c2.get_idx()), "reset") == 0) {
-            return false;
-          }
+    if(op.op != Mux_Op)
+      continue;
+
+    for(const auto &c2 : g->inp_edges(c.get_idx())) {
+      if(g->is_graph_input(c2.get_idx())) {
+        if(is_reset(g->get_graph_input_name(c2.get_idx()))) {
+          return false;
         }
       }
     }
@@ -529,6 +534,9 @@ bool Inou_pyrope::to_op(Out_string &s, Out_string &sub, const LGraph *g, Index_I
 
 bool Inou_pyrope::to_subgraph(Out_string &w, Out_string &out, const LGraph *g, Index_ID idx) const {
 
+  assert(false); // code being deprecased (cgen replaces pyrope code gen)
+
+#if 0
   std::vector<LGraph *> lgs;
 
   // FIXME: const std::string subgraph_name = g->get_library().get_name(g->subgraph_id_get(idx));
@@ -637,6 +645,7 @@ bool Inou_pyrope::to_subgraph(Out_string &w, Out_string &out, const LGraph *g, I
     delete[] subgraph_output_ids[i];
   }
   delete[] subgraph_output_ids;
+#endif
 
   return false;
 }

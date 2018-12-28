@@ -48,7 +48,7 @@ void Live_stitcher::stitch(LGraph *nsynth, const std::set<Net_ID>& diffs) {
         inp2originalid[idx] = original->get_graph_input(name).get_nid();
       } else if(original->is_graph_output(name)) {
         out2originalid[idx] = original->get_graph_output(name).get_nid();
-      } else if(original->has_name(name)) {
+      } else if(original->has_wirename(name)) {
         inp2originalid[idx] = original->get_node_id(name);
       } else {
         //Pass::>error("Wire {} not found in original synthesized graph\n",name);
@@ -106,8 +106,8 @@ void Live_stitcher::stitch(LGraph *nsynth, const std::set<Net_ID>& diffs) {
         }
       } else {
         //invariant boundary
-        std::string name = nsynth->get_graph_output_name(idx);
-        if(!original->has_name(name))
+        auto name = nsynth->get_graph_output_name(idx);
+        if(!original->has_wirename(name))
           continue;
         Index_ID oidx = original->get_node_id(name);
         for(auto &edge : original->out_edges(oidx)) {

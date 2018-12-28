@@ -14,6 +14,19 @@ private:
 
   typedef std::ostringstream Out_string;
 
+  bool iequals(std::string_view a, std::string_view b) const {
+    return std::equal(a.begin(), a.end(),
+        b.begin(), b.end(),
+        [](char a, char b) {
+        return tolower(a) == tolower(b);
+        });
+  }
+
+  bool is_reset(std::string_view key) const {
+    return (iequals(key,"reset"));
+  }
+
+
 protected:
   void to_pyrope(const LGraph *g, const std::string &filename);
   void to_src_var(Out_string &w, const LGraph *g, Index_ID idx) const;

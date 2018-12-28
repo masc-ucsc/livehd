@@ -346,3 +346,9 @@ Pass_abc::Abc_comb LGraph_CreateMUX(Abc_Ntk_t *pAig) {
   Pass_abc::Abc_comb TEMP = {pObj, pNet};
   return TEMP;
 }
+
+void Abc_object_assign_name(Abc_Obj_t *obj, const std::string name) {
+  // NOTE: nasty const_cast because ABC does not have const in the C API
+  Abc_ObjAssignName(obj, const_cast<char *>(name.c_str()), nullptr);
+}
+

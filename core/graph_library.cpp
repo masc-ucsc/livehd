@@ -3,6 +3,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 
+#include <cassert>
 #include <regex>
 #include <fstream>
 #include <set>
@@ -12,10 +13,10 @@
 #include "pass.hpp"
 #include "graph_library.hpp"
 
-std::unordered_map<std::string, Graph_library *> Graph_library::global_instances;
-std::unordered_map<std::string, std::unordered_map<std::string, LGraph *>> Graph_library::global_name2lgraph;
+Graph_library::Global_instances   Graph_library::global_instances;
+Graph_library::Global_name2lgraph Graph_library::global_name2lgraph;
 
-Lg_type_id Graph_library::reset_id(const std::string &name, const std::string &source) {
+Lg_type_id Graph_library::reset_id(std::string_view name, std::string_view source) {
   const auto &it = name2id.find(name);
   if(it != name2id.end()) {
     graph_library_clean           = false;
@@ -35,7 +36,7 @@ Lg_type_id Graph_library::reset_id(const std::string &name, const std::string &s
   return add_name(name, source);
 }
 
-LGraph *Graph_library::try_find_lgraph(const std::string &path, const std::string &name) {
+LGraph *Graph_library::try_find_lgraph(std::string_view path, std::string_view name) {
 
   if(global_name2lgraph.find(path) != global_name2lgraph.end() &&
      global_name2lgraph[path].find(name) != global_name2lgraph[path].end()) {
@@ -45,14 +46,14 @@ LGraph *Graph_library::try_find_lgraph(const std::string &path, const std::strin
   return nullptr;
 }
 
-bool Graph_library::exists(const std::string &path, const std::string &name) {
+bool Graph_library::exists(std::string_view path, std::string_view name) {
 
   const Graph_library *lib = instance(path);
 
   return lib->name2id.find(name) != lib->name2id.end();
 }
 
-LGraph *Graph_library::try_find_lgraph(const std::string &name) {
+LGraph *Graph_library::try_find_lgraph(std::string_view name) {
 
   if(global_name2lgraph.find(path) == global_name2lgraph.end())
     return nullptr;
@@ -69,23 +70,21 @@ LGraph *Graph_library::try_find_lgraph(const std::string &name) {
   return nullptr;
 }
 
-Lg_type_id Graph_library::add_name(const std::string &name, const std::string &source) {
+Lg_type_id Graph_library::add_name(std::string_view name, std::string_view source) {
 
   assert(source!="");
-
-  Graph_attributes a;
-  a.name = name;
-  a.source = source;
-  a.version = max_next_version.value++;
 
   Lg_type_id id = try_get_recycled_id();
   if (id==0) {
     id = attribute.size();
-    attribute.emplace_back(a);
+    attribute.emplace_back();
   }else{
     assert(id<attribute.size());
-    attribute[id] = a;
   }
+
+  attribute[id].name    = name;
+  attribute[id].source  = source;
+  attribute[id].version = max_next_version.value++;
 
   graph_library_clean   = false;
 
@@ -95,7 +94,20 @@ Lg_type_id Graph_library::add_name(const std::string &name, const std::string &s
   return id;
 }
 
-bool Graph_library::rename_name(const std::string &orig, const std::string &dest) {
+std::string Graph_library::get_lgraph_filename(std::string_view path, std::string_view name, std::string_view ext) {
+
+  std::string f;
+
+  f.append(path);
+  f.append("/lgraph_");
+  f.append(name);
+  f.append("_");
+  f.append(ext);
+
+  return f;
+}
+
+bool Graph_library::rename_name(std::string_view orig, std::string_view dest) {
 
   auto it = name2id.find(orig);
   if(it == name2id.end())
@@ -112,12 +124,12 @@ bool Graph_library::rename_name(const std::string &orig, const std::string &dest
 
   name2id.erase(it); // Erase orig
 
-  name2id[dest] = id;
-
   graph_library_clean   = false;
   attribute[id].name    = dest;
   attribute[id].version = max_next_version.value++;
   assert(attribute[id].source != ""); // Keep source
+
+  name2id[dest] = id;
 
   DIR *dir = opendir(path.c_str());
   assert(dir);
@@ -131,13 +143,13 @@ bool Graph_library::rename_name(const std::string &orig, const std::string &dest
       continue;
 
     const std::string name(dent->d_name + 7);
-    auto              pos = name.find(orig + "_");
-    if(pos == std::string::npos)
+    auto              pos = name.find(std::string(orig) + "_");
+    if(pos == std::string_view::npos)
       continue;
     const std::string ext(dent->d_name + 7 + orig.size() + 1);
 
-    const std::string dest_file(path + "/lgraph_" + dest + "_" + ext);
-    const std::string orig_file(path + "/lgraph_" + orig + "_" + ext);
+    const std::string dest_file = get_lgraph_filename(path, dest, ext);
+    const std::string orig_file = get_lgraph_filename(path, dest, ext);
 
     fmt::print("renaming {} to {}\n", orig_file, dest_file);
     int s = rename(orig_file.c_str(), dest_file.c_str());
@@ -203,8 +215,6 @@ void Graph_library::reload() {
     if(graph_version >= max_next_version)
       max_next_version = graph_version.value + 1;
 
-    name2id[name] = graph_id;
-
     // this is only true in case where we skip graph ids
     if(attribute.size() <= graph_id)
       attribute.resize(graph_id + 1);
@@ -213,6 +223,9 @@ void Graph_library::reload() {
     attribute[graph_id].source   = source;
     attribute[graph_id].version  = graph_version;
     attribute[graph_id].nentries = nentries;
+
+    // NOTE: must use attribute to keep the string in memory
+    name2id[name] = graph_id;
   }
 
   graph_list.close();
@@ -232,12 +245,12 @@ void Graph_library::reload() {
     if(strncmp(dent->d_name, "lgraph_", 7) != 0) // only if starts with lgraph_
       continue;
     int len = strlen(dent->d_name);
-    if (len <= (7+5))
+    if (len <= (7+6))
       continue;
-    if(strcmp(dent->d_name + len - 5, "_type") != 0) // and finish with _type
+    if(strcmp(dent->d_name + len - 6, "_nodes") != 0) // and finish with _nodes
       continue;
 
-    std::string name(&dent->d_name[7],len-7-5);
+    std::string name(&dent->d_name[7],len-7-6);
     assert(lg_found.find(name) == lg_found.end());
     lg_found.insert(name);
 
@@ -247,14 +260,22 @@ void Graph_library::reload() {
   }
   closedir(dir);
 
-  for(auto it=name2id.begin(); it != name2id.end() ; ++it) {
-    if (lg_found.find(it->first) == lg_found.end()) {
-      Pass::error("graph_library has {} but {} the directory does not have it", it->first, path);
+  for(const auto &[name, id]:name2id) {
+    std::string s(name);
+    assert(name.size() == strlen(s.c_str()));
+    if (lg_found.find(s) == lg_found.end()) {
+      for( auto contents:lg_found) {
+        if (contents == s)
+          fmt::print("   0lg_found has [{}] [{}]\n",contents, s);
+        else
+          fmt::print("   1lg_found has [{}] [{}] s:{} s:{} l:{} l:{}\n",contents, s, contents.size(), s.size(), contents.length(), s.length());
+      }
+      Pass::error("graph_library has {} but the {} directory does not have it", s, path);
     }
   }
 }
 
-Graph_library::Graph_library(const std::string &_path)
+Graph_library::Graph_library(std::string_view _path)
     : path(_path)
     , library_file("graph_library") {
 
@@ -290,7 +311,7 @@ void Graph_library::recycle_id(Lg_type_id lgid) {
   recycled_id.set_range(attribute.size(), end_pos, false);
 }
 
-bool Graph_library::expunge_lgraph(const std::string &name, const LGraph *lg) {
+bool Graph_library::expunge_lgraph(std::string_view name, const LGraph *lg) {
   if(global_name2lgraph[path][name] != lg) {
     Pass::warn("graph_library::expunge_lgraph({}) for a wrong graph??? path:{}", name, path);
     return true;
@@ -309,7 +330,7 @@ bool Graph_library::expunge_lgraph(const std::string &name, const LGraph *lg) {
   return false;
 }
 
-Lg_type_id Graph_library::register_lgraph(const std::string &name, const std::string &source, LGraph *lg) {
+Lg_type_id Graph_library::register_lgraph(std::string_view name, std::string_view source, LGraph *lg) {
   global_name2lgraph[path][name] = lg;
 
   Lg_type_id id = reset_id(name, source);
@@ -321,7 +342,7 @@ Lg_type_id Graph_library::register_lgraph(const std::string &name, const std::st
   return id;
 }
 
-bool Graph_library::unregister_lgraph(const std::string &name, Lg_type_id lgid, const LGraph *lg) {
+bool Graph_library::unregister_lgraph(std::string_view name, Lg_type_id lgid, const LGraph *lg) {
   assert(attribute.size() > (size_t)lgid);
 
   // WARNING: NOT ALWAYS, it can ::create multiple times before calling unregister
@@ -371,45 +392,49 @@ void Graph_library::clean_library() {
   graph_library_clean = true;
 }
 
-void Graph_library::each_type(std::function<void(Lg_type_id, const std::string &)> f1) const {
+void Graph_library::each_type(std::function<void(Lg_type_id, std::string_view)> f1) const {
 
-  for(const std::pair<const std::string, Lg_type_id> entry : name2id) {
-    f1(entry.second, entry.first);
+  for(const auto [name,id] : name2id) {
+    f1(id, name);
   }
 
 }
-void Graph_library::each_type(std::function<bool(Lg_type_id, const std::string &)> f1) const {
+void Graph_library::each_type(std::function<bool(Lg_type_id, std::string_view)> f1) const {
 
-  for(const std::pair<const std::string, Lg_type_id> entry : name2id) {
-    bool cont = f1(entry.second, entry.first);
+  for(const auto [name,id] : name2id) {
+    bool cont = f1(id,name);
     if (!cont)
       break;
   }
 
 }
 
-void Graph_library::each_type(const std::string &match, std::function<void(Lg_type_id, const std::string &)> f1) const {
+void Graph_library::each_type(std::string_view match, std::function<void(Lg_type_id, std::string_view)> f1) const {
 
-  const std::regex txt_regex(match);
+  const std::string string_match(match); // NOTE: regex does not support string_view, c++20 may fix this missing feature
+  const std::regex txt_regex(string_match);
 
-  for(const std::pair<const std::string, Lg_type_id> entry : name2id) {
-    if (!std::regex_search(entry.first, txt_regex))
+  for(const auto [name,id] : name2id) {
+    const std::string line(name);
+    if (!std::regex_search(line, txt_regex))
       continue;
 
-    f1(entry.second, entry.first);
+    f1(id, name);
   }
 
 }
 
-void Graph_library::each_type(const std::string &match, std::function<bool(Lg_type_id, const std::string &)> f1) const {
+void Graph_library::each_type(std::string_view match, std::function<bool(Lg_type_id, std::string_view)> f1) const {
 
-  const std::regex txt_regex(match);
+  const std::string string_match(match); // NOTE: regex does not support string_view, c++20 may fix this missing feature
+  const std::regex txt_regex(string_match);
 
-  for(const std::pair<const std::string, Lg_type_id> entry : name2id) {
-    if (!std::regex_search(entry.first, txt_regex))
+  for(const auto [name,id] : name2id) {
+    const std::string line(name);
+    if (!std::regex_search(line, txt_regex))
       continue;
 
-    bool cont = f1(entry.second, entry.first);
+    bool cont = f1(id, name);
     if (!cont)
       break;
   }

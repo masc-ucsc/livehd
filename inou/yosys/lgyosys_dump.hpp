@@ -79,6 +79,8 @@ public:
 
   std::vector<LGraph *> tolg() final {
     assert(false);
+    std::vector<LGraph *> empty;
+    return empty; // to avoid warning
   };
 
   /*

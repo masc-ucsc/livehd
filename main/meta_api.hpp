@@ -10,8 +10,8 @@ class Meta_api {
 protected:
   static void open(Eprp_var &var) {
 
-    const std::string path = var.get("path");
-    const std::string name = var.get("name");
+    auto path = var.get("path");
+    auto name = var.get("name");
     assert(!name.empty());
 
     LGraph *lg = LGraph::open(path,name);
@@ -25,8 +25,8 @@ protected:
 
   static void create(Eprp_var &var) {
 
-    const std::string path = var.get("path");
-    const std::string name = var.get("name");
+    auto path = var.get("path");
+    auto name = var.get("name");
     assert(!name.empty());
 
     LGraph *lg = LGraph::create(path,name,"lgshell");
@@ -41,9 +41,9 @@ protected:
 
   static void rename(Eprp_var &var) {
 
-    const std::string path = var.get("path");
-    const std::string name = var.get("name");
-    const std::string dest = var.get("dest");
+    auto path = var.get("path");
+    auto name = var.get("name");
+    auto dest = var.get("dest");
     assert(!name.empty());
 
     LGraph::rename(path,name,dest);
@@ -51,8 +51,8 @@ protected:
 
   static void match(Eprp_var &var) {
 
-    const std::string path  = var.get("path");
-    const std::string match = var.get("match");
+    auto path  = var.get("path");
+    auto match = var.get("match");
 
     const auto *library = Graph_library::instance(path);
     if (library==0) {
@@ -63,7 +63,7 @@ protected:
     std::vector<LGraph *> lgs;
 
     try {
-      library->each_type(match, [&lgs,path](Lg_type_id lgid, const std::string &name) {
+      library->each_type(match, [&lgs,path](Lg_type_id lgid, std::string_view name) {
           LGraph *lg = LGraph::open(path,name);
           if (lg) {
             lgs.push_back(lg);

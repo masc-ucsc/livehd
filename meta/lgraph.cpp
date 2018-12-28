@@ -35,11 +35,11 @@ LGraph::~LGraph() {
   library->unregister_lgraph(name, lgraph_id, this);
 }
 
-bool LGraph::exists(const std::string &path, const std::string &name) {
+bool LGraph::exists(std::string_view path, std::string_view name) {
   return Graph_library::try_find_lgraph(path,name);
 }
 
-LGraph *LGraph::create(const std::string &path, const std::string &name, const std::string &source) {
+LGraph *LGraph::create(std::string_view path, std::string_view name, std::string_view source) {
   LGraph *lg = Graph_library::try_find_lgraph(path,name);
   if (lg) {
     assert(Graph_library::instance(path));
@@ -50,16 +50,16 @@ LGraph *LGraph::create(const std::string &path, const std::string &name, const s
       delete lg;
   }
 
-  return new LGraph(path, name, source, true);
+  return new LGraph(std::string(path), std::string(name), std::string(source), true); // TODO: Remove these nasty std::string (create local)
 }
 
-LGraph *LGraph::open(const std::string &path, int lgid) {
-  const std::string &name = Graph_library::instance(path)->get_name(lgid);
+LGraph *LGraph::open(std::string_view path, int lgid) {
+  std::string_view name = Graph_library::instance(path)->get_name(lgid);
 
   return open(path, name);
 }
 
-void LGraph::rename(const std::string &path, const std::string &orig, const std::string &dest) {
+void LGraph::rename(std::string_view path, std::string_view orig, std::string_view dest) {
   LGraph *lg = Graph_library::try_find_lgraph(path,orig);
   if (lg) {
     Pass::error("lgraph::rename failed for {}/{} because the lgraph is open",path,orig);
@@ -73,11 +73,11 @@ void LGraph::rename(const std::string &path, const std::string &orig, const std:
     Pass::error("cannot find original graph {} in path {}", orig, path);
 }
 
-LGraph *LGraph::open(const std::string &path, const std::string &name) {
+LGraph *LGraph::open(std::string_view path, std::string_view name) {
   LGraph *lg = Graph_library::try_find_lgraph(path,name);
   if (lg) {
     assert(Graph_library::instance(path));
-    const auto &source = Graph_library::instance(path)->get_source(name);
+    auto source = Graph_library::instance(path)->get_source(name);
     auto lgid = Graph_library::instance(path)->register_lgraph(name, source, lg);
     assert(lg->lgraph_id == lgid);
 
@@ -87,14 +87,19 @@ LGraph *LGraph::open(const std::string &path, const std::string &name) {
   if (!Graph_library::instance(path)->include(name))
     return 0;
 
-  std::string lock = path + "/lgraph_" + name + ".lock";
+  std::string lock;
+  lock.append(path);
+  lock.append("/lgraph_");
+  lock.append(name);
+  lock.append(".lock");
+
   if (access(lock.c_str(),R_OK)!=-1) {
     Pass::error("trying to open a locked {} (broken?) graph {}", lock, name);
     return 0;
   }
   const auto &source = Graph_library::instance(path)->get_source(name);
 
-  return new LGraph(path, name, source, false);
+  return new LGraph(std::string(path), std::string(name), std::string(source), false);
 }
 
 void LGraph::close() {
@@ -144,12 +149,10 @@ void LGraph::emplace_back() {
   LGraph_WireNames::emplace_back();
 }
 
-Index_ID LGraph::add_graph_input(const char *str, Index_ID nid, uint16_t bits, uint16_t offset) {
+Index_ID LGraph::add_graph_input(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset) {
 
-#if DEBUG
   assert(!is_graph_output(str));
-  assert(!has_name(str));
-#endif
+  assert(!has_wirename(str));
 
   Index_ID idx = LGraph_Base::add_graph_input_int(str, nid, bits);
   LGraph_WireNames::set_offset(idx, offset);
@@ -158,12 +161,10 @@ Index_ID LGraph::add_graph_input(const char *str, Index_ID nid, uint16_t bits, u
   return idx;
 }
 
-Index_ID LGraph::add_graph_input(const char *str, Index_ID nid, uint16_t bits, uint16_t offset, Port_ID original_pos) {
+Index_ID LGraph::add_graph_input(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset, Port_ID original_pos) {
 
-#if DEBUG
   assert(!is_graph_output(str));
-  assert(!has_name(str));
-#endif
+  assert(!has_wirename(str));
 
   Index_ID idx = LGraph_Base::add_graph_input_int(str, nid, bits, original_pos);
   LGraph_WireNames::set_offset(idx, offset);
@@ -172,12 +173,10 @@ Index_ID LGraph::add_graph_input(const char *str, Index_ID nid, uint16_t bits, u
   return idx;
 }
 
-Index_ID LGraph::add_graph_output(const char *str, Index_ID nid, uint16_t bits, uint16_t offset) {
+Index_ID LGraph::add_graph_output(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset) {
 
-#if DEBUG
   assert(!is_graph_input(str));
-  assert(!has_name(str));
-#endif
+  assert(!has_wirename(str));
 
   Index_ID idx = LGraph_Base::add_graph_output_int(str, nid, bits);
   LGraph_WireNames::set_offset(idx, offset);
@@ -186,12 +185,10 @@ Index_ID LGraph::add_graph_output(const char *str, Index_ID nid, uint16_t bits, 
   return idx;
 }
 
-Index_ID LGraph::add_graph_output(const char *str, Index_ID nid, uint16_t bits, uint16_t offset, Port_ID original_pos) {
+Index_ID LGraph::add_graph_output(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset, Port_ID original_pos) {
 
-#if DEBUG
   assert(!is_graph_input(str));
-  assert(!has_name(str));
-#endif
+  assert(!has_wirename(str));
 
   Index_ID idx = LGraph_Base::add_graph_output_int(str, nid, bits, original_pos);
   LGraph_WireNames::set_offset(idx, offset);
@@ -276,14 +273,14 @@ void LGraph::dump() const {
 
   for(auto it = input_array.begin(); it!=input_array.end(); ++it ) {
     const auto &p = it.get_field();
-    fmt::print("inp {} idx:{} pid:{}\n", it.get_char(), p.nid, p.pos);
+    fmt::print("inp {} idx:{} pid:{}\n", it.get_name(), p.nid, p.pos);
   }
   for(auto it = output_array.begin(); it!=output_array.end(); ++it ) {
     const auto &p = it.get_field();
-    fmt::print("out {} idx:{} pid:{}\n", it.get_char(), p.nid, p.pos);
+    fmt::print("out {} idx:{} pid:{}\n", it.get_name(), p.nid, p.pos);
   }
 
-  dump_lgwires();
+  dump_wirenames();
 
 #if 1
   for(Index_ID i = 0; i < node_internal.size(); i.value++) {

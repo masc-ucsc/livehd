@@ -4,6 +4,7 @@
 #include <sys/types.h>
 
 #include <string>
+#include <charconv>
 
 #include "char_array.hpp"
 
@@ -123,8 +124,14 @@ void test5(size_t n) {
 
     assert(idlist[conta] == it.get_id());
 
-    const char *str = it.get_char();
-    assert(atoi(str) == static_cast<int>(conta));
+    auto str = it.get_name();
+
+#ifndef NDEBUG
+    // Ugly code for string_view atoi
+    size_t conta2;
+    std::from_chars(&str[0], &str[0] + str.size(), conta2);
+    assert(conta2 == conta);
+#endif
 
     const auto &d = it.get_field();
     assert(d.potato == (0xdead0000 | (conta & 0xFFFF)));

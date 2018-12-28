@@ -7,6 +7,7 @@ cc_library(
     includes = ["."],
     deps = ["@bm//:headers",
             "@rapidjson//:headers",
+            "@com_google_absl//absl/container:flat_hash_map",
             "//eprp:eprp",
             "//lmms:headers",
             "//bench:headers",

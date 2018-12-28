@@ -25,6 +25,7 @@ protected:
 
   Index_ID create_node_int() final;
 
+  // TODO: convert std::string & to std::string_view
   explicit LGraph(const std::string &path, const std::string &name, const std::string &source, bool clear);
 
 public:
@@ -33,22 +34,22 @@ public:
 
   virtual ~LGraph();
 
-  static bool    exists(const std::string &path, const std::string &name);
-  static LGraph *create(const std::string &path, const std::string &name, const std::string &source);
-  static LGraph *open(const std::string &path, int lgid);
-  static LGraph *open(const std::string &path, const std::string &name);
-  static void rename(const std::string &path, const std::string &orig, const std::string &dest);
-  void close();
+  static bool    exists(std::string_view path, std::string_view name);
+  static LGraph *create(std::string_view path, std::string_view name, std::string_view source);
+  static LGraph *open(std::string_view path, int lgid);
+  static LGraph *open(std::string_view path, std::string_view name);
+  static void rename(std::string_view path, std::string_view orig, std::string_view dest);
+  void close() override;
 
   void clear() override;
   void reload() override;
   void sync() override;
   void emplace_back() override;
 
-  Index_ID add_graph_input(const char *str, Index_ID nid , uint16_t bits, uint16_t offset);
-  Index_ID add_graph_output(const char *str, Index_ID nid , uint16_t bits , uint16_t offset);
-  Index_ID add_graph_input(const char *str, Index_ID nid , uint16_t bits, uint16_t offset, Port_ID origininal_pos);
-  Index_ID add_graph_output(const char *str, Index_ID nid , uint16_t bits , uint16_t offset, Port_ID origininal_pos);
+  Index_ID add_graph_input (std::string_view str, Index_ID nid , uint16_t bits, uint16_t offset);
+  Index_ID add_graph_output(std::string_view str, Index_ID nid , uint16_t bits, uint16_t offset);
+  Index_ID add_graph_input (std::string_view str, Index_ID nid , uint16_t bits, uint16_t offset, Port_ID origininal_pos);
+  Index_ID add_graph_output(std::string_view str, Index_ID nid , uint16_t bits, uint16_t offset, Port_ID origininal_pos);
 
   Node            create_node();
   Node            get_node(Index_ID nid);

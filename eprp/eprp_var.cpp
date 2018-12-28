@@ -36,7 +36,7 @@ void Eprp_var::delete_label(const std::string &name) {
     dict.erase(it);
 }
 
-const std::string Eprp_var::get(const std::string &name) const {
+std::string_view Eprp_var::get(const std::string &name) const {
   const auto &elem = dict.find(name);
   if (elem == dict.end()) {
     static const std::string empty("");

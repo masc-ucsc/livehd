@@ -24,8 +24,8 @@ void Pass_dfg::generate(Eprp_var &var) {
     if(!Eprp_utils::ends_with(g->get_name(), std::string("_cfg")))
       continue;
 
-    const std::string name = g->get_name().substr(0, g->get_name().size() - 4);
-    const std::string path = var.get("path");
+    auto name = g->get_name().substr(0, g->get_name().size() - 4);
+    auto path = var.get("path");
 
     LGraph *dfg = LGraph::create(path, name, g->get_name());
     assert(dfg);
@@ -95,8 +95,8 @@ void Pass_dfg::trans(LGraph *dfg) {
   // resolve pending graph
   for(auto idx : dfg->fast()) {
     if(dfg->node_type_get(idx).op == DfgPendingGraph_Op) {
-      const std::string wirename = dfg->get_node_wirename(idx);
-      sub_graph                  = LGraph::open(dfg->get_path(), wirename);
+      auto wirename = dfg->get_node_wirename(idx);
+      sub_graph     = LGraph::open(dfg->get_path(), wirename);
       assert(sub_graph);
 
       dfg->node_subgraph_set(idx, sub_graph->lg_id());
@@ -311,7 +311,7 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
   fmt::print("process_assign\n");
   const auto &                    target = data.get_target();
   const std::vector<std::string> &oprds  = data.get_operands();
-  const std::string &             op     = data.get_operator();
+  auto             op     = data.get_operator();
   Index_ID                        oprd_id0;
   Index_ID                        oprd_id1;
   assert(oprds.size() > 0);

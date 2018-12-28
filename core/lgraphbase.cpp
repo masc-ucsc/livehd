@@ -33,7 +33,7 @@ void LGraph_Base::close() {
   Lgraph_base_core::close();
 }
 
-const std::string &LGraph_Base::get_subgraph_name(Index_ID nid) const {
+std::string_view LGraph_Base::get_subgraph_name(Index_ID nid) const {
   assert(node_type_get(nid).op == SubGraph_Op);
   return library->get_name(subgraph_id_get(nid));
 }
@@ -94,10 +94,11 @@ void LGraph_Base::reload() {
 
 void LGraph_Base::recompute_io_ports() {
 
-  // Reassign inputs in alphabetical order (preserve original_pos if present)
-  std::map<const char *, int, str_cmp_i> ordered;
-  std::vector<int>                       fixed;
-  Port_ID                                pos = 1;
+  // WARNING: OK string_view as no memory alloc/dealloc is done in input_array/output_array
+  std::map<std::string_view, int> ordered;
+
+  std::vector<int>                fixed;
+  Port_ID                         pos = 1;
 
   for(auto it = input_array.begin(); it != input_array.end(); ++it) {
     auto &p = it.get_field();
@@ -108,7 +109,7 @@ void LGraph_Base::recompute_io_ports() {
       assert(fixed[p.original_pos] == 0); // original_pos must be unique
       fixed[p.original_pos] = it.get_id();
     } else {
-      ordered[it.get_char()] = it.get_id();
+      ordered[it.get_name()] = it.get_id();
     }
   }
 
@@ -136,7 +137,7 @@ void LGraph_Base::recompute_io_ports() {
       assert(fixed[p.original_pos] == 0); // original_pos must be unique
       fixed[p.original_pos] = it.get_id();
     } else {
-      ordered[it.get_char()] = it.get_id();
+      ordered[it.get_name()] = it.get_id();
     }
   }
 
@@ -152,7 +153,7 @@ void LGraph_Base::recompute_io_ports() {
   }
 }
 
-Index_ID LGraph_Base::add_graph_io_common(const char *str, Index_ID nid, uint16_t bits) {
+Index_ID LGraph_Base::add_graph_io_common(std::string_view str, Index_ID nid, uint16_t bits) {
 
   if(nid == 0)
     nid = create_node_int();
@@ -166,7 +167,7 @@ Index_ID LGraph_Base::add_graph_io_common(const char *str, Index_ID nid, uint16_
   return nid;
 }
 
-Index_ID LGraph_Base::add_graph_input_int(const char *str, Index_ID nid, uint16_t bits) {
+Index_ID LGraph_Base::add_graph_input_int(std::string_view str, Index_ID nid, uint16_t bits) {
   assert(input_array.get_id(str) == 0); // No name dupliation
 
   nid = add_graph_io_common(str, nid, bits);
@@ -180,7 +181,7 @@ Index_ID LGraph_Base::add_graph_input_int(const char *str, Index_ID nid, uint16_
   return nid;
 }
 
-Index_ID LGraph_Base::add_graph_input_int(const char *str, Index_ID nid, uint16_t bits, Port_ID original_pos) {
+Index_ID LGraph_Base::add_graph_input_int(std::string_view str, Index_ID nid, uint16_t bits, Port_ID original_pos) {
   assert(input_array.get_id(str) == 0); // No name dupliation
 
   nid = add_graph_io_common(str, nid, bits);
@@ -192,7 +193,7 @@ Index_ID LGraph_Base::add_graph_input_int(const char *str, Index_ID nid, uint16_
   return nid;
 }
 
-Index_ID LGraph_Base::add_graph_output_int(const char *str, Index_ID nid, uint16_t bits) {
+Index_ID LGraph_Base::add_graph_output_int(std::string_view str, Index_ID nid, uint16_t bits) {
   assert(output_array.get_id(str) == 0); // No name dupliation
 
   nid = add_graph_io_common(str, nid, bits);
@@ -206,7 +207,7 @@ Index_ID LGraph_Base::add_graph_output_int(const char *str, Index_ID nid, uint16
   return nid;
 }
 
-Index_ID LGraph_Base::add_graph_output_int(const char *str, Index_ID nid, uint16_t bits, Port_ID original_pos) {
+Index_ID LGraph_Base::add_graph_output_int(std::string_view str, Index_ID nid, uint16_t bits, Port_ID original_pos) {
   assert(output_array.get_id(str) == 0); // No name dupliation
 
   nid = add_graph_io_common(str, nid, bits);
@@ -218,34 +219,7 @@ Index_ID LGraph_Base::add_graph_output_int(const char *str, Index_ID nid, uint16
   return nid;
 }
 
-bool LGraph_Base::is_graph_input(const char *name) const {
-  return input_array.get_id(name) != 0;
-}
-
-bool LGraph_Base::is_graph_output(const char *name) const {
-  return output_array.get_id(name) != 0;
-}
-
-bool LGraph_Base::is_graph_input(Index_ID idx) const {
-  assert(static_cast<Index_ID>(node_internal.size()) > idx);
-
-  return node_internal[idx].is_graph_io_input();
-}
-
-bool LGraph_Base::is_graph_output(Index_ID idx) const {
-  assert(static_cast<Index_ID>(node_internal.size()) > idx);
-
-#ifndef NDEBUG
-  /*if (!node_internal[idx].is_master_root()) {
-    Index_ID nid = node_internal[idx].get_master_root_nid();
-    //assert(node_internal[nid].is_master_root() == node_internal[idx].is_master_root());
-  }*/
-#endif
-
-  return node_internal[idx].is_graph_io_output();
-}
-
-const char *LGraph_Base::get_graph_input_name(Index_ID nid) const {
+std::string_view LGraph_Base::get_graph_input_name(Index_ID nid) const {
 
   assert(node_internal[nid].is_graph_io_input());
   assert(node_internal[nid].is_master_root());
@@ -253,13 +227,13 @@ const char *LGraph_Base::get_graph_input_name(Index_ID nid) const {
   for(auto it = input_array.begin(); it != input_array.end(); ++it) {
     const auto &p = it.get_field();
     if(p.nid == nid)
-      return it.get_char();
+      return it.get_name();
   }
 
-  return "unknown name";
+  return unknown_io;
 }
 
-const char *LGraph_Base::get_graph_output_name(Index_ID nid) const {
+std::string_view LGraph_Base::get_graph_output_name(Index_ID nid) const {
 
   assert(node_internal[nid].is_graph_io_output());
   assert(node_internal[nid].is_master_root());
@@ -267,10 +241,32 @@ const char *LGraph_Base::get_graph_output_name(Index_ID nid) const {
   for(auto it = output_array.begin(); it != output_array.end(); ++it) {
     const auto &p = it.get_field();
     if(p.nid == nid)
-      return it.get_char();
+      return it.get_name();
   }
 
-  return "unknown name";
+  return unknown_io;
+}
+
+std::string_view LGraph_Base::get_graph_input_name_from_pid(Port_ID pid) const {
+
+  for(auto it = input_array.begin(); it != input_array.end(); ++it) {
+    const auto &p = it.get_field();
+    if(p.pos == pid)
+      return it.get_name();
+  }
+
+  return unknown_io;
+}
+
+std::string_view LGraph_Base::get_graph_output_name_from_pid(Port_ID pid) const {
+
+  for(auto it = output_array.begin(); it != output_array.end(); ++it) {
+    const auto &p = it.get_field();
+    if(p.pos == pid)
+      return it.get_name();
+  }
+
+  return unknown_io;
 }
 
 Port_ID LGraph_Base::get_graph_pid_from_nid(Index_ID nid) const {
@@ -312,29 +308,7 @@ Index_ID LGraph_Base::get_graph_output_nid_from_pid(Port_ID pid) const {
   return 0;
 }
 
-const char *LGraph_Base::get_graph_input_name_from_pid(Port_ID pid) const {
-
-  for(auto it = input_array.begin(); it != input_array.end(); ++it) {
-    const auto &p = it.get_field();
-    if(p.pos == pid)
-      return it.get_char();
-  }
-
-  return "unknown name";
-}
-
-const char *LGraph_Base::get_graph_output_name_from_pid(Port_ID pid) const {
-
-  for(auto it = output_array.begin(); it != output_array.end(); ++it) {
-    const auto &p = it.get_field();
-    if(p.pos == pid)
-      return it.get_char();
-  }
-
-  return "unknown name";
-}
-
-Node_Pin LGraph_Base::get_graph_input(const char *str) const {
+Node_Pin LGraph_Base::get_graph_input(std::string_view str) const {
 
   assert(input_array.get_id(str) != 0);
 
@@ -342,7 +316,7 @@ Node_Pin LGraph_Base::get_graph_input(const char *str) const {
   return Node_Pin(p.nid, p.pos, true);
 }
 
-Node_Pin LGraph_Base::get_graph_output(const char *str) const {
+Node_Pin LGraph_Base::get_graph_output(std::string_view str) const {
 
   assert(output_array.get_id(str) != 0);
 
@@ -910,7 +884,7 @@ Edge_iterator LGraph_Base::inp_edges(Index_ID idx) const {
   return Edge_iterator(s, e, true);
 }
 
-void LGraph_Base::each_sub_graph_fast_direct(const std::function<bool(const Index_ID &, const Lg_type_id &, const std::string &)> fn) const {
+void LGraph_Base::each_sub_graph_fast_direct(const std::function<bool(const Index_ID &, const Lg_type_id &, std::string_view)> fn) const {
 
   const bm::bvector<> &bm = get_sub_graph_ids();
   Index_ID            cid = bm.get_first();
@@ -922,7 +896,7 @@ void LGraph_Base::each_sub_graph_fast_direct(const std::function<bool(const Inde
     auto iname = get_node_instancename(cid);
     Lg_type_id lgid = subgraph_id_get(cid);
 
-    bool cont = fn(cid, lgid, std::string(iname)); // FIXME: once we move out of const char *
+    bool cont = fn(cid, lgid, iname);
     if (!cont)
       return;
 

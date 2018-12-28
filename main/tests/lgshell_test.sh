@@ -81,15 +81,15 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-touch mlgdb/lgraph_potato_type
+touch mlgdb/lgraph_potato_nodes
 echo "lgraph.open name:simple_flop path:mlgdb |> lgraph.stats" | ${LGSHELL} | grep warning: >mlgdb/pp
 if [ $(wc -l mlgdb/pp) -lt 1 ]; then
   echo "FAIL: (1) it should open simple_flop, but return error for corrupted graph_library"
   exit 1
 fi
 
-rm mlgdb/lgraph_potato_type
-rm mlgdb/lgraph_trivial_type
+rm mlgdb/lgraph_potato_nodes
+rm mlgdb/lgraph_trivial_nodes
 ls mlgdb/lgraph*type
 echo "lgraph.open name:simple_flop path:mlgdb |> lgraph.stats" | ${LGSHELL}
 if [ $? -eq 0 ]; then
