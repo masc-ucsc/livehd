@@ -19,10 +19,9 @@ CFG_Node_Data::CFG_Node_Data(const LGraph *g, Index_ID node) {
   // FIXME: Weird code, use STL methods in string_view or abseil
   // https://en.cppreference.com/w/cpp/string/basic_string_view/find
   // https://abseil.io/docs/cpp/guides/strings#abslstrsplit-for-splitting-strings
-  assert(false);
-#if 0
+#if 1
   int         len      = 0;
-  std::string_view start    = data_str;
+  std::string start(data_str);
   int         ndiscard = 2;
 
   size_t pos = 0;
