@@ -77,7 +77,7 @@ void Pass_abc::trans(LGraph *lg) {
 
 LGraph *Pass_abc::regen(const LGraph *lg) {
 
-  if(!is_techmap(lg)) {
+  if(!setup_techmap(lg)) {
     Pass::error("pass_abc.regen: supports techmap graphs only");
     return 0;
   }
@@ -432,11 +432,11 @@ void Pass_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology
       }
     }
   } else if(this_node_type == Pick_Op) {
-    int width      = 0;
-    int offset     = 0;
-    int pick_width = g->get_bits(this_idx);
-    int upper      = 0;
-    int lower      = 0;
+    auto width [[maybe_unused]] = 0;
+    auto upper [[maybe_unused]] = 0;
+    auto lower [[maybe_unused]] = 0;
+    auto offset     = 0;
+    auto pick_width = g->get_bits(this_idx);
     for(const auto &pre_inp : g->inp_edges(this_idx)) {
       switch(pre_inp.get_inp_pin().get_pid()) {
       case 0: {
@@ -467,7 +467,7 @@ void Pass_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology
 }
 
 /************************************************************************
- * Function:  Pass_abc::is_techmap
+ * Function:  Pass_abc::setup_techmap
  * --------------------
  * input arg0 -> const LGraph *g
  *
@@ -476,7 +476,7 @@ void Pass_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology
  * description: iterate the lgraph to see it is a valid graph to pass abc
  *
  ***********************************************************************/
-bool Pass_abc::is_techmap(const LGraph *g) {
+bool Pass_abc::setup_techmap(const LGraph *g) {
 
   bool is_valid_input = true;
 
@@ -494,9 +494,9 @@ bool Pass_abc::is_techmap(const LGraph *g) {
       break;
     }
     case Pick_Op: {
-      int width      = 0;
-      int pick_width = g->get_bits(idx);
-      int offset     = 0;
+      auto width [[maybe_unused]] = 0;
+      auto offset     = 0;
+      auto pick_width = g->get_bits(idx);
       for(const auto &c : g->inp_edges(idx)) {
         switch(c.get_inp_pin().get_pid()) {
         case 0: {
@@ -514,8 +514,8 @@ bool Pass_abc::is_techmap(const LGraph *g) {
         }
         }
       }
-      int upper = offset + pick_width - 1;
-      int lower = offset;
+      auto upper [[maybe_unused]] = offset + pick_width - 1;
+      auto lower [[maybe_unused]] = offset;
       assert(upper - lower + 1 <= width);
     }
     case Join_Op: {
