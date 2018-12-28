@@ -1,3 +1,4 @@
+load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain")
 
 def _impl(ctx):
   output = ctx.outputs.out
@@ -21,10 +22,15 @@ def _impl(ctx):
   #print("src_libs2:",src_libs2)
   #print("src_objs:",[f.dirname for f in src_libs])
 
-  #print(ctx.fragments.cpp.compiler_executable)
-  #print(ctx.fragments.cpp.ar_executable)
+  cc_toolchain = find_cpp_toolchain(ctx)
 
-  args = [output.path] + [ctx.fragments.cpp.compiler_executable] + [ctx.fragments.cpp.ar_executable] + [f.path for f in src_libs2] + ["-Wl,-Bstatic"] + ["-lstdc++"] + ["-Wl,-Bdynamic"] + ["-lrt", "-lgcov", "-lpthread"]
+  ar_executable = cc_toolchain.ar_executable()
+  compiler_executable = cc_toolchain.compiler_executable()
+
+  #print(compiler_executable)
+  #print(ar_executable)
+
+  args = [output.path] + [compiler_executable] + [ar_executable] + [f.path for f in src_libs2] + ["-Wl,-Bstatic"] + ["-lstdc++"] + ["-Wl,-Bdynamic"] + ["-lrt", "-lgcov", "-lpthread"]
 
   ctx.actions.run(
       inputs=src_libs2,
@@ -37,14 +43,16 @@ linkso = rule(
     implementation=_impl,
     attrs={"srcs":   attr.label_list(mandatory=True, allow_files=True),
            "deps": attr.label_list(),
+           "_cc_toolchain": attr.label(
+             default = Label("@bazel_tools//tools/cpp:current_cc_toolchain")
+           ),
            "_linkso_tool": attr.label(
-               executable = True,
-               cfg = "host",
-               allow_files = True,
-               default = Label("//tools:linkso_tool"),
-               ),
+             executable = True,
+             cfg = "host",
+             allow_files = True,
+             default = Label("//tools:linkso_tool"),
+            ),
            },
-    fragments = ["cpp"],
     outputs={"out": "%{name}.so"},
 )
 

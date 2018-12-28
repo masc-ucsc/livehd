@@ -11,6 +11,8 @@
 #include "lgraph.hpp"
 #include "pass_abc.hpp"
 
+Abc_Frame_t *Pass_abc::pAbc=0;
+
 void setup_pass_abc() {
   Pass_abc p;
 
@@ -128,7 +130,7 @@ static std::string get_clock_name(const LGraph *g, Index_ID clk_idx) {
 
 void Pass_abc::find_latch_conn(const LGraph *g) {
   for(const auto &idx : graph_info->latch_id) {
-    graph_topology::topology_info pid;
+    graph_topology::topology_info topo;
     const Tech_cell *             tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
     if(opack.verbose)
       fmt::print("\nLatch_Op_ID NodeID:{} has direct input from Node: \n", idx);
@@ -138,7 +140,7 @@ void Pass_abc::find_latch_conn(const LGraph *g) {
         if(opack.verbose)
           fmt::print("{} pin input port ID {}", tcell->get_name(input.get_inp_pin().get_pid()), input.get_inp_pin().get_pid());
         int bit_index[2] = {0, 0};
-        recursive_find(g, &input, pid, bit_index);
+        recursive_find(g, &input, topo, bit_index);
       }
       /*********************************************************************
        * The following code is to keep the clock nets and reset nets that
@@ -176,53 +178,50 @@ void Pass_abc::find_latch_conn(const LGraph *g) {
         graph_info->reset_group_map[reset_name].insert(idx);
       }
     }
-    assert(pid.size() == 1); // ensure that D pin have fanin and only store D pin info
-    graph_info->latch_conn[idx] = std::move(pid);
+    assert(topo.size() == 1); // ensure that D pin have fanin and only store D pin info
+    graph_info->latch_conn[idx] = std::move(topo);
   }
 }
 
 void Pass_abc::find_combinational_conn(const LGraph *g) {
 
   for(const auto &idx : graph_info->combinational_id) {
-    std::vector<const Edge *>     inp_edges(16);
-    graph_topology::topology_info pid;
-    // const Tech_cell *         tcell      = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
-    uint32_t port_count = 0;
+
+    std::map<Port_ID, const Edge *> inp_edges; // NOTE: recursive_find needs ordered inp_pids (sorting at the end is not enough)
+    graph_topology::topology_info topo;
+
     for(const auto &input : g->inp_edges(idx)) {
-      assert(input.get_inp_pin().get_pid() < 16);
+      assert(inp_edges.find(input.get_inp_pin().get_pid()) == inp_edges.end());
+
       inp_edges[input.get_inp_pin().get_pid()] = &input;
-      port_count++;
     }
 
-    for(uint32_t i = 0; i < port_count; i++) {
-      if(inp_edges[i] == nullptr)
-        break;
-
+    for(const auto &[inp_pid,edge]:inp_edges) {
       int bit_index[2] = {0, 0}; // changed withing recursive find
-      recursive_find(g, inp_edges[i], pid, bit_index);
+      recursive_find(g, edge, topo, bit_index);
     }
 
-    assert(pid.size() == port_count); // ensure that every port have fanin
-    graph_info->comb_conn[idx] = std::move(pid);
+    assert(topo.size() == inp_edges.size()); // ensure that every port have fanin
+    graph_info->comb_conn[idx] = std::move(topo);
   }
 }
 
 void Pass_abc::find_graphio_output_conn(const LGraph *g) {
   for(const auto &idx : graph_info->graphio_output_id) {
-    graph_topology::topology_info pid;
+    graph_topology::topology_info topo;
 
-    uint32_t width = g->get_bits(idx);
-    uint32_t index = 0;
+    auto width = g->get_bits(idx);
+    auto index = 0;
 
     for(const auto &input : g->inp_edges(idx)) {
       for(index = 0; index < width; index++) {
-        int bit_index[2] = {static_cast<int>(index), static_cast<int>(index)};
-        recursive_find(g, &input, pid, bit_index);
+        int bit_index[2] = {index, index};
+        recursive_find(g, &input, topo, bit_index);
       }
     }
 
-    assert(index == pid.size());
-    graph_info->primary_output_conn[idx] = std::move(pid);
+    assert(index == static_cast<int>(topo.size()));
+    graph_info->primary_output_conn[idx] = std::move(topo);
   }
 }
 
@@ -243,20 +242,20 @@ void Pass_abc::find_subgraph_conn(const LGraph *g) {
     for(const auto &input : inp_edges) {
       if(opack.verbose)
         fmt::print("\n------------------------------------------------ \n", idx);
-      graph_topology::topology_info pid;
-      auto                          node_idx = input.second->get_idx();
-      auto                          width    = g->get_bits(node_idx);
-      int                           index    = 0;
+      graph_topology::topology_info topo;
+      auto node_idx = input.second->get_idx();
+      auto width    = g->get_bits(node_idx);
+      auto index    = 0;
       if(width > 1) {
         for(index = 0; index < width; index++) {
           int bit_index[2] = {index, index};
-          recursive_find(g, input.second, pid, bit_index);
+          recursive_find(g, input.second, topo, bit_index);
         }
       } else {
         int bit_index[2] = {0, 0};
-        recursive_find(g, input.second, pid, bit_index);
+        recursive_find(g, input.second, topo, bit_index);
       }
-      subgraph_pid[input.first] = std::move(pid);
+      subgraph_pid[input.first] = std::move(topo);
     }
     graph_info->subgraph_conn[idx] = std::move(subgraph_pid);
   }
@@ -282,29 +281,29 @@ void Pass_abc::find_memory_conn(const LGraph *g) {
       Port_ID input_id = input.second->get_inp_pin().get_pid();
       if(opack.verbose)
         fmt::print("\n-------------------{}---------------------- \n", input_id);
-      graph_topology::topology_info pid;
+      graph_topology::topology_info topo;
       auto                          node_idx = input.second->get_idx();
       auto                          width    = g->get_bits(node_idx);
       int                           index    = 0;
       if(width > 1) {
         for(index = 0; index < width; index++) {
           int bit_index[2] = {index, index};
-          recursive_find(g, input.second, pid, bit_index);
+          recursive_find(g, input.second, topo, bit_index);
         }
       } else {
         int bit_index[2] = {0, 0};
-        recursive_find(g, input.second, pid, bit_index);
+        recursive_find(g, input.second, topo, bit_index);
       }
       if(input_id == LGRAPH_MEMOP_CLK) {
-        assert(pid.size() == 1);
-        Index_ID clk_idx = pid[0].idx;
+        assert(topo.size() == 1);
+        Index_ID clk_idx = topo[0].idx;
 
         std::string clock_name = get_clock_name(g,clk_idx);
 
         graph_info->clock_id[clock_name] = clk_idx;
         graph_info->skew_group_map[clock_name].insert(idx);
       }
-      memory_pid[input.first] = std::move(pid);
+      memory_pid[input.first] = std::move(topo);
     }
     graph_info->memory_conn[idx] = std::move(memory_pid);
   }
@@ -334,7 +333,7 @@ void Pass_abc::find_cell_conn(const LGraph *g) {
  * --------------------
  * input arg0 -> const LGraph *g
  * input arg1 -> const Edge *input
- * input arg2 -> topology_info &pid
+ * input arg2 -> topology_info &topo
  * input arg3 -> int *bit_addr
  *
  * returns: nothing
@@ -344,7 +343,7 @@ void Pass_abc::find_cell_conn(const LGraph *g) {
  * 						FIXME: More Join & Pick Node means (a way to reduce ?)
  * 						"deeper" traverse depth and recursion
  ***********************************************************************/
-void Pass_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology::topology_info &pid, int *bit_addr) {
+void Pass_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology::topology_info &topo, int bit_addr[2]) {
 
   Index_ID     this_idx       = input->get_idx();
   Node_Type_Op this_node_type = g->node_type_get(this_idx).op;
@@ -354,31 +353,31 @@ void Pass_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology
                  input->get_out_pin().get_pid());
 
     index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
-    pid.push_back(info);
+    topo.push_back(info);
   } else if(this_node_type == StrConst_Op) {
     if(opack.verbose)
       fmt::print("\t StrConst_Op_NodeID:{},bit [{}:{}]  portid : {} \n", this_idx, bit_addr[0], bit_addr[1],
                  input->get_out_pin().get_pid());
 
     index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
-    pid.push_back(info);
+    topo.push_back(info);
   } else if(this_node_type == GraphIO_Op) {
     if(g->is_graph_output(this_idx)) {
       for(const auto &pre_inp : g->inp_edges(this_idx)) {
-        recursive_find(g, &pre_inp, pid, bit_addr);
+        recursive_find(g, &pre_inp, topo, bit_addr);
       }
     } else {
       if(opack.verbose)
         fmt::print("\t GraphIO_Op_NodeID:{},bit [{}:{}] portid : {} \n", this_idx, bit_addr[0], bit_addr[1],
                    input->get_out_pin().get_pid());
       index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
-      pid.push_back(info);
+      topo.push_back(info);
     }
   } else if(this_node_type == Memory_Op) {
     if(opack.verbose)
       fmt::print("\t Memory_Op:{},bit [{}:{}] portid : {} \n", this_idx, bit_addr[0], bit_addr[1], input->get_out_pin().get_pid());
     index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
-    pid.push_back(info);
+    topo.push_back(info);
 
     std::string namebuffer = fmt::format("%memory_output_{}_{}_{}%", this_idx, input->get_out_pin().get_pid(), bit_addr[0]);
     const auto it = graph_info->memory_generated_output_wire.find(info);
@@ -390,7 +389,7 @@ void Pass_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology
       fmt::print("\t SubGraph_Op:{},bit [{}:{}] portid : {} \n", this_idx, bit_addr[0], bit_addr[1],
                  input->get_out_pin().get_pid());
     index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
-    pid.push_back(info);
+    topo.push_back(info);
 
     std::string namebuffer = fmt::format("%subgraph_output_{}_{}_{}%", this_idx, input->get_out_pin().get_pid(), bit_addr[0]);
 
@@ -405,11 +404,11 @@ void Pass_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology
     const std::string tcell_name = tcell->get_name();
     if(tcell_name == "$_BUF_") {
       for(const auto &pre_inp : g->inp_edges(this_idx)) {
-        recursive_find(g, &pre_inp, pid, bit_addr);
+        recursive_find(g, &pre_inp, topo, bit_addr);
       }
     } else {
       index_offset info = {this_idx, input->get_out_pin().get_pid(), {0, 0}};
-      pid.push_back(info);
+      topo.push_back(info);
     }
   } else if(this_node_type == Join_Op) {
     int                       width      = 0;
@@ -427,7 +426,7 @@ void Pass_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology
       if(bit_addr[0] + 1 <= width) {
         bit_addr[0] = bit_addr[0] - width_pre;
         bit_addr[1] = bit_addr[1] - width_pre;
-        recursive_find(g, Join[i], pid, bit_addr);
+        recursive_find(g, Join[i], topo, bit_addr);
         break;
       }
     }
@@ -460,7 +459,7 @@ void Pass_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology
       if(pre_inp.get_inp_pin().get_pid() == 0) {
         bit_addr[0] += lower;
         bit_addr[1] += lower;
-        recursive_find(g, &pre_inp, pid, bit_addr);
+        recursive_find(g, &pre_inp, topo, bit_addr);
       }
     }
   }
@@ -599,11 +598,13 @@ bool Pass_abc::setup_techmap(const LGraph *g) {
  * description: feed to abc for comb synthesis and mapping
  ***********************************************************************/
 Abc_Ntk_t *Pass_abc::to_abc(const LGraph *g) {
-  Abc_Frame_t *pAbc = nullptr;
-  Abc_Ntk_t *  pAig = nullptr;
+
   Abc_Start();
-  pAbc        = Abc_FrameGetGlobalFrame();
-  pAig        = Abc_NtkAlloc(ABC_NTK_NETLIST, ABC_FUNC_AIG, 1);
+
+  if (pAbc==0)
+    pAbc = Abc_FrameGetGlobalFrame();
+  Abc_Ntk_t   *pAig = Abc_NtkAlloc(ABC_NTK_NETLIST, ABC_FUNC_AIG, 1);
+
   pAig->pName = Extra_UtilStrsav(g->get_name().c_str());
 
   gen_netList(g, pAig);
