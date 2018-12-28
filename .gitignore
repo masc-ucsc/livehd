@@ -16,3 +16,4 @@ compile_commands.json
 bazel-*
 dist
 *.egg-info
+.gdb_history

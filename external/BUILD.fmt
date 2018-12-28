@@ -2,8 +2,9 @@
 cc_library(
    name = "fmt",
    hdrs = glob(["include/fmt/*.h"]),
-   srcs = glob(["src/*.cc"]),
+   #srcs = glob(["src/*.cc"]),
    includes = ["include"],
    visibility = ["//visibility:public"],
-   defines = ["FMT_STRING_ALIAS"],
+   # WARNING: Yosys dynamic library was giving problems without FMT_HEADER_ONLY
+   defines = ["FMT_STRING_ALIAS","FMT_HEADER_ONLY"],
 )

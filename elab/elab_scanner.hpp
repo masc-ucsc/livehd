@@ -120,15 +120,13 @@ protected:
   typedef std::vector<Token> Token_list;
 
   std::string buffer_name;
-  const char *buffer;
-  uint32_t buffer_sz; // Token.pos is uint32_t 4GB per chunk...
+  std::string_view buffer;
   Token_list token_list;
 
   void scan_token_append(Token_list &toklist) const {
     assert(scanner_pos < token_list.size());
     toklist.push_back(token_list[scanner_pos]);
   }
-
 
 private:
   std::vector<Token_id> translate;
@@ -146,20 +144,20 @@ private:
 
   void add_token(Token &t);
 
-  void chunked(const char *_buffer, size_t _buffer_sz);
+  void chunked(std::string_view buffer);
 
-  void scan_raw_msg(const std::string &cat, const std::string &text, bool third) const;
+  void scan_raw_msg(std::string_view cat, std::string_view text, bool third) const;
 
-  void lex_error(const std::string &text);
+  void lex_error(std::string_view text);
 public:
   Elab_scanner();
 
-  void scan_error(const std::string &text) const; // Not really const, but to allow to be used by const methods
-  void scan_warn(const std::string &text) const;
+  void scan_error(std::string_view text) const; // Not really const, but to allow to be used by const methods
+  void scan_warn(std::string_view text) const;
 
-  void parser_error(const std::string &text) const;
-  void parser_warn(const std::string &text) const;
-  void parser_info(const std::string &text) const;
+  void parser_error(std::string_view text) const;
+  void parser_warn(std::string_view text) const;
+  void parser_info(std::string_view text) const;
 
   bool scan_next();
 
@@ -210,10 +208,7 @@ public:
 
   void patch_pass(const std::map<std::string, uint8_t> &keywords);
 
-  void parse(const std::string &name, const char *memblock, size_t sz, bool chunking=false);
-  void parse(const std::string &name, const std::string &str) {
-    parse(name,str.c_str(),str.size());
-  }
+  void parse(std::string_view name, std::string_view str, bool chunking=false);
 
   void dump_token() const;
 

@@ -84,52 +84,23 @@ private:
     return parent->get_alias(v) != branch->get_alias(v);
   }
 
-  bool is_register(const std::string &v) {
-    return v.at(0) == REGISTER_MARKER;
-  }
-  bool is_input(const std::string &v) {
-    return v.at(0) == INPUT_MARKER;
-  }
-  bool is_output(const std::string &v) {
-    return v.at(0) == OUTPUT_MARKER;
-  }
-  bool is_reference(const std::string &v) {
-    return v.at(0) == REFERENCE_MARKER;
-  }
-  bool is_constant(const std::string &v) {
-    return (v.at(0) == '0' || v.at(0) == '-');
-  }
-  bool is_read_marker(const std::string &v) {
-    return v.substr(0, READ_MARKER.length()) == READ_MARKER;
-  }
-  bool is_write_marker(const std::string &v) {
-    return v.substr(0, WRITE_MARKER.length()) == WRITE_MARKER;
-  }
-  bool is_valid_marker(const std::string &v) {
-    return v.substr(0, VALID_MARKER.length()) == VALID_MARKER;
-  }
-  bool is_retry_marker(const std::string &v) {
-    return v.substr(0, RETRY_MARKER.length()) == RETRY_MARKER;
-  }
+  constexpr bool is_register(std::string_view v) const     { return v.at(0) == REGISTER_MARKER; }
+  constexpr bool is_input(std::string_view v) const        { return v.at(0) == INPUT_MARKER; }
+  constexpr bool is_output(std::string_view v) const       { return v.at(0) == OUTPUT_MARKER; }
+  constexpr bool is_reference(std::string_view v) const    { return v.at(0) == REFERENCE_MARKER; }
+  constexpr bool is_constant(std::string_view v) const     { return (v.at(0) == '0' || v.at(0) == '-'); }
+  constexpr bool is_read_marker(std::string_view v) const  { return v.substr(0, READ_MARKER.length()) == READ_MARKER; }
+  constexpr bool is_write_marker(std::string_view v) const { return v.substr(0, WRITE_MARKER.length()) == WRITE_MARKER; }
+  constexpr bool is_valid_marker(std::string_view v) const { return v.substr(0, VALID_MARKER.length()) == VALID_MARKER; }
+  constexpr bool is_retry_marker(std::string_view v) const { return v.substr(0, RETRY_MARKER.length()) == RETRY_MARKER; }
 
-  bool is_pure_assign_op(const std::string &v) {
-    return v == "=";
-  }
-  bool is_label_op(const std::string &v) {
-    return v == ":";
-  }
-  bool is_as_op(const std::string &v) {
-    return v == "as";
-  }
-  bool is_unary_op(const std::string &v) {
-    return (v == "!") || (v == "not");
-  }
-  bool is_compute_op(const std::string &v) {
-    return (v == "+");
-  }
-  bool is_compare_op(const std::string &v) {
-    return (v == "==") || (v == ">") || (v == ">=") || (v == "<") || (v == "<=");
-  }
+  constexpr bool is_pure_assign_op(std::string_view v) const { return v == "="; }
+  constexpr bool is_label_op(std::string_view v) const       { return v == ":"; }
+  constexpr bool is_as_op(std::string_view v) const          { return v == "as"; }
+
+  constexpr bool is_unary_op(std::string_view v) const   { return (v == "!") || (v == "not"); }
+  constexpr bool is_compute_op(std::string_view v) const { return (v == "+"); }
+  constexpr bool is_compare_op(std::string_view v) const { return (v == "==") || (v == ">") || (v == ">=") || (v == "<") || (v == "<="); }
 
   // Index_ID create_register(LGraph *g, Aux_tree *aux_tree, const std::string &var_name);
   Index_ID create_input(LGraph *g, Aux_tree *aux_tree, const std::string &var_name, uint16_t bits = 0);
@@ -146,7 +117,7 @@ private:
   Index_ID create_binary(LGraph *g, Aux_tree *aux_tree, Index_ID op1, Index_ID op2, Node_Type_Op oper);
   Index_ID create_NOT(LGraph *g, Aux_tree *aux_tree, Index_ID op1);
 
-  Node_Type_Op node_type_from_text(const std::string &operator_text);
+  Node_Type_Op node_type_from_text(std::string_view operator_text) const;
 
   Index_ID    resolve_constant(LGraph *g, Aux_tree *aux_tree, const std::string &str_in);
   Index_ID    process_bin_token(LGraph *g, const std::string &token1st, const uint16_t &bit_width, bool is_signed);

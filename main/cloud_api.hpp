@@ -6,8 +6,8 @@ class Cloud_api {
 protected:
   static void server(Eprp_var &var) {
 
-    const std::string host = var.get("host");
-    const std::string port = var.get("port");
+    auto host = var.get("host");
+    auto port = var.get("port");
 
     Main_api::warn(fmt::format("Still not implemented host:{} port:{}", host, port));
   }

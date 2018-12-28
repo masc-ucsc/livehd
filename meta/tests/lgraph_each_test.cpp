@@ -23,7 +23,7 @@ protected:
 
   std::map<std::string,int> children;
 
-  void add_child(LGraph *parent, LGraph *child, const std::string &iname) {
+  void add_child(LGraph *parent, LGraph *child, std::string_view iname) {
 
     children[parent->get_name() + ":" + child->get_name()]++;
 
@@ -31,17 +31,6 @@ protected:
     parent->node_subgraph_set(nid, child->lg_id());
     if (rand_r(&rseed)&1)
       parent->set_node_instance_name(nid, iname);
-
-#if 0
-    // Nodes are disconnected in this test. No need and unclear how to connect randomly created subgraphs
-    child->each_input([child,parent](Index_ID idx) {
-        const char *iname = child->get_graph_input_name(idx);
-        auto dst_pid = sub_graph->get_graph_input(iname).get_pid();
-
-        Node_Pin dst_pin(nid, dst_pid, true);
-    });
-#endif
-
   }
 
   void add_io(LGraph *g) {
@@ -111,7 +100,7 @@ TEST_F(Setup_graphs_test, EmptyLGraph) {
 
   for(auto &parent:lgs) {
     fmt::print("checking parent:{}\n", parent->get_name());
-    parent->each_sub_graph_fast([parent,&children2,this](Index_ID idx, Lg_type_id lgid, const std::string &iname) {
+    parent->each_sub_graph_fast([parent,&children2,this](Index_ID idx, Lg_type_id lgid, std::string_view iname) {
         LGraph *child = LGraph::open(parent->get_path(),lgid);
 
         ASSERT_NE(child,nullptr);

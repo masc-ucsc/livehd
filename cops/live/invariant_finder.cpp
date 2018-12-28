@@ -220,13 +220,13 @@ void Invariant_finder::find_invariant_boundaries() {
 
       Index_ID    idx;
       WireName_ID wire_id;
-      if(synth_graph->has_name(hierarchical_name.c_str())) {
+      if(synth_graph->has_wirename(hierarchical_name.c_str())) {
         idx     = synth_graph->get_node_id(hierarchical_name.c_str());
         wire_id = synth_graph->get_wid(idx);
 
 #ifndef NDEBUG
       } else {
-        assert(!synth_graph->has_name(("\\" + hierarchical_name).c_str()));
+        assert(!synth_graph->has_wirename(("\\" + hierarchical_name).c_str()));
 #endif
         continue;
       }

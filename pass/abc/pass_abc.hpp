@@ -36,9 +36,9 @@ protected:
   };
   Pass_abc_options opack;
 
-  const std::string mapping_command;
-  const std::string readlib_command;
-  const std::string synthesis_command;
+  const std::string cmd_mapping;
+  const std::string cmd_readlib;
+  const std::string cmd_synthesis;
 
   static void tmap(Eprp_var &var);
   static void optimize(Eprp_var &var);

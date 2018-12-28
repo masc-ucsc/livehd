@@ -27,10 +27,6 @@ void LGraph_InstanceNames::emplace_back() {
 }
 
 std::string_view LGraph_InstanceNames::get_instancename(Char_Array_ID cid) const {
-  if(cid == 0) {
-    static const std::string_view empty = "";
-    return empty;
-  }
   return inames.get_name(cid);
 }
 

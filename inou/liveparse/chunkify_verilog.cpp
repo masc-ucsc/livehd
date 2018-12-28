@@ -18,7 +18,7 @@
 
 #include "chunkify_verilog.hpp"
 
-Chunkify_verilog::Chunkify_verilog(const std::string &_path, const std::string &_elab_path)
+Chunkify_verilog::Chunkify_verilog(std::string_view _path, std::string_view _elab_path)
     : path(_path)
     , elab_path(_elab_path) {
 
@@ -30,22 +30,23 @@ Chunkify_verilog::Chunkify_verilog(const std::string &_path, const std::string &
     elab_library = Graph_library::instance(elab_path);
 }
 
-int Chunkify_verilog::open_write_file(const std::string &filename) const {
-  int fd = open(filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+int Chunkify_verilog::open_write_file(std::string_view filename) const {
+  std::string sfilename(filename);
+  int fd = open(sfilename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
   if(fd < 0) {
-    scan_error(fmt::format("could not open {} for output", filename));
+    scan_error(fmt::format("could not open {} for output", sfilename));
     return -1;
   }
 
   return fd;
 }
 
-bool Chunkify_verilog::is_same_file(const std::string &module, const std::string &text1, const std::string &text2) const {
+bool Chunkify_verilog::is_same_file(std::string_view module, std::string_view text1, std::string_view text2) const {
 
   if(elab_path.empty())
     return false;
 
-  const std::string elab_filename = elab_chunk_dir + "/" + module + ".v";
+  const std::string elab_filename = elab_chunk_dir + "/" + std::string(module) + ".v";
   int fd = open(elab_filename.c_str(), O_RDONLY);
   if(fd < 0)
     return false;
@@ -53,7 +54,7 @@ bool Chunkify_verilog::is_same_file(const std::string &module, const std::string
   struct stat sb;
   fstat(fd, &sb);
 
-  if(static_cast<size_t>(sb.st_size) != static_cast<size_t>(text1.size() + text2.size())) {
+  if(static_cast<size_t>(sb.st_size) != (text1.size() + text2.size())) {
     close(fd);
     return false;
   }
@@ -77,17 +78,17 @@ bool Chunkify_verilog::is_same_file(const std::string &module, const std::string
   return n == 0; // same file if n==0
 }
 
-void Chunkify_verilog::write_file(const std::string &filename, const std::string &text1, const std::string &text2) const {
+void Chunkify_verilog::write_file(std::string_view filename, std::string_view text1, std::string_view text2) const {
   int fd = open_write_file(filename);
   if(fd < 0)
     return;
 
-  size_t sz = write(fd, text1.c_str(), text1.size());
+  size_t sz = write(fd, text1.data(), text1.size());
   if(sz != text1.size()) {
     scan_error(fmt::format("could not write contents to file err:{} vs {}", sz, text1.size()));
     return;
   }
-  sz = write(fd, text2.c_str(), text2.size());
+  sz = write(fd, text2.data(), text2.size());
   if(sz != text2.size()) {
     scan_error(fmt::format("could not write contents to file err:{} vs {}", sz, text2.size()));
     return;
@@ -96,31 +97,31 @@ void Chunkify_verilog::write_file(const std::string &filename, const std::string
   close(fd);
 }
 
-void Chunkify_verilog::write_file(const std::string &filename, const char *text, int sz) const {
+void Chunkify_verilog::write_file(std::string_view filename, std::string_view text) const {
 
-  int fd = open_write_file(filename);
+  auto fd = open_write_file(filename);
   if(fd < 0)
     return;
 
-  int sz2 = write(fd, text, sz);
-  if(sz2 != sz) {
-    scan_error(fmt::format("could not write contents to file err:{} vs {}", sz2, sz));
+  size_t sz2 = write(fd, text.data(), text.size());
+  if(sz2 != text.size()) {
+    scan_error(fmt::format("could not write contents to file err:{} vs {}", sz2, text.size()));
     return;
   }
 
   close(fd);
 }
 
-void Chunkify_verilog::add_io(LGraph *lg, bool input, const std::string &io_name, Port_ID original_pos) {
+void Chunkify_verilog::add_io(LGraph *lg, bool input, std::string_view io_name, Port_ID original_pos) {
 
   assert(lg);
 
   if(input) {
-    if(!lg->is_graph_input(io_name.c_str()))
-      lg->add_graph_input(io_name.c_str(), 0, 0, 0, original_pos);
+    if(!lg->is_graph_input(io_name))
+      lg->add_graph_input(io_name, 0, 0, 0, original_pos);
   } else {
-    if(!lg->is_graph_output(io_name.c_str()))
-      lg->add_graph_output(io_name.c_str(), 0, 0, 0, original_pos);
+    if(!lg->is_graph_output(io_name))
+      lg->add_graph_output(io_name, 0, 0, 0, original_pos);
   }
 }
 
@@ -134,29 +135,31 @@ void Chunkify_verilog::elaborate() {
       format_name[i] = '.';
   }
 
-  int err = mkdir(path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+  std::string spath(path);
+
+  int err = mkdir(spath.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   if(err < 0 && errno != EEXIST) {
     scan_error(fmt::format("could not create {} directory", path));
     return;
   }
 
-  std::string cadena = path + "/parse";
+  std::string cadena = spath + "/parse";
   err                = mkdir(cadena.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   if(err < 0 && errno != EEXIST) {
     scan_error(fmt::format("could not create {}/{} directory", path, "parse"));
     return;
   }
 
-  // ProgressBar bar(buffer_sz,"liveparse");
-
-  write_file(path + "/parse/file_" + format_name, buffer, buffer_sz);
-  chunk_dir = path + "/parse/chunk_" + format_name;
+  write_file(spath + "/parse/file_" + format_name, buffer);
+  chunk_dir = spath + "/parse/chunk_" + format_name;
   Eprp_utils::clean_dir(chunk_dir);
 
-  if (elab_path.empty())
-    elab_chunk_dir.clear();
-  else
-    elab_chunk_dir = elab_path + "/parse/chunk_" + format_name;
+  elab_chunk_dir.clear();
+  if (!elab_path.empty()) {
+    elab_chunk_dir.append(elab_path);
+    elab_chunk_dir.append("/parse/chunk_");
+    elab_chunk_dir.append(format_name);
+  }
 
   bool in_module   = false;
   bool last_input  = false;
@@ -172,10 +175,10 @@ void Chunkify_verilog::elaborate() {
   std::string in_module_text;
   Token_list  in_module_token;
 
-  not_in_module_text.reserve(buffer_sz);
+  not_in_module_text.reserve(buffer.size());
   not_in_module_token.reserve(token_list.size());
 
-  in_module_text.reserve(buffer_sz);
+  in_module_text.reserve(buffer.size());
   in_module_token.reserve(token_list.size());
 
   LGraph *lg = 0;
@@ -199,7 +202,7 @@ void Chunkify_verilog::elaborate() {
         lg = library->try_find_lgraph(module);
         if(lg == 0) {
           // fmt::print("chunkify_verilog::add_io create module {}\n",mod_name);
-          const auto &source = chunk_dir + "/" + module + ".v";
+          const std::string &source = chunk_dir + "/" + module + ".v";
           lg = LGraph::create(path, module, source);
         }
 
@@ -246,7 +249,6 @@ void Chunkify_verilog::elaborate() {
       if(endmodule_found) {
         // bar.Progressed(in_module_token.back().pos);
 
-        // fmt::print("{}  {} {}\n",module,in_module_token.back().pos, buffer_sz);
         bool same = is_same_file(module, not_in_module_text, in_module_text);
         if(!same) {
           write_file(chunk_dir + "/" + module + ".v", not_in_module_text, in_module_text);

@@ -7,30 +7,21 @@
 #include <functional>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "bm.h"
+#include "fmt/format.h"
+#include "absl/container/flat_hash_map.h"
 
 #include "explicit_type.hpp"
 
-// Description:
-//
-// Graph_library is the base class to keep track of lgraph names, input, outputs.
-//
-// It can handle multiple lgraph directories at the same time, but it does NOT allow to link across lgraph directories.
-//
-// The lgraph_ids are unique per lgraph directory
+using Lg_type_id =  Explicit_type<uint32_t, struct Lg_type_id_struct>; // Global used all over
 
 class LGraph;
-using Lg_type_id =  Explicit_type<uint32_t, struct Lg_type_id_struct>;
 
 class Graph_library {
 protected:
-  Lg_type_id        max_next_version;
-  const std::string path;
-  const std::string library_file;
   struct Graph_attributes {
     uint64_t    nentries;
     std::string name;    // NOTE: No const as names can change (reload)
@@ -48,13 +39,23 @@ protected:
       source   = "";
     }
   };
-  std::unordered_map<std::string, Lg_type_id::type> name2id;
-  typedef bm::bvector<> Recycled_id;
-  Recycled_id recycled_id;
 
-  // WARNING: Not from name (id) because names can happen many times (multiple create)
-  typedef std::vector<Graph_attributes> Attribute_type;
-  Attribute_type                        attribute;
+  using Global_instances   = absl::flat_hash_map<std::string, Graph_library *>;
+  using Global_name2lgraph = absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, LGraph *>>;
+  using Name2id            = absl::flat_hash_map<std::string, Lg_type_id::type>;
+  using Recycled_id        = bm::bvector<>;
+  using Attribute_type     = std::vector<Graph_attributes>;
+
+  Lg_type_id        max_next_version;
+  const std::string path;
+  const std::string library_file;
+
+  Name2id        name2id;
+  Recycled_id    recycled_id;
+  Attribute_type attribute;
+
+  static Global_instances   global_instances;
+  static Global_name2lgraph global_name2lgraph;
 
   bool graph_library_clean;
 
@@ -62,7 +63,7 @@ protected:
     max_next_version = 1;
   }
 
-  explicit Graph_library(const std::string &_path);
+  explicit Graph_library(std::string_view _path);
 
   void clean_library();
 
@@ -70,29 +71,28 @@ protected:
     clean_library();
   }
 
-  static std::unordered_map<std::string, Graph_library *>       global_instances;
-  static std::unordered_map<std::string, std::unordered_map<std::string, LGraph *>> global_name2lgraph;
-
-  Lg_type_id reset_id(const std::string &name, const std::string &source);
+  Lg_type_id reset_id(std::string_view name, std::string_view source);
 
   Lg_type_id try_get_recycled_id();
   void recycle_id(Lg_type_id lgid);
 
+  static std::string get_lgraph_filename(std::string_view path, std::string_view name, std::string_view ext);
+
 public:
-  static bool    exists(const std::string &path, const std::string &name);
-  static LGraph *try_find_lgraph(const std::string &path, const std::string &name);
-  LGraph *       try_find_lgraph(const std::string &name);
+  static bool    exists(std::string_view path, std::string_view name);
+  static LGraph *try_find_lgraph(std::string_view path, std::string_view name);
+  LGraph *       try_find_lgraph(std::string_view name);
 
-  Lg_type_id add_name(const std::string &name, const std::string &source);
-  bool     rename_name(const std::string &orig, const std::string &dest);
+  Lg_type_id add_name(std::string_view name, std::string_view source);
+  bool     rename_name(std::string_view orig, std::string_view dest);
 
-  const std::string &get_name(Lg_type_id lgid) const {
+  std::string_view get_name(Lg_type_id lgid) const {
     assert(lgid > 0); // 0 is invalid lgid
     assert(attribute.size() > lgid);
     return attribute[lgid].name;
   }
 
-  Lg_type_id get_id(const std::string &name) const {
+  Lg_type_id get_id(std::string_view name) const {
     const auto &it = name2id.find(name);
     if(it != name2id.end()) {
       return it->second;
@@ -100,13 +100,13 @@ public:
     return 0; // Invalid ID
   }
 
-  const std::string &get_source(Lg_type_id lgid) const {
+  std::string_view get_source(Lg_type_id lgid) const {
     assert(lgid > 0); // 0 is invalid lgid
     assert(attribute.size() > lgid);
     return attribute[lgid].source;
   }
 
-  const std::string &get_source(const std::string &name) const {
+  std::string_view get_source(std::string_view name) const {
     return get_source(get_id(name));
   }
 
@@ -124,16 +124,19 @@ public:
     return attribute[lgid].version;
   }
 
-  bool include(const std::string &name) const {
+  bool include(std::string_view name) const {
     return name2id.find(name) != name2id.end();
   }
 
-  // FIXME: Change to Graph_library &instance...
-  static Graph_library *instance(std::string path) {
-    if(Graph_library::global_instances.find(path) == Graph_library::global_instances.end()) {
-      Graph_library::global_instances.insert(std::make_pair(path, new Graph_library(path)));
+  // TODO: Change to Graph_library &instance...
+  static Graph_library *instance(std::string_view path) {
+    auto it = Graph_library::global_instances.find(path);
+    if(it == Graph_library::global_instances.end()) {
+      Graph_library *graph_library =  new Graph_library(path);
+      Graph_library::global_instances.insert(std::make_pair(std::string(path), graph_library));
+      return graph_library;
     }
-    return Graph_library::global_instances[path];
+    return it->second;
   }
 
   Lg_type_id get_max_version() const {
@@ -141,10 +144,10 @@ public:
     return max_next_version - 1;
   }
 
-  bool expunge_lgraph(const std::string &name, const LGraph *lg);
+  bool expunge_lgraph(std::string_view name, const LGraph *lg);
 
-  Lg_type_id register_lgraph(const std::string &name, const std::string &source, LGraph *lg);
-  bool     unregister_lgraph(const std::string &name, Lg_type_id lgid, const LGraph *lg);
+  Lg_type_id register_lgraph(std::string_view name, std::string_view source, LGraph *lg);
+  bool     unregister_lgraph(std::string_view name, Lg_type_id lgid, const LGraph *lg);
 
   void     update_nentries(Lg_type_id lgid, uint64_t nentries);
   uint64_t get_nentries(Lg_type_id lgid) const {
@@ -159,12 +162,10 @@ public:
 
   static void sync_all(); // Called when running out of mmaps
 
-  void each_type(std::function<void(Lg_type_id, const std::string &)> fn) const;
-  void each_type(std::function<bool(Lg_type_id, const std::string &)> fn) const;
-  void each_type(const std::string &match, std::function<void(Lg_type_id, const std::string &)> fn) const;
-  void each_type(const std::string &match, std::function<bool(Lg_type_id, const std::string &)> fn) const;
-  //void each_type(const std::string &type, std::function<bool(Lg_type_id,Name_id)> fn) const;
-  //void each_name(const std::string &type, std::function<bool(Lg_type_id,Name_id)> fn) const;
+  void each_type(std::function<void(Lg_type_id, std::string_view)> fn) const;
+  void each_type(std::function<bool(Lg_type_id, std::string_view)> fn) const;
+  void each_type(std::string_view match, std::function<void(Lg_type_id, std::string_view)> fn) const;
+  void each_type(std::string_view match, std::function<bool(Lg_type_id, std::string_view)> fn) const;
 
   void reload();
 };

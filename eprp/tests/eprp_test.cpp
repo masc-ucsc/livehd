@@ -24,7 +24,7 @@ static bool is_equal_called = false;
 class test1{
 public:
   static void files2(Eprp_var &var) {
-    const std::string files = var.get("files");
+    auto files = var.get("files");
 
     std::vector<std::string> svector = Eprp_utils::parse_files(files,"test1.files2");
 
@@ -53,21 +53,21 @@ public:
     fmt::print("\n");
 
     var.add("test1_foo","field1");
-    EXPECT_STREQ(var.get("test1_foo").c_str(), "field1");
+    EXPECT_EQ(var.get("test1_foo"), "field1");
   }
 
   static void is_equal(Eprp_var &var) {
-    EXPECT_STREQ(var.get("test1_foo").c_str(), "field1");
+    EXPECT_EQ(var.get("test1_foo"), "field1");
 
     EXPECT_EQ(var.get("lgdb"), var.get("check1"));
 
-    EXPECT_STREQ(var.get("graph_name").c_str(), "chacha");
+    EXPECT_EQ(var.get("graph_name"), "chacha");
 
-    EXPECT_STRNE(var.get("lgdb").c_str(), "");
+    EXPECT_NE(var.get("lgdb"), "");
 
     fmt::print("var.get = {}\n", var.get("nofield2"));
 
-    EXPECT_STREQ(var.get("nofield").c_str(), "");
+    EXPECT_EQ(var.get("nofield"), "");
 
     is_equal_called = true;
   }

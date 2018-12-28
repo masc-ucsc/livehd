@@ -7,17 +7,17 @@
 
 #include "lgraph.hpp"
 
-const int         OPERANDS_INIT_SIZE = 4;   // most CFG nodes will have 4 operands
-const char        ENCODING_DELIM     = '|'; // deliminator used to encode CFG data into wirename field
-const int         CFG_METADATA_COUNT = 5;
-const std::string EMPTY_MARKER       = "<none>";
-const std::string COND_BR_MARKER     = "if";
-
 class CFG_Node_Data {
 private:
   std::string              target;
   std::vector<std::string> operands;
   std::string              operator_txt;
+
+  static inline constexpr int         OPERANDS_INIT_SIZE   = 4;   // most CFG nodes will have 4 operands
+  static inline constexpr char        ENCODING_DELIM       = '|'; // deliminator used to encode CFG data into wirename field
+  static inline constexpr int         CFG_METADATA_COUNT   = 5;
+  static inline constexpr std::string_view EMPTY_MARKER    = "<none>";
+  static inline constexpr std::string_view  COND_BR_MARKER = "if";
 
 public:
   CFG_Node_Data(const LGraph *g, Index_ID node);
@@ -33,8 +33,10 @@ public:
   std::string encode() const;
   void                            modify_operator(std::string new_op) {operator_txt = new_op;}
   const std::string              &get_target()   const { return target; }
-  const std::string              &get_operator() const { return operator_txt; }
+  std::string_view get_operator() const { return operator_txt; }
   const std::vector<std::string> &get_operands() const { return operands; }
+
+  bool is_br_marker() const { return operator_txt == CFG_Node_Data::COND_BR_MARKER; }
 
 };
 

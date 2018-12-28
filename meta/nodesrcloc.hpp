@@ -1,15 +1,13 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#ifndef NODESRCFILE_H
-#define NODESRCFILE_H
+#pragma once
 
-#include <assert.h>
-
-#include "dense.hpp"
+#include <string_view>
+#include <cassert>
 #include <map>
 #include <string>
 
+#include "dense.hpp"
 #include "lgraphbase.hpp"
-#include <string>
 
 class File_Loc {
 protected:
@@ -48,8 +46,7 @@ public:
   virtual void emplace_back();
 
   void        node_loc_set(Index_ID nid, const char *file_name, uint32_t offset, uint32_t length);
-  const char *node_file_name_get(Index_ID nid) const;
+  std::string_view node_file_name_get(Index_ID nid) const;
   File_Loc    node_file_loc_get(Index_ID nid) const;
 };
 
-#endif

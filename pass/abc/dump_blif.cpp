@@ -23,8 +23,8 @@ void Pass_abc::write_src_info(const LGraph *g, const index_offset &inp, std::ofs
     break;
   }
   case StrConst_Op: {
-    std::string value = g->node_const_value_get(src_idx);
-    auto        bit   = (value == "1") ? 1 : 0;
+    auto value = g->node_const_value_get(src_idx);
+    auto  bit  = (value == "1") ? 1 : 0;
     if(bit == 0) {
       fs << "$false ";
     } else {
@@ -99,7 +99,7 @@ void Pass_abc::gen_io_conn(const LGraph *g, std::ofstream &fs) {
   for(const auto &idx : graph_info->graphio_output_id) {
     auto src = graph_info->primary_output_conn[idx];
     assert(src.size() == 1);
-    if(g->get_node_wirename(src[0].idx) != nullptr && strcmp(g->get_node_wirename(src[0].idx), g->get_graph_output_name(idx)) == 0)
+    if(g->get_node_wirename(src[0].idx) == g->get_graph_output_name(idx))
       continue;
     fs << ".names ";
     for(const auto &inp : src) {
