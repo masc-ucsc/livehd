@@ -1,6 +1,8 @@
-#ifndef EPRP_METHOD_H
-#define EPRP_METHOD_H
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#pragma once
+
+#include "absl/container/flat_hash_map.h"
 #include "eprp_var.hpp"
 
 class Eprp_method {
@@ -20,7 +22,7 @@ protected:
   const std::string name;
 
 public:
-  std::map<std::string, Label_attr, eprp_casecmp_str> labels;
+  absl::flat_hash_map<std::string, Label_attr> labels;
 
   const std::string &get_name() const { return name; }
 
@@ -41,4 +43,3 @@ public:
   const std::string &get_label_help(const std::string &label) const;
 };
 
-#endif

@@ -140,8 +140,8 @@ TEST_F(MainTest, MultiComments) {
   EXPECT_THAT(l0, HasSubstr("dump")); // It has escape characters, just match a word
   EXPECT_THAT(l1, HasSubstr("dump"));
   EXPECT_THAT(l4, HasSubstr("lgraph.dump labels:"));
-  EXPECT_THAT(l5, HasSubstr("files:"));
-  EXPECT_THAT(l6, HasSubstr("match:xxx$"));
+  EXPECT_THAT(l5, HasSubstr("match:xxx$"));
+  EXPECT_THAT(l6, HasSubstr("files:"));
   EXPECT_THAT(l7, HasSubstr("lgraph.dump lgraphs:"));
 }
 
@@ -207,7 +207,7 @@ TEST_F(MainTest, HelpPass) {
 
   EXPECT_THAT(l0, HasSubstr("help"));
   EXPECT_THAT(l4, HasSubstr("dot format"));
-  EXPECT_THAT(l5, HasSubstr("dump bits"));
+  EXPECT_THAT(l5, HasSubstr("optional"));
 }
 
 TEST_F(MainTest, Quit) {

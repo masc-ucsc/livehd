@@ -1,13 +1,14 @@
-#ifndef EPRP_VAR_H
-#define EPRP_VAR_H
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#pragma once
 
 #include <strings.h>
 
 #include <algorithm>
 #include <functional>
-#include <map>
 #include <string>
 #include <vector>
+
+#include "absl/container/flat_hash_map.h"
 
 struct eprp_casecmp_str : public std::binary_function<const std::string, const std::string, bool> {
     bool operator()(const std::string &lhs, const std::string &rhs) const {
@@ -21,8 +22,8 @@ class Eprp_var {
 private:
 
 public:
-  typedef std::map<const std::string, std::string, eprp_casecmp_str> Eprp_dict;
-  typedef std::vector<LGraph *> Eprp_lgs;
+  using Eprp_dict = absl::flat_hash_map<const std::string, std::string>;
+  using Eprp_lgs  = std::vector<LGraph *>;
 
   Eprp_dict dict;
   Eprp_lgs  lgs;
@@ -60,6 +61,4 @@ public:
 
   bool empty() const { return dict.empty() && lgs.empty(); }
 };
-
-#endif
 
