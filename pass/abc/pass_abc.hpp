@@ -82,7 +82,7 @@ public:
     int      offset[2];
 
     inline bool operator==(const index_offset &rhs) const {
-      return ((idx == rhs.idx) && pid == rhs.pid && offset[0] && rhs.offset[0]);
+      return ((idx == rhs.idx) && (pid == rhs.pid) && (offset[0] == rhs.offset[0]));
     }
 
     inline bool operator<(const index_offset &rhs) const {
