@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include <ctype.h>
 
@@ -129,7 +130,7 @@ void Elab_scanner::add_token(Token &t) {
   token_list.push_back(t);
 }
 
-void Elab_scanner::patch_pass(const std::map<std::string, uint8_t> &keywords) {
+void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, uint8_t> &keywords) {
   for(auto &t:token_list) {
     if (t.tok != TOK_ALNUM)
       continue;

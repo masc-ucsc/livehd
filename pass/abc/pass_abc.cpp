@@ -268,7 +268,7 @@ void Pass_abc::find_memory_conn(const LGraph *g) {
     if(opack.verbose)
       fmt::print("\nMemory_Op NodeID:{} has direct input from Node: \n", idx);
 
-    absl::flat_hash_map<Port_ID, const Edge *>                            inp_edges;
+    absl::flat_hash_map<Port_ID, const Edge *>                  inp_edges;
     absl::flat_hash_map<Port_ID, graph_topology::topology_info> memory_pid;
 
     for(const auto &input : g->inp_edges(idx)) {

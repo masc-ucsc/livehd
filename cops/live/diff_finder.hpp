@@ -1,6 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#ifndef DIFF_FINDER_H_
-#define DIFF_FINDER_H_
+#pragma once
 
 #include "invariant.hpp"
 #include "live_common.hpp"
@@ -51,4 +50,3 @@ public:
   void generate_delta(const std::string &mod_lgdb, const std::string &out_lgdb, std::set<Net_ID> &diffs);
 };
 
-#endif

@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
@@ -5,6 +6,7 @@
 #include <vector>
 #include <string>
 
+#include "absl/container/flat_hash_map.h"
 #include "lgraph.hpp"
 
 using testing::HasSubstr;
@@ -21,7 +23,7 @@ protected:
   LGraph *gc31=0; // Grand child from 3, 1st
   LGraph *gc32=0; // Grand child from 3, 2nd
 
-  std::map<std::string,int> children;
+  absl::flat_hash_map<std::string,int> children;
 
   void add_child(LGraph *parent, LGraph *child, std::string_view iname) {
 
@@ -96,7 +98,7 @@ protected:
 
 TEST_F(Setup_graphs_test, EmptyLGraph) {
 
-  std::map<std::string,int> children2;
+  absl::flat_hash_map<std::string,int> children2;
 
   for(auto &parent:lgs) {
     fmt::print("checking parent:{}\n", parent->get_name());
@@ -113,6 +115,11 @@ TEST_F(Setup_graphs_test, EmptyLGraph) {
     });
   }
 
-  EXPECT_TRUE(std::equal(children.begin(), children.end(), children2.begin()));
+  for(auto &c:children) {
+    EXPECT_EQ(c.second, children2[c.first]);
+  }
+  for(auto &c:children2) {
+    EXPECT_EQ(c.second, children[c.first]);
+  }
 }
 

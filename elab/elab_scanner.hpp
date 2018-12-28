@@ -1,11 +1,12 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
 #include <cstdint>
 #include <cassert>
 #include <string>
 #include <vector>
-#include <map>
 
+#include "absl/container/flat_hash_map.h"
 #include "fmt/format.h"
 
 #define MIN_CHUNK_SIZE 4
@@ -206,7 +207,7 @@ public:
     return token_list[scanner_pos+pos].tok == tok;
   }
 
-  void patch_pass(const std::map<std::string, uint8_t> &keywords);
+  void patch_pass(const absl::flat_hash_map<std::string, uint8_t> &keywords);
 
   void parse(std::string_view name, std::string_view str, bool chunking=false);
 

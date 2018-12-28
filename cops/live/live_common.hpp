@@ -1,7 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#ifndef LIVE_COMMON_H_
-#define LIVE_COMMON_H_
+#pragma once
 
+#include "absl/container/flat_hash_set.h"
 #include "lgraph.hpp"
 #include "lgedgeiter.hpp"
 
@@ -33,11 +33,10 @@ namespace Live {
 
 //resolves which bits are dependencies of the current bit based on node type
 //when propagating backwards
-int resolve_bit(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID pin, std::set<uint32_t> &bits);
+int resolve_bit(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID pin, absl::flat_hash_set<uint32_t> &bits);
 
 //resolves which bits are dependencies of the current bit based on node type
 //when propagating backwards
-int resolve_bit_fwd(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID pin, std::set<uint32_t> &bits);
+int resolve_bit_fwd(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID pin, absl::flat_hash_set<uint32_t> &bits);
 } // namespace Live
 
-#endif

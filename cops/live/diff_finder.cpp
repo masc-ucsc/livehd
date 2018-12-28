@@ -164,7 +164,7 @@ void Diff_finder::find_fwd_boundaries(Graph_Node &          start_boundary,
       continue;
     Index_ID next = out.get_inp_pin().get_nid();
 
-    std::set<uint32_t> relevant_bits;
+    absl::flat_hash_set<uint32_t> relevant_bits;
     int                found = resolve_bit_fwd(current, next, start_boundary.bit, out.get_inp_pin().get_pid(), relevant_bits);
     if(found < 0)
       continue;
@@ -323,7 +323,7 @@ bool Diff_finder::compare_cone(const Graph_Node &start_boundary, const Graph_Nod
 
   for(auto &inp : current->inp_edges(idx)) {
     //in cases like join/pick we only propagate to a specific bit
-    std::set<uint32_t> useful_bits;
+    absl::flat_hash_set<uint32_t> useful_bits;
     int                found_bit = resolve_bit(current, idx, start_boundary.bit, inp.get_inp_pin().get_pid(), useful_bits);
     if(found_bit == -1) // do not propagate through this pid
       continue;
