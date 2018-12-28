@@ -37,6 +37,8 @@ protected:
   };
   Pass_abc_options opack;
 
+  static Abc_Frame_t *pAbc;
+
   const std::string cmd_mapping;
   const std::string cmd_readlib;
   const std::string cmd_synthesis;
@@ -228,7 +230,7 @@ private:
   void find_subgraph_conn(const LGraph *g);
   void find_memory_conn(const LGraph *g);
 
-  void recursive_find(const LGraph *g, const Edge *input, graph_topology::topology_info &pid, int *bit_addr);
+  void recursive_find(const LGraph *g, const Edge *input, graph_topology::topology_info &pid, int bit_addr[2]);
 
   Abc_Obj_t *gen_const_from_lgraph(const LGraph *g, index_offset key, Abc_Ntk_t *pAig);
 
