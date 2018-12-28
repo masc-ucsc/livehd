@@ -203,16 +203,17 @@ public:
 private:
   graph_topology *graph_info;
 
-  bool is_techmap(const LGraph *g);
+  bool setup_techmap(const LGraph *g);
 
-  bool is_latch(const Tech_cell *tcell) {
-    std::string cell_name = tcell->get_name();
-    std::string flop      = "FF";
-    std::string latch     = "LATCH";
+  bool is_latch(const Tech_cell *tcell) const {
+    std::string_view cell_name = tcell->get_name();
+    std::string_view flop      = "FF";
+    std::string_view latch     = "LATCH";
     if(cell_name.find(flop) != std::string::npos) {
       return true;
-    } else
-      return cell_name.find(latch) != std::string::npos;
+    }
+
+    return cell_name.find(latch) != std::string::npos;
   }
 
   void clear() {
@@ -221,15 +222,10 @@ private:
   }
 
   void find_cell_conn(const LGraph *g);
-
   void find_latch_conn(const LGraph *g);
-
   void find_combinational_conn(const LGraph *g);
-
   void find_graphio_output_conn(const LGraph *g);
-
   void find_subgraph_conn(const LGraph *g);
-
   void find_memory_conn(const LGraph *g);
 
   void recursive_find(const LGraph *g, const Edge *input, graph_topology::topology_info &pid, int *bit_addr);

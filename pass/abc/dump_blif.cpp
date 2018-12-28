@@ -45,8 +45,12 @@ void Pass_abc::write_src_info(const LGraph *g, const index_offset &inp, std::ofs
 }
 
 void Pass_abc::dump_blif(const LGraph *g, const std::string &filename) {
-  auto mapped = is_techmap(g);
-  assert(mapped);
+
+  if (!setup_techmap(g)) {
+    Pass::error("pass_abc.dump_blif: supports techmap graphs only");
+    return;
+  }
+
   find_cell_conn(g);
 
   std::ofstream fs;
