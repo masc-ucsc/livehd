@@ -171,7 +171,7 @@ void Diff_finder::find_fwd_boundaries(Graph_Node &          start_boundary,
 
     for(uint32_t bit : relevant_bits) {
       Graph_Node bound(current, next, bit, start_boundary.instance, out.get_inp_pin().get_pid());
-      if(is_invariant(bound)) {
+      if(set_invariant(bound)) {
         discovered.insert(bound);
       } else {
         if(stack.find(bound) == stack.end())
@@ -188,7 +188,7 @@ bool Diff_finder::is_user_def(LGraph *current, Index_ID idx, Port_ID pid) const 
   return current->is_graph_output(idx) || current->is_graph_input(idx) || (current->get_wid(port_id) != 0);
 }
 
-bool Diff_finder::is_invariant(Graph_Node node) {
+bool Diff_finder::set_invariant(Graph_Node node) {
   LGraph *    current  = node.module;
   Index_ID    idx      = node.idx;
   uint32_t    bit      = node.bit;
@@ -383,7 +383,7 @@ bool Diff_finder::compare_cone(const Graph_Node &start_boundary, const Graph_Nod
       Graph_Node bound(current, previous, bit, instance, inp.get_out_pin().get_pid());
       Graph_Node orig(current_original, previous_original, bit, instance, inp.get_out_pin().get_pid());
 
-      if(is_invariant(bound)) {
+      if(set_invariant(bound)) {
         endpoints[start_boundary].insert(bound);
         //cones[start_boundary].insert(bound);
       } else {
@@ -686,7 +686,7 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
         } else {
           //input not included in delta, promote this node to input
           //for joins, we can skip remaining wires
-          if(node.module->node_type_get(node.idx).op == Join_Op || is_invariant(node)) {
+          if(node.module->node_type_get(node.idx).op == Join_Op || set_invariant(node)) {
             continue;
           }
 
@@ -825,7 +825,7 @@ void Diff_finder::generate_delta(const std::string &modified_lgdb, const std::st
             LGraph *current_original = LGraph::open(current->get_name(), original->get_path());
             assert(current_original);
 
-            if(is_invariant(bound)) {
+            if(set_invariant(bound)) {
               visited_boundaries.insert(bound);
 
               Graph_Node orig(current_original, current_original->get_node_id(bound2net[bound]), bit, instance, pid);

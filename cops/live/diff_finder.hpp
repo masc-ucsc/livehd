@@ -27,7 +27,7 @@ private:
   std::set<Graph_Node> fwd_visited;
 
   bool is_user_def(LGraph *current, Index_ID idx, Port_ID pid) const;
-  bool is_invariant(Graph_Node node);
+  bool set_invariant(Graph_Node node);
 
   void find_fwd_boundaries(Graph_Node &start_boundary, std::set<Graph_Node> &discovered, bool went_up = false);
   bool compare_cone(const Graph_Node &start_boundary, const Graph_Node &original_boundary, bool went_up = false);
