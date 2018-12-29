@@ -49,9 +49,7 @@ public:
   static Invariant_boundaries *deserialize(std::istream &ifs);
 
   static Graph_ID get_graphID(LGraph *g) {
-    if(g->get_name().substr(0, 7) == "lgraph_")
-      return g->get_name().substr(7);
-
+    assert(g->get_name().substr(0, 7) != "lgraph_");
     return g->get_name();
   }
 
