@@ -11,6 +11,8 @@ declare -a inputs=("trivial.v" "null_port.v" "simple_flop.v" "test.v" "shift.v"\
 TEMP=$(getopt -o ps:: --long profile,source:: -n 'yosys.sh' -- "$@")
 eval set -- "$TEMP"
 
+echo "synth.sh running in "$(pwd)
+
 YOSYS=./inou/yosys/lgyosys
 LGCHECK=./inou/yosys/lgcheck
 OPT_LGRAPH="./"
@@ -41,6 +43,20 @@ done
 YOSYS_BIN=$(which yosys)
 YOSYS_LIB="/usr/local/share/yosys/"
 
+if [ ! -f "${YOSYS_BIN}" ]; then
+  if [ -x "/usr/bin/yosys" ]; then
+    YOSYS_BIN=/usr/bin/yosys
+    YOSYS_LIB="/usr/share/yosys/"
+  elif [ -x "/usr/local/bin/yosys" ]; then
+    YOSYS_BIN=/usr/local/bin/yosys
+    YOSYS_LIB="/usr/local/share/yosys/"
+  else
+    echo "synth.sh: unable to fix YOSYS_BIN path"
+    exit 5
+  fi
+fi
+
+echo "yosys:" $YOSYS_BIN
 if [ ! -f ${YOSYS_BIN} ]; then
   echo "ERROR: could not find yosys binary in path"
   exit 1
@@ -98,7 +114,7 @@ do
   opt -fast -full; memory_map; dffsr2dff; dff2dffe; opt -full;
   techmap -map +/techmap.v -map +/xilinx/arith_map.v; opt -fast; techmap -D ALU_RIPPLE;
   opt -fast; abc -D 100;"
-  yosys -m ${OPT_INOU_YOSYS} -p "read_verilog -sv ${OPT_LGRAPH}/inou/yosys/tests/${input};
+  ${YOSYS_BIN} -m ${OPT_INOU_YOSYS} -p "read_verilog -sv ${OPT_LGRAPH}/inou/yosys/tests/${input};
    ${synth_script}; write_verilog ${base}_synth.v; yosys2lg -path lgdb" > ./synth-test/log_from_yosys_${input} 2> ./synth-test/err_from_yosys_${input}
 
 
