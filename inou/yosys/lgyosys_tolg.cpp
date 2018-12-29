@@ -913,8 +913,9 @@ static LGraph *process_module(RTLIL::Module *module) {
       connect_constant(g, transp.as_int(), 1, onid, LGRAPH_MEMOP_RDTRAN);
 
       // FIXME: get a test case to patch
-      if(cell->parameters.find("\\INIT") != cell->parameters.end())
-        assert(cell->parameters["\\INIT"].as_string() == "x");
+      if(cell->parameters.find("\\INIT") != cell->parameters.end()) {
+        assert(cell->parameters["\\INIT"].as_string()[0] == 'x');
+      }
 
       clock = cell->getPort("\\RD_CLK")[0].wire;
       if(clock == nullptr) {

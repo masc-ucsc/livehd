@@ -46,7 +46,7 @@ void Inou_cgen::fromlg(Eprp_var &var) {
 }
 
 void Inou_cgen::Declaration::format_raw(Out_string &w) const {
-  static const char *str_type[] = {"local", "input", "output", "sflop", "aflop", "fflop", "latch"};
+  static std::string_view str_type[] = {"local", "input", "output", "sflop", "aflop", "fflop", "latch"};
 
   w << fmt::format("dec {} bits:{} pos:{} sign:{} order:{} type:{}\n", name, bits, pos, is_signed, order, str_type[type]);
 }
