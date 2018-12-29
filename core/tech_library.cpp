@@ -10,21 +10,20 @@
 #include "rapidjson/prettywriter.h"
 
 #include "pass.hpp"
-
 #include "tech_library.hpp"
 
-std::unordered_map<std::string, Tech_library *> Tech_library::instances;
+absl::flat_hash_map<std::string, Tech_library *> Tech_library::instances;
 
-bool Tech_library::include(const std::string &name) const {
+bool Tech_library::include(std::string_view name) const {
   return cname2id.find(name) != cname2id.end();
 }
 
-uint16_t Tech_library::get_cell_id(const std::string &name) const {
+uint16_t Tech_library::get_cell_id(std::string_view name) const {
   assert(include(name));
   return cname2id.at(name);
 }
 
-uint16_t Tech_library::create_cell_id(const std::string &name) {
+uint16_t Tech_library::create_cell_id(std::string_view name) {
   assert(!include(name));
   assert(cell_types.size() < std::numeric_limits<uint16_t>::max()); // increase to uin32t if needed
 
@@ -33,10 +32,10 @@ uint16_t Tech_library::create_cell_id(const std::string &name) {
 
   uint16_t newid = cell_types.size();
   cell_types.push_back(Tech_cell(name, newid));
-  cname2id.insert(std::make_pair(name, newid));
-
+  cname2id[name]=newid;
   clean = false;
-  return cname2id[name];
+
+  return newid;
 }
 
 Tech_cell *Tech_library::get_cell(uint16_t cell_id) {
@@ -163,7 +162,7 @@ void Tech_library::to_json() const {
     for(auto &cell : cell_types) {
       writer.StartObject();
       writer.Key("cell");
-      writer.String(cell.get_name().c_str());
+      writer.String(std::string(cell.get_name()).c_str());
 
       writer.Key("size");
       writer.StartArray();
@@ -174,14 +173,14 @@ void Tech_library::to_json() const {
       writer.Key("inps");
       writer.StartArray();
       for(auto &inp : cell.get_inputs()) {
-        writer.String(cell.get_name(inp).c_str());
+        writer.String(std::string(cell.get_name(inp)).c_str());
       }
       writer.EndArray();
 
       writer.Key("outs");
       writer.StartArray();
       for(auto &oup : cell.get_outputs()) {
-        writer.String(cell.get_name(oup).c_str());
+        writer.String(std::string(cell.get_name(oup)).c_str());
       }
       writer.EndArray();
 

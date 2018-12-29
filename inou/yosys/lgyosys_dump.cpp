@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <math.h>
 
+#include "absl/strings/str_cat.h"
+
 #include "lgedgeiter.hpp"
 #include "lgyosys_dump.hpp"
 
@@ -39,11 +41,11 @@ RTLIL::Wire *Lgyosys_dump::create_tree(const LGraph *g, std::vector<RTLIL::Wire 
   for(uint32_t current = 0; current < wires.size() / 2; current += 2) {
     RTLIL::Wire *aWire = nullptr;
     if(wires.size() > 2)
-      aWire = mod->addWire(next_id(), result_wire->width);
+      aWire = mod->addWire(next_id(g), result_wire->width);
     else
       aWire = result_wire;
 
-    (mod->*add_fnc)(next_id(), wires[current], wires[current + 1], aWire, sign, "");
+    (mod->*add_fnc)(next_id(g), wires[current], wires[current + 1], aWire, sign, "");
     next_level.push_back(aWire);
   }
   if(wires.size() % 2 == 1)
@@ -64,10 +66,10 @@ RTLIL::Wire *Lgyosys_dump::create_tree(const LGraph *g, std::vector<RTLIL::Wire 
   for(uint32_t current = 0; current < wires.size() / 2; current += 2) {
     RTLIL::Wire *aWire = nullptr;
     if(wires.size() > 2)
-      aWire = mod->addWire(next_id(), result_wire->width);
+      aWire = mod->addWire(next_id(g), result_wire->width);
     else
       aWire = result_wire;
-    (mod->*add_fnc)(next_id(), wires[current], wires[current + 1], aWire, "");
+    (mod->*add_fnc)(next_id(g), wires[current], wires[current + 1], aWire, "");
     next_level.push_back(aWire);
   }
   if(wires.size() % 2 == 1)
@@ -279,7 +281,7 @@ void Lgyosys_dump::create_subgraph(const LGraph *g, RTLIL::Module *module, Index
 
   RTLIL::IdString instance_name("\\tmp");
   if(g->get_instance_name_id(idx) == 0) {
-    instance_name = next_id();
+    instance_name = next_id(g);
 #ifndef NDEBUG
     fmt::print("inou_yosys got empty inst_name for cell type {}\n", subgraph->get_name());
 #endif
@@ -325,10 +327,9 @@ void Lgyosys_dump::create_subgraph_outputs(const LGraph *g, RTLIL::Module *modul
     if(g->get_wid(port_nid)) {
       name = "\\" + std::string(g->get_node_wirename(port_nid));
     } else {
-      name = "\\lgraph_cell_" + std::string(subgraph->get_graph_output_name_from_pid(edge.get_out_pin().get_pid())) +
-             std::to_string(idx);
-      while(g->has_wirename(name)) {
-        name = next_wire().c_str();
+      name = "\\lgraph_cell_" + std::string(subgraph->get_graph_output_name_from_pid(edge.get_out_pin().get_pid())) + std::to_string(idx);
+      if(g->has_wirename(name)) {
+        name = next_wire(g);
       }
     }
     uint16_t out_size = g->get_bits(port_nid);
@@ -362,10 +363,7 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module *module) {
       if(!g->has_wirename("lgraph_cell_" + std::to_string(idx)))
         name = RTLIL::IdString("\\lgraph_cell_" + std::to_string(idx));
       else {
-        std::string tmp;
-        do {
-          tmp = next_wire().c_str();
-        } while(g->has_wirename(tmp));
+        std::string tmp = next_wire(g);
         fmt::print("2.wname[{}]\n",wname);
         name = RTLIL::IdString("\\" + tmp);
       }
@@ -410,11 +408,11 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module *module) {
         if(g->get_wid(edge.get_out_pin().get_nid()) != 0) {
           full_name = g->get_node_wirename(edge.get_out_pin().get_nid());
         } else {
-          std::string out_name = "";
+          std::string out_name;
           if(edge.get_out_pin().get_pid() < tcell->n_outs())
             out_name = tcell->get_name(edge.get_out_pin().get_pid());
           else
-            out_name = next_id().str();
+            out_name = next_id(g).c_str();
           full_name = name.str().substr(1) + std::string(out_name);
         }
 
@@ -432,14 +430,14 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module *module) {
 
         visited_out_pids.insert(edge.get_out_pin().get_pid());
 
-        RTLIL::Wire *new_wire = module->addWire(next_id(), g->get_bits(edge.get_out_pin().get_nid()));
+        RTLIL::Wire *new_wire = module->addWire(next_id(g), g->get_bits(edge.get_out_pin().get_nid()));
         cell_output_map[std::make_pair(idx, edge.get_out_pin().get_pid())] = new_wire;
         mem_output_map[idx].push_back(RTLIL::SigChunk(new_wire));
       }
       continue;
     } else if(g->node_type_get(idx).op == BlackBox_Op) {
       for(auto &edge : g->out_edges(idx)) {
-        RTLIL::Wire *new_wire = module->addWire(next_id(), g->get_bits(edge.get_out_pin().get_nid()));
+        RTLIL::Wire *new_wire = module->addWire(next_id(g), g->get_bits(edge.get_out_pin().get_nid()));
         cell_output_map[std::make_pair(idx, edge.get_out_pin().get_pid())] = new_wire;
       }
       continue;
@@ -541,7 +539,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       RTLIL::Wire *addu_result = nullptr;
       if(add_unsigned.size() > 1) {
         if(add_signed.size() + sub_unsigned.size() + sub_signed.size() > 0) {
-          addu_result = module->addWire(next_id(), size);
+          addu_result = module->addWire(next_id(g), size);
         } else {
           addu_result = cell_output_map[std::make_pair(idx, 0)];
         }
@@ -553,7 +551,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       RTLIL::Wire *adds_result = nullptr;
       if(add_signed.size() > 1) {
         if(add_unsigned.size() + sub_unsigned.size() + sub_signed.size() > 0) {
-          adds_result = module->addWire(next_id(), size);
+          adds_result = module->addWire(next_id(g), size);
         } else {
           adds_result = cell_output_map[std::make_pair(idx, 0)];
         }
@@ -565,7 +563,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       RTLIL::Wire *subu_result = nullptr;
       if(sub_unsigned.size() > 1) {
         if(add_signed.size() + add_unsigned.size() + sub_signed.size() > 0) {
-          subu_result = module->addWire(next_id(), size);
+          subu_result = module->addWire(next_id(g), size);
         } else {
           subu_result = cell_output_map[std::make_pair(idx, 0)];
         }
@@ -577,7 +575,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       RTLIL::Wire *subs_result = nullptr;
       if(sub_signed.size() > 1) {
         if(add_unsigned.size() + sub_unsigned.size() + add_signed.size() > 0) {
-          subs_result = module->addWire(next_id(), size);
+          subs_result = module->addWire(next_id(g), size);
         } else {
           subs_result = cell_output_map[std::make_pair(idx, 0)];
         }
@@ -589,11 +587,11 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       RTLIL::Wire *a_result = nullptr;
       if(addu_result != nullptr && adds_result != nullptr) {
         if(subu_result != nullptr || subs_result != nullptr) {
-          a_result = module->addWire(next_id(), size);
+          a_result = module->addWire(next_id(g), size);
         } else {
           a_result = cell_output_map[std::make_pair(idx, 0)];
         }
-        module->addAdd(next_id(), addu_result, adds_result, false, a_result);
+        module->addAdd(next_id(g), addu_result, adds_result, false, a_result);
       } else if(addu_result != nullptr) {
         a_result = addu_result;
       } else if(adds_result != nullptr) {
@@ -602,8 +600,8 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
 
       RTLIL::Wire *s_result = nullptr;
       if(subu_result != nullptr && subs_result != nullptr) {
-        s_result = module->addWire(next_id(), size);
-        module->addAdd(next_id(), subu_result, subs_result, false, s_result);
+        s_result = module->addWire(next_id(g), size);
+        module->addAdd(next_id(g), subu_result, subs_result, false, s_result);
       } else if(subu_result != nullptr) {
         s_result = subu_result;
       } else if(subs_result != nullptr) {
@@ -611,9 +609,9 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       }
 
       if(a_result != nullptr && s_result != nullptr) {
-        module->addSub(next_id(), a_result, s_result, cell_output_map[std::make_pair(idx, 0)], false);
+        module->addSub(next_id(g), a_result, s_result, cell_output_map[std::make_pair(idx, 0)], false);
       } else if(s_result != nullptr) {
-        module->addSub(next_id(), RTLIL::Const(0), s_result, cell_output_map[std::make_pair(idx, 0)], false);
+        module->addSub(next_id(g), RTLIL::Const(0), s_result, cell_output_map[std::make_pair(idx, 0)], false);
       } else {
         if(a_result != cell_output_map[std::make_pair(idx, 0)])
           module->connect(cell_output_map[std::make_pair(idx, 0)], RTLIL::SigSpec(a_result));
@@ -647,7 +645,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         if(m_signed.size() == 0) {
           mu_result = cell_output_map[std::make_pair(idx, 0)];
         } else {
-          mu_result = module->addWire(next_id(), size);
+          mu_result = module->addWire(next_id(g), size);
         }
         create_tree(g, m_unsigned, module, &RTLIL::Module::addMul, false, mu_result);
       } else if(m_unsigned.size() == 1) {
@@ -658,7 +656,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         if(m_unsigned.size() == 0) {
           ms_result = cell_output_map[std::make_pair(idx, 0)];
         } else {
-          ms_result = module->addWire(next_id(), size);
+          ms_result = module->addWire(next_id(g), size);
         }
         create_tree(g, m_signed, module, &RTLIL::Module::addMul, false, ms_result);
       } else if(m_signed.size() == 1) {
@@ -666,7 +664,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       }
 
       if(mu_result != nullptr && ms_result != nullptr) {
-        module->addMul(next_id(), mu_result, ms_result, cell_output_map[std::make_pair(idx, 0)], false);
+        module->addMul(next_id(g), mu_result, ms_result, cell_output_map[std::make_pair(idx, 0)], false);
       } else if(mu_result != nullptr) {
         module->connect(cell_output_map[std::make_pair(idx, 0)], RTLIL::SigSpec(mu_result));
       } else if(ms_result != nullptr) {
@@ -682,7 +680,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       for(const auto &c : g->inp_edges(idx)) {
         n_inps++;
         RTLIL::Wire *inWire = get_wire(c.get_idx(), c.get_out_pin().get_pid());
-        module->addNot(next_id(), inWire, cell_output_map[std::make_pair(idx, 0)]);
+        module->addNot(next_id(g), inWire, cell_output_map[std::make_pair(idx, 0)]);
       }
       // if the assertion fails, check what does a not with multiple inputs mean
       assert(n_inps == 1);
@@ -753,7 +751,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         // reduce and: assign a = &b;
         assert(cell_output_map.find(std::make_pair(idx, 1)) !=
                cell_output_map.end()); // single input and gate that is not used as a reduce and
-        module->addReduceAnd(next_id(), and_inps[0], cell_output_map[std::make_pair(idx, 1)]);
+        module->addReduceAnd(next_id(g), and_inps[0], cell_output_map[std::make_pair(idx, 1)]);
       } else {
         assert(cell_output_map.find(std::make_pair(idx, 0)) != cell_output_map.end());
         create_tree(g, and_inps, module, &RTLIL::Module::addAnd, false, cell_output_map[std::make_pair(idx, 0)]);
@@ -770,7 +768,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         // reduce or: assign a = |b;
         assert(cell_output_map.find(std::make_pair(idx, 1)) !=
                cell_output_map.end()); // single input or gate that is not used as a reduce or
-        module->addReduceOr(next_id(), or_inps[0], cell_output_map[std::make_pair(idx, 1)]);
+        module->addReduceOr(next_id(g), or_inps[0], cell_output_map[std::make_pair(idx, 1)]);
       } else {
         assert(cell_output_map.find(std::make_pair(idx, 0)) != cell_output_map.end());
         create_tree(g, or_inps, module, &RTLIL::Module::addOr, false, cell_output_map[std::make_pair(idx, 0)]);
@@ -789,7 +787,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         // reduce xor: assign a = ^b;
         assert(cell_output_map.find(std::make_pair(idx, 1)) !=
                cell_output_map.end()); // single input xor gate that is not used as a reduce xor
-        module->addReduceXor(next_id(), xor_inps[0], cell_output_map[std::make_pair(idx, 1)]);
+        module->addReduceXor(next_id(g), xor_inps[0], cell_output_map[std::make_pair(idx, 1)]);
       } else {
         create_tree(g, xor_inps, module, &RTLIL::Module::addXor, false, cell_output_map[std::make_pair(idx, 0)]);
       }
@@ -830,7 +828,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       switch(g->node_type_get(idx).op) {
       case SFlop_Op:
         if(enWire == nullptr && clkWire != nullptr && dWire != nullptr && rstWire == nullptr && rstVal == nullptr) {
-          module->addDff(next_id(), clkWire, dWire, cell_output_map[std::make_pair(idx, 0)], true);
+          module->addDff(next_id(g), clkWire, dWire, cell_output_map[std::make_pair(idx, 0)], true);
         } else {
           log_error("Enable and Reset not supported on Flops yet!\n");
         }
@@ -839,7 +837,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         if(enWire == nullptr && clkWire != nullptr && dWire != nullptr && rstWire != nullptr && rstVal == nullptr) {
           //      addAdff(name,      sig_clk,sig_arst, sig_d, sig_q,                                   arst_value, clk_polarity,
           //      arst_polarity);
-          module->addAdff(next_id(), clkWire, rstWire, dWire, cell_output_map[std::make_pair(idx, 0)],
+          module->addAdff(next_id(g), clkWire, rstWire, dWire, cell_output_map[std::make_pair(idx, 0)],
                           RTLIL::Const(0, dWire->width), true, true);
         } else {
           log_error("Enable not supported on AFlops yet, RST required on AFlops!\n");
@@ -892,22 +890,22 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
 
       switch(g->node_type_get(idx).op) {
       case LessThan_Op:
-        module->addLt(next_id(), lhs, rhs, cell_output_map[std::make_pair(idx, 0)], sign);
+        module->addLt(next_id(g), lhs, rhs, cell_output_map[std::make_pair(idx, 0)], sign);
         break;
       case LessEqualThan_Op:
-        module->addLe(next_id(), lhs, rhs, cell_output_map[std::make_pair(idx, 0)], sign);
+        module->addLe(next_id(g), lhs, rhs, cell_output_map[std::make_pair(idx, 0)], sign);
         break;
       case GreaterThan_Op:
-        module->addGt(next_id(), lhs, rhs, cell_output_map[std::make_pair(idx, 0)], sign);
+        module->addGt(next_id(g), lhs, rhs, cell_output_map[std::make_pair(idx, 0)], sign);
         break;
       case GreaterEqualThan_Op:
-        module->addGe(next_id(), lhs, rhs, cell_output_map[std::make_pair(idx, 0)], sign);
+        module->addGe(next_id(g), lhs, rhs, cell_output_map[std::make_pair(idx, 0)], sign);
         break;
       case Div_Op:
-        module->addDiv(next_id(), lhs, rhs, cell_output_map[std::make_pair(idx, 0)], sign);
+        module->addDiv(next_id(g), lhs, rhs, cell_output_map[std::make_pair(idx, 0)], sign);
         break;
       case Mod_Op:
-        module->addMod(next_id(), lhs, rhs, cell_output_map[std::make_pair(idx, 0)], sign);
+        module->addMod(next_id(g), lhs, rhs, cell_output_map[std::make_pair(idx, 0)], sign);
         break;
       default:
         ::Pass::error("lgyosys_dump: internal error!");
@@ -942,7 +940,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         log_error("Internal Error: did not find a wire to be shifted.\n");
       if(shift_amount.size() == 0)
         log_error("Internal Error: did not find a wire to be shifted.\n");
-      module->addShl(next_id(), shifted_wire, shift_amount, cell_output_map[std::make_pair(idx, 0)], false);
+      module->addShl(next_id(g), shifted_wire, shift_amount, cell_output_map[std::make_pair(idx, 0)], false);
       break;
     }
     case ShiftRight_Op: {
@@ -986,11 +984,11 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         log_error("Internal Error: did not find a wire to be shifted.\n");
 
       if(sign)
-        module->addSshr(next_id(), shifted_wire, shift_amount, cell_output_map[std::make_pair(idx, 0)], a_sign);
+        module->addSshr(next_id(g), shifted_wire, shift_amount, cell_output_map[std::make_pair(idx, 0)], a_sign);
       else if(b_sign)
-        module->addShiftx(next_id(), shifted_wire, shift_amount, cell_output_map[std::make_pair(idx, 0)], a_sign);
+        module->addShiftx(next_id(g), shifted_wire, shift_amount, cell_output_map[std::make_pair(idx, 0)], a_sign);
       else
-        module->addShr(next_id(), shifted_wire, shift_amount, cell_output_map[std::make_pair(idx, 0)], a_sign);
+        module->addShr(next_id(g), shifted_wire, shift_amount, cell_output_map[std::make_pair(idx, 0)], a_sign);
       break;
     }
     case Equals_Op: {
@@ -1019,7 +1017,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         if(e_signed.size() == 0) {
           eu_result = cell_output_map[std::make_pair(idx, 0)];
         } else {
-          eu_result = module->addWire(next_id(), size);
+          eu_result = module->addWire(next_id(g), size);
         }
         create_tree(g, e_unsigned, module, &RTLIL::Module::addEq, false, eu_result);
       } else if(e_unsigned.size() == 1) {
@@ -1030,7 +1028,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         if(e_unsigned.size() == 0) {
           es_result = cell_output_map[std::make_pair(idx, 0)];
         } else {
-          es_result = module->addWire(next_id(), size);
+          es_result = module->addWire(next_id(g), size);
         }
         create_tree(g, e_signed, module, &RTLIL::Module::addEq, false, es_result);
       } else if(e_signed.size() == 1) {
@@ -1038,7 +1036,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       }
 
       if(eu_result != nullptr && es_result != nullptr) {
-        module->addEq(next_id(), eu_result, es_result, cell_output_map[std::make_pair(idx, 0)], false);
+        module->addEq(next_id(g), eu_result, es_result, cell_output_map[std::make_pair(idx, 0)], false);
       } else if(eu_result != nullptr) {
         module->connect(cell_output_map[std::make_pair(idx, 0)], RTLIL::SigSpec(eu_result));
       } else if(es_result != nullptr) {
@@ -1083,7 +1081,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       assert(aport->width == (cell_output_map[std::make_pair(idx, 0)]->width));
       assert(bport->width == (cell_output_map[std::make_pair(idx, 0)]->width));
 
-      module->addMux(next_id(), aport, bport, sel, cell_output_map[std::make_pair(idx, 0)]);
+      module->addMux(next_id(g), aport, bport, sel, cell_output_map[std::make_pair(idx, 0)]);
       break;
     }
     case Memory_Op: {
@@ -1101,7 +1099,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
 
       RTLIL::IdString instance_name("\\tmp");
       if(g->get_instance_name_id(idx) == 0 || std::string(g->get_node_instancename(idx)) == "") {
-        instance_name = next_id();
+        instance_name = next_id(g);
 #ifndef NDEBUG
         fmt::print("inou_yosys got empty inst_name for cell type {}\n", tcell->get_name());
 #endif
@@ -1109,8 +1107,12 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         instance_name = RTLIL::IdString("\\" + std::string(g->get_node_instancename(idx)));
       }
 
-      std::string name =
-          (tcell->get_name()[0] == '$' || tcell->get_name()[0] == '\\') ? tcell->get_name() : "\\" + tcell->get_name();
+      std::string name;
+      if (tcell->get_name()[0] == '$' || tcell->get_name()[0] == '\\')
+        name = absl::StrCat(tcell->get_name());
+      else
+        name = absl::StrCat("\\",tcell->get_name());
+
       RTLIL::Cell *new_cell = module->addCell(instance_name, name);
       for(const auto &c : g->inp_edges(idx)) {
         std::string port = "";

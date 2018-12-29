@@ -116,9 +116,9 @@ void Pass_abc::gen_io_conn(const LGraph *g, std::ofstream &fs) {
 
 void Pass_abc::gen_cell_conn(const LGraph *g, std::ofstream &fs) {
   for(const auto &idx : graph_info->combinational_id) {
-    auto              src        = graph_info->comb_conn[idx];
-    const Tech_cell * tcell      = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
-    const std::string tcell_name = tcell->get_name();
+    auto              src       = graph_info->comb_conn[idx];
+    const Tech_cell * tcell     = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
+    std::string_view tcell_name = tcell->get_name();
     fs << ".names ";
     for(const auto &inp : src) {
       write_src_info(g, inp, fs);

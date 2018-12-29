@@ -19,6 +19,9 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
+
 USING_YOSYS_NAMESPACE
 PRIVATE_NAMESPACE_BEGIN
 
@@ -30,8 +33,8 @@ struct GlobalPin {
 };
 
 static CellTypes ct_all;
-static std::set<std::string> cell_port_inputs;
-static std::set<std::string> cell_port_outputs;
+static absl::flat_hash_set<std::string> cell_port_inputs;
+static absl::flat_hash_set<std::string> cell_port_outputs;
 
 struct Local_pin {
   Port_ID out_pid;
@@ -43,19 +46,19 @@ typedef std::pair<const RTLIL::Wire *, int> Wire_bit;
 typedef std::vector<Node_Pin *>             Pins;
 
 // static std::map<const RTLIL::Wire *, GlobalPin> wire2gpin;
-static std::map<const RTLIL::Wire *, Local_pin> wire2lpin;
-static std::map<const RTLIL::Cell *, Index_ID>  cell2nid;
-static std::map<std::string, LGraph *>          module2graph;
-static std::map<const RTLIL::Wire *, Pins>      partially_assigned;
+static absl::flat_hash_map<const RTLIL::Wire *, Local_pin> wire2lpin;
+static absl::flat_hash_map<const RTLIL::Cell *, Index_ID>  cell2nid;
+static absl::flat_hash_map<std::string, LGraph *>          module2graph;
+static absl::flat_hash_map<const RTLIL::Wire *, Pins>      partially_assigned;
 
 static std::map<const Wire_bit, Local_pin> wirebit2lpin;
-static std::map<std::string, Index_ID>     const_map;
+static absl::flat_hash_map<std::string, Index_ID>     const_map;
 
 typedef std::pair<uint32_t, uint32_t> Value_size;
-static std::map<Value_size, Index_ID> int_const_map;
+static absl::flat_hash_map<Value_size, Index_ID> int_const_map;
 
 #ifndef NDEBUG
-static std::map<std::string, uint32_t> used_names;
+static absl::flat_hash_map<std::string, uint32_t> used_names;
 #endif
 
 static void look_for_module_outputs(RTLIL::Module *module, const std::string &path) {
@@ -421,7 +424,7 @@ static Index_ID resolve_constant(LGraph *g, const std::vector<RTLIL::State> &dat
 }
 
 // does not treat string, keeps as it is (useful for names)
-static void connect_string(LGraph *g, const char *value, Index_ID onid, Port_ID opid) {
+static void connect_string(LGraph *g, std::string_view value, Index_ID onid, Port_ID opid) {
   if(const_map.find(value) != const_map.end()) {
     Node_Pin const_pin(const_map[value], 0, false);
     g->add_edge(const_pin, Node_Pin(onid, opid, true));
@@ -455,7 +458,7 @@ static void look_for_cell_outputs(RTLIL::Module *module) {
     LGraph *         sub_graph = nullptr;
     const Tech_cell *tcell     = nullptr;
 
-    std::string mod_name = &(cell->type.c_str()[1]);
+    std::string_view mod_name(&(cell->type.c_str()[1]));
 
     if(cell->type.c_str()[0] == '\\' || cell->type.str().substr(0, 8) == "$paramod")
       sub_graph = LGraph::open(g->get_path(), mod_name);
@@ -942,8 +945,7 @@ static LGraph *process_module(RTLIL::Module *module) {
       // external graph reference
       sub_graph = LGraph::open(g->get_path(), &cell->type.c_str()[1]);
       assert(sub_graph);
-      const char *mod_name = &cell->type.c_str()[1];
-      log("module name %s original was  %s\n", mod_name, cell->type.c_str());
+      log("module name original was %s\n", cell->type.c_str());
       op = SubGraph_Op;
 
       std::string inst_name = cell->name.str().substr(1);
@@ -951,7 +953,7 @@ static LGraph *process_module(RTLIL::Module *module) {
         g->set_node_instance_name(inid, inst_name.c_str());
 #ifndef NDEBUG
       else
-        fmt::print("yosys2lg got empty inst_name for cell type {}\n", mod_name);
+        fmt::print("yosys2lg got empty inst_name for cell type {}\n", cell->type.c_str());
 #endif
 
 
@@ -1038,13 +1040,13 @@ static LGraph *process_module(RTLIL::Module *module) {
       Port_ID dst_pid = 0;
       // Go over cells with multiple inputs that map to something different than A
       if(op == SubGraph_Op) {
-        const char *name = &conn.first.c_str()[1];
+        std::string_view name(&conn.first.c_str()[1]);
         assert(sub_graph);
         if(sub_graph->is_graph_output(name))
           continue;
         dst_pid = sub_graph->get_graph_input(name).get_pid();
       } else if(op == TechMap_Op) {
-        const char *name = &conn.first.c_str()[1];
+        std::string_view name(&conn.first.c_str()[1]);
         if(tcell->is_output(name))
           continue;
         dst_pid = tcell->get_inp_id(name);
