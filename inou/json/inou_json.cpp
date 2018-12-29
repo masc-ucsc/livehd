@@ -268,7 +268,7 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
           /*normal operations*/
           if(g->node_type_get(idx).op == TechMap_Op) {
             const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
-            writer.String(tcell->get_name().c_str());
+            writer.String(std::string(tcell->get_name()).c_str());
           } else {
             writer.String((g->node_type_get(idx).get_name().c_str()));
           }

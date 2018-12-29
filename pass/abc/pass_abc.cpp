@@ -400,8 +400,9 @@ void Pass_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology
   } else if(this_node_type == TechMap_Op) {
     if(opack.verbose)
       fmt::print("\t NodeID:{},bit [{}:{}] portid : {} \n", this_idx, 0, 0, input->get_out_pin().get_pid());
+
     const Tech_cell * tcell      = g->get_tlibrary().get_const_cell(g->tmap_id_get(this_idx));
-    const std::string tcell_name = tcell->get_name();
+    auto              tcell_name = tcell->get_name();
     if(tcell_name == "$_BUF_") {
       for(const auto &pre_inp : g->inp_edges(this_idx)) {
         recursive_find(g, &pre_inp, topo, bit_addr);
@@ -529,8 +530,8 @@ bool Pass_abc::setup_techmap(const LGraph *g) {
         for(const auto &out : g->out_edges(idx)) {
           switch(g->node_type_get(out.get_idx()).op) {
           case TechMap_Op: {
-            const Tech_cell *tcell     = g->get_tlibrary().get_const_cell(g->tmap_id_get(out.get_idx()));
-            std::string      cell_name = tcell->get_name();
+            const auto *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(out.get_idx()));
+            auto    cell_name = tcell->get_name();
             Pass::error("nodeID:{} type:Join_Op has output to idx:{} cell_name: {}; mismatch in data width!" , idx, out.get_idx(), cell_name);
             is_valid_input = false;
             break;

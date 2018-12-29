@@ -35,7 +35,7 @@ std::vector<LGraph *> Inou_def::generate() {
     // g->node_place_set(compo_nid, iter_compo->posx, iter_compo->posy);
     // cout<< "node_place of nid " << compo_nid << " is " << g->get_x(compo_nid) << " " << g->get_y(compo_nid) << endl;
     for(int cell_id = 0; cell_id < cell_types_size; cell_id++) { // decide component's cell_type
-      std::string cell_type_name = tlib.get_const_cell(cell_id)->get_name();
+      auto cell_type_name = tlib.get_const_cell(cell_id)->get_name();
       if(iter_compo->macro_name == cell_type_name)
         g->node_tmap_set(compo_nid, cell_id); // node nid's cell type is cell_id.
                                               // for debugging
@@ -51,7 +51,7 @@ std::vector<LGraph *> Inou_def::generate() {
   Node     cf_node = g->create_node(); // cf = chip_frame_node
   Index_ID cf_nid  = cf_node.get_nid();
   for(int cell_id = 0; cell_id < cell_types_size; cell_id++) { // decide chip_frame_node's cell_type
-    std::string cell_type_name = tlib.get_const_cell(cell_id)->get_name();
+    auto cell_type_name = tlib.get_const_cell(cell_id)->get_name();
     if(cell_type_name == "chip_frame")
       g->node_tmap_set(cf_nid, cell_id); // node nid's cell type is cell_id.
   }
