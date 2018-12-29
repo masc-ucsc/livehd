@@ -315,13 +315,13 @@ static bool is_black_box_output(const RTLIL::Module *module, const RTLIL::Cell *
   //if(wire2lpin.find(wire) != wire2lpin.end())
   //  return false;
 
-  std::string cell_port = cell->type.str() + "_:_" + port_name.str();
+  std::string cell_port = absl::StrCat(cell->type.str(), "_:_", port_name.str());
 
-  if (cell_port_outputs.count(cell_port)>0) {
+  if (cell_port_outputs.find(cell_port) != cell_port_outputs.end()) {
     //std::cout << "1.output " << cell_port << std::endl;
     return true;
   }
-  if (cell_port_inputs.count(cell_port)>0) {
+  if (cell_port_inputs.find(cell_port) != cell_port_inputs.end()) {
     //std::cout << "1.input " << cell_port << std::endl;
     return false;
   }
@@ -349,14 +349,14 @@ static bool is_black_box_input(const RTLIL::Module *module, const RTLIL::Cell *c
   if(wire->port_input)
     return true;
 
-  std::string cell_port = cell->type.str() + "_:_" + port_name.str();
+  std::string cell_port = absl::StrCat(cell->type.str(), "_:_", port_name.str());
 
   // Opposite of is_black_box_output
-  if (cell_port_outputs.count(cell_port)>0) {
+  if (cell_port_outputs.find(cell_port) != cell_port_outputs.end()) {
     //std::cout << "2.output " << cell_port << std::endl;
     return false;
   }
-  if (cell_port_inputs.count(cell_port)>0) {
+  if (cell_port_inputs.find(cell_port) != cell_port_inputs.end()) {
     //std::cout << "2.input " << cell_port << std::endl;
     return true;
   }
@@ -386,21 +386,21 @@ static Index_ID resolve_constant(LGraph *g, const std::vector<RTLIL::State> &dat
   for(auto &b : data) {
     switch(b) {
     case RTLIL::S0:
-      val = "0" + val;
+      val = absl::StrCat("0",val);
       break;
     case RTLIL::S1:
-      val = "1" + val;
+      val = absl::StrCat("1",val);
       value += 1 * current_bit;
       break;
     case RTLIL::Sz:
-      val       = "z" + val;
+      val       = absl::StrCat("z",val);
       u32_const = false;
       break;
     case RTLIL::Sa:
       assert(false);
       break; // FIXME add support to Sa when a case is found
     default:
-      val       = "x" + val;
+      val       = absl::StrCat("x",val);
       u32_const = false;
       break;
     }
@@ -431,10 +431,9 @@ static void connect_string(LGraph *g, std::string_view value, Index_ID onid, Por
   } else {
 
     Index_ID const_nid = g->create_node().get_nid();
-    g->node_const_type_set(const_nid, std::string(value)
+    g->node_const_type_set(const_nid, value
 #ifndef NDEBUG
-                                          ,
-                           false
+        , false
 #endif
     );
     Node_Pin const_pin(const_nid, 0, false);
@@ -1336,7 +1335,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
                 << "\n";
 #endif
 
-              std::string cell_port = cell->type.str() + "_:_" + conn.first.str();
+              std::string cell_port = absl::StrCat(cell->type.str(),"_:_",conn.first.str());
               if (is_input)
                 cell_port_inputs.insert(cell_port);
               if (is_output)
