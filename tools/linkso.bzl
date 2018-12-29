@@ -1,5 +1,7 @@
 load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain")
 
+#load("@bazel_skylib//lib:versions.bzl", "versions")
+
 def _impl(ctx):
   output = ctx.outputs.out
   src_libs    = [f for f in ctx.files.srcs if f.path.endswith('a')]
@@ -22,10 +24,16 @@ def _impl(ctx):
   #print("src_libs2:",src_libs2)
   #print("src_objs:",[f.dirname for f in src_libs])
 
-  cc_toolchain = find_cpp_toolchain(ctx)
+  #versions.check(minimum_bazel_version = "0.5.4")
 
-  ar_executable = cc_toolchain.ar_executable()
-  compiler_executable = cc_toolchain.compiler_executable()
+  if "ar_executable" not in dir(ctx.fragments.cpp):
+    cc_toolchain = find_cpp_toolchain(ctx)
+    ar_executable = cc_toolchain.ar_executable()
+    compiler_executable = cc_toolchain.compiler_executable()
+  else:
+    print("Using the older fragments interface (older bazel versions)")
+    ar_executable = ctx.fragments.cpp.ar_executable
+    compiler_executable = ctx.fragments.cpp.compiler_executable
 
   #print(compiler_executable)
   #print(ar_executable)
@@ -53,6 +61,7 @@ linkso = rule(
              default = Label("//tools:linkso_tool"),
             ),
            },
+    fragments = ["cpp"], # only for bazel versions under 0.19.1
     outputs={"out": "%{name}.so"},
 )
 

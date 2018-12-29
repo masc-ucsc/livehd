@@ -3,6 +3,12 @@
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
+#git_repository(
+    #name = "bazel_skylib",
+    #remote = "https://github.com/bazelbuild/bazel-skylib.git",
+    #tag = "0.6.0",  # change this to use a different release
+#)
+
 new_git_repository(
     name = "Open_timer",
     build_file = "BUILD.Open_timer", # relative to external path
