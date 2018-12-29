@@ -3,6 +3,16 @@ golden=$1
 mapped=$2
 script="cec $mapped $golden"
 abc_binary="yosys-abc"
+if [ ! -f "${abc_binary}" ]; then
+  if [ -x "/usr/bin/yosys-abc" ]; then
+    abc_binary=/usr/bin/yosys-abc
+  elif [ -x "/usr/local/bin/yosys-abc" ]; then
+    abc_binary=/usr/local/bin/yosys-abc
+  else
+    echo "abc_check: unable to fix yosys-abc path"
+    exit 5
+  fi
+fi
 ${abc_binary} -c "${script}" | grep "Networks are equivalent."
 if [ $? -eq 0 ]; then
    echo "Successfully matched generated verilog with yosys elaborated verilog file"

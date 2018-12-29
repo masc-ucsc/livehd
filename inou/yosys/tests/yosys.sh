@@ -36,7 +36,6 @@ while true ; do
     esac
 done
 
-
 rm -rf ./lgdb/ ./logs ./yosys-test ./*.v ./*.json
 mkdir yosys-test/
 

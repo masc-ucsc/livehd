@@ -1095,9 +1095,11 @@ static LGraph *process_module(RTLIL::Module *module) {
             dst_pid += 2;
         } else if(op == Memory_Op) {
           if(conn.first.str() == "\\WR_CLK") {
+#ifndef NDEBUG
             for(auto &clk_chunk : conn.second.chunks()) {
               assert(clk_chunk.wire == clock);
             }
+#endif
             dst_pid = LGRAPH_MEMOP_CLK;
             ss      = RTLIL::SigSpec(clock);
           } else if(conn.first.str() == "\\WR_ADDR") {
@@ -1122,9 +1124,11 @@ static LGraph *process_module(RTLIL::Module *module) {
             }
             continue;
           } else if(std::strncmp(conn.first.c_str(), "\\RD_CLK", 7) == 0) {
+#ifndef NDEBUG
             for(auto &clk_chunk : conn.second.chunks()) {
               assert(clk_chunk.wire == clock || !clk_chunk.wire);
             }
+#endif
             continue;
           } else if(std::strncmp(conn.first.c_str(), "\\RD_ADDR", 8) == 0) {
             for(uint32_t rdport = 0; rdport < rdports; rdport++) {

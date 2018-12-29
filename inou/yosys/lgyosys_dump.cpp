@@ -158,9 +158,10 @@ void Lgyosys_dump::create_memory(const LGraph *g, RTLIL::Module *module, Index_I
 
   RTLIL::Cell *memory = module->addCell("\\" + cell_name, RTLIL::IdString("$mem"));
 
-  RTLIL::Wire *  clk = nullptr;
+  RTLIL::Wire   *clk = nullptr;
   RTLIL::SigSpec wr_addr, wr_data, wr_en, rd_addr, rd_en, rd_data;
-  RTLIL::State   posedge, transp;
+  RTLIL::State   posedge = RTLIL::State::Sx;
+  RTLIL::State   transp  = RTLIL::State::Sx;
 
   for(const auto &c : g->inp_edges(idx)) {
     Port_ID input_pin = c.get_inp_pin().get_pid();
@@ -231,6 +232,9 @@ void Lgyosys_dump::create_memory(const LGraph *g, RTLIL::Module *module, Index_I
       assert(false);
     }
   }
+
+  assert(posedge != RTLIL::State::Sx);
+  assert(transp  != RTLIL::State::Sx);
 
   memory->setParam("\\MEMID", RTLIL::Const(cell_name));
   memory->setParam("\\WIDTH", g->get_bits(idx));
