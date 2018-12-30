@@ -15,7 +15,7 @@ fi
 
 if [ "$1" == "long" ] ; then
   #declare -a benchmarks=("dlx" "alpha" "fpu" "mor1kx" "or1200")
-  declare -a benchmarks=("dlx" "alpha" "fpu" "or1200")
+  declare -a benchmarks=("dlx" "alpha" "or1200")
 else
   declare -a benchmarks=("dlx")
 fi

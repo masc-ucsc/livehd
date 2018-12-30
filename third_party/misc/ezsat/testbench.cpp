@@ -139,8 +139,8 @@ void test_xorshift32() {
   test_xorshift32_try(sat, rng());
   test_xorshift32_try(sat, rng());
 
-  sat.printDIMACS(stdout, true);
-  printf("\n");
+  //sat.printDIMACS(stdout, true);
+  //printf("\n");
 }
 
 // ------------------------------------------------------------------------------------------------------------
