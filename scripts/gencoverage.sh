@@ -42,5 +42,5 @@ bazel coverage -k //...
 ./bazel-bin/inou/liveparse/chunkify_verilog_test
 ./inou/liveparse/tests/chunkify_test.sh
 
-./cops/live/tests/invariant.sh long
+./cops/live/tests/invariant.sh
 
