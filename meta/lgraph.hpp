@@ -21,7 +21,15 @@ class LGraph :  public LGraph_Node_Delay
               , public LGraph_WireNames
               , public LGraph_Node_Place
                {
+public:
+  using Hierarchy = absl::flat_hash_map<std::string, Lg_type_id>;
 protected:
+  using Hierarchy_cache = absl::flat_hash_map<Lg_type_id, Lg_type_id>;
+
+  Hierarchy       hierarchy;
+  Hierarchy_cache hierarchy_cache; // Tracks used version to avoid recompute get_hierarchy
+
+  void add_hierarchy_entry(std::string_view base, Lg_type_id lgid);
 
   Index_ID create_node_int() final;
 
@@ -117,6 +125,7 @@ public:
       each_output_edge_fast(std::bind(func, first, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
     }
 
+  const Hierarchy &get_hierarchy();
 };
 
 // Clean interface/iterator for most operations. It must call graph
@@ -191,6 +200,7 @@ public:
 
   const Edge_iterator inp_edges() const override;
   const Edge_iterator out_edges() const override;
+
 };
 
 #endif

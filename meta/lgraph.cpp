@@ -36,7 +36,7 @@ LGraph::~LGraph() {
 }
 
 bool LGraph::exists(std::string_view path, std::string_view name) {
-  return Graph_library::try_find_lgraph(path,name);
+  return Graph_library::try_find_lgraph(path,name) != nullptr;
 }
 
 LGraph *LGraph::create(std::string_view path, std::string_view name, std::string_view source) {
@@ -289,3 +289,61 @@ void LGraph::dump() const {
   }
 #endif
 }
+
+void LGraph::add_hierarchy_entry(std::string_view base, Lg_type_id lgid) {
+  hierarchy[base] = lgid;
+  if (hierarchy_cache.find(lgid) == hierarchy_cache.end())
+    hierarchy_cache[lgid] = library->get_version(lgid);
+}
+
+const LGraph::Hierarchy &LGraph::get_hierarchy() {
+
+  if (!hierarchy.empty()) {
+    bool all_ok = true;
+    for(auto &[lgid,version]:hierarchy_cache) {
+      if (library->get_version(lgid) == version)
+        continue;
+      all_ok = false;
+      break;
+    }
+    if (all_ok)
+      return hierarchy;
+  }
+  hierarchy.clear();
+  hierarchy_cache.clear();
+
+  struct Entry {
+    std::string base;
+    LGraph *top;
+    LGraph *lg;
+    Entry(std::string _base, LGraph *_top, LGraph *_lg) :base(_base), top(_top) ,lg(_lg) {}
+  };
+  std::vector<Entry> pending;
+
+  pending.emplace_back(get_name(), this, this);
+
+  while(!pending.empty()) {
+    auto entry = pending.back();
+    pending.pop_back();
+
+    entry.top->add_hierarchy_entry(entry.base, entry.lg->lg_id());
+
+    entry.lg->each_sub_graph_fast([&entry, &pending](const Index_ID idx, const Lg_type_id lgid, std::string_view iname) {
+      if (iname.empty())
+        return;
+      LGraph *lg = LGraph::open(entry.top->get_path(), lgid);
+
+      if(lg==0) {
+        Pass::error("hierarchy for {} could not open instance {} with lgid {}", entry.base, iname, lgid);
+      }else{
+        std::string base2 = absl::StrCat(entry.base, ":", iname);
+        pending.emplace_back(base2, entry.top, lg);
+      }
+    });
+
+    entry.lg->close();
+  }
+
+  return hierarchy;
+}
+

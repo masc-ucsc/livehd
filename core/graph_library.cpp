@@ -62,7 +62,6 @@ LGraph *Graph_library::try_find_lgraph(std::string_view name) {
     LGraph *lg = global_name2lgraph[path][name];
     assert(global_instances.find(path) != global_instances.end());
     assert(get_id(name)!=0);
-    register_lgraph(name, attribute[get_id(name)].source, lg);
 
     return lg;
   }
@@ -89,6 +88,7 @@ Lg_type_id Graph_library::add_name(std::string_view name, std::string_view sourc
   graph_library_clean   = false;
 
   assert(name2id.find(name) == name2id.end());
+  assert(id);
   name2id[name] = id;
 
   return id;
@@ -317,8 +317,10 @@ bool Graph_library::expunge_lgraph(std::string_view name, const LGraph *lg) {
     return true;
   }
   global_name2lgraph[path].erase(global_name2lgraph[path].find(name));
-  Lg_type_id id   = name2id[name];
-  name2id[name] = 0;
+  auto it = name2id.find(name);
+  assert(it!=name2id.end());
+  Lg_type_id id   = it->second;
+  name2id.erase(it);
 
   if(attribute[id].nopen == 0) {
     attribute[id].clear();

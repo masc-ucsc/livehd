@@ -161,6 +161,7 @@ public:
 
   static void sync_all(); // Called when running out of mmaps
 
+  // FIXME: SFINAE
   void each_type(std::function<void(Lg_type_id, std::string_view)> fn) const;
   void each_type(std::function<bool(Lg_type_id, std::string_view)> fn) const;
   void each_type(std::string_view match, std::function<void(Lg_type_id, std::string_view)> fn) const;
