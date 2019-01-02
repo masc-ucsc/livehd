@@ -6,8 +6,8 @@
 
 #include <cassert>
 #include <map>
-#include <unordered_map>
 #include <vector>
+#include "absl/container/flat_hash_map.h"
 
 class Tech_cell {
 public:
@@ -45,13 +45,13 @@ private:
 
   std::vector<Pin> pins;
 
-  std::unordered_map<std::string, pin_type> pname2id;
+  absl::flat_hash_map<std::string, pin_type> pname2id;
 
   // FIXME: technically, this should be a full table for each pair?
   std::map<ppair, float> delay; // maps an (ipin x opin) to delay
 
 public:
-  explicit Tech_cell(const std::string &name, uint16_t id)
+  explicit Tech_cell(std::string_view name, uint16_t id)
       : cell_name(name)
       , id(id)
       , height(0)
@@ -61,7 +61,8 @@ public:
   uint16_t get_id() const {
     return id;
   }
-  const std::string get_name() const {
+
+  std::string_view get_name() const {
     return cell_name;
   }
 
@@ -74,14 +75,14 @@ public:
     width  = _width;
   }
 
-  const std::string get_function() const {
+  std::string_view get_function() const {
     return function;
   }
-  void set_function(const std::string &_function) {
+  void set_function(std::string _function) {
     function = _function;
   }
 
-  pin_type add_pin(const std::string &name, Direction dir) {
+  pin_type add_pin(std::string_view name, Direction dir) {
     pin_type id = pins.size();
     Pin      aPin;
     aPin.name  = name;
@@ -89,7 +90,7 @@ public:
     aPin.use   = "";
     aPin.io_id = 0;
     pins.push_back(aPin);
-    pname2id.insert(std::make_pair(name, id));
+    pname2id[name] = id;
 
     if(dir == input) {
       assert(std::find(inputs.begin(), inputs.end(), id) == inputs.end());
@@ -107,7 +108,7 @@ public:
     return id;
   }
 
-  bool include_pin(const std::string &name) const {
+  bool include_pin(std::string_view name) const {
     return pname2id.find(name) != pname2id.end();
   }
 
@@ -125,26 +126,26 @@ public:
     return outputs.size();
   }
 
-  const pin_type get_pin_id(const std::string &name) const {
+  const pin_type get_pin_id(std::string_view name) const {
     assert(pname2id.find(name) != pname2id.end());
     return pname2id.at(name);
   }
 
-  bool pin_name_exist(const std::string &name) const {
+  bool pin_name_exist(std::string_view name) const {
     if(pname2id.find(name) != pname2id.end())
       return true;
     else
       return false;
   }
 
-  const pin_type get_out_id(const std::string &name) const {
+  const pin_type get_out_id(std::string_view name) const {
     assert(pname2id.find(name) != pname2id.end());
     pin_type pin_id = pname2id.at(name);
     assert(pins[pin_id].dir == Direction::output);
     return pins[pin_id].io_id;
   }
 
-  const pin_type get_inp_id(const std::string &name) const {
+  const pin_type get_inp_id(std::string_view name) const {
     assert(pname2id.find(name) != pname2id.end());
     pin_type pin_id = pname2id.at(name);
     assert(pins[pin_id].dir == Direction::input);
@@ -155,17 +156,17 @@ public:
     return pins.size();
   };
 
-  const std::string &get_name(pin_type id) const {
+  std::string_view get_name(pin_type id) const {
     assert(pins.size() > id);
     return pins[id].name;
   }
 
-  const std::string &get_input_name(pin_type id) const {
+  std::string_view get_input_name(pin_type id) const {
     assert(inputs.size() > id);
     return pins[inputs[id]].name;
   }
 
-  const std::string &get_output_name(pin_type id) const {
+  std::string_view get_output_name(pin_type id) const {
     assert(outputs.size() > id);
     return pins[outputs[id]].name;
   }
@@ -179,14 +180,14 @@ public:
     return inputs;
   }
 
-  bool is_input(const std::string &name) const {
+  bool is_input(std::string_view name) const {
     assert(pname2id.find(name) != pname2id.end());
 
     pin_type inpid = pname2id.at(name);
     return (pins.at(inpid).dir == Direction::input);
   }
 
-  bool is_output(const std::string &name) const {
+  bool is_output(std::string_view name) const {
     assert(pname2id.find(name) != pname2id.end());
 
     pin_type outid = pname2id.at(name);
@@ -271,9 +272,9 @@ private:
   std::vector<Tech_layer> layers; // only for routing
   std::vector<Tech_via>   vias;   // only for routing
 
-  std::unordered_map<std::string, uint16_t> cname2id;
+  absl::flat_hash_map<std::string, uint16_t> cname2id;
 
-  explicit Tech_library(const std::string &_path)
+  explicit Tech_library(std::string_view _path)
       : lgdb(_path)
       , lib_file("tech_library") {
 
@@ -284,7 +285,7 @@ private:
     try_load_json();
   }
 
-  static std::unordered_map<std::string, Tech_library *> instances;
+  static absl::flat_hash_map<std::string, Tech_library *> instances;
 
   void to_yaml() const;
   void to_json() const;
@@ -306,17 +307,17 @@ public:
     cell_types.clear();
   }
 
-  bool include(const std::string &name) const;
+  bool include(std::string_view name) const;
 
-  uint16_t create_cell_id(const std::string &name);
+  uint16_t create_cell_id(std::string_view name);
 
-  uint16_t get_cell_id(const std::string &name) const;
+  uint16_t get_cell_id(std::string_view name) const;
 
   Tech_cell *get_cell(uint16_t cell_id);
 
   const Tech_cell *get_const_cell(uint16_t cell_id) const;
 
-  const std::string get_cell_name(uint16_t cell_id) const {
+  std::string_view get_cell_name(uint16_t cell_id) const {
     return get_const_cell(cell_id)->get_name();
   }
 

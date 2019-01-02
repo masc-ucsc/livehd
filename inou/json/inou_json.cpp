@@ -154,7 +154,7 @@ void Inou_json::from_json(LGraph *g, rapidjson::Document &document) {
 }
 
 void Inou_json::fromlg(Eprp_var &var) {
-  const std::string odir = var.get("odir");
+  auto odir = var.get("odir");
 
   Inou_json p;
 
@@ -163,14 +163,16 @@ void Inou_json::fromlg(Eprp_var &var) {
     return;
 
   for(const auto &g : var.lgs) {
-    const std::string file = odir + "/" + g->get_name() + ".json";
+    std::string file(odir);
+    file += "/" + g->get_name() + ".json";
+
     p.to_json(g, file);
   }
 }
 
 void Inou_json::tolg(Eprp_var &var) {
 
-  const std::string files = var.get("files");
+  auto files = var.get("files");
   if(files.empty()) {
     error(fmt::format("inou.json.tolg: no files provided"));
     return;
@@ -178,8 +180,8 @@ void Inou_json::tolg(Eprp_var &var) {
 
   Inou_json p;
 
-  const std::string path = var.get("path");
-  bool              ok   = p.setup_directory(path);
+  auto path = var.get("path");
+  bool  ok  = p.setup_directory(path);
   if(!ok)
     return;
 
@@ -257,13 +259,16 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
         if(g->node_type_get(idx).op == U32Const_Op) {
           writer.Uint64(g->node_value_get(idx));
         } else if(g->node_type_get(idx).op == StrConst_Op) {
-          const std::string tmp = (std::string("'") + g->node_const_value_get(idx) + "'");
+          std::string tmp;
+          tmp.append("'");
+          tmp.append(g->node_const_value_get(idx));
+          tmp.append("'");
           writer.String(tmp.c_str());
         } else {
           /*normal operations*/
           if(g->node_type_get(idx).op == TechMap_Op) {
             const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
-            writer.String(tcell->get_name().c_str());
+            writer.String(std::string(tcell->get_name()).c_str());
           } else {
             writer.String((g->node_type_get(idx).get_name().c_str()));
           }
@@ -276,23 +281,25 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
         writer.Uint64(node_width);
       }
 
-      if(g->get_node_instancename(idx) != nullptr) {
+      auto ni_name = g->get_node_instancename(idx);
+      if(!ni_name.empty()) {
         writer.Key("instance_name");
-        writer.String(g->get_node_instancename(idx));
+        writer.String(std::string(ni_name).c_str()); // rapidjson does not support string_view
       }
 
-      if(g->get_node_wirename(idx) != nullptr) {
+      auto wi_name = g->get_node_wirename(idx);
+      if(!wi_name.empty()) {
         writer.Key("node_wirename");
-        writer.String(g->get_node_wirename(idx));
+        writer.String(std::string(wi_name).c_str());
       }
 
       if(g->is_graph_input(idx)) {
         writer.Key("input_name");
-        writer.String(g->get_graph_input_name(idx));
+        writer.String(std::string(g->get_graph_input_name(idx)).c_str());
       }
       if(g->is_graph_output(idx)) {
         writer.Key("output_name");
-        writer.String(g->get_graph_output_name(idx));
+        writer.String(std::string(g->get_graph_output_name(idx)).c_str());
       }
 
       writer.Key("outputs");

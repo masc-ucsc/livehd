@@ -28,9 +28,9 @@ Inou_liveparse::Inou_liveparse()
 }
 
 void Inou_liveparse::tolg(Eprp_var &var) {
-  const std::string files     = var.get("files");
-  const std::string path      = var.get("path");
-  const std::string elab_path = var.get("elab_path");
+  auto files     = var.get("files");
+  auto path      = var.get("path");
+  auto elab_path = var.get("elab_path");
 
   if(files.empty()) {
     error(fmt::format("inou.liveparse: no files provided"));

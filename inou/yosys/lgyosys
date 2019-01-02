@@ -90,6 +90,18 @@ done
 OPT_FILES=$*
 
 if [ ! -f "${OPT_YOSYS}" ]; then
+  if [ -x "/usr/bin/yosys" ]; then
+    OPT_YOSYS=/usr/bin/yosys
+  elif [ -x "/usr/local/bin/yosys" ]; then
+    OPT_YOSYS=/usr/local/bin/yosys
+  else
+    echo "lgyosys: unable to fix OPT_YOSYS path"
+    exit 5
+  fi
+fi
+
+echo "yosys:" $OPT_YOSYS
+if [ ! -f "${OPT_YOSYS}" ]; then
   echo $PWD
   echo "Could not find yosys binary in ${OPT_YOSYS}"
   exit 3

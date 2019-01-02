@@ -2,10 +2,11 @@
 //
 // Created by birdeclipse on 1/30/18.
 //
-#ifndef LGRAPH_PASS_ABC_HPP
-#define LGRAPH_PASS_ABC_HPP
+#pragma once
 
 #include <string>
+
+#include "absl/container/flat_hash_map.h"
 
 #include "lgedgeiter.hpp"
 #include "lgraphbase.hpp"
@@ -36,9 +37,11 @@ protected:
   };
   Pass_abc_options opack;
 
-  const std::string mapping_command;
-  const std::string readlib_command;
-  const std::string synthesis_command;
+  static Abc_Frame_t *pAbc;
+
+  const std::string cmd_mapping;
+  const std::string cmd_readlib;
+  const std::string cmd_synthesis;
 
   static void tmap(Eprp_var &var);
   static void optimize(Eprp_var &var);
@@ -81,7 +84,7 @@ public:
     int      offset[2];
 
     inline bool operator==(const index_offset &rhs) const {
-      return ((idx == rhs.idx) && pid == rhs.pid && offset[0] && rhs.offset[0]);
+      return ((idx == rhs.idx) && (pid == rhs.pid) && (offset[0] == rhs.offset[0]));
     }
 
     inline bool operator<(const index_offset &rhs) const {
@@ -133,24 +136,25 @@ public:
   struct graph_topology {
 
     using topology_info = std::vector<index_offset>;
-    using name2id       = std::unordered_map<std::string, uint64_t>;
+    using name2id       = absl::flat_hash_map<std::string, uint64_t>;
+    using cell_group    = absl::flat_hash_map<uint64_t, Abc_comb, IndexID_Hash>;
+    using latch_group   = absl::flat_hash_map<uint64_t, Abc_latch, IndexID_Hash>;
+    using skew_group    = absl::flat_hash_map<std::string, std::set<uint64_t>>;
+    using reset_group   = absl::flat_hash_map<std::string, std::set<uint64_t>>;
+    using node_conn     = absl::flat_hash_map<uint64_t, topology_info, IndexID_Hash>;
+    using block_conn    = absl::flat_hash_map<uint64_t, absl::flat_hash_map<Port_ID, topology_info>, IndexID_Hash>;
+    using idremap       = absl::flat_hash_map<uint64_t, uint64_t>;
+    using pidremap      = absl::flat_hash_map<uint64_t, absl::flat_hash_map<Port_ID, uint64_t>>;
+    using ptr2id        = absl::flat_hash_map<Abc_Obj_t *, uint64_t>;
+    using id2pid        = absl::flat_hash_map<uint64_t, Port_ID, IndexID_Hash>;
+    using value_size    = std::pair<uint32_t, uint32_t>;
+    using value2idx     = absl::flat_hash_map<value_size, uint64_t>;
+    using record        = absl::flat_hash_map<std::string, Abc_Obj_t *>;
+
+    using picks2pin     = std::map<Pick_ID, Node_Pin>;
     using po_group      = std::map<index_offset, Abc_primary_output>;
     using pi_group      = std::map<index_offset, Abc_primary_input>;
-    using cell_group    = std::unordered_map<uint64_t, Abc_comb, IndexID_Hash>;
-    using latch_group   = std::unordered_map<uint64_t, Abc_latch, IndexID_Hash>;
-    using skew_group    = std::map<std::string, std::set<uint64_t>>;
-    using reset_group   = std::map<std::string, std::set<uint64_t>>;
-    using node_conn     = std::unordered_map<uint64_t, topology_info, IndexID_Hash>;
-    using block_conn    = std::unordered_map<uint64_t, std::unordered_map<Port_ID, topology_info>, IndexID_Hash>;
     using pseduo_name   = std::map<index_offset, std::string>;
-    using idremap       = std::unordered_map<uint64_t, uint64_t>;
-    using pidremap      = std::unordered_map<uint64_t, std::unordered_map<Port_ID, uint64_t>>;
-    using ptr2id        = std::unordered_map<Abc_Obj_t *, uint64_t>;
-    using id2pid        = std::unordered_map<uint64_t, Port_ID, IndexID_Hash>;
-    using value_size    = std::pair<uint32_t, uint32_t>;
-    using value2idx     = std::map<value_size, uint64_t>;
-    using picks2pin     = std::map<Pick_ID, Node_Pin>;
-    using record        = std::unordered_map<std::string, Abc_Obj_t *>;
 
     std::vector<uint64_t> combinational_id;
     std::vector<uint64_t> latch_id;
@@ -201,16 +205,17 @@ public:
 private:
   graph_topology *graph_info;
 
-  bool is_techmap(const LGraph *g);
+  bool setup_techmap(const LGraph *g);
 
-  bool is_latch(const Tech_cell *tcell) {
-    std::string cell_name = tcell->get_name();
-    std::string flop      = "FF";
-    std::string latch     = "LATCH";
+  bool is_latch(const Tech_cell *tcell) const {
+    std::string_view cell_name = tcell->get_name();
+    std::string_view flop      = "FF";
+    std::string_view latch     = "LATCH";
     if(cell_name.find(flop) != std::string::npos) {
       return true;
-    } else
-      return cell_name.find(latch) != std::string::npos;
+    }
+
+    return cell_name.find(latch) != std::string::npos;
   }
 
   void clear() {
@@ -219,18 +224,13 @@ private:
   }
 
   void find_cell_conn(const LGraph *g);
-
   void find_latch_conn(const LGraph *g);
-
   void find_combinational_conn(const LGraph *g);
-
   void find_graphio_output_conn(const LGraph *g);
-
   void find_subgraph_conn(const LGraph *g);
-
   void find_memory_conn(const LGraph *g);
 
-  void recursive_find(const LGraph *g, const Edge *input, graph_topology::topology_info &pid, int *bit_addr);
+  void recursive_find(const LGraph *g, const Edge *input, graph_topology::topology_info &pid, int bit_addr[2]);
 
   Abc_Obj_t *gen_const_from_lgraph(const LGraph *g, index_offset key, Abc_Ntk_t *pAig);
 
@@ -297,4 +297,3 @@ private:
   void gen_generic_lib(const std::string &buffer) const;
 };
 
-#endif

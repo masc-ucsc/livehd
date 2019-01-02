@@ -2,6 +2,10 @@
 #ifndef DUMP_YOSYS_H_
 #define DUMP_YOSYS_H_
 
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
+#include "absl/strings/str_cat.h"
+
 #include "pass.hpp"
 #include "inou.hpp"
 #include "lgraph.hpp"
@@ -19,10 +23,10 @@ private:
 
   void to_yosys(const LGraph *g);
 
-  std::map<Index_ID, RTLIL::Wire *>                     input_map;
-  std::map<Index_ID, RTLIL::Wire *>                     output_map;
-  std::map<std::pair<Index_ID, Port_ID>, RTLIL::Wire *> cell_output_map;
-  std::map<Index_ID, std::vector<RTLIL::SigChunk>>      mem_output_map;
+  absl::flat_hash_map<Index_ID, RTLIL::Wire *>                     input_map;
+  absl::flat_hash_map<Index_ID, RTLIL::Wire *>                     output_map;
+  absl::flat_hash_map<std::pair<Index_ID, Port_ID>, RTLIL::Wire *> cell_output_map;
+  absl::flat_hash_map<Index_ID, std::vector<RTLIL::SigChunk>>      mem_output_map;
 
   std::set<const LGraph *> _subgraphs;
 
@@ -31,12 +35,20 @@ private:
 
   bool hierarchy;
 
-  RTLIL::IdString next_id() {
-    return RTLIL::IdString("\\lgraph_id_" + std::to_string(ids++));
+  RTLIL::IdString next_id(const LGraph *g) {
+    std::string tmp;
+    do {
+      tmp = absl::StrCat("\\lg_", std::to_string(ids++));
+    } while(g->has_wirename(tmp));
+    return RTLIL::IdString(tmp);
   }
 
-  std::string next_wire() {
-    return ("lgraph_spare_wire_" + std::to_string(spare_wire++));
+  std::string next_wire(const LGraph *g) {
+    std::string tmp;
+    do {
+      tmp = absl::StrCat("lg_sw_", std::to_string(spare_wire++));
+    } while(g->has_wirename(tmp));
+    return tmp;
   }
 
   // FIXME: any way of merging these two?
@@ -79,6 +91,8 @@ public:
 
   std::vector<LGraph *> tolg() final {
     assert(false);
+    std::vector<LGraph *> empty;
+    return empty; // to avoid warning
   };
 
   /*

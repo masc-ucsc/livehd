@@ -92,12 +92,8 @@ LGraph_Node_Type::LGraph_Node_Type(const std::string &path, const std::string &n
     , node_type_table(path + "/lgraph_" + name + "_type") {
 }
 
-Const_ID LGraph_Node_Type::get_constant_id(const char *constant) {
-  return consts.create_id(constant);
-}
-
-const char *LGraph_Node_Type::get_constant(Const_ID const_id) const {
-  return consts.get_char(const_id);
+std::string_view LGraph_Node_Type::get_constant(Const_ID const_id) const {
+  return consts.get_name(const_id);
 }
 
 void LGraph_Node_Type::emplace_back() {
@@ -216,11 +212,8 @@ uint32_t LGraph_Node_Type::node_value_get(Index_ID nid) const {
   return (uint32_t)(node_type_table[node_internal[nid].get_nid()] - U32ConstMin_Op);
 }
 
-void LGraph_Node_Type::node_const_type_set(Index_ID nid, const std::string &value
-#ifndef NDEBUG
-                                           ,
-                                           bool enforce_bits
-#endif
+void LGraph_Node_Type::node_const_type_set(Index_ID nid, std::string_view value
+                                           ,bool enforce_bits
 ) {
 
 #ifndef NDEBUG
@@ -236,7 +229,7 @@ void LGraph_Node_Type::node_const_type_set(Index_ID nid, const std::string &valu
 
   assert(node_internal[nid].get_nid() < node_type_table.size());
 
-  uint32_t char_id = get_constant_id(value.c_str());
+  uint32_t char_id = consts.create_id(value);
   assert(char_id < (uint32_t)(StrConstMax_Op - StrConstMin_Op));
 
   // when a node is set as const, adds it to the const nodes list
@@ -247,7 +240,7 @@ void LGraph_Node_Type::node_const_type_set(Index_ID nid, const std::string &valu
   node_type_table[node_internal[nid].get_nid()] = (Node_Type_Op)(StrConstMin_Op + char_id);
 }
 
-const char *LGraph_Node_Type::node_const_value_get(Index_ID nid) const {
+std::string_view LGraph_Node_Type::node_const_value_get(Index_ID nid) const {
   assert(nid < node_type_table.size());
   assert(node_internal[nid].is_node_state());
 

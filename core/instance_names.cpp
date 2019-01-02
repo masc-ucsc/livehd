@@ -3,22 +3,22 @@
 
 LGraph_InstanceNames::LGraph_InstanceNames(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept
     : Lgraph_base_core(path, name, lgid)
-    , names(path + "/lgraph_" +  name + "_inst_names")
+    , inames(path + "/lgraph_" +  name + "_inst_names")
     , instances(path + "/lgraph_" + name + "_inst") {
 }
 
 void LGraph_InstanceNames::clear() {
-  names.clear();
+  inames.clear();
   instances.clear();
 }
 
 void LGraph_InstanceNames::reload(size_t sz) {
-  // Lazy names.reload();
+  // Lazy inames.reload();
   instances.reload(sz);
 }
 
 void LGraph_InstanceNames::sync() {
-  names.sync();
+  inames.sync();
   instances.sync();
 }
 
@@ -26,8 +26,8 @@ void LGraph_InstanceNames::emplace_back() {
   instances.emplace_back();
 }
 
-const char *LGraph_InstanceNames::get_instancename(Char_Array_ID cid) const {
-  return names.get_char(cid);
+std::string_view LGraph_InstanceNames::get_instancename(Char_Array_ID cid) const {
+  return inames.get_name(cid);
 }
 
 Char_Array_ID LGraph_InstanceNames::get_instance_name_id(Index_ID nid) const {
@@ -48,10 +48,10 @@ void LGraph_InstanceNames::set_node_instance(Index_ID nid, Char_Array_ID wid) {
   instances[nid] = wid;
 }
 
-bool LGraph_InstanceNames::has_instance_name(const char *name) const {
-  return names.include(name);
+bool LGraph_InstanceNames::has_instance_name(std::string_view name) const {
+  return inames.include(name);
 }
 
-Index_ID LGraph_InstanceNames::get_node_from_instance_name(const char *name) const {
-  return names.get_field(names.get_id(name));
+Index_ID LGraph_InstanceNames::get_node_from_instance_name(std::string_view name) const {
+  return inames.get_field(inames.get_id(name));
 }

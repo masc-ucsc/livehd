@@ -19,14 +19,13 @@ to use Bazel in the LGraph project.
 ## Release vs fastbuild (default) vs debug
 
     # Debug
-    bazel build --compilation_mode=dbg //inou/json:inou_json
     bazel build -c dbg //inou/json:inou_json
 
     # Release
-    bazel build --compilation_mode=opt //inou/json:inou_json
+    bazel build -c opt //inou/json:inou_json
 
     # Fast Build with assertions
-    bazel build                        //inou/json:inou_json
+    bazel build       //inou/json:inou_json
 
 ## See the command line executed
 
@@ -43,7 +42,7 @@ and to generate coverage reports.
 To debug errors in the testing environment, you may want to keep the sandbox
 files to check what may be going wrong. Use:
 
-    bazel test //... --sandbox_debug --keep_state_after_build
+    bazel test //... --sandbox_debug --verbose_failures --keep_state_after_build
 
 ## To run LONG tests
 

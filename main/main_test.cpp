@@ -110,7 +110,8 @@ TEST_F(MainTest, Comments) {
   drain_stdin();
   std::string cmd = "// COMMENT#\n"; // # is a marker for the stupid espace lines
 
-  write(master,cmd.c_str(),cmd.size());
+  auto sz = write(master,cmd.c_str(),cmd.size());
+  EXPECT_EQ(sz,cmd.size());
 
   std::string l0 = read_line(); // > // COMMENT
   std::string l1 = read_line(); // // COMMENT
@@ -126,7 +127,8 @@ TEST_F(MainTest, MultiComments) {
   std::string subcmd = "/*asdasd */ fil\t path:. /*zzz*/ match:\"xxx$\" |> dump // more #";
   std::string cmd = subcmd + "\n";
 
-  write(master,cmd.c_str(),cmd.size());
+  auto sz = write(master,cmd.c_str(),cmd.size());
+  EXPECT_EQ(sz,cmd.size());
 
   std::string l0 = read_line(); // typed line
   std::string l1 = read_line(); // cut&paste command echo
@@ -140,8 +142,8 @@ TEST_F(MainTest, MultiComments) {
   EXPECT_THAT(l0, HasSubstr("dump")); // It has escape characters, just match a word
   EXPECT_THAT(l1, HasSubstr("dump"));
   EXPECT_THAT(l4, HasSubstr("lgraph.dump labels:"));
-  EXPECT_THAT(l5, HasSubstr("files:"));
-  EXPECT_THAT(l6, HasSubstr("match:xxx$"));
+  EXPECT_THAT(l5, AnyOf(HasSubstr("match:xxx$"), HasSubstr("files:")));
+  EXPECT_THAT(l6, AnyOf(HasSubstr("match:xxx$"), HasSubstr("files:")));
   EXPECT_THAT(l7, HasSubstr("lgraph.dump lgraphs:"));
 }
 
@@ -150,7 +152,8 @@ TEST_F(MainTest, Autocomplete) {
   drain_stdin();
   std::string cmd = "fil\t#\n"; // # is a marker for the stupid espace lines
 
-  write(master,cmd.c_str(),cmd.size());
+  auto sz = write(master,cmd.c_str(),cmd.size());
+  EXPECT_EQ(sz,cmd.size());
 
   std::string l0 = read_line();
   std::string l1 = read_line();
@@ -182,7 +185,8 @@ TEST_F(MainTest, Help) {
   drain_stdin();
   std::string cmd = "he\t#\n"; // # is a marker for the stupid espace lines
 
-  write(master,cmd.c_str(),cmd.size());
+  auto sz = write(master,cmd.c_str(),cmd.size());
+  EXPECT_EQ(sz,cmd.size());
 
   std::string l0 = read_line();
   std::string l1 = read_line();
@@ -196,7 +200,8 @@ TEST_F(MainTest, HelpPass) {
   drain_stdin();
   std::string cmd = "help inou.graphviz #\n "; // # is a marker for the stupid espace lines
 
-  write(master,cmd.c_str(),cmd.size());
+  auto sz = write(master,cmd.c_str(),cmd.size());
+  EXPECT_EQ(sz,cmd.size());
 
   std::string l0 = read_line();
   read_line();
@@ -207,7 +212,7 @@ TEST_F(MainTest, HelpPass) {
 
   EXPECT_THAT(l0, HasSubstr("help"));
   EXPECT_THAT(l4, HasSubstr("dot format"));
-  EXPECT_THAT(l5, HasSubstr("dump bits"));
+  EXPECT_THAT(l5, HasSubstr("optional"));
 }
 
 TEST_F(MainTest, Quit) {
@@ -215,7 +220,8 @@ TEST_F(MainTest, Quit) {
   drain_stdin();
   std::string cmd = "qui\t#\n"; // # is a marker for the stupid espace lines
 
-  write(master,cmd.c_str(),cmd.size());
+  auto sz = write(master,cmd.c_str(),cmd.size());
+  EXPECT_EQ(sz,cmd.size());
 
   std::string l0 = read_line();
   std::string l1 = read_line_plain();

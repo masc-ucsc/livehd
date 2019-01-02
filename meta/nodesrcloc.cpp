@@ -37,9 +37,9 @@ void LGraph_Node_Src_Loc::node_loc_set(Index_ID nid, const char *file_name, uint
   node_src_loc[nid] = loc_id;
 }
 
-const char *LGraph_Node_Src_Loc::node_file_name_get(Index_ID nid) const {
+std::string_view LGraph_Node_Src_Loc::node_file_name_get(Index_ID nid) const {
   if (node_src_loc[nid])
-    return src_files.get_char(node_src_loc[nid]);
+    return src_files.get_name(node_src_loc[nid]);
   return "nofile";
 }
 

@@ -6,6 +6,7 @@ cc_library(
     visibility = ["//visibility:public"],
     includes = ["."],
     deps = ["//elab:elab",
+            "@com_google_absl//absl/container:flat_hash_map",
             "//task:task",
     ]
 )

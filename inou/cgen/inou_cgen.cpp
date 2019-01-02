@@ -30,26 +30,31 @@ void Inou_cgen::fromlg(Eprp_var &var) {
 
   Inou_cgen p;
 
-  const std::string odir = var.get("odir");
-  bool              ok   = p.setup_directory(odir);
+  auto odir = var.get("odir");
+  bool  ok  = p.setup_directory(odir);
   if(!ok)
     return;
 
   for(const auto &g : var.lgs) {
-    p.to_pyrope(g, odir);
+
+    const std::string prp_file = g->get_name() + ".prp";
+    std::string filename(odir);
+    filename += "/" + prp_file;
+
+    p.to_pyrope(g, filename);
   }
 }
 
 void Inou_cgen::Declaration::format_raw(Out_string &w) const {
-  static const char *str_type[] = {"local", "input", "output", "sflop", "aflop", "fflop", "latch"};
+  static std::string_view str_type[] = {"local", "input", "output", "sflop", "aflop", "fflop", "latch"};
 
   w << fmt::format("dec {} bits:{} pos:{} sign:{} order:{} type:{}\n", name, bits, pos, is_signed, order, str_type[type]);
 }
 
 void Inou_cgen::iterate_declarations(Index_ID idx, Port_ID pid) {
 
-  const char *wn = lg->get_node_wirename(idx);
-  if(!wn)
+  auto wn = lg->get_node_wirename(idx);
+  if(wn.empty())
     return;
 
   Declaration d;
@@ -87,13 +92,14 @@ void Inou_cgen::iterate_declarations(Index_ID idx, Port_ID pid) {
 
   declaration.push_back(d);
 
-  const char *found = strrchr(wn, '.');
-  if(found == 0)
+  auto found = wn.find('.');
+  if (found == std::string_view::npos)
     return;
 
-  int         id = declaration.size() - 1;
-  std::string str(wn, found - wn);
-  declaration_root.insert(std::pair<std::string, int>(str, id));
+  auto       id = declaration.size() - 1;
+  auto sub_str  = wn.substr(found);
+
+  declaration_root.insert(std::pair(sub_str, id));
 }
 
 void Inou_cgen::setup_declarations() {
@@ -106,34 +112,30 @@ void Inou_cgen::setup_declarations() {
   lg->each_output_root_fast(&Inou_cgen::iterate_declarations, this);
 }
 
-void Inou_cgen::to_pyrope(const LGraph *g, const std::string &odir) {
+void Inou_cgen::to_pyrope(const LGraph *g, std::string_view filename) {
 
   assert(lg == 0);
   lg = g;
 
   setup_declarations();
-
-  const std::string prp_file = lg->get_name() + ".prp";
-  const std::string filename = odir + "/" + prp_file;
-
   Out_string w;
 
-  w << fmt::format("// {} \n", prp_file);
+  w << fmt::format("// {} \n", filename);
 
   for(const auto &d : declaration) {
     d.format_raw(w);
   }
 
   for(auto idx : lg->forward()) {
-    const char *wn = lg->get_node_wirename(idx);
-    if(wn)
-      w << fmt::format(" {} {} op:{}\n", idx, wn, lg->node_type_get(idx).get_name());
-    else
+    auto wn = lg->get_node_wirename(idx);
+    if(wn.empty())
       w << fmt::format(" {} op:{} \n", idx, lg->node_type_get(idx).get_name());
+    else
+      w << fmt::format(" {} {} op:{}\n", idx, wn, lg->node_type_get(idx).get_name());
   }
 
   std::fstream fs;
-  fs.open(filename, std::ios::out | std::ios::trunc);
+  fs.open(std::string(filename), std::ios::out | std::ios::trunc);
   if(!fs.is_open()) {
     error(fmt::format("could not open destination pyrope file {}", filename));
     exit(-4);

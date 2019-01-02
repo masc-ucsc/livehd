@@ -12,8 +12,8 @@
 
 void Top_api::files(Eprp_var &var) {
 
-  const std::string path  = var.get("path");
-  const std::string match = var.get("match");
+  std::string path(var.get("path"));
+  std::string match(var.get("match"));
 
   try {
     const std::regex txt_regex(match);

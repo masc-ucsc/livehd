@@ -407,13 +407,14 @@ void Inou_cfg::update_ifs(vector<LGraph *> &lgs, vector<map<string, Index_ID>> &
     for(auto idx : g->fast()) {
       CFG_Node_Data data(g, idx);
 
-      if(data.get_operator() == COND_BR_MARKER) {
+      if(data.is_br_marker()) {
         const auto &   dops = data.get_operands();
         vector<string> new_operands(dops.size());
 
         std::transform(dops.begin(), dops.end(), new_operands.begin(),
                        [&](const string &op) -> string { return std::to_string(mapping[(op[0] == '\'') ? op.substr(1) : op]); });
-        g->set_node_wirename(idx, CFG_Node_Data(data.get_target(), new_operands, data.get_operator()).encode().c_str());
+        const CFG_Node_Data cnode(data.get_target(), new_operands, std::string(data.get_operator()));
+        g->set_node_wirename(idx, cnode.encode().c_str());
       }
     }
   }
@@ -433,10 +434,10 @@ void Inou_cfg::collect_fcall_info(LGraph *g, Index_ID new_node, const std::strin
 }
 
 void Inou_cfg::remove_fake_fcall(LGraph *g) {
-  std::set<std::string>                     func_dcl_tab;
-  std::set<std::string>                     drive_tab;
+  std::set<std::string_view>                func_dcl_tab;
+  std::set<std::string_view>                drive_tab;
   std::set<Index_ID>                        true_fcall_tab;
-  std::unordered_map<std::string, Index_ID> name2id;
+  std::unordered_map<std::string_view, Index_ID> name2id;
   //1st pass
   for(auto idx : g->fast()){
     if(g->node_type_get(idx).op == Invalid_Op)
@@ -456,7 +457,7 @@ void Inou_cfg::remove_fake_fcall(LGraph *g) {
     } else if(g->node_type_get(idx).op == CfgFunctionCall_Op) {
       auto pid2_wn = g->get_node_wirename(g->get_idx_from_pid(idx, 2));
       auto pid3_wn = g->get_node_wirename(g->get_idx_from_pid(idx, 3));
-      if(strcmp(pid3_wn, "") == 0) { // oprd num = 1
+      if(pid3_wn.empty()) { // oprd num = 1
         drive_tab.insert(pid2_wn);
         name2id[pid2_wn] = idx;
       } else { // oprd num >=1
@@ -477,9 +478,9 @@ void Inou_cfg::remove_fake_fcall(LGraph *g) {
   for(auto idx : g->fast()) {
     if(g->node_type_get(idx).op == CfgFunctionCall_Op && true_fcall_tab.find(idx) == true_fcall_tab.end()) {
       g->node_type_set(idx, CfgAssign_Op);
-      string wn = g->get_node_wirename(idx);
-      wn = "=" + wn.substr(3);
-      g->set_node_wirename(idx, wn.c_str());
+      std::string wn(g->get_node_wirename(idx));
+      wn = "=" + wn.substr(3); // FIXME: weird code!!! hardcoding positions? use string_view
+      g->set_node_wirename(idx, wn.c_str()); // FIXME: the code should have no c_str()
       fmt::print("find out fake function call!!!!!!\n");
       fmt::print("change idx:{} to CfgAssign_Op\n", idx);
     }

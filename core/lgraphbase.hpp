@@ -19,13 +19,7 @@ class LGraph_Base : public LGraph_Node_Type
                   , public LGraph_InstanceNames
 {
 private:
-  Index_ID add_graph_io_common(const char *str, Index_ID nid, uint16_t bits);
-
-  struct str_cmp_i { // case insensitive string compare for IO
-    bool operator()(char const *a, char const *b) const {
-      return strcasecmp(a, b) < 0;
-    }
-  };
+  Index_ID add_graph_io_common(std::string_view str, Index_ID nid, uint16_t bits);
 
 protected:
   struct IO_port {
@@ -46,6 +40,8 @@ protected:
   Char_Array<IO_port> input_array;
   Char_Array<IO_port> output_array;
 
+  static inline constexpr std::string_view unknown_io = "unknow name";
+
   Index_ID         create_node_space(Index_ID idx, Port_ID dst_pid, Index_ID master_nid, Index_ID root_nid);
   Index_ID         get_space_output_pin(Index_ID idx, Port_ID dst_pid, Index_ID &root_nid);
   Index_ID         get_space_output_pin(Index_ID master_nid, Index_ID idx, Port_ID dst_pid, Index_ID root_nid);
@@ -56,10 +52,10 @@ protected:
 
   void recompute_io_ports();
 
-  Index_ID add_graph_input_int(const char *str, Index_ID nid, uint16_t bits); // Don't 
-  Index_ID add_graph_output_int(const char *str, Index_ID nid, uint16_t bits);
-  Index_ID add_graph_input_int(const char *str, Index_ID nid, uint16_t bits, Port_ID original_pos);
-  Index_ID add_graph_output_int(const char *str, Index_ID nid, uint16_t bits, Port_ID original_pos);
+  Index_ID add_graph_input_int (std::string_view str, Index_ID nid, uint16_t bits);
+  Index_ID add_graph_output_int(std::string_view str, Index_ID nid, uint16_t bits);
+  Index_ID add_graph_input_int (std::string_view str, Index_ID nid, uint16_t bits, Port_ID original_pos);
+  Index_ID add_graph_output_int(std::string_view str, Index_ID nid, uint16_t bits, Port_ID original_pos);
 
   void del_int_node(Index_ID idx);
 
@@ -76,9 +72,9 @@ public:
   explicit LGraph_Base(const std::string &path, const std::string &_name, Lg_type_id lgid) noexcept;
   virtual ~LGraph_Base();
 
-  void close();
+  virtual void close();
 
-  const std::string &get_subgraph_name(Index_ID nid) const;
+  std::string_view get_subgraph_name(Index_ID nid) const;
 
   virtual void clear();
   virtual void sync();
@@ -87,21 +83,21 @@ public:
   virtual void emplace_back();
 
   // Graph input/output functions
-  bool is_graph_input(const char *str) const;
-  bool is_graph_output(const char *str) const;
+  bool is_graph_input(std::string_view name) const { return input_array.get_id(name) != 0; }
+  bool is_graph_output(std::string_view name) const { return output_array.get_id(name) != 0; }
 
-  bool is_graph_input(const std::string &str) const {
-    return is_graph_input(str.c_str());
-  }
-  bool is_graph_output(const std::string &str) const {
-    return is_graph_output(str.c_str());
+  bool is_graph_input(Index_ID idx) const {
+    assert(static_cast<Index_ID>(node_internal.size()) > idx);
+    return node_internal[idx].is_graph_io_input();
   }
 
-  bool is_graph_input(Index_ID idx) const;
-  bool is_graph_output(Index_ID idx) const;
+  bool is_graph_output(Index_ID idx) const {
+    assert(static_cast<Index_ID>(node_internal.size()) > idx);
+    return node_internal[idx].is_graph_io_output();
+  }
 
-  const char *get_graph_input_name(Index_ID nid) const;
-  const char *get_graph_output_name(Index_ID nid) const;
+  std::string_view get_graph_input_name(Index_ID nid) const;
+  std::string_view get_graph_output_name(Index_ID nid) const;
 
   // get internal nid from given pid
   Index_ID get_graph_input_nid_from_pid(Port_ID pid) const;
@@ -111,18 +107,11 @@ public:
   // get external pid from internal nid
   Port_ID get_graph_pid_from_nid(Index_ID nid) const;
 
-  const char *get_graph_input_name_from_pid(Port_ID pid) const;
-  const char *get_graph_output_name_from_pid(Port_ID pid) const;
+  std::string_view get_graph_input_name_from_pid(Port_ID pid) const;
+  std::string_view get_graph_output_name_from_pid(Port_ID pid) const;
 
-  Node_Pin get_graph_input(const char *str) const;
-  Node_Pin get_graph_output(const char *str) const;
-
-  Node_Pin get_graph_input(const std::string &str) const {
-    return get_graph_input(str.c_str());
-  }
-  Node_Pin get_graph_output(const std::string &str) const {
-    return get_graph_output(str.c_str());
-  }
+  Node_Pin get_graph_input(std::string_view str) const;
+  Node_Pin get_graph_output(std::string_view str) const;
 
   // get extra (non-master root) node for port_id pid
   // will allocate space if none is available
@@ -208,20 +197,20 @@ public:
     _init();
   } _static_initializer;
 
-  void each_sub_graph_fast_direct(const std::function<bool(const Index_ID &, const Lg_type_id &, const std::string &)>) const;
+  void each_sub_graph_fast_direct(const std::function<bool(const Index_ID &, const Lg_type_id &, std::string_view)>) const;
 
   template<typename FN>
     void each_sub_graph_fast(const FN f1) const {
-      if constexpr (std::is_invocable_r_v<bool, FN&, const Index_ID&, const Lg_type_id&, const std::string&>) { // WARNING: bool must be before void
+      if constexpr (std::is_invocable_r_v<bool, FN&, const Index_ID&, const Lg_type_id&, std::string_view>) { // WARNING: bool must be before void
         each_sub_graph_fast_direct(f1);
-      }else if constexpr (std::is_invocable_r_v<void, FN&, const Index_ID&, const Lg_type_id&, const std::string&>) {
-        auto f2 = [&f1](const Index_ID &idx, const Lg_type_id &lgid, const std::string &iname) { f1(idx,lgid,iname); return true; };
+      }else if constexpr (std::is_invocable_r_v<void, FN&, const Index_ID&, const Lg_type_id&, std::string_view>) {
+        auto f2 = [&f1](const Index_ID &idx, const Lg_type_id &lgid, std::string_view iname) { f1(idx,lgid,iname); return true; };
         each_sub_graph_fast_direct(f2);
       }else if constexpr (std::is_invocable_r_v<bool, FN&, const Index_ID&, const Lg_type_id&>) {
-        auto f2 = [&f1](const Index_ID &idx, const Lg_type_id &lgid, const std::string &iname) { return f1(idx,lgid); };
+        auto f2 = [&f1](const Index_ID &idx, const Lg_type_id &lgid, std::string_view iname) { return f1(idx,lgid); };
         each_sub_graph_fast_direct(f2);
       }else if constexpr (std::is_invocable_r_v<void, FN&, const Index_ID&, const Lg_type_id&>) {
-        auto f2 = [&f1](const Index_ID &idx, const Lg_type_id &lgid, const std::string &iname) { f1(idx,lgid); return true; };
+        auto f2 = [&f1](const Index_ID &idx, const Lg_type_id &lgid, std::string_view iname) { f1(idx,lgid); return true; };
         each_sub_graph_fast_direct(f2);
       }else{
         assert(false);

@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <string_view>
 #include <stdexcept>
 #include <cassert>
 #include <vector>
@@ -63,13 +64,6 @@ public:
       return ptr != other.ptr;
     }
 
-#if 0
-    // Legal, but a bit confusing. Better just to use the self_* interface
-    const char *operator*() const {
-      return (const char *)(&ptr[1 + (sizeof(Data_type)+sizeof(Hash_sign))/sizeof(uint16_t)]);
-    } // [3?] to skip ptr and Hash_sign
-#endif
-
     Char_Array_ID get_id() const {
       return (uint16_t *)ptr - first + 1; // distance with first which was 1 (hence + 1 for id)
     }
@@ -82,8 +76,22 @@ public:
       return *(Data_type *)&ptr[1 + (sizeof(Hash_sign)) / sizeof(uint16_t)]; // Skip signature
     }
 
-    const char *get_char() const {
-      return (const char *)&ptr[1 + (sizeof(Data_type) + sizeof(Hash_sign)) / sizeof(uint16_t)];
+    size_t get_name_len() const {
+      auto sz1 = *ptr;
+      auto sz2 = sz1 - (sizeof(Data_type)+sizeof(Hash_sign))/sizeof(uint16_t);
+      assert(sz2>0);
+      if (ptr[sz1] == 0)
+        sz2 = sz2 * 2 - 2; // 2 bytes used as end of string
+      else
+        sz2 = sz2 * 2 - 1; // 1 byte used as end of string
+
+      return sz2;
+    }
+
+    std::string_view get_name() const {
+      auto raw_str = (const char *)&ptr[1 + (sizeof(Data_type) + sizeof(Hash_sign)) / sizeof(uint16_t)];
+
+      return std::string_view(raw_str,get_name_len());
     }
 
   private:
@@ -107,11 +115,6 @@ private:
 
   explicit Char_Array() = delete; // Not allowed
 
-  Hash_sign prepare_hash(const char *str, uint16_t str_len) {
-    const std::string key(str, str_len);
-    return prepare_hash(key);
-  }
-
   Hash_sign re_hash(Hash_sign c_hash, Hash_sign seed) const {
     c_hash += seed;
     if(c_hash == 0)
@@ -119,8 +122,8 @@ private:
     return c_hash;
   }
 
-  Hash_sign seed_hash(const std::string &key, Hash_sign &seed) const {
-    std::size_t str_hash = std::hash<std::string>{}(key);
+  Hash_sign seed_hash(std::string_view key, Hash_sign &seed) const {
+    std::size_t str_hash = std::hash<std::string_view>{}(key);
     Hash_sign   c_hash   = str_hash ^ (str_hash >> 32);
     if(c_hash == 0)
       c_hash = 1023;
@@ -130,7 +133,7 @@ private:
     return c_hash;
   }
 
-  Hash_sign prepare_hash(const std::string &key) {
+  Hash_sign prepare_hash(std::string_view key) {
 
     Hash_sign seed   = 0;
     Hash_sign c_hash = seed_hash(key, seed);
@@ -229,16 +232,12 @@ public:
     return Const_Char_Array_Iter(first(), last());
   }
 
-  Char_Array_ID create_id(const std::string &str, const Data_type &dt = 0) {
-    return create_id(str.c_str(), dt);
-  }
-
-  Char_Array_ID create_id(const char *str, const Data_type &dt = 0) {
+  Char_Array_ID create_id(std::string_view str, const Data_type &dt = 0) {
     Char_Array_ID start = get_id(str);
     if(start) {
 
 #ifndef NDEBUG
-      size_t slen = strlen(str);
+      size_t slen = str.size();
       slen++;      // for zero
       if(slen & 1) // multiple of 2 bytes storage
         slen++;
@@ -266,7 +265,7 @@ public:
     // 31 bits. Then, we can have ~1B different IDs per lgraph.
     start = static_cast<Char_Array_ID>(t);
 
-    size_t slen = strlen(str);
+    size_t slen = str.size();
     size_t len  = slen;
     len++;      // for zero
     if(len & 1) // multiple of 2 bytes storage
@@ -276,11 +275,11 @@ public:
 
     assert((sizeof(Data_type) & 1) == 0); // multiple of 2 bytes storage
 
-    //--------------------- LEN (string + data + ptr)
+    //--------------------- LEN (string + data + hash + ptr)
     variable_internal.push_back(len / 2);
 
     //--------------------- SIGNATURE
-    Hash_sign c_hash = prepare_hash(str, slen);
+    Hash_sign c_hash = prepare_hash(str);
     assert(hash2id.find(c_hash) == hash2id.end());
     hash2id[c_hash] = start;
     {
@@ -313,12 +312,28 @@ public:
     return start;
   }
 
-  const char *get_char(Char_Array_ID id) const {
-    assert(id >= 0);
+  size_t get_name_len(Char_Array_ID id) const {
+    auto sz1 = variable_internal[id];
+    auto sz2 = sz1 - (sizeof(Data_type)+sizeof(Hash_sign))/sizeof(uint16_t);
+    assert(sz2>0);
+    if (variable_internal[id+sz1] == 0)
+      sz2 = sz2 * 2 - 2; // 2 bytes used as end of string
+    else
+      sz2 = sz2 * 2 - 1; // 1 byte used as end of string
+    return sz2;
+  }
+
+  std::string_view get_name(Char_Array_ID id) const {
+    if(id == 0) {
+      static const std::string_view empty = "";
+      return empty;
+    }
+
     assert(variable_internal.size() > (id + 1 + (sizeof(Data_type) + sizeof(Hash_sign)) / sizeof(uint16_t)));
 
     // SKIP len + hash + data
-    return (const char *)&variable_internal[id + 1 + (sizeof(Data_type) + sizeof(Hash_sign)) / sizeof(uint16_t)];
+    const char *raw_str = (const char *)&variable_internal[id + 1 + (sizeof(Data_type) + sizeof(Hash_sign)) / sizeof(uint16_t)];
+    return std::string_view(raw_str,get_name_len(id));
   }
 
   const Data_type &get_field(Char_Array_ID id) const {
@@ -345,31 +360,15 @@ public:
     return *(const Hash_sign *)&variable_internal[id + 1];
   }
 
-  const Data_type &get_field(const std::string &s) const {
-    return get_field(s.c_str());
+  const Data_type &get_field(std::string_view ptr) const {
+    return get_field(get_id(ptr));
   }
 
-  const Data_type &get_field(const char *ptr) const {
-    int id = get_id(ptr);
-    return get_field(id);
+  bool include(std::string_view str) const {
+    return get_id(str) != 0;
   }
 
-  Data_type &get_field(const char *ptr) {
-    int id = get_id(ptr);
-    return get_field(id);
-  }
-
-  bool include(const char *str) const {
-    const std::string key(str);
-    return include(key);
-  }
-
-  bool include(const std::string &str) const {
-    return get_id(str.c_str()) != 0;
-  }
-
-  int get_id(const char *str) const {
-    const std::string key(str);
+  int get_id(std::string_view key) const {
     Hash_sign         seed   = 0;
     Hash_sign         c_hash = seed_hash(key, seed);
     auto              it     = hash2id.find(c_hash);
@@ -377,14 +376,14 @@ public:
       return 0;
     Char_Array_ID cid = it->second;
     if(cid > 0) {
-      if(strcmp(get_char(cid), str) == 0)
+      if(get_name(cid) ==  key)
         return cid;
       return 0;
     }
 
     while(cid < 0) {
       cid = -cid;
-      if(strcmp(get_char(cid), str) == 0)
+      if(get_name(cid) == key)
         return cid;
 
       c_hash  = re_hash(c_hash, seed);
@@ -394,13 +393,9 @@ public:
       cid = it->second;
     }
 
-    if(strcmp(get_char(cid), str) == 0)
+    if(get_name(cid) == key)
       return cid;
     return 0;
-  }
-
-  int get_id(const std::string &str) const {
-    return get_id(str.c_str());
   }
 };
 

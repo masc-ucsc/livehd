@@ -1,6 +1,6 @@
-sudo: required
+#sudo: required
 
-language: ruby
+language: bash
 
 services:
   - docker

@@ -16,14 +16,14 @@
 #include "thread_pool.hpp"
 #include "eprp_utils.hpp"
 
-std::vector<std::string> Eprp_utils::parse_files(const std::string &files, const std::string &module) {
+std::vector<std::string> Eprp_utils::parse_files(std::string_view files, std::string_view module) {
   char seps[] = ",";
   char *token;
 
   std::vector<std::string> raw_file_list;
 
-  char *files_char = (char *)alloca(files.size()+1);
-  strcpy(files_char,files.c_str());
+  char *files_char = (char *)alloca(files.size()+1); // NOTE: alloca is OK, the vector<string> creates a duplicate
+  strcpy(files_char,std::string(files).c_str());
   token = std::strtok(files_char, seps);
   while( token != NULL ) {
 

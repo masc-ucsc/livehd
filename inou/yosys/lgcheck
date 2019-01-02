@@ -73,6 +73,17 @@ if [ ! -f ${GATE} ]; then
   fi
 fi
 
+if [ ! -f "${YOSYS}" ]; then
+  if [ -x "/usr/bin/yosys" ]; then
+    YOSYS=/usr/bin/yosys
+  elif [ -x "/usr/local/bin/yosys" ]; then
+    YOSYS=/usr/local/bin/yosys
+  else
+    echo "lgcheck: unable to fix YOSYS path"
+    exit 5
+  fi
+fi
+
 if [ ! -f ${YOSYS} ]; then
   echo "Yosys binary not found"
   exit 1

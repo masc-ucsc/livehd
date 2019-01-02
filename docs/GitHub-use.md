@@ -26,7 +26,6 @@ the repo.
 
 External contributions are welcome through pull-requests (see bellow).
 
-
 ### Create Private lgraph repo for personal use / contributions
 
 If you work outside UCSC, you should clone the pubic lgraph repo. First, create
@@ -91,6 +90,23 @@ To push your edits to the main public lgraph repo (replace XXX by your github na
     git push origin pull_request_XXX
 
 Now create a [pull][pull] request through github, and the UCSC/MASC team will review it.
+
+### Typical git commands
+
+Clean the directory from any file not in git (it will remove all the files not committed)
+
+    git clean -fdx
+
+Save and restore un-committed changes to allow a new git pull. stash is like a "push" and "pop" replays
+the changes in the current directory.
+
+    git stash
+    git pull
+    git pop
+
+See the differences against the server (still not pushed). Everything may be committed, so git diff may be empty
+
+    git diff @{u}
 
 [pull]: https://help.github.com/articles/creating-a-pull-request
 [masc]: http://masc.soe.ucsc.edu/

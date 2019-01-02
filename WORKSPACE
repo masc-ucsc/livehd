@@ -1,6 +1,13 @@
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
+load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
+
+#git_repository(
+    #name = "bazel_skylib",
+    #remote = "https://github.com/bazelbuild/bazel-skylib.git",
+    #tag = "0.6.0",  # change this to use a different release
+#)
 
 new_git_repository(
     name = "Open_timer",
@@ -36,6 +43,12 @@ new_git_repository(
     commit = "2c37b240f6d9147b4a7639c433fdde2f31b6868f", # Sep 22, 2018
     remote = "https://github.com/kainjow/Mustache.git",
     #strip_prefix = "kernel",
+)
+git_repository(
+    name = "com_google_absl",
+    #build_file = "BUILD.abseil", # relative to external path
+    commit = "7ffbe09f3d85504bd018783bbe1e2c12992fe47c", # Dec 27, 2018
+    remote = "https://github.com/abseil/abseil-cpp.git",
 )
 new_git_repository(
     name = "fmt",

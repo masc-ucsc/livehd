@@ -23,8 +23,8 @@ void Pass_abc::write_src_info(const LGraph *g, const index_offset &inp, std::ofs
     break;
   }
   case StrConst_Op: {
-    std::string value = g->node_const_value_get(src_idx);
-    auto        bit   = (value == "1") ? 1 : 0;
+    auto value = g->node_const_value_get(src_idx);
+    auto  bit  = (value == "1") ? 1 : 0;
     if(bit == 0) {
       fs << "$false ";
     } else {
@@ -45,8 +45,12 @@ void Pass_abc::write_src_info(const LGraph *g, const index_offset &inp, std::ofs
 }
 
 void Pass_abc::dump_blif(const LGraph *g, const std::string &filename) {
-  auto mapped = is_techmap(g);
-  assert(mapped);
+
+  if (!setup_techmap(g)) {
+    Pass::error("pass_abc.dump_blif: supports techmap graphs only");
+    return;
+  }
+
   find_cell_conn(g);
 
   std::ofstream fs;
@@ -99,7 +103,7 @@ void Pass_abc::gen_io_conn(const LGraph *g, std::ofstream &fs) {
   for(const auto &idx : graph_info->graphio_output_id) {
     auto src = graph_info->primary_output_conn[idx];
     assert(src.size() == 1);
-    if(g->get_node_wirename(src[0].idx) != nullptr && strcmp(g->get_node_wirename(src[0].idx), g->get_graph_output_name(idx)) == 0)
+    if(g->get_node_wirename(src[0].idx) == g->get_graph_output_name(idx))
       continue;
     fs << ".names ";
     for(const auto &inp : src) {
@@ -112,9 +116,9 @@ void Pass_abc::gen_io_conn(const LGraph *g, std::ofstream &fs) {
 
 void Pass_abc::gen_cell_conn(const LGraph *g, std::ofstream &fs) {
   for(const auto &idx : graph_info->combinational_id) {
-    auto              src        = graph_info->comb_conn[idx];
-    const Tech_cell * tcell      = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
-    const std::string tcell_name = tcell->get_name();
+    auto              src       = graph_info->comb_conn[idx];
+    const Tech_cell * tcell     = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
+    std::string_view tcell_name = tcell->get_name();
     fs << ".names ";
     for(const auto &inp : src) {
       write_src_info(g, inp, fs);

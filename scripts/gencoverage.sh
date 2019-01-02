@@ -20,16 +20,20 @@ bazel coverage -k //...
 ./bazel-bin/pass/sample/sample_test2
 ./bazel-bin/pass/sample/tests/sample_test1.sh
 
-
 ./main/tests/lgshell_test.sh
 
 ./bazel-bin/eprp/eprp_test
 
-./bazel-bin/core/thread_pool_test
 ./bazel-bin/core/iter_test
 ./bazel-bin/core/edge_test
-./bazel-bin/core/dense_test
-./bazel-bin/core/char_test
+
+./bazel-bin/task/thread_pool_test
+
+./bazel-bin/meta/lgraph_each
+
+./bazel-bin/lmms/dense_test
+./bazel-bin/lmms/dense_bench
+./bazel-bin/lmms/char_test
 
 ./bazel-bin/main/main_test
 
@@ -38,5 +42,5 @@ bazel coverage -k //...
 ./bazel-bin/inou/liveparse/chunkify_verilog_test
 ./inou/liveparse/tests/chunkify_test.sh
 
-./cops/live/tests/invariant.sh long
+./cops/live/tests/invariant.sh
 

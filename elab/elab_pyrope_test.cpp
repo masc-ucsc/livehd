@@ -10,6 +10,8 @@
 #include <set>
 #include <string>
 
+#include "absl/container/flat_hash_map.h"
+
 #include "elab_scanner.hpp"
 
 // Control
@@ -48,7 +50,7 @@
 
 
 class Pyrope_scanner : public Elab_scanner {
-  std::map<std::string, uint8_t> pyrope_keyword;
+  absl::flat_hash_map<std::string, uint8_t> pyrope_keyword;
 public:
   Pyrope_scanner() {
     pyrope_keyword["if"]        = TOK_KEY_IF;
