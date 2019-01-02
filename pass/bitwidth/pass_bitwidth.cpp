@@ -34,7 +34,7 @@ void Pass_bitwidth::trans(Eprp_var &var) {
 
   Pass_bitwidth pass;
 
-  pass.opack.max_iterations = std::stoi(var.get("max_iterations"));
+  pass.opack.max_iterations = std::stoi(std::string(var.get("max_iterations")));
   if(pass.opack.max_iterations == 0) {
     error(fmt::format("pass.bitwidth max_iterations:{} should be bigger than zero", var.get("max_iterations")));
     return;
@@ -62,7 +62,6 @@ void Pass_bitwidth::iterate_graphio(const LGraph *lg, Index_ID idx) {
 
   //This helps us detect if the IO node is an output.
   //  If it is an output, we cascade range info down into it.
-  bool updated = false;
   for(const auto &inp : lg->inp_edges(idx)) {
     //An input node should have nothing as its input.
     //is_output_node = true;
@@ -361,7 +360,6 @@ void Pass_bitwidth::iterate_mux(const LGraph *lg, Index_ID idx) {
   auto &nb_output = lg->node_bitwidth_get(idx);
   for(const auto &inp : lg->inp_edges(idx)) {
     Index_ID inp_idx = inp.get_idx();
-    auto       &nb_output = lg->node_bitwidth_get(idx);
     const auto &nb_input  = lg->node_bitwidth_get(inp_idx);
     if (first) {
       //Selector value.
@@ -381,7 +379,7 @@ void Pass_bitwidth::iterate_subgraph(const LGraph *lg, Index_ID idx) {
   std::vector<LGraph *> lgs;
   bool updated = false;
 
-  const std::string subgraph_name = lg->get_library().get_name(lg->subgraph_id_get(idx));
+  auto subgraph_name = lg->get_library().get_name(lg->subgraph_id_get(idx));
   LGraph *sg = LGraph::open(lg->get_path(), subgraph_name);
 
   //Here we populate our vector with all the subgraph's IO indices.
@@ -465,14 +463,8 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
     if(node.op == GraphIO_Op) {
       //If node is an input GRAPHIO, set implicit range. Don't for output.
       for(const auto &out : lg->out_edges(idx)) {
-        int count = 0;
-        //If count > 0, then it is an input-only node
-        for(const auto &inp : lg->inp_edges(idx)) {
-          count++;
-        }
-        if(count == 0) {
+        if(!lg->has_inputs(idx))
           nb.set_implicit();
-        }
       }
     } else if((node.op == U32Const_Op) | (node.op == Join_Op)) {
       nb.set_implicit();

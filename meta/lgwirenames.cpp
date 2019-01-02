@@ -41,8 +41,8 @@ void LGraph_WireNames::emplace_back() {
   return names.create_id(wirename);
 }*/
 
-const char *LGraph_WireNames::get_wirename(WireName_ID wid) const {
-  return names.get_char(wid);
+std::string_view LGraph_WireNames::get_wirename(WireName_ID wid) const {
+  return names.get_name(wid);
 }
 
 WireName_ID LGraph_WireNames::get_wid(Index_ID nid) const {
@@ -62,10 +62,3 @@ void LGraph_WireNames::set_node_wirename(Index_ID nid, WireName_ID wid) {
   wires[nid] = wid;
 }
 
-bool LGraph_WireNames::has_name(const char *name) const {
-  return names.include(name);
-}
-
-Index_ID LGraph_WireNames::get_node_id(const char *name) const {
-  return names.get_field(names.get_id(name));
-}

@@ -1,11 +1,42 @@
 
-# General coding style for lgraph
+# General coding style for LGraph
+
+These are the coding style rules for LGraph. Each rule can be broken, but it
+should be VERY rare, and a small comment should be placed explaining why.
+
+## comments
+
+Code should be the comments, try to keep comments concise. They should explain
+the WHY not the HOW. The code is the HOW.
+
+Labels used in comments:
+
+// FIXME: Known bug/issue but no time to fix it at the moment
+
+// TODO: Code improvement that will improve perf/quality/??? but no time at the moment
+
+// WARNING: message for some "strange" "weird" code that if changes has effects
+// (bug). Usually, this is a "not nice" code that must be kept for some reason.
+
+// NOTE: Any comment that you want to remember something about (not critical)
+
+// STYLE: why you broke a style rule (pointers, iterator...)
+
+## c++17
+
+Use std::string_view instead of "const char &ast" or "const std::string &" in the APIs. DO NOT use string_view in maps/sets/storage.
+
+Avoid pointers, use std::unique_ptr with RAII
 
 ## No camelCase. Use underscores to separate words:
 
 ```cpp
 foo_bar = Foo_bar(3);
 ```
+
+## Exceptions
+
+Unexpected non-recoverable behavior should raise an exception. They are captured at the top level to notify user and move to next task.
 
 ## No tabs, indentation is 2 spaces
 
@@ -15,8 +46,8 @@ You can configure your text editor to do this automatically
 
 ## Include order
 
-First do C includes, then an empty line with C++ includes, then an empty line
-followed with lgraph related includes. E.g:
+First do C includes (try to avoid when possible), then an empty line with C++
+includes, then an empty line followed with lgraph related includes. E.g:
 
 #include <sys/types.h>
 #include <dirent.h>
@@ -29,15 +60,15 @@ followed with lgraph related includes. E.g:
 
 ## Keep column widths short
 
-- Less than 80 characters if at all possible (meaning not compromising
+- Less than 120 characters if at all possible (meaning not compromising
   readability)
-- Less than 130 characters always
 
 You can configure your text editor to do this automatically
 
 ## Avoid trailing spaces
 
-You can configure your text editor to highlight them
+You can configure your text editor to highlight them.
+ https://github.com/ntpeters/vim-better-whitespace
 
 ## Classes start with upper case, but just first word.
 
@@ -52,18 +83,25 @@ for(auto idx:g->unordered()) {
 }
 ```
 
-## Use "auto" and "const auto" when possible.
+Use structured returns when iterator is returned for cleaner code:
 
+```cpp
+for(const auto &[name, id]:name2id) {
+  // ...
+```
+
+
+## Use "auto" and "const auto" when possible.
 
 ```cpp
 for(auto idx:g->unordered()) {
   for(const auto &c:g->out_edges(idx)) {
 ```
 
-## Strings must be passed as const references
+## Strings must be passed as std::string_view
 
 ```cpp
-void print(const std::string& message)
+void print(std::string_view message)
 ```
 
 ## Pass by reference and use "const" when possible
@@ -76,7 +114,9 @@ void edit(LGraph& g);
 
 Note that older code still uses pointers, this is no longer allowed.
 
-## Do not use dynamic allocation
+## Avoid dynamic allocation as much as possible
+
+The idea is to RARELY directly allocate pointer allocation
 
 Use:
 
@@ -89,6 +129,21 @@ instead of
 ```cpp
 foo = new Sweet_potato(3, 7)
 ```
+
+## Do not use "new"/"delete" keywords. Use smart pointers if needed (VERY VERY rare)
+
+
+Use:
+```cpp
+foo = std::make_unique<Sweet_potato>(3,7);
+```
+
+instead of
+
+```cpp
+foo = new Sweet_potato(3, 7)
+```
+
 
 ## Use fmt::print to print messages for debugging
 
@@ -121,6 +176,10 @@ assert(n_edges > 0); //at least one edge needed to perform this function
 
 ## Develop in debug mode and benchmark in release mode
 
+Extra checks should be only in debug. Debug and release must execute the same,
+only checks (not behavior change) allowed in debug mode.
+
+Benchmark in release. It is 2x-10x faster.
 
 ## Use compact if/else brackets
 

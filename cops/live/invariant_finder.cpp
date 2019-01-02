@@ -10,7 +10,7 @@ using namespace Live;
 void Invariant_finder::get_topology() {
 
   std::vector<LGraph *> discovered;
-  std::set<LGraph *>    visited;
+  absl::flat_hash_set<LGraph *>    visited;
 
   discovered.push_back(elab_graph);
 
@@ -40,17 +40,17 @@ void Invariant_finder::get_topology() {
       boundaries.hierarchy_tree[Invariant_boundaries::get_graphID(subgraph)].insert(Invariant_boundaries::get_graphID(current));
 
       for(auto &prefix : boundaries.instance_collection[Invariant_boundaries::get_graphID(current)]) {
-        std::string instance_name;
         if(current->get_instance_name_id(idx) == 0) {
           Pass::info("RTP got node with no instance name {}", idx);
           continue;
         }
 
+        std::string instance_name;
         if(prefix != "") {
-          instance_name = prefix + boundaries.hierarchical_separator + current->get_node_instancename(idx);
-        } else {
-          instance_name = current->get_node_instancename(idx);
+          instance_name = prefix + boundaries.hierarchical_separator;
         }
+        instance_name.append(current->get_node_instancename(idx));
+
         boundaries.instance_collection[Invariant_boundaries::get_graphID(subgraph)].insert(instance_name);
         boundaries.instance_type_map[instance_name] = Invariant_boundaries::get_graphID(subgraph);
       }
@@ -107,7 +107,7 @@ void Invariant_finder::propagate_until_boundary(Index_ID nid, uint32_t bit_selec
   for(auto &edge : synth_graph->inp_edges(master_id)) {
 
     //in cases like join/pick we only propagate to a specific bit
-    std::set<uint32_t> bit_selections;
+    absl::flat_hash_set<uint32_t> bit_selections;
     int                propagate = resolve_bit(synth_graph, nid, bit_selection, edge.get_inp_pin().get_pid(), bit_selections);
     if(propagate == -1)
       continue;
@@ -190,7 +190,7 @@ void Invariant_finder::find_invariant_boundaries() {
   std::string path = elab_graph->get_path();
   get_topology();
 
-  std::map<Net_ID, Index_ID> invariant_boundaries;
+  absl::flat_hash_map<Net_ID, Index_ID> invariant_boundaries;
   for(auto &_inst : boundaries.instance_type_map) {
     Instance_name inst = _inst.first;
     if(inst == "##TOP##")
@@ -220,13 +220,13 @@ void Invariant_finder::find_invariant_boundaries() {
 
       Index_ID    idx;
       WireName_ID wire_id;
-      if(synth_graph->has_name(hierarchical_name.c_str())) {
+      if(synth_graph->has_wirename(hierarchical_name.c_str())) {
         idx     = synth_graph->get_node_id(hierarchical_name.c_str());
         wire_id = synth_graph->get_wid(idx);
 
 #ifndef NDEBUG
       } else {
-        assert(!synth_graph->has_name(("\\" + hierarchical_name).c_str()));
+        assert(!synth_graph->has_wirename(("\\" + hierarchical_name).c_str()));
 #endif
         continue;
       }

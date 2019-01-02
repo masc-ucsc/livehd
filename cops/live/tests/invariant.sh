@@ -14,8 +14,8 @@ if [ ! -d ${OPT_ANUBIS} ]; then
 fi
 
 if [ "$1" == "long" ] ; then
-  declare -a benchmarks=("dlx" "alpha" "fpu" "mor1kx" "or1200")
-  declare -a benchmarks=("dlx" "alpha")
+  #declare -a benchmarks=("dlx" "alpha" "fpu" "mor1kx" "or1200")
+  declare -a benchmarks=("dlx" "alpha" "or1200")
 else
   declare -a benchmarks=("dlx")
 fi
@@ -41,7 +41,6 @@ for input in ${benchmarks[@]}; do
   elif [ "${input}" == "dlx" ] ; then
     top="cpu_bug"
   fi
-
 
   logdir=log_${input}
   bounds=${logdir}/bounds

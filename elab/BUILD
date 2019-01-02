@@ -6,7 +6,10 @@ cc_library(
     visibility = ["//visibility:public"],
     includes = ["."],
     deps = ["@fmt//:fmt",
-    ]
+            "@com_google_absl//absl/container:flat_hash_map",
+            "@com_google_absl//absl/container:flat_hash_set",
+    ],
+    linkopts = ["-lpthread"],
 )
 
 filegroup(

@@ -123,8 +123,9 @@ void test5(size_t n) {
 
     assert(idlist[conta] == it.get_id());
 
-    const char *str = it.get_char();
-    assert(atoi(str) == static_cast<int>(conta));
+    const auto str = it.get_name();
+
+    assert(std::atoi(std::string(str).c_str()) == conta);
 
     const auto &d = it.get_field();
     assert(d.potato == (0xdead0000 | (conta & 0xFFFF)));

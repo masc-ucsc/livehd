@@ -38,13 +38,13 @@ void Inou_rand::tolg(Eprp_var &var) {
   p.opack.name = var.get("name");
 
   if(var.has_label("seed"))
-    p.opack.rand_seed = std::stoi(var.get("seed"));
+    p.opack.rand_seed = std::stoi(std::string(var.get("seed")));
 
   if(var.has_label("crate"))
-    p.opack.rand_crate = std::stoi(var.get("crate"));
+    p.opack.rand_crate = std::stoi(std::string(var.get("crate")));
 
   if(var.has_label("eratio"))
-    p.opack.rand_eratio = std::stod(var.get("eratio"));
+    p.opack.rand_eratio = std::stod(std::string(var.get("eratio")));
 
   std::vector<LGraph *> lgs = p.do_tolg();
 

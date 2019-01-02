@@ -1,9 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-
-#ifndef INVARIANT_FINDER_H_
-#define INVARIANT_FINDER_H_
+#pragma once
 
 #include "bm.h"
+#include "absl/container/flat_hash_map.h"
 
 #include "invariant.hpp"
 #include "invariant_options.hpp"
@@ -20,14 +19,14 @@ private:
   bm::bvector<> stack;
 
   typedef std::pair<Index_ID, uint32_t> Node_bit;
-  std::map<Node_bit, Gate_set>          partial_cone_cells; // partial_gate_count
-  std::map<Node_bit, Net_set>           partial_endpoints;  //sips
+  absl::flat_hash_map<Node_bit, Gate_set>          partial_cone_cells; // partial_gate_count
+  absl::flat_hash_map<Node_bit, Net_set>           partial_endpoints;  //sips
 
   //there is a delay between allocation of the cache and populating it
-  std::set<Node_bit>                    cached;
+  absl::flat_hash_set<Node_bit>                    cached;
 
 #ifndef NDEBUG
-  std::set<Node_bit>                    deleted;
+  absl::flat_hash_set<Node_bit>                    deleted;
 #endif
 
   void get_topology();
@@ -58,4 +57,3 @@ public:
   }
 };
 
-#endif

@@ -5,6 +5,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <string_view>
 
 #include "bm.h"
 #include "bmsparsevec.h"
@@ -89,8 +90,8 @@ protected:
   const bool        pipelined;
 
   // Both inputs/outputs sorted in alphabetical order
-  std::vector<const char *> inputs;
-  std::vector<const char *> outputs;
+  std::vector<std::string_view> inputs;
+  std::vector<std::string_view> outputs;
   std::vector<bool>         inputs_sign;
 
   bool may_gen_sign;
@@ -109,9 +110,9 @@ protected:
     inputs_sign.resize(inputs.size());
 
     for(size_t i = 0; i < inputs.size(); i++) {
-      auto len = strlen(inputs[i]);
+      auto len = inputs[i].size();
       assert(len > 0);
-      inputs_sign[i] = (inputs[i][len - 1] == 's');
+      inputs_sign[i] = (inputs[i][len - 1] == 'S');
     }
   }
 
@@ -130,24 +131,44 @@ public:
     return name;
   }
 
-  Port_ID get_input_match(const char *str) const {
+  Port_ID get_input_match(std::string_view str) const {
+    std::string data(str);
+    std::transform(data.begin(), data.end(), data.begin(), ::toupper);
+
     for(size_t i = 0; i < inputs.size(); i++) {
-      if(strcasecmp(inputs[i], str) == 0) {
+      if(inputs[i] == data) {
         return static_cast<Port_ID>(i);
       }
     }
+#ifndef NDEBUG
+    for(size_t i = 0; i < inputs.size(); i++) {
+      std::string data(inputs[i]);
+      std::transform(data.begin(), data.end(), data.begin(), ::toupper);
+      assert(inputs[i] == data); // must be set uppercase
+    }
+#endif
 
     assert(false); // No match found
 
     return 0;
   }
 
-  Port_ID get_output_match(const char *str) const {
-    for(size_t i = 0; i < inputs.size(); i++) {
-      if(strcasecmp(outputs[i], str) == 0) {
+  Port_ID get_output_match(std::string_view str) const {
+    std::string data(str);
+    std::transform(data.begin(), data.end(), data.begin(), ::toupper);
+
+    for(size_t i = 0; i < outputs.size(); i++) {
+      if(outputs[i] == data) {
         return static_cast<Port_ID>(i);
       }
     }
+#ifndef NDEBUG
+    for(size_t i = 0; i < outputs.size(); i++) {
+      std::string data(outputs[i]);
+      std::transform(data.begin(), data.end(), data.begin(), ::toupper);
+      assert(outputs[i] == data); // must be set uppercase
+    }
+#endif
 
     assert(false); // No match found
 
@@ -184,10 +205,10 @@ class Node_Type_Sum : public Node_Type {
 public:
   Node_Type_Sum()
       : Node_Type("sum", Sum_Op, false) {
-    inputs.push_back("As"); // signed
-    inputs.push_back("Au"); // unsigned
-    inputs.push_back("Bs");
-    inputs.push_back("Bu");
+    inputs.push_back("AS"); // signed
+    inputs.push_back("AU"); // unsigned
+    inputs.push_back("BS");
+    inputs.push_back("BU");
     outputs.push_back("Y");
 
     setup_signs(true);
@@ -199,8 +220,8 @@ class Node_Type_Mult : public Node_Type {
 public:
   Node_Type_Mult()
       : Node_Type("mult", Mult_Op, false) {
-    inputs.push_back("As");
-    inputs.push_back("Au");
+    inputs.push_back("AS");
+    inputs.push_back("AU");
     outputs.push_back("Y");
 
     setup_signs(true);
@@ -212,10 +233,10 @@ class Node_Type_Div : public Node_Type {
 public:
   Node_Type_Div()
       : Node_Type("div", Div_Op, false) {
-    inputs.push_back("As");
-    inputs.push_back("Au");
-    inputs.push_back("Bs");
-    inputs.push_back("Bu");
+    inputs.push_back("AS");
+    inputs.push_back("AU");
+    inputs.push_back("BS");
+    inputs.push_back("BU");
     outputs.push_back("Y");
 
     setup_signs(true);
@@ -227,10 +248,10 @@ class Node_Type_Mod : public Node_Type {
 public:
   Node_Type_Mod()
       : Node_Type("mod", Mod_Op, false) {
-    inputs.push_back("As");
-    inputs.push_back("Au");
-    inputs.push_back("Bs");
-    inputs.push_back("Bu");
+    inputs.push_back("AS");
+    inputs.push_back("AU");
+    inputs.push_back("BS");
+    inputs.push_back("BU");
     outputs.push_back("Y");
 
     setup_signs(true);
@@ -270,7 +291,7 @@ public:
   Node_Type_Pick()
       : Node_Type("pick", Pick_Op, false) {
     inputs.push_back("A");
-    inputs.push_back("offset");
+    inputs.push_back("OFFSET");
     outputs.push_back("Y");
   };
 };
@@ -283,7 +304,7 @@ public:
       : Node_Type("and", And_Op, false) {
     inputs.push_back("A");        // pid: 0
     outputs.push_back("Y");       // pid: 0
-    outputs.push_back("Yreduce"); // pid: 1
+    outputs.push_back("YREDUCE"); // pid: 1
   };
 };
 
@@ -295,7 +316,7 @@ public:
       : Node_Type("or", Or_Op, false) {
     inputs.push_back("A");
     outputs.push_back("Y");
-    outputs.push_back("Yreduce");
+    outputs.push_back("YREDUCE");
   };
 };
 
@@ -307,7 +328,7 @@ public:
       : Node_Type("xor", Xor_Op, false) {
     inputs.push_back("A");
     outputs.push_back("Y");
-    outputs.push_back("Yreduce");
+    outputs.push_back("YREDUCE");
   };
 };
 
@@ -321,10 +342,10 @@ class Node_Type_LessThan : public Node_Type {
 public:
   Node_Type_LessThan()
       : Node_Type("lessthan", LessThan_Op, false) {
-    inputs.push_back("As");
-    inputs.push_back("Au");
-    inputs.push_back("Bs");
-    inputs.push_back("Bu");
+    inputs.push_back("AS");
+    inputs.push_back("AU");
+    inputs.push_back("BS");
+    inputs.push_back("BU");
     outputs.push_back("Y");
 
     setup_signs(false);
@@ -336,10 +357,10 @@ class Node_Type_GreaterThan : public Node_Type {
 public:
   Node_Type_GreaterThan()
       : Node_Type("greaterthan", GreaterThan_Op, false) {
-    inputs.push_back("As");
-    inputs.push_back("Au");
-    inputs.push_back("Bs");
-    inputs.push_back("Bu");
+    inputs.push_back("AS");
+    inputs.push_back("AU");
+    inputs.push_back("BS");
+    inputs.push_back("BU");
     outputs.push_back("Y");
 
     setup_signs(false);
@@ -351,10 +372,10 @@ class Node_Type_GreaterEqualThan : public Node_Type {
 public:
   Node_Type_GreaterEqualThan()
       : Node_Type("greaterequalthan", GreaterEqualThan_Op, false) {
-    inputs.push_back("As");
-    inputs.push_back("Au");
-    inputs.push_back("Bs");
-    inputs.push_back("Bu");
+    inputs.push_back("AS");
+    inputs.push_back("AU");
+    inputs.push_back("BS");
+    inputs.push_back("BU");
     outputs.push_back("Y");
 
     setup_signs(false);
@@ -366,10 +387,10 @@ class Node_Type_LessEqualThan : public Node_Type {
 public:
   Node_Type_LessEqualThan()
       : Node_Type("lessequalthan", LessEqualThan_Op, false) {
-    inputs.push_back("As");
-    inputs.push_back("Au");
-    inputs.push_back("Bs");
-    inputs.push_back("Bu");
+    inputs.push_back("AS");
+    inputs.push_back("AU");
+    inputs.push_back("BS");
+    inputs.push_back("BU");
     outputs.push_back("Y");
 
     setup_signs(false);
@@ -381,8 +402,8 @@ class Node_Type_Equals : public Node_Type {
 public:
   Node_Type_Equals()
       : Node_Type("equals", Equals_Op, false) {
-    inputs.push_back("As");
-    inputs.push_back("Au");
+    inputs.push_back("AS");
+    inputs.push_back("AU");
     outputs.push_back("Y");
 
     setup_signs(false);
@@ -447,12 +468,12 @@ class Node_Type_Flop : public Node_Type {
 public:
   Node_Type_Flop()
       : Node_Type("sflop", SFlop_Op, true) {
-    inputs.push_back("clk"); // clk
+    inputs.push_back("CLK");
     inputs.push_back("D");
     inputs.push_back("E");
     inputs.push_back("R");    // reset signal
-    inputs.push_back("Rval"); // reset value
-    inputs.push_back("pol");  // clock polarity (positive if not specified)
+    inputs.push_back("RVAL"); // reset value
+    inputs.push_back("POL");  // clock polarity (positive if not specified)
     outputs.push_back("Q");
   };
 };
@@ -461,11 +482,11 @@ class Node_Type_AFlop : public Node_Type {
 public:
   Node_Type_AFlop()
       : Node_Type("flop", AFlop_Op, true) {
-    inputs.push_back("clk"); // clk
+    inputs.push_back("CLK");
     inputs.push_back("D");
     inputs.push_back("E");
     inputs.push_back("R");    // reset signal
-    inputs.push_back("Rval"); // reset value
+    inputs.push_back("RVAL"); // reset value
     outputs.push_back("Q");
   };
 };
@@ -484,15 +505,15 @@ class Node_Type_FFlop : public Node_Type {
 public:
   Node_Type_FFlop()
       : Node_Type("fflop", FFlop_Op, true) {
-    inputs.push_back("clk"); // clk
+    inputs.push_back("CLK"); // clk
     inputs.push_back("D");
-    inputs.push_back("Vi");   // valid in
-    inputs.push_back("So");   // stop out
+    inputs.push_back("VI");   // valid in
+    inputs.push_back("SO");   // stop out
     inputs.push_back("R");    // rst
-    inputs.push_back("Rval"); // reset value
+    inputs.push_back("RVAL"); // reset value
     outputs.push_back("Q");
-    outputs.push_back("Vo"); // valid out
-    outputs.push_back("Si"); // stop in
+    outputs.push_back("VO"); // valid out
+    outputs.push_back("SI"); // stop in
   };
 };
 
@@ -533,54 +554,54 @@ public:
       : Node_Type("memory", Memory_Op, true) {
 
     // parameters
-    inputs.push_back("size");           // number of words (parameter)
-    inputs.push_back("abits");          // address bits //FIXME: if input ports have sizes, it is possible to remove this
-    inputs.push_back("wr_ports");       // number of wr_ports (parameter)
-    inputs.push_back("rd_ports");       // number of rd_ports (parameter)
-    inputs.push_back("clk_polarity");   // clock polarity: 0 == posedge, 1 == negedge
-    inputs.push_back("rd_transparent"); // fwd writes to reads in the same address
+    inputs.push_back("SIZE");           // number of words (parameter)
+    inputs.push_back("ABITS");          // address bits //FIXME: if input ports have sizes, it is possible to remove this
+    inputs.push_back("WR_PORTS");       // number of wr_ports (parameter)
+    inputs.push_back("RD_PORTS");       // number of rd_ports (parameter)
+    inputs.push_back("CLK_POLARITY");   // clock polarity: 0 == posedge, 1 == negedge
+    inputs.push_back("RD_TRANSPARENT"); // fwd writes to reads in the same address
 
     // shared ports
-    inputs.push_back("clk"); // single clock support only
-    inputs.push_back("ce");  // shared chip enable (no connection means always enable)
+    inputs.push_back("CLK"); // single clock support only
+    inputs.push_back("CE");  // shared chip enable (no connection means always enable)
 
     // wr / rd port 0
-    inputs.push_back("wr0_addr");
-    inputs.push_back("wr0_data");
-    inputs.push_back("wr0_en");
+    inputs.push_back("WR0_ADDR");
+    inputs.push_back("WR0_DATA");
+    inputs.push_back("WR0_EN");
 
-    inputs.push_back("rd0_addr");
-    inputs.push_back("rd0_en");
+    inputs.push_back("RD0_ADDR");
+    inputs.push_back("RD0_EN");
 
     // wr / rd port 1
-    inputs.push_back("wr1_addr");
-    inputs.push_back("wr1_data");
-    inputs.push_back("wr1_en");
+    inputs.push_back("WR1_ADDR");
+    inputs.push_back("WR1_DATA");
+    inputs.push_back("WR1_EN");
 
-    inputs.push_back("rd1_addr");
-    inputs.push_back("rd1_en");
+    inputs.push_back("RD1_ADDR");
+    inputs.push_back("RD1_EN");
 
     // wr / rd port 2
-    inputs.push_back("wr2_addr");
-    inputs.push_back("wr2_data");
-    inputs.push_back("wr2_en");
+    inputs.push_back("WR2_ADDR");
+    inputs.push_back("WR2_DATA");
+    inputs.push_back("WR2_EN");
 
-    inputs.push_back("rd2_addr");
-    inputs.push_back("rd2_en");
+    inputs.push_back("RD2_ADDR");
+    inputs.push_back("RD2_EN");
 
     // wr / rd port 3
-    inputs.push_back("wr3_addr");
-    inputs.push_back("wr3_data");
-    inputs.push_back("wr3_en");
+    inputs.push_back("WR3_ADDR");
+    inputs.push_back("WR3_DATA");
+    inputs.push_back("WR3_EN");
 
-    inputs.push_back("rd3_addr");
-    inputs.push_back("rd3_en");
+    inputs.push_back("RD3_ADDR");
+    inputs.push_back("RD3_EN");
     // continues...
 
-    outputs.push_back("rd_data0");
-    outputs.push_back("rd_data1");
-    outputs.push_back("rd_data2");
-    outputs.push_back("rd_data3");
+    outputs.push_back("RD_DATA0");
+    outputs.push_back("RD_DATA1");
+    outputs.push_back("RD_DATA2");
+    outputs.push_back("RD_DATA3");
     // continues...
   };
 };
@@ -621,30 +642,30 @@ class Node_Type_BlackBox : public Node_Type {
 public:
   Node_Type_BlackBox()
       : Node_Type("blackbox", BlackBox_Op, true) {
-    inputs.push_back("type");
-    inputs.push_back("instance_name");
+    inputs.push_back("TYPE");
+    inputs.push_back("INSTANCE_NAME");
 
-    inputs.push_back("port1_isparam"); // 0 = input, 1 = parameter
-    inputs.push_back("port1_name");
-    inputs.push_back("port1_connection");
+    inputs.push_back("PORT1_ISPARAM"); // 0 = input, 1 = parameter
+    inputs.push_back("PORT1_NAME");
+    inputs.push_back("PORT1_CONNECTION");
 
-    inputs.push_back("port2_isparam"); // 0 = input, 1 = parameter
-    inputs.push_back("port2_name");
-    inputs.push_back("port2_connection");
+    inputs.push_back("PORT2_ISPARAM"); // 0 = input, 1 = parameter
+    inputs.push_back("PORT2_NAME");
+    inputs.push_back("PORT2_CONNECTION");
 
-    inputs.push_back("port3_isparam"); // 0 = input, 1 = parameter
-    inputs.push_back("port3_name");
-    inputs.push_back("port3_connection");
+    inputs.push_back("PORT3_ISPARAM"); // 0 = input, 1 = parameter
+    inputs.push_back("PORT3_NAME");
+    inputs.push_back("PORT3_CONNECTION");
 
     // continues ...
-    outputs.push_back("port1_name");
-    outputs.push_back("port1_connection");
+    outputs.push_back("PORT1_NAME");
+    outputs.push_back("PORT1_CONNECTION");
 
-    outputs.push_back("port2_name");
-    outputs.push_back("port2_connection");
+    outputs.push_back("PORT2_NAME");
+    outputs.push_back("PORT2_CONNECTION");
 
-    outputs.push_back("port3_name");
-    outputs.push_back("port3_connection");
+    outputs.push_back("PORT3_NAME");
+    outputs.push_back("PORT3_CONNECTION");
   };
 };
 
@@ -772,8 +793,7 @@ public:
   explicit LGraph_Node_Type(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept;
   virtual ~LGraph_Node_Type(){};
 
-  Const_ID    get_constant_id(const char *constant);
-  const char *get_constant(Const_ID const_id) const;
+  std::string_view get_constant(Const_ID const_id) const;
 
   void clear();
   void reload(size_t sz);
@@ -788,12 +808,8 @@ public:
   void     node_subgraph_set(Index_ID nid, uint32_t subgraphid);
   uint32_t subgraph_id_get(Index_ID nid) const;
 
-  void node_const_type_set(Index_ID nid, const std::string &value
-#ifndef NDEBUG
-                           , bool enforce_bits = true
-#endif
-  );
-  const char *node_const_value_get(Index_ID nid) const;
+  void node_const_type_set(Index_ID nid, std::string_view value, bool enforce_bits = true);
+  std::string_view node_const_value_get(Index_ID nid) const;
 
   void     node_tmap_set(Index_ID nid, uint32_t tmapid);
   uint32_t tmap_id_get(Index_ID nid) const;

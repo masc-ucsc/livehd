@@ -1,6 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#ifndef DIFF_FINDER_H_
-#define DIFF_FINDER_H_
+#pragma once
 
 #include "invariant.hpp"
 #include "live_common.hpp"
@@ -28,7 +27,7 @@ private:
   std::set<Graph_Node> fwd_visited;
 
   bool is_user_def(LGraph *current, Index_ID idx, Port_ID pid) const;
-  bool is_invariant(Graph_Node node);
+  bool set_invariant(Graph_Node node);
 
   void find_fwd_boundaries(Graph_Node &start_boundary, std::set<Graph_Node> &discovered, bool went_up = false);
   bool compare_cone(const Graph_Node &start_boundary, const Graph_Node &original_boundary, bool went_up = false);
@@ -51,4 +50,3 @@ public:
   void generate_delta(const std::string &mod_lgdb, const std::string &out_lgdb, std::set<Net_ID> &diffs);
 };
 
-#endif

@@ -32,8 +32,8 @@ private:
   Index_ID get_candidate(Index_ID newid, LGraph *nsynth) {
     if(nsynth->get_wid(newid) == 0)
       return 0;
-    std::string name = nsynth->get_node_wirename(newid);
-    if(!original->has_name(name))
+    auto name = nsynth->get_node_wirename(newid);
+    if(!original->has_wirename(name))
       return 0;
 
     return original->get_node_id(name);

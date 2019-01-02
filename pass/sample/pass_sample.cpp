@@ -28,6 +28,7 @@ void Pass_sample::work(Eprp_var &var) {
     pass.do_work(g);
   }
 }
+
 void Pass_sample::do_work(const LGraph *g) {
   LGBench b("pass.sample");
 

@@ -115,7 +115,7 @@ Index_ID Pass_dfg::create_NOT(LGraph *g, Aux_tree *aux_tree, Index_ID op1) {
   return dfnode;
 }
 
-Node_Type_Op Pass_dfg::node_type_from_text(const std::string &operator_text) {
+Node_Type_Op Pass_dfg::node_type_from_text(std::string_view operator_text) const {
 
   if(operator_text == "==") {
     return Equals_Op;
@@ -133,7 +133,6 @@ Node_Type_Op Pass_dfg::node_type_from_text(const std::string &operator_text) {
     return Sum_Op;
   } else {
     fmt::print("Operator: {}\n", operator_text);
-    fflush(stdout);
     assert(false);
   }
 }

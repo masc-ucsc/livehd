@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include <ctype.h>
 
@@ -129,7 +130,7 @@ void Elab_scanner::add_token(Token &t) {
   token_list.push_back(t);
 }
 
-void Elab_scanner::patch_pass(const std::map<std::string, uint8_t> &keywords) {
+void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, uint8_t> &keywords) {
   for(auto &t:token_list) {
     if (t.tok != TOK_ALNUM)
       continue;
@@ -150,14 +151,12 @@ void Elab_scanner::patch_pass(const std::map<std::string, uint8_t> &keywords) {
   }
 }
 
-void Elab_scanner::parse(const std::string &name, const char *memblock, size_t sz, bool chunking) {
+void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool chunking) {
 
   token_list.clear();
-  //token_list.reserve(buffer_sz/4); // An average of a token each 4 characters?
 
   buffer_name = name;
-  buffer = memblock; // To allow error reporting before chunking
-  buffer_sz = sz;
+  buffer      = memblock; // To allow error reporting before chunking
   scanner_pos = 0;
 
   int  nlines                = 0;
@@ -167,7 +166,7 @@ void Elab_scanner::parse(const std::string &name, const char *memblock, size_t s
   bool in_singleline_comment = false;
   int  in_multiline_comment  = 0; // Nesting support
 
-  const char *ptr_section = memblock;
+  std::string_view ptr_section = memblock;
 
   Token t;
   t.pos = 0;
@@ -175,7 +174,7 @@ void Elab_scanner::parse(const std::string &name, const char *memblock, size_t s
 
   bool starting_comment=false; // Only for comments to avoid /*/* nested back to back */*/
   bool finishing_comment=false; // Only for comments to avoid /*/* nested back to back */*/
-  for(size_t pos = 0; pos < sz; pos++) {
+  for(size_t pos = 0; pos < memblock.size(); pos++) {
     char c = memblock[pos];
     //int pos = (&memblock[i] - ptr_section); // same as "i" unless chunking
     if(c == '\n' || c == '\r' || c == '\f') {
@@ -214,9 +213,9 @@ void Elab_scanner::parse(const std::string &name, const char *memblock, size_t s
       if (!in_comment) {
         constexpr size_t len1 = std::char_traits<char>::length("synopsys ");
         size_t npos=pos+1;
-        while(buffer[npos] == ' ' && npos<sz)
+        while(buffer[npos] == ' ' && npos<memblock.size())
           npos++;
-        if ((npos+len1)<sz) {
+        if ((npos+len1)<memblock.size()) {
           if (strncmp(&buffer[npos], "synopsys ",len1)==0) {
             t.tok = TOK_SYNOPSYS;
           }
@@ -228,7 +227,7 @@ void Elab_scanner::parse(const std::string &name, const char *memblock, size_t s
       assert(!finishing_comment);
     }else if(unlikely(!finishing_comment
           && ( (last_c == '/' && c == '*')
-            || (last_c == '(' && c == '*' && (sz > pos) && buffer[pos+1] != ')' && token_list.size() && token_list.back().tok != TOK_AT)
+            || (last_c == '(' && c == '*' && (memblock.size() > pos) && buffer[pos+1] != ')' && token_list.size() && token_list.back().tok != TOK_AT)
               ))) {
       t.len = pos - t.pos;
       t.tok = TOK_COMMENT;
@@ -281,7 +280,7 @@ void Elab_scanner::parse(const std::string &name, const char *memblock, size_t s
     last_c = c;
   }
   if (t.tok) {
-    t.len = sz - t.pos;
+    t.len = memblock.size() - t.pos;
     add_token(t);
   }
 
@@ -289,7 +288,7 @@ void Elab_scanner::parse(const std::string &name, const char *memblock, size_t s
     scan_error("scanner reached end of file with a multi-line comment");
   }
 
-  chunked(ptr_section, sz);
+  chunked(ptr_section);
 }
 
 Elab_scanner::Elab_scanner() {
@@ -302,20 +301,14 @@ Elab_scanner::Elab_scanner() {
   buffer = 0; // just to be clean
 }
 
-void Elab_scanner::chunked(const char *_buffer, size_t _buffer_sz) {
-
-  assert(_buffer_sz < std::numeric_limits<uint32_t>::max());
-
-  // TODO?: we could multithread each chunk. buffer_*, scanner_pos, and token_list should be privatized per thread
+void Elab_scanner::chunked(std::string_view _buffer) {
 
   buffer = _buffer;
-  buffer_sz = static_cast<uint32_t>(_buffer_sz);
 
   elaborate();
 
   token_list.clear();
   scanner_pos = 0;
-  buffer = 0;
 }
 
 bool Elab_scanner::scan_next() {
@@ -391,33 +384,33 @@ int Elab_scanner::scan_calc_lineno() const {
   return nlines;
 }
 
-void Elab_scanner::lex_error(const std::string &text) {
+void Elab_scanner::lex_error(std::string_view text) {
   // lexer can not look at token list
 
-  fmt::print(text + "\n");
+  fmt::print("{}\n",text);
   n_errors++;
   if (n_errors>max_errors)
     exit(-3);
 }
-void Elab_scanner::scan_error(const std::string &text) const {
+void Elab_scanner::scan_error(std::string_view text) const {
   scan_raw_msg("error", text, true);
   n_errors++;
   if (n_errors>max_errors)
     exit(-3);
 }
 
-void Elab_scanner::scan_warn(const std::string &text) const {
+void Elab_scanner::scan_warn(std::string_view text) const {
   scan_raw_msg("warning", text, true);
   n_warnings++;
   if (n_warnings>max_warnings)
     exit(-3);
 }
 
-void Elab_scanner::parser_info(const std::string &text) const {
+void Elab_scanner::parser_info(std::string_view text) const {
   scan_raw_msg("info", text, true);
 }
 
-void Elab_scanner::parser_error(const std::string &text) const {
+void Elab_scanner::parser_error(std::string_view text) const {
   scan_raw_msg("error", text, false);
   n_errors++;
   if (n_errors>max_errors)
@@ -425,14 +418,14 @@ void Elab_scanner::parser_error(const std::string &text) const {
   //throw std::runtime_error(text);
 }
 
-void Elab_scanner::parser_warn(const std::string &text) const {
+void Elab_scanner::parser_warn(std::string_view text) const {
   scan_raw_msg("warning", text, false);
   n_warnings++;
   if (n_warnings>max_warnings)
     exit(-3);
 }
 
-void Elab_scanner::scan_raw_msg(const std::string &cat, const std::string &text, bool third) const {
+void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, bool third) const {
 
   // Look at buffer for previous line change
 
@@ -453,8 +446,8 @@ void Elab_scanner::scan_raw_msg(const std::string &cat, const std::string &text,
       break;
     }
   }
-  size_t line_pos_end = buffer_sz;
-  for(size_t i=token_list[max_pos].pos;i<buffer_sz;i++) {
+  size_t line_pos_end = buffer.size();
+  for(size_t i=token_list[max_pos].pos;i<buffer.size();i++) {
     char c = buffer[i];
     if (c == '\n' || c == '\r' || c == '\f') {
       line_pos_end = i;

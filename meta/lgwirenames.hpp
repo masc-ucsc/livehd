@@ -1,16 +1,14 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#pragma once
 
-#ifndef LGWIRENAME_H
-#define LGWIRENAME_H
+#include <cassert>
 
-#include <assert.h>
-
-#include "dense.hpp"
+#include <string_view>
 #include <map>
 #include <string>
 
+#include "dense.hpp"
 #include "lgraphbase.hpp"
-#include <string>
 
 class LGraph;
 
@@ -50,13 +48,12 @@ public:
   virtual void sync();
   virtual void emplace_back();
 
-  // WireName_ID get_wirename_id(const char *wirename);
-  const char *get_wirename(WireName_ID wid) const;
+  std::string_view get_wirename(WireName_ID wid) const;
 
   WireName_ID get_wid(Index_ID nid) const;
   void        set_node_wirename(Index_ID nid, WireName_ID wid);
 
-  WireName_ID set_node_wirename(Index_ID nid, const char *name) {
+  WireName_ID set_node_wirename(Index_ID nid, std::string_view name) {
     assert(nid < wires.size());
     assert(node_internal[nid].is_node_state());
     assert(node_internal[nid].is_root());
@@ -65,34 +62,22 @@ public:
     return wid;
   }
 
-  const char *get_node_wirename(Index_ID nid) const {
+  std::string_view get_node_wirename(Index_ID nid) const {
     assert(nid < wires.size());
     assert(node_internal[nid].is_node_state());
     assert(node_internal[nid].is_root());
 
-
-    WireName_ID wid = get_wid(nid);
-    if(wid == 0)
-      return nullptr;
-    return get_wirename(wid);
+    return get_wirename(get_wid(nid));
   }
 
-  bool has_name(const char *name) const;
-  bool has_name(const std::string &name) const {
-    return has_name(name.c_str());
-  }
+  bool    has_wirename(std::string_view name) const { return names.include(name); }
+  Index_ID get_node_id(std::string_view name) const { return names.get_field(names.get_id(name)); }
 
-  Index_ID get_node_id(const char *name) const;
-  Index_ID get_node_id(const std::string &name) const {
-    return get_node_id(name.c_str());
-  }
-
-  void dump_lgwires() const {
-    fmt::print("lgwires {} \n", name);
+  void dump_wirenames() const {
+    fmt::print("wirenames {} \n", name);
     for(auto it=names.begin(); it!=names.end(); ++it) {
-      fmt::print(" {}\n", it.get_char());
+      fmt::print(" {}\n", it.get_name());
     }
   }
 };
 
-#endif

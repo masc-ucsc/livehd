@@ -6,20 +6,30 @@
 #include "cfg_node_data.hpp"
 
 CFG_Node_Data::CFG_Node_Data(const LGraph *g, Index_ID node) {
-  const char *data_str = g->get_node_wirename(node);
 
-  if(data_str == nullptr) {
+  std::string_view data_str = g->get_node_wirename(node);
+
+  if(data_str.empty()) {
     target       = EMPTY_MARKER;
     operator_txt = EMPTY_MARKER;
     return;
   }
 
+
+  // FIXME: Weird code, use STL methods in string_view or abseil
+  // https://en.cppreference.com/w/cpp/string/basic_string_view/find
+  // https://abseil.io/docs/cpp/guides/strings#abslstrsplit-for-splitting-strings
+#if 1
   int         len      = 0;
-  const char *start    = data_str;
+  std::string start(data_str);
   int         ndiscard = 2;
 
-  while(*data_str) {
-    if(*(data_str + len) == ENCODING_DELIM) {
+  size_t pos = 0;
+
+  // With the new std::string_view I had to disable (not clear how to conver)
+
+  while(data_str[pos]) {
+    if(data_str[pos + len] == ENCODING_DELIM) {
       assert(ndiscard >= 0);
       std::string tmp(start, len);
       if(ndiscard == 0) {
@@ -33,13 +43,14 @@ CFG_Node_Data::CFG_Node_Data(const LGraph *g, Index_ID node) {
         ndiscard--;
       }
 
-      data_str += len + 1;
-      start = data_str;
+      pos += len + 1;
+      start = &data_str[pos];
       len   = 0;
     } else {
       len++;
     }
   }
+#endif
 }
 
 CFG_Node_Data::CFG_Node_Data(const std::string &parser_raw) {
