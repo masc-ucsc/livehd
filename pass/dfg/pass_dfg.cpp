@@ -448,7 +448,7 @@ Index_ID Pass_dfg::process_operand(LGraph *dfg, Aux_tree *aux_tree, const std::s
 }
 
 Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data, Index_ID cfg_node) {
-  fmt::print("process if start\n");
+  fmt::print("process if start!\n");
   assert(aux_tree->has_alias(data.get_target()));
   Index_ID    cond     = aux_tree->get_alias(data.get_target());
   const auto &operands = data.get_operands();
