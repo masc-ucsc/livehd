@@ -4,7 +4,7 @@
 
 #include <string>
 #include <vector>
-
+#include "absl/strings/str_split.h"
 #include "lgraph.hpp"
 
 class CFG_Node_Data {
@@ -13,11 +13,11 @@ private:
   std::vector<std::string> operands;
   std::string              operator_txt;
 
-  static inline constexpr int         OPERANDS_INIT_SIZE   = 4;   // most CFG nodes will have 4 operands
-  static inline constexpr char        ENCODING_DELIM       = '|'; // deliminator used to encode CFG data into wirename field
-  static inline constexpr int         CFG_METADATA_COUNT   = 5;
-  static inline constexpr std::string_view EMPTY_MARKER    = "<none>";
-  static inline constexpr std::string_view  COND_BR_MARKER = "if";
+  static inline constexpr int               OPERANDS_INIT_SIZE = 4;   // most CFG nodes will have 4 operands
+  static inline constexpr char              ENCODING_DELIM     = '|'; // deliminator used to encode CFG data into wirename field
+  static inline constexpr int               CFG_METADATA_COUNT = 5;
+  static inline constexpr std::string_view  EMPTY_MARKER       = "<none>";
+  static inline constexpr std::string_view  COND_BR_MARKER     = "if";
 
 public:
   CFG_Node_Data(const LGraph *g, Index_ID node);
@@ -27,13 +27,11 @@ public:
       , operands(ops)
       , operator_txt(ot) {
   }
-  // CFG_Node_Data(const CFG_Node_Data &o) : target(o.get_target()), operands(o.get_operands()), operator_txt(o.get_operator()) { }
 
-  //~CFG_Node_Data(){};//dbg
   std::string encode() const;
   void                            modify_operator(std::string new_op) {operator_txt = new_op;}
   const std::string              &get_target()   const { return target; }
-  std::string_view get_operator() const { return operator_txt; }
+  std::string_view                get_operator() const { return operator_txt; }
   const std::vector<std::string> &get_operands() const { return operands; }
 
   bool is_br_marker() const { return operator_txt == CFG_Node_Data::COND_BR_MARKER; }
