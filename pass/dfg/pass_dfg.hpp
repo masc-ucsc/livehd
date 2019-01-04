@@ -110,6 +110,7 @@ private:
   Index_ID create_node(LGraph *g, Aux_tree *aux_tree, const std::string &v, const uint16_t bits = 0);
   Index_ID create_default_const(LGraph *g);
   Index_ID create_true_const(LGraph *g, Aux_tree *aux_tree);
+  Index_ID create_const32_node(LGraph *g, uint32_t val, uint16_t node_bit_width, bool is_signed);
   Index_ID create_false_const(LGraph *g, Aux_tree *aux_tree);
 
   Index_ID create_AND(LGraph *g, Aux_tree *aux_tree, Index_ID op1, Index_ID op2);

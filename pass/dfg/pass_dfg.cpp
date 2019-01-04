@@ -52,6 +52,7 @@ void Pass_dfg::finalize_bitwidth(Eprp_var &var) {
   for(auto &g : var.lgs) {
     Pass_dfg p;
     p.do_finalize_bitwidth(g);
+    g->sync();
   }
 }
 
@@ -75,12 +76,9 @@ void Pass_dfg::setup() {
   register_pass(m3);
 }
 
-Pass_dfg::Pass_dfg()
-    : Pass("dfg") {
-}
+Pass_dfg::Pass_dfg():Pass("dfg"){}
 
 void Pass_dfg::do_generate(const LGraph *cfg, LGraph *dfg) {
-
   cfg_2_dfg(cfg, dfg);
   dfg->sync();
 }
@@ -100,13 +98,11 @@ void Pass_dfg::trans(LGraph *dfg) {
       assert(sub_graph);
 
       dfg->node_subgraph_set(idx, sub_graph->lg_id());
-
       fmt::print("resolve pending subG! lg_id:{}, nid:{}, subG name:{}\n", sub_graph->lg_id(), idx, dfg->get_node_wirename(idx));
     }
   }
 
   for(auto idx : dfg->fast()) {
-      // if Equals_Op -> set bit_width = 1
       if(dfg->node_type_get(idx).op == Equals_Op) {
         dfg->set_bits(idx, 1);
       } else if(dfg->node_type_get(idx).op == GreaterEqualThan_Op) {
@@ -131,75 +127,34 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
       dfg->set_bits(idx, (uint16_t)ceil(log2(nb.i.max)));
     }
   }
-  // bits inference: first round: deal with src bw > dst bw
-  /*
-  for(auto idx : dfg->fast()) {
-    for(const auto &out : dfg->out_edges(idx)) {
-      Index_ID src_nid = idx;
-      Index_ID dst_nid = out.get_idx();
-      Port_ID  src_pid = out.get_out_pin().get_pid();
-      //Port_ID  dst_pid = out.get_inp_pin().get_pid();
-      uint16_t src_nid_size = dfg->get_bits(src_nid);
-      uint16_t dst_nid_size = dfg->get_bits(dst_nid);
 
-      if(dfg->node_type_get(idx).op == SubGraph_Op) {
-        LGraph *    subgraph = LGraph::open(dfg->get_path(), dfg->subgraph_id_get(idx));
-        assert(subgraph);
-        //fmt::print("node_wirename:{}\n",dfg->get_node_wirename(idx));
-        //problem2: inou_yosys got empty inst_name for cell type sp_add
-        //dfg->set_node_instance_name(idx, dfg->get_node_wirename(idx));//problem3: it seems fail and trigger char_array assertion fail
-        //fmt::print("has instance name:{}\n", dfg->has_instance_name(dfg->get_node_wirename(idx)));
-        //fmt::print("get instance name:{}\n", dfg->get_node_instancename(idx));
-        //const char *out_name = subgraph->get_graph_output_name_from_pid(1);//problem1:make source pid = 1 will work, but this is not a true pid
-        const char *out_name = subgraph->get_graph_output_name_from_pid(src_pid);//src_pid = 0 will fail, is it a new bug!?
-        fmt::print("nid:{}, subgraph_lg_id:{}, out_name:{}\n", idx, subgraph->lg_id(), out_name);
-        uint16_t    out_size = subgraph->get_bits(subgraph->get_graph_output(out_name).get_nid());
-        dfg->set_bits(dst_nid, out_size);
-      } else if(dfg->node_type_get(dst_nid).op == Mux_Op) {
-        ;
-      } else if(dfg->node_type_get(dst_nid).op == Equals_Op) {
-        ; // don't infetence when dst is a comparator, the result should be a bool
-      } else if(dfg->node_type_get(dst_nid).op == GreaterEqualThan_Op) {
-        ; // don't infetence when dst is a comparator, the result should be a bool
-      } else if(dfg->node_type_get(dst_nid).op == GreaterThan_Op) {
-        ; // don't infetence when dst is a comparator, the result should be a bool
-      } else if(dfg->node_type_get(dst_nid).op == LessEqualThan_Op) {
-        ; // don't infetence when dst is a comparator, the result should be a bool
-      } else if(dfg->node_type_get(dst_nid).op == LessThan_Op) {
-        ; // don't infetence when dst is a comparator, the result should be a bool
-      } else {
-        if(src_nid_size > dst_nid_size)
-          dfg->set_bits(dst_nid, src_nid_size);
+
+  for(auto idx: dfg->fast()){
+    if(dfg->node_type_get(idx).op == Mux_Op) {
+      for (auto &inp : dfg->inp_edges(idx)) {
+        Index_ID src_nid = inp.get_out_pin().get_nid();
+        Index_ID dst_nid = idx;
+        Port_ID  src_pid = inp.get_out_pin().get_pid();
+        Port_ID  dst_pid = inp.get_inp_pin().get_pid();
+
+        if(dst_pid == 0)
+          continue;
+
+        uint16_t bw_diff = abs(dfg->get_bits(src_nid) - dfg->get_bits(dst_nid));
+        if(dfg->get_bits(dst_nid) > dfg->get_bits(src_nid)) {
+          Index_ID sign_ext_nid = create_const32_node(dfg, (pow(2, bw_diff) - 1), bw_diff, false);
+          Index_ID nid_join = dfg->create_node().get_nid();
+          dfg->node_type_set(nid_join, Join_Op);
+          dfg->set_bits(nid_join, dfg->get_bits(dst_nid));
+          dfg->add_edge(Node_Pin(sign_ext_nid, 0, false), Node_Pin(nid_join, 0, true));
+          dfg->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(nid_join, 1, true));
+          dfg->add_edge(Node_Pin(nid_join, 0, false), Node_Pin(dst_nid, dst_pid, true));
+          dfg->del_edge(inp);
+        }
       }
     }
   }
-  // bits inference: second round: deal with src bw < dst bw
-  for(auto idx : dfg->backward()) {
-    for(const auto &out : dfg->out_edges(idx)) {
-      Index_ID src_nid = idx;
-      Index_ID dst_nid = out.get_idx();
-      // Port_ID  src_pid      = out.get_out_pin().get_pid();
-      // Port_ID  dst_pid      = out.get_inp_pin().get_pid();
-      uint16_t src_nid_size = dfg->get_bits(src_nid);
-      uint16_t dst_nid_size = dfg->get_bits(dst_nid);
-      if(dfg->node_type_get(src_nid).op == GraphIO_Op) {
-        ;
-      } else if(dfg->node_type_get(src_nid).op == Equals_Op) {
-        ; // don't infetence when src is a comparator, the result should be a bool
-      } else if(dfg->node_type_get(src_nid).op == GreaterEqualThan_Op) {
-        ; // don't infetence when src is a comparator, the result should be a bool
-      } else if(dfg->node_type_get(src_nid).op == GreaterThan_Op) {
-        ; // don't infetence when src is a comparator, the result should be a bool
-      } else if(dfg->node_type_get(src_nid).op == LessEqualThan_Op) {
-        ; // don't infetence when src is a comparator, the result should be a bool
-      } else if(dfg->node_type_get(src_nid).op == LessThan_Op) {
-        ; // don't infetence when src is a comparator, the result should be a bool
-      } else {
-        if(src_nid_size < dst_nid_size)
-          dfg->set_bits(src_nid, dst_nid_size);
-      }
-    }
-  }*/
+
 
 }
 
@@ -453,9 +408,7 @@ Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree
   Index_ID    cond     = aux_tree->get_alias(data.get_target());
   const auto &operands = data.get_operands();
   auto *      tauxnd   = new Aux_node;
-  auto *      fauxnd   = new Aux_node;
-  // Aux_node *tauxnd ; //todo: segmentation fault here? why?
-  // Aux_node *fauxnd ;
+  auto *      fauxnd   = new Aux_node; //don't dynamic allocate here!!
   auto *pauxnd = aux_tree->get_cur_auxnd(); // parent aux
 
   assert(operands.size() > 1);
@@ -681,3 +634,46 @@ void Pass_dfg::create_mux(LGraph *dfg, Aux_node *pauxnd, Index_ID tid, Index_ID 
   pauxnd->set_alias(var, phi);
   pauxnd->set_pending(var, phi);
 }
+
+// bits inference: first round: deal with src bw > dst bw
+/*
+for(auto idx : dfg->fast()) {
+  for(const auto &out : dfg->out_edges(idx)) {
+    Index_ID src_nid = idx;
+    Index_ID dst_nid = out.get_idx();
+    Port_ID  src_pid = out.get_out_pin().get_pid();
+    //Port_ID  dst_pid = out.get_inp_pin().get_pid();
+    uint16_t src_nid_size = dfg->get_bits(src_nid);
+    uint16_t dst_nid_size = dfg->get_bits(dst_nid);
+
+    if(dfg->node_type_get(idx).op == SubGraph_Op) {
+      LGraph *    subgraph = LGraph::open(dfg->get_path(), dfg->subgraph_id_get(idx));
+      assert(subgraph);
+      //fmt::print("node_wirename:{}\n",dfg->get_node_wirename(idx));
+      //problem2: inou_yosys got empty inst_name for cell type sp_add
+      //dfg->set_node_instance_name(idx, dfg->get_node_wirename(idx));//problem3: it seems fail and trigger char_array assertion fail
+      //fmt::print("has instance name:{}\n", dfg->has_instance_name(dfg->get_node_wirename(idx)));
+      //fmt::print("get instance name:{}\n", dfg->get_node_instancename(idx));
+      //const char *out_name = subgraph->get_graph_output_name_from_pid(1);//problem1:make source pid = 1 will work, but this is not a true pid
+      const char *out_name = subgraph->get_graph_output_name_from_pid(src_pid);//src_pid = 0 will fail, is it a new bug!?
+      fmt::print("nid:{}, subgraph_lg_id:{}, out_name:{}\n", idx, subgraph->lg_id(), out_name);
+      uint16_t    out_size = subgraph->get_bits(subgraph->get_graph_output(out_name).get_nid());
+      dfg->set_bits(dst_nid, out_size);
+    } else if(dfg->node_type_get(dst_nid).op == Mux_Op) {
+      ;
+    } else if(dfg->node_type_get(dst_nid).op == Equals_Op) {
+      ; // don't infetence when dst is a comparator, the result should be a bool
+    } else if(dfg->node_type_get(dst_nid).op == GreaterEqualThan_Op) {
+      ; // don't infetence when dst is a comparator, the result should be a bool
+    } else if(dfg->node_type_get(dst_nid).op == GreaterThan_Op) {
+      ; // don't infetence when dst is a comparator, the result should be a bool
+    } else if(dfg->node_type_get(dst_nid).op == LessEqualThan_Op) {
+      ; // don't infetence when dst is a comparator, the result should be a bool
+    } else if(dfg->node_type_get(dst_nid).op == LessThan_Op) {
+      ; // don't infetence when dst is a comparator, the result should be a bool
+    } else {
+      if(src_nid_size > dst_nid_size)
+        dfg->set_bits(dst_nid, src_nid_size);
+    }
+  }
+}*/

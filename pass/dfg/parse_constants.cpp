@@ -198,14 +198,14 @@ Index_ID Pass_dfg::process_bin_token(LGraph *g, const std::string &token, const 
     while(t_size - 32 * i > 0) {
       // fmt::print("@round{}, token_chunk:                  {}\n", i, token_chunk);
       nid_const32 = create_const32_node(g, token_chunk, 32, is_signed);
-      inp_pins.push_back(Node_Pin(nid_const32, 0, false));
+      inp_pins.emplace_back(Node_Pin(nid_const32, 0, false));
       if(t_size - (32 * (i + 1)) > 0)
         token_chunk = token.substr(t_size - 32 * (i + 1), 32);
       else {
         token_chunk = token.substr(0, t_size - 32 * i);
         // fmt::print("@round{}, token_chunk:                 {}\n", i+1, token_chunk);
         nid_const32 = create_const32_node(g, token_chunk, token_chunk.size(), is_signed);
-        inp_pins.push_back(Node_Pin(nid_const32, 0, false));
+        inp_pins.emplace_back(Node_Pin(nid_const32, 0, false));
       }
       i++;
     }
