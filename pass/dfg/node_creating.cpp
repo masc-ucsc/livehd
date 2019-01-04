@@ -37,6 +37,10 @@ Index_ID Pass_dfg::create_private(LGraph *g, Aux_tree *aux_tree, const std::stri
   return nid;
 }
 
+Index_ID Pass_dfg::create_const32_node(LGraph *g, uint32_t val, uint16_t node_bit_width, bool is_signed) {
+  return create_const32_node(g, std::to_string(val), node_bit_width, is_signed);
+}
+
 Index_ID Pass_dfg::create_default_const(LGraph *g) {
   Index_ID nid = g->create_node().get_nid();
   g->node_type_set(nid, U32Const_Op);
@@ -51,12 +55,6 @@ Index_ID Pass_dfg::create_true_const(LGraph *g, Aux_tree *aux_tree) {
   g->node_type_set(nid, U32Const_Op);
   g->node_u32type_set(nid, 1);
 
-#if 0
-  // Better not to assign temps. Use space, waste time and space. Only if strictly needed
-  std::string var_name = temp();
-  g->set_node_wirename(nid, var_name.c_str());
-#endif
-
   return nid;
 }
 
@@ -65,16 +63,10 @@ Index_ID Pass_dfg::create_false_const(LGraph *g, Aux_tree *aux_tree) {
   g->node_type_set(nid, U32Const_Op);
   g->node_u32type_set(nid, 0);
 
-#if 0
-  std::string var_name = temp();
-  g->set_node_wirename(nid, var_name.c_str());
-#endif
-
   return nid;
 }
 
 Index_ID Pass_dfg::create_node(LGraph *g, Aux_tree *aux_tree, const std::string &v, const uint16_t bits) {
-
   assert(!v.empty());
 
   Index_ID nid = g->create_node().get_nid();
