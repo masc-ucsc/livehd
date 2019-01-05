@@ -140,13 +140,15 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
         if(dst_pid == 0)
           continue;
 
+        //assume MIT algo. will at least set mux.bits equals to the larger input
         uint16_t bw_diff = abs(dfg->get_bits(src_nid) - dfg->get_bits(dst_nid));
         if(dfg->get_bits(dst_nid) > dfg->get_bits(src_nid)) {
-          Index_ID sign_ext_nid = create_const32_node(dfg, (pow(2, bw_diff) - 1), bw_diff, false);
+          //temporarily using unsigned extend to fix mux bitwidth mismatch
+          Index_ID unsign_ext_nid = create_const32_node(dfg, 0, bw_diff, false);
           Index_ID nid_join = dfg->create_node().get_nid();
           dfg->node_type_set(nid_join, Join_Op);
           dfg->set_bits(nid_join, dfg->get_bits(dst_nid));
-          dfg->add_edge(Node_Pin(sign_ext_nid, 0, false), Node_Pin(nid_join, 0, true));
+          dfg->add_edge(Node_Pin(unsign_ext_nid, 0, false), Node_Pin(nid_join, 0, true));
           dfg->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(nid_join, 1, true));
           dfg->add_edge(Node_Pin(nid_join, 0, false), Node_Pin(dst_nid, dst_pid, true));
           dfg->del_edge(inp);
