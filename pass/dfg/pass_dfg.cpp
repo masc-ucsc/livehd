@@ -128,7 +128,6 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
     }
   }
 
-
   for(auto idx: dfg->fast()){
     if(dfg->node_type_get(idx).op == Mux_Op) {
       for (auto &inp : dfg->inp_edges(idx)) {
@@ -156,8 +155,6 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
       }
     }
   }
-
-
 }
 
 bool Pass_dfg::cfg_2_dfg(const LGraph *cfg, LGraph *dfg) {
@@ -207,9 +204,9 @@ Index_ID Pass_dfg::process_cfg(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tre
 }
 
 Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, Index_ID cfg_node) {
+
   const CFG_Node_Data data(cfg, cfg_node);
 
-  // sh dbg
   fmt::print("Processing CFG node:{}\n", cfg_node);
   fmt::print("target:[{}], operator:[{}], ", data.get_target(), data.get_operator());
   fmt::print("operands:[");

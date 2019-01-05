@@ -5,6 +5,7 @@
 
 CFG_Node_Data::CFG_Node_Data(const LGraph *g, Index_ID node) {
   std::string_view data_str = g->get_node_wirename(node);
+  fmt::print("wirename:{}\n", data_str);
 
   if(data_str.empty()) {
     target       = EMPTY_MARKER;
@@ -18,6 +19,11 @@ CFG_Node_Data::CFG_Node_Data(const LGraph *g, Index_ID node) {
 
   for(int i = 2; i < v.size()-1; i++)
     operands.emplace_back(v[i]);
+
+  for(const auto& i : operands){
+    fmt::print("oprands:{}\n",i);
+  }
+
 }
 
 CFG_Node_Data::CFG_Node_Data(const std::string &parser_raw) {

@@ -133,7 +133,6 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs, unordered_ma
     create in/out GIO for every graph
   */
    for(uint32_t i = 0; i < lgs.size(); i++) {
-    fmt::print("now process loop:{}\n", i);
     //Graph input
     Node gio_node_begn = lgs[i]->create_node();
     lgs[i]->add_graph_input("ginp", gio_node_begn.get_nid(), 0, 0);
@@ -145,7 +144,6 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs, unordered_ma
     Node gio_node_ed = lgs[i]->create_node();
     lgs[i]->add_graph_output("gout", gio_node_ed.get_nid(), 0, 0);
     src_nid = nid_end_lgs[i];
-    fmt::print("total node number:{}\n", nname2nid_lgs[0].size());
     dst_nid = gio_node_ed.get_nid();
     lgs[i]->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
   }
@@ -225,6 +223,7 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
     g->node_type_set(name2id[w1st], CfgAssign_Op);
 
   g->set_node_wirename(name2id[w1st], CFG_Node_Data(dfg_data).encode().c_str());
+  fmt::print("@cfg node:{}, wirename:{}\n", name2id[w1st], CFG_Node_Data(dfg_data).encode().c_str());
 
   /*
     II-0.process 2nd node and 9th node(if-else merging node)
@@ -399,20 +398,29 @@ void Inou_cfg::lgraph_2_cfg(const LGraph *g, const string &filename) {
   fmt::print("line_cnt = {}\n", line_cnt);
 }
 
+
 void Inou_cfg::update_ifs(vector<LGraph *> &lgs, vector<map<string, Index_ID>> &node_mappings) {
   for(size_t i = 0; i < lgs.size(); i++) {
     LGraph *g       = lgs[i];
     auto &  mapping = node_mappings[i];
 
+    fmt::print("cfg update_ifs\n");
     for(auto idx : g->fast()) {
       CFG_Node_Data data(g, idx);
 
       if(data.is_br_marker()) {
         const auto &   dops = data.get_operands();
+        for(const auto& i: dops)
+          fmt::print("dops:{}\n", i);
         vector<string> new_operands(dops.size());
 
         std::transform(dops.begin(), dops.end(), new_operands.begin(),
-                       [&](const string &op) -> string { return std::to_string(mapping[(op[0] == '\'') ? op.substr(1) : op]); });
+                       [&](const string &op) -> string {
+          if(op == "null")
+            return "0";
+          return std::to_string(mapping[(op[0] == '\'') ? op.substr(1) : op]);
+        });
+
         const CFG_Node_Data cnode(data.get_target(), new_operands, std::string(data.get_operator()));
         g->set_node_wirename(idx, cnode.encode().c_str());
       }
@@ -428,9 +436,6 @@ void Inou_cfg::collect_fcall_info(LGraph *g, Index_ID new_node, const std::strin
   g->set_node_wirename(pin_node1, w7th.c_str());
   g->set_node_wirename(pin_node2, w8th.c_str());
   g->set_node_wirename(pin_node3, w9th.c_str());
-  fmt::print("pin_node1:{}, wirename:{}\n", pin_node1, g->get_node_wirename(pin_node1));
-  fmt::print("pin_node2:{}, wirename:{}\n", pin_node2, g->get_node_wirename(pin_node2));
-  fmt::print("pin_node3:{}, wirename:{}\n", pin_node3, g->get_node_wirename(pin_node3));
 }
 
 void Inou_cfg::remove_fake_fcall(LGraph *g) {
