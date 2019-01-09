@@ -19,6 +19,7 @@ cc_binary(
             "//inou/pyrope:inou_pyrope",
             "//inou/graphviz:inou_graphviz",
             "//inou/rand:inou_rand",
+            "//inou/verific:inou_verific",
 
 
             "//pass/abc:pass_abc",
