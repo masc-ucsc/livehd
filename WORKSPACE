@@ -126,6 +126,14 @@ new_git_repository(
     #patches = ["//external:patch.verilator"],
     #strip_prefix = "include",
 )
+new_git_repository(
+    name = "mockturtle",
+    build_file = "BUILD.mockturtle",
+    commit = "555ef000e984ad753e98836a7631b8a63dacf70d",
+    remote = "https://github.com/lsils/mockturtle.git",
+    #patches = ["//external:patch.verilator"],
+    #strip_prefix = "include",
+)
 #load(
 #    "//tools:externals.bzl",
 #    "new_patched_http_archive",

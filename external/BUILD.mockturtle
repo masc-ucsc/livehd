@@ -1,0 +1,11 @@
+#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+cc_library(
+   name = "mockturtle",
+   hdrs = glob(["include/**/*.hpp"])
+        + glob(["lib/ez/ez/*.hpp"])
+        + glob(["lib/kitty/**/*.hpp"])
+        + glob(["lib/sparsepp/sparsepp/*.h"]),
+   #srcs = glob(["src/*.cc"]),
+   includes = ["include", "lib/ez", "lib/kitty", "lib/sparsepp"],
+   visibility = ["//visibility:public"],
+)
