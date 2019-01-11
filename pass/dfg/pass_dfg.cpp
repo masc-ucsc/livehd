@@ -147,11 +147,23 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
           Index_ID nid_join = dfg->create_node().get_nid();
           dfg->node_type_set(nid_join, Join_Op);
           dfg->set_bits(nid_join, dfg->get_bits(dst_nid));
-          dfg->add_edge(Node_Pin(unsign_ext_nid, 0, false), Node_Pin(nid_join, 0, true));
-          dfg->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(nid_join, 1, true));
+          //dfg->add_edge(Node_Pin(unsign_ext_nid, 0, false), Node_Pin(nid_join, 0, true));
+          //dfg->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(nid_join, 1, true));
+          dfg->add_edge(Node_Pin(unsign_ext_nid, 0, false), Node_Pin(nid_join, 1, true));
+          dfg->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(nid_join, 0, true));
           dfg->add_edge(Node_Pin(nid_join, 0, false), Node_Pin(dst_nid, dst_pid, true));
           dfg->del_edge(inp);
         }
+      }
+    }
+
+    //after MIT algo. and Mux_Op processing, bw of every node should be synced except an output gio connected to a Mux_Op
+    if(dfg->node_type_get(idx).op == GraphIO_Op){
+      for(auto &inp : dfg->inp_edges(idx)){
+        Index_ID src_nid = inp.get_out_pin().get_nid();
+        Index_ID dst_nid = idx;
+        if(dfg->get_bits(src_nid) > dfg->get_bits(dst_nid))
+          dfg->set_bits(dst_nid, dfg->get_bits(src_nid));
       }
     }
   }
