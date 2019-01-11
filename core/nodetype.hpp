@@ -267,7 +267,8 @@ public:
   };
 };
 
-// Y = {A,B,C,D,E....}
+// Y = {A,B,C,D,E....} => previous expression might be wrong!!
+// Y = {...,E,D,C,B,A} => modified by SH
 class Node_Type_Join : public Node_Type {
 public:
   Node_Type_Join()

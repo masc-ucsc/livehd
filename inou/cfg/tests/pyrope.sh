@@ -15,8 +15,7 @@ pwd
 
 # pts='top_ooo  sp_add  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2  if_elif_else'
 # pts='top_ooo  sp_add  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2 '
-pts='constant_pos sp_if_0 nested_if_0'
-# pts='nested_if_0'
+pts='constant_pos sp_if_0 nested_if_0 nested_if_1 nested_if_2'
 
 LGSHELL=./bazel-bin/main/lgshell
 
@@ -67,9 +66,10 @@ do
   if [ $OPT_MITBW -eq 1 ]; then
     echo "lgraph.open name:${pt} |> pass.bitwidth"                        >> lgshell_cmds_opt
   fi
-  echo "lgraph.open name:${pt} |> pass.dfg.finalize_bitwidth"             >> lgshell_cmds_opt
 
+  echo "lgraph.open name:${pt} |> pass.dfg.finalize_bitwidth"             >> lgshell_cmds_opt
   echo "lgraph.open name:${pt} |> inou.json.fromlg output:${pt}.json"     >> lgshell_cmds_opt
+  echo "lgraph.open name:${pt} |> inou.graphviz odir:./logs bits:true"     >> lgshell_cmds_opt
 
 
  ${LGSHELL} < lgshell_cmds_opt

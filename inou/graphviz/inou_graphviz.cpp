@@ -56,17 +56,17 @@ void Inou_graphviz::do_fromlg(std::vector<const LGraph *> &lgs) {
 
     std::string data = "digraph {\n";
 
-    g->each_master_root_fast([g, &data](Index_ID src_nid) {
+    g->each_master_root_fast([this, g, &data](Index_ID src_nid) {
       const auto &node = g->node_type_get(src_nid);
-      data += fmt::format(" {} [label=\"{}:{}\"];\n", src_nid, src_nid, node.get_name());
+      std::string bits_str = std::to_string(g->get_bits(src_nid));
+      if(bits)
+        data += fmt::format(" {} [label=\"n{}:{}:{}b\"];\n", src_nid, src_nid, node.get_name(), bits_str);
+      else
+        data += fmt::format(" {} [label=\"n{}:{}\"];\n",  src_nid, src_nid, node.get_name());
     });
 
     g->each_output_edge_fast([this, g, &data](Index_ID src_nid, Port_ID src_pid, Index_ID dst_nid, Port_ID dst_pid) {
-      std::string bits_str = "";
-      if(bits)
-        bits_str = " " + std::to_string(g->get_bits_pid(src_nid, src_pid));
-
-      data += fmt::format(" {} -> {}[label=\"{}:{}{}\"];\n", src_nid, dst_nid, src_pid, dst_pid, bits_str);
+      data += fmt::format(" {} -> {}[label=\"{}:{}\"];\n", src_nid, dst_nid, src_pid, dst_pid);
     });
     data += "}\n";
 
