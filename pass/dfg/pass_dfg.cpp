@@ -8,7 +8,6 @@
 #include "lgedge.hpp"
 #include "lgedgeiter.hpp"
 #include "pass_dfg.hpp"
-
 #include "eprp_utils.hpp"
 
 void setup_pass_dfg() {
@@ -171,13 +170,11 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
 
 bool Pass_dfg::cfg_2_dfg(const LGraph *cfg, LGraph *dfg) {
   Index_ID itr = find_cfg_root(cfg);
-  // Aux_node auxnd(dfg);
   Aux_node auxnd_global;
   Aux_tree aux_tree(&auxnd_global);
   process_cfg(dfg, cfg, &aux_tree, itr);
   finalize_gconnect(dfg, &auxnd_global);
 
-  // attach_outputs(dfg, &auxnd);
   fmt::print("calling sync\n");
 
   return true; // FIXME: FALSE == failure in dfg generation
