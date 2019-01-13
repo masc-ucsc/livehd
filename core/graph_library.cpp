@@ -149,7 +149,7 @@ bool Graph_library::rename_name(std::string_view orig, std::string_view dest) {
     const std::string ext(dent->d_name + 7 + orig.size() + 1);
 
     const std::string dest_file = get_lgraph_filename(path, dest, ext);
-    const std::string orig_file = get_lgraph_filename(path, dest, ext);
+    const std::string orig_file = get_lgraph_filename(path, orig, ext);
 
     fmt::print("renaming {} to {}\n", orig_file, dest_file);
     int s = rename(orig_file.c_str(), dest_file.c_str());
