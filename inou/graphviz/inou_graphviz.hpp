@@ -20,7 +20,7 @@ protected:
 
   static void fromlg(Eprp_var &var);
 
-  void do_fromlg(std::vector<const LGraph *> &out);
+  void do_fromlg(std::vector<LGraph *> &out);
 
 public:
   Inou_graphviz();

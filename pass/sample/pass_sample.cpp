@@ -32,7 +32,7 @@ void Pass_sample::work(Eprp_var &var) {
 void Pass_sample::do_work(const LGraph *g) {
   LGBench b("pass.sample");
 
-#if 1
+#if 0
   g->each_sub_graph_fast([g](const Index_ID &idx, const Lg_type_id &lgid, std::string_view iname) {
     fmt::print("1.base:{} idx:{} lgid:{} iname:{}\n",g->get_name(), idx, lgid, iname);
     return true;
