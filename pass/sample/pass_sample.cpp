@@ -32,18 +32,18 @@ void Pass_sample::work(Eprp_var &var) {
 void Pass_sample::do_work(const LGraph *g) {
   LGBench b("pass.sample");
 
-#if 0
-  g->each_sub_graph_fast([g](Index_ID idx, Lg_type_id lgid, const std::string &iname) {
+#if 1
+  g->each_sub_graph_fast([g](const Index_ID &idx, const Lg_type_id &lgid, std::string_view iname) {
     fmt::print("1.base:{} idx:{} lgid:{} iname:{}\n",g->get_name(), idx, lgid, iname);
     return true;
   });
 
-  g->each_sub_graph_fast([g](Index_ID idx, Lg_type_id lgid, const std::string &iname) {
+  g->each_sub_graph_fast([g](const Index_ID &idx, const Lg_type_id &lgid, std::string_view iname) {
     fmt::print("3.base:{} idx:{} lgid:{} iname:{}\n",g->get_name(), idx, lgid, iname);
     return true;
   });
 
-  g->each_sub_graph_fast([g](const Index_ID &idx, const Lg_type_id &lgid, const std::string &iname) {
+  g->each_sub_graph_fast([g](const Index_ID &idx, const Lg_type_id &lgid, std::string_view iname) {
     fmt::print("3.base:{} idx:{} lgid:{} iname:{}\n",g->get_name(), idx, lgid, iname);
   });
 
@@ -56,12 +56,12 @@ void Pass_sample::do_work(const LGraph *g) {
     return false;
   });
 
-  std::function<void(const Index_ID &, const Lg_type_id &, const std::string &)> fn = [g](const Index_ID &idx, const Lg_type_id &lgid, const std::string &iname) {
+  std::function<void(const Index_ID &, const Lg_type_id &, std::string_view )> fn = [g](const Index_ID &idx, const Lg_type_id &lgid, std::string_view iname) {
     fmt::print("2.base:{} idx:{} lgid:{} iname:{}\n",g->get_name(), idx, lgid, iname);
   };
   g->each_sub_graph_fast(fn);
 
-  std::function fn2 = [g](const Index_ID &idx, const Lg_type_id &lgid, const std::string &iname) {
+  std::function fn2 = [g](const Index_ID &idx, const Lg_type_id &lgid, std::string_view iname) {
     fmt::print("2.base:{} idx:{} lgid:{} iname:{}\n",g->get_name(), idx, lgid, iname);
     return false;
   };
