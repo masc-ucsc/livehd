@@ -14,8 +14,9 @@ pwd
 
 
 # pts='top_ooo  sp_add  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2  if_elif_else'
-# pts='top_ooo  sp_add  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2 '
-pts='constant_pos sp_if_0 nested_if_0 nested_if_1 nested_if_2'
+# pts='constant_pos sp_if_0 nested_if_0 nested_if_1 nested_if_2 nested_if_3'
+pts='top_inline_add'
+# pts='sp_assign'
 
 LGSHELL=./bazel-bin/main/lgshell
 
@@ -55,10 +56,23 @@ done
 
 mv *.json ./logs
 
+# find ./lgdb -type f -printf "%f\n"
+
+# for file in ./lgdb/*; do
+#   for pt in $pts do
+#     # if(string length of pt != file[6:6+string_length])
+#     #   insert file into pts
+#     # else 
+#     #   do nothing, the pt has already in pts
+#   done
+# done
+
 echo ""
 echo "2nd round: DFG optimization"
 echo ""
 
+
+# dbg:should search lgdb directory for all possible cfg graphs instead of using static pattern name
 for pt in $pts
 do
   echo "lgraph.open name:${pt} |> pass.dfg.optimize"                      >  lgshell_cmds_opt

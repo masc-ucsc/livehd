@@ -93,6 +93,7 @@ void Pass_dfg::trans(LGraph *dfg) {
   for(auto idx : dfg->fast()) {
     if(dfg->node_type_get(idx).op == DfgPendingGraph_Op) {
       auto wirename = dfg->get_node_wirename(idx);
+      fmt::print("sub graph name is:{}\n", dfg->get_node_wirename(idx));
       sub_graph     = LGraph::open(dfg->get_path(), wirename);
       assert(sub_graph);
 
@@ -246,7 +247,7 @@ Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tr
 
 void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data) {
   // for func_call, all the node should be created before, you just connect them. No need to create target node
-  fmt::print("process function call\n");
+  fmt::print("------>process function call!!!!!\n");
   const auto &target    = data.get_target();
   const auto &oprds     = data.get_operands();
   const auto &oprd_ids  = process_operands(dfg, aux_tree, data); // all operands should be in auxtab, just retrieve oprd_ids
@@ -260,6 +261,8 @@ void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_t
                sub_graph->lg_id());
   } else {
     dfg->node_type_set(subg_root_nid, DfgPendingGraph_Op);
+    //re-assign correct subgraph name
+    dfg->set_node_wirename(subg_root_nid, oprds.at(0));
     fmt::print("set pending graph on nid:{}, sub_graph name should be:{}\n", subg_root_nid, dfg->get_node_wirename(subg_root_nid));
   }
 
