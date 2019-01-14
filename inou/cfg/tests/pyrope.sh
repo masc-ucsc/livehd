@@ -29,7 +29,6 @@ if [ ! -f $LGSHELL ]; then
   fi
 fi
 
-
 echo ""
 echo "1st round: CFG2DFG compilation"
 echo ""
@@ -41,7 +40,7 @@ do
     exit 1
   fi
 
-  echo "inou.cfg.tolg  file:./inou/cfg/tests/${pt}.cfg  name:${pt}_cfg  |> @a" >  lgshell_cmds
+  echo "inou.cfg.tolg  files:./inou/cfg/tests/${pt}.cfg  name:${pt}_cfg  |> @a" >  lgshell_cmds
   echo "lgraph.open name:${pt}_cfg |> inou.json.fromlg output:${pt}_cfg.json"  >> lgshell_cmds
   echo "lgraph.open name:${pt}_cfg |> pass.dfg.generate name:${pt}"            >> lgshell_cmds
   echo "lgraph.open name:${pt} |> inou.json.fromlg output:${pt}_pre.json"      >> lgshell_cmds

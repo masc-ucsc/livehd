@@ -42,7 +42,7 @@ void Inou_graphviz::fromlg(Eprp_var &var) {
   if(!ok)
     return;
 
-  std::vector<const LGraph *> lgs;
+  std::vector<LGraph *> lgs;
   for(const auto &l : var.lgs) {
     lgs.push_back(l);
   }
@@ -50,7 +50,15 @@ void Inou_graphviz::fromlg(Eprp_var &var) {
   p.do_fromlg(lgs);
 }
 
-void Inou_graphviz::do_fromlg(std::vector<const LGraph *> &lgs) {
+void Inou_graphviz::do_fromlg(std::vector<LGraph *> &lgs) {
+
+  for(const auto g : lgs) {
+    const auto hier = g->get_hierarchy();
+    fmt::print("hierarchy for {}\n",g->get_name());
+    for(auto &[name,lgid]:hier) {
+      fmt::print("  {} {}\n",name,lgid);
+    }
+  }
 
   for(const auto g : lgs) {
 

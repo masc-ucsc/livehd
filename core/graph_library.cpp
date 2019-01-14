@@ -159,7 +159,7 @@ bool Graph_library::rename_name(std::string_view orig, std::string_view dest) {
 
   clean_library();
 
-  return id;
+  return true;
 }
 
 void Graph_library::update(Lg_type_id lgid) {

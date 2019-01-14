@@ -28,7 +28,7 @@ public:
     m1.add_label_optional("path","output lgraph path");
     m1.add_label_required("name","output lgraph name");
 
-    m1.add_label_required("file","input src cfg_table file");
+    m1.add_label_required("files","input src cfg_table file");
 
     eprp.register_method(m1);
   }

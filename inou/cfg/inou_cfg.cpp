@@ -496,7 +496,7 @@ void Inou_cfg::remove_fake_fcall(LGraph *g) {
 
 void Inou_cfg_options::set(const std::string &key, const std::string &value) {
   try {
-    if(is_opt(key, "file"))
+    if(is_opt(key, "files"))
       file = value;
     else
       set_val(key, value);
