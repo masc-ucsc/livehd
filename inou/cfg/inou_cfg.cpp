@@ -62,8 +62,10 @@ vector<LGraph *> Inou_cfg::tolg() {
   for(const auto &it : rename_tab) {
     fmt::print("Try to rename lgraph!\n");
     fmt::print("original subg_name:{}, new name:{}\n", it.first, it.second);
-    LGraph::rename("./" + opack.path, it.first, it.second);
+    LGraph::rename("./" + opack.path, it.first, it.second + "_cfg");
   }
+  auto gl = Graph_library::instance("./" + opack.path);
+  gl->sync();
 
   close(fd);
   return lgs;
