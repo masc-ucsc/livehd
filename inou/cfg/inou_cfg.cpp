@@ -62,7 +62,7 @@ vector<LGraph *> Inou_cfg::tolg() {
   for(const auto &it : rename_tab) {
     fmt::print("Try to rename lgraph!\n");
     fmt::print("original subg_name:{}, new name:{}\n", it.first, it.second);
-    LGraph::rename("./" + opack.path, it.first, it.second + "_cfg");
+    LGraph::rename("./" + opack.path, it.first, it.second);
   }
   auto gl = Graph_library::instance("./" + opack.path);
   gl->sync();
@@ -189,7 +189,7 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
   static bool   has_func_defined;
   // method subgraph renaming
   if(has_func_defined) {
-    rename_tab[subg_name] = w7th;
+    rename_tab[subg_name] = w7th + "_cfg";
     subg_name             = "";
     has_func_defined      = false;
   }
