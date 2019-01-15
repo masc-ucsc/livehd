@@ -15,7 +15,7 @@ memory_dff
 memory_share
 memory_collect
 
-flatten
+#flatten
 
 {{#techmap_alumacc}}
 alumacc
