@@ -58,6 +58,13 @@ new_git_repository(
     #strip_prefix = "include",
 )
 new_git_repository(
+    name = "iassert",
+    build_file = "BUILD.iassert",
+    commit = "803222f444ad416e49f27ad332afcd6cefd6d759", # Jan 15, 2019
+    remote = "https://github.com/masc-ucsc/iassert.git",
+    strip_prefix = "src",
+)
+new_git_repository(
     name = "sparsehash",
     build_file = "BUILD.sparsehash",
     commit = "5ca6de766db32b3fb08a040636423cd3988d2d4f", # Jun 8, 2018

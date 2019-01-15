@@ -7,6 +7,7 @@ cc_library(
     includes = ["."],
     deps = ["@bm//:headers",
             "@rapidjson//:headers",
+            "@iassert//:iassert",
             "//eprp:eprp",
             "//lmms:headers",
             "//bench:headers",
