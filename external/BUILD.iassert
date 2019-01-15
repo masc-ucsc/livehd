@@ -1,0 +1,8 @@
+#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+cc_library(
+   name = "iassert",
+   srcs = ["iassert.cpp"],
+   hdrs = ["iassert.hpp"],
+   #includes = [ "." ], # Needed because some includes use <foo.h>
+   visibility = ["//visibility:public"],
+)
