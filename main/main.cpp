@@ -14,6 +14,7 @@
 #include <iomanip>
 #include <iostream>
 
+#include "iassert.hpp"
 #include "lgraph.hpp"
 #include "eprp.hpp"
 
@@ -260,6 +261,8 @@ void hook_color(std::string const& context, Replxx::colors_t& colors, void* user
 }
 
 int main(int argc, char **argv) {
+
+  I_segfault_setup();
 
   bool option_quiet = false;
 
