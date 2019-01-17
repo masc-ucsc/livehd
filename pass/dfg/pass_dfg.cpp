@@ -31,7 +31,9 @@ std::vector<LGraph*> Pass_dfg::hierarchical_gen_dfgs(LGraph *cfg_parent){
     if(cfg_child==0){
       Pass::error("hierarchy for {} could not open instance {} with lgid {}", cfg_parent->get_name(), iname, lgid);
     } else {
-      auto child_dfg_name = cfg_child->get_name().substr(0, cfg_child->get_name().size() - 4);
+      I(absl::EndsWith(cfg_child->get_name(),"_cfg"));
+      //auto child_dfg_name = cfg_child->get_name().substr(0, cfg_child->get_name().size() - 4);
+      std::string_view child_dfg_name(cfg_child->get_name().data(), cfg_child->get_name().size()-4); // _cfg
       LGraph *dfg_child = LGraph::create(cfg_child->get_path(), child_dfg_name, cfg_child->get_name());
       assert(dfg_child);
       this->do_generate(cfg_child, dfg_child);
@@ -49,7 +51,7 @@ void Pass_dfg::generate(Eprp_var &var) {
   //std::vector<LGraph *> lgs;
   std::vector<LGraph *> dfgs;
   for(auto &cfg : var.lgs) {
-    if(!Eprp_utils::ends_with(cfg->get_name(), std::string("_cfg")))
+    if(!absl::EndsWith(cfg->get_name(), "_cfg"))
       continue;
 
     dfgs = p.hierarchical_gen_dfgs(cfg);
@@ -538,10 +540,11 @@ void Pass_dfg::add_abort_logic(LGraph *dfg, Aux_tree *aux_tree, const std::vecto
 Index_ID Pass_dfg::find_cfg_root(const LGraph *cfg) {
   // FIXME: This is VERY inneficient. Why is not the input from the graph?
   // cfg->each_input([&idx] { ....
-  Index_ID root_id;
+  Index_ID root_id=0;
   cfg->each_input([&root_id](Index_ID idx){
     root_id = idx;
   });
+  I(root_id!=0);
 
   fmt::print("root_id:{}\n", root_id);
   assert(root_id);

@@ -78,7 +78,7 @@ void Inou_graphviz::do_fromlg(std::vector<LGraph *> &lgs) {
     });
     data += "}\n";
 
-    std::string file = odir + "/" + g->get_name() + ".dot";
+    std::string file = absl::StrCat(odir, "/", g->get_name(), ".dot");
     int         fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
     if(fd < 0) {
       Pass::error("inou.graphviz unable to create {}", file);

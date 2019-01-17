@@ -104,6 +104,30 @@ for(auto idx:g->unordered()) {
 void print(std::string_view message)
 ```
 
+## Use abseil library for String operations like StrCat, StrSplit, EndsWith
+
+```cpp
+#include "absl/strings/substitute.h"
+
+auto file = absl::StrCat("file","/",extension);
+
+if (absl::EndsWidth(file,".prp")) {
+  // Your code here
+}
+```
+The reason is to have a more efficient. Using + for string concats have mallocs
+and traversal overheads.
+
+## Do not use std::unordered_set, use flat_hash_map or flat_hash_set from abseil
+
+
+```cpp
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
+
+absl::flat_hash_map<Index_ID, RTLIL::Wire *>   my_example;
+```
+
 ## Pass by reference and use "const" when possible
 
 ```cpp

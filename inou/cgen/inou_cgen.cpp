@@ -36,10 +36,7 @@ void Inou_cgen::fromlg(Eprp_var &var) {
     return;
 
   for(const auto &g : var.lgs) {
-
-    const std::string prp_file = g->get_name() + ".prp";
-    std::string filename(odir);
-    filename += "/" + prp_file;
+    const auto filename = absl::StrCat(odir,"/",g->get_name(),".prp");
 
     p.to_pyrope(g, filename);
   }

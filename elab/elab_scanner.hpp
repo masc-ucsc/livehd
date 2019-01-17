@@ -6,7 +6,10 @@
 #include <string>
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/strings/substitute.h"
+
 #include "fmt/format.h"
 
 #define MIN_CHUNK_SIZE 4

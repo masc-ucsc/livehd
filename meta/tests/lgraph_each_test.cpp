@@ -28,7 +28,7 @@ protected:
 
   void add_child(LGraph *parent, LGraph *child, std::string_view iname, bool randomize) {
 
-    children[parent->get_name() + ":" + child->get_name()]++;
+    children[absl::StrCat(parent->get_name(), ":", child->get_name())]++;
 
     auto nid = parent->create_node().get_nid();
     parent->node_subgraph_set(nid, child->lg_id());
@@ -125,9 +125,13 @@ TEST_F(Setup_graphs_test, each_sub_graph) {
 
         fmt::print("parent:{} child:{} iname:{}\n",parent->get_name(), child->get_name(), iname);
 
-        EXPECT_TRUE(children.find(parent->get_name() + ":" + child->get_name()) != children.end());
+        EXPECT_TRUE(children.find(absl::StrCat(parent->get_name(), ":", child->get_name())) != children.end());
 
-        children2[parent->get_name() + ":" + child->get_name()]++;
+        auto id = absl::StrCat(parent->get_name(), ":", child->get_name());
+        if (children2.find(id) == children2.end())
+          children2[id] = 1;
+        else
+          children2[id]++;
 
         child->close();
     });
@@ -152,11 +156,17 @@ TEST_F(Setup_graphs_test, each_sub_graph_twice) {
 
         ASSERT_NE(child,nullptr);
 
-        fmt::print("parent:{} child:{} iname:{}\n",parent->get_name(), child->get_name(), iname);
 
-        EXPECT_TRUE(children.find(parent->get_name() + ":" + child->get_name()) != children.end());
+        EXPECT_TRUE(children.find(absl::StrCat(parent->get_name(), ":", child->get_name())) != children.end());
 
-        children2[parent->get_name() + ":" + child->get_name()]++;
+        auto id = absl::StrCat(parent->get_name(), ":", child->get_name());
+
+        fmt::print("parent:{} child:{} iname:{} id:{}\n",parent->get_name(), child->get_name(), iname, id);
+
+        if (children2.find(id) == children2.end())
+          children2[id] = 1;
+        else
+          children2[id]++;
 
         child->close();
     });

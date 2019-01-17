@@ -24,6 +24,8 @@ private:
   std::map<Graph_Node, Net_ID>               synth_map;
   std::map<Graph_Node, std::string>          bound2net;
 
+  using Name2graph_type = absl::flat_hash_map<std::string, LGraph *>;
+
   std::set<Graph_Node> fwd_visited;
 
   bool is_user_def(LGraph *current, Index_ID idx, Port_ID pid) const;
@@ -37,7 +39,7 @@ private:
 
   void generate_modules(std::set<Graph_Node> &different_nodes, const std::string &out_lgdb);
 
-  void add_ios_up(LGraph *module, Index_ID nid, std::map<std::string, LGraph *> &name2graph);
+  void add_ios_up(LGraph *module, Index_ID nid, Name2graph_type &name2graph);
 
 public:
   //FIXME: can we remove the dependency on the synthesized graph?

@@ -49,8 +49,7 @@ public:
   static Invariant_boundaries *deserialize(std::istream &ifs);
 
   static Graph_ID get_graphID(LGraph *g) {
-    assert(g->get_name().substr(0, 7) != "lgraph_");
-    return g->get_name();
+    return std::string(g->get_name()); // FIXME: It would be better to use string_view, BUT, lgraph can delete/add lgraphs names (can it???)
   }
 
   static LGraph *get_graph(Graph_ID id, const std::string& lgdb) {

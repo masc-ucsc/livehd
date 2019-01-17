@@ -1,5 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include <sstream>
+
+#include "iassert.hpp"
 #include "inou_cfg.hpp"
 #include "cfg_node_data.hpp"
 
@@ -13,6 +15,7 @@ CFG_Node_Data::CFG_Node_Data(const LGraph *g, Index_ID node) {
   }
 
   std::vector<std::string> v = absl::StrSplit(data_str, ENCODING_DELIM);
+  I(v.size()>=2);
   operator_txt = v[0];
   target       = v[1];
 

@@ -60,6 +60,7 @@ LGraph *LGraph::open(std::string_view path, int lgid) {
 }
 
 void LGraph::rename(std::string_view path, std::string_view orig, std::string_view dest) {
+
   LGraph *lg = Graph_library::try_find_lgraph(path,orig);
   if (lg) {
     Pass::error("lgraph::rename failed for {}/{} because the lgraph is open",path,orig);
@@ -316,7 +317,7 @@ const LGraph::Hierarchy &LGraph::get_hierarchy() {
     std::string base;
     LGraph *top;
     LGraph *lg;
-    Entry(std::string _base, LGraph *_top, LGraph *_lg) :base(_base), top(_top) ,lg(_lg) {}
+    Entry(std::string_view _base, LGraph *_top, LGraph *_lg) :base(_base), top(_top) ,lg(_lg) {}
   };
   std::vector<Entry> pending;
 
@@ -336,7 +337,7 @@ const LGraph::Hierarchy &LGraph::get_hierarchy() {
       if(lg==0) {
         Pass::error("hierarchy for {} could not open instance {} with lgid {}", entry.base, iname, lgid);
       }else{
-        std::string base2 = absl::StrCat(entry.base, ":", iname);
+        auto base2 = absl::StrCat(entry.base, ":", iname);
         pending.emplace_back(base2, entry.top, lg);
       }
     });

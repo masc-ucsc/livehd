@@ -5,6 +5,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#include "absl/strings/substitute.h"
 #include "chunkify_verilog.hpp"
 #include "eprp_utils.hpp"
 
@@ -33,14 +34,15 @@ void Inou_liveparse::tolg(Eprp_var &var) {
   auto elab_path = var.get("elab_path");
 
   if(files.empty()) {
-    error(fmt::format("inou.liveparse: no files provided"));
+    error("inou.liveparse: no files provided");
     return;
   }
 
-  for(const auto &f : Eprp_utils::parse_files(files, "inou.liveparse")) {
+  std::vector<std::string> list_files = absl::StrSplit(files, ',');
+  for(const auto &f : list_files) {
     int fd = open(f.c_str(), O_RDONLY);
     if(fd < 0) {
-      error(fmt::format("could not open {}", f.c_str()));
+      error("could not open {}", f);
       return;
     }
 
@@ -49,15 +51,15 @@ void Inou_liveparse::tolg(Eprp_var &var) {
 
     char *memblock = (char *)mmap(NULL, sb.st_size, PROT_WRITE, MAP_PRIVATE, fd, 0);
     if(memblock == MAP_FAILED) {
-      error(fmt::format("mmap failed??"));
+      error("mmap failed??");
       close(fd);
       return;
     }
 
-    if(Eprp_utils::ends_with(f, ".v") || Eprp_utils::ends_with(f, ".sv")) {
+    if(absl::EndsWith(f, ".v") || absl::EndsWith(f, ".sv")) {
       Chunkify_verilog chunker(path, elab_path);
       chunker.parse(f, memblock, sb.st_size);
-    } else if(Eprp_utils::ends_with(f, ".prp")) {
+    } else if(absl::EndsWith(f, ".prp")) {
       error(fmt::format("inou.liveparse pyrope chunkify NOT implemented for {}", f));
       close(fd);
       munmap(memblock, sb.st_size);

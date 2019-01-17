@@ -5,6 +5,8 @@
 
 #include <fstream>
 
+#include "absl/strings/substitute.h"
+
 #include "rapidjson/document.h"
 #include "rapidjson/error/en.h"
 #include "rapidjson/filereadstream.h"
@@ -163,8 +165,7 @@ void Inou_json::fromlg(Eprp_var &var) {
     return;
 
   for(const auto &g : var.lgs) {
-    std::string file(odir);
-    file += "/" + g->get_name() + ".json";
+    auto file = absl::StrCat(odir,"/",g->get_name(),".json");
 
     p.to_json(g, file);
   }
@@ -186,10 +187,10 @@ void Inou_json::tolg(Eprp_var &var) {
     return;
 
   std::vector<LGraph *> lgs;
-  for(const auto &f : Eprp_utils::parse_files(files, "inou.yosys.tolg")) {
+  for(const auto &f : absl::StrSplit(files, ',')) {
 
-    std::string name = f.substr(f.find_last_of("/\\") + 1);
-    if(Eprp_utils::ends_with(name, ".json")) {
+    std::string_view name = f.substr(f.find_last_of("/\\") + 1);
+    if(absl::EndsWith(name, ".json")) {
       name = name.substr(0, name.size() - 5); // remove .json
     } else {
       error(fmt::format("inou.json.tolg unknown file extension {}, expected .json", name));
@@ -198,7 +199,8 @@ void Inou_json::tolg(Eprp_var &var) {
 
     LGraph *lg = LGraph::create(path, name, f);
 
-    FILE *                    pFile = fopen(f.c_str(), "rb");
+    std::string fname(f);
+    FILE *                    pFile = fopen(fname.c_str(), "rb");
     if (pFile==0) {
       Pass::error(fmt::format("Inou_json::tolg could not open {} file",f));
       continue;

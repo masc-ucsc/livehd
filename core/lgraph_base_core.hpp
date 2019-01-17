@@ -58,7 +58,7 @@ public:
   virtual void clear();
   virtual void sync();
 
-  const std::string &get_name() const { return name; }
+  std::string_view get_name() const { return name; }
   const Lg_type_id lg_id() const { return lgraph_id; }
 
   const std::string   &get_path() const { return path; }
