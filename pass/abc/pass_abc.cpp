@@ -86,7 +86,7 @@ LGraph *Pass_abc::regen(const LGraph *lg) {
 
   find_cell_conn(lg);
   auto source = lg->get_library().get_source(lg->lg_id());
-  LGraph *mapped = LGraph::create(lg->get_path(), lg->get_name() + "_mapped", source);
+  LGraph *mapped = LGraph::create(lg->get_path(), absl::StrCat(lg->get_name(), "_mapped"), source);
   from_abc(mapped, lg, to_abc(lg));
   mapped->sync();
   if(opack.verbose)
@@ -606,7 +606,7 @@ Abc_Ntk_t *Pass_abc::to_abc(const LGraph *g) {
     pAbc = Abc_FrameGetGlobalFrame();
   Abc_Ntk_t   *pAig = Abc_NtkAlloc(ABC_NTK_NETLIST, ABC_FUNC_AIG, 1);
 
-  pAig->pName = Extra_UtilStrsav(g->get_name().c_str());
+  pAig->pName = Extra_UtilStrsav(std::string(g->get_name()).c_str());
 
   gen_netList(g, pAig);
   Abc_NtkFinalizeRead(pAig);

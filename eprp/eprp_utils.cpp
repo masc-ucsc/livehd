@@ -16,27 +16,6 @@
 #include "thread_pool.hpp"
 #include "eprp_utils.hpp"
 
-std::vector<std::string> Eprp_utils::parse_files(std::string_view files, std::string_view module) {
-  char seps[] = ",";
-  char *token;
-
-  std::vector<std::string> raw_file_list;
-
-  char *files_char = (char *)alloca(files.size()+1); // NOTE: alloca is OK, the vector<string> creates a duplicate
-  strcpy(files_char,std::string(files).c_str());
-  token = std::strtok(files_char, seps);
-  while( token != NULL ) {
-
-    if (token[0] != 0) { // Empty sequences are valid and ignored. E.g: foo,bar,,,,potato
-      raw_file_list.push_back(token);
-    }
-
-    token = std::strtok( NULL, seps );
-  }
-
-  return raw_file_list;
-}
-
 std::string Eprp_utils::get_exe_path() {
   char exePath[PATH_MAX] = {0,};
   int len = readlink("/proc/self/exe", exePath, PATH_MAX);
@@ -52,10 +31,6 @@ std::string Eprp_utils::get_exe_path() {
   return path;
 }
 
-bool Eprp_utils::ends_with(const std::string &s, const std::string &suffix) {
-  return s.rfind(suffix) == (s.size()-suffix.size());
-}
-
 static int rm_file(const char *pathname, const struct stat *sbuf, int type, struct FTW *ftwb) {
   remove(pathname);
   return 0;
@@ -66,22 +41,25 @@ static void clean_dir_thread(char *path) {
   free(path);
 }
 
-void Eprp_utils::clean_dir(const std::string &dir) {
+void Eprp_utils::clean_dir(std::string_view dir) {
 
-  const char *path = dir.c_str();
+  if (dir=="")
+    return;
 
-  DIR* dirp = opendir(path);
+  const std::string path(dir.data(), dir.size()); // null terminated
+
+  DIR* dirp = opendir(path.c_str());
   if (dirp==0) {
-    mkdir(path,0755);
+    mkdir(path.c_str(),0755);
     return;
   }
 
   // Rename, and allow a slow thread to delete it
   char dtemp[] = "deleting_dir.XXXXXX";
   char *dtemp2 = strdup(mkdtemp(dtemp));
-  rename(path,dtemp2);
+  rename(path.c_str(),dtemp2);
 
-  mkdir(path,0755); // Create clean directory again
+  mkdir(path.c_str(),0755); // Create clean directory again
 
   static Thread_pool tp(2); // Keep pool running for frequent calls
 

@@ -26,7 +26,7 @@ public:
   static void files2(Eprp_var &var) {
     auto files = var.get("files");
 
-    std::vector<std::string> svector = Eprp_utils::parse_files(files,"test1.files2");
+    std::vector<std::string> svector = absl::StrSplit(files,',');
 
     for (const auto& v : svector) {
       fmt::print(" {}",v);
@@ -35,10 +35,10 @@ public:
 
     EXPECT_EQ(svector.size(),4);
 
-    EXPECT_STREQ(svector[0].c_str(), "g3xx");
-    EXPECT_STREQ(svector[1].c_str(), "./f1/f1.v");
-    EXPECT_STREQ(svector[2].c_str(), "xotato/../bar.prp");
-    EXPECT_STREQ(svector[3].c_str(), "potato/bar.v");
+    EXPECT_EQ(svector[0], "g3xx");
+    EXPECT_EQ(svector[1], "./f1/f1.v");
+    EXPECT_EQ(svector[2], "xotato/../bar.prp");
+    EXPECT_EQ(svector[3], "potato/bar.v");
   }
 
   static void foo(Eprp_var &var) {
@@ -140,7 +140,7 @@ protected:
 };
 
 TEST_F(EPrpFiles, ParseFiles) {
-  const char *buffer =" test1.files2 match:\"nothing\" files:g3xx,./f1/f1.v,xotato/../bar.prp,,potato/bar.v";
+  const char *buffer =" test1.files2 match:\"nothing\" files:g3xx,./f1/f1.v,xotato/../bar.prp,potato/bar.v";
 
   eprp.parse("parsefiles", buffer, strlen(buffer));
 }

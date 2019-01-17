@@ -11,6 +11,8 @@
 #include <fstream>
 #include <iostream>
 
+#include "iassert.hpp"
+
 #include "lgraph.hpp"
 #include "main_api.hpp"
 #include "mustache.hpp"
@@ -183,8 +185,9 @@ void Inou_yosys_api::tolg(Eprp_var &var) {
   vars.set("path", std::string(path));
 
   mustache::data filelist{mustache::data::type::list};
-  for(const auto &f:Eprp_utils::parse_files(files,"inou.yosys.tolg")) {
-    filelist << mustache::data{"input", f};
+  for(const auto &f:absl::StrSplit(files,',')) {
+    I(!files.empty());
+    filelist << mustache::data{"input", std::string(f)};
   }
 
   vars.set("filelist",filelist);
@@ -266,9 +269,9 @@ void Inou_yosys_api::fromlg(Eprp_var &var) {
     vars.set("path", std::string(path));
     vars.set("odir", std::string(odir));
 
-    std::string file = std::string(odir) + "/" + lg->get_name() + ".v";
-    vars.set("file", file);
-    vars.set("name", lg->get_name());
+    auto file = absl::StrCat(odir, "/", lg->get_name(), ".v");
+    vars.set("file", std::string(file));
+    vars.set("name", std::string(lg->get_name()));
 
     do_work(yosys, liblg, script_file, vars);
   }

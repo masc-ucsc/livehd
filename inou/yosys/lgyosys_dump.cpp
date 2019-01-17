@@ -3,8 +3,6 @@
 #include <algorithm>
 #include <math.h>
 
-#include "absl/strings/str_cat.h"
-
 #include "lgedgeiter.hpp"
 #include "lgyosys_dump.hpp"
 
@@ -109,7 +107,7 @@ void Lgyosys_dump::create_blackbox(const LGraph &subgraph, RTLIL::Design *design
   mod->name                     = absl::StrCat("\\", subgraph.get_name());
   mod->attributes["\\blackbox"] = RTLIL::Const(1);
 
-  static std::set<string> created_blackboxes;
+  static absl::flat_hash_set<std::string_view> created_blackboxes; // FIXME: Remembers forever???
   if(created_blackboxes.find(subgraph.get_name()) == created_blackboxes.end()) {
     design->add(mod);
     created_blackboxes.insert(subgraph.get_name());

@@ -21,6 +21,14 @@ LGraph_Base::LGraph_Base(const std::string &_path, const std::string &_name, Lg_
 }
 
 LGraph_Base::~LGraph_Base() {
+  // TODO: This is NOT a bug. The reason is that we need to preserve the
+  // string pointers for graph name. Then, we can use string_view maps for all
+  // of them. Otherwise, we can not.
+  //
+  // If deleting becomes a problem, we should preserve the graph names as a
+  // table that lives forever once a graph/lgraph is opened.
+  //
+  //I(false);
 }
 
 LGraph_Base::_init::_init() {

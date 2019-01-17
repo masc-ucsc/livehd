@@ -6,5 +6,5 @@ cc_library(
    includes = ["include"],
    visibility = ["//visibility:public"],
    # WARNING: Yosys dynamic library was giving problems without FMT_HEADER_ONLY
-   defines = ["FMT_STRING_ALIAS","FMT_HEADER_ONLY"],
+   defines = ["FMT_HEADER_ONLY"],
 )
