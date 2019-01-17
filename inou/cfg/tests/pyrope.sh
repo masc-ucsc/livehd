@@ -15,8 +15,8 @@ pwd
 
 # pts='top_ooo  sp_add  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2  if_elif_else'
 # pts='constant_pos constant_neg sp_if_0 nested_if_0 nested_if_1 nested_if_2 nested_if_3'
-pts='top_inline_add'
-# pts='sp_assign'
+# pts='top_inline_add'
+pts='nested_if_0'
 
 LGSHELL=./bazel-bin/main/lgshell
 
@@ -72,7 +72,6 @@ echo "2nd round: DFG optimization"
 echo ""
 
 
-# dbg:should search lgdb directory for all possible cfg graphs instead of using static pattern name
 for pt in $pts
 do
   echo "lgraph.open name:${pt} |> pass.dfg.optimize"                      >  lgshell_cmds_opt
