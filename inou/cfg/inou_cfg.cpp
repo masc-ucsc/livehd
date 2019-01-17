@@ -118,7 +118,8 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs, unordered_ma
       chain_stks_lgs.resize(chain_stks_lgs.size() + 1);
       nid_end_lgs.resize(nid_end_lgs.size() + 1);
       nname_begn_lgs.push_back(w1st);
-      n1st2gid[w1st]    = gsub_id;
+      //n1st2gid[w1st]    = gsub_id; // don't assign graph_id by yourself!!
+      n1st2gid[w1st]    = lg->lg_id();
       n1st2lgname[w1st] = "sub_method" + std::to_string(gsub_id);
       build_graph(words, dfg_data, lgs[gsub_id], n1st2gid, n1st2lgname, nname2nid_lgs[gsub_id], chain_stks_lgs[gsub_id], rename_tab, nid_end_lgs[gsub_id]);
     }else if(gsub_id != 0)
@@ -135,12 +136,14 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs, unordered_ma
     create in/out GIO for every graph
   */
    for(uint32_t i = 0; i < lgs.size(); i++) {
+     fmt::print("create gio for graph:{},:{}\n", i, lgs[i]->lg_id());
     //Graph input
     Node gio_node_begn = lgs[i]->create_node();
     lgs[i]->add_graph_input("ginp", gio_node_begn.get_nid(), 0, 0);
     Index_ID src_nid = gio_node_begn.get_nid();
     Index_ID dst_nid = nname2nid_lgs[i][nname_begn_lgs[i]];
     lgs[i]->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+    fmt::print("graph input node nid:{}\n", src_nid);
 
     //Graph output
     Node gio_node_ed = lgs[i]->create_node();
@@ -149,16 +152,6 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs, unordered_ma
     dst_nid = gio_node_ed.get_nid();
     lgs[i]->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
   }
-
-#if 0
-   for(size_t i = 0; i < chain_stks_lgs.size(); i++) {
-     for(auto &x : chain_stks_lgs[i]) {
-       fmt::print("\ncurrent is chain_stks_lgs[{}], vid {} content is\n", i, x.first);
-       for(auto j = x.second.rbegin(); j != x.second.rend(); ++j)
-         fmt::print("{}\n", *j);
-     }
-   }
-#endif
 
   update_ifs(lgs, nname2nid_lgs);
 }

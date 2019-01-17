@@ -17,6 +17,7 @@ protected:
   static void optimize(Eprp_var &var);
   static void finalize_bitwidth(Eprp_var &var);
 
+  std::vector<LGraph *> hierarchical_gen_dfgs(LGraph *cfg_parent);
   void do_generate(const LGraph *cfg, LGraph *dfg);
   void do_optimize(LGraph *&ori_dfg); // calls trans() to perform optimization
   void do_finalize_bitwidth(LGraph *dfg);

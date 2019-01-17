@@ -15,28 +15,77 @@ void setup_pass_dfg() {
   p.setup();
 }
 
+std::vector<LGraph*> Pass_dfg::hierarchical_gen_dfgs(LGraph *cfg_parent){
+  std::vector<LGraph *> dfgs;
+  fmt::print("hierarchical dfg generation start!\n");
+  fmt::print("topg lgid:{}\n", cfg_parent->lg_id());
+  auto dfg_name = cfg_parent->get_name().substr(0, cfg_parent->get_name().size() - 4);
+  LGraph *dfg = LGraph::create(cfg_parent->get_path(), dfg_name, cfg_parent->get_name());
+  assert(dfg);
+  this->do_generate(cfg_parent, dfg);
+  dfgs.push_back(dfg);
+
+  cfg_parent->each_sub_graph_fast([cfg_parent, &dfgs, this](Index_ID idx, Lg_type_id lgid, std::string_view iname){
+    fmt::print("subgraph lgid:{}\n", lgid);
+    LGraph *cfg_child = LGraph::open(cfg_parent->get_path(), lgid);
+    if(cfg_child==0){
+      Pass::error("hierarchy for {} could not open instance {} with lgid {}", cfg_parent->get_name(), iname, lgid);
+    } else {
+      auto child_dfg_name = cfg_child->get_name().substr(0, cfg_child->get_name().size() - 4);
+      LGraph *dfg_child = LGraph::create(cfg_child->get_path(), child_dfg_name, cfg_child->get_name());
+      assert(dfg_child);
+      this->do_generate(cfg_child, dfg_child);
+      dfgs.push_back(dfg_child);
+    }
+  });
+
+  return dfgs;
+}
+
+
 void Pass_dfg::generate(Eprp_var &var) {
   Pass_dfg p;
 
-  std::vector<LGraph *> lgs;
-  for(auto &g : var.lgs) {
-    if(!Eprp_utils::ends_with(g->get_name(), std::string("_cfg")))
+  //std::vector<LGraph *> lgs;
+  std::vector<LGraph *> dfgs;
+  for(auto &cfg : var.lgs) {
+    if(!Eprp_utils::ends_with(cfg->get_name(), std::string("_cfg")))
       continue;
 
-    auto name = g->get_name().substr(0, g->get_name().size() - 4);
-    auto path = var.get("path");
-
-    LGraph *dfg = LGraph::create(path, name, g->get_name());
-    assert(dfg);
-    p.do_generate(g, dfg);
-    lgs.push_back(dfg);
+    dfgs = p.hierarchical_gen_dfgs(cfg);
   }
 
-  if(lgs.empty()) {
+  if(dfgs.empty()) {
     warn(fmt::format("pass.dfg.generate needs an input cfg lgraph. Either name or |> from lgraph.open"));
     return;
+  }else{
+    for(auto &g : dfgs)
+      g->sync();
   }
 }
+
+//void Pass_dfg::generate(Eprp_var &var) {
+//  Pass_dfg p;
+//
+//  std::vector<LGraph *> lgs;
+//  for(auto &cfg : var.lgs) {
+//    if(!Eprp_utils::ends_with(cfg->get_name(), std::string("_cfg")))
+//      continue;
+//
+//    auto name = cfg->get_name().substr(0, cfg->get_name().size() - 4);
+//    auto path = var.get("path");
+//
+//    LGraph *dfg = LGraph::create(path, name, cfg->get_name());
+//    assert(dfg);
+//    p.do_generate(cfg, dfg);
+//    lgs.push_back(dfg);
+//  }
+//
+//  if(lgs.empty()) {
+//    warn(fmt::format("pass.dfg.generate needs an input cfg lgraph. Either name or |> from lgraph.open"));
+//    return;
+//  }
+//}
 
 void Pass_dfg::optimize(Eprp_var &var) {
 
@@ -463,19 +512,7 @@ void Pass_dfg::assign_to_true(LGraph *dfg, Aux_tree *aux_tree, const std::string
 }
 
 void Pass_dfg::attach_outputs(LGraph *dfg, Aux_tree *aux_tree) {
-  //  for (const auto &pair : aux_tree->copy().get_auxtab()) {
-  //    const auto &var = pair.first;
-  //
-  //    if (is_register(var) || is_output(var)) {
-  //      Index_ID lref = pair.second;
-  //
-  //      Index_ID oid = create_output(dfg, aux_tree, var);
-  //      dfg->add_edge(Node_Pin(lref, 0, false), Node_Pin(oid, 0, true));
-  //    }
-  //  }
-
-  //  if (aux_tree->fluid_df())
-  //    add_fluid_behavior(dfg, aux_tree);
+  ;
 }
 
 void Pass_dfg::add_fluid_behavior(LGraph *dfg, Aux_tree *aux_tree) {
@@ -485,53 +522,36 @@ void Pass_dfg::add_fluid_behavior(LGraph *dfg, Aux_tree *aux_tree) {
 
 void Pass_dfg::add_fluid_ports(LGraph *dfg, Aux_tree *aux_tree, std::vector<Index_ID> &data_inputs,
                                std::vector<Index_ID> &data_outputs) {
-  // for (const auto &pair : aux_tree->outputs()) {
-  //  if (!is_valid_marker(pair.first) && !is_retry_marker(pair.first)) {
-  //    auto valid_output = valid_marker(pair.first);
-  //    auto retry_input = retry_marker(pair.first);
-  //    data_outputs.push_back(aux_tree->get_alias(pair.first));
-
-  //    if (!aux_tree->has_alias(valid_output))
-  //      create_output(dfg, aux_tree, valid_output);
-
-  //    if (!aux_tree->has_alias(retry_input))
-  //      create_input(dfg, aux_tree, retry_input);
-  //  }
-  //}
-
-  // for (const auto &pair : aux_tree->inputs()) {
-  //  if (!is_valid_marker(pair.first) && !is_retry_marker(pair.first)) {
-  //    auto valid_input = valid_marker(pair.first);
-  //    auto retry_output = retry_marker(pair.first);
-  //    data_inputs.push_back(aux_tree->get_alias(pair.first));
-
-  //    if (!aux_tree->has_alias(valid_input))
-  //      create_input(dfg, aux_tree, valid_input);
-
-  //    if (!aux_tree->has_alias(retry_output))
-  //      create_output(dfg, aux_tree, retry_output);
-  //  }
-  //}
+  ;
 }
 
 void Pass_dfg::add_fluid_logic(LGraph *dfg, Aux_tree *aux_tree, const std::vector<Index_ID> &data_inputs,
                                const std::vector<Index_ID> &data_outputs) {
-  // Index_ID abort_id = add_abort_logic(dfg, aux_tree, data_inputs, data_outputs);
+  ;
 }
 
 void Pass_dfg::add_abort_logic(LGraph *dfg, Aux_tree *aux_tree, const std::vector<Index_ID> &data_inputs,
                                const std::vector<Index_ID> &data_outputs) {
+  ;
 }
 
 Index_ID Pass_dfg::find_cfg_root(const LGraph *cfg) {
   // FIXME: This is VERY inneficient. Why is not the input from the graph?
   // cfg->each_input([&idx] { ....
-  for(auto idx : cfg->fast()) {
-    if(cfg->is_root(idx))
-      return idx;
-  }
+  Index_ID root_id;
+  cfg->each_input([&root_id](Index_ID idx){
+    root_id = idx;
+  });
 
-  assert(false);
+  fmt::print("root_id:{}\n", root_id);
+  assert(root_id);
+  return root_id;
+  //for(auto idx : cfg->fast()) {
+  //  if(cfg->is_root(idx))
+  //    return idx;
+  //}
+
+  //assert(false);
 }
 
 Index_ID Pass_dfg::get_cfg_child(const LGraph *cfg, Index_ID node) {
