@@ -133,33 +133,38 @@ std::string Graph_library::get_lgraph_filename(std::string_view path, std::strin
 
 bool Graph_library::rename_name(std::string_view orig, std::string_view dest) {
 
-  if (orig == "sub_method1") {
-    fmt::print("orig:{} dest:{}\n",orig,dest);
-    I(false);
-  }
-
   auto it = name2id.find(orig);
   if(it == name2id.end())
     return false;
   Lg_type_id id = it->second;
+  if(attribute[id].nopen != 0)
+    return false; // Must be closed
 
   // The dest name should not exist. Call expunge_lgraph/delete if it does
   assert(name2id.find(dest) == name2id.end());
 
   // The orig name should exist, BUT the lgraph should be in CLOSE state
-  assert(global_name2lgraph[path].find(orig) == global_name2lgraph[path].end()); // No orig open
   assert(global_name2lgraph[path].find(dest) == global_name2lgraph[path].end()); // No dest open
 
-  name2id.erase(it); // Erase orig
+  auto source   = attribute[id].source;
+  auto nentries = attribute[id].nentries;
 
-  graph_library_clean   = false;
-  if (dest == "sub_method1") {
-    fmt::print("rename_dest {}\n",dest);
-    I(false);
+  auto it2 = global_name2lgraph[path].find(orig);
+  if (it2 != global_name2lgraph[path].end()) { // orig around, but not open
+    bool done = expunge_lgraph(orig,it2->second);
+    I(done);
+    I(recycled_id.get_bit(id));
+    recycled_id.clear(id);
   }
-  attribute[id].name    = dest;
-  attribute[id].version = max_next_version.value++;
-  assert(attribute[id].source != ""); // Keep source
+  I(global_name2lgraph[path].find(orig) == global_name2lgraph[path].end()); // Gone after expunge_lgraph
+  I(name2id.find(orig) == name2id.end()); // Cleared by expunge_lgraph
+
+  graph_library_clean    = false;
+  attribute[id].name     = dest;
+  attribute[id].version  = max_next_version.value++;
+  attribute[id].source   = source;
+  attribute[id].nentries = nentries;
+  attribute[id].nopen    = 0;
 
   name2id[dest] = id;
 
@@ -348,8 +353,6 @@ void Graph_library::recycle_id(Lg_type_id lgid) {
 }
 
 bool Graph_library::expunge_lgraph(std::string_view name, const LGraph *lg) {
-  I(name != "sub_method1");
-
   if(global_name2lgraph[path][name] != lg) {
     Pass::warn("graph_library::expunge_lgraph({}) for a wrong graph??? path:{}", name, path);
     return true;
@@ -396,7 +399,6 @@ bool Graph_library::unregister_lgraph(std::string_view name, Lg_type_id lgid, co
 
   attribute[lgid].nopen--;
   if(attribute[lgid].nopen == 0) {
-    //expunge_lgraph(name,lg);
     return true;
   }
 

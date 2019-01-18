@@ -24,11 +24,12 @@ LGraph::LGraph(const std::string &path, const std::string &_name, const std::str
     , LGraph_Node_Place(path, _name, lg_id())
 {
   I(_name == get_name());
-  if(_clear) {
+  if(_clear) { // Create
     clear();
     sync();
-  } else {
+  } else { // open
     reload();
+    //I(node_internal.size()); // WEIRD, but possible to have an empty lgraph
   }
 }
 
@@ -65,13 +66,6 @@ LGraph *LGraph::open(std::string_view path, int lgid) {
 
 void LGraph::rename(std::string_view path, std::string_view orig, std::string_view dest) {
 
-  LGraph *lg = Graph_library::try_find_lgraph(path,orig);
-  if (lg) {
-    I(false);
-    Pass::error("lgraph::rename failed for {}/{} because the lgraph is open",path,orig);
-    return;
-  }
-
   bool valid = Graph_library::instance(path)->rename_name(orig, dest);
   if(valid)
     Pass::warn("lgraph::rename find original graph {} in path {}", orig, path);
@@ -82,6 +76,7 @@ void LGraph::rename(std::string_view path, std::string_view orig, std::string_vi
 LGraph *LGraph::open(std::string_view path, std::string_view name) {
   LGraph *lg = Graph_library::try_find_lgraph(path,name);
   if (lg) {
+    //I(lg->node_internal.size()); // WEIRD, but possible to have an empty lgraph
     assert(Graph_library::instance(path));
     auto source = Graph_library::instance(path)->get_source(name);
     auto lgid = Graph_library::instance(path)->register_lgraph(name, source, lg);
