@@ -9,7 +9,7 @@
 
 std::string Lgraph_base_core::Setup_path::last_path = "";
 
-Lgraph_base_core::Setup_path::Setup_path(const std::string &path) {
+Lgraph_base_core::Setup_path::Setup_path(std::string_view path) {
 
   if(last_path == path)
     return;
@@ -17,23 +17,25 @@ Lgraph_base_core::Setup_path::Setup_path(const std::string &path) {
 
   struct stat info;
 
-  if(stat(path.c_str(), &info) == 0) {
+  std::string spath(path);
+
+  if(stat(spath.c_str(), &info) == 0) {
     if((info.st_mode & S_IFDIR))
       return;
 
-    unlink(path.c_str());
+    unlink(spath.c_str());
   }
 
-  mkdir(path.c_str(), 0755);
+  mkdir(spath.c_str(), 0755);
 }
 
-Lgraph_base_core::Lgraph_base_core(const std::string &_path, const std::string &_name, Lg_type_id lgid)
+Lgraph_base_core::Lgraph_base_core(std::string_view _path, std::string_view _name, Lg_type_id lgid)
     : p(_path)
     , path(_path)
     , name(_name)
-    , long_name("lgraph_" + _name)
+    , long_name(absl::StrCat("lgraph_", _name))
     , lgraph_id(lgid)
-    , node_internal(path + "/lgraph_" + name + "_nodes")
+    , node_internal(absl::StrCat(path, "/lgraph_", name, "_nodes"))
     , locked(false) {
 
   assert(lgid);
@@ -57,11 +59,13 @@ void Lgraph_base_core::get_lock() {
   locked = true;
 }
 
-void Lgraph_base_core::close() {
+bool Lgraph_base_core::close() {
   if(!locked)
-    return;
+    return true;
 
   library->update(lgraph_id);
+
+  return true;
 }
 
 void Lgraph_base_core::clear() {

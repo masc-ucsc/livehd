@@ -262,7 +262,7 @@ void hook_color(std::string const& context, Replxx::colors_t& colors, void* user
 
 int main(int argc, char **argv) {
 
-  I_segfault_setup();
+  I_setup();
 
   bool option_quiet = false;
 

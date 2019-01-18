@@ -27,6 +27,7 @@ std::vector<LGraph*> Pass_dfg::hierarchical_gen_dfgs(LGraph *cfg_parent){
 
   cfg_parent->each_sub_graph_fast([cfg_parent, &dfgs, this](Index_ID idx, Lg_type_id lgid, std::string_view iname){
     fmt::print("subgraph lgid:{}\n", lgid);
+    I(false);
     LGraph *cfg_child = LGraph::open(cfg_parent->get_path(), lgid);
     if(cfg_child==0){
       Pass::error("hierarchy for {} could not open instance {} with lgid {}", cfg_parent->get_name(), iname, lgid);
@@ -298,15 +299,17 @@ Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tr
 
 void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data) {
   // for func_call, all the node should be created before, you just connect them. No need to create target node
-  fmt::print("------>process function call!!!!!\n");
   const auto &target    = data.get_target();
   const auto &oprds     = data.get_operands();
   const auto &oprd_ids  = process_operands(dfg, aux_tree, data); // all operands should be in auxtab, just retrieve oprd_ids
-  LGraph *    sub_graph = nullptr;
   assert(!oprds.empty());
   Index_ID subg_root_nid = aux_tree->get_alias(oprds[0]);
 
-  if((sub_graph = LGraph::open(cfg->get_path(), ((std::string)(dfg->get_node_wirename(subg_root_nid)))))) {
+  fmt::print("------>process function call for {}!!!!!\n", dfg->get_node_wirename(subg_root_nid));
+    // FIXME: LGraph::open is a costly op, do you really need to check this for each wire?????
+
+  LGraph *sub_graph = LGraph::open(cfg->get_path(), dfg->get_node_wirename(subg_root_nid));
+  if(sub_graph) {
     dfg->node_subgraph_set(subg_root_nid, sub_graph->lg_id());
     fmt::print("set subgraph on nid:{}, sub_graph name:{}, sub_graph_id:{}\n", subg_root_nid, dfg->get_node_wirename(subg_root_nid),
                sub_graph->lg_id());

@@ -36,9 +36,9 @@ LGraph_Base::_init::_init() {
   // Add here sequence of static initialization that may be needed
 }
 
-void LGraph_Base::close() {
+bool LGraph_Base::close() {
 
-  Lgraph_base_core::close();
+  return Lgraph_base_core::close();
 }
 
 std::string_view LGraph_Base::get_subgraph_name(Index_ID nid) const {

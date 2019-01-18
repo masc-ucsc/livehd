@@ -47,7 +47,7 @@ public:
   static LGraph *open(std::string_view path, int lgid);
   static LGraph *open(std::string_view path, std::string_view name);
   static void rename(std::string_view path, std::string_view orig, std::string_view dest);
-  void close() override;
+  bool close() override;
 
   void clear() override;
   void reload() override;

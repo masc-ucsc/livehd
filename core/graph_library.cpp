@@ -2,6 +2,8 @@
 
 #include <dirent.h>
 #include <sys/stat.h>
+#include <limits.h>
+#include <stdlib.h>
 
 #include <cassert>
 #include <regex>
@@ -15,6 +17,31 @@
 
 Graph_library::Global_instances   Graph_library::global_instances;
 Graph_library::Global_name2lgraph Graph_library::global_name2lgraph;
+
+
+Graph_library *Graph_library::instance(std::string_view path) {
+#if 0
+  auto it = Graph_library::global_instances.find(path);
+  if(it != Graph_library::global_instances.end()) {
+    return it->second;
+  }
+#endif
+
+  std::string spath(path);
+
+  char full_path[PATH_MAX+1];
+  realpath(spath.c_str(), full_path);
+
+  auto it = Graph_library::global_instances.find(full_path);
+  if(it != Graph_library::global_instances.end()) {
+    return it->second;
+  }
+
+  Graph_library *graph_library =  new Graph_library(full_path);
+  Graph_library::global_instances.insert(std::make_pair(std::string(full_path), graph_library));
+
+  return graph_library;
+}
 
 Lg_type_id Graph_library::reset_id(std::string_view name, std::string_view source) {
   const auto &it = name2id.find(name);
@@ -38,12 +65,8 @@ Lg_type_id Graph_library::reset_id(std::string_view name, std::string_view sourc
 
 LGraph *Graph_library::try_find_lgraph(std::string_view path, std::string_view name) {
 
-  if(global_name2lgraph.find(path) != global_name2lgraph.end() &&
-     global_name2lgraph[path].find(name) != global_name2lgraph[path].end()) {
-    return global_instances[path]->try_find_lgraph(name);
-  }
-
-  return nullptr;
+  Graph_library *lib = instance(path);
+  return lib->try_find_lgraph(name);
 }
 
 bool Graph_library::exists(std::string_view path, std::string_view name) {
@@ -55,8 +78,9 @@ bool Graph_library::exists(std::string_view path, std::string_view name) {
 
 LGraph *Graph_library::try_find_lgraph(std::string_view name) {
 
-  if(global_name2lgraph.find(path) == global_name2lgraph.end())
-    return nullptr;
+  if (global_name2lgraph.find(path) == global_name2lgraph.end()) {
+    return nullptr; // Library exists, but not the instance for lgraph
+  }
 
   if(global_name2lgraph[path].find(name) != global_name2lgraph[path].end()) {
     LGraph *lg = global_name2lgraph[path][name];
@@ -109,13 +133,17 @@ std::string Graph_library::get_lgraph_filename(std::string_view path, std::strin
 
 bool Graph_library::rename_name(std::string_view orig, std::string_view dest) {
 
+  if (orig == "sub_method1") {
+    fmt::print("orig:{} dest:{}\n",orig,dest);
+    I(false);
+  }
+
   auto it = name2id.find(orig);
   if(it == name2id.end())
     return false;
   Lg_type_id id = it->second;
 
   // The dest name should not exist. Call expunge_lgraph/delete if it does
-  assert(global_name2lgraph[path].find(dest) == global_name2lgraph[path].end());
   assert(name2id.find(dest) == name2id.end());
 
   // The orig name should exist, BUT the lgraph should be in CLOSE state
@@ -125,6 +153,10 @@ bool Graph_library::rename_name(std::string_view orig, std::string_view dest) {
   name2id.erase(it); // Erase orig
 
   graph_library_clean   = false;
+  if (dest == "sub_method1") {
+    fmt::print("rename_dest {}\n",dest);
+    I(false);
+  }
   attribute[id].name    = dest;
   attribute[id].version = max_next_version.value++;
   assert(attribute[id].source != ""); // Keep source
@@ -219,6 +251,10 @@ void Graph_library::reload() {
     if(attribute.size() <= graph_id)
       attribute.resize(graph_id + 1);
 
+    if (name == "sub_method1") {
+      fmt::print("reload {}\n",name);
+      I(false);
+    }
     attribute[graph_id].name     = name;
     attribute[graph_id].source   = source;
     attribute[graph_id].version  = graph_version;
@@ -312,6 +348,8 @@ void Graph_library::recycle_id(Lg_type_id lgid) {
 }
 
 bool Graph_library::expunge_lgraph(std::string_view name, const LGraph *lg) {
+  I(name != "sub_method1");
+
   if(global_name2lgraph[path][name] != lg) {
     Pass::warn("graph_library::expunge_lgraph({}) for a wrong graph??? path:{}", name, path);
     return true;
@@ -333,6 +371,7 @@ bool Graph_library::expunge_lgraph(std::string_view name, const LGraph *lg) {
 }
 
 Lg_type_id Graph_library::register_lgraph(std::string_view name, std::string_view source, LGraph *lg) {
+
   global_name2lgraph[path][name] = lg;
 
   Lg_type_id id = reset_id(name, source);
@@ -340,6 +379,7 @@ Lg_type_id Graph_library::register_lgraph(std::string_view name, std::string_vie
   const auto &it = name2id.find(name);
   assert(it != name2id.end());
   attribute[id].nopen++;
+  I(attribute[id].name == name);
 
   return id;
 }
@@ -356,7 +396,7 @@ bool Graph_library::unregister_lgraph(std::string_view name, Lg_type_id lgid, co
 
   attribute[lgid].nopen--;
   if(attribute[lgid].nopen == 0) {
-    // fmt::print("TODO: garbage collect lgraph mmaps {}\n", name);
+    //expunge_lgraph(name,lg);
     return true;
   }
 
