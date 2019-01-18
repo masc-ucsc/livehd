@@ -188,15 +188,18 @@ Pass::warn("inou_yaml.to_lg: output:{} input:{} graph:{}", output, input, graph_
 bitarray visited(g->max_size());
 ```
 
-## Use assert extensively / be meaningful whenever possible in assertions
+## Use iassert extensively / be meaningful whenever possible in assertions
 
 This usually means use meaningful variable names and conditions that are easy to understand.
 If the meaning is not clear from the assertion, use a comment in the same line.
 This way, when the assertion is triggered it is easy to identify the problem.
 
 ```cpp
-assert(n_edges > 0); //at least one edge needed to perform this function
+I(n_edges > 0); //at least one edge needed to perform this function
 ```
+
+We use the https://github.com/masc-ucsc/iassert package. Go to the iassert for more details on the advantages
+and how to allow it to use GDB with assertions.
 
 ## Develop in debug mode and benchmark in release mode
 
