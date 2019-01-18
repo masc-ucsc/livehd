@@ -60,7 +60,7 @@ new_git_repository(
 new_git_repository(
     name = "iassert",
     build_file = "BUILD.iassert",
-    commit = "b661c4579a3bb358ee240fba4fbf1afd70ca4867", # Jan 17, 2019
+    commit = "b5d9c8fd18b602655fdb87be970f97ccbf0f1ab0", # Jan 17, 2019
     remote = "https://github.com/masc-ucsc/iassert.git",
     strip_prefix = "src",
 )

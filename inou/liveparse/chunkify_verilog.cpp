@@ -255,8 +255,9 @@ void Chunkify_verilog::elaborate() {
           write_file(chunk_dir + "/" + module + ".v", not_in_module_text, in_module_text);
         }
         if(lg) {
-          library->unregister_lgraph(module, lg->lg_id(), lg);
-          lg->sync();
+          lg->close();
+          //library->unregister_lgraph(module, lg->lg_id(), lg);
+          //lg->sync();
           lg = 0;
         }
         module.clear();

@@ -128,15 +128,7 @@ public:
   }
 
   // TODO: Change to Graph_library &instance...
-  static Graph_library *instance(std::string_view path) {
-    auto it = Graph_library::global_instances.find(path);
-    if(it == Graph_library::global_instances.end()) {
-      Graph_library *graph_library =  new Graph_library(path);
-      Graph_library::global_instances.insert(std::make_pair(std::string(path), graph_library));
-      return graph_library;
-    }
-    return it->second;
-  }
+  static Graph_library *instance(std::string_view path);
 
   Lg_type_id get_max_version() const {
     assert(max_next_version > 0);

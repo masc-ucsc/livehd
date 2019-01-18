@@ -48,24 +48,29 @@ vector<LGraph *> Inou_cfg::tolg() {
     exit(-3);
   }
 
+  LGraph *g_cfg = LGraph::create(opack.path, opack.name, cfg_file);
+
   vector<LGraph *> lgs;
-  lgs.push_back(LGraph::create(opack.path, opack.name, cfg_file));
+  lgs.push_back(g_cfg);
 
   cfg_2_lgraph(&memblock, lgs, rename_tab, cfg_file);
 
   for(LGraph *g : lgs)
     remove_fake_fcall(g);
 
-  for(LGraph *g : lgs)
-    g->sync();
+  lgs[0] = 0; // Do not clear g_cfg
+  for(LGraph *g : lgs) {
+    if (g)
+      g->close();
+  }
+  lgs.clear();
+  lgs.push_back(g_cfg); // Just keep the new cfg in the return
 
   for(const auto &it : rename_tab) {
     fmt::print("Try to rename lgraph!\n");
     fmt::print("original subg_name:{}, new name:{}\n", it.first, it.second);
     LGraph::rename("./" + opack.path, it.first, it.second);
   }
-  auto gl = Graph_library::instance("./" + opack.path);
-  gl->sync();
 
   close(fd);
   return lgs;

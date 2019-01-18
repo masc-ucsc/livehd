@@ -15,7 +15,7 @@ protected:
     static std::string last_path; // Just try to optimize to avoid too many frequent syscalls
 
   public:
-    Setup_path(const std::string &path);
+    Setup_path(std::string_view path);
   };
   Setup_path        p; // Must be first in base object
   const std::string path;
@@ -32,7 +32,7 @@ protected:
   Tech_library  *tlibrary;
 
   Lgraph_base_core() = delete;
-  explicit Lgraph_base_core(const std::string &_path, const std::string &_name, Lg_type_id lgid);
+  explicit Lgraph_base_core(std::string_view _path, std::string_view _name, Lg_type_id lgid);
   virtual ~Lgraph_base_core(){};
 
   Index_ID fast_next(Index_ID nid) const {
@@ -54,11 +54,11 @@ protected:
 public:
   void get_lock();
 
-  virtual void close();
+  virtual bool close();
   virtual void clear();
   virtual void sync();
 
-  std::string_view get_name() const { return name; }
+  std::string_view get_name() const { return std::string_view(name); }
   const Lg_type_id lg_id() const { return lgraph_id; }
 
   const std::string   &get_path() const { return path; }

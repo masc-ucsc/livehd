@@ -72,7 +72,7 @@ public:
   explicit LGraph_Base(const std::string &path, const std::string &_name, Lg_type_id lgid) noexcept;
   virtual ~LGraph_Base();
 
-  virtual void close();
+  virtual bool close();
 
   std::string_view get_subgraph_name(Index_ID nid) const;
 

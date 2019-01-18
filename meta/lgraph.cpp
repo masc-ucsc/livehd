@@ -23,6 +23,7 @@ LGraph::LGraph(const std::string &path, const std::string &_name, const std::str
     , LGraph_WireNames(path, _name, lg_id())
     , LGraph_Node_Place(path, _name, lg_id())
 {
+  I(_name == get_name());
   if(_clear) {
     clear();
     sync();
@@ -32,7 +33,8 @@ LGraph::LGraph(const std::string &path, const std::string &_name, const std::str
 }
 
 LGraph::~LGraph() {
-  library->unregister_lgraph(name, lgraph_id, this);
+  bool deleted = library->unregister_lgraph(name, lgraph_id, this);
+  I(deleted);
 }
 
 bool LGraph::exists(std::string_view path, std::string_view name) {
@@ -44,10 +46,12 @@ LGraph *LGraph::create(std::string_view path, std::string_view name, std::string
   if (lg) {
     assert(Graph_library::instance(path));
     // Overwriting old lgraph. Delete old pointer (but better be sure that nobody has it)
-    lg->close();
-    bool done = Graph_library::instance(path)->expunge_lgraph(name, lg);
-    if (done)
+    bool deleted = lg->close();
+    if (deleted) {
+      // Call expunge id delete LGraph object
+      lg->library->expunge_lgraph(name,lg);
       delete lg;
+    }
   }
 
   return new LGraph(std::string(path), std::string(name), std::string(source), true); // TODO: Remove these nasty std::string (create local)
@@ -63,6 +67,7 @@ void LGraph::rename(std::string_view path, std::string_view orig, std::string_vi
 
   LGraph *lg = Graph_library::try_find_lgraph(path,orig);
   if (lg) {
+    I(false);
     Pass::error("lgraph::rename failed for {}/{} because the lgraph is open",path,orig);
     return;
   }
@@ -80,6 +85,7 @@ LGraph *LGraph::open(std::string_view path, std::string_view name) {
     assert(Graph_library::instance(path));
     auto source = Graph_library::instance(path)->get_source(name);
     auto lgid = Graph_library::instance(path)->register_lgraph(name, source, lg);
+    I(name == lg->get_name());
     assert(lg->lgraph_id == lgid);
 
     return lg;
@@ -103,13 +109,15 @@ LGraph *LGraph::open(std::string_view path, std::string_view name) {
   return new LGraph(std::string(path), std::string(name), std::string(source), false);
 }
 
-void LGraph::close() {
+bool LGraph::close() {
 
-	library->unregister_lgraph(name, lgraph_id, this);
+	bool deleted = library->unregister_lgraph(name, lgraph_id, this);
 
 	sync();
 
   LGraph_Base::close();
+
+  return deleted;
 }
 
 void LGraph::reload() {
