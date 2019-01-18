@@ -2,11 +2,11 @@
 #pragma once
 
 #include <cassert>
-
 #include <string_view>
 #include <map>
 #include <string>
 
+#include "iassert.hpp"
 #include "dense.hpp"
 #include "lgraphbase.hpp"
 
@@ -63,9 +63,9 @@ public:
   }
 
   std::string_view get_node_wirename(Index_ID nid) const {
-    assert(nid < wires.size());
-    assert(node_internal[nid].is_node_state());
-    assert(node_internal[nid].is_root());
+    I(nid < wires.size());
+    I(node_internal[nid].is_node_state());
+    I(node_internal[nid].is_root());
 
     return get_wirename(get_wid(nid));
   }
