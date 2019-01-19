@@ -15,98 +15,6 @@ void setup_pass_dfg() {
   p.setup();
 }
 
-std::vector<LGraph*> Pass_dfg::hierarchical_gen_dfgs(LGraph *cfg_parent){
-  std::vector<LGraph *> dfgs;
-  fmt::print("hierarchical dfg generation start!\n");
-  fmt::print("topg lgid:{}\n", cfg_parent->lg_id());
-  auto dfg_name = cfg_parent->get_name().substr(0, cfg_parent->get_name().size() - 4);
-  LGraph *dfg = LGraph::create(cfg_parent->get_path(), dfg_name, cfg_parent->get_name());
-  assert(dfg);
-  this->do_generate(cfg_parent, dfg);
-  dfgs.push_back(dfg);
-
-  cfg_parent->each_sub_graph_fast([cfg_parent, &dfgs, this](Index_ID idx, Lg_type_id lgid, std::string_view iname){
-    fmt::print("subgraph lgid:{}\n", lgid);
-    LGraph *cfg_child = LGraph::open(cfg_parent->get_path(), lgid);
-    if(cfg_child==0){
-      Pass::error("hierarchy for {} could not open instance {} with lgid {}", cfg_parent->get_name(), iname, lgid);
-    } else {
-      I(absl::EndsWith(cfg_child->get_name(),"_cfg"));
-      //auto child_dfg_name = cfg_child->get_name().substr(0, cfg_child->get_name().size() - 4);
-      std::string_view child_dfg_name(cfg_child->get_name().data(), cfg_child->get_name().size()-4); // _cfg
-      LGraph *dfg_child = LGraph::create(cfg_child->get_path(), child_dfg_name, cfg_child->get_name());
-      assert(dfg_child);
-
-      do_generate(cfg_child, dfg_child);
-
-      dfgs.push_back(dfg_child);
-    }
-  });
-
-  return dfgs;
-}
-
-
-void Pass_dfg::generate(Eprp_var &var) {
-  Pass_dfg p;
-
-  //std::vector<LGraph *> lgs;
-  std::vector<LGraph *> dfgs;
-  for(auto &cfg : var.lgs) {
-    if(!absl::EndsWith(cfg->get_name(), "_cfg"))
-      continue;
-
-    dfgs = p.hierarchical_gen_dfgs(cfg);
-  }
-
-  if(dfgs.empty()) {
-    warn(fmt::format("pass.dfg.generate needs an input cfg lgraph. Either name or |> from lgraph.open"));
-    return;
-  }else{
-    for(auto &g : dfgs)
-      g->sync();
-  }
-}
-
-//void Pass_dfg::generate(Eprp_var &var) {
-//  Pass_dfg p;
-//
-//  std::vector<LGraph *> lgs;
-//  for(auto &cfg : var.lgs) {
-//    if(!Eprp_utils::ends_with(cfg->get_name(), std::string("_cfg")))
-//      continue;
-//
-//    auto name = cfg->get_name().substr(0, cfg->get_name().size() - 4);
-//    auto path = var.get("path");
-//
-//    LGraph *dfg = LGraph::create(path, name, cfg->get_name());
-//    assert(dfg);
-//    p.do_generate(cfg, dfg);
-//    lgs.push_back(dfg);
-//  }
-//
-//  if(lgs.empty()) {
-//    warn(fmt::format("pass.dfg.generate needs an input cfg lgraph. Either name or |> from lgraph.open"));
-//    return;
-//  }
-//}
-
-void Pass_dfg::optimize(Eprp_var &var) {
-
-  for(auto &g : var.lgs) {
-    Pass_dfg p;
-    p.do_optimize(g);
-  }
-}
-
-void Pass_dfg::finalize_bitwidth(Eprp_var &var) {
-
-  for(auto &g : var.lgs) {
-    Pass_dfg p;
-    p.do_finalize_bitwidth(g);
-    g->sync();
-  }
-}
 
 void Pass_dfg::setup() {
   Eprp_method m1("pass.dfg.generate", "generate a dfg lgraph from a cfg lgraph", &Pass_dfg::generate);
@@ -128,16 +36,116 @@ void Pass_dfg::setup() {
   register_pass(m3);
 }
 
+void Pass_dfg::generate(Eprp_var &var) {
+  Pass_dfg p;
+
+  //std::vector<LGraph *> lgs;
+  std::vector<LGraph *> dfgs;
+  for(auto &cfg : var.lgs) {
+    if(!absl::EndsWith(cfg->get_name(), "_cfg"))
+      continue;
+
+    dfgs = p.hierarchical_gen_dfgs(cfg);
+  }
+
+  if(dfgs.empty()) {
+    warn(fmt::format("pass.dfg.generate needs an input cfg lgraph. Either name or |> from lgraph.open"));
+    return;
+  }
+}
+
+std::vector<LGraph*> Pass_dfg::hierarchical_gen_dfgs(LGraph *cfg_parent){
+  std::vector<LGraph *> dfgs;
+  fmt::print("hierarchical dfg generation start!\n");
+  fmt::print("topg lgid:{}\n", cfg_parent->lg_id());
+  auto dfg_name = cfg_parent->get_name().substr(0, cfg_parent->get_name().size() - 4);
+  LGraph *dfg = LGraph::create(cfg_parent->get_path(), dfg_name, cfg_parent->get_name());
+  I(dfg);
+  do_generate(cfg_parent, dfg);
+  dfgs.push_back(dfg);
+
+  cfg_parent->each_sub_graph_fast([cfg_parent, &dfgs, this](Index_ID idx, Lg_type_id lgid, std::string_view iname){
+    fmt::print("subgraph lgid:{}\n", lgid);
+    LGraph *cfg_child = LGraph::open(cfg_parent->get_path(), lgid);
+    if(cfg_child==0){
+      Pass::error("hierarchy for {} could not open instance {} with lgid {}", cfg_parent->get_name(), iname, lgid);
+    } else {
+      I(absl::EndsWith(cfg_child->get_name(),"_cfg"));
+      //auto child_dfg_name = cfg_child->get_name().substr(0, cfg_child->get_name().size() - 4);
+      std::string_view child_dfg_name(cfg_child->get_name().data(), cfg_child->get_name().size()-4); // _cfg
+      LGraph *dfg_child = LGraph::create(cfg_child->get_path(), child_dfg_name, cfg_child->get_name());
+      I(dfg_child);
+
+      do_generate(cfg_child, dfg_child);
+      dfgs.push_back(dfg_child);
+    }
+  });
+
+  return dfgs;
+}
+
+void Pass_dfg::optimize(Eprp_var &var) {
+
+  for(auto &g : var.lgs) {
+    Pass_dfg p;
+    p.hierarchical_opt_dfgs(g);
+  }
+}
+
+void Pass_dfg::hierarchical_opt_dfgs(LGraph *dfg_parent){
+  fmt::print("hierarchical dfg optimization start!\n");
+  fmt::print("topg lgid:{}\n", dfg_parent->lg_id());
+  do_optimize(dfg_parent);
+
+  dfg_parent->each_sub_graph_fast([dfg_parent, this](Index_ID idx, Lg_type_id lgid, std::string_view iname){
+    fmt::print("subgraph lgid:{}\n", lgid);
+    LGraph *dfg_child = LGraph::open(dfg_parent->get_path(), lgid);
+    if(dfg_child==0){
+      Pass::error("hierarchy for {} could not open instance {} with lgid {}", dfg_parent->get_name(), iname, lgid);
+    } else {
+      I(dfg_child);
+      do_optimize(dfg_child);
+    }
+  });
+}
+
+void Pass_dfg::finalize_bitwidth(Eprp_var &var) {
+
+  for(auto &g : var.lgs) {
+    Pass_dfg p;
+    p.hierarchical_finalize_bits_dfgs(g);
+    g->close();
+  }
+}
+
+void Pass_dfg::hierarchical_finalize_bits_dfgs(LGraph *dfg_parent){
+  fmt::print("hierarchical dfg finalize_bits start!\n");
+  fmt::print("topg lgid:{}\n", dfg_parent->lg_id());
+  do_finalize_bitwidth(dfg_parent);
+
+  dfg_parent->each_sub_graph_fast([dfg_parent, this](Index_ID idx, Lg_type_id lgid, std::string_view iname){
+    fmt::print("subgraph lgid:{}\n", lgid);
+    LGraph *dfg_child = LGraph::open(dfg_parent->get_path(), lgid);
+    if(dfg_child==0){
+      Pass::error("hierarchy for {} could not open instance {} with lgid {}", dfg_parent->get_name(), iname, lgid);
+    } else {
+      I(dfg_child);
+      do_finalize_bitwidth(dfg_child);
+    }
+  });
+}
+
+
 Pass_dfg::Pass_dfg():Pass("dfg"){}
 
 void Pass_dfg::do_generate(const LGraph *cfg, LGraph *dfg) {
   cfg_2_dfg(cfg, dfg);
-  dfg->sync();
+  dfg->close();//instead of using lg->sync(), you should just call close()
 }
 
 void Pass_dfg::do_optimize(LGraph *&ori_dfg) {
   trans(ori_dfg);
-  ori_dfg->sync();
+  ori_dfg->close();
 }
 
 void Pass_dfg::trans(LGraph *dfg) {
@@ -177,7 +185,7 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
     if(nid_size == 0){
       Node_bitwidth &nb = dfg->node_bitwidth_get(idx);
       fmt::print("nid:{},max:{}\n",idx, nb.i.max);
-      dfg->set_bits(idx, (uint16_t)ceil(log2(nb.i.max)));
+      dfg->set_bits(idx, ((uint16_t)floor(log2(nb.i.max))+1));
     }
   }
 
@@ -186,7 +194,7 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
       for (auto &inp : dfg->inp_edges(idx)) {
         Index_ID src_nid = inp.get_out_pin().get_nid();
         Index_ID dst_nid = idx;
-        Port_ID  src_pid = inp.get_out_pin().get_pid();
+        //Port_ID  src_pid = inp.get_out_pin().get_pid();
         Port_ID  dst_pid = inp.get_inp_pin().get_pid();
 
         if(dst_pid == 0)
@@ -217,6 +225,8 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
         Index_ID dst_nid = idx;
         if(dfg->get_bits(src_nid) > dfg->get_bits(dst_nid))
           dfg->set_bits(dst_nid, dfg->get_bits(src_nid));
+        //else//this is workaround will be eventually wrong after MIT could handle subgraph
+        //  dfg->set_bits(src_nid, dfg->get_bits(dst_nid));
       }
     }
   }

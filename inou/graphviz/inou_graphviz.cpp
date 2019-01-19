@@ -59,32 +59,40 @@ void Inou_graphviz::do_fromlg(std::vector<LGraph *> &lgs) {
       fmt::print("  {} {}\n",name,lgid);
     }
   }
-
-  for(const auto g : lgs) {
-
-    std::string data = "digraph {\n";
-
-    g->each_master_root_fast([this, g, &data](Index_ID src_nid) {
-      const auto &node = g->node_type_get(src_nid);
-      std::string bits_str = std::to_string(g->get_bits(src_nid));
-      if(bits)
-        data += fmt::format(" {} [label=\"n{}:{}:{}b\"];\n", src_nid, src_nid, node.get_name(), bits_str);
-      else
-        data += fmt::format(" {} [label=\"n{}:{}\"];\n",  src_nid, src_nid, node.get_name());
+  for(const auto lg_parent : lgs) {
+    populate_data(lg_parent);
+    lg_parent->each_sub_graph_fast([lg_parent,this](Index_ID idx, Lg_type_id lgid, std::string_view iname){
+      fmt::print("subgraph lgid:{}\n", lgid);
+      LGraph *lg_child = LGraph::open(lg_parent->get_path(), lgid);
+      populate_data(lg_child);
     });
-
-    g->each_output_edge_fast([this, g, &data](Index_ID src_nid, Port_ID src_pid, Index_ID dst_nid, Port_ID dst_pid) {
-      data += fmt::format(" {} -> {}[label=\"{}:{}\"];\n", src_nid, dst_nid, src_pid, dst_pid);
-    });
-    data += "}\n";
-
-    std::string file = absl::StrCat(odir, "/", g->get_name(), ".dot");
-    int         fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
-    if(fd < 0) {
-      Pass::error("inou.graphviz unable to create {}", file);
-      return;
-    }
-    write(fd, data.c_str(), data.size());
-    close(fd);
   }
 }
+
+void Inou_graphviz::populate_data(LGraph* g){
+  std::string data = "digraph {\n";
+
+  g->each_master_root_fast([this, g, &data](Index_ID src_nid) {
+    const auto &node = g->node_type_get(src_nid);
+    std::string bits_str = std::to_string(g->get_bits(src_nid));
+    if(bits)
+      data += fmt::format(" {} [label=\"n{}:{}:{}b\"];\n", src_nid, src_nid, node.get_name(), bits_str);
+    else
+      data += fmt::format(" {} [label=\"n{}:{}\"];\n",  src_nid, src_nid, node.get_name());
+  });
+
+  g->each_output_edge_fast([this, g, &data](Index_ID src_nid, Port_ID src_pid, Index_ID dst_nid, Port_ID dst_pid) {
+    data += fmt::format(" {} -> {}[label=\"{}:{}\"];\n", src_nid, dst_nid, src_pid, dst_pid);
+  });
+  data += "}\n";
+
+  std::string file = absl::StrCat(odir, "/", g->get_name(), ".dot");
+  int         fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
+  if(fd < 0) {
+    Pass::error("inou.graphviz unable to create {}", file);
+    return;
+  }
+  write(fd, data.c_str(), data.size());
+  close(fd);
+}
+
