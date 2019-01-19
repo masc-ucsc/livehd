@@ -30,7 +30,12 @@ Graph_library *Graph_library::instance(std::string_view path) {
   std::string spath(path);
 
   char full_path[PATH_MAX+1];
-  realpath(spath.c_str(), full_path);
+  char *ptr = realpath(spath.c_str(), full_path);
+  if (ptr == nullptr) {
+    mkdir(spath.c_str(), 0755); // At least make sure directory exists for future
+    ptr = realpath(spath.c_str(), full_path);
+    I(ptr);
+  }
 
   auto it = Graph_library::global_instances.find(full_path);
   if(it != Graph_library::global_instances.end()) {
