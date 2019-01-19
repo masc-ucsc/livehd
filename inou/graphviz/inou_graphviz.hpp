@@ -21,6 +21,7 @@ protected:
   static void fromlg(Eprp_var &var);
 
   void do_fromlg(std::vector<LGraph *> &out);
+  void populate_data(LGraph* lg);
 
 public:
   Inou_graphviz();

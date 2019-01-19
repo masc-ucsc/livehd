@@ -5,6 +5,7 @@ OPT_MITBW=1
 rm -rf ./lgdb 
 rm -f  ./logs/*.json
 rm -f  ./logs/*.v
+rm -f  ./logs/*.dot
 rm -f  ./logs/*.log
 rm -f  ./lgshell_cmds
 rm -f  ./lgshell_cmds_opt
@@ -14,8 +15,8 @@ pwd
 
 
 # pts='top_ooo  sp_add  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2  if_elif_else'
-# pts='constant_pos constant_neg sp_if_0 nested_if_0 nested_if_1 nested_if_2 nested_if_3'
-pts='top_inline_add'
+pts='constant_pos constant_neg sp_if_0 nested_if_0 nested_if_1 nested_if_2 nested_if_3'
+# pts='top_inline_add'
 # pts='nested_if_0'
 
 LGSHELL=./bazel-bin/main/lgshell
@@ -53,19 +54,8 @@ do
   fi
 done
 
-
 mv *.json ./logs
 
-# find ./lgdb -type f -printf "%f\n"
-
-# for file in ./lgdb/*; do
-#   for pt in $pts do
-#     # if(string length of pt != file[6:6+string_length])
-#     #   insert file into pts
-#     # else 
-#     #   do nothing, the pt has already in pts
-#   done
-# done
 
 echo ""
 echo "2nd round: DFG optimization"
@@ -80,9 +70,10 @@ do
     echo "lgraph.open name:${pt} |> pass.bitwidth"                        >> lgshell_cmds_opt
   fi
 
+  echo "lgraph.open name:${pt} |> inou.graphviz odir:./logs bits:true"    >> lgshell_cmds_opt
   echo "lgraph.open name:${pt} |> pass.dfg.finalize_bitwidth"             >> lgshell_cmds_opt
   echo "lgraph.open name:${pt} |> inou.json.fromlg output:${pt}.json"     >> lgshell_cmds_opt
-  echo "lgraph.open name:${pt} |> inou.graphviz odir:./logs bits:true"     >> lgshell_cmds_opt
+  # echo "lgraph.open name:${pt} |> inou.graphviz odir:./logs bits:true"     >> lgshell_cmds_opt
 
 
  ${LGSHELL} < lgshell_cmds_opt
@@ -99,7 +90,7 @@ echo "Verilog code generation"
 echo ""
 for pt in $pts
 do
-  ./inou/yosys/lgyosys -g"$pt"
+  ./inou/yosys/lgyosys -g"$pt" -h
   if [ $? -eq 0 ]; then
     echo "Successfully created verilog:${pt}.v"
   else
