@@ -31,7 +31,7 @@ def _impl(ctx):
     ar_executable = cc_toolchain.ar_executable()
     compiler_executable = cc_toolchain.compiler_executable()
   else:
-    print("Using the older fragments interface (older bazel versions)")
+    print("linkso.bzl switching to fragments interface for older bazel versions")
     ar_executable = ctx.fragments.cpp.ar_executable
     compiler_executable = ctx.fragments.cpp.compiler_executable
 
