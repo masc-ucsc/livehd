@@ -6,6 +6,7 @@ cc_library(
     visibility = ["//visibility:public"],
     includes = ["."],
     deps = ["@fmt//:fmt",
+            "@iassert//:iassert",
             "@com_google_absl//absl/container:flat_hash_map",
             "@com_google_absl//absl/container:flat_hash_set",
     ],
@@ -22,7 +23,6 @@ cc_test(
     srcs = ["tests/elab_scanner_test.cpp"],
     args = ["$(location :elab_scripts)"],
     deps = [
-        "@gtest//:gtest_main",
         ":elab",
     ],
     data = [
@@ -39,6 +39,15 @@ cc_test(
     ],
     data = [
         ":elab_scripts",
+    ],
+)
+
+cc_test(
+    name = "ast_test",
+    srcs = ["tests/ast_test.cpp"],
+    deps = [
+        "@gtest//:gtest_main",
+        ":elab",
     ],
 )
 
