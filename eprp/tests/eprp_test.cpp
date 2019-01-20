@@ -93,7 +93,7 @@ public:
   }
 };
 
-class EPrpTest : public ::testing::Test {
+class Eprp_test : public ::testing::Test {
 protected:
   Eprp eprp;
   void SetUp() override {
@@ -128,7 +128,7 @@ protected:
   }
 };
 
-class EPrpFiles : public ::testing::Test {
+class Eprp_files : public ::testing::Test {
 protected:
   Eprp eprp;
   void SetUp() override {
@@ -139,13 +139,13 @@ protected:
   }
 };
 
-TEST_F(EPrpFiles, ParseFiles) {
+TEST_F(Eprp_files, ParseFiles) {
   const char *buffer =" test1.files2 match:\"nothing\" files:g3xx,./f1/f1.v,xotato/../bar.prp,potato/bar.v";
 
   eprp.parse("parsefiles", buffer, strlen(buffer));
 }
 
-TEST_F(EPrpTest, SimpleReadlinePipe) {
+TEST_F(Eprp_test, SimpleReadlinePipe) {
   is_equal_called = false;
   const char *buffer =" test1.xyz.generate lgdb:./lgdb graph_name:chacha |> test1.fff.test     check2:chacha    check1:./lgdb   ";
 
