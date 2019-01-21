@@ -186,7 +186,7 @@ void Chunkify_verilog::elaborate() {
 
   while(!scan_is_end()) {
     bool endmodule_found = false;
-    if(scan_is_token(TOK_ALNUM)) {
+    if(scan_is_token(Token_id_alnum)) {
       std::string token;
       scan_append(token);
       if(strcasecmp(token.c_str(), "module") == 0) {
@@ -219,7 +219,7 @@ void Chunkify_verilog::elaborate() {
           scan_error(fmt::format("found endmodule without corresponding module"));
         }
       }
-    } else if(scan_is_token(TOK_COMMENT)) { // Before TOK_COMMA
+    } else if(scan_is_token(Token_id_comment)) { // Before Token_id_comma
       // Drop comment, to avoid unneeded recompilations
       if (in_module)
         in_module_text.append("\n");
@@ -227,9 +227,9 @@ void Chunkify_verilog::elaborate() {
         not_in_module_text.append("\n");
       scan_next();
       continue;
-    } else if(scan_is_token(TOK_COMMA) || scan_is_token(TOK_SEMICOLON) || scan_is_token(TOK_CP)) {
+    } else if(scan_is_token(Token_id_comma) || scan_is_token(Token_id_semicolon) || scan_is_token(Token_id_cp)) {
       if(last_input || last_output) {
-        if(in_module && scan_is_prev_token(TOK_ALNUM)) {
+        if(in_module && scan_is_prev_token(Token_id_alnum)) {
           std::string label;
           scan_prev_append(label);
 
