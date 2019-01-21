@@ -131,7 +131,7 @@ public:
 
     std::string module;
     while(!scan_is_end()) {
-      if(scan_is_token(TOK_ALNUM)) {
+      if(scan_is_token(Token_id_alnum)) {
         std::string token;
         scan_append(token);
         if(strcasecmp(token.c_str(), "module") == 0) {
@@ -154,9 +154,9 @@ public:
             scan_error(fmt::format("found endmodule without corresponding module"));
           }
         }
-      } else if(scan_is_token(TOK_COMMA) || scan_is_token(TOK_SEMICOLON) || scan_is_token(TOK_CP)) {
+      } else if(scan_is_token(Token_id_comma) || scan_is_token(Token_id_semicolon) || scan_is_token(Token_id_cp)) {
         if(last_input || last_output) {
-          if(scan_is_prev_token(TOK_ALNUM)) {
+          if(scan_is_prev_token(Token_id_alnum)) {
             std::string label;
             scan_prev_append(label);
 
@@ -168,11 +168,11 @@ public:
           last_input  = false;
           last_output = false;
 #if 0
-        }else if (scan_is_token(TOK_SEMICOLON)) {
-          if (scan_is_next_token(1,TOK_ALNUM)) {
+        }else if (scan_is_token(Token_id_semicolon)) {
+          if (scan_is_next_token(1,Token_id_alnum)) {
             std::string label;
             scan_next_append(label);
-            if (scan_is_next_token(2,TOK_ALNUM) || scan_is_next_token(2,TOK_POUND)) {
+            if (scan_is_next_token(2,Token_id_alnum) || scan_is_next_token(2,Token_id_pound)) {
               if (verilog_keyword.find(label) == verilog_keyword.end()) {
                 fmt::print("  instance {}\n",label);
               }

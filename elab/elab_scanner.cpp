@@ -7,6 +7,8 @@
 #include <string>
 #include <cctype>
 
+#include "iassert.hpp"
+
 #include "elab_scanner.hpp"
 
 #ifndef likely
@@ -22,130 +24,132 @@ void Elab_scanner::setup_translate() {
 
   for(int i=0;i<256;i++) {
     if (isalnum(i) || i == '_') {
-      translate[i] = TOK_ALNUM | TOK_TRYMERGE;
-    }else{
-      translate[i] = TOK_NOP;
+      translate[i] = Translate_item(Token_id_alnum, true);
     }
   }
 
-  translate['{'] = TOK_OB;
-  translate['}'] = TOK_CB;
-  translate[':'] = TOK_COLON | TOK_TRYMERGE; // TOK_LABEL
-  translate['|'] = TOK_OR;
-  translate['.'] = TOK_DOT;
-  translate[';'] = TOK_SEMICOLON;
-  translate[','] = TOK_COMMA;
-  translate['('] = TOK_OP;
-  translate[')'] = TOK_CP;
-  translate['#'] = TOK_POUND;
-  translate['>'] = TOK_GT  | TOK_TRYMERGE;  // TOK_PIPE
-  translate['*'] = TOK_MUL;
-  translate['/'] = TOK_DIV;
-  translate['"'] = TOK_STRING; // | TOK_TRYMERGE;  // Anything else until other TOK_STRING
-  translate['+'] = TOK_PLUS;
-  translate['-'] = TOK_MINUS;
-  translate['!'] = TOK_BANG;
-  translate['<'] = TOK_LT;
-  translate['='] = TOK_EQ | TOK_TRYMERGE; // <= >= == 
-  translate['&'] = TOK_AND;
-  translate['^'] = TOK_XOR;
-  translate['?'] = TOK_QMARK;
-  translate['\''] = TOK_TICK;
+  translate['{'] = Token_id_ob;
+  translate['}'] = Token_id_cb;
+  translate[':'] = Translate_item(Token_id_colon,true); // Token_id_label
+  translate['|'] = Token_id_or;
+  translate['.'] = Token_id_dot;
+  translate[';'] = Token_id_semicolon;
+  translate[','] = Token_id_comma;
+  translate['('] = Token_id_op;
+  translate[')'] = Token_id_cp;
+  translate['#'] = Token_id_pound;
+  translate['>'] = Translate_item(Token_id_gt, true);  // Token_id_pipe
+  translate['*'] = Token_id_mult;
+  translate['/'] = Token_id_div;
+  translate['"'] = Token_id_string;
+  translate['+'] = Token_id_plus;
+  translate['-'] = Token_id_minus;
+  translate['!'] = Token_id_bang;
+  translate['<'] = Token_id_lt;
+  translate['='] = Translate_item(Token_id_eq,true); // <= >= ==
+  translate['&'] = Token_id_and;
+  translate['^'] = Token_id_xor;
+  translate['?'] = Token_id_qmark;
+  translate['\''] = Token_id_tick;
 
-  translate['@'] = TOK_AT;
-  translate['$'] = TOK_DOLLAR;
-  translate['%'] = TOK_PERCENT;
+  translate['@'] = Token_id_at;
+  translate['$'] = Token_id_dollar;
+  translate['%'] = Token_id_percent;
 
-  translate['`'] = TOK_BACKTICK;
+  translate['`'] = Token_id_backtick;
 
-  translate['['] = TOK_OBR;
-  translate[']'] = TOK_CBR;
+  translate['['] = Token_id_obr;
+  translate[']'] = Token_id_cbr;
 }
 
 void Elab_scanner::add_token(Token &t) {
 
-  if (!t.tok) {
+  if (t.tok == Token_id_nop) {
     token_list_spaced = true;
+    I(!trying_merge);
     return;
   }
 
-  if (likely(!(t.tok & TOK_TRYMERGE))) {
+  if (likely(!trying_merge
+        || token_list.empty()
+        || (t.tok == Token_id_nop)
+        || token_list_spaced)) {
+    trying_merge      = false;
     token_list_spaced = false;
     token_list.push_back(t);
     return;
   }
 
-  t.tok &= ~TOK_TRYMERGE;
-  if (!token_list.empty() && !token_list_spaced) {
-    Token &last_tok = token_list.back();
+  trying_merge      = false;
+  Token &last_tok = token_list.back();
 
-    if (last_tok.tok == TOK_OR && t.tok == TOK_GT) {
-      token_list.back().tok = TOK_PIPE;
+  if (last_tok.tok == Token_id_or && t.tok == Token_id_gt) {
+    token_list.back().tok = Token_id_pipe;
+    token_list.back().len += t.len;
+    return;
+  }else if (t.tok == Token_id_eq) { // <=
+    if (last_tok.tok == Token_id_lt) { // <=
+      token_list.back().tok = Token_id_le;
       token_list.back().len += t.len;
       return;
-    }else if (t.tok == TOK_EQ) { // <=
-      if (last_tok.tok == TOK_LT) { // <=
-        token_list.back().tok = TOK_LE;
-        token_list.back().len += t.len;
-        return;
-      }else if (last_tok.tok == TOK_GT) { // >=
-        token_list.back().tok = TOK_GE;
-        token_list.back().len += t.len;
-        return;
-      }else if (last_tok.tok == TOK_EQ) { // ==
-        token_list.back().tok = TOK_SAME;
-        token_list.back().len += t.len;
-        return;
-      }else if (last_tok.tok == TOK_BANG) { // !=
-        token_list.back().tok = TOK_DIFF;
-        token_list.back().len += t.len;
-        return;
-      }else if (last_tok.tok == TOK_COLON ) { // :=
-        token_list.back().tok = TOK_COLONEQ;
-        token_list.back().len += t.len;
-        return;
-      }
-    }else if (t.tok == TOK_ALNUM) {
-      if (last_tok.tok == TOK_AT) { // @foo
-        token_list.back().tok = TOK_REGISTER;
-        token_list.back().len += t.len;
-        return;
-      }else if (last_tok.tok == TOK_PERCENT) { // %foo
-        token_list.back().tok = TOK_OUTPUT;
-        token_list.back().len += t.len;
-        return;
-      }else if (last_tok.tok == TOK_DOLLAR) { // $foo
-        token_list.back().tok = TOK_INPUT;
-        token_list.back().len += t.len;
-        return;
-      }
-    }else if (last_tok.tok == TOK_ALNUM && t.tok == TOK_COLON) {
-      last_tok.tok = TOK_LABEL;
-      // token_list.back().len += t.len;
+    }else if (last_tok.tok == Token_id_gt) { // >=
+      token_list.back().tok = Token_id_ge;
+      token_list.back().len += t.len;
+      return;
+    }else if (last_tok.tok == Token_id_eq) { // ==
+      token_list.back().tok = Token_id_same;
+      token_list.back().len += t.len;
+      return;
+    }else if (last_tok.tok == Token_id_bang) { // !=
+      token_list.back().tok = Token_id_diff;
+      token_list.back().len += t.len;
+      return;
+    }else if (last_tok.tok == Token_id_colon ) { // :=
+      token_list.back().tok = Token_id_coloneq;
+      token_list.back().len += t.len;
       return;
     }
+  }else if (t.tok == Token_id_alnum) {
+    if (last_tok.tok == Token_id_at) { // @foo
+      token_list.back().tok = Token_id_register;
+      token_list.back().len += t.len;
+      return;
+    }else if (last_tok.tok == Token_id_percent) { // %foo
+      token_list.back().tok = Token_id_output;
+      token_list.back().len += t.len;
+      return;
+    }else if (last_tok.tok == Token_id_dollar) { // $foo
+      token_list.back().tok = Token_id_input;
+      token_list.back().len += t.len;
+      return;
+    }
+  }else if (last_tok.tok == Token_id_alnum && t.tok == Token_id_colon) {
+    last_tok.tok = Token_id_label;
+    // token_list.back().len += t.len;
+    return;
   }
 
   token_list_spaced = false;
   token_list.push_back(t);
 }
 
-void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, uint8_t> &keywords) {
+void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, Token_id> &keywords) {
   for(auto &t:token_list) {
-    if (t.tok != TOK_ALNUM)
+    if (t.tok != Token_id_alnum)
       continue;
 
     if (isdigit(buffer[t.pos])) {
-      t.tok = TOK_NUM;
+      t.tok = Token_id_num;
       continue;
     }
+
     std::string alnum(&buffer[t.pos], t.len);
     auto it = keywords.find(alnum);
     if (it == keywords.end())
       continue;
 
-    assert(it->second >= TOK_KEYWORD_FIRST);
-    assert(it->second <= TOK_KEYWORD_LAST);
+    assert(it->second >= static_cast<Token_id>(Token_id_keyword_first));
+    assert(it->second <= static_cast<Token_id>(Token_id_keyword_last));
 
     t.tok = it->second;
   }
@@ -170,7 +174,7 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
 
   Token t;
   t.pos = 0;
-  t.tok = TOK_NOP;
+  t.tok = Token_id_nop;
 
   bool starting_comment=false; // Only for comments to avoid /*/* nested back to back */*/
   bool finishing_comment=false; // Only for comments to avoid /*/* nested back to back */*/
@@ -182,33 +186,46 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
       if (!in_comment && t.tok) {
         t.len = pos - t.pos;
         add_token(t);
-        t.tok = TOK_NOP;
-        t.pos = pos;
+
+        t.tok        = Token_id_nop;
+        t.pos        = pos;
+        t.len        = 0;
+        trying_merge = false;
       }else{
         t.len = pos - t.pos;
-        starting_comment  = false;
-        finishing_comment = false;
+        starting_comment      = false;
+        finishing_comment     = false;
         in_singleline_comment = false;
         in_comment            = in_singleline_comment | in_multiline_comment;
         if (!in_comment) {
-          add_token(t);
-          if (t.tok == TOK_SYNOPSYS) {
+          if (t.tok == Token_id_synopsys) {
             scan_warn("synopsys directive (most likely ignored)");
           }
-          t.tok = TOK_NOP;
-          t.pos = pos;
+          add_token(t);
+
+          t.tok        = Token_id_nop;
+          t.pos        = pos;
+          t.len        = 0;
+          trying_merge = false;
         }
       }
       if(in_string_pos>=0) {
         t.len = pos - in_string_pos;
         add_token(t);
-        t.tok = TOK_NOP;
-        t.pos = pos;
+
+        t.tok        = Token_id_nop;
+        t.pos        = pos;
+        t.len        = 0;
+        trying_merge = false;
+
         in_string_pos = -1;
       }
     }else if(unlikely(last_c == '/' && c == '/')) {
+      t.tok = Token_id_comment;
+      // t.pos = t.pos
       t.len = pos - t.pos;
-      t.tok = TOK_COMMENT;
+      trying_merge = false;
+
       // in the works!!
       if (!in_comment) {
         constexpr size_t len1 = std::char_traits<char>::length("synopsys ");
@@ -217,7 +234,7 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
           npos++;
         if ((npos+len1)<memblock.size()) {
           if (strncmp(&buffer[npos], "synopsys ",len1)==0) {
-            t.tok = TOK_SYNOPSYS;
+            t.tok = Token_id_synopsys;
           }
         }
       }
@@ -227,18 +244,22 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
       assert(!finishing_comment);
     }else if(unlikely(!finishing_comment
           && ( (last_c == '/' && c == '*')
-            || (last_c == '(' && c == '*' && (memblock.size() > pos) && buffer[pos+1] != ')' && token_list.size() && token_list.back().tok != TOK_AT)
+            || (last_c == '(' && c == '*' && (memblock.size() > pos) && buffer[pos+1] != ')' && token_list.size() && token_list.back().tok != Token_id_at)
               ))) {
-      t.len = pos - t.pos;
-      t.tok = TOK_COMMENT;
+      t.tok        = Token_id_comment;
+      t.len        = pos - t.pos;
+      trying_merge = false;
+
       in_multiline_comment++;
       in_comment = true;
       starting_comment  = true;
       assert(!finishing_comment);
       // The (* foo *) are attributes - not comments - in verilog. Must be handled in the grammar
     }else if (unlikely(!starting_comment && ((last_c == '*' && c == '/') || (in_comment && last_c == '*' && c == ')') ))) {
-      t.len = pos - t.pos;
-      t.tok = TOK_COMMENT;
+      t.tok        = Token_id_comment;
+      t.len        = pos - t.pos;
+      trying_merge = false;
+
       in_multiline_comment--;
       if (in_multiline_comment < 0) {
         scan_error(fmt::format("{}:{} found end of comment without matching beginning of comment", name, nlines));
@@ -256,30 +277,37 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
       if(c == '"' && last_c != '\\') {
         t.len = pos - in_string_pos;
         add_token(t);
-        t.tok = TOK_NOP;
-        t.pos = pos;
+
+        t.tok        = Token_id_nop;
+        t.pos        = pos;
+        t.len        = 1;
+        trying_merge = false;
+
         in_string_pos = -1;
       }
     }else if(c == '"' && last_c != '\\') {
       t.len = pos - t.pos;
       add_token(t);
-      t.tok = TOK_STRING;
-      t.pos = pos + 1;
+      t.tok        = Token_id_string;
+      t.pos        = pos + 1;
+      trying_merge = false;
+
       in_string_pos = pos + 1;
     }else{
-      Token_id nt = translate[static_cast<uint8_t>(c)];
+      Token_id nt = translate[c].tok;
       if (t.tok != nt) {
         finishing_comment = false;
         t.len = pos - t.pos;
         add_token(t);
         t.tok = nt;
         t.pos = pos;
+        trying_merge = translate[c].try_merge;
       }
     }
 
     last_c = c;
   }
-  if (t.tok) {
+  if (t.tok != Token_id_nop) {
     t.len = memblock.size() - t.pos;
     add_token(t);
   }

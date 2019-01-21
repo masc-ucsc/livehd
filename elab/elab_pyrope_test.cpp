@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include <fcntl.h>
 #include <stdio.h>
@@ -7,79 +8,70 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#include <set>
 #include <string>
 
 #include "absl/container/flat_hash_map.h"
 
 #include "elab_scanner.hpp"
 
-// Control
-#define TOK_KEY_IF        0x40
-#define TOK_KEY_ELSE      0x41
-#define TOK_KEY_FOR       0x42
-#define TOK_KEY_WHILE     0x43
-#define TOK_KEY_ELIF      0x44
-#define TOK_KEY_RETURN    0x45
-#define TOK_KEY_UNIQUE    0x46
-#define TOK_KEY_WHEN      0x47
-
+// control
+constexpr uint8_t Pyrope_id_if   = 128;
+constexpr uint8_t Pyrope_id_else = 129;
+constexpr uint8_t Pyrope_id_for  = 130;
+constexpr uint8_t Pyrope_id_while= 131;
+constexpr uint8_t Pyrope_id_elif = 132;
+constexpr uint8_t Pyrope_id_return = 133;
+constexpr uint8_t Pyrope_id_unique = 134;
+constexpr uint8_t Pyrope_id_when = 135;
 // type
-#define TOK_KEY_AS        0x4a
-#define TOK_KEY_IS        0x4b
-
+constexpr uint8_t Pyrope_id_as = 136;
+constexpr uint8_t Pyrope_id_is = 137;
 // Debug
-#define TOK_KEY_C         0x50
-#define TOK_KEY_I         0x51
-#define TOK_KEY_N         0x52
-#define TOK_KEY_YIELD     0x53
-#define TOK_KEY_WAITFOR   0x54
-
-
-// logic ops
-#define TOK_KEY_AND       0x5a
-#define TOK_KEY_OR        0x5b
-#define TOK_KEY_NOT       0x5c
-
+constexpr uint8_t Pyrope_id_I = 138;
+constexpr uint8_t Pyrope_id_N = 139;
+constexpr uint8_t Pyrope_id_yield = 140;
+constexpr uint8_t Pyrope_id_waitfor = 141;
+// logic op
+constexpr uint8_t Pyrope_id_and = 142;
+constexpr uint8_t Pyrope_id_or = 143;
+constexpr uint8_t Pyrope_id_not = 144;
 // Range ops
-#define TOK_KEY_INTERSECT 0x60
-#define TOK_KEY_UNION     0x61
-#define TOK_KEY_UNTIL     0x62
-#define TOK_KEY_IN        0x63
-#define TOK_KEY_BY        0x64
-
+constexpr uint8_t Pyrope_id_intersect = 145;
+constexpr uint8_t Pyrope_id_union = 145;
+constexpr uint8_t Pyrope_id_until = 146;
+constexpr uint8_t Pyrope_id_in = 147;
+constexpr uint8_t Pyrope_id_by = 148;
 
 class Pyrope_scanner : public Elab_scanner {
   absl::flat_hash_map<std::string, uint8_t> pyrope_keyword;
 public:
   Pyrope_scanner() {
-    pyrope_keyword["if"]        = TOK_KEY_IF;
-    pyrope_keyword["else"]      = TOK_KEY_ELSE;
-    pyrope_keyword["for"]       = TOK_KEY_FOR;
-    pyrope_keyword["while"]     = TOK_KEY_WHILE; // FUTURE
-    pyrope_keyword["elif"]      = TOK_KEY_ELIF;
-    pyrope_keyword["return"]    = TOK_KEY_RETURN;
-    pyrope_keyword["unique"]    = TOK_KEY_UNIQUE;
-    pyrope_keyword["when"]      = TOK_KEY_WHEN;
+    pyrope_keyword["if"]        = Pyrope_id_if;
+    pyrope_keyword["else"]      = Pyrope_id_else;
+    pyrope_keyword["for"]       = Pyrope_id_for;
+    pyrope_keyword["while"]     = Pyrope_id_while; // FUTURE
+    pyrope_keyword["elif"]      = Pyrope_id_elif;
+    pyrope_keyword["return"]    = Pyrope_id_return;
+    pyrope_keyword["unique"]    = Pyrope_id_unique;
+    pyrope_keyword["when"]      = Pyrope_id_when;
 
-    pyrope_keyword["as"]        = TOK_KEY_AS;
-    pyrope_keyword["is"]        = TOK_KEY_IS;
+    pyrope_keyword["as"]        = Pyrope_id_as;
+    pyrope_keyword["is"]        = Pyrope_id_is;
 
-    pyrope_keyword["and"]       = TOK_KEY_AND;
-    pyrope_keyword["or"]        = TOK_KEY_OR;
-    pyrope_keyword["not"]       = TOK_KEY_NOT;
+    pyrope_keyword["and"]       = Pyrope_id_and;
+    pyrope_keyword["or"]        = Pyrope_id_or;
+    pyrope_keyword["not"]       = Pyrope_id_not;
 
-    pyrope_keyword["C"]         = TOK_KEY_C;
-    pyrope_keyword["I"]         = TOK_KEY_I;
-    pyrope_keyword["N"]         = TOK_KEY_N;
-    pyrope_keyword["yield"]     = TOK_KEY_YIELD;
-    pyrope_keyword["waitfor"]   = TOK_KEY_WAITFOR;
+    pyrope_keyword["I"]         = Pyrope_id_I;
+    pyrope_keyword["N"]         = Pyrope_id_N;
+    pyrope_keyword["yield"]     = Pyrope_id_yield;
+    pyrope_keyword["waitfor"]   = Pyrope_id_waitfor;
 
-    pyrope_keyword["intersect"] = TOK_KEY_INTERSECT;
-    pyrope_keyword["union"]     = TOK_KEY_UNION;
-    pyrope_keyword["until"]     = TOK_KEY_UNTIL;
-    pyrope_keyword["in"]        = TOK_KEY_IN;
-    pyrope_keyword["by"]        = TOK_KEY_BY;
+    pyrope_keyword["intersect"] = Pyrope_id_intersect;
+    pyrope_keyword["union"]     = Pyrope_id_union;
+    pyrope_keyword["until"]     = Pyrope_id_until;
+    pyrope_keyword["in"]        = Pyrope_id_in;
+    pyrope_keyword["by"]        = Pyrope_id_by;
   }
 
   void elaborate() {
@@ -91,6 +83,17 @@ public:
 
       //dump_token();
       total++;
+
+      if (scan_is_token(Token_id_label)) {
+        std::string txt;
+        scan_append(txt);
+        fmt::print("LABEL [{}]\n",txt);
+      }
+      if (scan_is_token(Pyrope_id_if)) {
+        std::string txt;
+        scan_append(txt);
+        fmt::print("IF [{}]\n",txt);
+      }
 
       scan_next();
     }

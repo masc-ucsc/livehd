@@ -12,108 +12,72 @@
 
 #include "fmt/format.h"
 
-#define MIN_CHUNK_SIZE 4
+using Token_id = uint8_t;
 
-// No token
-#define TOK_NOP        0x00
-// # foo
-#define TOK_COMMENT    0x01
-// @asd @_asd
-#define TOK_REGISTER   0x03
-// |>
-#define TOK_PIPE       0x04
-// a..z..0..9.._
-#define TOK_ALNUM      0x05
-// {
-#define TOK_OB         0x06
-// }
-#define TOK_CB         0x07
-// :
-#define TOK_COLON      0x08
-// >
-#define TOK_GT         0x09
-// |
-#define TOK_OR         0x0a
-// @
-#define TOK_AT         0x0b
-// foo:
-#define TOK_LABEL      0x0c
-// %outasd
-#define TOK_OUTPUT     0x0d
-// $asd
-#define TOK_INPUT      0x0e
-// $
-#define TOK_DOLLAR     0x0f
-// %
-#define TOK_PERCENT    0x10
-// .
-#define TOK_DOT        0x11
-// /
-#define TOK_DIV        0x12
-// "asd23*.v" string (double quote)
-#define TOK_STRING     0x13
-// ;
-#define TOK_SEMICOLON  0x14
-// ,
-#define TOK_COMMA      0x15
-// (
-#define TOK_OP         0x16
-// )
-#define TOK_CP         0x17
-// #
-#define TOK_POUND      0x18
-// *
-#define TOK_MUL        0x19
-// 0123123 or 123123 or 0123ubits
-#define TOK_NUM        0x1a
-// 0123123 or 123123 or 0123ubits
-#define TOK_BACKTICK   0x1b
-// synopsys... directive in comment
-#define TOK_SYNOPSYS   0x1c
-// +
-#define TOK_PLUS       0x1d
-// -
-#define TOK_MINUS      0x1e
-// !
-#define TOK_BANG       0x1d
-// <
-#define TOK_LT         0x1e
-// =
-#define TOK_EQ         0x1f
-// ==
-#define TOK_SAME       0x20
-// !=
-#define TOK_DIFF       0x21
-// :=
-#define TOK_COLONEQ    0x22
-// >=
-#define TOK_GE         0x23
-// <=
-#define TOK_LE         0x24
-// &
-#define TOK_AND        0x25
-// ^
-#define TOK_XOR        0x26
-// ?
-#define TOK_QMARK      0x27
-// '
-#define TOK_TICK       0x28
-// [
-#define TOK_OBR        0x29
-// ]
-#define TOK_CBR        0x30
-
-#define TOK_KEYWORD_FIRST   0x40
-#define TOK_KEYWORD_LAST    0x7F
-#define TOK_TRYMERGE   0x80
+// WARNING:
+//
+// We can not use enum or enum class cleanly because they do not support
+// inheritance in C++. It ,,is just cleaner (less static_cast conversions) using
+// constexpr
+//
+// Suggested way to extend tokens for other languages: (replace pyrope for your language)
+//
+// constexpr Token_id Pyrope_id_if   = 128; // Bigger than Token_id_keyword_first
+// constexpr Token_id Pyrope_id_else = 129;
+// constexpr Token_id Pyrope_id_for  = 130;
+//
+constexpr Token_id Token_id_nop           = 0;// invalid token
+constexpr Token_id Token_id_comment       = 1;// c-like comments
+constexpr Token_id Token_id_register      = 2;// @asd @_asd
+constexpr Token_id Token_id_pipe          = 3;// |>
+constexpr Token_id Token_id_alnum         = 4;// a..z..0..9.._
+constexpr Token_id Token_id_ob            = 5;// {
+constexpr Token_id Token_id_cb            = 6;// }
+constexpr Token_id Token_id_colon         = 7;// :
+constexpr Token_id Token_id_gt            = 8;// >
+constexpr Token_id Token_id_or            = 9;// |
+constexpr Token_id Token_id_at            = 10;// @
+constexpr Token_id Token_id_label         = 11;// foo:
+constexpr Token_id Token_id_output        = 12;// %outasd
+constexpr Token_id Token_id_input         = 13;// $asd
+constexpr Token_id Token_id_dollar        = 14;// $
+constexpr Token_id Token_id_percent       = 15;// %
+constexpr Token_id Token_id_dot           = 16;// .
+constexpr Token_id Token_id_div           = 17;// /
+constexpr Token_id Token_id_string        = 18;// "asd23*.v" string (double quote)
+constexpr Token_id Token_id_semicolon     = 19;// ;
+constexpr Token_id Token_id_comma         = 20;// ,
+constexpr Token_id Token_id_op            = 21;// (
+constexpr Token_id Token_id_cp            = 22;// )
+constexpr Token_id Token_id_pound         = 23;// #
+constexpr Token_id Token_id_mult          = 24;// *
+constexpr Token_id Token_id_num           = 25;// 0123123 or 123123 or 0123ubits
+constexpr Token_id Token_id_backtick      = 26;// `ifdef
+constexpr Token_id Token_id_synopsys      = 27;// synopsys... directive in comment
+constexpr Token_id Token_id_plus          = 28;// +
+constexpr Token_id Token_id_minus         = 29;// -
+constexpr Token_id Token_id_bang          = 30;// !
+constexpr Token_id Token_id_lt            = 31;// <
+constexpr Token_id Token_id_eq            = 32;// =
+constexpr Token_id Token_id_same          = 33;// ==
+constexpr Token_id Token_id_diff          = 34;// !=
+constexpr Token_id Token_id_coloneq       = 35;// :=
+constexpr Token_id Token_id_ge            = 37;// >=
+constexpr Token_id Token_id_le            = 38;// <=
+constexpr Token_id Token_id_and           = 39;// &
+constexpr Token_id Token_id_xor           = 40;// ^
+constexpr Token_id Token_id_qmark         = 41;// ?
+constexpr Token_id Token_id_tick          = 42;// '
+constexpr Token_id Token_id_obr           = 43;// [
+constexpr Token_id Token_id_cbr           = 44;// ]
+constexpr Token_id Token_id_keyword_first = 64;
+constexpr Token_id Token_id_keyword_last  = 254;
 
 class Elab_scanner {
 protected:
-  typedef uint8_t Token_id;
-
   struct Token {
     Token() {
-      tok = TOK_NOP;
+      tok = Token_id_nop;
       pos = 0;
       len = 0;
     }
@@ -133,8 +97,25 @@ protected:
   }
 
 private:
-  std::vector<Token_id> translate;
+  struct Translate_item {
+    Translate_item() : tok(Token_id_nop), try_merge(false) { }
+    Translate_item(Token_id t,bool tm=false) : tok(t), try_merge(tm) { }
+    Translate_item& operator=(const Translate_item &other) {
+      *const_cast<Token_id *>(&tok)   = other.tok;
+      *const_cast<bool *>(&try_merge) = other.try_merge;
+      return *this;
+    }
+    Translate_item& operator=(const Token_id &other_tok) {
+      *const_cast<Token_id *>(&tok)   = other_tok;
+      *const_cast<bool *>(&try_merge) = false;
+      return *this;
+    }
+    const Token_id tok;
+    const bool try_merge;
+  };
+  std::vector<Translate_item> translate;
   bool token_list_spaced = true;
+  bool trying_merge = false;
 
   // Fields updated for each chunk processed
   size_t scanner_pos;
@@ -210,7 +191,7 @@ public:
     return token_list[scanner_pos+pos].tok == tok;
   }
 
-  void patch_pass(const absl::flat_hash_map<std::string, uint8_t> &keywords);
+  void patch_pass(const absl::flat_hash_map<std::string, Token_id> &keywords);
 
   void parse(std::string_view name, std::string_view str, bool chunking=false);
 

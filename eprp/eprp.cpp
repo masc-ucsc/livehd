@@ -7,7 +7,7 @@
 #include "eprp.hpp"
 
 void Eprp::eat_comments() {
-  while(scan_is_token(TOK_COMMENT) && !scan_is_end())
+  while(scan_is_token(Token_id_comment) && !scan_is_end())
     scan_next();
 }
 
@@ -17,10 +17,10 @@ bool Eprp::rule_path(std::string &path) {
 
   assert(!scan_is_end());
 
-  if (!(scan_is_token(TOK_DOT)
-        || scan_is_token(TOK_ALNUM)
-        || scan_is_token(TOK_STRING)
-        || scan_is_token(TOK_DIV)))
+  if (!(scan_is_token(Token_id_dot)
+        || scan_is_token(Token_id_alnum)
+        || scan_is_token(Token_id_string)
+        || scan_is_token(Token_id_div)))
     return false;
 
   do {
@@ -31,11 +31,11 @@ bool Eprp::rule_path(std::string &path) {
       break;
     eat_comments();
 
-  }while(scan_is_token(TOK_DOT)
-        || scan_is_token(TOK_ALNUM)
-        || scan_is_token(TOK_STRING)
-        || scan_is_token(TOK_COMMA)
-        || scan_is_token(TOK_DIV));
+  }while(scan_is_token(Token_id_dot)
+        || scan_is_token(Token_id_alnum)
+        || scan_is_token(Token_id_string)
+        || scan_is_token(Token_id_comma)
+        || scan_is_token(Token_id_div));
 
   return true;
 }
@@ -44,7 +44,7 @@ bool Eprp::rule_path(std::string &path) {
 bool Eprp::rule_label_path(const std::string &cmd_line, Eprp_var &next_var) {
 
 
-  if (!scan_is_token(TOK_LABEL))
+  if (!scan_is_token(Token_id_label))
     return false;
 
   std::string label = scan_text();
@@ -60,7 +60,7 @@ bool Eprp::rule_label_path(const std::string &cmd_line, Eprp_var &next_var) {
   std::string path;
   bool ok = rule_path(path);
   if (!ok) {
-    if (scan_is_token(TOK_REGISTER)) {
+    if (scan_is_token(Token_id_register)) {
       scan_error(fmt::format("could not pass a register {} to a method {}", scan_text(), cmd_line));
     }else{
       scan_error(fmt::format("field {} with invalid value in {} command", label, cmd_line));
@@ -75,7 +75,7 @@ bool Eprp::rule_label_path(const std::string &cmd_line, Eprp_var &next_var) {
 
 // rule_reg = reg+
 bool Eprp::rule_reg(bool first) {
-  if (!scan_is_token(TOK_REGISTER))
+  if (!scan_is_token(Token_id_register))
     return false;
 
   std::string var = scan_text();
@@ -101,7 +101,7 @@ bool Eprp::rule_cmd_line(std::string &path) {
   if(scan_is_end())
     return false;
 
-  if (!scan_is_token(TOK_ALNUM))
+  if (!scan_is_token(Token_id_alnum))
     return false;
 
   do {
@@ -112,7 +112,7 @@ bool Eprp::rule_cmd_line(std::string &path) {
       break;
     eat_comments();
 
-  }while(scan_is_token(TOK_DOT) || scan_is_token(TOK_ALNUM));
+  }while(scan_is_token(Token_id_dot) || scan_is_token(Token_id_alnum));
 
   return true;
 }
@@ -142,7 +142,7 @@ bool Eprp::rule_pipe() {
   if (scan_is_end())
     return false;
 
-  if (!scan_is_token(TOK_PIPE))
+  if (!scan_is_token(Token_id_pipe))
     return false;
 
   scan_next();
@@ -178,7 +178,7 @@ bool Eprp::rule_top() {
 
   bool try_pipe = rule_pipe();
   if (!try_pipe) {
-    if (scan_is_token(TOK_OR)) {
+    if (scan_is_token(Token_id_or)) {
       scan_error(fmt::format("eprp pipe is |> not |"));
       return false;
     }else if (scan_is_end()) {
