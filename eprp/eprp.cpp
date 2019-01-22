@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include <ctype.h>
 #include <algorithm>
@@ -13,7 +14,6 @@ void Eprp::eat_comments() {
 
 // rule_path = (\. | alnum | / | "asdad.." | \,)+
 bool Eprp::rule_path(std::string &path) {
-
 
   assert(!scan_is_end());
 
@@ -42,7 +42,6 @@ bool Eprp::rule_path(std::string &path) {
 
 // rule_label_path = label path
 bool Eprp::rule_label_path(const std::string &cmd_line, Eprp_var &next_var) {
-
 
   if (!scan_is_token(Token_id_label))
     return false;
