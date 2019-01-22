@@ -43,8 +43,8 @@ cc_test(
 )
 
 cc_test(
-    name = "ast_test",
-    srcs = ["tests/ast_test.cpp"],
+    name = "tree_test",
+    srcs = ["tests/tree_test.cpp"],
     deps = [
         "@gtest//:gtest_main",
         ":elab",

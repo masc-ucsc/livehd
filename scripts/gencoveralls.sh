@@ -19,6 +19,8 @@ done
 echo $LCOV_ADD
 lcov $LCOV_ADD --output-file cov/coverage.info
 
+exit
+
 echo "rtp"
 if [ -s cov/coverage.info ]; then
   coveralls-lcov --repo-token Z2cNEUdoWLokSj16laePFXdCWIwckDRHK cov/coverage.info >/dev/null
