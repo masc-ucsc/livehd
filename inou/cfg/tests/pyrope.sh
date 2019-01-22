@@ -1,6 +1,6 @@
 #!/bin/bash
 
-OPT_MITBW=1
+OPT_MITBW=0
 
 rm -rf ./lgdb 
 rm -f  ./logs/*.json
@@ -15,8 +15,8 @@ pwd
 
 
 # pts='top_ooo  sp_add  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2  if_elif_else'
-pts='constant_pos constant_neg sp_if_0 nested_if_0 nested_if_1 nested_if_2 nested_if_3'
-# pts='top_inline_add'
+# pts='constant_pos constant_neg sp_if_0 nested_if_0 nested_if_1 nested_if_2 nested_if_3'
+pts='top_inline_add'
 # pts='nested_if_0'
 
 LGSHELL=./bazel-bin/main/lgshell
@@ -70,8 +70,8 @@ do
     echo "lgraph.open name:${pt} |> pass.bitwidth"                        >> lgshell_cmds_opt
   fi
 
-  echo "lgraph.open name:${pt} |> inou.graphviz odir:./logs bits:true"    >> lgshell_cmds_opt
   echo "lgraph.open name:${pt} |> pass.dfg.finalize_bitwidth"             >> lgshell_cmds_opt
+  echo "lgraph.open name:${pt} |> inou.graphviz odir:./logs bits:true"    >> lgshell_cmds_opt
   echo "lgraph.open name:${pt} |> inou.json.fromlg output:${pt}.json"     >> lgshell_cmds_opt
   # echo "lgraph.open name:${pt} |> inou.graphviz odir:./logs bits:true"     >> lgshell_cmds_opt
 
@@ -88,6 +88,8 @@ mv *.json ./logs
 echo ""
 echo "Verilog code generation"
 echo ""
+
+
 for pt in $pts
 do
   ./inou/yosys/lgyosys -g"$pt" -h

@@ -153,13 +153,20 @@ void Pass_dfg::trans(LGraph *dfg) {
   // resolve pending graph
   for(auto idx : dfg->fast()) {
     if(dfg->node_type_get(idx).op == DfgPendingGraph_Op) {
-      auto wirename = dfg->get_node_wirename(idx);
+      //dfg->set_node_instance_name(idx, dfg->get_node_wirename(idx));
       fmt::print("sub graph name is:{}\n", dfg->get_node_wirename(idx));
-      sub_graph     = LGraph::open(dfg->get_path(), wirename);
+      sub_graph     = LGraph::open(dfg->get_path(), dfg->get_node_wirename(idx));
       assert(sub_graph);
-
+      //changing from DfgPendingGraph_Op to normal subgraph_op
       dfg->node_subgraph_set(idx, sub_graph->lg_id());
+      //set wirename of the subg node back to empty to avoid yosys code generation conflict of count_id(cell->name)
+      //or I just don't set a specific instance_name for the instantiation of subgraph?
+      //dfg->set_node_wirename(idx,"tmp_wire");
       fmt::print("resolve pending subG! lg_id:{}, nid:{}, subG name:{}\n", sub_graph->lg_id(), idx, dfg->get_node_wirename(idx));
+    }else if(dfg->node_type_get(idx).op == SubGraph_Op){
+      //set wirename of the subg node back to empty to avoid yosys code generation conflict of count_id(cell->name)
+      //or I just don't set a specific instance_name for the instantiation of subgraph?
+      //dfg->set_node_wirename(idx,"tmp_wire");
     }
   }
 
@@ -225,8 +232,8 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
         Index_ID dst_nid = idx;
         if(dfg->get_bits(src_nid) > dfg->get_bits(dst_nid))
           dfg->set_bits(dst_nid, dfg->get_bits(src_nid));
-        //else//this is workaround will be eventually wrong after MIT could handle subgraph
-        //  dfg->set_bits(src_nid, dfg->get_bits(dst_nid));
+        else//Warning! this is workaround will be eventually wrong after MIT could handle subgraph
+          dfg->set_bits(src_nid, dfg->get_bits(dst_nid));
       }
     }
   }
