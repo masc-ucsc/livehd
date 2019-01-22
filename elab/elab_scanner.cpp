@@ -71,7 +71,7 @@ void Elab_scanner::add_token(Token &t) {
   }
 
   if (likely(!trying_merge
-        || token_list.empty()
+        || token_list.size() <= 1
         || (t.tok == Token_id_nop)
         || token_list_spaced)) {
     trying_merge      = false;
@@ -157,11 +157,12 @@ void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, Token_id> &
 
 void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool chunking) {
 
-  token_list.clear();
-
   buffer_name = name;
   buffer      = memblock; // To allow error reporting before chunking
-  scanner_pos.value = 0;
+
+  token_list.clear();
+  token_list.emplace_back(); // bogus zero entry
+  scanner_pos = 1;           // Skip zero to catch bugs
 
   int  nlines                = 0;
   char last_c                = 0;
@@ -319,7 +320,8 @@ void Elab_scanner::chunked(std::string_view _buffer) {
   elaborate();
 
   token_list.clear();
-  scanner_pos = 0;
+  token_list.emplace_back();
+  scanner_pos = 1;
 }
 
 bool Elab_scanner::scan_next() {
@@ -440,7 +442,7 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
 
   // Look at buffer for previous line change
 
-  if (token_list.empty()) {
+  if (token_list.size() <= 1) {
     fmt::print(fmt::format("{}:{}:{} {}: {}\n", buffer_name, 0, 0, cat, text));
     return;
   }

@@ -9,7 +9,11 @@ using Rule_id = int; // FIXME explicit_type
 struct Ast_parser_node {
   const Rule_id     rule_id;
   const Token_entry token_entry;
-  Ast_parser_node(Rule_id rid, Token_entry te) : rule_id(rid), token_entry(te) {}
+  Ast_parser_node(Rule_id rid, Token_entry te)
+    :rule_id(rid),
+    token_entry(te) {
+      I(rid);
+    }
 };
 
 class Ast_parser : public Tree<Ast_parser_node> {

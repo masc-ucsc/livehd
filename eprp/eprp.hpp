@@ -19,6 +19,7 @@ protected:
   std::unique_ptr<Ast_parser> ast;
 
   enum Eprp_rules : Rule_id {
+    Eprp_invalid=0, // zero is not a valid Rule_id
     Eprp_rule,
     Eprp_rule_path,
     Eprp_rule_label_path,

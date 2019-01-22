@@ -212,7 +212,11 @@ public:
     return false;
   }
 
-  Token_entry scan_token() const { return scanner_pos; }
+  Token_entry scan_token() const {
+    I(scanner_pos!=0);
+    I(scanner_pos< token_list.size());
+    return scanner_pos;
+  }
 
   void scan_format_append(std::string &text) const;
 
@@ -220,14 +224,16 @@ public:
   void scan_prev_append(std::string &text) const;
   void scan_next_append(std::string &text) const;
 
+  inline std::string_view scan_text(const Token_entry te) const {
+    I(token_list.size()>te);
+    return buffer.substr(token_list[te].pos,token_list[te].len);
+  }
+
   std::string scan_text() const;
   int scan_calc_lineno() const;
 
   size_t get_token_pos() const {
-    if (scanner_pos==0)
-      return 0;
-    assert(scanner_pos< token_list.size());
-    return token_list[scanner_pos-1].pos;
+    return token_list[scan_token()].pos;
   }
 
   bool scan_is_prev_token(Token_id tok) const {

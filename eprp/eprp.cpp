@@ -243,8 +243,12 @@ void Eprp::elaborate() {
   ast->up(Eprp_rule);
 
 #if 0
-  ast->each_bottom_first_fast([](const Tree_index &parent, const Tree_index &self, const Ast_parser_node &node) {
-    fmt::print("level:{} pos:{} te:{} rid:{}\n",self.get_level(), self.get_pos(), node.token_entry, node.rule_id);
+  HERE
+  ast->each_bottom_first_fast([this](const Tree_index &parent, const Tree_index &self, const Ast_parser_node &node) {
+    auto txt = scan_text(node.token_entry);
+
+    fmt::print("level:{} pos:{} te:{} rid:{} txt:{}\n",self.get_level(), self.get_pos(), node.token_entry, node.rule_id, txt);
+
   });
 #endif
 
