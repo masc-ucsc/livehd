@@ -26,6 +26,8 @@ bool Eprp::rule_path(std::string &path) {
   do {
     scan_append(path); // Just get the raw text
 
+    // ast.add(Eprp_rule_path, scan_token);
+
     bool ok = scan_next();
     if (!ok)
       break;
@@ -37,6 +39,7 @@ bool Eprp::rule_path(std::string &path) {
         || scan_is_token(Token_id_comma)
         || scan_is_token(Token_id_div));
 
+
   return true;
 }
 
@@ -47,22 +50,25 @@ bool Eprp::rule_label_path(const std::string &cmd_line, Eprp_var &next_var) {
     return false;
 
   std::string label = scan_text();
+  // ast.add(Eprp_rule_label, scan_token());
 
   scan_next(); // Skip LABEL token
   eat_comments();
 
   if (scan_is_end()) {
-    scan_error(fmt::format("the {} field in {} command has no argument", label, cmd_line));
+    scan_error("the {} field in {} command has no argument", label, cmd_line);
     return false;
   }
 
   std::string path;
+  // ast.down();
   bool ok = rule_path(path);
+  // ast.up(Eprp_rule_label_path);
   if (!ok) {
     if (scan_is_token(Token_id_register)) {
-      scan_error(fmt::format("could not pass a register {} to a method {}", scan_text(), cmd_line));
+      scan_error("could not pass a register {} to a method {}", scan_text(), cmd_line);
     }else{
-      scan_error(fmt::format("field {} with invalid value in {} command", label, cmd_line));
+      scan_error("field {} with invalid value in {} command", label, cmd_line);
     }
     return false;
   }
@@ -78,9 +84,10 @@ bool Eprp::rule_reg(bool first) {
     return false;
 
   std::string var = scan_text();
+  // ast.add(Eprp_rule_reg, scan_token());
   if (first) { // First in line @a |> ...
     if (variables.find(var) == variables.end()) {
-      scan_error(fmt::format("variable {} is empty", var));
+      scan_error("variable {} is empty", var);
       return false;
     }
     last_cmd_var = variables[var];
@@ -105,6 +112,7 @@ bool Eprp::rule_cmd_line(std::string &path) {
 
   do {
     scan_append(path); // Just get the raw text
+    // ast.add(Eprp_rule_cmd_line, scan_token)
 
     bool ok = scan_next();
     if (!ok)
@@ -123,14 +131,22 @@ bool Eprp::rule_cmd_full() {
 
   Eprp_var next_var;
 
+  // ast.down()
   bool cmd_found = rule_cmd_line(cmd_line);
+  // ast.up(Eprp_rule_cmd_full)
   if (!cmd_found)
     return false;
 
-  while(rule_label_path(cmd_line, next_var))
-    ;
+  bool path_found;
+  do{
+    // ast.down()
+    path_found = rule_label_path(cmd_line, next_var);
+    // ast.up(Eprp_rule_cmd_full)
+  }while(path_found);
 
+  // ast.down()
   run_cmd(cmd_line, next_var);
+  // ast.up(Eprp_rule_cmd_full)
 
   return true;
 }
@@ -147,9 +163,11 @@ bool Eprp::rule_pipe() {
   scan_next();
   eat_comments();
 
+  // ast.down()
   bool try_either = rule_cmd_or_reg(false);
+  // ast.up(Eprp_rule_pipe)
   if (!try_either) {
-    scan_error(fmt::format("after a pipe there should be a register or a command"));
+    scan_error("after a pipe there should be a register or a command");
     return false;
   }
 
@@ -159,37 +177,50 @@ bool Eprp::rule_pipe() {
 // rule_cmd_or_reg = rule_reg | rule_cmd_full
 bool Eprp::rule_cmd_or_reg(bool first) {
 
+  // ast.down();
   bool try_reg_rule = rule_reg(first);
+  // ast.up(Eprp_rule_cmd_or_reg);
   if (try_reg_rule)
     return true;
 
-  return rule_cmd_full();
+  // ast.down();
+  bool cmd_found = rule_cmd_full();
+  // ast.up(Eprp_rule_cmd_or_reg);
+  return cmd_found;
 }
 
 // rule_top = rule_cmd_or_reg(first) rule_pipe*
 bool Eprp::rule_top() {
 
+  // ast.down()
   bool try_either = rule_cmd_or_reg(true);
+  // ast.up(Eprp_rule_top)
   if (!try_either) {
-    scan_error(fmt::format("statements start with a register or a command"));
+    scan_error("statements start with a register or a command");
     return false;
   }
+
+  // tree.add_lazy_child(1);
 
   bool try_pipe = rule_pipe();
   if (!try_pipe) {
     if (scan_is_token(Token_id_or)) {
-      scan_error(fmt::format("eprp pipe is |> not |"));
+      scan_error("eprp pipe is |> not |");
       return false;
     }else if (scan_is_end()) {
       return true;
     }else{
-      scan_error(fmt::format("invalid command"));
+      scan_error("invalid command");
       return false;
     }
   }
 
-  while(rule_pipe())
+  // tree.add_lazy_child(1);
+
+  while(rule_pipe()) {
+    // tree.add_lazy_child(1);
     ;
+  }
 
   return true;
 }
@@ -213,7 +244,7 @@ void Eprp::run_cmd(const std::string &cmd, Eprp_var &var) {
 
   const auto &it = methods.find(cmd);
   if (it == methods.end()) {
-    parser_error(fmt::format("method {} not registered", cmd));
+    parser_error("method {} not registered", cmd);
     return ;
   }
 
@@ -231,7 +262,7 @@ void Eprp::run_cmd(const std::string &cmd, Eprp_var &var) {
 #if 0
   for(const auto v:var.dict) {
     if (!m.has_label(v.first)) {
-      parser_warn(fmt::format("method {} does not have passed label {}", cmd, v.first));
+      parser_warn("method {} does not have passed label {}", cmd, v.first);
     }
   }
 #endif
