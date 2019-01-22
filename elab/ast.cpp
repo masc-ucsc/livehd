@@ -20,7 +20,7 @@ void Ast_parser::up(Rule_id rid) {
     I((down_added-1)== level);
     // It has descendents but not child (add one now)
     down_added = level;
-    add_lazy_child(level, Ast_parser_node(0,rid));
+    add_lazy_child(level, Ast_parser_node(rid,0));
   }else{
     I(down_added<level);
     // nothing to do, no descendents
@@ -36,6 +36,6 @@ void Ast_parser::add(Rule_id rid, Token_entry te) {
 
   down_added = level;
 
-  add_lazy_child(level, Ast_parser_node(te, rid));
+  add_lazy_child(level, Ast_parser_node(rid, te));
 }
 
