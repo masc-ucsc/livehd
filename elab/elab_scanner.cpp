@@ -165,7 +165,7 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
 
   int  nlines                = 0;
   char last_c                = 0;
-  int in_string_pos          = -1;
+  bool in_string_pos         = false;
   bool in_comment            = false;
   bool in_singleline_comment = false;
   int  in_multiline_comment  = 0; // Nesting support
@@ -173,26 +173,22 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
   std::string_view ptr_section = memblock;
 
   Token t;
-  t.pos = 0;
-  t.tok = Token_id_nop;
+  t.clear(0);
 
   bool starting_comment=false; // Only for comments to avoid /*/* nested back to back */*/
   bool finishing_comment=false; // Only for comments to avoid /*/* nested back to back */*/
   for(size_t pos = 0; pos < memblock.size(); pos++) {
     char c = memblock[pos];
     //int pos = (&memblock[i] - ptr_section); // same as "i" unless chunking
+
+    t.adjust_len(pos);
     if(c == '\n' || c == '\r' || c == '\f') {
       nlines++;
-      if (!in_comment && t.tok) {
-        t.len = pos - t.pos;
+      if (!in_comment && t.tok != Token_id_nop) {
         add_token(t);
-
-        t.tok        = Token_id_nop;
-        t.pos        = pos;
-        t.len        = 0;
+        t.clear(pos);
         trying_merge = false;
       }else{
-        t.len = pos - t.pos;
         starting_comment      = false;
         finishing_comment     = false;
         in_singleline_comment = false;
@@ -202,28 +198,21 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
             scan_warn("synopsys directive (most likely ignored)");
           }
           add_token(t);
+          t.clear(pos);
 
-          t.tok        = Token_id_nop;
-          t.pos        = pos;
-          t.len        = 0;
           trying_merge = false;
         }
       }
-      if(in_string_pos>=0) {
-        t.len = pos - in_string_pos;
+      if(in_string_pos) {
         add_token(t);
+        t.clear(pos);
 
-        t.tok        = Token_id_nop;
-        t.pos        = pos;
-        t.len        = 0;
         trying_merge = false;
 
-        in_string_pos = -1;
+        in_string_pos = false;
       }
     }else if(unlikely(last_c == '/' && c == '/')) {
       t.tok = Token_id_comment;
-      // t.pos = t.pos
-      t.len = pos - t.pos;
       trying_merge = false;
 
       // in the works!!
@@ -247,7 +236,6 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
             || (last_c == '(' && c == '*' && (memblock.size() > pos) && buffer[pos+1] != ')' && token_list.size() && token_list.back().tok != Token_id_at)
               ))) {
       t.tok        = Token_id_comment;
-      t.len        = pos - t.pos;
       trying_merge = false;
 
       in_multiline_comment++;
@@ -272,35 +260,31 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
     }else if(in_comment) {
       starting_comment  = false;
       finishing_comment = false;
-      t.len = pos - t.pos;
-    }else if(in_string_pos>=0) {
-      if(c == '"' && last_c != '\\') {
-        t.len = pos - in_string_pos;
-        add_token(t);
 
-        t.tok        = Token_id_nop;
-        t.pos        = pos;
-        t.len        = 1;
+    }else if(in_string_pos) {
+      if(c == '"' && last_c != '\\') {
+
+        add_token(t);
+        t.clear(pos);
         trying_merge = false;
 
-        in_string_pos = -1;
+        in_string_pos = false;
       }
     }else if(c == '"' && last_c != '\\') {
-      t.len = pos - t.pos;
+
       add_token(t);
-      t.tok        = Token_id_string;
-      t.pos        = pos + 1;
+      t.set(Token_id_string,pos+1);
       trying_merge = false;
 
-      in_string_pos = pos + 1;
+      in_string_pos = true;
     }else{
       Token_id nt = translate[c].tok;
       if (t.tok != nt) {
         finishing_comment = false;
-        t.len = pos - t.pos;
+
         add_token(t);
-        t.tok = nt;
-        t.pos = pos;
+        t.set(nt,pos);
+
         trying_merge = translate[c].try_merge;
       }
     }
@@ -343,7 +327,7 @@ bool Elab_scanner::scan_next() {
   if (scanner_pos >= token_list.size())
     return false;
 
-  scanner_pos++;
+  scanner_pos = scanner_pos + 1;
 
   return true;
 }

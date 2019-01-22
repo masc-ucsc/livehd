@@ -10,9 +10,13 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/substitute.h"
 
+#include "iassert.hpp"
 #include "fmt/format.h"
+#include "explicit_type.hpp"
 
 using Token_id = uint8_t;
+
+using Token_entry = Explicit_type<uint32_t, struct Token_entry_struct>;
 
 // WARNING:
 //
@@ -73,18 +77,39 @@ constexpr Token_id Token_id_cbr           = 44;// ]
 constexpr Token_id Token_id_keyword_first = 64;
 constexpr Token_id Token_id_keyword_last  = 254;
 
+class Token {
+public:
+  Token() {
+    tok = Token_id_nop;
+    pos = 0;
+    len = 0;
+  }
+  void clear(uint32_t p) {
+    tok = Token_id_nop;
+    pos = p;
+    len = 0;
+  }
+  void set(Token_id t, uint32_t p) {
+    tok = t;
+    pos = p;
+    len = 1;
+  }
+  void adjust_len(uint32_t new_pos) {
+    GI(tok!=Token_id_nop, new_pos>=pos);
+    len = new_pos - pos;
+  }
+
+  Token_id tok; // Token (identifier, if, while...)
+  uint32_t pos; // Position in buffer
+  uint16_t len; // length in buffer
+
+  std::string_view get_text(std::string_view buffer) const {
+    I(buffer.size()>(pos+len));
+    return buffer.substr(pos,len);
+  }
+};
 class Elab_scanner {
 protected:
-  struct Token {
-    Token() {
-      tok = Token_id_nop;
-      pos = 0;
-      len = 0;
-    }
-    Token_id tok; // Token (identifier, if, while...)
-    uint32_t pos; // Position in buffer
-    uint16_t len; // length in buffer
-  };
   typedef std::vector<Token> Token_list;
 
   std::string buffer_name;
@@ -118,7 +143,7 @@ private:
   bool trying_merge = false;
 
   // Fields updated for each chunk processed
-  size_t scanner_pos;
+  Token_entry scanner_pos;
 
   int max_errors;
   int max_warnings;
@@ -144,6 +169,28 @@ public:
   void parser_warn(std::string_view text) const;
   void parser_info(std::string_view text) const;
 
+  template <typename... Args>
+    void scan_error(std::string_view format, const Args & ... args) const {
+      scan_error(fmt::vformat(format, fmt::make_format_args(args...)));
+    }
+  template <typename... Args>
+    void scan_warn(std::string_view format, const Args & ... args) const {
+      scan_warn(fmt::vformat(format, fmt::make_format_args(args...)));
+    }
+  template <typename... Args>
+    void parser_error(std::string_view format, const Args & ... args) const {
+      parser_error(fmt::vformat(format, fmt::make_format_args(args...)));
+    }
+  template <typename... Args>
+    void parser_warn(std::string_view format, const Args & ... args) const {
+      parser_warn(fmt::vformat(format, fmt::make_format_args(args...)));
+    }
+  template <typename... Args>
+    void parser_info(std::string_view format, const Args & ... args) const {
+      parser_info(fmt::vformat(format, fmt::make_format_args(args...)));
+    }
+
+
   bool scan_next();
 
   void set_max_errors(int n) {
@@ -162,6 +209,8 @@ public:
       return token_list[scanner_pos].tok == tok;
     return false;
   }
+
+  Token_entry get_token_entry() const { return scanner_pos; }
 
   void scan_format_append(std::string &text) const;
 
