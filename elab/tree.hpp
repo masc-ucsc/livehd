@@ -5,10 +5,11 @@
 #include <vector>
 #include <functional>
 
+#include "explicit_type.hpp"
 #include "iassert.hpp"
 
-using Tree_level = uint16_t;
-using Tree_pos   = uint16_t;
+using Tree_level = Explicit_type<int32_t, struct Tree_level_struct>; // Must be signed
+using Tree_pos   = Explicit_type<uint32_t, struct Tree_pos_struct>;
 
 class Tree_index {
   const Tree_level level;
@@ -29,9 +30,9 @@ public:
 template<typename X>
 class Tree {
 
-  std::vector<std::vector<X>>         data_stack;
+  std::vector<std::vector<X>>          data_stack;
   std::vector<std::vector<Tree_index>> parent_stack;
-  int                                 pending_parent;
+  int                                  pending_parent; // Must be signed
 
   void adjust_to_level(Tree_level level);
 public:
@@ -39,17 +40,17 @@ public:
   Tree();
 
   // WARNING: can not return Tree_index & because future additions can move the pointer (vector realloc)
-  const Tree_index add_child(const Tree_index &parent, const X data);
-  const Tree_index add_sibling(const Tree_index &sibling, const X data);
+  const Tree_index add_child(const Tree_index &parent, const X &data);
+  const Tree_index add_sibling(const Tree_index &sibling, const X &data);
 
         X &get_data(const Tree_index &leaf);
   const X &get_data(const Tree_index &leaf) const;
 
   const Tree_index &get_parent(const Tree_index &child) const;
   const Tree_index &get_root() const;
-  void  set_root(const X data);
+  void  set_root(const X &data);
 
-  void add_lazy_child(const Tree_level &child_level, const X data);
+  void add_lazy_child(const Tree_level &child_level, const X &data);
 
   //const Tree_index add_child(Tree_index parent, const Tree &t);
   //const Tree_index add_sibling(Tree_index brother, const Tree &t);
@@ -85,7 +86,7 @@ Tree<X>::Tree() {
 };
 
 template<typename X>
-const Tree_index Tree<X>::add_child(const Tree_index &parent, const X data) {
+const Tree_index Tree<X>::add_child(const Tree_index &parent, const X &data) {
   const auto parent_level = parent.get_level();
   const auto parent_pos = parent.get_pos();
 
@@ -107,7 +108,7 @@ const Tree_index Tree<X>::add_child(const Tree_index &parent, const X data) {
 };
 
 template<typename X>
-const Tree_index Tree<X>::add_sibling(const Tree_index &sibling, const X data) {
+const Tree_index Tree<X>::add_sibling(const Tree_index &sibling, const X &data) {
   const auto sibling_level = sibling.get_level();
   const auto sibling_pos = sibling.get_pos();
 
@@ -143,7 +144,7 @@ const X &Tree<X>::get_data(const Tree_index &leaf) const {
 }
 
 template<typename X>
-void Tree<X>::add_lazy_child(const Tree_level &child_level, const X data) {
+void Tree<X>::add_lazy_child(const Tree_level &child_level, const X &data) {
   // -If child_level==1, add to root, do not mark as pending
 
   I(child_level!=0);
@@ -177,7 +178,7 @@ const Tree_index &Tree<X>::get_root() const {
 }
 
 template<typename X>
-void Tree<X>::set_root(const X data) {
+void Tree<X>::set_root(const X &data) {
   adjust_to_level(0);
 
   if (!data_stack[0].empty()) {

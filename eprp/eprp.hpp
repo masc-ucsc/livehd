@@ -1,6 +1,10 @@
-#ifndef EPRP_H
-#define EPRP_H
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#pragma once
+
+#include <memory>
+
+#include "ast.hpp"
 #include "elab_scanner.hpp"
 #include "eprp_var.hpp"
 #include "eprp_method.hpp"
@@ -8,10 +12,23 @@
 class Eprp : public Elab_scanner {
 protected:
   std::map<std::string, Eprp_method, eprp_casecmp_str> methods;
-
-  std::map<std::string, Eprp_var, eprp_casecmp_str> variables;
+  std::map<std::string, Eprp_var   , eprp_casecmp_str> variables;
 
   Eprp_var last_cmd_var;
+
+  std::unique_ptr<Ast_parser> ast;
+
+  enum Eprp_rules : Rule_id {
+    Eprp_rule,
+    Eprp_rule_path,
+    Eprp_rule_label_path,
+    Eprp_rule_reg,
+    Eprp_rule_cmd_line,
+    Eprp_rule_cmd_full,
+    Eprp_rule_pipe,
+    Eprp_rule_cmd_or_reg,
+    Eprp_rule_top
+  };
 
   void elaborate() final;
 
@@ -51,4 +68,3 @@ public:
   void get_labels(const std::string &cmd, std::function<void(const std::string &, const std::string &, bool required)> fn) const;
 };
 
-#endif

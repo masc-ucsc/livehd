@@ -121,6 +121,8 @@ protected:
     toklist.push_back(token_list[scanner_pos]);
   }
 
+  std::string_view get_buffer() { return buffer; }
+
 private:
   struct Translate_item {
     Translate_item() : tok(Token_id_nop), try_merge(false) { }
@@ -210,7 +212,7 @@ public:
     return false;
   }
 
-  Token_entry get_token_entry() const { return scanner_pos; }
+  Token_entry scan_token() const { return scanner_pos; }
 
   void scan_format_append(std::string &text) const;
 
