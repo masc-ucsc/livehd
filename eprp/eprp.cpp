@@ -3,8 +3,6 @@
 #include <ctype.h>
 #include <algorithm>
 
-#include "fmt/format.h"
-
 #include "eprp.hpp"
 
 void Eprp::eat_comments() {
@@ -26,7 +24,7 @@ bool Eprp::rule_path(std::string &path) {
   do {
     scan_append(path); // Just get the raw text
 
-    // ast.add(Eprp_rule_path, scan_token);
+    ast->add(Eprp_rule_path, scan_token());
 
     bool ok = scan_next();
     if (!ok)
@@ -50,7 +48,7 @@ bool Eprp::rule_label_path(const std::string &cmd_line, Eprp_var &next_var) {
     return false;
 
   std::string label = scan_text();
-  // ast.add(Eprp_rule_label, scan_token());
+  ast->add(Eprp_rule_label_path, scan_token());
 
   scan_next(); // Skip LABEL token
   eat_comments();
@@ -61,9 +59,9 @@ bool Eprp::rule_label_path(const std::string &cmd_line, Eprp_var &next_var) {
   }
 
   std::string path;
-  // ast.down();
+  ast->down();
   bool ok = rule_path(path);
-  // ast.up(Eprp_rule_label_path);
+  ast->up(Eprp_rule_label_path);
   if (!ok) {
     if (scan_is_token(Token_id_register)) {
       scan_error("could not pass a register {} to a method {}", scan_text(), cmd_line);
@@ -84,7 +82,7 @@ bool Eprp::rule_reg(bool first) {
     return false;
 
   std::string var = scan_text();
-  // ast.add(Eprp_rule_reg, scan_token());
+  ast->add(Eprp_rule_reg, scan_token());
   if (first) { // First in line @a |> ...
     if (variables.find(var) == variables.end()) {
       scan_error("variable {} is empty", var);
@@ -112,7 +110,7 @@ bool Eprp::rule_cmd_line(std::string &path) {
 
   do {
     scan_append(path); // Just get the raw text
-    // ast.add(Eprp_rule_cmd_line, scan_token)
+    ast->add(Eprp_rule_cmd_line, scan_token());
 
     bool ok = scan_next();
     if (!ok)
@@ -131,22 +129,22 @@ bool Eprp::rule_cmd_full() {
 
   Eprp_var next_var;
 
-  // ast.down()
+  ast->down();
   bool cmd_found = rule_cmd_line(cmd_line);
-  // ast.up(Eprp_rule_cmd_full)
+  ast->up(Eprp_rule_cmd_full);
   if (!cmd_found)
     return false;
 
   bool path_found;
   do{
-    // ast.down()
+    ast->down();
     path_found = rule_label_path(cmd_line, next_var);
-    // ast.up(Eprp_rule_cmd_full)
+    ast->up(Eprp_rule_cmd_full);
   }while(path_found);
 
-  // ast.down()
+  ast->down();
   run_cmd(cmd_line, next_var);
-  // ast.up(Eprp_rule_cmd_full)
+  ast->up(Eprp_rule_cmd_full);
 
   return true;
 }
@@ -163,9 +161,9 @@ bool Eprp::rule_pipe() {
   scan_next();
   eat_comments();
 
-  // ast.down()
+  ast->down();
   bool try_either = rule_cmd_or_reg(false);
-  // ast.up(Eprp_rule_pipe)
+  ast->up(Eprp_rule_pipe);
   if (!try_either) {
     scan_error("after a pipe there should be a register or a command");
     return false;
@@ -177,24 +175,24 @@ bool Eprp::rule_pipe() {
 // rule_cmd_or_reg = rule_reg | rule_cmd_full
 bool Eprp::rule_cmd_or_reg(bool first) {
 
-  // ast.down();
+  ast->down();
   bool try_reg_rule = rule_reg(first);
-  // ast.up(Eprp_rule_cmd_or_reg);
+  ast->up(Eprp_rule_cmd_or_reg);
   if (try_reg_rule)
     return true;
 
-  // ast.down();
+  ast->down();
   bool cmd_found = rule_cmd_full();
-  // ast.up(Eprp_rule_cmd_or_reg);
+  ast->up(Eprp_rule_cmd_or_reg);
   return cmd_found;
 }
 
 // rule_top = rule_cmd_or_reg(first) rule_pipe*
 bool Eprp::rule_top() {
 
-  // ast.down()
+  ast->down();
   bool try_either = rule_cmd_or_reg(true);
-  // ast.up(Eprp_rule_top)
+  ast->up(Eprp_rule_top);
   if (!try_either) {
     scan_error("statements start with a register or a command");
     return false;
@@ -228,14 +226,29 @@ bool Eprp::rule_top() {
 // top = parse_top+
 void Eprp::elaborate() {
 
+  ast = std::make_unique<Ast_parser>(get_buffer());
+  ast->down();
+
   while(!scan_is_end()) {
     eat_comments();
     if (scan_is_end())
       return;
+
+
     bool cmd = rule_top();
     if (!cmd)
       return;
   }
+
+  ast->up(Eprp_rule);
+
+#if 0
+  ast->each_bottom_first_fast([](const Tree_index &parent, const Tree_index &self, const Ast_parser_node &node) {
+    fmt::print("level:{} pos:{} te:{} rid:{}\n",self.get_level(), self.get_pos(), node.token_entry, node.rule_id);
+  });
+#endif
+
+  ast = nullptr;
 
   last_cmd_var.clear();
 };

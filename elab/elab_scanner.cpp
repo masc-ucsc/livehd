@@ -161,7 +161,7 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
 
   buffer_name = name;
   buffer      = memblock; // To allow error reporting before chunking
-  scanner_pos = 0;
+  scanner_pos.value = 0;
 
   int  nlines                = 0;
   char last_c                = 0;
@@ -197,16 +197,16 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
           if (t.tok == Token_id_synopsys) {
             scan_warn("synopsys directive (most likely ignored)");
           }
+
           add_token(t);
           t.clear(pos);
-
           trying_merge = false;
         }
       }
       if(in_string_pos) {
+
         add_token(t);
         t.clear(pos);
-
         trying_merge = false;
 
         in_string_pos = false;
@@ -245,7 +245,6 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
       // The (* foo *) are attributes - not comments - in verilog. Must be handled in the grammar
     }else if (unlikely(!starting_comment && ((last_c == '*' && c == '/') || (in_comment && last_c == '*' && c == ')') ))) {
       t.tok        = Token_id_comment;
-      t.len        = pos - t.pos;
       trying_merge = false;
 
       in_multiline_comment--;
@@ -292,7 +291,7 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
     last_c = c;
   }
   if (t.tok != Token_id_nop) {
-    t.len = memblock.size() - t.pos;
+    t.adjust_len(memblock.size());
     add_token(t);
   }
 
