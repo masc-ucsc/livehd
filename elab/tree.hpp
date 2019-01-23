@@ -64,7 +64,8 @@ public:
   void each_breadth_first_fast(std::function<void(const Tree_index &parent, const Tree_index &self, const X &)> fn) const;
 
   // void each_bottom_up(std::function<void(const Tree_index &parent, const Tree_index &self, const X &)> fn) const;
-  // void each_depth_first(const Tree_index &start_index, std::function<void(const Tree_index &parent, const Tree_index &self, const X &)> fn) const 
+  //void each_depth_first(const Tree_index &start_index, std::function<void(const Tree_index &parent, const Tree_index &self, const X &)> fn) const 
+  const std::vector<Tree_index> get_children(const Tree_index &start_index) const;
 };
 
 //--------------------- Template Implementation ----
@@ -210,5 +211,21 @@ void Tree<X>::each_breadth_first_fast(std::function<void(const Tree_index &paren
       fn(parent_stack[i][j], Tree_index(i,j), data_stack[i][j]);
     }
   }
+}
+
+template<typename X>
+const std::vector<Tree_index> Tree<X>::get_children(const Tree_index &top) const {
+  std::vector<Tree_index> children;
+
+  I(top.get_level()<parent_stack.size());
+  if (top.get_level() == (parent_stack.size()))
+    return children;
+
+  for(size_t j=0;j<parent_stack[top.get_level()+1].size();j++) {
+    if (parent_stack[top.get_level()+1][j].get_pos() == top.get_pos())
+      children.emplace_back(top.get_level()+1,j);
+  }
+
+  return children;
 }
 
