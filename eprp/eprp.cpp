@@ -242,20 +242,41 @@ void Eprp::elaborate() {
 
   ast->up(Eprp_rule);
 
-#if 0
-  HERE
-  ast->each_bottom_first_fast([this](const Tree_index &parent, const Tree_index &self, const Ast_parser_node &node) {
-    auto txt = scan_text(node.token_entry);
-
-    fmt::print("level:{} pos:{} te:{} rid:{} txt:{}\n",self.get_level(), self.get_pos(), node.token_entry, node.rule_id, txt);
-
-  });
-#endif
+  //process_ast();
 
   ast = nullptr;
-
   last_cmd_var.clear();
 };
+
+void Eprp::process_ast_handler(const Tree_index &parent, const Tree_index &self, const Ast_parser_node &node) {
+  auto txt = scan_text(node.token_entry);
+  fmt::print("level:{} pos:{} te:{} rid:{} txt:{}\n",self.get_level(), self.get_pos(), node.token_entry, node.rule_id, txt);
+
+  if (node.rule_id == Eprp_rule_cmd_or_reg) {
+    std::string children_txt;
+
+//HERE: Children should iterate FAST, over all the children recursively
+//HERE: Move this iterate over children as a handle_command
+
+    for(const auto &ti:ast->get_children(self)) {
+      auto txt2 = scan_text(ast->get_data(ti).token_entry);
+      if (ast->get_data(ti).rule_id == Eprp_rule_label_path)
+        absl::StrAppend(&children_txt, " ", txt2, ":");
+      else
+        absl::StrAppend(&children_txt, txt2);
+    }
+
+    fmt::print("  children: {}\n", children_txt);
+  }
+
+}
+
+void Eprp::process_ast() {
+
+  //ast->each_depth_first
+
+  ast->each_bottom_first_fast(std::bind(&Eprp::process_ast_handler,this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+}
 
 void Eprp::run_cmd(const std::string &cmd, Eprp_var &var) {
 
