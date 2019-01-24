@@ -1,24 +1,13 @@
-﻿---
-BasedOnStyle: LLVM
-AlignAfterOpenBracket: Align
+---
+BasedOnStyle: Google
+ColumnLimit: '132'
 AlignConsecutiveAssignments: 'true'
 AlignConsecutiveDeclarations: 'true'
-AlignEscapedNewlinesLeft: 'true'
 AlignTrailingComments: 'true'
-AllowAllParametersOfDeclarationOnNextLine: 'true'
-AllowShortBlocksOnASingleLine: 'true'
-AllowShortLoopsOnASingleLine: 'false'
-ColumnLimit: '132'
-ConstructorInitializerAllOnOneLineOrOnePerLine: 'false'
+AlignEscapedNewlines: 'true'
+AlignAfterOpenBracket: 'true'
+AlignOperands: 'true'
+AllowShortCaseLabelsOnASingleLine: 'true'
 BreakConstructorInitializers: 'BeforeComma'
-AllowShortFunctionsOnASingleLine: 'false'
-Cpp11BracedListStyle: 'true'
-SortIncludes: 'true'
-SpaceBeforeAssignmentOperators: 'true'
-SpaceBeforeParens: Never
-SpacesInAngles: 'false'
-SpacesInParentheses: 'false'
-TabWidth: '2'
-IndentWidth: '2'
-
+AccessModifierOffset: -2
 ...
