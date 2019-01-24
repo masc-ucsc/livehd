@@ -17,7 +17,7 @@ public:
   typedef enum { input, output } Direction;
 
   typedef struct {
-    std::string metal_name; // FIXME make it an enum
+    std::string metal_name;  // FIXME make it an enum
     pos_type    xl, yl, xh, yh;
   } Physical_pin;
 
@@ -25,7 +25,7 @@ public:
     std::vector<Physical_pin> phys;
     Direction                 dir;
     std::string               name;
-    std::string               use; // FIXME: make it an enum
+    std::string               use;  // FIXME: make it an enum
     pin_type                  io_id;
   } Pin;
 
@@ -33,7 +33,7 @@ public:
 
 private:
   std::string cell_name;
-  std::string function; // FIXME: maybe we want to limit the possibilities here
+  std::string function;  // FIXME: maybe we want to limit the possibilities here
 
   uint16_t id;
 
@@ -48,39 +48,24 @@ private:
   absl::flat_hash_map<std::string, pin_type> pname2id;
 
   // FIXME: technically, this should be a full table for each pair?
-  std::map<ppair, float> delay; // maps an (ipin x opin) to delay
+  std::map<ppair, float> delay;  // maps an (ipin x opin) to delay
 
 public:
-  explicit Tech_cell(std::string_view name, uint16_t id)
-      : cell_name(name)
-      , id(id)
-      , height(0)
-      , width(0) {
-  }
+  explicit Tech_cell(std::string_view name, uint16_t id) : cell_name(name), id(id), height(0), width(0) {}
 
-  uint16_t get_id() const {
-    return id;
-  }
+  uint16_t get_id() const { return id; }
 
-  std::string_view get_name() const {
-    return cell_name;
-  }
+  std::string_view get_name() const { return cell_name; }
 
-  const std::pair<double, double> get_cell_size() const {
-    return std::make_pair(height, width);
-  }
+  const std::pair<double, double> get_cell_size() const { return std::make_pair(height, width); }
 
   void set_cell_size(double _height, double _width) {
     height = _height;
     width  = _width;
   }
 
-  std::string_view get_function() const {
-    return function;
-  }
-  void set_function(std::string _function) {
-    function = _function;
-  }
+  std::string_view get_function() const { return function; }
+  void             set_function(std::string _function) { function = _function; }
 
   pin_type add_pin(std::string_view name, Direction dir) {
     pin_type id = pins.size();
@@ -92,7 +77,7 @@ public:
     pins.push_back(aPin);
     pname2id[name] = id;
 
-    if(dir == input) {
+    if (dir == input) {
       assert(std::find(inputs.begin(), inputs.end(), id) == inputs.end());
 
       pins[id].io_id = inputs.size();
@@ -108,23 +93,15 @@ public:
     return id;
   }
 
-  bool include_pin(std::string_view name) const {
-    return pname2id.find(name) != pname2id.end();
-  }
+  bool include_pin(std::string_view name) const { return pname2id.find(name) != pname2id.end(); }
 
   // FIXME: remove this
   // return a pointer point to "pins" vector, which is a type of std::vector<Pin>
-  std::vector<Pin> *get_vec_pins() {
-    return &pins;
-  }
+  std::vector<Pin> *get_vec_pins() { return &pins; }
 
-  int n_inps() const {
-    return inputs.size();
-  }
+  int n_inps() const { return inputs.size(); }
 
-  int n_outs() const {
-    return outputs.size();
-  }
+  int n_outs() const { return outputs.size(); }
 
   const pin_type get_pin_id(std::string_view name) const {
     assert(pname2id.find(name) != pname2id.end());
@@ -132,7 +109,7 @@ public:
   }
 
   bool pin_name_exist(std::string_view name) const {
-    if(pname2id.find(name) != pname2id.end())
+    if (pname2id.find(name) != pname2id.end())
       return true;
     else
       return false;
@@ -152,9 +129,7 @@ public:
     return pins[pin_id].io_id;
   }
 
-  const int get_pins_size() const {
-    return pins.size();
-  };
+  const int get_pins_size() const { return pins.size(); };
 
   std::string_view get_name(pin_type id) const {
     assert(pins.size() > id);
@@ -176,9 +151,7 @@ public:
     return pins[id].dir;
   }
 
-  const std::vector<pin_type> &get_inputs() const {
-    return inputs;
-  }
+  const std::vector<pin_type> &get_inputs() const { return inputs; }
 
   bool is_input(std::string_view name) const {
     assert(pname2id.find(name) != pname2id.end());
@@ -194,9 +167,7 @@ public:
     return (pins[outid].dir == Direction::output);
   }
 
-  const std::vector<pin_type> &get_outputs() const {
-    return outputs;
-  }
+  const std::vector<pin_type> &get_outputs() const { return outputs; }
 
   void set_position(pin_type id, pin_type phy_id, pos_type in_xl, pos_type in_yl, pos_type in_xh, pos_type in_yh) {
     assert(pins.size() > id);
@@ -236,9 +207,9 @@ public:
   std::vector<double> spacing_eol;
   std::vector<double> spacing_tb;
   std::vector<double> pitches;
-  double              spctb_prl;     // parallel running length
-  std::vector<double> spctb_width;   // width in spacing table
-  std::vector<double> spctb_spacing; // spacing in spacing table
+  double              spctb_prl;      // parallel running length
+  std::vector<double> spctb_width;    // width in spacing table
+  std::vector<double> spctb_spacing;  // spacing in spacing table
 
   // void to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer>&) const;
 } Tech_layer;
@@ -269,15 +240,12 @@ private:
   bool clean;
 
   std::vector<Tech_cell>  cell_types;
-  std::vector<Tech_layer> layers; // only for routing
-  std::vector<Tech_via>   vias;   // only for routing
+  std::vector<Tech_layer> layers;  // only for routing
+  std::vector<Tech_via>   vias;    // only for routing
 
   absl::flat_hash_map<std::string, uint16_t> cname2id;
 
-  explicit Tech_library(std::string_view _path)
-      : lgdb(_path)
-      , lib_file("tech_library") {
-
+  explicit Tech_library(std::string_view _path) : lgdb(_path), lib_file("tech_library") {
     cname2id.clear();
     cell_types.clear();
     clean = true;
@@ -296,7 +264,7 @@ public:
   void        try_load_json();
 
   void sync() {
-    if(!clean) {
+    if (!clean) {
       to_json();
       clean = true;
     }
@@ -317,13 +285,11 @@ public:
 
   const Tech_cell *get_const_cell(uint16_t cell_id) const;
 
-  std::string_view get_cell_name(uint16_t cell_id) const {
-    return get_const_cell(cell_id)->get_name();
-  }
+  std::string_view get_cell_name(uint16_t cell_id) const { return get_const_cell(cell_id)->get_name(); }
 
   // multiton pattern, one singleton per lgdb
   static Tech_library *instance(std::string path = "lgdb") {
-    if(Tech_library::instances.find(path) == Tech_library::instances.end()) {
+    if (Tech_library::instances.find(path) == Tech_library::instances.end()) {
       Tech_library::instances.insert(std::make_pair(path, new Tech_library(path)));
     }
     return Tech_library::instances[path];
@@ -332,30 +298,17 @@ public:
   // adding routing only member function here : layers and via
   // return a pointer point to "cell_types" vector, which is a type of std::vector<Tech_layer>
   // don't use pointer of vector, need to be modified
-  std::vector<Tech_cell> *get_vec_cell_types() {
-    return &cell_types;
-  }
+  std::vector<Tech_cell> *get_vec_cell_types() { return &cell_types; }
 
-  int get_cell_types_size() const {
-    return cell_types.size();
-  }
+  int get_cell_types_size() const { return cell_types.size(); }
 
   // return a pointer point to "layers" vector, which is a type of std::vector<Tech_layer>
-  std::vector<Tech_layer> *get_vec_layers() {
-    return &layers;
-  }
+  std::vector<Tech_layer> *get_vec_layers() { return &layers; }
 
-  void increase_vec_layers_size() {
-    layers.resize(layers.size() + 1);
-  }
+  void increase_vec_layers_size() { layers.resize(layers.size() + 1); }
 
   // return a pointer point to "layers" vector, which is a type of std::vector<Tech_via>
-  std::vector<Tech_via> *get_vec_vias() {
-    return &vias;
-  }
+  std::vector<Tech_via> *get_vec_vias() { return &vias; }
 
-  void increase_vec_vias_size() {
-    vias.resize(vias.size() + 1);
-  }
+  void increase_vec_vias_size() { vias.resize(vias.size() + 1); }
 };
-

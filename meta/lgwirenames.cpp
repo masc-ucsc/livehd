@@ -7,8 +7,7 @@ LGraph_WireNames::LGraph_WireNames(const std::string &path, const std::string &n
     , LGraph_Base(path, name, lgid)
     , names(path + "/lgraph_" + name + "_wnames")
     , wires(path + "/lgraph_" + name + "_wid")
-    , offsets(path + "/lgraph_" + name + "_offsets") {
-}
+    , offsets(path + "/lgraph_" + name + "_offsets") {}
 
 void LGraph_WireNames::clear() {
   names.clear();
@@ -31,10 +30,10 @@ void LGraph_WireNames::sync() {
 
 void LGraph_WireNames::emplace_back() {
   wires.emplace_back();
-  //wires[wires.size() - 1] = 0;
+  // wires[wires.size() - 1] = 0;
 
   offsets.emplace_back();
-  //offsets[offsets.size() - 1] = 0;
+  // offsets[offsets.size() - 1] = 0;
 }
 
 /*WireName_ID LGraph_WireNames::get_wirename_id(const char *wirename) {
@@ -42,9 +41,7 @@ void LGraph_WireNames::emplace_back() {
   return names.create_id(wirename);
 }*/
 
-std::string_view LGraph_WireNames::get_wirename(WireName_ID wid) const {
-  return names.get_name(wid);
-}
+std::string_view LGraph_WireNames::get_wirename(WireName_ID wid) const { return names.get_name(wid); }
 
 WireName_ID LGraph_WireNames::get_wid(Index_ID nid) const {
   assert(nid < wires.size());
@@ -62,4 +59,3 @@ void LGraph_WireNames::set_node_wirename(Index_ID nid, WireName_ID wid) {
 
   wires[nid] = wid;
 }
-

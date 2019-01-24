@@ -2,22 +2,18 @@
 #pragma once
 
 template <typename T, typename Meaning>
-struct Explicit_type
-{
+struct Explicit_type {
   //! Default constructor does not initialize the value.
-  Explicit_type()
-  { }
+  Explicit_type() {}
 
   //! Construction from a fundamental value.
-  Explicit_type(T value)
-    : value(value)
-  { }
+  Explicit_type(T value) : value(value) {}
 
   //! Implicit conversion back to the fundamental data type.
-  inline operator T () const { return value; }
+  inline operator T() const { return value; }
 
   //! The actual fundamental value.
-  T value;
+  T         value;
   typedef T type;
 };
 

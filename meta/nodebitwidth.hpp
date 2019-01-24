@@ -34,32 +34,32 @@ public:
     bool overflow;
 
     Implicit_range() {
-      max = 0;
-      min = 0;
-      sign = false;
+      max      = 0;
+      min      = 0;
+      sign     = false;
       overflow = false;
     }
     Implicit_range(const Implicit_range &i) {
-      max = i.max;
-      min = i.min;
-      sign = i.sign;
+      max      = i.max;
+      min      = i.min;
+      sign     = i.sign;
       overflow = i.overflow;
     }
-    void dump() const;
+    void    dump() const;
     int64_t round_power2(int64_t x) const;
-    bool expand(const Implicit_range &i, bool round2);
-    void pick(const Explicit_range &e);
+    bool    expand(const Implicit_range &i, bool round2);
+    void    pick(const Explicit_range &e);
   };
 
   Implicit_range i;
   Explicit_range e;
-  uint16_t niters = 0;
+  uint16_t       niters = 0;
 
   void set_implicit() {
     i.min = e.min;
     i.max = e.max;
 
-    i.sign = !e.is_unsigned();
+    i.sign     = !e.is_unsigned();
     i.overflow = e.overflow;
   }
 };
@@ -81,7 +81,6 @@ public:
   virtual void sync();
   virtual void emplace_back();
 
-  void  node_bitwidth_set(Index_ID nid, const Node_bitwidth &t);
+  void           node_bitwidth_set(Index_ID nid, const Node_bitwidth &t);
   Node_bitwidth &node_bitwidth_get(Index_ID nid) const;
 };
-

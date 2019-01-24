@@ -2,17 +2,16 @@
 #pragma once
 
 #include "invariant.hpp"
+#include "lgraph.hpp"
 #include "live_common.hpp"
 #include "live_options.hpp"
-#include "lgraph.hpp"
 
 using namespace Live;
 
 class Diff_finder {
-
 private:
-  const LGraph         *original;
-  const LGraph         *synth;
+  const LGraph *        original;
+  const LGraph *        synth;
   Invariant_boundaries *boundaries;
 
   std::string hier_sep;
@@ -42,13 +41,11 @@ private:
   void add_ios_up(LGraph *module, Index_ID nid, Name2graph_type &name2graph);
 
 public:
-  //FIXME: can we remove the dependency on the synthesized graph?
-  Diff_finder(LGraph *original, LGraph *synth, Invariant_boundaries *boundaries, const std::string& hier_sep = ".") :
-    original(original), synth(synth), boundaries(boundaries), hier_sep(hier_sep) {
-  }
+  // FIXME: can we remove the dependency on the synthesized graph?
+  Diff_finder(LGraph *original, LGraph *synth, Invariant_boundaries *boundaries, const std::string &hier_sep = ".")
+      : original(original), synth(synth), boundaries(boundaries), hier_sep(hier_sep) {}
 
   Diff_finder(Live_pass_options pack);
 
   void generate_delta(const std::string &mod_lgdb, const std::string &out_lgdb, std::set<Net_ID> &diffs);
 };
-

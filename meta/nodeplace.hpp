@@ -9,31 +9,24 @@
 
 // Sheng: have to determine the integer size of posx and posy later
 class Node_Place {
-
 private:
   friend class LGraph_Node_Place;
 
 protected:
-  uint32_t posx; // Enough for 1nm resolution and 100mm**2 die
+  uint32_t posx;  // Enough for 1nm resolution and 100mm**2 die
   uint32_t posy;
 
 public:
-  Node_Place(uint32_t x = 0, uint32_t y = 0)
-      : posx(x)
-      , posy(y){};
+  Node_Place(uint32_t x = 0, uint32_t y = 0) : posx(x), posy(y){};
 
   void replace(uint32_t x, uint32_t y) {
     posx = x;
     posy = y;
   }
 
-  uint32_t x() {
-    return posx;
-  }
+  uint32_t x() { return posx; }
 
-  uint32_t y() {
-    return posy;
-  }
+  uint32_t y() { return posy; }
 };
 
 class LGraph_Node_Place : virtual public LGraph_Base {

@@ -11,16 +11,13 @@
 #include "absl/container/flat_hash_map.h"
 
 struct eprp_casecmp_str : public std::binary_function<const std::string, const std::string, bool> {
-    bool operator()(const std::string &lhs, const std::string &rhs) const {
-        return strcasecmp(lhs.c_str(), rhs.c_str()) < 0 ;
-    }
+  bool operator()(const std::string &lhs, const std::string &rhs) const { return strcasecmp(lhs.c_str(), rhs.c_str()) < 0; }
 };
 
 class LGraph;
 
 class Eprp_var {
 private:
-
 public:
   using Eprp_dict = absl::flat_hash_map<const std::string, std::string>;
   using Eprp_lgs  = std::vector<LGraph *>;
@@ -32,14 +29,8 @@ public:
     dict.clear();
     lgs.clear();
   }
-  Eprp_var(const Eprp_dict &_dict)
-    :dict(_dict) {
-    lgs.clear();
-  }
-  Eprp_var(const Eprp_lgs &_lgs)
-    :lgs(_lgs) {
-    dict.clear();
-  }
+  Eprp_var(const Eprp_dict &_dict) : dict(_dict) { lgs.clear(); }
+  Eprp_var(const Eprp_lgs &_lgs) : lgs(_lgs) { dict.clear(); }
 
   void add(const Eprp_dict &_dict);
   void add(const Eprp_lgs &_lgs);
@@ -50,9 +41,9 @@ public:
 
   void delete_label(const std::string &name);
 
-  bool has_label(const std::string &name) const { return dict.find(name) != dict.end(); };
+  bool             has_label(const std::string &name) const { return dict.find(name) != dict.end(); };
   std::string_view get(const std::string &name) const;
-  //const std::string get(const std::string &name, const std::string &def_val) const;
+  // const std::string get(const std::string &name, const std::string &def_val) const;
 
   void clear() {
     dict.clear();
@@ -61,4 +52,3 @@ public:
 
   bool empty() const { return dict.empty() && lgs.empty(); }
 };
-

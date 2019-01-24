@@ -6,9 +6,8 @@
 #include "pass.hpp"
 
 class Cops_live : public Pass {
-  public:
-  Cops_live() : Pass("cops") {
-  }
+public:
+  Cops_live() : Pass("cops") {}
 
   void setup() final;
 

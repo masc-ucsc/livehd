@@ -1,7 +1,7 @@
 #pragma once
 
-#include <vector>
 #include <string>
+#include <vector>
 
 // List of useful methods for parsers in lgraph
 class Eprp_utils {
@@ -10,4 +10,3 @@ public:
 
   static void clean_dir(std::string_view dir);
 };
-

@@ -11,9 +11,7 @@ class Node_Delay {
 private:
 protected:
 public:
-  Node_Delay() {
-    delay = 0;
-  };
+  Node_Delay() { delay = 0; };
   float delay;
 };
 

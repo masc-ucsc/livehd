@@ -5,12 +5,8 @@
 #include "options.hpp"
 
 class Stitch_pass_options : public Options_base {
-
 public:
-  typedef enum {
-    LiveSynth,
-    Structural
-  } Live_method;
+  typedef enum { LiveSynth, Structural } Live_method;
 
   std::string osynth_lgdb;
   std::string nsynth_lgdb;
@@ -20,9 +16,12 @@ public:
 
   Live_method method;
 
-  Stitch_pass_options() : osynth_lgdb("lgdb"), nsynth_lgdb("lgdb-stitch"),
-                          boundaries_name("boundaries"), diff_file("diff"),
-                          method(Live_method::LiveSynth)  { }
+  Stitch_pass_options()
+      : osynth_lgdb("lgdb")
+      , nsynth_lgdb("lgdb-stitch")
+      , boundaries_name("boundaries")
+      , diff_file("diff")
+      , method(Live_method::LiveSynth) {}
 
   void set(const std::string &key, const std::string &value) final;
 };

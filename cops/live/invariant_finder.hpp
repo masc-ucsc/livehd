@@ -1,15 +1,14 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include "bm.h"
 #include "absl/container/flat_hash_map.h"
+#include "bm.h"
 
 #include "invariant.hpp"
 #include "invariant_options.hpp"
 #include "lgraph.hpp"
 
 class Invariant_finder {
-
 private:
   LGraph *             elab_graph;
   LGraph *             synth_graph;
@@ -18,15 +17,15 @@ private:
   bool          processed;
   bm::bvector<> stack;
 
-  typedef std::pair<Index_ID, uint32_t> Node_bit;
-  absl::flat_hash_map<Node_bit, Gate_set>          partial_cone_cells; // partial_gate_count
-  absl::flat_hash_map<Node_bit, Net_set>           partial_endpoints;  //sips
+  typedef std::pair<Index_ID, uint32_t>   Node_bit;
+  absl::flat_hash_map<Node_bit, Gate_set> partial_cone_cells;  // partial_gate_count
+  absl::flat_hash_map<Node_bit, Net_set>  partial_endpoints;   // sips
 
-  //there is a delay between allocation of the cache and populating it
-  absl::flat_hash_set<Node_bit>                    cached;
+  // there is a delay between allocation of the cache and populating it
+  absl::flat_hash_set<Node_bit> cached;
 
 #ifndef NDEBUG
-  absl::flat_hash_set<Node_bit>                    deleted;
+  absl::flat_hash_set<Node_bit> deleted;
 #endif
 
   void get_topology();
@@ -49,11 +48,10 @@ public:
     synth_graph = LGraph::open(pack.synth_lgdb, pack.top);
   }
 
-  const Invariant_boundaries& get_boundaries() {
-    if(!processed) {
+  const Invariant_boundaries &get_boundaries() {
+    if (!processed) {
       find_invariant_boundaries();
     }
     return boundaries;
   }
 };
-
