@@ -210,12 +210,16 @@ Benchmark in release. It is 2x-10x faster.
 
 ## Use compact if/else brackets
 
+Use clang-format as configured to catch style errors. LGraph clang-format is
+based on google format, but it adds several alignment directives and wider
+terminal.
+
 ```cpp
 std::vector<LGraph *> Inou_yaml::generate() {
 
-  if (opack.graph_name!="") {
+  if (opack.graph_name != "") {
      // ...
-  }else{
+  } else {
      // ..
   }
 ```
