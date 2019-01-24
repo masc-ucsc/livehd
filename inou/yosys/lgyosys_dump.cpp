@@ -286,6 +286,7 @@ void Lgyosys_dump::create_subgraph(const LGraph *g, RTLIL::Module *module, Index
     instance_name = RTLIL::IdString(absl::StrCat("\\", g->get_node_instancename(idx)));
   }
 
+  fmt::print("inou_yosys instance_name:{}, subgraph->get_name():{}\n", g->get_node_instancename(idx), subgraph->get_name());
   RTLIL::Cell *new_cell = module->addCell(instance_name, absl::StrCat("\\", subgraph->get_name()));
   for(const auto &c : g->inp_edges(idx)) {
     auto  port = subgraph->get_graph_input_name_from_pid(c.get_inp_pin().get_pid());

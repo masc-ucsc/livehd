@@ -89,10 +89,11 @@ echo ""
 echo "Verilog code generation"
 echo ""
 
+pts="sp_add top_inline_add"
 
 for pt in $pts
 do
-  ./inou/yosys/lgyosys -g"$pt" -h
+  ./inou/yosys/lgyosys -g"$pt" 
   if [ $? -eq 0 ]; then
     echo "Successfully created verilog:${pt}.v"
   else

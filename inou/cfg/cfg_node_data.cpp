@@ -19,7 +19,7 @@ CFG_Node_Data::CFG_Node_Data(const LGraph *g, Index_ID node) {
   operator_txt = v[0];
   target       = v[1];
 
-  for(int i = 2; i < v.size()-1; i++)
+  for(auto i = 2; i < v.size()-1; i++)
     operands.emplace_back(v[i]);
 
 }
