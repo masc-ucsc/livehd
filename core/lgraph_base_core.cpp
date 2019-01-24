@@ -10,18 +10,15 @@
 std::string Lgraph_base_core::Setup_path::last_path = "";
 
 Lgraph_base_core::Setup_path::Setup_path(std::string_view path) {
-
-  if(last_path == path)
-    return;
+  if (last_path == path) return;
   last_path = path;
 
   struct stat info;
 
   std::string spath(path);
 
-  if(stat(spath.c_str(), &info) == 0) {
-    if((info.st_mode & S_IFDIR))
-      return;
+  if (stat(spath.c_str(), &info) == 0) {
+    if ((info.st_mode & S_IFDIR)) return;
 
     unlink(spath.c_str());
   }
@@ -37,7 +34,6 @@ Lgraph_base_core::Lgraph_base_core(std::string_view _path, std::string_view _nam
     , lgraph_id(lgid)
     , node_internal(absl::StrCat(path, "/lgraph_", name, "_nodes"))
     , locked(false) {
-
   assert(lgid);
 
   library  = Graph_library::instance(path);
@@ -45,14 +41,13 @@ Lgraph_base_core::Lgraph_base_core(std::string_view _path, std::string_view _nam
 }
 
 void Lgraph_base_core::get_lock() {
-  if(locked)
-    return;
+  if (locked) return;
 
   std::string lock = path + "/" + long_name + ".lock";
-  int         err  = ::open(lock.c_str(), O_CREAT | O_EXCL, 420); // 644
-  if(err < 0) {
+  int         err  = ::open(lock.c_str(), O_CREAT | O_EXCL, 420);  // 644
+  if (err < 0) {
     Pass::error("Could not get lock:{}. Already running? Unclear exit?", lock.c_str());
-    assert(false); // ::error raises an exception
+    assert(false);  // ::error raises an exception
   }
   ::close(err);
 
@@ -60,8 +55,7 @@ void Lgraph_base_core::get_lock() {
 }
 
 bool Lgraph_base_core::close() {
-  if(!locked)
-    return true;
+  if (!locked) return true;
 
   library->update(lgraph_id);
 
@@ -69,8 +63,7 @@ bool Lgraph_base_core::close() {
 }
 
 void Lgraph_base_core::clear() {
-  if (!locked)
-    return;
+  if (!locked) return;
 
   // whenever we clean, we unlock
   std::string lock = path + "/" + long_name + ".lock";
@@ -82,8 +75,7 @@ void Lgraph_base_core::clear() {
 }
 
 void Lgraph_base_core::sync() {
-  if (!locked)
-    return;
+  if (!locked) return;
 
   library->update_nentries(lg_id(), node_internal.size());
 
@@ -96,6 +88,5 @@ void Lgraph_base_core::sync() {
 }
 
 Fast_edge_iterator Lgraph_base_core::fast() const {
-  return Fast_edge_iterator(fast_next(0), this); // Skip after 1, but first may be deleted, so fast_next
+  return Fast_edge_iterator(fast_next(0), this);  // Skip after 1, but first may be deleted, so fast_next
 }
-

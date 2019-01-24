@@ -6,20 +6,20 @@
 
 #include "ast.hpp"
 #include "elab_scanner.hpp"
-#include "eprp_var.hpp"
 #include "eprp_method.hpp"
+#include "eprp_var.hpp"
 
 class Eprp : public Elab_scanner {
 protected:
   std::map<std::string, Eprp_method, eprp_casecmp_str> methods;
-  std::map<std::string, Eprp_var   , eprp_casecmp_str> variables;
+  std::map<std::string, Eprp_var, eprp_casecmp_str>    variables;
 
   Eprp_var last_cmd_var;
 
   std::unique_ptr<Ast_parser> ast;
 
   enum Eprp_rules : Rule_id {
-    Eprp_invalid=0, // zero is not a valid Rule_id
+    Eprp_invalid = 0,  // zero is not a valid Rule_id
     Eprp_rule,
     Eprp_rule_path,
     Eprp_rule_label_path,
@@ -52,17 +52,13 @@ public:
 
   void register_method(const Eprp_method &method) {
     assert(methods.find(method.get_name()) == methods.end());
-    methods.insert({method.get_name(),method});
+    methods.insert({method.get_name(), method});
   }
 
-  bool has_method(const std::string &cmd) const {
-    return methods.find(cmd) != methods.end();
-  }
+  bool has_method(const std::string &cmd) const { return methods.find(cmd) != methods.end(); }
 
   void run_cmd(const std::string &cmd, Eprp_var &var);
-  void set_variable(const std::string &name, const Eprp_var &var) {
-    variables[name] = var;
-  }
+  void set_variable(const std::string &name, const Eprp_var &var) { variables[name] = var; }
 
   bool readline(const char *line);
 
@@ -71,4 +67,3 @@ public:
   void get_commands(std::function<void(const std::string &, const std::string &)> fn) const;
   void get_labels(const std::string &cmd, std::function<void(const std::string &, const std::string &, bool required)> fn) const;
 };
-

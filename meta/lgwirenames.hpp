@@ -2,12 +2,12 @@
 #pragma once
 
 #include <cassert>
-#include <string_view>
 #include <map>
 #include <string>
+#include <string_view>
 
-#include "iassert.hpp"
 #include "dense.hpp"
+#include "iassert.hpp"
 #include "lgraphbase.hpp"
 
 class LGraph;
@@ -70,14 +70,13 @@ public:
     return get_wirename(get_wid(nid));
   }
 
-  bool    has_wirename(std::string_view name) const { return names.include(name); }
+  bool     has_wirename(std::string_view name) const { return names.include(name); }
   Index_ID get_node_id(std::string_view name) const { return names.get_field(names.get_id(name)); }
 
   void dump_wirenames() const {
     fmt::print("wirenames {} \n", name);
-    for(auto it=names.begin(); it!=names.end(); ++it) {
+    for (auto it = names.begin(); it != names.end(); ++it) {
       fmt::print(" {}\n", it.get_name());
     }
   }
 };
-

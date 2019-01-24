@@ -33,7 +33,6 @@ void setup_cops_live();
 
 // add new setup function prototypes here
 
-
 void Main_api::init() {
   setup_pass_abc();
   setup_pass_bitwidth();
@@ -53,19 +52,16 @@ void Main_api::init() {
 
   // call the new setup function here
 
-
-
   // do not touch anything beyond this point
 
-  Top_api::setup(Pass::eprp);              // *
+  Top_api::setup(Pass::eprp);  // *
 
-  Meta_api::setup(Pass::eprp);             // lgraph.*
-  Cloud_api::setup(Pass::eprp);            // cloud.*
+  Meta_api::setup(Pass::eprp);   // lgraph.*
+  Cloud_api::setup(Pass::eprp);  // cloud.*
 
-  Inou_cfg_api::setup(Pass::eprp);         // inou.cfg.*
-  Inou_lef_api::setup(Pass::eprp);         // inou.lef.*
-  Inou_yosys_api::setup(Pass::eprp);       // inou.yosys.*
+  Inou_cfg_api::setup(Pass::eprp);    // inou.cfg.*
+  Inou_lef_api::setup(Pass::eprp);    // inou.lef.*
+  Inou_yosys_api::setup(Pass::eprp);  // inou.yosys.*
 
   main_path = Eprp_utils::get_exe_path();
 }
-

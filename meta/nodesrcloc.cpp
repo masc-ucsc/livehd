@@ -7,8 +7,7 @@ LGraph_Node_Src_Loc::LGraph_Node_Src_Loc(const std::string &path, const std::str
     : Lgraph_base_core(path, name, lgid)
     , LGraph_Base(path, name, lgid)
     , src_files(path + "/lgraph_" + name + "_src_files")
-    , node_src_loc(path + "/lgraph_" + name + "_src_locs") {
-}
+    , node_src_loc(path + "/lgraph_" + name + "_src_locs") {}
 
 void LGraph_Node_Src_Loc::clear() {
   src_files.clear();
@@ -28,7 +27,7 @@ void LGraph_Node_Src_Loc::sync() {
 
 void LGraph_Node_Src_Loc::emplace_back() {
   node_src_loc.emplace_back();
-  //node_src_loc[node_src_loc.size() - 1] = 0;
+  // node_src_loc[node_src_loc.size() - 1] = 0;
 }
 
 void LGraph_Node_Src_Loc::node_loc_set(Index_ID nid, const char *file_name, uint32_t offset, uint32_t length) {
@@ -38,15 +37,11 @@ void LGraph_Node_Src_Loc::node_loc_set(Index_ID nid, const char *file_name, uint
 }
 
 std::string_view LGraph_Node_Src_Loc::node_file_name_get(Index_ID nid) const {
-  if (node_src_loc[nid])
-    return src_files.get_name(node_src_loc[nid]);
+  if (node_src_loc[nid]) return src_files.get_name(node_src_loc[nid]);
   return "nofile";
 }
 
 File_Loc LGraph_Node_Src_Loc::node_file_loc_get(Index_ID nid) const {
-  if (node_src_loc[nid])
-    return src_files.get_field(node_src_loc[nid]);
-  return File_Loc(0,0);
+  if (node_src_loc[nid]) return src_files.get_field(node_src_loc[nid]);
+  return File_Loc(0, 0);
 }
-
-

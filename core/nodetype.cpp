@@ -57,21 +57,18 @@ Node_Type::_init::_init() {
   Node_Type::table[DfgPendingGraph_Op] = new Node_Type_DfgPendingGraph();
 
   assert(Invalid_Op == 0);
-  for(size_t i = Invalid_Op; i <= SubGraph_Op; i++) {
+  for (size_t i = Invalid_Op; i <= SubGraph_Op; i++) {
     assert(table[i]);
     name2node[table[i]->get_name()] = table[i];
   }
 }
 
 Node_Type &Node_Type::get(Node_Type_Op op) {
-  if(op >= SubGraphMin_Op && op <= SubGraphMax_Op)
-    op = SubGraph_Op;
+  if (op >= SubGraphMin_Op && op <= SubGraphMax_Op) op = SubGraph_Op;
 
-  if(op >= U32ConstMin_Op && op <= U32ConstMax_Op)
-    op = U32Const_Op;
+  if (op >= U32ConstMin_Op && op <= U32ConstMax_Op) op = U32Const_Op;
 
-  if(op >= StrConstMin_Op && op <= StrConstMax_Op)
-    op = StrConst_Op;
+  if (op >= StrConstMin_Op && op <= StrConstMax_Op) op = StrConst_Op;
 
   assert(table[op] != nullptr);
   return *table[op];
@@ -82,23 +79,16 @@ Node_Type_Op Node_Type::get(const std::string &opname) {
   return name2node[opname]->op;
 }
 
-bool Node_Type::is_type(const std::string &opname) {
-  return (name2node.find(opname) != name2node.end());
-}
+bool Node_Type::is_type(const std::string &opname) { return (name2node.find(opname) != name2node.end()); }
 
 LGraph_Node_Type::LGraph_Node_Type(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept
     : Lgraph_base_core(path, name, lgid)
     , consts(path + "/lgraph_" + name + "_consts")
-    , node_type_table(path + "/lgraph_" + name + "_type") {
-}
+    , node_type_table(path + "/lgraph_" + name + "_type") {}
 
-std::string_view LGraph_Node_Type::get_constant(Const_ID const_id) const {
-  return consts.get_name(const_id);
-}
+std::string_view LGraph_Node_Type::get_constant(Const_ID const_id) const { return consts.get_name(const_id); }
 
-void LGraph_Node_Type::emplace_back() {
-  node_type_table.emplace_back(Invalid_Op);
-}
+void LGraph_Node_Type::emplace_back() { node_type_table.emplace_back(Invalid_Op); }
 
 void LGraph_Node_Type::clear() {
   node_type_table.clear();
@@ -110,10 +100,10 @@ void LGraph_Node_Type::reload(size_t sz) {
 
   // Note: if you change this, make sure to change u32_type_set and
   // const_type_set functions accordingly
-  for(const Index_ID &node : Lgraph_base_core::fast()) {
-    if(node_type_get(node).op == U32Const_Op || node_type_get(node).op == StrConst_Op) {
+  for (const Index_ID &node : Lgraph_base_core::fast()) {
+    if (node_type_get(node).op == U32Const_Op || node_type_get(node).op == StrConst_Op) {
       const_nodes.set_bit(node);
-    }else if(node_type_get(node).op == SubGraph_Op) {
+    } else if (node_type_get(node).op == SubGraph_Op) {
       sub_graph_nodes.set_bit(node);
     }
   }
@@ -212,15 +202,11 @@ uint32_t LGraph_Node_Type::node_value_get(Index_ID nid) const {
   return (uint32_t)(node_type_table[node_internal[nid].get_nid()] - U32ConstMin_Op);
 }
 
-void LGraph_Node_Type::node_const_type_set(Index_ID nid, std::string_view value
-                                           ,bool enforce_bits
-) {
-
+void LGraph_Node_Type::node_const_type_set(Index_ID nid, std::string_view value, bool enforce_bits) {
 #ifndef NDEBUG
-  if(enforce_bits)
-    for(auto &digit : value) {
-      if(digit != '0' && digit != '1' && digit != 'z' && digit != 'x')
-        assert(false); // unrecognized bit value
+  if (enforce_bits)
+    for (auto &digit : value) {
+      if (digit != '0' && digit != '1' && digit != 'z' && digit != 'x') assert(false);  // unrecognized bit value
     }
 #endif
 
@@ -261,17 +247,13 @@ const Node_Type &LGraph_Node_Type::node_type_get(Index_ID nid) const {
 
   Node_Type_Op op = node_type_table[node_internal[nid].get_nid()];
 
-  if(op >= SubGraphMin_Op && op <= SubGraphMax_Op)
-    op = SubGraph_Op;
+  if (op >= SubGraphMin_Op && op <= SubGraphMax_Op) op = SubGraph_Op;
 
-  if(op >= TechMapMin_Op && op <= TechMapMax_Op)
-    op = TechMap_Op;
+  if (op >= TechMapMin_Op && op <= TechMapMax_Op) op = TechMap_Op;
 
-  if(op >= U32ConstMin_Op && op <= U32ConstMax_Op)
-    op = U32Const_Op;
+  if (op >= U32ConstMin_Op && op <= U32ConstMax_Op) op = U32Const_Op;
 
-  if(op >= StrConstMin_Op && op <= StrConstMax_Op)
-    op = StrConst_Op;
+  if (op >= StrConstMin_Op && op <= StrConstMax_Op) op = StrConst_Op;
 
   return Node_Type::get(op);
 }

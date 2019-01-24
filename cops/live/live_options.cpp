@@ -5,7 +5,6 @@
 #include "live_options.hpp"
 
 void Live_pass_options::set(const std::string &key, const std::string &value) {
-
   try {
     if (is_opt(key, "olgdb")) {
       original_lgdb = value;
@@ -22,7 +21,7 @@ void Live_pass_options::set(const std::string &key, const std::string &value) {
     } else {
       set_val(key, value);
     }
-  } catch (const std::invalid_argument& ia) {
+  } catch (const std::invalid_argument &ia) {
     Pass::error(fmt::format("Live_pass_options: key {} has an invalid argument", key));
   }
 }

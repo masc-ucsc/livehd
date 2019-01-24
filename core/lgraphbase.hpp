@@ -3,11 +3,11 @@
 
 #include <iostream>
 #include <map>
-#include <vector>
 #include <type_traits>
+#include <vector>
 
-#include "instance_names.hpp"
 #include "char_array.hpp"
+#include "instance_names.hpp"
 #include "lgraph_base_core.hpp"
 #include "nodetype.hpp"
 
@@ -15,9 +15,7 @@ class Edge_iterator;
 class Forward_edge_iterator;
 class Backward_edge_iterator;
 
-class LGraph_Base : public LGraph_Node_Type
-                  , public LGraph_InstanceNames
-{
+class LGraph_Base : public LGraph_Node_Type, public LGraph_InstanceNames {
 private:
   Index_ID add_graph_io_common(std::string_view str, Index_ID nid, uint16_t bits);
 
@@ -28,11 +26,7 @@ protected:
     Port_ID  original_pos;
     bool     original_set;
 
-    IO_port(Index_ID _nid, Port_ID _opos, bool force)
-        : nid(_nid)
-        , pos(_opos)
-        , original_pos(_opos)
-        , original_set(force) {};
+    IO_port(Index_ID _nid, Port_ID _opos, bool force) : nid(_nid), pos(_opos), original_pos(_opos), original_set(force){};
   };
 
   // typedef std::pair<Index_ID, Port_ID> io_t; // node id and position at verilog
@@ -52,9 +46,9 @@ protected:
 
   void recompute_io_ports();
 
-  Index_ID add_graph_input_int (std::string_view str, Index_ID nid, uint16_t bits);
+  Index_ID add_graph_input_int(std::string_view str, Index_ID nid, uint16_t bits);
   Index_ID add_graph_output_int(std::string_view str, Index_ID nid, uint16_t bits);
-  Index_ID add_graph_input_int (std::string_view str, Index_ID nid, uint16_t bits, Port_ID original_pos);
+  Index_ID add_graph_input_int(std::string_view str, Index_ID nid, uint16_t bits, Port_ID original_pos);
   Index_ID add_graph_output_int(std::string_view str, Index_ID nid, uint16_t bits, Port_ID original_pos);
 
   void del_int_node(Index_ID idx);
@@ -181,16 +175,10 @@ public:
     return node_internal[idx].is_root();
   }
 
-  static size_t max_size() {
-    return (((size_t)1) << Index_Bits) - 1;
-  }
-  size_t size() const {
-    return node_internal.size();
-  }
+  static size_t max_size() { return (((size_t)1) << Index_Bits) - 1; }
+  size_t        size() const { return node_internal.size(); }
 
-  bool empty() const {
-    return node_internal.size() == 0;
-  }
+  bool empty() const { return node_internal.size() == 0; }
 
   class _init {
   public:
@@ -199,37 +187,46 @@ public:
 
   void each_sub_graph_fast_direct(const std::function<bool(const Index_ID &, const Lg_type_id &, std::string_view)>) const;
 
-  template<typename FN>
-    void each_sub_graph_fast(const FN f1) const {
-      if constexpr (std::is_invocable_r_v<bool, FN&, const Index_ID&, const Lg_type_id&, std::string_view>) { // WARNING: bool must be before void
-        each_sub_graph_fast_direct(f1);
-      }else if constexpr (std::is_invocable_r_v<void, FN&, const Index_ID&, const Lg_type_id&, std::string_view>) {
-        auto f2 = [&f1](const Index_ID &idx, const Lg_type_id &lgid, std::string_view iname) { f1(idx,lgid,iname); return true; };
-        each_sub_graph_fast_direct(f2);
-      }else if constexpr (std::is_invocable_r_v<bool, FN&, const Index_ID&, const Lg_type_id&>) {
-        auto f2 = [&f1](const Index_ID &idx, const Lg_type_id &lgid, std::string_view iname) { return f1(idx,lgid); };
-        each_sub_graph_fast_direct(f2);
-      }else if constexpr (std::is_invocable_r_v<void, FN&, const Index_ID&, const Lg_type_id&>) {
-        auto f2 = [&f1](const Index_ID &idx, const Lg_type_id &lgid, std::string_view iname) { f1(idx,lgid); return true; };
-        each_sub_graph_fast_direct(f2);
-      }else{
-        assert(false);
-        each_sub_graph_fast_direct(f1); //Better error message if I keep this
-      }
-    };
+  template <typename FN>
+  void each_sub_graph_fast(const FN f1) const {
+    if constexpr (std::is_invocable_r_v<bool, FN &, const Index_ID &, const Lg_type_id &,
+                                        std::string_view>) {  // WARNING: bool must be before void
+      each_sub_graph_fast_direct(f1);
+    } else if constexpr (std::is_invocable_r_v<void, FN &, const Index_ID &, const Lg_type_id &, std::string_view>) {
+      auto f2 = [&f1](const Index_ID &idx, const Lg_type_id &lgid, std::string_view iname) {
+        f1(idx, lgid, iname);
+        return true;
+      };
+      each_sub_graph_fast_direct(f2);
+    } else if constexpr (std::is_invocable_r_v<bool, FN &, const Index_ID &, const Lg_type_id &>) {
+      auto f2 = [&f1](const Index_ID &idx, const Lg_type_id &lgid, std::string_view iname) { return f1(idx, lgid); };
+      each_sub_graph_fast_direct(f2);
+    } else if constexpr (std::is_invocable_r_v<void, FN &, const Index_ID &, const Lg_type_id &>) {
+      auto f2 = [&f1](const Index_ID &idx, const Lg_type_id &lgid, std::string_view iname) {
+        f1(idx, lgid);
+        return true;
+      };
+      each_sub_graph_fast_direct(f2);
+    } else {
+      assert(false);
+      each_sub_graph_fast_direct(f1);  // Better error message if I keep this
+    }
+  };
 
-  void each_root_fast_direct(std::function<bool(const Index_ID&)> f1) const;
-  template<typename FN>
-    void each_root_fast(const FN f1) const {
-      if constexpr (std::is_invocable_r_v<bool, FN&, const Index_ID&>) { // WARNING: bool must be before void
-        each_root_direct(f1);
-      }else if constexpr (std::is_invocable_r_v<void, FN&, const Index_ID&>) {
-        auto f2 = [&f1](const Index_ID &idx) { f1(idx); return true; };
-        each_root_direct(f2);
-      }else{
-        assert(false);
-        each_root_direct(f1); //Better error message if I keep this
-      }
-    };
+  void each_root_fast_direct(std::function<bool(const Index_ID &)> f1) const;
+  template <typename FN>
+  void each_root_fast(const FN f1) const {
+    if constexpr (std::is_invocable_r_v<bool, FN &, const Index_ID &>) {  // WARNING: bool must be before void
+      each_root_direct(f1);
+    } else if constexpr (std::is_invocable_r_v<void, FN &, const Index_ID &>) {
+      auto f2 = [&f1](const Index_ID &idx) {
+        f1(idx);
+        return true;
+      };
+      each_root_direct(f2);
+    } else {
+      assert(false);
+      each_root_direct(f1);  // Better error message if I keep this
+    }
+  };
 };
-

@@ -1,8 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <cassert>
 #include <fstream>
 #include <iostream>
-#include <cassert>
 
 #include "rapidjson/document.h"
 #include "rapidjson/error/en.h"
@@ -14,9 +14,7 @@
 
 absl::flat_hash_map<std::string, Tech_library *> Tech_library::instances;
 
-bool Tech_library::include(std::string_view name) const {
-  return cname2id.find(name) != cname2id.end();
-}
+bool Tech_library::include(std::string_view name) const { return cname2id.find(name) != cname2id.end(); }
 
 uint16_t Tech_library::get_cell_id(std::string_view name) const {
   assert(include(name));
@@ -25,15 +23,15 @@ uint16_t Tech_library::get_cell_id(std::string_view name) const {
 
 uint16_t Tech_library::create_cell_id(std::string_view name) {
   assert(!include(name));
-  assert(cell_types.size() < std::numeric_limits<uint16_t>::max()); // increase to uin32t if needed
+  assert(cell_types.size() < std::numeric_limits<uint16_t>::max());  // increase to uin32t if needed
 
   // FIXME: Make sure that the cells are added in alphabetical order (otherwise, loading/unloading
   // can have different names and trigger a corrupt lgraph)
 
   uint16_t newid = cell_types.size();
   cell_types.push_back(Tech_cell(name, newid));
-  cname2id[name]=newid;
-  clean = false;
+  cname2id[name] = newid;
+  clean          = false;
 
   return newid;
 }
@@ -52,7 +50,7 @@ void Tech_library::try_load_json() {
   std::string full_path = (lgdb + "/" + lib_file);
 
   FILE *pFile = fopen(full_path.c_str(), "rb");
-  if(!pFile) {
+  if (!pFile) {
     return;
   }
 
@@ -60,12 +58,10 @@ void Tech_library::try_load_json() {
   rapidjson::FileReadStream is(pFile, buffer, sizeof(buffer));
   rapidjson::Document       document;
   document.ParseStream<0, rapidjson::UTF8<>, rapidjson::FileReadStream>(is);
-  if(document.HasParseError()) {
-    Pass::error(fmt::format("TechLibrary reading error \"{}\", offset: {}"
-          , rapidjson::GetParseError_En(document.GetParseError())
-          , static_cast<unsigned>(document.GetErrorOffset())));
+  if (document.HasParseError()) {
+    Pass::error(fmt::format("TechLibrary reading error \"{}\", offset: {}", rapidjson::GetParseError_En(document.GetParseError()),
+                            static_cast<unsigned>(document.GetErrorOffset())));
     return;
-
   }
 
   std::vector<std::string> inputs;
@@ -75,28 +71,28 @@ void Tech_library::try_load_json() {
   const rapidjson::Value &nodeArray = document["cells"];
 
   assert(nodeArray.IsArray());
-  for(const auto &nodes : nodeArray.GetArray()) {
+  for (const auto &nodes : nodeArray.GetArray()) {
     assert(nodes.IsObject());
 
     assert(nodes.HasMember("cell"));
     tcell = get_cell(create_cell_id(nodes["cell"].GetString()));
-    if(nodes.HasMember("inps")) {
+    if (nodes.HasMember("inps")) {
       assert(nodes["inps"].IsArray());
-      for(const auto &inp : nodes["inps"].GetArray()) {
+      for (const auto &inp : nodes["inps"].GetArray()) {
         inputs.emplace_back(inp.GetString());
       }
     }
-    if(nodes.HasMember("outs")) {
+    if (nodes.HasMember("outs")) {
       assert(nodes["outs"].IsArray());
-      for(const auto &oup : nodes["outs"].GetArray()) {
+      for (const auto &oup : nodes["outs"].GetArray()) {
         outputs.emplace_back(oup.GetString());
       }
     }
 
-    for(const auto &inp : inputs) {
+    for (const auto &inp : inputs) {
       tcell->add_pin(inp, Tech_cell::Direction::input);
     }
-    for(const auto &oup : outputs) {
+    for (const auto &oup : outputs) {
       tcell->add_pin(oup, Tech_cell::Direction::output);
     }
 
@@ -159,7 +155,7 @@ void Tech_library::to_json() const {
     writer.StartObject();
     writer.Key("cells");
     writer.StartArray();
-    for(auto &cell : cell_types) {
+    for (auto &cell : cell_types) {
       writer.StartObject();
       writer.Key("cell");
       writer.String(std::string(cell.get_name()).c_str());
@@ -172,14 +168,14 @@ void Tech_library::to_json() const {
 
       writer.Key("inps");
       writer.StartArray();
-      for(auto &inp : cell.get_inputs()) {
+      for (auto &inp : cell.get_inputs()) {
         writer.String(std::string(cell.get_name(inp)).c_str());
       }
       writer.EndArray();
 
       writer.Key("outs");
       writer.StartArray();
-      for(auto &oup : cell.get_outputs()) {
+      for (auto &oup : cell.get_outputs()) {
         writer.String(std::string(cell.get_name(oup)).c_str());
       }
       writer.EndArray();
@@ -193,7 +189,7 @@ void Tech_library::to_json() const {
 
   std::string   full_path = lgdb + "/" + lib_file;
   std::ofstream fs(full_path);
-  if(!fs.is_open()) {
+  if (!fs.is_open()) {
     std::cerr << "ERROR: could not open internal library file [" << full_path << "] for writing\n";
     exit(-1);
   }

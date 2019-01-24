@@ -6,8 +6,8 @@
 #include <map>
 #include <string>
 
-#include "dense.hpp"
 #include "char_array.hpp"
+#include "dense.hpp"
 
 #include "lgraph_base_core.hpp"
 
@@ -17,7 +17,6 @@ private:
   Dense<Index_ID>      instances;
 
 protected:
-
 public:
   LGraph_InstanceNames() = delete;
   explicit LGraph_InstanceNames(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept;
@@ -59,4 +58,3 @@ public:
 
   Index_ID get_node_from_instance_name(std::string_view name) const;
 };
-

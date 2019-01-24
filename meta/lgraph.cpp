@@ -1,8 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include <assert.h>
-#include <sys/types.h>
 #include <dirent.h>
+#include <sys/types.h>
 
 #include <fstream>
 #include <iostream>
@@ -21,15 +21,14 @@ LGraph::LGraph(const std::string &path, const std::string &_name, const std::str
     , LGraph_Node_bitwidth(path, _name, lg_id())
     , LGraph_Node_Src_Loc(path, _name, lg_id())
     , LGraph_WireNames(path, _name, lg_id())
-    , LGraph_Node_Place(path, _name, lg_id())
-{
+    , LGraph_Node_Place(path, _name, lg_id()) {
   I(_name == get_name());
-  if(_clear) { // Create
+  if (_clear) {  // Create
     clear();
     sync();
-  } else { // open
+  } else {  // open
     reload();
-    //I(node_internal.size()); // WEIRD, but possible to have an empty lgraph
+    // I(node_internal.size()); // WEIRD, but possible to have an empty lgraph
   }
 }
 
@@ -38,24 +37,23 @@ LGraph::~LGraph() {
   I(deleted);
 }
 
-bool LGraph::exists(std::string_view path, std::string_view name) {
-  return Graph_library::try_find_lgraph(path,name) != nullptr;
-}
+bool LGraph::exists(std::string_view path, std::string_view name) { return Graph_library::try_find_lgraph(path, name) != nullptr; }
 
 LGraph *LGraph::create(std::string_view path, std::string_view name, std::string_view source) {
-  LGraph *lg = Graph_library::try_find_lgraph(path,name);
+  LGraph *lg = Graph_library::try_find_lgraph(path, name);
   if (lg) {
     assert(Graph_library::instance(path));
     // Overwriting old lgraph. Delete old pointer (but better be sure that nobody has it)
     bool deleted = lg->close();
     if (deleted) {
       // Call expunge id delete LGraph object
-      lg->library->expunge_lgraph(name,lg);
+      lg->library->expunge_lgraph(name, lg);
       delete lg;
     }
   }
 
-  return new LGraph(std::string(path), std::string(name), std::string(source), true); // TODO: Remove these nasty std::string (create local)
+  return new LGraph(std::string(path), std::string(name), std::string(source),
+                    true);  // TODO: Remove these nasty std::string (create local)
 }
 
 LGraph *LGraph::open(std::string_view path, int lgid) {
@@ -65,29 +63,27 @@ LGraph *LGraph::open(std::string_view path, int lgid) {
 }
 
 void LGraph::rename(std::string_view path, std::string_view orig, std::string_view dest) {
-
   bool valid = Graph_library::instance(path)->rename_name(orig, dest);
-  if(valid)
+  if (valid)
     Pass::warn("lgraph::rename find original graph {} in path {}", orig, path);
   else
     Pass::error("cannot find original graph {} in path {}", orig, path);
 }
 
 LGraph *LGraph::open(std::string_view path, std::string_view name) {
-  LGraph *lg = Graph_library::try_find_lgraph(path,name);
+  LGraph *lg = Graph_library::try_find_lgraph(path, name);
   if (lg) {
-    //I(lg->node_internal.size()); // WEIRD, but possible to have an empty lgraph
+    // I(lg->node_internal.size()); // WEIRD, but possible to have an empty lgraph
     assert(Graph_library::instance(path));
     auto source = Graph_library::instance(path)->get_source(name);
-    auto lgid = Graph_library::instance(path)->register_lgraph(name, source, lg);
+    auto lgid   = Graph_library::instance(path)->register_lgraph(name, source, lg);
     I(name == lg->get_name());
     assert(lg->lgraph_id == lgid);
 
     return lg;
   }
 
-  if (!Graph_library::instance(path)->include(name))
-    return 0;
+  if (!Graph_library::instance(path)->include(name)) return 0;
 
   std::string lock;
   lock.append(path);
@@ -95,7 +91,7 @@ LGraph *LGraph::open(std::string_view path, std::string_view name) {
   lock.append(name);
   lock.append(".lock");
 
-  if (access(lock.c_str(),R_OK)!=-1) {
+  if (access(lock.c_str(), R_OK) != -1) {
     Pass::error("trying to open a locked {} (broken?) graph {}", lock, name);
     return 0;
   }
@@ -105,10 +101,9 @@ LGraph *LGraph::open(std::string_view path, std::string_view name) {
 }
 
 bool LGraph::close() {
+  bool deleted = library->unregister_lgraph(name, lgraph_id, this);
 
-	bool deleted = library->unregister_lgraph(name, lgraph_id, this);
-
-	sync();
+  sync();
 
   LGraph_Base::close();
 
@@ -131,7 +126,7 @@ void LGraph::clear() {
   LGraph_Node_Src_Loc::clear();
   LGraph_WireNames::clear();
 
-  LGraph_Base::clear(); // last. Removes lock at the end
+  LGraph_Base::clear();  // last. Removes lock at the end
 }
 
 void LGraph::sync() {
@@ -141,7 +136,7 @@ void LGraph::sync() {
   LGraph_Node_Src_Loc::sync();
   LGraph_WireNames::sync();
 
-  LGraph_Base::sync(); // last. Removes lock at the end
+  LGraph_Base::sync();  // last. Removes lock at the end
 }
 
 void LGraph::emplace_back() {
@@ -154,7 +149,6 @@ void LGraph::emplace_back() {
 }
 
 Index_ID LGraph::add_graph_input(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset) {
-
   assert(!is_graph_output(str));
   assert(!has_wirename(str));
 
@@ -166,7 +160,6 @@ Index_ID LGraph::add_graph_input(std::string_view str, Index_ID nid, uint16_t bi
 }
 
 Index_ID LGraph::add_graph_input(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset, Port_ID original_pos) {
-
   assert(!is_graph_output(str));
   assert(!has_wirename(str));
 
@@ -178,7 +171,6 @@ Index_ID LGraph::add_graph_input(std::string_view str, Index_ID nid, uint16_t bi
 }
 
 Index_ID LGraph::add_graph_output(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset) {
-
   assert(!is_graph_input(str));
   assert(!has_wirename(str));
 
@@ -190,7 +182,6 @@ Index_ID LGraph::add_graph_output(std::string_view str, Index_ID nid, uint16_t b
 }
 
 Index_ID LGraph::add_graph_output(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset, Port_ID original_pos) {
-
   assert(!is_graph_input(str));
   assert(!has_wirename(str));
 
@@ -207,18 +198,14 @@ Node LGraph::create_node() {
   return Node(this, nid);
 }
 
-Node LGraph::get_node(Index_ID nid) {
-  return Node(this, nid);
-}
+Node LGraph::get_node(Index_ID nid) { return Node(this, nid); }
 
-const ConstNode LGraph::get_node(Index_ID nid) const {
-  return ConstNode(this, nid);
-}
+const ConstNode LGraph::get_node(Index_ID nid) const { return ConstNode(this, nid); }
 
 Node LGraph::get_dest_node(const Edge &edge) {
   Index_ID idx = edge.get_self_idx();
 
-  assert(is_root(idx)); // get_dest_node can only be called for root nodes
+  assert(is_root(idx));  // get_dest_node can only be called for root nodes
 
   return Node(this, idx);
 }
@@ -226,17 +213,16 @@ Node LGraph::get_dest_node(const Edge &edge) {
 ConstNode LGraph::get_dest_node(const Edge &edge) const {
   Index_ID idx = edge.get_self_idx();
 
-  assert(is_root(idx)); // get_dest_node can only be called for root nodes
+  assert(is_root(idx));  // get_dest_node can only be called for root nodes
 
   return ConstNode(this, idx);
 }
 
 Index_ID LGraph::create_node_int() {
-
-  get_lock(); // FIXME: change to Copy on Write permissions (mmap exception, and remap)
+  get_lock();  // FIXME: change to Copy on Write permissions (mmap exception, and remap)
   emplace_back();
 
-  if(node_internal.back().is_page_align()) {
+  if (node_internal.back().is_page_align()) {
     Node_Internal_Page *page = (Node_Internal_Page *)&node_internal.back();
 
     page->set_page(node_internal.size() - 1);
@@ -248,38 +234,26 @@ Index_ID LGraph::create_node_int() {
   return node_internal[node_internal.size() - 1].get_nid();
 }
 
-const Edge_iterator ConstNode::inp_edges() const {
-  return g->inp_edges(nid);
-}
+const Edge_iterator ConstNode::inp_edges() const { return g->inp_edges(nid); }
 
-const Edge_iterator ConstNode::out_edges() const {
-  return g->out_edges(nid);
-}
+const Edge_iterator ConstNode::out_edges() const { return g->out_edges(nid); }
 
-const Edge_iterator Node::inp_edges() const {
-  return g->inp_edges(nid);
-}
+const Edge_iterator Node::inp_edges() const { return g->inp_edges(nid); }
 
-const Edge_iterator Node::out_edges() const {
-  return g->out_edges(nid);
-}
+const Edge_iterator Node::out_edges() const { return g->out_edges(nid); }
 
-Forward_edge_iterator LGraph::forward() const {
-  return Forward_edge_iterator(this);
-}
+Forward_edge_iterator LGraph::forward() const { return Forward_edge_iterator(this); }
 
-Backward_edge_iterator LGraph::backward() const {
-  return Backward_edge_iterator(this);
-}
+Backward_edge_iterator LGraph::backward() const { return Backward_edge_iterator(this); }
 
 void LGraph::dump() const {
   fmt::print("lgraph name:{} size:{}\n", name, node_internal.size());
 
-  for(auto it = input_array.begin(); it!=input_array.end(); ++it ) {
+  for (auto it = input_array.begin(); it != input_array.end(); ++it) {
     const auto &p = it.get_field();
     fmt::print("inp {} idx:{} pid:{}\n", it.get_name(), p.nid, p.pos);
   }
-  for(auto it = output_array.begin(); it!=output_array.end(); ++it ) {
+  for (auto it = output_array.begin(); it != output_array.end(); ++it) {
     const auto &p = it.get_field();
     fmt::print("out {} idx:{} pid:{}\n", it.get_name(), p.nid, p.pos);
   }
@@ -287,7 +261,7 @@ void LGraph::dump() const {
   dump_wirenames();
 
 #if 1
-  for(Index_ID i = 0; i < node_internal.size(); i.value++) {
+  for (Index_ID i = 0; i < node_internal.size(); i.value++) {
     fmt::print("{} ", i);
     node_internal[i].dump();
   }
@@ -296,50 +270,45 @@ void LGraph::dump() const {
 
 void LGraph::add_hierarchy_entry(std::string_view base, Lg_type_id lgid) {
   hierarchy[base] = lgid;
-  if (hierarchy_cache.find(lgid) == hierarchy_cache.end())
-    hierarchy_cache[lgid] = library->get_version(lgid);
+  if (hierarchy_cache.find(lgid) == hierarchy_cache.end()) hierarchy_cache[lgid] = library->get_version(lgid);
 }
 
 const LGraph::Hierarchy &LGraph::get_hierarchy() {
-
   if (!hierarchy.empty()) {
     bool all_ok = true;
-    for(auto &[lgid,version]:hierarchy_cache) {
-      if (library->get_version(lgid) == version)
-        continue;
+    for (auto &[lgid, version] : hierarchy_cache) {
+      if (library->get_version(lgid) == version) continue;
       all_ok = false;
       break;
     }
-    if (all_ok)
-      return hierarchy;
+    if (all_ok) return hierarchy;
   }
   hierarchy.clear();
   hierarchy_cache.clear();
 
   struct Entry {
     std::string base;
-    LGraph *top;
-    LGraph *lg;
-    Entry(std::string_view _base, LGraph *_top, LGraph *_lg) :base(_base), top(_top) ,lg(_lg) {}
+    LGraph *    top;
+    LGraph *    lg;
+    Entry(std::string_view _base, LGraph *_top, LGraph *_lg) : base(_base), top(_top), lg(_lg) {}
   };
   std::vector<Entry> pending;
 
   pending.emplace_back(get_name(), this, this);
 
-  while(!pending.empty()) {
+  while (!pending.empty()) {
     auto entry = pending.back();
     pending.pop_back();
 
     entry.top->add_hierarchy_entry(entry.base, entry.lg->lg_id());
 
     entry.lg->each_sub_graph_fast([&entry, &pending](const Index_ID idx, const Lg_type_id lgid, std::string_view iname) {
-      if (iname.empty())
-        return;
+      if (iname.empty()) return;
       LGraph *lg = LGraph::open(entry.top->get_path(), lgid);
 
-      if(lg==0) {
+      if (lg == 0) {
         Pass::error("hierarchy for {} could not open instance {} with lgid {}", entry.base, iname, lgid);
-      }else{
+      } else {
         auto base2 = absl::StrCat(entry.base, ":", iname);
         pending.emplace_back(base2, entry.top, lg);
       }
@@ -350,4 +319,3 @@ const LGraph::Hierarchy &LGraph::get_hierarchy() {
 
   return hierarchy;
 }
-
