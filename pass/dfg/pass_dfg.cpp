@@ -153,9 +153,10 @@ void Pass_dfg::trans(LGraph *dfg) {
   // resolve pending graph
   for(auto idx : dfg->fast()) {
     if(dfg->node_type_get(idx).op == DfgPendingGraph_Op) {
-      //dfg->set_node_instance_name(idx, dfg->get_node_wirename(idx));
+      dfg->set_node_instance_name(idx, (std::string)dfg->get_node_wirename(idx)+ "_0");
       fmt::print("sub graph name is:{}\n", dfg->get_node_wirename(idx));
       sub_graph     = LGraph::open(dfg->get_path(), dfg->get_node_wirename(idx));
+      //dfg->set_node_wirename(idx,"tmp_wire");
       assert(sub_graph);
       //changing from DfgPendingGraph_Op to normal subgraph_op
       dfg->node_subgraph_set(idx, sub_graph->lg_id());
@@ -166,7 +167,7 @@ void Pass_dfg::trans(LGraph *dfg) {
     }else if(dfg->node_type_get(idx).op == SubGraph_Op){
       //set wirename of the subg node back to empty to avoid yosys code generation conflict of count_id(cell->name)
       //or I just don't set a specific instance_name for the instantiation of subgraph?
-      //dfg->set_node_wirename(idx,"tmp_wire");
+      dfg->set_node_wirename(idx,"tmp_wire");
     }
   }
 
@@ -236,6 +237,10 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
           dfg->set_bits(src_nid, dfg->get_bits(dst_nid));
       }
     }
+
+    //if(dfg->node_type_get(idx).op == SubGraph_Op){
+    //  dfg->set_bits(idx, 0);
+    //}
   }
 }
 
@@ -424,7 +429,7 @@ void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Index_ID> &src
     }
   }
 
-  for(unsigned i = 0; i < src_nids.size(); i++) {
+  for(auto i = 0; i < src_nids.size(); i++) {
     Index_ID src_nid = src_nids.at(i);
     Port_ID src_pid = 0;
     //assert(Node_Type_Sum::get_input_match("Au") == 1);

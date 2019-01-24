@@ -81,7 +81,7 @@ void Inou_graphviz::populate_data(LGraph* g){
       data += fmt::format(" {} [label=\"n{}:{}\"];\n",  src_nid, src_nid, node.get_name());
   });
 
-  g->each_output_edge_fast([this, g, &data](Index_ID src_nid, Port_ID src_pid, Index_ID dst_nid, Port_ID dst_pid) {
+  g->each_output_edge_fast([&data](Index_ID src_nid, Port_ID src_pid, Index_ID dst_nid, Port_ID dst_pid) {
     data += fmt::format(" {} -> {}[label=\"{}:{}\"];\n", src_nid, dst_nid, src_pid, dst_pid);
   });
   data += "}\n";
