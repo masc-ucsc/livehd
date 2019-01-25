@@ -222,7 +222,7 @@ void Eprp::elaborate() {
 
 void Eprp::process_ast_handler(const Tree_index &parent, const Tree_index &self, const Ast_parser_node &node) {
   auto txt = scan_text(node.token_entry);
-  fmt::print("level:{} pos:{} te:{} rid:{} txt:{}\n", self.get_level(), self.get_pos(), node.token_entry, node.rule_id, txt);
+  fmt::print("level:{} pos:{} te:{} rid:{} txt:{}\n", self.level, self.pos, node.token_entry, node.rule_id, txt);
 
   if (node.rule_id == Eprp_rule_cmd_or_reg) {
     std::string children_txt;

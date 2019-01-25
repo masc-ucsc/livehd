@@ -43,9 +43,9 @@ public:
     (void)c13;
 
     ast.each_breadth_first_fast([this](const Tree_index &parent, const Tree_index &self, std::string str) {
-      while (self.get_level()>=ast_sorted_verification.size())
+      while (self.level>=ast_sorted_verification.size())
       ast_sorted_verification.emplace_back();
-      ast_sorted_verification[self.get_level()].emplace_back(str);
+      ast_sorted_verification[self.level].emplace_back(str);
       EXPECT_EQ(ast.get_parent(self), parent);
     });
 
@@ -67,9 +67,9 @@ TEST_F(Elab_test, Traverse_breadth_first_check_on_ast) {
   std::vector<std::vector<std::string>> ast2_sorted_verification;
 
   ast.each_breadth_first_fast([this,&ast2_sorted_verification](const Tree_index &parent, const Tree_index &self, const std::string &str) {
-      while (self.get_level()>=ast2_sorted_verification.size())
+      while (self.level>=ast2_sorted_verification.size())
         ast2_sorted_verification.emplace_back();
-      ast2_sorted_verification[self.get_level()].emplace_back(str);
+      ast2_sorted_verification[self.level].emplace_back(str);
       EXPECT_EQ(ast.get_parent(self), parent);
       std::cout << str << " parent:" << ast.get_data(parent) << "\n";
   });
@@ -82,9 +82,9 @@ TEST_F(Elab_test, Traverse_bottom_first_check_on_ast) {
   std::vector<std::vector<std::string>> ast2_sorted_verification;
 
   ast.each_bottom_first_fast([this,&ast2_sorted_verification](const Tree_index &parent, const Tree_index &self, const std::string &str) {
-      while (self.get_level()>=ast2_sorted_verification.size())
+      while (self.level>=ast2_sorted_verification.size())
         ast2_sorted_verification.emplace_back();
-      ast2_sorted_verification[self.get_level()].emplace_back(str);
+      ast2_sorted_verification[self.level].emplace_back(str);
       EXPECT_EQ(ast.get_parent(self), parent);
       std::cout << str << " parent:" << ast.get_data(parent) << "\n";
   });
@@ -120,9 +120,9 @@ TEST_F(Elab_test, Create_with_lazy_check) {
   std::vector<std::vector<std::string>> ast2_sorted_verification;
 
   ast2.each_bottom_first_fast([&ast2,&ast2_sorted_verification](const Tree_index &parent, const Tree_index &self, std::string str) {
-      while (self.get_level()>=ast2_sorted_verification.size())
+      while (self.level>=ast2_sorted_verification.size())
         ast2_sorted_verification.emplace_back();
-      ast2_sorted_verification[self.get_level()].emplace_back(str);
+      ast2_sorted_verification[self.level].emplace_back(str);
       EXPECT_EQ(ast2.get_parent(self), parent);
       std::cout << str << " parent:" << ast2.get_data(parent) << "\n";
   });
@@ -131,9 +131,9 @@ TEST_F(Elab_test, Create_with_lazy_check) {
   ast2_sorted_verification.clear();
 
   ast2.each_breadth_first_fast([&ast2,&ast2_sorted_verification](const Tree_index &parent, const Tree_index &self, std::string str) {
-      while (self.get_level()>=ast2_sorted_verification.size())
+      while (self.level>=ast2_sorted_verification.size())
         ast2_sorted_verification.emplace_back();
-      ast2_sorted_verification[self.get_level()].emplace_back(str);
+      ast2_sorted_verification[self.level].emplace_back(str);
       EXPECT_EQ(ast2.get_parent(self), parent);
       std::cout << str << " parent:" << ast2.get_data(parent) << "\n";
   });
