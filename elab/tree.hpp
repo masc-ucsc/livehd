@@ -13,14 +13,16 @@ using Tree_pos   = Explicit_type<int32_t, struct Tree_pos_struct>;    // Must be
 
 class Tree_index {
 public:
-  const Tree_level level;
-  const Tree_pos   pos;
+  Tree_level level;
+  Tree_pos   pos;
 
   Tree_index() = delete;
   Tree_index(Tree_level l, Tree_pos i) : level(l), pos(i) {}
 
   bool operator==(const Tree_index &i) const { return level == i.level && pos == i.pos; }
+  bool operator!=(const Tree_index &i) const { return level != i.level || pos != i.pos; }
 };
+
 
 template <typename X>
 class Tree {
@@ -39,6 +41,41 @@ class Tree {
   void adjust_to_level(Tree_level level);
 
 public:
+class Tree_depth_preorder_iterator {
+public:
+  class CTree_depth_preorder_iterator {
+  public:
+    CTree_depth_preorder_iterator(const Tree_index &_ti, const Tree<X> *_t) : ti(_ti), t(_t) {}
+    CTree_depth_preorder_iterator operator++() {
+      CTree_depth_preorder_iterator i(ti, t);
+
+      ti = t->get_depth_preorder_next(ti);
+
+      return i;
+    };
+    bool operator!=(const CTree_depth_preorder_iterator &other) {
+      assert(t == other.t);
+      return ti != other.ti;
+    }
+    const Tree_index &operator*() const { return ti; }
+
+  private:
+    Tree_index     ti;
+    const Tree<X> *t;
+  };
+
+private:
+protected:
+  Tree_index                     ti;
+  const Tree<X> *t;
+
+public:
+  Tree_depth_preorder_iterator() = delete;
+  explicit Tree_depth_preorder_iterator(const Tree_index &_b, const Tree<X> *_t) : ti(_b), t(_t) {}
+
+  CTree_depth_preorder_iterator begin() const { return CTree_depth_preorder_iterator(ti, t); }
+  CTree_depth_preorder_iterator end() const { return CTree_depth_preorder_iterator(t->get_depth_preorder_next(ti), t); }  // 0 is end index for iterator
+};
   Tree();
 
   // WARNING: can not return Tree_index & because future additions can move the pointer (vector realloc)
@@ -47,6 +84,8 @@ public:
 
   X &      get_data(const Tree_index &leaf);
   const X &get_data(const Tree_index &leaf) const;
+
+  const Tree_index get_depth_preorder_next(const Tree_index &child) const;
 
   const Tree_index get_parent(const Tree_index &child) const;
   const Tree_index get_root() const;
@@ -69,6 +108,10 @@ public:
   // void each_depth_first(const Tree_index &start_index, std::function<void(const Tree_index &parent, const Tree_index &self, const
   // X &)> fn) const
   const std::vector<Tree_index> get_children(const Tree_index &start_index) const;
+
+  Tree_depth_preorder_iterator depth_preorder(const Tree_index &start_index) const {
+    return Tree_depth_preorder_iterator(start_index, this);
+  }
 };
 
 //--------------------- Template Implementation ----
@@ -208,6 +251,21 @@ void Tree<X>::add_lazy_child(const Tree_level &child_level, const X &data) {
   }
 
   pointers_stack[child_level].back().eldest_child = eldest_child;
+}
+
+template <typename X>
+const Tree_index Tree<X>::get_depth_preorder_next(const Tree_index &child) const {
+  I(child.level < pointers_stack.size());
+  I(child.pos   < pointers_stack[child.level].size());
+
+  I(0); // HERE
+
+  if (child.level>0)
+    return Tree_index(child.level-1, pointers_stack[child.level][child.pos].parent);
+
+  I(pointers_stack[0].size() == 1); // One single root
+
+  return Tree_index(0,0);
 }
 
 template <typename X>
