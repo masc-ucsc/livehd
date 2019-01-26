@@ -19,9 +19,10 @@ protected:
   Tree_level             down_added;
   const std::string_view buffer;  // const because it can not change at runtime
 public:
-  Ast_parser(std::string_view buffer);
+  Ast_parser(std::string_view buffer, Rule_id top_rule);
 
   void down() { level = level + 1; }
   void up(Rule_id rid);
   void add(Rule_id rid, Token_entry te);
 };
+

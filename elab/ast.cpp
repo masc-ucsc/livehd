@@ -2,8 +2,10 @@
 
 #include "ast.hpp"
 
-Ast_parser::Ast_parser(std::string_view _buffer) : buffer(_buffer) {
+Ast_parser::Ast_parser(std::string_view _buffer, Rule_id top_rule) : buffer(_buffer) {
   I(!buffer.empty());
+
+  set_root(Ast_parser_node(top_rule,0));
 
   level      = 0;
   down_added = 0;
