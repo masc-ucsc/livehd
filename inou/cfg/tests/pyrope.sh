@@ -73,7 +73,6 @@ do
   echo "lgraph.open name:${pt} |> pass.dfg.finalize_bitwidth"             >> lgshell_cmds_opt
   echo "lgraph.open name:${pt} |> inou.graphviz odir:./logs bits:true"    >> lgshell_cmds_opt
   echo "lgraph.open name:${pt} |> inou.json.fromlg output:${pt}.json"     >> lgshell_cmds_opt
-  # echo "lgraph.open name:${pt} |> inou.graphviz odir:./logs bits:true"     >> lgshell_cmds_opt
 
 
  ${LGSHELL} < lgshell_cmds_opt

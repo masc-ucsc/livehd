@@ -478,7 +478,9 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
 
         RTLIL::SigSpec rhs = RTLIL::SigSpec(get_wire(c.get_idx(), c.get_out_pin().get_pid()));
         assert(rhs != lhs);
+        fmt::print("hello1!!!!\n");
         module->connect(lhs, rhs);
+        fmt::print("hello2!!!!\n");
       }
       continue;
     }
