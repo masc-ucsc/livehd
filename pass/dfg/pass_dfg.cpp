@@ -201,7 +201,6 @@ void Pass_dfg::trans(LGraph *dfg) {
         Index_ID src_nid = idx;
         Index_ID dst_nid = out.get_inp_pin().get_nid();
         Port_ID  dst_pid = out.get_inp_pin().get_pid();
-        //Port_ID  dst_pid = 1;
         Port_ID  src_pid = 0;
         sub_graph->each_output([&sub_graph, &src_pid](Index_ID idx, Port_ID pid) {
           fmt::print("outputs of subgraph: idx:{}, pid:{}, name:{}\n",idx, pid, sub_graph->get_graph_output_name_from_pid(pid));
@@ -211,6 +210,9 @@ void Pass_dfg::trans(LGraph *dfg) {
         Node_Pin* src_pin = new Node_Pin(src_nid, src_pid, false);
         Node_Pin* dst_pin = new Node_Pin(dst_nid, dst_pid, true);
         subg_out_edges[src_pin] = dst_pin;
+        //fmt::print("hello~, get_bits_pid:{}\n", sub_graph->get_bits_pid(src_nid,src_pid));
+        //dfg->set_bits_pid(src_nid, src_pid, sub_graph->get_bits_pid(src_nid, src_pid));
+        dfg->set_bits_pid(src_nid, src_pid, 2);
         dfg->del_edge(out); //WARNNING: don't add_edge and del_edge at the same reference loop!
       }
 
@@ -474,7 +476,7 @@ void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Index_ID> &src
       break;
     }
   }
-  for(auto i = 0; i < src_nids.size(); i++) {
+  for(uint16_t i = 0; i < src_nids.size(); i++) {
     Index_ID src_nid = src_nids.at(i);
     Port_ID src_pid = 0;
     //assert(Node_Type_Sum::get_input_match("Au") == 1);
