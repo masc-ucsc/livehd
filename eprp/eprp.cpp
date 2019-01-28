@@ -201,7 +201,7 @@ bool Eprp::rule_top() {
 
 // top = parse_top+
 void Eprp::elaborate() {
-  ast = std::make_unique<Ast_parser>(get_buffer());
+  ast = std::make_unique<Ast_parser>(get_buffer(), Eprp_rule);
   ast->down();
 
   while (!scan_is_end()) {
@@ -214,7 +214,7 @@ void Eprp::elaborate() {
 
   ast->up(Eprp_rule);
 
-  // process_ast();
+  //process_ast();
 
   ast = nullptr;
   last_cmd_var.clear();
@@ -244,6 +244,10 @@ void Eprp::process_ast_handler(const Tree_index &parent, const Tree_index &self,
 
 void Eprp::process_ast() {
   // ast->each_depth_first
+
+  for(const auto &ti:ast->depth_preorder(ast->get_root())) {
+    fmt::print("ti.level:{} ti.pos:{}\n", ti.level, ti.pos);
+  }
 
   ast->each_bottom_first_fast(
       std::bind(&Eprp::process_ast_handler, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
