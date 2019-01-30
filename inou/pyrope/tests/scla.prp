@@ -1,7 +1,7 @@
 // libs/adder/code/scla.prp file
 cla = :($a $b) when $a.__bits==8:{           // specialize when bits == 8
   s1 = cla $a[[0..3]] $b[[0..3]] cin:0       // cla for 4 bits
-  t = generate.($a[[0..3]] $b[[0..3]])       // generate carry method
+  t = generate.($a[[0..3]],$b[[0..3]])       // generate carry method
   s2 = cla $a[[4..7]] $b[[4..7]] cin:t       // CLA with fast cin
   %sum = (s2.sum s1.sum)[[]]                 // bit concatenation
 }
