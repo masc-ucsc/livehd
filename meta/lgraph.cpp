@@ -270,7 +270,9 @@ void LGraph::dump() const {
 
 void LGraph::add_hierarchy_entry(std::string_view base, Lg_type_id lgid) {
   hierarchy[base] = lgid;
-  if (hierarchy_cache.find(lgid) == hierarchy_cache.end()) hierarchy_cache[lgid] = library->get_version(lgid);
+  if (hierarchy_cache.find(lgid) == hierarchy_cache.end()) {
+    hierarchy_cache[lgid] = library->get_version(lgid);
+  }
 }
 
 const LGraph::Hierarchy &LGraph::get_hierarchy() {
