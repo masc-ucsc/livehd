@@ -1,0 +1,15 @@
+// code/add4.prp file
+..+.. as /libs/adder/scla/.cla
+s1 as /libs/adder/.rca
+(%sum sum1 sum2) as __stage:true
+sum1 = $a + $b
+sum2 = $c + $c
+%sum = s1 a:sum1.sum b:sum2.sum cin:0
+test = ::{
+  b as add4 a:1 b:2 c:3 d:4
+  I b.sum == 0
+  yield
+  I b.sum == 0
+  yield
+  I b.sum == 10
+}
