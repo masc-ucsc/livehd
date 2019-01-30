@@ -272,7 +272,10 @@ Port_ID LGraph_Base::get_graph_pid_from_nid(Index_ID nid) const {
 Index_ID LGraph_Base::get_graph_input_nid_from_pid(Port_ID pid) const {
   for (auto it = input_array.begin(); it != input_array.end(); ++it) {
     const auto &p = it.get_field();
-    if (p.pos == pid) return p.nid;
+    if (p.pos == pid) {
+      I(node_internal[p.nid].is_master_root());
+      return p.nid;
+    }
   }
 
   return 0;
@@ -281,7 +284,10 @@ Index_ID LGraph_Base::get_graph_input_nid_from_pid(Port_ID pid) const {
 Index_ID LGraph_Base::get_graph_output_nid_from_pid(Port_ID pid) const {
   for (auto it = output_array.begin(); it != output_array.end(); ++it) {
     const auto &p = it.get_field();
-    if (p.pos == pid) return p.nid;
+    if (p.pos == pid) {
+      I(node_internal[p.nid].is_master_root());
+      return p.nid;
+    }
   }
 
   return 0;
@@ -504,6 +510,8 @@ void LGraph_Base::set_bits_pid(Index_ID nid, Port_ID pid, uint16_t bits) {
 }
 
 uint16_t LGraph_Base::get_bits_pid(Index_ID nid, Port_ID pid) const {
+  I(node_internal.size()>nid);
+  I(node_internal[nid].is_master_root());
   Index_ID idx = find_idx_from_pid(nid, pid);
   return get_bits(idx);
 }
