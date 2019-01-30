@@ -423,7 +423,6 @@ public:
     assert(nid);
     return nid;
   }
-  Index_ID             get_root_nid() const;
   Index_ID             get_master_root_nid() const;
   const Node_Internal &get_root() const;
   const Node_Internal &get_master_root() const;
