@@ -1,0 +1,11 @@
+// code/test1.prp file
+mytest = ::{
+  puts "Hello World"
+  I 1 == 0+1
+  yield
+  c = 1
+  f.a = 2
+  f.b = 3
+  a = methodx c f
+  I a.res == 6 and a.or == 0b11
+}
