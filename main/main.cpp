@@ -189,7 +189,8 @@ Replxx::hints_t hook_hint(std::string const& context, int index, Replxx::Color& 
     for (auto const& e : opts) {
       // fmt::print("prefix[{}] e[{}]\n",prefix,e);
       // if (strncasecmp(e.c_str(), prefix.c_str(), prefix.size()) == 0 ) {
-      hints.emplace_back(e.substr(prefix.size()).c_str());
+      if (e.size()>prefix.size())
+        hints.emplace_back(e.substr(prefix.size()).c_str());
       //}
     }
 #else

@@ -33,19 +33,12 @@ Pass_punch::Pass_punch(std::string_view _src, std::string_view _dst)
     Pass::error("src:{} should point to a wire after a module", src);
     return;
   }
-  if (src.find_first_of('.') != src.find_last_of('.')) {
-    Pass::error("src:{} could only track single wire hierarchy", src);
-    return;
-  }
 
   if (dst.find_first_of('.') == std::string::npos) {
     Pass::error("dst:{} should point to a wire after a module", dst);
     return;
   }
-  if (dst.find_first_of('.') != dst.find_last_of('.')) {
-    Pass::error("dst:{} could only track single wire hierarchy", dst);
-    return;
-  }
+
   if (dst == src) {
     Pass::error("src:{} and dst:{} must be different", src, dst);
     return;
@@ -67,19 +60,14 @@ void Pass_punch::work(Eprp_var &var) {
 void Pass_punch::punch(LGraph *g, std::string_view src, std::string_view dst) {
   LGBench b("pass.punch");
 
-  std::vector<std::string> vsrc = absl::StrSplit(src, '.');
-  I(vsrc.size()==2);
-  std::vector<std::string> vdst = absl::StrSplit(dst, '.');
-  I(vdst.size()==2);
-
-  std::string_view src_wname     = src.substr(src.find_first_of('.'));
-  std::string_view src_hierarchy = src.substr(0,src.find_first_of('.'));
-  std::string_view dst_wname     = dst.substr(dst.find_first_of('.'));
-  std::string_view dst_hierarchy = dst.substr(0,dst.find_first_of('.'));
+  std::string_view src_wname     = src.substr(src.find_last_of('.'));
+  std::string_view src_hierarchy = src.substr(0,src.find_last_of('.'));
+  std::string_view dst_wname     = dst.substr(dst.find_last_of('.'));
+  std::string_view dst_hierarchy = dst.substr(0,dst.find_last_of('.'));
 
   std::string_view dst_parent    = "";
-  if (dst.find_last_of(':') != std::string::npos)
-    dst_parent = dst.substr(0,dst.find_last_of(':'));
+  if (dst_hierarchy.find_last_of('.') != std::string::npos)
+    dst_parent = dst.substr(0,dst_hierarchy.find_last_of('.'));
 
   Lg_type_id src_lgid = 0;
   Lg_type_id dst_lgid = 0;
