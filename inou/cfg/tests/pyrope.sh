@@ -64,18 +64,18 @@ echo ""
 
 for pt in $pts
 do
-  echo "lgraph.open name:${pt} |> pass.dfg.optimize"                      >  lgshell_cmds_opt
+  echo "lgraph.open name:${pt} |> pass.dfg.optimize"                      >  lgshell_cmds
 
   if [ $OPT_MITBW -eq 1 ]; then
-    echo "lgraph.open name:${pt} |> pass.bitwidth"                        >> lgshell_cmds_opt
+    echo "lgraph.open name:${pt} |> pass.bitwidth"                        >> lgshell_cmds
   fi
 
-  echo "lgraph.open name:${pt} |> pass.dfg.finalize_bitwidth"             >> lgshell_cmds_opt
-  echo "lgraph.open name:${pt} |> inou.graphviz odir:./logs bits:true"    >> lgshell_cmds_opt
-  echo "lgraph.open name:${pt} |> inou.json.fromlg output:${pt}.json"     >> lgshell_cmds_opt
+  echo "lgraph.open name:${pt} |> pass.dfg.finalize_bitwidth"             >> lgshell_cmds
+  echo "lgraph.open name:${pt} |> inou.graphviz odir:./logs bits:true"    >> lgshell_cmds
+  echo "lgraph.open name:${pt} |> inou.json.fromlg output:${pt}.json"     >> lgshell_cmds
 
 
- ${LGSHELL} < lgshell_cmds_opt
+ ${LGSHELL} < lgshell_cmds
   if [ $? -ne 0 ]; then
     echo "pyrope.sh failed 2nd round: optimizie dfg ${pt}"
     exit 3
@@ -92,7 +92,8 @@ pts="sp_add top_inline_add"
 
 for pt in $pts
 do
-  ./inou/yosys/lgyosys -g"$pt" 
+  echo "lgraph.open name:${pt} |> inou.yosys.fromlg" > lgshell_cmds
+  ${LGSHELL} < lgshell_cmds
   if [ $? -eq 0 ]; then
     echo "Successfully created verilog:${pt}.v"
   else
@@ -100,6 +101,16 @@ do
     exit 1
   fi
 done
+
+# do
+#   ./inou/yosys/lgyosys -g"$pt" 
+#   if [ $? -eq 0 ]; then
+#     echo "Successfully created verilog:${pt}.v"
+#   else
+#     echo "FAIL: verilog generation terminated with an error (testcase ${pt}.v)"
+#     exit 1
+#   fi
+# done
 
 # echo ""
 # echo "Logic Equivalence Check"

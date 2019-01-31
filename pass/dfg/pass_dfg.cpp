@@ -20,7 +20,6 @@ void Pass_dfg::setup() {
   Eprp_method m1("pass.dfg.generate", "generate a dfg lgraph from a cfg lgraph", &Pass_dfg::generate);
   m1.add_label_optional("path", "lgraph path");
   m1.add_label_required("name", "lgraph name");
-
   register_pass(m1);
 
   Eprp_method m2("pass.dfg.optimize", "optimize a dfg lgraph", &Pass_dfg::optimize);
@@ -66,7 +65,7 @@ std::vector<LGraph*> Pass_dfg::hierarchical_gen_dfgs(LGraph *cfg_parent){
   cfg_parent->each_sub_graph_fast([cfg_parent, &dfgs, this](Index_ID idx, Lg_type_id lgid, std::string_view iname){
     fmt::print("subgraph lgid:{}\n", lgid);
     LGraph *cfg_child = LGraph::open(cfg_parent->get_path(), lgid);
-    if(cfg_child==0){
+    if(cfg_child== nullptr){
       Pass::error("hierarchy for {} could not open instance {} with lgid {}", cfg_parent->get_name(), iname, lgid);
     } else {
       I(absl::EndsWith(cfg_child->get_name(),"_cfg"));
@@ -99,7 +98,7 @@ void Pass_dfg::hierarchical_opt_dfgs(LGraph *dfg_parent){
   dfg_parent->each_sub_graph_fast([dfg_parent, this](Index_ID idx, Lg_type_id lgid, std::string_view iname){
     fmt::print("subgraph lgid:{}\n", lgid);
     LGraph *dfg_child = LGraph::open(dfg_parent->get_path(), lgid);
-    if(dfg_child==0){
+    if(dfg_child==nullptr){
       Pass::error("hierarchy for {} could not open instance {} with lgid {}", dfg_parent->get_name(), iname, lgid);
     } else {
       I(dfg_child);
@@ -148,13 +147,12 @@ void Pass_dfg::do_optimize(LGraph *&ori_dfg) {
 }
 
 void Pass_dfg::trans(LGraph *dfg) {
-  LGraph *sub_graph = nullptr;
   // resolve pending graph instantiation
   for(auto idx : dfg->fast()) {
     if(dfg->node_type_get(idx).op == DfgPendingGraph_Op) {
       //dfg->set_node_instance_name(idx, (std::string)dfg->get_node_wirename(idx)+ "_0");
       fmt::print("subgraph name is:{}\n", dfg->get_node_wirename(idx));
-      sub_graph = LGraph::open(dfg->get_path(), dfg->get_node_wirename(idx));
+      LGraph* sub_graph = LGraph::open(dfg->get_path(), dfg->get_node_wirename(idx));
       assert(sub_graph);
 
       dfg->node_subgraph_set(idx, sub_graph->lg_id());//changing from DfgPendingGraph_Op to normal subgraph_op
@@ -170,7 +168,7 @@ void Pass_dfg::trans(LGraph *dfg) {
   for(auto idx : dfg->fast()){
     if(dfg->node_type_get(idx).op == SubGraph_Op){
       fmt::print("resolving connections, subgraph is:{}\n", dfg->get_node_wirename(idx));
-      sub_graph = LGraph::open(dfg->get_path(), dfg->get_node_wirename(idx));
+      LGraph* sub_graph = LGraph::open(dfg->get_path(), dfg->get_node_wirename(idx));
       I(sub_graph);
 
       //resolve subgraph input connections
@@ -188,7 +186,7 @@ void Pass_dfg::trans(LGraph *dfg) {
         Node_Pin* src_pin = new Node_Pin(src_nid, src_pid, false);
         Node_Pin* dst_pin = new Node_Pin(dst_nid, dst_pid, true);
         subg_inp_edges[src_pin] = dst_pin;
-        dfg->del_edge(inp); //WARNNING: don't add_edge and del_edge at the same reference loop!
+        dfg->del_edge(inp); //WARNNING: do not add_edge and del_edge at the same reference loop!
       }
 
       for(auto &edge : subg_inp_edges){
@@ -202,17 +200,20 @@ void Pass_dfg::trans(LGraph *dfg) {
         Index_ID dst_nid = out.get_inp_pin().get_nid();
         Port_ID  dst_pid = out.get_inp_pin().get_pid();
         Port_ID  src_pid = 0;
-        sub_graph->each_output([&sub_graph, &src_pid](Index_ID idx, Port_ID pid) {
-          fmt::print("outputs of subgraph: idx:{}, pid:{}, name:{}\n",idx, pid, sub_graph->get_graph_output_name_from_pid(pid));
+        uint16_t bitwidth;
+        sub_graph->each_output([&sub_graph, &src_pid, &bitwidth](Index_ID idx, Port_ID pid) {
+          //fmt::print("outputs of subgraph: idx:{}, pid:{}, name:{}, bitwidth:{}\n",idx, pid, sub_graph->get_graph_output_name_from_pid(pid), sub_graph->get_bits_pid(idx, pid));
+          //WARNING:pid should start from 0, but here start from 1? why?
+          fmt::print("outputs of subgraph: idx:{}, pid:{}, name:{}, bitwidth:{}\n",idx, pid, sub_graph->get_graph_output_name_from_pid(pid), sub_graph->get_bits(idx));
           src_pid = pid;
+          bitwidth = sub_graph->get_bits(idx);
         });
         fmt::print("src_nid:{}, src_pid:{}, dst_nid:{}, dst_pid:{}\n", src_nid, src_pid, dst_nid, dst_pid);
         Node_Pin* src_pin = new Node_Pin(src_nid, src_pid, false);
         Node_Pin* dst_pin = new Node_Pin(dst_nid, dst_pid, true);
         subg_out_edges[src_pin] = dst_pin;
-        //fmt::print("hello~, get_bits_pid:{}\n", sub_graph->get_bits_pid(src_nid,src_pid));
-        //dfg->set_bits_pid(src_nid, src_pid, sub_graph->get_bits_pid(src_nid, src_pid));
-        dfg->set_bits_pid(src_nid, src_pid, 2);
+        fmt::print("bitwidth:{}\n", bitwidth);
+        dfg->set_bits_pid(src_nid, src_pid, bitwidth);
         dfg->del_edge(out); //WARNNING: don't add_edge and del_edge at the same reference loop!
       }
 
