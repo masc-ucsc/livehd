@@ -311,7 +311,7 @@ const LGraph::Hierarchy &LGraph::get_hierarchy() {
       if (lg == 0) {
         Pass::error("hierarchy for {} could not open instance {} with lgid {}", entry.base, iname, lgid);
       } else {
-        auto base2 = absl::StrCat(entry.base, ":", iname);
+        auto base2 = absl::StrCat(entry.base, ".", iname);
         pending.emplace_back(base2, entry.top, lg);
       }
     });
