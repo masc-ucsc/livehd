@@ -1,6 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#ifndef PASS_SAMPLE_H
-#define PASS_SAMPLE_H
+#pragma once
 
 #include "pass.hpp"
 
@@ -16,4 +15,3 @@ public:
   void do_work(const LGraph *g);
 };
 
-#endif

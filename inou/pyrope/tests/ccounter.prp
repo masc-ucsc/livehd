@@ -1,0 +1,6 @@
+// code/counter.prp file
+..+.. as \libs.adder.scla.cla      // Overload + operator
+if $enable {
+  @total := @total + 1
+  I 3 ..+.. 4 == 7 == 3 + 4          // + is an alias for ..+..
+}

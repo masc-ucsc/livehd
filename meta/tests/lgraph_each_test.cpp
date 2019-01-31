@@ -205,3 +205,26 @@ TEST_F(Setup_graphs_test, hierarchy_twice) {
 
   EXPECT_TRUE(true);
 }
+
+TEST_F(Setup_graphs_test, No_each_input) {
+
+  for(auto &parent:lgs) {
+    parent->each_input_root_fast([parent](Index_ID idx, Port_ID pid) {
+      EXPECT_FALSE(parent->has_inputs(idx));
+    });
+  }
+
+  EXPECT_TRUE(true);
+}
+
+TEST_F(Setup_graphs_test, No_each_output) {
+
+  for(auto &parent:lgs) {
+    parent->each_output_root_fast([parent](Index_ID idx, Port_ID pid) {
+      EXPECT_FALSE(parent->has_outputs(idx));
+    });
+  }
+
+  EXPECT_TRUE(true);
+}
+

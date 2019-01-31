@@ -245,14 +245,6 @@ Index_ID Node_Internal::get_master_root_nid() const {
   return get_root().get_nid();  // No need to do get_master_root
 }
 
-Index_ID Node_Internal::get_root_nid() const {
-  assert(nid);
-  if (root) return get_self_idx();
-
-  assert(get_root().get_self_idx() == nid);
-  return nid;
-}
-
 void Node_Internal::try_recycle() {
   if (out_pos != 0 || inp_pos != 0) return;
   assert(!is_free_state());

@@ -77,11 +77,6 @@ public:
   }
 
   void sync() {
-    if(__size == 0) {
-      assert(__buffer == 0);
-      return;
-    }
-
     if(__buffer) {
       __allocator.deallocate(__buffer, __size);
       __buffer = 0;
