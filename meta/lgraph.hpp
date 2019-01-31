@@ -168,9 +168,8 @@ public:
 
   void set(const Node_Type_Op op) { g->node_type_set(nid, op); }
 
-  void set_bits(uint16_t bits) { g->set_bits(nid, bits); }
-
-  void delay_set(float t) { g->node_delay_set(nid, t); }
+  //void set_bits(uint16_t bits) { g->set_bits(nid, bits); }
+  //void delay_set(float t) { g->node_delay_set(nid, t); }
 
   const Edge_iterator inp_edges() const override;
   const Edge_iterator out_edges() const override;

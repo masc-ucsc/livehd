@@ -43,7 +43,7 @@ void LGraph::each_input_root_fast(std::function<void(Index_ID, Port_ID)> f1) con
   for (const auto &ni : node_internal) {
     if (!ni.is_node_state()) continue;
     if (!ni.is_root()) continue;
-    if (!ni.has_pid_inputs()) continue;
+    if (!ni.has_pid_inputs() && !ni.is_graph_io_input()) continue;
 
     f1(ni.get_nid(), ni.get_dst_pid());
   }

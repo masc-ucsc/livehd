@@ -54,7 +54,7 @@ public:
       return i;
     };
     bool operator!=(const CTree_depth_preorder_iterator &other) {
-      assert(t == other.t);
+      I(t == other.t);
       return ti != other.ti;
     }
     const Tree_index &operator*() const { return ti; }
@@ -118,9 +118,9 @@ public:
 
 template <typename X>
 void Tree<X>::adjust_to_level(Tree_level level) {
-  if (data_stack.size() > level) return;
+  if (data_stack.size() > static_cast<size_t>(level)) return;
 
-  while (data_stack.size() <= level) {
+  while (data_stack.size() <= static_cast<size_t>(level)) {
     data_stack.emplace_back();
     pointers_stack.emplace_back();
   }
@@ -225,7 +225,7 @@ void Tree<X>::add_lazy_child(const Tree_level &child_level, const X &data) {
     pending_parent = parent_level;
   }
 
-  auto child_pos = data_stack[child_level].size();
+  Tree_pos child_pos = data_stack[child_level].size();
   if (child_pos>0 && pointers_stack[child_level][child_pos-1].parent == parent_pos) {
     pointers_stack[child_level][child_pos-1].younger_sibling = child_pos;
   }
@@ -233,7 +233,7 @@ void Tree<X>::add_lazy_child(const Tree_level &child_level, const X &data) {
   data_stack[child_level].emplace_back(data);
   pointers_stack[child_level].emplace_back(parent_pos);
 
-  if (pointers_stack.size() <= (child_level+1))
+  if (pointers_stack.size() <= static_cast<size_t>(child_level+1))
     return;
 
   if (pointers_stack[child_level+1].empty())

@@ -661,7 +661,7 @@ void Inou_pyrope::to_pyrope(const LGraph *g, const std::string &filename) {
     prp_file = g->get_name();
 
   Out_string w, sub;
-  w << "# " << prp_file << ".prp file from " << g->get_name() << "\n";
+  w << "// " << prp_file << ".prp file from " << g->get_name() << "\n";
 
   inline_stmt.clear();
 

@@ -6,6 +6,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "iassert.hpp"
 #include "char_array.hpp"
 #include "instance_names.hpp"
 #include "lgraph_base_core.hpp"
@@ -81,12 +82,12 @@ public:
   bool is_graph_output(std::string_view name) const { return output_array.get_id(name) != 0; }
 
   bool is_graph_input(Index_ID idx) const {
-    assert(static_cast<Index_ID>(node_internal.size()) > idx);
+    I(static_cast<Index_ID>(node_internal.size()) > idx);
     return node_internal[idx].is_graph_io_input();
   }
 
   bool is_graph_output(Index_ID idx) const {
-    assert(static_cast<Index_ID>(node_internal.size()) > idx);
+    I(static_cast<Index_ID>(node_internal.size()) > idx);
     return node_internal[idx].is_graph_io_output();
   }
 
@@ -117,19 +118,19 @@ public:
 
   // Graph Node functions
   uint16_t get_bits(Index_ID idx) const {
-    assert(idx < node_internal.size());
-    assert(node_internal[idx].is_root());
+    I(idx < node_internal.size());
+    I(node_internal[idx].is_root());
     return node_internal[idx].get_bits();
   }
   void set_bits(Index_ID idx, uint16_t bits) {
-    assert(idx < node_internal.size());
-    assert(node_internal[idx].is_root());
+    I(idx < node_internal.size());
+    I(node_internal[idx].is_root());
     node_internal[idx].set_bits(bits);
   }
 
   Index_ID add_edge(const Node_Pin src, const Node_Pin dst) {
-    assert(!src.is_input());
-    assert(dst.is_input());
+    I(!src.is_input());
+    I(dst.is_input());
     return add_edge_int(dst.get_nid(), dst.get_pid(), src.get_nid(), src.get_pid());
   }
 
@@ -137,21 +138,21 @@ public:
   void del_node(Index_ID idx);
 
   Index_ID add_edge(const Node_Pin src, const Node_Pin dst, uint16_t bits) {
-    assert(!src.is_input());
-    assert(dst.is_input());
+    I(!src.is_input());
+    I(dst.is_input());
     Index_ID idx = add_edge_int(dst.get_nid(), dst.get_pid(), src.get_nid(), src.get_pid());
     set_bits(idx, bits);
     return idx;
   }
 
   bool has_outputs(Index_ID idx) const {
-    assert(idx < node_internal.size());
-    assert(node_internal[idx].is_root());
+    I(idx < node_internal.size());
+    I(node_internal[idx].is_root());
     return node_internal[idx].has_outputs();
   }
   bool has_inputs(Index_ID idx) const {
-    assert(idx < node_internal.size());
-    assert(node_internal[idx].is_root());
+    I(idx < node_internal.size());
+    I(node_internal[idx].is_root());
     return node_internal[idx].has_inputs();
   }
 
@@ -161,17 +162,17 @@ public:
   void print_stats() const;
 
   const Node_Internal &get_node_int(Index_ID idx) const {
-    assert(static_cast<Index_ID>(node_internal.size()) > idx);
+    I(static_cast<Index_ID>(node_internal.size()) > idx);
     return node_internal[idx];
   }
 
   Node_Internal &get_node_int(Index_ID idx) {
-    assert(static_cast<Index_ID>(node_internal.size()) > idx);
+    I(static_cast<Index_ID>(node_internal.size()) > idx);
     return node_internal[idx];
   }
 
   bool is_root(Index_ID idx) const {
-    assert(static_cast<Index_ID>(node_internal.size()) > idx);
+    I(static_cast<Index_ID>(node_internal.size()) > idx);
     return node_internal[idx].is_root();
   }
 
@@ -208,7 +209,7 @@ public:
       };
       each_sub_graph_fast_direct(f2);
     } else {
-      assert(false);
+      I(false);
       each_sub_graph_fast_direct(f1);  // Better error message if I keep this
     }
   };
@@ -225,7 +226,7 @@ public:
       };
       each_root_direct(f2);
     } else {
-      assert(false);
+      I(false);
       each_root_direct(f1);  // Better error message if I keep this
     }
   };

@@ -25,6 +25,7 @@ cc_binary(
             "//pass/abc:pass_abc",
             "//pass/dfg:pass_dfg",
             "//pass/dce:pass_dce",
+            "//pass/punch:pass_punch",
             "//pass/sample:pass_sample",
             "//pass/bitwidth:pass_bitwidth",
 
