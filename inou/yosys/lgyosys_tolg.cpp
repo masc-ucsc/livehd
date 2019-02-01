@@ -78,8 +78,8 @@ static void look_for_module_outputs(RTLIL::Module *module, const std::string &pa
       io_idx = g->add_graph_input(&wire->name.c_str()[1], 0, wire->width, wire->start_offset, wire->port_id);
       // FIXME: can we get rid of the dependency in the wirename for IOs?
       g->set_node_wirename(io_idx, &wire->name.c_str()[1]);
-      g->set_bits(io_idx, wire->width);
-      g->node_type_set(io_idx, GraphIO_Op);
+      assert(g->get_bits(io_idx) == wire->width);
+      assert(g->node_type_get(io_idx).op ==  GraphIO_Op);
 
 #ifndef NDEBUG
       used_names.insert(std::make_pair(&wire->name.c_str()[1], io_idx));
@@ -91,8 +91,8 @@ static void look_for_module_outputs(RTLIL::Module *module, const std::string &pa
       io_idx = g->add_graph_output(&wire->name.c_str()[1], 0, wire->width, wire->start_offset, wire->port_id);
       // FIXME: can we get rid of the dependency in the wirename for IOs?
       g->set_node_wirename(io_idx, &wire->name.c_str()[1]);
-      g->set_bits(io_idx, wire->width);
-      g->node_type_set(io_idx, GraphIO_Op);
+      assert(g->get_bits(io_idx) == wire->width);
+      assert(g->node_type_get(io_idx).op ==  GraphIO_Op);
 
 #ifndef NDEBUG
       used_names.insert(std::make_pair(&wire->name.c_str()[1], io_idx));
