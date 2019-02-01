@@ -321,16 +321,12 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
             auto  node_idx   = out.get_out_pin().get_nid();
             auto  node       = g->get_dest_node(out);
             float node_delay = node.delay_get();
-            int   node_bits  = node.get_bits();
             int   node_width = g->get_bits(node_idx);
             if(node_delay != 0) {
               writer.Key("delay");
               writer.Double(node_delay);
             }
-            if(node_bits != 0) {
-              writer.Key("out_src_bits");
-              writer.Uint(node_bits);
-            } else if(node_width != 0) {
+            if(node_width != 0) {
               writer.Key("out_src_bits");
               writer.Uint(node_width);
             }
