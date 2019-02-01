@@ -256,6 +256,9 @@ std::string_view LGraph_Base::get_graph_output_name_from_pid(Port_ID pid) const 
 }
 
 Port_ID LGraph_Base::get_graph_pid_from_nid(Index_ID nid) const {
+  I(node_internal.size()>nid);
+  I(node_internal[nid].is_graph_io());
+
   for (auto it = input_array.begin(); it != input_array.end(); ++it) {
     const auto &p = it.get_field();
     if (p.nid == nid) return p.pos;
