@@ -1,0 +1,9 @@
+// code/assertions.prp
+a = 3
+#b = a  // b and a must be known at Compile time
+#if a==3 {  // compile time if condition
+  I true    // runtime assertion
+  %d = $0+a // no constant
+}
+#I a == b   // Compile time assertion
+I %d != a   // runtime assertion

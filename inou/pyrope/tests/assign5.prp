@@ -1,0 +1,9 @@
+// code/assign5.prp
+_tmp1 as $a // alias, no restart trigger
+_tmp2 = \$b // pass reference, no restart
+try {
+  %out1 = _tmp1 + 1  // can trigger resart
+}
+try {
+  %out2 = _tmp2 + 1  // can trigger restart
+}

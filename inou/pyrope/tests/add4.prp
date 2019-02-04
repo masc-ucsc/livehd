@@ -1,6 +1,6 @@
 // code/add4.prp file
-..+.. as \libs.adder.scla.cla
-s1 as \libs.adder.rca
+..+.. as /libs/adder/scla/.cla
+s1 as /libs/adder/.rca
 (%sum sum1 sum2) as __stage:true
 sum1 = $a + $b
 sum2 = $c + $c

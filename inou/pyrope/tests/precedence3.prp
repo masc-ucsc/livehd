@@ -1,0 +1,14 @@
+// code/precedence3.prp
+x = 3 ++ 4 -- 3     // compile error, precedence?
+x = 3 ; ++ 4 -- 3   // OK, 3 ++ (4 -- 3)
+b = !a or d         // OK, ! higher precedence
+b = !a or c == d    // OK, == breaks expression
+I b == !a or (c == d)
+bar = true or false and true // compile error
+bar = true ; or true and false ; or true
+I bar == true or (true and false) or true
+I (1,3) == (1 3)
+d = 1 3
+I d == 1 3
+I d == ;( ; 1 ;, 2;+1)   // Ugly but legal syntax
+f = 1 +;3                // Ugly illegal syntax

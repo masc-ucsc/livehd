@@ -1,0 +1,7 @@
+// code/fluid5.prp file
+%o1 = $in1?.0       // pass input, no restart
+%o2 = $in2?.field   // pass field, no restart
+%o3 = $in3?.a + 30  // use field, no restart
+try {
+  %o3 = $in3.a + 30 // same as last
+}

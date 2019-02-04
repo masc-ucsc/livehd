@@ -1,0 +1,22 @@
+// code/precission2.prp
+a as __range:(1..6)
+a = 5
+c = 5
+if xx {
+  a = a + 1  // OK
+  c = c + 1
+}else{
+  a = a - 4  // OK
+  c = c - 4
+}
+a = a + 1  // compile error, may be out range
+I c.__range == (1,6) // all possible values
+c = c + 2
+I c.__range == (3,8) and c.__bits == 4
+c = c ^ (c>>1)  // Not predictable
+I c.__range == (0..15) and c.__bits == 4
+c = 300   // OK because c was explicit
+d = 50u2bits  // compile error
+e = 3u2bits
+e := 50       // OK, drop upper bits
+e = e - 1

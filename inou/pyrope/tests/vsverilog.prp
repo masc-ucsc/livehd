@@ -1,0 +1,3 @@
+// code/vsverilog.prp file
+($a $b) as __bits:2
+%c = $a + $b

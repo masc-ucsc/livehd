@@ -1,0 +1,20 @@
+// code/objects1.prp
+obj1.oneortwo = ::{return 1}
+obj2.oneortwo = ::{return 2}
+obj1.oneortwo2 = 1
+obj2.oneortwo2 = 2
+if $input[[0..1]] == 0 {
+  tmp = obj1
+  I tmp.oneortwo  == 1
+  I tmp.oneortwo2 == 1
+}elif $input[[0..1]] == 1 {
+  tmp = obj2
+  I tmp.oneortwo  == 2
+  I tmp.oneortwo2 == 2
+}else{
+  // Calling undefined method is __init value
+  // NEVER runtime error
+  I tmp.oneortwo  == 0
+  I tmp.oneortwo2 == 0
+}
+I tmp.oneortwo ..in.. (1 2 0)

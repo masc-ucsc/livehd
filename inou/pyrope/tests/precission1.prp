@@ -1,0 +1,16 @@
+// code/precission1.prp
+a = 3       // implicit, __range:3u2bits
+a = a + 1   // OK
+b = 3u2bits // explicit, __bits:2 __range:3u2bits
+b = b - 1   // OK, __range:2u2bits
+b = b + 2   // compile error, __bits explicit 2
+I b == 2
+b := b + 2  // OK (drop bits)
+I b == 0    // 4u2bits -> 0b100[[0..1]] == 0
+// implicit unless all values explicit
+c = 3 - 1u1bits // implicit, __bits:2 __range:2u2bits
+@d as __range:(0 1 7) // allowed values
+@d = 1      // OK
+@d += 1
+@d += 1     // compile error
+I 0b11_1100 == (a 0b1100)[[]] // bit concatenation

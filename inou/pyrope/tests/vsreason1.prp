@@ -1,0 +1,13 @@
+// code/vsreason1.prp file
+unique if isBig and animal is Dog {
+  result = 1
+}elif isBig and animal is Car {
+  result = 2
+}elif isBig and animal is Bird {
+  result = 3
+}elif !isBig
+  and animal is Bird or animal is Cat {
+  result = 4
+}elif !isBig and animal is Bird {
+  result = 5
+}

@@ -1,0 +1,25 @@
+// code/objects2.prp
+parent.dox = ::{return 1+$0}
+child = parent  // inherit
+I child.__obj == parent.__obj
+child.dox = ::{
+  _tmp = super $
+  @this.v1 = 3  // add new field in child
+  %p1 punch $/objects1.child/.v2
+  %p1 = 5
+  return tmp + 7
+}
+puts $v2
+I child.__obj != parent.__obj
+I child.v1 == 0
+I child.v2 == 0
+t = child.dox 4
+I t == (1+4+7)
+I child.v1 == 3
+I child.v2 == 5
+grandson = child
+grandson.dox = :when $0>20:{100}
+t = grandson.dox 4
+I t == (1+4+7)
+t = grandson.dox 30
+I t == 100

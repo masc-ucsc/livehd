@@ -1,0 +1,9 @@
+// code/mem5.prp
+ __bits:int       // Number of bits in register
+ __reset:bool     // Reset register (true default)
+ __posedge:bool   // Posedge or negedge (true default)
+ __fflop:bool     // Flip-flop or latch based (true default)
+ __last:bool      // Last value or flop output
+ __size:int       // Number of entries in a SRAM-like flop
+ __clk_pin:name   // Wire signal to control clk pin
+ __reset_pin:name // Wire signal to control reset pin

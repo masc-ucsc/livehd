@@ -1,0 +1,15 @@
+// code/scope1.prp
+a = 1
+b = ::{
+  d = 3    // b local scope
+  %out = a // compile error, undefined a
+}
+x = b
+I a == 1
+c = ::{
+  a = 2    // local variable
+  d = 4
+  %out = a
+}
+I d==4     // compile error, d not defined
+I c.out == 2

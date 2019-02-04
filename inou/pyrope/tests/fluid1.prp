@@ -1,0 +1,15 @@
+// code/fluid1.prp file
+a as $c         // alias, no restart
+try {
+  if %sum2! {
+    %sum3 = $a  // sum2 busy, try sum3
+  }else{
+    %sum2 = $a
+  }
+}
+try {
+  if $a? {
+    $d? = false // do not consume b
+    $e!! = true // clear input e
+  }
+}
