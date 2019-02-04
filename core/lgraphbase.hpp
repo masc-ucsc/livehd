@@ -128,6 +128,16 @@ public:
     node_internal[idx].set_bits(bits);
   }
 
+  void add_edge(const Index_ID dst_idx, const Index_ID src_idx) {
+    I(src_idx < node_internal.size());
+    I(node_internal[src_idx].is_root());
+    I(dst_idx < node_internal.size());
+    I(node_internal[dst_idx].is_root());
+    I(src_idx != dst_idx);
+
+    add_edge_int(dst_idx, node_internal[dst_idx].get_dst_pid(), src_idx, node_internal[src_idx].get_dst_pid());
+  }
+
   Index_ID add_edge(const Node_Pin src, const Node_Pin dst) {
     I(!src.is_input());
     I(dst.is_input());
@@ -169,6 +179,12 @@ public:
   Node_Internal &get_node_int(Index_ID idx) {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
     return node_internal[idx];
+  }
+
+  Port_ID get_dst_pid(Index_ID idx) const {
+    I(static_cast<Index_ID>(node_internal.size()) > idx);
+    I(node_internal[idx].is_root());
+    return node_internal[idx].get_dst_pid();
   }
 
   bool is_root(Index_ID idx) const {

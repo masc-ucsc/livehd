@@ -148,8 +148,6 @@ public:
   float      delay_get() const { return g->node_delay_get(nid); }
   Node_Place place_get() const { return g->node_place_get(nid); }
 
-  uint16_t get_bits() const { return g->get_bits(nid); }
-
   virtual const Edge_iterator inp_edges() const;
   virtual const Edge_iterator out_edges() const;
 
@@ -167,9 +165,6 @@ public:
   Node(LGraph *_g, Index_ID _nid) : ConstNode(_g, _nid) { g = _g; };
 
   void set(const Node_Type_Op op) { g->node_type_set(nid, op); }
-
-  //void set_bits(uint16_t bits) { g->set_bits(nid, bits); }
-  //void delay_set(float t) { g->node_delay_set(nid, t); }
 
   const Edge_iterator inp_edges() const override;
   const Edge_iterator out_edges() const override;

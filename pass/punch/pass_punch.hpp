@@ -10,6 +10,7 @@ protected:
 
   static void work(Eprp_var &var);
 
+  void add_output(LGraph *g, std::string_view wire, std::string_view output);
 public:
   Pass_punch();
   Pass_punch(std::string_view src, std::string_view dst);
