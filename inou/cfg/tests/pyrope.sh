@@ -16,8 +16,8 @@ pwd
 
 # pts='top_ooo  sp_add  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2  if_elif_else'
 # pts='constant_pos constant_neg sp_if_0 nested_if_0 nested_if_1 nested_if_2 nested_if_3'
-pts='top_inline_add'
-# pts='nested_if_0'
+# pts='top_inline_add'
+pts='for'
 
 LGSHELL=./bazel-bin/main/lgshell
 
@@ -44,6 +44,7 @@ do
 
   echo "inou.cfg.tolg  files:./inou/cfg/tests/${pt}.cfg  name:${pt}_cfg  |> @a" > lgshell_cmds
   echo "lgraph.open name:${pt}_cfg |> inou.json.fromlg output:${pt}_cfg.json"  >> lgshell_cmds
+  echo "lgraph.open name:${pt}_cfg |> inou.graphviz odir:./logs verbose:true"  >> lgshell_cmds
   echo "lgraph.open name:${pt}_cfg |> pass.dfg.generate name:${pt}"            >> lgshell_cmds
   echo "lgraph.open name:${pt} |> inou.json.fromlg output:${pt}_pre.json"      >> lgshell_cmds
 
@@ -71,7 +72,7 @@ do
   fi
 
   echo "lgraph.open name:${pt} |> pass.dfg.finalize_bitwidth"             >> lgshell_cmds
-  echo "lgraph.open name:${pt} |> inou.graphviz odir:./logs bits:true"    >> lgshell_cmds
+  echo "lgraph.open name:${pt} |> inou.graphviz odir:./logs verbose:true" >> lgshell_cmds
   echo "lgraph.open name:${pt} |> inou.json.fromlg output:${pt}.json"     >> lgshell_cmds
 
 
@@ -88,8 +89,8 @@ echo ""
 echo "Verilog code generation"
 echo ""
 
-pts="sp_add top_inline_add"
-
+#pts="sp_add top_inline_add"
+#TODO:change to lgraph.match() to find all the graphs which needs to generate .v
 for pt in $pts
 do
   echo "lgraph.open name:${pt} |> inou.yosys.fromlg" > lgshell_cmds

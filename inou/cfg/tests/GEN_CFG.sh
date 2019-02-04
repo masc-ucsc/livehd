@@ -1,5 +1,6 @@
 #!/bin/bash
 rm -f *.cfg
+~/pyrope/parser/bin/prp for.prp            > yyy && column -t yyy > xxx && mv xxx for.cfg
 ~/pyrope/parser/bin/prp rca.prp            > yyy && column -t yyy > xxx && mv xxx rca.cfg
 ~/pyrope/parser/bin/prp fa.prp             > yyy && column -t yyy > xxx && mv xxx fa.cfg
 ~/pyrope/parser/bin/prp top_inline_add.prp > yyy && column -t yyy > xxx && mv xxx top_inline_add.cfg

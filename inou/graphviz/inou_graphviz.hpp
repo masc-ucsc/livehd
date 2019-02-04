@@ -12,6 +12,7 @@ private:
 protected:
   std::string odir;
   bool        bits;
+  bool        verbose;
 
   std::atomic<int> total;
   void             inc_total(Index_ID idx) {
