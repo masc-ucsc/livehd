@@ -1,0 +1,19 @@
+// code/scope2.prp
+a = 1
+if a == 1 {
+  a = 2
+  b = 3
+  _f = 4
+}
+I a == 2 and b == 3
+I _f == 4  // compile error, undefined
+total = 0  // needed
+for _i:(1..3) { total += _i }
+I total == 1+2+3
+I _i == 3  // compile error, undefined
+@val = 3
+@val_link punch @/scope2/.var
+I @val_link.__id == @val.__id
+I @val_link == 3
+@val = 1
+I @val_link == 1

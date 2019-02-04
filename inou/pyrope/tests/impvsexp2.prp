@@ -1,0 +1,4 @@
+// code/impvsexp2.prp file
+a = (1 2 3)
+a = f.(1 2 3)
+b = (1+23*fcall.(2+4))

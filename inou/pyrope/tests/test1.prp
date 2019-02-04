@@ -7,5 +7,5 @@ mytest = ::{
   f.a = 2
   f.b = 3
   a = methodx c f
-  I a.res == 6 and a.mor == 0b11
+  I a.res == 6 and a.or == 0b11
 }

@@ -1,0 +1,10 @@
+// code/vsjs1.prp file
+a = 0
+a.__read = ::{
+  this += 1
+}
+equality = (a == 1) and (a == 2) and (a == 3)
+I equality
+for a:myMap ::{
+  puts "{} = {}" a.__index a
+}

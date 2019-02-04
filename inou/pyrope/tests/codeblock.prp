@@ -1,0 +1,20 @@
+// code/codeblock.prp file
+each as ::{
+  I $.__block is def
+  for a:$ { $.__block a }
+}
+each.(1 2 3)    ::{ puts $ }
+(1 2 3) |> each ::{ puts $ }
+map as ::{
+  t = ()
+  fun = $.__block
+  for a:$ {
+    t ++= fun a
+  }
+  return t
+}
+a = ::{ 2+1 }  // OK implicit return
+// parse error, only last can be implicit return
+//a = ::{ 1+1 ; 2+1 }
+s = (1 2 3) |> map ::{$+1} |> map ::{$*$}
+I s == (4 9 16)

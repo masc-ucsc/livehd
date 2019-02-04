@@ -1,0 +1,7 @@
+// code/impvsexp1.prp file
+a = (1,2+3,3)            // tuple
+a = f.(1,2,f2.(3))       // function call
+b = (1
+    ,2-3)                // 2 lines
+a = f.(1
+      ,2-4*fcall.(3-1))  // 2 lines function call
