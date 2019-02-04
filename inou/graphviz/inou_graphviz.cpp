@@ -21,6 +21,7 @@ void Inou_graphviz::setup() {
   Eprp_method m2("inou.graphviz", "export lgraph to graphviz dot format", &Inou_graphviz::fromlg);
 
   m2.add_label_optional("bits", "dump bits (true/false)", "false");
+  m2.add_label_optional("verbose", "dump bits and wirename (true/false)", "false");
 
   register_inou(m2);
 }
@@ -29,6 +30,7 @@ Inou_graphviz::Inou_graphviz()
     : Pass("graphviz") {
 
   bits = false;
+  verbose = false;
 }
 
 void Inou_graphviz::fromlg(Eprp_var &var) {
@@ -37,6 +39,7 @@ void Inou_graphviz::fromlg(Eprp_var &var) {
 
   p.odir = var.get("odir");
   p.bits = var.get("bits") == "true";
+  p.verbose = var.get("verbose") == "true";
 
   bool ok = p.setup_directory(p.odir);
   if(!ok)
@@ -73,12 +76,14 @@ void Inou_graphviz::populate_data(LGraph* g){
   std::string data = "digraph {\n";
 
   g->each_master_root_fast([this, g, &data](Index_ID src_nid) {
-    const auto &node = g->node_type_get(src_nid);
+    const auto &ntype = g->node_type_get(src_nid);
     std::string bits_str = std::to_string(g->get_bits(src_nid));
-    if(bits)
-      data += fmt::format(" {} [label=\"n{}:{}:{}b\"];\n", src_nid, src_nid, node.get_name(), bits_str);
+    if(verbose)
+      data += fmt::format(" {} [label=\"n{}, {}, {}b\n{}\"];\n", src_nid, src_nid, ntype.get_name(), bits_str, g->get_node_wirename(src_nid));
+    else if(bits)
+      data += fmt::format(" {} [label=\"n{}:{}:{}b\"];\n", src_nid, src_nid, ntype.get_name(), bits_str);
     else
-      data += fmt::format(" {} [label=\"n{}:{}\"];\n",  src_nid, src_nid, node.get_name());
+      data += fmt::format(" {} [label=\"n{}:{}\"];\n",  src_nid, src_nid, ntype.get_name());
   });
 
   g->each_output_edge_fast([&data](Index_ID src_nid, Port_ID src_pid, Index_ID dst_nid, Port_ID dst_pid) {

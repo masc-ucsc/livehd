@@ -401,11 +401,10 @@ void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_t
 
 void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Data &data) {
   fmt::print("process_assign\n");
-  const auto &                    target = data.get_target();
-  const std::vector<std::string> &oprds  = data.get_operands();
-  auto             op     = data.get_operator();
-  Index_ID                        oprd_id0;
-  Index_ID                        oprd_id1;
+  const auto& target = data.get_target();
+  const auto& oprds  = data.get_operands(); //return strings
+  auto        op     = data.get_operator();
+  Index_ID    oprd_id0, oprd_id1;
   assert(oprds.size() > 0);
   if(is_pure_assign_op(op)) {
     if(is_output(target) && !dfg->is_graph_output(target.substr(1)))
@@ -498,9 +497,8 @@ void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Index_ID> &src
 
     // the subgraph IOs connection cannot be resolved at the first pass
     // so just casually connect the top<->subgraph IOs so we could traverse edges and
-    // resoved connections later when we resolves the subgraph instantiation".
+    // resoved connections after resolving the subgraph instantiation".
     dfg->add_edge(Node_Pin(src_nid, src_pid, false), Node_Pin(dst_nid, dst_pid, true));
-    fmt::print("add edge, src_nid:{}, src_pid:{}, dst_nid:{}, dst:pid:{}\n", src_nid, 0, dst_nid, 2);
   }
 }
 
@@ -605,15 +603,15 @@ void Pass_dfg::add_fluid_ports(LGraph *dfg, Aux_tree *aux_tree, std::vector<Inde
   ;
 }
 
-void Pass_dfg::add_fluid_logic(LGraph *dfg, Aux_tree *aux_tree, const std::vector<Index_ID> &data_inputs,
-                               const std::vector<Index_ID> &data_outputs) {
-  ;
-}
-
-void Pass_dfg::add_abort_logic(LGraph *dfg, Aux_tree *aux_tree, const std::vector<Index_ID> &data_inputs,
-                               const std::vector<Index_ID> &data_outputs) {
-  ;
-}
+//void Pass_dfg::add_fluid_logic(LGraph *dfg, Aux_tree *aux_tree, const std::vector<Index_ID> &data_inputs,
+//                               const std::vector<Index_ID> &data_outputs) {
+//  ;
+//}
+//
+//void Pass_dfg::add_abort_logic(LGraph *dfg, Aux_tree *aux_tree, const std::vector<Index_ID> &data_inputs,
+//                               const std::vector<Index_ID> &data_outputs) {
+//  ;
+//}
 
 Index_ID Pass_dfg::find_cfg_root(const LGraph *cfg) {
   Index_ID root_id=0;
