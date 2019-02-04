@@ -276,8 +276,7 @@ void Pass_abc::gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, A
 
     for(const auto &out : old_graph->out_edges(old_idx)) {
       auto     out_pid  = out.get_out_pin().get_pid();
-      auto     node     = old_graph->get_dest_node(out);
-      auto     width    = node.get_bits();
+      auto     width    = out.get_bits();
       Node_Pin pick_pin = create_pick_operator(new_graph, Node_Pin(new_memory_idx, out_pid, false), 0, width);
 
       Index_ID port_nid = new_graph->get_idx_from_pid(new_memory_idx, out_pid);
