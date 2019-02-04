@@ -6,8 +6,8 @@ cla = :($a $b) when $a.__bits==8:{           // specialize when bits == 8
   %sum = (s2.sum s1.sum)[[]]                 // bit concatenation
 }
 cla = :($a $b) when $a.__bits==12:{          // specialize when bits == 12
-  s1 = cla $a[[0...6]] $b[[0...6]] cin:0     // ... vs .. Ruby style ranges
-  t = generate.($a[[0..6]] $b[[0..6]])       // generate carry method
+  s1 = cla $a[[0..7]] $b[[0..7]] cin:0       // No ... like in Ruby
+  t = generate.($a[[0..6]], $b[[0..6]])       // generate carry method
   s2 = cla $a[[6..11]] $b[[6..11]] cin:t
   %sum = (s2.sum s1.sum)[[]]
 }
