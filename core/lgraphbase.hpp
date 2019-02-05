@@ -138,6 +138,7 @@ public:
     add_edge_int(dst_idx, node_internal[dst_idx].get_dst_pid(), src_idx, node_internal[src_idx].get_dst_pid());
   }
 
+  // FIXME: rename and make dest first, src 2nd for consistency
   Index_ID add_edge(const Node_Pin src, const Node_Pin dst) {
     I(!src.is_input());
     I(dst.is_input());
@@ -147,6 +148,7 @@ public:
   void del_edge(const Edge &edge);
   void del_node(Index_ID idx);
 
+  // FIXME: rename and make dest first, src 2nd for consistency
   Index_ID add_edge(const Node_Pin src, const Node_Pin dst, uint16_t bits) {
     I(!src.is_input());
     I(dst.is_input());
