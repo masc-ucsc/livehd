@@ -698,9 +698,7 @@ static LGraph *process_module(RTLIL::Module *module) {
 #endif
 
   for(auto cell : module->cells()) {
-#ifndef NDEBUG
-    log("Looking for cell %s:\n", cell->type.c_str());
-#endif
+    //log("Looking for cell %s:\n", cell->type.c_str());
 
     Index_ID onid, inid;
     assert(cell2nid.find(cell) != cell2nid.end());
