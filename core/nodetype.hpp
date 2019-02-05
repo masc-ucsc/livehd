@@ -748,7 +748,8 @@ public:
   void     node_subgraph_set(Index_ID nid, uint32_t subgraphid);
   uint32_t subgraph_id_get(Index_ID nid) const;
 
-  void             node_const_type_set(Index_ID nid, std::string_view value, bool enforce_bits = true);
+  void             node_const_type_set(Index_ID nid, std::string_view value);
+  void             node_const_type_set_string(Index_ID nid, std::string_view value);
   std::string_view node_const_value_get(Index_ID nid) const;
 
   void     node_tmap_set(Index_ID nid, uint32_t tmapid);

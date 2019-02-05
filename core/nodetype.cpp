@@ -202,13 +202,7 @@ uint32_t LGraph_Node_Type::node_value_get(Index_ID nid) const {
   return (uint32_t)(node_type_table[node_internal[nid].get_nid()] - U32ConstMin_Op);
 }
 
-void LGraph_Node_Type::node_const_type_set(Index_ID nid, std::string_view value, bool enforce_bits) {
-#ifndef NDEBUG
-  if (enforce_bits)
-    for (auto &digit : value) {
-      if (digit != '0' && digit != '1' && digit != 'z' && digit != 'x') assert(false);  // unrecognized bit value
-    }
-#endif
+void LGraph_Node_Type::node_const_type_set_string(Index_ID nid, std::string_view value) {
 
   assert(nid < node_type_table.size());
   assert(node_internal[nid].is_node_state());
@@ -224,6 +218,15 @@ void LGraph_Node_Type::node_const_type_set(Index_ID nid, std::string_view value,
   const_nodes.set_bit(nid);
 
   node_type_table[node_internal[nid].get_nid()] = (Node_Type_Op)(StrConstMin_Op + char_id);
+}
+
+void LGraph_Node_Type::node_const_type_set(Index_ID nid, std::string_view value) {
+
+  for (auto &digit : value) {
+    I(digit == '0' || digit == '1' || digit == 'z' || digit == 'x');
+  }
+
+  node_const_type_set_string(nid,value);
 }
 
 std::string_view LGraph_Node_Type::node_const_value_get(Index_ID nid) const {

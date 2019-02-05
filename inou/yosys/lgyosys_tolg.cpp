@@ -398,7 +398,7 @@ static Index_ID resolve_constant(LGraph *g, const std::vector<RTLIL::State> &dat
       break;
     case RTLIL::Sa:
       assert(false);
-      break; // FIXME add support to Sa when a case is found
+      break; // FIXME add support to Sa when a case is found (it should be a z)
     default:
       val       = absl::StrCat("x",val);
       u32_const = false;
@@ -431,11 +431,7 @@ static void connect_string(LGraph *g, std::string_view value, Index_ID onid, Por
   } else {
 
     Index_ID const_nid = g->create_node().get_nid();
-    g->node_const_type_set(const_nid, value
-#ifndef NDEBUG
-        , false
-#endif
-    );
+    g->node_const_type_set_string(const_nid, value);
     Node_Pin const_pin(const_nid, 0, false);
     g->add_edge(const_pin, Node_Pin(onid, opid, true));
     const_map[value] = const_nid;
