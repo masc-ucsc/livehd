@@ -10,7 +10,6 @@ protected:
 
   static void work(Eprp_var &var);
 
-  void add_output(LGraph *g, std::string_view wire, std::string_view output);
 public:
   Pass_punch();
   Pass_punch(std::string_view src, std::string_view dst);
@@ -18,5 +17,8 @@ public:
   void setup() final;
 
   void punch(LGraph *top, std::string_view src, std::string_view dst);
+  bool add_output(LGraph *g, std::string_view wire, std::string_view output);
+  bool add_input(LGraph *g, std::string_view wire, std::string_view input);
+  bool add_dest_instance(LGraph *g, std::string_view type, std::string_view instance, std::string_view wire);
 };
 
