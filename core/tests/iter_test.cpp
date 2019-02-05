@@ -141,18 +141,8 @@ bool simple() {
 
   g->node_u32type_set(const0, 1);
   g->node_u32type_set(const1, 21);
-  g->node_const_type_set(const2, "xxx"
-#ifndef NDEBUG
-                         ,
-                         false
-#endif
-  );
-  g->node_const_type_set(const3, "yyy"
-#ifndef NDEBUG
-                         ,
-                         false
-#endif
-  );
+  g->node_const_type_set(const2, "xxx");
+  g->node_const_type_set_string(const3, "yyy");
 
   g->create_node().get_nid(); // 13
   g->create_node().get_nid(); // 14

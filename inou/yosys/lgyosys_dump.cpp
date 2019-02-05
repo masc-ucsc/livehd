@@ -372,12 +372,22 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module *module) {
       continue;
 
     } else if(g->node_type_get(idx).op == StrConst_Op) {
-      auto const_val = g->node_const_value_get(idx);
-      RTLIL::Wire *new_wire  = module->addWire(name, const_val.size()); // FIXME: This assumes that const are in base 2. OK always?
+      bool blackbox_idx = 0;
+      for(const auto &c : g->out_edges(idx)) {
+        if (g->node_type_get(c.get_inp_pin().get_nid()).op == BlackBox_Op) {
+          blackbox_idx = c.get_inp_pin().get_nid();
+        }else{
+          I(!blackbox_idx); // if blackbox, always blackbox argument
+        }
+      }
+      if (blackbox_idx==0) {
+        auto const_val = g->node_const_value_get(idx);
+        RTLIL::Wire *new_wire  = module->addWire(name, const_val.size()); // FIXME: This assumes that const are in base 2. OK always?
 
-      // constants treated as inputs
-      module->connect(new_wire, RTLIL::SigSpec(RTLIL::Const::from_string(std::string(const_val))));
-      input_map[idx] = new_wire;
+        // constants treated as inputs
+        module->connect(new_wire, RTLIL::SigSpec(RTLIL::Const::from_string(std::string(const_val))));
+        input_map[idx] = new_wire;
+      }
       continue;
 
     } else if(g->node_type_get(idx).op == SubGraph_Op) {
@@ -483,7 +493,8 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       continue;
     }
 
-    if(g->node_type_get(idx).op != Memory_Op && g->node_type_get(idx).op != SubGraph_Op && !g->has_outputs(idx))
+    auto op = g->node_type_get(idx).op;
+    if(op != Memory_Op && op != SubGraph_Op && op != BlackBox_Op && !g->has_outputs(idx))
       continue;
 
     RTLIL::IdString name = RTLIL::IdString(absl::StrCat("\\lgraph_cell_", std::to_string(idx)));
@@ -1129,19 +1140,23 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       std::string_view instance_name;
 
       for(const auto &c : g->inp_edges(idx)) {
-        if(c.get_out_pin().get_pid() == LGRAPH_BBOP_TYPE) {
+        if(c.get_inp_pin().get_pid() == LGRAPH_BBOP_TYPE) {
           // celltype
           if(g->node_type_get(c.get_idx()).op != StrConst_Op)
             log_error("Internal Error: BB type is not a string.\n");
           celltype = g->node_const_value_get(c.get_idx());
-        } else if(c.get_out_pin().get_pid() == LGRAPH_BBOP_NAME) {
+        } else if(c.get_inp_pin().get_pid() == LGRAPH_BBOP_NAME) {
           // instance name
           if(g->node_type_get(c.get_idx()).op != StrConst_Op)
             log_error("Internal Error: BB name is not a string.\n");
           instance_name = g->node_const_value_get(c.get_idx());
-        } else if(c.get_out_pin().get_pid() < LGRAPH_BBOP_OFFSET) {
+        } else if(c.get_inp_pin().get_pid() < LGRAPH_BBOP_OFFSET) {
           log_error("Unrecognized blackbox option, pid %hu\n", c.get_out_pin().get_pid());
         }
+      }
+
+      if (celltype.empty() || instance_name.empty()) {
+        log_error("could not find instance name or celltype for blackbox\n");
       }
 
       std::vector<std::string_view> output_names; // WARNING: Guarantee to keep strings, so string_view avoids allocation
@@ -1152,8 +1167,8 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
 #endif
       bool is_param = false;
       for(const auto &c : g->inp_edges(idx)) {
-        if(c.get_out_pin().get_pid() >= LGRAPH_BBOP_OFFSET) {
-          if(LGRAPH_BBOP_ISPARAM(c.get_out_pin().get_pid())) {
+        if(c.get_inp_pin().get_pid() >= LGRAPH_BBOP_OFFSET) {
+          if(LGRAPH_BBOP_ISPARAM(c.get_inp_pin().get_pid())) {
             if(g->node_type_get(c.get_idx()).op != U32Const_Op)
               log_error("Internal Error: Could not define if input is parameter.\n");
             is_param = g->node_value_get(c.get_idx()) == 1;
@@ -1161,18 +1176,18 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
             assert(def == 0);
             def++;
             assert(current_port == 0);
-            current_port = LGRAPH_BBOP_PORT_N(c.get_out_pin().get_pid());
+            current_port = LGRAPH_BBOP_PORT_N(c.get_inp_pin().get_pid());
 #endif
-          } else if(LGRAPH_BBOP_ISPNAME(c.get_out_pin().get_pid())) {
+          } else if(LGRAPH_BBOP_ISPNAME(c.get_inp_pin().get_pid())) {
             if(g->node_type_get(c.get_idx()).op != StrConst_Op)
               log_error("Internal Error: BB input name not a string.\n");
             current_name = g->node_const_value_get(c.get_idx());
 #ifndef NDEBUG
             assert(def == 1);
             def += 1;
-            assert(current_port == 0 || current_port == LGRAPH_BBOP_PORT_N(c.get_out_pin().get_pid()));
+            assert(current_port == 0 || current_port == LGRAPH_BBOP_PORT_N(c.get_inp_pin().get_pid()));
 #endif
-          } else if(LGRAPH_BBOP_ISCONNECT(c.get_out_pin().get_pid())) {
+          } else if(LGRAPH_BBOP_ISCONNECT(c.get_inp_pin().get_pid())) {
             if(is_param) {
               if(g->node_type_get(c.get_idx()).op == U32Const_Op) {
                 cell->setParam(absl::StrCat("\\",current_name), RTLIL::Const(g->node_value_get(c.get_idx())));
@@ -1187,19 +1202,19 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
               } else if(g->node_type_get(c.get_idx()).op == StrConst_Op) {
                 cell->setPort(absl::StrCat("\\",current_name), RTLIL::Const(std::string(g->node_const_value_get(c.get_idx()))));
               } else {
-                cell->setPort(absl::StrCat("\\",current_name), get_wire(c.get_idx(), c.get_out_pin().get_pid()));
+                cell->setPort(absl::StrCat("\\",current_name), get_wire(c.get_idx(), c.get_out_pin().get_pid())); // get_out_pin
               }
             }
 #ifndef NDEBUG
             assert(def == 2);
-            assert(current_port == LGRAPH_BBOP_PORT_N(c.get_out_pin().get_pid()));
+            assert(current_port == LGRAPH_BBOP_PORT_N(c.get_inp_pin().get_pid()));
             current_port = 0;
             def          = 0;
 #endif
-          } else if(LGRAPH_BBOP_ISONAME(c.get_out_pin().get_pid())) {
+          } else if(LGRAPH_BBOP_ISONAME(c.get_inp_pin().get_pid())) {
             if(g->node_type_get(c.get_idx()).op != StrConst_Op)
               log_error("Internal Error: BB output name is not a string.\n");
-            assert(output_names.size() == (uint32_t)LGRAPH_BBOP_PORT_N(c.get_out_pin().get_pid()));
+            assert(output_names.size() == (uint32_t)LGRAPH_BBOP_PORT_N(c.get_inp_pin().get_pid()));
             output_names.push_back(g->node_const_value_get(c.get_idx()));
           }
         }
