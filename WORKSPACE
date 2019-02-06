@@ -141,6 +141,14 @@ new_git_repository(
     #patches = ["//external:patch.verilator"],
     #strip_prefix = "include",
 )
+new_git_repository(
+    name = "bison",
+    build_file = "BUILD.bison",
+    commit = "0d44f83fcc330dd4674cf4493e2a4e18e758e6bc",
+    remote = "https://git.savannah.gnu.org/git/bison.git",
+    #patches = ["//external:patch.verilator"],
+    #strip_prefix = "include",
+)
 #load(
 #    "//tools:externals.bzl",
 #    "new_patched_http_archive",
