@@ -1046,9 +1046,8 @@ static LGraph *process_module(RTLIL::Module *module) {
         dst_pid = tcell->get_inp_id(name);
 
       } else if(op == BlackBox_Op && !yosys_tech) {
-        if(is_black_box_output(module, cell, conn.first)) {
-          continue;
-        } else if(is_black_box_input(module, cell, conn.first)) {
+        if(is_black_box_output(module, cell, conn.first)
+        || is_black_box_input(module, cell, conn.first)) {
           connect_constant(g, 0, 1, onid, LGRAPH_BBOP_PARAM(blackbox_port));
           connect_string(g, &(conn.first.c_str()[1]), onid, LGRAPH_BBOP_PNAME(blackbox_port));
           dst_pid = LGRAPH_BBOP_CONNECT(blackbox_port);
