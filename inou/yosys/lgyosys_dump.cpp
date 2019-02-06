@@ -614,7 +614,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       } else if(s_result != nullptr) {
         module->addSub(next_id(g), RTLIL::Const(0), s_result, cell_output_map[std::make_pair(idx, 0)], false);
       } else {
-        if(a_result != cell_output_map[std::make_pair(idx, 0)])
+        if(cell_output_map[std::make_pair(idx, 0)]->name != a_result->name)
           module->connect(cell_output_map[std::make_pair(idx, 0)], RTLIL::SigSpec(a_result));
       }
 
@@ -667,9 +667,11 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       if(mu_result != nullptr && ms_result != nullptr) {
         module->addMul(next_id(g), mu_result, ms_result, cell_output_map[std::make_pair(idx, 0)], false);
       } else if(mu_result != nullptr) {
-        module->connect(cell_output_map[std::make_pair(idx, 0)], RTLIL::SigSpec(mu_result));
+        if(cell_output_map[std::make_pair(idx, 0)]->name != mu_result->name)
+          module->connect(cell_output_map[std::make_pair(idx, 0)], RTLIL::SigSpec(mu_result));
       } else if(ms_result != nullptr) {
-        module->connect(cell_output_map[std::make_pair(idx, 0)], RTLIL::SigSpec(ms_result));
+        if(cell_output_map[std::make_pair(idx, 0)]->name != ms_result->name)
+          module->connect(cell_output_map[std::make_pair(idx, 0)], RTLIL::SigSpec(ms_result));
       }
 
       break;
@@ -703,6 +705,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       if(!has_inputs) {
         continue;
       }
+      assert(cell_output_map.find(std::make_pair(idx, 0))!=cell_output_map.end());
       assert(width == (uint32_t)(cell_output_map[std::make_pair(idx, 0)]->width));
       module->connect(cell_output_map[std::make_pair(idx, 0)], RTLIL::SigSpec(joined_wires));
 
@@ -735,6 +738,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         module->connect(RTLIL::SigSpec(cell_output_map[std::make_pair(idx, 0)], lower, upper - lower + 1),
                         RTLIL::SigSpec(picked_wire, lower, upper - lower + 1));
       } else {
+        assert(cell_output_map[std::make_pair(idx, 0)]->name != picked_wire->name);
         module->connect(cell_output_map[std::make_pair(idx, 0)], RTLIL::SigSpec(picked_wire, lower, upper - lower + 1));
       }
       break;
@@ -1039,9 +1043,11 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       if(eu_result != nullptr && es_result != nullptr) {
         module->addEq(next_id(g), eu_result, es_result, cell_output_map[std::make_pair(idx, 0)], false);
       } else if(eu_result != nullptr) {
-        module->connect(cell_output_map[std::make_pair(idx, 0)], RTLIL::SigSpec(eu_result));
+        if(cell_output_map[std::make_pair(idx, 0)]->name != eu_result->name)
+          module->connect(cell_output_map[std::make_pair(idx, 0)], RTLIL::SigSpec(eu_result));
       } else if(es_result != nullptr) {
-        module->connect(cell_output_map[std::make_pair(idx, 0)], RTLIL::SigSpec(es_result));
+        if(cell_output_map[std::make_pair(idx, 0)]->name != es_result->name)
+          module->connect(cell_output_map[std::make_pair(idx, 0)], RTLIL::SigSpec(es_result));
       }
       break;
     }
