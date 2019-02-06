@@ -10,6 +10,7 @@ hierarchy {{top}}
 {{/hierarchy}}
 
 proc
+opt -fast
 pmuxtree
 memory_dff
 memory_share
