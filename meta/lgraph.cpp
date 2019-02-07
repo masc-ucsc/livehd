@@ -260,7 +260,7 @@ void LGraph::dump() const {
 
   dump_wirenames();
 
-#if 1
+#if 0
   for (Index_ID i = 0; i < node_internal.size(); i.value++) {
     fmt::print("{} ", i);
     node_internal[i].dump();

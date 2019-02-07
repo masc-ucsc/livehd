@@ -500,6 +500,14 @@ static void look_for_cell_outputs(RTLIL::Module *module) {
       if(cell->input(conn.first) || (sub_graph && sub_graph->is_graph_input(&(conn.first.c_str()[1]))))
         continue;
 
+#ifndef NDEBUG
+      if (sub_graph && !(cell->output(conn.first) || tcell || blackbox || (sub_graph && sub_graph->is_graph_output(&(conn.first.c_str()[1]))))) {
+        fmt::print("cf.s:{} i:{} o:{}\n",conn.first.c_str()
+            ,sub_graph->is_graph_input(&(conn.first.c_str()[1]))
+            ,sub_graph->is_graph_output(&(conn.first.c_str()[1])));
+        sub_graph->dump();
+      }
+#endif
       assert(cell->output(conn.first) || tcell || blackbox || (sub_graph && sub_graph->is_graph_output(&(conn.first.c_str()[1]))));
       if(blackbox && !is_black_box_output(module, cell, conn.first)) {
         connect_string(g, &(conn.first.c_str()[1]), nid, LGRAPH_BBOP_ONAME(blackbox_out++));
