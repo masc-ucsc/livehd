@@ -54,7 +54,13 @@ protected:
 
   void del_int_node(Index_ID idx);
 
-  Index_ID find_idx_from_pid_int(Index_ID nid, Port_ID pid) const;
+  Index_ID find_idx_from_pid_int(Index_ID idx, Port_ID pid) const;
+  Index_ID find_idx_from_pid_int(const Node_pin &pin) const {
+    if (likely(node_internal[pin.get_idx()].get_dst_pid() == pin.get_pid())) { // Common case
+      return pin.get_idx();
+    }
+    return find_idx_from_pid_int(pin.get_idx(),pin.get_pid());
+  }
 
   friend Forward_edge_iterator;
   friend Backward_edge_iterator;
@@ -105,18 +111,21 @@ public:
   std::string_view get_graph_input_name_from_pid(Port_ID pid) const;
   std::string_view get_graph_output_name_from_pid(Port_ID pid) const;
 
-  Node_Pin get_graph_input(std::string_view str) const;
-  Node_Pin get_graph_output(std::string_view str) const;
+  Node_pin get_graph_input(std::string_view str) const;
+  Node_pin get_graph_output(std::string_view str) const;
 
-  // get extra (non-master root) node for port_id pid
-  // will allocate space if none is available
-  Index_ID get_idx_from_pid(Index_ID nid, Port_ID pid);
+#if 1
+  // WARNING: deprecated: move to protected
+  Index_ID setup_idx_from_pid(Index_ID nid, Port_ID pid);
   Index_ID find_idx_from_pid(Index_ID nid, Port_ID pid) const;
+#endif
+
+#if 1
+  // WARNING: deprecated: Use get/set_bits(const Node_pin)
   void     set_bits_pid(Index_ID nid, Port_ID pid, uint16_t bits);
   uint16_t get_bits_pid(Index_ID nid, Port_ID pid) const;
   uint16_t get_bits_pid(Index_ID nid, Port_ID pid);
 
-  // Graph Node functions
   uint16_t get_bits(Index_ID idx) const {
     I(idx < node_internal.size());
     I(node_internal[idx].is_root());
@@ -126,6 +135,19 @@ public:
     I(idx < node_internal.size());
     I(node_internal[idx].is_root());
     node_internal[idx].set_bits(bits);
+  }
+#endif
+  uint16_t get_bits(const Node_pin &pin) const {
+    I(pin.is_output());
+    Index_ID idx = find_idx_from_pid_int(pin);
+    I(idx);
+    return node_internal[idx].get_bits();
+  }
+  void set_bits(const Node_pin &pin, uint16_t bits) {
+    I(pin.is_output());
+    Index_ID idx = find_idx_from_pid_int(pin);
+    I(idx);
+    return node_internal[idx].set_bits(bits);
   }
 
   void add_edge(const Index_ID dst_idx, const Index_ID src_idx) {
@@ -139,20 +161,20 @@ public:
   }
 
   // FIXME: rename and make dest first, src 2nd for consistency
-  Index_ID add_edge(const Node_Pin src, const Node_Pin dst) {
+  Index_ID add_edge(const Node_pin src, const Node_pin dst) {
     I(!src.is_input());
     I(dst.is_input());
-    return add_edge_int(dst.get_nid(), dst.get_pid(), src.get_nid(), src.get_pid());
+    return add_edge_int(dst.get_idx(), dst.get_pid(), src.get_idx(), src.get_pid());
   }
 
   void del_edge(const Edge &edge);
   void del_node(Index_ID idx);
 
   // FIXME: rename and make dest first, src 2nd for consistency
-  Index_ID add_edge(const Node_Pin src, const Node_Pin dst, uint16_t bits) {
+  Index_ID add_edge(const Node_pin src, const Node_pin dst, uint16_t bits) {
     I(!src.is_input());
     I(dst.is_input());
-    Index_ID idx = add_edge_int(dst.get_nid(), dst.get_pid(), src.get_nid(), src.get_pid());
+    Index_ID idx = add_edge_int(dst.get_idx(), dst.get_pid(), src.get_idx(), src.get_pid());
     set_bits(idx, bits);
     return idx;
   }

@@ -93,28 +93,51 @@ struct __attribute__((packed)) SEdge_Internal {  // 2 bytes total
   }
 };
 
-class Node_Pin {
+class LGraph;
+
+#if 0
+// WARNING: deprecated
+// Node_driver_pin : public Node_pin
+// Node_sink_pin   : public Node_pin
+#endif
+class Node_pin {
 protected:
-  Index_ID nid;
+  friend class LGraph;
+  // TODO: add LGraph so that it has more self-contained operations
+  // E.g: it can find/check that idx matches the (nid,pid) entry for speed
+  //LGraph   *g;
+  Index_ID idx;
   Port_ID  pid;
   bool     input;
 
 public:
-  Node_Pin(Index_ID _nid, Port_ID _pid, bool _input) : nid(_nid), pid(_pid), input(_input) { assert(_nid); }
+  Node_pin() : idx(0), pid(0), input(false) { }
+  Node_pin(Index_ID _idx, Port_ID _pid, bool _input) : idx(_idx), pid(_pid), input(_input) { assert(_idx); }
 
-  void     reset_as_output() { input = false; }
-  void     reset_as_input() { input = true; }
-  Index_ID get_nid() const { return nid; }
-  Port_ID  get_pid() const { return pid; }
-  bool     is_input() const { return input; }
+#if 0
+  // TODO: once we have the attribute and collapse lgraphbase and lgraph
+  static driver_pin(const Node &node, Port_ID _pid) {
+    return Node_pin(node.get_nid(), _pid, false);
+  }
+#endif
 
-  bool operator==(const Node_Pin &other) const { return (nid == other.nid) && (pid == other.pid) && (input == other.input); }
+#if 1
+  // WARNING: deprecated: This should be moved to protected, and friend by lgraph only
+  Index_ID get_idx()   const { assert(idx); return idx;    }
+  Port_ID  get_pid()   const { assert(idx); return pid;    }
 
-  bool operator!=(const Node_Pin &other) const { return (nid != other.nid) || (pid != other.pid) || (input != other.input); }
+  bool     is_input()  const { assert(idx); return input;  }
+  bool     is_output() const { assert(idx); return !input; }
+#endif
 
-  bool operator<(const Node_Pin &other) const {
-    return (nid < other.nid) || (nid == other.nid && pid < other.pid) ||
-           (nid == other.nid && pid == other.pid && input && !other.input);
+  bool operator==(const Node_pin &other) const { assert(idx); return (idx == other.idx) && (pid == other.pid) && (input == other.input); }
+
+  bool operator!=(const Node_pin &other) const { assert(idx); return (idx != other.idx) || (pid != other.pid) || (input != other.input); }
+
+  bool operator<(const Node_pin &other) const {
+    assert(idx);
+    return (idx < other.idx) || (idx == other.idx && pid < other.pid) ||
+           (idx == other.idx && pid == other.pid && input && !other.input);
   }
 };
 
@@ -169,17 +192,18 @@ public:
 
   // Output edge: inp (self_nid, dst_pid) -> out (idx, inp_pid)
   // Input edge : inp (idx, dst_pid)      -> out (self_nid, inp_pid)
-  Node_Pin get_out_pin() const {
+  // TODO: Rename to setup_driver_pin and get_sink_pin
+  Node_pin get_out_pin() const {
     if (is_input())
-      return Node_Pin(get_idx(), get_inp_pid(), false);
+      return Node_pin(get_idx(), get_inp_pid(), false);
     else
-      return Node_Pin(get_self_nid(), get_dst_pid(), false);
+      return Node_pin(get_self_nid(), get_dst_pid(), false);
   };
-  Node_Pin get_inp_pin() const {
+  Node_pin get_inp_pin() const {
     if (is_input())
-      return Node_Pin(get_self_nid(), get_dst_pid(), true);
+      return Node_pin(get_self_nid(), get_dst_pid(), true);
     else
-      return Node_Pin(get_idx(), get_inp_pid(), true);
+      return Node_pin(get_idx(), get_inp_pid(), true);
   };
 
   Index_ID get_self_idx() const;

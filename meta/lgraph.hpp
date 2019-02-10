@@ -59,9 +59,25 @@ public:
   Index_ID add_graph_input(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset, Port_ID origininal_pos);
   Index_ID add_graph_output(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset, Port_ID origininal_pos);
 
-  Node            create_node();
-  Node            get_node(Index_ID nid);
-  const ConstNode get_node(Index_ID nid) const;
+#if 1
+  // WARNING: deprecate: use Node create_node(xxx)
+  Node create_node();
+#endif
+
+  Node create_node(Node_Type_Op op);
+  Node create_node(Node_Type_Op op, uint16_t bits);
+  Node create_node_u32(uint32_t value, uint16_t bits);
+  Node create_node_const(std::string_view value);
+  Node create_node_const(std::string_view value, uint16_t bits);
+
+#if 1
+  // WARNING: deprecated: move to protected
+  Node      get_node(Index_ID nid);
+  ConstNode get_node(Index_ID nid) const;
+#endif
+
+  ConstNode get_node(const Node_pin &pin) const;
+  Node      get_node(const Node_pin &pin);
 
   ConstNode get_dest_node(const Edge &edge) const;
   Node      get_dest_node(const Edge &edge);
@@ -139,11 +155,13 @@ public:
     nid = _nid;
   };
 
+#if 1
+  // WARNING: deprecated: Move to protected used just by lgraph
   Index_ID get_nid() const {
     assert(nid);
     return nid;
   }
-
+#endif
   Node_Type  type_get() const { return g->node_type_get(nid); }
   float      delay_get() const { return g->node_delay_get(nid); }
   Node_Place place_get() const { return g->node_place_get(nid); }
@@ -164,7 +182,30 @@ protected:
 public:
   Node(LGraph *_g, Index_ID _nid) : ConstNode(_g, _nid) { g = _g; };
 
+#if 1
+  // WARNING: deprecated: do not set type after creating
   void set(const Node_Type_Op op) { g->node_type_set(nid, op); }
+#endif
+
+  Node_pin setup_driver_pin(Port_ID pid) {
+    I(g->node_type_get(nid).has_output(pid));
+    Index_ID idx = g->setup_idx_from_pid(nid,pid);
+    return Node_pin(idx, pid, false);
+  }
+  Node_pin setup_driver_pin() const {
+    I(g->node_type_get(nid).has_single_output());
+    return Node_pin(nid,0,false);
+  }
+
+  Node_pin setup_sink_pin(Port_ID pid) {
+    I(g->node_type_get(nid).has_input(pid));
+    Index_ID idx = g->setup_idx_from_pid(nid,pid);
+    return Node_pin(idx,pid,true);
+  }
+  Node_pin setup_sink_pin() const {
+    I(g->node_type_get(nid).has_single_input());
+    return Node_pin(nid,0,true);
+  }
 
   const Edge_iterator inp_edges() const override;
   const Edge_iterator out_edges() const override;

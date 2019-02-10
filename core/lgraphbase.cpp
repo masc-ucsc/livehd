@@ -296,33 +296,34 @@ Index_ID LGraph_Base::get_graph_output_nid_from_pid(Port_ID pid) const {
   return 0;
 }
 
-Node_Pin LGraph_Base::get_graph_input(std::string_view str) const {
+Node_pin LGraph_Base::get_graph_input(std::string_view str) const {
   I(input_array.get_id(str) != 0);
 
   const auto &p = input_array.get_field(str);
-  return Node_Pin(p.nid, p.pos, true);
+  return Node_pin(p.nid, p.pos, true);
 }
 
-Node_Pin LGraph_Base::get_graph_output(std::string_view str) const {
+Node_pin LGraph_Base::get_graph_output(std::string_view str) const {
   I(output_array.get_id(str) != 0);
 
   const auto &p = output_array.get_field(str);
-  return Node_Pin(p.nid, p.pos, false);
+  return Node_pin(p.nid, p.pos, false);
 }
 
-Index_ID LGraph_Base::create_node_space(Index_ID last_idx, Port_ID dst_pid, Index_ID master_nid, Index_ID root_nid) {
+Index_ID LGraph_Base::create_node_space(Index_ID last_idx, Port_ID dst_pid, Index_ID master_nid, Index_ID root_idx) {
   Index_ID idx2 = create_node_int();
 
   I(node_internal[master_nid].is_master_root());
   I(node_internal[last_idx].get_master_root_nid() == master_nid);
 
-  if (root_nid) {
-    I(node_internal[root_nid].is_root());
+  if (root_idx) {
+    I(node_internal[root_idx].is_root());
     node_internal[idx2].clear_root();
-    node_internal[idx2].set_nid(root_nid);
+    node_internal[idx2].set_nid(root_idx);
   } else {
     I(node_internal[idx2].is_root());
     node_internal[idx2].set_nid(master_nid);
+    I(node_internal[idx2].is_root());
   }
   I(node_internal[idx2].get_master_root_nid() == master_nid);
 
@@ -344,7 +345,7 @@ Index_ID LGraph_Base::create_node_space(Index_ID last_idx, Port_ID dst_pid, Inde
   int32_t     dbg_no     = dbg_master.get_num_outputs();
 
   if (node_internal[last_idx].get_dst_pid() == dst_pid) {
-    I(root_nid);
+    I(root_idx);
     // Nove stuff to idx2, legal
 
     node_internal[idx2].assimilate_edges(node_internal[last_idx]);
@@ -361,7 +362,7 @@ Index_ID LGraph_Base::create_node_space(Index_ID last_idx, Port_ID dst_pid, Inde
     if (!node_internal[last_idx].has_space(true)) {
       if (node_internal[idx2].has_space(true)) return idx2;
       // This can happen if 3 sedges transfered to 3 ledges in dest
-      return create_node_space(idx2, dst_pid, master_nid, root_nid);
+      return create_node_space(idx2, dst_pid, master_nid, root_idx);
     }
     return last_idx;
   }
@@ -431,7 +432,7 @@ void LGraph_Base::print_stats() const {
   fmt::print("  edges bytes/root:{} bytes/node:{} bytes/extra:{}\n", bytes / n_roots, bytes / n_nodes, bytes / n_extra);
 }
 
-Index_ID LGraph_Base::get_space_output_pin(Index_ID master_nid, Index_ID start_nid, Port_ID dst_pid, Index_ID root_nid) {
+Index_ID LGraph_Base::get_space_output_pin(Index_ID master_nid, Index_ID start_nid, Port_ID dst_pid, Index_ID root_idx) {
   I(node_internal[master_nid].is_root());
 
   I(node_internal[start_nid].is_node_state());
@@ -444,12 +445,12 @@ Index_ID LGraph_Base::get_space_output_pin(Index_ID master_nid, Index_ID start_n
 
   while (true) {
     if (node_internal[idx].get_dst_pid() == dst_pid) {
-      if (node_internal[idx].is_root()) I(root_nid == idx);
+      if (node_internal[idx].is_root()) I(root_idx == idx);
 
       if (node_internal[idx].has_space(true)) return idx;
     }
 
-    if (node_internal[idx].is_last_state()) return create_node_space(idx, dst_pid, master_nid, root_nid);
+    if (node_internal[idx].is_last_state()) return create_node_space(idx, dst_pid, master_nid, root_idx);
 
     Index_ID idx2 = node_internal[idx].get_next();
     I(node_internal[idx2].get_master_root_nid() == node_internal[idx].get_master_root_nid());
@@ -461,16 +462,18 @@ Index_ID LGraph_Base::get_space_output_pin(Index_ID master_nid, Index_ID start_n
   return 0;
 }
 
-Index_ID LGraph_Base::find_idx_from_pid_int(Index_ID nid, Port_ID pid) const {
-  I(node_internal[nid].is_root());
-  I(node_internal[nid].is_node_state());
-  if (node_internal[nid].get_dst_pid() == pid) {
-    return nid;
+Index_ID LGraph_Base::find_idx_from_pid_int(Index_ID idx, Port_ID pid) const {
+  I(node_internal[idx].is_root());
+  I(node_internal[idx].is_node_state());
+  if (likely(node_internal[idx].get_dst_pid() == pid)) { // Common case
+    return idx;
   }
+  Index_ID nid = node_internal[idx].get_master_root_nid();
+  idx = nid;
 
-  Index_ID idx = nid;
   while (true) {
-    if (node_internal[idx].get_dst_pid() == pid) {
+
+    if (node_internal[idx].get_dst_pid() == pid && node_internal[idx].is_root()) {
       return idx;
     }
 
@@ -478,9 +481,8 @@ Index_ID LGraph_Base::find_idx_from_pid_int(Index_ID nid, Port_ID pid) const {
       return 0;
     }
 
-    Index_ID idx2 = node_internal[idx].get_next();
-    I(node_internal[idx2].get_master_root_nid() == node_internal[idx].get_master_root_nid());
-    idx = idx2;
+    idx = node_internal[idx].get_next();
+    I(node_internal[idx].get_master_root_nid() == nid);
   }
 
   I(false);
@@ -494,21 +496,24 @@ Index_ID LGraph_Base::find_idx_from_pid(Index_ID nid, Port_ID pid) const {
   return pos;
 }
 
-Index_ID LGraph_Base::get_idx_from_pid(Index_ID nid, Port_ID pid) {
+Index_ID LGraph_Base::setup_idx_from_pid(Index_ID nid, Port_ID pid) {
   Index_ID pos = find_idx_from_pid_int(nid, pid);
-  if (pos) return pos;
+  if (pos) {
+    I(node_internal[pos].is_root());
+    return pos;
+  }
 
-  Index_ID root_nid;
-  Index_ID idx_new = get_space_output_pin(nid, pid, root_nid);
-  if (root_nid == 0) root_nid = idx_new;
+  Index_ID root_idx=0;
+  Index_ID idx_new = get_space_output_pin(nid, pid, root_idx);
+  if (root_idx == 0) root_idx = idx_new;
 
-  I(node_internal[root_nid].is_root());
+  I(node_internal[root_idx].is_root());
 
-  return idx_new;
+  return root_idx;
 }
 
 void LGraph_Base::set_bits_pid(Index_ID nid, Port_ID pid, uint16_t bits) {
-  Index_ID idx = get_idx_from_pid(nid, pid);
+  Index_ID idx = setup_idx_from_pid(nid, pid);
   set_bits(idx, bits);
 }
 
@@ -520,39 +525,39 @@ uint16_t LGraph_Base::get_bits_pid(Index_ID nid, Port_ID pid) const {
 }
 
 uint16_t LGraph_Base::get_bits_pid(Index_ID nid, Port_ID pid) {
-  Index_ID idx = get_idx_from_pid(nid, pid);
+  Index_ID idx = setup_idx_from_pid(nid, pid);
   return get_bits(idx);
 }
 
-Index_ID LGraph_Base::get_space_output_pin(Index_ID start_nid, Port_ID dst_pid, Index_ID &root_nid) {
+Index_ID LGraph_Base::get_space_output_pin(Index_ID start_nid, Port_ID dst_pid, Index_ID &root_idx) {
   I(node_internal[start_nid].is_root());
   I(node_internal[start_nid].is_node_state());
   if (node_internal[start_nid].has_space(false) && node_internal[start_nid].get_dst_pid() == dst_pid) {
-    root_nid = start_nid;
+    root_idx = start_nid;
     return start_nid;
   }
 
-  // Look for space
   Index_ID idx = start_nid;
-  root_nid     = 0;
+
   while (true) {
     if (node_internal[idx].get_dst_pid() == dst_pid) {
-      if (node_internal[idx].is_root()) root_nid = idx;
+      if (node_internal[idx].is_root()) root_idx = idx;
 
       if (node_internal[idx].has_space(false)) {
-        if (root_nid == 0) root_nid = start_nid;
 
-        if (root_nid != start_nid) I(node_internal[start_nid].get_dst_pid() != node_internal[root_nid].get_dst_pid());
-        I(node_internal[root_nid].is_root());
+        GI(root_idx != start_nid, node_internal[start_nid].get_dst_pid() != node_internal[root_idx].get_dst_pid());
+        I(node_internal[root_idx].is_root());
+
         return idx;
       }
     }
 
     if (node_internal[idx].is_last_state()) {
       Index_ID idx_new;
-      idx_new = create_node_space(idx, dst_pid, start_nid, root_nid);
-      if (root_nid == 0) root_nid = idx_new;
-      I(node_internal[root_nid].is_root());
+      idx_new = create_node_space(idx, dst_pid, start_nid, root_idx);
+      if (root_idx==0)
+        root_idx = idx_new;
+      I(node_internal[root_idx].is_root());
       return idx_new;
     }
 
@@ -595,41 +600,42 @@ Index_ID LGraph_Base::get_space_input_pin(Index_ID start_nid, Index_ID idx, bool
   return 0;
 }
 
-Index_ID LGraph_Base::add_edge_int(Index_ID dst_nid, Port_ID inp_pid, Index_ID src_nid, Port_ID dst_pid) {
+Index_ID LGraph_Base::add_edge_int(Index_ID dst_idx, Port_ID inp_pid, Index_ID src_idx, Port_ID dst_pid) {
   bool            sused;
   SEdge_Internal *sedge;
   LEdge_Internal *ledge;
 
-  I(node_internal.size() > src_nid);
-  I(node_internal.size() > dst_nid);
+  I(node_internal.size() > src_idx);
+  I(node_internal.size() > dst_idx);
 
   // Do not point to intermediate nodes which can be remapped, just root nodes
-  I(node_internal[dst_nid].is_master_root());
-  I(node_internal[src_nid].is_master_root());
+  I(node_internal[dst_idx].is_root());
+  I(node_internal[src_idx].is_root());
+
+  Index_ID src_nid = node_internal[src_idx].get_master_root_nid();
+  Index_ID dst_nid = node_internal[dst_idx].get_master_root_nid();
 
   // WARNING: Graph IO have alphabetical port IDs assigned to be mapped between
   // graphs. It should not use local port b
-  if (node_internal[src_nid].is_graph_io()) {
-    // dst_pid = node_internal[src_nid].get_dst_pid();
+  if (node_internal[src_idx].is_graph_io()) {
     dst_pid = 0;
   } else {
     I(node_internal[src_nid].get_dst_pid() == 0);
   }
 
-  if (node_internal[dst_nid].is_graph_io()) {
-    // inp_pid = node_internal[dst_nid].get_dst_pid();
+  if (node_internal[dst_idx].is_graph_io()) {
     inp_pid = 0;
   } else {
     I(node_internal[dst_nid].get_dst_pid() == 0);
   }
 
-  I(node_internal[dst_nid].is_node_state());
-  I(node_internal[src_nid].is_node_state());
+  I(node_internal[dst_idx].is_node_state());
+  I(node_internal[src_idx].is_node_state());
 
 #ifndef NDEBUG
   // Do not insert twice check
   for (const auto &v : out_edges(src_nid)) {
-    if (v.get_idx() == dst_nid && v.get_dst_pid() == dst_pid && v.get_inp_pid() == inp_pid) {
+    if (v.get_idx() == dst_idx && v.get_dst_pid() == dst_pid && v.get_inp_pid() == inp_pid) {
       I(false);  // edge added twice
     }
   }
@@ -637,13 +643,14 @@ Index_ID LGraph_Base::add_edge_int(Index_ID dst_nid, Port_ID inp_pid, Index_ID s
 
   Index_ID idx;
   //-----------------------
-  // ADD output edge in source (src_nid) with dst_pid to the destination (dst_nid) with inp_pid
-  Index_ID root_nid = 0;
-  idx               = get_space_output_pin(src_nid, dst_pid, root_nid);
-  I(root_nid != 0);
-  I(node_internal[root_nid].is_root());
+  // ADD output edge in source (src_nid) with dst_pid to the destination (dst_idx) with inp_pid
+  Index_ID root_idx = 0;
+  idx               = get_space_output_pin(src_nid, dst_pid, root_idx);
+  I(root_idx != 0);
+  I(node_internal[root_idx].is_root());
 
   int o = node_internal[idx].next_free_output_pos();
+
 
   sedge = (SEdge_Internal *)&node_internal[idx].sedge[o];
   sused = sedge->set(dst_nid, inp_pid, false);
@@ -651,7 +658,7 @@ Index_ID LGraph_Base::add_edge_int(Index_ID dst_nid, Port_ID inp_pid, Index_ID s
   if (sused) {
     node_internal[idx].inc_outputs();
   } else {
-    idx = get_space_output_pin(src_nid, idx, dst_pid, root_nid);
+    idx = get_space_output_pin(src_nid, idx, dst_pid, root_idx);
     o   = node_internal[idx].next_free_output_pos() - 2;
     node_internal[idx].inc_outputs(true);  // WARNING: Before next_free_output_pos to reserve space (decreasing insert)
 
@@ -704,13 +711,13 @@ Index_ID LGraph_Base::add_edge_int(Index_ID dst_nid, Port_ID inp_pid, Index_ID s
   }
 #endif
 
-  if (root_nid != src_nid) I(node_internal[src_nid].get_dst_pid() != node_internal[root_nid].get_dst_pid());
+  if (root_idx != src_nid) I(node_internal[src_nid].get_dst_pid() != node_internal[root_idx].get_dst_pid());
 
   if (node_internal[src_nid].get_dst_pid() == node_internal[out_idx].get_dst_pid() && src_nid != out_idx)
     I(!node_internal[out_idx].is_root());
 
-  I(node_internal[root_nid].is_root());
-  return root_nid;
+  I(node_internal[root_idx].is_root());
+  return root_idx;
 }
 
 void LGraph_Base::del_edge(const Edge &edge) { Node_Internal::get(&edge).del(edge); }
@@ -786,6 +793,7 @@ Edge_iterator LGraph_Base::out_edges(Index_ID idx) const {
   if (e == 0)  // empty list of outputs
     e = s;
 
+  I(Node_Internal::get(e).is_node_state());
   return Edge_iterator(s, e, false);
 }
 

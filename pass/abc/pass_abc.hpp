@@ -117,11 +117,11 @@ public:
   };
 
   struct Pick_ID {
-    Node_Pin driver;
+    Node_pin driver;
     int      offset;
     int      width;
 
-    Pick_ID(Node_Pin driver, int offset, int width)
+    Pick_ID(Node_pin driver, int offset, int width)
         : driver(driver)
         , offset(offset)
         , width(width) {
@@ -151,7 +151,7 @@ public:
     using value2idx     = absl::flat_hash_map<value_size, uint64_t>;
     using record        = absl::flat_hash_map<std::string, Abc_Obj_t *>;
 
-    using picks2pin     = std::map<Pick_ID, Node_Pin>;
+    using picks2pin     = std::map<Pick_ID, Node_pin>;
     using po_group      = std::map<index_offset, Abc_primary_output>;
     using pi_group      = std::map<index_offset, Abc_primary_input>;
     using pseduo_name   = std::map<index_offset, std::string>;
@@ -274,9 +274,9 @@ private:
 
   void gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
 
-  Node_Pin create_pick_operator(LGraph *g, const Node_Pin &driver, int offset, int width);
+  Node_pin create_pick_operator(LGraph *g, const Node_pin &driver, int offset, int width);
 
-  void connect_constant(LGraph *g, uint32_t value, uint32_t size, const Node_Pin &dst);
+  void connect_constant(LGraph *g, uint32_t value, uint32_t size, const Node_pin &dst);
 
   void conn_latch(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
 

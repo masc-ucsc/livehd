@@ -90,8 +90,8 @@ Index_ID Pass_dfg::create_binary(LGraph *g, Aux_tree *aux_tree, Index_ID op1, In
 
   g->node_type_set(dfnode, oper);
 
-  g->add_edge(Node_Pin(op1, 0, false), Node_Pin(dfnode, 0, true));
-  g->add_edge(Node_Pin(op2, 0, false), Node_Pin(dfnode, 0, true));
+  g->add_edge(Node_pin(op1, 0, false), Node_pin(dfnode, 0, true));
+  g->add_edge(Node_pin(op2, 0, false), Node_pin(dfnode, 0, true));
 
   return dfnode;
 }
@@ -102,7 +102,7 @@ Index_ID Pass_dfg::create_NOT(LGraph *g, Aux_tree *aux_tree, Index_ID op1) {
 
   g->node_type_set(dfnode, Not_Op);
 
-  g->add_edge(Node_Pin(op1, 0, false), Node_Pin(dfnode, 0, true));
+  g->add_edge(Node_pin(op1, 0, false), Node_pin(dfnode, 0, true));
 
   return dfnode;
 }

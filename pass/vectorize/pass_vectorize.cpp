@@ -84,16 +84,16 @@ void Pass_vectorize::collapse_reset(LGraph *g) {
 
     g->del_node(mux_idx);
 
-    Node_Pin src_d(mux_b_idx, mux_b_pid, false);
-    Node_Pin dst_d(flop_idx, Node_Type::get(SFlop_Op).get_input_match("D"), true);
+    Node_pin src_d(mux_b_idx, mux_b_pid, false);
+    Node_pin dst_d(flop_idx, Node_Type::get(SFlop_Op).get_input_match("D"), true);
     g->add_edge(src_d, dst_d);
 
-    Node_Pin src_val(mux_a_idx, mux_a_pid, false);
-    Node_Pin dst_val(flop_idx, Node_Type::get(SFlop_Op).get_input_match("Rval"), true);
+    Node_pin src_val(mux_a_idx, mux_a_pid, false);
+    Node_pin dst_val(flop_idx, Node_Type::get(SFlop_Op).get_input_match("Rval"), true);
     g->add_edge(src_val, dst_val);
 
-    Node_Pin src_r(reset_idx, reset_pid, false);
-    Node_Pin dst_r(flop_idx, Node_Type::get(SFlop_Op).get_input_match("R"), true);
+    Node_pin src_r(reset_idx, reset_pid, false);
+    Node_pin dst_r(flop_idx, Node_Type::get(SFlop_Op).get_input_match("R"), true);
     g->add_edge(src_r, dst_r);
   }
 }
@@ -116,7 +116,7 @@ void Pass_vectorize::collapse_join(LGraph *g) {
       src_pid = c.get_out_pin().get_pid();
     }
 
-    Node_Pin src(src_idx, src_pid, false);
+    Node_pin src(src_idx, src_pid, false);
 
     for(const auto &c : g->out_edges(idx)) {
       Index_ID dst_idx = c.get_idx();
@@ -124,7 +124,7 @@ void Pass_vectorize::collapse_join(LGraph *g) {
 
       g->del_edge(c);
 
-      Node_Pin dst(dst_idx, dst_pid, true);
+      Node_pin dst(dst_idx, dst_pid, true);
       g->add_edge(src, dst);
     }
     g->del_node(idx);

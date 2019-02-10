@@ -147,7 +147,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs, unordered_ma
     lgs[i]->add_graph_input("ginp", gio_node_begn.get_nid(), 0, 0);
     Index_ID src_nid = gio_node_begn.get_nid();
     Index_ID dst_nid = nname2nid_lgs[i][nname_begn_lgs[i]];
-    lgs[i]->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+    lgs[i]->add_edge(Node_pin(src_nid, 0, false), Node_pin(dst_nid, 0, true));
     fmt::print("graph input node nid:{}\n", src_nid);
 
     //Graph output
@@ -155,7 +155,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs, unordered_ma
     lgs[i]->add_graph_output("gout", gio_node_ed.get_nid(), 0, 0);
     src_nid = nid_end_lgs[i];
     dst_nid = gio_node_ed.get_nid();
-    lgs[i]->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+    lgs[i]->add_edge(Node_pin(src_nid, 0, false), Node_pin(dst_nid, 0, true));
   }
 
   update_ifs(lgs, nname2nid_lgs);
@@ -254,13 +254,13 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
     // III-1. connect if node to the begin of "true chunk" statement
     src_nid = name2id[w1st];
     dst_nid = name2id[w8th];
-    g->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+    g->add_edge(Node_pin(src_nid, 0, false), Node_pin(dst_nid, 0, true));
     fmt::print("if statement, connect src_node {} to dst_node {} ----- 1\n", src_nid, dst_nid);
     // III-2. connect if node to the begin of "false chunk" statement
     if(w9th != "null") {
       src_nid = name2id[w1st];
       dst_nid = name2id[w9th];
-      g->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+      g->add_edge(Node_pin(src_nid, 0, false), Node_pin(dst_nid, 0, true));
       fmt::print("if statement, connect src_node {} to dst_node {} ----- 2\n", src_nid, dst_nid);
     }
     // III-3. connect top of stack to end if node
@@ -268,7 +268,7 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
       src_nid = name2id[chain_stks[w8th].back()];
       fmt::print("chain_stks[w8th] back{}\n", chain_stks[w8th].back());
       dst_nid = name2id[w10th];
-      g->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+      g->add_edge(Node_pin(src_nid, 0, false), Node_pin(dst_nid, 0, true));
       fmt::print("if statement, connect src_node {} to dst_node {} ----- 3\n", src_nid, dst_nid);
     }
     if(w9th != "null") {
@@ -276,20 +276,20 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
         src_nid = name2id[chain_stks[w9th].back()];
         fmt::print("chain_stks[w9th] back{}\n", chain_stks[w9th].back());
         dst_nid = name2id[w10th];
-        g->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+        g->add_edge(Node_pin(src_nid, 0, false), Node_pin(dst_nid, 0, true));
         fmt::print("if statement, connect src_node {} to dst_node {} ----- 4\n", src_nid, dst_nid);
       }
     } else { // only one branch of if. EX.  K13  K30   63  169  if   tmp3  K15  null 'K13
       src_nid = name2id[w1st];
       dst_nid = name2id[w10th];
-      g->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+      g->add_edge(Node_pin(src_nid, 0, false), Node_pin(dst_nid, 0, true));
       fmt::print("if statement, connect src_node {} to dst_node {} ----- 5\n", src_nid, dst_nid);
     }
     // III-4. if it is an outer if statement, link w10th to w2nd
     if(w2nd != "null") {
       src_nid = name2id[w10th];
       dst_nid = name2id[w2nd];
-      g->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+      g->add_edge(Node_pin(src_nid, 0, false), Node_pin(dst_nid, 0, true));
       fmt::print("if statement, connect src_node {} to dst_node {} ----- 6\n", src_nid, dst_nid);
     }
     // III-5. figure out which stack w1st is belong to and push w10th into that stack
@@ -303,29 +303,29 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
     // I. True: connect for node to body
     src_nid = name2id[w1st];
     dst_nid = name2id[w8th];
-    g->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+    g->add_edge(Node_pin(src_nid, 0, false), Node_pin(dst_nid, 0, true));
     fmt::print("for statement, connect src_node {} to dst_node {}\n", src_nid, dst_nid);
     // II. False: connect for node to next event
     src_nid = name2id[w1st];
     dst_nid = name2id[w2nd];
-    g->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+    g->add_edge(Node_pin(src_nid, 0, false), Node_pin(dst_nid, 0, true));
     fmt::print("for statement, connect src_node {} to dst_node {}\n", src_nid, dst_nid);
   } else if(w6th == "while") {
     // I. connect while node to body
     src_nid = name2id[w1st];
     dst_nid = name2id[w8th];
-    g->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+    g->add_edge(Node_pin(src_nid, 0, false), Node_pin(dst_nid, 0, true));
     fmt::print("while statement, connect src_node {} to dst_node {}\n", src_nid, dst_nid);
 
     // II. False: connect while node to next event
     src_nid = name2id[w1st];
     dst_nid = name2id[w2nd];
-    g->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+    g->add_edge(Node_pin(src_nid, 0, false), Node_pin(dst_nid, 0, true));
     fmt::print("while statement, connect src_node {} to dst_node {}\n", src_nid, dst_nid);
   } else if(w6th == "::{") {
     src_nid = name2id[w1st];
     dst_nid = name2id[w2nd];
-    g->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+    g->add_edge(Node_pin(src_nid, 0, false), Node_pin(dst_nid, 0, true));
   } else if(w2nd == "null") { // no w2nd to create edge, only update chain_stks
     bool   belong_tops   = false;
     string target_vec_id = w1st;
@@ -344,7 +344,7 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
   } else if(w2nd != "null") { // normal edge connection: Kx->Ky, update chain_stks
     src_nid = name2id[w1st];
     dst_nid = name2id[w2nd];
-    g->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(dst_nid, 0, true));
+    g->add_edge(Node_pin(src_nid, 0, false), Node_pin(dst_nid, 0, true));
     fmt::print("normal case connection, connect src_node {} to dst_node {} ----- 5\n", src_nid, dst_nid);
 
     bool   belong_tops   = false;
@@ -430,9 +430,9 @@ void Inou_cfg::update_ifs(vector<LGraph *> &lgs, vector<map<string, Index_ID>> &
 
 void Inou_cfg::collect_fcall_info(LGraph *g, Index_ID new_node, const std::string &w7th, const std::string &w8th,
                                   const std::string &w9th) {
-  Index_ID pin_node1 = g->get_idx_from_pid(new_node, 1);
-  Index_ID pin_node2 = g->get_idx_from_pid(new_node, 2);
-  Index_ID pin_node3 = g->get_idx_from_pid(new_node, 3);
+  Index_ID pin_node1 = g->setup_idx_from_pid(new_node, 1);
+  Index_ID pin_node2 = g->setup_idx_from_pid(new_node, 2);
+  Index_ID pin_node3 = g->setup_idx_from_pid(new_node, 3);
   g->set_node_wirename(pin_node1, w7th.c_str());
   g->set_node_wirename(pin_node2, w8th.c_str());
   g->set_node_wirename(pin_node3, w9th.c_str());
@@ -453,15 +453,15 @@ void Inou_cfg::remove_fake_fcall(LGraph *g) {
       for(const auto &out : g->out_edges(idx)) {
         if(out.get_out_pin().get_pid() == 0) { // src_pid == 0
           Index_ID dst_nid = out.get_idx();
-          auto     pid1_wn = g->get_node_wirename(g->get_idx_from_pid(dst_nid, 1));
+          auto     pid1_wn = g->get_node_wirename(g->setup_idx_from_pid(dst_nid, 1));
           func_dcl_tab.insert(pid1_wn);
           fmt::print("push {} into func_dcl_tab\n", pid1_wn);
           break;
         }
       }
     } else if(g->node_type_get(idx).op == CfgFunctionCall_Op) {
-      auto pid2_wn = g->get_node_wirename(g->get_idx_from_pid(idx, 2));
-      auto pid3_wn = g->get_node_wirename(g->get_idx_from_pid(idx, 3));
+      auto pid2_wn = g->get_node_wirename(g->setup_idx_from_pid(idx, 2));
+      auto pid3_wn = g->get_node_wirename(g->setup_idx_from_pid(idx, 3));
       if(pid3_wn.empty()) { // oprd num = 1
         drive_tab.insert(pid2_wn);
         name2id[pid2_wn] = idx;

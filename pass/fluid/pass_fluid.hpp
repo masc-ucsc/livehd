@@ -13,21 +13,21 @@ class Pass_fluid_options_pack : public Options_pack {
 public:
 };
 
-class Node_Pin_P : public Node_Pin {
+class Node_pin_P : public Node_pin {
 public:
-  Node_Pin_P(Index_ID _nid, Port_ID _pid, bool _input)
-      : Node_Pin(_nid, _pid, _input) {
+  Node_pin_P(Index_ID _nid, Port_ID _pid, bool _input)
+      : Node_pin(_nid, _pid, _input) {
   }
 
-  Node_Pin_P(Node_Pin _node_pin)
-      : Node_Pin(_node_pin.get_nid(), _node_pin.get_pid(), _node_pin.is_input()) {
+  Node_pin_P(Node_pin _node_pin)
+      : Node_pin(_node_pin.get_nid(), _node_pin.get_pid(), _node_pin.is_input()) {
   }
 
-  Node_Pin_P()
-      : Node_Pin(-1, -1, false) {
+  Node_pin_P()
+      : Node_pin(-1, -1, false) {
   }
 
-  bool operator<(const Node_Pin &rhs) const {
+  bool operator<(const Node_pin &rhs) const {
     if(this->get_nid() < rhs.get_nid()) {
       return 1;
     } else if(this->get_nid() > rhs.get_nid())
@@ -39,7 +39,7 @@ public:
         return 0;
     }
   }
-  bool operator==(const Node_Pin &rhs) const {
+  bool operator==(const Node_pin &rhs) const {
     if(this->get_nid() != rhs.get_nid()) {
       return 0;
     } else { // equal nid
@@ -52,7 +52,7 @@ public:
     return;
   }
 };
-typedef std::vector<Node_Pin_P> Node_Pin_Vec;
+typedef std::vector<Node_pin_P> Node_pin_Vec;
 typedef std::vector<Index_ID>   Flop_Indx_Vec;
 
 typedef std::map<Index_ID, Flop_Indx_Vec>

@@ -10,13 +10,13 @@ Node:
   accessor:
     LGraph::get_node
 
-Node_Pin:
+Node_pin:
 
-  It is a pair coupling Node and Port
+  It is a pair coupling Node and Port. It can be either an driver (output) or an sink (input) pin.
 
 Edge:
 
-  An unidirectional link between two Node_Pin.
+  An unidirectional link between two Node_pin.
 
   constructor:
     LGraph::add_edge

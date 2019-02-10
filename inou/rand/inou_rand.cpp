@@ -57,19 +57,19 @@ void Inou_rand::tolg(Eprp_var &var) {
 }
 
 struct pin_pair_compare {
-  bool operator()(const std::pair<Node_Pin, Node_Pin> &lhs, const std::pair<Node_Pin, Node_Pin> &rhs) const {
-    if(lhs.first.get_nid() < rhs.first.get_nid())
+  bool operator()(const std::pair<Node_pin, Node_pin> &lhs, const std::pair<Node_pin, Node_pin> &rhs) const {
+    if(lhs.first.get_idx() < rhs.first.get_idx())
       return true;
 
-    if(lhs.first.get_nid() == rhs.first.get_nid() && lhs.first.get_pid() < rhs.first.get_pid())
+    if(lhs.first.get_idx() == rhs.first.get_idx() && lhs.first.get_pid() < rhs.first.get_pid())
       return true;
 
-    if(lhs.first.get_nid() == rhs.first.get_nid() && lhs.first.get_pid() < rhs.first.get_pid() &&
-       lhs.second.get_nid() < rhs.second.get_nid())
+    if(lhs.first.get_idx() == rhs.first.get_idx() && lhs.first.get_pid() < rhs.first.get_pid() &&
+       lhs.second.get_idx() < rhs.second.get_idx())
       return true;
 
-    if(lhs.first.get_nid() == rhs.first.get_nid() && lhs.first.get_pid() < rhs.first.get_pid() &&
-       lhs.second.get_nid() == rhs.second.get_nid() && lhs.second.get_pid() < rhs.second.get_pid())
+    if(lhs.first.get_idx() == rhs.first.get_idx() && lhs.first.get_pid() < rhs.first.get_pid() &&
+       lhs.second.get_idx() == rhs.second.get_idx() && lhs.second.get_pid() < rhs.second.get_pid())
       return true;
 
     return false;
@@ -112,7 +112,7 @@ std::vector<LGraph *> Inou_rand::do_tolg() {
 
   bm::bvector<> used_port;
 
-  std::set<std::pair<Node_Pin, Node_Pin>, struct pin_pair_compare> connections;
+  std::set<std::pair<Node_pin, Node_pin>, struct pin_pair_compare> connections;
 
   int i       = 0;
   int timeout = 0;
@@ -145,11 +145,11 @@ std::vector<LGraph *> Inou_rand::do_tolg() {
 
     Index_ID src_nid = created[rnd_created(rnd)];
 
-    Node_Pin dst_pin(dst_nid, dst_port, true);
-    Node_Pin src_pin(src_nid, rnd_4(rnd), false);
+    Node_pin dst_pin(dst_nid, dst_port, true);
+    Node_pin src_pin(src_nid, rnd_4(rnd), false);
 
     // prevent adding same edge twice
-    std::pair<Node_Pin, Node_Pin> conn(src_pin, dst_pin);
+    std::pair<Node_pin, Node_pin> conn(src_pin, dst_pin);
     if(connections.find(conn) == connections.end()) {
       g->add_edge(src_pin, dst_pin, rbits);
       connections.insert(conn);

@@ -273,7 +273,7 @@ bool Pass_punch::add_dest_instance(LGraph *g, std::string_view type, std::string
     g->set_node_instance_name(ins_idx, instance);
   }
 
-  g->add_edge(Node_Pin(wname_idx,0, false), Node_Pin(ins_idx, ins_input_pid, true), wname_bits);
+  g->add_edge(Node_pin(wname_idx,0, false), Node_pin(ins_idx, ins_input_pid, true), wname_bits);
 
   ins_g->close();
 
