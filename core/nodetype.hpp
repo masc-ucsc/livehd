@@ -169,6 +169,15 @@ public:
     return false;
   }
 
+  bool has_output(Port_ID pid) const {
+    return outputs.size() > pid || outputs.empty(); // no default outputs for blocks like Tech/subgraph....
+  }
+  bool has_input(Port_ID pid) const {
+    return inputs.size() > pid || inputs.empty(); // no default outputs for blocks like Tech/subgraph....
+  }
+  bool has_single_output() const { return outputs.size() == 1; }
+  bool has_single_input() const  { return inputs.size()  == 1; }
+
   bool is_pipelined() const { return pipelined; }  // Can create loops
 
   class _init {
@@ -252,12 +261,6 @@ public:
 class Node_Type_Join : public Node_Type {
 public:
   Node_Type_Join() : Node_Type("join", Join_Op, false) {
-    inputs.push_back("A");
-    inputs.push_back("B");
-    inputs.push_back("C");
-    inputs.push_back("D");
-    inputs.push_back("E");
-    inputs.push_back("F");
     outputs.push_back("Y");
   };
 };

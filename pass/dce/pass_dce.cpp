@@ -47,10 +47,10 @@ void Pass_dce::trans(LGraph *g) {
     output_used.set_bit(current);
 
     for(auto &c : g->inp_edges(current)) {
-      if(output_used.get_bit(c.get_out_pin().get_nid()))
+      if(output_used.get_bit(c.get_out_pin().get_idx()))
         continue;
 
-      pending.insert(c.get_out_pin().get_nid());
+      pending.insert(c.get_out_pin().get_idx());
     }
   }
 

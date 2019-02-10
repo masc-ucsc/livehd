@@ -43,9 +43,9 @@ void Live_stitcher::stitch(LGraph *nsynth, const std::set<Net_ID> &diffs) {
         name = nsynth->get_graph_output_name(idx);
 
       if (original->is_graph_input(name)) {
-        inp2originalid[idx] = original->get_graph_input(name).get_nid();
+        inp2originalid[idx] = original->get_graph_input(name).get_idx();
       } else if (original->is_graph_output(name)) {
-        out2originalid[idx] = original->get_graph_output(name).get_nid();
+        out2originalid[idx] = original->get_graph_output(name).get_idx();
       } else if (original->has_wirename(name)) {
         inp2originalid[idx] = original->get_node_id(name);
       } else {
@@ -73,15 +73,21 @@ void Live_stitcher::stitch(LGraph *nsynth, const std::set<Net_ID> &diffs) {
     if (!nsynth->is_graph_output(idx)) {
       for (auto &c : nsynth->inp_edges(idx)) {
         // if driver is in the delta region
-        if (nsynth2originalid.find(c.get_out_pin().get_nid()) != nsynth2originalid.end()) {
-          original->add_edge(Node_Pin(nsynth2originalid[c.get_out_pin().get_nid()], c.get_out_pin().get_pid(), false),
-                             Node_Pin(nsynth2originalid[c.get_inp_pin().get_nid()], c.get_inp_pin().get_pid(), true));
+        if (nsynth2originalid.find(nsynth->get_node(c.get_out_pin()).get_nid()) != nsynth2originalid.end()) {
+          auto dnode = original->get_node(nsynth2originalid[nsynth->get_node(c.get_out_pin()).get_nid()]);
+          auto snode = original->get_node(nsynth2originalid[nsynth->get_node(c.get_inp_pin()).get_nid()]);
+          auto dpin  = dnode.setup_driver_pin(c.get_out_pin().get_pid());
+          auto spin  = snode.setup_sink_pin(c.get_inp_pin().get_pid());
 
+          original->add_edge(dpin, spin);
         } else {
-          // FIXME: is there a case where I need to consider the out pid?
-          if (inp2originalid.find(idx) != inp2originalid.end())
-            original->add_edge(Node_Pin(inp2originalid[idx], 0, false),
-                               Node_Pin(nsynth2originalid[c.get_inp_pin().get_nid()], c.get_inp_pin().get_pid(), true));
+          if (inp2originalid.find(idx) != inp2originalid.end()) {
+            auto dnode = original->get_node(inp2originalid[idx]);
+            auto snode = original->get_node(nsynth2originalid[nsynth->get_node(c.get_inp_pin()).get_nid()]);
+            auto spin  = snode.setup_sink_pin(c.get_inp_pin().get_pid());
+            auto dpin  = dnode.setup_driver_pin(); // FIXME: is there a case where I need to consider the out pid?
+            original->add_edge(dpin, spin);
+          }
         }
       }
     } else {
@@ -89,8 +95,8 @@ void Live_stitcher::stitch(LGraph *nsynth, const std::set<Net_ID> &diffs) {
         // global output
         // FIXME: I need to consider the inp PID
         for (auto &c : nsynth->inp_edges(idx)) {
-          original->add_edge(Node_Pin(nsynth2originalid[c.get_out_pin().get_nid()], c.get_out_pin().get_pid(), false),
-                             Node_Pin(out2originalid[idx], out2originalid[idx], true));
+          original->add_edge(Node_pin(nsynth2originalid[nsynth->get_node(c.get_out_pin()).get_nid()], c.get_out_pin().get_pid(), false),
+                             Node_pin(out2originalid[idx], out2originalid[idx], true));
         }
       } else {
         // invariant boundary
@@ -98,7 +104,7 @@ void Live_stitcher::stitch(LGraph *nsynth, const std::set<Net_ID> &diffs) {
         if (!original->has_wirename(name)) continue;
         Index_ID oidx = original->get_node_id(name);
         for (auto &edge : original->out_edges(oidx)) {
-          original->add_edge(Node_Pin(inp2originalid[idx], edge.get_out_pin().get_pid(), false), edge.get_inp_pin());
+          original->add_edge(Node_pin(inp2originalid[idx], edge.get_out_pin().get_pid(), false), edge.get_inp_pin());
 
           original->del_edge(edge);
         }

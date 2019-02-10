@@ -194,13 +194,76 @@ Index_ID LGraph::add_graph_output(std::string_view str, Index_ID nid, uint16_t b
 
 Node LGraph::create_node() {
   Index_ID nid = create_node_int();
+  return Node(this, nid);
+}
+
+Node LGraph::create_node(Node_Type_Op op) {
+  Index_ID nid = create_node_int();
+  node_type_set(nid, op);
 
   return Node(this, nid);
 }
 
-Node LGraph::get_node(Index_ID nid) { return Node(this, nid); }
+Node LGraph::create_node(Node_Type_Op op, uint16_t bits) {
 
-const ConstNode LGraph::get_node(Index_ID nid) const { return ConstNode(this, nid); }
+  auto node = create_node(op);
+  I(node_type_get(node.get_nid()).has_single_output());
+
+  auto pin0 = node.setup_driver_pin();
+  set_bits(pin0,bits);
+
+  return node;
+}
+
+Node LGraph::create_node_u32(uint32_t value, uint16_t bits) {
+  Index_ID nid = create_node_int();
+  node_u32type_set(nid, value);
+
+  Node node(this,nid);
+  auto pin0 = node.setup_driver_pin();
+  set_bits(pin0,bits);
+
+  return node;
+}
+
+Node LGraph::create_node_const(std::string_view value) {
+  Index_ID nid = create_node_int();
+  node_const_type_set_string(nid, value);
+
+  Node node(this,nid);
+
+  return node;
+}
+
+Node LGraph::create_node_const(std::string_view value, uint16_t bits) {
+  auto node = create_node_const(value);
+
+  auto pin0 = node.setup_driver_pin();
+  set_bits(pin0,bits);
+
+  return node;
+}
+
+Node LGraph::get_node(Index_ID nid) { return Node(this, nid); }
+ConstNode LGraph::get_node(Index_ID nid) const { return ConstNode(this, nid); }
+
+Node LGraph::get_node(const Node_pin &pin) {
+  if (pin.get_pid()==0)
+    return Node(this, pin.get_idx());
+
+  Index_ID nid = node_internal[pin.get_idx()].get_nid(); // since it is root, no need to call the slower get_master_root_nid()
+  I(node_internal[nid].is_master_root());
+  return Node(this, nid);
+}
+
+ConstNode LGraph::get_node(const Node_pin &pin) const {
+  if (pin.get_pid()==0)
+    return ConstNode(this, pin.get_idx());
+
+  Index_ID nid = node_internal[pin.get_idx()].get_nid(); // since it is root, no need to call the slower get_master_root_nid()
+  I(node_internal[nid].is_master_root());
+  return ConstNode(this, nid);
+}
 
 Node LGraph::get_dest_node(const Edge &edge) {
   Index_ID idx = edge.get_self_idx();

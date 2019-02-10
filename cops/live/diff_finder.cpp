@@ -157,7 +157,7 @@ void Diff_finder::find_fwd_boundaries(Graph_Node &start_boundary, std::set<Graph
   for (auto &out : current->out_edges(idx)) {
     // FIXME: what other cases do we need to take into account for propagation?
     if (current->node_type_get(idx).op == SubGraph_Op && out.get_out_pin().get_pid() != pid) continue;
-    Index_ID next = out.get_inp_pin().get_nid();
+    Index_ID next = current->get_node(out.get_inp_pin()).get_nid();
 
     absl::flat_hash_set<uint32_t> relevant_bits;
     int found = resolve_bit_fwd(current, next, start_boundary.bit, out.get_inp_pin().get_pid(), relevant_bits);
@@ -177,7 +177,7 @@ void Diff_finder::find_fwd_boundaries(Graph_Node &start_boundary, std::set<Graph
 }
 
 bool Diff_finder::is_user_def(LGraph *current, Index_ID idx, Port_ID pid) const {
-  Index_ID port_id = current->get_idx_from_pid(idx, pid);
+  Index_ID port_id = current->setup_idx_from_pid(idx, pid);
   return current->is_graph_output(idx) || current->is_graph_input(idx) || (current->get_wid(port_id) != 0);
 }
 
@@ -317,7 +317,7 @@ bool Diff_finder::compare_cone(const Graph_Node &start_boundary, const Graph_Nod
     int found_bit = resolve_bit(current, idx, start_boundary.bit, inp.get_inp_pin().get_pid(), useful_bits);
     if (found_bit == -1)  // do not propagate through this pid
       continue;
-    Index_ID previous = inp.get_out_pin().get_nid();
+    Index_ID previous = current->get_node(inp.get_out_pin()).get_nid();
 
     // for subgraphs, only propagate through the input we exited through
     if (pid != inp.get_inp_pin().get_pid() && start_boundary.module->node_type_get(start_boundary.idx).op == SubGraph_Op) continue;
@@ -334,19 +334,19 @@ bool Diff_finder::compare_cone(const Graph_Node &start_boundary, const Graph_Nod
       for (auto &cinp : current_original->inp_edges(original_idx)) {
         if (cinp.get_inp_pin().get_pid() == n_pid) {
           if (!found) {
-            previous_original = (cinp.get_out_pin().get_nid());
+            previous_original = current->get_node(cinp.get_out_pin()).get_nid();
           } else {
             // there is more than one edge to the same pid, like Sum
             // let's try to figure out which one we need to follow
             if (previous == previous_original)
               continue;
-            else if (previous == (cinp.get_out_pin().get_nid())) {
-              previous_original = (cinp.get_out_pin().get_nid());
+            else if (previous == current_original->get_node(cinp.get_out_pin()).get_nid()) {
+              previous_original = current->get_node(cinp.get_out_pin()).get_nid();
             } else if (std::abs(static_cast<int64_t>(previous) - static_cast<int64_t>(previous_original)) <
-                       std::abs(static_cast<int64_t>(previous) - static_cast<int64_t>(cinp.get_out_pin().get_nid()))) {
-              previous_original = (cinp.get_out_pin().get_nid());
+                       std::abs(static_cast<int64_t>(previous) - static_cast<int64_t>(current->get_node(cinp.get_out_pin()).get_nid()))) {
+              previous_original = current->get_node(cinp.get_out_pin()).get_nid();
             } else if (std::abs(static_cast<int64_t>(previous) - static_cast<int64_t>(previous_original)) >
-                       std::abs(static_cast<int64_t>(previous) - static_cast<int64_t>(cinp.get_out_pin().get_nid()))) {
+                       std::abs(static_cast<int64_t>(previous) - static_cast<int64_t>(current->get_node(cinp.get_out_pin()).get_nid()))) {
               continue;
             } else {
               // is there any way to distinguish?
@@ -438,7 +438,7 @@ void Diff_finder::add_ios_up(LGraph *module, Index_ID nid, Name2graph_type &name
           return;
         }
         pnid = nparent->add_graph_input(wire_name, 0, module->get_bits(nid), module->get_offset(nid));
-        nparent->add_edge(Node_Pin(pnid, 0, false), Node_Pin(idx_in_parent, nid, true));
+        nparent->add_edge(Node_pin(pnid, 0, false), Node_pin(idx_in_parent, nid, true));
       }
 
     } else {
@@ -452,7 +452,7 @@ void Diff_finder::add_ios_up(LGraph *module, Index_ID nid, Name2graph_type &name
           return;
         }
         pnid = nparent->add_graph_output(wire_name, 0, module->get_bits(nid), module->get_offset(nid));
-        nparent->add_edge(Node_Pin(idx_in_parent, nid, false), Node_Pin(pnid, 0, true));
+        nparent->add_edge(Node_pin(idx_in_parent, nid, false), Node_pin(pnid, 0, true));
       }
     }
     add_ios_up(nparent, pnid, name2graph);
@@ -493,7 +493,7 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
                                           original->get_offset(node.idx));
       } else {
         // input already created
-        idx = new_module->get_graph_input(original->get_graph_input_name(node.idx)).get_nid();
+        idx = new_module->get_graph_input(original->get_graph_input_name(node.idx)).get_idx();
       }
     } else if (original->is_graph_output(node.idx)) {
       if (!new_module->is_graph_output(original->get_graph_output_name(node.idx))) {
@@ -501,7 +501,7 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
                                            original->get_offset(node.idx));
       } else {
         // output already created
-        idx = new_module->get_graph_output(original->get_graph_output_name(node.idx)).get_nid();
+        idx = new_module->get_graph_output(original->get_graph_output_name(node.idx)).get_idx();
       }
     } else {
       idx = new_module->create_node().get_nid();
@@ -548,20 +548,20 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
     visited.insert(std::make_pair(node.module, node.idx));
 
     for (auto &inp : node.module->inp_edges(node.idx)) {
-      if (old2newidx[node.module].find(inp.get_out_pin().get_nid()) != old2newidx[node.module].end()) {
+      if (old2newidx[node.module].find(node.module->get_node(inp.get_out_pin()).get_nid()) != old2newidx[node.module].end()) {
         // input included in delta
         Port_ID outpid = inp.get_out_pin().get_pid();
         Port_ID inppid = inp.get_inp_pin().get_pid();
-        if (new_module->is_graph_input(old2newidx[node.module][inp.get_out_pin().get_nid()]) ||
-            new_module->is_graph_output(old2newidx[node.module][inp.get_out_pin().get_nid()])) {
+        if (new_module->is_graph_input(old2newidx[node.module][node.module->get_node(inp.get_out_pin()).get_nid()]) ||
+            new_module->is_graph_output(old2newidx[node.module][node.module->get_node(inp.get_out_pin()).get_nid()])) {
           outpid = 0;
         }
         if (new_module->is_graph_input(idx) || new_module->is_graph_output(idx)) {
           inppid = 0;
         }
-        if (new_module->node_type_get(old2newidx[node.module][inp.get_inp_pin().get_nid()]).op == SubGraph_Op) {
+        if (new_module->node_type_get(old2newidx[node.module][node.module->get_node(inp.get_inp_pin()).get_nid()]).op == SubGraph_Op) {
           // edge load is a subgraph
-          const auto subgraph_name = new_module->get_subgraph_name(old2newidx[node.module][inp.get_inp_pin().get_nid()]);
+          const auto subgraph_name = new_module->get_subgraph_name(old2newidx[node.module][node.module->get_node(inp.get_inp_pin()).get_nid()]);
           assert(name2graph.find(subgraph_name) != name2graph.end());
           LGraph * nsubgraph = name2graph[subgraph_name];
           LGraph * osubgraph = LGraph::open(subgraph_name, node.module->get_path());
@@ -575,9 +575,9 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
             continue;
           }
         }
-        if (new_module->node_type_get(old2newidx[node.module][inp.get_out_pin().get_nid()]).op == SubGraph_Op) {
+        if (new_module->node_type_get(old2newidx[node.module][node.module->get_node(inp.get_out_pin()).get_nid()]).op == SubGraph_Op) {
           // edge driver is a subgraph
-          const auto subgraph_name = new_module->get_subgraph_name(old2newidx[node.module][inp.get_out_pin().get_nid()]);
+          const auto subgraph_name = new_module->get_subgraph_name(old2newidx[node.module][node.module->get_node(inp.get_out_pin()).get_nid()]);
           assert(name2graph.find(subgraph_name) != name2graph.end());
           LGraph * nsubgraph = name2graph[subgraph_name];
           LGraph * osubgraph = LGraph::open(subgraph_name, node.module->get_path());
@@ -593,7 +593,7 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
 
             // driver submodule is present in delta, but driver pin is not,
             // promote load input to module input
-            Index_ID name_idx = node.module->get_idx_from_pid(inp.get_out_pin().get_nid(), inp.get_out_pin().get_pid());
+            Index_ID name_idx = node.module->setup_idx_from_pid(node.module->get_node(inp.get_out_pin()).get_nid(), inp.get_out_pin().get_pid());
             assert(osubgraph->get_graph_output_nid_from_pid(inp.get_out_pin().get_pid()));
             assert(!new_module->is_graph_output(osubgraph->get_graph_output_name_from_pid(inp.get_inp_pin().get_pid())));
 
@@ -601,7 +601,7 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
             if (new_module->is_graph_input(osubgraph->get_graph_output_name_from_pid(inp.get_out_pin().get_pid()))) {
               // node has previously been promoted
               inp_id =
-                  new_module->get_graph_input(osubgraph->get_graph_output_name_from_pid(inp.get_out_pin().get_pid())).get_nid();
+                  new_module->get_graph_input(osubgraph->get_graph_output_name_from_pid(inp.get_out_pin().get_pid())).get_idx();
             } else {
               inp_id = new_module->add_graph_input(
                   osubgraph->get_graph_output_name_from_pid(inp.get_out_pin().get_pid()), 0,
@@ -610,17 +610,17 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
               assert(old2newidx[node.module].find(name_idx) == old2newidx[node.module].end());
               old2newidx[node.module][name_idx] = inp_id;
             }
-            new_module->add_edge(Node_Pin(inp_id, 0, false), Node_Pin(idx, inppid, true));
+            new_module->add_edge(Node_pin(inp_id, 0, false), Node_pin(idx, inppid, true));
             continue;
           }
         }
-        new_module->add_edge(Node_Pin(old2newidx[node.module][inp.get_out_pin().get_nid()], outpid, false),
-                             Node_Pin(idx, inppid, true));
+        new_module->add_edge(Node_pin(old2newidx[node.module][node.module->get_node(inp.get_out_pin()).get_nid()], outpid, false),
+                             Node_pin(idx, inppid, true));
 
       } else {
         Port_ID subgraph_inpid = inp.get_inp_pin().get_pid();
         if (node.module->node_type_get(node.idx).op == SubGraph_Op) {
-          const auto subgraph_name = new_module->get_subgraph_name(old2newidx[node.module][inp.get_inp_pin().get_nid()]);
+          const auto subgraph_name = new_module->get_subgraph_name(old2newidx[node.module][node.module->get_node(inp.get_inp_pin()).get_nid()]);
           assert(name2graph.find(subgraph_name) != name2graph.end());
           LGraph *osubgraph = LGraph::open(subgraph_name, node.module->get_path());
           LGraph *nsubgraph = name2graph[subgraph_name];
@@ -637,23 +637,23 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
         }
 
         // FIXME refactor to reduce code replication
-        if (node.module->node_type_get(inp.get_out_pin().get_nid()).op == U32Const_Op) {
+        if (node.module->node_type_get(node.module->get_node(inp.get_out_pin()).get_nid()).op == U32Const_Op) {
           // node not included but simple constant
           Index_ID const_id = new_module->create_node().get_nid();
-          new_module->node_u32type_set(const_id, node.module->node_value_get(inp.get_out_pin().get_nid()));
+          new_module->node_u32type_set(const_id, node.module->node_value_get(node.module->get_node(inp.get_out_pin()).get_nid()));
           if (new_module->is_graph_output(idx)) {
-            new_module->add_edge(Node_Pin(const_id, 0, false), Node_Pin(idx, idx, true));
+            new_module->add_edge(Node_pin(const_id, 0, false), Node_pin(idx, idx, true));
           } else {
-            new_module->add_edge(Node_Pin(const_id, 0, false), Node_Pin(idx, subgraph_inpid, true));
+            new_module->add_edge(Node_pin(const_id, 0, false), Node_pin(idx, subgraph_inpid, true));
           }
-        } else if (node.module->node_type_get(inp.get_out_pin().get_nid()).op == StrConst_Op) {
+        } else if (node.module->node_type_get(node.module->get_node(inp.get_out_pin()).get_nid()).op == StrConst_Op) {
           // node not included but simple constant
           Index_ID const_id = new_module->create_node().get_nid();
-          new_module->node_const_type_set(const_id, node.module->node_const_value_get(inp.get_out_pin().get_nid()));
+          new_module->node_const_type_set(const_id, node.module->node_const_value_get(node.module->get_node(inp.get_out_pin()).get_nid()));
           if (new_module->is_graph_output(idx)) {
-            new_module->add_edge(Node_Pin(const_id, 0, false), Node_Pin(idx, idx, true));
+            new_module->add_edge(Node_pin(const_id, 0, false), Node_pin(idx, idx, true));
           } else {
-            new_module->add_edge(Node_Pin(const_id, 0, false), Node_Pin(idx, subgraph_inpid, true));
+            new_module->add_edge(Node_pin(const_id, 0, false), Node_pin(idx, subgraph_inpid, true));
           }
 
         } else {
@@ -663,7 +663,7 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
             continue;
           }
 
-          Index_ID name_idx = node.module->get_idx_from_pid(inp.get_out_pin().get_nid(), inp.get_out_pin().get_pid());
+          Index_ID name_idx = node.module->setup_idx_from_pid(node.module->get_node(inp.get_out_pin()).get_nid(), inp.get_out_pin().get_pid());
           assert(node.module->get_wid(name_idx) != 0);
           Index_ID inp_id =
               new_module->add_graph_input(node.module->get_node_wirename(name_idx), 0, node.module->get_bits(name_idx), 0);
@@ -671,9 +671,9 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
           assert(old2newidx[node.module].find(name_idx) == old2newidx[node.module].end());
           old2newidx[node.module][name_idx] = inp_id;
           if (new_module->is_graph_output(idx)) {
-            new_module->add_edge(Node_Pin(inp_id, 0, false), Node_Pin(idx, idx, true));
+            new_module->add_edge(Node_pin(inp_id, 0, false), Node_pin(idx, idx, true));
           } else {
-            new_module->add_edge(Node_Pin(inp_id, 0, false), Node_Pin(idx, subgraph_inpid, true));
+            new_module->add_edge(Node_pin(inp_id, 0, false), Node_pin(idx, subgraph_inpid, true));
           }
         }
       }
@@ -696,9 +696,11 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
       if (node.module->is_graph_input(node.idx) || node.module->is_graph_output(node.idx)) {
         continue;
       }
-      if (old2newidx[node.module].find(out.get_inp_pin().get_nid()) == old2newidx[node.module].end()) {
+      if (old2newidx[node.module].find(node.module->get_node(out.get_inp_pin()).get_nid()) == old2newidx[node.module].end()) {
         fmt::print("module {}, from cell {}, to_cell {}, from_pin {}, to pin {}\n", node.module->get_name(),
-                   out.get_out_pin().get_nid(), out.get_inp_pin().get_nid(), out.get_out_pin().get_pid(),
+                   node.module->get_node(out.get_out_pin()).get_nid(),
+                   node.module->get_node(out.get_inp_pin()).get_nid(),
+                   out.get_out_pin().get_pid(),
                    out.get_inp_pin().get_pid());
 
         std::string_view wirename;
@@ -711,20 +713,20 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
           // wire does not have user defined name
           wire_id[new_module] = wire_id[new_module] + 1;
           wirename            = absl::StrCat("__lgraph__generated_wire_", new_module->get_name(), "__driver__",
-                                  std::to_string(out.get_inp_pin().get_nid()), "__pin__",
+                                  std::to_string(node.module->get_node(out.get_inp_pin()).get_nid()), "__pin__",
                                   std::to_string(out.get_inp_pin().get_pid()), "__id__", std::to_string(wire_id[new_module]));
           assert(!new_module->is_graph_output(wirename));
         }
 
         Index_ID out_id = new_module->add_graph_output(wirename, 0, node.module->get_bits(node.idx), 0);
         add_ios_up(new_module, out_id, name2graph);
-        old2newidx[node.module][out.get_out_pin().get_nid()] = out_id;
+        old2newidx[node.module][node.module->get_node(out.get_out_pin()).get_nid()] = out_id;
         if (new_module->is_graph_input(idx) || new_module->is_graph_output(idx)) {
-          new_module->add_edge(Node_Pin(idx, 0, false), Node_Pin(out_id, 0, true));
+          new_module->add_edge(Node_pin(idx, 0, false), Node_pin(out_id, 0, true));
         } else {
           new_module->add_edge(
-              // Node_Pin(idx, out.get_out_pin().get_pid(), false),
-              Node_Pin(idx, out.get_out_pin().get_pid(), false), Node_Pin(out_id, 0, true));
+              // Node_pin(idx, out.get_out_pin().get_pid(), false),
+              Node_pin(idx, out.get_out_pin().get_pid(), false), Node_pin(out_id, 0, true));
         }
 
         // only one output per node is needed
@@ -779,7 +781,7 @@ void Diff_finder::generate_delta(const std::string &modified_lgdb, const std::st
         }
 
         for (Port_ID pid : out_pids) {
-          Index_ID idx = current->get_idx_from_pid(ridx, pid);
+          Index_ID idx = current->setup_idx_from_pid(ridx, pid);
 
           if (!is_user_def(current, ridx, pid)) continue;
 

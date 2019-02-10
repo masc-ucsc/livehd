@@ -6,6 +6,7 @@
 #include "lgedgeiter.hpp"
 #include "lgyosys_dump.hpp"
 
+// FIXME: In attributes Attr_type_pin<RTLIL::Wire *> pin2
 RTLIL::Wire *Lgyosys_dump::get_wire(Index_ID idx, Port_ID pid, bool can_fail = false) {
   // std::pair<Index_ID,Port_ID> nid_pid = std::make_pair(inp_edge.get_idx(), inp_edge.get_out_pin().get_pid());
   std::pair<Index_ID, Port_ID> nid_pid = std::make_pair(idx, pid);
@@ -295,7 +296,7 @@ void Lgyosys_dump::create_subgraph(const LGraph *g, RTLIL::Module *module, Index
   }
   for(const auto &c : g->out_edges(idx)) {
     auto  port = subgraph->get_graph_output_name_from_pid(c.get_out_pin().get_pid());
-    RTLIL::Wire *output = get_wire(g->get_master_nid(c.get_out_pin().get_nid()), c.get_out_pin().get_pid());
+    RTLIL::Wire *output = get_wire(g->get_node(c.get_out_pin()).get_nid(), c.get_out_pin().get_pid());
     new_cell->setPort(absl::StrCat("\\", port).c_str(), output);
   }
 }
@@ -374,8 +375,8 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module *module) {
     } else if(g->node_type_get(idx).op == StrConst_Op) {
       bool blackbox_idx = 0;
       for(const auto &c : g->out_edges(idx)) {
-        if (g->node_type_get(c.get_inp_pin().get_nid()).op == BlackBox_Op) {
-          blackbox_idx = c.get_inp_pin().get_nid();
+        if (g->node_type_get(g->get_node(c.get_inp_pin()).get_nid()).op == BlackBox_Op) {
+          blackbox_idx = g->get_node(c.get_inp_pin()).get_nid();
         }else{
           I(!blackbox_idx); // if blackbox, always blackbox argument
         }
@@ -406,11 +407,11 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module *module) {
           continue;
 
         visited_out_pids.insert(edge.get_out_pin().get_pid());
-        uint16_t out_size = g->get_bits(edge.get_out_pin().get_nid());
+        uint16_t out_size = g->get_bits(edge.get_out_pin());
 
         std::string full_name;
-        if(g->get_wid(edge.get_out_pin().get_nid()) != 0) {
-          full_name = absl::StrCat("\\", g->get_node_wirename(edge.get_out_pin().get_nid()));
+        if(g->get_wid(edge.get_out_pin().get_idx()) != 0) {
+          full_name = absl::StrCat("\\", g->get_node_wirename(edge.get_out_pin().get_idx()));
         }else if(edge.get_out_pin().get_pid() < tcell->n_outs()) {
           full_name = absl::StrCat("\\", name.str().substr(1), tcell->get_name(edge.get_out_pin().get_pid()));
         }else{
@@ -430,14 +431,14 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module *module) {
 
         visited_out_pids.insert(edge.get_out_pin().get_pid());
 
-        RTLIL::Wire *new_wire = module->addWire(next_id(g), g->get_bits(edge.get_out_pin().get_nid()));
+        RTLIL::Wire *new_wire = module->addWire(next_id(g), g->get_bits(edge.get_out_pin()));
         cell_output_map[std::make_pair(idx, edge.get_out_pin().get_pid())] = new_wire;
         mem_output_map[idx].push_back(RTLIL::SigChunk(new_wire));
       }
       continue;
     } else if(g->node_type_get(idx).op == BlackBox_Op) {
       for(auto &edge : g->out_edges(idx)) {
-        RTLIL::Wire *new_wire = module->addWire(next_id(g), g->get_bits(edge.get_out_pin().get_nid()));
+        RTLIL::Wire *new_wire = module->addWire(next_id(g), g->get_bits(edge.get_out_pin()));
         cell_output_map[std::make_pair(idx, edge.get_out_pin().get_pid())] = new_wire;
       }
       continue;
@@ -696,9 +697,10 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       uint32_t width      = 0;
       bool     has_inputs = false;
       for(const auto &c : g->inp_edges(idx)) {
-        RTLIL::Wire *join                       = get_wire(c.get_out_pin().get_nid(), c.get_out_pin().get_pid());
+        RTLIL::Wire *join                       = get_wire(g->get_node(c.get_out_pin()).get_nid(), c.get_out_pin().get_pid());
         joined_wires[c.get_inp_pin().get_pid()] = RTLIL::SigChunk(join);
         width += join->width;
+//HERE: idx=16 
         has_inputs = true;
       }
 
@@ -706,6 +708,15 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         continue;
       }
       assert(cell_output_map.find(std::make_pair(idx, 0))!=cell_output_map.end());
+#ifndef NDEBUG
+      if(width != (uint32_t)(cell_output_map[std::make_pair(idx, 0)]->width)) {
+        fmt::print("dest_name:{} idx:{} w:{} | joined_width:{}\n"
+            ,cell_output_map[std::make_pair(idx, 0)]->name.c_str()
+            ,idx
+            ,cell_output_map[std::make_pair(idx, 0)]->width
+            ,width);
+      }
+#endif
       assert(width == (uint32_t)(cell_output_map[std::make_pair(idx, 0)]->width));
       module->connect(cell_output_map[std::make_pair(idx, 0)], RTLIL::SigSpec(joined_wires));
 
@@ -1085,8 +1096,8 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         log("ports size don't match a=%d, b=%d, y=%d\n", aport->width, bport->width,
             cell_output_map[std::make_pair(idx, 0)]->width);
       }
-      assert(aport->width == (cell_output_map[std::make_pair(idx, 0)]->width));
-      assert(bport->width == (cell_output_map[std::make_pair(idx, 0)]->width));
+      assert(aport->width <= (cell_output_map[std::make_pair(idx, 0)]->width));
+      assert(bport->width <= (cell_output_map[std::make_pair(idx, 0)]->width));
 
       module->addMux(next_id(g), aport, bport, sel, cell_output_map[std::make_pair(idx, 0)]);
       break;
@@ -1135,7 +1146,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
           log_error("I could not find a port associated with out pin %hu\n", c.get_out_pin().get_pid());
 
         auto port = tcell->get_output_name(c.get_out_pin().get_pid());
-        RTLIL::Wire *output = get_wire(c.get_out_pin().get_nid(), c.get_out_pin().get_pid());
+        RTLIL::Wire *output = get_wire(g->get_node(c.get_out_pin()).get_nid(), c.get_out_pin().get_pid());
         assert(output);
         new_cell->setPort(absl::StrCat("\\", port).c_str(), output);
       }

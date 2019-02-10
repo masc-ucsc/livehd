@@ -12,21 +12,21 @@ class Pass_gvn_pre_options_pack : public Options_pack {
 public:
 };
 
-class Node_Pin_Plus : public Node_Pin {
+class Node_pin_Plus : public Node_pin {
 public:
-  Node_Pin_Plus(Index_ID _nid, Port_ID _pid, bool _input)
-      : Node_Pin(_nid, _pid, _input) {
+  Node_pin_Plus(Index_ID _nid, Port_ID _pid, bool _input)
+      : Node_pin(_nid, _pid, _input) {
   }
 
-  Node_Pin_Plus(Node_Pin _node_pin)
-      : Node_Pin(_node_pin.get_nid(), _node_pin.get_pid(), false) {
+  Node_pin_Plus(Node_pin _node_pin)
+      : Node_pin(_node_pin.get_nid(), _node_pin.get_pid(), false) {
   }
 
-  Node_Pin_Plus()
-      : Node_Pin(-1, -1, false) {
+  Node_pin_Plus()
+      : Node_pin(-1, -1, false) {
   }
 
-  bool operator<(const Node_Pin &rhs) const {
+  bool operator<(const Node_pin &rhs) const {
     if(this->get_nid() < rhs.get_nid()) {
       return 1;
     } else if(this->get_nid() > rhs.get_nid())
@@ -38,7 +38,7 @@ public:
         return 0;
     }
   }
-  bool operator==(const Node_Pin &rhs) const {
+  bool operator==(const Node_pin &rhs) const {
     if(this->get_nid() != rhs.get_nid()) {
       return 0;
     } else { // equal nid
@@ -52,16 +52,16 @@ public:
   }
 };
 
-typedef std::vector<Node_Pin_Plus> Node_Pin_Vec;
+typedef std::vector<Node_pin_Plus> Node_pin_Vec;
 class Expression_Node {
 public:
   enum task_enum { build_sets_enum, insertion_enum, elimination_enum };
   Node_Type_Op node_type_op;
-  //  Node_Pin_Plus node_pin;
-  Node_Pin_Vec node_pin_vec;
+  //  Node_pin_Plus node_pin;
+  Node_pin_Vec node_pin_vec;
   Expression_Node(
-      // Node_Pin_Plus _node_pin= Node_Pin_Plus(-1, -1, false),
-      Node_Type_Op _node_type_op = Invalid_Op, Node_Pin_Vec _node_pin_vec = Node_Pin_Vec())
+      // Node_pin_Plus _node_pin= Node_pin_Plus(-1, -1, false),
+      Node_Type_Op _node_type_op = Invalid_Op, Node_pin_Vec _node_pin_vec = Node_pin_Vec())
       : node_type_op(_node_type_op)
       , node_pin_vec(_node_pin_vec)
   //    ,node_pin(_node_pin)
@@ -96,9 +96,9 @@ public:
     }
   }
 };
-typedef std::map<Expression_Node, Node_Pin_Plus>
+typedef std::map<Expression_Node, Node_pin_Plus>
     ExpLeaderMap; // Expression leader map; key:expression is led by leader:operand(has specific operation type)
-typedef std::map<Node_Pin_Plus, Node_Pin_Plus>
+typedef std::map<Node_pin_Plus, Node_pin_Plus>
     OpLeaderMap; // Operand leader map; key:(invalid type) operand is led by leader:operand(has specific operation type)
 class Pass_gvn_pre : public Pass {
 private:
@@ -111,7 +111,7 @@ public:
   Pass_gvn_pre();
   ExpLeaderMap                              exp_leader_map;
   OpLeaderMap                               op_leader_map;
-  typedef std::map<Index_ID, Node_Pin_Plus> Index_Replace_Map;
+  typedef std::map<Index_ID, Node_pin_Plus> Index_Replace_Map;
   Index_Replace_Map                         index_id_to_replace;
 
   void          build_sets(LGraph *g);
@@ -120,8 +120,8 @@ public:
   void          result_graph(LGraph *g);
   void          transform(LGraph *orig) final;
   void          traverse(LGraph *g, int round);
-  Node_Pin_Plus lookup_op_leader(Node_Pin_Plus new_opnode);
-  Node_Pin_Plus lookup_exp_leader(Index_ID idx, Expression_Node new_exp_enode);
+  Node_pin_Plus lookup_op_leader(Node_pin_Plus new_opnode);
+  Node_pin_Plus lookup_exp_leader(Index_ID idx, Expression_Node new_exp_enode);
 };
 
 #endif

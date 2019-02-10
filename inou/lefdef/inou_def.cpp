@@ -110,8 +110,8 @@ std::vector<LGraph *> Inou_def::generate() {
         // create N lgraph edge"s" to connect N fanout from 1 src pin
         assert(src_nid);
         assert(dst_nids[i]);
-        Node_Pin dst_pin(dst_nids[i], dst_pids[i], true);
-        Node_Pin src_pin(src_nid, src_pid, false);
+        Node_pin dst_pin(dst_nids[i], dst_pids[i], true);
+        Node_pin src_pin(src_nid, src_pid, false);
         g->add_edge(src_pin, dst_pin);
       }
     }
