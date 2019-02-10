@@ -1,7 +1,6 @@
-
-# trivial.prp file from trivial
- $a as __bits: 1
+// trivial.prp file from trivial
  $b as __bits: 1
- %c = $b xor $a
+ $a as __bits: 1
 
+ %c = $a xor $b
 
