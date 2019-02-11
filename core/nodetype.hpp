@@ -34,22 +34,31 @@ enum Node_Type_Op : uint64_t {
   Not_Op,
   Join_Op,
   Pick_Op,
+#if 1
+  // WARNING: deprecated once we have LUTs working (mockturtle)
   And_Op,
   Or_Op,
   Xor_Op,
+#endif
   SFlop_Op,  // sync reset flop
   AFlop_Op,  // async reset flop
   Latch_Op,
   FFlop_Op,
   Memory_Op,
+#if 1
+  // WARNING: deprecated once we have LUTs working (mockturtle)
   LessThan_Op,
   GreaterThan_Op,
   LessEqualThan_Op,
   GreaterEqualThan_Op,
   Equals_Op,
-  Mux_Op,
+#endif
+  Mux_Op, // WARNING: Trivial MUX (not bus muxes) converted to LUT
+#if 1
+  // WARNING: deprecated once we have LUTs working (mockturtle)
   ShiftRight_Op,
   ShiftLeft_Op,
+#endif
   GraphIO_Op,
   DontCare_Op,
   CfgAssign_Op,
