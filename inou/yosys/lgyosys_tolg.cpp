@@ -770,14 +770,15 @@ static LGraph *process_module(RTLIL::Module *module) {
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
 
-      inid = g->create_node().get_nid();
-      g->set_bits(inid, size);
+      auto not_node = g->create_node(Not_Op, size);
+      inid = not_node.get_nid();
 
-      g->node_type_set(onid, Not_Op);
+      auto xnor_node = g->get_node(onid);
+
       if(std::strncmp(cell->type.c_str(), "$xnor", 5) == 0)
-        g->add_edge(Node_pin(inid, 0, false), Node_pin(onid, 0, true));
+        g->add_edge(xnor_node.setup_driver_pin(0), not_node.setup_sink_pin());
       else
-        g->add_edge(Node_pin(inid, 1, false), Node_pin(onid, 0, true));
+        g->add_edge(xnor_node.setup_driver_pin(1), not_node.setup_sink_pin());
 
     } else if(std::strncmp(cell->type.c_str(), "$dff", 4) == 0) {
       op = SFlop_Op;
@@ -1042,8 +1043,24 @@ static LGraph *process_module(RTLIL::Module *module) {
       g->node_tmap_set(inid, tcell->get_id());
     } else {
       g->node_type_set(inid, op);
-      if (size)
-        g->set_bits(onid,size); // FIXME: Set the correct PID, not zero for size 2
+      if(std::strncmp(cell->type.c_str(), "$reduce_", 8) == 0 && cell->type.str() != "$reduce_xnor") {
+        assert(size);
+
+        if (size>1) {
+          auto x_node     = g->create_node_const(std::string(size, 'x'), size-1);
+          auto x_dpin     = x_node.setup_driver_pin();
+
+          auto join_node  = g->create_node(Join_Op, size);
+          auto j_spin_x   = join_node.setup_sink_pin(0);
+          auto j_spin_red = join_node.setup_sink_pin(1);
+
+          g->add_edge(x_dpin, j_spin_x);
+          g->add_edge(Node_pin(inid, 1, false), j_spin_red);
+
+          //inid = join_node.get_nid();
+          g->set_bits(join_node.setup_driver_pin(), size);
+        }
+      }
     }
 
     uint32_t blackbox_port = 0;
