@@ -14,10 +14,10 @@ echo "sandbox path is:"
 pwd
 
 
-# pts='top_ooo  sp_add  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2  if_elif_else'
-# pts='constant_pos constant_neg sp_if_0 nested_if_0 nested_if_1 nested_if_2 nested_if_3'
+# pts='top_ooo  sp_add  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2  nested_if_3  if_elif_else'
+pts='top_inline_add constant_pos constant_neg sp_if_0 nested_if_0 nested_if_1 nested_if_2'
 # pts='top_inline_add'
-pts='for'
+# pts='for'
 
 LGSHELL=./bazel-bin/main/lgshell
 
@@ -89,7 +89,8 @@ echo ""
 echo "Verilog code generation"
 echo ""
 
-#pts="sp_add top_inline_add"
+# pts='sp_add top_inline_add constant_pos constant_neg sp_if_0 nested_if_0 nested_if_1 nested_if_2'
+pts="sp_add $pts"
 #TODO:change to lgraph.match() to find all the graphs which needs to generate .v
 for pt in $pts
 do
@@ -113,31 +114,31 @@ done
 #   fi
 # done
 
-# echo ""
-# echo "Logic Equivalence Check"
-# echo ""
-# cp ./inou/cfg/tests/verilog_gld/*.* ./
+echo ""
+echo "Logic Equivalence Check"
+echo ""
+cp ./inou/cfg/tests/verilog_gld/*.* ./
 
-# for pt in $pts
-# do
-#   if [ "$pt" = "top" ]; then
-#     ./inou/yosys/lgcheck -r"top_gld.v sp_add_gld.v"  -i"top.v sp_add.v"
+for pt in $pts
+do
+  if [ "$pt" = "top_inline_add" ]; then
+    ./inou/yosys/lgcheck -r"top_inline_add_gld.v sp_add_gld.v"  -i"top_inline_add.v sp_add.v"
 
-#   elif [ "$pt" = "top_ooo" ]; then
-#     ./inou/yosys/lgcheck -r"top_ooo_gld.v sp_add_ooo_gld.v"  -i"top_ooo.v sp_add_ooo.v"
+  # elif [ "$pt" = "top_ooo" ]; then
+  #   ./inou/yosys/lgcheck -r"top_ooo_gld.v sp_add_ooo_gld.v"  -i"top_ooo.v sp_add_ooo.v"
 
-#   else
-#     ./inou/yosys/lgcheck -r"$pt"_gld.v -i"$pt".v
-#   fi
+  else
+    ./inou/yosys/lgcheck -r"$pt"_gld.v -i"$pt".v
+  fi
 
 
-#   if [ $? -eq 0 ]; then
-#     echo "Successfully pass logic equivilence check!"
-#   else
-#     echo "FAIL: "$pt".v !== "$pt"_gld.v"
-#     exit 1
-#   fi
-# done
+  if [ $? -eq 0 ]; then
+    echo "Successfully pass logic equivilence check!"
+  else
+    echo "FAIL: "$pt".v !== "$pt"_gld.v"
+    exit 1
+  fi
+done
 
 
 rm -f *_dirty.v
