@@ -1,0 +1,13 @@
+// code/vsdart.prp file
+person.fromJson = ::{
+  puts "in Person"
+}
+employee = person
+employee.fromJson = ::{
+  super $ // Notice, no fromJson
+  puts "in Employee"
+}
+emp = employee.fromJson
+// No cascade operations
+a.field1 = 1
+a.field2 = 2

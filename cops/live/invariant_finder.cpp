@@ -105,7 +105,7 @@ void Invariant_finder::propagate_until_boundary(Index_ID nid, uint32_t bit_selec
     if (propagate == -1) continue;
 
     for (uint32_t t_bit_selection : bit_selections) {
-      Index_ID driver_cell = edge.get_out_pin().get_nid();
+      Index_ID driver_cell = synth_graph->get_node(edge.get_out_pin()).get_nid();
       Node_bit driver_bit  = std::make_pair(driver_cell, t_bit_selection);
       Net_ID   net_bit     = std::make_pair(synth_graph->get_wid(driver_cell), t_bit_selection);
 
@@ -139,8 +139,8 @@ void Invariant_finder::propagate_until_boundary(Index_ID nid, uint32_t bit_selec
 
   cached.insert(nid_bit);
   for (auto &edge : synth_graph->inp_edges(master_id)) {
-    for (uint32_t t_bit_selection = 0; t_bit_selection < synth_graph->get_bits(edge.get_out_pin().get_nid()); t_bit_selection++) {
-      Index_ID driver_cell = edge.get_out_pin().get_nid();
+    for (uint32_t t_bit_selection = 0; t_bit_selection < synth_graph->get_bits(edge.get_out_pin()); t_bit_selection++) {
+      Index_ID driver_cell = synth_graph->get_node(edge.get_out_pin()).get_nid();
       Node_bit driver_bit  = std::make_pair(driver_cell, t_bit_selection);
       clear_cache(driver_bit);
     }
@@ -153,13 +153,9 @@ void Invariant_finder::clear_cache(const Node_bit &entry) {
   if (partial_endpoints.find(entry) == partial_endpoints.end() || stack.get_bit(entry.first)) return;
 
   for (auto &oedge : synth_graph->out_edges(entry.first)) {
-    Index_ID port_id = synth_graph->get_idx_from_pid(entry.first, oedge.get_out_pin().get_pid());
-    for (uint32_t bit = 0; bit < synth_graph->get_bits(port_id); bit++) {
-      if (cached.find(std::make_pair(port_id, bit)) == cached.end()) return;
-    }
-
-    for (uint32_t bit = 0; bit < synth_graph->get_bits(oedge.get_inp_pin().get_nid()); bit++) {
-      if (cached.find(std::make_pair(oedge.get_inp_pin().get_nid(), bit)) == cached.end()) return;
+    //Index_ID port_id = synth_graph->setup_idx_from_pid(entry.first, oedge.get_out_pin().get_pid());
+    for (uint32_t bit = 0; bit < synth_graph->get_bits(oedge.get_out_pin()); bit++) {
+      if (cached.find(std::make_pair(oedge.get_idx(), bit)) == cached.end()) return;
     }
   }
   partial_endpoints[entry].clear();

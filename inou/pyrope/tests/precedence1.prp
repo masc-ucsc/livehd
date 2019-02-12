@@ -1,0 +1,13 @@
+// code/precedence1.prp
+// Typically expected results
+I (true or !false) == (true or (!false))
+I (3*5+5) == ((3*5) + 5)
+a = true or false==false
+b = true or (false==false)
+I a == b
+c = fcall 1 2
+I c == fcall.(1 2)
+//bar = true or false and true // compile error
+//x = 3 ++ 4 -- 3              // compile error
+c = a == 3 == b                // OK
+I c == (a==3 and 3==b)

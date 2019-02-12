@@ -1,0 +1,8 @@
+// code/constants.prp
+a = 3                     // implicit __bits:2 __sign:false
+a = 3u                    // explicit __sign:false, implicit __bits:2
+a = 3u4bits               // explicit __sign:false, __bits:4
+b = 0xFF_f__fs32bits      // explicit __bits:32 __sign:true
+c = 0b_111_010_111u32bits
+c = 0b_111_010_111u2bits  // compile error
+c = 0xFF[[0..2]]          // explicit drop bits

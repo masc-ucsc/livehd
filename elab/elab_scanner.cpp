@@ -318,6 +318,14 @@ bool Elab_scanner::scan_next() {
   return true;
 }
 
+bool Elab_scanner::scan_prev() {
+  if (scanner_pos <= 1) return false;
+
+  scanner_pos = scanner_pos - 1;
+
+  return true;
+}
+
 void Elab_scanner::scan_append(std::string &text) const {
   assert(scanner_pos < token_list.size());
 

@@ -7,15 +7,13 @@ int resolve_bit(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID pin, 
   if (graph->node_type_get(idx).op == Pick_Op) {
     assert(graph->get_bits(idx) >= current_bit);
     if (pin != 0) return -1;  // do not propagate through this pid
-    Index_ID picked = 0, offset = 0;
-    Port_ID  picked_pid = 0;
+    Index_ID picked = 0;
+    Index_ID offset = 0;
     for (auto &c : graph->inp_edges(idx)) {
       if (c.get_inp_pin().get_pid() == 0) {
-        picked     = c.get_out_pin().get_nid();
-        picked_pid = c.get_out_pin().get_pid();
-        picked     = graph->get_idx_from_pid(picked, picked_pid);
+        picked     = c.get_out_pin().get_idx();
       } else if (c.get_inp_pin().get_pid() == 1) {
-        offset = c.get_out_pin().get_nid();
+        offset = graph->get_node(c.get_out_pin()).get_nid();
       }
     }
     assert(picked);
@@ -27,7 +25,7 @@ int resolve_bit(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID pin, 
   } else if (graph->node_type_get(idx).op == Join_Op) {
     std::map<Index_ID, uint32_t> port_size;
     for (auto &c : graph->inp_edges(idx)) {
-      port_size[c.get_inp_pin().get_pid()] = graph->get_bits_pid(c.get_out_pin().get_nid(), c.get_out_pin().get_pid());
+      port_size[c.get_inp_pin().get_pid()] = graph->get_bits(c.get_out_pin());
     }
     uint32_t offset = 0;
     int      last   = -1;
@@ -137,9 +135,9 @@ int resolve_bit_fwd(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID p
     Index_ID picked = 0, offset = 0;
     for (auto &c : graph->inp_edges(idx)) {
       if (c.get_inp_pin().get_pid() == 0) {
-        picked = c.get_out_pin().get_nid();
+        picked = c.get_out_pin().get_idx();
       } else if (c.get_inp_pin().get_pid() == 1) {
-        offset = c.get_out_pin().get_nid();
+        offset = graph->get_node(c.get_out_pin()).get_nid();
       }
     }
     assert(picked);
@@ -156,7 +154,7 @@ int resolve_bit_fwd(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID p
     std::map<Index_ID, uint32_t> port_size;
     for (auto &c : graph->inp_edges(idx)) {
       if (c.get_inp_pin().get_pid() >= pin) continue;
-      port_size[c.get_inp_pin().get_pid()] = graph->get_bits_pid(c.get_out_pin().get_nid(), c.get_out_pin().get_pid());
+      port_size[c.get_inp_pin().get_pid()] = graph->get_bits(c.get_out_pin());
     }
     uint32_t offset = 0;
     int      last   = -1;

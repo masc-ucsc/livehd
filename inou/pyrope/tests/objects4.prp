@@ -1,0 +1,17 @@
+// code/objects4.prp
+a = 0x73
+I a == 0b111011
+I a == 0b?11?11
+c as __bits:4
+I c.popcount <= 1 // Only 1 bit can be set
+unique if c == 0b???1 { // ? only in binaries
+  onehot = 1
+}elif c == 0b??1? {
+  onehot = 2
+}elif c == 0b?1?? {
+  onehot = 3
+}elif c == 0b1??? {
+  onehot = 4
+}else{
+  onehot = 0
+}

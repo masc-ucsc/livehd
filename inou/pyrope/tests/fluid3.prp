@@ -1,0 +1,8 @@
+// code/fluid3.prp file
+puts "prints every cycle"
+try {
+  puts "odd cycles"
+  yield         // Yield applies to scope ::{}
+  puts "even cycles"
+}
+puts "prints every cycle"

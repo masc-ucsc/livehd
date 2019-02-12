@@ -1,0 +1,14 @@
+// code/vsliberty.prp file
+gen  = ::{
+  @data = @data + 1
+}
+sink = ::{
+  if $data? {
+     puts ": {}" $data
+  }else{
+     puts ": No data"
+  }
+}
+s = sink __stage:true
+g = gen  __stage:true
+s.data = g.data

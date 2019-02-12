@@ -1,0 +1,13 @@
+// code/vsmigen.prp file
+if @counter {
+  @counter -= 1 // @counter-- does not work
+}else{
+  @counter = $maxperiod
+  @led = ~@led // Not %, @ is always valid
+}
+test = ::{
+  b = vsmigen maxperiod:300000
+  puts "led is {}" b.led
+  yield 300000
+  puts "led is {}" b.led
+}

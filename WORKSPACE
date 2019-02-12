@@ -141,6 +141,14 @@ new_git_repository(
     #patches = ["//external:patch.verilator"],
     #strip_prefix = "include",
 )
+new_git_repository(
+    name = "bison",
+    build_file = "BUILD.bison",
+    commit = "0d44f83fcc330dd4674cf4493e2a4e18e758e6bc",
+    remote = "https://git.savannah.gnu.org/git/bison.git",
+    #patches = ["//external:patch.verilator"],
+    #strip_prefix = "include",
+)
 #load(
 #    "//tools:externals.bzl",
 #    "new_patched_http_archive",
@@ -171,4 +179,15 @@ new_git_repository(
     #remote = "https://github.com/google/subpar",
     #tag = "1.3.0",
 #)
+
+# Hermetic even for the toolchain :D
+http_archive(
+  name = "bazel_toolchains",
+  sha256 = "109a99384f9d08f9e75136d218ebaebc68cc810c56897aea2224c57932052d30",
+  strip_prefix = "bazel-toolchains-94d31935a2c94fe7e7c7379a0f3393e181928ff7",
+  urls = [
+    "https://mirror.bazel.build/github.com/bazelbuild/bazel-toolchains/archive/94d31935a2c94fe7e7c7379a0f3393e181928ff7.tar.gz",
+    "https://github.com/bazelbuild/bazel-toolchains/archive/94d31935a2c94fe7e7c7379a0f3393e181928ff7.tar.gz",
+  ],
+)
 

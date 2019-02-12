@@ -14,7 +14,7 @@ Pass_fluid::Pass_fluid()
 }
 
 /*
-  Node_Pin:
+  Node_pin:
     Index_ID    nid:Index_Bits;
     Port_ID     pid:Port_Bits;
     bool        input;
@@ -26,7 +26,7 @@ void Pass_fluid::find_join(LGraph *g) {
     fmt::print("\n*****Visiting idx:{}\n", idx);
     fmt::print("{}\n", g->node_type_get(idx).get_name());
     for(const auto &inp_edge : g->inp_edges(idx)) {
-      Node_Pin_P new_node_pin = inp_edge.get_out_pin();
+      Node_pin_P new_node_pin = inp_edge.get_out_pin();
       Index_ID   inp_idx      = new_node_pin.get_nid();
       if(g->node_type_get(inp_idx).op == SFlop_Op) {
 #ifdef PRINT_INFO
@@ -78,7 +78,7 @@ void Pass_fluid::find_fork(LGraph *g) {
     fmt::print("\n*****Visiting idx:{}\n", idx);
     fmt::print("{}\n", g->node_type_get(idx).get_name());
     for(const auto &out_edge : g->out_edges(idx)) {
-      Node_Pin_P new_node_pin = out_edge.get_inp_pin();
+      Node_pin_P new_node_pin = out_edge.get_inp_pin();
       Index_ID   out_idx      = new_node_pin.get_nid();
       if(g->node_type_get(out_idx).op == SFlop_Op) {
         Port_ID flop_pid = out_edge.get_inp_pin().get_pid();
@@ -146,7 +146,7 @@ void Pass_fluid::add_fork(LGraph *g) {
   fmt::print("the nid of vi is {}\n", vi_nid);
   g->node_type_set(vi_nid, GraphIO_Op);
   g->add_graph_input(vi_name.c_str(), vi_nid);
-  Node_Pin global_vi(vi_nid, vi_pid, false);
+  Node_pin global_vi(vi_nid, vi_pid, false);
 
   // add so
   std::string so_name = "so";
@@ -157,7 +157,7 @@ void Pass_fluid::add_fork(LGraph *g) {
   fmt::print("the nid of so is {}\n", so_nid);
   g->node_type_set(so_nid, GraphIO_Op);
   g->add_graph_input(so_name.c_str(), so_nid);
-  Node_Pin global_so(so_nid, so_pid, false);
+  Node_pin global_so(so_nid, so_pid, false);
 
   // add vo
   std::string vo_name = "vo";
@@ -168,7 +168,7 @@ void Pass_fluid::add_fork(LGraph *g) {
   fmt::print("the nid of vo is {}\n", vo_nid);
   g->node_type_set(vo_nid, GraphIO_Op);
   g->add_graph_output(vo_name.c_str(), vo_nid);
-  Node_Pin global_vo(vo_nid, vo_pid, true);
+  Node_pin global_vo(vo_nid, vo_pid, true);
 
   // add si
   std::string si_name = "si";
@@ -179,7 +179,7 @@ void Pass_fluid::add_fork(LGraph *g) {
   fmt::print("the nid of si is {}\n", si_nid);
   g->node_type_set(si_nid, GraphIO_Op);
   g->add_graph_output(si_name.c_str(), si_nid);
-  Node_Pin global_si(si_nid, si_pid, true);
+  Node_pin global_si(si_nid, si_pid, true);
 
   for(auto idx : g->forward()) {
     fmt::print("\n*****Visiting idx:{}\n", idx);
@@ -198,11 +198,11 @@ void Pass_fluid::add_fork(LGraph *g) {
         // this flop is an In Flop
         fmt::print("This flop is an In Flop.\n");
         // connect vin
-        Node_Pin vin_pin(idx, ffvin, true);
+        Node_pin vin_pin(idx, ffvin, true);
         g->add_edge(global_vi, vin_pin);
 
         // connect si
-        Node_Pin si_pin(idx, ffsin, false);
+        Node_pin si_pin(idx, ffsin, false);
         g->add_edge(si_pin, global_si);
       }
 
@@ -211,16 +211,16 @@ void Pass_fluid::add_fork(LGraph *g) {
         // this flop is an Out Flop
         fmt::print("This flop is an Out Flop.\n");
         // connect vq
-        Node_Pin vq_pin(idx, ffvq, false);
+        Node_pin vq_pin(idx, ffvq, false);
         g->add_edge(vq_pin, global_vo);
 
         // connect sout
-        Node_Pin sout_pin(idx, ffsout, true);
+        Node_pin sout_pin(idx, ffsout, true);
         g->add_edge(global_so, sout_pin);
       }
       if(fork_index_has_flop_map[idx]) {
-        Node_Pin sout_pin(idx, ffsout, true);
-        Node_Pin vq_pin(idx, ffvq, false);
+        Node_pin sout_pin(idx, ffsout, true);
+        Node_pin vq_pin(idx, ffvq, false);
         if(fork_index_flop_map[idx].size() >= 2) {
           bool join_after_fork = false;
           // Add Fork
@@ -253,8 +253,8 @@ void Pass_fluid::add_fork(LGraph *g) {
               // this node should be replaced
               // Insert new edges
               for(const auto &out_edge : g->out_edges(idx)) {
-                Node_Pin src = Node_Pin(forked_fflop_nid[i], 0, false);
-                Node_Pin dst = Node_Pin(out_edge.get_idx(), out_edge.get_inp_pin().get_pid(), true);
+                Node_pin src = Node_pin(forked_fflop_nid[i], 0, false);
+                Node_pin dst = Node_pin(out_edge.get_idx(), out_edge.get_inp_pin().get_pid(), true);
                 g->add_edge(src, dst);
               }
             }
@@ -276,20 +276,20 @@ void Pass_fluid::add_fork(LGraph *g) {
           // Or gate
           Index_ID or_nid = g->create_node().get_nid();
           g->node_type_set(or_nid, Or_Op);
-          Node_Pin or_inp(or_nid, 0, true);
-          Node_Pin or_onp(or_nid, 0, false);
+          Node_pin or_inp(or_nid, 0, true);
+          Node_pin or_onp(or_nid, 0, false);
           local_fork_index_flop_vec = fork_index_flop_map[idx];
 
           for(int i = 0; i < flop_count; i++) {
             fmt::print("Add #{} input to OR.\n", i);
             fork_nid = local_fork_index_flop_vec.back();
             local_fork_index_flop_vec.pop_back();
-            Node_Pin fork_np = Node_Pin(fork_nid, ffsin, false);
+            Node_pin fork_np = Node_pin(fork_nid, ffsin, false);
             // check if the output flop needs to join
             if(join_index_flop_map[fork_nid].size() >= 2) {
               // add forked fflop
               // TODO add clk to new fflops
-              Node_Pin forked_fflop_sin(forked_fflop_nid[i], ffsin, false);
+              Node_pin forked_fflop_sin(forked_fflop_nid[i], ffsin, false);
               g->add_edge(forked_fflop_sin, or_inp);
             } else {
               g->add_edge(fork_np, or_inp);
@@ -300,15 +300,15 @@ void Pass_fluid::add_fork(LGraph *g) {
           // Not gate
           Index_ID not_nid = g->create_node().get_nid();
           g->node_type_set(not_nid, Not_Op);
-          Node_Pin not_inp(not_nid, 0, true);
+          Node_pin not_inp(not_nid, 0, true);
           g->add_edge(or_onp, not_inp);
-          Node_Pin not_onp(not_nid, 0, false);
+          Node_pin not_onp(not_nid, 0, false);
 
           // And gate
           Index_ID and_nid = g->create_node().get_nid();
           g->node_type_set(and_nid, And_Op);
-          Node_Pin and_inp(and_nid, 0, true);
-          Node_Pin and_onp(and_nid, 0, false);
+          Node_pin and_inp(and_nid, 0, true);
+          Node_pin and_onp(and_nid, 0, false);
           g->add_edge(not_onp, and_inp);
           g->add_edge(vq_pin, and_inp);
           local_fork_index_flop_vec = fork_index_flop_map[idx];
@@ -318,10 +318,10 @@ void Pass_fluid::add_fork(LGraph *g) {
             local_fork_index_flop_vec.pop_back();
             // check if the output flop needs to join
             if(join_index_flop_map[fork_nid].size() >= 2) {
-              Node_Pin forked_fflop_vin(forked_fflop_nid[i], ffvin, true);
+              Node_pin forked_fflop_vin(forked_fflop_nid[i], ffvin, true);
               g->add_edge(and_onp, forked_fflop_vin);
             } else {
-              Node_Pin fork_vin_np = Node_Pin(fork_nid, ffvin, true);
+              Node_pin fork_vin_np = Node_pin(fork_nid, ffvin, true);
               g->add_edge(and_onp, fork_vin_np);
             }
           }
@@ -335,9 +335,9 @@ void Pass_fluid::add_fork(LGraph *g) {
         }      // end of if (fork_index_flop_map[idx].size() >= 2)
         else { // only one out fflop; no need to fork, just connect
           Index_ID fork_nid    = fork_index_flop_map[idx].back();
-          Node_Pin fork_sin_np = Node_Pin(fork_nid, ffsin, false);
+          Node_pin fork_sin_np = Node_pin(fork_nid, ffsin, false);
           g->add_edge(fork_sin_np, sout_pin);
-          Node_Pin fork_vin_np = Node_Pin(fork_nid, ffvin, true);
+          Node_pin fork_vin_np = Node_pin(fork_nid, ffvin, true);
           g->add_edge(vq_pin, fork_vin_np);
           flop_to_vq_map[idx]  = idx;
           flop_to_sin_map[idx] = idx;
@@ -377,7 +377,7 @@ void Pass_fluid::add_fork_deadlock(LGraph *g) {
   fmt::print("the nid of vi is {}\n", vi_nid);
   g->node_type_set(vi_nid, GraphIO_Op);
   g->add_graph_input(vi_name.c_str(), vi_nid);
-  Node_Pin global_vi(vi_nid, vi_pid, false);
+  Node_pin global_vi(vi_nid, vi_pid, false);
 
   // add so
   std::string so_name = "so";
@@ -388,7 +388,7 @@ void Pass_fluid::add_fork_deadlock(LGraph *g) {
   fmt::print("the nid of so is {}\n", so_nid);
   g->node_type_set(so_nid, GraphIO_Op);
   g->add_graph_input(so_name.c_str(), so_nid);
-  Node_Pin global_so(so_nid, so_pid, false);
+  Node_pin global_so(so_nid, so_pid, false);
 
   // add vo
   std::string vo_name = "vo";
@@ -399,7 +399,7 @@ void Pass_fluid::add_fork_deadlock(LGraph *g) {
   fmt::print("the nid of vo is {}\n", vo_nid);
   g->node_type_set(vo_nid, GraphIO_Op);
   g->add_graph_output(vo_name.c_str(), vo_nid);
-  Node_Pin global_vo(vo_nid, vo_pid, true);
+  Node_pin global_vo(vo_nid, vo_pid, true);
 
   // add si
   std::string si_name = "si";
@@ -410,7 +410,7 @@ void Pass_fluid::add_fork_deadlock(LGraph *g) {
   fmt::print("the nid of si is {}\n", si_nid);
   g->node_type_set(si_nid, GraphIO_Op);
   g->add_graph_output(si_name.c_str(), si_nid);
-  Node_Pin global_si(si_nid, si_pid, true);
+  Node_pin global_si(si_nid, si_pid, true);
 
   for(auto idx : g->forward()) {
     fmt::print("\n*****Visiting idx:{}\n", idx);
@@ -427,11 +427,11 @@ void Pass_fluid::add_fork_deadlock(LGraph *g) {
         // this flop is an In Flop
         fmt::print("This flop is an In Flop.\n");
         // connect vin
-        Node_Pin vin_pin(idx, ffvin, true);
+        Node_pin vin_pin(idx, ffvin, true);
         g->add_edge(global_vi, vin_pin);
 
         // connect si
-        Node_Pin si_pin(idx, ffsin, false);
+        Node_pin si_pin(idx, ffsin, false);
         g->add_edge(si_pin, global_si);
       }
       // add out flops connections
@@ -439,16 +439,16 @@ void Pass_fluid::add_fork_deadlock(LGraph *g) {
         // this flop is an Out Flop
         fmt::print("This flop is an Out Flop.\n");
         // connect vq
-        Node_Pin vq_pin(idx, ffvq, false);
+        Node_pin vq_pin(idx, ffvq, false);
         g->add_edge(vq_pin, global_vo);
 
         // connect sout
-        Node_Pin sout_pin(idx, ffsout, true);
+        Node_pin sout_pin(idx, ffsout, true);
         g->add_edge(global_so, sout_pin);
       }
       if(fork_index_has_flop_map[idx]) {
-        Node_Pin sout_pin(idx, ffsout, true);
-        Node_Pin vq_pin(idx, ffvq, false);
+        Node_pin sout_pin(idx, ffsout, true);
+        Node_pin vq_pin(idx, ffvq, false);
         if(fork_index_flop_map[idx].size() >= 2) {
           // Add Fork
           fmt::print("Add fork at idx={}.\n", idx);
@@ -458,31 +458,31 @@ void Pass_fluid::add_fork_deadlock(LGraph *g) {
           // Or gate
           Index_ID or_nid = g->create_node().get_nid();
           g->node_type_set(or_nid, Or_Op);
-          Node_Pin or_inp(or_nid, 0, true);
+          Node_pin or_inp(or_nid, 0, true);
           Index_ID fork_nid;
           size_t   flop_count = fork_index_flop_map[idx].size();
           for(int i = 0; i < flop_count; i++) {
             fmt::print("Add #{} input to OR.\n", i);
             fork_nid = local_fork_index_flop_vec.back();
             local_fork_index_flop_vec.pop_back();
-            Node_Pin fork_np = Node_Pin(fork_nid, ffsin, false);
+            Node_pin fork_np = Node_pin(fork_nid, ffsin, false);
             g->add_edge(fork_np, or_inp);
           }
-          Node_Pin or_onp(or_nid, 0, false);
+          Node_pin or_onp(or_nid, 0, false);
           g->add_edge(or_onp, sout_pin);
 
           // Not gate
           Index_ID not_nid = g->create_node().get_nid();
           g->node_type_set(not_nid, Not_Op);
-          Node_Pin not_inp(not_nid, 0, true);
+          Node_pin not_inp(not_nid, 0, true);
           g->add_edge(or_onp, not_inp);
-          Node_Pin not_onp(not_nid, 0, false);
+          Node_pin not_onp(not_nid, 0, false);
 
           // And gate
           Index_ID and_nid = g->create_node().get_nid();
           g->node_type_set(and_nid, And_Op);
-          Node_Pin and_inp(and_nid, 0, true);
-          Node_Pin and_onp(and_nid, 0, false);
+          Node_pin and_inp(and_nid, 0, true);
+          Node_pin and_onp(and_nid, 0, false);
           g->add_edge(not_onp, and_inp);
           g->add_edge(vq_pin, and_inp);
           local_fork_index_flop_vec = fork_index_flop_map[idx];
@@ -490,7 +490,7 @@ void Pass_fluid::add_fork_deadlock(LGraph *g) {
             fmt::print("Add #{} output to AND.\n", i);
             fork_nid = local_fork_index_flop_vec.back();
             local_fork_index_flop_vec.pop_back();
-            Node_Pin fork_vin_np = Node_Pin(fork_nid, ffvin, true);
+            Node_pin fork_vin_np = Node_pin(fork_nid, ffvin, true);
             g->add_edge(and_onp, fork_vin_np);
           }
           flop_to_vq_map[idx]  = and_nid;
@@ -498,9 +498,9 @@ void Pass_fluid::add_fork_deadlock(LGraph *g) {
         }      // end of if (fork_index_flop_map[idx].size() >= 2)
         else { // only one out fflop; no need to fork, just connect
           Index_ID fork_nid    = fork_index_flop_map[idx].back();
-          Node_Pin fork_sin_np = Node_Pin(fork_nid, ffsin, false);
+          Node_pin fork_sin_np = Node_pin(fork_nid, ffsin, false);
           g->add_edge(fork_sin_np, sout_pin);
-          Node_Pin fork_vin_np = Node_Pin(fork_nid, ffvin, true);
+          Node_pin fork_vin_np = Node_pin(fork_nid, ffvin, true);
           g->add_edge(vq_pin, fork_vin_np);
           flop_to_vq_map[idx]  = idx;
           flop_to_sin_map[idx] = idx;
@@ -548,7 +548,7 @@ void Pass_fluid::add_join_deadlock(LGraph *g) {
         if(join_index_flop_map[idx].size() >= 2) {
           /* TODO: ask why this doesn't work
           for(const auto &inp_edge:g->inp_edges(idx)) {
-            Node_Pin_P new_node_pin = inp_edge.get_inp_pin();
+            Node_pin_P new_node_pin = inp_edge.get_inp_pin();
             new_node_pin.print_info();
             Port_ID new_pid2= new_node_pin.get_pid();
             fmt::print("new_pid2 is {}.\n", new_pid2);
@@ -560,34 +560,34 @@ void Pass_fluid::add_join_deadlock(LGraph *g) {
           // And gate to vout
           Index_ID and_vout_nid = g->create_node().get_nid();
           g->node_type_set(and_vout_nid, And_Op);
-          Node_Pin and_vout_inp(and_vout_nid, 0, true);
-          Node_Pin and_vout_onp(and_vout_nid, 0, false);
-          Node_Pin vin_np(idx, ffvin, true);
+          Node_pin and_vout_inp(and_vout_nid, 0, true);
+          Node_pin and_vout_onp(and_vout_nid, 0, false);
+          Node_pin vin_np(idx, ffvin, true);
           //          g->add_edge(and_vout_onp, vin_np);
 
           // Not gate to vout
           Index_ID not_nid = g->create_node().get_nid();
           g->node_type_set(not_nid, Not_Op);
-          Node_Pin not_inp(not_nid, 0, true);
-          Node_Pin not_onp(not_nid, 0, false);
+          Node_pin not_inp(not_nid, 0, true);
+          Node_pin not_onp(not_nid, 0, false);
           g->add_edge(and_vout_onp, not_inp);
 
           // Or gate
           Index_ID or_nid = g->create_node().get_nid();
           g->node_type_set(or_nid, Or_Op);
-          Node_Pin or_inp(or_nid, 0, true);
-          Node_Pin or_onp(or_nid, 0, false);
-          Node_Pin sin_np(idx, ffsin, false);
+          Node_pin or_inp(or_nid, 0, true);
+          Node_pin or_onp(or_nid, 0, false);
+          Node_pin sin_np(idx, ffsin, false);
           g->add_edge(sin_np, or_inp);
           g->add_edge(not_onp, or_inp);
 
           // And gate to souts of upstream
           Index_ID              and_sout_nid[flop_count];
-          std::vector<Node_Pin> and_sout_inp;
+          std::vector<Node_pin> and_sout_inp;
           for(int i = 0; i < flop_count; i++) {
             and_sout_nid[i] = g->create_node().get_nid();
             g->node_type_set(and_sout_nid[i], And_Op);
-            and_sout_inp.push_back(Node_Pin(and_sout_nid[i], 0, true));
+            and_sout_inp.push_back(Node_pin(and_sout_nid[i], 0, true));
           }
 
           for(int i = 0; i < flop_count; i++) {
@@ -599,12 +599,12 @@ void Pass_fluid::add_join_deadlock(LGraph *g) {
             join_vq_nid = flop_to_vq_map[flop_nid];
             // add edge to souts
             join_sout_nid = flop_to_sin_map[flop_nid];
-            Node_Pin and_sout_onp(and_sout_nid[i], 0, false);
+            Node_pin and_sout_onp(and_sout_nid[i], 0, false);
             g->add_edge(or_onp, and_sout_inp[i]);
 
             if(g->node_type_get(join_sout_nid).op == FFlop_Op) {
               // add edge fron and_sout_port to sout
-              Node_Pin join_sout_np = Node_Pin(join_sout_nid, ffsout, true);
+              Node_pin join_sout_np = Node_pin(join_sout_nid, ffsout, true);
               g->add_edge(and_sout_onp, join_sout_np);
               // delete the edge from this Fflop.sin to this Fflop.sout
               for(const auto &out_edge : g->out_edges(idx)) {
@@ -617,7 +617,7 @@ void Pass_fluid::add_join_deadlock(LGraph *g) {
               }
             } else if(g->node_type_get(join_sout_nid).op == Or_Op) {
               // add edge to sout
-              Node_Pin join_sout_np = Node_Pin(join_sout_nid, 0, true);
+              Node_pin join_sout_np = Node_pin(join_sout_nid, 0, true);
               g->add_edge(and_sout_onp, join_sout_np);
               // delete the edge from this Fflop.sin to the Or gate of the upstream fflop
               for(const auto &out_edge : g->out_edges(idx)) {
@@ -634,7 +634,7 @@ void Pass_fluid::add_join_deadlock(LGraph *g) {
             // add edge to vout
             if(g->node_type_get(join_vq_nid).op == FFlop_Op) {
               // add edge to vout
-              Node_Pin join_vq_np = Node_Pin(join_vq_nid, ffvq, false);
+              Node_pin join_vq_np = Node_pin(join_vq_nid, ffvq, false);
               g->add_edge(join_vq_np, and_vout_inp);
               // delete the edge from Fflop.vq to this Fflop.vin
               for(const auto &out_edge : g->out_edges(join_vq_nid)) {
@@ -649,7 +649,7 @@ void Pass_fluid::add_join_deadlock(LGraph *g) {
               g->add_edge(join_vq_np, and_sout_inp[i]);
             } else if(g->node_type_get(join_vq_nid).op == And_Op) {
               // add edge to vout
-              Node_Pin join_vq_np = Node_Pin(join_vq_nid, 0, false);
+              Node_pin join_vq_np = Node_pin(join_vq_nid, 0, false);
               g->add_edge(join_vq_np, and_vout_inp);
               // delete the edge from AND to this Fflop
               for(const auto &out_edge : g->out_edges(join_vq_nid)) {

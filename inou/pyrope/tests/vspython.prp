@@ -1,0 +1,17 @@
+// code/vspython.prp file
+objectTest.get_value = ::{
+  return @this.myvalue
+}
+objectTest.set_value = :($a):{
+  @this.myvalue = $a
+  return this
+}
+a = objecttest.set_value 1
+b = objecttest.set_value 1
+I a == b == 1
+I a.get_value.() == b.get_value
+I a.get_value.() == b.get_value.()
+I a.get_value    == b.get_value
+I a.__obj == b.__obj and a.__obj != 1.__obj
+total = 0..10 |> filter ::{$ & 1} |> map ::{$*$}
+I total == (1 9 25 49 81)

@@ -7,6 +7,9 @@
 
 Edge_iterator::CPod_iterator Edge_iterator::CPod_iterator::operator++() {
   CPod_iterator i(ptr, e, inputs);
+  I(Node_Internal::get(e).is_node_state());
+  I(Node_Internal::get(ptr).is_node_state());
+
   const auto &  node = Node_Internal::get(ptr);
 
   if ((inputs && !ptr->is_last_input()) || (!inputs && !ptr->is_last_output())) {
@@ -29,6 +32,8 @@ Edge_iterator::CPod_iterator Edge_iterator::CPod_iterator::operator++() {
     Index_ID delta = idx - root_page.get_idx();
 
     assert(node.get_master_root_nid() == root[delta].get_master_root_nid());
+
+    I(root[delta].is_node_state());
 
     if (inputs) {
       ptr2 = root[delta].get_input_begin();

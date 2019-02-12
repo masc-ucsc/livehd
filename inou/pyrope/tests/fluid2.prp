@@ -1,0 +1,13 @@
+// code/fluid2.prp file
+if a? and a.counter>0 {   // Option 1
+  @total += a.counter
+}
+try {                   // Option 2 (same behavor)
+  if a.counter>0 {
+    @total += a.counter
+  }
+}
+if a?.counter>0 {         // Option 3 (same)
+  @total += a.counter
+}
+@total += a?.counter      // Option 4 (same)

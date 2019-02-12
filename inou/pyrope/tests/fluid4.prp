@@ -1,0 +1,18 @@
+// code/fluid4.prp file
+everyother = ::{
+  if @conta {
+    yield
+  }
+  @conta = ~@conta
+  return 1
+}
+@total_all   += 1
+@total_yield += everyother.()
+I @total_all == @total_yield
+try {
+   @total2_all += 1
+}
+try {
+   @total2_yield += everyother.()
+   I @total2_all == 2 then @total2_yield == 1
+}

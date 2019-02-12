@@ -60,7 +60,7 @@ void generate_graphs(int n) {
         continue;
 
       edges.insert(std::make_pair(src, dst));
-      g->add_edge(Node_Pin(src, 0, false), Node_Pin(dst, 0, true));
+      g->add_edge(Node_pin(src, 0, false), Node_pin(dst, 0, true));
     }
 
     g->close();
@@ -79,8 +79,9 @@ bool fwd(int n) {
 
       // check if all incoming edges were visited
       for(auto &inp : g->inp_edges(idx)) {
-        if(visited.find(inp.get_out_pin().get_nid()) == visited.end()) {
+        if(visited.find(inp.get_out_pin().get_idx()) == visited.end()) {
           printf("fwd failed for lgraph %d\n", i);
+          I(false);
           return false;
         }
       }
@@ -106,8 +107,9 @@ bool bwd(int n) {
 
       // check if all incoming edges were visited
       for(auto &out : g->out_edges(idx)) {
-        if(visited.find(out.get_inp_pin().get_nid()) == visited.end()) {
+        if(visited.find(out.get_inp_pin().get_idx()) == visited.end()) {
           printf("bwd failed for lgraph %d\n", i);
+          I(false);
           return false;
         }
       }
@@ -141,18 +143,8 @@ bool simple() {
 
   g->node_u32type_set(const0, 1);
   g->node_u32type_set(const1, 21);
-  g->node_const_type_set(const2, "xxx"
-#ifndef NDEBUG
-                         ,
-                         false
-#endif
-  );
-  g->node_const_type_set(const3, "yyy"
-#ifndef NDEBUG
-                         ,
-                         false
-#endif
-  );
+  g->node_const_type_set(const2, "xxx");
+  g->node_const_type_set_string(const3, "yyy");
 
   g->create_node().get_nid(); // 13
   g->create_node().get_nid(); // 14
@@ -173,32 +165,32 @@ bool simple() {
   //        5     6        7            8
   */
 
-  g->add_edge(Node_Pin(1, 0, false), Node_Pin(13, 0, true));
-  g->add_edge(Node_Pin(2, 0, false), Node_Pin(13, 0, true));
+  g->add_edge(Node_pin(1, 0, false), Node_pin(13, 0, true));
+  g->add_edge(Node_pin(2, 0, false), Node_pin(13, 0, true));
 
-  g->add_edge(Node_Pin(3, 0, false), Node_Pin(14, 0, true));
-  g->add_edge(Node_Pin(4, 0, false), Node_Pin(14, 0, true));
-  g->add_edge(Node_Pin(4, 0, false), Node_Pin(15, 0, true));
+  g->add_edge(Node_pin(3, 0, false), Node_pin(14, 0, true));
+  g->add_edge(Node_pin(4, 0, false), Node_pin(14, 0, true));
+  g->add_edge(Node_pin(4, 0, false), Node_pin(15, 0, true));
 
-  g->add_edge(Node_Pin(9, 0, false), Node_Pin(16, 0, true));
-  g->add_edge(Node_Pin(10, 0, false), Node_Pin(16, 0, true));
+  g->add_edge(Node_pin(9, 0, false), Node_pin(16, 0, true));
+  g->add_edge(Node_pin(10, 0, false), Node_pin(16, 0, true));
 
-  g->add_edge(Node_Pin(11, 0, false), Node_Pin(17, 0, true));
-  g->add_edge(Node_Pin(12, 0, false), Node_Pin(17, 0, true));
-  g->add_edge(Node_Pin(12, 0, false), Node_Pin(18, 0, true));
+  g->add_edge(Node_pin(11, 0, false), Node_pin(17, 0, true));
+  g->add_edge(Node_pin(12, 0, false), Node_pin(17, 0, true));
+  g->add_edge(Node_pin(12, 0, false), Node_pin(18, 0, true));
 
-  g->add_edge(Node_Pin(13, 0, false), Node_Pin(5, 0, true));
-  g->add_edge(Node_Pin(13, 0, false), Node_Pin(6, 0, true));
-  g->add_edge(Node_Pin(14, 0, false), Node_Pin(6, 0, true));
-  g->add_edge(Node_Pin(14, 0, false), Node_Pin(7, 0, true));
+  g->add_edge(Node_pin(13, 0, false), Node_pin(5, 0, true));
+  g->add_edge(Node_pin(13, 0, false), Node_pin(6, 0, true));
+  g->add_edge(Node_pin(14, 0, false), Node_pin(6, 0, true));
+  g->add_edge(Node_pin(14, 0, false), Node_pin(7, 0, true));
 
-  g->add_edge(Node_Pin(17, 0, false), Node_Pin(20, 0, true));
-  g->add_edge(Node_Pin(17, 0, false), Node_Pin(19, 0, true));
-  g->add_edge(Node_Pin(18, 0, false), Node_Pin(19, 0, true));
-  g->add_edge(Node_Pin(18, 0, false), Node_Pin(21, 0, true));
+  g->add_edge(Node_pin(17, 0, false), Node_pin(20, 0, true));
+  g->add_edge(Node_pin(17, 0, false), Node_pin(19, 0, true));
+  g->add_edge(Node_pin(18, 0, false), Node_pin(19, 0, true));
+  g->add_edge(Node_pin(18, 0, false), Node_pin(21, 0, true));
 
-  g->add_edge(Node_Pin(16, 0, false), Node_Pin(8, 0, true));
-  g->add_edge(Node_Pin(20, 0, false), Node_Pin(8, 0, true));
+  g->add_edge(Node_pin(16, 0, false), Node_pin(8, 0, true));
+  g->add_edge(Node_pin(20, 0, false), Node_pin(8, 0, true));
 
   std::string fwd = "fwd: ";
   for(const auto &idx : g->forward()) {

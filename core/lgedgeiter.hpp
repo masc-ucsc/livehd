@@ -44,6 +44,7 @@ public:
   explicit Edge_iterator(const Edge *_b, const Edge *_e, bool _inputs) : inputs(_inputs) {
     b = _b;
     e = _e;
+    I(Node_Internal::get(e).is_node_state());
   }
 
   CPod_iterator begin() const { return CPod_iterator(b, e, inputs); }
@@ -289,10 +290,10 @@ public:
           for (const auto &c : g->out_edges(current)) {
             floating.erase(current);
 
-            if (dc_visited.find(c.get_inp_pin().get_nid()) == dc_visited.end() &&
-                global_visited.find(c.get_inp_pin().get_nid()) == global_visited.end()) {
-              discovered.push_back(c.get_inp_pin().get_nid());
-              floating.insert(c.get_inp_pin().get_nid());
+            if (dc_visited.find(c.get_inp_pin().get_idx()) == dc_visited.end() &&
+                global_visited.find(c.get_inp_pin().get_idx()) == global_visited.end()) {
+              discovered.push_back(c.get_inp_pin().get_idx());
+              floating.insert(c.get_inp_pin().get_idx());
             }
           }
         }

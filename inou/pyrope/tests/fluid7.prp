@@ -1,0 +1,20 @@
+// code/fluid7.prp file
+sadd = ::{ %sum = $a + $b }
+sinc = ::{ % = $ + 1 }
+combinational = ::{
+  % = ssum.(a:sinc.($a), b:sinc.($b))
+}
+one_stage_flop_out  = ::{ // The output is flopped
+  % = ssum.(a:sinc.($a), b:sinc.($b))
+  % as __stage:true
+}
+one_stage_comb_out = ::{  // Not flopped output
+  a1 as sinc
+  a2 as ssum __stage:true
+  % = a2.(a:a1.($a), b:a1.($b))
+}
+two_stage_comb_out = ::{  // Not flopped output
+  a1 as sinc __stage:true
+  a2 as ssum __stage:true
+  % = a2.(a:a1.($a), b:a1.($b))
+}

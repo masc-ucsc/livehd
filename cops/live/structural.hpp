@@ -32,7 +32,7 @@ private:
     return original->get_node_id(name);
   }
 
-  Node_Pin get_inp_edge(LGraph *current, Index_ID nid, Port_ID pid);
+  Node_pin get_inp_edge(LGraph *current, Index_ID nid, Port_ID pid);
 
 public:
   Live_structural(LGraph *original, Invariant_boundaries *boundaries)
