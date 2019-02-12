@@ -9,11 +9,11 @@ for i:(0..$a.__bits){
 
 
 
-//v.s. 
-//for i:(0..3){
-//  accu = accu + i
-//}
-
+//v.s.
+accu2 = 0
+for j:(0..3){
+  accu2 = accu2 + j
+}
 
 
 %o = accu

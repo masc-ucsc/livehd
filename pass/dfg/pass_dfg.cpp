@@ -415,7 +415,7 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
   } else if(is_label_op(op)) {
     assert(oprds.size() > 1);
     if(oprds[0] == "__bits") {
-      fmt::print("__bits size assign\n");
+      fmt::print("__bits size assignment\n");
       Index_ID floating_id = process_operand(dfg, aux_tree, oprds[1]);
       aux_tree->set_alias(target, floating_id);
     } else if(oprds[0] == "__fluid") {
@@ -451,6 +451,7 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
     std::vector<Index_ID> oprd_ids;
     oprd_ids.push_back(process_operand(dfg, aux_tree, oprds[0]));
     oprd_ids.push_back(process_operand(dfg, aux_tree, oprds[1]));
+    //the target might has been created before in for loop, use process_operand instead? or create a process target
     Index_ID target_id = create_node(dfg, aux_tree, target);
     fmt::print("create node for internal target:{}, nid:{}\n", target, target_id);
     dfg->node_type_set(target_id, node_type_from_text(op));
