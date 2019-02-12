@@ -3,17 +3,19 @@ square = :($x):{$ * $}
 //r=square 3 + square 4     // parse error, complex argument
 //r=square(3 + square.(4))  // parse error, space required for arguments
 //r=square (3 + square (4)) // parse error, missing explicit argument
-r=square square 4           // compile error, square has 1 argument, 2 passed
-r=square (3 + (square  4))  // compile error, two args, but first reqs argument
-r=square (3 + square.(4))   // OK, 361 = (3+4^2)^2 ; ^ is exp, not power
+//r=square square 4           // compile error, square has 1 argument, 2 passed
+//r=square (3 + (square  4))  // compile error, two args, but first reqs argument
+//r=square (3 + square.(4))   // compile error, 361 = (3+4^2)^2 ; ^ is exp, not power
 r=square.(3 + square.(4))   // OK, 361
 r=square.(3) + square.(4)   // OK, 25
+
 pass  = ::{
   if $.__size == 1 { return 7 }
   if $.__size == 2 { return 9 }
-  11
+  return 11
 }
-puts 3 square 4 5           // compile error, missing required square arg
-puts 3 square.(4) 5         // OK, prints "3 16 5"
-puts 3 pass 4 5             // OK, prints "3 11 5"
-puts 3 pass.(4) 5           // OK, prints "3 7 5"
+
+//puts 3 square 4 5           // compile error, missing required square arg
+puts.(3,square.(4),5)        // OK, prints "3 16 5"
+puts.(3,pass,4,5)            // OK, prints "3 11 5"
+puts.(3,pass.(4),5)          // OK, prints "3 7 5"
