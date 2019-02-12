@@ -2,7 +2,7 @@
 
 cc_library(
     name = "inou_pyrope",
-    srcs = ["inou_pyrope.cpp"],
+    srcs = glob(["*.cpp"],exclude=["*test*.cpp"]),
     hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
     includes = ["."],
@@ -28,4 +28,13 @@ sh_test(
         ":pyrope_tests",
         "//inou/yosys:verilog_tests",
         ],
+)
+
+cc_binary(
+    name = "prp_test",
+    srcs = ["prp_test.cpp"],
+    deps = [
+        "@gtest//:gtest_main",
+        ":inou_pyrope",
+    ],
 )

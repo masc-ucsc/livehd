@@ -1045,7 +1045,7 @@ static LGraph *process_module(RTLIL::Module *module) {
       g->node_type_set(inid, op);
       if(std::strncmp(cell->type.c_str(), "$reduce_", 8) == 0 && cell->type.str() != "$reduce_xnor") {
         assert(size);
-
+#if 0
         if (size>1) {
           auto x_node     = g->create_node_const(std::string(size, 'x'), size-1);
           auto x_dpin     = x_node.setup_driver_pin();
@@ -1060,6 +1060,7 @@ static LGraph *process_module(RTLIL::Module *module) {
           //inid = join_node.get_nid();
           g->set_bits(join_node.setup_driver_pin(), size);
         }
+#endif
       }
     }
 
