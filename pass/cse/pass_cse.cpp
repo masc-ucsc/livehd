@@ -25,7 +25,7 @@ public:
   int idx;
   // int next_avail_pid;
   bool                             need_modify;
-  typedef std::pair<Node_Pin, int> NPPair;       // <the node pin, to be replaced by idx>
+  typedef std::pair<Node_pin, int> NPPair;       // <the node pin, to be replaced by idx>
   typedef std::map<int, int>       CoverByNPMap; // key (idx) is covered by value (idx)
   CoverByNPMap                     cover_by_np_map;
   typedef std::vector<NPPair>      NPPairVec;
@@ -86,8 +86,8 @@ public:
   }
 
   comp_result comp(and_node_for_comp that_node) {
-    //    std::vector<pair<Node_Pin(), int>>::const_iterator j;  // existing nodes
-    //  std::vector<pair<Node_Pin(), int>>::const_iterator i; // new challenger
+    //    std::vector<pair<Node_pin(), int>>::const_iterator j;  // existing nodes
+    //  std::vector<pair<Node_pin(), int>>::const_iterator i; // new challenger
     auto j     = this->np_pair_vec.begin();
     int  int_i = 0;
     // int start = -1;
@@ -95,7 +95,7 @@ public:
     int              cover_count = 0;
     int              rep_count   = 0;
     int              overlap     = 0; // # of overlap with previous replacing node
-    Node_Pin         dummy_node  = Node_Pin(1, 1, 0);
+    Node_pin         dummy_node  = Node_pin(1, 1, 0);
     CoveredPos       new_covered_pos;
     std::vector<int> conflict_idx_vec;
     NPPair           last_pair = std::make_pair(dummy_node, -1);
@@ -257,7 +257,7 @@ void Pass_cse::traverse(LGraph *g, std::map<int, and_node_for_comp> &and_node_fo
         and_node_for_comp new_node_for_comp;
         new_node_for_comp.idx = idx;
         for(const auto &in_edge : g->inp_edges(idx)) {
-          std::pair<Node_Pin, int> new_pair = std::make_pair(in_edge.get_out_pin(), -1);
+          std::pair<Node_pin, int> new_pair = std::make_pair(in_edge.get_out_pin(), -1);
           new_node_for_comp.np_pair_vec.push_back(new_pair);
         }
         for(auto i : and_node_for_comp_map) {
@@ -286,14 +286,14 @@ void Pass_cse::traverse(LGraph *g, std::map<int, and_node_for_comp> &and_node_fo
         for(const auto &in_edge : g->inp_edges(idx)) {
           // haha
           and_node_for_comp   new_node_for_comp = and_node_for_comp_map[idx];
-          Node_Pin            out_pin           = in_edge.get_out_pin();
+          Node_pin            out_pin           = in_edge.get_out_pin();
           std::map<int, bool> local_map; // <idx, exist>
           auto                it = (new_node_for_comp.cover_by_np_map).find(out_pin.get_nid());
           if(it != new_node_for_comp.cover_by_np_map.end()) {
             // add new input edge
             if(local_map.find(it->second) == local_map.end()) {
-              Node_Pin dst = Node_Pin(idx, 0, 1);
-              Node_Pin src = Node_Pin(it->second, 0, 0);
+              Node_pin dst = Node_pin(idx, 0, 1);
+              Node_pin src = Node_pin(it->second, 0, 0);
               g->add_edge(src, dst);
               local_map.insert(std::make_pair(it->second, 1));
               fmt::print("Adding edge from {} to {}.\n", it->second, idx);

@@ -1,0 +1,11 @@
+// code/debug2.prp
+if c == 3 { // Error unless c is know at compile
+  b = "potato"
+}else{
+  b = "carrot"
+}
+tup[b] = true
+for a:tup ::{
+  puts "index:{} value:{}" a.__index a
+  I tup[a.__index] == a
+}

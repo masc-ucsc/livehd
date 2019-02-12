@@ -1,0 +1,5 @@
+// code/assign3.prp
+try {
+  %out1 = $a + 1
+  %out2 = $b + 1
+}

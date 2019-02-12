@@ -1,0 +1,9 @@
+// code/debug1.prp
+a = 3
+I a == 3   // runtime check
+#I a == 3  // compile time check
+N a != 3   // N (never) is I !(xxx)
+#if true { // condition known at compile time
+  c = 3
+}
+#c = 3+4   // c is known at compile time

@@ -1,0 +1,10 @@
+// code/scope3.prp
+a = 1
+if a == 1 ::{
+  a = 2           // compile error, no a in local
+  %this.a = 3     // compile error, no %a in parent
+  this.a = 3      // compile error, only %,$,% for this
+  f = 3           // local scope
+}
+I f == 3          // compile error, undefined
+I a == 1

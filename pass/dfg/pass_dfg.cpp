@@ -165,17 +165,17 @@ void Pass_dfg::trans(LGraph *dfg) {
 
 
   //resolve top <-> subgraph IO connection
-  for(auto idx : dfg->fast()){
-    if(dfg->node_type_get(idx).op == SubGraph_Op){
-      fmt::print("resolving connections, subgraph is:{}\n", dfg->get_node_wirename(idx));
-      LGraph* sub_graph = LGraph::open(dfg->get_path(), dfg->get_node_wirename(idx));
+  for(auto nid : dfg->fast()){
+    if(dfg->node_type_get(nid).op == SubGraph_Op){
+      fmt::print("resolving connections, subgraph is:{}\n", dfg->get_node_wirename(nid));
+      LGraph* sub_graph = LGraph::open(dfg->get_path(), dfg->get_node_wirename(nid));
       I(sub_graph);
 
       //resolve subgraph input connections
-      std::unordered_map <Node_Pin*, Node_Pin*> subg_inp_edges;
-      for(auto &inp : dfg->inp_edges(idx)){
-        Index_ID src_nid = inp.get_out_pin().get_nid();
-        Index_ID dst_nid = idx;
+      std::unordered_map <Node_pin*, Node_pin*> subg_inp_edges;
+      for(auto &inp : dfg->inp_edges(nid)){
+        Index_ID src_nid = dfg->get_node(inp.get_out_pin()).get_nid();
+        Index_ID dst_nid = nid;
         Port_ID  src_pid = 0;
         auto inp_name = dfg->get_node_wirename(src_nid);
         //TODO:should change to sub_graph->each_input
@@ -183,8 +183,8 @@ void Pass_dfg::trans(LGraph *dfg) {
 
         fmt::print("inp_name:{}\n",inp_name);
         fmt::print("src_nid:{}, src_pid:{}, dst_nid:{}, dst_pid:{}\n", src_nid, src_pid, dst_nid, dst_pid);
-        Node_Pin* src_pin = new Node_Pin(src_nid, src_pid, false);
-        Node_Pin* dst_pin = new Node_Pin(dst_nid, dst_pid, true);
+        Node_pin* src_pin = new Node_pin(src_nid, src_pid, false);
+        Node_pin* dst_pin = new Node_pin(dst_nid, dst_pid, true);
         subg_inp_edges[src_pin] = dst_pin;
         dfg->del_edge(inp); //WARNNING: do not add_edge and del_edge at the same reference loop!
       }
@@ -194,10 +194,10 @@ void Pass_dfg::trans(LGraph *dfg) {
       }
 
       //resolve subgraph output connections
-      std::unordered_map <Node_Pin*, Node_Pin*> subg_out_edges;
-      for(auto &out : dfg->out_edges(idx)){
-        Index_ID src_nid = idx;
-        Index_ID dst_nid = out.get_inp_pin().get_nid();
+      std::unordered_map <Node_pin*, Node_pin*> subg_out_edges;
+      for(auto &out : dfg->out_edges(nid)){
+        Index_ID src_nid = nid;
+        Index_ID dst_nid = dfg->get_node(out.get_inp_pin()).get_nid();
         Port_ID  dst_pid = out.get_inp_pin().get_pid();
         Port_ID  src_pid = 0;
         uint16_t bitwidth;
@@ -209,8 +209,8 @@ void Pass_dfg::trans(LGraph *dfg) {
           bitwidth = sub_graph->get_bits(idx);
         });
         fmt::print("src_nid:{}, src_pid:{}, dst_nid:{}, dst_pid:{}\n", src_nid, src_pid, dst_nid, dst_pid);
-        Node_Pin* src_pin = new Node_Pin(src_nid, src_pid, false);
-        Node_Pin* dst_pin = new Node_Pin(dst_nid, dst_pid, true);
+        Node_pin* src_pin = new Node_pin(src_nid, src_pid, false);
+        Node_pin* dst_pin = new Node_pin(dst_nid, dst_pid, true);
         subg_out_edges[src_pin] = dst_pin;
         fmt::print("bitwidth:{}\n", bitwidth);
         dfg->set_bits_pid(src_nid, src_pid, bitwidth);
@@ -222,21 +222,21 @@ void Pass_dfg::trans(LGraph *dfg) {
       }
 
       //set wirename of the subg node back to empty to avoid yosys code generation conflict of count_id(cell->name)
-      dfg->set_node_wirename(idx,"subg_tmp_wire");
+      dfg->set_node_wirename(nid,"subg_tmp_wire");
     }
   }
 
-  for(auto idx : dfg->fast()) {
-      if(dfg->node_type_get(idx).op == Equals_Op) {
-        dfg->set_bits(idx, 1);
-      } else if(dfg->node_type_get(idx).op == GreaterEqualThan_Op) {
-        dfg->set_bits(idx, 1);
-      } else if(dfg->node_type_get(idx).op == GreaterThan_Op) {
-        dfg->set_bits(idx, 1);
-      } else if(dfg->node_type_get(idx).op == LessEqualThan_Op) {
-        dfg->set_bits(idx, 1);
-      } else if(dfg->node_type_get(idx).op == LessThan_Op) {
-        dfg->set_bits(idx, 1);
+  for(auto nid : dfg->fast()) {
+      if(dfg->node_type_get(nid).op == Equals_Op) {
+        dfg->set_bits(nid, 1);
+      } else if(dfg->node_type_get(nid).op == GreaterEqualThan_Op) {
+        dfg->set_bits(nid, 1);
+      } else if(dfg->node_type_get(nid).op == GreaterThan_Op) {
+        dfg->set_bits(nid, 1);
+      } else if(dfg->node_type_get(nid).op == LessEqualThan_Op) {
+        dfg->set_bits(nid, 1);
+      } else if(dfg->node_type_get(nid).op == LessThan_Op) {
+        dfg->set_bits(nid, 1);
       } else {
         ;
       }
@@ -244,20 +244,20 @@ void Pass_dfg::trans(LGraph *dfg) {
 }
 
 void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
-  for(auto idx : dfg->fast()){
-    uint16_t nid_size = dfg->get_bits(idx);
+  for(auto nid : dfg->fast()){
+    uint16_t nid_size = dfg->get_bits(nid); // FIXME!!! This is just getting bits from PID 0
     if(nid_size == 0){
-      Node_bitwidth &nb = dfg->node_bitwidth_get(idx);
-      fmt::print("nid:{},max:{}\n",idx, nb.i.max);
-      dfg->set_bits(idx, ((uint16_t)floor(log2(nb.i.max))+1));
+      Node_bitwidth &nb = dfg->node_bitwidth_get(nid); // FIXME: it should be Node_pin
+      fmt::print("nid:{},max:{}\n",nid, nb.i.max);
+      dfg->set_bits(nid, ((uint16_t)floor(log2(nb.i.max))+1));
     }
   }
 
-  for(auto idx: dfg->fast()){
-    if(dfg->node_type_get(idx).op == Mux_Op) {
-      for (auto &inp : dfg->inp_edges(idx)) {
-        Index_ID src_nid = inp.get_out_pin().get_nid();
-        Index_ID dst_nid = idx;
+  for(auto nid: dfg->fast()){
+    if(dfg->node_type_get(nid).op == Mux_Op) {
+      for (auto &inp : dfg->inp_edges(nid)) {
+        Index_ID src_nid = dfg->get_node(inp.get_out_pin()).get_nid();
+        Index_ID dst_nid = nid;
         //Port_ID  src_pid = inp.get_out_pin().get_pid();
         Port_ID  dst_pid = inp.get_inp_pin().get_pid();
 
@@ -272,19 +272,19 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
           Index_ID nid_join = dfg->create_node().get_nid();
           dfg->node_type_set(nid_join, Join_Op);
           dfg->set_bits(nid_join, dfg->get_bits(dst_nid));
-          dfg->add_edge(Node_Pin(unsign_ext_nid, 0, false), Node_Pin(nid_join, 1, true));
-          dfg->add_edge(Node_Pin(src_nid, 0, false), Node_Pin(nid_join, 0, true));
-          dfg->add_edge(Node_Pin(nid_join, 0, false), Node_Pin(dst_nid, dst_pid, true));
+          dfg->add_edge(Node_pin(unsign_ext_nid, 0, false), Node_pin(nid_join, 1, true));
+          dfg->add_edge(Node_pin(src_nid, 0, false), Node_pin(nid_join, 0, true));
+          dfg->add_edge(Node_pin(nid_join, 0, false), Node_pin(dst_nid, dst_pid, true));
           dfg->del_edge(inp);
         }
       }
     }
 
     //after MIT algo. and Mux_Op processing, bw of every node should be synced except an output gio connected to a Mux_Op
-    if(dfg->node_type_get(idx).op == GraphIO_Op){
-      for(auto &inp : dfg->inp_edges(idx)){
-        Index_ID src_nid = inp.get_out_pin().get_nid();
-        Index_ID dst_nid = idx;
+    if(dfg->node_type_get(nid).op == GraphIO_Op){
+      for(auto &inp : dfg->inp_edges(nid)){
+        Index_ID src_nid = dfg->get_node(inp.get_out_pin()).get_nid();
+        Index_ID dst_nid = nid;
         if(dfg->get_bits(src_nid) > dfg->get_bits(dst_nid))
           dfg->set_bits(dst_nid, dfg->get_bits(src_nid));
         else//Warning! this is workaround will be eventually wrong after MIT could handle subgraph
@@ -310,10 +310,11 @@ void Pass_dfg::finalize_gconnect(LGraph *dfg, const Aux_node *auxnd_global) {
   fmt::print("finalize global connect\n");
   for(const auto &pair : auxnd_global->get_pendtab()) {
     if(is_output(pair.first)) {
-      Index_ID dst_nid = dfg->get_graph_output(pair.first.substr(1)).get_nid();
+      Index_ID dst_nid = dfg->get_graph_output(pair.first.substr(1)).get_idx();
+      I(dfg->get_node(dst_nid).get_nid() == dst_nid);
       Index_ID src_nid = pair.second;
       Port_ID  src_pid = 0;
-      dfg->add_edge(Node_Pin(src_nid, src_pid, false), Node_Pin(dst_nid, 0, true));
+      dfg->add_edge(Node_pin(src_nid, src_pid, false), Node_pin(dst_nid, 0, true));
       fmt::print("add edge, src_nid:{}, src_pid:{}, dst_nid:{}, dst:pid:{}\n", src_nid, src_pid, dst_nid, 0);
     } else if(is_register(pair.first)) {
       ; // balabala
@@ -499,7 +500,7 @@ void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Index_ID> &src
     // the subgraph IOs connection cannot be resolved at the first pass
     // so just casually connect the top<->subgraph IOs so we could traverse edges and
     // resoved connections after resolving the subgraph instantiation".
-    dfg->add_edge(Node_Pin(src_nid, src_pid, false), Node_Pin(dst_nid, dst_pid, true));
+    dfg->add_edge(Node_pin(src_nid, src_pid, false), Node_pin(dst_nid, dst_pid, true));
   }
 }
 
@@ -586,8 +587,8 @@ void Pass_dfg::assign_to_true(LGraph *dfg, Aux_tree *aux_tree, const std::string
   fmt::print("create node nid:{}\n", node);
   dfg->node_type_set(node, Or_Op);
 
-  dfg->add_edge(Node_Pin(create_true_const(dfg, aux_tree), 0, false), Node_Pin(node, 0, true));
-  dfg->add_edge(Node_Pin(create_true_const(dfg, aux_tree), 0, false), Node_Pin(node, 0, true));
+  dfg->add_edge(Node_pin(create_true_const(dfg, aux_tree), 0, false), Node_pin(node, 0, true));
+  dfg->add_edge(Node_pin(create_true_const(dfg, aux_tree), 0, false), Node_pin(node, 0, true));
 }
 
 void Pass_dfg::attach_outputs(LGraph *dfg, Aux_tree *aux_tree) {
@@ -616,8 +617,8 @@ void Pass_dfg::add_fluid_ports(LGraph *dfg, Aux_tree *aux_tree, std::vector<Inde
 
 Index_ID Pass_dfg::find_cfg_root(const LGraph *cfg) {
   Index_ID root_id=0;
-  cfg->each_input([&root_id](Index_ID idx){
-    root_id = idx;
+  cfg->each_input([&root_id](Index_ID nid){
+    root_id = nid;
   });
   I(root_id!=0);
 
@@ -628,7 +629,7 @@ Index_ID Pass_dfg::find_cfg_root(const LGraph *cfg) {
 
 Index_ID Pass_dfg::get_cfg_child(const LGraph *cfg, Index_ID node) {
   for(const auto &cedge : cfg->out_edges(node))
-    return cedge.get_inp_pin().get_nid();
+    return cfg->get_node(cedge.get_inp_pin()).get_nid();
 
   return 0;
 }
@@ -727,9 +728,9 @@ void Pass_dfg::create_mux(LGraph *dfg, Aux_node *pauxnd, Index_ID tid, Index_ID 
   Port_ID fin = tp.get_input_match("A");
   Port_ID cin = tp.get_input_match("S");
 
-  dfg->add_edge(Node_Pin(tid, 0, false), Node_Pin(phi, tin, true));
-  dfg->add_edge(Node_Pin(fid, 0, false), Node_Pin(phi, fin, true));
-  dfg->add_edge(Node_Pin(cond, 0, false), Node_Pin(phi, cin, true));
+  dfg->add_edge(Node_pin(tid, 0, false), Node_pin(phi, tin, true));
+  dfg->add_edge(Node_pin(fid, 0, false), Node_pin(phi, fin, true));
+  dfg->add_edge(Node_pin(cond, 0, false), Node_pin(phi, cin, true));
   pauxnd->set_alias(var, phi);
   pauxnd->set_pending(var, phi);
 }

@@ -1,0 +1,14 @@
+// code/ranges1.prp
+I (1 2 3) == 1...4 == 1..3
+I (0..7 ..by.. 2) == (0 2 4 6)
+I 0..15 ..by.. (2 3) == (0 2 5 7 10 12 15)
+I (1..2) ..union.. 3 == (1..3)
+I (1..10) ..intersect.. (2..20) == (2..10)
+// Ranges can be open
+I (3..) ..intersect.. (1..5) == (3..5)
+I (..)  ..intersect.. (1..2) == (1..2)
+I (..4) ..union..     (2..3) == (..4)
+I (2..) == (2..-1)
+I (..3) == (-1..3)
+// Ranges can be converted to values
+// I (1..3)[[]]  // compile error

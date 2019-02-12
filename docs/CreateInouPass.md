@@ -18,8 +18,7 @@ In the file pass/<my\_pass>/my\_pass.hpp:
 ```cpp
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#ifndef <MYPASS>_HPP_
-#define <MYPASS>_HPP_
+#pragma once
 
 #include "pass.hpp"
 #include "lgraph.hpp"
@@ -37,7 +36,6 @@ class <My_pass> : public Pass {
   static void pass(Eprp_var &var);
 };
 
-#endif
 ```
 
 In the file pass/<my\_pass>/my\_pass.cpp:
@@ -148,3 +146,4 @@ In the pass\_<my_pass>.cpp file:
   <my_other_pass>.add_label_optional("path","lgdb path","lgdb");
   register_pass(<my_other_pass>);
 ```
+

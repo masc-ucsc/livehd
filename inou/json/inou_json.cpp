@@ -137,8 +137,8 @@ void Inou_json::from_json(LGraph *g, rapidjson::Document &document) {
           if(output_edge.HasMember("out_dst_pid")) {
             dst_pid = output_edge["out_dst_pid"].GetUint();
           }
-          Node_Pin src_pin(last_nid, dst_pid, false);
-          Node_Pin dst_pin(dst_nid, src_pid, true);
+          Node_pin src_pin(last_nid, dst_pid, false);
+          Node_pin dst_pin(dst_nid, src_pid, true);
           if(output_edge.HasMember("out_src_bits")) {
             int bits = output_edge["out_src_bits"].GetInt();
             g->add_edge(src_pin, dst_pin, bits);
@@ -318,10 +318,9 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
           writer.Key("out_dst_pid");
           writer.Uint64(out.get_inp_pin().get_pid());
           if(out.is_root()) {
-            auto  node_idx   = out.get_out_pin().get_nid();
             auto  node       = g->get_dest_node(out);
             float node_delay = node.delay_get();
-            int   node_width = g->get_bits(node_idx);
+            int   node_width = g->get_bits(out.get_out_pin());
             if(node_delay != 0) {
               writer.Key("delay");
               writer.Double(node_delay);

@@ -1,0 +1,10 @@
+// code/mem3.prp
+// Enforce #rd and wr ports in SRAM
+@a as __bits:8 __size:1024 __wrports:1
+@cycle     as __bits:8
+@cycle += 13
+@_cycle_m1  = @cycle + 13 - 1
+@_cycle_p13 = @cycle + 13
+@_cycle_neg = ~(@cycle + 13)
+@a[@_cycle_p13] == @_cycle_m1
+%out = @a[@_cycle_neg]

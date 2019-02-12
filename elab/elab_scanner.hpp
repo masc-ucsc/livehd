@@ -194,6 +194,7 @@ public:
   }
 
   bool scan_next();
+  bool scan_prev();
 
   void set_max_errors(int n) { max_errors = n; }
   void set_max_warning(int n) { max_warnings = n; }

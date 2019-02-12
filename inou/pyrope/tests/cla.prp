@@ -3,7 +3,7 @@
 g = $a & $b // Generate
 p = $a ^ $b // Propagate
 // 4 bit: c = g[[3]] | g[[2]] & p[[3]] | g[[1]] & p[[3]] & p[[2]] |...
-c = $cin & &.(p)  // &.(p) is and reduction fcall with p as argument
+c = $cin & p.and_reduction  // &.(p) is and reduction fcall with p as argument
 for i:(0..a.__bits) {
   _tmp = g[[i]]
   for j:(i..(a.__bits-1)) {

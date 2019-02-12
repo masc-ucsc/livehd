@@ -219,15 +219,7 @@ void Chunkify_verilog::elaborate() {
           scan_error(fmt::format("found endmodule without corresponding module"));
         }
       }
-    } else if(scan_is_token(Token_id_comment)) { // Before Token_id_comma
-      // Drop comment, to avoid unneeded recompilations
-      if (in_module)
-        in_module_text.append("\n");
-      else
-        not_in_module_text.append("\n");
-      scan_next();
-      continue;
-    } else if(scan_is_token(Token_id_comma) || scan_is_token(Token_id_semicolon) || scan_is_token(Token_id_cp)) {
+    } else if(scan_is_token(Token_id_comma) || scan_is_token(Token_id_semicolon) || scan_is_token(Token_id_cp) || scan_is_token(Token_id_comment)) { // Before Token_id_comma
       if(last_input || last_output) {
         if(in_module && scan_is_prev_token(Token_id_alnum)) {
           std::string label;
@@ -239,6 +231,14 @@ void Chunkify_verilog::elaborate() {
         }
         last_input  = false;
         last_output = false;
+      }
+      if (scan_is_token(Token_id_comment)) {
+        if (in_module)
+          in_module_text.append("\n");
+        else
+          not_in_module_text.append("\n");
+        scan_next();
+        continue;
       }
     }
     if(!in_module && !endmodule_found) {

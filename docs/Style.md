@@ -175,12 +175,27 @@ foo = new Sweet_potato(3, 7)
 fmt::print("This is a debug message, name = {}, id = {}\n",g->get_name(), idx);
 ```
 
-## Use console log lg to report errors/warnings/info
+## Use Pass:: report errors/warnings/info
 
 ```cpp
 Pass::error("inou_yaml: can only have a yaml_input or a graph_name, not both");
 Pass::warn("inou_yaml.to_lg: output:{} input:{} graph:{}", output, input, graph_name);
 ```
+
+## Use accessors consistently
+
+* get_XX(): gets XX from object without side effects, it should return always
+  (assert if it does not exist)
+* find_XX(): gets XX from object without side effects, if it does not exist,
+  returns null or false, or ??
+* setup_XX(): gets XX from object, if it does not exists, it creates it
+* create_XX(): clears previous XX from object, and creates a new and returns it
+* set_XX(): sets XX to object, it creates if it does not exist. Similar to
+  create, but does not return reference.
+
+If a variable is const, it can be exposed directly without get/set accessors
+
+foo = x.const_var;  // No need to have x.get_const_var()
 
 ## Use bitarray class to have a compact bitvector marker
 

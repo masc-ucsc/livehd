@@ -1,0 +1,19 @@
+// code/controlflow1.prp
+if cond1 {
+  I cond1
+}elif cond2 {
+  I !cond1 and cond2
+}
+unique if cond3 {
+  I  cond3 and !cond4
+}elif cond4 {
+  I !cond3 and  cond4
+}else{
+  I !cond3 and !cond4
+}
+unique if cond5 {
+  I  cond5 and !cond6
+}elif cond6 {
+  I !cond5 and  cond6
+}
+I cond5 or cond6 // Unique implies full too

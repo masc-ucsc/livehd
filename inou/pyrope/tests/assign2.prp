@@ -1,0 +1,9 @@
+// code/assign2.prp
+_tmp1 = $a  // read that can trigger restart
+_tmp2 = $b
+try {
+  %out1 = _tmp1 + 1 // guarantee no restart (reread)
+}
+try {
+  %out2 = _tmp2 + 1
+}

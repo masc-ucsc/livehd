@@ -26,8 +26,8 @@ Live_structural::Live_structural(Stitch_pass_options &pack) {
   }
 }
 
-Node_Pin Live_structural::get_inp_edge(LGraph *current, Index_ID nid, Port_ID pid) {
-  Node_Pin candidate(1, 1, false);
+Node_pin Live_structural::get_inp_edge(LGraph *current, Index_ID nid, Port_ID pid) {
+  Node_pin candidate(1, 1, false);
   bool     found = false;
   for (auto &inp : current->inp_edges(nid)) {
     if (inp.get_inp_pin().get_pid()) {
@@ -78,15 +78,15 @@ void Live_structural::replace(LGraph *nsynth) {
       discovered.push(queue_element(pred.get_inp_pin().get_pid(), current_.priority + 1));
       for (auto &orig_pred : original->inp_edges(candidate_current)) {
         if (orig_pred.get_inp_pin().get_pid() == pred.get_inp_pin().get_pid()) {
-          if (candidate_equiv.find(pred.get_out_pin().get_nid()) == candidate_equiv.end()) {
-            candidate_equiv[pred.get_out_pin().get_nid()] = orig_pred.get_out_pin().get_nid();
+          if (candidate_equiv.find(pred.get_out_pin().get_idx()) == candidate_equiv.end()) {
+            candidate_equiv[pred.get_out_pin().get_idx()] = orig_pred.get_out_pin().get_idx();
           } else {
-            if (candidate_equiv[pred.get_out_pin().get_nid()] != orig_pred.get_out_pin().get_nid()) {
-              no_match.insert(pred.get_out_pin().get_nid());
+            if (candidate_equiv[pred.get_out_pin().get_idx()] != orig_pred.get_out_pin().get_idx()) {
+              no_match.insert(pred.get_out_pin().get_idx());
             }
           }
-          if (visited.find(pred.get_out_pin().get_nid()) == visited.end()) {
-            discovered.push(queue_element(pred.get_out_pin().get_nid(), prio + 1));
+          if (visited.find(pred.get_out_pin().get_idx()) == visited.end()) {
+            discovered.push(queue_element(pred.get_out_pin().get_idx(), prio + 1));
           }
         }
       }

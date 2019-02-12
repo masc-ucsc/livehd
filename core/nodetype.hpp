@@ -34,22 +34,31 @@ enum Node_Type_Op : uint64_t {
   Not_Op,
   Join_Op,
   Pick_Op,
+#if 1
+  // WARNING: deprecated once we have LUTs working (mockturtle)
   And_Op,
   Or_Op,
   Xor_Op,
+#endif
   SFlop_Op,  // sync reset flop
   AFlop_Op,  // async reset flop
   Latch_Op,
   FFlop_Op,
   Memory_Op,
+#if 1
+  // WARNING: deprecated once we have LUTs working (mockturtle)
   LessThan_Op,
   GreaterThan_Op,
   LessEqualThan_Op,
   GreaterEqualThan_Op,
   Equals_Op,
-  Mux_Op,
+#endif
+  Mux_Op, // WARNING: Trivial MUX (not bus muxes) converted to LUT
+#if 1
+  // WARNING: deprecated once we have LUTs working (mockturtle)
   ShiftRight_Op,
   ShiftLeft_Op,
+#endif
   GraphIO_Op,
   DontCare_Op,
   CfgAssign_Op,
@@ -169,6 +178,15 @@ public:
     return false;
   }
 
+  bool has_output(Port_ID pid) const {
+    return outputs.size() > pid || outputs.empty(); // no default outputs for blocks like Tech/subgraph....
+  }
+  bool has_input(Port_ID pid) const {
+    return inputs.size() > pid || inputs.empty(); // no default outputs for blocks like Tech/subgraph....
+  }
+  bool has_single_output() const { return outputs.size() == 1; }
+  bool has_single_input() const  { return inputs.size()  == 1; }
+
   bool is_pipelined() const { return pipelined; }  // Can create loops
 
   class _init {
@@ -252,12 +270,6 @@ public:
 class Node_Type_Join : public Node_Type {
 public:
   Node_Type_Join() : Node_Type("join", Join_Op, false) {
-    inputs.push_back("A");
-    inputs.push_back("B");
-    inputs.push_back("C");
-    inputs.push_back("D");
-    inputs.push_back("E");
-    inputs.push_back("F");
     outputs.push_back("Y");
   };
 };
@@ -748,7 +760,8 @@ public:
   void     node_subgraph_set(Index_ID nid, uint32_t subgraphid);
   uint32_t subgraph_id_get(Index_ID nid) const;
 
-  void             node_const_type_set(Index_ID nid, std::string_view value, bool enforce_bits = true);
+  void             node_const_type_set(Index_ID nid, std::string_view value);
+  void             node_const_type_set_string(Index_ID nid, std::string_view value);
   std::string_view node_const_value_get(Index_ID nid) const;
 
   void     node_tmap_set(Index_ID nid, uint32_t tmapid);

@@ -4,17 +4,63 @@
 #include "lgraph.hpp"
 
 bool test0() {
-  LGraph *g = LGraph::create("core_test_lgdb", "test0", "test");
+  LGraph *g = LGraph::create("lgdb_core_test", "test0", "test");
 
-  Index_ID idx1 = g->create_node().get_nid();
-  g->create_node().get_nid();
+  auto n1 = g->create_node(SubGraph_Op);
+  auto n2 = g->create_node(SubGraph_Op);
 
-  g->get_idx_from_pid(idx1, 20);
+  auto driver_pin20  = n1.setup_driver_pin(20);
+  auto sink_pin120 = n2.setup_sink_pin(120);
 
-  for(auto &out : g->out_edges(idx1)) {
-    assert(false);
+  for(auto &out : g->out_edges(n1.get_nid())) {
+    I(false);
     (void)out; // just to silence the warning
   }
+  for(auto &out : g->out_edges(n2.get_nid())) {
+    I(false);
+    (void)out; // just to silence the warning
+  }
+
+  g->add_edge(driver_pin20,sink_pin120);
+  int conta=0;
+  for(auto &out : g->out_edges(n1.get_nid())) {
+    conta++;
+    (void)out;
+  }
+  I(conta==1);
+  for(auto &out : g->out_edges(n2.get_nid())) {
+    I(false);
+    (void)out; // just to silence the warning
+  }
+
+  for(int i=30;i<330;i++) {
+    auto s = n1.setup_driver_pin(i);
+    g->add_edge(s,sink_pin120);
+  }
+  conta = 0;
+  for(auto &out : g->out_edges(n1.get_nid())) {
+    conta++;
+    (void)out;
+  }
+  I(conta == (1+300));
+
+  for(int i=200;i<1200;i++) {
+    auto s = n1.setup_driver_pin((i&31) + 20);
+    auto p = n2.setup_sink_pin(i);
+    g->add_edge(s,p);
+  }
+  conta = 0;
+  for(auto &out : g->out_edges(n1.get_nid())) {
+    conta++;
+    (void)out;
+  }
+  I(conta == (1+300+1000));
+  conta = 0;
+  for(auto &out : g->inp_edges(n2.get_nid())) {
+    conta++;
+    (void)out;
+  }
+  I(conta == (1+300+1000));
 
   g->close();
 
@@ -22,16 +68,16 @@ bool test0() {
 }
 
 bool test1() {
-  LGraph *g = LGraph::create("core_test_lgdb", "test", "test");
+  LGraph *g = LGraph::create("lgdb_core_test", "test", "test");
 
-  Index_ID idx1 = g->create_node().get_nid();
-  Index_ID idx2 = g->create_node().get_nid();
+  Index_ID idx1 = g->create_node(SubGraph_Op).get_nid();
+  Index_ID idx2 = g->create_node(SubGraph_Op).get_nid();
 
-  g->add_edge(Node_Pin(idx1, 20, false), Node_Pin(idx2, 25, true));
+  g->add_edge(Node_pin(idx1, 20, false), Node_pin(idx2, 25, true));
 
   for(auto &out : g->out_edges(idx1)) {
-    assert(out.get_inp_pin().get_nid() == idx2);
-    assert(out.get_out_pin().get_nid() == idx1);
+    assert(out.get_inp_pin().get_idx() == idx2);
+    assert(out.get_out_pin().get_idx() == idx1);
 
     assert(out.get_inp_pin().get_pid() == 25);
     assert(out.get_out_pin().get_pid() == 20);
@@ -41,8 +87,8 @@ bool test1() {
   }
 
   for(auto &inp : g->inp_edges(idx2)) {
-    assert(inp.get_inp_pin().get_nid() == idx2);
-    assert(inp.get_out_pin().get_nid() == idx1);
+    assert(inp.get_inp_pin().get_idx() == idx2);
+    assert(inp.get_out_pin().get_idx() == idx1);
 
     assert(inp.get_inp_pin().get_pid() == 25);
     assert(inp.get_out_pin().get_pid() == 20);
@@ -57,12 +103,12 @@ bool test1() {
 }
 
 bool test20() {
-  LGraph *g = LGraph::create("core_test_lgdb", "test20", "test");
+  LGraph *g = LGraph::create("lgdb_core_test", "test20", "test");
 
-  Index_ID idx1 = g->create_node().get_nid();
-  Index_ID idx2 = g->create_node().get_nid();
+  Index_ID idx1 = g->create_node(SubGraph_Op).get_nid();
+  Index_ID idx2 = g->create_node(SubGraph_Op).get_nid();
 
-  g->add_edge(Node_Pin(idx1, 0, false), Node_Pin(idx2, 0, true));
+  g->add_edge(Node_pin(idx1, 0, false), Node_pin(idx2, 0, true));
 
   for(auto &inp : g->inp_edges(idx2)) {
     g->del_edge(inp);
@@ -85,12 +131,12 @@ bool test20() {
 
 bool test21() {
 
-  LGraph *g = LGraph::create("core_test_lgdb", "test21", "test");
+  LGraph *g = LGraph::create("lgdb_core_test", "test21", "test");
 
-  Index_ID idx1 = g->create_node().get_nid();
-  Index_ID idx2 = g->create_node().get_nid();
+  Index_ID idx1 = g->create_node(SubGraph_Op).get_nid();
+  Index_ID idx2 = g->create_node(SubGraph_Op).get_nid();
 
-  g->add_edge(Node_Pin(idx1, 0, false), Node_Pin(idx2, 0, true));
+  g->add_edge(Node_pin(idx1, 0, false), Node_pin(idx2, 0, true));
 
   for(auto &out : g->out_edges(idx1)) {
     g->del_edge(out);
@@ -113,12 +159,12 @@ bool test21() {
 
 bool test2() {
 
-  LGraph *g = LGraph::create("core_test_lgdb", "test2", "test");
+  LGraph *g = LGraph::create("lgdb_core_test", "test2", "test");
 
-  Index_ID idx1 = g->create_node().get_nid();
-  Index_ID idx2 = g->create_node().get_nid();
+  Index_ID idx1 = g->create_node(SubGraph_Op).get_nid();
+  Index_ID idx2 = g->create_node(SubGraph_Op).get_nid();
 
-  g->add_edge(Node_Pin(idx1, 20, false), Node_Pin(idx2, 25, true));
+  g->add_edge(Node_pin(idx1, 20, false), Node_pin(idx2, 25, true));
 
   for(auto &inp : g->inp_edges(idx2)) {
     g->del_edge(inp);
@@ -141,12 +187,12 @@ bool test2() {
 
 bool test22() {
 
-  LGraph *g = LGraph::create("core_test_lgdb", "test22", "test");
+  LGraph *g = LGraph::create("lgdb_core_test", "test22", "test");
 
-  Index_ID idx1 = g->create_node().get_nid();
-  Index_ID idx2 = g->create_node().get_nid();
+  Index_ID idx1 = g->create_node(SubGraph_Op).get_nid();
+  Index_ID idx2 = g->create_node(SubGraph_Op).get_nid();
 
-  g->add_edge(Node_Pin(idx1, 20, false), Node_Pin(idx2, 25, true));
+  g->add_edge(Node_pin(idx1, 20, false), Node_pin(idx2, 25, true));
 
   for(auto &out : g->out_edges(idx1)) {
     g->del_edge(out);
@@ -169,12 +215,12 @@ bool test22() {
 
 bool test3() {
 
-  LGraph *g = LGraph::create("core_test_lgdb", "test3", "test");
+  LGraph *g = LGraph::create("lgdb_core_test", "test3", "test");
 
-  Index_ID idx1 = g->create_node().get_nid();
-  Index_ID idx2 = g->create_node().get_nid();
+  Index_ID idx1 = g->create_node(SubGraph_Op).get_nid();
+  Index_ID idx2 = g->create_node(SubGraph_Op).get_nid();
 
-  g->add_edge(Node_Pin(idx1, 20, false), Node_Pin(idx2, 25, true));
+  g->add_edge(Node_pin(idx1, 20, false), Node_pin(idx2, 25, true));
 
   for(auto &inp : g->inp_edges(idx2)) {
     g->del_edge(inp);
@@ -203,12 +249,12 @@ bool test3() {
 
 bool test4() {
 
-  LGraph *g = LGraph::create("core_test_lgdb", "test4", "test");
+  LGraph *g = LGraph::create("lgdb_core_test", "test4", "test");
 
-  Index_ID idx1 = g->create_node().get_nid();
-  Index_ID idx2 = g->create_node().get_nid();
+  Index_ID idx1 = g->create_node(SubGraph_Op).get_nid();
+  Index_ID idx2 = g->create_node(SubGraph_Op).get_nid();
 
-  g->add_edge(Node_Pin(idx1, 20, false), Node_Pin(idx2, 25, true));
+  g->add_edge(Node_pin(idx1, 20, false), Node_pin(idx2, 25, true));
 
   g->del_node(idx2);
 
