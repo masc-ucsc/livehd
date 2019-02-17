@@ -27,7 +27,7 @@ Live_structural::Live_structural(Stitch_pass_options &pack) {
 }
 
 Node_pin Live_structural::get_inp_edge(LGraph *current, Index_ID nid, Port_ID pid) {
-  Node_pin candidate(1, 1, false);
+  Node_pin candidate;
   bool     found = false;
   for (auto &inp : current->inp_edges(nid)) {
     if (inp.get_inp_pin().get_pid()) {

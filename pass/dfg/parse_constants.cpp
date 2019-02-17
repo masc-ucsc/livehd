@@ -198,20 +198,20 @@ Index_ID Pass_dfg::process_bin_token(LGraph *g, const std::string &token, const 
     while(t_size - 32 * i > 0) {
       // fmt::print("@round{}, token_chunk:                  {}\n", i, token_chunk);
       nid_const32 = create_const32_node(g, token_chunk, 32, is_signed);
-      inp_pins.emplace_back(Node_pin(nid_const32, 0, false));
+      inp_pins.emplace_back(g->get_node(nid_const32).setup_driver_pin());
       if(t_size - (32 * (i + 1)) > 0)
         token_chunk = token.substr(t_size - 32 * (i + 1), 32);
       else {
         token_chunk = token.substr(0, t_size - 32 * i);
         // fmt::print("@round{}, token_chunk:                 {}\n", i+1, token_chunk);
         nid_const32 = create_const32_node(g, token_chunk, token_chunk.size(), is_signed);
-        inp_pins.emplace_back(Node_pin(nid_const32, 0, false));
+        inp_pins.emplace_back(g->get_node(nid_const32).setup_driver_pin());
       }
       i++;
     }
     int pid = 0;
     for(auto &inp_pin : inp_pins) {
-      g->add_edge(inp_pin, Node_pin(nid_join, pid, true));
+      g->add_edge(inp_pin, g->get_node(nid_join).setup_sink_pin(pid));
       pid++;
     }
     return nid_join;
@@ -236,34 +236,34 @@ Index_ID Pass_dfg::process_bin_token_with_dc(LGraph *g, const std::string &token
     if(token[i] == '?') {
       if(sval_buf.size()) {
         Index_ID nid_const32 = create_const32_node(g, sval_buf, sval_buf.size(), is_signed);
-        inp_pins.push_back(Node_pin(nid_const32, 0, false));
+        inp_pins.push_back(g->get_node(nid_const32).setup_driver_pin());
         sval_buf.clear();
       }
       sdc_buf += '?';
       if(i == token_size - 1) {
         Index_ID nid_dc = create_dontcare_node(g, sdc_buf.size());
-        inp_pins.push_back(Node_pin(nid_dc, 0, false));
+        inp_pins.push_back(g->get_node(nid_dc).setup_driver_pin());
       } else if(i + 1 < token_size && token[i + 1] != '?') {
         Index_ID nid_dc = create_dontcare_node(g, sdc_buf.size());
-        inp_pins.push_back(Node_pin(nid_dc, 0, false));
+        inp_pins.push_back(g->get_node(nid_dc).setup_driver_pin());
         sdc_buf.clear();
       }
     } else { // token[i] = some value char
       sval_buf += token[i];
       if(sval_buf.size() == 32) {
         Index_ID nid_const32 = create_const32_node(g, sval_buf, 32, is_signed);
-        inp_pins.push_back(Node_pin(nid_const32, 0, false));
+        inp_pins.push_back(g->get_node(nid_const32).setup_driver_pin());
         sval_buf = sval_buf.substr(32);
       } else if(i == token_size - 1) {
         Index_ID nid_const32 = create_const32_node(g, sval_buf, sval_buf.size(), is_signed);
-        inp_pins.push_back(Node_pin(nid_const32, 0, false));
+        inp_pins.push_back(g->get_node(nid_const32).setup_driver_pin());
       }
     }
   }
 
   int pid = 0;
   for(auto &inp_pin : inp_pins) {
-    g->add_edge(inp_pin, Node_pin(nid_join, pid, true));
+    g->add_edge(inp_pin, g->get_node(nid_join).setup_sink_pin(pid));
     pid++;
   }
   return nid_join;

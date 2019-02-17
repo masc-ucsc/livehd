@@ -19,7 +19,7 @@ USING_YOSYS_NAMESPACE
 class Lgyosys_dump : public Inou {
 private:
   RTLIL::Design *design;
-  RTLIL::Wire *  get_wire(Index_ID idx, Port_ID pid, bool can_fail);
+  RTLIL::Wire *  get_wire(const Node_pin &pin);
 
   void to_yosys(const LGraph *g);
 
@@ -63,7 +63,7 @@ private:
   RTLIL::Wire *create_tree(const LGraph *g, std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod, add_cell_fnc_sign add_cell,
                            bool sign, RTLIL::Wire *result_wire);
 
-  RTLIL::Wire *create_wire(const LGraph *g, const Index_ID idx, RTLIL::Module *module, bool input, bool output);
+  RTLIL::Wire *create_io_wire(const LGraph *g, const Node_pin &pin, RTLIL::Module *module);
   void         create_wires(const LGraph *g, RTLIL::Module *module);
 
   void create_blackbox(const LGraph &subgraph, RTLIL::Design *design);

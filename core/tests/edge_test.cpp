@@ -73,11 +73,14 @@ bool test1() {
   Index_ID idx1 = g->create_node(SubGraph_Op).get_nid();
   Index_ID idx2 = g->create_node(SubGraph_Op).get_nid();
 
-  g->add_edge(Node_pin(idx1, 20, false), Node_pin(idx2, 25, true));
+  auto dpin = g->get_node(idx1).setup_driver_pin(20);
+  auto spin = g->get_node(idx2).setup_sink_pin(25);
+  
+  g->add_edge(dpin, spin);
 
   for(auto &out : g->out_edges(idx1)) {
-    assert(out.get_inp_pin().get_idx() == idx2);
-    assert(out.get_out_pin().get_idx() == idx1);
+    assert(out.get_inp_pin().get_idx() == spin.get_idx());
+    assert(out.get_out_pin().get_idx() == dpin.get_idx());
 
     assert(out.get_inp_pin().get_pid() == 25);
     assert(out.get_out_pin().get_pid() == 20);
@@ -87,8 +90,8 @@ bool test1() {
   }
 
   for(auto &inp : g->inp_edges(idx2)) {
-    assert(inp.get_inp_pin().get_idx() == idx2);
-    assert(inp.get_out_pin().get_idx() == idx1);
+    assert(inp.get_inp_pin().get_idx() == spin.get_idx());
+    assert(inp.get_out_pin().get_idx() == dpin.get_idx());
 
     assert(inp.get_inp_pin().get_pid() == 25);
     assert(inp.get_out_pin().get_pid() == 20);
@@ -108,7 +111,10 @@ bool test20() {
   Index_ID idx1 = g->create_node(SubGraph_Op).get_nid();
   Index_ID idx2 = g->create_node(SubGraph_Op).get_nid();
 
-  g->add_edge(Node_pin(idx1, 0, false), Node_pin(idx2, 0, true));
+  auto dpin = g->get_node(idx1).setup_driver_pin(0);
+  auto spin = g->get_node(idx2).setup_sink_pin(3);
+
+  g->add_edge(dpin, spin, 33);
 
   for(auto &inp : g->inp_edges(idx2)) {
     g->del_edge(inp);
@@ -136,7 +142,10 @@ bool test21() {
   Index_ID idx1 = g->create_node(SubGraph_Op).get_nid();
   Index_ID idx2 = g->create_node(SubGraph_Op).get_nid();
 
-  g->add_edge(Node_pin(idx1, 0, false), Node_pin(idx2, 0, true));
+  auto dpin = g->get_node(idx1).setup_driver_pin(0);
+  auto spin = g->get_node(idx2).setup_sink_pin(0);
+
+  g->add_edge(dpin, spin, 33);
 
   for(auto &out : g->out_edges(idx1)) {
     g->del_edge(out);
@@ -164,7 +173,10 @@ bool test2() {
   Index_ID idx1 = g->create_node(SubGraph_Op).get_nid();
   Index_ID idx2 = g->create_node(SubGraph_Op).get_nid();
 
-  g->add_edge(Node_pin(idx1, 20, false), Node_pin(idx2, 25, true));
+  auto dpin = g->get_node(idx1).setup_driver_pin(20);
+  auto spin = g->get_node(idx2).setup_sink_pin(30);
+
+  g->add_edge(dpin, spin, 33);
 
   for(auto &inp : g->inp_edges(idx2)) {
     g->del_edge(inp);
@@ -192,7 +204,10 @@ bool test22() {
   Index_ID idx1 = g->create_node(SubGraph_Op).get_nid();
   Index_ID idx2 = g->create_node(SubGraph_Op).get_nid();
 
-  g->add_edge(Node_pin(idx1, 20, false), Node_pin(idx2, 25, true));
+  auto dpin = g->get_node(idx1).setup_driver_pin(20);
+  auto spin = g->get_node(idx2).setup_sink_pin(0);
+
+  g->add_edge(dpin, spin, 33);
 
   for(auto &out : g->out_edges(idx1)) {
     g->del_edge(out);
@@ -220,7 +235,7 @@ bool test3() {
   Index_ID idx1 = g->create_node(SubGraph_Op).get_nid();
   Index_ID idx2 = g->create_node(SubGraph_Op).get_nid();
 
-  g->add_edge(Node_pin(idx1, 20, false), Node_pin(idx2, 25, true));
+  g->add_edge(g->get_node(idx1).setup_driver_pin(20), g->get_node(idx2).setup_sink_pin(25));
 
   for(auto &inp : g->inp_edges(idx2)) {
     g->del_edge(inp);
@@ -251,10 +266,11 @@ bool test4() {
 
   LGraph *g = LGraph::create("lgdb_core_test", "test4", "test");
 
-  Index_ID idx1 = g->create_node(SubGraph_Op).get_nid();
-  Index_ID idx2 = g->create_node(SubGraph_Op).get_nid();
+  Index_ID idx1  = g->create_node(SubGraph_Op).get_nid();
+  auto idx2_node = g->create_node(SubGraph_Op);
+  Index_ID idx2  = idx2_node.get_nid();
 
-  g->add_edge(Node_pin(idx1, 20, false), Node_pin(idx2, 25, true));
+  g->add_edge(g->get_node(idx1).setup_driver_pin(20), idx2_node.setup_sink_pin(25));
 
   g->del_node(idx2);
 
