@@ -723,7 +723,7 @@ static LGraph *process_module(RTLIL::Module *module) {
         size = cell->parameters["\\Y_WIDTH"].as_int();
 
       g->add_edge(i_node.setup_driver_pin(1), o_node.setup_sink_pin(), size); // OR
-      g->set_bits(o_node.setup_driver_pin(), 1); // NOT
+      g->set_bits(o_node.setup_driver_pin(), size); // NOT
 
     } else if(std::strncmp(cell->type.c_str(), "$or", 3) == 0 || std::strncmp(cell->type.c_str(), "$logic_or", 9) == 0 ||
               std::strncmp(cell->type.c_str(), "$reduce_or", 10) == 0 ||
@@ -750,7 +750,7 @@ static LGraph *process_module(RTLIL::Module *module) {
       if(std::strncmp(cell->type.c_str(), "$xnor", 5) == 0)
         g->add_edge(i_node.setup_driver_pin(0), not_node.setup_sink_pin());
       else
-        g->add_edge(i_node.setup_driver_pin(1), not_node.setup_sink_pin(), 1);
+        g->add_edge(i_node.setup_driver_pin(1), not_node.setup_sink_pin(), size);
 
     } else if(std::strncmp(cell->type.c_str(), "$dff", 4) == 0) {
       op = SFlop_Op;
