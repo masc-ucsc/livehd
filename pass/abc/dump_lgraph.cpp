@@ -36,13 +36,10 @@ void Pass_abc::gen_primary_io_from_abc(LGraph *new_graph, const LGraph *old_grap
     if(input_name[0] == '%' && input_name[input_name.size() - 1] == '%') {
       continue;
     } else {
-      Index_ID io_idx = new_graph->add_graph_input(Abc_ObjName(pNet), 0, 1, 0);
-      new_graph->set_node_wirename(io_idx, Abc_ObjName(pNet));
-      new_graph->set_bits(io_idx, 1);
-      new_graph->node_type_set(io_idx, GraphIO_Op);
-      graph_info->cell2id[pNet]               = io_idx;
-      graph_info->cell_out_pid[io_idx]        = 0;
-      graph_info->io_remap[Abc_ObjName(pNet)] = io_idx;
+      auto io_node = new_graph->add_graph_input(Abc_ObjName(pNet), 0, 1, 0);
+      graph_info->cell2id[pNet]                   = io_node.get_idx();
+      graph_info->cell_out_pid[io_node.get_idx()] = io_node.get_pid();
+      graph_info->io_remap[Abc_ObjName(pNet)]     = io_node.get_idx();
     }
 
     if(graph_info->skew_group_map.find(input_name) != graph_info->skew_group_map.end()) {
@@ -59,13 +56,10 @@ void Pass_abc::gen_primary_io_from_abc(LGraph *new_graph, const LGraph *old_grap
     if(output_name[0] == '%' && output_name[output_name.size() - 1] == '%') {
       continue;
     } else {
-      Index_ID io_idx = new_graph->add_graph_output(Abc_ObjName(pNet), 0, 1, 0);
-      new_graph->set_node_wirename(io_idx, Abc_ObjName(pNet));
-      new_graph->set_bits(io_idx, 1);
-      new_graph->node_type_set(io_idx, GraphIO_Op);
-      graph_info->cell2id[pTerm]              = io_idx;
-      graph_info->cell_out_pid[io_idx]        = 0;
-      graph_info->io_remap[Abc_ObjName(pNet)] = io_idx;
+      auto  io_node = new_graph->add_graph_output(Abc_ObjName(pNet), 0, 1, 0);
+      graph_info->cell2id[pTerm]                  = io_node.get_idx();
+      graph_info->cell_out_pid[io_node.get_idx()] = io_node.get_pid();
+      graph_info->io_remap[Abc_ObjName(pNet)]     = io_node.get_idx();
     }
 
     if(graph_info->skew_group_map.find(output_name) != graph_info->skew_group_map.end()) {
@@ -201,8 +195,9 @@ void Pass_abc::gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, A
 
         Index_ID new_memory_idx = graph_info->memory_remap[old_memory_idx];
         if(LGRAPH_MEMOP_ISWREN(old_inp_pid) || LGRAPH_MEMOP_ISRDEN(old_inp_pid)) {
-          new_graph->add_edge(Node_pin(graph_info->cell2id[pNet], graph_info->cell_out_pid[graph_info->cell2id[pNet]]++, false),
-                              Node_pin(new_memory_idx, old_inp_pid, true));
+          auto dpin = new_graph->get_node(graph_info->cell2id[pNet]).setup_driver_pin(graph_info->cell_out_pid[graph_info->cell2id[pNet]]++);
+          auto spin = new_graph->get_node(new_memory_idx).setup_sink_pin(old_inp_pid);
+          new_graph->add_edge(dpin, spin);
         } else {
           index_offset info      = {new_memory_idx, old_inp_pid, {old_offset, old_offset}};
           memory_input_map[info] = pNet;
@@ -242,34 +237,37 @@ void Pass_abc::gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, A
         if(old_graph->node_type_get(node_idx).op == U32Const_Op) {
           val = old_graph->node_value_get(node_idx);
         }
-        connect_constant(new_graph, val, width, Node_pin(new_memory_idx, old_inp_pid, true));
+        auto spin = new_graph->get_node(new_memory_idx).setup_sink_pin(old_inp_pid);
+        connect_constant(new_graph, val, width, spin);
       } else if(old_inp_pid == LGRAPH_MEMOP_CLK) {
         for(const auto &sg : graph_info->skew_group_map) {
           if(sg.second.find(old_idx) != sg.second.end()) {
             std::string ck_name = sg.first;
-            new_graph->add_edge(
-                Node_pin(graph_info->ck_remap[ck_name], graph_info->cell_out_pid[graph_info->ck_remap[ck_name]]++, false),
-                Node_pin(new_memory_idx, LGRAPH_MEMOP_CLK, true));
+            auto dpin = new_graph->get_node(graph_info->ck_remap[ck_name]).setup_driver_pin(graph_info->cell_out_pid[graph_info->ck_remap[ck_name]]++);
+            auto spin = new_graph->get_node(new_memory_idx).setup_sink_pin(LGRAPH_MEMOP_CLK);
+            new_graph->add_edge(dpin,spin);
           }
         }
       } else if(old_inp_pid == LGRAPH_MEMOP_CE) {
-        new_graph->add_edge(Node_pin(graph_info->cell2id[pNet], graph_info->cell_out_pid[graph_info->cell2id[pNet]]++, false),
-                            Node_pin(new_memory_idx, old_inp_pid, true));
+        auto dpin = new_graph->get_node(graph_info->cell2id[pNet]).setup_driver_pin(graph_info->cell_out_pid[graph_info->cell2id[pNet]]++);
+        auto spin = new_graph->get_node(new_memory_idx).setup_sink_pin(old_inp_pid);
+        new_graph->add_edge(dpin,spin);
       } else if(LGRAPH_MEMOP_ISWRADDR(old_inp_pid) || LGRAPH_MEMOP_ISWRDATA(old_inp_pid) || LGRAPH_MEMOP_ISRDADDR(old_inp_pid)) {
-        auto     inp_info = graph_info->memory_conn[old_idx][old_inp_pid];
-        auto     size     = inp_info.size();
-        Index_ID join_id  = new_graph->create_node().get_nid();
-        new_graph->node_type_set(join_id, Join_Op);
-        new_graph->set_bits(join_id, size);
-        auto src_pin = Node_pin(join_id, 0, false);
-        auto dst_pin = Node_pin(new_memory_idx, old_inp_pid, true);
-        new_graph->add_edge(src_pin, dst_pin);
 
-        for(size_t offset = 0; offset < size; ++offset) {
+        auto inp_info  = graph_info->memory_conn[old_idx][old_inp_pid];
+        auto join_node = new_graph->create_node(Join_Op, inp_info.size());
+
+        auto dpin      = join_node.setup_driver_pin(0);
+        auto spin      = new_graph->get_node(new_memory_idx).setup_sink_pin(old_inp_pid);
+        new_graph->add_edge(dpin, spin);
+
+        for(size_t offset = 0; offset < inp_info.size(); ++offset) {
           index_offset info = {new_memory_idx, old_inp_pid, {static_cast<int>(offset), static_cast<int>(offset)}};
-          auto *       pObj = memory_input_map[info];
-          new_graph->add_edge(Node_pin(graph_info->cell2id[pObj], graph_info->cell_out_pid[graph_info->cell2id[pObj]]++, false),
-                              Node_pin(join_id, offset, true));
+          auto *pObj        = memory_input_map[info];
+
+          auto dpin = new_graph->get_node(graph_info->cell2id[pObj]).setup_driver_pin(graph_info->cell_out_pid[graph_info->cell2id[pObj]]++);
+          auto spin = join_node.setup_sink_pin(offset);
+          new_graph->add_edge(dpin,spin);
         }
       }
     }
@@ -277,16 +275,16 @@ void Pass_abc::gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, A
     for(const auto &out : old_graph->out_edges(old_idx)) {
       auto     out_pid  = out.get_out_pin().get_pid();
       auto     width    = out.get_bits();
-      Node_pin pick_pin = create_pick_operator(new_graph, Node_pin(new_memory_idx, out_pid, false), 0, width);
+      Node_pin pick_pin = create_pick_operator(new_graph, new_graph->get_node(new_memory_idx).setup_driver_pin(out_pid), 0, width);
 
-      Index_ID port_nid = new_graph->setup_idx_from_pid(new_memory_idx, out_pid);
-      new_graph->set_bits(port_nid, width);
+      auto dpin = new_graph->get_node(new_memory_idx).setup_driver_pin(out_pid);
+      new_graph->set_bits(dpin, width);
 
       for(int offset = 0; offset < width; ++offset) {
-        Node_pin     pseudo_pin = create_pick_operator(new_graph, Node_pin(pick_pin.get_idx(), offset, false), offset, 1);
+        auto  pseudo_pin = create_pick_operator(new_graph, new_graph->get_node(pick_pin).setup_driver_pin(offset), offset, 1);
         index_offset key        = {new_memory_idx, out_pid, {offset, offset}};
-        graph_info->cell2id[memory_output_map[key]]    = old_graph->get_node(pseudo_pin).get_nid();
-        graph_info->cell_out_pid[old_graph->get_node(pseudo_pin).get_nid()] = 0;
+        graph_info->cell2id[memory_output_map[key]]    = pseudo_pin.get_idx();
+        graph_info->cell_out_pid[pseudo_pin.get_idx()] = pseudo_pin.get_pid();
       }
     }
   }
@@ -351,29 +349,32 @@ void Pass_abc::gen_subgraph_from_abc(LGraph *new_graph, const LGraph *old_graph,
     for(const auto &input : old_graph->inp_edges(old_idx)) {
       Port_ID  old_inp_pid = input.get_inp_pin().get_pid();
       auto     inp_info    = graph_info->subgraph_conn[old_idx][old_inp_pid];
-      auto     size        = inp_info.size();
-      Index_ID join_id     = new_graph->create_node().get_nid();
-      new_graph->node_type_set(join_id, Join_Op);
-      new_graph->set_bits(join_id, size);
-      auto src_pin = Node_pin(join_id, 0, false);
-      auto dst_pin = Node_pin(new_subgraph_idx, old_inp_pid, true);
-      new_graph->add_edge(src_pin, dst_pin);
-      for(size_t offset = 0; offset < size; ++offset) {
+
+      auto join_node = new_graph->create_node(Join_Op, inp_info.size());
+
+      auto dpin = join_node.setup_driver_pin();
+      auto spin = new_graph->get_node(new_subgraph_idx).setup_sink_pin(old_inp_pid);
+      new_graph->add_edge(dpin, spin);
+
+      for(size_t offset = 0; offset < inp_info.size(); ++offset) {
         index_offset info = {new_subgraph_idx, old_inp_pid, {static_cast<int>(offset), static_cast<int>(offset)}};
-        auto *       pObj = subgraph_input_map[info];
-        new_graph->add_edge(Node_pin(graph_info->cell2id[pObj], graph_info->cell_out_pid[graph_info->cell2id[pObj]]++, false),
-                            Node_pin(join_id, offset, true));
+        auto *pObj = subgraph_input_map[info];
+
+        auto dpin = new_graph->get_node(graph_info->cell2id[pObj]).setup_driver_pin(graph_info->cell_out_pid[graph_info->cell2id[pObj]]++);
+        auto spin = join_node.setup_sink_pin(offset);
+        new_graph->add_edge(dpin, spin);
       }
     }
     for(const auto &out : old_graph->out_edges(old_idx)) {
-      auto     out_pid  = out.get_out_pin().get_pid();
-      auto     width    = old_graph->get_bits(out.get_out_pin());
-      Node_pin pick_pin = create_pick_operator(new_graph, Node_pin(new_subgraph_idx, out_pid, false), 0, width);
+      auto out_pid  = out.get_out_pin().get_pid();
+      auto width    = old_graph->get_bits(out.get_out_pin());
+      auto pick_pin = create_pick_operator(new_graph, new_graph->get_node(new_subgraph_idx).setup_driver_pin(out_pid), 0, width);
+      auto pick_node = new_graph->get_node(pick_pin);
       for(int offset = 0; offset < width; ++offset) {
-        Node_pin     pseudo_pin = create_pick_operator(new_graph, Node_pin(pick_pin.get_idx(), offset, false), offset, 1);
+        auto     pseudo_pin = create_pick_operator(new_graph, pick_node.setup_driver_pin(offset), offset, 1);
         index_offset key        = {new_subgraph_idx, out_pid, {static_cast<int>(offset), static_cast<int>(offset)}};
-        graph_info->cell2id[subgraph_output_map[key]]  = old_graph->get_node(pseudo_pin).get_nid();
-        graph_info->cell_out_pid[old_graph->get_node(pseudo_pin).get_nid()] = 0;
+        graph_info->cell2id[subgraph_output_map[key]]  = pseudo_pin.get_idx();
+        graph_info->cell_out_pid[pseudo_pin.get_idx()] = pseudo_pin.get_pid();
       }
     }
   }
@@ -388,8 +389,9 @@ void Pass_abc::conn_latch(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t 
     std::string      trig_pin      = tcell->pin_name_exist("C") ? "C" : "E";
     Abc_Obj_t *      pNode         = Abc_ObjFanin0(Abc_ObjFanin0(pLatch));
 
-    new_graph->add_edge(Node_pin(graph_info->cell2id[pNode], graph_info->cell_out_pid[graph_info->cell2id[pNode]]++, false),
-                        Node_pin(latch_new_idx, tcell->get_pin_id("D"), true));
+    auto dpin = new_graph->get_node(graph_info->cell2id[pNode]).setup_driver_pin(graph_info->cell_out_pid[graph_info->cell2id[pNode]]++);
+    auto spin = new_graph->get_node(latch_new_idx).setup_sink_pin(tcell->get_pin_id("D"));
+    new_graph->add_edge(dpin, spin);
 
     Abc_Obj_t * pNet = Abc_ObjFanout0(Abc_ObjFanout0(pLatch));
     std::string latch_name(Abc_ObjName(pNet));
@@ -398,22 +400,24 @@ void Pass_abc::conn_latch(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t 
     for(const auto &sg : graph_info->skew_group_map) {
       if(sg.second.find(latch_old_idx) != sg.second.end()) {
         std::string ck_name = sg.first;
-        if(new_graph->is_graph_input(graph_info->ck_remap[ck_name])) {
-          new_graph->add_edge(Node_pin(graph_info->ck_remap[ck_name], 0, false),
-                              Node_pin(latch_new_idx, tcell->get_pin_id(trig_pin), true));
+        if(new_graph->is_graph_input(ck_name)) {
+          auto dpin = new_graph->get_graph_input(ck_name);
+          auto spin = new_graph->get_node(latch_new_idx).setup_sink_pin(tcell->get_pin_id(trig_pin));
+
+          new_graph->add_edge(dpin, spin);
         } else {
-          new_graph->add_edge(
-              Node_pin(graph_info->ck_remap[ck_name], graph_info->cell_out_pid[graph_info->ck_remap[ck_name]]++, false),
-              Node_pin(latch_new_idx, tcell->get_pin_id(trig_pin), true));
+          auto dpin = new_graph->get_node(graph_info->ck_remap[ck_name]).setup_driver_pin(graph_info->cell_out_pid[graph_info->ck_remap[ck_name]]++);
+          auto spin = new_graph->get_node(latch_new_idx).setup_sink_pin(tcell->get_pin_id(trig_pin));
+          new_graph->add_edge(dpin, spin);
         }
       }
     }
     for(const auto &rg : graph_info->reset_group_map) {
       if(rg.second.find(latch_old_idx) != rg.second.end()) {
         std::string rst_name = rg.first;
-        new_graph->add_edge(
-            Node_pin(graph_info->rst_remap[rst_name], graph_info->cell_out_pid[graph_info->rst_remap[rst_name]]++, false),
-            Node_pin(latch_new_idx, tcell->get_pin_id("R"), true));
+        auto dpin = new_graph->get_node(graph_info->rst_remap[rst_name]).setup_driver_pin(graph_info->cell_out_pid[graph_info->rst_remap[rst_name]]++);
+        auto spin = new_graph->get_node(latch_new_idx).setup_sink_pin(tcell->get_pin_id("R"));
+        new_graph->add_edge(dpin, spin);
       }
     }
 
@@ -443,8 +447,9 @@ void Pass_abc::conn_primary_output(LGraph *new_graph, const LGraph *old_graph, A
     } else if(graph_info->reset_group_map.find(output_name) != graph_info->reset_group_map.end()) {
       continue;
     } else {
-      new_graph->add_edge(Node_pin(graph_info->cell2id[pNet], graph_info->cell_out_pid[graph_info->cell2id[pNet]]++, false),
-                          Node_pin(graph_info->cell2id[pTerm], 0, true));
+      auto dpin = new_graph->get_node(graph_info->cell2id[pNet]).setup_driver_pin(graph_info->cell_out_pid[graph_info->cell2id[pNet]]++);
+      auto spin = new_graph->get_node(graph_info->cell2id[pTerm]).setup_sink_pin();
+      new_graph->add_edge(dpin, spin);
     }
   }
 }
@@ -460,44 +465,27 @@ void Pass_abc::conn_combinational_cell(LGraph *new_graph, const LGraph *old_grap
     for(pGatePin = Mio_GateReadPins(pGate), i = 0; pGatePin; pGatePin = Mio_PinReadNext(pGatePin), i++) {
       // std::string fanin_pin_name((Mio_PinReadName(pGatePin)));
       Abc_Obj_t *pNet = Abc_ObjFanin(pObj, i);
-      if(new_graph->is_graph_input(graph_info->cell2id[pNet])) {
-        new_graph->add_edge(Node_pin(graph_info->cell2id[pNet], 0, false),
-                            Node_pin(graph_info->cell2id[Abc_ObjFanout0(pObj)], inpid++, true));
-      } else {
-        new_graph->add_edge(Node_pin(graph_info->cell2id[pNet], graph_info->cell_out_pid[graph_info->cell2id[pNet]]++, false),
-                            Node_pin(graph_info->cell2id[Abc_ObjFanout0(pObj)], inpid++, true));
-      }
+      auto dpin = new_graph->get_node(graph_info->cell2id[pNet]).setup_driver_pin(graph_info->cell_out_pid[graph_info->cell2id[pNet]]++);
+      auto spin = new_graph->get_node(graph_info->cell2id[Abc_ObjFanout0(pObj)]).setup_sink_pin(inpid++); // FIXME: WHy the ++, store Pin, and done
+      new_graph->add_edge(dpin, spin);
     }
   }
 }
 
-void Pass_abc::connect_constant(LGraph *g, uint32_t value, uint32_t size, const Node_pin &dst) {
-  Index_ID const_idx;
-  if(graph_info->int_const_map.end() == graph_info->int_const_map.find(std::make_pair(value, size))) {
-    const_idx = g->create_node().get_nid();
-    g->node_u32type_set(const_idx, value);
-    g->set_bits(const_idx, size);
-    graph_info->int_const_map[std::make_pair(value, size)] = const_idx;
-  } else {
-    const_idx = graph_info->int_const_map[std::make_pair(value, size)];
-  }
-  Node_pin const_pin(const_idx, 0, false);
-  g->add_edge(const_pin, dst);
+void Pass_abc::connect_constant(LGraph *g, uint32_t value, uint32_t size, const Node_pin &spin) {
+
+  auto node = g->create_node_u32(value, size);
+  g->add_edge(node.get_driver_pin(), spin);
+
 }
 
 Node_pin Pass_abc::create_pick_operator(LGraph *g, const Node_pin &driver, int offset, int width) {
   if(offset == 0 && g->get_bits(driver) == width)
     return driver;
 
-  Pick_ID pick_id(driver, offset, width);
-  if(graph_info->picks.find(pick_id) != graph_info->picks.end())
-    return graph_info->picks.at(pick_id);
+  auto pick_node = g->create_node(Pick_Op, width);
+  g->add_edge(driver, pick_node.setup_sink_pin(0));
+  connect_constant(g, offset, 32, pick_node.setup_sink_pin(1));
 
-  Index_ID pick_nid = g->create_node().get_nid();
-  g->node_type_set(pick_nid, Pick_Op);
-  g->set_bits(pick_nid, width);
-  g->add_edge(driver, Node_pin(pick_nid, 0, true));
-  connect_constant(g, offset, 32, Node_pin(pick_nid, 1, true));
-  graph_info->picks.insert(std::make_pair(pick_id, Node_pin(pick_nid, 0, false)));
-  return graph_info->picks.at(pick_id);
+  return pick_node.setup_driver_pin(0);
 }

@@ -210,10 +210,9 @@ bool Pass_punch::add_output(LGraph *g, std::string_view wname, std::string_view 
   auto wname_bits   = g->get_bits(wname_idx);
   auto wname_offset = g->get_offset(wname_idx);
 
-  auto idx   = g->add_graph_output(output, 0, wname_bits, wname_offset);
-  g->set_node_wirename(idx, output);
-  I(idx);
-  g->add_edge(idx, wname_idx);
+  auto pin   = g->add_graph_output(output, 0, wname_bits, wname_offset);
+  g->set_node_wirename(pin.get_idx(), output);
+  g->add_edge(pin, g->get_node(wname_idx).get_sink_pin());
 
   return true;
 }
@@ -231,9 +230,7 @@ bool Pass_punch::add_input(LGraph *g, std::string_view wname, std::string_view i
   auto wname_bits   = g->get_bits(wname_idx);
   auto wname_offset = g->get_offset(wname_idx);
 
-  auto idx   = g->add_graph_input(input, 0, wname_bits, wname_offset);
-  g->set_node_wirename(idx,input);
-  I(idx);
+  g->add_graph_input(input, 0, wname_bits, wname_offset);
   // g->add_edge(idx, wname_idx);
 
   return true;
@@ -258,8 +255,7 @@ bool Pass_punch::add_dest_instance(LGraph *g, std::string_view type, std::string
     if (ins_g->has_wirename(wname))
       return false;
 
-    auto idx = ins_g->add_graph_input(wname, 0, wname_bits, wname_offset);
-    ins_g->set_node_wirename(idx, wname);
+    ins_g->add_graph_input(wname, 0, wname_bits, wname_offset);
   }
 
   Port_ID ins_input_pid = ins_g->get_graph_input(wname).get_pid();
@@ -273,7 +269,9 @@ bool Pass_punch::add_dest_instance(LGraph *g, std::string_view type, std::string
     g->set_node_instance_name(ins_idx, instance);
   }
 
-  g->add_edge(Node_pin(wname_idx,0, false), Node_pin(ins_idx, ins_input_pid, true), wname_bits);
+  I(g->get_node(wname_idx).get_nid() == wname_idx); // FIXME: only master root for the moment
+
+  g->add_edge(g->get_node(wname_idx).setup_driver_pin(), g->get_node(ins_idx).setup_sink_pin(ins_input_pid), wname_bits);
 
   ins_g->close();
 

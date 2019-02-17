@@ -148,7 +148,6 @@ public:
     using ptr2id        = absl::flat_hash_map<Abc_Obj_t *, uint64_t>;
     using id2pid        = absl::flat_hash_map<uint64_t, Port_ID, IndexID_Hash>;
     using value_size    = std::pair<uint32_t, uint32_t>;
-    using value2idx     = absl::flat_hash_map<value_size, uint64_t>;
     using record        = absl::flat_hash_map<std::string, Abc_Obj_t *>;
 
     using picks2pin     = std::map<Pick_ID, Node_pin>;
@@ -192,8 +191,6 @@ public:
     idremap   memory_remap;
     ptr2id    cell2id;
     id2pid    cell_out_pid;
-    value2idx int_const_map;
-    picks2pin picks;
   };
 
   Pass_abc();

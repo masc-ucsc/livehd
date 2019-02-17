@@ -105,7 +105,7 @@ void Pass_vectorize::collapse_join(LGraph *g) {
     if(op.op != Join_Op)
       continue;
 
-    if(g->get_node_int(idx).get_num_inputs() != 1)
+    if(g->get_node_int(idx).get_node_num_inputs() != 1)
       continue;
 
     Index_ID src_idx = 0;

@@ -164,17 +164,18 @@ public:
       return nid != 0;
     };
 
-    void add_node(Index_ID idx) {
-      assert(g->get_node_int(idx).is_master_root());
+    void add_node(Index_ID nid) {
+      assert(g->get_node_int(nid).is_master_root());
 
-      for (const auto &c : g->out_edges(idx)) {
-        const auto &dst_node        = g->get_node_int(c.get_idx());
-        Index_ID    master_root_nid = dst_node.get_master_root_nid();
+      for (const auto &c : g->out_edges(nid)) {
+        I(g->get_node_int(c.get_idx()).is_root());
+        Index_ID    master_root_nid = g->get_node_int(c.get_idx()).get_nid();
+        I(g->get_node_int(master_root_nid).is_master_root());
 
         Frontier_type::iterator fit = frontier->find(master_root_nid);
 
         if (fit == frontier->end()) {
-          int32_t ninputs = g->get_node_int(master_root_nid).get_num_inputs() - 1;
+          int32_t ninputs = g->get_node_int(master_root_nid).get_node_num_inputs() - 1;
           assert(ninputs >= 0);
           if (ninputs == 0) {  // Done already
             pending->push_back(master_root_nid);
@@ -222,11 +223,9 @@ public:
       pending.push_back(it.get_field().nid);
     }
 
-    // FIXME: output insertion should be moved to nid==0 (otherwise, and output with some logic but
-    // still disconnected would not be generated)
-
     for (auto it = g->output_array.begin(); it != g->output_array.end(); ++it) {
-      if (!g->get_node_int(it.get_field().nid).has_inputs()) pending.push_back(it.get_field().nid);
+      if (!g->get_node_int(it.get_field().nid).has_node_inputs())
+        pending.push_back(it.get_field().nid);
     }
 
     // for forward iteration we want to start from constants as well
@@ -280,9 +279,9 @@ public:
       // floating.set_deleted_key(0); // 128 is not allowed as key (4KB aligned)
 
       for (const auto &_idx : *frontier) {
-        Index_ID idx = _idx.first;
-        floating.insert(idx);
-        discovered.push_back(idx);
+        Index_ID nid = _idx.first;
+        floating.insert(nid);
+        discovered.push_back(nid);
         while (discovered.size() > 0) {
           Index_ID current = discovered.back();
           discovered.pop_back();
@@ -290,10 +289,13 @@ public:
           for (const auto &c : g->out_edges(current)) {
             floating.erase(current);
 
-            if (dc_visited.find(c.get_inp_pin().get_idx()) == dc_visited.end() &&
-                global_visited.find(c.get_inp_pin().get_idx()) == global_visited.end()) {
-              discovered.push_back(c.get_inp_pin().get_idx());
-              floating.insert(c.get_inp_pin().get_idx());
+            I(g->get_node_int(c.get_inp_pin().get_idx()).is_root());
+            Index_ID    nid = g->get_node_int(c.get_inp_pin().get_idx()).get_nid();
+            I(g->get_node_int(nid).is_master_root());
+
+            if (dc_visited.find(nid) == dc_visited.end() && global_visited.find(nid) == global_visited.end()) {
+              discovered.push_back(nid);
+              floating.insert(nid);
             }
           }
         }
@@ -301,23 +303,27 @@ public:
 
       if (floating.size() > 0) {
         Pass::warn(fmt::format("graph {} is not DCE free, consider running the DCE pass\n", g->get_name()));
-        for (const auto &idx : floating) {
-          pending->push_back(idx);
+        for (const auto &nid : floating) {
+          pending->push_back(nid);
         }
+      }else{
+        // FIXME: CHeck if the number of visited nodes matches n_nodes
+        // Otherwise, insert disconnected nodes that may exist in the graph
       }
     }
 
-    void add_node(Index_ID idx) {
-      assert(g->get_node_int(idx).is_master_root());
+    void add_node(Index_ID nid) {
+      assert(g->get_node_int(nid).is_master_root());
 
-      for (const auto &c : g->inp_edges(idx)) {
-        const auto &dst_node        = g->get_node_int(c.get_idx());
-        Index_ID    master_root_nid = dst_node.get_master_root_nid();
+      for (const auto &c : g->inp_edges(nid)) {
+        I(g->get_node_int(c.get_idx()).is_root());
+        Index_ID    master_root_nid = g->get_node_int(c.get_idx()).get_nid();
+        I(g->get_node_int(master_root_nid).is_master_root());
 
         Frontier_type::iterator fit = frontier->find(master_root_nid);
 
         if (fit == frontier->end()) {
-          int32_t noutputs = g->get_node_int(master_root_nid).get_num_outputs() - 1;
+          int32_t noutputs = g->get_node_int(master_root_nid).get_node_num_outputs() - 1;
           assert(noutputs >= 0);
           if (noutputs == 0) {  // Done already
             pending->push_back(master_root_nid);
@@ -368,12 +374,19 @@ public:
     // FIXME: This may need to be moved to nid==0. If any input not visited, then add it (but only
     // if full input/output)
 
+    // FIXME: pending has WAY too much redundant entries
+
     for (auto it = g->input_array.begin(); it != g->input_array.end(); ++it) {  // inputs without connection to preserve them
-      if (!g->get_node_int(it.get_field().nid).has_outputs()) pending.push_back(it.get_field().nid);
+      if (!g->get_node_int(it.get_field().nid).has_node_outputs()) {
+        I(g->get_node_int(it.get_field().nid).is_master_root());
+        pending.push_back(it.get_field().nid);
+      }
     }
     for (auto it = g->output_array.begin(); it != g->output_array.end(); ++it) {
-      if (!g->get_node_int(it.get_field().nid).has_outputs())  // do not add outputs with connections
+      if (!g->get_node_int(it.get_field().nid).has_node_outputs()) {  // do not add outputs with connections
+        I(g->get_node_int(it.get_field().nid).is_master_root());
         pending.push_back(it.get_field().nid);
+      }
     }
 
     Index_ID b = 0;

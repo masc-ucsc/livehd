@@ -143,15 +143,15 @@ std::vector<LGraph *> Inou_rand::do_tolg() {
     }
     used_port.set_bit(dst_nid);
 
-    Index_ID src_nid = created[rnd_created(rnd)];
+    Index_ID driver_nid = created[rnd_created(rnd)];
 
-    Node_pin dst_pin(dst_nid, dst_port, true);
-    Node_pin src_pin(src_nid, rnd_4(rnd), false);
+    Node_pin spin = g->get_node(dst_nid).setup_sink_pin(dst_port);
+    Node_pin dpin = g->get_node(driver_nid).setup_driver_pin(rnd_4(rnd));
 
     // prevent adding same edge twice
-    std::pair<Node_pin, Node_pin> conn(src_pin, dst_pin);
+    std::pair<Node_pin, Node_pin> conn(dpin, spin);
     if(connections.find(conn) == connections.end()) {
-      g->add_edge(src_pin, dst_pin, rbits);
+      g->add_edge(dpin, spin, rbits);
       connections.insert(conn);
       i++;
       timeout = 0;

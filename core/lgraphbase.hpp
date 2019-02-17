@@ -45,22 +45,23 @@ protected:
 
   Index_ID add_edge_int(Index_ID dst_nid, Port_ID dst_pid, Index_ID src_nid, Port_ID inp_pid);
 
-  void recompute_io_ports();
+  Port_ID recompute_io_ports(Index_ID track_nid);
 
-  Index_ID add_graph_input_int(std::string_view str, Index_ID nid, uint16_t bits);
-  Index_ID add_graph_output_int(std::string_view str, Index_ID nid, uint16_t bits);
-  Index_ID add_graph_input_int(std::string_view str, Index_ID nid, uint16_t bits, Port_ID original_pos);
-  Index_ID add_graph_output_int(std::string_view str, Index_ID nid, uint16_t bits, Port_ID original_pos);
+  Node_pin add_graph_input_int(std::string_view str, Index_ID nid, uint16_t bits);
+  Node_pin add_graph_output_int(std::string_view str, Index_ID nid, uint16_t bits);
+  Node_pin add_graph_input_int(std::string_view str, Index_ID nid, uint16_t bits, Port_ID original_pos);
+  Node_pin add_graph_output_int(std::string_view str, Index_ID nid, uint16_t bits, Port_ID original_pos);
 
   void del_int_node(Index_ID idx);
 
-  Index_ID find_idx_from_pid_int(Index_ID idx, Port_ID pid) const;
-  Index_ID find_idx_from_pid_int(const Node_pin &pin) const {
+  Index_ID find_idx_from_pid(Index_ID idx, Port_ID pid) const;
+  Index_ID find_idx_from_pid(const Node_pin &pin) const {
     if (likely(node_internal[pin.get_idx()].get_dst_pid() == pin.get_pid())) { // Common case
       return pin.get_idx();
     }
-    return find_idx_from_pid_int(pin.get_idx(),pin.get_pid());
+    return find_idx_from_pid(pin.get_idx(),pin.get_pid());
   }
+  Index_ID setup_idx_from_pid(Index_ID nid, Port_ID pid);
 
   friend Forward_edge_iterator;
   friend Backward_edge_iterator;
@@ -87,6 +88,8 @@ public:
   bool is_graph_input(std::string_view name) const { return input_array.get_id(name) != 0; }
   bool is_graph_output(std::string_view name) const { return output_array.get_id(name) != 0; }
 
+#if 1
+  // WARNING: deprecased to delete. Use Node_pin
   bool is_graph_input(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
     return node_internal[idx].is_graph_io_input();
@@ -96,9 +99,21 @@ public:
     I(static_cast<Index_ID>(node_internal.size()) > idx);
     return node_internal[idx].is_graph_io_output();
   }
+#endif
 
-  std::string_view get_graph_input_name(Index_ID nid) const;
-  std::string_view get_graph_output_name(Index_ID nid) const;
+  bool is_graph_input(const Node_pin &pin) const {
+    I(pin.get_idx() < node_internal.size());
+    I(node_internal[pin.get_idx()].is_root());
+    I(node_internal[pin.get_idx()].get_dst_pid() == pin.get_pid());
+    return node_internal[pin.get_idx()].is_graph_io_input();
+  }
+
+  bool is_graph_output(const Node_pin &pin) const {
+    I(pin.get_idx() < node_internal.size());
+    I(node_internal[pin.get_idx()].is_root());
+    I(node_internal[pin.get_idx()].get_dst_pid() == pin.get_pid());
+    return node_internal[pin.get_idx()].is_graph_io_output();
+  }
 
   // get internal nid from given pid
   Index_ID get_graph_input_nid_from_pid(Port_ID pid) const;
@@ -110,15 +125,6 @@ public:
 
   std::string_view get_graph_input_name_from_pid(Port_ID pid) const;
   std::string_view get_graph_output_name_from_pid(Port_ID pid) const;
-
-  Node_pin get_graph_input(std::string_view str) const;
-  Node_pin get_graph_output(std::string_view str) const;
-
-#if 1
-  // WARNING: deprecated: move to protected
-  Index_ID setup_idx_from_pid(Index_ID nid, Port_ID pid);
-  Index_ID find_idx_from_pid(Index_ID nid, Port_ID pid) const;
-#endif
 
 #if 1
   // WARNING: deprecated: Use get/set_bits(const Node_pin)
@@ -139,13 +145,14 @@ public:
 #endif
   uint16_t get_bits(const Node_pin &pin) const {
     I(pin.is_output());
-    Index_ID idx = find_idx_from_pid_int(pin);
-    I(idx);
-    return node_internal[idx].get_bits();
+    I(pin.get_idx() < node_internal.size());
+    I(node_internal[pin.get_idx()].is_root());
+    I(node_internal[pin.get_idx()].get_dst_pid() == pin.get_pid());
+    return node_internal[pin.get_idx()].get_bits();
   }
   void set_bits(const Node_pin &pin, uint16_t bits) {
     I(pin.is_output());
-    Index_ID idx = find_idx_from_pid_int(pin);
+    Index_ID idx = find_idx_from_pid(pin);
     I(idx);
     return node_internal[idx].set_bits(bits);
   }
@@ -179,15 +186,28 @@ public:
     return idx;
   }
 
-  bool has_outputs(Index_ID idx) const {
+#if 1
+  // WARNING: deprecated
+  bool has_pin_outputs(Index_ID idx) const {
     I(idx < node_internal.size());
     I(node_internal[idx].is_root());
-    return node_internal[idx].has_outputs();
+    return node_internal[idx].has_pin_outputs();
   }
-  bool has_inputs(Index_ID idx) const {
+  bool has_pin_inputs(Index_ID idx) const {
     I(idx < node_internal.size());
     I(node_internal[idx].is_root());
-    return node_internal[idx].has_inputs();
+    return node_internal[idx].has_pin_inputs();
+  }
+#endif
+  bool has_outputs(const Node_pin &pin) const {
+    I(pin.get_idx() < node_internal.size());
+    I(node_internal[pin.get_idx()].is_root());
+    return node_internal[pin.get_idx()].has_pin_outputs();
+  }
+  bool has_inputs(const Node_pin &pin) const {
+    I(pin.get_idx() < node_internal.size());
+    I(node_internal[pin.get_idx()].is_root());
+    return node_internal[pin.get_idx()].has_pin_inputs();
   }
 
   Edge_iterator inp_edges(Index_ID nid) const;
@@ -216,7 +236,7 @@ public:
     return node_internal[idx].is_root();
   }
 
-  static size_t max_size() { return (((size_t)1) << Index_Bits) - 1; }
+  static size_t max_size() { return (((size_t)1) << Index_bits) - 1; }
   size_t        size() const { return node_internal.size(); }
 
   bool empty() const { return node_internal.size() == 0; }

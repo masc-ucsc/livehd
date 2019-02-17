@@ -50,7 +50,7 @@ void Inou_pyrope::fromlg(Eprp_var &var) {
 bool Inou_pyrope::to_dst_var(Out_string &w, const LGraph *g, Index_ID idx) const {
   Index_ID direct_to_register = 0;
   for(const auto &c : g->out_edges(idx)) {
-    const auto op = g->node_type_get(c.get_idx());
+    const auto op = g->get_node(c.get_inp_pin()).get_type();
     if(op.op == SFlop_Op) {
       direct_to_register = c.get_idx();
       break;
@@ -73,7 +73,7 @@ bool Inou_pyrope::to_dst_var(Out_string &w, const LGraph *g, Index_ID idx) const
   }
 
   if(direct_to_output) {
-    w << " %" << g->get_graph_output_name(direct_to_output) << " = ";
+    w << " %" << g->get_node_wirename(direct_to_output) << " = ";
   } else if(direct_to_register) {
     w << " @tmp" << direct_to_register << " = ";
   } else {
@@ -91,7 +91,7 @@ void Inou_pyrope::to_src_var(Out_string &w, const LGraph *g, Index_ID idx) const
     return;
   }
   if(g->is_graph_input(idx)) {
-    w << "$" << g->get_graph_input_name(idx);
+    w << "$" << g->get_node_wirename(idx);
     return;
   }
 
@@ -119,7 +119,7 @@ void Inou_pyrope::to_src_var(Out_string &w, const LGraph *g, Index_ID idx) const
   }
 
   if(direct_to_output) {
-    w << "%" << g->get_graph_output_name(direct_to_output);
+    w << "%" << g->get_node_wirename(direct_to_output);
   } else if(direct_to_register) {
     w << "@tmp" << direct_to_register;
   } else if(inline_stmt.find(idx) != inline_stmt.end()) {
@@ -156,7 +156,7 @@ bool Inou_pyrope::to_mux(Out_string &w, const LGraph *g, Index_ID idx) const {
 
   Index_ID direct_to_register = 0;
   if(g->is_graph_input(c_idx)) {
-    if(is_reset(g->get_graph_input_name(c_idx))) {
+    if(is_reset(g->get_node_wirename(c_idx))) {
 
       for(const auto &c : g->out_edges(idx)) {
         const auto op = g->node_type_get(c.get_idx());
@@ -177,7 +177,7 @@ bool Inou_pyrope::to_mux(Out_string &w, const LGraph *g, Index_ID idx) const {
       }
     }
     if(direct_to_output) {
-      w << " @" << g->get_graph_output_name(direct_to_output) << " ";
+      w << " @" << g->get_node_wirename(direct_to_output) << " ";
     } else {
       w << " @tmp" << direct_to_register << " ";
     }
@@ -247,7 +247,7 @@ bool Inou_pyrope::to_flop(Out_string &w, const LGraph *g, Index_ID idx) const {
 
   if(direct_to_output) {
     if(g->get_bits(direct_to_output) == 0) {
-      w << " %" << g->get_graph_output_name(direct_to_output) << " as __bits: " << g->get_bits(idx) << "\n";
+      w << " %" << g->get_node_wirename(direct_to_output) << " as __bits: " << g->get_bits(idx) << "\n";
     }
   } else {
     w << " @tmp" << idx << " as __bits: " << g->get_bits(idx) << "\n";
@@ -260,7 +260,7 @@ bool Inou_pyrope::to_flop(Out_string &w, const LGraph *g, Index_ID idx) const {
 
     for(const auto &c2 : g->inp_edges(c.get_idx())) {
       if(g->is_graph_input(c2.get_idx())) {
-        if(is_reset(g->get_graph_input_name(c2.get_idx()))) {
+        if(is_reset(g->get_node_wirename(c2.get_idx()))) {
           return false;
         }
       }
@@ -268,7 +268,7 @@ bool Inou_pyrope::to_flop(Out_string &w, const LGraph *g, Index_ID idx) const {
   }
 
   if(direct_to_output) {
-    w << " @" << g->get_graph_output_name(direct_to_output) << " =";
+    w << " @" << g->get_node_wirename(direct_to_output) << " =";
   } else {
     w << " @tmp" << idx << " =";
   }
@@ -283,12 +283,10 @@ bool Inou_pyrope::to_flop(Out_string &w, const LGraph *g, Index_ID idx) const {
 bool Inou_pyrope::to_graphio(Out_string &w, const LGraph *g, Index_ID idx) const {
 
   auto bits = g->get_bits(idx);
+  if(!bits)
+    return false;
 
-  if(g->is_graph_input(idx)) {
-    if(bits) {
-      w << " $" << g->get_graph_input_name(idx) << " as __bits: " << bits;
-    }
-  }
+  w << " $" << g->get_node_wirename(idx) << " as __bits: " << bits << "\n";
 
   return false;
 }
@@ -432,12 +430,12 @@ bool Inou_pyrope::to_latch(Out_string &w, const LGraph *g, Index_ID idx) const {
     break;
   }
 
-  const auto &node = g->get_node_int(latch_idx);
+  const auto &node = g->get_node(latch_idx);
   if(!node.has_inputs())
     return false; // Not driven used output
 
-  w << " @" << g->get_graph_output_name(latch_idx) << " as __fflop:false";
-  w << "\n @" << g->get_graph_output_name(latch_idx) << " =";
+  w << " @" << g->get_node_wirename(latch_idx) << " as __fflop:false";
+  w << "\n @" << g->get_node_wirename(latch_idx) << " =";
   to_src_var(w, g, inp_idx);
 
   return false;
@@ -446,9 +444,9 @@ bool Inou_pyrope::to_latch(Out_string &w, const LGraph *g, Index_ID idx) const {
 bool Inou_pyrope::to_strconst(Out_string &w, const LGraph *g, Index_ID idx) const {
 
   if(g->is_graph_input(idx)) {
-    w << " $" << g->get_graph_input_name(idx) << " = " << g->node_const_value_get(idx);
+    w << " $" << g->get_node_wirename(idx) << " = " << g->node_const_value_get(idx);
   } else if(g->is_graph_output(idx)) {
-    w << " %" << g->get_graph_output_name(idx) << " = " << g->node_const_value_get(idx);
+    w << " %" << g->get_node_wirename(idx) << " = " << g->node_const_value_get(idx);
   } else {
     tmp_values[idx] = g->node_const_value_get(idx);
   }
@@ -461,7 +459,7 @@ bool Inou_pyrope::to_op(Out_string &s, Out_string &sub, const LGraph *g, Index_I
   bool       dest;
   switch(op.op) {
   case GraphIO_Op:
-    dest = to_graphio(s, g, idx);
+    // dest = to_graphio(s, g, idx);
     break;
   case And_Op:
     dest = to_logical2(s, g, idx, "&", "and");
@@ -571,12 +569,12 @@ bool Inou_pyrope::to_subgraph(Out_string &w, Out_string &out, const LGraph *g, I
 
     iter = 0;
     for(const auto &c : sg->inp_edges(idx)) {
-      subgraph_input_names[iter] = sg->get_graph_input_name(c.get_idx());
+      subgraph_input_names[iter] = sg->get_node_wirename(c.get_idx());
       iter++;
     }
 
     sg->each_output([sg, &w, &num_outputs](Index_ID idx) {
-      w << " %" << sg->get_graph_output_name(idx);
+      w << " %" << sg->get_node_wirename(idx);
       num_outputs++;
     });
     subgraph_output_names = new const char *[num_outputs];
@@ -587,7 +585,7 @@ bool Inou_pyrope::to_subgraph(Out_string &w, Out_string &out, const LGraph *g, I
 
     iter = 0;
     sg->each_output([sg, &subgraph_output_ids, &subgraph_output_names, &iter](Index_ID idx, Port_ID pid) {
-      subgraph_output_names[iter]  = sg->get_graph_output_name(idx);
+      subgraph_output_names[iter]  = sg->get_node_wirename(idx);
       subgraph_output_ids[iter][0] = (int)idx;
       subgraph_output_ids[iter][1] = (int)pid;
       iter++;
@@ -622,7 +620,7 @@ bool Inou_pyrope::to_subgraph(Out_string &w, Out_string &out, const LGraph *g, I
   int iter = 0;
   for(const auto &c : g->inp_edges(idx)) {
     out << " " << subgraph_input_names[iter] << ":$";
-    out << g->get_graph_input_name(c.get_idx());
+    out << g->get_node_wirename(c.get_idx());
     iter++;
   }
 
@@ -664,6 +662,10 @@ void Inou_pyrope::to_pyrope(const LGraph *g, const std::string &filename) {
   w << "// " << prp_file << ".prp file from " << g->get_name() << "\n";
 
   inline_stmt.clear();
+
+  g->each_input([g,this,&w](const Node_pin &pin) {
+    to_graphio(w,g,pin.get_idx());
+  });
 
   for(auto idx : g->forward()) {
 

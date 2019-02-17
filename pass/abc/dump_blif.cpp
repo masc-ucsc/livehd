@@ -74,10 +74,10 @@ void Pass_abc::gen_module(const LGraph *g, std::ofstream &fs) {
     int width = g->get_bits(idx);
     if(width > 1) {
       for(int j = 0; j < width; j++) {
-        fs << " " << g->get_graph_input_name(idx) << "[" << j << "]";
+        fs << " " << g->get_node_wirename(idx) << "[" << j << "]";
       }
     } else {
-      fs << " " << g->get_graph_input_name(idx);
+      fs << " " << g->get_node_wirename(idx);
     }
   }
   fs << "\n";
@@ -86,10 +86,10 @@ void Pass_abc::gen_module(const LGraph *g, std::ofstream &fs) {
     int width = g->get_bits(idx);
     if(width > 1) {
       for(int j = 0; j < width; j++) {
-        fs << " " << g->get_graph_output_name(idx) << "[" << j << "]";
+        fs << " " << g->get_node_wirename(idx) << "[" << j << "]";
       }
     } else {
-      fs << " " << g->get_graph_output_name(idx);
+      fs << " " << g->get_node_wirename(idx);
     }
   }
   fs << "\n";
@@ -103,13 +103,13 @@ void Pass_abc::gen_io_conn(const LGraph *g, std::ofstream &fs) {
   for(const auto &idx : graph_info->graphio_output_id) {
     auto src = graph_info->primary_output_conn[idx];
     assert(src.size() == 1);
-    if(g->get_node_wirename(src[0].idx) == g->get_graph_output_name(idx))
+    if(g->get_node_wirename(src[0].idx) == g->get_node_wirename(idx))
       continue;
     fs << ".names ";
     for(const auto &inp : src) {
       write_src_info(g, inp, fs);
     }
-    fs << g->get_graph_output_name(idx);
+    fs << g->get_node_wirename(idx);
     fs << "\n1 1\n";
   }
 }

@@ -3,6 +3,7 @@
 #include "nodetype.hpp"
 #include "lgraphbase.hpp"
 
+#include "iassert.hpp"
 #include "lgedgeiter.hpp"
 
 Node_Type *                        Node_Type::table[StrConst_Op + 1];
@@ -56,9 +57,9 @@ Node_Type::_init::_init() {
   Node_Type::table[DfgRef_Op]          = new Node_Type_DfgRef();
   Node_Type::table[DfgPendingGraph_Op] = new Node_Type_DfgPendingGraph();
 
-  assert(Invalid_Op == 0);
+  I(Invalid_Op == 0);
   for (size_t i = Invalid_Op; i <= SubGraph_Op; i++) {
-    assert(table[i]);
+    I(table[i]);
     name2node[table[i]->get_name()] = table[i];
   }
 }
@@ -70,12 +71,12 @@ Node_Type &Node_Type::get(Node_Type_Op op) {
 
   if (op >= StrConstMin_Op && op <= StrConstMax_Op) op = StrConst_Op;
 
-  assert(table[op] != nullptr);
+  I(table[op] != nullptr);
   return *table[op];
 }
 
 Node_Type_Op Node_Type::get(const std::string &opname) {
-  assert(is_type(opname));
+  I(is_type(opname));
   return name2node[opname]->op;
 }
 
@@ -117,21 +118,22 @@ void LGraph_Node_Type::sync() {
 }
 
 void LGraph_Node_Type::node_type_set(Index_ID nid, Node_Type_Op op) {
-  assert(nid < node_type_table.size());
-  assert(node_internal[nid].is_node_state());
-  assert(op != Invalid_Op);
+  I(nid < node_type_table.size());
+  I(node_internal[nid].is_node_state());
+  I(node_internal[nid].is_master_root());
+  I(op != Invalid_Op);
 
-  assert(node_internal[nid].get_nid() < node_type_table.size());
+  I(node_internal[nid].get_nid() < node_type_table.size());
 
   node_type_table[node_internal[nid].get_nid()] = op;
 }
 
 void LGraph_Node_Type::node_subgraph_set(Index_ID nid, uint32_t subgraphid) {
-  assert(nid < node_type_table.size());
-  assert(node_internal[nid].is_node_state());
+  I(nid < node_type_table.size());
+  I(node_internal[nid].is_node_state());
 
-  assert(node_internal[nid].get_nid() < node_type_table.size());
-  assert(subgraphid <= (uint32_t)(SubGraphMax_Op - SubGraphMin_Op));
+  I(node_internal[nid].get_nid() < node_type_table.size());
+  I(subgraphid <= (uint32_t)(SubGraphMax_Op - SubGraphMin_Op));
 
   sub_graph_nodes.set_bit(node_internal[nid].get_nid());
 
@@ -139,47 +141,47 @@ void LGraph_Node_Type::node_subgraph_set(Index_ID nid, uint32_t subgraphid) {
 }
 
 uint32_t LGraph_Node_Type::subgraph_id_get(Index_ID nid) const {
-  assert(nid < node_type_table.size());
-  assert(node_internal[nid].is_node_state());
+  I(nid < node_type_table.size());
+  I(node_internal[nid].is_node_state());
 
-  assert(node_internal[nid].get_nid() < node_type_table.size());
+  I(node_internal[nid].get_nid() < node_type_table.size());
 
   // only supported for constants
-  assert(node_type_table[node_internal[nid].get_nid()] >= SubGraphMin_Op);
-  assert(node_type_table[node_internal[nid].get_nid()] <= SubGraphMax_Op);
+  I(node_type_table[node_internal[nid].get_nid()] >= SubGraphMin_Op);
+  I(node_type_table[node_internal[nid].get_nid()] <= SubGraphMax_Op);
 
   return (uint32_t)(node_type_table[node_internal[nid].get_nid()] - SubGraphMin_Op);
 }
 
 void LGraph_Node_Type::node_tmap_set(Index_ID nid, uint32_t tmapid) {
-  assert(nid < node_type_table.size());
-  assert(node_internal[nid].is_node_state());
+  I(nid < node_type_table.size());
+  I(node_internal[nid].is_node_state());
 
-  assert(node_internal[nid].get_nid() < node_type_table.size());
-  assert(tmapid <= (uint32_t)(TechMapMax_Op - TechMapMin_Op));
+  I(node_internal[nid].get_nid() < node_type_table.size());
+  I(tmapid <= (uint32_t)(TechMapMax_Op - TechMapMin_Op));
 
   node_type_table[node_internal[nid].get_nid()] = (Node_Type_Op)(TechMapMin_Op + tmapid);
 }
 
 uint32_t LGraph_Node_Type::tmap_id_get(Index_ID nid) const {
-  assert(nid < node_type_table.size());
-  assert(node_internal[nid].is_node_state());
+  I(nid < node_type_table.size());
+  I(node_internal[nid].is_node_state());
 
-  assert(node_internal[nid].get_nid() < node_type_table.size());
+  I(node_internal[nid].get_nid() < node_type_table.size());
 
   // only supported for constants
-  assert(node_type_table[node_internal[nid].get_nid()] >= TechMapMin_Op);
-  assert(node_type_table[node_internal[nid].get_nid()] <= TechMapMax_Op);
+  I(node_type_table[node_internal[nid].get_nid()] >= TechMapMin_Op);
+  I(node_type_table[node_internal[nid].get_nid()] <= TechMapMax_Op);
 
   return (uint32_t)(node_type_table[node_internal[nid].get_nid()] - TechMapMin_Op);
 }
 
 void LGraph_Node_Type::node_u32type_set(Index_ID nid, uint32_t value) {
-  assert(nid < node_type_table.size());
-  assert(node_internal[nid].is_node_state());
+  I(nid < node_type_table.size());
+  I(node_internal[nid].is_node_state());
 
-  assert(node_internal[nid].get_nid() < node_type_table.size());
-  assert(value <= (uint32_t)(U32ConstMax_Op - U32ConstMin_Op));
+  I(node_internal[nid].get_nid() < node_type_table.size());
+  I(value <= (uint32_t)(U32ConstMax_Op - U32ConstMin_Op));
 
   // when a node is set as const, adds it to the const nodes list
   // Note: if the lazy initialization is changed to something that is
@@ -189,35 +191,95 @@ void LGraph_Node_Type::node_u32type_set(Index_ID nid, uint32_t value) {
   node_type_table[node_internal[nid].get_nid()] = (Node_Type_Op)(U32ConstMin_Op + value);
 }
 
-uint32_t LGraph_Node_Type::node_value_get(Index_ID nid) const {
-  assert(nid < node_type_table.size());
-  assert(node_internal[nid].is_node_state());
+Index_ID LGraph_Node_Type::node_u32type_find(uint32_t value) const {
 
-  assert(node_internal[nid].get_nid() < node_type_table.size());
+  // FIXME: This should be fast, but in a bad case we can have LOTS of
+  // constants in a graph. Then, it is pretty bad. This should be weird but
+  // possible.
+
+  auto op = static_cast<Node_Type_Op>(U32ConstMin_Op + value);
+
+  const bm::bvector<> &bm  = const_nodes;
+  Index_ID             cid = bm.get_first();
+  while (cid) {
+    I(cid);
+    I(node_internal[cid].is_node_state());
+    I(node_internal[cid].is_master_root());
+
+    if (op == node_type_table[cid])
+      return cid;
+
+    cid = bm.get_next(cid);
+  }
+
+  return 0;
+}
+
+uint32_t LGraph_Node_Type::node_value_get(const Node_pin &pin) const {
+  I(pin.get_idx() < node_type_table.size());
+  I(node_internal[pin.get_idx()].is_node_state());
+  I(node_internal[pin.get_idx()].is_master_root());
+  I(pin.get_pid()==0); // const have only single output
+
+  I(node_type_table[pin.get_idx()] >= U32ConstMin_Op);
+  I(node_type_table[pin.get_idx()] <= U32ConstMax_Op);
+
+  return (uint32_t)(node_type_table[pin.get_idx()] - U32ConstMin_Op);
+}
+
+uint32_t LGraph_Node_Type::node_value_get(Index_ID nid) const {
+  I(nid < node_type_table.size());
+  I(node_internal[nid].is_node_state());
+
+  I(node_internal[nid].get_nid() < node_type_table.size());
 
   // only supported for constants
-  assert(node_type_table[node_internal[nid].get_nid()] >= U32ConstMin_Op);
-  assert(node_type_table[node_internal[nid].get_nid()] <= U32ConstMax_Op);
+  I(node_type_table[node_internal[nid].get_nid()] >= U32ConstMin_Op);
+  I(node_type_table[node_internal[nid].get_nid()] <= U32ConstMax_Op);
 
   return (uint32_t)(node_type_table[node_internal[nid].get_nid()] - U32ConstMin_Op);
 }
 
 void LGraph_Node_Type::node_const_type_set_string(Index_ID nid, std::string_view value) {
 
-  assert(nid < node_type_table.size());
-  assert(node_internal[nid].is_node_state());
+  I(nid < node_type_table.size());
+  I(node_internal[nid].is_node_state());
 
-  assert(node_internal[nid].get_nid() < node_type_table.size());
+  I(node_internal[nid].get_nid() < node_type_table.size());
 
   uint32_t char_id = consts.create_id(value);
-  assert(char_id < (uint32_t)(StrConstMax_Op - StrConstMin_Op));
+  I(char_id < (uint32_t)(StrConstMax_Op - StrConstMin_Op));
 
   // when a node is set as const, adds it to the const nodes list
   // Note: if the lazy initialization is changed to something that is
   // destructive, this needs to be changed
   const_nodes.set_bit(nid);
 
-  node_type_table[node_internal[nid].get_nid()] = (Node_Type_Op)(StrConstMin_Op + char_id);
+  node_type_table[node_internal[nid].get_nid()] = static_cast<Node_Type_Op>(StrConstMin_Op + char_id);
+}
+
+Index_ID LGraph_Node_Type::node_const_string_find(std::string_view value) const {
+
+  auto id = consts.get_id(value);
+  if (id==0)
+    return 0;
+
+  auto op = static_cast<Node_Type_Op>(StrConstMin_Op + id);
+
+  const bm::bvector<> &bm  = const_nodes;
+  Index_ID             cid = bm.get_first();
+  while (cid) {
+    I(cid);
+    I(node_internal[cid].is_node_state());
+    I(node_internal[cid].is_master_root());
+
+    if (op == node_type_table[cid])
+      return cid;
+
+    cid = bm.get_next(cid);
+  }
+
+  return 0;
 }
 
 void LGraph_Node_Type::node_const_type_set(Index_ID nid, std::string_view value) {
@@ -230,33 +292,30 @@ void LGraph_Node_Type::node_const_type_set(Index_ID nid, std::string_view value)
 }
 
 std::string_view LGraph_Node_Type::node_const_value_get(Index_ID nid) const {
-  assert(nid < node_type_table.size());
-  assert(node_internal[nid].is_node_state());
+  I(nid < node_type_table.size());
+  I(node_internal[nid].is_node_state());
 
-  assert(node_internal[nid].get_nid() < node_type_table.size());
+  I(node_internal[nid].get_nid() < node_type_table.size());
 
   // only supported for constants
-  assert(node_type_table[node_internal[nid].get_nid()] >= StrConstMin_Op);
-  assert(node_type_table[node_internal[nid].get_nid()] <= StrConstMax_Op);
+  I(node_type_table[node_internal[nid].get_nid()] >= StrConstMin_Op);
+  I(node_type_table[node_internal[nid].get_nid()] <= StrConstMax_Op);
 
   return get_constant(node_type_table[node_internal[nid].get_nid()] - StrConstMin_Op);
 }
 
 const Node_Type &LGraph_Node_Type::node_type_get(Index_ID nid) const {
-  assert(nid < node_type_table.size());
-  assert(node_internal[nid].is_node_state());
-  assert(node_internal[nid].is_root());
-  assert(node_internal[nid].get_nid() < node_type_table.size());
+  I(nid < node_type_table.size());
+  I(node_internal[nid].is_node_state());
+  I(node_internal[nid].is_master_root());
 
   Node_Type_Op op = node_type_table[node_internal[nid].get_nid()];
 
   if (op >= SubGraphMin_Op && op <= SubGraphMax_Op) op = SubGraph_Op;
-
-  if (op >= TechMapMin_Op && op <= TechMapMax_Op) op = TechMap_Op;
-
+  if (op >= TechMapMin_Op  && op <= TechMapMax_Op ) op = TechMap_Op;
   if (op >= U32ConstMin_Op && op <= U32ConstMax_Op) op = U32Const_Op;
-
   if (op >= StrConstMin_Op && op <= StrConstMax_Op) op = StrConst_Op;
 
   return Node_Type::get(op);
 }
+

@@ -36,11 +36,7 @@ void Live_stitcher::stitch(LGraph *nsynth, const std::set<Net_ID> &diffs) {
       // FIXME: how to check if there are new global IOs?
       // FIXME: how to check if I need to delete global IOs?
 
-      std::string name;
-      if (nsynth->is_graph_input(idx))
-        name = nsynth->get_graph_input_name(idx);
-      else
-        name = nsynth->get_graph_output_name(idx);
+      auto name = nsynth->get_node_wirename(idx);
 
       if (original->is_graph_input(name)) {
         inp2originalid[idx] = original->get_graph_input(name).get_idx();
@@ -95,17 +91,19 @@ void Live_stitcher::stitch(LGraph *nsynth, const std::set<Net_ID> &diffs) {
         // global output
         // FIXME: I need to consider the inp PID
         for (auto &c : nsynth->inp_edges(idx)) {
-          original->add_edge(Node_pin(nsynth2originalid[nsynth->get_node(c.get_out_pin()).get_nid()], c.get_out_pin().get_pid(), false),
-                             Node_pin(out2originalid[idx], out2originalid[idx], true));
+          Node_pin dpin = original->get_node(nsynth2originalid[nsynth->get_node(c.get_out_pin()).get_nid()]).setup_driver_pin(c.get_out_pin().get_pid());
+          Node_pin spin = original->get_node(out2originalid[idx]).setup_sink_pin(out2originalid[idx]);
+          original->add_edge(dpin, spin);
         }
       } else {
         // invariant boundary
-        auto name = nsynth->get_graph_output_name(idx);
+        auto name = nsynth->get_node_wirename(idx);
         if (!original->has_wirename(name)) continue;
         Index_ID oidx = original->get_node_id(name);
         for (auto &edge : original->out_edges(oidx)) {
-          original->add_edge(Node_pin(inp2originalid[idx], edge.get_out_pin().get_pid(), false), edge.get_inp_pin());
+          Node_pin dpin = original->get_node(nsynth2originalid[idx]).setup_driver_pin(edge.get_out_pin().get_pid());
 
+          original->add_edge(dpin, edge.get_inp_pin());
           original->del_edge(edge);
         }
       }

@@ -2,6 +2,7 @@
 
 #include <cassert>
 
+#include "iassert.hpp"
 #include "lgedge.hpp"
 
 #include "mmap_allocator.hpp"
@@ -13,7 +14,7 @@ static_assert(sizeof(SEdge) == sizeof(SEdge_Internal), "SEdge should be 2 bytes"
 static_assert(sizeof(Edge) == 2, "Edge should be 2 bytes like SEdge");
 static_assert(sizeof(Node_Internal) == 32, "Node should be 32 bytes and 32 bytes aligned");
 static_assert(sizeof(Node_Internal_Page) == 32, "Node should be 32 bytes and 32 bytes aligned");
-static_assert((1ULL << Index_Bits) == MMAPA_MAX_ENTRIES, "Max number of entries in Dense");
+static_assert((1ULL << Index_bits) == MMAPA_MAX_ENTRIES, "Max number of entries in Dense");
 
 Index_ID SEdge_Internal::get_page_idx() const { return Node_Internal_Page::get(this).get_idx(); }
 
@@ -36,10 +37,10 @@ bool Edge::is_last_output() const {
   return ((this + sz) >= node.get_output_end());
 }
 
-const Edge *Edge::find_edge(const Edge *bt, const Edge *et, Index_ID ptr_nid, Port_ID inp_pid, Port_ID dst_pid) const {
+const Edge *Edge::find_edge(const Edge *bt, const Edge *et, Index_ID ptr_idx, Port_ID inp_pid, Port_ID dst_pid) const {
   const Edge *eit = bt;
   while (eit != et) {
-    if (eit->get_idx() == ptr_nid && eit->get_inp_pid() == inp_pid && eit->get_dst_pid() == dst_pid) return eit;
+    if (eit->get_idx() == ptr_idx && eit->get_inp_pid() == inp_pid && eit->get_dst_pid() == dst_pid) return eit;
 
     if (eit->is_snode())
       eit++;
@@ -51,29 +52,32 @@ const Edge *Edge::find_edge(const Edge *bt, const Edge *et, Index_ID ptr_nid, Po
 }
 
 const Edge &Edge::get_reverse_for_deletion() const {
+  I(is_root());
   Node_Internal *ptr_node = &Node_Internal::get(this);
   Index_ID       ptr_idx  = ptr_node->get_self_idx();
-  Index_ID       ptr_nid  = ptr_node->get_nid();
 
   Index_ID       dst_idx = get_idx();
-  Node_Internal *ptr_inp = &ptr_node[dst_idx - ptr_idx];
+  Node_Internal *ptr_inp2 = &ptr_node[dst_idx - ptr_idx];
+  const Node_Internal *ptr_inp = &(ptr_inp2->get_master_root());
+
+  I(ptr_inp->is_master_root());
 
   Index_ID dst_pid = get_out_pin().get_pid();
   Index_ID inp_pid = get_inp_pin().get_pid();
   do {
     const Edge *eit;
-    if (!input)
-      eit = find_edge(ptr_inp->get_input_begin(), ptr_inp->get_input_end(), ptr_nid, dst_pid, inp_pid);
+    if (input)
+      eit = find_edge(ptr_inp->get_output_begin(), ptr_inp->get_output_end(), ptr_idx, inp_pid, dst_pid);
     else
-      eit = find_edge(ptr_inp->get_output_begin(), ptr_inp->get_output_end(), ptr_nid, inp_pid, dst_pid);
+      eit = find_edge(ptr_inp->get_input_begin(), ptr_inp->get_input_end(), ptr_idx, dst_pid, inp_pid);
 
     if (eit) return *eit;
-    assert(!ptr_inp->is_last_state());  // Not found all over
+    I(!ptr_inp->is_last_state());  // Not found all over
 
     ptr_inp = &ptr_node[ptr_inp->get_next() - ptr_idx];
   } while (true);
 
-  assert(false);
+  I(false);
   return ptr_inp->sedge[0];  // Any random thing
 }
 
@@ -86,6 +90,19 @@ Index_ID Edge::get_self_idx() const {
   return delta + root_page.get_idx();
 }
 
+Index_ID Edge::get_self_root_idx() const {
+  const auto &root_page = Node_Internal_Page::get(this);
+  const auto &root_self = Node_Internal::get(this);
+
+  int delta = &root_self - (const Node_Internal *)&root_page;
+
+  Index_ID self_idx = delta + root_page.get_idx();
+  if (root_self.is_root())
+    return self_idx;
+
+  return root_self.get_nid();
+}
+
 Index_ID Node_Internal::get_self_idx() const {
   const auto &root_page = Node_Internal_Page::get(this);
 
@@ -94,82 +111,8 @@ Index_ID Node_Internal::get_self_idx() const {
   return delta + root_page.get_idx();
 }
 
-bool Node_Internal::has_inputs() const {
-  assert(is_master_root());
-
-  int32_t total = get_num_local_inputs();
-  if (total) return true;
-
-  if (is_last_state()) return false;
-
-  const Node_Internal *node = this;
-  do {
-    node  = &get(node->get_next());
-    total = node->get_num_local_inputs();
-    if (total) return true;
-  } while (!node->is_last_state());
-
-  return false;
-}
-
-bool Node_Internal::has_pid_inputs() const {
-  assert(is_root());
-
-  int32_t total = get_num_local_inputs();
-  if (total) return true;
-
-  if (is_last_state()) return false;
-
-  Port_ID              pid  = get_dst_pid();
-  const Node_Internal *node = this;
-  do {
-    node  = &get(node->get_next());
-    total = node->get_num_local_inputs();
-    if (total && node->get_dst_pid() == pid) return true;
-  } while (!node->is_last_state());
-
-  return false;
-}
-
-bool Node_Internal::has_outputs() const {
-  assert(is_master_root());
-
-  int32_t total = get_num_local_outputs();
-  if (total) return true;
-
-  if (is_last_state()) return false;
-
-  const Node_Internal *node = this;
-  do {
-    node  = &get(node->get_next());
-    total = node->get_num_local_outputs();
-    if (total) return true;
-  } while (!node->is_last_state());
-
-  return false;
-}
-
-bool Node_Internal::has_pid_outputs() const {
-  assert(is_root());
-
-  int32_t total = get_num_local_outputs();
-  if (total) return true;
-
-  if (is_last_state()) return false;
-
-  Port_ID              pid  = get_dst_pid();
-  const Node_Internal *node = this;
-  do {
-    node  = &get(node->get_next());
-    total = node->get_num_local_outputs();
-    if (total && node->get_dst_pid() == pid) return true;
-  } while (!node->is_last_state());
-
-  return false;
-}
-
-int32_t Node_Internal::get_num_inputs() const {
-  assert(is_master_root());
+int32_t Node_Internal::get_node_num_inputs() const {
+  I(is_master_root());
 
   int32_t total = get_num_local_inputs();
   if (is_last_state()) return total;
@@ -183,8 +126,8 @@ int32_t Node_Internal::get_num_inputs() const {
   return total;
 }
 
-int32_t Node_Internal::get_num_outputs() const {
-  assert(is_master_root());
+int32_t Node_Internal::get_node_num_outputs() const {
+  I(is_master_root());
 
   int32_t total = get_num_local_outputs();
   if (is_last_state()) return total;
@@ -198,8 +141,82 @@ int32_t Node_Internal::get_num_outputs() const {
   return total;
 }
 
+bool Node_Internal::has_node_inputs() const {
+  I(is_master_root());
+
+  int32_t total = get_num_local_inputs();
+  if (total) return true;
+
+  if (is_last_state()) return false;
+
+  const Node_Internal *node = this;
+  do {
+    node  = &get(node->get_next());
+    total = node->get_num_local_inputs();
+    if (total) return true;
+  } while (!node->is_last_state());
+
+  return false;
+}
+
+bool Node_Internal::has_pin_inputs() const {
+  I(is_root());
+
+  int32_t total = get_num_local_inputs();
+  if (total) return true;
+
+  if (is_last_state()) return false;
+
+  Port_ID              pid  = get_dst_pid();
+  const Node_Internal *node = this;
+  do {
+    node  = &get(node->get_next());
+    total = node->get_num_local_inputs();
+    if (total && node->get_dst_pid() == pid) return true;
+  } while (!node->is_last_state());
+
+  return false;
+}
+
+bool Node_Internal::has_node_outputs() const {
+  I(is_master_root());
+
+  int32_t total = get_num_local_outputs();
+  if (total) return true;
+
+  if (is_last_state()) return false;
+
+  const Node_Internal *node = this;
+  do {
+    node  = &get(node->get_next());
+    total = node->get_num_local_outputs();
+    if (total) return true;
+  } while (!node->is_last_state());
+
+  return false;
+}
+
+bool Node_Internal::has_pin_outputs() const {
+  I(is_root());
+
+  int32_t total = get_num_local_outputs();
+  if (total) return true;
+
+  if (is_last_state()) return false;
+
+  Port_ID              pid  = get_dst_pid();
+  const Node_Internal *node = this;
+  do {
+    node  = &get(node->get_next());
+    total = node->get_num_local_outputs();
+    if (total && node->get_dst_pid() == pid) return true;
+  } while (!node->is_last_state());
+
+  return false;
+}
+
 const Node_Internal &Node_Internal::get_root() const {
-  assert(nid);
+  I(nid);
   if (is_root()) return *this;
 
   const auto &         root_page = Node_Internal_Page::get(this);
@@ -207,14 +224,14 @@ const Node_Internal &Node_Internal::get_root() const {
 
   Index_ID delta = nid - root_page.get_idx();
   root_ptr       = (root_ptr + delta);
-  assert(root_ptr->is_root());
-  assert(root_ptr->is_node_state());
+  I(root_ptr->is_root());
+  I(root_ptr->is_node_state());
 
   return *root_ptr;
 }
 
 const Node_Internal &Node_Internal::get_master_root() const {
-  assert(nid);
+  I(nid);
   if (is_master_root()) return *this;
 
   const auto &         root_page = Node_Internal_Page::get(this);
@@ -222,32 +239,23 @@ const Node_Internal &Node_Internal::get_master_root() const {
 
   Index_ID delta = nid - root_page.get_idx();
   root_ptr       = ((const Node_Internal *)&root_page) + delta;
-  assert(root_ptr->is_root());
-  assert(root_ptr->is_node_state());
+  I(root_ptr->is_root());
+  I(root_ptr->is_node_state());
   if (root_ptr->is_master_root()) return *root_ptr;
 
   delta    = root_ptr->get_nid() - root_page.get_idx();
   root_ptr = ((const Node_Internal *)&root_page) + delta;
 
-  assert(root_ptr->is_root());
-  assert(root_ptr->is_master_root());
-  assert(root_ptr->is_node_state());
+  I(root_ptr->is_root());
+  I(root_ptr->is_master_root());
+  I(root_ptr->is_node_state());
 
   return *root_ptr;
 }
 
-Index_ID Node_Internal::get_master_root_nid() const {
-  assert(nid);
-  if (root) return nid;
-
-  assert(get_root().get_nid() == get_master_root().get_nid());
-
-  return get_root().get_nid();  // No need to do get_master_root
-}
-
 void Node_Internal::try_recycle() {
   if (out_pos != 0 || inp_pos != 0) return;
-  assert(!is_free_state());
+  I(!is_free_state());
 
   // Recycle nid
 
@@ -255,14 +263,14 @@ void Node_Internal::try_recycle() {
 
   Node_Internal *root     = (Node_Internal *)&get_root();
   Index_ID       root_idx = root->get_nid();
-  assert(root_idx == root->get_self_idx());
+  I(root_idx == root->get_self_idx());
 
   Index_ID self_idx = get_self_idx();
   Index_ID prev_idx = root_idx;
-  assert(prev_idx != self_idx);  // because it is not a root
+  I(prev_idx != self_idx);  // because it is not a root
 
   while (root[prev_idx - root_idx].get_next() != self_idx) {
-    assert(root[prev_idx - root_idx].is_next_state());
+    I(root[prev_idx - root_idx].is_next_state());
     prev_idx = root[prev_idx - root_idx].get_next();
   }
 
@@ -273,7 +281,7 @@ void Node_Internal::try_recycle() {
   }
 
   set_free_state();
-  assert(root[-root_idx].is_page_state());
+  I(root[-root_idx].is_page_state());
 
   Node_Internal_Page master_page = Node_Internal_Page::get(root[-root_idx].sedge);
 
@@ -282,17 +290,17 @@ void Node_Internal::try_recycle() {
 }
 
 void Node_Internal::del_input_int(const Edge &inp_edge) {
-  assert(((uint64_t)&inp_edge) >> 5 == ((uint64_t)this) >> 5);
+  I(((uint64_t)&inp_edge) >> 5 == ((uint64_t)this) >> 5);
 
   int pos = (SEdge *)&inp_edge - sedge;
 
-  assert(pos >= 0 && pos <= Num_SEdges);
-  assert((inp_pos + get_input_begin_pos_int()) > pos);
+  I(pos >= 0 && pos <= Num_SEdges);
+  I((inp_pos + get_input_begin_pos_int()) > pos);
 
   int sz = 1;
   if (!inp_edge.is_snode()) {
     sz = 3;
-    assert(inp_long);
+    I(inp_long);
     inp_long--;
   }
 
@@ -302,7 +310,7 @@ void Node_Internal::del_input_int(const Edge &inp_edge) {
     }
   }
 
-  assert(inp_pos >= sz);
+  I(inp_pos >= sz);
 
   inp_pos -= sz;
   for (int i = 0; i < inp_pos;) {
@@ -313,21 +321,21 @@ void Node_Internal::del_input_int(const Edge &inp_edge) {
     }
   }
 
-  assert(inp_pos >= (3 * inp_long));
+  I(inp_pos >= (3 * inp_long));
 }
 
 void Node_Internal::del_output_int(const Edge &out_edge) {
-  assert(((uint64_t)&out_edge) >> 5 == ((uint64_t)this) >> 5);
+  I(((uint64_t)&out_edge) >> 5 == ((uint64_t)this) >> 5);
 
   int pos = (SEdge *)&out_edge - sedge;
 
-  assert(pos >= 0 && pos <= Num_SEdges);
-  assert((Num_SEdges - out_pos) <= pos);
+  I(pos >= 0 && pos <= Num_SEdges);
+  I((Num_SEdges - out_pos) <= pos);
 
   int sz = 1;
   if (!out_edge.is_snode()) {
     sz = 3;
-    assert(out_long > 0);
+    I(out_long > 0);
     out_long--;
   }
 
@@ -339,7 +347,7 @@ void Node_Internal::del_output_int(const Edge &out_edge) {
   }
 
   out_pos -= sz;
-  assert(out_pos >= 0);
+  I(out_pos >= 0);
 }
 
 void Node_Internal::del(const Edge &edge) {
@@ -393,11 +401,11 @@ void Node_Internal::dump_full() const {
 // LCOV_EXCL_STOP
 
 void Node_Internal::assimilate_edges(Node_Internal &other) {
-  assert(inp_pos == 0);
-  assert(out_pos == 0);
-  assert(dst_pid == other.dst_pid);
-  assert(is_last_state());
-  assert(!is_root());  // Could not be root if it is assimulating
+  I(inp_pos == 0);
+  I(out_pos == 0);
+  I(dst_pid == other.dst_pid);
+  I(is_last_state());
+  I(!is_root());  // Could not be root if it is assimulating
 
   // TODO: Currently goes in-order assimilating. It would be better to do:
   //
@@ -450,7 +458,7 @@ void Node_Internal::assimilate_edges(Node_Internal &other) {
 
     if (self_pos >= (Num_SEdges - 1 - 2))  // at least an snode
       break;
-    assert(has_space());
+    I(has_space());
   }
 
   int start_pos = original_start_pos;
@@ -458,11 +466,11 @@ void Node_Internal::assimilate_edges(Node_Internal &other) {
     other.sedge[start_pos++] = other.sedge[j];
   }
 
-  assert(other_end >= other_pos);
+  I(other_end >= other_pos);
   other.inp_pos -= (other_pos - original_start_pos);
-  assert(other_inp_long_removed <= other.inp_long);
+  I(other_inp_long_removed <= other.inp_long);
   other.inp_long -= other_inp_long_removed;
-  assert(other.inp_pos >= (3 * other.inp_long));
+  I(other.inp_pos >= (3 * other.inp_long));
 
   if (has_space(true)) {
     // try transfer outputs if there is space in current
@@ -471,7 +479,7 @@ void Node_Internal::assimilate_edges(Node_Internal &other) {
       const Edge *other_out = other.get_output_begin();
 
       int self_pos = next_free_output_pos();
-      assert(self_pos < Num_SEdges);
+      I(self_pos < Num_SEdges);
       bool done = sedge[self_pos].set(other_out->get_idx(), other_out->get_inp_pid(), other_dst_pid, false  // output
       );
 
@@ -487,7 +495,7 @@ void Node_Internal::assimilate_edges(Node_Internal &other) {
         other.out_pos -= 1;
       } else {
         other.out_pos -= 3;
-        assert(other.out_long > 0);
+        I(other.out_long > 0);
         other.out_long--;
       }
 
