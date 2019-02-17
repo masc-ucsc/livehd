@@ -26,17 +26,16 @@ Edge:
     LGraph::inp_edges
     LGraph::out_edges
 
-  TO DEPRECATE:
-    find_idx_from_pid
-    (slow iterator, use edge.get_idx)
-
 Source (src):
 
 Dest (dst): (do we rename to sink?)
 
 Wirename:
 
-  accessor:
-    get_wid
+  accessors:
+    has_wirename
     get_node_wirename
+
+  deprecated:
+    get_wid (use has_wirename)
 

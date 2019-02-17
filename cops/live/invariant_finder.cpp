@@ -153,7 +153,6 @@ void Invariant_finder::clear_cache(const Node_bit &entry) {
   if (partial_endpoints.find(entry) == partial_endpoints.end() || stack.get_bit(entry.first)) return;
 
   for (auto &oedge : synth_graph->out_edges(entry.first)) {
-    //Index_ID port_id = synth_graph->setup_idx_from_pid(entry.first, oedge.get_out_pin().get_pid());
     for (uint32_t bit = 0; bit < synth_graph->get_bits(oedge.get_out_pin()); bit++) {
       if (cached.find(std::make_pair(oedge.get_idx(), bit)) == cached.end()) return;
     }
@@ -182,27 +181,21 @@ void Invariant_finder::find_invariant_boundaries() {
     LGraph *lg = Invariant_boundaries::get_graph(_inst.second, path);
     assert(lg);
 
-    for (auto &node : lg->forward()) {
-      std::string net_name;
+    for (auto &nid : lg->forward()) {
 
       // FIXME: when testing with synopsys, bit gets merged into name, we need to
       // take that into account here.
-      if (lg->is_graph_output(node)) {
-        net_name = lg->get_graph_output_name(node);
-      } else if (lg->is_graph_input(node)) {
-        net_name = lg->get_graph_input_name(node);
-      } else if (lg->get_wid(node) != 0) {
-        net_name = lg->get_node_wirename(node);
-      } else {
+      if (lg->get_wid(nid) == 0)
         continue;
-      }
 
-      std::string hierarchical_name = inst + net_name;
+     auto net_name = lg->get_node_wirename(nid);
+
+      auto hierarchical_name = absl::StrCat(inst, net_name);
 
       Index_ID    idx;
       WireName_ID wire_id;
-      if (synth_graph->has_wirename(hierarchical_name.c_str())) {
-        idx     = synth_graph->get_node_id(hierarchical_name.c_str());
+      if (synth_graph->has_wirename(hierarchical_name)) {
+        idx     = synth_graph->get_node_id(hierarchical_name);
         wire_id = synth_graph->get_wid(idx);
 
 #ifndef NDEBUG

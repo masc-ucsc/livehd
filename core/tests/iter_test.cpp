@@ -5,25 +5,27 @@
 
 #include <set>
 
+bool failed = false;
+
 void generate_graphs(int n) {
 
   unsigned int rseed = 123;
 
   for(int i = 0; i < n; i++) {
     std::string           gname = "test_" + std::to_string(i);
-    LGraph *              g     = LGraph::create("core_test_lgdb", gname, "test");
+    LGraph *              g     = LGraph::create("lgdb_iter_test", gname, "test");
     std::vector<Index_ID> nodes;
 
     int inps = 10 + rand_r(&rseed) % 100;
     for(int j = 0; j < inps; j++) {
       // max 110 inputs, min 10
-      Index_ID inp_id = g->add_graph_input(("i" + std::to_string(j)).c_str(), 0, 1, 0);
+      Index_ID inp_id = g->add_graph_input(("i" + std::to_string(j)).c_str(), 0, 1, 0).get_idx();
       nodes.push_back(inp_id);
     }
     int outs = 10 + rand_r(&rseed) % 100;
     for(int j = 0; j < outs; j++) {
       // max 110 outs, min 10
-      Index_ID out_id = g->add_graph_output(("o" + std::to_string(j)).c_str(), 0, 1, 0);
+      Index_ID out_id = g->add_graph_output(("o" + std::to_string(j)).c_str(), 0, 1, 0).get_idx();
       nodes.push_back(out_id);
     }
 
@@ -60,7 +62,7 @@ void generate_graphs(int n) {
         continue;
 
       edges.insert(std::make_pair(src, dst));
-      g->add_edge(Node_pin(src, 0, false), Node_pin(dst, 0, true));
+      g->add_edge(g->get_node(src).setup_driver_pin(), g->get_node(dst).setup_sink_pin());
     }
 
     g->close();
@@ -70,7 +72,7 @@ void generate_graphs(int n) {
 bool fwd(int n) {
   for(int i = 0; i < n; i++) {
     std::string gname = "test_" + std::to_string(i);
-    LGraph *    g     = LGraph::open("core_test_lgdb", gname);
+    LGraph *    g     = LGraph::open("lgdb_iter_test", gname);
     if(g == 0)
       return false;
 
@@ -98,7 +100,7 @@ bool fwd(int n) {
 bool bwd(int n) {
   for(int i = 0; i < n; i++) {
     std::string gname = "test_" + std::to_string(i);
-    LGraph *    g     = LGraph::open("core_test_lgdb", gname);
+    LGraph *    g     = LGraph::open("lgdb_iter_test", gname);
     if(g == 0)
       return false;
 
@@ -124,85 +126,112 @@ bool bwd(int n) {
 
 bool simple() {
   std::string gname = "simple_iter";
-  LGraph *    g     = LGraph::create("core_test_lgdb", gname, "test");
+  LGraph *    g     = LGraph::create("lgdb_iter_test", gname, "test");
 
-  g->add_graph_input("i0", 0, 1, 0); // 1
-  g->add_graph_input("i1", 0, 1, 0); // 2
-  g->add_graph_input("i2", 0, 1, 0); // 3
-  g->add_graph_input("i3", 0, 1, 0); // 4
+  auto i1 = g->add_graph_input("i0", 0, 1, 0); // 1
+  auto i2 = g->add_graph_input("i1", 0, 1, 0); // 2
+  auto i3 = g->add_graph_input("i2", 0, 1, 0); // 3
+  auto i4 = g->add_graph_input("i3", 0, 1, 0); // 4
 
-  g->add_graph_output("o0", 0, 1, 0); // 5
-  g->add_graph_output("o1", 0, 1, 0); // 6
-  g->add_graph_output("o2", 0, 1, 0); // 7
-  g->add_graph_output("o3", 0, 1, 0); // 8
+  auto o5 = g->add_graph_output("o0", 0, 1, 0); // 5
+  auto o6 = g->add_graph_output("o1", 0, 1, 0); // 6
+  auto o7 = g->add_graph_output("o2", 0, 1, 0); // 7
+  auto o8 = g->add_graph_output("o3", 0, 1, 0); // 8
 
-  Index_ID const0 = g->create_node().get_nid(); //  9
-  Index_ID const1 = g->create_node().get_nid(); //  10
-  Index_ID const2 = g->create_node().get_nid(); //  11
-  Index_ID const3 = g->create_node().get_nid(); //  12
+  auto c9 = g->create_node_u32(1,3); //  9
+  auto c10 = g->create_node_u32(21,4); //  10
+  auto c11 = g->create_node_const("xxx",3); //  11
+  auto c12 = g->create_node_const("yyyy",4); // 12
 
-  g->node_u32type_set(const0, 1);
-  g->node_u32type_set(const1, 21);
-  g->node_const_type_set(const2, "xxx");
-  g->node_const_type_set_string(const3, "yyy");
-
-  g->create_node().get_nid(); // 13
-  g->create_node().get_nid(); // 14
-  g->create_node().get_nid(); // 15
-  g->create_node().get_nid(); // 16
-  g->create_node().get_nid(); // 17
-  g->create_node().get_nid(); // 18
-  g->create_node().get_nid(); // 19
-  g->create_node().get_nid(); // 20
-  g->create_node().get_nid(); // 20
+  auto t13 = g->create_node(SubGraph_Op); // 13
+  auto t14 = g->create_node(SubGraph_Op); // 14
+  auto t15 = g->create_node(SubGraph_Op); // 15
+  auto t16 = g->create_node(SubGraph_Op); // 16
+  auto t17 = g->create_node(SubGraph_Op); // 17
+  auto t18 = g->create_node(SubGraph_Op); // 18
+  auto t19 = g->create_node(SubGraph_Op); // 19
+  auto t20 = g->create_node(SubGraph_Op); // 20
+  auto t21 = g->create_node(SubGraph_Op); // 21
+  auto t22 = g->create_node(SubGraph_Op); // 22
+  (void)t22; // Disconnected node. Source of bug when fully disconnected
 
   /*     1     2     3     4     9     10     11    12
   //       \  /       \   /  \    \   /       |   /   \
-  //        13         14     15   16          17     18
+  //        13         14     15   16          17     18   22
   //        | \       / \           \        /  \   /   \
   //        |  \     /   \           \      20   19     21
   //        |   \   /     \           \   /
   //        5     6        7            8
   */
 
-  g->add_edge(Node_pin(1, 0, false), Node_pin(13, 0, true));
-  g->add_edge(Node_pin(2, 0, false), Node_pin(13, 0, true));
+  g->add_edge(i1, t13.setup_sink_pin(random()&0xFF));
+  g->add_edge(i2, t13.setup_sink_pin(random()&0xFF));
 
-  g->add_edge(Node_pin(3, 0, false), Node_pin(14, 0, true));
-  g->add_edge(Node_pin(4, 0, false), Node_pin(14, 0, true));
-  g->add_edge(Node_pin(4, 0, false), Node_pin(15, 0, true));
+  g->add_edge(i3, t14.setup_sink_pin(random()&0xFF));
+  g->add_edge(i4, t14.setup_sink_pin(random()&0xFF));
+  g->add_edge(i4, t15.setup_sink_pin(random()&0xFF));
 
-  g->add_edge(Node_pin(9, 0, false), Node_pin(16, 0, true));
-  g->add_edge(Node_pin(10, 0, false), Node_pin(16, 0, true));
+  g->add_edge(c9.setup_driver_pin(), t16.setup_sink_pin(random()&0xFF));
+  g->add_edge(c10.setup_driver_pin(), t16.setup_sink_pin(random()&0xFF));
 
-  g->add_edge(Node_pin(11, 0, false), Node_pin(17, 0, true));
-  g->add_edge(Node_pin(12, 0, false), Node_pin(17, 0, true));
-  g->add_edge(Node_pin(12, 0, false), Node_pin(18, 0, true));
+  g->add_edge(c11.setup_driver_pin(), t17.setup_sink_pin(random()&0xFF));
+  if (rand()&1)
+    g->add_edge(c12.setup_driver_pin(), t17.setup_sink_pin(1000+(random()&0xFF)));
+  g->add_edge(c12.setup_driver_pin(), t17.setup_sink_pin(random()&0xFF));
+  g->add_edge(c12.setup_driver_pin(), t18.setup_sink_pin(random()&0xFF));
 
-  g->add_edge(Node_pin(13, 0, false), Node_pin(5, 0, true));
-  g->add_edge(Node_pin(13, 0, false), Node_pin(6, 0, true));
-  g->add_edge(Node_pin(14, 0, false), Node_pin(6, 0, true));
-  g->add_edge(Node_pin(14, 0, false), Node_pin(7, 0, true));
+  g->add_edge(t13.setup_driver_pin(random()&0xFF), o5);
+  g->add_edge(t13.setup_driver_pin(random()&0xFF), o6);
+  if (rand()&1)
+    g->add_edge(t14.setup_driver_pin(1000+(random()&0xFF)), o6);
+  g->add_edge(t14.setup_driver_pin(random()&0xFF), o6);
+  g->add_edge(t14.setup_driver_pin(random()&0xFF), o7);
 
-  g->add_edge(Node_pin(17, 0, false), Node_pin(20, 0, true));
-  g->add_edge(Node_pin(17, 0, false), Node_pin(19, 0, true));
-  g->add_edge(Node_pin(18, 0, false), Node_pin(19, 0, true));
-  g->add_edge(Node_pin(18, 0, false), Node_pin(21, 0, true));
+  g->add_edge(t17.setup_driver_pin(random()&0xFF), t20.setup_sink_pin(random()&0xFF));
+  if (rand()&1)
+    g->add_edge(t17.setup_driver_pin(1000+(random()&0xFF)), t20.setup_sink_pin(random()&0xFF));
+  g->add_edge(t17.setup_driver_pin(random()&0xFF), t19.setup_sink_pin(random()&0xFF));
+  g->add_edge(t18.setup_driver_pin(random()&0xFF), t19.setup_sink_pin(random()&0xFF));
+  g->add_edge(t18.setup_driver_pin(random()&0xFF), t21.setup_sink_pin(random()&0xFF));
 
-  g->add_edge(Node_pin(16, 0, false), Node_pin(8, 0, true));
-  g->add_edge(Node_pin(20, 0, false), Node_pin(8, 0, true));
+  g->add_edge(t16.setup_driver_pin(random()&0xFF), o8);
+  g->add_edge(t20.setup_driver_pin(random()&0xFF), o8);
 
-  std::string fwd = "fwd: ";
+  std::string fwd;
+  int conta=0;
   for(const auto &idx : g->forward()) {
     fwd += std::to_string(idx) + " ";
+    conta++;
   }
+  if (conta!=22)
+    failed = true;
 
-  std::string bwd = "bwd: ";
+  std::string bwd;
+  conta =0;
   for(const auto &idx : g->backward()) {
     bwd += std::to_string(idx) + " ";
+    conta++;
   }
+  if (conta!=22)
+    failed = true;
 
-  printf("\n\n%s\n\n%s\n\n", fwd.c_str(), bwd.c_str());
+  std::string fast;
+  conta =0;
+  for(const auto &idx : g->fast()) {
+    fast += std::to_string(idx) + " ";
+    conta++;
+  }
+  if (conta!=22)
+    failed = true;
+
+  fmt::print("fwd :{}\n",fwd);
+  fmt::print("back:{}\n",bwd);
+  fmt::print("fast:{}\n",fast);
+
+  if (fwd.size() != bwd.size())
+    failed = true;
+  if (fast.size() != bwd.size())
+    failed = true;
 
   g->close();
 
@@ -210,9 +239,12 @@ bool simple() {
 }
 
 int main() {
-  bool failed = false;
 
-  simple();
+  for(int i=0;i<20;i++) {
+    simple();
+    if (failed)
+      return -3;
+  }
 
   int n = 100;
   generate_graphs(n);

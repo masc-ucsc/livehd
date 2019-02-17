@@ -38,7 +38,7 @@ private:
 
   void generate_modules(std::set<Graph_Node> &different_nodes, const std::string &out_lgdb);
 
-  void add_ios_up(LGraph *module, Index_ID nid, Name2graph_type &name2graph);
+  void add_ios_up(LGraph *module, const Node_pin &pin, Name2graph_type &name2graph);
 
 public:
   // FIXME: can we remove the dependency on the synthesized graph?

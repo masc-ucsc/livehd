@@ -565,10 +565,12 @@ bool Pass_abc::setup_techmap(const LGraph *g) {
       break;
     }
     case GraphIO_Op: {
-      if(g->is_graph_input(idx))
+      if(g->is_graph_input(idx)) {
         graph_info->graphio_input_id.push_back(idx);
-      else
+      }else{
+        I(g->is_graph_output(idx));
         graph_info->graphio_output_id.push_back(idx);
+      }
       break;
     }
     case SubGraph_Op: {
@@ -936,7 +938,7 @@ void Pass_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
         Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
         Abc_ObjAddFanin(pwire, pbuf);
 
-        std::string namebuffer = fmt::format("{}[{}]", g->get_graph_output_name(idx), i);
+        std::string namebuffer = fmt::format("{}[{}]", g->get_node_wirename(idx), i);
 
         pObj = Abc_NtkCreatePo(pAig);
         Abc_ObjAddFanin(pObj, pwire);
@@ -951,7 +953,7 @@ void Pass_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
       Abc_Obj_t *pwire = Abc_NtkCreateNet(pAig);
       Abc_ObjAddFanin(pwire, pbuf);
 
-      std::string namebuffer(g->get_graph_output_name(idx));
+      std::string namebuffer(g->get_node_wirename(idx));
 
       pObj = Abc_NtkCreatePo(pAig);
       Abc_ObjAddFanin(pObj, pwire);
@@ -969,7 +971,7 @@ void Pass_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
         pObj            = Abc_NtkCreatePi(pAig);
         Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
 
-        std::string namebuffer = fmt::format("{}[{}]", g->get_graph_input_name(idx), i);
+        std::string namebuffer = fmt::format("{}[{}]", g->get_node_wirename(idx), i);
 
         Abc_object_assign_name(pNet, namebuffer);
         Abc_ObjAddFanin(pNet, pObj);
@@ -986,7 +988,7 @@ void Pass_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
       pObj            = Abc_NtkCreatePi(pAig);
       Abc_Obj_t *pNet = Abc_NtkCreateNet(pAig);
 
-      std::string namebuffer(g->get_graph_input_name(idx));
+      std::string namebuffer(g->get_node_wirename(idx));
 
       Abc_object_assign_name(pNet, namebuffer);
       Abc_ObjAddFanin(pNet, pObj);

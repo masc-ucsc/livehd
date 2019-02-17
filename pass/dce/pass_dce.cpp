@@ -37,8 +37,8 @@ void Pass_dce::trans(LGraph *g) {
   bm::bvector<>      output_used;
   std::set<Index_ID> pending;
 
-  g->each_output([&pending](Index_ID idx) {
-      pending.insert(idx);
+  g->each_output([&pending](const Node_pin &pin) {
+      pending.insert(pin.get_idx());
     });
 
   while(!pending.empty()) {

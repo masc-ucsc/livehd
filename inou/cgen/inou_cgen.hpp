@@ -27,7 +27,7 @@ private:
 
   const LGraph *lg;
 
-  void iterate_declarations(Index_ID idx, Port_ID pid);
+  void iterate_declarations(const Node_pin &pin);
 
 protected:
   void setup_declarations();

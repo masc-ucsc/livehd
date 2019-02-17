@@ -148,48 +148,86 @@ void LGraph::emplace_back() {
   LGraph_WireNames::emplace_back();
 }
 
-Index_ID LGraph::add_graph_input(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset) {
+Node_pin LGraph::get_graph_input(std::string_view str) const {
+  I(input_array.get_id(str) != 0);
+
+  const auto &p = input_array.get_field(str);
+  return get_node(p.nid).get_driver_pin(p.pos);
+}
+
+Node_pin LGraph::get_graph_output(std::string_view str) const {
+  I(output_array.get_id(str) != 0);
+
+  const auto &p = output_array.get_field(str);
+  return get_node(p.nid).get_sink_pin(p.pos);
+}
+
+Node_pin LGraph::get_graph_output_driver(std::string_view str) const {
+  I(output_array.get_id(str) != 0);
+
+  const auto &p = output_array.get_field(str);
+  return get_node(p.nid).get_driver_pin(p.pos);
+}
+
+#if 0
+Node_pin LGraph::get_graph_output_sink(std::string_view str) const {
+  I(output_array.get_id(str) != 0);
+
+  const auto &p = output_array.get_field(str);
+  return get_node(p.nid).get_sink_pin(p.pos);
+}
+#endif
+
+Node_pin LGraph::add_graph_input(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset) {
   assert(!is_graph_output(str));
   assert(!has_wirename(str));
 
-  Index_ID idx = LGraph_Base::add_graph_input_int(str, nid, bits);
-  LGraph_WireNames::set_offset(idx, offset);
-  node_type_set(idx, GraphIO_Op);
+  auto pin = LGraph_Base::add_graph_input_int(str, nid, bits);
+  set_offset(pin.get_idx(), offset);
+  set_node_wirename(pin, str);
 
-  return idx;
+  const auto &p = input_array.get_field(str);
+  I(pin.get_pid() == p.pos && p.nid != pin.get_idx());
+  return pin;
 }
 
-Index_ID LGraph::add_graph_input(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset, Port_ID original_pos) {
+Node_pin LGraph::add_graph_input(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset, Port_ID original_pos) {
   assert(!is_graph_output(str));
   assert(!has_wirename(str));
 
-  Index_ID idx = LGraph_Base::add_graph_input_int(str, nid, bits, original_pos);
-  LGraph_WireNames::set_offset(idx, offset);
-  node_type_set(idx, GraphIO_Op);
+  auto pin = LGraph_Base::add_graph_input_int(str, nid, bits, original_pos);
+  set_offset(pin.get_idx(), offset);
+  set_node_wirename(pin, str);
 
-  return idx;
+  const auto &p = input_array.get_field(str);
+  I(pin.get_pid() == p.pos && p.nid != pin.get_idx());
+  return pin;
 }
 
-Index_ID LGraph::add_graph_output(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset) {
+Node_pin LGraph::add_graph_output(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset) {
   assert(!is_graph_input(str));
   assert(!has_wirename(str));
 
-  Index_ID idx = LGraph_Base::add_graph_output_int(str, nid, bits);
-  LGraph_WireNames::set_offset(idx, offset);
-  node_type_set(idx, GraphIO_Op);
+  auto pin = LGraph_Base::add_graph_output_int(str, nid, bits);
+  LGraph_WireNames::set_offset(pin.get_idx(), offset);
+  LGraph_WireNames::set_node_wirename(pin, str);
 
-  return idx;
+  const auto &p = output_array.get_field(str);
+  I(pin.get_pid() == p.pos && p.nid != pin.get_idx());
+  return pin;
 }
 
-Index_ID LGraph::add_graph_output(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset, Port_ID original_pos) {
+Node_pin LGraph::add_graph_output(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset, Port_ID original_pos) {
   assert(!is_graph_input(str));
   assert(!has_wirename(str));
 
-  Index_ID idx = LGraph_Base::add_graph_output_int(str, nid, bits, original_pos);
-  LGraph_WireNames::set_offset(idx, offset);
-  node_type_set(idx, GraphIO_Op);
+  auto pin = LGraph_Base::add_graph_output_int(str, nid, bits, original_pos);
+  LGraph_WireNames::set_offset(pin.get_idx(), offset);
+  LGraph_WireNames::set_node_wirename(pin, str);
 
-  return idx;
+  const auto &p = output_array.get_field(str);
+  I(pin.get_pid() == p.pos && p.nid != pin.get_idx()); // PID==0 not used, so it must be different
+  return pin;
 }
 
 Node LGraph::create_node() {
@@ -216,19 +254,30 @@ Node LGraph::create_node(Node_Type_Op op, uint16_t bits) {
 }
 
 Node LGraph::create_node_u32(uint32_t value, uint16_t bits) {
-  Index_ID nid = create_node_int();
-  node_u32type_set(nid, value);
+
+  Index_ID nid = node_u32type_find(value);
+  if (nid==0 || node_internal[nid].get_bits() != bits) {
+    nid = create_node_int();
+    node_u32type_set(nid, value);
+
+    set_bits(nid, bits);
+  }
+
+  I(node_internal[nid].get_dst_pid()==0);
+  I(node_internal[nid].is_master_root());
 
   Node node(this,nid);
-  auto pin0 = node.setup_driver_pin();
-  set_bits(pin0,bits);
 
   return node;
 }
 
 Node LGraph::create_node_const(std::string_view value) {
-  Index_ID nid = create_node_int();
-  node_const_type_set_string(nid, value);
+
+  Index_ID nid = node_const_string_find(value);
+  if (nid==0) {
+    nid = create_node_int();
+    node_const_type_set_string(nid, value);
+  }
 
   Node node(this,nid);
 
@@ -236,16 +285,34 @@ Node LGraph::create_node_const(std::string_view value) {
 }
 
 Node LGraph::create_node_const(std::string_view value, uint16_t bits) {
-  auto node = create_node_const(value);
+  Index_ID nid = node_const_string_find(value);
+  if (nid==0 || node_internal[nid].get_bits() != bits) {
+    nid = create_node_int();
+    node_const_type_set_string(nid, value);
+    set_bits(nid,bits);
+  }
 
-  auto pin0 = node.setup_driver_pin();
-  set_bits(pin0,bits);
+  I(node_internal[nid].get_dst_pid()==0);
+  I(node_internal[nid].is_master_root());
+
+  Node node(this,nid);
 
   return node;
 }
 
-Node LGraph::get_node(Index_ID nid) { return Node(this, nid); }
-ConstNode LGraph::get_node(Index_ID nid) const { return ConstNode(this, nid); }
+Node LGraph::get_node(Index_ID nid) {
+  I(node_internal[nid].is_root());
+  nid = node_internal[nid].get_nid();
+  I(node_internal[nid].is_master_root());
+  return Node(this, nid);
+}
+
+ConstNode LGraph::get_node(Index_ID nid) const {
+  I(node_internal[nid].is_root());
+  nid = node_internal[nid].get_nid();
+  I(node_internal[nid].is_master_root());
+  return ConstNode(this, nid);
+}
 
 Node LGraph::get_node(const Node_pin &pin) {
   if (pin.get_pid()==0)
@@ -314,17 +381,17 @@ void LGraph::dump() const {
 
   for (auto it = input_array.begin(); it != input_array.end(); ++it) {
     const auto &p = it.get_field();
-    fmt::print("inp {} idx:{} pid:{}\n", it.get_name(), p.nid, p.pos);
+    fmt::print("inp {} nid:{} pid:{}\n", it.get_name(), p.nid, p.pos);
   }
   for (auto it = output_array.begin(); it != output_array.end(); ++it) {
     const auto &p = it.get_field();
-    fmt::print("out {} idx:{} pid:{}\n", it.get_name(), p.nid, p.pos);
+    fmt::print("out {} nid:{} pid:{}\n", it.get_name(), p.nid, p.pos);
   }
 
   dump_wirenames();
 
-#if 0
-  for (Index_ID i = 0; i < node_internal.size(); i.value++) {
+#if 1
+  for (size_t i = 0; i < node_internal.size(); ++i) {
     fmt::print("{} ", i);
     node_internal[i].dump();
   }
