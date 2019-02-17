@@ -31,6 +31,15 @@ cc_test(
 )
 
 cc_test(
+    name = "elab_scanner_unit_test",
+    srcs = ["tests/elab_scanner_unit_test.cpp"],
+    deps = [
+        "@gtest//:gtest_main",
+        ":elab",
+    ],
+)
+
+cc_test(
     name = "elab_verilog_test",
     srcs = ["tests/elab_verilog_test.cpp"],
     args = ["$(location :elab_scripts)"],
