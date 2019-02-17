@@ -1,4 +1,8 @@
 $c as __bits:3
 d = 5
 %out as __bits:4
-%out = $c + d
+%out = ($c + d)
+
+if ($a <= 254){
+  %out4 = $a + 1
+}
