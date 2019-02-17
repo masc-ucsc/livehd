@@ -119,7 +119,7 @@ void Lgyosys_dump::create_blackbox(const LGraph &subgraph, RTLIL::Design *design
 #else
   uint32_t port_idx = 0;
   for(auto &nid : subgraph.fast()) {
-    if(subgraph.node_type_get(nid).op != GraphIO_Op)
+    if(subgraph.get_node(nid).get_type().op != GraphIO_Op)
       continue;
     std::string name = "\\";
     if(subgraph.is_graph_input(nid)) {
@@ -158,37 +158,37 @@ void Lgyosys_dump::create_memory(const LGraph *g, RTLIL::Module *module, Index_I
       assert(clk);
 
     } else if(input_pin == LGRAPH_MEMOP_SIZE) {
-      if(g->node_type_get(c.get_idx()).op != U32Const_Op)
+      if(g->get_node(c.get_idx()).get_type().op != U32Const_Op)
         log_error("Internal Error: Mem size is not a constant.\n");
       memory->setParam("\\SIZE", RTLIL::Const(g->node_value_get(c.get_idx())));
 
     } else if(input_pin == LGRAPH_MEMOP_OFFSET) {
-      if(g->node_type_get(c.get_idx()).op != U32Const_Op)
+      if(g->get_node(c.get_idx()).get_type().op != U32Const_Op)
         log_error("Internal Error: Mem size is not a constant.\n");
       memory->setParam("\\OFFSET", RTLIL::Const(g->node_value_get(c.get_idx())));
 
     } else if(input_pin == LGRAPH_MEMOP_ABITS) {
-      if(g->node_type_get(c.get_idx()).op != U32Const_Op)
+      if(g->get_node(c.get_idx()).get_type().op != U32Const_Op)
         log_error("Internal Error: Mem addr bits is not a constant.\n");
       memory->setParam("\\ABITS", RTLIL::Const(g->node_value_get(c.get_idx())));
 
     } else if(input_pin == LGRAPH_MEMOP_WRPORT) {
-      if(g->node_type_get(c.get_idx()).op != U32Const_Op)
+      if(g->get_node(c.get_idx()).get_type().op != U32Const_Op)
         log_error("Internal Error: Mem num wr ports is not a constant.\n");
       memory->setParam("\\WR_PORTS", RTLIL::Const(g->node_value_get(c.get_idx())));
 
     } else if(input_pin == LGRAPH_MEMOP_RDPORT) {
-      if(g->node_type_get(c.get_idx()).op != U32Const_Op)
+      if(g->get_node(c.get_idx()).get_type().op != U32Const_Op)
         log_error("Internal Error: Mem num rd ports is not a constant.\n");
       memory->setParam("\\RD_PORTS", RTLIL::Const(g->node_value_get(c.get_idx())));
 
     } else if(input_pin == LGRAPH_MEMOP_RDTRAN) {
-      if(g->node_type_get(c.get_idx()).op != U32Const_Op)
+      if(g->get_node(c.get_idx()).get_type().op != U32Const_Op)
         log_error("Internal Error: Mem rd_transp is not a constant.\n");
       transp = g->node_value_get(c.get_idx()) ? RTLIL::State::S1 : RTLIL::State::S0;
 
     } else if(input_pin == LGRAPH_MEMOP_CLKPOL) {
-      if(g->node_type_get(c.get_idx()).op != U32Const_Op)
+      if(g->get_node(c.get_idx()).get_type().op != U32Const_Op)
         log_error("Internal Error: Mem RD_CLK polarity is not a constant.\n");
       posedge = (g->node_value_get(c.get_idx()) == 0) ? RTLIL::State::S1 : RTLIL::State::S0;
 
@@ -246,7 +246,7 @@ void Lgyosys_dump::create_memory(const LGraph *g, RTLIL::Module *module, Index_I
 }
 
 void Lgyosys_dump::create_subgraph(const LGraph *g, RTLIL::Module *module, Index_ID idx) {
-  assert(g->node_type_get(idx).op == SubGraph_Op);
+  assert(g->get_node(idx).get_type().op == SubGraph_Op);
 
   LGraph *subgraph = LGraph::open(g->get_path(), g->subgraph_id_get(idx));
   if(subgraph == nullptr) {
@@ -288,7 +288,7 @@ void Lgyosys_dump::create_subgraph(const LGraph *g, RTLIL::Module *module, Index
 }
 
 void Lgyosys_dump::create_subgraph_outputs(const LGraph *g, RTLIL::Module *module, Index_ID idx) {
-  assert(g->node_type_get(idx).op == SubGraph_Op);
+  assert(g->get_node(idx).get_type().op == SubGraph_Op);
 
   auto subgraph_name = g->get_library().get_name(g->subgraph_id_get(idx));
   LGraph *subgraph   = LGraph::open(g->get_path(), subgraph_name);
@@ -333,63 +333,62 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module *module) {
     input_map[pin.get_idx()]->port_output = false;
   });
 
-  for(auto idx : g->fast()) {
-    assert(g->is_root(idx));
+  for(auto nid : g->fast()) {
 
-    if(g->node_type_get(idx).op == GraphIO_Op)
+    if(g->get_node(nid).get_type().op == GraphIO_Op)
       continue; // handled before with each_output/each_input
 
     RTLIL::IdString name;
     RTLIL::IdString yosys_op;
-    auto wname = g->get_node_wirename(idx);
+    auto wname = g->get_node_wirename(nid);
     if(!wname.empty()) {
       name = RTLIL::IdString(absl::StrCat("\\", wname));
     } else {
-      if(!g->has_wirename(absl::StrCat("lgraph_cell_", std::to_string(idx))))
-        name = RTLIL::IdString(absl::StrCat("\\lgraph_cell_", std::to_string(idx)));
+      if(!g->has_wirename(absl::StrCat("lgraph_cell_", std::to_string(nid))))
+        name = RTLIL::IdString(absl::StrCat("\\lgraph_cell_", std::to_string(nid)));
       else {
         name = RTLIL::IdString(absl::StrCat("\\", next_wire(g)));
       }
     }
 
-    if(g->node_type_get(idx).op == U32Const_Op) {
-      RTLIL::Wire *new_wire = module->addWire(name, g->get_bits(idx));
+    if(g->get_node(nid).get_type().op == U32Const_Op) {
+      RTLIL::Wire *new_wire = module->addWire(name, g->get_bits(nid));
 
       // constants treated as inputs
-      module->connect(new_wire, RTLIL::SigSpec(g->node_value_get(idx), g->get_bits(idx)));
-      input_map[idx] = new_wire;
+      module->connect(new_wire, RTLIL::SigSpec(g->node_value_get(nid), g->get_bits(nid)));
+      input_map[nid] = new_wire;
       continue;
 
-    } else if(g->node_type_get(idx).op == StrConst_Op) {
+    } else if(g->get_node(nid).get_type().op == StrConst_Op) {
       bool blackbox_idx = 0;
-      for(const auto &c : g->out_edges(idx)) {
-        if (g->node_type_get(g->get_node(c.get_inp_pin()).get_nid()).op == BlackBox_Op) {
+      for(const auto &c : g->out_edges(nid)) {
+        if (g->get_node(c.get_inp_pin()).get_type().op == BlackBox_Op) {
           blackbox_idx = g->get_node(c.get_inp_pin()).get_nid();
         }else{
           I(!blackbox_idx); // if blackbox, always blackbox argument
         }
       }
       if (blackbox_idx==0) {
-        auto const_val = g->node_const_value_get(idx);
+        auto const_val = g->node_const_value_get(nid);
         RTLIL::Wire *new_wire  = module->addWire(name, const_val.size()); // FIXME: This assumes that const are in base 2. OK always?
 
         // constants treated as inputs
         module->connect(new_wire, RTLIL::SigSpec(RTLIL::Const::from_string(std::string(const_val))));
-        input_map[idx] = new_wire;
+        input_map[nid] = new_wire;
       }
       continue;
 
-    } else if(g->node_type_get(idx).op == SubGraph_Op) {
-      create_subgraph_outputs(g, module, idx);
+    } else if(g->get_node(nid).get_type().op == SubGraph_Op) {
+      create_subgraph_outputs(g, module, nid);
       continue;
 
-    } else if(g->node_type_get(idx).op == TechMap_Op) {
+    } else if(g->get_node(nid).get_type().op == TechMap_Op) {
 
-      const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
+      const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(nid));
 
       std::set<Port_ID> visited_out_pids;
 
-      for(auto &edge : g->out_edges(idx)) {
+      for(auto &edge : g->out_edges(nid)) {
         // only once per pid
         if(visited_out_pids.find(edge.get_out_pin().get_pid()) != visited_out_pids.end())
           continue;
@@ -409,11 +408,11 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module *module) {
         cell_output_map[std::make_pair(edge.get_out_pin().get_idx(), edge.get_out_pin().get_pid())] = module->addWire(full_name, out_size);
       }
       continue;
-    } else if(g->node_type_get(idx).op == Memory_Op) {
+    } else if(g->get_node(nid).get_type().op == Memory_Op) {
 
       std::set<Port_ID> visited_out_pids;
 
-      for(auto &edge : g->out_edges(idx)) {
+      for(auto &edge : g->out_edges(nid)) {
         if(visited_out_pids.find(edge.get_out_pin().get_pid()) != visited_out_pids.end())
           continue;
 
@@ -421,21 +420,19 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module *module) {
 
         RTLIL::Wire *new_wire = module->addWire(next_id(g), g->get_bits(edge.get_out_pin()));
         cell_output_map[std::make_pair(edge.get_out_pin().get_idx(), edge.get_out_pin().get_pid())] = new_wire;
-        mem_output_map[idx].push_back(RTLIL::SigChunk(new_wire));
+        mem_output_map[nid].push_back(RTLIL::SigChunk(new_wire));
       }
       continue;
-    } else if(g->node_type_get(idx).op == BlackBox_Op) {
-      for(auto &edge : g->out_edges(idx)) {
+    } else if(g->get_node(nid).get_type().op == BlackBox_Op) {
+      for(auto &edge : g->out_edges(nid)) {
         RTLIL::Wire *new_wire = module->addWire(next_id(g), g->get_bits(edge.get_out_pin()));
         cell_output_map[std::make_pair(edge.get_out_pin().get_idx(), edge.get_out_pin().get_pid())] = new_wire;
       }
       continue;
-    } else if(g->node_type_get(idx).op == And_Op || g->node_type_get(idx).op == Or_Op || g->node_type_get(idx).op == Xor_Op) {
+    } else if(g->get_node(nid).get_type().op == And_Op || g->get_node(nid).get_type().op == Or_Op || g->get_node(nid).get_type().op == Xor_Op) {
       // This differentiates between binary and unary Ands, Ors, Xors
       int count = 0;
-      if (idx==974)
-        fmt::print("HERE\n");
-      for(const auto &edge : g->out_edges(idx)) {
+      for(const auto &edge : g->out_edges(nid)) {
         if(cell_output_map.find(std::make_pair(edge.get_out_pin().get_idx(), edge.get_out_pin().get_pid())) == cell_output_map.end()) {
           ++count;
           assert(count == 1);
@@ -455,7 +452,7 @@ void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module *module) {
       continue;
     }
 
-    const auto node = g->get_node(idx);
+    const auto node = g->get_node(nid);
     RTLIL::Wire *result                     = module->addWire(name, g->get_bits(node.get_driver_pin()));
     cell_output_map[std::make_pair(node.get_driver_pin().get_idx(), 0)] = result;
   }
@@ -484,7 +481,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
 
   // now create nodes and make connections
   for(auto nid : g->fast()) {
-    auto op = g->node_type_get(nid).op;
+    auto op = g->get_node(nid).get_type().op;
     if (op == GraphIO_Op)
       continue; // outputs already handled, inputs are not used
 
@@ -499,7 +496,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
     uint16_t size = 0;
     // bool     u_type = true;
 
-    switch(g->node_type_get(nid).op) {
+    switch(g->get_node(nid).get_type().op) {
     case GraphIO_Op:
     case U32Const_Op:
     case StrConst_Op:
@@ -695,7 +692,6 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         RTLIL::Wire *join                       = get_wire(c.get_out_pin());
         joined_wires[c.get_inp_pin().get_pid()] = RTLIL::SigChunk(join);
         width += join->width;
-//HERE: idx=16 
         has_inputs = true;
       }
 
@@ -728,7 +724,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
           picked_wire = get_wire(c.get_out_pin());
           break;
         case 1:
-          if(g->node_type_get(c.get_idx()).op != U32Const_Op)
+          if(g->get_node(c.get_idx()).get_type().op != U32Const_Op)
             log_error("Internal Error: Pick range is not a constant.\n");
           lower = g->node_value_get(c.get_idx());
           break;
@@ -824,7 +820,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       if(dWire)
         log("adding sflop_Op width = %d\n", dWire->width);
       // last argument is polarity
-      switch(g->node_type_get(nid).op) {
+      switch(g->get_node(nid).get_type().op) {
       case SFlop_Op:
         if(enWire == nullptr && clkWire != nullptr && dWire != nullptr && rstWire == nullptr && rstVal == nullptr) {
           module->addDff(next_id(g), clkWire, dWire, cell_output_map[std::make_pair(node.get_driver_pin().get_idx(), 0)], true);
@@ -887,7 +883,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       if(lhs == nullptr || rhs == nullptr)
         log_error("Internal error: found no connections to LT pid.\n");
 
-      switch(g->node_type_get(nid).op) {
+      switch(g->get_node(nid).get_type().op) {
       case LessThan_Op:
         module->addLt(next_id(g), lhs, rhs, cell_output_map[std::make_pair(node.get_driver_pin().get_idx(), 0)], sign);
         break;
@@ -928,7 +924,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         case 1:
           if(shift_amount.size() != 0)
             log_error("Internal Error: multiple wires assigned to same shift\n");
-          if(g->node_type_get(c.get_idx()).op == U32Const_Op)
+          if(g->get_node(c.get_idx()).get_type().op == U32Const_Op)
             shift_amount = RTLIL::Const(g->node_value_get(c.get_idx()));
           else
             shift_amount = get_wire(c.get_out_pin());
@@ -963,13 +959,13 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         case 1:
           if(shift_amount.size() != 0)
             log_error("Internal Error: multiple wires assigned to same shift\n");
-          if(g->node_type_get(c.get_idx()).op == U32Const_Op)
+          if(g->get_node(c.get_idx()).get_type().op == U32Const_Op)
             shift_amount = RTLIL::Const(g->node_value_get(c.get_idx()));
           else
             shift_amount = get_wire(c.get_out_pin());
           break;
         case 2:
-          if(g->node_type_get(c.get_idx()).op != U32Const_Op)
+          if(g->get_node(c.get_idx()).get_type().op != U32Const_Op)
             log_error("Internal Error: Shift sign is not a constant.\n");
           sign   = (g->node_value_get(c.get_idx()) % 2 == 1);
           b_sign = (g->node_value_get(c.get_idx()) == 2);
@@ -1142,12 +1138,12 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       for(const auto &c : g->inp_edges(nid)) {
         if(c.get_inp_pin().get_pid() == LGRAPH_BBOP_TYPE) {
           // celltype
-          if(g->node_type_get(c.get_idx()).op != StrConst_Op)
+          if(g->get_node(c.get_idx()).get_type().op != StrConst_Op)
             log_error("Internal Error: BB type is not a string.\n");
           celltype = g->node_const_value_get(c.get_idx());
         } else if(c.get_inp_pin().get_pid() == LGRAPH_BBOP_NAME) {
           // instance name
-          if(g->node_type_get(c.get_idx()).op != StrConst_Op)
+          if(g->get_node(c.get_idx()).get_type().op != StrConst_Op)
             log_error("Internal Error: BB name is not a string.\n");
           instance_name = g->node_const_value_get(c.get_idx());
         } else if(c.get_inp_pin().get_pid() < LGRAPH_BBOP_OFFSET) {
@@ -1169,7 +1165,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       for(const auto &c : g->inp_edges(nid)) {
         if(c.get_inp_pin().get_pid() >= LGRAPH_BBOP_OFFSET) {
           if(LGRAPH_BBOP_ISPARAM(c.get_inp_pin().get_pid())) {
-            if(g->node_type_get(c.get_idx()).op != U32Const_Op)
+            if(g->get_node(c.get_idx()).get_type().op != U32Const_Op)
               log_error("Internal Error: Could not define if input is parameter.\n");
             is_param = g->node_value_get(c.get_idx()) == 1;
 #ifndef NDEBUG
@@ -1179,7 +1175,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
             current_port = LGRAPH_BBOP_PORT_N(c.get_inp_pin().get_pid());
 #endif
           } else if(LGRAPH_BBOP_ISPNAME(c.get_inp_pin().get_pid())) {
-            if(g->node_type_get(c.get_idx()).op != StrConst_Op)
+            if(g->get_node(c.get_idx()).get_type().op != StrConst_Op)
               log_error("Internal Error: BB input name not a string.\n");
             current_name = g->node_const_value_get(c.get_idx());
 #ifndef NDEBUG
@@ -1189,17 +1185,17 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
 #endif
           } else if(LGRAPH_BBOP_ISCONNECT(c.get_inp_pin().get_pid())) {
             if(is_param) {
-              if(g->node_type_get(c.get_idx()).op == U32Const_Op) {
+              if(g->get_node(c.get_idx()).get_type().op == U32Const_Op) {
                 cell->setParam(absl::StrCat("\\",current_name), RTLIL::Const(g->node_value_get(c.get_idx())));
-              } else if(g->node_type_get(c.get_idx()).op == StrConst_Op) {
+              } else if(g->get_node(c.get_idx()).get_type().op == StrConst_Op) {
                 cell->setParam(absl::StrCat("\\",current_name), RTLIL::Const(std::string(g->node_const_value_get(c.get_idx()))));
               } else {
                 assert(false); // parameter is not a constant
               }
             } else {
-              if(g->node_type_get(c.get_idx()).op == U32Const_Op) {
+              if(g->get_node(c.get_idx()).get_type().op == U32Const_Op) {
                 cell->setPort(absl::StrCat("\\",current_name), RTLIL::Const(g->node_value_get(c.get_idx())));
-              } else if(g->node_type_get(c.get_idx()).op == StrConst_Op) {
+              } else if(g->get_node(c.get_idx()).get_type().op == StrConst_Op) {
                 cell->setPort(absl::StrCat("\\",current_name), RTLIL::Const(std::string(g->node_const_value_get(c.get_idx()))));
               } else {
                 cell->setPort(absl::StrCat("\\",current_name), get_wire(c.get_out_pin()));
@@ -1212,7 +1208,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
             def          = 0;
 #endif
           } else if(LGRAPH_BBOP_ISONAME(c.get_inp_pin().get_pid())) {
-            if(g->node_type_get(c.get_idx()).op != StrConst_Op)
+            if(g->get_node(c.get_idx()).get_type().op != StrConst_Op)
               log_error("Internal Error: BB output name is not a string.\n");
             assert(output_names.size() == (uint32_t)LGRAPH_BBOP_PORT_N(c.get_inp_pin().get_pid()));
             output_names.push_back(g->node_const_value_get(c.get_idx()));
@@ -1230,7 +1226,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
     }
 
     default:
-      log_error("Operation %s (node = %ld) not supported, please add to lgyosys_dump.\n", g->node_type_get(nid).get_name().c_str(), nid.value);
+      log_error("Operation %s (node = %ld) not supported, please add to lgyosys_dump.\n", g->get_node(nid).get_type().get_name().c_str(), nid.value);
       break;
     }
   }
