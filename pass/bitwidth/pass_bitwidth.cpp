@@ -385,11 +385,9 @@ void Pass_bitwidth::iterate_subgraph(const LGraph *lg, Index_ID idx) {
   //Here we populate our vector with all the subgraph's IO indices.
   //FIXME: There has to be a better way to find just the subgraph's graphio nodes.
   std::vector<Index_ID> sg_io_idx;
-  lg->each_output_root_fast([this, sg, &sg_io_idx](Index_ID idx, Port_ID pid) {
-    const auto &op = sg->node_type_get(idx);
-    if (op.op == GraphIO_Op) {
-      sg_io_idx.push_back(idx);
-    }
+  lg->each_output([this, sg, &sg_io_idx](const Node_pin &pin) {
+    assert(sg->node_type_get(sg->get_node(pin).get_nid()).op == GraphIO_Op);
+    sg_io_idx.push_back(pin.get_idx());
   });
 
   do_trans(sg);
@@ -422,21 +420,21 @@ void Pass_bitwidth::iterate_subgraph(const LGraph *lg, Index_ID idx) {
 // MIT Algorithm
 void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
 
-  lg->each_output_root_fast([this, lg](Index_ID idx, Port_ID pid) {
-    if(lg->get_bits(idx) == 0)
+  lg->each_output([this, lg](const Node_pin &pin) {
+    if(lg->get_bits(pin) == 0)
       return;
 
-    const auto &node = lg->node_type_get(idx);
-    auto       &nb   = lg->node_bitwidth_get(idx);
+    const auto &node = lg->node_type_get(lg->get_node(pin).get_nid());
+    auto       &nb   = lg->node_bitwidth_get(pin.get_idx());
 
     bool sign = false;
     if(node.op == U32Const_Op) {
-      uint32_t val = lg->node_value_get(idx);
+      uint32_t val = lg->node_value_get(pin);
       nb.e.set_uconst(val);
     } else {
       if(node.has_may_gen_sign()) {
         bool all_signed = true;
-        for(const auto &inp : lg->inp_edges(idx)) {
+        for(const auto &inp : lg->inp_edges(lg->get_node(pin).get_nid())) {
           if(node.is_input_signed(inp.get_inp_pin().get_pid()))
             continue;
 
@@ -447,9 +445,9 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
       }
 
       if(sign)
-        nb.e.set_sbits(lg->get_bits(idx));
+        nb.e.set_sbits(lg->get_bits(pin));
       else
-        nb.e.set_ubits(lg->get_bits(idx));
+        nb.e.set_ubits(lg->get_bits(pin));
     }
 
     //Note: I don't think I'd just want to do set_implicit for all.
@@ -462,15 +460,12 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
     //  i.e. Join_Op should not be here, it should have some logic for min-max.
     if(node.op == GraphIO_Op) {
       //If node is an input GRAPHIO, set implicit range. Don't for output.
-      for(const auto &out : lg->out_edges(idx)) {
-        if(!lg->has_inputs(idx))
-          nb.set_implicit();
-      }
+      if(!lg->has_inputs(pin))
+        nb.set_implicit();
     } else if((node.op == U32Const_Op) | (node.op == Join_Op)) {
       nb.set_implicit();
     }
-    assert(idx);
-    pending.set_bit(idx);
+    pending.set_bit(pin.get_idx());
   });
 }
 
@@ -538,11 +533,11 @@ void Pass_bitwidth::iterate_node(LGraph *lg, Index_ID idx) {
 
 void Pass_bitwidth::bw_pass_dump(LGraph *lg) {
 
-  lg->each_input_root_fast([this, lg](Index_ID idx, Port_ID pid) {
-    const auto &node = lg->node_type_get(idx);
-    const auto &nb   = lg->node_bitwidth_get(idx);
+  lg->each_input([this, lg](const Node_pin &pin) {
+    const auto &name = lg->get_node_wirename(pin);
+    const auto &nb   = lg->node_bitwidth_get(pin.get_idx());
 
-    fmt::print("inp {}:{} {} ", idx, pid, node.get_name());
+    fmt::print("inp {}:{} {} ", pin.get_idx(), pin.get_pid(), name);
     nb.i.dump();
     fmt::print("\n  ");
     nb.e.dump();
@@ -551,12 +546,12 @@ void Pass_bitwidth::bw_pass_dump(LGraph *lg) {
 
   fmt::print("\n");
 
-  lg->each_output_root_fast([this,lg](Index_ID idx, Port_ID pid) {
+  lg->each_output([this,lg](const Node_pin &pin) {
 
-    const auto &node = lg->node_type_get(idx);
-    const auto &nb   = lg->node_bitwidth_get(idx);
+    const auto &name = lg->get_node_wirename(pin);
+    const auto &nb   = lg->node_bitwidth_get(pin.get_idx());
 
-    fmt::print("out {}:{} {} ", idx, pid, node.get_name());
+    fmt::print("out {}:{} {} ", pin.get_idx(), pin.get_pid(), name);
     nb.i.dump();
     fmt::print("\n  ");
     nb.e.dump();

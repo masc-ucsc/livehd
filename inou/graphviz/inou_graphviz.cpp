@@ -75,15 +75,24 @@ void Inou_graphviz::do_fromlg(std::vector<LGraph *> &lgs) {
 void Inou_graphviz::populate_data(LGraph* g){
   std::string data = "digraph {\n";
 
-  g->each_master_root_fast([this, g, &data](Index_ID src_nid) {
-    const auto &ntype = g->node_type_get(src_nid);
-    std::string bits_str = std::to_string(g->get_bits(src_nid));
-    if(verbose)
-      data += fmt::format(" {} [label=\"n{}, {}, {}b\n{}\"];\n", src_nid, src_nid, ntype.get_name(), bits_str, g->get_node_wirename(src_nid));
-    else if(bits)
-      data += fmt::format(" {} [label=\"n{}:{}:{}b\"];\n", src_nid, src_nid, ntype.get_name(), bits_str);
-    else
-      data += fmt::format(" {} [label=\"n{}:{}\"];\n",  src_nid, src_nid, ntype.get_name());
+  g->each_node_fast([this, g, &data](const Node &node) {
+    const auto &ntype = node.get_type();
+
+    if (ntype.has_single_output()) {
+      std::string bits_str = std::to_string(g->get_bits(node.get_driver_pin()));
+      if(verbose) {
+        data += fmt::format(" {} [label=\"n{}, {}, {}b\n{}\"];\n"
+            ,node.get_nid()
+            ,node.get_nid()
+            ,ntype.get_name()
+            ,bits_str
+            ,g->get_node_wirename(node.get_driver_pin()));
+      }else{
+        data += fmt::format(" {} [label=\"n{}:{}:{}b\"];\n", node.get_nid(), node.get_nid(), ntype.get_name(), bits_str);
+      }
+    }else{
+      data += fmt::format(" {} [label=\"n{}:{}\"];\n",  node.get_nid(), node.get_nid(), ntype.get_name());
+    }
   });
 
   g->each_output_edge_fast([&data](Index_ID src_nid, Port_ID src_pid, Index_ID dst_nid, Port_ID dst_pid) {

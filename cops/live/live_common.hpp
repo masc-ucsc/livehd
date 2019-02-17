@@ -7,7 +7,7 @@
 
 namespace Live {
 
-class Graph_Node {
+class Graph_Node { // FIXME: remove an use Node_pin (same info)
 public:
   LGraph *    module;
   Index_ID    idx;

@@ -183,8 +183,8 @@ void Pass_dfg::trans(LGraph *dfg) {
 
         fmt::print("inp_name:{}\n",inp_name);
         fmt::print("src_nid:{}, src_pid:{}, dst_nid:{}, dst_pid:{}\n", src_nid, src_pid, dst_nid, dst_pid);
-        Node_pin* src_pin = new Node_pin(src_nid, src_pid, false);
-        Node_pin* dst_pin = new Node_pin(dst_nid, dst_pid, true);
+        Node_pin* src_pin = new Node_pin(dfg->get_node(src_nid).setup_driver_pin(src_pid)); // FIXME: Not nice to do malloc
+        Node_pin* dst_pin = new Node_pin(dfg->get_node(dst_nid).setup_sink_pin(dst_pid)); // FIXME: ditto
         subg_inp_edges[src_pin] = dst_pin;
         dfg->del_edge(inp); //WARNNING: do not add_edge and del_edge at the same reference loop!
       }
@@ -199,18 +199,19 @@ void Pass_dfg::trans(LGraph *dfg) {
         Index_ID src_nid = nid;
         Index_ID dst_nid = dfg->get_node(out.get_inp_pin()).get_nid();
         Port_ID  dst_pid = out.get_inp_pin().get_pid();
-        Port_ID  src_pid = 0;
+        Port_ID  src_pid = 0; // FIXME: this looks weird. It will pick just the last pid in the inputs???
         uint16_t bitwidth;
-        sub_graph->each_output([&sub_graph, &src_pid, &bitwidth](Index_ID idx, Port_ID pid) {
+        sub_graph->each_output([&sub_graph, &src_pid, &bitwidth](const Node_pin &pin) {
           //fmt::print("outputs of subgraph: idx:{}, pid:{}, name:{}, bitwidth:{}\n",idx, pid, sub_graph->get_graph_output_name_from_pid(pid), sub_graph->get_bits_pid(idx, pid));
           //WARNING:pid should start from 0, but here start from 1? why?
-          fmt::print("outputs of subgraph: idx:{}, pid:{}, name:{}, bitwidth:{}\n",idx, pid, sub_graph->get_graph_output_name_from_pid(pid), sub_graph->get_bits(idx));
-          src_pid = pid;
-          bitwidth = sub_graph->get_bits(idx);
+          fmt::print("outputs of subgraph: idx:{}, pid:{}, name:{}, bitwidth:{}\n"
+              ,pin.get_idx(), pin.get_pid(), sub_graph->get_graph_output_name_from_pid(pin.get_pid()), sub_graph->get_bits(pin));
+          src_pid = pin.get_pid();
+          bitwidth = sub_graph->get_bits(pin);
         });
         fmt::print("src_nid:{}, src_pid:{}, dst_nid:{}, dst_pid:{}\n", src_nid, src_pid, dst_nid, dst_pid);
-        Node_pin* src_pin = new Node_pin(src_nid, src_pid, false);
-        Node_pin* dst_pin = new Node_pin(dst_nid, dst_pid, true);
+        Node_pin* src_pin = new Node_pin(dfg->get_node(src_nid).setup_driver_pin(src_pid));
+        Node_pin* dst_pin = new Node_pin(dfg->get_node(dst_nid).setup_sink_pin(dst_pid));
         subg_out_edges[src_pin] = dst_pin;
         fmt::print("bitwidth:{}\n", bitwidth);
         dfg->set_bits_pid(src_nid, src_pid, bitwidth);
@@ -272,9 +273,9 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
           Index_ID nid_join = dfg->create_node().get_nid();
           dfg->node_type_set(nid_join, Join_Op);
           dfg->set_bits(nid_join, dfg->get_bits(dst_nid));
-          dfg->add_edge(Node_pin(unsign_ext_nid, 0, false), Node_pin(nid_join, 1, true));
-          dfg->add_edge(Node_pin(src_nid, 0, false), Node_pin(nid_join, 0, true));
-          dfg->add_edge(Node_pin(nid_join, 0, false), Node_pin(dst_nid, dst_pid, true));
+          dfg->add_edge(dfg->get_node(unsign_ext_nid).setup_driver_pin(), dfg->get_node(nid_join).setup_sink_pin(1));
+          dfg->add_edge(dfg->get_node(src_nid).setup_driver_pin()       , dfg->get_node(nid_join).setup_sink_pin(0));
+          dfg->add_edge(dfg->get_node(nid_join).setup_driver_pin()      , dfg->get_node(dst_nid ).setup_sink_pin(dst_pid));
           dfg->del_edge(inp);
         }
       }
@@ -314,7 +315,7 @@ void Pass_dfg::finalize_gconnect(LGraph *dfg, const Aux_node *auxnd_global) {
       I(dfg->get_node(dst_nid).get_nid() == dst_nid);
       Index_ID src_nid = pair.second;
       Port_ID  src_pid = 0;
-      dfg->add_edge(Node_pin(src_nid, src_pid, false), Node_pin(dst_nid, 0, true));
+      dfg->add_edge(dfg->get_node(src_nid).setup_driver_pin(src_pid), dfg->get_node(dst_nid).setup_sink_pin());
       fmt::print("add edge, src_nid:{}, src_pid:{}, dst_nid:{}, dst:pid:{}\n", src_nid, src_pid, dst_nid, 0);
     } else if(is_register(pair.first)) {
       ; // balabala
@@ -500,7 +501,7 @@ void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Index_ID> &src
     // the subgraph IOs connection cannot be resolved at the first pass
     // so just casually connect the top<->subgraph IOs so we could traverse edges and
     // resoved connections after resolving the subgraph instantiation".
-    dfg->add_edge(Node_pin(src_nid, src_pid, false), Node_pin(dst_nid, dst_pid, true));
+    dfg->add_edge(dfg->get_node(src_nid).setup_driver_pin(src_pid), dfg->get_node(dst_nid).setup_sink_pin(dst_pid));
   }
 }
 
@@ -587,8 +588,8 @@ void Pass_dfg::assign_to_true(LGraph *dfg, Aux_tree *aux_tree, const std::string
   fmt::print("create node nid:{}\n", node);
   dfg->node_type_set(node, Or_Op);
 
-  dfg->add_edge(Node_pin(create_true_const(dfg, aux_tree), 0, false), Node_pin(node, 0, true));
-  dfg->add_edge(Node_pin(create_true_const(dfg, aux_tree), 0, false), Node_pin(node, 0, true));
+  dfg->add_edge(dfg->get_node(create_true_const(dfg,aux_tree)).setup_driver_pin(), dfg->get_node(node).setup_sink_pin());
+  dfg->add_edge(dfg->get_node(create_true_const(dfg,aux_tree)).setup_driver_pin(), dfg->get_node(node).setup_sink_pin());
 }
 
 void Pass_dfg::attach_outputs(LGraph *dfg, Aux_tree *aux_tree) {
@@ -616,9 +617,9 @@ void Pass_dfg::add_fluid_ports(LGraph *dfg, Aux_tree *aux_tree, std::vector<Inde
 //}
 
 Index_ID Pass_dfg::find_cfg_root(const LGraph *cfg) {
-  Index_ID root_id=0;
-  cfg->each_input([&root_id](Index_ID nid){
-    root_id = nid;
+  Index_ID root_id=0; // FIXME: this looks weird. It will pick randomly just one of the inputs
+  cfg->each_input([&root_id](const Node_pin &pin){
+    root_id = pin.get_idx();
   });
   I(root_id!=0);
 
@@ -728,9 +729,9 @@ void Pass_dfg::create_mux(LGraph *dfg, Aux_node *pauxnd, Index_ID tid, Index_ID 
   Port_ID fin = tp.get_input_match("A");
   Port_ID cin = tp.get_input_match("S");
 
-  dfg->add_edge(Node_pin(tid, 0, false), Node_pin(phi, tin, true));
-  dfg->add_edge(Node_pin(fid, 0, false), Node_pin(phi, fin, true));
-  dfg->add_edge(Node_pin(cond, 0, false), Node_pin(phi, cin, true));
+  dfg->add_edge(dfg->get_node(tid ).setup_driver_pin(), dfg->get_node(phi).setup_sink_pin(tin));
+  dfg->add_edge(dfg->get_node(fid ).setup_driver_pin(), dfg->get_node(phi).setup_sink_pin(fin));
+  dfg->add_edge(dfg->get_node(cond).setup_driver_pin(), dfg->get_node(phi).setup_sink_pin(cin));
   pauxnd->set_alias(var, phi);
   pauxnd->set_pending(var, phi);
 }

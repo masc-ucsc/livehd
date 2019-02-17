@@ -438,8 +438,7 @@ public:
 class Node_Type_GraphIO : public Node_Type {
 public:
   Node_Type_GraphIO() : Node_Type("graphio", GraphIO_Op, false) {
-    inputs.push_back("A");
-    outputs.push_back("Y");
+    // No pins because there are many pids (one per IO)
   };
 };
 
@@ -755,19 +754,24 @@ public:
   void node_type_set(Index_ID nid, Node_Type_Op op);
 
   void     node_u32type_set(Index_ID nid, uint32_t value);
+  Index_ID node_u32type_find(uint32_t value) const;
+#if 1
+  // WARNING: deprecated
   uint32_t node_value_get(Index_ID nid) const;
+  const Node_Type &node_type_get(Index_ID nid) const;
+#endif
+  uint32_t node_value_get(const Node_pin &pin) const;
 
   void     node_subgraph_set(Index_ID nid, uint32_t subgraphid);
   uint32_t subgraph_id_get(Index_ID nid) const;
 
   void             node_const_type_set(Index_ID nid, std::string_view value);
   void             node_const_type_set_string(Index_ID nid, std::string_view value);
+  Index_ID         node_const_string_find(std::string_view value) const;
   std::string_view node_const_value_get(Index_ID nid) const;
 
   void     node_tmap_set(Index_ID nid, uint32_t tmapid);
   uint32_t tmap_id_get(Index_ID nid) const;
-
-  const Node_Type &node_type_get(Index_ID nid) const;
 
   const bm::bvector<> &get_const_node_ids() const { return const_nodes; };
 

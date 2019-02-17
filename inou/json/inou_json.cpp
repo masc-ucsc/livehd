@@ -100,10 +100,6 @@ void Inou_json::from_json(LGraph *g, rapidjson::Document &document) {
         }
       }
 
-      if(nodes.HasMember("node_bits")) {
-        g->set_bits(last_nid, nodes["node_bits"].GetUint());
-      }
-
       if(nodes.HasMember("input_name")) {
         fmt::print("DEBUG:: input name is : {} \n", nodes["input_name"].GetString());
         g->add_graph_input(nodes["input_name"].GetString(), last_nid, 0, 0); // FIXME: set original_pos and bits
@@ -121,11 +117,11 @@ void Inou_json::from_json(LGraph *g, rapidjson::Document &document) {
           // if(output_edge.HasMember("out_out_pid")) {
           //  src_pid = output_edge["out_out_pid"].GetUint();
           //}
-          if(output_edge.HasMember("out_src_pid")) {
-            src_pid = output_edge["out_src_pid"].GetUint();
+          if(output_edge.HasMember("driver_pid")) {
+            src_pid = output_edge["driver_pid"].GetUint();
           }
-          if(output_edge.HasMember("out_dst_nid")) {
-            dst_nid = output_edge["out_dst_nid"].GetUint64();
+          if(output_edge.HasMember("sink_idx")) {
+            dst_nid = output_edge["sink_idx"].GetUint64();
             if(json_remap.find(dst_nid) == json_remap.end()) {
               json_remap[dst_nid] = g->create_node().get_nid();
             }
@@ -134,16 +130,15 @@ void Inou_json::from_json(LGraph *g, rapidjson::Document &document) {
           // if(output_edge.HasMember("out_inp_pid")) {
           //  dst_pid = output_edge["out_inp_pid"].GetUint();
           //}
-          if(output_edge.HasMember("out_dst_pid")) {
-            dst_pid = output_edge["out_dst_pid"].GetUint();
+          if(output_edge.HasMember("sink_pid")) {
+            dst_pid = output_edge["sink_pid"].GetUint();
           }
-          Node_pin src_pin(last_nid, dst_pid, false);
-          Node_pin dst_pin(dst_nid, src_pid, true);
-          if(output_edge.HasMember("out_src_bits")) {
-            int bits = output_edge["out_src_bits"].GetInt();
-            g->add_edge(src_pin, dst_pin, bits);
+          Node_pin dpin = g->get_node(last_nid).setup_driver_pin(dst_pid);
+          Node_pin spin = g->get_node(dst_nid).setup_sink_pin(src_pid);
+          if(output_edge.HasMember("bits")) {
+            g->add_edge(dpin, spin, output_edge["bits"].GetInt());
           } else {
-            g->add_edge(src_pin, dst_pin);
+            g->add_edge(dpin, spin);
           }
           if(output_edge.HasMember("delay")) {
             double delay = output_edge["delay"].GetDouble();
@@ -240,6 +235,7 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
       /*first print out the node Idx*/
       writer.Key("idx");
       writer.Uint64(idx);
+#if 0
       /*next print out input nodes*/
       writer.Key("inputs");
       writer.StartArray();
@@ -255,6 +251,7 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
         }
         writer.EndArray();
       }
+#endif
 
       writer.Key("op");
       {
@@ -277,31 +274,10 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
         }
       }
 
-      writer.Key("node_bits");
-      {
-        int node_width = g->get_bits(idx);
-        writer.Uint64(node_width);
-      }
-
       auto ni_name = g->get_node_instancename(idx);
       if(!ni_name.empty()) {
         writer.Key("instance_name");
         writer.String(std::string(ni_name).c_str()); // rapidjson does not support string_view
-      }
-
-      auto wi_name = g->get_node_wirename(idx);
-      if(!wi_name.empty()) {
-        writer.Key("node_wirename");
-        writer.String(std::string(wi_name).c_str());
-      }
-
-      if(g->is_graph_input(idx)) {
-        writer.Key("input_name");
-        writer.String(std::string(g->get_graph_input_name(idx)).c_str());
-      }
-      if(g->is_graph_output(idx)) {
-        writer.Key("output_name");
-        writer.String(std::string(g->get_graph_output_name(idx)).c_str());
       }
 
       writer.Key("outputs");
@@ -309,27 +285,56 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
       {
         for(const auto &out : g->out_edges(idx)) {
           writer.StartObject();
-          // writer.Key("out_out_pid");
-          writer.Key("out_src_pid");
+
+          auto wi_name = g->get_node_wirename(idx);
+          if(!wi_name.empty()) {
+            writer.Key("name");
+            writer.String(std::string(wi_name).c_str());
+          }
+
+          writer.Key("driver_idx");
+          writer.Uint64(out.get_out_pin().get_idx());
+          writer.Key("driver_pid");
           writer.Uint64(out.get_out_pin().get_pid());
-          writer.Key("out_dst_nid");
+          writer.Key("sink_idx");
           writer.Uint64(out.get_idx());
           // writer.Key("out_inp_pid");
-          writer.Key("out_dst_pid");
+          writer.Key("sink_pid");
           writer.Uint64(out.get_inp_pin().get_pid());
           if(out.is_root()) {
             auto  node       = g->get_dest_node(out);
-            float node_delay = node.delay_get();
+            float node_delay = node.get_delay();
             int   node_width = g->get_bits(out.get_out_pin());
             if(node_delay != 0) {
               writer.Key("delay");
               writer.Double(node_delay);
             }
             if(node_width != 0) {
-              writer.Key("out_src_bits");
+              writer.Key("bits");
               writer.Uint(node_width);
             }
           }
+          writer.EndObject();
+        }
+      }
+      writer.EndArray();
+      writer.Key("inputs");
+      writer.StartArray();
+      {
+        for(const auto &inp : g->inp_edges(idx)) {
+          writer.StartObject();
+
+          auto wi_name = g->get_node_wirename(idx);
+          if(!wi_name.empty()) {
+            writer.Key("name");
+            writer.String(std::string(wi_name).c_str());
+          }
+
+          writer.Key("sink_idx");
+          writer.Uint64(inp.get_inp_pin().get_idx());
+          writer.Key("sink_pid");
+          writer.Uint64(inp.get_inp_pin().get_pid());
+
           writer.EndObject();
         }
       }

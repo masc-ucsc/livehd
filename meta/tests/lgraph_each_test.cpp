@@ -50,21 +50,21 @@ protected:
   std::vector<LGraph *> lgs;
 
   void SetUp() override {
-    top = LGraph::create("lgraph_each_lgdb", "top", "nosource");
+    top = LGraph::create("lgdb_lgraph_each", "top", "nosource");
     ASSERT_NE(top,nullptr);
-    c1 = LGraph::create("lgraph_each_lgdb", "c1", "nosource");
+    c1 = LGraph::create("lgdb_lgraph_each", "c1", "nosource");
     ASSERT_NE(c1,nullptr);
-    c2 = LGraph::create("lgraph_each_lgdb", "c2", "nosource");
+    c2 = LGraph::create("lgdb_lgraph_each", "c2", "nosource");
     ASSERT_NE(c2,nullptr);
-    c3 = LGraph::create("lgraph_each_lgdb", "c3", "nosource");
+    c3 = LGraph::create("lgdb_lgraph_each", "c3", "nosource");
     ASSERT_NE(c3,nullptr);
-    gc11 = LGraph::create("lgraph_each_lgdb", "gc11", "nosource");
+    gc11 = LGraph::create("lgdb_lgraph_each", "gc11", "nosource");
     ASSERT_NE(gc11,nullptr);
-    gc31 = LGraph::create("lgraph_each_lgdb", "gc31", "nosource");
+    gc31 = LGraph::create("lgdb_lgraph_each", "gc31", "nosource");
     ASSERT_NE(gc31,nullptr);
-    gc32 = LGraph::create("lgraph_each_lgdb", "gc32", "nosource");
+    gc32 = LGraph::create("lgdb_lgraph_each", "gc32", "nosource");
     ASSERT_NE(gc32,nullptr);
-    top2 = LGraph::create("lgraph_each_lgdb", "top2", "nosource");
+    top2 = LGraph::create("lgdb_lgraph_each", "top2", "nosource");
     ASSERT_NE(top2,nullptr);
 
     lgs.push_back(top);
@@ -209,8 +209,10 @@ TEST_F(Setup_graphs_test, hierarchy_twice) {
 TEST_F(Setup_graphs_test, No_each_input) {
 
   for(auto &parent:lgs) {
-    parent->each_input_root_fast([parent](Index_ID idx, Port_ID pid) {
-      EXPECT_FALSE(parent->has_inputs(idx));
+    parent->each_input([parent](const Node_pin &pin) {
+      EXPECT_TRUE(parent->is_graph_input(pin));
+      EXPECT_TRUE(!parent->is_graph_output(pin));
+      EXPECT_FALSE(parent->has_inputs(pin));
     });
   }
 
@@ -220,8 +222,10 @@ TEST_F(Setup_graphs_test, No_each_input) {
 TEST_F(Setup_graphs_test, No_each_output) {
 
   for(auto &parent:lgs) {
-    parent->each_output_root_fast([parent](Index_ID idx, Port_ID pid) {
-      EXPECT_FALSE(parent->has_outputs(idx));
+    parent->each_output([parent](const Node_pin &pin) {
+      EXPECT_TRUE(!parent->is_graph_input(pin));
+      EXPECT_TRUE(parent->is_graph_output(pin));
+      EXPECT_FALSE(parent->has_outputs(pin));
     });
   }
 
