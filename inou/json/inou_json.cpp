@@ -324,7 +324,7 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
         for(const auto &inp : g->inp_edges(idx)) {
           writer.StartObject();
 
-          auto wi_name = g->get_node_wirename(idx);
+          auto wi_name = g->get_node_wirename(inp.get_inp_pin());
           if(!wi_name.empty()) {
             writer.Key("name");
             writer.String(std::string(wi_name).c_str());

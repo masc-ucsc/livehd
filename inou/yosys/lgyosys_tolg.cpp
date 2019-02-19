@@ -1166,8 +1166,7 @@ static LGraph *process_module(RTLIL::Module *module) {
           // there are two edges from dpin to spin
           // this is not allowed in lgraph, add a join in between
           auto join_node = g->create_node(Join_Op, ss.size());
-          Index_ID new_join = join_node.get_nid();
-          g->add_edge(dpin, join_node.setup_sink_pin(), ss.size());
+          g->add_edge(dpin, join_node.setup_sink_pin(0), ss.size());
           dpin = join_node.setup_driver_pin(0);
         }
         g->add_edge(dpin, spin);
@@ -1242,8 +1241,8 @@ static LGraph *process_module(RTLIL::Module *module) {
 
       log("  connecting module output %s driver[%d:%d] sink[%d:%d]\n"
           ,wire->name.c_str()
-          ,dpin.get_idx(), dpin.get_pid()
-          ,spin.get_idx(), spin.get_pid());
+          ,dpin.get_idx().value, dpin.get_pid()
+          ,spin.get_idx().value, spin.get_pid());
     }
   }
 
