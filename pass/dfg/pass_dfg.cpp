@@ -295,16 +295,13 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
   }
 }
 
-bool Pass_dfg::cfg_2_dfg(const LGraph *cfg, LGraph *dfg) {
+void Pass_dfg::cfg_2_dfg(const LGraph *cfg, LGraph *dfg) {
   Index_ID itr = find_cfg_root(cfg);
   Aux_node auxnd_global;
   Aux_tree aux_tree(&auxnd_global);
   process_cfg(dfg, cfg, &aux_tree, itr);
   finalize_gconnect(dfg, &auxnd_global);
-
-  fmt::print("calling sync\n");
-
-  return true; // FIXME: FALSE == failure in dfg generation
+  fmt::print("cfg_2_dfg finish!\n");
 }
 
 void Pass_dfg::finalize_gconnect(LGraph *dfg, const Aux_node *auxnd_global) {
@@ -341,6 +338,8 @@ Index_ID Pass_dfg::process_cfg(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tre
 }
 
 Index_ID Pass_dfg::process_node(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, Index_ID cfg_node) {
+  if(cfg->node_type_get(cfg_node).op == GraphIO_Op)
+    return get_cfg_child(cfg, cfg_node);
 
   const CFG_Node_Data data(cfg, cfg_node);
 
@@ -498,9 +497,9 @@ void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Index_ID> &src
         (dfg->node_type_get(dst_nid).op == DfgPendingGraph_Op)            ? (uint16_t)i :
         (dfg->node_type_get(dst_nid).op == SubGraph_Op)                   ? (uint16_t)i : (uint16_t)0;
 
-    // the subgraph IOs connection cannot be resolved at the first pass
-    // so just casually connect the top<->subgraph IOs so we could traverse edges and
-    // resoved connections after resolving the subgraph instantiation".
+    /* the subgraph IOs connection cannot be resolved at the first pass
+    so just casually connect the top<->subgraph IOs so we could traverse edges and
+    resolve connections after resolving the subgraph instantiation".*/
     dfg->add_edge(dfg->get_node(src_nid).setup_driver_pin(src_pid), dfg->get_node(dst_nid).setup_sink_pin(dst_pid));
   }
 }
@@ -617,21 +616,18 @@ void Pass_dfg::add_fluid_ports(LGraph *dfg, Aux_tree *aux_tree, std::vector<Inde
 //}
 
 Index_ID Pass_dfg::find_cfg_root(const LGraph *cfg) {
-  Index_ID root_id=0; // FIXME: this looks weird. It will pick randomly just one of the inputs
-  cfg->each_input([&root_id](const Node_pin &pin){
-    root_id = pin.get_idx();
+  Index_ID root_id;
+  cfg->each_input([cfg, &root_id](const Node_pin &pin){
+    root_id = cfg->get_node(pin).get_nid();
   });
-  I(root_id!=0);
-
-  fmt::print("root_id:{}\n", root_id);
-  assert(root_id);
+  I(root_id);
   return root_id;
 }
 
 Index_ID Pass_dfg::get_cfg_child(const LGraph *cfg, Index_ID node) {
-  for(const auto &cedge : cfg->out_edges(node))
-    return cfg->get_node(cedge.get_inp_pin()).get_nid();
-
+  for(const auto &cedge : cfg->out_edges(node)){
+    return cfg->get_node(cedge.get_inp_pin()).get_nid();//SH:FIXME:strange for loop usage, only return 1st edge?
+  }
   return 0;
 }
 

@@ -25,7 +25,7 @@ protected:
   void do_finalize_bitwidth(LGraph *dfg);
 
   void trans(LGraph *orig);
-  bool cfg_2_dfg(const LGraph *cfg, LGraph *dfg);
+  void cfg_2_dfg(const LGraph *cfg, LGraph *dfg);
 
 private:
   Index_ID find_cfg_root(const LGraph *cfg);
@@ -40,6 +40,8 @@ private:
   void process_func_call(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data);
 
   Index_ID process_if(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data, Index_ID node);
+
+  Index_ID process_loop(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data, Index_ID node);
 
   Index_ID process_operand(LGraph *dfg, Aux_tree *aux_tree, const std::string &oprd);
 
