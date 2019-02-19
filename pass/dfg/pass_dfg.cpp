@@ -182,9 +182,9 @@ void Pass_dfg::trans(LGraph *dfg) {
 
         fmt::print("inp_name:{}\n",inp_name);
         fmt::print("src_nid:{}, src_pid:{}, dst_nid:{}, dst_pid:{}\n", src_nid, src_pid, dst_nid, dst_pid);
-        Node_pin* src_pin = new Node_pin(dfg->get_node(src_nid).setup_driver_pin(src_pid)); // FIXME: Not nice to do malloc
-        Node_pin* dst_pin = new Node_pin(dfg->get_node(dst_nid).setup_sink_pin(dst_pid)); // FIXME: ditto
-        subg_inp_edges[src_pin] = dst_pin;
+        Node_pin src_pin = Node_pin(dfg->get_node(src_nid).setup_driver_pin(src_pid));
+        Node_pin dst_pin = Node_pin(dfg->get_node(dst_nid).setup_sink_pin(dst_pid));
+        subg_inp_edges[&src_pin] = &dst_pin;
         dfg->del_edge(inp); //WARNNING: do not add_edge and del_edge at the same reference loop!
       }
 
@@ -209,9 +209,9 @@ void Pass_dfg::trans(LGraph *dfg) {
           bitwidth = sub_graph->get_bits(pin);
         });
         fmt::print("src_nid:{}, src_pid:{}, dst_nid:{}, dst_pid:{}\n", src_nid, src_pid, dst_nid, dst_pid);
-        Node_pin* src_pin = new Node_pin(dfg->get_node(src_nid).setup_driver_pin(src_pid));
-        Node_pin* dst_pin = new Node_pin(dfg->get_node(dst_nid).setup_sink_pin(dst_pid));
-        subg_out_edges[src_pin] = dst_pin;
+        Node_pin src_pin = Node_pin(dfg->get_node(src_nid).setup_driver_pin(src_pid));
+        Node_pin dst_pin = Node_pin(dfg->get_node(dst_nid).setup_sink_pin(dst_pid));
+        subg_out_edges[&src_pin] = &dst_pin;
         fmt::print("bitwidth:{}\n", bitwidth);
         dfg->set_bits_pid(src_nid, src_pid, bitwidth);
         dfg->del_edge(out); //WARNNING: don't add_edge and del_edge at the same reference loop!
@@ -546,20 +546,22 @@ Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree
   assert(aux_tree->has_alias(data.get_target()));
   Index_ID    cond     = aux_tree->get_alias(data.get_target());
   const auto &operands = data.get_operands();
-  auto *      tauxnd   = new Aux_node;
-  auto *      fauxnd   = new Aux_node; //don't dynamic allocate here!!
+  //auto *      tauxnd   = new Aux_node;
+  //auto *      fauxnd   = new Aux_node; //don't dynamic allocate here!!
+  Aux_node      tauxnd;
+  Aux_node      fauxnd;
   auto *pauxnd = aux_tree->get_cur_auxnd(); // parent aux
 
   assert(operands.size() > 1);
   Index_ID tbranch = (Index_ID)std::stol(operands[0]);
   Index_ID fbranch = (Index_ID)std::stol(operands[1]);
 
-  aux_tree->set_parent_child(pauxnd, tauxnd, true);
+  aux_tree->set_parent_child(pauxnd, &tauxnd, true);
   Index_ID tb_next = get_cfg_child(cfg, process_cfg(dfg, cfg, aux_tree, tbranch));
   fmt::print("branch true finish! tb_next:{}\n", tb_next);
 
   if(fbranch != 0) { // there is an 'else' clause
-    aux_tree->set_parent_child(pauxnd, fauxnd, false);
+    aux_tree->set_parent_child(pauxnd, &fauxnd, false);
     Index_ID fb_next = get_cfg_child(cfg, process_cfg(dfg, cfg, aux_tree, fbranch));
     assert(tb_next == fb_next);
     fmt::print("branch false finish! tb_next:{}\n", tb_next);
@@ -567,14 +569,14 @@ Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree
 
   // The auxT,F should be empty and are safe to be deleted after
   // TODO:put assertion on auxT, F emptiness
-  resolve_phis(dfg, aux_tree, pauxnd, tauxnd, fauxnd, cond);
+  resolve_phis(dfg, aux_tree, pauxnd, &tauxnd, &fauxnd, cond);
 
   if(fbranch != 0) {
-    aux_tree->disconnect_child(aux_tree->get_cur_auxnd(), fauxnd, false);
+    aux_tree->disconnect_child(aux_tree->get_cur_auxnd(), &fauxnd, false);
     aux_tree->auxes_stack_pop();
   }
 
-  aux_tree->disconnect_child(aux_tree->get_cur_auxnd(), tauxnd, true);
+  aux_tree->disconnect_child(aux_tree->get_cur_auxnd(), &tauxnd, true);
   aux_tree->auxes_stack_pop();
 
   fmt::print("process if done!!\n");
