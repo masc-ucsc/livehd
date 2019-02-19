@@ -38,3 +38,21 @@ cc_binary(
         ":inou_pyrope",
     ],
 )
+
+cc_binary(
+    name = "ast_test",
+    srcs = ["ast_test.cpp"],
+    deps = [
+        "@gtest//:gtest_main",
+        ":inou_pyrope",
+    ],
+)
+
+cc_test(
+    name = "prp_unit_test",
+    srcs = ["prp_unit_test.cpp"],
+    deps = [
+        "@gtest//:gtest_main",
+        ":inou_pyrope",
+    ],
+)

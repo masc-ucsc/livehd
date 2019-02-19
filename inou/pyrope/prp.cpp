@@ -10,8 +10,8 @@ void Prp::eat_comments(){
 }
 
 bool Prp::rule_top(){
-	fmt::print("Hello from rule_top.\n");
-	return rule_code_blocks();
+  fmt::print("Hello from rule_top.\n");
+  return rule_code_blocks();
 }
 
 bool Prp::rule_code_blocks(){
@@ -26,34 +26,44 @@ bool Prp::rule_code_blocks(){
 
 bool Prp::rule_code_block_int(){
   eat_comments();
+  ast->down();
   if (rule_if_statement()){
+    ast->up(Prp_rule_if_statement);
     return true;
   }
   else if (rule_for_statement()){
+    ast->up(Prp_rule_for_statement);
     return true;
   }
   else if (rule_while_statement()){
+    ast->up(Prp_rule_while_statement);
     return true;
   }
   else if (rule_try_statement()){
+    ast->up(Prp_rule_try_statement);
     return true;
   }
   else if (rule_punch_format()){
+    ast->up(Prp_rule_punch_format);
     return true;
   }
   else if (rule_assignment_expression()){
+    ast->up(Prp_rule_assignment_expression);
     return true;
   }
   else if (rule_function_pipe()){
+    ast->up(Prp_rule_function_pipe);
     return true;
   }
   else if (rule_fcall_implicit()){
+    ast->up(Prp_rule_fcall_implicit);
     return true;
   }
   else if (rule_fcall_explicit()){
+    ast->up(Prp_rule_fcall_explicit);
     return true;
   }
-  
+  ast->up(Prp_invalid);
   return false;
 }
 
@@ -731,13 +741,19 @@ bool Prp::rule_assignment_expression(){
 			return true;
 		}
 	}
+	else{
+    //fmt::print("Parse error at line {}: Expected left hand side expression.\n", scan_calc_lineno());
+  }
 	return false;
 }
 
 /* FIXME: add range notation rule */
 bool Prp::rule_lhs_expression(){
   fmt::print("Hello from rule_lhs_expression.\n");
-  return rule_tuple_notation();
+  ast->down();
+  bool ok = rule_tuple_notation();
+  ast->up(Prp_rule_lhs_expression);
+  return ok;
 }
 
 /* FIXME: incomplete */
@@ -754,13 +770,17 @@ bool Prp:: rule_rhs_expression_property(){
 bool Prp::rule_tuple_notation(){
   fmt::print("Hello from rule_tuple_notation.\n");
 	int tokens_consumed = 0;
+  int levels_down = 0;
   
 	/* first option */
-	bool next = scan_is_token(Token_id_op);
+	bool next = scan_is_token(Token_id_op); // all the first three require this
+  if(next){
+    ast->add(Prp_rule_tuple_notation, scan_token());
+		debug_consume(); // consume the LPAR
+    tokens_consumed++;
+  }
 	
 	if(next){
-		debug_consume(); // consume the LPAR
-		tokens_consumed++;
 		// bit_selection_notation+
 		do{
 			next = rule_bit_selection_notation();
@@ -776,26 +796,24 @@ bool Prp::rule_tuple_notation(){
 		}
 	}
 	
-  go_back(tokens_consumed);
-	
-	/* second option */
-	next = scan_is_token(Token_id_op);
-	tokens_consumed = 0;
+	if(tokens_consumed > 0){
+    go_back(tokens_consumed-1);
+    
+    /* second option */
+    tokens_consumed = 1;
+  }
 	
 	if(next){
-		debug_consume(); // consume the LPAR
-		tokens_consumed++;
 		next = rule_rhs_expression_property() || rule_logical_expression();
 		if(next){
 			/* can be any number of the following */
 			while(next){
-			
 				next = scan_is_token(Token_id_comma);
 				if(next){
 					debug_consume(); // consume the comma
 					tokens_consumed++;
 					if(!(rule_rhs_expression_property() || rule_logical_expression())){
-          go_back(tokens_consumed);
+            go_back(tokens_consumed);
             return false;
           }
 				}
@@ -811,22 +829,25 @@ bool Prp::rule_tuple_notation(){
 		}
   }
 		
-  go_back(tokens_consumed);
-  
-  /* third option */
-  next = scan_is_token(Token_id_op);
-  tokens_consumed = 0;
+	if(tokens_consumed > 0){
+    go_back(tokens_consumed-1);
+    
+    /* third option */
+    tokens_consumed = 1;
+  }
   
   if(next){
-    debug_consume();
-    tokens_consumed++;
     next = scan_is_token(Token_id_cp);
     return next;
   }
 	
 	/* fourth option */
-  
-  return rule_bit_selection_notation();
+  bool ok = rule_bit_selection_notation();
+  if(ok){
+    go_back(tokens_consumed);
+    return true;
+  }
+  return false;
 }
 
 bool Prp::rule_bit_selection_notation(){
@@ -880,9 +901,12 @@ bool Prp::rule_tuple_array_notation(){
 
 bool Prp::rule_lhs_var_name(){
   fmt::print("Hello from rule_lhs_var_name.\n");
+  ast->down();
 	if(rule_identifier() || rule_constant()){
+    ast->up(Prp_rule_lhs_var_name);
     return true;
   }
+  ast->up(Prp_rule_lhs_var_name);
   return false;
 }
 
@@ -928,15 +952,20 @@ bool Prp::rule_tuple_notation_no_bracket(){
 
 bool Prp::rule_identifier(){  
   fmt::print("Hello from rule_identifier.\n");
+  ast->down();
 	if(!(scan_is_token(Token_id_register) || scan_is_token(Token_id_input) || scan_is_token(Token_id_output) || scan_is_token(Token_id_alnum) || scan_is_token(Token_id_label))){
+    ast->up(Prp_rule_identifier);
 		return false;
 	}
 	
-	debug_consume(); // check for optional "?"
+	ast->add(Prp_rule_identifier, scan_token());
+	debug_consume(); // consume the ID, need to check for optional "?"
 	
 	if(scan_is_token(Token_id_qmark)){
+    ast->add(Prp_rule_identifier, scan_token());
 		debug_consume();
 	}
+	ast->up(Prp_rule_identifier);
 	fmt::print("Fits rule_identifier.\n");
 	return true;
 }
@@ -1097,6 +1126,7 @@ bool Prp::rule_logical_expression(){
   if (rule_relational_expression()){
     /* zero or more of the following */
     while(next){
+      fmt::print("rule_logical_expression: looking for a logical operator. Next token:\n");
       next = scan_is_token(Pyrope_id_or) || scan_is_token(Pyrope_id_and);
       if(next){
         debug_consume();
@@ -1125,7 +1155,7 @@ bool Prp::rule_relational_expression(){
       fmt::print("rule_relational_expression: looking for a relational operator. Next token:\n");
       dump_token();
       next = scan_is_token(Token_id_le) || scan_is_token(Token_id_ge) || scan_is_token(Token_id_lt) || scan_is_token(Token_id_gt) || scan_is_token(Token_id_same) || scan_is_token(Token_id_diff) || scan_is_token(Pyrope_id_is);
-      fmt::print("rule_relational_expression: did we find our operator? %d\n", scan_is_token(Token_id_same));
+      fmt::print("rule_relational_expression: did we find our operator? {}\n", scan_is_token(Token_id_same));
       if(next){
         debug_consume();
         tokens_consumed++;
@@ -1248,7 +1278,7 @@ bool Prp::rule_additive_expression(){
       if(scan_is_token(Token_id_dot)){
         debug_consume();
         tokens_consumed++;
-        /* NEED TO FIX: this is optional, but it must either fully fit rule_additive_expression or
+        /* FIXME (maybe): this is optional, but it must either fully fit rule_additive_expression or
          not fit it at all, this will miss if there is an incorrectly described additive expression
          because it will just return false, the same as if it weren't there at all. */
         fmt::print("rule_additive_expression: danger.\n");
@@ -1259,6 +1289,7 @@ bool Prp::rule_additive_expression(){
     return true;
   }
   go_back(tokens_consumed);
+  fmt::print("Doesn't fit rule_additive_expression.\n");
   return false;
 }
 
@@ -1370,8 +1401,9 @@ bool Prp::rule_rhs_expression(){
 
 void Prp::elaborate(){
   patch_pass(pyrope_keyword);
-  //ast = std::make_unique<Ast_parser>(get_buffer(), Eprp_rule);
-  //ast->down();
+  ast = std::make_unique<Ast_parser>(get_buffer(), Prp_rule);
+  ast->down();
+  fmt::print("Starting to parse\n");
 	while(!scan_is_end()){
 		dump_token();
 		eat_comments();
@@ -1381,11 +1413,13 @@ void Prp::elaborate(){
 			return;
 		}
 	}
-  //ast->up(Eprp_rule);
+	fmt::print("Finished Parsing\n");
+  ast->up(Prp_rule_code_blocks);
 
-  //process_ast();
+  ast->each_bottom_first_fast(
+  std::bind(&Prp::ast_handler, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
 
-  //ast = nullptr;
+  ast = nullptr;
 }
 
 /* Consumes a token and dumps the new one */
@@ -1413,6 +1447,111 @@ bool Prp::go_back(int num_tok){
   return ok;
 }
 
+void Prp::go_up(int num_levels){
+  int i;
+  for(i=1;i<num_levels;i++){
+    ast->up_null();
+  }
+}
+
+void Prp::ast_handler(const Tree_index &parent, const Tree_index &self, const Ast_parser_node &node){
+  auto rule_value = node.rule_id;
+  std::string rule_name;
+  switch(rule_value){
+    case Prp_invalid:
+      rule_name.assign("Invalid");
+      break;
+    case Prp_rule:
+      rule_name.assign("Program");
+      break;
+    case Prp_rule_code_blocks:
+      rule_name.assign("Top level");
+      break;
+    case Prp_rule_code_block_int:
+      rule_name.assign("Code block");
+      break;
+    case Prp_rule_assignment_expression:
+      rule_name.assign("Assignment expression");
+      break;
+    case Prp_rule_logical_expression:
+      rule_name.assign("Logical expression");
+      break;
+    case Prp_rule_relational_expression:
+      rule_name.assign("Relational expression");
+      break;
+    case Prp_rule_additive_expression:
+      rule_name.assign("Additive expression");
+      break;
+    case Prp_rule_bitwise_expression:
+      rule_name.assign("Bitwise expression");
+      break;
+    case Prp_rule_multiplicative_expression:
+      rule_name.assign("Multiplicative expression");
+      break;
+    case Prp_rule_unary_expression:
+      rule_name.assign("Unary expressiion");
+      break;
+    case Prp_rule_factor:
+      rule_name.assign("Factor");
+      break;
+    case Prp_rule_tuple_by_notation:
+      rule_name.assign("Tuple by notation");
+      break;
+    case Prp_rule_tuple_notation_no_bracket:
+      rule_name.assign("Tuple notation non bracket");
+      break;
+    case Prp_rule_tuple_notation:
+      rule_name.assign("Tuple notation");
+      break;
+    case Prp_rule_tuple_notation_with_object:
+      rule_name.assign("Tuple notation with object");
+      break;
+    case Prp_rule_range_notation:
+      rule_name.assign("Range notation");
+      break;
+    case Prp_rule_bit_selection_bracket:
+      rule_name.assign("Bit selection bracket");
+      break;
+    case Prp_rule_bit_selection_notation:
+      rule_name.assign("Bit selection notation");
+      break;
+    case Prp_rule_tuple_array_bracket:
+      rule_name.assign("Tuple array bracket");
+      break;
+    case Prp_rule_tuple_array_notation:
+      rule_name.assign("Tuple array notation");
+      break;
+    case Prp_rule_lhs_expression:
+      rule_name.assign("LHS expression");
+      break;
+    case Prp_rule_lhs_var_name:
+      rule_name.assign("LHS variable name");
+      break;
+    case Prp_rule_rhs_expression_property:
+      rule_name.assign("RHS expression property");
+      break;
+    case Prp_rule_rhs_expression:
+      rule_name.assign("RHS expression");
+      break;
+    case Prp_rule_identifier:
+      rule_name.assign("Identifier");
+      break;
+    case Prp_rule_constant:
+      rule_name.assign("Constant");
+      break;
+    case Prp_rule_assignment_operator:
+      rule_name.assign("Assignment operator");
+      break;
+    case Prp_rule_tuple_dot_notation:
+      rule_name.assign("Tuple dot notation");
+      break;
+    case Prp_rule_tuple_dot_dot:
+      rule_name.assign("Tuple dot dot");
+      break;
+  }
+  auto token_text = scan_text(node.token_entry);
+  fmt::print("Rule number: {}, Token text: {}, Tree level: {}\n", rule_name, token_text, self.level);
+}
 /*void Eprp::process_ast_handler(const Tree_index &parent, const Tree_index &self, const Ast_parser_node &node) {
   auto txt = scan_text(node.token_entry);
   fmt::print("level:{} pos:{} te:{} rid:{} txt:{}\n", self.level, self.pos, node.token_entry, node.rule_id, txt);

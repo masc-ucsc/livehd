@@ -9,6 +9,8 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <queue>
+#include <tuple>
 
 #include <string>
 
@@ -16,6 +18,8 @@
 
 #include "ast.hpp"
 #include "elab_scanner.hpp"
+
+// using node_data = std::tuple<Rule_id, Token_entry>;
 
 // control
 constexpr Token_id Pyrope_id_if     = 128;
@@ -51,13 +55,25 @@ constexpr Token_id Pyrope_id_punch = 150;
 
 class Prp : public Elab_scanner {
 protected:
+  std::unique_ptr<Ast_parser> ast;
   absl::flat_hash_map<std::string, Token_id> pyrope_keyword;
   
   enum Prp_rules: Rule_id {
     Prp_invalid = 0,
     Prp_rule,
+    Prp_rule_top,
     Prp_rule_code_blocks,
     Prp_rule_code_block_int,
+    Prp_rule_if_statement,
+    Prp_rule_else_statement,
+    Prp_rule_for_statement,
+    Prp_rule_while_statement,
+    Prp_rule_try_statement,
+    Prp_rule_punch_format,
+    Prp_rule_function_pipe,
+    Prp_rule_fcall_explicit,
+    Prp_rule_fcall_implicit, 
+    Prp_rule_for_index,
     Prp_rule_assignment_expression,
     Prp_rule_logical_expression,
     Prp_rule_relational_expression,
@@ -83,7 +99,16 @@ protected:
     Prp_rule_constant,
     Prp_rule_assignment_operator,
     Prp_rule_tuple_dot_notation,
-    Prp_rule_tuple_dot_dot
+    Prp_rule_tuple_dot_dot,
+    Prp_rule_overload_notation,
+    Prp_rule_scope_else,
+    Prp_rule_scope_body,
+    Prp_rule_scope_declaration,
+    Prp_rule_scope,
+    Prp_rule_scope_condition,
+    Prp_rule_scope_argument,
+    Prp_rule_punch_rhs,
+    Prp_rule_fcall_arg_notation,
   };
   
   void elaborate() final;
@@ -142,8 +167,9 @@ protected:
   bool debug_unconsume();
   bool debug_consume();
   bool go_back(int num_tok);
+  void go_up(int num_levels);
   
-  void process_ast_handler(const Tree_index &parent, const Tree_index &self, const Ast_parser_node &node);
+  void ast_handler(const Tree_index &parent, const Tree_index &self, const Ast_parser_node &node);
   void process_ast();
   
 public:
