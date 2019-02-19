@@ -660,20 +660,27 @@ public:
   };
 };
 
-// Y = A
+// Y0 = A, Y1,Y2,Y3 for keeping meta information
 class Node_Type_CfgAssign : public Node_Type {
 public:
   Node_Type_CfgAssign() : Node_Type("cfg_assign", CfgAssign_Op, false) {
     inputs.push_back("A");
-    outputs.push_back("Y");
+    outputs.push_back("Y0");
+    outputs.push_back("Y1");
+    outputs.push_back("Y2");
+    outputs.push_back("Y3");
   };
 };
 
+// Y1, Y2, Y3 for keeping meta information
 class Node_Type_CfgFunctionCall : public Node_Type {
 public:
   Node_Type_CfgFunctionCall() : Node_Type("cfg_func", CfgFunctionCall_Op, false) {
     inputs.push_back("A");
-    outputs.push_back("Y");
+    outputs.push_back("Y0");
+    outputs.push_back("Y1");
+    outputs.push_back("Y2");
+    outputs.push_back("Y3");
   };
 };
 

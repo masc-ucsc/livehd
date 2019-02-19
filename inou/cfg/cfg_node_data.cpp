@@ -8,6 +8,7 @@
 CFG_Node_Data::CFG_Node_Data(const LGraph *g, Index_ID node) {
   std::string_view data_str = g->get_node_wirename(node);
 
+  fmt::print("cfg node data:{}\n", g->get_node_wirename(node));
   if(data_str.empty()) {
     target       = EMPTY_MARKER;
     operator_txt = EMPTY_MARKER;
