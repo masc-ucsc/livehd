@@ -163,7 +163,6 @@ void Pass_dfg::trans(LGraph *dfg) {
     }
   }
 
-
   //resolve top <-> subgraph IO connection
   for(auto nid : dfg->fast()){
     if(dfg->node_type_get(nid).op == SubGraph_Op){
@@ -308,11 +307,11 @@ void Pass_dfg::finalize_gconnect(LGraph *dfg, const Aux_node *auxnd_global) {
   fmt::print("finalize global connect\n");
   for(const auto &pair : auxnd_global->get_pendtab()) {
     if(is_output(pair.first)) {
-      Index_ID dst_nid = dfg->get_graph_output(pair.first.substr(1)).get_idx();
+      Index_ID dst_nid = dfg->get_node(dfg->get_graph_output(pair.first.substr(1))).get_nid();
       I(dfg->get_node(dst_nid).get_nid() == dst_nid);
       Index_ID src_nid = pair.second;
       Port_ID  src_pid = 0;
-      dfg->add_edge(dfg->get_node(src_nid).setup_driver_pin(src_pid), dfg->get_node(dst_nid).setup_sink_pin());
+      dfg->add_edge(dfg->get_node(src_nid).setup_driver_pin(src_pid), dfg->get_node(dst_nid).setup_sink_pin(0));
       fmt::print("add edge, src_nid:{}, src_pid:{}, dst_nid:{}, dst:pid:{}\n", src_nid, src_pid, dst_nid, 0);
     } else if(is_register(pair.first)) {
       ; // balabala
@@ -494,8 +493,8 @@ void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Index_ID> &src
         (dfg->node_type_get(dst_nid).op == LessEqualThan_Op && i == 1)    ? (uint16_t)2 :
         (dfg->node_type_get(dst_nid).op == GreaterEqualThan_Op && i == 0) ? (uint16_t)0 :
         (dfg->node_type_get(dst_nid).op == GreaterEqualThan_Op && i == 1) ? (uint16_t)2 :
-        (dfg->node_type_get(dst_nid).op == DfgPendingGraph_Op)            ? (uint16_t)i :
-        (dfg->node_type_get(dst_nid).op == SubGraph_Op)                   ? (uint16_t)i : (uint16_t)0;
+        (dfg->node_type_get(dst_nid).op == DfgPendingGraph_Op)            ? (uint16_t)0 :
+        (dfg->node_type_get(dst_nid).op == SubGraph_Op)                   ? (uint16_t)0 : (uint16_t)0;
 
     /* the subgraph IOs connection cannot be resolved at the first pass
     so just casually connect the top<->subgraph IOs so we could traverse edges and

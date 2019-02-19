@@ -245,7 +245,10 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
     nid_end       = new_node.get_nid(); // keep update the latest final nid
     fmt::print("create node:{}, nid:{}\n", w2nd, name2id[w2nd]);
   }
-  collect_fcall_info(g, name2id[w1st], w7th, w8th, w9th); // collect target and 1st operand for fake fcall analysis later
+
+
+  if(g->node_type_get(name2id[w1st]).op == (CfgFunctionCall_Op || SubGraph_Op))
+    collect_fcall_info(g, name2id[w1st], w7th, w8th, w9th); // collect target and 1st operand for fake fcall analysis later
   /*
     III.deal with edge connection
   */
@@ -429,7 +432,9 @@ void Inou_cfg::update_ifs(vector<LGraph *> &lgs, vector<map<string, Index_ID>> &
   }
 }
 
-void Inou_cfg::collect_fcall_info(LGraph *g, Index_ID new_node, const std::string &w7th, const std::string &w8th,
+void Inou_cfg::collect_fcall_info(LGraph *g, Index_ID new_node,
+                                  const std::string &w7th,
+                                  const std::string &w8th,
                                   const std::string &w9th) {
   g->set_node_wirename(g->get_node(new_node).setup_driver_pin(1), w7th);
   g->set_node_wirename(g->get_node(new_node).setup_driver_pin(2), w8th);
@@ -470,6 +475,7 @@ void Inou_cfg::remove_fake_fcall(LGraph *g) {
       }
     }
   }
+
   for(const auto &i : drive_tab) {
     fmt::print("in drive_tab:{}\n", i);
     if(func_dcl_tab.find((i)) != func_dcl_tab.end()) {
