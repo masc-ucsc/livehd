@@ -701,7 +701,11 @@ Index_ID LGraph_Base::add_edge_int(Index_ID dst_idx, Port_ID inp_pid, Index_ID s
   return root_idx;
 }
 
-void LGraph_Base::del_edge(const Edge &edge) { Node_Internal::get(&edge).del(edge); }
+void LGraph_Base::del_edge(const Edge &edge) {
+  I(edge.get_idx() < node_internal.size());
+  I(edge.get_self_idx() < node_internal.size());
+  Node_Internal::get(&edge).del(edge);
+}
 
 void LGraph_Base::del_node(Index_ID idx) {
   // TODO: do this more effiently (no need to build iterator)
