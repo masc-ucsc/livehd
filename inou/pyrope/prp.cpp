@@ -63,6 +63,7 @@ bool Prp::rule_code_block_int(){
     ast->up(Prp_rule_fcall_explicit);
     return true;
   }
+  fmt::print("Couldn't find a valid code block start.\n");
   ast->up(Prp_invalid);
   return false;
 }
@@ -616,6 +617,7 @@ bool Prp::rule_punch_rhs(){
 }
 
 bool Prp::rule_function_pipe(){
+  fmt::print("Hello from rule_function_pipe.\n");
   int tokens_consumed = 0;
   
   if(rule_fcall_implicit() || rule_logical_expression()){
@@ -628,6 +630,7 @@ bool Prp::rule_function_pipe(){
     }
   }
   go_back(tokens_consumed);
+  fmt::print("Doesn't fit rule_function_pipe.\n");
   return false;
 }
 
@@ -736,7 +739,7 @@ bool Prp::rule_assignment_expression(){
 	if(next){
 		next = rule_assignment_operator();
 		if(next){
-			next = rule_rhs_expression_property() || rule_function_pipe() || rule_fcall_implicit() || rule_logical_expression();
+			next = rule_function_pipe() || rule_fcall_implicit() || rule_logical_expression();
       fmt::print("Fits rule_assignment_expression.\n");
 			return true;
 		}
@@ -751,7 +754,7 @@ bool Prp::rule_assignment_expression(){
 bool Prp::rule_lhs_expression(){
   fmt::print("Hello from rule_lhs_expression.\n");
   ast->down();
-  bool ok = rule_tuple_notation();
+  bool ok = rule_tuple_notation() || rule_range_notation();
   ast->up(Prp_rule_lhs_expression);
   return ok;
 }
@@ -768,11 +771,54 @@ bool Prp:: rule_rhs_expression_property(){
 }
 
 bool Prp::rule_tuple_notation(){
+  fmt::print("Hello from rule_tuple_notation\n");
+  int lookahead_count = 0;
+  
+  // option 1
+  if(!scan_is_token(Token_id_op)){
+    fmt::print("rule_tuple_notation: trying option 1.\n");
+    if(!rule_bit_selection_notation()){ return false; }
+  }
+  // options 2 and 3
+  else{
+    fmt::print("rule_tuple_notation: trying options 2 and 3.\n");
+    if(rule_rhs_expression_property() || rule_logical_expression()){
+      bool next = true;
+      
+      // zero or more of the following
+      while(next){
+        if(scan_is_next_token(++lookahead_count, Token_id_comma)){
+          if(!(rule_rhs_expression_property() || rule_logical_expression())){
+            next = false; // NOTE: not a parse error; it's allowed to just have a comma.
+          }
+        }
+        else{ next = false; }
+      }
+      if(!scan_is_next_token(++lookahead_count, Token_id_cp)){ return false; }
+      else{
+        rule_tuple_by_notation() || rule_bit_selection_bracket(); // optional
+      }
+    }
+    else{
+      if(!scan_is_next_token(++lookahead_count, Token_id_cp)){ return false; }
+    }
+  }
+  
+  consume_block(Prp_rule_tuple_notation, lookahead_count);
+  return true;
+}
+
+bool Prp::rule_range_notation(){
+  return false;
+}
+
+/*
+bool Prp::rule_tuple_notation(){
   fmt::print("Hello from rule_tuple_notation.\n");
 	int tokens_consumed = 0;
   int levels_down = 0;
   
-	/* first option */
+	// first option
 	bool next = scan_is_token(Token_id_op); // all the first three require this
   if(next){
     ast->add(Prp_rule_tuple_notation, scan_token());
@@ -799,14 +845,14 @@ bool Prp::rule_tuple_notation(){
 	if(tokens_consumed > 0){
     go_back(tokens_consumed-1);
     
-    /* second option */
+    // second option
     tokens_consumed = 1;
   }
 	
 	if(next){
 		next = rule_rhs_expression_property() || rule_logical_expression();
 		if(next){
-			/* can be any number of the following */
+			// can be any number of the following
 			while(next){
 				next = scan_is_token(Token_id_comma);
 				if(next){
@@ -832,7 +878,7 @@ bool Prp::rule_tuple_notation(){
 	if(tokens_consumed > 0){
     go_back(tokens_consumed-1);
     
-    /* third option */
+    // third option
     tokens_consumed = 1;
   }
   
@@ -841,7 +887,7 @@ bool Prp::rule_tuple_notation(){
     return next;
   }
 	
-	/* fourth option */
+	// fourth option
   bool ok = rule_bit_selection_notation();
   if(ok){
     go_back(tokens_consumed);
@@ -849,6 +895,7 @@ bool Prp::rule_tuple_notation(){
   }
   return false;
 }
+*/
 
 bool Prp::rule_bit_selection_notation(){
   fmt::print("Hello from rule_bit_selection_notation.\n");
@@ -1409,23 +1456,36 @@ bool Prp::rule_factor(){
   
   fmt::print("Hello from rule_factor.\n");
   if(scan_is_token(Token_id_op)){
+    fmt::print("rule_factor: found an open parenthesis.\n");
     debug_consume();
     tokens_consumed++;
     if(rule_logical_expression()){
+      fmt::print("rule_factor: option 1 in progress\n");
       if(scan_is_token(Token_id_cp)){
         debug_consume();
         tokens_consumed++;
         rule_bit_selection_bracket(); // same problem as we saw in rule_additive_expression
-        fmt::print("Fits rule_factor.\n");
+        fmt::print("Fits rule_factor (option 1).\n");
         return true;
       }
+      else{
+        go_back(tokens_consumed);
+        fmt::print("rule_factor: doesn't fit option 1.\n");
+        return false;
+      }
+    }
+    else{
+      go_back(tokens_consumed);
+      fmt::print("rule_factor: doesn't fit option 1.\n");
+      return false;
     }
   }
   
   go_back(tokens_consumed);
+  tokens_consumed = 0;
   
   if(rule_rhs_expression()){
-    fmt::print("Fits rule_factor.\n");
+    fmt::print("Fits rule_factor (option 2).\n");
     return true;
   }
   go_back(tokens_consumed);
@@ -1489,6 +1549,15 @@ bool Prp::go_back(int num_tok){
     ok = debug_unconsume();
   }
   return ok;
+}
+
+void Prp::consume_block(Rule_id rid, int num_tok){
+  int i;
+  
+  for(i=0;i<num_tok;i++){
+    ast->add(rid, scan_token());
+    debug_consume();
+  }
 }
 
 /*void Prp::go_up(int num_levels){
@@ -1594,37 +1663,5 @@ void Prp::ast_handler(const Tree_index &parent, const Tree_index &self, const As
       break;
   }
   auto token_text = scan_text(node.token_entry);
-  fmt::print("Rule number: {}, Token text: {}, Tree level: {}\n", rule_name, token_text, self.level);
+  fmt::print("Rule name: {}, Token text: {}, Tree level: {}\n", rule_name, token_text, self.level);
 }
-/*void Eprp::process_ast_handler(const Tree_index &parent, const Tree_index &self, const Ast_parser_node &node) {
-  auto txt = scan_text(node.token_entry);
-  fmt::print("level:{} pos:{} te:{} rid:{} txt:{}\n", self.level, self.pos, node.token_entry, node.rule_id, txt);
-
-  if (node.rule_id == Eprp_rule_cmd_or_reg) {
-    std::string children_txt;
-
-    // HERE: Children should iterate FAST, over all the children recursively
-    // HERE: Move this iterate over children as a handle_command
-
-    for (const auto &ti : ast->get_children(self)) {
-      auto txt2 = scan_text(ast->get_data(ti).token_entry);
-      if (ast->get_data(ti).rule_id == Eprp_rule_label_path)
-        absl::StrAppend(&children_txt, " ", txt2, ":");
-      else
-        absl::StrAppend(&children_txt, txt2);
-    }
-
-    fmt::print("  children: {}\n", children_txt);
-  }
-}
-
-void Eprp::process_ast() {
-  // ast->each_depth_first
-
-  for(const auto &ti:ast->depth_preorder(ast->get_root())) {
-    fmt::print("ti.level:{} ti.pos:{}\n", ti.level, ti.pos);
-  }
-
-  ast->each_bottom_first_fast(
-      std::bind(&Eprp::process_ast_handler, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
-}*/

@@ -126,7 +126,7 @@ protected:
   bool rule_punch_format();
   bool rule_function_pipe();
   bool rule_fcall_explicit();
-  bool rule_fcall_implicit(); 
+  bool rule_fcall_implicit();
   bool rule_for_index();
   bool rule_assignment_expression();
   bool rule_logical_expression();
@@ -168,6 +168,7 @@ protected:
   bool debug_consume();
   bool go_back(int num_tok);
   void go_up(int num_levels);
+  void consume_block(Rule_id rid, int num_tok);
   
   void ast_handler(const Tree_index &parent, const Tree_index &self, const Ast_parser_node &node);
   void process_ast();
