@@ -171,7 +171,15 @@ void Pass_dfg::trans(LGraph *dfg) {
       I(sub_graph);
 
       //resolve subgraph input connections
-      std::unordered_map <Node_pin*, Node_pin*> subg_inp_edges;
+      struct My_pin {
+        Index_ID nid;
+        Port_ID pid;
+        bool operator<(const My_pin &other) const {
+          I(nid);
+          return (nid < other.nid) || (nid == other.nid && pid < other.pid);
+        }
+      };
+      std::map<My_pin, My_pin> subg_inp_edges;
       for(auto &inp : dfg->inp_edges(nid)){
         Index_ID src_nid = dfg->get_node(inp.get_out_pin()).get_nid();
         Index_ID dst_nid = nid;
@@ -182,18 +190,25 @@ void Pass_dfg::trans(LGraph *dfg) {
 
         fmt::print("inp_name:{}\n",inp_name);
         fmt::print("src_nid:{}, src_pid:{}, dst_nid:{}, dst_pid:{}\n", src_nid, src_pid, dst_nid, dst_pid);
-        Node_pin src_pin = Node_pin(dfg->get_node(src_nid).setup_driver_pin(src_pid));
-        Node_pin dst_pin = Node_pin(dfg->get_node(dst_nid).setup_sink_pin(dst_pid));
-        subg_inp_edges[&src_pin] = &dst_pin;
+        My_pin src_pin;
+        src_pin.nid = src_nid;
+        src_pin.pid = src_pid;
+
+        My_pin dst_pin;
+        dst_pin.nid = dst_nid;
+        dst_pin.pid = dst_pid;
+        subg_inp_edges[src_pin] = dst_pin;
         dfg->del_edge(inp); //WARNNING: do not add_edge and del_edge at the same reference loop!
       }
 
       for(auto &edge : subg_inp_edges){
-        dfg->add_edge(*(edge.first), *(edge.second));
+        auto dpin = dfg->get_node(edge.first.nid).setup_driver_pin(edge.first.pid);
+        auto spin = dfg->get_node(edge.second.nid).setup_sink_pin(edge.second.pid);
+        dfg->add_edge(dpin, spin);
       }
 
       //resolve subgraph output connections
-      std::unordered_map <Node_pin*, Node_pin*> subg_out_edges;
+      std::map<My_pin, My_pin> subg_out_edges;
       for(auto &out : dfg->out_edges(nid)){
         Index_ID src_nid = nid;
         Index_ID dst_nid = dfg->get_node(out.get_inp_pin()).get_nid();
@@ -209,16 +224,22 @@ void Pass_dfg::trans(LGraph *dfg) {
           bitwidth = sub_graph->get_bits(pin);
         });
         fmt::print("src_nid:{}, src_pid:{}, dst_nid:{}, dst_pid:{}\n", src_nid, src_pid, dst_nid, dst_pid);
-        Node_pin src_pin = Node_pin(dfg->get_node(src_nid).setup_driver_pin(src_pid));
-        Node_pin dst_pin = Node_pin(dfg->get_node(dst_nid).setup_sink_pin(dst_pid));
-        subg_out_edges[&src_pin] = &dst_pin;
+        My_pin src_pin; // = Node_pin(dfg->get_node(src_nid).setup_driver_pin(src_pid));
+        src_pin.nid = src_nid;
+        src_pin.pid = src_pid;
+        My_pin dst_pin; // = Node_pin(dfg->get_node(dst_nid).setup_sink_pin(dst_pid));
+        dst_pin.nid = dst_nid;
+        dst_pin.pid = dst_pid;
+        subg_out_edges[src_pin] = dst_pin;
         fmt::print("bitwidth:{}\n", bitwidth);
         dfg->set_bits_pid(src_nid, src_pid, bitwidth);
         dfg->del_edge(out); //WARNNING: don't add_edge and del_edge at the same reference loop!
       }
 
       for(auto &edge : subg_out_edges){
-        dfg->add_edge(*(edge.first), *(edge.second));
+        auto dpin = dfg->get_node(edge.first.nid).setup_driver_pin(edge.first.pid);
+        auto spin = dfg->get_node(edge.second.nid).setup_sink_pin(edge.second.pid);
+        dfg->add_edge(dpin,spin);
       }
 
       //set wirename of the subg node back to empty to avoid yosys code generation conflict of count_id(cell->name)

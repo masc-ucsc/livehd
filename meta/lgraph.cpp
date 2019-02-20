@@ -301,6 +301,7 @@ Node LGraph::create_node_const(std::string_view value, uint16_t bits) {
 }
 
 Node LGraph::get_node(Index_ID nid) {
+  I(node_internal.size() > nid);
   I(node_internal[nid].is_root());
   nid = node_internal[nid].get_nid();
   I(node_internal[nid].is_master_root());
@@ -308,6 +309,7 @@ Node LGraph::get_node(Index_ID nid) {
 }
 
 ConstNode LGraph::get_node(Index_ID nid) const {
+  I(node_internal.size() > nid);
   I(node_internal[nid].is_root());
   nid = node_internal[nid].get_nid();
   I(node_internal[nid].is_master_root());
@@ -315,6 +317,9 @@ ConstNode LGraph::get_node(Index_ID nid) const {
 }
 
 Node LGraph::get_node(const Node_pin &pin) {
+  I(node_internal.size() > pin.get_idx());
+  I(node_internal[pin.get_idx()].is_root());
+
   if (pin.get_pid()==0)
     return Node(this, pin.get_idx());
 
@@ -324,6 +329,8 @@ Node LGraph::get_node(const Node_pin &pin) {
 }
 
 ConstNode LGraph::get_node(const Node_pin &pin) const {
+  I(node_internal.size() > pin.get_idx());
+  I(node_internal[pin.get_idx()].is_root());
   if (pin.get_pid()==0)
     return ConstNode(this, pin.get_idx());
 
@@ -335,7 +342,8 @@ ConstNode LGraph::get_node(const Node_pin &pin) const {
 Node LGraph::get_dest_node(const Edge &edge) {
   Index_ID idx = edge.get_self_idx();
 
-  assert(is_root(idx));  // get_dest_node can only be called for root nodes
+  I(node_internal.size() > idx);
+  I(node_internal[idx].is_root());
 
   return Node(this, idx);
 }
@@ -343,7 +351,8 @@ Node LGraph::get_dest_node(const Edge &edge) {
 ConstNode LGraph::get_dest_node(const Edge &edge) const {
   Index_ID idx = edge.get_self_idx();
 
-  assert(is_root(idx));  // get_dest_node can only be called for root nodes
+  I(node_internal.size() > idx);
+  I(node_internal[idx].is_root());
 
   return ConstNode(this, idx);
 }
