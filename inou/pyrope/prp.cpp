@@ -739,7 +739,7 @@ bool Prp::rule_assignment_expression(){
 	if(next){
 		next = rule_assignment_operator();
 		if(next){
-			next = rule_function_pipe() || rule_fcall_implicit() || rule_logical_expression();
+			next = rule_logical_expression() || rule_function_pipe() || rule_fcall_implicit();
       fmt::print("Fits rule_assignment_expression.\n");
 			return true;
 		}
@@ -772,7 +772,7 @@ bool Prp:: rule_rhs_expression_property(){
 
 bool Prp::rule_tuple_notation(){
   fmt::print("Hello from rule_tuple_notation\n");
-  int lookahead_count = 0;
+  int tokens_consumed = 0;
   
   // option 1
   if(!scan_is_token(Token_id_op)){
@@ -781,30 +781,36 @@ bool Prp::rule_tuple_notation(){
   }
   // options 2 and 3
   else{
+    debug_consume();
+    tokens_consumed++;
     fmt::print("rule_tuple_notation: trying options 2 and 3.\n");
     if(rule_rhs_expression_property() || rule_logical_expression()){
       bool next = true;
       
       // zero or more of the following
       while(next){
-        if(scan_is_next_token(++lookahead_count, Token_id_comma)){
+        if(scan_is_token(Token_id_comma)){
+          debug_consume();
+          tokens_consumed++;
           if(!(rule_rhs_expression_property() || rule_logical_expression())){
             next = false; // NOTE: not a parse error; it's allowed to just have a comma.
           }
         }
         else{ next = false; }
       }
-      if(!scan_is_next_token(++lookahead_count, Token_id_cp)){ return false; }
+      if(!scan_is_token(Token_id_cp)){ return false; }
       else{
+        debug_consume();
+        tokens_consumed++;
         rule_tuple_by_notation() || rule_bit_selection_bracket(); // optional
       }
     }
     else{
-      if(!scan_is_next_token(++lookahead_count, Token_id_cp)){ return false; }
+      if(!scan_is_token(Token_id_cp)){ return false; }
     }
   }
   
-  consume_block(Prp_rule_tuple_notation, lookahead_count);
+  // consume_block(Prp_rule_tuple_notation, lookahead_count);
   return true;
 }
 
@@ -1246,7 +1252,7 @@ bool Prp::rule_relational_expression(){
   return false;
 }
 
-/* NEED TO ADD: overload notation */
+/* FIXME: need to add overload notation */
 bool Prp::rule_additive_expression(){
   int tokens_consumed = 0;
   bool next = true;
@@ -1454,40 +1460,36 @@ bool Prp::rule_unary_expression(){
 bool Prp::rule_factor(){
   int tokens_consumed = 0;
   
+  if(rule_rhs_expression()){
+    fmt::print("Fits rule_factor (option 2).\n");
+    return true;
+  }
+  
   fmt::print("Hello from rule_factor.\n");
   if(scan_is_token(Token_id_op)){
     fmt::print("rule_factor: found an open parenthesis.\n");
     debug_consume();
     tokens_consumed++;
     if(rule_logical_expression()){
-      fmt::print("rule_factor: option 1 in progress\n");
       if(scan_is_token(Token_id_cp)){
         debug_consume();
         tokens_consumed++;
         rule_bit_selection_bracket(); // same problem as we saw in rule_additive_expression
-        fmt::print("Fits rule_factor (option 1).\n");
         return true;
       }
       else{
         go_back(tokens_consumed);
-        fmt::print("rule_factor: doesn't fit option 1.\n");
         return false;
       }
     }
     else{
       go_back(tokens_consumed);
-      fmt::print("rule_factor: doesn't fit option 1.\n");
       return false;
     }
   }
   
   go_back(tokens_consumed);
   tokens_consumed = 0;
-  
-  if(rule_rhs_expression()){
-    fmt::print("Fits rule_factor (option 2).\n");
-    return true;
-  }
   go_back(tokens_consumed);
   return false;
 }
