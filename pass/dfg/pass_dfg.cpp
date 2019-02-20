@@ -161,6 +161,7 @@ void Pass_dfg::trans(LGraph *dfg) {
     }
   }
 
+  //SH:FIXME: top<->subgraph connection might be wrong, exam carefully
   //resolve top <-> subgraph IO connection
   for(auto nid : dfg->fast()){
     auto node = Node(dfg, 0, Node::Compact(nid));
@@ -169,84 +170,45 @@ void Pass_dfg::trans(LGraph *dfg) {
       LGraph* sub_graph = LGraph::open(dfg->get_path(), node.get_driver_pin(0).get_name()) ;
       I(sub_graph);
 
-      //resolve subgraph input connections
-      //struct My_pin {
-      //  Index_ID nid;
-      //  Port_ID pid;
-      //  bool operator<(const My_pin &other) const {
-      //    I(nid);
-      //    return (nid < other.nid) || (nid == other.nid && pid < other.pid);
-      //  }
-      //};
-      //std::map<My_pin, My_pin> subg_inp_edges;
-      //for(bool deleted = true; deleted;) {
-      //deleted = false;
+      absl::flat_hash_map<Node_pin, Node_pin> subg_inp_edges;
       for(auto &inp : node.inp_edges()){
-        Index_ID src_nid = dfg->get_node(inp.get_out_pin()).get_nid();
-        Index_ID dst_nid = nid;
-        Port_ID  src_pid = dfg->node_type_get(src_nid).op == GraphIO_Op ? 1 : 0;
-        auto inp_name = dfg->get_node_wirename(dfg->get_node(src_nid).get_driver_pin(0));
-        //TODO:should change to sub_graph->each_graph_input
-        Port_ID  dst_pid = sub_graph->get_graph_input(inp_name).get_pid();
+        Node dnode = inp.driver.get_node();
+        auto inp_name = dnode.get_driver_pin(0).get_name();
+        Node_pin dpin = dnode.get_driver_pin();
+        Node_pin spin = sub_graph->get_graph_input(inp_name);
 
         fmt::print("inp_name:{}\n",inp_name);
-        fmt::print("src_nid:{}, src_pid:{}, dst_nid:{}, dst_pid:{}\n", src_nid, src_pid, dst_nid, dst_pid);
-        My_pin src_pin;
-        src_pin.nid = src_nid;
-        src_pin.pid = src_pid;
-
-        My_pin dst_pin;
-        dst_pin.nid = dst_nid;
-        dst_pin.pid = dst_pid;
-        subg_inp_edges[src_pin] = dst_pin;
-        dfg->del_edge(&inp); //WARNNING: do not add_edge and del_edge at the same reference loop!
-        deleted = true; // Delete can corrupt the iterator
-        break;
+        //fmt::print("src_nid:{}, src_pid:{}, dst_nid:{}, dst_pid:{}\n", src_nid, src_pid, dst_nid, dst_pid);
+        subg_inp_edges[dpin] = spin;
+        inp.del_edge();
       }
-      //}
 
       for(auto &edge : subg_inp_edges){
-        auto dpin = dfg->get_node(edge.first.nid).setup_driver_pin(edge.first.pid);
-        auto spin = dfg->get_node(edge.second.nid).setup_sink_pin(edge.second.pid);
-        dfg->add_edge(dpin, spin);
+        dfg->add_edge(edge.first, edge.second);
       }
 
       //resolve subgraph output connections
-      std::map<My_pin, My_pin> subg_out_edges;
+      absl::flat_hash_map<Node_pin, Node_pin> subg_out_edges;
 
-      for(auto &out : dfg->out_edges(nid)){
-        Index_ID src_nid = nid;
-        Index_ID dst_nid = dfg->get_node(out.get_inp_pin()).get_nid();
-        Port_ID  dst_pid = out.get_inp_pin().get_pid();
-        Port_ID  src_pid = 0;
-        uint16_t bitwidth;
-        sub_graph->each_graph_output([&sub_graph, &src_pid, &bitwidth](const Node_pin &pin) {
-            fmt::print("outputs of subgraph: idx:{}, pid:{}, name:{}, bitwidth:{}\n"
-                ,pin.get_idx(), pin.get_pid(), sub_graph->get_graph_output_name_from_pid(pin.get_pid()), sub_graph->get_bits(pin));
-            src_pid = pin.get_pid();
-            bitwidth = sub_graph->get_bits(pin);
+      for(auto &out : node.out_edges()){
+        Node_pin dpin = out.driver;
+        Node_pin spin = out.sink;
+        uint16_t bw;
+        sub_graph->each_graph_output([&sub_graph, &spin, &bw](const Node_pin &pin) {
+            fmt::print("outputs of subgraph: name:{}, bitwidth:{}\n",
+              sub_graph->get_graph_output_name_from_pid(pin.get_pid()), pin.get_bits());
+            spin = pin;
+            bw = pin.get_bits();
             });
-        My_pin src_pin; // = Node_pin(dfg->get_node(src_nid).setup_driver_pin(src_pid));
-        src_pin.nid = src_nid;
-        src_pin.pid = src_pid;
-        My_pin dst_pin; // = Node_pin(dfg->get_node(dst_nid).setup_sink_pin(dst_pid));
-        dst_pin.nid = dst_nid;
-        dst_pin.pid = dst_pid;
-        subg_out_edges[src_pin] = dst_pin;
-        dfg->set_bits(dfg->get_node(src_nid).setup_driver_pin(src_pid), bitwidth);
-        dfg->del_edge(&out); //WARNNING: don't add_edge and del_edge at the same reference loop!
-        deleted = true;
-        break;
+        subg_out_edges[dpin] = spin;
+
+        dpin.set_bits(bw);
+        out.del_edge();
       }
 
       for(auto &edge : subg_out_edges){
-        auto dpin = dfg->get_node(edge.first.nid).setup_driver_pin(edge.first.pid);
-        auto spin = dfg->get_node(edge.second.nid).setup_sink_pin(edge.second.pid);
-        dfg->add_edge(dpin,spin);
+        dfg->add_edge(edge.first,edge.second);
       }
-
-      //set wirename of the subg node back to empty to avoid yosys code generation conflict of count_id(cell->name)
-      dfg->set_node_wirename(dfg->get_node(nid).setup_driver_pin(0),"subg_tmp_wire");
     }
   }
 

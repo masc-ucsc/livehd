@@ -79,6 +79,21 @@ std::string_view Node_pin::set_name(std::string_view wname) {
   return Ann_node_pin_name::set(*this, wname);
 }
 
+std::string Node_pin::debug_name() const {
+#ifdef NDEBUG
+  static int conta = 0;
+  if (conta<10) {
+    conta++;
+    fmt::print("WARNING: Node_pin::debug_name should not be called during release (Slowww!)\n");
+  }
+#endif
+  std::string name;
+  if (Ann_node_pin_name::has(*this))
+    name = Ann_node_pin_name::get(*this);
+
+  return absl::StrCat("node_pin_", std::to_string(idx), ":", std::to_string(pid), sink?"s":"d", "(", name ,")");
+}
+
 std::string_view Node_pin::get_name() const {
   return Ann_node_pin_name::get(*this);
 }
