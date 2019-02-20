@@ -28,6 +28,7 @@ cc_binary(
             "//pass/punch:pass_punch",
             "//pass/sample:pass_sample",
             "//pass/bitwidth:pass_bitwidth",
+            "//pass/mockturtle:pass_mockturtle",
 
             "//cops/live:cops_live",
 
