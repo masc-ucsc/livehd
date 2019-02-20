@@ -57,19 +57,13 @@ public:
       return H::combine(std::move(h), s.idx, s.sink);
     };
   };
+  template <typename H>
+  friend H AbslHashValue(H h, const Node_pin& s) {
+    return H::combine(std::move(h), (int)s.hid, (int)s.idx, s.sink); // Ignore lgraph pointer in hash
+  };
   Node_pin() : idx(0), pid(0), g(0), hid(0), sink(false) { }
   Node_pin(LGraph *_g, Hierarchy_id _hid, Compact comp);
   Node_pin(LGraph *_g, Hierarchy_id _hid, Compact comp, Node_pin_mode mode);
-  Node_pin &operator=(const Node_pin &obj) {
-    I(this != &obj); // Do not assign object to itself. works but wastefull
-    g   = obj.g;
-    const_cast<Index_ID&>(idx)     = obj.idx;
-    const_cast<Port_ID&>(pid)      = obj.pid;
-    const_cast<Hierarchy_id&>(hid) = obj.hid;
-    const_cast<bool&>(sink)        = obj.sink;
-
-    return *this;
-  };
 
   Compact get_compact() const {
     return Compact(idx,sink);
@@ -106,17 +100,21 @@ public:
     return connect_driver(dst);
   }
 
+  Node_pin &operator=(const Node_pin &obj) {
+    I(this != &obj); // Do not assign object to itself. works but wastefull
+    g   = obj.g;
+    const_cast<Index_ID&>(idx)     = obj.idx;
+    const_cast<Port_ID&>(pid)      = obj.pid;
+    const_cast<Hierarchy_id&>(hid) = obj.hid;
+    const_cast<bool&>(sink)        = obj.sink;
+
+    return *this;
+  };
   bool operator==(const Node_pin &other) const { I(idx); I(g == other.g); return (idx == other.idx) && (pid == other.pid) && (sink == other.sink) && (hid == other.hid); }
 
   bool operator!=(const Node_pin &other) const { I(idx); I(g == other.g); return (idx != other.idx) || (pid != other.pid) || (sink != other.sink) || (hid != other.hid); }
 
-  bool operator<(const Node_pin &other) const {
-    I(idx);
-    I(g == other.g);
-    I(hid == other.hid); // Not clear in what case to mix. Just to catch likely bugs, but it should work well without this
-    return (idx < other.idx) || (idx == other.idx && pid < other.pid) ||
-           (idx == other.idx && pid == other.pid && sink && !other.sink);
-  }
+  // NOTE: No operator<() needed for std::set std::map to avoid their use. Use flat_map_set for speed
 
   //static Node_pin get_out_pin(const Edge_raw *edge_raw);
   //static Node_pin get_inp_pin(const Edge_raw *edge_raw);
@@ -124,17 +122,18 @@ public:
   bool is_invalid() const { return g==nullptr || idx==0; }
 
   // BEGIN ATTRIBUTE ACCESSORS
+  std::string      debug_name() const;
+
+  std::string_view set_name(std::string_view wname);
+  std::string_view create_name() const;
+  std::string_view get_name() const;
+  bool has_name() const;
 
   uint16_t get_bits() const;
   void     set_bits(uint16_t bits);
 
   std::string_view get_type_subgraph_io_name() const;
   std::string_view get_type_tmap_io_name() const;
-
-  std::string_view set_name(std::string_view wname);
-  std::string_view create_name() const;
-  std::string_view get_name() const;
-  bool has_name() const;
 
   void set_offset(uint16_t offset);
   uint16_t get_offset() const;
