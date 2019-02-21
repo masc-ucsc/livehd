@@ -140,3 +140,33 @@ TEST_F(Elab_test, Create_with_lazy_check) {
   check_against_ast(ast2_sorted_verification);
 }
 
+TEST_F(Elab_test, Preorder_traversal_check) {
+  std::vector<std::string> ast_preorder_traversal_check;
+  std::vector<std::string> ast_preorder_traversal;
+  
+  ast_preorder_traversal_check.push_back("root");
+  ast_preorder_traversal_check.push_back("child1.1");
+  ast_preorder_traversal_check.push_back("child1.1.1");
+  ast_preorder_traversal_check.push_back("child1.1.1.1");
+  ast_preorder_traversal_check.push_back("child1.1.2");
+  ast_preorder_traversal_check.push_back("child1.1.3");
+  ast_preorder_traversal_check.push_back("child1.1.4");
+  ast_preorder_traversal_check.push_back("child1.2");
+  ast_preorder_traversal_check.push_back("child1.2.1");
+  ast_preorder_traversal_check.push_back("child1.2.2");
+  ast_preorder_traversal_check.push_back("child1.2.3");
+  ast_preorder_traversal_check.push_back("child1.3");
+  
+  ast_preorder_traversal.push_back("root");
+  Tree_index node = ast.get_root();
+  
+  while((node=ast.get_depth_preorder_next(node)) != ast.get_root()){
+    ast_preorder_traversal.push_back(ast.get_data(node));
+  }
+  
+  for(auto it = begin(ast_preorder_traversal); it != end(ast_preorder_traversal); ++it){
+    fmt::print("{}\n", *it);
+  }
+  
+  EXPECT_EQ(ast_preorder_traversal, ast_preorder_traversal_check);
+}
