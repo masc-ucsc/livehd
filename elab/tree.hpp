@@ -21,6 +21,11 @@ public:
 
   bool operator==(const Tree_index &i) const { return level == i.level && pos == i.pos; }
   bool operator!=(const Tree_index &i) const { return level != i.level || pos != i.pos; }
+  Tree_index operator=(const Tree_index &i) {
+    level = i.level;
+    pos = i.pos;
+    return *this;
+  }
 };
 
 
@@ -257,15 +262,38 @@ template <typename X>
 const Tree_index Tree<X>::get_depth_preorder_next(const Tree_index &child) const {
   I(child.level < pointers_stack.size());
   I(child.pos   < pointers_stack[child.level].size());
+  
+  auto node = pointers_stack[child.level][child.pos];
+  
+  if(node.younger_child != -1){ // case: has children
+    // return the eldest child
+    Tree_index return_index = Tree_index(child.level+1, node.younger_child);
+    return return_index;
+  }
+  else{ // case: does not have children
+    if(node.younger_sibling != -1){
+      return Tree_index(child.level, node.younger_sibling); // return the younger sibling
+    }
+    else{
+      Tree_level prev_level = child.level - 1;
+      Tree_pos parent_pos = node.parent;
+      while(1){
+        auto next_node = pointers_stack[prev_level][parent_pos];
+        if(next_node.younger_sibling != -1){
+          return Tree_index(prev_level, next_node.younger_sibling);
+        }
+        if(prev_level == 0){ // we're at the root, and we're done
+          return Tree_index(0,0);
+        }
+        prev_level = prev_level - 1;
+        parent_pos = next_node.parent;
+      }
+    }
+  }
 
-  I(0); // HERE
+  // I(pointers_stack[0].size() == 1); // One single root
 
-  if (child.level>0)
-    return Tree_index(child.level-1, pointers_stack[child.level][child.pos].parent);
-
-  I(pointers_stack[0].size() == 1); // One single root
-
-  return Tree_index(0,0);
+  // return Tree_index(0,0);
 }
 
 template <typename X>
