@@ -41,7 +41,7 @@ mkdir yosys-test/
 
 for input in ${inputs[@]}
 do
-  echo ${YOSYS} ./inou/yosys/tests/${input} 
+  echo ${YOSYS} ./inou/yosys/tests/${input}
   ${YOSYS} ./inou/yosys/tests/${input} > ./yosys-test/log_from_yosys_${input} 2> ./yosys-test/err_from_yosys_${input}
 
   if [ $? -eq 0 ]; then

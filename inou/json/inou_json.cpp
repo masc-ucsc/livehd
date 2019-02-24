@@ -55,8 +55,8 @@ void Inou_json::from_json(LGraph *g, rapidjson::Document &document) {
     for(const auto &nodes : nodesArray.GetArray()) {
       assert(nodes.IsObject());
 
-      assert(nodes.HasMember("idx"));
-      last_nid = nodes["idx"].GetUint64();
+      assert(nodes.HasMember("nid"));
+      last_nid = nodes["nid"].GetUint64();
       if(json_remap.find(last_nid) == json_remap.end()) {
         json_remap[last_nid] = g->create_node().get_nid();
       }
@@ -230,17 +230,17 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
     writer.Key("nodes");
     writer.StartArray();
 
-    for(auto &idx : g->fast()) { // Forward would not pass flops
+    for(auto &nid : g->fast()) { // Forward would not pass flops
       writer.StartObject();
-      /*first print out the node Idx*/
-      writer.Key("idx");
-      writer.Uint64(idx);
+      /*first print out the node nid */
+      writer.Key("nid");
+      writer.Uint64(nid);
 #if 0
       /*next print out input nodes*/
       writer.Key("inputs");
       writer.StartArray();
       {
-        for(const auto &input_edge : g->inp_edges(idx)) {
+        for(const auto &input_edge : g->inp_edges(nid)) {
           writer.StartObject();
           writer.Key("inp_nid ");
           writer.Uint64((input_edge.get_idx()));
@@ -255,26 +255,26 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
 
       writer.Key("op");
       {
-        if(g->node_type_get(idx).op == U32Const_Op) {
-          writer.Uint64(g->node_value_get(idx));
-        } else if(g->node_type_get(idx).op == StrConst_Op) {
+        if(g->node_type_get(nid).op == U32Const_Op) {
+          writer.Uint64(g->node_value_get(nid));
+        } else if(g->node_type_get(nid).op == StrConst_Op) {
           std::string tmp;
           tmp.append("'");
-          tmp.append(g->node_const_value_get(idx));
+          tmp.append(g->node_const_value_get(nid));
           tmp.append("'");
           writer.String(tmp.c_str());
         } else {
           /*normal operations*/
-          if(g->node_type_get(idx).op == TechMap_Op) {
-            const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
+          if(g->node_type_get(nid).op == TechMap_Op) {
+            const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(nid));
             writer.String(std::string(tcell->get_name()).c_str());
           } else {
-            writer.String((g->node_type_get(idx).get_name().c_str()));
+            writer.String((g->node_type_get(nid).get_name().c_str()));
           }
         }
       }
 
-      auto ni_name = g->get_node_instancename(idx);
+      auto ni_name = g->get_node_instancename(nid);
       if(!ni_name.empty()) {
         writer.Key("instance_name");
         writer.String(std::string(ni_name).c_str()); // rapidjson does not support string_view
@@ -283,10 +283,10 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
       writer.Key("outputs");
       writer.StartArray();
       {
-        for(const auto &out : g->out_edges(idx)) {
+        for(const auto &out : g->out_edges(nid)) {
           writer.StartObject();
 
-          auto wi_name = g->get_node_wirename(idx);
+          auto wi_name = g->get_node_wirename(nid);
           if(!wi_name.empty()) {
             writer.Key("name");
             writer.String(std::string(wi_name).c_str());
@@ -321,7 +321,7 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
       writer.Key("inputs");
       writer.StartArray();
       {
-        for(const auto &inp : g->inp_edges(idx)) {
+        for(const auto &inp : g->inp_edges(nid)) {
           writer.StartObject();
 
           auto wi_name = g->get_node_wirename(inp.get_inp_pin());
@@ -334,6 +334,10 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
           writer.Uint64(inp.get_inp_pin().get_idx());
           writer.Key("sink_pid");
           writer.Uint64(inp.get_inp_pin().get_pid());
+          writer.Key("driver_idx");
+          writer.Uint64(inp.get_out_pin().get_idx());
+          writer.Key("driver_pid");
+          writer.Uint64(inp.get_out_pin().get_pid());
 
           writer.EndObject();
         }
