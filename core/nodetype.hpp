@@ -492,28 +492,29 @@ public:
 };
 
 // Parameters
-#define LGRAPH_MEMOP_SIZE 0
-#define LGRAPH_MEMOP_OFFSET 1
-#define LGRAPH_MEMOP_ABITS 2
-#define LGRAPH_MEMOP_WRPORT 3
-#define LGRAPH_MEMOP_RDPORT 4
-#define LGRAPH_MEMOP_CLKPOL 5
-#define LGRAPH_MEMOP_RDTRAN 6
+#define LGRAPH_MEMOP_SIZE     0
+#define LGRAPH_MEMOP_OFFSET   1
+#define LGRAPH_MEMOP_ABITS    2
+#define LGRAPH_MEMOP_WRPORT   3
+#define LGRAPH_MEMOP_RDPORT   4
+#define LGRAPH_MEMOP_RDCLKPOL 5
+#define LGRAPH_MEMOP_WRCLKPOL 6
+#define LGRAPH_MEMOP_RDTRAN   7
 
 // Shared signals
-#define LGRAPH_MEMOP_CLK 7
-#define LGRAPH_MEMOP_CE 8
+#define LGRAPH_MEMOP_CLK      8
+#define LGRAPH_MEMOP_CE       9
 
 // Port specific signals
 #define LGRAPH_MEMOP_POFFSET (LGRAPH_MEMOP_CE + 1)
-#define LGRAPH_MEMOP_PIDS 5
+#define LGRAPH_MEMOP_PIDS     5
 
 #define LGRAPH_MEMOP_WRADDR(_n) (LGRAPH_MEMOP_POFFSET + 0 + _n * (LGRAPH_MEMOP_PIDS))
 #define LGRAPH_MEMOP_WRDATA(_n) (LGRAPH_MEMOP_POFFSET + 1 + _n * (LGRAPH_MEMOP_PIDS))
-#define LGRAPH_MEMOP_WREN(_n) (LGRAPH_MEMOP_POFFSET + 2 + _n * (LGRAPH_MEMOP_PIDS))
+#define LGRAPH_MEMOP_WREN(_n)   (LGRAPH_MEMOP_POFFSET + 2 + _n * (LGRAPH_MEMOP_PIDS))
 
 #define LGRAPH_MEMOP_RDADDR(_n) (LGRAPH_MEMOP_POFFSET + 3 + _n * (LGRAPH_MEMOP_PIDS))
-#define LGRAPH_MEMOP_RDEN(_n) (LGRAPH_MEMOP_POFFSET + 4 + _n * (LGRAPH_MEMOP_PIDS))
+#define LGRAPH_MEMOP_RDEN(_n)   (LGRAPH_MEMOP_POFFSET + 4 + _n * (LGRAPH_MEMOP_PIDS))
 
 #define LGRAPH_MEMOP_ISWRADDR(_pid) (((_pid - LGRAPH_MEMOP_POFFSET) % (LGRAPH_MEMOP_PIDS)) == 0)
 #define LGRAPH_MEMOP_ISWRDATA(_pid) (((_pid - LGRAPH_MEMOP_POFFSET) % (LGRAPH_MEMOP_PIDS)) == 1)
@@ -530,7 +531,8 @@ public:
     inputs.push_back("ABITS");           // address bits //FIXME: if input ports have sizes, it is possible to remove this
     inputs.push_back("WR_PORTS");        // number of wr_ports (parameter)
     inputs.push_back("RD_PORTS");        // number of rd_ports (parameter)
-    inputs.push_back("CLK_POLARITY");    // clock polarity: 0 == posedge, 1 == negedge
+    inputs.push_back("RDCLK_POLARITY");  // clock polarity: 0 == posedge, 1 == negedge
+    inputs.push_back("WRCLK_POLARITY");  // clock polarity: 0 == posedge, 1 == negedge
     inputs.push_back("RD_TRANSPARENT");  // fwd writes to reads in the same address
 
     // shared ports

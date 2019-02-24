@@ -876,17 +876,12 @@ static LGraph *process_module(RTLIL::Module *module) {
 
       std::string name = cell->parameters["\\MEMID"].decode_string();
 
-      // we only support a single clock, so polarity needs to be the same
-      // TODO: return this statement when done with google demo
-      // assert(rd_clkp == RTLIL::Const(rd_clkp[0], rd_clkp.size()));
-      // assert(wr_clkp == RTLIL::Const(wr_clkp[0], wr_clkp.size()));
-
-      // we only support a single clock, so polarity and enable needs to be the same
-      // TODO: return this statement when done with google demo
-      // assert(rd_clkp[0] == wr_clkp[0]);
+      assert(rd_clkp == RTLIL::Const(rd_clkp[0], rd_clkp.size()));
+      assert(wr_clkp == RTLIL::Const(wr_clkp[0], wr_clkp.size()));
 
       // lgraph has reversed convention compared to yosys.
       rd_clkp = RTLIL::Const(rd_clkp[0]).as_int() ? RTLIL::Const(0, 1) : RTLIL::Const(1, 1);
+      wr_clkp = RTLIL::Const(wr_clkp[0]).as_int() ? RTLIL::Const(0, 1) : RTLIL::Const(1, 1);
 
       size = width;
 
@@ -898,7 +893,10 @@ static LGraph *process_module(RTLIL::Module *module) {
       connect_constant(g, wrports, 32, onid, LGRAPH_MEMOP_WRPORT);
       connect_constant(g, rdports, 32, onid, LGRAPH_MEMOP_RDPORT);
 
-      connect_constant(g, rd_clkp.as_int(), 1, onid, LGRAPH_MEMOP_CLKPOL);
+      if (rd_clke.as_int())
+        connect_constant(g, rd_clkp.as_int(), 1, onid, LGRAPH_MEMOP_RDCLKPOL);
+      if (wr_clke.as_int())
+        connect_constant(g, wr_clkp.as_int(), 1, onid, LGRAPH_MEMOP_WRCLKPOL);
       connect_constant(g, transp.as_int() , 1, onid, LGRAPH_MEMOP_RDTRAN);
 
       // TODO: get a test case to patch
