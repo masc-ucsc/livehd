@@ -77,26 +77,19 @@ void Inou_graphviz::populate_data(LGraph* g){
 
   g->each_node_fast([this, g, &data](const Node &node) {
     const auto &ntype = node.get_type();
-
-    if (ntype.has_single_output()) {
-      std::string bits_str = std::to_string(g->get_bits(node.get_driver_pin()));
-      if(verbose) {
-        data += fmt::format(" {} [label=\"n{}, {}, {}b\n{}\"];\n"
-            ,node.get_nid()
-            ,node.get_nid()
-            ,ntype.get_name()
-            ,bits_str
-            ,g->get_node_wirename(node.get_driver_pin()));
-      }else{
-        data += fmt::format(" {} [label=\"n{}:{}:{}b\"];\n", node.get_nid(), node.get_nid(), ntype.get_name(), bits_str);
-      }
-    }else{
-      data += fmt::format(" {} [label=\"n{}:{}\"];\n",  node.get_nid(), node.get_nid(), ntype.get_name());
-    }
+    if(verbose)
+      data += fmt::format(" {} [label=\"n{}: {}: {}\"];\n", node.get_nid(), node.get_nid(), ntype.get_name(),g->get_node_wirename(node.get_driver_pin(0)));
+    else
+      data += fmt::format(" {} [label=\"n{}:{}\"];\n", node.get_nid(), node.get_nid(), ntype.get_name());
   });
 
-  g->each_output_edge_fast([&data](Index_ID src_nid, Port_ID src_pid, Index_ID dst_nid, Port_ID dst_pid) {
-    data += fmt::format(" {} -> {}[label=\"{}:{}\"];\n", src_nid, dst_nid, src_pid, dst_pid);
+  g->each_output_edge_fast([this, g, &data](Index_ID src_nid, Port_ID src_pid, Index_ID dst_nid, Port_ID dst_pid) {
+    if (verbose) {
+      std::string bits_str = std::to_string(g->get_bits(g->get_node(src_nid).get_driver_pin(src_pid)));
+      data += fmt::format(" {}->{}[label=\"{}b: {}: {}\"];\n", src_nid, dst_nid, bits_str, src_pid, dst_pid);
+    } else {
+      data += fmt::format(" {} -> {}[label=\"{}:{}\"];\n", src_nid, dst_nid, src_pid, dst_pid);
+    }
   });
   data += "}\n";
 

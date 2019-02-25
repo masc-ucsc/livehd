@@ -213,7 +213,7 @@ void Pass_dfg::trans(LGraph *dfg) {
         Index_ID src_nid = nid;
         Index_ID dst_nid = dfg->get_node(out.get_inp_pin()).get_nid();
         Port_ID  dst_pid = out.get_inp_pin().get_pid();
-        Port_ID  src_pid = 0; // FIXME: this looks weird. It will pick just the last pid in the inputs???
+        Port_ID  src_pid = 0;
         uint16_t bitwidth;
         sub_graph->each_output([&sub_graph, &src_pid, &bitwidth](const Node_pin &pin) {
           //fmt::print("outputs of subgraph: idx:{}, pid:{}, name:{}, bitwidth:{}\n",idx, pid, sub_graph->get_graph_output_name_from_pid(pid), sub_graph->get_bits_pid(idx, pid));
