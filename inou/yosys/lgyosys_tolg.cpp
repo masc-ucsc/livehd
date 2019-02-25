@@ -424,7 +424,7 @@ static Node_pin resolve_constant(LGraph *g, const std::vector<RTLIL::State> &dat
 // does not treat string, keeps as it is (useful for names)
 static void connect_string(LGraph *g, std::string_view value, Index_ID onid, Port_ID opid) {
 
-  auto spin = g->get_node(onid).get_sink_pin(opid);
+  auto spin = g->get_node(onid).setup_sink_pin(opid);
   auto dpin = g->create_node_const(value).setup_driver_pin();
 
   g->add_edge(dpin, spin);

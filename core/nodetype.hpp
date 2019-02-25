@@ -616,27 +616,18 @@ public:
     inputs.push_back("TYPE");
     inputs.push_back("INSTANCE_NAME");
 
-    inputs.push_back("PORT1_ISPARAM");  // 0 = input, 1 = parameter
-    inputs.push_back("PORT1_NAME");
-    inputs.push_back("PORT1_CONNECTION");
+    for(int i=0;i<1024;i++) { // At most 1K ports?? Increase if needed
+      std::string txt = "I" + std::to_string(i);
+      inputs.push_back(txt + "_ISPARAM");  // 0 = input, 1 = parameter
+      inputs.push_back(txt + "_NAME");
+      inputs.push_back(txt + "_CONNECTION");
+    }
 
-    inputs.push_back("PORT2_ISPARAM");  // 0 = input, 1 = parameter
-    inputs.push_back("PORT2_NAME");
-    inputs.push_back("PORT2_CONNECTION");
-
-    inputs.push_back("PORT3_ISPARAM");  // 0 = input, 1 = parameter
-    inputs.push_back("PORT3_NAME");
-    inputs.push_back("PORT3_CONNECTION");
-
-    // continues ...
-    outputs.push_back("PORT1_NAME");
-    outputs.push_back("PORT1_CONNECTION");
-
-    outputs.push_back("PORT2_NAME");
-    outputs.push_back("PORT2_CONNECTION");
-
-    outputs.push_back("PORT3_NAME");
-    outputs.push_back("PORT3_CONNECTION");
+    for(int i=0;i<1024;i++) {
+      std::string txt = "O" + std::to_string(i);
+      outputs.push_back(txt + "_NAME");
+      outputs.push_back(txt + "_CONNECTION");
+    }
   };
 };
 

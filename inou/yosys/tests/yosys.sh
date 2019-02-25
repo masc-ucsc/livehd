@@ -39,8 +39,10 @@ done
 rm -rf ./lgdb/ ./logs ./yosys-test ./*.v ./*.json
 mkdir yosys-test/
 
-for input in ${inputs[@]}
+#for input in ${inputs[@]}
+for full_input in inou/yosys/tests/*.v
 do
+  input=$(basename ${full_input})
   echo ${YOSYS} ./inou/yosys/tests/${input}
   ${YOSYS} ./inou/yosys/tests/${input} > ./yosys-test/log_from_yosys_${input} 2> ./yosys-test/err_from_yosys_${input}
 
@@ -69,12 +71,16 @@ do
     exit 1
   fi
 
-  ${LGCHECK} --implementation=${base}.v --reference=./inou/yosys/tests/${base}.v
-  if [ $? -eq 0 ]; then
-    echo "Successfully matched generated verilog with original verilog (${input})"
+  if [[ $base == "nocheck_*" ]]; then
+    echo "Skipping check for "$base
   else
-    echo "FAIL: circuits are not equivalent (${input})"
-    exit 1
+    ${LGCHECK} --implementation=${base}.v --reference=./inou/yosys/tests/${base}.v
+    if [ $? -eq 0 ]; then
+      echo "Successfully matched generated verilog with original verilog (${input})"
+    else
+      echo "FAIL: circuits are not equivalent (${input})"
+      exit 1
+    fi
   fi
 
 done
