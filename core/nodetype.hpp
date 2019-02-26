@@ -539,44 +539,19 @@ public:
     inputs.push_back("CLK");  // single clock support only
     inputs.push_back("CE");   // shared chip enable (no connection means always enable)
 
-    // wr / rd port 0
-    inputs.push_back("WR0_ADDR");
-    inputs.push_back("WR0_DATA");
-    inputs.push_back("WR0_EN");
+    for(int i=0;i<1024;i++) { // At most 1K ports?? Increase if needed
+      std::string wr = "WR" + std::to_string(i);
+      // wr / rd port 0
+      inputs.push_back(wr + "_ADDR");
+      inputs.push_back(wr + "_DATA");
+      inputs.push_back(wr + "_EN");
 
-    inputs.push_back("RD0_ADDR");
-    inputs.push_back("RD0_EN");
+      std::string rd = "RD" + std::to_string(i);
+      inputs.push_back(rd + "_ADDR");
+      inputs.push_back(rd + "_EN");
 
-    // wr / rd port 1
-    inputs.push_back("WR1_ADDR");
-    inputs.push_back("WR1_DATA");
-    inputs.push_back("WR1_EN");
-
-    inputs.push_back("RD1_ADDR");
-    inputs.push_back("RD1_EN");
-
-    // wr / rd port 2
-    inputs.push_back("WR2_ADDR");
-    inputs.push_back("WR2_DATA");
-    inputs.push_back("WR2_EN");
-
-    inputs.push_back("RD2_ADDR");
-    inputs.push_back("RD2_EN");
-
-    // wr / rd port 3
-    inputs.push_back("WR3_ADDR");
-    inputs.push_back("WR3_DATA");
-    inputs.push_back("WR3_EN");
-
-    inputs.push_back("RD3_ADDR");
-    inputs.push_back("RD3_EN");
-    // continues...
-
-    outputs.push_back("RD_DATA0");
-    outputs.push_back("RD_DATA1");
-    outputs.push_back("RD_DATA2");
-    outputs.push_back("RD_DATA3");
-    // continues...
+      outputs.push_back(rd + "_DATA");
+    }
   };
 };
 

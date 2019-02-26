@@ -876,12 +876,15 @@ static LGraph *process_module(RTLIL::Module *module) {
 
       std::string name = cell->parameters["\\MEMID"].decode_string();
 
-      assert(rd_clkp == RTLIL::Const(rd_clkp[0], rd_clkp.size()));
-      assert(wr_clkp == RTLIL::Const(wr_clkp[0], wr_clkp.size()));
-
       // lgraph has reversed convention compared to yosys.
       rd_clkp = RTLIL::Const(rd_clkp[0]).as_int() ? RTLIL::Const(0, 1) : RTLIL::Const(1, 1);
+      for(int i=0;i<rd_clkp.size();i++) {
+        assert(rd_clkp[0] == rd_clkp[i]); // All the read ports are equal
+      }
       wr_clkp = RTLIL::Const(wr_clkp[0]).as_int() ? RTLIL::Const(0, 1) : RTLIL::Const(1, 1);
+      for(int i=0;i<wr_clkp.size();i++) {
+        assert(wr_clkp[0] == wr_clkp[i]); // all the write ports are equal
+      }
 
       size = width;
 
