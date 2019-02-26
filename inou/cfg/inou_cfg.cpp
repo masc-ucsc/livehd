@@ -221,7 +221,6 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
     g->node_type_set(name2id[w1st], CfgAssign_Op);
 
   g->set_node_wirename(g->get_node(name2id[w1st]).setup_driver_pin(0), CFG_Node_Data(dfg_data).encode().c_str());
-  //g->set_node_wirename(name2id[w1st], CFG_Node_Data(dfg_data).encode().c_str());
   fmt::print("@cfg node:{}, wirename:{}\n", name2id[w1st], CFG_Node_Data(dfg_data).encode().c_str());
 
   /*
@@ -425,7 +424,7 @@ void Inou_cfg::update_ifs(vector<LGraph *> &lgs, vector<map<string, Index_ID>> &
         });
 
         const CFG_Node_Data cnode(data.get_target(), new_operands, std::string(data.get_operator()));
-        g->set_node_wirename(nid, cnode.encode().c_str());
+        g->set_node_wirename(g->get_node(nid).setup_driver_pin(0), cnode.encode().c_str());
       }
     }
   }
@@ -482,7 +481,7 @@ void Inou_cfg::remove_fake_fcall(LGraph *g) {
       g->node_type_set(nid, CfgAssign_Op);
       std::string wn(g->get_node_wirename(g->get_node(nid).get_driver_pin(0)));
       wn = "=" + wn.substr(3); // FIXME: weird code!!! hardcoding positions? use string_view
-      g->set_node_wirename(g->get_node(nid).get_driver_pin(0), wn.c_str()); // FIXME: the code should have no c_str()
+      g->set_node_wirename(g->get_node(nid).setup_driver_pin(0), wn.c_str()); // FIXME: the code should have no c_str()
       fmt::print("find out fake function call!!!!!!\n");
       fmt::print("change nid:{} to CfgAssign_Op\n", nid);
     }
