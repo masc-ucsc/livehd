@@ -218,7 +218,6 @@ void Pass_dfg::trans(LGraph *dfg) {
           src_pid = pin.get_pid();
           bitwidth = sub_graph->get_bits(pin);
         });
-        fmt::print("src_nid:{}, src_pid:{}, dst_nid:{}, dst_pid:{}\n", src_nid, src_pid, dst_nid, dst_pid);
         My_pin src_pin; // = Node_pin(dfg->get_node(src_nid).setup_driver_pin(src_pid));
         src_pin.nid = src_nid;
         src_pin.pid = src_pid;
@@ -226,8 +225,8 @@ void Pass_dfg::trans(LGraph *dfg) {
         dst_pin.nid = dst_nid;
         dst_pin.pid = dst_pid;
         subg_out_edges[src_pin] = dst_pin;
-        fmt::print("bitwidth:{}\n", bitwidth);
-        dfg->set_bits_pid(src_nid, src_pid, bitwidth);
+        //dfg->set_bits_pid(src_nid, src_pid, bitwidth);
+        dfg->set_bits(dfg->get_node(src_nid).setup_driver_pin(src_pid), bitwidth);
         dfg->del_edge(out); //WARNNING: don't add_edge and del_edge at the same reference loop!
       }
 
@@ -244,15 +243,15 @@ void Pass_dfg::trans(LGraph *dfg) {
 
   for(auto nid : dfg->fast()) {
       if(dfg->node_type_get(nid).op == Equals_Op) {
-        dfg->set_bits(nid, 1);
+        dfg->set_bits(dfg->get_node(nid).setup_driver_pin(0), 1);
       } else if(dfg->node_type_get(nid).op == GreaterEqualThan_Op) {
-        dfg->set_bits(nid, 1);
+        dfg->set_bits(dfg->get_node(nid).setup_driver_pin(0), 1);
       } else if(dfg->node_type_get(nid).op == GreaterThan_Op) {
-        dfg->set_bits(nid, 1);
+        dfg->set_bits(dfg->get_node(nid).setup_driver_pin(0), 1);
       } else if(dfg->node_type_get(nid).op == LessEqualThan_Op) {
-        dfg->set_bits(nid, 1);
+        dfg->set_bits(dfg->get_node(nid).setup_driver_pin(0), 1);
       } else if(dfg->node_type_get(nid).op == LessThan_Op) {
-        dfg->set_bits(nid, 1);
+        dfg->set_bits(dfg->get_node(nid).setup_driver_pin(0), 1);
       } else {
         ;
       }
@@ -261,11 +260,12 @@ void Pass_dfg::trans(LGraph *dfg) {
 
 void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
   for(auto nid : dfg->fast()){
-    uint16_t nid_size = dfg->get_bits(nid); // FIXME!!! This is just getting bits from PID 0
+    uint16_t nid_size = dfg->get_bits(dfg->get_node(nid).get_driver_pin(0));
     if(nid_size == 0){
       Node_bitwidth &nb = dfg->node_bitwidth_get(nid); // FIXME: it should be Node_pin
       fmt::print("nid:{},max:{}\n",nid, nb.i.max);
-      dfg->set_bits(nid, ((uint16_t)floor(log2(nb.i.max))+1)); //SH FIXME: set bits for all node_pin
+      //SH FIXME: should set bits for all output node_pin?
+      dfg->set_bits(dfg->get_node(nid).setup_driver_pin(0), ((uint16_t)floor(log2(nb.i.max))+1));
     }
   }
 
@@ -274,23 +274,25 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
       for (auto &inp : dfg->inp_edges(nid)) {
         Index_ID src_nid = dfg->get_node(inp.get_out_pin()).get_nid();
         Index_ID dst_nid = nid;
-        //Port_ID  src_pid = inp.get_out_pin().get_pid();
+        Port_ID  src_pid = inp.get_out_pin().get_pid();
         Port_ID  dst_pid = inp.get_inp_pin().get_pid();
 
         if(dst_pid == 0)
           continue;
 
         //assume MIT algo. will at least set mux.bits equals to the larger input
-        auto bw_diff = abs(dfg->get_bits(src_nid) - dfg->get_bits(dst_nid));
-        if(dfg->get_bits(dst_nid) > dfg->get_bits(src_nid)) {
+        auto src_bits = dfg->get_bits(dfg->get_node(src_nid).get_driver_pin(0));
+        auto dst_bits = dfg->get_bits(dfg->get_node(dst_nid).get_driver_pin(0));
+        auto bw_diff = (uint16_t)abs(src_bits - dst_bits);
+        if(dst_bits > src_bits) {
           //temporarily using unsigned extend to fix mux bitwidth mismatch
           Index_ID unsign_ext_nid = create_const32_node(dfg, 0, bw_diff, false);
           Index_ID nid_join = dfg->create_node().get_nid();
           dfg->node_type_set(nid_join, Join_Op);
-          dfg->set_bits(nid_join, dfg->get_bits(dst_nid));
-          dfg->add_edge(dfg->get_node(unsign_ext_nid).setup_driver_pin(), dfg->get_node(nid_join).setup_sink_pin(1));
-          dfg->add_edge(dfg->get_node(src_nid).setup_driver_pin()       , dfg->get_node(nid_join).setup_sink_pin(0));
-          dfg->add_edge(dfg->get_node(nid_join).setup_driver_pin()      , dfg->get_node(dst_nid ).setup_sink_pin(dst_pid));
+          dfg->set_bits(dfg->get_node(nid_join).setup_driver_pin(0), dst_bits);
+          dfg->add_edge(dfg->get_node(unsign_ext_nid).setup_driver_pin(0), dfg->get_node(nid_join).setup_sink_pin(1));
+          dfg->add_edge(dfg->get_node(src_nid).setup_driver_pin(0)       , dfg->get_node(nid_join).setup_sink_pin(0));
+          dfg->add_edge(dfg->get_node(nid_join).setup_driver_pin(0)      , dfg->get_node(dst_nid ).setup_sink_pin(dst_pid));
           dfg->del_edge(inp);
         }
       }
@@ -299,12 +301,16 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
     //after MIT algo. and Mux_Op processing, bw of every node should be synced except an output gio connected to a Mux_Op
     if(dfg->node_type_get(nid).op == GraphIO_Op){
       for(auto &inp : dfg->inp_edges(nid)){
-        Index_ID src_nid = dfg->get_node(inp.get_out_pin()).get_nid();
-        Index_ID dst_nid = nid;
-        if(dfg->get_bits(src_nid) > dfg->get_bits(dst_nid))
-          dfg->set_bits(dst_nid, dfg->get_bits(src_nid));
-        else//SH:FIXME:Warning! this is workaround will be eventually wrong after MIT could handle subgraph
-          dfg->set_bits(src_nid, dfg->get_bits(dst_nid));
+        Node nsrc = dfg->get_node(inp.get_out_pin());
+        Node ndst = dfg->get_node(nid);
+        if(dfg->get_bits(nsrc.get_driver_pin(0)) > dfg->get_bits(ndst.get_driver_pin(0))){
+          dfg->set_bits(ndst.setup_driver_pin(0), dfg->get_bits(nsrc.get_driver_pin(0)));
+          fmt::print("gio bitwidth less then source\n");
+        }
+        else{//SH:FIXME:Warning! this is workaround will be eventually wrong after MIT could handle subgraph
+          dfg->set_bits(nsrc.setup_driver_pin(0), dfg->get_bits(ndst.get_driver_pin(0)));
+          fmt::print("gio bitwidth larger then source\n");
+        }
 
         fmt::print("output bits:{}\n", dfg->get_bits(inp.get_out_pin()));
       }
@@ -454,12 +460,12 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
     // process target
     if(is_input(target)) {
       I(dfg->node_value_get(oprd_id0));
-      auto bits = dfg->node_value_get(oprd_id0);
+      auto bits          = dfg->node_value_get(oprd_id0);
       Index_ID target_id = create_input(dfg, aux_tree, target, bits);
       fmt::print("create node for input target:{}, nid:{}\n", target, target_id);
     } else if(is_output(target)) {
       assert(dfg->node_value_get(oprd_id0));
-      auto     bits      = dfg->node_value_get(oprd_id0);
+      auto bits          = dfg->node_value_get(oprd_id0);
       Index_ID target_id = create_output(dfg, aux_tree, target, bits);
       fmt::print("create node for output target:{}, nid:{}\n", target, target_id);
     } else
