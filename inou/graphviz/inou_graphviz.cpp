@@ -90,25 +90,26 @@ void Inou_graphviz::populate_data(LGraph* g){
       Index_ID dst_nid = g->get_node(dst_pin).get_nid();
       if (verbose) {
         auto bits = g->get_bits(src_pin);
-        //data += fmt::format(" {}->{}[label=\"{}b: {}:{}\"];\n", src_nid, dst_nid, bits_str, src_pid, dst_pid);
         data += fmt::format(" {}->{}[label=\"{}b: {}:{}\"];\n", src_nid, dst_nid, bits, src_pin.get_pid(), dst_pin.get_pid());
       } else {
-        //data += fmt::format(" {} -> {}[label=\"{}:{}\"];\n", src_nid, dst_nid, src_pid, dst_pid);
         data += fmt::format(" {} -> {}[label=\"{}:{}\"];\n", src_nid, dst_nid, src_pin.get_pid(), dst_pin.get_pid());
       }
     }
   });
 
-  //g->each_output_edge_fast([this, g, &data](Index_ID src_nid, Port_ID src_pid, Index_ID dst_nid, Port_ID dst_pid) {
-  //  if (verbose) {
-  //    std::string bits_str = std::to_string(g->get_bits(g->get_node(src_nid).get_driver_pin(src_pid)));
-  //    //data += fmt::format(" {}->{}[label=\"{}b: {}:{}\"];\n", src_nid, dst_nid, bits_str, src_pid, dst_pid);
-  //    data += fmt::format(" {}->{}[label=\"{}b: {}:{}\"];\n", src_nid, g->get_node(dst_pid).get_nid(), bits_str, src_pid, dst_pid);
-  //  } else {
-  //    //data += fmt::format(" {} -> {}[label=\"{}:{}\"];\n", src_nid, dst_nid, src_pid, dst_pid);
-  //    data += fmt::format(" {} -> {}[label=\"{}:{}\"];\n", src_nid, g->get_node(g-).get_nid(), src_pid, dst_pid);
-  //  }
-  //});
+  g->each_output([g,this, &data](const Node_pin &pin) {
+    assert(g->is_graph_output(pin));
+    auto nid = g->get_node(pin).get_nid();
+    std::string_view dst_str = "dst_module";
+    if (verbose) {
+      auto bits = g->get_bits(g->get_node(nid).get_driver_pin(0));
+      data += fmt::format(" {}->{}[label=\"{}b: {}:{}\"];\n", nid, dst_str, bits, 0, 0);
+    } else {
+      data += fmt::format(" {}->{}[label=\"{}:{}\"];\n", nid, dst_str, 0, 0);
+    }
+  });
+
+
   data += "}\n";
 
   std::string file = absl::StrCat(odir, "/", g->get_name(), ".dot");
