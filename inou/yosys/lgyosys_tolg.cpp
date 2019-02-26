@@ -876,16 +876,6 @@ static LGraph *process_module(RTLIL::Module *module) {
 
       std::string name = cell->parameters["\\MEMID"].decode_string();
 
-      // lgraph has reversed convention compared to yosys.
-      rd_clkp = RTLIL::Const(rd_clkp[0]).as_int() ? RTLIL::Const(0, 1) : RTLIL::Const(1, 1);
-      for(int i=0;i<rd_clkp.size();i++) {
-        assert(rd_clkp[0] == rd_clkp[i]); // All the read ports are equal
-      }
-      wr_clkp = RTLIL::Const(wr_clkp[0]).as_int() ? RTLIL::Const(0, 1) : RTLIL::Const(1, 1);
-      for(int i=0;i<wr_clkp.size();i++) {
-        assert(wr_clkp[0] == wr_clkp[i]); // all the write ports are equal
-      }
-
       size = width;
 
       fmt::print("name:{} depth:{} wrports:{} rdports:{}\n", name, depth, wrports, rdports);
@@ -896,10 +886,50 @@ static LGraph *process_module(RTLIL::Module *module) {
       connect_constant(g, wrports, 32, onid, LGRAPH_MEMOP_WRPORT);
       connect_constant(g, rdports, 32, onid, LGRAPH_MEMOP_RDPORT);
 
-      if (rd_clke.as_int())
-        connect_constant(g, rd_clkp.as_int(), 1, onid, LGRAPH_MEMOP_RDCLKPOL);
-      if (wr_clke.as_int())
-        connect_constant(g, wr_clkp.as_int(), 1, onid, LGRAPH_MEMOP_WRCLKPOL);
+      // lgraph has reversed convention compared to yosys.
+      int rd_clk_enabled  = 0;
+      int rd_clk_polarity = 0;
+      for(int i=0;i<rd_clkp.size();i++) {
+        if (rd_clke[i] != RTLIL::S1)
+          continue;
+
+        if (rd_clkp[i] == RTLIL::S1) {
+          if (rd_clk_enabled)
+            assert(rd_clk_polarity); // All the read ports are equal
+          rd_clk_enabled = 1;
+          rd_clk_polarity = 1;
+        }else if (rd_clkp[i] == RTLIL::S0) {
+          if (rd_clk_enabled)
+            assert(!rd_clk_polarity); // All the read ports are equal
+          rd_clk_enabled = 1;
+          rd_clk_polarity = 0;
+        }
+      }
+      int wr_clk_enabled  = 0;
+      int wr_clk_polarity = 0;
+      for(int i=0;i<wr_clkp.size();i++) {
+        if (wr_clke[i] != RTLIL::S1)
+          continue;
+        if (wr_clkp[i] == RTLIL::S1) {
+          if (wr_clk_enabled)
+            assert(wr_clk_polarity); // All the read ports are equal
+          wr_clk_enabled = 1;
+          wr_clk_polarity = 1;
+        }else if (wr_clkp[i] == RTLIL::S0) {
+          if (wr_clk_enabled)
+            assert(!wr_clk_polarity); // All the read ports are equal
+          wr_clk_enabled = 1;
+          wr_clk_polarity = 0;
+        }
+      }
+      rd_clk_polarity = rd_clk_polarity?0:1; // polarity flipped in lgraph vs yosys
+      wr_clk_polarity = wr_clk_polarity?0:1; // polarity flipped in lgraph vs yosys
+
+      if (rd_clk_enabled)
+        connect_constant(g, rd_clk_polarity, 1, onid, LGRAPH_MEMOP_RDCLKPOL);
+      if (wr_clk_enabled)
+        connect_constant(g, wr_clk_polarity, 1, onid, LGRAPH_MEMOP_WRCLKPOL);
+
       connect_constant(g, transp.as_int() , 1, onid, LGRAPH_MEMOP_RDTRAN);
 
       // TODO: get a test case to patch
@@ -1150,8 +1180,14 @@ static LGraph *process_module(RTLIL::Module *module) {
           } else if(std::strncmp(conn.first.c_str(), "\\RD_EN", 6) == 0) {
             for(uint32_t rdport = 0; rdport < rdports; rdport++) {
               Node_pin spin = g->get_node(inid).setup_sink_pin(LGRAPH_MEMOP_RDEN(rdport));
-              Node_pin dpin = create_join_operator(g, ss.extract(rdport, 1));
-              g->add_edge(dpin, spin);
+              if (ss.extract(rdport, 1)[0].data == RTLIL::State::Sx) { // Yosys has Sx as enable sometimes, WEIRD. Fix it to 0
+                auto node = g->create_node_u32(0,1);
+                Node_pin dpin = node.setup_driver_pin();
+                g->add_edge(dpin, spin);
+              }else{
+                Node_pin dpin = create_join_operator(g, ss.extract(rdport, 1));
+                g->add_edge(dpin, spin);
+              }
             }
             continue;
           } else {
