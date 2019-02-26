@@ -143,7 +143,9 @@ void Lgyosys_dump::create_memory(const LGraph *g, RTLIL::Module *module, Index_I
 
   RTLIL::Cell *memory = module->addCell(absl::StrCat("\\", cell_name), RTLIL::IdString("$mem"));
 
-  RTLIL::SigSpec wr_addr, wr_data, wr_en, rd_addr, rd_en, rd_data;
+  RTLIL::SigSpec wr_addr, wr_data, wr_en, rd_addr, rd_data;
+  int nrd_ports = 0;
+  RTLIL::SigSpec rd_en;
   RTLIL::Wire   *clk        = nullptr;
   bool           rd_clk     = false;
   bool           wr_clk     = false;
@@ -183,7 +185,9 @@ void Lgyosys_dump::create_memory(const LGraph *g, RTLIL::Module *module, Index_I
     } else if(input_pin == LGRAPH_MEMOP_RDPORT) {
       if(g->get_node(c.get_idx()).get_type().op != U32Const_Op)
         log_error("Internal Error: Mem num rd ports is not a constant.\n");
-      memory->setParam("\\RD_PORTS", RTLIL::Const(g->node_value_get(c.get_idx())));
+      assert(nrd_ports==0); // Do not double set
+      nrd_ports = g->node_value_get(c.get_idx());
+      memory->setParam("\\RD_PORTS", RTLIL::Const(nrd_ports));
 
     } else if(input_pin == LGRAPH_MEMOP_RDTRAN) {
       if(g->get_node(c.get_idx()).get_type().op != U32Const_Op)
@@ -218,7 +222,6 @@ void Lgyosys_dump::create_memory(const LGraph *g, RTLIL::Module *module, Index_I
       rd_addr.append(RTLIL::SigSpec(get_wire(c.get_out_pin())));
 
     } else if(LGRAPH_MEMOP_ISRDEN(input_pin)) {
-      // yosys is failing when wires are used for rd en
       rd_en.append(RTLIL::SigSpec(get_wire(c.get_out_pin())));
       // rd_en.append(RTLIL::SigSpec(RTLIL::State::Sx));
 
@@ -268,6 +271,8 @@ void Lgyosys_dump::create_memory(const LGraph *g, RTLIL::Module *module, Index_I
 
   memory->setPort("\\RD_DATA", RTLIL::SigSpec(mem_output_map[idx]));
   memory->setPort("\\RD_ADDR", rd_addr);
+
+  assert(nrd_ports == rd_en.size());
   memory->setPort("\\RD_EN", rd_en);
 
 }
