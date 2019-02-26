@@ -45,7 +45,7 @@ Index_ID Pass_dfg::create_default_const(LGraph *g) {
   Index_ID nid = g->create_node().get_nid();
   g->node_type_set(nid, U32Const_Op);
   g->node_u32type_set(nid, 0);
-  g->set_bits(nid, 1);
+  g->set_bits(g->get_node(nid).setup_driver_pin(0), 1);
 
   return nid;
 }
@@ -70,7 +70,7 @@ Index_ID Pass_dfg::create_node(LGraph *g, Aux_tree *aux_tree, const std::string 
   assert(!v.empty());
 
   Index_ID nid = g->create_node().get_nid();
-  g->set_node_wirename(nid, v.c_str());
+  g->set_node_wirename(g->get_node(nid).setup_driver_pin(0), v.c_str());
   aux_tree->set_alias(v, nid);
 
   return nid;

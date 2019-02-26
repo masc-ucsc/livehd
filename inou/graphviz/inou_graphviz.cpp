@@ -84,14 +84,14 @@ void Inou_graphviz::populate_data(LGraph* g){
       data += fmt::format(" {} [label=\"n{}:{}\"];\n", nid, nid, ntype.get_name());
 
     for(auto &out : g->out_edges(nid)){
-      auto src_pin = out.get_out_pin();
-      auto dst_pin = out.get_inp_pin();
-      auto src_nid = nid;
-      auto dst_nid = g->get_node(dst_pin).get_nid();
+      Node_pin src_pin = out.get_out_pin();
+      Node_pin dst_pin = out.get_inp_pin();
+      Index_ID src_nid = nid;
+      Index_ID dst_nid = g->get_node(dst_pin).get_nid();
       if (verbose) {
-        std::string bits_str = std::to_string(g->get_bits(src_pin));
+        auto bits = g->get_bits(src_pin);
         //data += fmt::format(" {}->{}[label=\"{}b: {}:{}\"];\n", src_nid, dst_nid, bits_str, src_pid, dst_pid);
-        data += fmt::format(" {}->{}[label=\"{}b: {}:{}\"];\n", src_nid, dst_nid, bits_str, src_pin.get_pid(), dst_pin.get_pid());
+        data += fmt::format(" {}->{}[label=\"{}b: {}:{}\"];\n", src_nid, dst_nid, bits, src_pin.get_pid(), dst_pin.get_pid());
       } else {
         //data += fmt::format(" {} -> {}[label=\"{}:{}\"];\n", src_nid, dst_nid, src_pid, dst_pid);
         data += fmt::format(" {} -> {}[label=\"{}:{}\"];\n", src_nid, dst_nid, src_pin.get_pid(), dst_pin.get_pid());
