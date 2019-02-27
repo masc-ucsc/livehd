@@ -97,7 +97,7 @@ void Inou_graphviz::populate_data(LGraph* g){
     }
   });
 
-  g->each_output([g,this, &data](const Node_pin &pin) {
+  g->each_graph_output([g,this, &data](const Node_pin &pin) {
     assert(g->is_graph_output(pin));
     auto nid = g->get_node(pin).get_nid();
     std::string_view dst_str = "dst_module";

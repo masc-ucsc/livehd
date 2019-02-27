@@ -112,16 +112,16 @@ public:
 
   // Iterators defined in the lgraph_each.cpp
 
-  void each_input(std::function<void(const Node_pin &pin)> f1) const;
+  void each_graph_input(std::function<void(const Node_pin &pin)> f1) const;
   template <class Func, class T>
-  void each_input(Func &&func, T *first) const {
-    each_input(std::bind(func, first, std::placeholders::_1));
+  void each_graph_input(Func &&func, T *first) const {
+    each_graph_input(std::bind(func, first, std::placeholders::_1));
   }
 
-  void each_output(std::function<void(const Node_pin &pin)> f1) const;
+  void each_graph_output(std::function<void(const Node_pin &pin)> f1) const;
   template <class Func, class T>
-  void each_output(Func &&func, T *first) const {
-    each_output(std::bind(func, first, std::placeholders::_1));
+  void each_graph_output(Func &&func, T *first) const {
+    each_graph_output(std::bind(func, first, std::placeholders::_1));
   }
 
   void each_node_fast(std::function<void(ConstNode &node)> f1) const;

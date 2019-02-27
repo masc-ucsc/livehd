@@ -101,7 +101,7 @@ void Lgyosys_dump::create_blackbox(const LGraph &subgraph, RTLIL::Design *design
 
 #if 1
   uint32_t port_id = 0;
-  subgraph.each_input([&port_id,mod,&subgraph](const Node_pin &pin) {
+  subgraph.each_graph_input([&port_id,mod,&subgraph](const Node_pin &pin) {
     std::string name = absl::StrCat("\\", subgraph.get_node_wirename(pin));
     RTLIL::Wire *wire = mod->addWire(name, subgraph.get_bits(pin));
     wire->port_id     = port_id++;
@@ -109,7 +109,7 @@ void Lgyosys_dump::create_blackbox(const LGraph &subgraph, RTLIL::Design *design
     wire->port_output = false;
   });
 
-  subgraph.each_output([&port_id,mod,&subgraph](const Node_pin &pin) {
+  subgraph.each_graph_output([&port_id,mod,&subgraph](const Node_pin &pin) {
     std::string name = absl::StrCat("\\", subgraph.get_node_wirename(pin));
     RTLIL::Wire *wire = mod->addWire(name, subgraph.get_bits(pin));
     wire->port_id     = port_id++;
@@ -353,13 +353,13 @@ void Lgyosys_dump::create_subgraph_outputs(const LGraph *g, RTLIL::Module *modul
 void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module *module) {
   // first create all the output wires
 
-  g->each_output([g,module,this](const Node_pin &pin) {
+  g->each_graph_output([g,module,this](const Node_pin &pin) {
     output_map[pin.get_idx()] = create_io_wire(g, pin, module);
     output_map[pin.get_idx()]->port_input  = false;
     output_map[pin.get_idx()]->port_output = true;
   });
 
-  g->each_input([g,module,this](const Node_pin &pin) {
+  g->each_graph_input([g,module,this](const Node_pin &pin) {
     input_map[pin.get_idx()] = create_io_wire(g, pin, module);
     input_map[pin.get_idx()]->port_input  = true;
     input_map[pin.get_idx()]->port_output = false;
@@ -501,7 +501,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
 
   create_wires(g, module);
 
-  g->each_output([g,this,module](const Node_pin &pin) {
+  g->each_graph_output([g,this,module](const Node_pin &pin) {
     assert(g->is_graph_output(pin));
     for(const auto &c : g->inp_edges(g->get_node(pin).get_nid())) {
       RTLIL::SigSpec lhs = RTLIL::SigSpec(output_map[pin.get_idx()]);

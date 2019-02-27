@@ -140,19 +140,14 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs, unordered_ma
    for(uint32_t i = 0; i < lgs.size(); i++) {
      fmt::print("create gio for graph:{},:{}\n", i, lgs[i]->lg_id());
     //Graph input
-    Node gio_node_begn = lgs[i]->create_node();
-    lgs[i]->add_graph_input("ginp", gio_node_begn.get_nid(), 0, 0);
-    Index_ID src_nid = gio_node_begn.get_nid();
-    Index_ID dst_nid = nname2nid_lgs[i][nname_begn_lgs[i]];
-    lgs[i]->add_edge(lgs[i]->get_node(src_nid).setup_driver_pin(0), lgs[i]->get_node(dst_nid).setup_sink_pin(0));
-    fmt::print("graph input node nid:{}\n", src_nid);
+    auto ipin = lgs[i]->add_graph_input("ginp", 0, 0, 0);
+    auto dst_nid = nname2nid_lgs[i][nname_begn_lgs[i]];
+    lgs[i]->add_edge(ipin, lgs[i]->get_node(dst_nid).setup_sink_pin());
 
     //Graph output
-    Node gio_node_ed = lgs[i]->create_node();
-    lgs[i]->add_graph_output("gout", gio_node_ed.get_nid(), 0, 0);
-    src_nid = nid_end_lgs[i];
-    dst_nid = gio_node_ed.get_nid();
-    lgs[i]->add_edge(lgs[i]->get_node(src_nid).setup_driver_pin(0), lgs[i]->get_node(dst_nid).setup_sink_pin(0));
+    auto opin = lgs[i]->add_graph_output("gout", 0, 0, 0);
+    auto src_nid = nid_end_lgs[i];
+    lgs[i]->add_edge(lgs[i]->get_node(src_nid).setup_driver_pin(), opin);
   }
 
   update_ifs(lgs, nname2nid_lgs);
