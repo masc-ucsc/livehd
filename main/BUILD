@@ -52,6 +52,20 @@ sh_test(
     ],
 )
 
+sh_test(
+    name = "verilog.sh",
+    srcs = ["tests/verilog.sh"],
+    data = [
+        "//inou/yosys:liblgraph_yosys.so",
+        "//inou/yosys:verilog_tests",
+        ":lgshell",
+        ],
+    deps = [
+        "//inou/yosys:scripts",
+    ]
+)
+
+
 cc_binary(
     name = "uclient_test",
     srcs = ["uclient_test.cpp"],
