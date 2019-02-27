@@ -346,7 +346,7 @@ void Pass_abc::find_cell_conn(const LGraph *g) {
 void Pass_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology::topology_info &topo, int bit_addr[2]) {
 
   Index_ID     this_idx       = input->get_idx();
-  Node_Type_Op this_node_type = g->node_type_get(this_idx).op;
+  Node_Type_Op this_node_type = g->get_node(this_idx).get_type().op;
   if(this_node_type == U32Const_Op) {
     if(opack.verbose)
       fmt::print("\t U32Const_Op_NodeID:{},bit [{}:{}] portid : {} \n", input->get_idx(), bit_addr[0], bit_addr[1],
@@ -444,7 +444,7 @@ void Pass_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology
         break;
       }
       case 1: {
-        assert(g->node_type_get(pre_inp.get_idx()).op == U32Const_Op);
+        assert(g->get_node(pre_inp.get_inp_pin()).get_type().op == U32Const_Op);
         offset = g->node_value_get(pre_inp.get_idx());
         break;
       }
@@ -481,7 +481,7 @@ bool Pass_abc::setup_techmap(const LGraph *g) {
   bool is_valid_input = true;
 
   for(const auto &idx : g->fast()) {
-    switch(g->node_type_get(idx).op) {
+    switch(g->get_node(idx).get_type().op) {
     case TechMap_Op: {
       const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
       if(is_latch(tcell)) {
@@ -528,7 +528,7 @@ bool Pass_abc::setup_techmap(const LGraph *g) {
          * 	3. The width of GraphIO_Op nodes MUST Match (it should traverse through a Pick_OP!!)
          **********************************************************************************************/
         for(const auto &out : g->out_edges(idx)) {
-          switch(g->node_type_get(out.get_idx()).op) {
+          switch(g->get_node(out.get_out_pin()).get_type().op) {
           case TechMap_Op: {
             const auto *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(out.get_idx()));
             auto    cell_name = tcell->get_name();
@@ -582,7 +582,7 @@ bool Pass_abc::setup_techmap(const LGraph *g) {
       break;
     }
     default: {
-      Pass::error("Pass_abc: nodeID:{} op is not supported, opType is {}", idx, g->node_type_get(idx).get_name().c_str());
+      Pass::error("Pass_abc: nodeID:{} op is not supported, opType is {}", idx, g->get_node(idx).get_type().get_name().c_str());
       is_valid_input = false;
       break;
     }
@@ -721,7 +721,7 @@ void Pass_abc::conn_memory(const LGraph *g, Abc_Ntk_t *pAig) {
         Index_ID     src_idx              = inp.idx;
         int          src_bits             = inp.offset[0];
         index_offset rhs                  = {src_idx, 0, {src_bits, src_bits}};
-        Node_Type_Op this_node_type       = g->node_type_get(src_idx).op;
+        Node_Type_Op this_node_type       = g->get_node(src_idx).get_type().op;
 
         if(this_node_type == TechMap_Op) {
           const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(src_idx));
@@ -792,7 +792,7 @@ void Pass_abc::conn_subgraph(const LGraph *g, Abc_Ntk_t *pAig) {
         Index_ID     src_idx                = inp.idx;
         int          src_bits               = inp.offset[0];
         index_offset rhs                    = {src_idx, 0, {src_bits, src_bits}};
-        Node_Type_Op this_node_type         = g->node_type_get(src_idx).op;
+        Node_Type_Op this_node_type         = g->get_node(src_idx).get_type().op;
 
         if(this_node_type == TechMap_Op) {
           const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(src_idx));
@@ -884,14 +884,14 @@ void Pass_abc::gen_latch_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
         std::string namebuffer = fmt::format("{}_%r", g->get_node_wirename(idx));
         Abc_object_assign_name(pNet, namebuffer);
         break;
-      } else if(g->node_type_get(output.get_idx()).op == Join_Op) {
+      } else if(g->get_node(output.get_out_pin()).get_type().op == Join_Op) {
         assert(g->get_bits(output.get_idx()) > 1);
         if(g->get_node_wirename(output.get_idx()) != nullptr) {
           std::string namebuffer = fmt::format("{}_%r_{}", g->get_node_wirename(output.get_idx()), output.get_inp_pin().get_pid());
           Abc_object_assign_name(pNet, namebuffer);
           break;
         }
-      } else if(g->node_type_get(output.get_idx()).op == Pick_Op) {
+      } else if(g->get_node(output.get_out_pin()).get_type().op == Pick_Op) {
         for(const auto &next_out : g->out_edges(output.get_idx())) {
           if(g->get_node_wirename(next_out.get_idx()) != nullptr) {
             std::string namebuffer = fmt::format("{}_%r", g->get_node_wirename(next_out.get_idx()));
@@ -1076,7 +1076,7 @@ Abc_Obj_t *Pass_abc::gen_const_from_lgraph(const LGraph *g, index_offset key, Ab
   Abc_Obj_t *pObj = nullptr;
   Abc_Obj_t *pNet = nullptr;
 
-  if(g->node_type_get(key.idx).op == U32Const_Op) {
+  if(g->get_node(key.idx).get_type().op == U32Const_Op) {
     int value   = g->node_value_get(key.idx);
     int bit     = 0;
     bit         = (value >> key.offset[0]) & 1;
@@ -1090,7 +1090,7 @@ Abc_Obj_t *Pass_abc::gen_const_from_lgraph(const LGraph *g, index_offset key, Ab
     return pNet;
   }
 
-  if(g->node_type_get(key.idx).op == StrConst_Op) {
+  if(g->get_node(key.idx).get_type().op == StrConst_Op) {
     auto value  = g->node_const_value_get(key.idx);
     pObj        = Abc_NtkCreateNode(pAig);
     pObj->pData = Hop_ManConst1((Hop_Man_t *)pAig->pManFunc);
@@ -1184,7 +1184,7 @@ void Pass_abc::conn_combinational_cell(const LGraph *g, Abc_Ntk_t *pAig) {
       Index_ID     src_idx        = inp.idx;
       int          src_bits       = inp.offset[0];
       index_offset rhs            = {src_idx, 0, {src_bits, src_bits}};
-      Node_Type_Op this_node_type = g->node_type_get(src_idx).op;
+      Node_Type_Op this_node_type = g->get_node(src_idx).get_type().op;
 
       if(this_node_type == TechMap_Op) {
         const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(src_idx));
@@ -1246,7 +1246,7 @@ void Pass_abc::conn_latch(const LGraph *g, Abc_Ntk_t *pAig) {
       Index_ID     src_idx        = inp.idx;
       int          src_bits       = inp.offset[0];
       index_offset rhs            = {src_idx, 0, {src_bits, src_bits}};
-      Node_Type_Op this_node_type = g->node_type_get(src_idx).op;
+      Node_Type_Op this_node_type = g->get_node(src_idx).get_type().op;
 
       if(this_node_type == TechMap_Op) {
         const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(src_idx));
@@ -1310,7 +1310,7 @@ void Pass_abc::conn_primary_output(const LGraph *g, Abc_Ntk_t *pAig) {
       int          src_bits       = inp.offset[0];
       index_offset lhs            = {idx, 0, {bit_index, bit_index}};
       index_offset rhs            = {src_idx, 0, {src_bits, src_bits}};
-      Node_Type_Op this_node_type = g->node_type_get(src_idx).op;
+      Node_Type_Op this_node_type = g->get_node(src_idx).get_type().op;
 
       if(this_node_type == TechMap_Op) {
         const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(src_idx));
@@ -1358,7 +1358,7 @@ void Pass_abc::conn_reset(const LGraph *g, Abc_Ntk_t *pAig) {
     Index_ID idx = graph_info->reset_id[reset_name];
     if(!g->is_graph_input(idx)) {
       Abc_Obj_t *generated_reset = Abc_NtkCreatePo(pAig); // create generated reset here
-      assert((g->node_type_get(idx).op == TechMap_Op));
+      assert((g->get_node(idx).get_type().op == TechMap_Op));
       const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
       if(is_latch(tcell)) {
         Abc_ObjAddFanin(generated_reset, graph_info->sequential_cell[idx].pLatchOutput);
@@ -1388,7 +1388,7 @@ void Pass_abc::conn_clock(const LGraph *g, Abc_Ntk_t *pAig) {
     Index_ID idx = graph_info->clock_id[clock_name];
     if(!g->is_graph_input(idx)) {
       Abc_Obj_t *generated_clock = Abc_NtkCreatePo(pAig); // create generated clock signal
-      assert((g->node_type_get(idx).op == TechMap_Op));
+      assert((g->get_node(idx).get_type().op == TechMap_Op));
       const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
       if(is_latch(tcell)) {
         Abc_ObjAddFanin(generated_clock, graph_info->sequential_cell[idx].pLatchOutput);

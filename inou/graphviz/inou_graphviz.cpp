@@ -77,27 +77,39 @@ void Inou_graphviz::populate_data(LGraph* g){
 
   g->each_node_fast([this, g, &data](const Node &node) {
     const auto &ntype = node.get_type();
+    auto nid = node.get_nid();
+    if(verbose)
+      data += fmt::format(" {} [label=\"n{}: {}: {}\"];\n", nid, nid, ntype.get_name(),g->get_node_wirename(node.get_driver_pin(0)));
+    else
+      data += fmt::format(" {} [label=\"n{}:{}\"];\n", nid, nid, ntype.get_name());
 
-    if (ntype.has_single_output()) {
-      std::string bits_str = std::to_string(g->get_bits(node.get_driver_pin()));
-      if(verbose) {
-        data += fmt::format(" {} [label=\"n{}, {}, {}b\n{}\"];\n"
-            ,node.get_nid()
-            ,node.get_nid()
-            ,ntype.get_name()
-            ,bits_str
-            ,g->get_node_wirename(node.get_driver_pin()));
-      }else{
-        data += fmt::format(" {} [label=\"n{}:{}:{}b\"];\n", node.get_nid(), node.get_nid(), ntype.get_name(), bits_str);
+    for(auto &out : g->out_edges(nid)){
+      Node_pin src_pin = out.get_out_pin();
+      Node_pin dst_pin = out.get_inp_pin();
+      Index_ID src_nid = nid;
+      Index_ID dst_nid = g->get_node(dst_pin).get_nid();
+      if (verbose) {
+        auto bits = g->get_bits(src_pin);
+        data += fmt::format(" {}->{}[label=\"{}b: {}:{}\"];\n", src_nid, dst_nid, bits, src_pin.get_pid(), dst_pin.get_pid());
+      } else {
+        data += fmt::format(" {} -> {}[label=\"{}:{}\"];\n", src_nid, dst_nid, src_pin.get_pid(), dst_pin.get_pid());
       }
-    }else{
-      data += fmt::format(" {} [label=\"n{}:{}\"];\n",  node.get_nid(), node.get_nid(), ntype.get_name());
     }
   });
 
-  g->each_output_edge_fast([&data](Index_ID src_nid, Port_ID src_pid, Index_ID dst_nid, Port_ID dst_pid) {
-    data += fmt::format(" {} -> {}[label=\"{}:{}\"];\n", src_nid, dst_nid, src_pid, dst_pid);
+  g->each_graph_output([g,this, &data](const Node_pin &pin) {
+    assert(g->is_graph_output(pin));
+    auto nid = g->get_node(pin).get_nid();
+    std::string_view dst_str = "dst_module";
+    if (verbose) {
+      auto bits = g->get_bits(g->get_node(nid).get_driver_pin(0));
+      data += fmt::format(" {}->{}[label=\"{}b\"];\n", nid, dst_str, bits);
+    } else {
+      data += fmt::format(" {}->{}[label=\"\"];\n", nid, dst_str);
+    }
   });
+
+
   data += "}\n";
 
   std::string file = absl::StrCat(odir, "/", g->get_name(), ".dot");

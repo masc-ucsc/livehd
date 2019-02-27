@@ -34,18 +34,18 @@ int main(int argc, char **argv){
 
 TEST_F(PrpMainTest, constant_neg) {
 
-  std::string_view txt{" $c as __bits:3
-d  as __bits:3
-d = -3
-%out as __bits:4
-%out = $c + d
-"};
+  std::string_view txt{" $c as __bits:3\n
+d  as __bits:3\n
+d = -3\n
+%out as __bits:4\n
+%out = $c + d"
+};
 
 	Prp scanner;
 
   scanner.parse(txt,txt.size());
 
-  XXXX.tree.traver() {
+  XXXX.tree.traverse() {
     YYYY.push back in vector();
   }
 

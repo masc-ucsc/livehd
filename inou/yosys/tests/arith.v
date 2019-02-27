@@ -30,7 +30,7 @@ module arith (input [7:0] a, input [7:0] b,
   assign umod =          a % b;
   assign smod = $signed(a) % $signed(b);
 
-  assign upow =          a **b;
-  assign spow = $signed(a) **$signed(b);
+//  assign upow =          a **b;
+//  assign spow = $signed(a) **$signed(b);
 
 endmodule

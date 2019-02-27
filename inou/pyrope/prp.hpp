@@ -14,7 +14,7 @@
 
 #include "absl/container/flat_hash_map.h"
 
-//#include "ast.hpp"
+#include "ast.hpp"
 #include "elab_scanner.hpp"
 
 // control
@@ -45,39 +45,46 @@ constexpr Token_id Pyrope_id_until     = 146;
 constexpr Token_id Pyrope_id_in        = 147;
 constexpr Token_id Pyrope_id_by        = 148;
 
+// new
+constexpr Token_id Pyrope_id_try = 149;
+constexpr Token_id Pyrope_id_punch = 150;
+
 class Prp : public Elab_scanner {
 protected:
   absl::flat_hash_map<std::string, Token_id> pyrope_keyword;
   
-  /*enum Prp_rules : Rule_id {
-  	Prp_invalid = 0,
-  	Prp_rule,
-  	Prp_rule_start,
-  	Prp_rule_code_blocks,
-  	Prp_rule_code_block_int,
-  	Prp_rule_assignent_expression,
-  	Prp_rule_logical_expression,
-  	Prp_rule_relational_expression,
-  	Prp_rule_additive_expression,
-  	Prp_rule_bitwise_expression,
-  	Prp_rule_multiplicative_expression,
-  	Prp_rule_unary_expression,
-  	Prp_rule_factor,
-  	Prp_rule_tuple_by_notation,
-  	Prp_rule_tuple_notation_no_bracket,
-  	Prp_rule_tuple_notation,
-  	Prp_rule_tuple_notation_with_object,
-  	Prp_rule_range_notation,
-  	Prp_rule_bit_selection_bracket,
-  	Prp_rule_bit_selection_notation,
-  	Prp_rule_tuple_array_bracket,
-  	Prp_rule_tuple_array_notation,
-  	Prp_rule_lhs_expression,
-  	Prp_rule_lhs_var_name,
-  	Prp_rule_rhs_expression_property,
-  	Prp_rule_rhs_expression,
-  	Prp_rule_identifier
-  };*/
+  enum Prp_rules: Rule_id {
+    Prp_invalid = 0,
+    Prp_rule,
+    Prp_rule_code_blocks,
+    Prp_rule_code_block_int,
+    Prp_rule_assignment_expression,
+    Prp_rule_logical_expression,
+    Prp_rule_relational_expression,
+    Prp_rule_additive_expression,
+    Prp_rule_bitwise_expression,
+    Prp_rule_multiplicative_expression,
+    Prp_rule_unary_expression,
+    Prp_rule_factor,
+    Prp_rule_tuple_by_notation,
+    Prp_rule_tuple_notation_no_bracket,
+    Prp_rule_tuple_notation,
+    Prp_rule_tuple_notation_with_object,
+    Prp_rule_range_notation,
+    Prp_rule_bit_selection_bracket,
+    Prp_rule_bit_selection_notation,
+    Prp_rule_tuple_array_bracket,
+    Prp_rule_tuple_array_notation,
+    Prp_rule_lhs_expression,
+    Prp_rule_lhs_var_name,
+    Prp_rule_rhs_expression_property,
+    Prp_rule_rhs_expression,
+    Prp_rule_identifier,
+    Prp_rule_constant,
+    Prp_rule_assignment_operator,
+    Prp_rule_tuple_dot_notation,
+    Prp_rule_tuple_dot_dot
+  };
   
   void elaborate() final;
   
@@ -86,6 +93,16 @@ protected:
   bool rule_top();
   bool rule_code_blocks();
   bool rule_code_block_int();
+  bool rule_if_statement();
+  bool rule_else_statement();
+  bool rule_for_statement();
+  bool rule_while_statement();
+  bool rule_try_statement();
+  bool rule_punch_format();
+  bool rule_function_pipe();
+  bool rule_fcall_explicit();
+  bool rule_fcall_implicit(); 
+  bool rule_for_index();
   bool rule_assignment_expression();
   bool rule_logical_expression();
   bool rule_relational_expression();
@@ -112,11 +129,23 @@ protected:
 	bool rule_assignment_operator();
   bool rule_tuple_dot_notation();
   bool rule_tuple_dot_dot();
+  bool rule_overload_notation();
+  bool rule_scope_else();
+  bool rule_scope_body();
+  bool rule_scope_declaration();
+  bool rule_scope();
+  bool rule_scope_condition();
+  bool rule_scope_argument();
+  bool rule_punch_rhs();
+  bool rule_fcall_arg_notation();
   
   bool debug_unconsume();
   bool debug_consume();
   bool go_back(int num_tok);
-
+  
+  void process_ast_handler(const Tree_index &parent, const Tree_index &self, const Ast_parser_node &node);
+  void process_ast();
+  
 public:
   Prp() {
     pyrope_keyword["if"]     = Pyrope_id_if;
@@ -127,6 +156,7 @@ public:
     pyrope_keyword["return"] = Pyrope_id_return;
     pyrope_keyword["unique"] = Pyrope_id_unique;
     pyrope_keyword["when"]   = Pyrope_id_when;
+    pyrope_keyword["try"]    = Pyrope_id_try;
 
     pyrope_keyword["as"] = Pyrope_id_as;
     pyrope_keyword["is"] = Pyrope_id_is;
@@ -145,5 +175,6 @@ public:
     pyrope_keyword["until"]     = Pyrope_id_until;
     pyrope_keyword["in"]        = Pyrope_id_in;
     pyrope_keyword["by"]        = Pyrope_id_by;
+    pyrope_keyword["punch"]     = Pyrope_id_punch;
   }
 };

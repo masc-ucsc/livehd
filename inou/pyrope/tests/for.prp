@@ -1,0 +1,19 @@
+%o as __bits:3
+$a as __bits:3
+accu = 0
+
+//dummy loop behavior but troublesome
+for i:(0..$a.__bits){
+  accu = $a + i
+}
+
+
+
+//v.s.
+accu2 = 0
+for j:(0..3){
+  accu2 = accu2 + j
+}
+
+
+%o = accu

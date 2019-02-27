@@ -594,6 +594,9 @@ Index_ID LGraph_Base::add_edge_int(Index_ID dst_idx, Port_ID inp_pid, Index_ID s
   Index_ID src_nid = node_internal[src_idx].get_master_root_nid();
   Index_ID dst_nid = node_internal[dst_idx].get_master_root_nid();
 
+  GI(node_type_get(src_nid).op == GraphIO_Op, dst_pid); // GraphIO never have pid==0
+  GI(node_type_get(dst_nid).op == GraphIO_Op, inp_pid); // GraphIO never have pid==0
+
 #if 0
   // WARNING: Graph IO have alphabetical port IDs assigned to be mapped between
   // graphs. It should not use local port b

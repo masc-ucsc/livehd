@@ -2,12 +2,12 @@
 
 void Aux_node::set_alias(const std::string &v, Index_ID n) {
   auxtab[v] = n;
-  fmt::print("set alias {} <-> {}\n", v, n);
+  fmt::print("set alias {} <-> n{}\n", v, n);
 }
 
 void Aux_node::set_pending(const std::string &v, Index_ID n) {
   pendtab[v] = n;
-  fmt::print("set pending {} <-> {}\n", v, n);
+  fmt::print("set pending {} <-> n{}\n", v, n);
 }
 
 Aux_node *Aux_tree::get_cur_auxnd() const {
