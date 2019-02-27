@@ -663,7 +663,7 @@ void Inou_pyrope::to_pyrope(const LGraph *g, const std::string &filename) {
 
   inline_stmt.clear();
 
-  g->each_input([g,this,&w](const Node_pin &pin) {
+  g->each_graph_input([g,this,&w](const Node_pin &pin) {
     to_graphio(w,g,pin.get_idx());
   });
 

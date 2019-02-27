@@ -385,7 +385,7 @@ void Pass_bitwidth::iterate_subgraph(const LGraph *lg, Index_ID idx) {
   //Here we populate our vector with all the subgraph's IO indices.
   //FIXME: There has to be a better way to find just the subgraph's graphio nodes.
   std::vector<Index_ID> sg_io_idx;
-  lg->each_output([this, sg, &sg_io_idx](const Node_pin &pin) {
+  lg->each_graph_output([this, sg, &sg_io_idx](const Node_pin &pin) {
     assert(sg->node_type_get(sg->get_node(pin).get_nid()).op == GraphIO_Op);
     sg_io_idx.push_back(pin.get_idx());
   });
@@ -420,7 +420,7 @@ void Pass_bitwidth::iterate_subgraph(const LGraph *lg, Index_ID idx) {
 // MIT Algorithm
 void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
 
-  lg->each_output([this, lg](const Node_pin &pin) {
+  lg->each_graph_output([this, lg](const Node_pin &pin) {
     if(lg->get_bits(pin) == 0)
       return;
 
@@ -533,7 +533,7 @@ void Pass_bitwidth::iterate_node(LGraph *lg, Index_ID idx) {
 
 void Pass_bitwidth::bw_pass_dump(LGraph *lg) {
 
-  lg->each_input([this, lg](const Node_pin &pin) {
+  lg->each_graph_input([this, lg](const Node_pin &pin) {
     const auto &name = lg->get_node_wirename(pin);
     const auto &nb   = lg->node_bitwidth_get(pin.get_idx());
 
@@ -546,7 +546,7 @@ void Pass_bitwidth::bw_pass_dump(LGraph *lg) {
 
   fmt::print("\n");
 
-  lg->each_output([this,lg](const Node_pin &pin) {
+  lg->each_graph_output([this,lg](const Node_pin &pin) {
 
     const auto &name = lg->get_node_wirename(pin);
     const auto &nb   = lg->node_bitwidth_get(pin.get_idx());

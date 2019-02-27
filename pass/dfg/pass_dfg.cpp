@@ -212,7 +212,7 @@ void Pass_dfg::trans(LGraph *dfg) {
         Port_ID  dst_pid = out.get_inp_pin().get_pid();
         Port_ID  src_pid = 0;
         uint16_t bitwidth;
-        sub_graph->each_output([&sub_graph, &src_pid, &bitwidth](const Node_pin &pin) {
+        sub_graph->each_graph_output([&sub_graph, &src_pid, &bitwidth](const Node_pin &pin) {
           fmt::print("outputs of subgraph: idx:{}, pid:{}, name:{}, bitwidth:{}\n"
               ,pin.get_idx(), pin.get_pid(), sub_graph->get_graph_output_name_from_pid(pin.get_pid()), sub_graph->get_bits(pin));
           src_pid = pin.get_pid();
@@ -332,12 +332,10 @@ void Pass_dfg::finalize_gconnect(LGraph *dfg, const Aux_node *auxnd_global) {
   fmt::print("finalize global connect\n");
   for(const auto &pair : auxnd_global->get_pendtab()) {
     if(is_output(pair.first)) {
-      Index_ID dst_nid = dfg->get_node(dfg->get_graph_output(pair.first.substr(1))).get_nid();
-      I(dfg->get_node(dst_nid).get_nid() == dst_nid);
-      Index_ID src_nid = pair.second;
-      Port_ID  src_pid = 0;
-      dfg->add_edge(dfg->get_node(src_nid).setup_driver_pin(src_pid), dfg->get_node(dst_nid).setup_sink_pin(0));
-      fmt::print("add edge, src_nid:{}, src_pid:{}, dst_nid:{}, dst:pid:{}\n", src_nid, src_pid, dst_nid, 0);
+      auto spin = dfg->get_graph_output(pair.first.substr(1));
+      auto dpin = dfg->get_node(pair.second).setup_driver_pin();
+
+      dfg->add_edge(dpin, spin);
     } else if(is_register(pair.first)) {
       ; // balabala
     }
@@ -650,7 +648,7 @@ void Pass_dfg::add_fluid_ports(LGraph *dfg, Aux_tree *aux_tree, std::vector<Inde
 
 Index_ID Pass_dfg::find_cfg_root(const LGraph *cfg) {
   Index_ID root_id;
-  cfg->each_input([cfg, &root_id](const Node_pin &pin){
+  cfg->each_graph_input([cfg, &root_id](const Node_pin &pin){
     root_id = cfg->get_node(pin).get_nid();
   });
   I(root_id);

@@ -96,7 +96,7 @@ void Inou_cgen::setup_declarations() {
   declaration.clear();
   declaration_root.clear();
 
-  lg->each_output(&Inou_cgen::iterate_declarations, this);
+  lg->each_graph_output(&Inou_cgen::iterate_declarations, this);
 }
 
 void Inou_cgen::to_pyrope(const LGraph *g, std::string_view filename) {

@@ -2,7 +2,7 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
-void LGraph::each_input(std::function<void(const Node_pin &pin)> f1) const {
+void LGraph::each_graph_input(std::function<void(const Node_pin &pin)> f1) const {
   for (auto it = input_array.begin(); it != input_array.end(); ++it) {
     const auto &p = it.get_field();
 
@@ -11,7 +11,7 @@ void LGraph::each_input(std::function<void(const Node_pin &pin)> f1) const {
   }
 }
 
-void LGraph::each_output(std::function<void(const Node_pin &pin)> f1) const {
+void LGraph::each_graph_output(std::function<void(const Node_pin &pin)> f1) const {
   for (auto it = output_array.begin(); it != output_array.end(); ++it) {
     const auto &p = it.get_field();
 
