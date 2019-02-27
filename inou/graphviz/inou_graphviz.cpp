@@ -103,9 +103,9 @@ void Inou_graphviz::populate_data(LGraph* g){
     std::string_view dst_str = "dst_module";
     if (verbose) {
       auto bits = g->get_bits(g->get_node(nid).get_driver_pin(0));
-      data += fmt::format(" {}->{}[label=\"{}b: {}:{}\"];\n", nid, dst_str, bits, 0, 0);
+      data += fmt::format(" {}->{}[label=\"{}b\"];\n", nid, dst_str, bits);
     } else {
-      data += fmt::format(" {}->{}[label=\"{}:{}\"];\n", nid, dst_str, 0, 0);
+      data += fmt::format(" {}->{}[label=\"\"];\n", nid, dst_str);
     }
   });
 

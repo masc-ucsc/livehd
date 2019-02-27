@@ -17,16 +17,16 @@ Index_ID Pass_dfg::create_reference(LGraph *g, Aux_tree *aux_tree, const std::st
 //}
 
 Index_ID Pass_dfg::create_input(LGraph *g, Aux_tree *aux_tree, const std::string &var_name, uint16_t bits) {
-  Index_ID nid = create_node(g, aux_tree, var_name, bits);
+  Index_ID nid = create_node(g, aux_tree, var_name);
   g->add_graph_input(var_name.substr(1).c_str(), nid, bits, 0); // get rid of $mark
-
+  g->set_bits(g->get_node(nid).setup_driver_pin(1), bits);
   return nid;
 }
 
 Index_ID Pass_dfg::create_output(LGraph *g, Aux_tree *aux_tree, const std::string &var_name, uint16_t bits) {
   Index_ID nid = create_node(g, aux_tree, var_name);
   g->add_graph_output(var_name.substr(1).c_str(), nid, bits, 0);
-
+  g->set_bits(g->get_node(nid).setup_driver_pin(1), bits);
   return nid;
 }
 
@@ -66,7 +66,7 @@ Index_ID Pass_dfg::create_false_const(LGraph *g, Aux_tree *aux_tree) {
   return nid;
 }
 
-Index_ID Pass_dfg::create_node(LGraph *g, Aux_tree *aux_tree, const std::string &v, const uint16_t bits) {
+Index_ID Pass_dfg::create_node(LGraph *g, Aux_tree *aux_tree, const std::string &v) {
   assert(!v.empty());
 
   Index_ID nid = g->create_node().get_nid();
