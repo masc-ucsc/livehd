@@ -1,5 +1,7 @@
-// expect-wr-ports 1
-// expect-rd-ports 1
+// Nocheck:
+//
+//  Yosys creates a memory with 2 read ports. One is Async and the other is
+//  Sync. Not sure how to fabricate this.
 
 module implicit_en(clk, rd_addr, rd_data, wr_addr, wr_en, wr_data);
 

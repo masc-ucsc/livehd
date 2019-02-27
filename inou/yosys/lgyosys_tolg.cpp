@@ -905,6 +905,15 @@ static LGraph *process_module(RTLIL::Module *module) {
           rd_clk_polarity = 0;
         }
       }
+      if (rd_clk_enabled) {
+        // If there is a rd_clk, all should have rd_clk
+        for(int i=0;i<rd_clkp.size();i++) {
+          if (rd_clke[i] == RTLIL::S1)
+            continue;
+
+          log("oops rd_port:%d does not need clk cell %s\n", i, cell->type.c_str());
+        }
+      }
       int wr_clk_enabled  = 0;
       int wr_clk_polarity = 0;
       for(int i=0;i<wr_clkp.size();i++) {

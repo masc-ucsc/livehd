@@ -1,4 +1,4 @@
-
+// no check: parameters do not work
 //==============================================================================
 //      File:           $URL$
 //      Version:        $Revision$
@@ -350,7 +350,7 @@ module join_fadd(
   logic       sum2Valid;
   logic       sum2Retry;
 
-  fflop #(.Size(8)) f1 (
+  ja_fflop #(.Size(8)) f1 (
     .clk      (clk),
     .reset    (reset),
 
@@ -363,7 +363,7 @@ module join_fadd(
     .qRetry   (sum2Retry)
   );
 
-  fflop #(.Size(8)) f2 (
+  ja_fflop #(.Size(8)) f2 (
     .clk      (clk),
     .reset    (reset),
 

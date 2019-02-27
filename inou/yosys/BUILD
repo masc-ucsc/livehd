@@ -58,18 +58,6 @@ filegroup(
 )
 
 sh_test(
-    name = "yosys.sh",
-    srcs = ["tests/yosys.sh"],
-    data = [
-        "liblgraph_yosys.so",
-        ":verilog_tests",
-        ],
-    deps = [
-        ":scripts",
-    ]
-)
-
-sh_test(
     name = "synth.sh",
     srcs = ["tests/synth.sh"],
     data = [
