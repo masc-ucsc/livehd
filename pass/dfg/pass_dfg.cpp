@@ -180,9 +180,9 @@ void Pass_dfg::trans(LGraph *dfg) {
       for(auto &inp : dfg->inp_edges(nid)){
         Index_ID src_nid = dfg->get_node(inp.get_out_pin()).get_nid();
         Index_ID dst_nid = nid;
-        Port_ID  src_pid = 0;
+        Port_ID  src_pid = dfg->node_type_get(src_nid).op == GraphIO_Op ? 1 : 0;
         auto inp_name = dfg->get_node_wirename(dfg->get_node(src_nid).get_driver_pin(0));
-        //TODO:should change to sub_graph->each_input
+        //TODO:should change to sub_graph->each_graph_input
         Port_ID  dst_pid = sub_graph->get_graph_input(inp_name).get_pid();
 
         fmt::print("inp_name:{}\n",inp_name);
@@ -225,7 +225,6 @@ void Pass_dfg::trans(LGraph *dfg) {
         dst_pin.nid = dst_nid;
         dst_pin.pid = dst_pid;
         subg_out_edges[src_pin] = dst_pin;
-        //dfg->set_bits_pid(src_nid, src_pid, bitwidth);
         dfg->set_bits(dfg->get_node(src_nid).setup_driver_pin(src_pid), bitwidth);
         dfg->del_edge(out); //WARNNING: don't add_edge and del_edge at the same reference loop!
       }
@@ -274,7 +273,6 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
       for (auto &inp : dfg->inp_edges(nid)) {
         Index_ID src_nid = dfg->get_node(inp.get_out_pin()).get_nid();
         Index_ID dst_nid = nid;
-        Port_ID  src_pid = inp.get_out_pin().get_pid();
         Port_ID  dst_pid = inp.get_inp_pin().get_pid();
 
         if(dst_pid == 0)
@@ -505,7 +503,7 @@ void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Index_ID> &src
   }
   for(uint16_t i = 0; i < src_nids.size(); i++) {
     Index_ID src_nid = src_nids.at(i);
-    Port_ID src_pid = 0;
+    Port_ID  src_pid = (dfg->node_type_get(src_nid).op == GraphIO_Op) ? 1 : 0;
     //assert(Node_Type_Sum::get_input_match("Au") == 1);
     //assert(dfg->node_type_get(dst_nid).op != SubGraph_Op); // Handled separate as it is a more complicated case
     Port_ID dst_pid =
