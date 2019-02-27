@@ -101,7 +101,7 @@ void Lgyosys_dump::create_blackbox(const LGraph &subgraph, RTLIL::Design *design
 
 #if 1
   uint32_t port_id = 0;
-  subgraph.each_input([&port_id,mod,&subgraph](const Node_pin &pin) {
+  subgraph.each_graph_input([&port_id,mod,&subgraph](const Node_pin &pin) {
     std::string name = absl::StrCat("\\", subgraph.get_node_wirename(pin));
     RTLIL::Wire *wire = mod->addWire(name, subgraph.get_bits(pin));
     wire->port_id     = port_id++;
@@ -109,7 +109,7 @@ void Lgyosys_dump::create_blackbox(const LGraph &subgraph, RTLIL::Design *design
     wire->port_output = false;
   });
 
-  subgraph.each_output([&port_id,mod,&subgraph](const Node_pin &pin) {
+  subgraph.each_graph_output([&port_id,mod,&subgraph](const Node_pin &pin) {
     std::string name = absl::StrCat("\\", subgraph.get_node_wirename(pin));
     RTLIL::Wire *wire = mod->addWire(name, subgraph.get_bits(pin));
     wire->port_id     = port_id++;
@@ -143,10 +143,15 @@ void Lgyosys_dump::create_memory(const LGraph *g, RTLIL::Module *module, Index_I
 
   RTLIL::Cell *memory = module->addCell(absl::StrCat("\\", cell_name), RTLIL::IdString("$mem"));
 
-  RTLIL::Wire   *clk = nullptr;
-  RTLIL::SigSpec wr_addr, wr_data, wr_en, rd_addr, rd_en, rd_data;
-  RTLIL::State   posedge = RTLIL::State::Sx;
-  RTLIL::State   transp  = RTLIL::State::Sx;
+  RTLIL::SigSpec wr_addr, wr_data, wr_en, rd_addr, rd_data;
+  int nrd_ports = 0;
+  RTLIL::SigSpec rd_en;
+  RTLIL::Wire   *clk        = nullptr;
+  bool           rd_clk     = false;
+  bool           wr_clk     = false;
+  RTLIL::State   rd_posedge = RTLIL::State::Sx;
+  RTLIL::State   wr_posedge = RTLIL::State::Sx;
+  RTLIL::State   transp     = RTLIL::State::Sx;
 
   for(const auto &c : g->inp_edges(idx)) {
     Port_ID input_pin = c.get_inp_pin().get_pid();
@@ -180,17 +185,26 @@ void Lgyosys_dump::create_memory(const LGraph *g, RTLIL::Module *module, Index_I
     } else if(input_pin == LGRAPH_MEMOP_RDPORT) {
       if(g->get_node(c.get_idx()).get_type().op != U32Const_Op)
         log_error("Internal Error: Mem num rd ports is not a constant.\n");
-      memory->setParam("\\RD_PORTS", RTLIL::Const(g->node_value_get(c.get_idx())));
+      assert(nrd_ports==0); // Do not double set
+      nrd_ports = g->node_value_get(c.get_idx());
+      memory->setParam("\\RD_PORTS", RTLIL::Const(nrd_ports));
 
     } else if(input_pin == LGRAPH_MEMOP_RDTRAN) {
       if(g->get_node(c.get_idx()).get_type().op != U32Const_Op)
         log_error("Internal Error: Mem rd_transp is not a constant.\n");
       transp = g->node_value_get(c.get_idx()) ? RTLIL::State::S1 : RTLIL::State::S0;
 
-    } else if(input_pin == LGRAPH_MEMOP_CLKPOL) {
+    } else if(input_pin == LGRAPH_MEMOP_RDCLKPOL) {
       if(g->get_node(c.get_idx()).get_type().op != U32Const_Op)
         log_error("Internal Error: Mem RD_CLK polarity is not a constant.\n");
-      posedge = (g->node_value_get(c.get_idx()) == 0) ? RTLIL::State::S1 : RTLIL::State::S0;
+      rd_posedge = (g->node_value_get(c.get_idx()) == 0) ? RTLIL::State::S1 : RTLIL::State::S0;
+      rd_clk = true;
+
+    } else if(input_pin == LGRAPH_MEMOP_WRCLKPOL) {
+      if(g->get_node(c.get_idx()).get_type().op != U32Const_Op)
+        log_error("Internal Error: Mem WR_CLK polarity is not a constant.\n");
+      wr_posedge = (g->node_value_get(c.get_idx()) == 0) ? RTLIL::State::S1 : RTLIL::State::S0;
+      wr_clk = true;
 
     } else if(LGRAPH_MEMOP_ISWRADDR(input_pin)) {
       wr_addr.append(RTLIL::SigSpec(get_wire(c.get_out_pin())));
@@ -208,7 +222,6 @@ void Lgyosys_dump::create_memory(const LGraph *g, RTLIL::Module *module, Index_I
       rd_addr.append(RTLIL::SigSpec(get_wire(c.get_out_pin())));
 
     } else if(LGRAPH_MEMOP_ISRDEN(input_pin)) {
-      // yosys is failing when wires are used for rd en
       rd_en.append(RTLIL::SigSpec(get_wire(c.get_out_pin())));
       // rd_en.append(RTLIL::SigSpec(RTLIL::State::Sx));
 
@@ -218,19 +231,38 @@ void Lgyosys_dump::create_memory(const LGraph *g, RTLIL::Module *module, Index_I
     }
   }
 
-  assert(posedge != RTLIL::State::Sx);
+  if (rd_clk)
+    assert(rd_posedge != RTLIL::State::Sx);
+  if (wr_clk)
+  assert(wr_posedge != RTLIL::State::Sx);
   assert(transp  != RTLIL::State::Sx);
 
   memory->setParam("\\MEMID", RTLIL::Const(cell_name));
   memory->setParam("\\WIDTH", g->get_bits(idx));
 
-  memory->setParam("\\RD_CLK_ENABLE", RTLIL::Const(RTLIL::State::S1, memory->getParam("\\RD_PORTS").as_int()));
-  memory->setParam("\\WR_CLK_ENABLE", RTLIL::Const(RTLIL::State::S1, memory->getParam("\\WR_PORTS").as_int()));
+  int rd_port_bits = memory->getParam("\\RD_PORTS").as_int();
+  if (rd_clk) {
+    memory->setParam("\\RD_CLK_ENABLE"  , RTLIL::Const(RTLIL::State::S1    , rd_port_bits));
+    memory->setParam("\\RD_CLK_POLARITY", RTLIL::Const(rd_posedge          , rd_port_bits));
+    memory->setPort("\\RD_CLK"          , RTLIL::SigSpec(RTLIL::SigBit(clk), rd_port_bits));
+  }else{
+    memory->setParam("\\RD_CLK_ENABLE"  , RTLIL::Const(RTLIL::State::S0  , rd_port_bits));
+    memory->setParam("\\RD_CLK_POLARITY", RTLIL::Const(RTLIL::State::S0  , rd_port_bits));
+    memory->setPort("\\RD_CLK"          , RTLIL::SigSpec(RTLIL::State::Sx, rd_port_bits));
+  }
+  int wr_port_bits = memory->getParam("\\WR_PORTS").as_int();
+  if (wr_clk) {
+    memory->setParam("\\WR_CLK_ENABLE"  , RTLIL::Const(RTLIL::State::S1    , wr_port_bits));
+    memory->setParam("\\WR_CLK_POLARITY", RTLIL::Const(wr_posedge          , wr_port_bits));
+    memory->setPort("\\WR_CLK"          , RTLIL::SigSpec(RTLIL::SigBit(clk), wr_port_bits));
+  }else{
+    memory->setParam("\\WR_CLK_ENABLE"  , RTLIL::Const(RTLIL::State::S0  , wr_port_bits));
+    memory->setParam("\\WR_CLK_POLARITY", RTLIL::Const(RTLIL::State::S0  , wr_port_bits));
+    memory->setPort("\\WR_CLK"          , RTLIL::SigSpec(RTLIL::State::Sx, wr_port_bits));
+  }
 
   memory->setParam("\\INIT", RTLIL::Const::from_string("x"));
 
-  memory->setParam("\\RD_CLK_POLARITY", RTLIL::Const(posedge, memory->getParam("\\RD_PORTS").as_int()));
-  memory->setParam("\\WR_CLK_POLARITY", RTLIL::Const(posedge, memory->getParam("\\WR_PORTS").as_int()));
   memory->setParam("\\RD_TRANSPARENT", RTLIL::Const(transp, memory->getParam("\\RD_PORTS").as_int()));
 
   memory->setPort("\\WR_DATA", wr_data);
@@ -239,10 +271,10 @@ void Lgyosys_dump::create_memory(const LGraph *g, RTLIL::Module *module, Index_I
 
   memory->setPort("\\RD_DATA", RTLIL::SigSpec(mem_output_map[idx]));
   memory->setPort("\\RD_ADDR", rd_addr);
+
+  assert(nrd_ports == rd_en.size());
   memory->setPort("\\RD_EN", rd_en);
 
-  memory->setPort("\\WR_CLK", RTLIL::SigSpec(RTLIL::SigBit(clk), memory->getParam("\\WR_PORTS").as_int()));
-  memory->setPort("\\RD_CLK", RTLIL::SigSpec(RTLIL::SigBit(clk), memory->getParam("\\RD_PORTS").as_int()));
 }
 
 void Lgyosys_dump::create_subgraph(const LGraph *g, RTLIL::Module *module, Index_ID idx) {
@@ -321,13 +353,13 @@ void Lgyosys_dump::create_subgraph_outputs(const LGraph *g, RTLIL::Module *modul
 void Lgyosys_dump::create_wires(const LGraph *g, RTLIL::Module *module) {
   // first create all the output wires
 
-  g->each_output([g,module,this](const Node_pin &pin) {
+  g->each_graph_output([g,module,this](const Node_pin &pin) {
     output_map[pin.get_idx()] = create_io_wire(g, pin, module);
     output_map[pin.get_idx()]->port_input  = false;
     output_map[pin.get_idx()]->port_output = true;
   });
 
-  g->each_input([g,module,this](const Node_pin &pin) {
+  g->each_graph_input([g,module,this](const Node_pin &pin) {
     input_map[pin.get_idx()] = create_io_wire(g, pin, module);
     input_map[pin.get_idx()]->port_input  = true;
     input_map[pin.get_idx()]->port_output = false;
@@ -469,7 +501,7 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
 
   create_wires(g, module);
 
-  g->each_output([g,this,module](const Node_pin &pin) {
+  g->each_graph_output([g,this,module](const Node_pin &pin) {
     assert(g->is_graph_output(pin));
     for(const auto &c : g->inp_edges(g->get_node(pin).get_nid())) {
       RTLIL::SigSpec lhs = RTLIL::SigSpec(output_map[pin.get_idx()]);

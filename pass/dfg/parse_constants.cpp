@@ -187,16 +187,15 @@ Index_ID Pass_dfg::process_bin_token(LGraph *g, const std::string &token, const 
   if(bit_width > 32) {
     std::vector<Node_pin> inp_pins;
     Index_ID              nid_const32;
-    int                   t_size   = (int)token.size();
+    auto                  t_size   = (uint16_t)token.size();
     Index_ID              nid_join = g->create_node().get_nid();
     g->node_type_set(nid_join, Join_Op);
-    g->set_bits(nid_join, t_size);
+    g->set_bits(g->get_node(nid_join).setup_driver_pin(0), t_size);
 
     int         i           = 1;
     std::string token_chunk = token.substr(t_size - 32 * i, 32);
 
     while(t_size - 32 * i > 0) {
-      // fmt::print("@round{}, token_chunk:                  {}\n", i, token_chunk);
       nid_const32 = create_const32_node(g, token_chunk, 32, is_signed);
       inp_pins.emplace_back(g->get_node(nid_const32).setup_driver_pin());
       if(t_size - (32 * (i + 1)) > 0)
@@ -227,7 +226,7 @@ Index_ID Pass_dfg::process_bin_token_with_dc(LGraph *g, const std::string &token
   int                   t_size   = (int)token.size();
   Index_ID              nid_join = g->create_node().get_nid();
   g->node_type_set(nid_join, Join_Op);
-  g->set_bits(nid_join, t_size);
+  g->set_bits(g->get_node(nid_join).setup_driver_pin(0), t_size);
 
   std::string sdc_buf;  // continuous don't care characters
   std::string sval_buf; // continuous val characters
@@ -274,7 +273,8 @@ Index_ID Pass_dfg::create_const32_node(LGraph *g, const std::string &val_str, ui
   Index_ID nid_const32 = g->create_node().get_nid();
 
   g->node_u32type_set(nid_const32, val);
-  g->set_bits(nid_const32, node_bit_width); //maybe not setup bits now, do it after MIT algo. analysis
+  //SH FIXME:maybe not setup bits now, do it after MIT algo. analysis
+  g->set_bits(g->get_node(nid_const32).setup_driver_pin(0), node_bit_width);
 
   Node_bitwidth &nb = g->node_bitwidth_get(nid_const32);
   if(is_signed)
@@ -288,7 +288,7 @@ Index_ID Pass_dfg::create_const32_node(LGraph *g, const std::string &val_str, ui
 Index_ID Pass_dfg::create_dontcare_node(LGraph *g, uint16_t node_bit_width ) {
   Index_ID nid_dc = g->create_node().get_nid();
   g->node_type_set(nid_dc, DontCare_Op);
-  g->set_bits(nid_dc, node_bit_width);
+  g->set_bits(g->get_node(nid_dc).setup_driver_pin(0), node_bit_width);
   return nid_dc;
 }
 

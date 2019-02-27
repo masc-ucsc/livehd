@@ -492,28 +492,29 @@ public:
 };
 
 // Parameters
-#define LGRAPH_MEMOP_SIZE 0
-#define LGRAPH_MEMOP_OFFSET 1
-#define LGRAPH_MEMOP_ABITS 2
-#define LGRAPH_MEMOP_WRPORT 3
-#define LGRAPH_MEMOP_RDPORT 4
-#define LGRAPH_MEMOP_CLKPOL 5
-#define LGRAPH_MEMOP_RDTRAN 6
+#define LGRAPH_MEMOP_SIZE     0
+#define LGRAPH_MEMOP_OFFSET   1
+#define LGRAPH_MEMOP_ABITS    2
+#define LGRAPH_MEMOP_WRPORT   3
+#define LGRAPH_MEMOP_RDPORT   4
+#define LGRAPH_MEMOP_RDCLKPOL 5
+#define LGRAPH_MEMOP_WRCLKPOL 6
+#define LGRAPH_MEMOP_RDTRAN   7
 
 // Shared signals
-#define LGRAPH_MEMOP_CLK 7
-#define LGRAPH_MEMOP_CE 8
+#define LGRAPH_MEMOP_CLK      8
+#define LGRAPH_MEMOP_CE       9
 
 // Port specific signals
 #define LGRAPH_MEMOP_POFFSET (LGRAPH_MEMOP_CE + 1)
-#define LGRAPH_MEMOP_PIDS 5
+#define LGRAPH_MEMOP_PIDS     5
 
 #define LGRAPH_MEMOP_WRADDR(_n) (LGRAPH_MEMOP_POFFSET + 0 + _n * (LGRAPH_MEMOP_PIDS))
 #define LGRAPH_MEMOP_WRDATA(_n) (LGRAPH_MEMOP_POFFSET + 1 + _n * (LGRAPH_MEMOP_PIDS))
-#define LGRAPH_MEMOP_WREN(_n) (LGRAPH_MEMOP_POFFSET + 2 + _n * (LGRAPH_MEMOP_PIDS))
+#define LGRAPH_MEMOP_WREN(_n)   (LGRAPH_MEMOP_POFFSET + 2 + _n * (LGRAPH_MEMOP_PIDS))
 
 #define LGRAPH_MEMOP_RDADDR(_n) (LGRAPH_MEMOP_POFFSET + 3 + _n * (LGRAPH_MEMOP_PIDS))
-#define LGRAPH_MEMOP_RDEN(_n) (LGRAPH_MEMOP_POFFSET + 4 + _n * (LGRAPH_MEMOP_PIDS))
+#define LGRAPH_MEMOP_RDEN(_n)   (LGRAPH_MEMOP_POFFSET + 4 + _n * (LGRAPH_MEMOP_PIDS))
 
 #define LGRAPH_MEMOP_ISWRADDR(_pid) (((_pid - LGRAPH_MEMOP_POFFSET) % (LGRAPH_MEMOP_PIDS)) == 0)
 #define LGRAPH_MEMOP_ISWRDATA(_pid) (((_pid - LGRAPH_MEMOP_POFFSET) % (LGRAPH_MEMOP_PIDS)) == 1)
@@ -530,51 +531,27 @@ public:
     inputs.push_back("ABITS");           // address bits //FIXME: if input ports have sizes, it is possible to remove this
     inputs.push_back("WR_PORTS");        // number of wr_ports (parameter)
     inputs.push_back("RD_PORTS");        // number of rd_ports (parameter)
-    inputs.push_back("CLK_POLARITY");    // clock polarity: 0 == posedge, 1 == negedge
+    inputs.push_back("RDCLK_POLARITY");  // clock polarity: 0 == posedge, 1 == negedge
+    inputs.push_back("WRCLK_POLARITY");  // clock polarity: 0 == posedge, 1 == negedge
     inputs.push_back("RD_TRANSPARENT");  // fwd writes to reads in the same address
 
     // shared ports
     inputs.push_back("CLK");  // single clock support only
     inputs.push_back("CE");   // shared chip enable (no connection means always enable)
 
-    // wr / rd port 0
-    inputs.push_back("WR0_ADDR");
-    inputs.push_back("WR0_DATA");
-    inputs.push_back("WR0_EN");
+    for(int i=0;i<1024;i++) { // At most 1K ports?? Increase if needed
+      std::string wr = "WR" + std::to_string(i);
+      // wr / rd port 0
+      inputs.push_back(wr + "_ADDR");
+      inputs.push_back(wr + "_DATA");
+      inputs.push_back(wr + "_EN");
 
-    inputs.push_back("RD0_ADDR");
-    inputs.push_back("RD0_EN");
+      std::string rd = "RD" + std::to_string(i);
+      inputs.push_back(rd + "_ADDR");
+      inputs.push_back(rd + "_EN");
 
-    // wr / rd port 1
-    inputs.push_back("WR1_ADDR");
-    inputs.push_back("WR1_DATA");
-    inputs.push_back("WR1_EN");
-
-    inputs.push_back("RD1_ADDR");
-    inputs.push_back("RD1_EN");
-
-    // wr / rd port 2
-    inputs.push_back("WR2_ADDR");
-    inputs.push_back("WR2_DATA");
-    inputs.push_back("WR2_EN");
-
-    inputs.push_back("RD2_ADDR");
-    inputs.push_back("RD2_EN");
-
-    // wr / rd port 3
-    inputs.push_back("WR3_ADDR");
-    inputs.push_back("WR3_DATA");
-    inputs.push_back("WR3_EN");
-
-    inputs.push_back("RD3_ADDR");
-    inputs.push_back("RD3_EN");
-    // continues...
-
-    outputs.push_back("RD_DATA0");
-    outputs.push_back("RD_DATA1");
-    outputs.push_back("RD_DATA2");
-    outputs.push_back("RD_DATA3");
-    // continues...
+      outputs.push_back(rd + "_DATA");
+    }
   };
 };
 
@@ -614,27 +591,18 @@ public:
     inputs.push_back("TYPE");
     inputs.push_back("INSTANCE_NAME");
 
-    inputs.push_back("PORT1_ISPARAM");  // 0 = input, 1 = parameter
-    inputs.push_back("PORT1_NAME");
-    inputs.push_back("PORT1_CONNECTION");
+    for(int i=0;i<1024;i++) { // At most 1K ports?? Increase if needed
+      std::string txt = "I" + std::to_string(i);
+      inputs.push_back(txt + "_ISPARAM");  // 0 = input, 1 = parameter
+      inputs.push_back(txt + "_NAME");
+      inputs.push_back(txt + "_CONNECTION");
+    }
 
-    inputs.push_back("PORT2_ISPARAM");  // 0 = input, 1 = parameter
-    inputs.push_back("PORT2_NAME");
-    inputs.push_back("PORT2_CONNECTION");
-
-    inputs.push_back("PORT3_ISPARAM");  // 0 = input, 1 = parameter
-    inputs.push_back("PORT3_NAME");
-    inputs.push_back("PORT3_CONNECTION");
-
-    // continues ...
-    outputs.push_back("PORT1_NAME");
-    outputs.push_back("PORT1_CONNECTION");
-
-    outputs.push_back("PORT2_NAME");
-    outputs.push_back("PORT2_CONNECTION");
-
-    outputs.push_back("PORT3_NAME");
-    outputs.push_back("PORT3_CONNECTION");
+    for(int i=0;i<1024;i++) {
+      std::string txt = "O" + std::to_string(i);
+      outputs.push_back(txt + "_NAME");
+      outputs.push_back(txt + "_CONNECTION");
+    }
   };
 };
 

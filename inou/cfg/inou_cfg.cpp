@@ -92,8 +92,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs, unordered_ma
 
   bool  gtop_begn_nname_recorded = false;
   char *str_ptr                  = nullptr;
-
-  char *   p           = strtok_r(*memblock, "\n\r\f", &str_ptr);
+  char *   p                     = strtok_r(*memblock, "\n\r\f", &str_ptr);
 
   while(p) {
     vector<string> words = split(p);
@@ -118,12 +117,10 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs, unordered_ma
       LGraph *lg = LGraph::create(opack.path, "sub_method" + std::to_string(gsub_id), source);
       lgs.push_back(lg);
 
-      fmt::print("lgs size:{}\n", lgs.size());
       nname2nid_lgs.resize(nname2nid_lgs.size() + 1);
       chain_stks_lgs.resize(chain_stks_lgs.size() + 1);
       nid_end_lgs.resize(nid_end_lgs.size() + 1);
       nname_begn_lgs.push_back(w1st);
-      //n1st2gid[w1st]    = gsub_id; // don't assign graph_id by yourself!!
       n1st2gid[w1st]    = lg->lg_id();
       n1st2lgname[w1st] = "sub_method" + std::to_string(gsub_id);
       build_graph(words, dfg_data, lgs[gsub_id], n1st2gid, n1st2lgname, nname2nid_lgs[gsub_id], chain_stks_lgs[gsub_id], rename_tab, nid_end_lgs[gsub_id]);
@@ -141,21 +138,16 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs, unordered_ma
     create in/out GIO for every graph
   */
    for(uint32_t i = 0; i < lgs.size(); i++) {
-     fmt::print("create gio for graph:{},:{}\n", i, lgs[i]->lg_id());
     //Graph input
-    Node gio_node_begn = lgs[i]->create_node();
-    lgs[i]->add_graph_input("ginp", gio_node_begn.get_nid(), 0, 0);
-    Index_ID src_nid = gio_node_begn.get_nid();
-    Index_ID dst_nid = nname2nid_lgs[i][nname_begn_lgs[i]];
-    lgs[i]->add_edge(lgs[i]->get_node(src_nid).setup_driver_pin(0), lgs[i]->get_node(dst_nid).setup_sink_pin(0));
-    fmt::print("graph input node nid:{}\n", src_nid);
+    auto ipin = lgs[i]->add_graph_input("ginp", 0, 0, 0);
+    auto dst_nid = nname2nid_lgs[i][nname_begn_lgs[i]];
+    I(lgs[i]->node_type_get(dst_nid).op != GraphIO_Op);
+    lgs[i]->add_edge(ipin, lgs[i]->get_node(dst_nid).setup_sink_pin());
 
     //Graph output
-    Node gio_node_ed = lgs[i]->create_node();
-    lgs[i]->add_graph_output("gout", gio_node_ed.get_nid(), 0, 0);
-    src_nid = nid_end_lgs[i];
-    dst_nid = gio_node_ed.get_nid();
-    lgs[i]->add_edge(lgs[i]->get_node(src_nid).setup_driver_pin(0), lgs[i]->get_node(dst_nid).setup_sink_pin(0));
+    auto opin = lgs[i]->add_graph_output("gout", 0, 0, 0);
+    auto src_nid = nid_end_lgs[i];
+    lgs[i]->add_edge(lgs[i]->get_node(src_nid).setup_driver_pin(0), opin);//CfgAssign_Op output number is not 1!
   }
 
   update_ifs(lgs, nname2nid_lgs);
@@ -223,7 +215,7 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
   } else
     g->node_type_set(name2id[w1st], CfgAssign_Op);
 
-  g->set_node_wirename(name2id[w1st], CFG_Node_Data(dfg_data).encode().c_str());
+  g->set_node_wirename(g->get_node(name2id[w1st]).setup_driver_pin(0), CFG_Node_Data(dfg_data).encode().c_str());
   fmt::print("@cfg node:{}, wirename:{}\n", name2id[w1st], CFG_Node_Data(dfg_data).encode().c_str());
 
   /*
@@ -246,9 +238,11 @@ void Inou_cfg::build_graph(vector<string> &words, string &dfg_data, LGraph *g, m
     fmt::print("create node:{}, nid:{}\n", w2nd, name2id[w2nd]);
   }
 
-
-  if(g->node_type_get(name2id[w1st]).op == (CfgFunctionCall_Op || SubGraph_Op))
+  if(g->node_type_get(name2id[w1st]).op == CfgFunctionCall_Op )
     collect_fcall_info(g, name2id[w1st], w7th, w8th, w9th); // collect target and 1st operand for fake fcall analysis later
+  else if(g->node_type_get(name2id[w1st]).op == SubGraph_Op)
+    collect_fcall_info(g, name2id[w1st], w7th, w8th, w9th); // collect target and 1st operand for fake fcall analysis later
+
   /*
     III.deal with edge connection
   */
@@ -382,7 +376,7 @@ vector<string> Inou_cfg::split(const string &str) {
 
     // copy the characters in [i,j)
     if(i != str.end())
-      ret.push_back(string(i, j));
+      ret.emplace_back(string(i, j));
 
     i = j;
   }
@@ -391,9 +385,9 @@ vector<string> Inou_cfg::split(const string &str) {
 
 void Inou_cfg::lgraph_2_cfg(const LGraph *g, const string &filename) {
   int line_cnt = 0;
-  for(auto &idx : g->fast()) {
-    if(g->get_node_wirename(idx) != nullptr) {
-      fmt::print("{}\n", g->get_node_wirename(idx)); // for now, just print out cfg, maybe mmap write later
+  for(auto &nid : g->fast()) {
+    if(g->get_node_wirename(g->get_node(nid).get_driver_pin(0)) != nullptr) {
+      fmt::print("{}\n", g->get_node_wirename(g->get_node(nid).get_driver_pin(0))); // for now, just print out cfg, maybe mmap write later
       ++line_cnt;
     }
   }
@@ -409,13 +403,12 @@ void Inou_cfg::update_ifs(vector<LGraph *> &lgs, vector<map<string, Index_ID>> &
     auto &  mapping = node_mappings[i];
 
     fmt::print("cfg update_ifs\n");
-    for(auto idx : g->fast()) {
-      CFG_Node_Data data(g, idx);
-
+    for(auto nid : g->fast()) {
+      CFG_Node_Data data(g, nid);
       if(data.is_br_marker()) {
         const auto &   dops = data.get_operands();
-        for(const auto& i: dops)
-          fmt::print("dops:{}\n", i);
+        for(const auto& j: dops)
+          fmt::print("dops:{}\n", j);
         vector<string> new_operands(dops.size());
 
         std::transform(dops.begin(), dops.end(), new_operands.begin(),
@@ -426,7 +419,7 @@ void Inou_cfg::update_ifs(vector<LGraph *> &lgs, vector<map<string, Index_ID>> &
         });
 
         const CFG_Node_Data cnode(data.get_target(), new_operands, std::string(data.get_operator()));
-        g->set_node_wirename(idx, cnode.encode().c_str());
+        g->set_node_wirename(g->get_node(nid).setup_driver_pin(0), cnode.encode().c_str());
       }
     }
   }
@@ -447,31 +440,24 @@ void Inou_cfg::remove_fake_fcall(LGraph *g) {
   std::set<Index_ID>                        true_fcall_tab;
   std::unordered_map<std::string_view, Index_ID> name2id;
   //1st pass
-  for(auto idx : g->fast()){
-    if(g->node_type_get(idx).op == Invalid_Op)
+  for(auto nid : g->fast()){
+    if(g->node_type_get(nid).op == Invalid_Op)
       break;
 
-    // fmt::print("node:{}, pid names:{},{},{}\n", idx, pid1_wn, pid2_wn, pid3_wn);
-    if(g->node_type_get(idx).op == SubGraph_Op) {
-      for(const auto &out : g->out_edges(idx)) {
-        if(out.get_out_pin().get_pid() == 0) { // src_pid == 0
-          Index_ID dst_nid = out.get_idx();
-          auto     pid1_wn = g->get_node_wirename(g->get_node(dst_nid).setup_driver_pin(1));
-          func_dcl_tab.insert(pid1_wn);
-          fmt::print("push {} into func_dcl_tab\n", pid1_wn);
-          break;
-        }
-      }
-    } else if(g->node_type_get(idx).op == CfgFunctionCall_Op) {
-      auto node    = g->get_node(idx);
-      auto pid2_wn = g->get_node_wirename(node.setup_driver_pin(2));
-      auto pid3_wn = g->get_node_wirename(node.setup_driver_pin(3));
+    // fmt::print("node:{}, pid names:{},{},{}\n", nid, pid1_wn, pid2_wn, pid3_wn);
+    if(g->node_type_get(nid).op == SubGraph_Op) {
+      auto     pid1_wn = g->get_node_wirename(g->get_node(nid).get_driver_pin(1));
+      func_dcl_tab.insert(pid1_wn);
+    } else if(g->node_type_get(nid).op == CfgFunctionCall_Op) {
+      auto node    = g->get_node(nid);
+      auto pid2_wn = g->get_node_wirename(node.get_driver_pin(2));
+      auto pid3_wn = g->get_node_wirename(node.get_driver_pin(3));
       if(pid3_wn.empty()) { // oprd num = 1
         drive_tab.insert(pid2_wn);
-        name2id[pid2_wn] = idx;
+        name2id[pid2_wn] = nid;
       } else { // oprd num >=1
-        fmt::print("push {} into true_fcall_tab\n", idx);
-        true_fcall_tab.insert(idx);
+        fmt::print("push {} into true_fcall_tab\n", nid);
+        true_fcall_tab.insert(nid);
       }
     }
   }
@@ -485,14 +471,14 @@ void Inou_cfg::remove_fake_fcall(LGraph *g) {
   }
 
   // 2nd pass
-  for(auto idx : g->fast()) {
-    if(g->node_type_get(idx).op == CfgFunctionCall_Op && true_fcall_tab.find(idx) == true_fcall_tab.end()) {
-      g->node_type_set(idx, CfgAssign_Op);
-      std::string wn(g->get_node_wirename(idx));
+  for(auto nid : g->fast()) {
+    if(g->node_type_get(nid).op == CfgFunctionCall_Op && true_fcall_tab.find(nid) == true_fcall_tab.end()) {
+      g->node_type_set(nid, CfgAssign_Op);
+      std::string wn(g->get_node_wirename(g->get_node(nid).get_driver_pin(0)));
       wn = "=" + wn.substr(3); // FIXME: weird code!!! hardcoding positions? use string_view
-      g->set_node_wirename(idx, wn.c_str()); // FIXME: the code should have no c_str()
+      g->set_node_wirename(g->get_node(nid).setup_driver_pin(0), wn.c_str()); // FIXME: the code should have no c_str()
       fmt::print("find out fake function call!!!!!!\n");
-      fmt::print("change idx:{} to CfgAssign_Op\n", idx);
+      fmt::print("change nid:{} to CfgAssign_Op\n", nid);
     }
   }
 }

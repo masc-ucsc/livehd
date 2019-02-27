@@ -15,7 +15,6 @@ void setup_pass_dfg() {
   p.setup();
 }
 
-
 void Pass_dfg::setup() {
   Eprp_method m1("pass.dfg.generate", "generate a dfg lgraph from a cfg lgraph", &Pass_dfg::generate);
   m1.add_label_optional("path", "lgraph path");
@@ -55,21 +54,21 @@ void Pass_dfg::generate(Eprp_var &var) {
 std::vector<LGraph*> Pass_dfg::hierarchical_gen_dfgs(LGraph *cfg_parent){
   std::vector<LGraph *> dfgs;
   fmt::print("hierarchical dfg generation start!\n");
-  fmt::print("topg lgid:{}\n", cfg_parent->lg_id());
+  fmt::print("top graph lgid:{}\n", cfg_parent->lg_id());
   auto dfg_name = cfg_parent->get_name().substr(0, cfg_parent->get_name().size() - 4);
   LGraph *dfg = LGraph::create(cfg_parent->get_path(), dfg_name, cfg_parent->get_name());
   I(dfg);
   do_generate(cfg_parent, dfg);
   dfgs.push_back(dfg);
+  fmt::print("top module cfg->dfg done!\n\n");
 
-  cfg_parent->each_sub_graph_fast([cfg_parent, &dfgs, this](Index_ID idx, Lg_type_id lgid, std::string_view iname){
-    fmt::print("subgraph lgid:{}\n", lgid);
+  cfg_parent->each_sub_graph_fast([cfg_parent, &dfgs, this](Index_ID nid, Lg_type_id lgid, std::string_view iname){
+    fmt::print("sub-graph lgid:{}\n", lgid);
     LGraph *cfg_child = LGraph::open(cfg_parent->get_path(), lgid);
     if(cfg_child== nullptr){
       Pass::error("hierarchy for {} could not open instance {} with lgid {}", cfg_parent->get_name(), iname, lgid);
     } else {
       I(absl::EndsWith(cfg_child->get_name(),"_cfg"));
-      //auto child_dfg_name = cfg_child->get_name().substr(0, cfg_child->get_name().size() - 4);
       std::string_view child_dfg_name(cfg_child->get_name().data(), cfg_child->get_name().size()-4); // _cfg
       LGraph *dfg_child = LGraph::create(cfg_child->get_path(), child_dfg_name, cfg_child->get_name());
       I(dfg_child);
@@ -78,12 +77,10 @@ std::vector<LGraph*> Pass_dfg::hierarchical_gen_dfgs(LGraph *cfg_parent){
       dfgs.push_back(dfg_child);
     }
   });
-
   return dfgs;
 }
 
 void Pass_dfg::optimize(Eprp_var &var) {
-
   for(auto &g : var.lgs) {
     Pass_dfg p;
     p.hierarchical_opt_dfgs(g);
@@ -92,11 +89,11 @@ void Pass_dfg::optimize(Eprp_var &var) {
 
 void Pass_dfg::hierarchical_opt_dfgs(LGraph *dfg_parent){
   fmt::print("hierarchical dfg optimization start!\n");
-  fmt::print("topg lgid:{}\n", dfg_parent->lg_id());
+  fmt::print("top graph lgid:{}\n", dfg_parent->lg_id());
   do_optimize(dfg_parent);
 
-  dfg_parent->each_sub_graph_fast([dfg_parent, this](Index_ID idx, Lg_type_id lgid, std::string_view iname){
-    fmt::print("subgraph lgid:{}\n", lgid);
+  dfg_parent->each_sub_graph_fast([dfg_parent, this](Index_ID nid, Lg_type_id lgid, std::string_view iname){
+    fmt::print("sub-graph lgid:{}\n", lgid);
     LGraph *dfg_child = LGraph::open(dfg_parent->get_path(), lgid);
     if(dfg_child==nullptr){
       Pass::error("hierarchy for {} could not open instance {} with lgid {}", dfg_parent->get_name(), iname, lgid);
@@ -124,7 +121,7 @@ void Pass_dfg::hierarchical_finalize_bits_dfgs(LGraph *dfg_parent){
   dfg_parent->each_sub_graph_fast([dfg_parent, this](Index_ID idx, Lg_type_id lgid, std::string_view iname){
     fmt::print("subgraph lgid:{}\n", lgid);
     LGraph *dfg_child = LGraph::open(dfg_parent->get_path(), lgid);
-    if(dfg_child==0){
+    if (dfg_child == nullptr) {
       Pass::error("hierarchy for {} could not open instance {} with lgid {}", dfg_parent->get_name(), iname, lgid);
     } else {
       I(dfg_child);
@@ -132,7 +129,6 @@ void Pass_dfg::hierarchical_finalize_bits_dfgs(LGraph *dfg_parent){
     }
   });
 }
-
 
 Pass_dfg::Pass_dfg():Pass("dfg"){}
 
@@ -148,15 +144,15 @@ void Pass_dfg::do_optimize(LGraph *&ori_dfg) {
 
 void Pass_dfg::trans(LGraph *dfg) {
   // resolve pending graph instantiation
-  for(auto idx : dfg->fast()) {
-    if(dfg->node_type_get(idx).op == DfgPendingGraph_Op) {
-      //dfg->set_node_instance_name(idx, (std::string)dfg->get_node_wirename(idx)+ "_0");
-      fmt::print("subgraph name is:{}\n", dfg->get_node_wirename(idx));
-      LGraph* sub_graph = LGraph::open(dfg->get_path(), dfg->get_node_wirename(idx));
-      assert(sub_graph);
+  for(auto nid : dfg->fast()) {
+    if(dfg->node_type_get(nid).op == DfgPendingGraph_Op) {
+      fmt::print("subgraph name is:{}\n", dfg->get_node_wirename(dfg->get_node(nid).get_driver_pin(0)));
+      LGraph* sub_graph = LGraph::open(dfg->get_path(), dfg->get_node_wirename(dfg->get_node(nid).get_driver_pin(0)));
+      I(sub_graph);
 
-      dfg->node_subgraph_set(idx, sub_graph->lg_id());//changing from DfgPendingGraph_Op to normal subgraph_op
-      fmt::print("resolve pending subG! lg_id:{}, nid:{}, subG name:{}\n", sub_graph->lg_id(), idx, dfg->get_node_wirename(idx));
+      dfg->node_subgraph_set(nid, sub_graph->lg_id());//changing from DfgPendingGraph_Op to normal Subgraph_Op
+      fmt::print("resolve pending subG! lg_id:{}, nid:{}, subG name:{}\n",
+                  sub_graph->lg_id(), nid, dfg->get_node_wirename(dfg->get_node(nid).get_driver_pin(0)));
       fmt::print("input name:{}\n",  sub_graph->get_graph_input_name_from_pid(1));
       fmt::print("input name:{}\n",  sub_graph->get_graph_input_name_from_pid(2));
       fmt::print("output name:{}\n", sub_graph->get_graph_output_name_from_pid(1));
@@ -166,8 +162,9 @@ void Pass_dfg::trans(LGraph *dfg) {
   //resolve top <-> subgraph IO connection
   for(auto nid : dfg->fast()){
     if(dfg->node_type_get(nid).op == SubGraph_Op){
-      fmt::print("resolving connections, subgraph is:{}\n", dfg->get_node_wirename(nid));
-      LGraph* sub_graph = LGraph::open(dfg->get_path(), dfg->get_node_wirename(nid));
+      fmt::print("resolving connections, subgraph is:{}\n",
+        dfg->get_node_wirename(dfg->get_node(nid).get_driver_pin(0)));
+      LGraph* sub_graph = LGraph::open(dfg->get_path(), dfg->get_node_wirename(dfg->get_node(nid).get_driver_pin(0)));
       I(sub_graph);
 
       //resolve subgraph input connections
@@ -183,9 +180,9 @@ void Pass_dfg::trans(LGraph *dfg) {
       for(auto &inp : dfg->inp_edges(nid)){
         Index_ID src_nid = dfg->get_node(inp.get_out_pin()).get_nid();
         Index_ID dst_nid = nid;
-        Port_ID  src_pid = 0;
-        auto inp_name = dfg->get_node_wirename(src_nid);
-        //TODO:should change to sub_graph->each_input
+        Port_ID  src_pid = dfg->node_type_get(src_nid).op == GraphIO_Op ? 1 : 0;
+        auto inp_name = dfg->get_node_wirename(dfg->get_node(src_nid).get_driver_pin(0));
+        //TODO:should change to sub_graph->each_graph_input
         Port_ID  dst_pid = sub_graph->get_graph_input(inp_name).get_pid();
 
         fmt::print("inp_name:{}\n",inp_name);
@@ -213,17 +210,14 @@ void Pass_dfg::trans(LGraph *dfg) {
         Index_ID src_nid = nid;
         Index_ID dst_nid = dfg->get_node(out.get_inp_pin()).get_nid();
         Port_ID  dst_pid = out.get_inp_pin().get_pid();
-        Port_ID  src_pid = 0; // FIXME: this looks weird. It will pick just the last pid in the inputs???
+        Port_ID  src_pid = 0;
         uint16_t bitwidth;
-        sub_graph->each_output([&sub_graph, &src_pid, &bitwidth](const Node_pin &pin) {
-          //fmt::print("outputs of subgraph: idx:{}, pid:{}, name:{}, bitwidth:{}\n",idx, pid, sub_graph->get_graph_output_name_from_pid(pid), sub_graph->get_bits_pid(idx, pid));
-          //WARNING:pid should start from 0, but here start from 1? why?
+        sub_graph->each_graph_output([&sub_graph, &src_pid, &bitwidth](const Node_pin &pin) {
           fmt::print("outputs of subgraph: idx:{}, pid:{}, name:{}, bitwidth:{}\n"
               ,pin.get_idx(), pin.get_pid(), sub_graph->get_graph_output_name_from_pid(pin.get_pid()), sub_graph->get_bits(pin));
           src_pid = pin.get_pid();
           bitwidth = sub_graph->get_bits(pin);
         });
-        fmt::print("src_nid:{}, src_pid:{}, dst_nid:{}, dst_pid:{}\n", src_nid, src_pid, dst_nid, dst_pid);
         My_pin src_pin; // = Node_pin(dfg->get_node(src_nid).setup_driver_pin(src_pid));
         src_pin.nid = src_nid;
         src_pin.pid = src_pid;
@@ -231,8 +225,7 @@ void Pass_dfg::trans(LGraph *dfg) {
         dst_pin.nid = dst_nid;
         dst_pin.pid = dst_pid;
         subg_out_edges[src_pin] = dst_pin;
-        fmt::print("bitwidth:{}\n", bitwidth);
-        dfg->set_bits_pid(src_nid, src_pid, bitwidth);
+        dfg->set_bits(dfg->get_node(src_nid).setup_driver_pin(src_pid), bitwidth);
         dfg->del_edge(out); //WARNNING: don't add_edge and del_edge at the same reference loop!
       }
 
@@ -243,21 +236,21 @@ void Pass_dfg::trans(LGraph *dfg) {
       }
 
       //set wirename of the subg node back to empty to avoid yosys code generation conflict of count_id(cell->name)
-      dfg->set_node_wirename(nid,"subg_tmp_wire");
+      dfg->set_node_wirename(dfg->get_node(nid).setup_driver_pin(0),"subg_tmp_wire");
     }
   }
 
   for(auto nid : dfg->fast()) {
       if(dfg->node_type_get(nid).op == Equals_Op) {
-        dfg->set_bits(nid, 1);
+        dfg->set_bits(dfg->get_node(nid).setup_driver_pin(0), 1);
       } else if(dfg->node_type_get(nid).op == GreaterEqualThan_Op) {
-        dfg->set_bits(nid, 1);
+        dfg->set_bits(dfg->get_node(nid).setup_driver_pin(0), 1);
       } else if(dfg->node_type_get(nid).op == GreaterThan_Op) {
-        dfg->set_bits(nid, 1);
+        dfg->set_bits(dfg->get_node(nid).setup_driver_pin(0), 1);
       } else if(dfg->node_type_get(nid).op == LessEqualThan_Op) {
-        dfg->set_bits(nid, 1);
+        dfg->set_bits(dfg->get_node(nid).setup_driver_pin(0), 1);
       } else if(dfg->node_type_get(nid).op == LessThan_Op) {
-        dfg->set_bits(nid, 1);
+        dfg->set_bits(dfg->get_node(nid).setup_driver_pin(0), 1);
       } else {
         ;
       }
@@ -266,11 +259,12 @@ void Pass_dfg::trans(LGraph *dfg) {
 
 void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
   for(auto nid : dfg->fast()){
-    uint16_t nid_size = dfg->get_bits(nid); // FIXME!!! This is just getting bits from PID 0
+    uint16_t nid_size = dfg->get_bits(dfg->get_node(nid).get_driver_pin(0));
     if(nid_size == 0){
       Node_bitwidth &nb = dfg->node_bitwidth_get(nid); // FIXME: it should be Node_pin
       fmt::print("nid:{},max:{}\n",nid, nb.i.max);
-      dfg->set_bits(nid, ((uint16_t)floor(log2(nb.i.max))+1));
+      //SH FIXME: should set bits for all output node_pin?
+      dfg->set_bits(dfg->get_node(nid).setup_driver_pin(0), ((uint16_t)floor(log2(nb.i.max))+1));
     }
   }
 
@@ -279,23 +273,24 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
       for (auto &inp : dfg->inp_edges(nid)) {
         Index_ID src_nid = dfg->get_node(inp.get_out_pin()).get_nid();
         Index_ID dst_nid = nid;
-        //Port_ID  src_pid = inp.get_out_pin().get_pid();
         Port_ID  dst_pid = inp.get_inp_pin().get_pid();
 
         if(dst_pid == 0)
           continue;
 
         //assume MIT algo. will at least set mux.bits equals to the larger input
-        uint16_t bw_diff = abs(dfg->get_bits(src_nid) - dfg->get_bits(dst_nid));
-        if(dfg->get_bits(dst_nid) > dfg->get_bits(src_nid)) {
+        auto src_bits = dfg->get_bits(dfg->get_node(src_nid).get_driver_pin(0));
+        auto dst_bits = dfg->get_bits(dfg->get_node(dst_nid).get_driver_pin(0));
+        auto bw_diff = (uint16_t)abs(src_bits - dst_bits);
+        if(dst_bits > src_bits) {
           //temporarily using unsigned extend to fix mux bitwidth mismatch
           Index_ID unsign_ext_nid = create_const32_node(dfg, 0, bw_diff, false);
           Index_ID nid_join = dfg->create_node().get_nid();
           dfg->node_type_set(nid_join, Join_Op);
-          dfg->set_bits(nid_join, dfg->get_bits(dst_nid));
-          dfg->add_edge(dfg->get_node(unsign_ext_nid).setup_driver_pin(), dfg->get_node(nid_join).setup_sink_pin(1));
-          dfg->add_edge(dfg->get_node(src_nid).setup_driver_pin()       , dfg->get_node(nid_join).setup_sink_pin(0));
-          dfg->add_edge(dfg->get_node(nid_join).setup_driver_pin()      , dfg->get_node(dst_nid ).setup_sink_pin(dst_pid));
+          dfg->set_bits(dfg->get_node(nid_join).setup_driver_pin(0), dst_bits);
+          dfg->add_edge(dfg->get_node(unsign_ext_nid).setup_driver_pin(0), dfg->get_node(nid_join).setup_sink_pin(1));
+          dfg->add_edge(dfg->get_node(src_nid).setup_driver_pin(0)       , dfg->get_node(nid_join).setup_sink_pin(0));
+          dfg->add_edge(dfg->get_node(nid_join).setup_driver_pin(0)      , dfg->get_node(dst_nid ).setup_sink_pin(dst_pid));
           dfg->del_edge(inp);
         }
       }
@@ -304,13 +299,20 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
     //after MIT algo. and Mux_Op processing, bw of every node should be synced except an output gio connected to a Mux_Op
     if(dfg->node_type_get(nid).op == GraphIO_Op){
       for(auto &inp : dfg->inp_edges(nid)){
-        Index_ID src_nid = dfg->get_node(inp.get_out_pin()).get_nid();
-        Index_ID dst_nid = nid;
-        if(dfg->get_bits(src_nid) > dfg->get_bits(dst_nid))
-          dfg->set_bits(dst_nid, dfg->get_bits(src_nid));
-        else//Warning! this is workaround will be eventually wrong after MIT could handle subgraph
-          dfg->set_bits(src_nid, dfg->get_bits(dst_nid));
+        Node nsrc = dfg->get_node(inp.get_out_pin());
+        Node ndst = dfg->get_node(nid);
+        if(dfg->get_bits(nsrc.get_driver_pin(0)) > dfg->get_bits(ndst.get_driver_pin(0))){
+          dfg->set_bits(ndst.setup_driver_pin(0), dfg->get_bits(nsrc.get_driver_pin(0)));
+          fmt::print("gio bitwidth less then source\n");
+        }
+        else{//SH:FIXME:Warning! this is workaround will be eventually wrong after MIT could handle subgraph
+          dfg->set_bits(nsrc.setup_driver_pin(0), dfg->get_bits(ndst.get_driver_pin(0)));
+          fmt::print("gio bitwidth larger then source\n");
+        }
+
+        fmt::print("output bits:{}\n", dfg->get_bits(inp.get_out_pin()));
       }
+      fmt::print("output bits:{}\n", dfg->get_bits(dfg->get_node(nid).get_driver_pin(0)));
     }
   }
 }
@@ -328,12 +330,10 @@ void Pass_dfg::finalize_gconnect(LGraph *dfg, const Aux_node *auxnd_global) {
   fmt::print("finalize global connect\n");
   for(const auto &pair : auxnd_global->get_pendtab()) {
     if(is_output(pair.first)) {
-      Index_ID dst_nid = dfg->get_node(dfg->get_graph_output(pair.first.substr(1))).get_nid();
-      I(dfg->get_node(dst_nid).get_nid() == dst_nid);
-      Index_ID src_nid = pair.second;
-      Port_ID  src_pid = 0;
-      dfg->add_edge(dfg->get_node(src_nid).setup_driver_pin(src_pid), dfg->get_node(dst_nid).setup_sink_pin(0));
-      fmt::print("add edge, src_nid:{}, src_pid:{}, dst_nid:{}, dst:pid:{}\n", src_nid, src_pid, dst_nid, 0);
+      auto spin = dfg->get_graph_output(pair.first.substr(1));
+      auto dpin = dfg->get_node(pair.second).setup_driver_pin();
+
+      dfg->add_edge(dpin, spin);
     } else if(is_register(pair.first)) {
       ; // balabala
     }
@@ -346,9 +346,8 @@ Index_ID Pass_dfg::process_cfg(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tre
 
   while(itr != 0) {
     last_itr = itr;
-
     Index_ID tmp = process_node(dfg, cfg, aux_tree, itr);
-    fmt::print("process_node return cfg_nid:{}!!\n\n", tmp);
+    fmt::print("process_node returns cfg_nid:{}!!\n\n", tmp);
     itr = tmp;
     fmt::print("cfg nid:{} process finished!!\n\n", last_itr);
   }
@@ -396,21 +395,24 @@ void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_t
   const auto &target    = data.get_target();
   const auto &oprds     = data.get_operands();
   const auto &oprd_ids  = process_operands(dfg, aux_tree, data); // all operands should be in auxtab, just retrieve oprd_ids
-  assert(!oprds.empty());
+  I(!oprds.empty());
   Index_ID subg_root_nid = aux_tree->get_alias(oprds[0]);
 
-  fmt::print("------>process function call for {}!!!!!\n", dfg->get_node_wirename(subg_root_nid));
+  fmt::print("------>process function call for {}!!!!!\n",
+              dfg->get_node_wirename(dfg->get_node(subg_root_nid).get_driver_pin(0)));
     // FIXME: LGraph::open is a costly op, do you really need to check this for each wire?????
 
-  LGraph *sub_graph = LGraph::open(cfg->get_path(), dfg->get_node_wirename(subg_root_nid));
+  LGraph *sub_graph = LGraph::open(cfg->get_path(), dfg->get_node_wirename(dfg->get_node(subg_root_nid).get_driver_pin(0)));
   if(sub_graph) {
     dfg->node_subgraph_set(subg_root_nid, sub_graph->lg_id());
-    fmt::print("set subgraph on nid:{}, name:{}, lgid:{}\n", subg_root_nid, dfg->get_node_wirename(subg_root_nid), sub_graph->lg_id());
+    fmt::print("set subgraph on nid:{}, name:{}, lgid:{}\n",
+      subg_root_nid, dfg->get_node_wirename(dfg->get_node(subg_root_nid).get_driver_pin(0)), sub_graph->lg_id());
   } else {
     dfg->node_type_set(subg_root_nid, DfgPendingGraph_Op);
     //re-assign correct subgraph name
-    dfg->set_node_wirename(subg_root_nid, oprds.at(0));
-    fmt::print("set pending graph on nid:{}, sub_graph name should be:{}\n", subg_root_nid, dfg->get_node_wirename(subg_root_nid));
+    dfg->set_node_wirename(dfg->get_node(subg_root_nid).setup_driver_pin(0), oprds.at(0));
+    fmt::print("set pending graph on nid:{}, sub_graph name should be:{}\n",
+                subg_root_nid, dfg->get_node_wirename(dfg->get_node(subg_root_nid).get_driver_pin(0)));
   }
 
   aux_tree->set_alias(target, oprd_ids[0]);
@@ -426,7 +428,7 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
   const auto& oprds  = data.get_operands(); //return strings
   auto        op     = data.get_operator();
   Index_ID    oprd_id0, oprd_id1;
-  assert(oprds.size() > 0);
+  I(!oprds.empty());
   if(is_pure_assign_op(op)) {
     if(is_output(target) && !dfg->is_graph_output(target.substr(1)))
       create_output(dfg, aux_tree, target);
@@ -434,7 +436,7 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
     aux_tree->set_alias(target, oprd_id0);
     aux_tree->set_pending(target, oprd_id0);
   } else if(is_label_op(op)) {
-    assert(oprds.size() > 1);
+    I(oprds.size() > 1);
     if(oprds[0] == "__bits") {
       fmt::print("__bits size assignment\n");
       Index_ID floating_id = process_operand(dfg, aux_tree, oprds[1]);
@@ -446,20 +448,20 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
       oprd_id1 = process_operand(dfg, aux_tree, oprds[1]);
       aux_tree->set_alias(target, oprd_id1);
       //oprd_id0 is the io name of subgraph, record in the src node wirename
-      dfg->set_node_wirename(oprd_id1, oprds[0]);
+      dfg->set_node_wirename(dfg->get_node(oprd_id1).setup_driver_pin(0), oprds[0]);
       fmt::print("dst_subG_io:{}, src_nid:[{},{}]\n",oprds[0], oprd_id1, oprds[1]);
     }
   } else if(is_as_op(op)) {
     oprd_id0 = process_operand(dfg, aux_tree, oprds[0]);
     // process target
     if(is_input(target)) {
-      assert(dfg->node_value_get(oprd_id0));
-      auto     bits      = dfg->node_value_get(oprd_id0);             // to be checked
-      Index_ID target_id = create_input(dfg, aux_tree, target, bits); // to be checked
+      I(dfg->node_value_get(oprd_id0));
+      auto bits          = dfg->node_value_get(oprd_id0);
+      Index_ID target_id = create_input(dfg, aux_tree, target, bits);
       fmt::print("create node for input target:{}, nid:{}\n", target, target_id);
     } else if(is_output(target)) {
       assert(dfg->node_value_get(oprd_id0));
-      auto     bits      = dfg->node_value_get(oprd_id0);
+      auto bits          = dfg->node_value_get(oprd_id0);
       Index_ID target_id = create_output(dfg, aux_tree, target, bits);
       fmt::print("create node for output target:{}, nid:{}\n", target, target_id);
     } else
@@ -472,7 +474,8 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
     std::vector<Index_ID> oprd_ids;
     oprd_ids.push_back(process_operand(dfg, aux_tree, oprds[0]));
     oprd_ids.push_back(process_operand(dfg, aux_tree, oprds[1]));
-    //the target might has been created before in for loop, use process_operand instead? or create a process target
+    //the target might has been created before in for loop,
+    //use process_operand instead? or create a process target
     Index_ID target_id = create_node(dfg, aux_tree, target);
     fmt::print("create node for internal target:{}, nid:{}\n", target, target_id);
     dfg->node_type_set(target_id, node_type_from_text(op));
@@ -500,7 +503,7 @@ void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Index_ID> &src
   }
   for(uint16_t i = 0; i < src_nids.size(); i++) {
     Index_ID src_nid = src_nids.at(i);
-    Port_ID src_pid = 0;
+    Port_ID  src_pid = (dfg->node_type_get(src_nid).op == GraphIO_Op) ? 1 : 0;
     //assert(Node_Type_Sum::get_input_match("Au") == 1);
     //assert(dfg->node_type_get(dst_nid).op != SubGraph_Op); // Handled separate as it is a more complicated case
     Port_ID dst_pid =
@@ -520,7 +523,11 @@ void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Index_ID> &src
     /* the subgraph IOs connection cannot be resolved at the first pass
     so just casually connect the top<->subgraph IOs so we could traverse edges and
     resolve connections after resolving the subgraph instantiation".*/
+
+    //strange representation in json and graphviz when connect to pid = 1, the port node will be explicit
+    //dfg->add_edge(dfg->get_node(src_nid).setup_driver_pin(src_pid), dfg->get_node(dst_nid).setup_sink_pin(0));
     dfg->add_edge(dfg->get_node(src_nid).setup_driver_pin(src_pid), dfg->get_node(dst_nid).setup_sink_pin(dst_pid));
+    fmt::print("add_edge src:(n{},p{})->dst:(n{},p{})\n", src_nid, src_pid, dst_nid, dst_pid);
   }
 }
 
@@ -639,7 +646,7 @@ void Pass_dfg::add_fluid_ports(LGraph *dfg, Aux_tree *aux_tree, std::vector<Inde
 
 Index_ID Pass_dfg::find_cfg_root(const LGraph *cfg) {
   Index_ID root_id;
-  cfg->each_input([cfg, &root_id](const Node_pin &pin){
+  cfg->each_graph_input([cfg, &root_id](const Node_pin &pin){
     root_id = cfg->get_node(pin).get_nid();
   });
   I(root_id);
@@ -754,45 +761,3 @@ void Pass_dfg::create_mux(LGraph *dfg, Aux_node *pauxnd, Index_ID tid, Index_ID 
   pauxnd->set_pending(var, phi);
 }
 
-// bits inference: first round: deal with src bw > dst bw
-/*
-for(auto idx : dfg->fast()) {
-  for(const auto &out : dfg->out_edges(idx)) {
-    Index_ID src_nid = idx;
-    Index_ID dst_nid = out.get_idx();
-    Port_ID  src_pid = out.get_out_pin().get_pid();
-    //Port_ID  dst_pid = out.get_inp_pin().get_pid();
-    uint16_t src_nid_size = dfg->get_bits(src_nid);
-    uint16_t dst_nid_size = dfg->get_bits(dst_nid);
-
-    if(dfg->node_type_get(idx).op == SubGraph_Op) {
-      LGraph *    subgraph = LGraph::open(dfg->get_path(), dfg->subgraph_id_get(idx));
-      assert(subgraph);
-      //fmt::print("node_wirename:{}\n",dfg->get_node_wirename(idx));
-      //problem2: inou_yosys got empty inst_name for cell type sp_add
-      //dfg->set_node_instance_name(idx, dfg->get_node_wirename(idx));//problem3: it seems fail and trigger char_array assertion fail
-      //fmt::print("has instance name:{}\n", dfg->has_instance_name(dfg->get_node_wirename(idx)));
-      //fmt::print("get instance name:{}\n", dfg->get_node_instancename(idx));
-      //const char *out_name = subgraph->get_graph_output_name_from_pid(1);//problem1:make source pid = 1 will work, but this is not a true pid
-      const char *out_name = subgraph->get_graph_output_name_from_pid(src_pid);//src_pid = 0 will fail, is it a new bug!?
-      fmt::print("nid:{}, subgraph_lg_id:{}, out_name:{}\n", idx, subgraph->lg_id(), out_name);
-      uint16_t    out_size = subgraph->get_bits(subgraph->get_graph_output(out_name).get_nid());
-      dfg->set_bits(dst_nid, out_size);
-    } else if(dfg->node_type_get(dst_nid).op == Mux_Op) {
-      ;
-    } else if(dfg->node_type_get(dst_nid).op == Equals_Op) {
-      ; // don't infetence when dst is a comparator, the result should be a bool
-    } else if(dfg->node_type_get(dst_nid).op == GreaterEqualThan_Op) {
-      ; // don't infetence when dst is a comparator, the result should be a bool
-    } else if(dfg->node_type_get(dst_nid).op == GreaterThan_Op) {
-      ; // don't infetence when dst is a comparator, the result should be a bool
-    } else if(dfg->node_type_get(dst_nid).op == LessEqualThan_Op) {
-      ; // don't infetence when dst is a comparator, the result should be a bool
-    } else if(dfg->node_type_get(dst_nid).op == LessThan_Op) {
-      ; // don't infetence when dst is a comparator, the result should be a bool
-    } else {
-      if(src_nid_size > dst_nid_size)
-        dfg->set_bits(dst_nid, src_nid_size);
-    }
-  }
-}*/

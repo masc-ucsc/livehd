@@ -1,0 +1,14 @@
+$a    as __bits:8
+%out4 as __bits:8
+
+if ($a > 128){
+  %out4 = $a + 16
+  if ($a <= 254){
+    %out4 = $a + 1
+  }
+}
+else {
+  if ($a <= 128){
+    %out4 = $a + 14
+  }
+}

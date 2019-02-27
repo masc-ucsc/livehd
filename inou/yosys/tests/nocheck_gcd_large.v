@@ -1,3 +1,6 @@
+
+// IT IS OK, but fairly slow in checking
+
 module gcd_large(input clk, 
            input reset, 
            input [40:0] a,

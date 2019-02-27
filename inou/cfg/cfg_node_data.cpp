@@ -5,10 +5,10 @@
 #include "inou_cfg.hpp"
 #include "cfg_node_data.hpp"
 
-CFG_Node_Data::CFG_Node_Data(const LGraph *g, Index_ID node) {
-  std::string_view data_str = g->get_node_wirename(node);
+CFG_Node_Data::CFG_Node_Data(const LGraph *g, Index_ID nid) {
+  std::string_view data_str = g->get_node_wirename(g->get_node(nid).get_driver_pin(0));
 
-  fmt::print("cfg node data:{}\n", g->get_node_wirename(node));
+  fmt::print("cfg node data:{}\n", g->get_node_wirename(g->get_node(nid).get_driver_pin(0)));
   if(data_str.empty()) {
     target       = EMPTY_MARKER;
     operator_txt = EMPTY_MARKER;
