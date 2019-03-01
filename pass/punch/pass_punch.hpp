@@ -2,11 +2,12 @@
 #pragma once
 
 #include "pass.hpp"
+#include "lghierarchy.hpp"
 
 class Pass_punch : public Pass {
 protected:
-  std::string_view src;
-  std::string_view dst;
+  LGraph_Hierarchy src_hierarchy;
+  LGraph_Hierarchy dst_hierarchy;
 
   static void work(Eprp_var &var);
 

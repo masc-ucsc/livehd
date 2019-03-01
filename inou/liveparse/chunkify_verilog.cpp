@@ -113,16 +113,16 @@ void Chunkify_verilog::write_file(std::string_view filename, std::string_view te
   close(fd);
 }
 
-void Chunkify_verilog::add_io(LGraph *lg, bool input, std::string_view io_name, Port_ID original_pos) {
+void Chunkify_verilog::add_io(LGraph *lg, bool input, std::string_view io_name) {
 
   assert(lg);
 
   if(input) {
     if(!lg->is_graph_input(io_name))
-      lg->add_graph_input(io_name, 0, 0, 0, original_pos);
+      lg->add_graph_input(io_name, 0, 0);
   } else {
     if(!lg->is_graph_output(io_name))
-      lg->add_graph_output(io_name, 0, 0, 0, original_pos);
+      lg->add_graph_output(io_name, 0, 0);
   }
 }
 
@@ -225,7 +225,7 @@ void Chunkify_verilog::elaborate() {
           std::string label;
           scan_prev_append(label);
 
-          add_io(lg, last_input, label, module_io_pos);
+          add_io(lg, last_input, label);
 
           module_io_pos++;
         }

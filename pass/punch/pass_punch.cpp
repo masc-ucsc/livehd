@@ -16,8 +16,8 @@ void setup_pass_punch() {
 void Pass_punch::setup() {
   Eprp_method m1("pass.punch", "punch wires between modules", &Pass_punch::work);
 
-  m1.add_label_required("src", "source module:net name to tap. E.g: top:i33:i2.wire1");
-  m1.add_label_required("dst", "destination module:net name to connect. E.g: mid3:i32:i3.wire3");
+  m1.add_label_required("src", "source module:net name to tap. E.g: a_module_name:a_instance_name.b_instance_name->a_wire_name");
+  m1.add_label_required("dst", "destination module:net name to connect. E.g: a_module_name:c_instance_name.d_instance_name->b_wire_name");
 
   register_pass(m1);
 }
@@ -27,30 +27,12 @@ Pass_punch::Pass_punch()
 }
 
 Pass_punch::Pass_punch(std::string_view _src, std::string_view _dst)
-    : Pass("punch"),
-      src(_src),
-      dst(_dst) {
-  if (src.find_first_of('.') == std::string::npos) {
-    Pass::error("src:{} should point to a wire after a module", src);
-    return;
-  }
-  if (src.find_last_of('.') == src.size()-1) {
-    Pass::error("src:{} should point to a valid wire after a module", src);
-    return;
-  }
+    : Pass("punch") {
+  bool ok_src = src_hierarchy.set_hierarchy(_src);
+  bool ok_dst = dst_hierarchy.set_hierarchy(_dst);
 
-  if (dst.find_first_of('.') == std::string::npos) {
-    Pass::error("dst:{} should point to a wire after a module", dst);
-    return;
-  }
-
-  if (dst.find_last_of('.') == dst.size()-1) {
-    Pass::error("dst:{} should point to a valid wire after a module", src);
-    return;
-  }
-
-  if (dst == src) {
-    Pass::error("src:{} and dst:{} must be different", src, dst);
+  if (!ok_src || !ok_dst) {
+    Pass::error("Looks like hierarchy syntax is wrong. See this: e.g: a_module_name:a_instance_name.b_instance_name->a_wire_name");
     return;
   }
 }
@@ -70,86 +52,105 @@ void Pass_punch::work(Eprp_var &var) {
 void Pass_punch::punch(LGraph *g, std::string_view src, std::string_view dst) {
   LGBench b("pass.punch");
 
-  std::string_view src_wname     = src.substr(src.find_last_of('.')+1);
-  std::string_view src_hierarchy = src.substr(0,src.find_last_of('.'));
-  std::string_view dst_wname     = dst.substr(dst.find_last_of('.')+1);
-  std::string_view dst_hierarchy = dst.substr(0,dst.find_last_of('.'));
+  /////////////////////////////////////
+  // find the level of common hierarchy between src and dst
+  /////////////////////////////////////
+  fmt::print("Searching for common hierarchy...\n");
+  bool common_hier_found = true;
+  uint16_t common_hier_depth = 0;
+  if (this->src_hierarchy.get_module_name() != this->dst_hierarchy.get_module_name()) {
+    common_hier_found = false;
+  } else {
+    while (this->src_hierarchy.get_inst_num() > common_hier_depth &&
+           this->dst_hierarchy.get_inst_num() > common_hier_depth) {
+      std::string_view src = this->src_hierarchy.get_hierarchy_upto(common_hier_depth);
+      std::string_view dst = this->dst_hierarchy.get_hierarchy_upto(common_hier_depth);
+      if (src != dst) {
+        break;
+      }
+      common_hier_depth++;
+    }
+  }
 
-  std::string_view dst_parent    = "";
-  if (dst_hierarchy.find_last_of('.') != std::string::npos)
-    dst_parent = dst.substr(0,dst_hierarchy.find_last_of('.'));
+  if (!common_hier_found) {
+    Pass::error("pass.punch could not find common hierarchy");
+    return;
+  }
+  fmt::print("Common hierarchy found...\n\n");
+
+  /////////////////////////////////////
+  // get subgraph ids
+  /////////////////////////////////////
+  fmt::print("Trying to get subgraphs of source and destination...\n");
+  std::string_view src_h        = this->src_hierarchy.get_hierarchy();
+  std::string_view dst_h        = this->dst_hierarchy.get_hierarchy();
+  std::string_view dst_h_parent = this->dst_hierarchy.get_hierarchy_upto(this->dst_hierarchy.get_inst_num() - 1);
+  std::string_view common       = this->src_hierarchy.get_hierarchy_upto(common_hier_depth);
 
   Lg_type_id src_lgid = 0;
   Lg_type_id dst_lgid = 0;
   Lg_type_id dst_parent_lgid = 0;
-
-  std::string_view src_hier;
-  std::string_view dst_hier;
+  Lg_type_id common_lgid = 0;
 
   const auto hier = g->get_hierarchy();
   for(auto &[name,lgid]:hier) {
-    if (name == src_hierarchy) {
+    if (name == src_h) {
       src_lgid = lgid;
-      src_hier = name;
-    }else if (name == dst_hierarchy) {
+    } else if (name == dst_h) {
       dst_lgid = lgid;
-      dst_hier = name;
-    }else if (name == dst_parent && dst_lgid == 0) {
+    } else if (name == dst_h_parent) {
       dst_parent_lgid = lgid;
-      dst_hier = name;
+    } else if (name == common) {
+      common_lgid = lgid;
     }
   }
 
-  std::vector<std::string> vsrc_hier = absl::StrSplit(src_hier,'.');
-  std::vector<std::string> vdst_hier = absl::StrSplit(dst_hier,'.');
-
-  fmt::print("src_hier:{} dst_hier:{}\n",src_hier,dst_hier);
-
-  std::string common_hier;
-  int min_size = std::min(vsrc_hier.size(),vdst_hier.size());
-  for(int i=0;i<min_size;++i) {
-    if (vsrc_hier[i] == vdst_hier[i]) {
-      if (common_hier.empty())
-        common_hier = vsrc_hier[i];
-      else
-        absl::StrAppend(&common_hier, "." , vsrc_hier[i]);
-    }
-  }
-
-  auto ch_it = hier.find(common_hier);
-
-  if (ch_it == hier.end()) {
-    Pass::error("pass.punch could not find common hierarchy for src:{} dst:{} common:{}",src,dst,common_hier);
-    return;
-  }
-
-  Lg_type_id common_hier_lgid = ch_it->second;
-  fmt::print("common hierarchy {} lgid:{}\n", common_hier, common_hier_lgid);
-
+  // sanity checks
   if (src_lgid == 0) {
-    Pass::warn("pass.punch no src:{} for top:{} match, ignoring punch", src,g->get_name());
+    Pass::warn("pass.punch no src found");
     return;
   }
-  if (dst_lgid == 0 && dst_parent_lgid == 0) {
-    Pass::warn("pass.punch no find (or create at parent) a destination dst:{} for top:{} match, ignoring punch dst_parent:{}", dst,g->get_name(), dst_parent);
+  if (dst_lgid == 0) {
+    Pass::warn("pass.punch no dst found");
+    return;
+  }
+  fmt::print("src_lgid:        {}\n",src_lgid);
+  fmt::print("dst_lgid:        {}\n",dst_lgid);
+  fmt::print("dst_lgid_parent: {}\n",dst_parent_lgid);
+  fmt::print("dst_lgid:        {}\n\n",common_lgid);
+
+  auto *src_g = LGraph::open(g->get_path(), src_lgid);
+  if (src_g == 0) {
+    Pass::error("pass.punch could not open path:{} lgid:{} src:{}",g->get_path(), src_lgid, this->src_hierarchy.get_hierarchy());
     return;
   }
 
-  LGraph *src_g = LGraph::open(g->get_path(), src_lgid);
-  if (src_g==0) {
-    Pass::error("pass.punch could not open path:{} lgid:{} src:{}",g->get_path(), src_lgid, src);
+  auto *dst_g = LGraph::open(g->get_path(), dst_lgid);
+  if (dst_g == 0) {
+    Pass::error("pass.punch could not open path:{} lgid:{} dst:{}",g->get_path(), dst_lgid, this->dst_hierarchy.get_hierarchy());
     return;
   }
+
+
+  /////////////////////////////////////
+  // Let the punching begin!
+  /////////////////////////////////////
+  // add output port to the inner module to wire out 
+  std::string_view target_wire_name = this->src_hierarchy.get_wire_name();
+  std::string output_wire_name = fmt::format("{}_punch", target_wire_name);
+  bool output_added = add_output(src_g, target_wire_name, output_wire_name);
+
+  if (output_added) {
+    fmt::print("Output port added...\n");
+    src_g->sync();
+  }
+//  dst_g->sync();
+/*
 
   LGraph *dst_g = 0;
 
   fmt::print(" src:{} MATCH name:{} lgid:{}\n", src, src_g->get_name(), src_lgid);
   if (dst_lgid) {
-    dst_g = LGraph::open(g->get_path(), dst_lgid);
-    if (dst_g==0) {
-      Pass::error("pass.punch could not open path:{} lgid:{} dst:{}",g->get_path(), dst_lgid, dst);
-      return;
-    }
 
     fmt::print(" dst:{} MATCH name:{} lgid:{}\n", dst, dst_g->get_name(), dst_lgid);
   }else{
@@ -189,11 +190,10 @@ void Pass_punch::punch(LGraph *g, std::string_view src, std::string_view dst) {
   add_dest_instance(lgi, "tracker", "itrack", "potato");
 
   lgo->sync();
-  lgi->sync();
+  lgi->sync();*/
 }
 
 bool Pass_punch::add_output(LGraph *g, std::string_view wname, std::string_view output) {
-
   I(g);
   I(!wname.empty());
   I(!output.empty());
@@ -204,15 +204,16 @@ bool Pass_punch::add_output(LGraph *g, std::string_view wname, std::string_view 
   if (g->has_wirename(output) || g->is_graph_input(output) || g->is_graph_output(output))
     return false;
 
-  fmt::print("Adding output:{} from wire:{} to lgraph:{}\n",output,wname, g->get_name());
 
-  auto wname_idx    = g->get_node_id(wname);
-  auto wname_bits   = g->get_bits(wname_idx);
-  auto wname_offset = g->get_offset(wname_idx);
+  auto dpin         = g->get_node(g->get_node_id(wname)).get_driver_pin();
+  auto wname_bits   = g->get_bits(dpin);
+  auto wname_offset = g->get_offset(dpin);
 
-  auto pin   = g->add_graph_output(output, 0, wname_bits, wname_offset);
-  g->set_node_wirename(pin.get_idx(), output);
-  g->add_edge(pin, g->get_node(wname_idx).get_sink_pin());
+  auto spin = g->add_graph_output(output, wname_bits, wname_offset);
+  g->add_edge(dpin, spin);
+
+  fmt::print("Adding output:{} from wire:{} to lgraph:{} (dpin {}:{}) (spin {}:{})\n"
+  , output, wname, g->get_name(), dpin.get_idx(),dpin.get_pid(), spin.get_idx(),spin.get_pid());
 
   return true;
 }
@@ -230,7 +231,7 @@ bool Pass_punch::add_input(LGraph *g, std::string_view wname, std::string_view i
   auto wname_bits   = g->get_bits(wname_idx);
   auto wname_offset = g->get_offset(wname_idx);
 
-  g->add_graph_input(input, 0, wname_bits, wname_offset);
+  g->add_graph_input(input, wname_bits, wname_offset);
   // g->add_edge(idx, wname_idx);
 
   return true;
@@ -255,7 +256,7 @@ bool Pass_punch::add_dest_instance(LGraph *g, std::string_view type, std::string
     if (ins_g->has_wirename(wname))
       return false;
 
-    ins_g->add_graph_input(wname, 0, wname_bits, wname_offset);
+    ins_g->add_graph_input(wname, wname_bits, wname_offset);
   }
 
   Port_ID ins_input_pid = ins_g->get_graph_input(wname).get_pid();
@@ -269,9 +270,9 @@ bool Pass_punch::add_dest_instance(LGraph *g, std::string_view type, std::string
     g->set_node_instance_name(ins_idx, instance);
   }
 
-  I(g->get_node(wname_idx).get_nid() == wname_idx); // FIXME: only master root for the moment
+//  I(g->get_node(wname_idx).get_nid() == wname_idx); // FIXME: only master root for the moment
 
-  g->add_edge(g->get_node(wname_idx).setup_driver_pin(), g->get_node(ins_idx).setup_sink_pin(ins_input_pid), wname_bits);
+  g->add_edge(g->get_node(wname_idx).setup_driver_pin(0), g->get_node(ins_idx).setup_sink_pin(ins_input_pid), wname_bits);
 
   ins_g->close();
 

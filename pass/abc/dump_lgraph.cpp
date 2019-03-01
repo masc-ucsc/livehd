@@ -36,7 +36,7 @@ void Pass_abc::gen_primary_io_from_abc(LGraph *new_graph, const LGraph *old_grap
     if(input_name[0] == '%' && input_name[input_name.size() - 1] == '%') {
       continue;
     } else {
-      auto io_node = new_graph->add_graph_input(Abc_ObjName(pNet), 0, 1, 0);
+      auto io_node = new_graph->add_graph_input(Abc_ObjName(pNet), 1, 0);
       graph_info->cell2id[pNet]                   = io_node.get_idx();
       graph_info->cell_out_pid[io_node.get_idx()] = io_node.get_pid();
       graph_info->io_remap[Abc_ObjName(pNet)]     = io_node.get_idx();
@@ -56,7 +56,7 @@ void Pass_abc::gen_primary_io_from_abc(LGraph *new_graph, const LGraph *old_grap
     if(output_name[0] == '%' && output_name[output_name.size() - 1] == '%') {
       continue;
     } else {
-      auto  io_node = new_graph->add_graph_output(Abc_ObjName(pNet), 0, 1, 0);
+      auto  io_node = new_graph->add_graph_output(Abc_ObjName(pNet), 1, 0);
       graph_info->cell2id[pTerm]                  = io_node.get_idx();
       graph_info->cell_out_pid[io_node.get_idx()] = io_node.get_pid();
       graph_info->io_remap[Abc_ObjName(pNet)]     = io_node.get_idx();
