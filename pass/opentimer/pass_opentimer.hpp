@@ -25,6 +25,10 @@ public:
 class Pass_opentimer : public Pass {
 private:
 protected:
+  static void optimize(Eprp_var &var);
+
+  void print(LGraph *orig);
+
 public:
   Pass_opentimer();
 
