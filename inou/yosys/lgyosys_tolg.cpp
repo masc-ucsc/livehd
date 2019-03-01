@@ -73,7 +73,7 @@ static void look_for_module_outputs(RTLIL::Module *module, const std::string &pa
       assert(!wire->port_output); // any bidirectional port?
       //log(" adding global input  wire: %s width %d id=%x original_pos=%d\n", wire->name.c_str(), wire->width, wire->hash(), wire->port_id);
       assert(wire->name.c_str()[0] == '\\');
-      auto io_pin = g->add_graph_input(&wire->name.c_str()[1], 0, wire->width, wire->start_offset, wire->port_id);
+      auto io_pin = g->add_graph_input(&wire->name.c_str()[1], wire->width, wire->start_offset, wire->port_id);
       io_idx = io_pin.get_idx();
       // TODO: can we get rid of the dependency in the wirename for IOs?
       g->set_node_wirename(io_idx, &wire->name.c_str()[1]);
@@ -87,7 +87,7 @@ static void look_for_module_outputs(RTLIL::Module *module, const std::string &pa
     } else if(wire->port_output) {
       //log(" adding global output wire: %s width %d id=%x\n", wire->name.c_str(), wire->width, wire->hash());
       assert(wire->name.c_str()[0] == '\\');
-      auto io_pin = g->add_graph_output(&wire->name.c_str()[1], 0, wire->width, wire->start_offset, wire->port_id);
+      auto io_pin = g->add_graph_output(&wire->name.c_str()[1], wire->width, wire->start_offset, wire->port_id);
       io_idx = io_pin.get_idx();
       // TODO: can we get rid of the dependency in the wirename for IOs?
       g->set_node_wirename(io_idx, &wire->name.c_str()[1]);

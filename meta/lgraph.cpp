@@ -178,11 +178,11 @@ Node_pin LGraph::get_graph_output_sink(std::string_view str) const {
 }
 #endif
 
-Node_pin LGraph::add_graph_input(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset) {
+Node_pin LGraph::add_graph_input(std::string_view str, uint16_t bits, uint16_t offset) {
   assert(!is_graph_output(str));
   assert(!has_wirename(str));
 
-  auto pin = LGraph_Base::add_graph_input_int(str, nid, bits);
+  auto pin = LGraph_Base::add_graph_input_int(str, bits);
   set_offset(pin.get_idx(), offset);
   set_node_wirename(pin, str);
 
@@ -191,11 +191,11 @@ Node_pin LGraph::add_graph_input(std::string_view str, Index_ID nid, uint16_t bi
   return pin;
 }
 
-Node_pin LGraph::add_graph_input(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset, Port_ID original_pos) {
+Node_pin LGraph::add_graph_input(std::string_view str, uint16_t bits, uint16_t offset, Port_ID original_pos) {
   assert(!is_graph_output(str));
   assert(!has_wirename(str));
 
-  auto pin = LGraph_Base::add_graph_input_int(str, nid, bits, original_pos);
+  auto pin = LGraph_Base::add_graph_input_int(str, bits, original_pos);
   set_offset(pin.get_idx(), offset);
   set_node_wirename(pin, str);
 
@@ -204,11 +204,11 @@ Node_pin LGraph::add_graph_input(std::string_view str, Index_ID nid, uint16_t bi
   return pin;
 }
 
-Node_pin LGraph::add_graph_output(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset) {
+Node_pin LGraph::add_graph_output(std::string_view str, uint16_t bits, uint16_t offset) {
   assert(!is_graph_input(str));
   assert(!has_wirename(str));
 
-  auto pin = LGraph_Base::add_graph_output_int(str, nid, bits);
+  auto pin = LGraph_Base::add_graph_output_int(str, bits);
   LGraph_WireNames::set_offset(pin.get_idx(), offset);
   LGraph_WireNames::set_node_wirename(pin, str);
 
@@ -217,11 +217,11 @@ Node_pin LGraph::add_graph_output(std::string_view str, Index_ID nid, uint16_t b
   return pin;
 }
 
-Node_pin LGraph::add_graph_output(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset, Port_ID original_pos) {
+Node_pin LGraph::add_graph_output(std::string_view str, uint16_t bits, uint16_t offset, Port_ID original_pos) {
   assert(!is_graph_input(str));
   assert(!has_wirename(str));
 
-  auto pin = LGraph_Base::add_graph_output_int(str, nid, bits, original_pos);
+  auto pin = LGraph_Base::add_graph_output_int(str, bits, original_pos);
   LGraph_WireNames::set_offset(pin.get_idx(), offset);
   LGraph_WireNames::set_node_wirename(pin, str);
 

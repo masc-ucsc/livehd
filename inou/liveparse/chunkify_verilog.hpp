@@ -25,7 +25,7 @@ protected:
   void write_file(std::string_view filename, std::string_view text1, std::string_view text2) const;
   void write_file(std::string_view filename, std::string_view text) const;
 
-  void add_io(LGraph *lg, bool input, std::string_view io_name, Port_ID original_pos);
+  void add_io(LGraph *lg, bool input, std::string_view io_name);
 
 public:
   Chunkify_verilog(std::string_view outd, std::string_view _elab_path);

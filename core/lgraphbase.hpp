@@ -18,7 +18,7 @@ class Backward_edge_iterator;
 
 class LGraph_Base : public LGraph_Node_Type, public LGraph_InstanceNames {
 private:
-  Index_ID add_graph_io_common(std::string_view str, Index_ID nid, uint16_t bits);
+  Index_ID add_graph_io_common();
 
 protected:
   struct IO_port {
@@ -47,10 +47,10 @@ protected:
 
   Port_ID recompute_io_ports(Index_ID track_nid);
 
-  Node_pin add_graph_input_int(std::string_view str, Index_ID nid, uint16_t bits);
-  Node_pin add_graph_output_int(std::string_view str, Index_ID nid, uint16_t bits);
-  Node_pin add_graph_input_int(std::string_view str, Index_ID nid, uint16_t bits, Port_ID original_pos);
-  Node_pin add_graph_output_int(std::string_view str, Index_ID nid, uint16_t bits, Port_ID original_pos);
+  Node_pin add_graph_input_int(std::string_view str, uint16_t bits);
+  Node_pin add_graph_output_int(std::string_view str, uint16_t bits);
+  Node_pin add_graph_input_int(std::string_view str, uint16_t bits, Port_ID original_pos);
+  Node_pin add_graph_output_int(std::string_view str, uint16_t bits, Port_ID original_pos);
 
   void del_int_node(Index_ID idx);
 

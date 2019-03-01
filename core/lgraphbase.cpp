@@ -162,23 +162,19 @@ Port_ID LGraph_Base::recompute_io_ports(Index_ID track_nid) {
   return track_pid;
 }
 
-Index_ID LGraph_Base::add_graph_io_common(std::string_view str, Index_ID nid, uint16_t bits) {
-  if (nid == 0) nid = create_node_int();
+Index_ID LGraph_Base::add_graph_io_common() {
 
-  if (bits != 0) set_bits(nid, bits);
-
+  auto nid = create_node_int();
   node_type_set(nid, GraphIO_Op);
-
-  node_internal[nid].set_dst_pid(0);
   I(node_internal[nid].is_master_root());
 
   return nid;
 }
 
-Node_pin LGraph_Base::add_graph_input_int(std::string_view str, Index_ID nid, uint16_t bits) {
+Node_pin LGraph_Base::add_graph_input_int(std::string_view str, uint16_t bits) {
   I(input_array.get_id(str) == 0);  // No name dupliation
 
-  nid = add_graph_io_common(str, nid, bits);
+  auto nid = add_graph_io_common();
   node_internal[nid].set_graph_io_input();
 
   IO_port p(nid, 0, false);
@@ -188,27 +184,29 @@ Node_pin LGraph_Base::add_graph_input_int(std::string_view str, Index_ID nid, ui
   I(pid);
 
   auto idx = setup_idx_from_pid(nid, pid);
+  set_bits(idx, bits);
   return Node_pin(idx, pid, false);
 }
 
-Node_pin LGraph_Base::add_graph_input_int(std::string_view str, Index_ID nid, uint16_t bits, Port_ID original_pos) {
+Node_pin LGraph_Base::add_graph_input_int(std::string_view str, uint16_t bits, Port_ID original_pos) {
   I(input_array.get_id(str) == 0);  // No name dupliation
   I(original_pos);
 
-  nid = add_graph_io_common(str, nid, bits);
+  auto nid = add_graph_io_common();
   node_internal[nid].set_graph_io_input();
 
   IO_port p(nid, original_pos, true);
   input_array.create_id(str, p);
 
   auto idx = setup_idx_from_pid(nid, original_pos);
+  set_bits(idx, bits);
   return Node_pin(idx, original_pos, false);
 }
 
-Node_pin LGraph_Base::add_graph_output_int(std::string_view str, Index_ID nid, uint16_t bits) {
+Node_pin LGraph_Base::add_graph_output_int(std::string_view str, uint16_t bits) {
   I(output_array.get_id(str) == 0);  // No name dupliation
 
-  nid = add_graph_io_common(str, nid, bits);
+  auto nid = add_graph_io_common();
   node_internal[nid].set_graph_io_output();
 
   IO_port p(nid, 0, false);
@@ -218,20 +216,22 @@ Node_pin LGraph_Base::add_graph_output_int(std::string_view str, Index_ID nid, u
   I(pid);
 
   auto idx = setup_idx_from_pid(nid, pid);
+  set_bits(idx, bits);
   return Node_pin(idx, pid, true);
 }
 
-Node_pin LGraph_Base::add_graph_output_int(std::string_view str, Index_ID nid, uint16_t bits, Port_ID original_pos) {
+Node_pin LGraph_Base::add_graph_output_int(std::string_view str, uint16_t bits, Port_ID original_pos) {
   I(output_array.get_id(str) == 0);  // No name dupliation
   I(original_pos);
 
-  nid = add_graph_io_common(str, nid, bits);
+  auto nid = add_graph_io_common();
   node_internal[nid].set_graph_io_output();
 
   IO_port p(nid, original_pos, true);
   output_array.create_id(str, p);
 
   auto idx = setup_idx_from_pid(nid, original_pos);
+  set_bits(idx, bits);
   return Node_pin(idx, original_pos, true);
 }
 

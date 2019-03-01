@@ -68,10 +68,10 @@ public:
   void sync() override;
   void emplace_back() override;
 
-  Node_pin add_graph_input(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset);
-  Node_pin add_graph_output(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset);
-  Node_pin add_graph_input(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset, Port_ID origininal_pos);
-  Node_pin add_graph_output(std::string_view str, Index_ID nid, uint16_t bits, uint16_t offset, Port_ID origininal_pos);
+  Node_pin add_graph_input(std::string_view str, uint16_t bits, uint16_t offset);
+  Node_pin add_graph_output(std::string_view str, uint16_t bits, uint16_t offset);
+  Node_pin add_graph_input(std::string_view str, uint16_t bits, uint16_t offset, Port_ID origininal_pos);
+  Node_pin add_graph_output(std::string_view str, uint16_t bits, uint16_t offset, Port_ID origininal_pos);
 
 #if 1
   // WARNING: deprecate: use Node create_node(xxx)
