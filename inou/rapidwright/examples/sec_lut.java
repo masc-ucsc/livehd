@@ -37,17 +37,28 @@ import java.util.Queue;
 public class sec_lut{
   public static void main(String[] args){
     //Create New Design for target part: PYNQ_Z1
-    Design d = new Design("newDesign", Device.PYNQ_Z1); 
-    
+    Design d = new Design("newDesign", Device.PYNQ_Z1);
+
     Cell or2 = d.createAndPlaceCell("or2", Unisim.OR2, "SLICE_X100Y100/A6LUT");
     Cell and2 = d.createAndPlaceCell("and2", Unisim.AND2, "SLICE_X100Y100/A6LUT");
 
     Cell b0 = d.createAndPlaceIOB("button0", PinType.IN , "D19",  "LVCMOS33");
     Cell b1 = d.createAndPlaceIOB("button1", PinType.IN , "D20",  "LVCMOS33");
-    
-    Cell out0    = d.createAndPlaceIOB("out0"   , PinType.OUT, "R14",  "LVCMOS33");
 
-						
+    Cell out0    = d.createAndPlaceIOB("out0"   , PinType.OUT, "R14",  "LVCMOS33");
+    Cell flop    = d.createAndPlaceCell(null, "myflop"   , Unisim.FDRE);
+
+    //inputNet.createPortInst("D", flop);
+    //outputNet.createPortInst("Q", flop);
+    //
+    //	private static void connectFDRECtrl(Net clk, Net rst, Net ce, Cell ff){
+		// clk.getLogicalNet().createPortInst("C", ff);
+		// rst.getLogicalNet().createPortInst("R", ff);
+		// ce.getLogicalNet().createPortInst("CE", ff);
+    //
+    // https://www.xilinx.com/support/documentation/sw_manuals/xilinx2018_3/ug953-vivado-7series-libraries.pdf
+
+
 // Connect Button 0 to the LUT2 input I0
     Net net0 = d.createNet("button0_IBUF");
     net0.connect(b0, "O");
@@ -67,7 +78,7 @@ public class sec_lut{
     netLUT2.connect(or2, "O");
     netLUT2.connect(and2, "I1");
 
-// Connect 
+// Connect
 // Connect the LUT2 (OR2) to input I3
     Net net2 = d.createNet("and2");
     net2.connect(and2, "O");
