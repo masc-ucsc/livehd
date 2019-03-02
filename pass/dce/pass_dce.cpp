@@ -34,7 +34,7 @@ void Pass_dce::optimize(Eprp_var &var) {
 
 void Pass_dce::trans(LGraph *g) {
 
-  bm::bvector<>      output_used;
+  bm::bvector<>      cell_used;
   std::set<Index_ID> pending;
 
   g->each_graph_output([&pending](const Node_pin &pin) {
@@ -44,21 +44,22 @@ void Pass_dce::trans(LGraph *g) {
   while(!pending.empty()) {
     Index_ID current = *(pending.begin());
     pending.erase(current);
-    output_used.set_bit(current);
+    auto node = g->get_node(current);
+    cell_used.set_bit(node.get_nid());
 
-    for(auto &c : g->inp_edges(current)) {
-      if(output_used.get_bit(c.get_out_pin().get_idx()))
+    for(auto &c : g->inp_edges(node.get_nid())) {
+      if(cell_used.get_bit(g->get_node(c.get_out_pin()).get_nid()))
         continue;
 
       pending.insert(c.get_out_pin().get_idx());
     }
   }
 
-  for(auto idx : g->fast()) {
-    if(output_used.get_bit(idx))
+  for(auto nid : g->fast()) {
+    if(cell_used.get_bit(nid))
       continue;
 
-    g->del_node(idx);
+    g->del_node(nid);
   }
 
   g->sync();
