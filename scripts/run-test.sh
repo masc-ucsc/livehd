@@ -25,6 +25,23 @@ if [ "$RUN_TYPE" == "long" ]; then
     echo "run-test.sh: long test failed"
     exit 1
   fi
+elif [ "$RUN_TYPE" == "long1" ]; then
+  # Not manual test
+  bazel test -c ${LGRAPH_BUILD_MODE} --test_tag_filters "long1" //...
+  if [ $? -ne 0 ]; then
+    echo "run-test.sh: long1 test failed"
+    exit 1
+  fi
+elif [ "$RUN_TYPE" == "long2" ]; then
+  # Not manual test
+  bazel test -c ${LGRAPH_BUILD_MODE} --test_tag_filters "long2" //...
+  if [ $? -ne 0 ]; then
+    echo "run-test.sh: long2 test failed"
+    exit 1
+  fi
+elif [ "$RUN_TYPE" != "" ]; then
+  echo "run-test.sh: unknown ${RUN_TYPE} run option"
+  exit 1
 fi
 
 exit 0

@@ -447,9 +447,9 @@ public:
   Node_Type_Flop() : Node_Type("sflop", SFlop_Op, true) {
     inputs.push_back("CLK");
     inputs.push_back("D");
-    inputs.push_back("E");
-    inputs.push_back("R");     // reset signal
-    inputs.push_back("RVAL");  // reset value
+    inputs.push_back("EN");
+    inputs.push_back("CLR");   // reset signal
+    inputs.push_back("SET");  // set value
     inputs.push_back("POL");   // clock polarity (positive if not specified)
     outputs.push_back("Q");
   };
@@ -460,9 +460,9 @@ public:
   Node_Type_AFlop() : Node_Type("flop", AFlop_Op, true) {
     inputs.push_back("CLK");
     inputs.push_back("D");
-    inputs.push_back("E");
-    inputs.push_back("R");     // reset signal
-    inputs.push_back("RVAL");  // reset value
+    inputs.push_back("EN");
+    inputs.push_back("CLR");   // reset signal
+    inputs.push_back("SET");   // set value
     outputs.push_back("Q");
   };
 };
@@ -472,6 +472,7 @@ public:
   Node_Type_Latch() : Node_Type("latch", Latch_Op, true) {
     inputs.push_back("D");
     inputs.push_back("EN");
+    inputs.push_back("POL");  // reset value
     outputs.push_back("Q");
   };
 };

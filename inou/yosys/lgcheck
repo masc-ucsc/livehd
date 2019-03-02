@@ -195,5 +195,5 @@ if [ $? -eq 0 ]; then
   exit 0
 fi
 
-echo "FAIL: circuits are not equivalent (${input})"
+echo "FAIL: circuits are not equivalent (${input}) with top:${OPT_TOP}"
 exit 1

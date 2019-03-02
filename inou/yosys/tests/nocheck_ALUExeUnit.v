@@ -1,4 +1,4 @@
-module ALUExeUnit(
+module nocheck_ALUExeUnit(
   input         clock,
   input         reset,
   output [9:0]  io_fu_types,

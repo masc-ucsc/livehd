@@ -1,20 +1,6 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-declare -a inputs=("dce1.v" "trivial.v" "null_port.v" "simple_flop.v" "test.v" "shift.v"\
-                   "simple_add.v" \
-                   "wires.v" "reduce.v" "graphtest.v" "add.v"  "assigns.v" \
-                   "submodule.v" "multiport.v"\
-                   "gcd.v" "common_sub.v" "trivial2.v" "consts.v" "async.v"\
-                   "unconnected.v" "gates.v" "operators.v" \
-                   #"shiftx.v" "regfile2r1w.v" \  #cases currently not working
-                   "offset.v" "submodule_offset.v" "mem.v" "mem2.v" \
-                    # "mem_offset.v" \ #deactivated until we get the new yosys
-                   "params.v" "params_submodule.v" "iwls_adder.v")
-
-TEMP=$(getopt -o p --long profile -n 'yosys.sh' -- "$@")
-eval set -- "$TEMP"
-
 echo "yosys.sh running in "$(pwd)
 
 LGSHELL=./bazel-bin/main/lgshell
@@ -30,33 +16,33 @@ fi
 
 YOSYS=./inou/yosys/lgyosys
 LGCHECK=./inou/yosys/lgcheck
-while true ; do
-    case "$1" in
-        -p|--profile)
-          shift
-          YOSYS="${YOSYS} --profile"
-          ;;
-        --)
-          shift
-          break
-          ;;
-        *)
-          echo "Option $1 not recognized!"
-          exit 1
-          ;;
-    esac
-done
 
 rm -rf ./lgdb/ ./logs ./yosys-test ./*.v ./*.json
 mkdir yosys-test/
 
-#for input in ${inputs[@]}
-for full_input in inou/yosys/tests/*.v
+inputs=inou/yosys/tests/*.v
+long=""
+if [ "$1" == "long" ]; then
+  long="true"
+  shift
+fi
+if [ "$1" != "" ]; then
+  inputs=""
+  while [ "$1" != "" ]; do
+    inputs+=" "$1
+    shift
+  done
+  echo "verilog.sh inputs: ${inputs}"
+fi
+
+for full_input in ${inputs}
 do
   input=$(basename ${full_input})
   echo ${YOSYS} ./inou/yosys/tests/${input}
-  if [[ $input =~ "future_" ]]; then
-    echo "Skipping synthesis and check for "$base
+  base=${input%.*}
+
+  if [[ $long == "" && $input =~ "long_" ]]; then
+    echo "Skipping long test for "$base
     continue
   fi
 
@@ -64,15 +50,13 @@ do
   mkdir -p tmp_yosys
 
   #${YOSYS} ./inou/yosys/tests/${input} > ./yosys-test/log_from_yosys_${input} 2> ./yosys-test/err_from_yosys_${input}
-  echo "inou.yosys.tolg path:lgdb_yosys files:"${full_input}  | ${LGSHELL} -q
+  echo "inou.yosys.tolg path:lgdb_yosys top:${base} files:"${full_input}  | ${LGSHELL} -q
   if [ $? -eq 0 ]; then
     echo "Successfully created graph from ${input}"
   else
     echo "FAIL: lgyosys parsing terminated with an error (testcase ${input})"
     exit 1
   fi
-
-  base=${input%.*}
 
   #./inou/json/lgjson  --graph_name ${base} --json_output ${base}.json > ./yosys-test/log_json_${input} 2> ./yosys-test/err_json_${input}
   #if [ $? -ne 0 ]; then
@@ -94,7 +78,7 @@ do
   if [[ $base =~ "nocheck_" ]]; then
     echo "Skipping check for "$base
   else
-    ${LGCHECK} --implementation=tmp_yosys/all_${base}.v --reference=${full_input}
+    ${LGCHECK} --implementation=tmp_yosys/all_${base}.v --reference=${full_input} --top=${base}
     if [ $? -eq 0 ]; then
       echo "Successfully matched generated verilog with original verilog (${full_input})"
     else

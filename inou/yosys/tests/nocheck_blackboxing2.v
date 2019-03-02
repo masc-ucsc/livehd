@@ -1,5 +1,5 @@
 
-module blackboxing2 (input a, input b, output c, output d);
+module nocheck_blackboxing2 (input a, input b, output c, output d);
 
 wire tmp1;
 wire tmp2;
