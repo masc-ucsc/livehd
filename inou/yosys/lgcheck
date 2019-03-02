@@ -102,6 +102,8 @@ if [ "${CELLLIB}" != "" ]; then
   lib="read_verilog ${CELLLIB}"
 fi
 
+#exit 2
+
 yosys_read="read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; proc; flatten; rename -top gold; design -stash gold;
             read_verilog -sv ${GATE}; hierarchy ${TOP_STR}; proc; flatten; rename -top gate; design -stash gate;
             design -copy-from gold -as gold gold; design -copy-from gate -as gate gate; ${lib};"
@@ -149,6 +151,19 @@ ${YOSYS} -p "${yosys_read};
     ${yosys_prep}; opt -purge; proc; opt -purge; ${yosys_equiv_extra}; equiv_status -assert" \
     | grep "Equivalence successfully proven!"
 
+if [ $? -eq 0 ]; then
+  echo "Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
+  exit 0
+fi
+
+${YOSYS} -p " read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; flatten ; opt ; prep; rename -top gold; design -stash gold;
+              read_verilog -sv ${GATE}; hierarchy ${TOP_STR}; flatten ; opt ; prep; rename -top gate; design -stash gate;
+              design -copy-from gold -as gold gold
+              design -copy-from gate -as gate gate
+
+              miter -equiv -make_assert -flatten gold gate equiv
+              hierarchy -top equiv
+              sat -prove-asserts -tempinduct -ignore_unknown_cells -verify -set-init-undef equiv"
 if [ $? -eq 0 ]; then
   echo "Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
   exit 0
