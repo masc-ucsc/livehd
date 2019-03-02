@@ -1,6 +1,6 @@
 
 (* hierarchy *)
-module hierarchy(a, b, y1, y2, y3, y4);
+module nocheck_hierarchy(a, b, y1, y2, y3, y4);
 input [3:0] a;
 input signed [3:0] b;
 output [7:0] y1, y2, y3, y4;

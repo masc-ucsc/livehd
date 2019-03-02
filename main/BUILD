@@ -65,6 +65,21 @@ sh_test(
     ]
 )
 
+sh_test(
+    name = "verilog.sh-long",
+    srcs = ["tests/verilog.sh"],
+    data = [
+        "//inou/yosys:liblgraph_yosys.so",
+        "//inou/yosys:verilog_tests",
+        ":lgshell",
+        ],
+    tags = ["long2"],
+    size = "large",
+    args = ["long"],
+    deps = [
+        "//inou/yosys:scripts",
+    ]
+)
 
 cc_binary(
     name = "uclient_test",

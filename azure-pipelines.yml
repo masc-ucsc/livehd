@@ -8,14 +8,23 @@ jobs:
     steps:
       - bash: ./scripts/run-docker-test.sh `pwd` dbg mascucsc/archlinux-masc /root/lgraph g++ coverage
 
-  - job: ArchLong
-    displayName: run archlinux-masc with debug and g++ long tests
+  - job: ArchLong1
+    displayName: run archlinux-masc with debug and g++ long1 tests
 
     pool:
       vmImage: 'Ubuntu 16.04'
 
     steps:
-      - bash: ./scripts/run-docker-test.sh `pwd` dbg mascucsc/archlinux-masc /root/lgraph g++ . long
+      - bash: ./scripts/run-docker-test.sh `pwd` dbg mascucsc/archlinux-masc /root/lgraph g++ . long1
+
+  - job: ArchLong2
+    displayName: run archlinux-masc with debug and g++ long2 tests
+
+    pool:
+      vmImage: 'Ubuntu 16.04'
+
+    steps:
+      - bash: ./scripts/run-docker-test.sh `pwd` dbg mascucsc/archlinux-masc /root/lgraph g++ . long2
 
   - job: AlpineDebug
     displayName: run alpine-masc with opt and g++

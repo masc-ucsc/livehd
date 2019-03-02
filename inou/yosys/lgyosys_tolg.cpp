@@ -756,10 +756,25 @@ static LGraph *process_module(RTLIL::Module *module) {
       op = SFlop_Op;
       if(cell->parameters.find("\\WIDTH") != cell->parameters.end())
         size = cell->parameters["\\WIDTH"].as_int();
+      RTLIL::Const clk_polarity = cell->parameters["\\CLK_POLARITY"];
+      for(int i=1;i<clk_polarity.size();i++) {
+        assert(clk_polarity[0] == clk_polarity[i]);
+      }
+      if (clk_polarity.size() && clk_polarity[0] != RTLIL::S1)
+        connect_constant(g, 0, 1, onid, 5); // POL is 5 in SFlop_Op
+
+
     } else if(std::strncmp(cell->type.c_str(), "$adff", 4) == 0) {
       op = AFlop_Op;
       if(cell->parameters.find("\\WIDTH") != cell->parameters.end())
         size = cell->parameters["\\WIDTH"].as_int();
+      RTLIL::Const clk_polarity = cell->parameters["\\EN_POLARITY"];
+      for(int i=1;i<clk_polarity.size();i++) {
+        assert(clk_polarity[0] == clk_polarity[i]);
+      }
+      if (clk_polarity.size() && clk_polarity[0] != RTLIL::S1)
+        connect_constant(g, 0, 1, onid, 2); // POL is 3 in Latch_Op
+
     } else if(std::strncmp(cell->type.c_str(), "$dlatch", 7) == 0) {
       op = Latch_Op;
       if(cell->parameters.find("\\WIDTH") != cell->parameters.end())
@@ -1125,6 +1140,8 @@ static LGraph *process_module(RTLIL::Module *module) {
             dst_pid = 3;
           else
             dst_pid = Node_Type::get(op).get_input_match(&conn.first.c_str()[1]);
+        } else if(op == Latch_Op) {
+          dst_pid = Node_Type::get(op).get_input_match(&conn.first.c_str()[1]);
         } else if(op == Sum_Op) {
           dst_pid = 0;
           if(cell->parameters[conn.first.str() + "_SIGNED"].as_int() == 0)

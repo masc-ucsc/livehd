@@ -830,6 +830,32 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       }
       break;
     }
+    case Latch_Op: {
+      RTLIL::Wire *dWire    = nullptr;
+      RTLIL::Wire *enWire   = nullptr;
+      bool         polarity = true;
+
+      for(const auto &c : g->inp_edges(nid)) {
+        switch(c.get_inp_pin().get_pid()) {
+        case 0: dWire  = get_wire(c.get_out_pin()); break;
+        case 1: enWire = get_wire(c.get_out_pin()); break;
+        case 2: {
+          auto const_node = g->get_node(c.get_out_pin());
+          if(const_node.get_type().op != U32Const_Op)
+            log_error("Internal Error: polarity is not a constant.\n");
+          polarity = g->node_value_get(const_node.get_nid()) != 0? true:false;
+        } break;
+        default:
+          log_error("DumpYosys: unrecognized wire connection pid=%d\n", c.get_out_pin().get_pid());
+        }
+      }
+      if(dWire)
+        log("adding Latch_Op width = %d\n", dWire->width);
+      if(enWire)
+        log("adding Latch_Op enable width = %d\n", dWire->width);
+      // last argument is polarity
+      module->addDlatch(next_id(g), enWire, dWire, cell_output_map[std::make_pair(node.get_driver_pin().get_idx(), 0)], polarity);
+    } break;
     case SFlop_Op:
     case AFlop_Op: {
       RTLIL::Wire *enWire  = nullptr;
@@ -837,14 +863,21 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       RTLIL::Wire *clkWire = nullptr;
       RTLIL::Wire *rstWire = nullptr;
       RTLIL::Wire *rstVal  = nullptr;
+      bool polarity = true;
 
       for(const auto &c : g->inp_edges(nid)) {
         switch(c.get_inp_pin().get_pid()) {
         case 0: clkWire = get_wire(c.get_out_pin()); break;
         case 1: dWire   = get_wire(c.get_out_pin()); break;
         case 2: enWire  = get_wire(c.get_out_pin()); break;
-        case 3: rstWire = get_wire(c.get_out_pin()); break;
-        case 4: rstVal  = get_wire(c.get_out_pin()); break;
+        case 3: rstWire = get_wire(c.get_out_pin()); break; // clr signal in yosys
+        case 4: rstVal  = get_wire(c.get_out_pin()); break; // set signal in yosys
+        case 5: {
+          auto const_node = g->get_node(c.get_out_pin());
+          if(const_node.get_type().op != U32Const_Op)
+            log_error("Internal Error: polarity is not a constant.\n");
+          polarity = g->node_value_get(const_node.get_nid()) != 0? true:false;
+        }
         default:
           log("[WARNING] DumpYosys: unrecognized wire connection pid=%d\n", c.get_out_pin().get_pid());
         }
@@ -855,7 +888,9 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
       switch(g->get_node(nid).get_type().op) {
       case SFlop_Op:
         if(enWire == nullptr && clkWire != nullptr && dWire != nullptr && rstWire == nullptr && rstVal == nullptr) {
-          module->addDff(next_id(g), clkWire, dWire, cell_output_map[std::make_pair(node.get_driver_pin().get_idx(), 0)], true);
+          module->addDff(next_id(g), clkWire, dWire, cell_output_map[std::make_pair(node.get_driver_pin().get_idx(), 0)], polarity);
+        }else if(enWire == nullptr && clkWire != nullptr && dWire != nullptr && rstWire != nullptr && rstVal != nullptr) {
+          module->addDffsr(next_id(g), clkWire, rstVal, rstWire, dWire, cell_output_map[std::make_pair(node.get_driver_pin().get_idx(), 0)], polarity, polarity, polarity);
         } else {
           log_error("Enable and Reset not supported on Flops yet!\n");
         }
