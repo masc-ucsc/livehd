@@ -75,7 +75,7 @@ static void look_for_module_outputs(RTLIL::Module *module, const std::string &pa
       I(!wire->port_output); // any bidirectional port?
       //log(" adding global input  wire: %s width %d id=%x original_pos=%d\n", wire->name.c_str(), wire->width, wire->hash(), wire->port_id);
       I(wire->name.c_str()[0] == '\\');
-      //I(last_input_port_id <= wire->port_id);
+      I(last_input_port_id <= wire->port_id);
       last_input_port_id = wire->port_id;
       auto io_pin = g->add_graph_input(&wire->name.c_str()[1], wire->width, wire->start_offset);
 
@@ -86,7 +86,7 @@ static void look_for_module_outputs(RTLIL::Module *module, const std::string &pa
     } else if(wire->port_output) {
       //log(" adding global output wire: %s width %d id=%x\n", wire->name.c_str(), wire->width, wire->hash());
       I(wire->name.c_str()[0] == '\\');
-      //I(last_output_port_id <= wire->port_id);
+      I(last_output_port_id <= wire->port_id);
       last_output_port_id = wire->port_id;
       auto io_pin = g->add_graph_output(&wire->name.c_str()[1], wire->width, wire->start_offset);
 #ifndef NDEBUG
