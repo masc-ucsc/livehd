@@ -49,6 +49,8 @@ void LGraph_Base::clear() {
   input_array.clear();
   output_array.clear();
 
+  max_io_port_pid = 0;
+
   Lgraph_base_core::clear();
 }
 
@@ -86,80 +88,20 @@ void LGraph_Base::reload() {
   // lazy input_array.reload();
   // lazy output_array.reload();
 
-  recompute_io_ports(0);
+  max_io_port_pid = 0;
+  for (auto it = input_array.begin(); it != input_array.end(); ++it) {
+    const auto &p = it.get_field();
+    if (max_io_port_pid<p.pos)
+      max_io_port_pid = p.pos;
+  }
+  for (auto it = output_array.begin(); it != output_array.end(); ++it) {
+    const auto &p = it.get_field();
+    if (max_io_port_pid<p.pos)
+      max_io_port_pid = p.pos;
+  }
 
   LGraph_Node_Type::reload(sz);
   LGraph_InstanceNames::reload(sz);
-}
-
-Port_ID LGraph_Base::recompute_io_ports(Index_ID track_nid) {
-  // FIXME: the input_array/sorting/output_array is a goner
-  // nid 1: inputs
-  // nid 2: outputs
-  std::map<std::string_view, int> ordered;
-
-  Port_ID track_pid = 0;
-
-  std::vector<int> fixed;
-  Port_ID          pos = 1;
-
-  for (auto it = input_array.begin(); it != input_array.end(); ++it) {
-    auto &p = it.get_field();
-    if (p.original_set || p.pos) {
-      if (p.original_set)
-        p.pos = p.original_pos;
-      if (p.pos >= fixed.size()) fixed.resize(p.pos + 1);
-      I(fixed[p.pos] == 0);  // original_pos must be unique
-      fixed[p.pos] = it.get_id();
-    } else {
-      ordered[it.get_name()] = it.get_id();
-    }
-  }
-
-  while (fixed.size() > pos && fixed[pos]) {
-    pos++;
-  }
-  for (auto &it : ordered) {
-    auto &p = input_array.get_field(it.second);
-    if (track_nid == p.nid)
-      track_pid = pos;
-    p.pos   = pos++;
-    while (fixed.size() > pos && fixed[pos]) {
-      pos++;
-    }
-  }
-
-  // Reassign outputs in alphabetical order
-  ordered.clear();
-  pos = 1;
-
-  for (auto it = output_array.begin(); it != output_array.end(); ++it) {
-    auto &p = it.get_field();
-    if (p.original_set) {
-      p.pos = p.original_pos;
-      if (p.original_pos >= fixed.size()) fixed.resize(p.original_pos + 1);
-      I(fixed[p.original_pos] == 0);  // original_pos must be unique
-      fixed[p.original_pos] = it.get_id();
-    } else {
-      ordered[it.get_name()] = it.get_id();
-    }
-  }
-
-  while (fixed.size() > pos && fixed[pos]) {
-    pos++;
-  }
-  for (auto &it : ordered) {
-    auto &p = output_array.get_field(it.second);
-    if (track_nid == p.nid)
-      track_pid = pos;
-    p.pos   = pos++;
-    while (fixed.size() > pos && fixed[pos]) {
-      pos++;
-    }
-  }
-
-  GI(track_nid, track_pid);
-  return track_pid;
 }
 
 Index_ID LGraph_Base::add_graph_io_common() {
@@ -177,30 +119,13 @@ Node_pin LGraph_Base::add_graph_input_int(std::string_view str, uint16_t bits) {
   auto nid = add_graph_io_common();
   node_internal[nid].set_graph_io_input();
 
-  IO_port p(nid, 0, false);
+  auto pid = ++max_io_port_pid;
+  IO_port p(nid, pid, false);
   input_array.create_id(str, p);
-
-  auto pid = recompute_io_ports(nid);
-  I(pid);
 
   auto idx = setup_idx_from_pid(nid, pid);
   set_bits(idx, bits);
   return Node_pin(idx, pid, false);
-}
-
-Node_pin LGraph_Base::add_graph_input_int(std::string_view str, uint16_t bits, Port_ID original_pos) {
-  I(input_array.get_id(str) == 0);  // No name dupliation
-  I(original_pos);
-
-  auto nid = add_graph_io_common();
-  node_internal[nid].set_graph_io_input();
-
-  IO_port p(nid, original_pos, true);
-  input_array.create_id(str, p);
-
-  auto idx = setup_idx_from_pid(nid, original_pos);
-  set_bits(idx, bits);
-  return Node_pin(idx, original_pos, false);
 }
 
 Node_pin LGraph_Base::add_graph_output_int(std::string_view str, uint16_t bits) {
@@ -209,30 +134,13 @@ Node_pin LGraph_Base::add_graph_output_int(std::string_view str, uint16_t bits) 
   auto nid = add_graph_io_common();
   node_internal[nid].set_graph_io_output();
 
-  IO_port p(nid, 0, false);
+  auto pid = ++max_io_port_pid;
+  IO_port p(nid, pid, false);
   output_array.create_id(str, p);
-
-  auto pid = recompute_io_ports(nid);
-  I(pid);
 
   auto idx = setup_idx_from_pid(nid, pid);
   set_bits(idx, bits);
   return Node_pin(idx, pid, true);
-}
-
-Node_pin LGraph_Base::add_graph_output_int(std::string_view str, uint16_t bits, Port_ID original_pos) {
-  I(output_array.get_id(str) == 0);  // No name dupliation
-  I(original_pos);
-
-  auto nid = add_graph_io_common();
-  node_internal[nid].set_graph_io_output();
-
-  IO_port p(nid, original_pos, true);
-  output_array.create_id(str, p);
-
-  auto idx = setup_idx_from_pid(nid, original_pos);
-  set_bits(idx, bits);
-  return Node_pin(idx, original_pos, true);
 }
 
 std::string_view LGraph_Base::get_graph_input_name_from_pid(Port_ID pid) const {

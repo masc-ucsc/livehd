@@ -32,6 +32,7 @@ protected:
 
   // typedef std::pair<Index_ID, Port_ID> io_t; // node id and position at verilog
 
+  Port_ID             max_io_port_pid;
   Char_Array<IO_port> input_array;
   Char_Array<IO_port> output_array;
 
@@ -49,8 +50,6 @@ protected:
 
   Node_pin add_graph_input_int(std::string_view str, uint16_t bits);
   Node_pin add_graph_output_int(std::string_view str, uint16_t bits);
-  Node_pin add_graph_input_int(std::string_view str, uint16_t bits, Port_ID original_pos);
-  Node_pin add_graph_output_int(std::string_view str, uint16_t bits, Port_ID original_pos);
 
   void del_int_node(Index_ID idx);
 

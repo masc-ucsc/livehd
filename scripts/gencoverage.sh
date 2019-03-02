@@ -9,7 +9,11 @@ bazel coverage -k --experimental_cc_coverage  //...
 
 for a in `bazel query "tests(//...)" 2>/dev/null | grep ^\/ | sed -e 's/^\//.\/bazel-bin/g' | sed -e 's/:/\//g'`
 do
-  echo $a
-  echo `${a}`
+  if [[ $a =~ "long" ]]; then
+    echo "Not using ${a} for coverage"
+  else
+    echo "coverage for ${a}"
+    ${a}
+  fi
 done
 
