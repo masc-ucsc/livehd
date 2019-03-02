@@ -191,6 +191,7 @@ Node_pin LGraph::add_graph_input(std::string_view str, uint16_t bits, uint16_t o
   return pin;
 }
 
+/*
 Node_pin LGraph::add_graph_input(std::string_view str, uint16_t bits, uint16_t offset, Port_ID original_pos) {
   assert(!is_graph_output(str));
   assert(!has_wirename(str));
@@ -203,6 +204,7 @@ Node_pin LGraph::add_graph_input(std::string_view str, uint16_t bits, uint16_t o
   I(pin.get_pid() == p.pos && p.nid != pin.get_idx());
   return pin;
 }
+*/
 
 Node_pin LGraph::add_graph_output(std::string_view str, uint16_t bits, uint16_t offset) {
   assert(!is_graph_input(str));
@@ -217,6 +219,7 @@ Node_pin LGraph::add_graph_output(std::string_view str, uint16_t bits, uint16_t 
   return pin;
 }
 
+/*
 Node_pin LGraph::add_graph_output(std::string_view str, uint16_t bits, uint16_t offset, Port_ID original_pos) {
   assert(!is_graph_input(str));
   assert(!has_wirename(str));
@@ -229,6 +232,7 @@ Node_pin LGraph::add_graph_output(std::string_view str, uint16_t bits, uint16_t 
   I(pin.get_pid() == p.pos && p.nid != pin.get_idx()); // PID==0 not used, so it must be different
   return pin;
 }
+*/
 
 Node LGraph::create_node() {
   Index_ID nid = create_node_int();

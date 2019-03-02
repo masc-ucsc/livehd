@@ -17,17 +17,13 @@ Index_ID Pass_dfg::create_reference(LGraph *g, Aux_tree *aux_tree, const std::st
 //}
 
 Index_ID Pass_dfg::create_input(LGraph *g, Aux_tree *aux_tree, const std::string &var_name, uint16_t bits) {
-  Index_ID nid = create_node(g, aux_tree, var_name);
-  g->add_graph_input(var_name.substr(1).c_str(), nid, bits, 0); // get rid of $mark
-  g->set_bits(g->get_node(nid).setup_driver_pin(1), bits);
-  return nid;
+  auto pin = g->add_graph_input(var_name.substr(1).c_str(), bits, 0); // get rid of $mark
+  return pin.get_idx();// FIXME: idx or nid??
 }
 
 Index_ID Pass_dfg::create_output(LGraph *g, Aux_tree *aux_tree, const std::string &var_name, uint16_t bits) {
-  Index_ID nid = create_node(g, aux_tree, var_name);
-  g->add_graph_output(var_name.substr(1).c_str(), nid, bits, 0);
-  g->set_bits(g->get_node(nid).setup_driver_pin(1), bits);
-  return nid;
+  auto pin = g->add_graph_output(var_name.substr(1).c_str(), bits, 0);
+  return pin.get_idx(); // FIXME: idx or nid??
 }
 
 Index_ID Pass_dfg::create_private(LGraph *g, Aux_tree *aux_tree, const std::string &var_name) {
