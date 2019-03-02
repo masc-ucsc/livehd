@@ -68,24 +68,43 @@ static void look_for_module_outputs(RTLIL::Module *module, const std::string &pa
 
   int last_input_port_id  = 0;
   int last_output_port_id = 0;
+
+  std::vector<RTLIL::Wire *> io_wires;
+
   for(auto &wire_iter : module->wires_) {
     RTLIL::Wire *wire = wire_iter.second;
-    Index_ID     io_idx;
     if(wire->port_input) {
+      log("input %s\n",wire->name.c_str());
+      io_wires.push_back(wire);
       I(!wire->port_output); // any bidirectional port?
-      //log(" adding global input  wire: %s width %d id=%x original_pos=%d\n", wire->name.c_str(), wire->width, wire->hash(), wire->port_id);
       I(wire->name.c_str()[0] == '\\');
+    }else if (wire->port_output) {
+      log("output %s\n",wire->name.c_str());
+      io_wires.push_back(wire);
+      I(wire->name.c_str()[0] == '\\');
+    }
+  }
+
+  struct Less_than_sort_io {
+    inline bool operator() (const RTLIL::Wire *e1, const RTLIL::Wire *e2) {
+      return (e1->port_id < e2->port_id);
+    }
+  };
+
+  std::sort(io_wires.begin(),io_wires.end(), Less_than_sort_io());
+
+  for(RTLIL::Wire *wire:io_wires) {
+    if(wire->port_input) {
+      log("2input %s\n",wire->name.c_str());
       I(last_input_port_id <= wire->port_id);
       last_input_port_id = wire->port_id;
       auto io_pin = g->add_graph_input(&wire->name.c_str()[1], wire->width, wire->start_offset);
-
 #ifndef NDEBUG
       used_names.insert(std::make_pair(&wire->name.c_str()[1], io_pin.get_idx()));
 #endif
-
-    } else if(wire->port_output) {
-      //log(" adding global output wire: %s width %d id=%x\n", wire->name.c_str(), wire->width, wire->hash());
-      I(wire->name.c_str()[0] == '\\');
+    }else{
+      I(wire->port_output);
+      log("2output %s\n",wire->name.c_str());
       I(last_output_port_id <= wire->port_id);
       last_output_port_id = wire->port_id;
       auto io_pin = g->add_graph_output(&wire->name.c_str()[1], wire->width, wire->start_offset);
