@@ -39,11 +39,11 @@ protected:
   void add_io(LGraph *g) {
     int inps = rand_r(&rseed) % 4; // 0..3 inputs
     for(int j = 0; j < inps; j++) {
-      g->add_graph_input(("i" + std::to_string(j)).c_str(), 0, rand_r(&rseed)&15, 0);
+      g->add_graph_input(("i" + std::to_string(j)).c_str(), rand_r(&rseed)&15, 0);
     }
     inps =rand_r(&rseed) % 5; // 0..4 outputs
     for(int j = 0; j < inps; j++) {
-      g->add_graph_output(("o" + std::to_string(j)).c_str(), 0, rand_r(&rseed)&15, 0);
+      g->add_graph_output(("o" + std::to_string(j)).c_str(), rand_r(&rseed)&15, 0);
     }
   }
 

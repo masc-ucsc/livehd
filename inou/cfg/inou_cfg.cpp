@@ -139,13 +139,13 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, vector<LGraph *> &lgs, unordered_ma
   */
    for(uint32_t i = 0; i < lgs.size(); i++) {
     //Graph input
-    auto ipin = lgs[i]->add_graph_input("ginp", 0, 0, 0);
+    auto ipin = lgs[i]->add_graph_input("ginp", 0, 0);
     auto dst_nid = nname2nid_lgs[i][nname_begn_lgs[i]];
     I(lgs[i]->node_type_get(dst_nid).op != GraphIO_Op);
     lgs[i]->add_edge(ipin, lgs[i]->get_node(dst_nid).setup_sink_pin());
 
     //Graph output
-    auto opin = lgs[i]->add_graph_output("gout", 0, 0, 0);
+    auto opin = lgs[i]->add_graph_output("gout", 0, 0);
     auto src_nid = nid_end_lgs[i];
     lgs[i]->add_edge(lgs[i]->get_node(src_nid).setup_driver_pin(0), opin);//CfgAssign_Op output number is not 1!
   }

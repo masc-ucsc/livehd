@@ -66,6 +66,8 @@ static void look_for_module_outputs(RTLIL::Module *module, const std::string &pa
   std::string name = &module->name.c_str()[1];
   auto *      g    = module2graph[name];
 
+  int last_input_port_id  = 0;
+  int last_output_port_id = 0;
   for(auto &wire_iter : module->wires_) {
     RTLIL::Wire *wire = wire_iter.second;
     Index_ID     io_idx;
@@ -73,29 +75,22 @@ static void look_for_module_outputs(RTLIL::Module *module, const std::string &pa
       assert(!wire->port_output); // any bidirectional port?
       //log(" adding global input  wire: %s width %d id=%x original_pos=%d\n", wire->name.c_str(), wire->width, wire->hash(), wire->port_id);
       assert(wire->name.c_str()[0] == '\\');
-      auto io_pin = g->add_graph_input(&wire->name.c_str()[1], wire->width, wire->start_offset, wire->port_id);
-      io_idx = io_pin.get_idx();
-      // TODO: can we get rid of the dependency in the wirename for IOs?
-      g->set_node_wirename(io_idx, &wire->name.c_str()[1]);
-      g->set_bits(io_pin, wire->width);
-      assert(g->get_node(io_idx).get_type().op ==  GraphIO_Op);
+      assert(last_input_port_id <= wire->port_id);
+      last_input_port_id = wire->port_id;
+      auto io_pin = g->add_graph_input(&wire->name.c_str()[1], wire->width, wire->start_offset);
 
 #ifndef NDEBUG
-      used_names.insert(std::make_pair(&wire->name.c_str()[1], io_idx));
+      used_names.insert(std::make_pair(&wire->name.c_str()[1], io_pin.get_idx()));
 #endif
 
     } else if(wire->port_output) {
       //log(" adding global output wire: %s width %d id=%x\n", wire->name.c_str(), wire->width, wire->hash());
       assert(wire->name.c_str()[0] == '\\');
-      auto io_pin = g->add_graph_output(&wire->name.c_str()[1], wire->width, wire->start_offset, wire->port_id);
-      io_idx = io_pin.get_idx();
-      // TODO: can we get rid of the dependency in the wirename for IOs?
-      g->set_node_wirename(io_idx, &wire->name.c_str()[1]);
-      g->set_bits(g->get_graph_output_driver(&wire->name.c_str()[1]), wire->width); // io_pin is a sink
-      assert(g->get_node(io_idx).get_type().op ==  GraphIO_Op);
-
+      assert(last_output_port_id <= wire->port_id);
+      last_output_port_id = wire->port_id;
+      auto io_pin = g->add_graph_output(&wire->name.c_str()[1], wire->width, wire->start_offset);
 #ifndef NDEBUG
-      used_names.insert(std::make_pair(&wire->name.c_str()[1], io_idx));
+      used_names.insert(std::make_pair(&wire->name.c_str()[1], io_pin.get_idx()));
 #endif
     }
   }

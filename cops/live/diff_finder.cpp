@@ -420,7 +420,7 @@ void Diff_finder::add_ios_up(LGraph *module, const Node_pin &io_pin, Name2graph_
           fmt::print("input {} already exists in parent module {}\n", wire_name, nparent->get_name());
           return;
         }
-        auto dpin = nparent->add_graph_input(wire_name, 0, module->get_bits(io_pin), module->get_offset(io_pin));
+        auto dpin = nparent->add_graph_input(wire_name, module->get_bits(io_pin), module->get_offset(io_pin));
         nparent->add_edge(dpin, nparent->get_node(idx_in_parent).setup_sink_pin(dpin.get_pid()));
         p_pin = dpin;
       }
@@ -435,7 +435,7 @@ void Diff_finder::add_ios_up(LGraph *module, const Node_pin &io_pin, Name2graph_
           fmt::print("output {} already exists in parent module {}\n", wire_name, nparent->get_name());
           return;
         }
-        auto spin = nparent->add_graph_output(wire_name, 0, module->get_bits(io_pin), module->get_offset(io_pin));
+        auto spin = nparent->add_graph_output(wire_name, module->get_bits(io_pin), module->get_offset(io_pin));
         nparent->add_edge(nparent->get_node(idx_in_parent).setup_driver_pin(spin.get_pid()), spin);
         p_pin = spin;
       }
@@ -475,7 +475,7 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
     Index_ID idx = 0;
     if (original->is_graph_input(node.idx)) {
       if (!new_module->is_graph_input(original->get_node_wirename(node.idx))) {
-        pin = new_module->add_graph_input(original->get_node_wirename(node.idx), 0, original->get_bits(node.idx),
+        pin = new_module->add_graph_input(original->get_node_wirename(node.idx), original->get_bits(node.idx),
                                           original->get_offset(node.idx));
       } else {
         // input already created
@@ -484,7 +484,7 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
       idx = pin.get_idx();
     } else if (original->is_graph_output(node.idx)) {
       if (!new_module->is_graph_output(original->get_node_wirename(node.idx))) {
-        pin = new_module->add_graph_output(original->get_node_wirename(node.idx), 0, original->get_bits(node.idx),
+        pin = new_module->add_graph_output(original->get_node_wirename(node.idx), original->get_bits(node.idx),
                                            original->get_offset(node.idx));
       } else {
         // output already created
@@ -591,7 +591,7 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
               inp_pin = new_module->get_graph_input(osubgraph->get_graph_output_name_from_pid(inp.get_out_pin().get_pid()));
             } else {
               inp_pin = new_module->add_graph_input(
-                  osubgraph->get_graph_output_name_from_pid(inp.get_out_pin().get_pid()), 0,
+                  osubgraph->get_graph_output_name_from_pid(inp.get_out_pin().get_pid()),
                   osubgraph->get_bits(osubgraph->get_graph_output_nid_from_pid(inp.get_out_pin().get_pid())), 0);
               add_ios_up(new_module, inp_pin, name2graph);
               assert(old2newidx[node.module].find(name_idx) == old2newidx[node.module].end());
@@ -653,7 +653,7 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
 
           Index_ID name_idx = inp.get_out_pin().get_idx();
           assert(node.module->get_wid(name_idx) != 0);
-          auto inp_pin = new_module->add_graph_input(node.module->get_node_wirename(name_idx), 0, node.module->get_bits(name_idx), 0);
+          auto inp_pin = new_module->add_graph_input(node.module->get_node_wirename(name_idx), node.module->get_bits(name_idx), 0);
           add_ios_up(new_module, inp_pin, name2graph);
           assert(old2newidx[node.module].find(name_idx) == old2newidx[node.module].end());
           old2newidx[node.module][name_idx] = inp_pin.get_idx();
@@ -705,7 +705,7 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
           assert(!new_module->is_graph_output(wirename));
         }
 
-        auto out_pin = new_module->add_graph_output(wirename, 0, node.module->get_bits(node.idx), 0);
+        auto out_pin = new_module->add_graph_output(wirename, node.module->get_bits(node.idx), 0);
         add_ios_up(new_module, out_pin, name2graph);
         old2newidx[node.module][node.module->get_node(out.get_out_pin()).get_nid()] = out_pin.get_idx();
         if (new_module->is_graph_input(idx) || new_module->is_graph_output(idx)) {
