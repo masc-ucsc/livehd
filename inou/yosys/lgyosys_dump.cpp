@@ -50,30 +50,6 @@ RTLIL::Wire *Lgyosys_dump::create_tree(const LGraph *g, std::vector<RTLIL::Wire 
   return create_tree(g, next_level, mod, add_fnc, sign, result_wire);
 }
 
-RTLIL::Wire *Lgyosys_dump::create_tree(const LGraph *g, std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod, add_cell_fnc add_fnc,
-                                       RTLIL::Wire *result_wire) {
-  if(wires.size() == 0)
-    return nullptr;
-
-  if(wires.size() == 1)
-    return wires[0];
-
-  std::vector<RTLIL::Wire *> next_level;
-  for(uint32_t current = 0; current < wires.size() / 2; current += 2) {
-    RTLIL::Wire *aWire = nullptr;
-    if(wires.size() > 2)
-      aWire = mod->addWire(next_id(g), result_wire->width);
-    else
-      aWire = result_wire;
-    (mod->*add_fnc)(next_id(g), wires[current], wires[current + 1], aWire, "");
-    next_level.push_back(aWire);
-  }
-  if(wires.size() % 2 == 1)
-    next_level.push_back(wires[wires.size() - 1]);
-
-  return create_tree(g, next_level, mod, add_fnc, result_wire);
-}
-
 RTLIL::Wire *Lgyosys_dump::create_io_wire(const LGraph *g, const Node_pin &pin, RTLIL::Module *module) {
 
   assert(g->has_wirename(pin)); // IO must have name
@@ -731,15 +707,6 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         continue;
       }
       assert(cell_output_map.find(std::make_pair(nid, 0))!=cell_output_map.end());
-#ifndef NDEBUG
-      if(width != (uint32_t)(cell_output_map[std::make_pair(node.get_driver_pin().get_idx(), 0)]->width)) {
-        fmt::print("dest_name:{} nid:{} w:{} | joined_width:{}\n"
-            ,cell_output_map[std::make_pair(nid, 0)]->name.c_str()
-            ,nid
-            ,cell_output_map[std::make_pair(nid, 0)]->width
-            ,width);
-      }
-#endif
       assert(width == (uint32_t)(cell_output_map[std::make_pair(node.get_driver_pin().get_idx(), 0)]->width));
       module->connect(cell_output_map[std::make_pair(node.get_driver_pin().get_idx(), 0)], RTLIL::SigSpec(joined_wires));
 
