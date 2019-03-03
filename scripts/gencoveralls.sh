@@ -1,5 +1,8 @@
 #!/bin/bash
 
+mkdir -p cov
+rm -f cov/coverage.*
+
 for a in cloud cops core eprp inou live main meta pass
 do
   lcov --ignore-errors source --capture --rc geninfo_auto_base=1 --rc lcov_branch_coverage=1 --compat-libtool --base-directory . --directory bazel-out/k8-fastbuild/bin/${a} --exclude '/usr/*' --exclude 'external/*' --output-file cov/coverage_${a}.info
@@ -21,6 +24,7 @@ lcov $LCOV_ADD --output-file cov/coverage.info
 
 echo "rtp"
 if [ -s cov/coverage.info ]; then
+  gem install coveralls-lcov
   coveralls-lcov --repo-token Z2cNEUdoWLokSj16laePFXdCWIwckDRHK cov/coverage.info >/dev/null
 
   echo "coverall"
