@@ -2,5 +2,7 @@
 
 lg2yosys -path {{path}} -name {{name}}
 
+opt
+
 write_verilog {{file}}
 
