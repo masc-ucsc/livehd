@@ -4,7 +4,7 @@
 #include "lgraph.hpp"
 
 LGraph_Node_Place::LGraph_Node_Place(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept
-    : Lgraph_base_core(path, name, lgid), LGraph_Base(path, name, lgid), node_place(path + "/lgraph_" + name + "_place") {}
+    : Lgraph_base_core(path, name, lgid), LGraph_Base(path, name, lgid), node_place(path + "/lgraph_" + std::to_string(lgid) + "_place") {}
 
 void LGraph_Node_Place::clear() { node_place.clear(); }
 

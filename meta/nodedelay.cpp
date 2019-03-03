@@ -4,7 +4,7 @@
 #include "lgraph.hpp"
 
 LGraph_Node_Delay::LGraph_Node_Delay(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept
-    : Lgraph_base_core(path, name, lgid), LGraph_Base(path, name, lgid), node_delay(path + "/lgraph_" + name + "_delay") {}
+    : Lgraph_base_core(path, name, lgid), LGraph_Base(path, name, lgid), node_delay(path + "/lgraph_" + std::to_string(lgid) + "_delay") {}
 
 void LGraph_Node_Delay::clear() { node_delay.clear(); }
 

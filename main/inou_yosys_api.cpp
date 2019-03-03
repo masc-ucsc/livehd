@@ -112,6 +112,7 @@ int Inou_yosys_api::do_work(std::string_view yosys, std::string_view liblg, std:
   strStream << inFile.rdbuf();  // read the whole file
 
   mustache::mustache tmpl(strStream.str());
+  tmpl.set_custom_escape([](const std::string& s) { return s; }); // No HTML escape
 
   int pid = fork();
   if (pid < 0) {

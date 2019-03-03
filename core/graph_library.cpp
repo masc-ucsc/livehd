@@ -5,6 +5,12 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 
+#include "rapidjson/document.h"
+#include "rapidjson/error/en.h"
+#include "rapidjson/filereadstream.h"
+#include "rapidjson/filewritestream.h"
+#include "rapidjson/prettywriter.h"
+
 #include <cassert>
 #include <fstream>
 #include <regex>
@@ -133,62 +139,29 @@ std::string Graph_library::get_lgraph_filename(std::string_view path, std::strin
 
 bool Graph_library::rename_name(std::string_view orig, std::string_view dest) {
   auto it = name2id.find(orig);
-  if (it == name2id.end()) return false;
+  if (it == name2id.end()) {
+    Pass::error("graph_library: file to rename {} does not exit", orig);
+    return false;
+  }
   Lg_type_id id = it->second;
-  if (attribute[id].nopen != 0) return false;  // Must be closed
 
-  // The dest name should not exist. Call expunge_lgraph/delete if it does
-  assert(name2id.find(dest) == name2id.end());
-
-  // The orig name should exist, BUT the lgraph should be in CLOSE state
-  assert(global_name2lgraph[path].find(dest) == global_name2lgraph[path].end());  // No dest open
-
-  auto source   = attribute[id].source;
-  auto nentries = attribute[id].nentries;
+  if (name2id.find(dest) != name2id.end()) {
+    // TODO: We could expunge the destination library if nobody has it opened
+    Pass::error("graph_library: renamed from {} to an already used name {}", orig, dest);
+    return false;
+  }
 
   auto it2 = global_name2lgraph[path].find(orig);
   if (it2 != global_name2lgraph[path].end()) {  // orig around, but not open
-    bool done = expunge_lgraph(orig, it2->second);
-    I(done);
-    I(recycled_id.get_bit(id));
-    recycled_id.clear(id);
+    global_name2lgraph[path].erase(it2);
   }
-  I(global_name2lgraph[path].find(orig) == global_name2lgraph[path].end());  // Gone after expunge_lgraph
-  I(name2id.find(orig) == name2id.end());                                    // Cleared by expunge_lgraph
+  name2id.erase(it);
+  I(name2id.find(orig) == name2id.end());
 
   graph_library_clean    = false;
-  attribute[id].name     = dest;
-  attribute[id].version  = max_next_version.value++;
-  attribute[id].source   = source;
-  attribute[id].nentries = nentries;
-  attribute[id].nopen    = 0;
+  attribute[id].name = dest;
 
   name2id[dest] = id;
-
-  DIR *dir = opendir(path.c_str());
-  assert(dir);
-
-  struct dirent *dent;
-  while ((dent = readdir(dir)) != nullptr) {
-    if (dent->d_type != DT_REG)  // Only regular files
-      continue;
-
-    if (strncmp(dent->d_name, "lgraph_", 7) != 0)  // only if starts with lgraph_
-      continue;
-
-    const std::string name(dent->d_name + 7);
-    auto              pos = name.find(std::string(orig) + "_");
-    if (pos == std::string_view::npos) continue;
-    const std::string ext(dent->d_name + 7 + orig.size() + 1);
-
-    const std::string dest_file = get_lgraph_filename(path, dest, ext);
-    const std::string orig_file = get_lgraph_filename(path, orig, ext);
-
-    fmt::print("renaming {} to {}\n", orig_file, dest_file);
-    int s = rename(orig_file.c_str(), dest_file.c_str());
-    assert(s >= 0);
-  }
-  closedir(dir);
 
   clean_library();
 
@@ -219,7 +192,7 @@ void Graph_library::reload() {
   max_next_version = 1;
   std::ifstream graph_list;
 
-  graph_list.open(path + "/" + library_file);
+  graph_list.open(library_file);
 
   name2id.clear();
   attribute.resize(1);  // 0 is not a valid ID
@@ -248,10 +221,6 @@ void Graph_library::reload() {
     // this is only true in case where we skip graph ids
     if (attribute.size() <= graph_id) attribute.resize(graph_id + 1);
 
-    if (name == "sub_method1") {
-      fmt::print("reload {}\n", name);
-      I(false);
-    }
     attribute[graph_id].name     = name;
     attribute[graph_id].source   = source;
     attribute[graph_id].version  = graph_version;
@@ -263,6 +232,7 @@ void Graph_library::reload() {
 
   graph_list.close();
 
+#ifndef NDEBUG
   DIR *dir = opendir(path.c_str());
   if (!dir) {
     Pass::error("graph_library.reload: could not open {} directory", path);
@@ -282,19 +252,27 @@ void Graph_library::reload() {
     if (strcmp(dent->d_name + len - 6, "_nodes") != 0)  // and finish with _nodes
       continue;
 
-    std::string name(&dent->d_name[7], len - 7 - 6);
-    assert(lg_found.find(name) == lg_found.end());
-    lg_found.insert(name);
+    const std::string id_str(&dent->d_name[7], len - 7 - 6);
+    assert(lg_found.find(id_str) == lg_found.end());
+    lg_found.insert(id_str);
 
-    if (name2id.find(name) == name2id.end()) {
-      Pass::warn("graph_library does not have {} but {} directory has it", name, path);
+    bool found = false;
+    Lg_type_id id_val = std::stoi(id_str);
+    I(id_val>0);
+    for (const auto &[name, id] : name2id) {
+      if (id_val == id) {
+        found = true;
+      }
+    }
+    if (!found) {
+      Pass::error("graph_library: directory has id:{} but the {} graph_library does not have it", id_val.value, path);
     }
   }
   closedir(dir);
 
   for (const auto &[name, id] : name2id) {
-    std::string s(name);
-    assert(name.size() == strlen(s.c_str()));
+    // std::string s(name);
+    std::string s = std::to_string(id);
     if (lg_found.find(s) == lg_found.end()) {
       for (auto contents : lg_found) {
         if (contents == s)
@@ -303,12 +281,13 @@ void Graph_library::reload() {
           fmt::print("   1lg_found has [{}] [{}] s:{} s:{} l:{} l:{}\n", contents, s, contents.size(), s.size(), contents.length(),
                      s.length());
       }
-      Pass::error("graph_library has {} but the {} directory does not have it", s, path);
+      Pass::error("graph_library has id:{} name:{} but the {} directory does not have it", id, name, path);
     }
   }
+#endif
 }
 
-Graph_library::Graph_library(std::string_view _path) : path(_path), library_file("graph_library") {
+Graph_library::Graph_library(std::string_view _path) : path(_path), library_file(path + "/" + "graph_library") {
   graph_library_clean = true;
   reload();
 }
@@ -403,9 +382,49 @@ void Graph_library::sync_all() {
 void Graph_library::clean_library() {
   if (graph_library_clean) return;
 
+  rapidjson::StringBuffer                          s;
+  rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(s);
+  writer.StartObject();
+  writer.Key("lgraph");
+  writer.StartArray();
+  for (size_t id = 1; id < attribute.size(); ++id) {
+    const auto &it = attribute[id];
+    writer.StartObject();
+
+    writer.Key("id");
+    writer.Uint64(id);
+
+    writer.Key("name");
+    writer.String(it.name.c_str());
+
+    writer.Key("version");
+    writer.Uint64(it.version);
+
+    writer.Key("nentries");
+    writer.Uint64(it.nentries);
+
+    writer.Key("source");
+    writer.String(it.source.c_str());
+
+    writer.EndObject();
+  }
+  writer.EndArray();
+  writer.EndObject();
+  {
+    std::ofstream fs;
+
+    fs.open(library_file + ".json", std::ios::out | std::ios::trunc);
+    if(!fs.is_open()) {
+      Pass::error("ERROR: could not open graph_library file {}", library_file + ".json");
+      return;
+    }
+    fs << s.GetString() << std::endl;
+    fs.close();
+  }
+
   std::ofstream graph_list;
 
-  graph_list.open(path + "/" + library_file);
+  graph_list.open(library_file);
   graph_list << (attribute.size() - 1) << std::endl;
   for (size_t id = 1; id < attribute.size(); ++id) {
     const auto &it = attribute[id];

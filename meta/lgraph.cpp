@@ -85,16 +85,13 @@ LGraph *LGraph::open(std::string_view path, std::string_view name) {
 
   if (!Graph_library::instance(path)->include(name)) return 0;
 
-  std::string lock;
-  lock.append(path);
-  lock.append("/lgraph_");
-  lock.append(name);
-  lock.append(".lock");
-
+#if 0
+  std::string lock = absl::StrCat(path, "/", std::to_string(lgraph_id), ".lock");
   if (access(lock.c_str(), R_OK) != -1) {
     Pass::error("trying to open a locked {} (broken?) graph {}", lock, name);
     return 0;
   }
+#endif
   const auto &source = Graph_library::instance(path)->get_source(name);
 
   return new LGraph(std::string(path), std::string(name), std::string(source), false);
