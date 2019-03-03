@@ -839,6 +839,8 @@ static LGraph *process_module(RTLIL::Module *module) {
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
       negonly = true;
+      // WORKS: assign tmp2 = {~{lgraph_cell_13[0]}}; Zero upper bits
+      // FAILS: assign tmp2 = ~lgraph_cell_13;
     } else if(std::strncmp(cell->type.c_str(), "$pos", 4) == 0) {
       // TODO: prevent the genereration of the join and simply connect wires
       op = Join_Op;
