@@ -84,8 +84,8 @@ bool Node_Type::is_type(const std::string &opname) { return (name2node.find(opna
 
 LGraph_Node_Type::LGraph_Node_Type(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept
     : Lgraph_base_core(path, name, lgid)
-    , consts(path + "/lgraph_" + name + "_consts")
-    , node_type_table(path + "/lgraph_" + name + "_type") {}
+    , consts(path + "/lgraph_" + std::to_string(lgid) + "_consts")
+    , node_type_table(path + "/lgraph_" + std::to_string(lgid) + "_type") {}
 
 std::string_view LGraph_Node_Type::get_constant(Const_ID const_id) const { return consts.get_name(const_id); }
 

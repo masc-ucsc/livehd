@@ -32,7 +32,7 @@ Lgraph_base_core::Lgraph_base_core(std::string_view _path, std::string_view _nam
     , name(_name)
     , long_name(absl::StrCat("lgraph_", _name))
     , lgraph_id(lgid)
-    , node_internal(absl::StrCat(path, "/lgraph_", name, "_nodes"))
+    , node_internal(absl::StrCat(path, "/lgraph_", std::to_string(lgid), "_nodes"))
     , locked(false) {
   assert(lgid);
 
@@ -43,7 +43,7 @@ Lgraph_base_core::Lgraph_base_core(std::string_view _path, std::string_view _nam
 void Lgraph_base_core::get_lock() {
   if (locked) return;
 
-  std::string lock = path + "/" + long_name + ".lock";
+  std::string lock = absl::StrCat(path, "/", std::to_string(lgraph_id), ".lock");
   int         err  = ::open(lock.c_str(), O_CREAT | O_EXCL, 420);  // 644
   if (err < 0) {
     Pass::error("Could not get lock:{}. Already running? Unclear exit?", lock.c_str());
@@ -66,7 +66,7 @@ void Lgraph_base_core::clear() {
   if (!locked) return;
 
   // whenever we clean, we unlock
-  std::string lock = path + "/" + long_name + ".lock";
+  std::string lock = absl::StrCat(path, "/", std::to_string(lgraph_id), ".lock");
   unlink(lock.c_str());
 
   library->update_nentries(lg_id(), 0);
@@ -82,7 +82,7 @@ void Lgraph_base_core::sync() {
   library->sync();
   tlibrary->sync();
 
-  std::string lock = path + "/" + long_name + ".lock";
+  std::string lock = absl::StrCat(path, "/", std::to_string(lgraph_id), ".lock");
   unlink(lock.c_str());
   locked = false;
 }

@@ -3,8 +3,8 @@
 
 LGraph_InstanceNames::LGraph_InstanceNames(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept
     : Lgraph_base_core(path, name, lgid)
-    , inames(path + "/lgraph_" + name + "_inst_names")
-    , instances(path + "/lgraph_" + name + "_inst") {}
+    , inames(path + "/lgraph_" + std::to_string(lgid) + "_inst_names")
+    , instances(path + "/lgraph_" + std::to_string(lgid) + "_inst") {}
 
 void LGraph_InstanceNames::clear() {
   inames.clear();

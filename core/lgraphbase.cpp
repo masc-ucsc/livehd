@@ -13,8 +13,8 @@ LGraph_Base::LGraph_Base(const std::string &_path, const std::string &_name, Lg_
     : Lgraph_base_core(_path, _name, lgid)
     , LGraph_Node_Type(_path, _name, lgid)
     , LGraph_InstanceNames(path, _name, lgid)
-    , input_array(_path + "/lgraph_" + _name + "_inputs")
-    , output_array(_path + "/lgraph_" + _name + "_outputs") {
+    , input_array(_path + "/lgraph_" + std::to_string(lgid) + "_inputs")
+    , output_array(_path + "/lgraph_" + std::to_string(lgid) + "_outputs") {
   I(lgid);  // No id zero allowed
 }
 

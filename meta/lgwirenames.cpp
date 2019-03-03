@@ -5,9 +5,9 @@
 LGraph_WireNames::LGraph_WireNames(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept
     : Lgraph_base_core(path, name, lgid)
     , LGraph_Base(path, name, lgid)
-    , names(path + "/lgraph_" + name + "_wnames")
-    , wires(path + "/lgraph_" + name + "_wid")
-    , offsets(path + "/lgraph_" + name + "_offsets") {}
+    , names(path + "/lgraph_" + std::to_string(lgid) + "_wnames")
+    , wires(path + "/lgraph_" + std::to_string(lgid) + "_wid")
+    , offsets(path + "/lgraph_" + std::to_string(lgid) + "_offsets") {}
 
 void LGraph_WireNames::clear() {
   names.clear();
