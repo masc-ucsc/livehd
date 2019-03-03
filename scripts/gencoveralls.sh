@@ -1,7 +1,5 @@
 #!/bin/bash
 
-mkdir -p cov
-rm -f cov/coverage.*
 
 for a in cloud cops core eprp inou live main meta pass
 do
@@ -9,8 +7,11 @@ do
 echo $a
 done
 
+if [ -s cov/coverage.info ]; then
+  cp -a cov/coverage.info cov/coverage_prev_run.info
+fi
 LCOV_ADD=""
-for a in cloud cops core eprp inou live main meta pass
+for a in cloud cops core eprp inou live main meta pass prev_run
 do
   if [ -s cov/coverage_${a}.info ]; then
     LCOV_ADD="${LCOV_ADD} --add-tracefile cov/coverage_${a}.info"
@@ -21,15 +22,4 @@ done
 
 echo $LCOV_ADD
 lcov $LCOV_ADD --output-file cov/coverage.info
-
-echo "rtp"
-if [ -s cov/coverage.info ]; then
-  gem install coveralls-lcov
-  coveralls-lcov --repo-token Z2cNEUdoWLokSj16laePFXdCWIwckDRHK cov/coverage.info >/dev/null
-
-  echo "coverall"
-  curl -s https://codecov.io/bash >cov/codecov
-  chmod 755 cov/codecov
-  ./cov/codecov -f 'cov/coverage.info' -t becc0c47-6817-4ba5-966c-3fc4dbb376ff >/dev/null
-fi
 
