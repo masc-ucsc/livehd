@@ -4,13 +4,13 @@ n2 = ::{
 }
 n3 = ::{
   // Punch a wire through n2/n1 hierarchy
-  $p1 punch %/n2.n1/.o
+  $p1 punch %n2.n1.o
   %o2 = $1 + 1
-  @p2 punch @/n1/.r
+  @p2 punch @n1.r
   %o4 = @p2 + 1
 }
-$i1 punch %/n2.n1/.o
-$i2 punch %/scope5.n2.n1/.o
+$i1 punch %n2.n1.o
+$i2 punch %scope5.n2.n1.o
 I $i1.__id == $i2.__id
 I n3.o2 == 2
 I n3.o4 == 4

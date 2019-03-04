@@ -5,7 +5,7 @@ I child.__obj == parent.__obj
 child.dox = ::{
   _tmp = super $
   @this.v1 = 3  // add new field in child
-  %p1 punch $/objects1.child/.v2
+  %p1 punch $objects1.child.v2
   %p1 = 5
   return tmp + 7
 }
