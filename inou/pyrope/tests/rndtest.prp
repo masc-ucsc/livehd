@@ -9,5 +9,5 @@ b.__rnd_bias ++= (5 9)  // 0 10%, 3 20%, 4 20%, and 9 50% chance
 c as __bits:8
 c.__rnd_bias   = (1 0)      // weight 1 for value 0
 c.__rnd_bias ++= (2 255)    // weight 2 for value 255
-c.__rnd_bias ++= (7 1..254) // weigth 7 for the rest
+c.__rnd_bias ++= (7,1..254) // weigth 7 for the rest
 puts c.__rnd                // 10% chance 0, 20% chance 255, 70% other

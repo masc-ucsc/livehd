@@ -1,7 +1,7 @@
 // code/ranges2.prp
-numbers = (1...10)
+numbers = (1..9)
 start  = numbers[0..2]
-middle = numbers[3...-2]
+middle = numbers[3..-2]
 end    = numbers[-2..]
 copy   = numbers[..]
 I start  == (1 2 3)
@@ -13,6 +13,6 @@ I val[[0..1]] == 0b11
 I val[[..-2]] == 0b01_10_11
 I val[[-2..]] == 0b00
 I val[[-1]]   == 0b1  // MSB
-I (1..3) * 2 = (2 4 6)
+I (1..3) * 2 == (2 4 6)
 I (1..3) + 2 == (3..5)
 I (1 2 4) ++ 3 == (1..4)

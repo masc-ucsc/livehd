@@ -10,7 +10,7 @@ nested1_5b = ::{
     @cycle += @incr
   }
 }
-@n2_links punch @/nested2/
+@n2_links punch @nested2
 for i:@n2_links {
   i.incr = i.__index + 1
 }
