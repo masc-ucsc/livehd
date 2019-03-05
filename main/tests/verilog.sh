@@ -17,8 +17,7 @@ fi
 YOSYS=./inou/yosys/lgyosys
 LGCHECK=./inou/yosys/lgcheck
 
-rm -rf ./lgdb/ ./logs ./yosys-test ./*.v ./*.json
-mkdir yosys-test/
+rm -rf ./logs
 
 inputs=inou/yosys/tests/*.v
 long=""

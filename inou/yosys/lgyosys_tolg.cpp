@@ -152,7 +152,14 @@ static Node_pin get_edge_pin(LGraph *g, const RTLIL::Wire *wire) {
   return pin0;
 }
 
-static void connect_constant(LGraph *g, uint32_t value, uint32_t size, Index_ID onid, Port_ID opid) {
+static void connect_constant(LGraph *g, uint32_t value, Index_ID onid, Port_ID opid) {
+
+  uint16_t size = 1;
+  uint32_t val  = value;
+  while (val > 0) {
+    size++;
+    val >>= 1;
+  }
 
   auto dpin = g->create_node_u32(value,size).setup_driver_pin();
   auto spin = g->get_node(onid).setup_sink_pin(opid);
@@ -193,7 +200,7 @@ static Node_pin create_pick_operator(LGraph *g, const Node_pin driver, int offse
 
   g->add_edge(driver, sink_pin0);
 
-  connect_constant(g, offset, 32, node.get_nid(), node.setup_sink_pin(1).get_pid());
+  connect_constant(g, offset, node.get_nid(), node.setup_sink_pin(1).get_pid());
 
   picks.insert(std::make_pair(pick_id, driver_pin0));
 
@@ -714,6 +721,8 @@ static LGraph *process_module(RTLIL::Module *module) {
     uint32_t     abits = 0;
     RTLIL::Wire *clock = nullptr;
 
+    bool single_bit_output = false;
+
     // Note that $_AND_ and $_NOT_ format are exclusive for aigmap
     // yosys usually uses cells like $or $not $and
     if(std::strncmp(cell->type.c_str(), "$and", 4) == 0 || std::strncmp(cell->type.c_str(), "$logic_and", 10) == 0 ||
@@ -721,6 +730,7 @@ static LGraph *process_module(RTLIL::Module *module) {
       op = And_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
+      single_bit_output = true;
     } else if(std::strncmp(cell->type.c_str(), "$not", 4) == 0) {
       op = Not_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
@@ -739,6 +749,7 @@ static LGraph *process_module(RTLIL::Module *module) {
       g->add_edge(i_node.setup_driver_pin(1), o_node.setup_sink_pin(), size); // OR
       g->set_bits(o_node.setup_driver_pin(), size); // NOT
 
+      single_bit_output = true; // HERE: add more
     } else if(std::strncmp(cell->type.c_str(), "$or", 3) == 0 || std::strncmp(cell->type.c_str(), "$logic_or", 9) == 0 ||
               std::strncmp(cell->type.c_str(), "$reduce_or", 10) == 0 ||
               std::strncmp(cell->type.c_str(), "$reduce_bool", 12) == 0) {
@@ -775,7 +786,7 @@ static LGraph *process_module(RTLIL::Module *module) {
         assert(clk_polarity[0] == clk_polarity[i]);
       }
       if (clk_polarity.size() && clk_polarity[0] != RTLIL::S1)
-        connect_constant(g, 0, 1, onid, 5); // POL is 5 in SFlop_Op
+        connect_constant(g, 0, onid, 5); // POL is 5 in SFlop_Op
 
 
     } else if(std::strncmp(cell->type.c_str(), "$adff", 4) == 0) {
@@ -787,7 +798,7 @@ static LGraph *process_module(RTLIL::Module *module) {
         assert(clk_polarity[0] == clk_polarity[i]);
       }
       if (clk_polarity.size() && clk_polarity[0] != RTLIL::S1)
-        connect_constant(g, 0, 1, onid, 2); // POL is 3 in Latch_Op
+        connect_constant(g, 0, onid, 2); // POL is 3 in Latch_Op
 
     } else if(std::strncmp(cell->type.c_str(), "$dlatch", 7) == 0) {
       op = Latch_Op;
@@ -839,8 +850,6 @@ static LGraph *process_module(RTLIL::Module *module) {
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
       negonly = true;
-      // WORKS: assign tmp2 = {~{lgraph_cell_13[0]}}; Zero upper bits
-      // FAILS: assign tmp2 = ~lgraph_cell_13;
     } else if(std::strncmp(cell->type.c_str(), "$pos", 4) == 0) {
       // TODO: prevent the genereration of the join and simply connect wires
       op = Join_Op;
@@ -856,10 +865,23 @@ static LGraph *process_module(RTLIL::Module *module) {
         size = cell->parameters["\\Y_WIDTH"].as_int();
       auto i_node = g->create_node();
       inid = i_node.get_nid();
-      g->set_bits(inid, size);
+      g->set_bits(i_node.setup_driver_pin(0), size);
 
-      g->node_type_set(onid, Not_Op);
-      g->add_edge(i_node.setup_driver_pin(0), g->get_node(onid).setup_sink_pin(), size);
+      if (size>1) {
+        auto zero_pin = g->create_node_u32(0,size-1).setup_driver_pin();
+        auto not_node = g->create_node(Not_Op, size);
+        g->add_edge(i_node.setup_driver_pin(0), not_node.setup_sink_pin(), 1);
+
+        g->node_type_set(onid, Join_Op);
+        g->add_edge(not_node.setup_driver_pin(), g->get_node(onid).setup_sink_pin(0), 1);
+        g->add_edge(zero_pin, g->get_node(onid).setup_sink_pin(1), size-1);
+      }else{
+        g->node_type_set(onid, Not_Op);
+        g->add_edge(i_node.setup_driver_pin(0), g->get_node(onid).setup_sink_pin(), 1);
+      }
+
+      // WORKS: assign tmp2 = {~{lgraph_cell_13[0]}}; Zero upper bits
+      // FAILS: assign tmp2 = ~lgraph_cell_13;
 
     } else if(std::strncmp(cell->type.c_str(), "$shr", 4) == 0 ||
               (std::strncmp(cell->type.c_str(), "$shiftx", 6) == 0 && !cell->parameters["\\B_SIGNED"].as_bool())) {
@@ -870,7 +892,7 @@ static LGraph *process_module(RTLIL::Module *module) {
       op = ShiftRight_Op;
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      connect_constant(g, 2, 1, onid, 2);
+      connect_constant(g, 2, onid, 2);
 
     } else if(std::strncmp(cell->type.c_str(), "$sshr", 5) == 0) {
       op = ShiftRight_Op;
@@ -878,9 +900,9 @@ static LGraph *process_module(RTLIL::Module *module) {
         size = cell->parameters["\\Y_WIDTH"].as_int();
 
       if(cell->parameters["\\A_SIGNED"].as_bool())
-        connect_constant(g, 3, 1, onid, 2);
+        connect_constant(g, 3, onid, 2);
       else
-        connect_constant(g, 1, 1, onid, 2);
+        connect_constant(g, 1, onid, 2);
 
     } else if(std::strncmp(cell->type.c_str(), "$shl", 4) == 0 || std::strncmp(cell->type.c_str(), "$sshl", 5) == 0) {
       op = ShiftLeft_Op;
@@ -911,11 +933,11 @@ static LGraph *process_module(RTLIL::Module *module) {
 
       fmt::print("name:{} depth:{} wrports:{} rdports:{}\n", name, depth, wrports, rdports);
 
-      connect_constant(g, depth  , 32, onid, LGRAPH_MEMOP_SIZE  );
-      connect_constant(g, offset , 32, onid, LGRAPH_MEMOP_OFFSET);
-      connect_constant(g, abits  , 32, onid, LGRAPH_MEMOP_ABITS );
-      connect_constant(g, wrports, 32, onid, LGRAPH_MEMOP_WRPORT);
-      connect_constant(g, rdports, 32, onid, LGRAPH_MEMOP_RDPORT);
+      connect_constant(g, depth  , onid, LGRAPH_MEMOP_SIZE  );
+      connect_constant(g, offset , onid, LGRAPH_MEMOP_OFFSET);
+      connect_constant(g, abits  , onid, LGRAPH_MEMOP_ABITS );
+      connect_constant(g, wrports, onid, LGRAPH_MEMOP_WRPORT);
+      connect_constant(g, rdports, onid, LGRAPH_MEMOP_RDPORT);
 
       // lgraph has reversed convention compared to yosys.
       int rd_clk_enabled  = 0;
@@ -966,11 +988,11 @@ static LGraph *process_module(RTLIL::Module *module) {
       wr_clk_polarity = wr_clk_polarity?0:1; // polarity flipped in lgraph vs yosys
 
       if (rd_clk_enabled)
-        connect_constant(g, rd_clk_polarity, 1, onid, LGRAPH_MEMOP_RDCLKPOL);
+        connect_constant(g, rd_clk_polarity, onid, LGRAPH_MEMOP_RDCLKPOL);
       if (wr_clk_enabled)
-        connect_constant(g, wr_clk_polarity, 1, onid, LGRAPH_MEMOP_WRCLKPOL);
+        connect_constant(g, wr_clk_polarity, onid, LGRAPH_MEMOP_WRCLKPOL);
 
-      connect_constant(g, transp.as_int() , 1, onid, LGRAPH_MEMOP_RDTRAN);
+      connect_constant(g, transp.as_int(), onid, LGRAPH_MEMOP_RDTRAN);
 
       // TODO: get a test case to patch
       if(cell->parameters.find("\\INIT") != cell->parameters.end()) {
@@ -1062,7 +1084,7 @@ static LGraph *process_module(RTLIL::Module *module) {
       op = SFlop_Op;
       if(cell->parameters.find("\\WIDTH") != cell->parameters.end())
         size = cell->parameters["\\WIDTH"].as_int();
-      connect_constant(g, 0, 1, onid, 5);
+      connect_constant(g, 0, onid, 5);
 
     } else if(std::strncmp(cell->type.c_str(), "$_DFF_NN", 8) == 0 || std::strncmp(cell->type.c_str(), "$_DFF_NP", 8) == 0 ||
               std::strncmp(cell->type.c_str(), "$_DFF_PP", 8) == 0 || std::strncmp(cell->type.c_str(), "$_DFF_PN", 8) == 0) {
@@ -1133,7 +1155,7 @@ static LGraph *process_module(RTLIL::Module *module) {
       } else if(op == BlackBox_Op && !yosys_tech) {
         if(is_black_box_output(module, cell, conn.first)
         || is_black_box_input(module, cell, conn.first)) {
-          connect_constant(g, 0, 1, onid, LGRAPH_BBOP_PARAM(blackbox_port));
+          connect_constant(g, 0, onid, LGRAPH_BBOP_PARAM(blackbox_port));
           connect_string(g, &(conn.first.c_str()[1]), onid, LGRAPH_BBOP_PNAME(blackbox_port));
           dst_pid = LGRAPH_BBOP_CONNECT(blackbox_port);
           blackbox_port++;
