@@ -163,7 +163,7 @@ ${YOSYS} -p " read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; flatten ; opt ; pr
 
               miter -equiv -make_assert -flatten gold gate equiv
               hierarchy -top equiv
-              sat -prove-asserts -tempinduct -ignore_unknown_cells -verify -set-init-undef equiv"
+              sat -prove-asserts -tempinduct -timeout 60 -ignore_unknown_cells -verify -set-init-undef equiv"
 if [ $? -eq 0 ]; then
   echo "Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
   exit 0
