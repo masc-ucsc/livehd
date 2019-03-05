@@ -19,6 +19,7 @@ void setup_pass_abc();
 void setup_pass_bitwidth();
 void setup_pass_dce();
 void setup_pass_dfg();
+void setup_pass_opentimer();
 void setup_pass_punch();
 void setup_pass_sample();
 void setup_pass_mockturtle();
@@ -40,9 +41,11 @@ void Main_api::init() {
   setup_pass_bitwidth();
   setup_pass_dce();
   setup_pass_dfg();
+  setup_pass_opentimer();
   setup_pass_punch();
   setup_pass_sample();
   setup_pass_mockturtle();
+
 
   setup_inou_cgen();
   setup_inou_liveparse();
