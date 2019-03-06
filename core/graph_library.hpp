@@ -36,6 +36,7 @@ protected:
       source   = "";
     }
   };
+  std::vector<std::string> liberty_list;
 
   using Global_instances   = absl::flat_hash_map<std::string, Graph_library *>;
   using Global_name2lgraph = absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, LGraph *>>;
@@ -142,6 +143,10 @@ public:
   void each_type(std::function<bool(Lg_type_id, std::string_view)> fn) const;
   void each_type(std::string_view match, std::function<void(Lg_type_id, std::string_view)> fn) const;
   void each_type(std::string_view match, std::function<bool(Lg_type_id, std::string_view)> fn) const;
+
+  const std::vector<std::string> &get_liberty() const {
+    return liberty_list;
+  };
 
   void reload();
 };

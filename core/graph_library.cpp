@@ -189,6 +189,8 @@ void Graph_library::update_nentries(Lg_type_id lgid, uint64_t nentries) {
 void Graph_library::reload() {
   assert(graph_library_clean);
 
+  liberty_list.push_back("fake_bad.lib"); // FIXME
+
   max_next_version = 1;
   std::ifstream graph_list;
 
@@ -384,6 +386,7 @@ void Graph_library::clean_library() {
 
   rapidjson::StringBuffer                          s;
   rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(s);
+
   writer.StartObject();
   writer.Key("lgraph");
   writer.StartArray();
@@ -409,7 +412,20 @@ void Graph_library::clean_library() {
     writer.EndObject();
   }
   writer.EndArray();
+
+  writer.Key("liberty");
+  writer.StartArray();
+  for (const auto lib:liberty_list) {
+    writer.StartObject();
+
+    writer.Key("file");
+    writer.String(lib.c_str());
+
+    writer.EndObject();
+  }
+  writer.EndArray();
   writer.EndObject();
+
   {
     std::ofstream fs;
 
