@@ -37,6 +37,8 @@ protected:
     }
   };
   std::vector<std::string> liberty_list;
+  std::vector<std::string> sdc_list;
+  std::vector<std::string> spef_list;
 
   using Global_instances   = absl::flat_hash_map<std::string, Graph_library *>;
   using Global_name2lgraph = absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, LGraph *>>;
@@ -146,6 +148,14 @@ public:
 
   const std::vector<std::string> &get_liberty() const {
     return liberty_list;
+  };
+
+  const std::vector<std::string> &get_sdc() const {
+    return sdc_list;
+  };
+
+  const std::vector<std::string> &get_spef() const {
+    return spef_list;
   };
 
   void reload();
