@@ -93,6 +93,17 @@ protected:
     }
   }
 
+  static void liberty(Eprp_var &var) {
+    auto files   = var.get("files");
+    auto path    = var.get("path");
+    fmt::print("lgraph.liberty path:{} ", path);
+    for (const auto &f : absl::StrSplit(files, ',')) {
+      I(!files.empty());
+      fmt::print("file:{} ", f);
+    }
+    fmt::print(" (FIXME!, NOT IMPLEMENTED)\n");
+  }
+
   static void lgdump(Eprp_var &var) {
     fmt::print("lgraph.dump lgraphs:\n");
     for (const auto &l : var.lgs) {
@@ -144,7 +155,13 @@ public:
     Eprp_method m7("lgraph.match", "open many lgraphs (match regex)", &Meta_api::match);
     m7.add_label_optional("path", "lgraph path", "lgdb");
     m7.add_label_optional("match", "quoted string of regex to match . E.g: match:\"\\.v$\" for verilog files.", ".*");
-
     eprp.register_method(m7);
+
+    //---------------------
+    Eprp_method m8("lgraph.liberty", "add liberty files to the lgraph library", &Meta_api::liberty);
+    m8.add_label_required("files", "liberty files to add (comma separated)");
+    m8.add_label_optional("path", "lgraph path", "lgdb");
+
+    eprp.register_method(m8);
   }
 };
