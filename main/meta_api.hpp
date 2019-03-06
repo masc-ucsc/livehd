@@ -104,6 +104,28 @@ protected:
     fmt::print(" (FIXME!, NOT IMPLEMENTED)\n");
   }
 
+  static void sdc(Eprp_var &var) {
+    auto files   = var.get("files");
+    auto path    = var.get("path");
+    fmt::print("lgraph.sdc path:{} ", path);
+    for (const auto &f : absl::StrSplit(files, ',')) {
+      I(!files.empty());
+      fmt::print("file:{} ", f);
+    }
+    fmt::print(" (FIXME!, NOT IMPLEMENTED)\n");
+  }
+
+  static void spef(Eprp_var &var) {
+    auto files   = var.get("files");
+    auto path    = var.get("path");
+    fmt::print("lgraph.spef path:{} ", path);
+    for (const auto &f : absl::StrSplit(files, ',')) {
+      I(!files.empty());
+      fmt::print("file:{} ", f);
+    }
+    fmt::print(" (FIXME!, NOT IMPLEMENTED)\n");
+  }
+
   static void lgdump(Eprp_var &var) {
     fmt::print("lgraph.dump lgraphs:\n");
     for (const auto &l : var.lgs) {
@@ -163,5 +185,19 @@ public:
     m8.add_label_optional("path", "lgraph path", "lgdb");
 
     eprp.register_method(m8);
+
+    //---------------------
+    Eprp_method m9("lgraph.sdc", "add sdc files to the lgraph library", &Meta_api::sdc);
+    m9.add_label_required("files", "sdc files to add (comma separated)");
+    m9.add_label_optional("path", "lgraph path", "lgdb");
+
+    eprp.register_method(m9);
+
+    //---------------------
+    Eprp_method m10("lgraph.spef", "add spef files to the lgraph library", &Meta_api::spef);
+    m10.add_label_required("files", "spef files to add (comma separated)");
+    m10.add_label_optional("path", "lgraph path", "lgdb");
+
+    eprp.register_method(m10);
   }
 };
