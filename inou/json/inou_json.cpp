@@ -255,9 +255,10 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
 
       writer.Key("op");
       {
-        if(g->node_type_get(nid).op == U32Const_Op) {
+        auto type = g->get_node(nid).get_type();
+        if(type.op == U32Const_Op) {
           writer.Uint64(g->node_value_get(nid));
-        } else if(g->node_type_get(nid).op == StrConst_Op) {
+        } else if(type.op == StrConst_Op) {
           std::string tmp;
           tmp.append("'");
           tmp.append(g->node_const_value_get(nid));
@@ -265,9 +266,9 @@ void Inou_json::to_json(const LGraph *g, const std::string &filename) const {
           writer.String(tmp.c_str());
         } else {
           /*normal operations*/
-          if(g->node_type_get(nid).op == TechMap_Op) {
-            const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(nid));
-            writer.String(std::string(tcell->get_name()).c_str());
+          if(type.op == TechMap_Op) {
+            auto cell_name = g->get_tlibrary().get_cell_name(g->tmap_id_get(nid));
+            writer.String(std::string(cell_name).c_str());
           } else {
             writer.String((g->node_type_get(nid).get_name().c_str()));
           }
