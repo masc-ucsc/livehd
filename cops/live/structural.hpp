@@ -38,7 +38,7 @@ public:
   Live_structural(LGraph *original, Invariant_boundaries *boundaries)
       :  // original(original), boundaries(boundaries) {
       original(original) {
-    assert(boundaries);
+    I(boundaries);
   }
 
   Live_structural(Stitch_pass_options &pack);

@@ -5,7 +5,7 @@ namespace Live {
 
 int resolve_bit(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID pin, absl::flat_hash_set<uint32_t> &bits) {
   if (graph->node_type_get(idx).op == Pick_Op) {
-    assert(graph->get_bits(idx) >= current_bit);
+    I(graph->get_bits(idx) >= current_bit);
     if (pin != 0) return -1;  // do not propagate through this pid
     Index_ID picked = 0;
     Index_ID offset = 0;
@@ -16,10 +16,10 @@ int resolve_bit(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID pin, 
         offset = graph->get_node(c.get_out_pin()).get_nid();
       }
     }
-    assert(picked);
-    assert(offset);
-    assert(graph->node_type_get(offset).op == U32Const_Op);
-    assert(graph->node_value_get(offset) + current_bit <= graph->get_bits(picked));
+    I(picked);
+    I(offset);
+    I(graph->node_type_get(offset).op == U32Const_Op);
+    I(graph->node_value_get(offset) + current_bit <= graph->get_bits(picked));
     bits.insert(graph->node_value_get(offset) + current_bit);
     return 0;
   } else if (graph->node_type_get(idx).op == Join_Op) {
@@ -30,17 +30,17 @@ int resolve_bit(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID pin, 
     uint32_t offset = 0;
     int      last   = -1;
     for (auto &ps : port_size) {
-      assert(last + 1 == (int)ps.first);  // need to traverse in order
+      I(last + 1 == (int)ps.first);  // need to traverse in order
       last = ps.first;
       if (offset + ps.second > current_bit) {
         if (ps.first != pin) return -1;  // do not propagate through this pid
-        assert(current_bit >= offset);
+        I(current_bit >= offset);
         bits.insert(current_bit - offset);
         return 0;
       }
       offset += ps.second;
     }
-    assert(false);  // internal error in join
+    I(false);  // internal error in join
     return -1;
   } else if (graph->node_type_get(idx).op == Mux_Op) {
     if (pin == 2) {
@@ -70,7 +70,7 @@ int resolve_bit(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID pin, 
       else if (pin == 0) {
         bits.insert(current_bit + const_shift);
       } else {
-        assert(false);
+        I(false);
       }
       return 0;
     } else {
@@ -95,10 +95,10 @@ int resolve_bit(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID pin, 
       if (pin == 1)
         bits.insert(0);
       else if (pin == 0) {
-        assert(current_bit >= static_cast<uint32_t>(const_shift));
+        I(current_bit >= static_cast<uint32_t>(const_shift));
         bits.insert(current_bit - const_shift);
       } else {
-        assert(false);
+        I(false);
       }
       return 0;
     } else {
@@ -140,8 +140,8 @@ int resolve_bit_fwd(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID p
         offset = graph->get_node(c.get_out_pin()).get_nid();
       }
     }
-    assert(picked);
-    assert(offset);
+    I(picked);
+    I(offset);
 
     if (current_bit < graph->node_value_get(offset)) {
       // ignore this bit, not used by pick
@@ -159,7 +159,7 @@ int resolve_bit_fwd(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID p
     uint32_t offset = 0;
     int      last   = -1;
     for (auto &ps : port_size) {
-      assert(last + 1 == static_cast<int>(ps.first));  // need to traverse in order
+      I(last + 1 == static_cast<int>(ps.first));  // need to traverse in order
       last = ps.first;
       offset += ps.second;
     }
