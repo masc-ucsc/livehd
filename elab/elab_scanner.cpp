@@ -266,7 +266,7 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
       in_string_pos = true;
     } else {
       Token_id nt = translate[c].tok;
-      if (t.tok != nt) {
+      if (t.tok != nt || !trying_merge) {
         finishing_comment = false;
 
         add_token(t);

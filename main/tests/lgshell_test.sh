@@ -48,7 +48,7 @@ do
 
   echo "inou.yosys.tolg files:${file} path:mlgdb" | ${LGSHELL}
 
-  if [ $? -eq 0 ] && [ -f mlgdb/lgraph_${base}_nodes ]; then
+  if [ $? -eq 0 ]; then
     echo "Successfully created graph from ${input}"
   else
     echo "FAIL: lgyosys parsing terminated with an error (testcase ${file})"
@@ -81,15 +81,15 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-touch mlgdb/lgraph_potato_nodes
+touch mlgdb/lgraph_33_nodes
 echo "lgraph.open name:simple_flop path:mlgdb |> lgraph.stats" | ${LGSHELL} | grep warning: >mlgdb/pp
 if [ $(wc -l mlgdb/pp) -lt 1 ]; then
   echo "FAIL: (1) it should open simple_flop, but return error for corrupted graph_library"
   exit 1
 fi
 
-rm mlgdb/lgraph_potato_nodes
-rm mlgdb/lgraph_trivial_nodes
+rm mlgdb/lgraph_33_nodes
+rm mlgdb/lgraph_1_nodes
 ls mlgdb/lgraph*type
 echo "lgraph.open name:simple_flop path:mlgdb |> lgraph.stats" | ${LGSHELL}
 if [ $? -eq 0 ]; then
