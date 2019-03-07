@@ -76,15 +76,15 @@ void Pass_sample::do_work(const LGraph *g) {
   std::map<std::string, int> histogram;
 
   int cells = 0;
-  for(const auto &idx : g->forward()) {
+  for(const auto &nid : g->forward()) {
     cells++;
-    const auto &nt = g->node_type_get(idx);
-    std::string name = nt.get_name();
-    for(const auto &in_edge : g->inp_edges(idx)) {
+    const auto &node = g->get_node(nid);
+    std::string name = node.get_type().get_name();
+    for(const auto &in_edge : g->inp_edges(nid)) {
       name.append("_i");
       name.append(std::to_string(in_edge.get_bits()));
     }
-    for(const auto &out_edge : g->out_edges(idx)) {
+    for(const auto &out_edge : g->out_edges(nid)) {
       name.append("_o");
       name.append(std::to_string(out_edge.get_bits()));
     }

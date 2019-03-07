@@ -130,6 +130,9 @@ public:
   const std::string &get_name() const { return name; }
 
   Port_ID get_input_match(std::string_view str) const {
+    if (inputs.empty()) // blackbox, subgraph...
+      return Port_invalid;
+
     std::string data(str);
     std::transform(data.begin(), data.end(), data.begin(), ::toupper);
 
@@ -146,12 +149,20 @@ public:
     }
 #endif
 
-    assert(false);  // No match found
-
-    return 0;
+    return Port_invalid;
   }
 
   Port_ID get_output_match(std::string_view str) const {
+    if (outputs.empty()) // blackbox, subgraph...
+      return Port_invalid;
+
+    if (str == "Y" && outputs[0] == "Y")
+      return 0;
+    if (str == "Q" && outputs[0] == "Q")
+      return 0;
+    if (str == "YREDUCE" && outputs[1] == "YREDUCE")
+      return 1;
+
     std::string data(str);
     std::transform(data.begin(), data.end(), data.begin(), ::toupper);
 
@@ -168,9 +179,7 @@ public:
     }
 #endif
 
-    assert(false);  // No match found
-
-    return 0;
+    return Port_invalid;
   }
 
   bool is_input_signed(Port_ID pid) const {
@@ -738,8 +747,8 @@ public:
 #endif
   uint32_t node_value_get(const Node_pin &pin) const;
 
-  void     node_subgraph_set(Index_ID nid, uint32_t subgraphid);
-  uint32_t subgraph_id_get(Index_ID nid) const;
+  void     node_subgraph_set(Index_ID nid, Lg_type_id subgraphid);
+  Lg_type_id subgraph_id_get(Index_ID nid) const;
 
   void             node_const_type_set(Index_ID nid, std::string_view value);
   void             node_const_type_set_string(Index_ID nid, std::string_view value);

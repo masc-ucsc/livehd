@@ -18,3 +18,12 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "node_test",
+    srcs = ["tests/node_test.cpp"],
+    deps = [
+        "@gtest//:gtest_main",
+        ":meta",
+    ],
+)
+

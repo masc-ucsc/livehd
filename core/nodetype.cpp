@@ -128,19 +128,19 @@ void LGraph_Node_Type::node_type_set(Index_ID nid, Node_Type_Op op) {
   node_type_table[node_internal[nid].get_nid()] = op;
 }
 
-void LGraph_Node_Type::node_subgraph_set(Index_ID nid, uint32_t subgraphid) {
+void LGraph_Node_Type::node_subgraph_set(Index_ID nid, Lg_type_id subgraphid) {
   I(nid < node_type_table.size());
   I(node_internal[nid].is_node_state());
 
   I(node_internal[nid].get_nid() < node_type_table.size());
-  I(subgraphid <= (uint32_t)(SubGraphMax_Op - SubGraphMin_Op));
+  I(subgraphid.value <= (uint32_t)(SubGraphMax_Op - SubGraphMin_Op));
 
   sub_graph_nodes.set_bit(node_internal[nid].get_nid());
 
   node_type_table[node_internal[nid].get_nid()] = (Node_Type_Op)(SubGraphMin_Op + subgraphid);
 }
 
-uint32_t LGraph_Node_Type::subgraph_id_get(Index_ID nid) const {
+Lg_type_id LGraph_Node_Type::subgraph_id_get(Index_ID nid) const {
   I(nid < node_type_table.size());
   I(node_internal[nid].is_node_state());
 
@@ -150,7 +150,7 @@ uint32_t LGraph_Node_Type::subgraph_id_get(Index_ID nid) const {
   I(node_type_table[node_internal[nid].get_nid()] >= SubGraphMin_Op);
   I(node_type_table[node_internal[nid].get_nid()] <= SubGraphMax_Op);
 
-  return (uint32_t)(node_type_table[node_internal[nid].get_nid()] - SubGraphMin_Op);
+  return Lg_type_id((uint32_t)(node_type_table[node_internal[nid].get_nid()] - SubGraphMin_Op));
 }
 
 void LGraph_Node_Type::node_tmap_set(Index_ID nid, uint32_t tmapid) {

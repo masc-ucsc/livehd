@@ -280,9 +280,16 @@ Node LGraph::create_node_const(std::string_view value) {
     node_const_type_set_string(nid, value);
   }
 
-  Node node(this,nid);
+  return Node(this,nid);
+}
 
-  return node;
+Node LGraph::create_node_sub(Lg_type_id sub_id) {
+  I(lg_id() != sub_id); // It can not point to itself (in fact, no recursion of any type)
+
+  auto nid = create_node().get_nid();
+  node_subgraph_set(nid, sub_id);
+
+  return Node(this,nid);
 }
 
 Node LGraph::create_node_const(std::string_view value, uint16_t bits) {
@@ -381,6 +388,60 @@ const Edge_iterator ConstNode::out_edges() const { return g->out_edges(nid); }
 const Edge_iterator Node::inp_edges() const { return g->inp_edges(nid); }
 
 const Edge_iterator Node::out_edges() const { return g->out_edges(nid); }
+
+Node_pin Node::setup_driver_pin(std::string_view name) {
+  auto type = get_type();
+
+  auto pid = type.get_output_match(name);
+  if (pid != Port_invalid) {
+    auto idx = nid;
+    if (pid)
+      idx = g->setup_idx_from_pid(nid,pid);
+    return Node_pin(idx,pid,false);
+  }
+
+  if (type.op == SubGraph_Op) {
+    Lg_type_id id2 = g->subgraph_id_get(nid);
+    LGraph *g2 = LGraph::open(g->get_path(), id2);
+    I(g2);
+    auto internal_pin = g2->get_graph_output(name);
+    pid = internal_pin.get_pid();
+    Index_ID idx = g->setup_idx_from_pid(nid,pid);
+    return Node_pin(idx,pid,false);
+  }
+
+  I(type.op == TechMap_Op); // TechFile still not handled. Anything else missing?
+  I(false); // TechFile still not handled. Anything else missing?
+
+  return Node_pin(nid,0,false);
+}
+
+Node_pin Node::setup_sink_pin(std::string_view name) {
+  auto type = get_type();
+
+  auto pid = type.get_input_match(name);
+  if (pid != Port_invalid) {
+    auto idx = nid;
+    if (pid)
+      idx = g->setup_idx_from_pid(nid,pid);
+    return Node_pin(idx,pid,true);
+  }
+
+  if (type.op == SubGraph_Op) {
+    Lg_type_id id2 = g->subgraph_id_get(nid);
+    LGraph *g2 = LGraph::open(g->get_path(), id2);
+    I(g2);
+    auto internal_pin = g2->get_graph_input(name);
+    pid = internal_pin.get_pid();
+    Index_ID idx = g->setup_idx_from_pid(nid,pid);
+    return Node_pin(idx,pid,true);
+  }
+
+  I(type.op == TechMap_Op); // TechFile still not handled. Anything else missing?
+  I(false); // TechFile still not handled. Anything else missing?
+
+  return Node_pin(nid,0,true);
+}
 
 Forward_edge_iterator LGraph::forward() const { return Forward_edge_iterator(this); }
 
