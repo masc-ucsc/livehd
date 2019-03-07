@@ -84,6 +84,7 @@ public:
   Node create_node_u32(uint32_t value, uint16_t bits);
   Node create_node_const(std::string_view value);
   Node create_node_const(std::string_view value, uint16_t bits);
+  Node create_node_sub(Lg_type_id sub);
 
 #if 1
   // WARNING: deprecated: move to protected
@@ -228,6 +229,7 @@ public:
   void set(const Node_Type_Op op) { g->node_type_set(nid, op); }
 #endif
 
+  Node_pin setup_driver_pin(std::string_view name);
   Node_pin setup_driver_pin(Port_ID pid) {
     I(g->node_type_get(nid).has_output(pid));
     Index_ID idx = g->setup_idx_from_pid(nid,pid);
@@ -238,6 +240,7 @@ public:
     return Node_pin(nid,0,false);
   }
 
+  Node_pin setup_sink_pin(std::string_view name);
   Node_pin setup_sink_pin(Port_ID pid) {
     I(g->node_type_get(nid).has_input(pid));
     Index_ID idx = g->setup_idx_from_pid(nid,pid);

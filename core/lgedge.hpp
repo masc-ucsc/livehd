@@ -22,6 +22,7 @@ typedef uint16_t Port_ID;    // ports have a set order (a-b != b-a)
 
 constexpr int Index_bits = 34;
 constexpr int Port_bits  = 12;
+constexpr int Port_invalid = 8192; // Anything over 1<<12
 
 struct __attribute__((packed)) LEdge_Internal {  // 6 bytes total
 
