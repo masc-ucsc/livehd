@@ -72,3 +72,28 @@ TEST_F(Elab_test, token_comp1){
     tok_num++;
   }
 }
+
+TEST_F(Elab_test, token_comp2){
+  std::string_view txt1("=>foo<=33+_foo");
+  scanner.parse("txt1", txt1, txt1.size());
+  EXPECT_EQ(7, scanner.debug_token_list.size());
+
+  EXPECT_EQ(scanner.debug_token_list[0], "=");
+  EXPECT_EQ(scanner.debug_token_list[1], ">");
+  EXPECT_EQ(scanner.debug_token_list[2], "foo");
+  EXPECT_EQ(scanner.debug_token_list[3], "<=");
+  EXPECT_EQ(scanner.debug_token_list[4], "33");
+  EXPECT_EQ(scanner.debug_token_list[5], "+");
+  EXPECT_EQ(scanner.debug_token_list[6], "_foo");
+}
+
+TEST_F(Elab_test, token_comp3){
+  std::string_view txt1("100s3bit /*110 /* comment */ 33*/_3_44_u32bits");
+  scanner.parse("txt1", txt1, txt1.size());
+  EXPECT_EQ(3, scanner.debug_token_list.size());
+
+  EXPECT_EQ(scanner.debug_token_list[0], "100s3bit");
+  EXPECT_EQ(scanner.debug_token_list[1], "/*110 /* comment */ 33*/"); // comment
+  EXPECT_EQ(scanner.debug_token_list[2], "_3_44_u32bits");
+}
+
