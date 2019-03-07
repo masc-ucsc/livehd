@@ -117,6 +117,9 @@ void Elab_scanner::add_token(Token &t) {
       token_list.back().tok = Token_id_input;
       token_list.back().len += t.len;
       return;
+    } else if (last_tok.tok == Token_id_alnum) {  // foo
+      token_list.back().len += t.len;
+      return;
     }
   } else if (last_tok.tok == Token_id_alnum && t.tok == Token_id_colon) {
     last_tok.tok = Token_id_label;
@@ -266,14 +269,12 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
       in_string_pos = true;
     } else {
       Token_id nt = translate[c].tok;
-      if (t.tok != nt || !trying_merge) {
-        finishing_comment = false;
+      finishing_comment = false;
 
-        add_token(t);
-        t.set(nt, pos);
+      add_token(t);
+      t.set(nt, pos);
 
-        trying_merge = translate[c].try_merge;
-      }
+      trying_merge = translate[c].try_merge;
     }
 
     last_c = c;
