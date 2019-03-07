@@ -36,16 +36,16 @@ protected:
     // Create graphs input/outputs
     auto top_a = top->add_graph_input("a", 10, 0);
     auto top_b = top->add_graph_input("b", 10, 0);
-    auto top_z = top->add_graph_output("z", 10, 0);
+    auto top_z = top->add_graph_output("z", 1, 0);
     auto top_y = top->add_graph_output("Y", 10, 0);
-    auto top_s2_out = top->add_graph_output("s2_out", 10, 0);
+    auto top_s2_out = top->add_graph_output("s2_out", 1, 0);
 
     auto c1_aaa = c1->add_graph_input("an_input", 10, 0);
-    auto c1_sss = c1->add_graph_output("s1_output", 10, 0);
+    auto c1_sss = c1->add_graph_output("s1_output", 1, 0);
 
     auto c2_aaa = c2->add_graph_input("a1", 10, 0);
     auto c2_bbb = c2->add_graph_input("anotherinput", 10, 0);
-    auto c2_sss = c2->add_graph_output("Y", 10, 0);
+    auto c2_sss = c2->add_graph_output("Y", 1, 0);
 
     //---------------------------------------------------
     // populate top graph with cells and instances
@@ -81,27 +81,30 @@ protected:
     auto mux_s = mux.setup_sink_pin("S");
     auto mux_y = mux.setup_driver_pin("Y");
 
-    top->add_edge(top_a, sum_a);
-    top->add_edge(top_b, sum_b);
+    top->add_edge(top_a, sum_a, 10);
+    top->add_edge(top_b, sum_b, 10);
 
-    top->add_edge(top_a, mor_a);
-    top->add_edge(top_b, mor_a);
+    top->add_edge(top_a, mor_a, 10);
+    top->add_edge(top_b, mor_a, 10);
 
-    top->add_edge(top_a, s1_aaa);
+    top->add_edge(top_a, s1_aaa, 10);
 
-    top->add_edge(top_a , s2_aaa);
-    top->add_edge(s1_sss, s2_bbb);
-    top->add_edge(s1_sss, top_z);
+    top->add_edge(top_a , s2_aaa, 10);
+    top->add_edge(s1_sss, s2_bbb, 1);
+    top->add_edge(s1_sss, top_z, 1);
 
-    top->add_edge(sum_y , mux_b);
-    top->add_edge(s2_sss, mux_s);
-    top->add_edge(mor_y , mux_a);
+    top->add_edge(sum_y , mux_b, 10);
+    top->add_edge(s2_sss, mux_s, 1);
+    top->add_edge(mor_y , mux_a, 10);
 
-    top->add_edge(mux_y  , top_y);
-    top->add_edge(s2_sss , top_s2_out);
+    top->add_edge(mux_y  , top_y, 10);
+    top->add_edge(s2_sss , top_s2_out, 1);
   }
 
   void TearDown() override {
+    top->sync();
+    c1->sync();
+    c2->sync();
   }
 };
 
