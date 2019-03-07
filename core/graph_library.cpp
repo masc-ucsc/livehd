@@ -189,12 +189,14 @@ void Graph_library::update_nentries(Lg_type_id lgid, uint64_t nentries) {
 void Graph_library::reload() {
   assert(graph_library_clean);
 
+  max_next_version = 1;
+  std::ifstream graph_list;
+
+  // FIXME: BEGIN DELETE THIS and replace with json reload
+
   liberty_list.push_back("fake_bad.lib"); // FIXME
   sdc_list.push_back("fake_bad.sdc"); // FIXME
   spef_list.push_back("fake_bad.spef"); // FIXME
-
-  max_next_version = 1;
-  std::ifstream graph_list;
 
   graph_list.open(library_file);
 
@@ -235,6 +237,7 @@ void Graph_library::reload() {
   }
 
   graph_list.close();
+  // FIXME: END
 
 #ifndef NDEBUG
   DIR *dir = opendir(path.c_str());
