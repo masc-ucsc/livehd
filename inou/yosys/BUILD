@@ -57,16 +57,3 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
-sh_test(
-    name = "synth.sh",
-    srcs = ["tests/synth.sh"],
-    data = [
-        "liblgraph_yosys.so",
-        ":verilog_tests",
-        ],
-    deps = [
-        ":scripts",
-        "//inou/tech:tech_gens",
-    ],
-)
-

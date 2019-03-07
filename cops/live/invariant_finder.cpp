@@ -32,7 +32,7 @@ void Invariant_finder::get_topology() {
       if (current->node_type_get(idx).op != SubGraph_Op) continue;
 
       LGraph *subgraph = LGraph::open(current->get_path(), current->get_subgraph_name(idx));
-      assert(subgraph);
+      I(subgraph);
 
       boundaries.hierarchy_tree[Invariant_boundaries::get_graphID(subgraph)].insert(Invariant_boundaries::get_graphID(current));
 
@@ -60,18 +60,14 @@ void Invariant_finder::get_topology() {
 }
 
 void Invariant_finder::propagate_until_boundary(Index_ID nid, uint32_t bit_selection) {
-  assert(synth_graph->get_bits(nid) > bit_selection);
 
   Index_ID master_id = synth_graph->get_master_nid(nid);
-#if 1
   const auto &op = synth_graph->node_type_get(master_id).op;
-  if (op == GraphIO_Op || op == U32Const_Op || op == StrConst_Op) return;
-#else
-  if (synth_graph->is_graph_input(nid) || synth_graph->node_type_get(master_id).op == U32Const_Op ||
-      synth_graph->node_type_get(master_id).op == StrConst_Op) {
+  if (op == GraphIO_Op || op == U32Const_Op || op == StrConst_Op) {
     return;
   }
-#endif
+
+  I(synth_graph->get_bits(nid) > bit_selection);
 
   const Node_bit nid_bit = std::make_pair(nid, bit_selection);
   if (partial_endpoints.find(nid_bit) != partial_endpoints.end()) {
@@ -86,12 +82,10 @@ void Invariant_finder::propagate_until_boundary(Index_ID nid, uint32_t bit_selec
     return;
   }
 
-  assert(partial_endpoints.find(nid_bit) == partial_endpoints.end());
-  assert(partial_cone_cells.find(nid_bit) == partial_cone_cells.end());
+  I(partial_endpoints.find(nid_bit) == partial_endpoints.end());
+  I(partial_cone_cells.find(nid_bit) == partial_cone_cells.end());
 
-#ifndef NDEBUG
-  assert(deleted.find(nid_bit) == deleted.end());
-#endif
+  I(deleted.find(nid_bit) == deleted.end());
 
   partial_endpoints[nid_bit]  = Net_set();
   partial_cone_cells[nid_bit] = Gate_set();
@@ -179,7 +173,7 @@ void Invariant_finder::find_invariant_boundaries() {
       inst = inst + boundaries.hierarchical_separator;
 
     LGraph *lg = Invariant_boundaries::get_graph(_inst.second, path);
-    assert(lg);
+    I(lg);
 
     for (auto &nid : lg->forward()) {
 
@@ -198,10 +192,8 @@ void Invariant_finder::find_invariant_boundaries() {
         idx     = synth_graph->get_node_id(hierarchical_name);
         wire_id = synth_graph->get_wid(idx);
 
-#ifndef NDEBUG
       } else {
-        assert(!synth_graph->has_wirename(("\\" + hierarchical_name).c_str()));
-#endif
+        I(!synth_graph->has_wirename(("\\" + hierarchical_name).c_str()));
         continue;
       }
 

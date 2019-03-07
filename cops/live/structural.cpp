@@ -31,11 +31,11 @@ Node_pin Live_structural::get_inp_edge(LGraph *current, Index_ID nid, Port_ID pi
   bool     found = false;
   for (auto &inp : current->inp_edges(nid)) {
     if (inp.get_inp_pin().get_pid()) {
-      assert(!found);
+      I(!found);
       candidate = inp.get_inp_pin();
     }
   }
-  assert(found);
+  I(found);
   return candidate;
 }
 
@@ -51,10 +51,11 @@ void Live_structural::replace(LGraph *nsynth) {
     if (nsynth->is_graph_output(idx)) {
       outputs.insert(idx);
       discovered.push(queue_element(idx, 0));
-      if (Index_ID oid = get_candidate(idx, nsynth))
+      if (Index_ID oid = get_candidate(idx, nsynth)) {
         candidate_equiv[idx] = oid;
-      else
-        assert(false);
+      }else{
+        I(false);
+      }
     }
   }
 

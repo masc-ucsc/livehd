@@ -112,9 +112,9 @@ void Live_stitcher::stitch(LGraph *nsynth, const std::set<Net_ID> &diffs) {
 
   // removed original graph
   for (auto &diff : diffs) {
-    assert(boundaries->invariant_cone_cells.find(diff) != boundaries->invariant_cone_cells.end());
+    I(boundaries->invariant_cone_cells.find(diff) != boundaries->invariant_cone_cells.end());
     for (auto &gate : boundaries->invariant_cone_cells[diff]) {
-      assert(boundaries->gate_appearances.find(gate) != boundaries->gate_appearances.end());
+      I(boundaries->gate_appearances.find(gate) != boundaries->gate_appearances.end());
       boundaries->gate_appearances[gate]--;
       if (boundaries->gate_appearances[gate] <= 0) {
         // original->del_node(gate);
