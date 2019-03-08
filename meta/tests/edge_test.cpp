@@ -75,7 +75,7 @@ bool test1() {
 
   auto dpin = g->get_node(idx1).setup_driver_pin(20);
   auto spin = g->get_node(idx2).setup_sink_pin(25);
-  
+
   g->add_edge(dpin, spin);
 
   for(auto &out : g->out_edges(idx1)) {

@@ -11,24 +11,16 @@ cc_library(
             "//eprp:eprp",
             "//lmms:headers",
             "//bench:headers",
+            "@yas//:headers",
             ],
 )
 
 cc_test(
-    name = "edge_test",
-    srcs = ["tests/edge_test.cpp"],
+    name = "attribute_test",
+    srcs = ["tests/attribute_test.cpp"],
     deps = [
+        "@gtest//:gtest_main",
         ":core",
-        "//meta:meta",
-    ],
-)
-
-cc_test(
-    name = "iter_test",
-    srcs = ["tests/iter_test.cpp"],
-    deps = [
-        ":core",
-        "//meta:meta",
     ],
 )
 

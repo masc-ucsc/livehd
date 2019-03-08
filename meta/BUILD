@@ -27,3 +27,19 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "iter_test",
+    srcs = ["tests/iter_test.cpp"],
+    deps = [
+        ":meta",
+    ],
+)
+
+
+cc_test(
+    name = "edge_test",
+    srcs = ["tests/edge_test.cpp"],
+    deps = [
+        ":meta",
+    ],
+)

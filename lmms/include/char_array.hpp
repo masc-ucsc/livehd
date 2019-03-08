@@ -202,6 +202,7 @@ public:
     variable_internal.clear();
     variable_internal.emplace_back();
     hash2id.clear();
+    unlink((long_name + "_map").c_str());
   }
 
   void sync() {

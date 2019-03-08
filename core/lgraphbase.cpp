@@ -9,6 +9,8 @@
 #include "lgraphbase.hpp"
 #include "pass.hpp"
 
+#include "attribute.hpp"
+
 LGraph_Base::LGraph_Base(const std::string &_path, const std::string &_name, Lg_type_id lgid) noexcept
     : Lgraph_base_core(_path, _name, lgid)
     , LGraph_Node_Type(_path, _name, lgid)
