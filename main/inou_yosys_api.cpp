@@ -259,6 +259,12 @@ void Inou_yosys_api::fromlg(Eprp_var &var) {
   auto yosys = var.get("yosys");
   auto odir  = var.get("odir");
 
+  struct stat sb;
+  std::string sdir(odir);
+  if (stat(sdir.c_str(), &sb) != 0 || !S_ISDIR(sb.st_mode)) {
+    mkdir(sdir.c_str(), 0755);
+  }
+
   std::string script_file;
   std::string liblg;
   set_script_liblg(var, script_file, liblg, false);

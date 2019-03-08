@@ -581,17 +581,13 @@ public:
 #define LGRAPH_BBOP_NAME 1
 
 #define LGRAPH_BBOP_OFFSET 2
-#define LGRAPH_BBOP_PORT_SIZE 4
+#define LGRAPH_BBOP_PORT_SIZE 2
 
-#define LGRAPH_BBOP_PARAM(_n) (LGRAPH_BBOP_OFFSET + 0 + _n * (LGRAPH_BBOP_PORT_SIZE))
-#define LGRAPH_BBOP_PNAME(_n) (LGRAPH_BBOP_OFFSET + 1 + _n * (LGRAPH_BBOP_PORT_SIZE))
-#define LGRAPH_BBOP_CONNECT(_n) (LGRAPH_BBOP_OFFSET + 2 + _n * (LGRAPH_BBOP_PORT_SIZE))
-#define LGRAPH_BBOP_ONAME(_n) (LGRAPH_BBOP_OFFSET + 3 + _n * (LGRAPH_BBOP_PORT_SIZE))
+#define LGRAPH_BBOP_ICONNECT(_n) (LGRAPH_BBOP_OFFSET + 1 + _n * (LGRAPH_BBOP_PORT_SIZE))
+#define LGRAPH_BBOP_IPARAM(_n)   (LGRAPH_BBOP_OFFSET + 0 + _n * (LGRAPH_BBOP_PORT_SIZE))
 
-#define LGRAPH_BBOP_ISPARAM(_pid) (((_pid - LGRAPH_BBOP_OFFSET) % (LGRAPH_BBOP_PORT_SIZE)) == 0)
-#define LGRAPH_BBOP_ISPNAME(_pid) (((_pid - LGRAPH_BBOP_OFFSET) % (LGRAPH_BBOP_PORT_SIZE)) == 1)
-#define LGRAPH_BBOP_ISCONNECT(_pid) (((_pid - LGRAPH_BBOP_OFFSET) % (LGRAPH_BBOP_PORT_SIZE)) == 2)
-#define LGRAPH_BBOP_ISONAME(_pid) (((_pid - LGRAPH_BBOP_OFFSET) % (LGRAPH_BBOP_PORT_SIZE)) == 3)
+#define LGRAPH_BBOP_ISIPARAM(_pid) (((_pid - LGRAPH_BBOP_OFFSET) % (LGRAPH_BBOP_PORT_SIZE)) == 0)
+#define LGRAPH_BBOP_ISICONNECT(_pid) (((_pid - LGRAPH_BBOP_OFFSET) % (LGRAPH_BBOP_PORT_SIZE)) == 1)
 
 #define LGRAPH_BBOP_PORT_N(_pid) ((_pid - LGRAPH_BBOP_OFFSET) / (LGRAPH_BBOP_PORT_SIZE))
 
@@ -604,14 +600,12 @@ public:
     for(int i=0;i<1024;i++) { // At most 1K ports?? Increase if needed
       std::string txt = "I" + std::to_string(i);
       inputs.push_back(txt + "_ISPARAM");  // 0 = input, 1 = parameter
-      inputs.push_back(txt + "_NAME");
-      inputs.push_back(txt + "_CONNECTION");
+      inputs.push_back(txt + "_CONNECT");
     }
 
     for(int i=0;i<1024;i++) {
       std::string txt = "O" + std::to_string(i);
-      outputs.push_back(txt + "_NAME");
-      outputs.push_back(txt + "_CONNECTION");
+      outputs.push_back(txt + "_CONNECT");
     }
   };
 };

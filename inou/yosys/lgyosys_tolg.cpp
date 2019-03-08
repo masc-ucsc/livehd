@@ -500,7 +500,7 @@ static void look_for_cell_outputs(RTLIL::Module *module) {
       pid = 1;
     }
 
-    uint32_t blackbox_out = 0;
+    //uint32_t blackbox_out = 0;
     for(const auto &conn : cell->connections()) {
       // first faster filter but doesn't always work
       if(cell->input(conn.first) || (sub_graph && sub_graph->is_graph_input(&(conn.first.c_str()[1]))))
@@ -516,7 +516,7 @@ static void look_for_cell_outputs(RTLIL::Module *module) {
 #endif
       assert(cell->output(conn.first) || tcell || blackbox || (sub_graph && sub_graph->is_graph_output(&(conn.first.c_str()[1]))));
       if(blackbox && !is_black_box_output(module, cell, conn.first)) {
-        connect_string(g, &(conn.first.c_str()[1]), nid, LGRAPH_BBOP_ONAME(blackbox_out++));
+        //g->set_node_wirename(g->get_node(nid).setup_driver_pin(blackbox_out++), &(conn.first.c_str()[1]));
         continue;
       } else if(sub_graph && !sub_graph->is_graph_output(&(conn.first.c_str()[1]))) {
         continue;
@@ -1098,8 +1098,8 @@ static LGraph *process_module(RTLIL::Module *module) {
       ::Pass::info("Black box addition from yosys frontend, cell type {} not found instance {}", cell->type.c_str(), cell->name.c_str());
 
       op = BlackBox_Op;
-      connect_string(g, &(cell->type.c_str()[1]), onid, 0);
-      connect_string(g, &(cell->name.c_str()[1]), onid, 1);
+      connect_string(g, &(cell->type.c_str()[1]), onid, LGRAPH_BBOP_TYPE);
+      connect_string(g, &(cell->name.c_str()[1]), onid, LGRAPH_BBOP_NAME);
     }
 
     if(op == SubGraph_Op) {
@@ -1130,7 +1130,8 @@ static LGraph *process_module(RTLIL::Module *module) {
       }
     }
 
-    uint32_t blackbox_port = 0;
+    uint32_t blackbox_inp_port = 0;
+    uint32_t blackbox_out_port = 0;
 
     std::set<std::pair<Node_pin, Node_pin>> added_edges;
     for(auto &conn : cell->connections()) {
@@ -1153,12 +1154,14 @@ static LGraph *process_module(RTLIL::Module *module) {
         dst_pid = tcell->get_inp_id(name);
 
       } else if(op == BlackBox_Op && !yosys_tech) {
-        if(is_black_box_output(module, cell, conn.first)
-        || is_black_box_input(module, cell, conn.first)) {
-          connect_constant(g, 0, onid, LGRAPH_BBOP_PARAM(blackbox_port));
-          connect_string(g, &(conn.first.c_str()[1]), onid, LGRAPH_BBOP_PNAME(blackbox_port));
-          dst_pid = LGRAPH_BBOP_CONNECT(blackbox_port);
-          blackbox_port++;
+        if(is_black_box_input(module, cell, conn.first)) {
+          connect_constant(g, 0, onid, LGRAPH_BBOP_IPARAM(blackbox_inp_port));
+          dst_pid = LGRAPH_BBOP_ICONNECT(blackbox_inp_port);
+          g->set_node_wirename(g->get_node(onid).setup_sink_pin(dst_pid), &(conn.first.c_str()[1]));
+          blackbox_inp_port++;
+        }else if(is_black_box_output(module, cell, conn.first)) {
+          g->set_node_wirename(g->get_node(onid).setup_sink_pin(blackbox_out_port), &(conn.first.c_str()[1]));
+          blackbox_out_port++;
         } else {
           bool o = is_black_box_output(module, cell, conn.first);
           bool i = is_black_box_input (module, cell, conn.first);
