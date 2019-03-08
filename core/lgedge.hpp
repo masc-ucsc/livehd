@@ -143,9 +143,13 @@ public:
   bool     is_input()  const { I(idx); return input;  }
   bool     is_output() const { I(idx); return !input; }
 
+  bool     is_sink()   const { I(idx); return input;  }
+  bool     is_driver() const { I(idx); return !input; }
+
 #if 0
-  // FUTURE:
-  std::string_view get_wirename() const;
+  // FUTURE: Once Node_pin has LGraph ptr
+  std::string_view get_name() const; // First wirename, otherwise default type name
+  void set_name(std::string_view name); // Set wirename
 #endif
 
   bool operator==(const Node_pin &other) const { I(idx); return (idx == other.idx) && (pid == other.pid) && (input == other.input); }

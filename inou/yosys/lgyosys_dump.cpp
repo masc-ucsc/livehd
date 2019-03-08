@@ -1189,72 +1189,62 @@ void Lgyosys_dump::to_yosys(const LGraph *g) {
         log_error("could not find instance name or celltype for blackbox\n");
       }
 
-      std::vector<std::string_view> output_names; // WARNING: Guarantee to keep strings, so string_view avoids allocation
       RTLIL::Cell *            cell = module->addCell(absl::StrCat("\\",instance_name), RTLIL::IdString(absl::StrCat("\\", celltype)));
-      std::string              current_name;
 #ifndef NDEBUG
       int current_port = 0, def = 0;
 #endif
       bool is_param = false;
       for(const auto &c : g->inp_edges(nid)) {
-        if(c.get_inp_pin().get_pid() >= LGRAPH_BBOP_OFFSET) {
-          if(LGRAPH_BBOP_ISPARAM(c.get_inp_pin().get_pid())) {
-            if(g->get_node(c.get_idx()).get_type().op != U32Const_Op)
-              log_error("Internal Error: Could not define if input is parameter.\n");
-            is_param = g->node_value_get(c.get_idx()) == 1;
+        if(c.get_inp_pin().get_pid() < LGRAPH_BBOP_OFFSET)
+          continue;
+
+        if(LGRAPH_BBOP_ISIPARAM(c.get_inp_pin().get_pid())) {
+          if(g->get_node(c.get_idx()).get_type().op != U32Const_Op)
+            log_error("Internal Error: Could not define if input is parameter.\n");
+          is_param = g->node_value_get(c.get_idx()) == 1;
 #ifndef NDEBUG
-            assert(def == 0);
-            def++;
-            assert(current_port == 0);
-            current_port = LGRAPH_BBOP_PORT_N(c.get_inp_pin().get_pid());
+          assert(def == 0);
+          def++;
+          assert(current_port == 0);
+          current_port = LGRAPH_BBOP_PORT_N(c.get_inp_pin().get_pid());
 #endif
-          } else if(LGRAPH_BBOP_ISPNAME(c.get_inp_pin().get_pid())) {
-            if(g->get_node(c.get_idx()).get_type().op != StrConst_Op)
-              log_error("Internal Error: BB input name not a string.\n");
-            current_name = g->node_const_value_get(c.get_idx());
-#ifndef NDEBUG
-            assert(def == 1);
-            def += 1;
-            assert(current_port == 0 || current_port == LGRAPH_BBOP_PORT_N(c.get_inp_pin().get_pid()));
-#endif
-          } else if(LGRAPH_BBOP_ISCONNECT(c.get_inp_pin().get_pid())) {
-            if(is_param) {
-              if(g->get_node(c.get_idx()).get_type().op == U32Const_Op) {
-                cell->setParam(absl::StrCat("\\",current_name), RTLIL::Const(g->node_value_get(c.get_idx())));
-              } else if(g->get_node(c.get_idx()).get_type().op == StrConst_Op) {
-                cell->setParam(absl::StrCat("\\",current_name), RTLIL::Const(std::string(g->node_const_value_get(c.get_idx()))));
-              } else {
-                assert(false); // parameter is not a constant
-              }
+        } else if(LGRAPH_BBOP_ISICONNECT(c.get_inp_pin().get_pid())) {
+          auto current_name = g->get_node_wirename(c.get_inp_pin());
+          if(is_param) {
+            if(g->get_node(c.get_idx()).get_type().op == U32Const_Op) {
+              cell->setParam(absl::StrCat("\\",current_name), RTLIL::Const(g->node_value_get(c.get_idx())));
+            } else if(g->get_node(c.get_idx()).get_type().op == StrConst_Op) {
+              cell->setParam(absl::StrCat("\\",current_name), RTLIL::Const(std::string(g->node_const_value_get(c.get_idx()))));
             } else {
-              if(g->get_node(c.get_idx()).get_type().op == U32Const_Op) {
-                cell->setPort(absl::StrCat("\\",current_name), RTLIL::Const(g->node_value_get(c.get_idx())));
-              } else if(g->get_node(c.get_idx()).get_type().op == StrConst_Op) {
-                cell->setPort(absl::StrCat("\\",current_name), RTLIL::Const(std::string(g->node_const_value_get(c.get_idx()))));
-              } else {
-                cell->setPort(absl::StrCat("\\",current_name), get_wire(c.get_out_pin()));
-              }
+              assert(false); // parameter is not a constant
             }
-#ifndef NDEBUG
-            assert(def == 2);
-            assert(current_port == LGRAPH_BBOP_PORT_N(c.get_inp_pin().get_pid()));
-            current_port = 0;
-            def          = 0;
-#endif
-          } else if(LGRAPH_BBOP_ISONAME(c.get_inp_pin().get_pid())) {
-            if(g->get_node(c.get_idx()).get_type().op != StrConst_Op)
-              log_error("Internal Error: BB output name is not a string.\n");
-            assert(output_names.size() == (uint32_t)LGRAPH_BBOP_PORT_N(c.get_inp_pin().get_pid()));
-            output_names.push_back(g->node_const_value_get(c.get_idx()));
+          } else {
+            if(g->get_node(c.get_idx()).get_type().op == U32Const_Op) {
+              cell->setPort(absl::StrCat("\\",current_name), RTLIL::Const(g->node_value_get(c.get_idx())));
+            } else if(g->get_node(c.get_idx()).get_type().op == StrConst_Op) {
+              cell->setPort(absl::StrCat("\\",current_name), RTLIL::Const(std::string(g->node_const_value_get(c.get_idx()))));
+            } else {
+              cell->setPort(absl::StrCat("\\",current_name), get_wire(c.get_out_pin()));
+            }
           }
+#ifndef NDEBUG
+          assert(def == 2);
+          assert(current_port == LGRAPH_BBOP_PORT_N(c.get_inp_pin().get_pid()));
+          current_port = 0;
+          def          = 0;
+#endif
         }
       }
+
 #ifndef NDEBUG
       current_port = 0, def = 0;
 #endif
-      int i = 0;
-      for(const auto &c : g->out_edges(nid)) {
-        cell->setPort(absl::StrCat("\\",output_names[i++]), cell_output_map[std::make_pair(c.get_out_pin().get_idx(), c.get_out_pin().get_pid())]);
+      for(const auto &c : g->inp_edges(nid)) {
+        if(LGRAPH_BBOP_ISICONNECT(c.get_inp_pin().get_pid())) {
+          // FIXME: nicer API last_name = c.get_inp_pin().name();
+          auto wname = absl::StrCat("\\",g->get_node_wirename(c.get_inp_pin()));
+          cell->setPort(wname, cell_output_map[std::make_pair(c.get_out_pin().get_idx(), c.get_out_pin().get_pid())]);
+        }
       }
       break;
     }
