@@ -351,7 +351,7 @@ Lg_type_id Graph_library::register_lgraph(std::string_view name, std::string_vie
   Lg_type_id id = reset_id(name, source);
 
   const auto &it = name2id.find(name);
-  assert(it != name2id.end());
+  I(it != name2id.end());
   attribute[id].nopen++;
   I(attribute[id].name == name);
 
