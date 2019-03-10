@@ -31,7 +31,7 @@ TEST_F(Setup_attr_test, test1) {
 
   LGBench b("attr_test1");
 
-  Sttribute<Index_ID> wname1("lgdb_attr","wname1");
+  Attr_sview_raw<uint64_t> wname1("lgdb_attr","wname1");
 
   constexpr std::array fix = {"A","B","C","Q","Y","Z"};
 
@@ -61,7 +61,7 @@ TEST_F(Setup_attr_test, test2) {
 
   LGBench b("attr_test2"); // Reload state
 
-  Sttribute<Index_ID> wname1("lgdb_attr","wname1");
+  Attr_sview_raw<uint64_t> wname1("lgdb_attr","wname1");
 
   constexpr std::array fix = {"A","B","C","Q","Y","Z"};
 
@@ -92,7 +92,7 @@ TEST_F(Setup_attr_test, test2) {
 
 TEST_F(Setup_attr_test, test3) {
 
-  Sttribute<Index_ID> wname1("lgdb_attr","wname1");
+  Attr_sview_raw<uint64_t> wname1("lgdb_attr","wname1");
 
   for(int i=0;i<1000000;i++) {
     EXPECT_FALSE(wname1.has(i));
@@ -107,7 +107,7 @@ TEST_F(Setup_attr_test, test4) {
 
   LGBench b("attr_test1");
 
-  Sttribute<Index_ID> wname2("lgdb_attr","wname2");
+  Attr_sview_raw<uint64_t> wname2("lgdb_attr","wname2");
 
   constexpr std::array fix = {"A","B","C","Q","Y","Z"};
 

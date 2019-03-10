@@ -1,0 +1,13 @@
+
+-How to annotate verilog.  Since we do not have verilog parser, to annotate:
+
+ opt1: insert a cell (bbox) and traverse using it. Do a pass that removes? bbox
+and annotates? or just keep bbox and treat as a "buffer"
+
+ opt2: dump a text file with netlist and read after loading in lgraph
+
+ opt3: modify parser in yosys (ufff)
+
+-Capacity to json (or text?) dump/read the annotations. It could be used by scripts
+(maybe include netlist name when possible)
+
