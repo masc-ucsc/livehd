@@ -10,12 +10,12 @@ load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 #)
 
 new_git_repository(
-    name = "Open_timer",
-    build_file = "BUILD.Open_timer", # relative to external path
+    name = "opentimer",
+    build_file = "BUILD.opentimer", # relative to external path
     commit = "4040d90a471a76998b3985de7827df413a5e8652", # Dec 8, 2018
     remote = "https://github.com/OpenTimer/OpenTimer.git",
     #strip_prefix = "ot", OpenTimer uses ot/... so, we have to keep it
-    patches = ["//external:patch.Open_timer"],
+    patches = ["//external:patch.opentimer"],
 )
 new_git_repository( # Open_timer user taskflow
     name = "taskflow",
