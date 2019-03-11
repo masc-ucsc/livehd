@@ -8,7 +8,7 @@ cc_library(
     defines = ["_YOSYS_","YOSYS_ENABLE_PLUGINS"],
     visibility = ["//visibility:public"],
     deps = [
-        "//meta:meta",
+        "//core:core",
         "@yosys//:headers",
     ],
 )
@@ -34,7 +34,7 @@ linkso(
     deps   = [
         "@com_google_absl//absl/container:flat_hash_map",
         "@fmt//:fmt",
-        "//meta:meta",
+        "//core:core",
         "//eprp:eprp",
         ],
     visibility = ["//visibility:public"],
