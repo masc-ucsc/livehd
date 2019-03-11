@@ -581,10 +581,12 @@ public:
     }
   }
   void inc_inputs(bool large = false) {
+#ifndef NDEBUG
     if (large)
-      I(((LEdge_Internal *)&sedge[next_free_input_pos()])->get_idx() != 0);
+      I(((LEdge_Internal *)&(sedge[next_free_input_pos()]))->get_idx() != 0);
     else
-      I(((SEdge_Internal *)&sedge[next_free_input_pos()])->get_idx(Node_Internal_Page::get(this).get_idx()) != 0);
+      I(((SEdge_Internal *)&(sedge[next_free_input_pos()]))->get_idx(Node_Internal_Page::get(this).get_idx()) != 0);
+#endif
 
     I(has_space(large));
     if (large) {
