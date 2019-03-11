@@ -7,7 +7,7 @@ cc_library(
     visibility = ["//visibility:public"],
     includes = ["."],
     deps = [
-        "//meta:meta",
+        "//core:core",
         "//eprp:eprp",
     ],
 )
@@ -19,7 +19,6 @@ cc_binary(
     includes = ["."],
     deps = [
         ":cops_live",
-        "//meta:meta",
     ],
 )
 

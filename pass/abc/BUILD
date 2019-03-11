@@ -13,7 +13,7 @@ cc_library(
     visibility = ["//visibility:public"],
     includes = ["."],
     deps = [
-        "//meta:meta",
+        "//core:core",
         "@abc//:abc",
     ],
 )

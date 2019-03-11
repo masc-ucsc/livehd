@@ -9,7 +9,7 @@ cc_binary(
             "@mustache//:headers",
             "//elab:elab",
             "//eprp:eprp",
-            "//meta:meta",
+            "//core:core",
 
             "//inou/cfg:inou_cfg",
             "//inou/cgen:inou_cgen",
@@ -20,7 +20,6 @@ cc_binary(
             "//inou/graphviz:inou_graphviz",
             "//inou/rand:inou_rand",
             "//inou/verific:inou_verific",
-
 
             "//pass/abc:pass_abc",
             "//pass/dfg:pass_dfg",
