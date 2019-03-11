@@ -24,3 +24,37 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "lgraph_each",
+    srcs = ["tests/lgraph_each_test.cpp"],
+    deps = [
+        "@gtest//:gtest_main",
+        ":core",
+    ],
+)
+
+cc_test(
+    name = "node_test",
+    srcs = ["tests/node_test.cpp"],
+    deps = [
+        "@gtest//:gtest_main",
+        ":core",
+    ],
+)
+
+cc_test(
+    name = "iter_test",
+    srcs = ["tests/iter_test.cpp"],
+    deps = [
+        ":core",
+    ],
+)
+
+
+cc_test(
+    name = "edge_test",
+    srcs = ["tests/edge_test.cpp"],
+    deps = [
+        ":core",
+    ],
+)
