@@ -5,7 +5,7 @@ cc_library(
     hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
     deps = [
-        "//meta:meta",
+        "//core:core",
         "//third_party/misc/lef/lef:lef",
         "//third_party/misc/def/def:def",
     ],

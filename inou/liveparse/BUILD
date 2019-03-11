@@ -6,7 +6,7 @@ cc_library(
     visibility = ["//visibility:public"],
     includes = ["."],
     deps = [ "//elab:elab",
-             "//meta:meta",
+             "//core:core",
             ]
 )
 
