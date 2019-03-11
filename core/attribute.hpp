@@ -42,10 +42,11 @@ pin_name.sync();
 #include "char_array.hpp"
 #include "dense.hpp"
 #include "iassert.hpp"
-//#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_map.h"
 #include "absl/strings/substitute.h"
 #include "yas/serialize.hpp"
 #include "yas/std_types.hpp"
+#include "yas/object.hpp"
 
 #ifndef likely
 #define likely(x) __builtin_expect((x), 1)
@@ -240,15 +241,14 @@ protected:
   const std::string sparse_file;
   const std::string dense_file;
 
-  // FUTURE: Sparse = absl::flat_hash_map<Index, Data>;
-  using Sparse = std::unordered_map<Index, Data>;
+  using Sparse = absl::flat_hash_map<Index, Data>;
   using Dense_holes = std::unordered_set<Index>;
 
   mutable Sparse      sparse;
   mutable Dense_holes dense_holes;
   Dense<Data>         dense;
 
-  Index idx_max; // used to switch dense/sparse
+  mutable Index idx_max; // used to switch dense/sparse
 
   constexpr static std::size_t yas_flags = yas::file|yas::binary;
 
@@ -266,34 +266,47 @@ protected:
       idx_max = 0;
     }
 
-    dense_stream.open(dense_file + "_size");
-    if (dense_stream.is_open()) {
-      uint64_t dense_size;
-      dense_stream >> dense_size;
-      dense_stream.close();
+    if (!dense.empty()) {
 
-      dense.reload(dense_size);
-
-      I(dense_size > idx_max);
-      if (dense_size != (idx_max+1)) {
+      I(dense.size() > idx_max);
+      if (dense.size() != (idx_max+1)) {
         I(access((dense_file + "_holes").c_str(), F_OK) != -1);
         yas::load<yas_flags>((dense_file + "_holes").c_str(),
             YAS_OBJECT("dense_holes", dense_holes)
             );
       }
-    }else if (access(sparse_file.c_str(), F_OK) != -1) {
-      yas::load<yas_flags>(sparse_file.c_str(),
-          YAS_OBJECT("sparse", sparse)
-          );
+    }else{
+#if 0
+      int fd = open(sparse_file.c_str(), O_RDONLY);
+      if (fd>=0) {
+        struct stat sb;
+        fstat(fd, &sb);
+        uint8_t *memblock = reinterpret_cast<uint8_t *>(mmap(0, sb.st_size, PROT_WRITE, MAP_PRIVATE, fd, 0));
+        if (memblock == nullptr) {
+          fprintf(stderr, "error, mmap failed\n");
+          exit(-3);
+        }
+        int n_elems = sb.st_size/(sizeof(Data)+sizeof(Index));
+        sparse.reserve(n_elems+1024);
+        uint8_t *pos = memblock;
+        for(int i=0;i<n_elems;i++) {
+          Index *idx=pos;
+          pos+=sizeof(Index);
+          Data *data=pos;
+          pos+=sizeof(Data);
+          sparse[*idx]=*data; // TODO: use the range insert for faster speed
+        }
+
+        munmap(memblock, sb.st_size);
+        close(fd);
+      }
+#endif
     }
 
-    if (dense.size()) {
-      dense_mode = true;
+    if (dense_mode) {
       I(access(sparse_file.c_str(), F_OK) == -1);
       I(sparse.empty()); // if dense, no sparse saved
       GI(idx_max,(idx_max+1)==dense.size()); // invariant
-    }else{
-      dense_mode = false;
     }
   };
 
@@ -362,6 +375,18 @@ public:
     clean      = true;
     loaded     = false;
     dense_mode = false; // It unknown until loaded, Starts in !dense_mode if empty
+
+    std::ifstream dense_stream;
+    dense_stream.open(dense_file + "_size");
+    if (dense_stream.is_open()) {
+      uint64_t dense_size;
+      dense_stream >> dense_size;
+      dense_stream.close();
+
+      dense.reload(dense_size);
+      dense_mode = true;
+    }
+
   };
 
   ~Attr_data_raw() {
@@ -377,7 +402,7 @@ public:
     if (!dense_mode)
       return sparse.find(idx) != sparse.end();
 
-    return (idx<idx_max) && dense_holes.find(idx) == sparse.end();
+    return (idx<idx_max) && dense_holes.find(idx) == dense_holes.end();
   };
 
   // Get const data reference, assert if idx does not exist
@@ -526,14 +551,37 @@ public:
 
     if (sparse.size() && !dense_mode) {
 
-      yas::save<yas_flags>(sparse_file.c_str(),
-          YAS_OBJECT("sparse", sparse)
-          );
+#if 0
+      size_t mmap_size = sparse.size() * (sizeof(Index)+sizeof(Data));
+
+      int fd = open(sparse_file.c_str(), O_RDWR | O_CREAT, 0644);
+      if (fd<0) {
+        fprintf(stderr, "error, open %s failed\n", sparse_file.c_str());
+        exit(-3);
+      }
+      int ret = ftruncate(fd, mmap_size);
+      if (ret<0) {
+        fprintf(stderr, "error, ftruncate failed failed\n");
+        exit(-3);
+      }
+      uint8_t *memblock = reinterpret_cast<uint8_t *>(mmap(0, mmap_size, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0));
+      if (memblock == nullptr) {
+        fprintf(stderr, "error, mmap failed\n");
+        exit(-3);
+      }
+      HERE!
+      for(const auto &it:sparse) {
+        Index *idx=pos;
+        pos+=sizeof(Index);
+        Data *data=pos;
+        pos+=sizeof(Data);
+        sparse[*idx]=*data; // TODO: use the range insert for faster speed
 
       I(dense.empty());
       if(access((dense_file + "_size").c_str(), F_OK) != -1) {
         unlink((dense_file + "_size").c_str());
       }
+#endif
       return;
     }
 

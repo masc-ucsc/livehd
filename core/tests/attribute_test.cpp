@@ -25,11 +25,11 @@ protected:
   };
 };
 
-TEST_F(Setup_attr_test, test1) {
+TEST_F(Setup_attr_test, sview_test1) {
 
   unlink("lgdb_attr/lgraph_wname1_id2wd_attr");
 
-  LGBench b("attr_test1");
+  LGBench b("attr_sview_test1");
 
   Attr_sview_raw<uint64_t> wname1("lgdb_attr","wname1");
 
@@ -57,7 +57,7 @@ TEST_F(Setup_attr_test, test1) {
   EXPECT_TRUE(true);
 }
 
-TEST_F(Setup_attr_test, test2) {
+TEST_F(Setup_attr_test, sview_test2) {
 
   LGBench b("attr_test2"); // Reload state
 
@@ -90,7 +90,7 @@ TEST_F(Setup_attr_test, test2) {
   EXPECT_TRUE(true);
 }
 
-TEST_F(Setup_attr_test, test3) {
+TEST_F(Setup_attr_test, sview_test3) {
 
   Attr_sview_raw<uint64_t> wname1("lgdb_attr","wname1");
 
@@ -101,11 +101,11 @@ TEST_F(Setup_attr_test, test3) {
   EXPECT_TRUE(true);
 }
 
-TEST_F(Setup_attr_test, test4) {
+TEST_F(Setup_attr_test, sview_test4) {
 
   unlink("lgdb_attr/lgraph_wname2_id2wd_attr");
 
-  LGBench b("attr_test1");
+  LGBench b("attr_sview_test4");
 
   Attr_sview_raw<uint64_t> wname2("lgdb_attr","wname2");
 
@@ -143,4 +143,99 @@ TEST_F(Setup_attr_test, test4) {
   ASSERT_NE(access("lgdb_attr/lgraph_wname2_names_attr", F_OK),-1);
   ASSERT_NE(access("lgdb_attr/lgraph_wname2_names_attr_map", F_OK),-1);
 }
+
+TEST_F(Setup_attr_test, data_test1) {
+
+  unlink("lgdb_attr/lgraph_dtest1_sparse_attr");
+  unlink("lgdb_attr/lgraph_dtest1_dense_attr");
+  unlink("lgdb_attr/lgraph_dtest1_dense_attr_max");
+  unlink("lgdb_attr/lgraph_dtest1_dense_attr_size");
+
+  unlink("lgdb_attr/lgraph_dtest2_sparse_attr");
+  unlink("lgdb_attr/lgraph_dtest2_dense_attr");
+  unlink("lgdb_attr/lgraph_dtest2_dense_attr_max");
+  unlink("lgdb_attr/lgraph_dtest2_dense_attr_size");
+
+  LGBench b("attr_data_test4");
+
+  struct Data {
+    int  a;
+    char b;
+  };
+  Attr_data_raw<uint32_t,Data> dtest1("lgdb_attr","dtest1");
+  Attr_data_raw<uint32_t,Data> dtest2("lgdb_attr","dtest2");
+
+  b.sample("setup");
+
+  for(int i=1;i<1000000;i++) {
+    Data d;
+    d.a = i;
+    d.b = i&0xFF;
+    dtest1.set(i, d);
+  }
+
+  b.sample("inserts inorder");
+
+  for(int i=1000000-1;i>0;--i) {
+    Data d;
+    d.a = i;
+    d.b = i&0xFF;
+    dtest2.set(i, d);
+  }
+
+  b.sample("inserts reverse");
+
+  dtest1.sync();
+  dtest2.sync();
+
+  b.sample("sync");
+
+  for(int i=0;i<1100000;i++) {
+    EXPECT_EQ(dtest1.has(i), i<1000000);
+    EXPECT_EQ(dtest2.has(i), i<1000000);
+  }
+
+  b.sample("check");
+
+  for(int i=0;i<1000000;i++) {
+    Data d;
+    d.a = i;
+    d.b = i&0xFF;
+    const auto &d1=dtest1.get(i);
+    const auto &d2=dtest2.get(i);
+    EXPECT_EQ(d.a,d1.a);
+    EXPECT_EQ(d.b,d1.b);
+    EXPECT_EQ(d.a,d2.a);
+    EXPECT_EQ(d.b,d2.b);
+  }
+  b.sample("get");
+
+  EXPECT_TRUE(true);
+
+  ASSERT_NE(access("lgdb_attr/lgraph_dtest1_dense_attr_max", F_OK),-1);
+  ASSERT_NE(access("lgdb_attr/lgraph_dtest2_dense_attr_max", F_OK),-1);
+
+  // both should be dense, not sparse
+  ASSERT_NE(access("lgdb_attr/lgraph_dtest1_dense_attr", F_OK),-1);
+  ASSERT_NE(access("lgdb_attr/lgraph_dtest1_dense_attr_size", F_OK),-1);
+  ASSERT_EQ(access("lgdb_attr/lgraph_dtest1_sparse_attr", F_OK),-1);
+
+  ASSERT_NE(access("lgdb_attr/lgraph_dtest2_dense_attr", F_OK),-1);
+  ASSERT_NE(access("lgdb_attr/lgraph_dtest2_dense_attr_size", F_OK),-1);
+  ASSERT_EQ(access("lgdb_attr/lgraph_dtest2_sparse_attr", F_OK),-1);
+
+  dtest1.clear();
+  dtest1.sync(); // should delete everything
+
+  ASSERT_EQ(access("lgdb_attr/lgraph_dtest1_dense_attr_max", F_OK),-1);
+  ASSERT_EQ(access("lgdb_attr/lgraph_dtest1_dense_attr", F_OK),-1);
+  ASSERT_EQ(access("lgdb_attr/lgraph_dtest1_dense_attr_size", F_OK),-1);
+  ASSERT_EQ(access("lgdb_attr/lgraph_dtest1_sparse_attr", F_OK),-1);
+
+  ASSERT_EQ(access("lgdb_attr/lgraph_dtest2_dense_attr_max", F_OK),-1);
+  ASSERT_EQ(access("lgdb_attr/lgraph_dtest2_dense_attr", F_OK),-1);
+  ASSERT_EQ(access("lgdb_attr/lgraph_dtest2_dense_attr_size", F_OK),-1);
+  ASSERT_EQ(access("lgdb_attr/lgraph_dtest2_sparse_attr", F_OK),-1);
+}
+
 
