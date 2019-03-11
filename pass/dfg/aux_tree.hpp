@@ -4,8 +4,8 @@
 #include <string>
 #include <string_view>
 
-#include "core/lgedge.hpp"
-#include "meta/lgraph.hpp"
+#include "lgedge.hpp"
+#include "lgraph.hpp"
 
 constexpr std::string_view READ_MARKER  = "prprd__";
 constexpr std::string_view WRITE_MARKER = "prpwt__";
