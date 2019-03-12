@@ -32,28 +32,27 @@ void Pass_mockturtle::work(Eprp_var &var) {
 void Pass_mockturtle::do_work(const LGraph *g) {
   LGBench b("pass.mockturtle");
 
-  std::map<std::string, int> histogram;
+  std::unordered_map<int,std::pair<std::string,std::pair<int,int>>> cell_type;
 
-  int cells = 0;
   for(const auto &idx : g->forward()) {
-    cells++;
     const auto &nt = g->node_type_get(idx);
     std::string name = nt.get_name();
+    int in_edges_num = 0;
     for(const auto &in_edge : g->inp_edges(idx)) {
-      name.append("_i");
-      name.append(std::to_string(in_edge.get_bits()));
+      //name.append(std::to_string(in_edge.get_bits()));
+      in_edges_num++;
     }
+    int out_edges_num = 0;
     for(const auto &out_edge : g->out_edges(idx)) {
-      name.append("_o");
-      name.append(std::to_string(out_edge.get_bits()));
+      //name.append(std::to_string(out_edge.get_bits()));
+      out_edges_num++;
     }
-
-    histogram[name]++;
+    cell_type[idx]=std::make_pair(name,std::make_pair(in_edges_num,out_edges_num));
   }
 
-  for(auto it=histogram.begin(); it != histogram.end(); it++) {
-    fmt::print("{} {}\n",it->first,it->second);
-  }
+  fmt::print("Pass: number of cells {}\n", cell_type.size());
 
-  fmt::print("Pass: cells {}\n", cells);
+  for(auto const it:cell_type) {
+    fmt::print("node_id:{} node_type:{} in_edges:{} out_edges:{}\n", it.first, it.second.first, it.second.second.first, it.second.second.second);
+  }
 }
