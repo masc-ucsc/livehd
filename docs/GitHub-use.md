@@ -91,6 +91,23 @@ To push your edits to the main public lgraph repo (replace XXX by your github na
 
 Now create a [pull][pull] request through github, and the UCSC/MASC team will review it.
 
+### Rebase vs No-Rebase
+
+Rebase creates cleaner logs, but sometimes it gets difficult to fix conflicts with rebase. For cases that you
+are struggling to merge a conflict, you could do this:
+
+    # undo the failed rebase merge
+    git rebase --abort 
+
+    # make sure that your code changes were committed
+    git commit -a -m"Your commit message"
+    git pull --no-rebase
+
+    # Fix the conflict without rebase (easier)
+    git commit -a -m"your merge message"
+    git pull --no-rebase
+    git push
+
 ### Typical git commands
 
 Clean the directory from any file not in git (it will remove all the files not committed)
