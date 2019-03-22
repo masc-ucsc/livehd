@@ -299,14 +299,14 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
     //after MIT algo. and Mux_Op processing, bw of every node should be synced except an output gio connected to a Mux_Op
     if(dfg->node_type_get(nid).op == GraphIO_Op){
       for(auto &inp : dfg->inp_edges(nid)){
-        Node nsrc = dfg->get_node(inp.get_out_pin());
-        Node ndst = dfg->get_node(nid);
-        if(dfg->get_bits(nsrc.get_driver_pin(0)) > dfg->get_bits(ndst.get_driver_pin(0))){
-          dfg->set_bits(ndst.setup_driver_pin(0), dfg->get_bits(nsrc.get_driver_pin(0)));
+        Node ndsrc = dfg->get_node(inp.get_out_pin());
+        Node nddst = dfg->get_node(nid);
+        if(dfg->get_bits(ndsrc.get_driver_pin(0)) > dfg->get_bits(nddst.get_driver_pin(0))){
+          dfg->set_bits(nddst.setup_driver_pin(0), dfg->get_bits(ndsrc.get_driver_pin(0)));
           fmt::print("gio bitwidth less then source\n");
         }
         else{//SH:FIXME:Warning! this is workaround will be eventually wrong after MIT could handle subgraph
-          dfg->set_bits(nsrc.setup_driver_pin(0), dfg->get_bits(ndst.get_driver_pin(0)));
+          dfg->set_bits(ndsrc.setup_driver_pin(0), dfg->get_bits(nddst.get_driver_pin(0)));
           fmt::print("gio bitwidth larger then source\n");
         }
 
@@ -427,70 +427,77 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
   const auto& target = data.get_target();
   const auto& oprds  = data.get_operands(); //return strings
   auto        op     = data.get_operator();
-  Index_ID    oprd_id0, oprd_id1;
+  Index_ID    target_id, oprd_id0, oprd_id1;
+  target_id = process_operand(dfg, aux_tree, target);
+  oprd_id0  = process_operand(dfg, aux_tree, oprds[0]);
+  if(oprds.size()>1)
+    oprd_id1 = process_operand(dfg, aux_tree, oprds[1]);
+
   I(!oprds.empty());
   if(is_pure_assign_op(op)) {
-    if(is_output(target) && !dfg->is_graph_output(target.substr(1)))
-      create_output(dfg, aux_tree, target);
-    oprd_id0 = process_operand(dfg, aux_tree, oprds[0]);
+    //if(is_output(target) && !dfg->is_graph_output(target.substr(1)))
+    //  create_output(dfg, aux_tree, target);
+    //oprd_id0 = process_operand(dfg, aux_tree, oprds[0]);
     aux_tree->set_alias(target, oprd_id0);
     aux_tree->set_pending(target, oprd_id0);
   } else if(is_label_op(op)) {
     I(oprds.size() > 1);
     if(oprds[0] == "__bits") {
       fmt::print("__bits size assignment\n");
-      Index_ID floating_id = process_operand(dfg, aux_tree, oprds[1]);
-      aux_tree->set_alias(target, floating_id);
+      //Index_ID floating_id = process_operand(dfg, aux_tree, oprds[1]);
+      //aux_tree->set_alias(target, floating_id);
+      I(oprds.size()>1);
+      aux_tree->set_alias(target, oprd_id1);
     } else if(oprds[0] == "__fluid") {
       ; //
     } else {
       fmt::print("function argument assign\n");
-      oprd_id1 = process_operand(dfg, aux_tree, oprds[1]);
-      aux_tree->set_alias(target, oprd_id1);
+      //oprd_id1 = process_operand(dfg, aux_tree, oprds[1]);
       //oprd_id0 is the io name of subgraph, record in the src node wirename
+      aux_tree->set_alias(target, oprd_id1);
       dfg->set_node_wirename(dfg->get_node(oprd_id1).setup_driver_pin(0), oprds[0]);
       fmt::print("dst_subG_io:{}, src_nid:[{},{}]\n",oprds[0], oprd_id1, oprds[1]);
     }
   } else if(is_as_op(op)) {
-    oprd_id0 = process_operand(dfg, aux_tree, oprds[0]);
+    //oprd_id0 = process_operand(dfg, aux_tree, oprds[0]);
     // process target
-    if(is_input(target)) {
+    if(is_input(target) || is_output(target)) {
       I(dfg->node_value_get(oprd_id0));
-      auto bits          = dfg->node_value_get(oprd_id0);
-      Index_ID target_id = create_input(dfg, aux_tree, target, bits);
-      fmt::print("create node for input target:{}, nid:{}\n", target, target_id);
-    } else if(is_output(target)) {
+      auto bits = dfg->node_value_get(oprd_id0);
+      //SH:FIXME: set_bits should be valid on all possible output pids -> new API or manually?
+      //SH:FIXME: for now, manually for all possible output node_pin
+      dfg->set_bits(dfg->get_node(target_id).setup_driver_pin(0), bits);
+      fmt::print("set_bits for input target:{}, nid:{}\n", target, target_id);
+    }
+    else if(is_output(target)) {
       assert(dfg->node_value_get(oprd_id0));
       auto bits          = dfg->node_value_get(oprd_id0);
-      Index_ID target_id = create_output(dfg, aux_tree, target, bits);
-      fmt::print("create node for output target:{}, nid:{}\n", target, target_id);
-    } else
+      //SH:FIXME: set_bits should be valid on all possible output pids -> new API or manually?
+      //SH:FIXME: for now, manually for all possible output node_pin
+      dfg->set_bits(dfg->get_node(target_id).setup_driver_pin(0), bits);
+      fmt::print("set_bits for output target:{}, nid:{}\n", target, target_id);
+    } else {
       aux_tree->set_alias(target, oprd_id0);
+    }
   } else if(is_unary_op(op)) {
-    oprd_id0 = process_operand(dfg, aux_tree, oprds[0]);
     aux_tree->set_alias(target, oprd_id0);
-  } else if(is_compute_op(op)) {
+  } else if(is_compute_op(op) || is_compare_op(op)) {
     assert(oprds.size() > 1);
     std::vector<Index_ID> oprd_ids;
-    oprd_ids.push_back(process_operand(dfg, aux_tree, oprds[0]));
-    oprd_ids.push_back(process_operand(dfg, aux_tree, oprds[1]));
-    //the target might has been created before in for loop,
-    //use process_operand instead? or create a process target
-    Index_ID target_id = create_node(dfg, aux_tree, target);
-    fmt::print("create node for internal target:{}, nid:{}\n", target, target_id);
-    dfg->node_type_set(target_id, node_type_from_text(op));
-    process_connections(dfg, oprd_ids, target_id);
-  } else if(is_compare_op(op)) {
-    assert(oprds.size() > 1);
-    fmt::print("{} is compare op\n", op);
-    std::vector<Index_ID> oprd_ids;
-    oprd_ids.push_back(process_operand(dfg, aux_tree, oprds[0]));
-    oprd_ids.push_back(process_operand(dfg, aux_tree, oprds[1]));
-    Index_ID target_id = create_node(dfg, aux_tree, target);
-    fmt::print("create node for internal target:{}, nid:{}\n", target, target_id);
+    oprd_ids.push_back(oprd_id0);
+    oprd_ids.push_back(oprd_id1);
     dfg->node_type_set(target_id, node_type_from_text(op));
     process_connections(dfg, oprd_ids, target_id);
   }
+  //else if(is_compare_op(op)) {
+  //  assert(oprds.size() > 1);
+  //  fmt::print("{} is compare op\n", op);
+  //  std::vector<Index_ID> oprd_ids;
+  //  oprd_ids.push_back(oprd_id0);
+  //  oprd_ids.push_back(oprd_id1);
+  //  dfg->node_type_set(target_id, node_type_from_text(op));
+  //  process_connections(dfg, oprd_ids, target_id);
+  //}
 }
 
 void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Index_ID> &src_nids, const Index_ID &dst_nid) {
@@ -537,7 +544,7 @@ Index_ID Pass_dfg::process_operand(LGraph *dfg, Aux_tree *aux_tree, const std::s
     oprd_id = aux_tree->get_alias(oprd);
     fmt::print("operand:{} has an alias:{}\n", oprd, oprd_id);
   } else {
-    if(is_constant(oprd)) { // as __bits is processed here!
+    if(is_constant(oprd)) { // process "as __bits" here!
       oprd_id = resolve_constant(dfg, aux_tree, oprd);
       aux_tree->set_alias(oprd, oprd_id);
       fmt::print("create node for constant operand:{}, nid:{}\n", oprd, oprd_id);

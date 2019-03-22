@@ -100,8 +100,9 @@ void Inou_graphviz::populate_data(LGraph* g){
   g->each_graph_output([g,this, &data](const Node_pin &pin) {
     assert(g->is_graph_output(pin));
     auto nid = g->get_node(pin).get_nid();
-    std::string_view dst_str = "dst_module";
+    std::string_view dst_str = "virtual_dst_module";
     if (verbose) {
+      //buggy, when add graph io, the auto generated pin don't necessarily be 1
       auto bits = g->get_bits(g->get_node(nid).get_driver_pin(0));
       data += fmt::format(" {}->{}[label=\"{}b\"];\n", nid, dst_str, bits);
     } else {

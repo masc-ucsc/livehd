@@ -16,7 +16,8 @@ pwd
 
 # pts='top_ooo  sp_add  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2  nested_if_3  if_elif_else'
 # pts='top_inline_add constant_pos constant_neg sp_if_0 nested_if_0 nested_if_1 nested_if_2'
-pts='top_inline_add'
+pts='constant_pos'
+# pts='top_inline_add'
 # pts='constant_pos constant_neg sp_if_0 nested_if_0 nested_if_1 nested_if_2'
 # pts='for'
 
@@ -91,7 +92,7 @@ echo "Verilog code generation"
 echo ""
 
 # pts='sp_add top_inline_add constant_pos constant_neg sp_if_0 nested_if_0 nested_if_1 nested_if_2'
-pts="sp_add $pts"
+# pts="sp_add $pts"
 #TODO:change to lgraph.match() to find all the graphs which needs to generate .v
 for pt in $pts
 do
