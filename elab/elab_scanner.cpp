@@ -427,7 +427,7 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
   }
 
   size_t max_pos = scanner_pos;
-  if (max_pos >= token_list.size() || scanner_pos == 0) max_pos = token_list.size() - 1;
+  if (max_pos >= token_list.size() || scanner_pos.value == 0) max_pos = token_list.size() - 1;
 
   size_t line_pos_start = 0;
   for (int i = token_list[max_pos].pos; i > 0; i--) {

@@ -1,28 +1,14 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#ifndef likely
-#define likely(x) __builtin_expect((x), 1)
-#endif
-#ifndef unlikely
-#define unlikely(x) __builtin_expect((x), 0)
-#endif
+#include "lgraph_base_core.hpp"
 
-#include <cassert>
+class Node_pin;
 
-#include "iassert.hpp"
-#include "fmt/format.h"
+typedef int64_t  SIndex_ID;  // Short Edge_raw must be signed +- offset
 
-#include "explicit_type.hpp"
-
-using Index_ID = Explicit_type<uint64_t, struct Index_ID_struct>;
-
-typedef int64_t  SIndex_ID;  // Short Edge must be signed +- offset
-typedef uint16_t Port_ID;    // ports have a set order (a-b != b-a)
-
-constexpr int Index_bits = 34;
+constexpr int Index_bits = 34; // FIXME: remove and move to 32bits for Index_ID
 constexpr int Port_bits  = 12;
-constexpr int Port_invalid = 8192; // Anything over 1<<12
 
 struct __attribute__((packed)) LEdge_Internal {  // 6 bytes total
 
@@ -30,7 +16,7 @@ protected:
   Port_ID get_inp_pid() const { return inp_pid; }
 
 public:
-  friend class Edge;
+  friend class Edge_raw;
 
   // TODO: the snode and input can be avoided by accessing the Node_Internal information
   bool     snode : 1;             // 1 bit
@@ -104,69 +90,11 @@ struct __attribute__((packed)) SEdge_Internal {  // 2 bytes total
 
 class LGraph;
 
-#if 0
-// WARNING: deprecated
-// Node_driver_pin : public Node_pin
-// Node_sink_pin   : public Node_pin
-#endif
-class Node_pin {
-protected:
-  friend class ConstNode;
-  friend class Node;
-  friend class Edge;
-  friend class LGraph_Base;
-  friend class LGraph;
-  // TODO: add LGraph so that it has more self-contained operations
-  // E.g: it can find/check that idx matches the (nid,pid) entry for speed
-  //LGraph   *g;
-  Index_ID idx;
-  Port_ID  pid;
-  bool     input;
-
-  Node_pin(Index_ID _idx, Port_ID _pid, bool _input) : idx(_idx), pid(_pid), input(_input) { I(_idx); }
-public:
-  Node_pin() : idx(0), pid(0), input(false) { }
-
-#if 0
-  // TODO: once we have the attribute and collapse lgraphbase and lgraph
-  static driver_pin(const Node &node, Port_ID _pid) {
-    return Node_pin(node.get_nid(), _pid, false);
-  }
-#endif
-
-#if 1
-  // WARNING: deprecated: This should be moved to protected, and friend by lgraph only
-  Index_ID get_idx()   const { I(idx); return idx;    }
-  Port_ID  get_pid()   const { I(idx); return pid;    }
-#endif
-
-  bool     is_input()  const { I(idx); return input;  }
-  bool     is_output() const { I(idx); return !input; }
-
-  bool     is_sink()   const { I(idx); return input;  }
-  bool     is_driver() const { I(idx); return !input; }
-
-#if 0
-  // FUTURE: Once Node_pin has LGraph ptr
-  std::string_view get_name() const; // First wirename, otherwise default type name
-  void set_name(std::string_view name); // Set wirename
-#endif
-
-  bool operator==(const Node_pin &other) const { I(idx); return (idx == other.idx) && (pid == other.pid) && (input == other.input); }
-
-  bool operator!=(const Node_pin &other) const { I(idx); return (idx != other.idx) || (pid != other.pid) || (input != other.input); }
-
-  bool operator<(const Node_pin &other) const {
-    I(idx);
-    return (idx < other.idx) || (idx == other.idx && pid < other.pid) ||
-           (idx == other.idx && pid == other.pid && input && !other.input);
-  }
-};
-
-class __attribute__((packed)) Edge {  // 2 bytes total
+class __attribute__((packed)) Edge_raw {  // 2 bytes total
 protected:
   friend class LGraph;
   friend class Node_Internal;
+  friend class Node_pin;
 
   uint64_t snode : 1;
   uint64_t input : 1;  // Same position for SEdge and LEdge
@@ -186,9 +114,9 @@ protected:
     return l->get_inp_pid();
   }
 
-  const Edge *find_edge(const Edge *bt, const Edge *et, Index_ID ptr_nid, Port_ID inp_pod, Port_ID dst_pid) const;
+  const Edge_raw *find_edge(const Edge_raw *bt, const Edge_raw *et, Index_ID ptr_nid, Port_ID inp_pod, Port_ID dst_pid) const;
 
-  const Edge &get_reverse_for_deletion() const;
+  const Edge_raw *get_reverse_for_deletion() const;
 
   Index_ID get_self_idx() const;  // WARNING: it can point to overflow. Be careful!
   Index_ID get_self_root_idx() const;
@@ -216,21 +144,10 @@ public:
     I(snode == reinterpret_cast<const SEdge_Internal *>(this)->is_snode());
   }
 
-  // Output edge: inp (self_nid, dst_pid) -> out (idx, inp_pid)
-  // Input edge : inp (idx, dst_pid)      -> out (self_nid, inp_pid)
-  // TODO: Rename to setup_driver_pin and get_sink_pin
-  Node_pin get_out_pin() const {
-    if (is_input())
-      return Node_pin(get_idx(), get_inp_pid(), false);
-    else
-      return Node_pin(get_self_root_idx(), get_dst_pid(), false);
-  };
-  Node_pin get_inp_pin() const {
-    if (is_input())
-      return Node_pin(get_self_root_idx(), get_dst_pid(), true);
-    else
-      return Node_pin(get_idx(), get_inp_pid(), true);
-  };
+  // Output Edge_raw: inp (self_nid, dst_pid) -> out (idx, inp_pid)
+  // Input Edge_raw : inp (idx, dst_pid)      -> out (self_nid, inp_pid)
+  Node_pin get_out_pin() const;
+  Node_pin get_inp_pin() const;
 
   Index_ID get_self_nid() const;
   Index_ID get_idx() const {
@@ -268,20 +185,20 @@ public:
   }
 
 private:  // all constructor&assignment should be marked as private
-  Edge()                = default;
-  Edge(const Edge &rhs) = default;
-  Edge(Edge &&rhs)      = delete;
-  ~Edge()               = default;
-  Edge &operator=(const Edge &rhs) = default;
-  Edge &operator=(Edge &&rhs) = delete;
+  Edge_raw()                = default;
+  Edge_raw(const Edge_raw &rhs) = default;
+  Edge_raw(Edge_raw &&rhs)      = delete;
+  ~Edge_raw()               = default;
+  Edge_raw &operator=(const Edge_raw &rhs) = default;
+  Edge_raw &operator=(Edge_raw &&rhs) = delete;
 };
 
-struct __attribute__((packed)) LEdge : public Edge {  // 6 bytes total
+struct __attribute__((packed)) LEdge : public Edge_raw {  // 6 bytes total
   LEdge() { snode = 0; };
   uint64_t pad : 32;
 };
 
-struct __attribute__((packed)) SEdge : public Edge {  // 2 bytes total
+struct __attribute__((packed)) SEdge : public Edge_raw {  // 2 bytes total
   SEdge() { snode = 1; };
 };
 
@@ -319,7 +236,7 @@ struct alignas(32) Node_Internal_Page {
 
     return *root;
   }
-  static Node_Internal_Page &get(const Edge *ptr) { return get(reinterpret_cast<const SEdge_Internal *>(ptr)); }
+  static Node_Internal_Page &get(const Edge_raw *ptr) { return get(reinterpret_cast<const SEdge_Internal *>(ptr)); }
 
   static Node_Internal_Page &get(const Node_Internal *ptr) { return get(reinterpret_cast<const SEdge_Internal *>(ptr)); }
 
@@ -367,41 +284,41 @@ private:
   // END 10 Bytes common payload
 
   void try_recycle();
-  void del_input_int(const Edge &out_edge);
-  void del_output_int(const Edge &out_edge);
+  void del_input_int(const Edge_raw *out_edge);
+  void del_output_int(const Edge_raw *out_edge);
 
-  void del_output(const Edge &out_edge) {
+  void del_output(const Edge_raw *out_edge) {
     // Node_Internal *ptr_node = &Node_Internal::get(&out_edge);
     // Index_ID       ptr_idx  = ptr_node->get_self_idx();
     // Index_ID       ptr_nid  = ptr_node->get_nid();
 
-    const Edge &inp_edge = out_edge.get_reverse_for_deletion();
-    I(inp_edge.is_input());
-    I(!out_edge.is_input());
+    const Edge_raw *inp_edge = out_edge->get_reverse_for_deletion();
+    I(inp_edge->is_input());
+    I(!out_edge->is_input());
 
-    Node_Internal::get(&inp_edge).del_input_int(inp_edge);
+    Node_Internal::get(inp_edge).del_input_int(inp_edge);
     del_output_int(out_edge);
 
     try_recycle();
   }
 
-  void del_input(const Edge &inp_edge) {
+  void del_input(const Edge_raw *inp_edge) {
     // Node_Internal *ptr_node = &Node_Internal::get(&inp_edge);
     // Index_ID       ptr_idx  = ptr_node->get_self_idx();
     // Index_ID       ptr_nid  = ptr_node->get_nid();
 
-    const Edge &out_edge = inp_edge.get_reverse_for_deletion();
-    I(inp_edge.is_input());
-    I(!out_edge.is_input());
+    const Edge_raw *out_edge = inp_edge->get_reverse_for_deletion();
+    I(inp_edge->is_input());
+    I(!out_edge->is_input());
 
-    Node_Internal::get(&out_edge).del_output_int(out_edge);
+    Node_Internal::get(out_edge).del_output_int(out_edge);
     del_input_int(inp_edge);
 
     try_recycle();
   }
 
 protected:
-  friend class Edge;
+  friend class Edge_raw;
   Index_ID get_self_idx() const; // WARNING: It can point to overflow
 
 public:
@@ -508,7 +425,7 @@ public:
     return root_n[idx2.value - get_self_idx().value];
   }
 
-  static Node_Internal &get(const Edge *ptr) {
+  static Node_Internal &get(const Edge_raw *ptr) {
     // WARNING: this belongs to a structure that it is cache aligned (32 bytes)
     uint64_t root_int = (uint64_t)ptr;
     root_int          = root_int >> 5;
@@ -569,7 +486,7 @@ public:
     return ((((uint64_t)this) & 0xFFF) == 0);  // page align.
   }
 
-  void del(const Edge &edge);
+  void del(const Edge_raw *edge_raw);
 
   void inc_outputs(bool large = false) {
     I(has_space(large));

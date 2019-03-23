@@ -14,14 +14,58 @@
 
 #include "lgraph.hpp"
 
+Index_ID LGraph::add_graph_io_common() {
+
+  auto nid = create_node_int();
+  node_type_set(nid, GraphIO_Op);
+  I(node_internal[nid].is_master_root());
+
+  return nid;
+}
+
+Node_pin LGraph::add_graph_input_int(std::string_view str, uint16_t bits) {
+  I(input_array.get_id(str) == 0);  // No name dupliation
+
+  auto nid = add_graph_io_common();
+  node_internal[nid].set_graph_io_input();
+
+  auto pid = ++max_io_port_pid;
+  IO_port p(nid, pid, false);
+  input_array.create_id(str, p);
+
+  auto idx = setup_idx_from_pid(nid, pid);
+  auto pin = Node_pin(idx, pid, false);
+  set_bits(pin, bits);
+  return pin;
+}
+
+Node_pin LGraph::add_graph_output_int(std::string_view str, uint16_t bits) {
+  I(output_array.get_id(str) == 0);  // No name dupliation
+
+  auto nid = add_graph_io_common();
+  node_internal[nid].set_graph_io_output();
+
+  auto pid = ++max_io_port_pid;
+  IO_port p(nid, pid, false);
+  output_array.create_id(str, p);
+
+  auto idx = setup_idx_from_pid(nid, pid);
+  auto dpin = Node_pin(idx, pid, false);
+  set_bits(dpin, bits);
+  return Node_pin(idx, pid, true);
+}
+
+
 LGraph::LGraph(const std::string &path, const std::string &_name, const std::string &_source, bool _clear)
-    : Lgraph_base_core(path, _name, Graph_library::instance(path)->register_lgraph(_name, _source, this))
-    , LGraph_Base(path, _name, lg_id())
+    // Lgraph_base_core(path, _name, Graph_library::instance(path)->register_lgraph(_name, _source, this))
+    : LGraph_Base(path, _name, Graph_library::instance(path)->register_lgraph(_name, _source, this))
     , LGraph_Node_Delay(path, _name, lg_id())
     , LGraph_Node_bitwidth(path, _name, lg_id())
     , LGraph_Node_Src_Loc(path, _name, lg_id())
     , LGraph_WireNames(path, _name, lg_id())
-    , LGraph_Node_Place(path, _name, lg_id()) {
+    , LGraph_Node_Place(path, _name, lg_id())
+    , LGraph_InstanceNames(path, _name, lg_id())
+    , LGraph_Node_Type(path, _name, lg_id()) {
   I(_name == get_name());
   if (_clear) {  // Create
     clear();
@@ -114,6 +158,8 @@ void LGraph::reload() {
   LGraph_Node_bitwidth::reload();
   LGraph_Node_Src_Loc::reload();
   LGraph_WireNames::reload();
+  LGraph_Node_Type::reload();
+  LGraph_InstanceNames::reload();
 }
 
 void LGraph::clear() {
@@ -122,6 +168,8 @@ void LGraph::clear() {
   LGraph_Node_bitwidth::clear();
   LGraph_Node_Src_Loc::clear();
   LGraph_WireNames::clear();
+  LGraph_Node_Type::clear();
+  LGraph_InstanceNames::clear();
 
   LGraph_Base::clear();  // last. Removes lock at the end
 }
@@ -132,6 +180,9 @@ void LGraph::sync() {
   LGraph_Node_bitwidth::sync();
   LGraph_Node_Src_Loc::sync();
   LGraph_WireNames::sync();
+  LGraph_Node_Type::sync();
+  LGraph_InstanceNames::sync();
+
 
   LGraph_Base::sync();  // last. Removes lock at the end
 }
@@ -143,6 +194,8 @@ void LGraph::emplace_back() {
   LGraph_Node_bitwidth::emplace_back();
   LGraph_Node_Src_Loc::emplace_back();
   LGraph_WireNames::emplace_back();
+  LGraph_Node_Type::emplace_back();
+  LGraph_InstanceNames::emplace_back();
 }
 
 Node_pin LGraph::get_graph_input(std::string_view str) const {
@@ -176,10 +229,10 @@ Node_pin LGraph::get_graph_output_sink(std::string_view str) const {
 #endif
 
 Node_pin LGraph::add_graph_input(std::string_view str, uint16_t bits, uint16_t offset) {
-  assert(!is_graph_output(str));
-  assert(!has_wirename(str));
+  assert(!LGraph_Base::is_graph_output(str));
+  assert(!LGraph_WireNames::has_wirename(str));
 
-  auto pin = LGraph_Base::add_graph_input_int(str, bits);
+  auto pin = add_graph_input_int(str, bits);
   set_offset(pin.get_idx(), offset);
   set_node_wirename(pin, str);
 
@@ -187,49 +240,19 @@ Node_pin LGraph::add_graph_input(std::string_view str, uint16_t bits, uint16_t o
   I(pin.get_pid() == p.pos && p.nid != pin.get_idx());
   return pin;
 }
-
-/*
-Node_pin LGraph::add_graph_input(std::string_view str, uint16_t bits, uint16_t offset, Port_ID original_pos) {
-  assert(!is_graph_output(str));
-  assert(!has_wirename(str));
-
-  auto pin = LGraph_Base::add_graph_input_int(str, bits, original_pos);
-  set_offset(pin.get_idx(), offset);
-  set_node_wirename(pin, str);
-
-  const auto &p = input_array.get_field(str);
-  I(pin.get_pid() == p.pos && p.nid != pin.get_idx());
-  return pin;
-}
-*/
 
 Node_pin LGraph::add_graph_output(std::string_view str, uint16_t bits, uint16_t offset) {
-  assert(!is_graph_input(str));
-  assert(!has_wirename(str));
+  assert(!LGraph_Base::is_graph_input(str));
+  assert(!LGraph_WireNames::has_wirename(str));
 
-  auto pin = LGraph_Base::add_graph_output_int(str, bits);
+  auto pin = add_graph_output_int(str, bits);
   LGraph_WireNames::set_offset(pin.get_idx(), offset);
-  LGraph_WireNames::set_node_wirename(pin, str);
+  set_node_wirename(pin, str);
 
   const auto &p = output_array.get_field(str);
   I(pin.get_pid() == p.pos && p.nid != pin.get_idx());
   return pin;
 }
-
-/*
-Node_pin LGraph::add_graph_output(std::string_view str, uint16_t bits, uint16_t offset, Port_ID original_pos) {
-  assert(!is_graph_input(str));
-  assert(!has_wirename(str));
-
-  auto pin = LGraph_Base::add_graph_output_int(str, bits, original_pos);
-  LGraph_WireNames::set_offset(pin.get_idx(), offset);
-  LGraph_WireNames::set_node_wirename(pin, str);
-
-  const auto &p = output_array.get_field(str);
-  I(pin.get_pid() == p.pos && p.nid != pin.get_idx()); // PID==0 not used, so it must be different
-  return pin;
-}
-*/
 
 Node LGraph::create_node() {
   Index_ID nid = create_node_int();
@@ -261,15 +284,13 @@ Node LGraph::create_node_u32(uint32_t value, uint16_t bits) {
     nid = create_node_int();
     node_u32type_set(nid, value);
 
-    set_bits(nid, bits);
+    set_bits(Node_pin(nid,0,false), bits);
   }
 
   I(node_internal[nid].get_dst_pid()==0);
   I(node_internal[nid].is_master_root());
 
-  Node node(this,nid);
-
-  return node;
+  return Node(this,nid);
 }
 
 Node LGraph::create_node_const(std::string_view value) {
@@ -297,7 +318,7 @@ Node LGraph::create_node_const(std::string_view value, uint16_t bits) {
   if (nid==0 || node_internal[nid].get_bits() != bits) {
     nid = create_node_int();
     node_const_type_set_string(nid, value);
-    set_bits(nid,bits);
+    set_bits(Node_pin(nid,0,false),bits);
   }
 
   I(node_internal[nid].get_dst_pid()==0);
@@ -347,8 +368,8 @@ ConstNode LGraph::get_node(const Node_pin &pin) const {
   return ConstNode(this, nid);
 }
 
-Node LGraph::get_dest_node(const Edge &edge) {
-  Index_ID idx = edge.get_self_idx();
+Node LGraph::get_dest_node(const Edge_raw &edge_raw) {
+  Index_ID idx = edge_raw.get_self_idx();
 
   I(node_internal.size() > idx);
   I(node_internal[idx].is_root());
@@ -356,8 +377,8 @@ Node LGraph::get_dest_node(const Edge &edge) {
   return Node(this, idx);
 }
 
-ConstNode LGraph::get_dest_node(const Edge &edge) const {
-  Index_ID idx = edge.get_self_idx();
+ConstNode LGraph::get_dest_node(const Edge_raw &edge_raw) const {
+  Index_ID idx = edge_raw.get_self_idx();
 
   I(node_internal.size() > idx);
   I(node_internal[idx].is_root());
@@ -381,71 +402,14 @@ Index_ID LGraph::create_node_int() {
   return node_internal[node_internal.size() - 1].get_nid();
 }
 
-const Edge_iterator ConstNode::inp_edges() const { return g->inp_edges(nid); }
-
-const Edge_iterator ConstNode::out_edges() const { return g->out_edges(nid); }
-
-const Edge_iterator Node::inp_edges() const { return g->inp_edges(nid); }
-
-const Edge_iterator Node::out_edges() const { return g->out_edges(nid); }
-
-Node_pin Node::setup_driver_pin(std::string_view name) {
-  auto type = get_type();
-
-  auto pid = type.get_output_match(name);
-  if (pid != Port_invalid) {
-    auto idx = nid;
-    if (pid)
-      idx = g->setup_idx_from_pid(nid,pid);
-    return Node_pin(idx,pid,false);
-  }
-
-  if (type.op == SubGraph_Op) {
-    Lg_type_id id2 = g->subgraph_id_get(nid);
-    LGraph *g2 = LGraph::open(g->get_path(), id2);
-    I(g2);
-    auto internal_pin = g2->get_graph_output(name);
-    pid = internal_pin.get_pid();
-    Index_ID idx = g->setup_idx_from_pid(nid,pid);
-    return Node_pin(idx,pid,false);
-  }
-
-  I(type.op == TechMap_Op); // TechFile still not handled. Anything else missing?
-  I(false); // TechFile still not handled. Anything else missing?
-
-  return Node_pin(nid,0,false);
-}
-
-Node_pin Node::setup_sink_pin(std::string_view name) {
-  auto type = get_type();
-
-  auto pid = type.get_input_match(name);
-  if (pid != Port_invalid) {
-    auto idx = nid;
-    if (pid)
-      idx = g->setup_idx_from_pid(nid,pid);
-    return Node_pin(idx,pid,true);
-  }
-
-  if (type.op == SubGraph_Op) {
-    Lg_type_id id2 = g->subgraph_id_get(nid);
-    LGraph *g2 = LGraph::open(g->get_path(), id2);
-    I(g2);
-    auto internal_pin = g2->get_graph_input(name);
-    pid = internal_pin.get_pid();
-    Index_ID idx = g->setup_idx_from_pid(nid,pid);
-    return Node_pin(idx,pid,true);
-  }
-
-  I(type.op == TechMap_Op); // TechFile still not handled. Anything else missing?
-  I(false); // TechFile still not handled. Anything else missing?
-
-  return Node_pin(nid,0,true);
-}
 
 Forward_edge_iterator LGraph::forward() const { return Forward_edge_iterator(this); }
 
 Backward_edge_iterator LGraph::backward() const { return Backward_edge_iterator(this); }
+
+Fast_edge_iterator LGraph::fast() const {
+  return Fast_edge_iterator(fast_next(0), this);  // Skip after 1, but first may be deleted, so fast_next
+}
 
 void LGraph::dump() const {
   fmt::print("lgraph name:{} size:{}\n", name, node_internal.size());
@@ -522,3 +486,20 @@ const LGraph::Hierarchy &LGraph::get_hierarchy() {
 
   return hierarchy;
 }
+
+#if 1
+// WARNING: deprecated for attributes
+
+uint32_t LGraph::node_value_get(const Node_pin &pin) const {
+  I(pin.get_idx() < node_type_table.size());
+  I(node_internal[pin.get_idx()].is_node_state());
+  I(node_internal[pin.get_idx()].is_master_root());
+  I(pin.get_pid()==0); // const have only single output
+
+  I(node_type_table[pin.get_idx()] >= U32ConstMin_Op);
+  I(node_type_table[pin.get_idx()] <= U32ConstMax_Op);
+
+  return (uint32_t)(node_type_table[pin.get_idx()] - U32ConstMin_Op);
+}
+#endif
+

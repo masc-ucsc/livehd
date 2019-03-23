@@ -1,10 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "lgwirenames.hpp"
+#include "graph_library.hpp"
 
 LGraph_WireNames::LGraph_WireNames(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept
-    : Lgraph_base_core(path, name, lgid)
-    , LGraph_Base(path, name, lgid)
+    : LGraph_Base(path, name, lgid)
     , names(path + "/lgraph_" + std::to_string(lgid) + "_wnames")
     , wires(path + "/lgraph_" + std::to_string(lgid) + "_wid")
     , offsets(path + "/lgraph_" + std::to_string(lgid) + "_offsets") {}
@@ -41,9 +41,9 @@ void LGraph_WireNames::emplace_back() {
   return names.create_id(wirename);
 }*/
 
-std::string_view LGraph_WireNames::get_wirename(WireName_ID wid) const { return names.get_name(wid); }
+std::string_view LGraph_WireNames::get_wirename(const WireName_ID wid) const { return names.get_name(wid); }
 
-WireName_ID LGraph_WireNames::get_wid(Index_ID nid) const {
+WireName_ID LGraph_WireNames::get_wid(const Index_ID nid) const {
   assert(nid < wires.size());
   assert(node_internal[nid].is_node_state());
   assert(node_internal[nid].is_root());
@@ -51,7 +51,7 @@ WireName_ID LGraph_WireNames::get_wid(Index_ID nid) const {
   return wires[nid];
 }
 
-void LGraph_WireNames::set_node_wirename(Index_ID nid, WireName_ID wid) {
+void LGraph_WireNames::set_node_wirename(const Index_ID nid, const WireName_ID wid) {
   assert(nid < wires.size());
   assert(node_internal[nid].is_node_state());
   assert(node_internal[nid].is_root());

@@ -218,7 +218,7 @@ void Tree<X>::add_lazy_child(const Tree_level &child_level, const X &data) {
 
   Tree_level parent_level = child_level - 1;
   Tree_pos   parent_pos   = pointers_stack[parent_level].size();
-  if (parent_level == 0) {
+  if (parent_level.value == 0) {
     parent_pos = parent_pos - 1;  // No lazy root
   } else {
     I(pending_parent <= child_level);
@@ -293,7 +293,7 @@ void Tree<X>::set_root(const X &data) {
   if (data_stack[0].empty()) {
     pointers_stack[0].emplace_back(0);
   }else{
-    I(pointers_stack[0][0].parent == 0);
+    I(pointers_stack[0][0].parent.value == 0);
     data_stack[0].clear();
   }
 
@@ -341,7 +341,7 @@ const std::vector<Tree_index> Tree<X>::get_children(const Tree_index &top) const
   // FIXME: build iterator
 
   I(top.level < pointers_stack.size());
-  if (top.level == (pointers_stack.size())) return children;
+  if (top.level.value == (pointers_stack.size())) return children;
 
   for (size_t j = 0; j < pointers_stack[top.level + 1].size(); j++) {
     if (pointers_stack[top.level + 1][j].parent == top.pos)

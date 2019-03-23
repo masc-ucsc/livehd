@@ -1,11 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
 #include "nodesrcloc.hpp"
-#include "lgraph.hpp"
-#include "nodetype.hpp"
+#include "graph_library.hpp"
 
 LGraph_Node_Src_Loc::LGraph_Node_Src_Loc(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept
-    : Lgraph_base_core(path, name, lgid)
-    , LGraph_Base(path, name, lgid)
+    : LGraph_Base(path, name, lgid)
     , src_files(path + "/lgraph_" + name + "_src_files")
     , node_src_loc(path + "/lgraph_" + name + "_src_locs") {}
 

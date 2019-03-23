@@ -111,7 +111,7 @@ protected:
 TEST_F(Setup_graphs_test, each_sub_graph) {
 
   for(const auto &nid:top->forward()) {
-    auto node = top->get_node(nid);
+    //auto node = top->get_node(nid);
     for(const auto &out_edge : top->out_edges(nid)) {
       auto dpin = out_edge.get_out_pin();
       auto spin = out_edge.get_inp_pin();

@@ -1,10 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "nodedelay.hpp"
-#include "lgraph.hpp"
+#include "graph_library.hpp"
 
 LGraph_Node_Delay::LGraph_Node_Delay(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept
-    : Lgraph_base_core(path, name, lgid), LGraph_Base(path, name, lgid), node_delay(path + "/lgraph_" + std::to_string(lgid) + "_delay") {}
+    : LGraph_Base(path, name, lgid), node_delay(path + "/lgraph_" + std::to_string(lgid) + "_delay") {}
 
 void LGraph_Node_Delay::clear() { node_delay.clear(); }
 

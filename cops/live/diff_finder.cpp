@@ -548,7 +548,8 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
         }
         if (new_module->node_type_get(old2newidx[node.module][node.module->get_node(inp.get_inp_pin()).get_nid()]).op == SubGraph_Op) {
           // edge load is a subgraph
-          const auto subgraph_name = new_module->get_subgraph_name(old2newidx[node.module][node.module->get_node(inp.get_inp_pin()).get_nid()]);
+          const auto sub_id = new_module->subgraph_id_get(old2newidx[node.module][node.module->get_node(inp.get_inp_pin()).get_nid()]);
+          const auto subgraph_name = new_module->get_library().get_name(sub_id);
           I(name2graph.find(subgraph_name) != name2graph.end());
           LGraph * nsubgraph = name2graph[subgraph_name];
           LGraph * osubgraph = LGraph::open(subgraph_name, node.module->get_path());
@@ -564,7 +565,8 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
         }
         if (new_module->node_type_get(old2newidx[node.module][node.module->get_node(inp.get_out_pin()).get_nid()]).op == SubGraph_Op) {
           // edge driver is a subgraph
-          const auto subgraph_name = new_module->get_subgraph_name(old2newidx[node.module][node.module->get_node(inp.get_out_pin()).get_nid()]);
+          const auto sub_id        = new_module->subgraph_id_get(old2newidx[node.module][node.module->get_node(inp.get_out_pin()).get_nid()]);
+          const auto subgraph_name = new_module->get_library().get_name(sub_id);
           I(name2graph.find(subgraph_name) != name2graph.end());
           LGraph * nsubgraph = name2graph[subgraph_name];
           LGraph * osubgraph = LGraph::open(subgraph_name, node.module->get_path());
@@ -607,7 +609,8 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
       } else {
         Port_ID subgraph_inpid = inp.get_inp_pin().get_pid();
         if (node.module->node_type_get(node.idx).op == SubGraph_Op) {
-          const auto subgraph_name = new_module->get_subgraph_name(old2newidx[node.module][node.module->get_node(inp.get_inp_pin()).get_nid()]);
+          const auto sub_id        = new_module->subgraph_id_get(old2newidx[node.module][node.module->get_node(inp.get_inp_pin()).get_nid()]);
+          const auto subgraph_name = new_module->get_library().get_name(sub_id);
           I(name2graph.find(subgraph_name) != name2graph.end());
           LGraph *osubgraph = LGraph::open(subgraph_name, node.module->get_path());
           LGraph *nsubgraph = name2graph[subgraph_name];

@@ -1,6 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include "absl/hash/hash.h"
+
 template <typename T, typename Meaning>
 struct Explicit_type {
   //! Default constructor does not initialize the value.
@@ -15,6 +17,8 @@ struct Explicit_type {
   //! The actual fundamental value.
   T         value;
   typedef T type;
+
+  //bool operator==(const Explicit_type<T,Meaning> &other) const { return value == other.value; }
 };
 
 #if 0

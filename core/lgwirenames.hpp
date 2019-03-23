@@ -15,12 +15,11 @@ class LGraph;
 typedef Char_Array_ID WireName_ID;
 
 class LGraph_WireNames : virtual public LGraph_Base {
-private:
+protected:
   Char_Array<Index_ID> names;
   Dense<WireName_ID>   wires;
   Dense<uint16_t>      offsets;
 
-protected:
   void set_offset(Index_ID nid, uint16_t offset) {
     assert(nid < offsets.size());
     assert(node_internal[nid].is_node_state());
@@ -38,13 +37,13 @@ public:
   virtual void sync();
   virtual void emplace_back();
 
-  std::string_view get_wirename(WireName_ID wid) const;
+  std::string_view get_wirename(const WireName_ID wid) const;
 
 #if 1
   // WARNING: deprecated (Node_pin)
-  WireName_ID get_wid(Index_ID nid) const; // Move to protected, use has_wirename(Node_pin)
+  WireName_ID get_wid(const Index_ID nid) const; // Move to protected, use has_wirename(Node_pin)
 
-  void        set_node_wirename(Index_ID nid, WireName_ID wid);
+  void        set_node_wirename(const Index_ID nid, const WireName_ID wid);
 
   uint16_t get_offset(Index_ID idx) const {
     assert(idx < offsets.size());
@@ -55,35 +54,13 @@ public:
   }
 #endif
 
-  bool has_wirename(const Node_pin &pin) const {
-    assert(node_internal[pin.get_idx()].is_node_state());
-    assert(node_internal[pin.get_idx()].is_root());
-    assert(node_internal[pin.get_idx()].get_dst_pid() == pin.get_pid());
-
-    return get_wid(pin.get_idx())!=0;
-  }
-
-  uint16_t get_offset(const Node_pin &pin) const {
-    assert(pin.get_idx() < offsets.size());
-    assert(node_internal[pin.get_idx()].is_node_state());
-    assert(node_internal[pin.get_idx()].is_root());
-    assert(node_internal[pin.get_idx()].get_dst_pid() == pin.get_pid());
-
-    return offsets[pin.get_idx()];
-  }
-
-  WireName_ID set_node_wirename(Index_ID idx, std::string_view name) {
+  WireName_ID set_node_wirename(const Index_ID idx, std::string_view name) {
     assert(idx < wires.size());
     assert(node_internal[idx].is_node_state());
     assert(node_internal[idx].is_root());
     WireName_ID wid = names.create_id(name, idx);
     set_node_wirename(idx, wid);
     return wid;
-  }
-
-  void set_node_wirename(const Node_pin &pin, std::string_view name) {
-    assert(node_internal[pin.get_idx()].get_dst_pid() == pin.get_pid());
-    set_node_wirename(pin.get_idx(), name);
   }
 
 #if 1
@@ -96,14 +73,6 @@ public:
     return get_wirename(get_wid(idx));
   }
 #endif
-  std::string_view get_node_wirename(const Node_pin &pin) const {
-    assert(pin.get_idx() < offsets.size());
-    assert(node_internal[pin.get_idx()].is_node_state());
-    assert(node_internal[pin.get_idx()].is_root());
-    assert(node_internal[pin.get_idx()].get_dst_pid() == pin.get_pid());
-
-    return get_wirename(get_wid(pin.get_idx()));
-  }
 
   bool     has_wirename(std::string_view name) const { return names.include(name); }
   Index_ID get_node_id(std::string_view name) const { return names.get_field(names.get_id(name)); }

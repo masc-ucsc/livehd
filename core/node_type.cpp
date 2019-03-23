@@ -1,89 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "nodetype.hpp"
-#include "lgraphbase.hpp"
-
-#include "iassert.hpp"
-#include "lgedgeiter.hpp"
-
-Node_Type *                        Node_Type::table[StrConst_Op + 1];
-std::map<std::string, Node_Type *> Node_Type::name2node;
-
-Node_Type::_init Node_Type::_static_initializer;
-
-Node_Type::_init::_init() {
-  // Static initialization
-
-  Node_Type::table[Invalid_Op]          = new Node_Type_Invalid();
-  Node_Type::table[Sum_Op]              = new Node_Type_Sum();
-  Node_Type::table[Mult_Op]             = new Node_Type_Mult();
-  Node_Type::table[Div_Op]              = new Node_Type_Div();
-  Node_Type::table[Mod_Op]              = new Node_Type_Mod();
-  Node_Type::table[Not_Op]              = new Node_Type_Not();
-  Node_Type::table[Join_Op]             = new Node_Type_Join();
-  Node_Type::table[Pick_Op]             = new Node_Type_Pick();
-  Node_Type::table[And_Op]              = new Node_Type_And();
-  Node_Type::table[Or_Op]               = new Node_Type_Or();
-  Node_Type::table[Xor_Op]              = new Node_Type_Xor();
-  Node_Type::table[SFlop_Op]            = new Node_Type_Flop();
-  Node_Type::table[AFlop_Op]            = new Node_Type_AFlop();
-  Node_Type::table[Latch_Op]            = new Node_Type_Latch();
-  Node_Type::table[FFlop_Op]            = new Node_Type_FFlop();
-  Node_Type::table[Memory_Op]           = new Node_Type_Memory();
-  Node_Type::table[LessThan_Op]         = new Node_Type_LessThan();
-  Node_Type::table[GreaterThan_Op]      = new Node_Type_GreaterThan();
-  Node_Type::table[LessEqualThan_Op]    = new Node_Type_LessEqualThan();
-  Node_Type::table[GreaterEqualThan_Op] = new Node_Type_GreaterEqualThan();
-  Node_Type::table[Equals_Op]           = new Node_Type_Equals();
-  Node_Type::table[Mux_Op]              = new Node_Type_Mux();
-  Node_Type::table[ShiftRight_Op]       = new Node_Type_ShiftRight();
-  Node_Type::table[ShiftLeft_Op]        = new Node_Type_ShiftLeft();
-  Node_Type::table[GraphIO_Op]          = new Node_Type_GraphIO();
-  Node_Type::table[SubGraph_Op]         = new Node_Type_SubGraph();
-  // IDs between SubGraph_Op and SubGraphMax_Op are allowed, but they just mean a different type of subgraph
-  Node_Type::table[TechMap_Op]  = new Node_Type_TechMap();
-  Node_Type::table[BlackBox_Op] = new Node_Type_BlackBox();
-
-  Node_Type::table[U32Const_Op]        = new Node_Type_U32Const();
-  Node_Type::table[StrConst_Op]        = new Node_Type_StrConst();
-  Node_Type::table[CfgAssign_Op]       = new Node_Type_CfgAssign();
-  Node_Type::table[CfgIf_Op]           = new Node_Type_CfgIf();
-  Node_Type::table[CfgFunctionCall_Op] = new Node_Type_CfgFunctionCall();
-  Node_Type::table[CfgFor_Op]          = new Node_Type_CfgFor();
-  Node_Type::table[CfgWhile_Op]        = new Node_Type_CfgWhile();
-  Node_Type::table[CfgIfMerge_Op]      = new Node_Type_CfgIfMerge();
-  Node_Type::table[CfgBeenRead_Op]     = new Node_Type_CfgBeenRead();
-  Node_Type::table[DontCare_Op]        = new Node_Type_DontCare();
-  Node_Type::table[DfgRef_Op]          = new Node_Type_DfgRef();
-  Node_Type::table[DfgPendingGraph_Op] = new Node_Type_DfgPendingGraph();
-
-  I(Invalid_Op == 0);
-  for (size_t i = Invalid_Op; i <= SubGraph_Op; i++) {
-    I(table[i]);
-    name2node[table[i]->get_name()] = table[i];
-  }
-}
-
-Node_Type &Node_Type::get(Node_Type_Op op) {
-  if (op >= SubGraphMin_Op && op <= SubGraphMax_Op) op = SubGraph_Op;
-
-  if (op >= U32ConstMin_Op && op <= U32ConstMax_Op) op = U32Const_Op;
-
-  if (op >= StrConstMin_Op && op <= StrConstMax_Op) op = StrConst_Op;
-
-  I(table[op] != nullptr);
-  return *table[op];
-}
-
-Node_Type_Op Node_Type::get(const std::string &opname) {
-  I(is_type(opname));
-  return name2node[opname]->op;
-}
-
-bool Node_Type::is_type(const std::string &opname) { return (name2node.find(opname) != name2node.end()); }
+#include "node_type.hpp"
+#include "graph_library.hpp"
 
 LGraph_Node_Type::LGraph_Node_Type(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept
-    : Lgraph_base_core(path, name, lgid)
+    : LGraph_Base(path, name, lgid)
     , consts(path + "/lgraph_" + std::to_string(lgid) + "_consts")
     , node_type_table(path + "/lgraph_" + std::to_string(lgid) + "_type") {}
 
@@ -96,16 +17,23 @@ void LGraph_Node_Type::clear() {
   consts.clear();
 }
 
-void LGraph_Node_Type::reload(size_t sz) {
+void LGraph_Node_Type::reload() {
+
+  uint64_t sz = library->get_nentries(lgraph_id);
   node_type_table.reload(sz);
 
   // Note: if you change this, make sure to change u32_type_set and
   // const_type_set functions accordingly
-  for (const Index_ID &node : Lgraph_base_core::fast()) {
-    if (node_type_get(node).op == U32Const_Op || node_type_get(node).op == StrConst_Op) {
-      const_nodes.set_bit(node);
-    } else if (node_type_get(node).op == SubGraph_Op) {
-      sub_graph_nodes.set_bit(node);
+  for (const auto &ni : node_internal) {
+    if (!ni.is_node_state()) continue;
+    if (!ni.is_root()) continue;
+
+    Index_ID nid = ni.get_nid();
+
+    if (node_type_get(nid).op == U32Const_Op || node_type_get(nid).op == StrConst_Op) {
+      const_nodes.set_bit(nid);
+    } else if (node_type_get(nid).op == SubGraph_Op) {
+      sub_graph_nodes.set_bit(nid);
     }
   }
 }
@@ -213,18 +141,6 @@ Index_ID LGraph_Node_Type::node_u32type_find(uint32_t value) const {
   }
 
   return 0;
-}
-
-uint32_t LGraph_Node_Type::node_value_get(const Node_pin &pin) const {
-  I(pin.get_idx() < node_type_table.size());
-  I(node_internal[pin.get_idx()].is_node_state());
-  I(node_internal[pin.get_idx()].is_master_root());
-  I(pin.get_pid()==0); // const have only single output
-
-  I(node_type_table[pin.get_idx()] >= U32ConstMin_Op);
-  I(node_type_table[pin.get_idx()] <= U32ConstMax_Op);
-
-  return (uint32_t)(node_type_table[pin.get_idx()] - U32ConstMin_Op);
 }
 
 uint32_t LGraph_Node_Type::node_value_get(Index_ID nid) const {

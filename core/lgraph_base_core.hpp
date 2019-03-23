@@ -1,12 +1,32 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include "dense.hpp"
-#include "graph_library.hpp"
-#include "lgedge.hpp"
-#include "tech_library.hpp"
+#include <string_view>
+#include <string>
+#include <cstdint>
 
-class Fast_edge_iterator;
+#include "fmt/format.h"
+
+#include "char_array.hpp"
+#include "dense.hpp"
+#include "explicit_type.hpp"
+#include "iassert.hpp"
+
+//#include "graph_library.hpp"
+//#include "lgedge.hpp"
+//#include "tech_library.hpp"
+
+using Lg_type_id = Explicit_type<uint32_t, struct Lg_type_id_struct>;  // Global used all over
+using Index_ID   = Explicit_type<uint64_t, struct Index_ID_struct>;
+
+struct Lg_type_id_hash {
+  size_t operator()(const Lg_type_id& obj) const { return obj.value; }
+};
+
+using Port_ID    = uint16_t;    // ports have a set order (a-b != b-a)
+constexpr uint16_t Port_invalid = 8192; // Anything over 1<<12
+class Graph_library;
+class Tech_library;
 
 class Lgraph_base_core {
 protected:
@@ -23,8 +43,6 @@ protected:
   const std::string long_name;
   const Lg_type_id  lgraph_id;
 
-  Dense<Node_Internal> node_internal;
-
   bool locked;
 
   // Integrate graph and tech library?
@@ -35,18 +53,6 @@ protected:
   explicit Lgraph_base_core(std::string_view _path, std::string_view _name, Lg_type_id lgid);
   virtual ~Lgraph_base_core(){};
 
-  Index_ID fast_next(Index_ID nid) const {
-    while (true) {
-      nid.value++;
-      if (nid >= static_cast<Index_ID>(node_internal.size())) return 0;
-      if (!node_internal[nid].is_node_state()) continue;
-      if (node_internal[nid].is_master_root()) return nid;
-    }
-
-    return 0;
-  }
-
-  friend Fast_edge_iterator;
 
 public:
   void get_lock();
@@ -58,10 +64,8 @@ public:
   std::string_view get_name() const { return std::string_view(name); }
   const Lg_type_id lg_id() const { return lgraph_id; }
 
-  const std::string &  get_path() const { return path; }
+  const std::string   &get_path() const { return path; }
   const Graph_library &get_library() const { return *library; }
-  const Tech_library & get_tlibrary() const { return *tlibrary; }
+  const Tech_library  &get_tlibrary() const { return *tlibrary; }
   Tech_library &       get_tech_library() { return *tlibrary; }
-
-  Fast_edge_iterator fast() const;
 };

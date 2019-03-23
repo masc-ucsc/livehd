@@ -6,6 +6,8 @@
 
 #include "lgedgeiter.hpp"
 #include "lgraph_base_core.hpp"
+#include "tech_library.hpp"
+#include "graph_library.hpp"
 
 std::string Lgraph_base_core::Setup_path::last_path = "";
 
@@ -32,7 +34,6 @@ Lgraph_base_core::Lgraph_base_core(std::string_view _path, std::string_view _nam
     , name(_name)
     , long_name(absl::StrCat("lgraph_", _name))
     , lgraph_id(lgid)
-    , node_internal(absl::StrCat(path, "/lgraph_", std::to_string(lgid), "_nodes"))
     , locked(false) {
   assert(lgid);
 
@@ -77,8 +78,6 @@ void Lgraph_base_core::clear() {
 void Lgraph_base_core::sync() {
   if (!locked) return;
 
-  library->update_nentries(lg_id(), node_internal.size());
-
   library->sync();
   tlibrary->sync();
 
@@ -87,6 +86,3 @@ void Lgraph_base_core::sync() {
   locked = false;
 }
 
-Fast_edge_iterator Lgraph_base_core::fast() const {
-  return Fast_edge_iterator(fast_next(0), this);  // Skip after 1, but first may be deleted, so fast_next
-}

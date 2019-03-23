@@ -47,13 +47,13 @@ new_git_repository(
 git_repository(
     name = "com_google_absl",
     #build_file = "BUILD.abseil", # relative to external path
-    commit = "7ffbe09f3d85504bd018783bbe1e2c12992fe47c", # Dec 27, 2018
+    commit = "febc5ee6a92d0eb7dac1fceaa6c648cf6521b4dc", # March 20, 2019 "7ffbe09f3d85504bd018783bbe1e2c12992fe47c", # Dec 27, 2018
     remote = "https://github.com/abseil/abseil-cpp.git",
 )
 new_git_repository(
     name = "fmt",
     build_file = "BUILD.fmt",
-    commit = "a084495d7e35436304e9ad0df999e06b2faf2a0b", # Nov 29, 2018
+    commit = "91acfe685234534b8f8b379031d00cd62240ce3f", # March 20, 2019 "a084495d7e35436304e9ad0df999e06b2faf2a0b", # Nov 29, 2018
     remote = "https://github.com/fmtlib/fmt.git",
     #strip_prefix = "include",
 )
@@ -73,7 +73,7 @@ new_git_repository(
 new_git_repository(
     name = "bm",
     build_file = "BUILD.bm",
-    commit = "28466673dac932b5b14bf866b9b85a018c7d764b", # Dec 23, 2018
+    commit = "93a8ba2c50c039cfe6b95f9d6fe128603a14e0ed", # March 20, 2019 "28466673dac932b5b14bf866b9b85a018c7d764b", # Dec 23, 2018
     remote = "https://github.com/tlk00/BitMagic.git",
     strip_prefix = "src",
 )
