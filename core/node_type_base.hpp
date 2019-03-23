@@ -1,29 +1,15 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include <cassert>
 #include <map>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "bm.h"
-#include "bmsparsevec.h"
-#include "char_array.hpp"
-#include "dense.hpp"
-
 #include "lgraph_base_core.hpp"
 
 // nodetype should be at meta directory but the node type is needed all over in the base class. It may be good to integrate nodetype
 // as part of the lgnode itself to avoid extra cache misses
-
-enum Node_type_op : uint8_t { XxxInvalid_Op, XxxMux_Op, XxxSum_Op, XxxMult_Op, XxxDiv_Op, XxxMod_Op };
-struct Node_type_op2 {
-  const Node_type_op op;
-  uint32_t           meta;
-  Node_type_op2() = delete;
-  Node_type_op2(Node_type_op _op, uint32_t _meta) : op(_op), meta(_meta) {}
-} __attribute__((packed));
 
 enum Node_Type_Op : uint64_t {
   Invalid_Op,
@@ -113,7 +99,7 @@ protected:
 
     for (size_t i = 0; i < inputs.size(); i++) {
       auto len = inputs[i].size();
-      assert(len > 0);
+      I(len > 0);
       inputs_sign[i] = (inputs[i][len - 1] == 'S');
     }
   }
@@ -145,7 +131,7 @@ public:
     for (size_t i = 0; i < inputs.size(); i++) {
       std::string data(inputs[i]);
       std::transform(data.begin(), data.end(), data.begin(), ::toupper);
-      assert(inputs[i] == data);  // must be set uppercase
+      I(inputs[i] == data);  // must be set uppercase
     }
 #endif
 
@@ -175,7 +161,7 @@ public:
     for (size_t i = 0; i < outputs.size(); i++) {
       std::string data(outputs[i]);
       std::transform(data.begin(), data.end(), data.begin(), ::toupper);
-      assert(outputs[i] == data);  // must be set uppercase
+      I(outputs[i] == data);  // must be set uppercase
     }
 #endif
 
@@ -414,11 +400,6 @@ public:
     inputs.push_back("E");  // Keeps going
     outputs.push_back("Y");
   };
-
-  static Node_type_op2 create() {
-    Node_type_op2 op2(XxxMux_Op, 0);
-    return op2;
-  }
 };
 
 // Y = (A >> B)
@@ -709,50 +690,3 @@ public:
   Node_Type_DontCare() : Node_Type("don't_care", DontCare_Op, false) { outputs.push_back("Y"); };
 };
 
-typedef Char_Array_ID Const_ID;
-
-class LGraph_Node_Type : virtual public Lgraph_base_core {
-private:
-  Char_Array<Const_ID> consts;
-  Dense<Node_Type_Op>  node_type_table;
-  bm::bvector<>        const_nodes;      // FIXME: migrate to structure in node_intenral (otherwise, big meory as more nodes...
-  bm::bvector<>        sub_graph_nodes;  // FIXME: migrate to structure in node_intenral (otherwise, big meory as more nodes...
-
-public:
-  LGraph_Node_Type() = delete;
-  explicit LGraph_Node_Type(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept;
-  virtual ~LGraph_Node_Type(){};
-
-  std::string_view get_constant(Const_ID const_id) const;
-
-  void clear();
-  void reload(size_t sz);
-  void sync();
-  void emplace_back();
-
-  void node_type_set(Index_ID nid, Node_Type_Op op);
-
-  void     node_u32type_set(Index_ID nid, uint32_t value);
-  Index_ID node_u32type_find(uint32_t value) const;
-#if 1
-  // WARNING: deprecated
-  uint32_t node_value_get(Index_ID nid) const;
-  const Node_Type &node_type_get(Index_ID nid) const;
-#endif
-  uint32_t node_value_get(const Node_pin &pin) const;
-
-  void     node_subgraph_set(Index_ID nid, Lg_type_id subgraphid);
-  Lg_type_id subgraph_id_get(Index_ID nid) const;
-
-  void             node_const_type_set(Index_ID nid, std::string_view value);
-  void             node_const_type_set_string(Index_ID nid, std::string_view value);
-  Index_ID         node_const_string_find(std::string_view value) const;
-  std::string_view node_const_value_get(Index_ID nid) const;
-
-  void     node_tmap_set(Index_ID nid, uint32_t tmapid);
-  uint32_t tmap_id_get(Index_ID nid) const;
-
-  const bm::bvector<> &get_const_node_ids() const { return const_nodes; };
-
-  const bm::bvector<> &get_sub_graph_ids() const { return sub_graph_nodes; };
-};

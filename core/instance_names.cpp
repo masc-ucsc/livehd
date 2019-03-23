@@ -1,8 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
 #include "instance_names.hpp"
+#include "graph_library.hpp"
 
 LGraph_InstanceNames::LGraph_InstanceNames(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept
-    : Lgraph_base_core(path, name, lgid)
+    : LGraph_Base(path, name, lgid)
     , inames(path + "/lgraph_" + std::to_string(lgid) + "_inst_names")
     , instances(path + "/lgraph_" + std::to_string(lgid) + "_inst") {}
 
@@ -11,8 +13,9 @@ void LGraph_InstanceNames::clear() {
   instances.clear();
 }
 
-void LGraph_InstanceNames::reload(size_t sz) {
+void LGraph_InstanceNames::reload() {
   // Lazy inames.reload();
+  uint64_t sz = library->get_nentries(lgraph_id);
   instances.reload(sz);
 }
 

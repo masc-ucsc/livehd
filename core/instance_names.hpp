@@ -9,9 +9,9 @@
 #include "char_array.hpp"
 #include "dense.hpp"
 
-#include "lgraph_base_core.hpp"
+#include "lgraphbase.hpp"
 
-class LGraph_InstanceNames : virtual public Lgraph_base_core {
+class LGraph_InstanceNames : virtual public LGraph_Base {
 private:
   Char_Array<Index_ID> inames;
   Dense<Index_ID>      instances;
@@ -23,7 +23,7 @@ public:
   virtual ~LGraph_InstanceNames(){};
 
   void clear();
-  void reload(size_t sz);
+  void reload();
   void sync();
   void emplace_back();
 

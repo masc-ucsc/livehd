@@ -32,7 +32,7 @@ void Ast_parser::up(Rule_id rid) {
 void Ast_parser::add(Rule_id rid, Token_entry te) {
   I(level > 0, "no rule add for ast root");
 
-  GI(down_added > level, down_added == (level + 1));
+  GI(down_added > level, down_added.value == (level + 1));
 
   down_added = level;
 

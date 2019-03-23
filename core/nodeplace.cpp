@@ -1,10 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "nodeplace.hpp"
-#include "lgraph.hpp"
+#include "graph_library.hpp"
 
 LGraph_Node_Place::LGraph_Node_Place(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept
-    : Lgraph_base_core(path, name, lgid), LGraph_Base(path, name, lgid), node_place(path + "/lgraph_" + std::to_string(lgid) + "_place") {}
+    : LGraph_Base(path, name, lgid), node_place(path + "/lgraph_" + std::to_string(lgid) + "_place") {}
 
 void LGraph_Node_Place::clear() { node_place.clear(); }
 

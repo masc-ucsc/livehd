@@ -1,7 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "nodebitwidth.hpp"
-#include "lgraph.hpp"
+#include "graph_library.hpp"
 
 void Node_bitwidth::Explicit_range::dump() const {
   fmt::print("max{}:{} min{}:{} sign{}:{} {}", max_set ? "_set" : "", max, min_set ? "_set" : "", min, sign_set ? "_set" : "", sign,
@@ -174,7 +174,7 @@ void Node_bitwidth::Implicit_range::pick(const Explicit_range &e) {
 }
 
 LGraph_Node_bitwidth::LGraph_Node_bitwidth(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept
-    : Lgraph_base_core(path, name, lgid), LGraph_Base(path, name, lgid), node_bitwidth(path + "/lgraph_" + name + "_bitwidth") {}
+    : LGraph_Base(path, name, lgid), node_bitwidth(path + "/lgraph_" + name + "_bitwidth") {}
 
 void LGraph_Node_bitwidth::clear() { node_bitwidth.clear(); }
 

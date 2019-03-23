@@ -256,12 +256,13 @@ void Lgyosys_dump::create_memory(const LGraph *g, RTLIL::Module *module, Index_I
 void Lgyosys_dump::create_subgraph(const LGraph *g, RTLIL::Module *module, Index_ID idx) {
   assert(g->get_node(idx).get_type().op == SubGraph_Op);
 
-  LGraph *subgraph = LGraph::open(g->get_path(), g->subgraph_id_get(idx));
+  auto sub_id = g->subgraph_id_get(idx);
+  LGraph *subgraph = LGraph::open(g->get_path(), sub_id);
   if(subgraph == nullptr) {
     // FIXME: prevent loading the whole graph just to read the IOs if
     // hierarchy is set to false
-    auto subgraph_name = g->get_subgraph_name(idx);
-    auto source        = g->get_library().get_source(subgraph_name);
+    auto subgraph_name = g->get_library().get_name(sub_id);
+    auto source        = g->get_library().get_source(sub_id);
     subgraph           = LGraph::create(g->get_path(), subgraph_name, source);
   }
   if(hierarchy) {

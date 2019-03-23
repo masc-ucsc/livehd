@@ -117,7 +117,7 @@ bool test20() {
   g->add_edge(dpin, spin, 33);
 
   for(auto &inp : g->inp_edges(idx2)) {
-    g->del_edge(inp);
+    g->del_edge(&inp);
   }
 
   for(auto &inp : g->inp_edges(idx2)) {
@@ -148,7 +148,7 @@ bool test21() {
   g->add_edge(dpin, spin, 33);
 
   for(auto &out : g->out_edges(idx1)) {
-    g->del_edge(out);
+    g->del_edge(&out);
   }
 
   for(auto &inp : g->inp_edges(idx2)) {
@@ -179,7 +179,7 @@ bool test2() {
   g->add_edge(dpin, spin, 33);
 
   for(auto &inp : g->inp_edges(idx2)) {
-    g->del_edge(inp);
+    g->del_edge(&inp);
   }
 
   for(auto &inp : g->inp_edges(idx2)) {
@@ -210,7 +210,7 @@ bool test22() {
   g->add_edge(dpin, spin, 33);
 
   for(auto &out : g->out_edges(idx1)) {
-    g->del_edge(out);
+    g->del_edge(&out);
   }
 
   for(auto &inp : g->inp_edges(idx2)) {
@@ -238,7 +238,7 @@ bool test3() {
   g->add_edge(g->get_node(idx1).setup_driver_pin(20), g->get_node(idx2).setup_sink_pin(25));
 
   for(auto &inp : g->inp_edges(idx2)) {
-    g->del_edge(inp);
+    g->del_edge(&inp);
   }
 
   for(auto &inp : g->inp_edges(idx2)) {

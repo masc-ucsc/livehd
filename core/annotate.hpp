@@ -8,7 +8,7 @@
 #include "char_array.hpp"
 #include "dense.hpp"
 #include "explicit_type.hpp"
-#include "graph_library.hpp"
+//#include "graph_library.hpp"
 
 using Name_id = Explicit_type<uint64_t, struct Name_name_struct>;
 

@@ -11,13 +11,8 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "bm.h"
-#include "fmt/format.h"
 
-#include "explicit_type.hpp"
-
-using Lg_type_id = Explicit_type<uint32_t, struct Lg_type_id_struct>;  // Global used all over
-
-class LGraph;
+#include "lgraph.hpp"
 
 class Graph_library {
 protected:

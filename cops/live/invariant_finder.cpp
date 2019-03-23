@@ -31,7 +31,7 @@ void Invariant_finder::get_topology() {
       // filter out primitives, we're only interested in user defined modules
       if (current->node_type_get(idx).op != SubGraph_Op) continue;
 
-      LGraph *subgraph = LGraph::open(current->get_path(), current->get_subgraph_name(idx));
+      LGraph *subgraph = LGraph::open(current->get_path(), current->subgraph_id_get(idx));
       I(subgraph);
 
       boundaries.hierarchy_tree[Invariant_boundaries::get_graphID(subgraph)].insert(Invariant_boundaries::get_graphID(current));
