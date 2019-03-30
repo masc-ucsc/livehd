@@ -14,6 +14,14 @@ Node_pin::Node_pin(LGraph *_g, Hierarchy_id _hid, Compact comp)
   ,sink(comp.sink) {
 }
 
+Node_pin::Node_pin(LGraph *_g, Hierarchy_id _hid, Compact comp, Node_pin_mode mode)
+  :idx(comp.idx)
+  ,pid(g->get_dst_pid(comp.idx))
+  ,g(_g)
+  ,hid(_hid)
+  ,sink(mode==Node_pin_mode::Both?comp.sink:(mode==Node_pin_mode::Sink)) {
+}
+
 Node Node_pin::get_node() const {
   I(hid==0);
   return g->get_node(idx);
@@ -43,11 +51,15 @@ bool Node_pin::has_name() const {
 }
 
 void Node_pin::set_offset(uint16_t offset) {
-  //I(0);
-  // FIXME33
+	if (offset)
+		Ann_node_pin_offset::set(*this, offset);
 }
 
 uint16_t Node_pin::get_offset() const {
-  //I(0);
-  return 0; // FIXME33
+	if (!Ann_node_pin_offset::has(*this))
+			return 0;
+	auto off = Ann_node_pin_offset::get(*this);
+	I(off);
+	return off;
 }
+
