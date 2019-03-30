@@ -5,6 +5,12 @@ class LGraph;
 class XEdge;
 class Node;
 
+enum class Node_pin_mode {
+  Driver,
+  Sink,
+  Both
+};
+
 class Node_pin {
 protected:
   friend class LGraph;
@@ -24,15 +30,15 @@ protected:
 public:
   struct __attribute__((packed)) Compact {
     const uint32_t idx  : Index_bits;
-    const uint16_t sink : 1;
+    const uint32_t sink : 1;
 
     // Hash
-    constexpr size_t operator()(const Compact &obj) const { return (obj.idx<<1)|obj.sink; }
-    constexpr operator size_t() const { return (idx<<1)|sink; }
+    constexpr size_t operator()(const Compact &obj) const { return obj.idx|(obj.sink<<31); }
+    constexpr operator size_t() const { return idx|(sink<<31); }
 
     Compact(const Compact &obj): idx(obj.idx), sink(obj.sink) { }
     Compact(const Index_ID &_idx, bool _sink) :idx(_idx) ,sink(_sink) { };
-    Compact(size_t raw) :idx(raw>>1) ,sink(raw&1) { };
+    Compact(size_t raw) :idx((raw<<1)>>1) ,sink(raw&(1UL<<31)?1:0) { };
     Compact() :idx(0) ,sink(0) { };
     Compact &operator=(const Compact &obj) {
       I(this != &obj);
@@ -46,9 +52,15 @@ public:
   };
   Node_pin() : idx(0), pid(0), g(0), hid(0), sink(false) { }
   Node_pin(LGraph *_g, Hierarchy_id _hid, Compact comp);
+  Node_pin(LGraph *_g, Hierarchy_id _hid, Compact comp, Node_pin_mode mode);
 
   Compact get_compact() const {
     return Compact(idx,sink);
+  };
+  Compact get_compact(Node_pin_mode mode) const {
+		if (mode==Node_pin_mode::Both)
+			return Compact(idx,sink);
+		return Compact(idx,false);
   };
 
   LGraph       *get_lgraph() const { return g; };

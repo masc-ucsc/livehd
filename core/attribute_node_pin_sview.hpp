@@ -2,22 +2,6 @@
 #include "attribute.hpp"
 #include "lgraph.hpp"
 
-// Example
-//
-// using wirename = Attribute_node_pin_sview<true,true,"wirename">;
-//
-// Wirename::set(pin,"foo")
-// Wirename::get(pin)
-// Wirename::has(pin)
-// ...
-
-
-enum class Node_pin_mode {
-  Driver,
-  Sink,
-  Both
-};
-
 template<const char *Name, Node_pin_mode Mode, bool Unique>
 class Attribute_node_pin_sview_type {
 
@@ -55,9 +39,9 @@ public:
       table[pos] = new Attr_data(lg->get_path(), get_filename(lg->get_lgid()));
     }
 
-    I(!table[pos]->has(pin.get_compact())); // Do not double insert (why???) waste or bug with Name alias!!
+    I(!table[pos]->has(pin.get_compact(Mode))); // Do not double insert (why???) waste or bug with Name alias!!
 
-    table[pos]->set(pin.get_compact(), wname);
+    table[pos]->set(pin.get_compact(Mode), wname);
   };
 
   static std::string_view get(const Node_pin &pin) {
@@ -69,7 +53,7 @@ public:
     if (is_invalid(pos))
       return "";
 
-    return table[pos]->get(pin.get_compact());
+    return table[pos]->get(pin.get_compact(Mode));
   };
 
   static bool has(const Node_pin &pin) {
@@ -81,7 +65,7 @@ public:
     if (is_invalid(pos))
       return false;
 
-    return table[pos]->has(pin.get_compact());
+    return table[pos]->has(pin.get_compact(Mode));
   };
 
   static Node_pin find(LGraph *g, std::string_view name) {
@@ -95,7 +79,7 @@ public:
       return Node_pin();
     }
 
-    auto pin = Node_pin(g, 0, Node_pin::Compact(raw));
+    auto pin = Node_pin(g, 0, Node_pin::Compact(raw,Mode));
 
     GI(Mode == Node_pin_mode::Driver, pin.is_driver());
     GI(Mode == Node_pin_mode::Sink  , pin.is_sink());
