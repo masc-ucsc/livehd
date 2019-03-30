@@ -5,20 +5,20 @@ namespace Live {
 
 int resolve_bit(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID pin, absl::flat_hash_set<uint32_t> &bits) {
   if (graph->node_type_get(idx).op == Pick_Op) {
-    I(graph->get_bits(idx) >= current_bit);
+    I(graph->get_bits(graph->get_node(idx).get_driver_pin()) >= current_bit);
     if (pin != 0) return -1;  // do not propagate through this pid
-    Index_ID picked = 0;
-    Index_ID offset = 0;
+    Node_pin picked;
+    Node_pin offset;
     for (auto &c : graph->inp_edges(idx)) {
       if (c.get_inp_pin().get_pid() == 0) {
-        picked     = c.get_out_pin().get_idx();
+        picked = c.get_out_pin();
       } else if (c.get_inp_pin().get_pid() == 1) {
-        offset = graph->get_node(c.get_out_pin()).get_nid();
+        offset = c.get_out_pin();
       }
     }
-    I(picked);
-    I(offset);
-    I(graph->node_type_get(offset).op == U32Const_Op);
+    I(picked.is_valid());
+    I(offset.is_valid());
+    I(offset.get_node().get_type().op == U32Const_Op);
     I(graph->node_value_get(offset) + current_bit <= graph->get_bits(picked));
     bits.insert(graph->node_value_get(offset) + current_bit);
     return 0;

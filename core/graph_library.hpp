@@ -12,7 +12,9 @@
 #include "absl/container/flat_hash_map.h"
 #include "bm.h"
 
-#include "lgraph.hpp"
+#include "lgraphbase.hpp"
+
+class LGraph;
 
 class Graph_library {
 protected:

@@ -343,7 +343,7 @@ void Pass_abc::find_cell_conn(const LGraph *g) {
  * 						FIXME: More Join & Pick Node means (a way to reduce ?)
  * 						"deeper" traverse depth and recursion
  ***********************************************************************/
-void Pass_abc::recursive_find(const LGraph *g, const Edge *input, graph_topology::topology_info &topo, int bit_addr[2]) {
+void Pass_abc::recursive_find(const LGraph *g, const Edge_raw *input, graph_topology::topology_info &topo, int bit_addr[2]) {
 
   Index_ID     this_idx       = input->get_idx();
   Node_Type_Op this_node_type = g->get_node(this_idx).get_type().op;

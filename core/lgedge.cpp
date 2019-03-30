@@ -15,7 +15,7 @@ static_assert(sizeof(SEdge) == sizeof(SEdge_Internal), "SEdge should be 2 bytes"
 static_assert(sizeof(Edge_raw) == 2, "Edge_raw should be 2 bytes like SEdge");
 static_assert(sizeof(Node_Internal) == 32, "Node should be 32 bytes and 32 bytes aligned");
 static_assert(sizeof(Node_Internal_Page) == 32, "Node should be 32 bytes and 32 bytes aligned");
-static_assert((1ULL << Index_bits) == MMAPA_MAX_ENTRIES, "Max number of entries in Dense");
+static_assert((1ULL << Index_bits) <= MMAPA_MAX_ENTRIES, "Max number of entries in Dense");
 
 Index_ID SEdge_Internal::get_page_idx() const { return Node_Internal_Page::get(this).get_idx(); }
 
@@ -38,7 +38,7 @@ bool Edge_raw::is_last_output() const {
   return ((this + sz) >= node.get_output_end());
 }
 
-const Edge_raw *Edge_raw::find_edge(const Edge_raw *bt, const Edge_raw *et, Index_ID ptr_idx, Port_ID inp_pid, Port_ID dst_pid) const {
+const Edge_raw *Edge_raw::find_edge(const Edge_raw *bt, const Edge_raw *et, Index_ID ptr_idx, Port_ID inp_pid, Port_ID dst_pid) {
   const Edge_raw *eit = bt;
   while (eit != et) {
     if (eit->get_idx() == ptr_idx && eit->get_inp_pid() == inp_pid && eit->get_dst_pid() == dst_pid) return eit;
@@ -49,7 +49,7 @@ const Edge_raw *Edge_raw::find_edge(const Edge_raw *bt, const Edge_raw *et, Inde
       eit += 3;
   }
 
-  return 0;
+  return nullptr;
 }
 
 const Edge_raw *Edge_raw::get_reverse_for_deletion() const {
@@ -361,6 +361,21 @@ void Node_Internal::del_output_int(const Edge_raw *out_edge) {
   I(out_pos >= 0);
 }
 
+bool Node_Internal::del(Index_ID src_idx, Port_ID pid, bool input) {
+  const Edge_raw *eit=nullptr;
+  if (input)
+    eit = Edge_raw::find_edge(get_output_begin(), get_output_end(), src_idx, pid, get_dst_pid());
+  else
+    eit = Edge_raw::find_edge(get_input_begin(), get_input_end(), src_idx, get_dst_pid(), pid);
+
+  if (eit==nullptr)
+    return false;
+
+  del(eit);
+
+  return true;
+}
+
 void Node_Internal::del(const Edge_raw *edge_raw) {
   if (edge_raw->is_input())
     del_input(edge_raw);
@@ -517,18 +532,18 @@ void Node_Internal::assimilate_edges(Node_Internal &other) {
 
 Port_ID Edge_raw::get_dst_pid() const { return Node_Internal::get(this).get_dst_pid(); }
 
-Node_pin Edge_raw::get_out_pin() const {
+Node_pin Edge_raw::get_out_pin(LGraph *g, const Hierarchy_id hid) const {
   if (is_input())
-    return Node_pin(get_idx(), get_inp_pid(), false);
+    return Node_pin(g, hid, get_idx(), get_inp_pid(), false);
   else
-    return Node_pin(get_self_root_idx(), get_dst_pid(), false);
+    return Node_pin(g, hid, get_self_root_idx(), get_dst_pid(), false);
 }
 
-Node_pin Edge_raw::get_inp_pin() const {
+Node_pin Edge_raw::get_inp_pin(LGraph *g, const Hierarchy_id hid) const {
   if (is_input())
-    return Node_pin(get_self_root_idx(), get_dst_pid(), true);
+    return Node_pin(g, hid, get_self_root_idx(), get_dst_pid(), true);
   else
-    return Node_pin(get_idx(), get_inp_pid(), true);
+    return Node_pin(g, hid, get_idx(), get_inp_pid(), true);
 }
 
 Index_ID Edge_raw::get_self_nid() const { return Node_Internal::get(this).get_nid(); }

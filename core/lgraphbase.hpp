@@ -69,6 +69,9 @@ protected:
     return 0;
   }
 
+  void del_node(Index_ID idx);
+  void del_edge(const Edge_raw *edge_raw);
+
 public:
   LGraph_Base() = delete;
 
@@ -90,7 +93,10 @@ public:
   void     set_bits_pid(Index_ID nid, Port_ID pid, uint16_t bits);
   uint16_t get_bits_pid(Index_ID nid, Port_ID pid) const;
   uint16_t get_bits_pid(Index_ID nid, Port_ID pid);
+#endif
 
+#if 1
+  // WARNING: deprecated, move to protected
   uint16_t get_bits(Index_ID idx) const {
     I(idx < node_internal.size());
     I(node_internal[idx].is_root());
@@ -102,9 +108,6 @@ public:
     node_internal[idx].set_bits(bits);
   }
 #endif
-  // Graph input/output functions
-  bool is_graph_input(std::string_view name) const { return input_array.get_id(name) != 0; }
-  bool is_graph_output(std::string_view name) const { return output_array.get_id(name) != 0; }
 
   // get internal nid from given pid
   Index_ID get_graph_input_nid_from_pid(Port_ID pid) const;
@@ -127,11 +130,8 @@ public:
     add_edge_int(dst_idx, node_internal[dst_idx].get_dst_pid(), src_idx, node_internal[src_idx].get_dst_pid());
   }
 
-  void del_node(Index_ID idx);
-  void del_edge(const Edge_raw *edge_raw);
-
-  Edge_raw_iterator inp_edges(Index_ID nid) const;
-  Edge_raw_iterator out_edges(Index_ID nid) const;
+  Edge_raw_iterator inp_edges_raw(Index_ID nid) const;
+  Edge_raw_iterator out_edges_raw(Index_ID nid) const;
 
   void print_stats() const;
 

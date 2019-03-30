@@ -21,7 +21,7 @@ using Token_entry = Explicit_type<uint32_t, struct Token_entry_struct>;
 // WARNING:
 //
 // We can not use enum or enum class cleanly because they do not support
-// inheritance in C++. It ,,is just cleaner (less static_cast conversions) using
+// inheritance in C++. It is just cleaner (less static_cast conversions) using
 // constexpr
 //
 // Suggested way to extend tokens for other languages: (replace pyrope for your language)

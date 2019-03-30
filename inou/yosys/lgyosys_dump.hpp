@@ -22,11 +22,19 @@ private:
   RTLIL::Wire *  get_wire(const Node_pin &pin);
 
   void to_yosys(const LGraph *g);
+  struct My_pin_hash {
+    size_t operator()(const std::pair<Index_ID, Port_ID> &obj) const {
+      size_t v= obj.first.value;
+      v <<=12;
+      v ^=obj.second;
+      return v;
+    }
+  };
 
-  absl::flat_hash_map<Index_ID, RTLIL::Wire *>                     input_map;
-  absl::flat_hash_map<Index_ID, RTLIL::Wire *>                     output_map;
-  absl::flat_hash_map<std::pair<Index_ID, Port_ID>, RTLIL::Wire *> cell_output_map;
-  absl::flat_hash_map<Index_ID, std::vector<RTLIL::SigChunk>>      mem_output_map;
+  absl::flat_hash_map<Index_ID, RTLIL::Wire *                    , Index_ID_hash>  input_map;
+  absl::flat_hash_map<Index_ID, RTLIL::Wire *                    , Index_ID_hash>  output_map;
+  absl::flat_hash_map<std::pair<Index_ID, Port_ID>, RTLIL::Wire *, My_pin_hash>    cell_output_map;
+  absl::flat_hash_map<Index_ID, std::vector<RTLIL::SigChunk>     , Index_ID_hash>  mem_output_map;
 
   std::set<const LGraph *> _subgraphs;
 

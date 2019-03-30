@@ -30,10 +30,10 @@ protected:
 
     children[absl::StrCat(parent->get_name(), ":", child->get_name())]++;
 
-    auto nid = parent->create_node().get_nid();
-    parent->node_subgraph_set(nid, child->lg_id());
+    auto node = parent->create_node();
+    node.set_type_subgraph(child->lg_id());
     if (rand_r(&rseed)&1 || !randomize)
-      parent->set_node_instance_name(nid, iname);
+      node.set_name(iname);
   }
 
   void add_io(LGraph *g) {

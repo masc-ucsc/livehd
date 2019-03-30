@@ -473,7 +473,7 @@ Index_ID LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid
 
 #ifndef NDEBUG
   // Do not insert twice check
-  for (const auto &v : out_edges(src_nid)) {
+  for (const auto &v : out_edges_raw(src_nid)) {
     if (v.get_idx() == dst_idx && v.get_dst_pid() == dst_pid && v.get_inp_pid() == inp_pid) {
       I(false);  // edge added twice
     }
@@ -575,7 +575,7 @@ void LGraph_Base::del_node(const Index_ID idx) {
   bool deleted;
   do {
     deleted = false;
-    for (auto &c : inp_edges(idx)) {
+    for (auto &c : inp_edges_raw(idx)) {
       fmt::print("del_node {} inp {}\n", idx, c.get_self_idx());
       I(Node_Internal::get(&c).get_master_root_nid() == idx);
       node_internal[c.get_self_idx()].del(&c);
@@ -586,7 +586,7 @@ void LGraph_Base::del_node(const Index_ID idx) {
 
   do {
     deleted = false;
-    for (auto &c : out_edges(idx)) {
+    for (auto &c : out_edges_raw(idx)) {
       fmt::print("del_node {} out {}\n", idx, c.get_self_idx());
       I(Node_Internal::get(&c).get_master_root_nid() == idx);
       node_internal[c.get_self_idx()].del(&c);
@@ -609,7 +609,7 @@ void LGraph_Base::del_int_node(const Index_ID idx) {
   node_internal[idx].reset();
 }
 
-Edge_raw_iterator LGraph_Base::out_edges(const Index_ID idx) const {
+Edge_raw_iterator LGraph_Base::out_edges_raw(const Index_ID idx) const {
   Index_ID idx2 = node_internal[idx].get_master_root_nid();
   I(node_internal[idx2].is_master_root());
 
@@ -641,7 +641,7 @@ Edge_raw_iterator LGraph_Base::out_edges(const Index_ID idx) const {
   return Edge_raw_iterator(s, e, false);
 }
 
-Edge_raw_iterator LGraph_Base::inp_edges(const Index_ID idx) const {
+Edge_raw_iterator LGraph_Base::inp_edges_raw(const Index_ID idx) const {
   I(node_internal[idx].is_master_root());
 
   const SEdge *s = 0;

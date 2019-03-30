@@ -5,6 +5,7 @@
 #include <string>
 #include <strings.h>
 
+#include "lgraph.hpp"
 #include "eprp_utils.hpp"
 #include "inou_pyrope.hpp"
 #include "lgedgeiter.hpp"
@@ -101,7 +102,7 @@ void Inou_pyrope::to_src_var(Out_string &w, const LGraph *g, Index_ID idx) const
   if(op.op == SFlop_Op) {
     direct_to_register = idx;
   } else if(op.op == U32Const_Op) {
-    const_val = g->node_value_get(idx);
+    const_val = g->node_value_get(g->get_node(idx).get_driver_pin());
   }
 
   Index_ID direct_to_output = 0;
@@ -237,20 +238,19 @@ bool Inou_pyrope::to_join(Out_string &w, const LGraph *g, Index_ID idx) const {
 
 bool Inou_pyrope::to_flop(Out_string &w, const LGraph *g, Index_ID idx) const {
 
-  Index_ID direct_to_output = 0;
+  bool direct_to_output = false;
   for(const auto &c : g->out_edges(idx)) {
     if(g->is_graph_output(c.get_idx())) {
-      direct_to_output = c.get_idx();
+      auto name = g->get_node_wirename(c.get_idx());
+      auto dpin = g->get_graph_output_driver(name);
+      w << " %" << name << " as __bits: " << g->get_bits(dpin) << "\n";
+      direct_to_output = true;
       break;
     }
   }
 
-  if(direct_to_output) {
-    if(g->get_bits(direct_to_output) == 0) {
-      w << " %" << g->get_node_wirename(direct_to_output) << " as __bits: " << g->get_bits(idx) << "\n";
-    }
-  } else {
-    w << " @tmp" << idx << " as __bits: " << g->get_bits(idx) << "\n";
+  if(!direct_to_output) {
+    w << " @tmp" << idx << " as __bits: " << g->get_bits(g->get_node(idx).get_driver_pin()) << "\n";
   }
 
   for(const auto &c : g->inp_edges(idx)) {
@@ -282,7 +282,7 @@ bool Inou_pyrope::to_flop(Out_string &w, const LGraph *g, Index_ID idx) const {
 
 bool Inou_pyrope::to_graphio(Out_string &w, const LGraph *g, Index_ID idx) const {
 
-  auto bits = g->get_bits(idx);
+  auto bits = g->get_bits(g->get_node(idx).get_driver_pin());
   if(!bits)
     return false;
 
@@ -394,7 +394,7 @@ bool Inou_pyrope::to_compare(Out_string &w, const LGraph *g, Index_ID idx, const
 
 bool Inou_pyrope::to_const(Out_string &w, const LGraph *g, Index_ID idx) const {
 
-  w << g->node_value_get(idx);
+  w << g->node_value_get(g->get_node(idx).get_driver_pin());
 
   return true;
 }
@@ -405,7 +405,7 @@ bool Inou_pyrope::to_pick(Out_string &w, const LGraph *g, Index_ID idx) const {
   for(const auto &c : g->inp_edges(idx)) {
     const auto op = g->node_type_get(c.get_idx());
     if(op.op == U32Const_Op) {
-      g->node_value_get(c.get_idx());
+      g->node_value_get(g->get_node(c.get_idx()).get_driver_pin());
       upper = lower + g->get_bits(idx) - 1;
       assert(lower <= upper);
       w << "[" << lower << ":" << upper << "]\n";

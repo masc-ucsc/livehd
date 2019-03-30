@@ -19,6 +19,7 @@
 #include "fmt/format.h"
 
 #include "graph_library.hpp"
+#include "lgraph.hpp"
 #include "pass.hpp"
 
 Graph_library::Global_instances   Graph_library::global_instances;

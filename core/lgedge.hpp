@@ -7,8 +7,8 @@ class Node_pin;
 
 typedef int64_t  SIndex_ID;  // Short Edge_raw must be signed +- offset
 
-constexpr int Index_bits = 34; // FIXME: remove and move to 32bits for Index_ID
-constexpr int Port_bits  = 12;
+constexpr int Index_bits = 31; // 31 bit to have Sink/Driver + Index in 32 bits
+constexpr int Port_bits  = 14;
 
 struct __attribute__((packed)) LEdge_Internal {  // 6 bytes total
 
@@ -19,10 +19,10 @@ public:
   friend class Edge_raw;
 
   // TODO: the snode and input can be avoided by accessing the Node_Internal information
-  bool     snode : 1;             // 1 bit
-  bool     input : 1;             // 1 bit
+  bool     snode   : 1;           // 1 bit
+  bool     input   : 1;           // 1 bit
+  Port_ID  inp_pid : Port_bits;   // 14 bits ; abs
   uint64_t raw_idx : Index_bits;  // abs (too much, 32 bits enough already not live)
-  Port_ID  inp_pid : Port_bits;   // 10 bits ; abs
 
   bool     is_snode() const { return snode; }
   bool     is_input() const { return input; }
@@ -32,7 +32,7 @@ public:
   }
 
   bool set(Index_ID _idx, Port_ID _inp_pid, bool _input) {
-    I(_idx < (1LL << Index_bits));
+    I(_idx < (1LL << (Index_bits-1)));
     I(_inp_pid < (1 << Port_bits));
 
     snode   = 0;
@@ -114,7 +114,7 @@ protected:
     return l->get_inp_pid();
   }
 
-  const Edge_raw *find_edge(const Edge_raw *bt, const Edge_raw *et, Index_ID ptr_nid, Port_ID inp_pod, Port_ID dst_pid) const;
+  static const Edge_raw *find_edge(const Edge_raw *bt, const Edge_raw *et, Index_ID ptr_nid, Port_ID inp_pod, Port_ID dst_pid);
 
   const Edge_raw *get_reverse_for_deletion() const;
 
@@ -144,10 +144,8 @@ public:
     I(snode == reinterpret_cast<const SEdge_Internal *>(this)->is_snode());
   }
 
-  // Output Edge_raw: inp (self_nid, dst_pid) -> out (idx, inp_pid)
-  // Input Edge_raw : inp (idx, dst_pid)      -> out (self_nid, inp_pid)
-  Node_pin get_out_pin() const;
-  Node_pin get_inp_pin() const;
+  Node_pin get_out_pin(LGraph *g, const Hierarchy_id hid) const;
+  Node_pin get_inp_pin(LGraph *g, const Hierarchy_id hid) const;
 
   Index_ID get_self_nid() const;
   Index_ID get_idx() const {
@@ -278,8 +276,8 @@ public:
   static constexpr int Num_SEdges = 16 - 5;  // 5 entries for the 80 bits (10 bytes)
   SEdge                sedge[Num_SEdges];    // WARNING: Must not be the last field in struct or iterators fail
 private:
-  uint64_t nid : Index_bits;     // 36bits, 4 byte aligned
-  Port_ID  dst_pid : Port_bits;  // Not well aligned
+  uint64_t nid : Index_bits;     // 32bits, 4 byte aligned
+  Port_ID  dst_pid : Port_bits;  // 4 byte aligned
   uint16_t out_long : 2;
   // END 10 Bytes common payload
 
@@ -487,6 +485,7 @@ public:
   }
 
   void del(const Edge_raw *edge_raw);
+  bool del(Index_ID src_idx, Port_ID pid, bool input);
 
   void inc_outputs(bool large = false) {
     I(has_space(large));

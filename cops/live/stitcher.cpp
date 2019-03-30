@@ -42,7 +42,7 @@ void Live_stitcher::stitch(LGraph *nsynth, const std::set<Net_ID> &diffs) {
         inp2originalid[idx] = original->get_graph_input(name).get_idx();
       } else if (original->is_graph_output(name)) {
         out2originalid[idx] = original->get_graph_output(name).get_idx();
-      } else if (original->has_wirename(name)) {
+      } else{ if (original->has_wirename(name)) {
         inp2originalid[idx] = original->get_node_id(name);
       } else {
         // Pass::>error("Wire {} not found in original synthesized graph\n",name);
