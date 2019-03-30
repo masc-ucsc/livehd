@@ -102,6 +102,7 @@ public:
   // BEGIN ATTRIBUTE ACCESSORS
   void set_name(std::string_view iname);
   std::string_view get_name() const;
+  bool has_name() const;
 
   // END ATTRIBUTE ACCESSORS
 };

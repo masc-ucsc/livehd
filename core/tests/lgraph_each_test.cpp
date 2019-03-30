@@ -118,10 +118,14 @@ TEST_F(Setup_graphs_test, each_sub_graph) {
 
   for(auto &parent:lgs) {
     fmt::print("checking parent:{}\n", parent->get_name());
-    parent->each_sub_graph_fast([parent,&children2,this](Index_ID idx, Lg_type_id lgid, std::string_view iname) {
+    parent->each_sub_graph_fast([parent,&children2,this](Node &node, Lg_type_id lgid) {
         LGraph *child = LGraph::open(parent->get_path(),lgid);
 
         ASSERT_NE(child,nullptr);
+
+        std::string_view iname = "NONAME";
+        if (node.has_name())
+          iname = node.get_name();
 
         fmt::print("parent:{} child:{} iname:{}\n",parent->get_name(), child->get_name(), iname);
 
@@ -151,16 +155,18 @@ TEST_F(Setup_graphs_test, each_sub_graph_twice) {
 
   for(auto &parent:lgs) {
     fmt::print("checking parent:{}\n", parent->get_name());
-    parent->each_sub_graph_fast([parent,&children2,this](Index_ID idx, Lg_type_id lgid, std::string_view iname) {
+    parent->each_sub_graph_fast([parent,&children2,this](Node &node, Lg_type_id lgid) {
         LGraph *child = LGraph::open(parent->get_path(),lgid);
 
         ASSERT_NE(child,nullptr);
-
 
         EXPECT_TRUE(children.find(absl::StrCat(parent->get_name(), ":", child->get_name())) != children.end());
 
         auto id = absl::StrCat(parent->get_name(), ":", child->get_name());
 
+        std::string_view iname = "NONAME";
+        if (node.has_name())
+          iname = node.get_name();
         fmt::print("parent:{} child:{} iname:{} id:{}\n",parent->get_name(), child->get_name(), iname, id);
 
         if (children2.find(id) == children2.end())

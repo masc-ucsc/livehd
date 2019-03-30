@@ -38,10 +38,16 @@ std::string_view Node_pin::get_name() const {
   return Ann_node_pin_name::get(*this);
 }
 
+bool Node_pin::has_name() const {
+  return Ann_node_pin_name::has(*this);
+}
+
 void Node_pin::set_offset(uint16_t offset) {
+  //I(0);
   // FIXME33
 }
 
 uint16_t Node_pin::get_offset() const {
+  //I(0);
   return 0; // FIXME33
 }

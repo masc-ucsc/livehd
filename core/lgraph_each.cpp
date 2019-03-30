@@ -52,22 +52,25 @@ void LGraph::each_output_pin_fast(std::function<void(Node_pin &pin)> f1) {
   }
 }
 
-void LGraph::each_output_edge_fast(std::function<void(Index_ID, Port_ID, Index_ID, Port_ID)> f1) const {
+void LGraph::each_output_edge_fast(std::function<void(XEdge &edge)> f1) {
   for (const auto &ni : node_internal) {
     if (!ni.is_node_state()) continue;
     if (!ni.is_root()) continue;
     if (!ni.has_local_outputs()) continue;
 
+    auto dpin = Node_pin(this,0,ni.get_nid(), ni.get_dst_pid(), false);
+
     const Edge_raw *edge_raw = ni.get_output_begin();
     do {
-      f1(ni.get_nid(), ni.get_dst_pid(), edge_raw->get_idx(), edge_raw->get_inp_pid());
+      XEdge edge(dpin, Node_pin(this,0,edge_raw->get_idx(), edge_raw->get_inp_pid(), true));
+
+      f1(edge);
       edge_raw += edge_raw->next_node_inc();
     } while (edge_raw != ni.get_output_end());
   }
 }
 
-void LGraph::each_sub_graph_fast_direct(
-    const std::function<bool(const Index_ID &, const Lg_type_id &, std::string_view)> fn) const {
+void LGraph::each_sub_graph_fast_direct(const std::function<bool(Node &, const Lg_type_id &)> fn) {
   const bm::bvector<> &bm  = get_sub_graph_ids();
   Index_ID             cid = bm.get_first();
   while (cid) {
@@ -75,22 +78,25 @@ void LGraph::each_sub_graph_fast_direct(
     I(node_internal[cid].is_node_state());
     I(node_internal[cid].is_master_root());
 
-    auto       iname = get_node_instancename(cid);
-    Lg_type_id lgid  = get_type_subgraph(cid);
+    auto lgid = get_type_subgraph(cid);
+    auto node = Node(this,0,Node::Compact(cid));
 
-    bool cont = fn(cid, lgid, iname);
+    bool cont = fn(node, lgid);
     if (!cont) return;
 
     cid = bm.get_next(cid);
   }
 }
 
-void LGraph::each_root_fast_direct(std::function<bool(const Index_ID &)> f1) const {
+void LGraph::each_root_fast_direct(std::function<bool(Node &)> f1) {
   for (const auto &ni : node_internal) {
     if (!ni.is_node_state()) continue;
     if (!ni.is_root()) continue;
 
-    bool cont = f1(ni.get_nid());
+    auto node = Node(this,0,ni.get_nid());
+
+    bool cont = f1(node);
     if (!cont) return;
   }
 }
+

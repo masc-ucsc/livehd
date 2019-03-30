@@ -17,7 +17,6 @@
 #include "nodeplace.hpp"
 #include "nodesrcloc.hpp"
 #include "node_type_base.hpp"
-#include "instance_names.hpp"
 #include "node_type.hpp"
 
 #include "node_type_base.hpp"
@@ -33,7 +32,6 @@ class LGraph : public LGraph_Node_Delay,
                public LGraph_Node_bitwidth,
                public LGraph_Node_Src_Loc,
                public LGraph_Node_Place,
-               public LGraph_InstanceNames,
                public LGraph_Node_Type
 {
 private:
@@ -248,27 +246,17 @@ public:
   void each_input_pin_fast(std::function<void(Node_pin &pin)> f1);
   void each_output_pin_fast(std::function<void(Node_pin &pin)> f1);
 
-  void each_output_edge_fast(std::function<void(Index_ID, Port_ID, Index_ID, Port_ID)> f1) const;
+  void each_output_edge_fast(std::function<void(XEdge &edge)> f1);
 
-  void each_sub_graph_fast_direct(const std::function<bool(const Index_ID &, const Lg_type_id &, std::string_view)>) const;
+  void each_sub_graph_fast_direct(const std::function<bool(Node &, const Lg_type_id &)>);
 
   template <typename FN>
-  void each_sub_graph_fast(const FN f1) const {
-    if constexpr (std::is_invocable_r_v<bool, FN &, const Index_ID &, const Lg_type_id &,
-                                        std::string_view>) {  // WARNING: bool must be before void
+  void each_sub_graph_fast(const FN f1) {
+    if constexpr (std::is_invocable_r_v<bool, FN &, Node &, const Lg_type_id &>) {  // WARNING: bool must be before void
       each_sub_graph_fast_direct(f1);
-    } else if constexpr (std::is_invocable_r_v<void, FN &, const Index_ID &, const Lg_type_id &, std::string_view>) {
-      auto f2 = [&f1](const Index_ID &idx, const Lg_type_id &lgid, std::string_view iname) {
-        f1(idx, lgid, iname);
-        return true;
-      };
-      each_sub_graph_fast_direct(f2);
-    } else if constexpr (std::is_invocable_r_v<bool, FN &, const Index_ID &, const Lg_type_id &>) {
-      auto f2 = [&f1](const Index_ID &idx, const Lg_type_id &lgid, std::string_view iname) { return f1(idx, lgid); };
-      each_sub_graph_fast_direct(f2);
-    } else if constexpr (std::is_invocable_r_v<void, FN &, const Index_ID &, const Lg_type_id &>) {
-      auto f2 = [&f1](const Index_ID &idx, const Lg_type_id &lgid, std::string_view iname) {
-        f1(idx, lgid);
+    } else if constexpr (std::is_invocable_r_v<void, FN &, Node &, const Lg_type_id &>) {
+      auto f2 = [&f1](Node &node, const Lg_type_id &lgid) {
+        f1(node,lgid);
         return true;
       };
       each_sub_graph_fast_direct(f2);
@@ -278,14 +266,14 @@ public:
     }
   };
 
-  void each_root_fast_direct(std::function<bool(const Index_ID &)> f1) const;
+  void each_root_fast_direct(std::function<bool(Node &)> f1);
   template <typename FN>
-  void each_root_fast(const FN f1) const {
-    if constexpr (std::is_invocable_r_v<bool, FN &, const Index_ID &>) {  // WARNING: bool must be before void
+  void each_root_fast(const FN f1) {
+    if constexpr (std::is_invocable_r_v<bool, FN &, Node &>) {  // WARNING: bool must be before void
       each_root_direct(f1);
-    } else if constexpr (std::is_invocable_r_v<void, FN &, const Index_ID &>) {
-      auto f2 = [&f1](const Index_ID &idx) {
-        f1(idx);
+    } else if constexpr (std::is_invocable_r_v<void, FN &, Node &>) {
+      auto f2 = [&f1](Node &node) {
+        f1(node);
         return true;
       };
       each_root_direct(f2);
