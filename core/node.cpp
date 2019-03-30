@@ -149,3 +149,17 @@ bool Node::has_name() const {
   return Ann_node_name::has(*this);
 }
 
+const Node_place &Node::get_place() const {
+  return Ann_node_place::get(*this);
+}
+
+Node_place *Node::ref_place() {
+  if (!Ann_node_place::has(*this))
+    Ann_node_place::set(*this,Node_place()); // Empty
+
+  return &Ann_node_place::at(*this);
+}
+
+bool Node::has_place() const {
+  return Ann_node_place::has(*this);
+}

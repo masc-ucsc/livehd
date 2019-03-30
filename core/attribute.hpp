@@ -566,7 +566,7 @@ public:
         pos+=sizeof(Index);
 
         Data *data=(Data *)pos;
-        *data = it.second;
+        *data = std::move(it.second);
         pos+=sizeof(Data);
       }
 
