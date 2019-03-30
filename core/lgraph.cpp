@@ -62,7 +62,6 @@ LGraph::LGraph(const std::string &path, const std::string &_name, const std::str
     , LGraph_Node_bitwidth(path, _name, lg_id())
     , LGraph_Node_Src_Loc(path, _name, lg_id())
     , LGraph_Node_Place(path, _name, lg_id())
-    , LGraph_InstanceNames(path, _name, lg_id())
     , LGraph_Node_Type(path, _name, lg_id()) {
   I(_name == get_name());
   if (_clear) {  // Create
@@ -156,7 +155,6 @@ void LGraph::reload() {
   LGraph_Node_bitwidth::reload();
   LGraph_Node_Src_Loc::reload();
   LGraph_Node_Type::reload();
-  LGraph_InstanceNames::reload();
 }
 
 void LGraph::clear() {
@@ -165,7 +163,6 @@ void LGraph::clear() {
   LGraph_Node_bitwidth::clear();
   LGraph_Node_Src_Loc::clear();
   LGraph_Node_Type::clear();
-  LGraph_InstanceNames::clear();
 
   LGraph_Base::clear();  // last. Removes lock at the end
 
@@ -178,7 +175,6 @@ void LGraph::sync() {
   LGraph_Node_bitwidth::sync();
   LGraph_Node_Src_Loc::sync();
   LGraph_Node_Type::sync();
-  LGraph_InstanceNames::sync();
 
   LGraph_Base::sync();  // last. Removes lock at the end
 
@@ -192,7 +188,6 @@ void LGraph::emplace_back() {
   LGraph_Node_bitwidth::emplace_back();
   LGraph_Node_Src_Loc::emplace_back();
   LGraph_Node_Type::emplace_back();
-  LGraph_InstanceNames::emplace_back();
 }
 
 Node_pin LGraph::get_graph_input(std::string_view str) {
@@ -468,14 +463,14 @@ const LGraph::Hierarchy &LGraph::get_hierarchy() {
 
     entry.top->add_hierarchy_entry(entry.base, entry.lg->lg_id());
 
-    entry.lg->each_sub_graph_fast([&entry, &pending](const Index_ID idx, const Lg_type_id lgid, std::string_view iname) {
-      if (iname.empty()) return;
+    entry.lg->each_sub_graph_fast([&entry, &pending](Node &node, const Lg_type_id lgid) {
+      if (!node.has_name()) return;
       LGraph *lg = LGraph::open(entry.top->get_path(), lgid);
 
       if (lg == 0) {
-        Pass::error("hierarchy for {} could not open instance {} with lgid {}", entry.base, iname, lgid);
+        Pass::error("hierarchy for {} could not open instance {} with lgid {}", entry.base, node.get_name(), lgid);
       } else {
-        auto base2 = absl::StrCat(entry.base, ".", iname);
+        auto base2 = absl::StrCat(entry.base, ".", node.get_name());
         pending.emplace_back(base2, entry.top, lg);
       }
     });

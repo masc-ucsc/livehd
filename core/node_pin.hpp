@@ -91,6 +91,7 @@ public:
 
   void set_name(std::string_view wname);
   std::string_view get_name() const;
+  bool has_name() const;
 
   void set_offset(uint16_t offset);
   uint16_t get_offset() const;
