@@ -4,6 +4,7 @@
 #include <string>
 
 #include "lgraph.hpp"
+#include "graph_library.hpp"
 #include "main_api.hpp"
 
 class Meta_api {

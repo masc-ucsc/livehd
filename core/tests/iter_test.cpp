@@ -14,55 +14,63 @@ void generate_graphs(int n) {
   for(int i = 0; i < n; i++) {
     std::string           gname = "test_" + std::to_string(i);
     LGraph *              g     = LGraph::create("lgdb_iter_test", gname, "test");
-    std::vector<Index_ID> nodes;
+    std::vector<Node_pin::Compact> spins;
+    std::vector<Node_pin::Compact> dpins;
 
     int inps = 10 + rand_r(&rseed) % 100;
     for(int j = 0; j < inps; j++) {
-      // max 110 inputs, min 10
-      Index_ID inp_id = g->add_graph_input(("i" + std::to_string(j)).c_str(), 1, 0).get_idx();
-      nodes.push_back(inp_id);
+      dpins.push_back(g->add_graph_input(("i" + std::to_string(j)), 1, 0).get_compact());
     }
+
     int outs = 10 + rand_r(&rseed) % 100;
     for(int j = 0; j < outs; j++) {
-      // max 110 outs, min 10
-      Index_ID out_id = g->add_graph_output(("o" + std::to_string(j)).c_str(), 1, 0).get_idx();
-      nodes.push_back(out_id);
+      spins.push_back(g->add_graph_output(("o" + std::to_string(j)), 1, 0).get_compact());
+      dpins.push_back(g->get_graph_output_driver(("o" + std::to_string(j))).get_compact());
     }
 
     int nnodes = 100 + rand_r(&rseed) % 1000;
-    for(int j = 0; j < nnodes; j++) {
-      Index_ID     nid = g->create_node().get_nid();
+    for(int j = 0; j < nnodes; j++) { // Simple output nodes
+      auto node = g->create_node();
       Node_Type_Op op  = (Node_Type_Op)(1 + rand_r(&rseed) % 22); // regular node types range
-      g->node_type_set(nid, op);
-      nodes.push_back(nid);
+      node.set_type(op);
+      dpins.push_back(node.setup_driver_pin().get_compact());
+      spins.push_back(node.setup_sink_pin().get_compact());
     }
 
-    int                                     nedges = 2000 + rand_r(&rseed) % 5000;
-    std::set<std::pair<Index_ID, Index_ID>> edges;
+    int cnodes = 100 + rand_r(&rseed) % 1000;
+    for(int j = 0; j < cnodes; j++) { // complex nodes
+      auto node = g->create_node(FFlop_Op);
+      auto d1 = rand_r(&rseed)%3;
+      auto s1 = rand_r(&rseed)%6;
+      dpins.push_back(node.setup_driver_pin(d1).get_compact());
+      spins.push_back(node.setup_sink_pin(s1).get_compact());
+      if (rand_r(&rseed)&1) {
+        auto d2 = rand_r(&rseed)%3;
+        auto s2 = rand_r(&rseed)%6;
+        if (d1!=d2)
+          dpins.push_back(node.setup_driver_pin(d2).get_compact());
+        if (s1!=s2)
+          spins.push_back(node.setup_sink_pin(s2).get_compact());
+      }
+    }
+
+    int nedges = 2000 + rand_r(&rseed) % 5000;
+    std::set<std::pair<Node_pin::Compact, Node_pin::Compact>> edges;
     for(int j = 0; j < nedges; j++) {
       int      counter = 0;
-      Index_ID src;
-      ;
-      Index_ID dst;
+      Node_pin::Compact src;
+      Node_pin::Compact dst;
       do {
-        do {
-          src = nodes[rand_r(&rseed) % (nodes.size())];
-        } while(!g->is_graph_output(src));
-        do {
-          dst = nodes[rand_r(&rseed) % (nodes.size())];
-        } while(!g->is_graph_input(dst));
+        src = dpins[rand_r(&rseed) % (dpins.size())];
+        dst = spins[rand_r(&rseed) % (spins.size())];
         counter++;
-      } while(!src && !dst && edges.find(std::make_pair(src, dst)) != edges.end() && counter < 1000 &&
-              (g->is_graph_output(dst) || dst >= src)); // guarantees no loops
+      } while(edges.find(std::make_pair(src, dst)) != edges.end() && counter < 1000);
 
-      if(!src || !dst || edges.find(std::make_pair(src, dst)) != edges.end())
-        continue;
-
-      if(!g->is_graph_output(dst) && dst >= src)
-        continue;
+      if (edges.find(std::make_pair(src, dst)) != edges.end())
+        break;
 
       edges.insert(std::make_pair(src, dst));
-      g->add_edge(g->get_node(src).setup_driver_pin(), g->get_node(dst).setup_sink_pin());
+      g->add_edge(Node_pin(g,0,src), Node_pin(g,0,dst));
     }
 
     g->close();
@@ -78,17 +86,18 @@ bool fwd(int n) {
 
     std::set<Index_ID> visited;
     for(auto &idx : g->forward()) {
+      auto node = Node(g,0,Node::Compact(idx));
 
       // check if all incoming edges were visited
-      for(auto &inp : g->inp_edges(idx)) {
-        if(visited.find(inp.get_out_pin().get_idx()) == visited.end()) {
+      for(auto &inp : node.inp_edges()) {
+        if(visited.find(inp.driver.get_node().get_compact().nid) == visited.end()) {
           printf("fwd failed for lgraph %d\n", i);
           I(false);
           return false;
         }
       }
 
-      visited.insert(idx);
+      visited.insert(node.get_compact().nid);
     }
 
     g->close();
@@ -104,19 +113,20 @@ bool bwd(int n) {
     if(g == 0)
       return false;
 
-    std::set<Index_ID> visited;
+    std::set<Node::Compact> visited;
     for(auto &idx : g->backward()) {
+      auto node = Node(g,0,Node::Compact(idx));
+      visited.insert(node.get_compact());
 
       // check if all incoming edges were visited
-      for(auto &out : g->out_edges(idx)) {
-        if(visited.find(out.get_inp_pin().get_idx()) == visited.end()) {
+      for(auto &out : node.out_edges()) {
+        if(visited.find(out.sink.get_node().get_compact()) == visited.end()) {
           printf("bwd failed for lgraph %d\n", i);
           I(false);
           return false;
         }
       }
 
-      visited.insert(idx);
     }
 
     g->close();

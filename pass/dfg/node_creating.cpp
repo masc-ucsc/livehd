@@ -1,6 +1,9 @@
-#include "nodetype.hpp"
-#include "pass_dfg.hpp"
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
 #include <string>
+
+#include "lgraph.hpp"
+#include "pass_dfg.hpp"
 
 Index_ID Pass_dfg::create_reference(LGraph *g, Aux_tree *aux_tree, const std::string &var_name) {
   Index_ID nid = create_node(g, aux_tree, var_name.substr(1));

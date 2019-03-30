@@ -177,25 +177,30 @@ void Pass_dfg::trans(LGraph *dfg) {
         }
       };
       std::map<My_pin, My_pin> subg_inp_edges;
-      for(auto &inp : dfg->inp_edges(nid)){
-        Index_ID src_nid = dfg->get_node(inp.get_out_pin()).get_nid();
-        Index_ID dst_nid = nid;
-        Port_ID  src_pid = dfg->node_type_get(src_nid).op == GraphIO_Op ? 1 : 0;
-        auto inp_name = dfg->get_node_wirename(dfg->get_node(src_nid).get_driver_pin(0));
-        //TODO:should change to sub_graph->each_graph_input
-        Port_ID  dst_pid = sub_graph->get_graph_input(inp_name).get_pid();
+      for(bool deleted = true; deleted;) {
+        deleted = false;
+        for(auto &inp : dfg->inp_edges(nid)){
+          Index_ID src_nid = dfg->get_node(inp.get_out_pin()).get_nid();
+          Index_ID dst_nid = nid;
+          Port_ID  src_pid = dfg->node_type_get(src_nid).op == GraphIO_Op ? 1 : 0;
+          auto inp_name = dfg->get_node_wirename(dfg->get_node(src_nid).get_driver_pin(0));
+          //TODO:should change to sub_graph->each_graph_input
+          Port_ID  dst_pid = sub_graph->get_graph_input(inp_name).get_pid();
 
-        fmt::print("inp_name:{}\n",inp_name);
-        fmt::print("src_nid:{}, src_pid:{}, dst_nid:{}, dst_pid:{}\n", src_nid, src_pid, dst_nid, dst_pid);
-        My_pin src_pin;
-        src_pin.nid = src_nid;
-        src_pin.pid = src_pid;
+          fmt::print("inp_name:{}\n",inp_name);
+          fmt::print("src_nid:{}, src_pid:{}, dst_nid:{}, dst_pid:{}\n", src_nid, src_pid, dst_nid, dst_pid);
+          My_pin src_pin;
+          src_pin.nid = src_nid;
+          src_pin.pid = src_pid;
 
-        My_pin dst_pin;
-        dst_pin.nid = dst_nid;
-        dst_pin.pid = dst_pid;
-        subg_inp_edges[src_pin] = dst_pin;
-        dfg->del_edge(inp); //WARNNING: do not add_edge and del_edge at the same reference loop!
+          My_pin dst_pin;
+          dst_pin.nid = dst_nid;
+          dst_pin.pid = dst_pid;
+          subg_inp_edges[src_pin] = dst_pin;
+          dfg->del_edge(&inp); //WARNNING: do not add_edge and del_edge at the same reference loop!
+          deleted = true; // Delete can corrupt the iterator
+          break;
+        }
       }
 
       for(auto &edge : subg_inp_edges){
@@ -206,27 +211,33 @@ void Pass_dfg::trans(LGraph *dfg) {
 
       //resolve subgraph output connections
       std::map<My_pin, My_pin> subg_out_edges;
-      for(auto &out : dfg->out_edges(nid)){
-        Index_ID src_nid = nid;
-        Index_ID dst_nid = dfg->get_node(out.get_inp_pin()).get_nid();
-        Port_ID  dst_pid = out.get_inp_pin().get_pid();
-        Port_ID  src_pid = 0;
-        uint16_t bitwidth;
-        sub_graph->each_graph_output([&sub_graph, &src_pid, &bitwidth](const Node_pin &pin) {
-          fmt::print("outputs of subgraph: idx:{}, pid:{}, name:{}, bitwidth:{}\n"
-              ,pin.get_idx(), pin.get_pid(), sub_graph->get_graph_output_name_from_pid(pin.get_pid()), sub_graph->get_bits(pin));
-          src_pid = pin.get_pid();
-          bitwidth = sub_graph->get_bits(pin);
-        });
-        My_pin src_pin; // = Node_pin(dfg->get_node(src_nid).setup_driver_pin(src_pid));
-        src_pin.nid = src_nid;
-        src_pin.pid = src_pid;
-        My_pin dst_pin; // = Node_pin(dfg->get_node(dst_nid).setup_sink_pin(dst_pid));
-        dst_pin.nid = dst_nid;
-        dst_pin.pid = dst_pid;
-        subg_out_edges[src_pin] = dst_pin;
-        dfg->set_bits(dfg->get_node(src_nid).setup_driver_pin(src_pid), bitwidth);
-        dfg->del_edge(out); //WARNNING: don't add_edge and del_edge at the same reference loop!
+
+      for(bool deleted=true;deleted;) {
+        deleted = false;
+        for(auto &out : dfg->out_edges(nid)){
+          Index_ID src_nid = nid;
+          Index_ID dst_nid = dfg->get_node(out.get_inp_pin()).get_nid();
+          Port_ID  dst_pid = out.get_inp_pin().get_pid();
+          Port_ID  src_pid = 0;
+          uint16_t bitwidth;
+          sub_graph->each_graph_output([&sub_graph, &src_pid, &bitwidth](const Node_pin &pin) {
+              fmt::print("outputs of subgraph: idx:{}, pid:{}, name:{}, bitwidth:{}\n"
+                  ,pin.get_idx(), pin.get_pid(), sub_graph->get_graph_output_name_from_pid(pin.get_pid()), sub_graph->get_bits(pin));
+              src_pid = pin.get_pid();
+              bitwidth = sub_graph->get_bits(pin);
+              });
+          My_pin src_pin; // = Node_pin(dfg->get_node(src_nid).setup_driver_pin(src_pid));
+          src_pin.nid = src_nid;
+          src_pin.pid = src_pid;
+          My_pin dst_pin; // = Node_pin(dfg->get_node(dst_nid).setup_sink_pin(dst_pid));
+          dst_pin.nid = dst_nid;
+          dst_pin.pid = dst_pid;
+          subg_out_edges[src_pin] = dst_pin;
+          dfg->set_bits(dfg->get_node(src_nid).setup_driver_pin(src_pid), bitwidth);
+          dfg->del_edge(&out); //WARNNING: don't add_edge and del_edge at the same reference loop!
+          deleted = true;
+          break;
+        }
       }
 
       for(auto &edge : subg_out_edges){
@@ -270,28 +281,33 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
 
   for(auto nid: dfg->fast()){
     if(dfg->node_type_get(nid).op == Mux_Op) {
-      for (auto &inp : dfg->inp_edges(nid)) {
-        Index_ID src_nid = dfg->get_node(inp.get_out_pin()).get_nid();
-        Index_ID dst_nid = nid;
-        Port_ID  dst_pid = inp.get_inp_pin().get_pid();
+      for(bool deleted=true;deleted;) {
+        deleted = false;
+        for (auto &inp : dfg->inp_edges(nid)) {
+          Index_ID src_nid = dfg->get_node(inp.get_out_pin()).get_nid();
+          Index_ID dst_nid = nid;
+          Port_ID  dst_pid = inp.get_inp_pin().get_pid();
 
-        if(dst_pid == 0)
-          continue;
+          if(dst_pid == 0)
+            continue;
 
-        //assume MIT algo. will at least set mux.bits equals to the larger input
-        auto src_bits = dfg->get_bits(dfg->get_node(src_nid).get_driver_pin(0));
-        auto dst_bits = dfg->get_bits(dfg->get_node(dst_nid).get_driver_pin(0));
-        auto bw_diff = (uint16_t)abs(src_bits - dst_bits);
-        if(dst_bits > src_bits) {
-          //temporarily using unsigned extend to fix mux bitwidth mismatch
-          Index_ID unsign_ext_nid = create_const32_node(dfg, 0, bw_diff, false);
-          Index_ID nid_join = dfg->create_node().get_nid();
-          dfg->node_type_set(nid_join, Join_Op);
-          dfg->set_bits(dfg->get_node(nid_join).setup_driver_pin(0), dst_bits);
-          dfg->add_edge(dfg->get_node(unsign_ext_nid).setup_driver_pin(0), dfg->get_node(nid_join).setup_sink_pin(1));
-          dfg->add_edge(dfg->get_node(src_nid).setup_driver_pin(0)       , dfg->get_node(nid_join).setup_sink_pin(0));
-          dfg->add_edge(dfg->get_node(nid_join).setup_driver_pin(0)      , dfg->get_node(dst_nid ).setup_sink_pin(dst_pid));
-          dfg->del_edge(inp);
+          //assume MIT algo. will at least set mux.bits equals to the larger input
+          auto src_bits = dfg->get_bits(dfg->get_node(src_nid).get_driver_pin(0));
+          auto dst_bits = dfg->get_bits(dfg->get_node(dst_nid).get_driver_pin(0));
+          auto bw_diff = (uint16_t)abs(src_bits - dst_bits);
+          if(dst_bits > src_bits) {
+            //temporarily using unsigned extend to fix mux bitwidth mismatch
+            Index_ID unsign_ext_nid = create_const32_node(dfg, 0, bw_diff, false);
+            Index_ID nid_join = dfg->create_node().get_nid();
+            dfg->node_type_set(nid_join, Join_Op);
+            dfg->set_bits(dfg->get_node(nid_join).setup_driver_pin(0), dst_bits);
+            dfg->add_edge(dfg->get_node(unsign_ext_nid).setup_driver_pin(0), dfg->get_node(nid_join).setup_sink_pin(1));
+            dfg->add_edge(dfg->get_node(src_nid).setup_driver_pin(0)       , dfg->get_node(nid_join).setup_sink_pin(0));
+            dfg->add_edge(dfg->get_node(nid_join).setup_driver_pin(0)      , dfg->get_node(dst_nid ).setup_sink_pin(dst_pid));
+            dfg->del_edge(&inp);
+            deleted = true;
+            break;
+          }
         }
       }
     }

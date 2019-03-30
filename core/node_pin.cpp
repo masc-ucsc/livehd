@@ -4,18 +4,44 @@
 
 #include "node_pin.hpp"
 
-#if 0
-Node_pin Node_pin::get_out_pin(const Edge_raw *edge_raw) {
-  if (edge_raw->is_input())
-    return Node_pin(edge_raw->get_idx(), edge_raw->get_inp_pid(), false);
-  else
-    return Node_pin(edge_raw->get_self_root_idx(), edge_raw->get_dst_pid(), false);
+#include "annotate.hpp"
+
+Node_pin::Node_pin(LGraph *_g, Hierarchy_id _hid, Compact comp)
+  :idx(comp.idx)
+  ,pid(g->get_dst_pid(comp.idx))
+  ,g(_g)
+  ,hid(_hid)
+  ,sink(comp.sink) {
 }
 
-Node_pin Node_pin::get_inp_pin(const Edge_raw *edge_raw) {
-  if (edge_raw->is_input())
-    return Node_pin(edge_raw->get_self_root_idx(), edge_raw->get_dst_pid(), true);
-  else
-    return Node_pin(edge_raw->get_idx(), edge_raw->get_inp_pid(), true);
+Node Node_pin::get_node() const {
+  I(hid==0);
+  return g->get_node(idx);
 }
-#endif
+
+uint16_t Node_pin::get_bits() const {
+  I(hid==0);
+  return g->get_bits(idx);
+}
+
+void Node_pin::set_bits(uint16_t bits) {
+  I(hid==0);
+  I(is_driver());
+  g->set_bits(idx, bits);
+}
+
+void Node_pin::set_name(std::string_view wname) {
+  Ann_node_pin_name::set(*this, wname);
+}
+
+std::string_view Node_pin::get_name() const {
+  return Ann_node_pin_name::get(*this);
+}
+
+void Node_pin::set_offset(uint16_t offset) {
+  // FIXME33
+}
+
+uint16_t Node_pin::get_offset() const {
+  return 0; // FIXME33
+}

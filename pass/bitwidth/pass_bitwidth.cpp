@@ -8,6 +8,7 @@
 #include "lgbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
+#include "graph_library.hpp"
 
 #include "pass_bitwidth.hpp"
 

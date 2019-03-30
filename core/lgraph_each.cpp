@@ -2,7 +2,7 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
-void LGraph::each_graph_input(std::function<void(const Node_pin &pin)> f1) const {
+void LGraph::each_graph_input(std::function<void(Node_pin &pin)> f1) {
   for (auto it = input_array.begin(); it != input_array.end(); ++it) {
     const auto &p = it.get_field();
 
@@ -11,7 +11,7 @@ void LGraph::each_graph_input(std::function<void(const Node_pin &pin)> f1) const
   }
 }
 
-void LGraph::each_graph_output(std::function<void(const Node_pin &pin)> f1) const {
+void LGraph::each_graph_output(std::function<void(Node_pin &pin)> f1) {
   for (auto it = output_array.begin(); it != output_array.end(); ++it) {
     const auto &p = it.get_field();
 
@@ -20,44 +20,34 @@ void LGraph::each_graph_output(std::function<void(const Node_pin &pin)> f1) cons
   }
 }
 
-void LGraph::each_node_fast(std::function<void(ConstNode &node)> f1) const {
-  for (const auto &ni : node_internal) {
-    if (!ni.is_node_state()) continue;
-    if (!ni.is_master_root()) continue;
-
-    ConstNode node(this, ni.get_nid());
-    f1(node);
-  }
-}
-
 void LGraph::each_node_fast(std::function<void(Node &node)> f1) {
   for (const auto &ni : node_internal) {
     if (!ni.is_node_state()) continue;
     if (!ni.is_master_root()) continue;
 
-    Node node(this, ni.get_nid());
+    Node node(this, 0, ni.get_nid());
     f1(node);
   }
 }
 
-void LGraph::each_input_pin_fast(std::function<void(const Node_pin &pin)> f1) const {
+void LGraph::each_input_pin_fast(std::function<void(Node_pin &pin)> f1) {
   for (const auto &ni : node_internal) {
     if (!ni.is_node_state()) continue;
     if (!ni.is_root()) continue;
     if (!ni.has_pin_inputs() && !ni.is_graph_io_input()) continue;
 
-    Node_pin pin(ni.get_nid(), ni.get_dst_pid(), false);
+    Node_pin pin(this, 0, ni.get_nid(), ni.get_dst_pid(), false);
     f1(pin);
   }
 }
 
-void LGraph::each_output_pin_fast(std::function<void(const Node_pin &pin)> f1) const {
+void LGraph::each_output_pin_fast(std::function<void(Node_pin &pin)> f1) {
   for (const auto &ni : node_internal) {
     if (!ni.is_node_state()) continue;
     if (!ni.is_root()) continue;
     if (!ni.has_pin_outputs() && !ni.is_graph_io_output()) continue;
 
-    Node_pin pin(ni.get_nid(), ni.get_dst_pid(), false);
+    Node_pin pin(this, 0, ni.get_nid(), ni.get_dst_pid(), false);
     f1(pin);
   }
 }
@@ -86,7 +76,7 @@ void LGraph::each_sub_graph_fast_direct(
     I(node_internal[cid].is_master_root());
 
     auto       iname = get_node_instancename(cid);
-    Lg_type_id lgid  = subgraph_id_get(cid);
+    Lg_type_id lgid  = get_type_subgraph(cid);
 
     bool cont = fn(cid, lgid, iname);
     if (!cont) return;

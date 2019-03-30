@@ -111,11 +111,11 @@ protected:
 TEST_F(Setup_graphs_test, each_sub_graph) {
 
   for(const auto &nid:top->forward()) {
-    //auto node = top->get_node(nid);
-    for(const auto &out_edge : top->out_edges(nid)) {
-      auto dpin = out_edge.get_out_pin();
-      auto spin = out_edge.get_inp_pin();
-      fmt::print("idx:{} pid:{} -> idx:{} pid:{}\n",dpin.get_idx(), dpin.get_pid(), spin.get_idx(), spin.get_pid());
+    auto node = Node(top,0,Node::Compact(nid));
+    for(const auto &out_edge : node.out_edges()) {
+      auto dpin = out_edge.driver;
+      auto spin = out_edge.sink;
+      fmt::print("idx:{} pid:{} -> idx:{} pid:{}\n",dpin.get_compact().idx, dpin.get_pid(), spin.get_compact().idx, spin.get_pid());
     }
   }
 

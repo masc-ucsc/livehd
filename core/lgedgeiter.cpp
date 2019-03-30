@@ -75,8 +75,9 @@ bool Edge_raw_iterator_base::check_frontier() {
   bool pushed = false;
   for (auto &it : *frontier) {
     if (it.second > 0) {
+      auto node = Node(g,0,Node::Compact(it.first));
       // FIXME: What if it is a sub-module just pure combinational or with flops? How to distinguish???
-      if (g->node_type_get(it.first).is_pipelined()) {
+      if (node.get_type().is_pipelined()) {
         pending->push_back(it.first);
         it.second = -1;  // Mark as pipelined, but keep not to visit twice
         pushed    = true;
@@ -92,7 +93,7 @@ bool Edge_raw_iterator_base::check_frontier() {
 void Forward_edge_iterator::CForward_edge_iterator::add_node(const Index_ID nid) {
   assert(g->get_node_int(nid).is_master_root());
 
-  for (const auto &c : g->out_edges(nid)) {
+  for (const auto &c : g->out_edges_raw(nid)) {
     I(g->get_node_int(c.get_idx()).is_root());
     Index_ID    master_root_nid = g->get_node_int(c.get_idx()).get_nid();
     I(g->get_node_int(master_root_nid).is_master_root());
@@ -165,11 +166,11 @@ void Backward_edge_iterator::CBackward_edge_iterator::find_dce_nodes() {
       Index_ID current = discovered.back();
       discovered.pop_back();
       dc_visited.insert(current);
-      for (const auto &c : g->out_edges(current)) {
+      for (const auto &c : g->out_edges_raw(current)) {
         floating.erase(current);
 
-        I(g->get_node_int(c.get_inp_pin().get_idx()).is_root());
-        Index_ID    nid = g->get_node_int(c.get_inp_pin().get_idx()).get_nid();
+        I(g->get_node_int(c.get_idx()).is_root());
+        Index_ID    nid = g->get_node_int(c.get_idx()).get_nid();
         I(g->get_node_int(nid).is_master_root());
 
         if (dc_visited.find(nid) == dc_visited.end() && global_visited.find(nid) == global_visited.end()) {
@@ -194,7 +195,7 @@ void Backward_edge_iterator::CBackward_edge_iterator::find_dce_nodes() {
 void Backward_edge_iterator::CBackward_edge_iterator::add_node(const Index_ID nid) {
   assert(g->get_node_int(nid).is_master_root());
 
-  for (const auto &c : g->inp_edges(nid)) {
+  for (const auto &c : g->inp_edges_raw(nid)) {
     I(g->get_node_int(c.get_idx()).is_root());
     Index_ID    master_root_nid = g->get_node_int(c.get_idx()).get_nid();
     I(g->get_node_int(master_root_nid).is_master_root());

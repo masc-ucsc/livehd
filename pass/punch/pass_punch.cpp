@@ -201,9 +201,8 @@ bool Pass_punch::add_output(LGraph *g, std::string_view wname, std::string_view 
   if (!g->has_wirename(wname))
     return false;
 
-  if (g->has_wirename(output) || g->is_graph_input(output) || g->is_graph_output(output))
+  if (g->has_wirename(output))
     return false;
-
 
   auto dpin         = g->get_node(g->get_node_id(wname)).get_driver_pin();
   auto wname_bits   = g->get_bits(dpin);
@@ -223,16 +222,22 @@ bool Pass_punch::add_input(LGraph *g, std::string_view wname, std::string_view i
   I(g);
   I(!input.empty());
 
-  if (g->has_wirename(input) || g->is_graph_input(input) || g->is_graph_output(input))
+  if (g->has_wirename(input))
     return false;
 
+#if 0
+FIXME: This makes no sense. It check if there is an input, and adds the input if already exists???
   fmt::print("Adding input:{} lgraph:{}\n",input, g->get_name());
+  auto ipin = g->get_graph_input(input);
   auto wname_idx    = g->get_node_id(wname);
   auto wname_bits   = g->get_bits(wname_idx);
-  auto wname_offset = g->get_offset(wname_idx);
+  auto wname_offset = g->get_offset(ipin);
 
   g->add_graph_input(input, wname_bits, wname_offset);
   // g->add_edge(idx, wname_idx);
+#else
+  I(0);
+#endif
 
   return true;
 }
@@ -241,6 +246,8 @@ bool Pass_punch::add_dest_instance(LGraph *g, std::string_view type, std::string
 
   if (!g->has_wirename(wname))
     return false;
+#if 0
+FIXME: This code also seems bad
   auto wname_idx    = g->get_node_id(wname);
   auto wname_bits   = g->get_bits(wname_idx);
   auto wname_offset = g->get_offset(wname_idx);
@@ -275,6 +282,9 @@ bool Pass_punch::add_dest_instance(LGraph *g, std::string_view type, std::string
   g->add_edge(g->get_node(wname_idx).setup_driver_pin(0), g->get_node(ins_idx).setup_sink_pin(ins_input_pid), wname_bits);
 
   ins_g->close();
+#else
+  I(0);
+#endif
 
   return true;
 }

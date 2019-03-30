@@ -55,50 +55,8 @@ pin_name.sync();
 #define unlikely(x) __builtin_expect((x), 0)
 #endif
 
-template <typename Index, typename Data> class Attribute {
-protected:
-  Data last_set;
 
-public:
-
-  // Persistent constructor (path provided)
-  Attribute(std::string_view path, std::string_view name) {
-    I(false);
-  };
-
-  // Ephemeral constructor (no path)
-  Attribute(std::string_view name) {
-    I(false);
-  };
-
-  // Check if idx is populated
-  bool has(const Index &idx) const {
-    return false;
-  };
-
-  // Get const data reference, assert if idx does not exist
-  const Data &get(const Index &idx) const {
-    return last_set;
-  };
-
-  // Get data reference, assert if does not exist
-  Data &at(const Index &idx) {
-    return last_set;
-  };
-
-  // Set data, overwrite if previously set
-  void set(const Index &idx, const Data &data) {
-    last_set = data;
-  };
-
-  // Create entry, assert if already exists
-  Data &emplace(const Index &idx) {
-    return last_set;
-  };
-
-};
-
-template <typename Index> class Attr_sview_raw {
+template <typename Index, bool Unique> class Attr_sview_raw {
 protected:
   bool clean;
   mutable bool loaded;
@@ -113,7 +71,7 @@ protected:
   using Idx2w = absl::flat_hash_map<Index, Char_Array_ID>;
   using Names = absl::flat_hash_set<std::string, uint32_t>;
 #else
-  using Idx2w = std::unordered_map<Index, uint32_t>;
+  using Idx2w = std::unordered_map<Index, Char_Array_ID>;
   using Names = Char_Array<uint16_t>;
 #endif
 
@@ -140,8 +98,8 @@ public:
   Attr_sview_raw(std::string_view _path, std::string_view _name)
     : path(_path)
     , name(_name)
-    , names(absl::StrCat(_path, "/lgraph_", _name, "_names_attr"))
     , idx2w_file(absl::StrCat(_path, "/lgraph_", _name, "_id2wd_attr"))
+    , names(absl::StrCat(_path, "/lgraph_", _name, "_names_attr"))
   {
     static_assert(sizeof(Index)<=sizeof(uint64_t) && sizeof(Index)>=sizeof(uint8_t));
 #ifndef NDEBUG
@@ -181,6 +139,14 @@ public:
     return name;
   };
 
+  Index find(std::string_view name) const {
+    auto str_id = names.get_id(name);
+    if (str_id==0)
+      return 0;
+
+    return names.get_field(str_id);
+  }
+
   // Get data reference, assert if does not exist
   std::string_view &at(const Index &idx) {
     I(idx); // zero is not valid
@@ -188,18 +154,27 @@ public:
     return get(idx);
   };
 
-  // Set data, overwrite if previously set
+  // Set data, overwrite if previously set (!Unique)
   void set(const Index &idx, std::string_view data) {
     I(idx); // zero is not valid
     if (unlikely(!loaded))
       reload();
     clean = false;
     auto wid = names.get_id(data);
-    if(wid==0) {
-      wid = names.create_id(data);
+    if (Unique) {
+      if(wid==0) {
+        wid = names.create_id(data, idx);
+        idx2w[idx] = wid;
+      }else{
+        // If this fails. More likely the labels are not unique
+        I(idx2w[idx] == wid);
+      }
+    }else{
+      if(wid==0) {
+        wid = names.create_id(data, idx);
+      }
+      idx2w[idx] = wid;
     }
-
-    idx2w[idx] = wid;
   };
 
   // Create entry, assert if already exists

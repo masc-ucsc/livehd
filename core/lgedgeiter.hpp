@@ -55,7 +55,7 @@ class Fast_edge_iterator {
 public:
   class CFast_edge_iterator {
   public:
-    CFast_edge_iterator(const Index_ID _nid, const LGraph *_g) : nid(_nid), g(_g) {}
+    CFast_edge_iterator(const Index_ID _nid, LGraph *_g) : nid(_nid), g(_g) {}
     CFast_edge_iterator operator++();
     bool operator!=(const CFast_edge_iterator &other) {
       assert(g == other.g);
@@ -65,17 +65,17 @@ public:
 
   private:
     Index_ID                nid;
-    const LGraph *g;
+    LGraph *g;
   };
 
 private:
 protected:
-  const LGraph *g;
+  LGraph *g;
   const Index_ID          b;
 
 public:
   Fast_edge_iterator() = delete;
-  explicit Fast_edge_iterator(const Index_ID _b, const LGraph *_g) : g(_g), b(_b) {}
+  explicit Fast_edge_iterator(const Index_ID _b, LGraph *_g) : g(_g), b(_b) {}
 
   CFast_edge_iterator begin() const { return CFast_edge_iterator(b, g); }
   CFast_edge_iterator end() const { return CFast_edge_iterator(0, g); }  // 0 is end index for iterator
@@ -88,12 +88,12 @@ typedef google::sparse_hash_set<uint64_t>         Deadcode_type;
 class Edge_raw_iterator_base {
 protected:
   Index_ID           nid;
-  const LGraph *g;
+  LGraph *g;
   Frontier_type *    frontier;  // 2G inputs at most
   Pending_type *     pending;   // vertex that cleared the frontier
 
 public:
-  Edge_raw_iterator_base(const Index_ID _nid, const LGraph *_g, Frontier_type *_frontier, Pending_type *_pending)
+  Edge_raw_iterator_base(const Index_ID _nid, LGraph *_g, Frontier_type *_frontier, Pending_type *_pending)
       : nid(_nid), g(_g), frontier(_frontier), pending(_pending) {}
 
   virtual void    add_node(Index_ID nid) = 0;
@@ -132,7 +132,7 @@ class Forward_edge_iterator {
 public:
   class CForward_edge_iterator : public Edge_raw_iterator_base {
   public:
-    CForward_edge_iterator(const Index_ID _nid, const LGraph *_g, Frontier_type *_frontier, Pending_type *_pending)
+    CForward_edge_iterator(const Index_ID _nid, LGraph *_g, Frontier_type *_frontier, Pending_type *_pending)
         : Edge_raw_iterator_base(_nid, _g, _frontier, _pending) {}
 
     bool operator!=(const CForward_edge_iterator &other) {
@@ -156,13 +156,13 @@ public:
 
 private:
 protected:
-  const LGraph *g;
+  LGraph *g;
   Frontier_type      frontier;  // 2G inputs at most
   Pending_type       pending;   // vertex that cleared the frontier
 
 public:
   Forward_edge_iterator() = delete;
-  explicit Forward_edge_iterator(const LGraph *_g) : g(_g) {
+  explicit Forward_edge_iterator(LGraph *_g) : g(_g) {
     frontier.set_empty_key(0);      // 0 is not allowed as key
     frontier.set_deleted_key(128);  // 128 is not allowed as key (4KB aligned)
     // frontier.resize(32+g->size()/16);
@@ -181,7 +181,7 @@ public:
     Deadcode_type global_visited;
 
   public:
-    CBackward_edge_iterator(const Index_ID _nid, const LGraph *_g, Frontier_type *_frontier, Pending_type *_pending)
+    CBackward_edge_iterator(const Index_ID _nid, LGraph *_g, Frontier_type *_frontier, Pending_type *_pending)
         : Edge_raw_iterator_base(_nid, _g, _frontier, _pending) {}
 
     bool operator!=(const CBackward_edge_iterator &other) {
@@ -213,13 +213,13 @@ public:
 
 private:
 protected:
-  const LGraph *g;
+  LGraph *g;
   Frontier_type      frontier;  // 2G inputs at most
   Pending_type       pending;   // vertex that cleared the frontier
 
 public:
   Backward_edge_iterator() = delete;
-  explicit Backward_edge_iterator(const LGraph *_g) : g(_g) {
+  explicit Backward_edge_iterator(LGraph *_g) : g(_g) {
     frontier.set_empty_key(0);      // 0 is not allowed as key
     frontier.set_deleted_key(128);  // 128 is not allowed as key (4KB aligned)
     frontier.resize(128);           // FIXME: do average or gsize ratio

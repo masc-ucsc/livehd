@@ -30,9 +30,9 @@ void LGraph_Node_Type::reload() {
 
     Index_ID nid = ni.get_nid();
 
-    if (node_type_get(nid).op == U32Const_Op || node_type_get(nid).op == StrConst_Op) {
+    if (get_type(nid).op == U32Const_Op || get_type(nid).op == StrConst_Op) {
       const_nodes.set_bit(nid);
-    } else if (node_type_get(nid).op == SubGraph_Op) {
+    } else if (get_type(nid).op == SubGraph_Op) {
       sub_graph_nodes.set_bit(nid);
     }
   }
@@ -45,7 +45,7 @@ void LGraph_Node_Type::sync() {
   // FIXME: const_nodes and sub_graph_nodes SERIALIZATION???
 }
 
-void LGraph_Node_Type::node_type_set(Index_ID nid, Node_Type_Op op) {
+void LGraph_Node_Type::set_type(Index_ID nid, Node_Type_Op op) {
   I(nid < node_type_table.size());
   I(node_internal[nid].is_node_state());
   I(node_internal[nid].is_master_root());
@@ -56,7 +56,7 @@ void LGraph_Node_Type::node_type_set(Index_ID nid, Node_Type_Op op) {
   node_type_table[node_internal[nid].get_nid()] = op;
 }
 
-void LGraph_Node_Type::node_subgraph_set(Index_ID nid, Lg_type_id subgraphid) {
+void LGraph_Node_Type::set_type_subgraph(Index_ID nid, Lg_type_id subgraphid) {
   I(nid < node_type_table.size());
   I(node_internal[nid].is_node_state());
 
@@ -68,7 +68,7 @@ void LGraph_Node_Type::node_subgraph_set(Index_ID nid, Lg_type_id subgraphid) {
   node_type_table[node_internal[nid].get_nid()] = (Node_Type_Op)(SubGraphMin_Op + subgraphid);
 }
 
-Lg_type_id LGraph_Node_Type::subgraph_id_get(Index_ID nid) const {
+Lg_type_id LGraph_Node_Type::get_type_subgraph(Index_ID nid) const {
   I(nid < node_type_table.size());
   I(node_internal[nid].is_node_state());
 
@@ -220,7 +220,7 @@ std::string_view LGraph_Node_Type::node_const_value_get(Index_ID nid) const {
   return get_constant(node_type_table[node_internal[nid].get_nid()] - StrConstMin_Op);
 }
 
-const Node_Type &LGraph_Node_Type::node_type_get(Index_ID nid) const {
+const Node_Type &LGraph_Node_Type::get_type(Index_ID nid) const {
   I(nid < node_type_table.size());
   I(node_internal[nid].is_node_state());
   I(node_internal[nid].is_master_root());
