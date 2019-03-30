@@ -14,7 +14,6 @@
 #include "lgraphbase.hpp"
 #include "nodebitwidth.hpp"
 #include "nodedelay.hpp"
-#include "nodeplace.hpp"
 #include "nodesrcloc.hpp"
 #include "node_type_base.hpp"
 #include "node_type.hpp"
@@ -31,7 +30,6 @@
 class LGraph : public LGraph_Node_Delay,
                public LGraph_Node_bitwidth,
                public LGraph_Node_Src_Loc,
-               public LGraph_Node_Place,
                public LGraph_Node_Type
 {
 private:

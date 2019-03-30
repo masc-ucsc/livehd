@@ -9,6 +9,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
+#include "annotate.hpp"
 
 using testing::HasSubstr;
 
@@ -35,7 +36,7 @@ protected:
     //---------------------------------------------------
     // Create graphs input/outputs
     auto top_a = top->add_graph_input("a", 10, 0);
-    auto top_b = top->add_graph_input("b", 10, 0);
+    auto top_b = top->add_graph_input("b", 10, 3);
     auto top_z = top->add_graph_output("z", 1, 0);
     auto top_y = top->add_graph_output("Y", 10, 0);
     auto top_s2_out = top->add_graph_output("s2_out", 1, 0);
@@ -122,3 +123,56 @@ TEST_F(Setup_graphs_test, each_sub_graph) {
   EXPECT_TRUE(true);
 }
 
+TEST_F(Setup_graphs_test, annotate1) {
+
+  for(const auto &nid:top->forward()) {
+    auto node = Node(top,0,Node::Compact(nid));
+    for(const auto &out_edge : node.out_edges()) {
+      auto dpin = out_edge.driver;
+      EXPECT_EQ(dpin.get_node().get_place().get_x(),0);
+      EXPECT_EQ(dpin.get_node().get_place().get_y(),0);
+      if (dpin.has_name() && dpin.get_name() == "b")
+        EXPECT_EQ(dpin.get_offset(),3);
+      else
+        EXPECT_EQ(dpin.get_offset(),0);
+    }
+  }
+
+  int x_val = 0;
+  int y_val = 0;
+  for(const auto &nid:top->forward()) {
+    auto node = Node(top,0,Node::Compact(nid));
+    x_val++;
+    y_val+=3;
+
+    EXPECT_TRUE(!node.has_place());
+
+    auto *place1 = node.ref_place();
+    place1->replace(x_val,y_val);
+    EXPECT_EQ(place1->get_x(), x_val);
+
+    auto *place2 = node.ref_place();
+    EXPECT_EQ(place2->get_x(), x_val);
+
+    auto place3 = node.get_place();
+    EXPECT_EQ(place3.get_x(), x_val);
+
+    auto &place4 = node.get_place();
+    EXPECT_EQ(place4.get_x(), x_val);
+    EXPECT_EQ(&place4,place1);
+    EXPECT_EQ(&place4,place2);
+  }
+
+  x_val = 0;
+  y_val = 0;
+  for(const auto &nid:top->forward()) {
+    auto node = Node(top,0,Node::Compact(nid));
+    x_val++;
+    y_val+=3;
+    EXPECT_TRUE(node.has_place());
+    EXPECT_EQ(node.get_place().get_x(), x_val);
+    EXPECT_EQ(node.ref_place()->get_y(), y_val);
+  }
+
+  EXPECT_TRUE(true);
+}

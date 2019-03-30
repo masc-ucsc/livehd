@@ -5,6 +5,8 @@
 
 #include "node_pin.hpp"
 
+class Node_place;
+
 using XEdge_iterator = std::vector<XEdge>;
 
 class LGraph;
@@ -103,6 +105,10 @@ public:
   void set_name(std::string_view iname);
   std::string_view get_name() const;
   bool has_name() const;
+
+  const Node_place &get_place() const;
+  Node_place *ref_place();
+  bool has_place() const;
 
   // END ATTRIBUTE ACCESSORS
 };

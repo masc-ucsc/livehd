@@ -61,7 +61,6 @@ LGraph::LGraph(const std::string &path, const std::string &_name, const std::str
     , LGraph_Node_Delay(path, _name, lg_id())
     , LGraph_Node_bitwidth(path, _name, lg_id())
     , LGraph_Node_Src_Loc(path, _name, lg_id())
-    , LGraph_Node_Place(path, _name, lg_id())
     , LGraph_Node_Type(path, _name, lg_id()) {
   I(_name == get_name());
   if (_clear) {  // Create
@@ -150,7 +149,6 @@ bool LGraph::close() {
 
 void LGraph::reload() {
   LGraph_Base::reload();
-  LGraph_Node_Place::reload();
   LGraph_Node_Delay::reload();
   LGraph_Node_bitwidth::reload();
   LGraph_Node_Src_Loc::reload();
@@ -158,7 +156,6 @@ void LGraph::reload() {
 }
 
 void LGraph::clear() {
-  LGraph_Node_Place::clear();
   LGraph_Node_Delay::clear();
   LGraph_Node_bitwidth::clear();
   LGraph_Node_Src_Loc::clear();
@@ -170,7 +167,6 @@ void LGraph::clear() {
 }
 
 void LGraph::sync() {
-  LGraph_Node_Place::sync();
   LGraph_Node_Delay::sync();
   LGraph_Node_bitwidth::sync();
   LGraph_Node_Src_Loc::sync();
@@ -183,7 +179,6 @@ void LGraph::sync() {
 
 void LGraph::emplace_back() {
   LGraph_Base::emplace_back();
-  LGraph_Node_Place::emplace_back();
   LGraph_Node_Delay::emplace_back();
   LGraph_Node_bitwidth::emplace_back();
   LGraph_Node_Src_Loc::emplace_back();
