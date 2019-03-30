@@ -79,6 +79,28 @@ To run with gdb
     >b Eprp::run
     >r
 
+## Debugging with Yosys verilog code generation
+
+create local yosys binary 
+    
+    git clone https://github.com/YosysHQ/yosys.git
+
+    cd yosys
+
+    make 
+
+launch gdb with this new installed yoys binary and lgraph-yosys plugin
+
+    cd ~/your/work_path/lgraph
+    
+    gdb --args ~/yosys/yosys -m ./bazel-bin/inou/yosys/liblgraph_yosys.so
+
+    (gdb) run
+
+    yosys> lg2yosys -name you_lgraph_name
+
+    set break point at the line of assertion failure 
+
 ## Code coverage for all the tests used
 
     bazel build --collect_code_coverage ...
