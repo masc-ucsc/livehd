@@ -47,7 +47,7 @@ new_git_repository(
 git_repository(
     name = "com_google_absl",
     #build_file = "BUILD.abseil", # relative to external path
-    commit = "febc5ee6a92d0eb7dac1fceaa6c648cf6521b4dc", # March 20, 2019 "7ffbe09f3d85504bd018783bbe1e2c12992fe47c", # Dec 27, 2018
+    commit = "93dfcf74cb5fccae3da07897d8613ae6cab958a0", # April 3, 2019 febc5ee6a92d0eb7dac1fceaa6c648cf6521b4dc", # March 20, 2019 "7ffbe09f3d85504bd018783bbe1e2c12992fe47c", # Dec 27, 2018
     remote = "https://github.com/abseil/abseil-cpp.git",
 )
 new_git_repository(

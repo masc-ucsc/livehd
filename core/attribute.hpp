@@ -155,7 +155,7 @@ public:
   };
 
   // Set data, overwrite if previously set (!Unique)
-  void set(const Index &idx, std::string_view data) {
+  std::string_view set(const Index &idx, std::string_view data) {
     I(idx); // zero is not valid
     if (unlikely(!loaded))
       reload();
@@ -175,6 +175,8 @@ public:
       }
       idx2w[idx] = wid;
     }
+
+    return names.get_name(wid);
   };
 
   // Create entry, assert if already exists

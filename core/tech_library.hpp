@@ -115,14 +115,14 @@ public:
       return false;
   }
 
-  const pin_type get_out_id(std::string_view name) const {
+  const pin_type get_out_pid(std::string_view name) const {
     assert(pname2id.find(name) != pname2id.end());
     pin_type pin_id = pname2id.at(name);
     assert(pins[pin_id].dir == Direction::output);
     return pins[pin_id].io_id;
   }
 
-  const pin_type get_inp_id(std::string_view name) const {
+  const pin_type get_inp_pid(std::string_view name) const {
     assert(pname2id.find(name) != pname2id.end());
     pin_type pin_id = pname2id.at(name);
     assert(pins[pin_id].dir == Direction::input);

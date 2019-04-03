@@ -49,10 +49,27 @@ public:
 
       return *this;
     };
+
+#if 0
+    // Works, but I do not like it
+    Node_pin get_driver(LGraph *_g, Hierarchy_id _hid) const {
+      return Node_pin(_g,_hid, *this, Node_pin_mode::Driver);
+    }
+#endif
   };
   Node_pin() : idx(0), pid(0), g(0), hid(0), sink(false) { }
   Node_pin(LGraph *_g, Hierarchy_id _hid, Compact comp);
   Node_pin(LGraph *_g, Hierarchy_id _hid, Compact comp, Node_pin_mode mode);
+  Node_pin &operator=(const Node_pin &obj) {
+    I(this != &obj); // Do not assing object to itself. works but wastefull
+    g   = obj.g;
+    const_cast<Index_ID&>(idx)     = obj.idx;
+    const_cast<Port_ID&>(pid)      = obj.pid;
+    const_cast<Hierarchy_id&>(hid) = obj.hid;
+    const_cast<bool&>(sink)        = obj.sink;
+
+    return *this;
+  };
 
   Compact get_compact() const {
     return Compact(idx,sink);
@@ -68,6 +85,9 @@ public:
 
   const Port_ID  get_pid()   const { I(idx); return pid;    }
 
+  bool     is_graph_io()  const;
+  bool     is_graph_input()  const;
+  bool     is_graph_output() const;
 
   bool     is_input()  const { I(idx); return sink;  }
   bool     is_output() const { I(idx); return !sink; }
@@ -77,7 +97,14 @@ public:
 
   Node get_node() const;
 
-  XEdge connect_to(const Node_pin &dst);
+  void connect_sink(Node_pin &dst);
+  void connect_driver(Node_pin &dst);
+  void connect(Node_pin &dst) {
+    if (dst.is_sink() && is_driver())
+      return connect_sink(dst);
+    I(dst.is_driver() && is_sink());
+    return connect_driver(dst);
+  }
 
   bool operator==(const Node_pin &other) const { I(idx); I(g == other.g); return (idx == other.idx) && (pid == other.pid) && (sink == other.sink) && (hid == other.hid); }
 
@@ -94,14 +121,18 @@ public:
   //static Node_pin get_out_pin(const Edge_raw *edge_raw);
   //static Node_pin get_inp_pin(const Edge_raw *edge_raw);
 
-  bool is_valid() const { return idx!=0; }
+  bool is_invalid() const { return g==nullptr || idx==0; }
 
   // BEGIN ATTRIBUTE ACCESSORS
 
   uint16_t get_bits() const;
   void     set_bits(uint16_t bits);
 
-  void set_name(std::string_view wname);
+  std::string_view get_type_subgraph_io_name() const;
+  std::string_view get_type_tmap_io_name() const;
+
+  std::string_view set_name(std::string_view wname);
+  std::string_view create_name() const;
   std::string_view get_name() const;
   bool has_name() const;
 

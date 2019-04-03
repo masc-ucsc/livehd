@@ -46,6 +46,7 @@ Node_pin Node::setup_driver_pin(Port_ID pid) {
   Index_ID idx = g->setup_idx_from_pid(nid,pid);
   return Node_pin(g,hid,idx, pid, false);
 }
+
 Node_pin Node::setup_driver_pin() const {
   I(g->get_type(nid).has_single_output());
   return Node_pin(g,hid,nid,0,false);
@@ -57,12 +58,54 @@ void Node::set_type(const Node_Type_Op op) {
   g->set_type(nid,op);
 }
 
+void Node::set_type(const Node_Type_Op op, uint16_t bits) {
+  g->set_type(nid, op);
+
+  setup_driver_pin().set_bits(bits); // bits only possible when the cell has a single output
+}
+
+bool Node::is_type(const Node_Type_Op op) const {
+  return g->get_type(nid).op == op;
+}
+
 void Node::set_type_subgraph(Lg_type_id subid) {
   g->set_type_subgraph(nid,subid);
 }
 
 Lg_type_id Node::get_type_subgraph() const {
   return g->get_type_subgraph(nid);
+}
+
+void Node::set_type_tmap_id(uint32_t tmap_id) {
+  g->set_type_tmap_id(nid,tmap_id);
+}
+
+uint32_t Node::get_type_tmap_id() const {
+  return g->get_type_tmap_id(nid);
+}
+
+const Tech_cell *Node::get_type_tmap_cell() const {
+  return g->get_tlibrary().get_const_cell(g->get_type_tmap_id(nid));
+}
+
+void Node::set_type_const_value(std::string_view str) {
+  g->set_type_const_value(nid, str);
+}
+
+void Node::set_type_const_sview(std::string_view str) {
+  g->set_type_const_sview(nid, str);
+}
+
+void Node::set_type_const_value(uint32_t val) {
+  g->set_type_const_value(nid, val);
+}
+
+uint32_t Node::get_type_const_value() const {
+  return g->get_type_const_value(nid);
+}
+
+std::string_view Node::get_type_const_sview() const {
+  return g->get_type_const_sview(nid);
 }
 
 Node_pin Node::setup_driver_pin(std::string_view name) {
@@ -132,13 +175,55 @@ Node_pin Node::setup_sink_pin() const {
 
 XEdge_iterator Node::inp_edges() const { return g->inp_edges(*this); }
 XEdge_iterator Node::out_edges() const { return g->out_edges(*this); }
+Node_pin_iterator Node::out_connected_pins() const { return g->out_connected_pins(*this); }
 
 void Node::del_node() {
   g->del_node(nid);
 }
 
-void Node::set_name(std::string_view iname) {
-  Ann_node_name::set(*this,iname);
+std::string_view Node::set_name(std::string_view iname) {
+  return Ann_node_name::set(*this,iname);
+}
+
+std::string_view Node::create_name() const {
+  if (Ann_node_name::has(*this))
+    return Ann_node_name::get(*this);
+
+  std::string signature = absl::StrCat("lg_", get_type().get_name());
+
+  if (get_type().op == GraphIO_Op) {
+    absl::StrAppend(&signature, "subid_", get_type_subgraph().value);
+  }else if (get_type().op == TechMap_Op) {
+    const Tech_cell *tcell = get_type_tmap_cell();
+
+    if (tcell) {
+      for(const auto &e:inp_edges()) {
+        if(!e.driver.has_name() && e.driver.get_pid() < tcell->n_outs()) {
+          absl::StrAppend(&signature, "_", tcell->get_name(e.driver.get_pid()));
+        }
+      }
+    }
+  }
+
+  auto nod = Ann_node_name::find(g, signature);
+  if (nod.is_invalid()) {
+    return Ann_node_name::set(*this, signature);
+  }
+
+  for(const auto &dpin:out_connected_pins()) {
+    absl::StrAppend(&signature,"_",dpin.create_name());
+  }
+
+  auto nod2 = Ann_node_name::find(g, signature);
+  if (nod2.is_invalid()) {
+    return Ann_node_name::set(*this, signature);
+  }
+
+  absl::StrAppend(&signature,"_nid", std::to_string(nid)); // OK, add to stop trying
+
+  I(Ann_node_name::find(g, signature).is_invalid());
+
+  return Ann_node_name::set(*this, signature);
 }
 
 std::string_view Node::get_name() const {

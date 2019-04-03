@@ -4,7 +4,8 @@
 #include "lgraphbase.hpp"
 
 Node_Type *                        Node_Type::table[StrConst_Op + 1];
-std::map<std::string, Node_Type *> Node_Type::name2node;
+// std::map<std::string, Node_Type *> Node_Type::name2node;
+absl::flat_hash_map<std::string, Node_Type *> Node_Type::name2node;
 
 Node_Type::_init Node_Type::_static_initializer;
 
@@ -72,10 +73,10 @@ Node_Type &Node_Type::get(Node_Type_Op op) {
   return *table[op];
 }
 
-Node_Type_Op Node_Type::get(const std::string &opname) {
+Node_Type_Op Node_Type::get(std::string_view opname) {
   I(is_type(opname));
   return name2node[opname]->op;
 }
 
-bool Node_Type::is_type(const std::string &opname) { return (name2node.find(opname) != name2node.end()); }
+bool Node_Type::is_type(std::string_view opname) { return (name2node.find(opname) != name2node.end()); }
 

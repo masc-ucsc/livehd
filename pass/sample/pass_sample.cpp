@@ -25,68 +25,27 @@ void Pass_sample::work(Eprp_var &var) {
   Pass_sample pass;
 
   for(const auto &g : var.lgs) {
-    pass.do_work(g);
+    pass.compute_histogram(g);
+    pass.compute_max_depth(g);
   }
 }
 
-void Pass_sample::do_work(const LGraph *g) {
-  LGBench b("pass.sample");
+void Pass_sample::compute_histogram(LGraph *g) {
+  LGBench b("pass.sample.compute_histogram");
 
-#if 0
-  g->each_sub_graph_fast([g](const Index_ID &idx, const Lg_type_id &lgid, std::string_view iname) {
-    fmt::print("1.base:{} idx:{} lgid:{} iname:{}\n",g->get_name(), idx, lgid, iname);
-    return true;
-  });
-
-  g->each_sub_graph_fast([g](const Index_ID &idx, const Lg_type_id &lgid, std::string_view iname) {
-    fmt::print("3.base:{} idx:{} lgid:{} iname:{}\n",g->get_name(), idx, lgid, iname);
-    return true;
-  });
-
-  g->each_sub_graph_fast([g](const Index_ID &idx, const Lg_type_id &lgid, std::string_view iname) {
-    fmt::print("3.base:{} idx:{} lgid:{} iname:{}\n",g->get_name(), idx, lgid, iname);
-  });
-
-  g->each_sub_graph_fast([g](const Index_ID &idx, const Lg_type_id &lgid) {
-    fmt::print("1.base:{} idx:{} lgid:{}\n",g->get_name(), idx, lgid);
-  });
-
-  g->each_sub_graph_fast([g](const Index_ID &idx, const Lg_type_id &lgid) {
-    fmt::print("1.base:{} idx:{} lgid:{}\n",g->get_name(), idx, lgid);
-    return false;
-  });
-
-  std::function<void(const Index_ID &, const Lg_type_id &, std::string_view )> fn = [g](const Index_ID &idx, const Lg_type_id &lgid, std::string_view iname) {
-    fmt::print("2.base:{} idx:{} lgid:{} iname:{}\n",g->get_name(), idx, lgid, iname);
-  };
-  g->each_sub_graph_fast(fn);
-
-  std::function fn2 = [g](const Index_ID &idx, const Lg_type_id &lgid, std::string_view iname) {
-    fmt::print("2.base:{} idx:{} lgid:{} iname:{}\n",g->get_name(), idx, lgid, iname);
-    return false;
-  };
-  g->each_sub_graph_fast(fn2);
-
-  auto fn3 = [g](const Index_ID &idx, const Lg_type_id &lgid) {
-    fmt::print("2.base:{} idx:{} lgid:{}\n",g->get_name(), idx, lgid);
-  };
-  g->each_sub_graph_fast(fn3);
-
-#else
   std::map<std::string, int> histogram;
 
   int cells = 0;
   for(const auto &nid : g->forward()) {
-    cells++;
     const auto &node = g->get_node(nid);
+
+    cells++;
     std::string name = node.get_type().get_name();
-    for(const auto &in_edge : g->inp_edges(nid)) {
-      name.append("_i");
-      name.append(std::to_string(in_edge.get_bits()));
+    for(const auto &edge : node.inp_edges()) {
+      absl::StrAppend(&name, "_i", std::to_string(edge.get_bits()));
     }
-    for(const auto &out_edge : g->out_edges(nid)) {
-      name.append("_o");
-      name.append(std::to_string(out_edge.get_bits()));
+    for(const auto &edge : node.out_edges()) {
+      absl::StrAppend(&name, "_o", std::to_string(edge.get_bits()));
     }
 
     histogram[name]++;
@@ -97,5 +56,51 @@ void Pass_sample::do_work(const LGraph *g) {
   }
 
   fmt::print("Pass: cells {}\n", cells);
-#endif
 }
+
+void Pass_sample::max_depth(LGraph *g) {
+  LGBench b("pass.sample.max_depth");
+
+  absl::flat_hash_map<Node::Compact, int>  depth;
+
+  int max_depth = 0;
+  for(const auto &nid : g->forward()) {
+    const auto &node = g->get_node(nid);
+
+    int local_max = 0;
+    for(const auto &edge : node.inp_edges()) {
+      int d = depth[edge.src.get_compact()];
+      if (local_max<d)
+        local_max = d;
+    }
+    depth[node.get_compact()] = local_max;
+  }
+
+  fmt::print("Pass: max_depth {}\n", max_depth);
+}
+
+void Pass_sample::annotate_placement(LGraph *g) {
+  LGBench b("pass.sample.replace_inline");
+
+  int x_pos = 0;
+
+  Ann_node_place::clear(g); // Not needed, but clears all the previous placement info
+
+  for(const auto &nid : g->backward()) {
+    const auto &node = g->get_node(nid);
+
+    Node_place p(x_pos++,0);
+    Ann_node_place::set(node, p);
+  }
+
+  for(const auto &nid : g->fast()) {
+    const auto &node = g->get_node(nid);
+
+    auto &place = Ann_node_place::get(node);
+    fmt::print("cell {} placed at x:{}\n",node.create_name(), place.get_x());
+  }
+
+  fmt::print("Pass: max_depth {}\n", max_depth);
+}
+
+

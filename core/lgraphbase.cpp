@@ -452,22 +452,6 @@ Index_ID LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid
   Index_ID src_nid = node_internal[src_idx].get_master_root_nid();
   Index_ID dst_nid = node_internal[dst_idx].get_master_root_nid();
 
-#if 0
-  // WARNING: Graph IO have alphabetical port IDs assigned to be mapped between
-  // graphs. It should not use local port b
-  if (node_internal[src_idx].is_graph_io()) {
-    dst_pid = 0;
-  } else {
-    I(node_internal[src_nid].get_dst_pid() == 0);
-  }
-
-  if (node_internal[dst_idx].is_graph_io()) {
-    inp_pid = 0;
-  } else {
-    I(node_internal[dst_nid].get_dst_pid() == 0);
-  }
-#endif
-
   I(node_internal[dst_idx].is_node_state());
   I(node_internal[src_idx].is_node_state());
 
@@ -489,7 +473,6 @@ Index_ID LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid
   I(node_internal[root_idx].is_root());
 
   int o = node_internal[idx].next_free_output_pos();
-
 
   sedge = (SEdge_Internal *)&node_internal[idx].sedge[o];
   sused = sedge->set(dst_idx, inp_pid, false);

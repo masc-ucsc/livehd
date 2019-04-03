@@ -8,10 +8,6 @@ LGraph_Node_Type::LGraph_Node_Type(const std::string &path, const std::string &n
     , consts(path + "/lgraph_" + std::to_string(lgid) + "_consts")
     , node_type_table(path + "/lgraph_" + std::to_string(lgid) + "_type") {}
 
-std::string_view LGraph_Node_Type::get_constant(Const_ID const_id) const { return consts.get_name(const_id); }
-
-void LGraph_Node_Type::emplace_back() { node_type_table.emplace_back(Invalid_Op); }
-
 void LGraph_Node_Type::clear() {
   node_type_table.clear();
   consts.clear();
@@ -45,6 +41,8 @@ void LGraph_Node_Type::sync() {
   // FIXME: const_nodes and sub_graph_nodes SERIALIZATION???
 }
 
+void LGraph_Node_Type::emplace_back() { node_type_table.emplace_back(Invalid_Op); }
+
 void LGraph_Node_Type::set_type(Index_ID nid, Node_Type_Op op) {
   I(nid < node_type_table.size());
   I(node_internal[nid].is_node_state());
@@ -54,6 +52,21 @@ void LGraph_Node_Type::set_type(Index_ID nid, Node_Type_Op op) {
   I(node_internal[nid].get_nid() < node_type_table.size());
 
   node_type_table[node_internal[nid].get_nid()] = op;
+}
+
+const Node_Type &LGraph_Node_Type::get_type(Index_ID nid) const {
+  I(nid < node_type_table.size());
+  I(node_internal[nid].is_node_state());
+  I(node_internal[nid].is_master_root());
+
+  Node_Type_Op op = node_type_table[node_internal[nid].get_nid()];
+
+  if (op >= SubGraphMin_Op && op <= SubGraphMax_Op) op = SubGraph_Op;
+  if (op >= TechMapMin_Op  && op <= TechMapMax_Op ) op = TechMap_Op;
+  if (op >= U32ConstMin_Op && op <= U32ConstMax_Op) op = U32Const_Op;
+  if (op >= StrConstMin_Op && op <= StrConstMax_Op) op = StrConst_Op;
+
+  return Node_Type::get(op);
 }
 
 void LGraph_Node_Type::set_type_subgraph(Index_ID nid, Lg_type_id subgraphid) {
@@ -81,7 +94,7 @@ Lg_type_id LGraph_Node_Type::get_type_subgraph(Index_ID nid) const {
   return Lg_type_id((uint32_t)(node_type_table[node_internal[nid].get_nid()] - SubGraphMin_Op));
 }
 
-void LGraph_Node_Type::node_tmap_set(Index_ID nid, uint32_t tmapid) {
+void LGraph_Node_Type::set_type_tmap_id(Index_ID nid, uint32_t tmapid) {
   I(nid < node_type_table.size());
   I(node_internal[nid].is_node_state());
 
@@ -91,7 +104,7 @@ void LGraph_Node_Type::node_tmap_set(Index_ID nid, uint32_t tmapid) {
   node_type_table[node_internal[nid].get_nid()] = (Node_Type_Op)(TechMapMin_Op + tmapid);
 }
 
-uint32_t LGraph_Node_Type::tmap_id_get(Index_ID nid) const {
+uint32_t LGraph_Node_Type::get_type_tmap_id(Index_ID nid) const {
   I(nid < node_type_table.size());
   I(node_internal[nid].is_node_state());
 
@@ -104,7 +117,29 @@ uint32_t LGraph_Node_Type::tmap_id_get(Index_ID nid) const {
   return (uint32_t)(node_type_table[node_internal[nid].get_nid()] - TechMapMin_Op);
 }
 
-void LGraph_Node_Type::node_u32type_set(Index_ID nid, uint32_t value) {
+void LGraph_Node_Type::set_type_const_value(Index_ID nid, std::string_view value) {
+
+  for (auto &digit : value) {
+    I(digit == '0' || digit == '1' || digit == 'z' || digit == 'x');
+  }
+
+  set_type_const_sview(nid,value);
+}
+
+std::string_view LGraph_Node_Type::get_type_const_sview(Index_ID nid) const {
+  I(nid < node_type_table.size());
+  I(node_internal[nid].is_node_state());
+
+  I(node_internal[nid].get_nid() < node_type_table.size());
+
+  // only supported for constants
+  I(node_type_table[node_internal[nid].get_nid()] >= StrConstMin_Op);
+  I(node_type_table[node_internal[nid].get_nid()] <= StrConstMax_Op);
+
+  return get_constant(node_type_table[node_internal[nid].get_nid()] - StrConstMin_Op);
+}
+
+void LGraph_Node_Type::set_type_const_value(Index_ID nid, uint32_t value) {
   I(nid < node_type_table.size());
   I(node_internal[nid].is_node_state());
 
@@ -119,7 +154,42 @@ void LGraph_Node_Type::node_u32type_set(Index_ID nid, uint32_t value) {
   node_type_table[node_internal[nid].get_nid()] = (Node_Type_Op)(U32ConstMin_Op + value);
 }
 
-Index_ID LGraph_Node_Type::node_u32type_find(uint32_t value) const {
+Index_ID LGraph_Node_Type::find_type_const_sview(std::string_view value) const {
+
+  auto id = consts.get_id(value);
+  if (id==0)
+    return 0;
+
+#if 0
+  bool all_one_zero = true;
+  for(auto &c:value) {
+    if (c=='0' && c=='1')
+      continue;
+
+    all_one_zero = false;
+    break;
+  }
+#endif
+
+  auto op = static_cast<Node_Type_Op>(StrConstMin_Op + id);
+
+  const bm::bvector<> &bm  = const_nodes;
+  Index_ID             cid = bm.get_first();
+  while (cid) {
+    I(cid);
+    I(node_internal[cid].is_node_state());
+    I(node_internal[cid].is_master_root());
+
+    if (op == node_type_table[cid])
+      return cid;
+
+    cid = bm.get_next(cid);
+  }
+
+  return 0;
+}
+
+Index_ID LGraph_Node_Type::find_type_const_value(uint32_t value) const {
 
   // FIXME: This should be fast, but in a bad case we can have LOTS of
   // constants in a graph. Then, it is pretty bad. This should be weird but
@@ -143,20 +213,7 @@ Index_ID LGraph_Node_Type::node_u32type_find(uint32_t value) const {
   return 0;
 }
 
-uint32_t LGraph_Node_Type::node_value_get(Index_ID nid) const {
-  I(nid < node_type_table.size());
-  I(node_internal[nid].is_node_state());
-
-  I(node_internal[nid].get_nid() < node_type_table.size());
-
-  // only supported for constants
-  I(node_type_table[node_internal[nid].get_nid()] >= U32ConstMin_Op);
-  I(node_type_table[node_internal[nid].get_nid()] <= U32ConstMax_Op);
-
-  return (uint32_t)(node_type_table[node_internal[nid].get_nid()] - U32ConstMin_Op);
-}
-
-void LGraph_Node_Type::node_const_type_set_string(Index_ID nid, std::string_view value) {
+void LGraph_Node_Type::set_type_const_sview(Index_ID nid, std::string_view value) {
 
   I(nid < node_type_table.size());
   I(node_internal[nid].is_node_state());
@@ -174,64 +231,18 @@ void LGraph_Node_Type::node_const_type_set_string(Index_ID nid, std::string_view
   node_type_table[node_internal[nid].get_nid()] = static_cast<Node_Type_Op>(StrConstMin_Op + char_id);
 }
 
-Index_ID LGraph_Node_Type::node_const_string_find(std::string_view value) const {
-
-  auto id = consts.get_id(value);
-  if (id==0)
-    return 0;
-
-  auto op = static_cast<Node_Type_Op>(StrConstMin_Op + id);
-
-  const bm::bvector<> &bm  = const_nodes;
-  Index_ID             cid = bm.get_first();
-  while (cid) {
-    I(cid);
-    I(node_internal[cid].is_node_state());
-    I(node_internal[cid].is_master_root());
-
-    if (op == node_type_table[cid])
-      return cid;
-
-    cid = bm.get_next(cid);
-  }
-
-  return 0;
-}
-
-void LGraph_Node_Type::node_const_type_set(Index_ID nid, std::string_view value) {
-
-  for (auto &digit : value) {
-    I(digit == '0' || digit == '1' || digit == 'z' || digit == 'x');
-  }
-
-  node_const_type_set_string(nid,value);
-}
-
-std::string_view LGraph_Node_Type::node_const_value_get(Index_ID nid) const {
+uint32_t LGraph_Node_Type::get_type_const_value(Index_ID nid) const {
   I(nid < node_type_table.size());
   I(node_internal[nid].is_node_state());
 
   I(node_internal[nid].get_nid() < node_type_table.size());
 
   // only supported for constants
-  I(node_type_table[node_internal[nid].get_nid()] >= StrConstMin_Op);
-  I(node_type_table[node_internal[nid].get_nid()] <= StrConstMax_Op);
+  I(node_type_table[node_internal[nid].get_nid()] >= U32ConstMin_Op);
+  I(node_type_table[node_internal[nid].get_nid()] <= U32ConstMax_Op);
 
-  return get_constant(node_type_table[node_internal[nid].get_nid()] - StrConstMin_Op);
+  return (uint32_t)(node_type_table[node_internal[nid].get_nid()] - U32ConstMin_Op);
 }
 
-const Node_Type &LGraph_Node_Type::get_type(Index_ID nid) const {
-  I(nid < node_type_table.size());
-  I(node_internal[nid].is_node_state());
-  I(node_internal[nid].is_master_root());
-
-  Node_Type_Op op = node_type_table[node_internal[nid].get_nid()];
-
-  if (op >= SubGraphMin_Op && op <= SubGraphMax_Op) op = SubGraph_Op;
-  if (op >= TechMapMin_Op  && op <= TechMapMax_Op ) op = TechMap_Op;
-  if (op >= U32ConstMin_Op && op <= U32ConstMax_Op) op = U32Const_Op;
-  if (op >= StrConstMin_Op && op <= StrConstMax_Op) op = StrConst_Op;
-
-  return Node_Type::get(op);
-}
+std::string_view LGraph_Node_Type::get_constant(Const_ID const_id) const { return consts.get_name(const_id); }
 
