@@ -9,6 +9,7 @@
 #include "pass.hpp"
 #include "inou.hpp"
 #include "lgraph.hpp"
+#include "annotate.hpp"
 
 #include "kernel/rtlil.h"
 #include "kernel/yosys.h"
@@ -22,19 +23,11 @@ private:
   RTLIL::Wire *  get_wire(const Node_pin &pin);
 
   void to_yosys(const LGraph *g);
-  struct My_pin_hash {
-    size_t operator()(const std::pair<Index_ID, Port_ID> &obj) const {
-      size_t v= obj.first.value;
-      v <<=12;
-      v ^=obj.second;
-      return v;
-    }
-  };
 
-  absl::flat_hash_map<Index_ID, RTLIL::Wire *                    , Index_ID_hash>  input_map;
-  absl::flat_hash_map<Index_ID, RTLIL::Wire *                    , Index_ID_hash>  output_map;
-  absl::flat_hash_map<std::pair<Index_ID, Port_ID>, RTLIL::Wire *, My_pin_hash>    cell_output_map;
-  absl::flat_hash_map<Index_ID, std::vector<RTLIL::SigChunk>     , Index_ID_hash>  mem_output_map;
+  absl::flat_hash_map<Node_pin::Compact, RTLIL::Wire *               >  input_map;
+  absl::flat_hash_map<Node_pin::Compact, RTLIL::Wire *               >  output_map;
+  absl::flat_hash_map<Node_pin::Compact, RTLIL::Wire *               >  cell_output_map;
+  absl::flat_hash_map<Node::Compact    , std::vector<RTLIL::SigChunk>>  mem_output_map;
 
   std::set<const LGraph *> _subgraphs;
 
@@ -43,20 +36,26 @@ private:
 
   bool hierarchy;
 
-  RTLIL::IdString next_id(const LGraph *g) {
+  std::string unique_name(LGraph *g, const std::string &test) {
     std::string tmp;
-    do {
-      tmp = absl::StrCat("\\lg_", std::to_string(ids++));
-    } while(g->has_wirename(tmp));
-    return RTLIL::IdString(tmp);
+    assert(test.size()>=1);
+    if(test[0] == '\\')
+      tmp = &test[1];
+    else
+      tmp = test;
+
+    while(true) {
+
+      if (!Ann_node_pin_name::find(g,tmp).is_invalid())
+        if (!Ann_node_name::find(g,tmp).is_invalid())
+          return tmp;
+
+      tmp = absl::StrCat(test, "_", std::to_string(ids++));
+    }
   }
 
-  std::string next_wire(const LGraph *g) {
-    std::string tmp;
-    do {
-      tmp = absl::StrCat("lg_sw_", std::to_string(spare_wire++));
-    } while(g->has_wirename(tmp));
-    return tmp;
+  RTLIL::IdString next_id(LGraph *lg) {
+    return RTLIL::IdString(absl::StrCat("\\",unique_name(lg,"lg")));
   }
 
   // FIXME: any way of merging these two?
@@ -67,12 +66,12 @@ private:
 
   RTLIL::Wire *create_tree(const LGraph *g, std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod, add_cell_fnc_sign add_cell, bool sign, RTLIL::Wire *result_wire);
 
-  RTLIL::Wire *create_io_wire(const LGraph *g, const Node_pin &pin, RTLIL::Module *module);
+  RTLIL::Wire *create_io_wire(Node_pin &pin, RTLIL::Module *module);
   void         create_wires(const LGraph *g, RTLIL::Module *module);
 
-  void create_blackbox(const LGraph &subgraph, RTLIL::Design *design);
-  void create_subgraph_outputs(const LGraph *g, RTLIL::Module *module, Index_ID idx);
-  void create_subgraph(const LGraph *g, RTLIL::Module *module, Index_ID idx);
+  void create_blackbox(const LGraph *subgraph, RTLIL::Design *design);
+  void create_subgraph_outputs(const LGraph *g, RTLIL::Module *module, Node &node);
+  void create_subgraph(const LGraph *g, RTLIL::Module *module, Node &node);
   void create_memory(const LGraph *g, RTLIL::Module *module, Index_ID idx);
 
 protected:
@@ -107,7 +106,7 @@ public:
     }
   }*/
 
-  const std::set<const LGraph *> subgraphs() const {
+  const std::set<const LGraph *> &subgraphs() const {
     return _subgraphs;
   }
 

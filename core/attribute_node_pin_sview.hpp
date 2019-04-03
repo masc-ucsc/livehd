@@ -25,7 +25,7 @@ class Attribute_node_pin_sview_type {
   };
 
 public:
-  static void set(const Node_pin &pin, std::string_view wname) {
+  static std::string_view set(const Node_pin &pin, std::string_view wname) {
     GI(Mode == Node_pin_mode::Driver, pin.is_driver());
     GI(Mode == Node_pin_mode::Sink  , pin.is_sink());
 
@@ -41,7 +41,7 @@ public:
 
     I(!table[pos]->has(pin.get_compact(Mode))); // Do not double insert (why???) waste or bug with Name alias!!
 
-    table[pos]->set(pin.get_compact(Mode), wname);
+    return table[pos]->set(pin.get_compact(Mode), wname);
   };
 
   static std::string_view get(const Node_pin &pin) {
@@ -70,6 +70,8 @@ public:
 
   static Node_pin find(LGraph *g, std::string_view name) {
 
+    I(Mode != Node_pin_mode::Both); // not supported mode for find
+
     size_t pos = g->get_lgid().value;
     if (is_invalid(pos))
       return Node_pin();
@@ -79,7 +81,7 @@ public:
       return Node_pin();
     }
 
-    auto pin = Node_pin(g, 0, Node_pin::Compact(raw,Mode));
+    auto pin = Node_pin(g, 0, Node_pin::Compact(raw,Mode == Node_pin_mode::Sink));
 
     GI(Mode == Node_pin_mode::Driver, pin.is_driver());
     GI(Mode == Node_pin_mode::Sink  , pin.is_sink());

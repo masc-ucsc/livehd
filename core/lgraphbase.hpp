@@ -72,6 +72,27 @@ protected:
   void del_node(Index_ID idx);
   void del_edge(const Edge_raw *edge_raw);
 
+  bool is_graph_io(Index_ID idx) const {
+    I(static_cast<Index_ID>(node_internal.size()) > idx);
+    return node_internal[idx].is_graph_io();
+  }
+
+  bool is_graph_input(Index_ID idx) const {
+    I(static_cast<Index_ID>(node_internal.size()) > idx);
+    return node_internal[idx].is_graph_io_input();
+  }
+
+  bool is_graph_output(Index_ID idx) const {
+    I(static_cast<Index_ID>(node_internal.size()) > idx);
+    return node_internal[idx].is_graph_io_output();
+  }
+
+  // Graph input/output functions
+  bool is_graph_input(std::string_view name) const { return input_array.get_id(name) != 0; }
+  bool is_graph_output(std::string_view name) const { return output_array.get_id(name) != 0; }
+
+  Index_ID get_master_nid(Index_ID idx) const { return node_internal[idx].get_master_root_nid(); }
+
 public:
   LGraph_Base() = delete;
 

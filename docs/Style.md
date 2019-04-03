@@ -239,3 +239,24 @@ std::vector<LGraph *> Inou_yaml::generate() {
   }
 ```
 
+## Check if a string starts with a substring
+
+Use the STL rfind to handle the common case of finding a sub-string. Even for when checking if a string starts with a given substring.
+
+```cpp
+  // If string starts with a given substring
+  std::string str1 = "start333";
+  std::string str2 = "xstart333";
+  I(str1.rfind("start") == 0);
+  I(str2.rfind("start") != 0);
+
+  // For single character checks
+  I(str1[0] == 's');
+  I(str2[1] == 's');
+
+  // If the substring exists
+  I(str1.rfind("start") != std::string::npos);
+  I(str2.rfind("start") != std::string::npos);
+  I(str2.rfind("potato") == std::string::npos);
+```
+

@@ -215,10 +215,10 @@ TEST_F(Setup_graphs_test, hierarchy_twice) {
 TEST_F(Setup_graphs_test, No_each_input) {
 
   for(auto &parent:lgs) {
-    parent->each_graph_input([parent](const Node_pin &pin) {
-      EXPECT_TRUE(parent->is_graph_input(pin));
-      EXPECT_TRUE(!parent->is_graph_output(pin));
-      EXPECT_FALSE(parent->has_inputs(pin));
+    parent->each_graph_input([](Node_pin &pin) {
+      EXPECT_TRUE(pin.is_graph_input());
+      EXPECT_TRUE(!pin.is_graph_output());
+      EXPECT_FALSE(pin.get_node().has_inputs());
     });
   }
 
@@ -228,10 +228,10 @@ TEST_F(Setup_graphs_test, No_each_input) {
 TEST_F(Setup_graphs_test, No_each_output) {
 
   for(auto &parent:lgs) {
-    parent->each_graph_output([parent](const Node_pin &pin) {
-      EXPECT_TRUE(!parent->is_graph_input(pin));
-      EXPECT_TRUE(parent->is_graph_output(pin));
-      EXPECT_FALSE(parent->has_outputs(pin));
+    parent->each_graph_output([](Node_pin &pin) {
+      EXPECT_TRUE(!pin.is_graph_input());
+      EXPECT_TRUE(pin.is_graph_output());
+      EXPECT_FALSE(pin.get_node().has_outputs());
     });
   }
 

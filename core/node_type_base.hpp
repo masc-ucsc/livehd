@@ -6,6 +6,8 @@
 #include <string_view>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
+
 #include "lgraph_base_core.hpp"
 
 // nodetype should be at meta directory but the node type is needed all over in the base class. It may be good to integrate nodetype
@@ -75,7 +77,7 @@ enum Node_Type_Op : uint64_t {
 class Node_Type {
 private:
   static Node_Type *                        table[StrConst_Op + 1];
-  static std::map<std::string, Node_Type *> name2node;
+  static absl::flat_hash_map<std::string, Node_Type *> name2node;
 
 protected:
   const std::string name;
@@ -88,7 +90,7 @@ protected:
 
   bool may_gen_sign;
 
-  Node_Type(const std::string &_name, Node_Type_Op _op, bool _pipelined) : name(_name), pipelined(_pipelined), op(_op) {
+  Node_Type(std::string_view _name, Node_Type_Op _op, bool _pipelined) : name(_name), pipelined(_pipelined), op(_op) {
     may_gen_sign = false;
   };
 
@@ -110,10 +112,10 @@ public:
   bool has_may_gen_sign() const { return may_gen_sign; }
 
   static Node_Type &  get(Node_Type_Op op);
-  static Node_Type_Op get(const std::string &opname);
-  static bool         is_type(const std::string &opname);
+  static Node_Type_Op get(std::string_view opname);
+  static bool         is_type(std::string_view opname);
 
-  const std::string &get_name() const { return name; }
+  std::string_view get_name() const { return name; }
 
   Port_ID get_input_match(std::string_view str) const {
     if (inputs.empty()) // blackbox, subgraph...

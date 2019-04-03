@@ -245,6 +245,39 @@ Node_pin LGraph::add_graph_output(std::string_view str, uint16_t bits, uint16_t 
   return pin;
 }
 
+Node_pin_iterator LGraph::out_connected_pins(const Node &node) const {
+  I(node.get_lgraph() == this);
+  Node_pin_iterator xiter;
+
+  Index_ID idx2 = node.get_nid();
+  I(node_internal[idx2].is_master_root());
+
+  absl::flat_hash_set<uint16_t> visited;
+
+  while (true) {
+    auto n = node_internal[idx2].get_num_local_outputs();
+    if (n>0) {
+      if (node_internal[idx2].is_root()) {
+        xiter.emplace_back(Node_pin(node.get_lgraph(),node.get_hid(), idx2, node_internal[idx2].get_dst_pid(), false));
+        visited.insert(node_internal[idx2].get_dst_pid());
+      }else{
+        if (visited.find(node_internal[idx2].get_dst_pid()) == visited.end()) {
+          auto master_nid = node_internal[idx2].get_nid();
+          xiter.emplace_back(Node_pin(node.get_lgraph(),node.get_hid(), master_nid, node_internal[idx2].get_dst_pid(), false));
+        }
+      }
+    }
+
+    if (node_internal[idx2].is_last_state()) break;
+
+    Index_ID tmp = node_internal[idx2].get_next();
+    I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
+    idx2 = tmp;
+  }
+
+  return xiter;
+}
+
 XEdge_iterator LGraph::out_edges(const Node &node) const {
   I(node.get_lgraph() == this);
   XEdge_iterator xiter;
@@ -317,12 +350,12 @@ Node LGraph::create_node(Node_Type_Op op, uint16_t bits) {
   return node;
 }
 
-Node LGraph::create_node_u32(uint32_t value, uint16_t bits) {
+Node LGraph::create_node_const(uint32_t value, uint16_t bits) {
 
-  Index_ID nid = node_u32type_find(value);
+  Index_ID nid = find_type_const_value(value);
   if (nid==0 || node_internal[nid].get_bits() != bits) {
     nid = create_node_int();
-    node_u32type_set(nid, value);
+    set_type_const_value(nid, value);
 
     set_bits(nid, bits);
   }
@@ -335,10 +368,10 @@ Node LGraph::create_node_u32(uint32_t value, uint16_t bits) {
 
 Node LGraph::create_node_const(std::string_view value) {
 
-  Index_ID nid = node_const_string_find(value);
+  Index_ID nid = find_type_const_sview(value);
   if (nid==0) {
     nid = create_node_int();
-    node_const_type_set_string(nid, value);
+    set_type_const_sview(nid, value);
   }
 
   return Node(this,0,nid);
@@ -354,10 +387,10 @@ Node LGraph::create_node_sub(Lg_type_id sub_id) {
 }
 
 Node LGraph::create_node_const(std::string_view value, uint16_t bits) {
-  Index_ID nid = node_const_string_find(value);
+  Index_ID nid = find_type_const_sview(value);
   if (nid==0 || node_internal[nid].get_bits() != bits) {
     nid = create_node_int();
-    node_const_type_set_string(nid, value);
+    set_type_const_sview(nid, value);
     set_bits(nid,bits);
   }
 
@@ -475,20 +508,4 @@ const LGraph::Hierarchy &LGraph::get_hierarchy() {
 
   return hierarchy;
 }
-
-#if 1
-// WARNING: deprecated for attributes
-
-uint32_t LGraph::node_value_get(const Node_pin &pin) const {
-  I(pin.get_idx() < node_type_table.size());
-  I(node_internal[pin.get_idx()].is_node_state());
-  I(node_internal[pin.get_idx()].is_master_root());
-  I(pin.get_pid()==0); // const have only single output
-
-  I(node_type_table[pin.get_idx()] >= U32ConstMin_Op);
-  I(node_type_table[pin.get_idx()] <= U32ConstMax_Op);
-
-  return (uint32_t)(node_type_table[pin.get_idx()] - U32ConstMin_Op);
-}
-#endif
 
