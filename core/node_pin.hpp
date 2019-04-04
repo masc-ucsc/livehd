@@ -50,12 +50,12 @@ public:
       return *this;
     };
 
-#if 0
-    // Works, but I do not like it
-    Node_pin get_driver(LGraph *_g, Hierarchy_id _hid) const {
-      return Node_pin(_g,_hid, *this, Node_pin_mode::Driver);
-    }
-#endif
+    bool is_invalid() const { return idx == 0; }
+
+    template <typename H>
+    friend H AbslHashValue(H h, const Compact& s) {
+      return H::combine(std::move(h), s.idx, s.sink);
+    };
   };
   Node_pin() : idx(0), pid(0), g(0), hid(0), sink(false) { }
   Node_pin(LGraph *_g, Hierarchy_id _hid, Compact comp);

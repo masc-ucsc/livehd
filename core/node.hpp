@@ -51,6 +51,12 @@ public:
 
       return *this;
     };
+    bool is_invalid() const { return nid == 0; }
+
+    template <typename H>
+    friend H AbslHashValue(H h, const Compact& s) {
+      return H::combine(std::move(h), s.nid);
+    };
   };
   Node()
     :nid(0)
