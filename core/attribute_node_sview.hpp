@@ -30,76 +30,60 @@ class Attribute_node_sview_type {
     return (table.size() <= pos) || table[pos] == nullptr;
   };
 
-public:
-  static std::string_view set(const Node &node, std::string_view wname) {
-
-    auto *lg   = node.get_lgraph();
-    if (unlikely(lg!=last_lg)) {
-      size_t pos = lg->get_lgid().value;
-      if (is_invalid(pos)) {
-        table.resize(pos+1);
-        I(table[pos] == 0);
-        table[pos] = new Attr_data(lg->get_path(), get_filename(lg->get_lgid()));
-      }
-      last_lg   = lg;
+  static void setup_table(LGraph *lg) {
+    last_lg   = lg;
+    size_t pos = lg->get_lgid().value;
+    if (!is_invalid(pos)) {
       last_attr = table[pos];
+      return;
     }
+
+    table.resize(pos+1);
+    I(table[pos] == 0);
+    last_attr  = new Attr_data(lg->get_path(), get_filename(lg->get_lgid()));
+    table[pos] = last_attr;
+  };
+
+public:
+  static std::string_view set(const Node &node, std::string_view data) {
+
+    if (unlikely(node.get_lgraph()!=last_lg))
+      setup_table(node.get_lgraph());
 
     I(!last_attr->has(node.get_compact())); // Do not double insert (why???) waste or bug with Name alias!!
 
-    return last_attr->set(node.get_compact(), wname);
+    return last_attr->set(node.get_compact(), data);
   };
 
   static std::string_view get(const Node &node) {
 
-    auto *lg   = node.get_lgraph();
-    if (unlikely(lg!=last_lg)) {
-      size_t pos = lg->get_lgid().value;
-      if (is_invalid(pos))
-        return "";
-      last_lg   = lg;
-      last_attr = table[pos];
-    }
+    if (unlikely(node.get_lgraph()!=last_lg))
+      setup_table(node.get_lgraph());
 
     return last_attr->get(node.get_compact());
   };
 
   static bool has(const Node &node) {
 
-    auto *lg   = node.get_lgraph();
-    if (unlikely(lg!=last_lg)) {
-      size_t pos = lg->get_lgid().value;
-      if (is_invalid(pos))
-        return false;
-      last_lg   = lg;
-      last_attr = table[pos];
-    }
+    if (unlikely(node.get_lgraph()!=last_lg))
+      setup_table(node.get_lgraph());
 
     return last_attr->has(node.get_compact());
   };
 
   static Node find(LGraph *lg, std::string_view name) {
 
-    if (unlikely(lg!=last_lg)) {
-      size_t pos = lg->get_lgid().value;
-      if (is_invalid(pos))
-        return Node();
-      last_attr = table[pos];
-      last_lg   = lg;
-    }
+    if (unlikely(lg!=last_lg))
+      setup_table(lg);
 
     auto raw = last_attr->find(name);
-    if (raw==0) {
+    if (raw == 0)
       return Node();
-    }
 
     return Node(lg, 0, Node::Compact(raw));
   };
 
   static void sync() {
-    last_lg   = nullptr;
-    last_attr = nullptr;
-
     for(auto *ent:table) {
       if (ent == nullptr)
         continue;
@@ -108,9 +92,6 @@ public:
   };
 
   static void sync(LGraph *lg) {
-    last_lg   = nullptr;
-    last_attr = nullptr;
-
     size_t pos = lg->get_lgid().value;
     if (is_invalid(pos))
       return;
@@ -122,10 +103,10 @@ public:
     last_lg   = nullptr;
     last_attr = nullptr;
 
-    size_t pos = lg->get_lgid().value;
-    if (is_invalid(pos))
-      return;
+    if (unlikely(lg!=last_lg))
+      setup_table(lg);
 
+    size_t pos = lg->get_lgid().value;
     table[pos]->clear();
     delete table[pos];
     table[pos] = nullptr;

@@ -30,6 +30,12 @@ public:
       ,sink_pid(s_pid)
       ,pad4(0) {
     };
+
+    template <typename H>
+    friend H AbslHashValue(H h, const Compact& s) {
+      return H::combine(std::move(h), s.driver_idx, s.sink_idx, s.driver_pid, s.sink_pid);
+    };
+
   };
   Node_pin driver;
   Node_pin sink;

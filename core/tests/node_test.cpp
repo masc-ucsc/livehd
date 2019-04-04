@@ -123,14 +123,34 @@ TEST_F(Setup_graphs_test, each_sub_graph) {
   EXPECT_TRUE(true);
 }
 
-TEST_F(Setup_graphs_test, annotate1) {
+TEST_F(Setup_graphs_test, annotate1a) {
+  for(const auto &nid:top->forward()) {
+    auto node = Node(top,0,Node::Compact(nid));
+    EXPECT_DEATH({node.get_place().get_x();},"assertion.*failed"); // get_place for something not set, triggers failure
+  }
+}
+
+TEST_F(Setup_graphs_test, annotate1b) {
+  for(const auto &nid:top->forward()) {
+    auto node = Node(top,0,Node::Compact(nid));
+    EXPECT_TRUE(!node.has_place());
+    EXPECT_EQ(node.ref_place()->get_x(),0);
+    EXPECT_TRUE(node.has_place());
+  }
+  for(const auto &nid:top->forward()) {
+    auto node = Node(top,0,Node::Compact(nid));
+    EXPECT_EQ(node.get_place().get_x(),0); // Now, OK, ref passes referene or allocates
+  }
+}
+
+TEST_F(Setup_graphs_test, annotate1c) {
 
   for(const auto &nid:top->forward()) {
     auto node = Node(top,0,Node::Compact(nid));
     for(const auto &out_edge : node.out_edges()) {
       auto dpin = out_edge.driver;
-      EXPECT_EQ(dpin.get_node().get_place().get_x(),0);
-      EXPECT_EQ(dpin.get_node().get_place().get_y(),0);
+      EXPECT_EQ(dpin.get_node().ref_place()->get_x(),0);
+      EXPECT_EQ(dpin.get_node().ref_place()->get_y(),0);
       if (dpin.has_name() && dpin.get_name() == "b")
         EXPECT_EQ(dpin.get_offset(),3);
       else
@@ -144,8 +164,6 @@ TEST_F(Setup_graphs_test, annotate1) {
     auto node = Node(top,0,Node::Compact(nid));
     x_val++;
     y_val+=3;
-
-    EXPECT_TRUE(!node.has_place());
 
     auto *place1 = node.ref_place();
     place1->replace(x_val,y_val);
@@ -176,3 +194,41 @@ TEST_F(Setup_graphs_test, annotate1) {
 
   EXPECT_TRUE(true);
 }
+
+TEST_F(Setup_graphs_test, annotate2) {
+
+  std::map<Node_pin::Compact, int>  my_map1;
+  absl::flat_hash_map<Node_pin::Compact, int>  my_map2;
+
+  int total = 0;
+  for(const auto &nid:top->forward()) {
+    auto node = Node(top,0,Node::Compact(nid));
+
+    for(const auto &e:node.out_edges()) {
+      my_map1[e.driver.get_compact()] = total;
+      my_map2[e.driver.get_compact()] = total;
+      total++;
+    }
+  }
+
+  std::vector<bool> used(total);
+
+  for(const auto &it:my_map1) {
+    auto dpin = Node_pin(top,0,it.first);
+    EXPECT_TRUE(dpin.is_driver());
+    EXPECT_FALSE(used[it.second]);
+    used[it.second] = true;
+  }
+
+  used.clear();
+  used.resize(total);
+
+  for(const auto &it:my_map2) {
+    auto dpin = Node_pin(top,0,it.first);
+    EXPECT_TRUE(dpin.is_driver());
+    EXPECT_FALSE(used[it.second]);
+    used[it.second] = true;
+  }
+
+}
+

@@ -179,7 +179,7 @@ H AbslHashValue(H h, const Pick_ID& m) {
 
 absl::flat_hash_map<Pick_ID, Node_pin> picks; // NODE, not flat to preserve pointer stability
 
-static Node_pin create_pick_operator(LGraph *g, Node_pin &driver, int offset, int width) {
+static Node_pin &create_pick_operator(LGraph *g, Node_pin &driver, int offset, int width) {
   if(offset == 0 && driver.get_bits() == width)
     return driver;
 
@@ -193,7 +193,7 @@ static Node_pin create_pick_operator(LGraph *g, Node_pin &driver, int offset, in
 
   g->add_edge(driver, sink_pin0);
 
-  connect_constant(g, offset, node.get_nid(), node.setup_sink_pin(1).get_pid());
+  connect_constant(g, offset, node, node.setup_sink_pin(1).get_pid());
 
   picks.insert(std::make_pair(pick_id, driver_pin0));
 

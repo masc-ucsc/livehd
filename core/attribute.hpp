@@ -186,9 +186,9 @@ public:
   };
 
   void clear() {
-    if (!loaded && clean)
+    if (loaded && idx2w.empty())
       return;
-    loaded  = false;
+    loaded  = true;
     clean   = true;
 
     idx2w.clear();
@@ -299,7 +299,7 @@ protected:
 
   void clear_sparse() {
     I(loaded);
-    I(!sparse.empty());
+    I(!sparse.empty() || idx_max == 0);
 
     sparse.clear();
     unlink(sparse_file.c_str());
@@ -307,7 +307,7 @@ protected:
 
   void clear_dense() {
     I(loaded);
-    I(!dense.empty());
+    I(!dense.empty() || idx_max == 0); // empty or calling clear
 
     dense.clear();
     unlink((dense_file + "_size").c_str());
@@ -494,9 +494,7 @@ public:
 #endif
 
   void clear() {
-    if (!loaded && clean)
-      return;
-    if (idx_max==0) { // already cleared
+    if (idx_max==0 && loaded) { // already cleared
       loaded  = false;
       clean   = true;
       return;
@@ -506,26 +504,18 @@ public:
 
     unlink((dense_file + "_max").c_str());
 
-    if (!dense_mode) {
-      I(access((dense_file + "_size").c_str(), F_OK) == -1);
-      if (!sparse.empty())
-        clear_sparse();
-    }else{
-      I(access(sparse_file.c_str(), F_OK) == -1);
-      clear_dense();
+    loaded  = true;
+    clean   = true;
 
+    clear_sparse();
+    clear_dense();
+    if (dense_mode) {
       std::ofstream dense_stream;
-
       dense_stream.open(dense_file + "_size");
       I(dense_stream.is_open());
-      // Save size 0, to remember that it is better dense mode
-      uint64_t dense_size = 0;
-      dense_stream << dense_size;
+      dense_stream << 0;
       dense_stream.close();
     }
-
-    loaded  = false;
-    clean   = true;
   };
 
   void sync() {
@@ -600,4 +590,5 @@ public:
 
   bool is_dense() const { return dense_mode; };
 };
+
 
