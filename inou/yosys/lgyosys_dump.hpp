@@ -20,19 +20,19 @@ USING_YOSYS_NAMESPACE
 class Lgyosys_dump : public Inou {
 private:
   RTLIL::Design *design;
-  RTLIL::Wire *  get_wire(const Node_pin &pin);
+  RTLIL::Wire *get_wire(const Node_pin &pin);
+  RTLIL::Wire *add_wire(RTLIL::Module *module, const Node_pin &pin);
 
-  void to_yosys(const LGraph *g);
+  void to_yosys(LGraph *g);
 
   absl::flat_hash_map<Node_pin::Compact, RTLIL::Wire *               >  input_map;
   absl::flat_hash_map<Node_pin::Compact, RTLIL::Wire *               >  output_map;
   absl::flat_hash_map<Node_pin::Compact, RTLIL::Wire *               >  cell_output_map;
   absl::flat_hash_map<Node::Compact    , std::vector<RTLIL::SigChunk>>  mem_output_map;
 
-  std::set<const LGraph *> _subgraphs;
+  std::set<LGraph *> _subgraphs;
 
   uint64_t ids        = 0;
-  uint64_t spare_wire = 0;
 
   bool hierarchy;
 
@@ -64,15 +64,15 @@ private:
   typedef RTLIL::Cell *(RTLIL::Module::*add_cell_fnc)(RTLIL::IdString, RTLIL::SigSpec, RTLIL::SigSpec, RTLIL::SigSpec,
                                                       const std::string &);
 
-  RTLIL::Wire *create_tree(const LGraph *g, std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod, add_cell_fnc_sign add_cell, bool sign, RTLIL::Wire *result_wire);
+  RTLIL::Wire *create_tree(LGraph *g, std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod, add_cell_fnc_sign add_cell, bool sign, RTLIL::Wire *result_wire);
 
   RTLIL::Wire *create_io_wire(Node_pin &pin, RTLIL::Module *module);
-  void         create_wires(const LGraph *g, RTLIL::Module *module);
+  void         create_wires(LGraph *g, RTLIL::Module *module);
 
-  void create_blackbox(const LGraph *subgraph, RTLIL::Design *design);
-  void create_subgraph_outputs(const LGraph *g, RTLIL::Module *module, Node &node);
-  void create_subgraph(const LGraph *g, RTLIL::Module *module, Node &node);
-  void create_memory(const LGraph *g, RTLIL::Module *module, Index_ID idx);
+  void create_blackbox(LGraph *subgraph, RTLIL::Design *design);
+  void create_subgraph_outputs(LGraph *g, RTLIL::Module *module, Node &node);
+  void create_subgraph(LGraph *g, RTLIL::Module *module, Node &node);
+  void create_memory(LGraph *g, RTLIL::Module *module, Node &node);
 
 protected:
 public:
@@ -81,7 +81,7 @@ public:
     hierarchy = hier;
   };
 
-  void fromlg(std::vector<const LGraph *> &out) final {
+  void fromlg(std::vector<LGraph *> &out) final {
     for(const auto &g : out) {
       if(!g) {
         ::Pass::warn("null lgraph (ignoring)");
@@ -106,7 +106,7 @@ public:
     }
   }*/
 
-  const std::set<const LGraph *> &subgraphs() const {
+  const std::set<LGraph *> &subgraphs() const {
     return _subgraphs;
   }
 

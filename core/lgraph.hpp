@@ -101,6 +101,21 @@ protected:
     return node_internal[src.get_idx()].del(dst.get_idx(),dst.get_pid(),dst.is_input());
   }
 
+  bool is_graph_io(Index_ID idx) const {
+    I(static_cast<Index_ID>(node_internal.size()) > idx);
+    return node_internal[idx].is_graph_io();
+  }
+
+  bool is_graph_input(Index_ID idx) const {
+    I(static_cast<Index_ID>(node_internal.size()) > idx);
+    return node_internal[idx].is_graph_io_input();
+  }
+
+  bool is_graph_output(Index_ID idx) const {
+    I(static_cast<Index_ID>(node_internal.size()) > idx);
+    return node_internal[idx].is_graph_io_output();
+  }
+
 public:
   LGraph()               = delete;
   LGraph(const LGraph &) = delete;
@@ -160,6 +175,10 @@ public:
   Node_pin get_graph_input(std::string_view str);
   Node_pin get_graph_output(std::string_view str);
   Node_pin get_graph_output_driver(std::string_view str);
+
+  bool is_graph_input(std::string_view name) const { return input_array.get_id(name) != 0; }
+  bool is_graph_output(std::string_view name) const { return output_array.get_id(name) != 0; }
+
   // Iterators defined in the lgraph_each.cpp
 
   void each_graph_input(std::function<void(Node_pin &pin)> f1);
