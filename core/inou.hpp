@@ -14,7 +14,7 @@ public:
 
   virtual std::vector<LGraph *> tolg() = 0;
   // Output modules like to verilog target
-  virtual void fromlg(std::vector<const LGraph *> &out) = 0;
+  virtual void fromlg(std::vector<LGraph *> &out) = 0;
   // Set the options/arguments for the pass
   virtual void set(const std::string &key, const std::string &value) = 0;
 };

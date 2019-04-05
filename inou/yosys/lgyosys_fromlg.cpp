@@ -72,9 +72,9 @@ struct LG2Yosys_Pass : public Yosys::Pass {
     // handle extra options (e.g. selection)
     extra_args(args, argidx, design);
 
-    std::vector<const LGraph *> lgs;
+    std::vector<LGraph *> lgs;
     if(single_graph_mode) {
-      const LGraph *lg = LGraph::open(path, name);
+      LGraph *lg = LGraph::open(path, name);
       if (lg==0) {
         log_error("could not open graph %s in path %s\n.", name.c_str(), path.c_str());
       }else{
@@ -90,7 +90,7 @@ struct LG2Yosys_Pass : public Yosys::Pass {
       log("converting all graphs in path %s.\n", path.c_str());
     }
 
-    std::set<const LGraph *> generated;
+    std::set<LGraph *> generated;
     Lgyosys_dump             dumper(design, hierarchy);
 
     dumper.fromlg(lgs);
@@ -99,7 +99,7 @@ struct LG2Yosys_Pass : public Yosys::Pass {
     }
 
     while(dumper.subgraphs().size() >= generated.size()) {
-      std::vector<const LGraph *> lgs_;
+      std::vector<LGraph *> lgs_;
       for(auto *g : dumper.subgraphs()) {
         if(generated.find(g) == generated.end()) {
           lgs_.push_back(g);

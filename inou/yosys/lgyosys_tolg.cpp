@@ -166,15 +166,13 @@ public:
   }
 
   template <typename H>
-  friend H AbslHashValue(H h, const Pick_ID& m);
+  friend H AbslHashValue(H h, const Pick_ID& s) {
+    return H::combine(std::move(h), s.driver.get_compact(), s.offset, s.width);
+  };
 };
 
 constexpr bool operator==(const Pick_ID &lhs, const Pick_ID &rhs) {
   return lhs.driver == rhs.driver && lhs.driver == rhs.driver && lhs.offset == rhs.offset;
-}
-template <typename H>
-H AbslHashValue(H h, const Pick_ID& m) {
-  return H::combine(std::move(h), m.driver, m.offset, m.width);
 }
 
 absl::flat_hash_map<Pick_ID, Node_pin> picks; // NODE, not flat to preserve pointer stability
@@ -416,7 +414,7 @@ static void connect_string(LGraph *g, std::string_view value, Node &exit_node, P
   spin.connect_driver(dpin);
 }
 
-static void look_for_cell_outputs(RTLIL::Module *module) {
+static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path) {
 
   //log("yosys2lg look_for_cell_outputs pass for module %s:\n", module->name.c_str());
 
@@ -648,7 +646,7 @@ static void process_assigns(RTLIL::Module *module, LGraph *g) {
 }
 
 // this function is called for each module in the design
-static LGraph *process_module(RTLIL::Module *module) {
+static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
 #ifndef NDEBUG
   log("yosys2lg pass for module %s:\n", module->name.c_str());
   printf("process_module %s\n", module->name.c_str());
@@ -707,7 +705,7 @@ static LGraph *process_module(RTLIL::Module *module) {
       auto &not_node = exit_node;
 
       g->add_edge(entry_node.setup_driver_pin(1), not_node.setup_sink_pin(), size); // OR
-      g->set_bits(not_node.setup_driver_pin(), size); // NOT
+      not_node.setup_driver_pin().set_bits(size); // NOT
 
     } else if(std::strncmp(cell->type.c_str(), "$or", 3) == 0 || std::strncmp(cell->type.c_str(), "$logic_or", 9) == 0 ||
               std::strncmp(cell->type.c_str(), "$reduce_or", 10) == 0 ||
@@ -861,7 +859,7 @@ static LGraph *process_module(RTLIL::Module *module) {
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
       entry_node.set_type(ShiftRight_Op, size);
-      connect_constant(g, 2, initd, 2);
+      connect_constant(g, 2, entry_node, 2);
 
     } else if(std::strncmp(cell->type.c_str(), "$sshr", 5) == 0) {
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
@@ -1098,7 +1096,7 @@ static LGraph *process_module(RTLIL::Module *module) {
         if(is_black_box_input(module, cell, conn.first)) {
           connect_constant(g, 0, exit_node, LGRAPH_BBOP_IPARAM(blackbox_inp_port));
           sink_pid = LGRAPH_BBOP_ICONNECT(blackbox_inp_port);
-          g->set_node_wirename(g->get_node(exit_node).setup_sink_pin(sink_pid), &(conn.first.c_str()[1]));
+          exit_node.setup_sink_pin(sink_pid).set_name(&(conn.first.c_str()[1]));
           blackbox_inp_port++;
         }else if(is_black_box_output(module, cell, conn.first)) {
           exit_node.setup_sink_pin(blackbox_out_port).set_name(&(conn.first.c_str()[1]));
@@ -1236,10 +1234,11 @@ static LGraph *process_module(RTLIL::Module *module) {
   for(auto &kv : partially_assigned) {
     const RTLIL::Wire *wire = kv.first;
 
-    uaot     join_node = wire2pin[wire].get_node();
+    auto     join_node = wire2pin[wire].get_node();
     Port_ID  join_pid  = 0;
 
-    set_bits_wirename(join_node.setup_driver_pin(), wire);
+    auto join_dpin = join_node.setup_driver_pin();
+    set_bits_wirename(join_dpin, wire);
 
     Node_pin current;
     int       size    = 0;
@@ -1399,6 +1398,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
 
 
       auto *g            = LGraph::create(path, name, "-"); // No source, unable to track
+      I(g);
       log("yosys2lg look_for_module_outputs pass for module %s:\n", module->name.c_str());
       look_for_module_outputs(module, path);
     }
@@ -1407,8 +1407,8 @@ struct Yosys2lg_Pass : public Yosys::Pass {
       RTLIL::Module *module = it.second;
       log("yosys2lg NOT look_for_cell_outputs pass for module %s:\n", module->name.c_str());
       if(design->selected_module(it.first)) {
-        look_for_cell_outputs(module);
-        LGraph *g = process_module(module);
+        look_for_cell_outputs(module, path);
+        LGraph *g = process_module(module, path);
 
         g->sync();
         g->close();
