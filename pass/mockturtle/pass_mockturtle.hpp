@@ -12,6 +12,6 @@ public:
 
   void setup() final;
 
-  void do_work(const LGraph *g);
+  void do_work(LGraph *g);
 };
 
