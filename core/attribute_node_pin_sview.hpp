@@ -13,11 +13,11 @@ class Attribute_node_pin_sview_type {
 
   static std::string get_filename(Lg_type_id lgid) {
     if constexpr (Mode == Node_pin_mode::Driver)
-      return absl::StrCat("lgraph_", std::to_string(lgid), "_node_pin_sview", Name, "_driver", Unique?"_unique":"_dup");
+      return absl::StrCat("lgraph_", std::to_string(lgid), "_node_pin_sview_", Name, "_driver", Unique?"_unique":"_dup");
     else if constexpr (Mode == Node_pin_mode::Sink)
-      return absl::StrCat("lgraph_", std::to_string(lgid), "_node_pin_sview", Name, "_sink", Unique?"_unique":"_dup");
+      return absl::StrCat("lgraph_", std::to_string(lgid), "_node_pin_sview_", Name, "_sink", Unique?"_unique":"_dup");
     else if constexpr (Mode == Node_pin_mode::Both)
-      return absl::StrCat("lgraph_", std::to_string(lgid), "_node_pin_sview", Name, "_both", Unique?"_unique":"_dup");
+      return absl::StrCat("lgraph_", std::to_string(lgid), "_node_pin_sview_", Name, "_both", Unique?"_unique":"_dup");
     I(false);
     return "bogus";
   };
@@ -34,7 +34,8 @@ class Attribute_node_pin_sview_type {
       return;
     }
 
-    table.resize(pos+1);
+    if (pos>=table.size())
+      table.resize(pos+1);
     I(table[pos] == 0);
     last_attr  = new Attr_data(lg->get_path(), get_filename(lg->get_lgid()));
     table[pos] = last_attr;
@@ -109,16 +110,15 @@ public:
   };
 
   static void clear(LGraph *lg) {
-    last_lg   = nullptr;
-    last_attr = nullptr;
-
-    if (unlikely(lg!=last_lg))
-      setup_table(lg);
+    setup_table(lg);
 
     size_t pos = lg->get_lgid().value;
     table[pos]->clear();
     delete table[pos];
     table[pos] = nullptr;
+
+    last_lg   = nullptr;
+    last_attr = nullptr;
   };
 };
 

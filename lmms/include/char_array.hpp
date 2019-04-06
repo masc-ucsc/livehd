@@ -100,7 +100,7 @@ public:
   };
 
 private:
-  const std::string                                        long_name;
+  std::string                                              long_name;
   mutable Dense<uint16_t>                                  variable_internal;
   mutable google::dense_hash_map<Hash_sign, Char_Array_ID> hash2id;
 
@@ -185,17 +185,24 @@ private:
   }
 
 public:
-  explicit Char_Array(const std::string &long_name_)
+  explicit Char_Array(std::string_view long_name_)
       : long_name(long_name_)
       , variable_internal(long_name_) {
 
     hash2id.set_empty_key(0);
 
     reload();
+
+    assert(variable_internal.size()>0);
   }
 
   virtual ~Char_Array() {
     sync();
+  }
+
+  bool empty() const {
+    assert(variable_internal.size()>0);
+    return variable_internal.size()==1;
   }
 
   void clear() {
@@ -203,9 +210,11 @@ public:
     variable_internal.emplace_back();
     hash2id.clear();
     unlink((long_name + "_map").c_str());
+    assert(variable_internal.size()>0);
   }
 
   void sync() {
+    assert(variable_internal.size()>0);
     variable_internal.sync();
 
     if(hash2id.empty()) {

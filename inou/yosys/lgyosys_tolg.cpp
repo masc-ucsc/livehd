@@ -689,7 +689,8 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
        std::strncmp(cell->type.c_str(), "$reduce_and", 11) == 0) {
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      exit_node.set_type(And_Op,size);
+      exit_node.set_type(And_Op);
+      exit_node.setup_driver_pin(0).set_bits(size);
     } else if(std::strncmp(cell->type.c_str(), "$not", 4) == 0) {
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
@@ -712,11 +713,13 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
               std::strncmp(cell->type.c_str(), "$reduce_bool", 12) == 0) {
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      exit_node.set_type(Or_Op, size);
+      exit_node.set_type(Or_Op);
+      exit_node.setup_driver_pin(0).set_bits(size);
     } else if(std::strncmp(cell->type.c_str(), "$xor", 4) == 0 || std::strncmp(cell->type.c_str(), "$reduce_xor", 11) == 0) {
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      exit_node.set_type(Xor_Op, size);
+      exit_node.set_type(Xor_Op);
+      exit_node.setup_driver_pin(0).set_bits(size);
     } else if(std::strncmp(cell->type.c_str(), "$xnor", 5) == 0 || std::strncmp(cell->type.c_str(), "$reduce_xnor", 11) == 0) {
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();

@@ -101,3 +101,35 @@ lgraph> exit
 $ ls trivial.json
 $ ls pyrope_output
 ```
+
+### Low level directed build
+
+To compile an individual pass:
+
+```bash
+bazel build -c dbg //pass/sample:pass_sampl
+bazel build -c dbg //inou/yosys:all
+```
+
+To build yosys module:
+
+```bash
+bazel build -c dbg //inou/yosys:all
+```
+
+To read a module with yosys directly
+
+```bash
+yosys -m ./bazel-bin/inou/yosys/liblgraph_yosys.so
+>read_verilog -sv ./inou/yosys/tests/trivial.v ; proc ; opt -fast ; pmuxtree ; memory_dff ; memory_share ; memory_collect
+>yosys2lg
+```
+
+To create a verilog from lgraph
+
+```bash
+yosys -m ./bazel-bin/inou/yosys/liblgraph_yosys.so
+>lg2yosys -name trivial
+>write_verilog trivial.v
+```
+

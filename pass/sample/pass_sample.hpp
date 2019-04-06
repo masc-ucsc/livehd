@@ -7,9 +7,9 @@ class Pass_sample : public Pass {
 protected:
   static void work(Eprp_var &var);
 
-  void annotate_placement(LGraph *g);
-  void max_depth(LGraph *g);
   void compute_histogram(LGraph *g);
+  void compute_max_depth(LGraph *g);
+  void annotate_placement(LGraph *g);
 
 public:
   Pass_sample();
