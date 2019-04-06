@@ -116,12 +116,14 @@ void Chunkify_verilog::write_file(std::string_view filename, std::string_view te
 void Chunkify_verilog::add_io(LGraph *lg, bool input, std::string_view io_name) {
 
   assert(lg);
-  if(lg->has_wirename(io_name))
-    return;
 
   if(input) {
+    if (lg->is_graph_input(io_name))
+      return;
     lg->add_graph_input(io_name, 0, 0);
   } else {
+    if (lg->is_graph_output(io_name))
+      return;
     lg->add_graph_output(io_name, 0, 0);
   }
 }

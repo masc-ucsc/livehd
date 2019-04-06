@@ -3,8 +3,7 @@
 // Created by birdeclipse on 12/18/17.
 //
 
-#ifndef INOU_JSON_H
-#define INOU_JSON_H
+#pragma once
 
 #include <string>
 
@@ -15,7 +14,7 @@
 class Inou_json : public Pass {
 private:
 protected:
-  std::map<Index_ID, Index_ID> json_remap;
+  absl::flat_hash_map<int, Node> json_remap;
 
   bool is_const_op(const std::string &s) const;
   bool is_int(const std::string &s) const;
@@ -32,4 +31,3 @@ public:
   void setup() final;
 };
 
-#endif
