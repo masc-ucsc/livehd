@@ -171,7 +171,7 @@ public:
   };
 };
 
-constexpr bool operator==(const Pick_ID &lhs, const Pick_ID &rhs) {
+bool operator==(const Pick_ID &lhs, const Pick_ID &rhs) {
   return lhs.driver == rhs.driver && lhs.driver == rhs.driver && lhs.offset == rhs.offset;
 }
 
@@ -279,7 +279,7 @@ static Node resolve_memory(LGraph *g, RTLIL::Cell *cell) {
         auto &src_pin = create_pick_operator(g, dpin, offset, chunk.width);
         offset += chunk.width;
         for(int i = 0; i < chunk.width; i++) {
-          I((chunk.offset+i)<partially_assigned[wire].size());
+          I((size_t)(chunk.offset+i)<partially_assigned[wire].size());
           partially_assigned[wire][chunk.offset + i] = src_pin;
         }
       }
@@ -540,7 +540,7 @@ static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path
           auto &src_pin = create_pick_operator(g, driver_pin, offset, chunk.width);
           offset += chunk.width;
           for(int i = 0; i < chunk.width; i++) {
-            I((chunk.offset+i)<partially_assigned[wire].size());
+            I((size_t)(chunk.offset+i)<partially_assigned[wire].size());
             partially_assigned[wire][chunk.offset + i] = src_pin;
           }
         }
@@ -637,7 +637,7 @@ static void process_assigns(RTLIL::Module *module, LGraph *g) {
 
         offset += chunk.width;
         for(int i = 0; i < chunk.width; i++) {
-          I((chunk.offset+i)<partially_assigned[lhs_wire].size());
+          I((size_t)(chunk.offset+i)<partially_assigned[lhs_wire].size());
           partially_assigned[lhs_wire][chunk.offset + i] = dpin;
         }
       }
