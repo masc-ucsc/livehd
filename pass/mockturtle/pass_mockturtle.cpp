@@ -29,30 +29,29 @@ void Pass_mockturtle::work(Eprp_var &var) {
   }
 }
 
-void Pass_mockturtle::do_work(const LGraph *g) {
+void Pass_mockturtle::do_work(LGraph *g) {
   LGBench b("pass.mockturtle");
 
-  std::unordered_map<int,std::pair<std::string,std::pair<int,int>>> cell_type;
+  absl::flat_hash_map<Node::Compact, std::pair<std::string,std::pair<int,int>>> cell_type;
 
-  for(const auto &idx : g->forward()) {
-    const auto &nt = g->node_type_get(idx);
-    std::string name = nt.get_name();
+  for(const auto &nid : g->forward()) {
+    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
+
+    auto name = node.get_type().get_name();
     int in_edges_num = 0;
-    for(const auto &in_edge : g->inp_edges(idx)) {
-      //name.append(std::to_string(in_edge.get_bits()));
+    for(const auto &in_edge : node.inp_edges()) {
       in_edges_num++;
     }
     int out_edges_num = 0;
-    for(const auto &out_edge : g->out_edges(idx)) {
-      //name.append(std::to_string(out_edge.get_bits()));
+    for(const auto &out_edge : node.out_edges()) {
       out_edges_num++;
     }
-    cell_type[idx]=std::make_pair(name,std::make_pair(in_edges_num,out_edges_num));
+    cell_type[node.get_compact()]=std::make_pair(name,std::make_pair(in_edges_num,out_edges_num));
   }
 
   fmt::print("Pass: number of cells {}\n", cell_type.size());
 
   for(auto const it:cell_type) {
-    fmt::print("node_id:{} node_type:{} in_edges:{} out_edges:{}\n", it.first, it.second.first, it.second.second.first, it.second.second.second);
+    fmt::print("node_type:{} in_edges:{} out_edges:{}\n", it.second.first, it.second.second.first, it.second.second.second);
   }
 }
