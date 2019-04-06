@@ -46,11 +46,11 @@ private:
 
     while(true) {
 
-      if (!Ann_node_pin_name::find(g,tmp).is_invalid())
-        if (!Ann_node_name::find(g,tmp).is_invalid())
-          return tmp;
-
       tmp = absl::StrCat(test, "_", std::to_string(ids++));
+
+      if (Ann_node_pin_name::find(g,tmp).is_invalid())
+        if (Ann_node_name::find(g,tmp).is_invalid())
+          return tmp;
     }
   }
 

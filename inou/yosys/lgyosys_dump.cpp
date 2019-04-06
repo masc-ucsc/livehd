@@ -29,7 +29,9 @@ RTLIL::Wire *Lgyosys_dump::get_wire(const Node_pin &pin) {
 
 RTLIL::Wire *Lgyosys_dump::add_wire(RTLIL::Module *module, const Node_pin &pin) {
   assert(pin.is_driver());
-  return module->addWire(std::string(pin.get_name()), pin.get_bits());
+  if (pin.has_name())
+    return module->addWire(std::string(pin.get_name()), pin.get_bits());
+  return module->addWire(next_id(pin.get_lgraph()), pin.get_bits());
 }
 
 RTLIL::Wire *Lgyosys_dump::create_tree(LGraph *g, std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod,
@@ -48,7 +50,8 @@ RTLIL::Wire *Lgyosys_dump::create_tree(LGraph *g, std::vector<RTLIL::Wire *> &wi
     else
       aWire = result_wire;
 
-    (mod->*add_fnc)(next_id(g), wires[current], wires[current + 1], aWire, sign, "");
+    auto name = next_id(g);
+    (mod->*add_fnc)(name, wires[current], wires[current + 1], aWire, sign, "");
     next_level.push_back(aWire);
   }
   if(wires.size() % 2 == 1)

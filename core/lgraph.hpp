@@ -126,8 +126,8 @@ public:
     I(!src.is_input());
     I(dst.is_input());
     I(dst.get_lgraph() == src.get_lgraph());
-    GI(src.get_node().get_type().op == GraphIO_Op, dst.get_pid()); // GraphIO never have pid==0
-    GI(dst.get_node().get_type().op == GraphIO_Op, src.get_pid()); // GraphIO never have pid==0
+    GI(src.get_node().get_type().op == GraphIO_Op, src.get_pid()); // GraphIO never have pid==0
+    GI(dst.get_node().get_type().op == GraphIO_Op, dst.get_pid()); // GraphIO never have pid==0
 
     return add_edge_int(dst.get_idx(), dst.get_pid(), src.get_idx(), src.get_pid());
   }

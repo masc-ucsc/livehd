@@ -82,8 +82,12 @@ protected:
     auto mux_s = mux.setup_sink_pin("S");
     auto mux_y = mux.setup_driver_pin("Y");
 
-    top->add_edge(top_a, sum_a, 10);
-    top->add_edge(top_b, sum_b, 10);
+    top_a.connect_sink(sum_a);
+    top_a.set_bits(10);
+    //top->add_edge(top_a, sum_a, 10);
+    sum_b.connect_driver(top_b);
+    top_b.set_bits(10);
+    //top->add_edge(top_b, sum_b, 10);
 
     top->add_edge(top_a, mor_a, 10);
     top->add_edge(top_b, mor_a, 10);

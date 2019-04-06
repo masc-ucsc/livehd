@@ -28,7 +28,7 @@ public:
       g_collect();
   }
 
-  explicit mmap_allocator(const std::string &filename)
+  explicit mmap_allocator(std::string_view filename)
       : mmap_base(0)
       , mmap_capacity(0)
       , mmap_size(0)
@@ -153,7 +153,7 @@ public:
     return mmap_size / sizeof(T);
   }
 
-  const std::string &get_filename() const {
+  std::string_view get_filename() const {
     return mmap_name;
   }
 
@@ -222,6 +222,6 @@ protected:
   mutable size_t    mmap_size;
   mutable int       mmap_fd;
   mutable int       alloc;
-  std::string       mmap_name;
+  const std::string mmap_name;
 };
 

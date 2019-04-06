@@ -51,7 +51,7 @@ public:
   typedef value_type *      iterator;
   typedef const value_type *const_iterator;
 
-  explicit Dense(const std::string &filename)
+  explicit Dense(std::string_view filename)
       : __allocator(filename) {
     __buffer = 0;
     __size   = 0;

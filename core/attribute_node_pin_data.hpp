@@ -34,7 +34,8 @@ class Attribute_node_pin_data_type {
       return;
     }
 
-    table.resize(pos+1);
+    if (pos>=table.size())
+      table.resize(pos+1);
     I(table[pos] == 0);
     last_attr  = new Attr_data(lg->get_path(), get_filename(lg->get_lgid()));
     table[pos] = last_attr;
@@ -100,16 +101,15 @@ public:
   };
 
   static void clear(LGraph *lg) {
-    last_lg   = nullptr;
-    last_attr = nullptr;
-
-    if (unlikely(lg!=last_lg))
-      setup_table(lg);
+    setup_table(lg);
 
     size_t pos = lg->get_lgid().value;
     table[pos]->clear();
     delete table[pos];
     table[pos] = nullptr;
+
+    last_lg   = nullptr;
+    last_attr = nullptr;
   };
 };
 
