@@ -30,7 +30,7 @@ RTLIL::Wire *Lgyosys_dump::get_wire(const Node_pin &pin) {
 RTLIL::Wire *Lgyosys_dump::add_wire(RTLIL::Module *module, const Node_pin &pin) {
   assert(pin.is_driver());
   if (pin.has_name())
-    return module->addWire(std::string(pin.get_name()), pin.get_bits());
+    return module->addWire(absl::StrCat("\\",pin.get_name()), pin.get_bits());
   return module->addWire(next_id(pin.get_lgraph()), pin.get_bits());
 }
 
@@ -244,7 +244,7 @@ void Lgyosys_dump::create_subgraph(LGraph *g, RTLIL::Module *module, Node &node)
     create_blackbox(subgraph, module->design);
   }
 
-  RTLIL::Cell *new_cell = module->addCell(std::string(node.create_name()), absl::StrCat("\\", subgraph->get_name()));
+  RTLIL::Cell *new_cell = module->addCell(absl::StrCat("\\",node.create_name()), absl::StrCat("\\", subgraph->get_name()));
 
   fmt::print("inou_yosys instance_name:{}, subgraph->get_name():{}\n", node.get_name(), subgraph->get_name());
   for(const auto &e:node.inp_edges()) {
@@ -308,7 +308,7 @@ void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
       }
       if (!blackbox_exists) {
         auto const_val = node.get_type_const_sview();
-        RTLIL::Wire *new_wire  = module->addWire(std::string(node.get_driver_pin().create_name()), const_val.size()); // FIXME: This assumes that const are in base 2. OK always?
+        RTLIL::Wire *new_wire  = module->addWire(absl::StrCat("\\",node.get_driver_pin().create_name()), const_val.size()); // FIXME: This assumes that const are in base 2. OK always?
 
         // constants treated as inputs
         module->connect(new_wire, RTLIL::SigSpec(RTLIL::Const::from_string(std::string(const_val))));
@@ -1003,7 +1003,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
       else
         name = absl::StrCat("\\",tcell->get_name());
 
-      RTLIL::Cell *new_cell = module->addCell(std::string(node.create_name()), name);
+      RTLIL::Cell *new_cell = module->addCell(absl::StrCat("\\",node.create_name()), name);
 
       for(const auto &e:node.inp_edges()) {
         if(e.sink.get_pid() >= tcell->n_inps())

@@ -700,7 +700,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
 
-      entry_node = g->create_node(Or_Op, size);
+      entry_node = g->create_node(Or_Op);
 
       exit_node.set_type(Not_Op);
       auto &not_node = exit_node;
