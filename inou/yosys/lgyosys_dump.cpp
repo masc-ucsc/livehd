@@ -69,6 +69,7 @@ RTLIL::Wire *Lgyosys_dump::create_io_wire(Node_pin &pin, RTLIL::Module *module) 
   new_wire->start_offset = pin.get_offset();
 
   module->ports.push_back(name);
+  assert(pin.get_pid() == module->ports.size());
   new_wire->port_id = module->ports.size();
 
   return new_wire;
@@ -86,21 +87,20 @@ void Lgyosys_dump::create_blackbox(LGraph *subgraph, RTLIL::Design *design) {
   }
 
   uint32_t port_id = 0;
-  subgraph->each_graph_input([&port_id,mod](const Node_pin &pin) {
+  subgraph->each_graph_io([&port_id,mod,this](Node_pin &pin) {
     std::string name = absl::StrCat("\\", pin.get_name());
     RTLIL::Wire *wire = mod->addWire(name, pin.get_bits());
     wire->port_id     = port_id++;
-    wire->port_input  = true;
-    wire->port_output = false;
+    assert(pin.get_pid() == port_id);
+    if(pin.is_graph_output()) {
+      wire->port_input  = false;
+      wire->port_output = true;
+    }else{
+      wire->port_input  = true;
+      wire->port_output = false;
+    }
   });
 
-  subgraph->each_graph_output([&port_id,mod](const Node_pin &pin) {
-    std::string name = absl::StrCat("\\", pin.get_name());
-    RTLIL::Wire *wire = mod->addWire(name, pin.get_bits());
-    wire->port_id     = port_id++;
-    wire->port_input  = false;
-    wire->port_output = true;
-  });
   mod->fixup_ports();
 }
 
@@ -270,16 +270,20 @@ void Lgyosys_dump::create_subgraph_outputs(LGraph *g, RTLIL::Module *module, Nod
 void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
   // first create all the output wires
 
-  g->each_graph_output([module,this](Node_pin &pin) {
-    output_map[pin.get_compact()] = create_io_wire(pin, module);
-    output_map[pin.get_compact()]->port_input  = false;
-    output_map[pin.get_compact()]->port_output = true;
-  });
-
-  g->each_graph_input([module,this](Node_pin &pin) {
-    input_map[pin.get_compact()] = create_io_wire(pin, module);
-    input_map[pin.get_compact()]->port_input  = true;
-    input_map[pin.get_compact()]->port_output = false;
+  uint32_t port_id = 0;
+  g->each_graph_io([&port_id,module,this](Node_pin &pin) {
+    port_id++;
+    assert(port_id == pin.get_pid());
+    if(pin.is_graph_output()) {
+      output_map[pin.get_compact()] = create_io_wire(pin, module);
+      output_map[pin.get_compact()]->port_input  = false;
+      output_map[pin.get_compact()]->port_output = true;
+    }else{
+      assert(pin.is_graph_input());
+      input_map[pin.get_compact()] = create_io_wire(pin, module);
+      input_map[pin.get_compact()]->port_input  = true;
+      input_map[pin.get_compact()]->port_output = false;
+    }
   });
 
   for(auto nid : g->fast()) {

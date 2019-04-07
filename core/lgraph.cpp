@@ -25,7 +25,7 @@ Index_ID LGraph::add_graph_io_common() {
 }
 
 Node_pin LGraph::add_graph_input_int(std::string_view str, uint16_t bits) {
-  I(input_array.get_id(str) == 0);  // No name dupliation
+  I(input_array.get_id(str) == 0);  // No name duplication
 
   auto nid = add_graph_io_common();
   node_internal[nid].set_graph_io_input();
@@ -40,7 +40,7 @@ Node_pin LGraph::add_graph_input_int(std::string_view str, uint16_t bits) {
 }
 
 Node_pin LGraph::add_graph_output_int(std::string_view str, uint16_t bits) {
-  I(output_array.get_id(str) == 0);  // No name dupliation
+  I(output_array.get_id(str) == 0);  // No name duplication
 
   auto nid = add_graph_io_common();
   node_internal[nid].set_graph_io_output();
@@ -54,14 +54,13 @@ Node_pin LGraph::add_graph_output_int(std::string_view str, uint16_t bits) {
   return Node_pin(this, 0, idx, pid, true);
 }
 
-
 LGraph::LGraph(const std::string &path, const std::string &_name, const std::string &_source, bool _clear)
     // Lgraph_base_core(path, _name, Graph_library::instance(path)->register_lgraph(_name, _source, this))
-    : LGraph_Base(path, _name, Graph_library::instance(path)->register_lgraph(_name, _source, this))
-    , LGraph_Node_Delay(path, _name, lg_id())
-    , LGraph_Node_bitwidth(path, _name, lg_id())
-    , LGraph_Node_Src_Loc(path, _name, lg_id())
-    , LGraph_Node_Type(path, _name, lg_id()) {
+    :LGraph_Base(path, _name, Graph_library::instance(path)->register_lgraph(_name, _source, this))
+    ,LGraph_Node_Delay(path, _name, lg_id())
+    ,LGraph_Node_bitwidth(path, _name, lg_id())
+    ,LGraph_Node_Src_Loc(path, _name, lg_id())
+    ,LGraph_Node_Type(path, _name, lg_id()) {
   I(_name == get_name());
   if (_clear) {  // Create
     clear();

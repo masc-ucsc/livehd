@@ -1,6 +1,6 @@
 
 
-module inner(input z, input y, output a, output h);
+module inner(input z, output a, input y, output h);
   assign a = y & z;
   assign h = !(y&z);
 
