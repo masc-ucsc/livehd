@@ -12,7 +12,7 @@ load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 new_git_repository(
     name = "opentimer",
     build_file = "BUILD.opentimer", # relative to external path
-    commit = "4040d90a471a76998b3985de7827df413a5e8652", # Dec 8, 2018
+    commit = "a09a75ec02000eeeba918ea9f2f82f4bc907345d", # April 6, 2019 4040d90a471a76998b3985de7827df413a5e8652", # Dec 8, 2018
     remote = "https://github.com/OpenTimer/OpenTimer.git",
     #strip_prefix = "ot", OpenTimer uses ot/... so, we have to keep it
     patches = ["//external:patch.opentimer"],
@@ -20,40 +20,40 @@ new_git_repository(
 new_git_repository( # Open_timer user taskflow
     name = "taskflow",
     build_file = "BUILD.taskflow",
-    commit = "c8a12caed111977c92497c6b5338aacf29e715f9", # Dec 20, 2018
+    commit = "764f93f57f5b18cf4edcafb12e9ce1b42b3fcea9", # April 6, c8a12caed111977c92497c6b5338aacf29e715f9", # Dec 20, 2018
     remote = "https://github.com/cpp-taskflow/cpp-taskflow.git",
 )
 new_git_repository(
     name = "abc",
     build_file = "BUILD.abc", # relative to external path
-    commit = "14d985a8c4597bc70765cb889be160b7af5fa128", # Oct 20, 2018
+    commit = "362b2d9d08f4dbc8dfc751b68ddf7bd3f9c4ed54", # April 6 14d985a8c4597bc70765cb889be160b7af5fa128", # Oct 20, 2018
     remote = "https://github.com/berkeley-abc/abc.git",
     patches = ["//external:patch.abc"],
 )
 new_git_repository(
     name = "yosys",
     build_file = "BUILD.yosys", # relative to external path
-    commit = "93d44bb9a613b46a80642b8ce71295db18fadbc5", # Dec 20, 2018
+    commit = "dfb242c905ff10bb4038f080aeb74a820e8fbd00", # April 6, 2019 93d44bb9a613b46a80642b8ce71295db18fadbc5", # Dec 20, 2018
     remote = "https://github.com/YosysHQ/yosys.git",
     #strip_prefix = "kernel",
 )
 new_git_repository(
     name = "mustache",
     build_file = "BUILD.mustache", # relative to external path
-    commit = "2c37b240f6d9147b4a7639c433fdde2f31b6868f", # Sep 22, 2018
+    commit = "40ddfe9daecc699eca319f1c739b0cfc7e5f3ae5", # April 6 2019 2c37b240f6d9147b4a7639c433fdde2f31b6868f", # Sep 22, 2018
     remote = "https://github.com/kainjow/Mustache.git",
     #strip_prefix = "kernel",
 )
 git_repository(
     name = "com_google_absl",
     #build_file = "BUILD.abseil", # relative to external path
-    commit = "93dfcf74cb5fccae3da07897d8613ae6cab958a0", # April 3, 2019 febc5ee6a92d0eb7dac1fceaa6c648cf6521b4dc", # March 20, 2019 "7ffbe09f3d85504bd018783bbe1e2c12992fe47c", # Dec 27, 2018
+    commit = "6cc6ac44e065b9e8975fadfd6ccb99cbcf89aac4", # April 6 2019
     remote = "https://github.com/abseil/abseil-cpp.git",
 )
 new_git_repository(
     name = "fmt",
     build_file = "BUILD.fmt",
-    commit = "91acfe685234534b8f8b379031d00cd62240ce3f", # March 20, 2019 "a084495d7e35436304e9ad0df999e06b2faf2a0b", # Nov 29, 2018
+    commit = "ab1474ef661a82175de693f79926f38bf11d6815", # April 6, 2019 91acfe685234534b8f8b379031d00cd62240ce3f", # March 20, 2019 "a084495d7e35436304e9ad0df999e06b2faf2a0b", # Nov 29, 2018
     remote = "https://github.com/fmtlib/fmt.git",
     #strip_prefix = "include",
 )
@@ -73,14 +73,14 @@ new_git_repository(
 new_git_repository(
     name = "bm",
     build_file = "BUILD.bm",
-    commit = "93a8ba2c50c039cfe6b95f9d6fe128603a14e0ed", # March 20, 2019 "28466673dac932b5b14bf866b9b85a018c7d764b", # Dec 23, 2018
+    commit = "93a8ba2c50c039cfe6b95f9d6fe128603a14e0ed", # March 20, 2019
     remote = "https://github.com/tlk00/BitMagic.git",
     strip_prefix = "src",
 )
 new_git_repository(
     name = "cryptominisat",
     build_file = "BUILD.cryptominisat",
-    commit = "4c26a766aab2a452aed9a8fe6f28f4171bcb8690", # October 10, 2018
+    commit = "883e69199f95543d4c0878fe0d552e901848d154", # April 6 2019 4c26a766aab2a452aed9a8fe6f28f4171bcb8690", # October 10, 2018
     remote = "https://github.com/msoos/cryptominisat.git",
     patches = ["//external:patch.cryptominisat"],
     #strip_prefix = "include",
@@ -88,7 +88,7 @@ new_git_repository(
 new_git_repository(
     name = "rapidjson",
     build_file = "BUILD.rapidjson",
-    commit = "663f076c7b44ce96526d1acfda3fa46971c8af31", # October 6, 2018
+    commit = "55c3c241cf55801d8caf0f11af2e98595797801a", # April 6, 2019 663f076c7b44ce96526d1acfda3fa46971c8af31", # October 6, 2018
     remote = "https://github.com/Tencent/rapidjson.git",
     strip_prefix = "include",
 )
@@ -102,7 +102,7 @@ new_git_repository(
 new_git_repository(
     name = "httplib",
     build_file = "BUILD.httplib",
-    commit = "b5927aec123351dcf796e1fba8a6a1805d294cbe", # Dec 20, 2018
+    commit = "8483e5931fb8a07ba8be078c59ee641eff661769", # April 6 2019 b5927aec123351dcf796e1fba8a6a1805d294cbe", # Dec 20, 2018
     remote = "https://github.com/yhirose/cpp-httplib.git",
 )
 new_git_repository(
@@ -114,8 +114,9 @@ new_git_repository(
 new_git_repository(
     name = "gtest",
     build_file = "BUILD.gtest",
+    commit = "5ba69d5cb93779fba14bf438dfdaf589e2b92071", # APril 6 2019
     remote = "https://github.com/google/googletest",
-    tag = "release-1.8.0",
+    #tag = "release-1.8.0",
 )
 new_git_repository(
     name = "verilator",
@@ -136,7 +137,7 @@ new_git_repository(
 new_git_repository(
     name = "mockturtle",
     build_file = "BUILD.mockturtle",
-    commit = "555ef000e984ad753e98836a7631b8a63dacf70d",
+    commit = "1da278ecb239bcdf4e0f6f605fa1e3380a726c5d", # April 6, 2019 555ef000e984ad753e98836a7631b8a63dacf70d",
     remote = "https://github.com/lsils/mockturtle.git",
     #patches = ["//external:patch.verilator"],
     #strip_prefix = "include",
