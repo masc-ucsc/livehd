@@ -15,40 +15,51 @@
 
 enum Node_Type_Op : uint64_t {
   Invalid_Op,
+  // op_class: arith
   Sum_Op,
   Mult_Op,
   Div_Op,
   Mod_Op,
+  // op_class: logic
   Not_Op,
+  // op_class: wire
   Join_Op,
   Pick_Op,
 #if 1
   // WARNING: deprecated once we have LUTs working (mockturtle)
+  // op_class: logic
   And_Op,
   Or_Op,
   Xor_Op,
 #endif
+  // op_class: register
   SFlop_Op,  // sync reset flop
   AFlop_Op,  // async reset flop
   Latch_Op,
   FFlop_Op,
+  // op_class: memory
   Memory_Op,
 #if 1
   // WARNING: deprecated once we have LUTs working (mockturtle)
+  // op_class: cmp
   LessThan_Op,
   GreaterThan_Op,
   LessEqualThan_Op,
   GreaterEqualThan_Op,
   Equals_Op,
 #endif
+  // op_class: mux
   Mux_Op, // WARNING: Trivial MUX (not bus muxes) converted to LUT
 #if 1
   // WARNING: deprecated once we have LUTs working (mockturtle)
+  // op_class: shift
   ShiftRight_Op,
   ShiftLeft_Op,
 #endif
+  // op_class: wire
   GraphIO_Op,
   DontCare_Op,
+  // op_class: cfg
   CfgAssign_Op,
   CfgIf_Op,
   CfgFunctionCall_Op,
@@ -56,6 +67,7 @@ enum Node_Type_Op : uint64_t {
   CfgWhile_Op,
   CfgIfMerge_Op,
   CfgBeenRead_Op,
+  // op_class: dfg
   DfgRef_Op,
   DfgPendingGraph_Op,
   // Add here, operators needed
@@ -64,12 +76,16 @@ enum Node_Type_Op : uint64_t {
   TechMap_Op,
   U32Const_Op,
   StrConst_Op,
+  // op_class: sub
   SubGraphMin_Op,  // Each subgraph cell starts here
   SubGraphMax_Op = (1ULL << 32),
+  // op_class: value
   U32ConstMin_Op,
   U32ConstMax_Op = 2 * (1ULL << 32),
+  // op_class: str
   StrConstMin_Op,
   StrConstMax_Op = 3 * (1ULL << 32),
+  // op_class: sub
   TechMapMin_Op,
   TechMapMax_Op = 4 * (1ULL << 32)
 };
