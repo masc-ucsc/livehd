@@ -2,6 +2,33 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
+void LGraph::each_graph_io(std::function<void(Node_pin &pin)> f1) {
+  auto i_it = input_array.begin();
+  auto o_it = output_array.begin();
+  while(true) {
+    Node_pin pin;
+
+    if (i_it != input_array.end() && o_it != output_array.end()) {
+      if (i_it.get_field().pos < o_it.get_field().pos) {
+        pin = get_node(i_it.get_field().nid).get_driver_pin(i_it.get_field().pos);
+        ++i_it;
+      }else{
+        pin = get_node(o_it.get_field().nid).get_driver_pin(o_it.get_field().pos);
+        ++o_it;
+      }
+    }else if (i_it != input_array.end()) {
+      pin = get_node(i_it.get_field().nid).get_driver_pin(i_it.get_field().pos);
+      ++i_it;
+    }else if (o_it != output_array.end()) {
+      pin = get_node(o_it.get_field().nid).get_driver_pin(o_it.get_field().pos);
+      ++o_it;
+    }else{
+      return;
+    }
+    f1(pin);
+  }
+}
+
 void LGraph::each_graph_input(std::function<void(Node_pin &pin)> f1) {
   for (auto it = input_array.begin(); it != input_array.end(); ++it) {
     const auto &p = it.get_field();

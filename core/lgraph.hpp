@@ -181,6 +181,7 @@ public:
 
   // Iterators defined in the lgraph_each.cpp
 
+  void each_graph_io(std::function<void(Node_pin &pin)> f1);
   void each_graph_input(std::function<void(Node_pin &pin)> f1);
   void each_graph_output(std::function<void(Node_pin &pin)> f1);
 
