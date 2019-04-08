@@ -97,7 +97,7 @@ launch gdb with this new installed yoys binary and lgraph-yosys plugin
 
     (gdb) run
 
-    yosys> lg2yosys -name you_lgraph_name
+    yosys> lg2yosys -name your_lgraph_name
 
     set break point at the line of assertion failure 
 

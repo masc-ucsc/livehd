@@ -107,7 +107,7 @@ $ ls pyrope_output
 To compile an individual pass:
 
 ```bash
-bazel build -c dbg //pass/sample:pass_sampl
+bazel build -c dbg //pass/sample:pass_sample
 bazel build -c dbg //inou/yosys:all
 ```
 
