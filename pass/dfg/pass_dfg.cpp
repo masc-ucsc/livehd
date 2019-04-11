@@ -592,7 +592,7 @@ Index_ID Pass_dfg::process_operand(LGraph *dfg, Aux_tree *aux_tree, const std::s
   return oprd_id;
 }
 
-Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data, Index_ID cfg_node) {
+Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data, Node cfg_node) {
   fmt::print("process if start!\n");
   assert(aux_tree->has_alias(data.get_target()));
   Index_ID    cond     = aux_tree->get_alias(data.get_target());
@@ -604,8 +604,13 @@ Index_ID Pass_dfg::process_if(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree
   auto *pauxnd = aux_tree->get_cur_auxnd(); // parent aux
 
   assert(operands.size() > 1);
-  Index_ID tbranch = (Index_ID)std::stol(operands[0]);
-  Index_ID fbranch = (Index_ID)std::stol(operands[1]);
+
+
+  Node tbranch = cfg_node.setup_driver_pin(0).get_node();
+  Node fbranch = cfg_node.setup_driver_pin(1).get_node();
+
+  //Index_ID tbranch = (Index_ID)std::stol(operands[0]);
+  //Index_ID fbranch = (Index_ID)std::stol(operands[1]);
 
   aux_tree->set_parent_child(pauxnd, &tauxnd, true);
   Index_ID tb_next = get_cfg_child(cfg, process_cfg(dfg, cfg, aux_tree, tbranch));
