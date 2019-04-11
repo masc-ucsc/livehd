@@ -1,7 +1,7 @@
 #include "pass_dfg.hpp"
 #include <string>
 
-Index_ID Pass_dfg::resolve_constant(LGraph *g, Aux_tree *aux_tree, const std::string &str) {
+Node Pass_dfg::resolve_constant(LGraph *g, Aux_tree *aux_tree, const std::string &str) {
   // arguments -> local variable
   // bool is_in32b;
   // bool is_explicit_signed;
@@ -183,50 +183,50 @@ uint32_t Pass_dfg::cal_bin_val_32b(const std::string &token) {
   return val;
 }
 
-Index_ID Pass_dfg::process_bin_token(LGraph *g, const std::string &token, const uint16_t &bit_width, bool is_signed) {
+Node Pass_dfg::process_bin_token(LGraph *g, const std::string &token, const uint16_t &bit_width, bool is_signed) {
   if(bit_width > 32) {
-    std::vector<Node_pin> inp_pins;
-    Index_ID              nid_const32;
-    auto                  t_size   = (uint16_t)token.size();
-    Index_ID              nid_join = g->create_node().get_nid();
-    g->node_type_set(nid_join, Join_Op);
-    g->set_bits(g->get_node(nid_join).setup_driver_pin(0), t_size);
+    std::vector<Node_pin> dpins;
+    Node  node_const32;
+    auto  t_size    = (uint16_t)token.size();
+    Node  node_join = g->create_node();
 
-    int         i           = 1;
+    node_join.set_type(Join_Op);
+    node_join.setup_driver_pin(0).set_bits(t_size);
+
+    int i = 1;
     std::string token_chunk = token.substr(t_size - 32 * i, 32);
 
     while(t_size - 32 * i > 0) {
-      nid_const32 = create_const32_node(g, token_chunk, 32, is_signed);
-      inp_pins.emplace_back(g->get_node(nid_const32).setup_driver_pin());
+      node_const32 = create_const32_node(g, token_chunk, 32, is_signed);
+      dpins.emplace_back(node_const32.setup_driver_pin());
       if(t_size - (32 * (i + 1)) > 0)
         token_chunk = token.substr(t_size - 32 * (i + 1), 32);
       else {
         token_chunk = token.substr(0, t_size - 32 * i);
-        // fmt::print("@round{}, token_chunk:                 {}\n", i+1, token_chunk);
-        nid_const32 = create_const32_node(g, token_chunk, token_chunk.size(), is_signed);
-        inp_pins.emplace_back(g->get_node(nid_const32).setup_driver_pin());
+        node_const32 = create_const32_node(g, token_chunk, token_chunk.size(), is_signed);
+        dpins.emplace_back(node_const32.setup_driver_pin());
       }
       i++;
     }
-    int pid = 0;
-    for(auto &inp_pin : inp_pins) {
-      g->add_edge(inp_pin, g->get_node(nid_join).setup_sink_pin(pid));
-      pid++;
+    Port_ID sink_pid = 0;
+    for(auto &dpin : dpins) {
+      g->add_edge(dpin, node_join.setup_sink_pin(sink_pid));
+      sink_pid++;
     }
-    return nid_join;
+    return node_join;
   } else {
-    Index_ID nid_const32 = create_const32_node(g, token, bit_width, is_signed);
-    return nid_const32;
+    Node node_const32 = create_const32_node(g, token, bit_width, is_signed);
+    return node_const32;
   }
 }
 
-Index_ID Pass_dfg::process_bin_token_with_dc(LGraph *g, const std::string &token, bool is_signed) {
-  // fmt::print("process binary with don't cares!\n");
-  std::vector<Node_pin> inp_pins;
-  int                   t_size   = (int)token.size();
-  Index_ID              nid_join = g->create_node().get_nid();
-  g->node_type_set(nid_join, Join_Op);
-  g->set_bits(g->get_node(nid_join).setup_driver_pin(0), t_size);
+
+Node Pass_dfg::process_bin_token_with_dc(LGraph *g, const std::string &token, bool is_signed) {
+  std::vector<Node_pin> dpins;
+  int  t_size = (int)token.size();
+  Node node_join = g->create_node();
+  node_join.set_type(Join_Op);
+  node_join.setup_driver_pin().set_bits(t_size);
 
   std::string sdc_buf;  // continuous don't care characters
   std::string sval_buf; // continuous val characters
@@ -234,62 +234,62 @@ Index_ID Pass_dfg::process_bin_token_with_dc(LGraph *g, const std::string &token
   for(int i = 0; i < token_size; i++) {
     if(token[i] == '?') {
       if(sval_buf.size()) {
-        Index_ID nid_const32 = create_const32_node(g, sval_buf, sval_buf.size(), is_signed);
-        inp_pins.push_back(g->get_node(nid_const32).setup_driver_pin());
+        Node node_const32 = create_const32_node(g, sval_buf, sval_buf.size(), is_signed);
+        dpins.push_back(node_const32.setup_driver_pin());
         sval_buf.clear();
       }
       sdc_buf += '?';
       if(i == token_size - 1) {
-        Index_ID nid_dc = create_dontcare_node(g, sdc_buf.size());
-        inp_pins.push_back(g->get_node(nid_dc).setup_driver_pin());
+        Node node_dc = create_dontcare_node(g, sdc_buf.size());
+        dpins.push_back(node_dc.setup_driver_pin());
       } else if(i + 1 < token_size && token[i + 1] != '?') {
-        Index_ID nid_dc = create_dontcare_node(g, sdc_buf.size());
-        inp_pins.push_back(g->get_node(nid_dc).setup_driver_pin());
+        Node node_dc = create_dontcare_node(g, sdc_buf.size());
+        dpins.push_back(node_dc.setup_driver_pin());
         sdc_buf.clear();
       }
     } else { // token[i] = some value char
       sval_buf += token[i];
       if(sval_buf.size() == 32) {
-        Index_ID nid_const32 = create_const32_node(g, sval_buf, 32, is_signed);
-        inp_pins.push_back(g->get_node(nid_const32).setup_driver_pin());
+        Node node_const32 = create_const32_node(g, sval_buf, 32, is_signed);
+        dpins.push_back(node_const32.setup_driver_pin());
         sval_buf = sval_buf.substr(32);
       } else if(i == token_size - 1) {
-        Index_ID nid_const32 = create_const32_node(g, sval_buf, sval_buf.size(), is_signed);
-        inp_pins.push_back(g->get_node(nid_const32).setup_driver_pin());
+        Node node_const32 = create_const32_node(g, sval_buf, sval_buf.size(), is_signed);
+        dpins.push_back(node_const32.setup_driver_pin());
       }
     }
   }
 
-  int pid = 0;
-  for(auto &inp_pin : inp_pins) {
-    g->add_edge(inp_pin, g->get_node(nid_join).setup_sink_pin(pid));
-    pid++;
+  Port_ID sink_pid = 0;
+  for(auto &dpin : dpins) {
+    g->add_edge(dpin, node_join.setup_sink_pin(sink_pid));
+    sink_pid++;
   }
-  return nid_join;
+  return node_join;
 }
 
-Index_ID Pass_dfg::create_const32_node(LGraph *g, const std::string &val_str, uint16_t node_bit_width, bool is_signed) {
+Node Pass_dfg::create_const32_node(LGraph *g, const std::string &val_str, uint16_t node_bit_width, bool is_signed) {
   uint32_t val = cal_bin_val_32b(val_str);
-  Index_ID nid_const32 = g->create_node().get_nid();
+  Node node_const32 = g->create_node();
+  node_const32.set_type_const_value(val);
+  node_const32.setup_driver_pin().set_bits(node_bit_width);//SH:FIXME:maybe not setup bits now, do it after b.w. analysis
 
-  g->node_u32type_set(nid_const32, val);
-  //SH FIXME:maybe not setup bits now, do it after MIT algo. analysis
-  g->set_bits(g->get_node(nid_const32).setup_driver_pin(0), node_bit_width);
-
-  Node_bitwidth &nb = g->node_bitwidth_get(nid_const32);
+  //SH:FIXME: Attribute for Node_pin explicit/implicit bitwidth??? TBD.
+  /*
+  Node_bitwidth &nb = node_const32.get_driver_pin().get_bits();
   if(is_signed)
     nb.e.set_sconst(val);
   else
     nb.e.set_uconst(val);
-
-  return nid_const32;
+  */
+  return node_const32;
 }
 
-Index_ID Pass_dfg::create_dontcare_node(LGraph *g, uint16_t node_bit_width ) {
-  Index_ID nid_dc = g->create_node().get_nid();
-  g->node_type_set(nid_dc, DontCare_Op);
-  g->set_bits(g->get_node(nid_dc).setup_driver_pin(0), node_bit_width);
-  return nid_dc;
+Node Pass_dfg::create_dontcare_node(LGraph *g, uint16_t node_bit_width ) {
+  Node node_dc = g->create_node();
+  node_dc.set_type(DontCare_Op);
+  node_dc.setup_driver_pin().set_bits(node_bit_width);
+  return node_dc;
 }
 
 std::string Pass_dfg::hex_char_to_bin(char c) {
