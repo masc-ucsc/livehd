@@ -2,26 +2,26 @@
 
 /** This black-boxes an Async Reset
   * Reg.
-  *  
+  *
   * Because Chisel doesn't support
-  * parameterized black boxes, 
-  * we unfortunately have to 
+  * parameterized black boxes,
+  * we unfortunately have to
   * instantiate a number of these.
-  *  
+  *
   * We also have to hard-code the set/reset.
-  *  
+  *
   *  Do not confuse an asynchronous
   *  reset signal with an asynchronously
-  *  reset reg. You should still 
-  *  properly synchronize your reset 
+  *  reset reg. You should still
+  *  properly synchronize your reset
   *  deassertion.
-  *  
+  *
   *  @param d Data input
   *  @param q Data Output
   *  @param clk Clock Input
   *  @param rst Reset Input
   *  @param en Write Enable Input
-  *  
+  *
   */
 
 `ifdef RANDOMIZE_GARBAGE_ASSIGN
@@ -63,7 +63,7 @@ input  wire rst;
     `endif // RANDOMIZE
     if (rst) begin
       q = RESET_VALUE;
-    end 
+    end
   end
 `endif
 
@@ -75,6 +75,5 @@ input  wire rst;
          q <= d;
       end
    end
- 
-endmodule // AsyncResetReg
 
+endmodule // AsyncResetReg
