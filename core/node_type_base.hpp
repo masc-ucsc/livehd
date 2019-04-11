@@ -631,7 +631,7 @@ public:
   };
 };
 
-// Y0 = A, Y1,Y2,Y3 for keeping meta information
+// Y0 = A, Y0,Y1,Y2,Y3 for keeping meta information
 class Node_Type_CfgAssign : public Node_Type {
 public:
   Node_Type_CfgAssign() : Node_Type("cfg_assign", CfgAssign_Op, false) {

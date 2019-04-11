@@ -20,7 +20,7 @@ private:
   static inline constexpr std::string_view  COND_BR_MARKER     = "if";
 
 public:
-  CFG_Node_Data(const LGraph *g, Index_ID node);
+  CFG_Node_Data(const LGraph *g, Node node);
   CFG_Node_Data(const std::string &parser_raw);
   CFG_Node_Data(const std::string &t, const std::vector<std::string> &ops, const std::string &ot)
       : target(t)
