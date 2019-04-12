@@ -217,49 +217,62 @@ void Graph_library::reload() {
   sdc_list.push_back("fake_bad.sdc"); // FIXME
   spef_list.push_back("fake_bad.spef"); // FIXME
 
-  graph_list.open(library_file);
-
   name2id.clear();
   attribute.resize(1);  // 0 is not a valid ID
 
-  if (!graph_list.is_open()) {  // No reload, just empty
+  if (access(library_file.c_str(), F_OK) != -1) {
     mkdir(path.c_str(), 0755);  // At least make sure directory exists for future
     return;
   }
+  FILE *pFile = fopen(library_file.c_str(), "rb");
+  if (pFile==0) {
+    Pass::error("graph_library::reload could not open graph {} file",library_file);
+    return;
+  }
+  char                      buffer[65536];
+  rapidjson::FileReadStream is(pFile, buffer, sizeof(buffer));
+  rapidjson::Document       document;
+  document.ParseStream<0, rapidjson::UTF8<>, rapidjson::FileReadStream>(is);
 
-  size_t n_graphs = 0;
-  graph_list >> n_graphs;
-  attribute.resize(n_graphs + 1);
+  if(document.HasParseError()) {
+    Pass::error("graph_library::reload {} Error(offset {}): {}"
+        ,library_file
+        ,static_cast<unsigned>(document.GetErrorOffset())
+        ,rapidjson::GetParseError_En(document.GetParseError()));
+    return;
+  }
 
-  for (size_t idx = 0; idx < n_graphs; ++idx) {
-    std::string name;
-    std::string source;
-    Lg_type_id  graph_version;
-    size_t      graph_id;
-    size_t      nentries;
+  I(document.HasMember("lgraph"));
+  const rapidjson::Value &lgraph_array = document["lgraph"];
+  I(lgraph_array.IsArray());
+  for(const auto &lg_entry : lgraph_array.GetArray()) {
+    I(lg_entry.IsObject());
 
-    graph_list >> name >> graph_id >> graph_version.value >> nentries;
-    graph_list >> source;
+    I(lg_entry.HasMember("id"));
+    I(lg_entry.HasMember("nentries"));
+    I(lg_entry.HasMember("source"));
+    I(lg_entry.HasMember("version"));
 
-    if (graph_version >= max_next_version) max_next_version = graph_version.value + 1;
+    uint64_t id = lg_entry["id"].GetUint64();;
+    if (id>attribute.size())
+      attribute.resize(id);
 
-    // this is only true in case where we skip graph ids
-    if (attribute.size() <= graph_id) attribute.resize(graph_id + 1);
+    attribute[id].nentries = lg_entry["nentries"].GetUint64();;
+    attribute[id].source   = lg_entry["source"].GetString();;
+    attribute[id].version  = lg_entry["version"].GetUint64();;
 
     if (graph_version.value != 0) {
-      attribute[graph_id].sub_node.setup(name,graph_id);
-      attribute[graph_id].source   = source;
-      attribute[graph_id].version  = graph_version;
-      attribute[graph_id].nentries = nentries;
+      attribute[id].sub_node.from_json(lg_entry);
+
       // NOTE: must use attribute to keep the string in memory
-      name2id[name] = graph_id;
+      name2id[sub_node.get_name()] = id;
+
     } else {
       recycled_id.set_bit(graph_id);
     }
-  }
 
-  graph_list.close();
-  // FIXME: END
+    I(sub_node.get_lgid() == id); // for consistency
+  }
 
 #ifndef NDEBUG
   DIR *dir = opendir(path.c_str());
@@ -316,7 +329,7 @@ void Graph_library::reload() {
 #endif
 }
 
-Graph_library::Graph_library(std::string_view _path) : path(_path), library_file(path + "/" + "graph_library") {
+Graph_library::Graph_library(std::string_view _path) : path(_path), library_file(path + "/" + "graph_library.json") {
   graph_library_clean = true;
   reload();
 }
@@ -483,6 +496,7 @@ void Graph_library::clean_library() {
   rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(s);
 
   writer.StartObject();
+
   writer.Key("lgraph");
   writer.StartArray();
   for (size_t id = 1; id < attribute.size(); ++id) {
@@ -492,9 +506,6 @@ void Graph_library::clean_library() {
     writer.Key("id");
     writer.Uint64(id);
 
-    writer.Key("name");
-    writer.String(it.name.c_str());
-
     writer.Key("version");
     writer.Uint64(it.version);
 
@@ -503,6 +514,8 @@ void Graph_library::clean_library() {
 
     writer.Key("source");
     writer.String(it.source.c_str());
+
+    it.sub_node.to_json(writer);
 
     writer.EndObject();
   }
@@ -548,25 +561,14 @@ void Graph_library::clean_library() {
   {
     std::ofstream fs;
 
-    fs.open(library_file + ".json", std::ios::out | std::ios::trunc);
+    fs.open(library_file, std::ios::out | std::ios::trunc);
     if(!fs.is_open()) {
-      Pass::error("ERROR: could not open graph_library file {}", library_file + ".json");
+      Pass::error("ERROR: could not open graph_library file {}", library_file);
       return;
     }
     fs << s.GetString() << std::endl;
     fs.close();
   }
-
-  std::ofstream graph_list;
-
-  graph_list.open(library_file);
-  graph_list << (attribute.size() - 1) << std::endl;
-  for (size_t id = 1; id < attribute.size(); ++id) {
-    const auto &it = attribute[id];
-    graph_list << it.name << " " << id << " " << it.version << " " << it.nentries << " " << it.source << std::endl;
-  }
-
-  graph_list.close();
 
   graph_library_clean = true;
 }

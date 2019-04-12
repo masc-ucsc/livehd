@@ -4,6 +4,12 @@
 #include "lgraph_base_core.hpp"
 #include "tech_library.hpp"
 
+#include "rapidjson/document.h"
+#include "rapidjson/error/en.h"
+#include "rapidjson/filereadstream.h"
+#include "rapidjson/filewritestream.h"
+#include "rapidjson/prettywriter.h"
+
 #include "absl/container/flat_hash_map.h"
 
 class Sub_node {
@@ -64,6 +70,9 @@ public:
   Sub_node() {
     expunge();
   }
+
+  void to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer) const;
+  void from_json(const rapidjson::Value &entry);
 
   void setup(std::string_view _name, Lg_type_id _lgid) {
     I(io_pins.empty());
