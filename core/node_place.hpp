@@ -21,4 +21,3 @@ public:
   uint32_t get_x() const { return posx; }
   uint32_t get_y() const { return posy; }
 };
-

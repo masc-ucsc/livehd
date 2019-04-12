@@ -42,10 +42,6 @@ Node_Type::_init::_init() {
   Node_Type::table[LUT_Op]               = new Node_Type_LUT();
   Node_Type::table[GraphIO_Op]           = new Node_Type_GraphIO();
   Node_Type::table[SubGraph_Op]          = new Node_Type_SubGraph();
-  // IDs between SubGraph_Op and SubGraphMax_Op are allowed, but they just mean a different type of subgraph
-  Node_Type::table[TechMap_Op]           = new Node_Type_TechMap();
-  Node_Type::table[BlackBox_Op]          = new Node_Type_BlackBox();
-
   Node_Type::table[U32Const_Op]          = new Node_Type_U32Const();
   Node_Type::table[StrConst_Op]          = new Node_Type_StrConst();
   Node_Type::table[CfgAssign_Op]         = new Node_Type_CfgAssign();
@@ -68,7 +64,6 @@ Node_Type::_init::_init() {
 
 Node_Type &Node_Type::get(Node_Type_Op op) {
   if (op >= SubGraphMin_Op && op <= SubGraphMax_Op) op = SubGraph_Op;
-  else if (op >= TechMapMin_Op  && op <= TechMapMax_Op ) op = TechMap_Op;
   else if (op >= U32ConstMin_Op && op <= U32ConstMax_Op) op = U32Const_Op;
   else if (op >= StrConstMin_Op && op <= StrConstMax_Op) op = StrConst_Op;
   else if (op >= LUTMin_Op      && op <= LUTMax_Op)      op = LUT_Op;
@@ -83,4 +78,3 @@ Node_Type_Op Node_Type::get(std::string_view opname) {
 }
 
 bool Node_Type::is_type(std::string_view opname) { return (name2node.find(opname) != name2node.end()); }
-

@@ -11,12 +11,14 @@
 
 #include "attribute.hpp"
 
-LGraph_Base::LGraph_Base(const std::string &_path, const std::string &_name, Lg_type_id lgid) noexcept
+LGraph_Base::LGraph_Base(std::string_view _path, std::string_view _name, Lg_type_id lgid) noexcept
     : Lgraph_base_core(_path, _name, lgid)
-    , input_array(_path + "/lgraph_" + std::to_string(lgid) + "_inputs")
-    , output_array(_path + "/lgraph_" + std::to_string(lgid) + "_outputs")
+    , input_array(absl::StrCat(_path, "/lgraph_", std::to_string(lgid), "_inputs"))
+    , output_array(absl::StrCat(_path, "/lgraph_", std::to_string(lgid), "_outputs"))
     , node_internal(absl::StrCat(path, "/lgraph_", std::to_string(lgid), "_nodes")) {
   I(lgid);  // No id zero allowed
+
+  library  = Graph_library::instance(path);
 }
 
 LGraph_Base::~LGraph_Base() {
@@ -35,8 +37,6 @@ LGraph_Base::_init::_init() {
   // Add here sequence of static initialization that may be needed
 }
 
-bool LGraph_Base::close() { return Lgraph_base_core::close(); }
-
 void LGraph_Base::clear() {
   node_internal.clear();
   input_array.clear();
@@ -45,11 +45,11 @@ void LGraph_Base::clear() {
   max_io_port_pid = 0;
 
   Lgraph_base_core::clear();
+
+  library->update_nentries(lgid, 0);
 }
 
 void LGraph_Base::sync() {
-
-  library->update_nentries(lg_id(), node_internal.size());
 
   node_internal.sync();
 
@@ -57,6 +57,9 @@ void LGraph_Base::sync() {
   output_array.sync();
 
   Lgraph_base_core::sync();
+
+  library->update_nentries(lgid, node_internal.size());
+  library->sync();
 }
 
 void LGraph_Base::emplace_back() {
@@ -72,7 +75,7 @@ void LGraph_Base::emplace_back() {
 }
 
 void LGraph_Base::reload() {
-  auto sz = library->get_nentries(lgraph_id);
+  auto sz = library->get_nentries(lgid);
 
   node_internal.reload(sz);
   // lazy input_array.reload();
@@ -150,7 +153,6 @@ Index_ID LGraph_Base::get_graph_output_nid_from_pid(Port_ID pid) const {
 
   return 0;
 }
-
 
 Index_ID LGraph_Base::create_node_space(const Index_ID last_idx, const Port_ID dst_pid, const Index_ID master_nid, const Index_ID root_idx) {
   Index_ID idx2 = create_node_int();
@@ -665,5 +667,3 @@ Edge_raw_iterator LGraph_Base::inp_edges_raw(const Index_ID idx) const {
 
   return Edge_raw_iterator(s, e, true);
 }
-
-

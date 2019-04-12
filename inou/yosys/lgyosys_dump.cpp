@@ -80,15 +80,15 @@ RTLIL::Wire *Lgyosys_dump::create_io_wire(Node_pin &pin, RTLIL::Module *module) 
 }
 
 void Lgyosys_dump::create_blackbox(LGraph *subgraph, RTLIL::Design *design) {
+  if(created_sub.find(subgraph->get_name()) != created_sub.end())
+    return;
+  created_sub.insert(subgraph->get_name());
+
   RTLIL::Module *mod            = new RTLIL::Module;
   mod->name                     = absl::StrCat("\\", subgraph->get_name());
   mod->attributes["\\blackbox"] = RTLIL::Const(1);
 
-  static absl::flat_hash_set<std::string_view> created_blackboxes; // FIXME: Remembers forever???
-  if(created_blackboxes.find(subgraph->get_name()) == created_blackboxes.end()) {
-    design->add(mod);
-    created_blackboxes.insert(subgraph->get_name());
-  }
+  design->add(mod);
 
   uint32_t port_id = 0;
   subgraph->each_graph_io([&port_id,mod,this](Node_pin &pin) {
@@ -239,11 +239,8 @@ void Lgyosys_dump::create_subgraph(LGraph *g, RTLIL::Module *module, Node &node)
 
   auto sub_id = node.get_type_subgraph();
   LGraph *subgraph = LGraph::open(g->get_path(), sub_id);
-  if(subgraph == nullptr) {
-    auto subgraph_name = g->get_library().get_name(sub_id);
-    auto source        = g->get_library().get_source(sub_id);
-    subgraph           = LGraph::create(g->get_path(), subgraph_name, source);
-  }
+  assert(subgraph);
+
   if(hierarchy) {
     _subgraphs.insert(subgraph);
   } else {
@@ -380,6 +377,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
 
   RTLIL::Module *module = design->addModule(absl::StrCat("\\",name));
 
+  created_sub.clear();
   input_map.clear();
   output_map.clear();
   cell_output_map.clear();

@@ -77,8 +77,6 @@ enum Node_Type_Op : uint64_t {
   DfgPendingGraph_Op,
   // Add here, operators needed
   SubGraph_Op,
-  BlackBox_Op,
-  TechMap_Op,
   U32Const_Op,
   StrConst_Op,
   // op_class: sub
@@ -209,10 +207,10 @@ public:
   }
 
   bool has_output(Port_ID pid) const {
-    return outputs.size() > pid || outputs.empty(); // no default outputs for blocks like Tech/subgraph....
+    return outputs.size() > pid || outputs.empty(); // no default outputs subgraph
   }
   bool has_input(Port_ID pid) const {
-    return inputs.size() > pid || inputs.empty(); // no default outputs for blocks like Tech/subgraph....
+    return inputs.size() > pid || inputs.empty(); // no default inputs for subgraph
   }
   bool has_single_output() const { return outputs.size() == 1; }
   bool has_single_input() const  { return inputs.size()  == 1; }
@@ -618,45 +616,6 @@ public:
   Node_Type_SubGraph() : Node_Type("subgraph", SubGraph_Op, true){};
 };
 
-class Node_Type_TechMap : public Node_Type {
-public:
-  // FIXME: Create 2 TechMaps to know if it is pipelined or not for loops
-  Node_Type_TechMap() : Node_Type("techmap", TechMap_Op, true){};
-};
-
-#define LGRAPH_BBOP_TYPE 0
-#define LGRAPH_BBOP_NAME 1
-
-#define LGRAPH_BBOP_OFFSET 2
-#define LGRAPH_BBOP_PORT_SIZE 2
-
-#define LGRAPH_BBOP_ICONNECT(_n) (LGRAPH_BBOP_OFFSET + 1 + _n * (LGRAPH_BBOP_PORT_SIZE))
-#define LGRAPH_BBOP_IPARAM(_n)   (LGRAPH_BBOP_OFFSET + 0 + _n * (LGRAPH_BBOP_PORT_SIZE))
-
-#define LGRAPH_BBOP_ISIPARAM(_pid) (((_pid - LGRAPH_BBOP_OFFSET) % (LGRAPH_BBOP_PORT_SIZE)) == 0)
-#define LGRAPH_BBOP_ISICONNECT(_pid) (((_pid - LGRAPH_BBOP_OFFSET) % (LGRAPH_BBOP_PORT_SIZE)) == 1)
-
-#define LGRAPH_BBOP_PORT_N(_pid) ((_pid - LGRAPH_BBOP_OFFSET) / (LGRAPH_BBOP_PORT_SIZE))
-
-class Node_Type_BlackBox : public Node_Type {
-public:
-  Node_Type_BlackBox() : Node_Type("blackbox", BlackBox_Op, true) {
-    inputs.push_back("TYPE");
-    inputs.push_back("INSTANCE_NAME");
-
-    for(int i=0;i<1024;i++) { // At most 1K ports?? Increase if needed
-      std::string txt = "I" + std::to_string(i);
-      inputs.push_back(txt + "_ISPARAM");  // 0 = input, 1 = parameter
-      inputs.push_back(txt + "_CONNECT");
-    }
-
-    for(int i=0;i<1024;i++) {
-      std::string txt = "O" + std::to_string(i);
-      outputs.push_back(txt + "_CONNECT");
-    }
-  };
-};
-
 class Node_Type_U32Const : public Node_Type {
 public:
   Node_Type_U32Const() : Node_Type("u32const", U32Const_Op, false) { outputs.push_back("Y"); };
@@ -768,4 +727,3 @@ class Node_Type_DontCare : public Node_Type {
 public:
   Node_Type_DontCare() : Node_Type("don't_care", DontCare_Op, false) { outputs.push_back("Y"); };
 };
-

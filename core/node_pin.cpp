@@ -60,8 +60,8 @@ void Node_pin::set_bits(uint16_t bits) {
   g->set_bits(idx, bits);
 }
 
-std::string_view Node_pin::get_type_subgraph_io_name() const {
-  auto sub_id = get_node().get_type_subgraph();
+std::string_view Node_pin::get_type_sub_io_name() const {
+  auto sub_id = get_node().get_type_sub();
   LGraph *subgraph = LGraph::open(g->get_path(), sub_id);
   I(subgraph);
   auto name = subgraph->get_graph_output_name_from_pid(pid);
@@ -69,14 +69,6 @@ std::string_view Node_pin::get_type_subgraph_io_name() const {
     return name;
 
   return subgraph->get_graph_input_name_from_pid(pid);
-}
-
-std::string_view Node_pin::get_type_tmap_io_name() const {
-  const Tech_cell *tcell = get_node().get_type_tmap_cell();
-  if (sink)
-    return tcell->get_input_name(pid);
-
-  return tcell->get_output_name(pid);
 }
 
 float Node_pin::get_delay() const {
@@ -160,4 +152,3 @@ uint16_t Node_pin::get_offset() const {
 	I(off);
 	return off;
 }
-

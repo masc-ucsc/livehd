@@ -92,6 +92,9 @@ public:
   Node get_node() const;
 
   void connect_sink(Node_pin &dst);
+  void connect_sink(Node_pin &&dst) {
+    connect_sink(dst);
+  }
   void connect_driver(Node_pin &dst);
   void connect(Node_pin &dst) {
     if (dst.is_sink() && is_driver())
@@ -135,12 +138,10 @@ public:
   uint16_t get_bits() const;
   void     set_bits(uint16_t bits);
 
-  std::string_view get_type_subgraph_io_name() const;
-  std::string_view get_type_tmap_io_name() const;
+  std::string_view get_type_sub_io_name() const;
 
   void set_offset(uint16_t offset);
   uint16_t get_offset() const;
 
   // END ATTRIBUTE ACCESSORS
 };
-

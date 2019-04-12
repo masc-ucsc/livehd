@@ -9,7 +9,7 @@ LGraph_Node_Delay::LGraph_Node_Delay(const std::string &path, const std::string 
 void LGraph_Node_Delay::clear() { node_delay.clear(); }
 
 void LGraph_Node_Delay::reload() {
-  uint64_t sz = library->get_nentries(lgraph_id);
+  uint64_t sz = library->get_nentries(get_lgid());
   node_delay.reload(sz);
 }
 

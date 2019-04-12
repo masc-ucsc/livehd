@@ -71,5 +71,3 @@ public:
 
   // END ATTRIBUTE ACCESSORS
 };
-
-

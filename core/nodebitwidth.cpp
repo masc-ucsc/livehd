@@ -179,7 +179,7 @@ LGraph_Node_bitwidth::LGraph_Node_bitwidth(const std::string &path, const std::s
 void LGraph_Node_bitwidth::clear() { node_bitwidth.clear(); }
 
 void LGraph_Node_bitwidth::reload() {
-  uint64_t sz = library->get_nentries(lgraph_id);
+  uint64_t sz = library->get_nentries(get_lgid());
   node_bitwidth.reload(sz);
 }
 

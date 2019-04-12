@@ -21,7 +21,6 @@
 #include "node_type_base.hpp"
 
 #include "graph_library.hpp"
-#include "tech_library.hpp"
 
 #include "node_pin.hpp"
 #include "node.hpp"
@@ -51,8 +50,7 @@ protected:
 
   Index_ID create_node_int() final;
 
-  // TODO: convert std::string & to std::string_view
-  explicit LGraph(const std::string &path, const std::string &name, const std::string &source, bool clear);
+  explicit LGraph(std::string_view _path, std::string_view _name, std::string_view _source, bool clear);
 
   bool has_node_outputs(Index_ID nid) const {
     I(nid < node_internal.size());
@@ -141,7 +139,6 @@ public:
     return idx;
   }
 
-
   Forward_edge_iterator  forward();
   Backward_edge_iterator backward();
   Fast_edge_iterator fast();
@@ -151,7 +148,6 @@ public:
   static LGraph *open(std::string_view path, int lgid);
   static LGraph *open(std::string_view path, std::string_view name);
   static void    rename(std::string_view path, std::string_view orig, std::string_view dest);
-  bool           close() override;
 
   void clear() override;
   void reload() override;
@@ -169,6 +165,9 @@ public:
   Node create_node_const(std::string_view value);
   Node create_node_const(std::string_view value, uint16_t bits);
   Node create_node_sub(Lg_type_id sub);
+  Node create_node_sub(std::string_view sub_name);
+
+  Sub_node         &get_self_sub_node() const; // Access all input/outputs
 
   void dump();
 
@@ -192,21 +191,21 @@ public:
 
   void each_output_edge_fast(std::function<void(XEdge &edge)> f1);
 
-  void each_sub_graph_fast_direct(const std::function<bool(Node &, const Lg_type_id &)>);
+  void each_sub_fast_direct(const std::function<bool(Node &, const Lg_type_id &)>);
 
   template <typename FN>
-  void each_sub_graph_fast(const FN f1) {
+  void each_sub_fast(const FN f1) {
     if constexpr (std::is_invocable_r_v<bool, FN &, Node &, const Lg_type_id &>) {  // WARNING: bool must be before void
-      each_sub_graph_fast_direct(f1);
+      each_sub_fast_direct(f1);
     } else if constexpr (std::is_invocable_r_v<void, FN &, Node &, const Lg_type_id &>) {
       auto f2 = [&f1](Node &node, const Lg_type_id &lgid) {
         f1(node,lgid);
         return true;
       };
-      each_sub_graph_fast_direct(f2);
+      each_sub_fast_direct(f2);
     } else {
       I(false);
-      each_sub_graph_fast_direct(f1);  // Better error message if I keep this
+      each_sub_fast_direct(f1);  // Better error message if I keep this
     }
   };
 
@@ -229,4 +228,3 @@ public:
 
   const Hierarchy &get_hierarchy();
 };
-

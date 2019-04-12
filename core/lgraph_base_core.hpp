@@ -12,10 +12,6 @@
 #include "explicit_type.hpp"
 #include "iassert.hpp"
 
-//#include "graph_library.hpp"
-//#include "lgedge.hpp"
-//#include "tech_library.hpp"
-
 // LGraph basic core types used all over
 using Lg_type_id   = Explicit_type<uint32_t, struct Lg_type_id_struct>;  // Global used all over
 using Index_ID     = Explicit_type<uint64_t, struct Index_ID_struct>;
@@ -49,37 +45,28 @@ protected:
   public:
     Setup_path(std::string_view path);
   };
-  Setup_path        p;  // Must be first in base object
-  const std::string path;
-  const std::string name;
-  const std::string long_name;
-  const Lg_type_id  lgraph_id;
+
+  Setup_path  p;  // Must be first in base object
+  std::string path;
+  std::string name;
+  std::string long_name;
+  Lg_type_id  lgid;
 
   bool locked;
-
-  // Integrate graph and tech library?
-  Graph_library *library;
-  Tech_library * tlibrary;
 
   Lgraph_base_core() = delete;
   explicit Lgraph_base_core(std::string_view _path, std::string_view _name, Lg_type_id lgid);
   virtual ~Lgraph_base_core(){};
 
-
 public:
   void get_lock();
 
-  virtual bool close();
   virtual void clear();
   virtual void sync();
 
   std::string_view get_name() const { return std::string_view(name); }
 
-  const Lg_type_id get_lgid() const { return lgraph_id; }
-  const Lg_type_id lg_id()    const { return lgraph_id; } // WARNING: deprecated: use get_lgid()
+  const Lg_type_id get_lgid() const { return lgid; }
 
-  const std::string   &get_path() const { return path; }
-  const Graph_library &get_library() const { return *library; }
-  const Tech_library  &get_tlibrary() const { return *tlibrary; }
-  Tech_library &       get_tech_library() { return *tlibrary; }
+  std::string_view     get_path() const { return path; }
 };

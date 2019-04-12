@@ -16,6 +16,7 @@ class Edge_raw_iterator;
 class Forward_edge_iterator;
 class Backward_edge_iterator;
 class Fast_edge_iterator;
+class Graph_library;
 
 class LGraph_Base : public Lgraph_base_core {
 private:
@@ -32,12 +33,13 @@ protected:
 
   // typedef std::pair<Index_ID, Port_ID> io_t; // node id and position at verilog
 
-  Port_ID             max_io_port_pid;
-  Char_Array<IO_port> input_array;
-  Char_Array<IO_port> output_array;
+  Port_ID              max_io_port_pid;
+  Char_Array<IO_port>  input_array;
+  Char_Array<IO_port>  output_array;
   Dense<Node_Internal> node_internal;
 
   static inline constexpr std::string_view unknown_io = "unknown";
+  Graph_library       *library;
 
   Index_ID         create_node_space(const Index_ID idx, const Port_ID dst_pid, const Index_ID master_nid, const Index_ID root_nid);
   Index_ID         get_space_output_pin(const Index_ID idx, const Port_ID dst_pid, Index_ID &root_nid);
@@ -79,7 +81,7 @@ public:
 
   LGraph_Base(const LGraph_Base &) = delete;
 
-  explicit LGraph_Base(const std::string &path, const std::string &_name, Lg_type_id lgid) noexcept;
+  explicit LGraph_Base(std::string_view _path, std::string_view _name, Lg_type_id lgid) noexcept;
   virtual ~LGraph_Base();
 
   virtual bool close();
@@ -168,6 +170,5 @@ public:
     _init();
   } _static_initializer;
 
-
+  const Graph_library &get_library() const { return *library; }
 };
-

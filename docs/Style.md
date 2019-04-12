@@ -259,6 +259,60 @@ std::vector<LGraph *> Inou_yaml::generate() {
   }
 ```
 
+## Decide how to use attributes
+
+Attributes are parameters or information that an be per Node, Node_pin or Edge. In LGraph, attributes are
+persistent. This means that they are kept across execution runs in the LGraph database (E.g: in lgdb).
+
+
+For persistent attributes, the structures to use are defined in core/annotate.hpp. Any new attribute
+must be added to "annotate.hpp" to preserve persistence and to make sure that they are cleared when needed.
+
+
+Many times it is important to have information per node, but that it is not persistent across runs. For example,
+when building a LGraph from Yosys, there is a need to remember pointers from yosys to LGraph. This by definition can not be persistent because pointers change across runs. For this case, there are several options.
+
+
+### The Non-Persistent Annotations use Node, Node_pin, or Edge as data
+
+In this case, there is some index value like a pointer or a string or an integer. The index for the map
+is not a LGraph structure. E.g:
+
+```cpp
+absl::flat_hash_map<SomeData, Node_pin> s2pin;
+absl::flat_hash_map<SomeData, Node>     s2node;
+
+SomeData d1;
+s2pin[d1]  = node.get_driver_pin(); // Example of use getting a pint
+s2node[d1] = node;
+auto name = s2pin[d1].get_name();   // Pick previously set driver name
+```
+
+In this case, it is fine to use the full Node, Node_pin, or Edge. This has some pointers inside, but it is OK because it is not persistent.
+
+### The Non-Persistent Annotations use Node, Node_pin, or Edge as Index
+
+When using the Node, Node_pin, Edge as index for a map-like structure, it is NOT ok to use the Node, Node_pin, Edge directly. The reason is that the internal pointer is going to confuse the hash function. The value to use
+is the Node::Compact, Node_pin::Compact, Edge::Compact. The ::Compact already comes with the hash functions for abseil map structures that are the recommended by default for performance reasons.
+
+
+```cpp
+absl::flat_hash_map<Node_pin::Compact, RTLIL::Wire *>  input_map;
+
+input_map[pin.get_compact()] = wire;
+
+auto *wire = input_map[pin.get_compact()];
+
+for(const auto &[key, value]:input_map) {
+  Node_pin pin(lg, 0, key); // Key is a ::Compact, not a Node_pin. Must provide LGraph pointer back. 0 is for no hierarchy
+  auto name  = pin.get_name();
+  auto *wire = value;
+  // ... Some use here
+}
+```
+
+The persistent attribute class does something similar internally, but it is hidden from the external usage.
+
 ## Check if a string starts with a substring
 
 Use the STL rfind to handle the common case of finding a sub-string. Even for when checking if a string starts with a given substring.

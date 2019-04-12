@@ -54,13 +54,12 @@ Node_pin LGraph::add_graph_output_int(std::string_view str, uint16_t bits) {
   return Node_pin(this, 0, idx, pid, true);
 }
 
-LGraph::LGraph(const std::string &path, const std::string &_name, const std::string &_source, bool _clear)
-    // Lgraph_base_core(path, _name, Graph_library::instance(path)->register_lgraph(_name, _source, this))
-    :LGraph_Base(path, _name, Graph_library::instance(path)->register_lgraph(_name, _source, this))
-    ,LGraph_Node_Delay(path, _name, lg_id())
-    ,LGraph_Node_bitwidth(path, _name, lg_id())
-    ,LGraph_Node_Src_Loc(path, _name, lg_id())
-    ,LGraph_Node_Type(path, _name, lg_id()) {
+LGraph::LGraph(std::string_view _path, std::string_view _name, std::string_view _source, bool _clear)
+    :LGraph_Base(_path, _name, Graph_library::instance(_path)->register_lgraph(_name, _source, this))
+    ,LGraph_Node_Delay(_path, _name, lg_id())
+    ,LGraph_Node_bitwidth(_path, _name, lg_id())
+    ,LGraph_Node_Src_Loc(_path, _name, lg_id())
+    ,LGraph_Node_Type(_path, _name, lg_id()) {
   I(_name == get_name());
   if (_clear) {  // Create
     clear();
@@ -72,27 +71,18 @@ LGraph::LGraph(const std::string &path, const std::string &_name, const std::str
 }
 
 LGraph::~LGraph() {
-  bool deleted = library->unregister_lgraph(name, lgraph_id, this);
-  I(deleted);
+  library->unregister(name, lgid, this);
 }
 
 bool LGraph::exists(std::string_view path, std::string_view name) { return Graph_library::try_find_lgraph(path, name) != nullptr; }
 
 LGraph *LGraph::create(std::string_view path, std::string_view name, std::string_view source) {
-  LGraph *lg = Graph_library::try_find_lgraph(path, name);
-  if (lg) {
-    assert(Graph_library::instance(path));
-    // Overwriting old lgraph. Delete old pointer (but better be sure that nobody has it)
-    bool deleted = lg->close();
-    if (deleted) {
-      // Call expunge id delete LGraph object
-      lg->library->expunge_lgraph(name, lg);
-      delete lg;
-    }
-  }
+  auto *lib = Graph_library::instance(path);
+  LGraph *lg = lib->try_find_lgraph(name);
+  if (lg)
+    return new (lg) LGraph(path, name, source, true);
 
-  return new LGraph(std::string(path), std::string(name), std::string(source),
-                    true);  // TODO: Remove these nasty std::string (create local)
+  return new LGraph(path, name, source, true);
 }
 
 LGraph *LGraph::open(std::string_view path, int lgid) {
@@ -110,40 +100,28 @@ void LGraph::rename(std::string_view path, std::string_view orig, std::string_vi
 }
 
 LGraph *LGraph::open(std::string_view path, std::string_view name) {
-  LGraph *lg = Graph_library::try_find_lgraph(path, name);
+  auto *lib = Graph_library::instance(path);
+  if (lib == 0)
+    return 0;
+
+  LGraph *lg = lib->try_find_lgraph(path, name);
   if (lg) {
     // I(lg->node_internal.size()); // WEIRD, but possible to have an empty lgraph
-    assert(Graph_library::instance(path));
+    I(Graph_library::instance(path));
     auto source = Graph_library::instance(path)->get_source(name);
     auto lgid   = Graph_library::instance(path)->register_lgraph(name, source, lg);
     I(name == lg->get_name());
-    assert(lg->lgraph_id == lgid);
+    I(lg->get_lgid() == lgid);
 
     return lg;
   }
 
-  if (!Graph_library::instance(path)->include(name)) return 0;
-
-#if 0
-  std::string lock = absl::StrCat(path, "/", std::to_string(lgraph_id), ".lock");
-  if (access(lock.c_str(), R_OK) != -1) {
-    Pass::error("trying to open a locked {} (broken?) graph {}", lock, name);
+  I(!lib->include(name))
     return 0;
-  }
-#endif
-  const auto &source = Graph_library::instance(path)->get_source(name);
 
-  return new LGraph(std::string(path), std::string(name), std::string(source), false);
-}
+  std::string source = lib->get_source(name);
 
-bool LGraph::close() {
-  bool deleted = library->unregister_lgraph(name, lgraph_id, this);
-
-  sync();
-
-  LGraph_Base::close();
-
-  return deleted;
+  return new LGraph(path, name, source, false);
 }
 
 void LGraph::reload() {
@@ -380,9 +358,23 @@ Node LGraph::create_node_sub(Lg_type_id sub_id) {
   I(lg_id() != sub_id); // It can not point to itself (in fact, no recursion of any type)
 
   auto nid = create_node().get_nid();
-  set_type_subgraph(nid, sub_id);
+  set_type_sub(nid, sub_id);
 
   return Node(this,0,nid);
+}
+
+Node LGraph::create_node_sub(std::string_view sub_name) {
+  I(name != sub_name); // It can not point to itself (in fact, no recursion of any type)
+
+  auto nid = create_node().get_nid();
+  auto sub = library->setup_sub(sub_name);
+  set_type_sub(nid, sub.get_lgid());
+
+  return Node(this,0,nid);
+}
+
+Sub_node &LGraph::get_self_sub_node() const {
+  return library->get_sub(get_lgid());
 }
 
 Node LGraph::create_node_const(std::string_view value, uint16_t bits) {
@@ -522,4 +514,3 @@ const LGraph::Hierarchy &LGraph::get_hierarchy() {
 
   return hierarchy;
 }
-

@@ -25,6 +25,7 @@ private:
 
   void to_yosys(LGraph *g);
 
+  absl::flat_hash_set<std::string_view>                                 created_sub;
   absl::flat_hash_map<Node_pin::Compact, RTLIL::Wire *               >  input_map;
   absl::flat_hash_map<Node_pin::Compact, RTLIL::Wire *               >  output_map;
   absl::flat_hash_map<Node_pin::Compact, RTLIL::Wire *               >  cell_output_map;

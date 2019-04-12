@@ -1,4 +1,3 @@
-
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
@@ -97,15 +96,15 @@ void LGraph::each_output_edge_fast(std::function<void(XEdge &edge)> f1) {
   }
 }
 
-void LGraph::each_sub_graph_fast_direct(const std::function<bool(Node &, const Lg_type_id &)> fn) {
-  const bm::bvector<> &bm  = get_sub_graph_ids();
+void LGraph::each_sub_fast_direct(const std::function<bool(Node &, const Lg_type_id &)> fn) {
+  const bm::bvector<> &bm  = get_sub_ids();
   Index_ID             cid = bm.get_first();
   while (cid) {
     I(cid);
     I(node_internal[cid].is_node_state());
     I(node_internal[cid].is_master_root());
 
-    auto lgid = get_type_subgraph(cid);
+    auto lgid = get_type_sub(cid);
     auto node = Node(this,0,Node::Compact(cid));
 
     bool cont = fn(node, lgid);
@@ -126,4 +125,3 @@ void LGraph::each_root_fast_direct(std::function<bool(Node &)> f1) {
     if (!cont) return;
   }
 }
-

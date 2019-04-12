@@ -9,6 +9,7 @@
 
 #include "lgraphbase.hpp"
 #include "node_type_base.hpp"
+#include "sub_node.hpp"
 
 typedef Char_Array_ID Const_ID;
 
@@ -17,7 +18,7 @@ protected:
   Char_Array<Const_ID> consts;
   Dense<Node_Type_Op>  node_type_table;
   bm::bvector<>        const_nodes;      // FIXME: migrate to structure in node_intenral (otherwise, big meory as more nodes...
-  bm::bvector<>        sub_graph_nodes;  // FIXME: migrate to structure in node_intenral (otherwise, big meory as more nodes...
+  bm::bvector<>        sub_nodes;
 
   void clear();
   void reload();
@@ -27,14 +28,15 @@ protected:
   void             set_type(Index_ID nid, Node_Type_Op op);
   const Node_Type &get_type(Index_ID nid) const;
 
-  void             set_type_subgraph(Index_ID nid, Lg_type_id subgraphid);
-  Lg_type_id       get_type_subgraph(Index_ID nid) const;
+  void             set_type_sub(Index_ID nid, Lg_type_id subgraphid);
+  Lg_type_id       get_type_sub(Index_ID nid) const;
+  Sub_node        &get_type_sub_node(Index_ID nid);
+  const Sub_node  &get_type_sub_node(Index_ID nid) const;
+  Sub_node        &get_type_sub_node(std::string_view sub_name);
+  const Sub_node  &get_type_sub_node(std::string_view sub_name) const;
 
   void             set_type_lut(Index_ID nid, Lut_type_id lutid);
   Lut_type_id      get_type_lut(Index_ID nid) const;
-
-  void             set_type_tmap_id(Index_ID nid, uint32_t tmapid);
-  uint32_t         get_type_tmap_id(Index_ID nid) const;
 
   void             set_type_const_value(Index_ID nid, std::string_view value);
   void             set_type_const_sview(Index_ID nid, std::string_view value);
@@ -54,5 +56,5 @@ public:
   virtual ~LGraph_Node_Type(){};
 
   const bm::bvector<> &get_const_node_ids() const { return const_nodes;     };
-  const bm::bvector<> &get_sub_graph_ids() const  { return sub_graph_nodes; };
+  const bm::bvector<> &get_sub_ids() const  { return sub_nodes; };
 };

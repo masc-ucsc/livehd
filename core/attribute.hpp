@@ -27,7 +27,6 @@ pin_name.set(Index_ID idx, Y x, T v)
 const T &pin_name.get(Index_ID idx, Y x) const
 T &pin_name.at(Index_ID idx, Y x);A
 
-
 Attr_sview_raw
 Attr_data_raw
 
@@ -54,7 +53,6 @@ pin_name.sync();
 #ifndef unlikely
 #define unlikely(x) __builtin_expect((x), 0)
 #endif
-
 
 template <typename Index, bool Unique> class Attr_sview_raw {
 protected:
@@ -591,5 +589,3 @@ public:
 
   bool is_dense() const { return dense_mode; };
 };
-
-

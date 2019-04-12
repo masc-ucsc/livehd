@@ -108,43 +108,38 @@ public:
 
   bool is_root() const;
 
-  const Node_Type &get_type() const;
-  void set_type(const Node_Type_Op op);
-  void set_type(const Node_Type_Op op, uint16_t bits);
-  bool is_type(const Node_Type_Op op) const;
+  void              set_type_lut(Lut_type_id lutid);
+  Lut_type_id       get_type_lut() const;
 
-  void set_type_subgraph(Lg_type_id subid);
-  Lg_type_id get_type_subgraph() const;
+  const Node_Type  &get_type() const;
+  void              set_type(const Node_Type_Op op);
+  void              set_type(const Node_Type_Op op, uint16_t bits);
+  bool              is_type(const Node_Type_Op op) const;
 
-  void set_type_lut(Lut_type_id lutid);
-  Lut_type_id get_type_lut() const;
+  void              set_type_sub(Lg_type_id subid);
+  Lg_type_id        get_type_sub() const;
+  Sub_node         &get_type_sub_node() const;
 
-  void set_type_tmap_id(uint32_t tmap_id);
-  uint32_t get_type_tmap_id() const;
-  const Tech_cell *get_type_tmap_cell() const;
+  // WARNING: Do not call this. Use create_node_const... to reuse node if already exists
+  //void              set_type_const_value(std::string_view str);
+  //void              set_type_const_sview(std::string_view str);
+  //void              set_type_const_value(uint32_t val);
+  uint32_t          get_type_const_value() const;
+  std::string_view  get_type_const_sview() const;
 
-  /* WARNING: Do not call this. Use create_node_const... to reuse node if already exists
-  void set_type_const_value(std::string_view str);
-  void set_type_const_sview(std::string_view str);
-  void set_type_const_value(uint32_t val);
-  */
+  Node_pin          setup_driver_pin(std::string_view name);
+  Node_pin          setup_driver_pin(Port_ID pid);
+  Node_pin          setup_driver_pin() const;
 
-  uint32_t get_type_const_value() const;
-  std::string_view get_type_const_sview() const;
-
-  Node_pin setup_driver_pin(std::string_view name);
-  Node_pin setup_driver_pin(Port_ID pid);
-  Node_pin setup_driver_pin() const;
-
-  Node_pin setup_sink_pin(std::string_view name);
-  Node_pin setup_sink_pin(Port_ID pid);
-  Node_pin setup_sink_pin() const;
+  Node_pin          setup_sink_pin(std::string_view name);
+  Node_pin          setup_sink_pin(Port_ID pid);
+  Node_pin          setup_sink_pin() const;
 
   Node_pin_iterator inp_connected_pins() const;
   Node_pin_iterator out_connected_pins() const;
 
-  XEdge_iterator out_edges() const;
-  XEdge_iterator inp_edges() const;
+  XEdge_iterator    out_edges() const;
+  XEdge_iterator    inp_edges() const;
 
   void del_node();
 

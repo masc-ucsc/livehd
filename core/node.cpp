@@ -68,12 +68,12 @@ bool Node::is_type(const Node_Type_Op op) const {
   return g->get_type(nid).op == op;
 }
 
-void Node::set_type_subgraph(Lg_type_id subid) {
-  g->set_type_subgraph(nid,subid);
+void Node::set_type_sub(Lg_type_id subid) {
+  g->set_type_sub(nid,subid);
 }
 
-Lg_type_id Node::get_type_subgraph() const {
-  return g->get_type_subgraph(nid);
+Lg_type_id Node::get_type_sub() const {
+  return g->get_type_sub(nid);
 }
 
 void Node::set_type_lut(Lut_type_id lutid) {
@@ -84,16 +84,8 @@ Lut_type_id Node::get_type_lut() const {
   return g->get_type_lut(nid);
 }
 
-void Node::set_type_tmap_id(uint32_t tmap_id) {
-  g->set_type_tmap_id(nid,tmap_id);
-}
-
-uint32_t Node::get_type_tmap_id() const {
-  return g->get_type_tmap_id(nid);
-}
-
-const Tech_cell *Node::get_type_tmap_cell() const {
-  return g->get_tlibrary().get_const_cell(g->get_type_tmap_id(nid));
+Sub_node &Node::get_type_sub_node() const {
+  return g->get_type_sub_node(nid);
 }
 
 /* DEPRECATED
@@ -130,7 +122,7 @@ Node_pin Node::setup_driver_pin(std::string_view name) {
   }
 
   if (type.op == SubGraph_Op) {
-    Lg_type_id id2 = g->get_type_subgraph(nid);
+    Lg_type_id id2 = g->get_type_sub(nid);
     LGraph *g2 = LGraph::open(g->get_path(), id2);
     I(g2);
     auto internal_pin = g2->get_graph_output(name);
@@ -157,7 +149,7 @@ Node_pin Node::setup_sink_pin(std::string_view name) {
   }
 
   if (type.op == SubGraph_Op) {
-    Lg_type_id id2 = g->get_type_subgraph(nid);
+    Lg_type_id id2 = g->get_type_sub(nid);
     LGraph *g2 = LGraph::open(g->get_path(), id2);
     I(g2);
     auto internal_pin = g2->get_graph_input(name);
@@ -204,7 +196,7 @@ std::string_view Node::create_name() const {
   // FIXME: HERE. Does not scale for large designs (too much recursion)
 
   if (get_type().op == SubGraph_Op) {
-    absl::StrAppend(&signature, "subid_", get_type_subgraph().value);
+    absl::StrAppend(&signature, "subid_", get_type_sub().value);
   }else if (get_type().op == TechMap_Op) {
     const Tech_cell *tcell = get_type_tmap_cell();
 

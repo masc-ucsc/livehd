@@ -1,4 +1,3 @@
-
 #include "attribute.hpp"
 #include "lgraph.hpp"
 
@@ -112,4 +111,3 @@ public:
     last_attr = nullptr;
   };
 };
-

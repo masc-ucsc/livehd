@@ -56,9 +56,11 @@ Graph_library *Graph_library::instance(std::string_view path) {
 }
 
 Lg_type_id Graph_library::reset_id(std::string_view name, std::string_view source) {
+  graph_library_clean = false;
+
   const auto &it = name2id.find(name);
   if (it != name2id.end()) {
-    graph_library_clean           = false;
+    // Maybe it was a sub before, or reloaded, or the ID got recycled
     attribute[it->second].version = max_next_version.value++;
     if (attribute[it->second].source != source) {
       if (attribute[it->second].source == "-") {
@@ -66,9 +68,11 @@ Lg_type_id Graph_library::reset_id(std::string_view name, std::string_view sourc
         Pass::warn("overwrite lgraph:{} source from {} to {}", name, attribute[it->second].source, source);  // LCOV_EXCL_LINE
       } else if (source == "-") {
         Pass::warn("keeping lgraph:{} source {}", name, attribute[it->second].source);  // LCOV_EXCL_LINE
+      } else if (attribute[it->second].source.empty()) {
+        // Blackbox with a newly populated. OK
+        attribute[it->second].source = source;
       } else {
-        Pass::error("No overwrite lgraph:{} because it changed source from {} to {} (LGraph::delete first)", name,
-                    attribute[it->second].source, source);  // LCOV_EXCL_LINE
+        Pass::error("No overwrite lgraph:{} because it changed source from {} to {} (LGraph::delete first)", name, attribute[it->second].source, source);  // LCOV_EXCL_LINE
       }
     }
     return it->second;
@@ -76,15 +80,15 @@ Lg_type_id Graph_library::reset_id(std::string_view name, std::string_view sourc
   return add_name(name, source);
 }
 
-LGraph *Graph_library::try_find_lgraph(std::string_view path, std::string_view name) {
-  Graph_library *lib = instance(path);
-  return lib->try_find_lgraph(name);
-}
-
 bool Graph_library::exists(std::string_view path, std::string_view name) {
   const Graph_library *lib = instance(path);
 
   return lib->name2id.find(name) != lib->name2id.end();
+}
+
+LGraph *Graph_library::try_find_lgraph(std::string_view path, std::string_view name) {
+  Graph_library *lib = instance(path);
+  return lib->try_find_lgraph(name);
 }
 
 LGraph *Graph_library::try_find_lgraph(std::string_view name) {
@@ -94,8 +98,8 @@ LGraph *Graph_library::try_find_lgraph(std::string_view name) {
 
   if (global_name2lgraph[path].find(name) != global_name2lgraph[path].end()) {
     LGraph *lg = global_name2lgraph[path][name];
-    assert(global_instances.find(path) != global_instances.end());
-    assert(get_id(name) != 0);
+    I(global_instances.find(path) != global_instances.end());
+    I(get_lgid(name) != 0);
 
     return lg;
   }
@@ -103,25 +107,36 @@ LGraph *Graph_library::try_find_lgraph(std::string_view name) {
   return nullptr;
 }
 
+Sub_node &Graph_library::setup_sub(std::string_view name) {
+  Lg_type_id lgid = get_lgid(name);
+  if (lgid) {
+    return attribute[lgid].sub_node;
+  }
+
+  lgid = add_name(name,"-");
+  I(lgid);
+  return attribute[lgid].sub_node;
+}
+
 Lg_type_id Graph_library::add_name(std::string_view name, std::string_view source) {
-  assert(source != "");
+  I(source != "");
 
   Lg_type_id id = try_get_recycled_id();
   if (id == 0) {
     id = attribute.size();
     attribute.emplace_back();
   } else {
-    assert(id < attribute.size());
+    I(id < attribute.size());
   }
 
-  attribute[id].name    = name;
+  attribute[id].sub_node.setup(name, id);
   attribute[id].source  = source;
   attribute[id].version = max_next_version.value++;
 
   graph_library_clean = false;
 
-  assert(name2id.find(name) == name2id.end());
-  assert(id);
+  I(name2id.find(name) == name2id.end());
+  I(id);
   name2id[name] = id;
 
   return id;
@@ -162,7 +177,8 @@ bool Graph_library::rename_name(std::string_view orig, std::string_view dest) {
   I(name2id.find(orig) == name2id.end());
 
   graph_library_clean    = false;
-  attribute[id].name = dest;
+  attribute[id].sub_node.rename(dest);
+  I(attribute[id].sub_node.get_lgid() == id);
 
   name2id[dest] = id;
 
@@ -172,7 +188,7 @@ bool Graph_library::rename_name(std::string_view orig, std::string_view dest) {
 }
 
 void Graph_library::update(Lg_type_id lgid) {
-  assert(lgid < attribute.size());
+  I(lgid < attribute.size());
 
   if (attribute[lgid].version == (max_next_version - 1)) return;
 
@@ -181,7 +197,7 @@ void Graph_library::update(Lg_type_id lgid) {
 }
 
 void Graph_library::update_nentries(Lg_type_id lgid, uint64_t nentries) {
-  assert(lgid < attribute.size());
+  I(lgid < attribute.size());
 
   if (attribute[lgid].nentries != nentries) {
     graph_library_clean      = false;
@@ -190,7 +206,7 @@ void Graph_library::update_nentries(Lg_type_id lgid, uint64_t nentries) {
 }
 
 void Graph_library::reload() {
-  assert(graph_library_clean);
+  I(graph_library_clean);
 
   max_next_version = 1;
   std::ifstream graph_list;
@@ -231,7 +247,7 @@ void Graph_library::reload() {
     if (attribute.size() <= graph_id) attribute.resize(graph_id + 1);
 
     if (graph_version.value != 0) {
-      attribute[graph_id].name     = name;
+      attribute[graph_id].sub_node.setup(name,graph_id);
       attribute[graph_id].source   = source;
       attribute[graph_id].version  = graph_version;
       attribute[graph_id].nentries = nentries;
@@ -266,7 +282,7 @@ void Graph_library::reload() {
       continue;
 
     const std::string id_str(&dent->d_name[7], len - 7 - 6);
-    assert(lg_found.find(id_str) == lg_found.end());
+    I(lg_found.find(id_str) == lg_found.end());
     lg_found.insert(id_str);
 
     bool found = false;
@@ -309,7 +325,7 @@ Lg_type_id Graph_library::try_get_recycled_id() {
   if (recycled_id.none()) return 0;
 
   Lg_type_id lgid = recycled_id.get_first();
-  assert(lgid <= attribute.size());
+  I(lgid <= attribute.size());
   recycled_id.clear(lgid);
 
   return lgid;
@@ -330,16 +346,11 @@ void Graph_library::recycle_id(Lg_type_id lgid) {
   recycled_id.set_range(attribute.size(), end_pos, false);
 }
 
-bool Graph_library::expunge_lgraph(std::string_view name, LGraph *lg) {
-  if (global_name2lgraph[path][name] != lg) {
-    Pass::warn("graph_library::expunge_lgraph({}) for a wrong graph??? path:{}", name, path);
-    return true;
+void Graph_library::expunge(std::string_view name) {
+  auto it = global_name2lgraph[path].find(name);
+  if (it != global_name2lgraph[path].end()) {
+    global_name2lgraph[path].erase(it);
   }
-  global_name2lgraph[path].erase(global_name2lgraph[path].find(name));
-  auto it = name2id.find(name);
-  assert(it != name2id.end());
-  Lg_type_id id = it->second;
-  name2id.erase(it);
 
   if (attribute[id].nopen != 0) {
     lg->sync();
@@ -428,6 +439,8 @@ Lg_type_id Graph_library::copy_lgraph(std::string_view name, std::string_view ne
 }
 
 Lg_type_id Graph_library::register_lgraph(std::string_view name, std::string_view source, LGraph *lg) {
+  I(global_name2lgraph[path].find(name) == global_name2lgraph[path].end());
+
   global_name2lgraph[path][name] = lg;
 
   Lg_type_id id = reset_id(name, source);
@@ -435,30 +448,25 @@ Lg_type_id Graph_library::register_lgraph(std::string_view name, std::string_vie
   const auto &it = name2id.find(name);
   I(it != name2id.end());
   attribute[id].nopen++;
-  I(attribute[id].name == name);
+  I(attribute[id].sub_node.get_name() == name);
 
   return id;
 }
 
-bool Graph_library::unregister_lgraph(std::string_view name, Lg_type_id lgid, const LGraph *lg) {
-  assert(attribute.size() > (size_t)lgid);
+void Graph_library::unregister(std::string_view name, Lg_type_id lgid) {
+  I(attribute.size() > (size_t)lgid);
 
-  // WARNING: NOT ALWAYS, it can ::create multiple times before calling unregister
-  // assert(name2id[name] == lgid);
-  // assert(global_name2lgraph[path][name] == lg);
-
-  if (attribute[lgid].nopen == 0) return true;
+  I(attribute[lgid].nopen);
 
   attribute[lgid].nopen--;
   if (attribute[lgid].nopen == 0) {
-    return true;
+    if (attribute[lgid].sub_node.is_invalid())
+      expunge(name);
   }
-
-  return false;
 }
 
 void Graph_library::sync_all() {
-  assert(false);  // FIXME: to implement, once we migrate lgraph.cpp to core
+  I(false);  // FIXME: to implement, once we migrate lgraph.cpp to core
 #if 0
   for(auto &it:global_name2lgraph) {
     for(auto &it2:it.second) {

@@ -13,29 +13,37 @@
 #include "bm.h"
 
 #include "lgraphbase.hpp"
+#include "tech_library.hpp"
+#include "sub_node.hpp"
 
 class LGraph;
 
 class Graph_library {
 protected:
   struct Graph_attributes {
-    uint64_t    nentries;
-    std::string name;     // NOTE: No const as names can change (reload)
-    std::string source;   // File were this module came from. If file updated (all the associated lgraphs must be deleted)
+    Sub_node    sub_node;
+    uint64_t    nentries; // TODO: deprecate with the new attributes (once all the old attributes are gone)
+    std::string source;   // File were this module came from. If file updated (all the associated lgraphs must be deleted). If empty, it ies not present (blackbox)
     Lg_type_id  version;  // In which sequence order were the graphs last modified
     int         nopen;
-    Graph_attributes() { clear(); }
-    void clear() {
-      name     = "INVALID";
+    Graph_attributes() { expunge(); }
+    void expunge() {
+      sub_node.expunge();
       nopen    = 0;
       version  = 0;
       nentries = 0;
       source   = "-";
     }
   };
+
+  // BEGIN: common attributes or properties shared across all graphs in this library
   std::vector<std::string> liberty_list;
   std::vector<std::string> sdc_list;
   std::vector<std::string> spef_list;
+
+  std::vector<Tech_layer>  layer_list;  // only for routing
+  std::vector<Tech_via>    via_list;    // only for routing
+  // END: common attributes
 
   using Global_instances   = absl::flat_hash_map<std::string, Graph_library *>;
   using Global_name2lgraph = absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, LGraph *>>;
@@ -76,16 +84,39 @@ public:
   static LGraph *try_find_lgraph(std::string_view path, std::string_view name);
   LGraph *       try_find_lgraph(std::string_view name);
 
-  Lg_type_id add_name(std::string_view name, std::string_view source);
-  bool       rename_name(std::string_view orig, std::string_view dest);
-
-  std::string_view get_name(Lg_type_id lgid) const {
-    assert(lgid > 0);  // 0 is invalid lgid
-    assert(attribute.size() > lgid);
-    return attribute[lgid].name;
+  Sub_node      &setup_sub(std::string_view name);
+  Sub_node      &get_sub(Lg_type_id lgid) {
+    graph_library_clean = false;
+    I(lgid > 0);  // 0 is invalid lgid
+    I(attribute.size() > lgid);
+    I(attribute[lgid].sub_node.get_lgid() == lgid);
+    return attribute[lgid].sub_node;
+  }
+  Sub_node      &get_sub(std::string_view name) {
+    graph_library_clean = false;
+    return get_sub(get_lgid(name));
+  }
+  const Sub_node      &get_sub(Lg_type_id lgid) const {
+    I(lgid > 0);  // 0 is invalid lgid
+    I(attribute.size() > lgid);
+    I(attribute[lgid].sub_node.get_lgid() == lgid);
+    return attribute[lgid].sub_node;
+  }
+  const Sub_node      &get_sub(std::string_view name) const {
+    return get_sub(get_lgid(name));
   }
 
-  Lg_type_id get_id(std::string_view name) const {
+  Lg_type_id     add_name(std::string_view name, std::string_view source);
+  bool           rename_name(std::string_view orig, std::string_view dest);
+
+  std::string_view get_name(Lg_type_id lgid) const {
+    I(lgid > 0);  // 0 is invalid lgid
+    I(attribute.size() > lgid);
+    I(attribute[lgid].sub_node.get_lgid() == lgid);
+    return attribute[lgid].sub_node.get_name();
+  }
+
+  Lg_type_id get_lgid(std::string_view name) const {
     const auto &it = name2id.find(name);
     if (it != name2id.end()) {
       return it->second;
@@ -99,7 +130,7 @@ public:
     return attribute[lgid].source;
   }
 
-  std::string_view get_source(std::string_view name) const { return get_source(get_id(name)); }
+  std::string_view get_source(std::string_view name) const { return get_source(get_lgid(name)); }
 
   int lgraph_count() const { return attribute.size() - 1; }
 
@@ -124,8 +155,10 @@ public:
   bool expunge_lgraph(std::string_view name, LGraph *lg);
 
   Lg_type_id copy_lgraph(std::string_view name, std::string_view new_name);
+  Lg_type_id register_sub(std::string_view name);
   Lg_type_id register_lgraph(std::string_view name, std::string_view source, LGraph *lg);
-  bool       unregister_lgraph(std::string_view name, Lg_type_id lgid, const LGraph *lg);
+  void       unregister(std::string_view name, Lg_type_id lgid); // unregister open instance
+  void       expunge(std::string_view name); // Delete completely, even if open instances exists
 
   void     update_nentries(Lg_type_id lgid, uint64_t nentries);
   uint64_t get_nentries(Lg_type_id lgid) const {
@@ -144,17 +177,12 @@ public:
   void each_type(std::string_view match, std::function<void(Lg_type_id, std::string_view)> fn) const;
   void each_type(std::string_view match, std::function<bool(Lg_type_id, std::string_view)> fn) const;
 
-  const std::vector<std::string> &get_liberty() const {
-    return liberty_list;
-  };
+  const std::vector<std::string> &get_liberty() const { return liberty_list; };
+  const std::vector<std::string> &get_sdc()     const { return sdc_list; };
+  const std::vector<std::string> &get_spef()    const { return spef_list; };
 
-  const std::vector<std::string> &get_sdc() const {
-    return sdc_list;
-  };
-
-  const std::vector<std::string> &get_spef() const {
-    return spef_list;
-  };
+  const std::vector<Tech_layer> &get_layer()    const { return layer_list; };
+  const std::vector<Tech_via>   &get_via()      const { return via_list; };
 
   void reload();
 };

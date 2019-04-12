@@ -46,4 +46,3 @@ struct Ann_support {
     Ann_node_cfgmeta::sync(lg);
   };
 };
-
