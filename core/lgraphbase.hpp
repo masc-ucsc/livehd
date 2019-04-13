@@ -84,8 +84,6 @@ public:
   explicit LGraph_Base(std::string_view _path, std::string_view _name, Lg_type_id lgid) noexcept;
   virtual ~LGraph_Base();
 
-  virtual bool close();
-
   virtual void clear();
   virtual void sync();
 

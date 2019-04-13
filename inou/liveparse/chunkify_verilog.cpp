@@ -263,7 +263,7 @@ void Chunkify_verilog::elaborate() {
         }
         if(lg) {
           lg->close();
-          //library->unregister_lgraph(module, lg->lg_id(), lg);
+          //library->unregister_lgraph(module, lg->get_lgid(), lg);
           //lg->sync();
           lg = 0;
         }

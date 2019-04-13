@@ -991,7 +991,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
       assert(sub_graph);
       log("module name original was %s\n", cell->type.c_str());
 
-      entry_node.set_type_subgraph(sub_graph->lg_id());
+      entry_node.set_type_subgraph(sub_graph->get_lgid());
 
       std::string inst_name = cell->name.str().substr(1);
       if(!inst_name.empty())

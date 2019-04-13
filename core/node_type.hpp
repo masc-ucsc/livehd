@@ -52,7 +52,7 @@ protected:
 
 public:
   LGraph_Node_Type() = delete;
-  explicit LGraph_Node_Type(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept;
+  explicit LGraph_Node_Type(std::string_view path, std::string_view name, Lg_type_id lgid) noexcept;
   virtual ~LGraph_Node_Type(){};
 
   const bm::bvector<> &get_const_node_ids() const { return const_nodes;     };

@@ -121,20 +121,15 @@ Node_pin Node::setup_driver_pin(std::string_view name) {
     return Node_pin(g,hid,idx,pid,false);
   }
 
-  if (type.op == SubGraph_Op) {
-    Lg_type_id id2 = g->get_type_sub(nid);
-    LGraph *g2 = LGraph::open(g->get_path(), id2);
-    I(g2);
-    auto internal_pin = g2->get_graph_output(name);
-    pid = internal_pin.get_pid();
-    Index_ID idx = g->setup_idx_from_pid(nid,pid);
-    return Node_pin(g,hid,idx,pid,false);
-  }
+  I(type.op == SubGraph_Op);
 
-  I(type.op == TechMap_Op); // TechFile still not handled. Anything else missing?
-  I(false); // TechFile still not handled. Anything else missing?
-
-  return Node_pin(g,hid,nid,0,false);
+  Lg_type_id id2 = g->get_type_sub(nid);
+  LGraph *g2 = LGraph::open(g->get_path(), id2);
+  I(g2);
+  auto internal_pin = g2->get_graph_output(name);
+  pid = internal_pin.get_pid();
+  Index_ID idx = g->setup_idx_from_pid(nid,pid);
+  return Node_pin(g,hid,idx,pid,false);
 }
 
 Node_pin Node::setup_sink_pin(std::string_view name) {
@@ -148,20 +143,15 @@ Node_pin Node::setup_sink_pin(std::string_view name) {
     return Node_pin(g,hid,idx,pid,true);
   }
 
-  if (type.op == SubGraph_Op) {
-    Lg_type_id id2 = g->get_type_sub(nid);
-    LGraph *g2 = LGraph::open(g->get_path(), id2);
-    I(g2);
-    auto internal_pin = g2->get_graph_input(name);
-    pid = internal_pin.get_pid();
-    Index_ID idx = g->setup_idx_from_pid(nid,pid);
-    return Node_pin(g,hid,idx,pid,true);
-  }
+  I(type.op == SubGraph_Op);
 
-  I(type.op == TechMap_Op); // TechFile still not handled. Anything else missing?
-  I(false); // TechFile still not handled. Anything else missing?
-
-  return Node_pin(g,hid,nid,0,true);
+  Lg_type_id id2 = g->get_type_sub(nid);
+  LGraph *g2 = LGraph::open(g->get_path(), id2);
+  I(g2);
+  auto internal_pin = g2->get_graph_input(name);
+  pid = internal_pin.get_pid();
+  Index_ID idx = g->setup_idx_from_pid(nid,pid);
+  return Node_pin(g,hid,idx,pid,true);
 }
 
 Node_pin Node::setup_sink_pin(Port_ID pid) {
@@ -195,18 +185,14 @@ std::string_view Node::create_name() const {
   return Ann_node_name::set(*this, signature);
   // FIXME: HERE. Does not scale for large designs (too much recursion)
 
-  if (get_type().op == SubGraph_Op) {
-    absl::StrAppend(&signature, "subid_", get_type_sub().value);
-  }else if (get_type().op == TechMap_Op) {
-    const Tech_cell *tcell = get_type_tmap_cell();
+  if (get_type().op == GraphIO_Op) {
+    absl::StrAppend(&signature, "_io");
+	}else if (get_type().op == SubGraph_Op) {
+    absl::StrAppend(&signature, "_", get_type_sub_node().get_name());
+  }
 
-    if (tcell) {
-      for(const auto &e:inp_edges()) {
-        if(!e.driver.has_name() && e.driver.get_pid() < tcell->n_outs()) {
-          absl::StrAppend(&signature, "_", tcell->get_name(e.driver.get_pid()));
-        }
-      }
-    }
+  for(const auto &e:inp_edges()) {
+    absl::StrAppend(&signature, "_", e.driver.create_name());
   }
 
   auto nod = Ann_node_name::find(g, signature);
@@ -214,16 +200,7 @@ std::string_view Node::create_name() const {
     return Ann_node_name::set(*this, signature);
   }
 
-  for(const auto &dpin:out_connected_pins()) {
-    absl::StrAppend(&signature,"_",dpin.create_name());
-  }
-
-  auto nod2 = Ann_node_name::find(g, signature);
-  if (nod2.is_invalid()) {
-    return Ann_node_name::set(*this, signature);
-  }
-
-  absl::StrAppend(&signature,"_nid", std::to_string(nid)); // OK, add to stop trying
+  absl::StrAppend(&signature,"_", std::to_string(nid)); // OK, add to stop trying
 
   I(Ann_node_name::find(g, signature).is_invalid());
 
@@ -255,13 +232,13 @@ bool Node::has_name() const {
   return Ann_node_name::has(*this);
 }
 
-const Node_place &Node::get_place() const {
+const Ann_place &Node::get_place() const {
   return Ann_node_place::get(*this);
 }
 
-Node_place *Node::ref_place() {
+Ann_place *Node::ref_place() {
   if (!Ann_node_place::has(*this))
-    Ann_node_place::set(*this,Node_place()); // Empty
+    Ann_node_place::set(*this,Ann_place()); // Empty
 
   return &Ann_node_place::at(*this);
 }

@@ -12,7 +12,12 @@ void Sub_node::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer)
 
   writer.Key("io_pins");
   writer.StartArray();
+  bool skip_first = false;
   for(const auto &pin:io_pins) {
+    if (!skip_first) {
+      skip_first = true;
+      continue;
+    }
     writer.StartObject();
 
     writer.Key("name");
@@ -41,6 +46,8 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
 
   I(entry.HasMember("lgid"));
   I(entry.HasMember("name"));
+
+  io_pins.resize(1); // No id ZERO
 
   const rapidjson::Value &io_pins_array = entry["io_pins"];
   I(io_pins_array.IsArray());

@@ -85,7 +85,7 @@ LGraph *Pass_abc::regen(const LGraph *lg) {
   }
 
   find_cell_conn(lg);
-  auto source = lg->get_library().get_source(lg->lg_id());
+  auto source = lg->get_library().get_source(lg->get_lgid());
   LGraph *mapped = LGraph::create(lg->get_path(), absl::StrCat(lg->get_name(), "_mapped"), source);
   from_abc(mapped, lg, to_abc(lg));
   mapped->sync();

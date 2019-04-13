@@ -62,8 +62,6 @@ bool test0() {
   }
   I(conta == (1+300+1000));
 
-  g->close();
-
   return true;
 }
 
@@ -100,8 +98,6 @@ bool test1() {
     assert(inp.sink.is_input() == true);
   }
 
-  g->close();
-
   return true;
 }
 
@@ -129,8 +125,6 @@ bool test20() {
     assert(false);
     (void)out; // just to silence the warning
   }
-
-  g->close();
 
   return true;
 }
@@ -168,8 +162,6 @@ bool test21() {
     (void)out; // just to silence the warning
   }
 
-  g->close();
-
   return true;
 }
 
@@ -199,8 +191,6 @@ bool test2() {
     (void)out; // just to silence the warning
   }
 
-  g->close();
-
   return true;
 }
 
@@ -229,8 +219,6 @@ bool test22() {
     assert(false);
     (void)out; // just to silence the warning
   }
-
-  g->close();
 
   return true;
 }
@@ -263,8 +251,6 @@ bool test3() {
   for(auto nid : g->fast()) {
     assert(nid != n2.get_compact().nid);
   }
-
-  g->close();
 
   return true;
 }

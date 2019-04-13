@@ -59,7 +59,7 @@ void Pass_dfg::generate(Eprp_var &var) {
 std::vector<LGraph*> Pass_dfg::hier_generate_dfgs(LGraph *cfg_parent){
   std::vector<LGraph *> dfgs;
   fmt::print("hierarchical dfg generation start!\n");
-  fmt::print("top graph lgid:{}\n", cfg_parent->lg_id());
+  fmt::print("top graph lgid:{}\n", cfg_parent->get_lgid());
   auto dfg_name = cfg_parent->get_name().substr(0, cfg_parent->get_name().size() - 4);
   LGraph *dfg = LGraph::create(cfg_parent->get_path(), dfg_name, cfg_parent->get_name());
   I(dfg);
@@ -94,7 +94,7 @@ void Pass_dfg::optimize(Eprp_var &var) {
 
 void Pass_dfg::hier_optimize_dfgs(LGraph *dfg_parent){
   fmt::print("hierarchical dfg optimization start!\n");
-  fmt::print("top graph lgid:{}\n", dfg_parent->lg_id());
+  fmt::print("top graph lgid:{}\n", dfg_parent->get_lgid());
   do_optimize(dfg_parent);
 
   dfg_parent->each_sub_graph_fast([dfg_parent, this](Node node, Lg_type_id lgid){
@@ -119,7 +119,7 @@ void Pass_dfg::finalize_bitwidth(Eprp_var &var) {
 
 void Pass_dfg::hier_finalize_bits_dfgs(LGraph *dfg_parent){
   fmt::print("hierarchical dfg finalize_bits start!\n");
-  fmt::print("topg lgid:{}\n", dfg_parent->lg_id());
+  fmt::print("topg lgid:{}\n", dfg_parent->get_lgid());
   do_finalize_bitwidth(dfg_parent);
 
   dfg_parent->each_sub_graph_fast([dfg_parent, this](Node node, Lg_type_id lgid){

@@ -147,10 +147,6 @@ protected:
 
   void TearDown() override {
     // No needed to clear/delete every time, but it should work too
-    for(auto &lg:lgs) {
-      if(lg) lg->close();
-      lg = 0;
-    }
     lgs.clear();
   }
 };
@@ -180,7 +176,6 @@ TEST_F(Setup_graphs_test, each_sub_graph) {
         else
           children2[id]++;
 
-        child->close();
     });
   }
 
@@ -217,7 +212,6 @@ TEST_F(Setup_graphs_test, each_sub_graph_twice) {
         else
           children2[id]++;
 
-        child->close();
     });
   }
 

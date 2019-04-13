@@ -301,7 +301,7 @@ void Pass_abc::gen_sub_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_
     new_graph->set_node_instance_name(new_sub_idx, old_graph->get_node_instancename(idx));
 
     LGraph *sub_graph = LGraph::open(old_graph->get_path(), subgraph_name);
-    new_graph->node_subgraph_set(new_sub_idx, sub_graph->lg_id());
+    new_graph->node_subgraph_set(new_sub_idx, sub_graph->get_lgid());
   }
   Abc_Obj_t *pTerm = nullptr, *pNet = nullptr;
 

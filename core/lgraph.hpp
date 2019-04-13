@@ -12,9 +12,6 @@
 
 #include "lgedge.hpp"
 #include "lgraphbase.hpp"
-#include "nodebitwidth.hpp"
-#include "nodedelay.hpp"
-#include "nodesrcloc.hpp"
 #include "node_type_base.hpp"
 #include "node_type.hpp"
 
@@ -26,10 +23,7 @@
 #include "node.hpp"
 #include "edge.hpp"
 
-class LGraph : public LGraph_Node_Delay,
-               public LGraph_Node_bitwidth,
-               public LGraph_Node_Src_Loc,
-               public LGraph_Node_Type
+class LGraph : public LGraph_Node_Type
 {
 private:
   Index_ID add_graph_io_common();

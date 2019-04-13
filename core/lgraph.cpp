@@ -56,10 +56,7 @@ Node_pin LGraph::add_graph_output_int(std::string_view str, uint16_t bits) {
 
 LGraph::LGraph(std::string_view _path, std::string_view _name, std::string_view _source, bool _clear)
     :LGraph_Base(_path, _name, Graph_library::instance(_path)->register_lgraph(_name, _source, this))
-    ,LGraph_Node_Delay(_path, _name, lg_id())
-    ,LGraph_Node_bitwidth(_path, _name, lg_id())
-    ,LGraph_Node_Src_Loc(_path, _name, lg_id())
-    ,LGraph_Node_Type(_path, _name, lg_id()) {
+    ,LGraph_Node_Type(_path, _name, get_lgid()) {
   I(_name == get_name());
   if (_clear) {  // Create
     clear();
@@ -71,7 +68,7 @@ LGraph::LGraph(std::string_view _path, std::string_view _name, std::string_view 
 }
 
 LGraph::~LGraph() {
-  library->unregister(name, lgid, this);
+  library->unregister(name, lgid);
 }
 
 bool LGraph::exists(std::string_view path, std::string_view name) { return Graph_library::try_find_lgraph(path, name) != nullptr; }
@@ -116,26 +113,20 @@ LGraph *LGraph::open(std::string_view path, std::string_view name) {
     return lg;
   }
 
-  I(!lib->include(name))
+  if(!lib->include(name))
     return 0;
 
-  std::string source = lib->get_source(name);
+  auto source = lib->get_source(name);
 
   return new LGraph(path, name, source, false);
 }
 
 void LGraph::reload() {
   LGraph_Base::reload();
-  LGraph_Node_Delay::reload();
-  LGraph_Node_bitwidth::reload();
-  LGraph_Node_Src_Loc::reload();
   LGraph_Node_Type::reload();
 }
 
 void LGraph::clear() {
-  LGraph_Node_Delay::clear();
-  LGraph_Node_bitwidth::clear();
-  LGraph_Node_Src_Loc::clear();
   LGraph_Node_Type::clear();
 
   LGraph_Base::clear();  // last. Removes lock at the end
@@ -144,9 +135,6 @@ void LGraph::clear() {
 }
 
 void LGraph::sync() {
-  LGraph_Node_Delay::sync();
-  LGraph_Node_bitwidth::sync();
-  LGraph_Node_Src_Loc::sync();
   LGraph_Node_Type::sync();
 
   LGraph_Base::sync();  // last. Removes lock at the end
@@ -156,9 +144,6 @@ void LGraph::sync() {
 
 void LGraph::emplace_back() {
   LGraph_Base::emplace_back();
-  LGraph_Node_Delay::emplace_back();
-  LGraph_Node_bitwidth::emplace_back();
-  LGraph_Node_Src_Loc::emplace_back();
   LGraph_Node_Type::emplace_back();
 }
 
@@ -355,7 +340,7 @@ Node LGraph::create_node_const(std::string_view value) {
 }
 
 Node LGraph::create_node_sub(Lg_type_id sub_id) {
-  I(lg_id() != sub_id); // It can not point to itself (in fact, no recursion of any type)
+  I(get_lgid() != sub_id); // It can not point to itself (in fact, no recursion of any type)
 
   auto nid = create_node().get_nid();
   set_type_sub(nid, sub_id);
@@ -495,9 +480,9 @@ const LGraph::Hierarchy &LGraph::get_hierarchy() {
     auto entry = pending.back();
     pending.pop_back();
 
-    entry.top->add_hierarchy_entry(entry.base, entry.lg->lg_id());
+    entry.top->add_hierarchy_entry(entry.base, entry.lg->get_lgid());
 
-    entry.lg->each_sub_graph_fast([&entry, &pending](Node &node, const Lg_type_id lgid) {
+    entry.lg->each_sub_fast([&entry, &pending](Node &node, const Lg_type_id lgid) {
       if (!node.has_name()) return;
       LGraph *lg = LGraph::open(entry.top->get_path(), lgid);
 
@@ -508,8 +493,6 @@ const LGraph::Hierarchy &LGraph::get_hierarchy() {
         pending.emplace_back(base2, entry.top, lg);
       }
     });
-
-    entry.lg->close();
   }
 
   return hierarchy;

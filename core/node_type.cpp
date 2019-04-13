@@ -3,10 +3,10 @@
 #include "node_type.hpp"
 #include "graph_library.hpp"
 
-LGraph_Node_Type::LGraph_Node_Type(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept
+LGraph_Node_Type::LGraph_Node_Type(std::string_view path, std::string_view name, Lg_type_id lgid) noexcept
     : LGraph_Base(path, name, lgid)
-    , consts(path + "/lgraph_" + std::to_string(lgid) + "_consts")
-    , node_type_table(path + "/lgraph_" + std::to_string(lgid) + "_type") {}
+    , consts(absl::StrCat(path, "/lgraph_", std::to_string(lgid), "_consts"))
+    , node_type_table(absl::StrCat(path, "/lgraph_", std::to_string(lgid), "_type")) {}
 
 void LGraph_Node_Type::clear() {
   node_type_table.clear();

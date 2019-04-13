@@ -18,6 +18,9 @@
 
 class LGraph;
 
+// FIXME: lgid keep increasing. We may want a garbage collector once the lgraph is shutdown to remap
+// or at least find holes in lgids no longer used
+
 class Graph_library {
 protected:
   struct Graph_attributes {
@@ -25,11 +28,9 @@ protected:
     uint64_t    nentries; // TODO: deprecate with the new attributes (once all the old attributes are gone)
     std::string source;   // File were this module came from. If file updated (all the associated lgraphs must be deleted). If empty, it ies not present (blackbox)
     Lg_type_id  version;  // In which sequence order were the graphs last modified
-    int         nopen;
     Graph_attributes() { expunge(); }
     void expunge() {
       sub_node.expunge();
-      nopen    = 0;
       version  = 0;
       nentries = 0;
       source   = "-";

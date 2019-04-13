@@ -11,6 +11,7 @@
 #include "rapidjson/prettywriter.h"
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/types/span.h"
 
 class Sub_node {
 protected:
@@ -223,7 +224,7 @@ public:
     add_phys_pin_int(graph_pid2instance_pid[graph_pid], ppin);
   }
 
-  const std::vector<IO_pin> &get_io_pins() const { return io_pins; }
+  const absl::Span<const IO_pin> get_io_pins() const { I(io_pins.size()>=1); return absl::MakeSpan(io_pins).subspan(1); }
 
   void set_phys(const Physical_cell &&cphys) {
     I(lgid);

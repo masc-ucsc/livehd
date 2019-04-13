@@ -51,8 +51,8 @@ protected:
     //---------------------------------------------------
     // populate top graph with cells and instances
 
-    auto s1 = top->create_node_sub(c1->lg_id());
-    auto s2 = top->create_node_sub(c2->lg_id());
+    auto s1 = top->create_node_sub(c1->get_lgid());
+    auto s2 = top->create_node_sub(c2->get_lgid());
     auto sum = top->create_node(Sum_Op);
     auto mux = top->create_node(Mux_Op);
     auto mor = top->create_node(Xor_Op); // cell called mor to avoid xor reserved keyword

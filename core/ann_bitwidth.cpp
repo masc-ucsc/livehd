@@ -1,16 +1,16 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "nodebitwidth.hpp"
-#include "graph_library.hpp"
+#include "ann_bitwidth.hpp"
+#include "lgraph.hpp"
 
-void Node_bitwidth::Explicit_range::dump() const {
+void Ann_bitwidth::Explicit_range::dump() const {
   fmt::print("max{}:{} min{}:{} sign{}:{} {}", max_set ? "_set" : "", max, min_set ? "_set" : "", min, sign_set ? "_set" : "", sign,
              overflow ? "overflow" : "");
 }
 
-bool Node_bitwidth::Explicit_range::is_unsigned() const { return !sign_set || (sign_set && !sign); }
+bool Ann_bitwidth::Explicit_range::is_unsigned() const { return !sign_set || (sign_set && !sign); }
 
-void Node_bitwidth::Explicit_range::set_sbits(uint16_t size) {
+void Ann_bitwidth::Explicit_range::set_sbits(uint16_t size) {
   sign_set = true;
   sign     = true;
 
@@ -36,7 +36,7 @@ void Node_bitwidth::Explicit_range::set_sbits(uint16_t size) {
   }
 }
 
-void Node_bitwidth::Explicit_range::set_ubits(uint16_t size) {
+void Ann_bitwidth::Explicit_range::set_ubits(uint16_t size) {
   sign_set = false;
   sign     = false;
 
@@ -60,7 +60,7 @@ void Node_bitwidth::Explicit_range::set_ubits(uint16_t size) {
     max      = pow(2, size) - 1;
   }
 }
-void Node_bitwidth::Explicit_range::set_uconst(uint32_t val) {
+void Ann_bitwidth::Explicit_range::set_uconst(uint32_t val) {
   sign_set = true;
   sign     = false;
 
@@ -70,7 +70,7 @@ void Node_bitwidth::Explicit_range::set_uconst(uint32_t val) {
   min     = val;
 }
 
-void Node_bitwidth::Explicit_range::set_sconst(uint32_t val) {
+void Ann_bitwidth::Explicit_range::set_sconst(uint32_t val) {
   sign_set = true;
   sign     = true;
 
@@ -80,11 +80,11 @@ void Node_bitwidth::Explicit_range::set_sconst(uint32_t val) {
   min     = static_cast<int32_t>(val);
 }
 
-void Node_bitwidth::Implicit_range::dump() const {
+void Ann_bitwidth::Implicit_range::dump() const {
   fmt::print("max:{} min:{} sign:{} {}", max, min, sign, overflow ? "overflow" : "");
 }
 
-int64_t Node_bitwidth::Implicit_range::round_power2(int64_t x) const {
+int64_t Ann_bitwidth::Implicit_range::round_power2(int64_t x) const {
   uint64_t ux = abs(x);
 
   if (x == 0) {
@@ -102,7 +102,7 @@ int64_t Node_bitwidth::Implicit_range::round_power2(int64_t x) const {
   return -ux_r;
 }
 
-bool Node_bitwidth::Implicit_range::expand(const Implicit_range &i, bool round2) {
+bool Ann_bitwidth::Implicit_range::expand(const Implicit_range &i, bool round2) {
   bool updated = false;
 
   if (sign & !i.sign) updated = true;
@@ -138,7 +138,7 @@ bool Node_bitwidth::Implicit_range::expand(const Implicit_range &i, bool round2)
   return updated;
 }
 
-void Node_bitwidth::Implicit_range::pick(const Explicit_range &e) {
+void Ann_bitwidth::Implicit_range::pick(const Explicit_range &e) {
   if (!e.overflow && !overflow) {
     if (e.sign && sign) {
     } else if (e.sign && !sign) {
@@ -173,37 +173,3 @@ void Node_bitwidth::Implicit_range::pick(const Explicit_range &e) {
   }
 }
 
-LGraph_Node_bitwidth::LGraph_Node_bitwidth(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept
-    : LGraph_Base(path, name, lgid), node_bitwidth(path + "/lgraph_" + name + "_bitwidth") {}
-
-void LGraph_Node_bitwidth::clear() { node_bitwidth.clear(); }
-
-void LGraph_Node_bitwidth::reload() {
-  uint64_t sz = library->get_nentries(get_lgid());
-  node_bitwidth.reload(sz);
-}
-
-void LGraph_Node_bitwidth::sync() { node_bitwidth.sync(); }
-
-void LGraph_Node_bitwidth::emplace_back() {
-  node_bitwidth.emplace_back();
-  // node_bitwidth[node_bitwidth.size() - 1] = Node_bitwidth();
-}
-
-void LGraph_Node_bitwidth::node_bitwidth_set(Index_ID nid, const Node_bitwidth &t) {
-  assert(nid < node_bitwidth.size());
-  assert(node_internal[nid].is_node_state());
-  assert(node_internal[nid].is_root());
-
-  node_bitwidth[nid] = t;
-}
-
-Node_bitwidth &LGraph_Node_bitwidth::node_bitwidth_get(Index_ID nid) const {
-  assert(nid < node_bitwidth.size());
-  assert(node_internal[nid].is_node_state());
-  assert(node_internal[nid].is_root());
-
-  return node_bitwidth[nid];
-}
-
-void LGraph_Node_bitwidth::node_bitwidth_emplace_back() { node_bitwidth.emplace_back(); }

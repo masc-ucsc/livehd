@@ -128,7 +128,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, std::vector<LGraph *> &lgs,
       branch_chain_stacks_lgs.resize(branch_chain_stacks_lgs.size() + 1);
       final_node_lgs.resize(final_node_lgs.size() + 1);
       first_node_name_lgs.push_back(w1st);
-      n1st2gid[w1st]    = lg->lg_id();
+      n1st2gid[w1st]    = lg->get_lgid();
       n1st2lgname[w1st] = "sub_method" + std::to_string(subgraph_id);
       build_graph(words, dfg_data, lgs[subgraph_id], n1st2gid, n1st2lgname, name2node_lgs[subgraph_id], branch_chain_stacks_lgs[subgraph_id], rename_tab, final_node_lgs[subgraph_id]);
     } else if(subgraph_id != 0){

@@ -73,7 +73,6 @@ void generate_graphs(int n) {
       g->add_edge(Node_pin(g,0,src), Node_pin(g,0,dst));
     }
 
-    g->close();
   }
 }
 
@@ -100,7 +99,6 @@ bool fwd(int n) {
       visited.insert(node.get_compact().nid);
     }
 
-    g->close();
   }
 
   return true;
@@ -129,7 +127,6 @@ bool bwd(int n) {
 
     }
 
-    g->close();
   }
   return true;
 }
@@ -271,8 +268,6 @@ bool simple() {
     failed = true;
   if (fast.size() != bwd.size())
     failed = true;
-
-  g->close();
 
   return true;
 }

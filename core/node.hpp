@@ -5,7 +5,7 @@
 
 #include "node_pin.hpp"
 
-class Node_place;
+class Ann_place;
 
 using XEdge_iterator    = std::vector<XEdge>;
 using Node_pin_iterator = std::vector<Node_pin>;
@@ -151,8 +151,8 @@ public:
   std::string_view create_name() const;
   bool has_name() const;
 
-  const Node_place &get_place() const;
-  Node_place *ref_place();
+  const Ann_place &get_place() const;
+  Ann_place *ref_place();
   bool has_place() const;
 
   // END ATTRIBUTE ACCESSORS

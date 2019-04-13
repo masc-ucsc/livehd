@@ -220,7 +220,7 @@ void Graph_library::reload() {
   name2id.clear();
   attribute.resize(1);  // 0 is not a valid ID
 
-  if (access(library_file.c_str(), F_OK) != -1) {
+  if (access(library_file.c_str(), F_OK) == -1) {
     mkdir(path.c_str(), 0755);  // At least make sure directory exists for future
     return;
   }
@@ -266,12 +266,14 @@ void Graph_library::reload() {
 
       // NOTE: must use attribute to keep the string in memory
       name2id[sub_node.get_name()] = id;
+      name2id[attribute[id].sub_node.get_name()] = id;
+      I(attribute[id].sub_node.get_lgid() == id); // for consistency
 
+      I(sub_node.get_lgid() == id); // for consistency
     } else {
       recycled_id.set_bit(graph_id);
     }
 
-    I(sub_node.get_lgid() == id); // for consistency
   }
 
 #ifndef NDEBUG
@@ -390,6 +392,12 @@ void Graph_library::expunge(std::string_view name) {
     }
   }
 
+  auto it2 = name2id.find(name);
+  I(it2 != name2id.end());
+  Lg_type_id id = it2->second;
+
+  attribute[id].sub_node.expunge(); // Nuke IO and contents, but keep around lgid
+
   closedir(dr);
 
   return true;
@@ -404,6 +412,7 @@ Lg_type_id Graph_library::copy_lgraph(std::string_view name, std::string_view ne
   const auto &it = name2id.find(name);
   I(it != name2id.end());
   auto id_orig = it->second;
+  I(attribute[id].sub_node.get_name() == name);
 
   Lg_type_id id_new = reset_id(new_name, attribute[id_orig].source);
 
@@ -460,7 +469,6 @@ Lg_type_id Graph_library::register_lgraph(std::string_view name, std::string_vie
 
   const auto &it = name2id.find(name);
   I(it != name2id.end());
-  attribute[id].nopen++;
   I(attribute[id].sub_node.get_name() == name);
 
   return id;
@@ -469,13 +477,8 @@ Lg_type_id Graph_library::register_lgraph(std::string_view name, std::string_vie
 void Graph_library::unregister(std::string_view name, Lg_type_id lgid) {
   I(attribute.size() > (size_t)lgid);
 
-  I(attribute[lgid].nopen);
-
-  attribute[lgid].nopen--;
-  if (attribute[lgid].nopen == 0) {
-    if (attribute[lgid].sub_node.is_invalid())
-      expunge(name);
-  }
+  if (attribute[lgid].sub_node.is_invalid())
+    expunge(name);
 }
 
 void Graph_library::sync_all() {
@@ -563,7 +566,7 @@ void Graph_library::clean_library() {
 
     fs.open(library_file, std::ios::out | std::ios::trunc);
     if(!fs.is_open()) {
-      Pass::error("ERROR: could not open graph_library file {}", library_file);
+      Pass::error("graph_library::clean_library could not open graph_library file {}", library_file);
       return;
     }
     fs << s.GetString() << std::endl;
