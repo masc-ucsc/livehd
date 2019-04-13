@@ -16,38 +16,40 @@ protected:
   static void generate(Eprp_var &var);
   static void optimize(Eprp_var &var);
   static void finalize_bitwidth(Eprp_var &var);
+  static bool graph_name_ends_with(std::string_view str, std::string_view suffix){
+    return str.rfind(suffix) == (str.size() - suffix.size());
+  }
 
-  std::vector<LGraph *> hierarchical_gen_dfgs(LGraph *cfg_parent);
-  void                  hierarchical_opt_dfgs(LGraph *dfg_parent);
-  void                  hierarchical_finalize_bits_dfgs(LGraph *dfg_parent);
+  std::vector<LGraph *> hier_generate_dfgs(LGraph *cfg_parent);
+  void                  hier_optimize_dfgs(LGraph *dfg_parent);
+  void                  hier_finalize_bits_dfgs(LGraph *dfg_parent);
   void do_generate(const LGraph *cfg, LGraph *dfg);
   void do_optimize(LGraph *&ori_dfg); // calls trans() to perform optimization
   void do_finalize_bitwidth(LGraph *dfg);
 
   void trans(LGraph *orig);
-  void cfg_2_dfg(const LGraph *cfg, LGraph *dfg);
+  void cfg_2_dfg(LGraph *cfg, LGraph *dfg);
 
 private:
-  Node find_cfg_root(const LGraph *cfg);
+  Node find_cfg_root(LGraph *cfg);
+  Node get_cfg_child(LGraph *cfg, Node cfg_node);
   Node process_cfg(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, Node top_node);
-
   Node process_node(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, Node node);
 
   void process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Data &data);
-  void finalize_gconnect(LGraph *dfg, const Aux_node *auxand_global);
+  void finalize_global_connect(LGraph *dfg, const Aux_node *auxand_global);
   void process_connections(LGraph *dfg, const std::vector<Node> &src_node const Node &dst_node);
 
   void process_func_call(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data);
 
-  Node process_if(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data, Node node);
+  Node process_if(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data, Node node);
 
-  Node process_loop(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data, Node node);
+  Node process_loop(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data, Node node);
 
   Node process_operand(LGraph *dfg, Aux_tree *aux_tree, const std::string &oprd);
 
   std::vector<Node> process_operands(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Data &data);
 
-  Node get_cfg_child(const LGraph *cfg, Node node);
 
   void resolve_phis(LGraph *dfg, Aux_tree *aux_tee, Aux_node *pauxnd, Aux_node *tauxnd, Aux_node *fauxnd, Node cond);
   void create_mux(LGraph *dfg, Aux_node *pauxnd, Node tid, Node fid, Node cond, const std::string &var);
@@ -56,9 +58,9 @@ private:
   void add_fluid_behavior(LGraph *dfg, Aux_tree *aux_tree);
   void add_fluid_ports(LGraph *dfg, Aux_tree *aux_tree, std::vector<Node> &data_inputs, std::vector<Node> &data_outputs);
   void add_fluid_logic(LGraph *dfg, Aux_tree *aux_tree, const std::vector<Node> &data_inputs,
-                       const std::vector<Node> &data_outputs);
+                       const std::vector<Node> &data_outputs){}
   void add_abort_logic(LGraph *dfg, Aux_tree *aux_tree, const std::vector<Node> &data_inputs,
-                       const std::vector<Node> &data_outputs);
+                       const std::vector<Node> &data_outputs){}
 
   void add_read_marker(LGraph *dfg, Aux_tree *aux_tree, const std::string &v) {
     assign_to_true(dfg, aux_tree, read_marker(v));
@@ -107,7 +109,7 @@ private:
   constexpr bool is_compute_op(std::string_view v) const { return (v == "+"); }
   constexpr bool is_compare_op(std::string_view v) const { return (v == "==") || (v == ">") || (v == ">=") || (v == "<") || (v == "<="); }
 
-  // Node create_register(LGraph *g, Aux_tree *aux_tree, const std::string &var_name);
+  Node create_register(LGraph *g, Aux_tree *aux_tree, const std::string &var_name);
   Node create_input(LGraph *g, Aux_tree *aux_tree, const std::string &var_name, uint16_t bits = 0);
   Node create_output(LGraph *g, Aux_tree *aux_tree, const std::string &var_name, uint16_t bits = 0);
   Node create_private(LGraph *g, Aux_tree *aux_tree, const std::string &var_name);
