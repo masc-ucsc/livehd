@@ -1,11 +1,4 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-
-#include <fstream>
-#include <stack>
-#include <algorithm>
-#include <string>
-#include <vector>
-
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +6,12 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+
+#include <fstream>
+#include <stack>
+#include <algorithm>
+#include <string>
+#include <vector>
 
 #include "cfg_node_data.hpp"
 #include "inou_cfg.hpp"
@@ -194,7 +193,9 @@ void Inou_cfg::build_graph(std::vector<std::string> &words, std::string &dfg_dat
   //I. process 1st node, only assign node type for the first "K" in every line of cfg
   if(name2node.count(w1st) == 0) { // if node has not been created before
     name2node[w1st] = g->create_node();
-    final_node         = name2node[w1st]; // keep update the latest final nid
+    name2node[w1st].setup_driver_pin().set_name(w1st);
+    final_node      = name2node[w1st]; // keep update the latest final nid
+
     fmt::print("create node:{}\n", w1st);
     //SH:FIXME: move to new attribute
     //g->node_loc_set(name2node[w1st], opack.file.c_str(), (uint32_t)std::stoi(w3rd), (uint32_t)std::stoi(w4th));
@@ -231,6 +232,7 @@ void Inou_cfg::build_graph(std::vector<std::string> &words, std::string &dfg_dat
   //II-0. process 10th word(if-else merging node)
   if(w6th == "if" && name2node.count(w10th) == 0) { // if node has not been created before
     name2node[w10th] = g->create_node();
+    name2node[w10th].setup_driver_pin().set_name(w10th);
     final_node        = name2node[w10th]; // keep update the latest final nid
     fmt::print("create node:{}\n", w10th);
     name2node[w10th].set_type(CfgIfMerge_Op);
@@ -238,6 +240,7 @@ void Inou_cfg::build_graph(std::vector<std::string> &words, std::string &dfg_dat
   //II-1. process 2nd word
   if(w2nd != "null" && name2node.count(w2nd) == 0) {
     name2node[w2nd] = g->create_node();
+    name2node[w2nd].setup_driver_pin().set_name(w2nd);
     final_node       = name2node[w2nd]; // keep update the latest final nid
     fmt::print("create node:{}\n", w2nd);
   }
@@ -411,6 +414,8 @@ void Inou_cfg::lgraph_2_cfg(LGraph *g, const std::string &filename) {
 }
 
 #if 1
+//it just want to transform "null" to "0" as an indicator for DFG
+//however, I think I could use the "null" directly now
 void Inou_cfg::update_ifs(std::vector<LGraph *> &lgs, std::vector<std::map<std::string, Node>> &node_mappings) {
   for(size_t i = 0; i < lgs.size(); i++) {
     LGraph *g       = lgs[i];
@@ -421,14 +426,14 @@ void Inou_cfg::update_ifs(std::vector<LGraph *> &lgs, std::vector<std::map<std::
       auto node = Node(g, 0, Node::Compact(nid));
       CFG_Node_Data data(g, node);
       if(data.is_br_marker()) {
-        const auto &   oprands = data.get_operands();
-        for(const auto& j: oprands)
-          fmt::print("oprands:{}\n", j);
-        std::vector<std::string> new_operands(oprands.size());
+        const auto &   operands = data.get_operands();
+        for(const auto& j: operands)
+          fmt::print("operands:{}\n", j);
+        std::vector<std::string> new_operands(operands.size());
 
         //lambda usage for std::transform
-        std::transform(oprands.begin(), oprands.end(), new_operands.begin(),
-          [&](const std::string &operand) -> std::string_view{
+        std::transform(operands.begin(), operands.end(), new_operands.begin(),
+          [&](const std::string &operand) -> std::string_view {
           if(operand == "null")
             return "0";
           else {
@@ -457,7 +462,8 @@ void Inou_cfg::collect_fcall_info(LGraph *g, Node new_node, const std::string &w
 void Inou_cfg::remove_fake_fcall(LGraph *g) {
   std::set<std::string_view>                 func_dcl_tab;
   std::set<std::string_view>                 drive_tab;
-  std::set<Node::Compact>                             true_fcall_tab;
+  std::set<Node::Compact>                    true_fcall_tab;
+  //SH:FIXME:change to absl::map
   std::unordered_map<std::string_view, Node> name2node;
   //1st pass
   for(auto nid : g->fast()){
@@ -465,7 +471,6 @@ void Inou_cfg::remove_fake_fcall(LGraph *g) {
     if(node.get_type().op == Invalid_Op)
       break;
 
-    // fmt::print("node:{}, pid names:{},{},{}\n", nid, pid1_wn, pid2_wn, pid3_wn);
     if(node.get_type().op == SubGraph_Op) {
       auto pid1_name = node.get_driver_pin(1).get_name();
       func_dcl_tab.insert(pid1_name);
@@ -475,7 +480,7 @@ void Inou_cfg::remove_fake_fcall(LGraph *g) {
       if(pid3_name.empty()) { // oprd num = 1
         drive_tab.insert(pid2_name);
         name2node[pid2_name] = node;
-      } else { // oprd num >=1
+      } else { // operand number >=1
         auto node_name = node.get_name();
         //SH:FIXME:check correctness of the following debug message
         fmt::print("push node:{} into true_fcall_tab\n", node_name.substr(0, node_name.find(" ")));
@@ -508,6 +513,7 @@ void Inou_cfg::remove_fake_fcall(LGraph *g) {
   }
 }
 
+//SH:FIXME:this is the old style argument passing, change it.
 void Inou_cfg_options::set(const std::string &key, const std::string &value) {
   try {
     if(is_opt(key, "files"))

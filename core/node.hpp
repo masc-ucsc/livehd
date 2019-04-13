@@ -71,7 +71,7 @@ public:
       I(g);
   };
   Node &operator=(const Node &obj) {
-    I(this != &obj); // Do not assing object to itself. works but wastefull
+    I(this != &obj); // Do not assign object to itself. works but wastefull
     g   = obj.g;
     const_cast<Index_ID&>(nid)     = obj.nid;
     const_cast<Hierarchy_id&>(hid) = obj.hid;

@@ -61,7 +61,7 @@ public:
   Node_pin(LGraph *_g, Hierarchy_id _hid, Compact comp);
   Node_pin(LGraph *_g, Hierarchy_id _hid, Compact comp, Node_pin_mode mode);
   Node_pin &operator=(const Node_pin &obj) {
-    I(this != &obj); // Do not assing object to itself. works but wastefull
+    I(this != &obj); // Do not assign object to itself. works but wastefull
     g   = obj.g;
     const_cast<Index_ID&>(idx)     = obj.idx;
     const_cast<Port_ID&>(pid)      = obj.pid;
