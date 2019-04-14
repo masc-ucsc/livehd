@@ -68,7 +68,8 @@ LGraph::LGraph(std::string_view _path, std::string_view _name, std::string_view 
 }
 
 LGraph::~LGraph() {
-  library->unregister(name, lgid);
+  sync();
+  library->unregister(name, lgid, this);
 }
 
 bool LGraph::exists(std::string_view path, std::string_view name) { return Graph_library::try_find_lgraph(path, name) != nullptr; }
@@ -103,17 +104,11 @@ LGraph *LGraph::open(std::string_view path, std::string_view name) {
 
   LGraph *lg = lib->try_find_lgraph(path, name);
   if (lg) {
-    // I(lg->node_internal.size()); // WEIRD, but possible to have an empty lgraph
-    I(Graph_library::instance(path));
-    auto source = Graph_library::instance(path)->get_source(name);
-    auto lgid   = Graph_library::instance(path)->register_lgraph(name, source, lg);
     I(name == lg->get_name());
-    I(lg->get_lgid() == lgid);
-
     return lg;
   }
 
-  if(!lib->include(name))
+  if(!lib->has_name(name))
     return 0;
 
   auto source = lib->get_source(name);

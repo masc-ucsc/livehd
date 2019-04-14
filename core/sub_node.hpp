@@ -69,6 +69,7 @@ private:
 
 public:
   Sub_node() {
+    name.clear();
     expunge();
   }
 

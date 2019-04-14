@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/types/span.h"
 #include "bm.h"
 
 #include "lgraphbase.hpp"
@@ -24,13 +25,11 @@ class LGraph;
 class Graph_library {
 protected:
   struct Graph_attributes {
-    Sub_node    sub_node;
     uint64_t    nentries; // TODO: deprecate with the new attributes (once all the old attributes are gone)
     std::string source;   // File were this module came from. If file updated (all the associated lgraphs must be deleted). If empty, it ies not present (blackbox)
     Lg_type_id  version;  // In which sequence order were the graphs last modified
     Graph_attributes() { expunge(); }
     void expunge() {
-      sub_node.expunge();
       version  = 0;
       nentries = 0;
       source   = "-";
@@ -50,20 +49,20 @@ protected:
   using Global_name2lgraph = absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, LGraph *>>;
   using Name2id            = absl::flat_hash_map<std::string, Lg_type_id::type>;
   using Recycled_id        = bm::bvector<>;
-  using Attribute_type     = std::vector<Graph_attributes>;
 
-  Lg_type_id        max_next_version;
-  const std::string path;
-  const std::string library_file;
+  Lg_type_id                    max_next_version;
+  const std::string             path;
+  const std::string             library_file;
 
-  Name2id        name2id;
-  Recycled_id    recycled_id;
-  Attribute_type attribute;
+  Name2id                       name2id;
+  Recycled_id                   recycled_id;
+  std::vector<Graph_attributes> attributes;
+  std::vector<Sub_node>         sub_nodes;
 
-  static Global_instances   global_instances;
-  static Global_name2lgraph global_name2lgraph;
+  static Global_instances       global_instances;
+  static Global_name2lgraph     global_name2lgraph;
 
-  bool graph_library_clean;
+  bool                          graph_library_clean;
 
   Graph_library() { max_next_version = 1; }
 
@@ -89,9 +88,10 @@ public:
   Sub_node      &get_sub(Lg_type_id lgid) {
     graph_library_clean = false;
     I(lgid > 0);  // 0 is invalid lgid
-    I(attribute.size() > lgid);
-    I(attribute[lgid].sub_node.get_lgid() == lgid);
-    return attribute[lgid].sub_node;
+    I(attributes.size() > lgid);
+    I(attributes.size() == sub_nodes.size());
+    I(sub_nodes[lgid].get_lgid() == lgid);
+    return sub_nodes[lgid];
   }
   Sub_node      &get_sub(std::string_view name) {
     graph_library_clean = false;
@@ -99,9 +99,11 @@ public:
   }
   const Sub_node      &get_sub(Lg_type_id lgid) const {
     I(lgid > 0);  // 0 is invalid lgid
-    I(attribute.size() > lgid);
-    I(attribute[lgid].sub_node.get_lgid() == lgid);
-    return attribute[lgid].sub_node;
+    I(lgid > 0);  // 0 is invalid lgid
+    I(attributes.size() > lgid);
+    I(attributes.size() == sub_nodes.size());
+    I(sub_nodes[lgid].get_lgid() == lgid);
+    return sub_nodes[lgid];
   }
   const Sub_node      &get_sub(std::string_view name) const {
     return get_sub(get_lgid(name));
@@ -112,9 +114,9 @@ public:
 
   std::string_view get_name(Lg_type_id lgid) const {
     I(lgid > 0);  // 0 is invalid lgid
-    I(attribute.size() > lgid);
-    I(attribute[lgid].sub_node.get_lgid() == lgid);
-    return attribute[lgid].sub_node.get_name();
+    I(sub_nodes.size() > lgid);
+    I(sub_nodes[lgid].get_lgid() == lgid);
+    return sub_nodes[lgid].get_name();
   }
 
   Lg_type_id get_lgid(std::string_view name) const {
@@ -127,23 +129,23 @@ public:
 
   std::string_view get_source(Lg_type_id lgid) const {
     assert(lgid > 0);  // 0 is invalid lgid
-    assert(attribute.size() > lgid);
-    return attribute[lgid].source;
+    assert(attributes.size() > lgid);
+    return attributes[lgid].source;
   }
 
   std::string_view get_source(std::string_view name) const { return get_source(get_lgid(name)); }
 
-  int lgraph_count() const { return attribute.size() - 1; }
+  //int lgraph_count() const { return attributes.size() - 1; }
 
   void update(Lg_type_id lgid);
 
   Lg_type_id get_version(Lg_type_id lgid) const {
-    if (attribute.size() < lgid) return 0;  // Invalid ID
+    if (attributes.size() < lgid) return 0;  // Invalid ID
 
-    return attribute[lgid].version;
+    return attributes[lgid].version;
   }
 
-  bool include(std::string_view name) const { return name2id.find(name) != name2id.end(); }
+  bool has_name(std::string_view name) const { return name2id.find(name) != name2id.end(); }
 
   // TODO: Change to Graph_library &instance...
   static Graph_library *instance(std::string_view path);
@@ -158,32 +160,32 @@ public:
   Lg_type_id copy_lgraph(std::string_view name, std::string_view new_name);
   Lg_type_id register_sub(std::string_view name);
   Lg_type_id register_lgraph(std::string_view name, std::string_view source, LGraph *lg);
-  void       unregister(std::string_view name, Lg_type_id lgid); // unregister open instance
+  void       unregister(std::string_view name, Lg_type_id lgid, LGraph *lg=0); // unregister open instance
   void       expunge(std::string_view name); // Delete completely, even if open instances exists
 
   void     update_nentries(Lg_type_id lgid, uint64_t nentries);
   uint64_t get_nentries(Lg_type_id lgid) const {
-    assert(attribute.size() >= lgid);
+    assert(attributes.size() >= lgid);
 
-    return attribute[lgid].nentries;
+    return attributes[lgid].nentries;
   };
 
   void sync() { clean_library(); }
 
   static void sync_all();  // Called when running out of mmaps
 
-  // FIXME: SFINAE
-  void each_type(std::function<void(Lg_type_id, std::string_view)> fn) const;
-  void each_type(std::function<bool(Lg_type_id, std::string_view)> fn) const;
-  void each_type(std::string_view match, std::function<void(Lg_type_id, std::string_view)> fn) const;
-  void each_type(std::string_view match, std::function<bool(Lg_type_id, std::string_view)> fn) const;
+  absl::Span<const Sub_node>    get_sub_nodes() const {
+    I(sub_nodes.size()>=1);
+    return absl::MakeSpan(sub_nodes).subspan(1);
+  };
 
-  const std::vector<std::string> &get_liberty() const { return liberty_list; };
-  const std::vector<std::string> &get_sdc()     const { return sdc_list; };
-  const std::vector<std::string> &get_spef()    const { return spef_list; };
+  absl::Span<const std::string>  get_liberty() const { return absl::MakeSpan(liberty_list); };
+  absl::Span<const std::string>  get_sdc()     const { return absl::MakeSpan(sdc_list); };
+  absl::Span<const std::string>  get_spef()    const { return absl::MakeSpan(spef_list); };
 
-  const std::vector<Tech_layer> &get_layer()    const { return layer_list; };
-  const std::vector<Tech_via>   &get_via()      const { return via_list; };
+  absl::Span<const Tech_layer>  get_layer()    const { return absl::MakeSpan(layer_list); };
+  absl::Span<const Tech_via>    get_via()      const { return absl::MakeSpan(via_list); };
 
   void reload();
 };
+

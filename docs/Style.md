@@ -28,15 +28,32 @@ Use std::string_view instead of "const char &ast" or "const std::string &" in th
 
 Avoid pointers, use std::unique_ptr with RAII
 
-## No camelCase. Use underscores to separate words:
 
+## Variable naming rules
+
+* No camelCase. Use underscores to separate words:
 ```cpp
 foo_bar = Foo_bar(3);
 ```
+* Use plural for containers with multiple entries like vector, singular otherwise
+```cpp
+elem = entries[index];
+```
+* Classes/types/enums start with uppercase. Lowercase otherwise
+```cpp
+val = My_enum::Big;
+class Sweet_potato {
+```
 
-## Exceptions
+## Error handling and exceptions
 
-Unexpected non-recoverable behavior should raise an exception. They are captured at the top level to notify user and move to next task.
+Use the Pass::error or Pass:warn for error and likely error (warn). Internally, error generates
+and exception capture by the main lgshell to move to the next task.
+
+```cpp
+Pass::error("inou_yaml: can only have a yaml_input or a graph_name, not both");
+Pass::warn("inou_yaml.to_lg: output:{} input:{} graph:{}", output, input, graph_name);
+```
 
 ## No tabs, indentation is 2 spaces
 
@@ -69,12 +86,6 @@ You can configure your text editor to do this automatically
 
 You can configure your text editor to highlight them.
  https://github.com/ntpeters/vim-better-whitespace
-
-## Classes start with upper case, but just first word.
-
-```cpp
-class Sweet_potato {
-```
 
 ## Use C++14 iterators not ::iterator
 
@@ -120,7 +131,6 @@ and traversal overheads.
 
 ## Do not use std::unordered_set, use flat_hash_map or flat_hash_set from abseil
 
-
 ```cpp
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -148,12 +158,29 @@ if (set.contains(key_value)) {
 }
 ```
 
+## Use absl::Span instead of std::vector as return argument
+
+absl::Span is the equivalent of string_view for a string but for vectors. Like
+string_view, it does not have ownership, and the size in the span can decrease
+(not increase) without changing the original vector with "subspan". Faster and
+more functional, no reason to return "const std::vector<Foo> &", instead return
+"absl::Span<Foo>".
+
+```cpp
+#include "absl/types/span.h"
+
+absl::Span<Sub_node>    get_sub_nodes() const {
+  I(sub_nodes.size()>=1);
+  return absl::MakeSpan(sub_nodes).subspan(1); // Skip first element from vector
+};
+```
+
 ## Pass by reference and use "const" when possible
 
 ```cpp
-void print(const LGraph& g); //or
+void print(const Sub_node& g); //or
 
-void edit(LGraph& g);
+void edit(Sub_node& g);
 ```
 
 Note that older code still uses pointers, this is no longer allowed.
@@ -193,13 +220,6 @@ foo = new Sweet_potato(3, 7)
 
 ```cpp
 fmt::print("This is a debug message, name = {}, id = {}\n",g->get_name(), idx);
-```
-
-## Use Pass:: report errors/warnings/info
-
-```cpp
-Pass::error("inou_yaml: can only have a yaml_input or a graph_name, not both");
-Pass::warn("inou_yaml.to_lg: output:{} input:{} graph:{}", output, input, graph_name);
 ```
 
 ## Use accessors consistently

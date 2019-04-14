@@ -46,6 +46,11 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
 
   I(entry.HasMember("lgid"));
   I(entry.HasMember("name"));
+  I(entry["name"].IsString());
+
+  lgid  = entry["lgid"].GetUint64();
+  std::string str  = entry["name"].GetString();
+  name = str;
 
   io_pins.resize(1); // No id ZERO
 

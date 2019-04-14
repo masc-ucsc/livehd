@@ -93,7 +93,8 @@ git_repository(
 new_git_repository(
     name = "rapidjson",
     build_file = "BUILD.rapidjson",
-    commit = "55c3c241cf55801d8caf0f11af2e98595797801a", # April 6, 2019 663f076c7b44ce96526d1acfda3fa46971c8af31", # October 6, 2018
+    #commit = "55c3c241cf55801d8caf0f11af2e98595797801a", # April 6, 2019 663f076c7b44ce96526d1acfda3fa46971c8af31", # October 6, 2018
+    commit = "663f076c7b44ce96526d1acfda3fa46971c8af31", # October 6, 2018
     remote = "https://github.com/Tencent/rapidjson.git",
     strip_prefix = "include",
 )

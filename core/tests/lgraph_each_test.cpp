@@ -146,7 +146,9 @@ protected:
   }
 
   void TearDown() override {
-    // No needed to clear/delete every time, but it should work too
+    for(auto *lg:lgs) {
+      delete lg;
+    }
     lgs.clear();
   }
 };
