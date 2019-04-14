@@ -33,12 +33,12 @@ protected:
 private:
   Node find_cfg_root(LGraph *cfg);
   Node get_cfg_child(LGraph *cfg, Node cfg_node);
-  Node process_cfg(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, Node top_node);
-  Node process_node(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, Node node);
+  Node process_cfg(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, Node top_node);
+  Node process_node(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, Node node);
 
   void process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Data &data);
   void finalize_global_connect(LGraph *dfg, const Aux_node *auxand_global);
-  void process_connections(LGraph *dfg, const std::vector<Node> &src_node const Node &dst_node);
+  void process_connections(LGraph *dfg, const std::vector<Node> &driver_nodes, const Node &sink_node);
 
   void process_func_call(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data);
 
