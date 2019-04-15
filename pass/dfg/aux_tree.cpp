@@ -2,12 +2,12 @@
 
 void Aux_node::set_alias(const std::string &v, Node n) {
   auxtab[v] = n;
-  fmt::print("set alias {} <-> n{}\n", v, n);
+  fmt::print("set alias {} <-> n{}\n", v, n.get_compact());
 }
 
 void Aux_node::set_pending(const std::string &v, Node n) {
   pendtab[v] = n;
-  fmt::print("set pending {} <-> n{}\n", v, n);
+  fmt::print("set pending {} <-> n{}\n", v, n.get_compact());
 }
 
 Aux_node *Aux_tree::get_cur_auxnd() const {
@@ -144,6 +144,6 @@ Node Aux_tree::get_global_pending(const Aux_node *auxnd, const std::string &v) c
 
 void Aux_tree::print_cur_auxnd() {
   for(const auto &iter : get_cur_auxnd()->get_auxtab()) {
-    fmt::print("auxtab:{:>10} -> {}\n", iter.first, iter.second);
+    fmt::print("auxtab:{:>10} -> {}\n", iter.first, iter.second.get_compact());
   }
 }
