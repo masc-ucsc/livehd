@@ -23,7 +23,7 @@ protected:
   std::vector<LGraph *> hier_generate_dfgs(LGraph *cfg_parent);
   void                  hier_optimize_dfgs(LGraph *dfg_parent);
   void                  hier_finalize_bits_dfgs(LGraph *dfg_parent);
-  void do_generate(const LGraph *cfg, LGraph *dfg);
+  void do_generate(LGraph *cfg, LGraph *dfg);
   void do_optimize(LGraph *&ori_dfg); // calls trans() to perform optimization
   void do_finalize_bitwidth(LGraph *dfg);
 
@@ -88,7 +88,7 @@ private:
   bool reference_changed(const Aux_node *parent, const Aux_node *branch, const std::string &v) {
     if(!parent->has_alias(v))
       return true;
-    return parent->get_alias(v) != branch->get_alias(v);
+    return parent->get_alias(v).get_compact() != branch->get_alias(v).get_compact();
   }
 
   constexpr bool is_register(std::string_view v)     const { return v.at(0) == REGISTER_MARKER; }
