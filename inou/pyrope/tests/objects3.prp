@@ -1,6 +1,6 @@
 // code/objects3.prp
-obj1.foo as __bits:3
-obj2.bar as __bits:2
+obj1.foo as (__bits:3)
+obj2.bar as (__bits:2)
 I !(obj1 is obj2)
 obj1c = obj1
 obj1.foo  = 1

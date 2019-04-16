@@ -1,5 +1,5 @@
 // code/precission2.prp
-a as __range:(1..6)
+a as (__range:(1..6))
 a = 5
 c = 5
 if xx {

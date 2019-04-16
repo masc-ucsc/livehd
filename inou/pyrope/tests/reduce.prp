@@ -6,16 +6,16 @@ reduce = ::{
   while true {
     tmp2 = ()
     for i:(0..tmp.__size by 2) {
-      tmp2 ++= redop tmp[i] tmp[i+1]
+      tmp2 ++= redop.(tmp[i], tmp[i+1])
     }
     if tmp2.__size <=1 { return tmp2 }
     tmp = tmp2
     if tmp2.__size[[0]] {     // odd number
       tmp = tmp2[[..-2]]      // all but last two
-      tmp ++= redop tmp2[-2..]// reduce last two
+      tmp ++= redop.(tmp2[-2..])// reduce last two
     }
   }
   I false
 }
-a = (1 2 3) |> reduce ::{$0 + $1}
+a = (1 ,2, 3) |> reduce ::{$0 + $1}
 I a == 6

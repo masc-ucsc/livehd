@@ -1,12 +1,13 @@
 // code/scope6.prp
 nested1_3b = ::{
   nested2 = ::{
-    @cycle as __bits:3
+    @cycle as (__bits:3)
     @cycle += @incr
   }
+}
 nested1_5b = ::{
   nested2 = ::{
-    @cycle as __bits:5
+    @cycle as (__bits:5)
     @cycle += @incr
   }
 }

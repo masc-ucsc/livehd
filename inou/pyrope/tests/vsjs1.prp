@@ -6,5 +6,5 @@ a.__read = ::{
 equality = (a == 1) and (a == 2) and (a == 3)
 I equality
 for a:myMap ::{
-  puts "{} = {}" a.__index a
+  puts.("{} = {}" ,a.__index, a)
 }

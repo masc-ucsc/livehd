@@ -1,7 +1,7 @@
 // code/mem2.prp
 // Enforce #rd and wr ports in SRAM
-@a as __bits:8 __size:1024 __rdports:1 __wrports:1
-@cycle as __bits:8
+@a as (__bits:8, __size:1024, __rdports:1, __wrports:1)
+@cycle as (__bits:8)
 @cycle += 13
 // ADDR must be stable at posedge. Push logic
 @a[@cycle] = @cycle-1

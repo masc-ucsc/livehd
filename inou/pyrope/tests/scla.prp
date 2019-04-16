@@ -1,20 +1,20 @@
 // libs/adder/code/scla.prp file
-cla = :($a $b) when $a.__bits==8:{           // specialize when bits == 8
-  s1 = cla $a[[0..3]] $b[[0..3]] cin:0       // cla for 4 bits
+cla = :($a, $b) when $a.__bits==8:{           // specialize when bits == 8
+  s1 = cla.($a[[0..3]], $b[[0..3]], cin:0)       // cla for 4 bits
   t = generate.($a[[0..3]],$b[[0..3]])       // generate carry method
-  s2 = cla $a[[4..7]] $b[[4..7]] cin:t       // CLA with fast cin
-  %sum = (s2.sum s1.sum)[[]]                 // bit concatenation
+  s2 = cla.($a[[4..7]], $b[[4..7]], cin:t)       // CLA with fast cin
+  %sum = (s2.sum, s1.sum)[[]]                 // bit concatenation
 }
-cla = :($a $b) when $a.__bits==12:{          // specialize when bits == 12
-  s1 = cla $a[[0..7]] $b[[0..7]] cin:0       // .. Ruby style ranges
+cla = :($a, $b) when $a.__bits==12:{          // specialize when bits == 12
+  s1 = cla.($a[[0..7]], $b[[0..7]], cin:0)       // .. Ruby style ranges
   t = generate.($a[[0..6]],$b[[0..6]])       // generate carry method
-  s2 = cla $a[[6..11]] $b[[6..11]] cin:t
-  %sum = (s2.sum s1.sum)[[]]
+  s2 = cla.($a[[6..11]], $b[[6..11]], cin:t)
+  %sum = (s2.sum, s1.sum)[[]]
 }
-cla = :($a $b):{                             // default CLA (not CLA, just RCA)
-  return rca.($a $b cin:0)
+cla = :($a, $b):{                             // default CLA (not CLA, just RCA)
+  return rca.($a, $b, cin:0)
 }
 test = ::{
-  s = cla 3 5
+  s = cla.(3, 5)
   I s.sum == 8
 }

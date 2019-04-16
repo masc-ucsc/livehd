@@ -10,4 +10,4 @@ if cycle[[0..1]] == 3 { a = a + 3 }
 for k:(20..24) {
   a = a + k
 }
-puts "{}: rule, a={}" cycle a
+puts.("{}: rule, a={}",cycle, a)

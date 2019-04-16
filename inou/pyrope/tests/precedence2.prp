@@ -5,8 +5,8 @@ bar = x == 3
 //bar = false or
 //      true         // compile error, ops after newline
 I (true or false==false) == (true or (false==false))
-d = 1
-   ,3
+d = (1
+   ,3)
 //d = 1,
 //    3          // compile error, ',' after newline
 bar = 3

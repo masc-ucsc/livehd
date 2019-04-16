@@ -1,8 +1,8 @@
 // code/mem4.prp
 // Enforce #rd and wr ports in SRAM
-@a as __bits:8 __size:1024 __rdports:1 __wrports:1
-@a as __posedge:false // posedge by default
-@cycle as __bits:8
+@a as (__bits:8, __size:1024, __rdports:1, __wrports:1)
+@a as (__posedge:false) // posedge by default
+@cycle as (__bits:8)
 @cycle += 13
 // SRAM can use pos/neg edge
 @a[@cycle] = @cycle-1

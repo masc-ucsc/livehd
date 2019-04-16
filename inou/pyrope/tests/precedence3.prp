@@ -7,8 +7,8 @@ I b == !a or (c == d)
 //bar = true or false and true // compile error
 bar = true ; or true and false ; or true
 I bar == true or (true and false) or true
-I (1,3) == (1 3)
-d = 1 3
-I d == 1 3
+I (1,3) == (1, 3)
+d =( 1, 3)
+I d == (1, 3)
 I d == ;( ; 1 ;, 2;+1)   // Ugly but legal syntax
 f = 1 +;3                // Ugly illegal syntax

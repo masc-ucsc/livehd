@@ -6,7 +6,7 @@
   }
   return t
 }
-I (1 3) ..dox.. (2 1) == (3 2 5 4)
+I (1, 3) ..dox.. (2, 1) == (3, 2, 5, 4)
 sub1 = ::{
   t = ()
   b = $1[0]   // first element in rhs
@@ -14,5 +14,5 @@ sub1 = ::{
   return t
 }
 // .. required in call to be operator
-I (3 2) ..sub1.. 1 == (2 1)
-I (3 2) ..sub1.. (2 3) == (1 0)
+I (3, 2) ..sub1.. 1 == (2, 1)
+I (3, 2) ..sub1.. (2, 3) == (1, 0)

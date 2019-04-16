@@ -1,17 +1,17 @@
 // libs/adder/code/rca.prp file
-fa = :($a $b $cin %sum %cout):{      // method with explicit arguments
+fa = :($a, $b, $cin, %sum, %cout):{      // method with explicit arguments
   tmp   = $a  ^ $b
   %sum  = tmp ^ $cin
   %cout = (tmp & $cin) | ($a & $b)
 }
 carry = $cin                         // 0 if RCA without carry in
 for i:(0..a.__bits) {                // iterate #bits
-  tmp = fa a[[i]] b[[i]] carry       // function call to fa
+  tmp = fa.(a[[i]], b[[i]], carry)       // function call to fa
   %sum[[i]] = tmp.sum
   carry     = tmp.cout
 }
 %cout = carry
 test2 = ::{
-  c = rca a:32 b:4 cin:0
-  puts "sum is {0:b} {0}" c.sum      // print sum in binary and decimal
+  c = rca.(a:32, b:4, cin:0)
+  puts.("sum is {0:b} {0}", c.sum )     // print sum in binary and decimal
 }
