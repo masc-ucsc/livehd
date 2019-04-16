@@ -990,23 +990,31 @@ bool Prp::rule_constant(){
 bool Prp::rule_assignment_operator(){
   fmt::print("Hello from rule_assignment_operator.\n");
   int tokens_consumed = 0;
+  
+  ast->down();
 
 	if(scan_is_token(Token_id_coloneq) || scan_is_token(Token_id_eq) || scan_is_token(Pyrope_id_as)){
+    ast->add(Prp_rule_assignment_operator, scan_token());
     debug_consume(); // consume the operator
     fmt::print("Fits rule_assignment_operator.\n");
+    ast->up(Prp_rule_assignment_operator);
 		return true;
 	}
 	
 	/* op= tokens*/
   if (scan_is_token(Token_id_mult) || scan_is_token(Token_id_plus) || scan_is_token(Token_id_minus)){
+    ast->add(Prp_rule_assignment_operator, scan_token());
     debug_consume();
     tokens_consumed++;
     if (scan_is_token(Token_id_eq)){
+      ast->add(Prp_rule_assignment_operator, scan_token());
       debug_consume();
       fmt::print("Fits rule_assignment_operator.\n");
+      ast->up(Prp_rule_assignment_operator);
       return true;
     }
     go_back(tokens_consumed);
+    ast->up(Prp_rule_assignment_operator);
     return false;
   }
 	
@@ -1015,18 +1023,23 @@ bool Prp::rule_assignment_operator(){
 	
 	/* left and right shift */
   if (scan_is_token(Token_id_lt)){
+    ast->add(Prp_rule_assignment_operator, scan_token());
     debug_consume();
     tokens_consumed++;
     if(scan_is_token(Token_id_lt)){
+      ast->add(Prp_rule_assignment_operator, scan_token());
+      debug_consume();
+      tokens_consumed++;
+      if(scan_is_token(Token_id_eq)){
+        ast->add(Prp_rule_assignment_operator, scan_token());
         debug_consume();
-        tokens_consumed++;
-        if(scan_is_token(Token_id_eq)){
-          debug_consume();
-          fmt::print("Fits rule_assignment_operator.\n");
-          return true;
-        }
+        fmt::print("Fits rule_assignment_operator.\n");
+        ast->up(Prp_rule_assignment_operator);
+        return true;
+      }
     }
     go_back(tokens_consumed);
+    ast->up(Prp_rule_assignment_operator);
     return false;
   }
   
@@ -1034,19 +1047,24 @@ bool Prp::rule_assignment_operator(){
   tokens_consumed = 0;
   
   if (scan_is_token(Token_id_gt)){
+    ast->add(Prp_rule_assignment_operator, scan_token());
     debug_consume();
     tokens_consumed++;
     if(scan_is_token(Token_id_gt)){
+      ast->add(Prp_rule_assignment_operator, scan_token());
       debug_consume();
       tokens_consumed++;
       if(scan_is_token(Token_id_eq)){
+        ast->add(Prp_rule_assignment_operator, scan_token());
         debug_consume();
         fmt::print("Fits rule_assignment_operator.\n");
+        ast->up(Prp_rule_assignment_operator);
         return true;
       }
     }
   }
 	go_back(tokens_consumed);
+  ast->up(Prp_rule_assignment_operator);
 	return false;
 }
 
@@ -1122,6 +1140,8 @@ bool Prp::rule_logical_expression(){
   int tokens_consumed = 0;
   bool next = true;
   
+  ast->down();
+  
   fmt::print("Hello from rule_logical_expression.\n");
   if (rule_relational_expression()){
     /* zero or more of the following */
@@ -1129,18 +1149,24 @@ bool Prp::rule_logical_expression(){
       fmt::print("rule_logical_expression: looking for a logical operator. Next token:\n");
       next = scan_is_token(Pyrope_id_or) || scan_is_token(Pyrope_id_and);
       if(next){
+        ast->down();
+        ast->add(Prp_rule_logical_expression, scan_token());
+        ast->up(Prp_rule_logical_expression);
         debug_consume();
         tokens_consumed++;
         if (!rule_relational_expression()){
           go_back(tokens_consumed);
+          ast->up(Prp_rule_logical_expression);
           return false;
         }
       }
     }
     fmt::print("Fits rule_logical_expression.\n");
+    ast->up(Prp_rule_logical_expression);
     return true;
   }
   go_back(tokens_consumed);
+  ast->up(Prp_rule_logical_expression);
   return false;
 }
 
@@ -1157,6 +1183,7 @@ bool Prp::rule_relational_expression(){
       next = scan_is_token(Token_id_le) || scan_is_token(Token_id_ge) || scan_is_token(Token_id_lt) || scan_is_token(Token_id_gt) || scan_is_token(Token_id_same) || scan_is_token(Token_id_diff) || scan_is_token(Pyrope_id_is);
       fmt::print("rule_relational_expression: did we find our operator? {}\n", scan_is_token(Token_id_same));
       if(next){
+        ast->add(Prp_rule_relational_expression, scan_token());
         debug_consume();
         tokens_consumed++;
         if (!rule_additive_expression()){
@@ -1186,9 +1213,13 @@ bool Prp::rule_additive_expression(){
       // dump_token();
       next = scan_is_token(Token_id_plus);
       if(next){
+        ast->down();
+        ast->add(Prp_rule_additive_expression, scan_token());
+        ast->up(Prp_rule_additive_expression);
         debug_consume();
         tokens_consumed++;
         if(scan_is_token(Token_id_plus)){ // increment operator
+          ast->add(Prp_rule_additive_expression, scan_token());
           debug_consume();
           tokens_consumed++;
         }
@@ -1201,9 +1232,11 @@ bool Prp::rule_additive_expression(){
       
       next = scan_is_token(Token_id_mult);
       if(next){
+        ast->add(Prp_rule_additive_expression, scan_token());
         debug_consume();
         tokens_consumed++;
         if(scan_is_token(Token_id_mult)){ // ** operator
+          ast->add(Prp_rule_additive_expression, scan_token());
           debug_consume();
           tokens_consumed++;
           if(!rule_bitwise_expression()){
@@ -1216,9 +1249,11 @@ bool Prp::rule_additive_expression(){
       
       next = scan_is_token(Token_id_lt);
       if(next){
+        ast->add(Prp_rule_additive_expression, scan_token());
         debug_consume();
         tokens_consumed++;
         if(scan_is_token(Token_id_lt)){
+          ast->add(Prp_rule_additive_expression, scan_token());
           debug_consume();
           tokens_consumed++;
           if(!rule_bitwise_expression()){
@@ -1236,9 +1271,11 @@ bool Prp::rule_additive_expression(){
       
       next = scan_is_token(Token_id_gt);
       if(next){
+        ast->add(Prp_rule_additive_expression, scan_token());
         debug_consume();
         tokens_consumed++;
         if(scan_is_token(Token_id_gt)){
+          ast->add(Prp_rule_additive_expression, scan_token());
           debug_consume();
           tokens_consumed++;
           if(!rule_bitwise_expression()){
@@ -1256,6 +1293,7 @@ bool Prp::rule_additive_expression(){
       
       next = (scan_is_token(Token_id_minus) || scan_is_token(Pyrope_id_union) || scan_is_token(Pyrope_id_intersect));
       if(next){
+        ast->add(Prp_rule_additive_expression, scan_token());
         debug_consume();
         tokens_consumed++;
         if(!rule_bitwise_expression()){
@@ -1273,9 +1311,11 @@ bool Prp::rule_additive_expression(){
     
     /* optional */
     if(scan_is_token(Token_id_dot)){
+      ast->add(Prp_rule_additive_expression, scan_token());
       debug_consume();
       tokens_consumed++;
       if(scan_is_token(Token_id_dot)){
+        ast->add(Prp_rule_additive_expression, scan_token());
         debug_consume();
         tokens_consumed++;
         /* FIXME (maybe): this is optional, but it must either fully fit rule_additive_expression or
@@ -1303,6 +1343,7 @@ bool Prp::rule_bitwise_expression(){
     while(next){
       next = scan_is_token(Token_id_pipe) || scan_is_token(Token_id_and) || scan_is_token(Token_id_xor);
       if(next){
+        ast->add(Prp_rule_additive_expression, scan_token());
         debug_consume();
         tokens_consumed++;
         if(!rule_multiplicative_expression()){
@@ -1327,6 +1368,9 @@ bool Prp::rule_multiplicative_expression(){
     while(next){
       next = scan_is_token(Token_id_mult) || scan_is_token(Token_id_div);
       if(next){
+        ast->add(Prp_rule_additive_expression, scan_token());
+        debug_consume();
+        tokens_consumed++;
         if(!rule_unary_expression()){
           go_back(tokens_consumed);
           return false;
@@ -1447,12 +1491,12 @@ bool Prp::go_back(int num_tok){
   return ok;
 }
 
-void Prp::go_up(int num_levels){
+/*void Prp::go_up(int num_levels){
   int i;
   for(i=1;i<num_levels;i++){
     ast->up_null();
   }
-}
+}*/
 
 void Prp::ast_handler(const Tree_index &parent, const Tree_index &self, const Ast_parser_node &node){
   auto rule_value = node.rule_id;
