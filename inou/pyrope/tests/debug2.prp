@@ -6,6 +6,6 @@ if c == 3 { // Error unless c is know at compile
 }
 tup[b] = true
 for a:tup ::{
-  puts "index:{} value:{}" a.__index a
+  puts.("index:{} value:{}", a.__index, a)
   I tup[a.__index] == a
 }

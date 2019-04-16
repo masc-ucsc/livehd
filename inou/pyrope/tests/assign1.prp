@@ -1,9 +1,9 @@
 // code/assign1.prp
 a = b         // potential restart in fluid
 a as c        // alias a as c, no real read for fluid
-b = __bits:3  // explicit bits
+b = (__bits:3)  // explicit bits
 b = 3         // OK
-b = __bits:10 // OK to redefine
+b = (__bits:10) // OK to redefine
 b = 100       // OK
-d as __bits:3 // explicit bits
-d = __bits:4  // compile error, fixed with as
+d as (__bits:3) // explicit bits
+d = (__bits:4)  // compile error, fixed with as

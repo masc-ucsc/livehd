@@ -1,7 +1,7 @@
 // code/clk1.prp
 @clk_flop = $inp
 // implicit @clk_flop as __clk_pin:$clk
-@clk2_flop as __clk_pin:$clk2
+@clk2_flop as (__clk_pin:$clk2)
 @clk2_flop = @clk_flop
 %out = @clk2_flop
-%out as __fluid:true __clk_pin:$clk3  // 3rd clock for output
+%out as (__fluid:true, __clk_pin:$clk3)  // 3rd clock for output

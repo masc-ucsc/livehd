@@ -6,8 +6,8 @@ if @counter {
   @led = ~@led // Not %, @ is always valid
 }
 test = ::{
-  b = vsmigen maxperiod:300000
-  puts "led is {}" b.led
-  yield 300000
-  puts "led is {}" b.led
+  b = vsmigen.(maxperiod:300000)
+  puts.("led is {}" ,b.led)
+  yield.(300000)
+  puts.("led is {}" ,b.led)
 }

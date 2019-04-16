@@ -17,4 +17,4 @@ if $input[[0..1]] == 0 {
   I tmp.oneortwo  == 0
   I tmp.oneortwo2 == 0
 }
-I tmp.oneortwo ..in.. (1 2 0)
+I tmp.oneortwo ..in.. (1, 2, 0)

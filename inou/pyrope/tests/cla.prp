@@ -1,5 +1,5 @@
 // libs/adder/code/cla.prp file
-%sum = rca.(a:$a b:$b cin:0).sum
+%sum = rca.(a:$a, b:$b, cin:0).sum
 g = $a & $b // Generate
 p = $a ^ $b // Propagate
 // 4 bit: c = g[[3]] | g[[2]] & p[[3]] | g[[1]] & p[[3]] & p[[2]] |...
@@ -14,8 +14,8 @@ for i:(0..a.__bits) {
 %cout = c
 test = ::{
   for a:(1..40) b:(1..100) {
-    c1 = cla a:a b:b cin:0
-    c2 = rca a:a b:b cin:0
+    c1 = cla.(a:a, b:b, cin:0)
+    c2 = rca.(a:a, b:b, cin:0)
     I c1.cout == c2.cout
   }
 }

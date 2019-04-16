@@ -6,8 +6,8 @@ for i:(0..$a.__bits) {
 }
 
 test = ::{
-  for a:(1..100) b:(0..33) c:(0 1) {
-    d = rca2 a:a b:b cin:c
+  for a:(1..100) b:(0..33) c:(0, 1) {
+    d = rca2.(a:a, b:b, cin:c)
     I d.sum == (a+b+c)
   }
 }

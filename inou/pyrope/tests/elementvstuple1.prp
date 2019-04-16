@@ -1,10 +1,10 @@
 // code/elementvstuple1.prp
 // operators read left and right side
-a = (1 2 3) + 4      // element op
-I a == (5 6 7)
-a = (1 2 3) ++ (4 5) // tuple concat
-I a == (1 2 3 4 5)
-a = (1 2 3) ..+.. 4  // element op
-I a == (5 6 7)
+a = (1, 2, 3) + 4      // element op
+I a == (5, 6, 7)
+a = (1, 2, 3) ++ (4, 5) // tuple concat
+I a == (1, 2, 3, 4, 5)
+a = (1, 2, 3) ..+.. 4  // element op
+I a == (5, 6, 7)
 // ..XX.. means operator XX
 // .. are optional for non-alphanumeric operators

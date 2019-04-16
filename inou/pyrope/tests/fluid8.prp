@@ -3,15 +3,15 @@ combinational = ::{
   % = ssum.(a:sinc.($a), b:sinc.($b))
 }
 incsum = combinational.(a:$a,b:$b)
-incsum as __fluid:true    // instance is fluid
+incsum as (__fluid:true)    // instance is fluid
 one_stage_fluid  = ::{    // Same as incsum
   % = ssum.(a:sinc.($a), b:sinc.($b))
-  % as __fluid:true
+  % as (__fluid:true)
 }
 mixed_weird_fluid = ::{
   %out1 = a2.(a:a1.($a), b:a1.($b))
-  %out2 = a2.(a:$a b:$b)
-  %out2 as __fluid:true
+  %out2 = a2.(a:$a, b:$b)
+  %out2 as (__fluid:true)
 }
 allfluid = mixed_weird_fluid
-allfuild as __fluid:true  // both out1 and out2
+allfuild as (__fluid:true)  // both out1 and out2

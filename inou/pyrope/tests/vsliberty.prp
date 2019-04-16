@@ -4,11 +4,11 @@ gen  = ::{
 }
 sink = ::{
   if $data? {
-     puts ": {}" $data
+     puts.(": {}" ,$data)
   }else{
-     puts ": No data"
+     puts.(": No data")
   }
 }
-s = sink __stage:true
-g = gen  __stage:true
+s = sink.(__stage:true)
+g = gen.(__stage:true)
 s.data = g.data

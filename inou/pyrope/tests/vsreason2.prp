@@ -2,8 +2,8 @@
 increment = :($x):{$x + 1 }
 double    = :($x):{$x + $x}
 eleven = increment.(double.(5))
-add = :($x $y):{$x + $y}
+add = :($x, $y):{$x + $y}
 addFive = \add  // add reference, no call
-addFive = ::{ super x:5 y:$y }
-eleven  = ::{ super y:6 }
-twelve  = ::{ super y:7 }
+addFive = ::{ super.(x:5, y:$y) }
+eleven  = ::{ super.(y:6) }
+twelve  = ::{ super.(y:7) }
