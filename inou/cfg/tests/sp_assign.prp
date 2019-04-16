@@ -1,7 +1,7 @@
-%o1 as __bits:4
+%o1 as (__bits:4)
 
 method1st = ::{
-  var as __bits:4
+  var as (__bits:4)
   var = 11u4bits
   return var
 }
@@ -13,7 +13,7 @@ method2nd = 12u4bits
 
 %o3 = method3rd
 method3rd = ::{
-  var as __bits:4
+  var as (__bits:4)
   var = 13u4bits
   return var
 }
