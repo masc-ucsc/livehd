@@ -104,6 +104,7 @@ private:
   constexpr bool is_pure_assign_op(std::string_view v) const { return v == "="; }
   constexpr bool is_label_op(std::string_view v)       const { return v == ":"; }
   constexpr bool is_as_op(std::string_view v)          const { return v == "as"; }
+  constexpr bool is_tuple_op(std::string_view v)       const { return v == "()"; }
 
   constexpr bool is_unary_op(std::string_view v)   const { return (v == "!") || (v == "not"); }
   constexpr bool is_compute_op(std::string_view v) const { return (v == "+"); }

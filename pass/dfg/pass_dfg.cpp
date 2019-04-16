@@ -161,7 +161,6 @@ void Pass_dfg::trans(LGraph *dfg) {
     }
   }
 
-/*
   //resolve top <-> subgraph IO connection
   for(auto nid : dfg->fast()){
     auto node = Node(dfg, 0, Node::Compact(nid));
@@ -250,7 +249,7 @@ void Pass_dfg::trans(LGraph *dfg) {
       dfg->set_node_wirename(dfg->get_node(nid).setup_driver_pin(0),"subg_tmp_wire");
     }
   }
-*/
+
   for(auto nid : dfg->fast()) {
     auto node = Node(dfg, 0, Node::Compact(nid));
       if(node.get_type().op == Equals_Op) {
@@ -424,6 +423,7 @@ void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_t
   } else {
     subg_root_node.set_type(DfgPendingGraph_Op);
     //re-assign correct subgraph name
+    //SH:FIXME: should store subgraph name at "Node" if moving to "Node_pin" based design
     subg_root_node.setup_driver_pin().set_name(oprds.at(0));
     fmt::print("set pending graph on node:{}, sub_graph name should be:{}\n",
                 subg_root_node.get_compact(), subg_root_node.setup_driver_pin().set_name(oprds.at(0)));
@@ -465,14 +465,19 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
       oprd_node1.setup_driver_pin().set_name(oprds[0]);
       fmt::print("dst_subG_io:{}, assigned by:{}\n",oprds[0], oprds[1]);
     }
+  } else if(is_tuple_op(op)){
+    //SH:FIXME: need to extend to real tuple function
+    //SH:FIXME: for now, it acts as a pure assignment
+    aux_tree->set_alias(target, oprd_node0);
+    aux_tree->set_pending(target, oprd_node0);
   } else if(is_as_op(op)) {
     // process target
     if(is_input(target) || is_output(target)) {
       I(oprd_node0.get_type_const_value());
-      auto bits = oprd_node0.get_type_const_value();
+      auto bits = (uint16_t)oprd_node0.get_type_const_value();
       //SH:FIXME: should set_bits on every Node_pin
       target_node.setup_driver_pin().set_bits(bits);
-      fmt::print("set_bits for input target:{}\n", target);
+      fmt::print("set_bits for i/o target:{}\n", target);
     } else {
       aux_tree->set_alias(target, oprd_node0);
     }
@@ -508,6 +513,9 @@ void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Node> &dnodes,
     Port_ID spin_pid =
         (snode.get_type().op == Sum_Op &&  one_srcs_is_signed) ? (uint16_t)0 :
         (snode.get_type().op == Sum_Op && !one_srcs_is_signed) ? (uint16_t)1 :
+        (snode.get_type().op == And_Op )                       ? (uint16_t)0 :
+        (snode.get_type().op == Or_Op  )                       ? (uint16_t)0 :
+        (snode.get_type().op == Xor_Op )                       ? (uint16_t)0 :
         (snode.get_type().op == LessThan_Op && i == 0)         ? (uint16_t)0 :
         (snode.get_type().op == LessThan_Op && i == 1)         ? (uint16_t)2 :
         (snode.get_type().op == GreaterThan_Op && i == 0)      ? (uint16_t)0 :
@@ -520,7 +528,7 @@ void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Node> &dnodes,
         (snode.get_type().op == SubGraph_Op)                   ? (uint16_t)0 : (uint16_t)0;
 
     /* the sub-graph IOs connection cannot be resolved at the first pass
-    so just casually connect the top<->sub-graph IOs so we could traverse edges and
+    so just initially connect the top->sub-graph IOs so we could traverse edges and
     resolve connections after resolving the sub-graph instantiation".*/
 
     dfg->add_edge(dnode.get_driver_pin(dpin_pid), snode.get_sink_pin(spin_pid));
@@ -539,23 +547,23 @@ Node Pass_dfg::process_operand(LGraph *dfg, Aux_tree *aux_tree, const std::strin
     if(is_constant(oprd)) { // process "as __bits" here!
       oprd_node = resolve_constant(dfg, aux_tree, oprd);
       aux_tree->set_alias(oprd, oprd_node);
-      //fmt::print("create node for constant operand:{}, nid:{}\n", oprd, oprd_node);
+      fmt::print("create node for constant operand:{}\n", oprd);
     } else if(is_input(oprd)) {
       oprd_node = create_input(dfg, aux_tree, oprd);
       aux_tree->set_alias(oprd, oprd_node);
-      //fmt::print("create node for input operand:{}, nid:{}\n", oprd, oprd_node);
+      fmt::print("create node for input operand:{}\n", oprd);
     } else if(is_output(oprd)) {
       oprd_node = create_output(dfg, aux_tree, oprd);
       aux_tree->set_alias(oprd, oprd_node);
-      //fmt::print("create node for output operand:{}, nid:{}\n", oprd, oprd_node);
+      fmt::print("create node for output operand:{}\n", oprd);
     } else if(is_reference(oprd)) {
       oprd_node = create_reference(dfg, aux_tree, oprd);
       aux_tree->set_alias(oprd, oprd_node);
-      //fmt::print("create node for reference operand:{}, nid:{}\n", oprd, oprd_node);
+      fmt::print("create node for reference operand:{}\n", oprd);
     } else {
       oprd_node = create_private(dfg, aux_tree, oprd);
       aux_tree->set_alias(oprd, oprd_node);
-      //fmt::print("create node for private operand:{}, nid:{}\n", oprd, oprd_node);
+      fmt::print("create node for private operand:{}\n", oprd);
     }
     // else if (is_register(oprd)){
     //  //oprd_id = create_register(dfg, aux_tree, oprd);

@@ -1,4 +1,4 @@
-$c as __bits:3
+$c as (__bits:3)
 d = 5
-%out as __bits:4
+%out as (__bits:4)
 %out = $c + d
