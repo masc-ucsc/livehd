@@ -230,6 +230,21 @@ std::string_view Node::get_name() const {
   return Ann_node_name::get(*this);
 }
 
+std::string Node::debug_name() const {
+#ifdef NDEBUG
+  static int conta = 0;
+  if (conta<10) {
+    conta++;
+    fmt::print("WARNING: Node::debug_name should not be called during release (Slowww!)\n");
+  }
+#endif
+  std::string name;
+  if (Ann_node_name::has(*this))
+    name = Ann_node_name::get(*this);
+
+  return absl::StrCat("node_", std::to_string(nid), "(", name ,")");
+}
+
 bool Node::has_name() const {
   return Ann_node_name::has(*this);
 }
