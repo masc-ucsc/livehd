@@ -35,7 +35,6 @@ void Pass_dce::optimize(Eprp_var &var) {
 void Pass_dce::trans(LGraph *g) {
 
   bm::bvector<>  cell_used;
-  //std::set<Node> pending;
   absl::flat_hash_set<Node> pending;
 
   g->each_graph_output([&pending](const Node_pin &pin) {
@@ -46,13 +45,9 @@ void Pass_dce::trans(LGraph *g) {
     auto it = pending.begin();
     Node cur_node = *it;
     pending.erase(it);
-    //auto node = g->get_node(current); //already in Node form
-    //SH:FIXME:ASK: how to use "Node" to index a container which requires an integer?
-    //cell_used.set_bit(cur_node.get_compact());
     cell_used.set_bit((bm::id_t)cur_node.get_compact());
 
     for(auto &inp : cur_node.inp_edges()) {
-      //if(cell_used.get_bit(g->get_node(inp.get_out_pin()).get_nid()))
       if(cell_used.get_bit( (bm::id_t)inp.driver.get_node().get_compact()))
         continue;
 
