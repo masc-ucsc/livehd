@@ -143,6 +143,8 @@ public:
   void del_node();
 
   // BEGIN ATTRIBUTE ACCESSORS
+  std::string      debug_name() const;
+
   std::string_view set_name(std::string_view iname);
   std::string_view get_name() const;
   std::string_view create_name() const;

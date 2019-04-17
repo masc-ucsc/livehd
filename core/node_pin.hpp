@@ -122,17 +122,18 @@ public:
   bool is_invalid() const { return g==nullptr || idx==0; }
 
   // BEGIN ATTRIBUTE ACCESSORS
+  std::string      debug_name() const;
+
+  std::string_view set_name(std::string_view wname);
+  std::string_view create_name() const;
+  std::string_view get_name() const;
+  bool has_name() const;
 
   uint16_t get_bits() const;
   void     set_bits(uint16_t bits);
 
   std::string_view get_type_subgraph_io_name() const;
   std::string_view get_type_tmap_io_name() const;
-
-  std::string_view set_name(std::string_view wname);
-  std::string_view create_name() const;
-  std::string_view get_name() const;
-  bool has_name() const;
 
   void set_offset(uint16_t offset);
   uint16_t get_offset() const;
