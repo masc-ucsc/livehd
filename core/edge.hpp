@@ -37,10 +37,18 @@ public:
     };
 
   };
+  template <typename H>
+  friend H AbslHashValue(H h, const XEdge& s) {
+    return H::combine(std::move(h), s.driver, s.sink);
+  };
   Node_pin driver;
   Node_pin sink;
 
   XEdge(const Node_pin &src_, const Node_pin &dst_);
+
+  bool operator==(const XEdge &other) const { return (driver == other.driver) && (sink == other.sink); }
+
+  bool operator!=(const XEdge &other) const { return (driver != other.driver) || (sink != other.sink); }
 
   inline Compact get_compact() const {
     return Compact(driver.get_idx(),driver.get_pid(),sink.get_idx(),sink.get_pid());
