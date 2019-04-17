@@ -36,7 +36,7 @@ public:
 
   std::vector<LGraph *> tolg() final;
 
-  void fromlg(std::vector<const LGraph *> &out) final;
+  void fromlg(std::vector<const LGraph *> &out) ;
 
   void set(const std::string &key, const std::string &value) final {
     opack.set(key, value);
