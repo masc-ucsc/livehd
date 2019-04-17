@@ -23,22 +23,20 @@ std::vector<LGraph *> Inou_def::generate() {
   const Tech_library &tlib            = g->get_tlibrary();
   const int           cell_types_size = tlib.get_cell_types_size();
 
-  std::unordered_map<std::string, Index_ID> ht_comp2nid;
+  std::unordered_map<std::string, Node> ht_comp2node;
 
   // set up node place coordinate and node type
   for(auto iter_compo = dinfo.compos.begin(); iter_compo != dinfo.compos.end();
       ++iter_compo) { // iterate over all components in def file
     Node     compo_node           = g->create_node();
-    Index_ID compo_nid            = compo_node.get_nid();
-    ht_comp2nid[iter_compo->name] = compo_nid;
+    ht_comp2node[iter_compo->name] = compo_node;
     // comment out for IWLS18
     // g->node_place_set(compo_nid, iter_compo->posx, iter_compo->posy);
     // cout<< "node_place of nid " << compo_nid << " is " << g->get_x(compo_nid) << " " << g->get_y(compo_nid) << endl;
-    for(int cell_id = 0; cell_id < cell_types_size; cell_id++) { // decide component's cell_type
+    for(uint16_t cell_id = 0; cell_id < cell_types_size; cell_id++) { // decide component's cell_type
       auto cell_type_name = tlib.get_const_cell(cell_id)->get_name();
       if(iter_compo->macro_name == cell_type_name)
-        g->node_tmap_set(compo_nid, cell_id); // node nid's cell type is cell_id.
-                                              // for debugging
+        compo_node.set_type_tmap_id(cell_id);// node nid's cell type is cell_id.
     }
     // const Tech_cell* cell_type = tlib.get_const_cell(g->tmap_id_get(compo_nid));
     // cout << "node_type of nid "  << compo_nid << " is " << cell_type->get_name()<< endl;
@@ -49,17 +47,16 @@ std::vector<LGraph *> Inou_def::generate() {
   } // end outer for
 
   Node     cf_node = g->create_node(); // cf = chip_frame_node
-  Index_ID cf_nid  = cf_node.get_nid();
-  for(int cell_id = 0; cell_id < cell_types_size; cell_id++) { // decide chip_frame_node's cell_type
+  for(uint16_t cell_id = 0; cell_id < cell_types_size; cell_id++) { // decide chip_frame_node's cell_type
     auto cell_type_name = tlib.get_const_cell(cell_id)->get_name();
     if(cell_type_name == "chip_frame")
-      g->node_tmap_set(cf_nid, cell_id); // node nid's cell type is cell_id.
+      cf_node.set_type_tmap_id(cell_id);// node nid's cell type is cell_id.
   }
 
   for(auto iter_net = dinfo.nets.begin(); iter_net != dinfo.nets.end(); ++iter_net) {
-    Index_ID              src_nid;
+    Node                  src_node;
     Port_ID               src_pid;
-    std::vector<Index_ID> dst_nids;
+    std::vector<Node>     dst_nodes;
     std::vector<Port_ID>  dst_pids;
 
     // deal with a net without drive/drived relationship, such as a net between memory D pin and a cell pin {(MEM D[1]) (inst533
@@ -71,26 +68,26 @@ std::vector<LGraph *> Inou_def::generate() {
     for(auto iter_conn = iter_net->conns.begin(); iter_conn != iter_net->conns.end();
         ++iter_conn) {                     // determine src nid/pid and dst nids/pids
       if(iter_conn->compo_name == "PIN") { // compo type is an io pin
-        const Tech_cell *cell_type = tlib.get_const_cell(g->tmap_id_get(cf_nid));
+        const Tech_cell *cell_type = tlib.get_const_cell( (uint16_t)cf_node.get_type_tmap_id());
         Port_ID          pid       = cell_type->get_pin_id(iter_conn->pin_name);
         if(cell_type->is_output(iter_conn->pin_name)) {
-          src_nid = cf_nid;
+          src_node = cf_node;
           src_pid = pid;
         } else {
-          dst_nids.push_back(cf_nid);
+          dst_nodes.push_back(cf_node);
           dst_pids.push_back(pid);
         }
       } else { // compo type is not an io pin, i.e. regular cell
-        Index_ID         compo_nid = ht_comp2nid[iter_conn->compo_name];
-        const Tech_cell *cell_type = tlib.get_const_cell(g->tmap_id_get(compo_nid));
-        Port_ID          pid       = cell_type->get_pin_id(iter_conn->pin_name);
+        Node             compo_node = ht_comp2node[iter_conn->compo_name];
+        const Tech_cell *cell_type  = tlib.get_const_cell( (uint16_t)compo_node.get_type_tmap_id());
+        Port_ID          pid        = cell_type->get_pin_id(iter_conn->pin_name);
 
         if(cell_type->is_output(iter_conn->pin_name)) {
-          src_nid = compo_nid; // for each net, there will be only 1 drive and N-fanout
+          src_node  = compo_node; // for each net, there will be only 1 drive and N-fanout
           src_pid   = pid;
           has_drive = true;
         } else {
-          dst_nids.push_back(compo_nid);
+          dst_nodes.push_back(compo_node);
           dst_pids.push_back(pid);
         }
       }
@@ -106,12 +103,12 @@ std::vector<LGraph *> Inou_def::generate() {
     //}
 
     if(has_drive) {
-      for(size_t i = 0; i < dst_nids.size(); ++i) {
+      for(size_t i = 0; i < dst_nodes.size(); ++i) {
         // create N lgraph edge"s" to connect N fanout from 1 src pin
-        assert(src_nid);
-        assert(dst_nids[i]);
-        Node_pin dst_pin = g->get_node(dst_nids[i]).setup_sink_pin(dst_pids[i]);
-        Node_pin src_pin = g->get_node(src_nid).setup_driver_pin(src_pid);
+        assert(!src_node.is_invalid());
+        assert(!dst_nodes[i].is_invalid());
+        Node_pin dst_pin = dst_nodes[i].setup_sink_pin(dst_pids[i]);
+        Node_pin src_pin = src_node.setup_driver_pin(src_pid);
         g->add_edge(src_pin, dst_pin);
       }
     }
