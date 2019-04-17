@@ -51,6 +51,8 @@ void LGraph_Node_Type::set_type(Index_ID nid, Node_Type_Op op) {
 
   I(node_internal[nid].get_nid() < node_type_table.size());
 
+  I(node_type_table[node_internal[nid].get_nid()] == Invalid_Op);
+
   node_type_table[node_internal[nid].get_nid()] = op;
 }
 
@@ -77,6 +79,9 @@ void LGraph_Node_Type::set_type_subgraph(Index_ID nid, Lg_type_id subgraphid) {
   I(subgraphid.value <= (uint32_t)(SubGraphMax_Op - SubGraphMin_Op));
 
   sub_graph_nodes.set_bit(node_internal[nid].get_nid());
+  I((node_type_table[node_internal[nid].get_nid()] >=SubGraphMin_Op
+     && node_type_table[node_internal[nid].get_nid()] <SubGraphMax_Op)
+  || node_type_table[node_internal[nid].get_nid()] == Invalid_Op);
 
   node_type_table[node_internal[nid].get_nid()] = (Node_Type_Op)(SubGraphMin_Op + subgraphid);
 }

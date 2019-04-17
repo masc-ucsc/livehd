@@ -120,9 +120,12 @@ public:
   uint32_t get_type_tmap_id() const;
   const Tech_cell *get_type_tmap_cell() const;
 
+  /* WARNING: Do not call this. Use create_node_const... to reuse node if already exists
   void set_type_const_value(std::string_view str);
   void set_type_const_sview(std::string_view str);
   void set_type_const_value(uint32_t val);
+  */
+
   uint32_t get_type_const_value() const;
   std::string_view get_type_const_sview() const;
 
