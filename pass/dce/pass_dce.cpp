@@ -43,8 +43,9 @@ void Pass_dce::trans(LGraph *g) {
     });
 
   while(!pending.empty()) {
-    Node cur_node = *(pending.begin());
-    pending.erase(cur_node);
+    auto it = pending.begin();
+    Node cur_node = *it;
+    pending.erase(it);
     //auto node = g->get_node(current); //already in Node form
     //SH:FIXME:ASK: how to use "Node" to index a container which requires an integer?
     //cell_used.set_bit(cur_node.get_compact());

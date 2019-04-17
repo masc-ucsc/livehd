@@ -58,6 +58,16 @@ public:
       return H::combine(std::move(h), s.nid);
     };
   };
+  template <typename H>
+  friend H AbslHashValue(H h, const Node& s) {
+    return H::combine(std::move(h), (int)s.nid, (int)s.hid); // Ignore lgraph pointer in hash
+  };
+  bool operator==(const Node &other) const { I(nid); I(g == other.g); return (nid == other.nid) && (hid == other.hid); }
+
+  bool operator!=(const Node &other) const { I(nid); I(g == other.g); return (nid != other.nid) || (hid != other.hid); }
+
+  // NOTE: No operator<() needed for std::set std::map to avoid their use. Use flat_map_set for speed
+
   Node()
     :nid(0)
     ,hid(0)
