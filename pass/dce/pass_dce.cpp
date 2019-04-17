@@ -34,33 +34,36 @@ void Pass_dce::optimize(Eprp_var &var) {
 
 void Pass_dce::trans(LGraph *g) {
 
-  bm::bvector<>      cell_used;
-  std::set<Index_ID> pending;
+  bm::bvector<>  cell_used;
+  //std::set<Node> pending;
+  absl::flat_hash_set<Node> pending;
 
   g->each_graph_output([&pending](const Node_pin &pin) {
-      pending.insert(pin.get_idx());
+      pending.insert(pin.get_node());
     });
 
   while(!pending.empty()) {
-    Index_ID current = *(pending.begin());
-    pending.erase(current);
-    auto node = g->get_node(current);
-    cell_used.set_bit(node.get_nid());
+    Node cur_node = *(pending.begin());
+    pending.erase(cur_node);
+    //auto node = g->get_node(current); //already in Node form
+    //SH:FIXME:ASK: how to use "Node" to index a container which requires an integer?
+    //cell_used.set_bit(cur_node.get_compact());
+    cell_used.set_bit((bm::id_t)cur_node.get_compact());
 
-    for(auto &c : g->inp_edges(node.get_nid())) {
-      if(cell_used.get_bit(g->get_node(c.get_out_pin()).get_nid()))
+    for(auto &inp : cur_node.inp_edges()) {
+      //if(cell_used.get_bit(g->get_node(inp.get_out_pin()).get_nid()))
+      if(cell_used.get_bit( (bm::id_t)inp.driver.get_node().get_compact()))
         continue;
 
-      pending.insert(c.get_out_pin().get_idx());
+      pending.insert(inp.driver.get_node());
     }
   }
 
   for(auto nid : g->fast()) {
-    if(cell_used.get_bit(nid))
+    auto node = Node(g, 0, Node::Compact(nid));
+    if(cell_used.get_bit( (bm::id_t)node.get_compact()))
       continue;
-
-    g->del_node(nid);
+    node.del_node();
   }
-
   g->sync();
 }
