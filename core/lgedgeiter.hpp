@@ -1,10 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include <cassert>
-#include <set>
-#include <vector>
-
 #include "pass.hpp"
 
 #include "sparsehash/dense_hash_map"
@@ -58,7 +54,7 @@ public:
     CFast_edge_iterator(const Index_ID _nid, LGraph *_g) : nid(_nid), g(_g) {}
     CFast_edge_iterator operator++();
     bool operator!=(const CFast_edge_iterator &other) {
-      assert(g == other.g);
+      I(g == other.g);
       return nid != other.nid;
     }
     const Index_ID &operator*() const { return nid; }
@@ -82,18 +78,17 @@ public:
 };
 
 typedef google::dense_hash_map<uint64_t, int32_t> Frontier_type;
-typedef std::vector<uint64_t>                     Pending_type;
 typedef google::sparse_hash_set<uint64_t>         Deadcode_type;
 
 class Edge_raw_iterator_base {
 protected:
-  Index_ID           nid;
-  LGraph *g;
-  Frontier_type *    frontier;  // 2G inputs at most
-  Pending_type *     pending;   // vertex that cleared the frontier
+  Index_ID       nid;
+  LGraph        *g;
+  Frontier_type *frontier;  // 2G inputs at most
+  bmsparse      *pending;   // vertex that cleared the frontier
 
 public:
-  Edge_raw_iterator_base(const Index_ID _nid, LGraph *_g, Frontier_type *_frontier, Pending_type *_pending)
+  Edge_raw_iterator_base(const Index_ID _nid, LGraph *_g, Frontier_type *_frontier, bmsparse *_pending)
       : nid(_nid), g(_g), frontier(_frontier), pending(_pending) {}
 
   virtual void    add_node(Index_ID nid) = 0;
@@ -102,29 +97,35 @@ public:
   bool check_frontier();
 
   void set_next_nid() {
-    if (pending->empty())
-      if (!check_frontier()) {
-        nid = 0;  // We are done
-        return;
-      }
+    const auto it = pending->first();
+    if (it.valid()) {
+      nid = *it;
+      return;
+    }
+
+    if (!check_frontier()) {
+      nid = 0;  // We are done
+      return;
+    }
 
 #if DEBUG
     // Benchmark pending and frontier sizes
     static size_t p_max_size = 0;
     static size_t f_max_size = 0;
     if (pending->size() > (2 * p_max_size)) {
-      fmt::print("pending {} {}\n", pending->size(), ((double)pending->size()) / g->size());
-      p_max_size = pending->size();
+      fmt::print("pending {} {}\n", pending->count(), ((double)pending->count()) / g->size());
+      p_max_size = pending->count();
     }
     if (frontier->size() > (2 * f_max_size)) {
-      fmt::print("frontier {} {}\n", frontier->size(), ((double)frontier->size()) / g->size());
-      f_max_size = frontier->size();
+      fmt::print("frontier {} {}\n", frontier->count(), ((double)frontier->count()) / g->size());
+      f_max_size = frontier->count();
     }
 #endif
 
-    assert(!pending->empty());
-    nid = pending->back();
-    pending->pop_back();
+    I(pending->first() != pending->end());
+    auto it2 = pending->first();
+    nid = *it2;
+    I(nid);
   };
 };
 
@@ -132,13 +133,13 @@ class Forward_edge_iterator {
 public:
   class CForward_edge_iterator : public Edge_raw_iterator_base {
   public:
-    CForward_edge_iterator(const Index_ID _nid, LGraph *_g, Frontier_type *_frontier, Pending_type *_pending)
+    CForward_edge_iterator(const Index_ID _nid, LGraph *_g, Frontier_type *_frontier, bmsparse *_pending)
         : Edge_raw_iterator_base(_nid, _g, _frontier, _pending) {}
 
     bool operator!=(const CForward_edge_iterator &other) {
-      assert(g == other.g);
-      assert(frontier == other.frontier);
-      assert(pending == other.pending);
+      I(g == other.g);
+      I(frontier == other.frontier);
+      I(pending == other.pending);
 
       return nid != 0;
     };
@@ -146,7 +147,7 @@ public:
     void add_node(const Index_ID nid);
 
     CForward_edge_iterator operator++() {
-      assert(nid);  // Do not call ++ after end
+      I(nid);  // Do not call ++ after end
       CForward_edge_iterator i(nid, g, frontier, pending);
       add_node(nid);
       set_next_nid();
@@ -156,17 +157,16 @@ public:
 
 private:
 protected:
-  LGraph *g;
-  Frontier_type      frontier;  // 2G inputs at most
-  Pending_type       pending;   // vertex that cleared the frontier
+  LGraph        *g;
+  Frontier_type  frontier;  // 2G inputs at most
+  bmsparse       pending;   // vertex that cleared the frontier
 
 public:
   Forward_edge_iterator() = delete;
   explicit Forward_edge_iterator(LGraph *_g) : g(_g) {
     frontier.set_empty_key(0);      // 0 is not allowed as key
     frontier.set_deleted_key(128);  // 128 is not allowed as key (4KB aligned)
-    // frontier.resize(32+g->size()/16);
-    // pending.reserve(32+g->size()/128);
+    frontier.resize(32+g->size()/16);
   }
 
   CForward_edge_iterator begin();
@@ -178,16 +178,17 @@ class Backward_edge_iterator {
 public:
   class CBackward_edge_iterator : public Edge_raw_iterator_base {
   private:
-    Deadcode_type global_visited;
+    bmsparse global_visited;
 
   public:
-    CBackward_edge_iterator(const Index_ID _nid, LGraph *_g, Frontier_type *_frontier, Pending_type *_pending)
-        : Edge_raw_iterator_base(_nid, _g, _frontier, _pending) {}
+    CBackward_edge_iterator(const Index_ID _nid, LGraph *_g, Frontier_type *_frontier, bmsparse *_pending)
+      : Edge_raw_iterator_base(_nid, _g, _frontier, _pending) {
+    }
 
     bool operator!=(const CBackward_edge_iterator &other) {
-      assert(g == other.g);
-      assert(frontier == other.frontier);
-      assert(pending == other.pending);
+      I(g == other.g);
+      I(frontier == other.frontier);
+      I(pending == other.pending);
 
       return nid != 0;
     };
@@ -199,11 +200,11 @@ public:
     void add_node(const Index_ID nid);
 
     CBackward_edge_iterator operator++() {
-      assert(nid);  // Do not call ++ after end
+      I(nid);  // Do not call ++ after end
       CBackward_edge_iterator i(nid, g, frontier, pending);
-      global_visited.insert(nid);
+      global_visited.set(nid, true);
       add_node(nid);
-      if (pending->empty()) {
+      if (pending->first()==pending->end()) {
         find_dce_nodes();
       }
       set_next_nid();
@@ -213,9 +214,9 @@ public:
 
 private:
 protected:
-  LGraph *g;
-  Frontier_type      frontier;  // 2G inputs at most
-  Pending_type       pending;   // vertex that cleared the frontier
+  LGraph        *g;
+  Frontier_type  frontier;  // 2G inputs at most
+  bmsparse       pending;   // vertex that cleared the frontier
 
 public:
   Backward_edge_iterator() = delete;
@@ -223,7 +224,6 @@ public:
     frontier.set_empty_key(0);      // 0 is not allowed as key
     frontier.set_deleted_key(128);  // 128 is not allowed as key (4KB aligned)
     frontier.resize(128);           // FIXME: do average or gsize ratio
-    pending.reserve(128);
   }
 
   CBackward_edge_iterator begin();

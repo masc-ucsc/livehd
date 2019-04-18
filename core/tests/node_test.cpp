@@ -35,18 +35,32 @@ protected:
 
     //---------------------------------------------------
     // Create graphs input/outputs
-    auto top_a = top->add_graph_input("a", 10, 0);
-    auto top_b = top->add_graph_input("b", 10, 3);
-    auto top_z = top->add_graph_output("z", 1, 0);
-    auto top_y = top->add_graph_output("Y", 10, 0);
-    auto top_s2_out = top->add_graph_output("s2_out", 1, 0);
+    int pos = 0;
+    auto top_a = top->add_graph_input("a", pos++);
+    top_a.set_bits(10);
+    auto top_b = top->add_graph_input("b", pos++);
+    top_b.set_bits(10);
+    top_b.set_offset(3);
+    auto top_z = top->add_graph_output("z", pos++);
+    top_z.set_bits(1);
+    auto top_y = top->add_graph_output("Y", pos++);
+    top_y.set_bits(10);
+    auto top_s2_out = top->add_graph_output("s2_out", pos++);
+    top_s2_out.set_bits(1);
 
-    auto c1_aaa = c1->add_graph_input("an_input", 10, 0);
-    auto c1_sss = c1->add_graph_output("s1_output", 1, 0);
+    pos = 0;
+    auto c1_aaa = c1->add_graph_input("an_input", pos++);
+    c1_aaa.set_bits(10);
+    auto c1_sss = c1->add_graph_output("s1_output", pos++);
+    c1_sss.set_bits(1);
 
-    auto c2_aaa = c2->add_graph_input("a1", 10, 0);
-    auto c2_bbb = c2->add_graph_input("anotherinput", 10, 0);
-    auto c2_sss = c2->add_graph_output("Y", 1, 0);
+    pos = 0;
+    auto c2_aaa = c2->add_graph_input("a1", pos++);
+    c2_aaa.set_bits(10);
+    auto c2_bbb = c2->add_graph_input("anotherinput", pos++);
+    c2_bbb.set_bits(10);
+    auto c2_sss = c2->add_graph_output("Y", pos++);
+    c2_sss.set_bits(1);
 
     //---------------------------------------------------
     // populate top graph with cells and instances

@@ -44,11 +44,13 @@ bool Node::is_root() const {
 Node_pin Node::setup_driver_pin(Port_ID pid) {
   I(g->get_type(nid).has_output(pid));
   Index_ID idx = g->setup_idx_from_pid(nid,pid);
+  g->setup_driver(idx);
   return Node_pin(g,hid,idx, pid, false);
 }
 
 Node_pin Node::setup_driver_pin() const {
   I(g->get_type(nid).has_single_output());
+  g->setup_driver(nid);
   return Node_pin(g,hid,nid,0,false);
 }
 
@@ -118,6 +120,7 @@ Node_pin Node::setup_driver_pin(std::string_view name) {
     auto idx = nid;
     if (pid)
       idx = g->setup_idx_from_pid(nid,pid);
+    g->setup_driver(idx);
     return Node_pin(g,hid,idx,pid,false);
   }
 
@@ -129,6 +132,7 @@ Node_pin Node::setup_driver_pin(std::string_view name) {
   auto internal_pin = g2->get_graph_output(name);
   pid = internal_pin.get_pid();
   Index_ID idx = g->setup_idx_from_pid(nid,pid);
+  g->setup_driver(idx);
   return Node_pin(g,hid,idx,pid,false);
 }
 
@@ -140,6 +144,7 @@ Node_pin Node::setup_sink_pin(std::string_view name) {
     auto idx = nid;
     if (pid)
       idx = g->setup_idx_from_pid(nid,pid);
+    g->setup_sink(idx);
     return Node_pin(g,hid,idx,pid,true);
   }
 
@@ -151,23 +156,31 @@ Node_pin Node::setup_sink_pin(std::string_view name) {
   auto internal_pin = g2->get_graph_input(name);
   pid = internal_pin.get_pid();
   Index_ID idx = g->setup_idx_from_pid(nid,pid);
+  g->setup_sink(idx);
   return Node_pin(g,hid,idx,pid,true);
 }
 
 Node_pin Node::setup_sink_pin(Port_ID pid) {
   I(g->get_type(nid).has_input(pid));
   Index_ID idx = g->setup_idx_from_pid(nid,pid);
+  g->setup_sink(idx);
   return Node_pin(g,hid,idx,pid,true);
 }
 
 Node_pin Node::setup_sink_pin() const {
   I(g->get_type(nid).has_single_input());
+  g->setup_sink(nid);
   return Node_pin(g,hid,nid,0,true);
 }
 
 XEdge_iterator Node::inp_edges() const { return g->inp_edges(*this); }
 XEdge_iterator Node::out_edges() const { return g->out_edges(*this); }
+
+Node_pin_iterator Node::inp_connected_pins() const { return g->inp_connected_pins(*this); }
 Node_pin_iterator Node::out_connected_pins() const { return g->out_connected_pins(*this); }
+
+Node_pin_iterator Node::inp_setup_pins() const { return g->inp_setup_pins(*this); }
+Node_pin_iterator Node::out_setup_pins() const { return g->out_setup_pins(*this); }
 
 void Node::del_node() {
   g->del_node(nid);

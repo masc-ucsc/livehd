@@ -23,6 +23,7 @@ protected:
   friend LGraph;
   friend Node_pin;
   friend XEdge;
+  friend Node_set;
 
   Index_ID get_nid() const { return nid; }
 
@@ -35,19 +36,18 @@ protected:
     };
 public:
   struct __attribute__((packed)) Compact {
-    const uint32_t nid  : Index_bits;
+    uint32_t nid:Index_bits;
+    uint16_t hid;
 
     constexpr size_t operator()(const Compact &obj) const { return obj.nid; }
     constexpr operator size_t() const { return nid; }
 
-    Compact(const Index_ID &_nid) :nid(_nid) { I(nid); };
-    Compact(size_t raw) :nid((uint32_t)raw) { };
-    Compact() :nid(0) { };
+    Compact(const Index_ID &_nid, const Hierarchy_id &_hid) :nid(_nid), hid(_hid) { I(nid); };
+    Compact() :nid(0),hid(0) { };
     Compact &operator=(const Compact &obj) {
       I(this != &obj);
-      *((uint32_t *)this)  = *((uint32_t *)&obj); // NASTY, but how else to preserve the const???
-
-      I(nid  == obj.nid);
+      nid  = obj.nid;
+      hid  = obj.hid;
 
       return *this;
     };
@@ -55,7 +55,7 @@ public:
 
     template <typename H>
     friend H AbslHashValue(H h, const Compact& s) {
-      return H::combine(std::move(h), s.nid);
+      return H::combine(std::move(h), s.nid, s.hid);
     };
   };
   template <typename H>
@@ -135,8 +135,10 @@ public:
   Node_pin          setup_sink_pin(Port_ID pid);
   Node_pin          setup_sink_pin() const;
 
-  Node_pin_iterator inp_connected_pins() const;
   Node_pin_iterator out_connected_pins() const;
+  Node_pin_iterator inp_connected_pins() const;
+  Node_pin_iterator out_setup_pins() const;
+  Node_pin_iterator inp_setup_pins() const;
 
   XEdge_iterator    out_edges() const;
   XEdge_iterator    inp_edges() const;

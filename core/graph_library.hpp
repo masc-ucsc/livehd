@@ -163,6 +163,8 @@ public:
   void       unregister(std::string_view name, Lg_type_id lgid, LGraph *lg=0); // unregister open instance
   void       expunge(std::string_view name); // Delete completely, even if open instances exists
 
+  void     clear(Lg_type_id lgid);
+
   void     update_nentries(Lg_type_id lgid, uint64_t nentries);
   uint64_t get_nentries(Lg_type_id lgid) const {
     assert(attributes.size() >= lgid);

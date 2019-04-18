@@ -19,12 +19,16 @@ void generate_graphs(int n) {
 
     int inps = 10 + rand_r(&rseed) % 100;
     for(int j = 0; j < inps; j++) {
-      dpins.push_back(g->add_graph_input(("i" + std::to_string(j)), 1, 0).get_compact());
+      auto pin = g->add_graph_input("i" + std::to_string(j), j);
+      pin.set_bits(1);
+      dpins.push_back(pin.get_compact());
     }
 
     int outs = 10 + rand_r(&rseed) % 100;
     for(int j = 0; j < outs; j++) {
-      spins.push_back(g->add_graph_output(("o" + std::to_string(j)), 1, 0).get_compact());
+      auto pin = g->add_graph_output("o" + std::to_string(j), inps+j);
+      pin.set_bits(1);
+      spins.push_back(pin.get_compact());
       dpins.push_back(g->get_graph_output_driver(("o" + std::to_string(j))).get_compact());
     }
 
@@ -135,15 +139,20 @@ bool simple() {
   std::string gname = "simple_iter";
   LGraph *    g     = LGraph::create("lgdb_iter_test", gname, "test");
 
-  auto i1 = g->add_graph_input("i0", 1, 0); // 1
-  auto i2 = g->add_graph_input("i1", 1, 0); // 2
-  auto i3 = g->add_graph_input("i2", 1, 0); // 3
-  auto i4 = g->add_graph_input("i3", 1, 0); // 4
+  int pos = 0;
+  auto i1 = g->add_graph_input("i0", pos++); // 1
+  i1.set_bits(1);
+  auto i2 = g->add_graph_input("i1", pos++); // 2
+  i2.set_bits(1);
+  auto i3 = g->add_graph_input("i2", pos++); // 3
+  i3.set_bits(1);
+  auto i4 = g->add_graph_input("i3", pos++); // 4
+  i4.set_bits(1);
 
-  auto o5 = g->add_graph_output("o0", 1, 0); // 5
-  auto o6 = g->add_graph_output("o1", 1, 0); // 6
-  auto o7 = g->add_graph_output("o2", 1, 0); // 7
-  auto o8 = g->add_graph_output("o3", 1, 0); // 8
+  auto o5 = g->add_graph_output("o0", pos++); // 5
+  auto o6 = g->add_graph_output("o1", pos++); // 6
+  auto o7 = g->add_graph_output("o2", pos++); // 7
+  auto o8 = g->add_graph_output("o3", pos++); // 8
 
   auto c9 = g->create_node_const(1,3); //  9
   auto c10 = g->create_node_const(21,4); //  10

@@ -59,7 +59,7 @@ protected:
 
         }else if (io_pin.dir == Sub_node::Direction::Output) {
           pid = sub.add_pin(io_pin.name, Sub_node::Direction::Output);
-          auto spin = parent->get_graph_input(io_pin.name);
+          auto spin = parent->get_graph_output(io_pin.name);
           if (!spin.get_node().has_inputs()) {
             node.setup_driver_pin(pid).connect_sink(spin);
           }
@@ -77,12 +77,15 @@ protected:
 
   void add_io(LGraph *g) {
     int inps = rand_r(&rseed) % 4; // 0..3 inputs
+    int pos = 0;
     for(int j = 0; j < inps; j++) {
-      g->add_graph_input(("i" + std::to_string(j)).c_str(), rand_r(&rseed)&15, 0);
+      auto pin = g->add_graph_input(("i" + std::to_string(j)).c_str(), pos++);
+      pin.set_bits(rand_r(&rseed)&15);
     }
     inps =rand_r(&rseed) % 5; // 0..4 outputs
     for(int j = 0; j < inps; j++) {
-      g->add_graph_output(("o" + std::to_string(j)).c_str(), rand_r(&rseed)&15, 0);
+      auto pin = g->add_graph_output(("o" + std::to_string(j)), pos++);
+      pin.set_bits(rand_r(&rseed)&15);
     }
   }
 

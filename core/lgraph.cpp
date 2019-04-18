@@ -15,45 +15,6 @@
 #include "lgraph.hpp"
 #include "annotate.hpp"
 
-Index_ID LGraph::add_graph_io_common() {
-
-  auto nid = create_node_int();
-  set_type(nid, GraphIO_Op);
-  I(node_internal[nid].is_master_root());
-
-  return nid;
-}
-
-Node_pin LGraph::add_graph_input_int(std::string_view str, uint16_t bits) {
-  I(input_array.get_id(str) == 0);  // No name duplication
-
-  auto nid = add_graph_io_common();
-  node_internal[nid].set_graph_io_input();
-
-  auto pid = ++max_io_port_pid;
-  IO_port p(nid, pid, false);
-  input_array.create_id(str, p);
-
-  auto idx = setup_idx_from_pid(nid, pid);
-  set_bits(idx, bits);
-  return Node_pin(this, 0, idx, pid, false);
-}
-
-Node_pin LGraph::add_graph_output_int(std::string_view str, uint16_t bits) {
-  I(output_array.get_id(str) == 0);  // No name duplication
-
-  auto nid = add_graph_io_common();
-  node_internal[nid].set_graph_io_output();
-
-  auto pid = ++max_io_port_pid;
-  IO_port p(nid, pid, false);
-  output_array.create_id(str, p);
-
-  auto idx = setup_idx_from_pid(nid, pid);
-  set_bits(idx, bits);
-  return Node_pin(this, 0, idx, pid, true);
-}
-
 LGraph::LGraph(std::string_view _path, std::string_view _name, std::string_view _source, bool _clear)
     :LGraph_Base(_path, _name, Graph_library::instance(_path)->register_lgraph(_name, _source, this))
     ,LGraph_Node_Type(_path, _name, get_lgid()) {
@@ -143,62 +104,73 @@ void LGraph::emplace_back() {
 }
 
 Node_pin LGraph::get_graph_input(std::string_view str) {
-  I(input_array.get_id(str) != 0);
 
-  const auto &p = input_array.get_field(str);
-  return get_node(p.nid).get_driver_pin(p.pos);
+  auto io_pin = get_self_sub_node().get_graph_input_io_pin(str);
+
+  return get_node(io_pin.graph_io_idx).get_driver_pin(io_pin.graph_io_pid);
 }
 
 Node_pin LGraph::get_graph_output(std::string_view str) {
-  I(output_array.get_id(str) != 0);
+  auto io_pin = get_self_sub_node().get_graph_output_io_pin(str);
 
-  const auto &p = output_array.get_field(str);
-  return get_node(p.nid).get_sink_pin(p.pos);
+  return get_node(io_pin.graph_io_idx).get_sink_pin(io_pin.graph_io_pid);
 }
 
 Node_pin LGraph::get_graph_output_driver(std::string_view str) {
-  I(output_array.get_id(str) != 0);
+  auto io_pin = get_self_sub_node().get_graph_output_io_pin(str);
 
-  const auto &p = output_array.get_field(str);
-  return get_node(p.nid).get_driver_pin(p.pos);
+  return get_node(io_pin.graph_io_idx).get_driver_pin(io_pin.graph_io_pid);
 }
 
-#if 0
-Node_pin LGraph::get_graph_output_sink(std::string_view str) const {
-  I(output_array.get_id(str) != 0);
+bool LGraph::is_graph_input(std::string_view name) const {
+  if (!get_self_sub_node().has_pin(name))
+    return false;
 
-  const auto &p = output_array.get_field(str);
-  return get_node(p.nid).get_sink_pin(p.pos);
+  const auto &io_pin = get_self_sub_node().get_pin(name);
+  return io_pin.dir == Sub_node::Direction::Input;
 }
-#endif
 
-Node_pin LGraph::add_graph_input(std::string_view str, uint16_t bits, uint16_t offset) {
+bool LGraph::is_graph_output(std::string_view name) const {
+  if (!get_self_sub_node().has_pin(name))
+    return false;
+
+  const auto &io_pin = get_self_sub_node().get_pin(name);
+  return io_pin.dir == Sub_node::Direction::Output;
+}
+
+Node_pin LGraph::add_graph_input(std::string_view str, uint16_t pos) {
   I(!is_graph_output(str));
 
-  auto pin = add_graph_input_int(str, bits);
+  auto nid = create_node_int();
+  set_type(nid, GraphIO_Op);
 
-  pin.set_offset(offset);
+  auto idx = setup_idx_from_pid(nid, pos);
+
+  get_self_sub_node().add_pin(str, Sub_node::Direction::Input, idx, pos);
+
+  setup_driver(idx);
+  Node_pin pin(this, 0, idx, pos, false);
+
   pin.set_name(str);
 
-#ifndef NDEBUG
-  const auto &p = input_array.get_field(str);
-  I(pin.get_pid() == p.pos && p.nid != pin.get_idx());
-#endif
   return pin;
 }
 
-Node_pin LGraph::add_graph_output(std::string_view str, uint16_t bits, uint16_t offset) {
+Node_pin LGraph::add_graph_output(std::string_view str, uint16_t pos) {
   I(!is_graph_input(str));
 
-  auto pin = add_graph_output_int(str, bits);
+  auto nid = create_node_int();
+  set_type(nid, GraphIO_Op);
+  auto idx = setup_idx_from_pid(nid, pos);
 
-  pin.set_offset(offset);
-  pin.get_node().get_driver_pin(pin.get_pid()).set_name(str); // Only driver pins have names
+  setup_sink(idx);
+  setup_driver(idx);
+  get_self_sub_node().add_pin(str, Sub_node::Direction::Output, idx, pos);
 
-#ifndef NDEBUG
-  const auto &p = output_array.get_field(str);
-  I(pin.get_pid() == p.pos && p.nid != pin.get_idx());
-#endif
+  Node_pin pin(this, 0, idx, pos, false);
+
+  pin.set_name(str);
+
   return pin;
 }
 
@@ -224,6 +196,81 @@ Node_pin_iterator LGraph::out_connected_pins(const Node &node) const {
         }
       }
     }
+
+    if (node_internal[idx2].is_last_state()) break;
+
+    Index_ID tmp = node_internal[idx2].get_next();
+    I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
+    idx2 = tmp;
+  }
+
+  return xiter;
+}
+
+Node_pin_iterator LGraph::inp_connected_pins(const Node &node) const {
+  I(node.get_lgraph() == this);
+  Node_pin_iterator xiter;
+
+  Index_ID idx2 = node.get_nid();
+  I(node_internal[idx2].is_master_root());
+
+  absl::flat_hash_set<uint16_t> visited;
+
+  while (true) {
+    auto n = node_internal[idx2].get_num_local_inputs();
+    if (n>0) {
+      if (node_internal[idx2].is_root()) {
+        xiter.emplace_back(Node_pin(node.get_lgraph(),node.get_hid(), idx2, node_internal[idx2].get_dst_pid(), true));
+        visited.insert(node_internal[idx2].get_dst_pid());
+      }else{
+        if (visited.find(node_internal[idx2].get_dst_pid()) == visited.end()) {
+          auto master_nid = node_internal[idx2].get_nid();
+          xiter.emplace_back(Node_pin(node.get_lgraph(),node.get_hid(), master_nid, node_internal[idx2].get_dst_pid(), true));
+        }
+      }
+    }
+
+    if (node_internal[idx2].is_last_state()) break;
+
+    Index_ID tmp = node_internal[idx2].get_next();
+    I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
+    idx2 = tmp;
+  }
+
+  return xiter;
+}
+
+Node_pin_iterator LGraph::out_setup_pins(const Node &node) const {
+  I(node.get_lgraph() == this);
+  Node_pin_iterator xiter;
+
+  Index_ID idx2 = node.get_nid();
+  I(node_internal[idx2].is_master_root());
+
+  while (true) {
+    if (node_internal[idx2].is_root()  && node_internal[idx2].is_driver_setup())
+      xiter.emplace_back(Node_pin(node.get_lgraph(),node.get_hid(), idx2, node_internal[idx2].get_dst_pid(), false));
+
+    if (node_internal[idx2].is_last_state()) break;
+
+    Index_ID tmp = node_internal[idx2].get_next();
+    I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
+    idx2 = tmp;
+  }
+
+  return xiter;
+}
+
+Node_pin_iterator LGraph::inp_setup_pins(const Node &node) const {
+  I(node.get_lgraph() == this);
+  Node_pin_iterator xiter;
+
+  Index_ID idx2 = node.get_nid();
+  I(node_internal[idx2].is_master_root());
+
+  while (true) {
+    if (node_internal[idx2].is_root()  && node_internal[idx2].is_sink_setup())
+      xiter.emplace_back(Node_pin(node.get_lgraph(),node.get_hid(), idx2, node_internal[idx2].get_dst_pid(), true));
 
     if (node_internal[idx2].is_last_state()) break;
 
@@ -409,13 +456,8 @@ Fast_edge_iterator LGraph::fast() { return Fast_edge_iterator(fast_next(0), this
 void LGraph::dump() {
   fmt::print("lgraph name:{} size:{}\n", name, node_internal.size());
 
-  for (auto it = input_array.begin(); it != input_array.end(); ++it) {
-    const auto &p = it.get_field();
-    fmt::print("inp {} nid:{} pid:{}\n", it.get_name(), p.nid, p.pos);
-  }
-  for (auto it = output_array.begin(); it != output_array.end(); ++it) {
-    const auto &p = it.get_field();
-    fmt::print("out {} nid:{} pid:{}\n", it.get_name(), p.nid, p.pos);
+  for(const auto &io_pin:get_self_sub_node().get_io_pins()) {
+    fmt::print("io {} pid:{} {}\n", io_pin.name, io_pin.graph_io_pid, io_pin.dir==Sub_node::Direction::Input?"input":"output");
   }
 
 #if 1

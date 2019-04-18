@@ -23,8 +23,13 @@ void Sub_node::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer)
     writer.Key("name");
     writer.String(pin.name.c_str());
 
-    writer.Key("graph_io_pid");
-    writer.Uint(pin.graph_io_pid);
+    if (pin.graph_io_idx) {
+      writer.Key("graph_io_idx");
+      writer.Uint64(pin.graph_io_idx);
+
+      writer.Key("graph_io_pid");
+      writer.Uint(pin.graph_io_pid);
+    }
 
     writer.Key("dir");
     if (pin.dir == Direction::Invalid)
@@ -61,7 +66,7 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
 
     I(io_pin.HasMember("name"));
     I(io_pin.HasMember("dir"));
-    I(io_pin.HasMember("graph_io_pid"));
+
 
     std::string dir_str = io_pin["dir"].GetString();
     Direction dir;
@@ -74,9 +79,20 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
     else
       I(false);
 
-    io_pins.emplace_back(io_pin["name"].GetString()
-        ,dir
-        ,io_pin["graph_io_pid"].GetUint());
+    Index_ID idx = 0;
+    Port_ID  pid = 0;
+    if (io_pin.HasMember("graph_io_idx")) {
+      idx = io_pin["graph_io_idx"].GetUint64();
+      pid = io_pin["graph_io_pid"].GetUint();
+
+      if (dir == Direction::Input)
+        input_ids.set(idx, true);
+      else if (dir == Direction::Output)
+        output_ids.set(idx, true);
+    }
+
+    auto name = io_pin["name"].GetString();
+    io_pins.emplace_back(name, dir, idx, pid);
   }
 
 }

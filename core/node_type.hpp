@@ -1,9 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include "bm.h"
-#include "bmsparsevec.h"
-
 #include "dense.hpp"
 #include "char_array.hpp"
 
@@ -17,8 +14,9 @@ class LGraph_Node_Type : virtual public LGraph_Base {
 protected:
   Char_Array<Const_ID> consts;
   Dense<Node_Type_Op>  node_type_table;
-  bm::bvector<>        const_nodes;      // FIXME: migrate to structure in node_intenral (otherwise, big meory as more nodes...
-  bm::bvector<>        sub_nodes;
+
+  Node_set             const_nodes;      // FIXME: migrate to structure in node_intenral (otherwise, big meory as more nodes...
+  Node_set             sub_nodes;
 
   void clear();
   void reload();
@@ -55,6 +53,7 @@ public:
   explicit LGraph_Node_Type(std::string_view path, std::string_view name, Lg_type_id lgid) noexcept;
   virtual ~LGraph_Node_Type(){};
 
-  const bm::bvector<> &get_const_node_ids() const { return const_nodes;     };
-  const bm::bvector<> &get_sub_ids() const  { return sub_nodes; };
+  const Node_set &get_const_node_ids() const { return const_nodes; };
+  const Node_set &get_sub_ids() const  { return sub_nodes; };
 };
+

@@ -26,7 +26,6 @@
 class LGraph : public LGraph_Node_Type
 {
 private:
-  Index_ID add_graph_io_common();
 public:
   using Hierarchy = absl::flat_hash_map<std::string, Lg_type_id>;
 
@@ -56,9 +55,6 @@ protected:
     return node_internal[nid].has_node_inputs();
   }
 
-  Node_pin add_graph_input_int(std::string_view str, uint16_t bits);
-  Node_pin add_graph_output_int(std::string_view str, uint16_t bits);
-
   Index_ID find_idx(const Node_pin &pin) const {
     if (likely(node_internal[pin.get_idx()].get_dst_pid() == pin.get_pid())) { // Common case
       return pin.get_idx();
@@ -69,6 +65,9 @@ protected:
   Node      get_node(Index_ID nid);
 
   Node_pin_iterator out_connected_pins(const Node &node) const;
+  Node_pin_iterator inp_connected_pins(const Node &node) const;
+  Node_pin_iterator out_setup_pins(const Node &node) const;
+  Node_pin_iterator inp_setup_pins(const Node &node) const;
 
   XEdge_iterator out_edges(const Node &node) const;
   XEdge_iterator inp_edges(const Node &node) const;
@@ -95,17 +94,25 @@ protected:
 
   bool is_graph_io(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
-    return node_internal[idx].is_graph_io();
+    return node_type_table[idx] == GraphIO_Op;
   }
 
   bool is_graph_input(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
-    return node_internal[idx].is_graph_io_input();
+    if (node_type_table[idx] != GraphIO_Op)
+      return false;
+
+    auto pid = node_internal[idx].get_dst_pid();
+    return get_self_sub_node().is_input_from_graph_pid(pid);
   }
 
   bool is_graph_output(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
-    return node_internal[idx].is_graph_io_output();
+    if (node_type_table[idx] != GraphIO_Op)
+      return false;
+
+    auto pid = node_internal[idx].get_dst_pid();
+    return get_self_sub_node().is_output_from_graph_pid(pid);
   }
 
 public:
@@ -118,8 +125,6 @@ public:
     I(!src.is_input());
     I(dst.is_input());
     I(dst.get_lgraph() == src.get_lgraph());
-    GI(src.get_node().get_type().op == GraphIO_Op, src.get_pid()); // GraphIO never have pid==0
-    GI(dst.get_node().get_type().op == GraphIO_Op, dst.get_pid()); // GraphIO never have pid==0
 
     return add_edge_int(dst.get_idx(), dst.get_pid(), src.get_idx(), src.get_pid());
   }
@@ -148,8 +153,8 @@ public:
   void sync() override;
   void emplace_back() override;
 
-  Node_pin add_graph_input(std::string_view str, uint16_t bits, uint16_t offset);
-  Node_pin add_graph_output(std::string_view str, uint16_t bits, uint16_t offset);
+  Node_pin add_graph_input(std::string_view str, uint16_t pos);
+  Node_pin add_graph_output(std::string_view str, uint16_t pos);
 
   Node create_node();
 
@@ -169,8 +174,8 @@ public:
   Node_pin get_graph_output(std::string_view str);
   Node_pin get_graph_output_driver(std::string_view str);
 
-  bool is_graph_input(std::string_view name) const { return input_array.get_id(name) != 0; }
-  bool is_graph_output(std::string_view name) const { return output_array.get_id(name) != 0; }
+  bool is_graph_input(std::string_view name) const;
+  bool is_graph_output(std::string_view name) const;
 
   // Iterators defined in the lgraph_each.cpp
 
@@ -179,9 +184,6 @@ public:
   void each_graph_output(std::function<void(Node_pin &pin)> f1);
 
   void each_node_fast(std::function<void(Node &node)> f1);
-
-  void each_input_pin_fast(std::function<void(Node_pin &pin)> f1);
-  void each_output_pin_fast(std::function<void(Node_pin &pin)> f1);
 
   void each_output_edge_fast(std::function<void(XEdge &edge)> f1);
 

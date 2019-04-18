@@ -13,8 +13,6 @@
 
 LGraph_Base::LGraph_Base(std::string_view _path, std::string_view _name, Lg_type_id lgid) noexcept
     : Lgraph_base_core(_path, _name, lgid)
-    , input_array(absl::StrCat(_path, "/lgraph_", std::to_string(lgid), "_inputs"))
-    , output_array(absl::StrCat(_path, "/lgraph_", std::to_string(lgid), "_outputs"))
     , node_internal(absl::StrCat(path, "/lgraph_", std::to_string(lgid), "_nodes")) {
   I(lgid);  // No id zero allowed
 
@@ -39,10 +37,6 @@ LGraph_Base::_init::_init() {
 
 void LGraph_Base::clear() {
   node_internal.clear();
-  input_array.clear();
-  output_array.clear();
-
-  max_io_port_pid = 0;
 
   Lgraph_base_core::clear();
 
@@ -52,9 +46,6 @@ void LGraph_Base::clear() {
 void LGraph_Base::sync() {
 
   node_internal.sync();
-
-  input_array.sync();
-  output_array.sync();
 
   Lgraph_base_core::sync();
 
@@ -78,80 +69,6 @@ void LGraph_Base::reload() {
   auto sz = library->get_nentries(lgid);
 
   node_internal.reload(sz);
-  // lazy input_array.reload();
-  // lazy output_array.reload();
-
-  max_io_port_pid = 0;
-  for (auto it = input_array.begin(); it != input_array.end(); ++it) {
-    const auto &p = it.get_field();
-    if (max_io_port_pid<p.pos)
-      max_io_port_pid = p.pos;
-  }
-  for (auto it = output_array.begin(); it != output_array.end(); ++it) {
-    const auto &p = it.get_field();
-    if (max_io_port_pid<p.pos)
-      max_io_port_pid = p.pos;
-  }
-
-}
-
-std::string_view LGraph_Base::get_graph_input_name_from_pid(Port_ID pid) const {
-  for (auto it = input_array.begin(); it != input_array.end(); ++it) {
-    const auto &p = it.get_field();
-    if (p.pos == pid) return it.get_name();
-  }
-
-  return unknown_io;
-}
-
-std::string_view LGraph_Base::get_graph_output_name_from_pid(Port_ID pid) const {
-  for (auto it = output_array.begin(); it != output_array.end(); ++it) {
-    const auto &p = it.get_field();
-    if (p.pos == pid) return it.get_name();
-  }
-
-  return unknown_io;
-}
-
-Port_ID LGraph_Base::get_graph_pid_from_nid(const Index_ID nid) const {
-  I(node_internal.size()>nid);
-  I(node_internal[nid].is_graph_io());
-
-  for (auto it = input_array.begin(); it != input_array.end(); ++it) {
-    const auto &p = it.get_field();
-    if (p.nid == nid) return p.pos;
-  }
-
-  for (auto it = output_array.begin(); it != output_array.end(); ++it) {
-    const auto &p = it.get_field();
-    if (p.nid == nid) return p.pos;
-  }
-
-  return 0;
-}
-
-Index_ID LGraph_Base::get_graph_input_nid_from_pid(Port_ID pid) const {
-  for (auto it = input_array.begin(); it != input_array.end(); ++it) {
-    const auto &p = it.get_field();
-    if (p.pos == pid) {
-      I(node_internal[p.nid].is_master_root());
-      return p.nid;
-    }
-  }
-
-  return 0;
-}
-
-Index_ID LGraph_Base::get_graph_output_nid_from_pid(Port_ID pid) const {
-  for (auto it = output_array.begin(); it != output_array.end(); ++it) {
-    const auto &p = it.get_field();
-    if (p.pos == pid) {
-      I(node_internal[p.nid].is_master_root());
-      return p.nid;
-    }
-  }
-
-  return 0;
 }
 
 Index_ID LGraph_Base::create_node_space(const Index_ID last_idx, const Port_ID dst_pid, const Index_ID master_nid, const Index_ID root_idx) {
@@ -171,11 +88,6 @@ Index_ID LGraph_Base::create_node_space(const Index_ID last_idx, const Port_ID d
   }
   I(node_internal[idx2].get_master_root_nid() == master_nid);
 
-  if (node_internal[master_nid].is_graph_io()) {
-    if (node_internal[master_nid].is_graph_io_input()) node_internal[idx2].set_graph_io_input();
-    if (node_internal[master_nid].is_graph_io_output()) node_internal[idx2].set_graph_io_output();
-    //I(dst_pid == node_internal[master_nid].get_dst_pid());  // All the graph_io edges have the same port
-  }
   node_internal[idx2].set_dst_pid(dst_pid);
 
   if (node_internal[last_idx].has_next_space()) {

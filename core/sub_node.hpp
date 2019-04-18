@@ -1,8 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include "lgraph_base_core.hpp"
-#include "tech_library.hpp"
+#include "bm.h"
+#include "bmsparsevec.h"
 
 #include "rapidjson/document.h"
 #include "rapidjson/error/en.h"
@@ -13,8 +13,17 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/types/span.h"
 
+#include "lgraph_base_core.hpp"
+#include "tech_library.hpp"
+
+//using bmsparse = bm::sparse_vector<uint32_t, bm::bvector<> >;
+using bmsparse = bm::bvector<>;
+
 class Sub_node {
 protected:
+  bmsparse input_ids;
+  bmsparse output_ids;
+
   void add_phys_pin_int(Port_ID instance_pid, const Tech_pin &ppin) {
     I(io_pins.size() > instance_pid);
 #ifndef NDEBUG
@@ -36,14 +45,16 @@ public:
   };
 
   struct IO_pin {
-    IO_pin() : dir(Direction::Invalid), graph_io_pid(0) { }
-    IO_pin(std::string_view _name, Direction _dir, Port_ID _graph_io_pid)
+    IO_pin() : dir(Direction::Invalid), graph_io_idx(0), graph_io_pid(0) { }
+    IO_pin(std::string_view _name, Direction _dir, Index_ID _graph_io_idx, Port_ID _graph_io_pid)
     :name(_name)
     ,dir(_dir)
+    ,graph_io_idx(_graph_io_idx)
     ,graph_io_pid(_graph_io_pid) {
     }
     std::string           name;
     Direction             dir;
+    Index_ID              graph_io_idx;
     Port_ID               graph_io_pid;
     std::vector<Tech_pin> phys; // There could be more than one location per pin
   };
@@ -58,9 +69,17 @@ private:
   absl::flat_hash_map<std::string, Port_ID> name2id;
   std::vector<Port_ID> graph_pid2instance_pid;
 
-  void map_pin_int(Port_ID instance_pid, Port_ID graph_pid) {
-    I(graph_pid);
+  void map_pin_int(Port_ID instance_pid, Index_ID idx, Port_ID graph_pid) {
+    I(idx);
     I(instance_pid);
+
+    if (io_pins[instance_pid].dir == Direction::Input) {
+      input_ids.set(idx, true);
+    }else{
+      I(io_pins[instance_pid].dir == Direction::Output);
+      output_ids.set(idx, true);
+    }
+
     if (graph_pid2instance_pid.size()<=graph_pid)
       graph_pid2instance_pid.resize(graph_pid+1);
     I(graph_pid2instance_pid[graph_pid]==0);
@@ -90,8 +109,17 @@ public:
   }
 
   void expunge() {
+    input_ids.clear();
+    output_ids.clear();
     io_pins.clear();
     lgid = 0;
+  }
+
+  void clear_io_pins() {
+    io_pins.clear();
+    io_pins.resize(1); // No id ZERO
+    input_ids.clear();
+    output_ids.clear();
   }
 
   bool is_invalid() const { return lgid==0; }
@@ -100,26 +128,28 @@ public:
 
   std::string_view get_name() const { I(lgid); return name; }
 
-  Port_ID add_pin(std::string_view name, Direction dir, Port_ID graph_pid=0) {
+  Port_ID add_pin(std::string_view name, Direction dir, Index_ID graph_idx=0, Port_ID graph_pid=0) {
     I(lgid);
     Port_ID instance_pid = io_pins.size();
-    io_pins.emplace_back(name, dir, graph_pid);
+    io_pins.emplace_back(name, dir, graph_idx, graph_pid);
     name2id[name] = instance_pid;
-    if (graph_pid)
-      map_pin_int(instance_pid, graph_pid);
+    if (graph_idx)
+      map_pin_int(instance_pid, graph_idx, graph_pid);
 
     return instance_pid;
   }
 
-  Port_ID map_graph_pid(std::string_view name, Port_ID graph_pid) {
+  Port_ID map_graph_pid(std::string_view name, Index_ID graph_idx, Port_ID graph_pid) {
     I(has_pin(name));
     I(!has_graph_pin(graph_pid));
+    I(graph_idx);
 
     Port_ID instance_pid = name2id[name];
-    I(io_pins[instance_pid].graph_io_pid==0); // remap not supported (could be added if needed as remap_pin)
+    I(io_pins[instance_pid].graph_io_idx==0); // remap not supported (could be added if needed as remap_pin)
+    io_pins[instance_pid].graph_io_idx = graph_idx;
     io_pins[instance_pid].graph_io_pid = graph_pid;
 
-    map_pin_int(instance_pid, graph_pid);
+    map_pin_int(instance_pid, graph_idx, graph_pid);
 
     return instance_pid;
   }
@@ -143,26 +173,32 @@ public:
     return io_pins[instance_pid].graph_io_pid;
   }
 
-  const Port_ID get_graph_output_pid(std::string_view name) const {
+  const IO_pin &get_pin(std::string_view name) const {
+    I(has_pin(name));
+    auto instance_pid = name2id.at(name);
+    return io_pins[instance_pid];
+  }
+
+  const IO_pin &get_graph_output_io_pin(std::string_view name) const {
     I(has_pin(name));
     auto instance_pid = name2id.at(name);
     I(io_pins[instance_pid].dir == Direction::Output);
-    I(io_pins[instance_pid].graph_io_pid); // Must map before use
-    return io_pins[instance_pid].graph_io_pid;
+    I(io_pins[instance_pid].graph_io_idx); // Must map before use
+    return io_pins[instance_pid];
   }
 
-  const Port_ID get_graph_input_pid(std::string_view name) const {
+  const IO_pin &get_graph_input_io_pin(std::string_view name) const {
     I(has_pin(name));
     auto instance_pid = name2id.at(name);
     I(io_pins[instance_pid].dir == Direction::Input);
-    I(io_pins[instance_pid].graph_io_pid); // Must map before use
-    return io_pins[instance_pid].graph_io_pid;
+    I(io_pins[instance_pid].graph_io_idx); // Must map before use
+    return io_pins[instance_pid];
   }
 
   const Port_ID get_graph_io_pid(std::string_view name) const {
     I(has_pin(name));
     auto instance_pid = name2id.at(name);
-    I(io_pins[instance_pid].graph_io_pid); // Must map before use
+    I(io_pins[instance_pid].graph_io_idx); // Must map before use
     return io_pins[instance_pid].graph_io_pid;
   }
 
@@ -224,6 +260,9 @@ public:
     I(has_graph_pin(graph_pid));
     add_phys_pin_int(graph_pid2instance_pid[graph_pid], ppin);
   }
+
+  const bmsparse &get_input_ids()  const { return input_ids;  }
+  const bmsparse &get_output_ids() const { return output_ids; }
 
   const absl::Span<const IO_pin> get_io_pins() const { I(io_pins.size()>=1); return absl::MakeSpan(io_pins).subspan(1); }
 

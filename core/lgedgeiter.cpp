@@ -78,7 +78,7 @@ bool Edge_raw_iterator_base::check_frontier() {
       auto node = Node(g,0,Node::Compact(it.first));
       // FIXME: What if it is a sub-module just pure combinational or with flops? How to distinguish???
       if (node.get_type().is_pipelined()) {
-        pending->push_back(it.first);
+        pending->set(it.first, true);
         it.second = -1;  // Mark as pipelined, but keep not to visit twice
         pushed    = true;
       }
@@ -104,14 +104,14 @@ void Forward_edge_iterator::CForward_edge_iterator::add_node(const Index_ID nid)
       int32_t ninputs = g->get_node_int(master_root_nid).get_node_num_inputs() - 1;
       assert(ninputs >= 0);
       if (ninputs == 0) {  // Done already
-        pending->push_back(master_root_nid);
+        pending->set(master_root_nid, true);
       } else {
         (*frontier)[master_root_nid] = ninputs;
       }
     } else {
       int ninputs = (fit->second) - 1;
       if (ninputs == 0) {  // Done
-        pending->push_back(master_root_nid);
+        pending->set(master_root_nid, true);
         frontier->erase(fit);
       } else {
         fit->second = ninputs;
@@ -121,17 +121,18 @@ void Forward_edge_iterator::CForward_edge_iterator::add_node(const Index_ID nid)
 }
 
 Forward_edge_iterator::CForward_edge_iterator Forward_edge_iterator::begin() {
-  for (auto it = g->input_array.begin(); it != g->input_array.end(); ++it) {
-    pending.push_back(it.get_field().nid);
+  pending.join(g->get_self_sub_node().get_input_ids());
+
+  const auto &ob = g->get_self_sub_node().get_output_ids();
+  for(auto it=ob.begin() ; it!=ob.end() ; ++it) {
+    Index_ID idx = *it;
+    if (!g->get_node_int(idx).has_node_inputs())
+      pending.set(idx, true); // Disconnected outputs
   }
 
-  for (auto it = g->output_array.begin(); it != g->output_array.end(); ++it) {
-    if (!g->get_node_int(it.get_field().nid).has_node_inputs())
-      pending.push_back(it.get_field().nid);
-  }
+  pending.join(g->get_const_node_ids());
 
-  // for forward iteration we want to start from constants as well
-  const LGraph *lgr     = const_cast<LGraph *>(g);
+#if 0
   const auto &constants = lgr->get_const_node_ids();
   Index_ID    cid       = constants.get_first();
   while (cid) {
@@ -140,52 +141,58 @@ Forward_edge_iterator::CForward_edge_iterator Forward_edge_iterator::begin() {
     cid = constants.get_next(cid);
   }
 
-  Index_ID b = 0;
-  if (!pending.empty()) {
-    b = pending.back();
-    pending.pop_back();
+  bm::id_t p = 1;
+  for (p = bv2.extract_next(p); p != 0; p = bv2.extract_next(p)) {
+    std::cout << "Extracted p = " << p << std::endl;
   }
+  for (Index_ID current = discovered.extract_next(1); current != 0; current = discovered.extract_next(current)) {
+  }
+#endif
 
-  CForward_edge_iterator it(b, g, &frontier, &pending);
+  I(!pending.empty());
+  auto it = pending.begin();
+  Index_ID b = *it;
+  pending.clear(b);
 
-  return it;
+  CForward_edge_iterator it2(b, g, &frontier, &pending);
+
+  return it2;
 }
 
 void Backward_edge_iterator::CBackward_edge_iterator::find_dce_nodes() {
-  Pending_type       discovered;
-  std::set<Index_ID> dc_visited;
-  std::set<Index_ID> floating;
-  // floating.set_empty_key(0);     // 0 is not allowed as key
-  // floating.set_deleted_key(0); // 128 is not allowed as key (4KB aligned)
+  bmsparse  discovered;
+  bmsparse  dc_visited;
+  bmsparse  floating;
 
   for (const auto &_idx : *frontier) {
     Index_ID nid = _idx.first;
-    floating.insert(nid);
-    discovered.push_back(nid);
-    while (discovered.size() > 0) {
-      Index_ID current = discovered.back();
-      discovered.pop_back();
-      dc_visited.insert(current);
+    floating.set(nid, true);
+
+    Index_ID current = nid;
+    do{
+      dc_visited.set(current, true);
       for (const auto &c : g->out_edges_raw(current)) {
-        floating.erase(current);
+        floating.clear(current);
 
         I(g->get_node_int(c.get_idx()).is_root());
         Index_ID    nid = g->get_node_int(c.get_idx()).get_nid();
         I(g->get_node_int(nid).is_master_root());
 
-        if (dc_visited.find(nid) == dc_visited.end() && global_visited.find(nid) == global_visited.end()) {
-          discovered.push_back(nid);
-          floating.insert(nid);
+        if (dc_visited.get(nid) && global_visited.get(nid)) {
+          discovered.set(nid, true);
+          floating.set(nid, true);
         }
       }
-    }
+      if (discovered.empty())
+        break;
+      auto it = discovered.begin();
+      current = *it;
+    }while(true);
   }
 
-  if (floating.size() > 0) {
+  if (!floating.empty()) {
     Pass::warn(fmt::format("graph {} is not DCE free, consider running the DCE pass\n", g->get_name()));
-    for (const auto &nid : floating) {
-      pending->push_back(nid);
-    }
+    pending->join(floating);
   }else{
     // FIXME: CHeck if the number of visited nodes matches n_nodes
     // Otherwise, insert disconnected nodes that may exist in the graph
@@ -206,14 +213,14 @@ void Backward_edge_iterator::CBackward_edge_iterator::add_node(const Index_ID ni
       int32_t noutputs = g->get_node_int(master_root_nid).get_node_num_outputs() - 1;
       assert(noutputs >= 0);
       if (noutputs == 0) {  // Done already
-        pending->push_back(master_root_nid);
+        pending->set(master_root_nid, true);
       } else {
         (*frontier)[master_root_nid] = noutputs;
       }
     } else {
       int noutputs = (fit->second) - 1;
       if (noutputs == 0) {  // Done
-        pending->push_back(master_root_nid);
+        pending->set(master_root_nid, true);
         frontier->erase(fit);
       } else {
         fit->second = noutputs;
@@ -223,31 +230,22 @@ void Backward_edge_iterator::CBackward_edge_iterator::add_node(const Index_ID ni
 }
 
 Backward_edge_iterator::CBackward_edge_iterator Backward_edge_iterator::begin() {
-  // FIXME: This may need to be moved to nid==0. If any input not visited, then add it (but only
-  // if full input/output)
 
-  // FIXME: pending has WAY too much redundant entries
-
-  for (auto it = g->input_array.begin(); it != g->input_array.end(); ++it) {  // inputs without connection to preserve them
-    if (!g->get_node_int(it.get_field().nid).has_node_outputs()) {
-      I(g->get_node_int(it.get_field().nid).is_master_root());
-      pending.push_back(it.get_field().nid);
-    }
-  }
-  for (auto it = g->output_array.begin(); it != g->output_array.end(); ++it) {
-    if (!g->get_node_int(it.get_field().nid).has_node_outputs()) {  // do not add outputs with connections
-      I(g->get_node_int(it.get_field().nid).is_master_root());
-      pending.push_back(it.get_field().nid);
-    }
+  const auto &ib = g->get_self_sub_node().get_input_ids();
+  for(auto it = ib.begin() ; it != ib.end() ; ++it) {
+    Index_ID idx = *it;
+    if (!g->get_node_int(idx).has_node_outputs())
+      pending.set(idx, true); // Disconnected inputs
   }
 
-  Index_ID b = 0;
-  if (!pending.empty()) {
-    b = pending.back();
-    pending.pop_back();
-  }
+  pending.join(g->get_self_sub_node().get_output_ids());
 
-  CBackward_edge_iterator it(b, g, &frontier, &pending);
+  I(!pending.empty());
+  auto it = pending.begin();
+  Index_ID b = *it;
+  pending.clear(b);
 
-  return it;
+  CBackward_edge_iterator it2(b, g, &frontier, &pending);
+
+  return it2;
 }

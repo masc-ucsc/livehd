@@ -401,9 +401,22 @@ void Graph_library::expunge(std::string_view name) {
   I(it2 != name2id.end());
   Lg_type_id id = it2->second;
 
-  sub_nodes[id].expunge(); // Nuke IO and contents, but keep around lgid
+  sub_nodes[id].expunge();  // Nuke IO and contents, but keep around lgid
 
   closedir(dr);
+}
+
+void Graph_library::clear(Lg_type_id lgid) {
+  I(lgid < attributes.size());
+
+  attributes[lgid].nentries = 0;
+  sub_nodes[lgid].clear_io_pins();
+}
+
+Lg_type_id Graph_library::register_sub(std::string_view name) {
+  I(global_name2lgraph[path].find(name) == global_name2lgraph[path].end());
+
+  I(false);
 
   return true;
 }

@@ -2,46 +2,48 @@
 #include "lgraph.hpp"
 
 void LGraph::each_graph_io(std::function<void(Node_pin &pin)> f1) {
-  auto i_it = input_array.begin();
-  auto o_it = output_array.begin();
-  while(true) {
-    Node_pin pin;
 
-    if (i_it != input_array.end() && o_it != output_array.end()) {
-      if (i_it.get_field().pos < o_it.get_field().pos) {
-        pin = get_node(i_it.get_field().nid).get_driver_pin(i_it.get_field().pos);
-        ++i_it;
-      }else{
-        pin = get_node(o_it.get_field().nid).get_driver_pin(o_it.get_field().pos);
-        ++o_it;
-      }
-    }else if (i_it != input_array.end()) {
-      pin = get_node(i_it.get_field().nid).get_driver_pin(i_it.get_field().pos);
-      ++i_it;
-    }else if (o_it != output_array.end()) {
-      pin = get_node(o_it.get_field().nid).get_driver_pin(o_it.get_field().pos);
-      ++o_it;
-    }else{
-      return;
-    }
+  std::vector<Node_pin> pins;
+  for(const auto &io_pin:get_self_sub_node().get_io_pins()) {
+    if (io_pin.graph_io_idx==0)
+      continue;
+
+    Node_pin pin(this, 0, io_pin.graph_io_idx, io_pin.graph_io_pid, false);
+    pins.emplace_back(pin);
+  }
+  std::sort(pins.begin(), pins.end()
+           ,[](const Node_pin& a, const Node_pin& b)
+            {
+                return a.get_pid() > b.get_pid();
+            });
+
+  for(auto &pin:pins) {
     f1(pin);
   }
 }
 
 void LGraph::each_graph_input(std::function<void(Node_pin &pin)> f1) {
-  for (auto it = input_array.begin(); it != input_array.end(); ++it) {
-    const auto &p = it.get_field();
 
-    auto pin = get_node(p.nid).get_driver_pin(p.pos);
+  for(const auto &io_pin:get_self_sub_node().get_io_pins()) {
+    if (io_pin.graph_io_idx==0)
+      continue;
+    if (io_pin.dir != Sub_node::Direction::Input)
+      continue;
+
+    Node_pin pin(this, 0, io_pin.graph_io_idx, io_pin.graph_io_pid, false);
     f1(pin);
   }
 }
 
 void LGraph::each_graph_output(std::function<void(Node_pin &pin)> f1) {
-  for (auto it = output_array.begin(); it != output_array.end(); ++it) {
-    const auto &p = it.get_field();
 
-    auto pin = get_node(p.nid).get_driver_pin(p.pos);
+  for(const auto &io_pin:get_self_sub_node().get_io_pins()) {
+    if (io_pin.graph_io_idx==0)
+      continue;
+    if (io_pin.dir != Sub_node::Direction::Output)
+      continue;
+
+    Node_pin pin(this, 0, io_pin.graph_io_idx, io_pin.graph_io_pid, false);
     f1(pin);
   }
 }
@@ -53,28 +55,6 @@ void LGraph::each_node_fast(std::function<void(Node &node)> f1) {
 
     Node node(this, 0, ni.get_nid());
     f1(node);
-  }
-}
-
-void LGraph::each_input_pin_fast(std::function<void(Node_pin &pin)> f1) {
-  for (const auto &ni : node_internal) {
-    if (!ni.is_node_state()) continue;
-    if (!ni.is_root()) continue;
-    if (!ni.has_pin_inputs() && !ni.is_graph_io_input()) continue;
-
-    Node_pin pin(this, 0, ni.get_nid(), ni.get_dst_pid(), false);
-    f1(pin);
-  }
-}
-
-void LGraph::each_output_pin_fast(std::function<void(Node_pin &pin)> f1) {
-  for (const auto &ni : node_internal) {
-    if (!ni.is_node_state()) continue;
-    if (!ni.is_root()) continue;
-    if (!ni.has_pin_outputs() && !ni.is_graph_io_output()) continue;
-
-    Node_pin pin(this, 0, ni.get_nid(), ni.get_dst_pid(), false);
-    f1(pin);
   }
 }
 
@@ -97,9 +77,11 @@ void LGraph::each_output_edge_fast(std::function<void(XEdge &edge)> f1) {
 }
 
 void LGraph::each_sub_fast_direct(const std::function<bool(Node &, const Lg_type_id &)> fn) {
-  const bm::bvector<> &bm  = get_sub_ids();
-  Index_ID             cid = bm.get_first();
-  while (cid) {
+
+  const auto &bm  = get_sub_ids();
+  bmsparse::bvector_type::enumerator en = bm.first();
+  for(; en.valid(); ++en) {
+    Index_ID    cid = *en;
     I(cid);
     I(node_internal[cid].is_node_state());
     I(node_internal[cid].is_master_root());
@@ -109,12 +91,11 @@ void LGraph::each_sub_fast_direct(const std::function<bool(Node &, const Lg_type
 
     bool cont = fn(node, lgid);
     if (!cont) return;
-
-    cid = bm.get_next(cid);
   }
 }
 
 void LGraph::each_root_fast_direct(std::function<bool(Node &)> f1) {
+
   for (const auto &ni : node_internal) {
     if (!ni.is_node_state()) continue;
     if (!ni.is_root()) continue;

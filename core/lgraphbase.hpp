@@ -20,22 +20,7 @@ class Graph_library;
 
 class LGraph_Base : public Lgraph_base_core {
 private:
-
 protected:
-  struct IO_port {
-    Index_ID nid;
-    Port_ID  pos;
-    Port_ID  original_pos;
-    bool     original_set;
-
-    IO_port(Index_ID _nid, Port_ID _opos, bool force) : nid(_nid), pos(_opos), original_pos(_opos), original_set(force){};
-  };
-
-  // typedef std::pair<Index_ID, Port_ID> io_t; // node id and position at verilog
-
-  Port_ID              max_io_port_pid;
-  Char_Array<IO_port>  input_array;
-  Char_Array<IO_port>  output_array;
   Dense<Node_Internal> node_internal;
 
   static inline constexpr std::string_view unknown_io = "unknown";
@@ -55,6 +40,15 @@ protected:
 
   Index_ID find_idx_from_pid(const Index_ID idx, const Port_ID pid) const;
   Index_ID setup_idx_from_pid(const Index_ID nid, const Port_ID pid);
+
+  void setup_driver(const Index_ID idx) {
+    I(idx < node_internal.size());
+    node_internal[idx].set_driver_setup();
+  }
+  void setup_sink(const Index_ID idx) {
+    I(idx < node_internal.size());
+    node_internal[idx].set_sink_setup();
+  }
 
   friend Forward_edge_iterator;
   friend Backward_edge_iterator;
@@ -110,17 +104,6 @@ public:
     node_internal[idx].set_bits(bits);
   }
 #endif
-
-  // get internal nid from given pid
-  Index_ID get_graph_input_nid_from_pid(Port_ID pid) const;
-  // get internal nid from given pid
-  Index_ID get_graph_output_nid_from_pid(Port_ID pid) const;
-
-  // get external pid from internal nid
-  Port_ID get_graph_pid_from_nid(Index_ID nid) const;
-
-  std::string_view get_graph_input_name_from_pid(Port_ID pid) const;
-  std::string_view get_graph_output_name_from_pid(Port_ID pid) const;
 
   void add_edge(const Index_ID dst_idx, const Index_ID src_idx) {
     I(src_idx < node_internal.size());

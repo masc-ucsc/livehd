@@ -347,17 +347,17 @@ public:
   bool    has_pin_outputs() const;
 
   void reset() {
-    bits            = 0;
-    dst_pid         = 0;
-    root            = 1;
-    graph_io_input  = false;
-    graph_io_output = false;
-    inp_pos         = 0;  // SEdge uses 1, LEdge uses 4
-    out_pos         = 0;  // SEdge uses 1, LEdge uses 4
-    inp_long        = 0;
-    out_long        = 0;
-    nid             = 0;
-    state           = Last_Node_State;
+    bits         = 0;
+    dst_pid      = 0;
+    root         = 1;
+    inp_pos      = 0;  // SEdge uses 1, LEdge uses 4
+    driver_setup = 0;
+    sink_setup   = 0;
+    out_pos      = 0;  // SEdge uses 1, LEdge uses 4
+    inp_long     = 0;
+    out_long     = 0;
+    nid          = 0;
+    state        = Last_Node_State;
   }
 
   bool is_root() const {
@@ -371,23 +371,10 @@ public:
 
     return ms;
   }
-  bool is_graph_io() const { return graph_io_input || graph_io_output; }
-  bool is_graph_io_input() const { return graph_io_input; }
-  bool is_graph_io_output() const { return graph_io_output; }
-  void set_graph_io_input() {
-    I(!graph_io_output);
-    graph_io_input = true;
-  }
-  void set_graph_io_output() {
-    I(!graph_io_input);
-    graph_io_output = true;
-  }
 
   void set_root() { root = true; }
   void clear_root() {
     root            = false;
-    graph_io_input  = false;
-    graph_io_output = false;
   }
 
   Port_ID get_dst_pid() const { return dst_pid; }
@@ -413,7 +400,6 @@ public:
 
   void set_nid(Index_ID _nid) {
     I(_nid < (1LL << Index_bits));
-    I(!is_graph_io());
     nid = _nid.value;
     GI(nid == get_self_idx().value, root);
   }
@@ -537,6 +523,10 @@ public:
     I(_bits < (1 << 14));
     bits = _bits;
   }
+  bool is_driver_setup() const { return driver_setup != 0; }
+  bool is_sink_setup()   const { return sink_setup   != 0; }
+  void set_driver_setup() { driver_setup=1; }
+  void set_sink_setup()   { driver_setup=1; }
 
   const SEdge *get_input_begin() const { return &sedge[get_input_begin_pos_int()]; }
   const SEdge *get_input_end() const { return &sedge[get_input_end_pos_int()]; }
