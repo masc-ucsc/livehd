@@ -23,16 +23,16 @@ private:
   };
 
   std::multimap<std::string_view, int> declaration_root; // For structs
-  std::vector<Declaration>        declaration;
+  std::vector<Declaration>        declarations;
 
-  const LGraph *lg;
+  LGraph *lg;
 
-  void iterate_declarations(const Node_pin &pin);
+  void iterate_declarations(Node_pin &pin);
 
 protected:
   void setup_declarations();
 
-  void to_pyrope(const LGraph *g, std::string_view filename);
+  void to_pyrope(LGraph *g, std::string_view filename);
 
   static void fromlg(Eprp_var &var);
 
