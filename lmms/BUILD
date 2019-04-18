@@ -16,6 +16,40 @@ cc_test(
 )
 
 cc_test(
+    name = "use_map_bench",
+    srcs = ["tests/use_map_bench.cpp"],
+    deps = [
+        ":headers",
+        "//bench:headers",
+        "@com_google_absl//absl/container:flat_hash_map",
+    ],
+)
+
+cc_test(
+    name = "use_set_bench",
+    srcs = ["tests/use_set_bench.cpp"],
+    deps = [
+        ":headers",
+        "//bench:headers",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@bm//:headers",
+    ],
+)
+
+cc_test(
+    name = "map_test",
+    srcs = ["tests/map_test.cpp"],
+    deps = [
+        ":headers",
+        "//bench:headers",
+        "@gtest//:gtest_main",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
+    ],
+)
+
+cc_test(
     name = "dense_bench",
     srcs = ["tests/dense_bench.cpp"],
     deps = [

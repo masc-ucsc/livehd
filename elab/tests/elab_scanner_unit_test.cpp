@@ -68,7 +68,7 @@ TEST_F(Elab_test, token_comp1){
         EXPECT_EQ(0, i->compare(">="));
         break;
     }
-    std::cout << *i << std::endl;
+    // std::cout << *i << std::endl;
     tok_num++;
   }
 }
@@ -95,5 +95,18 @@ TEST_F(Elab_test, token_comp3){
   EXPECT_EQ(scanner.debug_token_list[0], "100s3bit");
   EXPECT_EQ(scanner.debug_token_list[1], "/*110 /* comment */ 33*/"); // comment
   EXPECT_EQ(scanner.debug_token_list[2], "_3_44_u32bits");
+}
+
+TEST_F(Elab_test, token_comp4){
+  std::string_view txt1("\%in\n@out=a+b");
+  scanner.parse("txt1", txt1, txt1.size());
+  EXPECT_EQ(6, scanner.debug_token_list.size());
+  
+  EXPECT_EQ(scanner.debug_token_list[0], "\%in");
+  EXPECT_EQ(scanner.debug_token_list[1], "@out");
+  EXPECT_EQ(scanner.debug_token_list[2], "=");
+  EXPECT_EQ(scanner.debug_token_list[3], "a");
+  EXPECT_EQ(scanner.debug_token_list[4], "+");
+  EXPECT_EQ(scanner.debug_token_list[5], "b");
 }
 

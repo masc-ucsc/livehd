@@ -117,7 +117,7 @@ void Elab_scanner::add_token(Token &t) {
       token_list.back().tok = Token_id_input;
       token_list.back().len += t.len;
       return;
-    } else if (last_tok.tok == Token_id_alnum) {  // foo
+    } else if (last_tok.tok == Token_id_alnum || last_tok.tok == Token_id_register || last_tok.tok == Token_id_output || last_tok.tok == Token_id_input) {  // foo
       token_list.back().len += t.len;
       return;
     }

@@ -128,6 +128,26 @@ and traversal overheads.
 absl::flat_hash_map<Index_ID, RTLIL::Wire *>   my_example;
 ```
 
+## Some common idioms to handle map/sets
+
+
+Traverse the map/set, and as it traverses decide to erase some of the entries:
+```cpp
+for (auto it = m.begin(), end = m.end(); it != end;) {
+  if (condition_to_erase_it) {
+    m.erase(it++);
+  } else {
+    ++it;
+  }
+}
+```
+
+To check if a key is present:
+```cpp
+if (set.contains(key_value)) {
+}
+```
+
 ## Pass by reference and use "const" when possible
 
 ```cpp
