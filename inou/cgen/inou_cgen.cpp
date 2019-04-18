@@ -48,26 +48,27 @@ void Inou_cgen::Declaration::format_raw(Out_string &w) const {
   w << fmt::format("dec {} bits:{} pos:{} sign:{} order:{} type:{}\n", name, bits, pos, is_signed, order, str_type[type]);
 }
 
-void Inou_cgen::iterate_declarations(const Node_pin &pin) {
-
-  auto wn = lg->get_node_wirename(pin);
+void Inou_cgen::iterate_declarations(Node_pin &pin) {
+  /*
+  auto wn = pin.get_name();
   if(wn.empty())
     return;
 
   Declaration d;
   d.name      = wn;
-  d.pos       = lg->node_file_loc_get(pin.get_idx()).get_start();
+  d.pos       = -1; // SH:FIXME: Undefined for this moment
   d.order     = -1; // FIXME: Undefined for the moment
-  d.bits      = lg->get_bits(pin);
+  d.bits      = pin.get_bits();
   d.is_signed = false; // Could change after the traversal
 
-  if(lg->is_graph_input(pin)) {
+  if(pin.is_graph_input()){
+    I(false); //SH:FIXME: Impossible for this case as declarations only consider graph output pins
     d.type = Decl_inp;
-  } else if(lg->is_graph_output(pin)) {
+  } else if(pin.is_graph_output()) {
     d.type = Decl_out;
   } else if(pin.get_pid() == 0) { // Only pid ==0 is the Q output from flops/latches
-    assert(false); // FIXME: Not sure what is this code, but an iterator over outputs should never reach this
-    const auto &nt = lg->node_type_get(pin.get_idx());
+    I(false); // FIXME: Not sure what is this code, but an iterator over outputs should never reach this
+    const auto &nt = pin.get_node().get_type();
     switch(nt.op) {
     case SFlop_Op: d.type = Decl_sflop; break;
     case AFlop_Op: d.type = Decl_aflop; break;
@@ -79,29 +80,71 @@ void Inou_cgen::iterate_declarations(const Node_pin &pin) {
     d.type = Decl_local;
   }
 
-  declaration.push_back(d);
+  declarations.push_back(d);
 
   auto found = wn.find('.');
   if (found == std::string_view::npos)
     return;
 
-  auto       id = declaration.size() - 1;
+  auto       id = declarations.size() - 1;
   auto sub_str  = wn.substr(found);
 
   declaration_root.insert(std::pair(sub_str, id));
+   */
 }
 
 void Inou_cgen::setup_declarations() {
 
-  declaration.clear();
+  declarations.clear();
   declaration_root.clear();
 
-  lg->each_graph_output(&Inou_cgen::iterate_declarations, this);
+  lg->each_graph_output([this](Node_pin &pin) {
+    auto wn = pin.get_name();
+    if(wn.empty())
+      return;
+
+    Declaration d;
+    d.name      = wn;
+    d.pos       = -1; // SH:FIXME: Undefined for this moment
+    d.order     = -1; // FIXME: Undefined for the moment
+    d.bits      = pin.get_bits();
+    d.is_signed = false; // Could change after the traversal
+
+    if(pin.is_graph_input()){
+      I(false); //SH:FIXME: Impossible for this case as declarations only consider graph output pins
+      d.type = Decl_inp;
+    } else if(pin.is_graph_output()) {
+      d.type = Decl_out;
+    } else if(pin.get_pid() == 0) { // Only pid ==0 is the Q output from flops/latches
+      I(false); // FIXME: Not sure what is this code, but an iterator over outputs should never reach this
+      const auto &nt = pin.get_node().get_type();
+      switch(nt.op) {
+        case SFlop_Op: d.type = Decl_sflop; break;
+        case AFlop_Op: d.type = Decl_aflop; break;
+        case FFlop_Op: d.type = Decl_fflop; break;
+        case Latch_Op: d.type = Decl_latch; break;
+        default:       d.type = Decl_local;
+      }
+    } else {
+      d.type = Decl_local;
+    }
+
+    declarations.push_back(d);
+
+    auto found = wn.find('.');
+    if (found == std::string_view::npos)
+      return;
+
+    auto       id = declarations.size() - 1;
+    auto sub_str  = wn.substr(found);
+
+    declaration_root.insert(std::pair(sub_str, id));
+  });
 }
 
-void Inou_cgen::to_pyrope(const LGraph *g, std::string_view filename) {
+void Inou_cgen::to_pyrope(LGraph *g, std::string_view filename) {
 
-  assert(lg == 0);
+  assert(lg == nullptr);
   lg = g;
 
   setup_declarations();
@@ -109,16 +152,17 @@ void Inou_cgen::to_pyrope(const LGraph *g, std::string_view filename) {
 
   w << fmt::format("// {} \n", filename);
 
-  for(const auto &d : declaration) {
+  for(const auto &d : declarations) {
     d.format_raw(w);
   }
 
   for(auto idx : lg->forward()) {
-    auto wn = lg->get_node_wirename(idx);
+    auto node = Node(g,0,Node::Compact(idx));
+    auto wn = node.get_name();
     if(wn.empty())
-      w << fmt::format(" {} op:{} \n", idx, lg->node_type_get(idx).get_name());
+      w << fmt::format(" {} op:{} \n", node.get_compact(), node.get_type().get_name());
     else
-      w << fmt::format(" {} {} op:{}\n", idx, wn, lg->node_type_get(idx).get_name());
+      w << fmt::format(" {} {} op:{}\n", idx, wn, node.get_type().get_name());
   }
 
   std::fstream fs;
@@ -132,5 +176,5 @@ void Inou_cgen::to_pyrope(const LGraph *g, std::string_view filename) {
 
   std::cout << w.str() << std::endl;
 
-  lg = 0; // just being clean
+  lg = nullptr; // just being clean
 }
