@@ -14,7 +14,7 @@ public:
 
 TEST_F(Prp_test, assignment_expression) {
 
-  std::string_view parse_txt{"a=b+c"};
-
+  std::string_view parse_txt{"\%out4=b+c"};
+  
   scanner.parse("assignment_expression", parse_txt, parse_txt.size());
 }

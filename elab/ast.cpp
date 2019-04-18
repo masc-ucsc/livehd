@@ -13,7 +13,7 @@ Ast_parser::Ast_parser(std::string_view _buffer, Rule_id top_rule) : buffer(_buf
 
 void Ast_parser::up(Rule_id rid) {
   I(level > 0);
-
+  
   if (down_added == level) {
     // Child was added, nothing to do now
   } else if (down_added > level) {
@@ -25,7 +25,7 @@ void Ast_parser::up(Rule_id rid) {
     I(down_added < level);
     // nothing to do, no descendents
   }
-
+  
   level = level - 1;
 }
 

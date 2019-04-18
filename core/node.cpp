@@ -88,6 +88,7 @@ const Tech_cell *Node::get_type_tmap_cell() const {
   return g->get_tlibrary().get_const_cell(g->get_type_tmap_id(nid));
 }
 
+/* DEPRECATED
 void Node::set_type_const_value(std::string_view str) {
   g->set_type_const_value(nid, str);
 }
@@ -99,6 +100,7 @@ void Node::set_type_const_sview(std::string_view str) {
 void Node::set_type_const_value(uint32_t val) {
   g->set_type_const_value(nid, val);
 }
+*/
 
 uint32_t Node::get_type_const_value() const {
   return g->get_type_const_value(nid);

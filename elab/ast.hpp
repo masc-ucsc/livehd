@@ -22,6 +22,7 @@ public:
   Ast_parser(std::string_view buffer, Rule_id top_rule);
 
   void down() { level = level + 1; }
+  void up_null() { level = level - 1; }
   void up(Rule_id rid);
   void add(Rule_id rid, Token_entry te);
 };
