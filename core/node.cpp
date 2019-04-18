@@ -193,6 +193,7 @@ std::string_view Node::create_name() const {
 
   std::string signature = absl::StrCat("lg_", get_type().get_name());
 
+  //SH:FIXME: is it a typo? should be SubGraph_Op?
   if (get_type().op == GraphIO_Op) {
     absl::StrAppend(&signature, "subid_", get_type_subgraph().value);
   }else if (get_type().op == TechMap_Op) {

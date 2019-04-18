@@ -64,7 +64,7 @@ void Inou_graphviz::do_fromlg(std::vector<LGraph *> &lgs) {
   }
   for(const auto lg_parent : lgs) {
     populate_data(lg_parent);
-    lg_parent->each_sub_graph_fast([lg_parent,this](Index_ID idx, Lg_type_id lgid, std::string_view iname){
+    lg_parent->each_sub_graph_fast([lg_parent,this](Node node, Lg_type_id lgid){
       fmt::print("subgraph lgid:{}\n", lgid);
       LGraph *lg_child = LGraph::open(lg_parent->get_path(), lgid);
       populate_data(lg_child);
@@ -75,39 +75,24 @@ void Inou_graphviz::do_fromlg(std::vector<LGraph *> &lgs) {
 void Inou_graphviz::populate_data(LGraph* g){
   std::string data = "digraph {\n";
 
-  g->each_node_fast([this, g, &data](const Node &node) {
+  g->each_node_fast([&data](const Node &node) {
     const auto &ntype = node.get_type();
-    auto nid = node.get_nid();
-    if(verbose)
-      data += fmt::format(" {} [label=\"n{}: {}: {}\"];\n", nid, nid, ntype.get_name(),g->get_node_wirename(node.get_driver_pin(0)));
-    else
-      data += fmt::format(" {} [label=\"n{}:{}\"];\n", nid, nid, ntype.get_name());
+      data += fmt::format(" {} [label=\"{}:{}\"];\n", node.create_name(), ntype.get_name(), node.get_name());
 
-    for(auto &out : g->out_edges(nid)){
-      Node_pin src_pin = out.get_out_pin();
-      Node_pin dst_pin = out.get_inp_pin();
-      Index_ID src_nid = nid;
-      Index_ID dst_nid = g->get_node(dst_pin).get_nid();
-      if (verbose) {
-        auto bits = g->get_bits(src_pin);
-        data += fmt::format(" {}->{}[label=\"{}b: {}:{}\"];\n", src_nid, dst_nid, bits, src_pin.get_pid(), dst_pin.get_pid());
-      } else {
-        data += fmt::format(" {} -> {}[label=\"{}:{}\"];\n", src_nid, dst_nid, src_pin.get_pid(), dst_pin.get_pid());
-      }
+    for(auto &out : node.out_edges()){
+      Node_pin dpin = out.driver;
+      Node_pin spin = out.sink;
+      auto dname = dpin.get_node().create_name();
+      auto sname = spin.get_node().create_name();
+      auto bits = dpin.get_bits();
+        data += fmt::format(" {}->{}[label=\"{}b: {}:{}\"];\n", dname, sname, bits, dpin.get_pid(), spin.get_pid());
     }
   });
 
-  g->each_graph_output([g,this, &data](const Node_pin &pin) {
-    assert(g->is_graph_output(pin));
-    auto nid = g->get_node(pin).get_nid();
+  g->each_graph_output([&data](const Node_pin &pin) {
     std::string_view dst_str = "virtual_dst_module";
-    if (verbose) {
-      //buggy, when add graph io, the auto generated pin don't necessarily be 1
-      auto bits = g->get_bits(g->get_node(nid).get_driver_pin(0));
-      data += fmt::format(" {}->{}[label=\"{}b\"];\n", nid, dst_str, bits);
-    } else {
-      data += fmt::format(" {}->{}[label=\"\"];\n", nid, dst_str);
-    }
+    auto bits = pin.get_bits();
+      data += fmt::format(" {}->{}[label=\"{}b\"];\n", pin.get_node().create_name(), dst_str, bits);
   });
 
 
