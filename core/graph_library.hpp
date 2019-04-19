@@ -82,7 +82,7 @@ protected:
 public:
   static bool    exists(std::string_view path, std::string_view name);
   static LGraph *try_find_lgraph(std::string_view path, std::string_view name);
-  LGraph *       try_find_lgraph(std::string_view name);
+  LGraph        *try_find_lgraph(std::string_view name);
 
   Sub_node      &setup_sub(std::string_view name);
   Sub_node      &get_sub(Lg_type_id lgid) {

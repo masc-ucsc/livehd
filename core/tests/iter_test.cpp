@@ -88,8 +88,7 @@ bool fwd(int n) {
       return false;
 
     std::set<Index_ID> visited;
-    for(auto &idx : g->forward()) {
-      auto node = Node(g,0,Node::Compact(idx));
+    for(auto node : g->forward()) {
 
       // check if all incoming edges were visited
       for(auto &inp : node.inp_edges()) {
@@ -116,8 +115,7 @@ bool bwd(int n) {
       return false;
 
     std::set<Node::Compact> visited;
-    for(auto &idx : g->backward()) {
-      auto node = Node(g,0,Node::Compact(idx));
+    for(auto node : g->backward()) {
       visited.insert(node.get_compact());
 
       // check if all incoming edges were visited
@@ -227,36 +225,33 @@ bool simple() {
   g->add_edge(t16.setup_driver_pin(random()&0xFF), o8);
   g->add_edge(t20.setup_driver_pin(random()&0xFF), o8);
 
-  std::string fwd;
+  std::vector<std::string> fwd;
   int conta=0;
-  for(const auto &idx : g->forward()) {
-    fwd += std::to_string(idx) + " ";
+  for(const auto node : g->forward()) {
+    fwd.emplace_back(node.debug_name(true));
     conta++;
   }
   if (conta!=22)
     failed = true;
 
-  std::string bwd;
+  std::vector<std::string> bwd;
   conta =0;
-  for(const auto &idx : g->backward()) {
-    bwd += std::to_string(idx) + " ";
+  for(const auto node : g->backward()) {
+    bwd.emplace_back(node.debug_name(true));
     conta++;
   }
   if (conta!=22)
     failed = true;
 
-  std::string fast;
+  std::vector<std::string> fast;
   conta =0;
-  for(const auto &idx : g->fast()) {
-    fast += std::to_string(idx) + " ";
+  for(const auto node : g->fast()) {
+    fast.emplace_back(node.debug_name(true));
     conta++;
   }
   if (conta!=22)
     failed = true;
 
-  fmt::print("fwd :{}\n",fwd);
-  fmt::print("back:{}\n",bwd);
-  fmt::print("fast:{}\n",fast);
   for(const auto &nid : g->fast()) {
     auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
 
@@ -272,13 +267,66 @@ bool simple() {
     }
     fmt::print("\n");
   }
+  fmt::print("fwd :");
+  for(auto txt:fwd)
+    fmt::print(" {}",txt);
+  fmt::print("\n");
+
+  fmt::print("fwd :");
+  for(auto txt:bwd)
+    fmt::print(" {}",txt);
+  fmt::print("\n");
+
+  fmt::print("fast:");
+  for(auto txt:fast)
+    fmt::print(" {}",txt);
+  fmt::print("\n");
 
   if (fwd.size() != bwd.size())
     failed = true;
   if (fast.size() != bwd.size())
     failed = true;
 
-  return true;
+  std::sort(fwd.begin() , fwd.end());
+  std::sort(bwd.begin() , bwd.end());
+  std::sort(fast.begin(), fast.end());
+
+  auto fast_it = fast.begin();
+  auto fwd_it  = fwd.begin();
+  auto bwd_it  = bwd.begin();
+
+  while(fast_it != fast.end()) {
+    if (*fast_it != *fwd_it) {
+      fmt::print("missmatch fast {} vs fwd {}\n",*fast_it, *fwd_it);
+      failed = true;
+    }
+    if (*fast_it != *bwd_it) {
+      fmt::print("missmatch fast {} vs bwd {}\n",*fast_it, *bwd_it);
+      failed = true;
+    }
+    fast_it++;
+    fwd_it++;
+    bwd_it++;
+    if (fwd_it == fwd.end() && bwd_it == bwd.end() && fast_it == fast.end())
+      break;
+
+    if (fwd_it == fwd.end()) {
+      fmt::print("fwd is shorter\n");
+      failed = true;
+      break;
+    }
+    if (bwd_it == bwd.end()) {
+      fmt::print("bwd is shorter\n");
+      failed = true;
+      break;
+    }
+    if (fast_it == fast.end()) {
+      fmt::print("fast is shorter\n");
+      failed = true;
+      break;
+    }
+  }
+
 }
 
 int main() {

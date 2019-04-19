@@ -3,9 +3,7 @@
 
 #include "pass.hpp"
 
-#include "sparsehash/dense_hash_map"
-#include "sparsehash/sparse_hash_set"
-
+#include "lgset.hpp"
 #include "lgraph.hpp"
 #include "lgedge.hpp"
 
@@ -47,84 +45,85 @@ public:
   CPod_iterator end() const { return CPod_iterator(e, e, inputs); }
 };
 
+class CFast_edge_iterator {
+public:
+  CFast_edge_iterator(LGraph *_g, Hierarchy_id _hid, const Index_ID _nid, bool _visit_sub) : top_g(_g), hid(_hid), nid(_nid), visit_sub(_visit_sub) {}
+  CFast_edge_iterator operator++();
+  bool operator!=(const CFast_edge_iterator &other) {
+    I(top_g == other.top_g);
+    return nid != other.nid;
+  }
+  Node operator*() const {
+    return Node(top_g, hid, nid);
+  }
+
+private:
+  std::vector<Node::Compact> h_stack;
+  LGraph        *top_g;
+  Hierarchy_id   hid;
+  Index_ID       nid;
+  bool           visit_sub;
+};
+
 class Fast_edge_iterator {
 public:
-  class CFast_edge_iterator {
-  public:
-    CFast_edge_iterator(const Index_ID _nid, LGraph *_g) : nid(_nid), g(_g) {}
-    CFast_edge_iterator operator++();
-    bool operator!=(const CFast_edge_iterator &other) {
-      I(g == other.g);
-      return nid != other.nid;
-    }
-    const Index_ID &operator*() const { return nid; }
-
-  private:
-    Index_ID                nid;
-    LGraph *g;
-  };
 
 private:
 protected:
-  LGraph *g;
-  const Index_ID          b;
+  LGraph             *top_g;
+  const Hierarchy_id  it_hid;
+  const Index_ID      it_nid;
+  const bool          visit_sub;
 
 public:
   Fast_edge_iterator() = delete;
-  explicit Fast_edge_iterator(const Index_ID _b, LGraph *_g) : g(_g), b(_b) {}
+  explicit Fast_edge_iterator(LGraph *_g, const Hierarchy_id _hid, const Index_ID _nid, bool _visit_sub) : top_g(_g), it_hid(_hid), it_nid(_nid), visit_sub(_visit_sub) {}
 
-  CFast_edge_iterator begin() const { return CFast_edge_iterator(b, g); }
-  CFast_edge_iterator end() const { return CFast_edge_iterator(0, g); }  // 0 is end index for iterator
+  CFast_edge_iterator begin() const { return CFast_edge_iterator(top_g, it_hid, it_nid, visit_sub); }
+  CFast_edge_iterator end() const { return CFast_edge_iterator(top_g, 0, 0, visit_sub); }  // 0 is end index for iterator
 };
 
-typedef google::dense_hash_map<uint64_t, int32_t> Frontier_type;
-typedef google::sparse_hash_set<uint64_t>         Deadcode_type;
+using Frontier_type = absl::flat_hash_map<Node::Compact, int32_t>;
 
 class Edge_raw_iterator_base {
 protected:
+  LGraph        *top_g;
+  Hierarchy_id   hid;
   Index_ID       nid;
-  LGraph        *g;
+
   Frontier_type *frontier;  // 2G inputs at most
-  bmsparse      *pending;   // vertex that cleared the frontier
+  Node_set      *pending;   // vertex that cleared the frontier
+  Index_ID      *hardcoded_nid;
 
 public:
-  Edge_raw_iterator_base(const Index_ID _nid, LGraph *_g, Frontier_type *_frontier, bmsparse *_pending)
-      : nid(_nid), g(_g), frontier(_frontier), pending(_pending) {}
+  Edge_raw_iterator_base(LGraph *_g, Hierarchy_id _hid, Index_ID _nid, Frontier_type *_frontier, Node_set *_pending, Index_ID *_hardcoded_nid)
+      : top_g(_g), hid(_hid), nid(_nid), frontier(_frontier), pending(_pending), hardcoded_nid(_hardcoded_nid) {}
 
-  virtual void    add_node(Index_ID nid) = 0;
-  const Index_ID &operator*() const { return nid; }
+  virtual void    set_current_node_as_visited() = 0;
+  Node operator*() const {
+    return Node(top_g, hid, nid);
+  }
 
-  bool check_frontier();
+  bool update_frontier();
 
-  void set_next_nid() {
-    const auto it = pending->first();
-    if (it.valid()) {
-      nid = *it;
+  void set_next_node_to_visit() {
+    if (likely(!pending->empty())) {
+      const auto it = pending->begin();
+      nid = it->nid;
+      hid = it->hid;
       return;
     }
 
-    if (!check_frontier()) {
+    if (!update_frontier()) {
       nid = 0;  // We are done
+      // keep hid
       return;
     }
 
-#if DEBUG
-    // Benchmark pending and frontier sizes
-    static size_t p_max_size = 0;
-    static size_t f_max_size = 0;
-    if (pending->size() > (2 * p_max_size)) {
-      fmt::print("pending {} {}\n", pending->count(), ((double)pending->count()) / g->size());
-      p_max_size = pending->count();
-    }
-    if (frontier->size() > (2 * f_max_size)) {
-      fmt::print("frontier {} {}\n", frontier->count(), ((double)frontier->count()) / g->size());
-      f_max_size = frontier->count();
-    }
-#endif
-
-    I(pending->first() != pending->end());
-    auto it2 = pending->first();
-    nid = *it2;
+    I(!pending->empty());
+    auto it2 = pending->begin();
+    nid = it2->nid;
+    hid = it2->hid;
     I(nid);
   };
 };
@@ -133,100 +132,96 @@ class Forward_edge_iterator {
 public:
   class CForward_edge_iterator : public Edge_raw_iterator_base {
   public:
-    CForward_edge_iterator(const Index_ID _nid, LGraph *_g, Frontier_type *_frontier, bmsparse *_pending)
-        : Edge_raw_iterator_base(_nid, _g, _frontier, _pending) {}
+    CForward_edge_iterator(LGraph *_g, Hierarchy_id _hid, Index_ID _nid, Frontier_type *_frontier, Node_set *_pending, Index_ID *_hardcoded_nid)
+        : Edge_raw_iterator_base(_g, _hid, _nid, _frontier, _pending, _hardcoded_nid) {}
 
     bool operator!=(const CForward_edge_iterator &other) {
-      I(g == other.g);
+      I(top_g == other.top_g);
       I(frontier == other.frontier);
       I(pending == other.pending);
 
       return nid != 0;
     };
 
-    void add_node(const Index_ID nid);
+    void set_current_node_as_visited();
 
     CForward_edge_iterator operator++() {
       I(nid);  // Do not call ++ after end
-      CForward_edge_iterator i(nid, g, frontier, pending);
-      add_node(nid);
-      set_next_nid();
+      CForward_edge_iterator i(top_g, hid, nid, frontier, pending, hardcoded_nid);
+      set_current_node_as_visited();
+      set_next_node_to_visit();
       return i;
     };
   };
 
 private:
 protected:
-  LGraph        *g;
+  LGraph        *top_g;
   Frontier_type  frontier;  // 2G inputs at most
-  bmsparse       pending;   // vertex that cleared the frontier
+  Node_set       pending;   // vertex that cleared the frontier
+  Index_ID       hardcoded_nid;
 
 public:
   Forward_edge_iterator() = delete;
-  explicit Forward_edge_iterator(LGraph *_g) : g(_g) {
-    frontier.set_empty_key(0);      // 0 is not allowed as key
-    frontier.set_deleted_key(128);  // 128 is not allowed as key (4KB aligned)
-    frontier.resize(32+g->size()/16);
+  explicit Forward_edge_iterator(LGraph *_g) : top_g(_g) {
   }
 
   CForward_edge_iterator begin();
 
-  CForward_edge_iterator end() { return CForward_edge_iterator(0, g, &frontier, &pending); }  // 0 is end index for iterator
+  CForward_edge_iterator end() { return CForward_edge_iterator(top_g, 0, 0, &frontier, &pending, &hardcoded_nid); }  // 0 is end index for iterator
 };
 
 class Backward_edge_iterator {
 public:
   class CBackward_edge_iterator : public Edge_raw_iterator_base {
   private:
-    bmsparse global_visited;
+    Node_set back_iter_global_visited;
 
   public:
-    CBackward_edge_iterator(const Index_ID _nid, LGraph *_g, Frontier_type *_frontier, bmsparse *_pending)
-      : Edge_raw_iterator_base(_nid, _g, _frontier, _pending) {
+    CBackward_edge_iterator(LGraph *_g, Hierarchy_id _hid, Index_ID _nid, Frontier_type *_frontier, Node_set *_pending, Index_ID *_hardcoded_nid)
+      : Edge_raw_iterator_base(_g, _hid, _nid, _frontier, _pending, _hardcoded_nid) {
     }
 
     bool operator!=(const CBackward_edge_iterator &other) {
-      I(g == other.g);
+      I(top_g == other.top_g);
       I(frontier == other.frontier);
       I(pending == other.pending);
 
-      return nid != 0;
+      return nid != other.nid || hid != other.hid;
     };
 
     // find nodes not connected to output that are preventing the propagation
     // only use in case the backward fails
     void find_dce_nodes();
 
-    void add_node(const Index_ID nid);
+    void set_current_node_as_visited();
 
     CBackward_edge_iterator operator++() {
       I(nid);  // Do not call ++ after end
-      CBackward_edge_iterator i(nid, g, frontier, pending);
-      global_visited.set(nid, true);
-      add_node(nid);
-      if (pending->first()==pending->end()) {
+      CBackward_edge_iterator i(top_g, hid, nid, frontier, pending, hardcoded_nid);
+      back_iter_global_visited.set(Node::Compact(hid, nid));
+      set_current_node_as_visited();
+      if (pending->empty()) {
         find_dce_nodes();
       }
-      set_next_nid();
+      set_next_node_to_visit();
       return i;
     };
   };
 
 private:
 protected:
-  LGraph        *g;
+  LGraph        *top_g;
   Frontier_type  frontier;  // 2G inputs at most
-  bmsparse       pending;   // vertex that cleared the frontier
+  Node_set       pending;   // vertex that cleared the frontier
+  Index_ID       hardcoded_nid;
 
 public:
   Backward_edge_iterator() = delete;
-  explicit Backward_edge_iterator(LGraph *_g) : g(_g) {
-    frontier.set_empty_key(0);      // 0 is not allowed as key
-    frontier.set_deleted_key(128);  // 128 is not allowed as key (4KB aligned)
-    frontier.resize(128);           // FIXME: do average or gsize ratio
+  explicit Backward_edge_iterator(LGraph *_g) : top_g(_g) {
   }
 
   CBackward_edge_iterator begin();
 
-  CBackward_edge_iterator end() { return CBackward_edge_iterator(0, g, &frontier, &pending); }  // 0 is end index for iterator
+  CBackward_edge_iterator end() { return CBackward_edge_iterator(top_g, 0, 0, &frontier, &pending, &hardcoded_nid); }  // 0 is end index for iterator
 };

@@ -248,8 +248,8 @@ bool test3() {
 
   n2.del_node();
 
-  for(auto nid : g->fast()) {
-    assert(nid != n2.get_compact().nid);
+  for(auto node:g->fast()) {
+    I(node != n2);
   }
 
   return true;

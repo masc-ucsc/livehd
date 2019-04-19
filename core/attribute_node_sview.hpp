@@ -15,7 +15,7 @@ class Attribute_node_sview_type {
 
   using Attr_data = Attr_sview_raw<uint32_t, Unique>;
 
-  inline static std::vector<Attr_data *> table;
+  inline static std::vector<Attr_data *> table; // FIXME: This should be a map wiht lgid + hid and check that top_g is constant
   inline static LGraph    *last_lg   = nullptr;
   inline static Attr_data *last_attr = nullptr;
 
@@ -29,7 +29,7 @@ class Attribute_node_sview_type {
     return (table.size() <= pos) || table[pos] == nullptr;
   };
 
-  static void setup_table(LGraph *lg) {
+  static void setup_table(LGraph *lg) { // FIXME: add hid too
     last_lg   = lg;
     size_t pos = lg->get_lgid().value;
     if (!is_invalid(pos)) {
@@ -47,8 +47,8 @@ class Attribute_node_sview_type {
 public:
   static std::string_view set(const Node &node, std::string_view data) {
 
-    if (unlikely(node.get_lgraph()!=last_lg))
-      setup_table(node.get_lgraph());
+    if (unlikely(node.get_top_lgraph()!=last_lg))
+      setup_table(node.get_top_lgraph());
 
     I(!last_attr->has(node.get_compact())); // Do not double insert (why???) waste or bug with Name alias!!
 

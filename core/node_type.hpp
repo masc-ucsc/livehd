@@ -7,6 +7,7 @@
 #include "lgraphbase.hpp"
 #include "node_type_base.hpp"
 #include "sub_node.hpp"
+#include "lgset.hpp"
 
 typedef Char_Array_ID Const_ID;
 

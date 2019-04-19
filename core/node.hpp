@@ -3,43 +3,48 @@
 
 #include <vector>
 
+#include "lgraph_base_core.hpp"
+#include "node_type_base.hpp"
 #include "node_pin.hpp"
+#include "sub_node.hpp"
 
 class Ann_place;
 
 using XEdge_iterator    = std::vector<XEdge>;
 using Node_pin_iterator = std::vector<Node_pin>;
 
-class LGraph;
-class Node_Type;
-
 class Node {
 private:
-  const Index_ID nid;
+  LGraph *top_g;
   const Hierarchy_id hid;
-  LGraph *g;
+  const Index_ID nid;
 
 protected:
-  friend LGraph;
-  friend Node_pin;
-  friend XEdge;
-  friend Node_set;
+  friend class LGraph;
+  friend class Node_pin;
+  friend class XEdge;
+  friend class Node_set;
+  friend class CFast_edge_iterator;
+  friend class Edge_raw_iterator_base;
 
   Index_ID get_nid() const { return nid; }
 
-  Node(LGraph *_g, Hierarchy_id _hid, Index_ID _nid)
-    :nid(_nid)
+  Node(LGraph *_g, Index_ID _nid, Hierarchy_id _hid)
+    :top_g(_g)
     ,hid(_hid)
-    ,g(_g) {
+    ,nid(_nid) {
       I(nid);
-      I(g);
+      I(top_g);
     };
 public:
-  struct __attribute__((packed)) Compact {
-    uint32_t nid:Index_bits;
-    uint16_t hid;
+  static constexpr char Hardcoded_input_nid  = 1;
+  static constexpr char Hardcoded_output_nid = 2;
 
-    constexpr size_t operator()(const Compact &obj) const { return obj.nid; }
+  struct __attribute__((packed)) Compact {
+    uint64_t  nid:Index_bits;
+    uint64_t  hid; // FIXME: vector for more than 8 nested levels hierarchy
+
+    //constexpr size_t operator()(const Compact &obj) const { return obj.nid; }
     constexpr operator size_t() const { return nid; }
 
     Compact(const Index_ID &_nid, const Hierarchy_id &_hid) :nid(_nid), hid(_hid) { I(nid); };
@@ -62,27 +67,27 @@ public:
   friend H AbslHashValue(H h, const Node& s) {
     return H::combine(std::move(h), (int)s.nid, (int)s.hid); // Ignore lgraph pointer in hash
   };
-  bool operator==(const Node &other) const { I(nid); I(g == other.g); return (nid == other.nid) && (hid == other.hid); }
+  bool operator==(const Node &other) const { I(nid); I(top_g == other.top_g); return (nid == other.nid) && (hid == other.hid); }
 
-  bool operator!=(const Node &other) const { I(nid); I(g == other.g); return (nid != other.nid) || (hid != other.hid); }
+  bool operator!=(const Node &other) const { I(nid); I(top_g == other.top_g); return (nid != other.nid) || (hid != other.hid); }
 
   // NOTE: No operator<() needed for std::set std::map to avoid their use. Use flat_map_set for speed
 
   Node()
-    :nid(0)
+    :top_g(0)
     ,hid(0)
-    ,g(0) {
+    ,nid(0) {
   };
-  Node(LGraph *_g, Hierarchy_id _hid, Compact comp)
-    :nid(comp.nid)
-    ,hid(_hid)
-    ,g(_g) {
+  Node(LGraph *_g, Compact comp)
+    :top_g(_g)
+    ,hid(comp.hid)
+    ,nid(comp.nid) {
       I(nid);
-      I(g);
+      I(top_g);
   };
   Node &operator=(const Node &obj) {
     I(this != &obj); // Do not assign object to itself. works but wastefull
-    g   = obj.g;
+    top_g   = obj.top_g;
     const_cast<Index_ID&>(nid)     = obj.nid;
     const_cast<Hierarchy_id&>(hid) = obj.hid;
 
@@ -90,11 +95,11 @@ public:
   };
 
   inline Compact get_compact() const {
-    return Compact(nid);
+    return Compact(nid, hid);
   }
 
-  LGraph *get_lgraph() const { return g; }
-  Hierarchy_id  get_hid()    const { return hid; }
+  LGraph *get_top_lgraph() const { return top_g; }
+  Hierarchy_id  get_hid()  const { return hid;   }
 
   Node_pin get_driver_pin() const;
   Node_pin get_driver_pin(Port_ID pid) const;
@@ -104,7 +109,7 @@ public:
   bool has_inputs () const;
   bool has_outputs() const;
 
-  bool is_invalid() const { return g==nullptr || nid==0; }
+  bool is_invalid() const { return top_g==nullptr || nid==0; }
 
   bool is_root() const;
 
@@ -146,7 +151,7 @@ public:
   void del_node();
 
   // BEGIN ATTRIBUTE ACCESSORS
-  std::string      debug_name() const;
+  std::string      debug_name(bool nowarning=false) const;
 
   std::string_view set_name(std::string_view iname);
   std::string_view get_name() const;

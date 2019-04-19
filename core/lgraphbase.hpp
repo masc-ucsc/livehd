@@ -50,19 +50,19 @@ protected:
     node_internal[idx].set_sink_setup();
   }
 
-  friend Forward_edge_iterator;
-  friend Backward_edge_iterator;
-
-  friend Fast_edge_iterator;
-  Index_ID fast_next(Index_ID nid) const {
-    while (true) {
-      nid.value++;
-      if (nid >= static_cast<Index_ID>(node_internal.size())) return 0;
-      if (!node_internal[nid].is_node_state()) continue;
-      if (node_internal[nid].is_master_root()) return nid;
-    }
-
-    return 0;
+  int get_hid_bits() const {
+    // NOTE: possible to used sub_nodes.size(). It would be a more compact
+    // tree, but it requires an extra indirection using sub_nodes to find the
+    // nid when traversing.
+    uint32_t n = node_internal.size();
+    if (n<16)
+      return 4;
+    n |= (n >>  1);
+    n |= (n >>  2);
+    n |= (n >>  4);
+    n |= (n >>  8);
+    n |= (n >> 16);
+    return n - (n >> 1);
   }
 
   void del_node(Index_ID idx);
@@ -74,6 +74,9 @@ public:
   LGraph_Base() = delete;
 
   LGraph_Base(const LGraph_Base &) = delete;
+
+  Hierarchy_id get_sub_hierarchy_id(Hierarchy_id hid, Index_ID nid) const;
+  LGraph *find_sub_lgraph(Hierarchy_id hid) const;
 
   explicit LGraph_Base(std::string_view _path, std::string_view _name, Lg_type_id lgid) noexcept;
   virtual ~LGraph_Base();

@@ -16,7 +16,7 @@
 using Lg_type_id   = Explicit_type<uint32_t, struct Lg_type_id_struct>;  // Global used all over
 using Index_ID     = Explicit_type<uint64_t, struct Index_ID_struct>;
 using Lut_type_id  = Explicit_type<uint32_t, struct Lut_type_id_struct>;
-using Hierarchy_id = uint16_t;
+using Hierarchy_id = uint64_t; // FIXME: just 8 nesting levels. Use absl:inlined_vector???
 
 struct Lg_type_id_hash {
   size_t operator()(const Lg_type_id& obj) const { return obj.value; }

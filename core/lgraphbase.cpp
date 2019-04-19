@@ -268,6 +268,36 @@ Index_ID LGraph_Base::setup_idx_from_pid(const Index_ID nid, const Port_ID pid) 
   return root_idx;
 }
 
+Hierarchy_id LGraph_Base::get_sub_hierarchy_id(Hierarchy_id hid, Index_ID nid) const {
+  I(node_internal.size()>nid);
+  I(node_internal[nid].is_root());
+
+  auto hid_bits = get_hid_bits();
+  I((nid & ((1<<hid_bits)-1)) == nid);
+
+  auto new_hid = (hid << hid_bits) | nid;
+
+  return new_hid;
+}
+
+LGraph *LGraph_Base::find_sub_lgraph(Hierarchy_id hid) const {
+  if (hid==0)
+    return this;
+
+  auto hid_bits = get_hid_bits();
+  auto level_0_sub_nid = hid & ((1<<hid_bits)-1);
+  auto level_n_sub_hid = hid >> hid_bits;
+
+  I(sub_nodes.find(level_0_sub_nid) != sub_nodes.end());
+  I(is_sub_node(0,level_0_sub_nid));
+
+  auto sub_lgid = get_type_sub(level_0_sub_nid);
+  if (sub_lgid==0)
+    return 0; // No subgraph present (bbox)
+
+  return open(path, sub_lgid);
+}
+
 void LGraph_Base::set_bits_pid(const Index_ID nid, const Port_ID pid, uint16_t bits) {
   Index_ID idx = setup_idx_from_pid(nid, pid);
   set_bits(idx, bits);

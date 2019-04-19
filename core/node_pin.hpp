@@ -5,6 +5,8 @@ class LGraph;
 class XEdge;
 class Node;
 
+#include "lgedge.hpp"
+
 enum class Node_pin_mode {
   Driver,
   Sink,

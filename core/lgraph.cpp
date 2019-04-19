@@ -451,7 +451,7 @@ Forward_edge_iterator LGraph::forward() { return Forward_edge_iterator(this); }
 Backward_edge_iterator LGraph::backward() { return Backward_edge_iterator(this); }
 
 // Skip after 1, but first may be deleted, so fast_next
-Fast_edge_iterator LGraph::fast() { return Fast_edge_iterator(fast_next(0), this);  }
+Fast_edge_iterator LGraph::fast(bool visit_sub) { return Fast_edge_iterator(this, 0, fast_next(0), visit_sub);  }
 
 void LGraph::dump() {
   fmt::print("lgraph name:{} size:{}\n", name, node_internal.size());

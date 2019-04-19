@@ -33,6 +33,10 @@ protected:
   friend class Node;
   friend class Node_pin;
   friend class XEdge;
+  friend class CFast_edge_iterator;
+  friend class Forward_edge_iterator;
+  friend class Backward_edge_iterator;
+  friend class Fast_edge_iterator;
 
   using Hierarchy_cache = absl::flat_hash_map<Lg_type_id, Lg_type_id, Lg_type_id_hash>;
 
@@ -115,6 +119,46 @@ protected:
     return get_self_sub_node().is_output_from_graph_pid(pid);
   }
 
+  Index_ID fast_next(Index_ID nid) const {
+    while (true) {
+      nid.value++;
+      if (nid >= static_cast<Index_ID>(node_internal.size())) return 0;
+      if (!node_internal[nid].is_node_state()) continue;
+      if (node_internal[nid].is_master_root()) return nid;
+    }
+
+    return 0;
+  }
+
+  Index_ID fast_next(Hierarchy_id hid, Index_ID nid) const {
+    LGraph *sub_g = find_sub_lgraph(hid);
+    I(sub_g);
+    return fast_next(nid);
+  }
+
+  bool is_sub(Index_ID nid) const {
+    I(nid < node_type_table.size());
+    I(node_internal[nid].is_node_state());
+    I(node_internal[nid].is_master_root());
+
+    Node_Type_Op op = node_type_table[nid];
+
+    return op >= SubGraphMin_Op && op <= SubGraphMax_Op;
+  }
+
+  bool is_sub(Hierarchy_id hid, Index_ID nid) const {
+    LGraph *sub_g = find_sub_lgraph(hid);
+    if (sub_g==0)
+      return false; // This can be if the subgraph is not present (bbox)
+
+    bool it_is_sub = sub_g->is_sub(nid);
+
+    GI( it_is_sub, sub_g->sub_nodes.find(Node::Compact(hid, nid)) != sub_g->sub_nodes.end());
+    GI(!it_is_sub, sub_g->sub_nodes.find(Node::Compact(hid, nid)) == sub_g->sub_nodes.end());
+
+    return it_is_sub;
+  }
+
 public:
   LGraph()               = delete;
   LGraph(const LGraph &) = delete;
@@ -140,7 +184,7 @@ public:
 
   Forward_edge_iterator  forward();
   Backward_edge_iterator backward();
-  Fast_edge_iterator fast();
+  Fast_edge_iterator fast(bool visit_sub=false);
 
   static bool    exists(std::string_view path, std::string_view name);
   static LGraph *create(std::string_view path, std::string_view name, std::string_view source);
@@ -179,23 +223,28 @@ public:
 
   // Iterators defined in the lgraph_each.cpp
 
+  // FIXME: Use Instance.each_graph_*
   void each_graph_io(std::function<void(Node_pin &pin)> f1);
   void each_graph_input(std::function<void(Node_pin &pin)> f1);
   void each_graph_output(std::function<void(Node_pin &pin)> f1);
 
+  // FIXME: Use Instance.each_graph_*
   void each_node_fast(std::function<void(Node &node)> f1);
 
+  // FIXME: Use Instance.each_graph_*
   void each_output_edge_fast(std::function<void(XEdge &edge)> f1);
 
-  void each_sub_fast_direct(const std::function<bool(Node &, const Lg_type_id &)>);
+  // FIXME: Use Instance.each_graph_*
+  void each_sub_fast_direct(const std::function<bool(Node &)>);
 
+  // FIXME: Use Instance.each_graph_*
   template <typename FN>
   void each_sub_fast(const FN f1) {
-    if constexpr (std::is_invocable_r_v<bool, FN &, Node &, const Lg_type_id &>) {  // WARNING: bool must be before void
+    if constexpr (std::is_invocable_r_v<bool, FN &, Node &>) {  // WARNING: bool must be before void
       each_sub_fast_direct(f1);
-    } else if constexpr (std::is_invocable_r_v<void, FN &, Node &, const Lg_type_id &>) {
-      auto f2 = [&f1](Node &node, const Lg_type_id &lgid) {
-        f1(node,lgid);
+    } else if constexpr (std::is_invocable_r_v<void, FN &, Node &>) {
+      auto f2 = [&f1](Node &node) {
+        f1(node);
         return true;
       };
       each_sub_fast_direct(f2);
@@ -205,6 +254,7 @@ public:
     }
   };
 
+  // FIXME: Use Instance.each_graph_*
   void each_root_fast_direct(std::function<bool(Node &)> f1);
   template <typename FN>
   void each_root_fast(const FN f1) {

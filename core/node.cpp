@@ -224,10 +224,10 @@ std::string_view Node::get_name() const {
   return Ann_node_name::get(*this);
 }
 
-std::string Node::debug_name() const {
+std::string Node::debug_name(bool nowarning) const {
 #ifdef NDEBUG
   static int conta = 0;
-  if (conta<10) {
+  if (conta<10 && !nowarning) {
     conta++;
     fmt::print("WARNING: Node::debug_name should not be called during release (Slowww!)\n");
   }

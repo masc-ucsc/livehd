@@ -1,14 +1,24 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
+#include "sub_node.hpp"
 
 void LGraph::each_graph_io(std::function<void(Node_pin &pin)> f1) {
 
   std::vector<Node_pin> pins;
   for(const auto &io_pin:get_self_sub_node().get_io_pins()) {
-    if (io_pin.graph_io_idx==0)
+    if (!io_pin.is_mapped())
       continue;
 
-    Node_pin pin(this, 0, io_pin.graph_io_idx, io_pin.graph_io_pid, false);
+    Index_ID nid;
+    if (io_pin.dir == Sub_node::Direction::Input) {
+      nid = Node::Hardcoded_input_nid;
+    }else{
+      I(io_pin.dir == Sub_node::Direction::Output);
+      nid = Node::Hardcoded_output_nid;
+    }
+    Node_pin pin(this, 0, nid, io_pin.graph_io_pid, false);
     pins.emplace_back(pin);
   }
   std::sort(pins.begin(), pins.end()
@@ -25,12 +35,12 @@ void LGraph::each_graph_io(std::function<void(Node_pin &pin)> f1) {
 void LGraph::each_graph_input(std::function<void(Node_pin &pin)> f1) {
 
   for(const auto &io_pin:get_self_sub_node().get_io_pins()) {
-    if (io_pin.graph_io_idx==0)
+    if (!io_pin.is_mapped())
       continue;
     if (io_pin.dir != Sub_node::Direction::Input)
       continue;
 
-    Node_pin pin(this, 0, io_pin.graph_io_idx, io_pin.graph_io_pid, false);
+    Node_pin pin(this, 0, Node::Hardcoded_input_nid, io_pin.graph_io_pid, false);
     f1(pin);
   }
 }
@@ -38,12 +48,12 @@ void LGraph::each_graph_input(std::function<void(Node_pin &pin)> f1) {
 void LGraph::each_graph_output(std::function<void(Node_pin &pin)> f1) {
 
   for(const auto &io_pin:get_self_sub_node().get_io_pins()) {
-    if (io_pin.graph_io_idx==0)
+    if (!io_pin.is_mapped())
       continue;
     if (io_pin.dir != Sub_node::Direction::Output)
       continue;
 
-    Node_pin pin(this, 0, io_pin.graph_io_idx, io_pin.graph_io_pid, false);
+    Node_pin pin(this, 0, Node::Hardcoded_output_nid, io_pin.graph_io_pid, false);
     f1(pin);
   }
 }
@@ -76,20 +86,19 @@ void LGraph::each_output_edge_fast(std::function<void(XEdge &edge)> f1) {
   }
 }
 
-void LGraph::each_sub_fast_direct(const std::function<bool(Node &, const Lg_type_id &)> fn) {
+void LGraph::each_sub_fast_direct(const std::function<bool(Node &)> fn) {
 
-  const auto &bm  = get_sub_ids();
-  bmsparse::bvector_type::enumerator en = bm.first();
-  for(; en.valid(); ++en) {
-    Index_ID    cid = *en;
+  const auto &m = get_sub_ids();
+  for (auto it = m.begin(), end = m.end(); it != end; ++it) {
+    Index_ID    cid = it->nid;
+    I(it->hid==0); // subs have hid zero all the time
     I(cid);
     I(node_internal[cid].is_node_state());
     I(node_internal[cid].is_master_root());
 
-    auto lgid = get_type_sub(cid);
-    auto node = Node(this,0,Node::Compact(cid));
+    auto node = Node(this,*it);
 
-    bool cont = fn(node, lgid);
+    bool cont = fn(node);
     if (!cont) return;
   }
 }

@@ -4,8 +4,6 @@
 #include "graph_library.hpp"
 #include "pass.hpp"
 
-#include "bmsparsevec_serial.h"
-
 LGraph_Node_Type::LGraph_Node_Type(std::string_view path, std::string_view name, Lg_type_id lgid) noexcept
     : LGraph_Base(path, name, lgid)
     , consts(absl::StrCat(path, "/lgraph_", std::to_string(lgid), "_consts"))
@@ -23,61 +21,10 @@ void LGraph_Node_Type::reload() {
   uint64_t sz = library->get_nentries(get_lgid());
   node_type_table.reload(sz);
 
-  BM_DECLARE_TEMP_BLOCK(tb);
-
-  auto const_file = absl::StrCat(path, "lgraph_", std::to_string(lgid), "_const_nodes");
-  if (access(const_file.c_str(), F_OK) == 0) {
-    int fd = open(const_file.c_str(), O_RDONLY);
-    if (fd < 0) {
-      Pass::error("reload could not open const_file {}", const_file);
-      return;
-    }
-    struct stat sb;
-    fstat(fd, &sb);
-    unsigned char *memblock = (unsigned char *)mmap(NULL, sb.st_size, PROT_WRITE, MAP_PRIVATE, fd, 0);
-    if (memblock == MAP_FAILED) {
-      Pass::error("reload mmap failed");
-      return;
-    }
-
-    int res = bm::sparse_vector_deserialize(const_nodes, memblock, tb);
-
-    munmap(memblock, sb.st_size);
-    close(fd);
-
-    if (res != 0) {
-      Pass::error("reload unable de deserialize {}",const_file);
-      return;
-    }
-  }
-
-  auto sub_file = absl::StrCat(path, "lgraph_", std::to_string(lgid), "_sub_nodes");
-  if (access(sub_file.c_str(), F_OK) == 0) {
-    int fd = open(sub_file.c_str(), O_RDONLY);
-    if (fd < 0) {
-      Pass::error("reload could not open sub_file {}", sub_file);
-      return;
-    }
-    struct stat sb;
-    fstat(fd, &sb);
-    unsigned char *memblock = (unsigned char *)mmap(NULL, sb.st_size, PROT_WRITE, MAP_PRIVATE, fd, 0);
-    if (memblock == MAP_FAILED) {
-      Pass::error("reload mmap failed");
-      return;
-    }
-
-    int res = bm::sparse_vector_deserialize(sub_nodes, memblock, tb);
-
-    munmap(memblock, sb.st_size);
-    close(fd);
-
-    if (res != 0) {
-      Pass::error("reload unable de deserialize {}",sub_file);
-      return;
-    }
-  }
-
 #if 0
+  const_nodes.unserialize(absl::StrCat(path, "lgraph_", std::to_string(lgid), "_const_nodes"));
+  sub_nodes.unserialize(  absl::StrCat(path, "lgraph_", std::to_string(lgid), "_sub_nodes"));
+#else
   // Note: if you change this, make sure to change u32_type_set and
   // const_type_set functions accordingly
   for (const auto &ni : node_internal) {
@@ -88,9 +35,9 @@ void LGraph_Node_Type::reload() {
 
     auto raw_op = node_type_table[nid];
     if (raw_op >= SubGraphMin_Op && raw_op <= SubGraphMax_Op) {
-      sub_nodes.set_bit_no_check(nid);
+      sub_nodes.set(nid);
     }else if (raw_op >= U32ConstMin_Op && raw_op <= StrConstMax_Op) {
-      const_nodes.set_bit_no_check(nid);
+      const_nodes.set(nid);
     }else{
       I(get_type(nid).op != U32Const_Op);
       I(get_type(nid).op != StrConst_Op);
@@ -104,49 +51,8 @@ void LGraph_Node_Type::sync() {
   node_type_table.sync();
   consts.sync();
 
-  BM_DECLARE_TEMP_BLOCK(tb);
-
-  if (const_nodes.first() != const_nodes.end()) {
-
-    const_nodes.optimize(tb);
-
-    bm::sparse_vector_serial_layout<bmsparse> const_lay;
-    bm::sparse_vector_serialize(const_nodes, const_lay, tb);
-
-    auto const_file = absl::StrCat(path, "lgraph_", std::to_string(lgid), "_const_nodes");
-    int fd = open(const_file.c_str(), O_RDWR | O_CREAT, 0644);
-    if (fd<0) {
-      Pass::error("lgraph const_file unable to open {}", const_file);
-      return;
-    }
-    int ret = write(fd, const_lay.buf(), const_lay.size());
-    if (ret != (int)const_lay.size()) {
-      Pass::error("lgraph const_file {} unable to serialize", const_file);
-      return;
-    }
-    close(fd);
-  }
-
-  if (!sub_nodes.empty()) {
-
-    sub_nodes.optimize(tb);
-
-    bm::sparse_vector_serial_layout<bmsparse> sub_lay;
-    bm::sparse_vector_serialize(sub_nodes, sub_lay, tb);
-
-    auto sub_file = absl::StrCat(path, "lgraph_", std::to_string(lgid), "_sub_nodes");
-    int fd = open(sub_file.c_str(), O_RDWR | O_CREAT, 0644);
-    if (fd<0) {
-      Pass::error("lgraph sub_file unable to open {}", sub_file);
-      return;
-    }
-    int ret = write(fd, sub_lay.buf(), sub_lay.size());
-    if (ret != (int)sub_lay.size()) {
-      Pass::error("lgraph sub_file {} unable to serialize", sub_file);
-      return;
-    }
-    close(fd);
-  }
+  const_nodes.serialize(absl::StrCat(path, "lgraph_", std::to_string(lgid), "_const_nodes"));
+  sub_nodes.serialize(absl::StrCat(path, "lgraph_", std::to_string(lgid), "_sub_nodes"));
 }
 
 void LGraph_Node_Type::emplace_back() { node_type_table.emplace_back(Invalid_Op); }
@@ -190,7 +96,7 @@ void LGraph_Node_Type::set_type_sub(Index_ID nid, Lg_type_id subgraphid) {
   I((node_type_table[nid] >=SubGraphMin_Op && node_type_table[nid] <SubGraphMax_Op)
   || node_type_table[nid] == Invalid_Op);
 
-  sub_nodes.set(nid,true);
+  sub_nodes.set(nid);
 
   node_type_table[nid] = (Node_Type_Op)(SubGraphMin_Op + subgraphid);
 }
@@ -285,7 +191,7 @@ void LGraph_Node_Type::set_type_const_value(Index_ID nid, uint32_t value) {
   // when a node is set as const, adds it to the const nodes list
   // Note: if the lazy initialization is changed to something that is
   // destructive, this needs to be changed
-  const_nodes.set(nid, true);
+  const_nodes.set(nid);
 
   node_type_table[node_internal[nid].get_nid()] = (Node_Type_Op)(U32ConstMin_Op + value);
 }
@@ -310,7 +216,9 @@ Index_ID LGraph_Node_Type::find_type_const_sview(std::string_view value) const {
   auto op = static_cast<Node_Type_Op>(StrConstMin_Op + id);
 
   for(auto it = const_nodes.begin() ; it != const_nodes.end() ; ++it) {
-    Index_ID    cid = *it;
+    Index_ID    cid = it->nid;
+    I(it->hid==0);
+
     I(cid);
     I(node_internal[cid].is_node_state());
     I(node_internal[cid].is_master_root());
@@ -331,7 +239,8 @@ Index_ID LGraph_Node_Type::find_type_const_value(uint32_t value) const {
   auto op = static_cast<Node_Type_Op>(U32ConstMin_Op + value);
 
   for(auto it = const_nodes.begin() ; it != const_nodes.end() ; ++it) {
-    Index_ID cid = *it;
+    Index_ID cid = it->nid;
+    I(it->hid==0);
     I(cid);
     I(node_internal[cid].is_node_state());
     I(node_internal[cid].is_master_root());
@@ -356,7 +265,7 @@ void LGraph_Node_Type::set_type_const_sview(Index_ID nid, std::string_view value
   // when a node is set as const, adds it to the const nodes list
   // Note: if the lazy initialization is changed to something that is
   // destructive, this needs to be changed
-  const_nodes.set(nid, true);
+  const_nodes.set(nid);
 
   node_type_table[node_internal[nid].get_nid()] = static_cast<Node_Type_Op>(StrConstMin_Op + char_id);
 }

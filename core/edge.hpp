@@ -6,9 +6,9 @@
 
 class XEdge { // FIXME: s/XEdge/Edge/g
 protected:
-  friend LGraph;
-  friend Node;
-  friend Node_pin;
+  friend class LGraph;
+  friend class Node;
+  friend class Node_pin;
 public:
   struct __attribute__((packed)) Compact {
     const uint64_t driver_idx : Index_bits;

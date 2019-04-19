@@ -162,8 +162,8 @@ TEST_F(Setup_graphs_test, each_sub_graph) {
 
   for(auto &parent:lgs) {
     fmt::print("checking parent:{}\n", parent->get_name());
-    parent->each_sub_fast([parent,&children2,this](Node &node, Lg_type_id lgid) {
-        LGraph *child = LGraph::open(parent->get_path(),lgid);
+    parent->each_sub_fast([parent,&children2,this](Node &node) {
+        LGraph *child = LGraph::open(parent->get_path(),node.get_type_sub());
 
         ASSERT_NE(child,nullptr);
 
@@ -198,8 +198,8 @@ TEST_F(Setup_graphs_test, each_sub_graph_twice) {
 
   for(auto &parent:lgs) {
     fmt::print("checking parent:{}\n", parent->get_name());
-    parent->each_sub_fast([parent,&children2,this](Node &node, Lg_type_id lgid) {
-        LGraph *child = LGraph::open(parent->get_path(),lgid);
+    parent->each_sub_fast([parent,&children2,this](Node &node) {
+        LGraph *child = LGraph::open(parent->get_path(),node.get_type_sub());
 
         ASSERT_NE(child,nullptr);
 
