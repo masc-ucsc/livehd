@@ -159,13 +159,6 @@ public:
       , offset(offset)
       , width(width) {}
 
-  //should be deprecated
-  /*
-  bool operator<(const Pick_ID other) const {
-    return (driver < other.driver) || (driver == other.driver && offset < other.offset) ||
-           (driver == other.driver && offset == other.offset && width < other.width);
-  }*/
-
   template <typename H>
   friend H AbslHashValue(H h, const Pick_ID& s) {
     return H::combine(std::move(h), s.driver.get_compact(), s.offset, s.width);
@@ -1075,9 +1068,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
     uint32_t blackbox_inp_port = 0;
     uint32_t blackbox_out_port = 0;
 
-
-    //std::set<std::pair<Node_pin, Node_pin>> added_edges;
-    absl::flat_hash_set<std::pair<Node_pin, Node_pin>> added_edges;
+    absl::flat_hash_set<XEdge::Compact> added_edges;
     for(auto &conn : cell->connections()) {
       RTLIL::SigSpec ss = conn.second;
       if(ss.size() == 0)
@@ -1218,7 +1209,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
       Node_pin spin = entry_node.setup_sink_pin(sink_pid);
       if(ss.size() > 0) {
         Node_pin dpin = create_join_operator(g, ss);
-        if(added_edges.find(std::make_pair(dpin, spin)) != added_edges.end()) {
+        if(added_edges.find(XEdge(spin,dpin).get_compact()) != added_edges.end()) {
           // there are two edges from dpin to spin
           // this is not allowed in lgraph, add a join in between
           auto join_node = g->create_node(Join_Op, ss.size());
@@ -1226,7 +1217,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
           dpin = join_node.setup_driver_pin(0);
         }
         g->add_edge(dpin, spin);
-        added_edges.insert(std::make_pair(dpin, spin));
+        added_edges.insert(XEdge(spin, dpin).get_compact());
       }
     }
 

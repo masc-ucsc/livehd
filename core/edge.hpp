@@ -31,6 +31,13 @@ public:
       ,pad4(0) {
     };
 
+    bool operator==(const Compact &other) const {
+      return (driver_idx == other.driver_idx)
+          && (driver_pid == other.driver_pid)
+          && (sink_idx   == other.sink_idx  )
+          && (sink_pid   == other.sink_pid  );
+    }
+
     template <typename H>
     friend H AbslHashValue(H h, const Compact& s) {
       return H::combine(std::move(h), s.driver_idx, s.sink_idx, s.driver_pid, s.sink_pid);
