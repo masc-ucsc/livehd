@@ -35,7 +35,7 @@ sh_test(
         ],
     deps = [
         "//inou/yosys:scripts",
-        "//inou/tech:tech_gens",
+        # "//inou/tech:tech_gens",
         ":scripts",
     ]
 )

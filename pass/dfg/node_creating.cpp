@@ -46,26 +46,17 @@ Node Pass_dfg::create_const32_node(LGraph *g, uint32_t val, uint16_t node_bit_wi
 }
 
 Node Pass_dfg::create_default_const(LGraph *g) {
-  Node node = g->create_node();
-  node.set_type(U32Const_Op);
-  node.set_type_const_value(0);
-  node.setup_driver_pin(0).set_bits(1);
+  Node node = g->create_node_const(0,1);
   return node;
 }
 
 Node Pass_dfg::create_true_const(LGraph *g, Aux_tree *aux_tree) {
-  Node node = g->create_node();
-  node.set_type(U32Const_Op);
-  node.set_type_const_value(1);
-  node.setup_driver_pin(0).set_bits(1);
+  Node node = g->create_node_const(1,1);
   return node;
 }
 
 Node Pass_dfg::create_false_const(LGraph *g, Aux_tree *aux_tree) {
-  Node node = g->create_node();
-  node.set_type(U32Const_Op);
-  node.set_type_const_value(0);
-  node.setup_driver_pin(0).set_bits(1);
+  Node node = g->create_node_const(0,1);
   return node;
 }
 

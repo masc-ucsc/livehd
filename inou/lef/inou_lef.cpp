@@ -32,11 +32,6 @@ static int lef_layer_cb(lefrCallbackType_e c, lefiLayer *flayer, lefiUserData ud
 
 static int lef_via_cb(lefrCallbackType_e c, lefiVia *fvia, lefiUserData ud);
 
-Inou_lef::Inou_lef() {
-}
-
-Inou_lef::~Inou_lef() {
-}
 
 int lef_macro_begin_cb(lefrCallbackType_e c, const char *macroName, lefiUserData ud) {
   assert(c);
@@ -224,6 +219,6 @@ std::vector<LGraph *> Inou_lef::tolg() {
   return lgs;
 }
 
-void Inou_lef::fromlg(std::vector<const LGraph *> &out) {
+void Inou_lef::fromlg(std::vector<LGraph *> &out) {
   assert(false); // TODO: dump lef from lgraph
 }
