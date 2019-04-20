@@ -39,7 +39,7 @@ sh_test(
     ],
     data = [
         "//inou/yosys:liblgraph_yosys.so",
-        "//inou/tech:tech_gens",
+        # "//inou/tech:tech_gens",
         "//main:lgshell",
         "@anubis//:anubis",
     ],
@@ -56,7 +56,7 @@ sh_test(
     args = ["long"],
     data = [
         "//inou/yosys:liblgraph_yosys.so",
-        "//inou/tech:tech_gens",
+        # "//inou/tech:tech_gens",
         "//main:lgshell",
         "@anubis//:anubis",
     ],

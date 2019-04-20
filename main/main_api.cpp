@@ -15,7 +15,7 @@
 
 std::string Main_api::main_path;
 
-void setup_pass_abc();
+void setu_pass_abc();
 void setup_pass_bitwidth();
 void setup_pass_dce();
 void setup_pass_dfg();
@@ -37,12 +37,12 @@ void setup_cops_live();
 // add new setup function prototypes here
 
 void Main_api::init() {
-  setup_pass_abc();
-  setup_pass_bitwidth();
+  /* setup_pass_abc(); */
+  /* setup_pass_bitwidth(); */
   setup_pass_dce();
   setup_pass_dfg();
   setup_pass_opentimer();
-  setup_pass_punch();
+  /* setup_pass_punch(); */
   setup_pass_sample();
   setup_pass_mockturtle();
 
@@ -50,12 +50,12 @@ void Main_api::init() {
   setup_inou_cgen();
   setup_inou_liveparse();
   setup_inou_graphviz();
-  setup_inou_json();
-  setup_inou_pyrope();
-  setup_inou_rand();
-  setup_inou_verific();
+  /* setup_inou_json(); */
+  /* setup_inou_pyrope(); */
+  /* setup_inou_rand(); */
+  /* setup_inou_verific(); */
+  /* setup_cops_live(); */
 
-  setup_cops_live();
 
   // call the new setup function here
 

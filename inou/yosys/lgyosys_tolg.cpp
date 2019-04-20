@@ -157,13 +157,14 @@ public:
   Pick_ID(Node_pin driver, int offset, int width)
       : driver(driver)
       , offset(offset)
-      , width(width) {
-  }
+      , width(width) {}
 
+  //should be deprecated
+  /*
   bool operator<(const Pick_ID other) const {
     return (driver < other.driver) || (driver == other.driver && offset < other.offset) ||
            (driver == other.driver && offset == other.offset && width < other.width);
-  }
+  }*/
 
   template <typename H>
   friend H AbslHashValue(H h, const Pick_ID& s) {
@@ -1074,7 +1075,9 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
     uint32_t blackbox_inp_port = 0;
     uint32_t blackbox_out_port = 0;
 
-    std::set<std::pair<Node_pin, Node_pin>> added_edges;
+
+    //std::set<std::pair<Node_pin, Node_pin>> added_edges;
+    absl::flat_hash_set<std::pair<Node_pin, Node_pin>> added_edges;
     for(auto &conn : cell->connections()) {
       RTLIL::SigSpec ss = conn.second;
       if(ss.size() == 0)

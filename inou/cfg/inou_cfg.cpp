@@ -74,7 +74,7 @@ std::vector<LGraph *> Inou_cfg::tolg() {
   return lgs;
 }
 
-void Inou_cfg::fromlg(std::vector<const LGraph *> &lgs) {
+void Inou_cfg::fromlg(std::vector<LGraph *> &lgs) {
   assert(false); // Maybe in the future, we can generate a CFG from a cfg lgraph. Still not there
 }
 
