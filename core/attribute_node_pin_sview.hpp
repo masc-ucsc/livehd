@@ -4,7 +4,7 @@
 template<const char *Name, Node_pin_mode Mode, bool Unique>
 class Attribute_node_pin_sview_type {
 
-  using Attr_data = Attr_sview_raw<uint32_t, Unique>;
+  using Attr_data = Attr_sview_raw<Node_pin::Compact, Unique>;
 
   inline static std::vector<Attr_data *> table;
   inline static LGraph    *last_lg   = nullptr;

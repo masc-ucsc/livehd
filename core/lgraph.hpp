@@ -66,6 +66,18 @@ protected:
     return find_idx_from_pid(pin.get_idx(),pin.get_pid());
   }
 
+  int get_num_outputs(Index_ID nid) const {
+    I(nid < node_internal.size());
+    I(node_internal[nid].is_master_root());
+    return node_internal[nid].get_node_num_outputs();
+  }
+
+  int get_num_inputs(Index_ID nid) const {
+    I(nid < node_internal.size());
+    I(node_internal[nid].is_master_root());
+    return node_internal[nid].get_node_num_inputs();
+  }
+
   Node      get_node(Index_ID nid);
 
   Node_pin_iterator out_connected_pins(const Node &node) const;
@@ -131,8 +143,8 @@ protected:
   }
 
   Index_ID fast_next(Hierarchy_id hid, Index_ID nid) const {
-    LGraph *sub_g = find_sub_lgraph(hid);
-    I(sub_g);
+    I(find_sub_lgraph(hid));
+
     return fast_next(nid);
   }
 
@@ -147,7 +159,7 @@ protected:
   }
 
   bool is_sub(Hierarchy_id hid, Index_ID nid) const {
-    LGraph *sub_g = find_sub_lgraph(hid);
+    const LGraph *sub_g = find_sub_lgraph(hid);
     if (sub_g==0)
       return false; // This can be if the subgraph is not present (bbox)
 
@@ -196,6 +208,11 @@ public:
   void reload() override;
   void sync() override;
   void emplace_back() override;
+
+  const LGraph *find_sub_lgraph(Hierarchy_id hid) const;
+  LGraph *find_sub_lgraph(Hierarchy_id hid) {
+    return const_cast<LGraph *>(find_sub_lgraph(hid));
+  }
 
   Node_pin add_graph_input(std::string_view str, uint16_t pos);
   Node_pin add_graph_output(std::string_view str, uint16_t pos);

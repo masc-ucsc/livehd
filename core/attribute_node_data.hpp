@@ -4,7 +4,7 @@
 template<const char *Name, typename Data>
 class Attribute_node_data_type {
 
-  using Attr_data = Attr_data_raw<uint32_t, Data>;
+  using Attr_data = Attr_data_raw<Node::Compact, Data>;
 
   inline static std::vector<Attr_data *> table;
   inline static LGraph    *last_lg   = nullptr;
@@ -36,8 +36,8 @@ class Attribute_node_data_type {
 public:
   static void set(const Node &node, Data data) {
 
-    if (unlikely(node.get_lgraph()!=last_lg))
-      setup_table(node.get_lgraph());
+    if (unlikely(node.get_top_lgraph()!=last_lg))
+      setup_table(node.get_top_lgraph());
 
     I(!last_attr->has(node.get_compact())); // Do not double insert (why???) waste or bug with Name alias!!
 
@@ -46,24 +46,24 @@ public:
 
   static const Data &get(const Node &node) {
 
-    if (unlikely(node.get_lgraph()!=last_lg))
-      setup_table(node.get_lgraph());
+    if (unlikely(node.get_top_lgraph()!=last_lg))
+      setup_table(node.get_top_lgraph());
 
     return last_attr->get(node.get_compact());
   };
 
   static Data &at(const Node &node) {
 
-    if (unlikely(node.get_lgraph()!=last_lg))
-      setup_table(node.get_lgraph());
+    if (unlikely(node.get_top_lgraph()!=last_lg))
+      setup_table(node.get_top_lgraph());
 
     return last_attr->at(node.get_compact());
   };
 
   static bool has(const Node &node) {
 
-    if (unlikely(node.get_lgraph()!=last_lg))
-      setup_table(node.get_lgraph());
+    if (unlikely(node.get_top_lgraph()!=last_lg))
+      setup_table(node.get_top_lgraph());
 
     return last_attr->has(node.get_compact());
   };

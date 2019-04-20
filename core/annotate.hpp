@@ -30,9 +30,9 @@ using Ann_node_pin_name     = Attribute_node_pin_sview_type<Ann_name::wirename, 
 using Ann_node_pin_bitwidth = Attribute_node_pin_data_type<Ann_name::bitwidth , Node_pin_mode::Driver, Ann_bitwidth>;
 using Ann_node_pin_delay    = Attribute_node_pin_data_type<Ann_name::delay    , Node_pin_mode::Driver, float>;
 
-using Ann_node_name       = Attribute_node_sview_type<Ann_name::nodename, true>;
+using Ann_node_name       = Attribute_node_sview_type<Ann_name::nodename, Attribute_type::Class   , true>;
 using Ann_node_place      = Attribute_node_data_type<Ann_name::nodeplace, Ann_place>;
-using Ann_node_cfgmeta    = Attribute_node_sview_type<Ann_name::cfgmeta , false>;
+using Ann_node_cfgmeta    = Attribute_node_sview_type<Ann_name::cfgmeta , Attribute_type::Instance, false>;
 using Ann_node_file_loc   = Attribute_node_data_type<Ann_name::file_loc , Ann_file_loc>;
 
 struct Ann_support {

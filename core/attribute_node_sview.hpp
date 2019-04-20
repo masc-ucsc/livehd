@@ -1,19 +1,10 @@
 #include "attribute.hpp"
 #include "lgraph.hpp"
 
-// Example
-//
-// using wirename = Attribute_node_pin_sview<true,true,"wirename">;
-//
-// Wirename::set(pin,"foo")
-// Wirename::get(pin)
-// Wirename::has(pin)
-// ...
-
-template<const char *Name, bool Unique>
+template<const char *Name, Attribute_type at, bool Unique>
 class Attribute_node_sview_type {
 
-  using Attr_data = Attr_sview_raw<uint32_t, Unique>;
+  using Attr_data = Attr_sview_raw<at == Attribute_type::Instance?Node::Compact : Node::Compact_class, Unique>;
 
   inline static std::vector<Attr_data *> table; // FIXME: This should be a map wiht lgid + hid and check that top_g is constant
   inline static LGraph    *last_lg   = nullptr;
@@ -29,7 +20,7 @@ class Attribute_node_sview_type {
     return (table.size() <= pos) || table[pos] == nullptr;
   };
 
-  static void setup_table(LGraph *lg) { // FIXME: add hid too
+  static void setup_table(LGraph *lg) { // Setup table based on top_g
     last_lg   = lg;
     size_t pos = lg->get_lgid().value;
     if (!is_invalid(pos)) {
@@ -50,38 +41,46 @@ public:
     if (unlikely(node.get_top_lgraph()!=last_lg))
       setup_table(node.get_top_lgraph());
 
-    I(!last_attr->has(node.get_compact())); // Do not double insert (why???) waste or bug with Name alias!!
-
-    return last_attr->set(node.get_compact(), data);
-  };
+    if constexpr (Attribute_type::Instance ) {
+      I(!last_attr->has(node.get_compact()));
+      return last_attr->set(node.get_compact(), data);
+    }else{
+      I(!last_attr->has(node.get_compact_class()));
+      return last_attr->set(node.get_compact_class(), data);
+    }
+  }
 
   static std::string_view get(const Node &node) {
 
-    if (unlikely(node.get_lgraph()!=last_lg))
-      setup_table(node.get_lgraph());
+    if (unlikely(node.get_top_lgraph()!=last_lg))
+      setup_table(node.get_top_lgraph());
 
-    return last_attr->get(node.get_compact());
-  };
+    if constexpr (Attribute_type::Instance) {
+      return last_attr->get(node.get_compact());
+    }else{
+      return last_attr->get(node.get_compact_class());
+    }
+  }
 
   static bool has(const Node &node) {
 
-    if (unlikely(node.get_lgraph()!=last_lg))
-      setup_table(node.get_lgraph());
+    if (unlikely(node.get_top_lgraph()!=last_lg))
+      setup_table(node.get_top_lgraph());
 
-    return last_attr->has(node.get_compact());
-  };
+    if constexpr (Attribute_type::Instance) {
+      return last_attr->has(node.get_compact());
+    }else{
+      return last_attr->has(node.get_compact_class());
+    }
+  }
 
   static Node find(LGraph *lg, std::string_view name) {
 
     if (unlikely(lg!=last_lg))
       setup_table(lg);
 
-    auto raw = last_attr->find(name);
-    if (raw == 0)
-      return Node();
-
-    return Node(lg, 0, Node::Compact(raw));
-  };
+    return Node(lg, last_attr->find(name));
+  }
 
   static void sync() {
     for(auto *ent:table) {
@@ -89,7 +88,7 @@ public:
         continue;
       ent->sync();
     }
-  };
+  }
 
   static void sync(LGraph *lg) {
     size_t pos = lg->get_lgid().value;

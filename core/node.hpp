@@ -15,9 +15,10 @@ using Node_pin_iterator = std::vector<Node_pin>;
 
 class Node {
 private:
-  LGraph *top_g;
+  LGraph            *top_g;
+  mutable LGraph    *current_g;
   const Hierarchy_id hid;
-  const Index_ID nid;
+  const Index_ID     nid;
 
 protected:
   friend class LGraph;
@@ -26,26 +27,22 @@ protected:
   friend class Node_set;
   friend class CFast_edge_iterator;
   friend class Edge_raw_iterator_base;
+  friend class CForward_edge_iterator;
+  friend class CBackward_edge_iterator;
 
   Index_ID get_nid() const { return nid; }
 
-  Node(LGraph *_g, Index_ID _nid, Hierarchy_id _hid)
-    :top_g(_g)
-    ,hid(_hid)
-    ,nid(_nid) {
-      I(nid);
-      I(top_g);
-    };
+  Node(LGraph *_g, LGraph *_c_g, Index_ID _nid, Hierarchy_id _hid);
+
 public:
   static constexpr char Hardcoded_input_nid  = 1;
   static constexpr char Hardcoded_output_nid = 2;
 
   struct __attribute__((packed)) Compact {
-    uint64_t  nid:Index_bits;
-    uint64_t  hid; // FIXME: vector for more than 8 nested levels hierarchy
+    uint64_t      nid:Index_bits;
+    Hierarchy_id  hid;
 
-    //constexpr size_t operator()(const Compact &obj) const { return obj.nid; }
-    constexpr operator size_t() const { return nid; }
+    constexpr operator size_t() const { I(0); return nid; }
 
     Compact(const Index_ID &_nid, const Hierarchy_id &_hid) :nid(_nid), hid(_hid) { I(nid); };
     Compact() :nid(0),hid(0) { };
@@ -63,6 +60,26 @@ public:
       return H::combine(std::move(h), s.nid, s.hid);
     };
   };
+  struct __attribute__((packed)) Compact_class {
+    uint64_t      nid:Index_bits;
+
+    constexpr operator size_t() const { return nid; }
+
+    Compact_class(const Index_ID &_nid) :nid(_nid) { I(nid); };
+    Compact_class() :nid(0) { };
+    Compact_class &operator=(const Compact_class &obj) {
+      I(this != &obj);
+      nid  = obj.nid;
+
+      return *this;
+    };
+    bool is_invalid() const { return nid == 0; }
+
+    template <typename H>
+    friend H AbslHashValue(H h, const Compact_class& s) {
+      return H::combine(std::move(h), s.nid);
+    };
+  };
   template <typename H>
   friend H AbslHashValue(H h, const Node& s) {
     return H::combine(std::move(h), (int)s.nid, (int)s.hid); // Ignore lgraph pointer in hash
@@ -73,21 +90,14 @@ public:
 
   // NOTE: No operator<() needed for std::set std::map to avoid their use. Use flat_map_set for speed
 
-  Node()
-    :top_g(0)
-    ,hid(0)
-    ,nid(0) {
-  };
-  Node(LGraph *_g, Compact comp)
-    :top_g(_g)
-    ,hid(comp.hid)
-    ,nid(comp.nid) {
-      I(nid);
-      I(top_g);
-  };
+  Node() :top_g(0) ,current_g(0) ,hid(0) ,nid(0) { }
+  Node(LGraph *_g, Compact comp);
+  Node(LGraph *_g, Hierarchy_id _hid, Compact_class comp);
+  Node(LGraph *_g, Compact_class comp);
   Node &operator=(const Node &obj) {
     I(this != &obj); // Do not assign object to itself. works but wastefull
-    top_g   = obj.top_g;
+    top_g     = obj.top_g;
+    current_g = obj.current_g;
     const_cast<Index_ID&>(nid)     = obj.nid;
     const_cast<Hierarchy_id&>(hid) = obj.hid;
 
@@ -97,8 +107,13 @@ public:
   inline Compact get_compact() const {
     return Compact(nid, hid);
   }
+  inline Compact_class get_compact_class() const {
+    return Compact_class(nid);
+  }
 
-  LGraph *get_top_lgraph() const { return top_g; }
+  LGraph *get_top_lgraph() const { I(top_g); return top_g; }
+  LGraph *get_class_lgraph() const { I(current_g); return current_g; }
+
   Hierarchy_id  get_hid()  const { return hid;   }
 
   Node_pin get_driver_pin() const;
@@ -108,8 +123,10 @@ public:
 
   bool has_inputs () const;
   bool has_outputs() const;
+  int  get_num_inputs()  const;
+  int  get_num_outputs() const;
 
-  bool is_invalid() const { return top_g==nullptr || nid==0; }
+  bool is_invalid() const { return nid==0; }
 
   bool is_root() const;
 

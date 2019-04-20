@@ -39,7 +39,7 @@ Edge_raw_iterator::CPod_iterator Edge_raw_iterator::CPod_iterator::operator++() 
 
   if ((inputs && !ptr->is_last_input()) || (!inputs && !ptr->is_last_output())) {
     ptr += ptr->next_node_inc();
-    assert(&node == &Node_Internal::get(ptr));
+    I(&node == &Node_Internal::get(ptr));
     return i;
   }
 
@@ -56,7 +56,7 @@ Edge_raw_iterator::CPod_iterator Edge_raw_iterator::CPod_iterator::operator++() 
     Index_ID idx   = Node_Internal::get(ptr2).get_next();
     Index_ID delta = idx - root_page.get_idx();
 
-    assert(node.get_master_root_nid() == root[delta].get_master_root_nid());
+    I(node.get_master_root_nid() == root[delta].get_master_root_nid());
 
     I(root[delta].is_node_state());
 
@@ -78,7 +78,7 @@ Edge_raw_iterator::CPod_iterator Edge_raw_iterator::CPod_iterator::operator++() 
       ptr = e;
       // if ((root[delta].has_local_outputs() && !inputs)
       //   ||(root[delta].has_local_inputs() && inputs))
-      assert(&node == &Node_Internal::get(ptr));
+      I(&node == &Node_Internal::get(ptr));
       break;  // No more in this iterator
     }
   }
@@ -111,29 +111,25 @@ bool Edge_raw_iterator_base::update_frontier() {
   return true;
 }
 
-void Forward_edge_iterator::CForward_edge_iterator::set_current_node_as_visited() {
-  I(hid==0); // FIXME
-  assert(top_g->get_node_int(nid).is_master_root());
+void CForward_edge_iterator::set_current_node_as_visited() {
+  I(top_g->get_node_int(nid).is_master_root());
 
-  for (const auto &c : top_g->out_edges_raw(nid)) {
-    I(top_g->get_node_int(c.get_idx()).is_root());
-    Index_ID    master_root_nid = top_g->get_node_int(c.get_idx()).get_nid();
-    I(top_g->get_node_int(master_root_nid).is_master_root());
-
-    Node::Compact key(hid,master_root_nid);
+  Node node(top_g,hid,nid);
+  for (const auto &e : node.out_edges()) {
+    const Node::Compact key = e.sink.get_node().get_compact();
 
     Frontier_type::iterator fit = frontier->find(key);
 
     if (fit == frontier->end()) {
-      int32_t ninputs = top_g->get_node_int(master_root_nid).get_node_num_inputs() - 1;
-      assert(ninputs >= 0);
+      auto ninputs = node.get_num_inputs()-1; // -1 for self
+      I(ninputs >= 0);
       if (ninputs == 0) {  // Done already
         pending->set(key);
       } else {
         (*frontier)[key] = ninputs;
       }
     } else {
-      int ninputs = (fit->second) - 1;
+      auto ninputs = (fit->second) - 1;
       if (ninputs == 0) {  // Done
         pending->set(key);
         frontier->erase(fit);
@@ -144,7 +140,7 @@ void Forward_edge_iterator::CForward_edge_iterator::set_current_node_as_visited(
   }
 }
 
-Forward_edge_iterator::CForward_edge_iterator Forward_edge_iterator::begin() {
+CForward_edge_iterator Forward_edge_iterator::begin() {
   pending.set(Node::Compact(0,Node::Hardcoded_input_nid));
 
   hardcoded_nid = Node::Hardcoded_output_nid;
@@ -171,8 +167,7 @@ Forward_edge_iterator::CForward_edge_iterator Forward_edge_iterator::begin() {
   return it2;
 }
 
-void Backward_edge_iterator::CBackward_edge_iterator::find_dce_nodes() {
-  I(hid==0); // FIXME
+void CBackward_edge_iterator::find_dce_nodes() {
   Node_set  discovered;
   Node_set  dc_visited;
   Node_set  floating;
@@ -183,12 +178,12 @@ void Backward_edge_iterator::CBackward_edge_iterator::find_dce_nodes() {
 
     do{
       dc_visited.set(current);
-      Node node(top_g,current);
       floating.erase(current);
 
+      Node node(top_g,current);
       for (const auto &e : node.out_edges()) {
 
-        const Node::Compact key = e.driver.get_node().get_compact();
+        const Node::Compact key = e.sink.get_node().get_compact();
 
         if (!dc_visited.contains(key) && !back_iter_global_visited.contains(key)) {
           discovered.set(key);
@@ -212,38 +207,39 @@ void Backward_edge_iterator::CBackward_edge_iterator::find_dce_nodes() {
   }
 }
 
-void Backward_edge_iterator::CBackward_edge_iterator::set_current_node_as_visited() {
-  I(hid==0); // FIXME
-  assert(top_g->get_node_int(nid).is_master_root());
+void CBackward_edge_iterator::set_current_node_as_visited() {
 
-  for (const auto &c : top_g->inp_edges_raw(nid)) {
-    I(top_g->get_node_int(c.get_idx()).is_root());
-    Index_ID    master_root_nid = top_g->get_node_int(c.get_idx()).get_nid();
-    I(top_g->get_node_int(master_root_nid).is_master_root());
+  I(top_g->get_node_int(nid).is_master_root());
 
-    Frontier_type::iterator fit = frontier->find(master_root_nid);
+  Node node(top_g,hid,nid);
+  for (const auto &e : node.inp_edges()) {
+    const Node::Compact key = e.driver.get_node().get_compact();
+
+    Frontier_type::iterator fit = frontier->find(key);
 
     if (fit == frontier->end()) {
-      int32_t noutputs = top_g->get_node_int(master_root_nid).get_node_num_outputs() - 1;
-      assert(noutputs >= 0);
+      auto noutputs = node.get_num_outputs()-1; // -1 for self
+      I(noutputs >= 0);
       if (noutputs == 0) {  // Done already
-        pending->set(master_root_nid, true);
+        pending->set(key);
       } else {
-        (*frontier)[master_root_nid] = noutputs;
+        (*frontier)[key] = noutputs;
       }
     } else {
-      int noutputs = (fit->second) - 1;
+      auto noutputs = (fit->second) - 1;
+      I(noutputs >= 0);
       if (noutputs == 0) {  // Done
-        pending->set(master_root_nid, true);
+        pending->set(key);
         frontier->erase(fit);
       } else {
         fit->second = noutputs;
       }
     }
   }
+
 }
 
-Backward_edge_iterator::CBackward_edge_iterator Backward_edge_iterator::begin() {
+CBackward_edge_iterator Backward_edge_iterator::begin() {
 
   pending.set(Node::Compact(0,Node::Hardcoded_output_nid));
   hardcoded_nid = Node::Hardcoded_input_nid;

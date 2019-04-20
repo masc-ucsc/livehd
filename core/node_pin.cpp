@@ -6,20 +6,37 @@
 
 #include "annotate.hpp"
 
-Node_pin::Node_pin(LGraph *_g, Hierarchy_id _hid, Compact comp)
-  :idx(comp.idx)
-  ,pid(_g->get_dst_pid(comp.idx))
-  ,g(_g)
+Node_pin::Node_pin(LGraph *_g, LGraph *_c_g, Hierarchy_id _hid, Index_ID _idx, Port_ID _pid, bool _sink)
+  :top_g(_g)
+  ,current_g(_c_g)
   ,hid(_hid)
-  ,sink(comp.sink) {
+  ,idx(_idx)
+  ,pid(_pid)
+  ,sink(_sink) {
+
+  I(current_g->is_valid_node_pin(idx));
+  I(_g);
+  I(_idx);
 }
 
-Node_pin::Node_pin(LGraph *_g, Hierarchy_id _hid, Compact comp, Node_pin_mode mode)
-  :idx(comp.idx)
+Node_pin::Node_pin(LGraph *_g, Compact comp)
+  :top_g(_g)
   ,pid(_g->get_dst_pid(comp.idx))
-  ,g(_g)
+  ,hid(comp.hid)
+  ,idx(comp.idx)
+  ,sink(comp.sink) {
+  current_g = top_g->find_sub_lgraph(hid);
+  I(current_g->is_valid_node_pin(nid));
+}
+
+Node_pin::Node_pin(LGraph *_g, Hierarchy_id _hid, Compact_class comp)
+  :top_g(_g)
+  ,pid(_g->get_dst_pid(comp.idx))
   ,hid(_hid)
-  ,sink(mode==Node_pin_mode::Both?comp.sink:(mode==Node_pin_mode::Sink)) {
+  ,idx(comp.idx)
+  ,sink(comp.sink) {
+  current_g = top_g->find_sub_lgraph(hid);
+  I(current_g->is_valid_node_pin(nid));
 }
 
 bool Node_pin::is_graph_io() const {

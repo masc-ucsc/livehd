@@ -130,7 +130,7 @@ protected:
 TEST_F(Setup_graphs_test, each_sub_graph) {
 
   for(const auto &nid:top->forward()) {
-    auto node = Node(top,0,Node::Compact(nid));
+    auto node = Node(top,Node::Compact(nid));
     for(const auto &out_edge : node.out_edges()) {
       auto dpin = out_edge.driver;
       auto spin = out_edge.sink;

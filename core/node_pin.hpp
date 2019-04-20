@@ -20,13 +20,14 @@ protected:
   friend class XEdge;
   friend class Edge_raw;
 
+  LGraph             *top_g;
+  LGraph             *current_g;
+  const Hierarchy_id  hid;
   const Index_ID      idx;
   const Port_ID       pid;
-  LGraph             *g;
-  const Hierarchy_id  hid;
   const bool          sink;
 
-  Node_pin(LGraph *_g, Hierarchy_id _hid, Index_ID _idx, Port_ID _pid, bool _sink) : idx(_idx), pid(_pid), g(_g), hid(_hid), sink(_sink) { I(_g); I(_idx); }
+  Node_pin(LGraph *_g, LGraph *_c_g, Hierarchy_id _hid, Index_ID _idx, Port_ID _pid, bool _sink);
 
   const Index_ID get_idx()   const { I(idx); return idx;    }
 public:
@@ -63,9 +64,10 @@ public:
   friend H AbslHashValue(H h, const Node_pin& s) {
     return H::combine(std::move(h), (int)s.hid, (int)s.idx, s.sink); // Ignore lgraph pointer in hash
   };
-  Node_pin() : idx(0), pid(0), g(0), hid(0), sink(false) { }
-  Node_pin(LGraph *_g, Hierarchy_id _hid, Compact comp);
-  Node_pin(LGraph *_g, Hierarchy_id _hid, Compact comp, Node_pin_mode mode);
+  Node_pin() : top_g(0), current_lg(0), hid(0), idx(0), pid(0), sink(false) { }
+  Node_pin(LGraph *_g, Compact comp);
+  Node_pin(LGraph *_g, Hierarchy_id _hid, Compact_class comp);
+  Node_pin(LGraph *_g, Compact_class comp);
 
   Compact get_compact() const {
     return Compact(idx,sink);
@@ -76,7 +78,8 @@ public:
 		return Compact(idx,false);
   };
 
-  LGraph       *get_lgraph() const { return g; };
+  LGraph       *get_top_lgraph() const { return top_x; };
+  LGraph       *get_class_lgraph() const { return current_g; };
   Hierarchy_id  get_hid() const { return hid; };
 
   const Port_ID  get_pid()   const { I(idx); return pid;    }

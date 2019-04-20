@@ -2,38 +2,6 @@
 
 #pragma once
 
-/*
-Attribute_pin_dense<T>  apd;
-Attribute_pin_sparse<T> asd;
-Attribute_node_sparse<T> asd;
-
-Attribute_sink_pin_sparse<T> asd;
-Attribute_driver_pin_sparse<T> asd;
-
-Attribute<I0, T>     single;
-Attribute<I0, I1, T> pair;
-
-Attribute<Index_ID, std::string_view>  node_name(Lgraph *g, std::string_view attr_name);
-Attribute<Index_ID, int>               node_whatever;
-Attribute<Index_ID, bool, std::string_view> pin_name;
-
-node_name.has(Index_ID idx) const
-node_name.set(Index_ID idx, T v)
-const T &node_name.get(Index_ID idx) const
-T &node_name.at(Index_ID idx);
-
-pin_name.has(Index_ID idx, Y x) const
-pin_name.set(Index_ID idx, Y x, T v)
-const T &pin_name.get(Index_ID idx, Y x) const
-T &pin_name.at(Index_ID idx, Y x);A
-
-Attr_sview_raw
-Attr_data_raw
-
-pin_name.sync();
-
-*/
-
 #include <string_view>
 #include <cassert>
 #include <fstream>
@@ -53,6 +21,8 @@ pin_name.sync();
 #ifndef unlikely
 #define unlikely(x) __builtin_expect((x), 0)
 #endif
+
+enum class Attribute_type { Instance, Class };
 
 template <typename Index, bool Unique> class Attr_sview_raw {
 protected:
@@ -140,7 +110,7 @@ public:
   Index find(std::string_view name) const {
     auto str_id = names.get_id(name);
     if (str_id==0)
-      return 0;
+      return Index();
 
     return names.get_field(str_id);
   }

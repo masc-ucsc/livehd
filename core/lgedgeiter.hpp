@@ -128,31 +128,32 @@ public:
   };
 };
 
+class CForward_edge_iterator : public Edge_raw_iterator_base {
+public:
+  CForward_edge_iterator(LGraph *_g, Hierarchy_id _hid, Index_ID _nid, Frontier_type *_frontier, Node_set *_pending, Index_ID *_hardcoded_nid)
+      : Edge_raw_iterator_base(_g, _hid, _nid, _frontier, _pending, _hardcoded_nid) {}
+
+  bool operator!=(const CForward_edge_iterator &other) {
+    I(top_g == other.top_g);
+    I(frontier == other.frontier);
+    I(pending == other.pending);
+
+    return nid != 0;
+  };
+
+  void set_current_node_as_visited();
+
+  CForward_edge_iterator operator++() {
+    I(nid);  // Do not call ++ after end
+    CForward_edge_iterator i(top_g, hid, nid, frontier, pending, hardcoded_nid);
+    set_current_node_as_visited();
+    set_next_node_to_visit();
+    return i;
+  };
+};
+
 class Forward_edge_iterator {
 public:
-  class CForward_edge_iterator : public Edge_raw_iterator_base {
-  public:
-    CForward_edge_iterator(LGraph *_g, Hierarchy_id _hid, Index_ID _nid, Frontier_type *_frontier, Node_set *_pending, Index_ID *_hardcoded_nid)
-        : Edge_raw_iterator_base(_g, _hid, _nid, _frontier, _pending, _hardcoded_nid) {}
-
-    bool operator!=(const CForward_edge_iterator &other) {
-      I(top_g == other.top_g);
-      I(frontier == other.frontier);
-      I(pending == other.pending);
-
-      return nid != 0;
-    };
-
-    void set_current_node_as_visited();
-
-    CForward_edge_iterator operator++() {
-      I(nid);  // Do not call ++ after end
-      CForward_edge_iterator i(top_g, hid, nid, frontier, pending, hardcoded_nid);
-      set_current_node_as_visited();
-      set_next_node_to_visit();
-      return i;
-    };
-  };
 
 private:
 protected:
@@ -171,43 +172,44 @@ public:
   CForward_edge_iterator end() { return CForward_edge_iterator(top_g, 0, 0, &frontier, &pending, &hardcoded_nid); }  // 0 is end index for iterator
 };
 
+class CBackward_edge_iterator : public Edge_raw_iterator_base {
+private:
+  Node_set back_iter_global_visited;
+
+public:
+  CBackward_edge_iterator(LGraph *_g, Hierarchy_id _hid, Index_ID _nid, Frontier_type *_frontier, Node_set *_pending, Index_ID *_hardcoded_nid)
+    : Edge_raw_iterator_base(_g, _hid, _nid, _frontier, _pending, _hardcoded_nid) {
+  }
+
+  bool operator!=(const CBackward_edge_iterator &other) {
+    I(top_g == other.top_g);
+    I(frontier == other.frontier);
+    I(pending == other.pending);
+
+    return nid != other.nid || hid != other.hid;
+  };
+
+  // find nodes not connected to output that are preventing the propagation
+  // only use in case the backward fails
+  void find_dce_nodes();
+
+  void set_current_node_as_visited();
+
+  CBackward_edge_iterator operator++() {
+    I(nid);  // Do not call ++ after end
+    CBackward_edge_iterator i(top_g, hid, nid, frontier, pending, hardcoded_nid);
+    back_iter_global_visited.set(Node::Compact(hid, nid));
+    set_current_node_as_visited();
+    if (pending->empty()) {
+      find_dce_nodes();
+    }
+    set_next_node_to_visit();
+    return i;
+  };
+};
+
 class Backward_edge_iterator {
 public:
-  class CBackward_edge_iterator : public Edge_raw_iterator_base {
-  private:
-    Node_set back_iter_global_visited;
-
-  public:
-    CBackward_edge_iterator(LGraph *_g, Hierarchy_id _hid, Index_ID _nid, Frontier_type *_frontier, Node_set *_pending, Index_ID *_hardcoded_nid)
-      : Edge_raw_iterator_base(_g, _hid, _nid, _frontier, _pending, _hardcoded_nid) {
-    }
-
-    bool operator!=(const CBackward_edge_iterator &other) {
-      I(top_g == other.top_g);
-      I(frontier == other.frontier);
-      I(pending == other.pending);
-
-      return nid != other.nid || hid != other.hid;
-    };
-
-    // find nodes not connected to output that are preventing the propagation
-    // only use in case the backward fails
-    void find_dce_nodes();
-
-    void set_current_node_as_visited();
-
-    CBackward_edge_iterator operator++() {
-      I(nid);  // Do not call ++ after end
-      CBackward_edge_iterator i(top_g, hid, nid, frontier, pending, hardcoded_nid);
-      back_iter_global_visited.set(Node::Compact(hid, nid));
-      set_current_node_as_visited();
-      if (pending->empty()) {
-        find_dce_nodes();
-      }
-      set_next_node_to_visit();
-      return i;
-    };
-  };
 
 private:
 protected:

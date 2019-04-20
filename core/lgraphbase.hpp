@@ -76,7 +76,6 @@ public:
   LGraph_Base(const LGraph_Base &) = delete;
 
   Hierarchy_id get_sub_hierarchy_id(Hierarchy_id hid, Index_ID nid) const;
-  LGraph *find_sub_lgraph(Hierarchy_id hid) const;
 
   explicit LGraph_Base(std::string_view _path, std::string_view _name, Lg_type_id lgid) noexcept;
   virtual ~LGraph_Base();
@@ -126,6 +125,18 @@ public:
   const Node_Internal &get_node_int(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
     return node_internal[idx];
+  }
+
+  bool is_valid_node(Index_ID nid) const {
+    if (nid >= node_internal.size())
+      return false;
+    return node_internal[src_idx].is_master_root();
+  }
+
+  bool is_valid_node_pin(Index_ID nid) const {
+    if (nid >= node_internal.size())
+      return false;
+    return node_internal[src_idx].is_root();
   }
 
   Node_Internal &get_node_int(Index_ID idx) {

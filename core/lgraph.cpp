@@ -103,6 +103,25 @@ void LGraph::emplace_back() {
   LGraph_Node_Type::emplace_back();
 }
 
+const LGraph *LGraph::find_sub_lgraph(Hierarchy_id hid) const {
+  if (hid==0)
+    return this;
+
+  auto hid_bits = get_hid_bits();
+  auto level_0_sub_nid = hid & ((1<<hid_bits)-1);
+  auto level_n_sub_hid = hid >> hid_bits;
+
+  I(sub_nodes.find(level_0_sub_nid) != sub_nodes.end());
+  I(is_sub_node(0,level_0_sub_nid));
+
+  auto sub_lgid = get_type_sub(level_0_sub_nid);
+  if (sub_lgid==0)
+    return 0; // No subgraph present (bbox)
+
+  return open(path, sub_lgid);
+}
+
+
 Node_pin LGraph::get_graph_input(std::string_view str) {
 
   auto io_pin = get_self_sub_node().get_graph_input_io_pin(str);
