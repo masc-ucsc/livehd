@@ -1217,7 +1217,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
           dpin = join_node.setup_driver_pin(0);
         }
         g->add_edge(dpin, spin);
-        added_edges.insert(XEdge(spin, dpin).get_compact());
+        added_edges.insert(XEdge(dpin, spin).get_compact());
       }
     }
 
