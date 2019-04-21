@@ -1403,7 +1403,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
     for(auto &it : design->modules_) {
       RTLIL::Module *module = it.second;
       log("yosys2lg NOT look_for_cell_outputs pass for module %s:\n", module->name.c_str());
-      if(design->selected_module(it.first)) {
+        if(design->selected_module(it.first)) {
         look_for_cell_outputs(module, path);
         LGraph *g = process_module(module, path);
 
