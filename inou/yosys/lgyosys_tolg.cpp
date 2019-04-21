@@ -1209,7 +1209,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
       Node_pin spin = entry_node.setup_sink_pin(sink_pid);
       if(ss.size() > 0) {
         Node_pin dpin = create_join_operator(g, ss);
-        if(added_edges.find(XEdge(spin,dpin).get_compact()) != added_edges.end()) {
+        if(added_edges.find(XEdge(dpin,spin).get_compact()) != added_edges.end()) {
           // there are two edges from dpin to spin
           // this is not allowed in lgraph, add a join in between
           auto join_node = g->create_node(Join_Op, ss.size());
