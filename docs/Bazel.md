@@ -89,7 +89,7 @@ create local yosys binary
 
     make 
 
-launch gdb with this new installed yoys binary and lgraph-yosys plugin
+launch gdb with this new installed yosys binary and lgraph-yosys plugin
 
     cd ~/your/work_path/lgraph
     
