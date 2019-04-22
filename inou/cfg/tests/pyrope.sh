@@ -16,7 +16,7 @@ pwd
 
 # pts='top_ooo  sp_add  sp_if_0  top  nested_if_0  nested_if_1  nested_if_2  nested_if_3  if_elif_else'
 # pts='top_inline_add constant_pos constant_neg sp_if_0 nested_if_0 nested_if_1 nested_if_2'
-pts='constant_pos'
+pts='sp_and'
 # pts='top_inline_add'
 # pts='constant_pos constant_neg sp_if_0 nested_if_0 nested_if_1 nested_if_2'
 # pts='for'
@@ -45,10 +45,10 @@ do
   fi
 
   echo "inou.cfg.tolg  files:./inou/cfg/tests/${pt}.cfg  name:${pt}_cfg  |> @a" > lgshell_cmds
-  echo "lgraph.open name:${pt}_cfg |> inou.json.fromlg output:${pt}_cfg.json"  >> lgshell_cmds
+  # echo "lgraph.open name:${pt}_cfg |> inou.json.fromlg output:${pt}_cfg.json"  >> lgshell_cmds
   echo "lgraph.open name:${pt}_cfg |> inou.graphviz odir:./logs verbose:true"  >> lgshell_cmds
   echo "lgraph.open name:${pt}_cfg |> pass.dfg.generate name:${pt}"            >> lgshell_cmds
-  echo "lgraph.open name:${pt} |> inou.json.fromlg output:${pt}_pre.json"      >> lgshell_cmds
+  # echo "lgraph.open name:${pt} |> inou.json.fromlg output:${pt}_pre.json"      >> lgshell_cmds
 
   ${LGSHELL} < lgshell_cmds
   if [ $? -ne 0 ]; then
@@ -75,7 +75,7 @@ do
 
   echo "lgraph.open name:${pt} |> pass.dfg.finalize_bitwidth"             >> lgshell_cmds
   echo "lgraph.open name:${pt} |> inou.graphviz odir:./logs verbose:true" >> lgshell_cmds
-  echo "lgraph.open name:${pt} |> inou.json.fromlg output:${pt}.json"     >> lgshell_cmds
+  # echo "lgraph.open name:${pt} |> inou.json.fromlg output:${pt}.json"     >> lgshell_cmds
 
 
  ${LGSHELL} < lgshell_cmds

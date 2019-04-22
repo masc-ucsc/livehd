@@ -144,12 +144,12 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, std::vector<LGraph *> &lgs,
     auto ipin = lgs[i]->add_graph_input("cfg_inp", 0, 0);
     auto dst_node = name2node_lgs[i][first_node_name_lgs[i]];
     I(dst_node.get_type().op != GraphIO_Op);
-    lgs[i]->add_edge(ipin, dst_node.setup_sink_pin());
+    lgs[i]->add_edge(ipin, dst_node.setup_sink_pin(0));
 
     //Graph output
     auto opin = lgs[i]->add_graph_output("cfg_out", 0, 0);
     auto src_node = final_node_lgs[i];
-    lgs[i]->add_edge(src_node.setup_driver_pin(), opin);
+    lgs[i]->add_edge(src_node.setup_driver_pin(0), opin);
   }
 
   //update_ifs(lgs, name2node_lgs);
@@ -193,7 +193,7 @@ void Inou_cfg::build_graph(std::vector<std::string> &words, std::string &dfg_dat
   //I. process 1st node, only assign node type for the first "K" in every line of cfg
   if(name2node.count(w1st) == 0) { // if node has not been created before
     name2node[w1st] = g->create_node();
-    name2node[w1st].setup_driver_pin().set_name(w1st);
+    name2node[w1st].setup_driver_pin(0).set_name(w1st);
     final_node      = name2node[w1st]; // keep update the latest final nid
 
     fmt::print("create node:{}\n", w1st);
@@ -232,7 +232,7 @@ void Inou_cfg::build_graph(std::vector<std::string> &words, std::string &dfg_dat
   //II-0. process 10th word(if-else merging node)
   if(w6th == "if" && name2node.count(w10th) == 0) { // if node has not been created before
     name2node[w10th] = g->create_node();
-    name2node[w10th].setup_driver_pin().set_name(w10th);
+    name2node[w10th].setup_driver_pin(0).set_name(w10th);
     final_node        = name2node[w10th]; // keep update the latest final nid
     fmt::print("create node:{}\n", w10th);
     name2node[w10th].set_type(CfgIfMerge_Op);
@@ -240,7 +240,7 @@ void Inou_cfg::build_graph(std::vector<std::string> &words, std::string &dfg_dat
   //II-1. process 2nd word
   if(w2nd != "null" && name2node.count(w2nd) == 0) {
     name2node[w2nd] = g->create_node();
-    name2node[w2nd].setup_driver_pin().set_name(w2nd);
+    name2node[w2nd].setup_driver_pin(0).set_name(w2nd);
     final_node       = name2node[w2nd]; // keep update the latest final nid
     fmt::print("create node:{}\n", w2nd);
   }
@@ -258,46 +258,46 @@ void Inou_cfg::build_graph(std::vector<std::string> &words, std::string &dfg_dat
   if(w6th == "if") {
     // III-1. connect if node to the begin of "true chunk" statement
     dpin = name2node[w1st].setup_driver_pin(0);
-    spin = name2node[w8th].setup_sink_pin();
+    spin = name2node[w8th].setup_sink_pin(0);
     g->add_edge(dpin, spin);
     fmt::print("if statement:T, connect {}->{}\n", w1st, w8th);
 
     // III-2. connect if node to the begin of "false chunk" statement
     if(w9th != "null") {
       dpin = name2node[w1st].setup_driver_pin(1);
-      spin = name2node[w9th].setup_sink_pin();
+      spin = name2node[w9th].setup_sink_pin(0);
       g->add_edge(dpin, spin);
       fmt::print("if statement:F, connect {}->{}\n", w1st, w9th);
     }
     // III-3. connect top of stack to end if node
     I(branch_chain_stacks[w8th].back() != w10th);
     if(branch_chain_stacks[w8th].back() != w10th) {
-      dpin = name2node[branch_chain_stacks[w8th].back()].setup_driver_pin();
+      dpin = name2node[branch_chain_stacks[w8th].back()].setup_driver_pin(0);
       fmt::print("branch_chain_stacks[w8th] back{}\n", branch_chain_stacks[w8th].back());
-      spin = name2node[w10th].setup_sink_pin();
+      spin = name2node[w10th].setup_sink_pin(0);
       g->add_edge(dpin, spin);
       fmt::print("connect end of T branch to phi node {}->{}\n", branch_chain_stacks[w8th].back(), w10th);
     }
     if(w9th != "null") {
       I(branch_chain_stacks[w9th].back() != w10th);
       if(branch_chain_stacks[w9th].back() != w10th) {
-        dpin = name2node[branch_chain_stacks[w9th].back()].setup_driver_pin();
+        dpin = name2node[branch_chain_stacks[w9th].back()].setup_driver_pin(0);
         fmt::print("branch_chain_stacks[w9th] back{}\n", branch_chain_stacks[w9th].back());
-        spin = name2node[w10th].setup_sink_pin();
+        spin = name2node[w10th].setup_sink_pin(0);
         g->add_edge(dpin, spin);
         fmt::print("connect end of F branch to phi node {}->{}\n", branch_chain_stacks[w8th].back(), w10th);
       }
     } else { // only one branch of if. EX.  K13  K30  0  63  169  if ___g  K15  null 'K13
       dpin = name2node[w1st].setup_driver_pin(1);
-      spin = name2node[w10th].setup_sink_pin();
+      spin = name2node[w10th].setup_sink_pin(0);
       g->add_edge(dpin, spin);
       fmt::print("if statement, no false branch, connect {}->{}\n", w1st, w10th);
     }
 
     // III-4. if it is an outer if statement, link w10th to w2nd
     if(w2nd != "null") {
-      dpin = name2node[w10th].setup_driver_pin();
-      spin = name2node[w2nd].setup_sink_pin();
+      dpin = name2node[w10th].setup_driver_pin(0);
+      spin = name2node[w2nd].setup_sink_pin(0);
       g->add_edge(dpin, spin);
       fmt::print("if statement, connect driver_node:{} -> sink_node:{} ----- 6\n", w10th, w2nd);
     }
@@ -311,31 +311,31 @@ void Inou_cfg::build_graph(std::vector<std::string> &words, std::string &dfg_dat
   //process for_loop statement
   } else if(w6th == "for") { //SH:FIXME:wait for pyrope for_loop feature development
     // I. True: connect for node to body
-    dpin = name2node[w1st].setup_driver_pin();
-    spin = name2node[w8th].setup_sink_pin();
+    dpin = name2node[w1st].setup_driver_pin(0);
+    spin = name2node[w8th].setup_sink_pin(0);
     g->add_edge(dpin, spin);
     fmt::print("for statement, connect driver_node:{} -> sink_node:{}\n", w1st, w8th);
     // II. False: connect for node to next event
-    dpin = name2node[w1st].setup_driver_pin();
-    spin = name2node[w2nd].setup_sink_pin();
+    dpin = name2node[w1st].setup_driver_pin(0);
+    spin = name2node[w2nd].setup_sink_pin(0);
     g->add_edge(dpin, spin);
     fmt::print("for statement, connect driver_node:{} -> sink_node:{}\n", w1st, w2nd);
   //process while_loop statement
   } else if(w6th == "while") { //SH:FIXME:wait for pyrope while_loop feature development
     // I. connect while node to body
-    dpin = name2node[w1st].setup_driver_pin();
-    spin = name2node[w8th].setup_sink_pin();
+    dpin = name2node[w1st].setup_driver_pin(0);
+    spin = name2node[w8th].setup_sink_pin(0);
     g->add_edge(dpin, spin);
     fmt::print("while statement, connect driver_node:{} -> sink_node:{}\n", w1st, w8th);
 
     // II. False: connect while node to next event
-    dpin = name2node[w1st].setup_driver_pin();
-    spin = name2node[w2nd].setup_sink_pin();
+    dpin = name2node[w1st].setup_driver_pin(0);
+    spin = name2node[w2nd].setup_sink_pin(0);
     g->add_edge(dpin, spin);
     fmt::print("while statement, connect driver_node:{} -> sink_node:{}\n", w1st, w2nd);
   } else if(w6th == "::{") {
-    dpin = name2node[w1st].setup_driver_pin();
-    spin = name2node[w2nd].setup_sink_pin();
+    dpin = name2node[w1st].setup_driver_pin(0);
+    spin = name2node[w2nd].setup_sink_pin(0);
     g->add_edge(dpin, spin);
   } else if(w2nd == "null") { // no w2nd to create edge, only update branch_chain_stacks
     bool   belong_tops   = false;
@@ -353,8 +353,8 @@ void Inou_cfg::build_graph(std::vector<std::string> &words, std::string &dfg_dat
       branch_chain_stacks[target_vec_id].push_back(w1st);
 
   } else if(w2nd != "null") { // normal edge connection: Kx->Ky, update branch_chain_stacks
-    dpin = name2node[w1st].setup_driver_pin();
-    spin = name2node[w2nd].setup_sink_pin();
+    dpin = name2node[w1st].setup_driver_pin(0);
+    spin = name2node[w2nd].setup_sink_pin(0);
     g->add_edge(dpin, spin);
     fmt::print("normal case connection, connect driver_node:{} -> sink_node:{} ----- 5\n", w1st, w2nd);
 
