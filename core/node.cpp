@@ -193,8 +193,7 @@ std::string_view Node::create_name() const {
 
   std::string signature = absl::StrCat("lg_", get_type().get_name());
 
-  //SH:FIXME: is it a typo? should be SubGraph_Op?
-  if (get_type().op == GraphIO_Op) {
+  if (get_type().op == SubGraph_Op) {
     absl::StrAppend(&signature, "subid_", get_type_subgraph().value);
   }else if (get_type().op == TechMap_Op) {
     const Tech_cell *tcell = get_type_tmap_cell();
@@ -245,7 +244,9 @@ std::string Node::debug_name() const {
   if (Ann_node_name::has(*this))
     name = Ann_node_name::get(*this);
 
-  return absl::StrCat("node_", std::to_string(nid), "(", name ,")");
+  return absl::StrCat("node", std::to_string(nid));
+  //not a acceptable format for dot
+  //return absl::StrCat("node_", std::to_string(nid), "(", name ,")");
 }
 
 bool Node::has_name() const {

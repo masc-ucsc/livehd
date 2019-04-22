@@ -31,11 +31,12 @@ public:
       , rchild(nullptr)
       , parent(nullptr){};
   virtual ~Aux_node(){};
+  //SH:FIXME: should move to private data member and use setter/getter function?
   Aux_node *lchild;
   Aux_node *rchild;
   Aux_node *parent;
 
-  void     set_alias(const std::string &v, Node n);
+  void set_alias(const std::string &v, Node n);
   Node get_alias(const std::string &v) const {
     return auxtab.at(v);
   }
@@ -45,7 +46,7 @@ public:
   void del_alias(const std::string &v) {
     auxtab.erase(v);
   }
-  void     set_pending(const std::string &v, Node n);
+  void set_pending(const std::string &v, Node n);
   Node get_pending(const std::string &v) const {
     return pendtab.at(v);
   }
@@ -79,11 +80,14 @@ public:
   };
   void            set_parent_child(Aux_node *parent, Aux_node *child, bool branch);
   void            set_parent(Aux_node *parent, Aux_node *child);
-  const Aux_node *get_parent(const Aux_node *child) const;
+  const Aux_node* get_parent(const Aux_node *child) const;
   void            disconnect_child(Aux_node *parent, Aux_node *child, bool branch);
   bool            is_root_aux(const Aux_node *auxtab) const; // for chained parents aux_tabs checking
   Aux_node *      get_root();
-  Aux_node *      get_cur_auxnd() const;
+  //SH:FIXME: dangerous approach to return handles(i.e., pointer, reference etc) of a object. Other approach?
+  //SH:FIXME: at least change to return const to avoid client write
+  //SH:FIXME: another risk is the Aux_node object might not exist anymore -> returning a garbage.
+  Aux_node*       get_cur_auxnd() const;
   void            set_alias(const std::string &v, Node n);
   bool            has_alias(const std::string &v) const;
   Node            get_alias(const std::string &v) const;

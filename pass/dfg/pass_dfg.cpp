@@ -551,8 +551,6 @@ Node Pass_dfg::process_if(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, const CF
 
   I(operands.size() > 1);
 
-  //SH:FIXME:ASK: is there an Node_pin API directly get another Node_pin in the other side of the edge?
-  //SH:FIXME:ASK: no, since there might be multiple edges from a single pin
   Node tbranch, fbranch;
   for(const auto &out_edge : cfg_node.out_edges()) {
     if(out_edge.driver.get_pid() == 0)

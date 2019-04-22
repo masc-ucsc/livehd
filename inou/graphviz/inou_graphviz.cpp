@@ -77,22 +77,27 @@ void Inou_graphviz::populate_data(LGraph* g){
 
   g->each_node_fast([&data](const Node &node) {
     const auto &ntype = node.get_type();
-      data += fmt::format(" {} [label=\"{}:{}\"];\n", node.create_name(), ntype.get_name(), node.get_name());
+    auto node_name = node.has_name() ? node.get_name() : "";
+
+    data += fmt::format(" {} [label=\"{} :{} :{}\"];\n", node.debug_name(), node.debug_name(), ntype.get_name(), node_name);
 
     for(auto &out : node.out_edges()){
       Node_pin dpin = out.driver;
       Node_pin spin = out.sink;
-      auto dname = dpin.get_node().create_name();
-      auto sname = spin.get_node().create_name();
+      auto dnode_name = dpin.get_node().debug_name();
+      auto snode_name = spin.get_node().debug_name();
+      auto dpin_name = dpin.has_name() ? dpin.get_name() : ""; // only driver pin has name attribute
       auto bits = dpin.get_bits();
-        data += fmt::format(" {}->{}[label=\"{}b: {}:{}\"];\n", dname, sname, bits, dpin.get_pid(), spin.get_pid());
+
+        data += fmt::format(" {}->{}[label=\"{}b :{} :{} :{}\"];\n",
+                dnode_name, snode_name, bits, dpin.get_pid(), spin.get_pid(), dpin_name);
     }
   });
 
   g->each_graph_output([&data](const Node_pin &pin) {
     std::string_view dst_str = "virtual_dst_module";
     auto bits = pin.get_bits();
-      data += fmt::format(" {}->{}[label=\"{}b\"];\n", pin.get_node().create_name(), dst_str, bits);
+      data += fmt::format(" {}->{}[label=\"{}b\"];\n", pin.get_node().debug_name(), dst_str, bits);
   });
 
 

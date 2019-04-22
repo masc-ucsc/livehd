@@ -10,7 +10,7 @@ void Aux_node::set_pending(const std::string &v, Node n) {
   fmt::print("set pending {} <-> n{}\n", v, n.get_compact());
 }
 
-Aux_node *Aux_tree::get_cur_auxnd() const {
+Aux_node* Aux_tree::get_cur_auxnd() const {
   return auxes_stack.back();
 }
 
