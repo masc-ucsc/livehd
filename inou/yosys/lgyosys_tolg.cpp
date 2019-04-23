@@ -111,6 +111,7 @@ static Node_pin &get_edge_pin(LGraph *g, const RTLIL::Wire *wire) {
           ,wire2pin[wire].get_pid()
           ,wire2pin[wire].get_bits());
     }
+    wire2pin[wire].set_bits(wire->width);
     assert(wire->width == wire2pin[wire].get_bits());
     return wire2pin[wire];
   }
@@ -1032,7 +1033,20 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
     } else if(std::strncmp(cell->type.c_str(), "$_AND_", 6) == 0) {
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      entry_node.set_type(And_Op, size);
+      entry_node.set_type(And_Op);
+      entry_node.setup_driver_pin(0).set_bits(size); // zero
+
+    } else if(std::strncmp(cell->type.c_str(), "$_OR_", 6) == 0) {
+      if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
+        size = cell->parameters["\\Y_WIDTH"].as_int();
+      entry_node.set_type(Or_Op);
+      entry_node.setup_driver_pin(0).set_bits(size); // zero
+
+    } else if(std::strncmp(cell->type.c_str(), "$_XOR_", 6) == 0) {
+      if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
+        size = cell->parameters["\\Y_WIDTH"].as_int();
+      entry_node.set_type(Xor_Op);
+      entry_node.setup_driver_pin(0).set_bits(size); // zero
 
     } else if(std::strncmp(cell->type.c_str(), "$_NOT_", 6) == 0) {
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
@@ -1120,6 +1134,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
         || entry_node.is_type(ShiftRight_Op)
         || entry_node.is_type(ShiftLeft_Op)) {
           sink_pid = entry_node.get_type().get_input_match(&conn.first.c_str()[1]);
+					printf("input_match[%s] -> pid:%d\n", &conn.first.c_str()[1], sink_pid);
         } else if(entry_node.is_type(AFlop_Op)) {
           if(conn.first.str() == "\\ARST")
             sink_pid = 3;

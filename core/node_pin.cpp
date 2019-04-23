@@ -64,7 +64,11 @@ std::string_view Node_pin::get_type_subgraph_io_name() const {
   auto sub_id = get_node().get_type_subgraph();
   LGraph *subgraph = LGraph::open(g->get_path(), sub_id);
   I(subgraph);
-  return subgraph->get_graph_output_name_from_pid(pid);
+  auto name = subgraph->get_graph_output_name_from_pid(pid);
+  if (name != "unknown")
+    return name;
+
+  return subgraph->get_graph_input_name_from_pid(pid);
 }
 
 std::string_view Node_pin::get_type_tmap_io_name() const {
