@@ -132,7 +132,7 @@ static Node_pin &get_edge_pin(LGraph *g, const RTLIL::Wire *wire) {
   return wire2pin[wire];
 }
 
-static void connect_constant(LGraph *g, uint32_t value, Node &exit_node, Port_ID opid) {
+static Node_pin connect_constant(LGraph *g, uint32_t value, Node &exit_node, Port_ID opid) {
 
   uint16_t size = 1;
   uint32_t val  = value;
@@ -145,6 +145,8 @@ static void connect_constant(LGraph *g, uint32_t value, Node &exit_node, Port_ID
   auto spin = exit_node.setup_sink_pin(opid);
 
   spin.connect_driver(dpin);
+
+  return dpin;
 }
 
 class Pick_ID {
@@ -1065,8 +1067,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
       connect_string(g, &(cell->name.c_str()[1]), exit_node, LGRAPH_BBOP_NAME);
     }
 
-    uint32_t blackbox_inp_port = 0;
-    uint32_t blackbox_out_port = 0;
+    uint32_t blackbox_port = 0;
 
     absl::flat_hash_set<XEdge::Compact> added_edges;
     for(auto &conn : cell->connections()) {
@@ -1091,13 +1092,17 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
 
       } else if(entry_node.is_type(BlackBox_Op) && !yosys_tech) {
         if(is_black_box_input(module, cell, conn.first)) {
-          connect_constant(g, 0, exit_node, LGRAPH_BBOP_IPARAM(blackbox_inp_port));
-          sink_pid = LGRAPH_BBOP_ICONNECT(blackbox_inp_port);
-          exit_node.setup_sink_pin(sink_pid).set_name(&(conn.first.c_str()[1]));
-          blackbox_inp_port++;
+          auto dpin = connect_constant(g, 0, exit_node, LGRAPH_BBOP_IPARAM(blackbox_port));
+          sink_pid = LGRAPH_BBOP_ICONNECT(blackbox_port);
+          if (!dpin.has_name())
+            dpin.set_name(&(conn.first.c_str()[1]));
+          blackbox_port++;
         }else if(is_black_box_output(module, cell, conn.first)) {
-          exit_node.setup_sink_pin(blackbox_out_port).set_name(&(conn.first.c_str()[1]));
-          blackbox_out_port++;
+          auto dpin = exit_node.setup_driver_pin(blackbox_port);
+          if (!dpin.has_name())
+            dpin.set_name(&(conn.first.c_str()[1]));
+          sink_pid = LGRAPH_BBOP_ICONNECT(blackbox_port);
+          blackbox_port++;
         } else {
           bool o = is_black_box_output(module, cell, conn.first);
           bool i = is_black_box_input (module, cell, conn.first);
