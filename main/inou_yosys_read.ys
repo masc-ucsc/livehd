@@ -1,4 +1,8 @@
 # default yosys2lg script inou_yosys_read.ys
+#
+{{#liberty_tmap}}
+read_liberty {{liberty_file}}
+{{/liberty_tmap}}
 
 {{#filelist}}
 read_verilog -sv -nomeminit {{input}}
@@ -25,10 +29,10 @@ techmap -map techmap.v
 {{#techmap_full}}
 techmap
 {{/techmap_full}}
-{{#liberty_tmap}}
-techmap -D ALU_RIPPLE
-abc -liberty {{liberty_file}}
-{{/liberty_tmap}}
+#{{#liberty_tmap}}
+#techmap -D ALU_RIPPLE
+#abc -liberty {{liberty_file}}
+#{{/liberty_tmap}}
 # opt
 
 {{#abc_in_yosys}}
