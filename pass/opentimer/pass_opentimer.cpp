@@ -29,6 +29,8 @@ void Pass_opentimer::work(Eprp_var &var) {
 
   ot::Timer timer;
 
+  timer.insert_gate("foo","bar");
+
   for(const auto &g : var.lgs) {
     pass.list_cells(g);
   }
@@ -36,6 +38,8 @@ void Pass_opentimer::work(Eprp_var &var) {
 
 void Pass_opentimer::list_cells(LGraph *g) {
   LGBench b("pass.opentimer.list_cells");
+
+
 
   for(const auto &nid : g -> forward()) {
     auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
