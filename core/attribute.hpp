@@ -201,6 +201,7 @@ public:
       return;
     clean = true;
 
+    unlink(idx2w_file.c_str());
     yas::save<yas_flags>(idx2w_file.c_str(),
         YAS_OBJECT("idx2w", idx2w)
         );

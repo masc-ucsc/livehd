@@ -17,7 +17,7 @@ struct Ann_name {
 };
 
 using Ann_node_pin_offset = Attribute_node_pin_data_type<Ann_name::wirename,  Node_pin_mode::Driver, uint16_t>;
-using Ann_node_pin_name   = Attribute_node_pin_sview_type<Ann_name::wirename, Node_pin_mode::Driver, true>;
+using Ann_node_pin_name   = Attribute_node_pin_sview_type<Ann_name::wirename, Node_pin_mode::Driver, false>;
 
 using Ann_node_name       = Attribute_node_sview_type<Ann_name::nodename, true>;
 using Ann_node_place      = Attribute_node_data_type<Ann_name::nodeplace, Node_place>;
