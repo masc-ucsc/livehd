@@ -37,7 +37,7 @@ protected:
   Char_Array<IO_port> output_array;
   Dense<Node_Internal> node_internal;
 
-  static inline constexpr std::string_view unknown_io = "unknow name";
+  static inline constexpr std::string_view unknown_io = "unknown";
 
   Index_ID         create_node_space(const Index_ID idx, const Port_ID dst_pid, const Index_ID master_nid, const Index_ID root_nid);
   Index_ID         get_space_output_pin(const Index_ID idx, const Port_ID dst_pid, Index_ID &root_nid);

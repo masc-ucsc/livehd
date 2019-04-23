@@ -111,6 +111,7 @@ static Node_pin &get_edge_pin(LGraph *g, const RTLIL::Wire *wire) {
           ,wire2pin[wire].get_pid()
           ,wire2pin[wire].get_bits());
     }
+    wire2pin[wire].set_bits(wire->width);
     assert(wire->width == wire2pin[wire].get_bits());
     return wire2pin[wire];
   }
@@ -132,7 +133,7 @@ static Node_pin &get_edge_pin(LGraph *g, const RTLIL::Wire *wire) {
   return wire2pin[wire];
 }
 
-static void connect_constant(LGraph *g, uint32_t value, Node &exit_node, Port_ID opid) {
+static Node_pin connect_constant(LGraph *g, uint32_t value, Node &exit_node, Port_ID opid) {
 
   uint16_t size = 1;
   uint32_t val  = value;
@@ -145,6 +146,8 @@ static void connect_constant(LGraph *g, uint32_t value, Node &exit_node, Port_ID
   auto spin = exit_node.setup_sink_pin(opid);
 
   spin.connect_driver(dpin);
+
+  return dpin;
 }
 
 class Pick_ID {
@@ -1030,7 +1033,20 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
     } else if(std::strncmp(cell->type.c_str(), "$_AND_", 6) == 0) {
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      entry_node.set_type(And_Op, size);
+      entry_node.set_type(And_Op);
+      entry_node.setup_driver_pin(0).set_bits(size); // zero
+
+    } else if(std::strncmp(cell->type.c_str(), "$_OR_", 6) == 0) {
+      if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
+        size = cell->parameters["\\Y_WIDTH"].as_int();
+      entry_node.set_type(Or_Op);
+      entry_node.setup_driver_pin(0).set_bits(size); // zero
+
+    } else if(std::strncmp(cell->type.c_str(), "$_XOR_", 6) == 0) {
+      if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
+        size = cell->parameters["\\Y_WIDTH"].as_int();
+      entry_node.set_type(Xor_Op);
+      entry_node.setup_driver_pin(0).set_bits(size); // zero
 
     } else if(std::strncmp(cell->type.c_str(), "$_NOT_", 6) == 0) {
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
@@ -1065,8 +1081,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
       connect_string(g, &(cell->name.c_str()[1]), exit_node, LGRAPH_BBOP_NAME);
     }
 
-    uint32_t blackbox_inp_port = 0;
-    uint32_t blackbox_out_port = 0;
+    uint32_t blackbox_port = 0;
 
     absl::flat_hash_set<XEdge::Compact> added_edges;
     for(auto &conn : cell->connections()) {
@@ -1091,13 +1106,17 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
 
       } else if(entry_node.is_type(BlackBox_Op) && !yosys_tech) {
         if(is_black_box_input(module, cell, conn.first)) {
-          connect_constant(g, 0, exit_node, LGRAPH_BBOP_IPARAM(blackbox_inp_port));
-          sink_pid = LGRAPH_BBOP_ICONNECT(blackbox_inp_port);
-          exit_node.setup_sink_pin(sink_pid).set_name(&(conn.first.c_str()[1]));
-          blackbox_inp_port++;
+          auto dpin = connect_constant(g, 0, exit_node, LGRAPH_BBOP_IPARAM(blackbox_port));
+          sink_pid = LGRAPH_BBOP_ICONNECT(blackbox_port);
+          if (!dpin.has_name())
+            dpin.set_name(&(conn.first.c_str()[1]));
+          blackbox_port++;
         }else if(is_black_box_output(module, cell, conn.first)) {
-          exit_node.setup_sink_pin(blackbox_out_port).set_name(&(conn.first.c_str()[1]));
-          blackbox_out_port++;
+          auto dpin = exit_node.setup_driver_pin(blackbox_port);
+          if (!dpin.has_name())
+            dpin.set_name(&(conn.first.c_str()[1]));
+          sink_pid = LGRAPH_BBOP_ICONNECT(blackbox_port);
+          blackbox_port++;
         } else {
           bool o = is_black_box_output(module, cell, conn.first);
           bool i = is_black_box_input (module, cell, conn.first);
@@ -1115,6 +1134,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
         || entry_node.is_type(ShiftRight_Op)
         || entry_node.is_type(ShiftLeft_Op)) {
           sink_pid = entry_node.get_type().get_input_match(&conn.first.c_str()[1]);
+					printf("input_match[%s] -> pid:%d\n", &conn.first.c_str()[1], sink_pid);
         } else if(entry_node.is_type(AFlop_Op)) {
           if(conn.first.str() == "\\ARST")
             sink_pid = 3;

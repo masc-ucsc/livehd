@@ -29,9 +29,13 @@ RTLIL::Wire *Lgyosys_dump::get_wire(const Node_pin &pin) {
 
 RTLIL::Wire *Lgyosys_dump::add_wire(RTLIL::Module *module, const Node_pin &pin) {
   assert(pin.is_driver());
-  if (pin.has_name())
-    return module->addWire(absl::StrCat("\\",pin.get_name()), pin.get_bits());
-  return module->addWire(next_id(pin.get_lgraph()), pin.get_bits());
+  if (pin.has_name()) {
+    auto name = absl::StrCat("\\",pin.get_name());
+    printf("add wire [%s]\n", name.c_str());
+    return module->addWire(name, pin.get_bits());
+  }else{
+    return module->addWire(next_id(pin.get_lgraph()), pin.get_bits());
+  }
 }
 
 RTLIL::Wire *Lgyosys_dump::create_tree(LGraph *g, std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod,
@@ -249,11 +253,13 @@ void Lgyosys_dump::create_subgraph(LGraph *g, RTLIL::Module *module, Node &node)
   fmt::print("inou_yosys instance_name:{}, subgraph->get_name():{}\n", node.get_name(), subgraph->get_name());
   for(const auto &e:node.inp_edges()) {
     auto  port_name = e.sink.get_type_subgraph_io_name();
+    fmt::print("input:{}\n", port_name);
     RTLIL::Wire *input = get_wire(e.driver);
     new_cell->setPort(absl::StrCat("\\", port_name).c_str(), input);
   }
   for(const auto &dpin:node.out_connected_pins()) {
     auto  port_name = dpin.get_type_subgraph_io_name();
+    fmt::print("output:{}\n", port_name);
     RTLIL::Wire *output = get_wire(dpin);
     new_cell->setPort(absl::StrCat("\\", port_name).c_str(), output);
   }
@@ -340,9 +346,9 @@ void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
       }
       continue;
     } else if(node.get_type().op == BlackBox_Op) {
-      for(auto &e:node.out_edges()) {
-        RTLIL::Wire *new_wire = add_wire(module, e.driver);
-        cell_output_map[e.driver.get_compact()]= new_wire;
+      for(auto &dpin:node.out_connected_pins()) {
+        RTLIL::Wire *new_wire = add_wire(module, dpin);
+        cell_output_map[dpin.get_compact()]= new_wire;
       }
       continue;
     } else if(node.get_type().op == And_Op || node.get_type().op == Or_Op || node.get_type().op == Xor_Op) {
@@ -1055,9 +1061,6 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
       }
 
       RTLIL::Cell *cell = module->addCell(absl::StrCat("\\",instance_name), RTLIL::IdString(absl::StrCat("\\", celltype)));
-#ifndef NDEBUG
-      int current_port = 0, def = 0;
-#endif
       bool is_param = false;
       for(const auto &e:node.inp_edges()) {
         if(e.sink.get_pid() < LGRAPH_BBOP_OFFSET)
@@ -1069,12 +1072,6 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
           if(dpin_node.get_type().op != U32Const_Op)
             log_error("Internal Error: Could not define if input is parameter.\n");
           is_param = dpin_node.get_type_const_value() == 1;
-#ifndef NDEBUG
-          assert(def == 0);
-          def++;
-          assert(current_port == 0);
-          current_port = LGRAPH_BBOP_PORT_N(e.sink.get_pid());
-#endif
         } else if(LGRAPH_BBOP_ISICONNECT(e.sink.get_pid())) {
           auto current_name = e.driver.get_name();
           if(is_param) {
@@ -1094,19 +1091,12 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
               cell->setPort(absl::StrCat("\\",current_name), get_wire(e.driver));
             }
           }
-#ifndef NDEBUG
-          assert(def == 2);
-          assert(current_port == LGRAPH_BBOP_PORT_N(e.sink.get_pid()));
-          current_port = 0;
-          def          = 0;
-#endif
         }
       }
 
-#ifndef NDEBUG
-      current_port = 0, def = 0;
-#endif
       for(const auto &e:node.inp_edges()) {
+        if (e.driver.is_graph_input())
+          continue;
         if(LGRAPH_BBOP_ISICONNECT(e.sink.get_pid())) {
           auto wname = absl::StrCat("\\",e.driver.get_name());
           cell->setPort(wname, cell_output_map[e.driver.get_compact()]);
