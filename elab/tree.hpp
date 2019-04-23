@@ -79,7 +79,7 @@ public:
   explicit Tree_depth_preorder_iterator(const Tree_index &_b, const Tree<X> *_t) : ti(_b), t(_t) {}
 
   CTree_depth_preorder_iterator begin() const { return CTree_depth_preorder_iterator(ti, t); }
-  CTree_depth_preorder_iterator end() const { return CTree_depth_preorder_iterator(t->get_depth_preorder_next(ti), t); }  // 0 is end index for iterator
+  CTree_depth_preorder_iterator end() const { return CTree_depth_preorder_iterator(Tree_index(-1,-1), t); }  // 0 is end index for iterator
 };
   Tree();
 
@@ -283,7 +283,7 @@ const Tree_index Tree<X>::get_depth_preorder_next(const Tree_index &child) const
           return Tree_index(prev_level, next_node.younger_sibling);
         }
         if(prev_level == 0){ // we're at the root, and we're done
-          return Tree_index(0,0);
+          return Tree_index(-1,-1);
         }
         prev_level = prev_level - 1;
         parent_pos = next_node.parent;
