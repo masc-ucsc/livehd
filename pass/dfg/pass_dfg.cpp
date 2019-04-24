@@ -309,7 +309,7 @@ void Pass_dfg::finalize_global_connect(LGraph *dfg, const Aux_node *auxnd_global
   for(const auto &pair : auxnd_global->get_pendtab()) {
     if(is_output(pair.first)) {
       auto spin = dfg->get_graph_output(pair.first.substr(1));
-      auto dpin = pair.second.get_driver_pin(0);
+      auto dpin = pair.second;
 
       dfg->add_edge(dpin, spin);
     } else if(is_register(pair.first)) {
