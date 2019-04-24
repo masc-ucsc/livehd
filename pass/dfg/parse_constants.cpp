@@ -1,7 +1,7 @@
 #include "pass_dfg.hpp"
 #include <string>
 
-Node Pass_dfg::resolve_constant(LGraph *g, Aux_tree *aux_tree, const std::string &str) {
+Node Pass_dfg::resolve_constant(LGraph *g, const std::string &str) {
   // arguments -> local variable
   // bool is_in32b;
   // bool is_explicit_signed;
