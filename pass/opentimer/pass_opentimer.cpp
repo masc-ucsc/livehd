@@ -27,23 +27,36 @@ void Pass_opentimer::work(Eprp_var &var) {
 
   fmt::print("OpenTimer-LGraph Action Going On...\n");
 
-  ot::Timer timer;
-
-  timer.insert_gate("foo","bar");
-
-  for(const auto &g : var.lgs) {
-    pass.list_cells(g);
-  }
+//  for(const auto &g : var.lgs) {
+//    pass.list_cells(g);
+//  }
+  pass.ot_api_check();
 }
 
-void Pass_opentimer::list_cells(LGraph *g) {
-  LGBench b("pass.opentimer.list_cells");
+//void Pass_opentimer::list_cells(LGraph *g) {
+//  LGBench b("pass.opentimer.list_cells");
+//  for(const auto &nid : g -> forward()) {
+//    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
+//    std::string name (node.get_type().get_name());
+//    fmt::print("Cell\t{}\n", name);
+//  }
+//}
 
 
+void Pass_opentimer::ot_api_check() {
 
-  for(const auto &nid : g -> forward()) {
-    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
-    std::string name (node.get_type().get_name());
-    fmt::print("Cell\t{}\n", name);
-  }
+  //This is the same code as the examples/simple in OpenTimer
+
+  ot::Timer timer;
+  // Read design
+  timer.read_celllib("ot_examples/osu018_stdcells.lib")
+       .read_verilog("ot_examples/unit.v")
+       .read_sdc("ot_examples/aaa.sdc")
+       .read_spef("ot_examples/unit.spef");
+
+  // the default library is at ns and pf scale.
+  std::cout << timer.time_unit()->value()        << " second (time unit)\n"
+            << timer.capacitance_unit()->value() << " farad  (capacitance unit)\n"
+            << "TNS: " << *timer.report_tns() << '\n';
+
 }

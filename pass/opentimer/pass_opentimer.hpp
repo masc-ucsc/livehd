@@ -11,6 +11,7 @@ protected:
   static void work(Eprp_var &var);
 
   void list_cells(LGraph *g);
+  void ot_api_check();
 
 public:
   Pass_opentimer();
