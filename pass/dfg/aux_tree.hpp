@@ -21,15 +21,14 @@ const char    REGISTER_MARKER  = '@';
 const char    INPUT_MARKER     = '$';
 const char    OUTPUT_MARKER    = '%';
 const char    REFERENCE_MARKER = '\\';
+const char    POS_CONST_MARKER = '0';
+const char    NEG_CONST_MARKER = '-';
 const Port_ID REG_INPUT        = 'D';
 const Port_ID REG_OUTPUT       = 'Q';
 
 class Aux_node {
 public:
-  Aux_node()
-      : lchild(nullptr)
-      , rchild(nullptr)
-      , parent(nullptr){};
+  Aux_node():lchild(nullptr), rchild(nullptr), parent(nullptr){};
   virtual ~Aux_node(){};
   //SH:FIXME: should move to private data member and use setter/getter function?
   Aux_node *lchild;

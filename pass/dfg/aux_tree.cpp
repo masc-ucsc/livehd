@@ -23,16 +23,16 @@ Aux_node *Aux_tree::get_root() {
 }
 
 void Aux_tree::set_parent_child(Aux_node *parent, Aux_node *new_child, bool branch) {
-  assert(parent != nullptr && new_child != nullptr);
+  I(parent != nullptr && new_child != nullptr);
   if(branch) {
-    assert(parent->lchild == nullptr);
+    I(parent->lchild == nullptr);
     auxes_stack.push_back(new_child);
     parent->lchild    = new_child;
     new_child->parent = parent;
     new_child->lchild = nullptr;
     new_child->rchild = nullptr;
   } else {
-    assert(parent->rchild == nullptr);
+    I(parent->rchild == nullptr);
     auxes_stack.push_back(new_child);
     parent->rchild    = new_child;
     new_child->parent = parent;

@@ -296,10 +296,10 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
 }//end of finalize bitwidth
 
 void Pass_dfg::cfg_2_dfg(LGraph *cfg, LGraph *dfg) {
-  Node itr = find_cfg_root(cfg);
+  Node cfg_iter = find_cfg_root(cfg);
   Aux_node auxnd_global;
   Aux_tree aux_tree(&auxnd_global);
-  process_cfg(dfg, cfg, &aux_tree, itr);
+  process_cfg(dfg, cfg, &aux_tree, cfg_iter);
   finalize_global_connect(dfg, &auxnd_global);
   fmt::print("cfg_2_dfg finish!\n");
 }
@@ -318,36 +318,35 @@ void Pass_dfg::finalize_global_connect(LGraph *dfg, const Aux_node *auxnd_global
   }
 }
 
-Node Pass_dfg::process_cfg(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, Node top_node) {
-  Node itr = top_node;
+Node Pass_dfg::process_cfg(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, const Node& top_node) {
+  Node cfg_iter = top_node; //SH:FIXME: optimization?
   bool finished = false;
 
   while(!finished) {
-    itr = process_node(dfg, cfg, aux_tree, itr);
-    if(itr.get_driver_pin(0).is_graph_output() or itr.get_type().op == CfgIfMerge_Op){
+    cfg_iter = process_node(dfg, cfg, aux_tree, cfg_iter);
+    if(cfg_iter.get_driver_pin(0).is_graph_output() or cfg_iter.get_type().op == CfgIfMerge_Op){
       finished = true;
     }
-    if(itr.get_driver_pin(0).has_name())
-      fmt::print("cfg node:{} process finished!!\n\n", itr.get_driver_pin(0).get_name());
+    if(cfg_iter.get_driver_pin(0).has_name())
+      fmt::print("cfg node:{} process finished!!\n\n", cfg_iter.get_driver_pin(0).get_name());
   }
   aux_tree->print_cur_auxnd();
   fmt::print("\n\n");
-  return itr;
+  return cfg_iter;
 }
 
-Node Pass_dfg::process_node(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, Node cfg_node) {
+Node Pass_dfg::process_node(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, const Node& cfg_node) {
   if(cfg_node.get_type().op == GraphIO_Op)
     return get_cfg_child(cfg, cfg_node);
 
   const CFG_Node_Data data(cfg, cfg_node);
 
-  fmt::print("Processing CFG node:{}\n", cfg_node.get_compact());
+  fmt::print("Processing CFG node:{}\n", cfg_node.get_driver_pin(0).get_name());
   fmt::print("target:[{}], operator:[{}], ", data.get_target(), data.get_operator());
   fmt::print("operands:[");
   for(const auto &i : data.get_operands())
     fmt::print("{}, ", i);
-  fmt::print("]");
-  fmt::print("\n");
+  fmt::print("]\n");
 
   switch(cfg_node.get_type().op) {
   case CfgAssign_Op:{
@@ -409,7 +408,7 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
   const auto& target = data.get_target();
   const auto& oprds  = data.get_operands(); //return strings
   auto        op     = data.get_operator();
-  Node    target_node, oprd_node0, oprd_node1;
+  Node        target_node, oprd_node0, oprd_node1;
   target_node = process_operand(dfg, aux_tree, target);
   oprd_node0  = process_operand(dfg, aux_tree, oprds[0]);
   if(oprds.size()>1)
@@ -513,7 +512,7 @@ Node Pass_dfg::process_operand(LGraph *dfg, Aux_tree *aux_tree, const std::strin
     //fmt::print("operand:{} has an alias:{}\n", oprd, oprd_node);
   } else {
     if(is_constant(oprd)) { // process "as __bits" here!
-      oprd_node = resolve_constant(dfg, aux_tree, oprd);
+      oprd_node = resolve_constant(dfg, oprd);
       aux_tree->set_alias(oprd, oprd_node);
       fmt::print("create node for constant operand:{}\n", oprd);
     } else if(is_input(oprd)) {
@@ -628,24 +627,18 @@ void Pass_dfg::add_fluid_ports(LGraph *dfg, Aux_tree *aux_tree, std::vector<Node
 //  ;
 //}
 
-
-//SH:FIXME:ASK:
-//can't use each_graph_input since it's non-constant member function?
-//create each_graph_input() const would be code replication...
-//this force me to use a non-const LGraph pointer in this case
 Node Pass_dfg::find_cfg_root(LGraph *cfg) {
   Node root_node;
   cfg->each_graph_input([&root_node](const Node_pin &pin) {
     root_node = pin.get_node();
   });
-  //SH:FIXME:ASK: any better way to check if the Node exist?
-  I(root_node.get_compact());
+  I(!root_node.is_invalid());
   return root_node;
 }
 
-Node Pass_dfg::get_cfg_child(LGraph *cfg, Node cfg_node) {
+Node Pass_dfg::get_cfg_child(LGraph *cfg, const Node& cfg_node) {
   //an graph output node is the terminate node
-  if(cfg_node.setup_driver_pin(0).is_graph_output())
+  if(cfg_node.get_driver_pin(0).is_graph_output())
     return cfg_node;
 
   I(cfg_node.out_edges().size()==1); //note: "CfgIf_Op" will be handled specially
@@ -666,7 +659,7 @@ std::vector<Node> Pass_dfg::process_operands(LGraph *dfg, Aux_tree *aux_tree, co
     } else {
       if(is_constant(oprds[i])) {
         // oprd_nodes[i] = create_default_const(dfg, aux_tree);
-        oprd_nodes[i] = resolve_constant(dfg, aux_tree, oprds[i]);
+        oprd_nodes[i] = resolve_constant(dfg, oprds[i]);
         //fmt::print("create node for constant operand:{}, nid:{}\n", oprds[i], oprd_nodes[i]);
       } else if(is_input(oprds[i])) {
         oprd_nodes[i] = create_input(dfg, aux_tree, oprds[i]);

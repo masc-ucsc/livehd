@@ -32,9 +32,9 @@ protected:
 
 private:
   Node find_cfg_root(LGraph *cfg);
-  Node get_cfg_child(LGraph *cfg, Node cfg_node);
-  Node process_cfg(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, Node top_node);
-  Node process_node(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, Node node);
+  Node get_cfg_child(LGraph *cfg, const Node& cfg_node);
+  Node process_cfg(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, const Node& top_node);
+  Node process_node(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, const Node& cfg_node);
 
   void process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Data &data);
   void finalize_global_connect(LGraph *dfg, const Aux_node *auxand_global);
@@ -95,7 +95,7 @@ private:
   constexpr bool is_input(std::string_view v)        const { return v.at(0) == INPUT_MARKER; }
   constexpr bool is_output(std::string_view v)       const { return v.at(0) == OUTPUT_MARKER; }
   constexpr bool is_reference(std::string_view v)    const { return v.at(0) == REFERENCE_MARKER; }
-  constexpr bool is_constant(std::string_view v)     const { return (v.at(0) == '0' || v.at(0) == '-'); }
+  constexpr bool is_constant(std::string_view v)     const { return (v.at(0) == POS_CONST_MARKER || v.at(0) == NEG_CONST_MARKER); }
   constexpr bool is_read_marker(std::string_view v)  const { return v.substr(0, READ_MARKER.length()) == READ_MARKER; }
   constexpr bool is_write_marker(std::string_view v) const { return v.substr(0, WRITE_MARKER.length()) == WRITE_MARKER; }
   constexpr bool is_valid_marker(std::string_view v) const { return v.substr(0, VALID_MARKER.length()) == VALID_MARKER; }
@@ -128,7 +128,7 @@ private:
 
   Node_Type_Op node_type_from_text(std::string_view operator_text) const;
 
-  Node     resolve_constant(LGraph *g, Aux_tree *aux_tree, const std::string &str_in);
+  Node     resolve_constant(LGraph *g, const std::string &str_in);
   Node     process_bin_token(LGraph *g, const std::string &token1st, const uint16_t &bit_width, bool is_signed);
   Node     process_bin_token_with_dc(LGraph *g, const std::string &token1st,bool is_signed);
   uint32_t cal_bin_val_32b(const std::string &);
