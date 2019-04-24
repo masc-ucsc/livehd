@@ -1522,8 +1522,7 @@ void Prp::elaborate(){
 	fmt::print("Finished Parsing\n");
   ast->up(Prp_rule_code_blocks);
 
-  ast->each_bottom_first_fast(
-  std::bind(&Prp::ast_handler, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+  ast_handler();
 
   ast = nullptr;
 }
@@ -1569,101 +1568,104 @@ void Prp::consume_block(Rule_id rid, int num_tok){
   }
 }*/
 
-void Prp::ast_handler(const Tree_index &parent, const Tree_index &self, const Ast_parser_node &node){
-  auto rule_value = node.rule_id;
+void Prp::ast_handler(){
   std::string rule_name;
-  switch(rule_value){
-    case Prp_invalid:
-      rule_name.assign("Invalid");
-      break;
-    case Prp_rule:
-      rule_name.assign("Program");
-      break;
-    case Prp_rule_code_blocks:
-      rule_name.assign("Top level");
-      break;
-    case Prp_rule_code_block_int:
-      rule_name.assign("Code block");
-      break;
-    case Prp_rule_assignment_expression:
-      rule_name.assign("Assignment expression");
-      break;
-    case Prp_rule_logical_expression:
-      rule_name.assign("Logical expression");
-      break;
-    case Prp_rule_relational_expression:
-      rule_name.assign("Relational expression");
-      break;
-    case Prp_rule_additive_expression:
-      rule_name.assign("Additive expression");
-      break;
-    case Prp_rule_bitwise_expression:
-      rule_name.assign("Bitwise expression");
-      break;
-    case Prp_rule_multiplicative_expression:
-      rule_name.assign("Multiplicative expression");
-      break;
-    case Prp_rule_unary_expression:
-      rule_name.assign("Unary expressiion");
-      break;
-    case Prp_rule_factor:
-      rule_name.assign("Factor");
-      break;
-    case Prp_rule_tuple_by_notation:
-      rule_name.assign("Tuple by notation");
-      break;
-    case Prp_rule_tuple_notation_no_bracket:
-      rule_name.assign("Tuple notation non bracket");
-      break;
-    case Prp_rule_tuple_notation:
-      rule_name.assign("Tuple notation");
-      break;
-    case Prp_rule_tuple_notation_with_object:
-      rule_name.assign("Tuple notation with object");
-      break;
-    case Prp_rule_range_notation:
-      rule_name.assign("Range notation");
-      break;
-    case Prp_rule_bit_selection_bracket:
-      rule_name.assign("Bit selection bracket");
-      break;
-    case Prp_rule_bit_selection_notation:
-      rule_name.assign("Bit selection notation");
-      break;
-    case Prp_rule_tuple_array_bracket:
-      rule_name.assign("Tuple array bracket");
-      break;
-    case Prp_rule_tuple_array_notation:
-      rule_name.assign("Tuple array notation");
-      break;
-    case Prp_rule_lhs_expression:
-      rule_name.assign("LHS expression");
-      break;
-    case Prp_rule_lhs_var_name:
-      rule_name.assign("LHS variable name");
-      break;
-    case Prp_rule_rhs_expression_property:
-      rule_name.assign("RHS expression property");
-      break;
-    case Prp_rule_rhs_expression:
-      rule_name.assign("RHS expression");
-      break;
-    case Prp_rule_identifier:
-      rule_name.assign("Identifier");
-      break;
-    case Prp_rule_constant:
-      rule_name.assign("Constant");
-      break;
-    case Prp_rule_assignment_operator:
-      rule_name.assign("Assignment operator");
-      break;
-    case Prp_rule_tuple_dot_notation:
-      rule_name.assign("Tuple dot notation");
-      break;
-    case Prp_rule_tuple_dot_dot:
-      rule_name.assign("Tuple dot dot");
-      break;
+  for(const auto &it:ast->depth_preorder(ast->get_root())) {
+    auto node = ast->get_data(it);
+    
+    /*switch(node.rule_id){
+      case Prp_invalid:
+        rule_name.assign("Invalid");
+        break;
+      case Prp_rule:
+        rule_name.assign("Program");
+        break;
+      case Prp_rule_code_blocks:
+        rule_name.assign("Top level");
+        break;
+      case Prp_rule_code_block_int:
+        rule_name.assign("Code block");
+        break;
+      case Prp_rule_assignment_expression:
+        rule_name.assign("Assignment expression");
+        break;
+      case Prp_rule_logical_expression:
+        rule_name.assign("Logical expression");
+        break;
+      case Prp_rule_relational_expression:
+        rule_name.assign("Relational expression");
+        break;
+      case Prp_rule_additive_expression:
+        rule_name.assign("Additive expression");
+        break;
+      case Prp_rule_bitwise_expression:
+        rule_name.assign("Bitwise expression");
+        break;
+      case Prp_rule_multiplicative_expression:
+        rule_name.assign("Multiplicative expression");
+        break;
+      case Prp_rule_unary_expression:
+        rule_name.assign("Unary expressiion");
+        break;
+      case Prp_rule_factor:
+        rule_name.assign("Factor");
+        break;
+      case Prp_rule_tuple_by_notation:
+        rule_name.assign("Tuple by notation");
+        break;
+      case Prp_rule_tuple_notation_no_bracket:
+        rule_name.assign("Tuple notation non bracket");
+        break;
+      case Prp_rule_tuple_notation:
+        rule_name.assign("Tuple notation");
+        break;
+      case Prp_rule_tuple_notation_with_object:
+        rule_name.assign("Tuple notation with object");
+        break;
+      case Prp_rule_range_notation:
+        rule_name.assign("Range notation");
+        break;
+      case Prp_rule_bit_selection_bracket:
+        rule_name.assign("Bit selection bracket");
+        break;
+      case Prp_rule_bit_selection_notation:
+        rule_name.assign("Bit selection notation");
+        break;
+      case Prp_rule_tuple_array_bracket:
+        rule_name.assign("Tuple array bracket");
+        break;
+      case Prp_rule_tuple_array_notation:
+        rule_name.assign("Tuple array notation");
+        break;
+      case Prp_rule_lhs_expression:
+        rule_name.assign("LHS expression");
+        break;
+      case Prp_rule_lhs_var_name:
+        rule_name.assign("LHS variable name");
+        break;
+      case Prp_rule_rhs_expression_property:
+        rule_name.assign("RHS expression property");
+        break;
+      case Prp_rule_rhs_expression:
+        rule_name.assign("RHS expression");
+        break;
+      case Prp_rule_identifier:
+        rule_name.assign("Identifier");
+        break;
+      case Prp_rule_constant:
+        rule_name.assign("Constant");
+        break;
+      case Prp_rule_assignment_operator:
+        rule_name.assign("Assignment operator");
+        break;
+      case Prp_rule_tuple_dot_notation:
+        rule_name.assign("Tuple dot notation");
+        break;
+      case Prp_rule_tuple_dot_dot:
+        rule_name.assign("Tuple dot dot");
+        break;
+    }
+    auto token_text = scan_text(node.token_entry);
+    fmt::print("Rule name: {}, Token text: {}, Tree level: {}\n", rule_name, token_text, it.level);*/
   }
-  auto token_text = scan_text(node.token_entry);
-  fmt::print("Rule name: {}, Token text: {}, Tree level: {}\n", rule_name, token_text, self.level);
 }
