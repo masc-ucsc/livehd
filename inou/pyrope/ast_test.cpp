@@ -38,8 +38,36 @@ public:
     ast->up(test_rule_statement); // at level 2
     ast->up(test_rule_top); // at level 1
     
-    ast->each_bottom_first_fast(
-      std::bind(&Test_scanner::ast_handler, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+    //ast->each_bottom_first_fast(
+      //std::bind(&Test_scanner::ast_handler, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+    
+    for(const auto &it:ast->depth_preorder(ast->get_root())){
+      auto node = ast->get_data(it);
+      auto rule_value = node.rule_id;
+      std::string rule_name;
+      switch(rule_value){
+        case test_rule:
+          rule_name.assign("test_rule");
+          break;
+        case test_rule_invalid:
+          rule_name.assign("test_rule_invalid");
+          break;
+        case test_rule_top:
+          rule_name.assign("test_rule_top");
+          break;
+        case test_rule_identifier:
+          rule_name.assign("test_rule_identifier");
+          break;
+        case test_rule_add_expression:
+          rule_name.assign("test_rule_add_expression");
+          break;
+        case test_rule_statement:
+          rule_name.assign("test_rule_statement");
+          break;
+      }
+      auto token_text = scan_text(node.token_entry);
+      fmt::print("Rule name: {}, Token text: {}\n", rule_name, token_text);
+    }
     
     ast = nullptr;
   }
