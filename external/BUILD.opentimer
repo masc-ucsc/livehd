@@ -46,6 +46,7 @@ cc_library(
        ,
   hdrs = glob(["ot/**/*.hpp"])
        , 
+   linkopts = ["-lstdc++fs"],
   includes = ["."],
   visibility = ["//visibility:public"],
 )
