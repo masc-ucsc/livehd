@@ -1,11 +1,11 @@
 #include "aux_tree.hpp"
 
-void Aux_node::set_alias(const std::string &v, Node n) {
+void Aux_node::set_alias(std::string_view v, Node_pin n) {
   auxtab[v] = n;
   fmt::print("set alias {} <-> n{}\n", v, n.get_compact());
 }
 
-void Aux_node::set_pending(const std::string &v, Node n) {
+void Aux_node::set_pending(std::string_view v, Node_pin n) {
   pendtab[v] = n;
   fmt::print("set pending {} <-> n{}\n", v, n.get_compact());
 }
@@ -66,24 +66,24 @@ void Aux_tree::disconnect_child(Aux_node *parent, Aux_node *child, bool branch) 
   }
 }
 
-void Aux_tree::set_pending(const std::string &v, Node n) {
+void Aux_tree::set_pending(std::string_view v, Node_pin n) {
   Aux_node *cur_auxnd = get_cur_auxnd();
   cur_auxnd->set_pending(v, n);
 }
 
-void Aux_tree::set_alias(const std::string &v, Node n) {
+void Aux_tree::set_alias(std::string_view v, Node_pin n) {
   Aux_node *cur_auxnd = get_cur_auxnd();
   cur_auxnd->set_alias(v, n);
 }
 
-bool Aux_tree::has_alias(const std::string &v) const {
+bool Aux_tree::has_alias(std::string_view v) const {
   const Aux_node *cur_auxnd = get_cur_auxnd();
   // recursive check on parents
   return check_global_alias(cur_auxnd, v);
 }
 
 // check_global_alias() only checks "chain of patent auxtabs" and don't check sibling auxtab
-bool Aux_tree::check_global_alias(const Aux_node *auxnd, const std::string &v) const {
+bool Aux_tree::check_global_alias(const Aux_node *auxnd, std::string_view v) const {
   if(auxnd == nullptr)
     return false;
 
@@ -93,14 +93,14 @@ bool Aux_tree::check_global_alias(const Aux_node *auxnd, const std::string &v) c
   return check_global_alias(auxnd->parent, v);
 };
 
-Node Aux_tree::get_alias(const std::string &v) const {
+Node_pin Aux_tree::get_alias(std::string_view v) const {
   const Aux_node *cur_auxnd = get_cur_auxnd();
   // recursive search through parents
   return get_global_alias(cur_auxnd, v);
 }
 
 // get_global_alias() only gets "chain of patent auxtabs" and don't get sibling auxtab
-Node Aux_tree::get_global_alias(const Aux_node *auxnd, const std::string &v) const {
+Node_pin Aux_tree::get_global_alias(const Aux_node *auxnd, std::string_view v) const {
   if(auxnd->get_auxtab().find(v) != auxnd->get_auxtab().end())
     return auxnd->get_auxtab().at(v);
 
@@ -110,13 +110,13 @@ Node Aux_tree::get_global_alias(const Aux_node *auxnd, const std::string &v) con
   return get_global_alias(get_parent(auxnd), v);
 };
 
-bool Aux_tree::has_pending(const std::string &v) const {
+bool Aux_tree::has_pending(std::string_view v) const {
   const Aux_node *cur_auxnd = get_cur_auxnd()->parent;
   return check_global_pending(cur_auxnd, v); // recursive check on parents
 }
 
 // check_global_pending() only checks "chain of patent pendtabs" and don't check sibling pendtab
-bool Aux_tree::check_global_pending(const Aux_node *auxnd, const std::string &v) const {
+bool Aux_tree::check_global_pending(const Aux_node *auxnd, std::string_view v) const {
   if(auxnd == nullptr)
     return false;
 
@@ -126,13 +126,13 @@ bool Aux_tree::check_global_pending(const Aux_node *auxnd, const std::string &v)
   return check_global_pending(auxnd->parent, v);
 };
 
-Node Aux_tree::get_pending(const std::string &v) const {
+Node_pin Aux_tree::get_pending(std::string_view v) const {
   const Aux_node *cur_auxnd = get_cur_auxnd();
   return get_global_pending(cur_auxnd, v); // recursive search through parents
 }
 
 // get_global_pending() only gets "chain of patent pendtabs" and don't get sibling pendtab
-Node Aux_tree::get_global_pending(const Aux_node *auxnd, const std::string &v) const {
+Node_pin Aux_tree::get_global_pending(const Aux_node *auxnd, std::string_view v) const {
   if(auxnd->get_pendtab().find(v) != auxnd->get_pendtab().end())
     return auxnd->get_pendtab().at(v);
 
