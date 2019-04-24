@@ -6,9 +6,14 @@
 #include "cfg_node_data.hpp"
 
 CFG_Node_Data::CFG_Node_Data(const LGraph *g, Node node) {
-  std::string_view data_str = node.get_name();
 
-  fmt::print("cfg node data:{}\n", node.get_name());
+  std::string_view data_str;
+  if(node.has_name())
+    data_str = node.get_name();
+  else
+    data_str = "";
+
+  fmt::print("cfg node data:{}\n", data_str);
   if(data_str.empty()) {
     target       = EMPTY_MARKER;
     operator_txt = EMPTY_MARKER;

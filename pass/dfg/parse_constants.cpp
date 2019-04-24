@@ -36,7 +36,7 @@ Node Pass_dfg::resolve_constant(LGraph *g, Aux_tree *aux_tree, const std::string
   }
 
   // explicit bits width
-  if(token2nd.empty()) {
+  if(!token2nd.empty()) {
     explicit_bits = (uint32_t)std::stoi(token2nd);
   } else
     explicit_bits = 0;

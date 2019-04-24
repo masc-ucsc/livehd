@@ -39,7 +39,7 @@ void Pass_dfg::generate(Eprp_var &var) {
 
   std::vector<LGraph *> dfgs;
   for(auto &cfg : var.lgs) {
-    if(graph_name_ends_with(cfg->get_name(), "_cfg"))
+    if(!graph_name_ends_with(cfg->get_name(), "_cfg"))
       continue;
 
     dfgs = p.hier_generate_dfgs(cfg);
@@ -47,6 +47,7 @@ void Pass_dfg::generate(Eprp_var &var) {
 
   if(dfgs.empty()) {
     warn(fmt::format("pass.dfg.generate needs an input cfg lgraph. Either name or |> from lgraph.open"));
+    I(false);
     return;
   }
 }
@@ -174,7 +175,7 @@ void Pass_dfg::trans(LGraph *dfg) {
       for(auto &inp : node.inp_edges()){
         Node dnode = inp.driver.get_node();
         auto inp_name = dnode.get_driver_pin(0).get_name();
-        Node_pin dpin = dnode.get_driver_pin();
+        Node_pin dpin = dnode.get_driver_pin(0);
         Node_pin spin = sub_graph->get_graph_input(inp_name);
 
         fmt::print("inp_name:{}\n",inp_name);
@@ -283,7 +284,7 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
       for(auto &inp : node.inp_edges()){
         //SH:FIXME: Warning! this is workaround will be eventually wrong after MIT could handle subgraph
         if(inp.driver.get_bits() > inp.sink.get_bits()){
-          inp.sink.set_bits(inp.driver.get_bits());
+          inp.sink.get_node().setup_driver_pin(0).set_bits(inp.driver.get_bits());
           fmt::print("gio bitwidth less then source\n");
         } else {
           inp.driver.set_bits(inp.sink.get_bits());
@@ -308,7 +309,7 @@ void Pass_dfg::finalize_global_connect(LGraph *dfg, const Aux_node *auxnd_global
   for(const auto &pair : auxnd_global->get_pendtab()) {
     if(is_output(pair.first)) {
       auto spin = dfg->get_graph_output(pair.first.substr(1));
-      auto dpin = pair.second.setup_driver_pin();
+      auto dpin = pair.second.get_driver_pin(0);
 
       dfg->add_edge(dpin, spin);
     } else if(is_register(pair.first)) {
@@ -319,10 +320,15 @@ void Pass_dfg::finalize_global_connect(LGraph *dfg, const Aux_node *auxnd_global
 
 Node Pass_dfg::process_cfg(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, Node top_node) {
   Node itr = top_node;
+  bool finished = false;
 
-  while( ! (itr.get_driver_pin().is_graph_output() or itr.get_type().op == CfgIfMerge_Op)) {
+  while(!finished) {
     itr = process_node(dfg, cfg, aux_tree, itr);
-    fmt::print("cfg node:{} process finished!!\n\n", itr.get_driver_pin().get_name());
+    if(itr.get_driver_pin(0).is_graph_output() or itr.get_type().op == CfgIfMerge_Op){
+      finished = true;
+    }
+    if(itr.get_driver_pin(0).has_name())
+      fmt::print("cfg node:{} process finished!!\n\n", itr.get_driver_pin(0).get_name());
   }
   aux_tree->print_cur_auxnd();
   fmt::print("\n\n");
@@ -386,9 +392,9 @@ void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_t
     subg_root_node.set_type(DfgPendingGraph_Op);
     //re-assign correct subgraph name
     //SH:FIXME: should store subgraph name at "Node" if moving to "Node_pin" based design
-    subg_root_node.setup_driver_pin().set_name(oprds.at(0));
+    subg_root_node.setup_driver_pin(0).set_name(oprds.at(0));
     fmt::print("set pending graph on node:{}, sub_graph name should be:{}\n",
-                subg_root_node.get_compact(), subg_root_node.setup_driver_pin().set_name(oprds.at(0)));
+                subg_root_node.get_compact(), subg_root_node.setup_driver_pin(0).set_name(oprds.at(0)));
   }
 
   aux_tree->set_alias(target, oprd_nodes[0]);
@@ -424,7 +430,7 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
     } else {
       fmt::print("function argument assign\n");
       aux_tree->set_alias(target, oprd_node1);
-      oprd_node1.setup_driver_pin().set_name(oprds[0]);
+      oprd_node1.setup_driver_pin(0).set_name(oprds[0]);
       fmt::print("dst_subG_io:{}, assigned by:{}\n",oprds[0], oprds[1]);
     }
   } else if(is_tuple_op(op)){
@@ -438,7 +444,7 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
       I(oprd_node0.get_type_const_value());
       auto bits = (uint16_t)oprd_node0.get_type_const_value();
       //SH:FIXME: should set_bits on every Node_pin
-      target_node.setup_driver_pin().set_bits(bits);
+      target_node.setup_driver_pin(0).set_bits(bits);
       fmt::print("set_bits for i/o target:{}\n", target);
     } else {
       aux_tree->set_alias(target, oprd_node0);
@@ -595,7 +601,7 @@ void Pass_dfg::assign_to_true(LGraph *dfg, Aux_tree *aux_tree, const std::string
   Node dnode = create_true_const(dfg, aux_tree);
   Node snode = create_node(dfg, aux_tree, v);
   snode.set_type(Or_Op);
-  dfg->add_edge(dnode.setup_driver_pin(), snode.setup_sink_pin());
+  dfg->add_edge(dnode.setup_driver_pin(0), snode.setup_sink_pin());
 }
 
 void Pass_dfg::attach_outputs(LGraph *dfg, Aux_tree *aux_tree) {
@@ -639,7 +645,7 @@ Node Pass_dfg::find_cfg_root(LGraph *cfg) {
 
 Node Pass_dfg::get_cfg_child(LGraph *cfg, Node cfg_node) {
   //an graph output node is the terminate node
-  if(cfg_node.setup_driver_pin().is_graph_output())
+  if(cfg_node.setup_driver_pin(0).is_graph_output())
     return cfg_node;
 
   I(cfg_node.out_edges().size()==1); //note: "CfgIf_Op" will be handled specially
