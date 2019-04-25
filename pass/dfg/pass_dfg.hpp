@@ -37,8 +37,8 @@ private:
   Node process_node(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, const Node& cfg_node);
 
   void process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Data &data);
-  void finalize_global_connect(LGraph *dfg, const Aux_node *auxand_global);
-  void process_connections(LGraph *dfg, const std::vector<Node_pin> &driver_pins, const Node &sink_node);
+  void finalize_global_connect(LGraph *dfg, const Aux *auxand_global);
+  void process_connections(LGraph *dfg, const std::vector<Node_pin> &driver_pins, Node &sink_node);
 
   void process_func_call(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data);
 
@@ -47,12 +47,11 @@ private:
   //Node process_loop(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data, Node node);
 
   Node_pin process_operand(LGraph *dfg, Aux_tree *aux_tree, std::string_view oprd);
+  Node_pin process_target (LGraph *dfg, Aux_tree *aux_tree, std::string_view oprd, std::string_view op);
 
-  std::vector<Node_pin> process_operands(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Data &data);
 
-
-  void resolve_phis(LGraph *dfg, Aux_tree *aux_tee, Aux_node *pauxnd, Aux_node *tauxnd, Aux_node *fauxnd, Node cond);
-  void create_mux(LGraph *dfg, Aux_node *pauxnd, Node tid, Node fid, Node cond, const std::string &var);
+  void resolve_phis(LGraph *dfg, Aux_tree *aux_tee, Aux *paux, Aux *taux, Aux *faux, Node_pin cond);
+  void create_mux(LGraph *dfg, Aux *paux, Node_pin tid, Node_pin fid, Node_pin cond, std::string_view var);
 
   void attach_outputs(LGraph *dfg, Aux_tree *aux_tree);
   void add_fluid_behavior(LGraph *dfg, Aux_tree *aux_tree);
@@ -85,7 +84,7 @@ private:
 
   void assign_to_true(LGraph *dfg, Aux_tree *aux_tree, std::string_view v);
 
-  bool reference_changed(const Aux_node *parent, const Aux_node *branch, const std::string &v) {
+  bool reference_changed(const Aux *parent, const Aux *branch, const std::string &v) {
     if(!parent->has_alias(v))
       return true;
     return parent->get_alias(v).get_compact() != branch->get_alias(v).get_compact();
@@ -106,9 +105,11 @@ private:
   constexpr bool is_as_op(std::string_view v)          const { return v == "as"; }
   constexpr bool is_tuple_op(std::string_view v)       const { return v == "()"; }
 
-  constexpr bool is_unary_op(std::string_view v)   const { return (v == "!")  || (v == "not"); }
-  constexpr bool is_compute_op(std::string_view v) const { return (v == "+")  || (v == "-") || (v == "*"); }
-  constexpr bool is_compare_op(std::string_view v) const { return (v == "==") || (v == ">") || (v == ">=") || (v == "<") || (v == "<="); }
+  constexpr bool is_unary_op  (std::string_view v) const { return (v == "!")   || (v == "not"); }
+  constexpr bool is_binary_op (std::string_view v) const {return  (v == "&&")  || (v == "||") || (v == "&") ||
+                                                                  (v == "|")   || (v == "+")  || (v == "-") ||
+                                                                  (v == "*")   || (v == "==") || (v == ">") ||
+                                                                  (v == "<")   || (v == "<=") ;}
 
   Node_pin create_register     (LGraph *g, Aux_tree *aux_tree, std::string_view var_name);
   Node_pin create_input        (LGraph *g, Aux_tree *aux_tree, std::string_view var_name, uint16_t bits = 0);
