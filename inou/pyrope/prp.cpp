@@ -762,12 +762,16 @@ bool Prp::rule_lhs_expression(){
 /* FIXME: incomplete */
 bool Prp:: rule_rhs_expression_property(){
   fmt::print("Hello from rule_rhs_expression_property.\n");
+  ast->down();
   if(scan_is_token(Token_id_label)){
+    ast->add(Prp_rule_rhs_expression_property, scan_token());
     debug_consume(); // consume the label
     rule_tuple_notation(); // optional
+    ast->up(Prp_rule_rhs_expression_property);
     return true;
   }
-	return false;
+  ast->up(Prp_rule_rhs_expression_property);
+  return false;
 }
 
 bool Prp::rule_tuple_notation(){
@@ -807,101 +811,22 @@ bool Prp::rule_tuple_notation(){
     }
     else{
       if(!scan_is_token(Token_id_cp)){ return false; }
+      else{
+        debug_consume();
+        tokens_consumed++;
+        rule_tuple_by_notation() || rule_bit_selection_bracket(); // optional
+      }
     }
   }
   
   // consume_block(Prp_rule_tuple_notation, lookahead_count);
+  fmt::print("fits rule_tuple_notation\n");
   return true;
 }
 
 bool Prp::rule_range_notation(){
   return false;
 }
-
-/*
-bool Prp::rule_tuple_notation(){
-  fmt::print("Hello from rule_tuple_notation.\n");
-	int tokens_consumed = 0;
-  int levels_down = 0;
-  
-	// first option
-	bool next = scan_is_token(Token_id_op); // all the first three require this
-  if(next){
-    ast->add(Prp_rule_tuple_notation, scan_token());
-		debug_consume(); // consume the LPAR
-    tokens_consumed++;
-  }
-	
-	if(next){
-		// bit_selection_notation+
-		do{
-			next = rule_bit_selection_notation();
-		} while(rule_bit_selection_notation());
-		if(next){
-			next = scan_is_token(Token_id_cp);
-			if(next){
-				debug_consume(); // consume the RPAR
-				tokens_consumed++;
-				next = rule_tuple_by_notation() || rule_bit_selection_bracket();
-				return true;
-			}
-		}
-	}
-	
-	if(tokens_consumed > 0){
-    go_back(tokens_consumed-1);
-    
-    // second option
-    tokens_consumed = 1;
-  }
-	
-	if(next){
-		next = rule_rhs_expression_property() || rule_logical_expression();
-		if(next){
-			// can be any number of the following
-			while(next){
-				next = scan_is_token(Token_id_comma);
-				if(next){
-					debug_consume(); // consume the comma
-					tokens_consumed++;
-					if(!(rule_rhs_expression_property() || rule_logical_expression())){
-            go_back(tokens_consumed);
-            return false;
-          }
-				}
-			}
-			
-			next = scan_is_token(Token_id_cp);
-			if(next){
-				debug_consume();
-				tokens_consumed++;
-			}
-			next = rule_tuple_by_notation() || rule_bit_selection_bracket(); // optional
-			return true;
-		}
-  }
-		
-	if(tokens_consumed > 0){
-    go_back(tokens_consumed-1);
-    
-    // third option
-    tokens_consumed = 1;
-  }
-  
-  if(next){
-    next = scan_is_token(Token_id_cp);
-    return next;
-  }
-	
-	// fourth option
-  bool ok = rule_bit_selection_notation();
-  if(ok){
-    go_back(tokens_consumed);
-    return true;
-  }
-  return false;
-}
-*/
 
 bool Prp::rule_bit_selection_notation(){
   fmt::print("Hello from rule_bit_selection_notation.\n");
@@ -1028,11 +953,12 @@ bool Prp::rule_constant(){
   int tokens_consumed = 0;
   fmt::print("Hello from rule_constant.\n");
   if(scan_is_token(Token_id_minus)){
+    ast->add(Prp_rule_constant, scan_token());
     debug_consume();
     tokens_consumed++;
   }
 	if(scan_is_token(Token_id_num)){
-    std::cout << "Found a constant: " << scan_text() << std::endl; 
+    ast->add(Prp_rule_constant, scan_token());
 		debug_consume();
 		return true;
 	}
@@ -1561,19 +1487,12 @@ void Prp::consume_block(Rule_id rid, int num_tok){
   }
 }
 
-/*void Prp::go_up(int num_levels){
-  int i;
-  for(i=1;i<num_levels;i++){
-    ast->up_null();
-  }
-}*/
-
 void Prp::ast_handler(){
   std::string rule_name;
   for(const auto &it:ast->depth_preorder(ast->get_root())) {
     auto node = ast->get_data(it);
     
-    /*switch(node.rule_id){
+    switch(node.rule_id){
       case Prp_invalid:
         rule_name.assign("Invalid");
         break;
@@ -1666,6 +1585,6 @@ void Prp::ast_handler(){
         break;
     }
     auto token_text = scan_text(node.token_entry);
-    fmt::print("Rule name: {}, Token text: {}, Tree level: {}\n", rule_name, token_text, it.level);*/
+    fmt::print("Rule name: {}, Token text: {}, Tree level: {}\n", rule_name, token_text, it.level);
   }
 }
