@@ -753,24 +753,22 @@ bool Prp::rule_assignment_expression(){
 /* FIXME: add range notation rule */
 bool Prp::rule_lhs_expression(){
   fmt::print("Hello from rule_lhs_expression.\n");
-  ast->down();
   bool ok = rule_tuple_notation() || rule_range_notation();
-  ast->up(Prp_rule_lhs_expression);
   return ok;
 }
 
 /* FIXME: incomplete */
 bool Prp:: rule_rhs_expression_property(){
   fmt::print("Hello from rule_rhs_expression_property.\n");
-  ast->down();
   if(scan_is_token(Token_id_label)){
-    ast->add(Prp_rule_rhs_expression_property, scan_token());
+    ast->down();
+    ast->add(Prp_rule_identifier, scan_token());
     debug_consume(); // consume the label
     rule_tuple_notation(); // optional
     ast->up(Prp_rule_rhs_expression_property);
+    ast->add(Prp_rule_rhs_expression_property, 0);
     return true;
   }
-  ast->up(Prp_rule_rhs_expression_property);
   return false;
 }
 
@@ -785,6 +783,9 @@ bool Prp::rule_tuple_notation(){
   }
   // options 2 and 3
   else{
+    ast->down();
+    ast->down();
+    ast->add(Prp_rule_tuple_notation, scan_token());
     debug_consume();
     tokens_consumed++;
     fmt::print("rule_tuple_notation: trying options 2 and 3.\n");
@@ -794,6 +795,7 @@ bool Prp::rule_tuple_notation(){
       // zero or more of the following
       while(next){
         if(scan_is_token(Token_id_comma)){
+          ast->add(Prp_rule_tuple_notation, scan_token());
           debug_consume();
           tokens_consumed++;
           if(!(rule_rhs_expression_property() || rule_logical_expression())){
@@ -804,6 +806,7 @@ bool Prp::rule_tuple_notation(){
       }
       if(!scan_is_token(Token_id_cp)){ return false; }
       else{
+        ast->add(Prp_rule_tuple_notation, scan_token());
         debug_consume();
         tokens_consumed++;
         rule_tuple_by_notation() || rule_bit_selection_bracket(); // optional
@@ -812,14 +815,15 @@ bool Prp::rule_tuple_notation(){
     else{
       if(!scan_is_token(Token_id_cp)){ return false; }
       else{
+        ast->add(Prp_rule_tuple_notation, scan_token());
         debug_consume();
         tokens_consumed++;
         rule_tuple_by_notation() || rule_bit_selection_bracket(); // optional
       }
     }
+    ast->up(Prp_rule_tuple_notation);
+    ast->up(Prp_rule_tuple_notation);
   }
-  
-  // consume_block(Prp_rule_tuple_notation, lookahead_count);
   fmt::print("fits rule_tuple_notation\n");
   return true;
 }
@@ -879,12 +883,9 @@ bool Prp::rule_tuple_array_notation(){
 
 bool Prp::rule_lhs_var_name(){
   fmt::print("Hello from rule_lhs_var_name.\n");
-  ast->down();
 	if(rule_identifier() || rule_constant()){
-    ast->up(Prp_rule_lhs_var_name);
     return true;
   }
-  ast->up(Prp_rule_lhs_var_name);
   return false;
 }
 
@@ -1118,9 +1119,7 @@ bool Prp::rule_bit_selection_bracket(){
 bool Prp::rule_logical_expression(){
   int tokens_consumed = 0;
   bool next = true;
-  
   ast->down();
-  
   fmt::print("Hello from rule_logical_expression.\n");
   if (rule_relational_expression()){
     /* zero or more of the following */
