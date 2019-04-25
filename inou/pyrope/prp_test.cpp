@@ -1,6 +1,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <iostream>
 
 #include "prp.hpp"
 
@@ -29,28 +30,4 @@ int main(int argc, char **argv){
 
 	scanner.parse(argv[1], memblock, sb.st_size);
 }
-
-#if 0
-
-TEST_F(PrpMainTest, constant_neg) {
-
-  std::string_view txt{" $c as __bits:3\n
-d  as __bits:3\n
-d = -3\n
-%out as __bits:4\n
-%out = $c + d"
-};
-
-	Prp scanner;
-
-  scanner.parse(txt,txt.size());
-
-  XXXX.tree.traverse() {
-    YYYY.push back in vector();
-  }
-
-  EXPECT_.... cmp YYYY m "{out} c d"
-
-}
-#endif
 

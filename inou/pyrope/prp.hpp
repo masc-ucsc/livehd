@@ -111,7 +111,7 @@ protected:
     Prp_rule_fcall_arg_notation,
   };
   
-  void elaborate() final;
+  void elaborate();
   
   void eat_comments();
   
