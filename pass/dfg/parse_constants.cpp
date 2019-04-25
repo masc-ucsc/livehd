@@ -271,6 +271,8 @@ Node Pass_dfg::process_bin_token_with_dc(LGraph *g, const std::string &token, bo
 Node Pass_dfg::create_const32_node(LGraph *g, const std::string &val_str, uint16_t node_bit_width, bool is_signed) {
   uint32_t val = cal_bin_val_32b(val_str);
   Node node_const32 = g->create_node_const(val, node_bit_width);
+  I(val_str == std::to_string(node_const32.get_type_const_value()));
+  node_const32.setup_driver_pin().set_name(val_str);
 
   //SH:FIXME: Attribute for Node_pin explicit/implicit bitwidth??? TBD.
   /*

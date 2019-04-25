@@ -56,16 +56,16 @@ public:
     pendtab.erase(v);
   }
   void print_aux();
-  const absl::flat_hash_map<std::string_view, Node_pin> &get_auxtab() const {
+  const absl::flat_hash_map<std::string, Node_pin> &get_auxtab() const {
     return auxtab;
   }
-  const absl::flat_hash_map<std::string_view, Node_pin> &get_pendtab() const {
+  const absl::flat_hash_map<std::string, Node_pin> &get_pendtab() const {
     return pendtab;
   }
 
 private:
-  absl::flat_hash_map<std::string_view, Node_pin> auxtab;
-  absl::flat_hash_map<std::string_view, Node_pin> pendtab;
+  absl::flat_hash_map<std::string, Node_pin> auxtab;
+  absl::flat_hash_map<std::string, Node_pin> pendtab;
 };
 
 class Aux_tree {
@@ -83,6 +83,7 @@ public:
   void            disconnect_child(Aux_node *parent, Aux_node *child, bool branch);
   bool            is_root_aux(const Aux_node *auxtab) const; // for chained parents aux_tabs checking
   Aux_node *      get_root();
+
   //SH:FIXME: dangerous approach to return handles(i.e., pointer, reference etc) of a object. Other approach?
   //SH:FIXME: at least change to return const to avoid client write
   //SH:FIXME: another risk is the Aux_node object might not exist anymore -> returning a garbage.

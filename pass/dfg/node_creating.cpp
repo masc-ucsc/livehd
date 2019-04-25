@@ -22,14 +22,12 @@ Node_pin Pass_dfg::create_register(LGraph *g, Aux_tree *aux_tree, std::string_vi
 Node_pin Pass_dfg::create_input(LGraph *g, Aux_tree *aux_tree, std::string_view var_name, uint16_t bits) {
   var_name.remove_prefix(1); //get rid of $mark
   auto pin = g->add_graph_input(var_name, bits, 0);
-  pin.set_name(var_name);
   return pin;
 }
 
 Node_pin Pass_dfg::create_output(LGraph *g, Aux_tree *aux_tree, std::string_view var_name, uint16_t bits) {
   var_name.remove_prefix(1); //get rid of %mark
   auto pin = g->add_graph_output(var_name, bits, 0); // get rid of %mark
-  pin.set_name(var_name);
   return pin;
 }
 
@@ -41,7 +39,6 @@ Node_pin Pass_dfg::create_private(LGraph *g, Aux_tree *aux_tree, std::string_vie
 
 Node_pin Pass_dfg::create_const32(LGraph *g, uint32_t val, uint16_t node_bit_width, bool is_signed) {
   Node_pin pin = create_const32_node(g, std::to_string(val), node_bit_width, is_signed).setup_driver_pin(0);
-  pin.set_name(std::to_string(val));
   return pin;
 }
 
