@@ -1,5 +1,5 @@
-$a as __bits:2
-%o as __bits:3
+$a as (__bits:2)
+%o as (__bits:3)
 
 %o = 4
 if $a == 2 {

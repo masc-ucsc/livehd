@@ -5,8 +5,9 @@
 #include "lgraph.hpp"
 #include "pass_dfg.hpp"
 
+//SH:FIXME: need to think the pyrope reference syntax design
 Node_pin Pass_dfg::create_reference(LGraph *g, Aux_tree *aux_tree, std::string_view var_name) {
-  var_name.remove_prefix(1);//SH:FIXME: need to think the pyrope reference syntax design
+  var_name.remove_prefix(1);
   Node_pin pin = create_node_and_pin(g, aux_tree, var_name);
   pin.get_node().set_type(DfgRef_Op);
   return pin;
@@ -47,19 +48,22 @@ Node_pin Pass_dfg::create_const32(LGraph *g, uint32_t val, uint16_t node_bit_wid
 
 Node_pin Pass_dfg::create_default_const(LGraph *g) {
   Node_pin pin = g->create_node_const(0,1).setup_driver_pin();
-  pin.set_name("default_const");
+  if(!pin.has_name())
+    pin.set_name("default_const");
   return pin;
 }
 
 Node_pin Pass_dfg::create_true_const(LGraph *g) {
   Node_pin pin = g->create_node_const(1,1).setup_driver_pin();
-  pin.set_name("true");
+  if(!pin.has_name())
+    pin.set_name("true");
   return pin;
 }
 
 Node_pin Pass_dfg::create_false_const(LGraph *g) {
   Node_pin pin = g->create_node_const(0,1).setup_driver_pin();
-  pin.set_name("true");
+  if(!pin.has_name())
+    pin.set_name("true");
   return pin;
 }
 
@@ -67,7 +71,7 @@ Node_pin Pass_dfg::create_node_and_pin(LGraph *g, Aux_tree *aux_tree, std::strin
   I(!v.empty());
   Node node = g->create_node();
   node.setup_driver_pin(0).set_name(v);
-  aux_tree->set_alias(v, node.get_driver_pin(0));
+  //aux_tree->set_alias(v, node.get_driver_pin(0));
   return node.get_driver_pin(0);
 }
 
@@ -78,13 +82,13 @@ Node_pin Pass_dfg::create_AND(LGraph *g, Aux_tree *aux_tree, Node_pin op1, Node_
 Node_pin Pass_dfg::create_OR(LGraph *g, Aux_tree *aux_tree, Node_pin op1, Node_pin op2) {
   return create_binary(g, aux_tree, op1, op2, Or_Op);
 }
-
 Node_pin Pass_dfg::create_binary(LGraph *g, Aux_tree *aux_tree, Node_pin op1, Node_pin op2, Node_Type_Op oper) {
   Node sink_node = g->create_node();
   sink_node.set_type(oper);
   g->add_edge(op1, sink_node.setup_sink_pin(0));
   g->add_edge(op2, sink_node.setup_sink_pin(0));
-  return sink_node.setup_driver_pin(0); //SH:FIXME: need to extend to multi-output-pin Node Type
+  //SH:FIXME: need to extend to multi-output-pin Node Type
+  return sink_node.setup_driver_pin(0);
 }
 
 Node_pin Pass_dfg::create_NOT(LGraph *g, Aux_tree *aux_tree, Node_pin op1) {
@@ -105,13 +109,26 @@ Node_Type_Op Pass_dfg::node_type_from_text(std::string_view operator_text) const
     return LessEqualThan_Op;
   } else if(operator_text == ">") {
     return LessThan_Op;
-  } else if(operator_text == "=" || operator_text == "as" || operator_text == ":") {
+  } else if(operator_text == "=" || operator_text == "as" || operator_text == ":" ) {
     return Or_Op; // reduction or
-  } else if(operator_text == "+") {
+  } else if (operator_text == "()"){
+    return Or_Op; // SH:FIXME: tuple not implemented yet
+  }else if(operator_text == "+" || operator_text == "-") {
     return Sum_Op;
+  } else if(operator_text == "*") {
+    return Mult_Op;
+  } else if(operator_text == "/") {
+    return Div_Op;
+  } else if(operator_text == "!" || operator_text == "~"){
+    return Not_Op;
+  } else if(operator_text == "&") {
+    return And_Op;
+  } else if(operator_text == "^") {
+    return Xor_Op;
+  } else if(operator_text == "|") {
+    return Or_Op;
   } else {
     fmt::print("Operator: {}\n", operator_text);
-    I(false);
     return Invalid_Op;
   }
 }
