@@ -83,7 +83,7 @@ bool eligable_cell_op(Node_Type_Op cell_op) {
         case ShiftLeft_Op:
           break;
         default:
-          fmt::print("Node: Unknown\n");
+          //fmt::print("Node: Unknown\n");
           return false;
       }
       return true;
@@ -100,17 +100,30 @@ void Pass_mockturtle::do_work(LGraph *g) {
   for(const auto &nid : g->forward()) {
     auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
 
+    fmt::print("Node identifier:{}\n", node.get_compact());
     if (eligable_cell_op(node.get_type().op)) {
 
       if (group_boundary.find(node.get_compact())==group_boundary.end()) {
-            group_id++;
-            group_boundary[node.get_compact()] = group_id;
+
+        int current_node_group_id = 0;
+
+        for(const auto &in_edge : node.inp_edges()) {
+          auto peer_driver_node = in_edge.driver.get_node();
+          if (group_boundary.find(peer_driver_node.get_compact())!=group_boundary.end())
+            current_node_group_id = group_boundary[peer_driver_node.get_compact()];
+        }
+
+        if (current_node_group_id == 0) {
+          group_id++;
+          current_node_group_id = group_id;
+        }
+        group_boundary[node.get_compact()] = current_node_group_id;
       }
 
       for(const auto &out_edge : node.out_edges()) {
-        auto peer_node = out_edge.sink.get_node();
-        if (eligable_cell_op(peer_node.get_type().op))
-          group_boundary[peer_node.get_compact()] = group_boundary[node.get_compact()];
+        auto peer_sink_node = out_edge.sink.get_node();
+        if (eligable_cell_op(peer_sink_node.get_type().op))
+          group_boundary[peer_sink_node.get_compact()] = group_boundary[node.get_compact()];
       }
     }
     cell_amount++;
