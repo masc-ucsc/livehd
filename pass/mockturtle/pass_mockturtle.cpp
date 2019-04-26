@@ -78,9 +78,15 @@ bool eligable_cell_op(Node_Type_Op cell_op) {
           break;
         case Equals_Op:
           break;
-        case ShiftRight_Op:
+        //case ShiftRight_Op:
+        //  break;
+        //case ShiftLeft_Op:
+        //  break;
+        case Not_Op:
           break;
-        case ShiftLeft_Op:
+        case Join_Op:
+          break;
+        case Pick_Op:
           break;
         default:
           //fmt::print("Node: Unknown\n");
