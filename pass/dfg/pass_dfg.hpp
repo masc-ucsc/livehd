@@ -32,23 +32,23 @@ protected:
 
 private:
   Node find_cfg_root(LGraph *cfg);
-  Node get_cfg_child(LGraph *cfg, Node cfg_node);
-  Node process_cfg(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, Node top_node);
-  Node process_node(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, Node node);
+  Node get_cfg_child(LGraph *cfg, const Node& cfg_node);
+  Node process_cfg(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, const Node& top_node);
+  Node process_node(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, const Node& cfg_node);
 
   void process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Data &data);
   void finalize_global_connect(LGraph *dfg, const Aux_node *auxand_global);
-  void process_connections(LGraph *dfg, const std::vector<Node> &driver_nodes, const Node &sink_node);
+  void process_connections(LGraph *dfg, const std::vector<Node_pin> &driver_pins, const Node &sink_node);
 
   void process_func_call(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data);
 
   Node process_if(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data, Node node);
 
-  Node process_loop(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data, Node node);
+  //Node process_loop(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data, Node node);
 
-  Node process_operand(LGraph *dfg, Aux_tree *aux_tree, const std::string &oprd);
+  Node_pin process_operand(LGraph *dfg, Aux_tree *aux_tree, std::string_view oprd);
 
-  std::vector<Node> process_operands(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Data &data);
+  std::vector<Node_pin> process_operands(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Data &data);
 
 
   void resolve_phis(LGraph *dfg, Aux_tree *aux_tee, Aux_node *pauxnd, Aux_node *tauxnd, Aux_node *fauxnd, Node cond);
@@ -83,7 +83,7 @@ private:
     return std::string(RETRY_MARKER) + v;
   }
 
-  void assign_to_true(LGraph *dfg, Aux_tree *aux_tree, const std::string &v);
+  void assign_to_true(LGraph *dfg, Aux_tree *aux_tree, std::string_view v);
 
   bool reference_changed(const Aux_node *parent, const Aux_node *branch, const std::string &v) {
     if(!parent->has_alias(v))
@@ -95,7 +95,7 @@ private:
   constexpr bool is_input(std::string_view v)        const { return v.at(0) == INPUT_MARKER; }
   constexpr bool is_output(std::string_view v)       const { return v.at(0) == OUTPUT_MARKER; }
   constexpr bool is_reference(std::string_view v)    const { return v.at(0) == REFERENCE_MARKER; }
-  constexpr bool is_constant(std::string_view v)     const { return (v.at(0) == '0' || v.at(0) == '-'); }
+  constexpr bool is_constant(std::string_view v)     const { return (v.at(0) == POS_CONST_MARKER || v.at(0) == NEG_CONST_MARKER); }
   constexpr bool is_read_marker(std::string_view v)  const { return v.substr(0, READ_MARKER.length()) == READ_MARKER; }
   constexpr bool is_write_marker(std::string_view v) const { return v.substr(0, WRITE_MARKER.length()) == WRITE_MARKER; }
   constexpr bool is_valid_marker(std::string_view v) const { return v.substr(0, VALID_MARKER.length()) == VALID_MARKER; }
@@ -106,34 +106,34 @@ private:
   constexpr bool is_as_op(std::string_view v)          const { return v == "as"; }
   constexpr bool is_tuple_op(std::string_view v)       const { return v == "()"; }
 
-  constexpr bool is_unary_op(std::string_view v)   const { return (v == "!") || (v == "not"); }
-  constexpr bool is_compute_op(std::string_view v) const { return (v == "+"); }
+  constexpr bool is_unary_op(std::string_view v)   const { return (v == "!")  || (v == "not"); }
+  constexpr bool is_compute_op(std::string_view v) const { return (v == "+")  || (v == "-") || (v == "*"); }
   constexpr bool is_compare_op(std::string_view v) const { return (v == "==") || (v == ">") || (v == ">=") || (v == "<") || (v == "<="); }
 
-  Node create_register(LGraph *g, Aux_tree *aux_tree, const std::string &var_name);
-  Node create_input(LGraph *g, Aux_tree *aux_tree, const std::string &var_name, uint16_t bits = 0);
-  Node create_output(LGraph *g, Aux_tree *aux_tree, const std::string &var_name, uint16_t bits = 0);
-  Node create_private(LGraph *g, Aux_tree *aux_tree, const std::string &var_name);
-  Node create_reference(LGraph *g, Aux_tree *aux_tree, const std::string &var_name);
-  Node create_node(LGraph *g, Aux_tree *aux_tree, const std::string &v);
-  Node create_default_const(LGraph *g);
-  Node create_true_const(LGraph *g, Aux_tree *aux_tree);
-  Node create_const32_node(LGraph *g, uint32_t val, uint16_t node_bit_width, bool is_signed);
-  Node create_false_const(LGraph *g, Aux_tree *aux_tree);
+  Node_pin create_register     (LGraph *g, Aux_tree *aux_tree, std::string_view var_name);
+  Node_pin create_input        (LGraph *g, Aux_tree *aux_tree, std::string_view var_name, uint16_t bits = 0);
+  Node_pin create_output       (LGraph *g, Aux_tree *aux_tree, std::string_view var_name, uint16_t bits = 0);
+  Node_pin create_private      (LGraph *g, Aux_tree *aux_tree, std::string_view var_name);
+  Node_pin create_reference    (LGraph *g, Aux_tree *aux_tree, std::string_view var_name);
+  Node_pin create_node_and_pin (LGraph *g, Aux_tree *aux_tree, std::string_view v);
+  Node_pin create_const32      (LGraph *g, uint32_t val, uint16_t node_bit_width, bool is_signed);
+  Node_pin create_default_const(LGraph *g);
+  Node_pin create_true_const   (LGraph *g);
+  Node_pin create_false_const  (LGraph *g);
 
-  Node create_AND(LGraph *g, Aux_tree *aux_tree, Node op1, Node op2);
-  Node create_OR(LGraph *g, Aux_tree *aux_tree, Node op1, Node op2);
-  Node create_binary(LGraph *g, Aux_tree *aux_tree, Node op1, Node op2, Node_Type_Op oper);
-  Node create_NOT(LGraph *g, Aux_tree *aux_tree, Node op1);
+  Node_pin create_AND(LGraph *g, Aux_tree *aux_tree, Node_pin op1, Node_pin op2);
+  Node_pin create_OR (LGraph *g, Aux_tree *aux_tree, Node_pin op1, Node_pin op2);
+  Node_pin create_binary(LGraph *g, Aux_tree *aux_tree, Node_pin op1, Node_pin op2, Node_Type_Op oper);
+  Node_pin create_NOT(LGraph *g, Aux_tree *aux_tree, Node_pin op1);
 
   Node_Type_Op node_type_from_text(std::string_view operator_text) const;
 
-  Node     resolve_constant(LGraph *g, Aux_tree *aux_tree, const std::string &str_in);
-  Node     process_bin_token(LGraph *g, const std::string &token1st, const uint16_t &bit_width, bool is_signed);
-  Node     process_bin_token_with_dc(LGraph *g, const std::string &token1st,bool is_signed);
-  uint32_t cal_bin_val_32b(const std::string &);
-  Node     create_const32_node(LGraph *g, const std::string &, uint16_t node_bit_width, bool is_signed);
-  Node     create_dontcare_node(LGraph *g, uint16_t node_bit_width);
+  Node        resolve_constant(LGraph *g, std::string_view str_in);
+  Node        process_bin_token(LGraph *g, const std::string &token1st, const uint16_t &bit_width, bool is_signed);
+  Node        process_bin_token_with_dc(LGraph *g, const std::string &token1st,bool is_signed);
+  uint32_t    cal_bin_val_32b(const std::string &);
+  Node        create_const32_node(LGraph *g, const std::string &, uint16_t node_bit_width, bool is_signed);
+  Node        create_dontcare_node(LGraph *g, uint16_t node_bit_width);
   std::string hex_char_to_bin(char c);
   std::string hex_msb_char_to_bin(char c);
 

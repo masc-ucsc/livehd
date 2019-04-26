@@ -263,18 +263,53 @@ const Tree_index Tree<X>::get_depth_preorder_next(const Tree_index &child) const
   I(child.level < pointers_stack.size());
   I(child.pos   < pointers_stack[child.level].size());
   
+  if(pointers_stack.size()-1 > child.level){
+    Tree_pos i = 0;
+    for(auto it = begin(pointers_stack[child.level+1]); it != end(pointers_stack[child.level+1]); ++it){
+      if(it->parent == child.pos){ // the node on the next level is a child of our node
+        return Tree_index(child.level+1, i);
+      }
+      i = i + 1;
+    }
+  }
+  
+  if(pointers_stack[child.level][child.pos].younger_sibling != -1){
+    return Tree_index(child.level, pointers_stack[child.level][child.pos].younger_sibling);
+  }
+  else{
+    auto this_node = pointers_stack[child.level][child.pos];
+    auto prev_level = child.level - 1;
+    auto parent_pos = this_node.parent;
+    
+    while(prev_level > 0){
+      auto next_node = pointers_stack[prev_level][parent_pos];
+      if(next_node.younger_sibling != -1){
+        return Tree_index(prev_level, next_node.younger_sibling);
+      }
+      prev_level = prev_level - 1;
+      parent_pos = next_node.parent;
+    }
+  }
+  
+  return Tree_index(-1,-1);
+  
+  /*fmt::print("Starting node: level: {}, position: {}\n", child.level, child.pos);
   auto node = pointers_stack[child.level][child.pos];
+  fmt::print("Starting node: eldest child: {}, youngest child: {}, parent: {}, younger sibling: {}\n", node.younger_child, node.eldest_child, node.parent, node.younger_sibling);
   
   if(node.younger_child != -1){ // case: has children
+    fmt::print("Has children\n");
     // return the eldest child
     Tree_index return_index = Tree_index(child.level+1, node.younger_child);
     return return_index;
   }
   else{ // case: does not have children
     if(node.younger_sibling != -1){
+      fmt::print("Has no children, but has at least one sibling\n");
       return Tree_index(child.level, node.younger_sibling); // return the younger sibling
     }
     else{
+      fmt::print("Has no children and no siblings\n");
       Tree_level prev_level = child.level - 1;
       Tree_pos parent_pos = node.parent;
       while(1){
@@ -289,7 +324,7 @@ const Tree_index Tree<X>::get_depth_preorder_next(const Tree_index &child) const
         parent_pos = next_node.parent;
       }
     }
-  }
+  }*/
 
   // I(pointers_stack[0].size() == 1); // One single root
 

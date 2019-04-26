@@ -30,6 +30,7 @@ public:
 
   std::string encode() const;
   void                            modify_operator(std::string new_op) {operator_txt = new_op;}
+  //SH:FIXME:ASK: avoid return a const reference of an object!?
   const std::string              &get_target()   const { return target; }
   std::string_view                get_operator() const { return operator_txt; }
   const std::vector<std::string> &get_operands() const { return operands; }

@@ -8,6 +8,8 @@ cc_library(
     includes = ["."],
     deps = [
         "//core:core",
+        "@mockturtle//:mockturtle",
+        "@fmt//:fmt",
     ]
 )
 

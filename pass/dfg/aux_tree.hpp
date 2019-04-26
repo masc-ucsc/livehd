@@ -21,52 +21,51 @@ const char    REGISTER_MARKER  = '@';
 const char    INPUT_MARKER     = '$';
 const char    OUTPUT_MARKER    = '%';
 const char    REFERENCE_MARKER = '\\';
+const char    POS_CONST_MARKER = '0';
+const char    NEG_CONST_MARKER = '-';
 const Port_ID REG_INPUT        = 'D';
 const Port_ID REG_OUTPUT       = 'Q';
 
 class Aux_node {
 public:
-  Aux_node()
-      : lchild(nullptr)
-      , rchild(nullptr)
-      , parent(nullptr){};
+  Aux_node():lchild(nullptr), rchild(nullptr), parent(nullptr){};
   virtual ~Aux_node(){};
   //SH:FIXME: should move to private data member and use setter/getter function?
   Aux_node *lchild;
   Aux_node *rchild;
   Aux_node *parent;
 
-  void set_alias(const std::string &v, Node n);
-  Node get_alias(const std::string &v) const {
+  void set_alias(std::string_view v, Node_pin n);
+  Node_pin get_alias(std::string_view v) const {
     return auxtab.at(v);
   }
-  bool has_alias(const std::string &v) const {
+  bool has_alias(std::string_view v) const {
     return auxtab.find(v) != auxtab.end();
   }
-  void del_alias(const std::string &v) {
+  void del_alias(std::string_view v) {
     auxtab.erase(v);
   }
-  void set_pending(const std::string &v, Node n);
-  Node get_pending(const std::string &v) const {
+  void set_pending(std::string_view v, Node_pin n);
+  Node_pin get_pending(const std::string &v) const {
     return pendtab.at(v);
   }
-  bool has_pending(const std::string &v) const {
+  bool has_pending(std::string_view v) const {
     return pendtab.find(v) != pendtab.end();
   }
-  void del_pending(const std::string &v) {
+  void del_pending(std::string_view v) {
     pendtab.erase(v);
   }
   void print_aux();
-  const std::unordered_map<std::string, Node> &get_auxtab() const {
+  const absl::flat_hash_map<std::string_view, Node_pin> &get_auxtab() const {
     return auxtab;
   }
-  const std::unordered_map<std::string, Node> &get_pendtab() const {
+  const absl::flat_hash_map<std::string_view, Node_pin> &get_pendtab() const {
     return pendtab;
   }
 
 private:
-  std::unordered_map<std::string, Node> auxtab;
-  std::unordered_map<std::string, Node> pendtab;
+  absl::flat_hash_map<std::string_view, Node_pin> auxtab;
+  absl::flat_hash_map<std::string_view, Node_pin> pendtab;
 };
 
 class Aux_tree {
@@ -88,22 +87,22 @@ public:
   //SH:FIXME: at least change to return const to avoid client write
   //SH:FIXME: another risk is the Aux_node object might not exist anymore -> returning a garbage.
   Aux_node*       get_cur_auxnd() const;
-  void            set_alias(const std::string &v, Node n);
-  bool            has_alias(const std::string &v) const;
-  Node            get_alias(const std::string &v) const;
-  void            set_pending(const std::string &v, Node n);
-  bool            has_pending(const std::string &v) const;
-  Node            get_pending(const std::string &v) const;
+  void            set_alias(std::string_view v, Node_pin n);
+  bool            has_alias(std::string_view v) const;
+  Node_pin        get_alias(std::string_view v) const;
+  void            set_pending(std::string_view v, Node_pin n);
+  bool            has_pending(std::string_view v) const;
+  Node_pin        get_pending(std::string_view v) const;
   void            print_cur_auxnd();
   void            auxes_stack_pop() {auxes_stack.pop_back();};
 
 private:
   Aux_node *              root_auxnd;
   std::vector<Aux_node *> auxes_stack; // for tracking latest aux_node
-  bool                    check_global_alias  (const Aux_node *auxnd, const std::string &v) const;
-  Node                    get_global_alias    (const Aux_node *auxnd, const std::string &v) const;
-  bool                    check_global_pending(const Aux_node *auxnd, const std::string &v) const;
-  Node                    get_global_pending  (const Aux_node *auxnd, const std::string &v) const;
+  bool                    check_global_alias  (const Aux_node *auxnd, std::string_view v) const;
+  Node_pin                get_global_alias    (const Aux_node *auxnd, std::string_view v) const;
+  bool                    check_global_pending(const Aux_node *auxnd, std::string_view v) const;
+  Node_pin                get_global_pending  (const Aux_node *auxnd, std::string_view v) const;
 };
 
 #endif
