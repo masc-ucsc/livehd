@@ -94,6 +94,7 @@ void Pass_mockturtle::do_work(LGraph *g) {
 
   //absl::flat_hash_map<Node::Compact, std::pair<std::string,std::pair<int,int>>> cell_type;
   absl::flat_hash_map<Node::Compact, int> group_boundary;
+  std::map<int, int> group_id_mapping;
   int cell_amount = 0;
   int group_id = 0;
 
@@ -109,8 +110,10 @@ void Pass_mockturtle::do_work(LGraph *g) {
 
         for(const auto &in_edge : node.inp_edges()) {
           auto peer_driver_node = in_edge.driver.get_node();
-          if (group_boundary.find(peer_driver_node.get_compact())!=group_boundary.end())
+          if (group_boundary.find(peer_driver_node.get_compact())!=group_boundary.end()) {
             current_node_group_id = group_boundary[peer_driver_node.get_compact()];
+            break;
+          }
         }
 
         if (current_node_group_id == 0) {
@@ -122,8 +125,14 @@ void Pass_mockturtle::do_work(LGraph *g) {
 
       for(const auto &out_edge : node.out_edges()) {
         auto peer_sink_node = out_edge.sink.get_node();
-        if (eligable_cell_op(peer_sink_node.get_type().op))
-          group_boundary[peer_sink_node.get_compact()] = group_boundary[node.get_compact()];
+        if (eligable_cell_op(peer_sink_node.get_type().op)) {
+          if (group_boundary.find(peer_sink_node.get_compact())==group_boundary.end()) {
+            group_boundary[peer_sink_node.get_compact()] = group_boundary[node.get_compact()];
+          }
+          else {
+            group_id_mapping[group_boundary[node.get_compact()]]=group_boundary[peer_sink_node.get_compact()];
+          }
+        }
       }
     }
     cell_amount++;
@@ -140,10 +149,18 @@ void Pass_mockturtle::do_work(LGraph *g) {
     cell_type[node.get_compact()]=std::make_pair(name,std::make_pair(in_edges_num,out_edges_num));
 */
   }
-
+  for (std::map<int,int>::reverse_iterator rit = group_id_mapping.rbegin(); rit!=group_id_mapping.rend(); rit++) {
+    for (auto &it:group_boundary) {
+      if (it.second==rit->first)
+        it.second=rit->second;
+    }
+  }
 //  fmt::print("Pass: number of cells {}\n", cell_type.size());
   fmt::print("{} nodes passed.\n", cell_amount);
 /*
+  for (auto const it:group_id_mapping) {
+    fmt::print("GID:{}->{}\n", it.first, it.second);
+  }
   for(auto const it:cell_type) {
     fmt::print("node_type:{} in_edges:{} out_edges:{}\n", it.second.first, it.second.second.first, it.second.second.second);
   }
