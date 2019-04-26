@@ -10,8 +10,9 @@ protected:
 
   static void work(Eprp_var &var);
 
-  void list_cells(LGraph *g);
-  void ot_api_check();
+  void list_cells(LGraph *g);             // To be removed later
+  void file_reader();
+  void circuit_builder();
 
 public:
   Pass_opentimer();

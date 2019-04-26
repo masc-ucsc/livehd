@@ -5,7 +5,6 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "pass_opentimer.hpp"
-
 #include "ot/timer/timer.hpp"
 
 void setup_pass_opentimer() {
@@ -25,38 +24,67 @@ Pass_opentimer::Pass_opentimer()
 void Pass_opentimer::work(Eprp_var &var) {
   Pass_opentimer pass;
 
-  fmt::print("OpenTimer-LGraph Action Going On...\n");
-
-//  for(const auto &g : var.lgs) {
-//    pass.list_cells(g);
-//  }
-  pass.ot_api_check();
-}
-
-//void Pass_opentimer::list_cells(LGraph *g) {
-//  LGBench b("pass.opentimer.list_cells");
-//  for(const auto &nid : g -> forward()) {
-//    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
-//    std::string name (node.get_type().get_name());
-//    fmt::print("Cell\t{}\n", name);
-//  }
-//}
-
-
-void Pass_opentimer::ot_api_check() {
-
-  //This is the same code as the examples/simple in OpenTimer
+  fmt::print("\nOpenTimer-LGraph Action Going On...\n\n");
 
   ot::Timer timer;
-  // Read design
+  pass.file_reader();                                     // Make OpenTimer read the input files
+
+  for(const auto &g : var.lgs) {
+      pass.circuit_builder();                             // Traverse the lgraph and build the circuit (not there yet)
+      pass.list_cells(g);                                 // Traverse the lgraph and list the cells for the moment (for debug only)
+  }
+
+}
+
+void Pass_opentimer::file_reader(){                       // Currently just reads hardcoded file
+                                                          // Exapnd this to reading from user input and later develop inou.add_liberty etc.
+  ot::Timer timer;
+
   timer.read_celllib("ot_examples/osu018_stdcells.lib")
        .read_verilog("ot_examples/unit.v")
-       .read_sdc("ot_examples/aaa.sdc")
        .read_spef("ot_examples/unit.spef");
 
-  // the default library is at ns and pf scale.
-  std::cout << timer.time_unit()->value()        << " second (time unit)\n"
-            << timer.capacitance_unit()->value() << " farad  (capacitance unit)\n"
-            << "TNS: " << *timer.report_tns() << '\n';
+}
 
+void Pass_opentimer::circuit_builder() {                  // Currently just using a sample to check if the API works
+                                                          // Expand this to traversing the graph and building the circuit
+    ot::Timer timer;
+
+    timer.read_celllib("ot_examples/osu018_stdcells.lib");
+
+    timer.insert_gate("FA1", "FAX1")
+         .insert_gate("FA2", "FAX1")
+         .insert_net("n1")
+         .connect_pin("FA1:YC", "n1")
+         .connect_pin("FA2:C", "n1");
+
+    timer.num_gates();
+}
+
+void Pass_opentimer::list_cells(LGraph *g) {
+
+  int cell = 0;
+  uint32_t gates = 0;
+  std::string instance_name;
+
+  ot::Timer timer;
+
+  timer.read_celllib("ot_examples/osu018_stdcells.lib");
+
+  LGBench b("pass.opentimer.list_cells");
+
+  for(const auto &nid : g -> forward()) {
+    auto node = Node(g,0,Node::Compact(nid));  //NOTE: To remove once new iterators are finished
+    cell++;
+    std::string name (node.get_type().get_name());
+    fmt::print("Cell\t{}\n", name);
+    instance_name = name+std::to_string(cell);            // This makes sure 2 cells of the same strength have distinct instance names
+    timer.insert_gate(instance_name,name);
+  }
+
+  timer.insert_gate("FA1", "FAX1");
+
+  fmt::print("Cells {}\n", cell);
+  gates = timer.num_gates();
+  fmt::print("Gates {}\n", gates);
 }
