@@ -18,7 +18,7 @@ void LGraph::each_graph_io(std::function<void(Node_pin &pin)> f1) {
       I(io_pin.dir == Sub_node::Direction::Output);
       nid = Node::Hardcoded_output_nid;
     }
-    Node_pin pin(this, 0, nid, io_pin.graph_io_pid, false);
+    Node_pin pin(this, this, 0, nid, io_pin.graph_io_pid, false); // FIXME: hierarchy id???
     pins.emplace_back(pin);
   }
   std::sort(pins.begin(), pins.end()
@@ -40,7 +40,7 @@ void LGraph::each_graph_input(std::function<void(Node_pin &pin)> f1) {
     if (io_pin.dir != Sub_node::Direction::Input)
       continue;
 
-    Node_pin pin(this, 0, Node::Hardcoded_input_nid, io_pin.graph_io_pid, false);
+    Node_pin pin(this, this, 0, Node::Hardcoded_input_nid, io_pin.graph_io_pid, false);// FIXME: hid??
     f1(pin);
   }
 }
@@ -53,7 +53,7 @@ void LGraph::each_graph_output(std::function<void(Node_pin &pin)> f1) {
     if (io_pin.dir != Sub_node::Direction::Output)
       continue;
 
-    Node_pin pin(this, 0, Node::Hardcoded_output_nid, io_pin.graph_io_pid, false);
+    Node_pin pin(this, this, 0, Node::Hardcoded_output_nid, io_pin.graph_io_pid, false); // FIXME: hid???
     f1(pin);
   }
 }
@@ -74,11 +74,11 @@ void LGraph::each_output_edge_fast(std::function<void(XEdge &edge)> f1) {
     if (!ni.is_root()) continue;
     if (!ni.has_local_outputs()) continue;
 
-    auto dpin = Node_pin(this,0,ni.get_nid(), ni.get_dst_pid(), false);
+    auto dpin = Node_pin(this,this, 0,ni.get_nid(), ni.get_dst_pid(), false); // FIXME: hid
 
     const Edge_raw *edge_raw = ni.get_output_begin();
     do {
-      XEdge edge(dpin, Node_pin(this,0,edge_raw->get_idx(), edge_raw->get_inp_pid(), true));
+      XEdge edge(dpin, Node_pin(this,this,0,edge_raw->get_idx(), edge_raw->get_inp_pid(), true)); // FIXME: hid
 
       f1(edge);
       edge_raw += edge_raw->next_node_inc();

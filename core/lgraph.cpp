@@ -103,24 +103,6 @@ void LGraph::emplace_back() {
   LGraph_Node_Type::emplace_back();
 }
 
-const LGraph *LGraph::find_sub_lgraph(Hierarchy_id hid) const {
-  if (hid==0)
-    return this;
-
-  auto hid_bits = get_hid_bits();
-  auto level_0_sub_nid = hid & ((1<<hid_bits)-1);
-  auto level_n_sub_hid = hid >> hid_bits;
-
-  I(sub_nodes.find(level_0_sub_nid) != sub_nodes.end());
-  I(is_sub_node(0,level_0_sub_nid));
-
-  auto sub_lgid = get_type_sub(level_0_sub_nid);
-  if (sub_lgid==0)
-    return 0; // No subgraph present (bbox)
-
-  return open(path, sub_lgid);
-}
-
 
 Node_pin LGraph::get_graph_input(std::string_view str) {
 
@@ -326,6 +308,7 @@ XEdge_iterator LGraph::out_edges(const Node &node) const {
 
   return xiter;
 }
+
 XEdge_iterator LGraph::inp_edges(const Node &node) const {
   I(node.get_lgraph() == this);
   XEdge_iterator xiter;
@@ -350,6 +333,24 @@ XEdge_iterator LGraph::inp_edges(const Node &node) const {
   }
 
   return xiter;
+}
+
+const LGraph *LGraph::find_sub_lgraph(Hierarchy_id hid) const {
+  if (hid==0)
+    return this;
+
+  auto hid_bits = get_hid_bits();
+  auto level_0_sub_nid = hid & ((1<<hid_bits)-1);
+  auto level_n_sub_hid = hid >> hid_bits;
+
+  I(sub_nodes.find(level_0_sub_nid) != sub_nodes.end());
+  I(is_sub_node(0,level_0_sub_nid));
+
+  auto sub_lgid = get_type_sub(level_0_sub_nid);
+  if (sub_lgid==0)
+    return 0; // No subgraph present (bbox)
+
+  return open(path, sub_lgid);
 }
 
 Node LGraph::create_node() {
@@ -435,17 +436,6 @@ Node LGraph::create_node_const(std::string_view value, uint16_t bits) {
   I(node_internal[nid].is_master_root());
 
   return Node(this,0,nid);
-}
-
-Node LGraph::get_node(Index_ID idx) {
-  I(node_internal.size() > idx);
-  I(node_internal[idx].is_root());
-  if (node_internal[idx].is_master_root())
-    return Node(this, 0, idx);
-
-  idx = node_internal[idx].get_nid();
-  I(node_internal[idx].is_master_root());
-  return Node(this, 0, idx);
 }
 
 Index_ID LGraph::create_node_int() {
@@ -553,3 +543,4 @@ const LGraph::Hierarchy &LGraph::get_hierarchy() {
 
   return hierarchy;
 }
+

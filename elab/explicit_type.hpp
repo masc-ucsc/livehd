@@ -6,13 +6,13 @@
 template <typename T, typename Meaning>
 struct Explicit_type {
   //! Default constructor does not initialize the value.
-  Explicit_type() {}
+  constexpr Explicit_type() {}
 
   //! Construction from a fundamental value.
-  Explicit_type(T value) : value(value) {}
+  constexpr Explicit_type(T value) : value(value) {}
 
   //! Implicit conversion back to the fundamental data type.
-  inline operator T() const { return value; }
+  constexpr inline operator T() const { return value; }
 
   //! The actual fundamental value.
   T         value;

@@ -78,7 +78,16 @@ protected:
     return node_internal[nid].get_node_num_inputs();
   }
 
-  Node      get_node(Index_ID nid);
+  Index_ID get_node_nid(Index_ID idx) {
+    I(node_internal.size() > idx);
+    I(node_internal[idx].is_root());
+    if (node_internal[idx].is_master_root())
+      return idx;
+
+    idx = node_internal[idx].get_nid();
+    I(node_internal[idx].is_master_root());
+    return idx;
+  }
 
   Node_pin_iterator out_connected_pins(const Node &node) const;
   Node_pin_iterator inp_connected_pins(const Node &node) const;
@@ -87,6 +96,8 @@ protected:
 
   XEdge_iterator out_edges(const Node &node) const;
   XEdge_iterator inp_edges(const Node &node) const;
+
+  const LGraph *find_sub_lgraph_const(Hierarchy_id hid) const;
 
   bool has_outputs(const Node_pin &pin) const {
     I(pin.get_idx() < node_internal.size());
@@ -180,7 +191,7 @@ public:
   Index_ID add_edge(const Node_pin &src, const Node_pin &dst) {
     I(!src.is_input());
     I(dst.is_input());
-    I(dst.get_lgraph() == src.get_lgraph());
+    I(dst.get_class_lgraph() == src.get_class_lgraph());
 
     return add_edge_int(dst.get_idx(), dst.get_pid(), src.get_idx(), src.get_pid());
   }
@@ -188,7 +199,7 @@ public:
   Index_ID add_edge(const Node_pin &src, const Node_pin &dst, uint16_t bits) {
     I(!src.is_input());
     I(dst.is_input());
-    I(dst.get_lgraph() == src.get_lgraph());
+    I(dst.get_class_lgraph() == src.get_class_lgraph());
     Index_ID idx = add_edge_int(dst.get_idx(), dst.get_pid(), src.get_idx(), src.get_pid());
     set_bits(src.get_idx(), bits);
     return idx;
@@ -209,9 +220,11 @@ public:
   void sync() override;
   void emplace_back() override;
 
-  const LGraph *find_sub_lgraph(Hierarchy_id hid) const;
+  const LGraph *find_sub_lgraph(Hierarchy_id hid) const {
+    return find_sub_lgraph_const(hid);
+  }
   LGraph *find_sub_lgraph(Hierarchy_id hid) {
-    return const_cast<LGraph *>(find_sub_lgraph(hid));
+    return const_cast<LGraph *>(find_sub_lgraph_const(hid));
   }
 
   Node_pin add_graph_input(std::string_view str, uint16_t pos);

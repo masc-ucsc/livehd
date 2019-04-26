@@ -21,60 +21,59 @@ Node_pin::Node_pin(LGraph *_g, LGraph *_c_g, Hierarchy_id _hid, Index_ID _idx, P
 
 Node_pin::Node_pin(LGraph *_g, Compact comp)
   :top_g(_g)
-  ,pid(_g->get_dst_pid(comp.idx))
   ,hid(comp.hid)
   ,idx(comp.idx)
+  ,pid(_g->get_dst_pid(comp.idx))
   ,sink(comp.sink) {
   current_g = top_g->find_sub_lgraph(hid);
-  I(current_g->is_valid_node_pin(nid));
+  I(current_g->is_valid_node_pin(idx));
 }
 
 Node_pin::Node_pin(LGraph *_g, Hierarchy_id _hid, Compact_class comp)
   :top_g(_g)
-  ,pid(_g->get_dst_pid(comp.idx))
   ,hid(_hid)
   ,idx(comp.idx)
+  ,pid(_g->get_dst_pid(comp.idx))
   ,sink(comp.sink) {
   current_g = top_g->find_sub_lgraph(hid);
-  I(current_g->is_valid_node_pin(nid));
+  I(current_g->is_valid_node_pin(idx));
 }
 
 bool Node_pin::is_graph_io() const {
-  return g->is_graph_io(idx);
+  return current_g->is_graph_io(idx);
 }
 
 bool Node_pin::is_graph_input() const {
-  return g->is_graph_input(idx);
+  return current_g->is_graph_input(idx);
 }
 
 bool Node_pin::is_graph_output() const {
-  return g->is_graph_output(idx);
+  return current_g->is_graph_output(idx);
 }
 
 Node Node_pin::get_node() const {
-  I(hid==0);
-  return g->get_node(idx);
+  auto nid = current_g->get_node_nid(idx);
+
+  return Node(top_g, current_g, hid, nid);
 }
 
 void Node_pin::connect_sink(Node_pin &spin) {
-  I(g == spin.g);
-  g->add_edge(*this,spin);
+  I(current_g == spin.current_g); // Use punch otherwise
+  current_g->add_edge(*this,spin);
 }
 
 void Node_pin::connect_driver(Node_pin &dpin) {
-  I(g == dpin.g);
-  g->add_edge(dpin, *this);
+  I(current_g == dpin.current_g);
+  current_g->add_edge(dpin, *this);
 }
 
 uint16_t Node_pin::get_bits() const {
-  I(hid==0);
-  return g->get_bits(idx);
+  return current_g->get_bits(idx);
 }
 
 void Node_pin::set_bits(uint16_t bits) {
-  I(hid==0);
   I(is_driver());
-  g->set_bits(idx, bits);
+  current_g->set_bits(idx, bits);
 }
 
 std::string_view Node_pin::get_type_sub_io_name() const {
@@ -133,16 +132,16 @@ std::string_view Node_pin::create_name() const {
     }
   }
 
-  auto found = Ann_node_pin_name::find(g, signature);
+  auto found = Ann_node_pin_name::find(current_g, signature);
   if (!found.is_invalid()) {
     static std::vector<int> last_used;
-    last_used.resize(g->get_lgid().value+1);
+    last_used.resize(current_g->get_lgid().value+1);
     while(true) {
-      int t = last_used[g->get_lgid().value]++;
+      int t = last_used[current_g->get_lgid().value]++;
 
       auto tmp = absl::StrCat(signature, "_t", t);
 
-      auto found = Ann_node_pin_name::find(g, tmp);
+      auto found = Ann_node_pin_name::find(current_g, tmp);
       if (found.is_invalid()) {
         signature = tmp;
         break;

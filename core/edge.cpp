@@ -5,8 +5,10 @@
 #include "edge.hpp"
 
 static_assert(sizeof(XEdge::Compact) == 16);
-static_assert(sizeof(Node_pin::Compact) == 4);
+static_assert(sizeof(Node_pin::Compact) == 12);
+static_assert(sizeof(Node_pin::Compact_class) == 4);
 static_assert(sizeof(Node::Compact) == 12);
+static_assert(sizeof(Node::Compact_class) == 4);
 
 XEdge::XEdge(const Node_pin &src_, const Node_pin &dst_)
   : driver(src_)
@@ -15,13 +17,15 @@ XEdge::XEdge(const Node_pin &src_, const Node_pin &dst_)
   I(sink.is_sink());
   I(driver.is_driver());
 
-  I(driver.get_hid()    == sink.get_hid());
-  I(driver.get_lgraph() == sink.get_lgraph());
+  I(driver.get_hid()        == sink.get_hid());
+  I(driver.get_top_lgraph() == sink.get_top_lgraph());
 }
 
 void XEdge::del_edge() {
 
-  bool deleted = driver.get_lgraph()->del_edge(driver,sink);
+  I(driver.get_class_lgraph() == sink.get_class_lgraph());
+
+  bool deleted = driver.get_class_lgraph()->del_edge(driver,sink);
   I(deleted);
 
 }

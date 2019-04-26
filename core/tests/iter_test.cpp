@@ -59,7 +59,7 @@ void generate_graphs(int n) {
     }
 
     int nedges = 2000 + rand_r(&rseed) % 5000;
-    std::set<std::pair<Node_pin::Compact, Node_pin::Compact>> edges;
+    absl::flat_hash_set<std::pair<Node_pin::Compact, Node_pin::Compact>> edges;
     for(int j = 0; j < nedges; j++) {
       int      counter = 0;
       Node_pin::Compact src;
@@ -74,7 +74,9 @@ void generate_graphs(int n) {
         break;
 
       edges.insert(std::make_pair(src, dst));
-      g->add_edge(Node_pin(g,0,src), Node_pin(g,0,dst));
+      Node_pin dpin(g,src);
+      Node_pin spin(g,dst);
+      g->add_edge(dpin, spin);
     }
 
   }
@@ -87,19 +89,19 @@ bool fwd(int n) {
     if(g == 0)
       return false;
 
-    std::set<Index_ID> visited;
+    absl::flat_hash_set<Node::Compact> visited;
     for(auto node : g->forward()) {
 
       // check if all incoming edges were visited
       for(auto &inp : node.inp_edges()) {
-        if(visited.find(inp.driver.get_node().get_compact().nid) == visited.end()) {
+        if(visited.find(inp.driver.get_node().get_compact()) == visited.end()) {
           printf("fwd failed for lgraph %d\n", i);
           I(false);
           return false;
         }
       }
 
-      visited.insert(node.get_compact().nid);
+      visited.insert(node.get_compact());
     }
 
   }
@@ -114,7 +116,7 @@ bool bwd(int n) {
     if(g == 0)
       return false;
 
-    std::set<Node::Compact> visited;
+    absl::flat_hash_set<Node::Compact> visited;
     for(auto node : g->backward()) {
       visited.insert(node.get_compact());
 
@@ -133,7 +135,7 @@ bool bwd(int n) {
   return true;
 }
 
-bool simple() {
+void simple() {
   std::string gname = "simple_iter";
   LGraph *    g     = LGraph::create("lgdb_iter_test", gname, "test");
 
@@ -326,7 +328,6 @@ bool simple() {
       break;
     }
   }
-
 }
 
 int main() {

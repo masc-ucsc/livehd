@@ -20,8 +20,11 @@ cc_test(
     srcs = ["tests/use_map_bench.cpp"],
     deps = [
         ":headers",
+        "@fmt//:fmt",
+        "@iassert//:iassert",
         "//bench:headers",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:node_hash_map",
     ],
 )
 
@@ -33,9 +36,24 @@ cc_test(
         "//bench:headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/container:node_hash_map",
+        "@com_google_absl//absl/container:node_hash_set",
         "@bm//:headers",
     ],
 )
+
+cc_test(
+    name = "robin_test",
+    srcs = ["tests/robin_test.cpp"],
+    deps = [
+        ":headers",
+        "//bench:headers",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@gtest//:gtest_main",
+        "@fmt//:fmt",
+    ],
+)
+
 
 cc_test(
     name = "map_test",

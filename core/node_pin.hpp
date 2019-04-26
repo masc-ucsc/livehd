@@ -16,69 +16,144 @@ enum class Node_pin_mode {
 class Node_pin {
 protected:
   friend class LGraph;
-  friend class Node;
+  friend class LGraph_Node_Type;
   friend class XEdge;
-  friend class Edge_raw;
+  friend class Node;
+  friend class Node_set;
+  friend class CFast_edge_iterator;
+  friend class Edge_raw_iterator_base;
+  friend class CForward_edge_iterator;
+  friend class CBackward_edge_iterator;
 
-  LGraph             *top_g;
-  LGraph             *current_g;
-  const Hierarchy_id  hid;
-  const Index_ID      idx;
-  const Port_ID       pid;
-  const bool          sink;
+  LGraph       *top_g;
+  LGraph       *current_g;
+  Hierarchy_id  hid;
+  Index_ID      idx;
+  Port_ID       pid;
+  bool          sink;
 
   Node_pin(LGraph *_g, LGraph *_c_g, Hierarchy_id _hid, Index_ID _idx, Port_ID _pid, bool _sink);
 
-  const Index_ID get_idx()   const { I(idx); return idx;    }
+  const Index_ID get_idx() const { I(idx); return idx;    }
 public:
-  struct __attribute__((packed)) Compact {
-    const uint32_t idx  : Index_bits;
-    const uint32_t sink : 1;
+  class __attribute__((packed)) Compact {
+  protected:
+    Hierarchy_id   hid;
+    uint32_t idx  : Index_bits;
+    uint32_t sink : 1;
 
-    // Hash
-    constexpr size_t operator()(const Compact &obj) const { return obj.idx|(obj.sink<<31); }
-    constexpr operator size_t() const { return idx|(sink<<31); }
+    friend class LGraph;
+    friend class LGraph_Node_Type;
+    friend class Node;
+    friend class Node_pin;
+    friend class XEdge;
+    friend class Node_set;
+    friend class CFast_edge_iterator;
+    friend class Edge_raw_iterator_base;
+    friend class CForward_edge_iterator;
+    friend class CBackward_edge_iterator;
+  public:
 
-    Compact(const Compact &obj): idx(obj.idx), sink(obj.sink) { }
-    Compact(const Index_ID &_idx, bool _sink) :idx(_idx) ,sink(_sink) { };
-    Compact(size_t raw) :idx((raw<<1)>>1) ,sink(raw&(1UL<<31)?1:0) { };
-    Compact() :idx(0) ,sink(0) { };
+    //constexpr operator size_t() const { I(0); return idx|(sink<<31); }
+
+    Compact(const Compact &obj): hid(obj.hid), idx(obj.idx), sink(obj.sink) { }
+    Compact(Hierarchy_id _hid, Index_ID _idx, bool _sink) :hid(_hid), idx(_idx) ,sink(_sink) { };
+    Compact() :hid(0), idx(0) ,sink(0) { };
     Compact &operator=(const Compact &obj) {
       I(this != &obj);
-      *((uint32_t *)this)  = *((uint32_t *)&obj); // NASTY, but how else to preserve the const???
-
-      I(idx  == obj.idx);
-      I(sink == obj.sink);
+      hid  = obj.hid;
+      idx  = obj.idx;
+      sink = obj.sink;
 
       return *this;
     };
 
-    bool is_invalid() const { return idx == 0; }
+    constexpr bool is_invalid() const { return idx == 0; }
+
+    constexpr bool operator==(const Compact &other) const {
+      return hid == other.hid && idx == other.idx && sink == other.sink;
+    }
+    constexpr bool operator!=(const Compact &other) const { return !(*this == other); }
 
     template <typename H>
     friend H AbslHashValue(H h, const Compact& s) {
-      return H::combine(std::move(h), s.idx, s.sink);
+      return H::combine(std::move(h), s.hid, s.idx, s.sink);
     };
   };
+  class __attribute__((packed)) Compact_class {
+  protected:
+    uint32_t idx  : Index_bits;
+    uint32_t sink : 1;
+
+    friend class LGraph;
+    friend class LGraph_Node_Type;
+    friend class Node;
+    friend class Node_pin;
+    friend class XEdge;
+    friend class Node_set;
+    friend class CFast_edge_iterator;
+    friend class Edge_raw_iterator_base;
+    friend class CForward_edge_iterator;
+    friend class CBackward_edge_iterator;
+  public:
+
+    //constexpr operator size_t() const { I(0); return idx|(sink<<31); }
+
+    Compact_class(const Compact_class &obj): idx(obj.idx), sink(obj.sink) { }
+    Compact_class(Index_ID _idx, bool _sink) :idx(_idx) ,sink(_sink) { }
+    Compact_class():idx(0) ,sink(0) { }
+    Compact_class &operator=(const Compact_class &obj) {
+      I(this != &obj);
+      idx  = obj.idx;
+      sink = obj.sink;
+
+      return *this;
+    }
+
+    constexpr bool is_invalid() const { return idx == 0; }
+
+    constexpr bool operator==(const Compact_class &other) const {
+      return idx == other.idx && sink == other.sink;
+    }
+    constexpr bool operator!=(const Compact_class &other) const { return !(*this == other); }
+
+    template <typename H>
+    friend H AbslHashValue(H h, const Compact_class& s) {
+      return H::combine(std::move(h), s.idx, s.sink);
+    }
+  };
+
   template <typename H>
   friend H AbslHashValue(H h, const Node_pin& s) {
     return H::combine(std::move(h), (int)s.hid, (int)s.idx, s.sink); // Ignore lgraph pointer in hash
-  };
-  Node_pin() : top_g(0), current_lg(0), hid(0), idx(0), pid(0), sink(false) { }
+  }
+
+  Node_pin() : top_g(0), current_g(0), hid(0), idx(0), pid(0), sink(false) { }
   Node_pin(LGraph *_g, Compact comp);
   Node_pin(LGraph *_g, Hierarchy_id _hid, Compact_class comp);
   Node_pin(LGraph *_g, Compact_class comp);
 
   Compact get_compact() const {
-    return Compact(idx,sink);
-  };
-  Compact get_compact(Node_pin_mode mode) const {
+    return Compact(hid,idx,sink);
+  }
+
+  Compact_class get_compact_class() const {
+    return Compact_class(idx,sink);
+  }
+
+  Compact_class get_compact_class(Node_pin_mode mode) const {
 		if (mode==Node_pin_mode::Both)
-			return Compact(idx,sink);
-		return Compact(idx,false);
+			return Compact_class(idx,sink);
+		return Compact_class(idx,false);
   };
 
-  LGraph       *get_top_lgraph() const { return top_x; };
+  Compact get_compact(Node_pin_mode mode) const {
+		if (mode==Node_pin_mode::Both)
+			return Compact(hid, idx,sink);
+		return Compact(hid, idx,false);
+  };
+
+  LGraph       *get_top_lgraph() const { return top_g; };
   LGraph       *get_class_lgraph() const { return current_g; };
   Hierarchy_id  get_hid() const { return hid; };
 
@@ -110,24 +185,25 @@ public:
 
   Node_pin &operator=(const Node_pin &obj) {
     I(this != &obj); // Do not assign object to itself. works but wastefull
-    g   = obj.g;
-    const_cast<Index_ID&>(idx)     = obj.idx;
-    const_cast<Port_ID&>(pid)      = obj.pid;
-    const_cast<Hierarchy_id&>(hid) = obj.hid;
-    const_cast<bool&>(sink)        = obj.sink;
+    top_g     = obj.top_g;
+    current_g = obj.current_g;
+    idx       = obj.idx;
+    pid       = obj.pid;
+    hid       = obj.hid;
+    sink      = obj.sink;
 
     return *this;
   };
-  bool operator==(const Node_pin &other) const { I(idx); I(g == other.g); return (idx == other.idx) && (pid == other.pid) && (sink == other.sink) && (hid == other.hid); }
-
-  bool operator!=(const Node_pin &other) const { I(idx); I(g == other.g); return (idx != other.idx) || (pid != other.pid) || (sink != other.sink) || (hid != other.hid); }
 
   // NOTE: No operator<() needed for std::set std::map to avoid their use. Use flat_map_set for speed
 
   //static Node_pin get_out_pin(const Edge_raw *edge_raw);
   //static Node_pin get_inp_pin(const Edge_raw *edge_raw);
 
-  bool is_invalid() const { return g==nullptr || idx==0; }
+  constexpr bool is_invalid() const { return idx==0; }
+
+  constexpr bool operator==(const Node_pin &other) const { return (top_g == other.top_g) && (idx == other.idx) && (pid == other.pid) && (sink == other.sink) && (hid == other.hid); }
+  constexpr bool operator!=(const Node_pin &other) const { return !(*this == other); }
 
   // BEGIN ATTRIBUTE ACCESSORS
   std::string      debug_name() const;

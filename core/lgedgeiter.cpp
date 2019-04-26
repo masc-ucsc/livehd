@@ -149,7 +149,6 @@ CForward_edge_iterator Forward_edge_iterator::begin() {
 
   // Add any sub node that has no inputs but has outputs (not hit with forward)
   for(auto c_sub:top_g->get_sub_ids()) {
-    I(c_sub.hid==0);
     Node n_sub(top_g,c_sub);
     if (n_sub.has_outputs() && !n_sub.has_inputs()) {
       pending.set(c_sub);
@@ -246,7 +245,6 @@ CBackward_edge_iterator Backward_edge_iterator::begin() {
 
   // Add any sub node that has no outputs but has inputs (not hit with backward)
   for(auto c_sub:top_g->get_sub_ids()) {
-    I(c_sub.hid==0);
     Node n_sub(top_g,c_sub);
     if (!n_sub.has_outputs() && n_sub.has_inputs()) {
       pending.set(c_sub);

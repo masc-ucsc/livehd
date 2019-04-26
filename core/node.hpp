@@ -14,14 +14,14 @@ using XEdge_iterator    = std::vector<XEdge>;
 using Node_pin_iterator = std::vector<Node_pin>;
 
 class Node {
-private:
+protected:
   LGraph            *top_g;
   mutable LGraph    *current_g;
   const Hierarchy_id hid;
   const Index_ID     nid;
 
-protected:
   friend class LGraph;
+  friend class LGraph_Node_Type;
   friend class Node_pin;
   friend class XEdge;
   friend class Node_set;
@@ -38,32 +38,67 @@ public:
   static constexpr char Hardcoded_input_nid  = 1;
   static constexpr char Hardcoded_output_nid = 2;
 
-  struct __attribute__((packed)) Compact {
-    uint64_t      nid:Index_bits;
+  class __attribute__((packed)) Compact {
+  protected:
     Hierarchy_id  hid;
+    uint64_t      nid:Index_bits;
 
-    constexpr operator size_t() const { I(0); return nid; }
+    friend class LGraph;
+    friend class LGraph_Node_Type;
+    friend class Node;
+    friend class Node_pin;
+    friend class XEdge;
+    friend class Node_set;
+    friend class CFast_edge_iterator;
+    friend class Edge_raw_iterator_base;
+    friend class CForward_edge_iterator;
+    friend class CBackward_edge_iterator;
+    friend class Forward_edge_iterator;
+    friend class Backward_edge_iterator;
+  public:
 
-    Compact(const Index_ID &_nid, const Hierarchy_id &_hid) :nid(_nid), hid(_hid) { I(nid); };
-    Compact() :nid(0),hid(0) { };
+    //constexpr operator size_t() const { I(0); return nid; }
+
+    Compact(Hierarchy_id _hid, Index_ID _nid) :hid(_hid), nid(_nid) { I(nid); };
+    Compact() :hid(0),nid(0) { };
     Compact &operator=(const Compact &obj) {
       I(this != &obj);
-      nid  = obj.nid;
       hid  = obj.hid;
+      nid  = obj.nid;
 
       return *this;
-    };
-    bool is_invalid() const { return nid == 0; }
+    }
+
+    constexpr bool is_invalid() const { return nid == 0; }
+
+    constexpr bool operator==(const Compact &other) const {
+      return hid == other.hid && nid == other.nid;
+    }
+    constexpr bool operator!=(const Compact &other) const { return !(*this == other); }
 
     template <typename H>
     friend H AbslHashValue(H h, const Compact& s) {
       return H::combine(std::move(h), s.nid, s.hid);
     };
   };
-  struct __attribute__((packed)) Compact_class {
+
+  class __attribute__((packed)) Compact_class {
+  protected:
     uint64_t      nid:Index_bits;
 
-    constexpr operator size_t() const { return nid; }
+    friend class LGraph;
+    friend class LGraph_Node_Type;
+    friend class Node;
+    friend class Node_pin;
+    friend class XEdge;
+    friend class Node_set;
+    friend class CFast_edge_iterator;
+    friend class Edge_raw_iterator_base;
+    friend class CForward_edge_iterator;
+    friend class CBackward_edge_iterator;
+  public:
+
+    // constexpr operator size_t() const { return nid; }
 
     Compact_class(const Index_ID &_nid) :nid(_nid) { I(nid); };
     Compact_class() :nid(0) { };
@@ -72,8 +107,14 @@ public:
       nid  = obj.nid;
 
       return *this;
-    };
-    bool is_invalid() const { return nid == 0; }
+    }
+
+    constexpr bool is_invalid() const { return nid == 0; }
+
+    constexpr bool operator==(const Compact_class &other) const {
+      return nid == other.nid;
+    }
+    constexpr bool operator!=(const Compact_class &other) const { return !(*this == other); }
 
     template <typename H>
     friend H AbslHashValue(H h, const Compact_class& s) {
@@ -84,9 +125,6 @@ public:
   friend H AbslHashValue(H h, const Node& s) {
     return H::combine(std::move(h), (int)s.nid, (int)s.hid); // Ignore lgraph pointer in hash
   };
-  bool operator==(const Node &other) const { I(nid); I(top_g == other.top_g); return (nid == other.nid) && (hid == other.hid); }
-
-  bool operator!=(const Node &other) const { I(nid); I(top_g == other.top_g); return (nid != other.nid) || (hid != other.hid); }
 
   // NOTE: No operator<() needed for std::set std::map to avoid their use. Use flat_map_set for speed
 
@@ -126,7 +164,12 @@ public:
   int  get_num_inputs()  const;
   int  get_num_outputs() const;
 
-  bool is_invalid() const { return nid==0; }
+  constexpr bool is_invalid() const { return nid==0; }
+
+  constexpr bool operator==(const Node &other) const {
+    return top_g == other.top_g && hid == other.hid && nid == other.nid;
+  }
+  constexpr bool operator!=(const Node& other) const { return !(*this == other); };
 
   bool is_root() const;
 
@@ -164,6 +207,10 @@ public:
 
   XEdge_iterator    out_edges() const;
   XEdge_iterator    inp_edges() const;
+
+  bool              has_graph_io()  const;
+  bool              has_graph_input()  const;
+  bool              has_graph_output() const;
 
   void del_node();
 

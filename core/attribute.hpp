@@ -34,29 +34,32 @@ protected:
 
   const std::string idx2w_file;
 
-#if 0
-  // FUTURE?
   using Idx2w = absl::flat_hash_map<Index, Char_Array_ID>;
+#if 0
   using Names = absl::flat_hash_set<std::string, uint32_t>;
 #else
-  using Idx2w = std::unordered_map<Index, Char_Array_ID>;
-  using Names = Char_Array<uint16_t>;
+  using Names = Char_Array<Index>;
 #endif
 
   mutable Names   names;
   mutable Idx2w   idx2w;
-
-  constexpr static std::size_t yas_flags = yas::file|yas::binary;
 
   void reload() const {
     if (loaded)
       return;
     loaded = true;
 
-    if (access(idx2w_file.c_str(), F_OK) != -1) {
-      yas::load<yas_flags>(idx2w_file.c_str(),
-          YAS_OBJECT("idx2w", idx2w)
-          );
+    std::ifstream dense_stream;
+    dense_stream.open(idx2w_file + "_size");
+    if (dense_stream.is_open()) {
+      uint64_t dense_size;
+      dense_stream >> dense_size;
+      dense_stream.close();
+
+      Dense<std::pair<Index,Char_Array_ID>> dense(idx2w_file);
+      dense.reload(dense_size);
+
+      idx2w.insert(dense.begin(),dense.end());
     }
   };
 
@@ -98,7 +101,7 @@ public:
     if (unlikely(!loaded))
       reload();
     auto it1 = idx2w.find(idx);
-    I(it1 != idx2w.end());
+    I(it1 != idx2w.end()); // The name does not exist
     I(it1->second); // zero is not valid
 
     auto name = names.get_name(it1->second);
@@ -169,10 +172,16 @@ public:
       return;
     clean = true;
 
-    unlink(idx2w_file.c_str());
-    yas::save<yas_flags>(idx2w_file.c_str(),
-        YAS_OBJECT("idx2w", idx2w)
-        );
+    std::ofstream dense_stream;
+    dense_stream.open(idx2w_file + "_size");
+
+    Dense<std::pair<Index,Char_Array_ID>> dense(idx2w_file);
+    for(const auto it:idx2w) {
+      dense.emplace_back(std::pair<Index,Char_Array_ID>(it.first,it.second));
+    }
+
+    dense_stream << dense.size();
+    dense_stream.close();
 
     names.sync();
   };
@@ -192,7 +201,7 @@ protected:
   const std::string dense_file;
 
   using Sparse = absl::flat_hash_map<Index, Data>;
-  using Dense_holes = std::unordered_set<Index>;
+  using Dense_holes = std::flat_hash_set<Index>;
 
   mutable Sparse      sparse;
   mutable Dense_holes dense_holes;
@@ -223,6 +232,7 @@ protected:
 
       I(dense.size() > idx_max);
       if(access((dense_file + "_holes").c_str(), F_OK) != -1) {
+        HERE!!!
         yas::load<yas_flags>((dense_file + "_holes").c_str(),
             YAS_OBJECT("dense_holes", dense_holes)
             );

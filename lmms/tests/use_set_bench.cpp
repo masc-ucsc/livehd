@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include <unistd.h>
 #include <strings.h>
@@ -16,7 +17,10 @@
 
 using Rng = sfc64;
 
-#define ABSEIL_USE_MAP
+#define BENCH_OUT_SIZE 2000
+#define BENCH_INN_SIZE 1000
+
+//#define ABSEIL_USE_MAP
 //#define USE_MAP_FALSE
 
 void random_std_set(int max) {
@@ -26,24 +30,27 @@ void random_std_set(int max) {
 
   std::unordered_set<uint32_t> map;
 
-  for (int n = 1; n < 4'000; ++n) {
-    for (int i = 0; i < 10'000; ++i) {
-      int pos = rng.uniform<int>(static_cast<uint64_t>(n)) % max;
+  for (int n = 1; n < BENCH_OUT_SIZE; ++n) {
+    for (int i = 0; i < BENCH_INN_SIZE; ++i) {
+      auto pos = rng.uniform<int>(max);
       map.insert(pos);
-      pos = rng.uniform<int>(static_cast<uint64_t>(n)) % max;
-      map.erase(pos);
-      pos = rng.uniform<int>(static_cast<uint64_t>(n)) % max;
-      map.erase(pos);
+      pos = rng.uniform<int>(max); map.erase(pos);
+      pos = rng.uniform<int>(max);
+      if (map.find(pos) != map.end())
+        map.erase(pos);
     }
   }
 
-#if 1
   b.sample("insert/erase dense");
   int conta = 0;
-  for (int i = 0; i < 10'000; ++i) {
-    for(auto it=map.begin(); it!= map.end(); ++it) {
+  for (int i = 0; i < BENCH_INN_SIZE; ++i) {
+    for (auto it = map.begin(), end = map.end(); it != end;++it) {
       conta++;
     }
+    map.insert(rng.uniform<int>(max));
+    auto pos = rng.uniform<int>(max);
+    if (map.find(pos) != map.end())
+      map.erase(pos);
   }
   b.sample("traversal sparse");
 
@@ -51,19 +58,20 @@ void random_std_set(int max) {
   conta = 0;
 
   for (int i = 0; i < max; ++i) {
-    int pos = rng.uniform<int>(static_cast<uint64_t>(max)) % max;
-    map.erase(pos);
+    map.erase(rng.uniform<int>(max));
+    map.erase(rng.uniform<int>(max));
+    map.erase(rng.uniform<int>(max));
+    map.erase(rng.uniform<int>(max));
   }
 
-  for (int i = 0; i < 10'000; ++i) {
-    for(auto it=map.begin(); it!= map.end(); ++it) {
+  for (int i = 0; i < BENCH_INN_SIZE; ++i) {
+    for (auto it = map.begin(), end = map.end(); it != end;++it) {
       conta++;
     }
   }
   b.sample("traversal dense");
 
   printf("inserts random %d\n",conta);
-#endif
 }
 
 void random_robin_set(int max) {
@@ -73,29 +81,47 @@ void random_robin_set(int max) {
 
   robin_hood::unordered_map<uint32_t,bool> map;
 
-  for (int n = 1; n < 4'000; ++n) {
-    for (int i = 0; i < 10'000; ++i) {
-      int pos = rng.uniform<int>(static_cast<uint64_t>(n)) % max;
+  for (int n = 1; n < BENCH_OUT_SIZE; ++n) {
+    for (int i = 0; i < BENCH_INN_SIZE; ++i) {
+      auto pos = rng.uniform<int>(max);
       map[pos] = true;
-      pos = rng.uniform<int>(static_cast<uint64_t>(n)) % max;
-      map.erase(pos);
-      pos = rng.uniform<int>(static_cast<uint64_t>(n)) % max;
-      map.erase(pos);
+#ifdef USE_MAP_FALSE
+      map[rng.uniform<int>(max)] = false;
+      pos = rng.uniform<int>(max);
+      if (map.find(pos) != map.end())
+        map[pos] = false;
+#else
+      pos = rng.uniform<int>(max); map.erase(pos);
+      pos = rng.uniform<int>(max);
+      if (map.find(pos) != map.end())
+        map.erase(pos);
+#endif
     }
   }
 
-#if 1
   b.sample("insert/erase dense");
   int conta = 0;
-  for (int i = 0; i < 10'000; ++i) {
-    for(auto it=map.begin(); it!= map.end(); ++it) {
+  for (int i = 0; i < BENCH_INN_SIZE; ++i) {
+    for (auto it = map.begin(), end = map.end(); it != end;++it) {
 #ifdef USE_MAP_FALSE
       if (it->second)
         conta++;
+      else
+        map.erase(it);
 #else
       conta++;
 #endif
     }
+    map[rng.uniform<int>(max)] = true;
+#ifdef USE_MAP_FALSE
+    auto pos = rng.uniform<int>(max);
+    if (map.find(pos) != map.end())
+      map[pos] = false;
+#else
+    auto pos = rng.uniform<int>(max);
+    if (map.find(pos) != map.end())
+      map.erase(pos);
+#endif
   }
   b.sample("traversal sparse");
 
@@ -103,25 +129,26 @@ void random_robin_set(int max) {
   conta = 0;
 
   for (int i = 0; i < max; ++i) {
-    int pos = rng.uniform<int>(static_cast<uint64_t>(max)) % max;
 #ifdef USE_MAP_FALSE
-    map[pos] = false;
+    map[rng.uniform<int>(max)] = false;
+    map[rng.uniform<int>(max)] = false;
+    map[rng.uniform<int>(max)] = false;
+    map[rng.uniform<int>(max)] = false;
 #else
-    map.erase(pos);
+    map.erase(rng.uniform<int>(max));
+    map.erase(rng.uniform<int>(max));
+    map.erase(rng.uniform<int>(max));
+    map.erase(rng.uniform<int>(max));
 #endif
   }
-#ifdef USE_MAP_FALSE
-  for(auto it=map.begin(); it!= map.end(); ++it) {
-    if (!it->second)
-      map.erase(it);
-  }
-#endif
 
-  for (int i = 0; i < 10'000; ++i) {
-    for(auto it=map.begin(); it!= map.end(); ++it) {
+  for (int i = 0; i < BENCH_INN_SIZE; ++i) {
+    for (auto it = map.begin(), end = map.end(); it != end;++it) {
 #ifdef USE_MAP_FALSE
       if (it->second)
         conta++;
+      else
+        map.erase(it);
 #else
       conta++;
 #endif
@@ -130,7 +157,6 @@ void random_robin_set(int max) {
   b.sample("traversal dense");
 
   printf("inserts random %d\n",conta);
-#endif
 }
 
 void random_abseil_set(int max) {
@@ -144,49 +170,63 @@ void random_abseil_set(int max) {
   absl::flat_hash_set<uint32_t> map;
 #endif
 
-  for (int n = 1; n < 4'000; ++n) {
-    for (int i = 0; i < 10'000; ++i) {
-      int pos = rng.uniform<int>(static_cast<uint64_t>(n)) % max;
+  for (int n = 1; n < BENCH_OUT_SIZE; ++n) {
+    for (int i = 0; i < BENCH_INN_SIZE; ++i) {
+      auto pos = rng.uniform<int>(max);
 #ifdef ABSEIL_USE_MAP
       map[pos]=true;
-      pos = rng.uniform<int>(static_cast<uint64_t>(n)) % max;
 #else
       map.insert(pos);
-      pos = rng.uniform<int>(static_cast<uint64_t>(n)) % max;
 #endif
 
+      pos = rng.uniform<int>(max);
 #ifdef USE_MAP_FALSE
       map[pos]=false;
-      pos = rng.uniform<int>(static_cast<uint64_t>(n)) % max;
-      map[pos]=false;
+      pos = rng.uniform<int>(max);
+      if (map.find(pos) != map.end())
+        map[pos]=false;
 #else
       map.erase(pos);
-      pos = rng.uniform<int>(static_cast<uint64_t>(n)) % max;
-      map.erase(pos);
+      pos = rng.uniform<int>(max);
+      if (map.find(pos) != map.end())
+        map.erase(pos);
 #endif
     }
-#if 1
-    for (auto it = map.begin(), end = map.end(); it != end;) {
-      map.erase(it++);
-    }
-#else
-    while(map.empty()) {
-      map.erase(map.begin());
-    }
-#endif
   }
-#if 1
+
   b.sample("insert/erase dense");
   int conta = 0;
-  for (int i = 0; i < 10'000; ++i) {
-    for(auto it=map.begin(); it!= map.end(); ++it) {
+  for (int i = 0; i < BENCH_INN_SIZE; ++i) {
+    for (auto it = map.begin(), end = map.end(); it != end;++it) {
 #ifdef USE_MAP_FALSE
       if (it->second)
         conta++;
+      else
+        map.erase(it);
 #else
       conta++;
 #endif
     }
+#ifdef ABSEIL_USE_MAP
+    map[rng.uniform<int>(max)] = true;
+#ifdef USE_MAP_FALSE
+    map[rng.uniform<int>(max)] = false;
+    auto pos = rng.uniform<int>(max);
+    if (map.find(pos) != map.end())
+      map[pos] = false;
+#else
+    map.erase(rng.uniform<int>(max));
+    auto pos = rng.uniform<int>(max);
+    if (map.find(pos) != map.end())
+      map.erase(pos);
+#endif
+#else
+    map.insert(rng.uniform<int>(max));
+    map.erase(rng.uniform<int>(max));
+    auto pos = rng.uniform<int>(max);
+    if (map.find(pos) != map.end())
+      map.erase(pos);
+#endif
   }
   b.sample("traversal sparse");
 
@@ -194,25 +234,26 @@ void random_abseil_set(int max) {
   conta = 0;
 
   for (int i = 0; i < max; ++i) {
-    int pos = rng.uniform<int>(static_cast<uint64_t>(max)) % max;
 #ifdef USE_MAP_FALSE
-    map[pos] = false;
+    map[rng.uniform<int>(max)] = false;
+    map[rng.uniform<int>(max)] = false;
+    map[rng.uniform<int>(max)] = false;
+    map[rng.uniform<int>(max)] = false;
 #else
-    map.erase(pos);
+    map.erase(rng.uniform<int>(max));
+    map.erase(rng.uniform<int>(max));
+    map.erase(rng.uniform<int>(max));
+    map.erase(rng.uniform<int>(max));
 #endif
   }
-#ifdef USE_MAP_FALSE
-  for(auto it=map.begin(); it!= map.end(); ++it) {
-    if (!it->second)
-      map.erase(it);
-  }
-#endif
 
-  for (int i = 0; i < 10'000; ++i) {
-    for(auto it=map.begin(); it!= map.end(); ++it) {
+  for (int i = 0; i < BENCH_INN_SIZE; ++i) {
+    for (auto it = map.begin(), end = map.end(); it != end;++it) {
 #ifdef USE_MAP_FALSE
       if (it->second)
         conta++;
+      else
+        map.erase(it);
 #else
       conta++;
 #endif
@@ -221,7 +262,6 @@ void random_abseil_set(int max) {
   b.sample("traversal dense");
 
   printf("inserts random %d\n",conta);
-#endif
 }
 
 void random_ska_set(int max) {
@@ -231,36 +271,45 @@ void random_ska_set(int max) {
 
   ska::flat_hash_map<uint32_t,bool> map;
 
-  for (int n = 1; n < 4'000; ++n) {
-    for (int i = 0; i < 10'000; ++i) {
-      int pos = rng.uniform<int>(static_cast<uint64_t>(n)) % max;
+  for (int n = 1; n < BENCH_OUT_SIZE; ++n) {
+    for (int i = 0; i < BENCH_INN_SIZE; ++i) {
+      int pos = rng.uniform<int>(max);
       map[pos] = true;
 #ifdef USE_MAP_FALSE
-      pos = rng.uniform<int>(static_cast<uint64_t>(n)) % max;
+      pos = rng.uniform<int>(max);
       map[pos] = false;
-      pos = rng.uniform<int>(static_cast<uint64_t>(n)) % max;
-      map[pos] = false;
+      pos = rng.uniform<int>(max);
+      if (map.find(pos) != map.end())
+        map[pos] = false;
 #else
-      pos = rng.uniform<int>(static_cast<uint64_t>(n)) % max;
+      pos = rng.uniform<int>(max);
       map.erase(pos);
-      pos = rng.uniform<int>(static_cast<uint64_t>(n)) % max;
-      map.erase(pos);
+      pos = rng.uniform<int>(max);
+      if (map.find(pos) != map.end())
+        map.erase(pos);
 #endif
     }
   }
 
-#if 1
   b.sample("insert/erase dense");
   int conta = 0;
-  for (int i = 0; i < 10'000; ++i) {
-    for(auto it=map.begin(); it!= map.end(); ++it) {
+  for (int i = 0; i < BENCH_INN_SIZE; ++i) {
+    for (auto it = map.begin(), end = map.end(); it != end;++it) {
 #ifdef USE_MAP_FALSE
       if (it->second)
         conta++;
+      else
+        map.erase(it);
 #else
       conta++;
 #endif
     }
+#ifdef USE_MAP_FALSE
+    map[rng.uniform<int>(max)] = false;
+#else
+    map.erase(rng.uniform<int>(max));
+#endif
+    map[rng.uniform<int>(max)] = true;
   }
   b.sample("traversal sparse");
 
@@ -268,25 +317,26 @@ void random_ska_set(int max) {
   conta = 0;
 
   for (int i = 0; i < max; ++i) {
-    int pos = rng.uniform<int>(static_cast<uint64_t>(max)) % max;
 #ifdef USE_MAP_FALSE
-    map[pos] = false;
+    map[rng.uniform<int>(max)] = false;
+    map[rng.uniform<int>(max)] = false;
+    map[rng.uniform<int>(max)] = false;
+    map[rng.uniform<int>(max)] = false;
 #else
-    map.erase(pos);
+    map.erase(rng.uniform<int>(max));
+    map.erase(rng.uniform<int>(max));
+    map.erase(rng.uniform<int>(max));
+    map.erase(rng.uniform<int>(max));
 #endif
   }
-#ifdef USE_MAP_FALSE
-  for(auto it=map.begin(); it!= map.end(); ++it) {
-    if (!it->second)
-      map.erase(it);
-  }
-#endif
 
-  for (int i = 0; i < 10'000; ++i) {
-    for(auto it=map.begin(); it!= map.end(); ++it) {
+  for (int i = 0; i < BENCH_INN_SIZE; ++i) {
+    for (auto it = map.begin(), end = map.end(); it != end;++it) {
 #ifdef USE_MAP_FALSE
       if (it->second)
         conta++;
+      else
+        map.erase(it);
 #else
       conta++;
 #endif
@@ -295,7 +345,6 @@ void random_ska_set(int max) {
   b.sample("traversal dense");
 
   printf("inserts random %d\n",conta);
-#endif
 }
 
 void random_vector_set(int max) {
@@ -306,16 +355,51 @@ void random_vector_set(int max) {
   std::vector<bool> map;
   map.resize(max);
 
-  for (int n = 1; n < 4'000; ++n) {
-    for (int i = 0; i < 10'000; ++i) {
-      int pos = rng.uniform<int>(static_cast<uint64_t>(n)) % max;
+  for (int n = 1; n < BENCH_OUT_SIZE; ++n) {
+    for (int i = 0; i < BENCH_INN_SIZE; ++i) {
+      int pos = rng.uniform<int>(max);
       map[pos] = true;
-      pos = rng.uniform<int>(static_cast<uint64_t>(n)) % max;
+      pos = rng.uniform<int>(max);
       map[pos] = false;
-      pos = rng.uniform<int>(static_cast<uint64_t>(n)) % max;
-      map[pos] = false;
+      pos = rng.uniform<int>(max);
+      if (map[pos] == true)
+        map[pos] = false;
     }
   }
+
+  b.sample("insert/erase dense");
+  int conta = 0;
+  for (int i = 0; i < BENCH_INN_SIZE; ++i) {
+    for (auto e:map) {
+      if (e)
+        conta++;
+    }
+    map[rng.uniform<int>(max)] = true;
+    auto pos = rng.uniform<int>(max);
+    if (map[pos])
+      map[pos] = false;
+  }
+  b.sample("traversal sparse");
+
+  printf("inserts random %d\n",conta);
+  conta = 0;
+
+  for (int i = 0; i < max; ++i) {
+    map[rng.uniform<int>(max)] = false;
+    map[rng.uniform<int>(max)] = false;
+    map[rng.uniform<int>(max)] = false;
+    map[rng.uniform<int>(max)] = false;
+  }
+
+  for (int i = 0; i < BENCH_INN_SIZE; ++i) {
+    for (auto e:map) {
+      if (e)
+        conta++;
+    }
+  }
+  b.sample("traversal dense");
+
+  printf("inserts random %d\n",conta);
 }
 
 void random_bm_set(int max) {
@@ -325,16 +409,56 @@ void random_bm_set(int max) {
 
   bm::bvector<> bm;
 
-  for (int n = 1; n < 4'000; ++n) {
-    for (int i = 0; i < 10'000; ++i) {
-      int pos = rng.uniform<int>(static_cast<uint64_t>(n)) % max;
-      bm.set_bit(pos,true);
-      pos = rng.uniform<int>(static_cast<uint64_t>(n)) % max;
-      bm.clear_bit(pos);
-      pos = rng.uniform<int>(static_cast<uint64_t>(n)) % max;
+  for (int n = 1; n < BENCH_OUT_SIZE; ++n) {
+    for (int i = 0; i < BENCH_INN_SIZE; ++i) {
+      int pos = rng.uniform<int>(max);
+      bm.set_bit(pos);
+      pos = rng.uniform<int>(max);
+      if (bm.get_bit(pos)) {
+        bm.clear_bit(pos);
+      }
+    }
+  }
+
+  b.sample("insert/erase dense");
+  int conta = 0;
+  for (int i = 0; i < BENCH_INN_SIZE; ++i) {
+    unsigned value = bm.get_first();
+    do {
+      conta++;
+      value = bm.get_next(value);
+    } while(value);
+    int pos = rng.uniform<int>(max);
+    bm.set_bit(pos);
+    pos = rng.uniform<int>(max);
+    if (bm.get_bit(pos)) {
       bm.clear_bit(pos);
     }
   }
+
+  b.sample("traversal sparse");
+
+  printf("inserts random %d\n",conta);
+  conta = 0;
+
+  for (int i = 0; i < max; ++i) {
+    bm.clear_bit(rng.uniform<int>(max));
+    bm.clear_bit(rng.uniform<int>(max));
+    bm.clear_bit(rng.uniform<int>(max));
+    bm.clear_bit(rng.uniform<int>(max));
+  }
+
+  for (int i = 0; i < BENCH_INN_SIZE; ++i) {
+    unsigned value = bm.get_first();
+    do {
+      conta++;
+      value = bm.get_next(value);
+    } while(value);
+  }
+
+  b.sample("traversal dense");
+
+  printf("inserts random %d\n",conta);
 }
 
 int main(int argc, char **argv) {
@@ -368,7 +492,9 @@ int main(int argc, char **argv) {
     run_random_bm_set     = true;
   }
 
-  for(int i=1000;i<10'000'001;i*=1000) {
+  for(int i=1000;i<1'000'001;i*=1000) {
+    printf("-----------------------------------------------\n");
+    printf("        %d max\n",i);
     if (run_random_std_set)
       random_std_set(i);
 

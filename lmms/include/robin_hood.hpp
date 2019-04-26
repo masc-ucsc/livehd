@@ -242,6 +242,7 @@ public:
     //   T* obj = pool.allocate();
     //   ::new (static_cast<void*>(obj)) T();
     T* allocate() {
+      fmt::print("BULK allocate\n");
         T* tmp = mHead;
         if (!tmp) {
             tmp = performAllocation();
@@ -1097,6 +1098,13 @@ public:
         : Hash{h}
         , KeyEqual{equal} {}
 
+    explicit unordered_map(std::string_view _filename)
+        : Hash{Hash{}}
+        , KeyEqual{KeyEqual{}}
+        , filename{_filename} {
+          std::cout << "setup " << filename << "\n";
+    }
+
     template <typename Iter>
     unordered_map(Iter first, Iter last, size_t ROBIN_HOOD_UNUSED(bucket_count) /*unused*/ = 0,
                   const Hash& h = Hash{}, const KeyEqual& equal = KeyEqual{})
@@ -1123,7 +1131,8 @@ public:
         , mMask{std::move(o.mMask)}
         , mMaxNumElementsAllowed{std::move(o.mMaxNumElementsAllowed)}
         , mInfoInc{std::move(o.mInfoInc)}
-        , mInfoHashShift{std::move(o.mInfoHashShift)} {
+        , mInfoHashShift{std::move(o.mInfoHashShift)}
+        , filename{std::move(o.filename)} {
         // set other's mask to 0 so its destructor won't do anything
         o.mMask = 0;
     }
@@ -1139,6 +1148,7 @@ public:
             mMaxNumElementsAllowed = std::move(o.mMaxNumElementsAllowed);
             mInfoInc = std::move(o.mInfoInc);
             mInfoHashShift = std::move(o.mInfoHashShift);
+            filename = std::move(o.filename);
             Hash::operator=(std::move(static_cast<Hash&>(o)));
             KeyEqual::operator=(std::move(static_cast<KeyEqual&>(o)));
             DataPool::operator=(std::move(static_cast<DataPool&>(o)));
@@ -1166,6 +1176,7 @@ public:
             mMaxNumElementsAllowed = o.mMaxNumElementsAllowed;
             mInfoInc = o.mInfoInc;
             mInfoHashShift = o.mInfoHashShift;
+            filename = o.filename;
             cloneData(o);
         }
     }
@@ -1201,6 +1212,7 @@ public:
             mMaxNumElementsAllowed = 0;
             mInfoInc = InitialInfoInc;
             mInfoHashShift = InitialInfoHashShift;
+            filename = "invalid";
             return *this;
         }
 
@@ -1221,6 +1233,7 @@ public:
             mInfo = reinterpret_cast<uint8_t*>(mKeyVals + o.mMask + 1);
             mInfoInc = o.mInfoInc;
             mInfoHashShift = o.mInfoHashShift;
+            filename = o.filename;
             // sentinel is set in cloneData
         }
         Hash::operator=(static_cast<const Hash&>(o));
@@ -1243,6 +1256,7 @@ public:
         swap(mMaxNumElementsAllowed, o.mMaxNumElementsAllowed);
         swap(mInfoInc, o.mInfoInc);
         swap(mInfoHashShift, o.mInfoHashShift);
+        swap(filename, o.filename);
         swap(static_cast<Hash&>(*this), static_cast<Hash&>(o));
         swap(static_cast<KeyEqual&>(*this), static_cast<KeyEqual&>(o));
         // no harm done in swapping datapool
@@ -1266,6 +1280,7 @@ public:
 
         mInfoInc = InitialInfoInc;
         mInfoHashShift = InitialInfoHashShift;
+        // Do not clear filename
     }
 
     // Destroys the map and all it's contents.
@@ -1516,6 +1531,8 @@ private:
         mMask = max_elements - 1;
         mMaxNumElementsAllowed = calcMaxNumElementsAllowed(max_elements);
 
+        std::cout << "init_data sz:" << max_elements << " file:" << filename << "\n";
+
         // calloc also zeroes everything
         mKeyVals = reinterpret_cast<Node*>(
             detail::assertNotNull<std::bad_alloc>(calloc(1, calcNumBytesTotal(max_elements))));
@@ -1720,6 +1737,7 @@ private:
     InfoType mInfoInc = InitialInfoInc;                                     // 4 byte 44
     InfoType mInfoHashShift = InitialInfoHashShift;                         // 4 byte 48
                                                     // 16 byte 56 if NodeAllocator
+    std::string filename;
 };
 
 } // namespace detail

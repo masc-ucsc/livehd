@@ -130,13 +130,13 @@ public:
   bool is_valid_node(Index_ID nid) const {
     if (nid >= node_internal.size())
       return false;
-    return node_internal[src_idx].is_master_root();
+    return node_internal[nid].is_master_root();
   }
 
-  bool is_valid_node_pin(Index_ID nid) const {
-    if (nid >= node_internal.size())
+  bool is_valid_node_pin(Index_ID idx) const {
+    if (idx >= node_internal.size())
       return false;
-    return node_internal[src_idx].is_root();
+    return node_internal[idx].is_root();
   }
 
   Node_Internal &get_node_int(Index_ID idx) {
