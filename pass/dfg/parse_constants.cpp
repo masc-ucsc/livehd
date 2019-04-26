@@ -1,7 +1,7 @@
 #include "pass_dfg.hpp"
 #include <string>
 
-Node Pass_dfg::resolve_constant(LGraph *g, Aux_tree *aux_tree, const std::string &str) {
+Node Pass_dfg::resolve_constant(LGraph *g, std::string_view str) {
   // arguments -> local variable
   // bool is_in32b;
   // bool is_explicit_signed;
@@ -12,7 +12,7 @@ Node Pass_dfg::resolve_constant(LGraph *g, Aux_tree *aux_tree, const std::string
   size_t   bit_width;
 
   std::string token1st, token2nd;
-  std::string str_in = str;
+  std::string str_in(str);//explicitly construct a string from string_view
   char        rm     = '_'; // remove '_' in 0xF___FFFF
   str_in.erase(std::remove(str_in.begin(), str_in.end(), rm), str_in.end());
   size_t s_pos = str_in.find('s'); // O(n)
@@ -36,7 +36,7 @@ Node Pass_dfg::resolve_constant(LGraph *g, Aux_tree *aux_tree, const std::string
   }
 
   // explicit bits width
-  if(token2nd.empty()) {
+  if(!token2nd.empty()) {
     explicit_bits = (uint32_t)std::stoi(token2nd);
   } else
     explicit_bits = 0;

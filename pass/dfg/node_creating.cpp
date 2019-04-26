@@ -5,90 +5,93 @@
 #include "lgraph.hpp"
 #include "pass_dfg.hpp"
 
-Node Pass_dfg::create_reference(LGraph *g, Aux_tree *aux_tree, const std::string &var_name) {
-  Node node = create_node(g, aux_tree, var_name.substr(1));
-  fmt::print("create node:{}\n");
-  node.set_type(DfgRef_Op);
-  return node;
+Node_pin Pass_dfg::create_reference(LGraph *g, Aux_tree *aux_tree, std::string_view var_name) {
+  var_name.remove_prefix(1);//SH:FIXME: need to think the pyrope reference syntax design
+  Node_pin pin = create_node_and_pin(g, aux_tree, var_name);
+  pin.get_node().set_type(DfgRef_Op);
+  return pin;
 }
 
-Node Pass_dfg::create_register(LGraph *g, Aux_tree *aux_tree, const std::string &var_name) {
-  Node node = create_node(g, aux_tree, var_name);
-  node.set_type(SFlop_Op);
-  return node;
+//SH:FIXME: need to figure out how to attach other pin other than the Q pin (pin0)
+Node_pin Pass_dfg::create_register(LGraph *g, Aux_tree *aux_tree, std::string_view var_name) {
+  Node_pin pin = create_node_and_pin(g, aux_tree, var_name);
+  pin.get_node().set_type(SFlop_Op);
+  return pin;
 }
 
-/*
-SH:FIXME: return Node_pin will pollute the uniform of Aux table... need a new design!
-need to store the input/output name string information
-and use string comparison to match the target io
-*/
-Node Pass_dfg::create_input(LGraph *g, Aux_tree *aux_tree, const std::string &var_name, uint16_t bits) {
-  auto pin = g->add_graph_input(var_name.substr(1).c_str(), bits, 0); // get rid of $mark
-  return pin.get_node();
-  //return g->get_node(pin).get_nid();
+Node_pin Pass_dfg::create_input(LGraph *g, Aux_tree *aux_tree, std::string_view var_name, uint16_t bits) {
+  var_name.remove_prefix(1); //get rid of $mark
+  auto pin = g->add_graph_input(var_name, bits, 0);
+  pin.set_name(var_name);
+  return pin;
 }
 
-Node Pass_dfg::create_output(LGraph *g, Aux_tree *aux_tree, const std::string &var_name, uint16_t bits) {
-  auto pin = g->add_graph_output(var_name.substr(1).c_str(), bits, 0); // get rid of %mark
-  return pin.get_node();
-  //return g->get_node(pin).get_nid();
+Node_pin Pass_dfg::create_output(LGraph *g, Aux_tree *aux_tree, std::string_view var_name, uint16_t bits) {
+  var_name.remove_prefix(1); //get rid of %mark
+  auto pin = g->add_graph_output(var_name, bits, 0); // get rid of %mark
+  pin.set_name(var_name);
+  return pin;
 }
 
-Node Pass_dfg::create_private(LGraph *g, Aux_tree *aux_tree, const std::string &var_name) {
-  Node node = create_node(g, aux_tree, var_name);
-  node.set_type(Or_Op);
-  return node;
+Node_pin Pass_dfg::create_private(LGraph *g, Aux_tree *aux_tree, std::string_view var_name) {
+  Node_pin pin = create_node_and_pin(g, aux_tree, var_name);
+  pin.get_node().set_type(Or_Op);
+  return pin;
 }
 
-Node Pass_dfg::create_const32_node(LGraph *g, uint32_t val, uint16_t node_bit_width, bool is_signed) {
-  return create_const32_node(g, std::to_string(val), node_bit_width, is_signed);
+Node_pin Pass_dfg::create_const32(LGraph *g, uint32_t val, uint16_t node_bit_width, bool is_signed) {
+  Node_pin pin = create_const32_node(g, std::to_string(val), node_bit_width, is_signed).setup_driver_pin(0);
+  pin.set_name(std::to_string(val));
+  return pin;
 }
 
-Node Pass_dfg::create_default_const(LGraph *g) {
-  Node node = g->create_node_const(0,1);
-  return node;
+Node_pin Pass_dfg::create_default_const(LGraph *g) {
+  Node_pin pin = g->create_node_const(0,1).setup_driver_pin();
+  pin.set_name("default_const");
+  return pin;
 }
 
-Node Pass_dfg::create_true_const(LGraph *g, Aux_tree *aux_tree) {
-  Node node = g->create_node_const(1,1);
-  return node;
+Node_pin Pass_dfg::create_true_const(LGraph *g) {
+  Node_pin pin = g->create_node_const(1,1).setup_driver_pin();
+  pin.set_name("true");
+  return pin;
 }
 
-Node Pass_dfg::create_false_const(LGraph *g, Aux_tree *aux_tree) {
-  Node node = g->create_node_const(0,1);
-  return node;
+Node_pin Pass_dfg::create_false_const(LGraph *g) {
+  Node_pin pin = g->create_node_const(0,1).setup_driver_pin();
+  pin.set_name("true");
+  return pin;
 }
 
-Node Pass_dfg::create_node(LGraph *g, Aux_tree *aux_tree, const std::string &v) {
+Node_pin Pass_dfg::create_node_and_pin(LGraph *g, Aux_tree *aux_tree, std::string_view v) {
   I(!v.empty());
   Node node = g->create_node();
-  node.setup_driver_pin(0).set_name(v);//SH:FIXME: what information do you want to store at pin(0)?
-  aux_tree->set_alias(v, node);
-  return node;
+  node.setup_driver_pin(0).set_name(v);
+  aux_tree->set_alias(v, node.get_driver_pin(0));
+  return node.get_driver_pin(0);
 }
 
-Node Pass_dfg::create_AND(LGraph *g, Aux_tree *aux_tree, Node op1, Node op2) {
+Node_pin Pass_dfg::create_AND(LGraph *g, Aux_tree *aux_tree, Node_pin op1, Node_pin op2) {
   return create_binary(g, aux_tree, op1, op2, And_Op);
 }
 
-Node Pass_dfg::create_OR(LGraph *g, Aux_tree *aux_tree, Node op1, Node op2) {
+Node_pin Pass_dfg::create_OR(LGraph *g, Aux_tree *aux_tree, Node_pin op1, Node_pin op2) {
   return create_binary(g, aux_tree, op1, op2, Or_Op);
 }
 
-Node Pass_dfg::create_binary(LGraph *g, Aux_tree *aux_tree, Node op1, Node op2, Node_Type_Op oper) {
-  Node dfnode = g->create_node();
-  dfnode.set_type(oper);
-  g->add_edge(op1.setup_driver_pin(0), dfnode.setup_sink_pin(0));
-  g->add_edge(op2.setup_driver_pin(0), dfnode.setup_sink_pin(0));
-  return dfnode;
+Node_pin Pass_dfg::create_binary(LGraph *g, Aux_tree *aux_tree, Node_pin op1, Node_pin op2, Node_Type_Op oper) {
+  Node sink_node = g->create_node();
+  sink_node.set_type(oper);
+  g->add_edge(op1, sink_node.setup_sink_pin(0));
+  g->add_edge(op2, sink_node.setup_sink_pin(0));
+  return sink_node.setup_driver_pin(0); //SH:FIXME: need to extend to multi-output-pin Node Type
 }
 
-Node Pass_dfg::create_NOT(LGraph *g, Aux_tree *aux_tree, Node op1) {
-  Node dfnode = g->create_node();
-  dfnode.set_type(Not_Op);
-  g->add_edge(op1.setup_driver_pin(0), dfnode.setup_sink_pin(0));
-  return dfnode;
+Node_pin Pass_dfg::create_NOT(LGraph *g, Aux_tree *aux_tree, Node_pin op1) {
+  Node sink_node = g->create_node();
+  sink_node.set_type(Not_Op);
+  g->add_edge(op1, sink_node.setup_sink_pin());
+  return sink_node.setup_driver_pin();
 }
 
 Node_Type_Op Pass_dfg::node_type_from_text(std::string_view operator_text) const {

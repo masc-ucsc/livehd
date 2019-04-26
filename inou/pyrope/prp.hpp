@@ -170,7 +170,7 @@ protected:
   void go_up(int num_levels);
   void consume_block(Rule_id rid, int num_tok);
   
-  void ast_handler(const Tree_index &parent, const Tree_index &self, const Ast_parser_node &node);
+  void ast_handler();
   void process_ast();
   
 public:

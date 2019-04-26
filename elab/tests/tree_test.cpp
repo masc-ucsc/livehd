@@ -157,8 +157,6 @@ TEST_F(Elab_test, Preorder_traversal_check) {
   ast_preorder_traversal_check.push_back("child1.2.3");
   ast_preorder_traversal_check.push_back("child1.3");
 
-  Tree_index node = ast.get_root();
-
   for(const auto &it:ast.depth_preorder(ast.get_root())) {
     ast_preorder_traversal.push_back(ast.get_data(it));
   }

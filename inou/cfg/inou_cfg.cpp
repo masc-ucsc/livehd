@@ -356,7 +356,7 @@ void Inou_cfg::build_graph(std::vector<std::string> &words, std::string &dfg_dat
     dpin = name2node[w1st].setup_driver_pin(0);
     spin = name2node[w2nd].setup_sink_pin(0);
     g->add_edge(dpin, spin);
-    fmt::print("normal case connection, connect driver_node:{} -> sink_node:{} ----- 5\n", w1st, w2nd);
+    fmt::print("normal case connection, connect driver_node:{} -> sink_node:{}\n", w1st, w2nd);
 
     bool   belong_tops   = false;
     std::string target_vec_id = w1st;
