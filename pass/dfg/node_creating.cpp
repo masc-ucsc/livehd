@@ -26,8 +26,11 @@ Node_pin Pass_dfg::create_input(LGraph *g, Aux_tree *aux_tree, std::string_view 
 }
 
 Node_pin Pass_dfg::create_output(LGraph *g, Aux_tree *aux_tree, std::string_view var_name, uint16_t bits) {
+  //add_graph_output will return the sink pin of graph out
+  //we need it's twin driver node_pin to represent %out
   var_name.remove_prefix(1); //get rid of %mark
-  auto pin = g->add_graph_output(var_name, bits, 0); // get rid of %mark
+  g->add_graph_output(var_name, bits, 0); // get rid of %mark
+  auto pin = g->get_graph_output_driver(var_name);
   return pin;
 }
 
