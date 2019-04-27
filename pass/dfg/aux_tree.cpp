@@ -1,9 +1,9 @@
 #include "aux_tree.hpp"
 
 void Aux_node::set_alias(std::string_view v, Node_pin n) {
+  I(false);
   auxtab[v] = n;
-  //SH:FIXME: wait for pin.get_name() bug resolve
-  //fmt::print("set alias {} <-> node_pin:{}\n", v, n.get_name());
+  fmt::print("set alias {} <-> node_pin:{}\n", v, n.get_name());
 }
 
 void Aux_node::set_pending(std::string_view v, Node_pin n) {

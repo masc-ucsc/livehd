@@ -408,7 +408,8 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
   const auto& target = data.get_target();
   const auto& oprds  = data.get_operands(); //return strings
   auto        op     = data.get_operator();
-  Node_pin    target_pin, oprd_p0, oprd_p1;
+  Node_pin target_pin, oprd_p0, oprd_p1;
+
   target_pin = process_operand(dfg, aux_tree, target);
   oprd_p0  = process_operand(dfg, aux_tree, oprds[0]);
   if(oprds.size()>1)
@@ -436,7 +437,8 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
     aux_tree->set_alias(target, oprd_p0);
     aux_tree->set_pending(target, oprd_p0);
   } else if(is_as_op(op)) {
-    // process explicit bitwidth assignment
+    //SH:FIXME: should add some flag to identify the uniqueness of "as" op
+    //process explicit bitwidth assignment
     if(is_input(target) || is_output(target)) {
       I(oprd_p0.get_node().get_type_const_value());
       auto bits = (uint16_t)oprd_p0.get_node().get_type_const_value();
