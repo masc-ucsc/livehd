@@ -56,52 +56,9 @@ void Pass_mockturtle::work(Eprp_var &var) {
   }
 }
 
-bool eligable_cell_op(Node_Type_Op cell_op) {
-
-      switch (cell_op) {
-        case And_Op:
-          //fmt::print("Node: And Gate\n");
-          break;
-        case Or_Op:
-          //fmt::print("Node: Or Gate\n");
-          break;
-        case Xor_Op:
-          //fmt::print("Node: Xor Gate\n");
-          break;
-        case LessThan_Op:
-          break;
-        case GreaterThan_Op:
-          break;
-        case LessEqualThan_Op:
-          break;
-        case GreaterEqualThan_Op:
-          break;
-        case Equals_Op:
-          break;
-        //case ShiftRight_Op:
-        //  break;
-        //case ShiftLeft_Op:
-        //  break;
-        case Not_Op:
-          break;
-        case Join_Op:
-          break;
-        case Pick_Op:
-          break;
-        default:
-          //fmt::print("Node: Unknown\n");
-          return false;
-      }
-      return true;
-}
-
-void Pass_mockturtle::do_work(LGraph *g) {
-  LGBench b("pass.mockturtle");
-
-  //absl::flat_hash_map<Node::Compact, std::pair<std::string,std::pair<int,int>>> cell_type;
-  absl::flat_hash_map<Node::Compact, int> group_boundary;
+void Pass_mockturtle::lg_partition(LGraph *g) {
+  //absl::flat_hash_map<Node::Compact, int> group_boundary;
   std::map<int, int> group_id_mapping;
-  int cell_amount = 0;
   int group_id = 0;
 
   for(const auto &nid : g->forward()) {
@@ -141,6 +98,26 @@ void Pass_mockturtle::do_work(LGraph *g) {
         }
       }
     }
+  }
+
+  for (std::map<int,int>::reverse_iterator rit = group_id_mapping.rbegin(); rit!=group_id_mapping.rend(); rit++) {
+    for (auto &it:group_boundary) {
+      if (it.second==rit->first)
+        it.second=rit->second;
+    }
+  }
+
+}
+
+void Pass_mockturtle::do_work(LGraph *g) {
+  LGBench b("pass.mockturtle");
+
+  //absl::flat_hash_map<Node::Compact, std::pair<std::string,std::pair<int,int>>> cell_type;
+
+  int cell_amount = 0;
+  for(const auto &nid : g->forward()) {
+    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
+    node.get_type(); //avoid warning
     cell_amount++;
 /*
     auto name = node.get_type().get_name();
@@ -155,12 +132,9 @@ void Pass_mockturtle::do_work(LGraph *g) {
     cell_type[node.get_compact()]=std::make_pair(name,std::make_pair(in_edges_num,out_edges_num));
 */
   }
-  for (std::map<int,int>::reverse_iterator rit = group_id_mapping.rbegin(); rit!=group_id_mapping.rend(); rit++) {
-    for (auto &it:group_boundary) {
-      if (it.second==rit->first)
-        it.second=rit->second;
-    }
-  }
+
+  lg_partition(g);
+
 //  fmt::print("Pass: number of cells {}\n", cell_type.size());
   fmt::print("{} nodes passed.\n", cell_amount);
 /*
