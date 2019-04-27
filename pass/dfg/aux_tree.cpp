@@ -2,12 +2,14 @@
 
 void Aux_node::set_alias(std::string_view v, Node_pin n) {
   auxtab[v] = n;
-  fmt::print("set alias {} <-> node_pin:{}\n", v, n.get_name());
+  //SH:FIXME: wait for pin.get_name() bug resolve
+  //fmt::print("set alias {} <-> node_pin:{}\n", v, n.get_name());
 }
 
 void Aux_node::set_pending(std::string_view v, Node_pin n) {
   pendtab[v] = n;
-  fmt::print("set pending {} <-> node_pin:{}\n", v, n.get_name());
+  //SH:FIXME: wait for pin.get_name() bug resolve
+  //fmt::print("set pending {} <-> node_pin:{}\n", v, n.get_name());
 }
 
 Aux_node* Aux_tree::get_cur_auxnd() const {
