@@ -75,10 +75,12 @@ void Inou_graphviz::do_fromlg(std::vector<LGraph *> &lgs) {
 void Inou_graphviz::populate_data(LGraph* g){
   std::string data = "digraph {\n";
 
+
   g->each_node_fast([&data](const Node &node) {
     const auto &ntype = node.get_type();
     auto node_name = node.has_name() ? node.get_name() : "";
 
+    //SH:FIXME:ASK: bug!! for graph io, visit two nodes?
     data += fmt::format(" {} [label=\"{} :{} :{}\"];\n", node.debug_name(), node.debug_name(), ntype.get_name(), node_name);
 
     for(auto &out : node.out_edges()){
