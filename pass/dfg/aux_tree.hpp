@@ -91,19 +91,21 @@ public:
   void            set_alias(std::string_view v, Node_pin n);
   bool            has_alias(std::string_view v) const;
   Node_pin        get_alias(std::string_view v) const;
+  void            update_alias(std::string_view v, Node_pin n);
   void            set_pending(std::string_view v, Node_pin n);
   bool            has_pending(std::string_view v) const;
   Node_pin        get_pending(std::string_view v) const;
+  void            update_pending(std::string_view v, Node_pin n);
   void            print_cur_auxnd();
   void            auxes_stack_pop() {auxes_stack.pop_back();};
 
 private:
   Aux_node *              root_auxnd;
   std::vector<Aux_node *> auxes_stack; // for tracking latest aux_node
-  bool                    check_global_alias  (const Aux_node *auxnd, std::string_view v) const;
-  Node_pin                get_global_alias    (const Aux_node *auxnd, std::string_view v) const;
-  bool                    check_global_pending(const Aux_node *auxnd, std::string_view v) const;
-  Node_pin                get_global_pending  (const Aux_node *auxnd, std::string_view v) const;
+  bool                    check_global_alias    (const Aux_node *auxnd, std::string_view v) const;
+  bool                    check_global_pending  (const Aux_node *auxnd, std::string_view v) const;
+  Node_pin                get_global_alias      (const Aux_node *auxnd, std::string_view v) const;
+  Node_pin                get_global_pending    (const Aux_node *auxnd, std::string_view v) const;
 };
 
 #endif

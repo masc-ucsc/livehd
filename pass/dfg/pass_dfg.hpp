@@ -47,8 +47,7 @@ private:
   //Node process_loop(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data, Node node);
 
   Node_pin process_operand(LGraph *dfg, Aux_tree *aux_tree, std::string_view oprd);
-
-  std::vector<Node_pin> process_operands(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Data &data);
+  Node_pin process_target (LGraph *dfg, Aux_tree *aux_tree, std::string_view oprd, std::string_view op);
 
 
   void resolve_phis(LGraph *dfg, Aux_tree *aux_tee, Aux_node *pauxnd, Aux_node *tauxnd, Aux_node *fauxnd, Node cond);
