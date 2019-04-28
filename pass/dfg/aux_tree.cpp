@@ -68,13 +68,11 @@ void Aux_tree::disconnect_child(Aux_node *parent, Aux_node *child, bool branch) 
 }
 
 void Aux_tree::set_pending(std::string_view v, Node_pin n) {
-  Aux_node *cur_auxnd = get_cur_auxnd();
-  cur_auxnd->set_pending(v, n);
+  get_cur_auxnd()->set_pending(v, n);
 }
 
 void Aux_tree::set_alias(std::string_view v, Node_pin n) {
-  Aux_node *cur_auxnd = get_cur_auxnd();
-  cur_auxnd->set_alias(v, n);
+  get_cur_auxnd()->set_alias(v, n);
 }
 
 bool Aux_tree::has_alias(std::string_view v) const {
@@ -95,10 +93,12 @@ bool Aux_tree::check_global_alias(const Aux_node *auxnd, std::string_view v) con
 };
 
 Node_pin Aux_tree::get_alias(std::string_view v) const {
+  I(this->has_alias(v));
   const Aux_node *cur_auxnd = get_cur_auxnd();
   // recursive search through parents
   return get_global_alias(cur_auxnd, v);
 }
+
 
 // get_global_alias() only gets "chain of patent auxtabs" and don't get sibling auxtab
 Node_pin Aux_tree::get_global_alias(const Aux_node *auxnd, std::string_view v) const {
@@ -110,6 +110,7 @@ Node_pin Aux_tree::get_global_alias(const Aux_node *auxnd, std::string_view v) c
 
   return get_global_alias(get_parent(auxnd), v);
 };
+
 
 bool Aux_tree::has_pending(std::string_view v) const {
   const Aux_node *cur_auxnd = get_cur_auxnd()->parent;
@@ -148,3 +149,17 @@ void Aux_tree::print_cur_auxnd() {
     fmt::print("auxtab:{:>10} -> {}\n", iter.first, iter.second.get_compact());
   }
 }
+
+//SH:FIXME: only update local alias seems reasonalbe
+//replace all keys which point to old Node_pin with new Node_pin
+void Aux_tree::update_alias(std::string_view target, Node_pin new_pin) {
+  Aux_node *cur_auxnd = get_cur_auxnd();
+  I(cur_auxnd->has_alias(target));
+  Node_pin old_pin = cur_auxnd->get_alias(target);
+  for(const auto& iter : cur_auxnd->get_auxtab()){
+    if(iter.second == old_pin){
+      cur_auxnd->set_alias(iter.first, new_pin);
+    }
+  }
+}
+
