@@ -10,6 +10,10 @@
 #include "pass_dfg.hpp"
 #include "eprp_utils.hpp"
 
+//SH:FIXME: (1)need to extend to real tuple function, for now it acts as a pure assignment
+//SH:FIXME: (2)should add some flag to identify the uniqueness of "as" op
+//SH:FIXME: (3)differentiate logical AND <-> bitwise AND <-> reduced AND in Pyrope
+
 void setup_pass_dfg() {
   Pass_dfg p;
   p.setup();
@@ -411,7 +415,7 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
   Node_pin target_pin, oprd_p0, oprd_p1;
 
   target_pin = process_operand(dfg, aux_tree, target);
-  oprd_p0  = process_operand(dfg, aux_tree, oprds[0]);
+  oprd_p0    = process_operand(dfg, aux_tree, oprds[0]);
   if(oprds.size()>1)
     oprd_p1 = process_operand(dfg, aux_tree, oprds[1]);
 
@@ -433,23 +437,21 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
       fmt::print("sink io of subgraph:{}, assigned by:{}\n",oprds[0], oprds[1]);
     }
   } else if(is_tuple_op(op)){
-    //SH:FIXME: need to extend to real tuple function, for now it acts as a pure assignment
     aux_tree->set_alias(target, oprd_p0);
     aux_tree->set_pending(target, oprd_p0);
   } else if(is_as_op(op)) {
-    //SH:FIXME: should add some flag to identify the uniqueness of "as" op
     //process explicit bitwidth assignment
     if(is_input(target) || is_output(target)) {
       I(oprd_p0.get_node().get_type_const_value());
       auto bits = (uint16_t)oprd_p0.get_node().get_type_const_value();
       target_pin.set_bits(bits);
-      fmt::print("set_bits for i/o target:{}\n", target);
+      fmt::print("set_bits({}) for i/o target:{}\n",bits, target);
     } else {
       aux_tree->set_alias(target, oprd_p0);
     }
   } else if(is_unary_op(op)) {
     aux_tree->set_alias(target, oprd_p0);
-  } else if(is_compute_op(op) || is_compare_op(op)) {
+  } else if(is_binary_op(op)) {
     I(oprds.size() > 1);
     std::vector<Node_pin> oprd_pins;
     oprd_pins.push_back(oprd_p0);
@@ -511,28 +513,29 @@ Node_pin Pass_dfg::process_operand(LGraph *dfg, Aux_tree *aux_tree, std::string_
   Node_pin oprd_pin;
   if(aux_tree->has_alias(oprd)) {
     oprd_pin = aux_tree->get_alias(oprd);
-    //fmt::print("operand:{} has an alias:{}\n", oprd, oprd_node);
+    I(oprd_pin.has_name());
+    fmt::print("operand:{} has an alias:{}\n", oprd, oprd_pin.get_name());
   } else {
     if(is_constant(oprd)) { // process "as __bits" here!
       oprd_pin = resolve_constant(dfg, oprd).setup_driver_pin();
-      aux_tree->set_alias(oprd, oprd_pin);
       fmt::print("create node for constant operand:{}\n", oprd);
+      aux_tree->set_alias(oprd, oprd_pin);
     } else if(is_input(oprd)) {
       oprd_pin = create_input(dfg, aux_tree, oprd);
-      aux_tree->set_alias(oprd, oprd_pin);
       fmt::print("create node for input operand:{}\n", oprd);
+      aux_tree->set_alias(oprd, oprd_pin);
     } else if(is_output(oprd)) {
       oprd_pin = create_output(dfg, aux_tree, oprd);
-      aux_tree->set_alias(oprd, oprd_pin);
       fmt::print("create node for output operand:{}\n", oprd);
+      aux_tree->set_alias(oprd, oprd_pin);
     } else if(is_reference(oprd)) {
       oprd_pin = create_reference(dfg, aux_tree, oprd);
-      aux_tree->set_alias(oprd, oprd_pin);
       fmt::print("create node for reference operand:{}\n", oprd);
+      aux_tree->set_alias(oprd, oprd_pin);
     } else {
       oprd_pin = create_private(dfg, aux_tree, oprd);
-      aux_tree->set_alias(oprd, oprd_pin);
       fmt::print("create node for private operand:{}\n", oprd);
+      aux_tree->set_alias(oprd, oprd_pin);
     }
     // else if (is_register(oprd)){
     //  //oprd_id = create_register(dfg, aux_tree, oprd);
