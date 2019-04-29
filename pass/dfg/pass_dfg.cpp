@@ -455,7 +455,8 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
     aux_tree->set_alias(target, oprd_pins[0]);
   } else if(is_binary_op(op)) {
     I(operands.size() > 1);
-    process_connections(dfg, oprd_pins, target_pin.get_node());
+    Node tnode = target_pin.get_node();
+    process_connections(dfg, oprd_pins, tnode);
   }
 }
 
@@ -536,13 +537,13 @@ Node_pin Pass_dfg::process_target(LGraph *dfg, Aux_tree *aux_tree, std::string_v
   return tpin;
 }
 
-void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Node_pin> &dpins, const Node &snode) {
-  bool one_srcs_is_signed = false;
+void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Node_pin> &dpins, Node &snode) {
+  bool one_srcs_is_signed = false; //SH:FIXME: wait for bitwidth algorithm
 
   for(std::vector<Node_pin>::size_type i = 0; i < dpins.size(); i++){
     auto ntype = snode.get_type().op;
-    I(ntype != SubGraph_Op);        //todo: Handled separate as it is a more complicated case
-    I(ntype != DfgPendingGraph_Op); //todo: Handled separate as it is a more complicated case
+    I(ntype != SubGraph_Op);        //SH:FIXME: Handled separate as it is a more complicated case
+    I(ntype != DfgPendingGraph_Op); //SH:FIXME: Handled separate as it is a more complicated case
 
     Node_pin dpin = dpins.at(i);
     Port_ID  spin_pid =
@@ -561,7 +562,7 @@ void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Node_pin> &dpi
       (ntype == GreaterEqualThan_Op && i == 1) ? (uint16_t)2 : (uint16_t)0;
 
 
-    dfg->add_edge(dpin, snode.get_sink_pin(spin_pid));
+    dfg->add_edge(dpin, snode.setup_sink_pin(spin_pid));
     I(dpin.has_name());
     I(snode.get_driver_pin(0).has_name());
     fmt::print("add_edge driver:{}->sink:{}\n", dpin.get_name(), snode.get_driver_pin(0).get_name());
