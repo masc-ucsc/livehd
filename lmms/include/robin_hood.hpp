@@ -39,6 +39,13 @@
 #define ROBIN_HOOD_VERSION_MINOR 2 // for adding functionality in a backwards-compatible manner
 #define ROBIN_HOOD_VERSION_PATCH 2 // for backwards-compatible bug fixes
 
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#include <queue>
 #include <algorithm>
 #include <cstring>
 #include <functional>
@@ -46,10 +53,10 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <iostream>
 
-// #define ROBIN_HOOD_LOG_ENABLED
+#define ROBIN_HOOD_LOG_ENABLED
 #ifdef ROBIN_HOOD_LOG_ENABLED
-#    include <iostream>
 #    define ROBIN_HOOD_LOG(x) std::cout << __FUNCTION__ << "@" << __LINE__ << ": " << x << std::endl
 #else
 #    define ROBIN_HOOD_LOG(x)
@@ -188,6 +195,7 @@ inline T unaligned_load(void const* ptr) {
     return t;
 }
 
+#if 0
 // Allocates bulks of memory for objects of type T. This deallocates the memory in the destructor,
 // and keeps a linked list of the allocated memory around. Overhead per allocation is the size of a
 // pointer.
@@ -265,6 +273,7 @@ public:
     // responsible for freeing the data (with free()). If the provided data is not large enough to
     // make use of, it is immediately freed. Otherwise it is reused and freed in the destructor.
     void addOrFree(void* ptr, const size_t numBytes) {
+        fmt::print("bulk:addOrFree ptr:{}\n",ptr);
         // calculate number of available elements in ptr
         if (numBytes < ALIGNMENT + ALIGNED_SIZE) {
             // not enough data for at least one element. Free and return.
@@ -350,7 +359,9 @@ private:
     T* mHead;
     T** mListForFree;
 };
+#endif
 
+#if 0
 template <typename T, size_t MinSize, size_t MaxSize, bool IsFlatMap>
 struct NodeAllocator;
 
@@ -366,6 +377,7 @@ struct NodeAllocator<T, MinSize, MaxSize, true> {
 
 template <typename T, size_t MinSize, size_t MaxSize>
 struct NodeAllocator<T, MinSize, MaxSize, false> : public BulkPoolAllocator<T, MinSize, MaxSize> {};
+#endif
 
 // All empty maps initial mInfo point to this infobyte. That way lookup in an empty map
 // always returns false, and this is a very hot byte.
@@ -608,10 +620,7 @@ template <bool IsFlatMap, size_t MaxLoadFactor100, typename Key, typename T, typ
           typename KeyEqual>
 class unordered_map
     : public Hash,
-      public KeyEqual,
-      detail::NodeAllocator<
-          robin_hood::pair<typename std::conditional<IsFlatMap, Key, Key const>::type, T>, 4, 16384,
-          IsFlatMap> {
+      public KeyEqual {
 public:
     using key_type = Key;
     using mapped_type = T;
@@ -631,11 +640,10 @@ private:
     // configuration defaults
 
     // make sure we have 8 elements, needed to quickly rehash mInfo
-    static constexpr size_t InitialNumElements = sizeof(uint64_t);
+    static constexpr size_t InitialNumElements = 1024;
     static constexpr int InitialInfoNumBits = 5;
     static constexpr uint8_t InitialInfoInc = 1 << InitialInfoNumBits;
     static constexpr uint8_t InitialInfoHashShift = sizeof(size_t) * 8 - InitialInfoNumBits;
-    using DataPool = detail::NodeAllocator<value_type, 4, 16384, IsFlatMap>;
 
     // type needs to be wider than uint8_t.
     using InfoType = int32_t;
@@ -716,7 +724,6 @@ private:
             : mData(std::move(n.mData)) {}
 
         void destroy(M& map) {
-            // don't deallocate, just put it into list of datapool.
             mData->~value_type();
             map.deallocate(mData);
         }
@@ -781,7 +788,7 @@ private:
             //             target.calcNumBytesTotal(target.mMask + 1));
             auto src = reinterpret_cast<char const*>(source.mKeyVals);
             auto tgt = reinterpret_cast<char*>(target.mKeyVals);
-            std::copy(src, src + target.calcNumBytesTotal(target.mMask + 1), tgt);
+            std::copy(src, src + target.calcNumBytesTotal(*target.mMask + 1), tgt);
         }
     };
 
@@ -790,10 +797,10 @@ private:
         void operator()(M const& source, M& target) const {
             // make sure to copy initialize sentinel as well
             // std::memcpy(target.mInfo, source.mInfo, target.calcNumBytesInfo(target.mMask + 1));
-            std::copy(source.mInfo, source.mInfo + target.calcNumBytesInfo(target.mMask + 1),
+            std::copy(source.mInfo, source.mInfo + target.calcNumBytesInfo(*target.mMask + 1),
                       target.mInfo);
 
-            for (size_t i = 0; i < target.mMask + 1; ++i) {
+            for (size_t i = 0; i < *target.mMask + 1; ++i) {
                 if (target.mInfo[i]) {
                     ::new (static_cast<void*>(target.mKeyVals + i))
                         Node(target, *source.mKeyVals[i]);
@@ -810,20 +817,20 @@ private:
     template <typename M>
     struct Destroyer<M, true> {
         void nodes(M& m) const {
-            m.mNumElements = 0;
+            *m.mNumElements = 0;
         }
 
         void nodesDoNotDeallocate(M& m) const {
-            m.mNumElements = 0;
+            *m.mNumElements = 0;
         }
     };
 
     template <typename M>
     struct Destroyer<M, false> {
         void nodes(M& m) const {
-            m.mNumElements = 0;
+            *m.mNumElements = 0;
             // clear also resets mInfo to 0, that's sometimes not necessary.
-            for (size_t idx = 0; idx <= m.mMask; ++idx) {
+            for (size_t idx = 0; idx <= *m.mMask; ++idx) {
                 if (0 != m.mInfo[idx]) {
                     Node& n = m.mKeyVals[idx];
                     n.destroy(m);
@@ -833,9 +840,9 @@ private:
         }
 
         void nodesDoNotDeallocate(M& m) const {
-            m.mNumElements = 0;
+            *m.mNumElements = 0;
             // clear also resets mInfo to 0, that's sometimes not necessary.
-            for (size_t idx = 0; idx <= m.mMask; ++idx) {
+            for (size_t idx = 0; idx <= *m.mMask; ++idx) {
                 if (0 != m.mInfo[idx]) {
                     Node& n = m.mKeyVals[idx];
                     n.destroyDoNotDeallocate();
@@ -945,6 +952,115 @@ private:
         return s;
     }
 
+    void garbage_collect() const {
+      if (!loaded)
+        return;
+
+      loaded = false;
+
+      if(mmap_base) {
+        munmap(mmap_base, mmap_size);
+        mmap_base = 0;
+        mmap_size = 0;
+      }
+
+      if(mmap_fd >= 0) {
+        close(mmap_fd);
+        mmap_fd = -1;
+      }
+
+      if (empty()) {
+        unlink(mmap_name.c_str());
+      }
+    }
+
+    size_t calc_mmap_size(size_t nelems) const {
+      size_t total = (3+2)*sizeof(uint64_t); // m* fields + 2 for alignment
+      total += calcNumBytesTotal(nelems);
+
+      return total;
+    }
+
+    void setup_mmap(size_t n_entries) const {
+
+      mmap_fd = open(mmap_name.c_str(), O_RDWR | O_CREAT, 0644);
+      if (mmap_fd<0) {
+        // Time to garbage collect mmaps/file_descriptors
+        while(!gc_queue.empty()) {
+          std::function<void()> func = gc_queue.front();
+          gc_queue.pop();
+          func();
+        }
+
+        mmap_fd = open(mmap_name.c_str(), O_RDWR | O_CREAT, 0644);
+        if (mmap_fd<0) {
+          std::cerr << "robin_hood::reload ERROR failed to setup " << mmap_name << std::endl;
+          exit(-4);
+        }
+      }
+
+      struct stat s;
+      int status = fstat(mmap_fd, &s);
+      if (status < 0) {
+        std::cerr << "robin_hood::reload ERROR Could not check file status " << mmap_name << std::endl;
+        exit(-3);
+      }
+      if (s.st_size <= calc_mmap_size(n_entries)) {
+        mmap_size = calc_mmap_size(n_entries);
+        int ret = ftruncate(mmap_fd, mmap_size);
+        if (ret<0) {
+          std::cerr << "robin_hood::reload ERROR ftruncate could not resize  " << mmap_name << " to " << mmap_size << "\n";
+          mmap_base = 0;
+          exit(-1);
+        }
+      }else{
+        mmap_size = s.st_size;
+      }
+
+      mmap_base = reinterpret_cast<uint64_t *>(mmap(0, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, mmap_fd, 0));
+      if(mmap_base == MAP_FAILED) {
+        std::cerr << "robin_hood::reload ERROR mmap could not adjust\n";
+        mmap_base = 0;
+        exit(-1);
+      }
+
+      mNumElements           = &mmap_base[0];
+      mMask                  = &mmap_base[1];
+      mMaxNumElementsAllowed = &mmap_base[2];
+
+      mInfo = reinterpret_cast<uint8_t*>(&mmap_base[3]);
+      if (*mMask == 0) {
+        *mMaxNumElementsAllowed = calcMaxNumElementsAllowed(n_entries);
+        assert(*mMaxNumElementsAllowed <= n_entries); // less due to load factor
+        *mMask = n_entries - 1;
+        assert(*mNumElements==0);
+        mKeyVals = reinterpret_cast<Node*>(&mmap_base[3+(*mMask+9)/sizeof(uint64_t)]); // 9 to be 8 byte aligned
+        mInfo[n_entries] = 1; // Sentinel
+      }else{
+        assert(*mMaxNumElementsAllowed<*mMask);
+        assert(calc_mmap_size(*mMask+1)==mmap_size);
+        assert(mInfo[*mMask+1] == 1); // Sentinel
+        mKeyVals = reinterpret_cast<Node*>(&mmap_base[3+(*mMask+9)/sizeof(uint64_t)]);
+      }
+
+      mInfoInc       = InitialInfoInc;
+      mInfoHashShift = InitialInfoHashShift;
+    }
+
+    void reload() const {
+      assert(!loaded);
+
+      assert(mmap_fd <0);
+
+      setup_mmap(InitialNumElements);
+
+      fmt::print("load from mmap_name:{}\n",mmap_name);
+
+      gc_queue.push([=] { garbage_collect(); });
+
+      loaded = true;
+    }
+
     // highly performance relevant code.
     // Lower bits are used for indexing into the array (2^n size)
     // The upper 1-5 bits need to be a reasonable good hash, to save comparisons.
@@ -954,14 +1070,17 @@ private:
             std::is_same<::robin_hood::hash<key_type>, hasher>::value
                 ? 1
                 : (ROBIN_HOOD_BITNESS == 64 ? UINT64_C(0xb3727c1f779b8d8b) : UINT32_C(0xda4afe47));
+
+        if (ROBIN_HOOD_UNLIKELY(!loaded))
+          reload();
         idx = Hash::operator()(key) * bad_hash_prevention;
         info = static_cast<InfoType>(mInfoInc + static_cast<InfoType>(idx >> mInfoHashShift));
-        idx &= mMask;
+        idx &= *mMask;
     }
 
     // forwards the index by one, wrapping around at the end
     void next(InfoType* info, size_t* idx) const {
-        *idx = (*idx + 1) & mMask;
+        *idx = (*idx + 1) & *mMask;
         *info = static_cast<InfoType>(*info + mInfoInc);
     }
 
@@ -977,7 +1096,7 @@ private:
     // Fals if no shift has occured (entry under idx is unconstructed memory)
     void shiftUp(size_t idx, size_t const insertion_idx) {
         while (idx != insertion_idx) {
-            size_t prev_idx = (idx - 1) & mMask;
+            size_t prev_idx = (idx - 1) & *mMask;
             if (mInfo[idx]) {
                 mKeyVals[idx] = std::move(mKeyVals[prev_idx]);
             } else {
@@ -985,7 +1104,7 @@ private:
             }
             mInfo[idx] = static_cast<uint8_t>(mInfo[prev_idx] + mInfoInc);
             if (ROBIN_HOOD_UNLIKELY(mInfo[idx] + mInfoInc > 0xFF)) {
-                mMaxNumElementsAllowed = 0;
+                *mMaxNumElementsAllowed = 0;
             }
             idx = prev_idx;
         }
@@ -997,12 +1116,12 @@ private:
         mKeyVals[idx].destroy(*this);
 
         // until we find one that is either empty or has zero offset.
-        size_t nextIdx = (idx + 1) & mMask;
+        size_t nextIdx = (idx + 1) & *mMask;
         while (mInfo[nextIdx] >= 2 * mInfoInc) {
             mInfo[idx] = static_cast<uint8_t>(mInfo[nextIdx] - mInfoInc);
             mKeyVals[idx] = std::move(mKeyVals[nextIdx]);
             idx = nextIdx;
-            nextIdx = (idx + 1) & mMask;
+            nextIdx = (idx + 1) & *mMask;
         }
 
         mInfo[idx] = 0;
@@ -1031,7 +1150,7 @@ private:
         } while (info <= mInfo[idx]);
 
         // nothing found!
-        return mMask + 1;
+        return *mMask + 1;
     }
 
     void cloneData(const unordered_map& o) {
@@ -1043,8 +1162,8 @@ private:
     size_t insert_move(Node&& keyval) {
         // we don't retry, fail if overflowing
         // don't need to check max num elements
-        if (0 == mMaxNumElementsAllowed && !try_increase_info()) {
-            throwOverflowError();
+        if (0 == *mMaxNumElementsAllowed && !try_increase_info()) {
+          report_badhash();
         }
 
         size_t idx;
@@ -1053,7 +1172,7 @@ private:
 
         // skip forward. Use <= because we are certain that the element is not there.
         while (info <= mInfo[idx]) {
-            idx = (idx + 1) & mMask;
+            idx = (idx + 1) & *mMask;
             info = static_cast<InfoType>(info + mInfoInc);
         }
 
@@ -1061,12 +1180,15 @@ private:
         auto const insertion_idx = idx;
         auto const insertion_info = static_cast<uint8_t>(info);
         if (ROBIN_HOOD_UNLIKELY(insertion_info + mInfoInc > 0xFF)) {
-            mMaxNumElementsAllowed = 0;
+            *mMaxNumElementsAllowed = 0;
         }
 
         // find an empty spot
         while (0 != mInfo[idx]) {
             next(&info, &idx);
+#ifndef NDEBUG
+            conflicts++;
+#endif
         }
 
         auto& l = mKeyVals[insertion_idx];
@@ -1079,8 +1201,16 @@ private:
 
         // put at empty spot
         mInfo[insertion_idx] = insertion_info;
+#ifndef NDEBUG
+        static int conta=0;
+        if (((++conta)&0xFFFF)==0 && *mNumElements>100) {
+          if (conflict_factor()>0.01) {
+            fmt::print("potential bad hash for mmap_name:{}, try to debug it\n",mmap_name);
+          }
+        }
+#endif
 
-        ++mNumElements;
+        ++(*mNumElements);
         return insertion_idx;
     }
 
@@ -1088,180 +1218,30 @@ public:
     using iterator = Iter<false>;
     using const_iterator = Iter<true>;
 
-    // Creates an empty hash map. Nothing is allocated yet, this happens at the first insert. This
-    // tremendously speeds up ctor & dtor of a map that never receives an element. The penalty is
-    // payed at the first insert, and not before. Lookup of this empty map works because everybody
-    // points to DummyInfoByte::b. parameter bucket_count is dictated by the standard, but we can
-    // ignore it.
-    explicit unordered_map(size_t ROBIN_HOOD_UNUSED(bucket_count) /*unused*/ = 0,
-                           const Hash& h = Hash{}, const KeyEqual& equal = KeyEqual{})
-        : Hash{h}
-        , KeyEqual{equal} {}
-
-    explicit unordered_map(std::string_view _filename)
+    explicit unordered_map(std::string_view _map_name)
         : Hash{Hash{}}
         , KeyEqual{KeyEqual{}}
-        , filename{_filename} {
-          std::cout << "setup " << filename << "\n";
+        , mmap_name{_map_name} {
+          std::cout << "constructor " << mmap_name << "\n";
+
+          static size_t static_mNumElements           = 0;
+          static size_t static_mMask                  = 0;
+          static size_t static_mMaxNumElementsAllowed = 0;
+
+          assert(static_mMask==0);
+
+          mNumElements           = &static_mNumElements;
+          mMask                  = &static_mMask;
+          mMaxNumElementsAllowed = &static_mMaxNumElementsAllowed;
+          mInfoInc               = InitialInfoInc;
+          mInfoHashShift         = InitialInfoHashShift;
     }
 
-    template <typename Iter>
-    unordered_map(Iter first, Iter last, size_t ROBIN_HOOD_UNUSED(bucket_count) /*unused*/ = 0,
-                  const Hash& h = Hash{}, const KeyEqual& equal = KeyEqual{})
-        : Hash{h}
-        , KeyEqual{equal} {
-        insert(first, last);
-    }
-
-    unordered_map(std::initializer_list<value_type> init,
-                  size_t ROBIN_HOOD_UNUSED(bucket_count) /*unused*/ = 0, const Hash& h = Hash{},
-                  const KeyEqual& equal = KeyEqual{})
-        : Hash{h}
-        , KeyEqual{equal} {
-        insert(init.begin(), init.end());
-    }
-
-    unordered_map(unordered_map&& o)
-        : Hash{std::move(static_cast<Hash&>(o))}
-        , KeyEqual{std::move(static_cast<KeyEqual&>(o))}
-        , DataPool{std::move(static_cast<DataPool&>(o))}
-        , mKeyVals{std::move(o.mKeyVals)}
-        , mInfo{std::move(o.mInfo)}
-        , mNumElements{std::move(o.mNumElements)}
-        , mMask{std::move(o.mMask)}
-        , mMaxNumElementsAllowed{std::move(o.mMaxNumElementsAllowed)}
-        , mInfoInc{std::move(o.mInfoInc)}
-        , mInfoHashShift{std::move(o.mInfoHashShift)}
-        , filename{std::move(o.filename)} {
-        // set other's mask to 0 so its destructor won't do anything
-        o.mMask = 0;
-    }
-
-    unordered_map& operator=(unordered_map&& o) {
-        if (&o != this) {
-            // different, move it
-            destroy();
-            mKeyVals = std::move(o.mKeyVals);
-            mInfo = std::move(o.mInfo);
-            mNumElements = std::move(o.mNumElements);
-            mMask = std::move(o.mMask);
-            mMaxNumElementsAllowed = std::move(o.mMaxNumElementsAllowed);
-            mInfoInc = std::move(o.mInfoInc);
-            mInfoHashShift = std::move(o.mInfoHashShift);
-            filename = std::move(o.filename);
-            Hash::operator=(std::move(static_cast<Hash&>(o)));
-            KeyEqual::operator=(std::move(static_cast<KeyEqual&>(o)));
-            DataPool::operator=(std::move(static_cast<DataPool&>(o)));
-            // set other's mask to 0 so its destructor won't do anything
-            o.mMask = 0;
-        }
-        return *this;
-    }
-
-    unordered_map(const unordered_map& o)
-        : Hash{static_cast<const Hash&>(o)}
-        , KeyEqual{static_cast<const KeyEqual&>(o)}
-        , DataPool{static_cast<const DataPool&>(o)} {
-
-        if (!o.empty()) {
-            // not empty: create an exact copy. it is also possible to just iterate through all
-            // elements and insert them, but copying is probably faster.
-
-            mKeyVals = static_cast<Node*>(
-                detail::assertNotNull<std::bad_alloc>(malloc(calcNumBytesTotal(o.mMask + 1))));
-            // no need for calloc because clonData does memcpy
-            mInfo = reinterpret_cast<uint8_t*>(mKeyVals + o.mMask + 1);
-            mNumElements = o.mNumElements;
-            mMask = o.mMask;
-            mMaxNumElementsAllowed = o.mMaxNumElementsAllowed;
-            mInfoInc = o.mInfoInc;
-            mInfoHashShift = o.mInfoHashShift;
-            filename = o.filename;
-            cloneData(o);
-        }
-    }
-
-    // Creates a copy of the given map. Copy constructor of each entry is used.
-    unordered_map& operator=(unordered_map const& o) {
-        if (&o == this) {
-            // prevent assigning of itself
-            return *this;
-        }
-
-        // we keep using the old allocator and not assign the new one, because we want to keep the
-        // memory available. when it is the same size.
-        if (o.empty()) {
-            if (0 == mMask) {
-                // nothing to do, we are empty too
-                return *this;
-            }
-
-            // not empty: destroy what we have there
-            // clear also resets mInfo to 0, that's sometimes not necessary.
-            destroy();
-
-            // we assign an invalid pointer, but this is ok because we never dereference it.
-            using detail::DummyInfoByte::b;
-            mKeyVals = reinterpret_cast<Node*>(&b) - 1; // lgtm [cpp/suspicious-pointer-scaling]
-            mInfo = reinterpret_cast<uint8_t*>(&b);
-            Hash::operator=(static_cast<const Hash&>(o));
-            KeyEqual::operator=(static_cast<const KeyEqual&>(o));
-            DataPool::operator=(static_cast<DataPool const&>(o));
-            mNumElements = 0;
-            mMask = 0;
-            mMaxNumElementsAllowed = 0;
-            mInfoInc = InitialInfoInc;
-            mInfoHashShift = InitialInfoHashShift;
-            filename = "invalid";
-            return *this;
-        }
-
-        // clean up old stuff
-        Destroyer<Self, IsFlatMap && std::is_trivially_destructible<Node>::value>{}.nodes(*this);
-
-        if (mMask != o.mMask) {
-            // no luck: we don't have the same array size allocated, so we need to realloc.
-            if (0 != mMask) {
-                // only deallocate if we actually have data!
-                free(mKeyVals);
-            }
-
-            mKeyVals = static_cast<Node*>(
-                detail::assertNotNull<std::bad_alloc>(malloc(calcNumBytesTotal(o.mMask + 1))));
-
-            // no need for calloc here because cloneData performs a memcpy.
-            mInfo = reinterpret_cast<uint8_t*>(mKeyVals + o.mMask + 1);
-            mInfoInc = o.mInfoInc;
-            mInfoHashShift = o.mInfoHashShift;
-            filename = o.filename;
-            // sentinel is set in cloneData
-        }
-        Hash::operator=(static_cast<const Hash&>(o));
-        KeyEqual::operator=(static_cast<const KeyEqual&>(o));
-        mNumElements = o.mNumElements;
-        mMask = o.mMask;
-        mMaxNumElementsAllowed = o.mMaxNumElementsAllowed;
-        cloneData(o);
-
-        return *this;
-    }
-
-    // Swaps everything between the two maps.
-    void swap(unordered_map& o) {
-        using std::swap;
-        swap(mKeyVals, o.mKeyVals);
-        swap(mInfo, o.mInfo);
-        swap(mNumElements, o.mNumElements);
-        swap(mMask, o.mMask);
-        swap(mMaxNumElementsAllowed, o.mMaxNumElementsAllowed);
-        swap(mInfoInc, o.mInfoInc);
-        swap(mInfoHashShift, o.mInfoHashShift);
-        swap(filename, o.filename);
-        swap(static_cast<Hash&>(*this), static_cast<Hash&>(o));
-        swap(static_cast<KeyEqual&>(*this), static_cast<KeyEqual&>(o));
-        // no harm done in swapping datapool
-        swap(static_cast<DataPool&>(*this), static_cast<DataPool&>(o));
-    }
+    unordered_map(unordered_map&& o) = delete;
+    unordered_map& operator=(unordered_map&& o) = delete;
+    unordered_map(const unordered_map& o) = delete;
+    unordered_map& operator=(unordered_map const& o) = delete;
+    void swap(unordered_map& o) = delete;
 
     // Clears all data, without resizing.
     void clear() {
@@ -1276,11 +1256,11 @@ public:
         // clear everything except the sentinel
         // std::memset(mInfo, 0, sizeof(uint8_t) * (mMask + 1));
         uint8_t const z = 0;
-        std::fill(mInfo, mInfo + (sizeof(uint8_t) * (mMask + 1)), z);
+        std::fill(mInfo, mInfo + (sizeof(uint8_t) * (*mMask + 1)), z);
 
         mInfoInc = InitialInfoInc;
         mInfoHashShift = InitialInfoHashShift;
-        // Do not clear filename
+        // Do not clear mmap_name or loaded
     }
 
     // Destroys the map and all it's contents.
@@ -1344,14 +1324,14 @@ public:
 
     // Returns 1 if key is found, 0 otherwise.
     size_t count(const key_type& key) const {
-        return findIdx(key) == (mMask + 1) ? 0 : 1;
+        return findIdx(key) == (*mMask + 1) ? 0 : 1;
     }
 
     // Returns a reference to the value found for key.
     // Throws std::out_of_range if element cannot be found
     mapped_type& at(key_type const& key) {
         auto idx = findIdx(key);
-        if (idx == mMask + 1) {
+        if (idx == *mMask + 1) {
             doThrow<std::out_of_range>("key not found");
         }
         return mKeyVals[idx].getSecond();
@@ -1361,7 +1341,7 @@ public:
     // Throws std::out_of_range if element cannot be found
     mapped_type const& at(key_type const& key) const {
         auto idx = findIdx(key);
-        if (idx == mMask + 1) {
+        if (idx == *mMask + 1) {
             doThrow<std::out_of_range>("key not found");
         }
         return mKeyVals[idx].getSecond();
@@ -1408,13 +1388,13 @@ public:
     iterator end() {
         // no need to supply valid info pointer: end() must not be dereferenced, and only node
         // pointer is compared.
-        return iterator{reinterpret_cast<Node*>(mInfo), nullptr};
+        return iterator{reinterpret_cast<Node*>(&mKeyVals[*mMask+1]), nullptr};
     }
     const_iterator end() const {
         return cend();
     }
     const_iterator cend() const {
-        return const_iterator{reinterpret_cast<Node*>(mInfo), nullptr};
+        return const_iterator{reinterpret_cast<Node*>(&mKeyVals[*mMask+1]), nullptr};
     }
 
     iterator erase(const_iterator pos) {
@@ -1428,7 +1408,7 @@ public:
         auto const idx = static_cast<size_t>(pos.mKeyVals - mKeyVals);
 
         shiftDown(idx);
-        --mNumElements;
+        --(*mNumElements);
 
         if (*pos.mInfo) {
             // we've backward shifted, return this again
@@ -1448,7 +1428,7 @@ public:
         do {
             if (info == mInfo[idx] && KeyEqual::operator()(key, mKeyVals[idx].getFirst())) {
                 shiftDown(idx);
-                --mNumElements;
+                --(*mNumElements);
                 return 1;
             }
             next(&info, &idx);
@@ -1459,7 +1439,7 @@ public:
     }
 
     void reserve(size_t count) {
-        auto newSize = InitialNumElements > mMask + 1 ? InitialNumElements : mMask + 1;
+        auto newSize = InitialNumElements > *mMask + 1 ? InitialNumElements : *mMask + 1;
         while (calcMaxNumElementsAllowed(newSize) < count && newSize != 0) {
             newSize *= 2;
         }
@@ -1471,33 +1451,51 @@ public:
     }
 
     void rehash(size_t numBuckets) {
-        if (ROBIN_HOOD_UNLIKELY((numBuckets & (numBuckets - 1)) != 0)) {
-            doThrow<std::runtime_error>("rehash only allowed for power of two");
+      if (ROBIN_HOOD_UNLIKELY((numBuckets & (numBuckets - 1)) != 0)) {
+        doThrow<std::runtime_error>("rehash only allowed for power of two");
+      }
+
+      if (!loaded)
+        reload();
+
+      const size_t oldMaxElements = *mMask + 1;
+      if (oldMaxElements >= numBuckets)
+        return; // done
+
+      rename(mmap_name.c_str(), (mmap_name + "old").c_str());
+
+      const size_t  old_mmap_size = mmap_size;
+      uint64_t     *old_mmap_base = mmap_base;
+      const int     old_mmap_fd   = mmap_fd;
+
+      Node* const oldKeyVals        = mKeyVals;
+      uint8_t const* const oldInfo  = mInfo;
+
+      setup_mmap(numBuckets);
+
+      assert(*mNumElements == 0);
+      assert(*mMask == numBuckets - 1);
+      assert(*mMaxNumElementsAllowed == calcMaxNumElementsAllowed(numBuckets));
+
+      std::cout << "resize sz:" << numBuckets << " mmap_name:" << mmap_name << "\n";
+
+      for (size_t i = 0; i < oldMaxElements; ++i) {
+        if (oldInfo[i] != 0) {
+          insert_move(std::move(oldKeyVals[i]));
+          // destroy the node but DON'T destroy the data.
+          oldKeyVals[i].~Node();
         }
+      }
 
-        Node* const oldKeyVals = mKeyVals;
-        uint8_t const* const oldInfo = mInfo;
+      // don't destroy old data: put it into the pool instead
+      munmap(old_mmap_base, old_mmap_size);
+      close(old_mmap_fd);
 
-        const size_t oldMaxElements = mMask + 1;
-
-        // resize operation: move stuff
-        init_data(numBuckets);
-        if (oldMaxElements > 1) {
-            for (size_t i = 0; i < oldMaxElements; ++i) {
-                if (oldInfo[i] != 0) {
-                    insert_move(std::move(oldKeyVals[i]));
-                    // destroy the node but DON'T destroy the data.
-                    oldKeyVals[i].~Node();
-                }
-            }
-
-            // don't destroy old data: put it into the pool instead
-            DataPool::addOrFree(oldKeyVals, calcNumBytesTotal(oldMaxElements));
-        }
+      unlink((mmap_name + "old").c_str());
     }
 
     size_type size() const {
-        return mNumElements;
+        return *mNumElements;
     }
 
     size_type max_size() const {
@@ -1505,7 +1503,7 @@ public:
     }
 
     bool empty() const {
-        return 0 == mNumElements;
+        return 0 == *mNumElements;
     }
 
     float max_load_factor() const {
@@ -1514,35 +1512,28 @@ public:
 
     // Average number of elements per bucket. Since we allow only 1 per bucket
     float load_factor() const {
-        return static_cast<float>(size()) / (mMask + 1);
+        return static_cast<float>(size()) / (*mMask + 1);
     }
 
+#ifndef NDEBUG
+    float conflict_factor() const {
+        return static_cast<float>(conflicts) / (*mNumElements + 1);
+    }
+#else
+    float conflict_factor() const { return 0.0; }
+#endif
+
     size_t mask() const {
-        return mMask;
+        return *mMask;
     }
 
 private:
     ROBIN_HOOD_NOINLINE void throwOverflowError() const {
         throw std::overflow_error("robin_hood::map overflow");
     }
-
-    void init_data(size_t max_elements) {
-        mNumElements = 0;
-        mMask = max_elements - 1;
-        mMaxNumElementsAllowed = calcMaxNumElementsAllowed(max_elements);
-
-        std::cout << "init_data sz:" << max_elements << " file:" << filename << "\n";
-
-        // calloc also zeroes everything
-        mKeyVals = reinterpret_cast<Node*>(
-            detail::assertNotNull<std::bad_alloc>(calloc(1, calcNumBytesTotal(max_elements))));
-        mInfo = reinterpret_cast<uint8_t*>(mKeyVals + max_elements);
-
-        // set sentinel
-        mInfo[max_elements] = 1;
-
-        mInfoInc = InitialInfoInc;
-        mInfoHashShift = InitialInfoHashShift;
+    ROBIN_HOOD_NOINLINE void report_badhash() const {
+      fmt::print("robin_hood::map FATAL really bad hash function, mmap_name:{}\n", mmap_name);
+      assert(false);
     }
 
     template <typename Arg>
@@ -1564,7 +1555,7 @@ private:
             }
 
             // unlikely that this evaluates to true
-            if (ROBIN_HOOD_UNLIKELY(mNumElements >= mMaxNumElementsAllowed)) {
+            if (ROBIN_HOOD_UNLIKELY(*mNumElements >= *mMaxNumElementsAllowed)) {
                 increase_size();
                 continue;
             }
@@ -1573,7 +1564,7 @@ private:
             auto const insertion_idx = idx;
             auto const insertion_info = info;
             if (ROBIN_HOOD_UNLIKELY(insertion_info + mInfoInc > 0xFF)) {
-                mMaxNumElementsAllowed = 0;
+                *mMaxNumElementsAllowed = 0;
             }
 
             // find an empty spot
@@ -1597,7 +1588,7 @@ private:
             // mKeyVals[idx].getFirst() = std::move(key);
             mInfo[insertion_idx] = static_cast<uint8_t>(insertion_info);
 
-            ++mNumElements;
+            ++(*mNumElements);
             return mKeyVals[insertion_idx].getSecond();
         }
     }
@@ -1623,7 +1614,7 @@ private:
             }
 
             // unlikely that this evaluates to true
-            if (ROBIN_HOOD_UNLIKELY(mNumElements >= mMaxNumElementsAllowed)) {
+            if (ROBIN_HOOD_UNLIKELY(*mNumElements >= *mMaxNumElementsAllowed)) {
                 increase_size();
                 continue;
             }
@@ -1632,12 +1623,15 @@ private:
             auto const insertion_idx = idx;
             auto const insertion_info = info;
             if (ROBIN_HOOD_UNLIKELY(insertion_info + mInfoInc > 0xFF)) {
-                mMaxNumElementsAllowed = 0;
+                *mMaxNumElementsAllowed = 0;
             }
 
             // find an empty spot
             while (0 != mInfo[idx]) {
                 next(&info, &idx);
+#ifndef NDEBUG
+                conflicts++;
+#endif
             }
 
             auto& l = mKeyVals[insertion_idx];
@@ -1650,13 +1644,21 @@ private:
 
             // put at empty spot
             mInfo[insertion_idx] = static_cast<uint8_t>(insertion_info);
+#ifndef NDEBUG
+            static int conta=0;
+            if (((++conta)&0xFFFF)==0 && *mNumElements>100) {
+              if (conflict_factor()>0.01) {
+                fmt::print("potential bad hash for mmap_name:{}, try to debug it\n",mmap_name);
+              }
+            }
+#endif
 
-            ++mNumElements;
+            ++(*mNumElements);
             return std::make_pair(iterator(mKeyVals + insertion_idx, mInfo + insertion_idx), true);
         }
     }
 
-    size_t calcMaxNumElementsAllowed(size_t maxElements) {
+    size_t calcMaxNumElementsAllowed(size_t maxElements) const {
         static constexpr size_t overflowLimit = (std::numeric_limits<size_t>::max)() / 100;
         static constexpr double factor = MaxLoadFactor100 / 100.0;
 
@@ -1669,9 +1671,9 @@ private:
     }
 
     bool try_increase_info() {
-        ROBIN_HOOD_LOG("mInfoInc=" << mInfoInc << ", numElements=" << mNumElements
+        ROBIN_HOOD_LOG("mInfoInc=" << mInfoInc << ", numElements=" << *mNumElements
                                    << ", maxNumElementsAllowed="
-                                   << calcMaxNumElementsAllowed(mMask + 1));
+                                   << calcMaxNumElementsAllowed(*mMask + 1));
         // we got space left, try to make info smaller
         mInfoInc = static_cast<uint8_t>(mInfoInc >> 1);
         if (1 == mInfoInc) {
@@ -1683,41 +1685,42 @@ private:
         // This is extremely fast because we can operate on 8 bytes at once.
         ++mInfoHashShift;
         auto const data = reinterpret_cast<uint64_t*>(mInfo);
-        auto const numEntries = (mMask + 1) / 8;
+        auto const numEntries = (*mMask + 1) / 8;
 
         for (size_t i = 0; i < numEntries; ++i) {
             data[i] = (data[i] >> 1) & UINT64_C(0x7f7f7f7f7f7f7f7f);
         }
-        mMaxNumElementsAllowed = calcMaxNumElementsAllowed(mMask + 1);
+        *mMaxNumElementsAllowed = calcMaxNumElementsAllowed(*mMask + 1);
         return true;
     }
 
     void increase_size() {
         // nothing allocated yet? just allocate InitialNumElements
-        if (0 == mMask) {
-            init_data(InitialNumElements);
+        if (0 == *mMask) {
+					  std::cout << "initial sz: mmap_name:" << mmap_name << "\n";
+            reload();
             return;
         }
 
-        auto const maxNumElementsAllowed = calcMaxNumElementsAllowed(mMask + 1);
-        if (mNumElements < maxNumElementsAllowed && try_increase_info()) {
+        auto const maxNumElementsAllowed = calcMaxNumElementsAllowed(*mMask + 1);
+        if (*mNumElements < maxNumElementsAllowed && try_increase_info()) {
             return;
         }
 
-        ROBIN_HOOD_LOG("mNumElements=" << mNumElements << ", maxNumElementsAllowed="
+        ROBIN_HOOD_LOG("mNumElements=" << *mNumElements << ", maxNumElementsAllowed="
                                        << maxNumElementsAllowed << ", load="
-                                       << (static_cast<double>(mNumElements) * 100.0 /
-                                           (static_cast<double>(mMask) + 1)));
+                                       << (static_cast<double>(*mNumElements) * 100.0 /
+                                           (static_cast<double>(*mMask) + 1)));
         // it seems we have a really bad hash function! don't try to resize again
-        if (mNumElements * 2 < calcMaxNumElementsAllowed(mMask + 1)) {
-            throwOverflowError();
+        if (*mNumElements * 2 < calcMaxNumElementsAllowed(*mMask + 1)) {
+            report_badhash();
         }
 
-        rehash((mMask + 1) * 2);
+        rehash((*mMask + 1) * 2);
     }
 
     void destroy() {
-        if (0 == mMask) {
+        if (0 == *mMask) {
             // don't deallocate! we are pointing to DummyInfoByte::b.
             return;
         }
@@ -1728,16 +1731,23 @@ private:
     }
 
     // members are sorted so no padding occurs
-    Node* mKeyVals = reinterpret_cast<Node*>(reinterpret_cast<uint8_t*>(&detail::DummyInfoByte::b) -
+    mutable Node* mKeyVals = reinterpret_cast<Node*>(reinterpret_cast<uint8_t*>(&detail::DummyInfoByte::b) -
                                              sizeof(Node));                 // 8 byte  8
-    uint8_t* mInfo = reinterpret_cast<uint8_t*>(&detail::DummyInfoByte::b); // 8 byte 16
-    size_t mNumElements = 0;                                                // 8 byte 24
-    size_t mMask = 0;                                                       // 8 byte 32
-    size_t mMaxNumElementsAllowed = 0;                                      // 8 byte 40
-    InfoType mInfoInc = InitialInfoInc;                                     // 4 byte 44
-    InfoType mInfoHashShift = InitialInfoHashShift;                         // 4 byte 48
-                                                    // 16 byte 56 if NodeAllocator
-    std::string filename;
+    mutable uint8_t* mInfo = reinterpret_cast<uint8_t*>(&detail::DummyInfoByte::b); // 8 byte 16
+    mutable size_t *mNumElements;                                                   // 8 byte 24
+    mutable size_t *mMask;                                                          // 8 byte 32
+    mutable size_t *mMaxNumElementsAllowed;                                         // 8 byte 40
+    mutable InfoType mInfoInc;                                                     // 4 byte 44
+    mutable InfoType mInfoHashShift;                                               // 4 byte 48
+    mutable bool loaded = false;
+    std::string       mmap_name = "invalid";
+    mutable int       mmap_fd   = -1;
+    mutable size_t    mmap_size = 0;
+    mutable uint64_t *mmap_base = 0;
+    inline static std::queue<std::function<void(void)>> gc_queue;
+#ifndef NDEBUG
+    size_t conflicts = 0;
+#endif
 };
 
 } // namespace detail

@@ -39,10 +39,30 @@ TEST_F(Setup_robin_test, big_entry) {
 
   robin_hood::unordered_flat_map<uint32_t,Big_entry> map("potato");
   absl::flat_hash_map<uint32_t,Big_entry> map2;
+  map.clear();
 
+  map[1].f0=1;
+  map[2].f0=2;
+  map[3].f0=3;
+  map[4].f0=4;
   int conta = 0;
+  for(auto it:map) {
+    (void)it;
+    conta++;
+  }
+  EXPECT_EQ(conta,4);
+  map.clear();
+
+  conta = 0;
   for(int i=0;i<10000;i++) {
     int sz = rng.uniform<int>(0xFFFFFF);
+
+    if (map2.find(sz) == map2.end()) {
+      EXPECT_EQ(map.count(sz),0);
+    }else{
+      EXPECT_EQ(map.count(sz),1);
+    }
+
     map[sz].f0 = sz;
     map[sz].f1 = sz+1;
     map[sz].f2 = sz+2;
@@ -62,8 +82,16 @@ TEST_F(Setup_robin_test, big_entry) {
     EXPECT_TRUE(map2[it.first] == it.second);
     conta--;
   }
-
   EXPECT_EQ(conta,0);
+
+  fmt::print("load_factor:{} conflict_factor:{}\n",map.load_factor(), map.conflict_factor());
+
+  map.clear();
+  for(auto it:map) {
+    (void)it;
+    EXPECT_TRUE(false);
+  }
+
 }
 
 class Big_entry {
@@ -95,12 +123,11 @@ namespace robin_hood {
 template <>
 struct hash<Big_entry> {
   size_t operator()(Big_entry const &o) const {
-    uint64_t h = o.f0;
+    uint32_t h = o.f0;
     h = (h<<2) ^ o.f1;
     h = (h<<2) ^ o.f2;
     h = (h<<2) ^ o.f3;
-
-    return hash<uint64_t>{}(h);
+    return hash<uint32_t>{}(h);
   }
 };
 }
@@ -138,5 +165,7 @@ TEST_F(Setup_robin_test, big_key) {
   }
 
   EXPECT_EQ(conta,0);
+
+  fmt::print("load_factor:{} conflict_factor:{}\n",map.load_factor(), map.conflict_factor());
 }
 
