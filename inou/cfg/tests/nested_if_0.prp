@@ -1,5 +1,5 @@
-$a    as __bits:8
-%out1 as __bits:8
+$a    as (__bits:8)
+%out1 as (__bits:8)
 
 if ($a >= 128){
   if ($a == 254){

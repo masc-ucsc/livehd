@@ -1,5 +1,5 @@
-$a    as __bits:8
-%out4 as __bits:8
+$a    as (__bits:8) 
+%out4 as (__bits:8)
 
 if ($a >= 128){
   %out4 = $a + 16

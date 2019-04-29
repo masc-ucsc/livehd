@@ -26,14 +26,14 @@ const char    NEG_CONST_MARKER = '-';
 const Port_ID REG_INPUT        = 'D';
 const Port_ID REG_OUTPUT       = 'Q';
 
-class Aux_node {
+class Aux {
 public:
-  Aux_node():lchild(nullptr), rchild(nullptr), parent(nullptr){};
-  virtual ~Aux_node(){};
+  Aux():lchild(nullptr), rchild(nullptr), parent(nullptr){};
+  virtual ~Aux(){};
   //SH:FIXME: should move to private data member and use setter/getter function?
-  Aux_node *lchild;
-  Aux_node *rchild;
-  Aux_node *parent;
+  Aux *lchild;
+  Aux *rchild;
+  Aux *parent;
 
   void set_alias(std::string_view v, Node_pin n);
   Node_pin get_alias(std::string_view v) const {
@@ -71,23 +71,23 @@ private:
 class Aux_tree {
 public:
   Aux_tree()
-      : root_auxnd(nullptr){};
+      : root_aux(nullptr){};
   virtual ~Aux_tree(){};
-  explicit Aux_tree(Aux_node *auxnd)
-      : root_auxnd(auxnd) {
-    auxes_stack.push_back(auxnd);
+  explicit Aux_tree(Aux *aux)
+      : root_aux(aux) {
+    auxes_stack.push_back(aux);
   };
-  void            set_parent_child(Aux_node *parent, Aux_node *child, bool branch);
-  void            set_parent(Aux_node *parent, Aux_node *child);
-  const Aux_node* get_parent(const Aux_node *child) const;
-  void            disconnect_child(Aux_node *parent, Aux_node *child, bool branch);
-  bool            is_root_aux(const Aux_node *auxtab) const; // for chained parents aux_tabs checking
-  Aux_node *      get_root();
+  void            set_parent_child(Aux *parent, Aux *child, bool branch);
+  void            set_parent(Aux *parent, Aux *child);
+  const Aux*      get_parent(const Aux *child) const;
+  void            disconnect_child(Aux *parent, Aux *child, bool branch);
+  bool            is_root_aux(const Aux *auxtab) const; // for chained parents aux_tabs checking
+  Aux *           get_root();
 
   //SH:FIXME: dangerous approach to return handles(i.e., pointer, reference etc) of a object. Other approach?
   //SH:FIXME: at least change to return const to avoid client write
-  //SH:FIXME: another risk is the Aux_node object might not exist anymore -> returning a garbage.
-  Aux_node*       get_cur_auxnd() const;
+  //SH:FIXME: another risk is the Aux object might not exist anymore -> returning a garbage.
+  Aux*            get_cur_aux() const;
   void            set_alias(std::string_view v, Node_pin n);
   bool            has_alias(std::string_view v) const;
   Node_pin        get_alias(std::string_view v) const;
@@ -96,16 +96,16 @@ public:
   bool            has_pending(std::string_view v) const;
   Node_pin        get_pending(std::string_view v) const;
   void            update_pending(std::string_view v, Node_pin n);
-  void            print_cur_auxnd();
+  void            print_cur_aux();
   void            auxes_stack_pop() {auxes_stack.pop_back();};
 
 private:
-  Aux_node *              root_auxnd;
-  std::vector<Aux_node *> auxes_stack; // for tracking latest aux_node
-  bool                    check_global_alias    (const Aux_node *auxnd, std::string_view v) const;
-  bool                    check_global_pending  (const Aux_node *auxnd, std::string_view v) const;
-  Node_pin                get_global_alias      (const Aux_node *auxnd, std::string_view v) const;
-  Node_pin                get_global_pending    (const Aux_node *auxnd, std::string_view v) const;
+  Aux *              root_aux;
+  std::vector<Aux *> auxes_stack; // for tracking latest aux_node
+  bool               check_global_alias    (const Aux *aux, std::string_view v) const;
+  bool               check_global_pending  (const Aux *aux, std::string_view v) const;
+  Node_pin           get_global_alias      (const Aux *aux, std::string_view v) const;
+  Node_pin           get_global_pending    (const Aux *aux, std::string_view v) const;
 };
 
 #endif
