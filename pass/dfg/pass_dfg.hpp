@@ -38,7 +38,7 @@ private:
 
   void process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Data &data);
   void finalize_global_connect(LGraph *dfg, const Aux_node *auxand_global);
-  void process_connections(LGraph *dfg, const std::vector<Node_pin> &driver_pins, const Node &sink_node);
+  void process_connections(LGraph *dfg, const std::vector<Node_pin> &driver_pins, Node &sink_node);
 
   void process_func_call(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data);
 
