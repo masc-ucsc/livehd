@@ -1,9 +1,9 @@
-$a    as __bits:5
-%out1 as __bits:5
-%out2 as __bits:5
-%out3 as __bits:5
-%out4 as __bits:5
-%out5 as __bits:5
+$a    as (__bits:5)
+%out1 as (__bits:5)
+%out2 as (__bits:5)
+%out3 as (__bits:5)
+%out4 as (__bits:5)
+%out5 as (__bits:5)
 
 %out1 = 16
 %out3 = 17

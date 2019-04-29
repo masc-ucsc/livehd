@@ -1,29 +1,28 @@
 #include "aux_tree.hpp"
 
-void Aux_node::set_alias(std::string_view v, Node_pin n) {
+void Aux::set_alias(std::string_view v, Node_pin n) {
   auxtab[v] = n;
   fmt::print("set alias {} <-> node_pin:{}\n", v, n.get_name());
 }
 
-void Aux_node::set_pending(std::string_view v, Node_pin n) {
+void Aux::set_pending(std::string_view v, Node_pin n) {
   pendtab[v] = n;
-  //SH:FIXME: wait for pin.get_name() bug resolve
-  //fmt::print("set pending {} <-> node_pin:{}\n", v, n.get_name());
+  fmt::print("set pending {} <-> node_pin:{}\n", v, n.get_name());
 }
 
-Aux_node* Aux_tree::get_cur_auxnd() const {
+Aux* Aux_tree::get_cur_aux() const {
   return auxes_stack.back();
 }
 
-bool Aux_tree::is_root_aux(const Aux_node *auxnd) const {
-  assert(auxnd != nullptr);
-  return (auxnd->parent == nullptr);
+bool Aux_tree::is_root_aux(const Aux *aux) const {
+  assert(aux != nullptr);
+  return (aux->parent == nullptr);
 }
-Aux_node *Aux_tree::get_root() {
-  return root_auxnd;
+Aux *Aux_tree::get_root() {
+  return root_aux;
 }
 
-void Aux_tree::set_parent_child(Aux_node *parent, Aux_node *new_child, bool branch) {
+void Aux_tree::set_parent_child(Aux *parent, Aux *new_child, bool branch){
   I(parent != nullptr && new_child != nullptr);
   if(branch) {
     I(parent->lchild == nullptr);
@@ -42,19 +41,19 @@ void Aux_tree::set_parent_child(Aux_node *parent, Aux_node *new_child, bool bran
   }
 }
 
-void Aux_tree::set_parent(Aux_node *parent, Aux_node *child) {
+void Aux_tree::set_parent(Aux *parent, Aux *child) {
   assert(parent != nullptr && child != nullptr);
   child->parent = parent;
 }
 
-const Aux_node *Aux_tree::get_parent(const Aux_node *child) const {
+const Aux *Aux_tree::get_parent(const Aux *child) const {
   if(child->parent != nullptr)
     return child->parent;
   else
     return child;
 }
 
-void Aux_tree::disconnect_child(Aux_node *parent, Aux_node *child, bool branch) {
+void Aux_tree::disconnect_child(Aux *parent, Aux *child, bool branch) {
   // assert(child->get_auxtab().empty()); //put back later when resolving phi
   if(branch) {
     // delete child; //buggy to have a function delete a pointer that was passed to it!
@@ -68,97 +67,99 @@ void Aux_tree::disconnect_child(Aux_node *parent, Aux_node *child, bool branch) 
 }
 
 void Aux_tree::set_pending(std::string_view v, Node_pin n) {
-  get_cur_auxnd()->set_pending(v, n);
+  get_cur_aux()->set_pending(v, n);
 }
 
 void Aux_tree::set_alias(std::string_view v, Node_pin n) {
-  get_cur_auxnd()->set_alias(v, n);
+  get_cur_aux()->set_alias(v, n);
 }
 
 bool Aux_tree::has_alias(std::string_view v) const {
-  const Aux_node *cur_auxnd = get_cur_auxnd();
+  const Aux *cur_aux = get_cur_aux();
   // recursive check on parents
-  return check_global_alias(cur_auxnd, v);
+  return check_global_alias(cur_aux, v);
 }
 
 // check_global_alias() only checks "chain of patent auxtabs" and don't check sibling auxtab
-bool Aux_tree::check_global_alias(const Aux_node *auxnd, std::string_view v) const {
-  if(auxnd == nullptr)
+bool Aux_tree::check_global_alias(const Aux *aux, std::string_view v) const {
+  if(aux == nullptr)
     return false;
 
-  if(auxnd->get_auxtab().find(v) != auxnd->get_auxtab().end())
+  if(aux->get_auxtab().find(v) != aux->get_auxtab().end())
     return true;
 
-  return check_global_alias(auxnd->parent, v);
+  return check_global_alias(aux->parent, v);
 };
 
 Node_pin Aux_tree::get_alias(std::string_view v) const {
   I(this->has_alias(v));
-  const Aux_node *cur_auxnd = get_cur_auxnd();
+  const Aux *cur_aux = get_cur_aux();
   // recursive search through parents
-  return get_global_alias(cur_auxnd, v);
+  return get_global_alias(cur_aux, v);
 }
 
 
 // get_global_alias() only gets "chain of patent auxtabs" and don't get sibling auxtab
-Node_pin Aux_tree::get_global_alias(const Aux_node *auxnd, std::string_view v) const {
-  if(auxnd->get_auxtab().find(v) != auxnd->get_auxtab().end())
-    return auxnd->get_auxtab().at(v);
+Node_pin Aux_tree::get_global_alias(const Aux *aux, std::string_view v) const {
+  if(aux->get_auxtab().find(v) != aux->get_auxtab().end())
+    return aux->get_auxtab().at(v);
 
-  if(is_root_aux(auxnd))
+  if(is_root_aux(aux))
     assert(false); // must has a alias in chain of parents since it has passed has_alias()
 
-  return get_global_alias(get_parent(auxnd), v);
+  return get_global_alias(get_parent(aux), v);
 };
 
 
 bool Aux_tree::has_pending(std::string_view v) const {
-  const Aux_node *cur_auxnd = get_cur_auxnd()->parent;
-  return check_global_pending(cur_auxnd, v); // recursive check on parents
+  const Aux *cur_aux = get_cur_aux()->parent;
+  return check_global_pending(cur_aux, v); // recursive check on parents
 }
 
 // check_global_pending() only checks "chain of patent pendtabs" and don't check sibling pendtab
-bool Aux_tree::check_global_pending(const Aux_node *auxnd, std::string_view v) const {
-  if(auxnd == nullptr)
+bool Aux_tree::check_global_pending(const Aux *aux, std::string_view v) const {
+  if(aux == nullptr)
     return false;
 
-  if(auxnd->get_pendtab().find(v) != auxnd->get_pendtab().end())
+  if(aux->get_pendtab().find(v) != aux->get_pendtab().end())
     return true;
 
-  return check_global_pending(auxnd->parent, v);
+  return check_global_pending(aux->parent, v);
 };
 
 Node_pin Aux_tree::get_pending(std::string_view v) const {
-  const Aux_node *cur_auxnd = get_cur_auxnd();
-  return get_global_pending(cur_auxnd, v); // recursive search through parents
+  const Aux *cur_aux = get_cur_aux();
+  return get_global_pending(cur_aux, v); // recursive search through parents
 }
 
 // get_global_pending() only gets "chain of patent pendtabs" and don't get sibling pendtab
-Node_pin Aux_tree::get_global_pending(const Aux_node *auxnd, std::string_view v) const {
-  if(auxnd->get_pendtab().find(v) != auxnd->get_pendtab().end())
-    return auxnd->get_pendtab().at(v);
+Node_pin Aux_tree::get_global_pending(const Aux *aux, std::string_view v) const {
+  if(aux->get_pendtab().find(v) != aux->get_pendtab().end())
+    return aux->get_pendtab().at(v);
 
-  if(is_root_aux(auxnd))
+  if(is_root_aux(aux))
     assert(false); // must has a pending in chain of parents since it has passed has_pending()
 
-  return get_global_pending(get_parent(auxnd), v);
+  return get_global_pending(get_parent(aux), v);
 };
 
-void Aux_tree::print_cur_auxnd() {
-  for(const auto &iter : get_cur_auxnd()->get_auxtab()) {
+void Aux_tree::print_cur_aux() {
+  for(const auto &iter : get_cur_aux()->get_auxtab()) {
     fmt::print("auxtab:{:>10} -> {}\n", iter.first, iter.second.get_compact());
   }
 }
 
 //SH:FIXME: only update local alias seems reasonalbe
-//replace all keys which point to old Node_pin with new Node_pin
+//SH:FIXME: but for graph io, it's legal be created in if-else branch
+//replace all keys which point to old Node_pin with the new Node_pin
 void Aux_tree::update_alias(std::string_view target, Node_pin new_pin) {
-  Aux_node *cur_auxnd = get_cur_auxnd();
-  I(cur_auxnd->has_alias(target));
-  Node_pin old_pin = cur_auxnd->get_alias(target);
-  for(const auto& iter : cur_auxnd->get_auxtab()){
+  Aux *cur_aux = get_cur_aux();
+  I(cur_aux->has_alias(target));
+
+  Node_pin old_pin = cur_aux->get_alias(target);
+  for(const auto& iter : cur_aux->get_auxtab()){
     if(iter.second == old_pin){
-      cur_auxnd->set_alias(iter.first, new_pin);
+      cur_aux->set_alias(iter.first, new_pin);
     }
   }
 }
