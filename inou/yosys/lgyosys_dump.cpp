@@ -980,6 +980,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
           break;
         }
       }
+
       if(aport == nullptr || bport == nullptr || sel == nullptr)
         log_error("Internal Error: did not find a wire to be shifted.\n");
 

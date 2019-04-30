@@ -145,7 +145,7 @@ Node_pin Aux_tree::get_global_pending(const Aux *aux, std::string_view v) const 
 
 void Aux_tree::print_cur_aux() {
   for(const auto &iter : get_cur_aux()->get_auxtab()) {
-    fmt::print("auxtab:{:>10} -> {}\n", iter.first, iter.second.get_compact());
+    fmt::print("auxtab:{:>10} -> {}\n", iter.first, iter.second.get_name());
   }
 }
 

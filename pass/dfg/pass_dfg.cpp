@@ -241,6 +241,7 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
 
     if(node.get_type().op == Mux_Op){
       Node_pin tpin_driver, fpin_driver;
+      //retrieve true and false drivers
       for(auto& inp : node.inp_edges()){
         if(inp.sink.get_pid() == 1)
           fpin_driver = inp.driver;
@@ -252,6 +253,14 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
       auto bw_diff = (uint16_t)abs(tpin_driver_bw - fpin_driver_bw);
       node.get_driver_pin().set_bits(std::max(tpin_driver_bw, fpin_driver_bw));
 
+      //delete original edge
+      for(auto &inp : node.inp_edges()){
+        if(inp.sink.get_pid() == 1 && tpin_driver_bw > fpin_driver_bw)
+          inp.del_edge();
+        else if(inp.sink.get_pid() == 2 && tpin_driver_bw < fpin_driver_bw)
+          inp.del_edge();
+      }
+
       //create internal Join_Op to resolve bitwidth mismatch
       if(bw_diff == 0){
         continue;
@@ -260,56 +269,22 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
         node_join.set_type(Join_Op);
         node_join.setup_driver_pin().set_bits(tpin_driver_bw);
 
-        Node_pin node_pin_unsign_ext = create_const32(dfg, 0, bw_diff, false);
+        Node_pin node_pin_unsign_ext = dfg->create_node_const(0,bw_diff).setup_driver_pin();
         dfg->add_edge(node_pin_unsign_ext, node_join.setup_sink_pin(1));
         dfg->add_edge(fpin_driver, node_join.setup_sink_pin(0));
         dfg->add_edge(node_join.setup_driver_pin(0), node.setup_sink_pin(1));
+
       } else if (tpin_driver_bw < fpin_driver_bw){
         Node node_join = dfg -> create_node();
         node_join.set_type(Join_Op);
         node_join.setup_driver_pin().set_bits(fpin_driver_bw);
 
-        Node_pin node_pin_unsign_ext = create_const32(dfg, 0, bw_diff, false);
+        Node_pin node_pin_unsign_ext = dfg->create_node_const(0,bw_diff).setup_driver_pin();
         dfg->add_edge(node_pin_unsign_ext, node_join.setup_sink_pin(1));
         dfg->add_edge(tpin_driver, node_join.setup_sink_pin(0));
         dfg->add_edge(node_join.setup_driver_pin(0), node.setup_sink_pin(2));
       }
-
-      //del original edge
-      for(auto &inp : node.inp_edges()){
-        if(inp.sink.get_pid() == 1 && tpin_driver_bw > fpin_driver_bw)
-          inp.del_edge();
-        else if(inp.sink.get_pid() == 2 && tpin_driver_bw < fpin_driver_bw)
-          inp.del_edge();
-      }
-
-
-      //for (auto &inp : node.inp_edges()) {
-      //  if(inp.sink.get_pid() == 0) //the mux select pin
-      //    continue;
-      //  //assume MIT algo. will at least set mux.bits equals to the larger input
-      //  auto dpin_bits = inp.driver.get_bits();
-      //  auto spin_bits = inp.sink.get_bits();//sink is the mux node
-      //  auto bw_diff = (uint16_t)abs(dpin_bits - spin_bits);
-      //  if(spin_bits > dpin_bits) {
-      //    //SH:FIXME: using unsigned extend to fix mux bitwidth mismatch, what if the network is signed representation?
-      //    Node_pin node_pin_unsign_ext = create_const32(dfg, 0, bw_diff, false);
-      //    Node node_join = dfg->create_node();
-      //    node_join.set_type(Join_Op);
-      //    node_join.setup_driver_pin(0).set_bits(spin_bits);
-      //    dfg->add_edge(node_pin_unsign_ext, node_join.setup_sink_pin(1));
-      //    dfg->add_edge(inp.driver                         , node_join.setup_sink_pin(0));
-      //    dfg->add_edge(node_join.setup_driver_pin(0)      , inp.sink);
-      //    inp.del_edge();
-      //    //dfg->set_bits(dfg->get_node(nid_join).setup_driver_pin(0), dst_bits);
-      //    //dfg->add_edge(dfg->get_node(unsign_ext_nid).setup_driver_pin(0), dfg->get_node(nid_join).setup_sink_pin(1));
-      //    //dfg->add_edge(dfg->get_node(src_nid).setup_driver_pin(0), dfg->get_node(nid_join).setup_sink_pin(0));
-      //    //dfg->add_edge(dfg->get_node(nid_join).setup_driver_pin(0), dfg->get_node(dst_nid ).setup_sink_pin(dst_pid));
-      //    //dfg->del_edge(inp.driver, inp.sink);
-      //    //break;
-      //  }
-      //}
-    }
+    }//end of Mux_Op
 
     //after MIT algo. and Mux_Op processing, bw of every node should be synced
     //except an output gio connected to a Mux_Op
@@ -324,7 +299,7 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
           fmt::print("gio bitwidth larger then source\n");
         }
       }
-    }
+    }//end of GraphIO_Op
 
 
     //SH:FIXME: wait for MIT bitwidth algorithm

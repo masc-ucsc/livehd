@@ -54,6 +54,10 @@ std::vector<LGraph *> Inou_cfg::tolg() {
   for(LGraph *g : lgs)
     remove_fake_fcall(g);
 
+  fmt::print("\n*************************************************************************************************\n");
+  fmt::print("                    cfg-lgraph building finish!\n");
+  fmt::print("*************************************************************************************************\n\n\n");
+
   //SH:FIXME: do you really need this? I don't see it makes any sense
   lgs[0] = 0; // Do not clear g_cfg
   for(LGraph *g : lgs) {
@@ -133,7 +137,6 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, std::vector<LGraph *> &lgs,
       build_graph(words, dfg_data, gtop, n1st2gid, n1st2lgname, name2node_lgs[0], branch_chain_stacks_lgs[0], rename_tab, final_node_lgs[0]);
     }
 
-    fmt::print("\n");
     p = strtok_r(nullptr, "\n\r\f", &str_ptr);
   }
 
