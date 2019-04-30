@@ -39,7 +39,7 @@ TEST_F(Setup_robin_test, big_entry) {
     }
   };
 
-  lgraph_hood::unordered_flat_map<uint32_t,Big_entry> map("potato");
+  lgraph_hood::unordered_map<uint32_t,Big_entry> map("robin_test_se");
   absl::flat_hash_map<uint32_t,Big_entry> map2;
 	auto cap = map.capacity();
 
@@ -157,7 +157,8 @@ struct hash<Big_entry> {
 TEST_F(Setup_robin_test, big_key) {
   Rng rng(123);
 
-  lgraph_hood::unordered_flat_map<Big_entry,uint32_t> map("potato");
+  lgraph_hood::unordered_map<Big_entry,uint32_t> map("robin_test_be");
+	map.clear(); // Remove data from previous runs
   absl::flat_hash_map<Big_entry, uint32_t> map2;
 
   int conta = 0;

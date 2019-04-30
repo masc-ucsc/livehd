@@ -13,12 +13,13 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/flat_hash_map.h"
 #include "flat_hash_map.hpp"
+#include "lgraph_hood.hpp"
 #include "robin_hood.hpp"
 
 using Rng = sfc64;
 
-#define BENCH_OUT_SIZE 2000
-#define BENCH_INN_SIZE 1000
+#define BENCH_OUT_SIZE 500
+#define BENCH_INN_SIZE 200
 
 //#define ABSEIL_USE_MAP
 //#define USE_MAP_FALSE
@@ -80,6 +81,91 @@ void random_robin_set(int max) {
   LGBench b("random_robin_set");
 
   robin_hood::unordered_map<uint32_t,bool> map;
+
+  for (int n = 1; n < BENCH_OUT_SIZE; ++n) {
+    for (int i = 0; i < BENCH_INN_SIZE; ++i) {
+      auto pos = rng.uniform<int>(max);
+      map[pos] = true;
+#ifdef USE_MAP_FALSE
+      map[rng.uniform<int>(max)] = false;
+      pos = rng.uniform<int>(max);
+      if (map.find(pos) != map.end())
+        map[pos] = false;
+#else
+      pos = rng.uniform<int>(max); map.erase(pos);
+      pos = rng.uniform<int>(max);
+      if (map.find(pos) != map.end())
+        map.erase(pos);
+#endif
+    }
+  }
+
+  b.sample("insert/erase dense");
+  int conta = 0;
+  for (int i = 0; i < BENCH_INN_SIZE; ++i) {
+    for (auto it = map.begin(), end = map.end(); it != end;++it) {
+#ifdef USE_MAP_FALSE
+      if (it->second)
+        conta++;
+      else
+        map.erase(it);
+#else
+      conta++;
+#endif
+    }
+    map[rng.uniform<int>(max)] = true;
+#ifdef USE_MAP_FALSE
+    auto pos = rng.uniform<int>(max);
+    if (map.find(pos) != map.end())
+      map[pos] = false;
+#else
+    auto pos = rng.uniform<int>(max);
+    if (map.find(pos) != map.end())
+      map.erase(pos);
+#endif
+  }
+  b.sample("traversal sparse");
+
+  printf("inserts random %d\n",conta);
+  conta = 0;
+
+  for (int i = 0; i < max; ++i) {
+#ifdef USE_MAP_FALSE
+    map[rng.uniform<int>(max)] = false;
+    map[rng.uniform<int>(max)] = false;
+    map[rng.uniform<int>(max)] = false;
+    map[rng.uniform<int>(max)] = false;
+#else
+    map.erase(rng.uniform<int>(max));
+    map.erase(rng.uniform<int>(max));
+    map.erase(rng.uniform<int>(max));
+    map.erase(rng.uniform<int>(max));
+#endif
+  }
+
+  for (int i = 0; i < BENCH_INN_SIZE; ++i) {
+    for (auto it = map.begin(), end = map.end(); it != end;++it) {
+#ifdef USE_MAP_FALSE
+      if (it->second)
+        conta++;
+      else
+        map.erase(it);
+#else
+      conta++;
+#endif
+    }
+  }
+  b.sample("traversal dense");
+
+  printf("inserts random %d\n",conta);
+}
+
+void random_lgraph_set(int max) {
+  Rng rng(123);
+
+  LGBench b("random_lgraph_set");
+
+  lgraph_hood::unordered_map<uint32_t,bool> map("use_set_bench_db");
 
   for (int n = 1; n < BENCH_OUT_SIZE; ++n) {
     for (int i = 0; i < BENCH_INN_SIZE; ++i) {
@@ -465,6 +551,7 @@ int main(int argc, char **argv) {
 
   bool run_random_std_set    = false;
   bool run_random_robin_set  = false;
+  bool run_random_lgraph_set = false;
   bool run_random_abseil_set = false;
   bool run_random_ska_set    = false;
   bool run_random_vector_set = false;
@@ -475,6 +562,8 @@ int main(int argc, char **argv) {
       run_random_std_set = true;
     else if (strcasecmp(argv[1],"robin")==0)
       run_random_robin_set = true;
+    else if (strcasecmp(argv[1],"lgraph")==0)
+      run_random_lgraph_set = true;
     else if (strcasecmp(argv[1],"abseil")==0)
       run_random_abseil_set = true;
     else if (strcasecmp(argv[1],"ska")==0)
@@ -486,6 +575,7 @@ int main(int argc, char **argv) {
   }else{
     run_random_std_set    = true;
     run_random_robin_set  = true;
+    run_random_lgraph_set = true;
     run_random_abseil_set = true;
     run_random_ska_set    = true;
     run_random_vector_set = true;
@@ -500,6 +590,9 @@ int main(int argc, char **argv) {
 
     if (run_random_robin_set)
       random_robin_set(i);
+
+    if (run_random_lgraph_set)
+      random_lgraph_set(i);
 
     if (run_random_abseil_set)
       random_abseil_set(i);
