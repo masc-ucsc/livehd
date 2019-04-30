@@ -966,17 +966,17 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         case 0:
           if(sel != nullptr)
             log_error("Internal Error: multiple wires assigned to same mux port\n");
-          sel = get_wire(e.sink);
+          sel = get_wire(e.driver);
           break;
         case 1:
           if(aport != nullptr)
             log_error("Internal Error: multiple wires assigned to same mux port\n");
-          aport = get_wire(e.sink);
+          aport = get_wire(e.driver);
           break;
         case 2:
           if(bport != nullptr)
             log_error("Internal Error: multiple wires assigned to same mux port\n");
-          bport = get_wire(e.sink);
+          bport = get_wire(e.driver);
           break;
         }
       }
