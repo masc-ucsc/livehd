@@ -3,8 +3,10 @@
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
+#include "fmt/format.h"
+
 #include "absl/container/flat_hash_map.h"
-#include "maprobin.hpp"
+#include "lgraph_hood.hpp"
 #include "rng.hpp"
 
 using testing::HasSubstr;
@@ -37,30 +39,50 @@ TEST_F(Setup_robin_test, big_entry) {
     }
   };
 
-  robin_hood::unordered_flat_map<uint32_t,Big_entry> map("potato");
+  lgraph_hood::unordered_flat_map<uint32_t,Big_entry> map("potato");
   absl::flat_hash_map<uint32_t,Big_entry> map2;
+	auto cap = map.capacity();
+
+	for(auto i=0;i<1000;i++) {
+		map.clear();
+		map.clear(); // 2 calls to clear triggers a delete to map file
+
+		EXPECT_EQ(map.has(33),0);
+		EXPECT_EQ(map.has(0),0);
+		map[0].f1=33;
+		EXPECT_EQ(map.has(0),1);
+		map.erase(0);
+
+		EXPECT_EQ(map.capacity(),cap); // No capacity degeneration
+
+		int conta = 0;
+		for(int i=1;i<rng.uniform<int>(16);++i) {
+			int sz = rng.uniform<int>(0xFFFFFF);
+			if (map.find(sz)!=map.end()) {
+				map.erase(sz);
+			}else{
+				map[sz].f1=sz;
+				EXPECT_EQ(map.has(sz),1);
+				conta++;
+			}
+		}
+
+		for(auto it:map) {
+			EXPECT_EQ(it.first, it.second.f1);
+			conta--;
+		}
+		EXPECT_EQ(conta,0);
+	}
   map.clear();
 
-  map[1].f0=1;
-  map[2].f0=2;
-  map[3].f0=3;
-  map[4].f0=4;
   int conta = 0;
-  for(auto it:map) {
-    (void)it;
-    conta++;
-  }
-  EXPECT_EQ(conta,4);
-  map.clear();
-
-  conta = 0;
   for(int i=0;i<10000;i++) {
     int sz = rng.uniform<int>(0xFFFFFF);
 
     if (map2.find(sz) == map2.end()) {
-      EXPECT_EQ(map.count(sz),0);
+      EXPECT_EQ(map.has(sz),0);
     }else{
-      EXPECT_EQ(map.count(sz),1);
+      EXPECT_EQ(map.has(sz),1);
     }
 
     map[sz].f0 = sz;
@@ -119,7 +141,7 @@ public:
   };
 };
 
-namespace robin_hood {
+namespace lgraph_hood {
 template <>
 struct hash<Big_entry> {
   size_t operator()(Big_entry const &o) const {
@@ -135,7 +157,7 @@ struct hash<Big_entry> {
 TEST_F(Setup_robin_test, big_key) {
   Rng rng(123);
 
-  robin_hood::unordered_flat_map<Big_entry,uint32_t> map("potato");
+  lgraph_hood::unordered_flat_map<Big_entry,uint32_t> map("potato");
   absl::flat_hash_map<Big_entry, uint32_t> map2;
 
   int conta = 0;

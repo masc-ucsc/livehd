@@ -1,3 +1,9 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+//
+// Code based on robin-hood hash map. Changed to use only flat_map (not
+// node_map), small changes in hashing function (zero hash use as end), and
+// several changes to support mmap storage
+
 //                 ______  _____                 ______                _________
 //  ______________ ___  /_ ___(_)_______         ___  /_ ______ ______ ______  /
 //  __  ___/_  __ \__  __ \__  / __  __ \        __  __ \_  __ \_  __ \_  __  /
@@ -6,7 +12,7 @@
 //                                      _/_____/
 //
 // robin_hood::unordered_map for C++14
-// version 3.2.2
+// version 3.2.7
 // https://github.com/martinus/robin-hood-hashing
 //
 // Licensed under the MIT License <http://opensource.org/licenses/MIT>.
@@ -31,13 +37,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef ROBIN_HOOD_H_INCLUDED
-#define ROBIN_HOOD_H_INCLUDED
-
-// see https://semver.org/
-#define ROBIN_HOOD_VERSION_MAJOR 3 // for incompatible API changes
-#define ROBIN_HOOD_VERSION_MINOR 2 // for adding functionality in a backwards-compatible manner
-#define ROBIN_HOOD_VERSION_PATCH 2 // for backwards-compatible bug fixes
+#pragma once
 
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -55,24 +55,24 @@
 #include <utility>
 #include <iostream>
 
-#define ROBIN_HOOD_LOG_ENABLED
-#ifdef ROBIN_HOOD_LOG_ENABLED
-#    define ROBIN_HOOD_LOG(x) std::cout << __FUNCTION__ << "@" << __LINE__ << ": " << x << std::endl
+//#define lgraph_hood_LOG_ENABLED
+#ifdef lgraph_hood_LOG_ENABLED
+#    define lgraph_hood_LOG(x) std::cout << __FUNCTION__ << "@" << __LINE__ << ": " << x << std::endl
 #else
-#    define ROBIN_HOOD_LOG(x)
+#    define lgraph_hood_LOG(x)
 #endif
 
 // mark unused members with this macro
-#define ROBIN_HOOD_UNUSED(identifier)
+#define lgraph_hood_UNUSED(identifier)
 
 // bitness
 #ifdef FORCE_ROBIN_32
-#define ROBIN_HOOD_BITNESS 32
+#define lgraph_hood_BITNESS 32
 #else
 #if SIZE_MAX == UINT32_MAX
-#    define ROBIN_HOOD_BITNESS 32
+#    define lgraph_hood_BITNESS 32
 #elif SIZE_MAX == UINT64_MAX
-#    define ROBIN_HOOD_BITNESS 64
+#    define lgraph_hood_BITNESS 64
 #else
 #    error Unsupported bitness
 #endif
@@ -80,12 +80,12 @@
 
 // endianess
 #ifdef _WIN32
-#    define ROBIN_HOOD_LITTLE_ENDIAN 1
-#    define ROBIN_HOOD_BIG_ENDIAN 0
+#    define lgraph_hood_LITTLE_ENDIAN 1
+#    define lgraph_hood_BIG_ENDIAN 0
 #else
 #    if __GNUC__ >= 4
-#        define ROBIN_HOOD_LITTLE_ENDIAN (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
-#        define ROBIN_HOOD_BIG_ENDIAN (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+#        define lgraph_hood_LITTLE_ENDIAN (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+#        define lgraph_hood_BIG_ENDIAN (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
 #    else
 #        error cannot determine endianness
 #    endif
@@ -93,94 +93,94 @@
 
 // inline
 #ifdef _WIN32
-#    define ROBIN_HOOD_NOINLINE __declspec(noinline)
+#    define lgraph_hood_NOINLINE __declspec(noinline)
 #else
 #    if __GNUC__ >= 4
-#        define ROBIN_HOOD_NOINLINE __attribute__((noinline))
+#        define lgraph_hood_NOINLINE __attribute__((noinline))
 #    else
-#        define ROBIN_HOOD_NOINLINE
+#        define lgraph_hood_NOINLINE
 #    endif
 #endif
 
 // count leading/trailing bits
 #ifdef _WIN32
-#    if ROBIN_HOOD_BITNESS == 32
-#        define ROBIN_HOOD_BITSCANFORWARD _BitScanForward
+#    if lgraph_hood_BITNESS == 32
+#        define lgraph_hood_BITSCANFORWARD _BitScanForward
 #    else
-#        define ROBIN_HOOD_BITSCANFORWARD _BitScanForward64
+#        define lgraph_hood_BITSCANFORWARD _BitScanForward64
 #    endif
 #    include <intrin.h>
-#    pragma intrinsic(ROBIN_HOOD_BITSCANFORWARD)
-#    define ROBIN_HOOD_COUNT_TRAILING_ZEROES(x)                                          \
+#    pragma intrinsic(lgraph_hood_BITSCANFORWARD)
+#    define lgraph_hood_COUNT_TRAILING_ZEROES(x)                                          \
         [](size_t mask) -> int {                                                         \
             unsigned long index;                                                         \
-            return ROBIN_HOOD_BITSCANFORWARD(&index, mask) ? index : ROBIN_HOOD_BITNESS; \
+            return lgraph_hood_BITSCANFORWARD(&index, mask) ? index : lgraph_hood_BITNESS; \
         }(x)
 #else
 #    if __GNUC__ >= 4
-#        if ROBIN_HOOD_BITNESS == 32
-#            define ROBIN_HOOD_CTZ(x) __builtin_ctzl(x)
-#            define ROBIN_HOOD_CLZ(x) __builtin_clzl(x)
+#        if lgraph_hood_BITNESS == 32
+#            define lgraph_hood_CTZ(x) __builtin_ctzl(x)
+#            define lgraph_hood_CLZ(x) __builtin_clzl(x)
 #        else
-#            define ROBIN_HOOD_CTZ(x) __builtin_ctzll(x)
-#            define ROBIN_HOOD_CLZ(x) __builtin_clzll(x)
+#            define lgraph_hood_CTZ(x) __builtin_ctzll(x)
+#            define lgraph_hood_CLZ(x) __builtin_clzll(x)
 #        endif
-#        define ROBIN_HOOD_COUNT_LEADING_ZEROES(x) (x ? ROBIN_HOOD_CLZ(x) : ROBIN_HOOD_BITNESS)
-#        define ROBIN_HOOD_COUNT_TRAILING_ZEROES(x) (x ? ROBIN_HOOD_CTZ(x) : ROBIN_HOOD_BITNESS)
+#        define lgraph_hood_COUNT_LEADING_ZEROES(x) (x ? lgraph_hood_CLZ(x) : lgraph_hood_BITNESS)
+#        define lgraph_hood_COUNT_TRAILING_ZEROES(x) (x ? lgraph_hood_CTZ(x) : lgraph_hood_BITNESS)
 #    else
 #        error clz not supported
 #    endif
 #endif
 
 // umul
-namespace robin_hood {
+namespace lgraph_hood {
 namespace detail {
 #if defined(__SIZEOF_INT128__)
-#    define ROBIN_HOOD_UMULH(a, b) \
+#    define lgraph_hood_UMULH(a, b) \
         static_cast<uint64_t>(     \
             (static_cast<unsigned __int128>(a) * static_cast<unsigned __int128>(b)) >> 64u)
 
-#    define ROBIN_HOOD_HAS_UMUL128 1
+#    define lgraph_hood_HAS_UMUL128 1
 inline uint64_t umul128(uint64_t a, uint64_t b, uint64_t* high) {
     auto result = static_cast<unsigned __int128>(a) * static_cast<unsigned __int128>(b);
     *high = static_cast<uint64_t>(result >> 64);
     return static_cast<uint64_t>(result);
 }
-#elif (defined(_WIN32) && ROBIN_HOOD_BITNESS == 64)
-#    define ROBIN_HOOD_HAS_UMUL128 1
+#elif (defined(_WIN32) && lgraph_hood_BITNESS == 64)
+#    define lgraph_hood_HAS_UMUL128 1
 #    include <intrin.h> // for __umulh
 #    pragma intrinsic(__umulh)
 #    pragma intrinsic(_umul128)
-#    define ROBIN_HOOD_UMULH(a, b) __umulh(a, b)
+#    define lgraph_hood_UMULH(a, b) __umulh(a, b)
 inline uint64_t umul128(uint64_t a, uint64_t b, uint64_t* high) {
     return _umul128(a, b, high);
 }
 #endif
 } // namespace detail
-} // namespace robin_hood
+} // namespace lgraph_hood
 
 // likely/unlikely
 #if __GNUC__ >= 4
-#    define ROBIN_HOOD_LIKELY(condition) __builtin_expect(static_cast<bool>(condition), 1)
-#    define ROBIN_HOOD_UNLIKELY(condition) __builtin_expect(static_cast<bool>(condition), 0)
+#    define lgraph_hood_LIKELY(condition) __builtin_expect(static_cast<bool>(condition), 1)
+#    define lgraph_hood_UNLIKELY(condition) __builtin_expect(static_cast<bool>(condition), 0)
 #else
-#    define ROBIN_HOOD_LIKELY(condition) condition
-#    define ROBIN_HOOD_UNLIKELY(condition) condition
+#    define lgraph_hood_LIKELY(condition) condition
+#    define lgraph_hood_UNLIKELY(condition) condition
 #endif
-namespace robin_hood {
+namespace lgraph_hood {
 
 namespace detail {
 
 // make sure this is not inlined as it is slow and dramatically enlarges code, thus making other
 // inlinings more difficult. Throws are also generally the slow path.
 template <typename E, typename... Args>
-static ROBIN_HOOD_NOINLINE void doThrow(Args&&... args) {
+static lgraph_hood_NOINLINE void doThrow(Args&&... args) {
     throw E(std::forward<Args>(args)...);
 }
 
 template <typename E, typename T, typename... Args>
 static T* assertNotNull(T* t, Args&&... args) {
-    if (ROBIN_HOOD_UNLIKELY(nullptr == t)) {
+    if (lgraph_hood_UNLIKELY(nullptr == t)) {
         doThrow<E>(std::forward<Args>(args)...);
     }
     return t;
@@ -195,200 +195,12 @@ inline T unaligned_load(void const* ptr) {
     return t;
 }
 
-#if 0
-// Allocates bulks of memory for objects of type T. This deallocates the memory in the destructor,
-// and keeps a linked list of the allocated memory around. Overhead per allocation is the size of a
-// pointer.
-template <typename T, size_t MinNumAllocs = 4, size_t MaxNumAllocs = 256>
-class BulkPoolAllocator {
-public:
-    BulkPoolAllocator()
-        : mHead(nullptr)
-        , mListForFree(nullptr) {}
-
-    // does not copy anything, just creates a new allocator.
-    BulkPoolAllocator(const BulkPoolAllocator& ROBIN_HOOD_UNUSED(o) /*unused*/)
-        : mHead(nullptr)
-        , mListForFree(nullptr) {}
-
-    BulkPoolAllocator(BulkPoolAllocator&& o)
-        : mHead(o.mHead)
-        , mListForFree(o.mListForFree) {
-        o.mListForFree = nullptr;
-        o.mHead = nullptr;
-    }
-
-    BulkPoolAllocator& operator=(BulkPoolAllocator&& o) {
-        reset();
-        mHead = o.mHead;
-        mListForFree = o.mListForFree;
-        o.mListForFree = nullptr;
-        o.mHead = nullptr;
-        return *this;
-    }
-
-    BulkPoolAllocator& operator=(const BulkPoolAllocator& ROBIN_HOOD_UNUSED(o) /*unused*/) {
-        // does not do anything
-        return *this;
-    }
-
-    ~BulkPoolAllocator() {
-        reset();
-    }
-
-    // Deallocates all allocated memory.
-    void reset() {
-        while (mListForFree) {
-            T* tmp = *mListForFree;
-            free(mListForFree);
-            mListForFree = reinterpret_cast<T**>(tmp);
-        }
-        mHead = nullptr;
-    }
-
-    // allocates, but does NOT initialize. Use in-place new constructor, e.g.
-    //   T* obj = pool.allocate();
-    //   ::new (static_cast<void*>(obj)) T();
-    T* allocate() {
-      fmt::print("BULK allocate\n");
-        T* tmp = mHead;
-        if (!tmp) {
-            tmp = performAllocation();
-        }
-
-        mHead = *reinterpret_cast<T**>(tmp);
-        return tmp;
-    }
-
-    // does not actually deallocate but puts it in store.
-    // make sure you have already called the destructor! e.g. with
-    //  obj->~T();
-    //  pool.deallocate(obj);
-    void deallocate(T* obj) {
-        *reinterpret_cast<T**>(obj) = mHead;
-        mHead = obj;
-    }
-
-    // Adds an already allocated block of memory to the allocator. This allocator is from now on
-    // responsible for freeing the data (with free()). If the provided data is not large enough to
-    // make use of, it is immediately freed. Otherwise it is reused and freed in the destructor.
-    void addOrFree(void* ptr, const size_t numBytes) {
-        fmt::print("bulk:addOrFree ptr:{}\n",ptr);
-        // calculate number of available elements in ptr
-        if (numBytes < ALIGNMENT + ALIGNED_SIZE) {
-            // not enough data for at least one element. Free and return.
-            free(ptr);
-        } else {
-            add(ptr, numBytes);
-        }
-    }
-
-    void swap(BulkPoolAllocator<T, MinNumAllocs, MaxNumAllocs>& other) {
-        using std::swap;
-        swap(mHead, other.mHead);
-        swap(mListForFree, other.mListForFree);
-    }
-
-private:
-    // iterates the list of allocated memory to calculate how many to alloc next.
-    // Recalculating this each time saves us a size_t member.
-    // This ignores the fact that memory blocks might have been added manually with addOrFree. In
-    // practice, this should not matter much.
-    size_t calcNumElementsToAlloc() const {
-        auto tmp = mListForFree;
-        size_t numAllocs = MinNumAllocs;
-
-        while (numAllocs * 2 <= MaxNumAllocs && tmp) {
-            auto x = reinterpret_cast<T***>(tmp);
-            tmp = *x;
-            numAllocs *= 2;
-        }
-
-        return numAllocs;
-    }
-
-    // WARNING: Underflow if numBytes < ALIGNMENT! This is guarded in addOrFree().
-    void add(void* ptr, const size_t numBytes) {
-        const size_t numElements = (numBytes - ALIGNMENT) / ALIGNED_SIZE;
-
-        auto data = reinterpret_cast<T**>(ptr);
-
-        // link free list
-        auto x = reinterpret_cast<T***>(data);
-        *x = mListForFree;
-        mListForFree = data;
-
-        // create linked list for newly allocated data
-        auto const headT = reinterpret_cast<T*>(reinterpret_cast<char*>(ptr) + ALIGNMENT);
-
-        auto const head = reinterpret_cast<char*>(headT);
-
-        // Visual Studio compiler automatically unrolls this loop, which is pretty cool
-        for (size_t i = 0; i < numElements; ++i) {
-            *reinterpret_cast<char**>(head + i * ALIGNED_SIZE) = head + (i + 1) * ALIGNED_SIZE;
-        }
-
-        // last one points to 0
-        *reinterpret_cast<T**>(head + (numElements - 1) * ALIGNED_SIZE) = mHead;
-        mHead = headT;
-    }
-
-    // Called when no memory is available (mHead == 0).
-    // Don't inline this slow path.
-    ROBIN_HOOD_NOINLINE T* performAllocation() {
-        size_t const numElementsToAlloc = calcNumElementsToAlloc();
-
-        // alloc new memory: [prev |T, T, ... T]
-        // std::cout << (sizeof(T*) + ALIGNED_SIZE * numElementsToAlloc) << " bytes" << std::endl;
-        size_t const bytes = ALIGNMENT + ALIGNED_SIZE * numElementsToAlloc;
-        add(assertNotNull<std::bad_alloc>(malloc(bytes)), bytes);
-        return mHead;
-    }
-
-    // enforce byte alignment of the T's
-    static constexpr size_t ALIGNMENT =
-        (std::max)(std::alignment_of<T>::value, std::alignment_of<T*>::value);
-    static constexpr size_t ALIGNED_SIZE = ((sizeof(T) - 1) / ALIGNMENT + 1) * ALIGNMENT;
-
-    static_assert(MinNumAllocs >= 1, "MinNumAllocs");
-    static_assert(MaxNumAllocs >= MinNumAllocs, "MaxNumAllocs");
-    static_assert(ALIGNED_SIZE >= sizeof(T*), "ALIGNED_SIZE");
-    static_assert(0 == (ALIGNED_SIZE % sizeof(T*)), "ALIGNED_SIZE mod");
-    static_assert(ALIGNMENT >= sizeof(T*), "ALIGNMENT");
-
-    T* mHead;
-    T** mListForFree;
-};
-#endif
-
-#if 0
-template <typename T, size_t MinSize, size_t MaxSize, bool IsFlatMap>
-struct NodeAllocator;
-
-// dummy allocator that does nothing
-template <typename T, size_t MinSize, size_t MaxSize>
-struct NodeAllocator<T, MinSize, MaxSize, true> {
-
-    // we are not using the data, so just free it.
-    void addOrFree(void* ptr, size_t ROBIN_HOOD_UNUSED(numBytes) /*unused*/) {
-        free(ptr);
-    }
-};
-
-template <typename T, size_t MinSize, size_t MaxSize>
-struct NodeAllocator<T, MinSize, MaxSize, false> : public BulkPoolAllocator<T, MinSize, MaxSize> {};
-#endif
-
 // All empty maps initial mInfo point to this infobyte. That way lookup in an empty map
 // always returns false, and this is a very hot byte.
 //
 // we have to use data >1byte (at least 2 bytes), because initially we set mShift to 63 (has to be
 // <63), so initial index will be 0 or 1.
-namespace DummyInfoByte {
 
-static uint64_t b = 0;
-
-} // namespace DummyInfoByte
 } // namespace detail
 
 struct is_transparent_tag {};
@@ -477,59 +289,61 @@ struct hash : public std::hash<T> {
 
 // Murmur2 hash without caring about big endianness. Generally much faster than the standard
 // std::hash for std::string, and the code is quite simple.
+inline size_t hash_bytes(void const* ptr, size_t const len) {
+    static constexpr uint64_t m = UINT64_C(0xc6a4a7935bd1e995);
+    static constexpr uint64_t seed = UINT64_C(0xe17a1465);
+    static constexpr unsigned int r = 47;
+
+    auto const data64 = reinterpret_cast<uint64_t const*>(ptr);
+    uint64_t h = seed ^ (len * m);
+
+    size_t const n_blocks = len / 8;
+    for (size_t i = 0; i < n_blocks; ++i) {
+        uint64_t k = detail::unaligned_load<uint64_t>(data64 + i);
+
+        k *= m;
+        k ^= k >> r;
+        k *= m;
+
+        h ^= k;
+        h *= m;
+    }
+
+    auto const data8 = reinterpret_cast<uint8_t const*>(data64 + n_blocks);
+    switch (len & 7u) {
+    case 7:
+        h ^= static_cast<uint64_t>(data8[6]) << 48u;
+        // fallthrough
+    case 6:
+        h ^= static_cast<uint64_t>(data8[5]) << 40u;
+        // fallthrough
+    case 5:
+        h ^= static_cast<uint64_t>(data8[4]) << 32u;
+        // fallthrough
+    case 4:
+        h ^= static_cast<uint64_t>(data8[3]) << 24u;
+        // fallthrough
+    case 3:
+        h ^= static_cast<uint64_t>(data8[2]) << 16u;
+        // fallthrough
+    case 2:
+        h ^= static_cast<uint64_t>(data8[1]) << 8u;
+        // fallthrough
+    case 1:
+        h ^= static_cast<uint64_t>(data8[0]);
+        h *= m;
+    };
+
+    h ^= h >> r;
+    h *= m;
+    h ^= h >> r;
+
+    return static_cast<size_t>(h);
+}
 template <>
 struct hash<std::string> {
     size_t operator()(std::string const& str) const {
-        static constexpr uint64_t m = UINT64_C(0xc6a4a7935bd1e995);
-        static constexpr uint64_t seed = UINT64_C(0xe17a1465);
-        static constexpr unsigned int r = 47;
-
-        size_t const len = str.size();
-        auto const data64 = reinterpret_cast<uint64_t const*>(str.data());
-        uint64_t h = seed ^ (len * m);
-
-        size_t const n_blocks = len / 8;
-        for (size_t i = 0; i < n_blocks; ++i) {
-            uint64_t k = detail::unaligned_load<uint64_t>(data64 + i);
-
-            k *= m;
-            k ^= k >> r;
-            k *= m;
-
-            h ^= k;
-            h *= m;
-        }
-
-        auto const data8 = reinterpret_cast<uint8_t const*>(data64 + n_blocks);
-        switch (len & 7u) {
-        case 7:
-            h ^= static_cast<uint64_t>(data8[6]) << 48u;
-            // fallthrough
-        case 6:
-            h ^= static_cast<uint64_t>(data8[5]) << 40u;
-            // fallthrough
-        case 5:
-            h ^= static_cast<uint64_t>(data8[4]) << 32u;
-            // fallthrough
-        case 4:
-            h ^= static_cast<uint64_t>(data8[3]) << 24u;
-            // fallthrough
-        case 3:
-            h ^= static_cast<uint64_t>(data8[2]) << 16u;
-            // fallthrough
-        case 2:
-            h ^= static_cast<uint64_t>(data8[1]) << 8u;
-            // fallthrough
-        case 1:
-            h ^= static_cast<uint64_t>(data8[0]);
-            h *= m;
-        };
-
-        h ^= h >> r;
-        h *= m;
-        h ^= h >> r;
-
-        return static_cast<size_t>(h);
+        return hash_bytes(str.data(), str.size());
     }
 };
 
@@ -537,13 +351,13 @@ struct hash<std::string> {
 template <>
 struct hash<uint64_t> {
     size_t operator()(uint64_t const& obj) const {
-#if defined(ROBIN_HOOD_HAS_UMUL128)
+#if defined(lgraph_hood_HAS_UMUL128)
         // 167079903232 masksum, 120428523 ops best: 0xde5fb9d2630458e9
         static constexpr uint64_t k = UINT64_C(0xde5fb9d2630458e9);
         uint64_t h;
         uint64_t l = detail::umul128(obj, k, &h);
         return h + l;
-#elif ROBIN_HOOD_BITNESS == 32
+#elif lgraph_hood_BITNESS == 32
         static constexpr uint32_t k = UINT32_C(0x9a0ecda7);
         uint64_t const r = obj * k;
         uint32_t h = static_cast<uint32_t>(r >> 32);
@@ -572,7 +386,7 @@ struct hash<int64_t> {
 template <>
 struct hash<uint32_t> {
     size_t operator()(uint32_t const& h) const {
-#if ROBIN_HOOD_BITNESS == 32
+#if lgraph_hood_BITNESS == 32
         return static_cast<size_t>((UINT64_C(0xca4bcaa75ec3f625) * (uint64_t)h) >> 32);
 #else
         return hash<uint64_t>{}(static_cast<uint64_t>(h));
@@ -625,7 +439,7 @@ public:
     using key_type = Key;
     using mapped_type = T;
     using value_type =
-        robin_hood::pair<typename std::conditional<IsFlatMap, Key, Key const>::type, T>;
+        lgraph_hood::pair<typename std::conditional<IsFlatMap, Key, Key const>::type, T>;
     using size_type = size_t;
     using hasher = Hash;
     using key_equal = KeyEqual;
@@ -661,14 +475,14 @@ private:
     class DataNode<M, true> {
     public:
         template <typename... Args>
-        explicit DataNode(M& ROBIN_HOOD_UNUSED(map) /*unused*/, Args&&... args)
+        explicit DataNode(M& lgraph_hood_UNUSED(map) /*unused*/, Args&&... args)
             : mData(std::forward<Args>(args)...) {}
 
-        DataNode(M& ROBIN_HOOD_UNUSED(map) /*unused*/, DataNode<M, true>&& n)
+        DataNode(M& lgraph_hood_UNUSED(map) /*unused*/, DataNode<M, true>&& n)
             : mData(std::move(n.mData)) {}
 
         // doesn't do anything
-        void destroy(M& ROBIN_HOOD_UNUSED(map) /*unused*/) {}
+        void destroy(M& lgraph_hood_UNUSED(map) /*unused*/) {}
         void destroyDoNotDeallocate() {}
 
         value_type const* operator->() const {
@@ -720,7 +534,7 @@ private:
             ::new (static_cast<void*>(mData)) value_type(std::forward<Args>(args)...);
         }
 
-        DataNode(M& ROBIN_HOOD_UNUSED(map) /*unused*/, DataNode<M, false>&& n)
+        DataNode(M& lgraph_hood_UNUSED(map) /*unused*/, DataNode<M, false>&& n)
             : mData(std::move(n.mData)) {}
 
         void destroy(M& map) {
@@ -854,6 +668,8 @@ private:
 
     // Iter ////////////////////////////////////////////////////////////
 
+    struct fast_forward_tag {};
+
     // generic iterator for both const_iterator and iterator.
     template <bool IsConst>
     class Iter {
@@ -882,21 +698,18 @@ private:
             : mKeyVals(valPtr)
             , mInfo(infoPtr) {}
 
+        Iter(NodePtr valPtr, uint8_t const* infoPtr,
+             fast_forward_tag lgraph_hood_UNUSED(tag) /*unused*/)
+            : mKeyVals(valPtr)
+            , mInfo(infoPtr) {
+            fastForward();
+        }
+
         // prefix increment. Undefined behavior if we are at end()!
         Iter& operator++() {
             mInfo++;
             mKeyVals++;
-            int inc;
-            do {
-                auto const n = detail::unaligned_load<size_t>(mInfo);
-#if ROBIN_HOOD_LITTLE_ENDIAN
-                inc = ROBIN_HOOD_COUNT_TRAILING_ZEROES(n) / 8;
-#else
-                inc = ROBIN_HOOD_COUNT_LEADING_ZEROES(n) / 8;
-#endif
-                mInfo += inc;
-                mKeyVals += inc;
-            } while (inc == sizeof(size_t));
+            fastForward();
             return *this;
         }
 
@@ -919,6 +732,21 @@ private:
         }
 
     private:
+        // fast forward to the next non-free info byte
+        void fastForward() {
+            int inc;
+            do {
+                auto const n = detail::unaligned_load<size_t>(mInfo);
+#if lgraph_hood_LITTLE_ENDIAN
+                inc = lgraph_hood_COUNT_TRAILING_ZEROES(n) / 8;
+#else
+                inc = lgraph_hood_COUNT_LEADING_ZEROES(n) / 8;
+#endif
+                mInfo += inc;
+                mKeyVals += inc;
+            } while (inc == sizeof(size_t));
+        }
+
         friend class unordered_map<IsFlatMap, MaxLoadFactor100, key_type, mapped_type, hasher,
                                    key_equal>;
         NodePtr mKeyVals;
@@ -929,7 +757,7 @@ private:
 
     size_t calcNumBytesInfo(size_t numElements) const {
         const size_t s = sizeof(uint8_t) * (numElements + 1);
-        if (ROBIN_HOOD_UNLIKELY(s / sizeof(uint8_t) != numElements + 1)) {
+        if (lgraph_hood_UNLIKELY(s / sizeof(uint8_t) != numElements + 1)) {
             throwOverflowError();
         }
         // make sure it's a bit larger, so we can load 64bit numbers
@@ -937,7 +765,7 @@ private:
     }
     size_t calcNumBytesNode(size_t numElements) const {
         const size_t s = sizeof(Node) * numElements;
-        if (ROBIN_HOOD_UNLIKELY(s / sizeof(Node) != numElements)) {
+        if (lgraph_hood_UNLIKELY(s / sizeof(Node) != numElements)) {
             throwOverflowError();
         }
         return s;
@@ -946,7 +774,7 @@ private:
         const size_t si = calcNumBytesInfo(numElements);
         const size_t sn = calcNumBytesNode(numElements);
         const size_t s = si + sn;
-        if (ROBIN_HOOD_UNLIKELY(s <= si || s <= sn)) {
+        if (lgraph_hood_UNLIKELY(s <= si || s <= sn)) {
             throwOverflowError();
         }
         return s;
@@ -957,6 +785,7 @@ private:
         return;
 
       loaded = false;
+			bool is_empty = empty();
 
       if(mmap_base) {
         munmap(mmap_base, mmap_size);
@@ -969,7 +798,7 @@ private:
         mmap_fd = -1;
       }
 
-      if (empty()) {
+      if (is_empty) {
         unlink(mmap_name.c_str());
       }
     }
@@ -987,14 +816,14 @@ private:
       if (mmap_fd<0) {
         // Time to garbage collect mmaps/file_descriptors
         while(!gc_queue.empty()) {
-          std::function<void()> func = gc_queue.front();
+          auto func = gc_queue.front();
           gc_queue.pop();
           func();
         }
 
         mmap_fd = open(mmap_name.c_str(), O_RDWR | O_CREAT, 0644);
         if (mmap_fd<0) {
-          std::cerr << "robin_hood::reload ERROR failed to setup " << mmap_name << std::endl;
+          std::cerr << "lgraph_hood::reload ERROR failed to setup " << mmap_name << std::endl;
           exit(-4);
         }
       }
@@ -1002,14 +831,14 @@ private:
       struct stat s;
       int status = fstat(mmap_fd, &s);
       if (status < 0) {
-        std::cerr << "robin_hood::reload ERROR Could not check file status " << mmap_name << std::endl;
+        std::cerr << "lgraph_hood::reload ERROR Could not check file status " << mmap_name << std::endl;
         exit(-3);
       }
       if (s.st_size <= calc_mmap_size(n_entries)) {
         mmap_size = calc_mmap_size(n_entries);
         int ret = ftruncate(mmap_fd, mmap_size);
         if (ret<0) {
-          std::cerr << "robin_hood::reload ERROR ftruncate could not resize  " << mmap_name << " to " << mmap_size << "\n";
+          std::cerr << "lgraph_hood::reload ERROR ftruncate could not resize  " << mmap_name << " to " << mmap_size << "\n";
           mmap_base = 0;
           exit(-1);
         }
@@ -1019,7 +848,7 @@ private:
 
       mmap_base = reinterpret_cast<uint64_t *>(mmap(0, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, mmap_fd, 0));
       if(mmap_base == MAP_FAILED) {
-        std::cerr << "robin_hood::reload ERROR mmap could not adjust\n";
+        std::cerr << "lgraph_hood::reload ERROR mmap could not adjust\n";
         mmap_base = 0;
         exit(-1);
       }
@@ -1054,9 +883,7 @@ private:
 
       setup_mmap(InitialNumElements);
 
-      fmt::print("load from mmap_name:{}\n",mmap_name);
-
-      gc_queue.push([=] { garbage_collect(); });
+			gc_queue.push(std::bind(&unordered_map<IsFlatMap, MaxLoadFactor100, Key, T, Hash, KeyEqual>::garbage_collect, this));
 
       loaded = true;
     }
@@ -1067,15 +894,17 @@ private:
     template <typename HashKey>
     void keyToIdx(HashKey&& key, size_t& idx, InfoType& info) const {
         static constexpr size_t bad_hash_prevention =
-            std::is_same<::robin_hood::hash<key_type>, hasher>::value
+            std::is_same<::lgraph_hood::hash<key_type>, hasher>::value
                 ? 1
-                : (ROBIN_HOOD_BITNESS == 64 ? UINT64_C(0xb3727c1f779b8d8b) : UINT32_C(0xda4afe47));
+                : (lgraph_hood_BITNESS == 64 ? UINT64_C(0xb3727c1f779b8d8b) : UINT32_C(0xda4afe47));
 
-        if (ROBIN_HOOD_UNLIKELY(!loaded))
+        if (lgraph_hood_UNLIKELY(!loaded))
           reload();
         idx = Hash::operator()(key) * bad_hash_prevention;
         info = static_cast<InfoType>(mInfoInc + static_cast<InfoType>(idx >> mInfoHashShift));
         idx &= *mMask;
+				if (idx==0)
+					idx = 1;
     }
 
     // forwards the index by one, wrapping around at the end
@@ -1103,7 +932,7 @@ private:
                 ::new (static_cast<void*>(mKeyVals + idx)) Node(std::move(mKeyVals[prev_idx]));
             }
             mInfo[idx] = static_cast<uint8_t>(mInfo[prev_idx] + mInfoInc);
-            if (ROBIN_HOOD_UNLIKELY(mInfo[idx] + mInfoInc > 0xFF)) {
+            if (lgraph_hood_UNLIKELY(mInfo[idx] + mInfoInc > 0xFF)) {
                 *mMaxNumElementsAllowed = 0;
             }
             idx = prev_idx;
@@ -1140,17 +969,19 @@ private:
         do {
             // unrolling this twice gives a bit of a speedup. More unrolling did not help.
             if (info == mInfo[idx] && KeyEqual::operator()(key, mKeyVals[idx].getFirst())) {
+                assert(idx);
                 return idx;
             }
             next(&info, &idx);
             if (info == mInfo[idx] && KeyEqual::operator()(key, mKeyVals[idx].getFirst())) {
+                assert(idx);
                 return idx;
             }
             next(&info, &idx);
         } while (info <= mInfo[idx]);
 
         // nothing found!
-        return *mMask + 1;
+        return 0; //*mMask == 0 ? 0 : *mMask + 1;
     }
 
     void cloneData(const unordered_map& o) {
@@ -1179,7 +1010,7 @@ private:
         // key not found, so we are now exactly where we want to insert it.
         auto const insertion_idx = idx;
         auto const insertion_info = static_cast<uint8_t>(info);
-        if (ROBIN_HOOD_UNLIKELY(insertion_info + mInfoInc > 0xFF)) {
+        if (lgraph_hood_UNLIKELY(insertion_info + mInfoInc > 0xFF)) {
             *mMaxNumElementsAllowed = 0;
         }
 
@@ -1205,7 +1036,7 @@ private:
         static int conta=0;
         if (((++conta)&0xFFFF)==0 && *mNumElements>100) {
           if (conflict_factor()>0.01) {
-            fmt::print("potential bad hash for mmap_name:{}, try to debug it\n",mmap_name);
+            std::cerr << "potential bad hash for mmap_name:" << mmap_name << ", try to debug it\n";
           }
         }
 #endif
@@ -1245,9 +1076,12 @@ public:
 
     // Clears all data, without resizing.
     void clear() {
+			  if (!loaded) {
+					unlink(mmap_name.c_str());
+					return;
+				}
         if (empty()) {
-            // don't do anything! also important because we don't want to write to DummyInfoByte::b,
-            // even though we would just write 0 to it.
+					  garbage_collect();
             return;
         }
 
@@ -1323,27 +1157,31 @@ public:
     }
 
     // Returns 1 if key is found, 0 otherwise.
-    size_t count(const key_type& key) const {
-        return findIdx(key) == (*mMask + 1) ? 0 : 1;
+    bool has(const key_type& key) const {
+        return findIdx(key);
     }
 
     // Returns a reference to the value found for key.
     // Throws std::out_of_range if element cannot be found
     mapped_type& at(key_type const& key) {
-        auto idx = findIdx(key);
-        if (idx == *mMask + 1) {
+        auto kv = mKeyVals + findIdx(key);
+#ifndef NDEBUG
+        if (kv == reinterpret_cast<Node*>(mKeyVals)) {
             doThrow<std::out_of_range>("key not found");
         }
-        return mKeyVals[idx].getSecond();
+#endif
+        return kv->getSecond();
     }
 
     // Returns a reference to the value found for key.
     // Throws std::out_of_range if element cannot be found
     mapped_type const& at(key_type const& key) const {
         auto idx = findIdx(key);
-        if (idx == *mMask + 1) {
+#ifndef NDEBUG
+        if (idx == 0) {
             doThrow<std::out_of_range>("key not found");
         }
+#endif
         return mKeyVals[idx].getSecond();
     }
 
@@ -1370,19 +1208,27 @@ public:
     }
 
     iterator begin() {
+			  if (!loaded) {
+					reload();
+				}
+
         if (empty()) {
             return end();
         }
-        return ++iterator(mKeyVals - 1, mInfo - 1);
+        return iterator(mKeyVals, mInfo, fast_forward_tag{});
     }
     const_iterator begin() const {
         return cbegin();
     }
     const_iterator cbegin() const {
+			  if (!loaded) {
+					reload();
+				}
+
         if (empty()) {
             return cend();
         }
-        return ++const_iterator(mKeyVals - 1, mInfo - 1);
+        return const_iterator(mKeyVals, mInfo, fast_forward_tag{});
     }
 
     iterator end() {
@@ -1443,7 +1289,7 @@ public:
         while (calcMaxNumElementsAllowed(newSize) < count && newSize != 0) {
             newSize *= 2;
         }
-        if (ROBIN_HOOD_UNLIKELY(newSize == 0)) {
+        if (lgraph_hood_UNLIKELY(newSize == 0)) {
             throwOverflowError();
         }
 
@@ -1451,7 +1297,7 @@ public:
     }
 
     void rehash(size_t numBuckets) {
-      if (ROBIN_HOOD_UNLIKELY((numBuckets & (numBuckets - 1)) != 0)) {
+      if (lgraph_hood_UNLIKELY((numBuckets & (numBuckets - 1)) != 0)) {
         doThrow<std::runtime_error>("rehash only allowed for power of two");
       }
 
@@ -1506,6 +1352,12 @@ public:
         return 0 == *mNumElements;
     }
 
+		size_t capacity() const {
+			if (loaded)
+				return *mMaxNumElementsAllowed;
+      return calcMaxNumElementsAllowed(InitialNumElements);
+		}
+
     float max_load_factor() const {
         return MaxLoadFactor100 / 100.0f;
     }
@@ -1528,11 +1380,11 @@ public:
     }
 
 private:
-    ROBIN_HOOD_NOINLINE void throwOverflowError() const {
-        throw std::overflow_error("robin_hood::map overflow");
+    lgraph_hood_NOINLINE void throwOverflowError() const {
+        throw std::overflow_error("lgraph_hood::map overflow");
     }
-    ROBIN_HOOD_NOINLINE void report_badhash() const {
-      fmt::print("robin_hood::map FATAL really bad hash function, mmap_name:{}\n", mmap_name);
+    lgraph_hood_NOINLINE void report_badhash() const {
+      std::cerr << "lgraph_hood::map FATAL really bad hash function, mmap_name:" << mmap_name << "\n";
       assert(false);
     }
 
@@ -1555,7 +1407,7 @@ private:
             }
 
             // unlikely that this evaluates to true
-            if (ROBIN_HOOD_UNLIKELY(*mNumElements >= *mMaxNumElementsAllowed)) {
+            if (lgraph_hood_UNLIKELY(*mNumElements >= *mMaxNumElementsAllowed)) {
                 increase_size();
                 continue;
             }
@@ -1563,7 +1415,7 @@ private:
             // key not found, so we are now exactly where we want to insert it.
             auto const insertion_idx = idx;
             auto const insertion_info = info;
-            if (ROBIN_HOOD_UNLIKELY(insertion_info + mInfoInc > 0xFF)) {
+            if (lgraph_hood_UNLIKELY(insertion_info + mInfoInc > 0xFF)) {
                 *mMaxNumElementsAllowed = 0;
             }
 
@@ -1614,7 +1466,7 @@ private:
             }
 
             // unlikely that this evaluates to true
-            if (ROBIN_HOOD_UNLIKELY(*mNumElements >= *mMaxNumElementsAllowed)) {
+            if (lgraph_hood_UNLIKELY(*mNumElements >= *mMaxNumElementsAllowed)) {
                 increase_size();
                 continue;
             }
@@ -1622,7 +1474,7 @@ private:
             // key not found, so we are now exactly where we want to insert it.
             auto const insertion_idx = idx;
             auto const insertion_info = info;
-            if (ROBIN_HOOD_UNLIKELY(insertion_info + mInfoInc > 0xFF)) {
+            if (lgraph_hood_UNLIKELY(insertion_info + mInfoInc > 0xFF)) {
                 *mMaxNumElementsAllowed = 0;
             }
 
@@ -1648,7 +1500,7 @@ private:
             static int conta=0;
             if (((++conta)&0xFFFF)==0 && *mNumElements>100) {
               if (conflict_factor()>0.01) {
-                fmt::print("potential bad hash for mmap_name:{}, try to debug it\n",mmap_name);
+                std::cerr << "potential bad hash for mmap_name:" << mmap_name << ", try to debug it\n";
               }
             }
 #endif
@@ -1671,15 +1523,15 @@ private:
     }
 
     bool try_increase_info() {
-        ROBIN_HOOD_LOG("mInfoInc=" << mInfoInc << ", numElements=" << *mNumElements
+        lgraph_hood_LOG("mInfoInc=" << mInfoInc << ", numElements=" << mNumElements
                                    << ", maxNumElementsAllowed="
-                                   << calcMaxNumElementsAllowed(*mMask + 1));
-        // we got space left, try to make info smaller
-        mInfoInc = static_cast<uint8_t>(mInfoInc >> 1);
-        if (1 == mInfoInc) {
-            // need to be > 1 so that shift works (otherwise undefined behavior!)
+                                   << calcMaxNumElementsAllowed(mMask + 1));
+        if (mInfoInc <= 2) {
+            // need to be > 2 so that shift works (otherwise undefined behavior!)
             return false;
         }
+        // we got space left, try to make info smaller
+        mInfoInc = static_cast<uint8_t>(mInfoInc >> 1);
 
         // remove one bit of the hash, leaving more space for the distance info.
         // This is extremely fast because we can operate on 8 bytes at once.
@@ -1707,7 +1559,7 @@ private:
             return;
         }
 
-        ROBIN_HOOD_LOG("mNumElements=" << *mNumElements << ", maxNumElementsAllowed="
+        lgraph_hood_LOG("mNumElements=" << *mNumElements << ", maxNumElementsAllowed="
                                        << maxNumElementsAllowed << ", load="
                                        << (static_cast<double>(*mNumElements) * 100.0 /
                                            (static_cast<double>(*mMask) + 1)));
@@ -1719,21 +1571,19 @@ private:
         rehash((*mMask + 1) * 2);
     }
 
-    void destroy() {
-        if (0 == *mMask) {
-            // don't deallocate! we are pointing to DummyInfoByte::b.
-            return;
-        }
+		void destroy() {
 
-        Destroyer<Self, IsFlatMap && std::is_trivially_destructible<Node>::value>{}
-            .nodesDoNotDeallocate(*this);
-        free(mKeyVals);
-    }
+			// Destroy is very infrequent in LGraph, must GC everybody
+			while(!gc_queue.empty()) {
+				auto func = gc_queue.front();
+				gc_queue.pop();
+				func();
+			}
+		}
 
     // members are sorted so no padding occurs
-    mutable Node* mKeyVals = reinterpret_cast<Node*>(reinterpret_cast<uint8_t*>(&detail::DummyInfoByte::b) -
-                                             sizeof(Node));                 // 8 byte  8
-    mutable uint8_t* mInfo = reinterpret_cast<uint8_t*>(&detail::DummyInfoByte::b); // 8 byte 16
+    mutable Node *mKeyVals = reinterpret_cast<Node*>(&mInfoInc);
+    mutable uint8_t *mInfo = reinterpret_cast<uint8_t*>(&mInfoInc);
     mutable size_t *mNumElements;                                                   // 8 byte 24
     mutable size_t *mMask;                                                          // 8 byte 32
     mutable size_t *mMaxNumElementsAllowed;                                         // 8 byte 40
@@ -1763,11 +1613,11 @@ using unordered_node_map = detail::unordered_map<false, MaxLoadFactor100, Key, T
 template <typename Key, typename T, typename Hash = hash<Key>,
           typename KeyEqual = std::equal_to<Key>, size_t MaxLoadFactor100 = 80>
 using unordered_map =
-    detail::unordered_map<sizeof(robin_hood::pair<Key, T>) <= sizeof(size_t) * 6 &&
-                              std::is_nothrow_move_constructible<robin_hood::pair<Key, T>>::value &&
-                              std::is_nothrow_move_assignable<robin_hood::pair<Key, T>>::value,
+    detail::unordered_map<sizeof(lgraph_hood::pair<Key, T>) <= sizeof(size_t) * 6 &&
+                              std::is_nothrow_move_constructible<lgraph_hood::pair<Key, T>>::value &&
+                              std::is_nothrow_move_assignable<lgraph_hood::pair<Key, T>>::value,
                           MaxLoadFactor100, Key, T, Hash, KeyEqual>;
 
-} // namespace robin_hood
+} // namespace lgraph_hood
 
-#endif
+
