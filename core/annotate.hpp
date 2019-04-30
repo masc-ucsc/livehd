@@ -10,13 +10,15 @@
 
 struct Ann_name {
   static constexpr char offset[]    = "offset";
+  static constexpr char delay[]     = "delay";
   static constexpr char wirename[]  = "wirename";
   static constexpr char nodename[]  = "nodename";
   static constexpr char nodeplace[] = "nodeplace";
   static constexpr char cfgmeta[]   = "cfgmeta";
 };
 
-using Ann_node_pin_offset = Attribute_node_pin_data_type<Ann_name::wirename,  Node_pin_mode::Driver, uint16_t>;
+using Ann_node_pin_offset = Attribute_node_pin_data_type<Ann_name::offset   , Node_pin_mode::Driver, uint16_t>;
+using Ann_node_pin_delay  = Attribute_node_pin_data_type<Ann_name::delay    , Node_pin_mode::Driver, float>;
 using Ann_node_pin_name   = Attribute_node_pin_sview_type<Ann_name::wirename, Node_pin_mode::Driver, false>;
 
 using Ann_node_name       = Attribute_node_sview_type<Ann_name::nodename, true>;
@@ -26,6 +28,7 @@ using Ann_node_cfgmeta    = Attribute_node_sview_type<Ann_name::cfgmeta , false>
 struct Ann_support {
   static void clear(LGraph *lg) {
     Ann_node_pin_offset::clear(lg);
+    Ann_node_pin_delay::clear(lg);
     Ann_node_pin_name::clear(lg);
 
     Ann_node_name::clear(lg);
@@ -35,6 +38,7 @@ struct Ann_support {
 
   static void sync(LGraph *lg) {
     Ann_node_pin_offset::sync(lg);
+    Ann_node_pin_delay::sync(lg);
     Ann_node_pin_name::sync(lg);
 
     Ann_node_name::sync(lg);

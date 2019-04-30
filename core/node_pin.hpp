@@ -129,6 +129,9 @@ public:
   std::string_view get_name() const;
   bool has_name() const;
 
+  void  set_delay(float val);
+  float get_delay() const;
+
   uint16_t get_bits() const;
   void     set_bits(uint16_t bits);
 
