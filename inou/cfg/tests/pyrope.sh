@@ -96,12 +96,11 @@ echo ""
 #TODO:change to lgraph.match() to find all the graphs which needs to generate .v
 for pt in $pts
 do
-  echo "lgraph.open name:${pt} |> inou.yosys.fromlg" > lgshell_cmds
-  ${LGSHELL} < lgshell_cmds
-  if [ $? -eq 0 ]; then
+  echo "lgraph.open name:${pt} |> inou.yosys.fromlg" | ${LGSHELL}
+  if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
     echo "Successfully created verilog:${pt}.v"
   else
-    echo "FAIL: verilog generation terminated with an error (testcase ${pt}.v)"
+    echo "FAIL: verilog generation terminated with an error, testcase: ${pt}.v"
     exit 1
   fi
 done
