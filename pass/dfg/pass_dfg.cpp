@@ -168,54 +168,55 @@ void Pass_dfg::trans(LGraph *dfg) {
 
   //SH:FIXME: top<->subgraph connection might be wrong, exam carefully
   //resolve top <-> subgraph IO connection
-  for(auto nid : dfg->fast()){
-    auto node = Node(dfg, 0, Node::Compact(nid));
-    if(node.get_type().op == SubGraph_Op){
-      fmt::print("resolve connection, subgraph is:{}\n",node.get_driver_pin(0).get_name());
-      LGraph* sub_graph = LGraph::open(dfg->get_path(), node.get_driver_pin(0).get_name()) ;
-      I(sub_graph);
 
-      absl::flat_hash_map<Node_pin, Node_pin> subg_inp_edges;
-      for(auto &inp : node.inp_edges()){
-        Node dnode = inp.driver.get_node();
-        auto inp_name = dnode.get_driver_pin(0).get_name();
-        Node_pin dpin = dnode.get_driver_pin(0);
-        Node_pin spin = sub_graph->get_graph_input(inp_name);
+  //for(auto nid : dfg->fast()){
+  //  auto node = Node(dfg, 0, Node::Compact(nid));
+  //  if(node.get_type().op == SubGraph_Op){
+  //    fmt::print("resolve connection, subgraph is:{}\n",node.get_driver_pin(0).get_name());
+  //    LGraph* sub_graph = LGraph::open(dfg->get_path(), node.get_driver_pin(0).get_name()) ;
+  //    I(sub_graph);
 
-        fmt::print("inp_name:{}\n",inp_name);
-        //fmt::print("src_nid:{}, src_pid:{}, dst_nid:{}, dst_pid:{}\n", src_nid, src_pid, dst_nid, dst_pid);
-        subg_inp_edges[dpin] = spin;
-        inp.del_edge();
-      }
+  //    absl::flat_hash_map<Node_pin, Node_pin> subg_inp_edges;
+  //    for(auto &inp : node.inp_edges()){
+  //      Node dnode = inp.driver.get_node();
+  //      auto inp_name = dnode.get_driver_pin(0).get_name();
+  //      Node_pin dpin = dnode.get_driver_pin(0);
+  //      Node_pin spin = sub_graph->get_graph_input(inp_name);
 
-      for(auto &edge : subg_inp_edges){
-        dfg->add_edge(edge.first, edge.second);
-      }
+  //      fmt::print("inp_name:{}\n",inp_name);
+  //      //fmt::print("src_nid:{}, src_pid:{}, dst_nid:{}, dst_pid:{}\n", src_nid, src_pid, dst_nid, dst_pid);
+  //      subg_inp_edges[dpin] = spin;
+  //      inp.del_edge();
+  //    }
 
-      //resolve subgraph output connections
-      absl::flat_hash_map<Node_pin, Node_pin> subg_out_edges;
+  //    for(auto &edge : subg_inp_edges){
+  //      dfg->add_edge(edge.first, edge.second);
+  //    }
 
-      for(auto &out : node.out_edges()){
-        Node_pin dpin = out.driver;
-        Node_pin spin = out.sink;
-        uint16_t bw;
-        sub_graph->each_graph_output([&sub_graph, &spin, &bw](const Node_pin &pin) {
-            fmt::print("outputs of subgraph: name:{}, bitwidth:{}\n",
-              sub_graph->get_graph_output_name_from_pid(pin.get_pid()), pin.get_bits());
-            spin = pin;
-            bw = pin.get_bits();
-            });
-        subg_out_edges[dpin] = spin;
+  //    //resolve subgraph output connections
+  //    absl::flat_hash_map<Node_pin, Node_pin> subg_out_edges;
 
-        dpin.set_bits(bw);
-        out.del_edge();
-      }
+  //    for(auto &out : node.out_edges()){
+  //      Node_pin dpin = out.driver;
+  //      Node_pin spin = out.sink;
+  //      uint16_t bw;
+  //      sub_graph->each_graph_output([&sub_graph, &spin, &bw](const Node_pin &pin) {
+  //          fmt::print("outputs of subgraph: name:{}, bitwidth:{}\n",
+  //            sub_graph->get_graph_output_name_from_pid(pin.get_pid()), pin.get_bits());
+  //          spin = pin;
+  //          bw = pin.get_bits();
+  //          });
+  //      subg_out_edges[dpin] = spin;
 
-      for(auto &edge : subg_out_edges){
-        dfg->add_edge(edge.first,edge.second);
-      }
-    }
-  }
+  //      dpin.set_bits(bw);
+  //      out.del_edge();
+  //    }
+
+  //    for(auto &edge : subg_out_edges){
+  //      dfg->add_edge(edge.first,edge.second);
+  //    }
+  //  }
+  //}//end of resolving top<->sub-graph connection
 
   for(auto nid : dfg->fast()) {
     auto node = Node(dfg, 0, Node::Compact(nid));
@@ -234,52 +235,80 @@ void Pass_dfg::trans(LGraph *dfg) {
 }//end of Pass_dfg::trans()
 
 void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
-  for(auto nid : dfg->fast()){
-    auto node = Node(dfg, 0, Node::Compact(nid));
-    uint16_t node_size = node.setup_driver_pin(0).get_bits();
-    if(node_size == 0){
-      //SH:FIXME: should set bits for all output node_pin?
-      //SH:FIXME: yes, modify the algorithm to decide all bitwidth on all output pins
-      //Node_bitwidth &nb = dfg->node_bitwidth_get(nid);
-      //fmt::print("nid:{},max:{}\n",nid, nb.i.max);
-      //dfg->set_bits(dfg->get_node(nid).setup_driver_pin(0), ((uint16_t)floor(log2(nb.i.max))+1));
-
-      //SH:FIXME: wait for MIT bitwidth algorithm
-      //SH:FIXME: temporarily set 1-bit for all Node_pins
-      node.get_driver_pin(0).set_bits(1);
-    }
-  }
 
   for(auto nid: dfg->fast()){
     auto node = Node(dfg, 0, Node::Compact(nid));
+
     if(node.get_type().op == Mux_Op){
-      for (auto &inp : node.inp_edges()) {
-        if(inp.sink.get_pid() == 0) //the mux select pin
-          continue;
-        //assume MIT algo. will at least set mux.bits equals to the larger input
-        //auto src_bits = dfg->get_bits(dfg->get_node(src_nid).get_driver_pin(0));
-        //auto dst_bits = dfg->get_bits(dfg->get_node(dst_nid).get_driver_pin(0));
-        auto dpin_bits = inp.driver.get_bits();
-        auto spin_bits = inp.sink.get_bits();
-        auto bw_diff = (uint16_t)abs(dpin_bits - spin_bits);
-        if(spin_bits > dpin_bits) {
-          //SH:FIXME: using unsigned extend to fix mux bitwidth mismatch, what if the network is signed representation?
-          Node_pin node_pin_unsign_ext = create_const32(dfg, 0, bw_diff, false);
-          Node node_join = dfg->create_node();
-          node_join.set_type(Join_Op);
-          node_join.setup_driver_pin(0).set_bits(spin_bits);
-          dfg->add_edge(node_pin_unsign_ext, node_join.setup_sink_pin(1));
-          dfg->add_edge(inp.driver                         , node_join.setup_sink_pin(0));
-          dfg->add_edge(node_join.setup_driver_pin(0)      , inp.sink);
-          inp.del_edge();
-          //dfg->set_bits(dfg->get_node(nid_join).setup_driver_pin(0), dst_bits);
-          //dfg->add_edge(dfg->get_node(unsign_ext_nid).setup_driver_pin(0), dfg->get_node(nid_join).setup_sink_pin(1));
-          //dfg->add_edge(dfg->get_node(src_nid).setup_driver_pin(0), dfg->get_node(nid_join).setup_sink_pin(0));
-          //dfg->add_edge(dfg->get_node(nid_join).setup_driver_pin(0), dfg->get_node(dst_nid ).setup_sink_pin(dst_pid));
-          //dfg->del_edge(inp.driver, inp.sink);
-          //break;
-        }
+      Node_pin tpin_driver, fpin_driver;
+      for(auto& inp : node.inp_edges()){
+        if(inp.sink.get_pid() == 1)
+          fpin_driver = inp.driver;
+        else if(inp.sink.get_pid() == 2)
+          tpin_driver = inp.driver;
       }
+      auto tpin_driver_bw = tpin_driver.get_bits();
+      auto fpin_driver_bw = fpin_driver.get_bits();
+      auto bw_diff = (uint16_t)abs(tpin_driver_bw - fpin_driver_bw);
+      node.get_driver_pin().set_bits(std::max(tpin_driver_bw, fpin_driver_bw));
+
+      //create internal Join_Op to resolve bitwidth mismatch
+      if(bw_diff == 0){
+        continue;
+      } else if (tpin_driver_bw > fpin_driver_bw){
+        Node node_join = dfg -> create_node();
+        node_join.set_type(Join_Op);
+        node_join.setup_driver_pin().set_bits(tpin_driver_bw);
+
+        Node_pin node_pin_unsign_ext = create_const32(dfg, 0, bw_diff, false);
+        dfg->add_edge(node_pin_unsign_ext, node_join.setup_sink_pin(1));
+        dfg->add_edge(fpin_driver, node_join.setup_sink_pin(0));
+        dfg->add_edge(node_join.setup_driver_pin(0), node.setup_sink_pin(1));
+      } else if (tpin_driver_bw < fpin_driver_bw){
+        Node node_join = dfg -> create_node();
+        node_join.set_type(Join_Op);
+        node_join.setup_driver_pin().set_bits(fpin_driver_bw);
+
+        Node_pin node_pin_unsign_ext = create_const32(dfg, 0, bw_diff, false);
+        dfg->add_edge(node_pin_unsign_ext, node_join.setup_sink_pin(1));
+        dfg->add_edge(tpin_driver, node_join.setup_sink_pin(0));
+        dfg->add_edge(node_join.setup_driver_pin(0), node.setup_sink_pin(2));
+      }
+
+      //del original edge
+      for(auto &inp : node.inp_edges()){
+        if(inp.sink.get_pid() == 1 && tpin_driver_bw > fpin_driver_bw)
+          inp.del_edge();
+        else if(inp.sink.get_pid() == 2 && tpin_driver_bw < fpin_driver_bw)
+          inp.del_edge();
+      }
+
+
+      //for (auto &inp : node.inp_edges()) {
+      //  if(inp.sink.get_pid() == 0) //the mux select pin
+      //    continue;
+      //  //assume MIT algo. will at least set mux.bits equals to the larger input
+      //  auto dpin_bits = inp.driver.get_bits();
+      //  auto spin_bits = inp.sink.get_bits();//sink is the mux node
+      //  auto bw_diff = (uint16_t)abs(dpin_bits - spin_bits);
+      //  if(spin_bits > dpin_bits) {
+      //    //SH:FIXME: using unsigned extend to fix mux bitwidth mismatch, what if the network is signed representation?
+      //    Node_pin node_pin_unsign_ext = create_const32(dfg, 0, bw_diff, false);
+      //    Node node_join = dfg->create_node();
+      //    node_join.set_type(Join_Op);
+      //    node_join.setup_driver_pin(0).set_bits(spin_bits);
+      //    dfg->add_edge(node_pin_unsign_ext, node_join.setup_sink_pin(1));
+      //    dfg->add_edge(inp.driver                         , node_join.setup_sink_pin(0));
+      //    dfg->add_edge(node_join.setup_driver_pin(0)      , inp.sink);
+      //    inp.del_edge();
+      //    //dfg->set_bits(dfg->get_node(nid_join).setup_driver_pin(0), dst_bits);
+      //    //dfg->add_edge(dfg->get_node(unsign_ext_nid).setup_driver_pin(0), dfg->get_node(nid_join).setup_sink_pin(1));
+      //    //dfg->add_edge(dfg->get_node(src_nid).setup_driver_pin(0), dfg->get_node(nid_join).setup_sink_pin(0));
+      //    //dfg->add_edge(dfg->get_node(nid_join).setup_driver_pin(0), dfg->get_node(dst_nid ).setup_sink_pin(dst_pid));
+      //    //dfg->del_edge(inp.driver, inp.sink);
+      //    //break;
+      //  }
+      //}
     }
 
     //after MIT algo. and Mux_Op processing, bw of every node should be synced
@@ -296,6 +325,15 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
         }
       }
     }
+
+
+    //SH:FIXME: wait for MIT bitwidth algorithm
+    //SH:FIXME: temporarily set 1-bit for all Node_pins w/o bitwidth define
+    for(auto& inp : node.inp_edges()){
+      if(inp.driver.get_bits() == 0)
+        inp.driver.set_bits(1);
+    }
+
   }//end of g->fast()
 }//end of finalize bitwidth
 
@@ -331,7 +369,6 @@ Node Pass_dfg::process_cfg(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, const N
     if(cfg_iter.get_driver_pin(0).is_graph_output() or cfg_iter.get_type().op == CfgIfMerge_Op)
       finished = true;
 
-    I(cfg_iter.get_driver_pin(0).has_name());
     fmt::print("process_node finished!!\n\n");
   }
   aux_tree->print_cur_aux();
@@ -726,11 +763,12 @@ void Pass_dfg::resolve_phis(LGraph *dfg, Aux_tree *aux_tree, Aux *paux, Aux *tau
 void Pass_dfg::create_mux(LGraph *dfg, Aux *paux, Node_pin tp, Node_pin fp, Node_pin cp, std::string_view var) {
   Node phi_node = dfg->create_node();
   phi_node.set_type(Mux_Op);
-  phi_node.setup_driver_pin().set_name(absl::StrCat("mux:", tp.get_name(), fp.get_name()));
+  phi_node.setup_driver_pin().set_name(absl::StrCat("mux_", tp.get_name(), "_", fp.get_name()));
+  //phi_node.setup_driver_pin(0).set_name(" ");
   auto type = phi_node.get_type();
 
-  Port_ID t_pid = type.get_input_match("B");
   Port_ID f_pid = type.get_input_match("A");
+  Port_ID t_pid = type.get_input_match("B");
   Port_ID c_pid = type.get_input_match("S");
 
   dfg->add_edge(tp, phi_node.setup_sink_pin(t_pid));
