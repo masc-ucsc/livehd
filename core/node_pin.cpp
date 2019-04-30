@@ -79,6 +79,14 @@ std::string_view Node_pin::get_type_tmap_io_name() const {
   return tcell->get_output_name(pid);
 }
 
+float Node_pin::get_delay() const {
+  return Ann_node_pin_delay::get(*this);
+}
+
+void Node_pin::set_delay(float val) {
+  return Ann_node_pin_delay::set(*this, val);
+}
+
 std::string_view Node_pin::set_name(std::string_view wname) {
   return Ann_node_pin_name::set(*this, wname);
 }
