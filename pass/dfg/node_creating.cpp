@@ -63,7 +63,7 @@ Node_pin Pass_dfg::create_true_const(LGraph *g) {
 Node_pin Pass_dfg::create_false_const(LGraph *g) {
   Node_pin pin = g->create_node_const(0,1).setup_driver_pin();
   if(!pin.has_name())
-    pin.set_name("true");
+    pin.set_name("false");
   return pin;
 }
 
