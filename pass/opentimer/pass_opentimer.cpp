@@ -42,7 +42,7 @@ void Pass_opentimer::work(Eprp_var &var) {
 void Pass_opentimer::example_ot(){                       // Read SDC does not work and thereby dependent commands don't work..
 
   ot::Timer timer;
-  
+
   // Read design
   timer.read_celllib("pass/opentimer/ot_examples/optimizer_Early.lib", ot::MIN)
        .read_celllib("pass/opentimer/ot_examples/optimizer_Late.lib", ot::MAX)
@@ -74,17 +74,17 @@ void Pass_opentimer::example_ot(){                       // Read SDC does not wo
        .connect_pin("TAUGATE_1:A", "TAUNET_1")
        .connect_pin("TAUGATE_1:Z", "net_14")
        .read_spef("pass/opentimer/ot_examples/change_1.spef");
-  
+
   // report the slack at a G17
-  std::cout << "Late/Fall slack at pin G17: " 
-            << *timer.report_slack("G17", ot::MAX, ot::FALL) 
+  std::cout << "Late/Fall slack at pin G17: "
+            << *timer.report_slack("G17", ot::MAX, ot::FALL)
             << '\n';
-  
+
   // report the arrival time at G17
   std::cout << "Late/Fall arrival time at pin G17: "
             << *timer.report_at("G17", ot::MAX, ot::FALL)
             << '\n';
-  
+
   // report the required arrival time at G17
   std::cout << "Late/Fall required arrival time at pin G17: "
             << *timer.report_rat("G17", ot::MAX, ot::FALL)
