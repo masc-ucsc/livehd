@@ -51,8 +51,8 @@ std::vector<LGraph *> Inou_cfg::tolg() {
 
   cfg_2_lgraph(&memblock, lgs, rename_tab, cfg_file);
 
-  for(LGraph *g : lgs)
-    remove_fake_fcall(g);
+  //for(LGraph *g : lgs)
+  //  remove_fake_fcall(g);
 
   fmt::print("\n*************************************************************************************************\n");
   fmt::print("                    cfg-lgraph building finish!\n");
@@ -454,20 +454,22 @@ void Inou_cfg::update_ifs(std::vector<LGraph *> &lgs, std::vector<std::map<std::
 }
 #endif
 
-void Inou_cfg::collect_fcall_info(LGraph *g, Node new_node, const std::string &w7th,
-                                                            const std::string &w8th,
-                                                            const std::string &w9th) {
+void Inou_cfg::collect_fcall_info(LGraph *g, Node new_node, std::string_view w7th,
+                                                            std::string_view w8th,
+                                                            std::string_view w9th) {
   new_node.setup_driver_pin(1).set_name(w7th);
   new_node.setup_driver_pin(2).set_name(w8th);
-  new_node.setup_driver_pin(3).set_name(w9th);
+  if(w9th != "")
+    new_node.setup_driver_pin(3).set_name(w9th);
+  else
+    new_node.setup_driver_pin(3);
 }
 
 void Inou_cfg::remove_fake_fcall(LGraph *g) {
-  std::set<std::string_view>                 func_dcl_tab;
-  std::set<std::string_view>                 drive_tab;
-  std::set<Node::Compact>                    true_fcall_tab;
-  //SH:FIXME:change to absl::map
-  std::unordered_map<std::string_view, Node> name2node;
+  absl::flat_hash_set<std::string_view>       func_dcl_tab;
+  absl::flat_hash_set<std::string_view>       drive_tab;
+  absl::flat_hash_set<Node::Compact>          true_fcall_tab;
+  absl::flat_hash_map<std::string_view, Node> name2node;
   //1st pass
   for(auto nid : g->fast()){
     auto node = Node(g, 0, Node::Compact(nid));
@@ -479,8 +481,7 @@ void Inou_cfg::remove_fake_fcall(LGraph *g) {
       func_dcl_tab.insert(pid1_name);
     } else if(node.get_type().op == CfgFunctionCall_Op) {
       auto pid2_name = node.get_driver_pin(2).get_name();
-      auto pid3_name = node.get_driver_pin(3).get_name();
-      if(pid3_name.empty()) { // oprd num = 1
+      if(!node.get_driver_pin(3).has_name()) { // oprd num = 1
         drive_tab.insert(pid2_name);
         name2node[pid2_name] = node;
       } else { // operand number >=1
@@ -519,11 +520,10 @@ void Inou_cfg::remove_fake_fcall(LGraph *g) {
 //SH:FIXME:this is the old style argument passing, change it.
 void Inou_cfg_options::set(const std::string &key, const std::string &value) {
   try {
-    if(is_opt(key, "files"))
+    if (is_opt(key, "files"))
       file = value;
     else
       set_val(key, value);
 
-  } catch(const std::invalid_argument &ia) { fmt::print("ERROR: key {} has an invalid argument {}\n", key); }
-  Pass::warn("inou_cfg file:{} path:{} name:{}", file, path, name);
+  } catch (const std::invalid_argument &ia) { fmt::print("ERROR: key {} has an invalid argument {}\n", key); }
 }

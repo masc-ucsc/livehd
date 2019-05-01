@@ -33,7 +33,7 @@ private:
                    std::map<std::string, std::vector<std::string>> &, std::unordered_map<std::string, std::string> &, Node &);
   void cfg_2_lgraph(char **, std::vector<LGraph *> &, std::unordered_map<std::string, std::string> &, const std::string &);
   void remove_fake_fcall(LGraph *g);
-  void collect_fcall_info(LGraph *g, Node node, const std::string &w7, const std::string &w8, const std::string &w9);
+  void collect_fcall_info(LGraph *g, Node node, std::string_view w7, std::string_view w8, std::string_view w9);
   void update_ifs(std::vector<LGraph *> &lgs, std::vector<std::map<std::string, Node>> &node_mappings);
 
 protected:
