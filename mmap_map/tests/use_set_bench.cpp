@@ -13,7 +13,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/flat_hash_map.h"
 #include "flat_hash_map.hpp"
-#include "lgraph_hood.hpp"
+#include "mmap_map.hpp"
 #include "robin_hood.hpp"
 
 using Rng = sfc64;
@@ -165,7 +165,7 @@ void random_lgraph_set(int max) {
 
   LGBench b("random_lgraph_set");
 
-  lgraph_hood::unordered_map<uint32_t,bool> map("use_set_bench_db");
+  mmap_map::unordered_map<uint32_t,bool> map("use_set_bench_db");
 
   for (int n = 1; n < BENCH_OUT_SIZE; ++n) {
     for (int i = 0; i < BENCH_INN_SIZE; ++i) {

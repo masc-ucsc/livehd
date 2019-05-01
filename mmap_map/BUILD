@@ -4,7 +4,6 @@ cc_library(
     hdrs = glob(["include/*.hpp"]),
     visibility = ["//visibility:public"],
     includes = ["include"],
-    deps = ["@sparsehash//:headers"]
 )
 
 cc_test(
@@ -20,9 +19,10 @@ cc_test(
     srcs = ["tests/use_map_bench.cpp"],
     deps = [
         ":headers",
+        "//bench:headers",
+        "@sparsehash//:headers",
         "@fmt//:fmt",
         "@iassert//:iassert",
-        "//bench:headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:node_hash_map",
     ],
@@ -34,6 +34,7 @@ cc_test(
     deps = [
         ":headers",
         "//bench:headers",
+        "@sparsehash//:headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/container:node_hash_map",
@@ -43,17 +44,17 @@ cc_test(
 )
 
 cc_test(
-    name = "robin_test",
-    srcs = ["tests/robin_test.cpp"],
+    name = "mmap_map_test",
+    srcs = ["tests/mmap_map_test.cpp"],
     deps = [
         ":headers",
         "//bench:headers",
+        "@sparsehash//:headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@gtest//:gtest_main",
         "@fmt//:fmt",
     ],
 )
-
 
 cc_test(
     name = "map_test",
@@ -72,8 +73,8 @@ cc_test(
     srcs = ["tests/dense_bench.cpp"],
     deps = [
         ":headers",
-        "@yas//:headers",
         "//bench:headers",
+        "@yas//:headers",
     ],
 )
 

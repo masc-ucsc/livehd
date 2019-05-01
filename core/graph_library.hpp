@@ -48,7 +48,7 @@ protected:
   using Global_instances   = absl::flat_hash_map<std::string, Graph_library *>;
   using Global_name2lgraph = absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, LGraph *>>;
   using Name2id            = absl::flat_hash_map<std::string, Lg_type_id::type>;
-  using Recycled_id        = bm::bvector<>;
+  using Recycled_id        = bm::bvector<>; // TODO: get rid of bm::bvector
 
   Lg_type_id                    max_next_version;
   const std::string             path;

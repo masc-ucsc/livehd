@@ -11,7 +11,7 @@
 #include "absl/container/node_hash_map.h"
 #include "absl/container/flat_hash_map.h"
 #include "flat_hash_map.hpp"
-#include "lgraph_hood.hpp"
+#include "mmap_map.hpp"
 #include "robin_hood.hpp"
 
 #include <type_traits>
@@ -57,7 +57,7 @@ void random_lgraph_map(int max) {
 
   LGBench b("random_lgraph_map " + std::to_string(max));
 
-  lgraph_hood::unordered_map<uint32_t,uint32_t> map("use_map_bench_db");
+  mmap_map::unordered_map<uint32_t,uint32_t> map("use_map_bench_db");
   map.clear();
 
   for (int n = 1; n < 400; ++n) {

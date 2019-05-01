@@ -2,7 +2,7 @@
 //
 // Code based on robin-hood hash map. Changed to use only flat_map (not
 // node_map), small changes in hashing function (zero hash use as end), and
-// several changes to support mmap storage
+// significant changes to support mmap storage, strings with mmap at index...
 
 //                 ______  _____                 ______                _________
 //  ______________ ___  /_ ___(_)_______         ___  /_ ______ ______ ______  /
@@ -55,24 +55,24 @@
 #include <utility>
 #include <iostream>
 
-//#define lgraph_hood_LOG_ENABLED
-#ifdef lgraph_hood_LOG_ENABLED
-#    define lgraph_hood_LOG(x) std::cout << __FUNCTION__ << "@" << __LINE__ << ": " << x << std::endl
+//#define mmap_map_LOG_ENABLED
+#ifdef mmap_map_LOG_ENABLED
+#    define mmap_map_LOG(x) std::cout << __FUNCTION__ << "@" << __LINE__ << ": " << x << std::endl
 #else
-#    define lgraph_hood_LOG(x)
+#    define mmap_map_LOG(x)
 #endif
 
 // mark unused members with this macro
-#define lgraph_hood_UNUSED(identifier)
+#define mmap_map_UNUSED(identifier)
 
 // bitness
 #ifdef FORCE_ROBIN_32
-#define lgraph_hood_BITNESS 32
+#define mmap_map_BITNESS 32
 #else
 #if SIZE_MAX == UINT32_MAX
-#    define lgraph_hood_BITNESS 32
+#    define mmap_map_BITNESS 32
 #elif SIZE_MAX == UINT64_MAX
-#    define lgraph_hood_BITNESS 64
+#    define mmap_map_BITNESS 64
 #else
 #    error Unsupported bitness
 #endif
@@ -80,12 +80,12 @@
 
 // endianess
 #ifdef _WIN32
-#    define lgraph_hood_LITTLE_ENDIAN 1
-#    define lgraph_hood_BIG_ENDIAN 0
+#    define mmap_map_LITTLE_ENDIAN 1
+#    define mmap_map_BIG_ENDIAN 0
 #else
 #    if __GNUC__ >= 4
-#        define lgraph_hood_LITTLE_ENDIAN (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
-#        define lgraph_hood_BIG_ENDIAN (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+#        define mmap_map_LITTLE_ENDIAN (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+#        define mmap_map_BIG_ENDIAN (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
 #    else
 #        error cannot determine endianness
 #    endif
@@ -93,94 +93,94 @@
 
 // inline
 #ifdef _WIN32
-#    define lgraph_hood_NOINLINE __declspec(noinline)
+#    define mmap_map_NOINLINE __declspec(noinline)
 #else
 #    if __GNUC__ >= 4
-#        define lgraph_hood_NOINLINE __attribute__((noinline))
+#        define mmap_map_NOINLINE __attribute__((noinline))
 #    else
-#        define lgraph_hood_NOINLINE
+#        define mmap_map_NOINLINE
 #    endif
 #endif
 
 // count leading/trailing bits
 #ifdef _WIN32
-#    if lgraph_hood_BITNESS == 32
-#        define lgraph_hood_BITSCANFORWARD _BitScanForward
+#    if mmap_map_BITNESS == 32
+#        define mmap_map_BITSCANFORWARD _BitScanForward
 #    else
-#        define lgraph_hood_BITSCANFORWARD _BitScanForward64
+#        define mmap_map_BITSCANFORWARD _BitScanForward64
 #    endif
 #    include <intrin.h>
-#    pragma intrinsic(lgraph_hood_BITSCANFORWARD)
-#    define lgraph_hood_COUNT_TRAILING_ZEROES(x)                                          \
+#    pragma intrinsic(mmap_map_BITSCANFORWARD)
+#    define mmap_map_COUNT_TRAILING_ZEROES(x)                                          \
         [](size_t mask) -> int {                                                         \
             unsigned long index;                                                         \
-            return lgraph_hood_BITSCANFORWARD(&index, mask) ? index : lgraph_hood_BITNESS; \
+            return mmap_map_BITSCANFORWARD(&index, mask) ? index : mmap_map_BITNESS; \
         }(x)
 #else
 #    if __GNUC__ >= 4
-#        if lgraph_hood_BITNESS == 32
-#            define lgraph_hood_CTZ(x) __builtin_ctzl(x)
-#            define lgraph_hood_CLZ(x) __builtin_clzl(x)
+#        if mmap_map_BITNESS == 32
+#            define mmap_map_CTZ(x) __builtin_ctzl(x)
+#            define mmap_map_CLZ(x) __builtin_clzl(x)
 #        else
-#            define lgraph_hood_CTZ(x) __builtin_ctzll(x)
-#            define lgraph_hood_CLZ(x) __builtin_clzll(x)
+#            define mmap_map_CTZ(x) __builtin_ctzll(x)
+#            define mmap_map_CLZ(x) __builtin_clzll(x)
 #        endif
-#        define lgraph_hood_COUNT_LEADING_ZEROES(x) (x ? lgraph_hood_CLZ(x) : lgraph_hood_BITNESS)
-#        define lgraph_hood_COUNT_TRAILING_ZEROES(x) (x ? lgraph_hood_CTZ(x) : lgraph_hood_BITNESS)
+#        define mmap_map_COUNT_LEADING_ZEROES(x) (x ? mmap_map_CLZ(x) : mmap_map_BITNESS)
+#        define mmap_map_COUNT_TRAILING_ZEROES(x) (x ? mmap_map_CTZ(x) : mmap_map_BITNESS)
 #    else
 #        error clz not supported
 #    endif
 #endif
 
 // umul
-namespace lgraph_hood {
+namespace mmap_map {
 namespace detail {
 #if defined(__SIZEOF_INT128__)
-#    define lgraph_hood_UMULH(a, b) \
+#    define mmap_map_UMULH(a, b) \
         static_cast<uint64_t>(     \
             (static_cast<unsigned __int128>(a) * static_cast<unsigned __int128>(b)) >> 64u)
 
-#    define lgraph_hood_HAS_UMUL128 1
+#    define mmap_map_HAS_UMUL128 1
 inline uint64_t umul128(uint64_t a, uint64_t b, uint64_t* high) {
     auto result = static_cast<unsigned __int128>(a) * static_cast<unsigned __int128>(b);
     *high = static_cast<uint64_t>(result >> 64);
     return static_cast<uint64_t>(result);
 }
-#elif (defined(_WIN32) && lgraph_hood_BITNESS == 64)
-#    define lgraph_hood_HAS_UMUL128 1
+#elif (defined(_WIN32) && mmap_map_BITNESS == 64)
+#    define mmap_map_HAS_UMUL128 1
 #    include <intrin.h> // for __umulh
 #    pragma intrinsic(__umulh)
 #    pragma intrinsic(_umul128)
-#    define lgraph_hood_UMULH(a, b) __umulh(a, b)
+#    define mmap_map_UMULH(a, b) __umulh(a, b)
 inline uint64_t umul128(uint64_t a, uint64_t b, uint64_t* high) {
     return _umul128(a, b, high);
 }
 #endif
 } // namespace detail
-} // namespace lgraph_hood
+} // namespace mmap_map
 
 // likely/unlikely
 #if __GNUC__ >= 4
-#    define lgraph_hood_LIKELY(condition) __builtin_expect(static_cast<bool>(condition), 1)
-#    define lgraph_hood_UNLIKELY(condition) __builtin_expect(static_cast<bool>(condition), 0)
+#    define mmap_map_LIKELY(condition) __builtin_expect(static_cast<bool>(condition), 1)
+#    define mmap_map_UNLIKELY(condition) __builtin_expect(static_cast<bool>(condition), 0)
 #else
-#    define lgraph_hood_LIKELY(condition) condition
-#    define lgraph_hood_UNLIKELY(condition) condition
+#    define mmap_map_LIKELY(condition) condition
+#    define mmap_map_UNLIKELY(condition) condition
 #endif
-namespace lgraph_hood {
+namespace mmap_map {
 
 namespace detail {
 
 // make sure this is not inlined as it is slow and dramatically enlarges code, thus making other
 // inlinings more difficult. Throws are also generally the slow path.
 template <typename E, typename... Args>
-static lgraph_hood_NOINLINE void doThrow(Args&&... args) {
+static mmap_map_NOINLINE void doThrow(Args&&... args) {
     throw E(std::forward<Args>(args)...);
 }
 
 template <typename E, typename T, typename... Args>
 static T* assertNotNull(T* t, Args&&... args) {
-    if (lgraph_hood_UNLIKELY(nullptr == t)) {
+    if (mmap_map_UNLIKELY(nullptr == t)) {
         doThrow<E>(std::forward<Args>(args)...);
     }
     return t;
@@ -291,13 +291,13 @@ struct hash : public std::hash<T> {
 template <>
 struct hash<uint64_t> {
     size_t operator()(uint64_t const& obj) const {
-#if defined(lgraph_hood_HAS_UMUL128)
+#if defined(mmap_map_HAS_UMUL128)
         // 167079903232 masksum, 120428523 ops best: 0xde5fb9d2630458e9
         static constexpr uint64_t k = UINT64_C(0xde5fb9d2630458e9);
         uint64_t h;
         uint64_t l = detail::umul128(obj, k, &h);
         return h + l;
-#elif lgraph_hood_BITNESS == 32
+#elif mmap_map_BITNESS == 32
         static constexpr uint32_t k = UINT32_C(0x9a0ecda7);
         uint64_t const r = obj * k;
         uint32_t h = static_cast<uint32_t>(r >> 32);
@@ -326,7 +326,7 @@ struct hash<int64_t> {
 template <>
 struct hash<uint32_t> {
     size_t operator()(uint32_t const& h) const {
-#if lgraph_hood_BITNESS == 32
+#if mmap_map_BITNESS == 32
         return static_cast<size_t>((UINT64_C(0xca4bcaa75ec3f625) * (uint64_t)h) >> 32);
 #else
         return hash<uint64_t>{}(static_cast<uint64_t>(h));
@@ -338,6 +338,67 @@ template <>
 struct hash<int32_t> {
     size_t operator()(int32_t const& obj) const {
         return hash<uint32_t>{}(static_cast<uint32_t>(obj));
+    }
+};
+
+// Hash an arbitrary amount of bytes. This is basically Murmur2 hash without caring about big
+// endianness. TODO add a fallback for very large strings?
+inline size_t hash_bytes(void const* ptr, size_t const len) {
+    static constexpr uint64_t m = UINT64_C(0xc6a4a7935bd1e995);
+    static constexpr uint64_t seed = UINT64_C(0xe17a1465);
+    static constexpr unsigned int r = 47;
+
+    auto const data64 = reinterpret_cast<uint64_t const*>(ptr);
+    uint64_t h = seed ^ (len * m);
+
+    size_t const n_blocks = len / 8;
+    for (size_t i = 0; i < n_blocks; ++i) {
+        uint64_t k = detail::unaligned_load<uint64_t>(data64 + i);
+
+        k *= m;
+        k ^= k >> r;
+        k *= m;
+
+        h ^= k;
+        h *= m;
+    }
+
+    auto const data8 = reinterpret_cast<uint8_t const*>(data64 + n_blocks);
+    switch (len & 7u) {
+    case 7:
+        h ^= static_cast<uint64_t>(data8[6]) << 48u;
+        // fallthrough
+    case 6:
+        h ^= static_cast<uint64_t>(data8[5]) << 40u;
+        // fallthrough
+    case 5:
+        h ^= static_cast<uint64_t>(data8[4]) << 32u;
+        // fallthrough
+    case 4:
+        h ^= static_cast<uint64_t>(data8[3]) << 24u;
+        // fallthrough
+    case 3:
+        h ^= static_cast<uint64_t>(data8[2]) << 16u;
+        // fallthrough
+    case 2:
+        h ^= static_cast<uint64_t>(data8[1]) << 8u;
+        // fallthrough
+    case 1:
+        h ^= static_cast<uint64_t>(data8[0]);
+        h *= m;
+    };
+
+    h ^= h >> r;
+    h *= m;
+    h ^= h >> r;
+
+    return static_cast<size_t>(h);
+}
+
+template <>
+struct hash<std::string> {
+    size_t operator()(std::string const& str) const {
+        return hash_bytes(str.data(), str.size());
     }
 };
 
@@ -370,25 +431,22 @@ namespace detail {
 // According to STL, order of templates has effect on throughput. That's why I've moved the boolean
 // to the front.
 // https://www.reddit.com/r/cpp/comments/ahp6iu/compile_time_binary_size_reductions_and_cs_future/eeguck4/
-template <size_t MaxLoadFactor100, typename Key, typename T, typename Hash,
-          typename KeyEqual>
+template <size_t MaxLoadFactor100, typename Key, typename T, typename Hash>
 class unordered_map
-    : public Hash,
-      public KeyEqual {
+    : public Hash {
 public:
     using key_type    = Key;
     using mapped_type = T;
-    using value_type  = lgraph_hood::pair<typename std::conditional<true, Key, Key const>::type, T>;
+    using value_type  = mmap_map::pair<typename std::conditional<std::is_same<Key, std::string_view>::value, uint32_t, Key>::type, T>;
     using size_type   = size_t;
     using hasher      = Hash;
-    using key_equal   = KeyEqual;
-    using Self        = unordered_map<MaxLoadFactor100, key_type, mapped_type, hasher, key_equal>;
+    using Self        = unordered_map<MaxLoadFactor100, key_type, mapped_type, hasher>;
 
 private:
-    static_assert(!std::is_same<Key, std::string>::value     ,"lgraph_hood does not deal with strings or string_views (pointers). Use char_array\n");
-    static_assert(!std::is_same<Key, std::string_view>::value,"lgraph_hood does not deal with strings or string_views (pointers). Use char_array\n");
-    static_assert(!std::is_same<T, std::string>::value       ,"lgraph_hood does not deal with strings or string_views (pointers). Use char_array\n");
-    static_assert(!std::is_same<T, std::string_view>::value  ,"lgraph_hood does not deal with strings or string_views (pointers). Use char_array\n");
+    static_assert(!std::is_same<Key, std::string>::value     ,"mmap_map uses string_view as key (not slow string)\n");
+    //static_assert(!std::is_same<Key, std::string_view>::value,"mmap_map does not deal with strings or string_views (pointers). Use char_array\n");
+    static_assert(!std::is_same<T, std::string>::value       ,"mmap_map does not deal with strings or string_views (pointers). Use char_array\n");
+    static_assert(!std::is_same<T, std::string_view>::value  ,"mmap_map does not deal with strings or string_views (pointers). Use char_array\n");
 
     static_assert(MaxLoadFactor100 > 10 && MaxLoadFactor100 < 100, "MaxLoadFactor100 needs to be >10 && < 100");
 
@@ -411,14 +469,14 @@ private:
     class DataNode {
     public:
         template <typename... Args>
-        explicit DataNode(M& lgraph_hood_UNUSED(map) /*unused*/, Args&&... args)
+        explicit DataNode(M& mmap_map_UNUSED(map) /*unused*/, Args&&... args)
             : mData(std::forward<Args>(args)...) {}
 
-        DataNode(M& lgraph_hood_UNUSED(map) /*unused*/, DataNode<M>&& n)
+        DataNode(M& mmap_map_UNUSED(map) /*unused*/, DataNode<M>&& n)
             : mData(std::move(n.mData)) {}
 
         // doesn't do anything
-        void destroy(M& lgraph_hood_UNUSED(map) /*unused*/) {}
+        void destroy(M& mmap_map_UNUSED(map) /*unused*/) {}
         void destroyDoNotDeallocate() {}
 
         value_type const* operator->() const {
@@ -572,7 +630,7 @@ private:
             , mInfo(infoPtr) {}
 
         Iter(NodePtr valPtr, uint8_t const* infoPtr,
-             fast_forward_tag lgraph_hood_UNUSED(tag) /*unused*/)
+             fast_forward_tag mmap_map_UNUSED(tag) /*unused*/)
             : mKeyVals(valPtr)
             , mInfo(infoPtr) {
             fastForward();
@@ -610,18 +668,17 @@ private:
             int inc;
             do {
                 auto const n = detail::unaligned_load<size_t>(mInfo);
-#if lgraph_hood_LITTLE_ENDIAN
-                inc = lgraph_hood_COUNT_TRAILING_ZEROES(n) / 8;
+#if mmap_map_LITTLE_ENDIAN
+                inc = mmap_map_COUNT_TRAILING_ZEROES(n) / 8;
 #else
-                inc = lgraph_hood_COUNT_LEADING_ZEROES(n) / 8;
+                inc = mmap_map_COUNT_LEADING_ZEROES(n) / 8;
 #endif
                 mInfo += inc;
                 mKeyVals += inc;
             } while (inc == sizeof(size_t));
         }
 
-        friend class unordered_map<MaxLoadFactor100, key_type, mapped_type, hasher,
-                                   key_equal>;
+        friend class unordered_map<MaxLoadFactor100, key_type, mapped_type, hasher>;
         NodePtr mKeyVals;
         uint8_t const* mInfo;
     };
@@ -630,7 +687,7 @@ private:
 
     size_t calcNumBytesInfo(size_t numElements) const {
         const size_t s = sizeof(uint8_t) * (numElements + 1);
-        if (lgraph_hood_UNLIKELY(s / sizeof(uint8_t) != numElements + 1)) {
+        if (mmap_map_UNLIKELY(s / sizeof(uint8_t) != numElements + 1)) {
             throwOverflowError();
         }
         // make sure it's a bit larger, so we can load 64bit numbers
@@ -638,7 +695,7 @@ private:
     }
     size_t calcNumBytesNode(size_t numElements) const {
         const size_t s = sizeof(Node) * numElements;
-        if (lgraph_hood_UNLIKELY(s / sizeof(Node) != numElements)) {
+        if (mmap_map_UNLIKELY(s / sizeof(Node) != numElements)) {
             throwOverflowError();
         }
         return s;
@@ -647,7 +704,7 @@ private:
         const size_t si = calcNumBytesInfo(numElements);
         const size_t sn = calcNumBytesNode(numElements);
         const size_t s = si + sn;
-        if (lgraph_hood_UNLIKELY(s <= si || s <= sn)) {
+        if (mmap_map_UNLIKELY(s <= si || s <= sn)) {
             throwOverflowError();
         }
         return s;
@@ -673,6 +730,9 @@ private:
 
       if (is_empty) {
         unlink(mmap_name.c_str());
+        if constexpr (std::is_same<Key, std::string_view>::value) {
+          txt_clear();
+        }
       }
     }
 
@@ -681,6 +741,32 @@ private:
       total += calcNumBytesTotal(nelems);
 
       return total;
+    }
+
+    std::tuple<uint64_t *, size_t> create_mmap(int fd, size_t size) const {
+      struct stat s;
+      int status = fstat(fd, &s);
+      if (status < 0) {
+        std::cerr << "mmap_map::reload ERROR Could not check file status " << mmap_name << std::endl;
+        exit(-3);
+      }
+      if (s.st_size <= size) {
+        int ret = ftruncate(fd, size);
+        if (ret<0) {
+          std::cerr << "mmap_map::reload ERROR ftruncate could not resize  " << mmap_name << " to " << size << "\n";
+          exit(-1);
+        }
+      }else{
+        size = s.st_size;
+      }
+
+      void *base = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+      if(base == MAP_FAILED) {
+        std::cerr << "mmap_map::reload ERROR mmap could not adjust\n";
+        exit(-1);
+      }
+
+      return std::make_tuple(reinterpret_cast<uint64_t *>(base),size);
     }
 
     void setup_mmap(size_t n_entries) const {
@@ -696,35 +782,19 @@ private:
 
         mmap_fd = open(mmap_name.c_str(), O_RDWR | O_CREAT, 0644);
         if (mmap_fd<0) {
-          std::cerr << "lgraph_hood::reload ERROR failed to setup " << mmap_name << std::endl;
+          std::cerr << "mmap_map::reload ERROR failed to setup " << mmap_name << std::endl;
           exit(-4);
         }
       }
 
-      struct stat s;
-      int status = fstat(mmap_fd, &s);
-      if (status < 0) {
-        std::cerr << "lgraph_hood::reload ERROR Could not check file status " << mmap_name << std::endl;
-        exit(-3);
-      }
-      if (s.st_size <= calc_mmap_size(n_entries)) {
-        mmap_size = calc_mmap_size(n_entries);
-        int ret = ftruncate(mmap_fd, mmap_size);
-        if (ret<0) {
-          std::cerr << "lgraph_hood::reload ERROR ftruncate could not resize  " << mmap_name << " to " << mmap_size << "\n";
-          mmap_base = 0;
-          exit(-1);
-        }
-      }else{
-        mmap_size = s.st_size;
+      mmap_txt_fd = open((mmap_name + "txt").c_str(), O_RDWR | O_CREAT, 0644);
+      if (mmap_txt_fd<0) {
+        std::cerr << "mmap_map::reload ERROR failed to setup " << mmap_name << "txt\n";
+        exit(-4);
       }
 
-      mmap_base = reinterpret_cast<uint64_t *>(mmap(0, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, mmap_fd, 0));
-      if(mmap_base == MAP_FAILED) {
-        std::cerr << "lgraph_hood::reload ERROR mmap could not adjust\n";
-        mmap_base = 0;
-        exit(-1);
-      }
+      std::tie(mmap_base    , mmap_size    ) = create_mmap(mmap_fd,calc_mmap_size(n_entries));
+      std::tie(mmap_txt_base, mmap_txt_size) = create_mmap(mmap_txt_fd,8192);
 
       mNumElements           = &mmap_base[0];
       mMask                  = &mmap_base[1];
@@ -756,7 +826,7 @@ private:
 
       setup_mmap(InitialNumElements);
 
-			gc_queue.push(std::bind(&unordered_map<MaxLoadFactor100, Key, T, Hash, KeyEqual>::garbage_collect, this));
+			gc_queue.push(std::bind(&unordered_map<MaxLoadFactor100, Key, T, Hash>::garbage_collect, this));
 
       loaded = true;
     }
@@ -764,14 +834,13 @@ private:
     // highly performance relevant code.
     // Lower bits are used for indexing into the array (2^n size)
     // The upper 1-5 bits need to be a reasonable good hash, to save comparisons.
-    template <typename HashKey>
-    void keyToIdx(HashKey&& key, size_t& idx, InfoType& info) const {
+    void keyToIdx(const Key &key, size_t& idx, InfoType& info) const {
         static constexpr size_t bad_hash_prevention =
-            std::is_same<::lgraph_hood::hash<key_type>, hasher>::value
+            std::is_same<::mmap_map::hash<key_type>, hasher>::value
                 ? 1
-                : (lgraph_hood_BITNESS == 64 ? UINT64_C(0xb3727c1f779b8d8b) : UINT32_C(0xda4afe47));
+                : (mmap_map_BITNESS == 64 ? UINT64_C(0xb3727c1f779b8d8b) : UINT32_C(0xda4afe47));
 
-        if (lgraph_hood_UNLIKELY(!loaded))
+        if (mmap_map_UNLIKELY(!loaded))
           reload();
 
         idx = Hash::operator()(key) * bad_hash_prevention;
@@ -799,11 +868,11 @@ private:
     // Fals if no shift has occured (entry under idx is unconstructed memory)
     void shiftUp(size_t idx, size_t const insertion_idx) {
 #if 0
-      if (lgraph_hood_LIKELY(idx>insertion_idx)) {
+      if (mmap_map_LIKELY(idx>insertion_idx)) {
         memmove(&mKeyVals[insertion_idx+1],&mKeyVals[insertion_idx],(idx-insertion_idx)*sizeof(Node));
         for(auto i=idx;i>insertion_idx;--i) {
           mInfo[i] = static_cast<uint8_t>(mInfo[i-1] + mInfoInc);
-          if (lgraph_hood_UNLIKELY(mInfo[i] + mInfoInc > 0xFF)) {
+          if (mmap_map_UNLIKELY(mInfo[i] + mInfoInc > 0xFF)) {
             *mMaxNumElementsAllowed = 0;
           }
         }
@@ -823,7 +892,7 @@ private:
         }
 #endif
         mInfo[idx] = static_cast<uint8_t>(mInfo[prev_idx] + mInfoInc);
-        if (lgraph_hood_UNLIKELY(mInfo[idx] + mInfoInc > 0xFF)) {
+        if (mmap_map_UNLIKELY(mInfo[idx] + mInfoInc > 0xFF)) {
           *mMaxNumElementsAllowed = 0;
         }
         idx = prev_idx;
@@ -850,6 +919,15 @@ private:
         mKeyVals[idx].~Node();
     }
 
+    inline bool equals(const Key k1, const Key k2) const {
+      return k1 == k2;
+    }
+
+    inline bool equals(std::string_view k1, const uint32_t key_pos) const {
+      auto txt = txt_get_txt(key_pos);
+      return k1 == txt;
+    }
+
     // copy of find(), except that it returns iterator instead of const_iterator.
     template <typename Other>
     size_t findIdx(Other const& key) const {
@@ -859,12 +937,12 @@ private:
 
         do {
             // unrolling this twice gives a bit of a speedup. More unrolling did not help.
-            if (info == mInfo[idx] && KeyEqual::operator()(key, mKeyVals[idx].getFirst())) {
+            if (info == mInfo[idx] && equals(key, mKeyVals[idx].getFirst())) {
                 assert(idx);
                 return idx;
             }
             next(&info, &idx);
-            if (info == mInfo[idx] && KeyEqual::operator()(key, mKeyVals[idx].getFirst())) {
+            if (info == mInfo[idx] && equals(key, mKeyVals[idx].getFirst())) {
                 assert(idx);
                 return idx;
             }
@@ -890,7 +968,11 @@ private:
 
         size_t idx;
         InfoType info;
-        keyToIdx(keyval.getFirst(), idx, info);
+        if constexpr (std::is_same<Key, std::string_view>::value) {
+          keyToIdx(txt_get_txt(keyval.getFirst()), idx, info);
+        }else{
+          keyToIdx(keyval.getFirst(), idx, info);
+        }
 
         // skip forward. Use <= because we are certain that the element is not there.
         while (info <= mInfo[idx]) {
@@ -901,7 +983,7 @@ private:
         // key not found, so we are now exactly where we want to insert it.
         auto const insertion_idx = idx;
         auto const insertion_info = static_cast<uint8_t>(info);
-        if (lgraph_hood_UNLIKELY(insertion_info + mInfoInc > 0xFF)) {
+        if (mmap_map_UNLIKELY(insertion_info + mInfoInc > 0xFF)) {
             *mMaxNumElementsAllowed = 0;
         }
 
@@ -942,7 +1024,6 @@ public:
 
     explicit unordered_map(std::string_view _map_name)
         : Hash{Hash{}}
-        , KeyEqual{KeyEqual{}}
         , mmap_name{_map_name} {
           std::cout << "constructor " << mmap_name << "\n";
 
@@ -969,6 +1050,9 @@ public:
     void clear() {
 			  if (!loaded) {
 					unlink(mmap_name.c_str());
+          if constexpr (std::is_same<Key, std::string_view>::value) {
+            txt_clear();
+          }
 					return;
 				}
         if (empty()) {
@@ -991,25 +1075,6 @@ public:
     // Destroys the map and all it's contents.
     ~unordered_map() {
         destroy();
-    }
-
-    // Checks if both maps contain the same entries. Order is irrelevant.
-    bool operator==(const unordered_map& other) const {
-        if (other.size() != size()) {
-            return false;
-        }
-        for (auto const& otherEntry : other) {
-            auto const myIt = find(otherEntry.first);
-            if (myIt == end() || !(myIt->second == otherEntry.second)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    bool operator!=(const unordered_map& other) const {
-        return !operator==(other);
     }
 
     mapped_type& operator[](const key_type& key) {
@@ -1163,7 +1228,7 @@ public:
 
         // check while info matches with the source idx
         do {
-            if (info == mInfo[idx] && KeyEqual::operator()(key, mKeyVals[idx].getFirst())) {
+            if (info == mInfo[idx] && equals(key, mKeyVals[idx].getFirst())) {
                 shiftDown(idx);
                 --(*mNumElements);
                 return 1;
@@ -1180,7 +1245,7 @@ public:
         while (calcMaxNumElementsAllowed(newSize) < count && newSize != 0) {
             newSize *= 2;
         }
-        if (lgraph_hood_UNLIKELY(newSize == 0)) {
+        if (mmap_map_UNLIKELY(newSize == 0)) {
             throwOverflowError();
         }
 
@@ -1188,7 +1253,7 @@ public:
     }
 
     void rehash(size_t numBuckets) {
-      if (lgraph_hood_UNLIKELY((numBuckets & (numBuckets - 1)) != 0)) {
+      if (mmap_map_UNLIKELY((numBuckets & (numBuckets - 1)) != 0)) {
         doThrow<std::runtime_error>("rehash only allowed for power of two");
       }
 
@@ -1258,6 +1323,14 @@ public:
         return static_cast<float>(size()) / (*mMask + 1);
     }
 
+    size_t txt_size() const {
+      if constexpr (std::is_same<Key, std::string_view>::value) {
+        return txt_vector.size();
+      }else{
+        return 0;
+      }
+    }
+
 #ifndef NDEBUG
     float conflict_factor() const {
         return static_cast<float>(conflicts) / (*mNumElements + 1);
@@ -1271,11 +1344,24 @@ public:
     }
 
 private:
-    lgraph_hood_NOINLINE void throwOverflowError() const {
-        throw std::overflow_error("lgraph_hood::map overflow");
+    mutable std::vector<std::string> txt_vector;
+    uint32_t txt_get_id(std::string_view txt) {
+      txt_vector.push_back(std::string(txt));
+      return txt_vector.size()-1;
     }
-    lgraph_hood_NOINLINE void report_badhash() const {
-      std::cerr << "lgraph_hood::map FATAL really bad hash function, mmap_name:" << mmap_name << "\n";
+    std::string_view txt_get_txt(uint32_t key_pos) const {
+      assert(key_pos<txt_vector.size());
+      return txt_vector[key_pos];
+    }
+    void txt_clear() const {
+      txt_vector.clear();
+    }
+
+    mmap_map_NOINLINE void throwOverflowError() const {
+        throw std::overflow_error("mmap_map::map overflow");
+    }
+    mmap_map_NOINLINE void report_badhash() const {
+      std::cerr << "mmap_map::map FATAL really bad hash function, mmap_name:" << mmap_name << "\n";
       assert(false);
     }
 
@@ -1290,7 +1376,7 @@ private:
             // while we potentially have a match. Can't do a do-while here because when mInfo is 0
             // we don't want to skip forward
             while (info == mInfo[idx]) {
-                if (KeyEqual::operator()(key, mKeyVals[idx].getFirst())) {
+                if (equals(key, mKeyVals[idx].getFirst())) {
                     // key already exists, do not insert.
                     return mKeyVals[idx].getSecond();
                 }
@@ -1298,7 +1384,7 @@ private:
             }
 
             // unlikely that this evaluates to true
-            if (lgraph_hood_UNLIKELY(*mNumElements >= *mMaxNumElementsAllowed)) {
+            if (mmap_map_UNLIKELY(*mNumElements >= *mMaxNumElementsAllowed)) {
                 increase_size();
                 continue;
             }
@@ -1306,7 +1392,7 @@ private:
             // key not found, so we are now exactly where we want to insert it.
             auto const insertion_idx = idx;
             auto const insertion_info = info;
-            if (lgraph_hood_UNLIKELY(insertion_info + mInfoInc > 0xFF)) {
+            if (mmap_map_UNLIKELY(insertion_info + mInfoInc > 0xFF)) {
                 *mMaxNumElementsAllowed = 0;
             }
 
@@ -1319,13 +1405,26 @@ private:
             if (idx == insertion_idx) {
                 // put at empty spot. This forwards all arguments into the node where the object is
                 // constructed exactly where it is needed.
+              if constexpr (std::is_same<Key, std::string_view>::value) {
+                uint32_t key_pos = txt_get_id(key);
                 ::new (static_cast<void*>(&l))
-                    Node(*this, std::piecewise_construct,
-                         std::forward_as_tuple(std::forward<Arg>(key)), std::forward_as_tuple());
+                  Node(*this, std::piecewise_construct,
+                      std::forward_as_tuple(std::forward<uint32_t>(key_pos)), std::forward_as_tuple());
+              }else{
+                ::new (static_cast<void*>(&l))
+                  Node(*this, std::piecewise_construct,
+                      std::forward_as_tuple(std::forward<Arg>(key)), std::forward_as_tuple());
+              }
             } else {
                 shiftUp(idx, insertion_idx);
-                l = Node(*this, std::piecewise_construct,
-                         std::forward_as_tuple(std::forward<Arg>(key)), std::forward_as_tuple());
+                if constexpr (std::is_same<Key, std::string_view>::value) {
+                  uint32_t key_pos = txt_get_id(key);
+                  l = Node(*this, std::piecewise_construct,
+                      std::forward_as_tuple(std::forward<uint32_t>(key_pos)), std::forward_as_tuple());
+                }else{
+                  l = Node(*this, std::piecewise_construct,
+                      std::forward_as_tuple(std::forward<Arg>(key)), std::forward_as_tuple());
+                }
             }
 
             // mKeyVals[idx].getFirst() = std::move(key);
@@ -1342,12 +1441,16 @@ private:
         while (true) {
             size_t idx;
             InfoType info;
-            keyToIdx(keyval.getFirst(), idx, info);
+            if constexpr (std::is_same<Key, std::string_view>::value) {
+              keyToIdx(txt_get_txt(keyval.getFirst()), idx, info);
+            }else{
+              keyToIdx(keyval.getFirst(), idx, info);
+            }
             nextWhileLess(&info, &idx);
 
             // while we potentially have a match
             while (info == mInfo[idx]) {
-                if (KeyEqual::operator()(keyval.getFirst(), mKeyVals[idx].getFirst())) {
+                if (equals(keyval.getFirst(), mKeyVals[idx].getFirst())) {
                     // key already exists, do NOT insert.
                     // see http://en.cppreference.com/w/cpp/container/unordered_map/insert
                     return std::make_pair<iterator, bool>(iterator(mKeyVals + idx, mInfo + idx),
@@ -1357,7 +1460,7 @@ private:
             }
 
             // unlikely that this evaluates to true
-            if (lgraph_hood_UNLIKELY(*mNumElements >= *mMaxNumElementsAllowed)) {
+            if (mmap_map_UNLIKELY(*mNumElements >= *mMaxNumElementsAllowed)) {
                 increase_size();
                 continue;
             }
@@ -1365,7 +1468,7 @@ private:
             // key not found, so we are now exactly where we want to insert it.
             auto const insertion_idx = idx;
             auto const insertion_info = info;
-            if (lgraph_hood_UNLIKELY(insertion_info + mInfoInc > 0xFF)) {
+            if (mmap_map_UNLIKELY(insertion_info + mInfoInc > 0xFF)) {
                 *mMaxNumElementsAllowed = 0;
             }
 
@@ -1414,7 +1517,7 @@ private:
     }
 
     bool try_increase_info() {
-        lgraph_hood_LOG("mInfoInc=" << mInfoInc << ", numElements=" << mNumElements
+        mmap_map_LOG("mInfoInc=" << mInfoInc << ", numElements=" << mNumElements
                                    << ", maxNumElementsAllowed="
                                    << calcMaxNumElementsAllowed(mMask + 1));
         if (mInfoInc <= 2) {
@@ -1450,7 +1553,7 @@ private:
             return;
         }
 
-        lgraph_hood_LOG("mNumElements=" << *mNumElements << ", maxNumElementsAllowed="
+        mmap_map_LOG("mNumElements=" << *mNumElements << ", maxNumElementsAllowed="
                                        << maxNumElementsAllowed << ", load="
                                        << (static_cast<double>(*mNumElements) * 100.0 /
                                            (static_cast<double>(*mMask) + 1)));
@@ -1481,10 +1584,13 @@ private:
     mutable InfoType mInfoInc;                                                     // 4 byte 44
     mutable InfoType mInfoHashShift;                                               // 4 byte 48
     mutable bool loaded = false;
-    std::string       mmap_name = "invalid";
-    mutable int       mmap_fd   = -1;
-    mutable size_t    mmap_size = 0;
-    mutable uint64_t *mmap_base = 0;
+    std::string       mmap_name     = "invalid";
+    mutable int       mmap_fd       = -1;
+    mutable size_t    mmap_size     = 0;
+    mutable uint64_t *mmap_base     = 0;
+    mutable int       mmap_txt_fd   = -1;
+    mutable size_t    mmap_txt_size = 0;
+    mutable uint64_t *mmap_txt_base = 0;
     inline static std::queue<std::function<void(void)>> gc_queue;
 #ifndef NDEBUG
     size_t conflicts = 0;
@@ -1493,11 +1599,10 @@ private:
 
 } // namespace detail
 
-template <typename Key, typename T, typename Hash = hash<Key>,
-          typename KeyEqual = std::equal_to<Key>, size_t MaxLoadFactor100 = 80>
-using unordered_map = detail::unordered_map<MaxLoadFactor100, Key, T, Hash, KeyEqual>;
+template <typename Key, typename T, typename Hash = hash<Key>, size_t MaxLoadFactor100 = 80>
+using unordered_map = detail::unordered_map<MaxLoadFactor100, Key, T, Hash>;
 
 
-} // namespace lgraph_hood
+} // namespace mmap_map
 
 

@@ -1030,7 +1030,7 @@ private:
             if (info == mInfo[idx] && KeyEqual::operator()(key, mKeyVals[idx].getFirst())) {
                 return idx;
             }
-           next(&info, &idx);
+            next(&info, &idx);
         } while (info <= mInfo[idx]);
 
         // nothing found!

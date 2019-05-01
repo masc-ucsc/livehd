@@ -6,14 +6,14 @@
 #include "fmt/format.h"
 
 #include "absl/container/flat_hash_map.h"
-#include "lgraph_hood.hpp"
+#include "mmap_map.hpp"
 #include "rng.hpp"
 
 using testing::HasSubstr;
 
 unsigned int rseed = 123;
 
-class Setup_robin_test : public ::testing::Test {
+class Setup_mmap_map_test : public ::testing::Test {
 protected:
 
   void SetUp() override {
@@ -23,7 +23,8 @@ protected:
   }
 };
 
-TEST_F(Setup_robin_test, big_entry) {
+TEST_F(Setup_mmap_map_test, big_entry) {
+	return;
   Rng rng(123);
 
   struct Big_entry {
@@ -39,7 +40,7 @@ TEST_F(Setup_robin_test, big_entry) {
     }
   };
 
-  lgraph_hood::unordered_map<uint32_t,Big_entry> map("robin_test_se");
+  mmap_map::unordered_map<uint32_t,Big_entry> map("mmap_map_test_se");
   absl::flat_hash_map<uint32_t,Big_entry> map2;
 	auto cap = map.capacity();
 
@@ -141,7 +142,7 @@ public:
   };
 };
 
-namespace lgraph_hood {
+namespace mmap_map {
 template <>
 struct hash<Big_entry> {
   size_t operator()(Big_entry const &o) const {
@@ -154,10 +155,11 @@ struct hash<Big_entry> {
 };
 }
 
-TEST_F(Setup_robin_test, big_key) {
+TEST_F(Setup_mmap_map_test, big_key) {
+	return;
   Rng rng(123);
 
-  lgraph_hood::unordered_map<Big_entry,uint32_t> map("robin_test_be");
+  mmap_map::unordered_map<Big_entry,uint32_t> map("mmap_map_test_be");
 	map.clear(); // Remove data from previous runs
   absl::flat_hash_map<Big_entry, uint32_t> map2;
 
@@ -190,5 +192,40 @@ TEST_F(Setup_robin_test, big_key) {
   EXPECT_EQ(conta,0);
 
   fmt::print("load_factor:{} conflict_factor:{}\n",map.load_factor(), map.conflict_factor());
+}
+
+TEST_F(Setup_mmap_map_test, string_index) {
+  Rng rng(123);
+
+  mmap_map::unordered_map<std::string_view,uint32_t> map("mmap_map_test_str");
+	map.clear();
+  absl::flat_hash_map<std::string, uint32_t> map2;
+
+  int conta = 0;
+  for(int i=0;i<10000;i++) {
+    int sz = rng.uniform<int>(0xFFFF);
+		std::string_view key = std::to_string(sz) + "foo";
+
+		if (map.has(key)) {
+			EXPECT_EQ(map2.count(key),1);
+			continue;
+		}
+
+		conta++;
+		map[key] = sz;
+
+		EXPECT_EQ(map2.count(key),0);
+		map2[key] = sz;
+	}
+
+  for(auto it:map) {
+		(void)it;
+    //EXPECT_EQ(it.first, std::to_string(it.second) + "foo");
+    conta--;
+  }
+
+  EXPECT_EQ(conta,0);
+
+  fmt::print("load_factor:{} conflict_factor:{} txt_size:{}\n",map.load_factor(), map.conflict_factor(),map.txt_size());
 }
 
