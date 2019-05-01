@@ -1,5 +1,6 @@
 #!/bin/bash
 rm -f *.cfg
+~/pyrope/parser/bin/prp sp_punch.prp       > yyy && column -t yyy > xxx && rm -f yyy && mv xxx sp_punch.cfg
 ~/pyrope/parser/bin/prp sp_and.prp         > yyy && column -t yyy > xxx && rm -f yyy && mv xxx sp_and.cfg
 ~/pyrope/parser/bin/prp for.prp            > yyy && column -t yyy > xxx && rm -f yyy && mv xxx for.cfg
 ~/pyrope/parser/bin/prp rca.prp            > yyy && column -t yyy > xxx && rm -f yyy && mv xxx rca.cfg
