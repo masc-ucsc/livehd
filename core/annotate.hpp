@@ -20,7 +20,6 @@ struct Ann_name {
   static constexpr char nodeplace[] = "nodeplace";
   static constexpr char cfgmeta[]   = "cfgmeta";
   static constexpr char bitwidth[]  = "bitwidth";
-  static constexpr char delay[]     = "delay";
   static constexpr char file_loc[]  = "file_loc";
 };
 

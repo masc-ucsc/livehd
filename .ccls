@@ -18,6 +18,7 @@ clang
 -Iinou/sat
 -Iinou/cfg
 -Ieprp
--Ilmms/include
+-Immap_map/include
+-Immap_map/tests
 -Ibench/include
 
