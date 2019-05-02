@@ -31,6 +31,7 @@ protected:
   void cfg_2_dfg(LGraph *cfg, LGraph *dfg);
 
 private:
+  int  mux_cnt;
   Node find_cfg_root(LGraph *cfg);
   Node get_cfg_child(LGraph *cfg, const Node& cfg_node);
   Node process_cfg(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, const Node& top_node);
@@ -109,7 +110,7 @@ private:
   constexpr bool is_binary_op (std::string_view v) const {return  (v == "&&")  || (v == "||") || (v == "&") ||
                                                                   (v == "|")   || (v == "+")  || (v == "-") ||
                                                                   (v == "*")   || (v == "==") || (v == ">") ||
-                                                                  (v == "<")   || (v == "<=") ;}
+                                                                  (v == "<")   || (v == "<=") || (v == "^");}
 
   Node_pin create_register     (LGraph *g, Aux_tree *aux_tree, std::string_view var_name);
   Node_pin create_input        (LGraph *g, Aux_tree *aux_tree, std::string_view var_name, uint16_t bits = 0);

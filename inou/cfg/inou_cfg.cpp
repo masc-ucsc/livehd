@@ -12,7 +12,6 @@
 #include <algorithm>
 #include <string>
 #include <vector>
-#include <regex>
 
 #include "cfg_node_data.hpp"
 #include "inou_cfg.hpp"
@@ -229,7 +228,7 @@ void Inou_cfg::build_graph(std::vector<std::string> &words, std::string &dfg_dat
     name2node[w1st].set_type(CfgAssign_Op);
   }
 
-  name2node[w1st].set_name(CFG_Node_Data(dfg_data).encode());
+  name2node[w1st].set_name(CFG_Node_Data(dfg_data).encode().c_str());
   fmt::print("node:{}, data:{}\n", w1st, CFG_Node_Data(dfg_data).encode().c_str());
 
 
