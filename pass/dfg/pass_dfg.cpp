@@ -390,6 +390,11 @@ Node Pass_dfg::process_node(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, const 
 
 void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data) {
   // for func_call, all the node should be created before, you just connect them. No need to create target node
+
+  const auto& target    = data.get_target();
+  const auto& operands  = data.get_operands(); //return strings
+  auto        op        = data.get_operator();
+
   //const auto &target    = data.get_target();
   //const auto &operands     = data.get_operands();
   //const auto &oprd_nodes  = process_operands(dfg, aux_tree, data); // all operands should be in auxtab, just retrieve oprd_nodes
