@@ -12,13 +12,8 @@ protected:
 
   static void work(Eprp_var &var);
 
-  //Temporary debug
-  void list_cells(LGraph *g);             // To be removed later
-  void example_ot();
-
-// Methods to use finally
   void read_file();
-  void build_circuit();
+  void build_circuit(LGraph *g);
   void compute_timing();
   void populate_table();
 
