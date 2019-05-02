@@ -167,8 +167,8 @@ protected:
   bool debug_unconsume();
   bool debug_consume();
   bool go_back(int num_tok);
-  void go_up(int num_levels);
-  void consume_block(Rule_id rid, int num_tok);
+  void debug_up(Rule_id rid);
+  void debug_down();
   
   void ast_handler();
   void process_ast();

@@ -138,10 +138,9 @@ public:
     std::vector<std::string_view> tree_traversal_tokens;
     std::vector<std::string> tree_traversal_rules;
   };
-  Prp_test_class scanner;
 };
 
-TEST_F(Prp_test, assignment_expression) {
+/*TEST_F(Prp_test, assignment_expression0) {
   std::vector<std::string_view> tree_traversal_check_tokens;
   std::vector<std::string> tree_traversal_check_rules;
   
@@ -151,6 +150,8 @@ TEST_F(Prp_test, assignment_expression) {
   tree_traversal_check_tokens.push_back("\%out");
   tree_traversal_check_tokens.push_back("=");
   tree_traversal_check_tokens.push_back(""); // logical expression
+  tree_traversal_check_tokens.push_back(""); // relational expression
+  tree_traversal_check_tokens.push_back(""); // additive expression
   tree_traversal_check_tokens.push_back("b");
   tree_traversal_check_tokens.push_back("+");
   tree_traversal_check_tokens.push_back("c");
@@ -161,13 +162,60 @@ TEST_F(Prp_test, assignment_expression) {
   tree_traversal_check_rules.push_back("Identifier");
   tree_traversal_check_rules.push_back("Assignment operator");
   tree_traversal_check_rules.push_back("Logical expression");
+  tree_traversal_check_rules.push_back("Relational expression");
+  tree_traversal_check_rules.push_back("Additive expression");
   tree_traversal_check_rules.push_back("Identifier");
   tree_traversal_check_rules.push_back("Additive expression");
   tree_traversal_check_rules.push_back("Identifier");
   
   std::string_view parse_txt("\%out=b+c\n");
-    
-  scanner.parse("assignment_expression", parse_txt.data(), 1);
+  
+  scanner.parse("assignment_expression0", parse_txt.data(), 1);
+  EXPECT_EQ(tree_traversal_check_tokens, scanner.tree_traversal_tokens);
+  EXPECT_EQ(tree_traversal_check_rules, scanner.tree_traversal_rules);
+}*/
+
+TEST_F(Prp_test, assignment_expression1){
+  Prp_test_class scanner;
+  
+  std::vector<std::string_view> tree_traversal_check_tokens;
+  std::vector<std::string> tree_traversal_check_rules;
+  
+  tree_traversal_check_tokens.push_back(""); // program
+  tree_traversal_check_tokens.push_back(""); // top level
+  tree_traversal_check_tokens.push_back(""); // assignment expression
+  tree_traversal_check_tokens.push_back("\%out");
+  tree_traversal_check_tokens.push_back("as");
+  tree_traversal_check_tokens.push_back(""); // logical expression
+  tree_traversal_check_tokens.push_back(""); // relational expression
+  tree_traversal_check_tokens.push_back(""); // additive expression
+  tree_traversal_check_tokens.push_back(""); // bitwise expression
+  tree_traversal_check_tokens.push_back(""); // tuple_notation
+  tree_traversal_check_tokens.push_back("(");
+  tree_traversal_check_tokens.push_back(""); // rhs_expression_property
+  tree_traversal_check_rules.push_back("__bits:");
+  tree_traversal_check_rules.push_back("8");
+  tree_traversal_check_rules.push_back(")");
+  
+  tree_traversal_check_rules.push_back("Program");
+  tree_traversal_check_rules.push_back("Top level");
+  tree_traversal_check_rules.push_back("Assignment expression");
+  tree_traversal_check_rules.push_back("Identifier");
+  tree_traversal_check_rules.push_back("Assignment operator");
+  tree_traversal_check_rules.push_back("Logical expression");
+  tree_traversal_check_rules.push_back("Relational expression");
+  tree_traversal_check_rules.push_back("Additive expression");
+  tree_traversal_check_rules.push_back("Bitwise expression");
+  tree_traversal_check_rules.push_back("Tuple notation");
+  tree_traversal_check_rules.push_back("Tuple notation");
+  tree_traversal_check_rules.push_back("RHS expression property");
+  tree_traversal_check_rules.push_back("Identifier");
+  tree_traversal_check_rules.push_back("Constant");
+  tree_traversal_check_rules.push_back("Tuple notation");
+  
+  std::string_view parse_txt("\%out as (__bits:8)\n");
+  
+  scanner.parse("assignment_expression1", parse_txt.data(), 1);
   EXPECT_EQ(tree_traversal_check_tokens, scanner.tree_traversal_tokens);
   EXPECT_EQ(tree_traversal_check_rules, scanner.tree_traversal_rules);
 }
