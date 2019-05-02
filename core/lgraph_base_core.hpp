@@ -7,7 +7,6 @@
 
 #include "fmt/format.h"
 
-#include "char_array.hpp"
 #include "dense.hpp"
 #include "explicit_type.hpp"
 #include "iassert.hpp"

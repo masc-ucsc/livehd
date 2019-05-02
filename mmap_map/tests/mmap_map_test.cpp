@@ -23,8 +23,60 @@ protected:
   }
 };
 
+TEST_F(Setup_mmap_map_test, string_index) {
+  Rng rng(123);
+
+  bool zero_found = false;
+  while(!zero_found) {
+    mmap_map::unordered_map<std::string_view,uint32_t> map;
+    map.clear();
+    absl::flat_hash_map<std::string, uint32_t> map2;
+
+    int conta = 0;
+    for(int i=0;i<10000;i++) {
+      int sz = rng.uniform<int>(0xFFFF);
+      std::string sz_str = std::to_string(sz)+"foo";
+      std::string_view key{sz_str};
+
+      if (map.has(key)) {
+        EXPECT_EQ(map2.count(key),1);
+        continue;
+      }
+
+      conta++;
+
+      EXPECT_TRUE(!map.has(key));
+      map[key] = sz;
+      EXPECT_TRUE(map.has(key));
+
+      EXPECT_EQ(map2.count(key),0);
+      map2[key] = sz;
+      EXPECT_EQ(map2.count(key),1);
+    }
+
+    for(auto it:map) {
+      (void)it;
+      if(it.getFirst() == 0)
+        zero_found = true;
+
+      EXPECT_EQ(map.get_sview(it), std::to_string(it.second) + "foo");
+      EXPECT_EQ(map2.count(map.get_sview(it)), 1);
+      conta--;
+    }
+    for(auto it:map2) {
+      (map.has(it.first));
+      if (!map.has(it.first))
+        fmt::print("bug bug\n");
+      EXPECT_TRUE(map.has(it.first));
+    }
+
+    EXPECT_EQ(conta,0);
+
+    fmt::print("load_factor:{} conflict_factor:{} txt_size:{}\n",map.load_factor(), map.conflict_factor(),map.txt_size());
+  }
+}
+
 TEST_F(Setup_mmap_map_test, big_entry) {
-	return;
   Rng rng(123);
 
   struct Big_entry {
@@ -156,7 +208,6 @@ struct hash<Big_entry> {
 }
 
 TEST_F(Setup_mmap_map_test, big_key) {
-	return;
   Rng rng(123);
 
   mmap_map::unordered_map<Big_entry,uint32_t> map("mmap_map_test_be");
@@ -192,40 +243,5 @@ TEST_F(Setup_mmap_map_test, big_key) {
   EXPECT_EQ(conta,0);
 
   fmt::print("load_factor:{} conflict_factor:{}\n",map.load_factor(), map.conflict_factor());
-}
-
-TEST_F(Setup_mmap_map_test, string_index) {
-  Rng rng(123);
-
-  mmap_map::unordered_map<std::string_view,uint32_t> map("mmap_map_test_str");
-	map.clear();
-  absl::flat_hash_map<std::string, uint32_t> map2;
-
-  int conta = 0;
-  for(int i=0;i<10000;i++) {
-    int sz = rng.uniform<int>(0xFFFF);
-		std::string_view key = std::to_string(sz) + "foo";
-
-		if (map.has(key)) {
-			EXPECT_EQ(map2.count(key),1);
-			continue;
-		}
-
-		conta++;
-		map[key] = sz;
-
-		EXPECT_EQ(map2.count(key),0);
-		map2[key] = sz;
-	}
-
-  for(auto it:map) {
-		(void)it;
-    //EXPECT_EQ(it.first, std::to_string(it.second) + "foo");
-    conta--;
-  }
-
-  EXPECT_EQ(conta,0);
-
-  fmt::print("load_factor:{} conflict_factor:{} txt_size:{}\n",map.load_factor(), map.conflict_factor(),map.txt_size());
 }
 

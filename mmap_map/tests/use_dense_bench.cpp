@@ -18,7 +18,7 @@
 
 using Rng = sfc64;
 
-#define NITERS 1000
+#define NITERS 100
 #define NIT 2
 
 void use_std_vector(int max) {
@@ -78,7 +78,7 @@ void use_lgraph_map(int max) {
 
   LGBench b("mmap_map " + std::to_string(max));
 
-  mmap_map::unordered_map<uint32_t,uint32_t> map("use_dense_bench_mmap_map");
+  mmap_map::unordered_map<uint32_t,uint32_t> map; // Annonymous (no file backup)
   map.clear();
 
   for (int n = 1; n < NITERS; ++n) {
@@ -99,6 +99,7 @@ void use_lgraph_map(int max) {
   }
 
   fmt::print("load factor {}\n", map.load_factor());
+  assert(map.load_factor()>0.2); // Weird bug otherwise
 }
 
 void use_abseil_map(int max) {

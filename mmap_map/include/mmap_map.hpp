@@ -676,25 +676,31 @@ private:
 	}
 
 	std::tuple<uint64_t *, size_t> create_mmap(int fd, size_t size) const {
-		struct stat s;
-		int status = fstat(fd, &s);
-		if (status < 0) {
-			std::cerr << "mmap_map::reload ERROR Could not check file status " << mmap_name << std::endl;
-			exit(-3);
-		}
-		if (s.st_size <= size) {
-			int ret = ftruncate(fd, size);
-			if (ret<0) {
-				std::cerr << "mmap_map::reload ERROR ftruncate could not resize  " << mmap_name << " to " << size << "\n";
-				exit(-1);
-			}
-		}else{
-			size = s.st_size;
-		}
+    void *base;
 
-		//void *base = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0); no superpages
-		void *base = mmap(0, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, fd, 0);
-		if(base == MAP_FAILED) {
+    if (fd < 0) {
+      base = mmap(0, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, fd, 0); // superpages
+    }else{
+      struct stat s;
+      int status = fstat(fd, &s);
+      if (status < 0) {
+        std::cerr << "mmap_map::reload ERROR Could not check file status " << mmap_name << std::endl;
+        exit(-3);
+      }
+      if (s.st_size <= size) {
+        int ret = ftruncate(fd, size);
+        if (ret<0) {
+          std::cerr << "mmap_map::reload ERROR ftruncate could not resize  " << mmap_name << " to " << size << "\n";
+          exit(-1);
+        }
+      } else {
+        size = s.st_size;
+      }
+
+      base = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0); // no superpages
+    }
+
+    if(base == MAP_FAILED) {
 			std::cerr << "mmap_map::reload ERROR mmap could not adjust\n";
 			exit(-1);
 		}
@@ -702,34 +708,47 @@ private:
 		return std::make_tuple(reinterpret_cast<uint64_t *>(base),size);
 	}
 
-	void setup_mmap(size_t n_entries) const {
+  void try_reclaim_mmaps() const {
+    while(!gc_queue.empty()) {
+      auto func = gc_queue.front();
+      gc_queue.pop();
+      func();
+    }
+  }
 
-		mmap_fd = open(mmap_name.c_str(), O_RDWR | O_CREAT, 0644);
-		if (mmap_fd<0) {
-			// Time to garbage collect mmaps/file_descriptors
-			while(!gc_queue.empty()) {
-				auto func = gc_queue.front();
-				gc_queue.pop();
-				func();
-			}
+  void setup_mmap(size_t n_entries) const {
 
-			mmap_fd = open(mmap_name.c_str(), O_RDWR | O_CREAT, 0644);
-			if (mmap_fd<0) {
-				std::cerr << "mmap_map::reload ERROR failed to setup " << mmap_name << std::endl;
-				exit(-4);
-			}
-		}
+    if (mmap_name.empty()) {
+      mmap_fd     = -1;
+      mmap_txt_fd = -1;
+    }else{
+      mmap_fd = open(mmap_name.c_str(), O_RDWR | O_CREAT, 0644);
+      if (mmap_fd<0) {
+        try_reclaim_mmaps();
 
-		mmap_txt_fd = open((mmap_name + "txt").c_str(), O_RDWR | O_CREAT, 0644);
-		if (mmap_txt_fd<0) {
-			std::cerr << "mmap_map::reload ERROR failed to setup " << mmap_name << "txt\n";
-			exit(-4);
-		}
+        mmap_fd = open(mmap_name.c_str(), O_RDWR | O_CREAT, 0644);
+        if (mmap_fd<0) {
+          std::cerr << "mmap_map::reload ERROR failed to setup " << mmap_name << std::endl;
+          exit(-4);
+        }
+      }
 
-		std::tie(mmap_base    , mmap_size    ) = create_mmap(mmap_fd,calc_mmap_size(n_entries));
-		std::tie(mmap_txt_base, mmap_txt_size) = create_mmap(mmap_txt_fd,8192);
+      mmap_txt_fd = open((mmap_name + "txt").c_str(), O_RDWR | O_CREAT, 0644);
+      if (mmap_txt_fd < 0) {
+        try_reclaim_mmaps();
 
-		mNumElements           = &mmap_base[0];
+        mmap_txt_fd = open((mmap_name + "txt").c_str(), O_RDWR | O_CREAT, 0644);
+        if (mmap_txt_fd < 0) {
+          std::cerr << "mmap_map::reload ERROR failed to setup " << mmap_name << "txt\n";
+          exit(-4);
+        }
+      }
+    }
+
+    std::tie(mmap_base    , mmap_size    ) = create_mmap(mmap_fd    , calc_mmap_size(n_entries));
+    std::tie(mmap_txt_base, mmap_txt_size) = create_mmap(mmap_txt_fd, 8192);
+
+    mNumElements           = &mmap_base[0];
 		mMask                  = &mmap_base[1];
 		mMaxNumElementsAllowed = &mmap_base[2];
 
@@ -767,7 +786,7 @@ private:
 	// highly performance relevant code.
 	// Lower bits are used for indexing into the array (2^n size)
 	// The upper 1-5 bits need to be a reasonable good hash, to save comparisons.
-	void keyToIdx(const Key &key, size_t& idx, InfoType& info) const {
+	void keyToIdx(const Key &key, int& idx, InfoType& info) const {
 		static constexpr size_t bad_hash_prevention =
 			std::is_same<::mmap_map::hash<key_type>, hasher>::value
 			? 1
@@ -780,27 +799,29 @@ private:
 		idx = Hash::operator()(key) * bad_hash_prevention;
 		info = static_cast<InfoType>(mInfoInc + static_cast<InfoType>(idx >> mInfoHashShift));
 		idx &= *mMask;
-		if (idx==0)
-			idx = 1;
 	}
 
 	// forwards the index by one, wrapping around at the end
-	void next(InfoType* info, size_t* idx) const {
-		*idx = (*idx + 1) & *mMask;
-		*info = static_cast<InfoType>(*info + mInfoInc);
+	inline int next_idx(int idx) const {
+		idx = (idx + 1) & *mMask;
+    return idx;
+	}
+	inline InfoType next_info(InfoType info) const {
+		return static_cast<InfoType>(info + mInfoInc);
 	}
 
-	void nextWhileLess(InfoType* info, size_t* idx) const {
+	void nextWhileLess(InfoType* info, int* idx) const {
 		// unrolling this by hand did not bring any speedups.
 		while (*info < mInfo[*idx]) {
-			next(info, idx);
+			*idx  = next_idx(*idx);
+			*info = next_info(*info);
 		}
 	}
 
 	// Shift everything up by one element. Tries to move stuff around.
 	// True if some shifting has occured (entry under idx is a constructed object)
 	// Fals if no shift has occured (entry under idx is unconstructed memory)
-	void shiftUp(size_t idx, size_t const insertion_idx) {
+	void shiftUp(int idx, int const insertion_idx) {
 #if 0
 		if (mmap_map_LIKELY(idx>insertion_idx)) {
 			memmove(&mKeyVals[insertion_idx+1],&mKeyVals[insertion_idx],(idx-insertion_idx)*sizeof(Node));
@@ -815,7 +836,7 @@ private:
 		}
 #endif
 		while (idx != insertion_idx) {
-			size_t prev_idx = (idx - 1) & *mMask;
+			unsigned int prev_idx = (idx - 1) & *mMask;
 #if 0
 			::memcpy(&mKeyVals[idx],&mKeyVals[prev_idx],sizeof(Node));
 #else
@@ -833,18 +854,19 @@ private:
 		}
 	}
 
-	void shiftDown(size_t idx) {
+	void shiftDown(int idx) {
 		// until we find one that is either empty or has zero offset.
 		// TODO we don't need to move everything, just the last one for the same bucket.
 		mKeyVals[idx].destroy(*this);
 
 		// until we find one that is either empty or has zero offset.
-		size_t nextIdx = (idx + 1) & *mMask;
+		auto nextIdx = next_idx(idx);
+
 		while (mInfo[nextIdx] >= 2 * mInfoInc) {
 			mInfo[idx] = static_cast<uint8_t>(mInfo[nextIdx] - mInfoInc);
 			mKeyVals[idx] = std::move(mKeyVals[nextIdx]);
 			idx = nextIdx;
-			nextIdx = (idx + 1) & *mMask;
+			nextIdx = next_idx(idx);
 		}
 
 		mInfo[idx] = 0;
@@ -864,27 +886,27 @@ private:
 
 	// copy of find(), except that it returns iterator instead of const_iterator.
 	template <typename Other>
-		size_t findIdx(Other const& key) const {
-			size_t idx;
+		int findIdx(Other const& key) const {
+			int idx;
 			InfoType info;
 			keyToIdx(key, idx, info);
 
 			do {
 				// unrolling this twice gives a bit of a speedup. More unrolling did not help.
 				if (info == mInfo[idx] && equals(key, mKeyVals[idx].getFirst())) {
-					assert(idx);
 					return idx;
 				}
-				next(&info, &idx);
+				idx  = next_idx(idx);
+				info = next_info(info);
 				if (info == mInfo[idx] && equals(key, mKeyVals[idx].getFirst())) {
-					assert(idx);
 					return idx;
 				}
-				next(&info, &idx);
+				idx  = next_idx(idx);
+				info = next_info(info);
 			} while (info <= mInfo[idx]);
 
 			// nothing found!
-			return 0; //*mMask == 0 ? 0 : *mMask + 1;
+			return -1; //*mMask == 0 ? 0 : *mMask + 1;
 		}
 
 	// inserts a keyval that is guaranteed to be new, e.g. when the hashmap is resized.
@@ -896,7 +918,7 @@ private:
 			report_badhash();
 		}
 
-		size_t idx;
+		int idx;
 		InfoType info;
 		if constexpr (std::is_same<Key, std::string_view>::value) {
 			keyToIdx(get_sview(keyval.getFirst()), idx, info);
@@ -906,8 +928,8 @@ private:
 
 		// skip forward. Use <= because we are certain that the element is not there.
 		while (info <= mInfo[idx]) {
-			idx = (idx + 1) & *mMask;
-			info = static_cast<InfoType>(info + mInfoInc);
+			idx = next_idx(idx);
+      info = next_info(info);
 		}
 
 		// key not found, so we are now exactly where we want to insert it.
@@ -919,7 +941,8 @@ private:
 
 		// find an empty spot
 		while (0 != mInfo[idx]) {
-			next(&info, &idx);
+      idx  = next_idx(idx);
+      info = next_info(info);
 #ifndef NDEBUG
 			conflicts++;
 #endif
@@ -954,8 +977,23 @@ public:
 
 	explicit unordered_map(std::string_view _map_name)
 		: Hash{Hash{}}
-	, mmap_name{_map_name} {
-		std::cout << "constructor " << mmap_name << "\n";
+	  , mmap_name{_map_name} {
+
+		static size_t static_mNumElements           = 0;
+		static size_t static_mMask                  = 0;
+		static size_t static_mMaxNumElementsAllowed = 0;
+
+		assert(static_mMask==0);
+
+		mNumElements           = &static_mNumElements;
+		mMask                  = &static_mMask;
+		mMaxNumElementsAllowed = &static_mMaxNumElementsAllowed;
+		mInfoInc               = InitialInfoInc;
+		mInfoHashShift         = InitialInfoHashShift;
+	}
+
+	explicit unordered_map()
+		: Hash{Hash{}} {
 
 		static size_t static_mNumElements           = 0;
 		static size_t static_mMask                  = 0;
@@ -1013,9 +1051,11 @@ public:
 		return doCreateByKey(key);
 	}
 
+#if 0
 	mapped_type& operator[](key_type&& key) {
 		return doCreateByKey(std::move(key));
 	}
+#endif
 
 	template <typename Iter>
 		void insert(Iter first, Iter last) {
@@ -1046,7 +1086,7 @@ public:
 
 	// Returns 1 if key is found, 0 otherwise.
 	bool has(const key_type& key) const {
-		return findIdx(key);
+		return findIdx(key)>=0;
 	}
 
 	// Returns a reference to the value found for key.
@@ -1074,24 +1114,24 @@ public:
 	}
 
 	const_iterator find(const key_type& key) const {
-		const size_t idx = findIdx(key);
+		const auto idx = findIdx(key);
 		return const_iterator{mKeyVals + idx, mInfo + idx};
 	}
 
 	template <typename OtherKey>
 		const_iterator find(const OtherKey& key, is_transparent_tag /*unused*/) const {
-			const size_t idx = findIdx(key);
+			const auto idx = findIdx(key);
 			return const_iterator{mKeyVals + idx, mInfo + idx};
 		}
 
 	iterator find(const key_type& key) {
-		const size_t idx = findIdx(key);
+		const auto idx = findIdx(key);
 		return iterator{mKeyVals + idx, mInfo + idx};
 	}
 
 	template <typename OtherKey>
 		iterator find(const OtherKey& key, is_transparent_tag /*unused*/) {
-			const size_t idx = findIdx(key);
+			const auto idx = findIdx(key);
 			return iterator{mKeyVals + idx, mInfo + idx};
 		}
 
@@ -1154,7 +1194,7 @@ public:
 	}
 
 	size_t erase(const key_type& key) {
-		size_t idx;
+		int idx;
 		InfoType info;
 		keyToIdx(key, idx, info);
 
@@ -1165,7 +1205,8 @@ public:
 				--(*mNumElements);
 				return 1;
 			}
-			next(&info, &idx);
+      idx  = next_idx(idx);
+      info = next_info(info);
 		} while (info <= mInfo[idx]);
 
 		// nothing found to delete
@@ -1209,7 +1250,7 @@ public:
 		assert(*mMask == numBuckets - 1);
 		assert(*mMaxNumElementsAllowed == calcMaxNumElementsAllowed(numBuckets));
 
-		std::cout << "resize sz:" << numBuckets << " mmap_name:" << mmap_name << "\n";
+		//std::cout << "resize sz:" << numBuckets << " mmap_name:" << mmap_name << "\n";
 
 		for (size_t i = 0; i < oldMaxElements; ++i) {
 			if (oldInfo[i] != 0) {
@@ -1273,7 +1314,7 @@ public:
 		return *mMask;
 	}
 
-	std::string_view get_sview(iterator it) const {
+	std::string_view get_sview(const value_type it) const {
 		if (mmap_map_UNLIKELY(!loaded)) {
 			reload();
 		}
@@ -1283,7 +1324,8 @@ public:
 private:
 	mutable std::vector<std::string> txt_vector;
 	uint32_t allocate_sview_id(std::string_view txt) {
-		txt_vector.push_back(std::string(txt));
+    std::string s(txt);
+		txt_vector.push_back(s);
 		return txt_vector.size()-1;
 	}
 	std::string_view get_sview(uint32_t key_pos) const {
@@ -1305,7 +1347,7 @@ private:
 	template <typename Arg>
 		mapped_type& doCreateByKey(Arg&& key) {
 			while (true) {
-				size_t idx;
+				int idx;
 				InfoType info;
 				keyToIdx(key, idx, info);
 				nextWhileLess(&info, &idx);
@@ -1317,7 +1359,8 @@ private:
 						// key already exists, do not insert.
 						return mKeyVals[idx].getSecond();
 					}
-					next(&info, &idx);
+          idx  = next_idx(idx);
+          info = next_info(info);
 				}
 
 				// unlikely that this evaluates to true
@@ -1335,7 +1378,8 @@ private:
 
 				// find an empty spot
 				while (0 != mInfo[idx]) {
-					next(&info, &idx);
+          idx  = next_idx(idx);
+          info = next_info(info);
 				}
 
 				auto& l = mKeyVals[insertion_idx];
@@ -1368,6 +1412,7 @@ private:
 				mInfo[insertion_idx] = static_cast<uint8_t>(insertion_info);
 
 				++(*mNumElements);
+
 				return mKeyVals[insertion_idx].getSecond();
 			}
 		}
@@ -1376,7 +1421,7 @@ private:
 	template <typename Arg>
 		std::pair<iterator, bool> doInsert(Arg&& keyval) {
 			while (true) {
-				size_t idx;
+				int idx;
 				InfoType info;
 				if constexpr (std::is_same<Key, std::string_view>::value) {
 					keyToIdx(get_sview(keyval.getFirst()), idx, info);
@@ -1393,7 +1438,8 @@ private:
 						return std::make_pair<iterator, bool>(iterator(mKeyVals + idx, mInfo + idx),
 								false);
 					}
-					next(&info, &idx);
+          idx  = next_idx(idx);
+          info = next_info(info);
 				}
 
 				// unlikely that this evaluates to true
@@ -1411,7 +1457,8 @@ private:
 
 				// find an empty spot
 				while (0 != mInfo[idx]) {
-					next(&info, &idx);
+          idx  = next_idx(idx);
+          info = next_info(info);
 #ifndef NDEBUG
 					conflicts++;
 #endif
@@ -1480,7 +1527,6 @@ private:
 	void increase_size() {
 		// nothing allocated yet? just allocate InitialNumElements
 		if (0 == *mMask) {
-			std::cout << "initial sz: mmap_name:" << mmap_name << "\n";
 			reload();
 			return;
 		}
@@ -1514,10 +1560,10 @@ private:
 
 	// members are sorted so no padding occurs
 	mutable Node *mKeyVals = reinterpret_cast<Node*>(&mInfoInc);
-	__restrict__ mutable uint8_t *mInfo = reinterpret_cast<uint8_t*>(&mInfoInc);
-	__restrict__ mutable size_t *mNumElements;                                                   // 8 byte 24
-	__restrict__ mutable size_t *mMask;                                                          // 8 byte 32
-	__restrict__ mutable size_t *mMaxNumElementsAllowed;                                         // 8 byte 40
+	mutable uint8_t *mInfo = reinterpret_cast<uint8_t*>(&mInfoInc);
+	mutable size_t *mNumElements;                                                   // 8 byte 24
+	mutable size_t *mMask;                                                          // 8 byte 32
+	mutable size_t *mMaxNumElementsAllowed;                                         // 8 byte 40
 	mutable InfoType mInfoInc;                                                     // 4 byte 44
 	mutable InfoType mInfoHashShift;                                               // 4 byte 48
 	mutable bool loaded = false;

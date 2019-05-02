@@ -1,3 +1,7 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
+#pragma once
+
 #include "attribute.hpp"
 #include "lgraph.hpp"
 
@@ -36,7 +40,7 @@ class Attribute_data {
 
   static void setup_table(LGraph *lg) {
     last_lg   = lg;
-    size_t pos = lg->get_lgid().value;
+    auto pos = lg->get_lgid().value;
     if (!is_invalid(pos)) {
       last_attr = table[pos];
       return;

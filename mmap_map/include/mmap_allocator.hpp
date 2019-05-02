@@ -204,8 +204,8 @@ protected:
         }
       }
 
-      //mmap_base = reinterpret_cast<uint64_t *>(mmap(0, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, mmap_fd, 0)); no superpages
-      mmap_base = reinterpret_cast<uint64_t *>(mmap(0, mmap_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, mmap_fd, 0));
+      mmap_base = reinterpret_cast<uint64_t *>(mmap(0, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, mmap_fd, 0)); //no superpages
+      //mmap_base = reinterpret_cast<uint64_t *>(mmap(0, mmap_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, mmap_fd, 0));
       if(mmap_base == MAP_FAILED) {
         std::cerr << "ERROR: mmap could not adjust\n";
         mmap_base = 0;

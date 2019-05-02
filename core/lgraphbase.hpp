@@ -8,7 +8,6 @@
 
 #include "dense.hpp"
 #include "iassert.hpp"
-#include "char_array.hpp"
 #include "lgraph_base_core.hpp"
 #include "lgedge.hpp"
 
