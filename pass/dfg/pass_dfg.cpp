@@ -542,8 +542,8 @@ void Pass_dfg::process_connections(LGraph *dfg, const std::vector<Node_pin> &dpi
       (ntype == GreaterEqualThan_Op && i == 0) ? (uint16_t)0 :
       (ntype == GreaterEqualThan_Op && i == 1) ? (uint16_t)2 : (uint16_t)0;
 
-
     dfg->add_edge(dpin, snode.setup_sink_pin(spin_pid));
+
     I(dpin.has_name());
     I(snode.get_driver_pin(0).has_name());
     fmt::print("add_edge driver:{}->sink:{}\n", dpin.get_name(), snode.get_driver_pin(0).get_name());

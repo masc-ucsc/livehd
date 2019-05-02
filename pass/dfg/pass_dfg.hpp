@@ -107,10 +107,11 @@ private:
   constexpr bool is_tuple_op(std::string_view v)       const { return v == "()"; }
 
   constexpr bool is_unary_op  (std::string_view v) const { return (v == "!")   || (v == "not"); }
-  constexpr bool is_binary_op (std::string_view v) const {return  (v == "&&")  || (v == "||") || (v == "&") ||
-                                                                  (v == "|")   || (v == "+")  || (v == "-") ||
-                                                                  (v == "*")   || (v == "==") || (v == ">") ||
-                                                                  (v == "<")   || (v == "<=") || (v == "^");}
+  constexpr bool is_binary_op (std::string_view v) const {return  (v == "&&")  || (v == "||") || (v == "&")  ||
+                                                                  (v == "|")   || (v == "+")  || (v == "-")  ||
+                                                                  (v == "*")   || (v == "==") || (v == ">")  ||
+                                                                  (v == ">=")  ||(v == "<")   || (v == "<=") ||
+                                                                  (v == "^");}
 
   Node_pin create_register     (LGraph *g, Aux_tree *aux_tree, std::string_view var_name);
   Node_pin create_input        (LGraph *g, Aux_tree *aux_tree, std::string_view var_name, uint16_t bits = 0);
