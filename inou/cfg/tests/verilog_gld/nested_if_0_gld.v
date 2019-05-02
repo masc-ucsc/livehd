@@ -9,7 +9,7 @@ module nested_if_0(a, out1);
   wire [7:0] tmp2;
   assign tmp0 = $signed(a) >= $signed(8'h80);
   assign tmp1 = a == 8'hfe;
-  assign tmp2 = a + 1'h1;
+  assign tmp2 = a;
   assign lgraph_cell_12 = tmp1 ? tmp2 : 8'h0;
   assign out1 = tmp0 ? lgraph_cell_12 : 8'h0;
 endmodule
