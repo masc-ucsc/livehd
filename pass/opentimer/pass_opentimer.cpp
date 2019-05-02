@@ -24,118 +24,55 @@ void Pass_opentimer::work(Eprp_var &var) {
   Pass_opentimer pass;
 
   fmt::print("\nOpenTimer-LGraph Action Going On...\n\n");
-  pass.example_ot();                                    // Traverse the lgraph and build the circuit (not there yet)
 
-//  pass.read_file();                                     // Make OpenTimer read the input files
-//  pass.build_circuit();                                 // Traverse the lgraph and build the circuit (not there yet)
-  pass.compute_timing();                                // Traverse the lgraph and build the circuit (not there yet)
-  pass.populate_table();                                // Traverse the lgraph and build the circuit (not there yet)
-
-
+  pass.read_file();                                     // Task1: Read input files (implement read_sdc hack) | Status: 75% done
   for(const auto &g : var.lgs) {
-//      pass.list_cells(g);                                 // Traverse the lgraph and list the cells for the moment (for debug only)
+      pass.build_circuit(g);                            // Task2: Traverse the lgraph and build the equivalent circuit (no dependencies) | Status: 15% done
   }
+  pass.compute_timing();                                // Task3: Compute Timing (Will work once read_sdc() hack is implemented) | Status: 100% done
+//  pass.populate_table();                                // Task4: Traverse the lgraph and populate the tables | Status: 0% done
 
 }
 
-// Temporary Methods for debugging -----------------------------------------------------------------------------------------------------------------
-void Pass_opentimer::example_ot(){                       // Read SDC does not work and thereby dependent commands don't work..
-
-  ot::Timer timer;
-
-  // Read design
-  timer.read_celllib("pass/opentimer/ot_examples/optimizer_Early.lib", ot::MIN)
-       .read_celllib("pass/opentimer/ot_examples/optimizer_Late.lib", ot::MAX)
-       .read_verilog("pass/opentimer/ot_examples/optimizer.v")
-       .read_sdc   ("pass/opentimer/ot_examples/optimizer.sdc")
-       .read_spef   ("pass/opentimer/ot_examples/optimizer.spef");
-
-  // Report the TNS and WNS
-  if(std::optional<float> tns = timer.report_tns(); tns) {
-    std::cout << "TNS: " << *tns << '\n';
-  }
-  else {
-    std::cout << "TNS is not available\n";
-  }
-
-  if(std::optional<float> wns = timer.report_wns(); wns) {
-    std::cout << "WNS: " << *wns << '\n';
-  }
-  else {
-    std::cout << "WNS is not available\n";
-  }
-
-  // repower a gate and insert a buffer
-  timer.repower_gate("inst_10", "INV_X16")
-       .insert_gate("TAUGATE_1", "BUF_X2")
-       .insert_net("TAUNET_1")
-       .disconnect_pin("inst_3:ZN")
-       .connect_pin("inst_3:ZN", "TAUNET_1")
-       .connect_pin("TAUGATE_1:A", "TAUNET_1")
-       .connect_pin("TAUGATE_1:Z", "net_14")
-       .read_spef("pass/opentimer/ot_examples/change_1.spef");
-
-  // report the slack at a G17
-  std::cout << "Late/Fall slack at pin G17: "
-            << *timer.report_slack("G17", ot::MAX, ot::FALL)
-            << '\n';
-
-  // report the arrival time at G17
-  std::cout << "Late/Fall arrival time at pin G17: "
-            << *timer.report_at("G17", ot::MAX, ot::FALL)
-            << '\n';
-
-  // report the required arrival time at G17
-  std::cout << "Late/Fall required arrival time at pin G17: "
-            << *timer.report_rat("G17", ot::MAX, ot::FALL)
-            << '\n';
-
-}
-
-void Pass_opentimer::list_cells(LGraph *g) {              //Enhance this for build_circuit
-
-  int cell = 0;
-  std::string instance_name;
-
-  timer.read_celllib("pass/opentimer/ot_examples/osu018_stdcells.lib");
-
-  LGBench b("pass.opentimer.list_cells");
-
-  for(const auto &nid : g -> forward()) {
-    auto node = Node(g,0,Node::Compact(nid));             //NOTE: To remove once new iterators are finished
-    cell++;
-    std::string name (node.get_name());
-    fmt::print("Cell\t{}\n", name);
-    instance_name = name+std::to_string(cell);            // This makes sure 2 cells of the same strength have distinct instance names
-    timer.insert_gate(instance_name,name);
-  }
-
-  timer.insert_gate("FA1", "FAX1");
-
-  fmt::print("Cells {}\n", cell);
-  auto gates = timer.num_gates();
-  fmt::print("Gates {}\n", gates);
-}
-
-// Methods to use finally---------------------------------------------------------------------------------------------------------------------------
 void Pass_opentimer::read_file(){                        // Currently just reads hardcoded file
-                                                         // Exapnd this method to reading from user input and later develop inou.add_liberty etc.
+  LGBench b("pass.opentimer.read_file");
+                                                         // Expand this method to reading from user input and later develop inou.add_liberty etc.
 
   timer.read_celllib ("pass/opentimer/ot_examples/osu018_stdcells.lib");
 
 }
 
-void Pass_opentimer::build_circuit() {                    // Expand this method to traversing the graph and building the circuit
+void Pass_opentimer::build_circuit(LGraph *g) {              //Enhance this for build_circuit
+  LGBench b("pass.opentimer.build_circuit");
 
-  timer.insert_gate("FA1", "FAX1")
-       .insert_gate("FA2", "FAX1")
-       .insert_net("n1")
-       .connect_pin("FA1:YC", "n1")
-       .connect_pin("FA2:C", "n1");
+  std::string celltype;
+  std::string instance_name;
+  for(const auto &nid : g -> forward()) {
+    auto node = Node(g,0,Node::Compact(nid));             //NOTE: To remove once new iterators are finished
 
+    for(const auto &e:node.inp_edges()) {
+      if(e.sink.get_pid() == LGRAPH_BBOP_TYPE) {
+        if(e.driver.get_node().get_type().op != StrConst_Op)
+            error("Internal Error: BB type is not a string.\n");
+          celltype = e.driver.get_node().get_type_const_sview();
+        } else if(e.sink.get_pid() == LGRAPH_BBOP_NAME) {
+          if(e.driver.get_node().get_type().op != StrConst_Op)
+            error("Internal Error: BB name is not a string.\n");
+          instance_name = e.driver.get_node().get_type_const_sview();
+        } else if(e.sink.get_pid() < LGRAPH_BBOP_OFFSET) {
+          error("Unrecognized blackbox option, pid %hu\n", e.sink.get_pid());
+      }
+    }
+
+    if(node.get_type().get_name() == "blackbox"){
+      timer.insert_gate(instance_name,celltype);
+      fmt::print("Cell Type: {} \t Instance Name {}\n", celltype, instance_name);
+    }
+  }
 }
 
 void Pass_opentimer::compute_timing(){                    // Expand this method to compute timing information
+  LGBench b("pass.opentimer.compute_timing");
 
   timer.update_timing();
 
@@ -152,15 +89,13 @@ void Pass_opentimer::compute_timing(){                    // Expand this method 
   fmt::print("Number of pins {}\n", num_pins);
 
   auto num_nets = timer.num_nets();
-  fmt::print("Number of nets {}\n", num_nets);
+  fmt::print("Number of nets {}\n\n", num_nets);
 
   timer.dump_graph(std::cout);
 
 }
 
 void Pass_opentimer::populate_table(){                    // Expand this method to populate the tables in lgraph
-
+  LGBench b("pass.opentimer.populate_table");
 
 }
-
-// --------------------------------------------------------------------------------------------------------------------------------------------------------
