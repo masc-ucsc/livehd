@@ -1,1 +1,2 @@
 %out as (__bits:8)
+%out1 = b+c
