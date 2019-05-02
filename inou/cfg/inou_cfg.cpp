@@ -51,8 +51,8 @@ std::vector<LGraph *> Inou_cfg::tolg() {
 
   cfg_2_lgraph(&memblock, lgs, rename_tab, cfg_file);
 
-  //for(LGraph *g : lgs)
-  //  remove_fake_fcall(g);
+  for(LGraph *g : lgs)
+    remove_fake_fcall(g);
 
   fmt::print("\n*************************************************************************************************\n");
   fmt::print("                    cfg-lgraph building finish!\n");
@@ -468,7 +468,7 @@ void Inou_cfg::collect_fcall_info(LGraph *g, Node new_node, std::string_view w7t
 void Inou_cfg::remove_fake_fcall(LGraph *g) {
   absl::flat_hash_set<std::string_view>       func_dcl_tab;
   absl::flat_hash_set<std::string_view>       drive_tab;
-  absl::flat_hash_set<Node::Compact>          true_fcall_tab;
+  absl::flat_hash_set<Node>                   true_fcall_tab;
   absl::flat_hash_map<std::string_view, Node> name2node;
   //1st pass
   for(auto nid : g->fast()){
@@ -488,7 +488,7 @@ void Inou_cfg::remove_fake_fcall(LGraph *g) {
         auto node_name = node.get_name();
         //SH:FIXME:check correctness of the following debug message
         fmt::print("push node:{} into true_fcall_tab\n", node_name.substr(0, node_name.find(" ")));
-        true_fcall_tab.insert(node.get_compact());
+        true_fcall_tab.insert(node);
       }
     }
   }
@@ -496,23 +496,40 @@ void Inou_cfg::remove_fake_fcall(LGraph *g) {
   for(const auto &it : drive_tab) {
     fmt::print("in drive_tab:{}\n", it);
     if(func_dcl_tab.find((it)) != func_dcl_tab.end()) {
-      true_fcall_tab.insert(name2node[it].get_compact());
+      true_fcall_tab.insert(name2node[it]);
       auto node_name = name2node[it].get_name();
       fmt::print("push node:{} into true_fcall_tab\n", node_name.substr(0, node_name.find(" ")));
     }
   }
 
-  // 2nd pass
+  // 2nd pass: replace fake CfgFunctionCall_Op node with CfgAssign_Op node
   for(auto nid : g->fast()) {
     auto node = Node(g, 0, Node::Compact(nid));
-    if(node.get_type().op == CfgFunctionCall_Op && true_fcall_tab.find(node.get_compact()) == true_fcall_tab.end()) {
-      node.set_type(CfgAssign_Op);
-      std::string tmp_name(node.get_name().substr(3));
-      //SH:FIXME: could you avoid hardcoding positions? also try to use string_view
-      std::string new_node_name = "=" + tmp_name;
-      node.set_name(new_node_name);
+    if(node.get_type().op == CfgFunctionCall_Op && true_fcall_tab.find(node) == true_fcall_tab.end()) {
+      Node_pin driver_pin, sink_pin;
+
+      I(node.inp_edges().size() == 1); //CFGFunctionCall_Op only have one driver/sink node
+      for(auto &inp:node.inp_edges()) {
+        driver_pin = inp.driver;
+        inp.del_edge();
+      }
+
+      I(node.out_edges().size() == 1);
+      for(auto &out:node.out_edges()) {
+        sink_pin = out.sink;
+        out.del_edge();
+      }
+
+      Node new_node = g->create_node();
+      new_node.set_type(CfgAssign_Op);
+      g->add_edge(driver_pin, new_node.setup_sink_pin());
+      g->add_edge(new_node.setup_driver_pin(0), sink_pin);
+      std::string ori_cfg_text(node.get_name().substr(3)); //remove beginning ".()"
+      new_node.set_name(absl::StrCat("=", ori_cfg_text));
+      new_node.setup_driver_pin(0).set_name(  node.get_driver_pin(0).get_name());
+
       fmt::print("find out fake function call!!!!!!\n");
-      fmt::print("change node:{} to CfgAssign_Op\n", new_node_name.substr(0, new_node_name.find(" ")));
+      fmt::print("create new node:{} for CfgAssign_Op\n", new_node.get_name());
     }
   }
 }
