@@ -14,7 +14,7 @@ private:
   std::string              operator_txt;
 
   static inline constexpr int               OPERANDS_INIT_SIZE = 4;   // most CFG nodes will have 4 operands
-  static inline constexpr char              ENCODING_DELIM     = '|'; // deliminator used to encode CFG data into wirename field
+  static inline constexpr char              ENCODING_DELIM     = ','; // deliminator used to encode CFG data into wirename field
   static inline constexpr int               CFG_METADATA_COUNT = 5;
   static inline constexpr std::string_view  EMPTY_MARKER       = "<none>";
   static inline constexpr std::string_view  COND_BR_MARKER     = "if";
