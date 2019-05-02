@@ -1,0 +1,12 @@
+$a as   (__bits:1)
+$b as   (__bits:1)
+%out as (__bits:1)
+
+if ($a == 1) {
+  tmp  = $a & $b
+  %out = tmp
+} else {
+  tmp  = $a ^ $b
+  %out = tmp
+}
+
