@@ -187,11 +187,11 @@ void Pass_dfg::trans(LGraph *dfg) {
 }//end of Pass_dfg::trans()
 
 void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
-
-  for(auto nid: dfg->fast()){
+  //SH:FIXME: change to dfg->fast() after MIT algorithm is ready
+  for(auto nid: dfg->forward()){
     auto node = Node(dfg, 0, Node::Compact(nid));
-
-    if(node.get_type().op == Mux_Op){
+    auto ntype = node.get_type().op;
+    if(ntype == Mux_Op){
       Node_pin tpin_driver, fpin_driver;
       //retrieve true and false drivers
       for(auto& inp : node.inp_edges()){
@@ -236,11 +236,13 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
         dfg->add_edge(tpin_driver, node_join.setup_sink_pin(0));
         dfg->add_edge(node_join.setup_driver_pin(0), node.setup_sink_pin(2));
       }
-    }//end of Mux_Op
 
-    //after MIT algo. and Mux_Op processing, bw of every node should be synced
-    //except an output gio connected to a Mux_Op
-    if(node.get_type().op == GraphIO_Op){
+      //SH:FIXME: wait for MIT bitwidth algorithm
+      if(node.get_driver_pin().get_bits() < node.get_sink_pin(1).get_bits())
+        node.get_driver_pin().set_bits( node.get_sink_pin(1).get_bits());
+    } else if(ntype == GraphIO_Op){
+      //after MIT algo. and Mux_Op processing, bw of every node should be synced
+      //except an output gio connected to a Mux_Op
       for(auto &inp : node.inp_edges()){
         //SH:FIXME: Warning! this is workaround will be eventually wrong after MIT could handle subgraph
         if(inp.driver.get_bits() > inp.sink.get_bits()){
@@ -251,7 +253,13 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
           fmt::print("gio bitwidth larger then source\n");
         }
       }
-    }//end of GraphIO_Op
+    } else if(ntype == And_Op || ntype == Or_Op || ntype == Xor_Op){
+      //SH:FIXME: deprecate after MIT bitwidth algorithm ready
+      for(auto& inp : node.inp_edges()){
+        if(node.get_driver_pin(0).get_bits() < inp.driver.get_bits())
+          node.setup_driver_pin(0).set_bits(inp.driver.get_bits());
+      }
+    }
 
 
     //SH:FIXME: wait for MIT bitwidth algorithm
@@ -259,6 +267,11 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
     if(node.get_driver_pin(0).get_bits() == 0){
       node.get_driver_pin(0).set_bits(1);
     }
+
+
+
+
+
 
   }//end of g->fast()
 }//end of finalize bitwidth
@@ -716,7 +729,8 @@ void Pass_dfg::create_mux(LGraph *dfg, Aux *paux, Node_pin tp, Node_pin fp, Node
   Node phi_node = dfg->create_node();
   phi_node.set_type(Mux_Op);
   //SH:FIXME: cant tp.get_name() get full "$a" name instead of just "a"?
-  phi_node.setup_driver_pin().set_name(absl::StrCat("mux",  "_T_", tp.get_name(), "_F_", fp.get_name()));
+  //phi_node.setup_driver_pin().set_name(absl::StrCat("mux",  "_T_", tp.get_name(), "_F_", fp.get_name()));
+  phi_node.setup_driver_pin().set_name(absl::StrCat("mux", mux_cnt ));
   auto type = phi_node.get_type();
 
   Port_ID f_pid = type.get_input_match("A");
