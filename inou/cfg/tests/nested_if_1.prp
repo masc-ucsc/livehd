@@ -1,14 +1,15 @@
 $a    as (__bits:8)
-%out4 as (__bits:8)
+$b    as (__bits:8)
+%out  as (__bits:8)
 
 if ($a > 128){
-  %out4 = $a + 16
+  %out = $a & $b
   if ($a == 254){
-    %out4 = $a + 1
+    %out = $a | $b
   }
-}
+} 
 else {
   if ($a == 128){
-    %out4 = $a + 14
+    %out = $a ^ $b
   }
 }
