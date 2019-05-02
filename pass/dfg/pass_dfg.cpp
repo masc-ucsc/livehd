@@ -134,7 +134,7 @@ void Pass_dfg::hier_finalize_bits_dfgs(LGraph *dfg_parent){
   });
 }
 
-Pass_dfg::Pass_dfg():Pass("dfg"){}
+Pass_dfg::Pass_dfg():Pass("dfg"), mux_cnt(0){}
 
 void Pass_dfg::do_generate(LGraph *cfg, LGraph *dfg) {
   cfg_2_dfg(cfg, dfg);
@@ -166,57 +166,9 @@ void Pass_dfg::trans(LGraph *dfg) {
     }
   }
 
-  //SH:FIXME: top<->subgraph connection might be wrong, exam carefully
+  //SH:FIXME: new top<->subgraph connection afer Jose submit LGraph v0.2
   //resolve top <-> subgraph IO connection
 
-  //for(auto nid : dfg->fast()){
-  //  auto node = Node(dfg, 0, Node::Compact(nid));
-  //  if(node.get_type().op == SubGraph_Op){
-  //    fmt::print("resolve connection, subgraph is:{}\n",node.get_driver_pin(0).get_name());
-  //    LGraph* sub_graph = LGraph::open(dfg->get_path(), node.get_driver_pin(0).get_name()) ;
-  //    I(sub_graph);
-
-  //    absl::flat_hash_map<Node_pin, Node_pin> subg_inp_edges;
-  //    for(auto &inp : node.inp_edges()){
-  //      Node dnode = inp.driver.get_node();
-  //      auto inp_name = dnode.get_driver_pin(0).get_name();
-  //      Node_pin dpin = dnode.get_driver_pin(0);
-  //      Node_pin spin = sub_graph->get_graph_input(inp_name);
-
-  //      fmt::print("inp_name:{}\n",inp_name);
-  //      //fmt::print("src_nid:{}, src_pid:{}, dst_nid:{}, dst_pid:{}\n", src_nid, src_pid, dst_nid, dst_pid);
-  //      subg_inp_edges[dpin] = spin;
-  //      inp.del_edge();
-  //    }
-
-  //    for(auto &edge : subg_inp_edges){
-  //      dfg->add_edge(edge.first, edge.second);
-  //    }
-
-  //    //resolve subgraph output connections
-  //    absl::flat_hash_map<Node_pin, Node_pin> subg_out_edges;
-
-  //    for(auto &out : node.out_edges()){
-  //      Node_pin dpin = out.driver;
-  //      Node_pin spin = out.sink;
-  //      uint16_t bw;
-  //      sub_graph->each_graph_output([&sub_graph, &spin, &bw](const Node_pin &pin) {
-  //          fmt::print("outputs of subgraph: name:{}, bitwidth:{}\n",
-  //            sub_graph->get_graph_output_name_from_pid(pin.get_pid()), pin.get_bits());
-  //          spin = pin;
-  //          bw = pin.get_bits();
-  //          });
-  //      subg_out_edges[dpin] = spin;
-
-  //      dpin.set_bits(bw);
-  //      out.del_edge();
-  //    }
-
-  //    for(auto &edge : subg_out_edges){
-  //      dfg->add_edge(edge.first,edge.second);
-  //    }
-  //  }
-  //}//end of resolving top<->sub-graph connection
 
   for(auto nid : dfg->fast()) {
     auto node = Node(dfg, 0, Node::Compact(nid));
@@ -304,9 +256,8 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
 
     //SH:FIXME: wait for MIT bitwidth algorithm
     //SH:FIXME: temporarily set 1-bit for all Node_pins w/o bitwidth define
-    for(auto& inp : node.inp_edges()){
-      if(inp.driver.get_bits() == 0)
-        inp.driver.set_bits(1);
+    if(node.get_driver_pin(0).get_bits() == 0){
+      node.get_driver_pin(0).set_bits(1);
     }
 
   }//end of g->fast()
@@ -346,6 +297,7 @@ Node Pass_dfg::process_cfg(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, const N
 
     fmt::print("process_node finished!!\n\n");
   }
+  fmt::print("\n\nprocess_cfg finished!!\n\n");
   aux_tree->print_cur_aux();
   fmt::print("\n\n");
   return cfg_iter;
@@ -391,9 +343,9 @@ Node Pass_dfg::process_node(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, const 
 void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_tree, const CFG_Node_Data &data) {
   // for func_call, all the node should be created before, you just connect them. No need to create target node
 
-  const auto& target    = data.get_target();
-  const auto& operands  = data.get_operands(); //return strings
-  auto        op        = data.get_operator();
+  //const auto& target    = data.get_target();
+  //const auto& operands  = data.get_operands(); //return strings
+  //auto        op        = data.get_operator();
 
   //const auto &target    = data.get_target();
   //const auto &operands     = data.get_operands();
@@ -433,14 +385,29 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
 
   std::vector<Node_pin> oprd_pins;
   for(const auto& iter : operands)
-    oprd_pins.emplace_back(process_operand(dfg, aux_tree, iter));
+    oprd_pins.emplace_back( process_operand(dfg, aux_tree, iter));
 
   I(!oprd_pins.empty());
 
+  //if target is $, %, @, mux, put into pending table
+  //else, check globally, if it is only a local variable, don't need to create mux in parent scope
+  //it's just used as intermediate variable in branch block
   if(is_pure_assign_op(op)) {
+
     aux_tree->set_alias  (target, oprd_pins[0]);
-    aux_tree->set_pending(target, oprd_pins[0]);
+    if(target_pin.is_graph_io() || target_pin.get_node().get_type().op == FFlop_Op){
+      aux_tree->set_pending(target, oprd_pins[0]);
+    } else if (aux_tree->get_parent(aux_tree->get_cur_aux())-> has_pending(target)){
+      aux_tree->set_pending(target, oprd_pins[0]);
+    }
+
+  } else if (is_tuple_op(op)) {
+
+    aux_tree->set_alias(target, oprd_pins[0]);
+    //SH:FIXME: potential candidate to set pending
+
   } else if(is_label_op(op)) {
+
     I(operands.size() > 1);
     if(operands[0] == "__bits") {
       fmt::print("__bits size assignment\n");
@@ -453,11 +420,9 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
       oprd_pins[1].set_name(operands[0]);
       fmt::print("sink io of subgraph:{}, assigned by:{}\n",operands[0], operands[1]);
     }
-  } else if(is_tuple_op(op)){
-    //target_pin = process_target(dfg, aux_tree, target, op);
-    aux_tree->set_alias(target, oprd_pins[0]);
-    aux_tree->set_pending(target, oprd_pins[0]);
+
   } else if(is_as_op(op)) {
+
     if(oprd_pins[0].get_node().get_type().op == U32Const_Op) {//explicit bitwidth assignment
       I(oprd_pins[0].get_node().get_type_const_value());
       auto bits = (uint16_t)oprd_pins[0].get_node().get_type_const_value();
@@ -466,19 +431,25 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
     } else {
       aux_tree->set_alias(target, oprd_pins[0]);
     }
+
   } else if(is_unary_op(op)) {
+
     //SH:FIXME: is there a Not op in CFG?
     aux_tree->set_alias(target, oprd_pins[0]);
+
   } else if(is_binary_op(op)) {
+
     I(operands.size() > 1);
     Node tnode = target_pin.get_node();
     process_connections(dfg, oprd_pins, tnode);
+
   }
 }
 
 Node_pin Pass_dfg::process_operand(LGraph *dfg, Aux_tree *aux_tree, std::string_view oprd) {
   Node_pin oprd_pin;
   if(aux_tree->has_alias(oprd)) {
+    //why check whole tree? Since upper scope variable should be seen by if-else branch
     oprd_pin = aux_tree->get_alias(oprd);
     I(oprd_pin.has_name());
     fmt::print("operand:{} has an alias:{}\n", oprd, oprd_pin.get_name());
@@ -697,7 +668,7 @@ Node Pass_dfg::process_if(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, const CF
 
 void Pass_dfg::resolve_phis(LGraph *dfg, Aux_tree *aux_tree, Aux *paux, Aux *taux, Aux *faux, Node_pin cond) {
   fmt::print("resolve phis\n");
-  // resolve phi in branch true
+  // resolve phi in branch TRUE
   auto iter = taux->get_pendtab().begin();
   while(iter != taux->get_pendtab().end()) {
     fmt::print("key is:{}, ", iter->first);
@@ -721,7 +692,7 @@ void Pass_dfg::resolve_phis(LGraph *dfg, Aux_tree *aux_tree, Aux *paux, Aux *tau
     }
     taux->del_pending(iter++->first);
   }
-  // resolve phi in branch false
+  // resolve phi in branch FALSE
   iter = faux->get_pendtab().begin();
   while(iter != faux->get_pendtab().end()) {
     if(paux->has_pending(iter->first)) {
@@ -741,10 +712,11 @@ void Pass_dfg::resolve_phis(LGraph *dfg, Aux_tree *aux_tree, Aux *paux, Aux *tau
 }
 
 void Pass_dfg::create_mux(LGraph *dfg, Aux *paux, Node_pin tp, Node_pin fp, Node_pin cp, std::string_view var) {
+  mux_cnt += 1;
   Node phi_node = dfg->create_node();
   phi_node.set_type(Mux_Op);
-  phi_node.setup_driver_pin().set_name(absl::StrCat("mux_", tp.get_name(), "_", fp.get_name()));
-  //phi_node.setup_driver_pin(0).set_name(" ");
+  //SH:FIXME: cant tp.get_name() get full "$a" name instead of just "a"?
+  phi_node.setup_driver_pin().set_name(absl::StrCat("mux",  "_T_", tp.get_name(), "_F_", fp.get_name()));
   auto type = phi_node.get_type();
 
   Port_ID f_pid = type.get_input_match("A");
