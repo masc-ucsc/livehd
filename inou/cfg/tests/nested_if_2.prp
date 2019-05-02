@@ -1,4 +1,5 @@
 $a    as (__bits:8)
+$b    as (__bits:8)
 %out1 as (__bits:8)
 %out2 as (__bits:8)
 %out3 as (__bits:8)
@@ -6,17 +7,17 @@ $a    as (__bits:8)
 
 if ($a > 200){
   if ($a == 201){
-    %out1 = $a + 10
+    %out1 = $a & $b
   }
   else {
-    %out2 = $a + 11
+    %out2 = $a | $b
   }
 }
 else {
   if ($a == 128){
-    %out3 = $a + 12
+    %out3 = $a ^ $b
   }
   else {
-    %out1 = $a + 1
+    %out1 = $a 
   }
 }
