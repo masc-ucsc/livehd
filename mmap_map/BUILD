@@ -53,6 +53,20 @@ cc_test(
 )
 
 cc_test(
+    name = "use_dense_bench",
+    srcs = ["tests/use_dense_bench.cpp"],
+    deps = [
+        ":mmap_map_test_lib",
+        "//bench:headers",
+        "@sparsehash//:headers",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@gtest//:gtest_main",
+        "@fmt//:fmt",
+        "@iassert//:iassert",
+    ],
+)
+
+cc_test(
     name = "mmap_map_test",
     srcs = ["tests/mmap_map_test.cpp"],
     deps = [

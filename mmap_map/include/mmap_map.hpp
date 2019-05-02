@@ -326,11 +326,11 @@ struct hash<int64_t> {
 template <>
 struct hash<uint32_t> {
 	size_t operator()(uint32_t const& h) const {
-#if mmap_map_BITNESS == 32
+//#if mmap_map_BITNESS == 32
 		return static_cast<size_t>((UINT64_C(0xca4bcaa75ec3f625) * (uint64_t)h) >> 32);
-#else
-		return hash<uint64_t>{}(static_cast<uint64_t>(h));
-#endif
+//#else
+		//return hash<uint64_t>{}(static_cast<uint64_t>(h));
+//#endif
 	}
 };
 
@@ -587,10 +587,11 @@ private:
 
 			private:
 				// fast forward to the next non-free info byte
-				void fastForward() {
-					int inc;
+        void fastForward() {
+#ifdef FAST_MISS_ALIGNED_CPU
+          int inc;
 					do {
-						auto const n = detail::unaligned_load<size_t>(mInfo);
+						auto const n = detail::unaligned_load<uint64_t>(mInfo);
 #if mmap_map_LITTLE_ENDIAN
 						inc = mmap_map_COUNT_TRAILING_ZEROES(n) / 8;
 #else
@@ -598,7 +599,15 @@ private:
 #endif
 						mInfo += inc;
 						mKeyVals += inc;
-					} while (inc == sizeof(size_t));
+					} while (mmap_map_UNLIKELY(inc == sizeof(uint64_t)));
+#else
+          while(true) {
+						if (*mInfo)
+              return;
+						mInfo++;
+						mKeyVals++;
+					}
+#endif
 				}
 
 				friend class unordered_map<MaxLoadFactor100, key_type, mapped_type, hasher>;
@@ -683,7 +692,8 @@ private:
 			size = s.st_size;
 		}
 
-		void *base = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+		//void *base = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0); no superpages
+		void *base = mmap(0, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, fd, 0);
 		if(base == MAP_FAILED) {
 			std::cerr << "mmap_map::reload ERROR mmap could not adjust\n";
 			exit(-1);
@@ -989,6 +999,8 @@ public:
 
 		mInfoInc = InitialInfoInc;
 		mInfoHashShift = InitialInfoHashShift;
+
+    *mNumElements = 0;
 		// Do not clear mmap_name or loaded
 	}
 

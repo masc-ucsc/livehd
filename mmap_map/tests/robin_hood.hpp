@@ -1482,6 +1482,7 @@ public:
 
         const size_t oldMaxElements = mMask + 1;
 
+        std::cout << "resize sz:" << numBuckets << "\n";
         // resize operation: move stuff
         init_data(numBuckets);
         if (oldMaxElements > 1) {
