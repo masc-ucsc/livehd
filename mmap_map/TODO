@@ -42,4 +42,37 @@ Long term TODOs:
 switches to dense. In dense, no need to check the Key field (it must be kept in case that we switch back). It may be good to have the
 keys in a separate array when in dense (different memory layout, flat for sparse, 2 vectors for dense).
 
+ 5-Large data field (like string_view)
+
+   mmap_map<key,data> becomes:
+    mmap_map<key,data_pos>
+    vector<data>
+
+    mmap.get(key) : mmap<key,pos> -> vector<pos>
+
+ 6-Base class for mmap_map, mmap_bimap, mmap_set
+
+   mmap_set only has a mValid and key, no data
+
+   mmap_bimap is a 2 mmap_map with the optimization.
+
+   mmap_bimap<Pin,Sview>
+
+     mmap_map<Pin,Str_pos> and mmap_map<sview, Str_pos>
+
+     vector<str_pos> has sview and pin_hash.
+
+     bimap.has_key(pin) : mmap_map<Pin,str_pos>.has(pin)
+     bimap.has_val(str) : mmap_map<sview,...>.has(str)
+
+     bimap.get_val(pin) : mmap_map<Pin,str_pos> -> vector[str_pos]
+
+     bimap.get_key(sview) : mmap_map<sview, pair<Str_pos,Pin>>
+
+   mmap_bimap<Pin,Data>
+
+    if (sizeof(Pin)<=sizeof(Data))
+       mmap_map<pin, data_pos>
+       mmap_map<data, pin>
+       vector<data>
 

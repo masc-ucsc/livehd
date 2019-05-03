@@ -436,20 +436,24 @@ class unordered_map
 : public Hash {
 public:
 	using key_type    = Key;
-	using mapped_type = T;
-	using value_type  = mmap_map::pair<typename std::conditional<std::is_same<Key, std::string_view>::value, uint32_t, Key>::type, T>;
+	using mapped_type = typename std::conditional<std::is_same<T  , std::string_view>::value, uint32_t, T  >::type;
+	using value_type  = mmap_map::pair<typename std::conditional<std::is_same<Key, std::string_view>::value, uint32_t, Key>::type
+                                    ,typename std::conditional<std::is_same<T  , std::string_view>::value, uint32_t, T  >::type>;
 	using size_type   = size_t;
 	using hasher      = Hash;
-	using Self        = unordered_map<MaxLoadFactor100, key_type, mapped_type, hasher>;
+	using Self        = unordered_map<MaxLoadFactor100, key_type, T, hasher>;
 
 private:
-	static_assert(!std::is_same<Key, std::string>::value     ,"mmap_map uses string_view as key (not slow string)\n");
+	static_assert(!std::is_same<Key, std::string>::value     ,"mmap_map uses string_view as key (not slow std::string)\n");
 	//static_assert(!std::is_same<Key, std::string_view>::value,"mmap_map does not deal with strings or string_views (pointers). Use char_array\n");
-	static_assert(!std::is_same<T, std::string>::value       ,"mmap_map does not deal with strings or string_views (pointers). Use char_array\n");
-	static_assert(!std::is_same<T, std::string_view>::value  ,"mmap_map does not deal with strings or string_views (pointers). Use char_array\n");
+	static_assert(!std::is_same<T, std::string>::value       ,"mmap_map uses string_view as value (not slow std::string)\n");
+	//static_assert(!std::is_same<T, std::string_view>::value  ,"mmap_map does not deal with strings or string_views (pointers). Use char_array\n");
 
+	static_assert(!(std::is_same<Key, std::string_view>::value && std::is_same<T, std::string_view>::value)
+        ,"mmap_map can not have std::string_view for key and value simultaneously\n");
 	static_assert(MaxLoadFactor100 > 10 && MaxLoadFactor100 < 100, "MaxLoadFactor100 needs to be >10 && < 100");
 
+  static constexpr bool    using_sview          = std::is_same<Key, std::string_view>::value || std::is_same<T, std::string_view>::value;
 	static constexpr size_t  InitialNumElements   = 1024;
 	static constexpr int     InitialInfoNumBits   = 5;
 	static constexpr uint8_t InitialInfoInc       = 1 << InitialInfoNumBits;
@@ -610,7 +614,7 @@ private:
 #endif
 				}
 
-				friend class unordered_map<MaxLoadFactor100, key_type, mapped_type, hasher>;
+				friend class unordered_map<MaxLoadFactor100, key_type, T, hasher>;
 				NodePtr mKeyVals;
 				uint8_t const* mInfo;
 		};
@@ -720,7 +724,9 @@ private:
 
     if (mmap_name.empty()) {
       mmap_fd     = -1;
-      mmap_txt_fd = -1;
+      if constexpr (using_sview) {
+        mmap_txt_fd = -1;
+      }
     }else{
       mmap_fd = open(mmap_name.c_str(), O_RDWR | O_CREAT, 0644);
       if (mmap_fd<0) {
@@ -733,20 +739,24 @@ private:
         }
       }
 
-      mmap_txt_fd = open((mmap_name + "txt").c_str(), O_RDWR | O_CREAT, 0644);
-      if (mmap_txt_fd < 0) {
-        try_reclaim_mmaps();
-
+      if constexpr (using_sview) {
         mmap_txt_fd = open((mmap_name + "txt").c_str(), O_RDWR | O_CREAT, 0644);
         if (mmap_txt_fd < 0) {
-          std::cerr << "mmap_map::reload ERROR failed to setup " << mmap_name << "txt\n";
-          exit(-4);
+          try_reclaim_mmaps();
+
+          mmap_txt_fd = open((mmap_name + "txt").c_str(), O_RDWR | O_CREAT, 0644);
+          if (mmap_txt_fd < 0) {
+            std::cerr << "mmap_map::reload ERROR failed to setup " << mmap_name << "txt\n";
+            exit(-4);
+          }
         }
       }
     }
 
     std::tie(mmap_base    , mmap_size    ) = create_mmap(mmap_fd    , calc_mmap_size(n_entries));
-    std::tie(mmap_txt_base, mmap_txt_size) = create_mmap(mmap_txt_fd, 8192);
+    if constexpr (using_sview) {
+      std::tie(mmap_txt_base, mmap_txt_size) = create_mmap(mmap_txt_fd, 8192);
+    }
 
     mNumElements           = &mmap_base[0];
 		mMask                  = &mmap_base[1];
@@ -880,6 +890,7 @@ private:
 	}
 
 	inline bool equals(std::string_view k1, const uint32_t key_pos) const {
+    assert(using_sview);
 		auto txt = get_sview(key_pos);
 		return k1 == txt;
 	}
@@ -1018,7 +1029,7 @@ public:
 	void clear() {
 		if (mmap_map_UNLIKELY(!loaded)) {
 			unlink(mmap_name.c_str());
-			if constexpr (std::is_same<Key, std::string_view>::value) {
+			if constexpr (using_sview) {
 				clear_sview();
 			}
 			return;
@@ -1047,15 +1058,21 @@ public:
 		destroy();
 	}
 
+#if 0
 	mapped_type& operator[](const key_type& key) {
 		return doCreateByKey(key);
 	}
 
-#if 0
 	mapped_type& operator[](key_type&& key) {
 		return doCreateByKey(std::move(key));
 	}
 #endif
+	void set(key_type&& key, T &&val) {
+		return doCreate(std::move(key), std::move(val));
+	}
+	void set(const key_type& key, T &&val) {
+		return doCreate(key, std::move(val));
+	}
 
 	template <typename Iter>
 		void insert(Iter first, Iter last) {
@@ -1102,15 +1119,15 @@ public:
 	}
 
 	// Returns a reference to the value found for key.
-	// Throws std::out_of_range if element cannot be found
-	mapped_type const& at(key_type const& key) const {
+	T const& get(key_type const& key) const {
 		auto idx = findIdx(key);
-#ifndef NDEBUG
-		if (idx == 0) {
-			doThrow<std::out_of_range>("key not found");
-		}
-#endif
-		return mKeyVals[idx].getSecond();
+		assert(idx>=0);
+
+		if constexpr (std::is_same<T, std::string_view>::value) {
+      return get_val(mKeyVals[idx].getSecond());
+    }else{
+      return mKeyVals[idx].getSecond();
+    }
 	}
 
 	const_iterator find(const key_type& key) const {
@@ -1314,25 +1331,47 @@ public:
 		return *mMask;
 	}
 
-	std::string_view get_sview(const value_type it) const {
+	std::string_view get_key(const value_type it) const {
 		if (mmap_map_UNLIKELY(!loaded)) {
 			reload();
 		}
-		return get_sview(it.getFirst());
+
+    if constexpr (std::is_same<Key, std::string_view>::value) {
+      return get_sview(it.getFirst());
+    }else{
+      assert(false); // get_val only makes sense when the KEY is std::string_view
+      return "bug";
+    }
+	}
+
+	std::string_view get_val(const value_type it) const {
+		if (mmap_map_UNLIKELY(!loaded)) {
+			reload();
+		}
+
+    if constexpr (std::is_same<T, std::string_view>::value) {
+      return get_sview(it.getSecond());
+    }else{
+      assert(false); // get_val only makes sense when the DATA is std::string_view
+      return "bug";
+    }
 	}
 
 private:
 	mutable std::vector<std::string> txt_vector;
 	uint32_t allocate_sview_id(std::string_view txt) {
+    assert(using_sview);
     std::string s(txt);
 		txt_vector.push_back(s);
 		return txt_vector.size()-1;
 	}
 	std::string_view get_sview(uint32_t key_pos) const {
+    assert(using_sview);
 		assert(key_pos<txt_vector.size());
 		return txt_vector[key_pos];
 	}
 	void clear_sview() const {
+    assert(using_sview);
 		txt_vector.clear();
 	}
 
@@ -1344,8 +1383,8 @@ private:
 		assert(false);
 	}
 
-	template <typename Arg>
-		mapped_type& doCreateByKey(Arg&& key) {
+	template <typename Arg, typename Data>
+		void doCreate(Arg&& key, Data&& val) {
 			while (true) {
 				int idx;
 				InfoType info;
@@ -1390,21 +1429,30 @@ private:
 						uint32_t key_pos = allocate_sview_id(key);
 						::new (static_cast<void*>(&l))
 							Node(*this, std::piecewise_construct,
-									std::forward_as_tuple(std::forward<uint32_t>(key_pos)), std::forward_as_tuple());
+									std::forward_as_tuple(std::forward<uint32_t>(key_pos)), std::forward_as_tuple(val));
+          }else if constexpr (std::is_same<T, std::string_view>::value) {
+						uint32_t val_pos = allocate_sview_id(val);
+						::new (static_cast<void*>(&l))
+							Node(*this, std::piecewise_construct,
+									std::forward_as_tuple(std::forward<Arg>(key)), std::forward_as_tuple(std::forward<uint32_t>(val_pos)));
 					}else{
 						::new (static_cast<void*>(&l))
 							Node(*this, std::piecewise_construct,
-									std::forward_as_tuple(std::forward<Arg>(key)), std::forward_as_tuple());
+									std::forward_as_tuple(std::forward<Arg>(key)), std::forward_as_tuple(val));
 					}
 				} else {
 					shiftUp(idx, insertion_idx);
 					if constexpr (std::is_same<Key, std::string_view>::value) {
 						uint32_t key_pos = allocate_sview_id(key);
 						l = Node(*this, std::piecewise_construct,
-								std::forward_as_tuple(std::forward<uint32_t>(key_pos)), std::forward_as_tuple());
+								std::forward_as_tuple(std::forward<uint32_t>(key_pos)), std::forward_as_tuple(val));
+          }else if constexpr (std::is_same<T, std::string_view>::value) {
+						uint32_t val_pos = allocate_sview_id(val);
+						l = Node(*this, std::piecewise_construct,
+								std::forward_as_tuple(std::forward<Arg>(key)), std::forward_as_tuple(std::forward<uint32_t>(val_pos)));
 					}else{
 						l = Node(*this, std::piecewise_construct,
-								std::forward_as_tuple(std::forward<Arg>(key)), std::forward_as_tuple());
+								std::forward_as_tuple(std::forward<Arg>(key)), std::forward_as_tuple(val));
 					}
 				}
 
@@ -1413,7 +1461,8 @@ private:
 
 				++(*mNumElements);
 
-				return mKeyVals[insertion_idx].getSecond();
+				//return mKeyVals[insertion_idx].getSecond();
+        return;
 			}
 		}
 

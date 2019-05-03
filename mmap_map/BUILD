@@ -106,6 +106,7 @@ cc_test(
     srcs = ["tests/char_test.cpp"],
     deps = [
         ":mmap_map_test_lib",
+        "@sparsehash//:headers",
     ],
 )
 

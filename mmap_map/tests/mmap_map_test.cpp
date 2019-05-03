@@ -23,7 +23,55 @@ protected:
   }
 };
 
-TEST_F(Setup_mmap_map_test, string_index) {
+TEST_F(Setup_mmap_map_test, string_data) {
+  Rng rng(123);
+
+  bool zero_found = false;
+  while(!zero_found) {
+    mmap_map::unordered_map<uint32_t, std::string_view> map;
+    map.clear();
+    absl::flat_hash_map<uint32_t, std::string> map2;
+
+    int conta = 0;
+    for(int i=0;i<10000;i++) {
+      int key = rng.uniform<int>(0xFFFF);
+      std::string key_str = std::to_string(key)+"foo";
+
+      if (map.has(key)) {
+        EXPECT_EQ(map2.count(key),1);
+        continue;
+      }
+
+      conta++;
+
+      EXPECT_TRUE(!map.has(key));
+      map.set(key,key_str);
+      EXPECT_TRUE(map.has(key));
+
+      EXPECT_EQ(map2.count(key),0);
+      map2[key] = key_str;
+      EXPECT_EQ(map2.count(key),1);
+    }
+
+    for(auto it:map) {
+      (void)it;
+      if(it.getSecond() == 0)
+        zero_found = true;
+
+      EXPECT_EQ(map.get_val(it), std::to_string(it.first) + "foo");
+      conta--;
+    }
+    for(auto it:map2) {
+      EXPECT_TRUE(map.has(it.first));
+    }
+
+    EXPECT_EQ(conta,0);
+
+    fmt::print("load_factor:{} conflict_factor:{} txt_size:{}\n",map.load_factor(), map.conflict_factor(),map.txt_size());
+  }
+}
+
+TEST_F(Setup_mmap_map_test, string_key) {
   Rng rng(123);
 
   bool zero_found = false;
@@ -46,7 +94,7 @@ TEST_F(Setup_mmap_map_test, string_index) {
       conta++;
 
       EXPECT_TRUE(!map.has(key));
-      map[key] = sz;
+      map.set(key, sz);
       EXPECT_TRUE(map.has(key));
 
       EXPECT_EQ(map2.count(key),0);
@@ -59,14 +107,11 @@ TEST_F(Setup_mmap_map_test, string_index) {
       if(it.getFirst() == 0)
         zero_found = true;
 
-      EXPECT_EQ(map.get_sview(it), std::to_string(it.second) + "foo");
-      EXPECT_EQ(map2.count(map.get_sview(it)), 1);
+      EXPECT_EQ(map.get_key(it), std::to_string(it.second) + "foo");
+      EXPECT_EQ(map2.count(map.get_key(it)), 1);
       conta--;
     }
     for(auto it:map2) {
-      (map.has(it.first));
-      if (!map.has(it.first))
-        fmt::print("bug bug\n");
       EXPECT_TRUE(map.has(it.first));
     }
 
@@ -76,21 +121,54 @@ TEST_F(Setup_mmap_map_test, string_index) {
   }
 }
 
+class Big_entry {
+public:
+  int f0;
+  int f1;
+  int f2;
+  int f3;
+  bool operator==(const Big_entry &o) const {
+    return f0 == o.f0
+        && f1 == o.f1
+        && f2 == o.f2
+        && f3 == o.f3;
+  }
+  bool operator!=(const Big_entry &o) const {
+    return f0 != o.f0
+        || f1 != o.f1
+        || f2 != o.f2
+        || f3 != o.f3;
+  };
+  Big_entry() {
+    f0= 0;
+    f1= 0;
+    f2= 0;
+    f3= 0;
+  }
+  Big_entry(int x) : f0(x), f1(x+1), f2(x+2), f3(x+3) {}
+  Big_entry(int x,int y) : f0(x), f1(y), f2(y+1), f3(y+2) {}
+  Big_entry(const Big_entry &o) {
+    f0 = o.f0;
+    f1 = o.f1;
+    f2 = o.f2;
+    f3 = o.f3;
+  }
+  Big_entry &operator=(const Big_entry &o) {
+    f0 = o.f0;
+    f1 = o.f1;
+    f2 = o.f2;
+    f3 = o.f3;
+    return *this;
+  }
+
+  template <typename H>
+  friend H AbslHashValue(H h, const Big_entry &s) {
+    return H::combine(std::move(h), s.f0, s.f1, s.f2, s.f3);
+  };
+};
+
 TEST_F(Setup_mmap_map_test, big_entry) {
   Rng rng(123);
-
-  struct Big_entry {
-    int f0;
-    int f1;
-    int f2;
-    int f3;
-    bool operator==(const Big_entry &o) const {
-      return f0 == o.f0
-          && f1 == o.f1
-          && f2 == o.f2
-          && f3 == o.f3;
-    }
-  };
 
   mmap_map::unordered_map<uint32_t,Big_entry> map("mmap_map_test_se");
   absl::flat_hash_map<uint32_t,Big_entry> map2;
@@ -102,11 +180,21 @@ TEST_F(Setup_mmap_map_test, big_entry) {
 
 		EXPECT_EQ(map.has(33),0);
 		EXPECT_EQ(map.has(0),0);
-		map[0].f1=33;
+		map.set(0,33);
 		EXPECT_EQ(map.has(0),1);
+		EXPECT_EQ(map.has(33),0);
+    EXPECT_EQ(map.get(0).f0, 33);
+    EXPECT_EQ(map.get(0).f1, 34);
 		map.erase(0);
+		EXPECT_EQ(map.has(0),0);
+		map.set(0,{13,24});
+		EXPECT_EQ(map.has(0),1);
+    EXPECT_EQ(map.get(0).f0, 13);
+    EXPECT_EQ(map.get(0).f1, 24);
+    EXPECT_EQ(map.get(0).f2, 25);
 
 		EXPECT_EQ(map.capacity(),cap); // No capacity degeneration
+    map.erase(0);
 
 		int conta = 0;
 		for(int i=1;i<rng.uniform<int>(16);++i) {
@@ -114,7 +202,7 @@ TEST_F(Setup_mmap_map_test, big_entry) {
 			if (map.find(sz)!=map.end()) {
 				map.erase(sz);
 			}else{
-				map[sz].f1=sz;
+				map.set(sz,{11,sz});
 				EXPECT_EQ(map.has(sz),1);
 				conta++;
 			}
@@ -138,14 +226,12 @@ TEST_F(Setup_mmap_map_test, big_entry) {
       EXPECT_EQ(map.has(sz),1);
     }
 
-    map[sz].f0 = sz;
-    map[sz].f1 = sz+1;
-    map[sz].f2 = sz+2;
-    map[sz].f3 = sz+3;
+    map.set(sz,sz);
 
     if (map2.find(sz) == map2.end()) {
       conta++;
-      map2[sz] = map[sz];
+      Big_entry data = map.get(sz);
+      map2[sz] = data;
     }
   }
 
@@ -169,30 +255,6 @@ TEST_F(Setup_mmap_map_test, big_entry) {
 
 }
 
-class Big_entry {
-public:
-  int f0;
-  int f1;
-  int f2;
-  int f3;
-  bool operator==(const Big_entry &o) const {
-    return f0 == o.f0
-        && f1 == o.f1
-        && f2 == o.f2
-        && f3 == o.f3;
-  }
-  bool operator!=(const Big_entry &o) const {
-    return f0 != o.f0
-        || f1 != o.f1
-        || f2 != o.f2
-        || f3 != o.f3;
-  };
-
-  template <typename H>
-  friend H AbslHashValue(H h, const Big_entry &s) {
-    return H::combine(std::move(h), s.f0, s.f1, s.f2, s.f3);
-  };
-};
 
 namespace mmap_map {
 template <>
@@ -217,13 +279,13 @@ TEST_F(Setup_mmap_map_test, big_key) {
   int conta = 0;
   for(int i=0;i<10000;i++) {
     int sz = rng.uniform<int>(0xFFFFFF);
-    Big_entry key;
-    key.f0 = sz;
-    key.f1 = sz+1;
-    key.f2 = sz+2;
-    key.f3 = sz+3;
+    Big_entry key(sz);
 
-    map[key] = sz;
+    if (rng.uniform<bool>()) {
+      map.set(key,sz);
+    }else{
+      map.set({sz},sz);
+    }
 
     if (map2.find(key) == map2.end()) {
       conta++;

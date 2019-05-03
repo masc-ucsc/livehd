@@ -8,7 +8,6 @@
 
 #include "rng.hpp"
 #include "lgbench.hpp"
-#include "absl/container/node_hash_map.h"
 #include "absl/container/flat_hash_map.h"
 #include "mmap_map.hpp"
 #include "robin_hood.hpp"
@@ -179,7 +178,7 @@ int main(int argc, char **argv) {
     run_use_dense      = true;
   }
 
-  for(int i=10000;i<1000'001;i*=100) {
+  for(int i=10000;i<100'001;i*=100) {
     if (run_use_std_vector)
       use_std_vector(i);
 
