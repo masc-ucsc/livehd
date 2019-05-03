@@ -11,6 +11,7 @@
 #include <sys/types.h>
 #include <queue>
 #include <tuple>
+#include <fstream>
 
 #include <string>
 
@@ -72,7 +73,7 @@ protected:
   
   std::unique_ptr<Ast_parser> ast;
   absl::flat_hash_map<std::string, Token_id> pyrope_keyword;
-  ofstream debug_log;
+  std::ofstream debug_log;
   
   enum Prp_rules: Rule_id {
     Prp_invalid = 0,
@@ -185,6 +186,7 @@ protected:
   bool go_back(int num_tok);
   void debug_up(Rule_id rid);
   void debug_down();
+  //void debug_add(std::string rule_name, Rule_id, rid);
   
   void ast_handler();
   void process_ast();
