@@ -19,6 +19,7 @@
 #include "ast.hpp"
 #include "elab_scanner.hpp"
 
+#define DEBUG_RUN 1
 // using node_data = std::tuple<Rule_id, Token_entry>;
 
 // control
@@ -55,8 +56,23 @@ constexpr Token_id Pyrope_id_punch = 150;
 
 class Prp : public Elab_scanner {
 protected:
+  struct debug_statistics{
+    uint16_t rules_called;
+    uint16_t rules_matched;
+    uint16_t tokens_consumed;
+    uint16_t tokens_unconsumed;
+    uint16_t ast_up_calls;
+    uint16_t ast_down_calls;
+    uint16_t ast_add_calls;
+  };
+  
+  debug_statistics debug_stat{0,0,0,0,0,0,0};
+  std::vector<std::string> rule_call_trace;
+  std::vector<std::string> ast_call_trace;
+  
   std::unique_ptr<Ast_parser> ast;
   absl::flat_hash_map<std::string, Token_id> pyrope_keyword;
+  ofstream debug_log;
   
   enum Prp_rules: Rule_id {
     Prp_invalid = 0,
@@ -172,6 +188,10 @@ protected:
   
   void ast_handler();
   void process_ast();
+  
+  void open_log();
+  void close_log();
+  void write_log(std::string log_message);
   
 public:
   Prp() {
