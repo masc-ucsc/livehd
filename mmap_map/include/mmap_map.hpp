@@ -623,26 +623,20 @@ private:
 
 	size_t calcNumBytesInfo(size_t numElements) const {
 		const size_t s = sizeof(uint8_t) * (numElements + 1);
-		if (mmap_map_UNLIKELY(s / sizeof(uint8_t) != numElements + 1)) {
-			throwOverflowError();
-		}
+		assert(s / sizeof(uint8_t) == numElements + 1);
 		// make sure it's a bit larger, so we can load 64bit numbers
 		return s + sizeof(uint64_t);
 	}
 	size_t calcNumBytesNode(size_t numElements) const {
 		const size_t s = sizeof(Node) * numElements;
-		if (mmap_map_UNLIKELY(s / sizeof(Node) != numElements)) {
-			throwOverflowError();
-		}
+		assert(s / sizeof(Node) == numElements);
 		return s;
 	}
 	size_t calcNumBytesTotal(size_t numElements) const {
 		const size_t si = calcNumBytesInfo(numElements);
 		const size_t sn = calcNumBytesNode(numElements);
 		const size_t s = si + sn;
-		if (mmap_map_UNLIKELY(s <= si || s <= sn)) {
-			throwOverflowError();
-		}
+		assert(!(s <= si || s <= sn));
 		return s;
 	}
 
@@ -925,9 +919,7 @@ private:
 	size_t insert_move(Node&& keyval) {
 		// we don't retry, fail if overflowing
 		// don't need to check max num elements
-		if (0 == *mMaxNumElementsAllowed && !try_increase_info()) {
-			report_badhash();
-		}
+		assert(*mMaxNumElementsAllowed && !try_increase_info());
 
 		int idx;
 		InfoType info;
@@ -1058,15 +1050,6 @@ public:
 		destroy();
 	}
 
-#if 0
-	mapped_type& operator[](const key_type& key) {
-		return doCreateByKey(key);
-	}
-
-	mapped_type& operator[](key_type&& key) {
-		return doCreateByKey(std::move(key));
-	}
-#endif
 	void set(key_type&& key, T &&val) {
 		doCreate(std::move(key), std::move(val));
 	}
@@ -1113,18 +1096,6 @@ public:
 	}
 
 	// Returns a reference to the value found for key.
-	// Throws std::out_of_range if element cannot be found
-	mapped_type& at(key_type const& key) {
-		auto kv = mKeyVals + findIdx(key);
-#ifndef NDEBUG
-		if (kv == reinterpret_cast<Node*>(mKeyVals)) {
-			doThrow<std::out_of_range>("key not found");
-		}
-#endif
-		return kv->getSecond();
-	}
-
-	// Returns a reference to the value found for key.
 	T const& get(key_type const& key) const {
 		auto idx = findIdx(key);
 		assert(idx>=0);
@@ -1133,6 +1104,18 @@ public:
       return get_val(mKeyVals[idx].getSecond());
     }else{
       return mKeyVals[idx].getSecond();
+    }
+	}
+
+	T *ref(key_type const& key) {
+		auto idx = findIdx(key);
+		assert(idx>=0);
+
+		if constexpr (std::is_same<T, std::string_view>::value) {
+      assert(false); // Do not get a reference to a std::string_view
+      return &get_val(mKeyVals[idx].getSecond());
+    }else{
+      return &mKeyVals[idx].getSecond();
     }
 	}
 
@@ -1241,13 +1224,77 @@ public:
 		while (calcMaxNumElementsAllowed(newSize) < count && newSize != 0) {
 			newSize *= 2;
 		}
-		if (mmap_map_UNLIKELY(newSize == 0)) {
-			throwOverflowError();
-		}
+		assert(newSize != 0);
 
 		rehash(newSize);
 	}
 
+	size_type size() const {
+		return *mNumElements;
+	}
+
+	bool empty() const {
+		return 0 == *mNumElements;
+	}
+
+	size_t capacity() const {
+		if (loaded)
+			return *mMaxNumElementsAllowed;
+		return calcMaxNumElementsAllowed(InitialNumElements);
+	}
+
+	float max_load_factor() const {
+		return MaxLoadFactor100 / 100.0f;
+	}
+
+	// Average number of elements per bucket. Since we allow only 1 per bucket
+	float load_factor() const {
+		return static_cast<float>(size()) / (*mMask + 1);
+	}
+
+	size_t txt_size() const {
+		if constexpr (std::is_same<Key, std::string_view>::value) {
+			return txt_vector.size();
+		}else{
+			return 0;
+		}
+	}
+
+#ifndef NDEBUG
+	float conflict_factor() const {
+		return static_cast<float>(conflicts) / (*mNumElements + 1);
+	}
+#else
+	float conflict_factor() const { return 0.0; }
+#endif
+
+	std::string_view get_key(const value_type it) const {
+		if (mmap_map_UNLIKELY(!loaded)) {
+			reload();
+		}
+
+    if constexpr (std::is_same<Key, std::string_view>::value) {
+      return get_sview(it.getFirst());
+    }else{
+      assert(false); // get_val only makes sense when the KEY is std::string_view
+      return "bug";
+    }
+	}
+
+	std::string_view get_val(const value_type it) const {
+		if (mmap_map_UNLIKELY(!loaded)) {
+			reload();
+		}
+
+    if constexpr (std::is_same<T, std::string_view>::value) {
+      return get_sview(it.getSecond());
+    }else{
+      assert(false); // get_val only makes sense when the DATA is std::string_view
+      return "bug";
+    }
+	}
+
+private:
 	void rehash(size_t numBuckets) {
 		assert(mmap_map_UNLIKELY((numBuckets & (numBuckets - 1)) == 0)); // rehash only allowed for power of two
 
@@ -1289,81 +1336,10 @@ public:
 
 		unlink((mmap_name + "old").c_str());
 	}
-
-	size_type size() const {
-		return *mNumElements;
-	}
-
-	size_type max_size() const {
-		return static_cast<size_type>(-1);
-	}
-
-	bool empty() const {
-		return 0 == *mNumElements;
-	}
-
-	size_t capacity() const {
-		if (loaded)
-			return *mMaxNumElementsAllowed;
-		return calcMaxNumElementsAllowed(InitialNumElements);
-	}
-
-	float max_load_factor() const {
-		return MaxLoadFactor100 / 100.0f;
-	}
-
-	// Average number of elements per bucket. Since we allow only 1 per bucket
-	float load_factor() const {
-		return static_cast<float>(size()) / (*mMask + 1);
-	}
-
-	size_t txt_size() const {
-		if constexpr (std::is_same<Key, std::string_view>::value) {
-			return txt_vector.size();
-		}else{
-			return 0;
-		}
-	}
-
-#ifndef NDEBUG
-	float conflict_factor() const {
-		return static_cast<float>(conflicts) / (*mNumElements + 1);
-	}
-#else
-	float conflict_factor() const { return 0.0; }
-#endif
-
 	size_t mask() const {
 		return *mMask;
 	}
 
-	std::string_view get_key(const value_type it) const {
-		if (mmap_map_UNLIKELY(!loaded)) {
-			reload();
-		}
-
-    if constexpr (std::is_same<Key, std::string_view>::value) {
-      return get_sview(it.getFirst());
-    }else{
-      assert(false); // get_val only makes sense when the KEY is std::string_view
-      return "bug";
-    }
-	}
-
-	std::string_view get_val(const value_type it) const {
-		if (mmap_map_UNLIKELY(!loaded)) {
-			reload();
-		}
-
-    if constexpr (std::is_same<T, std::string_view>::value) {
-      return get_sview(it.getSecond());
-    }else{
-      assert(false); // get_val only makes sense when the DATA is std::string_view
-      return "bug";
-    }
-	}
-
-private:
 	mutable std::vector<std::string> txt_vector;
 	uint32_t allocate_sview_id(std::string_view txt) {
     assert(using_sview);
@@ -1371,22 +1347,16 @@ private:
 		txt_vector.push_back(s);
 		return txt_vector.size()-1;
 	}
+
 	std::string_view get_sview(uint32_t key_pos) const {
     assert(using_sview);
 		assert(key_pos<txt_vector.size());
 		return txt_vector[key_pos];
 	}
+
 	void clear_sview() const {
     assert(using_sview);
 		txt_vector.clear();
-	}
-
-	mmap_map_NOINLINE void throwOverflowError() const {
-		throw std::overflow_error("mmap_map::map overflow");
-	}
-	mmap_map_NOINLINE void report_badhash() const {
-		std::cerr << "mmap_map::map FATAL really bad hash function, mmap_name:" << mmap_name << "\n";
-		assert(false);
 	}
 
 	template <typename Arg, typename Data>
@@ -1600,9 +1570,7 @@ private:
 				<< (static_cast<double>(*mNumElements) * 100.0 /
 					(static_cast<double>(*mMask) + 1)));
 		// it seems we have a really bad hash function! don't try to resize again
-		if (*mNumElements * 2 < calcMaxNumElementsAllowed(*mMask + 1)) {
-			report_badhash();
-		}
+		assert(*mNumElements * 2 >= calcMaxNumElementsAllowed(*mMask + 1));
 
 		rehash((*mMask + 1) * 2);
 	}

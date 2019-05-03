@@ -1,5 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <unistd.h>
+
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -69,6 +71,63 @@ TEST_F(Setup_mmap_map_test, string_data) {
 
     fmt::print("load_factor:{} conflict_factor:{} txt_size:{}\n",map.load_factor(), map.conflict_factor(),map.txt_size());
   }
+}
+
+TEST_F(Setup_mmap_map_test, string_data_persistance) {
+  Rng rng(123);
+
+  absl::flat_hash_map<uint32_t, std::string> map2;
+
+  unlink("mmap_map_test_sview_data");
+  EXPECT_EQ(access("mmap_map_test_sview_data", F_OK), -1);
+
+  int conta;
+  for(int i=0;i<3;i++) {
+    mmap_map::unordered_map<uint32_t, std::string_view> map("mmap_map_test_sview_data");
+    map.clear();
+    map2.clear();
+
+    conta = 0;
+    for(int i=0;i<10000;i++) {
+      int key = rng.uniform<int>(0xFFFF);
+      std::string key_str = std::to_string(key)+"foo";
+
+      if (map.has(key)) {
+        EXPECT_EQ(map2.count(key),1);
+        continue;
+      }
+
+      conta++;
+
+      EXPECT_TRUE(!map.has(key));
+      map.set(key,key_str);
+      EXPECT_TRUE(map.has(key));
+
+      EXPECT_EQ(map2.count(key),0);
+      map2[key] = key_str;
+      EXPECT_EQ(map2.count(key),1);
+    }
+  }
+
+  EXPECT_EQ(access("mmap_map_test_sview_data", F_OK), 0);
+  EXPECT_EQ(access("mmap_map_test_sview_datatxt", F_OK), 0);
+
+  {
+    mmap_map::unordered_map<uint32_t, std::string_view> map("mmap_map_test_sview_data");
+    for(auto it:map) {
+      (void)it;
+      EXPECT_EQ(map.get_val(it), std::to_string(it.first) + "foo");
+      conta--;
+    }
+    for(auto it:map2) {
+      EXPECT_TRUE(map.has(it.first));
+    }
+
+    EXPECT_EQ(conta,0);
+
+    fmt::print("load_factor:{} conflict_factor:{} txt_size:{}\n",map.load_factor(), map.conflict_factor(),map.txt_size());
+  }
+
 }
 
 TEST_F(Setup_mmap_map_test, string_key) {
