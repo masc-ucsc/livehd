@@ -62,8 +62,8 @@ void random_lgraph_map(int max) {
 
   for (int n = 1; n < 400; ++n) {
     for (int i = 0; i < 10'000; ++i) {
-      int pos = rng.uniform<int>(max);
-      map[pos] = i;
+      uint32_t pos = rng.uniform<int>(max);
+      map.set(pos,i);
       pos = rng.uniform<int>(max);
       map.erase(pos);
     }

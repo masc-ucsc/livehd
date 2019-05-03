@@ -1068,10 +1068,16 @@ public:
 	}
 #endif
 	void set(key_type&& key, T &&val) {
-		return doCreate(std::move(key), std::move(val));
+		doCreate(std::move(key), std::move(val));
 	}
 	void set(const key_type& key, T &&val) {
-		return doCreate(key, std::move(val));
+		doCreate(key, std::move(val));
+	}
+	void set(const key_type& key, const T &val) {
+		doCreate(key, val);
+	}
+	void set(key_type&& key, const T &val) {
+		doCreate(std::move(key), val);
 	}
 
 	template <typename Iter>
@@ -1393,33 +1399,36 @@ private:
 
 				// while we potentially have a match. Can't do a do-while here because when mInfo is 0
 				// we don't want to skip forward
+        bool found = false;
 				while (info == mInfo[idx]) {
 					if (equals(key, mKeyVals[idx].getFirst())) {
-						// key already exists, do not insert.
-						return mKeyVals[idx].getSecond();
+            found = true;
+            break;
 					}
           idx  = next_idx(idx);
           info = next_info(info);
 				}
 
-				// unlikely that this evaluates to true
-				if (mmap_map_UNLIKELY(*mNumElements >= *mMaxNumElementsAllowed)) {
-					increase_size();
-					continue;
-				}
-
-				// key not found, so we are now exactly where we want to insert it.
 				auto const insertion_idx = idx;
 				auto const insertion_info = info;
-				if (mmap_map_UNLIKELY(insertion_info + mInfoInc > 0xFF)) {
-					*mMaxNumElementsAllowed = 0;
-				}
+        if (!found) {
+          // unlikely that this evaluates to true
+          if (mmap_map_UNLIKELY(*mNumElements >= *mMaxNumElementsAllowed)) {
+            increase_size();
+            continue;
+          }
 
-				// find an empty spot
-				while (0 != mInfo[idx]) {
-          idx  = next_idx(idx);
-          info = next_info(info);
-				}
+          // key not found, so we are now exactly where we want to insert it.
+          if (mmap_map_UNLIKELY(insertion_info + mInfoInc > 0xFF)) {
+            *mMaxNumElementsAllowed = 0;
+          }
+
+          // find an empty spot
+          while (0 != mInfo[idx]) {
+            idx  = next_idx(idx);
+            info = next_info(info);
+          }
+        }
 
 				auto& l = mKeyVals[insertion_idx];
 				if (idx == insertion_idx) {
@@ -1441,6 +1450,7 @@ private:
 									std::forward_as_tuple(std::forward<Arg>(key)), std::forward_as_tuple(val));
 					}
 				} else {
+          assert(!found);
 					shiftUp(idx, insertion_idx);
 					if constexpr (std::is_same<Key, std::string_view>::value) {
 						uint32_t key_pos = allocate_sview_id(key);

@@ -169,8 +169,8 @@ void random_lgraph_set(int max) {
 
   for (int n = 1; n < BENCH_OUT_SIZE; ++n) {
     for (int i = 0; i < BENCH_INN_SIZE; ++i) {
-      auto pos = rng.uniform<int>(max);
-      map[pos] = true;
+      auto pos = rng.uniform<uint32_t>(max);
+      map.set(pos,true);
 #ifdef USE_MAP_FALSE
       map[rng.uniform<int>(max)] = false;
       pos = rng.uniform<int>(max);
@@ -198,11 +198,11 @@ void random_lgraph_set(int max) {
       conta++;
 #endif
     }
-    map[rng.uniform<int>(max)] = true;
+    map.set(rng.uniform<uint32_t>(max),true);
 #ifdef USE_MAP_FALSE
     auto pos = rng.uniform<int>(max);
     if (map.find(pos) != map.end())
-      map[pos] = false;
+      map.set(pos,false);
 #else
     auto pos = rng.uniform<int>(max);
     if (map.find(pos) != map.end())
@@ -216,10 +216,10 @@ void random_lgraph_set(int max) {
 
   for (int i = 0; i < max; ++i) {
 #ifdef USE_MAP_FALSE
-    map[rng.uniform<int>(max)] = false;
-    map[rng.uniform<int>(max)] = false;
-    map[rng.uniform<int>(max)] = false;
-    map[rng.uniform<int>(max)] = false;
+    map.set(rng.uniform<uint32_t>(max),false);
+    map.set(rng.uniform<uint32_t>(max),false);
+    map.set(rng.uniform<uint32_t>(max),false);
+    map.set(rng.uniform<uint32_t>(max),false);
 #else
     map.erase(rng.uniform<int>(max));
     map.erase(rng.uniform<int>(max));

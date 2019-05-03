@@ -84,7 +84,7 @@ void use_lgraph_map(int max) {
     map.clear();
     int conta=0;
     for (int i = 0; i < max; ++i) {
-      map[i] = i;
+      map.set(i,i);
       conta++;
     }
     conta *= NIT;
