@@ -12,7 +12,7 @@ protected:
 
   static void work(Eprp_var &var);
 
-  void read_file();
+  void read_file(LGraph *g);
   void build_circuit(LGraph *g);
   void compute_timing();
   void populate_table();
