@@ -25,8 +25,8 @@ void Pass_opentimer::work(Eprp_var &var) {
 
   fmt::print("\nOpenTimer-LGraph Action Going On...\n\n");
 
-  pass.read_file();                                     // Task1: Read input files (implement read_sdc hack) | Status: 75% done
   for(const auto &g : var.lgs) {
+      pass.read_file(g);                                // Task1: Read input files (implement read_sdc hack) | Status: 75% done
       pass.build_circuit(g);                            // Task2: Traverse the lgraph and build the equivalent circuit (no dependencies) | Status: 15% done
   }
   pass.compute_timing();                                // Task3: Compute Timing (Will work once read_sdc() hack is implemented) | Status: 100% done
@@ -34,13 +34,52 @@ void Pass_opentimer::work(Eprp_var &var) {
 
 }
 
-void Pass_opentimer::read_file(){                        // Currently just reads hardcoded file
+void Pass_opentimer::read_file(LGraph *g){                                    // Currently just reads hardcoded file
   LGBench b("pass.opentimer.read_file");
-                                                         // Expand this method to reading from user input and later develop inou.add_liberty etc.
-
+                                                                              // Expand this method to reading from user input and later develop inou.add_liberty etc.
   timer.read_celllib ("pass/opentimer/ot_examples/osu018_stdcells.lib");
+  timer.read_verilog ("pass/opentimer/ot_examples/simple.v");
 
+  timer.create_clock("tau2015_clk", 5);
+
+  for(const auto &nid : g->forward()) {
+    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
+
+    std::string name(node.get_type().get_name());
+
+    if(node.get_type().get_name() == "graphio"){
+  //    fmt::print("Name {}\n",name);
+      for(const auto &edge : node.out_edges()) {
+        if(edge.driver.is_graph_input()){
+          std::string driver_name (edge.driver.get_name());
+  //        fmt::print("Driver Name {}\n\n", driver_name);
+
+          timer.set_at(driver_name,ot::MIN,ot::RISE,0)
+               .set_at(driver_name,ot::MIN,ot::FALL,0)
+               .set_at(driver_name,ot::MAX,ot::RISE,0)
+               .set_at(driver_name,ot::MAX,ot::FALL,0);
+
+          timer.set_slew(driver_name,ot::MIN,ot::RISE,0)
+               .set_slew(driver_name,ot::MIN,ot::FALL,0)
+               .set_slew(driver_name,ot::MAX,ot::RISE,0)
+               .set_slew(driver_name,ot::MAX,ot::FALL,0);
+        }
+      }
+
+      for(const auto &edge : node.out_edges()) {                             // Check how to add the driver of the output graphio and add it
+        if(edge.driver.is_graph_output()){
+          std::string driver_name (edge.driver.get_name());
+  //        fmt::print("Driver Name {}\n\n", driver_name);
+          timer.set_rat(driver_name,ot::MIN,ot::RISE,0)
+               .set_rat(driver_name,ot::MIN,ot::FALL,0)
+               .set_rat(driver_name,ot::MAX,ot::RISE,0)
+               .set_rat(driver_name,ot::MAX,ot::FALL,0);
+        }
+      }
+    }
+  }
 }
+
 
 void Pass_opentimer::build_circuit(LGraph *g) {              //Enhance this for build_circuit
   LGBench b("pass.opentimer.build_circuit");
@@ -71,6 +110,7 @@ void Pass_opentimer::build_circuit(LGraph *g) {              //Enhance this for 
   }
 }
 
+
 void Pass_opentimer::compute_timing(){                    // Expand this method to compute timing information
   LGBench b("pass.opentimer.compute_timing");
 
@@ -89,7 +129,10 @@ void Pass_opentimer::compute_timing(){                    // Expand this method 
   fmt::print("Number of pins {}\n", num_pins);
 
   auto num_nets = timer.num_nets();
-  fmt::print("Number of nets {}\n\n", num_nets);
+  fmt::print("Number of nets {}\n", num_nets);
+
+  auto opt_path = timer.report_timing(1);
+  std::cout << "Critical Path" << opt_path[0] <<'\n';
 
   timer.dump_graph(std::cout);
 
