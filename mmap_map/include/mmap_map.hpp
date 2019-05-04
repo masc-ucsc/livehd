@@ -673,6 +673,25 @@ private:
 		return total;
 	}
 
+	void grow_txt_mmap(size_t size) {
+    assert(mmap_txt_size<size);
+    mmap_txt_base = reinterpret_cast<uint64_t *>(mremap(mmap_txt_base, mmap_txt_size, size, MREMAP_MAYMOVE));
+    if (mmap_txt_base == MAP_FAILED) {
+      std::cerr << "ERROR: remmap could not allocate" << mmap_name << "txt with " << size << "bytes\n";
+      exit(-1);
+    }
+    if (mmap_txt_fd>=0) {
+      int ret = ftruncate(mmap_txt_fd, size);
+      if(ret<0) {
+        std::cerr << "ERROR: ftruncate could not allocate " << mmap_name << " to " << size << "\n";
+        mmap_base = 0;
+        exit(-1);
+      }
+    }
+
+    mmap_txt_size = size;
+  }
+
 	std::tuple<uint64_t *, size_t> create_mmap(int fd, size_t size) const {
     void *base;
 
@@ -722,26 +741,30 @@ private:
         mmap_txt_fd = -1;
       }
     }else{
-      mmap_fd = open(mmap_name.c_str(), O_RDWR | O_CREAT, 0644);
       if (mmap_fd<0) {
-        try_reclaim_mmaps();
-
         mmap_fd = open(mmap_name.c_str(), O_RDWR | O_CREAT, 0644);
         if (mmap_fd<0) {
-          std::cerr << "mmap_map::reload ERROR failed to setup " << mmap_name << std::endl;
-          exit(-4);
+          try_reclaim_mmaps();
+
+          mmap_fd = open(mmap_name.c_str(), O_RDWR | O_CREAT, 0644);
+          if (mmap_fd<0) {
+            std::cerr << "mmap_map::reload ERROR failed to setup " << mmap_name << std::endl;
+            exit(-4);
+          }
         }
       }
 
       if constexpr (using_sview) {
-        mmap_txt_fd = open((mmap_name + "txt").c_str(), O_RDWR | O_CREAT, 0644);
-        if (mmap_txt_fd < 0) {
-          try_reclaim_mmaps();
-
+        if (mmap_txt_fd<0) {
           mmap_txt_fd = open((mmap_name + "txt").c_str(), O_RDWR | O_CREAT, 0644);
           if (mmap_txt_fd < 0) {
-            std::cerr << "mmap_map::reload ERROR failed to setup " << mmap_name << "txt\n";
-            exit(-4);
+            try_reclaim_mmaps();
+
+            mmap_txt_fd = open((mmap_name + "txt").c_str(), O_RDWR | O_CREAT, 0644);
+            if (mmap_txt_fd < 0) {
+              std::cerr << "mmap_map::reload ERROR failed to setup " << mmap_name << "txt\n";
+              exit(-4);
+            }
           }
         }
       }
@@ -749,7 +772,9 @@ private:
 
     std::tie(mmap_base    , mmap_size    ) = create_mmap(mmap_fd    , calc_mmap_size(n_entries));
     if constexpr (using_sview) {
-      std::tie(mmap_txt_base, mmap_txt_size) = create_mmap(mmap_txt_fd, 8192);
+      if (mmap_txt_size==0) {
+        std::tie(mmap_txt_base, mmap_txt_size) = create_mmap(mmap_txt_fd, 8192);
+      }
     }
 
     mNumElements           = &mmap_base[0];
@@ -919,7 +944,10 @@ private:
 	size_t insert_move(Node&& keyval) {
 		// we don't retry, fail if overflowing
 		// don't need to check max num elements
-		assert(*mMaxNumElementsAllowed && !try_increase_info());
+    if (*mMaxNumElementsAllowed == 0) {
+      bool ok = try_increase_info();
+      assert(ok);
+    }
 
 		int idx;
 		InfoType info;
@@ -964,7 +992,7 @@ private:
 #ifndef NDEBUG
 		static int conta=0;
 		if (((++conta)&0xFFFF)==0 && *mNumElements>100) {
-			if (conflict_factor()>0.01) {
+			if (conflict_factor()>0.05) {
 				std::cerr << "potential bad hash for mmap_name:" << mmap_name << ", try to debug it\n";
 			}
 		}
@@ -1253,8 +1281,8 @@ public:
 	}
 
 	size_t txt_size() const {
-		if constexpr (std::is_same<Key, std::string_view>::value) {
-			return txt_vector.size();
+		if constexpr (using_sview) {
+			return mmap_txt_size;
 		}else{
 			return 0;
 		}
@@ -1314,6 +1342,7 @@ private:
 		Node* const oldKeyVals        = mKeyVals;
 		uint8_t const* const oldInfo  = mInfo;
 
+    mmap_fd = -1;
 		setup_mmap(numBuckets);
 
 		assert(*mNumElements == 0);
@@ -1340,23 +1369,55 @@ private:
 		return *mMask;
 	}
 
-	mutable std::vector<std::string> txt_vector;
 	uint32_t allocate_sview_id(std::string_view txt) {
+
+		if (mmap_map_UNLIKELY(!loaded))
+			reload();
+
     assert(using_sview);
-    std::string s(txt);
-		txt_vector.push_back(s);
-		return txt_vector.size()-1;
+
+    auto insert_point = mmap_txt_base[0]+1;
+    if (mmap_txt_size <= (8*insert_point+4096))
+      grow_txt_mmap(std::max(mmap_txt_size*2,8*insert_point+8192));
+    assert(mmap_txt_size > (8*insert_point+4096));
+
+    char *ptr = reinterpret_cast<char *>(&mmap_txt_base[insert_point+1]);
+    size_t sz=0;
+    for(const auto c:txt) {
+      *ptr++ = c;
+      sz++;
+      assert(sz<4096); // IDs should not be so long
+    }
+    mmap_txt_base[insert_point] = sz;
+    assert(sz == txt.size());
+    *ptr=0;
+    auto bytes = sz+1;
+    // Extra space from bytes&0xF to xtra_space
+    // 0 -> 0
+    // 1 -> 15
+    // 2 -> 14
+    // 14 -> 2
+    // 15 -> 1
+    uint8_t xtra_space = bytes&0xF;
+    xtra_space = (~xtra_space)&0xF;
+    mmap_txt_base[0] += 1+(bytes+xtra_space+7)/8; // +7 to cheaply round up, +1 for the strlen
+
+		return insert_point;
 	}
 
 	std::string_view get_sview(uint32_t key_pos) const {
     assert(using_sview);
-		assert(key_pos<txt_vector.size());
-		return txt_vector[key_pos];
+    assert(loaded);
+		assert(key_pos<mmap_txt_base[0]);
+		std::string_view sview(reinterpret_cast<char *>(&mmap_txt_base[key_pos+1]),mmap_txt_base[key_pos]);
+		return sview;
 	}
 
 	void clear_sview() const {
     assert(using_sview);
-		txt_vector.clear();
+    if (mmap_txt_base == nullptr)
+      return;
+    mmap_txt_base[0] = 0;
 	}
 
 	template <typename Arg, typename Data>
@@ -1436,10 +1497,12 @@ private:
 					}
 				}
 
-				// mKeyVals[idx].getFirst() = std::move(key);
-				mInfo[insertion_idx] = static_cast<uint8_t>(insertion_info);
+        if (!found) {
+          // mKeyVals[idx].getFirst() = std::move(key);
+          mInfo[insertion_idx] = static_cast<uint8_t>(insertion_info);
 
-				++(*mNumElements);
+          ++(*mNumElements);
+        }
 
 				//return mKeyVals[insertion_idx].getSecond();
         return;
@@ -1594,7 +1657,7 @@ private:
 	mutable InfoType mInfoInc;                                                     // 4 byte 44
 	mutable InfoType mInfoHashShift;                                               // 4 byte 48
 	mutable bool loaded = false;
-	std::string       mmap_name     = "invalid";
+	std::string       mmap_name;
 	mutable int       mmap_fd       = -1;
 	mutable size_t    mmap_size     = 0;
 	mutable uint64_t *mmap_base     = 0;

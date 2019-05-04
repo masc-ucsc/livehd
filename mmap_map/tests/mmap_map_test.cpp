@@ -57,7 +57,7 @@ TEST_F(Setup_mmap_map_test, string_data) {
 
     for(auto it:map) {
       (void)it;
-      if(it.getSecond() == 0)
+      if(it.getFirst() == 0)
         zero_found = true;
 
       EXPECT_EQ(map.get_val(it), std::to_string(it.first) + "foo");
@@ -133,8 +133,7 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
 TEST_F(Setup_mmap_map_test, string_key) {
   Rng rng(123);
 
-  bool zero_found = false;
-  while(!zero_found) {
+  for(int i=0;i<4;++i) {
     mmap_map::unordered_map<std::string_view,uint32_t> map;
     map.clear();
     absl::flat_hash_map<std::string, uint32_t> map2;
@@ -163,9 +162,6 @@ TEST_F(Setup_mmap_map_test, string_key) {
 
     for(auto it:map) {
       (void)it;
-      if(it.getFirst() == 0)
-        zero_found = true;
-
       EXPECT_EQ(map.get_key(it), std::to_string(it.second) + "foo");
       EXPECT_EQ(map2.count(map.get_key(it)), 1);
       conta--;
