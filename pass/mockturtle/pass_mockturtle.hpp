@@ -7,7 +7,7 @@ class Pass_mockturtle : public Pass {
 protected:
   static void work(Eprp_var &var);
 
-  absl::flat_hash_map<Node::Compact, int> group_boundary;
+  absl::flat_hash_map<int, std::list<Node::Compact>> group_boundary_set;
   void lg_partition(LGraph *g);
 
   bool eligable_cell_op(Node_Type_Op cell_op) {
