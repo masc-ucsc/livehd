@@ -57,7 +57,7 @@ void Pass_mockturtle::work(Eprp_var &var) {
 }
 
 void Pass_mockturtle::lg_partition(LGraph *g) {
-  //absl::flat_hash_map<Node::Compact, int> group_boundary;
+  absl::flat_hash_map<Node::Compact, int> group_boundary;
   std::map<int, int> group_id_mapping;
   int group_id = 0;
 
@@ -145,7 +145,10 @@ void Pass_mockturtle::do_work(LGraph *g) {
     fmt::print("node_type:{} in_edges:{} out_edges:{}\n", it.second.first, it.second.second.first, it.second.second.second);
   }
 */
-  for (auto const it:group_boundary) {
-    fmt::print("Node identifier:{} Group ID:{}\n", it.first, it.second);
+  for (auto const group_id_it:group_boundary_set) {
+    fmt::print("Group ID:{}\n", group_id_it.first);
+    for (auto const node_it:group_id_it.second) {
+      fmt::print("Node identifier:{}\n", node_it);
+    }
   }
 }
