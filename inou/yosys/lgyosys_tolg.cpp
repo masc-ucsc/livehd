@@ -1134,7 +1134,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
         || entry_node.is_type(ShiftRight_Op)
         || entry_node.is_type(ShiftLeft_Op)) {
           sink_pid = entry_node.get_type().get_input_match(&conn.first.c_str()[1]);
-					printf("input_match[%s] -> pid:%d\n", &conn.first.c_str()[1], sink_pid);
+					//printf("input_match[%s] -> pid:%d\n", &conn.first.c_str()[1], sink_pid);
         } else if(entry_node.is_type(AFlop_Op)) {
           if(conn.first.str() == "\\ARST")
             sink_pid = 3;
