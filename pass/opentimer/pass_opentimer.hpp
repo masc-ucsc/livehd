@@ -14,6 +14,7 @@ protected:
 
   void read_file(LGraph *g);
   void build_circuit(LGraph *g);
+  void read_sdc(LGraph *g);
   void compute_timing();
   void populate_table();
 
