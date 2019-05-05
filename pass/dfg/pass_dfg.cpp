@@ -343,7 +343,7 @@ Node Pass_dfg::process_node(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, const 
     return process_if(dfg, cfg, aux_tree, data, cfg_node);
   }
   case CfgIfMerge_Op:{
-    I(false); //CfgIfMerge_Op should never enter process_node
+    I(false);
     return get_cfg_child(cfg, cfg_node);
   }
   default:
@@ -402,13 +402,17 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
 
   I(!oprd_pins.empty());
 
-  //if target is $, %, @, mux, put into pending table
+  //if target is %, @, mux, put into pending table
   //else, check globally, if it is only a local variable, don't need to create mux in parent scope
   //it's just used as intermediate variable in branch block
   if(is_pure_assign_op(op)) {
 
-    aux_tree->set_alias  (target, oprd_pins[0]);
-    if(target_pin.is_graph_io() || target_pin.get_node().get_type().op == FFlop_Op){
+    aux_tree->set_alias(target, oprd_pins[0]);
+    if(is_output(target))
+      I(target_pin.is_graph_output());
+
+    if(target_pin.is_graph_output() || target_pin.get_node().get_type().op == FFlop_Op){
+      fmt::print("hello222!!!!!!!!!\n");
       aux_tree->set_pending(target, oprd_pins[0]);
     } else if (aux_tree->get_parent(aux_tree->get_cur_aux())-> has_pending(target)){
       aux_tree->set_pending(target, oprd_pins[0]);
@@ -498,14 +502,16 @@ Node_pin Pass_dfg::process_target(LGraph *dfg, Aux_tree *aux_tree, std::string_v
 
   if(is_input(target)) {
     if(dfg->is_graph_input(target.substr(1))){
-      tpin = aux_tree->get_alias(target);
+      //tpin = aux_tree->get_alias(target);
+      tpin = dfg->get_graph_input(target.substr(1));
     } else {
       tpin = create_input(dfg, aux_tree, target);
       fmt::print("create node for input target:{}\n", target);
     }
   } else if(is_output(target)) {
     if(dfg->is_graph_output(target.substr(1))){
-      tpin = aux_tree->get_alias(target);
+      //tpin = aux_tree->get_alias(target);
+      tpin = dfg->get_graph_output_driver(target.substr(1));
     } else {
       tpin = create_output(dfg, aux_tree, target);
       fmt::print("create node for output target:{}\n", target);
@@ -677,6 +683,7 @@ Node Pass_dfg::process_if(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, const CF
   fmt::print("process_if() done!!\n");
   //tb_next is phi node, return its child to keep flow runs
   return get_cfg_child(cfg, tb_next);
+  //return tb_next;
 }
 
 void Pass_dfg::resolve_phis(LGraph *dfg, Aux_tree *aux_tree, Aux *paux, Aux *taux, Aux *faux, Node_pin cond) {
