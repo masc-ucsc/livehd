@@ -453,7 +453,9 @@ private:
         ,"mmap_map can not have std::string_view for key and value simultaneously\n");
 	static_assert(MaxLoadFactor100 > 10 && MaxLoadFactor100 < 100, "MaxLoadFactor100 needs to be >10 && < 100");
 
-  static constexpr bool    using_sview          = std::is_same<Key, std::string_view>::value || std::is_same<T, std::string_view>::value;
+  static constexpr bool    using_key_sview      = std::is_same<Key, std::string_view>::value;
+  static constexpr bool    using_val_sview      = std::is_same<T, std::string_view>::value;
+  static constexpr bool    using_sview          = using_key_sview || using_val_sview;
 	static constexpr size_t  InitialNumElements   = 1024;
 	static constexpr int     InitialInfoNumBits   = 5;
 	static constexpr uint8_t InitialInfoInc       = 1 << InitialInfoNumBits;
@@ -657,12 +659,18 @@ private:
 			close(mmap_fd);
 			mmap_fd = -1;
 		}
+    if constexpr (using_sview) {
+      if (mmap_txt_fd >= 0) {
+        close(mmap_txt_fd);
+        mmap_txt_fd = -1;
+      }
+    }
 
 		if (is_empty) {
 			unlink(mmap_name.c_str());
-			if constexpr (std::is_same<Key, std::string_view>::value) {
-				clear_sview();
-			}
+      if constexpr (using_sview) {
+        unlink((mmap_name+"txt").c_str());
+      }
 		}
 	}
 
@@ -740,6 +748,8 @@ private:
       if constexpr (using_sview) {
         mmap_txt_fd = -1;
       }
+      if (n_entries == 0)
+        n_entries = InitialNumElements;
     }else{
       if (mmap_fd<0) {
         mmap_fd = open(mmap_name.c_str(), O_RDWR | O_CREAT, 0644);
@@ -751,6 +761,16 @@ private:
             std::cerr << "mmap_map::reload ERROR failed to setup " << mmap_name << std::endl;
             exit(-4);
           }
+        }
+      }
+
+      if (n_entries==0) { // reload
+        int sz = read(mmap_fd,&n_entries,8);
+        if (sz!=8) {
+          n_entries = InitialNumElements;
+        }else{
+          n_entries++; // We read mMask at base 0
+          assert(n_entries>=InitialNumElements);
         }
       }
 
@@ -777,27 +797,30 @@ private:
       }
     }
 
-    mNumElements           = &mmap_base[0];
-		mMask                  = &mmap_base[1];
+		mMask                  = &mmap_base[0];
+    mNumElements           = &mmap_base[1];
 		mMaxNumElementsAllowed = &mmap_base[2];
+		mInfoInc               = reinterpret_cast<InfoType *>(&mmap_base[3]);
+		mInfoHashShift         = reinterpret_cast<InfoType *>(&mmap_base[4]);
 
-		mInfo = reinterpret_cast<uint8_t*>(&mmap_base[3]);
-		if (*mMask == 0) {
-			*mMaxNumElementsAllowed = calcMaxNumElementsAllowed(n_entries);
-			assert(*mMaxNumElementsAllowed <= n_entries); // less due to load factor
-			*mMask = n_entries - 1;
-			assert(*mNumElements==0);
-			mKeyVals = reinterpret_cast<Node*>(&mmap_base[3+(*mMask+9)/sizeof(uint64_t)]); // 9 to be 8 byte aligned
-			mInfo[n_entries] = 1; // Sentinel
-		}else{
+		mInfo = reinterpret_cast<uint8_t*>(&mmap_base[5]);
+		if (*mMask == n_entries - 1) {
 			assert(*mMaxNumElementsAllowed<*mMask);
 			assert(calc_mmap_size(*mMask+1)==mmap_size);
 			assert(mInfo[*mMask+1] == 1); // Sentinel
-			mKeyVals = reinterpret_cast<Node*>(&mmap_base[3+(*mMask+9)/sizeof(uint64_t)]);
+			mKeyVals = reinterpret_cast<Node*>(&mmap_base[5+(*mMask+9)/sizeof(uint64_t)]);
+    }else{
+			assert(*mMaxNumElementsAllowed <= n_entries); // less due to load factor
+			assert(*mNumElements==0);
+      // Setup intial mmap values
+			*mMaxNumElementsAllowed = calcMaxNumElementsAllowed(n_entries);
+			*mMask = n_entries - 1;
+			mInfo[n_entries] = 1; // Sentinel
+      *mInfoInc       = InitialInfoInc;
+      *mInfoHashShift = InitialInfoHashShift;
+			mKeyVals = reinterpret_cast<Node*>(&mmap_base[5+(*mMask+9)/sizeof(uint64_t)]); // 9 to be 8 byte aligned
 		}
 
-		mInfoInc       = InitialInfoInc;
-		mInfoHashShift = InitialInfoHashShift;
 	}
 
 	void reload() const {
@@ -805,7 +828,7 @@ private:
 
 		assert(mmap_fd <0);
 
-		setup_mmap(InitialNumElements);
+		setup_mmap(0);
 
 		gc_queue.push(std::bind(&unordered_map<MaxLoadFactor100, Key, T, Hash>::garbage_collect, this));
 
@@ -826,7 +849,7 @@ private:
 		}
 
 		idx = Hash::operator()(key) * bad_hash_prevention;
-		info = static_cast<InfoType>(mInfoInc + static_cast<InfoType>(idx >> mInfoHashShift));
+		info = static_cast<InfoType>(*mInfoInc + static_cast<InfoType>(idx >> *mInfoHashShift));
 		idx &= *mMask;
 	}
 
@@ -836,7 +859,7 @@ private:
     return idx;
 	}
 	inline InfoType next_info(InfoType info) const {
-		return static_cast<InfoType>(info + mInfoInc);
+		return static_cast<InfoType>(info + *mInfoInc);
 	}
 
 	void nextWhileLess(InfoType* info, int* idx) const {
@@ -855,8 +878,8 @@ private:
 		if (mmap_map_LIKELY(idx>insertion_idx)) {
 			memmove(&mKeyVals[insertion_idx+1],&mKeyVals[insertion_idx],(idx-insertion_idx)*sizeof(Node));
 			for(auto i=idx;i>insertion_idx;--i) {
-				mInfo[i] = static_cast<uint8_t>(mInfo[i-1] + mInfoInc);
-				if (mmap_map_UNLIKELY(mInfo[i] + mInfoInc > 0xFF)) {
+				mInfo[i] = static_cast<uint8_t>(mInfo[i-1] + *mInfoInc);
+				if (mmap_map_UNLIKELY(mInfo[i] + *mInfoInc > 0xFF)) {
 					*mMaxNumElementsAllowed = 0;
 				}
 			}
@@ -875,8 +898,8 @@ private:
 				::new (static_cast<void*>(mKeyVals + idx)) Node(std::move(mKeyVals[prev_idx]));
 			}
 #endif
-			mInfo[idx] = static_cast<uint8_t>(mInfo[prev_idx] + mInfoInc);
-			if (mmap_map_UNLIKELY(mInfo[idx] + mInfoInc > 0xFF)) {
+			mInfo[idx] = static_cast<uint8_t>(mInfo[prev_idx] + *mInfoInc);
+			if (mmap_map_UNLIKELY(mInfo[idx] + *mInfoInc > 0xFF)) {
 				*mMaxNumElementsAllowed = 0;
 			}
 			idx = prev_idx;
@@ -891,8 +914,8 @@ private:
 		// until we find one that is either empty or has zero offset.
 		auto nextIdx = next_idx(idx);
 
-		while (mInfo[nextIdx] >= 2 * mInfoInc) {
-			mInfo[idx] = static_cast<uint8_t>(mInfo[nextIdx] - mInfoInc);
+		while (mInfo[nextIdx] >= 2 * *mInfoInc) {
+			mInfo[idx] = static_cast<uint8_t>(mInfo[nextIdx] - *mInfoInc);
 			mKeyVals[idx] = std::move(mKeyVals[nextIdx]);
 			idx = nextIdx;
 			nextIdx = next_idx(idx);
@@ -951,7 +974,7 @@ private:
 
 		int idx;
 		InfoType info;
-		if constexpr (std::is_same<Key, std::string_view>::value) {
+		if constexpr (using_key_sview) {
 			keyToIdx(get_sview(keyval.getFirst()), idx, info);
 		}else{
 			keyToIdx(keyval.getFirst(), idx, info);
@@ -966,7 +989,7 @@ private:
 		// key not found, so we are now exactly where we want to insert it.
 		auto const insertion_idx = idx;
 		auto const insertion_info = static_cast<uint8_t>(info);
-		if (mmap_map_UNLIKELY(insertion_info + mInfoInc > 0xFF)) {
+		if (mmap_map_UNLIKELY(insertion_info + *mInfoInc > 0xFF)) {
 			*mMaxNumElementsAllowed = 0;
 		}
 
@@ -1002,6 +1025,21 @@ private:
 		return insertion_idx;
 	}
 
+  void setup_pointers() {
+		static size_t static_mNumElements           = 0;
+		static size_t static_mMask                  = 0;
+		static size_t static_mMaxNumElementsAllowed = 0;
+		static InfoType static_InitialInfoInc       = InitialInfoInc;
+		static InfoType static_InitialInfoHashShift = InitialInfoHashShift;
+
+		assert(static_mMask==0);
+
+		mNumElements           = &static_mNumElements;
+		mMask                  = &static_mMask;
+		mMaxNumElementsAllowed = &static_mMaxNumElementsAllowed;
+		mInfoInc               = &static_InitialInfoInc;
+		mInfoHashShift         = &static_InitialInfoHashShift;
+  }
 public:
 	using iterator = Iter<false>;
 	using const_iterator = Iter<true>;
@@ -1010,33 +1048,13 @@ public:
 		: Hash{Hash{}}
 	  , mmap_name{_map_name} {
 
-		static size_t static_mNumElements           = 0;
-		static size_t static_mMask                  = 0;
-		static size_t static_mMaxNumElementsAllowed = 0;
-
-		assert(static_mMask==0);
-
-		mNumElements           = &static_mNumElements;
-		mMask                  = &static_mMask;
-		mMaxNumElementsAllowed = &static_mMaxNumElementsAllowed;
-		mInfoInc               = InitialInfoInc;
-		mInfoHashShift         = InitialInfoHashShift;
+    setup_pointers();
 	}
 
 	explicit unordered_map()
 		: Hash{Hash{}} {
 
-		static size_t static_mNumElements           = 0;
-		static size_t static_mMask                  = 0;
-		static size_t static_mMaxNumElementsAllowed = 0;
-
-		assert(static_mMask==0);
-
-		mNumElements           = &static_mNumElements;
-		mMask                  = &static_mMask;
-		mMaxNumElementsAllowed = &static_mMaxNumElementsAllowed;
-		mInfoInc               = InitialInfoInc;
-		mInfoHashShift         = InitialInfoHashShift;
+    setup_pointers();
 	}
 
 	unordered_map(unordered_map&& o) = delete;
@@ -1066,8 +1084,8 @@ public:
 		uint8_t const z = 0;
 		std::fill(mInfo, mInfo + (sizeof(uint8_t) * (*mMask + 1)), z);
 
-		mInfoInc = InitialInfoInc;
-		mInfoHashShift = InitialInfoHashShift;
+		*mInfoInc = InitialInfoInc;
+		*mInfoHashShift = InitialInfoHashShift;
 
     *mNumElements = 0;
 		// Do not clear mmap_name or loaded
@@ -1128,8 +1146,8 @@ public:
 		auto idx = findIdx(key);
 		assert(idx>=0);
 
-		if constexpr (std::is_same<T, std::string_view>::value) {
-      return get_val(mKeyVals[idx].getSecond());
+		if constexpr (using_val_sview) {
+      return get_val(mKeyVals[idx]);
     }else{
       return mKeyVals[idx].getSecond();
     }
@@ -1139,9 +1157,9 @@ public:
 		auto idx = findIdx(key);
 		assert(idx>=0);
 
-		if constexpr (std::is_same<T, std::string_view>::value) {
+		if constexpr (using_val_sview) {
       assert(false); // Do not get a reference to a std::string_view
-      return &get_val(mKeyVals[idx].getSecond());
+      return &get_val(mKeyVals[idx]);
     }else{
       return &mKeyVals[idx].getSecond();
     }
@@ -1296,12 +1314,12 @@ public:
 	float conflict_factor() const { return 0.0; }
 #endif
 
-	std::string_view get_key(const value_type it) const {
+	std::string_view get_key(const value_type &it) const {
 		if (mmap_map_UNLIKELY(!loaded)) {
 			reload();
 		}
 
-    if constexpr (std::is_same<Key, std::string_view>::value) {
+    if constexpr (using_key_sview) {
       return get_sview(it.getFirst());
     }else{
       assert(false); // get_val only makes sense when the KEY is std::string_view
@@ -1309,12 +1327,12 @@ public:
     }
 	}
 
-	std::string_view get_val(const value_type it) const {
+	std::string_view get_val(const value_type &it) const {
 		if (mmap_map_UNLIKELY(!loaded)) {
 			reload();
 		}
 
-    if constexpr (std::is_same<T, std::string_view>::value) {
+    if constexpr (using_val_sview) {
       return get_sview(it.getSecond());
     }else{
       assert(false); // get_val only makes sense when the DATA is std::string_view
@@ -1415,8 +1433,10 @@ private:
 
 	void clear_sview() const {
     assert(using_sview);
-    if (mmap_txt_base == nullptr)
+    if (mmap_txt_base == nullptr) {
+      unlink((mmap_name+"txt").c_str());
       return;
+    }
     mmap_txt_base[0] = 0;
 	}
 
@@ -1450,7 +1470,7 @@ private:
           }
 
           // key not found, so we are now exactly where we want to insert it.
-          if (mmap_map_UNLIKELY(insertion_info + mInfoInc > 0xFF)) {
+          if (mmap_map_UNLIKELY(insertion_info + *mInfoInc > 0xFF)) {
             *mMaxNumElementsAllowed = 0;
           }
 
@@ -1465,16 +1485,16 @@ private:
 				if (idx == insertion_idx) {
 					// put at empty spot. This forwards all arguments into the node where the object is
 					// constructed exactly where it is needed.
-					if constexpr (std::is_same<Key, std::string_view>::value) {
+					if constexpr (using_key_sview) {
 						uint32_t key_pos = allocate_sview_id(key);
 						::new (static_cast<void*>(&l))
 							Node(*this, std::piecewise_construct,
-									std::forward_as_tuple(std::forward<uint32_t>(key_pos)), std::forward_as_tuple(val));
-          }else if constexpr (std::is_same<T, std::string_view>::value) {
+									std::forward_as_tuple(key_pos), std::forward_as_tuple(val));
+          }else if constexpr (using_val_sview) {
 						uint32_t val_pos = allocate_sview_id(val);
 						::new (static_cast<void*>(&l))
 							Node(*this, std::piecewise_construct,
-									std::forward_as_tuple(std::forward<Arg>(key)), std::forward_as_tuple(std::forward<uint32_t>(val_pos)));
+									std::forward_as_tuple(std::forward<Arg>(key)), std::forward_as_tuple(val_pos));
 					}else{
 						::new (static_cast<void*>(&l))
 							Node(*this, std::piecewise_construct,
@@ -1483,14 +1503,14 @@ private:
 				} else {
           assert(!found);
 					shiftUp(idx, insertion_idx);
-					if constexpr (std::is_same<Key, std::string_view>::value) {
+					if constexpr (using_key_sview) {
 						uint32_t key_pos = allocate_sview_id(key);
 						l = Node(*this, std::piecewise_construct,
-								std::forward_as_tuple(std::forward<uint32_t>(key_pos)), std::forward_as_tuple(val));
-          }else if constexpr (std::is_same<T, std::string_view>::value) {
+								std::forward_as_tuple(key_pos), std::forward_as_tuple(val));
+          }else if constexpr (using_val_sview) {
 						uint32_t val_pos = allocate_sview_id(val);
 						l = Node(*this, std::piecewise_construct,
-								std::forward_as_tuple(std::forward<Arg>(key)), std::forward_as_tuple(std::forward<uint32_t>(val_pos)));
+								std::forward_as_tuple(std::forward<Arg>(key)), std::forward_as_tuple(val_pos));
 					}else{
 						l = Node(*this, std::piecewise_construct,
 								std::forward_as_tuple(std::forward<Arg>(key)), std::forward_as_tuple(val));
@@ -1515,7 +1535,7 @@ private:
 			while (true) {
 				int idx;
 				InfoType info;
-				if constexpr (std::is_same<Key, std::string_view>::value) {
+				if constexpr (using_key_sview) {
 					keyToIdx(get_sview(keyval.getFirst()), idx, info);
 				}else{
 					keyToIdx(keyval.getFirst(), idx, info);
@@ -1543,7 +1563,7 @@ private:
 				// key not found, so we are now exactly where we want to insert it.
 				auto const insertion_idx = idx;
 				auto const insertion_info = info;
-				if (mmap_map_UNLIKELY(insertion_info + mInfoInc > 0xFF)) {
+				if (mmap_map_UNLIKELY(insertion_info + *mInfoInc > 0xFF)) {
 					*mMaxNumElementsAllowed = 0;
 				}
 
@@ -1593,19 +1613,19 @@ private:
 	}
 
 	bool try_increase_info() {
-		mmap_map_LOG("mInfoInc=" << mInfoInc << ", numElements=" << mNumElements
+		mmap_map_LOG("mInfoInc=" << *mInfoInc << ", numElements=" << mNumElements
 				<< ", maxNumElementsAllowed="
 				<< calcMaxNumElementsAllowed(mMask + 1));
-		if (mInfoInc <= 2) {
+		if (*mInfoInc <= 2) {
 			// need to be > 2 so that shift works (otherwise undefined behavior!)
 			return false;
 		}
 		// we got space left, try to make info smaller
-		mInfoInc = static_cast<uint8_t>(mInfoInc >> 1);
+		*mInfoInc = static_cast<uint8_t>(*mInfoInc >> 1);
 
 		// remove one bit of the hash, leaving more space for the distance info.
 		// This is extremely fast because we can operate on 8 bytes at once.
-		++mInfoHashShift;
+		++(*mInfoHashShift);
 		auto const data = reinterpret_cast<uint64_t*>(mInfo);
 		auto const numEntries = (*mMask + 1) / 8;
 
@@ -1639,6 +1659,8 @@ private:
 	}
 
 	void destroy() {
+    if (!loaded)
+      return;
 
 		// Destroy is very infrequent in LGraph, must GC everybody
 		while(!gc_queue.empty()) {
@@ -1646,16 +1668,18 @@ private:
 			gc_queue.pop();
 			func();
 		}
+
+    assert(!loaded);
 	}
 
 	// members are sorted so no padding occurs
-	mutable Node *mKeyVals = reinterpret_cast<Node*>(&mInfoInc);
-	mutable uint8_t *mInfo = reinterpret_cast<uint8_t*>(&mInfoInc);
+	mutable Node *mKeyVals = nullptr;
+	mutable uint8_t *mInfo = nullptr;
 	mutable size_t *mNumElements;                                                   // 8 byte 24
 	mutable size_t *mMask;                                                          // 8 byte 32
 	mutable size_t *mMaxNumElementsAllowed;                                         // 8 byte 40
-	mutable InfoType mInfoInc;                                                     // 4 byte 44
-	mutable InfoType mInfoHashShift;                                               // 4 byte 48
+	mutable InfoType *mInfoInc;                                                     // 4 byte 44
+	mutable InfoType *mInfoHashShift;                                               // 4 byte 48
 	mutable bool loaded = false;
 	std::string       mmap_name;
 	mutable int       mmap_fd       = -1;

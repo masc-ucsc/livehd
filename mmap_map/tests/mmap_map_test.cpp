@@ -127,7 +127,6 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
 
     fmt::print("load_factor:{} conflict_factor:{} txt_size:{}\n",map.load_factor(), map.conflict_factor(),map.txt_size());
   }
-
 }
 
 TEST_F(Setup_mmap_map_test, string_key) {
@@ -159,6 +158,64 @@ TEST_F(Setup_mmap_map_test, string_key) {
       map2[key] = sz;
       EXPECT_EQ(map2.count(key),1);
     }
+
+    for(auto it:map) {
+      (void)it;
+      EXPECT_EQ(map.get_key(it), std::to_string(it.second) + "foo");
+      EXPECT_EQ(map2.count(map.get_key(it)), 1);
+      conta--;
+    }
+    for(auto it:map2) {
+      EXPECT_TRUE(map.has(it.first));
+    }
+
+    EXPECT_EQ(conta,0);
+
+    fmt::print("load_factor:{} conflict_factor:{} txt_size:{}\n",map.load_factor(), map.conflict_factor(),map.txt_size());
+  }
+}
+
+TEST_F(Setup_mmap_map_test, string_key_persistance) {
+  Rng rng(123);
+
+  int fd = open("mmap_map_test_str",O_WRONLY | O_CREAT,0600); // Try to create a bogus mmap
+  if (fd>=0) {
+    //write(fd, "bunch of garbage", strlen("bunch of garbage"));
+    close(fd);
+  }
+
+  absl::flat_hash_map<std::string, uint32_t> map2;
+
+  int conta;
+  {
+    mmap_map::unordered_map<std::string_view,uint32_t> map("mmap_map_test_str");
+    map.clear(); // Clear the garbage from before
+
+    conta = 0;
+    for(int i=0;i<10000;i++) {
+      int sz = rng.uniform<int>(0xFFFF);
+      std::string sz_str = std::to_string(sz)+"foo";
+      std::string_view key{sz_str};
+
+      if (map.has(key)) {
+        EXPECT_EQ(map2.count(key),1);
+        continue;
+      }
+
+      conta++;
+
+      EXPECT_TRUE(!map.has(key));
+      map.set(key, sz);
+      EXPECT_TRUE(map.has(key));
+
+      EXPECT_EQ(map2.count(key),0);
+      map2[key] = sz;
+      EXPECT_EQ(map2.count(key),1);
+    }
+  }
+
+  {
+    mmap_map::unordered_map<std::string_view,uint32_t> map("mmap_map_test_str");
 
     for(auto it:map) {
       (void)it;
