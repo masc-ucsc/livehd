@@ -107,6 +107,10 @@ void Pass_mockturtle::lg_partition(LGraph *g) {
     }
   }
 
+  for (const auto it:group_boundary) {
+    group_boundary_set[it.second].push_back(it.first);
+  }
+
 }
 
 void Pass_mockturtle::do_work(LGraph *g) {
@@ -145,9 +149,9 @@ void Pass_mockturtle::do_work(LGraph *g) {
     fmt::print("node_type:{} in_edges:{} out_edges:{}\n", it.second.first, it.second.second.first, it.second.second.second);
   }
 */
-  for (auto const group_id_it:group_boundary_set) {
+  for (const auto group_id_it:group_boundary_set) {
     fmt::print("Group ID:{}\n", group_id_it.first);
-    for (auto const node_it:group_id_it.second) {
+    for (const auto node_it:group_id_it.second) {
       fmt::print("Node identifier:{}\n", node_it);
     }
   }
