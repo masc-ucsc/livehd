@@ -282,10 +282,10 @@ void Inou_cfg::build_graph(std::vector<std::string> &words, std::string &dfg_dat
       fmt::print("connect end of T branch to phi node {}->{}\n", branch_chain_stacks[w8th].back(), w10th);
     }
     if(w9th != "null") {
-      I(branch_chain_stacks[w9th].back() != w10th);
+      //I(branch_chain_stacks[w9th].back() != w10th);
       if(branch_chain_stacks[w9th].back() != w10th) {
         dpin = name2node[branch_chain_stacks[w9th].back()].setup_driver_pin(0);
-        fmt::print("branch_chain_stacks[w9th] back{}\n", branch_chain_stacks[w9th].back());
+        fmt::print("branch_chain_stacks[w9th] back {}\n", branch_chain_stacks[w9th].back());
         spin = name2node[w10th].setup_sink_pin(0);
         g->add_edge(dpin, spin);
         fmt::print("connect end of F branch to phi node {}->{}\n", branch_chain_stacks[w8th].back(), w10th);
