@@ -1,36 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include <iostream>
-#include <sstream>
-
-#include <mockturtle/algorithms/cut_enumeration.hpp>
-
-#include <mockturtle/algorithms/resubstitution.hpp>
-
-#include <mockturtle/algorithms/refactoring.hpp>
-
-#include <mockturtle/algorithms/collapse_mapped.hpp>
-
-#include <mockturtle/algorithms/node_resynthesis.hpp>
-#include <mockturtle/algorithms/node_resynthesis/akers.hpp>
-#include <mockturtle/algorithms/node_resynthesis/direct.hpp>
-#include <mockturtle/algorithms/node_resynthesis/mig_npn.hpp>
-#include <mockturtle/algorithms/node_resynthesis/xmg_npn.hpp>
-
-#include <mockturtle/algorithms/cleanup.hpp>
-#include <mockturtle/generators/arithmetic.hpp>
-#include <mockturtle/io/write_bench.hpp>
-//#include <mockturtle/networks/aig.hpp>
-#include <mockturtle/networks/klut.hpp>
-#include <mockturtle/networks/mig.hpp>
-
-#include <mockturtle/algorithms/lut_mapping.hpp>
-#include <mockturtle/views/mapping_view.hpp>
-
-#include "lgbench.hpp"
-#include "lgedgeiter.hpp"
-#include "lgraph.hpp"
-
 #include "pass_mockturtle.hpp"
 
 void setup_pass_mockturtle() {
@@ -57,7 +26,6 @@ void Pass_mockturtle::work(Eprp_var &var) {
 }
 
 void Pass_mockturtle::lg_partition(LGraph *g) {
-  absl::flat_hash_map<Node::Compact, int> group_boundary;
   std::map<int, int> group_id_mapping;
   int group_id = 0;
 
@@ -107,10 +75,49 @@ void Pass_mockturtle::lg_partition(LGraph *g) {
     }
   }
 
-  for (const auto it:group_boundary) {
+  for (const auto &it:group_boundary) {
     group_boundary_set[it.second].push_back(it.first);
   }
 
+}
+
+void Pass_mockturtle::create_LUT_network(LGraph *g) {
+  for (const auto gid:group_boundary_set) {
+    auto klut = mockturtle::klut_network();
+    gid2klut[gid.first]=klut;
+    for (const auto gid_node:gid.second) {
+      auto cur_node = Node(g, 0, gid_node);
+
+      switch (cur_node.get_type().op) {
+        case And_Op:
+          /*
+          std::vector<mockturtle::klut_network::signal> in_sig;
+          for (const auto &in_edge : cur_node.inp_edges() ) {
+            const auto x = klut.create_pi();
+            edge_signal_mapping[in_edge] = x;
+            in_sig.push_back(x);
+          }
+          //check: how many inputs we have?
+          auto out_sig = in_sig[0];
+          for (long unsigned int i = 1; i < in_sig.size(); i++) {
+            out_sig = klut.create_and(in_sig[i], out_sig);
+          }
+          //FIX ME:
+          edge_signal_mapping[cur_node.out_edges()[0]]=out_sig;
+          */
+          break;
+
+        case Or_Op:
+          break;
+        case Xor_Op:
+          break;
+        default:
+          break;
+      }
+
+
+    }
+  }
 }
 
 void Pass_mockturtle::do_work(LGraph *g) {
@@ -136,9 +143,6 @@ void Pass_mockturtle::do_work(LGraph *g) {
     cell_type[node.get_compact()]=std::make_pair(name,std::make_pair(in_edges_num,out_edges_num));
 */
   }
-
-  lg_partition(g);
-
 //  fmt::print("Pass: number of cells {}\n", cell_type.size());
   fmt::print("{} nodes passed.\n", cell_amount);
 /*
@@ -149,10 +153,20 @@ void Pass_mockturtle::do_work(LGraph *g) {
     fmt::print("node_type:{} in_edges:{} out_edges:{}\n", it.second.first, it.second.second.first, it.second.second.second);
   }
 */
-  for (const auto group_id_it:group_boundary_set) {
+  fmt::print("Start partition...");
+
+  lg_partition(g);
+
+  for (const auto &group_id_it:group_boundary_set) {
     fmt::print("Group ID:{}\n", group_id_it.first);
-    for (const auto node_it:group_id_it.second) {
+    for (const auto &node_it:group_id_it.second) {
       fmt::print("Node identifier:{}\n", node_it);
     }
   }
+
+  fmt::print("Creating k-LUT network...");
+
+  create_LUT_network(g);
+
+
 }
