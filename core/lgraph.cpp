@@ -251,7 +251,7 @@ Node_pin_iterator LGraph::out_connected_pins(const Node &node) const {
   Index_ID idx2 = node.get_nid();
   I(node_internal[idx2].is_master_root());
 
-  absl::flat_hash_set<uint16_t> visited;
+  std::set<uint16_t> visited;
 
   while (true) {
     auto n = node_internal[idx2].get_num_local_outputs();

@@ -191,7 +191,9 @@ std::string_view Node::create_name() const {
   if (Ann_node_name::has(*this))
     return Ann_node_name::get(*this);
 
-  std::string signature = absl::StrCat("lg_", get_type().get_name());
+  std::string signature = absl::StrCat("lg_", get_type().get_name(), std::to_string(nid));
+  return Ann_node_name::set(*this, signature);
+  // FIXME: HERE. Does not scale for large designs (too much recursion)
 
   if (get_type().op == SubGraph_Op) {
     absl::StrAppend(&signature, "subid_", get_type_subgraph().value);
