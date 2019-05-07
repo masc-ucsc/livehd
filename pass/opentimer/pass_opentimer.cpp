@@ -14,9 +14,7 @@ void setup_pass_opentimer() {
 void Pass_opentimer::setup() {
   Eprp_method m1("pass.opentimer", "timing analysis on lgraph", &Pass_opentimer::work);
 
-  m1.add_label_optional("verilog:", "Verilog file for timing");
   m1.add_label_optional("liberty:", "Liberty file for timing");
-  m1.add_label_optional("sdc:", "SDC file for timing");
   m1.add_label_optional("spef:", "SPEF file for timing");
 
   register_pass(m1);
@@ -30,25 +28,24 @@ void Pass_opentimer::work(Eprp_var &var) {
   Pass_opentimer pass;
 
   auto liberty = var.get("liberty");
-  auto verilog = var.get("verilog");
-  auto sdc = var.get("sdc");
   auto spef = var.get("spef");
 
   for(const auto &g : var.lgs) {
-      pass.read_file(g);          // Task1: Read input files (Read user from input) | Status: 75% done
-      pass.build_circuit(g);      // Task2: Traverse the lgraph and build the equivalent circuit (no dependencies) | Status: 15% done
-      pass.read_sdc(g);           // Task3: SDC
-      pass.compute_timing();      // Task4: Compute Timing (Will work once read_sdc() hack is implemented) | Status: 100% done
-  //    pass.populate_table();      // Task5: Traverse the lgraph and populate the tables | Status: 0% done
+      pass.read_file(g, liberty, spef);          // Task1: Read input files (Read user from input) | Status: 75% done
+      pass.build_circuit(g);                                   // Task2: Traverse the lgraph and build the equivalent circuit (No dependencies) | Status: 50% done
+      pass.read_sdc(g);                                        // Task3: Traverse the lgraph and create fake SDC numbers | Status: 100% done
+      pass.compute_timing();                                   // Task4: Compute Timing | Status: 100% done
+      pass.populate_table();                                   // Task5: Traverse the lgraph and populate the tables | Status: 0% done
   }
-
 }
 
-void Pass_opentimer::read_file(LGraph *g){      // Currently just reads hardcoded file
+void Pass_opentimer::read_file(LGraph *g,std::string_view liberty, std::string_view spef){
 //  LGBench b("pass.opentimer.read_file");      // Expand this method to reading from user input and later develop inou.add_liberty etc.
 
-  timer.read_celllib ("pass/opentimer/ot_examples/osu018_stdcells.lib");
-  timer.read_verilog ("pass/opentimer/ot_examples/simpal.v");
+//  fmt::print("\n\nLiberty path: {}\n\n", liberty);
+//  timer.read_celllib ("pass/opentimer/ot_examples/osu018_stdcells.lib");
+  timer.read_celllib (liberty)
+       .read_spef (spef);
 
 }
 
@@ -126,10 +123,17 @@ void Pass_opentimer::build_circuit(LGraph *g) {       // Enhance this for build_
     if(node.get_type().get_name() == "blackbox"){
      // fmt::print("Name {}\n",name);
 
-    //  for(const auto &edge : node.out_edges()) {
-    //      std::string some_name (edge.sink.get_node().get_driver_pin(pid).get_name());
-    //      fmt::print("\n\nSome  Name {}\n\n", some_name);
-    //  }
+     // for(const auto &edge : node.out_edges()) {
+        //  std::string driver_name (edge.driver.get_name());
+        //  std::string node_pin_name (node.get_driver_pin(0).get_name());
+        //  fmt::print("Node Name: {} | Driver Name: {}\n", node_pin_name, driver_name);
+
+        // Get the name of the node (eg: NAND2X1), get the name of the corresponding node pin (eg: Y)
+        // Connect the driver (eg: n1) from the corresponding node pin
+        // Get the name of the node to which the driver is connected to (eg: NOR4X1), get the name of the corresponding node pin (eg: A)
+        // Concatenate strings with a : in between. Use absl::append ? 
+        // Use timer.connect_pin() to do the connections. eg: timer.connect_pin(NAND2X1:A, n1);
+     // }
     }
   }
 }
