@@ -76,16 +76,8 @@ void Pass_opentimer::build_circuit(LGraph *g) {       // Enhance this for build_
     if(node.get_type().get_name() == "blackbox"){
       timer.insert_gate(instance_name,celltype);
       //fmt::print("Cell Type: {} \t Instance Name {}\n", celltype, instance_name);
-    }
-  }
 
-  // BUILD NETS AND IO PINS
-  for(const auto &nid : g->forward()) {
-    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
-
-    if(node.get_type().get_name() == "blackbox"){
-     // fmt::print("Name {}\n",name);
-
+      // BUILD NETS AND IO PINS
       for(const auto &edge : node.out_edges()) {
           std::string driver_name (edge.driver.get_name());
        //   fmt::print("Driver Name {}\n\n", driver_name);
