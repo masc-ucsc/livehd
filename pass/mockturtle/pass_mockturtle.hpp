@@ -41,7 +41,7 @@ protected:
   absl::flat_hash_map<Node::Compact, int> group_boundary;
   absl::flat_hash_map<int, mockturtle::klut_network> gid2klut;
   absl::flat_hash_map<int, std::list<Node::Compact>> group_boundary_set;
-  absl::flat_hash_map<XEdge, mockturtle::klut_network::signal> edge_signal_mapping;
+  absl::flat_hash_map<XEdge, std::vector<mockturtle::klut_network::signal>> edge_signal_mapping;
   void lg_partition(LGraph *g);
   void create_LUT_network(LGraph *g);
 

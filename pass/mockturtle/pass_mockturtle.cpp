@@ -89,12 +89,34 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
       auto cur_node = Node(g, 0, gid_node);
 
       switch (cur_node.get_type().op) {
-        case Not_Op:
+        case Not_Op: {
           fmt::print("Node: Not Gate\n");
-          for (const auto &in_edge : cur_node.inp_edges() ) {
-            fmt::print("bit_width:{}\n",in_edge.get_bits());
+          //assuming there is only one input
+          I(cur_node.inp_edges().size()==1);
+          //I(cur_node.out_edges().size()==1);
+
+          std::vector<mockturtle::klut_network::signal> inp_sig, out_sig;
+          for (const auto &in_edge : cur_node.inp_edges()) {
+            fmt::print("input_bit_width:{}\n",in_edge.get_bits());
+            for (auto i=0;i<in_edge.get_bits();i++) {
+              //fmt::print("{}-b ",i);
+              auto x = klut.create_pi();
+              auto nx = klut.create_not(x);
+              inp_sig.push_back(x);
+              out_sig.push_back(nx);
+            }
+            //fmt::print("\n");
+            edge_signal_mapping[in_edge]=inp_sig;
+          }
+
+          for (const auto &out_edge : cur_node.out_edges()) {
+            fmt::print("output_bit_width:{}\n",out_edge.get_bits());
+            //assuming input and output have the same bit-width
+            I(cur_node.inp_edges()[0].get_bits()==out_edge.get_bits());
+            edge_signal_mapping[out_edge]=out_sig;
           }
           break;
+        }
         case And_Op:
           fmt::print("Node: And Gate\n");
           /*
