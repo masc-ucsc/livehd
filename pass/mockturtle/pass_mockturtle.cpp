@@ -89,7 +89,14 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
       auto cur_node = Node(g, 0, gid_node);
 
       switch (cur_node.get_type().op) {
+        case Not_Op:
+          fmt::print("Node: Not Gate\n");
+          for (const auto &in_edge : cur_node.inp_edges() ) {
+            fmt::print("bit_width:{}\n",in_edge.get_bits());
+          }
+          break;
         case And_Op:
+          fmt::print("Node: And Gate\n");
           /*
           std::vector<mockturtle::klut_network::signal> in_sig;
           for (const auto &in_edge : cur_node.inp_edges() ) {
@@ -106,12 +113,14 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
           edge_signal_mapping[cur_node.out_edges()[0]]=out_sig;
           */
           break;
-
         case Or_Op:
+          fmt::print("Node: Or Gate\n");
           break;
         case Xor_Op:
+          fmt::print("Node: Xor Gate\n");
           break;
         default:
+          fmt::print("Node: Unknown Gate\n");
           break;
       }
 
@@ -164,7 +173,7 @@ void Pass_mockturtle::do_work(LGraph *g) {
     }
   }
 
-  fmt::print("Creating k-LUT network...");
+  fmt::print("Creating k-LUT network...\n");
 
   create_LUT_network(g);
 
