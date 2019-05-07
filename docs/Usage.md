@@ -87,19 +87,16 @@ lgraph> exit
 $ ls lgdb/*.v
 ```
 
-### Generating a pyrope file from a graph
+### Generating json file from a graph
 
 ```bash
-$ mkdir pyrope_out
 $ ./bazel-bin/main/lgshell
 
 lgraph> inou.yosys.tolg files:./inou/yosys/tests/trivial.v |> @a
 lgraph> @a |> inou.json.fromlg output:trivial.json
-lgraph> @a |> inou.pyrope.fromlg odir:pyrope_out
 lgraph> exit
 
 $ ls trivial.json
-$ ls pyrope_output
 ```
 
 ### Low level directed build
