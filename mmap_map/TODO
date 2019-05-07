@@ -1,13 +1,10 @@
 
 BUGS:
 
- -Use mmap for txt. Use MREMAP_MAYMOVE when increasing size
-
- -Current mmap uses std::string_view for index, it has to support it for data too.
-
 Short term TODOs:
 
- -Create testbench that check persistence
+ 1-Ramdonly offset mKeyVals (0,128,256bytes) to reduce cache conflicts when
+multiple maps are traversed with the same indexes.
 
 Long term TODOs:
 
