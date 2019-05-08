@@ -628,9 +628,9 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
           picked_wire = get_wire(e.driver);
           break;
         case 1:
-          if(node.get_type().op != U32Const_Op)
+          if(e.driver.get_node().get_type().op != U32Const_Op)
             log_error("Internal Error: Pick range is not a constant.\n");
-          lower = node.get_type_const_value();
+          lower = e.driver.get_node().get_type_const_value();
           break;
         default:
           assert(0); // pids > 1 not supported

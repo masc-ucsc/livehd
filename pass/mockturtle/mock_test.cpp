@@ -45,7 +45,7 @@ int main() {
   }
 
   net.create_po( array2[31] );
-  net.create_po( net.create_nary_and(array) );
+  net.create_po( net.create_nary_xor(array) );
 
   // OPT1
   refactoring_params rf_ps;
