@@ -103,7 +103,7 @@ std::string Node_pin::debug_name() const {
   if (Ann_node_pin_name::has(*this))
     name = Ann_node_pin_name::get(*this);
 
-  return absl::StrCat("node_pin", std::to_string(idx), ":", std::to_string(pid), sink?"s":"d");
+  return absl::StrCat("node_pin_", name, std::to_string(get_node().nid), ":", std::to_string(pid), sink?"s":"d");
   //not a acceptable format for dot
   //return absl::StrCat("node_pin_", std::to_string(idx), ":", std::to_string(pid), sink?"s":"d", "(", name ,")");
 }

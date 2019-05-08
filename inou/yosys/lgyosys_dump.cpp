@@ -1063,6 +1063,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
 
       RTLIL::Cell *cell = module->addCell(absl::StrCat("\\",instance_name), RTLIL::IdString(absl::StrCat("\\", celltype)));
       bool is_param = false;
+      std::string current_name= "bbox";
       for(const auto &e:node.inp_edges()) {
         if(e.sink.get_pid() < LGRAPH_BBOP_OFFSET)
           continue;
@@ -1070,11 +1071,9 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         auto dpin_node = e.driver.get_node();
 
         if(LGRAPH_BBOP_ISIPARAM(e.sink.get_pid())) {
-          if(dpin_node.get_type().op != U32Const_Op)
-            log_error("Internal Error: Could not define if input is parameter.\n");
-          is_param = dpin_node.get_type_const_value() == 1;
+          //is_param = dpin_node.get_type_const_value() == 1;
+          current_name = dpin_node.get_type_const_sview();
         } else if(LGRAPH_BBOP_ISICONNECT(e.sink.get_pid())) {
-          auto current_name = e.driver.get_name();
           if(is_param) {
             if(dpin_node.get_type().op == U32Const_Op) {
               cell->setParam(absl::StrCat("\\",current_name), RTLIL::Const(dpin_node.get_type_const_value()));
@@ -1099,7 +1098,13 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         if (e.driver.is_graph_input())
           continue;
         if(LGRAPH_BBOP_ISICONNECT(e.sink.get_pid())) {
-          auto wname = absl::StrCat("\\",e.driver.get_name());
+          std::string wname;
+          if (e.driver.has_name()) {
+            wname = absl::StrCat("\\",e.driver.get_name());
+          } else {
+            wname = "\\wire_";
+            wname = unique_name(g, wname);
+          }
           cell->setPort(wname, cell_output_map[e.driver.get_compact()]);
         }
       }

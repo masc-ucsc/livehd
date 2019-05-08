@@ -170,7 +170,7 @@ public:
   Node create_node_const(std::string_view value, uint16_t bits);
   Node create_node_sub(Lg_type_id sub);
 
-  void dump() const;
+  void dump();
 
   Node_pin get_graph_input(std::string_view str);
   Node_pin get_graph_output(std::string_view str);

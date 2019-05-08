@@ -1105,16 +1105,8 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
         sink_pid = tcell->get_inp_pid(name);
 
       } else if(entry_node.is_type(BlackBox_Op) && !yosys_tech) {
-        if(is_black_box_input(module, cell, conn.first)) {
-          auto dpin = connect_constant(g, 0, exit_node, LGRAPH_BBOP_IPARAM(blackbox_port));
-          sink_pid = LGRAPH_BBOP_ICONNECT(blackbox_port);
-          if (!dpin.has_name())
-            dpin.set_name(&(conn.first.c_str()[1]));
-          blackbox_port++;
-        }else if(is_black_box_output(module, cell, conn.first)) {
-          auto dpin = exit_node.setup_driver_pin(blackbox_port);
-          if (!dpin.has_name())
-            dpin.set_name(&(conn.first.c_str()[1]));
+        if(is_black_box_input(module, cell, conn.first) || is_black_box_output(module, cell, conn.first)) {
+          connect_string(g, &(conn.first.c_str()[1]), exit_node, LGRAPH_BBOP_IPARAM(blackbox_port));
           sink_pid = LGRAPH_BBOP_ICONNECT(blackbox_port);
           blackbox_port++;
         } else {

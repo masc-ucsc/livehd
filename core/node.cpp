@@ -246,7 +246,7 @@ std::string Node::debug_name() const {
   if (Ann_node_name::has(*this))
     name = Ann_node_name::get(*this);
 
-  return absl::StrCat("node", std::to_string(nid));
+  return absl::StrCat("node_", name, std::to_string(nid));
   //not a acceptable format for dot
   //return absl::StrCat("node_", std::to_string(nid), "(", name ,")");
 }

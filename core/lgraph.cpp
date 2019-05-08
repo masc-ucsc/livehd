@@ -434,7 +434,7 @@ Backward_edge_iterator LGraph::backward() { return Backward_edge_iterator(this);
 // Skip after 1, but first may be deleted, so fast_next
 Fast_edge_iterator LGraph::fast() { return Fast_edge_iterator(fast_next(0), this);  }
 
-void LGraph::dump() const {
+void LGraph::dump() {
   fmt::print("lgraph name:{} size:{}\n", name, node_internal.size());
 
   for (auto it = input_array.begin(); it != input_array.end(); ++it) {
@@ -448,8 +448,19 @@ void LGraph::dump() const {
 
 #if 1
   for (size_t i = 0; i < node_internal.size(); ++i) {
-    fmt::print("{} ", i);
-    node_internal[i].dump();
+    if (!node_internal[i].is_node_state())
+      continue;
+    if (!node_internal[i].is_master_root())
+      continue;
+    auto node = Node(this,0,Node::Compact(i)); // NOTE: To remove once new iterators are finished
+    fmt::print("nid:{} type:{}\n", node.nid, node.get_type().get_name());
+    for(const auto &edge : node.inp_edges()) {
+      fmt::print("  inp pid:{} from pid:{} name:{}\n", edge.sink.get_pid(), edge.driver.get_pid(), edge.driver.debug_name());
+    }
+    for(const auto &edge : node.out_edges()) {
+      fmt::print("  out pid:{} name:{} to nid:{} pid:{}\n", edge.driver.get_pid(), edge.driver.debug_name(),
+                 edge.sink.get_node().nid, edge.sink.get_pid());
+    }
   }
 #endif
 }
