@@ -137,7 +137,7 @@ new_git_repository(
 new_git_repository(
     name = "mockturtle",
     build_file = "BUILD.mockturtle",
-    commit = "1da278ecb239bcdf4e0f6f605fa1e3380a726c5d", # April 6, 2019 555ef000e984ad753e98836a7631b8a63dacf70d",
+    commit = "28c18ecd78dac3e42876a7e0f044132b9c16f466", # May 8, 2019 1da278ecb239bcdf4e0f6f605fa1e3380a726c5d", # April 6, 2019 
     remote = "https://github.com/lsils/mockturtle.git",
     #patches = ["//external:patch.verilator"],
     #strip_prefix = "include",
