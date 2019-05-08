@@ -76,7 +76,7 @@ void Pass_mockturtle::lg_partition(LGraph *g) {
   }
 
   for (const auto &it:group_boundary) {
-    group_boundary_set[it.second].push_back(it.first);
+    group_boundary_set[it.second].emplace_back(it.first);
   }
 
 }
@@ -85,15 +85,16 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
   for (const auto gid:group_boundary_set) {
     auto klut = mockturtle::klut_network();
     gid2klut[gid.first]=klut;
+
     for (const auto gid_node:gid.second) {
       auto cur_node = Node(g, 0, gid_node);
-
       switch (cur_node.get_type().op) {
         case Not_Op: {
-          fmt::print("Node: Not Gate\n");
+          fmt::print("Not_Op in gid:{}\n",gid.first);
           //assuming there is only one input
           I(cur_node.inp_edges().size()==1);
-          //I(cur_node.out_edges().size()==1);
+          //must have output
+          I(cur_node.out_edges().size()>0);
 
           std::vector<mockturtle::klut_network::signal> inp_sig, out_sig;
           for (const auto &in_edge : cur_node.inp_edges()) {
@@ -102,8 +103,8 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
               //fmt::print("{}-b ",i);
               auto x = klut.create_pi();
               auto nx = klut.create_not(x);
-              inp_sig.push_back(x);
-              out_sig.push_back(nx);
+              inp_sig.emplace_back(x);
+              out_sig.emplace_back(nx);
             }
             //fmt::print("\n");
             edge_signal_mapping[in_edge]=inp_sig;
@@ -117,32 +118,62 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
           }
           break;
         }
-        case And_Op:
-          fmt::print("Node: And Gate\n");
-          /*
-          std::vector<mockturtle::klut_network::signal> in_sig;
-          for (const auto &in_edge : cur_node.inp_edges() ) {
-            const auto x = klut.create_pi();
-            edge_signal_mapping[in_edge] = x;
-            in_sig.push_back(x);
+        case And_Op: {
+          fmt::print("And_Op in gid:{}\n",gid.first);
+          //And_Op must have more than one input
+          I(cur_node.inp_edges().size()>1);
+          //must have output
+          I(cur_node.out_edges().size()>0);
+
+          //mapping all input edge to input signal
+          //create output signal at the same time
+          std::vector<mockturtle::klut_network::signal> out_sig_0, out_sig_1;
+          std::vector<std::vector<mockturtle::klut_network::signal>> inp_sig_group_by_bit;
+          mockturtle::klut_network::signal out_sig_reduction = klut.get_constant(true);
+          for (const auto &in_edge : cur_node.inp_edges()) {
+            fmt::print("input_bit_width:{}\n",in_edge.get_bits());
+            std::vector<mockturtle::klut_network::signal> inp_sig;
+            for (long unsigned int i=0;i<in_edge.get_bits();i++) {
+              const auto x = klut.create_pi();
+              inp_sig.emplace_back(x);
+              out_sig_reduction = klut.create_and(x,out_sig_reduction);
+              if (inp_sig_group_by_bit.size()<=i) {
+                inp_sig_group_by_bit.resize(i+1);
+              }
+              inp_sig_group_by_bit[i].emplace_back(x);
+            }
+            edge_signal_mapping[in_edge] = inp_sig;
           }
-          //check: how many inputs we have?
-          auto out_sig = in_sig[0];
-          for (long unsigned int i = 1; i < in_sig.size(); i++) {
-            out_sig = klut.create_and(in_sig[i], out_sig);
+          for (long unsigned int i = 0; i < inp_sig_group_by_bit.size(); i++) {
+            out_sig_0.emplace_back(klut.create_nary_and(inp_sig_group_by_bit[i]));
           }
-          //FIX ME:
-          edge_signal_mapping[cur_node.out_edges()[0]]=out_sig;
-          */
+          out_sig_1.emplace_back(out_sig_reduction);
+          //mapping output edge to output signal
+          for (const auto &out_edge : cur_node.out_edges()) {
+            switch (out_edge.driver.get_pid()) {
+              case 0: {
+                edge_signal_mapping[out_edge] = out_sig_0;
+                break;
+              }
+              case 1: {
+                edge_signal_mapping[out_edge] = out_sig_1;
+                break;
+              }
+              default:
+                I(false);
+                break;
+            }
+          }
           break;
+        }
         case Or_Op:
-          fmt::print("Node: Or Gate\n");
+          fmt::print("Or_Op in gid:{}\n",gid.first);
           break;
         case Xor_Op:
-          fmt::print("Node: Xor Gate\n");
+          fmt::print("Xor_Op in gid:{}\n",gid.first);
           break;
         default:
-          fmt::print("Node: Unknown Gate\n");
+          fmt::print("Unknown_Op in gid:{}\n",gid.first);
           break;
       }
 

@@ -48,33 +48,43 @@ protected:
   bool eligable_cell_op(Node_Type_Op cell_op) {
     switch (cell_op) {
       case And_Op:
-        //fmt::print("Node: And Gate\n");
+        //fmt::print("Node: And_Op\n");
         break;
       case Or_Op:
-        //fmt::print("Node: Or Gate\n");
+        //fmt::print("Node: Or_Op\n");
         break;
       case Xor_Op:
-        //fmt::print("Node: Xor Gate\n");
+        //fmt::print("Node: Xor_Op\n");
         break;
       case LessThan_Op:
+        //fmt::print("Node: LessThan_Op\n");
         break;
       case GreaterThan_Op:
+        //fmt::print("Node: GreaterThan_Op\n");
         break;
       case LessEqualThan_Op:
+        //fmt::print("Node: LessEqualThan_Op\n");
         break;
       case GreaterEqualThan_Op:
+        //fmt::print("Node: GreaterEqualThan_Op\n");
         break;
       case Equals_Op:
+        //fmt::print("Node: Equals_Op\n");
         break;
       //case ShiftRight_Op:
+        //fmt::print("Node: ShiftRight_Op\n");
       //  break;
       //case ShiftLeft_Op:
+        //fmt::print("Node: ShiftLeft_Op\n");
       //  break;
       case Not_Op:
+        //fmt::print("Node: Not_Op\n");
         break;
       case Join_Op:
+        //fmt::print("Node: Join_Op\n");
         break;
       case Pick_Op:
+        //fmt::print("Node: Pick_Op\n");
         break;
       default:
         //fmt::print("Node: Unknown\n");
