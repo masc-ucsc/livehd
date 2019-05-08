@@ -32,11 +32,11 @@ int main() {
 
   mig_network net;
 
-  mig_network::signal array[32];
+  std::vector<mig_network::signal> array;
   mig_network::signal array2[32];
 
   for(int i=0;i<32;i++) {
-    array[i] = net.create_pi();
+    array.emplace_back(net.create_pi());
   }
 
   array2[0] = net.create_xor(array[0],array[1]);
@@ -45,6 +45,7 @@ int main() {
   }
 
   net.create_po( array2[31] );
+  net.create_po( net.create_nary_and(array) );
 
   // OPT1
   refactoring_params rf_ps;
