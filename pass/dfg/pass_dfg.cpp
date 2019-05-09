@@ -168,22 +168,6 @@ void Pass_dfg::trans(LGraph *dfg) {
 
   //SH:FIXME: new top<->subgraph connection afer Jose submit LGraph v0.2
   //resolve top <-> subgraph IO connection
-
-
-  for(auto nid : dfg->fast()) {
-    auto node = Node(dfg, 0, Node::Compact(nid));
-      if(node.get_type().op == Equals_Op) {
-        node.get_driver_pin().set_bits(1);
-      } else if(node.get_type().op == GreaterEqualThan_Op) {
-        node.get_driver_pin().set_bits(1);
-      } else if(node.get_type().op == GreaterThan_Op) {
-        node.get_driver_pin().set_bits(1);
-      } else if(node.get_type().op == LessEqualThan_Op) {
-        node.get_driver_pin().set_bits(1);
-      } else if(node.get_type().op == LessThan_Op) {
-        node.get_driver_pin().set_bits(1);
-      }
-  }
 }//end of Pass_dfg::trans()
 
 void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
@@ -253,14 +237,28 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
           fmt::print("gio bitwidth larger then source\n");
         }
       }
-    } else if(ntype == And_Op || ntype == Or_Op || ntype == Xor_Op){
+    } else if(ntype == And_Op || ntype == Or_Op){
       //SH:FIXME: deprecate after MIT bitwidth algorithm ready
+      for(auto& inp : node.inp_edges()){
+        if(node.get_driver_pin(0).get_bits()!= 1)  //exclude logical and/or cases
+          node.setup_driver_pin(0).set_bits(inp.driver.get_bits());
+      }
+    } else if(node.get_type().op == Xor_Op){
       for(auto& inp : node.inp_edges()){
         if(node.get_driver_pin(0).get_bits() < inp.driver.get_bits())
           node.setup_driver_pin(0).set_bits(inp.driver.get_bits());
       }
+    } else if(node.get_type().op == Equals_Op) {
+      node.get_driver_pin().set_bits(1);
+    } else if(node.get_type().op == GreaterEqualThan_Op) {
+      node.get_driver_pin().set_bits(1);
+    } else if(node.get_type().op == GreaterThan_Op) {
+      node.get_driver_pin().set_bits(1);
+    } else if(node.get_type().op == LessEqualThan_Op) {
+      node.get_driver_pin().set_bits(1);
+    } else if(node.get_type().op == LessThan_Op) {
+      node.get_driver_pin().set_bits(1);
     }
-
 
     //SH:FIXME: wait for MIT bitwidth algorithm
     //SH:FIXME: temporarily set 1-bit for all Node_pins w/o bitwidth define
@@ -338,6 +336,10 @@ Node Pass_dfg::process_node(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, const 
     process_func_call(dfg, cfg, aux_tree, data);
     return get_cfg_child(cfg, cfg_node);
   }
+  case CfgBeenRead_Op:{
+    //do Fluid stuff
+    return get_cfg_child(cfg, cfg_node);
+  }
   case CfgIf_Op:{
     aux_tree->print_cur_aux();
     return process_if(dfg, cfg, aux_tree, data, cfg_node);
@@ -388,13 +390,21 @@ void Pass_dfg::process_func_call(LGraph *dfg, const LGraph *cfg, Aux_tree *aux_t
   //process_connections(dfg, subg_input_ids, subg_root_node);
 }
 
+
+/*
+ * pending table rules
+ * if target is %, @, mux, insert into pending table
+ * else, check globally, if it is only a local variable, don't need to create mux in parent scope
+ * it's just used as intermediate variable in branch block
+ */
+
 void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Data &data) {
   fmt::print("process_assign\n");
   const auto& target    = data.get_target();
   const auto& operands  = data.get_operands(); //return strings
   auto        op        = data.get_operator();
 
-  Node_pin target_pin = process_target(dfg, aux_tree, target, op);
+  Node_pin tpin = process_target(dfg, aux_tree, target, op);
 
   std::vector<Node_pin> oprd_pins;
   for(const auto& iter : operands)
@@ -402,17 +412,13 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
 
   I(!oprd_pins.empty());
 
-  //if target is %, @, mux, put into pending table
-  //else, check globally, if it is only a local variable, don't need to create mux in parent scope
-  //it's just used as intermediate variable in branch block
   if(is_pure_assign_op(op)) {
 
     aux_tree->set_alias(target, oprd_pins[0]);
     if(is_output(target))
-      I(target_pin.is_graph_output());
+      I(tpin.is_graph_output());
 
-    if(target_pin.is_graph_output() || target_pin.get_node().get_type().op == FFlop_Op){
-      fmt::print("hello222!!!!!!!!!\n");
+    if(tpin.is_graph_output() || tpin.get_node().get_type().op == FFlop_Op){
       aux_tree->set_pending(target, oprd_pins[0]);
     } else if (aux_tree->get_parent(aux_tree->get_cur_aux())-> has_pending(target)){
       aux_tree->set_pending(target, oprd_pins[0]);
@@ -443,7 +449,7 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
     if(oprd_pins[0].get_node().get_type().op == U32Const_Op) {//explicit bitwidth assignment
       I(oprd_pins[0].get_node().get_type_const_value());
       auto bits = (uint16_t)oprd_pins[0].get_node().get_type_const_value();
-      target_pin.set_bits(bits);
+      tpin.set_bits(bits);
       fmt::print("set_bits({}) for target:{}\n",bits, target);
     } else {
       aux_tree->set_alias(target, oprd_pins[0]);
@@ -454,10 +460,17 @@ void Pass_dfg::process_assign(LGraph *dfg, Aux_tree *aux_tree, const CFG_Node_Da
     //SH:FIXME: is there a Not op in CFG?
     aux_tree->set_alias(target, oprd_pins[0]);
 
+  } else if(is_logic_op(op)) {
+
+    I(operands.size() > 1);
+    Node tnode = tpin.get_node();
+    process_connections(dfg, oprd_pins, tnode);
+    tpin.set_bits(1); //logic op always has 1 bit output
+
   } else if(is_binary_op(op)) {
 
     I(operands.size() > 1);
-    Node tnode = target_pin.get_node();
+    Node tnode = tpin.get_node();
     process_connections(dfg, oprd_pins, tnode);
 
   }
