@@ -3,6 +3,7 @@
 #include "lgbench.hpp"
 
 #include "lgedgeiter.hpp"
+#include "annotate.hpp"
 #include "lgraph.hpp"
 #include "pass_opentimer.hpp"
 
@@ -14,7 +15,9 @@ void setup_pass_opentimer() {
 void Pass_opentimer::setup() {
   Eprp_method m1("pass.opentimer", "timing analysis on lgraph", &Pass_opentimer::work);
 
-  m1.add_label_optional("liberty:", "Liberty file for timing");
+  m1.add_label_optional("lib:", "Liberty file for timing");
+  m1.add_label_optional("lib_max:", "Liberty file for timing");
+  m1.add_label_optional("lib_min:", "Liberty file for timing");
   m1.add_label_optional("spef:", "SPEF file for timing");
 
   register_pass(m1);
@@ -24,14 +27,17 @@ Pass_opentimer::Pass_opentimer()
     : Pass("opentimer") {
 }
 
+
 void Pass_opentimer::work(Eprp_var &var) {
   Pass_opentimer pass;
 
-  auto liberty = var.get("liberty");
+  auto lib = var.get("lib");
+  auto lib_max = var.get("lib_max");
+  auto lib_min = var.get("lib_min");
   auto spef = var.get("spef");
 
   for(const auto &g : var.lgs) {
-      pass.read_file(g, liberty, spef);          // Task1: Read input files (Read user from input) | Status: 75% done
+      pass.read_file(g, lib, lib_max, lib_min, spef);                        // Task1: Read input files (Read user from input) | Status: 75% done
       pass.build_circuit(g);                                   // Task2: Traverse the lgraph and build the equivalent circuit (No dependencies) | Status: 50% done
       pass.read_sdc(g);                                        // Task3: Traverse the lgraph and create fake SDC numbers | Status: 100% done
       pass.compute_timing();                                   // Task4: Compute Timing | Status: 100% done
@@ -39,13 +45,17 @@ void Pass_opentimer::work(Eprp_var &var) {
   }
 }
 
-void Pass_opentimer::read_file(LGraph *g,std::string_view liberty, std::string_view spef){
+void Pass_opentimer::read_file(LGraph *g, std::string_view lib, std::string_view lib_max, std::string_view lib_min, std::string_view spef) {
 //  LGBench b("pass.opentimer.read_file");      // Expand this method to reading from user input and later develop inou.add_liberty etc.
 
-//  fmt::print("\n\nLiberty path: {}\n\n", liberty);
 //  timer.read_celllib ("pass/opentimer/ot_examples/osu018_stdcells.lib");
-  timer.read_celllib (liberty)
-       .read_spef (spef);
+  if(lib_max.length()==0 || lib_min.length()==0){
+    timer.read_celllib (lib);
+  }else{
+    timer.read_celllib (lib_max,ot::MAX);
+    timer.read_celllib (lib_min,ot::MIN);
+  }
+  timer.read_spef (spef);
 
 }
 
@@ -55,10 +65,9 @@ void Pass_opentimer::build_circuit(LGraph *g) {       // Enhance this for build_
   std::string celltype;
   std::string instance_name;
 
-  // BUILD GATE
+// BUILD GATE
   for(const auto &nid : g -> forward()) {
     auto node = Node(g,0,Node::Compact(nid));
-
     for(const auto &e:node.inp_edges()) {
       if(e.sink.get_pid() == LGRAPH_BBOP_TYPE) {
         if(e.driver.get_node().get_type().op != StrConst_Op)
@@ -72,22 +81,25 @@ void Pass_opentimer::build_circuit(LGraph *g) {       // Enhance this for build_
           error("Unrecognized blackbox option, pid %hu\n", e.sink.get_pid());
       }
     }
-
     if(node.get_type().get_name() == "blackbox"){
       timer.insert_gate(instance_name,celltype);
       //fmt::print("Cell Type: {} \t Instance Name {}\n", celltype, instance_name);
+    }
+  }
 
-      // BUILD NETS AND IO PINS
+  // BUILD NETS AND IO PINS
+  for(const auto &nid : g->forward()) {
+    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
+    if(node.get_type().get_name() == "blackbox"){
+     // fmt::print("Name {}\n",name);
       for(const auto &edge : node.out_edges()) {
           std::string driver_name (edge.driver.get_name());
        //   fmt::print("Driver Name {}\n\n", driver_name);
           timer.insert_net(driver_name);
       }
     }
-
     if(node.get_type().get_name() == "graphio"){
      // fmt::print("Name {}\n",name);
-
       for(const auto &edge : node.out_edges()) {
           if(edge.driver.is_graph_input()){
             std::string driver_name (edge.driver.get_name());
@@ -96,7 +108,6 @@ void Pass_opentimer::build_circuit(LGraph *g) {       // Enhance this for build_
             timer.insert_primary_input(driver_name);
           }
       }
-
       for(const auto &edge : node.inp_edges()) {
           if(edge.sink.is_graph_output()){
             std::string driver_name (edge.driver.get_name());
@@ -112,7 +123,36 @@ void Pass_opentimer::build_circuit(LGraph *g) {       // Enhance this for build_
   for(const auto &nid : g->forward()) {
     auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
 
-    if(node.get_type().get_name() == "blackbox"){
+      bool is_param = false;
+      std::string current_name ="bbox";
+      for(const auto &e:node.inp_edges()) {
+        if(e.sink.get_pid() < LGRAPH_BBOP_OFFSET)
+          continue;
+
+        auto dpin_node = e.driver.get_node();
+
+        if(LGRAPH_BBOP_ISIPARAM(e.sink.get_pid())) {
+          current_name = dpin_node.get_type_const_value() ==1;
+          fmt::print("\n\n Current Name: {} \n\n", current_name);
+        }
+
+        else if(LGRAPH_BBOP_ISICONNECT(e.sink.get_pid())) {
+            if(dpin_node.get_type().op == U32Const_Op) {
+            } else if(dpin_node.get_type().op == StrConst_Op) {
+                std::string xname (dpin_node.get_type_const_sview());
+                fmt::print("\n\n Y Name: {} \n\n", xname);
+            } else {
+                 if(e.driver.has_name()){
+                  std::string wname (e.driver.get_name());
+                  fmt::print("\n\n W Name: {} \n\n", wname);
+              //    fmt::print("\n\n I am here \n\n");
+                }
+            }
+          }
+        }
+      }
+
+   // if(node.get_type().get_name() == "blackbox"){
      // fmt::print("Name {}\n",name);
 
      // for(const auto &edge : node.out_edges()) {
@@ -126,8 +166,7 @@ void Pass_opentimer::build_circuit(LGraph *g) {       // Enhance this for build_
         // Concatenate strings with a : in between. Use absl::append ? 
         // Use timer.connect_pin() to do the connections. eg: timer.connect_pin(NAND2X1:A, n1);
      // }
-    }
-  }
+  //  }
 }
 
 void Pass_opentimer::read_sdc(LGraph *g){
@@ -191,8 +230,8 @@ void Pass_opentimer::compute_timing(){                    // Expand this method 
   auto num_nets = timer.num_nets();
   fmt::print("Number of nets {}\n", num_nets);
 
-  auto opt_path = timer.report_timing(1);
-  std::cout << "Critical Path" << opt_path[0] <<'\n';
+//  auto opt_path = timer.report_timing(1);
+//  std::cout << "Critical Path" << opt_path[0] <<'\n';
 
 //  timer.dump_graph(std::cout);
 
