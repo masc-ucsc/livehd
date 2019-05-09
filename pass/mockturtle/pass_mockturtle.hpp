@@ -41,16 +41,19 @@ protected:
   absl::flat_hash_map<Node::Compact, int> group_boundary;
   absl::flat_hash_map<int, mockturtle::klut_network> gid2klut;
   absl::flat_hash_map<int, std::list<Node::Compact>> group_boundary_set;
-  absl::flat_hash_map<XEdge, std::vector<mockturtle::klut_network::signal>> edge_signal_mapping;
+  absl::flat_hash_map<XEdge, std::vector<mockturtle::klut_network::signal>> edge2signal;
   void lg_partition(LGraph *g);
   void create_LUT_network(LGraph *g);
 
   bool eligable_cell_op(Node_Type_Op cell_op) {
     switch (cell_op) {
+      case Not_Op:
+        //fmt::print("Node: Not_Op\n");
+        break;
       case And_Op:
         //fmt::print("Node: And_Op\n");
         break;
-      case Or_Op:
+/*      case Or_Op:
         //fmt::print("Node: Or_Op\n");
         break;
       case Xor_Op:
@@ -77,15 +80,12 @@ protected:
       //case ShiftLeft_Op:
         //fmt::print("Node: ShiftLeft_Op\n");
       //  break;
-      case Not_Op:
-        //fmt::print("Node: Not_Op\n");
-        break;
       case Join_Op:
         //fmt::print("Node: Join_Op\n");
         break;
       case Pick_Op:
         //fmt::print("Node: Pick_Op\n");
-        break;
+        break;*/
       default:
         //fmt::print("Node: Unknown\n");
         return false;

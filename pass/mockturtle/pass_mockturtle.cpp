@@ -84,12 +84,13 @@ void Pass_mockturtle::lg_partition(LGraph *g) {
 void Pass_mockturtle::create_LUT_network(LGraph *g) {
   for (const auto gid:group_boundary_set) {
     auto klut = mockturtle::klut_network();
-    gid2klut[gid.first]=klut;
-
+    //gid2klut[gid.first]=klut;
+    //traverse the nodes in lgraph and create nodes/signals in klut network
     for (const auto gid_node:gid.second) {
       auto cur_node = Node(g, 0, gid_node);
       switch (cur_node.get_type().op) {
         case Not_Op: {
+          //Note: Don't need to check the node_pin pid since Not_Op has only one sink pin and one driver pin
           fmt::print("Not_Op in gid:{}\n",gid.first);
           //assuming there is only one input
           I(cur_node.inp_edges().size()==1);
@@ -97,27 +98,53 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
           I(cur_node.out_edges().size()>0);
 
           std::vector<mockturtle::klut_network::signal> inp_sig, out_sig;
+          unsigned long int loop_count = 0;
           for (const auto &in_edge : cur_node.inp_edges()) {
             fmt::print("input_bit_width:{}\n",in_edge.get_bits());
-            for (auto i=0;i<in_edge.get_bits();i++) {
-              //fmt::print("{}-b ",i);
-              auto x = klut.create_pi();
-              auto nx = klut.create_not(x);
-              inp_sig.emplace_back(x);
-              out_sig.emplace_back(nx);
+            //check if this input edge is already in the output mapping table
+            //then setup the input signal accordingly
+            if (edge2signal.count(in_edge)!=0) {
+              for (auto i=0;i<in_edge.get_bits();i++) {
+                inp_sig.emplace_back(edge2signal[in_edge][i]);
+              }
             }
-            //fmt::print("\n");
-            edge_signal_mapping[in_edge]=inp_sig;
+            else {
+              for (auto i=0;i<in_edge.get_bits();i++) {
+                inp_sig.emplace_back(klut.create_pi());
+              }
+              edge2signal[in_edge]=inp_sig;
+            }
+            //create the output signal
+            for (auto i=0;i<in_edge.get_bits();i++) {
+              out_sig.emplace_back(klut.create_not(inp_sig[i]));
+            }
+            loop_count++;
           }
-
+          //this loop should be executed only once
+          //since a Not_Op should only have single input edge
+          I(loop_count==1);
+          //mapping the output edge to output signal
           for (const auto &out_edge : cur_node.out_edges()) {
             fmt::print("output_bit_width:{}\n",out_edge.get_bits());
-            //assuming input and output have the same bit-width
-            I(cur_node.inp_edges()[0].get_bits()==out_edge.get_bits());
-            edge_signal_mapping[out_edge]=out_sig;
+            //make sure the bit-width matches each other
+            I(out_sig.size()==out_edge.get_bits());
+            //check if the output edge is already in the input mapping table
+            //then setup/update the output/input table
+            if (edge2signal.count(out_edge)!=0) {
+              //substitution the input signal by output signal
+              for (auto i=0;i<out_edge.get_bits();i++) {
+                klut.substitute_node(edge2signal[out_edge][i], out_sig[i]);
+                //FIX ME: Remove dead node from klut network
+                //K-Lut network doesn't support take_out_node()
+                //To fix this problem, we should first create MIG network
+                //then convert the whole MIG to K-Lut
+              }
+            }
+            edge2signal[out_edge]=out_sig;
           }
           break;
         }
+
         case And_Op: {
           fmt::print("And_Op in gid:{}\n",gid.first);
           //And_Op must have more than one input
@@ -129,34 +156,60 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
           //create output signal at the same time
           std::vector<mockturtle::klut_network::signal> out_sig_0, out_sig_1;
           std::vector<std::vector<mockturtle::klut_network::signal>> inp_sig_group_by_bit;
-          mockturtle::klut_network::signal out_sig_reduction = klut.get_constant(true);
           for (const auto &in_edge : cur_node.inp_edges()) {
             fmt::print("input_bit_width:{}\n",in_edge.get_bits());
             std::vector<mockturtle::klut_network::signal> inp_sig;
-            for (long unsigned int i=0;i<in_edge.get_bits();i++) {
-              const auto x = klut.create_pi();
-              inp_sig.emplace_back(x);
-              out_sig_reduction = klut.create_and(x,out_sig_reduction);
-              if (inp_sig_group_by_bit.size()<=i) {
-                inp_sig_group_by_bit.resize(i+1);
+            //check if this input edge is already in the output mapping table
+            //then setup the input signal accordingly
+            if (edge2signal.count(in_edge)!=0) {
+              for (long unsigned int i=0;i<in_edge.get_bits();i++) {
+                if (inp_sig_group_by_bit.size()<=i) {
+                  inp_sig_group_by_bit.resize(i+1);
+                }
+                inp_sig_group_by_bit[i].emplace_back(edge2signal[in_edge][i]);
               }
-              inp_sig_group_by_bit[i].emplace_back(x);
+            } else {
+              //input edge not mapped, create new signal and map it
+              for (long unsigned int i=0;i<in_edge.get_bits();i++) {
+                if (inp_sig_group_by_bit.size()<=i) {
+                  inp_sig_group_by_bit.resize(i+1);
+                }
+                const auto x = klut.create_pi();
+                inp_sig_group_by_bit[i].emplace_back(x);
+                inp_sig.emplace_back(x);
+              }
+              //mapping the input edge to input signal
+              edge2signal[in_edge]=inp_sig;
             }
-            edge_signal_mapping[in_edge] = inp_sig;
           }
+          //create the output signal
           for (long unsigned int i = 0; i < inp_sig_group_by_bit.size(); i++) {
             out_sig_0.emplace_back(klut.create_nary_and(inp_sig_group_by_bit[i]));
           }
-          out_sig_1.emplace_back(out_sig_reduction);
+          out_sig_1.emplace_back(klut.create_nary_and(out_sig_0));
           //mapping output edge to output signal
           for (const auto &out_edge : cur_node.out_edges()) {
             switch (out_edge.driver.get_pid()) {
               case 0: {
-                edge_signal_mapping[out_edge] = out_sig_0;
+                I(out_edge.get_bits()==out_sig_0.size());
+                if (edge2signal.count(out_edge)!=0) {
+                  for (auto i=0;i<out_edge.get_bits();i++) {
+                    klut.substitute_node(edge2signal[out_edge][i], out_sig_0[i]);
+                    //FIX ME: removing dead signals/nodes.
+                  }
+                }
+                edge2signal[out_edge] = out_sig_0;
                 break;
               }
               case 1: {
-                edge_signal_mapping[out_edge] = out_sig_1;
+                I(out_edge.get_bits()==out_sig_1.size());
+                if (edge2signal.count(out_edge)!=0) {
+                  for (auto i=0;i<out_edge.get_bits();i++) {
+                    klut.substitute_node(edge2signal[out_edge][i], out_sig_1[i]);
+                    //FIX ME: removing dead signals/nodes.
+                  }
+                }
+                edge2signal[out_edge] = out_sig_1;
                 break;
               }
               default:
@@ -166,19 +219,22 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
           }
           break;
         }
-        case Or_Op:
+/*        case Or_Op:
           fmt::print("Or_Op in gid:{}\n",gid.first);
           break;
         case Xor_Op:
           fmt::print("Xor_Op in gid:{}\n",gid.first);
-          break;
+          break;*/
         default:
           fmt::print("Unknown_Op in gid:{}\n",gid.first);
           break;
       }
 
-
     }
+    //output the unconnected nodes in the klut network
+    fmt::print("KLUT network under Group ID:{}\n", gid.first);
+    mockturtle::write_bench(klut,std::cout);
+
   }
 }
 
