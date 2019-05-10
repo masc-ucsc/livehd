@@ -109,11 +109,15 @@ Node_Type_Op Pass_dfg::node_type_from_text(std::string_view operator_text) const
     return LessEqualThan_Op;
   } else if(operator_text == ">") {
     return LessThan_Op;
+  } else if(operator_text == "and") {
+    return And_Op;
+  } else if(operator_text == "or") {
+    return Or_Op;
   } else if(operator_text == "=" || operator_text == "as" || operator_text == ":" ) {
     return Or_Op; // reduction or
   } else if (operator_text == "()"){
     return Or_Op; // SH:FIXME: tuple not implemented yet
-  }else if(operator_text == "+" || operator_text == "-") {
+  } else if(operator_text == "+" || operator_text == "-") {
     return Sum_Op;
   } else if(operator_text == "*") {
     return Mult_Op;
@@ -127,11 +131,7 @@ Node_Type_Op Pass_dfg::node_type_from_text(std::string_view operator_text) const
     return Xor_Op;
   } else if(operator_text == "|") {
     return Or_Op;
-  } else if(operator_text == ".()") {
-    // SH:FIXME: might be fake funcall, set Invalid for now?
-    // SH:FIXME: or change the target text and of into node_type_from_text()?
-    return Invalid_Op;
-  }else {
+  } else {
     fmt::print("Operator: {}\n", operator_text);
     return Invalid_Op;
   }

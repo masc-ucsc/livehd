@@ -1,0 +1,12 @@
+$a as (__bits:8)
+$b as (__bits:8)
+%c as (__bits:1)
+%d as (__bits:1)
+%c2 as (__bits:8)
+%d2 as (__bits:8)
+
+%c = $a and $b
+%d = $a or  $b
+
+%c2 = $a & $b
+%d2 = $a | $b
