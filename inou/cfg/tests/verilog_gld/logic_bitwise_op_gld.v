@@ -8,8 +8,10 @@ module logic_bitwise_op(
 );
 
 
-assign c = a && b;
+assign c = a && b; //strange expression in Verilog
 assign d = a || b;
+// assign c = (a != 8'b0) && (b != 8'b0);
+// assign d = (a != 8'b0) || (b != 8'b0);
 assign c2 = a & b;
 assign d2 = a | b;
 
