@@ -10,66 +10,90 @@ void Prp::eat_comments(){
 }
 
 bool Prp::rule_top(){
-  fmt::print("Hello from rule_top.\n");
-  return rule_code_blocks();
+  debug_stats.rules_called++;
+  rule_call_trace.push_back("Called rule_top.\n");
+  bool ok = rule_code_blocks();
+  if(ok){
+    rule_call_trace.push_back("Matched rule_top\n");
+  }
+  else{
+    rule_call_trace.push_back("Failed rule_top\n");
+  }
+  return ok;
 }
 
 bool Prp::rule_code_blocks(){
+  debug_stats.rules_called++;
+  rule_call_trace.push_back("Called rule_code_blocks\n");
   eat_comments();
   if (!rule_code_block_int()){
+    rule_call_trace.push_back("Failed rule_code_blocks\n");
     return false;
   }
   while(rule_code_block_int());
   
+  rule_call_trace.push_back("Matched rule_code_blocks\n");
   return true;
 }
 
 bool Prp::rule_code_block_int(){
+  debug_stats.rules_called++;
+  rule_call_trace.push_back("Called rule_code_block_int\n");
   eat_comments();
   debug_down();
   if (rule_if_statement()){
     debug_up(Prp_rule_if_statement);
+    rule_call_trace.push_back("Matched rule_code_block_int\n");
     return true;
   }
   else if (rule_for_statement()){
     debug_up(Prp_rule_for_statement);
+    rule_call_trace.push_back("Matched rule_code_block_int\n");
     return true;
   }
   else if (rule_while_statement()){
     debug_up(Prp_rule_while_statement);
+    rule_call_trace.push_back("Matched rule_code_block_int\n");
     return true;
   }
   else if (rule_try_statement()){
     debug_up(Prp_rule_try_statement);
+    rule_call_trace.push_back("Matched rule_code_block_int\n");
     return true;
   }
   else if (rule_punch_format()){
     debug_up(Prp_rule_punch_format);
+    rule_call_trace.push_back("Matched rule_code_block_int\n");
     return true;
   }
   else if (rule_assignment_expression()){
     debug_up(Prp_rule_assignment_expression);
+    rule_call_trace.push_back("Matched rule_code_block_int\n");
     return true;
   }
   else if (rule_function_pipe()){
     debug_up(Prp_rule_function_pipe);
+    rule_call_trace.push_back("Matched rule_code_block_int\n");
     return true;
   }
   else if (rule_fcall_implicit()){
     debug_up(Prp_rule_fcall_implicit);
+    rule_call_trace.push_back("Matched rule_code_block_int\n");
     return true;
   }
   else if (rule_fcall_explicit()){
     debug_up(Prp_rule_fcall_explicit);
+    rule_call_trace.push_back("Matched rule_code_block_int\n");
     return true;
   }
-  fmt::print("Couldn't find a valid code block start.\n");
+  rule_call_trace.push_back("Failed rule_code_block_int\n");
   debug_up(Prp_invalid);
   return false;
 }
 
 bool Prp::rule_if_statement(){
-  fmt::print("Hello from rule_if_statement.\n");
+  debug_stats.rules_called++;
+  rule_call_trace.push_back("Called rule_if_statement\n");
   int tokens_consumed = 0;
   
   if (scan_is_token(Pyrope_id_unique)){
@@ -81,6 +105,7 @@ bool Prp::rule_if_statement(){
     }
     else{
       go_back(tokens_consumed);
+      rule_call_trace.push_back("Failed rule_if_statement\n");
       return false;
     }
   }
@@ -91,11 +116,10 @@ bool Prp::rule_if_statement(){
   }
   else{
     go_back(tokens_consumed);
+    rule_call_trace.push_back("Failed rule_if_statement\n");
     return false;
   }
-  fmt::print("rule_if_statement: Checking for a logical expression.\n");
   if(rule_logical_expression()){
-    fmt::print("rule_if_statement: found a logical expression. Current token:");
     dump_token();
     // optional
     if(scan_is_token(Token_id_colon)){
@@ -107,34 +131,34 @@ bool Prp::rule_if_statement(){
       }
       else{
         go_back(tokens_consumed);
-        fmt::print("rule_if_statment: Doesn't fit rule_if_statement.\n");
+        rule_call_trace.push_back("Failed rule_if_statement\n");
         return false;
       }
     }
     if(scan_is_token(Token_id_ob)){
       debug_consume(); // consume the open brace
       tokens_consumed++;
-      fmt::print("rule_if_statement: found an open bracket.\n");
       // optional
       rule_code_blocks(); // PROBLEM: occurs many times; doesn't account for code block syntax being incorrect
-      fmt::print("rule_if_statement: we just looked for a code block.\n");
       // optional
       if(scan_is_token(Token_id_cb)){
         debug_consume(); // consume the close brace
         tokens_consumed++;
         rule_else_statement(); // PROBLEM: same as above
-        fmt::print("rule_if_statment: Fits rule_if_statement.\n");
+        rule_call_trace.push_back("Matched rule_if_statement\n");
+        debug_stats.rules_matched++;
         return true;
       }
     }
   }
-  fmt::print("rule_if_statment: Doesn't fit rule_if_statement.\n");
+  rule_call_trace.push_back("Failed rule_if_statement\n");
   go_back(tokens_consumed);
   return false;
 }
 
 bool Prp::rule_for_statement(){
-  fmt::print("Hello from rule_for_statement.\n");
+  debug_stats.rules_called++;
+  rule_call_trace.push_back("Called rule_for_statement\n");
   int tokens_consumed = 0;
   if(scan_is_token(Pyrope_id_for)){
     debug_consume();
@@ -150,7 +174,7 @@ bool Prp::rule_for_statement(){
         }
         else{
           go_back(tokens_consumed);
-          fmt::print("rule_for_statment: Doesn't fit rule_for_statement.\n");
+          rule_call_trace.push_back("Failed rule_for_statement\n");
           return false;
         }
       }
@@ -162,16 +186,21 @@ bool Prp::rule_for_statement(){
         if(scan_is_token(Token_id_cb)){
           debug_consume(); // consume the open brace
           tokens_consumed++;
+          rule_call_trace.push_back("Matched rule_for_statement\n");
+          debug_stats.rules_matched++;
           return true;
         }
       }
     }
   }
   go_back(tokens_consumed);
+  rule_call_trace.push_back("Failed rule_for_statement\n");
   return false;
 }
 
 bool Prp::rule_for_index(){
+  debug_stats.rules_called++;
+  rules_call_trace.push_back("Called rule_for_index\n");
   int tokens_consumed = 0;
   
   if(rule_rhs_expression_property()){
@@ -191,23 +220,27 @@ bool Prp::rule_for_index(){
         }
         else{
           go_back(tokens_consumed);
+          rules_call_trace.push_back("Failed rule_for_index\n");
           return false;
         }
       }
     }
+    rules_call_trace.push_back("Matched rule_for_index\n");
+    debug_stats.rules_matched++;
     return true;
   }
   go_back(tokens_consumed);
+  rules_call_trace.push_back("Failed rule_for_index\n");
   return false;
 }
 
 bool Prp::rule_else_statement(){
-  fmt::print("Hello from rule_else_statement.\n");
+  debug_stats.rules_called++;
+  rules_call_trace.push_back("Called rule_else_statement\n");
   int tokens_consumed = 0;
   
   // option one
   if(scan_is_token(Pyrope_id_elif)){
-    fmt::print("rule_else_statement: found an elif.\n");
     debug_consume(); // consume the elif
     tokens_consumed++;
     if(rule_logical_expression()){
@@ -221,6 +254,7 @@ bool Prp::rule_else_statement(){
         }
         else{
           go_back(tokens_consumed);
+          rules_call_trace.push_back("Failed rule_else_statement\n");
           return false;
         }
       }
@@ -230,6 +264,8 @@ bool Prp::rule_else_statement(){
         if(scan_is_token(Token_id_cb)){
           // optional
           rule_else_statement();
+          rules_call_trace.push_back("Matched rule_else_statement\n");
+          debug_stats.rules_matched++;
           return true;
         }
       }
@@ -240,7 +276,6 @@ bool Prp::rule_else_statement(){
   go_back(tokens_consumed);
   tokens_consumed = 0;
   if(scan_is_token(Pyrope_id_else)){
-    fmt::print("rule_else_statement: found an else.\n");
     debug_consume(); // consume the else
     tokens_consumed++;
     // optional
@@ -253,6 +288,7 @@ bool Prp::rule_else_statement(){
       }
       else{
         go_back(tokens_consumed);
+        rules_call_trace.push_back("Failed rule_else_statement\n");
         return false;
       }
     }
@@ -264,15 +300,20 @@ bool Prp::rule_else_statement(){
       if(scan_is_token(Token_id_cb)){
         debug_consume(); // consume the open brace
         tokens_consumed++;
+        rules_call_trace.push_back("Matched rule_else_statement\n");
+        debug_stats.rules_matched++;
         return true;
       }
     }
   }
   go_back(tokens_consumed);
+  rules_call_trace.push_back("Failed rule_else_statement\n);
   return false;
 }
 
 bool Prp::rule_while_statement(){
+  debug_stats.rules_called++;
+  rules_call_trace.push_back("Called rule_while_statement\n");
   int tokens_consumed = 0;
   
   if(scan_is_token(Pyrope_id_while)){
@@ -289,6 +330,7 @@ bool Prp::rule_while_statement(){
         }
         else{
           go_back(tokens_consumed);
+          rules_call_trace.push_back("Failed rule_while_statement\n");
           return false;
         }
       }
@@ -299,16 +341,21 @@ bool Prp::rule_while_statement(){
         rule_code_blocks();
         if(scan_is_token(Token_id_cb)){
           debug_consume(); // consume the open bracket
+          rules_call_trace.push_back("Matched rule_while_statement\n");
+          debug_stats.rules_matched++;
           return true;
         }
       }
     }
   }
   go_back(tokens_consumed);
+  rules_call_trace.push_back("Failed rule_while_statement\n");
   return false;
 }
 
 bool Prp::rule_try_statement(){
+  debug_stats.rules_called++;
+  rules_call_trace.push_back("Called rule_try_statement\n");
   int tokens_consumed = 0;
   
   if(scan_is_token(Pyrope_id_try)){
@@ -325,6 +372,7 @@ bool Prp::rule_try_statement(){
         }
         else{
           go_back(tokens_consumed);
+          rules_call_trace.push_back("Failed rule_try_statement\n");
           return false;
         }
       }
@@ -338,16 +386,21 @@ bool Prp::rule_try_statement(){
           tokens_consumed++;
           // optional
           rule_scope_else();
+          rules_call_trace.push_back("Matched rule_try_statement\n");
+          debug_stats.rules_matched++;
           return true;
         }
       }
     }
   }
   go_back(tokens_consumed);
+  rules_call_trace.push_back("Failed rule_try_statement\n");
   return false;
 }
 
 bool Prp::rule_scope_else(){
+  debug_stats.rules_called++;
+  rules_call_trace.push_back("Called rule_scope_else\n");
   int tokens_consumed = 0;
   if(scan_is_token(Pyrope_id_else)){
     debug_consume();
@@ -360,31 +413,43 @@ bool Prp::rule_scope_else(){
       if(scan_is_token(Token_id_cb)){
         debug_consume();
         tokens_consumed++;
+        rules_call_trace.push_back("Matched rule_scope_else\n");
+        debug_stats.rules_matched++;
         return true;
       }
     }
   }
   go_back(tokens_consumed);
+  rules_call_trace.push_back("Failed rule_scope_else\n");
   return false;
 }
 
 bool Prp::rule_scope_body(){
+  debug_stats.rules_called++;
+  rules_call_trace.push_back("Called rule_scope_body\n");
   // option one
   if(rule_code_blocks()){
     // optional
     rule_logical_expression();
+    rules_call_trace.push_back("Matched rule_scope_body\n");
+    debug_stats.rules_matched++;
     return true;
   }
   
   // option two
   if(rule_logical_expression()){
+    rules_call_trace.push_back("Matched rule_scope_body\n");
+    debug_stats.rules_matched++;
     return true;
   }
   
+  rules_call_trace.push_back("Failed rule_scope_body\n");
   return false;
 }
 
 bool Prp::rule_scope(){
+  rules_call_trace.push_back("Called rule_scope\n");
+  debug_stats.rules_called++;
   int tokens_consumed = 0;
   
   if(scan_is_token(Token_id_colon)){
@@ -394,15 +459,20 @@ bool Prp::rule_scope(){
     rule_scope_condition();
     if(scan_is_token(Token_id_colon)){
       debug_consume(); // consume the colon
+      rules_call_trace.push_back("Matched rule_scope\n");
+      debug_stats,rules_matched++;
       return true;
     }
   }
   
   go_back(tokens_consumed);
+  rules_call_trace.push_back("Failed rule_scope\n");
   return false;
 }
 
 bool Prp::rule_scope_condition(){
+  rules_call_trace.push_back("Called rule_scope_condition\n");
+  debug_stats.rules_called++;
   int tokens_consumed = 0;
   
   // option one
@@ -411,6 +481,8 @@ bool Prp::rule_scope_condition(){
       debug_consume();
       tokens_consumed++;
       if(rule_logical_expression()){
+        rules_call_trace.push_back("Matched rule_scope_condition\n");
+        debug_stats.rules_matched++;
         return true;
       }
     }
@@ -425,15 +497,20 @@ bool Prp::rule_scope_condition(){
     debug_consume();
     tokens_consumed++;
     if(rule_logical_expression()){
+      rules_call_trace.push_back("Matched rule_scope_condition\n");
+      debug_stats.rules_matched++;
       return true;
     }
   }
   
   go_back(tokens_consumed);
+  rules_call_trace.push_back("Failed rule_scope_condition\n");
   return false;
 }
 
 bool Prp::rule_scope_argument(){
+  rules_call_trace.push_back("Called rule_scope_argument\n");
+  debug_stats.rules_called++;
   int tokens_consumed = 0;
   
   // option one
@@ -445,6 +522,8 @@ bool Prp::rule_scope_argument(){
       while(rule_identifier());
       if(scan_is_token(Token_id_cp)){
         debug_consume();
+        rules_call_trace.push_back("Matched rule_scope_argument\n");
+        debug_stats.rules_matched++;
         return true;
       }
     }
@@ -466,22 +545,29 @@ bool Prp::rule_scope_argument(){
           tokens_consumed++;
           if(!rule_identifier()){
             go_back(tokens_consumed);
+            rules_call_trace.push_back("Failed rule_scope_argument\n");
             return false;
           }
         }
       }
       if(scan_is_token(Token_id_cp)){
         debug_consume();
+        rules_call_trace.push_back("Matched rule_scope_argument\n");
+        debug_stats.rules_matched++;
         return true;
       }
     }
   }
   
   go_back(tokens_consumed);
+  rules_call_trace.push_back("Matched rule_scope_argument\n");
+  debug_stats.rules_matched++;
   return true;
 }
 
 bool Prp::rule_scope_declaration(){
+  debug_stats.rules_called++;
+  rules_call_trace.push_back("Called rule_scope_declaration\n");
   int tokens_consumed = 0;
   
   if(rule_scope()){
@@ -495,15 +581,20 @@ bool Prp::rule_scope_declaration(){
         tokens_consumed++;
         // optional
         rule_scope_else();
+        rules_call_trace.push_back("Matched rule_scope_declaration\n");
+        debug_stats.rules_matched++;
         return true;
       }
     }
   }
   go_back(tokens_consumed);
+  rules_call_trace.push_back("Failed rule_scope_declaration\n");
   return false;
 }
 
 bool Prp::rule_punch_format(){
+  rules_call_trace.push_back("Called rule_punch_format\n");
+  debug_stats.rules_called++;
   int tokens_consumed = 0;
   
   if(scan_is_token(Pyrope_id_punch)){
@@ -514,16 +605,22 @@ bool Prp::rule_punch_format(){
         debug_consume();
         tokens_consumed++;
         if(rule_punch_rhs()){
+          rules_call_trace.push_back("Matched rule_punch_format\n");
+          debug_stats.rules_matched++;
           return true;
         }
       }
     }
   }
   go_back(tokens_consumed);
+  rules_call_trace.push_back("Failed rule_punch_format\n");
   return false;
 }
 
+/* FIXME: never returns true */
 bool Prp::rule_punch_rhs(){
+  rules_call_trace.push_back("Called rule_punch_rhs\n");
+  debug_stats.rules_called++;
   int tokens_consumed = 0;
   bool next;
   
@@ -542,6 +639,7 @@ bool Prp::rule_punch_rhs(){
           tokens_consumed++;
           if(!rule_identifier()){
             go_back(tokens_consumed);
+            rules_call_trace.push_back("Failed rule_punch_rhs\n");
             return false;
           }
         }
@@ -562,6 +660,7 @@ bool Prp::rule_punch_rhs(){
               tokens_consumed++;
               if(!rule_identifier()){
                 go_back(tokens_consumed);
+                rules_call_trace.push_back("Failed rule_punch_rhs\n");
                 return false;
               }
             }
@@ -589,6 +688,7 @@ bool Prp::rule_punch_rhs(){
           tokens_consumed++;
           if(!rule_identifier()){
             go_back(tokens_consumed);
+            rules_call_trace.push_back("Failed rule_punch_rhs\n");
             return false;
           }
         }
@@ -605,6 +705,7 @@ bool Prp::rule_punch_rhs(){
           tokens_consumed++;
           if(!rule_identifier()){
             go_back(tokens_consumed);
+            rules_call_trace.push_back("Failed rule_punch_rhs\n");
             return false;
           }
         }
@@ -613,10 +714,12 @@ bool Prp::rule_punch_rhs(){
   }
   
   go_back(tokens_consumed);
+  rules_call_trace.push_back("Failed rule_punch_rhs\n");
   return false;
 }
 
 bool Prp::rule_function_pipe(){
+  debug_stats.rules_called++;
   fmt::print("Hello from rule_function_pipe.\n");
   int tokens_consumed = 0;
   
@@ -635,6 +738,7 @@ bool Prp::rule_function_pipe(){
 }
 
 bool Prp::rule_fcall_explicit(){
+  debug_stats.rules_called++;
   int tokens_consumed = 0;
   
   if(!rule_constant()){
@@ -662,6 +766,7 @@ bool Prp::rule_fcall_explicit(){
 }
 
 bool Prp::rule_fcall_arg_notation(){
+  debug_stats.rules_called++;
   int tokens_consumed = 0;
   bool next;
   
@@ -725,10 +830,12 @@ bool Prp::rule_fcall_arg_notation(){
 }
 
 bool Prp::rule_fcall_implicit(){
-  return false;
+  debug_stats.rules_called++;
+  return true;
 }
 
 bool Prp::rule_assignment_expression(){
+  debug_stats.rules_called++;
 	fmt::print("Hello from rule_assignment_expression.\n");
 	if(rule_constant()){
 		return false;
@@ -758,6 +865,7 @@ bool Prp::rule_assignment_expression(){
 
 /* FIXME: add range notation rule */
 bool Prp::rule_lhs_expression(){
+  debug_stats.rules_called++;
   fmt::print("Hello from rule_lhs_expression.\n");
   bool ok = rule_tuple_notation() || rule_range_notation();
   return ok;
@@ -765,6 +873,7 @@ bool Prp::rule_lhs_expression(){
 
 /* FIXME: incomplete */
 bool Prp:: rule_rhs_expression_property(){
+  debug_stats.rules_called++;
   fmt::print("Hello from rule_rhs_expression_property.\n");
   if(scan_is_token(Token_id_label)){
     debug_down();
@@ -779,6 +888,7 @@ bool Prp:: rule_rhs_expression_property(){
 }
 
 bool Prp::rule_tuple_notation(){
+  debug_stats.rules_called++;
   fmt::print("Hello from rule_tuple_notation\n");
   int tokens_consumed = 0;
   
@@ -835,10 +945,12 @@ bool Prp::rule_tuple_notation(){
 }
 
 bool Prp::rule_range_notation(){
+  debug_stats.rules_called++;
   return false;
 }
 
 bool Prp::rule_bit_selection_notation(){
+  debug_stats.rules_called++;
   fmt::print("Hello from rule_bit_selection_notation.\n");
 	bool next = rule_tuple_dot_notation();
 	if (next){
@@ -850,6 +962,7 @@ bool Prp::rule_bit_selection_notation(){
 }
 
 bool Prp::rule_tuple_dot_notation(){
+  debug_stats.rules_called++;
   fmt::print("Hello from rule_tuple_dot_notation.\n");
 	bool next = rule_tuple_array_notation();
 	if(next){
@@ -860,6 +973,7 @@ bool Prp::rule_tuple_dot_notation(){
 }
 
 bool Prp::rule_tuple_dot_dot(){
+  debug_stats.rules_called++;
   fmt::print("Hello from rule_tuple_dot_dot.\n");
   bool next = true;
   int tokens_consumed = 0;
@@ -877,6 +991,7 @@ bool Prp::rule_tuple_dot_dot(){
 }
 
 bool Prp::rule_tuple_array_notation(){
+  debug_stats.rules_called++;
   fmt::print("Hello from rule_tuple_array_notation.\n");
 	bool next = rule_lhs_var_name();
 	if(next){
@@ -888,6 +1003,7 @@ bool Prp::rule_tuple_array_notation(){
 }
 
 bool Prp::rule_lhs_var_name(){
+  debug_stats.rules_called++;
   fmt::print("Hello from rule_lhs_var_name.\n");
 	if(rule_identifier() || rule_constant()){
     return true;
@@ -896,6 +1012,7 @@ bool Prp::rule_lhs_var_name(){
 }
 
 bool Prp::rule_tuple_array_bracket(){
+  debug_stats.rules_called++;
   fmt::print("Hello from rule_tuple_array_bracket.\n");
   bool next = true;
   int tokens_consumed = 0;
@@ -925,8 +1042,9 @@ bool Prp::rule_tuple_array_bracket(){
 }
 
 bool Prp::rule_tuple_notation_no_bracket(){
+  debug_stats.rules_called++;
   fmt::print("Hello from rule_tuple_notation_no_bracket.\n");
-	/* bit_selection_notation+ */
+  /* bit_selection_notation+ */
   if(rule_bit_selection_notation()){
     while(rule_bit_selection_notation());
     return true;
@@ -935,7 +1053,8 @@ bool Prp::rule_tuple_notation_no_bracket(){
 	return false;
 }
 
-bool Prp::rule_identifier(){  
+bool Prp::rule_identifier(){
+  debug_stats.rules_called++;
   fmt::print("Hello from rule_identifier.\n");
 	if(!(scan_is_token(Token_id_register) || scan_is_token(Token_id_input) || scan_is_token(Token_id_output) || scan_is_token(Token_id_alnum) || scan_is_token(Token_id_label))){
     //debug_up(Prp_rule_identifier);
@@ -955,6 +1074,7 @@ bool Prp::rule_identifier(){
 
 /* FIXME: support for string constants */
 bool Prp::rule_constant(){
+  debug_stats.rules_called++;
   int tokens_consumed = 0;
   fmt::print("Hello from rule_constant.\n");
   if(scan_is_token(Token_id_minus)){
@@ -972,6 +1092,7 @@ bool Prp::rule_constant(){
 }
 
 bool Prp::rule_assignment_operator(){
+  debug_stats.rules_called++;
   fmt::print("Hello from rule_assignment_operator.\n");
   int tokens_consumed = 0;
 
@@ -1048,6 +1169,7 @@ bool Prp::rule_assignment_operator(){
 }
 
 bool Prp::rule_tuple_by_notation(){
+  debug_stats.rules_called++;
   int tokens_consumed = 0;
   fmt::print("Hello from rule_tuple_by_notation.\n");
   if (scan_is_token(Pyrope_id_by)){
@@ -1063,6 +1185,7 @@ bool Prp::rule_tuple_by_notation(){
 }
 
 bool Prp::rule_bit_selection_bracket(){
+  debug_stats.rules_called++;
   fmt::print("Hello from rule_bit_selection_bracket.\n");
   bool next = true;
   int tokens_consumed = 0;
@@ -1116,6 +1239,7 @@ bool Prp::rule_bit_selection_bracket(){
 }
 
 bool Prp::rule_logical_expression(){
+  debug_stats.rules_called++;
   int tokens_consumed = 0;
   bool next = true;
   fmt::print("Hello from rule_logical_expression.\n");
@@ -1147,6 +1271,7 @@ bool Prp::rule_logical_expression(){
 }
 
 bool Prp::rule_relational_expression(){
+  debug_stats.rules_called++;
   int tokens_consumed = 0;
   bool next = true;
   
@@ -1180,6 +1305,7 @@ bool Prp::rule_relational_expression(){
 
 /* FIXME: need to add overload notation */
 bool Prp::rule_additive_expression(){
+  debug_stats.rules_called++;
   int tokens_consumed = 0;
   bool next = true;
   
@@ -1326,6 +1452,7 @@ bool Prp::rule_additive_expression(){
 }
 
 bool Prp::rule_bitwise_expression(){
+  debug_stats.rules_called++;
   int tokens_consumed = 0;
   bool next = true;
   
@@ -1352,6 +1479,7 @@ bool Prp::rule_bitwise_expression(){
 }
 
 bool Prp::rule_multiplicative_expression(){
+  debug_stats.rules_called++;
   int tokens_consumed = 0;
   bool next = true;
   
@@ -1377,6 +1505,7 @@ bool Prp::rule_multiplicative_expression(){
 }
 
 bool Prp::rule_unary_expression(){
+  debug_stats.rules_called++;
   int tokens_consumed = 0;
   fmt::print("Hello from rule_unary_expression().\n");
   if(rule_factor()){
@@ -1397,6 +1526,7 @@ bool Prp::rule_unary_expression(){
 }
 
 bool Prp::rule_factor(){
+  debug_stats.rules_called++;
   int tokens_consumed = 0;
   
   if(rule_rhs_expression()){
@@ -1435,11 +1565,13 @@ bool Prp::rule_factor(){
 
 /* FIXME: Incomplete */
 bool Prp::rule_overload_notation(){
+  debug_stats.rules_called++;
   return false;
 }
 
 /* FIXME: Incomplete */
 bool Prp::rule_rhs_expression(){
+  debug_stats.rules_called++;
   fmt::print("Hello from rule_rhs_expression().\n");
   return rule_lhs_expression();
 }
@@ -1448,27 +1580,67 @@ void Prp::elaborate(){
   patch_pass(pyrope_keyword);
   ast = std::make_unique<Ast_parser>(get_buffer(), Prp_rule);
   debug_down();
-  fmt::print("Starting to parse\n");
-	while(!scan_is_end()){
-		dump_token();
-		eat_comments();
-		if(scan_is_end()) return;
-		if(!rule_top()){
-			fmt::print("Something went wrong.\n");
-			return;
-		}
-	}
-	fmt::print("Finished Parsing\n");
+  
+  int failed = 0;
+  
+  while(!scan_is_end()){
+    dump_token();
+    eat_comments();
+    if(!rule_top()){
+      failed = 1;
+      break;
+    }
+  }
+  
   debug_up(Prp_rule_code_blocks);
-
+  
+  if(failed){
+    write_log("Parsing FAILED!\n")
+  }
+  else{
+    write_log("Parsing SUCCESSFUL!\n");
+  }
+  
+  write_log("\nPART 1: RULE CALL TRACE\n\n");
+  
+  // create the debug log; first write the rule call trace
+  for(auto &m = rule_call_trace.begin(); m != rule_call_trace.end(); ++m){
+    write_log(m);
+  }
+  
+  write_log("\nPART 2: AST CALL TRACE\n\n");
+  
+  // second, write the ast call trace
+  for(auto &m = ast_call_trace.begin(); m != ast_call_trace.end(); ++m){
+    write_log(m);
+  }
+  
+  write_log("\nPART 3: AST PREORDER TRAVERSAL\n\n")
+  
+  // next, write the AST traversal
   ast_handler();
+  
+  write_log("\nPART 4: STATISTICS\n\n");
+  
+  // finally, write the statistics
+  write_log(fmt::format("Number of rules called: {}\n", debug_stat.rules_called));
+  write_log(fmt::format("Number of rules matched: {}\n", debug_stat.rules_matched));
+  write_log(fmt::format("Number of tokens consumed: {}\n", debug_stat.tokens_consumed));
+  write_log(fmt::format("Number of tokens unconsumed: {}\n", debug_stat.tokens_unconsumed));
+  write_log(fmt::format("Number of ast->up() calls: {}\n", debug_stat.ast_up_calls));
+  write_log(fmt::format("Number of ast->down() calls: {}\n", debug_stat.ast_down_calls));
+  write_log(fmt::format("Number of ast->add() calls: {}\n", debug_stat.ast_add_calls));
 
+  // close the log
+  close_log();
+  
   ast = nullptr;
 }
 
 /* Consumes a token and dumps the new one */
 bool Prp::debug_consume(){
   fmt::print("Consuming token: ");
+  debug_stat.tokens_consumed++;
   dump_token();
   bool ok = scan_next();
   return ok;
@@ -1477,6 +1649,7 @@ bool Prp::debug_consume(){
 /* Unconsumes a token and dumps it */
 bool Prp::debug_unconsume(){
   fmt::print("Unconsuming token: ");
+  debug_stat.tokens_unconsumed++;
   bool ok = scan_prev();
   dump_token();
   return ok;
@@ -1491,14 +1664,22 @@ bool Prp::go_back(int num_tok){
   return ok;
 }
 
-void Prp::debug_up(Rule_id rid){
-  fmt::print("Going up a level in the AST with rule ID: {}\n", rid);
+void Prp::debug_up(std::string rule_name, Rule_id rid){
+  ast_call_trace.push_back(fmt::format("went up from rule {}\n", rule_name));
+  debug_stat.ast_up_calls++;
   ast->up(rid);
 }
 
-void Prp::debug_down(){
-  fmt::print("Going down a level in the AST\n");
+void Prp::debug_down(std::string rule_name){
+  ast_call_trace.push_back(fmt::format"went down from rule {}\n", rule_name);
+  debug_stat.ast_down_calls++;
   ast->down();
+}
+
+void debug_add(std::string rule_name, Rule_id, rid){
+  ast_call_trace.push_back("added token {} from rule {}", scan_text(), rule_name)
+  debug_stat.ast_add_calls++;
+  ast->add(rid, scan_token());
 }
 
 void Prp::ast_handler(){
@@ -1599,6 +1780,24 @@ void Prp::ast_handler(){
         break;
     }
     auto token_text = scan_text(node.token_entry);
-    fmt::print("Rule name: {}, Token text: {}, Tree level: {}\n", rule_name, token_text, it.level);
+    write_log(fmt::format("Rule name: {}, Token text: {}, Tree level: {}\n", rule_name, token_text, it.level));
+  }
+  
+  Prp::open_log(){
+#ifdef DEBUG
+    debug_log.open("debug_log");
+#endif
+  }
+  
+  Prp::close_log(){
+#ifdef DEBUG
+    debug_log.close();
+#endif
+  }
+  
+  Prp::write_log(std::string message){
+#ifdef DEBUG
+    debug_log << message;
+#endif
   }
 }

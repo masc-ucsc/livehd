@@ -659,6 +659,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
       if(inps.size() == 1) {
         // reduce op: assign a = &b;
         assert(cell_output_map.find(node.get_driver_pin(1).get_compact()) != cell_output_map.end()); // single input and gate that is not used as a reduce and
+        //SH:FIXME: dummy code?
         if (node.get_type().op == And_Op)
           module->addReduceAnd(next_id(g), inps[0], cell_output_map[node.get_driver_pin(1).get_compact()]);
         else if (node.get_type().op == Or_Op)
@@ -669,6 +670,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
           assert(false);
       } else {
         assert(cell_output_map.find(node.get_driver_pin(0).get_compact()) != cell_output_map.end());
+        //SH:FIXME: dummy code?
         if (node.get_type().op == And_Op)
           create_tree(g, inps, module, &RTLIL::Module::addAnd, false, cell_output_map[node.get_driver_pin(0).get_compact()]);
         else if (node.get_type().op == Or_Op)
