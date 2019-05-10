@@ -78,7 +78,6 @@ void Pass_mockturtle::lg_partition(LGraph *g) {
   for (const auto &it:group_boundary) {
     group_boundary_set[it.second].emplace_back(it.first);
   }
-
 }
 
 void Pass_mockturtle::setup_input_signal(const XEdge &input_edge, std::vector<mockturtle::klut_network::signal> &input_signal, mockturtle::klut_network &klut) {
@@ -126,7 +125,6 @@ void Pass_mockturtle::split_input_signal(const std::vector<mockturtle::klut_netw
 void Pass_mockturtle::create_LUT_network(LGraph *g) {
   for (const auto gid:group_boundary_set) {
     auto klut = mockturtle::klut_network();
-    //gid2klut[gid.first]=klut;
     //traverse the nodes in lgraph and create nodes/signals in klut network
     for (const auto gid_node:gid.second) {
       auto cur_node = Node(g, 0, gid_node);
@@ -221,9 +219,9 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
       }
 
     }
-    //output the unconnected nodes in the klut network
     fmt::print("KLUT network under Group ID:{}\n", gid.first);
     mockturtle::write_bench(klut,std::cout);
+    gid2klut[gid.first]=klut;
 
   }
 }
@@ -251,12 +249,9 @@ void Pass_mockturtle::do_work(LGraph *g) {
     cell_type[node.get_compact()]=std::make_pair(name,std::make_pair(in_edges_num,out_edges_num));
 */
   }
-//  fmt::print("Pass: number of cells {}\n", cell_type.size());
-  fmt::print("{} nodes passed.\n", cell_amount);
-/*
-  for (auto const it:group_id_mapping) {
-    fmt::print("GID:{}->{}\n", it.first, it.second);
-  }
+  fmt::print("Pass: number of cells {}\n", cell_amount);
+/*  fmt::print("Pass: number of cells {}\n", cell_type.size());
+
   for(auto const it:cell_type) {
     fmt::print("node_type:{} in_edges:{} out_edges:{}\n", it.second.first, it.second.second.first, it.second.second.second);
   }
