@@ -42,10 +42,13 @@ protected:
   absl::flat_hash_map<int, mockturtle::klut_network> gid2klut;
   absl::flat_hash_map<int, std::list<Node::Compact>> group_boundary_set;
   absl::flat_hash_map<XEdge, std::vector<mockturtle::klut_network::signal>> edge2signal;
-  void lg_partition(LGraph *g);
-  void create_LUT_network(LGraph *g);
+  void lg_partition(LGraph *);
+  void create_LUT_network(LGraph *);
+  void setup_input_signal(const XEdge &, std::vector<mockturtle::klut_network::signal> &, mockturtle::klut_network &);
+  void setup_output_signal(const XEdge &, std::vector<mockturtle::klut_network::signal> &, mockturtle::klut_network &);
+  void split_input_signal(const std::vector<mockturtle::klut_network::signal> &, std::vector<std::vector<mockturtle::klut_network::signal>> &);
 
-  bool eligable_cell_op(Node_Type_Op cell_op) {
+  bool eligable_cell_op(const Node_Type_Op &cell_op) {
     switch (cell_op) {
       case Not_Op:
         //fmt::print("Node: Not_Op\n");
