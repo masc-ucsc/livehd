@@ -122,6 +122,24 @@ void Pass_mockturtle::split_input_signal(const std::vector<mockturtle::klut_netw
   }
 }
 
+void Pass_mockturtle::create_network_output_signal(LGraph *g, int gid, mockturtle::klut_network &klut) {
+  I(group_boundary_set.count(gid)!=0);
+  absl::flat_hash_set<Node::Compact> node_set;
+  for (const auto node_compact:group_boundary_set[gid]) {
+    node_set.insert(node_compact);
+  }
+  for (const auto node_compact:node_set) {
+    auto node = Node(g, 0, node_compact);
+    for (const auto &out_edge : node.out_edges()) {
+      if (node_set.find((out_edge.sink.get_node().get_compact()))==node_set.end()) {
+        for (const auto sig : edge2signal[out_edge]) {
+          klut.create_po(sig);
+        }
+      }
+    }
+  }
+}
+
 void Pass_mockturtle::create_LUT_network(LGraph *g) {
   for (const auto gid:group_boundary_set) {
     auto klut = mockturtle::klut_network();
@@ -132,10 +150,7 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
         case Not_Op: {
           //Note: Don't need to check the node_pin pid since Not_Op has only one sink pin and one driver pin
           fmt::print("Not_Op in gid:{}\n",gid.first);
-          //assuming there is only one input
-          I(cur_node.inp_edges().size()==1);
-          //must have output
-          I(cur_node.out_edges().size()>0);
+          I(cur_node.inp_edges().size()==1 && cur_node.out_edges().size()>0);
 
           std::vector<mockturtle::klut_network::signal> inp_sig, out_sig;
           unsigned long int loop_count = 0;
@@ -164,10 +179,7 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
 
         case And_Op: {
           fmt::print("And_Op in gid:{}\n",gid.first);
-          //And_Op must have more than one input
-          I(cur_node.inp_edges().size()>1);
-          //must have output
-          I(cur_node.out_edges().size()>0);
+          I(cur_node.inp_edges().size()>0 && cur_node.out_edges().size()>0);
 
           //mapping all input edge to input signal
           //create output signal at the same time
@@ -183,8 +195,19 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
             split_input_signal(inp_sig, inp_sig_group_by_bit);
           }
           //creating output signal
-          for (long unsigned int i = 0; i < inp_sig_group_by_bit.size(); i++) {
-            out_sig_0.emplace_back(klut.create_nary_and(inp_sig_group_by_bit[i]));
+          switch (cur_node.inp_edges().size()) {
+            case 1: {
+              for (long unsigned int i = 0; i < inp_sig_group_by_bit.size(); i++) {
+                out_sig_0.emplace_back(inp_sig_group_by_bit[i][0]);
+              }
+              break;
+            }
+            default: {
+              for (long unsigned int i = 0; i < inp_sig_group_by_bit.size(); i++) {
+                out_sig_0.emplace_back(klut.create_nary_and(inp_sig_group_by_bit[i]));
+              }
+              break;
+            }
           }
           out_sig_1.emplace_back(klut.create_nary_and(out_sig_0));
           //processing output signal
@@ -205,6 +228,7 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
                 break;
             }
           }
+          //FIX ME: delete unused output signal
           break;
         }
 /*        case Or_Op:
@@ -212,13 +236,21 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
           break;
         case Xor_Op:
           fmt::print("Xor_Op in gid:{}\n",gid.first);
-          break;*/
+          break;
+*/
+        case Equals_Op: {
+          fmt::print("Equals_Op in gid:{}\n",gid.first);
+          I(cur_node.inp_edges().size()>1);
+          break;
+        }
+
         default:
           fmt::print("Unknown_Op in gid:{}\n",gid.first);
           break;
       }
 
     }
+    create_network_output_signal(g, gid.first, klut);
     fmt::print("KLUT network under Group ID:{}\n", gid.first);
     mockturtle::write_bench(klut,std::cout);
     gid2klut[gid.first]=klut;

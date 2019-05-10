@@ -44,6 +44,7 @@ protected:
   absl::flat_hash_map<XEdge, std::vector<mockturtle::klut_network::signal>> edge2signal;
   void lg_partition(LGraph *);
   void create_LUT_network(LGraph *);
+  void create_network_output_signal(LGraph *, int, mockturtle::klut_network &);
   void setup_input_signal(const XEdge &, std::vector<mockturtle::klut_network::signal> &, mockturtle::klut_network &);
   void setup_output_signal(const XEdge &, std::vector<mockturtle::klut_network::signal> &, mockturtle::klut_network &);
   void split_input_signal(const std::vector<mockturtle::klut_network::signal> &, std::vector<std::vector<mockturtle::klut_network::signal>> &);
@@ -56,12 +57,24 @@ protected:
       case And_Op:
         //fmt::print("Node: And_Op\n");
         break;
-/*      case Or_Op:
+/*
+      case Or_Op:
         //fmt::print("Node: Or_Op\n");
         break;
       case Xor_Op:
         //fmt::print("Node: Xor_Op\n");
         break;
+      case Join_Op:
+        //fmt::print("Node: Join_Op\n");
+        break;
+      case Pick_Op:
+        //fmt::print("Node: Pick_Op\n");
+        break;
+*/
+      case Equals_Op:
+        //fmt::print("Node: Equals_Op\n");
+        break;
+/*
       case LessThan_Op:
         //fmt::print("Node: LessThan_Op\n");
         break;
@@ -74,21 +87,13 @@ protected:
       case GreaterEqualThan_Op:
         //fmt::print("Node: GreaterEqualThan_Op\n");
         break;
-      case Equals_Op:
-        //fmt::print("Node: Equals_Op\n");
-        break;
       //case ShiftRight_Op:
         //fmt::print("Node: ShiftRight_Op\n");
       //  break;
       //case ShiftLeft_Op:
         //fmt::print("Node: ShiftLeft_Op\n");
       //  break;
-      case Join_Op:
-        //fmt::print("Node: Join_Op\n");
-        break;
-      case Pick_Op:
-        //fmt::print("Node: Pick_Op\n");
-        break;*/
+*/
       default:
         //fmt::print("Node: Unknown\n");
         return false;
