@@ -1125,13 +1125,15 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
 
         if(std::strncmp(cell->type.c_str(), "$logic_and", 10) == 0
          ||std::strncmp(cell->type.c_str(), "$logic_or", 9) == 0 ) {
-          Node_pin dpin = create_join_operator(g, ss);
-          auto or_node = g->create_node(Or_Op);
-          g->add_edge(dpin,or_node.setup_sink_pin());
+          if (ss.size() > 1) {
+            Node_pin dpin    = create_join_operator(g, ss);
+            auto     or_node = g->create_node(Or_Op);
+            g->add_edge(dpin, or_node.setup_sink_pin());
 
-          g->add_edge(or_node.setup_driver_pin(1), entry_node.setup_sink_pin(), 1); // reduce_OR
+            g->add_edge(or_node.setup_driver_pin(1), entry_node.setup_sink_pin(), 1);  // reduce_OR
 
-          continue;
+            continue;
+          }
         }else if (entry_node.is_type(SFlop_Op) || entry_node.is_type(Mux_Op) || entry_node.is_type(ShiftRight_Op) ||
             entry_node.is_type(ShiftLeft_Op)) {
           if (conn.first.str() == "\\CLK")
@@ -1185,7 +1187,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
           } else if(std::strncmp(conn.first.c_str(), "\\WR_EN", 6) == 0) {
             for(uint32_t wrport = 0; wrport < wrports; wrport++) {
               Node_pin spin = entry_node.setup_sink_pin(LGRAPH_MEMOP_WREN(wrport));
-              Node_pin dpin = create_join_operator(g, ss.extract(wrport, 1));
+              Node_pin dpin = create_join_operator(g, ss.extract(wrport * size, size));
               g->add_edge(dpin, spin);
             }
             continue;
