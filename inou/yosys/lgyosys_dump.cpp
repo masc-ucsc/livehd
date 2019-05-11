@@ -31,7 +31,7 @@ RTLIL::Wire *Lgyosys_dump::add_wire(RTLIL::Module *module, const Node_pin &pin) 
   assert(pin.is_driver());
   if (pin.has_name()) {
     auto name = absl::StrCat("\\",pin.get_name());
-    printf("add wire [%s]\n", name.c_str());
+    //printf("add wire [%s]\n", name.c_str());
     return module->addWire(name, pin.get_bits());
   }else{
     return module->addWire(next_id(pin.get_lgraph()), pin.get_bits());
