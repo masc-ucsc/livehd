@@ -18,6 +18,7 @@ void Pass_opentimer::setup() {
   m1.add_label_optional("lib:", "Liberty file for timing");
   m1.add_label_optional("lib_max:", "Liberty file for timing");
   m1.add_label_optional("lib_min:", "Liberty file for timing");
+  m1.add_label_optional("sdc:", "SDC file for timing");
   m1.add_label_optional("spef:", "SPEF file for timing");
 
   register_pass(m1);
@@ -34,29 +35,119 @@ void Pass_opentimer::work(Eprp_var &var) {
   auto lib = var.get("lib");
   auto lib_max = var.get("lib_max");
   auto lib_min = var.get("lib_min");
+  auto sdc = var.get("sdc");
   auto spef = var.get("spef");
 
   for(const auto &g : var.lgs) {
-      pass.read_file(g, lib, lib_max, lib_min, spef);                        // Task1: Read input files (Read user from input) | Status: 75% done
-      pass.build_circuit(g);                                   // Task2: Traverse the lgraph and build the equivalent circuit (No dependencies) | Status: 50% done
-    //  pass.read_sdc(g);                                        // Task3: Traverse the lgraph and create fake SDC numbers | Status: 100% done
-    //  pass.compute_timing();                                   // Task4: Compute Timing | Status: 100% done
+      pass.read_file(g, lib, lib_max, lib_min, spef, sdc);          // Task1: Read input files (Read user from input) | Status: 75% done
+  //    pass.build_circuit(g);                                   // Task2: Traverse the lgraph and build the equivalent circuit (No dependencies) | Status: 50% done
+      pass.read_sdc(sdc);                                        // Task3: Traverse the lgraph and create fake SDC numbers | Status: 100% done
+      pass.compute_timing();                                   // Task4: Compute Timing | Status: 100% done
       pass.populate_table();                                   // Task5: Traverse the lgraph and populate the tables | Status: 0% done
   }
 }
 
-void Pass_opentimer::read_file(LGraph *g, std::string_view lib, std::string_view lib_max, std::string_view lib_min, std::string_view spef) {
+void Pass_opentimer::read_file(LGraph *g, std::string_view lib, std::string_view lib_max, std::string_view lib_min, std::string_view spef, std::string_view sdc) {
 //  LGBench b("pass.opentimer.read_file");      // Expand this method to reading from user input and later develop inou.add_liberty etc.
 
-//  timer.read_celllib ("pass/opentimer/ot_examples/osu018_stdcells.lib");
+
   if(lib_max.length()==0 || lib_min.length()==0){
     timer.read_celllib (lib);
   }else{
     timer.read_celllib (lib_max,ot::MAX);
     timer.read_celllib (lib_min,ot::MIN);
   }
+  //pass.read_sdc(sdc);
+  timer.read_verilog ("pass/opentimer/tests/simple.v"); //USING THIS FOR THE MOMENT AS THE CIRCUIT IS NOT CONSTRUCTED FROM LGRAPH YET
   timer.read_spef (spef);
 
+}
+
+void Pass_opentimer::read_sdc(std::string_view sdc){
+  std::vector<std::string> line_vec;
+  std::ifstream file(static_cast<std::string>(sdc));
+  if(file.is_open()) {
+    std::string line;
+
+    while (getline(file, line)) {
+      std::stringstream datastream(line);
+      std::copy(std::istream_iterator<std::string>(datastream), std::istream_iterator<std::string>(),std::back_inserter(line_vec));
+
+      if(line_vec[0] == "create_clock"){
+        int period;
+        std::string name;
+        for(std::size_t i = 1; i < line_vec.size(); i++){
+          if(line_vec[i] == "-period"){
+            period = stoi(line_vec[++i]);
+            continue;
+          } else if(line_vec[i] == "-name"){
+              name = line_vec[++i];
+              continue;
+            }
+        }
+        timer.create_clock(name, period);
+      } else if(line_vec[0] == "set_input_delay"){
+          std::string name;
+          int delay = stoi(line_vec[1]);
+          for(std::size_t i = 2; i < line_vec.size(); i++){
+            if(line_vec[i] == "[get_ports"){
+              name = line_vec[++i];
+              name.pop_back();
+              continue;
+            }
+          }
+          if(line_vec[2] == "-min" && line_vec[3] == "-rise"){
+            timer.set_at(name, ot::MIN, ot::RISE, delay);
+          } else if(line_vec[2] == "-min" && line_vec[3] == "-fall"){
+            timer.set_at(name, ot::MIN, ot::FALL, delay);
+          } else if(line_vec[2] == "-max" && line_vec[3] == "-rise"){
+            timer.set_at(name, ot::MAX, ot::RISE, delay);
+          } else if(line_vec[2] == "-max" && line_vec[3] == "-fall"){
+            timer.set_at(name, ot::MIN, ot::FALL, delay);
+          }
+      } else if(line_vec[0] == "set_input_transition"){
+          std::string name;
+          int delay = stoi(line_vec[1]);
+          for(std::size_t i = 2; i < line_vec.size(); i++){
+            if(line_vec[i] == "[get_ports"){
+              name = line_vec[++i];
+              name.pop_back();
+              continue;
+            }
+          }
+          if(line_vec[2] == "-min" && line_vec[3] == "-rise"){
+            timer.set_slew(name, ot::MIN, ot::RISE, delay);
+          } else if(line_vec[2] == "-min" && line_vec[3] == "-fall"){
+            timer.set_slew(name, ot::MIN, ot::FALL, delay);
+          } else if(line_vec[2] == "-max" && line_vec[3] == "-rise"){
+            timer.set_slew(name, ot::MAX, ot::RISE, delay);
+          } else if(line_vec[2] == "-max" && line_vec[3] == "-fall"){
+            timer.set_slew(name, ot::MIN, ot::FALL, delay);
+          }
+      } else if(line_vec[0] == "set_output_delay"){
+          std::string name;
+          int delay = stoi(line_vec[1]);
+          for(std::size_t i = 2; i < line_vec.size(); i++){
+            if(line_vec[i] == "[get_ports"){
+              name = line_vec[++i];
+              name.pop_back();
+              continue;
+            }
+          }
+          if(line_vec[2] == "-min" && line_vec[3] == "-rise"){
+            timer.set_rat(name, ot::MIN, ot::RISE, delay);
+          } else if(line_vec[2] == "-min" && line_vec[3] == "-fall"){
+            timer.set_rat(name, ot::MIN, ot::FALL, delay);
+          } else if(line_vec[2] == "-max" && line_vec[3] == "-rise"){
+            timer.set_rat(name, ot::MAX, ot::RISE, delay);
+          } else if(line_vec[2] == "-max" && line_vec[3] == "-fall"){
+            timer.set_rat(name, ot::MIN, ot::FALL, delay);
+          }
+      }
+      line_vec.clear();
+    }
+    file.close();
+  }
 }
 
 void Pass_opentimer::build_circuit(LGraph *g) {       // Enhance this for build_circuit
@@ -126,7 +217,7 @@ void Pass_opentimer::build_circuit(LGraph *g) {       // Enhance this for build_
 
   // CONNECT NETS TO PINS
 
-      bool is_param = false;
+    //  bool is_param = false;
       std::string current_name = "bbox";
       for(const auto &e:node.inp_edges()) {
         if(e.sink.get_pid() < LGRAPH_BBOP_OFFSET)
@@ -136,7 +227,7 @@ void Pass_opentimer::build_circuit(LGraph *g) {       // Enhance this for build_
 
         if(LGRAPH_BBOP_ISIPARAM(e.sink.get_pid())) {
         //  is_param = dpin_node.get_type_const_value() == 1;
-          current_name = dpin_node.get_type_const_sview();
+        //  current_name = static_cast<std::string>(dpin_node.get_type_const_sview());
           fmt::print("Current_Name {}\n", current_name);
         } else if(LGRAPH_BBOP_ISICONNECT(e.sink.get_pid())) {
             if(dpin_node.get_type().op == U32Const_Op) {
@@ -173,47 +264,6 @@ void Pass_opentimer::build_circuit(LGraph *g) {       // Enhance this for build_
   }
 }
 
-void Pass_opentimer::read_sdc(LGraph *g){
-  timer.create_clock("tau2015_clk", 5);
-
-  for(const auto &nid : g->forward()) {
-    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
-
-    std::string name(node.get_type().get_name());
-
-    if(node.get_type().get_name() == "graphio"){
-  //    fmt::print("Name {}\n",name);
-      for(const auto &edge : node.out_edges()) {
-        if(edge.driver.is_graph_input()){
-          std::string driver_name (edge.driver.get_name());
-  //        fmt::print("Driver Name {}\n\n", driver_name);
-
-          timer.set_at(driver_name,ot::MIN,ot::RISE,0)
-               .set_at(driver_name,ot::MIN,ot::FALL,0)
-               .set_at(driver_name,ot::MAX,ot::RISE,0)
-               .set_at(driver_name,ot::MAX,ot::FALL,0);
-
-          timer.set_slew(driver_name,ot::MIN,ot::RISE,0)
-               .set_slew(driver_name,ot::MIN,ot::FALL,0)
-               .set_slew(driver_name,ot::MAX,ot::RISE,0)
-               .set_slew(driver_name,ot::MAX,ot::FALL,0);
-        }
-      }
-
-      for(const auto &edge : node.inp_edges()) {
-          if(edge.sink.is_graph_output()){
-            std::string driver_name (edge.driver.get_name());
-  //        fmt::print("Driver Name {}\n\n", driver_name);
-            timer.set_rat(driver_name,ot::MIN,ot::RISE,0)
-                 .set_rat(driver_name,ot::MIN,ot::FALL,0)
-                 .set_rat(driver_name,ot::MAX,ot::RISE,0)
-                 .set_rat(driver_name,ot::MAX,ot::FALL,0);
-        }
-      }
-    }
-  }
-}
-
 void Pass_opentimer::compute_timing(){                    // Expand this method to compute timing information
 //  LGBench b("pass.opentimer.compute_timing");
 
@@ -234,10 +284,10 @@ void Pass_opentimer::compute_timing(){                    // Expand this method 
   auto num_nets = timer.num_nets();
   fmt::print("Number of nets {}\n", num_nets);
 
-//  auto opt_path = timer.report_timing(1);
-//  std::cout << "Critical Path" << opt_path[0] <<'\n';
+  auto opt_path = timer.report_timing(1);
+  std::cout << "Critical Path" << opt_path[0] <<'\n';
 
-//  timer.dump_graph(std::cout);
+  //timer.dump_graph(std::cout);
 
 }
 

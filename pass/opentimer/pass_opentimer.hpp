@@ -15,9 +15,9 @@ protected:
 
   static void work(Eprp_var &var);
 
-  void read_file(LGraph *g,std::string_view lib,std::string_view lib_max,std::string_view lib_min,std::string_view spef);
+  void read_file(LGraph *g,std::string_view lib,std::string_view lib_max,std::string_view lib_min,std::string_view spef, std::string_view sdc);
   void build_circuit(LGraph *g);
-  void read_sdc(LGraph *g);
+  void read_sdc(std::string_view sdc);
   void compute_timing();
   void populate_table();
 
