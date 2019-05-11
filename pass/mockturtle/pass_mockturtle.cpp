@@ -182,7 +182,6 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
           I(cur_node.inp_edges().size()>0 && cur_node.out_edges().size()>0);
 
           //mapping all input edge to input signal
-          //create output signal at the same time
           //out_sig_0: regular AND
           //out_sig_1: reduced AND
           std::vector<mockturtle::klut_network::signal> out_sig_0, out_sig_1;
@@ -231,7 +230,8 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
           //FIX ME: delete unused output signal
           break;
         }
-/*        case Or_Op:
+/*
+        case Or_Op:
           fmt::print("Or_Op in gid:{}\n",gid.first);
           break;
         case Xor_Op:
@@ -240,10 +240,44 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
 */
         case Equals_Op: {
           fmt::print("Equals_Op in gid:{}\n",gid.first);
-          I(cur_node.inp_edges().size()>1);
+          I(cur_node.inp_edges().size()>1 && cur_node.out_edges().size()>0);
+          //mapping all input edge to input signal
+          std::vector<mockturtle::klut_network::signal> out_sig, med_sig;
+          std::vector<std::vector<mockturtle::klut_network::signal>> inp_sig_group_by_bit;
+          for (const auto &in_edge : cur_node.inp_edges()) {
+            fmt::print("input_bit_width:{}\n",in_edge.get_bits());
+            std::vector<mockturtle::klut_network::signal> inp_sig;
+            setup_input_signal(in_edge, inp_sig, klut);
+            split_input_signal(inp_sig, inp_sig_group_by_bit);
+          }
+          //creating output signal
+          //A[0..n]==B[0..n]==C[0..n] iff
+          //A0^B0==0 && B0^C0==0 && A1^B1==0 && B1^C1==0
+          //&& ... && AN^BN==0 && BN^CN==0
+          //that is: ~(|{(A0,B0),(B0,C0) ... (AN,BN), (BN,CN)})==1
+          for (long unsigned int i = 0; i < inp_sig_group_by_bit.size(); i++) {
+            for (long unsigned int j = 1; j < inp_sig_group_by_bit[i].size(); j++) {
+              med_sig.emplace_back(klut.create_xor(inp_sig_group_by_bit[i][j-1],inp_sig_group_by_bit[i][j]));
+            }
+          }
+          out_sig.emplace_back(klut.create_not(klut.create_nary_or(med_sig)));
+          //processing output signal
+          for (const auto &out_edge : cur_node.out_edges()) {
+            I(out_edge.get_bits()==1);
+            setup_output_signal(out_edge, out_sig, klut);
+          }
           break;
         }
-
+/*
+        case LessThan_Op: {
+          //CAUTION: mockturtle has neither binary nor n-ary LessThan
+          //therefore the implementation would be tricky and TBD
+          fmt::print("LessThan_Op in gid:{}\n",gid.first);
+          I(cur_node.inp_edges().size()>1 && cur_node.out_edges().size()>0);
+          //
+          break;
+        }
+*/
         default:
           fmt::print("Unknown_Op in gid:{}\n",gid.first);
           break;
