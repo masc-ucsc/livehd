@@ -39,8 +39,8 @@ void Pass_opentimer::work(Eprp_var &var) {
   for(const auto &g : var.lgs) {
       pass.read_file(g, lib, lib_max, lib_min, spef);                        // Task1: Read input files (Read user from input) | Status: 75% done
       pass.build_circuit(g);                                   // Task2: Traverse the lgraph and build the equivalent circuit (No dependencies) | Status: 50% done
-      pass.read_sdc(g);                                        // Task3: Traverse the lgraph and create fake SDC numbers | Status: 100% done
-      pass.compute_timing();                                   // Task4: Compute Timing | Status: 100% done
+    //  pass.read_sdc(g);                                        // Task3: Traverse the lgraph and create fake SDC numbers | Status: 100% done
+    //  pass.compute_timing();                                   // Task4: Compute Timing | Status: 100% done
       pass.populate_table();                                   // Task5: Traverse the lgraph and populate the tables | Status: 0% done
   }
 }
@@ -65,9 +65,10 @@ void Pass_opentimer::build_circuit(LGraph *g) {       // Enhance this for build_
   std::string celltype;
   std::string instance_name;
 
-// BUILD GATE
   for(const auto &nid : g -> forward()) {
     auto node = Node(g,0,Node::Compact(nid));
+
+    // CREATE GATES
     for(const auto &e:node.inp_edges()) {
       if(e.sink.get_pid() == LGRAPH_BBOP_TYPE) {
         if(e.driver.get_node().get_type().op != StrConst_Op)
@@ -81,50 +82,52 @@ void Pass_opentimer::build_circuit(LGraph *g) {       // Enhance this for build_
           error("Unrecognized blackbox option, pid %hu\n", e.sink.get_pid());
       }
     }
-    if(node.get_type().get_name() == "blackbox"){
-      timer.insert_gate(instance_name,celltype);
-      //fmt::print("Cell Type: {} \t Instance Name {}\n", celltype, instance_name);
-    }
-  }
 
-  // BUILD NETS AND IO PINS
-  for(const auto &nid : g->forward()) {
-    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
+
     if(node.get_type().get_name() == "blackbox"){
-     // fmt::print("Name {}\n",name);
+      //fmt::print("Cell Type: {} \t Instance Name {}\n", celltype, instance_name);
+
+      // CREATE NETS  ??
       for(const auto &edge : node.out_edges()) {
+        if(edge.driver.has_name()){
           std::string driver_name (edge.driver.get_name());
-       //   fmt::print("Driver Name {}\n\n", driver_name);
+        //  fmt::print("Driver Name {}\n\n", driver_name);
           timer.insert_net(driver_name);
+        }
       }
     }
+
+    // CREATE PRIMARY INPUTS AND PRIMARY OUTPUTS
     if(node.get_type().get_name() == "graphio"){
-     // fmt::print("Name {}\n",name);
       for(const auto &edge : node.out_edges()) {
           if(edge.driver.is_graph_input()){
-            std::string driver_name (edge.driver.get_name());
-       //   fmt::print("Driver Name {}\n\n", driver_name);
-            timer.insert_net(driver_name);
-            timer.insert_primary_input(driver_name);
+            if(edge.driver.has_name()){
+              std::string driver_name (edge.driver.get_name());
+            //  fmt::print("Graph Input Driver Name {}\n\n", driver_name);
+              timer.insert_net(driver_name);
+              timer.insert_primary_input(driver_name);
+            }
           }
       }
       for(const auto &edge : node.inp_edges()) {
           if(edge.sink.is_graph_output()){
-            std::string driver_name (edge.driver.get_name());
-   //         fmt::print("Sink Name {}\n\n", driver_name);
-            timer.insert_net(driver_name);
-            timer.insert_primary_output(driver_name);
+            if(edge.driver.has_name()){
+              std::string driver_name (edge.driver.get_name());
+            //  fmt::print("Graph Output Sink Name {}\n\n", driver_name);
+              timer.insert_net(driver_name);
+              timer.insert_primary_output(driver_name);
+            }
           }
       }
     }
-  }
+
+      fmt::print("Cell Name {}\n\n", celltype);
+      timer.insert_gate(instance_name,celltype);
 
   // CONNECT NETS TO PINS
-  for(const auto &nid : g->forward()) {
-    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
 
       bool is_param = false;
-      std::string current_name ="bbox";
+      std::string current_name = "bbox";
       for(const auto &e:node.inp_edges()) {
         if(e.sink.get_pid() < LGRAPH_BBOP_OFFSET)
           continue;
@@ -132,41 +135,42 @@ void Pass_opentimer::build_circuit(LGraph *g) {       // Enhance this for build_
         auto dpin_node = e.driver.get_node();
 
         if(LGRAPH_BBOP_ISIPARAM(e.sink.get_pid())) {
-          current_name = dpin_node.get_type_const_value() ==1;
-          fmt::print("\n\n Current Name: {} \n\n", current_name);
-        }
-
-        else if(LGRAPH_BBOP_ISICONNECT(e.sink.get_pid())) {
+        //  is_param = dpin_node.get_type_const_value() == 1;
+          current_name = dpin_node.get_type_const_sview();
+          fmt::print("Current_Name {}\n", current_name);
+        } else if(LGRAPH_BBOP_ISICONNECT(e.sink.get_pid())) {
             if(dpin_node.get_type().op == U32Const_Op) {
+              int IDK = dpin_node.get_type_const_value();
+              fmt::print("? Value {}\n\n", IDK);
             } else if(dpin_node.get_type().op == StrConst_Op) {
-                std::string xname (dpin_node.get_type_const_sview());
-                fmt::print("\n\n Y Name: {} \n\n", xname);
+                std::string IDK (dpin_node.get_type_const_sview());
+                fmt::print("? Name {}\n\n", IDK);
             } else {
-                 if(e.driver.has_name()){
+                if (e.driver.has_name()) {
                   std::string wname (e.driver.get_name());
-                  fmt::print("\n\n W Name: {} \n\n", wname);
-              //    fmt::print("\n\n I am here \n\n");
+                  fmt::print("Wire Name 1 {}\n\n", wname);
                 }
             }
-          }
         }
       }
 
-   // if(node.get_type().get_name() == "blackbox"){
-     // fmt::print("Name {}\n",name);
+      for(const auto &e:node.inp_edges()) {
+        if (e.driver.is_graph_input())
+          continue;
+        if(LGRAPH_BBOP_ISICONNECT(e.sink.get_pid())) {
+          if (e.driver.has_name()) {
+            std::string wname (e.driver.get_name());
+            fmt::print("Wire Name 2 {}\n\n", wname);
+          }
+        //  else {
+        //    wname = "\\wire_";
+        //    wname = unique_name(g, wname);
+        //  }
+        //  cell->setPort(wname, cell_output_map[e.driver.get_compact()]);
+        }
+      }
 
-     // for(const auto &edge : node.out_edges()) {
-        //  std::string driver_name (edge.driver.get_name());
-        //  std::string node_pin_name (node.get_driver_pin(0).get_name());
-        //  fmt::print("Node Name: {} | Driver Name: {}\n", node_pin_name, driver_name);
-
-        // Get the name of the node (eg: NAND2X1), get the name of the corresponding node pin (eg: Y)
-        // Connect the driver (eg: n1) from the corresponding node pin
-        // Get the name of the node to which the driver is connected to (eg: NOR4X1), get the name of the corresponding node pin (eg: A)
-        // Concatenate strings with a : in between. Use absl::append ? 
-        // Use timer.connect_pin() to do the connections. eg: timer.connect_pin(NAND2X1:A, n1);
-     // }
-  //  }
+  }
 }
 
 void Pass_opentimer::read_sdc(LGraph *g){
