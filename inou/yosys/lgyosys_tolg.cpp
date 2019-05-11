@@ -682,8 +682,9 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
 
     // Note that $_AND_ and $_NOT_ format are exclusive for aigmap
     // yosys usually uses cells like $or $not $and
-    if(std::strncmp(cell->type.c_str(), "$and", 4) == 0 || std::strncmp(cell->type.c_str(), "$logic_and", 10) == 0 ||
-       std::strncmp(cell->type.c_str(), "$reduce_and", 11) == 0) {
+    if(std::strncmp(cell->type.c_str(), "$and", 4) == 0
+       || std::strncmp(cell->type.c_str(), "$logic_and", 10) == 0
+       || std::strncmp(cell->type.c_str(), "$reduce_and", 11) == 0) {
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
       exit_node.set_type(And_Op);
@@ -705,11 +706,13 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
       g->add_edge(entry_node.setup_driver_pin(1), not_node.setup_sink_pin(), size); // OR
       not_node.setup_driver_pin().set_bits(size); // NOT
 
-    } else if(std::strncmp(cell->type.c_str(), "$or", 3) == 0 || std::strncmp(cell->type.c_str(), "$logic_or", 9) == 0 ||
-              std::strncmp(cell->type.c_str(), "$reduce_or", 10) == 0 ||
-              std::strncmp(cell->type.c_str(), "$reduce_bool", 12) == 0) {
+    } else if(std::strncmp(cell->type.c_str(), "$or", 3) == 0
+            ||std::strncmp(cell->type.c_str(), "$logic_or", 9) == 0
+            ||std::strncmp(cell->type.c_str(), "$reduce_or", 10) == 0
+            ||std::strncmp(cell->type.c_str(), "$reduce_bool", 12) == 0) {
       if(cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
+
       exit_node.set_type(Or_Op);
       exit_node.setup_driver_pin(0).set_bits(size);
     } else if(std::strncmp(cell->type.c_str(), "$xor", 4) == 0 || std::strncmp(cell->type.c_str(), "$reduce_xor", 11) == 0) {
@@ -1118,49 +1121,46 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
           assert(false); // not able to distinguish if blackbox input or output
         }
       } else {
-        if(is_yosys_output(conn.first.c_str()))
-          continue; // Just go over the inputs
+        if (is_yosys_output(conn.first.c_str())) continue;  // Just go over the inputs
 
-        if(entry_node.is_type(SFlop_Op)
-        || entry_node.is_type(Mux_Op)
-        || entry_node.is_type(ShiftRight_Op)
-        || entry_node.is_type(ShiftLeft_Op)) {
+        if(std::strncmp(cell->type.c_str(), "$logic_and", 10) == 0
+         ||std::strncmp(cell->type.c_str(), "$logic_or", 9) == 0 ) {
+          Node_pin dpin = create_join_operator(g, ss);
+          auto or_node = g->create_node(Or_Op);
+          g->add_edge(dpin,or_node.setup_sink_pin());
+
+          g->add_edge(or_node.setup_driver_pin(1), entry_node.setup_sink_pin(), 1); // reduce_OR
+
+          continue;
+        }else if (entry_node.is_type(SFlop_Op) || entry_node.is_type(Mux_Op) || entry_node.is_type(ShiftRight_Op) ||
+            entry_node.is_type(ShiftLeft_Op)) {
           if (conn.first.str() == "\\CLK")
             sink_pid = entry_node.get_type().get_input_match("C");
           else
             sink_pid = entry_node.get_type().get_input_match(&conn.first.c_str()[1]);
-          assert(sink_pid<Port_invalid);
-					//printf("input_match[%s] -> pid:%d\n", &conn.first.c_str()[1], sink_pid);
-        } else if(entry_node.is_type(AFlop_Op)) {
-          if(conn.first.str() == "\\ARST")
+          assert(sink_pid < Port_invalid);
+          // printf("input_match[%s] -> pid:%d\n", &conn.first.c_str()[1], sink_pid);
+        } else if (entry_node.is_type(AFlop_Op)) {
+          if (conn.first.str() == "\\ARST")
             sink_pid = 3;
           else
             sink_pid = entry_node.get_type().get_input_match(&conn.first.c_str()[1]);
-        } else if(entry_node.is_type(Latch_Op)) {
+        } else if (entry_node.is_type(Latch_Op)) {
           sink_pid = entry_node.get_type().get_input_match(&conn.first.c_str()[1]);
-        } else if(entry_node.is_type(Sum_Op)) {
+        } else if (entry_node.is_type(Sum_Op)) {
           sink_pid = 0;
-          if(cell->parameters[conn.first.str() + "_SIGNED"].as_int() == 0)
-            sink_pid += 1;
-          if(negonly || (subtraction && conn.first.c_str()[1] == 'B'))
-            sink_pid += 2;
-        } else if(entry_node.is_type(Mult_Op)) {
+          if (cell->parameters[conn.first.str() + "_SIGNED"].as_int() == 0) sink_pid += 1;
+          if (negonly || (subtraction && conn.first.c_str()[1] == 'B')) sink_pid += 2;
+        } else if (entry_node.is_type(Mult_Op)) {
           sink_pid = 0;
-          if(cell->parameters[conn.first.str() + "_SIGNED"].as_int() == 0)
-            sink_pid += 1;
-        } else if(entry_node.is_type(GreaterThan_Op)
-               || entry_node.is_type(LessThan_Op)
-               || entry_node.is_type(GreaterEqualThan_Op)
-               || entry_node.is_type(LessEqualThan_Op)
-               || entry_node.is_type(Div_Op)
-               || entry_node.is_type(Mod_Op)) {
+          if (cell->parameters[conn.first.str() + "_SIGNED"].as_int() == 0) sink_pid += 1;
+        } else if (entry_node.is_type(GreaterThan_Op) || entry_node.is_type(LessThan_Op) || entry_node.is_type(GreaterEqualThan_Op) ||
+            entry_node.is_type(LessEqualThan_Op) || entry_node.is_type(Div_Op) || entry_node.is_type(Mod_Op)) {
           sink_pid = 0;
-          if(cell->parameters[conn.first.str() + "_SIGNED"].as_int() == 0)
-            sink_pid += 1;
-          if(conn.first.c_str()[1] == 'B')
-            sink_pid += 2;
-        } else if(entry_node.is_type(Memory_Op)) {
-          if(conn.first.str() == "\\WR_CLK") {
+          if (cell->parameters[conn.first.str() + "_SIGNED"].as_int() == 0) sink_pid += 1;
+          if (conn.first.c_str()[1] == 'B') sink_pid += 2;
+        } else if (entry_node.is_type(Memory_Op)) {
+          if (conn.first.str() == "\\WR_CLK") {
 #ifndef NDEBUG
             for(auto &clk_chunk : conn.second.chunks()) {
               assert(clk_chunk.wire == clock);

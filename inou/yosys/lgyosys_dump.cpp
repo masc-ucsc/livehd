@@ -656,29 +656,63 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         inps.push_back(get_wire(e.driver));
       }
 
-      if(inps.size() == 1) {
-        // reduce op: assign a = &b;
-        assert(cell_output_map.find(node.get_driver_pin(1).get_compact()) != cell_output_map.end()); // single input and gate that is not used as a reduce and
-        //SH:FIXME: dummy code?
-        if (node.get_type().op == And_Op)
-          module->addReduceAnd(next_id(g), inps[0], cell_output_map[node.get_driver_pin(1).get_compact()]);
-        else if (node.get_type().op == Or_Op)
-          module->addReduceOr(next_id(g), inps[0], cell_output_map[node.get_driver_pin(1).get_compact()]);
-        else if (node.get_type().op == Xor_Op)
-          module->addReduceXor(next_id(g), inps[0], cell_output_map[node.get_driver_pin(1).get_compact()]);
-        else
-          assert(false);
+      Port_ID pid;
+      if (inps.size() == 1) {
+        pid = 1;
       } else {
-        assert(cell_output_map.find(node.get_driver_pin(0).get_compact()) != cell_output_map.end());
-        //SH:FIXME: dummy code?
-        if (node.get_type().op == And_Op)
-          create_tree(g, inps, module, &RTLIL::Module::addAnd, false, cell_output_map[node.get_driver_pin(0).get_compact()]);
-        else if (node.get_type().op == Or_Op)
-          create_tree(g, inps, module, &RTLIL::Module::addOr , false, cell_output_map[node.get_driver_pin(0).get_compact()]);
-        else if (node.get_type().op == Xor_Op)
-          create_tree(g, inps, module, &RTLIL::Module::addXor, false, cell_output_map[node.get_driver_pin(0).get_compact()]);
+        if(cell_output_map.find(node.get_driver_pin(0).get_compact()) != cell_output_map.end())
+          pid = 0;
+        else if(cell_output_map.find(node.get_driver_pin(1).get_compact()) != cell_output_map.end())
+          pid = 1;
         else
           assert(false);
+      }
+
+      assert(cell_output_map.find(node.get_driver_pin(pid).get_compact()) != cell_output_map.end()); // single input and gate that is not used as a reduce and
+      if (inps.size() == 1) {
+        if (pid == 1) {  // REDUCE OP
+          if (node.get_type().op == And_Op)
+            module->addReduceAnd(next_id(g), inps[0], cell_output_map[node.get_driver_pin(pid).get_compact()]);
+          else if (node.get_type().op == Or_Op)
+            module->addReduceOr(next_id(g), inps[0], cell_output_map[node.get_driver_pin(pid).get_compact()]);
+          else if (node.get_type().op == Xor_Op)
+            module->addReduceXor(next_id(g), inps[0], cell_output_map[node.get_driver_pin(pid).get_compact()]);
+          else
+            assert(false);
+        } else { // Just connect wire (one input)
+          module->connect(cell_output_map[node.get_driver_pin(pid).get_compact()], inps[0]);
+        }
+      } else {
+        if (pid == 1) {  // REDUCE OP
+          RTLIL::Wire *or_input_wires = module->addWire(next_id(g), inps[0]->width);
+          if (node.get_type().op == And_Op)
+            create_tree(g, inps, module, &RTLIL::Module::addAnd, false, or_input_wires);
+          else if (node.get_type().op == Or_Op)
+            create_tree(g, inps, module, &RTLIL::Module::addOr, false, or_input_wires);
+          else if (node.get_type().op == Xor_Op)
+            create_tree(g, inps, module, &RTLIL::Module::addXor, false, or_input_wires);
+          else
+            assert(false);
+
+          if (node.get_type().op == And_Op)
+            module->addReduceAnd(next_id(g), or_input_wires, cell_output_map[node.get_driver_pin(pid).get_compact()]);
+          else if (node.get_type().op == Or_Op)
+            module->addReduceOr(next_id(g), or_input_wires, cell_output_map[node.get_driver_pin(pid).get_compact()]);
+          else if (node.get_type().op == Xor_Op)
+            module->addReduceXor(next_id(g), or_input_wires, cell_output_map[node.get_driver_pin(pid).get_compact()]);
+          else
+            assert(false);
+
+        } else {
+          if (node.get_type().op == And_Op)
+            create_tree(g, inps, module, &RTLIL::Module::addAnd, false, cell_output_map[node.get_driver_pin(pid).get_compact()]);
+          else if (node.get_type().op == Or_Op)
+            create_tree(g, inps, module, &RTLIL::Module::addOr, false, cell_output_map[node.get_driver_pin(pid).get_compact()]);
+          else if (node.get_type().op == Xor_Op)
+            create_tree(g, inps, module, &RTLIL::Module::addXor, false, cell_output_map[node.get_driver_pin(pid).get_compact()]);
+          else
+            assert(false);
+        }
       }
       break;
     }
