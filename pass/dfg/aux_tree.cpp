@@ -54,15 +54,17 @@ const Aux *Aux_tree::get_parent(const Aux *child) const {
 }
 
 void Aux_tree::disconnect_child(Aux *parent, Aux *child, bool branch) {
-  // assert(child->get_auxtab().empty()); //put back later when resolving phi
+  I(child->get_pendtab().empty());
   if(branch) {
     // delete child; //buggy to have a function delete a pointer that was passed to it!
     parent->lchild = nullptr;
     fmt::print("delete branch true auxtab\n");
+    I(parent->lchild == nullptr);
   } else {
     // delete child;
     parent->rchild = nullptr;
     fmt::print("delete branch false auxtab\n");
+    I(parent->rchild == nullptr);
   }
 }
 

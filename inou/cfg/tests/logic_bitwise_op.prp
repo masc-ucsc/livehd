@@ -5,8 +5,20 @@ $b as (__bits:8)
 %c2 as (__bits:8)
 %d2 as (__bits:8)
 
-%c = $a and $b
-%d = $a or  $b
+a_bool = 0
+b_bool = 0
+
+if ($a > 0) {
+  a_bool = 1
+} 
+
+if ($b > 0){
+  b_bool = 1
+} 
+
+
+%c = a_bool and b_bool
+%d = a_bool or  b_bool
 
 %c2 = $a & $b
 %d2 = $a | $b
