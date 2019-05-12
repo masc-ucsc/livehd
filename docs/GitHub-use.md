@@ -61,8 +61,8 @@ Suggested options for git first time users
     # Rebase no merge by default
     git config --global pull.rebase true
     # Set your name and email
-    git config --global user.email "email@example.com"
-    git config --global user.name "Mona Lisa"
+    git config --global user.email "perico@example.com"
+    git config --global user.name "Perico LosPalotes"
 
 
 Work in the lgraph-private repo, and commit to master branch
