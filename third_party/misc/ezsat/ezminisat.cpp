@@ -33,7 +33,7 @@
 #include <unistd.h>
 #endif
 
-#include <cryptominisat5/cryptominisat.h>
+#include "cryptominisat5/cryptominisat.h"
 
 //#include "../minisat/Solver.h"
 //#include "../minisat/SimpSolver.h"
