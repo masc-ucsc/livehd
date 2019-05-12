@@ -2,18 +2,16 @@
 #pragma once
 
 #include "dense.hpp"
-#include "char_array.hpp"
+#include "mmap_map.hpp"
 
 #include "lgraphbase.hpp"
 #include "node_type_base.hpp"
 #include "sub_node.hpp"
 #include "lgset.hpp"
 
-typedef Char_Array_ID Const_ID;
-
 class LGraph_Node_Type : virtual public LGraph_Base {
 protected:
-  Char_Array<Const_ID> consts;
+  mmap_map::unordered_map<std::string_view, bool> const_sview;
   Dense<Node_Type_Op>  node_type_table;
 
   Node_set             const_nodes;      // FIXME: migrate to structure in node_intenral (otherwise, big meory as more nodes...
@@ -47,7 +45,7 @@ protected:
   std::string_view get_type_const_sview(Index_ID nid) const;
   uint32_t         get_type_const_value(Index_ID nid) const;
 
-  std::string_view get_constant(Const_ID const_id) const;
+  std::string_view get_constant(uint32_t const_id) const;
 
 public:
   LGraph_Node_Type() = delete;

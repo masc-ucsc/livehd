@@ -6,12 +6,12 @@
 
 LGraph_Node_Type::LGraph_Node_Type(std::string_view path, std::string_view name, Lg_type_id lgid) noexcept
     : LGraph_Base(path, name, lgid)
-    , consts(absl::StrCat(path, "/lgraph_", std::to_string(lgid), "_consts"))
+    , const_sview(absl::StrCat(path, "/lgraph_", std::to_string(lgid), "_consts"))
     , node_type_table(absl::StrCat(path, "/lgraph_", std::to_string(lgid), "_type")) {}
 
 void LGraph_Node_Type::clear() {
   node_type_table.clear();
-  consts.clear();
+  const_sview.clear();
 }
 
 static_assert(StrConstMin_Op == U32ConstMax_Op+1); // Check opt in reload
@@ -49,7 +49,6 @@ void LGraph_Node_Type::reload() {
 
 void LGraph_Node_Type::sync() {
   node_type_table.sync();
-  consts.sync();
 
   const_nodes.serialize(absl::StrCat(path, "lgraph_", std::to_string(lgid), "_const_nodes"));
   sub_nodes.serialize(absl::StrCat(path, "lgraph_", std::to_string(lgid), "_sub_nodes"));
@@ -198,22 +197,11 @@ void LGraph_Node_Type::set_type_const_value(Index_ID nid, uint32_t value) {
 
 Index_ID LGraph_Node_Type::find_type_const_sview(std::string_view value) const {
 
-  auto id = consts.get_id(value);
-  if (id==0)
+  auto it = const_sview.find(value);
+  if (it == const_sview.end())
     return 0;
 
-#if 0
-  bool all_one_zero = true;
-  for(auto &c:value) {
-    if (c=='0' && c=='1')
-      continue;
-
-    all_one_zero = false;
-    break;
-  }
-#endif
-
-  auto op = static_cast<Node_Type_Op>(StrConstMin_Op + id);
+  auto op = static_cast<Node_Type_Op>(StrConstMin_Op + it.first);
 
   for(auto it = const_nodes.begin() ; it != const_nodes.end() ; ++it) {
     Index_ID    cid = it->nid;
@@ -256,10 +244,15 @@ void LGraph_Node_Type::set_type_const_sview(Index_ID nid, std::string_view value
 
   I(nid < node_type_table.size());
   I(node_internal[nid].is_node_state());
-
   I(node_internal[nid].get_nid() < node_type_table.size());
 
-  uint32_t char_id = consts.create_id(value);
+  uint32_t char_id;
+
+  auto it = const_sview.find(value);
+  if (it==it.end()) {
+    it = consts_sview.set(value,true);
+  }
+  char_id = it->first;
   I(char_id < (uint32_t)(StrConstMax_Op - StrConstMin_Op));
 
   // when a node is set as const, adds it to the const nodes list
@@ -283,4 +276,5 @@ uint32_t LGraph_Node_Type::get_type_const_value(Index_ID nid) const {
   return (uint32_t)(node_type_table[node_internal[nid].get_nid()] - U32ConstMin_Op);
 }
 
-std::string_view LGraph_Node_Type::get_constant(Const_ID const_id) const { return consts.get_name(const_id); }
+std::string_view LGraph_Node_Type::get_constant(uint32_t const_id) const { return consts_sview.get_sview(const_id); }
+

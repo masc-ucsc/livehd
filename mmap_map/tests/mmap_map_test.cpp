@@ -84,6 +84,10 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
   int conta;
   for(int i=0;i<3;i++) {
     mmap_map::unordered_map<uint32_t, std::string_view> map("mmap_map_test_sview_data");
+    auto it = map.set(3,"test");
+    EXPECT_EQ(it->first,3);
+    EXPECT_NE(it->second,0);
+    EXPECT_EQ(map.get_val(*it),"test");
     map.clear();
     map2.clear();
 
@@ -115,7 +119,6 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
   {
     mmap_map::unordered_map<uint32_t, std::string_view> map("mmap_map_test_sview_data");
     for(auto it:map) {
-      (void)it;
       EXPECT_EQ(map.get_val(it), std::to_string(it.first) + "foo");
       conta--;
     }

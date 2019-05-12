@@ -8,7 +8,10 @@
 template<const char *Name, typename Base, typename Key, typename Data, Node_pin_mode Mode=Node_pin_mode::Both>
 class Attribute_data {
 
-  using Attr_data = Attr_data_raw<Key, Data>;
+HERE: Choose compact/compact_class if Hierarchy or no Huerarchy in template
+
+  using Attr_data = Attr_data_raw<Key::Compact, Data>;
+  using Attr_data = Attr_data_raw<Key::Compact_class, Data>;
 
   inline static std::vector<Attr_data *> table;
   inline static LGraph    *last_lg   = nullptr;
@@ -69,6 +72,17 @@ class Attribute_data {
     ,"Base and Key should be from the same group. E.g: Node_pin and Node_pin::Compact");
 
 public:
+  static Attr_data *ref(const Base &obj) {
+    if (unlikely(obj.get_top_lgraph()!=last_lg))
+      setup_table(obj.get_top_lgraph());
+    return last_attr;
+  }
+  static Attr_data *ref(const LGraph *lg) {
+    if (unlikely(lg!=last_lg))
+      setup_table(lg);
+    return last_attr;
+  }
+
   static void set(const Base &obj, Data data) {
 
     if (unlikely(obj.get_top_lgraph()!=last_lg))

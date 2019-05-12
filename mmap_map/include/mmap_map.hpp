@@ -1096,19 +1096,20 @@ public:
 		destroy();
 	}
 
-	void set(key_type&& key, T &&val) {
-		doCreate(std::move(key), std::move(val));
+	const_iterator set(key_type&& key, T &&val) {
+		return doCreate(std::move(key), std::move(val));
 	}
-	void set(const key_type& key, T &&val) {
-		doCreate(key, std::move(val));
+	const_iterator set(const key_type& key, T &&val) {
+		return doCreate(key, std::move(val));
 	}
-	void set(const key_type& key, const T &val) {
-		doCreate(key, val);
+	const_iterator set(const key_type& key, const T &val) {
+		return doCreate(key, val);
 	}
-	void set(key_type&& key, const T &val) {
-		doCreate(std::move(key), val);
+	const_iterator set(key_type&& key, const T &val) {
+		return doCreate(std::move(key), val);
 	}
 
+#if 0
 	template <typename Iter>
 		void insert(Iter first, Iter last) {
 			for (; first != last; ++first) {
@@ -1135,14 +1136,15 @@ public:
 	std::pair<iterator, bool> insert(value_type&& keyval) {
 		return doInsert(std::move(keyval));
 	}
+#endif
 
 	// Returns 1 if key is found, 0 otherwise.
-	bool has(const key_type& key) const {
+	[[nodiscard]] bool has(const key_type& key) const {
 		return findIdx(key)>=0;
 	}
 
 	// Returns a reference to the value found for key.
-	T const& get(key_type const& key) const {
+	[[nodiscard]] T const& get(key_type const& key) const {
 		auto idx = findIdx(key);
 		assert(idx>=0);
 
@@ -1153,7 +1155,7 @@ public:
     }
 	}
 
-	T *ref(key_type const& key) {
+	[[nodiscard]] T *ref(key_type const& key) {
 		auto idx = findIdx(key);
 		assert(idx>=0);
 
@@ -1165,29 +1167,29 @@ public:
     }
 	}
 
-	const_iterator find(const key_type& key) const {
+	[[nodiscard]] const_iterator find(const key_type& key) const {
 		const auto idx = findIdx(key);
 		return const_iterator{mKeyVals + idx, mInfo + idx};
 	}
 
 	template <typename OtherKey>
-		const_iterator find(const OtherKey& key, is_transparent_tag /*unused*/) const {
+		[[nodiscard]] const_iterator find(const OtherKey& key, is_transparent_tag /*unused*/) const {
 			const auto idx = findIdx(key);
 			return const_iterator{mKeyVals + idx, mInfo + idx};
 		}
 
-	iterator find(const key_type& key) {
+	[[nodiscard]] iterator find(const key_type& key) {
 		const auto idx = findIdx(key);
 		return iterator{mKeyVals + idx, mInfo + idx};
 	}
 
 	template <typename OtherKey>
-		iterator find(const OtherKey& key, is_transparent_tag /*unused*/) {
+		[[nodiscard]] iterator find(const OtherKey& key, is_transparent_tag /*unused*/) {
 			const auto idx = findIdx(key);
 			return iterator{mKeyVals + idx, mInfo + idx};
 		}
 
-	iterator begin() {
+	[[nodiscard]] iterator begin() {
 		if (mmap_map_UNLIKELY(!loaded)) {
 			reload();
 		}
@@ -1197,10 +1199,10 @@ public:
 		}
 		return iterator(mKeyVals, mInfo, fast_forward_tag{});
 	}
-	const_iterator begin() const {
+	[[nodiscard]] const_iterator begin() const {
 		return cbegin();
 	}
-	const_iterator cbegin() const {
+	[[nodiscard]] const_iterator cbegin() const {
 		if (mmap_map_UNLIKELY(!loaded)) {
 			reload();
 		}
@@ -1211,19 +1213,19 @@ public:
 		return const_iterator(mKeyVals, mInfo, fast_forward_tag{});
 	}
 
-	iterator end() {
+	[[nodiscard]] iterator end() {
 		// no need to supply valid info pointer: end() must not be dereferenced, and only node
 		// pointer is compared.
 		return iterator{reinterpret_cast<Node*>(&mKeyVals[*mMask+1]), nullptr};
 	}
-	const_iterator end() const {
+	[[nodiscard]] const_iterator end() const {
 		return cend();
 	}
-	const_iterator cend() const {
+	[[nodiscard]] const_iterator cend() const {
 		return const_iterator{reinterpret_cast<Node*>(&mKeyVals[*mMask+1]), nullptr};
 	}
 
-	iterator erase(const_iterator pos) {
+	iterator erase(const_iterator &pos) {
 		// its safe to perform const cast here
 		return erase(iterator{const_cast<Node*>(pos.mKeyVals), const_cast<uint8_t*>(pos.mInfo)});
 	}
@@ -1275,30 +1277,30 @@ public:
 		rehash(newSize);
 	}
 
-	size_type size() const {
+	[[nodiscard]] size_type size() const {
 		return *mNumElements;
 	}
 
-	bool empty() const {
+	[[nodiscard]] bool empty() const {
 		return 0 == *mNumElements;
 	}
 
-	size_t capacity() const {
+	[[nodiscard]] size_t capacity() const {
 		if (loaded)
 			return *mMaxNumElementsAllowed;
 		return calcMaxNumElementsAllowed(InitialNumElements);
 	}
 
-	float max_load_factor() const {
+	[[nodiscard]] float max_load_factor() const {
 		return MaxLoadFactor100 / 100.0f;
 	}
 
 	// Average number of elements per bucket. Since we allow only 1 per bucket
-	float load_factor() const {
+	[[nodiscard]] float load_factor() const {
 		return static_cast<float>(size()) / (*mMask + 1);
 	}
 
-	size_t txt_size() const {
+	[[nodiscard]] size_t txt_size() const {
 		if constexpr (using_sview) {
 			return mmap_txt_size;
 		}else{
@@ -1314,11 +1316,7 @@ public:
 	float conflict_factor() const { return 0.0; }
 #endif
 
-	std::string_view get_key(const value_type &it) const {
-		if (mmap_map_UNLIKELY(!loaded)) {
-			reload();
-		}
-
+	[[nodiscard]] std::string_view get_key(const value_type &it) const {
     if constexpr (using_key_sview) {
       return get_sview(it.getFirst());
     }else{
@@ -1327,11 +1325,7 @@ public:
     }
 	}
 
-	std::string_view get_val(const value_type &it) const {
-		if (mmap_map_UNLIKELY(!loaded)) {
-			reload();
-		}
-
+	[[nodiscard]] std::string_view get_val(const value_type &it) const {
     if constexpr (using_val_sview) {
       return get_sview(it.getSecond());
     }else{
@@ -1424,8 +1418,10 @@ private:
 	}
 
 	std::string_view get_sview(uint32_t key_pos) const {
+		if (mmap_map_UNLIKELY(!loaded)) {
+			reload();
+		}
     assert(using_sview);
-    assert(loaded);
 		assert(key_pos<mmap_txt_base[0]);
 		std::string_view sview(reinterpret_cast<char *>(&mmap_txt_base[key_pos+1]),mmap_txt_base[key_pos]);
 		return sview;
@@ -1441,7 +1437,7 @@ private:
 	}
 
 	template <typename Arg, typename Data>
-		void doCreate(Arg&& key, Data&& val) {
+		const_iterator doCreate(Arg&& key, Data&& val) {
 			while (true) {
 				int idx;
 				InfoType info;
@@ -1524,11 +1520,12 @@ private:
           ++(*mNumElements);
         }
 
-				//return mKeyVals[insertion_idx].getSecond();
-        return;
+				return const_iterator(mKeyVals + insertion_idx, mInfo + insertion_idx);
+        //return;
 			}
 		}
 
+#if 0
 	// This is exactly the same code as operator[], except for the return values
 	template <typename Arg>
 		std::pair<iterator, bool> doInsert(Arg&& keyval) {
@@ -1599,6 +1596,7 @@ private:
 				return std::make_pair(iterator(mKeyVals + insertion_idx, mInfo + insertion_idx), true);
 			}
 		}
+#endif
 
 	size_t calcMaxNumElementsAllowed(size_t maxElements) const {
 		static constexpr size_t overflowLimit = (std::numeric_limits<size_t>::max)() / 100;
