@@ -80,7 +80,7 @@ new_git_repository(
 new_git_repository(
     name = "cryptominisat",
     build_file = "BUILD.cryptominisat",
-    commit = "883e69199f95543d4c0878fe0d552e901848d154", # April 6 2019 4c26a766aab2a452aed9a8fe6f28f4171bcb8690", # October 10, 2018
+    commit = "f5609bfda3edbe373999fa5f79bc153ee619a7ca", # May 12, 2019 4c26a766aab2a452aed9a8fe6f28f4171bcb8690", # October 10, 2018
     remote = "https://github.com/msoos/cryptominisat.git",
     patches = ["//external:patch.cryptominisat"],
     #strip_prefix = "include",

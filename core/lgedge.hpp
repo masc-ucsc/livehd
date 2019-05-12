@@ -7,8 +7,6 @@ class Node_pin;
 
 typedef int64_t  SIndex_ID;  // Short Edge_raw must be signed +- offset
 
-constexpr int Index_bits = 31; // 31 bit to have Sink/Driver + Index in 32 bits
-constexpr int Port_bits  = 14;
 
 struct __attribute__((packed)) LEdge_Internal {  // 6 bytes total
 
