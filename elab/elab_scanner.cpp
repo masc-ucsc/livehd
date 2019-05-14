@@ -328,7 +328,7 @@ bool Elab_scanner::scan_prev() {
 }
 
 void Elab_scanner::scan_append(std::string &text) const {
-  assert(scanner_pos < token_list.size());
+  I(scanner_pos < token_list.size());
 
   text.append(&buffer[token_list[scanner_pos].pos], token_list[scanner_pos].len);
 }
@@ -358,7 +358,6 @@ void Elab_scanner::scan_next_append(std::string &text) const {
   assert(scanner_pos < token_list.size());
   size_t p = scanner_pos + 1;
   if (p >= token_list.size()) p = token_list.size() - 1;
-  ;
 
   text.append(&buffer[token_list[p].pos], token_list[p].len);
 }

@@ -51,6 +51,13 @@ class Thread_pool {
   std::mutex              queue_mutex;
 
   void task() {
+    static std::atomic_flag lock = ATOMIC_FLAG_INIT;
+
+    if (!lock.test_and_set(std::memory_order_acquire)) {
+      for(unsigned i = 1; i < thread_count; ++i)
+        threads.push_back(std::thread([this] { this->task(); }));
+    }
+
     while(!finishing) {
       while(!queue.empty()) {
         next_job()();
@@ -106,8 +113,7 @@ public:
 
     assert(thread_count);
 
-    for(unsigned i = 0; i < thread_count; ++i)
-      threads.push_back(std::thread([this] { this->task(); }));
+    threads.push_back(std::thread([this] { this->task(); })); // Just one thread in critical path
   }
 
   ~Thread_pool() {

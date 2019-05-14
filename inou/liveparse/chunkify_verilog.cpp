@@ -138,23 +138,24 @@ void Chunkify_verilog::elaborate() {
       format_name[i] = '.';
   }
 
-  std::string spath(path);
+  std::string parse_path = absl::StrCat(path, "/parse/"); // Keep trailing /
+  if (access(parse_path.c_str(), F_OK) != 0) {
+    std::string spath(path);
+    int err = mkdir(spath.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+    if(err < 0 && errno != EEXIST) {
+      scan_error(fmt::format("could not create {} directory", path));
+      return;
+    }
 
-  int err = mkdir(spath.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-  if(err < 0 && errno != EEXIST) {
-    scan_error(fmt::format("could not create {} directory", path));
-    return;
+    err = mkdir(parse_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+    if(err < 0 && errno != EEXIST) {
+      scan_error(fmt::format("could not create {}/{} directory", path, "parse"));
+      return;
+    }
   }
 
-  std::string cadena = spath + "/parse";
-  err                = mkdir(cadena.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-  if(err < 0 && errno != EEXIST) {
-    scan_error(fmt::format("could not create {}/{} directory", path, "parse"));
-    return;
-  }
-
-  write_file(spath + "/parse/file_" + format_name, buffer);
-  chunk_dir = spath + "/parse/chunk_" + format_name;
+  write_file(absl::StrCat(parse_path, "file_", format_name), buffer);
+  chunk_dir = absl::StrCat(parse_path, "chunk_", format_name);
   Eprp_utils::clean_dir(chunk_dir);
 
   elab_chunk_dir.clear();
@@ -189,9 +190,8 @@ void Chunkify_verilog::elaborate() {
   while(!scan_is_end()) {
     bool endmodule_found = false;
     if(scan_is_token(Token_id_alnum)) {
-      std::string token;
-      scan_append(token);
-      if(strcasecmp(token.c_str(), "module") == 0) {
+      auto txt = scan_sview();
+      if(txt == "module") {
         if(in_module) {
           scan_error(fmt::format("unexpected nested modules"));
         }
@@ -209,11 +209,11 @@ void Chunkify_verilog::elaborate() {
           lg = LGraph::create(path, module, source);
         }
 
-      } else if(strcasecmp(token.c_str(), "input") == 0) {
+      } else if(txt == "input") {
         last_input = true;
-      } else if(strcasecmp(token.c_str(), "output") == 0) {
+      } else if(txt == "output") {
         last_output = true;
-      } else if(strcasecmp(token.c_str(), "endmodule") == 0) {
+      } else if(txt == "endmodule") {
         if(in_module) {
           in_module       = false;
           endmodule_found = true;
@@ -224,8 +224,13 @@ void Chunkify_verilog::elaborate() {
     } else if(scan_is_token(Token_id_comma) || scan_is_token(Token_id_semicolon) || scan_is_token(Token_id_cp) || scan_is_token(Token_id_comment)) { // Before Token_id_comma
       if(last_input || last_output) {
         if(in_module && scan_is_prev_token(Token_id_alnum)) {
+#if 1
+          // FIXME: bug in char_array prevents to use sview. Delete this once we move to LGraph 0.2 (mmap_map/mmap_bimap)
           std::string label;
           scan_prev_append(label);
+#else
+          auto label = scan_prev_sview();
+#endif
 
           add_io(lg, last_input, label);
 
