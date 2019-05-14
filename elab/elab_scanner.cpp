@@ -169,7 +169,7 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
   std::string_view ptr_section = memblock;
 
   Token t;
-  t.clear(0);
+  t.clear(0,0);
 
   bool starting_comment  = false;  // Only for comments to avoid /*/* nested back to back */*/
   bool finishing_comment = false;  // Only for comments to avoid /*/* nested back to back */*/
@@ -182,7 +182,7 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
       nlines++;
       if (!in_comment && t.tok != Token_id_nop) {
         add_token(t);
-        t.clear(pos);
+        t.clear(pos, nlines);
         trying_merge = false;
       } else {
         starting_comment      = false;
@@ -195,13 +195,13 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
           }
 
           add_token(t);
-          t.clear(pos);
+          t.clear(pos, nlines);
           trying_merge = false;
         }
       }
       if (in_string_pos) {
         add_token(t);
-        t.clear(pos);
+        t.clear(pos, nlines);
         trying_merge = false;
 
         in_string_pos = false;
@@ -256,14 +256,14 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
     } else if (in_string_pos) {
       if (c == '"' && last_c != '\\') {
         add_token(t);
-        t.clear(pos);
+        t.clear(pos, nlines);
         trying_merge = false;
 
         in_string_pos = false;
       }
     } else if (c == '"' && last_c != '\\') {
       add_token(t);
-      t.set(Token_id_string, pos + 1);
+      t.adjust(Token_id_string, pos + 1);
       trying_merge = false;
 
       in_string_pos = true;
@@ -272,7 +272,7 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
       finishing_comment = false;
 
       add_token(t);
-      t.set(nt, pos);
+      t.adjust(nt, pos);
 
       trying_merge = translate[c].try_merge;
     }

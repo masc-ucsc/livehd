@@ -80,16 +80,18 @@ constexpr Token_id Token_id_keyword_last  = 254;
 class Token {
 public:
   Token() {
-    tok = Token_id_nop;
-    pos = 0;
-    len = 0;
+    tok  = Token_id_nop;
+    pos  = 0;
+    line = 0;
+    len  = 0;
   }
-  void clear(uint32_t p) {
-    tok = Token_id_nop;
-    pos = p;
-    len = 0;
+  void clear(uint32_t p, uint32_t lno) {
+    tok  = Token_id_nop;
+    pos  = p;
+    line = lno;
+    len  = 0;
   }
-  void set(Token_id t, uint32_t p) {
+  void adjust(Token_id t, uint32_t p) {
     tok = t;
     pos = p;
     len = 1;
@@ -101,6 +103,7 @@ public:
 
   Token_id tok;  // Token (identifier, if, while...)
   uint32_t pos;  // Position in buffer
+  uint32_t line; // line of code
   uint16_t len;  // length in buffer
 
   std::string_view get_text(std::string_view buffer) const {
@@ -108,6 +111,7 @@ public:
     return buffer.substr(pos, len);
   }
 };
+
 class Elab_scanner {
 protected:
   typedef std::vector<Token> Token_list;
