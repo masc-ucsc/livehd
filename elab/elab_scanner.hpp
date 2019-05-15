@@ -96,6 +96,7 @@ public:
     pos = p;
     len = 1;
   }
+  void adjust_inc() { len++; }
   void adjust_len(uint32_t new_pos) {
     GI(tok != Token_id_nop, new_pos >= pos);
     len = new_pos - pos;
