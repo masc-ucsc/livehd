@@ -80,20 +80,23 @@ constexpr Token_id Token_id_keyword_last  = 254;
 class Token {
 public:
   Token() {
-    tok = Token_id_nop;
-    pos = 0;
-    len = 0;
+    tok  = Token_id_nop;
+    pos  = 0;
+    line = 0;
+    len  = 0;
   }
-  void clear(uint32_t p) {
-    tok = Token_id_nop;
-    pos = p;
-    len = 0;
+  void clear(uint32_t p, uint32_t lno) {
+    tok  = Token_id_nop;
+    pos  = p;
+    line = lno;
+    len  = 0;
   }
-  void set(Token_id t, uint32_t p) {
+  void adjust(Token_id t, uint32_t p) {
     tok = t;
     pos = p;
     len = 1;
   }
+  void adjust_inc() { len++; }
   void adjust_len(uint32_t new_pos) {
     GI(tok != Token_id_nop, new_pos >= pos);
     len = new_pos - pos;
@@ -101,6 +104,7 @@ public:
 
   Token_id tok;  // Token (identifier, if, while...)
   uint32_t pos;  // Position in buffer
+  uint32_t line; // line of code
   uint16_t len;  // length in buffer
 
   std::string_view get_text(std::string_view buffer) const {
@@ -108,6 +112,7 @@ public:
     return buffer.substr(pos, len);
   }
 };
+
 class Elab_scanner {
 protected:
   typedef std::vector<Token> Token_list;
@@ -214,6 +219,21 @@ public:
 
   void scan_format_append(std::string &text) const;
 
+  std::string_view scan_sview() const {
+    I(scanner_pos < token_list.size());
+    return std::string_view(&buffer[token_list[scanner_pos].pos], token_list[scanner_pos].len);
+  }
+  std::string_view scan_prev_sview() const {
+    size_t p = scanner_pos - 1;
+    if (p < 0) p = 0;
+    return std::string_view(&buffer[token_list[p].pos], token_list[p].len);
+  }
+  std::string_view scan_next_sview() const {
+    size_t p = scanner_pos - 1;
+    if (p >= token_list.size())
+      p = token_list.size() - 1;
+    return std::string_view(&buffer[token_list[p].pos], token_list[p].len);
+  }
   void scan_append(std::string &text) const;
   void scan_prev_append(std::string &text) const;
   void scan_next_append(std::string &text) const;

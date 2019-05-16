@@ -34,6 +34,9 @@ if [ "$1" != "" ]; then
   echo "verilog.sh inputs: ${inputs}"
 fi
 
+pass=0
+fail=0
+fail_list=""
 for full_input in ${inputs}
 do
   input=$(basename ${full_input})
@@ -52,9 +55,11 @@ do
   echo "inou.yosys.tolg path:lgdb_yosys top:${base} files:"${full_input}  | ${LGSHELL} -q
   if [ $? -eq 0 ]; then
     echo "Successfully created graph from ${input}"
+    let pass++
   else
     echo "FAIL: lgyosys parsing terminated with an error (testcase ${input})"
-    exit 1
+    let fail++
+    fail_list+=" "$base
   fi
 
   #./inou/json/lgjson  --graph_name ${base} --json_output ${base}.json > ./yosys-test/log_json_${input} 2> ./yosys-test/err_json_${input}
@@ -67,10 +72,12 @@ do
   echo "lgraph.match path:lgdb_yosys |> inou.yosys.fromlg odir:tmp_yosys" | ${LGSHELL} -q
   if [ $? -eq 0 ]; then
     echo "Successfully created verilog from graph ${input}"
+    let pass++
   else
     echo ${YOSYS} -g${base} -h -d
     echo "FAIL: verilog generation terminated with an error (testcase ${input})"
-    exit 1
+    let fail++
+    fail_list+=" "$base
   fi
   $(cat tmp_yosys/*.v >tmp_yosys/all_${base}.v)
 
@@ -80,13 +87,20 @@ do
     ${LGCHECK} --implementation=tmp_yosys/all_${base}.v --reference=${full_input} --top=${base}
     if [ $? -eq 0 ]; then
       echo "Successfully matched generated verilog with original verilog (${full_input})"
+      let pass++
     else
       echo "FAIL: circuits are not equivalent (${full_input})"
-      exit 1
+      let fail++
+      fail_list+=" "$base
     fi
   fi
 
 done
 
-echo "SUCCESS: all yosys test cases ended without errors"
+if [ $fail -eq 0 ]; then
+  echo "SUCCESS: pass:${pass} tests without errors"
+else
+  echo "FAIL: ${pass} tests passed but ${fail} failed verification: ${fail_list}"
+fi
+
 

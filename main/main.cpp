@@ -258,8 +258,25 @@ int main(int argc, char** argv) {
 
   bool option_quiet = false;
 
-  if (argc > 1) {
-    if (strcasecmp(argv[1], "-q") == 0) option_quiet = true;
+  std::string cmd;
+
+  for(int i=1;i<argc;++i) {
+    if (argv[i][0] == '-') {
+      if (strcasecmp(argv[1], "-q") == 0) option_quiet = true;
+    } else {
+      if (cmd.empty())
+        cmd.append(argv[i]);
+      else
+        absl::StrAppend(&cmd, " ", argv[i]);
+    }
+  }
+
+  Main_api::init();
+
+  if (!cmd.empty()) {
+    fmt::print("lgraph cmd {}\n", cmd);
+    Main_api::parse(cmd);
+    exit(0);
   }
 
   using cl = Replxx::Color;
@@ -301,8 +318,6 @@ int main(int argc, char** argv) {
   };
 
   // init all the lgraph libraries used
-  Main_api::init();
-
   Main_api::get_commands([&examples](const std::string& cmd, const std::string& help_msg) { examples.push_back(cmd); });
 
   const char* env_home = std::getenv("HOME");

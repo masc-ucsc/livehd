@@ -1,16 +1,16 @@
 module gcd_small(input clk,
            input reset,
-           input [31:0] a,
-           input [31:0] b,
+           input [14:0] a,
+           input [14:0] b,
            input start,
-           output reg [31:0] res,
+           output reg [14:0] res,
            output reg done);
 
-  reg [31:0] x;
-  reg [31:0] x_next;
+  reg [14:0] x;
+  reg [14:0] x_next;
 
-  reg [31:0] y;
-  reg [31:0] y_next;
+  reg [14:0] y;
+  reg [14:0] y_next;
 
   reg pending;
   reg pending_next;

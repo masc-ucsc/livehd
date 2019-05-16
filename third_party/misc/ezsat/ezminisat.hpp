@@ -31,7 +31,7 @@
 // can be the source of some troubles when used from c++11. thefore we
 // don't force ezSAT users to use minisat headers..
 
-#include <cryptominisat5/cryptominisat.h>
+#include "cryptominisat.h"
 
 class ezMiniSAT : public ezSAT {
 private:

@@ -128,10 +128,14 @@ public:
         , width(width) {
     }
 
-    bool operator<(const Pick_ID other) const {
-      return (driver < other.driver) || (driver == other.driver && offset < other.offset) ||
-             (driver == other.driver && offset == other.offset && width < other.width);
+    bool operator!=(const Pick_ID other) const {
+      return (driver != other.driver) || (driver == other.driver && offset != other.offset) ||
+             (driver == other.driver && offset == other.offset && width != other.width);
     }
+    template <typename H>
+    friend H AbslHashValue(H h, const Pick_ID& s) {
+      return H::combine(std::move(h), s.driver, s.offset, s.width);
+    };
   };
 
   struct graph_topology {
@@ -151,7 +155,7 @@ public:
     using value_size    = std::pair<uint32_t, uint32_t>;
     using record        = absl::flat_hash_map<std::string, Abc_Obj_t *>;
 
-    using picks2pin     = std::map<Pick_ID, Node_pin>;
+    using picks2pin     = absl::flat_hash_map<Pick_ID, Node_pin>;
     using po_group      = std::map<index_offset, Abc_primary_output>;
     using pi_group      = std::map<index_offset, Abc_primary_input>;
     using pseduo_name   = std::map<index_offset, std::string>;

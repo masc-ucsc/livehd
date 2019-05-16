@@ -118,6 +118,7 @@ yosys_equiv_extra="${yosys_simple}; equiv_simple -seq 5; equiv_induct -seq 5;"
 if [ "$OPT_DEBUG" != "" ]; then
   echo "${YOSYS} -p \"${yosys_read}; ${yosys_prep}; ${yosys_equiv}; equiv_status -assert\""
 fi
+
 ${YOSYS} -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; equiv_status -assert" \
     2> /dev/null | grep "Equivalence successfully proven!"
 

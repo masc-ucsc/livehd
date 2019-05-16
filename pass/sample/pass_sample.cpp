@@ -22,13 +22,17 @@ Pass_sample::Pass_sample()
     : Pass("sample") {
 }
 
+void Pass_sample::do_work(LGraph *g) {
+  compute_histogram(g);
+  compute_max_depth(g);
+  annotate_placement(g);
+}
+
 void Pass_sample::work(Eprp_var &var) {
   Pass_sample pass;
 
   for(const auto &g : var.lgs) {
-    pass.compute_histogram(g);
-    pass.compute_max_depth(g);
-    pass.annotate_placement(g);
+    pass.do_work(g);
   }
 }
 

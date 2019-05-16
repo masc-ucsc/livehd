@@ -685,13 +685,13 @@ Node Pass_dfg::process_if(LGraph *dfg, LGraph *cfg, Aux_tree *aux_tree, const CF
 
   resolve_phis(dfg, aux_tree, paux_ptr, &taux, &faux, condition);
 
-  if(fbranch_cfg.get_type().op != CfgIfMerge_Op) {
-    aux_tree->disconnect_child(aux_tree->get_cur_aux(), &faux, false);
+  if(fbranch_cfg.get_type().op != CfgIfMerge_Op) { //there is an 'else' clause
     aux_tree->auxes_stack_pop();
+    aux_tree->disconnect_child(aux_tree->get_cur_aux(), &faux, false);
   }
 
-  aux_tree->disconnect_child(aux_tree->get_cur_aux(), &taux, true);
   aux_tree->auxes_stack_pop();
+  aux_tree->disconnect_child(aux_tree->get_cur_aux(), &taux, true);
 
   fmt::print("process_if() done!!\n");
   //tb_next is phi node, return its child to keep flow runs

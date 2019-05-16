@@ -77,14 +77,19 @@ new_git_repository(
     remote = "https://github.com/tlk00/BitMagic.git",
     strip_prefix = "src",
 )
-new_git_repository(
+git_repository(
     name = "cryptominisat",
-    build_file = "BUILD.cryptominisat",
-    commit = "883e69199f95543d4c0878fe0d552e901848d154", # April 6 2019 4c26a766aab2a452aed9a8fe6f28f4171bcb8690", # October 10, 2018
-    remote = "https://github.com/msoos/cryptominisat.git",
-    patches = ["//external:patch.cryptominisat"],
-    #strip_prefix = "include",
+    #build_file = "BUILD.abseil", # relative to external path
+    commit = "6ee26181af5c719fa4f6ac1fa1aa3c85d070bcea", # May 12, 2019
+    remote = "https://github.com/masc-ucsc/cryptominisat.git",
 )
+#new_git_repository(
+    #name = "cryptominisat",
+    #build_file = "BUILD.cryptominisat",
+    #commit = "f5609bfda3edbe373999fa5f79bc153ee619a7ca", # May 12, 2019 4c26a766aab2a452aed9a8fe6f28f4171bcb8690", # October 10, 2018
+    #remote = "https://github.com/msoos/cryptominisat.git",
+    #patches = ["//external:patch.cryptominisat"],
+#)
 new_git_repository(
     name = "rapidjson",
     build_file = "BUILD.rapidjson",

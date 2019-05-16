@@ -62,6 +62,8 @@ public:
   }
 
   void del_edge();
+  void add_edge();
+  void add_edge(uint16_t bits);
 
   // BEGIN ATTRIBUTE ACCESSORS
 

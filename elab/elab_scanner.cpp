@@ -68,7 +68,7 @@ void Elab_scanner::add_token(Token &t) {
     return;
   }
 
-  if (likely(!trying_merge || token_list.size() <= 1 || (t.tok == Token_id_nop) || token_list_spaced)) {
+  if (likely(!trying_merge || token_list_spaced)) {
     trying_merge      = false;
     token_list_spaced = false;
     token_list.push_back(t);
@@ -169,7 +169,7 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
   std::string_view ptr_section = memblock;
 
   Token t;
-  t.clear(0);
+  t.clear(0,0);
 
   bool starting_comment  = false;  // Only for comments to avoid /*/* nested back to back */*/
   bool finishing_comment = false;  // Only for comments to avoid /*/* nested back to back */*/
@@ -178,11 +178,11 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
     // int pos = (&memblock[i] - ptr_section); // same as "i" unless chunking
 
     t.adjust_len(pos);
-    if (c == '\n' || c == '\r' || c == '\f') {
+    if (unlikely(c == '\n' || c == '\r' || c == '\f')) {
       nlines++;
       if (!in_comment && t.tok != Token_id_nop) {
         add_token(t);
-        t.clear(pos);
+        t.clear(pos, nlines);
         trying_merge = false;
       } else {
         starting_comment      = false;
@@ -195,13 +195,13 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
           }
 
           add_token(t);
-          t.clear(pos);
+          t.clear(pos, nlines);
           trying_merge = false;
         }
       }
       if (in_string_pos) {
         add_token(t);
-        t.clear(pos);
+        t.clear(pos, nlines);
         trying_merge = false;
 
         in_string_pos = false;
@@ -249,21 +249,25 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
       }
       assert(!starting_comment);
       finishing_comment = true;
-    } else if (in_comment) {
+    } else if (unlikely(in_comment)) {
       starting_comment  = false;
       finishing_comment = false;
 
-    } else if (in_string_pos) {
+      // TODO: Convert this to a word base (not byte based) skip
+      while(memblock[pos+1]!='\n' && memblock[pos+1]!='*' && pos<memblock.size())
+        pos++;
+
+    } else if (unlikely(in_string_pos)) {
       if (c == '"' && last_c != '\\') {
         add_token(t);
-        t.clear(pos);
+        t.clear(pos, nlines);
         trying_merge = false;
 
         in_string_pos = false;
       }
-    } else if (c == '"' && last_c != '\\') {
+    } else if (unlikely(c == '"' && last_c != '\\')) {
       add_token(t);
-      t.set(Token_id_string, pos + 1);
+      t.adjust(Token_id_string, pos + 1);
       trying_merge = false;
 
       in_string_pos = true;
@@ -272,9 +276,9 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
       finishing_comment = false;
 
       add_token(t);
-      t.set(nt, pos);
-
+      t.adjust(nt, pos);
       trying_merge = translate[c].try_merge;
+
     }
 
     last_c = c;
@@ -328,7 +332,7 @@ bool Elab_scanner::scan_prev() {
 }
 
 void Elab_scanner::scan_append(std::string &text) const {
-  assert(scanner_pos < token_list.size());
+  I(scanner_pos < token_list.size());
 
   text.append(&buffer[token_list[scanner_pos].pos], token_list[scanner_pos].len);
 }
@@ -358,7 +362,6 @@ void Elab_scanner::scan_next_append(std::string &text) const {
   assert(scanner_pos < token_list.size());
   size_t p = scanner_pos + 1;
   if (p >= token_list.size()) p = token_list.size() - 1;
-  ;
 
   text.append(&buffer[token_list[p].pos], token_list[p].len);
 }

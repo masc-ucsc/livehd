@@ -6,7 +6,8 @@
 
 #include <set>
 
-#include "bm.h"
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 
 #include "inou_rand.hpp"
 #include "lgraph.hpp"
@@ -56,26 +57,6 @@ void Inou_rand::tolg(Eprp_var &var) {
   }
 }
 
-struct pin_pair_compare {
-  bool operator()(const std::pair<Node_pin, Node_pin> &lhs, const std::pair<Node_pin, Node_pin> &rhs) const {
-    if(lhs.first.get_idx() < rhs.first.get_idx())
-      return true;
-
-    if(lhs.first.get_idx() == rhs.first.get_idx() && lhs.first.get_pid() < rhs.first.get_pid())
-      return true;
-
-    if(lhs.first.get_idx() == rhs.first.get_idx() && lhs.first.get_pid() < rhs.first.get_pid() &&
-       lhs.second.get_idx() < rhs.second.get_idx())
-      return true;
-
-    if(lhs.first.get_idx() == rhs.first.get_idx() && lhs.first.get_pid() < rhs.first.get_pid() &&
-       lhs.second.get_idx() == rhs.second.get_idx() && lhs.second.get_pid() < rhs.second.get_pid())
-      return true;
-
-    return false;
-  }
-};
-
 std::vector<LGraph *> Inou_rand::do_tolg() {
 
   assert(!opack.name.empty());
@@ -87,32 +68,25 @@ std::vector<LGraph *> Inou_rand::do_tolg() {
 
   std::uniform_int_distribution<uint64_t> rnd_created(0, opack.rand_size - 1);
   std::uniform_int_distribution<Port_ID>  rnd_4(0, 4);
+  std::uniform_int_distribution<Port_ID>  rnd_port(0, (1<<Port_bits)-1);
   std::uniform_int_distribution<uint16_t> rnd_bits1(1, 32);
   std::uniform_int_distribution<uint16_t> rnd_bits2(1, 512);
   std::uniform_int_distribution<uint8_t>  rnd_op(Sum_Op, SubGraph_Op - 1);
   std::uniform_int_distribution<uint32_t> rnd_u32op(0, (uint32_t)(U32ConstMax_Op - U32ConstMin_Op));
   std::uniform_int_distribution<uint8_t>  rnd_const(0, 100);
 
-  std::vector<uint64_t> created;
+  std::vector<Node> created;
 
-  Index_ID max_nid = 0;
   for(int i = 0; i < opack.rand_size; i++) {
-    Node     node = g->create_node();
-    Index_ID nid  = node.get_nid();
-    created.push_back(nid);
-    if(nid > max_nid)
-      max_nid = nid;
-
     if(rnd_const(rnd) < opack.rand_crate) {
-      g->node_u32type_set(nid, static_cast<Node_Type_Op>(rnd_u32op(rnd)));
+      created.emplace_back(g->create_node_const(rnd_u32op(rnd),rnd_bits1(rnd)));
     } else {
-      g->node_type_set(nid, static_cast<Node_Type_Op>(rnd_op(rnd)));
+      created.emplace_back(g->create_node(static_cast<Node_Type_Op>(rnd_op(rnd))));
     }
   }
 
-  bm::bvector<> used_port;
-
-  std::set<std::pair<Node_pin, Node_pin>, struct pin_pair_compare> connections;
+  absl::flat_hash_set<Node_pin::Compact> used_port;
+  absl::flat_hash_set<XEdge::Compact> connections;
 
   int i       = 0;
   int timeout = 0;
@@ -131,28 +105,26 @@ std::vector<LGraph *> Inou_rand::do_tolg() {
     default:
       rbits = rnd_bits1(rnd);
     }
-    Index_ID  dst_nid  = created[rnd_created(rnd)];
-    Node_Type dst_type = g->node_type_get(dst_nid);
-    // if constant, we don't allow inputs to node
+    auto &sink_node = created[rnd_created(rnd)];
+    auto dst_type = sink_node.get_type();
+    // if constant, we don't allow inputs to sink_node
     if(dst_type.op > U32Const_Op && dst_type.op <= U32ConstMax_Op)
       continue;
 
-    Port_ID dst_port = 0;
-    if(used_port.get_bit(dst_nid)) {
-      dst_port = rnd_4(rnd);
-    }
-    used_port.set_bit(dst_nid);
+    auto spin = sink_node.setup_sink_pin(rnd_port(rnd) % dst_type.get_num_inputs());
+    if(used_port.count(spin.get_compact()))
+      continue;
 
-    Index_ID driver_nid = created[rnd_created(rnd)];
+    used_port.insert(spin.get_compact());
 
-    Node_pin spin = g->get_node(dst_nid).setup_sink_pin(dst_port);
-    Node_pin dpin = g->get_node(driver_nid).setup_driver_pin(rnd_4(rnd));
+    auto &driver_node = created[rnd_created(rnd)];
+    auto dpin = driver_node.setup_driver_pin(rnd_port(rnd) % driver_node.get_type().get_num_outputs());
 
+    XEdge e(dpin,spin);
     // prevent adding same edge twice
-    std::pair<Node_pin, Node_pin> conn(dpin, spin);
-    if(connections.find(conn) == connections.end()) {
-      g->add_edge(dpin, spin, rbits);
-      connections.insert(conn);
+    if(!connections.count(e.get_compact())) {
+      e.add_edge(rbits);
+      connections.insert(e.get_compact());
       i++;
       timeout = 0;
     } else {

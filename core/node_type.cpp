@@ -51,7 +51,7 @@ void LGraph_Node_Type::set_type(Index_ID nid, Node_Type_Op op) {
 
   I(node_internal[nid].get_nid() < node_type_table.size());
 
-  I(node_type_table[node_internal[nid].get_nid()] == Invalid_Op);
+  I(node_type_table[node_internal[nid].get_nid()] == Invalid_Op || node_type_table[node_internal[nid].get_nid()] == op);
 
   node_type_table[node_internal[nid].get_nid()] = op;
 }

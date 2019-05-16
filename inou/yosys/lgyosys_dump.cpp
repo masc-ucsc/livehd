@@ -31,7 +31,7 @@ RTLIL::Wire *Lgyosys_dump::add_wire(RTLIL::Module *module, const Node_pin &pin) 
   assert(pin.is_driver());
   if (pin.has_name()) {
     auto name = absl::StrCat("\\",pin.get_name());
-    printf("add wire [%s]\n", name.c_str());
+    //printf("add wire [%s]\n", name.c_str());
     return module->addWire(name, pin.get_bits());
   }else{
     return module->addWire(next_id(pin.get_lgraph()), pin.get_bits());
@@ -169,10 +169,12 @@ void Lgyosys_dump::create_memory(LGraph *g, RTLIL::Module *module, Node &node) {
       wr_data.append(RTLIL::SigSpec(get_wire(e.driver)));
 
     } else if(LGRAPH_MEMOP_ISWREN(input_pin)) {
+      wr_en.append(RTLIL::SigSpec(get_wire(e.driver)));
+#if 0
       RTLIL::Wire *en = get_wire(e.driver);
-      assert(en->width == 1);
-      // yosys requires one wr_en per bit
+      assert(en->width == 1); // yosys requires one wr_en per bit
       wr_en.append(RTLIL::SigSpec(RTLIL::SigBit(en), e.get_bits()));
+#endif
 
     } else if(LGRAPH_MEMOP_ISRDADDR(input_pin)) {
       rd_addr.append(RTLIL::SigSpec(get_wire(e.driver)));
