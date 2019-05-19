@@ -1,3 +1,7 @@
+$a as (__bits:1)
+$b as (__bits:1)
+%s as (__bits:1)
+%s = $a & $b
 
 fun1 = :($a,$b,%o):{
   %o = $a + $b
