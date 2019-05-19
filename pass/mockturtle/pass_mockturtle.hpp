@@ -38,9 +38,8 @@ class Pass_mockturtle : public Pass {
 protected:
   static void work(Eprp_var &var);
 
-  absl::flat_hash_map<Node::Compact, int> group_boundary;
-  absl::flat_hash_map<int, mockturtle::klut_network> gid2klut;
-  absl::flat_hash_map<int, std::list<Node::Compact>> group_boundary_set;
+  absl::flat_hash_map<Node::Compact, int> node2gid;
+  absl::flat_hash_map<int, mockturtle::mig_network> gid2mig;
   absl::flat_hash_map<XEdge, std::vector<mockturtle::mig_network::signal>> edge2signal;
   void lg_partition(LGraph *);
   void create_LUT_network(LGraph *);
