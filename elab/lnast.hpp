@@ -16,19 +16,42 @@ struct Lnast_node {
 
 
 class Language_neutral_ast : public Tree<Lnast_node> {
-private:
-protected:
 public:
+  Language_neutral_ast() = default;
   //add_parent(Token_entry te);
   //potential_functions();
+private:
+protected:
 };
 
 
 class Lnast_parser : public Elab_scanner {
+public:
+  Lnast_parser() = default;
 private:
   std::unique_ptr<Language_neutral_ast> lnast;
-protected:
+  void elaborate();
 
-public:
-  void elaborate() final;
+  enum Lnast_node_type : Lnast_ntype_id {
+    Lnast_ntype_invalid = 0,  // zero is not a valid Lnast_ntype_id
+    Lnast_ntype_statement,
+    Lnast_ntype_pure_assign,
+    Lnast_ntype_dp_assign,    //dp = deprecate
+    Lnast_ntype_as,
+    Lnast_ntype_logical_and,
+    Lnast_ntype_logical_or,
+    Lnast_ntype_arith,
+    Lnast_ntype_ref,
+    Lnast_ntype_const,
+    Lnast_ntype_attr_bits,
+    Lnast_ntype_assert,
+    Lnast_ntype_if,
+    Lnast_ntype_uif,
+    Lnast_ntype_tuple,
+    Lnast_ntype_funccall,
+    Lnast_ntype_funcdef,
+    Lnast_ntype_sub,
+    Lnast_ntype_top
+  };
+private:
 };
