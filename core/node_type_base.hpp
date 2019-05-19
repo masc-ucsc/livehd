@@ -76,6 +76,7 @@ enum Node_Type_Op : uint64_t {
   TechMap_Op,
   U32Const_Op,
   StrConst_Op,
+  LUT_Op,
   // op_class: sub
   SubGraphMin_Op,  // Each subgraph cell starts here
   SubGraphMax_Op = (1ULL << 32),
@@ -87,7 +88,10 @@ enum Node_Type_Op : uint64_t {
   StrConstMax_Op = 3 * (1ULL << 32),
   // op_class: sub
   TechMapMin_Op,
-  TechMapMax_Op = 4 * (1ULL << 32)
+  TechMapMax_Op = 4 * (1ULL << 32),
+  //op_class: lut
+  LUTMin_Op,
+  LUTMax_Op = 5 * (1ULL << 32)
 };
 
 class Node_Type {
@@ -626,6 +630,11 @@ public:
 class Node_Type_StrConst : public Node_Type {
 public:
   Node_Type_StrConst() : Node_Type("strconst", StrConst_Op, false) { outputs.push_back("Y"); };
+};
+
+class Node_Type_LUT : public Node_Type {
+public:
+  Node_Type_LUT() : Node_Type("lut", LUT_Op, false){};
 };
 
 // start adding CFG node_types descriptions
