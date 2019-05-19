@@ -4,7 +4,8 @@
 #include "elab_scanner.hpp"
 #include "tree.hpp"
 
-using Lnast_ntype_id = Explicit_type<int8_t, struct Lnast_ntype_id_struct>;
+//using Lnast_ntype_id = Explicit_type<int8_t, struct Lnast_ntype_id_struct>;
+using Lnast_ntype_id = uint8_t ;
 
 struct Lnast_node {
   const Lnast_ntype_id   node_type;
@@ -18,9 +19,11 @@ struct Lnast_node {
 class Language_neutral_ast : public Tree<Lnast_node> {
 public:
   Language_neutral_ast() = default;
+  Language_neutral_ast(std::string_view _buffer, Lnast_ntype_id ntype_top);
   //add_parent(Token_entry te);
   //potential_functions();
 private:
+  const std::string_view buffer;  // const because it can not change at runtime
 protected:
 };
 
