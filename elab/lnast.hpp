@@ -30,11 +30,8 @@ protected:
 
 class Lnast_parser : public Elab_scanner {
 public:
-  Lnast_parser() = default;
-private:
-  std::unique_ptr<Language_neutral_ast> lnast;
-  void elaborate();
-
+  Lnast_parser() : line_num(0) {};
+protected:
   enum Lnast_node_type : Lnast_ntype_id {
     Lnast_ntype_invalid = 0,  // zero is not a valid Lnast_ntype_id
     Lnast_ntype_statement,
@@ -56,5 +53,12 @@ private:
     Lnast_ntype_sub,
     Lnast_ntype_top
   };
+
+
+  void elaborate() override;
+  void build_statement();
+
 private:
+  std::unique_ptr<Language_neutral_ast>  lnast;
+  uint32_t                               line_num;
 };
