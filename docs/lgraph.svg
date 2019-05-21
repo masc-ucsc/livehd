@@ -9,9 +9,9 @@
    xmlns="http://www.w3.org/2000/svg"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
-   width="170.49855mm"
-   height="23.631142mm"
-   viewBox="0 0 170.49855 23.631142"
+   width="132.36475mm"
+   height="23.63114mm"
+   viewBox="0 0 132.36475 23.63114"
    version="1.1"
    id="svg8"
    inkscape:version="0.92.4 5da689c313, 2019-01-14"
@@ -308,8 +308,8 @@
      inkscape:pageopacity="0.0"
      inkscape:pageshadow="2"
      inkscape:zoom="2.8"
-     inkscape:cx="306.65325"
-     inkscape:cy="85.287159"
+     inkscape:cx="311.90366"
+     inkscape:cy="85.287143"
      inkscape:document-units="mm"
      inkscape:current-layer="layer1"
      showgrid="false"
@@ -338,7 +338,7 @@
      inkscape:label="Layer 1"
      inkscape:groupmode="layer"
      id="layer1"
-     transform="translate(-43.586296,-127.094)">
+     transform="translate(-42.197123,-127.094)">
     <text
        xml:space="preserve"
        style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.23333311px;line-height:125%;font-family:'Droid Sans Mono';-inkscape-font-specification:'Droid Sans Mono';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
@@ -350,46 +350,7 @@
          x="74.196648"
          y="141.05762"
          style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Source Code Pro';-inkscape-font-specification:'Source Code Pro';stroke-width:0.26458332px">LNAST</tspan></text>
-    <flowRoot
-       xml:space="preserve"
-       id="flowRoot855"
-       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.33333397px;line-height:125%;font-family:'Droid Sans Mono';-inkscape-font-specification:'Droid Sans Mono';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#008000;fill-opacity:1;stroke:none;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;"
-       transform="matrix(0.26458333,0,0,0.26458333,1.5675614,39.925542)"><flowRegion
-         id="flowRegion857"
-         style="fill:#008000;"><rect
-           id="rect859"
-           width="65.000008"
-           height="17.142843"
-           x="157.85715"
-           y="331.80539"
-           style="fill:#008000;" /></flowRegion><flowPara
-         id="flowPara861">Verilog</flowPara></flowRoot>    <flowRoot
-       xml:space="preserve"
-       id="flowRoot855-1"
-       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.33333397px;line-height:125%;font-family:'Droid Sans Mono';-inkscape-font-specification:'Droid Sans Mono';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#008000;fill-opacity:1;stroke:none;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;"
-       transform="matrix(0.26458333,0,0,0.26458333,1.4469827,50.012492)"><flowRegion
-         id="flowRegion857-4"
-         style="fill:#008000;"><rect
-           id="rect859-8"
-           width="65.000008"
-           height="17.142843"
-           x="157.85715"
-           y="331.80539"
-           style="fill:#008000;" /></flowRegion><flowPara
-         id="flowPara861-6">FIRRTL</flowPara></flowRoot>    <flowRoot
-       xml:space="preserve"
-       id="flowRoot855-1-8"
-       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.33333397px;line-height:125%;font-family:'Droid Sans Mono';-inkscape-font-specification:'Droid Sans Mono';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#008000;fill-opacity:1;stroke:none;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;"
-       transform="matrix(0.26458333,0,0,0.26458333,112.1497,57.476672)"><flowRegion
-         id="flowRegion857-4-7"
-         style="fill:#008000;"><rect
-           id="rect859-8-5"
-           width="65.000008"
-           height="17.142843"
-           x="157.85715"
-           y="331.80539"
-           style="fill:#008000;" /></flowRegion><flowPara
-         id="flowPara861-6-1">C++</flowPara></flowRoot>    <text
+    <text
        xml:space="preserve"
        style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.23333311px;line-height:125%;font-family:'Droid Sans Mono';-inkscape-font-specification:'Droid Sans Mono';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#0000ff;fill-opacity:1;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
        x="74.467583"
@@ -400,33 +361,7 @@
          x="74.467583"
          y="130.87106"
          style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Source Code Pro';-inkscape-font-specification:'Source Code Pro';fill:#0000ff;stroke-width:0.26458332px">Yosys</tspan></text>
-    <flowRoot
-       xml:space="preserve"
-       id="flowRoot855-17"
-       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.33333397px;line-height:125%;font-family:'Droid Sans Mono';-inkscape-font-specification:'Droid Sans Mono';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#008000;fill-opacity:1;stroke:none;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;"
-       transform="matrix(0.26458333,0,0,0.26458333,116.54564,39.925542)"><flowRegion
-         id="flowRegion857-7"
-         style="fill:#008000;"><rect
-           id="rect859-9"
-           width="65.000008"
-           height="17.142843"
-           x="157.85715"
-           y="331.80539"
-           style="fill:#008000;" /></flowRegion><flowPara
-         id="flowPara861-4">Verilog</flowPara></flowRoot>    <flowRoot
-       xml:space="preserve"
-       id="flowRoot855-1-0"
-       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.33333397px;line-height:125%;font-family:'Droid Sans Mono';-inkscape-font-specification:'Droid Sans Mono';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#008000;fill-opacity:1;stroke:none;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;"
-       transform="matrix(0.26458333,0,0,0.26458333,115.12454,50.012492)"><flowRegion
-         id="flowRegion857-4-8"
-         style="fill:#008000;"><rect
-           id="rect859-8-7"
-           width="65.000008"
-           height="17.142843"
-           x="157.85715"
-           y="331.80539"
-           style="fill:#008000;" /></flowRegion><flowPara
-         id="flowPara861-6-5">FIRRTL</flowPara></flowRoot>    <text
+    <text
        xml:space="preserve"
        style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.23333311px;line-height:125%;font-family:'Droid Sans Mono';-inkscape-font-specification:'Droid Sans Mono';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
        x="142.83685"
@@ -453,40 +388,6 @@
          x="143.10779"
          y="130.87106"
          style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Source Code Pro';-inkscape-font-specification:'Source Code Pro';fill:#0000ff;stroke-width:0.26458332px">Yosys</tspan></text>
-    <text
-       xml:space="preserve"
-       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.23333311px;line-height:125%;font-family:'Droid Sans Mono';-inkscape-font-specification:'Droid Sans Mono';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
-       x="189.22804"
-       y="141.05762"
-       id="text817-8-4-3"><tspan
-         sodipodi:role="line"
-         id="tspan815-1-0-1"
-         x="189.22804"
-         y="141.05762"
-         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Source Code Pro';-inkscape-font-specification:'Source Code Pro';stroke-width:0.26458332px">ESSENT</tspan></text>
-    <flowRoot
-       xml:space="preserve"
-       id="flowRoot855-1-8-1"
-       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.33333397px;line-height:125%;font-family:'Droid Sans Mono';-inkscape-font-specification:'Droid Sans Mono';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#008000;fill-opacity:1;stroke:none;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;"
-       transform="matrix(0.26458333,0,0,0.26458333,159.81006,50.013353)"><flowRegion
-         id="flowRegion857-4-7-6"
-         style="fill:#008000;"><rect
-           id="rect859-8-5-2"
-           width="65.000008"
-           height="17.142843"
-           x="157.85715"
-           y="331.80539"
-           style="fill:#008000;" /></flowRegion><flowPara
-         id="flowPara861-6-1-6">C++</flowPara></flowRoot>    <path
-       style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;marker-end:url(#marker2307-9-6)"
-       d="m 173.57154,139.67163 h 6.09031"
-       id="path2267-8-8"
-       inkscape:connector-curvature="0" />
-    <path
-       style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;marker-end:url(#marker2307-9-3)"
-       d="m 198.70068,139.67163 h 6.09031"
-       id="path2267-8-5"
-       inkscape:connector-curvature="0" />
     <path
        style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;marker-end:url(#marker2307-9-4)"
        d="m 151.50547,136.26238 5.27436,-3.04516"
@@ -635,5 +536,60 @@
          d="m 127.8689,136.53568 c 0.80856,0 1.61689,0 2.02094,1.79876 0.40405,1.79876 0.40405,5.39656 -3.80562,7.19559 -4.20968,1.79903 -12.62804,1.79903 -16.82979,6e-5 -4.20174,-1.79897 -4.18598,-5.39642 -3.65325,-7.199 0.53272,-1.80259 1.58218,-1.81046 2.63139,-1.81832"
          style="opacity:1;vector-effect:none;fill:none;fill-opacity:1;fill-rule:evenodd;stroke:#000000;stroke-width:0.20704871px;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker-end:url(#marker1375-5)" />
     </g>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:3.52777767px;line-height:125%;font-family:'Droid Sans Mono';-inkscape-font-specification:'Droid Sans Mono';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="166.33406"
+       y="132.3933"
+       id="text1008"><tspan
+         sodipodi:role="line"
+         id="tspan1006"
+         x="166.33406"
+         y="132.3933"
+         style="fill:#008000;stroke-width:0.26458332px">Verilog</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:3.52777767px;line-height:125%;font-family:'Droid Sans Mono';-inkscape-font-specification:'Droid Sans Mono';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="164.91296"
+       y="140.92827"
+       id="text1008-3"><tspan
+         sodipodi:role="line"
+         id="tspan1006-6"
+         x="164.91296"
+         y="140.92827"
+         style="fill:#008000;stroke-width:0.26458332px">FIRRTL</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:3.52777767px;line-height:125%;font-family:'Droid Sans Mono';-inkscape-font-specification:'Droid Sans Mono';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="161.93813"
+       y="147.67279"
+       id="text1008-7"><tspan
+         sodipodi:role="line"
+         id="tspan1006-5"
+         x="161.93813"
+         y="147.67279"
+         style="fill:#008000;stroke-width:0.26458332px">C++</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:3.52777767px;line-height:125%;font-family:'Droid Sans Mono';-inkscape-font-specification:'Droid Sans Mono';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="51.368153"
+       y="140.92827"
+       id="text1008-3-3"><tspan
+         sodipodi:role="line"
+         id="tspan1006-6-5"
+         x="51.368153"
+         y="140.92827"
+         style="fill:#008000;stroke-width:0.26458332px">FIRRTL</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:3.52777767px;line-height:125%;font-family:'Droid Sans Mono';-inkscape-font-specification:'Droid Sans Mono';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="50.543789"
+       y="130.84131"
+       id="text1008-6"><tspan
+         sodipodi:role="line"
+         id="tspan1006-2"
+         x="50.543789"
+         y="130.84131"
+         style="fill:#008000;stroke-width:0.26458332px">Verilog</tspan></text>
   </g>
 </svg>
