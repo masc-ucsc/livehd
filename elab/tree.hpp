@@ -96,7 +96,7 @@ public:
   const Tree_index get_root() const;
   void             set_root(const X &data);
 
-  void add_lazy_child(const Tree_level &child_level, const X &data);
+  void add_lazy_child(const Tree_level &child_level, const X &data); // FIXME: same as bimap/map, use emplace_back style (avoid extra copy)
 
   // const Tree_index add_child(Tree_index parent, const Tree &t);
   // const Tree_index add_sibling(Tree_index brother, const Tree &t);
