@@ -536,39 +536,42 @@
          d="m 127.8689,136.53568 c 0.80856,0 1.61689,0 2.02094,1.79876 0.40405,1.79876 0.40405,5.39656 -3.80562,7.19559 -4.20968,1.79903 -12.62804,1.79903 -16.82979,6e-5 -4.20174,-1.79897 -4.18598,-5.39642 -3.65325,-7.199 0.53272,-1.80259 1.58218,-1.81046 2.63139,-1.81832"
          style="opacity:1;vector-effect:none;fill:none;fill-opacity:1;fill-rule:evenodd;stroke:#000000;stroke-width:0.20704871px;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker-end:url(#marker1375-5)" />
     </g>
-    <text
-       xml:space="preserve"
-       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:3.52777767px;line-height:125%;font-family:'Droid Sans Mono';-inkscape-font-specification:'Droid Sans Mono';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
-       x="166.33406"
-       y="132.3933"
-       id="text1008"><tspan
-         sodipodi:role="line"
-         id="tspan1006"
-         x="166.33406"
+    <g
+       id="g1198">
+      <text
+         id="text1008"
          y="132.3933"
-         style="fill:#008000;stroke-width:0.26458332px">Verilog</tspan></text>
-    <text
-       xml:space="preserve"
-       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:3.52777767px;line-height:125%;font-family:'Droid Sans Mono';-inkscape-font-specification:'Droid Sans Mono';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
-       x="164.91296"
-       y="140.92827"
-       id="text1008-3"><tspan
-         sodipodi:role="line"
-         id="tspan1006-6"
-         x="164.91296"
+         x="166.33406"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:3.52777767px;line-height:125%;font-family:'Droid Sans Mono';-inkscape-font-specification:'Droid Sans Mono';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           style="fill:#008000;stroke-width:0.26458332px"
+           y="132.3933"
+           x="166.33406"
+           id="tspan1006"
+           sodipodi:role="line">Verilog</tspan></text>
+      <text
+         id="text1008-3"
          y="140.92827"
-         style="fill:#008000;stroke-width:0.26458332px">FIRRTL</tspan></text>
-    <text
-       xml:space="preserve"
-       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:3.52777767px;line-height:125%;font-family:'Droid Sans Mono';-inkscape-font-specification:'Droid Sans Mono';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
-       x="161.93813"
-       y="147.67279"
-       id="text1008-7"><tspan
-         sodipodi:role="line"
-         id="tspan1006-5"
-         x="161.93813"
+         x="164.91296"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:3.52777767px;line-height:125%;font-family:'Droid Sans Mono';-inkscape-font-specification:'Droid Sans Mono';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           style="fill:#008000;stroke-width:0.26458332px"
+           y="140.92827"
+           x="164.91296"
+           id="tspan1006-6"
+           sodipodi:role="line">FIRRTL</tspan></text>
+      <text
+         id="text1008-7"
          y="147.67279"
-         style="fill:#008000;stroke-width:0.26458332px">C++</tspan></text>
+         x="161.93813"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:3.52777767px;line-height:125%;font-family:'Droid Sans Mono';-inkscape-font-specification:'Droid Sans Mono';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           style="fill:#008000;stroke-width:0.26458332px"
+           y="147.67279"
+           x="161.93813"
+           id="tspan1006-5"
+           sodipodi:role="line">C++</tspan></text>
+    </g>
     <text
        xml:space="preserve"
        style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:3.52777767px;line-height:125%;font-family:'Droid Sans Mono';-inkscape-font-specification:'Droid Sans Mono';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
