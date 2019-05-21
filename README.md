@@ -11,11 +11,17 @@ LGraph is a graph optimized for live synthesis (Live Synthesizes Graph or
 LGraph for short). By live, we mean that small changes in the design should
 have results in few seconds. The goal is that any code change can have its
 synthesis and simulation setup ready under 30 seconds with a goal of under 4
-seconds in most cases.
+seconds in most cases.  
 
 Notice that this is different goal from having a incremental synthesis were many
 edges are added and removed. The typical graph reconstruction is in the order of
 thousands of nodes.
+
+LGraph is built to interface with other tools like Yosys, ABC, OpenTimer...
+
+![LGraph overall flow](./docs/lgraph.svg)
+<img src="./docs/lgraph.svg">
+
 
 ## Building
 
