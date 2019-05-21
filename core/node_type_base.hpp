@@ -634,7 +634,10 @@ public:
 
 class Node_Type_LUT : public Node_Type {
 public:
-  Node_Type_LUT() : Node_Type("lut", LUT_Op, false){};
+  Node_Type_LUT() : Node_Type("lut", LUT_Op, false) {
+    inputs.push_back("A");
+    outputs.push_back("Y");
+  };
 };
 
 // start adding CFG node_types descriptions
