@@ -36,6 +36,7 @@ Node_Type::_init::_init() {
   Node_Type::table[Mux_Op]              = new Node_Type_Mux();
   Node_Type::table[ShiftRight_Op]       = new Node_Type_ShiftRight();
   Node_Type::table[ShiftLeft_Op]        = new Node_Type_ShiftLeft();
+  Node_Type::table[LUT_Op]              = new Node_Type_LUT();
   Node_Type::table[GraphIO_Op]          = new Node_Type_GraphIO();
   Node_Type::table[SubGraph_Op]         = new Node_Type_SubGraph();
   // IDs between SubGraph_Op and SubGraphMax_Op are allowed, but they just mean a different type of subgraph

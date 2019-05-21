@@ -56,6 +56,8 @@ enum Node_Type_Op : uint64_t {
   ShiftRight_Op,
   ShiftLeft_Op,
 #endif
+  // op_class: LUT
+  LUT_Op,
   // op_class: wire
   GraphIO_Op,
   DontCare_Op,
@@ -76,7 +78,6 @@ enum Node_Type_Op : uint64_t {
   TechMap_Op,
   U32Const_Op,
   StrConst_Op,
-  LUT_Op,
   // op_class: sub
   SubGraphMin_Op,  // Each subgraph cell starts here
   SubGraphMax_Op = (1ULL << 32),
@@ -636,6 +637,9 @@ class Node_Type_LUT : public Node_Type {
 public:
   Node_Type_LUT() : Node_Type("lut", LUT_Op, false) {
     inputs.push_back("A");
+    inputs.push_back("B");
+    inputs.push_back("C");
+    inputs.push_back("D");
     outputs.push_back("Y");
   };
 };
