@@ -20,8 +20,6 @@ thousands of nodes.
 LGraph is built to interface with other tools like Yosys, ABC, OpenTimer...
 
 ![LGraph overall flow](./docs/lgraph.svg)
-<img src="./docs/lgraph.svg">
-
 
 ## Building
 
