@@ -30,6 +30,9 @@ protected:
   void             set_type_subgraph(Index_ID nid, Lg_type_id subgraphid);
   Lg_type_id       get_type_subgraph(Index_ID nid) const;
 
+  void             set_type_lut(Index_ID nid, Lut_type_id lutid);
+  Lut_type_id      get_type_lut(Index_ID nid) const;
+
   void             set_type_tmap_id(Index_ID nid, uint32_t tmapid);
   uint32_t         get_type_tmap_id(Index_ID nid) const;
 

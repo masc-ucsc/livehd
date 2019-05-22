@@ -339,7 +339,7 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
       edge2signal_klut[io_edge_it].signals.emplace_back(gid2mig2klut_io_signal[gid][gid2mig[gid].get_node(mig_sig_it)]);
     }
   }
-
+  //print out the signal mapping information
   for (const auto &edge : boundary_edges) {
     I(edge2signal_mig[edge].gid == edge2signal_klut[edge].gid);
     const auto gid = edge2signal_klut[edge].gid;
@@ -355,7 +355,18 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
 }
 
 void Pass_mockturtle::create_lutified_lgraph(LGraph *g) {
-
+  auto lg_path = g->get_path();
+  auto lg_source = g->get_library().get_source(g->get_lgid());
+  std::string lg_name(g->get_name());
+  lg_name += LUTIFIED_NETWORK_NAME_SIGNATURE;
+  LGraph *lg = LGraph::create(lg_path, lg_name, lg_source);
+  for (const auto &nid : g->forward()) {
+    auto old_node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
+    if (node2gid.find(old_node.get_compact())==node2gid.end()) {
+      auto new_node = lg->create_node(old_node.get_type().op);
+      //new_node.set_type();
+    }
+  }
 }
 
 void Pass_mockturtle::do_work(LGraph *g) {

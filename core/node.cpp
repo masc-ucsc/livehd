@@ -76,6 +76,14 @@ Lg_type_id Node::get_type_subgraph() const {
   return g->get_type_subgraph(nid);
 }
 
+void Node::set_type_lut(Lut_type_id lutid) {
+  g->set_type_lut(nid, lutid);
+}
+
+Lut_type_id Node::get_type_lut() const {
+  return g->get_type_lut(nid);
+}
+
 void Node::set_type_tmap_id(uint32_t tmap_id) {
   g->set_type_tmap_id(nid,tmap_id);
 }

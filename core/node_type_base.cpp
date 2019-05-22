@@ -40,21 +40,21 @@ Node_Type::_init::_init() {
   Node_Type::table[GraphIO_Op]          = new Node_Type_GraphIO();
   Node_Type::table[SubGraph_Op]         = new Node_Type_SubGraph();
   // IDs between SubGraph_Op and SubGraphMax_Op are allowed, but they just mean a different type of subgraph
-  Node_Type::table[TechMap_Op]  = new Node_Type_TechMap();
-  Node_Type::table[BlackBox_Op] = new Node_Type_BlackBox();
+  Node_Type::table[TechMap_Op]          = new Node_Type_TechMap();
+  Node_Type::table[BlackBox_Op]         = new Node_Type_BlackBox();
 
-  Node_Type::table[U32Const_Op]        = new Node_Type_U32Const();
-  Node_Type::table[StrConst_Op]        = new Node_Type_StrConst();
-  Node_Type::table[CfgAssign_Op]       = new Node_Type_CfgAssign();
-  Node_Type::table[CfgIf_Op]           = new Node_Type_CfgIf();
-  Node_Type::table[CfgFunctionCall_Op] = new Node_Type_CfgFunctionCall();
-  Node_Type::table[CfgFor_Op]          = new Node_Type_CfgFor();
-  Node_Type::table[CfgWhile_Op]        = new Node_Type_CfgWhile();
-  Node_Type::table[CfgIfMerge_Op]      = new Node_Type_CfgIfMerge();
-  Node_Type::table[CfgBeenRead_Op]     = new Node_Type_CfgBeenRead();
-  Node_Type::table[DontCare_Op]        = new Node_Type_DontCare();
-  Node_Type::table[DfgRef_Op]          = new Node_Type_DfgRef();
-  Node_Type::table[DfgPendingGraph_Op] = new Node_Type_DfgPendingGraph();
+  Node_Type::table[U32Const_Op]         = new Node_Type_U32Const();
+  Node_Type::table[StrConst_Op]         = new Node_Type_StrConst();
+  Node_Type::table[CfgAssign_Op]        = new Node_Type_CfgAssign();
+  Node_Type::table[CfgIf_Op]            = new Node_Type_CfgIf();
+  Node_Type::table[CfgFunctionCall_Op]  = new Node_Type_CfgFunctionCall();
+  Node_Type::table[CfgFor_Op]           = new Node_Type_CfgFor();
+  Node_Type::table[CfgWhile_Op]         = new Node_Type_CfgWhile();
+  Node_Type::table[CfgIfMerge_Op]       = new Node_Type_CfgIfMerge();
+  Node_Type::table[CfgBeenRead_Op]      = new Node_Type_CfgBeenRead();
+  Node_Type::table[DontCare_Op]         = new Node_Type_DontCare();
+  Node_Type::table[DfgRef_Op]           = new Node_Type_DfgRef();
+  Node_Type::table[DfgPendingGraph_Op]  = new Node_Type_DfgPendingGraph();
 
   I(Invalid_Op == 0);
   for (size_t i = Invalid_Op; i <= SubGraph_Op; i++) {
@@ -65,10 +65,10 @@ Node_Type::_init::_init() {
 
 Node_Type &Node_Type::get(Node_Type_Op op) {
   if (op >= SubGraphMin_Op && op <= SubGraphMax_Op) op = SubGraph_Op;
-
+  if (op >= TechMapMin_Op  && op <= TechMapMax_Op ) op = TechMap_Op;
   if (op >= U32ConstMin_Op && op <= U32ConstMax_Op) op = U32Const_Op;
-
   if (op >= StrConstMin_Op && op <= StrConstMax_Op) op = StrConst_Op;
+  if (op >= LUTMin_Op      && op <= LUTMax_Op)      op = LUT_Op;
 
   I(table[op] != nullptr);
   return *table[op];

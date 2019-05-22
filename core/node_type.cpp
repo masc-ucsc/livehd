@@ -67,6 +67,7 @@ const Node_Type &LGraph_Node_Type::get_type(Index_ID nid) const {
   if (op >= TechMapMin_Op  && op <= TechMapMax_Op ) op = TechMap_Op;
   if (op >= U32ConstMin_Op && op <= U32ConstMax_Op) op = U32Const_Op;
   if (op >= StrConstMin_Op && op <= StrConstMax_Op) op = StrConst_Op;
+  if (op >= LUTMin_Op      && op <= LUTMax_Op)      op = LUT_Op;
 
   return Node_Type::get(op);
 }
@@ -97,6 +98,29 @@ Lg_type_id LGraph_Node_Type::get_type_subgraph(Index_ID nid) const {
   I(node_type_table[node_internal[nid].get_nid()] <= SubGraphMax_Op);
 
   return Lg_type_id((uint32_t)(node_type_table[node_internal[nid].get_nid()] - SubGraphMin_Op));
+}
+
+void LGraph_Node_Type::set_type_lut(Index_ID nid, Lut_type_id lutid) {
+  I(nid < node_type_table.size());
+  I(node_internal[nid].is_node_state());
+
+  I(node_internal[nid].get_nid() < node_type_table.size());
+  I(lutid.value <= (uint32_t)(LUTMax_Op - LUTMin_Op));
+
+  node_type_table[node_internal[nid].get_nid()] = (Node_Type_Op)(LUTMin_Op + lutid);
+}
+
+Lut_type_id LGraph_Node_Type::get_type_lut(Index_ID nid) const {
+  I(nid < node_type_table.size());
+  I(node_internal[nid].is_node_state());
+
+  I(node_internal[nid].get_nid() < node_type_table.size());
+
+  // only supported for constants
+  I(node_type_table[node_internal[nid].get_nid()] >= LUTMin_Op);
+  I(node_type_table[node_internal[nid].get_nid()] <= LUTMax_Op);
+
+  return Lut_type_id((uint32_t)(node_type_table[node_internal[nid].get_nid()] - LUTMin_Op));
 }
 
 void LGraph_Node_Type::set_type_tmap_id(Index_ID nid, uint32_t tmapid) {

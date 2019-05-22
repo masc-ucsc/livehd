@@ -19,6 +19,7 @@
 // LGraph basic core types used all over
 using Lg_type_id   = Explicit_type<uint32_t, struct Lg_type_id_struct>;  // Global used all over
 using Index_ID     = Explicit_type<uint64_t, struct Index_ID_struct>;
+using Lut_type_id  = Explicit_type<uint32_t, struct Lut_type_id_struct>;
 using Hierarchy_id = uint16_t;
 
 struct Lg_type_id_hash {

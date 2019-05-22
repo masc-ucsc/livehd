@@ -36,6 +36,8 @@
 
 #include "pass.hpp"
 
+#define LUTIFIED_NETWORK_NAME_SIGNATURE "_lutified"
+
 template<typename sig>
 struct Ntk_Sig {
   int gid;

@@ -116,6 +116,9 @@ public:
   void set_type_subgraph(Lg_type_id subid);
   Lg_type_id get_type_subgraph() const;
 
+  void set_type_lut(Lut_type_id lutid);
+  Lut_type_id get_type_lut() const;
+
   void set_type_tmap_id(uint32_t tmap_id);
   uint32_t get_type_tmap_id() const;
   const Tech_cell *get_type_tmap_cell() const;
