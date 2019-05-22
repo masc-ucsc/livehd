@@ -83,103 +83,6 @@ public:
     return last_attr;
   }
 
-  static void set(const Base &obj, Data data) {
-
-    if (unlikely(obj.get_top_lgraph()!=last_lg))
-      setup_table(obj.get_top_lgraph());
-
-    if constexpr (std::is_same<Key, Node_pin::Compact>::value) {
-      GI(Mode == Node_pin_mode::Driver, obj.is_driver());
-      GI(Mode == Node_pin_mode::Sink  , obj.is_sink());
-      I(!last_attr->has(obj.get_compact(Mode)));
-      last_attr->set(obj.get_compact(Mode), data);
-    }else if constexpr (std::is_same<Key, Node_pin::Compact_class>::value) {
-      GI(Mode == Node_pin_mode::Driver, obj.is_driver());
-      GI(Mode == Node_pin_mode::Sink  , obj.is_sink());
-      I(!last_attr->has(obj.get_compact_class(Mode)));
-      last_attr->set(obj.get_compact_class(Mode), data);
-    }else if constexpr (std::is_same<Key, Node::Compact>::value) {
-      I(!last_attr->has(obj.get_compact()));
-      last_attr->set(obj.get_compact(), data);
-    }else if constexpr (std::is_same<Key, Node::Compact_class>::value) {
-      I(!last_attr->has(obj.get_compact_class()));
-      last_attr->set(obj.get_compact_class(), data);
-    }
-  };
-
-  static const Data &get(const Base &obj) {
-    if (unlikely(obj.get_top_lgraph()!=last_lg))
-      setup_table(obj.get_top_lgraph());
-
-    if constexpr (std::is_same<Key, Node_pin::Compact>::value) {
-      GI(Mode == Node_pin_mode::Driver, obj.is_driver());
-      GI(Mode == Node_pin_mode::Sink  , obj.is_sink());
-      return last_attr->get(obj.get_compact(Mode));
-    }else if constexpr (std::is_same<Key, Node_pin::Compact_class>::value) {
-      GI(Mode == Node_pin_mode::Driver, obj.is_driver());
-      GI(Mode == Node_pin_mode::Sink  , obj.is_sink());
-      return last_attr->get(obj.get_compact_class(Mode));
-    }else if constexpr (std::is_same<Key, Node::Compact>::value) {
-      return last_attr->get(obj.get_compact());
-    }else if constexpr (std::is_same<Key, Node::Compact_class>::value) {
-      return last_attr->get(obj.get_compact_class());
-    }
-  }
-
-  static Data &at(const Base &obj) {
-    if (unlikely(obj.get_top_lgraph()!=last_lg))
-      setup_table(obj.get_top_lgraph());
-
-    if constexpr (std::is_same<Key, Node_pin::Compact>::value) {
-      GI(Mode == Node_pin_mode::Driver, obj.is_driver());
-      GI(Mode == Node_pin_mode::Sink  , obj.is_sink());
-      return last_attr->at(obj.get_compact(Mode));
-    }else if constexpr (std::is_same<Key, Node_pin::Compact_class>::value) {
-      GI(Mode == Node_pin_mode::Driver, obj.is_driver());
-      GI(Mode == Node_pin_mode::Sink  , obj.is_sink());
-      return last_attr->at(obj.get_compact_class(Mode));
-    }else if constexpr (std::is_same<Key, Node::Compact>::value) {
-      return last_attr->at(obj.get_compact());
-    }else if constexpr (std::is_same<Key, Node::Compact_class>::value) {
-      return last_attr->at(obj.get_compact_class());
-    }
-  }
-
-  static bool has(const Base &obj) {
-    if (unlikely(obj.get_top_lgraph()!=last_lg))
-      setup_table(obj.get_top_lgraph());
-
-    if constexpr (std::is_same<Key, Node_pin::Compact>::value) {
-      GI(Mode == Node_pin_mode::Driver, obj.is_driver());
-      GI(Mode == Node_pin_mode::Sink  , obj.is_sink());
-      return last_attr->has(obj.get_compact(Mode));
-    }else if constexpr (std::is_same<Key, Node_pin::Compact_class>::value) {
-      GI(Mode == Node_pin_mode::Driver, obj.is_driver());
-      GI(Mode == Node_pin_mode::Sink  , obj.is_sink());
-      return last_attr->has(obj.get_compact_class(Mode));
-    }else if constexpr (std::is_same<Key, Node::Compact>::value) {
-      return last_attr->has(obj.get_compact());
-    }else if constexpr (std::is_same<Key, Node::Compact_class>::value) {
-      return last_attr->has(obj.get_compact_class());
-    }
-  }
-
-  static void sync() {
-    for(auto *ent:table) {
-      if (ent == nullptr)
-        continue;
-      ent->sync();
-    }
-  };
-
-  static void sync(LGraph *lg) {
-    size_t pos = lg->get_lgid().value;
-    if (is_invalid(pos))
-      return;
-
-    table[pos]->sync();
-  };
-
   static void clear(LGraph *lg) {
     setup_table(lg);
 
@@ -190,5 +93,6 @@ public:
 
     last_lg   = nullptr;
     last_attr = nullptr;
-  };
+  }
+
 };
