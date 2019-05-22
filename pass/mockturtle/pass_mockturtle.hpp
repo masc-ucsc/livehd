@@ -28,24 +28,36 @@
 #include <mockturtle/algorithms/lut_mapping.hpp>
 #include <mockturtle/views/mapping_view.hpp>
 
+#include <mockturtle/algorithms/miter.hpp>
+
 #include "lgbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
 #include "pass.hpp"
 
+template<typename sig>
+struct Ntk_Sig {
+  int gid;
+  std::vector<sig> signals;
+};
+
 class Pass_mockturtle : public Pass {
 protected:
   static void work(Eprp_var &var);
 
+  std::vector<XEdge> boundary_edges;
   absl::flat_hash_map<Node::Compact, int> node2gid;
   absl::flat_hash_map<int, mockturtle::mig_network> gid2mig;
-  absl::flat_hash_map<XEdge, std::vector<mockturtle::mig_network::signal>> edge2signal;
+  absl::flat_hash_map<int, mockturtle::klut_network> gid2klut;
+  absl::flat_hash_map<XEdge, Ntk_Sig<mockturtle::mig_network::signal>> edge2signal_mig;
+  absl::flat_hash_map<XEdge, Ntk_Sig<mockturtle::klut_network::signal>> edge2signal_klut;
+  absl::flat_hash_map<int, absl::flat_hash_map<mockturtle::mig_network::signal, mockturtle::klut_network::signal>> gid2mig2klut_io_signal;
   void lg_partition(LGraph *);
   void create_LUT_network(LGraph *);
-  void create_network_output_signal(LGraph *, int, mockturtle::mig_network &);
-  void setup_input_signal(const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
-  void setup_output_signal(const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
+  void create_lutified_lgraph(LGraph *);
+  void setup_input_signal(const int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
+  void setup_output_signal(const int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
   void split_input_signal(const std::vector<mockturtle::mig_network::signal> &, std::vector<std::vector<mockturtle::mig_network::signal>> &);
 
   bool eligable_cell_op(const Node_Type_Op &cell_op) {

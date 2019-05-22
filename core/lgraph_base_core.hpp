@@ -34,6 +34,7 @@ using Port_ID    = uint16_t;    // ports have a set order (a-b != b-a)
 constexpr uint16_t Port_invalid = 8192; // Anything over 1<<12
 constexpr int Index_bits = 31; // 31 bit to have Sink/Driver + Index in 32 bits
 constexpr int Port_bits  = 14;
+constexpr int LUT_input_bits  = 4;
 
 class Graph_library;
 class Tech_library;
