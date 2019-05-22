@@ -52,7 +52,6 @@ protected:
   absl::flat_hash_map<int, mockturtle::klut_network> gid2klut;
   absl::flat_hash_map<XEdge, Ntk_Sig<mockturtle::mig_network::signal>> edge2signal_mig;
   absl::flat_hash_map<XEdge, Ntk_Sig<mockturtle::klut_network::signal>> edge2signal_klut;
-  absl::flat_hash_map<int, absl::flat_hash_map<mockturtle::mig_network::signal, mockturtle::klut_network::signal>> gid2mig2klut_io_signal;
   void lg_partition(LGraph *);
   void create_LUT_network(LGraph *);
   void create_lutified_lgraph(LGraph *);
