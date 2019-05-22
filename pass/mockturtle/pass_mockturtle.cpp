@@ -87,7 +87,7 @@ void Pass_mockturtle::setup_input_signal(const int &group_id, const XEdge &input
       input_signal.emplace_back(edge2signal_mig[input_edge].signals[i]);
     }
   } else {
-    boundary_edges.emplace_back(input_edge);
+    input_edges.emplace_back(input_edge);
     edge2signal_mig[input_edge].gid = group_id;
     //create new input signals and map them back
     for (auto i=0;i<input_edge.get_bits();i++) {
@@ -277,7 +277,7 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
       continue;
     for (const auto &out_edge : node.out_edges()) {
       if (node2gid.find(out_edge.sink.get_node().get_compact())==node2gid.end()) {
-        boundary_edges.emplace_back(out_edge);
+        output_edges.emplace_back(out_edge);
         I(node2gid[node.get_compact()] == edge2signal_mig[out_edge].gid);
         for (const auto sig : edge2signal_mig[out_edge].signals) {
           gid2mig[node2gid[node.get_compact()]].create_po(sig);
@@ -328,6 +328,9 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
     }
     gid2mig2klut_io_signal[group_id] = mig2klut_io_signal;
   }
+  std::vector<XEdge> boundary_edges;
+  boundary_edges.insert(boundary_edges.end(),input_edges.begin(),input_edges.end());
+  boundary_edges.insert(boundary_edges.end(),output_edges.begin(),output_edges.end());
   //mapping lgraph edges to klut io signals
   for (const auto &io_edge_it : boundary_edges) {
     const int gid = edge2signal_mig[io_edge_it].gid;
