@@ -48,7 +48,7 @@ class Pass_mockturtle : public Pass {
 protected:
   static void work(Eprp_var &var);
 
-  std::vector<XEdge> input_edges, output_edges;
+  absl::flat_hash_set<XEdge> input_edges, output_edges;
   absl::flat_hash_map<Node::Compact, Node::Compact> old_node_to_new_node, new_node_to_old_node;
   absl::flat_hash_map<Node::Compact, int> node2gid;
   absl::flat_hash_map<int, mockturtle::mig_network> gid2mig;
