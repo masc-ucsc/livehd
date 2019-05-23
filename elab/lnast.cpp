@@ -73,19 +73,19 @@ void Lnast_parser::add_operator_subtree(const Tree_index& tree_idx_op, int& line
   I(scan_is_token(Token_id_alnum)); //must be an alnum for first operand
   auto nt = lnast->get_data(tree_idx_op).node_type;
 
-  if (nt == Lnast_ntype_pure_assign || nt == Lnast_ntype_dp_assign || nt == Lnast_ntype_as || nt == Lnast_ntype_tuple) {
-    process_assign_like_op(tree_idx_op, line_tkcnt, cur_scope);
-  } else if (nt == Lnast_ntype_lable) {
-    process_lable_op(tree_idx_op, line_tkcnt, cur_scope);
-  } else if (nt == Lnast_ntype_func_call) {
-    process_func_call_op(tree_idx_op, line_tkcnt, cur_scope);
-  } else if (nt == Lnast_ntype_func_def) {
-    process_func_def_op(tree_idx_op, line_tkcnt, cur_scope);
-  } else if (nt == Lnast_ntype_if || nt == Lnast_ntype_uif) {
-    process_if_op(tree_idx_op, line_tkcnt, cur_scope);
-  } else {
-    process_binary_like_op(tree_idx_op, line_tkcnt, cur_scope)
-  }
+  //if (nt == Lnast_ntype_pure_assign || nt == Lnast_ntype_dp_assign || nt == Lnast_ntype_as || nt == Lnast_ntype_tuple) {
+  //  process_assign_like_op(tree_idx_op, line_tkcnt, cur_scope);
+  //} else if (nt == Lnast_ntype_lable) {
+  //  process_lable_op(tree_idx_op, line_tkcnt, cur_scope);
+  //} else if (nt == Lnast_ntype_func_call) {
+  //  process_func_call_op(tree_idx_op, line_tkcnt, cur_scope);
+  //} else if (nt == Lnast_ntype_func_def) {
+  //  process_func_def_op(tree_idx_op, line_tkcnt, cur_scope);
+  //} else if (nt == Lnast_ntype_if || nt == Lnast_ntype_uif) {
+  //  process_if_op(tree_idx_op, line_tkcnt, cur_scope);
+  //} else {
+  //  process_binary_like_op(tree_idx_op, line_tkcnt, cur_scope)
+  //}
 }
 
 
