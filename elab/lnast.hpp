@@ -43,13 +43,13 @@ protected:
   enum Lnast_node_type : Lnast_ntype_id {
     Lnast_ntype_invalid = 0,  // zero is not a valid Lnast_ntype_id
     Lnast_ntype_statement,
-    Lnast_ntype_pure_assign,
+    Lnast_ntype_pure_assign,  // =
     Lnast_ntype_dp_assign,    // :=, dp = deprecate
     Lnast_ntype_as,           // as
     Lnast_ntype_lable,        // :
     Lnast_ntype_dot,          // .
-    Lnast_ntype_logical_and,
-    Lnast_ntype_logical_or,
+    Lnast_ntype_logical_and,  // and
+    Lnast_ntype_logical_or,   // or
     Lnast_ntype_and,
     Lnast_ntype_or,
     Lnast_ntype_xor,
@@ -82,9 +82,9 @@ protected:
   void         build_statements(Scope_id scope);
   void         add_statement(const Tree_index& statements, Scope_id cur_scope);
   void         add_subgraph();
+  void         add_operator_subtree(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id cur_scope);
   Scope_id     process_scope(Scope_id cur_scope);
   void         operator_analysis(Lnast_ntype_id & node_type, int& line_tkcnt);
-  void         add_operator_subtree(Lnast_ntype_id & node_type, int& line_tkcnt);
 
 private:
   std::unique_ptr<Language_neutral_ast>  lnast;
