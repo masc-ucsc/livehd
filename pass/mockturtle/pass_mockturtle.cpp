@@ -371,6 +371,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *g) {
       new_node_to_old_node[new_node.get_compact()] = old_node.get_compact();
     }
   }
+  lg->close();
 }
 
 void Pass_mockturtle::do_work(LGraph *g) {
