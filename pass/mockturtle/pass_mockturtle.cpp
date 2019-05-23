@@ -369,6 +369,29 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *g) {
       //new_node.set_type();
       old_node_to_new_node[old_node.get_compact()] = new_node.get_compact();
       new_node_to_old_node[new_node.get_compact()] = old_node.get_compact();
+      //create unmapped edges
+      for (const auto &in_edge : old_node.inp_edges()) {
+        if (edge2signal_mig.find(in_edge)==edge2signal_mig.end()) {
+          auto peer_driver_node = in_edge.driver.get_node();
+          if (old_node_to_new_node.find(peer_driver_node.get_compact())!=old_node_to_new_node.end()) {
+            auto driver_node = Node(lg,0,Node::Compact(old_node_to_new_node[peer_driver_node.get_compact()]));
+            auto driver_pin = driver_node.setup_driver_pin(in_edge.driver.get_pid());
+            auto sink_pin = new_node.setup_sink_pin(in_edge.sink.get_pid());
+            lg->add_edge(driver_pin, sink_pin);
+          }
+        }
+      }
+      for (const auto &out_edge : old_node.out_edges()) {
+        if (edge2signal_mig.find(out_edge)==edge2signal_mig.end()) {
+          auto peer_sink_node = out_edge.sink.get_node();
+          if (old_node_to_new_node.find(peer_sink_node.get_compact())!=old_node_to_new_node.end()) {
+            auto sink_node = Node(lg,0,Node::Compact(old_node_to_new_node[peer_sink_node.get_compact()]));
+            auto sink_pin = sink_node.setup_sink_pin(out_edge.sink.get_pid());
+            auto driver_pin = new_node.setup_driver_pin(out_edge.driver.get_pid());
+            lg->add_edge(driver_pin, sink_pin);
+          }
+        }
+      }
     }
   }
   lg->close();

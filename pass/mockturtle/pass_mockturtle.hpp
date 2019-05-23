@@ -39,7 +39,7 @@
 #define LUTIFIED_NETWORK_NAME_SIGNATURE "_lutified"
 
 template<typename sig>
-struct Ntk_Sig {
+struct Ntk_Sigs {
   int gid;
   std::vector<sig> signals;
 };
@@ -49,12 +49,13 @@ protected:
   static void work(Eprp_var &var);
 
   absl::flat_hash_set<XEdge> input_edges, output_edges;
-  absl::flat_hash_map<Node::Compact, Node::Compact> old_node_to_new_node, new_node_to_old_node;
   absl::flat_hash_map<Node::Compact, int> node2gid;
   absl::flat_hash_map<int, mockturtle::mig_network> gid2mig;
   absl::flat_hash_map<int, mockturtle::klut_network> gid2klut;
-  absl::flat_hash_map<XEdge, Ntk_Sig<mockturtle::mig_network::signal>> edge2signal_mig;
-  absl::flat_hash_map<XEdge, Ntk_Sig<mockturtle::klut_network::signal>> edge2signal_klut;
+  absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle::mig_network::signal>> edge2signal_mig;
+  absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle::klut_network::signal>> edge2signal_klut;
+  absl::flat_hash_map<Node::Compact, Node::Compact> old_node_to_new_node, new_node_to_old_node;
+  absl::flat_hash_map<std::pair<int, mockturtle::klut_network::signal>, Node::Compact> gidsignal2edge;
   void lg_partition(LGraph *);
   void create_LUT_network(LGraph *);
   void create_lutified_lgraph(LGraph *);
