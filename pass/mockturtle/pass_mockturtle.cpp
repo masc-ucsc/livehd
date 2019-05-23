@@ -363,8 +363,12 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *g) {
   for (const auto &nid : g->forward()) {
     auto old_node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
     if (node2gid.find(old_node.get_compact())==node2gid.end()) {
-      auto new_node = lg->create_node(old_node.get_type().op);
+      Node_Type_Op op = old_node.get_type().op;
+      //FIX ME: op doesn't not reflect the true operation id of subgraph, tmap, uconst, conststr and lut.
+      auto new_node = lg->create_node(op);
       //new_node.set_type();
+      old_node_to_new_node[old_node.get_compact()] = new_node.get_compact();
+      new_node_to_old_node[new_node.get_compact()] = old_node.get_compact();
     }
   }
 }

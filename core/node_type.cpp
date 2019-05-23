@@ -64,10 +64,10 @@ const Node_Type &LGraph_Node_Type::get_type(Index_ID nid) const {
   Node_Type_Op op = node_type_table[node_internal[nid].get_nid()];
 
   if (op >= SubGraphMin_Op && op <= SubGraphMax_Op) op = SubGraph_Op;
-  if (op >= TechMapMin_Op  && op <= TechMapMax_Op ) op = TechMap_Op;
-  if (op >= U32ConstMin_Op && op <= U32ConstMax_Op) op = U32Const_Op;
-  if (op >= StrConstMin_Op && op <= StrConstMax_Op) op = StrConst_Op;
-  if (op >= LUTMin_Op      && op <= LUTMax_Op)      op = LUT_Op;
+  else if (op >= TechMapMin_Op  && op <= TechMapMax_Op ) op = TechMap_Op;
+  else if (op >= U32ConstMin_Op && op <= U32ConstMax_Op) op = U32Const_Op;
+  else if (op >= StrConstMin_Op && op <= StrConstMax_Op) op = StrConst_Op;
+  else if (op >= LUTMin_Op      && op <= LUTMax_Op)      op = LUT_Op;
 
   return Node_Type::get(op);
 }
