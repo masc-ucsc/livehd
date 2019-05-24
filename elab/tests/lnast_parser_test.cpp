@@ -8,6 +8,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include "gtest/gtest.h"
+#include "fmt/format.h"
 #include "lnast.hpp"
 
 int main(int argc, char **argv) {

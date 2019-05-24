@@ -67,6 +67,16 @@ cc_test(
         ":elab",
     ],
 )
+
+cc_test(
+    name = "lnast_parser_unit_test",
+    srcs = ["tests/lnast_parser_unit_test.cpp"],
+    deps = [
+        "@gtest//:gtest_main",
+        ":elab",
+    ],
+)
+
 cc_binary(
     name = "elab_pyrope_test",
     srcs = ["elab_pyrope_test.cpp"],

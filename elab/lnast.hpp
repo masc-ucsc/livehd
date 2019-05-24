@@ -39,7 +39,9 @@ protected:
 class Lnast_parser : public Elab_scanner {
 public:
   Lnast_parser() : line_num(0) {};
+  const std::unique_ptr<Language_neutral_ast>&  get_ast(){return lnast;};
 protected:
+
   enum Lnast_node_type : Lnast_ntype_id {
     Lnast_ntype_invalid = 0,  // zero is not a valid Lnast_ntype_id
     Lnast_ntype_statement,
@@ -77,14 +79,19 @@ protected:
     Lnast_ntype_top
   };
 
-
-  void         elaborate() override;
-  void         build_statements(Scope_id scope);
-  void         add_statement(const Tree_index& statements, Scope_id cur_scope);
-  void         add_subgraph();
-  void         add_operator_subtree(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id cur_scope);
-  Scope_id     process_scope(Scope_id cur_scope);
-  void         operator_analysis(Lnast_ntype_id & node_type, int& line_tkcnt);
+  void      elaborate() override;
+  void      build_statements(Scope_id scope);
+  void      add_statement(const Tree_index& statements, Scope_id cur_scope);
+  void      add_subgraph();
+  void      add_operator_subtree(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id cur_scope);
+  Scope_id  process_scope(Scope_id cur_scope);
+  void      operator_analysis(Lnast_ntype_id & node_type, int& line_tkcnt);
+  void      process_assign_like_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
+  void      process_lable_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
+  void      process_binary_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
+  void      process_func_call_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
+  void      process_func_def_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
+  void      process_if_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
 
 private:
   std::unique_ptr<Language_neutral_ast>  lnast;

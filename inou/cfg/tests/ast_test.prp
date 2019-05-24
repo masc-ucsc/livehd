@@ -1,26 +1,26 @@
 $a as (__bits:1)
-$b as (__bits:1)
-%s as (__bits:1)
-%s = $a & $b
+//$b as (__bits:1)
+//%s as (__bits:1)
+//%s = $a & $b
 
-fun1 = :($a,$b,%o):{
-  %o = $a + $b
-}
-
-if 3<4 {
-  total = fun1.(a:3,b:4)
-}else{
-  total = 3
-}
-
-I total == 7
-
-unique if 3<3 {
- a = 1
-}elif 3<4 {
- a = 2
-}elif 6<5 {
- a = 3
-}else{
- a = 4
-}
+//fun1 = :($a,$b,%o):{
+//  %o = $a + $b
+//}
+//
+//if 3<4 {
+//  total = fun1.(a:3,b:4)
+//}else{
+//  total = 3
+//}
+//
+//I total == 7
+//
+//unique if 3<3 {
+// a = 1
+//}elif 3<4 {
+// a = 2
+//}elif 6<5 {
+// a = 3
+//}else{
+// a = 4
+//}
