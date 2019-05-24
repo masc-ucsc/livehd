@@ -20,6 +20,7 @@ struct Lnast_node {
   const Scope_id         scope;
   Lnast_node(Lnast_ntype_id node_type, Token_entry te, Scope_id scope):node_type(node_type), node_name(te), scope(scope) {
     I(node_type);
+    fmt::print("node_name:{}, node_type:{}, scope:{}\n", node_name, node_type, scope);
   }
 };
 

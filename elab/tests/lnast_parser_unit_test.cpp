@@ -8,6 +8,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <string.h>
 
 #include "gtest/gtest.h"
 #include "fmt/format.h"
@@ -92,12 +93,14 @@ public:
       printf("Size: %lu\n", (uint64_t)sb.st_size);
 
       char *memblock = (char *)mmap(NULL, sb.st_size, PROT_WRITE, MAP_PRIVATE, fd, 0);
+      fprintf(stderr, "Content of memblock: \n%s\n", memblock);
       if(memblock == MAP_FAILED) {
           fprintf(stderr, "error, mmap failed\n");
           exit(-3);
       }
 
       lnast_parser.parse(file_path, memblock, sb.st_size);
+
   }
 };
 

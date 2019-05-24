@@ -12,6 +12,8 @@
 #include "fmt/format.h"
 #include "lnast.hpp"
 
+using tuple = std::tuple<std::string, uint8_t , uint8_t>;// <node_name, node_type, scope>
+
 int main(int argc, char **argv) {
 
   if(argc != 2) {
@@ -38,4 +40,18 @@ int main(int argc, char **argv) {
   Lnast_parser lnast_parser;
 
   lnast_parser.parse(argv[1], memblock, sb.st_size);
+
+  std::vector<std::vector<tuple>> ast_sorted_testee;
+  lnast_parser.get_ast()->each_breadth_first_fast([&lnast_parser, &ast_sorted_testee](const Tree_index &parent, const Tree_index &self, const Lnast_node &node_data) {
+    while (static_cast<size_t>(self.level)>=ast_sorted_testee.size())
+      ast_sorted_testee.emplace_back();
+
+    std::string node_name(lnast_parser.scan_text(node_data.node_name));
+    auto        node_type  = node_data.node_type;
+    auto        node_scope = node_data.scope;
+    fmt::print("nname:{}, ntype:{}, nscope:{}\n", node_name, node_type, node_scope);
+
+    tuple tuple_data = std::make_tuple(node_name, node_type, node_scope);
+    ast_sorted_testee[self.level].emplace_back(tuple_data);
+  });
 }
