@@ -58,4 +58,44 @@ module add3 (
   assign o = sum3;
 endmodule
 
+// add5
+module add5_top (
+  input i1,
+  input i2,
+  input i3,
+  input i4,
+  input i5,
+  output [1:0] o
+);
 
+  wire [1:0] add3_out;
+  wire [1:0] add3_out_2;
+  wire       add2_out;
+  wire       add2_c_out;
+
+  add3 add3_0(
+    .i1(i1),
+    .i2(i2),
+    .i3(i3),
+    .c_in(i1),
+    .o(add3_out)
+  );
+
+  add2 add2_0(
+    .i1(i4),
+    .i2(i5),
+    .c_in(i1),
+    .o(add2_out),
+    .c_out(add2_c_out)
+  );
+
+  add3 add3_1(
+    .i1(add3_out[0]),
+    .i2(add3_out[1]),
+    .i3(~add2_c_out),
+    .c_in(add2_c_out),
+    .o(add3_out_2)
+  );
+
+  assign o = ~add3_out_2;
+endmodule
