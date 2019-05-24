@@ -4,7 +4,6 @@
 #include "lgbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
-#include "lgwirenames.hpp"
 
 #include "pass_punch.hpp"
 
@@ -26,13 +25,18 @@ Pass_punch::Pass_punch()
     : Pass("punch") {
 }
 
-Pass_punch::Pass_punch(std::string_view _src, std::string_view _dst)
+Pass_punch::Pass_punch(LGraph *top, std::string_view _src, std::string_view _dst)
     : Pass("punch") {
-  bool ok_src = src_hierarchy.set_hierarchy(_src);
-  bool ok_dst = dst_hierarchy.set_hierarchy(_dst);
+  uint16_t ok_src = src_hierarchy.set_hierarchy(top, _src);
+  uint16_t ok_dst = dst_hierarchy.set_hierarchy(top, _dst);
 
-  if (!ok_src || !ok_dst) {
+  if (ok_src == 1 || ok_dst == 1) {
     Pass::error("Looks like hierarchy syntax is wrong. See this: e.g: a_module_name:a_instance_name.b_instance_name->a_wire_name");
+    return;
+  }
+
+  if (ok_src == 2 || ok_dst == 2) {
+    Pass::error("Provided hierarchy does not exist, check your src and dst arguments");
     return;
   }
 }
@@ -42,9 +46,9 @@ void Pass_punch::work(Eprp_var &var) {
   auto src = var.get("src");
   auto dst = var.get("dst");
 
-  Pass_punch pass(src,dst);
 
   for(const auto g : var.lgs) {
+    Pass_punch pass(g, src, dst);
     pass.punch(g, src, dst);
   }
 }
@@ -82,28 +86,10 @@ void Pass_punch::punch(LGraph *g, std::string_view src, std::string_view dst) {
   // get subgraph ids
   /////////////////////////////////////
   fmt::print("Trying to get subgraphs of source and destination...\n");
-  std::string_view src_h        = this->src_hierarchy.get_hierarchy();
-  std::string_view dst_h        = this->dst_hierarchy.get_hierarchy();
-  std::string_view dst_h_parent = this->dst_hierarchy.get_hierarchy_upto(this->dst_hierarchy.get_inst_num() - 1);
-  std::string_view common       = this->src_hierarchy.get_hierarchy_upto(common_hier_depth);
-
-  Lg_type_id src_lgid = 0;
-  Lg_type_id dst_lgid = 0;
-  Lg_type_id dst_parent_lgid = 0;
-  Lg_type_id common_lgid = 0;
-
-  const auto hier = g->get_hierarchy();
-  for(auto &[name,lgid]:hier) {
-    if (name == src_h) {
-      src_lgid = lgid;
-    } else if (name == dst_h) {
-      dst_lgid = lgid;
-    } else if (name == dst_h_parent) {
-      dst_parent_lgid = lgid;
-    } else if (name == common) {
-      common_lgid = lgid;
-    }
-  }
+  std::string src_h   = this->src_hierarchy.get_hierarchy();
+  std::string dst_h   = this->dst_hierarchy.get_hierarchy();
+  Lg_type_id src_lgid = this->src_hierarchy.get_lgid(src_h);
+  Lg_type_id dst_lgid = this->dst_hierarchy.get_lgid(dst_h);;
 
   // sanity checks
   if (src_lgid == 0) {
@@ -116,8 +102,6 @@ void Pass_punch::punch(LGraph *g, std::string_view src, std::string_view dst) {
   }
   fmt::print("src_lgid:        {}\n",src_lgid);
   fmt::print("dst_lgid:        {}\n",dst_lgid);
-  fmt::print("dst_lgid_parent: {}\n",dst_parent_lgid);
-  fmt::print("dst_lgid:        {}\n\n",common_lgid);
 
   auto *src_g = LGraph::open(g->get_path(), src_lgid);
   if (src_g == 0) {
@@ -131,90 +115,86 @@ void Pass_punch::punch(LGraph *g, std::string_view src, std::string_view dst) {
     return;
   }
 
+  
+  fmt::print("{}\n", src_g->get_name());
+  for (const auto &nid: src_g->forward()) {
+    auto node = Node(src_g,0,Node::Compact(nid));
 
+    for(const auto &edge : node.inp_edges()) {
+      if (edge.driver.has_name()) {
+        std::string_view wname = edge.driver.get_name();
+        fmt::print("w_name: {}\n", wname);
+      }
+    }
+
+    for(const auto &edge : node.out_edges()) {
+      if (edge.driver.has_name()) {
+        std::string_view wname = edge.driver.get_name();
+        fmt::print("w_name: {}\n", wname);
+      }
+    }
+  }
+/*
   /////////////////////////////////////
   // Let the punching begin!
   /////////////////////////////////////
-  // add output port to the inner module to wire out 
+  // add output port to the inner-most module to get the wire out 
   std::string_view target_wire_name = this->src_hierarchy.get_wire_name();
   std::string output_wire_name = fmt::format("{}_punch", target_wire_name);
-  bool output_added = add_output(src_g, target_wire_name, output_wire_name);
+  this->add_output(src_g, target_wire_name, output_wire_name);
+  src_g->sync();
 
-  if (output_added) {
-    fmt::print("Output port added...\n");
-    src_g->sync();
-  }
-//  dst_g->sync();
-/*
+  // punch from src module upto common hierarchy
+  uint16_t current_depth = src_hierarchy.get_hierarchy_depth() - 1;
+  while (current_depth > common_hier_depth) {
+    current_depth--;
+    // get subgraph
+    Lg_type_id current_lgid = this->src_hierarchy.get_lgid(current_depth);
+    LGraph* current_g = LGraph::open(g->get_path(), current_lgid);
 
-  LGraph *dst_g = 0;
-
-  fmt::print(" src:{} MATCH name:{} lgid:{}\n", src, src_g->get_name(), src_lgid);
-  if (dst_lgid) {
-
-    fmt::print(" dst:{} MATCH name:{} lgid:{}\n", dst, dst_g->get_name(), dst_lgid);
-  }else{
-    LGraph *parent = LGraph::open(g->get_path(), dst_parent_lgid);
-
-    fmt::print(" dst:{} does not exist, creating instance at parent:{} name:{} lgid:{}\n",dst, dst_parent, parent->get_name(), dst_parent_lgid);
-
-    dst_lgid = dst_parent_lgid;
-  }
-
-  // FIXME: instead of potato, use the full name of the path
-  // dst:foo.bar.xxx.yy.dd
-  // potato = foo_bar_xxx_yy_dd
-  //
-  // FIXME: instead of itrack and potato, use the two last files>
-  // dst:punching.cover.c
-  // itrack = cover
-  // potato = cover_c
-  //
-  // FIXME:
-  // Connect the hierarchy. Not done at the moment
-
-  bool ok;
-  auto *lgo = LGraph::open(g->get_path(), src_lgid);
-  ok = add_output(lgo, src_wname,"potato");
-  if (!ok) {
-    Pass::error("pass.punch add wire:{} as output:{} in lgraph:{}",src_wname, "potato", g->get_name());
-    return;
-  }
-  auto *lgi = LGraph::open(g->get_path(), dst_lgid);
-  ok = add_input(lgi, dst_wname, "potato");
-  if (!ok) {
-    Pass::error("pass.punch add wire:{} as output:{} in lgraph:{}",src_wname, "potato", g->get_name());
-    return;
-  }
-
-  add_dest_instance(lgi, "tracker", "itrack", "potato");
-
-  lgo->sync();
-  lgi->sync();*/
+    // 
+    std::string current_name = fmt::format("out_{}_{}", output_wire_name, current_depth);
+    auto sub_g_id = current_g->get_node_from_instance_name(this->src_hierarchy.get_instance(current_depth));
+    auto sub_g_node = current_g->get_node(sub_g_id);
+    auto pin = sub_g_node.setup_driver_pin(output_wire_name);
+    add_output(current_g, pin, current_name);
+    current_g->sync();
+    break;
+  }*/
 }
-
-bool Pass_punch::add_output(LGraph *g, std::string_view wname, std::string_view output) {
+#if 0
+void Pass_punch::add_output(LGraph *g, std::string_view wname, std::string_view output) {
   I(g);
   I(!wname.empty());
   I(!output.empty());
-
-  if (!g->has_wirename(wname))
-    return false;
-
-  if (g->has_wirename(output))
-    return false;
+  I(g->has_wirename(wname));
+  I(!g->has_wirename(output));
+  I(!g->is_graph_input(output));
+  I(!g->is_graph_output(output));
 
   auto dpin         = g->get_node(g->get_node_id(wname)).get_driver_pin();
-  auto wname_bits   = g->get_bits(dpin);
-  auto wname_offset = g->get_offset(dpin);
+  auto bits   = g->get_bits(dpin);
+  auto offset = g->get_offset(dpin);
 
-  auto spin = g->add_graph_output(output, wname_bits, wname_offset);
+  auto spin = g->add_graph_output(output, bits, offset);
   g->add_edge(dpin, spin);
 
   fmt::print("Adding output:{} from wire:{} to lgraph:{} (dpin {}:{}) (spin {}:{})\n"
   , output, wname, g->get_name(), dpin.get_idx(),dpin.get_pid(), spin.get_idx(),spin.get_pid());
+}
 
-  return true;
+void Pass_punch::add_output(LGraph *g, Node_pin dpin, std::string output) {
+  I(g);
+  I(!output.empty());
+  I(!g->has_wirename(output));
+  I(!g->is_graph_input(output));
+  I(!g->is_graph_output(output));
+
+  auto bits   = g->get_bits(dpin);
+  auto offset = g->get_offset(dpin);
+
+  auto spin = g->add_graph_output(output, 1, 0);
+  g->add_edge(dpin, spin);
 }
 
 bool Pass_punch::add_input(LGraph *g, std::string_view wname, std::string_view input) {
@@ -222,71 +202,17 @@ bool Pass_punch::add_input(LGraph *g, std::string_view wname, std::string_view i
   I(g);
   I(!input.empty());
 
-  if (g->has_wirename(input))
+  if (g->has_wirename(input) || g->is_graph_input(input) || g->is_graph_output(input))
     return false;
 
-#if 0
-FIXME: This makes no sense. It check if there is an input, and adds the input if already exists???
   fmt::print("Adding input:{} lgraph:{}\n",input, g->get_name());
-  auto ipin = g->get_graph_input(input);
-  auto wname_idx    = g->get_node_id(wname);
-  auto wname_bits   = g->get_bits(wname_idx);
-  auto wname_offset = g->get_offset(ipin);
-
-  g->add_graph_input(input, wname_bits, wname_offset);
-  // g->add_edge(idx, wname_idx);
-#else
-  I(0);
-#endif
-
-  return true;
-}
-
-bool Pass_punch::add_dest_instance(LGraph *g, std::string_view type, std::string_view instance, std::string_view wname) {
-
-  if (!g->has_wirename(wname))
-    return false;
-#if 0
-FIXME: This code also seems bad
   auto wname_idx    = g->get_node_id(wname);
   auto wname_bits   = g->get_bits(wname_idx);
   auto wname_offset = g->get_offset(wname_idx);
 
-  auto *ins_g = LGraph::open(g->get_path(), type);
-  if (ins_g==0) {
-    ins_g = LGraph::create(g->get_path(), type, "pass.punch");
-  }
-
-  if (ins_g->is_graph_output(wname))
-    return false;
-  if (!ins_g->is_graph_input(wname)) {
-    if (ins_g->has_wirename(wname))
-      return false;
-
-    ins_g->add_graph_input(wname, wname_bits, wname_offset);
-  }
-
-  Port_ID ins_input_pid = ins_g->get_graph_input(wname).get_pid();
-
-  Index_ID ins_idx;
-  if (g->has_instance_name(instance)) {
-    ins_idx = g->get_node_from_instance_name(instance);
-  }else{
-    ins_idx = g->create_node().get_nid();
-    g->node_subgraph_set(ins_idx, ins_g->lg_id());
-    g->set_node_instance_name(ins_idx, instance);
-  }
-
-//  I(g->get_node(wname_idx).get_nid() == wname_idx); // FIXME: only master root for the moment
-
-  g->add_edge(g->get_node(wname_idx).setup_driver_pin(0), g->get_node(ins_idx).setup_sink_pin(ins_input_pid), wname_bits);
-
-  ins_g->close();
-#else
-  I(0);
-#endif
+  g->add_graph_input(input, wname_bits, wname_offset);
+  // g->add_edge(idx, wname_idx);
 
   return true;
 }
-
-
+#endif

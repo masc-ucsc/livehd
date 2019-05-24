@@ -24,7 +24,7 @@ cc_binary(
             "//pass/dfg:pass_dfg",
             "//pass/dce:pass_dce",
             "//pass/opentimer:pass_opentimer",
-            # "//pass/punch:pass_punch",
+            "//pass/punch:pass_punch",
             "//pass/sample:pass_sample",
             # "//pass/bitwidth:pass_bitwidth",
             "//pass/mockturtle:pass_mockturtle",
