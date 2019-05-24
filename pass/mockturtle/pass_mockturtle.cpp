@@ -399,6 +399,19 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *g) {
   for (const auto &gid2klut_iter : gid2klut) {
     const auto group_id = gid2klut_iter.first;
     const auto &klut_ntk = gid2klut_iter.second;
+    klut_ntk.foreach_node( [&](auto const &klut_ntk_node) {
+      if (klut_ntk.is_pi(klut_ntk_node)) {
+        //this is an primary input of the klut network
+        //does not have any fanin
+        return; //continue
+      }
+      auto func = klut_ntk.node_function(klut_ntk_node);
+      klut_ntk.foreach_fanin( klut_ntk_node, [&](auto const& sig, auto i) {
+        if (klut_ntk.is_complemented(sig)) {
+          kitty::flip_inplace(func, i);
+        }
+      } );
+    } );
   }
   lg->close();
 }
