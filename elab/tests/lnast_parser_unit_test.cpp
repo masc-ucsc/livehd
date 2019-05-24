@@ -2,6 +2,7 @@
 
 #include <fcntl.h>
 #include <stdio.h>
+#include <unistd.h>  //for getcwd()
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -17,7 +18,6 @@ K2   K3   0  0   16  ()  ___a  ___b
 K3   K4   0  0   16  as  $a    ___a
 END
 */
-
 using tuple = std::tuple<std::string, uint8_t , uint8_t>;// <node_name, node_type, scope>
 
 class Lnast_test : public ::testing::Test, public Lnast_parser {
@@ -73,11 +73,17 @@ public:
       EXPECT_EQ(ast_sorted_golden, ast_sorted_testee);
   }
 
+  std::string get_current_working_dir(){
+      std::string cwd("\0", FILENAME_MAX + 1);
+      return getcwd(&cwd[0],cwd.capacity());
+  }
+
   void setup_testee(){
-      const char* file_path = "inou/cfg/tests/ast_test.cfg";
-      int fd = open(file_path, O_RDONLY);
+      std::string tmp_str = get_current_working_dir();
+      std::string file_path = tmp_str + "/inou/cfg/tests/ast_test.cfg";
+      int fd = open(file_path.c_str(), O_RDONLY);
       if(fd < 0) {
-          fprintf(stderr, "error, could not open %s\n", file_path);
+          fprintf(stderr, "error, could not open %s\n", file_path.c_str());
           exit(-3);
       }
 

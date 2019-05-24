@@ -68,9 +68,11 @@ cc_test(
     ],
 )
 
+
 cc_test(
     name = "lnast_parser_unit_test",
     srcs = ["tests/lnast_parser_unit_test.cpp"],
+    data = ["//inou/cfg:cfg_pts"],
     deps = [
         "@gtest//:gtest_main",
         ":elab",
