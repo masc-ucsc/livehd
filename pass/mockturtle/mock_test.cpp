@@ -22,6 +22,7 @@
 //#include <mockturtle/networks/aig.hpp>
 #include <mockturtle/networks/klut.hpp>
 #include <mockturtle/networks/mig.hpp>
+#include <mockturtle/networks/aig.hpp>
 
 #include <mockturtle/algorithms/lut_mapping.hpp>
 #include <mockturtle/views/mapping_view.hpp>
