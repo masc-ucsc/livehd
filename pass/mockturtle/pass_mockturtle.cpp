@@ -399,18 +399,58 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *g) {
   for (const auto &gid2klut_iter : gid2klut) {
     const auto group_id = gid2klut_iter.first;
     const auto &klut_ntk = gid2klut_iter.second;
-    klut_ntk.foreach_node( [&](auto const &klut_ntk_node) {
+    //create new lut nodes
+    klut_ntk.foreach_node( [&](const auto &klut_ntk_node) {
       if (klut_ntk.is_pi(klut_ntk_node)) {
         //this is an primary input of the klut network
         //does not have any fanin
         return; //continue
       }
+
+      //check whether there is a complemented fanin,
+      //a signal that is the opposite of the original signal
+      //then change the truth table accordingly
       auto func = klut_ntk.node_function(klut_ntk_node);
-      klut_ntk.foreach_fanin( klut_ntk_node, [&](auto const& sig, auto i) {
+      klut_ntk.foreach_fanin(klut_ntk_node, [&](const auto &sig, auto i) {
         if (klut_ntk.is_complemented(sig)) {
           kitty::flip_inplace(func, i);
         }
+        if (klut_ntk.is_pi(klut_ntk.get_node(sig))) {
+          gid_fanin2parent[std::make_pair(group_id, sig)] = klut_ntk_node;
+        }
       } );
+
+      auto encoding = std::stoul(kitty::to_hex(func), nullptr, 16);
+      auto new_node = lg->create_node();
+      //if (!klut_ntk.is_constant(klut_ntk_node))
+      //  fmt::print("LUT created!\n");
+      new_node.set_type_lut(encoding);
+      gidMTnode2LGnode[std::make_pair(group_id, klut_ntk_node)] = new_node.get_compact();
+    } );
+
+    //create new edges connecting nodes already created
+    klut_ntk.foreach_node( [&](const auto &klut_ntk_node) {
+      if (klut_ntk.is_pi(klut_ntk_node) || klut_ntk.is_constant(klut_ntk_node)) {
+        //constant and primary input do not have fanin
+        return;
+      }
+      klut_ntk.foreach_fanin(klut_ntk_node, [&](auto const& sig, auto i) {
+        //variable "i" is an index indicating the order of the fanin signals
+        //therefore it can be used as pid.
+        if (klut_ntk.is_pi(klut_ntk.get_node(sig)))
+          return; //continue
+        const auto child = klut_ntk.get_node(sig);
+        const auto parent = klut_ntk_node;
+        I(gidMTnode2LGnode.find(std::make_pair(group_id, child)) != gidMTnode2LGnode.end());
+        I(gidMTnode2LGnode.find(std::make_pair(group_id, parent)) != gidMTnode2LGnode.end());
+        auto driver_node = Node(lg,0,Node::Compact(gidMTnode2LGnode[std::make_pair(group_id, child)]));
+        auto sink_node = Node(lg,0,Node::Compact(gidMTnode2LGnode[std::make_pair(group_id, parent)]));
+        auto driver_pin = driver_node.setup_driver_pin(0);
+        auto sink_pin = sink_node.setup_sink_pin(i);
+        /*auto result = */lg->add_edge(driver_pin, sink_pin);
+        //fmt::print("Edge added!\n");
+      } );
+
     } );
   }
   lg->close();

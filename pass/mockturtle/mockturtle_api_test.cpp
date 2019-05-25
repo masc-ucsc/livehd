@@ -1,4 +1,3 @@
-
 #include <iostream>
 #include <sstream>
 
@@ -38,47 +37,6 @@ int main() {
      auto func = lut.node_function(n);
      fmt::print("n{} func = {}\n", lut.node_to_index(n),kitty::to_hex(func));
   });
-/*
-  mig_network net;
-
-  std::vector<mig_network::signal> array;
-  mig_network::signal array2[32];
-
-  for(int i=0;i<32;i++) {
-    array.emplace_back(net.create_pi());
-  }
-
-  array2[0] = net.create_xor(array[0],array[1]);
-  for(int i=1;i<32;i++) {
-    array2[i] = net.create_xor(array[i],array2[i-1]);
-  }
-
-  net.create_po( array2[31] );
-  net.create_po( net.create_nary_xor(array) );
-
-  // OPT1
-  refactoring_params rf_ps;
-  rf_ps.max_pis = 4;
-  mig_npn_resynthesis resyn1;
-  refactoring(net, resyn1, rf_ps);
-  net = cleanup_dangling(net);
-
-  // OPT1
-  //resubstitution(net);
-  //net = cleanup_dangling(net);
-
-  // OPT3
-  akers_resynthesis<mig_network> resyn2;
-  const auto mig = node_resynthesis<mig_network>( net, resyn2 );
-  net = cleanup_dangling(net);
-
-  mapping_view<mig_network, true> mapped_mig{net};
-
-  lut_mapping_params ps;
-  ps.cut_enumeration_ps.cut_size = 6;
-  lut_mapping<mapping_view<mig_network, true>, true>( mapped_mig, ps);
-  auto lut =*collapse_mapped_network<klut_network>(mapped_mig);
-*/
   write_bench(lut, std::cout);
 }
 
