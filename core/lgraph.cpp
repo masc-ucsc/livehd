@@ -454,6 +454,9 @@ void LGraph::dump() {
       continue;
     auto node = Node(this,0,Node::Compact(i)); // NOTE: To remove once new iterators are finished
     fmt::print("nid:{} type:{}\n", node.nid, node.get_type().get_name());
+    if (node.get_type().get_name()=="lut") {
+      fmt::print("  lut_id=0x{:x}\n",node.get_type_lut());
+    }
     for(const auto &edge : node.inp_edges()) {
       fmt::print("  inp pid:{} from pid:{} name:{}\n", edge.sink.get_pid(), edge.driver.get_pid(), edge.driver.debug_name());
     }
