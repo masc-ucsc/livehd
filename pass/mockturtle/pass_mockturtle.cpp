@@ -329,6 +329,14 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
     gid2mig2klut_io_signal[group_id] = mig2klut_io_signal;
   }
   absl::flat_hash_set<XEdge> boundary_edges;
+  fmt::print("input edges:\n");
+  for (const auto &in_edge : input_edges) {
+    fmt::print("{}:{}->{}:{}\n",in_edge.driver.get_node().get_compact(), in_edge.driver.get_pid(), in_edge.sink.get_node().get_compact(), in_edge.sink.get_pid());
+  }
+  fmt::print("output edges:\n");
+  for (const auto &out_edge : output_edges) {
+    fmt::print("{}:{}->{}:{}\n",out_edge.driver.get_node().get_compact(), out_edge.driver.get_pid(), out_edge.sink.get_node().get_compact(), out_edge.sink.get_pid());
+  }
   boundary_edges.insert(input_edges.begin(),input_edges.end());
   boundary_edges.insert(output_edges.begin(),output_edges.end());
   //mapping lgraph edges to klut io signals
@@ -395,6 +403,10 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *g) {
       }
     }
   }
+  fmt::print("old_node->new_node:\n");
+  for (const auto &it : old_node_to_new_node) {
+    fmt::print("{}->{}\n",it.first,it.second);
+  }
   //create lutified portion
   for (const auto &gid2klut_iter : gid2klut) {
     const auto group_id = gid2klut_iter.first;
@@ -416,7 +428,8 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *g) {
           kitty::flip_inplace(func, i);
         }
         if (klut_ntk.is_pi(klut_ntk.get_node(sig))) {
-          gid_fanin2parent[std::make_pair(group_id, sig)] = klut_ntk_node;
+          Port_ID pid = (uint16_t) i;
+          gid_fanin2parent_pid[std::make_pair(group_id, sig)].emplace_back(std::make_pair(klut_ntk_node, pid));
         }
       } );
 
@@ -457,12 +470,18 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *g) {
   for (const auto &in_edge : input_edges) {
     const auto group_id = edge2signal_klut[in_edge].gid;
     const std::vector<mockturtle::klut_network::signal> &sigs = edge2signal_klut[in_edge].signals;
-    auto dirver_node = old_node_to_new_node[in_edge.driver.get_node().get_compact()];
+    auto driver_node = Node(lg,0,Node::Compact(old_node_to_new_node[in_edge.driver.get_node().get_compact()]));
+    auto driver_pin = driver_node.setup_driver_pin(in_edge.driver.get_pid());
     const auto bit_width = in_edge.get_bits();
     I(bit_width == sigs.size());
-    std::vector<Node::Compact> sink_nodes;
     for (auto i=0; i<bit_width; i++) {
-      sink_nodes.emplace_back(gidMTnode2LGnode[std::make_pair(group_id, gid_fanin2parent[std::make_pair(group_id, sigs[i])])]);
+      for (const auto &parent_and_pid : gid_fanin2parent_pid[std::make_pair(group_id, sigs[i])]) {
+        auto sink_node = Node(lg,0,Node::Compact(gidMTnode2LGnode[std::make_pair(group_id, parent_and_pid.first)]));
+        const auto pid = parent_and_pid.second;
+        auto sink_pin = sink_node.setup_sink_pin(pid);
+        //FIX ME: use join_op to connect the nodes
+        lg->add_edge(driver_pin, sink_pin);
+      }
     }
   }
   lg->close();
