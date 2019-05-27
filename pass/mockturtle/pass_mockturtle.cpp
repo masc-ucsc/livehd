@@ -453,6 +453,18 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *g) {
 
     } );
   }
+  //create edges for input signals
+  for (const auto &in_edge : input_edges) {
+    const auto group_id = edge2signal_klut[in_edge].gid;
+    const std::vector<mockturtle::klut_network::signal> &sigs = edge2signal_klut[in_edge].signals;
+    auto dirver_node = old_node_to_new_node[in_edge.driver.get_node().get_compact()];
+    const auto bit_width = in_edge.get_bits();
+    I(bit_width == sigs.size());
+    std::vector<Node::Compact> sink_nodes;
+    for (auto i=0; i<bit_width; i++) {
+      sink_nodes.emplace_back(gidMTnode2LGnode[std::make_pair(group_id, gid_fanin2parent[std::make_pair(group_id, sigs[i])])]);
+    }
+  }
   lg->close();
 }
 
