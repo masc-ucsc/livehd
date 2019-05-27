@@ -458,7 +458,8 @@ void LGraph::dump() {
       fmt::print("  lut_id=0x{:x}\n",node.get_type_lut());
     }
     for(const auto &edge : node.inp_edges()) {
-      fmt::print("  inp pid:{} from pid:{} name:{}\n", edge.sink.get_pid(), edge.driver.get_pid(), edge.driver.debug_name());
+      fmt::print("  inp pid:{} from nid:{} pid:{} name:{}\n", edge.sink.get_pid(), edge.driver.get_node().nid,
+                 edge.driver.get_pid(), edge.driver.debug_name());
     }
     for(const auto &edge : node.out_edges()) {
       fmt::print("  out pid:{} name:{} to nid:{} pid:{}\n", edge.driver.get_pid(), edge.driver.debug_name(),
