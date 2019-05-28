@@ -36,7 +36,7 @@ def _impl(ctx):
     resolved_srcs = depset(transitive = [resolved_srcs, dep.files])
 
   for dep in ctx.attr.deps:
-    print("src_libs:",dep.files)
+    #print("src_libs:",dep.files)
     resolved_srcs = dep.files + get_libs_for_static_executable(dep) + resolved_srcs
 
   src_libs2    = [f for f in resolved_srcs.to_list() if f.path.endswith('a')]
