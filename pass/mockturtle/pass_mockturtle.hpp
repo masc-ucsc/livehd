@@ -40,7 +40,7 @@
 
 template<typename sig>
 struct Ntk_Sigs {
-  int gid;
+  unsigned int gid;
   std::vector<sig> signals;
 };
 
@@ -49,21 +49,21 @@ protected:
   static void work(Eprp_var &var);
 
   absl::flat_hash_set<XEdge> input_edges, output_edges;
-  absl::flat_hash_map<Node::Compact, int> node2gid;
-  absl::flat_hash_map<int, mockturtle::mig_network> gid2mig;
-  absl::flat_hash_map<int, mockturtle::klut_network> gid2klut;
+  absl::flat_hash_map<Node::Compact, unsigned int> node2gid;
+  absl::flat_hash_map<unsigned int, mockturtle::mig_network> gid2mig;
+  absl::flat_hash_map<unsigned int, mockturtle::klut_network> gid2klut;
   absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle::mig_network::signal>> edge2signal_mig;
   absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle::klut_network::signal>> edge2signal_klut;
   absl::flat_hash_map<Node::Compact, Node::Compact> old_node_to_new_node, new_node_to_old_node;
-  absl::flat_hash_map<std::pair<int, mockturtle::klut_network::node>, Node::Compact> gidMTnode2LGnode;
-  absl::flat_hash_map<std::pair<int, mockturtle::klut_network::signal>, std::vector<std::pair<mockturtle::klut_network::node, Port_ID>>> gid_fanin2parent_pid;
+  absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::node>, Node::Compact> gidMTnode2LGnode;
+  absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::signal>, std::vector<std::pair<mockturtle::klut_network::node, Port_ID>>> gid_fanin2parent_pid;
   void lg_partition(LGraph *);
-  void dfs_populate_gid(Node, const int);
+  void dfs_populate_gid(Node, const unsigned int);
   void create_MIG_network(LGraph *);
   void convert_MIG_to_KLUT(LGraph *);
   void create_lutified_lgraph(LGraph *);
-  void setup_input_signal(const int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
-  void setup_output_signal(const int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
+  void setup_input_signal(const unsigned int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
+  void setup_output_signal(const unsigned int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
   void split_input_signal(const std::vector<mockturtle::mig_network::signal> &, std::vector<std::vector<mockturtle::mig_network::signal>> &);
 
   bool eligable_cell_op(const Node_Type_Op &cell_op) {
