@@ -80,19 +80,19 @@ enum Node_Type_Op : uint64_t {
   StrConst_Op,
   // op_class: sub
   SubGraphMin_Op,  // Each subgraph cell starts here
-  SubGraphMax_Op = SubGraphMin_Op + ((1ULL << 32)-1),
+  SubGraphMax_Op = SubGraphMin_Op + ((1ULL << 32) - 1),
   // op_class: value
   U32ConstMin_Op,
-  U32ConstMax_Op = U32ConstMin_Op + ((1ULL << 32)-1),
+  U32ConstMax_Op = U32ConstMin_Op + ((1ULL << 32) - 1),
   // op_class: str
   StrConstMin_Op,
-  StrConstMax_Op = StrConstMin_Op + ((1ULL << 32)-1),
+  StrConstMax_Op = StrConstMin_Op + ((1ULL << 32) - 1),
   // op_class: sub
   TechMapMin_Op,
-  TechMapMax_Op = TechMapMin_Op + ((1ULL << 32)-1),
+  TechMapMax_Op = TechMapMin_Op + ((1ULL << 32) - 1),
   //op_class: lut
   LUTMin_Op,
-  LUTMax_Op = LUTMin_Op + (1ULL << (1ULL << LUT_input_bits)-1)
+  LUTMax_Op = LUTMin_Op + ((1ULL << (1ULL << LUT_input_bits)) - 1)
 };
 
 class Node_Type {
