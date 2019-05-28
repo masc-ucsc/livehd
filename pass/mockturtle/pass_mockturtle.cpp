@@ -79,6 +79,7 @@ void Pass_mockturtle::lg_partition(LGraph *g) {
 void Pass_mockturtle::setup_input_signal(const int &group_id, const XEdge &input_edge, std::vector<mockturtle::mig_network::signal> &input_signal, mockturtle::mig_network &mig) {
   //check if this input edge is already in the output mapping table
   //then setup the input signal accordingly
+  fmt::print("input_edge:{}:{}->{}:{}\n",input_edge.driver.get_node().get_compact(), input_edge.driver.get_pid(), input_edge.sink.get_node().get_compact(), input_edge.sink.get_pid());
   if (edge2signal_mig.count(input_edge)!=0) {
     I(group_id == edge2signal_mig[input_edge].gid);
     //fetch the input signal from mapping table
@@ -114,6 +115,7 @@ void Pass_mockturtle::setup_output_signal(const int &group_id, const XEdge &outp
   //mapping output edge to output signal
   edge2signal_mig[output_edge].gid = group_id;
   edge2signal_mig[output_edge].signals=output_signal;
+  fmt::print("ouput_edge:{}:{}->{}:{}\n",output_edge.driver.get_node().get_compact(), output_edge.driver.get_pid(), output_edge.sink.get_node().get_compact(), output_edge.sink.get_pid());
 }
 
 //split the input signal by bits
@@ -126,7 +128,7 @@ void Pass_mockturtle::split_input_signal(const std::vector<mockturtle::mig_netwo
   }
 }
 
-void Pass_mockturtle::create_LUT_network(LGraph *g) {
+void Pass_mockturtle::create_MIG_network(LGraph *g) {
   for(const auto &nid : g->forward()) {
     auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
     if (node2gid.find(node.get_compact())==node2gid.end())
@@ -285,7 +287,9 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
       }
     }
   }
+}
 
+void Pass_mockturtle::convert_MIG_to_KLUT(LGraph *g) {
   absl::flat_hash_map<int, absl::flat_hash_map<mockturtle::mig_network::node, mockturtle::klut_network::signal>> gid2mig2klut_io_signal;
   for (const auto &gid2mig_iter : gid2mig) {
     const int group_id = gid2mig_iter.first;
@@ -297,19 +301,23 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
     //mockturtle::write_bench(cleaned_mig_ntk,std::cout);
     //create klut network for each group
     //converting mig to klut
+    fmt::print("Converting MIG network (gid:{}) to KLUT network...", group_id);
     mockturtle::mapping_view<mockturtle::mig_network, true> mapped_mig{cleaned_mig_ntk};
     mockturtle::lut_mapping_params ps;
     ps.cut_enumeration_ps.cut_size = LUT_input_bits;
     mockturtle::lut_mapping<mockturtle::mapping_view<mockturtle::mig_network, true>, true>(mapped_mig, ps);
     mockturtle::klut_network klut_ntk =*mockturtle::collapse_mapped_network<mockturtle::klut_network>(mapped_mig);
+    fmt::print("finished.\n");
     fmt::print("KLUT network under Group ID:{}\n", group_id);
     mockturtle::write_bench(klut_ntk,std::cout);
     //equivalence checking using miter
     //const auto miter = *mockturtle::miter<mockturtle::mig_network>(cleaned_mig_ntk, klut_ntk);
     gid2klut[group_id]=klut_ntk;
-    //mapping mig io signal to klut io signal
+
+    //mapping mig IO signal to klut IO signal
     //FIX ME: foreach_pi returns node while foreach_po returns signal
     //but in klut network, you can regard them as the same
+    fmt::print("Mapping MIG network IO signal to KLUT network IO signal...");
     I(mig_ntk.num_pis()==klut_ntk.num_pis() && mig_ntk.num_pos()==klut_ntk.num_pos());
     std::vector<mockturtle::mig_network::node> mig_signal;
     std::vector<mockturtle::klut_network::signal> klut_signal;
@@ -328,18 +336,21 @@ void Pass_mockturtle::create_LUT_network(LGraph *g) {
     }
     gid2mig2klut_io_signal[group_id] = mig2klut_io_signal;
   }
+  fmt::print("finished.\n");
+
+  //mapping lgraph edges to klut io signals
   absl::flat_hash_set<XEdge> boundary_edges;
-  fmt::print("input edges:\n");
+  fmt::print("IO edges info:\n");
+  /*fmt::print("input edges:\n");
   for (const auto &in_edge : input_edges) {
     fmt::print("{}:{}->{}:{}\n",in_edge.driver.get_node().get_compact(), in_edge.driver.get_pid(), in_edge.sink.get_node().get_compact(), in_edge.sink.get_pid());
   }
   fmt::print("output edges:\n");
   for (const auto &out_edge : output_edges) {
     fmt::print("{}:{}->{}:{}\n",out_edge.driver.get_node().get_compact(), out_edge.driver.get_pid(), out_edge.sink.get_node().get_compact(), out_edge.sink.get_pid());
-  }
+  }*/
   boundary_edges.insert(input_edges.begin(),input_edges.end());
   boundary_edges.insert(output_edges.begin(),output_edges.end());
-  //mapping lgraph edges to klut io signals
   for (const auto &io_edge_it : boundary_edges) {
     const int gid = edge2signal_mig[io_edge_it].gid;
     edge2signal_klut[io_edge_it].gid = gid;
@@ -516,17 +527,22 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *g) {
 void Pass_mockturtle::do_work(LGraph *g) {
   LGBench b("pass.mockturtle");
 
-  fmt::print("Start partition...\n");
-
+  fmt::print("Partitioning...\n");
   lg_partition(g);
-
+  fmt::print("Partition finished.\n");
   for (const auto &group_id_it:node2gid) {
     fmt::print("nid{} -> gid:{}\n", group_id_it.first, group_id_it.second);
   }
 
-  fmt::print("Creating LUT network...\n");
+  fmt::print("Creating MIG network...\n");
+  create_MIG_network(g);
+  fmt::print("MIG network created.\n");
 
-  create_LUT_network(g);
+  fmt::print("Converting MIG networks to KLUT networks...\n");
+  convert_MIG_to_KLUT(g);
+  fmt::print("All MIG networks are converted to KLUT networks.\n");
 
+  fmt::print("Creating lutified LGraph...\n");
   create_lutified_lgraph(g);
+  fmt::print("Lutified LGraph created.\n");
 }
