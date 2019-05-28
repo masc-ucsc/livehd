@@ -88,6 +88,10 @@ void Pass_punch::punch(LGraph *g, std::string_view src, std::string_view dst) {
   fmt::print("Trying to get subgraphs of source and destination...\n");
   std::string src_h   = this->src_hierarchy.get_hierarchy();
   std::string dst_h   = this->dst_hierarchy.get_hierarchy();
+
+  fmt::print("src_h = {}\n", src_h);
+  fmt::print("dst_h = {}\n", dst_h);
+
   Lg_type_id src_lgid = this->src_hierarchy.get_lgid(src_h);
   Lg_type_id dst_lgid = this->dst_hierarchy.get_lgid(dst_h);;
 
@@ -115,26 +119,6 @@ void Pass_punch::punch(LGraph *g, std::string_view src, std::string_view dst) {
     return;
   }
 
-  
-  fmt::print("{}\n", src_g->get_name());
-  for (const auto &nid: src_g->forward()) {
-    auto node = Node(src_g,0,Node::Compact(nid));
-
-    for(const auto &edge : node.inp_edges()) {
-      if (edge.driver.has_name()) {
-        std::string_view wname = edge.driver.get_name();
-        fmt::print("w_name: {}\n", wname);
-      }
-    }
-
-    for(const auto &edge : node.out_edges()) {
-      if (edge.driver.has_name()) {
-        std::string_view wname = edge.driver.get_name();
-        fmt::print("w_name: {}\n", wname);
-      }
-    }
-  }
-/*
   /////////////////////////////////////
   // Let the punching begin!
   /////////////////////////////////////
@@ -142,7 +126,11 @@ void Pass_punch::punch(LGraph *g, std::string_view src, std::string_view dst) {
   std::string_view target_wire_name = this->src_hierarchy.get_wire_name();
   std::string output_wire_name = fmt::format("{}_punch", target_wire_name);
   this->add_output(src_g, target_wire_name, output_wire_name);
+  fmt::print("{}\n", src_g->get_name());
+
   src_g->sync();
+  g->sync();
+/*
 
   // punch from src module upto common hierarchy
   uint16_t current_depth = src_hierarchy.get_hierarchy_depth() - 1;
@@ -162,27 +150,45 @@ void Pass_punch::punch(LGraph *g, std::string_view src, std::string_view dst) {
     break;
   }*/
 }
-#if 0
 void Pass_punch::add_output(LGraph *g, std::string_view wname, std::string_view output) {
   I(g);
   I(!wname.empty());
   I(!output.empty());
-  I(g->has_wirename(wname));
-  I(!g->has_wirename(output));
   I(!g->is_graph_input(output));
   I(!g->is_graph_output(output));
 
-  auto dpin         = g->get_node(g->get_node_id(wname)).get_driver_pin();
-  auto bits   = g->get_bits(dpin);
-  auto offset = g->get_offset(dpin);
+  bool done = false;
+  Node_pin dpin;
+  uint32_t bits;
+  uint32_t offset;
+  for (const auto &nid: g->forward()) {
+    if (done) {
+      break;
+    }
 
+    auto node = Node(g,0,Node::Compact(nid));
+
+    for(const auto &edge : node.inp_edges()) {
+      if (edge.driver.has_name()) {
+        std::string_view this_wname = edge.driver.get_name();
+        if (this_wname == wname) {
+          fmt::print("wire found: {} {}\n", wname, output);
+          done = true;          
+          dpin = edge.driver;
+          bits = edge.get_bits();
+          offset = dpin.get_offset();
+          break;
+        }
+      }
+    }
+  }
+
+  I(done);
   auto spin = g->add_graph_output(output, bits, offset);
   g->add_edge(dpin, spin);
-
-  fmt::print("Adding output:{} from wire:{} to lgraph:{} (dpin {}:{}) (spin {}:{})\n"
-  , output, wname, g->get_name(), dpin.get_idx(),dpin.get_pid(), spin.get_idx(),spin.get_pid());
 }
 
+#if 0
 void Pass_punch::add_output(LGraph *g, Node_pin dpin, std::string output) {
   I(g);
   I(!output.empty());

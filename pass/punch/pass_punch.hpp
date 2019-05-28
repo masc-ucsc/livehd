@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include "assert.h"
 #include "pass.hpp"
 #include "lghierarchy.hpp"
 #include <string_view>
