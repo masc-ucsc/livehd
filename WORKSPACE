@@ -187,6 +187,7 @@ new_git_repository(
 #)
 
 # Hermetic even for the toolchain :D
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 http_archive(
   name = "bazel_toolchains",
   sha256 = "109a99384f9d08f9e75136d218ebaebc68cc810c56897aea2224c57932052d30",

@@ -2,6 +2,28 @@ load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain")
 
 #load("@bazel_skylib//lib:versions.bzl", "versions")
 
+def get_libs_for_static_executable(dep):
+    """
+    Finds the libraries used for linking an executable statically.
+    This replaces the old API dep.cc.libs
+    Args:
+      dep: Target
+    Returns:
+      A list of File instances, these are the libraries used for linking.
+    """
+    libraries_to_link = dep[CcInfo].linking_context.libraries_to_link
+    libs = []
+    for library_to_link in libraries_to_link:
+        if library_to_link.static_library != None:
+            libs.append(library_to_link.static_library)
+        elif library_to_link.pic_static_library != None:
+            libs.append(library_to_link.pic_static_library)
+        elif library_to_link.interface_library != None:
+            libs.append(library_to_link.interface_library)
+        elif library_to_link.dynamic_library != None:
+            libs.append(library_to_link.dynamic_library)
+    return depset(libs)
+
 def _impl(ctx):
   output = ctx.outputs.out
   src_libs    = [f for f in ctx.files.srcs if f.path.endswith('a')]
@@ -12,13 +34,10 @@ def _impl(ctx):
 
   for dep in ctx.attr.srcs:
     resolved_srcs = depset(transitive = [resolved_srcs, dep.files])
-    resolved_srcs = depset(transitive = [resolved_srcs, dep.cc.libs])
-    #print(" list:", dep.files.to_list())
 
   for dep in ctx.attr.deps:
-    resolved_srcs = depset(transitive = [resolved_srcs, dep.files])
-    resolved_srcs = depset(transitive = [resolved_srcs, dep.cc.libs])
-    #print(" list:", dep.files.to_list())
+    print("src_libs:",dep.files)
+    resolved_srcs = dep.files + get_libs_for_static_executable(dep) + resolved_srcs
 
   src_libs2    = [f for f in resolved_srcs.to_list() if f.path.endswith('a')]
   #print("src_libs2:",src_libs2)
@@ -49,8 +68,12 @@ def _impl(ctx):
 
 linkso = rule(
     implementation=_impl,
-    attrs={"srcs":   attr.label_list(mandatory=True, allow_files=True),
-           "deps": attr.label_list(),
+    attrs={"srcs": attr.label_list(mandatory=True, allow_files=True),
+           "deps": attr.label_list(
+               providers = [],  # CcSkylarkApiProvider
+               mandatory = True,
+               allow_empty = False,
+               ),
            "_cc_toolchain": attr.label(
              default = Label("@bazel_tools//tools/cpp:current_cc_toolchain")
            ),
