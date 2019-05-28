@@ -59,8 +59,7 @@ void Pass_mockturtle::lg_partition(LGraph *g) {
         if (eligable_cell_op(peer_sink_node.get_type().op)) {
           if (node2gid.find(peer_sink_node.get_compact())==node2gid.end()) {
             node2gid[peer_sink_node.get_compact()] = node2gid[node.get_compact()];
-          }
-          else {
+          } else {
             group_id_mapping[node2gid[node.get_compact()]]=node2gid[peer_sink_node.get_compact()];
           }
         }
