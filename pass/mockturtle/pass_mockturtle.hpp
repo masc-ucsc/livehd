@@ -58,6 +58,7 @@ protected:
   absl::flat_hash_map<std::pair<int, mockturtle::klut_network::node>, Node::Compact> gidMTnode2LGnode;
   absl::flat_hash_map<std::pair<int, mockturtle::klut_network::signal>, std::vector<std::pair<mockturtle::klut_network::node, Port_ID>>> gid_fanin2parent_pid;
   void lg_partition(LGraph *);
+  void dfs_populate_gid(Node, const int);
   void create_MIG_network(LGraph *);
   void convert_MIG_to_KLUT(LGraph *);
   void create_lutified_lgraph(LGraph *);
