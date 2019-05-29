@@ -49,6 +49,12 @@ struct Ntk_Sigs {
 struct comparator_input_signal {
   bool is_signed;
   std::vector<mockturtle::mig_network::signal> signals;
+  comparator_input_signal &operator=(const comparator_input_signal &obj) {
+    I(this != &obj); // Do not assign object to itself. works but wastefull
+    is_signed  = obj.is_signed;
+    signals = obj.signals;
+    return *this;
+  };
 };
 
 class Pass_mockturtle : public Pass {
@@ -74,6 +80,7 @@ protected:
   void split_input_signal(const std::vector<mockturtle::mig_network::signal> &, std::vector<std::vector<mockturtle::mig_network::signal>> &);
   void convert_signed_to_unsigned(const comparator_input_signal &, comparator_input_signal &, mockturtle::mig_network &);
   mockturtle::mig_network::signal calc_lt(const comparator_input_signal &, const comparator_input_signal &, mockturtle::mig_network &);
+  void match_bit_width_by_sign_extension(const comparator_input_signal &, const comparator_input_signal &, comparator_input_signal &, comparator_input_signal &, mockturtle::mig_network &);
 
   template<typename signal, typename Ntk>
   signal create_eq(const signal &x, const signal &y, Ntk &net) {
