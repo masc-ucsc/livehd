@@ -8,6 +8,7 @@
 class Main_api {
 protected:
   static std::string main_path;
+  inline static std::vector<Token> tlist;
 
 public:
   static void error(const std::string &msg) { Pass::eprp.parser_error(msg); }
@@ -25,7 +26,7 @@ public:
 
   static void setup(std::function<void(Eprp &)> fn) { fn(Pass::eprp); }
 
-  static void parse(const std::string &line) { Pass::eprp.parse("stdin", line); }
+  static void parse(const std::string &line) { Pass::eprp.parse("stdin", line, tlist); }
 
   static void get_commands(std::function<void(const std::string &, const std::string &)> fn) { Pass::eprp.get_commands(fn); };
 

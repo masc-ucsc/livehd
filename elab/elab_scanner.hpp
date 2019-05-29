@@ -273,7 +273,7 @@ public:
 
   void patch_pass(const absl::flat_hash_map<std::string, Token_id> &keywords);
 
-  void parse(std::string_view name, std::string_view str, bool chunking = false);
+  void parse(std::string_view name, std::string_view str, Token_list tlist, bool chunking = false);
 
   void dump_token() const;
 

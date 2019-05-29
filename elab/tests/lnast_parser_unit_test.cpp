@@ -27,6 +27,7 @@ class Lnast_test : public ::testing::Test, public Lnast_parser {
 public:
   Tree<tuple>  ast;
   Lnast_parser lnast_parser;
+  std::vector<Token> tlist;
 
   void SetUp() override {
     //root and statement
@@ -99,7 +100,7 @@ public:
           exit(-3);
       }
 
-      lnast_parser.parse(file_path, memblock, sb.st_size);
+      lnast_parser.parse(file_path, memblock, tlist, sb.st_size);
 
   }
 };
