@@ -38,10 +38,17 @@
 
 #define LUTIFIED_NETWORK_NAME_SIGNATURE "_lutified"
 
+//NOTE: In a vector of signals, the LSB signal is represented by index[0]
+//while the MSB signal is represented by index[size()-1]
 template<typename sig>
 struct Ntk_Sigs {
   unsigned int gid;
   std::vector<sig> signals;
+};
+
+struct comparator_input_signal {
+  bool is_signed;
+  std::vector<mockturtle::mig_network::signal> signals;
 };
 
 class Pass_mockturtle : public Pass {
@@ -65,6 +72,18 @@ protected:
   void setup_input_signal(const unsigned int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
   void setup_output_signal(const unsigned int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
   void split_input_signal(const std::vector<mockturtle::mig_network::signal> &, std::vector<std::vector<mockturtle::mig_network::signal>> &);
+  void convert_signed_to_unsigned(const comparator_input_signal &, comparator_input_signal &);
+  mockturtle::mig_network::signal calc_lt(const comparator_input_signal &, const comparator_input_signal &, mockturtle::mig_network &);
+
+  template<typename signal, typename Ntk>
+  signal create_eq(const signal &x, const signal &y, Ntk &net) {
+    signal not_x = net.create_not(x);
+    signal not_y = net.create_not(y);
+    signal x_and_y = net.create_and(x, y);
+    signal not_x_and_not_y = net.create_and(not_x, not_y);
+    signal is_x_y_equal = net.create_or(x_and_y, not_x_and_not_y);
+    return is_x_y_equal;
+  }
 
   bool eligable_cell_op(const Node_Type_Op &cell_op) {
     switch (cell_op) {
@@ -91,10 +110,10 @@ protected:
       case Equals_Op:
         //fmt::print("Node: Equals_Op\n");
         break;
-/*
       case LessThan_Op:
         //fmt::print("Node: LessThan_Op\n");
         break;
+/*
       case GreaterThan_Op:
         //fmt::print("Node: GreaterThan_Op\n");
         break;
