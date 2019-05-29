@@ -94,6 +94,8 @@ public:
 };
 
 class Eprp_test : public ::testing::Test {
+public:
+  std::vector<Token> tlist;
 protected:
   Eprp eprp;
   void SetUp() override {
@@ -129,6 +131,8 @@ protected:
 };
 
 class Eprp_files : public ::testing::Test {
+public:
+  std::vector<Token> tlist;
 protected:
   Eprp eprp;
   void SetUp() override {
@@ -142,23 +146,23 @@ protected:
 TEST_F(Eprp_files, ParseFiles) {
   const char *buffer =" test1.files2 match:\"nothing\" files:g3xx,./f1/f1.v,xotato/../bar.prp,potato/bar.v";
 
-  eprp.parse("parsefiles", buffer, strlen(buffer));
+  eprp.parse("parsefiles", buffer, tlist, strlen(buffer));
 }
 
 TEST_F(Eprp_test, SimpleReadlinePipe) {
   is_equal_called = false;
   const char *buffer =" test1.xyz.generate lgdb:./lgdb graph_name:chacha |> test1.fff.test     check2:chacha    check1:./lgdb   ";
 
-  eprp.parse("inline", buffer, strlen(buffer));
+  eprp.parse("inline", buffer, tlist, strlen(buffer));
 
   EXPECT_TRUE(is_equal_called);
   is_equal_called=false;
 
   buffer =" test1.pass graph_name:chacha check2:chacha  check1:./lgdb  lgdb:./lgdb test1_foo:field1 |> @a";
-  eprp.parse("inline", buffer, strlen(buffer));
+  eprp.parse("inline", buffer, tlist, strlen(buffer));
 
   buffer ="@a |> test1.fff.test";
-  eprp.parse("inline", buffer, strlen(buffer));
+  eprp.parse("inline", buffer, tlist, strlen(buffer));
   EXPECT_TRUE(is_equal_called);
 
 }

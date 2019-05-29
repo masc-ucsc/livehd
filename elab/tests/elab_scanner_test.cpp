@@ -55,5 +55,6 @@ int main(int argc, char **argv) {
 
   Test_scanner scanner;
 
-  scanner.parse(argv[1], memblock, sb.st_size);
+  std::vector<Token> tlist;
+  scanner.parse(argv[1], memblock, tlist, sb.st_size);
 }

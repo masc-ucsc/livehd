@@ -32,6 +32,7 @@ void Inou_liveparse::tolg(Eprp_var &var) {
   auto files     = var.get("files");
   auto path      = var.get("path");
   auto elab_path = var.get("elab_path");
+  std::vector<Token> tlist;
 
   if(files.empty()) {
     error("inou.liveparse: no files provided");
@@ -58,7 +59,7 @@ void Inou_liveparse::tolg(Eprp_var &var) {
 
     if(absl::EndsWith(f, ".v") || absl::EndsWith(f, ".sv")) {
       Chunkify_verilog chunker(path, elab_path);
-      chunker.parse(f, memblock, sb.st_size);
+      chunker.parse(f, memblock, tlist, sb.st_size);
     } else if(absl::EndsWith(f, ".prp")) {
       error(fmt::format("inou.liveparse pyrope chunkify NOT implemented for {}", f));
       close(fd);

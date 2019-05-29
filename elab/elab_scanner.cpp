@@ -151,10 +151,11 @@ void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, Token_id> &
   }
 }
 
-void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool chunking) {
+void Elab_scanner::parse(std::string_view name, std::string_view memblock, Token_list tlist, bool chunking) {
   buffer_name = name;
   buffer      = memblock;  // To allow error reporting before chunking
 
+  tlist.clear();
   token_list.clear();
   token_list.emplace_back();  // bogus zero entry
   scanner_pos = 1;            // Skip zero to catch bugs
@@ -292,7 +293,14 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, bool 
     scan_error("scanner reached end of file with a multi-line comment");
   }
 
-  chunked(ptr_section);
+  buffer = ptr_section;
+
+  elaborate();
+
+  tlist.swap(token_list);
+  token_list.clear();
+  token_list.emplace_back();
+  scanner_pos = 1;
 }
 
 Elab_scanner::Elab_scanner() {
@@ -303,16 +311,6 @@ Elab_scanner::Elab_scanner() {
   n_warnings   = 0;
 
   buffer = 0;  // just to be clean
-}
-
-void Elab_scanner::chunked(std::string_view _buffer) {
-  buffer = _buffer;
-
-  elaborate();
-
-  token_list.clear();
-  token_list.emplace_back();
-  scanner_pos = 1;
 }
 
 bool Elab_scanner::scan_next() {
