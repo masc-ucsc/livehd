@@ -167,9 +167,9 @@ CForward_edge_iterator Forward_edge_iterator::begin() {
 }
 
 void CBackward_edge_iterator::find_dce_nodes() {
-  Node_set  discovered;
-  Node_set  dc_visited;
-  Node_set  floating;
+  Node_set_type  discovered;
+  Node_set_type  dc_visited;
+  Node_set_type  floating;
 
   for (auto it : *frontier) {
     auto current = it.first;

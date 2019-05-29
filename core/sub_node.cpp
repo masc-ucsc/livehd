@@ -23,9 +23,9 @@ void Sub_node::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer)
     writer.Key("name");
     writer.String(pin.name.c_str());
 
-    if (pin.graph_io_pid!=Port_invalid) {
-      writer.Key("graph_io_pid");
-      writer.Uint(pin.graph_io_pid);
+    if (pin.graph_io_pos!=Port_invalid) {
+      writer.Key("graph_io_pos");
+      writer.Uint(pin.graph_io_pos);
     }
 
     writer.Key("dir");
@@ -77,8 +77,8 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
       I(false);
 
     Port_ID  pid = Port_invalid;
-    if (io_pin.HasMember("graph_io_pod")) {
-      pid = io_pin["graph_io_pid"].GetUint();
+    if (io_pin.HasMember("graph_io_pos")) {
+      pid = io_pin["graph_io_pos"].GetUint();
     }
 
     auto name = io_pin["name"].GetString();

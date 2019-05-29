@@ -4,32 +4,38 @@
 
 #include "mmap_map.hpp"
 
+namespace mmap_map {
 template <typename Key, typename T>
-class unordered_bimap {
+class bimap {
 public:
-  using iterator = idx2val::iterator;
-  using const_iterator = idx2val::const_iterator;
+  using Idx2val_type = typename mmap_map::map<Key,T>;
+  using Val2idx_type = typename mmap_map::map<T,Key>;
+  Idx2val_type idx2val;
+  Val2idx_type val2idx;
 
-	explicit unordered_bimap(std::string_view _map_name) {
+  using iterator       = typename Idx2val_type::iterator;
+  using const_iterator = typename Idx2val_type::const_iterator;
+
+	explicit bimap(std::string_view _map_name) {
   }
 
 	void clear() {
     idx2val.clear();
     val2idx.clear();
   }
-	const_iterator set(key_type&& key, T &&val) {
+	const_iterator set(Key&& key, T &&val) {
     val2idx.set(val,key);
 		return idx2val.set(key,val);
 	}
-	const_iterator set(const key_type& key, T &&val) {
+	const_iterator set(const Key& key, T &&val) {
     val2idx.set(val,key);
 		return idx2val.set(key,val);
 	}
-	const_iterator set(const key_type& key, const T &val) {
+	const_iterator set(const Key& key, const T &val) {
     val2idx.set(val,key);
 		return idx2val.set(key,val);
 	}
-	const_iterator set(key_type&& key, const T &val) {
+	const_iterator set(Key&& key, const T &val) {
     val2idx.set(val,key);
 		return idx2val.set(key,val);
 	}
@@ -86,4 +92,5 @@ public:
 
 };
 
+} // namespace mmap_map 
 

@@ -57,7 +57,7 @@ void random_lgraph_map(int max) {
 
   LGBench b("random_lgraph_map " + std::to_string(max));
 
-  mmap_map::unordered_map<uint32_t,uint32_t> map("use_map_bench_db");
+  mmap_map::map<uint32_t,uint32_t> map("use_map_bench_db");
   map.clear();
 
   for (int n = 1; n < 400; ++n) {

@@ -7,19 +7,12 @@ class Node;
 
 #include "lgedge.hpp"
 
-enum class Node_pin_mode {
-  Driver,
-  Sink,
-  Both
-};
-
 class Node_pin {
 protected:
   friend class LGraph;
   friend class LGraph_Node_Type;
   friend class XEdge;
   friend class Node;
-  friend class Node_set;
   friend class CFast_edge_iterator;
   friend class Edge_raw_iterator_base;
   friend class CForward_edge_iterator;
@@ -47,7 +40,6 @@ public:
     friend class Node;
     friend class Node_pin;
     friend class XEdge;
-    friend class Node_set;
     friend class CFast_edge_iterator;
     friend class Edge_raw_iterator_base;
     friend class CForward_edge_iterator;
@@ -80,6 +72,47 @@ public:
       return H::combine(std::move(h), s.hid, s.idx, s.sink);
     };
   };
+  class __attribute__((packed)) Compact_driver {
+  protected:
+    Hierarchy_id   hid;
+    uint32_t idx  : Index_bits;
+
+    friend class LGraph;
+    friend class LGraph_Node_Type;
+    friend class Node;
+    friend class Node_pin;
+    friend class XEdge;
+    friend class CFast_edge_iterator;
+    friend class Edge_raw_iterator_base;
+    friend class CForward_edge_iterator;
+    friend class CBackward_edge_iterator;
+  public:
+
+    //constexpr operator size_t() const { I(0); return idx|(sink<<31); }
+
+    Compact_driver(const Compact_driver &obj): hid(obj.hid), idx(obj.idx) { }
+    Compact_driver(Hierarchy_id _hid, Index_ID _idx) :hid(_hid), idx(_idx) { };
+    Compact_driver() :hid(0), idx(0) { };
+    Compact_driver &operator=(const Compact_driver &obj) {
+      I(this != &obj);
+      hid  = obj.hid;
+      idx  = obj.idx;
+
+      return *this;
+    };
+
+    constexpr bool is_invalid() const { return idx == 0; }
+
+    constexpr bool operator==(const Compact_driver &other) const {
+      return hid == other.hid && idx == other.idx;
+    }
+    constexpr bool operator!=(const Compact_driver &other) const { return !(*this == other); }
+
+    template <typename H>
+    friend H AbslHashValue(H h, const Compact_driver &s) {
+      return H::combine(std::move(h), s.hid, s.idx);
+    };
+  };
   class __attribute__((packed)) Compact_class {
   protected:
     uint32_t idx  : Index_bits;
@@ -90,7 +123,6 @@ public:
     friend class Node;
     friend class Node_pin;
     friend class XEdge;
-    friend class Node_set;
     friend class CFast_edge_iterator;
     friend class Edge_raw_iterator_base;
     friend class CForward_edge_iterator;
@@ -122,6 +154,45 @@ public:
       return H::combine(std::move(h), s.idx, s.sink);
     }
   };
+  class __attribute__((packed)) Compact_class_driver {
+  protected:
+    uint32_t idx  : Index_bits;
+
+    friend class LGraph;
+    friend class LGraph_Node_Type;
+    friend class Node;
+    friend class Node_pin;
+    friend class XEdge;
+    friend class CFast_edge_iterator;
+    friend class Edge_raw_iterator_base;
+    friend class CForward_edge_iterator;
+    friend class CBackward_edge_iterator;
+  public:
+
+    //constexpr operator size_t() const { I(0); return idx|(sink<<31); }
+
+    Compact_class_driver(const Compact_class_driver &obj): idx(obj.idx) { }
+    Compact_class_driver(Index_ID _idx) :idx(_idx) { }
+    Compact_class_driver():idx(0) { }
+    Compact_class_driver &operator=(const Compact_class_driver &obj) {
+      I(this != &obj);
+      idx  = obj.idx;
+
+      return *this;
+    }
+
+    constexpr bool is_invalid() const { return idx == 0; }
+
+    constexpr bool operator==(const Compact_class_driver &other) const {
+      return idx == other.idx;
+    }
+    constexpr bool operator!=(const Compact_class_driver &other) const { return !(*this == other); }
+
+    template <typename H>
+    friend H AbslHashValue(H h, const Compact_class_driver &s) {
+      return H::combine(std::move(h), s.idx);
+    }
+  };
 
   template <typename H>
   friend H AbslHashValue(H h, const Node_pin& s) {
@@ -130,28 +201,28 @@ public:
 
   Node_pin() : top_g(0), current_g(0), hid(0), idx(0), pid(0), sink(false) { }
   Node_pin(LGraph *_g, Compact comp);
-  Node_pin(LGraph *_g, Hierarchy_id _hid, Compact_class comp);
+  Node_pin(LGraph *_g, Compact_driver comp);
+  //Node_pin(LGraph *_g, Hierarchy_id _hid, Compact_class comp);
   Node_pin(LGraph *_g, Compact_class comp);
+  Node_pin(LGraph *_g, Compact_class_driver comp);
 
   Compact get_compact() const {
     return Compact(hid,idx,sink);
+  }
+
+  Compact_driver get_compact_driver() const {
+    I(!sink);
+    return Compact_driver(hid,idx);
   }
 
   Compact_class get_compact_class() const {
     return Compact_class(idx,sink);
   }
 
-  Compact_class get_compact_class(Node_pin_mode mode) const {
-		if (mode==Node_pin_mode::Both)
-			return Compact_class(idx,sink);
-		return Compact_class(idx,false);
-  };
-
-  Compact get_compact(Node_pin_mode mode) const {
-		if (mode==Node_pin_mode::Both)
-			return Compact(hid, idx,sink);
-		return Compact(hid, idx,false);
-  };
+  Compact_class_driver get_compact_class_driver() const {
+    I(!sink); // Only driver pin allowed
+    return Compact_class_driver(idx);
+  }
 
   LGraph       *get_top_lgraph() const { return top_g; };
   LGraph       *get_class_lgraph() const { return current_g; };
@@ -208,7 +279,7 @@ public:
   // BEGIN ATTRIBUTE ACCESSORS
   std::string      debug_name() const;
 
-  std::string_view set_name(std::string_view wname);
+  void set_name(std::string_view wname);
   std::string_view create_name() const;
   std::string_view get_name() const;
   bool has_name() const;

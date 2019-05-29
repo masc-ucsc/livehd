@@ -4,18 +4,22 @@
 #include "dense.hpp"
 #include "mmap_map.hpp"
 
+#include "node.hpp"
 #include "lgraphbase.hpp"
 #include "node_type_base.hpp"
 #include "sub_node.hpp"
-#include "lgset.hpp"
+
+using Node_sview_map = mmap_map::map<std::string_view, Node::Compact_class>;
+using Node_value_map = mmap_map::map<uint32_t, Node::Compact_class>;
+using Node_sub_map   = mmap_map::map<Node::Compact_class, Lg_type_id>;
 
 class LGraph_Node_Type : virtual public LGraph_Base {
 protected:
-  mmap_map::unordered_map<std::string_view, bool> const_sview;
   Dense<Node_Type_Op>  node_type_table;
 
-  Node_set             const_nodes;      // FIXME: migrate to structure in node_intenral (otherwise, big meory as more nodes...
-  Node_set             sub_nodes;
+  Node_sview_map   const_sview;
+  Node_value_map   const_value;
+  Node_sub_map     sub_nodes;
 
   void clear();
   void reload();
@@ -39,8 +43,8 @@ protected:
   void             set_type_const_sview(Index_ID nid, std::string_view value);
   void             set_type_const_value(Index_ID nid, uint32_t value);
 
-  Index_ID         find_type_const_sview(std::string_view value) const;
-  Index_ID         find_type_const_value(uint32_t value) const;
+  Node             find_type_const_sview(std::string_view value) const;
+  Node             find_type_const_value(uint32_t value) const;
 
   std::string_view get_type_const_sview(Index_ID nid) const;
   uint32_t         get_type_const_value(Index_ID nid) const;
@@ -52,7 +56,8 @@ public:
   explicit LGraph_Node_Type(std::string_view path, std::string_view name, Lg_type_id lgid) noexcept;
   virtual ~LGraph_Node_Type(){};
 
-  const Node_set &get_const_node_ids() const { return const_nodes; };
-  const Node_set &get_sub_ids() const  { return sub_nodes; };
+  const Node_sview_map &get_const_sview_map() const { return const_sview; };
+  const Node_value_map &get_const_value_map() const { return const_value; };
+  const Node_sub_map   &get_sub_nodes_map()   const { return sub_nodes; };
 };
 

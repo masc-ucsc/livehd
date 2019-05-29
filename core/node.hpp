@@ -24,7 +24,6 @@ protected:
   friend class LGraph_Node_Type;
   friend class Node_pin;
   friend class XEdge;
-  friend class Node_set;
   friend class CFast_edge_iterator;
   friend class Edge_raw_iterator_base;
   friend class CForward_edge_iterator;
@@ -32,11 +31,11 @@ protected:
 
   Index_ID get_nid() const { return nid; }
 
-  Node(LGraph *_g, LGraph *_c_g, Index_ID _nid, Hierarchy_id _hid);
+  Node(LGraph *_g, LGraph *_c_g, Hierarchy_id _hid, Index_ID _nid);
 
 public:
-  static constexpr char Hardcoded_input_nid  = 1;
-  static constexpr char Hardcoded_output_nid = 2;
+  static constexpr Index_ID Hardcoded_input_nid  = 1;
+  static constexpr Index_ID Hardcoded_output_nid = 2;
 
   class __attribute__((packed)) Compact {
   protected:
@@ -48,13 +47,13 @@ public:
     friend class Node;
     friend class Node_pin;
     friend class XEdge;
-    friend class Node_set;
     friend class CFast_edge_iterator;
     friend class Edge_raw_iterator_base;
     friend class CForward_edge_iterator;
     friend class CBackward_edge_iterator;
     friend class Forward_edge_iterator;
     friend class Backward_edge_iterator;
+    friend class mmap_map::hash<Node::Compact>;
   public:
 
     //constexpr operator size_t() const { I(0); return nid; }
@@ -91,11 +90,13 @@ public:
     friend class Node;
     friend class Node_pin;
     friend class XEdge;
-    friend class Node_set;
     friend class CFast_edge_iterator;
     friend class Edge_raw_iterator_base;
     friend class CForward_edge_iterator;
     friend class CBackward_edge_iterator;
+    friend class Forward_edge_iterator;
+    friend class Backward_edge_iterator;
+    friend class mmap_map::hash<Node::Compact_class>;
   public:
 
     // constexpr operator size_t() const { return nid; }
@@ -228,4 +229,22 @@ public:
 
   // END ATTRIBUTE ACCESSORS
 };
+
+namespace mmap_map {
+template <>
+struct hash<Node::Compact> {
+  size_t operator()(Node::Compact const &o) const {
+    uint64_t h = o.nid;
+    h = (h<<12) ^ o.hid ^ o.nid;
+    return hash<uint64_t>{}(h);
+  }
+};
+
+template <>
+struct hash<Node::Compact_class> {
+  size_t operator()(Node::Compact_class const &o) const {
+    return hash<uint32_t>{}(o.nid);
+  }
+};
+}
 

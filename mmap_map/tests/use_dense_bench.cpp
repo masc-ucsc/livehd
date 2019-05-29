@@ -77,7 +77,7 @@ void use_lgraph_map(int max) {
 
   LGBench b("mmap_map " + std::to_string(max));
 
-  mmap_map::unordered_map<uint32_t,uint32_t> map; // Annonymous (no file backup)
+  mmap_map::map<uint32_t,uint32_t> map; // Annonymous (no file backup)
   map.clear();
 
   for (int n = 1; n < NITERS; ++n) {

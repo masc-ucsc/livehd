@@ -91,11 +91,11 @@ void Lgyosys_dump::create_blackbox(LGraph *subgraph, RTLIL::Design *design) {
   design->add(mod);
 
   uint32_t port_id = 0;
-  subgraph->each_graph_io([&port_id,mod,this](Node_pin &pin) {
+  subgraph->each_sorted_graph_io([&port_id,mod,this](Node_pin &pin, Port_ID pos) {
     std::string name = absl::StrCat("\\", pin.get_name());
     RTLIL::Wire *wire = mod->addWire(name, pin.get_bits());
     wire->port_id     = port_id++;
-    assert(pin.get_pid() == port_id);
+    assert(pin.pos == port_id);
     if(pin.is_graph_output()) {
       wire->port_input  = false;
       wire->port_output = true;
@@ -276,9 +276,9 @@ void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
   // first create all the output wires
 
   uint32_t port_id = 0;
-  g->each_graph_io([&port_id,module,this](Node_pin &pin) {
+  g->each_sorted_graph_io([&port_id,module,this](Node_pin &pin, Port_ID pos) {
     port_id++;
-    assert(port_id == pin.get_pid());
+    assert(port_id == pos);
     if(pin.is_graph_output()) {
       output_map[pin.get_compact()] = create_io_wire(pin, module);
       output_map[pin.get_compact()]->port_input  = false;

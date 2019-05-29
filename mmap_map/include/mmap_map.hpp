@@ -279,7 +279,7 @@ struct pair {
 };
 
 // A thin wrapper around std::hash, performing a single multiplication to (hopefully) get nicely
-// randomized upper bits, which are used by the unordered_map.
+// randomized upper bits, which are used by the mmap_map.
 template <typename T>
 struct hash : public std::hash<T> {
 	size_t operator()(T const& obj) const {
@@ -406,7 +406,7 @@ namespace detail {
 
 // A highly optimized hashmap implementation, using the Robin Hood algorithm.
 //
-// In most cases, this map should be usable as a drop-in replacement for std::unordered_map, but be
+// In most cases, this map should be usable as a drop-in replacement for std::mmap_map, but be
 // about 2x faster in most cases and require much less allocations.
 //
 // This implementation uses the following memory layout:
@@ -432,7 +432,7 @@ namespace detail {
 // to the front.
 // https://www.reddit.com/r/cpp/comments/ahp6iu/compile_time_binary_size_reductions_and_cs_future/eeguck4/
 template <size_t MaxLoadFactor100, typename Key, typename T, typename Hash>
-class unordered_map
+class map
 : public Hash {
 public:
 	using key_type    = Key;
@@ -441,7 +441,7 @@ public:
                                     ,typename std::conditional<std::is_same<T  , std::string_view>::value, uint32_t, T  >::type>;
 	using size_type   = size_t;
 	using hasher      = Hash;
-	using Self        = unordered_map<MaxLoadFactor100, key_type, T, hasher>;
+	using Self        = map<MaxLoadFactor100, key_type, T, hasher>;
 
 private:
 	static_assert(!std::is_same<Key, std::string>::value     ,"mmap_map uses string_view as key (not slow std::string)\n");
@@ -616,7 +616,7 @@ private:
 #endif
 				}
 
-				friend class unordered_map<MaxLoadFactor100, key_type, T, hasher>;
+				friend class map<MaxLoadFactor100, key_type, T, hasher>;
 				NodePtr mKeyVals;
 				uint8_t const* mInfo;
 		};
@@ -830,7 +830,7 @@ private:
 
 		setup_mmap(0);
 
-		gc_queue.push(std::bind(&unordered_map<MaxLoadFactor100, Key, T, Hash>::garbage_collect, this));
+		gc_queue.push(std::bind(&map<MaxLoadFactor100, Key, T, Hash>::garbage_collect, this));
 
 		loaded = true;
 	}
@@ -1044,24 +1044,24 @@ public:
 	using iterator = Iter<false>;
 	using const_iterator = Iter<true>;
 
-	explicit unordered_map(std::string_view _map_name)
+	explicit map(std::string_view _map_name)
 		: Hash{Hash{}}
 	  , mmap_name{_map_name} {
 
     setup_pointers();
 	}
 
-	explicit unordered_map()
+	explicit map()
 		: Hash{Hash{}} {
 
     setup_pointers();
 	}
 
-	unordered_map(unordered_map&& o) = delete;
-	unordered_map& operator=(unordered_map&& o) = delete;
-	unordered_map(const unordered_map& o) = delete;
-	unordered_map& operator=(unordered_map const& o) = delete;
-	void swap(unordered_map& o) = delete;
+	map(map&& o) = delete;
+	map& operator=(map&& o) = delete;
+	map(const map& o) = delete;
+	map& operator=(map const& o) = delete;
+	void swap(map& o) = delete;
 
 	// Clears all data, without resizing.
 	void clear() {
@@ -1092,7 +1092,7 @@ public:
 	}
 
 	// Destroys the map and all it's contents.
-	~unordered_map() {
+	virtual ~map() {
 		destroy();
 	}
 
@@ -1543,7 +1543,7 @@ private:
 				while (info == mInfo[idx]) {
 					if (equals(keyval.getFirst(), mKeyVals[idx].getFirst())) {
 						// key already exists, do NOT insert.
-						// see http://en.cppreference.com/w/cpp/container/unordered_map/insert
+						// see http://en.cppreference.com/w/cpp/container/map/insert
 						return std::make_pair<iterator, bool>(iterator(mKeyVals + idx, mInfo + idx),
 								false);
 					}
@@ -1695,7 +1695,7 @@ private:
 } // namespace detail
 
 template <typename Key, typename T, typename Hash = hash<Key>, size_t MaxLoadFactor100 = 80>
-using unordered_map = detail::unordered_map<MaxLoadFactor100, Key, T, Hash>;
+using map = detail::map<MaxLoadFactor100, Key, T, Hash>;
 
 
 } // namespace mmap_map

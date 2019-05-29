@@ -3,7 +3,6 @@
 
 #include "pass.hpp"
 
-#include "lgset.hpp"
 #include "lgraph.hpp"
 #include "lgedge.hpp"
 
@@ -84,6 +83,7 @@ public:
 };
 
 using Frontier_type = absl::flat_hash_map<Node::Compact, int32_t>;
+using Node_set_type = absl::flat_hash_set<Node::Compact>;
 
 class Edge_raw_iterator_base {
 protected:
@@ -92,11 +92,11 @@ protected:
   Index_ID       nid;
 
   Frontier_type *frontier;  // 2G inputs at most
-  Node_set      *pending;   // vertex that cleared the frontier
+  Node_set_type *pending;   // vertex that cleared the frontier
   Index_ID      *hardcoded_nid;
 
 public:
-  Edge_raw_iterator_base(LGraph *_g, Hierarchy_id _hid, Index_ID _nid, Frontier_type *_frontier, Node_set *_pending, Index_ID *_hardcoded_nid)
+  Edge_raw_iterator_base(LGraph *_g, Hierarchy_id _hid, Index_ID _nid, Frontier_type *_frontier, Node_set_type *_pending, Index_ID *_hardcoded_nid)
       : top_g(_g), hid(_hid), nid(_nid), frontier(_frontier), pending(_pending), hardcoded_nid(_hardcoded_nid) {}
 
   virtual void    set_current_node_as_visited() = 0;
@@ -130,7 +130,7 @@ public:
 
 class CForward_edge_iterator : public Edge_raw_iterator_base {
 public:
-  CForward_edge_iterator(LGraph *_g, Hierarchy_id _hid, Index_ID _nid, Frontier_type *_frontier, Node_set *_pending, Index_ID *_hardcoded_nid)
+  CForward_edge_iterator(LGraph *_g, Hierarchy_id _hid, Index_ID _nid, Frontier_type *_frontier, Node_set_type *_pending, Index_ID *_hardcoded_nid)
       : Edge_raw_iterator_base(_g, _hid, _nid, _frontier, _pending, _hardcoded_nid) {}
 
   bool operator!=(const CForward_edge_iterator &other) {
@@ -159,7 +159,7 @@ private:
 protected:
   LGraph        *top_g;
   Frontier_type  frontier;  // 2G inputs at most
-  Node_set       pending;   // vertex that cleared the frontier
+  Node_set_type  pending;   // vertex that cleared the frontier
   Index_ID       hardcoded_nid;
 
 public:
@@ -174,10 +174,10 @@ public:
 
 class CBackward_edge_iterator : public Edge_raw_iterator_base {
 private:
-  Node_set back_iter_global_visited;
+  Node_set_type back_iter_global_visited;
 
 public:
-  CBackward_edge_iterator(LGraph *_g, Hierarchy_id _hid, Index_ID _nid, Frontier_type *_frontier, Node_set *_pending, Index_ID *_hardcoded_nid)
+  CBackward_edge_iterator(LGraph *_g, Hierarchy_id _hid, Index_ID _nid, Frontier_type *_frontier, Node_set_type *_pending, Index_ID *_hardcoded_nid)
     : Edge_raw_iterator_base(_g, _hid, _nid, _frontier, _pending, _hardcoded_nid) {
   }
 
@@ -198,7 +198,7 @@ public:
   CBackward_edge_iterator operator++() {
     I(nid);  // Do not call ++ after end
     CBackward_edge_iterator i(top_g, hid, nid, frontier, pending, hardcoded_nid);
-    back_iter_global_visited.set(Node::Compact(hid, nid));
+    back_iter_global_visited.insert(Node::Compact(hid, nid));
     set_current_node_as_visited();
     if (pending->empty()) {
       find_dce_nodes();
@@ -215,7 +215,7 @@ private:
 protected:
   LGraph        *top_g;
   Frontier_type  frontier;  // 2G inputs at most
-  Node_set       pending;   // vertex that cleared the frontier
+  Node_set_type  pending;   // vertex that cleared the frontier
   Index_ID       hardcoded_nid;
 
 public:

@@ -31,9 +31,10 @@ void XEdge::del_edge() {
 }
 
 void XEdge::add_edge() {
-  driver.get_lgraph()->add_edge(driver,sink);
+  driver.get_class_lgraph()->add_edge(driver, sink);
 }
 
 void XEdge::add_edge(uint16_t bits) {
-  driver.get_lgraph()->add_edge(driver,sink,bits);
+  driver.get_class_lgraph()->add_edge(driver, sink, bits);
 }
+

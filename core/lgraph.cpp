@@ -88,6 +88,15 @@ void LGraph::clear() {
   LGraph_Base::clear();  // last. Removes lock at the end
 
   Ann_support::clear(this);
+
+  auto nid1 = create_node_int();
+  auto nid2 = create_node_int();
+
+  I(nid1 == Node::Hardcoded_input_nid);
+  I(nid2 == Node::Hardcoded_output_nid);
+
+  set_type(nid1, GraphIO_Op);
+  set_type(nid2, GraphIO_Op);
 }
 
 void LGraph::sync() {
@@ -124,33 +133,57 @@ Node_pin LGraph::get_graph_output_driver(std::string_view str) {
 }
 
 bool LGraph::is_graph_input(std::string_view name) const {
-  if (!get_self_sub_node().has_pin(name))
+#ifndef NDEBUG
+  bool alt_input = Ann_node_pin_name::ref(this)->has_key(name);
+  if (alt_input) {
+    auto dpin = Node_pin(this, Ann_node_pin_name::ref(this)->get_val(name));
+    alt_input = dpin.get_node().get_nid() == Node::Hardcoded_input_nid;
+  }
+#endif
+  if (!get_self_sub_node().has_pin(name)) {
+    I(!alt_input);
     return false;
+  }
 
   const auto &io_pin = get_self_sub_node().get_pin(name);
+  I(alt_input == (io_pin.dir == Sub_node::Direction::Input));
   return io_pin.dir == Sub_node::Direction::Input;
 }
 
 bool LGraph::is_graph_output(std::string_view name) const {
-  if (!get_self_sub_node().has_pin(name))
+#ifndef NDEBUG
+  bool alt_output = Ann_node_pin_name::ref(this)->has_key(name);
+  if (alt_output) {
+    auto dpin = Node_pin(this, Ann_node_pin_name::ref(this)->get_val(name));
+    alt_output = dpin.get_node().get_nid() == Node::Hardcoded_output_nid;
+  }
+#endif
+
+  if (!get_self_sub_node().has_pin(name)) {
+    I(!alt_output);
     return false;
+  }
 
   const auto &io_pin = get_self_sub_node().get_pin(name);
+  I(alt_output == (io_pin.dir == Sub_node::Direction::Output));
   return io_pin.dir == Sub_node::Direction::Output;
 }
 
 Node_pin LGraph::add_graph_input(std::string_view str, uint16_t pos) {
   I(!is_graph_output(str));
 
-  auto nid = create_node_int();
-  set_type(nid, GraphIO_Op);
+  Port_ID inst_pid;
+  if (get_self_sub_node().has_pin(str)) {
+    // reset pin stats
+    inst_pid = get_self_sub_node().map_graph_pos(pos);
+  }else{
+    inst_pid = get_self_sub_node().add_pin(str, Sub_node::Direction::Input, pos);
+  }
+  I(node_type_table[Node::Hardcoded_input_nid] == GraphIO_Op);
 
-  auto idx = setup_idx_from_pid(nid, pos);
-
-  get_self_sub_node().add_pin(str, Sub_node::Direction::Input, idx, pos);
-
-  setup_driver(idx);
-  Node_pin pin(this, 0, idx, pos, false);
+  auto idx = setup_idx_from_pid(Node::Hardcoded_input_nid, inst_pid);
+  setup_driver(idx); // Just driver, no sink
+  Node_pin pin(this, 0, idx, inst_pid, false);
 
   pin.set_name(str);
 
@@ -160,16 +193,20 @@ Node_pin LGraph::add_graph_input(std::string_view str, uint16_t pos) {
 Node_pin LGraph::add_graph_output(std::string_view str, uint16_t pos) {
   I(!is_graph_input(str));
 
-  auto nid = create_node_int();
-  set_type(nid, GraphIO_Op);
-  auto idx = setup_idx_from_pid(nid, pos);
+  Port_ID inst_pid;
+  if (get_self_sub_node().has_pin(str)) {
+    // reset pin stats
+    inst_pid = get_self_sub_node().map_graph_pos(pos);
+  }else{
+    inst_pid = get_self_sub_node().add_pin(str, Sub_node::Direction::Output, pos);
+  }
+  I(node_type_table[Node::Hardcoded_output_nid] == GraphIO_Op);
 
+  auto idx = setup_idx_from_pid(Node::Hardcoded_output_nid, inst_pid);
   setup_sink(idx);
-  setup_driver(idx);
-  get_self_sub_node().add_pin(str, Sub_node::Direction::Output, idx, pos);
+  setup_driver(idx); // outputs can also drive internal nodes. So both sink/driver
 
-  Node_pin pin(this, 0, idx, pos, false);
-
+  Node_pin pin(this, 0, idx, inst_pid, false);
   pin.set_name(str);
 
   return pin;
@@ -340,10 +377,10 @@ const LGraph *LGraph::find_sub_lgraph(Hierarchy_id hid) const {
     return this;
 
   auto hid_bits = get_hid_bits();
-  auto level_0_sub_nid = hid & ((1<<hid_bits)-1);
+  Index_ID level_0_sub_nid = hid & ((1<<hid_bits)-1);
   auto level_n_sub_hid = hid >> hid_bits;
 
-  I(sub_nodes.find(level_0_sub_nid) != sub_nodes.end());
+  I(sub_nodes.find(Node::Compact_class(level_0_sub_nid)) != sub_nodes.end());
   I(is_sub_node(0,level_0_sub_nid));
 
   auto sub_lgid = get_type_sub(level_0_sub_nid);
@@ -392,11 +429,12 @@ Node LGraph::create_node_const(uint32_t value, uint16_t bits) {
 
 Node LGraph::create_node_const(std::string_view value) {
 
-  Index_ID nid = find_type_const_sview(value);
-  if (nid==0) {
-    nid = create_node_int();
-    set_type_const_sview(nid, value);
-  }
+  auto node = find_type_const_sview(value);
+  if (likely(!node.is_invalid()))
+    return node;
+
+  auto nid = create_node_int();
+  set_type_const_sview(nid, value);
 
   return Node(this,0,nid);
 }
@@ -425,12 +463,14 @@ Sub_node &LGraph::get_self_sub_node() const {
 }
 
 Node LGraph::create_node_const(std::string_view value, uint16_t bits) {
-  Index_ID nid = find_type_const_sview(value);
-  if (nid==0 || node_internal[nid].get_bits() != bits) {
-    nid = create_node_int();
-    set_type_const_sview(nid, value);
-    set_bits(nid,bits);
-  }
+  auto node find_type_const_sview(value);
+
+  if (likely(!node.is_invalid() && node_internal[node.get_nid()].get_bits() == bits))
+    return node;
+
+  auto nid = create_node_int();
+  set_type_const_sview(nid, value);
+  set_bits(nid,bits);
 
   I(node_internal[nid].get_dst_pid()==0);
   I(node_internal[nid].is_master_root());

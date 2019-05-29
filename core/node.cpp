@@ -38,7 +38,7 @@ Node::Node(LGraph *_g, Compact_class comp)
   I(current_g->is_valid_node(nid));
 }
 
-Node(LGraph *_g, LGraph *_c_g, Hierarchy_id _hid, Index_ID _nid)
+Node::Node(LGraph *_g, LGraph *_c_g, Hierarchy_id _hid, Index_ID _nid)
   :top_g(_g)
   ,current_g(_c_g)
   ,hid(_hid)

@@ -113,33 +113,28 @@ protected:
   bool del_edge(const Node_pin &src, const Node_pin &dst) {
     I(node_internal.size()>src.get_idx());
     I(node_internal.size()>dst.get_idx());
-    assert(node_internal[src.get_idx()].is_root());
-    assert(node_internal[dst.get_idx()].is_root());
+    I(node_internal[src.get_idx()].is_root());
+    I(node_internal[dst.get_idx()].is_root());
 
     return node_internal[src.get_idx()].del(dst.get_idx(),dst.get_pid(),dst.is_input());
   }
 
   bool is_graph_io(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
-    return node_type_table[idx] == GraphIO_Op;
+    auto nid = node_internal[idx].get_nid();
+    return nid == Node::Hardcoded_input_nid || nid == Node::Hardcoded_output_nid;
   }
 
   bool is_graph_input(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
-    if (node_type_table[idx] != GraphIO_Op)
-      return false;
-
-    auto pid = node_internal[idx].get_dst_pid();
-    return get_self_sub_node().is_input_from_graph_pid(pid);
+    auto nid = node_internal[idx].get_nid();
+    return nid == Node::Hardcoded_input_nid;
   }
 
   bool is_graph_output(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
-    if (node_type_table[idx] != GraphIO_Op)
-      return false;
-
-    auto pid = node_internal[idx].get_dst_pid();
-    return get_self_sub_node().is_output_from_graph_pid(pid);
+    auto nid = node_internal[idx].get_nid();
+    return nid == Node::Hardcoded_output_nid;
   }
 
   Index_ID fast_next(Index_ID nid) const {
@@ -176,8 +171,8 @@ protected:
 
     bool it_is_sub = sub_g->is_sub(nid);
 
-    GI( it_is_sub, sub_g->sub_nodes.find(Node::Compact(hid, nid)) != sub_g->sub_nodes.end());
-    GI(!it_is_sub, sub_g->sub_nodes.find(Node::Compact(hid, nid)) == sub_g->sub_nodes.end());
+    GI( it_is_sub, sub_g->sub_nodes.find(Node::Compact_class(nid)) != sub_g->sub_nodes.end());
+    GI(!it_is_sub, sub_g->sub_nodes.find(Node::Compact_class(nid)) == sub_g->sub_nodes.end());
 
     return it_is_sub;
   }
@@ -254,12 +249,12 @@ public:
   // Iterators defined in the lgraph_each.cpp
 
   // FIXME: Use Instance.each_graph_*
-  void each_graph_io(std::function<void(Node_pin &pin)> f1);
-  void each_graph_input(std::function<void(Node_pin &pin)> f1);
-  void each_graph_output(std::function<void(Node_pin &pin)> f1);
+  void each_sorted_graph_io(std::function<void(const Node_pin &pin, Port_ID pos)> f1);
+  void each_graph_input(std::function<void(const Node_pin &pin)> f1);
+  void each_graph_output(std::function<void(const Node_pin &pin)> f1);
 
   // FIXME: Use Instance.each_graph_*
-  void each_node_fast(std::function<void(Node &node)> f1);
+  void each_node_fast(std::function<void(const Node &node)> f1);
 
   // FIXME: Use Instance.each_graph_*
   void each_output_edge_fast(std::function<void(XEdge &edge)> f1);

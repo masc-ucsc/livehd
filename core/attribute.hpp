@@ -2,16 +2,12 @@
 
 #pragma once
 
-#include "attribute.hpp"
+#include "mmap_map.hpp"
+#include "mmap_bimap.hpp"
 #include "lgraph.hpp"
 
-template<const char *Name, typename Base, typename Key, typename Data, Node_pin_mode Mode=Node_pin_mode::Both>
-class Attribute_data {
-
-HERE: Choose compact/compact_class if Hierarchy or no Huerarchy in template
-
-  using Attr_data = Attr_data_raw<Key::Compact, Data>;
-  using Attr_data = Attr_data_raw<Key::Compact_class, Data>;
+template<const char *Name, typename Base, typename Attr_data>
+class Attribute {
 
   inline static std::vector<Attr_data *> table;
   inline static LGraph    *last_lg   = nullptr;
@@ -19,22 +15,15 @@ HERE: Choose compact/compact_class if Hierarchy or no Huerarchy in template
 
   static std::string_view get_base() {
     if constexpr (std::is_same<Base, Node>::value) {
-      return "lgraph_data_node";
+      return "lg_data_node";
     }else if constexpr (std::is_same<Base, Node_pin>::value) {
-      return "lgraph_data_npin";
+      return "lg_data_npin";
     }
     return "bogus";
   }
 
   static std::string get_filename(Lg_type_id lgid) {
-    if constexpr (Mode == Node_pin_mode::Driver)
-      return absl::StrCat(get_base(), std::to_string(lgid), Name, "_d");
-    else if constexpr (Mode == Node_pin_mode::Sink)
-      return absl::StrCat(get_base(), std::to_string(lgid), Name, "_s");
-    else if constexpr (Mode == Node_pin_mode::Both)
-      return absl::StrCat(get_base(), std::to_string(lgid), Name);
-    I(false);
-    return "lgraph_bogus";
+    return absl::StrCat(get_base(), std::to_string(lgid), Name);
   };
 
   static bool is_invalid(size_t pos) {
@@ -56,20 +45,9 @@ HERE: Choose compact/compact_class if Hierarchy or no Huerarchy in template
     table[pos] = last_attr;
   };
 
-  static_assert(std::is_same<Key, Node_pin::Compact>::value
-      || std::is_same<Key, Node_pin::Compact_class>::value
-      || std::is_same<Key, Node::Compact>::value
-      || std::is_same<Key, Node::Compact_class>::value
-      ,"Key should be Node_pin::Compact or Node_pin::Compact_class or Node::Compact or Node::Compact_class");
-
   static_assert(std::is_same<Base, Node_pin>::value
       || std::is_same<Base, Node>::value
       ,"Base should be Node or Node_pin");
-
-  static_assert(
-    (std::is_same<Base, Node_pin>::value == (std::is_same<Key, Node_pin::Compact>::value || std::is_same<Key, Node_pin::Compact_class>::value))
-    || (std::is_same<Base, Node>::value == (std::is_same<Key, Node::Compact>::value || std::is_same<Key, Node::Compact_class>::value))
-    ,"Base and Key should be from the same group. E.g: Node_pin and Node_pin::Compact");
 
 public:
   static Attr_data *ref(const Base &obj) {
@@ -77,7 +55,7 @@ public:
       setup_table(obj.get_top_lgraph());
     return last_attr;
   }
-  static Attr_data *ref(const LGraph *lg) {
+  static Attr_data *ref(LGraph *lg) {
     if (unlikely(lg!=last_lg))
       setup_table(lg);
     return last_attr;

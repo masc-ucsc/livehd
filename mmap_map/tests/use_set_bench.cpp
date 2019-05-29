@@ -165,7 +165,7 @@ void random_lgraph_set(int max) {
 
   LGBench b("random_lgraph_set");
 
-  mmap_map::unordered_map<uint32_t,bool> map("use_set_bench_db");
+  mmap_map::map<uint32_t,bool> map("use_set_bench_db");
 
   for (int n = 1; n < BENCH_OUT_SIZE; ++n) {
     for (int i = 0; i < BENCH_INN_SIZE; ++i) {
