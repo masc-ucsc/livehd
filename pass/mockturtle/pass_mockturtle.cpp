@@ -169,8 +169,8 @@ void Pass_mockturtle::convert_signed_to_unsigned(const comparator_input_signal &
 mockturtle::mig_network::signal Pass_mockturtle::calc_lt(const comparator_input_signal &l_op, const comparator_input_signal &r_op, mockturtle::mig_network &mig) {
   I(l_op.signals.size() == r_op.signals.size());
   comparator_input_signal left_op, right_op;
-  convert_signed_to_unsigned(l_op, left_op);
-  convert_signed_to_unsigned(r_op, right_op);
+  convert_signed_to_unsigned(l_op, left_op, mig);
+  convert_signed_to_unsigned(r_op, right_op, mig);
   I(left_op.signals.size() == right_op.signals.size());
   I(left_op.is_signed == false && right_op.is_signed == false);
   const auto bit_width = left_op.signals.size();
