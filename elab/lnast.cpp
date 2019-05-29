@@ -4,7 +4,7 @@
 //------------- Language_neutral_ast member function start -----
 Language_neutral_ast::Language_neutral_ast(std::string_view _buffer, Lnast_ntype_id ntype_top) : buffer(_buffer) {
   I(!buffer.empty());
-  set_root(Lnast_node(ntype_top, 0, 0));
+  set_root(Lnast_node(ntype_top, Token(), 0));
 }
 
 
@@ -17,18 +17,18 @@ void Lnast_parser::elaborate(){
 
 
 void Lnast_parser::build_statements(Scope_id scope){
-  auto tree_idx_sts  = lnast->add_child(lnast->get_root(), Lnast_node(Lnast_ntype_statement, scan_token(), scope));
+  auto tree_idx_sts  = lnast->add_child(lnast->get_root(), Lnast_node(Lnast_ntype_statement, scan_get_token(), scope));
   add_statement(tree_idx_sts, scope);
 }
 
 void Lnast_parser::add_statement(const Tree_index &tree_idx_sts, Scope_id cur_scope) {
   fmt::print("line:{}, statement:{}\n", line_num, scan_text());
 
-  Token_entry    node_name;
+  Token          node_token;
   Lnast_ntype_id node_type = Lnast_ntype_invalid;
+  Scope_id       token_scope = cur_scope;
   Token_entry    cfg_token_beg;
   Token_entry    cfg_token_end;
-  Scope_id       token_scope = cur_scope;
 
   int line_tkcnt = 1;
   while(line_num == scan_calc_lineno()){
@@ -36,7 +36,7 @@ void Lnast_parser::add_statement(const Tree_index &tree_idx_sts, Scope_id cur_sc
 
     switch (line_tkcnt) {
       case CFG_NODE_NAME_POS:
-        node_name = scan_token();  //must be a complete alnum
+        node_token = scan_get_token();  //must be a complete alnum
         break;
       case CFG_SCOPE_ID_POS:
         token_scope = process_scope(cur_scope); //recursive build sub-graph
@@ -49,7 +49,7 @@ void Lnast_parser::add_statement(const Tree_index &tree_idx_sts, Scope_id cur_sc
         break;
       case CFG_OP_POS_BEG: { //no regular pattern, start to do scan_next() internally case by case
         operator_analysis(node_type, line_tkcnt);
-        auto tree_idx_op = lnast->add_child(tree_idx_sts, Lnast_node(node_type, node_name, cur_scope));
+        auto tree_idx_op = lnast->add_child(tree_idx_sts, Lnast_node(node_type, node_token, cur_scope));
         scan_next();
         line_tkcnt += 1;
         add_operator_subtree(tree_idx_op, line_tkcnt, cur_scope);
@@ -92,39 +92,39 @@ void Lnast_parser::add_operator_subtree(const Tree_index& tree_idx_op, int& line
 
 void Lnast_parser::process_binary_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id cur_scope) {
   I(scan_is_token(Token_id_alnum) || scan_is_token(Token_id_output) || scan_is_token(Token_id_input));
-  lnast->add_child(tree_idx_op, Lnast_node(Lnast_ntype_ref, scan_token(), cur_scope));
+  lnast->add_child(tree_idx_op, Lnast_node(Lnast_ntype_ref, scan_get_token(), cur_scope));
   scan_next(); line_tkcnt += 1;
   I(scan_is_token(Token_id_alnum) || scan_is_token(Token_id_output) || scan_is_token(Token_id_input));
-  lnast->add_child(tree_idx_op, Lnast_node(Lnast_ntype_ref, scan_token(), cur_scope));
+  lnast->add_child(tree_idx_op, Lnast_node(Lnast_ntype_ref, scan_get_token(), cur_scope));
   scan_next(); line_tkcnt += 1;
   I(scan_is_token(Token_id_alnum) || scan_is_token(Token_id_output) || scan_is_token(Token_id_input));
-  lnast->add_child(tree_idx_op, Lnast_node(Lnast_ntype_ref, scan_token(), cur_scope));
+  lnast->add_child(tree_idx_op, Lnast_node(Lnast_ntype_ref, scan_get_token(), cur_scope));
 }
 
 void Lnast_parser::process_assign_like_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id cur_scope) {
   I(scan_is_token(Token_id_alnum) || scan_is_token(Token_id_output) || scan_is_token(Token_id_input));
-  lnast->add_child(tree_idx_op, Lnast_node(Lnast_ntype_ref, scan_token(), cur_scope));
+  lnast->add_child(tree_idx_op, Lnast_node(Lnast_ntype_ref, scan_get_token(), cur_scope));
   scan_next(); line_tkcnt += 1;
   I(scan_is_token(Token_id_alnum) || scan_is_token(Token_id_output) || scan_is_token(Token_id_input));
-  lnast->add_child(tree_idx_op, Lnast_node(Lnast_ntype_ref, scan_token(), cur_scope));
+  lnast->add_child(tree_idx_op, Lnast_node(Lnast_ntype_ref, scan_get_token(), cur_scope));
 }
 
 void Lnast_parser::process_lable_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id cur_scope) {
   I(scan_is_token(Token_id_alnum) || scan_is_token(Token_id_output) || scan_is_token(Token_id_input));
-  lnast->add_child(tree_idx_op, Lnast_node(Lnast_ntype_ref, scan_token(), cur_scope));
+  lnast->add_child(tree_idx_op, Lnast_node(Lnast_ntype_ref, scan_get_token(), cur_scope));
   scan_next(); line_tkcnt += 1;
 
   I(scan_is_token(Token_id_alnum) || scan_is_token(Token_id_output) || scan_is_token(Token_id_input));
   if (scan_is_token(Token_id_alnum) && scan_sview() == "__bits") {
-    auto tree_idx_attr_bits = lnast->add_child(tree_idx_op, Lnast_node(Lnast_ntype_attr_bits, scan_token(), cur_scope));
+    auto tree_idx_attr_bits = lnast->add_child(tree_idx_op, Lnast_node(Lnast_ntype_attr_bits, scan_get_token(), cur_scope));
     scan_next(); line_tkcnt += 1;
     I(scan_is_token(Token_id_alnum) || scan_is_token(Token_id_output) || scan_is_token(Token_id_input));
-    lnast->add_child(tree_idx_attr_bits, Lnast_node(Lnast_ntype_const, scan_token(), cur_scope));
+    lnast->add_child(tree_idx_attr_bits, Lnast_node(Lnast_ntype_const, scan_get_token(), cur_scope));
   } else {
-    lnast->add_child(tree_idx_op, Lnast_node(Lnast_ntype_ref, scan_token(), cur_scope));
+    lnast->add_child(tree_idx_op, Lnast_node(Lnast_ntype_ref, scan_get_token(), cur_scope));
     scan_next(); line_tkcnt += 1;
     I(scan_is_token(Token_id_alnum) || scan_is_token(Token_id_output) || scan_is_token(Token_id_input));
-    lnast->add_child(tree_idx_op, Lnast_node(Lnast_ntype_ref, scan_token(), cur_scope));
+    lnast->add_child(tree_idx_op, Lnast_node(Lnast_ntype_ref, scan_get_token(), cur_scope));
   }
 }
 

@@ -299,7 +299,7 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, Token
 
   buffer = ptr_section;
 
-  elaborate();
+  elaborate(); //build ast
 
   tlist.swap(token_list);
   token_list.clear();

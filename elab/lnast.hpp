@@ -5,23 +5,20 @@
 #include "tree.hpp"
 
 using Lnast_ntype_id = uint8_t ;
-//using Scope_id       = Explicit_type<uint8_t, struct Scope_ID_struct>;
 using Scope_id       = uint8_t ;
 
-static inline constexpr int   CFG_NODE_NAME_POS    = 1;
-static inline constexpr int   CFG_SCOPE_ID_POS     = 3;
-static inline constexpr int   CFG_TOKEN_POS_BEG    = 4;
-static inline constexpr int   CFG_TOKEN_POS_END    = 5;
-static inline constexpr int   CFG_OP_POS_BEG       = 6;
+static inline constexpr int   CFG_NODE_NAME_POS = 1;
+static inline constexpr int   CFG_SCOPE_ID_POS  = 3;
+static inline constexpr int   CFG_TOKEN_POS_BEG = 4;
+static inline constexpr int   CFG_TOKEN_POS_END = 5;
+static inline constexpr int   CFG_OP_POS_BEG    = 6;
 
 struct Lnast_node {
   const Lnast_ntype_id   node_type;
-  //const Token            token; FIXME: Use this
-  const Token_entry      node_name;
+  const Token            node_token;
   const Scope_id         scope;
-  Lnast_node(Lnast_ntype_id node_type, Token_entry te, Scope_id scope):node_type(node_type), node_name(te), scope(scope) {
+  Lnast_node(Lnast_ntype_id node_type, Token token, Scope_id scope):node_type(node_type), node_token(token), scope(scope) {
     I(node_type);
-    fmt::print("node_name:{}, node_type:{}, scope:{}\n", node_name, node_type, scope);
   }
 };
 

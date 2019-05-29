@@ -30,7 +30,7 @@ public:
 
   void SetUp() override {
     //root and statement
-    ast.set_root(std::make_tuple("K1", Lnast_ntype_top, 0));
+    ast.set_root(std::make_tuple("", Lnast_ntype_top, 0));
     auto c11    = ast.add_child(Tree_index(0,0), std::make_tuple("K1", Lnast_ntype_statement, 0));
 
     auto c111   = ast.add_child(c11,   std::make_tuple("K1",     Lnast_ntype_lable, 0));
@@ -64,6 +64,7 @@ public:
         std::sort(a.begin(), a.end());
     }
 
+
     setup_testee();
   }
 
@@ -79,7 +80,7 @@ public:
       return getcwd(&cwd[0],cwd.capacity());
   }
 
-  void setup_testee(){
+  std::string_view setup_memblock(){
       std::string tmp_str = get_current_working_dir();
       std::string file_path = tmp_str + "/inou/cfg/tests/ast_test.cfg";
       int fd = open(file_path.c_str(), O_RDONLY);
@@ -98,21 +99,25 @@ public:
           fprintf(stderr, "error, mmap failed\n");
           exit(-3);
       }
+      return memblock;
+  }
 
-      lnast_parser.parse(file_path, memblock);
-
+  void setup_testee(){
+    std::string_view memblock = setup_memblock();
+    lnast_parser.parse("lnast", memblock);
   }
 };
 
 TEST_F(Lnast_test, Traverse_breadth_first_check_on_ast) {
 
     std::vector<std::vector<tuple>> ast_sorted_testee;
+    std::string_view memblock = setup_memblock();
 
-    lnast_parser.get_ast()->each_breadth_first_fast([this, &ast_sorted_testee](const Tree_index &parent, const Tree_index &self, const Lnast_node &node_data) {
+    lnast_parser.get_ast()->each_breadth_first_fast([this, &ast_sorted_testee, &memblock](const Tree_index &parent, const Tree_index &self, const Lnast_node &node_data) {
       while (static_cast<size_t>(self.level)>=ast_sorted_testee.size())
           ast_sorted_testee.emplace_back();
 
-      std::string node_name(lnast_parser.scan_text(node_data.node_name));
+      std::string node_name(node_data.node_token.get_text(memblock));
       auto        node_type  = node_data.node_type;
       auto        node_scope = node_data.scope;
       fmt::print("nname:{}, ntype:{}, nscope:{}\n", node_name, node_type, node_scope);

@@ -281,4 +281,6 @@ public:
   virtual void elaborate() = 0;
 
   bool has_errors() const { return n_errors > 0; }
+
+  Token scan_get_token() const {return token_list[scanner_pos];}
 };
