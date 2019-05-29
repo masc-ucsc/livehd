@@ -347,7 +347,7 @@ public:
   };
 };
 
-// Y = (As|AU) < (Bs|Bu)
+// Y = (As|Au) < (Bs|Bu)
 // it can not have both As and Au at the same time
 // it can not have both Bs and Bu at the same time
 // If many edges are connected, it is and AND.
