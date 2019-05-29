@@ -29,12 +29,11 @@ class Test_scanner : public Elab_scanner{
 class Elab_test : public ::testing::Test{
 public:
   Test_scanner scanner;
-  std::vector<Token> tlist;
 };
 
 TEST_F(Elab_test, token_comp1){
   std::string_view txt1("<<\n++\n--\n==\n<=\n>=");
-  scanner.parse("txt1", txt1, tlist, txt1.size());
+  scanner.parse("txt1", txt1);
   EXPECT_EQ(9, scanner.debug_token_list.size());
 
   int tok_num = 0;
@@ -76,7 +75,7 @@ TEST_F(Elab_test, token_comp1){
 
 TEST_F(Elab_test, token_comp2){
   std::string_view txt1("=>foo<=33+_foo");
-  scanner.parse("txt1", txt1, tlist, txt1.size());
+  scanner.parse("txt1", txt1);
   EXPECT_EQ(7, scanner.debug_token_list.size());
 
   EXPECT_EQ(scanner.debug_token_list[0], "=");
@@ -90,7 +89,7 @@ TEST_F(Elab_test, token_comp2){
 
 TEST_F(Elab_test, token_comp3){
   std::string_view txt1("100s3bit /*110 /* comment */ 33*/_3_44_u32bits");
-  scanner.parse("txt1", txt1, tlist, txt1.size());
+  scanner.parse("txt1", txt1);
   EXPECT_EQ(3, scanner.debug_token_list.size());
 
   EXPECT_EQ(scanner.debug_token_list[0], "100s3bit");
@@ -100,7 +99,7 @@ TEST_F(Elab_test, token_comp3){
 
 TEST_F(Elab_test, token_comp4){
   std::string_view txt1("\%in\n@out=a+b");
-  scanner.parse("txt1", txt1, tlist, txt1.size());
+  scanner.parse("txt1", txt1);
   EXPECT_EQ(6, scanner.debug_token_list.size());
   
   EXPECT_EQ(scanner.debug_token_list[0], "\%in");

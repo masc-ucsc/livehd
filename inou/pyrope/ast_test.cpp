@@ -104,7 +104,6 @@ int main(int argc, char **argv){
   char statement[] = "a+b=c\n";
   
   Test_scanner scanner;
-  std::vector<Token> tlist;
 
-  scanner.parse("test", statement, tlist, sizeof(statement));
+  scanner.parse("test", statement);
 }

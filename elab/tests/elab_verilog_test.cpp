@@ -211,6 +211,5 @@ int main(int argc, char **argv) {
 
   Verilog_scanner scanner;
 
-  std::vector<Token> tlist;
-  scanner.parse(argv[1], memblock, tlist, sb.st_size);
+  scanner.parse(argv[1], memblock);
 }

@@ -39,8 +39,7 @@ int main(int argc, char **argv) {
 
   Lnast_parser lnast_parser;
 
-  std::vector<Token> tlist;
-  lnast_parser.parse(argv[1], memblock, tlist, sb.st_size);
+  lnast_parser.parse(argv[1], memblock);
 
   std::vector<std::vector<tuple>> ast_sorted_testee;
   lnast_parser.get_ast()->each_breadth_first_fast([&lnast_parser, &ast_sorted_testee](const Tree_index &parent, const Tree_index &self, const Lnast_node &node_data) {
