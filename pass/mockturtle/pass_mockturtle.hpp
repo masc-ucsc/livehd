@@ -72,7 +72,7 @@ protected:
   void setup_input_signal(const unsigned int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
   void setup_output_signal(const unsigned int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
   void split_input_signal(const std::vector<mockturtle::mig_network::signal> &, std::vector<std::vector<mockturtle::mig_network::signal>> &);
-  void convert_signed_to_unsigned(const comparator_input_signal &, comparator_input_signal &);
+  void convert_signed_to_unsigned(const comparator_input_signal &, comparator_input_signal &, mockturtle::mig_network &);
   mockturtle::mig_network::signal calc_lt(const comparator_input_signal &, const comparator_input_signal &, mockturtle::mig_network &);
 
   template<typename signal, typename Ntk>
@@ -83,6 +83,12 @@ protected:
     signal not_x_and_not_y = net.create_and(not_x, not_y);
     signal is_x_y_equal = net.create_or(x_and_y, not_x_and_not_y);
     return is_x_y_equal;
+  }
+
+  template<typename signal, typename Ntk>
+  void create_half_adder(const signal &x, const signal &y, signal &s, signal &c, Ntk &net) {
+    s = net.create_xor(x, y);
+    c = net.create_and(x, y);
   }
 
   bool eligable_cell_op(const Node_Type_Op &cell_op) {

@@ -133,10 +133,26 @@ void Pass_mockturtle::split_input_signal(const std::vector<mockturtle::mig_netwo
   }
 }
 
-void Pass_mockturtle::convert_signed_to_unsigned(const comparator_input_signal &signed_signal, comparator_input_signal &unsigned_signal) {
-  for (const auto &sig : signed_signal.signals) {
-    unsigned_signal.signals.emplace_back(sig);
+//converting signed input to unsigned input using half adder
+//1. old_sign_bit += 1
+//2. new_sign_bit = input signal is signed? 0 : carry
+//3. out = new_sign_bit concatenated by input_signal
+void Pass_mockturtle::convert_signed_to_unsigned(const comparator_input_signal &signed_signal, comparator_input_signal &unsigned_signal, mockturtle::mig_network &mig) {
+  I(signed_signal.signals.size() >= 1);
+  const auto old_sign_bit = signed_signal.signals[signed_signal.signals.size() - 1];
+  mockturtle::mig_network::signal sum, carry, new_sign_bit;
+
+  create_half_adder(old_sign_bit, mig.get_constant(true), sum, carry, mig);
+  if (signed_signal.is_signed) {
+    new_sign_bit = mig.get_constant(false);
+  } else {
+    new_sign_bit = carry;
   }
+  for (long unsigned int i=0; i<signed_signal.signals.size()-1; i++) {
+    unsigned_signal.signals.emplace_back(signed_signal.signals[i]);
+  }
+  unsigned_signal.signals.emplace_back(sum);
+  unsigned_signal.signals.emplace_back(new_sign_bit);
   unsigned_signal.is_signed = false;
 }
 
