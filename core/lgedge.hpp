@@ -19,8 +19,8 @@ public:
   // TODO: the snode and input can be avoided by accessing the Node_Internal information
   bool     snode   : 1;           // 1 bit
   bool     input   : 1;           // 1 bit
-  Port_ID  inp_pid : Port_bits;   // 14 bits ; abs
-  uint64_t raw_idx : Index_bits;  // abs (too much, 32 bits enough already not live)
+  Port_ID  inp_pid : Port_bits;   // 30 bits abs
+  uint64_t raw_idx : Index_bits;  // 31 bits abs
 
   bool     is_snode() const { return snode; }
   bool     is_input() const { return input; }
@@ -128,7 +128,7 @@ public:
 
   int next_node_inc() const {
     if (is_snode()) return 1;
-    return 3;
+    return 4;
   };
   bool is_last_input() const;
   bool is_last_output() const;
@@ -189,9 +189,9 @@ private:  // all constructor&assignment should be marked as private
   Edge_raw &operator=(Edge_raw &&rhs) = delete;
 };
 
-struct __attribute__((packed)) LEdge : public Edge_raw {  // 6 bytes total
+struct __attribute__((packed)) LEdge : public Edge_raw {  // 8 bytes total
   LEdge() { snode = 0; };
-  uint64_t pad : 32;
+  uint64_t pad_match:48;
 };
 
 struct __attribute__((packed)) SEdge : public Edge_raw {  // 2 bytes total
@@ -257,7 +257,7 @@ struct alignas(32) Node_Internal_Page {
 //
 class __attribute__((packed)) Node_Internal {
 private:
-  // BEGIN 10 Bytes common payload
+  // BEGIN 12 Bytes common payload
   Node_State state : 3;  // State must be the first thing (Node_Internal_Page)
   uint16_t   root : 1;
   uint16_t   inp_pos : 4;
@@ -265,17 +265,18 @@ private:
   uint16_t   graph_io_input : 1; // FIXME: remove this bits. Use idx==1 
   uint16_t   graph_io_output : 1; // FIXME: remove this bits. Use idx==2 
   uint16_t   out_pos : 4;
-  uint16_t   next_lower2 : 2;
+  uint16_t   next_lower2 : 2; // FIXME: remove this bits, no longer used 32bits max for Index_ID
   uint16_t   inp_long : 2;
   // 4 bytes aligned
 public:
   // WARNING: This must be here not at the end of the structure. OTherwise the
   // iterator goes the 64byte boundary for the outputs
-  static constexpr int Num_SEdges = 16 - 5;  // 5 entries for the 80 bits (10 bytes)
+  static constexpr int Num_SEdges = 16 - 6;  // 6 entries for the 96 bits (12 bytes)
   SEdge                sedge[Num_SEdges];    // WARNING: Must not be the last field in struct or iterators fail
 private:
   uint64_t nid : Index_bits;     // 32bits, 4 byte aligned
-  Port_ID  dst_pid : Port_bits;  // 4 byte aligned
+  uint64_t pad3: 1; // 31bits in Index_bits, to do pad/align to 4 bytes
+  Port_ID  dst_pid : Port_bits;  // 30bits
   uint16_t out_long : 2;
   // END 10 Bytes common payload
 
@@ -325,14 +326,14 @@ public:
 
   uint8_t get_num_local_inputs() const {
     uint8_t n = inp_pos;
-    I(inp_long * 2 <= n);
-    n -= 2 * inp_long;
+    I(inp_long * (4) <= n);
+    n -= (4-1) * inp_long;
     return n;
   }
   uint8_t get_num_local_outputs() const {
     uint8_t n = out_pos;
-    I(out_long * 2 <= n);
-    n -= 2 * out_long;
+    I(out_long * (4) <= n);
+    n -= (4-1) * out_long;
     return n;
   }
 
@@ -350,8 +351,8 @@ public:
     root            = 1;
     graph_io_input  = false;
     graph_io_output = false;
-    inp_pos         = 0;  // SEdge uses 1, LEdge uses 3
-    out_pos         = 0;  // SEdge uses 1, LEdge uses 3
+    inp_pos         = 0;  // SEdge uses 1, LEdge uses 4
+    out_pos         = 0;  // SEdge uses 1, LEdge uses 4
     inp_long        = 0;
     out_long        = 0;
     nid             = 0;
@@ -488,7 +489,7 @@ public:
   void inc_outputs(bool large = false) {
     I(has_space(large));
     if (large) {
-      out_pos += 3;
+      out_pos += 4;
       out_long++;
     } else {
       out_pos++;
@@ -504,7 +505,7 @@ public:
 
     I(has_space(large));
     if (large) {
-      inp_pos += 3;
+      inp_pos += 4;
       inp_long++;
     } else {
       inp_pos++;

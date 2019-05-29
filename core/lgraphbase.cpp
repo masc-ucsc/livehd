@@ -481,7 +481,7 @@ Index_ID LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid
     node_internal[idx].inc_outputs();
   } else {
     idx = get_space_output_pin(src_nid, idx, dst_pid, root_idx);
-    o   = node_internal[idx].next_free_output_pos() - 2;
+    o   = node_internal[idx].next_free_output_pos() - (4-1);
     node_internal[idx].inc_outputs(true);  // WARNING: Before next_free_output_pos to reserve space (decreasing insert)
 
     ledge = (LEdge_Internal *)(&node_internal[idx].sedge[o]);

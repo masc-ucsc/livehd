@@ -15,10 +15,10 @@ public:
     const uint16_t pad1 : 1; // Just to improve alignment of
     const uint64_t sink_idx   : Index_bits;
     const uint16_t pad2 : 1; // Just to improve alignment of
-    const uint16_t driver_pid : Port_bits;
+    const uint32_t driver_pid : Port_bits;
     const uint16_t pad3 : 2; // Just to improve alignment of
-    const uint16_t sink_pid   : Port_bits;
-    const uint16_t pad4 : 2; // Just to improve alignment of
+    const uint32_t sink_pid   : Port_bits;
+    const uint32_t pad4 : 2; // Just to improve alignment of
 
     Compact(const Index_ID &d_idx, const Port_ID &d_pid, const Index_ID &s_idx, const Port_ID &s_pid)
       :driver_idx(d_idx)

@@ -4,7 +4,7 @@
 
 #include "edge.hpp"
 
-static_assert(sizeof(XEdge::Compact) == 12);
+static_assert(sizeof(XEdge::Compact) == 16);
 static_assert(sizeof(Node_pin::Compact) == 4);
 static_assert(sizeof(Node::Compact) == 4);
 
