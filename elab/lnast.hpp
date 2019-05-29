@@ -16,6 +16,7 @@ static inline constexpr int   CFG_OP_POS_BEG       = 6;
 
 struct Lnast_node {
   const Lnast_ntype_id   node_type;
+  //const Token            token; FIXME: Use this
   const Token_entry      node_name;
   const Scope_id         scope;
   Lnast_node(Lnast_ntype_id node_type, Token_entry te, Scope_id scope):node_type(node_type), node_name(te), scope(scope) {

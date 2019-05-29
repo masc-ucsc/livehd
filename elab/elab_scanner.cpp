@@ -150,8 +150,12 @@ void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, Token_id> &
     t.tok = it->second;
   }
 }
+void Elab_scanner::parse(std::string_view name, std::string_view memblock) {
+  Token_list tlist;
+  parse(name, memblock, tlist);
+}
 
-void Elab_scanner::parse(std::string_view name, std::string_view memblock, Token_list tlist, bool chunking) {
+void Elab_scanner::parse(std::string_view name, std::string_view memblock, Token_list &tlist) {
   buffer_name = name;
   buffer      = memblock;  // To allow error reporting before chunking
 
