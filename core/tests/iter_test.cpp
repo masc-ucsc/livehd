@@ -164,14 +164,27 @@ bool simple() {
   auto t21 = g->create_node(SubGraph_Op); // 21
   auto t22 = g->create_node(SubGraph_Op); // 22
   (void)t22; // Disconnected node. Source of bug when fully disconnected
+  auto t23 = g->create_node(SubGraph_Op); // 23
 
-  /*     1     2     3     4     9     10     11    12
-  //       \  /       \   /  \    \   /       |   /   \
-  //        13         14     15   16          17     18   22
+  /*
+  // nodes:
+  //     1i    2i    3i    4i    9c 23g 10c   11c   12c
+  //       \  /       \   /  \    \  | /      |   /   \
+  //        13g        14g    15g  16g        17g    18g  22g
   //        | \       / \           \        /  \   /   \
-  //        |  \     /   \           \      20   19     21
+  //        |  \     /   \           \      20   19g    21g
   //        |   \   /     \           \   /
-  //        5     6        7            8
+  //        5o    6o       7o           8o
+  //
+  // IDX:
+  //
+  //     1i    3i    5i    7i   17c 31g 18c   19c   20c
+  //       \  /       \   /  \    \  | /      |   /   \
+  //        21g        22g    23g  24g        25g    26g  30g
+  //        | \       / \           \        /  \   /   \
+  //        |  \     /   \           \      28   27g    29g
+  //        |   \   /     \           \   /
+  //        9o   11o      13o          15o
   */
 
   g->add_edge(i1, t13.setup_sink_pin(random()&0xFF));
@@ -183,6 +196,7 @@ bool simple() {
 
   g->add_edge(c9.setup_driver_pin(), t16.setup_sink_pin(random()&0xFF));
   g->add_edge(c10.setup_driver_pin(), t16.setup_sink_pin(random()&0xFF));
+  g->add_edge(t23.setup_driver_pin(random()&0xFF), t16.setup_sink_pin(random()&0xFF));
 
   g->add_edge(c11.setup_driver_pin(), t17.setup_sink_pin(random()&0xFF));
   if (rand()&1)
@@ -237,6 +251,21 @@ bool simple() {
   fmt::print("fwd :{}\n",fwd);
   fmt::print("back:{}\n",bwd);
   fmt::print("fast:{}\n",fast);
+  for(const auto &nid : g->fast()) {
+    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
+
+    fmt::print("idx:{}\n", nid);
+    fmt::print("  inp_edges");
+    for(const auto &edge : node.inp_edges()) {
+      fmt::print("  {}", edge.driver.get_node().get_compact().nid);
+    }
+    fmt::print("\n");
+    fmt::print("  out_edges");
+    for(const auto &edge : node.out_edges()) {
+      fmt::print("  {}", edge.sink.get_node().get_compact().nid);
+    }
+    fmt::print("\n");
+  }
 
   if (fwd.size() != bwd.size())
     failed = true;

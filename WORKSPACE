@@ -33,7 +33,7 @@ new_git_repository(
 new_git_repository(
     name = "yosys",
     build_file = "BUILD.yosys", # relative to external path
-    commit = "dfb242c905ff10bb4038f080aeb74a820e8fbd00", # April 6, 2019 93d44bb9a613b46a80642b8ce71295db18fadbc5", # Dec 20, 2018
+    commit = "349c47250a9779bc58634870d2e3facfe95fbff8", #May 28, 2019 dfb242c905ff10bb4038f080aeb74a820e8fbd00", # April 6, 2019 
     remote = "https://github.com/YosysHQ/yosys.git",
     #strip_prefix = "kernel",
 )
@@ -187,6 +187,7 @@ new_git_repository(
 #)
 
 # Hermetic even for the toolchain :D
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 http_archive(
   name = "bazel_toolchains",
   sha256 = "109a99384f9d08f9e75136d218ebaebc68cc810c56897aea2224c57932052d30",

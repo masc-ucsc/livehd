@@ -423,9 +423,9 @@ Index_ID LGraph::create_node_int() {
 
   assert(node_internal[node_internal.size() - 1].get_dst_pid() == 0);
 
-  return node_internal[node_internal.size() - 1].get_nid();
+  I(node_internal[node_internal.size() - 1].get_nid() == node_internal.size()-1);
+  return node_internal.size() - 1;
 }
-
 
 Forward_edge_iterator LGraph::forward() { return Forward_edge_iterator(this); }
 

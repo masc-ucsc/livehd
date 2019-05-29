@@ -65,6 +65,7 @@ cc_test(
     srcs = ["tests/lnast_parser_test.cpp"],
     deps = [
         ":elab",
+        "@gtest//:gtest_main",
     ],
 )
 
