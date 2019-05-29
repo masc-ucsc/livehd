@@ -143,6 +143,7 @@ void Pass_mockturtle::split_input_signal(const std::vector<mockturtle::mig_netwo
   }
 }
 
+//extend sign bit so that the bit width of two signals matches each other
 void Pass_mockturtle::match_bit_width_by_sign_extension(const comparator_input_signal &sig1,
                                                         const comparator_input_signal &sig2,
                                                         comparator_input_signal &new_sig1,
