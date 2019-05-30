@@ -350,7 +350,9 @@ mockturtle::mig_network::signal Pass_mockturtle::compare_op(const comparator_inp
 
 //creating and mapping a compare-op LGraph node to a mig node
 //mapping it's both input and output LGraph edges to mig signals
-void Pass_mockturtle::mapping_comparation_cell_lg2mig(const bool &lt_op,  const bool &eq_op, mockturtle::mig_network &mig_ntk, Node &node, const unsigned int &group_id)
+void Pass_mockturtle::mapping_comparation_cell_lg2mig(const bool &lt_op, const bool &eq_op,
+                                                      mockturtle::mig_network &mig_ntk, Node &node,
+                                                      const unsigned int &group_id)
 {
   //FIX ME: use ep_op to differentiate between lt and le, gt and ge.
   //mapping input edge to input signal
@@ -529,7 +531,9 @@ void Pass_mockturtle::create_MIG_network(LGraph *g) {
 }
 
 void Pass_mockturtle::convert_MIG_to_KLUT(LGraph *g) {
-  absl::flat_hash_map<unsigned int, absl::flat_hash_map<mockturtle::mig_network::node, mockturtle::klut_network::signal>> gid2mig2klut_io_signal;
+  absl::flat_hash_map<unsigned int,
+                      absl::flat_hash_map<mockturtle::mig_network::node,
+                                          mockturtle::klut_network::signal>> gid2mig2klut_io_signal;
   for (const auto &gid2mig_iter : gid2mig) {
     const unsigned int group_id = gid2mig_iter.first;
     const mockturtle::mig_network &mig_ntk = gid2mig_iter.second;
