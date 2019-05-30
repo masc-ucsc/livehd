@@ -79,9 +79,10 @@ protected:
   void setup_output_signal(const unsigned int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
   void split_input_signal(const std::vector<mockturtle::mig_network::signal> &, std::vector<std::vector<mockturtle::mig_network::signal>> &);
   void convert_signed_to_unsigned(const comparator_input_signal &, comparator_input_signal &, mockturtle::mig_network &);
-  mockturtle::mig_network::signal calc_lt(const comparator_input_signal &, const comparator_input_signal &, mockturtle::mig_network &);
+  mockturtle::mig_network::signal compare_op(const comparator_input_signal &, const comparator_input_signal &, const bool &, const bool &, mockturtle::mig_network &);
   void match_bit_width_by_sign_extension(const comparator_input_signal &, const comparator_input_signal &, comparator_input_signal &, comparator_input_signal &, mockturtle::mig_network &);
   void mapping_logic_cell_lg2mig(mockturtle::mig_network::signal (mockturtle::mig_network::*)(std::vector<mockturtle::mig_network::signal> const &), mockturtle::mig_network &, Node &, const unsigned int &);
+  void mapping_comparation_cell_lg2mig(const bool &, const bool &, mockturtle::mig_network &, Node &, const unsigned int &);
 
   template<typename signal, typename Ntk>
   signal create_eq(const signal &x, const signal &y, Ntk &net) {
@@ -99,6 +100,16 @@ protected:
     c = net.create_and(x, y);
   }
 
+  template<typename signal, typename Ntk>
+  signal create_lt(const signal &x, const signal &y, Ntk &net) {
+    return net.create_lt(x, y);
+  }
+
+  template<typename signal, typename Ntk>
+  signal create_gt(const signal &x, const signal &y, Ntk &net) {
+    return net.create_lt(y, x);
+  }
+
   bool eligable_cell_op(const Node_Type_Op &cell_op) {
     switch (cell_op) {
       case Not_Op:
@@ -110,10 +121,10 @@ protected:
       case Or_Op:
         //fmt::print("Node: Or_Op\n");
         break;
-/*
       case Xor_Op:
         //fmt::print("Node: Xor_Op\n");
         break;
+/*
       case Join_Op:
         //fmt::print("Node: Join_Op\n");
         break;
