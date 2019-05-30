@@ -308,7 +308,7 @@ mockturtle::mig_network::signal Pass_mockturtle::compare_op(const comparator_inp
 
   const auto bit_width = left_op.signals.size();
   mockturtle::mig_network::signal output;
-  std::vector<mockturtle::mig_network::signal> bit_equal_sig, bit_lt_sig, res, kth_term;
+  std::vector<mockturtle::mig_network::signal> is_equal_bit_sigs, comp_op_bit_sigs, res, kth_term;
 
   //create X[i] = A[i]B[i] + A[i]'B[i]' and Y[i] = A[i]'B[i] for LessThan
   //create X[i] = A[i]B[i] + A[i]'B[i]' and Y[i] = A[i]B[i]' for GreaterThan
@@ -319,16 +319,16 @@ mockturtle::mig_network::signal Pass_mockturtle::compare_op(const comparator_inp
     lt_op ? &Pass_mockturtle::create_lt<mockturtle::mig_network::signal, mockturtle::mig_network>
           : &Pass_mockturtle::create_gt<mockturtle::mig_network::signal, mockturtle::mig_network>;
   for (long unsigned int i=0; i<bit_width; i++) {
-    bit_equal_sig.emplace_back(create_eq(left_op.signals[i], right_op.signals[i], mig));
-    bit_lt_sig.emplace_back((this->*comp_op)(left_op.signals[i], right_op.signals[i], mig));
+    is_equal_bit_sigs.emplace_back(create_eq(left_op.signals[i], right_op.signals[i], mig));
+    comp_op_bit_sigs.emplace_back((this->*comp_op)(left_op.signals[i], right_op.signals[i], mig));
   }
 
   //create each term and push to res
   for (long unsigned int i=0; i<bit_width; i++) {
     kth_term.clear();
-    kth_term.emplace_back(bit_lt_sig[i]);
+    kth_term.emplace_back(comp_op_bit_sigs[i]);
     for (long unsigned int j=i+1; j<bit_width; j++) {
-      kth_term.emplace_back(bit_equal_sig[i]);
+      kth_term.emplace_back(is_equal_bit_sigs[i]);
     }
     if (kth_term.size() == 1) {
       res.emplace_back(kth_term[0]);
@@ -337,12 +337,21 @@ mockturtle::mig_network::signal Pass_mockturtle::compare_op(const comparator_inp
     }
   }
 
-  //create the final result
-  //FIX ME: use eq_op to support equal comparation
+  //create the final comparation result
   if (res.size() == 1) {
     output = res[0];
   } else {
     output = mig.create_nary_or(res);
+  }
+
+  if (eq_op) {
+    mockturtle::mig_network::signal is_equal;
+    if (is_equal_bit_sigs.size() == 1){
+      is_equal = is_equal_bit_sigs[0];
+    } else {
+      is_equal = mig.create_nary_and(is_equal_bit_sigs);
+    }
+    output = mig.create_or(output, is_equal);
   }
 
   return output;
@@ -502,7 +511,21 @@ void Pass_mockturtle::create_MIG_network(LGraph *g) {
       case GreaterThan_Op: {
         fmt::print("GreaterThan_Op in gid:{}\n",group_id);
         I(node.inp_edges().size()>1 && node.out_edges().size()>0);
-        mapping_comparation_cell_lg2mig(true, false, mig_ntk, node, group_id);
+        mapping_comparation_cell_lg2mig(false, false, mig_ntk, node, group_id);
+        break;
+      }
+
+      case LessEqualThan_Op: {
+        fmt::print("LessEqualThan_Op in gid:{}\n",group_id);
+        I(node.inp_edges().size()>1 && node.out_edges().size()>0);
+        mapping_comparation_cell_lg2mig(true, true, mig_ntk, node, group_id);
+        break;
+      }
+
+      case GreaterEqualThan_Op: {
+        fmt::print("GreaterEqualThan_Op in gid:{}\n",group_id);
+        I(node.inp_edges().size()>1 && node.out_edges().size()>0);
+        mapping_comparation_cell_lg2mig(false, true, mig_ntk, node, group_id);
         break;
       }
 
