@@ -147,10 +147,10 @@ protected:
       case LessThan_Op:
         //fmt::print("Node: LessThan_Op\n");
         break;
-/*
       case GreaterThan_Op:
         //fmt::print("Node: GreaterThan_Op\n");
         break;
+/*
       case LessEqualThan_Op:
         //fmt::print("Node: LessEqualThan_Op\n");
         break;
