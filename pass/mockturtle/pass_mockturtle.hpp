@@ -81,6 +81,7 @@ protected:
   void convert_signed_to_unsigned(const comparator_input_signal &, comparator_input_signal &, mockturtle::mig_network &);
   mockturtle::mig_network::signal calc_lt(const comparator_input_signal &, const comparator_input_signal &, mockturtle::mig_network &);
   void match_bit_width_by_sign_extension(const comparator_input_signal &, const comparator_input_signal &, comparator_input_signal &, comparator_input_signal &, mockturtle::mig_network &);
+  void mapping_logic_cell_lg2mig(mockturtle::mig_network::signal (mockturtle::mig_network::*)(std::vector<mockturtle::mig_network::signal> const &), mockturtle::mig_network &, Node &, const unsigned int &);
 
   template<typename signal, typename Ntk>
   signal create_eq(const signal &x, const signal &y, Ntk &net) {
@@ -106,10 +107,10 @@ protected:
       case And_Op:
         //fmt::print("Node: And_Op\n");
         break;
-/*
       case Or_Op:
         //fmt::print("Node: Or_Op\n");
         break;
+/*
       case Xor_Op:
         //fmt::print("Node: Xor_Op\n");
         break;
