@@ -1,18 +1,20 @@
-$a as (__bits:1)
-//$b as (__bits:1)
-//%s as (__bits:1)
-//%s = $a & $b
+$a as __bits:1
+$b as __bits:1
+%s as __bits:1
+%s = $a & $b
 
-//fun1 = :($a,$b,%o):{
-//  %o = $a + $b
-//}
-//
+fun1 = :($a,$b,%o):{
+  %o = $a + $b
+}
+
+result = fun1(a:3, b:4)
+
 //if 3<4 {
-//  total = fun1.(a:3,b:4)
+//  total = fun1(a:3,b:4)
 //}else{
 //  total = 3
 //}
-//
+
 //I total == 7
 //
 //unique if 3<3 {

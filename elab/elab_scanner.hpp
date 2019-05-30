@@ -231,15 +231,20 @@ public:
   }
 
   std::string_view scan_next_sview() const {
-    //ori
-    //size_t p = scanner_pos - 1;
-    //if (p >= token_list.size())
-    //  p = token_list.size() - 1;
     size_t p = scanner_pos + 1;
     if (p >= token_list.size())
       p = token_list.size()-1;
     return std::string_view(&buffer[token_list[p].pos], token_list[p].len);
   }
+
+  std::string_view scan_next_next_sview() const {
+    size_t p = scanner_pos + 2;
+    if (p >= token_list.size())
+      p = token_list.size()-1;
+    return std::string_view(&buffer[token_list[p].pos], token_list[p].len);
+  }
+
+
   void scan_append(std::string &text) const;
   void scan_prev_append(std::string &text) const;
   void scan_next_append(std::string &text) const;
