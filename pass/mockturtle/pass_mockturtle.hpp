@@ -69,7 +69,8 @@ protected:
   absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle::klut_network::signal>> edge2signal_klut;
   absl::flat_hash_map<Node::Compact, Node::Compact> old_node_to_new_node, new_node_to_old_node;
   absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::node>, Node::Compact> gidMTnode2LGnode;
-  absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::signal>, std::vector<std::pair<mockturtle::klut_network::node, Port_ID>>> gid_fanin2parent_pid;
+  absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::signal>,
+                      std::vector<std::pair<mockturtle::klut_network::node, Port_ID>>> gid_fanin2parent_pid;
   void lg_partition(LGraph *);
   void dfs_populate_gid(Node, const unsigned int);
   void create_MIG_network(LGraph *);
@@ -79,9 +80,17 @@ protected:
   void setup_output_signal(const unsigned int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
   void split_input_signal(const std::vector<mockturtle::mig_network::signal> &, std::vector<std::vector<mockturtle::mig_network::signal>> &);
   void convert_signed_to_unsigned(const comparator_input_signal &, comparator_input_signal &, mockturtle::mig_network &);
-  mockturtle::mig_network::signal compare_op(const comparator_input_signal &, const comparator_input_signal &, const bool &, const bool &, mockturtle::mig_network &);
-  void match_bit_width_by_sign_extension(const comparator_input_signal &, const comparator_input_signal &, comparator_input_signal &, comparator_input_signal &, mockturtle::mig_network &);
-  void mapping_logic_cell_lg2mig(mockturtle::mig_network::signal (mockturtle::mig_network::*)(std::vector<mockturtle::mig_network::signal> const &), mockturtle::mig_network &, Node &, const unsigned int &);
+  mockturtle::mig_network::signal compare_op(const comparator_input_signal &,
+                                             const comparator_input_signal &,
+                                             const bool &, const bool &,
+                                             mockturtle::mig_network &);
+  void match_bit_width_by_sign_extension(const comparator_input_signal &,
+                                         const comparator_input_signal &,
+                                         comparator_input_signal &,
+                                         comparator_input_signal &,
+                                         mockturtle::mig_network &);
+  void mapping_logic_cell_lg2mig(mockturtle::mig_network::signal (mockturtle::mig_network::*)(std::vector<mockturtle::mig_network::signal> const &),
+                                 mockturtle::mig_network &, Node &, const unsigned int &);
   void mapping_comparation_cell_lg2mig(const bool &, const bool &, mockturtle::mig_network &, Node &, const unsigned int &);
 
   template<typename signal, typename Ntk>
