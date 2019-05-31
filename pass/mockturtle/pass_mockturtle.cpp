@@ -812,14 +812,33 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *g) {
     auto driver_pin = driver_node.setup_driver_pin(in_edge.driver.get_pid());
     const auto bit_width = in_edge.get_bits();
     I(bit_width == sigs.size());
-    for (auto i = 0; i < bit_width; i++) {
-      for (const auto &parent_and_pid : gid_fanin2parent_pid[std::make_pair(group_id, sigs[i])]) {
+    if (bit_width == 1) {
+      for (const auto &parent_and_pid : gid_fanin2parent_pid[std::make_pair(group_id, sigs[0])]) {
         I(gidMTnode2LGnode.find(std::make_pair(group_id, parent_and_pid.first)) != gidMTnode2LGnode.end());
         auto sink_node = Node(lg,0,Node::Compact(gidMTnode2LGnode[std::make_pair(group_id, parent_and_pid.first)]));
         const auto pid = parent_and_pid.second;
         auto sink_pin = sink_node.setup_sink_pin(pid);
-        //FIX ME: use pick_op and u32const_op to connect the nodes
         lg->add_edge(driver_pin, sink_pin);
+      }
+    } else {
+      for (auto i = 0; i < bit_width; i++) {
+        for (const auto &parent_and_pid : gid_fanin2parent_pid[std::make_pair(group_id, sigs[i])]) {
+          I(gidMTnode2LGnode.find(std::make_pair(group_id, parent_and_pid.first)) != gidMTnode2LGnode.end());
+          auto sink_node = Node(lg,0,Node::Compact(gidMTnode2LGnode[std::make_pair(group_id, parent_and_pid.first)]));
+          const auto pid = parent_and_pid.second;
+          auto sink_pin = sink_node.setup_sink_pin(pid);
+          //NOTE: update this simple Pick_Op node when the more powerful Pick_Op is readly
+          auto pick_node = lg->create_node(Pick_Op);
+          auto pick_node_sink_pin = pick_node.setup_sink_pin(0);
+          auto pick_node_offset_pin = pick_node.setup_sink_pin(1);
+          auto pick_node_driver_pin = pick_node.setup_driver_pin(0);
+          auto const_node_for_bit_select = lg->create_node_const(i, sizeof(decltype(bit_width))*8);
+          auto bit_select_signal = const_node_for_bit_select.setup_driver_pin(0);
+          pick_node_driver_pin.set_bits(1);
+          lg->add_edge(bit_select_signal, pick_node_offset_pin);
+          lg->add_edge(driver_pin, pick_node_sink_pin);
+          lg->add_edge(pick_node_driver_pin, sink_pin);
+        }
       }
     }
   }
