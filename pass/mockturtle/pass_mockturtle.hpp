@@ -80,6 +80,9 @@ protected:
   void setup_output_signal(const unsigned int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
   void split_input_signal(const std::vector<mockturtle::mig_network::signal> &, std::vector<std::vector<mockturtle::mig_network::signal>> &);
   void convert_signed_to_unsigned(const comparator_input_signal &, comparator_input_signal &, mockturtle::mig_network &);
+  mockturtle::mig_network::signal is_equal_op(const comparator_input_signal &,
+                                              const comparator_input_signal &,
+                                              mockturtle::mig_network &);
   mockturtle::mig_network::signal compare_op(const comparator_input_signal &,
                                              const comparator_input_signal &,
                                              const bool &, const bool &,
