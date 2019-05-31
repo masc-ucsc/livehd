@@ -74,6 +74,8 @@ constexpr Token_id Token_id_qmark         = 41;  // ?
 constexpr Token_id Token_id_tick          = 42;  // '
 constexpr Token_id Token_id_obr           = 43;  // [
 constexpr Token_id Token_id_cbr           = 44;  // ]
+constexpr Token_id Token_id_backslash     = 45;  // \ back slash
+constexpr Token_id Token_id_reference     = 46;  // \target
 constexpr Token_id Token_id_keyword_first = 64;
 constexpr Token_id Token_id_keyword_last  = 254;
 
@@ -269,7 +271,7 @@ public:
     return token_list[scanner_pos + pos].tok == tok;
   }
 
-  bool scan_next_token_is(Token_id tok){
+  bool scan_next_is_token(Token_id tok){
     size_t p = scanner_pos + 1;
     if (p >= token_list.size())
       p = token_list.size() - 1;

@@ -15,8 +15,8 @@ static inline constexpr int   CFG_OP_POS_BEG    = 6;
 
 struct Lnast_node {
   const Lnast_ntype_id   node_type;
-  const Token            node_token;
   const Scope_id         scope;
+  Token                  node_token;
   Lnast_node(Lnast_ntype_id node_type, Token token, Scope_id scope):node_type(node_type), node_token(token), scope(scope) {
     I(node_type);
   }

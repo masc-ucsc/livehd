@@ -42,11 +42,11 @@ int main(int argc, char **argv) {
   lnast_parser.parse(argv[1], memblock);
 
   std::vector<std::vector<tuple>> ast_sorted_testee;
-  lnast_parser.get_ast()->each_breadth_first_fast([&lnast_parser, &ast_sorted_testee](const Tree_index &parent, const Tree_index &self, const Lnast_node &node_data) {
+  lnast_parser.get_ast()->each_breadth_first_fast([&memblock, &ast_sorted_testee](const Tree_index &parent, const Tree_index &self, const Lnast_node &node_data) {
     while (static_cast<size_t>(self.level)>=ast_sorted_testee.size())
       ast_sorted_testee.emplace_back();
 
-    std::string node_name(lnast_parser.scan_text(node_data.node_name));
+    std::string node_name(node_data.node_token.get_text(memblock));
     auto        node_type  = node_data.node_type;
     auto        node_scope = node_data.scope;
     fmt::print("nname:{}, ntype:{}, nscope:{}\n", node_name, node_type, node_scope);
