@@ -15,8 +15,8 @@ static inline constexpr int   CFG_OP_POS_BEG    = 6;
 
 struct Lnast_node {
   const Lnast_ntype_id   node_type;
-  const Token            node_token;
   const Scope_id         scope;
+  Token                  node_token;
   Lnast_node(Lnast_ntype_id node_type, Token token, Scope_id scope):node_type(node_type), node_token(token), scope(scope) {
     I(node_type);
   }
@@ -78,19 +78,20 @@ protected:
     Lnast_ntype_top
   };
 
-  void      elaborate() override;
-  void      build_statements(Scope_id scope);
-  void      add_statement(const Tree_index& statements, Scope_id cur_scope);
-  void      add_subgraph();
-  void      add_operator_subtree(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id cur_scope);
-  Scope_id  process_scope(Scope_id cur_scope);
-  void      operator_analysis(Lnast_ntype_id & node_type, int& line_tkcnt);
-  void      process_assign_like_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
-  void      process_lable_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
-  void      process_binary_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
-  void      process_func_call_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
-  void      process_func_def_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
-  void      process_if_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
+  void        elaborate() override;
+  void        build_statements(const Tree_index& tree_idx_top, Scope_id scope);
+  Scope_id    add_statement(const Tree_index& tree_idx_sts, Scope_id cur_scope);
+  Scope_id    process_scope(const Tree_index& tree_idx_sts, Scope_id cur_scope );
+  void        add_subgraph(const Tree_index& tree_idx_std, Scope_id new_scope, Scope_id cur_scope);
+  void        operator_analysis(Lnast_ntype_id & node_type, int& line_tkcnt);
+  void        process_assign_like_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
+  void        process_lable_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
+  void        process_binary_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
+  void        process_func_call_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
+  void        process_func_def_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
+  void        process_if_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
+  Tree_index  add_operator_node(const Tree_index& tree_idx_sts, Token node_token, Lnast_ntype_id node_type, Scope_id cur_scope);
+  void        add_operator_subtree(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id cur_scope);
 
 private:
   std::unique_ptr<Language_neutral_ast>  lnast;

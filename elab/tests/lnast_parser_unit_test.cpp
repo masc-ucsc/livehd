@@ -31,27 +31,61 @@ public:
   void SetUp() override {
     //root and statement
     ast.set_root(std::make_tuple("", Lnast_ntype_top, 0));
-    auto c11    = ast.add_child(Tree_index(0,0), std::make_tuple("K1", Lnast_ntype_statement, 0));
+    auto c1    = ast.add_child(Tree_index(0,0), std::make_tuple("K1", Lnast_ntype_statement, 0));
 
-    auto c111   = ast.add_child(c11,   std::make_tuple("K1",     Lnast_ntype_lable, 0));
-    auto c1111  = ast.add_child(c111,  std::make_tuple("___b",   Lnast_ntype_ref, 0));
-    auto c1112  = ast.add_child(c111,  std::make_tuple("__bits", Lnast_ntype_attr_bits, 0));
-    auto c11121 = ast.add_child(c1112, std::make_tuple("0d1",    Lnast_ntype_const, 0));
-    (void) c1111; // for turn off un-used warning
-    (void) c11121;
-
-    auto c112   = ast.add_child(c11,   std::make_tuple("K2",     Lnast_ntype_tuple, 0));
-    auto c1121  = ast.add_child(c112,  std::make_tuple("___a",   Lnast_ntype_ref, 0));
-    auto c1122  = ast.add_child(c112,  std::make_tuple("___b",   Lnast_ntype_ref, 0));
+    auto c11   = ast.add_child(c1,   std::make_tuple("K1",     Lnast_ntype_lable, 0));
+    auto c111  = ast.add_child(c11,  std::make_tuple("___a",   Lnast_ntype_ref, 0));
+    auto c112  = ast.add_child(c11,  std::make_tuple("__bits", Lnast_ntype_attr_bits, 0));
+    auto c1121 = ast.add_child(c112, std::make_tuple("0d1",    Lnast_ntype_const, 0));
+    (void) c111; // for turn off un-used warning
     (void) c1121;
-    (void) c1122;
 
+    auto c12   = ast.add_child(c1,   std::make_tuple("K2",     Lnast_ntype_as, 0));
+    auto c121  = ast.add_child(c12,  std::make_tuple("$a",     Lnast_ntype_ref, 0));
+    auto c122  = ast.add_child(c12,  std::make_tuple("___a",   Lnast_ntype_ref, 0));
+    (void) c121;
+    (void) c122;
 
-    auto c113   = ast.add_child(c11,   std::make_tuple("K3",     Lnast_ntype_as, 0));
-    auto c1131  = ast.add_child(c113,  std::make_tuple("$a",     Lnast_ntype_ref, 0));
-    auto c1132  = ast.add_child(c113,  std::make_tuple("___a",   Lnast_ntype_ref, 0));
-    (void) c1131;
-    (void) c1132;
+    auto c13   = ast.add_child(c1,   std::make_tuple("K3",     Lnast_ntype_lable, 0));
+    auto c131  = ast.add_child(c13,  std::make_tuple("___b",   Lnast_ntype_ref, 0));
+    auto c132  = ast.add_child(c13,  std::make_tuple("__bits", Lnast_ntype_attr_bits, 0));
+    auto c1321 = ast.add_child(c132, std::make_tuple("0d1",    Lnast_ntype_const, 0));
+    (void) c131; // for turn off un-used warning
+    (void) c1321;
+
+    auto c14   = ast.add_child(c1,   std::make_tuple("K4",     Lnast_ntype_as, 0));
+    auto c141  = ast.add_child(c14,  std::make_tuple("$b",     Lnast_ntype_ref, 0));
+    auto c142  = ast.add_child(c14,  std::make_tuple("___b",   Lnast_ntype_ref, 0));
+    (void) c141;
+    (void) c142;
+
+    auto c15   = ast.add_child(c1,   std::make_tuple("K5",     Lnast_ntype_lable, 0));
+    auto c151  = ast.add_child(c15,  std::make_tuple("___c",   Lnast_ntype_ref, 0));
+    auto c152  = ast.add_child(c15,  std::make_tuple("__bits", Lnast_ntype_attr_bits, 0));
+    auto c1521 = ast.add_child(c152, std::make_tuple("0d1",    Lnast_ntype_const, 0));
+    (void) c151; // for turn off un-used warning
+    (void) c1521;
+
+    auto c16   = ast.add_child(c1,   std::make_tuple("K6",     Lnast_ntype_as, 0));
+    auto c161  = ast.add_child(c16,  std::make_tuple("%s",     Lnast_ntype_ref, 0));
+    auto c162  = ast.add_child(c16,  std::make_tuple("___c",   Lnast_ntype_ref, 0));
+    (void) c161;
+    (void) c162;
+
+    auto c17   = ast.add_child(c1,   std::make_tuple("K7",     Lnast_ntype_and, 0));
+    auto c171  = ast.add_child(c17,  std::make_tuple("___d",   Lnast_ntype_ref, 0));
+    auto c172  = ast.add_child(c17,  std::make_tuple("$a",     Lnast_ntype_ref, 0));
+    auto c173  = ast.add_child(c17,  std::make_tuple("$b",     Lnast_ntype_ref, 0));
+    (void) c171;
+    (void) c172;
+    (void) c173;
+
+    auto c18   = ast.add_child(c1,   std::make_tuple("K8",     Lnast_ntype_pure_assign, 0));
+    auto c181  = ast.add_child(c18,  std::make_tuple("%s",     Lnast_ntype_ref, 0));
+    auto c182  = ast.add_child(c18,  std::make_tuple("___d",   Lnast_ntype_ref, 0));
+    (void) c181;
+    (void) c182;
+
 
     ast.each_breadth_first_fast([this](const Tree_index &parent, const Tree_index &self, tuple tuple_data) {
       while (static_cast<size_t>(self.level)>=ast_sorted_golden.size())
@@ -60,10 +94,10 @@ public:
       EXPECT_EQ(ast.get_parent(self), parent);
     });
 
+
     for(auto &a:ast_sorted_golden) {
         std::sort(a.begin(), a.end());
     }
-
 
     setup_testee();
   }
