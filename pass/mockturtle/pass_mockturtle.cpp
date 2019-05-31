@@ -709,9 +709,42 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *g) {
     auto old_node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
     if (node2gid.find(old_node.get_compact())==node2gid.end()) {
       Node_Type_Op op = old_node.get_type().op;
-      //FIX ME: op doesn't not reflect the true operation id of subgraph, tmap, uconst, conststr and lut.
-      auto new_node = lg->create_node(op);
-      //new_node.set_type();
+      Node new_node;
+      switch (op) {
+        case LUT_Op: {
+          new_node = lg->create_node();
+          new_node.set_type_lut(old_node.get_type_lut());
+        }
+
+        case SubGraph_Op: {
+          new_node = lg->create_node();
+          new_node.set_type_subgraph(old_node.get_type_subgraph());
+          break;
+        }
+
+        case TechMap_Op: {
+          new_node = lg->create_node();
+          new_node.set_type_tmap_id(old_node.get_type_tmap_id());
+          break;
+        }
+
+        case U32Const_Op: {
+          new_node = lg->create_node(op); //FIX ME: remove once new api available
+          //new_node = lg->create_node_const(old_node.get_type_const_value(), );
+          break;
+        }
+
+        case StrConst_Op: {
+          new_node = lg->create_node(op); //FIX ME: remove once new api available
+          //new_node = lg->create_node_const(old_node.get_type_const_sview());
+          break;
+        }
+
+        default: {
+          new_node = lg->create_node(op);
+          break;
+        }
+      }
       old_node_to_new_node[old_node.get_compact()] = new_node.get_compact();
       new_node_to_old_node[new_node.get_compact()] = old_node.get_compact();
       //create unchanged edges
@@ -847,13 +880,16 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *g) {
       auto driver_pin = driver_node.setup_driver_pin(0);
       connect_complemented_signal(lg, driver_pin, sink_pin, klut, sigs[0]);
     } else {
+      auto join_node = lg->create_node(Join_Op);
       for (auto i = 0; i < bit_width; i++) {
         I(gidMTnode2LGnode.find(std::make_pair(group_id, gid2klut[group_id].get_node(sigs[i]))) != gidMTnode2LGnode.end());
         auto driver_node = Node(lg,0,Node::Compact(gidMTnode2LGnode[std::make_pair(group_id, klut.get_node(sigs[i]))]));
-        auto driver_pin = driver_node.setup_driver_pin(0);
-        //FIX ME: use join_op ti connect nodes
-        connect_complemented_signal(lg, driver_pin, sink_pin, klut, sigs[i]);
+        auto kth_driver_pin = driver_node.setup_driver_pin(0);
+        auto kth_sink_pin = join_node.setup_sink_pin(i);
+        connect_complemented_signal(lg, kth_driver_pin, kth_sink_pin, klut, sigs[i]);
       }
+      auto driver_pin = join_node.setup_driver_pin(0);
+      lg->add_edge(driver_pin, sink_pin);
     }
   }
   fmt::print("finished.\n");
