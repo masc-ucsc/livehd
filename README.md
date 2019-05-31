@@ -154,6 +154,8 @@ LGraph.
 
 # Coding and contributing
 
+We have several projects (and MS/undergraduate thesis project options). Contact renau@ucsc.edu to query about them.
+
 ## Style
 
 For coding, please follow the coding styles from [Style.md](docs/Style.md). To contribute,
