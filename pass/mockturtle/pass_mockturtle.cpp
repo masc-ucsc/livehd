@@ -415,28 +415,19 @@ void Pass_mockturtle::mapping_comparation_cell_lg2mig(const bool &lt_op, const b
     }
   }
   //input validity check
-  I(left_operant_sigs.size() + right_operant_sigs.size() >= 2);
-  I(left_operant_sigs.size() == 1 || right_operant_sigs.size() == 1);
+  I(left_operant_sigs.size() >= 1);
+  I(right_operant_sigs.size() >= 1);
   //creating output signal
-  if (left_operant_sigs.size() == 1 && right_operant_sigs.size() >= 1) {
-    const auto &l_op = left_operant_sigs[0];
-    for (const auto &r_op : right_operant_sigs) {
-      med_sig.emplace_back(compare_op(l_op, r_op, lt_op, eq_op, mig_ntk));
-    }
-    out_sig.emplace_back(mig_ntk.create_nary_and(med_sig));
-  }
-  else if (left_operant_sigs.size() >= 1 && right_operant_sigs.size() == 1) {
-    const auto &r_op = right_operant_sigs[0];
-    for (const auto &l_op : left_operant_sigs) {
-      med_sig.emplace_back(compare_op(l_op, r_op, lt_op, eq_op, mig_ntk));
-    }
-    out_sig.emplace_back(mig_ntk.create_nary_and(med_sig));
-  }
-  else if (left_operant_sigs.size() == 1 && right_operant_sigs.size() == 1) {
+  if (left_operant_sigs.size() == 1 && right_operant_sigs.size() == 1) {
     out_sig.emplace_back(compare_op(left_operant_sigs[0], right_operant_sigs[0], lt_op, eq_op, mig_ntk));
   }
   else {
-    I(false);
+    for (const auto &l_op : left_operant_sigs) {
+      for (const auto &r_op : right_operant_sigs) {
+        med_sig.emplace_back(compare_op(l_op, r_op, lt_op, eq_op, mig_ntk));
+      }
+    }
+    out_sig.emplace_back(mig_ntk.create_nary_and(med_sig));
   }
   //processing output signal
   for (const auto &out_edge : node.out_edges()) {
@@ -502,35 +493,7 @@ void Pass_mockturtle::create_MIG_network(LGraph *g) {
 
       case Equals_Op: {
         fmt::print("Equals_Op in gid:{}\n",group_id);
-        I(node.inp_edges().size()>1 && node.out_edges().size()>0);
-        /*---------------------------------------------------------
-        //mapping input edge to input signal
-        //we don't differentiate between signed and unsigned input
-        std::vector<mockturtle::mig_network::signal> out_sig, med_sig;
-        std::vector<std::vector<mockturtle::mig_network::signal>> inp_sig_group_by_bit;
-        for (const auto &in_edge : node.inp_edges()) {
-          fmt::print("input_bit_width:{}\n",in_edge.get_bits());
-          std::vector<mockturtle::mig_network::signal> inp_sig;
-          setup_input_signal(group_id, in_edge, inp_sig, mig_ntk);
-          split_input_signal(inp_sig, inp_sig_group_by_bit);
-        }
-        //creating output signal
-        //A[0..n]==B[0..n]==C[0..n] iff
-        //A0^B0==0 && B0^C0==0 && A1^B1==0 && B1^C1==0
-        //&& ... && AN^BN==0 && BN^CN==0
-        //that is: ~(|{(A0,B0),(B0,C0) ... (AN,BN), (BN,CN)})==1
-        for (long unsigned int i = 0; i < inp_sig_group_by_bit.size(); i++) {
-          for (long unsigned int j = 1; j < inp_sig_group_by_bit[i].size(); j++) {
-            med_sig.emplace_back(mig_ntk.create_xor(inp_sig_group_by_bit[i][j-1], inp_sig_group_by_bit[i][j]));
-          }
-        }
-        out_sig.emplace_back(mig_ntk.create_not(mig_ntk.create_nary_or(med_sig)));
-        //processing output signal
-        for (const auto &out_edge : node.out_edges()) {
-          I(out_edge.get_bits()==1);
-          setup_output_signal(group_id, out_edge, out_sig, mig_ntk);
-        }
-        ---------------------------------------------------------*/
+        I(node.inp_edges().size()>=2 && node.out_edges().size()>0);
         //mapping input edge to input signal
         //must differentiate between signed and unsigned input
         std::vector<mockturtle::mig_network::signal> out_sig, med_sig;
@@ -561,28 +524,28 @@ void Pass_mockturtle::create_MIG_network(LGraph *g) {
 
       case LessThan_Op: {
         fmt::print("LessThan_Op in gid:{}\n",group_id);
-        I(node.inp_edges().size()>1 && node.out_edges().size()>0);
+        I(node.inp_edges().size()>=2 && node.out_edges().size()>0);
         mapping_comparation_cell_lg2mig(true, false, mig_ntk, node, group_id);
         break;
       }
 
       case GreaterThan_Op: {
         fmt::print("GreaterThan_Op in gid:{}\n",group_id);
-        I(node.inp_edges().size()>1 && node.out_edges().size()>0);
+        I(node.inp_edges().size()>=2 && node.out_edges().size()>0);
         mapping_comparation_cell_lg2mig(false, false, mig_ntk, node, group_id);
         break;
       }
 
       case LessEqualThan_Op: {
         fmt::print("LessEqualThan_Op in gid:{}\n",group_id);
-        I(node.inp_edges().size()>1 && node.out_edges().size()>0);
+        I(node.inp_edges().size()>=2 && node.out_edges().size()>0);
         mapping_comparation_cell_lg2mig(true, true, mig_ntk, node, group_id);
         break;
       }
 
       case GreaterEqualThan_Op: {
         fmt::print("GreaterEqualThan_Op in gid:{}\n",group_id);
-        I(node.inp_edges().size()>1 && node.out_edges().size()>0);
+        I(node.inp_edges().size()>=2 && node.out_edges().size()>0);
         mapping_comparation_cell_lg2mig(false, true, mig_ntk, node, group_id);
         break;
       }
@@ -729,14 +692,12 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *g) {
         }
 
         case U32Const_Op: {
-          new_node = lg->create_node(op); //FIX ME: remove once new api available
-          //new_node = lg->create_node_const(old_node.get_type_const_value(), );
+          new_node = lg->create_node_const(old_node.get_type_const_value(), old_node.get_driver_pin().get_bits());
           break;
         }
 
         case StrConst_Op: {
-          new_node = lg->create_node(op); //FIX ME: remove once new api available
-          //new_node = lg->create_node_const(old_node.get_type_const_sview());
+          new_node = lg->create_node_const(old_node.get_type_const_sview(), old_node.get_driver_pin().get_bits());
           break;
         }
 
