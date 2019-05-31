@@ -41,7 +41,7 @@ public:
     (void) c1121;
 
     auto c12   = ast.add_child(c1,   std::make_tuple("K2",     Lnast_ntype_as, 0));
-    auto c121  = ast.add_child(c12,  std::make_tuple("$a",     Lnast_ntype_ref, 0));
+    auto c121  = ast.add_child(c12,  std::make_tuple("$a",     Lnast_ntype_input, 0));
     auto c122  = ast.add_child(c12,  std::make_tuple("___a",   Lnast_ntype_ref, 0));
     (void) c121;
     (void) c122;
@@ -54,7 +54,7 @@ public:
     (void) c1321;
 
     auto c14   = ast.add_child(c1,   std::make_tuple("K4",     Lnast_ntype_as, 0));
-    auto c141  = ast.add_child(c14,  std::make_tuple("$b",     Lnast_ntype_ref, 0));
+    auto c141  = ast.add_child(c14,  std::make_tuple("$b",     Lnast_ntype_input, 0));
     auto c142  = ast.add_child(c14,  std::make_tuple("___b",   Lnast_ntype_ref, 0));
     (void) c141;
     (void) c142;
@@ -67,25 +67,88 @@ public:
     (void) c1521;
 
     auto c16   = ast.add_child(c1,   std::make_tuple("K6",     Lnast_ntype_as, 0));
-    auto c161  = ast.add_child(c16,  std::make_tuple("%s",     Lnast_ntype_ref, 0));
+    auto c161  = ast.add_child(c16,  std::make_tuple("%s",     Lnast_ntype_output, 0));
     auto c162  = ast.add_child(c16,  std::make_tuple("___c",   Lnast_ntype_ref, 0));
     (void) c161;
     (void) c162;
 
     auto c17   = ast.add_child(c1,   std::make_tuple("K7",     Lnast_ntype_and, 0));
     auto c171  = ast.add_child(c17,  std::make_tuple("___d",   Lnast_ntype_ref, 0));
-    auto c172  = ast.add_child(c17,  std::make_tuple("$a",     Lnast_ntype_ref, 0));
-    auto c173  = ast.add_child(c17,  std::make_tuple("$b",     Lnast_ntype_ref, 0));
+    auto c172  = ast.add_child(c17,  std::make_tuple("$a",     Lnast_ntype_input, 0));
+    auto c173  = ast.add_child(c17,  std::make_tuple("$b",     Lnast_ntype_input, 0));
     (void) c171;
     (void) c172;
     (void) c173;
 
     auto c18   = ast.add_child(c1,   std::make_tuple("K8",     Lnast_ntype_pure_assign, 0));
-    auto c181  = ast.add_child(c18,  std::make_tuple("%s",     Lnast_ntype_ref, 0));
+    auto c181  = ast.add_child(c18,  std::make_tuple("%s",     Lnast_ntype_output, 0));
     auto c182  = ast.add_child(c18,  std::make_tuple("___d",   Lnast_ntype_ref, 0));
     (void) c181;
     (void) c182;
 
+    auto c19    = ast.add_child(c1,     std::make_tuple("K11",  Lnast_ntype_sub,1));
+    auto c191   = ast.add_child(c19,    std::make_tuple("K11",  Lnast_ntype_statement,1));
+    auto c1911  = ast.add_child(c191,   std::make_tuple("K11",  Lnast_ntype_plus,1));
+    auto c19111 = ast.add_child(c1911,  std::make_tuple("___f", Lnast_ntype_ref,1));
+    auto c19112 = ast.add_child(c1911,  std::make_tuple("$a",   Lnast_ntype_input,1));
+    auto c19113 = ast.add_child(c1911,  std::make_tuple("$b",   Lnast_ntype_input,1));
+    (void) c19111;
+    (void) c19112;
+    (void) c19113;
+
+
+    auto c1912   = ast.add_child(c191,   std::make_tuple("K12",    Lnast_ntype_pure_assign, 1));
+    auto c19121  = ast.add_child(c1912,  std::make_tuple("%o",     Lnast_ntype_output, 1));
+    auto c19122  = ast.add_child(c1912,  std::make_tuple("___f",   Lnast_ntype_ref, 1));
+    (void) c19121;
+    (void) c19122;
+
+
+    auto c1913   = ast.add_child(c191,   std::make_tuple("K9",     Lnast_ntype_func_def, 1));
+    auto c19131  = ast.add_child(c1913,  std::make_tuple("___e",   Lnast_ntype_ref, 1));
+    auto c19132  = ast.add_child(c1913,  std::make_tuple("K11",    Lnast_ntype_ref, 1));
+    auto c19133  = ast.add_child(c1913,  std::make_tuple("$a",     Lnast_ntype_input, 1));
+    auto c19134  = ast.add_child(c1913,  std::make_tuple("$b",     Lnast_ntype_input, 1));
+    auto c19135  = ast.add_child(c1913,  std::make_tuple("%o",     Lnast_ntype_output, 1));
+    (void) c19131;
+    (void) c19132;
+    (void) c19133;
+    (void) c19134;
+    (void) c19135;
+
+    auto c1a  = ast.add_child(c1,  std::make_tuple("K15",    Lnast_ntype_lable, 0));
+    auto c1a1 = ast.add_child(c1a, std::make_tuple("___h",   Lnast_ntype_ref,   0));
+    auto c1a2 = ast.add_child(c1a, std::make_tuple("a",      Lnast_ntype_ref,   0));
+    auto c1a3 = ast.add_child(c1a, std::make_tuple("0d3",    Lnast_ntype_const, 0));
+    (void) c1a1;
+    (void) c1a2;
+    (void) c1a3;
+
+
+    auto c1b  = ast.add_child(c1,  std::make_tuple("K16",    Lnast_ntype_lable, 0));
+    auto c1b1 = ast.add_child(c1b, std::make_tuple("___i",   Lnast_ntype_ref,   0));
+    auto c1b2 = ast.add_child(c1b, std::make_tuple("b",      Lnast_ntype_ref,   0));
+    auto c1b3 = ast.add_child(c1b, std::make_tuple("0d4",    Lnast_ntype_const, 0));
+    (void) c1b1;
+    (void) c1b2;
+    (void) c1b3;
+
+    auto c1c  = ast.add_child(c1, std::make_tuple("K17",     Lnast_ntype_func_call, 0));
+    auto c1c1 = ast.add_child(c1c, std::make_tuple("___g",   Lnast_ntype_ref,   0));
+    auto c1c2 = ast.add_child(c1c, std::make_tuple("fun1",   Lnast_ntype_ref,   0));
+    auto c1c3 = ast.add_child(c1c, std::make_tuple("___h",   Lnast_ntype_ref,   0));
+    auto c1c4 = ast.add_child(c1c, std::make_tuple("___i",   Lnast_ntype_ref,   0));
+    (void) c1c1;
+    (void) c1c2;
+    (void) c1c3;
+    (void) c1c4;
+
+
+    auto c1d   = ast.add_child(c1,   std::make_tuple("K18",     Lnast_ntype_pure_assign, 0));
+    auto c1d1  = ast.add_child(c1d,  std::make_tuple("result",  Lnast_ntype_ref, 0));
+    auto c1d2  = ast.add_child(c1d,  std::make_tuple("___g",    Lnast_ntype_ref, 0));
+    (void) c1d1;
+    (void) c1d2;
 
     ast.each_breadth_first_fast([this](const Tree_index &parent, const Tree_index &self, tuple tuple_data) {
       while (static_cast<size_t>(self.level)>=ast_sorted_golden.size())
@@ -164,4 +227,4 @@ TEST_F(Lnast_test, Traverse_breadth_first_check_on_ast) {
     check_against_ast(ast_sorted_testee);
 }
 
-//Todo: need to test pre-order print screen
+//todo: need to test node by node when pre-order traverse
