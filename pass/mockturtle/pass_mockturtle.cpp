@@ -29,7 +29,10 @@ void Pass_mockturtle::do_work(LGraph *g) {
   LGBench b("pass.mockturtle");
 
   fmt::print("Partitioning...\n");
-  lg_partition(g);
+  if (!lg_partition(g)) {
+    fmt::print("There is no node to be lutified!");
+    return;
+  }
   fmt::print("Partition finished.\n");
   for (const auto &group_id_it : node2gid) {
     fmt::print("nid{} -> gid:{}\n", group_id_it.first, group_id_it.second);
@@ -48,7 +51,7 @@ void Pass_mockturtle::do_work(LGraph *g) {
   fmt::print("Lutified LGraph created.\n");
 }
 
-void Pass_mockturtle::lg_partition(LGraph *g) {
+bool Pass_mockturtle::lg_partition(LGraph *g) {
   unsigned int new_group_id = 0;
   for(const auto &nid : g->forward()) {
     auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
@@ -58,6 +61,7 @@ void Pass_mockturtle::lg_partition(LGraph *g) {
       dfs_populate_gid(node, new_group_id);
     }
   }
+  return !node2gid.empty();
 }
 
 void Pass_mockturtle::dfs_populate_gid(Node node, const unsigned int group_id) {
@@ -663,8 +667,8 @@ void Pass_mockturtle::convert_MIG_to_KLUT(LGraph *g) {
 void Pass_mockturtle::create_lutified_lgraph(LGraph *g) {
   auto lg_path = g->get_path();
   auto lg_source = g->get_library().get_source(g->get_lgid());
-  std::string lg_name(g->get_name());
-  lg_name += LUTIFIED_NETWORK_NAME_SIGNATURE;
+  std::string g_name(g->get_name());
+  std::string lg_name = absl::StrCat(g_name, LUTIFIED_NETWORK_NAME_SIGNATURE);
   LGraph *lg = LGraph::create(lg_path, lg_name, lg_source);
   //create unchanged portion
   fmt::print("Start mapping unchanged part...\n");
@@ -832,7 +836,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *g) {
           auto pick_node_sink_pin = pick_node.setup_sink_pin(0);
           auto pick_node_offset_pin = pick_node.setup_sink_pin(1);
           auto pick_node_driver_pin = pick_node.setup_driver_pin(0);
-          auto const_node_for_bit_select = lg->create_node_const(i, sizeof(decltype(bit_width))*8);
+          auto const_node_for_bit_select = lg->create_node_const(i, 0);
           auto bit_select_signal = const_node_for_bit_select.setup_driver_pin(0);
           pick_node_driver_pin.set_bits(1);
           lg->add_edge(bit_select_signal, pick_node_offset_pin);
@@ -873,7 +877,13 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *g) {
     }
   }
   fmt::print("finished.\n");
+
+  g->close();
   lg->close();
+
+  //if (g_name.rfind(LUTIFIED_NETWORK_NAME_SIGNATURE) != std::string::npos) {
+    lg->rename(lg_path, lg_name, g_name);
+  //}
 }
 
 //slove complemented signal
