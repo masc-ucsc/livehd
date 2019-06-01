@@ -30,7 +30,7 @@ protected:
       nopen    = 0;
       version  = 0;
       nentries = 0;
-      source   = "";
+      source   = "-";
     }
   };
   std::vector<std::string> liberty_list;
@@ -121,8 +121,9 @@ public:
     return max_next_version - 1;
   }
 
-  bool expunge_lgraph(std::string_view name, const LGraph *lg);
+  bool expunge_lgraph(std::string_view name, LGraph *lg);
 
+  Lg_type_id copy_lgraph(std::string_view name, std::string_view new_name);
   Lg_type_id register_lgraph(std::string_view name, std::string_view source, LGraph *lg);
   bool       unregister_lgraph(std::string_view name, Lg_type_id lgid, const LGraph *lg);
 

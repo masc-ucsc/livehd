@@ -4,6 +4,7 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <sys/sendfile.h>
 
 #include "rapidjson/document.h"
 #include "rapidjson/error/en.h"
@@ -148,30 +149,9 @@ bool Graph_library::rename_name(std::string_view orig, std::string_view dest) {
 
   auto dest_it = name2id.find(dest);
   if (dest_it != name2id.end()) {
-    // TODO: We could expunge the destination library if nobody has it opened
-    if (attribute[dest_it->second].nopen!=0) {
-      Pass::error("graph_library: renamed from {} to an already used name {}", orig, dest);
-      return false;
-    }
-
-    DIR *dr = opendir(path.c_str());
-    if (dr == NULL) {
-      Pass::error("graph_library: unable to access path {}", path);
-      return false;
-    }
-
-    struct dirent *de;  // Pointer for directory entry
-    std::string match(std::string("lgraph_") + std::to_string(dest_it->second));
-    while ((de = readdir(dr)) != NULL) {
-      std::string chop_name(de->d_name, match.size());
-      if (chop_name == match) {
-        std::string file = absl::StrCat(path,"/",de->d_name);
-        fmt::print("deleting... {}\n", file);
-        unlink(file.c_str());
-      }
-    }
-
-    closedir(dr);
+    auto it2 = global_name2lgraph[path].find(dest);
+    I(it2 != global_name2lgraph[path].end());
+    expunge_lgraph(dest, it2->second);
   }
 
   auto it2 = global_name2lgraph[path].find(orig);
@@ -250,13 +230,16 @@ void Graph_library::reload() {
     // this is only true in case where we skip graph ids
     if (attribute.size() <= graph_id) attribute.resize(graph_id + 1);
 
-    attribute[graph_id].name     = name;
-    attribute[graph_id].source   = source;
-    attribute[graph_id].version  = graph_version;
-    attribute[graph_id].nentries = nentries;
-
-    // NOTE: must use attribute to keep the string in memory
-    name2id[name] = graph_id;
+    if (graph_version.value != 0) {
+      attribute[graph_id].name     = name;
+      attribute[graph_id].source   = source;
+      attribute[graph_id].version  = graph_version;
+      attribute[graph_id].nentries = nentries;
+      // NOTE: must use attribute to keep the string in memory
+      name2id[name] = graph_id;
+    } else {
+      recycled_id.set_bit(graph_id);
+    }
   }
 
   graph_list.close();
@@ -347,7 +330,7 @@ void Graph_library::recycle_id(Lg_type_id lgid) {
   recycled_id.set_range(attribute.size(), end_pos, false);
 }
 
-bool Graph_library::expunge_lgraph(std::string_view name, const LGraph *lg) {
+bool Graph_library::expunge_lgraph(std::string_view name, LGraph *lg) {
   if (global_name2lgraph[path][name] != lg) {
     Pass::warn("graph_library::expunge_lgraph({}) for a wrong graph??? path:{}", name, path);
     return true;
@@ -358,14 +341,90 @@ bool Graph_library::expunge_lgraph(std::string_view name, const LGraph *lg) {
   Lg_type_id id = it->second;
   name2id.erase(it);
 
-  if (attribute[id].nopen == 0) {
-    attribute[id].clear();
-    recycle_id(id);
-    return true;
+  if (attribute[id].nopen != 0) {
+    lg->sync();
+    // FIXME: Memory leak? it is out there used by someone
   }
 
-  // WARNING: Do not recycle attribute (multiple ::create, and overwrite existing name)
-  return false;
+  attribute[id].clear();
+  recycle_id(id);
+
+  DIR *dr = opendir(path.c_str());
+  if (dr == NULL) {
+    Pass::error("graph_library: unable to access path {}", path);
+    return false;
+  }
+
+  struct dirent *de;  // Pointer for directory entry
+  std::string match = absl::StrCat("lgraph_", std::to_string(id));
+  while ((de = readdir(dr)) != NULL) {
+    std::string chop_name(de->d_name, match.size());
+    if (chop_name == match) {
+      std::string file = absl::StrCat(path,"/",de->d_name);
+      fmt::print("deleting... {}\n", file);
+      unlink(file.c_str());
+    }
+  }
+
+  closedir(dr);
+
+  return true;
+}
+
+Lg_type_id Graph_library::copy_lgraph(std::string_view name, std::string_view new_name) {
+  graph_library_clean = false;
+  auto it2 = global_name2lgraph[path].find(name);
+  if (it2 != global_name2lgraph[path].end()) {  // orig around, but not open
+    it2->second->sync();
+  }
+  const auto &it = name2id.find(name);
+  I(it != name2id.end());
+  auto id_orig = it->second;
+
+  Lg_type_id id_new = reset_id(new_name, attribute[id_orig].source);
+
+  attribute[id_new] = attribute[id_orig];
+  attribute[id_new].name = new_name;
+
+  DIR *dr = opendir(path.c_str());
+  if (dr == NULL) {
+    Pass::error("graph_library: unable to access path {}", path);
+    return false;
+  }
+
+  struct dirent *de;  // Pointer for directory entry
+  std::string match = absl::StrCat("lgraph_", std::to_string(id_orig));
+  std::string rematch = absl::StrCat("lgraph_", std::to_string(id_new));
+  while ((de = readdir(dr)) != NULL) {
+    std::string chop_name(de->d_name, match.size());
+    if (chop_name == match) {
+      std::string_view dname(de->d_name);
+      std::string file = absl::StrCat(path,"/",dname);
+      std::string_view extension = dname.substr(match.size());
+
+      auto new_file = absl::StrCat(path, "/", rematch, extension);
+
+      fmt::print("copying... {} to {}\n", file, new_file);
+
+      int source = open(file.c_str(), O_RDONLY, 0);
+      int dest = open(new_file.c_str(), O_WRONLY | O_CREAT /*| O_TRUNC/**/, 0644);
+
+      // struct required, rationale: function stat() exists also
+      struct stat stat_source;
+      fstat(source, &stat_source);
+
+      sendfile(dest, source, 0, stat_source.st_size);
+
+      close(source);
+      close(dest);
+    }
+  }
+
+  closedir(dr);
+
+  clean_library();
+
+  return id_new;
 }
 
 Lg_type_id Graph_library::register_lgraph(std::string_view name, std::string_view source, LGraph *lg) {
@@ -496,8 +555,6 @@ void Graph_library::clean_library() {
   graph_list << (attribute.size() - 1) << std::endl;
   for (size_t id = 1; id < attribute.size(); ++id) {
     const auto &it = attribute[id];
-    if (it.version == 0)  // Clear/delete sets version to zero
-      continue;
     graph_list << it.name << " " << id << " " << it.version << " " << it.nentries << " " << it.source << std::endl;
   }
 

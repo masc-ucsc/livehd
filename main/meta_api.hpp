@@ -44,7 +44,19 @@ protected:
     auto dest = var.get("dest");
     assert(!name.empty());
 
-    LGraph::rename(path, name, dest);
+    auto *glibrary = Graph_library::instance(path);
+    glibrary->rename_name(name, dest);
+  }
+
+  static void copy(Eprp_var &var) {
+    auto path = var.get("path");
+    auto name = var.get("name");
+    auto dest = var.get("dest");
+    assert(!name.empty());
+
+    auto *glibrary = Graph_library::instance(path);
+
+    glibrary->copy_lgraph(name, dest);
   }
 
   static void match(Eprp_var &var) {
@@ -200,5 +212,13 @@ public:
     m10.add_label_optional("path", "lgraph path", "lgdb");
 
     eprp.register_method(m10);
+
+    //---------------------
+    Eprp_method m11("lgraph.copy", "copy a lgraph", &Meta_api::copy);
+    m11.add_label_optional("path", "lgraph path", "lgdb");
+    m11.add_label_required("name", "lgraph name");
+    m11.add_label_required("dest", "lgraph destination name");
+
+    eprp.register_method(m11);
   }
 };
