@@ -75,7 +75,7 @@ constexpr Token_id Token_id_tick          = 42;  // '
 constexpr Token_id Token_id_obr           = 43;  // [
 constexpr Token_id Token_id_cbr           = 44;  // ]
 constexpr Token_id Token_id_backslash     = 45;  // \ back slash
-constexpr Token_id Token_id_reference     = 46;  // \target
+constexpr Token_id Token_id_reference     = 46;  // \foo
 constexpr Token_id Token_id_keyword_first = 64;
 constexpr Token_id Token_id_keyword_last  = 254;
 
@@ -239,13 +239,22 @@ public:
     return std::string_view(&buffer[token_list[p].pos], token_list[p].len);
   }
 
-  std::string_view scan_next_next_sview() const {
-    size_t p = scanner_pos + 2;
+  //std::string_view scan_next_next_sview() const {
+  //  size_t p = scanner_pos + 2;
+  //  if (p >= token_list.size())
+  //    p = token_list.size()-1;
+  //  return std::string_view(&buffer[token_list[p].pos], token_list[p].len);
+  //}
+
+  std::string_view scan_peep_sview(int offset) const {
+    I(offset != 0);
+    size_t p = scanner_pos + offset;
     if (p >= token_list.size())
       p = token_list.size()-1;
+    else if (p < 0)
+      p = 0 ;
     return std::string_view(&buffer[token_list[p].pos], token_list[p].len);
   }
-
 
   void scan_append(std::string &text) const;
   void scan_prev_append(std::string &text) const;
@@ -271,10 +280,13 @@ public:
     return token_list[scanner_pos + pos].tok == tok;
   }
 
-  bool scan_next_is_token(Token_id tok){
-    size_t p = scanner_pos + 1;
+  bool scan_peep_is_token(Token_id tok, int offset) const {
+    I(offset != 0);
+    size_t p = scanner_pos + offset;
     if (p >= token_list.size())
       p = token_list.size() - 1;
+    else if (p < 0)
+      p = 0 ;
     return token_list[p].tok == tok;;
   }
 
@@ -289,5 +301,12 @@ public:
 
   bool has_errors() const { return n_errors > 0; }
 
-  Token scan_get_token() const {return token_list[scanner_pos];}
+  Token scan_get_token(int offset = 0) const {
+    size_t p = scanner_pos + offset;
+    if (p >= token_list.size())
+      p = token_list.size() - 1;
+    else if (p < 0)
+      p = 0 ;
+    return token_list[p];
+  }
 };

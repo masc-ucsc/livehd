@@ -83,10 +83,6 @@ void Elab_scanner::add_token(Token &t) {
     token_list.back().tok = Token_id_pipe;
     token_list.back().len += t.len;
     return;
-  } else if(last_tok.tok == Token_id_backslash && t.tok == Token_id_alnum) {
-    token_list.back().tok = Token_id_reference;
-    token_list.back().len += t.len;
-    return;
   } else if (t.tok == Token_id_eq) {    // <=
     if (last_tok.tok == Token_id_lt) {  // <=
       token_list.back().tok = Token_id_le;
@@ -122,7 +118,12 @@ void Elab_scanner::add_token(Token &t) {
       token_list.back().tok = Token_id_input;
       token_list.back().len += t.len;
       return;
-    } else if (last_tok.tok == Token_id_alnum || last_tok.tok == Token_id_register || last_tok.tok == Token_id_output || last_tok.tok == Token_id_input) {  // foo
+    } else if (last_tok.tok == Token_id_backslash){ // \foo
+      token_list.back().tok = Token_id_reference;
+      token_list.back().len += t.len;
+      return;
+    } else if (last_tok.tok == Token_id_alnum || last_tok.tok == Token_id_register || last_tok.tok == Token_id_output
+                                              || last_tok.tok == Token_id_input || last_tok.tok == Token_id_reference) {  // foo
       token_list.back().len += t.len;
       return;
     }
