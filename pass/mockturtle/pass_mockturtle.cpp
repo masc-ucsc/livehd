@@ -49,6 +49,18 @@ void Pass_mockturtle::do_work(LGraph *g) {
   fmt::print("Creating lutified LGraph...\n");
   create_lutified_lgraph(g);
   fmt::print("Lutified LGraph created.\n");
+
+  node2gid.clear();
+  gid2mig.clear();
+  gid2klut.clear();
+  input_edges.clear();
+  output_edges.clear();
+  edge2signal_mig.clear();
+  edge2signal_klut.clear();
+  old_node_to_new_node.clear();
+  new_node_to_old_node.clear();
+  gidMTnode2LGnode.clear();
+  gid_fanin2parent_pid.clear();
 }
 
 bool Pass_mockturtle::lg_partition(LGraph *g) {
