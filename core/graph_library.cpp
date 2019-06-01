@@ -146,10 +146,32 @@ bool Graph_library::rename_name(std::string_view orig, std::string_view dest) {
   }
   Lg_type_id id = it->second;
 
-  if (name2id.find(dest) != name2id.end()) {
+  auto dest_it = name2id.find(dest);
+  if (dest_it != name2id.end()) {
     // TODO: We could expunge the destination library if nobody has it opened
-    Pass::error("graph_library: renamed from {} to an already used name {}", orig, dest);
-    return false;
+    if (attribute[dest_it->second].nopen!=0) {
+      Pass::error("graph_library: renamed from {} to an already used name {}", orig, dest);
+      return false;
+    }
+
+    DIR *dr = opendir(path.c_str());
+    if (dr == NULL) {
+      Pass::error("graph_library: unable to access path {}", path);
+      return false;
+    }
+
+    struct dirent *de;  // Pointer for directory entry
+    std::string match(std::string("lgraph_") + std::to_string(dest_it->second));
+    while ((de = readdir(dr)) != NULL) {
+      std::string chop_name(de->d_name, match.size());
+      if (chop_name == match) {
+        std::string file = absl::StrCat(path,"/",de->d_name);
+        fmt::print("deleting... {}\n", file);
+        unlink(file.c_str());
+      }
+    }
+
+    closedir(dr);
   }
 
   auto it2 = global_name2lgraph[path].find(orig);
