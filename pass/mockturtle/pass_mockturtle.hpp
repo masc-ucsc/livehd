@@ -98,16 +98,6 @@ protected:
   void connect_complemented_signal(LGraph *, Node_pin &, Node_pin &, const mockturtle::klut_network &, const mockturtle::klut_network::signal &);
 
   template<typename signal, typename Ntk>
-  signal create_eq(const signal &x, const signal &y, Ntk &net) {
-    signal not_x = net.create_not(x);
-    signal not_y = net.create_not(y);
-    signal x_and_y = net.create_and(x, y);
-    signal not_x_and_not_y = net.create_and(not_x, not_y);
-    signal is_x_y_equal = net.create_or(x_and_y, not_x_and_not_y);
-    return is_x_y_equal;
-  }
-
-  template<typename signal, typename Ntk>
   void create_half_adder(const signal &x, const signal &y, signal &s, signal &c, Ntk &net) {
     s = net.create_xor(x, y);
     c = net.create_and(x, y);
@@ -137,14 +127,6 @@ protected:
       case Xor_Op:
         //fmt::print("Node: Xor_Op\n");
         break;
-/*
-      case Join_Op:
-        //fmt::print("Node: Join_Op\n");
-        break;
-      case Pick_Op:
-        //fmt::print("Node: Pick_Op\n");
-        break;
-*/
       case Equals_Op:
         //fmt::print("Node: Equals_Op\n");
         break;
@@ -154,19 +136,19 @@ protected:
       case GreaterThan_Op:
         //fmt::print("Node: GreaterThan_Op\n");
         break;
-/*
       case LessEqualThan_Op:
         //fmt::print("Node: LessEqualThan_Op\n");
         break;
       case GreaterEqualThan_Op:
         //fmt::print("Node: GreaterEqualThan_Op\n");
         break;
-      //case ShiftRight_Op:
+/*
+      case ShiftRight_Op:
         //fmt::print("Node: ShiftRight_Op\n");
-      //  break;
-      //case ShiftLeft_Op:
+        break;
+      case ShiftLeft_Op:
         //fmt::print("Node: ShiftLeft_Op\n");
-      //  break;
+        break;
 */
       default:
         //fmt::print("Node: Unknown\n");
