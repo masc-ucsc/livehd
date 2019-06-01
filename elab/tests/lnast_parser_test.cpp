@@ -49,7 +49,7 @@ int main(int argc, char **argv) {
     std::string node_name(node_data.node_token.get_text(memblock));
     auto        node_type  = node_data.node_type;
     auto        node_scope = node_data.scope;
-    fmt::print("nname:{}, ntype:{}, nscope:{}\n", node_name, node_type, node_scope);
+    fmt::print("nname:{>18}, ntype:{>18}, nscope:{>18}\n", node_name, node_type, node_scope);
 
     tuple tuple_data = std::make_tuple(node_name, node_type, node_scope);
     ast_sorted_testee[self.level].emplace_back(tuple_data);
