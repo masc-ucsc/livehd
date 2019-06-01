@@ -30,13 +30,13 @@ void Pass_mockturtle::do_work(LGraph *g) {
 
   fmt::print("Partitioning...\n");
   if (!lg_partition(g)) {
-    fmt::print("There is no node to be lutified!");
+    fmt::print("There is no node to be lutified!\n");
     return;
   }
-  fmt::print("Partition finished.\n");
   for (const auto &group_id_it : node2gid) {
     fmt::print("nid{} -> gid:{}\n", group_id_it.first, group_id_it.second);
   }
+  fmt::print("Partition finished.\n");
 
   fmt::print("Creating MIG network...\n");
   create_MIG_network(g);
@@ -878,12 +878,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *g) {
   }
   fmt::print("finished.\n");
 
-  g->close();
   lg->close();
-
-  //if (g_name.rfind(LUTIFIED_NETWORK_NAME_SIGNATURE) != std::string::npos) {
-    lg->rename(lg_path, lg_name, g_name);
-  //}
 }
 
 //slove complemented signal
