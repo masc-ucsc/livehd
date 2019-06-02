@@ -83,7 +83,7 @@ get_out_pid // Port_ID for the output port driving this edge
 
 
 A graph edge does not have a unique id. LGraph does not allow to store
-meta-information for edges generic edges. It allows to store meta-information
+meta-information for generic edges. It allows to store meta-information
 for `Outp_ID`. This is different than edge because the same node/port output can
 have many destinations and all have to share the same meta-information. This
 would be an issue if we want to store information like resistance/capacitance
