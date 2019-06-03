@@ -254,18 +254,17 @@ void simple() {
   if (conta!=22)
     failed = true;
 
-  for(const auto &nid : g->fast()) {
-    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
+  for(const auto &node : g->fast()) {
 
-    fmt::print("idx:{}\n", nid);
+    fmt::print("node:{}\n", node.debug_name());
     fmt::print("  inp_edges");
     for(const auto &edge : node.inp_edges()) {
-      fmt::print("  {}", edge.driver.get_node().get_compact().nid);
+      fmt::print("  {}", edge.driver.debug_name());
     }
     fmt::print("\n");
     fmt::print("  out_edges");
     for(const auto &edge : node.out_edges()) {
-      fmt::print("  {}", edge.sink.get_node().get_compact().nid);
+      fmt::print("  {}", edge.sink.debug_name());
     }
     fmt::print("\n");
   }

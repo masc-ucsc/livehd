@@ -93,7 +93,7 @@ bool Edge_raw_iterator_base::update_frontier() {
       auto node = Node(top_g,Node::Compact(it.first));
       // FIXME: What if it is a sub-module just pure combinational or with flops? How to distinguish???
       if (node.get_type().is_pipelined()) {
-        pending->set(it.first);
+        pending->insert(it.first);
         it.second = -1;  // Mark as pipelined, but keep not to visit twice
         pushed    = true;
       }
@@ -124,14 +124,14 @@ void CForward_edge_iterator::set_current_node_as_visited() {
       auto ninputs = node.get_num_inputs()-1; // -1 for self
       I(ninputs >= 0);
       if (ninputs == 0) {  // Done already
-        pending->set(key);
+        pending->insert(key);
       } else {
         (*frontier)[key] = ninputs;
       }
     } else {
       auto ninputs = (fit->second) - 1;
       if (ninputs == 0) {  // Done
-        pending->set(key);
+        pending->insert(key);
         frontier->erase(fit);
       } else {
         fit->second = ninputs;
@@ -141,17 +141,22 @@ void CForward_edge_iterator::set_current_node_as_visited() {
 }
 
 CForward_edge_iterator Forward_edge_iterator::begin() {
-  pending.set(Node::Compact(0,Node::Hardcoded_input_nid));
+  pending.insert(Node::Compact(0,Node::Hardcoded_input_nid));
 
   hardcoded_nid = Node::Hardcoded_output_nid;
 
-  pending.insert(top_g->get_const_node_ids().begin(),top_g->get_const_node_ids().end());
+  for(const auto it:top_g->get_const_value_map()) {
+    pending.insert(Node::Compact(0,it.second.nid));
+  }
+  for(const auto it:top_g->get_const_sview_map()) {
+    pending.insert(Node::Compact(0,it.second.nid));
+  }
 
   // Add any sub node that has no inputs but has outputs (not hit with forward)
-  for(auto c_sub:top_g->get_sub_ids()) {
-    Node n_sub(top_g,c_sub);
+  for(auto it:top_g->get_sub_nodes_map()) {
+    Node n_sub(top_g,it.first);
     if (n_sub.has_outputs() && !n_sub.has_inputs()) {
-      pending.set(c_sub);
+      pending.insert(Node::Compact(0,it.first.nid));
     }
   }
 
@@ -173,10 +178,10 @@ void CBackward_edge_iterator::find_dce_nodes() {
 
   for (auto it : *frontier) {
     auto current = it.first;
-    floating.set(current);
+    floating.insert(current);
 
     do{
-      dc_visited.set(current);
+      dc_visited.insert(current);
       floating.erase(current);
 
       Node node(top_g,current);
@@ -185,8 +190,8 @@ void CBackward_edge_iterator::find_dce_nodes() {
         const Node::Compact key = e.sink.get_node().get_compact();
 
         if (!dc_visited.contains(key) && !back_iter_global_visited.contains(key)) {
-          discovered.set(key);
-          floating.set(key);
+          discovered.insert(key);
+          floating.insert(key);
         }
       }
       if (discovered.empty())
@@ -220,7 +225,7 @@ void CBackward_edge_iterator::set_current_node_as_visited() {
       auto noutputs = node.get_num_outputs()-1; // -1 for self
       I(noutputs >= 0);
       if (noutputs == 0) {  // Done already
-        pending->set(key);
+        pending->insert(key);
       } else {
         (*frontier)[key] = noutputs;
       }
@@ -228,7 +233,7 @@ void CBackward_edge_iterator::set_current_node_as_visited() {
       auto noutputs = (fit->second) - 1;
       I(noutputs >= 0);
       if (noutputs == 0) {  // Done
-        pending->set(key);
+        pending->insert(key);
         frontier->erase(fit);
       } else {
         fit->second = noutputs;
@@ -240,14 +245,14 @@ void CBackward_edge_iterator::set_current_node_as_visited() {
 
 CBackward_edge_iterator Backward_edge_iterator::begin() {
 
-  pending.set(Node::Compact(0,Node::Hardcoded_output_nid));
+  pending.insert(Node::Compact(0,Node::Hardcoded_output_nid));
   hardcoded_nid = Node::Hardcoded_input_nid;
 
   // Add any sub node that has no outputs but has inputs (not hit with backward)
-  for(auto c_sub:top_g->get_sub_ids()) {
-    Node n_sub(top_g,c_sub);
+  for(auto it:top_g->get_sub_nodes_map()) {
+    Node n_sub(top_g,it.first);
     if (!n_sub.has_outputs() && n_sub.has_inputs()) {
-      pending.set(c_sub);
+      pending.insert(Node::Compact(0,it.first.nid));
     }
   }
 

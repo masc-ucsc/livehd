@@ -136,11 +136,11 @@ Lg_type_id Node::get_type_sub() const {
 }
 
 void Node::set_type_lut(Lut_type_id lutid) {
-  g->set_type_lut(nid, lutid);
+  current_g->set_type_lut(nid, lutid);
 }
 
 Lut_type_id Node::get_type_lut() const {
-  return g->get_type_lut(nid);
+  return current_g->get_type_lut(nid);
 }
 
 Sub_node &Node::get_type_sub_node() const {
@@ -261,16 +261,20 @@ void Node::del_node() {
   current_g->del_node(nid);
 }
 
-std::string_view Node::set_name(std::string_view iname) {
-  return Ann_node_name::set(*this,iname);
+void Node::set_name(std::string_view iname) {
+  Ann_node_name::ref(current_g)->set(get_compact_class(), iname);
 }
 
 std::string_view Node::create_name() const {
-  if (Ann_node_name::has(*this))
-    return Ann_node_name::get(*this);
+  auto *ref = Ann_node_name::ref(current_g);
+  const auto it = ref->find(get_compact_class());
+  if (it != ref->end())
+    return ref->get_val(it);
 
-  std::string signature = absl::StrCat("lg_", get_type().get_name(), std::to_string(nid));
-  return Ann_node_name::set(*this, signature);
+  std::string sig = absl::StrCat("lg_", get_type().get_name(), std::to_string(nid));
+  const auto it2 = ref->set(get_compact_class(), sig);
+  return ref->get_val(it2);
+#if 0
   // FIXME: HERE. Does not scale for large designs (too much recursion)
 
   if (get_type().op == GraphIO_Op) {
@@ -293,13 +297,14 @@ std::string_view Node::create_name() const {
   I(Ann_node_name::find(current_g, signature).is_invalid());
 
   return Ann_node_name::set(*this, signature);
+#endif
 }
 
 std::string_view Node::get_name() const {
-  return Ann_node_name::get(*this);
+  return Ann_node_name::ref(current_g)->get_val(get_compact_class());
 }
 
-std::string Node::debug_name(bool nowarning) const {
+std::string_view Node::debug_name(bool nowarning) const {
 #ifdef NDEBUG
   static int conta = 0;
   if (conta<10 && !nowarning) {
@@ -307,30 +312,39 @@ std::string Node::debug_name(bool nowarning) const {
     fmt::print("WARNING: Node::debug_name should not be called during release (Slowww!)\n");
   }
 #endif
-  std::string name;
-  if (Ann_node_name::has(*this))
-    name = Ann_node_name::get(*this);
+  auto *ref = Ann_node_name::ref(current_g);
+  const auto it = ref->find(get_compact_class());
+  if (it != ref->end())
+    return ref->get_val(it);
 
-  return absl::StrCat("node_", name, std::to_string(nid));
-  //not a acceptable format for dot
-  //return absl::StrCat("node_", std::to_string(nid), "(", name ,")");
+  static std::string last_debug;
+  last_debug = absl::StrCat("node_", std::to_string(nid));
+
+  return last_debug;
 }
 
 bool Node::has_name() const {
-  return Ann_node_name::has(*this);
+  return Ann_node_name::ref(current_g)->has_key(get_compact_class());
 }
 
 const Ann_place &Node::get_place() const {
-  return Ann_node_place::get(*this);
+  auto *data = Ann_node_place::ref(top_g)->ref(get_compact());
+  return *data;
 }
 
 Ann_place *Node::ref_place() {
-  if (!Ann_node_place::has(*this))
-    Ann_node_place::set(*this,Ann_place()); // Empty
+  auto *ref = Ann_node_place::ref(top_g);
 
-  return &Ann_node_place::at(*this);
+  auto it = ref->find(get_compact());
+  if (it != ref->end()) {
+    return ref->ref(it);
+  }
+
+  auto it2 = ref->set(get_compact(),Ann_place()); // Empty
+  return ref->ref(it2);
 }
 
 bool Node::has_place() const {
-  return Ann_node_place::has(*this);
+  return Ann_node_place::ref(top_g)->has(get_compact());
 }
+

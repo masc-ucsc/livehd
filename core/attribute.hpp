@@ -10,7 +10,7 @@ template<const char *Name, typename Base, typename Attr_data>
 class Attribute {
 
   inline static std::vector<Attr_data *> table;
-  inline static LGraph    *last_lg   = nullptr;
+  inline static const LGraph *last_lg   = nullptr;
   inline static Attr_data *last_attr = nullptr;
 
   static std::string_view get_base() {
@@ -30,7 +30,7 @@ class Attribute {
     return (table.size() <= pos) || table[pos] == nullptr;
   };
 
-  static void setup_table(LGraph *lg) {
+  static void setup_table(const LGraph *lg) {
     last_lg   = lg;
     auto pos = lg->get_lgid().value;
     if (!is_invalid(pos)) {
@@ -55,13 +55,13 @@ public:
       setup_table(obj.get_top_lgraph());
     return last_attr;
   }
-  static Attr_data *ref(LGraph *lg) {
+  static Attr_data *ref(const LGraph *lg) {
     if (unlikely(lg!=last_lg))
       setup_table(lg);
     return last_attr;
   }
 
-  static void clear(LGraph *lg) {
+  static void clear(const LGraph *lg) {
     setup_table(lg);
 
     size_t pos = lg->get_lgid().value;

@@ -172,23 +172,22 @@ void LGraph_Node_Type::set_type_const_value(Index_ID nid, uint32_t value) {
   node_type_table[node_internal[nid].get_nid()] = (Node_Type_Op)(U32ConstMin_Op + value);
 }
 
-Node LGraph_Node_Type::find_type_const_sview(std::string_view value) const {
+Index_ID LGraph_Node_Type::find_type_const_sview(std::string_view value) const {
 
   auto it = const_sview.find(value);
   if (it == const_sview.end())
-    return Node();
+    return 0;
 
-  Node::Compact_class cnode = const_sview.get_val(it);
-  return Node(this,cnode);
+  return const_sview.get(it).nid;
 }
 
-Node LGraph_Node_Type::find_type_const_value(uint32_t value) const {
+Index_ID LGraph_Node_Type::find_type_const_value(uint32_t value) const {
 
   auto it = const_value.find(value);
   if (it == const_value.end())
-    return Node();
+    return 0;
 
-  return Node(this,const_value.get_val(it));
+  return const_value.get(it).nid;
 }
 
 void LGraph_Node_Type::set_type_const_sview(Index_ID nid, std::string_view value) {
@@ -197,11 +196,14 @@ void LGraph_Node_Type::set_type_const_sview(Index_ID nid, std::string_view value
   I(node_internal[nid].is_node_state());
   I(node_internal[nid].get_nid() < node_type_table.size());
 
-  auto it = const_sview.find(value);
-  if (it==it.end()) {
-    it = const_sview.set(value, Node::Compact_class(nid));
+  const auto it = const_sview.find(value);
+  uint32_t char_id;
+  if (it==const_sview.end()) {
+    auto it2 = const_sview.set(value, Node::Compact_class(nid));
+    char_id = it2->first;
+  }else{
+    char_id = it->first;
   }
-  uint32_t char_id = it->getFirst();
   I(char_id < (uint32_t)(StrConstMax_Op - StrConstMin_Op));
 
   node_type_table[node_internal[nid].get_nid()] = static_cast<Node_Type_Op>(StrConstMin_Op + char_id);
@@ -221,6 +223,6 @@ uint32_t LGraph_Node_Type::get_type_const_value(Index_ID nid) const {
 }
 
 std::string_view LGraph_Node_Type::get_constant(uint32_t const_id) const {
-  return consts_sview.get_sview(const_id);
+  return const_sview.get_sview(const_id);
 }
 

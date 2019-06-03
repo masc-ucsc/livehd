@@ -43,8 +43,8 @@ protected:
   void             set_type_const_sview(Index_ID nid, std::string_view value);
   void             set_type_const_value(Index_ID nid, uint32_t value);
 
-  Node             find_type_const_sview(std::string_view value) const;
-  Node             find_type_const_value(uint32_t value) const;
+  Index_ID         find_type_const_sview(std::string_view value) const;
+  Index_ID         find_type_const_value(uint32_t value) const;
 
   std::string_view get_type_const_sview(Index_ID nid) const;
   uint32_t         get_type_const_value(Index_ID nid) const;

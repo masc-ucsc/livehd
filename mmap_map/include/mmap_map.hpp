@@ -1051,6 +1051,22 @@ public:
     setup_pointers();
 	}
 
+	explicit map(std::string_view _path, std::string_view _map_name)
+		: Hash{Hash{}}
+	  , mmap_name{std::string(_path) + std::string("/") + std::string(_map_name)} {
+
+    struct stat sb;
+    if (_path != ".") {
+      std::string path(_path);
+      if (stat(path.c_str(), &sb) != 0 || !S_ISDIR(sb.st_mode)) {
+        int e = mkdir(path.c_str(), 0755);
+        assert(e>=0);
+      }
+    }
+
+    setup_pointers();
+	}
+
 	explicit map()
 		: Hash{Hash{}} {
 
@@ -1096,16 +1112,16 @@ public:
 		destroy();
 	}
 
-	const_iterator set(key_type&& key, T &&val) {
+	iterator set(key_type&& key, T &&val) {
 		return doCreate(std::move(key), std::move(val));
 	}
-	const_iterator set(const key_type& key, T &&val) {
+	iterator set(const key_type& key, T &&val) {
 		return doCreate(key, std::move(val));
 	}
-	const_iterator set(const key_type& key, const T &val) {
+	iterator set(const key_type& key, const T &val) {
 		return doCreate(key, val);
 	}
-	const_iterator set(key_type&& key, const T &val) {
+	iterator set(key_type&& key, const T &val) {
 		return doCreate(std::move(key), val);
 	}
 
@@ -1143,15 +1159,56 @@ public:
 		return findIdx(key)>=0;
 	}
 
+	std::string_view get_sview(uint32_t key_pos) const {
+		if (mmap_map_UNLIKELY(!loaded)) {
+			reload();
+		}
+    assert(using_sview);
+		assert(key_pos<mmap_txt_base[0]);
+		std::string_view sview(reinterpret_cast<char *>(&mmap_txt_base[key_pos+1]),mmap_txt_base[key_pos]);
+		return sview;
+	}
+
 	// Returns a reference to the value found for key.
-	[[nodiscard]] T const& get(key_type const& key) const {
+	[[nodiscard]] T get(key_type const& key) const {
 		auto idx = findIdx(key);
 		assert(idx>=0);
 
 		if constexpr (using_val_sview) {
-      return get_val(mKeyVals[idx]);
+      return get_sview(mKeyVals[idx].getSecond());
     }else{
       return mKeyVals[idx].getSecond();
+    }
+	}
+
+	[[nodiscard]] T get(const value_type& it) const {
+		if constexpr (using_val_sview) {
+      return get_sview(it.second);
+    }else{
+      return it.second;
+    }
+	}
+
+	[[nodiscard]] T get(const_iterator it) const {
+		if constexpr (using_val_sview) {
+      return get_sview(it->second);
+    }else{
+      return it->second;
+    }
+	}
+
+	[[nodiscard]] Key get_key(const_iterator it) const {
+		if constexpr (using_key_sview) {
+      return get_sview(it->first);
+    }else{
+      return it->first;
+    }
+	}
+	[[nodiscard]] Key get_key(const value_type& it) const {
+		if constexpr (using_key_sview) {
+      return get_sview(it.first);
+    }else{
+      return it.first;
     }
 	}
 
@@ -1161,9 +1218,27 @@ public:
 
 		if constexpr (using_val_sview) {
       assert(false); // Do not get a reference to a std::string_view
-      return &get_val(mKeyVals[idx]);
+      return &get_sview(mKeyVals[idx].getSecond());
     }else{
       return &mKeyVals[idx].getSecond();
+    }
+	}
+
+	[[nodiscard]] T *ref(const value_type& it) {
+		if constexpr (using_val_sview) {
+      assert(false); // Do not get a reference to a std::string_view
+      return &get_sview(it.second);
+    }else{
+      return &it.second;
+    }
+	}
+
+	[[nodiscard]] T *ref(iterator it) {
+		if constexpr (using_val_sview) {
+      assert(false); // Do not get a reference to a std::string_view
+      return &get_sview(it->second);
+    }else{
+      return &it->second;
     }
 	}
 
@@ -1316,24 +1391,6 @@ public:
 	float conflict_factor() const { return 0.0; }
 #endif
 
-	[[nodiscard]] std::string_view get_key(const value_type &it) const {
-    if constexpr (using_key_sview) {
-      return get_sview(it.getFirst());
-    }else{
-      assert(false); // get_val only makes sense when the KEY is std::string_view
-      return "bug";
-    }
-	}
-
-	[[nodiscard]] std::string_view get_val(const value_type &it) const {
-    if constexpr (using_val_sview) {
-      return get_sview(it.getSecond());
-    }else{
-      assert(false); // get_val only makes sense when the DATA is std::string_view
-      return "bug";
-    }
-	}
-
 private:
 	void rehash(size_t numBuckets) {
 		assert(mmap_map_UNLIKELY((numBuckets & (numBuckets - 1)) == 0)); // rehash only allowed for power of two
@@ -1417,16 +1474,6 @@ private:
 		return insert_point;
 	}
 
-	std::string_view get_sview(uint32_t key_pos) const {
-		if (mmap_map_UNLIKELY(!loaded)) {
-			reload();
-		}
-    assert(using_sview);
-		assert(key_pos<mmap_txt_base[0]);
-		std::string_view sview(reinterpret_cast<char *>(&mmap_txt_base[key_pos+1]),mmap_txt_base[key_pos]);
-		return sview;
-	}
-
 	void clear_sview() const {
     assert(using_sview);
     if (mmap_txt_base == nullptr) {
@@ -1437,7 +1484,7 @@ private:
 	}
 
 	template <typename Arg, typename Data>
-		const_iterator doCreate(Arg&& key, Data&& val) {
+		iterator doCreate(Arg&& key, Data&& val) {
 			while (true) {
 				int idx;
 				InfoType info;
@@ -1520,7 +1567,7 @@ private:
           ++(*mNumElements);
         }
 
-				return const_iterator(mKeyVals + insertion_idx, mInfo + insertion_idx);
+				return iterator(mKeyVals + insertion_idx, mInfo + insertion_idx);
         //return;
 			}
 		}

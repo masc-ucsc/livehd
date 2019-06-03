@@ -84,7 +84,7 @@ void LGraph::each_sub_fast_direct(const std::function<bool(Node &)> fn) {
     I(node_internal[cid].is_node_state());
     I(node_internal[cid].is_master_root());
 
-    auto node = Node(this,it.first);
+    auto node = Node(this,it->first);
 
     bool cont = fn(node);
     if (!cont) return;

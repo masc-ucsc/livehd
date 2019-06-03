@@ -5,6 +5,7 @@ class LGraph;
 class XEdge;
 class Node;
 
+#include "mmap_map.hpp"
 #include "lgedge.hpp"
 
 class Node_pin {
@@ -44,6 +45,7 @@ public:
     friend class Edge_raw_iterator_base;
     friend class CForward_edge_iterator;
     friend class CBackward_edge_iterator;
+    friend class mmap_map::hash<Node_pin::Compact>;
   public:
 
     //constexpr operator size_t() const { I(0); return idx|(sink<<31); }
@@ -86,6 +88,7 @@ public:
     friend class Edge_raw_iterator_base;
     friend class CForward_edge_iterator;
     friend class CBackward_edge_iterator;
+    friend class mmap_map::hash<Node_pin::Compact_driver>;
   public:
 
     //constexpr operator size_t() const { I(0); return idx|(sink<<31); }
@@ -127,6 +130,7 @@ public:
     friend class Edge_raw_iterator_base;
     friend class CForward_edge_iterator;
     friend class CBackward_edge_iterator;
+    friend class mmap_map::hash<Node_pin::Compact_class>;
   public:
 
     //constexpr operator size_t() const { I(0); return idx|(sink<<31); }
@@ -167,6 +171,7 @@ public:
     friend class Edge_raw_iterator_base;
     friend class CForward_edge_iterator;
     friend class CBackward_edge_iterator;
+    friend class mmap_map::hash<Node_pin::Compact_class_driver>;
   public:
 
     //constexpr operator size_t() const { I(0); return idx|(sink<<31); }
@@ -297,3 +302,39 @@ public:
 
   // END ATTRIBUTE ACCESSORS
 };
+
+namespace mmap_map {
+template <>
+struct hash<Node_pin::Compact> {
+  size_t operator()(Node_pin::Compact const &o) const {
+    uint64_t h = o.idx;
+    h = (h<<12) ^ o.hid ^ o.idx;
+    return hash<uint64_t>{}((h<<1) + o.sink);
+  }
+};
+
+template <>
+struct hash<Node_pin::Compact_driver> {
+  size_t operator()(Node_pin::Compact_driver const &o) const {
+    uint64_t h = o.idx;
+    h = (h<<12) ^ o.hid ^ o.idx;
+    return hash<uint64_t>{}(h);
+  }
+};
+
+template <>
+struct hash<Node_pin::Compact_class> {
+  size_t operator()(Node_pin::Compact_class const &o) const {
+    uint32_t h = o.idx;
+    return hash<uint32_t>{}((h<<1) + o.sink);
+  }
+};
+
+template <>
+struct hash<Node_pin::Compact_class_driver> {
+  size_t operator()(Node_pin::Compact_class_driver const &o) const {
+    return hash<uint32_t>{}(o.idx);
+  }
+};
+}
+

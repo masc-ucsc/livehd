@@ -216,16 +216,16 @@ public:
   void del_node();
 
   // BEGIN ATTRIBUTE ACCESSORS
-  std::string      debug_name(bool nowarning=false) const;
+  std::string_view debug_name(bool nowarning=false) const;
 
-  std::string_view set_name(std::string_view iname);
+  void             set_name(std::string_view iname);
   std::string_view get_name() const;
   std::string_view create_name() const;
-  bool has_name() const;
+  bool             has_name() const;
 
   const Ann_place &get_place() const;
-  Ann_place *ref_place();
-  bool has_place() const;
+  Ann_place       *ref_place();
+  bool             has_place() const;
 
   // END ATTRIBUTE ACCESSORS
 };

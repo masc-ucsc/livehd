@@ -222,8 +222,8 @@ public:
     return const_cast<LGraph *>(find_sub_lgraph_const(hid));
   }
 
-  Node_pin add_graph_input(std::string_view str, uint16_t pos);
-  Node_pin add_graph_output(std::string_view str, uint16_t pos);
+  Node_pin add_graph_input(std::string_view str, Port_ID pos);
+  Node_pin add_graph_output(std::string_view str, Port_ID pos);
 
   Node create_node();
 
