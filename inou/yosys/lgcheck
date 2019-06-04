@@ -119,6 +119,7 @@ if [ "$OPT_DEBUG" != "" ]; then
   echo "${YOSYS} -p \"${yosys_read}; ${yosys_prep}; ${yosys_equiv}; equiv_status -assert\""
 fi
 
+
 ${YOSYS} -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; equiv_status -assert" \
     2> /dev/null | grep "Equivalence successfully proven!"
 
@@ -127,13 +128,13 @@ if [ $? -eq 0 ]; then
   exit 0
 fi
 
-${YOSYS} -p "${yosys_read}; ${yosys_prep_bb}; ${yosys_equiv}; equiv_status -assert" \
-    2> /dev/null | grep "Equivalence successfully proven!"
+#${YOSYS} -p "${yosys_read}; ${yosys_prep_bb}; ${yosys_equiv}; equiv_status -assert" \
+#    2> /dev/null | grep "Equivalence successfully proven!"
 
-if [ $? -eq 0 ]; then
-  echo "Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP} (module contain blackboxes)"
-  exit 0
-fi
+#if [ $? -eq 0 ]; then
+#  echo "Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP} (module contain blackboxes)"
+#  exit 0
+#fi
 
 ${YOSYS} -p "${yosys_read};
     proc; memory -nomap; opt_expr -full; opt -purge; opt -purge;
