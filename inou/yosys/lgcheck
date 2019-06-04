@@ -99,7 +99,7 @@ if [ "${CELLLIB}" != "" ]; then
     echo "cell library ${CELLLIB} not found"
     exit 1
   fi
-  lib="read_verilog ${CELLLIB}"
+  lib="read_verilog -sv ${CELLLIB}"
 fi
 
 #exit 2
@@ -173,8 +173,8 @@ fi
 
 echo "WARN: Yosys failed to prove equivalency, trying to prove equivalency with Formality."
 
-gate_top=`${YOSYS} -p "read_verilog ${GATE}; hierarchy ${TOP_STR}"  | grep "Top module" | tail -n1 | tr '\\\\' ' ' | awk '{print $3}'`
-gold_top=`${YOSYS} -p "read_verilog ${GOLD}; hierarchy ${TOP_STR}"  | grep "Top module" | tail -n1 | tr '\\\\' ' ' | awk '{print $3}'`
+gate_top=`${YOSYS} -p "read_verilog -sv ${GATE}; hierarchy ${TOP_STR}"  | grep "Top module" | tail -n1 | tr '\\\\' ' ' | awk '{print $3}'`
+gold_top=`${YOSYS} -p "read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}"  | grep "Top module" | tail -n1 | tr '\\\\' ' ' | awk '{print $3}'`
 
 if [ -z $FM_SHELL ]; then
   FM_SHELL=`which fm_shell`

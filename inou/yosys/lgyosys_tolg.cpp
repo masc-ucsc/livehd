@@ -606,13 +606,12 @@ static void process_assigns(RTLIL::Module *module, LGraph *g) {
             wire2pin[lhs_wire] = dpin;
           } else {
             I(dpin.get_bits());
-            wire2pin[lhs_wire].set_bits(dpin.get_bits());
+            I(wire2pin[lhs_wire].get_bits() == dpin.get_bits());
 
-            assert(false);// FIXME: find test case to debug/fix this
-#if 0
-            auto spin = g->get_node(wire2pin[lhs_wire].idx).get_sink_pin(wire2pin[lhs_wire].out_pid);
-            g->add_edge(dpin, spin);
-#endif
+            printf("WARNING: unclear code\n");
+            //auto spin = wire2pin[lhs_wire];
+            //assert(false);// FIXME: find test case to debug/fix this
+            //g->add_edge(dpin, spin);
           }
         }
 

@@ -59,7 +59,7 @@ module add3 (
 endmodule
 
 // add5
-module add5_top (
+module punching_3 (
   input i1,
   input i2,
   input i3,

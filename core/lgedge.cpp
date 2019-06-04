@@ -13,8 +13,8 @@ static_assert(sizeof(LEdge) == sizeof(LEdge_Internal), "LEdge should be 8 bytes"
 static_assert(sizeof(SEdge) == 2, "SEdge should be 2 bytes");
 static_assert(sizeof(SEdge) == sizeof(SEdge_Internal), "SEdge should be 2 bytes");
 static_assert(sizeof(Edge_raw) == 2, "Edge_raw should be 2 bytes like SEdge");
-static_assert(sizeof(Node_Internal) == 32, "Node should be 32 bytes and 32 bytes aligned");
-static_assert(sizeof(Node_Internal_Page) == 32, "Node should be 32 bytes and 32 bytes aligned");
+static_assert(sizeof(Node_Internal) == 64, "Node should be 64 bytes and 64 bytes aligned");
+static_assert(sizeof(Node_Internal_Page) == 64, "Node should 64 32 bytes and 64 bytes aligned");
 static_assert((1ULL << Index_bits) <= MMAPA_MAX_ENTRIES, "Max number of entries in Dense");
 
 Index_ID SEdge_Internal::get_page_idx() const { return Node_Internal_Page::get(this).get_idx(); }
@@ -301,7 +301,7 @@ void Node_Internal::try_recycle() {
 }
 
 void Node_Internal::del_input_int(const Edge_raw *inp_edge) {
-  I(((uint64_t)inp_edge) >> 5 == ((uint64_t)this) >> 5);
+  I(((uint64_t)inp_edge) >> 6 == ((uint64_t)this) >> 6);
 
   int pos = (SEdge *)inp_edge - sedge;
 
@@ -336,7 +336,7 @@ void Node_Internal::del_input_int(const Edge_raw *inp_edge) {
 }
 
 void Node_Internal::del_output_int(const Edge_raw *out_edge) {
-  I(((uint64_t)out_edge) >> 5 == ((uint64_t)this) >> 5);
+  I(((uint64_t)out_edge) >> 6 == ((uint64_t)this) >> 6);
 
   int pos = (SEdge *)out_edge - sedge;
 
@@ -519,8 +519,10 @@ void Node_Internal::assimilate_edges(Node_Internal &other) {
         inc_outputs(true);
       }
       if (other_out->is_snode()) {
+        I(other.out_pos >= 1);
         other.out_pos -= 1;
       } else {
+        I(other.out_pos >= 4);
         other.out_pos -= 4;
         I(other.out_long > 0);
         other.out_long--;

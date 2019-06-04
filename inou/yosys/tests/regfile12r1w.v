@@ -97,7 +97,7 @@ module regfile12r1w
        q1_next = rf[raddr1];
    end
    always @(*) begin
-     if (we0 && raddr0 == waddr0)
+     if (we0 && raddr2 == waddr0)
        q2_next = din0;
      else
        q2_next = rf[raddr2];

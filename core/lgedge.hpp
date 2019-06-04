@@ -209,14 +209,14 @@ enum Node_State {
 
 class Node_Internal;
 
-struct alignas(32) Node_Internal_Page {
+struct alignas(64) Node_Internal_Page {
   Node_State state : 3;  // 1byte
   uint8_t    pad1[7];    // 7bytes waste just to get Index_ID aligned
-  Index_ID   idx;        // 36bits but OK to give 8bytes for speed
-  Index_ID   free_idx;   // ptr to the first free node
+  Index_ID   idx;        // 4bytes 32bits but for speed
+  Index_ID   free_idx;   // 4bytes 32bits to the first free node
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused"
-  uint8_t pad2[32 - 24];
+  uint8_t pad2[64 - 24];
 #pragma clang diagnostic pop
 
   Index_ID get_idx() const { return idx; }
@@ -255,29 +255,27 @@ struct alignas(32) Node_Internal_Page {
 // should split in subgraphs large netlist. The split is transparent in reading
 // and output.
 //
-class __attribute__((packed)) Node_Internal {
+class  __attribute__((packed)) Node_Internal {
 private:
   // BEGIN 12 Bytes common payload
   Node_State state : 3;  // State must be the first thing (Node_Internal_Page)
   uint16_t   root : 1;
-  uint16_t   inp_pos : 4;
-  uint16_t   bits : 14;
+  uint16_t   inp_pos : 5;
   uint16_t   graph_io_input : 1; // FIXME: remove this bits. Use idx==1 
   uint16_t   graph_io_output : 1; // FIXME: remove this bits. Use idx==2 
-  uint16_t   out_pos : 4;
-  uint16_t   next_lower2 : 2; // FIXME: remove this bits, no longer used 32bits max for Index_ID
-  uint16_t   inp_long : 2;
+  uint16_t   bits : 13;
+  uint16_t   out_pos : 5;
+  uint16_t   inp_long : 3; // FIXME: 2 are nought
   // 4 bytes aligned
 public:
   // WARNING: This must be here not at the end of the structure. OTherwise the
   // iterator goes the 64byte boundary for the outputs
-  static constexpr int Num_SEdges = 16 - 6;  // 6 entries for the 96 bits (12 bytes)
+  static constexpr int Num_SEdges = 32 - 6;  // 6 entries for the 96 bits (12 bytes)
   SEdge                sedge[Num_SEdges];    // WARNING: Must not be the last field in struct or iterators fail
 private:
   uint64_t nid : Index_bits;     // 32bits, 4 byte aligned
-  uint64_t pad3: 1; // 31bits in Index_bits, to do pad/align to 4 bytes
   Port_ID  dst_pid : Port_bits;  // 30bits
-  uint16_t out_long : 2;
+  uint16_t out_long : 3; // FIXME: 2 are nought
   // END 10 Bytes common payload
 
   void try_recycle();
@@ -425,8 +423,8 @@ public:
   static Node_Internal &get(const Edge_raw *ptr) {
     // WARNING: this belongs to a structure that it is cache aligned (32 bytes)
     uint64_t root_int = (uint64_t)ptr;
-    root_int          = root_int >> 5;
-    root_int          = root_int << 5;
+    root_int          = root_int >> 6;
+    root_int          = root_int << 6;
 
     Node_Internal *root_n = reinterpret_cast<Node_Internal *>(root_int);
     I(root_n->is_node_state());
@@ -438,16 +436,13 @@ public:
     I(is_next_state());
     uint32_t *idx_upp = (uint32_t *)(&sedge[0]);
     uint64_t  idx_val = *idx_upp;
-    idx_val <<= 2;
-    idx_val |= next_lower2;
     return idx_val;
   }
 
   void set_next_state(Index_ID _idx) {
     I(is_next_state());
-    next_lower2       = _idx.value;
     uint32_t *idx_upp = (uint32_t *)(&sedge[0]);
-    *idx_upp          = _idx.value >> 2;
+    *idx_upp          = _idx.value;
   }
 
   void push_next_state(Index_ID _idx) {
