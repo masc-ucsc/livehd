@@ -378,7 +378,7 @@ mockturtle::mig_network::signal Pass_mockturtle::compare_op(const comparator_inp
     kth_term.clear();
     kth_term.emplace_back(comp_op_bit_sigs[i]);
     for (long unsigned int j = i + 1;  j < bit_width; j++) {
-      kth_term.emplace_back(is_equal_bit_sigs[i]);
+      kth_term.emplace_back(is_equal_bit_sigs[j]);
     }
     if (kth_term.size() == 1) {
       res.emplace_back(kth_term[0]);
