@@ -252,8 +252,12 @@ void LGraph_Base::print_stats() const {
   size_t n_nodes = 1;
   size_t n_extra = 1;
   size_t n_roots = 1;
+  size_t n_long_edges = 1;
+  size_t n_short_edges = 1;
   for (size_t i = 0; i < node_internal.size(); i++) {
     if (node_internal[i].is_node_state()) {
+      n_long_edges  += node_internal[i].get_num_local_long();
+      n_short_edges += node_internal[i].get_num_local_short();
       n_nodes++;
       if (node_internal[i].is_root()) n_roots++;
     } else {
@@ -267,11 +271,13 @@ void LGraph_Base::print_stats() const {
 
   fmt::print("path:{} name:{}\n", path, name);
   fmt::print("  size:{} kbytes:{} bytes/size:{}\n", node_internal.size(), bytes / 1024, bytes / node_internal.size());
-  fmt::print("  total root:{} node:{} extra:{}\n", n_roots, n_nodes, n_extra);
+  fmt::print("  total root:{} node:{} extra:{} root/ratio:{} extra/ratio:{}\n", n_roots, n_nodes, n_extra, n_roots/(1.0+n_nodes+n_extra), n_extra/(1.0+n_nodes+n_extra));
   fmt::print("  total bytes/root:{} bytes/node:{} bytes/extra:{}\n", bytes / n_roots, bytes / n_nodes, bytes / n_extra);
 
-  bytes = node_internal.size() * sizeof(Node_Internal);
+  bytes = node_internal.size() * sizeof(Node_Internal)+1;
   fmt::print("  edges bytes/root:{} bytes/node:{} bytes/extra:{}\n", bytes / n_roots, bytes / n_nodes, bytes / n_extra);
+  bytes = n_nodes+1;
+  fmt::print("  edges short/node:{} long/node:{} short/ratio:{}\n", n_short_edges / bytes, n_long_edges / bytes, (n_short_edges)/(1.0+n_short_edges+n_long_edges));
 }
 
 Index_ID LGraph_Base::get_space_output_pin(const Index_ID master_nid, const Index_ID start_nid, const Port_ID dst_pid, const Index_ID root_idx) {

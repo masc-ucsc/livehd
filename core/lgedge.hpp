@@ -319,6 +319,9 @@ protected:
 public:
   Node_Internal() { reset(); }
 
+  uint8_t get_num_local_short() const { return inp_pos + out_pos - 4 * inp_long - 4 * out_long; }
+  uint8_t get_num_local_long() const { return inp_long + out_long; }
+
   uint8_t get_inp_pos() const { return inp_pos; }
   uint8_t get_out_pos() const { return out_pos; }
 
