@@ -103,9 +103,13 @@ void Pass_sample::annotate_placement(LGraph *g) {
     auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
 
     auto &place = Ann_node_place::get(node);
-    fmt::print("cell {} placed at x:{}\n",node.create_name(), place.get_x());
+    fmt::print("1.cell {} placed at x:{}\n",node.create_name(), place.get_x());
   }
+  for(const auto &nid : g->forward()) {
+    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
 
+    auto &place = Ann_node_place::get(node);
+    fmt::print("2.cell {} placed at x:{}\n",node.create_name(), place.get_x());
+  }
 }
-
 
