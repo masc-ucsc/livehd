@@ -7,23 +7,23 @@
 #include "annotate.hpp"
 #include "inou_pyrope.hpp"
 
-void setup_pass_sample() {
-  Pass_sample p;
+void setup_inou_pyrope() {
+  Inou_pyrope p;
   p.setup();
 }
 
-void Pass_sample::setup() {
-  Eprp_method m1("pass.sample", "counts number of nodes in an lgraph", &Pass_sample::work);
+void Inou_pyrope::setup() {
+  Eprp_method m1("inou.pyrope", "counts number of nodes in an lgraph", &Inou_pyrope::work);
 
   register_pass(m1);
 }
 
-Pass_sample::Pass_sample()
+Inou_pyrope::Inou_pyrope()
     : Pass("sample") {
 }
 
-void Pass_sample::work(Eprp_var &var) {
-  Pass_sample pass;
+void Inou_pyrope::work(Eprp_var &var) {
+  Inou_pyrope pass;
 
   for(const auto &g : var.lgs) {
     pass.compute_histogram(g);
@@ -32,8 +32,8 @@ void Pass_sample::work(Eprp_var &var) {
   }
 }
 
-void Pass_sample::compute_histogram(LGraph *g) {
-  LGBench b("pass.sample.compute_histogram");
+void Inou_pyrope::compute_histogram(LGraph *g) {
+  LGBench b("inou.pyrope.compute_histogram");
 
   std::map<std::string, int> histogram;
 
@@ -60,8 +60,8 @@ void Pass_sample::compute_histogram(LGraph *g) {
   fmt::print("Pass: cells {}\n", cells);
 }
 
-void Pass_sample::compute_max_depth(LGraph *g) {
-  LGBench b("pass.sample.max_depth");
+void Inou_pyrope::compute_max_depth(LGraph *g) {
+  LGBench b("inou.pyrope.max_depth");
 
   absl::flat_hash_map<Node::Compact, int>  depth;
 
@@ -81,8 +81,8 @@ void Pass_sample::compute_max_depth(LGraph *g) {
   fmt::print("Pass: max_depth {}\n", max_depth);
 }
 
-void Pass_sample::annotate_placement(LGraph *g) {
-  LGBench b("pass.sample.replace_inline");
+void Inou_pyrope::annotate_placement(LGraph *g) {
+  LGBench b("inou.pyrope.replace_inline");
 
   int x_pos = 0;
 

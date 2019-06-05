@@ -9,7 +9,7 @@ void Pass::register_pass(Eprp_method &method) {
   eprp.register_method(method);
 
   // All the passses should start with pass.*
-  assert(method.get_name().substr(0, 5) == "pass." || method.get_name().substr(0, 5) == "live.");
+  assert(method.get_name().substr(0, 5) == "pass." || method.get_name().substr(0, 5) == "live." || method.get_name().substr(0, 5) == "inou.");
 }
 
 void Pass::register_inou(Eprp_method &method) {

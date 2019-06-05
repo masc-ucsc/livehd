@@ -3,7 +3,7 @@
 
 #include "pass.hpp"
 
-class Pass_sample : public Pass {
+class Inou_pyrope : public Pass {
 protected:
   static void work(Eprp_var &var);
 
@@ -12,7 +12,7 @@ protected:
   void annotate_placement(LGraph *g);
 
 public:
-  Pass_sample();
+  Inou_pyrope();
 
   void setup() final;
 

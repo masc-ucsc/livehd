@@ -51,7 +51,7 @@ void Main_api::init() {
   setup_inou_liveparse();
   setup_inou_graphviz();
   /* setup_inou_json(); */
-  /* setup_inou_pyrope(); */
+  setup_inou_pyrope();
   /* setup_inou_rand(); */
   /* setup_inou_verific(); */
   /* setup_cops_live(); */
