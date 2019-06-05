@@ -19,8 +19,10 @@ public:
   // TODO: the snode and input can be avoided by accessing the Node_Internal information
   bool     snode   : 1;           // 1 bit
   bool     input   : 1;           // 1 bit
-  Port_ID  inp_pid : Port_bits;   // 30 bits abs
-  uint64_t raw_idx : Index_bits;  // 31 bits abs
+  Port_ID  inp_pid : Port_bits;   // 28 bits abs
+  int16_t  pad1: 2;
+  uint64_t raw_idx : Index_bits;  // 31 bits abs, 4 byte aligned
+  uint16_t pad2: 1;
 
   bool     is_snode() const { return snode; }
   bool     is_input() const { return input; }
@@ -48,11 +50,11 @@ public:
   }
 };
 
-struct __attribute__((packed)) SEdge_Internal {  // 2 bytes total
+struct __attribute__((packed)) SEdge_Internal {  // 2 bytes total (TODO: Move to 3 bytes)
   bool      snode : 1;                           //  1 bit
   bool      input : 1;                           //  1 bit
   SIndex_ID ridx : 12;                           //  relative
-  Port_ID   inp_pid : 2;                         //   2 bits ; abs
+  Port_ID   inp_pid : 2;                         //  2 bits ; abs
 
   bool     is_snode() const { return snode; }
   bool     is_input() const { return input; }
@@ -261,11 +263,10 @@ private:
   Node_State state : 3;  // State must be the first thing (Node_Internal_Page)
   uint16_t   root : 1;
   uint16_t   inp_pos : 5;
-  uint16_t   graph_io_input : 1; // FIXME: remove this bits. Use idx==1 
-  uint16_t   graph_io_output : 1; // FIXME: remove this bits. Use idx==2 
-  uint16_t   bits : 13;
+  uint16_t   driver_setup : 1;
+  uint16_t   sink_setup : 1;
   uint16_t   out_pos : 5;
-  uint16_t   inp_long : 3; // FIXME: 2 are nought
+  uint16_t   bits : Bits_bits; // 2 byte aligned
   // 4 bytes aligned
 public:
   // WARNING: This must be here not at the end of the structure. OTherwise the
@@ -273,9 +274,11 @@ public:
   static constexpr int Num_SEdges = 32 - 6;  // 6 entries for the 96 bits (12 bytes)
   SEdge                sedge[Num_SEdges];    // WARNING: Must not be the last field in struct or iterators fail
 private:
-  uint64_t nid : Index_bits;     // 32bits, 4 byte aligned
-  Port_ID  dst_pid : Port_bits;  // 30bits
-  uint16_t out_long : 3; // FIXME: 2 are nought
+  uint64_t nid : Index_bits;     // 31bits, 4 byte aligned
+  uint16_t pad: 1; // To get nicer alignment
+  Port_ID  dst_pid : Port_bits;  // 28bits, 4 byte aligned
+  uint16_t inp_long : 2; // 8 bytes each. Just 3 at most
+  uint16_t out_long : 2;
   // END 10 Bytes common payload
 
   void try_recycle();
@@ -520,7 +523,7 @@ public:
   }
   void set_bits(uint16_t _bits) {
     I(is_root());
-    I(_bits < (1 << 14));
+    static_assert(Bits_bits == 8*sizeof(uint16_t));
     bits = _bits;
   }
   bool is_driver_setup() const { return driver_setup != 0; }

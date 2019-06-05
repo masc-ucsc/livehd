@@ -250,8 +250,6 @@ void Graph_library::reload() {
     I(lg_entry.IsObject());
 
     I(lg_entry.HasMember("lgid"));
-    I(lg_entry.HasMember("nentries"));
-    I(lg_entry.HasMember("source"));
     I(lg_entry.HasMember("version"));
 
     uint64_t id = lg_entry["lgid"].GetUint64();;
@@ -260,21 +258,21 @@ void Graph_library::reload() {
       sub_nodes.resize(id+1);
     }
 
-    attributes[id].nentries = lg_entry["nentries"].GetUint64();;
-    attributes[id].source   = lg_entry["source"].GetString();;
-    attributes[id].version  = lg_entry["version"].GetUint64();;
+    auto version = lg_entry["version"].GetUint64();;
+    if (version != 0) {
+      I(lg_entry.HasMember("nentries"));
+      I(lg_entry.HasMember("source"));
+      attributes[id].nentries = lg_entry["nentries"].GetUint64();;
+      attributes[id].source   = lg_entry["source"].GetString();;
+      attributes[id].version  = version;
 
-    if (graph_version.value != 0) {
-      attribute[id].sub_node.from_json(lg_entry);
+      sub_nodes[id].from_json(lg_entry);
 
       // NOTE: must use attribute to keep the string in memory
-      name2id[sub_node.get_name()] = id;
-      name2id[attribute[id].sub_node.get_name()] = id;
-      I(attribute[id].sub_node.get_lgid() == id); // for consistency
-
-      I(sub_node.get_lgid() == id); // for consistency
+      name2id[sub_nodes[id].get_name()] = id;
+      I(sub_nodes[id].get_lgid() == id); // for consistency
     } else {
-      recycled_id.set_bit(graph_id);
+      recycled_id.set_bit(id);
     }
   }
 
@@ -372,18 +370,19 @@ void Graph_library::expunge(std::string_view name) {
     global_name2lgraph[path].erase(it);
   }
 
-  if (attribute[id].nopen != 0) {
-    lg->sync();
-    // FIXME: Memory leak? it is out there used by someone
-  }
+  auto it2 = name2id.find(name);
+  if (it2 == name2id.end())
+    return; // already gone
 
-  attribute[id].clear();
+  auto id = it2->second;
+
+  attributes[id].expunge();
   recycle_id(id);
 
   DIR *dr = opendir(path.c_str());
   if (dr == NULL) {
     Pass::error("graph_library: unable to access path {}", path);
-    return false;
+    return;
   }
 
   struct dirent *de;  // Pointer for directory entry
@@ -396,14 +395,9 @@ void Graph_library::expunge(std::string_view name) {
       unlink(file.c_str());
     }
   }
-
-  auto it2 = name2id.find(name);
-  I(it2 != name2id.end());
-  Lg_type_id id = it2->second;
+  closedir(dr);
 
   sub_nodes[id].expunge();  // Nuke IO and contents, but keep around lgid
-
-  closedir(dr);
 }
 
 void Graph_library::clear(Lg_type_id lgid) {
@@ -430,12 +424,11 @@ Lg_type_id Graph_library::copy_lgraph(std::string_view name, std::string_view ne
   const auto &it = name2id.find(name);
   I(it != name2id.end());
   auto id_orig = it->second;
-  I(sub_nodes[id].get_name() == name);
+  I(sub_nodes[id_orig].get_name() == name);
 
-  Lg_type_id id_new = reset_id(new_name, attribute[id_orig].source);
+  Lg_type_id id_new = reset_id(new_name, attributes[id_orig].source);
 
-  attribute[id_new] = attribute[id_orig];
-  attribute[id_new].name = new_name;
+  attributes[id_new] = attributes[id_orig];
 
   DIR *dr = opendir(path.c_str());
   if (dr == NULL) {
@@ -458,7 +451,7 @@ Lg_type_id Graph_library::copy_lgraph(std::string_view name, std::string_view ne
       fmt::print("copying... {} to {}\n", file, new_file);
 
       int source = open(file.c_str(), O_RDONLY, 0);
-      int dest = open(new_file.c_str(), O_WRONLY | O_CREAT /*| O_TRUNC/**/, 0644);
+      int dest = open(new_file.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
 
       // struct required, rationale: function stat() exists also
       struct stat stat_source;
