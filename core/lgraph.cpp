@@ -391,7 +391,7 @@ XEdge_iterator LGraph::inp_edges(const Node &node) const {
   return xiter;
 }
 
-const LGraph *LGraph::find_sub_lgraph_const(Hierarchy_id hid) const {
+const LGraph *LGraph::find_sub_lgraph_const(const Hierarchy_id hid) const {
   if (hid==0)
     return this;
 

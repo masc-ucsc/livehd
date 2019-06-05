@@ -18,6 +18,7 @@ protected:
   friend class Edge_raw_iterator_base;
   friend class CForward_edge_iterator;
   friend class CBackward_edge_iterator;
+  friend class Edge_raw;
 
   LGraph       *top_g;
   LGraph       *current_g;
@@ -26,7 +27,7 @@ protected:
   Port_ID       pid;
   bool          sink;
 
-  Node_pin(LGraph *_g, LGraph *_c_g, Hierarchy_id _hid, Index_ID _idx, Port_ID _pid, bool _sink);
+  Node_pin(LGraph *_g, LGraph *_c_g, const Hierarchy_id _hid, Index_ID _idx, Port_ID _pid, bool _sink);
 
   const Index_ID get_idx() const { I(idx); return idx;    }
 public:
@@ -51,7 +52,7 @@ public:
     //constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
     Compact(const Compact &obj): hid(obj.hid), idx(obj.idx), sink(obj.sink) { }
-    Compact(Hierarchy_id _hid, Index_ID _idx, bool _sink) :hid(_hid), idx(_idx) ,sink(_sink) { };
+    Compact(const Hierarchy_id _hid, Index_ID _idx, bool _sink) :hid(_hid), idx(_idx) ,sink(_sink) { };
     Compact() :hid(0), idx(0) ,sink(0) { };
     Compact &operator=(const Compact &obj) {
       I(this != &obj);
@@ -94,7 +95,7 @@ public:
     //constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
     Compact_driver(const Compact_driver &obj): hid(obj.hid), idx(obj.idx) { }
-    Compact_driver(Hierarchy_id _hid, Index_ID _idx) :hid(_hid), idx(_idx) { };
+    Compact_driver(const Hierarchy_id _hid, Index_ID _idx) :hid(_hid), idx(_idx) { };
     Compact_driver() :hid(0), idx(0) { };
     Compact_driver &operator=(const Compact_driver &obj) {
       I(this != &obj);

@@ -166,7 +166,7 @@ bool Graph_library::rename_name(std::string_view orig, std::string_view dest) {
   if (dest_it != name2id.end()) {
     auto it2 = global_name2lgraph[path].find(dest);
     I(it2 != global_name2lgraph[path].end());
-    expunge_lgraph(dest, it2->second);
+    expunge(dest);
   }
 
   auto it2 = global_name2lgraph[path].find(orig);

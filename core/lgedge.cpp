@@ -8,6 +8,8 @@
 
 #include "mmap_allocator.hpp"
 
+#include "lgraph.hpp"
+
 static_assert(sizeof(LEdge) == 8, "LEdge should be 8 bytes");
 static_assert(sizeof(LEdge) == sizeof(LEdge_Internal), "LEdge should be 8 bytes");
 static_assert(sizeof(SEdge) == 2, "SEdge should be 2 bytes");
@@ -535,12 +537,11 @@ void Node_Internal::assimilate_edges(Node_Internal &other) {
 
 Port_ID Edge_raw::get_dst_pid() const { return Node_Internal::get(this).get_dst_pid(); }
 
-/*
 Node_pin Edge_raw::get_out_pin(LGraph *g, const Hierarchy_id hid) const {
   if (is_input())
     return Node_pin(g, g->find_sub_lgraph(hid), hid, get_idx(), get_inp_pid(), false);
   else
-    return Node_pin(g, g->find_sub_lgraph(hid). hid, get_self_root_idx(), get_dst_pid(), false);
+    return Node_pin(g, g->find_sub_lgraph(hid), hid, get_self_root_idx(), get_dst_pid(), false);
 }
 
 Node_pin Edge_raw::get_inp_pin(LGraph *g, const Hierarchy_id hid) const {
@@ -549,7 +550,6 @@ Node_pin Edge_raw::get_inp_pin(LGraph *g, const Hierarchy_id hid) const {
   else
     return Node_pin(g, g->find_sub_lgraph(hid), hid, get_idx(), get_inp_pid(), true);
 }
-*/
 
 Index_ID Edge_raw::get_self_nid() const { return Node_Internal::get(this).get_nid(); }
 

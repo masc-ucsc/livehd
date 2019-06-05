@@ -97,7 +97,7 @@ protected:
   XEdge_iterator out_edges(const Node &node) const;
   XEdge_iterator inp_edges(const Node &node) const;
 
-  const LGraph *find_sub_lgraph_const(Hierarchy_id hid) const;
+  const LGraph *find_sub_lgraph_const(const Hierarchy_id hid) const;
 
   bool has_outputs(const Node_pin &pin) const {
     I(pin.get_idx() < node_internal.size());
@@ -215,10 +215,10 @@ public:
   void sync() override;
   void emplace_back() override;
 
-  const LGraph *find_sub_lgraph(Hierarchy_id hid) const {
+  const LGraph *find_sub_lgraph(const Hierarchy_id hid) const {
     return find_sub_lgraph_const(hid);
   }
-  LGraph *find_sub_lgraph(Hierarchy_id hid) {
+  LGraph *find_sub_lgraph(const Hierarchy_id hid) {
     return const_cast<LGraph *>(find_sub_lgraph_const(hid));
   }
 

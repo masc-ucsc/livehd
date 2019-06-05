@@ -155,7 +155,7 @@ public:
     return max_next_version - 1;
   }
 
-  bool expunge_lgraph(std::string_view name, LGraph *lg);
+  //deprecated bool expunge_lgraph(std::string_view name, LGraph *lg);
 
   Lg_type_id copy_lgraph(std::string_view name, std::string_view new_name);
   Lg_type_id register_sub(std::string_view name);
