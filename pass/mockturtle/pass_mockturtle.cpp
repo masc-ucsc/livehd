@@ -816,6 +816,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *g) {
   for (const auto &in_edge : input_edges) {
     const auto group_id = edge2signal_klut[in_edge].gid;
     const std::vector<mockturtle::klut_network::signal> &sigs = edge2signal_klut[in_edge].signals;
+    I(old_node_to_new_node.find(in_edge.driver.get_node().get_compact()) != old_node_to_new_node.end());
     auto driver_node = Node(lg,0,Node::Compact(old_node_to_new_node[in_edge.driver.get_node().get_compact()]));
     auto driver_pin = driver_node.setup_driver_pin(in_edge.driver.get_pid());
     const auto bit_width = in_edge.get_bits();
@@ -858,6 +859,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *g) {
     const auto group_id = edge2signal_klut[out_edge].gid;
     const auto klut = gid2klut[group_id];
     const std::vector<mockturtle::klut_network::signal> &sigs = edge2signal_klut[out_edge].signals;
+    I(old_node_to_new_node.find(out_edge.sink.get_node().get_compact()) != old_node_to_new_node.end());
     auto sink_node = Node(lg,0,Node::Compact(old_node_to_new_node[out_edge.sink.get_node().get_compact()]));
     auto sink_pin = sink_node.setup_sink_pin(out_edge.sink.get_pid());
     const auto bit_width = out_edge.get_bits();
