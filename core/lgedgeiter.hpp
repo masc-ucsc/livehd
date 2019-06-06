@@ -107,24 +107,20 @@ public:
   bool update_frontier();
 
   void set_next_node_to_visit() {
-    if (likely(!pending->empty())) {
-      const auto it = pending->begin();
-      nid = it->nid;
-      hid = it->hid;
-      return;
-    }
-
-    if (!update_frontier()) {
-      nid = 0;  // We are done
-      // keep hid
-      return;
+    if (unlikely(pending->empty())) {
+      if (!update_frontier()) {
+        nid = 0;  // We are done
+        // keep hid
+        return;
+      }
     }
 
     I(!pending->empty());
-    auto it2 = pending->begin();
-    nid = it2->nid;
-    hid = it2->hid;
+    auto it = pending->begin();
+    nid = it->nid;
+    hid = it->hid;
     I(nid);
+    pending->erase(it);
   };
 };
 

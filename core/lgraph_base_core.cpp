@@ -54,7 +54,7 @@ void Lgraph_base_core::get_lock() {
 }
 
 void Lgraph_base_core::clear() {
-  if (!locked) return;
+  //if (!locked) return;
 
   // whenever we clean, we unlock
   std::string lock = absl::StrCat(path, "/", std::to_string(lgid), ".lock");

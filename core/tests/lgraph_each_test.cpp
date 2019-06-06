@@ -65,7 +65,7 @@ protected:
           }
         }else{
           I(false);// For LGraph sub there should be no undefined iopins
-          I(io_pin.graph_io_pid); // graph_io_pid must be defined too
+          I(io_pin.graph_io_pos != Port_invalid); // graph_io_pos must be defined too
         }
       }
       node.set_type_sub(sub.get_lgid());
@@ -79,13 +79,11 @@ protected:
     int inps = rand_r(&rseed) % 4; // 0..3 inputs
     int pos = 0;
     for(int j = 0; j < inps; j++) {
-      auto pin = g->add_graph_input(("i" + std::to_string(j)).c_str(), pos++);
-      pin.set_bits(rand_r(&rseed)&15);
+      g->add_graph_input(("i" + std::to_string(j)).c_str(), pos++, rand_r(&rseed)&15);
     }
     inps =rand_r(&rseed) % 5; // 0..4 outputs
     for(int j = 0; j < inps; j++) {
-      auto pin = g->add_graph_output(("o" + std::to_string(j)), pos++);
-      pin.set_bits(rand_r(&rseed)&15);
+      g->add_graph_output(("o" + std::to_string(j)), pos++, rand_r(&rseed)&15);
     }
   }
 
@@ -257,7 +255,7 @@ TEST_F(Setup_graphs_test, hierarchy_twice) {
 TEST_F(Setup_graphs_test, No_each_input) {
 
   for(auto &parent:lgs) {
-    parent->each_graph_input([](Node_pin &pin) {
+    parent->each_graph_input([](const Node_pin &pin) {
       EXPECT_TRUE(pin.is_graph_input());
       EXPECT_TRUE(!pin.is_graph_output());
       EXPECT_FALSE(pin.get_node().has_inputs());
@@ -270,7 +268,7 @@ TEST_F(Setup_graphs_test, No_each_input) {
 TEST_F(Setup_graphs_test, No_each_output) {
 
   for(auto &parent:lgs) {
-    parent->each_graph_output([](Node_pin &pin) {
+    parent->each_graph_output([](const Node_pin &pin) {
       EXPECT_TRUE(!pin.is_graph_input());
       EXPECT_TRUE(pin.is_graph_output());
       EXPECT_FALSE(pin.get_node().has_outputs());

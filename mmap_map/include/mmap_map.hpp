@@ -1244,23 +1244,31 @@ public:
 
 	[[nodiscard]] const_iterator find(const key_type& key) const {
 		const auto idx = findIdx(key);
+    if (idx<0)
+      return end();
 		return const_iterator{mKeyVals + idx, mInfo + idx};
 	}
 
 	template <typename OtherKey>
 		[[nodiscard]] const_iterator find(const OtherKey& key, is_transparent_tag /*unused*/) const {
 			const auto idx = findIdx(key);
+      if (idx<0)
+        return cend();
 			return const_iterator{mKeyVals + idx, mInfo + idx};
 		}
 
 	[[nodiscard]] iterator find(const key_type& key) {
 		const auto idx = findIdx(key);
+    if (idx<0)
+      return end();
 		return iterator{mKeyVals + idx, mInfo + idx};
 	}
 
 	template <typename OtherKey>
 		[[nodiscard]] iterator find(const OtherKey& key, is_transparent_tag /*unused*/) {
 			const auto idx = findIdx(key);
+      if (idx<0)
+        return end();
 			return iterator{mKeyVals + idx, mInfo + idx};
 		}
 

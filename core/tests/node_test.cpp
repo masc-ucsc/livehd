@@ -36,31 +36,21 @@ protected:
     //---------------------------------------------------
     // Create graphs input/outputs
     int pos = 0;
-    auto top_a = top->add_graph_input("a", pos++);
-    top_a.set_bits(10);
-    auto top_b = top->add_graph_input("b", pos++);
-    top_b.set_bits(10);
+    auto top_a = top->add_graph_input("a", pos++, 10);
+    auto top_b = top->add_graph_input("b", pos++, 10);
     top_b.set_offset(3);
-    auto top_z = top->add_graph_output("z", pos++);
-    top_z.set_bits(1);
-    auto top_y = top->add_graph_output("Y", pos++);
-    top_y.set_bits(10);
-    auto top_s2_out = top->add_graph_output("s2_out", pos++);
-    top_s2_out.set_bits(1);
+    auto top_z = top->add_graph_output("z", pos++, 1);
+    auto top_y = top->add_graph_output("Y", pos++, 10);
+    auto top_s2_out = top->add_graph_output("s2_out", pos++, 1);
 
     pos = 0;
-    auto c1_aaa = c1->add_graph_input("an_input", pos++);
-    c1_aaa.set_bits(10);
-    auto c1_sss = c1->add_graph_output("s1_output", pos++);
-    c1_sss.set_bits(1);
+    auto c1_aaa = c1->add_graph_input("an_input", pos++, 10);
+    auto c1_sss = c1->add_graph_output("s1_output", pos++, 1);
 
     pos = 0;
-    auto c2_aaa = c2->add_graph_input("a1", pos++);
-    c2_aaa.set_bits(10);
-    auto c2_bbb = c2->add_graph_input("anotherinput", pos++);
-    c2_bbb.set_bits(10);
-    auto c2_sss = c2->add_graph_output("Y", pos++);
-    c2_sss.set_bits(1);
+    auto c2_aaa = c2->add_graph_input("a1", pos++, 10);
+    auto c2_bbb = c2->add_graph_input("anotherinput", pos++, 10);
+    auto c2_sss = c2->add_graph_output("Y", pos++, 1);
 
     //---------------------------------------------------
     // populate top graph with cells and instances
@@ -129,12 +119,11 @@ protected:
 
 TEST_F(Setup_graphs_test, each_sub_graph) {
 
-  for(const auto &nid:top->forward()) {
-    auto node = Node(top,Node::Compact(nid));
+  for(const auto node:top->forward()) {
     for(const auto &out_edge : node.out_edges()) {
       auto dpin = out_edge.driver;
       auto spin = out_edge.sink;
-      fmt::print("idx:{} pid:{} -> idx:{} pid:{}\n",dpin.get_compact().idx, dpin.get_pid(), spin.get_compact().idx, spin.get_pid());
+      fmt::print("name:{} pid:{} -> name:{} pid:{}\n",dpin.debug_name(), dpin.get_pid(), spin.debug_name(), spin.get_pid());
     }
   }
 
@@ -142,29 +131,25 @@ TEST_F(Setup_graphs_test, each_sub_graph) {
 }
 
 TEST_F(Setup_graphs_test, annotate1a) {
-  for(const auto &nid:top->forward()) {
-    auto node = Node(top,0,Node::Compact(nid));
+  for(const auto node:top->forward()) {
     EXPECT_DEATH({node.get_place().get_x();},"assertion.*failed"); // get_place for something not set, triggers failure
   }
 }
 
 TEST_F(Setup_graphs_test, annotate1b) {
-  for(const auto &nid:top->forward()) {
-    auto node = Node(top,0,Node::Compact(nid));
+  for(auto node:top->forward()) {
     EXPECT_TRUE(!node.has_place());
     EXPECT_EQ(node.ref_place()->get_x(),0);
     EXPECT_TRUE(node.has_place());
   }
-  for(const auto &nid:top->forward()) {
-    auto node = Node(top,0,Node::Compact(nid));
+  for(const auto node:top->forward()) {
     EXPECT_EQ(node.get_place().get_x(),0); // Now, OK, ref passes referene or allocates
   }
 }
 
 TEST_F(Setup_graphs_test, annotate1c) {
 
-  for(const auto &nid:top->forward()) {
-    auto node = Node(top,0,Node::Compact(nid));
+  for(const auto node:top->forward()) {
     for(const auto &out_edge : node.out_edges()) {
       auto dpin = out_edge.driver;
       EXPECT_EQ(dpin.get_node().ref_place()->get_x(),0);
@@ -178,8 +163,7 @@ TEST_F(Setup_graphs_test, annotate1c) {
 
   int x_val = 0;
   int y_val = 0;
-  for(const auto &nid:top->forward()) {
-    auto node = Node(top,0,Node::Compact(nid));
+  for(auto node:top->forward()) {
     x_val++;
     y_val+=3;
 
@@ -201,8 +185,7 @@ TEST_F(Setup_graphs_test, annotate1c) {
 
   x_val = 0;
   y_val = 0;
-  for(const auto &nid:top->forward()) {
-    auto node = Node(top,0,Node::Compact(nid));
+  for(auto node:top->forward()) {
     x_val++;
     y_val+=3;
     EXPECT_TRUE(node.has_place());
@@ -215,34 +198,23 @@ TEST_F(Setup_graphs_test, annotate1c) {
 
 TEST_F(Setup_graphs_test, annotate2) {
 
-  std::map<Node_pin::Compact, int>  my_map1;
   absl::flat_hash_map<Node_pin::Compact, int>  my_map2;
 
   int total = 0;
-  for(const auto &nid:top->forward()) {
-    auto node = Node(top,0,Node::Compact(nid));
+  for(const auto node:top->forward()) {
 
     for(const auto &e:node.out_edges()) {
-      my_map1[e.driver.get_compact()] = total;
       my_map2[e.driver.get_compact()] = total;
       total++;
     }
   }
 
   std::vector<bool> used(total);
-
-  for(const auto &it:my_map1) {
-    auto dpin = Node_pin(top,0,it.first);
-    EXPECT_TRUE(dpin.is_driver());
-    EXPECT_FALSE(used[it.second]);
-    used[it.second] = true;
-  }
-
   used.clear();
   used.resize(total);
 
   for(const auto &it:my_map2) {
-    auto dpin = Node_pin(top,0,it.first);
+    auto dpin = Node_pin(top,it.first);
     EXPECT_TRUE(dpin.is_driver());
     EXPECT_FALSE(used[it.second]);
     used[it.second] = true;

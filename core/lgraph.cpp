@@ -115,19 +115,19 @@ Node_pin LGraph::get_graph_input(std::string_view str) {
 
   auto io_pin = get_self_sub_node().get_graph_input_io_pin(str);
 
-  return Node(this,0,Node::Hardcoded_input_nid).get_driver_pin(io_pin.graph_io_pos);
+  return Node(this,0,Node::Hardcoded_input_nid).setup_driver_pin(io_pin.graph_io_pos);
 }
 
 Node_pin LGraph::get_graph_output(std::string_view str) {
   auto io_pin = get_self_sub_node().get_graph_output_io_pin(str);
 
-  return Node(this,0,Node::Hardcoded_output_nid).get_sink_pin(io_pin.graph_io_pos);
+  return Node(this,0,Node::Hardcoded_output_nid).setup_sink_pin(io_pin.graph_io_pos);
 }
 
 Node_pin LGraph::get_graph_output_driver(std::string_view str) {
   auto io_pin = get_self_sub_node().get_graph_output_io_pin(str);
 
-  return Node(this,0,Node::Hardcoded_output_nid).get_driver_pin(io_pin.graph_io_pos);
+  return Node(this,0,Node::Hardcoded_output_nid).setup_driver_pin(io_pin.graph_io_pos);
 }
 
 bool LGraph::is_graph_input(std::string_view name) const {
@@ -136,7 +136,6 @@ bool LGraph::is_graph_input(std::string_view name) const {
   bool alt=false;
   if (get_self_sub_node().has_pin(name)) {
     const auto &io_pin = get_self_sub_node().get_pin(name);
-    I(alt == (io_pin.dir == Sub_node::Direction::Input));
     alt = io_pin.dir == Sub_node::Direction::Input;
   } else {
     alt = false;
@@ -164,7 +163,6 @@ bool LGraph::is_graph_output(std::string_view name) const {
   bool alt = false;
   if (get_self_sub_node().has_pin(name)) {
     const auto &io_pin = get_self_sub_node().get_pin(name);
-    I(alt == (io_pin.dir == Sub_node::Direction::Input));
     alt = io_pin.dir == Sub_node::Direction::Output;
   } else {
     alt = false;
@@ -186,7 +184,7 @@ bool LGraph::is_graph_output(std::string_view name) const {
   return cond;
 }
 
-Node_pin LGraph::add_graph_input(std::string_view str, Port_ID pos) {
+Node_pin LGraph::add_graph_input(std::string_view str, Port_ID pos, uint16_t bits) {
   I(!is_graph_output(str));
 
   Port_ID inst_pid;
@@ -200,14 +198,16 @@ Node_pin LGraph::add_graph_input(std::string_view str, Port_ID pos) {
 
   auto idx = setup_idx_from_pid(Node::Hardcoded_input_nid, inst_pid);
   setup_driver(idx); // Just driver, no sink
+
   Node_pin pin(this, this, 0, idx, inst_pid, false);
 
   pin.set_name(str);
+  pin.set_bits(bits);
 
   return pin;
 }
 
-Node_pin LGraph::add_graph_output(std::string_view str, Port_ID pos) {
+Node_pin LGraph::add_graph_output(std::string_view str, Port_ID pos, uint16_t bits) {
   I(!is_graph_input(str));
 
   Port_ID inst_pid;
@@ -225,8 +225,9 @@ Node_pin LGraph::add_graph_output(std::string_view str, Port_ID pos) {
 
   Node_pin pin(this, this, 0, idx, inst_pid, false);
   pin.set_name(str);
+  pin.set_bits(bits);
 
-  return pin;
+  return Node_pin(this, this, 0, idx, inst_pid, true);
 }
 
 Node_pin_iterator LGraph::out_connected_pins(const Node &node) const {
@@ -416,6 +417,8 @@ Node LGraph::create_node() {
 Node LGraph::create_node(Node_Type_Op op) {
   Index_ID nid = create_node_int();
   set_type(nid, op);
+
+  I(op!=SubGraph_Op); // Do not build by steps. call create_node_sub
 
   return Node(this, 0, nid);
 }

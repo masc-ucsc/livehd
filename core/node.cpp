@@ -304,23 +304,22 @@ std::string_view Node::get_name() const {
   return Ann_node_name::ref(current_g)->get_val(get_compact_class());
 }
 
-std::string_view Node::debug_name(bool nowarning) const {
-#ifdef NDEBUG
+std::string Node::debug_name() const {
+#ifndef NDEBUG
   static int conta = 0;
-  if (conta<10 && !nowarning) {
-    conta++;
+  if (conta==0) {
+    conta=1;
     fmt::print("WARNING: Node::debug_name should not be called during release (Slowww!)\n");
   }
 #endif
   auto *ref = Ann_node_name::ref(current_g);
+  std::string name;
   const auto it = ref->find(get_compact_class());
-  if (it != ref->end())
-    return ref->get_val(it);
+  if (it != ref->end()) {
+    name = ref->get_val(it);
+  }
 
-  static std::string last_debug;
-  last_debug = absl::StrCat("node_", std::to_string(nid));
-
-  return last_debug;
+  return absl::StrCat("node_", std::to_string(nid), "_", name);
 }
 
 bool Node::has_name() const {

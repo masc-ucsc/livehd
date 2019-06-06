@@ -77,7 +77,7 @@ public:
 
     template <typename H>
     friend H AbslHashValue(H h, const Compact& s) {
-      return H::combine(std::move(h), s.nid, s.hid);
+      return H::combine(std::move(h), s.hid, s.nid);
     };
   };
 
@@ -124,7 +124,7 @@ public:
   };
   template <typename H>
   friend H AbslHashValue(H h, const Node& s) {
-    return H::combine(std::move(h), (int)s.nid, (int)s.hid); // Ignore lgraph pointer in hash
+    return H::combine(std::move(h), (int)s.hid, (int)s.nid); // Ignore lgraph pointer in hash
   };
 
   // NOTE: No operator<() needed for std::set std::map to avoid their use. Use flat_map_set for speed
@@ -144,7 +144,7 @@ public:
   };
 
   inline Compact get_compact() const {
-    return Compact(nid, hid);
+    return Compact(hid, nid);
   }
   inline Compact_class get_compact_class() const {
     return Compact_class(nid);
@@ -216,7 +216,7 @@ public:
   void del_node();
 
   // BEGIN ATTRIBUTE ACCESSORS
-  std::string_view debug_name(bool nowarning=false) const;
+  std::string      debug_name() const;
 
   void             set_name(std::string_view iname);
   std::string_view get_name() const;

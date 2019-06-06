@@ -90,7 +90,7 @@ bool Edge_raw_iterator_base::update_frontier() {
   bool pushed = false;
   for (auto &it : *frontier) {
     if (it.second > 0) {
-      auto node = Node(top_g,Node::Compact(it.first));
+      auto node = Node(top_g,it.first);
       // FIXME: What if it is a sub-module just pure combinational or with flops? How to distinguish???
       if (node.get_type().is_pipelined()) {
         pending->insert(it.first);
@@ -101,6 +101,7 @@ bool Edge_raw_iterator_base::update_frontier() {
   }
   if (!pushed) {
     if (*hardcoded_nid) {
+      pending->insert(Node(top_g, 0, *hardcoded_nid).get_compact());
       nid = *hardcoded_nid;
       *hardcoded_nid = 0;
       return true;
@@ -112,16 +113,21 @@ bool Edge_raw_iterator_base::update_frontier() {
 }
 
 void CForward_edge_iterator::set_current_node_as_visited() {
+
   I(top_g->get_node_int(nid).is_master_root());
 
   Node node(top_g,hid,nid);
   for (const auto &e : node.out_edges()) {
-    const Node::Compact key = e.sink.get_node().get_compact();
+    const auto sink_node = e.sink.get_node();
+    if (sink_node.get_nid() == Node::Hardcoded_output_nid)
+      continue;
+
+    const Node::Compact key = sink_node.get_compact();
 
     Frontier_type::iterator fit = frontier->find(key);
 
     if (fit == frontier->end()) {
-      auto ninputs = node.get_num_inputs()-1; // -1 for self
+      auto ninputs = sink_node.get_num_inputs()-1; // -1 for self
       I(ninputs >= 0);
       if (ninputs == 0) {  // Done already
         pending->insert(key);
@@ -141,6 +147,7 @@ void CForward_edge_iterator::set_current_node_as_visited() {
 }
 
 CForward_edge_iterator Forward_edge_iterator::begin() {
+
   pending.insert(Node::Compact(0,Node::Hardcoded_input_nid));
 
   hardcoded_nid = Node::Hardcoded_output_nid;
@@ -217,12 +224,16 @@ void CBackward_edge_iterator::set_current_node_as_visited() {
 
   Node node(top_g,hid,nid);
   for (const auto &e : node.inp_edges()) {
-    const Node::Compact key = e.driver.get_node().get_compact();
+    const auto driver_node = e.driver.get_node();
+    if (driver_node.get_nid() == Node::Hardcoded_input_nid)
+      continue;
+
+    const Node::Compact key = driver_node.get_compact();
 
     Frontier_type::iterator fit = frontier->find(key);
 
     if (fit == frontier->end()) {
-      auto noutputs = node.get_num_outputs()-1; // -1 for self
+      auto noutputs = driver_node.get_num_outputs()-1; // -1 for self
       I(noutputs >= 0);
       if (noutputs == 0) {  // Done already
         pending->insert(key);
@@ -246,13 +257,14 @@ void CBackward_edge_iterator::set_current_node_as_visited() {
 CBackward_edge_iterator Backward_edge_iterator::begin() {
 
   pending.insert(Node::Compact(0,Node::Hardcoded_output_nid));
+
   hardcoded_nid = Node::Hardcoded_input_nid;
 
   // Add any sub node that has no outputs but has inputs (not hit with backward)
   for(auto it:top_g->get_sub_nodes_map()) {
     Node n_sub(top_g,it.first);
     if (!n_sub.has_outputs() && n_sub.has_inputs()) {
-      pending.insert(Node::Compact(0,it.first.nid));
+      pending.insert(n_sub.get_compact());
     }
   }
 

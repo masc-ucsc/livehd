@@ -526,7 +526,6 @@ void Node_Internal::assimilate_edges(Node_Internal &other) {
       } else {
         I(other.out_pos >= 4);
         other.out_pos -= 4;
-        I(other.out_long > 0);
         other.out_long--;
       }
 

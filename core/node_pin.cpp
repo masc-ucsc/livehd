@@ -104,18 +104,19 @@ void Node_pin::set_name(std::string_view wname) {
 }
 
 std::string Node_pin::debug_name() const {
-#ifdef NDEBUG
+#ifndef NDEBUG
   static int conta = 0;
-  if (conta<100) {
-    conta++;
+  if (conta==0) {
+    conta=1;
     fmt::print("WARNING: Node_pin::debug_name should not be called during release (Slowww!)\n");
   }
 #endif
   std::string name;
-  if (Ann_node_pin_name::ref(current_g)->has_key(get_compact_class_driver()))
-    name = Ann_node_pin_name::ref(current_g)->get_val(get_compact_class_driver());
+  if (!sink)
+    if (Ann_node_pin_name::ref(current_g)->has_key(get_compact_class_driver()))
+      name = Ann_node_pin_name::ref(current_g)->get_val(get_compact_class_driver());
 
-  return absl::StrCat("node_pin_", name, std::to_string(get_node().nid), ":", std::to_string(pid), sink?"s":"d");
+  return absl::StrCat("node_pin_", std::to_string(get_node().nid), "_", name, ":", std::to_string(pid), sink?"s":"d");
   //not a acceptable format for dot
   //return absl::StrCat("node_pin_", std::to_string(idx), ":", std::to_string(pid), sink?"s":"d", "(", name ,")");
 }

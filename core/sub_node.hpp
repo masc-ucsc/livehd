@@ -66,12 +66,12 @@ private:
   std::vector<Port_ID> graph_pos2instance_pid;
 
   void map_pin_int(Port_ID instance_pid, Port_ID graph_pos) {
-    I(graph_pos);
-    I(instance_pid);
+    I(graph_pos!=Port_invalid);
+    I(instance_pid); // Must be non zero for input/output pid
 
     if (graph_pos2instance_pid.size()<=graph_pos)
       graph_pos2instance_pid.resize(graph_pos+1);
-    I(graph_pos2instance_pid[graph_pos]==0);
+    I(graph_pos2instance_pid[graph_pos]==0 || graph_pos2instance_pid[graph_pos]==instance_pid);
     graph_pos2instance_pid[graph_pos] = instance_pid;
   }
 
@@ -126,10 +126,10 @@ public:
 
   Port_ID map_graph_pos(std::string_view name, Port_ID graph_pos) {
     I(has_pin(name));
-    I(!has_graph_pin(graph_pos));
-    I(graph_pos);
+    I(graph_pos != Port_invalid);
 
     Port_ID instance_pid = name2id[name];
+    I(io_pins[instance_pid].graph_io_pos == graph_pos || !has_graph_pin(graph_pos));
     io_pins[instance_pid].graph_io_pos = graph_pos;
 
     map_pin_int(instance_pid, graph_pos);

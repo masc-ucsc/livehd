@@ -19,15 +19,13 @@ void generate_graphs(int n) {
 
     int inps = 10 + rand_r(&rseed) % 100;
     for(int j = 0; j < inps; j++) {
-      auto pin = g->add_graph_input("i" + std::to_string(j), j);
-      pin.set_bits(1);
+      auto pin = g->add_graph_input("i" + std::to_string(j), j, 1);
       dpins.push_back(pin.get_compact());
     }
 
     int outs = 10 + rand_r(&rseed) % 100;
     for(int j = 0; j < outs; j++) {
-      auto pin = g->add_graph_output("o" + std::to_string(j), inps+j);
-      pin.set_bits(1);
+      auto pin = g->add_graph_output("o" + std::to_string(j), inps+j,1);
       spins.push_back(pin.get_compact());
       dpins.push_back(g->get_graph_output_driver(("o" + std::to_string(j))).get_compact());
     }
@@ -37,8 +35,8 @@ void generate_graphs(int n) {
       auto node = g->create_node();
       Node_Type_Op op  = (Node_Type_Op)(1 + rand_r(&rseed) % 22); // regular node types range
       node.set_type(op);
-      dpins.push_back(node.setup_driver_pin().get_compact());
-      spins.push_back(node.setup_sink_pin().get_compact());
+      dpins.push_back(node.setup_driver_pin(0).get_compact());
+      spins.push_back(node.setup_sink_pin(0).get_compact());
     }
 
     int cnodes = 100 + rand_r(&rseed) % 1000;
@@ -137,40 +135,41 @@ bool bwd(int n) {
 
 void simple() {
   std::string gname = "simple_iter";
-  LGraph *    g     = LGraph::create("lgdb_iter_test", gname, "test");
+  LGraph *g     = LGraph::create("lgdb_iter_test", gname, "test");
+  LGraph *sub_g = LGraph::create("lgdb_iter_test", "sub", "test");
 
   int pos = 0;
-  auto i1 = g->add_graph_input("i0", pos++); // 1
+  auto i1 = g->add_graph_input("i0", pos++, 0); // 1
   i1.set_bits(1);
-  auto i2 = g->add_graph_input("i1", pos++); // 2
+  auto i2 = g->add_graph_input("i1", pos++, rand()&0xF); // 2
   i2.set_bits(1);
-  auto i3 = g->add_graph_input("i2", pos++); // 3
+  auto i3 = g->add_graph_input("i2", pos++, rand()&0xF); // 3
   i3.set_bits(1);
-  auto i4 = g->add_graph_input("i3", pos++); // 4
+  auto i4 = g->add_graph_input("i3", pos++, rand()&0xF); // 4
   i4.set_bits(1);
 
-  auto o5 = g->add_graph_output("o0", pos++); // 5
-  auto o6 = g->add_graph_output("o1", pos++); // 6
-  auto o7 = g->add_graph_output("o2", pos++); // 7
-  auto o8 = g->add_graph_output("o3", pos++); // 8
+  auto o5 = g->add_graph_output("o0", pos++, rand()&0xF); // 5
+  auto o6 = g->add_graph_output("o1", pos++, rand()&0xF); // 6
+  auto o7 = g->add_graph_output("o2", pos++, rand()&0xF); // 7
+  auto o8 = g->add_graph_output("o3", pos++, rand()&0xF); // 8
 
   auto c9 = g->create_node_const(1,3); //  9
   auto c10 = g->create_node_const(21,4); //  10
   auto c11 = g->create_node_const("xxx",3); //  11
   auto c12 = g->create_node_const("yyyy",4); // 12
 
-  auto t13 = g->create_node(SubGraph_Op); // 13
-  auto t14 = g->create_node(SubGraph_Op); // 14
-  auto t15 = g->create_node(SubGraph_Op); // 15
-  auto t16 = g->create_node(SubGraph_Op); // 16
-  auto t17 = g->create_node(SubGraph_Op); // 17
-  auto t18 = g->create_node(SubGraph_Op); // 18
-  auto t19 = g->create_node(SubGraph_Op); // 19
-  auto t20 = g->create_node(SubGraph_Op); // 20
-  auto t21 = g->create_node(SubGraph_Op); // 21
-  auto t22 = g->create_node(SubGraph_Op); // 22
+  auto t13 = g->create_node_sub(sub_g->get_lgid()); // 13
+  auto t14 = g->create_node_sub(sub_g->get_lgid()); // 14
+  auto t15 = g->create_node_sub(sub_g->get_lgid()); // 15
+  auto t16 = g->create_node_sub(sub_g->get_lgid()); // 16
+  auto t17 = g->create_node_sub(sub_g->get_lgid()); // 17
+  auto t18 = g->create_node_sub(sub_g->get_lgid()); // 18
+  auto t19 = g->create_node_sub(sub_g->get_lgid()); // 19
+  auto t20 = g->create_node_sub(sub_g->get_lgid()); // 20
+  auto t21 = g->create_node_sub(sub_g->get_lgid()); // 21
+  auto t22 = g->create_node_sub(sub_g->get_lgid()); // 22
   (void)t22; // Disconnected node. Source of bug when fully disconnected
-  auto t23 = g->create_node(SubGraph_Op); // 23
+  auto t23 = g->create_node_sub(sub_g->get_lgid()); // 23
 
   /*
   // nodes:
@@ -182,15 +181,15 @@ void simple() {
   //        |   \   /     \           \   /
   //        5o    6o       7o           8o
   //
-  // IDX:
+  // node_debug_name:
   //
-  //     1i    3i    5i    7i   17c 31g 18c   19c   20c
-  //       \  /       \   /  \    \  | /      |   /   \
-  //        21g        22g    23g  24g        25g    26g  30g
-  //        | \       / \           \        /  \   /   \
-  //        |  \     /   \           \      28   27g    29g
-  //        |   \   /     \           \   /
-  //        9o   11o      13o          15o
+  //     1i    1i    1i    1i   11c 25g 12c  13c   14c
+  //       \  /       \   /  \    \  | /     |   /   \
+  //        15g        16g    17g  18g       19g    20g  24g
+  //        | \       / \           \       /  \   /   \
+  //        |  \     /   \           \     22   21g    23g
+  //        |   \   /     \           \  /
+  //        2o   2o       2o           2o
   */
 
   g->add_edge(i1, t13.setup_sink_pin(random()&0xFF));
@@ -227,33 +226,6 @@ void simple() {
   g->add_edge(t16.setup_driver_pin(random()&0xFF), o8);
   g->add_edge(t20.setup_driver_pin(random()&0xFF), o8);
 
-  std::vector<std::string> fwd;
-  int conta=0;
-  for(const auto node : g->forward()) {
-    fwd.emplace_back(node.debug_name(true));
-    conta++;
-  }
-  if (conta!=22)
-    failed = true;
-
-  std::vector<std::string> bwd;
-  conta =0;
-  for(const auto node : g->backward()) {
-    bwd.emplace_back(node.debug_name(true));
-    conta++;
-  }
-  if (conta!=22)
-    failed = true;
-
-  std::vector<std::string> fast;
-  conta =0;
-  for(const auto node : g->fast()) {
-    fast.emplace_back(node.debug_name(true));
-    conta++;
-  }
-  if (conta!=22)
-    failed = true;
-
   for(const auto &node : g->fast()) {
 
     fmt::print("node:{}\n", node.debug_name());
@@ -268,12 +240,44 @@ void simple() {
     }
     fmt::print("\n");
   }
+
+  std::vector<std::string> fwd;
+  int conta=0;
+  for(const auto node : g->forward()) {
+    //fmt::print(" fwd:{}\n", node.debug_name());
+    fwd.emplace_back(node.debug_name());
+    conta++;
+  }
+  if (conta!=16) {
+    fmt::print("ERROR. expected 16 nodes in forward traversal. Found {}\n",conta);
+    failed = true;
+  }
+
+  std::vector<std::string> bwd;
+  conta =0;
+  for(const auto node : g->backward()) {
+    //fmt::print(" bwd:{}\n", node.debug_name());
+    bwd.emplace_back(node.debug_name());
+    conta++;
+  }
+  if (conta!=16) {
+    fmt::print("ERROR. expected 16 nodes in backward traversal. Found {}\n",conta);
+    failed = true;
+  }
+
+  std::vector<std::string> fast;
+  conta =0;
+  for(const auto node : g->fast()) {
+    fast.emplace_back(node.debug_name());
+    conta++;
+  }
+
   fmt::print("fwd :");
   for(auto txt:fwd)
     fmt::print(" {}",txt);
   fmt::print("\n");
 
-  fmt::print("fwd :");
+  fmt::print("bwd :");
   for(auto txt:bwd)
     fmt::print(" {}",txt);
   fmt::print("\n");
@@ -283,32 +287,21 @@ void simple() {
     fmt::print(" {}",txt);
   fmt::print("\n");
 
-  if (fwd.size() != bwd.size())
-    failed = true;
-  if (fast.size() != bwd.size())
-    failed = true;
-
   std::sort(fwd.begin() , fwd.end());
   std::sort(bwd.begin() , bwd.end());
   std::sort(fast.begin(), fast.end());
 
-  auto fast_it = fast.begin();
   auto fwd_it  = fwd.begin();
   auto bwd_it  = bwd.begin();
 
-  while(fast_it != fast.end()) {
-    if (*fast_it != *fwd_it) {
-      fmt::print("missmatch fast {} vs fwd {}\n",*fast_it, *fwd_it);
+  while(fwd_it != fwd.end()) {
+    if (*bwd_it != *fwd_it) {
+      fmt::print("missmatch bwd {} vs fwd {}\n",*bwd_it, *fwd_it);
       failed = true;
     }
-    if (*fast_it != *bwd_it) {
-      fmt::print("missmatch fast {} vs bwd {}\n",*fast_it, *bwd_it);
-      failed = true;
-    }
-    fast_it++;
     fwd_it++;
     bwd_it++;
-    if (fwd_it == fwd.end() && bwd_it == bwd.end() && fast_it == fast.end())
+    if (fwd_it == fwd.end() && bwd_it == bwd.end())
       break;
 
     if (fwd_it == fwd.end()) {
@@ -318,11 +311,6 @@ void simple() {
     }
     if (bwd_it == bwd.end()) {
       fmt::print("bwd is shorter\n");
-      failed = true;
-      break;
-    }
-    if (fast_it == fast.end()) {
-      fmt::print("fast is shorter\n");
       failed = true;
       break;
     }
