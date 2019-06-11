@@ -39,6 +39,13 @@ void generate_graphs(int n) {
       spins.push_back(node.setup_sink_pin(0).get_compact());
     }
 
+    int const_nodes = 10 + rand_r(&rseed) % 100;
+    for(int j = 0; j < const_nodes; j++) { // Simple output nodes
+      auto node = g->create_node();
+      node.set_type(U32Const_Op);
+      dpins.push_back(node.setup_driver_pin().get_compact());
+    }
+
     int cnodes = 100 + rand_r(&rseed) % 1000;
     for(int j = 0; j < cnodes; j++) { // complex nodes
       auto node = g->create_node(FFlop_Op);
@@ -56,7 +63,7 @@ void generate_graphs(int n) {
       }
     }
 
-    int nedges = 2000 + rand_r(&rseed) % 5000;
+    int nedges = 1000 + rand_r(&rseed) % 8000;
     absl::flat_hash_set<std::pair<Node_pin::Compact, Node_pin::Compact>> edges;
     for(int j = 0; j < nedges; j++) {
       int      counter = 0;
@@ -80,22 +87,27 @@ void generate_graphs(int n) {
   }
 }
 
-bool fwd(int n) {
-  for(int i = 0; i < n; i++) {
+bool fwd(int n) { for(int i = 0; i < n; i++) {
     std::string gname = "test_" + std::to_string(i);
     LGraph *    g     = LGraph::open("lgdb_iter_test", gname);
     if(g == 0)
       return false;
 
+    //g->dump();
+    //fmt::print("----------------------\n");
     absl::flat_hash_set<Node::Compact> visited;
     for(auto node : g->forward()) {
 
-      // check if all incoming edges were visited
-      for(auto &inp : node.inp_edges()) {
-        if(visited.find(inp.driver.get_node().get_compact()) == visited.end()) {
-          printf("fwd failed for lgraph %d\n", i);
-          I(false);
-          return false;
+      if (!node.get_type().is_pipelined() && node.get_type().op != GraphIO_Op) {
+        // check if all incoming edges were visited
+        for(auto &inp : node.inp_edges()) {
+          if (!inp.driver.get_node().get_type().is_pipelined() && inp.driver.get_node().get_type().op != GraphIO_Op) {
+            if(visited.find(inp.driver.get_node().get_compact()) == visited.end()) {
+              fmt::print("fwd failed for lgraph node:{} fwd:{}\n", node.debug_name(), inp.driver.get_node().debug_name());
+              I(false);
+              return false;
+            }
+          }
         }
       }
 
@@ -114,16 +126,24 @@ bool bwd(int n) {
     if(g == 0)
       return false;
 
+    //g->dump();
+    //fmt::print("----------------------\n");
     absl::flat_hash_set<Node::Compact> visited;
     for(auto node : g->backward()) {
+      //fmt::print(" bwd {}\n", node.debug_name());
+
       visited.insert(node.get_compact());
 
-      // check if all incoming edges were visited
-      for(auto &out : node.out_edges()) {
-        if(visited.find(out.sink.get_node().get_compact()) == visited.end()) {
-          printf("bwd failed for lgraph %d\n", i);
-          I(false);
-          return false;
+      if (!node.get_type().is_pipelined() && node.get_type().op != GraphIO_Op) {
+        // check if all incoming edges were visited
+        for(auto &out : node.out_edges()) {
+          if (!out.sink.get_node().get_type().is_pipelined() && out.sink.get_node().get_type().op != GraphIO_Op) {
+            if(visited.find(out.sink.get_node().get_compact()) == visited.end()) {
+              fmt::print("bwd failed for lgraph node:{} bwd:{}\n", node.debug_name(), out.sink.get_node().debug_name());
+              I(false);
+              return false;
+            }
+          }
         }
       }
 
@@ -319,18 +339,23 @@ void simple() {
 
 int main() {
 
+#if 1
   for(int i=0;i<20;i++) {
     simple();
     if (failed)
       return -3;
   }
+#endif
 
-  int n = 100;
+  int n = 200;
   generate_graphs(n);
 
+#if 1
   if(!fwd(n)) {
     failed = true;
   }
+#endif
+
   if(!bwd(n)) {
     failed = true;
   }

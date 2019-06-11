@@ -170,6 +170,7 @@ public:
     return ((((uint64_t)this) & 0xFFF) == 0);  // page align.
   }
 
+#if 0
   bool set(Index_ID _idx, Port_ID _inp_pid, Port_ID _dst_pid, bool _input) {
     I(!is_page_align());
     I(get_dst_pid() == _dst_pid);
@@ -181,6 +182,7 @@ public:
     LEdge_Internal *l = reinterpret_cast<LEdge_Internal *>(this);
     return l->set(_idx, _inp_pid, _input);
   }
+#endif
 
 private:  // all constructor&assignment should be marked as private
   Edge_raw()                = default;
@@ -276,7 +278,7 @@ public:
 private:
   uint64_t nid : Index_bits;     // 31bits, 4 byte aligned
   uint16_t pad: 1; // To get nicer alignment
-  Port_ID  dst_pid : Port_bits;  // 28bits, 4 byte aligned
+  Port_ID  dst_pid : Port_bits;  // 26bits, 4 byte aligned
   uint16_t inp_long : 2; // 8 bytes each. Just 3 at most
   uint16_t out_long : 2;
   // END 10 Bytes common payload
@@ -474,27 +476,30 @@ public:
   bool del(Index_ID src_idx, Port_ID pid, bool input);
 
   void inc_outputs(bool large = false) {
-    I(has_space(large));
     if (large) {
+      I(has_space_long_out());
+      I(!sedge[next_free_output_pos()-3].is_snode());
       out_pos += 4;
+      I(out_long<3); // To avoid overflow
       out_long++;
     } else {
+      I(has_space_short());
+      I(sedge[next_free_output_pos()].is_snode());
       out_pos++;
     }
   }
   void inc_inputs(bool large = false) {
-#ifndef NDEBUG
-    if (large)
-      I(((LEdge_Internal *)&(sedge[next_free_input_pos()]))->get_idx() != 0);
-    else
-      I(((SEdge_Internal *)&(sedge[next_free_input_pos()]))->get_idx(Node_Internal_Page::get(this).get_idx()) != 0);
-#endif
-
-    I(has_space(large));
     if (large) {
+      I(has_space_long_inp());
+      I(!sedge[next_free_input_pos()].is_snode());
+      I(((LEdge_Internal *)&(sedge[next_free_input_pos()]))->get_idx() != 0);
       inp_pos += 4;
+      I(inp_long<3); // To avoid overflow
       inp_long++;
     } else {
+      I(has_space_short());
+      I(sedge[next_free_input_pos()].is_snode());
+      I(((SEdge_Internal *)&(sedge[next_free_input_pos()]))->get_idx(Node_Internal_Page::get(this).get_idx()) != 0);
       inp_pos++;
     }
   }
@@ -510,11 +515,21 @@ public:
     return (inp_pos + out_pos + 2) < Num_SEdges;  // pos 0 uses 2 entries (4bytes ptr next)
   }
 
-  bool has_space(bool large = false) const {
-    int reserve = 0;
-    if (large) reserve = 4;  // +2 is enough but +4 avoids cross boundary issues
-    if (state == Last_Node_State) return (inp_pos + out_pos + reserve) < Num_SEdges;
-    return (inp_pos + out_pos + 2 + reserve) < Num_SEdges;  // pos 0 uses 2 entries (4bytes ptr next)
+  bool has_space_long() const {
+    int reserve = state == Last_Node_State ? 0 : 2;
+    return inp_long<3 && out_long<3 && (reserve + inp_pos + out_pos + 4) < Num_SEdges;
+  }
+  bool has_space_long_inp() const {
+    int reserve = state == Last_Node_State ? 0 : 2;
+    return inp_long<3 && (reserve + inp_pos + out_pos + 4) < Num_SEdges;
+  }
+  bool has_space_long_out() const {
+    int reserve = state == Last_Node_State ? 0 : 2;
+    return out_long<3 && (reserve + inp_pos + out_pos + 4) < Num_SEdges;
+  }
+  bool has_space_short() const {
+    int reserve = state == Last_Node_State ? 0 : 2;
+    return (inp_pos + out_pos + reserve) < Num_SEdges;  // pos 0 uses 2 entries (4bytes ptr next)
   }
 
   uint16_t get_bits() const {
@@ -538,12 +553,12 @@ public:
   const SEdge *get_output_end() const { return &sedge[Num_SEdges]; }
 
   int next_free_input_pos() const {
-    I(has_space());
+    I(has_space_short());
     return get_input_end_pos_int();
   }
 
   int next_free_output_pos() const {
-    I(has_space());
+    I(has_space_short());
     return get_output_begin_pos_int();
   }
 
@@ -552,7 +567,7 @@ public:
 
 private:
   int get_input_end_pos_int() const {
-    if (inp_pos == 0) return get_input_begin_pos_int();
+    //if (inp_pos == 0) return get_input_begin_pos_int();
 
     int pos = inp_pos;
     if (state != Last_Node_State) pos += 2;

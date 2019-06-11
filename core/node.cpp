@@ -319,7 +319,7 @@ std::string Node::debug_name() const {
     name = ref->get_val(it);
   }
 
-  return absl::StrCat("node_", std::to_string(nid), "_", name);
+  return absl::StrCat("node_", std::to_string(nid), "_", get_type().get_name() , "_", name);
 }
 
 bool Node::has_name() const {

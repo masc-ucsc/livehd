@@ -92,7 +92,7 @@ Index_ID LGraph_Base::create_node_space(const Index_ID last_idx, const Port_ID d
 
   if (node_internal[last_idx].has_next_space()) {
     node_internal[last_idx].push_next_state(idx2);
-    I(node_internal[idx2].has_space(true));
+    I(node_internal[idx2].has_space_long());
     return idx2;
   }
 
@@ -115,8 +115,8 @@ Index_ID LGraph_Base::create_node_space(const Index_ID last_idx, const Port_ID d
     I(dbg_master.get_node_num_inputs() == dbg_ni);
     I(dbg_master.get_node_num_outputs() == dbg_no);
 
-    if (!node_internal[last_idx].has_space(true)) {
-      if (node_internal[idx2].has_space(true)) return idx2;
+    if (!node_internal[last_idx].has_space_long()) {
+      if (node_internal[idx2].has_space_long()) return idx2;
       // This can happen if 3 sedges transfered to 3 ledges in dest
       return create_node_space(idx2, dst_pid, master_nid, root_idx);
     }
@@ -156,7 +156,7 @@ Index_ID LGraph_Base::create_node_space(const Index_ID last_idx, const Port_ID d
   I(node_internal[last_idx].get_master_root().get_node_num_inputs() == dbg_ni);
   I(node_internal[last_idx].get_master_root().get_node_num_outputs() == dbg_no);
 
-  I(node_internal[idx2].has_space(true));
+  I(node_internal[idx2].has_space_long());
   return idx2;
 }
 
@@ -198,7 +198,7 @@ Index_ID LGraph_Base::get_space_output_pin(const Index_ID master_nid, const Inde
   I(node_internal[master_nid].is_root());
 
   I(node_internal[start_nid].is_node_state());
-  if (node_internal[start_nid].has_space(true) && node_internal[start_nid].get_dst_pid() == dst_pid) {
+  if (node_internal[start_nid].has_space_long() && node_internal[start_nid].get_dst_pid() == dst_pid) {
     return start_nid;
   }
 
@@ -209,7 +209,7 @@ Index_ID LGraph_Base::get_space_output_pin(const Index_ID master_nid, const Inde
     if (node_internal[idx].get_dst_pid() == dst_pid) {
       if (node_internal[idx].is_root()) I(root_idx == idx);
 
-      if (node_internal[idx].has_space(true)) return idx;
+      if (node_internal[idx].has_space_long()) return idx;
     }
 
     if (node_internal[idx].is_last_state()) return create_node_space(idx, dst_pid, master_nid, root_idx);
@@ -300,7 +300,7 @@ uint16_t LGraph_Base::get_bits_pid(const Index_ID nid, const Port_ID pid) {
 Index_ID LGraph_Base::get_space_output_pin(const Index_ID start_nid, const Port_ID dst_pid, Index_ID &root_idx) {
   I(node_internal[start_nid].is_root());
   I(node_internal[start_nid].is_node_state());
-  if (node_internal[start_nid].has_space(false) && node_internal[start_nid].get_dst_pid() == dst_pid) {
+  if (node_internal[start_nid].has_space_short() && node_internal[start_nid].get_dst_pid() == dst_pid) {
     root_idx = start_nid;
     return start_nid;
   }
@@ -311,7 +311,7 @@ Index_ID LGraph_Base::get_space_output_pin(const Index_ID start_nid, const Port_
     if (node_internal[idx].get_dst_pid() == dst_pid) {
       if (node_internal[idx].is_root()) root_idx = idx;
 
-      if (node_internal[idx].has_space(false)) {
+      if (node_internal[idx].has_space_short()) {
 
         GI(root_idx != start_nid, node_internal[start_nid].get_dst_pid() != node_internal[root_idx].get_dst_pid());
         I(node_internal[root_idx].is_root());
@@ -339,6 +339,7 @@ Index_ID LGraph_Base::get_space_output_pin(const Index_ID start_nid, const Port_
   return 0;
 }
 
+#if 0
 Index_ID LGraph_Base::get_space_input_pin(const Index_ID start_nid, const Index_ID idx, bool large) {
   // FIXME: Change the get_space_input_pin to insert when dst_pid matches. Then
   // the forward and reverse edge can have src/dst pid
@@ -368,6 +369,7 @@ Index_ID LGraph_Base::get_space_input_pin(const Index_ID start_nid, const Index_
 
   return 0;
 }
+#endif
 
 Index_ID LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid, Index_ID src_idx, Port_ID dst_pid) {
   bool            sused;
@@ -414,10 +416,11 @@ Index_ID LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid
   } else {
     idx = get_space_output_pin(src_nid, idx, dst_pid, root_idx);
     o   = node_internal[idx].next_free_output_pos() - (4-1);
-    node_internal[idx].inc_outputs(true);  // WARNING: Before next_free_output_pos to reserve space (decreasing insert)
 
     ledge = (LEdge_Internal *)(&node_internal[idx].sedge[o]);
     ledge->set(dst_idx, inp_pid, false);
+
+    node_internal[idx].inc_outputs(true);  // WARNING: Before next_free_output_pos to reserve space (decreasing insert)
   }
   Index_ID out_idx = idx;
 

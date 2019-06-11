@@ -86,20 +86,78 @@ Edge_raw_iterator::CPod_iterator Edge_raw_iterator::CPod_iterator::operator++() 
   return i;
 }
 
+void Edge_raw_iterator_base::find_dce_nodes() {
+
+  Node_set_type  discovered;
+  Node_set_type  dc_visited;
+  Node_set_type  floating;
+
+  for (auto it : *frontier) {
+    auto current = it.first;
+    floating.insert(current);
+
+    do{
+      dc_visited.insert(current);
+      floating.erase(current);
+
+      Node node(top_g,current);
+      for (const auto &e : node.out_edges()) {
+
+        const Node::Compact key = e.sink.get_node().get_compact();
+
+        if (!dc_visited.contains(key) && !global_visited.contains(key)) {
+          discovered.insert(key);
+          floating.insert(key);
+        }
+      }
+      if (discovered.empty())
+        break;
+      auto it = discovered.begin();
+      current = *it;
+      discovered.erase(it);
+    }while(true);
+  }
+
+  if (!floating.empty()) {
+    Pass::warn(fmt::format("graph {} is not DCE free, consider running the DCE pass\n", top_g->get_name()));
+    pending->insert(floating.begin(),floating.end());
+  }else{
+    // FIXME: CHeck if the number of visited nodes matches n_nodes
+    // Otherwise, insert disconnected nodes that may exist in the graph
+  }
+}
+
 bool Edge_raw_iterator_base::update_frontier() {
+
+  I(pending->empty());
   bool pushed = false;
   for (auto &it : *frontier) {
-    if (it.second > 0) {
-      auto node = Node(top_g,it.first);
-      // FIXME: What if it is a sub-module just pure combinational or with flops? How to distinguish???
-      if (node.get_type().is_pipelined()) {
-        pending->insert(it.first);
-        it.second = -1;  // Mark as pipelined, but keep not to visit twice
-        pushed    = true;
-      }
+    if (it.second <= 0)
+      continue;
+
+    auto node = Node(top_g,it.first);
+
+    if (*hardcoded_nid == Node::Hardcoded_output_nid && node.has_outputs()) {
+      continue;
+    }else if (*hardcoded_nid == Node::Hardcoded_input_nid && node.has_inputs()) {
+      continue;
+    }else if (!node.get_type().is_pipelined()) {
+      continue;
     }
+
+    //fmt::print("Adding node {}\n", node.debug_name());
+
+    pending->insert(it.first);
+    it.second = -1;  // Mark as pipelined, but keep not to visit twice
+    pushed    = true;
+    frontier->erase(it.first);
+    break;
   }
   if (!pushed) {
+    //find_dce_nodes();
+    if (!pending->empty())
+      return true;
+
     if (*hardcoded_nid) {
       pending->insert(Node(top_g, 0, *hardcoded_nid).get_compact());
       nid = *hardcoded_nid;
@@ -116,13 +174,18 @@ void CForward_edge_iterator::set_current_node_as_visited() {
 
   I(top_g->get_node_int(nid).is_master_root());
 
+  global_visited.insert(Node::Compact(hid, nid));
+
   Node node(top_g,hid,nid);
   for (const auto &e : node.out_edges()) {
     const auto sink_node = e.sink.get_node();
+    // FIXME: put hardcoded in global_visited?? (speed reasons)
     if (sink_node.get_nid() == Node::Hardcoded_output_nid)
       continue;
 
     const Node::Compact key = sink_node.get_compact();
+    if (global_visited.find(key) != global_visited.end())
+      continue;
 
     Frontier_type::iterator fit = frontier->find(key);
 
@@ -178,49 +241,11 @@ CForward_edge_iterator Forward_edge_iterator::begin() {
   return it2;
 }
 
-void CBackward_edge_iterator::find_dce_nodes() {
-  Node_set_type  discovered;
-  Node_set_type  dc_visited;
-  Node_set_type  floating;
-
-  for (auto it : *frontier) {
-    auto current = it.first;
-    floating.insert(current);
-
-    do{
-      dc_visited.insert(current);
-      floating.erase(current);
-
-      Node node(top_g,current);
-      for (const auto &e : node.out_edges()) {
-
-        const Node::Compact key = e.sink.get_node().get_compact();
-
-        if (!dc_visited.contains(key) && !back_iter_global_visited.contains(key)) {
-          discovered.insert(key);
-          floating.insert(key);
-        }
-      }
-      if (discovered.empty())
-        break;
-      auto it = discovered.begin();
-      current = *it;
-      discovered.erase(it);
-    }while(true);
-  }
-
-  if (!floating.empty()) {
-    Pass::warn(fmt::format("graph {} is not DCE free, consider running the DCE pass\n", top_g->get_name()));
-    pending->insert(floating.begin(),floating.end());
-  }else{
-    // FIXME: CHeck if the number of visited nodes matches n_nodes
-    // Otherwise, insert disconnected nodes that may exist in the graph
-  }
-}
-
 void CBackward_edge_iterator::set_current_node_as_visited() {
 
   I(top_g->get_node_int(nid).is_master_root());
+
+  global_visited.insert(Node::Compact(hid, nid));
 
   Node node(top_g,hid,nid);
   for (const auto &e : node.inp_edges()) {
@@ -229,6 +254,8 @@ void CBackward_edge_iterator::set_current_node_as_visited() {
       continue;
 
     const Node::Compact key = driver_node.get_compact();
+    if (global_visited.find(key) != global_visited.end())
+      continue;
 
     Frontier_type::iterator fit = frontier->find(key);
 

@@ -95,6 +95,10 @@ protected:
   Node_set_type *pending;   // vertex that cleared the frontier
   Index_ID      *hardcoded_nid;
 
+  Node_set_type  global_visited;
+
+  void find_dce_nodes();
+
 public:
   Edge_raw_iterator_base(LGraph *_g, Hierarchy_id _hid, Index_ID _nid, Frontier_type *_frontier, Node_set_type *_pending, Index_ID *_hardcoded_nid)
       : top_g(_g), hid(_hid), nid(_nid), frontier(_frontier), pending(_pending), hardcoded_nid(_hardcoded_nid) {}
@@ -170,8 +174,6 @@ public:
 
 class CBackward_edge_iterator : public Edge_raw_iterator_base {
 private:
-  Node_set_type back_iter_global_visited;
-
 public:
   CBackward_edge_iterator(LGraph *_g, Hierarchy_id _hid, Index_ID _nid, Frontier_type *_frontier, Node_set_type *_pending, Index_ID *_hardcoded_nid)
     : Edge_raw_iterator_base(_g, _hid, _nid, _frontier, _pending, _hardcoded_nid) {
@@ -187,18 +189,12 @@ public:
 
   // find nodes not connected to output that are preventing the propagation
   // only use in case the backward fails
-  void find_dce_nodes();
-
   void set_current_node_as_visited();
 
   CBackward_edge_iterator operator++() {
     I(nid);  // Do not call ++ after end
     CBackward_edge_iterator i(top_g, hid, nid, frontier, pending, hardcoded_nid);
-    back_iter_global_visited.insert(Node::Compact(hid, nid));
     set_current_node_as_visited();
-    if (pending->empty()) {
-      find_dce_nodes();
-    }
     set_next_node_to_visit();
     return i;
   };
