@@ -10,6 +10,7 @@ protected:
   void compute_histogram(LGraph *g);
   void compute_max_depth(LGraph *g);
   void annotate_placement(LGraph *g);
+  void create_sample_graph(LGraph *g);
 
 public:
   Pass_sample();

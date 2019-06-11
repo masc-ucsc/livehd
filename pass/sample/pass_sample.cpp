@@ -26,6 +26,7 @@ void Pass_sample::do_work(LGraph *g) {
   compute_histogram(g);
   compute_max_depth(g);
   annotate_placement(g);
+  create_sample_graph(g);
 }
 
 void Pass_sample::work(Eprp_var &var) {
@@ -113,3 +114,31 @@ void Pass_sample::annotate_placement(LGraph *g) {
   }
 }
 
+void Pass_sample::create_sample_graph(LGraph *g) {
+  auto lg_path = g->get_path();
+  auto lg_source = g->get_library().get_source(g->get_lgid());
+  LGraph *lg = LGraph::create(lg_path, "pass_sample", lg_source);
+  fmt::print("Creating new sample LGraph...\n");
+  auto shr_node = lg->create_node(ShiftRight_Op);
+  auto graph_input = lg->create_node(GraphIO_Op);
+  auto graph_output = lg->create_node(GraphIO_Op);
+  auto graph_inp_drv = graph_input.setup_driver_pin(1);
+  graph_inp_drv.set_bits(8);
+  auto shr_inp_sink = shr_node.setup_sink_pin(0);
+  auto graph_out_sink = graph_output.setup_sink_pin(1);
+  auto shr_out_drv = shr_node.setup_driver_pin(0);
+  shr_out_drv.set_bits(8);
+  auto b_const = lg->create_node_const(3, 2);
+  auto b_drv = b_const.setup_driver_pin(0);
+  auto s_const = lg->create_node_const(1, 2);
+  auto s_drv = s_const.setup_driver_pin(0);
+  auto b_sink = shr_node.setup_sink_pin(1);
+  auto s_sink = shr_node.setup_sink_pin(2);
+  lg->add_edge(graph_inp_drv, shr_inp_sink);
+  lg->add_edge(shr_out_drv, graph_out_sink);
+  lg->add_edge(b_drv, b_sink);
+  lg->add_edge(s_drv, s_sink);
+
+  fmt::print("Finished.\n");
+  lg->close();
+}
