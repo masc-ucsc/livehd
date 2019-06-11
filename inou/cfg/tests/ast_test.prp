@@ -9,10 +9,16 @@ fun1 = :($a,$b,%o):{
 
 result = fun1(a:3, b:4)
 
-//if 3<4 {
-//  total = fun1(a:3,b:4)
-//}else{
-//  total = 3
+//if 4<4 {
+//  if 55>44 {
+//    total = fun1(a:3,b:4)
+//  } else {
+//    total = fun1(a:5,b:6)
+//  }
+//} elif 4>4 {
+//  total = 3 + $a;
+//} else {
+//  total = 5 + $b;
 //}
 
 //I total == 7

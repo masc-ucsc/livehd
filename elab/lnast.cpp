@@ -13,7 +13,7 @@ Language_neutral_ast::Language_neutral_ast(std::string_view _buffer, Lnast_ntype
 void Lnast_parser::elaborate(){
   lnast = std::make_unique<Language_neutral_ast>(get_buffer(), Lnast_ntype_top);
   build_statements(lnast->get_root(), 0);
-  subgraph_scope_pass();
+  subgraph_scope_sync();
 }
 
 
@@ -239,19 +239,6 @@ Scope_id Lnast_parser::process_scope(const Tree_index& tree_idx_sts, Scope_id cu
     add_subgraph(tree_idx_sts, token_scope, cur_scope);
   }
   return token_scope;
-
-  //if (token_scope == cur_scope) {
-  //  return token_scope;
-  //} else if (token_scope < cur_scope) {//going back to parent scope
-  //  //for(int i = 0; i < CFG_SCOPE_ID_POS; i++) // re-parse
-  //    //scan_prev();
-  //  return token_scope;
-  //} else {
-  //  for(int i = 0; i < CFG_SCOPE_ID_POS; i++) // re-parse
-  //    scan_prev();
-  //  add_subgraph(tree_idx_sts, token_scope, cur_scope);
-  //  return token_scope;
-  //}
 }
 
 void Lnast_parser::add_subgraph(const Tree_index& tree_idx_sts, Scope_id new_scope, Scope_id cur_scope) {
@@ -352,7 +339,7 @@ Lnast_ntype_id Lnast_parser::operator_analysis(int& line_tkcnt) {
   return node_type;
 }
 
-std::string Lnast_parser::ntype_dbg(Lnast_ntype_id ntype){
+std::string Lnast_parser::ntype_dbg(Lnast_ntype_id ntype) {
   std::string ntype_str;
   switch (ntype) {
     case Lnast_ntype_invalid:           ntype_str = "invalid"      ; break;
@@ -397,7 +384,7 @@ std::string Lnast_parser::ntype_dbg(Lnast_ntype_id ntype){
   return ntype_str;
 }
 
-void Lnast_parser::subgraph_scope_pass() {
+void Lnast_parser::subgraph_scope_sync() {
   for (const auto &it:lnast->depth_preorder(lnast->get_root())) {
     auto parent = lnast->get_parent(it);
     if (lnast->get_data(it).scope < lnast->get_data(parent).scope)

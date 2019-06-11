@@ -23,6 +23,7 @@ using tuple = std::tuple<std::string, std::string , uint8_t>;// <node_name, node
 
 class Lnast_test : public ::testing::Test, public Lnast_parser {
   std::vector<std::vector<tuple>> ast_sorted_golden;
+  std::vector<std::vector<tuple>> ast_preorder_golden;
 
 public:
   Tree<tuple>  ast;
@@ -148,10 +149,10 @@ public:
     (void) c1d1;
     (void) c1d2;
 
-    ast.each_breadth_first_fast([this](const Tree_index &parent, const Tree_index &self, tuple tuple_data) {
+    ast.each_breadth_first_fast([this](const Tree_index &parent, const Tree_index &self, tuple node_data) {
       while (static_cast<size_t>(self.level)>=ast_sorted_golden.size())
           ast_sorted_golden.emplace_back();
-      ast_sorted_golden[self.level].emplace_back(tuple_data);
+      ast_sorted_golden[self.level].emplace_back(node_data);
       EXPECT_EQ(ast.get_parent(self), parent);
     });
 
@@ -160,14 +161,24 @@ public:
         std::sort(a.begin(), a.end());
     }
 
+    for (const auto &it:ast.depth_preorder(ast.get_root())) {
+        while (static_cast<size_t>(it.level)>=ast_preorder_golden.size())
+            ast_preorder_golden.emplace_back();
+        ast_preorder_golden[it.level].emplace_back(ast.get_data(it));
+    }
+
     setup_testee();
   }
 
-  void check_against_ast(std::vector<std::vector<tuple>> &ast_sorted_testee) {
+  void check_sorted_against_ast(std::vector<std::vector<tuple>> &ast_sorted_testee) {
       for(auto &a:ast_sorted_testee) {
           std::sort(a.begin(), a.end());
       }
       EXPECT_EQ(ast_sorted_golden, ast_sorted_testee);
+  }
+
+  void check_preorder_against_ast(std::vector<std::vector<tuple>> &ast_preorder_testee) {
+      EXPECT_EQ(ast_preorder_golden, ast_preorder_testee);
   }
 
   std::string get_current_working_dir(){
@@ -226,7 +237,27 @@ TEST_F(Lnast_test, Traverse_breadth_first_check_on_ast) {
       EXPECT_EQ(lnast_parser.get_ast()-> get_parent(self), parent);
     });
 
-    check_against_ast(ast_sorted_testee);
+    check_sorted_against_ast(ast_sorted_testee);
 }
 
-//todo: need to test node by node when pre-order traverse
+
+TEST_F(Lnast_test,Traverse_preorder_traverse_check_on_lnast){
+
+    std::vector<std::vector<tuple>> ast_preorder_testee;
+    std::string_view memblock = setup_memblock();
+
+    for (const auto &it: lnast_parser.get_ast()->depth_preorder(lnast_parser.get_ast()->get_root()) ) {
+        std::string node_name(lnast_parser.get_ast()->get_data(it).node_token.get_text(memblock));
+        std::string node_type  = ntype_dbg(lnast_parser.get_ast()->get_data(it).node_type);
+        auto        node_scope = lnast_parser.get_ast()->get_data(it).scope;
+        tuple tuple_data = std::make_tuple(node_name, node_type, node_scope);
+
+        while (static_cast<size_t>(it.level)>=ast_preorder_testee.size())
+            ast_preorder_testee.emplace_back();
+
+        ast_preorder_testee[it.level].emplace_back(tuple_data);
+    }
+
+    check_preorder_against_ast(ast_preorder_testee);
+}
+

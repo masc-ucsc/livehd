@@ -71,7 +71,7 @@ public:
 
 private:
 protected:
-  Tree_index                     ti;
+  Tree_index     ti;
   const Tree<X> *t;
 
 public:
