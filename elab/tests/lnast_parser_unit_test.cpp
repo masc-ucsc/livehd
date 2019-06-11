@@ -14,11 +14,26 @@
 #include "fmt/format.h"
 #include "lnast.hpp"
 /*
-K1   K2   0  0   16  :   ___b  __bits  0d1
-K2   K3   0  0   16  ()  ___a  ___b
-K3   K4   0  0   16  as  $a    ___a
+ * CFG text input for lnast parser
+K1   K2    0  0   14   :    ___a    __bits  0d1
+K2   K3    0  0   14   as   $a      ___a
+K3   K4    0  15  29   :    ___b    __bits  0d1
+K4   K5    0  15  29   as   $b      ___b
+K5   K6    0  30  44   :    ___c    __bits  0d1
+K6   K7    0  30  44   as   %s      ___c
+K7   K8    0  45  57   &    ___d    $a      $b
+K8   K9    0  45  57   =    %s      ___d
+K11  K12   1  59  96   +    ___f    $a      $b
+K12  null  1  59  96   =    %o      ___f
+K9   K14   0  59  96   ::{  ___e    K11   $a    $b  %o
+K14  K15   0  59  96   =    fun1    \___e
+K15  K16   0  98  121  :    ___h    a       0d3
+K16  K17   0  98  121  :    ___i    b       0d4
+K17  K18   0  98  121  .()  ___g    fun1    ___h  ___i
+K18  K19   0  98  121  =    result  ___g
 END
 */
+
 using tuple = std::tuple<std::string, std::string , uint8_t>;// <node_name, node_type, scope>
 
 class Lnast_test : public ::testing::Test, public Lnast_parser {
@@ -220,7 +235,9 @@ TEST_F(Lnast_test, Traverse_breadth_first_check_on_ast) {
     std::vector<std::vector<tuple>> ast_sorted_testee;
     std::string_view memblock = setup_memblock();
 
-    lnast->each_breadth_first_fast([this, &ast_sorted_testee, &memblock, &lnast](const Tree_index &parent, const Tree_index &self, const Lnast_node &node_data) {
+    lnast->each_breadth_first_fast([this, &ast_sorted_testee, &memblock, &lnast] (const Tree_index &parent,
+                                                                                  const Tree_index &self,
+                                                                                  const Lnast_node &node_data) {
       while (static_cast<size_t>(self.level)>=ast_sorted_testee.size())
           ast_sorted_testee.emplace_back();
 
