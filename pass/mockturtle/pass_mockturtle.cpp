@@ -558,6 +558,10 @@ void Pass_mockturtle::create_MIG_network(LGraph *g) {
         break;
       }
 
+      case ShiftLeft_Op:
+        //fmt::print("Node: ShiftLeft_Op\n");
+        break;
+
       default:
         fmt::print("Unknown_Op in gid:{}\n",group_id);
         break;
