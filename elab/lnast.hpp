@@ -4,8 +4,8 @@
 #include "elab_scanner.hpp"
 #include "tree.hpp"
 
-using Lnast_ntype_id = uint8_t ;
-using Scope_id       = uint8_t ;
+using Lnast_ntype_id = uint8_t;
+using Scope_id       = uint8_t;
 
 static inline constexpr int   CFG_NODE_NAME_POS           =  1;
 static inline constexpr int   CFG_SCOPE_ID_POS            =  3;
@@ -102,7 +102,7 @@ protected:
   Lnast_ntype_id  operand_analysis();
   Lnast_ntype_id  operator_analysis(int& line_tkcnt);
   std::string     ntype_dbg(Lnast_ntype_id ntype);
-  void            subgraph_scope_pass();
+  void            subgraph_scope_sync();
 
 private:
   std::unique_ptr<Language_neutral_ast>  lnast;
