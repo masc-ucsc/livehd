@@ -40,7 +40,7 @@ void LGraph_Base::clear() {
 
   Lgraph_base_core::clear();
 
-  library->update_nentries(lgid, 0);
+  library->clear(lgid);
 }
 
 void LGraph_Base::sync() {

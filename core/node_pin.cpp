@@ -87,7 +87,7 @@ void Node_pin::set_bits(uint16_t bits) {
 }
 
 std::string_view Node_pin::get_type_sub_io_name() const {
-  auto sub_node = get_node().get_type_sub_node();
+  auto &sub_node = get_node().get_type_sub_node();
   return sub_node.get_name_from_instance_pid(pid);
 }
 

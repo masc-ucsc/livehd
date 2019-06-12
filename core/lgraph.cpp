@@ -113,21 +113,21 @@ void LGraph::emplace_back() {
 
 Node_pin LGraph::get_graph_input(std::string_view str) {
 
-  auto io_pin = get_self_sub_node().get_graph_input_io_pin(str);
+  auto io_pid = get_self_sub_node().get_instance_pid(str);
 
-  return Node(this,0,Node::Hardcoded_input_nid).setup_driver_pin(io_pin.graph_io_pos);
+  return Node(this,0,Node::Hardcoded_input_nid).setup_driver_pin(io_pid);
 }
 
 Node_pin LGraph::get_graph_output(std::string_view str) {
-  auto io_pin = get_self_sub_node().get_graph_output_io_pin(str);
+  auto io_pid = get_self_sub_node().get_instance_pid(str);
 
-  return Node(this,0,Node::Hardcoded_output_nid).setup_sink_pin(io_pin.graph_io_pos);
+  return Node(this,0,Node::Hardcoded_output_nid).setup_sink_pin(io_pid);
 }
 
 Node_pin LGraph::get_graph_output_driver(std::string_view str) {
-  auto io_pin = get_self_sub_node().get_graph_output_io_pin(str);
+  auto io_pid = get_self_sub_node().get_instance_pid(str);
 
-  return Node(this,0,Node::Hardcoded_output_nid).setup_driver_pin(io_pin.graph_io_pos);
+  return Node(this,0,Node::Hardcoded_output_nid).setup_driver_pin(io_pid);
 }
 
 bool LGraph::is_graph_input(std::string_view name) const {
@@ -187,6 +187,8 @@ bool LGraph::is_graph_output(std::string_view name) const {
 Node_pin LGraph::add_graph_input(std::string_view str, Port_ID pos, uint16_t bits) {
   I(!is_graph_output(str));
 
+  fmt::print("add_input {} {} {}\n", name, str, pos);
+
   Port_ID inst_pid;
   if (get_self_sub_node().has_pin(str)) {
     // reset pin stats
@@ -209,6 +211,8 @@ Node_pin LGraph::add_graph_input(std::string_view str, Port_ID pos, uint16_t bit
 
 Node_pin LGraph::add_graph_output(std::string_view str, Port_ID pos, uint16_t bits) {
   I(!is_graph_input(str));
+
+  fmt::print("add_output {} {} {}\n", name, str, pos);
 
   Port_ID inst_pid;
   if (get_self_sub_node().has_pin(str)) {
@@ -472,7 +476,7 @@ Node LGraph::create_node_sub(std::string_view sub_name) {
   I(name != sub_name); // It can not point to itself (in fact, no recursion of any type)
 
   auto nid = create_node().get_nid();
-  auto sub = library->setup_sub(sub_name);
+  auto &sub = library->setup_sub(sub_name);
   set_type_sub(nid, sub.get_lgid());
 
   return Node(this,0,nid);
@@ -552,55 +556,4 @@ void LGraph::dump() {
 #endif
 }
 
-void LGraph::add_hierarchy_entry(std::string_view base, Lg_type_id lgid) {
-  hierarchy[base] = lgid;
-  if (hierarchy_cache.find(lgid) == hierarchy_cache.end()) {
-    hierarchy_cache[lgid] = library->get_version(lgid);
-  }
-}
-
-const LGraph::Hierarchy &LGraph::get_hierarchy() {
-  if (!hierarchy.empty()) {
-    bool all_ok = true;
-    for (auto &[lgid, version] : hierarchy_cache) {
-      if (library->get_version(lgid) == version) continue;
-      all_ok = false;
-      break;
-    }
-    if (all_ok) return hierarchy;
-  }
-  hierarchy.clear();
-  hierarchy_cache.clear();
-
-  struct Entry {
-    std::string base;
-    LGraph *    top;
-    LGraph *    lg;
-    Entry(std::string_view _base, LGraph *_top, LGraph *_lg) : base(_base), top(_top), lg(_lg) {}
-  };
-  std::vector<Entry> pending;
-
-  pending.emplace_back(get_name(), this, this);
-
-  while (!pending.empty()) {
-    auto entry = pending.back();
-    pending.pop_back();
-
-    entry.top->add_hierarchy_entry(entry.base, entry.lg->get_lgid());
-
-    entry.lg->each_sub_fast([&entry, &pending](Node &node) {
-      if (!node.has_name()) return;
-      LGraph *lg = node.get_class_lgraph();
-
-      if (lg == 0) {
-        Pass::error("hierarchy for {} could not open instance {} lgid {}", entry.base, node.get_name(), lg->get_lgid());
-      } else {
-        auto base2 = absl::StrCat(entry.base, ".", node.get_name());
-        pending.emplace_back(base2, entry.top, lg);
-      }
-    });
-  }
-
-  return hierarchy;
-}
 

@@ -276,59 +276,6 @@ void Graph_library::reload() {
     }
   }
 
-#ifndef NDEBUG
-  DIR *dir = opendir(path.c_str());
-  if (!dir) {
-    Pass::error("graph_library.reload: could not open {} directory", path);
-    return;
-  }
-  struct dirent *dent;
-
-  std::set<std::string> lg_found;
-
-  while ((dent = readdir(dir)) != nullptr) {
-    if (dent->d_type != DT_REG)  // Only regular files
-      continue;
-    if (strncmp(dent->d_name, "lgraph_", 7) != 0)  // only if starts with lgraph_
-      continue;
-    int len = strlen(dent->d_name);
-    if (len <= (7 + 6)) continue;
-    if (strcmp(dent->d_name + len - 6, "_nodes") != 0)  // and finish with _nodes
-      continue;
-
-    const std::string id_str(&dent->d_name[7], len - 7 - 6);
-    I(lg_found.find(id_str) == lg_found.end());
-    lg_found.insert(id_str);
-
-    bool found = false;
-    Lg_type_id id_val = std::stoi(id_str);
-    I(id_val>0);
-    for (const auto &[name, id] : name2id) {
-      if (id_val == id) {
-        found = true;
-      }
-    }
-    if (!found) {
-      Pass::error("graph_library: directory has id:{} but the {} graph_library does not have it", id_val.value, path);
-    }
-  }
-  closedir(dir);
-
-  for (const auto &[name, id] : name2id) {
-    // std::string s(name);
-    std::string s = std::to_string(id);
-    if (lg_found.find(s) == lg_found.end()) {
-      for (auto contents : lg_found) {
-        if (contents == s)
-          fmt::print("   0lg_found has [{}] [{}]\n", contents, s);
-        else
-          fmt::print("   1lg_found has [{}] [{}] s:{} s:{} l:{} l:{}\n", contents, s, contents.size(), s.size(), contents.length(),
-                     s.length());
-      }
-      Pass::error("graph_library has id:{} name:{} but the {} directory does not have it", id, name, path);
-    }
-  }
-#endif
 }
 
 Graph_library::Graph_library(std::string_view _path) : path(_path), library_file(path + "/" + "graph_library.json") {

@@ -27,8 +27,6 @@ class LGraph : public LGraph_Node_Type
 {
 private:
 public:
-  using Hierarchy = absl::flat_hash_map<std::string, Lg_type_id>;
-
 protected:
   friend class Node;
   friend class Node_pin;
@@ -39,9 +37,6 @@ protected:
   friend class Fast_edge_iterator;
 
   using Hierarchy_cache = absl::flat_hash_map<Lg_type_id, Lg_type_id, Lg_type_id_hash>;
-
-  Hierarchy       hierarchy;
-  Hierarchy_cache hierarchy_cache;  // Tracks used version to avoid recompute get_hierarchy
 
   void add_hierarchy_entry(std::string_view base, Lg_type_id lgid);
 
@@ -260,16 +255,16 @@ public:
   void each_output_edge_fast(std::function<void(XEdge &edge)> f1);
 
   // FIXME: Use Instance.each_graph_*
-  void each_sub_fast_direct(const std::function<bool(Node &)>);
+  void each_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)>);
 
   // FIXME: Use Instance.each_graph_*
   template <typename FN>
   void each_sub_fast(const FN f1) {
-    if constexpr (std::is_invocable_r_v<bool, FN &, Node &>) {  // WARNING: bool must be before void
+    if constexpr (std::is_invocable_r_v<bool, FN &, Node &, Lg_type_id>) {  // WARNING: bool must be before void
       each_sub_fast_direct(f1);
-    } else if constexpr (std::is_invocable_r_v<void, FN &, Node &>) {
-      auto f2 = [&f1](Node &node) {
-        f1(node);
+    } else if constexpr (std::is_invocable_r_v<void, FN &, Node &, Lg_type_id>) {
+      auto f2 = [&f1](Node &node, Lg_type_id lgid) {
+        f1(node, lgid);
         return true;
       };
       each_sub_fast_direct(f2);
@@ -296,6 +291,4 @@ public:
       each_root_direct(f1);  // Better error message if I keep this
     }
   };
-
-  const Hierarchy &get_hierarchy();
 };

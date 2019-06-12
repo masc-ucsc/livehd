@@ -75,7 +75,7 @@ void LGraph::each_output_edge_fast(std::function<void(XEdge &edge)> f1) {
   }
 }
 
-void LGraph::each_sub_fast_direct(const std::function<bool(Node &)> fn) {
+void LGraph::each_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)> fn) {
 
   const auto &m = get_sub_nodes_map();
   for (auto it = m.begin(), end = m.end(); it != end; ++it) {
@@ -84,9 +84,9 @@ void LGraph::each_sub_fast_direct(const std::function<bool(Node &)> fn) {
     I(node_internal[cid].is_node_state());
     I(node_internal[cid].is_master_root());
 
-    auto node = Node(this,it->first);
+    auto node = Node(this, it->first);
 
-    bool cont = fn(node);
+    bool cont = fn(node, it->second);
     if (!cont) return;
   }
 }

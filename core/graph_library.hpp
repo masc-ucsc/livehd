@@ -80,6 +80,9 @@ protected:
   static std::string get_lgraph_filename(std::string_view path, std::string_view name, std::string_view ext);
 
 public:
+  Graph_library(const Graph_library &s) = delete;
+  Graph_library & operator=(const Graph_library&) = delete;
+
   static bool    exists(std::string_view path, std::string_view name);
   static LGraph *try_find_lgraph(std::string_view path, std::string_view name);
   LGraph        *try_find_lgraph(std::string_view name);

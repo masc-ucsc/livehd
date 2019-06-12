@@ -185,11 +185,18 @@ Node_pin Node::setup_driver_pin(std::string_view name) {
   I(type.op == SubGraph_Op);
 
   Lg_type_id id2 = current_g->get_type_sub(nid);
+
+  auto &sub_node = current_g->get_library().get_sub(id2);
+  pid = sub_node.get_instance_pid(name);
+
+#ifndef NDEBUG
   LGraph *g2 = LGraph::open(top_g->get_path(), id2);
   I(g2);
-  auto internal_pin = g2->get_graph_output(name);
-  pid = internal_pin.get_pid();
-  Index_ID idx = current_g->setup_idx_from_pid(nid,pid);
+  auto pid2 = g2->get_graph_output(name).get_pid();
+  I(pid == pid2);
+#endif
+
+  Index_ID idx = current_g->setup_idx_from_pid(nid, pid);
   current_g->setup_driver(idx);
   return Node_pin(top_g, current_g, hid, idx, pid, false);
 }
@@ -198,13 +205,15 @@ Node_pin Node::setup_sink_pin(std::string_view name) {
   auto type = get_type();
   I(current_g); // Get type sets it
 
-  auto pid = type.get_input_match(name);
-  if (pid != Port_invalid) {
-    auto idx = nid;
-    if (pid)
-      idx = current_g->setup_idx_from_pid(nid,pid);
-    current_g->setup_sink(idx);
-    return Node_pin(top_g, current_g, hid, idx, pid, true);
+  if (type.op != SubGraph_Op) {
+    auto pid = type.get_input_match(name);
+    if (pid != Port_invalid) {
+      auto idx = nid;
+      if (pid) idx = current_g->setup_idx_from_pid(nid, pid);
+      current_g->setup_sink(idx);
+      return Node_pin(top_g, current_g, hid, idx, pid, true);
+    }
+    return Node_pin(top_g, current_g, hid, 0, Port_invalid, true);
   }
 
   I(type.op == SubGraph_Op);
@@ -213,7 +222,7 @@ Node_pin Node::setup_sink_pin(std::string_view name) {
   LGraph *g2 = LGraph::open(current_g->get_path(), id2);
   I(g2);
   auto internal_pin = g2->get_graph_input(name);
-  pid = internal_pin.get_pid();
+  auto pid = internal_pin.get_pid();
   Index_ID idx = current_g->setup_idx_from_pid(nid,pid);
   current_g->setup_sink(idx);
   return Node_pin(top_g, current_g, hid, idx, pid, true);
@@ -328,6 +337,7 @@ bool Node::has_name() const {
 
 const Ann_place &Node::get_place() const {
   auto *data = Ann_node_place::ref(top_g)->ref(get_compact());
+  I(data);
   return *data;
 }
 

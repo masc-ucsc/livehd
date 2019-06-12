@@ -69,9 +69,12 @@ private:
     I(graph_pos!=Port_invalid);
     I(instance_pid); // Must be non zero for input/output pid
 
-    if (graph_pos2instance_pid.size()<=graph_pos)
-      graph_pos2instance_pid.resize(graph_pos+1);
-    I(graph_pos2instance_pid[graph_pos]==0 || graph_pos2instance_pid[graph_pos]==instance_pid);
+    if (graph_pos2instance_pid.size()<=graph_pos) {
+      graph_pos2instance_pid.resize(graph_pos+1, Port_invalid);
+      I(graph_pos2instance_pid[graph_pos]==Port_invalid);
+    }else{
+      I(graph_pos2instance_pid[graph_pos]==Port_invalid || graph_pos2instance_pid[graph_pos]==instance_pid);
+    }
     graph_pos2instance_pid[graph_pos] = instance_pid;
   }
 
@@ -80,15 +83,19 @@ public:
     name.clear();
     expunge();
   }
+  //Sub_node(const Sub_node &s) = delete;
+  Sub_node & operator=(const Sub_node&) = delete;
 
   void to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer) const;
   void from_json(const rapidjson::Value &entry);
 
   void setup(std::string_view _name, Lg_type_id _lgid) {
-    I(io_pins.empty());
-    io_pins.resize(1); // No id ZERO
     name = _name;
     lgid = _lgid;
+
+    clear_io_pins();
+    io_pins.clear();   // WARNING: Do NOT remove mappings, just port id. (allows to reload designs)
+    io_pins.resize(1); // No id ZERO
   }
 
   void rename(std::string_view _name) {
@@ -98,13 +105,15 @@ public:
   }
 
   void expunge() {
+    name2id.clear();
     io_pins.clear();
     lgid = 0;
   }
 
   void clear_io_pins() {
-    io_pins.clear();
-    io_pins.resize(1); // No id ZERO
+    graph_pos2instance_pid.clear();
+    //io_pins.clear();   // WARNING: Do NOT remove mappings, just port id. (allows to reload designs)
+    //io_pins.resize(1); // No id ZERO
   }
 
   bool is_invalid() const { return lgid==0; }
@@ -113,12 +122,15 @@ public:
 
   std::string_view get_name() const { I(lgid); return name; }
 
-  Port_ID add_pin(std::string_view name, Direction dir, Port_ID graph_pos=0) {
+  Port_ID add_pin(std::string_view name, Direction dir, Port_ID graph_pos=Port_invalid) {
     I(lgid);
+    I(!has_pin(name));
     Port_ID instance_pid = io_pins.size();
     io_pins.emplace_back(name, dir, graph_pos);
+    fmt::print("add_pin name:{} instance_pid:{} name2id{}\n", name, instance_pid, name2id.size());
     name2id[name] = instance_pid;
-    if (graph_pos)
+    I(io_pins[instance_pid].name == name);
+    if (graph_pos != Port_invalid)
       map_pin_int(instance_pid, graph_pos);
 
     return instance_pid;
@@ -129,6 +141,7 @@ public:
     I(graph_pos != Port_invalid);
 
     Port_ID instance_pid = name2id[name];
+    I(io_pins[instance_pid].name == name);
     I(io_pins[instance_pid].graph_io_pos == graph_pos || !has_graph_pin(graph_pos));
     io_pins[instance_pid].graph_io_pos = graph_pos;
 
@@ -159,12 +172,14 @@ public:
   const IO_pin &get_pin(std::string_view name) const {
     I(has_pin(name));
     auto instance_pid = name2id.at(name);
+    I(io_pins[instance_pid].name == name);
     return io_pins[instance_pid];
   }
 
   const IO_pin &get_graph_output_io_pin(std::string_view name) const {
     I(has_pin(name));
     auto instance_pid = name2id.at(name);
+    I(io_pins[instance_pid].name == name);
     I(io_pins[instance_pid].dir == Direction::Output);
     return io_pins[instance_pid];
   }
@@ -172,6 +187,7 @@ public:
   const IO_pin &get_graph_input_io_pin(std::string_view name) const {
     I(has_pin(name));
     auto instance_pid = name2id.at(name);
+    I(io_pins[instance_pid].name == name);
     I(io_pins[instance_pid].dir == Direction::Input);
     return io_pins[instance_pid];
   }
@@ -179,6 +195,7 @@ public:
   const Port_ID get_graph_io_pos(std::string_view name) const {
     I(has_pin(name));
     auto instance_pid = name2id.at(name);
+    I(io_pins[instance_pid].name == name);
     return io_pins[instance_pid].graph_io_pos;
   }
 
@@ -206,6 +223,7 @@ public:
     I(has_pin(name));
 
     auto instance_pid = name2id.at(name);
+    I(io_pins[instance_pid].name == name);
     return (io_pins.at(instance_pid).dir == Direction::Input);
   }
 
@@ -223,6 +241,7 @@ public:
     I(has_pin(name));
 
     auto instance_pid = name2id.at(name);
+    I(io_pins[instance_pid].name == name);
     return (io_pins[instance_pid].dir == Direction::Output);
   }
 

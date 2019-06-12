@@ -51,18 +51,23 @@ protected:
         Port_ID pid;
 
         if (io_pin.dir == Sub_node::Direction::Input) {
-          pid = sub.add_pin(io_pin.name, Sub_node::Direction::Input);
+          if (!sub.has_pin(io_pin.name)) {
+            pid = sub.add_pin(io_pin.name, Sub_node::Direction::Input);
 
-          auto dpin = parent->get_graph_input(io_pin.name);
+            auto dpin = parent->get_graph_input(io_pin.name);
 
-          dpin.connect_sink(node.setup_sink_pin(pid));
+            dpin.connect_sink(node.setup_sink_pin(pid));
+          }
 
         }else if (io_pin.dir == Sub_node::Direction::Output) {
-          pid = sub.add_pin(io_pin.name, Sub_node::Direction::Output);
-          auto spin = parent->get_graph_output(io_pin.name);
-          if (!spin.get_node().has_inputs()) {
-            node.setup_driver_pin(pid).connect_sink(spin);
+          if (!sub.has_pin(io_pin.name)) {
+            pid = sub.add_pin(io_pin.name, Sub_node::Direction::Output);
+            auto spin = parent->get_graph_output(io_pin.name);
+            if (!spin.get_node().has_inputs()) {
+              node.setup_driver_pin(pid).connect_sink(spin);
+            }
           }
+        }else if (io_pin.dir == Sub_node::Direction::Invalid) {
         }else{
           I(false);// For LGraph sub there should be no undefined iopins
           I(io_pin.graph_io_pos != Port_invalid); // graph_io_pos must be defined too
@@ -160,7 +165,7 @@ TEST_F(Setup_graphs_test, each_sub_graph) {
 
   for(auto &parent:lgs) {
     fmt::print("checking parent:{}\n", parent->get_name());
-    parent->each_sub_fast([parent,&children2,this](Node &node) {
+    parent->each_sub_fast([parent,&children2,this](Node &node, Lg_type_id lgid) {
         LGraph *child = LGraph::open(parent->get_path(),node.get_type_sub());
 
         ASSERT_NE(child,nullptr);
@@ -196,7 +201,7 @@ TEST_F(Setup_graphs_test, each_sub_graph_twice) {
 
   for(auto &parent:lgs) {
     fmt::print("checking parent:{}\n", parent->get_name());
-    parent->each_sub_fast([parent,&children2,this](Node &node) {
+    parent->each_sub_fast([parent,&children2,this](Node &node, Lg_type_id lgid) {
         LGraph *child = LGraph::open(parent->get_path(),node.get_type_sub());
 
         ASSERT_NE(child,nullptr);
@@ -229,24 +234,11 @@ TEST_F(Setup_graphs_test, each_sub_graph_twice) {
 TEST_F(Setup_graphs_test, hierarchy) {
 
   for(auto &parent:lgs) {
-    const auto hier = parent->get_hierarchy();
     fmt::print("hierarchy for {}\n",parent->get_name());
-    for(auto &[name,lgid]:hier) {
-      fmt::print("  {} {}\n",name,lgid);
-    }
-  }
-
-  EXPECT_TRUE(true);
-}
-
-TEST_F(Setup_graphs_test, hierarchy_twice) {
-
-  for(auto &parent:lgs) {
-    const auto hier = parent->get_hierarchy();
-    fmt::print("hierarchy for {}\n",parent->get_name());
-    for(auto &[name,lgid]:hier) {
-      fmt::print("  {} {}\n",name,lgid);
-    }
+    parent->each_sub_fast([](Node &node, Lg_type_id lgid) {
+      fmt::print("  {} {}\n",node.get_name(), lgid);
+      }
+    );
   }
 
   EXPECT_TRUE(true);

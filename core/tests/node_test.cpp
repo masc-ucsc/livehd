@@ -132,7 +132,7 @@ TEST_F(Setup_graphs_test, each_sub_graph) {
 
 TEST_F(Setup_graphs_test, annotate1a) {
   for(const auto node:top->forward()) {
-    EXPECT_DEATH({node.get_place().get_x();},"assertion.*failed"); // get_place for something not set, triggers failure
+    EXPECT_DEATH({node.get_place().get_x();},"Assertion.*failed"); // get_place for something not set, triggers failure
   }
 }
 

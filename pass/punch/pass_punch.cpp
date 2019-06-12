@@ -25,6 +25,7 @@ Pass_punch::Pass_punch()
     : Pass("punch") {
 }
 
+#if 0
 Pass_punch::Pass_punch(LGraph *top, std::string_view _src, std::string_view _dst)
     : Pass("punch") {
   uint16_t ok_src = src_hierarchy.set_hierarchy(top, _src);
@@ -221,4 +222,5 @@ bool Pass_punch::add_input(LGraph *g, std::string_view wname, std::string_view i
 
   return true;
 }
+#endif
 #endif
