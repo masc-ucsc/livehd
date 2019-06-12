@@ -53,7 +53,10 @@ enum Node_Type_Op : uint64_t {
 #if 1
   // WARNING: deprecated once we have LUTs working (mockturtle)
   // op_class: shift
-  ShiftRight_Op,
+  LogicShiftRight_Op,
+  ArithShiftRight_Op,
+  DynamicShiftRight_Op,
+  ShiftRight_Op, //FIX ME: should be superseded by above Ops
   ShiftLeft_Op,
 #endif
   // op_class: LUT
@@ -434,9 +437,40 @@ public:
   };
 };
 
-// Y = (A >> B)
+// Y = A >> B
+class Node_Type_LogicShiftRight : public Node_Type {
+public:
+  Node_Type_LogicShiftRight() : Node_Type("lshr", LogicShiftRight_Op, false) {
+    inputs.push_back("A");
+    inputs.push_back("B");
+    outputs.push_back("Y");
+  };
+};
+
+// Y = $signed(A) >>> B
+class Node_Type_ArithShiftRight : public Node_Type {
+public:
+  Node_Type_ArithShiftRight() : Node_Type("ashr", ArithShiftRight_Op, false) {
+    inputs.push_back("A");
+    inputs.push_back("B");
+    outputs.push_back("Y");
+  };
+};
+
+// Y = A[$signed(B) +: bit_width(A)]
+class Node_Type_DynamicShiftRight : public Node_Type {
+public:
+  Node_Type_DynamicShiftRight() : Node_Type("dshr", DynamicShiftRight_Op, false) {
+    inputs.push_back("A");
+    inputs.push_back("B");
+    outputs.push_back("Y");
+  };
+};
+
+// Y = A >> B
 // S == 1: sign extension
 // S == 2: B is signed
+// FIX ME: should be superseded
 class Node_Type_ShiftRight : public Node_Type {
 public:
   Node_Type_ShiftRight() : Node_Type("shr", ShiftRight_Op, false) {
