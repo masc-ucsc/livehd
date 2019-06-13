@@ -20,10 +20,10 @@ void setup_inou_rand() {
 void Inou_rand::setup() {
   Eprp_method m1("inou.rand", "generate a random lgraph", &Inou_rand::tolg);
 
-  m1.add_label_optional("seed", "random seed");
-  m1.add_label_optional("size", "lgraph size");
+  m1.add_label_optional("seed",   "random seed");
+  m1.add_label_optional("size",   "lgraph size");
   m1.add_label_optional("eratio", "edge ratio for random");
-  m1.add_label_required("name", "lgraph name");
+  m1.add_label_required("name",   "lgraph name");
 
   register_inou(m1);
 }
@@ -86,7 +86,7 @@ std::vector<LGraph *> Inou_rand::do_tolg() {
   }
 
   absl::flat_hash_set<Node_pin::Compact> used_port;
-  absl::flat_hash_set<XEdge::Compact> connections;
+  absl::flat_hash_set<XEdge::Compact>    connections;
 
   int i       = 0;
   int timeout = 0;

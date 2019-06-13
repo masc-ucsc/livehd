@@ -12,9 +12,9 @@ static inline constexpr int   CFG_SCOPE_ID_POS            =  3;
 static inline constexpr int   CFG_TOKEN_POS_BEG           =  4;
 static inline constexpr int   CFG_TOKEN_POS_END           =  5;
 static inline constexpr int   CFG_OP_POS_BEG              =  6;
-static inline constexpr int   CFG_SCOPE_OP_TOKEN1ST_RANGE = -7; //K9 K14 0 59 96 ::{  ___e  K11  $a  $b  %o
-static inline constexpr int   CFG_OP_FUNC_ROOT_RANGE      =  2; //K9 K14 0 59 96 ::{  ___e  K11  $a  $b  %o
-static inline constexpr int   CFG_OP_FUNC_TMP_REF_RANGE   =  2; //K14 K15 0 59 96 = fun1  \___e
+static inline constexpr int   CFG_SCOPE_OP_TOKEN1ST_RANGE = -7; //K9  K14  0 59 96 ::{  ___e  K11  $a  $b  %o
+static inline constexpr int   CFG_OP_FUNC_ROOT_RANGE      =  2; //K9  K14  0 59 96 ::{  ___e  K11  $a  $b  %o
+static inline constexpr int   CFG_OP_FUNC_TMP_REF_RANGE   =  2; //K14 K15  0 59 96   =  fun1  \___e
 
 
 struct Lnast_node {
