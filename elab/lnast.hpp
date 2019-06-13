@@ -43,6 +43,7 @@ class Lnast_parser : public Elab_scanner {
 public:
   Lnast_parser() : line_num(0) {};
   const std::unique_ptr<Language_neutral_ast>&  get_ast(){return lnast;};
+  std::string     ntype_dbg(Lnast_ntype_id ntype);
 protected:
 
   enum Lnast_node_type : Lnast_ntype_id {
@@ -101,7 +102,6 @@ protected:
   void            add_operator_subtree(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id cur_scope);
   Lnast_ntype_id  operand_analysis();
   Lnast_ntype_id  operator_analysis(int& line_tkcnt);
-  std::string     ntype_dbg(Lnast_ntype_id ntype);
   void            subgraph_scope_sync();
 
 private:

@@ -254,7 +254,7 @@ TEST_F(Lnast_test, Traverse_breadth_first_check_on_ast) {
 
       tuple tuple_data = std::make_tuple(node_name, node_type, node_scope);
       ast_sorted_testee[self.level].emplace_back(tuple_data);
-      EXPECT_EQ(lnast_parser.get_ast()-> get_parent(self), parent);
+      EXPECT_EQ(lnast-> get_parent(self), parent);
     });
 
     check_sorted_against_ast(ast_sorted_testee);
@@ -267,7 +267,7 @@ TEST_F(Lnast_test,Traverse_preorder_traverse_check_on_lnast){
     std::vector<std::vector<tuple>> ast_preorder_testee;
     std::string_view memblock = setup_memblock();
 
-    for (const auto &it: lnast->depth_preorder(lnast_parser.get_ast()->get_root()) ) {
+    for (const auto &it: lnast->depth_preorder(lnast->get_root()) ) {
 
         const auto& node_data = lnast->get_data(it);
         std::string node_name(node_data.node_token.get_text(memblock)); //str_view to string
