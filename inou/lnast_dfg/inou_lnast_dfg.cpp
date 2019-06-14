@@ -35,6 +35,7 @@ void Inou_lnast_dfg::tolg(Eprp_var &var){
   //cfg_text to lnast
   p.memblock = p.setup_memblock();
   p.lnast_parser.parse("lnast", p.memblock);
+  p.lnast = p.lnast_parser.get_ast().get(); //unique_ptr lend its ownership
 
   //lnast to lgraph
   std::vector<LGraph *> lgs = p.do_tolg();
@@ -52,11 +53,8 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
   I(!opack.files.empty());
   I(!opack.path.empty());
   LGraph *dfg = LGraph::create(opack.path, opack.files, "inou_lnast_dfg");
-  auto lnast = lnast_parser.get_ast().get(); //unique_ptr lend its ownership
 
-  //implement lnast to dfg here
   for (const auto &it: lnast->depth_preorder(lnast->get_root()) ) {
-
     const auto& node_data = lnast->get_data(it);
     std::string node_name(node_data.node_token.get_text(memblock)); //str_view to string
     std::string node_type  = lnast_parser.ntype_dbg(node_data.node_type);
@@ -64,13 +62,80 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
     fmt::print("name:{}, type:{}, scope:{}\n", node_name, node_type, node_scope);
   }
 
-  dfg->sync();
+  //lnast to dfg
+  process_ast_top(dfg);
 
+
+
+  dfg->sync();
   std::vector<LGraph *> lgs;
   lgs.push_back(dfg);
 
   return lgs;
 }
+
+
+void Inou_lnast_dfg::process_ast_top(LGraph *dfg){
+  const auto& top = lnast->get_root();
+  const auto& statement  = lnast->get_child(top);
+  const auto& statements = lnast->get_children(statement);
+  process_ast_statements(dfg, statements);
+}
+
+void Inou_lnast_dfg::process_ast_statements(LGraph *dfg, const std::vector<Tree_index> &sts){
+  for (const auto& ast_idx : sts) {
+    const auto& op = lnast->get_data(ast_idx).node_type;
+    if (is_pure_assign_op(op)) {
+      process_ast_pure_assign_op(dfg, ast_idx);
+    } else if (is_binary_op(op)) {
+      process_ast_binary_op(dfg, ast_idx);
+    } else if (is_unary_op(op)) {
+      process_ast_unary_op(dfg, ast_idx);
+    } else if (is_logical_op(op)) {
+      process_ast_logical_op(dfg, ast_idx);
+    } else if (is_as_op(op)) {
+      process_ast_as_op(dfg, ast_idx);
+    } else if (is_label_op(op)) {
+      process_ast_label_op(dfg, ast_idx);
+    } else if (is_dp_assign_op(op)) {
+      process_ast_dp_assign_op(dfg, ast_idx);
+    } else if (is_if_op(op)) {
+      process_ast_if_op(dfg, ast_idx);
+    } else if (is_uif_op(op)) {
+      process_ast_uif_op(dfg, ast_idx);
+    } else if (is_func_call_op(op)) {
+      process_ast_func_call_op(dfg, ast_idx);
+    } else if (is_func_def_op(op)) {
+      process_ast_func_def_op(dfg, ast_idx);
+    } else if (is_sub_op(op)) {
+      process_ast_sub_op(dfg, ast_idx);
+    } else if (is_for_op(op)) {
+      process_ast_for_op(dfg, ast_idx);
+    } else if (is_while_op(op)) {
+      process_ast_while_op(dfg, ast_idx);
+    } else {
+      I(false);
+      return;
+    }
+  }
+}
+
+
+void  Inou_lnast_dfg::process_ast_pure_assign_op (LGraph *dfg, const Tree_index &ast_idx){;};
+void  Inou_lnast_dfg::process_ast_binary_op      (LGraph *dfg, const Tree_index &ast_idx){;};
+void  Inou_lnast_dfg::process_ast_unary_op       (LGraph *dfg, const Tree_index &ast_idx){;};
+void  Inou_lnast_dfg::process_ast_logical_op     (LGraph *dfg, const Tree_index &ast_idx){;};
+void  Inou_lnast_dfg::process_ast_as_op          (LGraph *dfg, const Tree_index &ast_idx){;};
+void  Inou_lnast_dfg::process_ast_label_op       (LGraph *dfg, const Tree_index &ast_idx){;};
+void  Inou_lnast_dfg::process_ast_if_op          (LGraph *dfg, const Tree_index &ast_idx){;};
+void  Inou_lnast_dfg::process_ast_uif_op         (LGraph *dfg, const Tree_index &ast_idx){;};
+void  Inou_lnast_dfg::process_ast_func_call_op   (LGraph *dfg, const Tree_index &ast_idx){;};
+void  Inou_lnast_dfg::process_ast_func_def_op    (LGraph *dfg, const Tree_index &ast_idx){;};
+void  Inou_lnast_dfg::process_ast_sub_op         (LGraph *dfg, const Tree_index &ast_idx){;};
+void  Inou_lnast_dfg::process_ast_for_op         (LGraph *dfg, const Tree_index &ast_idx){;};
+void  Inou_lnast_dfg::process_ast_while_op       (LGraph *dfg, const Tree_index &ast_idx){;};
+void  Inou_lnast_dfg::process_ast_dp_assign_op   (LGraph *dfg, const Tree_index &ast_idx){;};
+
 
 std::string_view Inou_lnast_dfg::setup_memblock(){
   auto file_path = opack.files;

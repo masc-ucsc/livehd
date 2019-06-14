@@ -102,8 +102,8 @@ void Lnast_parser::add_operator_subtree(const Tree_index& tree_idx_op, int& line
 
   if (nt == Lnast_ntype_pure_assign || nt == Lnast_ntype_dp_assign || nt == Lnast_ntype_as || nt == Lnast_ntype_tuple) {//SH:FIXME: handle tuple seperately
     process_assign_like_op(tree_idx_op, line_tkcnt, cur_scope);
-  } else if (nt == Lnast_ntype_lable) {
-    process_lable_op(tree_idx_op, line_tkcnt, cur_scope);
+  } else if (nt == Lnast_ntype_label) {
+    process_label_op(tree_idx_op, line_tkcnt, cur_scope);
   } else if (nt == Lnast_ntype_func_call) {
     process_func_call_op(tree_idx_op, line_tkcnt, cur_scope);
   } else if (nt == Lnast_ntype_func_def) {
@@ -209,7 +209,7 @@ void Lnast_parser::process_assign_like_op(const Tree_index& tree_idx_op, int& li
 
 
 //scan pos start: first operand token, stop: last operand
-void Lnast_parser::process_lable_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id cur_scope) {
+void Lnast_parser::process_label_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id cur_scope) {
   I(scan_is_token(Token_id_alnum) || scan_is_token(Token_id_output) || scan_is_token(Token_id_input));
   lnast->add_child(tree_idx_op, Lnast_node(operand_analysis(), scan_get_token(), cur_scope));
   scan_next(); line_tkcnt += 1;
@@ -279,7 +279,7 @@ Lnast_ntype_id Lnast_parser::operator_analysis(int& line_tkcnt) {
         scan_next();
         line_tkcnt += 1;
       } else {
-        node_type = Lnast_ntype_lable;
+        node_type = Lnast_ntype_label;
       }
   } else if (scan_is_token(Token_id_dot)) { //handle .()
       if (scan_peep_is_token(Token_id_op, 1)){
@@ -346,7 +346,7 @@ std::string Lnast_parser::ntype_dbg(Lnast_ntype_id ntype) {
     case Lnast_ntype_pure_assign: return "pure_assign";
     case Lnast_ntype_dp_assign:   return "dp_assign"  ;
     case Lnast_ntype_as:          return "as"         ;
-    case Lnast_ntype_lable:       return "lable"      ;
+    case Lnast_ntype_label:       return "label"      ;
     case Lnast_ntype_dot:         return "dot"        ;
     case Lnast_ntype_logical_and: return "logical_and";
     case Lnast_ntype_logical_or:  return "logical_or" ;
@@ -380,6 +380,7 @@ std::string Lnast_parser::ntype_dbg(Lnast_ntype_id ntype) {
     case Lnast_ntype_top:         return "top"        ;
     default:;
   }
+  return "invalid";
 }
 
 void Lnast_parser::subgraph_scope_sync() {

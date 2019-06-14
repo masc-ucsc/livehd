@@ -52,7 +52,7 @@ protected:
     Lnast_ntype_pure_assign,  // =
     Lnast_ntype_dp_assign,    // :=, dp = deprecate
     Lnast_ntype_as,           // as
-    Lnast_ntype_lable,        // :
+    Lnast_ntype_label,        // :
     Lnast_ntype_dot,          // .
     Lnast_ntype_logical_and,  // and
     Lnast_ntype_logical_or,   // or
@@ -87,19 +87,19 @@ protected:
   };
 
   void            elaborate() override;
-  void            build_statements(const Tree_index& tree_idx_top, Scope_id scope);
-  Scope_id        add_statement(const Tree_index& tree_idx_sts, Scope_id cur_scope);
-  Scope_id        process_scope(const Tree_index& tree_idx_sts, Scope_id cur_scope );
-  void            add_subgraph(const Tree_index& tree_idx_std, Scope_id new_scope, Scope_id cur_scope);
-  void            process_assign_like_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
-  void            process_function_name_replacement(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
-  void            process_lable_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
-  void            process_binary_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
-  void            process_func_call_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
-  void            process_func_def_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
-  void            process_if_op(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
-  Tree_index      add_operator_node(const Tree_index& tree_idx_sts, Token node_token, Lnast_ntype_id node_type, Scope_id cur_scope);
-  void            add_operator_subtree(const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id cur_scope);
+  void            build_statements                  (const Tree_index& tree_idx_top, Scope_id scope);
+  Scope_id        add_statement                     (const Tree_index& tree_idx_sts, Scope_id cur_scope);
+  Scope_id        process_scope                     (const Tree_index& tree_idx_sts, Scope_id cur_scope );
+  void            add_subgraph                      (const Tree_index& tree_idx_std, Scope_id new_scope, Scope_id cur_scope);
+  void            process_assign_like_op            (const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
+  void            process_function_name_replacement (const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
+  void            process_label_op                  (const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
+  void            process_binary_op                 (const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
+  void            process_func_call_op              (const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
+  void            process_func_def_op               (const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
+  void            process_if_op                     (const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
+  Tree_index      add_operator_node                 (const Tree_index& tree_idx_sts, Token node_token, Lnast_ntype_id node_type, Scope_id cur_scope);
+  void            add_operator_subtree              (const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id cur_scope);
   Lnast_ntype_id  operand_analysis();
   Lnast_ntype_id  operator_analysis(int& line_tkcnt);
   void            subgraph_scope_sync();

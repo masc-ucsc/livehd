@@ -113,7 +113,7 @@ public:
   // void each_depth_first(const Tree_index &start_index, std::function<void(const Tree_index &parent, const Tree_index &self, const
   // X &)> fn) const
   const std::vector<Tree_index> get_children(const Tree_index &start_index) const;
-
+  const Tree_index              get_child   (const Tree_index &start_index) const;
   Tree_depth_preorder_iterator depth_preorder(const Tree_index &start_index) const {
     return Tree_depth_preorder_iterator(start_index, this);
   }
@@ -414,3 +414,8 @@ const std::vector<Tree_index> Tree<X>::get_children(const Tree_index &top) const
   return children;
 }
 
+template <typename X>
+const Tree_index Tree<X>::get_child(const Tree_index &top) const {
+  I(get_children(top).size() == 1);
+  return get_children(top)[0];
+}

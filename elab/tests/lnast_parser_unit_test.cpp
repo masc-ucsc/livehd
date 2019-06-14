@@ -49,7 +49,7 @@ public:
     ast_gld.set_root(std::make_tuple("", ntype_dbg(Lnast_ntype_top), 0));
     auto c1    = ast_gld.add_child(Tree_index(0,0), std::make_tuple("K1", ntype_dbg(Lnast_ntype_statement), 0));
 
-    auto c11   = ast_gld.add_child(c1,   std::make_tuple("K1",     ntype_dbg(Lnast_ntype_lable), 0));
+    auto c11   = ast_gld.add_child(c1,   std::make_tuple("K1",     ntype_dbg(Lnast_ntype_label), 0));
     auto c111  = ast_gld.add_child(c11,  std::make_tuple("___a",   ntype_dbg(Lnast_ntype_ref), 0));
     auto c112  = ast_gld.add_child(c11,  std::make_tuple("__bits", ntype_dbg(Lnast_ntype_attr_bits), 0));
     auto c1121 = ast_gld.add_child(c112, std::make_tuple("0d1",    ntype_dbg(Lnast_ntype_const), 0));
@@ -62,7 +62,7 @@ public:
     (void) c121;
     (void) c122;
 
-    auto c13   = ast_gld.add_child(c1,   std::make_tuple("K3",     ntype_dbg(Lnast_ntype_lable), 0));
+    auto c13   = ast_gld.add_child(c1,   std::make_tuple("K3",     ntype_dbg(Lnast_ntype_label), 0));
     auto c131  = ast_gld.add_child(c13,  std::make_tuple("___b",   ntype_dbg(Lnast_ntype_ref), 0));
     auto c132  = ast_gld.add_child(c13,  std::make_tuple("__bits", ntype_dbg(Lnast_ntype_attr_bits), 0));
     auto c1321 = ast_gld.add_child(c132, std::make_tuple("0d1",    ntype_dbg(Lnast_ntype_const), 0));
@@ -75,7 +75,7 @@ public:
     (void) c141;
     (void) c142;
 
-    auto c15   = ast_gld.add_child(c1,   std::make_tuple("K5",     ntype_dbg(Lnast_ntype_lable), 0));
+    auto c15   = ast_gld.add_child(c1,   std::make_tuple("K5",     ntype_dbg(Lnast_ntype_label), 0));
     auto c151  = ast_gld.add_child(c15,  std::make_tuple("___c",   ntype_dbg(Lnast_ntype_ref), 0));
     auto c152  = ast_gld.add_child(c15,  std::make_tuple("__bits", ntype_dbg(Lnast_ntype_attr_bits), 0));
     auto c1521 = ast_gld.add_child(c152, std::make_tuple("0d1",    ntype_dbg(Lnast_ntype_const), 0));
@@ -130,7 +130,7 @@ public:
     (void) c19133;
     (void) c19134;
 
-    auto c1a  = ast_gld.add_child(c1,  std::make_tuple("K15",    ntype_dbg(Lnast_ntype_lable), 0));
+    auto c1a  = ast_gld.add_child(c1,  std::make_tuple("K15",    ntype_dbg(Lnast_ntype_label), 0));
     auto c1a1 = ast_gld.add_child(c1a, std::make_tuple("___h",   ntype_dbg(Lnast_ntype_ref),   0));
     auto c1a2 = ast_gld.add_child(c1a, std::make_tuple("a",      ntype_dbg(Lnast_ntype_ref),   0));
     auto c1a3 = ast_gld.add_child(c1a, std::make_tuple("0d3",    ntype_dbg(Lnast_ntype_const), 0));
@@ -139,7 +139,7 @@ public:
     (void) c1a3;
 
 
-    auto c1b  = ast_gld.add_child(c1,  std::make_tuple("K16",    ntype_dbg(Lnast_ntype_lable), 0));
+    auto c1b  = ast_gld.add_child(c1,  std::make_tuple("K16",    ntype_dbg(Lnast_ntype_label), 0));
     auto c1b1 = ast_gld.add_child(c1b, std::make_tuple("___i",   ntype_dbg(Lnast_ntype_ref),   0));
     auto c1b2 = ast_gld.add_child(c1b, std::make_tuple("b",      ntype_dbg(Lnast_ntype_ref),   0));
     auto c1b3 = ast_gld.add_child(c1b, std::make_tuple("0d4",    ntype_dbg(Lnast_ntype_const), 0));
