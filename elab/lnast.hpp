@@ -41,7 +41,7 @@ protected:
 
 class Lnast_parser : public Elab_scanner {
 public:
-  Lnast_parser() : line_num(0) {};
+  Lnast_parser() : line_num(0) { setup_ntype_str_mapping();};
   const std::unique_ptr<Language_neutral_ast>&  get_ast(){return lnast;};
   std::string     ntype_dbg(Lnast_ntype_id ntype);
 protected:
@@ -103,8 +103,10 @@ protected:
   Lnast_ntype_id  operand_analysis();
   Lnast_ntype_id  operator_analysis(int& line_tkcnt);
   void            subgraph_scope_sync();
+  void            setup_ntype_str_mapping();
 
 private:
-  std::unique_ptr<Language_neutral_ast>  lnast;
-  int                                    line_num;
+  std::unique_ptr<Language_neutral_ast>             lnast;
+  int                                               line_num;
+  absl::flat_hash_map<Lnast_ntype_id , std::string> ntype2str;
 };

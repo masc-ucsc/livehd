@@ -65,8 +65,6 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
   //lnast to dfg
   process_ast_top(dfg);
 
-
-
   dfg->sync();
   std::vector<LGraph *> lgs;
   lgs.push_back(dfg);

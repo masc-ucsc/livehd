@@ -339,48 +339,49 @@ Lnast_ntype_id Lnast_parser::operator_analysis(int& line_tkcnt) {
   return node_type;
 }
 
+void Lnast_parser::setup_ntype_str_mapping(){
+  ntype2str [Lnast_ntype_invalid]     = "invalid"    ;
+  ntype2str [Lnast_ntype_statement]   = "statement"  ;
+  ntype2str [Lnast_ntype_pure_assign] = "pure_assign";
+  ntype2str [Lnast_ntype_dp_assign]   = "dp_assign"  ;
+  ntype2str [Lnast_ntype_as]          = "as"         ;
+  ntype2str [Lnast_ntype_label]       = "label"      ;
+  ntype2str [Lnast_ntype_dot]         = "dot"        ;
+  ntype2str [Lnast_ntype_logical_and] = "logical_and";
+  ntype2str [Lnast_ntype_logical_or]  = "logical_or" ;
+  ntype2str [Lnast_ntype_and]         = "and"        ;
+  ntype2str [Lnast_ntype_or]          = "or"         ;
+  ntype2str [Lnast_ntype_xor]         = "xor"        ;
+  ntype2str [Lnast_ntype_plus]        = "plus"       ;
+  ntype2str [Lnast_ntype_minus]       = "minus"      ;
+  ntype2str [Lnast_ntype_mult]        = "mult"       ;
+  ntype2str [Lnast_ntype_div]         = "div"        ;
+  ntype2str [Lnast_ntype_eq]          = "eq"         ;
+  ntype2str [Lnast_ntype_lt]          = "lt"         ;
+  ntype2str [Lnast_ntype_le]          = "le"         ;
+  ntype2str [Lnast_ntype_gt]          = "gt"         ;
+  ntype2str [Lnast_ntype_ge]          = "ge"         ;
+  ntype2str [Lnast_ntype_tuple]       = "tuple"      ;
+  ntype2str [Lnast_ntype_ref]         = "ref"        ;
+  ntype2str [Lnast_ntype_const]       = "const"      ;
+  ntype2str [Lnast_ntype_input]       = "input"      ;
+  ntype2str [Lnast_ntype_output]      = "output"     ;
+  ntype2str [Lnast_ntype_reg]         = "reg"        ;
+  ntype2str [Lnast_ntype_attr_bits]   = "attr_bits"  ;
+  ntype2str [Lnast_ntype_assert]      = "assert"     ;
+  ntype2str [Lnast_ntype_if]          = "if"         ;
+  ntype2str [Lnast_ntype_uif]         = "uif"        ;
+  ntype2str [Lnast_ntype_for]         = "for"        ;
+  ntype2str [Lnast_ntype_while]       = "while"      ;
+  ntype2str [Lnast_ntype_func_call]   = "func_call"  ;
+  ntype2str [Lnast_ntype_func_def]    = "func_def"   ;
+  ntype2str [Lnast_ntype_sub]         = "sub"        ;
+  ntype2str [Lnast_ntype_top]         = "top"        ;
+
+}
+
 std::string Lnast_parser::ntype_dbg(Lnast_ntype_id ntype) {
-  switch (ntype) {
-    case Lnast_ntype_invalid:     return "invalid"    ;
-    case Lnast_ntype_statement:   return "statement"  ;
-    case Lnast_ntype_pure_assign: return "pure_assign";
-    case Lnast_ntype_dp_assign:   return "dp_assign"  ;
-    case Lnast_ntype_as:          return "as"         ;
-    case Lnast_ntype_label:       return "label"      ;
-    case Lnast_ntype_dot:         return "dot"        ;
-    case Lnast_ntype_logical_and: return "logical_and";
-    case Lnast_ntype_logical_or:  return "logical_or" ;
-    case Lnast_ntype_and:         return "and"        ;
-    case Lnast_ntype_or:          return "or"         ;
-    case Lnast_ntype_xor:         return "xor"        ;
-    case Lnast_ntype_plus:        return "plus"       ;
-    case Lnast_ntype_minus:       return "minus"      ;
-    case Lnast_ntype_mult:        return "mult"       ;
-    case Lnast_ntype_div:         return "div"        ;
-    case Lnast_ntype_eq:          return "eq"         ;
-    case Lnast_ntype_lt:          return "lt"         ;
-    case Lnast_ntype_le:          return "le"         ;
-    case Lnast_ntype_gt:          return "gt"         ;
-    case Lnast_ntype_ge:          return "ge"         ;
-    case Lnast_ntype_tuple:       return "tuple"      ;
-    case Lnast_ntype_ref:         return "ref"        ;
-    case Lnast_ntype_const:       return "const"      ;
-    case Lnast_ntype_input:       return "input"      ;
-    case Lnast_ntype_output:      return "output"     ;
-    case Lnast_ntype_reg:         return "reg"        ;
-    case Lnast_ntype_attr_bits:   return "attr_bits"  ;
-    case Lnast_ntype_assert:      return "assert"     ;
-    case Lnast_ntype_if:          return "if"         ;
-    case Lnast_ntype_uif:         return "uif"        ;
-    case Lnast_ntype_for:         return "for"        ;
-    case Lnast_ntype_while:       return "while"      ;
-    case Lnast_ntype_func_call:   return "func_call"  ;
-    case Lnast_ntype_func_def:    return "func_def"   ;
-    case Lnast_ntype_sub:         return "sub"        ;
-    case Lnast_ntype_top:         return "top"        ;
-    default:;
-  }
-  return "invalid";
+  return ntype2str[ntype];
 }
 
 void Lnast_parser::subgraph_scope_sync() {
