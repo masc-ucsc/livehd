@@ -540,3 +540,20 @@ void Graph_library::clean_library() {
   graph_library_clean = true;
 }
 
+void Graph_library::each_lgraph(std::function<void(Lg_type_id lgid, std::string_view name)> f1) const {
+  for (const auto [name, id] : name2id) {
+    f1(id, name);
+  }
+}
+
+void Graph_library::each_lgraph(std::string_view match, std::function<void(Lg_type_id lgid, std::string_view name)> f1) const {
+  const std::string string_match(match);  // NOTE: regex does not support string_view, c++20 may fix this missing feature
+  const std::regex  txt_regex(string_match);
+
+  for (const auto [name, id] : name2id) {
+    const std::string line(name);
+    if (!std::regex_search(line, txt_regex)) continue;
+
+    f1(id, name);
+  }
+}

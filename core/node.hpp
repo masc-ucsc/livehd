@@ -201,8 +201,11 @@ public:
   Node_pin          setup_sink_pin(Port_ID pid);
   Node_pin          setup_sink_pin() const;
 
+  void              nuke(); // Delete all the pins, edges, and attributes of this node
+
   Node_pin_iterator out_connected_pins() const;
   Node_pin_iterator inp_connected_pins() const;
+
   Node_pin_iterator out_setup_pins() const;
   Node_pin_iterator inp_setup_pins() const;
 

@@ -191,6 +191,9 @@ public:
   absl::Span<const Tech_layer>  get_layer()    const { return absl::MakeSpan(layer_list); };
   absl::Span<const Tech_via>    get_via()      const { return absl::MakeSpan(via_list); };
 
+  void each_lgraph(std::function<void(Lg_type_id lgid, std::string_view name)> f1) const;
+  void each_lgraph(std::string_view match, std::function<void(Lg_type_id lgid, std::string_view name)> f1) const;
+
   void reload();
 };
 

@@ -6,6 +6,7 @@ class XEdge;
 class Node;
 
 #include "mmap_map.hpp"
+#include "ann_bitwidth.hpp"
 #include "lgedge.hpp"
 
 class Node_pin {
@@ -282,6 +283,8 @@ public:
   constexpr bool operator==(const Node_pin &other) const { return (top_g == other.top_g) && (idx == other.idx) && (pid == other.pid) && (sink == other.sink) && (hid == other.hid); }
   constexpr bool operator!=(const Node_pin &other) const { return !(*this == other); }
 
+  void nuke(); // Delete all the edges, and attributes of this node_pin
+
   // BEGIN ATTRIBUTE ACCESSORS
   std::string      debug_name() const;
 
@@ -300,6 +303,10 @@ public:
 
   void set_offset(uint16_t offset);
   uint16_t get_offset() const;
+
+  const Ann_bitwidth &get_bitwidth() const;
+  Ann_bitwidth       *ref_bitwidth();
+  bool                has_bitwidth() const;
 
   // END ATTRIBUTE ACCESSORS
 };

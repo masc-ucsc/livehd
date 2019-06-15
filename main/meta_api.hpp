@@ -72,7 +72,7 @@ protected:
     std::vector<LGraph *> lgs;
 
     try {
-      library->each_type(match, [&lgs, path](Lg_type_id lgid, std::string_view name) {
+      library->each_lgraph(match, [&lgs, path](Lg_type_id lgid, std::string_view name) {
         LGraph *lg = LGraph::open(path, name);
         if (lg) {
           lgs.push_back(lg);

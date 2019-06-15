@@ -103,6 +103,10 @@ void Node_pin::set_name(std::string_view wname) {
   Ann_node_pin_name::ref(current_g)->set(get_compact_class_driver(), wname);
 }
 
+void Node_pin::nuke() {
+  I(false); // TODO:
+}
+
 std::string Node_pin::debug_name() const {
 #ifndef NDEBUG
   static int conta = 0;
@@ -166,5 +170,27 @@ uint16_t Node_pin::get_offset() const {
 	auto off = ref->get(get_compact_class_driver());
 	I(off);
 	return off;
+}
+
+const Ann_bitwidth &Node_pin::get_bitwidth() const {
+  const auto *data = Ann_node_pin_bitwidth::ref(top_g)->ref(get_compact_driver());
+  I(data);
+  return *data;
+}
+
+Ann_bitwidth *Node_pin::ref_bitwidth() {
+  auto *ref = Ann_node_pin_bitwidth::ref(top_g);
+
+  auto it = ref->find(get_compact_driver());
+  if (it != ref->end()) {
+    return ref->ref(it);
+  }
+
+  auto it2 = ref->set(get_compact_driver(),Ann_bitwidth()); // Empty
+  return ref->ref(it2);
+}
+
+bool Node_pin::has_bitwidth() const {
+  return Ann_node_pin_bitwidth::ref(top_g)->has(get_compact_driver());
 }
 

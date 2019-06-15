@@ -240,7 +240,7 @@ void Inou_yosys_api::tolg(Eprp_var &var) {
   gl->reload();  // after the do_work
 
   std::vector<LGraph *> lgs;
-  gl->each_type([&lgs, gl, max_version, path](Lg_type_id id, std::string_view name) {
+  gl->each_lgraph([&lgs, gl, max_version, path](Lg_type_id id, std::string_view name) {
     if (gl->get_version(id) > max_version) {
       LGraph *lg = LGraph::open(path, id);
       if (lg == 0) {

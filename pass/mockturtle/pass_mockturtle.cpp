@@ -65,8 +65,7 @@ void Pass_mockturtle::do_work(LGraph *g) {
 
 bool Pass_mockturtle::lg_partition(LGraph *g) {
   unsigned int new_group_id = 0;
-  for(const auto &nid : g->forward()) {
-    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
+  for(const auto node : g->forward()) {
     fmt::print("Node identifier:{}\n", node.get_compact());
     if (node2gid.find(node.get_compact()) == node2gid.end() && eligable_cell_op(node.get_type().op)) {
       new_group_id++;
@@ -445,8 +444,7 @@ void Pass_mockturtle::mapping_comparation_cell_lg2mig(const bool &lt_op, const b
 }
 
 void Pass_mockturtle::create_MIG_network(LGraph *g) {
-  for(const auto &nid : g->forward()) {
-    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
+  for(const auto node : g->forward()) {
     if (node2gid.find(node.get_compact())==node2gid.end())
       continue;
     unsigned int group_id = node2gid[node.get_compact()];
@@ -570,8 +568,7 @@ void Pass_mockturtle::create_MIG_network(LGraph *g) {
   }
 
   //create mig network output signal for each group
-  for(const auto &nid : g->forward()) {
-    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
+  for(const auto node : g->forward()) {
     if (node2gid.find(node.get_compact()) == node2gid.end())
       continue;
     for (const auto &out_edge : node.out_edges()) {
@@ -680,8 +677,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *g) {
   LGraph *lg = LGraph::create(lg_path, lg_name, lg_source);
   //create unchanged portion
   fmt::print("Start mapping unchanged part...\n");
-  for (const auto &nid : g->forward()) {
-    auto old_node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
+  for (const auto old_node : g->forward()) {
     if (node2gid.find(old_node.get_compact())==node2gid.end()) {
       Node_Type_Op op = old_node.get_type().op;
       Node new_node;

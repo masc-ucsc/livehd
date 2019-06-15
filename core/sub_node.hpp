@@ -164,6 +164,11 @@ public:
     return graph_pos2instance_pid[graph_pos];
   }
 
+  const IO_pin get_io_pin_from_graph_pos(Port_ID graph_pos) const {
+    I(has_graph_pin(graph_pos));
+    return io_pins[graph_pos2instance_pid[graph_pos]];
+  }
+
   Port_ID get_graph_pos_from_instance_pid(Port_ID instance_pid) const {
     I(has_instance_pin(instance_pid));
     return io_pins[instance_pid].graph_io_pos;

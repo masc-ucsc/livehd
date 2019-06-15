@@ -5,6 +5,9 @@
 // TODO: Move this as a callback registration for Graph_Library
 // Then all the files are distributed per pass as needed
 
+
+// TODO: We have attributes per node/pin/edge, we should have also per lgraph module (lef attributes)
+
 #include "attribute.hpp"
 
 #include "ann_place.hpp"

@@ -58,12 +58,6 @@ std::vector<LGraph *> Inou_cfg::tolg() {
   fmt::print("                    cfg-lgraph building finish!\n");
   fmt::print("*************************************************************************************************\n\n\n");
 
-  //SH:FIXME: do you really need this? I don't see it makes any sense
-  lgs[0] = 0; // Do not clear g_cfg
-  for(LGraph *g : lgs) {
-    if (g)
-      g->close();
-  }
   lgs.clear();
   lgs.push_back(g_cfg); // Just keep the new cfg in the return
 
@@ -220,7 +214,7 @@ void Inou_cfg::build_graph(std::vector<std::string> &words, std::string &dfg_dat
   else if(w6th == "RD")
     name2node[w1st].set_type(CfgBeenRead_Op);
   else if(w6th == "::{") {
-    name2node[w1st].set_type_subgraph(n1st2gid[w9th]);
+    name2node[w1st].set_type_sub(n1st2gid[w9th]);
     subg_name        = n1st2lgname[w9th];
     has_func_defined = true;
     fmt::print("set node:{} as subgraph, subgraph_id:{}\n", w1st, n1st2gid[w9th]);
@@ -403,8 +397,7 @@ std::vector<std::string> Inou_cfg::split(const std::string &str) {
 
 void Inou_cfg::lgraph_2_cfg(LGraph *g, const std::string &filename) {
   int line_cnt = 0;
-  for(auto nid : g->fast()) {
-    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
+  for(auto node : g->fast()) {
 
     if(node.get_name() != nullptr) {
       fmt::print("{}\n", node.get_name()); // for now, just print out cfg, maybe mmap write later
@@ -425,8 +418,8 @@ void Inou_cfg::update_ifs(std::vector<LGraph *> &lgs, std::vector<std::map<std::
     auto &  mapping = node_mappings[i];
 
     fmt::print("cfg update_ifs\n");
-    for(auto nid : g->fast()) {
-      auto node = Node(g, 0, Node::Compact(nid));
+    for(auto node : g->fast()) {
+      
       CFG_Node_Data data(g, node);
       if(data.is_br_marker()) {
         const auto &   operands = data.get_operands();
@@ -471,8 +464,7 @@ void Inou_cfg::remove_fake_fcall(LGraph *g) {
   absl::flat_hash_set<Node>                   true_fcall_tab;
   absl::flat_hash_map<std::string_view, Node> name2node;
   //1st pass
-  for(auto nid : g->fast()){
-    auto node = Node(g, 0, Node::Compact(nid));
+  for(auto node : g->fast()){
     if(node.get_type().op == Invalid_Op)
       break;
 
@@ -503,8 +495,8 @@ void Inou_cfg::remove_fake_fcall(LGraph *g) {
   }
 
   // 2nd pass: replace fake CfgFunctionCall_Op node with CfgAssign_Op node
-  for(auto nid : g->fast()) {
-    auto node = Node(g, 0, Node::Compact(nid));
+  for(auto node : g->fast()) {
+
     if(node.get_type().op == CfgFunctionCall_Op && true_fcall_tab.find(node) == true_fcall_tab.end()) {
       Node_pin driver_pin, sink_pin;
 

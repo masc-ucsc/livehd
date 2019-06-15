@@ -201,6 +201,10 @@ Node_pin Node::setup_driver_pin(std::string_view name) {
   return Node_pin(top_g, current_g, hid, idx, pid, false);
 }
 
+void Node::nuke() {
+  I(false); // TODO:
+}
+
 Node_pin Node::setup_sink_pin(std::string_view name) {
   auto type = get_type();
   I(current_g); // Get type sets it

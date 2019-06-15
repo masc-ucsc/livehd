@@ -98,7 +98,7 @@ void Inou_cgen::setup_declarations() {
   declarations.clear();
   declaration_root.clear();
 
-  lg->each_graph_output([this](Node_pin &pin) {
+  lg->each_graph_output([this](const Node_pin &pin) {
     auto wn = pin.get_name();
     if(wn.empty())
       return;
@@ -156,13 +156,12 @@ void Inou_cgen::to_pyrope(LGraph *g, std::string_view filename) {
     d.format_raw(w);
   }
 
-  for(auto idx : lg->forward()) {
-    auto node = Node(g,0,Node::Compact(idx));
+  for(auto node : lg->forward()) {
     auto wn = node.get_name();
     if(wn.empty())
-      w << fmt::format(" {} op:{} \n", node.get_compact(), node.get_type().get_name());
+      w << fmt::format(" {} op:{} \n", node.debug_name(), node.get_type().get_name());
     else
-      w << fmt::format(" {} {} op:{}\n", idx, wn, node.get_type().get_name());
+      w << fmt::format(" {} {} op:{}\n", node.debug_name(), wn, node.get_type().get_name());
   }
 
   std::fstream fs;

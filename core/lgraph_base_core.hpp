@@ -34,7 +34,6 @@ constexpr Port_ID Port_invalid = ((1ULL<<Port_bits)-1); // Max Port_bits allowed
 constexpr int LUT_input_bits  = 4;
 
 class Graph_library;
-class Tech_library;
 
 class Lgraph_base_core {
 protected:
