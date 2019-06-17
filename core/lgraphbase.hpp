@@ -165,4 +165,5 @@ public:
   } _static_initializer;
 
   const Graph_library &get_library() const { return *library; }
+  Graph_library *ref_library() const { return library; }
 };

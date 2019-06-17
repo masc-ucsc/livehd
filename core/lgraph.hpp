@@ -222,6 +222,8 @@ public:
 
   Node create_node();
 
+  Node create_node(const Node &old_node);
+
   Node create_node(Node_Type_Op op);
   Node create_node(Node_Type_Op op, uint16_t bits);
   Node create_node_const(uint32_t value, uint16_t bits);
@@ -243,21 +245,16 @@ public:
 
   // Iterators defined in the lgraph_each.cpp
 
-  // FIXME: Use Instance.each_graph_*
   void each_sorted_graph_io(std::function<void(const Node_pin &pin, Port_ID pos)> f1);
   void each_graph_input(std::function<void(const Node_pin &pin)> f1);
   void each_graph_output(std::function<void(const Node_pin &pin)> f1);
 
-  // FIXME: Use Instance.each_graph_*
   void each_node_fast(std::function<void(const Node &node)> f1);
 
-  // FIXME: Use Instance.each_graph_*
   void each_output_edge_fast(std::function<void(XEdge &edge)> f1);
 
-  // FIXME: Use Instance.each_graph_*
   void each_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)>);
 
-  // FIXME: Use Instance.each_graph_*
   template <typename FN>
   void each_sub_fast(const FN f1) {
     if constexpr (std::is_invocable_r_v<bool, FN &, Node &, Lg_type_id>) {  // WARNING: bool must be before void
@@ -274,7 +271,6 @@ public:
     }
   };
 
-  // FIXME: Use Instance.each_graph_*
   void each_root_fast_direct(std::function<bool(Node &)> f1);
   template <typename FN>
   void each_root_fast(const FN f1) {

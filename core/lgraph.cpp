@@ -418,6 +418,33 @@ Node LGraph::create_node() {
   return Node(this, 0, nid);
 }
 
+Node LGraph::create_node(const Node &old_node) {
+
+  // TODO: We can just copy the node_type_table AND update the tracking (graphio, consts)
+
+  Node_Type_Op op = old_node.get_type().op;
+
+  if (op == LUT_Op ) {
+    auto new_node = create_node();
+    new_node.set_type_lut(old_node.get_type_lut());
+    return new_node;
+  }
+
+  if (op == SubGraph_Op) {
+    return create_node_sub(old_node.get_type_sub());
+  }
+
+  if (op == U32Const_Op) {
+    return create_node_const(old_node.get_type_const_value(), old_node.get_driver_pin().get_bits());
+  }
+
+  if (op == StrConst_Op) {
+    return create_node_const(old_node.get_type_const_sview(), old_node.get_driver_pin().get_bits());
+  }
+
+  return create_node(op);
+}
+
 Node LGraph::create_node(Node_Type_Op op) {
   Index_ID nid = create_node_int();
   set_type(nid, op);

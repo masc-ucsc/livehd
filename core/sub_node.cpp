@@ -18,7 +18,6 @@ void Sub_node::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer)
       pos++;
       continue;
     }
-    pos++;
     writer.StartObject();
 
     writer.Key("name");
@@ -42,6 +41,7 @@ void Sub_node::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer)
       I(false);
 
     writer.EndObject();
+    pos++;
   }
 
   writer.EndArray();

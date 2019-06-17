@@ -69,7 +69,7 @@ void Main_api::init() {
   Cloud_api::setup(Pass::eprp);  // cloud.*
 
   Inou_cfg_api::setup(Pass::eprp);    // inou.cfg.*
-  Inou_lef_api::setup(Pass::eprp);    // inou.lef.*
+  //Inou_lef_api::setup(Pass::eprp);    // inou.lef.*
   Inou_yosys_api::setup(Pass::eprp);  // inou.yosys.*
 
   main_path = Eprp_utils::get_exe_path();

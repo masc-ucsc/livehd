@@ -4,31 +4,31 @@
 #include <iostream>
 #include <sstream>
 
-#include <mockturtle/algorithms/cut_enumeration.hpp>
+#include "mockturtle/algorithms/cut_enumeration.hpp"
 
-#include <mockturtle/algorithms/resubstitution.hpp>
+#include "mockturtle/algorithms/resubstitution.hpp"
 
-#include <mockturtle/algorithms/refactoring.hpp>
+#include "mockturtle/algorithms/refactoring.hpp"
 
-#include <mockturtle/algorithms/collapse_mapped.hpp>
+#include "mockturtle/algorithms/collapse_mapped.hpp"
 
-#include <mockturtle/algorithms/node_resynthesis.hpp>
-#include <mockturtle/algorithms/node_resynthesis/akers.hpp>
-#include <mockturtle/algorithms/node_resynthesis/direct.hpp>
-#include <mockturtle/algorithms/node_resynthesis/mig_npn.hpp>
-#include <mockturtle/algorithms/node_resynthesis/xmg_npn.hpp>
+#include "mockturtle/algorithms/node_resynthesis.hpp"
+#include "mockturtle/algorithms/node_resynthesis/akers.hpp"
+#include "mockturtle/algorithms/node_resynthesis/direct.hpp"
+#include "mockturtle/algorithms/node_resynthesis/mig_npn.hpp"
+#include "mockturtle/algorithms/node_resynthesis/xmg_npn.hpp"
 
-#include <mockturtle/algorithms/cleanup.hpp>
-#include <mockturtle/generators/arithmetic.hpp>
-#include <mockturtle/io/write_bench.hpp>
-//#include <mockturtle/networks/aig.hpp>
-#include <mockturtle/networks/klut.hpp>
-#include <mockturtle/networks/mig.hpp>
+#include "mockturtle/algorithms/cleanup.hpp"
+#include "mockturtle/generators/arithmetic.hpp"
+#include "mockturtle/io/write_bench.hpp"
+//#include "mockturtle/networks/aig.hpp"
+#include "mockturtle/networks/klut.hpp"
+#include "mockturtle/networks/mig.hpp"
 
-#include <mockturtle/algorithms/lut_mapping.hpp>
-#include <mockturtle/views/mapping_view.hpp>
+#include "mockturtle/algorithms/lut_mapping.hpp"
+#include "mockturtle/views/mapping_view.hpp"
 
-#include <mockturtle/algorithms/miter.hpp>
+#include "mockturtle/algorithms/miter.hpp"
 
 #include "lgbench.hpp"
 #include "lgedgeiter.hpp"
@@ -93,8 +93,8 @@ protected:
                                          comparator_input_signal &,
                                          mockturtle::mig_network &);
   void mapping_logic_cell_lg2mig(mockturtle::mig_network::signal (mockturtle::mig_network::*)(std::vector<mockturtle::mig_network::signal> const &),
-                                 mockturtle::mig_network &, Node &, const unsigned int &);
-  void mapping_comparation_cell_lg2mig(const bool &, const bool &, mockturtle::mig_network &, Node &, const unsigned int &);
+                                 mockturtle::mig_network &, const Node &, const unsigned int &);
+  void mapping_comparation_cell_lg2mig(const bool &, const bool &, mockturtle::mig_network &, const Node &, const unsigned int &);
   void connect_complemented_signal(LGraph *, Node_pin &, Node_pin &, const mockturtle::klut_network &, const mockturtle::klut_network::signal &);
 
   template<typename signal, typename Ntk>

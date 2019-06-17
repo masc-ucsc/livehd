@@ -110,6 +110,10 @@ public:
     lgid = 0;
   }
 
+  bool is_black_box() const {
+    return graph_pos2instance_pid.empty(); // BBox if we still do not know how to map from instance_pid to pos
+  }
+
   void clear_io_pins() {
     graph_pos2instance_pid.clear();
     //io_pins.clear();   // WARNING: Do NOT remove mappings, just port id. (allows to reload designs)
@@ -121,6 +125,14 @@ public:
   Lg_type_id get_lgid() const { I(lgid); return lgid; }
 
   std::string_view get_name() const { I(lgid); return name; }
+
+  Port_ID add_input_pin(std::string_view name) {
+    return add_pin(name, Direction::Input);
+  }
+
+  Port_ID add_output_pin(std::string_view name) {
+    return add_pin(name, Direction::Output);
+  }
 
   Port_ID add_pin(std::string_view name, Direction dir, Port_ID graph_pos=Port_invalid) {
     I(lgid);

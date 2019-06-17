@@ -141,5 +141,4 @@ void Pass_sample::create_sample_graph(LGraph *g) {
   lg->add_edge(s_drv, s_sink);
 
   fmt::print("Finished.\n");
-  lg->close();
 }

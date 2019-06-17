@@ -23,7 +23,7 @@ void LGraph::each_sorted_graph_io(std::function<void(const Node_pin &pin, Port_I
   std::sort(pin_pair.begin(), pin_pair.end()
            ,[](const std::pair<Node_pin,Port_ID>& a, const std::pair<Node_pin,Port_ID>& b)
             {
-                return a.second > b.second;
+                return a.second < b.second;
             });
 
   for(auto &pp:pin_pair) {

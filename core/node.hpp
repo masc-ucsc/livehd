@@ -68,6 +68,8 @@ public:
       return *this;
     }
 
+    Node get_node(LGraph *lg) const { return Node(lg, *this); }
+
     constexpr bool is_invalid() const { return nid == 0; }
 
     constexpr bool operator==(const Compact &other) const {
@@ -109,6 +111,8 @@ public:
 
       return *this;
     }
+
+    Node get_node(LGraph *lg) const { return Node(lg, *this); }
 
     constexpr bool is_invalid() const { return nid == 0; }
 
