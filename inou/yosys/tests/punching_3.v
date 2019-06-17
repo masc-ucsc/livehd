@@ -26,6 +26,16 @@ module add2 (
   end
 endmodule
 
+module l (
+  input i1,
+  input i2,
+  output o
+);
+  wire x;
+  assign x = i1^i2;
+  assign o = ~x;
+endmodule
+
 // add3
 module add3 (
   input i1,
@@ -38,6 +48,7 @@ module add3 (
   wire inter_sum_2;
   wire c_out_2;
   wire [1:0] sum3;
+  wire log_out;
 
   add2 add2_0(
     .i1(i1),
@@ -55,7 +66,13 @@ module add3 (
     .c_out(sum3[1])
   );
 
-  assign o = sum3;
+  l l_0 (
+    .i1(i1),
+    .i2(i2),
+    .o(log_out)
+  );
+
+  assign o = sum3 + {1'b0,~log_out};
 endmodule
 
 // add5
