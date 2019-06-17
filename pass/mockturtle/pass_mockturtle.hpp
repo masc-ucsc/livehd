@@ -103,6 +103,7 @@ protected:
   void mapping_logic_cell_lg2mig(mockturtle::mig_network::signal (mockturtle::mig_network::*)(std::vector<mockturtle::mig_network::signal> const &),
                                  mockturtle::mig_network &, Node &, const unsigned int &);
   void mapping_comparation_cell_lg2mig(const bool &, const bool &, mockturtle::mig_network &, Node &, const unsigned int &);
+  void mapping_shift_cell_lg2mig();
   void connect_complemented_signal(LGraph *, Node_pin &, Node_pin &, const mockturtle::klut_network &, const mockturtle::klut_network::signal &);
 
   template<typename signal, typename Ntk>
@@ -157,12 +158,17 @@ protected:
           if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD)
             return false;
         }
-          break;
+        break;
+      }
+      case ArithShiftRight_Op: {
+        //fmt::print("Node: ArithShiftRight_Op\n");
+        for (const auto &in_edge : cell.inp_edges()) {
+          if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD)
+            return false;
+        }
+        break;
       }
 /*
-      case ArithShiftRight_Op:
-        //fmt::print("Node: ArithShiftRight_Op\n");
-        break;
       case DynamicShiftRight_Op:
         //fmt::print("Node: DynamicShiftRight_Op\n");
         break;

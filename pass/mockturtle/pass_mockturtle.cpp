@@ -504,6 +504,9 @@ void Pass_mockturtle::create_n_bit_k_input_mux(std::vector<std::vector<mockturtl
   }
 }
 
+void Pass_mockturtle::mapping_shift_cell_lg2mig() {
+}
+
 void Pass_mockturtle::create_MIG_network(LGraph *g) {
   for(const auto &nid : g->forward()) {
     auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
@@ -659,6 +662,11 @@ void Pass_mockturtle::create_MIG_network(LGraph *g) {
           I(out_edge.get_bits() == out_sig.size());
           setup_output_signal(group_id, out_edge, out_sig, mig_ntk);
         }
+        break;
+      }
+
+      case ArithShiftRight_Op: {
+        fmt::print("ArithShiftRight_Op in gid:{}\n",group_id);
         break;
       }
 /*
