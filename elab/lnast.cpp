@@ -259,6 +259,7 @@ Lnast_ntype_id  Lnast_parser::operand_analysis() {
     return Lnast_ntype_ref;
 }
 
+//SH:Todo:add not token, example: !foo
 //scan pos will stop at the end of operator token
 Lnast_ntype_id Lnast_parser::operator_analysis(int& line_tkcnt) {
   Lnast_ntype_id node_type;
