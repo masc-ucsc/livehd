@@ -37,6 +37,7 @@
 #include "pass.hpp"
 
 #define LUTIFIED_NETWORK_NAME_SIGNATURE "_lutified"
+#define BIT_WIDTH_THRESHOLD 2
 
 //NOTE: In a vector of signals, the LSB signal is represented by index[0]
 //while the MSB signal is represented by index[size()-1]
@@ -80,6 +81,13 @@ protected:
   void setup_output_signal(const unsigned int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
   void split_input_signal(const std::vector<mockturtle::mig_network::signal> &, std::vector<std::vector<mockturtle::mig_network::signal>> &);
   void convert_signed_to_unsigned(const comparator_input_signal &, comparator_input_signal &, mockturtle::mig_network &);
+  void shr_op(std::vector<mockturtle::mig_network::signal> &,
+              const std::vector<mockturtle::mig_network::signal> &,
+              const bool &, const long unsigned int &, mockturtle::mig_network &);
+  void create_n_bit_k_input_mux(std::vector<std::vector<mockturtle::mig_network::signal>> const &,
+                                std::vector<mockturtle::mig_network::signal> const &,
+                                std::vector<mockturtle::mig_network::signal> &,
+                                mockturtle::mig_network &);
   mockturtle::mig_network::signal is_equal_op(const comparator_input_signal &,
                                               const comparator_input_signal &,
                                               mockturtle::mig_network &);
@@ -113,8 +121,8 @@ protected:
     return net.create_lt(y, x);
   }
 
-  bool eligable_cell_op(const Node_Type_Op &cell_op) {
-    switch (cell_op) {
+  bool eligable_cell_op(const Node &cell) {
+    switch (cell.get_type().op) {
       case Not_Op:
         //fmt::print("Node: Not_Op\n");
         break;
@@ -142,7 +150,22 @@ protected:
       case GreaterEqualThan_Op:
         //fmt::print("Node: GreaterEqualThan_Op\n");
         break;
+      case LogicShiftRight_Op: {
+        //fmt::print("Node: LogicShiftRight_Op\n");
+        //if Node_Pin "B" is a constant or of small bit_width
+        for (const auto &in_edge : cell.inp_edges()) {
+          if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD)
+            return false;
+        }
+          break;
+      }
 /*
+      case ArithShiftRight_Op:
+        //fmt::print("Node: ArithShiftRight_Op\n");
+        break;
+      case DynamicShiftRight_Op:
+        //fmt::print("Node: DynamicShiftRight_Op\n");
+        break;
       case ShiftRight_Op:
         //fmt::print("Node: ShiftRight_Op\n");
         break;
