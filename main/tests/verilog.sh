@@ -51,15 +51,27 @@ do
   rm -rf lgdb_yosys tmp_yosys
   mkdir -p tmp_yosys
 
-  #${YOSYS} ./inou/yosys/tests/${input} > ./yosys-test/log_from_yosys_${input} 2> ./yosys-test/err_from_yosys_${input}
-  echo "inou.yosys.tolg path:lgdb_yosys top:${base} files:"${full_input}  | ${LGSHELL} -q
+  echo "inou.yosys.tolg path:lgdb_yosys top:${base} files:"${full_input}  | ${LGSHELL} -q >tmp_yosys/${input}.log 2>tmp_yosys/${input}.err
   if [ $? -eq 0 ]; then
     echo "Successfully created graph from ${input}"
-    let pass++
   else
     echo "FAIL: lgyosys parsing terminated with an error (testcase ${input})"
     let fail++
     fail_list+=" "$base
+  fi
+  LC=$(wc -l tmp_yosys/${input}.err | cut -d" " -f1)
+  if [[ $LC -gt 0 ]]; then
+    echo "FAIL: Faulty log verilog file tmp_yosys/${base}.err"
+    let fail++
+    fail_list+=" "$base
+    continue
+  fi
+  LC=$(grep signal tmp_yosys/${input}.log | wc -l | cut -d" " -f1)
+  if [[ $LC -gt 0 ]]; then
+    echo "FAIL: Faulty err verilog file tmp_yosys/${base}.err"
+    let fail++
+    fail_list+=" "$base
+    continue
   fi
 
   #./inou/json/lgjson  --graph_name ${base} --json_output ${base}.json > ./yosys-test/log_json_${input} 2> ./yosys-test/err_json_${input}
@@ -72,22 +84,27 @@ do
   echo "lgraph.match path:lgdb_yosys |> inou.yosys.fromlg odir:tmp_yosys" | ${LGSHELL} -q
   if [ $? -eq 0 ]; then
     echo "Successfully created verilog from graph ${input}"
-    let pass++
   else
     echo ${YOSYS} -g${base} -h -d
     echo "FAIL: verilog generation terminated with an error (testcase ${input})"
     let fail++
     fail_list+=" "$base
+    continue
   fi
   $(cat tmp_yosys/*.v >tmp_yosys/all_${base}.v)
 
   if [[ $base =~ "nocheck_" ]]; then
-    echo "Skipping check for "$base
+    LC=$(wc -l tmp_yosys/all_${base}.v | cut -d" " -f1)
+    echo "Skipping check for "$base" LC:"$LC
+    if [[ $LC -lt 2 ]]; then
+      echo "FAIL: Generated verilog file tmp_yosys/all_${base}.v is too small"
+      let fail++
+      fail_list+=" "$base
+    fi
   else
     ${LGCHECK} --implementation=tmp_yosys/all_${base}.v --reference=${full_input} --top=${base}
     if [ $? -eq 0 ]; then
       echo "Successfully matched generated verilog with original verilog (${full_input})"
-      let pass++
     else
       echo "FAIL: circuits are not equivalent (${full_input})"
       let fail++
@@ -95,6 +112,7 @@ do
     fi
   fi
 
+  let pass++
 done
 
 if [ $fail -eq 0 ]; then
