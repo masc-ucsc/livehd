@@ -77,25 +77,25 @@ bool test1() {
   g->add_edge(dpin, spin);
 
   for(auto &out : n1.out_edges()) {
-    assert(out.sink == spin);
-    assert(out.driver == dpin);
+    I(out.sink == spin);
+    I(out.driver == dpin);
 
-    assert(out.sink.get_pid() == 25);
-    assert(out.driver.get_pid() == 20);
+    I(out.sink.get_pid() == 25);
+    I(out.driver.get_pid() == 20);
 
-    assert(out.driver.is_input() == false);
-    assert(out.sink.is_input() == true);
+    I(out.driver.is_input() == false);
+    I(out.sink.is_input() == true);
   }
 
   for(auto &inp : n2.inp_edges()) {
-    assert(inp.sink == spin);
-    assert(inp.driver == dpin);
+    I(inp.sink == spin);
+    I(inp.driver == dpin);
 
-    assert(inp.sink.get_pid() == 25);
-    assert(inp.driver.get_pid() == 20);
+    I(inp.sink.get_pid() == 25);
+    I(inp.driver.get_pid() == 20);
 
-    assert(inp.driver.is_input() == false);
-    assert(inp.sink.is_input() == true);
+    I(inp.driver.is_input() == false);
+    I(inp.sink.is_input() == true);
   }
 
   return true;
@@ -142,23 +142,23 @@ bool test21() {
   g->add_edge(dpin, spin, 33);
 
   for(auto &inp : n2.inp_edges()) {
-    assert(inp.get_bits() == 33);
-    assert(inp.driver.get_bits() == 33);
+    I(inp.get_bits() == 33);
+    I(inp.driver.get_bits() == 33);
   }
 
   for(auto &out : n1.out_edges()) {
-    assert(out.get_bits() == 33);
-    assert(out.driver.get_bits() == 33);
+    I(out.get_bits() == 33);
+    I(out.driver.get_bits() == 33);
     out.del_edge();
   }
 
   for(auto &inp : n2.inp_edges()) {
-    assert(false);
+    I(false);
     (void)inp; // just to silence the warning
   }
 
   for(auto &out : n1.out_edges()) {
-    assert(false);
+    I(false);
     (void)out; // just to silence the warning
   }
 

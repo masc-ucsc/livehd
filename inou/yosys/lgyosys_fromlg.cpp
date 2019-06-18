@@ -98,6 +98,7 @@ struct LG2Yosys_Pass : public Yosys::Pass {
       generated.insert(g);
     }
 
+#if 0
     while(dumper.subgraphs().size() >= generated.size()) {
       std::vector<LGraph *> lgs_;
       for(auto *g : dumper.subgraphs()) {
@@ -110,6 +111,7 @@ struct LG2Yosys_Pass : public Yosys::Pass {
         break;
       dumper.fromlg(lgs_);
     }
+#endif
   }
 
 } Lg2yosys_Pass;

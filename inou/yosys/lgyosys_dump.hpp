@@ -31,8 +31,6 @@ private:
   absl::flat_hash_map<Node_pin::Compact, RTLIL::Wire *               >  cell_output_map;
   absl::flat_hash_map<Node::Compact    , std::vector<RTLIL::SigChunk>>  mem_output_map;
 
-  std::set<LGraph *> _subgraphs;
-
   uint64_t ids        = 0;
 
   bool hierarchy;
@@ -70,10 +68,10 @@ private:
 
   RTLIL::Wire *create_tree(LGraph *g, std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod, add_cell_fnc_sign add_cell, bool sign, RTLIL::Wire *result_wire);
 
-  RTLIL::Wire *create_io_wire(const Node_pin &pin, RTLIL::Module *module, int pos);
+  RTLIL::Wire *create_io_wire(const Node_pin &pin, RTLIL::Module *module, Port_ID pos);
   void         create_wires(LGraph *g, RTLIL::Module *module);
 
-  void create_blackbox(LGraph *subgraph, RTLIL::Design *design);
+  void create_blackbox(const Sub_node &sub, RTLIL::Design *design);
   void create_subgraph_outputs(LGraph *g, RTLIL::Module *module, Node &node);
   void create_subgraph(LGraph *g, RTLIL::Module *module, Node &node);
   void create_memory(LGraph *g, RTLIL::Module *module, Node &node);
@@ -101,18 +99,6 @@ public:
     std::vector<LGraph *> empty;
     return empty; // to avoid warning
   };
-
-  /*
-  void generate(std::vector<LGraph *> out) {
-    for(auto &g : out) {
-      std::cout << g->get_name() << std::endl;
-      to_yosys(const_cast<LGraph *>(g));
-    }
-  }*/
-
-  const std::set<LGraph *> &subgraphs() const {
-    return _subgraphs;
-  }
 
   void set(const std::string &key, const std::string &value) final {
     assert(false); // No main_api interface for this module as it uses yosys plug-ins
