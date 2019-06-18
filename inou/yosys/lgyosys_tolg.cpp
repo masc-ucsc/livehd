@@ -632,7 +632,6 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
     Node exit_node  = cell2node[cell];
     Node entry_node = exit_node; // Same entry/exit unless multiple cells are needed to model
 
-    LGraph      *sub_graph   = nullptr;
     bool         subtraction = false;
     bool         negonly     = false;
     uint32_t     size        = 0;
@@ -1021,11 +1020,19 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
       Port_ID sink_pid = 0; // default for most cells
       // Go over cells with multiple inputs that map to something different than A
       if(entry_node.is_type(SubGraph_Op)) {
-        std::string_view name(&conn.first.c_str()[1]);
-        assert(sub_graph);
-        if(sub_graph->is_graph_output(name))
-          continue;
-        sink_pid = sub_graph->get_graph_input(name).get_pid();
+        std::string name(&conn.first.c_str()[1]);
+        const auto &sub = entry_node.get_type_sub_node();
+        if (isdigit(name[0])) {
+          // hardcoded pin position
+          int  pos    = atoi(name.c_str());
+          auto io_pin = sub.get_io_pin_from_graph_pos(pos);
+          if (io_pin.dir == Sub_node::Direction::Output) continue;
+
+          sink_pid = sub.get_instance_pid(io_pin.name);
+        } else {
+          if (sub.is_output(name)) continue;
+          sink_pid = sub.get_instance_pid(name);
+        }
       } else {
         if (is_yosys_output(conn.first.c_str())) continue;  // Just go over the inputs
 

@@ -132,8 +132,8 @@ Node_pin LGraph::get_graph_output_driver(std::string_view str) {
 
 bool LGraph::is_graph_input(std::string_view name) const {
 
-#ifndef NDEBUG
   bool alt=false;
+#ifndef NDEBUG
   if (get_self_sub_node().has_pin(name)) {
     const auto &io_pin = get_self_sub_node().get_pin(name);
     alt = io_pin.dir == Sub_node::Direction::Input;
@@ -159,8 +159,8 @@ bool LGraph::is_graph_input(std::string_view name) const {
 
 bool LGraph::is_graph_output(std::string_view name) const {
 
-#ifndef NDEBUG
   bool alt = false;
+#ifndef NDEBUG
   if (get_self_sub_node().has_pin(name)) {
     const auto &io_pin = get_self_sub_node().get_pin(name);
     alt = io_pin.dir == Sub_node::Direction::Output;

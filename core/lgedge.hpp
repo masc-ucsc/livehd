@@ -492,14 +492,12 @@ public:
     if (large) {
       I(has_space_long_inp());
       I(!sedge[next_free_input_pos()].is_snode());
-      I(((LEdge_Internal *)&(sedge[next_free_input_pos()]))->get_idx() != 0);
       inp_pos += 4;
       I(inp_long<3); // To avoid overflow
       inp_long++;
     } else {
       I(has_space_short());
       I(sedge[next_free_input_pos()].is_snode());
-      I(((SEdge_Internal *)&(sedge[next_free_input_pos()]))->get_idx(Node_Internal_Page::get(this).get_idx()) != 0);
       inp_pos++;
     }
   }
