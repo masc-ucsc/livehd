@@ -53,6 +53,8 @@ public:
     std::vector<Tech_pin> phys; // There could be more than one location per pin
 
     bool is_mapped() const { return graph_io_pos != Port_invalid; }
+    bool is_input()  const { return dir == Direction::Input; }
+    bool is_output() const { return dir == Direction::Output; }
   };
 
 private:

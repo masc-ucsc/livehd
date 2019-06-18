@@ -64,7 +64,7 @@ RTLIL::Wire *Lgyosys_dump::create_tree(LGraph *g, std::vector<RTLIL::Wire *> &wi
   return create_tree(g, next_level, mod, add_fnc, sign, result_wire);
 }
 
-RTLIL::Wire *Lgyosys_dump::create_io_wire(const Node_pin &pin, RTLIL::Module *module, int pos) {
+RTLIL::Wire *Lgyosys_dump::create_io_wire(const Node_pin &pin, RTLIL::Module *module, Port_ID pos) {
 
   assert(pin.has_name()); // IO must have name
   RTLIL::IdString name = absl::StrCat("\\", pin.get_name());
@@ -79,30 +79,30 @@ RTLIL::Wire *Lgyosys_dump::create_io_wire(const Node_pin &pin, RTLIL::Module *mo
   return new_wire;
 }
 
-void Lgyosys_dump::create_blackbox(LGraph *subgraph, RTLIL::Design *design) {
-  if(created_sub.find(subgraph->get_name()) != created_sub.end())
+void Lgyosys_dump::create_blackbox(const Sub_node &sub, RTLIL::Design *design) {
+  if(created_sub.find(sub.get_name()) != created_sub.end())
     return;
-  created_sub.insert(subgraph->get_name());
+  created_sub.insert(sub.get_name());
 
   RTLIL::Module *mod            = new RTLIL::Module;
-  mod->name                     = absl::StrCat("\\", subgraph->get_name());
+  mod->name                     = absl::StrCat("\\", sub.get_name());
   mod->attributes["\\blackbox"] = RTLIL::Const(1);
 
   design->add(mod);
 
-  uint32_t port_id = 0;
-  subgraph->each_sorted_graph_io([&port_id,mod,this](const Node_pin &pin, Port_ID pos) {
-    std::string name = absl::StrCat("\\", pin.get_name());
-    RTLIL::Wire *wire = mod->addWire(name, pin.get_bits());
+  int port_id=0;
+  for(const auto &io_pin:sub.get_io_pins()) {
+    std::string name = absl::StrCat("\\", io_pin.name);
+    RTLIL::Wire *wire = mod->addWire(name); // , pin.get_bits());
     wire->port_id     = port_id++;
-    if(pin.is_graph_output()) {
+    if(io_pin.is_input()) {
       wire->port_input  = false;
       wire->port_output = true;
     }else{
       wire->port_input  = true;
       wire->port_output = false;
     }
-  });
+  }
 
   mod->fixup_ports();
 }
@@ -236,19 +236,13 @@ void Lgyosys_dump::create_memory(LGraph *g, RTLIL::Module *module, Node &node) {
 void Lgyosys_dump::create_subgraph(LGraph *g, RTLIL::Module *module, Node &node) {
   assert(node.get_type().op == SubGraph_Op);
 
-  auto sub_id = node.get_type_sub();
-  LGraph *subgraph = LGraph::open(g->get_path(), sub_id);
-  assert(subgraph);
+  const auto &sub = node.get_type_sub_node();
 
-  if(hierarchy) {
-    _subgraphs.insert(subgraph);
-  } else {
-    create_blackbox(subgraph, module->design);
-  }
+  create_blackbox(sub, module->design);
 
-  RTLIL::Cell *new_cell = module->addCell(absl::StrCat("\\",node.create_name()), absl::StrCat("\\", subgraph->get_name()));
+  RTLIL::Cell *new_cell = module->addCell(absl::StrCat("\\",node.create_name()), absl::StrCat("\\", sub.get_name()));
 
-  fmt::print("inou_yosys instance_name:{}, subgraph->get_name():{}\n", node.get_name(), subgraph->get_name());
+  fmt::print("inou_yosys instance_name:{}, subgraph->get_name():{}\n", node.get_name(), sub.get_name());
   for(const auto &e:node.inp_edges()) {
     auto  port_name = e.sink.get_type_sub_io_name();
     fmt::print("input:{}\n", port_name);
