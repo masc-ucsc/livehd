@@ -6,8 +6,8 @@
 bool test0() {
   LGraph *g = LGraph::create("lgdb_core_test", "test0", "test");
 
-  auto n1 = g->create_node(SubGraph_Op);
-  auto n2 = g->create_node(SubGraph_Op);
+  auto n1 = g->create_node_sub("n1");
+  auto n2 = g->create_node_sub("n2");
 
   auto driver_pin20  = n1.setup_driver_pin(20);
   auto sink_pin120 = n2.setup_sink_pin(120);
@@ -62,16 +62,14 @@ bool test0() {
   }
   I(conta == (1+300+1000));
 
-  g->close();
-
   return true;
 }
 
 bool test1() {
   LGraph *g = LGraph::create("lgdb_core_test", "test", "test");
 
-  auto n1 = g->create_node(SubGraph_Op);
-  auto n2 = g->create_node(SubGraph_Op);
+  auto n1 = g->create_node_sub("n1");
+  auto n2 = g->create_node_sub("n2");
 
   auto dpin = n1.setup_driver_pin(20);
   auto spin = n2.setup_sink_pin(25);
@@ -100,16 +98,14 @@ bool test1() {
     assert(inp.sink.is_input() == true);
   }
 
-  g->close();
-
   return true;
 }
 
 bool test20() {
   LGraph *g = LGraph::create("lgdb_core_test", "test20", "test");
 
-  auto n1 = g->create_node(SubGraph_Op);
-  auto n2 = g->create_node(SubGraph_Op);
+  auto n1 = g->create_node_sub("n1");
+  auto n2 = g->create_node_sub("n2");
 
   auto dpin = n1.setup_driver_pin(0);
   auto spin = n2.setup_sink_pin(3);
@@ -130,8 +126,6 @@ bool test20() {
     (void)out; // just to silence the warning
   }
 
-  g->close();
-
   return true;
 }
 
@@ -139,8 +133,8 @@ bool test21() {
 
   LGraph *g = LGraph::create("lgdb_core_test", "test21", "test");
 
-  auto n1 = g->create_node(SubGraph_Op);
-  auto n2 = g->create_node(SubGraph_Op);
+  auto n1 = g->create_node_sub("n1");
+  auto n2 = g->create_node_sub("n2");
 
   auto dpin = n1.setup_driver_pin(0);
   auto spin = n2.setup_sink_pin(0);
@@ -168,8 +162,6 @@ bool test21() {
     (void)out; // just to silence the warning
   }
 
-  g->close();
-
   return true;
 }
 
@@ -177,8 +169,8 @@ bool test2() {
 
   LGraph *g = LGraph::create("lgdb_core_test", "test2", "test");
 
-  auto n1 = g->create_node(SubGraph_Op);
-  auto n2 = g->create_node(SubGraph_Op);
+  auto n1 = g->create_node_sub("n1");
+  auto n2 = g->create_node_sub("n2");
 
   auto dpin = n1.setup_driver_pin(20);
   auto spin = n2.setup_sink_pin(30);
@@ -199,8 +191,6 @@ bool test2() {
     (void)out; // just to silence the warning
   }
 
-  g->close();
-
   return true;
 }
 
@@ -208,8 +198,8 @@ bool test22() {
 
   LGraph *g = LGraph::create("lgdb_core_test", "test22", "test");
 
-  auto n1 = g->create_node(SubGraph_Op);
-  auto n2 = g->create_node(SubGraph_Op);
+  auto n1 = g->create_node_sub("n1");
+  auto n2 = g->create_node_sub("n2");
 
   auto dpin = n1.setup_driver_pin(20);
   auto spin = n2.setup_sink_pin(0);
@@ -230,8 +220,6 @@ bool test22() {
     (void)out; // just to silence the warning
   }
 
-  g->close();
-
   return true;
 }
 
@@ -239,8 +227,8 @@ bool test3() {
 
   LGraph *g = LGraph::create("lgdb_core_test", "test3", "test");
 
-  auto n1 = g->create_node(SubGraph_Op);
-  auto n2 = g->create_node(SubGraph_Op);
+  auto n1 = g->create_node_sub("n1");
+  auto n2 = g->create_node_sub("n2");
 
   g->add_edge(n1.setup_driver_pin(20), n2.setup_sink_pin(25));
 
@@ -260,11 +248,9 @@ bool test3() {
 
   n2.del_node();
 
-  for(auto nid : g->fast()) {
-    assert(nid != n2.get_compact().nid);
+  for(auto node:g->fast()) {
+    I(node != n2);
   }
-
-  g->close();
 
   return true;
 }

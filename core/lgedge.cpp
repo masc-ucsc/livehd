@@ -8,6 +8,8 @@
 
 #include "mmap_allocator.hpp"
 
+#include "lgraph.hpp"
+
 static_assert(sizeof(LEdge) == 8, "LEdge should be 8 bytes");
 static_assert(sizeof(LEdge) == sizeof(LEdge_Internal), "LEdge should be 8 bytes");
 static_assert(sizeof(SEdge) == 2, "SEdge should be 2 bytes");
@@ -448,23 +450,21 @@ void Node_Internal::assimilate_edges(Node_Internal &other) {
 
   int self_pos = 0;
 
-  Port_ID other_dst_pid = other.get_dst_pid();
-
   int other_inp_long_removed = 0;
 
   for (int i = 0; i < other.inp_pos;) {
     if (other.sedge[other_pos].is_snode()) {
-      bool done =
-          sedge[self_pos].set(other.sedge[other_pos].get_idx(), other.sedge[other_pos].get_inp_pid(), other_dst_pid, true  // input
-          );
+      SEdge_Internal *sedge_i = (SEdge_Internal *)&sedge[self_pos];
+
+      bool done = sedge_i->set(other.sedge[other_pos].get_idx(), other.sedge[other_pos].get_inp_pid(), true);
       if (done) {
         self_pos++;
         inc_inputs(false);
       } else {
-        if (self_pos >= (Num_SEdges - 4 - 2)) break;
+        if (self_pos >= (Num_SEdges - 4 - 2) || inp_long>=3) break;
 
-        LEdge_Internal *ledge = (LEdge_Internal *)&sedge[self_pos];
-        ledge->set(other.sedge[other_pos].get_idx(), other.sedge[other_pos].get_inp_pid(), true  // input
+        LEdge_Internal *ledge_i = (LEdge_Internal *)&sedge[self_pos];
+        ledge_i->set(other.sedge[other_pos].get_idx(), other.sedge[other_pos].get_inp_pid(), true  // input
         );
 
         self_pos += 4;
@@ -473,7 +473,7 @@ void Node_Internal::assimilate_edges(Node_Internal &other) {
       other_pos++;
       i += 1;
     } else {
-      if (self_pos >= (Num_SEdges - 4 - 2)) break;
+      if (self_pos >= (Num_SEdges - 4 - 2) || inp_long>=3) break;
       sedge[self_pos++] = other.sedge[other_pos++];
       sedge[self_pos++] = other.sedge[other_pos++];
       sedge[self_pos++] = other.sedge[other_pos++];
@@ -485,7 +485,7 @@ void Node_Internal::assimilate_edges(Node_Internal &other) {
 
     if (self_pos >= (Num_SEdges - 1 - 2))  // at least an snode
       break;
-    I(has_space());
+    I(has_space_short());
   }
 
   int start_pos = original_start_pos;
@@ -499,37 +499,39 @@ void Node_Internal::assimilate_edges(Node_Internal &other) {
   other.inp_long -= other_inp_long_removed;
   I(other.inp_pos >= (4 * other.inp_long));
 
-  if (has_space(true)) {
-    // try transfer outputs if there is space in current
+  if (!has_space_short())
+    return;
 
-    while (other.out_pos) {
-      const Edge_raw *other_out = other.get_output_begin();
+  // try transfer outputs if there is space in current
 
-      int self_pos = next_free_output_pos();
-      I(self_pos < Num_SEdges);
-      bool done = sedge[self_pos].set(other_out->get_idx(), other_out->get_inp_pid(), other_dst_pid, false  // output
-      );
+  while (other.out_pos) {
+    const Edge_raw *other_out = other.get_output_begin();
 
-      if (done) {
-        inc_outputs(false);
-      } else {
-        LEdge_Internal *ledge = (LEdge_Internal *)&sedge[self_pos - (4-1)];   // became an sedge
-        ledge->set(other_out->get_idx(), other_out->get_inp_pid(), false  // output
-        );
-        inc_outputs(true);
-      }
-      if (other_out->is_snode()) {
-        I(other.out_pos >= 1);
-        other.out_pos -= 1;
-      } else {
-        I(other.out_pos >= 4);
-        other.out_pos -= 4;
-        I(other.out_long > 0);
-        other.out_long--;
-      }
+    int self_pos = next_free_output_pos();
+    I(self_pos < Num_SEdges);
+    SEdge_Internal *sedge_i = (SEdge_Internal *)&sedge[self_pos];   // became an sedge
+    bool done = sedge_i->set(other_out->get_idx(), other_out->get_inp_pid(), false);
 
-      if (!has_space(true)) break;
+    if (done) {
+      inc_outputs(false);
+    } else {
+      if (!has_space_long_out()) break; // We need long space
+      self_pos -= (4-1);
+      LEdge_Internal *ledge_i = (LEdge_Internal *)&sedge[self_pos];   // became an ledge
+      ledge_i->set(other_out->get_idx(), other_out->get_inp_pid(), false); // output
+      inc_outputs(true);
     }
+    if (other_out->is_snode()) {
+      I(other.out_pos > 0);
+      other.out_pos -= 1;
+    } else {
+      I(other.out_pos >= 4);
+      other.out_pos -= 4;
+      I(other.out_long > 0);
+      other.out_long--;
+    }
+
+    if (!has_space_short()) break;
   }
 }
 
@@ -537,16 +539,16 @@ Port_ID Edge_raw::get_dst_pid() const { return Node_Internal::get(this).get_dst_
 
 Node_pin Edge_raw::get_out_pin(LGraph *g, const Hierarchy_id hid) const {
   if (is_input())
-    return Node_pin(g, hid, get_idx(), get_inp_pid(), false);
+    return Node_pin(g, g->find_sub_lgraph(hid), hid, get_idx(), get_inp_pid(), false);
   else
-    return Node_pin(g, hid, get_self_root_idx(), get_dst_pid(), false);
+    return Node_pin(g, g->find_sub_lgraph(hid), hid, get_self_root_idx(), get_dst_pid(), false);
 }
 
 Node_pin Edge_raw::get_inp_pin(LGraph *g, const Hierarchy_id hid) const {
   if (is_input())
-    return Node_pin(g, hid, get_self_root_idx(), get_dst_pid(), true);
+    return Node_pin(g, g->find_sub_lgraph(hid), hid, get_self_root_idx(), get_dst_pid(), true);
   else
-    return Node_pin(g, hid, get_idx(), get_inp_pid(), true);
+    return Node_pin(g, g->find_sub_lgraph(hid), hid, get_idx(), get_inp_pid(), true);
 }
 
 Index_ID Edge_raw::get_self_nid() const { return Node_Internal::get(this).get_nid(); }

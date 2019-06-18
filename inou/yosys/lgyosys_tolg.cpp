@@ -52,49 +52,25 @@ static void look_for_module_outputs(RTLIL::Module *module, const std::string &pa
   auto *g       = library->try_find_lgraph(&module->name.c_str()[1]);
   assert(g);
 
-  int last_input_port_id  = 0;
-  int last_output_port_id = 0;
-
-  std::vector<RTLIL::Wire *> io_wires;
-
   for(auto &wire_iter : module->wires_) {
     RTLIL::Wire *wire = wire_iter.second;
     if(wire->port_input) {
       log("input %s\n",wire->name.c_str());
-      io_wires.push_back(wire);
       I(!wire->port_output); // any bidirectional port?
       I(wire->name.c_str()[0] == '\\');
+      auto pin = g->add_graph_input(&wire->name.c_str()[1], wire->port_id, wire->width);
+      if (wire->start_offset) {
+        pin.set_offset(wire->start_offset);
+      }
     }else if (wire->port_output) {
       log("output %s\n",wire->name.c_str());
-      io_wires.push_back(wire);
       I(wire->name.c_str()[0] == '\\');
+      auto pin = g->add_graph_output(&wire->name.c_str()[1], wire->port_id, wire->width);
+      if (wire->start_offset) {
+        pin.set_offset(wire->start_offset);
+      }
     }
   }
-
-  struct Less_than_sort_io {
-    inline bool operator() (const RTLIL::Wire *e1, const RTLIL::Wire *e2) {
-      return (e1->port_id < e2->port_id);
-    }
-  };
-
-  std::sort(io_wires.begin(),io_wires.end(), Less_than_sort_io());
-
-  for(RTLIL::Wire *wire:io_wires) {
-    if(wire->port_input) {
-      log("2input %s\n",wire->name.c_str());
-      I(last_input_port_id <= wire->port_id);
-      last_input_port_id = wire->port_id;
-      g->add_graph_input(&wire->name.c_str()[1], wire->width, wire->start_offset);
-    }else{
-      I(wire->port_output);
-      log("2output %s\n",wire->name.c_str());
-      I(last_output_port_id <= wire->port_id);
-      last_output_port_id = wire->port_id;
-      g->add_graph_output(&wire->name.c_str()[1], wire->width, wire->start_offset);
-    }
-  }
-
-  g->sync(); // Not needed, but to free-up mmaps...
 }
 
 static bool is_yosys_output(const std::string &idstring) {
@@ -402,6 +378,7 @@ static Node_pin resolve_constant(LGraph *g, const std::vector<RTLIL::State> &dat
   return node.setup_driver_pin();
 }
 
+#if 0
 // does not treat string, keeps as it is (useful for names)
 static void connect_string(LGraph *g, std::string_view value, Node &exit_node, Port_ID opid) {
 
@@ -410,6 +387,7 @@ static void connect_string(LGraph *g, std::string_view value, Node &exit_node, P
 
   spin.connect_driver(dpin);
 }
+#endif
 
 static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path) {
 
@@ -419,7 +397,6 @@ static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path
   auto *g       = library->try_find_lgraph(&module->name.c_str()[1]);
   assert(g);
 
-  const Tech_library &tlib = g->get_tlibrary();
   for(auto cell : module->cells()) {
 
     if(cell->type == "$mem") {
@@ -427,71 +404,65 @@ static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path
       continue;
     }
 
-    LGraph *         sub_graph = nullptr;
-    const Tech_cell *tcell     = nullptr;
-
-    std::string_view mod_name(&(cell->type.c_str()[1]));
-
-    if(cell->type.c_str()[0] == '\\' || cell->type.str().rfind("$paramod") == 0)
-      sub_graph = LGraph::open(g->get_path(), mod_name);
-
-    if(!sub_graph && tlib.include(cell->type.str())) {
-      tcell = tlib.get_const_cell(tlib.get_cell_id(cell->type.str()));
-    }
-
-    if(!sub_graph && !tcell && tlib.include(mod_name)) {
-      tcell = tlib.get_const_cell(tlib.get_cell_id(mod_name));
-    }
-
-    if(!sub_graph && !tcell && tlib.include(mod_name.substr(1))) {
-      tcell = tlib.get_const_cell(tlib.get_cell_id(mod_name.substr(1)));
-    }
-
-    bool blackbox = false;
-    if ((!sub_graph) && (!tcell)) {
-      if (cell->type.c_str()[0] == '\\')
-        blackbox = true;
-      else if (!ct_all.cell_known(cell->type))
-        blackbox = true;
-    }
-
     cell2node[cell] = g->create_node();
     auto &node = cell2node[cell];
 
-    //uint32_t blackbox_out = 0;
+    Sub_node *sub = nullptr;
+
+    if (cell->type.c_str()[0] == '\\') { // sub_cell type
+      std::string_view mod_name(&(cell->type.c_str()[1]));
+
+      sub = &g->ref_library()->setup_sub(mod_name);
+    }
+
     for(const auto &conn : cell->connections()) {
-      // first faster filter but doesn't always work
-      if(cell->input(conn.first) || (sub_graph && sub_graph->is_graph_input(&(conn.first.c_str()[1]))))
-        continue;
-
-#ifndef NDEBUG
-      if (sub_graph && !(cell->output(conn.first) || tcell || blackbox || (sub_graph && sub_graph->is_graph_output(&(conn.first.c_str()[1]))))) {
-        fmt::print("cf.s:{} i:{} o:{}\n",conn.first.c_str()
-            ,sub_graph->is_graph_input(&(conn.first.c_str()[1]))
-            ,sub_graph->is_graph_output(&(conn.first.c_str()[1])));
-        sub_graph->dump();
-      }
-#endif
-      assert(cell->output(conn.first) || tcell || blackbox || (sub_graph && sub_graph->is_graph_output(&(conn.first.c_str()[1]))));
-      if(blackbox && !is_black_box_output(module, cell, conn.first)) {
-        continue;
-      } else if(sub_graph && !sub_graph->is_graph_output(&(conn.first.c_str()[1]))) {
-        continue;
-      } else if(tcell && !tcell->is_output(&(conn.first.c_str()[1]))) {
-        continue;
-      } else if(!sub_graph && !tcell && !is_yosys_output(conn.first.c_str())) {
-        continue;
-      }
-
       Port_ID pid;
-      if(sub_graph) {
-        pid = sub_graph->get_graph_output(&(conn.first.c_str()[1])).get_pid();
-      } else if(tcell) {
-        pid = tcell->get_out_pid(&(conn.first.c_str()[1]));
-      }else if(std::strncmp(cell->type.c_str(), "$reduce_", 8) == 0 && cell->type.str() != "$reduce_xnor") {
-        pid = 1;
-      }else{
-        pid = 0;
+
+      if (sub) {
+        std::string pin_name(&(conn.first.c_str()[1]));
+
+        printf("module %s cell type %s has pin_name %s\n",module->name.c_str(), cell->type.c_str(), pin_name.c_str());
+
+        if (isdigit(pin_name[0])) {
+          // hardcoded pin position
+          int pos = atoi(pin_name.c_str());
+
+          if (!sub->has_graph_pin(pos)) {
+            printf("module %s cell type %s has pin_name %s but it is disconnected\n",module->name.c_str(), cell->type.c_str(), pin_name.c_str());
+            if (cell->output(conn.first)) {
+              assert(false); // TODO: We could add as a sub without name
+            }
+            continue;
+          }
+          auto io_pin = sub->get_io_pin_from_graph_pos(pos);
+          if (io_pin.dir == Sub_node::Direction::Input)
+            continue;
+
+          printf("module %s cell type %s maps from %s pin_name to %s\n",module->name.c_str(), cell->type.c_str(), pin_name.c_str(), io_pin.name.c_str());
+          pid = sub->get_instance_pid(io_pin.name);
+        }else{
+
+          if (!sub->has_pin(pin_name)) {
+            if (cell->input(conn.first) || is_black_box_input(module, cell, conn.first))
+              sub->add_input_pin(pin_name);
+            else if (cell->output(conn.first) || is_black_box_output(module, cell, conn.first))
+              sub->add_output_pin(pin_name);
+          }
+
+          if (!sub->has_pin(pin_name) || sub->is_input(pin_name))
+            continue;
+
+          pid = sub->get_instance_pid(pin_name);
+        }
+      } else {
+        if (cell->input(conn.first))
+          continue;
+
+        if (std::strncmp(cell->type.c_str(), "$reduce_", 8) == 0 && cell->type.str() != "$reduce_xnor") {
+          pid = 1;
+        } else {
+          pid = 0;
+        }
       }
 
       // WARNING: Not very nice that we set pins before we even know the cell type.
@@ -542,11 +513,6 @@ static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path
           }
         }
       }
-    }
-
-    if (sub_graph) { // To do not leave too many mmaps open
-      sub_graph->close();
-      sub_graph = nullptr;
     }
   }
 }
@@ -652,9 +618,6 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
   auto *g       = library->try_find_lgraph(&module->name.c_str()[1]);
   assert(g);
 
-  const Tech_library &tlib  = g->get_tlibrary();
-  const Tech_cell    *tcell = nullptr;
-
   process_assigns(module, g);
 
 #ifndef NDEBUG
@@ -672,7 +635,6 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
     LGraph      *sub_graph   = nullptr;
     bool         subtraction = false;
     bool         negonly     = false;
-    bool         yosys_tech  = false;
     uint32_t     size        = 0;
     uint32_t     rdports     = 0;
     uint32_t     wrports     = 0;
@@ -985,13 +947,13 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
 
       assert(false);
 
-    } else if((LGraph::exists(g->get_path(), &cell->type.c_str()[1]))) {
+    } else if(g->get_library().get_lgid(&cell->type.c_str()[1])) {
       // external graph reference
-      sub_graph = LGraph::open(g->get_path(), &cell->type.c_str()[1]);
-      assert(sub_graph);
+      auto sub_lgid = g->get_library().get_lgid(&cell->type.c_str()[1]);
+      assert(sub_lgid);
       log("module name original was %s\n", cell->type.c_str());
 
-      entry_node.set_type_subgraph(sub_graph->lg_id());
+      entry_node.set_type_sub(sub_lgid);
 
       std::string inst_name = cell->name.str().substr(1);
       if(!inst_name.empty())
@@ -1000,36 +962,6 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
       else
         fmt::print("yosys2lg got empty inst_name for cell type {}\n", cell->type.c_str());
 #endif
-
-    } else if(tlib.include(cell->type.str())) {
-      std::string ttype = cell->type.str();
-      tcell             = tlib.get_const_cell(tlib.get_cell_id(ttype));
-
-      entry_node.set_type_tmap_id(tcell->get_id());
-
-      std::string inst_name = cell->name.str().substr(1);
-      if(!inst_name.empty() && inst_name.rfind("auto$")!=0 && inst_name.rfind("abc$")!=0)
-        entry_node.set_name(inst_name);
-
-    } else if(tlib.include(cell->type.str().substr(1))) {
-      std::string ttype = cell->type.str().substr(1);
-      tcell             = tlib.get_const_cell(tlib.get_cell_id(ttype));
-
-      entry_node.set_type_tmap_id(tcell->get_id());
-
-      std::string inst_name = cell->name.str().substr(1);
-      if(inst_name != "" && inst_name.rfind("auto$")!=0 && inst_name.rfind("abc$")!=0)
-        entry_node.set_name(inst_name);
-
-    } else if(tlib.include(cell->type.str().substr(2))) {
-      std::string ttype = cell->type.str().substr(2);
-      tcell             = tlib.get_const_cell(tlib.get_cell_id(ttype));
-
-      entry_node.set_type_tmap_id(tcell->get_id());
-
-      std::string inst_name = cell->name.str().substr(1);
-      if(inst_name != "" && inst_name.rfind("auto$")!=0 && inst_name.rfind("abc$")!=0)
-        entry_node.set_name(inst_name);
 
       // DO NOT MERGE THE BELLOW WITH THE OTHER ANDs, NOTs, DFFs
     } else if(std::strncmp(cell->type.c_str(), "$_AND_", 6) == 0) {
@@ -1077,13 +1009,8 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
     } else {
       // blackbox addition
       ::Pass::info("Black box addition from yosys frontend, cell type {} not found instance {}", cell->type.c_str(), cell->name.c_str());
-
-      entry_node.set_type(BlackBox_Op);
-      connect_string(g, &(cell->type.c_str()[1]), exit_node, LGRAPH_BBOP_TYPE);
-      connect_string(g, &(cell->name.c_str()[1]), exit_node, LGRAPH_BBOP_NAME);
+      assert(false);
     }
-
-    uint32_t blackbox_port = 0;
 
     absl::flat_hash_set<XEdge::Compact> added_edges;
     for(auto &conn : cell->connections()) {
@@ -1099,26 +1026,6 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
         if(sub_graph->is_graph_output(name))
           continue;
         sink_pid = sub_graph->get_graph_input(name).get_pid();
-      } else if(entry_node.is_type(TechMap_Op)) {
-        assert(tcell);
-        std::string_view name(&conn.first.c_str()[1]);
-        if(tcell->is_output(name))
-          continue;
-        sink_pid = tcell->get_inp_pid(name);
-
-      } else if(entry_node.is_type(BlackBox_Op) && !yosys_tech) {
-        if(is_black_box_input(module, cell, conn.first) || is_black_box_output(module, cell, conn.first)) {
-          connect_string(g, &(conn.first.c_str()[1]), exit_node, LGRAPH_BBOP_IPARAM(blackbox_port));
-          sink_pid = LGRAPH_BBOP_ICONNECT(blackbox_port);
-          blackbox_port++;
-        } else {
-          bool o = is_black_box_output(module, cell, conn.first);
-          bool i = is_black_box_input (module, cell, conn.first);
-          ::Pass::error("Could not find a definition for module {}, treating as a blackbox but could not determine whether {} is an input"
-              "or an output {} {}",
-              cell->type.str(), conn.first.c_str(), i, o);
-          assert(false); // not able to distinguish if blackbox input or output
-        }
       } else {
         if (is_yosys_output(conn.first.c_str())) continue;  // Just go over the inputs
 
@@ -1237,12 +1144,6 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
         added_edges.insert(XEdge(dpin, spin).get_compact());
       }
     }
-
-    if (sub_graph) {
-      sub_graph->close(); // to avoid output leak
-      sub_graph = nullptr;
-    }
-
   }
 
   for(auto &kv : partially_assigned) {
@@ -1425,7 +1326,6 @@ struct Yosys2lg_Pass : public Yosys::Pass {
         LGraph *g = process_module(module, path);
 
         g->sync();
-        g->close();
       }
 
       wire2pin.clear();

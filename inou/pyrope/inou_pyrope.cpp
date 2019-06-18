@@ -28,7 +28,6 @@ void Inou_pyrope::work(Eprp_var &var) {
   for(const auto &g : var.lgs) {
     pass.compute_histogram(g);
     pass.compute_max_depth(g);
-    pass.annotate_placement(g);
   }
 }
 
@@ -38,8 +37,7 @@ void Inou_pyrope::compute_histogram(LGraph *g) {
   std::map<std::string, int> histogram;
 
   int cells = 0;
-  for(const auto &nid : g->forward()) {
-    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
+  for(const auto node : g->forward()) {
 
     cells++;
     std::string name(node.get_type().get_name());
@@ -66,8 +64,7 @@ void Inou_pyrope::compute_max_depth(LGraph *g) {
   absl::flat_hash_map<Node::Compact, int>  depth;
 
   int max_depth = 0;
-  for(const auto &nid : g->forward()) {
-    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
+  for(const auto node : g->forward()) {
 
     int local_max = 0;
     for(const auto &edge : node.inp_edges()) {
@@ -80,28 +77,4 @@ void Inou_pyrope::compute_max_depth(LGraph *g) {
 
   fmt::print("Pass: max_depth {}\n", max_depth);
 }
-
-void Inou_pyrope::annotate_placement(LGraph *g) {
-  LGBench b("inou.pyrope.replace_inline");
-
-  int x_pos = 0;
-
-  Ann_node_place::clear(g); // Not needed, but clears all the previous placement info
-
-  for(const auto &nid : g->backward()) {
-    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
-
-    Node_place p(x_pos++,0);
-    Ann_node_place::set(node, p);
-  }
-
-  for(const auto &nid : g->fast()) {
-    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
-
-    auto &place = Ann_node_place::get(node);
-    fmt::print("cell {} placed at x:{}\n",node.create_name(), place.get_x());
-  }
-
-}
-
 

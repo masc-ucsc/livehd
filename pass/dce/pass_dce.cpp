@@ -3,8 +3,6 @@
 #include <string>
 #include <time.h>
 
-#include "bm.h"
-
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "pass_dce.hpp"
@@ -34,7 +32,7 @@ void Pass_dce::optimize(Eprp_var &var) {
 
 void Pass_dce::trans(LGraph *g) {
 
-  bm::bvector<>  cell_used;
+  absl::flat_hash_set<Node::Compact> cell_used;
   absl::flat_hash_set<Node> pending;
 
   g->each_graph_output([&pending](const Node_pin &pin) {
@@ -45,19 +43,18 @@ void Pass_dce::trans(LGraph *g) {
     auto it = pending.begin();
     Node cur_node = *it;
     pending.erase(it);
-    cell_used.set_bit((bm::id_t)cur_node.get_compact());
+    cell_used.insert(cur_node.get_compact());
 
     for(auto &inp : cur_node.inp_edges()) {
-      if(cell_used.get_bit( (bm::id_t)inp.driver.get_node().get_compact()))
+      if(cell_used.count(inp.driver.get_node().get_compact()))
         continue;
 
       pending.insert(inp.driver.get_node());
     }
   }
 
-  for(auto nid : g->fast()) {
-    auto node = Node(g, 0, Node::Compact(nid));
-    if(cell_used.get_bit( (bm::id_t)node.get_compact()))
+  for(auto node : g->fast()) {
+    if(cell_used.count(node.get_compact()))
       continue;
     node.del_node();
   }

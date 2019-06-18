@@ -35,7 +35,7 @@ static int lef_via_cb(lefrCallbackType_e c, lefiVia *fvia, lefiUserData ud);
 
 int lef_macro_begin_cb(lefrCallbackType_e c, const char *macroName, lefiUserData ud) {
   assert(c);
-  auto *tlib = static_cast<Tech_library *>(ud);
+  auto *tlib = static_cast<Graph_library *>(ud);
   if(!tlib->include(macroName))
     tlib->create_cell_id(macroName);
   return 0;
@@ -52,7 +52,7 @@ int lef_macro_cb(lefrCallbackType_e c, lefiMacro *fmacro, lefiUserData ud) {
 int lef_pin_cb(lefrCallbackType_e c, lefiPin *fpin, lefiUserData ud) {
 
   assert(c);
-  auto *tlib = static_cast<Tech_library *>(ud);
+  auto *tlib = static_cast<Graph_library *>(ud);
 
   int  port_number = 0;
   bool is_input    = false;
@@ -103,7 +103,7 @@ int lef_pin_cb(lefrCallbackType_e c, lefiPin *fpin, lefiUserData ud) {
 
 int lef_layer_cb(lefrCallbackType_e c, lefiLayer *flayer, lefiUserData ud) {
   assert(c);
-  auto *tlib = static_cast<Tech_library *>(ud);
+  auto *tlib = static_cast<Graph_library *>(ud);
 
   lefiSpacingTable *spTable;
   lefiParallel *    parallel;
@@ -167,7 +167,7 @@ int lef_layer_cb(lefrCallbackType_e c, lefiLayer *flayer, lefiUserData ud) {
 
 int lef_via_cb(lefrCallbackType_e c, lefiVia *fvia, lefiUserData ud) {
   assert(c);
-  auto *tlib = static_cast<Tech_library *>(ud);
+  auto *tlib = static_cast<Graph_library *>(ud);
 
   tlib->increase_vec_vias_size();
   Tech_via &tmp_via = tlib->get_vec_vias()->back();
@@ -189,7 +189,7 @@ int lef_via_cb(lefrCallbackType_e c, lefiVia *fvia, lefiUserData ud) {
   return 0;
 }
 
-void Inou_lef::lef_parsing(Tech_library &tlib, std::string &lef_file_name) {
+void Inou_lef::lef_parsing(Graph_library &tlib, std::string &lef_file_name) {
   fmt::print("lefile is {}", lef_file_name);
   FILE *fin;
   lefrInit();

@@ -19,8 +19,10 @@ public:
   // TODO: the snode and input can be avoided by accessing the Node_Internal information
   bool     snode   : 1;           // 1 bit
   bool     input   : 1;           // 1 bit
-  Port_ID  inp_pid : Port_bits;   // 30 bits abs
-  uint64_t raw_idx : Index_bits;  // 31 bits abs
+  Port_ID  inp_pid : Port_bits;   // 28 bits abs
+  int16_t  pad1: 2;
+  uint64_t raw_idx : Index_bits;  // 31 bits abs, 4 byte aligned
+  uint16_t pad2: 1;
 
   bool     is_snode() const { return snode; }
   bool     is_input() const { return input; }
@@ -48,11 +50,11 @@ public:
   }
 };
 
-struct __attribute__((packed)) SEdge_Internal {  // 2 bytes total
+struct __attribute__((packed)) SEdge_Internal {  // 2 bytes total (TODO: Move to 3 bytes)
   bool      snode : 1;                           //  1 bit
   bool      input : 1;                           //  1 bit
   SIndex_ID ridx : 12;                           //  relative
-  Port_ID   inp_pid : 2;                         //   2 bits ; abs
+  Port_ID   inp_pid : 2;                         //  2 bits ; abs
 
   bool     is_snode() const { return snode; }
   bool     is_input() const { return input; }
@@ -168,6 +170,7 @@ public:
     return ((((uint64_t)this) & 0xFFF) == 0);  // page align.
   }
 
+#if 0
   bool set(Index_ID _idx, Port_ID _inp_pid, Port_ID _dst_pid, bool _input) {
     I(!is_page_align());
     I(get_dst_pid() == _dst_pid);
@@ -179,6 +182,7 @@ public:
     LEdge_Internal *l = reinterpret_cast<LEdge_Internal *>(this);
     return l->set(_idx, _inp_pid, _input);
   }
+#endif
 
 private:  // all constructor&assignment should be marked as private
   Edge_raw()                = default;
@@ -261,11 +265,10 @@ private:
   Node_State state : 3;  // State must be the first thing (Node_Internal_Page)
   uint16_t   root : 1;
   uint16_t   inp_pos : 5;
-  uint16_t   graph_io_input : 1; // FIXME: remove this bits. Use idx==1 
-  uint16_t   graph_io_output : 1; // FIXME: remove this bits. Use idx==2 
-  uint16_t   bits : 13;
+  uint16_t   driver_setup : 1;
+  uint16_t   sink_setup : 1;
   uint16_t   out_pos : 5;
-  uint16_t   inp_long : 3; // FIXME: 2 are nought
+  uint16_t   bits : Bits_bits; // 2 byte aligned
   // 4 bytes aligned
 public:
   // WARNING: This must be here not at the end of the structure. OTherwise the
@@ -273,9 +276,11 @@ public:
   static constexpr int Num_SEdges = 32 - 6;  // 6 entries for the 96 bits (12 bytes)
   SEdge                sedge[Num_SEdges];    // WARNING: Must not be the last field in struct or iterators fail
 private:
-  uint64_t nid : Index_bits;     // 32bits, 4 byte aligned
-  Port_ID  dst_pid : Port_bits;  // 30bits
-  uint16_t out_long : 3; // FIXME: 2 are nought
+  uint64_t nid : Index_bits;     // 31bits, 4 byte aligned
+  uint16_t pad: 1; // To get nicer alignment
+  Port_ID  dst_pid : Port_bits;  // 26bits, 4 byte aligned
+  uint16_t inp_long : 2; // 8 bytes each. Just 3 at most
+  uint16_t out_long : 2;
   // END 10 Bytes common payload
 
   void try_recycle();
@@ -347,17 +352,17 @@ public:
   bool    has_pin_outputs() const;
 
   void reset() {
-    bits            = 0;
-    dst_pid         = 0;
-    root            = 1;
-    graph_io_input  = false;
-    graph_io_output = false;
-    inp_pos         = 0;  // SEdge uses 1, LEdge uses 4
-    out_pos         = 0;  // SEdge uses 1, LEdge uses 4
-    inp_long        = 0;
-    out_long        = 0;
-    nid             = 0;
-    state           = Last_Node_State;
+    bits         = 0;
+    dst_pid      = 0;
+    root         = 1;
+    inp_pos      = 0;  // SEdge uses 1, LEdge uses 4
+    driver_setup = 0;
+    sink_setup   = 0;
+    out_pos      = 0;  // SEdge uses 1, LEdge uses 4
+    inp_long     = 0;
+    out_long     = 0;
+    nid          = 0;
+    state        = Last_Node_State;
   }
 
   bool is_root() const {
@@ -371,23 +376,10 @@ public:
 
     return ms;
   }
-  bool is_graph_io() const { return graph_io_input || graph_io_output; }
-  bool is_graph_io_input() const { return graph_io_input; }
-  bool is_graph_io_output() const { return graph_io_output; }
-  void set_graph_io_input() {
-    I(!graph_io_output);
-    graph_io_input = true;
-  }
-  void set_graph_io_output() {
-    I(!graph_io_input);
-    graph_io_output = true;
-  }
 
   void set_root() { root = true; }
   void clear_root() {
     root            = false;
-    graph_io_input  = false;
-    graph_io_output = false;
   }
 
   Port_ID get_dst_pid() const { return dst_pid; }
@@ -413,7 +405,6 @@ public:
 
   void set_nid(Index_ID _nid) {
     I(_nid < (1LL << Index_bits));
-    I(!is_graph_io());
     nid = _nid.value;
     GI(nid == get_self_idx().value, root);
   }
@@ -485,27 +476,30 @@ public:
   bool del(Index_ID src_idx, Port_ID pid, bool input);
 
   void inc_outputs(bool large = false) {
-    I(has_space(large));
     if (large) {
+      I(has_space_long_out());
+      I(!sedge[next_free_output_pos()-3].is_snode());
       out_pos += 4;
+      I(out_long<3); // To avoid overflow
       out_long++;
     } else {
+      I(has_space_short());
+      I(sedge[next_free_output_pos()].is_snode());
       out_pos++;
     }
   }
   void inc_inputs(bool large = false) {
-#ifndef NDEBUG
-    if (large)
-      I(((LEdge_Internal *)&(sedge[next_free_input_pos()]))->get_idx() != 0);
-    else
-      I(((SEdge_Internal *)&(sedge[next_free_input_pos()]))->get_idx(Node_Internal_Page::get(this).get_idx()) != 0);
-#endif
-
-    I(has_space(large));
     if (large) {
+      I(has_space_long_inp());
+      I(!sedge[next_free_input_pos()].is_snode());
+      I(((LEdge_Internal *)&(sedge[next_free_input_pos()]))->get_idx() != 0);
       inp_pos += 4;
+      I(inp_long<3); // To avoid overflow
       inp_long++;
     } else {
+      I(has_space_short());
+      I(sedge[next_free_input_pos()].is_snode());
+      I(((SEdge_Internal *)&(sedge[next_free_input_pos()]))->get_idx(Node_Internal_Page::get(this).get_idx()) != 0);
       inp_pos++;
     }
   }
@@ -521,11 +515,21 @@ public:
     return (inp_pos + out_pos + 2) < Num_SEdges;  // pos 0 uses 2 entries (4bytes ptr next)
   }
 
-  bool has_space(bool large = false) const {
-    int reserve = 0;
-    if (large) reserve = 4;  // +2 is enough but +4 avoids cross boundary issues
-    if (state == Last_Node_State) return (inp_pos + out_pos + reserve) < Num_SEdges;
-    return (inp_pos + out_pos + 2 + reserve) < Num_SEdges;  // pos 0 uses 2 entries (4bytes ptr next)
+  bool has_space_long() const {
+    int reserve = state == Last_Node_State ? 0 : 2;
+    return inp_long<3 && out_long<3 && (reserve + inp_pos + out_pos + 4) < Num_SEdges;
+  }
+  bool has_space_long_inp() const {
+    int reserve = state == Last_Node_State ? 0 : 2;
+    return inp_long<3 && (reserve + inp_pos + out_pos + 4) < Num_SEdges;
+  }
+  bool has_space_long_out() const {
+    int reserve = state == Last_Node_State ? 0 : 2;
+    return out_long<3 && (reserve + inp_pos + out_pos + 4) < Num_SEdges;
+  }
+  bool has_space_short() const {
+    int reserve = state == Last_Node_State ? 0 : 2;
+    return (inp_pos + out_pos + reserve) < Num_SEdges;  // pos 0 uses 2 entries (4bytes ptr next)
   }
 
   uint16_t get_bits() const {
@@ -534,9 +538,13 @@ public:
   }
   void set_bits(uint16_t _bits) {
     I(is_root());
-    I(_bits < (1 << 14));
+    static_assert(Bits_bits == 8*sizeof(uint16_t));
     bits = _bits;
   }
+  bool is_driver_setup() const { return driver_setup != 0; }
+  bool is_sink_setup()   const { return sink_setup   != 0; }
+  void set_driver_setup() { driver_setup=1; }
+  void set_sink_setup()   { driver_setup=1; }
 
   const SEdge *get_input_begin() const { return &sedge[get_input_begin_pos_int()]; }
   const SEdge *get_input_end() const { return &sedge[get_input_end_pos_int()]; }
@@ -545,12 +553,12 @@ public:
   const SEdge *get_output_end() const { return &sedge[Num_SEdges]; }
 
   int next_free_input_pos() const {
-    I(has_space());
+    I(has_space_short());
     return get_input_end_pos_int();
   }
 
   int next_free_output_pos() const {
-    I(has_space());
+    I(has_space_short());
     return get_output_begin_pos_int();
   }
 
@@ -559,7 +567,7 @@ public:
 
 private:
   int get_input_end_pos_int() const {
-    if (inp_pos == 0) return get_input_begin_pos_int();
+    //if (inp_pos == 0) return get_input_begin_pos_int();
 
     int pos = inp_pos;
     if (state != Last_Node_State) pos += 2;

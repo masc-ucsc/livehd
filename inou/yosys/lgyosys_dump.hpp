@@ -25,6 +25,7 @@ private:
 
   void to_yosys(LGraph *g);
 
+  absl::flat_hash_set<std::string_view>                                 created_sub;
   absl::flat_hash_map<Node_pin::Compact, RTLIL::Wire *               >  input_map;
   absl::flat_hash_map<Node_pin::Compact, RTLIL::Wire *               >  output_map;
   absl::flat_hash_map<Node_pin::Compact, RTLIL::Wire *               >  cell_output_map;
@@ -48,9 +49,12 @@ private:
 
       tmp = absl::StrCat(test, "_", std::to_string(ids++));
 
-      if (Ann_node_pin_name::find(g,tmp).is_invalid())
-        if (Ann_node_name::find(g,tmp).is_invalid())
-          return tmp;
+      if (Ann_node_pin_name::ref(g)->has_val(tmp))
+        continue;
+      if (Ann_node_name::ref(g)->has_val(tmp))
+        continue;
+
+      return tmp;
     }
   }
 
@@ -66,7 +70,7 @@ private:
 
   RTLIL::Wire *create_tree(LGraph *g, std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod, add_cell_fnc_sign add_cell, bool sign, RTLIL::Wire *result_wire);
 
-  RTLIL::Wire *create_io_wire(Node_pin &pin, RTLIL::Module *module);
+  RTLIL::Wire *create_io_wire(const Node_pin &pin, RTLIL::Module *module, int pos);
   void         create_wires(LGraph *g, RTLIL::Module *module);
 
   void create_blackbox(LGraph *subgraph, RTLIL::Design *design);

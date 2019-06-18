@@ -151,100 +151,59 @@ void Pass_opentimer::read_sdc(std::string_view sdc){
 }
 
 void Pass_opentimer::build_circuit(LGraph *g) {       // Enhance this for build_circuit
-//  LGBench b("pass.opentimer.build_circuit");
+  //  LGBench b("pass.opentimer.build_circuit");
 
-  std::string celltype;
-  std::string instance_name;
+  g->each_graph_input([this](const Node_pin &pin) {
+    std::string driver_name(pin.get_name()); // OT needs std::string, not string_view support
 
-  for(const auto &nid : g -> forward()) {
-    auto node = Node(g,0,Node::Compact(nid));
+    fmt::print("\nGraph Input Driver Name {}", driver_name);
+    timer.insert_net(driver_name);
+    timer.insert_primary_input(driver_name);
+    timer.connect_pin(driver_name, driver_name);
+  });
 
+  g->each_graph_output([this](const Node_pin &pin) {
+    std::string driver_name(pin.get_name()); // OT needs std::string, not string_view support
 
-    // CREATE PRIMARY INPUTS AND PRIMARY OUTPUTS
-    if(node.get_type().op == GraphIO_Op) {
-      for(const auto &edge : node.out_edges()) {
-        if(!edge.driver.is_graph_input())
-          continue;
-        I(edge.driver.has_name());
-        std::string driver_name (edge.driver.get_name());
-        fmt::print("\nGraph Input Driver Name {}", driver_name);
-        timer.insert_net(driver_name);
-        timer.insert_primary_input(driver_name);
-        timer.connect_pin(driver_name,driver_name);
-      }
-      for(const auto &edge : node.inp_edges()) {
-        if(!edge.sink.is_graph_output())
-          continue;
-        auto dpin = node.get_driver_pin(edge.sink.get_pid());
-        I(dpin.has_name());
-        std::string driver_name (dpin.get_name());
-        fmt::print("\n\nGraph Output Sink Name {}", driver_name);
-        timer.insert_net(driver_name);
-        timer.insert_primary_output(driver_name);
-        timer.connect_pin(driver_name,driver_name);
-      }
+    fmt::print("\nGraph Output Driver Name {}", driver_name);
+    timer.insert_net(driver_name);
+    timer.insert_primary_output(driver_name);
+    timer.connect_pin(driver_name, driver_name);
+  });
+
+  for(const auto node : g->forward()) { // TODO: Do we really need a slow forward. Why not just fast??
+    auto op = node.get_type().op;
+
+    if (op != SubGraph_Op) {
+      if (op != GraphIO_Op)
+        Pass::error("opentimer pass needs the lgraph to be tmap, found cell {} with type {}\n",node.debug_name(), node.get_type().get_name());
+      continue;
     }
 
-    if (node.get_type().op == BlackBox_Op) {
+    auto &sub_node = node.get_type_sub_node();
+    if (!sub_node.is_black_box()) {
+      fmt::print("Not BBox sub found {}, fixme to traverse hierarchy\n",sub_node.get_name());
+      continue;
+    }
 
-    // CREATE GATES
+    std::string instance_name(node.get_name()); // OT needs std::string
+    std::string type_name(sub_node.get_name()); // OT needs std::string
+
+    timer.insert_gate(instance_name, type_name);
+
+    // CONNECT NETS TO PINS
     for(const auto &e:node.inp_edges()) {
-      if(e.sink.get_pid() == LGRAPH_BBOP_TYPE) {
-        if(e.driver.get_node().get_type().op != StrConst_Op)
-            error("Internal Error: BB type is not a string.\n");
-          celltype = e.driver.get_node().get_type_const_sview();
-        } else if(e.sink.get_pid() == LGRAPH_BBOP_NAME) {
-          if(e.driver.get_node().get_type().op != StrConst_Op)
-            error("Internal Error: BB name is not a string.\n");
-          instance_name = e.driver.get_node().get_type_const_sview();
-        } else if(e.sink.get_pid() < LGRAPH_BBOP_OFFSET) {
-          error("Unrecognized blackbox option, pid %hu\n", e.sink.get_pid());
-      }
+
+      auto nodepin_name = sub_node.get_name_from_instance_pid(e.sink.get_pid());
+      auto pin_name = absl::StrCat(instance_name,":",nodepin_name);
+      std::string wname(e.driver.get_name()); // OT needs std::string
+
+      fmt::print("\n{},{}", pin_name, wname);
+      timer.insert_net(wname);
+      timer.connect_pin(pin_name,wname);
     }
-
-    if(node.get_type().op != StrConst_Op && node.get_type().op != GraphIO_Op){
-     // fmt::print("Cell Name {}\n---------------------------------\n", celltype);
-      timer.insert_gate(instance_name,celltype);
-    }
-
-
-  // CONNECT NETS TO PINS
-      std::string nodepin_name = "bbox";
-      for(const auto &e:node.inp_edges()) {
-        if(e.sink.get_pid() < LGRAPH_BBOP_OFFSET)
-          continue;
-
-        auto dpin_node = e.driver.get_node();
-
-        I(node.get_type().op == BlackBox_Op);
-
-        if(LGRAPH_BBOP_ISIPARAM(e.sink.get_pid())) {
-            nodepin_name = dpin_node.get_type_const_sview();
-           // fmt::print("nodepin_name {}\n", nodepin_name);
-        } else if(LGRAPH_BBOP_ISICONNECT(e.sink.get_pid())) {
-            if(dpin_node.get_type().op == U32Const_Op) {
-              int IDK = dpin_node.get_type_const_value();
-              fmt::print("? Value {}\n\n", IDK);
-            } else if(dpin_node.get_type().op == StrConst_Op) {
-                std::string IDK (dpin_node.get_type_const_sview());
-                fmt::print("? Name {}\n\n", IDK);
-            } else {
-                if (e.driver.has_name()) {
-                  std::string wname (e.driver.get_name());
-                  std::string pin_name = absl::StrCat(instance_name,":",nodepin_name);
-                  //fmt::print("Wire Name 1 {}\n\n", wname);
-                  fmt::print("\n{},{}", pin_name,wname);
-                  timer.insert_net(wname);
-                //  fmt::print("Pin Name :  {}\n", pin_name);
-                  timer.connect_pin(pin_name,wname);
-                }
-            }
-        }
-      }
-    }
-
+    timer.connect_pin("u3:Y","out");                        // This the last thing to fix
   }
-  timer.connect_pin("u3:Y","out");                        // This the last thing to fix
 }
 
 void Pass_opentimer::compute_timing(){                    // Expand this method to compute timing information

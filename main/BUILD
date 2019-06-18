@@ -15,7 +15,7 @@ cc_binary(
             "//inou/cgen:inou_cgen",
             "//inou/liveparse:inou_liveparse",
             # "//inou/json:inou_json",
-            "//inou/lef:inou_lef",
+            #"//inou/lef:inou_lef",
             "//inou/pyrope:inou_pyrope",
             "//inou/graphviz:inou_graphviz",
             # "//inou/rand:inou_rand",

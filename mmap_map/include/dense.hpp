@@ -96,7 +96,8 @@ public:
   }
 
   void clear() noexcept {
-    __allocator.clear();
+    if (__size==0)
+      __allocator.clear();
     __size   = 0;
     __buffer = 0;
   }

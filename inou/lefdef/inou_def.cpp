@@ -17,6 +17,9 @@ void Inou_def::set_def_info(Def_info &dinfo_in) {
 
 std::vector<LGraph *> Inou_def::generate() {
   std::vector<LGraph *> lgs;
+#if 1
+  I(false);
+#else
   // clear since loading from def
   auto *g = LGraph::create(opack.lgdb_path, dinfo.mod_name, opack.def_file);
 
@@ -117,6 +120,7 @@ std::vector<LGraph *> Inou_def::generate() {
   g->sync();
   lgs.push_back(g);
 
+#endif
   return lgs;
 }
 

@@ -19,7 +19,7 @@ void Pass_abc::from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *p
   gen_comb_cell_from_abc(new_graph, old_graph, pNtk);
   gen_latch_from_abc(new_graph, old_graph, pNtk);
   gen_memory_from_abc(new_graph, old_graph, pNtk);
-  gen_subgraph_from_abc(new_graph, old_graph, pNtk);
+  gen_sub_from_abc(new_graph, old_graph, pNtk);
 
   conn_latch(new_graph, old_graph, pNtk);
   conn_primary_output(new_graph, old_graph, pNtk);
@@ -290,18 +290,18 @@ void Pass_abc::gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, A
   }
 }
 
-void Pass_abc::gen_subgraph_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
+void Pass_abc::gen_sub_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
   assert(old_graph);
   for(const auto &idx : graph_info->subgraph_id) {
 
     std::string subgraph_name(old_graph->get_library().get_name(old_graph->subgraph_id_get(idx)));
-    Index_ID    new_subgraph_idx    = new_graph->create_node().get_nid();
-    graph_info->subgraph_remap[idx] = new_subgraph_idx;
-    new_graph->node_type_set(new_subgraph_idx, SubGraph_Op);
-    new_graph->set_node_instance_name(new_subgraph_idx, old_graph->get_node_instancename(idx));
+    Index_ID    new_sub_idx    = new_graph->create_node().get_nid();
+    graph_info->subgraph_remap[idx] = new_sub_idx;
+    new_graph->node_type_set(new_sub_idx, SubGraph_Op);
+    new_graph->set_node_instance_name(new_sub_idx, old_graph->get_node_instancename(idx));
 
     LGraph *sub_graph = LGraph::open(old_graph->get_path(), subgraph_name);
-    new_graph->node_subgraph_set(new_subgraph_idx, sub_graph->lg_id());
+    new_graph->node_subgraph_set(new_sub_idx, sub_graph->get_lgid());
   }
   Abc_Obj_t *pTerm = nullptr, *pNet = nullptr;
 
@@ -316,10 +316,10 @@ void Pass_abc::gen_subgraph_from_abc(LGraph *new_graph, const LGraph *old_graph,
       std::smatch subgraph_info;
       if(std::regex_search(output_name, subgraph_info, trap)) {
         assert(subgraph_info.size() - 1 == 3); // disregard the 0th capture
-        Index_ID     old_subgraph_idx = std::stol(subgraph_info[1]);
+        Index_ID     old_sub_idx      = std::stol(subgraph_info[1]);
         Port_ID      old_inp_pid      = static_cast<Port_ID>(std::stol(subgraph_info[2]));
         Port_ID      old_offset       = static_cast<Port_ID>(std::stol(subgraph_info[3]));
-        index_offset info             = {graph_info->subgraph_remap[old_subgraph_idx], old_inp_pid, {old_offset, old_offset}};
+        index_offset info             = {graph_info->subgraph_remap[old_sub_idx], old_inp_pid, {old_offset, old_offset}};
         subgraph_input_map[info]      = pNet;
       }
     }
@@ -334,18 +334,18 @@ void Pass_abc::gen_subgraph_from_abc(LGraph *new_graph, const LGraph *old_graph,
       std::smatch subgraph_info;
       if(std::regex_search(input_name, subgraph_info, trap)) {
         assert(subgraph_info.size() - 1 == 3); // disregard the 0th capture
-        Index_ID old_subgraph_idx = std::stol(subgraph_info[1]);
+        Index_ID old_subh_idx     = std::stol(subgraph_info[1]);
         Port_ID  old_inp_pid      = static_cast<Port_ID>(std::stol(subgraph_info[2]));
         Port_ID  old_offset       = static_cast<Port_ID>(std::stol(subgraph_info[3]));
 
-        index_offset info         = {graph_info->subgraph_remap[old_subgraph_idx], old_inp_pid, {old_offset, old_offset}};
+        index_offset info         = {graph_info->subgraph_remap[old_sub_idx], old_inp_pid, {old_offset, old_offset}};
         subgraph_output_map[info] = pNet;
       }
     }
   }
 
   for(const auto &old_idx : graph_info->subgraph_id) {
-    Index_ID new_subgraph_idx = graph_info->subgraph_remap[old_idx];
+    Index_ID new_sub_idx = graph_info->subgraph_remap[old_idx];
     for(const auto &input : old_graph->inp_edges(old_idx)) {
       Port_ID  old_inp_pid = input.get_inp_pin().get_pid();
       auto     inp_info    = graph_info->subgraph_conn[old_idx][old_inp_pid];
@@ -353,11 +353,11 @@ void Pass_abc::gen_subgraph_from_abc(LGraph *new_graph, const LGraph *old_graph,
       auto join_node = new_graph->create_node(Join_Op, inp_info.size());
 
       auto dpin = join_node.setup_driver_pin();
-      auto spin = new_graph->get_node(new_subgraph_idx).setup_sink_pin(old_inp_pid);
+      auto spin = new_graph->get_node(new_sub_idx).setup_sink_pin(old_inp_pid);
       new_graph->add_edge(dpin, spin);
 
       for(size_t offset = 0; offset < inp_info.size(); ++offset) {
-        index_offset info = {new_subgraph_idx, old_inp_pid, {static_cast<int>(offset), static_cast<int>(offset)}};
+        index_offset info = {new_sub_idx, old_inp_pid, {static_cast<int>(offset), static_cast<int>(offset)}};
         auto *pObj = subgraph_input_map[info];
 
         auto dpin = new_graph->get_node(graph_info->cell2id[pObj]).setup_driver_pin(graph_info->cell_out_pid[graph_info->cell2id[pObj]]++);
@@ -368,11 +368,11 @@ void Pass_abc::gen_subgraph_from_abc(LGraph *new_graph, const LGraph *old_graph,
     for(const auto &out : old_graph->out_edges(old_idx)) {
       auto out_pid  = out.get_out_pin().get_pid();
       auto width    = old_graph->get_bits(out.get_out_pin());
-      auto pick_pin = create_pick_operator(new_graph, new_graph->get_node(new_subgraph_idx).setup_driver_pin(out_pid), 0, width);
+      auto pick_pin = create_pick_operator(new_graph, new_graph->get_node(new_sub_idx).setup_driver_pin(out_pid), 0, width);
       auto pick_node = new_graph->get_node(pick_pin);
       for(int offset = 0; offset < width; ++offset) {
         auto     pseudo_pin = create_pick_operator(new_graph, pick_node.setup_driver_pin(offset), offset, 1);
-        index_offset key        = {new_subgraph_idx, out_pid, {static_cast<int>(offset), static_cast<int>(offset)}};
+        index_offset key        = {new_sub_idx, out_pid, {static_cast<int>(offset), static_cast<int>(offset)}};
         graph_info->cell2id[subgraph_output_map[key]]  = pseudo_pin.get_idx();
         graph_info->cell_out_pid[pseudo_pin.get_idx()] = pseudo_pin.get_pid();
       }

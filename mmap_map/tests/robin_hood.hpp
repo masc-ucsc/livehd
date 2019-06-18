@@ -6,7 +6,7 @@
 //                                      _/_____/
 //
 // robin_hood::unordered_map for C++14
-// version 3.2.2
+// version 3.2.7
 // https://github.com/martinus/robin-hood-hashing
 //
 // Licensed under the MIT License <http://opensource.org/licenses/MIT>.
@@ -37,9 +37,10 @@
 // see https://semver.org/
 #define ROBIN_HOOD_VERSION_MAJOR 3 // for incompatible API changes
 #define ROBIN_HOOD_VERSION_MINOR 2 // for adding functionality in a backwards-compatible manner
-#define ROBIN_HOOD_VERSION_PATCH 2 // for backwards-compatible bug fixes
+#define ROBIN_HOOD_VERSION_PATCH 7 // for backwards-compatible bug fixes
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <stdexcept>
@@ -59,16 +60,12 @@
 #define ROBIN_HOOD_UNUSED(identifier)
 
 // bitness
-#ifdef FORCE_ROBIN_32
-#define ROBIN_HOOD_BITNESS 32
-#else
 #if SIZE_MAX == UINT32_MAX
 #    define ROBIN_HOOD_BITNESS 32
 #elif SIZE_MAX == UINT64_MAX
 #    define ROBIN_HOOD_BITNESS 64
 #else
 #    error Unsupported bitness
-#endif
 #endif
 
 // endianess
@@ -366,16 +363,6 @@ struct NodeAllocator<T, MinSize, MaxSize, true> {
 template <typename T, size_t MinSize, size_t MaxSize>
 struct NodeAllocator<T, MinSize, MaxSize, false> : public BulkPoolAllocator<T, MinSize, MaxSize> {};
 
-// All empty maps initial mInfo point to this infobyte. That way lookup in an empty map
-// always returns false, and this is a very hot byte.
-//
-// we have to use data >1byte (at least 2 bytes), because initially we set mShift to 63 (has to be
-// <63), so initial index will be 0 or 1.
-namespace DummyInfoByte {
-
-static uint64_t b = 0;
-
-} // namespace DummyInfoByte
 } // namespace detail
 
 struct is_transparent_tag {};
@@ -462,61 +449,64 @@ struct hash : public std::hash<T> {
     }
 };
 
-// Murmur2 hash without caring about big endianness. Generally much faster than the standard
-// std::hash for std::string, and the code is quite simple.
+// Hash an arbitrary amount of bytes. This is basically Murmur2 hash without caring about big
+// endianness. TODO add a fallback for very large strings?
+inline size_t hash_bytes(void const* ptr, size_t const len) {
+    static constexpr uint64_t m = UINT64_C(0xc6a4a7935bd1e995);
+    static constexpr uint64_t seed = UINT64_C(0xe17a1465);
+    static constexpr unsigned int r = 47;
+
+    auto const data64 = reinterpret_cast<uint64_t const*>(ptr);
+    uint64_t h = seed ^ (len * m);
+
+    size_t const n_blocks = len / 8;
+    for (size_t i = 0; i < n_blocks; ++i) {
+        uint64_t k = detail::unaligned_load<uint64_t>(data64 + i);
+
+        k *= m;
+        k ^= k >> r;
+        k *= m;
+
+        h ^= k;
+        h *= m;
+    }
+
+    auto const data8 = reinterpret_cast<uint8_t const*>(data64 + n_blocks);
+    switch (len & 7u) {
+    case 7:
+        h ^= static_cast<uint64_t>(data8[6]) << 48u;
+        // fallthrough
+    case 6:
+        h ^= static_cast<uint64_t>(data8[5]) << 40u;
+        // fallthrough
+    case 5:
+        h ^= static_cast<uint64_t>(data8[4]) << 32u;
+        // fallthrough
+    case 4:
+        h ^= static_cast<uint64_t>(data8[3]) << 24u;
+        // fallthrough
+    case 3:
+        h ^= static_cast<uint64_t>(data8[2]) << 16u;
+        // fallthrough
+    case 2:
+        h ^= static_cast<uint64_t>(data8[1]) << 8u;
+        // fallthrough
+    case 1:
+        h ^= static_cast<uint64_t>(data8[0]);
+        h *= m;
+    };
+
+    h ^= h >> r;
+    h *= m;
+    h ^= h >> r;
+
+    return static_cast<size_t>(h);
+}
+
 template <>
 struct hash<std::string> {
     size_t operator()(std::string const& str) const {
-        static constexpr uint64_t m = UINT64_C(0xc6a4a7935bd1e995);
-        static constexpr uint64_t seed = UINT64_C(0xe17a1465);
-        static constexpr unsigned int r = 47;
-
-        size_t const len = str.size();
-        auto const data64 = reinterpret_cast<uint64_t const*>(str.data());
-        uint64_t h = seed ^ (len * m);
-
-        size_t const n_blocks = len / 8;
-        for (size_t i = 0; i < n_blocks; ++i) {
-            uint64_t k = detail::unaligned_load<uint64_t>(data64 + i);
-
-            k *= m;
-            k ^= k >> r;
-            k *= m;
-
-            h ^= k;
-            h *= m;
-        }
-
-        auto const data8 = reinterpret_cast<uint8_t const*>(data64 + n_blocks);
-        switch (len & 7u) {
-        case 7:
-            h ^= static_cast<uint64_t>(data8[6]) << 48u;
-            // fallthrough
-        case 6:
-            h ^= static_cast<uint64_t>(data8[5]) << 40u;
-            // fallthrough
-        case 5:
-            h ^= static_cast<uint64_t>(data8[4]) << 32u;
-            // fallthrough
-        case 4:
-            h ^= static_cast<uint64_t>(data8[3]) << 24u;
-            // fallthrough
-        case 3:
-            h ^= static_cast<uint64_t>(data8[2]) << 16u;
-            // fallthrough
-        case 2:
-            h ^= static_cast<uint64_t>(data8[1]) << 8u;
-            // fallthrough
-        case 1:
-            h ^= static_cast<uint64_t>(data8[0]);
-            h *= m;
-        };
-
-        h ^= h >> r;
-        h *= m;
-        h ^= h >> r;
-
-        return static_cast<size_t>(h);
+        return hash_bytes(str.data(), str.size());
     }
 };
 
@@ -846,6 +836,8 @@ private:
 
     // Iter ////////////////////////////////////////////////////////////
 
+    struct fast_forward_tag {};
+
     // generic iterator for both const_iterator and iterator.
     template <bool IsConst>
     class Iter {
@@ -874,21 +866,18 @@ private:
             : mKeyVals(valPtr)
             , mInfo(infoPtr) {}
 
+        Iter(NodePtr valPtr, uint8_t const* infoPtr,
+             fast_forward_tag ROBIN_HOOD_UNUSED(tag) /*unused*/)
+            : mKeyVals(valPtr)
+            , mInfo(infoPtr) {
+            fastForward();
+        }
+
         // prefix increment. Undefined behavior if we are at end()!
         Iter& operator++() {
             mInfo++;
             mKeyVals++;
-            int inc;
-            do {
-                auto const n = detail::unaligned_load<size_t>(mInfo);
-#if ROBIN_HOOD_LITTLE_ENDIAN
-                inc = ROBIN_HOOD_COUNT_TRAILING_ZEROES(n) / 8;
-#else
-                inc = ROBIN_HOOD_COUNT_LEADING_ZEROES(n) / 8;
-#endif
-                mInfo += inc;
-                mKeyVals += inc;
-            } while (inc == sizeof(size_t));
+            fastForward();
             return *this;
         }
 
@@ -911,6 +900,21 @@ private:
         }
 
     private:
+        // fast forward to the next non-free info byte
+        void fastForward() {
+            int inc;
+            do {
+                auto const n = detail::unaligned_load<size_t>(mInfo);
+#if ROBIN_HOOD_LITTLE_ENDIAN
+                inc = ROBIN_HOOD_COUNT_TRAILING_ZEROES(n) / 8;
+#else
+                inc = ROBIN_HOOD_COUNT_LEADING_ZEROES(n) / 8;
+#endif
+                mInfo += inc;
+                mKeyVals += inc;
+            } while (inc == sizeof(size_t));
+        }
+
         friend class unordered_map<IsFlatMap, MaxLoadFactor100, key_type, mapped_type, hasher,
                                    key_equal>;
         NodePtr mKeyVals;
@@ -1030,7 +1034,7 @@ private:
         } while (info <= mInfo[idx]);
 
         // nothing found!
-        return mMask + 1;
+        return mMask == 0 ? 0 : mMask + 1;
     }
 
     void cloneData(const unordered_map& o) {
@@ -1094,44 +1098,30 @@ public:
     // ignore it.
     explicit unordered_map(size_t ROBIN_HOOD_UNUSED(bucket_count) /*unused*/ = 0,
                            const Hash& h = Hash{}, const KeyEqual& equal = KeyEqual{})
-        : Hash{h}
-        , KeyEqual{equal} {}
+        : Hash(h)
+        , KeyEqual(equal) {}
 
     template <typename Iter>
     unordered_map(Iter first, Iter last, size_t ROBIN_HOOD_UNUSED(bucket_count) /*unused*/ = 0,
                   const Hash& h = Hash{}, const KeyEqual& equal = KeyEqual{})
-        : Hash{h}
-        , KeyEqual{equal} {
+        : Hash(h)
+        , KeyEqual(equal) {
         insert(first, last);
     }
 
     unordered_map(std::initializer_list<value_type> init,
                   size_t ROBIN_HOOD_UNUSED(bucket_count) /*unused*/ = 0, const Hash& h = Hash{},
                   const KeyEqual& equal = KeyEqual{})
-        : Hash{h}
-        , KeyEqual{equal} {
+        : Hash(h)
+        , KeyEqual(equal) {
         insert(init.begin(), init.end());
     }
 
     unordered_map(unordered_map&& o)
-        : Hash{std::move(static_cast<Hash&>(o))}
-        , KeyEqual{std::move(static_cast<KeyEqual&>(o))}
-        , DataPool{std::move(static_cast<DataPool&>(o))}
-        , mKeyVals{std::move(o.mKeyVals)}
-        , mInfo{std::move(o.mInfo)}
-        , mNumElements{std::move(o.mNumElements)}
-        , mMask{std::move(o.mMask)}
-        , mMaxNumElementsAllowed{std::move(o.mMaxNumElementsAllowed)}
-        , mInfoInc{std::move(o.mInfoInc)}
-        , mInfoHashShift{std::move(o.mInfoHashShift)} {
-        // set other's mask to 0 so its destructor won't do anything
-        o.mMask = 0;
-    }
-
-    unordered_map& operator=(unordered_map&& o) {
-        if (&o != this) {
-            // different, move it
-            destroy();
+        : Hash(std::move(static_cast<Hash&>(o)))
+        , KeyEqual(std::move(static_cast<KeyEqual&>(o)))
+        , DataPool(std::move(static_cast<DataPool&>(o))) {
+        if (o.mMask) {
             mKeyVals = std::move(o.mKeyVals);
             mInfo = std::move(o.mInfo);
             mNumElements = std::move(o.mNumElements);
@@ -1139,19 +1129,40 @@ public:
             mMaxNumElementsAllowed = std::move(o.mMaxNumElementsAllowed);
             mInfoInc = std::move(o.mInfoInc);
             mInfoHashShift = std::move(o.mInfoHashShift);
-            Hash::operator=(std::move(static_cast<Hash&>(o)));
-            KeyEqual::operator=(std::move(static_cast<KeyEqual&>(o)));
-            DataPool::operator=(std::move(static_cast<DataPool&>(o)));
             // set other's mask to 0 so its destructor won't do anything
             o.mMask = 0;
+        }
+    }
+
+    unordered_map& operator=(unordered_map&& o) {
+        if (&o != this) {
+            if (o.mMask) {
+                // only move stuff if the other map actually has some data
+                destroy();
+                mKeyVals = std::move(o.mKeyVals);
+                mInfo = std::move(o.mInfo);
+                mNumElements = std::move(o.mNumElements);
+                mMask = std::move(o.mMask);
+                mMaxNumElementsAllowed = std::move(o.mMaxNumElementsAllowed);
+                mInfoInc = std::move(o.mInfoInc);
+                mInfoHashShift = std::move(o.mInfoHashShift);
+                Hash::operator=(std::move(static_cast<Hash&>(o)));
+                KeyEqual::operator=(std::move(static_cast<KeyEqual&>(o)));
+                DataPool::operator=(std::move(static_cast<DataPool&>(o)));
+                // set other's mask to 0 so its destructor won't do anything
+                o.mMask = 0;
+            } else {
+                // nothing in the other map => just clear us.
+                clear();
+            }
         }
         return *this;
     }
 
     unordered_map(const unordered_map& o)
-        : Hash{static_cast<const Hash&>(o)}
-        , KeyEqual{static_cast<const KeyEqual&>(o)}
-        , DataPool{static_cast<const DataPool&>(o)} {
+        : Hash(static_cast<const Hash&>(o))
+        , KeyEqual(static_cast<const KeyEqual&>(o))
+        , DataPool(static_cast<const DataPool&>(o)) {
 
         if (!o.empty()) {
             // not empty: create an exact copy. it is also possible to just iterate through all
@@ -1189,10 +1200,12 @@ public:
             // clear also resets mInfo to 0, that's sometimes not necessary.
             destroy();
 
-            // we assign an invalid pointer, but this is ok because we never dereference it.
-            using detail::DummyInfoByte::b;
-            mKeyVals = reinterpret_cast<Node*>(&b) - 1; // lgtm [cpp/suspicious-pointer-scaling]
-            mInfo = reinterpret_cast<uint8_t*>(&b);
+            // we assign invalid pointer, but this is ok because we never dereference it.
+            // The worst that can happen is that find() is called, which will return an iterator but
+            // it will be the end() iterator.
+            mKeyVals = reinterpret_cast<Node*>(&mMask);
+            // we need to point somewhere thats 0 as long as we're empty
+            mInfo = reinterpret_cast<uint8_t*>(mMask);
             Hash::operator=(static_cast<const Hash&>(o));
             KeyEqual::operator=(static_cast<const KeyEqual&>(o));
             DataPool::operator=(static_cast<DataPool const&>(o));
@@ -1329,27 +1342,31 @@ public:
 
     // Returns 1 if key is found, 0 otherwise.
     size_t count(const key_type& key) const {
-        return findIdx(key) == (mMask + 1) ? 0 : 1;
+        auto kv = mKeyVals + findIdx(key);
+        if (kv != reinterpret_cast<Node*>(mInfo)) {
+            return 1;
+        }
+        return 0;
     }
 
     // Returns a reference to the value found for key.
     // Throws std::out_of_range if element cannot be found
     mapped_type& at(key_type const& key) {
-        auto idx = findIdx(key);
-        if (idx == mMask + 1) {
+        auto kv = mKeyVals + findIdx(key);
+        if (kv == reinterpret_cast<Node*>(mInfo)) {
             doThrow<std::out_of_range>("key not found");
         }
-        return mKeyVals[idx].getSecond();
+        return kv->getSecond();
     }
 
     // Returns a reference to the value found for key.
     // Throws std::out_of_range if element cannot be found
     mapped_type const& at(key_type const& key) const {
-        auto idx = findIdx(key);
-        if (idx == mMask + 1) {
+        auto kv = mKeyVals + findIdx(key);
+        if (kv == reinterpret_cast<Node*>(mInfo)) {
             doThrow<std::out_of_range>("key not found");
         }
-        return mKeyVals[idx].getSecond();
+        return kv->getSecond();
     }
 
     const_iterator find(const key_type& key) const {
@@ -1378,7 +1395,7 @@ public:
         if (empty()) {
             return end();
         }
-        return ++iterator(mKeyVals - 1, mInfo - 1);
+        return iterator(mKeyVals, mInfo, fast_forward_tag{});
     }
     const_iterator begin() const {
         return cbegin();
@@ -1387,7 +1404,7 @@ public:
         if (empty()) {
             return cend();
         }
-        return ++const_iterator(mKeyVals - 1, mInfo - 1);
+        return const_iterator(mKeyVals, mInfo, fast_forward_tag{});
     }
 
     iterator end() {
@@ -1465,6 +1482,7 @@ public:
 
         const size_t oldMaxElements = mMask + 1;
 
+        //std::cout << "resize sz:" << numBuckets << "\n";
         // resize operation: move stuff
         init_data(numBuckets);
         if (oldMaxElements > 1) {
@@ -1655,12 +1673,12 @@ private:
         ROBIN_HOOD_LOG("mInfoInc=" << mInfoInc << ", numElements=" << mNumElements
                                    << ", maxNumElementsAllowed="
                                    << calcMaxNumElementsAllowed(mMask + 1));
-        // we got space left, try to make info smaller
-        mInfoInc = static_cast<uint8_t>(mInfoInc >> 1);
-        if (1 == mInfoInc) {
-            // need to be > 1 so that shift works (otherwise undefined behavior!)
+        if (mInfoInc <= 2) {
+            // need to be > 2 so that shift works (otherwise undefined behavior!)
             return false;
         }
+        // we got space left, try to make info smaller
+        mInfoInc = static_cast<uint8_t>(mInfoInc >> 1);
 
         // remove one bit of the hash, leaving more space for the distance info.
         // This is extremely fast because we can operate on 8 bytes at once.
@@ -1701,7 +1719,7 @@ private:
 
     void destroy() {
         if (0 == mMask) {
-            // don't deallocate! we are pointing to DummyInfoByte::b.
+            // don't deallocate!
             return;
         }
 
@@ -1711,15 +1729,14 @@ private:
     }
 
     // members are sorted so no padding occurs
-    Node* mKeyVals = reinterpret_cast<Node*>(reinterpret_cast<uint8_t*>(&detail::DummyInfoByte::b) -
-                                             sizeof(Node));                 // 8 byte  8
-    uint8_t* mInfo = reinterpret_cast<uint8_t*>(&detail::DummyInfoByte::b); // 8 byte 16
-    size_t mNumElements = 0;                                                // 8 byte 24
-    size_t mMask = 0;                                                       // 8 byte 32
-    size_t mMaxNumElementsAllowed = 0;                                      // 8 byte 40
-    InfoType mInfoInc = InitialInfoInc;                                     // 4 byte 44
-    InfoType mInfoHashShift = InitialInfoHashShift;                         // 4 byte 48
-                                                    // 16 byte 56 if NodeAllocator
+    Node* mKeyVals = reinterpret_cast<Node*>(&mMask);    // 8 byte  8
+    uint8_t* mInfo = reinterpret_cast<uint8_t*>(&mMask); // 8 byte 16
+    size_t mNumElements = 0;                             // 8 byte 24
+    size_t mMask = 0;                                    // 8 byte 32
+    size_t mMaxNumElementsAllowed = 0;                   // 8 byte 40
+    InfoType mInfoInc = InitialInfoInc;                  // 4 byte 44
+    InfoType mInfoHashShift = InitialInfoHashShift;      // 4 byte 48
+                                                         // 16 byte 56 if NodeAllocator
 };
 
 } // namespace detail

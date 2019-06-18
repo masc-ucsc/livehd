@@ -43,8 +43,7 @@ void Pass_sample::compute_histogram(LGraph *g) {
   std::map<std::string, int> histogram;
 
   int cells = 0;
-  for(const auto &nid : g->forward()) {
-    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
+  for(const auto node : g->forward()) {
 
     cells++;
     std::string name(node.get_type().get_name());
@@ -71,8 +70,7 @@ void Pass_sample::compute_max_depth(LGraph *g) {
   absl::flat_hash_map<Node::Compact, int>  depth;
 
   int max_depth = 0;
-  for(const auto &nid : g->forward()) {
-    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
+  for(const auto node : g->forward()) {
 
     int local_max = 0;
     for(const auto &edge : node.inp_edges()) {
@@ -93,24 +91,21 @@ void Pass_sample::annotate_placement(LGraph *g) {
 
   Ann_node_place::clear(g); // Not needed, but clears all the previous placement info
 
-  for(const auto &nid : g->backward()) {
-    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
+  for(auto node : g->backward()) {
 
-    Node_place p(x_pos++,0);
-    Ann_node_place::set(node, p);
+    auto *p = node.ref_place();
+    p->replace(x_pos++,0);
   }
 
-  for(const auto &nid : g->fast()) {
-    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
+  for(auto node : g->fast()) {
 
-    auto &place = Ann_node_place::get(node);
+    const auto &place = node.get_place();
     fmt::print("1.cell {} placed at x:{}\n",node.create_name(), place.get_x());
   }
-  for(const auto &nid : g->forward()) {
-    auto node = Node(g,0,Node::Compact(nid)); // NOTE: To remove once new iterators are finished
+  for(auto node : g->forward()) {
 
-    auto &place = Ann_node_place::get(node);
-    fmt::print("2.cell {} placed at x:{}\n",node.create_name(), place.get_x());
+    auto *place = node.ref_place();
+    fmt::print("2.cell {} placed at x:{}\n",node.create_name(), place->get_x());
   }
 }
 
@@ -146,5 +141,4 @@ void Pass_sample::create_sample_graph(LGraph *g) {
   lg->add_edge(s_drv, s_sink);
 
   fmt::print("Finished.\n");
-  lg->close();
 }

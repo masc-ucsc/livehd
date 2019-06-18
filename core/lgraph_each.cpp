@@ -1,53 +1,53 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
+#include "sub_node.hpp"
 
-void LGraph::each_graph_io(std::function<void(Node_pin &pin)> f1) {
-  auto i_it = input_array.begin();
-  auto o_it = output_array.begin();
-  while(true) {
-    Node_pin pin;
+void LGraph::each_sorted_graph_io(std::function<void(const Node_pin &pin, Port_ID pos)> f1) {
 
-    if (i_it != input_array.end() && o_it != output_array.end()) {
-      if (i_it.get_field().pos < o_it.get_field().pos) {
-        pin = get_node(i_it.get_field().nid).get_driver_pin(i_it.get_field().pos);
-        ++i_it;
-      }else{
-        pin = get_node(o_it.get_field().nid).get_driver_pin(o_it.get_field().pos);
-        ++o_it;
-      }
-    }else if (i_it != input_array.end()) {
-      pin = get_node(i_it.get_field().nid).get_driver_pin(i_it.get_field().pos);
-      ++i_it;
-    }else if (o_it != output_array.end()) {
-      pin = get_node(o_it.get_field().nid).get_driver_pin(o_it.get_field().pos);
-      ++o_it;
-    }else{
-      return;
-    }
+  std::vector<std::pair<Node_pin,Port_ID>> pin_pair;
+
+  auto out = Node(this, 0, Node::Hardcoded_output_nid);
+  for(const auto &o_pin:out.out_setup_pins()) {
+    auto pos = get_self_sub_node().get_graph_pos_from_instance_pid(o_pin.get_pid());
+    pin_pair.emplace_back(std::make_pair(o_pin, pos));
+  }
+
+  auto inp = Node(this, 0, Node::Hardcoded_input_nid);
+  for(const auto &i_pin:inp.out_setup_pins()) {
+    auto pos = get_self_sub_node().get_graph_pos_from_instance_pid(i_pin.get_pid());
+    pin_pair.emplace_back(std::make_pair(i_pin, pos));
+  }
+
+  std::sort(pin_pair.begin(), pin_pair.end()
+           ,[](const std::pair<Node_pin,Port_ID>& a, const std::pair<Node_pin,Port_ID>& b)
+            {
+                return a.second < b.second;
+            });
+
+  for(auto &pp:pin_pair) {
+    f1(pp.first, pp.second);
+  }
+}
+
+void LGraph::each_graph_input(std::function<void(const Node_pin &pin)> f1) {
+
+  auto node = Node(this, 0, Node::Hardcoded_input_nid);
+  for(const auto &pin:node.out_setup_pins()) {
     f1(pin);
   }
 }
 
-void LGraph::each_graph_input(std::function<void(Node_pin &pin)> f1) {
-  for (auto it = input_array.begin(); it != input_array.end(); ++it) {
-    const auto &p = it.get_field();
+void LGraph::each_graph_output(std::function<void(const Node_pin &pin)> f1) {
 
-    auto pin = get_node(p.nid).get_driver_pin(p.pos);
+  auto node = Node(this, 0, Node::Hardcoded_output_nid);
+  for(const auto &pin:node.out_setup_pins()) {
     f1(pin);
   }
 }
 
-void LGraph::each_graph_output(std::function<void(Node_pin &pin)> f1) {
-  for (auto it = output_array.begin(); it != output_array.end(); ++it) {
-    const auto &p = it.get_field();
-
-    auto pin = get_node(p.nid).get_driver_pin(p.pos);
-    f1(pin);
-  }
-}
-
-void LGraph::each_node_fast(std::function<void(Node &node)> f1) {
+void LGraph::each_node_fast(std::function<void(const Node &node)> f1) {
   for (const auto &ni : node_internal) {
     if (!ni.is_node_state()) continue;
     if (!ni.is_master_root()) continue;
@@ -57,39 +57,17 @@ void LGraph::each_node_fast(std::function<void(Node &node)> f1) {
   }
 }
 
-void LGraph::each_input_pin_fast(std::function<void(Node_pin &pin)> f1) {
-  for (const auto &ni : node_internal) {
-    if (!ni.is_node_state()) continue;
-    if (!ni.is_root()) continue;
-    if (!ni.has_pin_inputs() && !ni.is_graph_io_input()) continue;
-
-    Node_pin pin(this, 0, ni.get_nid(), ni.get_dst_pid(), false);
-    f1(pin);
-  }
-}
-
-void LGraph::each_output_pin_fast(std::function<void(Node_pin &pin)> f1) {
-  for (const auto &ni : node_internal) {
-    if (!ni.is_node_state()) continue;
-    if (!ni.is_root()) continue;
-    if (!ni.has_pin_outputs() && !ni.is_graph_io_output()) continue;
-
-    Node_pin pin(this, 0, ni.get_nid(), ni.get_dst_pid(), false);
-    f1(pin);
-  }
-}
-
 void LGraph::each_output_edge_fast(std::function<void(XEdge &edge)> f1) {
   for (const auto &ni : node_internal) {
     if (!ni.is_node_state()) continue;
     if (!ni.is_root()) continue;
     if (!ni.has_local_outputs()) continue;
 
-    auto dpin = Node_pin(this,0,ni.get_nid(), ni.get_dst_pid(), false);
+    auto dpin = Node_pin(this,this, 0,ni.get_nid(), ni.get_dst_pid(), false); // FIXME: hid
 
     const Edge_raw *edge_raw = ni.get_output_begin();
     do {
-      XEdge edge(dpin, Node_pin(this,0,edge_raw->get_idx(), edge_raw->get_inp_pid(), true));
+      XEdge edge(dpin, Node_pin(this,this,0,edge_raw->get_idx(), edge_raw->get_inp_pid(), true)); // FIXME: hid
 
       f1(edge);
       edge_raw += edge_raw->next_node_inc();
@@ -97,25 +75,24 @@ void LGraph::each_output_edge_fast(std::function<void(XEdge &edge)> f1) {
   }
 }
 
-void LGraph::each_sub_graph_fast_direct(const std::function<bool(Node &, const Lg_type_id &)> fn) {
-  const bm::bvector<> &bm  = get_sub_graph_ids();
-  Index_ID             cid = bm.get_first();
-  while (cid) {
+void LGraph::each_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)> fn) {
+
+  const auto &m = get_sub_nodes_map();
+  for (auto it = m.begin(), end = m.end(); it != end; ++it) {
+    Index_ID    cid = it->first.nid;
     I(cid);
     I(node_internal[cid].is_node_state());
     I(node_internal[cid].is_master_root());
 
-    auto lgid = get_type_subgraph(cid);
-    auto node = Node(this,0,Node::Compact(cid));
+    auto node = Node(this, it->first);
 
-    bool cont = fn(node, lgid);
+    bool cont = fn(node, it->second);
     if (!cont) return;
-
-    cid = bm.get_next(cid);
   }
 }
 
 void LGraph::each_root_fast_direct(std::function<bool(Node &)> f1) {
+
   for (const auto &ni : node_internal) {
     if (!ni.is_node_state()) continue;
     if (!ni.is_root()) continue;
@@ -126,4 +103,3 @@ void LGraph::each_root_fast_direct(std::function<bool(Node &)> f1) {
     if (!cont) return;
   }
 }
-

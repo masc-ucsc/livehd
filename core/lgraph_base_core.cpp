@@ -28,23 +28,21 @@ Lgraph_base_core::Setup_path::Setup_path(std::string_view path) {
   mkdir(spath.c_str(), 0755);
 }
 
-Lgraph_base_core::Lgraph_base_core(std::string_view _path, std::string_view _name, Lg_type_id lgid)
+Lgraph_base_core::Lgraph_base_core(std::string_view _path, std::string_view _name, Lg_type_id _lgid)
     : p(_path)
     , path(_path)
     , name(_name)
     , long_name(absl::StrCat("lgraph_", _name))
-    , lgraph_id(lgid)
+    , lgid(_lgid)
     , locked(false) {
   assert(lgid);
 
-  library  = Graph_library::instance(path);
-  tlibrary = Tech_library::instance(path);
 }
 
 void Lgraph_base_core::get_lock() {
   if (locked) return;
 
-  std::string lock = absl::StrCat(path, "/", std::to_string(lgraph_id), ".lock");
+  std::string lock = absl::StrCat(path, "/", std::to_string(lgid), ".lock");
   int         err  = ::open(lock.c_str(), O_CREAT | O_EXCL, 420);  // 644
   if (err < 0) {
     Pass::error("Could not get lock:{}. Already running? Unclear exit?", lock.c_str());
@@ -55,22 +53,12 @@ void Lgraph_base_core::get_lock() {
   locked = true;
 }
 
-bool Lgraph_base_core::close() {
-  if (!locked) return true;
-
-  library->update(lgraph_id);
-
-  return true;
-}
-
 void Lgraph_base_core::clear() {
-  if (!locked) return;
+  //if (!locked) return;
 
   // whenever we clean, we unlock
-  std::string lock = absl::StrCat(path, "/", std::to_string(lgraph_id), ".lock");
+  std::string lock = absl::StrCat(path, "/", std::to_string(lgid), ".lock");
   unlink(lock.c_str());
-
-  library->update_nentries(lg_id(), 0);
 
   locked = false;
 }
@@ -78,11 +66,7 @@ void Lgraph_base_core::clear() {
 void Lgraph_base_core::sync() {
   if (!locked) return;
 
-  library->sync();
-  tlibrary->sync();
-
-  std::string lock = absl::StrCat(path, "/", std::to_string(lgraph_id), ".lock");
+  std::string lock = absl::StrCat(path, "/", std::to_string(lgid), ".lock");
   unlink(lock.c_str());
   locked = false;
 }
-

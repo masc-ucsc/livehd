@@ -49,16 +49,9 @@ void Inou_graphviz::fromlg(Eprp_var &var) {
 }
 
 void Inou_graphviz::do_fromlg(std::vector<LGraph *> &lgs) {
-  for (const auto g : lgs) {
-    const auto hier = g->get_hierarchy();
-    fmt::print("hierarchy for {}\n", g->get_name());
-    for (auto &[name, lgid] : hier) {
-      fmt::print("  {} {}\n", name, lgid);
-    }
-  }
   for (const auto lg_parent : lgs) {
     populate_data(lg_parent);
-    lg_parent->each_sub_graph_fast([lg_parent, this](Node node, Lg_type_id lgid) {
+    lg_parent->each_sub_fast([lg_parent, this](Node &node, Lg_type_id lgid) {
       fmt::print("subgraph lgid:{}\n", lgid);
       LGraph *lg_child = LGraph::open(lg_parent->get_path(), lgid);
       populate_data(lg_child);

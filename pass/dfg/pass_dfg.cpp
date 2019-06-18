@@ -59,7 +59,7 @@ void Pass_dfg::generate(Eprp_var &var) {
 std::vector<LGraph*> Pass_dfg::hier_generate_dfgs(LGraph *cfg_parent){
   std::vector<LGraph *> dfgs;
   fmt::print("hierarchical dfg generation start!\n");
-  fmt::print("top graph lgid:{}\n", cfg_parent->lg_id());
+  fmt::print("top graph lgid:{}\n", cfg_parent->get_lgid());
   auto dfg_name = cfg_parent->get_name().substr(0, cfg_parent->get_name().size() - 4);
   LGraph *dfg = LGraph::create(cfg_parent->get_path(), dfg_name, cfg_parent->get_name());
   I(dfg);
@@ -67,7 +67,7 @@ std::vector<LGraph*> Pass_dfg::hier_generate_dfgs(LGraph *cfg_parent){
   dfgs.push_back(dfg);
   fmt::print("top module cfg->dfg done!\n\n");
 
-  cfg_parent->each_sub_graph_fast([cfg_parent, &dfgs, this](Node node, Lg_type_id lgid){
+  cfg_parent->each_sub_fast([cfg_parent, &dfgs, this](Node &node, Lg_type_id lgid){
     fmt::print("sub-graph lgid:{}\n", lgid);
     LGraph *cfg_child = LGraph::open(cfg_parent->get_path(), lgid);
     if(cfg_child== nullptr){
@@ -94,10 +94,10 @@ void Pass_dfg::optimize(Eprp_var &var) {
 
 void Pass_dfg::hier_optimize_dfgs(LGraph *dfg_parent){
   fmt::print("hierarchical dfg optimization start!\n");
-  fmt::print("top graph lgid:{}\n", dfg_parent->lg_id());
+  fmt::print("top graph lgid:{}\n", dfg_parent->get_lgid());
   do_optimize(dfg_parent);
 
-  dfg_parent->each_sub_graph_fast([dfg_parent, this](Node node, Lg_type_id lgid){
+  dfg_parent->each_sub_fast([dfg_parent, this](Node &node, Lg_type_id lgid){
     fmt::print("sub-graph lgid:{}\n", lgid);
     LGraph *dfg_child = LGraph::open(dfg_parent->get_path(), lgid);
     if(dfg_child==nullptr){
@@ -113,16 +113,15 @@ void Pass_dfg::finalize_bitwidth(Eprp_var &var) {
   for(auto &g : var.lgs) {
     Pass_dfg p;
     p.hier_finalize_bits_dfgs(g);
-    g->close();
   }
 }
 
 void Pass_dfg::hier_finalize_bits_dfgs(LGraph *dfg_parent){
   fmt::print("hierarchical dfg finalize_bits start!\n");
-  fmt::print("topg lgid:{}\n", dfg_parent->lg_id());
+  fmt::print("topg lgid:{}\n", dfg_parent->get_lgid());
   do_finalize_bitwidth(dfg_parent);
 
-  dfg_parent->each_sub_graph_fast([dfg_parent, this](Node node, Lg_type_id lgid){
+  dfg_parent->each_sub_fast([dfg_parent, this](Node &node, Lg_type_id lgid){
     fmt::print("subgraph lgid:{}\n", lgid);
     LGraph *dfg_child = LGraph::open(dfg_parent->get_path(), lgid);
     if (dfg_child == nullptr) {
@@ -138,31 +137,29 @@ Pass_dfg::Pass_dfg():Pass("dfg"), mux_cnt(0){}
 
 void Pass_dfg::do_generate(LGraph *cfg, LGraph *dfg) {
   cfg_2_dfg(cfg, dfg);
-  dfg->close();//instead of using lg->sync(), you should just call close()
+  //dfg->close();//instead of using lg->sync(), you should just call close()
 }
 
 void Pass_dfg::do_optimize(LGraph *&ori_dfg) {
   trans(ori_dfg);
-  ori_dfg->close();
+  //ori_dfg->close();
 }
 
 void Pass_dfg::trans(LGraph *dfg) {
   // resolve pending graph instantiation
-  for(auto nid : dfg->fast()) {
-    auto node = Node(dfg, 0, Node::Compact(nid));
+  for(auto node : dfg->fast()) {
     if(node.get_type().op == DfgPendingGraph_Op) {
       //SH:FIXME: watch out! you've occasionally set sub-graph name to pid0
       //SH:FIXME: you might want to change whole structure to Node_pin based, and
       //SH:FIXME: store the subgraph name in "Node::set_name()"
       fmt::print("subgraph name is:{}\n", node.get_driver_pin(0).get_name());
-      LGraph* sub_graph = LGraph::open(dfg->get_path(), node.get_driver_pin(0).get_name());
-      I(sub_graph);
+      auto &sub = dfg->get_library().get_sub(node.get_driver_pin(0).get_name());
 
-      node.set_type_subgraph(sub_graph->lg_id());//change from DfgPendingGraph_Op to Subgraph_Op
-      fmt::print("resolve pending subG! lg_id:{}, name:{}\n",sub_graph->lg_id(), node.get_driver_pin(0).get_name());
-      fmt::print("input name:{}\n",  sub_graph->get_graph_input_name_from_pid(1));
-      fmt::print("input name:{}\n",  sub_graph->get_graph_input_name_from_pid(2));
-      fmt::print("output name:{}\n", sub_graph->get_graph_output_name_from_pid(1));
+      node.set_type_sub(sub.get_lgid());
+      fmt::print("resolve pending subG! lg_id:{}, name:{}\n",sub.get_lgid(), sub.get_name());
+      fmt::print("input name:{}\n",  sub.get_io_pin_from_graph_pos(1).name);
+      fmt::print("input name:{}\n",  sub.get_io_pin_from_graph_pos(2).name);
+      fmt::print("output name:{}\n", sub.get_io_pin_from_graph_pos(1).name);
     }
   }
 
@@ -172,8 +169,7 @@ void Pass_dfg::trans(LGraph *dfg) {
 
 void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
   //SH:FIXME: change to dfg->fast() after MIT algorithm is ready
-  for(auto nid: dfg->forward()){
-    auto node = Node(dfg, 0, Node::Compact(nid));
+  for(auto node: dfg->forward()){
     auto ntype = node.get_type().op;
     if(ntype == Mux_Op){
       Node_pin tpin_driver, fpin_driver;

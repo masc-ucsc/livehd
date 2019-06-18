@@ -1,12 +1,11 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include "dense.hpp"
-#include "lgraphbase.hpp"
+#include <cstdint>
 
-class Node_bitwidth {
+class __attribute__((packed)) Ann_bitwidth {
 public:
-  class Explicit_range {
+  class __attribute__((packed)) Explicit_range {
   public:
     int64_t max = 0;
     int64_t min = 0;
@@ -25,7 +24,7 @@ public:
     void set_sbits(uint16_t size);
   };
 
-  class Implicit_range {
+  class __attribute__((packed)) Implicit_range {
   public:
     int64_t max;
     int64_t min;
@@ -64,23 +63,3 @@ public:
   }
 };
 
-class LGraph_Node_bitwidth : virtual public LGraph_Base {
-private:
-  mutable Dense<Node_bitwidth> node_bitwidth;
-
-protected:
-  void node_bitwidth_emplace_back();
-
-public:
-  LGraph_Node_bitwidth() = delete;
-  explicit LGraph_Node_bitwidth(const std::string &path, const std::string &name, Lg_type_id lgid) noexcept;
-  virtual ~LGraph_Node_bitwidth(){};
-
-  virtual void clear();
-  virtual void reload();
-  virtual void sync();
-  virtual void emplace_back();
-
-  void           node_bitwidth_set(Index_ID nid, const Node_bitwidth &t);
-  Node_bitwidth &node_bitwidth_get(Index_ID nid) const;
-};

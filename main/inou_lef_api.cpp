@@ -1,4 +1,5 @@
 
+#if 0
 #include "inou_lef_api.hpp"
 #include "inou_lef.hpp"
 #include "main_api.hpp"
@@ -29,3 +30,4 @@ void Inou_lef_api::setup(Eprp &eprp) {
 
   eprp.register_method(m1);
 }
+#endif

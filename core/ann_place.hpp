@@ -2,7 +2,7 @@
 
 #pragma once
 
-class Node_place {
+class __attribute__((packed)) Ann_place {
 private:
 
 protected:
@@ -10,8 +10,8 @@ protected:
   uint32_t posy;
 
 public:
-  constexpr Node_place() : posx(0), posy(0) {};
-  Node_place(uint32_t x, uint32_t y) : posx(x), posy(y){};
+  constexpr Ann_place() : posx(0), posy(0) {};
+  Ann_place(uint32_t x, uint32_t y) : posx(x), posy(y){};
 
   void replace(uint32_t x, uint32_t y) {
     posx = x;
@@ -21,4 +21,3 @@ public:
   uint32_t get_x() const { return posx; }
   uint32_t get_y() const { return posy; }
 };
-

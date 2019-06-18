@@ -45,105 +45,106 @@ void Inou_json::from_json(LGraph *g, rapidjson::Document &document) {
   json_remap.clear();
 
   if(document.HasParseError()) {
-    fprintf(stderr, "\nError(offset %u): %s\n", static_cast<unsigned>(document.GetErrorOffset()),
-            rapidjson::GetParseError_En(document.GetParseError()));
-    // ...
-  } else {
-    assert(document.HasMember("nodes"));
-    const rapidjson::Value &nodesArray = document["nodes"];
-    assert(nodesArray.IsArray());
-    for(const auto &nodes : nodesArray.GetArray()) {
-      assert(nodes.IsObject());
+    Pass::error("inou_json::from_json Error(offset {}): {}"
+        ,static_cast<unsigned>(document.GetErrorOffset())
+        ,rapidjson::GetParseError_En(document.GetParseError()));
+    return;
+  }
 
-      assert(nodes.HasMember("nid"));
-      last_nid = nodes["nid"].GetUint64();
-      if(json_remap.find(last_nid) == json_remap.end()) {
-        json_remap[last_nid] = g->create_node();
-      }
-      last_nid = json_remap[last_nid];
+  I(document.HasMember("nodes"));
+  const rapidjson::Value &nodesArray = document["nodes"];
+  I(nodesArray.IsArray());
+  for(const auto &nodes : nodesArray.GetArray()) {
+    assert(nodes.IsObject());
 
-      if(nodes.HasMember("inputs")) {
-        assert(nodes["inputs"].IsArray());
-        for(const auto &input_edge : nodes["inputs"].GetArray()) {
-          assert(input_edge.IsObject());
-          if(input_edge.HasMember("inp_in_pid")) {
-            fmt::print("DEBUG:: inp_in_pid {} \n", input_edge["inp_in_pid"].GetUint64());
-          }
-          if(input_edge.HasMember("inp_nid")) {
-            fmt::print("DEBUG:: inp_nid {} \n", input_edge["inp_nid"].GetUint64());
-          }
-          // if(input_edge.HasMember("inp_out_pid")) {
-          //  fmt::print("DEBUG:: inp_out_pid {} \n", input_edge["inp_out_pid"].GetUint64());
-          //}
-          if(input_edge.HasMember("inp_dst_pid")) {
-            fmt::print("DEBUG:: inp_dst_pid {} \n", input_edge["inp_dst_pid"].GetUint64());
-          }
+    assert(nodes.HasMember("nid"));
+    last_nid = nodes["nid"].GetUint64();
+    if(json_remap.find(last_nid) == json_remap.end()) {
+      json_remap[last_nid] = g->create_node();
+    }
+    last_nid = json_remap[last_nid];
+
+    if(nodes.HasMember("inputs")) {
+      assert(nodes["inputs"].IsArray());
+      for(const auto &input_edge : nodes["inputs"].GetArray()) {
+        assert(input_edge.IsObject());
+        if(input_edge.HasMember("inp_in_pid")) {
+          fmt::print("DEBUG:: inp_in_pid {} \n", input_edge["inp_in_pid"].GetUint64());
+        }
+        if(input_edge.HasMember("inp_nid")) {
+          fmt::print("DEBUG:: inp_nid {} \n", input_edge["inp_nid"].GetUint64());
+        }
+        // if(input_edge.HasMember("inp_out_pid")) {
+        //  fmt::print("DEBUG:: inp_out_pid {} \n", input_edge["inp_out_pid"].GetUint64());
+        //}
+        if(input_edge.HasMember("inp_dst_pid")) {
+          fmt::print("DEBUG:: inp_dst_pid {} \n", input_edge["inp_dst_pid"].GetUint64());
         }
       }
-      if(nodes.HasMember("op")) {
-        if(nodes["op"].IsString()) {
-          std::string op = nodes["op"].GetString();
-          if(Node_Type::is_type(op)) {
-            g->node_type_set(last_nid, Node_Type::get(op));
-          } else if(is_const_op(op)) {
-            fmt::print("DEBUG:: const op : {} \n", op);
-            assert(op.size() > 2);
-            assert(op[op.size() - 1] == '\'');
-            assert(op[op.size() - 1] == '\'');
-            g->node_const_type_set(last_nid, op.substr(1, op.size() - 3));
-          } else {
-            fmt::print("DEBUG:: HOW TO GET HERE?? \n ");
-          }
+    }
+    if(nodes.HasMember("op")) {
+      if(nodes["op"].IsString()) {
+        std::string op = nodes["op"].GetString();
+        if(Node_Type::is_type(op)) {
+          g->node_type_set(last_nid, Node_Type::get(op));
+        } else if(is_const_op(op)) {
+          fmt::print("DEBUG:: const op : {} \n", op);
+          assert(op.size() > 2);
+          assert(op[op.size() - 1] == '\'');
+          assert(op[op.size() - 1] == '\'');
+          g->node_const_type_set(last_nid, op.substr(1, op.size() - 3));
         } else {
-          uint32_t val = nodes["op"].GetUint();
-          g->node_u32type_set(last_nid, val);
+          fmt::print("DEBUG:: HOW TO GET HERE?? \n ");
         }
+      } else {
+        uint32_t val = nodes["op"].GetUint();
+        g->node_u32type_set(last_nid, val);
       }
+    }
 
-      if(nodes.HasMember("input_name")) {
-        fmt::print("DEBUG:: input name is : {} \n", nodes["input_name"].GetString());
-        g->add_graph_input(nodes["input_name"].GetString(), 0, 0); // FIXME: set original_pos and bits
-      }
+    if(nodes.HasMember("input_name")) {
+      fmt::print("DEBUG:: input name is : {} \n", nodes["input_name"].GetString());
+      g->add_graph_input(nodes["input_name"].GetString(), 0, 0); // FIXME: set original_pos and bits
+    }
 
-      if(nodes.HasMember("output_name")) {
-        fmt::print("DEBUG:: output name is : {} \n", nodes["output_name"].GetString());
-        g->add_graph_output(nodes["output_name"].GetString(), 0, 0); // FIXME: must remember original_pos and set bits
-      }
+    if(nodes.HasMember("output_name")) {
+      fmt::print("DEBUG:: output name is : {} \n", nodes["output_name"].GetString());
+      g->add_graph_output(nodes["output_name"].GetString(), 0, 0); // FIXME: must remember original_pos and set bits
+    }
 
-      if(nodes.HasMember("outputs")) {
-        assert(nodes["outputs"].IsArray());
-        for(const auto &output_edge : nodes["outputs"].GetArray()) {
-          assert(output_edge.IsObject());
-          // if(output_edge.HasMember("out_out_pid")) {
-          //  src_pid = output_edge["out_out_pid"].GetUint();
-          //}
-          if(output_edge.HasMember("driver_pid")) {
-            src_pid = output_edge["driver_pid"].GetUint();
+    if(nodes.HasMember("outputs")) {
+      assert(nodes["outputs"].IsArray());
+      for(const auto &output_edge : nodes["outputs"].GetArray()) {
+        assert(output_edge.IsObject());
+        // if(output_edge.HasMember("out_out_pid")) {
+        //  src_pid = output_edge["out_out_pid"].GetUint();
+        //}
+        if(output_edge.HasMember("driver_pid")) {
+          src_pid = output_edge["driver_pid"].GetUint();
+        }
+        if(output_edge.HasMember("sink_idx")) {
+          dst_nid = output_edge["sink_idx"].GetUint64();
+          if(json_remap.find(dst_nid) == json_remap.end()) {
+            json_remap[dst_nid] = g->create_node().get_nid();
           }
-          if(output_edge.HasMember("sink_idx")) {
-            dst_nid = output_edge["sink_idx"].GetUint64();
-            if(json_remap.find(dst_nid) == json_remap.end()) {
-              json_remap[dst_nid] = g->create_node().get_nid();
-            }
-            dst_nid = json_remap[dst_nid];
-          }
-          // if(output_edge.HasMember("out_inp_pid")) {
-          //  dst_pid = output_edge["out_inp_pid"].GetUint();
-          //}
-          if(output_edge.HasMember("sink_pid")) {
-            dst_pid = output_edge["sink_pid"].GetUint();
-          }
-          Node_pin dpin = g->get_node(last_nid).setup_driver_pin(dst_pid);
-          Node_pin spin = g->get_node(dst_nid).setup_sink_pin(src_pid);
-          if(output_edge.HasMember("bits")) {
-            g->add_edge(dpin, spin, output_edge["bits"].GetInt());
-          } else {
-            g->add_edge(dpin, spin);
-          }
-          if(output_edge.HasMember("delay")) {
-            double delay = output_edge["delay"].GetDouble();
-            g->node_delay_set(last_nid, static_cast<float>(delay));
-          }
+          dst_nid = json_remap[dst_nid];
+        }
+        // if(output_edge.HasMember("out_inp_pid")) {
+        //  dst_pid = output_edge["out_inp_pid"].GetUint();
+        //}
+        if(output_edge.HasMember("sink_pid")) {
+          dst_pid = output_edge["sink_pid"].GetUint();
+        }
+        Node_pin dpin = g->get_node(last_nid).setup_driver_pin(dst_pid);
+        Node_pin spin = g->get_node(dst_nid).setup_sink_pin(src_pid);
+        if(output_edge.HasMember("bits")) {
+          g->add_edge(dpin, spin, output_edge["bits"].GetInt());
+        } else {
+          g->add_edge(dpin, spin);
+        }
+        if(output_edge.HasMember("delay")) {
+          double delay = output_edge["delay"].GetDouble();
+          g->node_delay_set(last_nid, static_cast<float>(delay));
         }
       }
     }
@@ -195,7 +196,7 @@ void Inou_json::tolg(Eprp_var &var) {
     LGraph *lg = LGraph::create(path, name, f);
 
     std::string fname(f);
-    FILE *                    pFile = fopen(fname.c_str(), "rb");
+    FILE *pFile = fopen(fname.c_str(), "rb");
     if (pFile==0) {
       Pass::error(fmt::format("Inou_json::tolg could not open {} file",f));
       continue;

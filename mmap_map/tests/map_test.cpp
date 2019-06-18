@@ -75,5 +75,4 @@ TEST_F(Setup_map_test, iter_test_set) {
 
   dense.resize(101);
   dense[100] = 100;
-
 }

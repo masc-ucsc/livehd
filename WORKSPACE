@@ -60,7 +60,7 @@ new_git_repository(
 new_git_repository(
     name = "iassert",
     build_file = "BUILD.iassert",
-    commit = "5900f12cde1bc59a34f9cf1a2a03715642f4a1c3", # Jan 18, 2019
+    commit = "c5598058cc3d6fc47d4ecee021f5179fc0a1b18b", # June 10, 2019
     remote = "https://github.com/masc-ucsc/iassert.git",
     strip_prefix = "src",
 )
@@ -93,7 +93,8 @@ git_repository(
 new_git_repository(
     name = "rapidjson",
     build_file = "BUILD.rapidjson",
-    commit = "55c3c241cf55801d8caf0f11af2e98595797801a", # April 6, 2019 663f076c7b44ce96526d1acfda3fa46971c8af31", # October 6, 2018
+    #commit = "55c3c241cf55801d8caf0f11af2e98595797801a", # April 6, 2019 663f076c7b44ce96526d1acfda3fa46971c8af31", # October 6, 2018
+    commit = "663f076c7b44ce96526d1acfda3fa46971c8af31", # October 6, 2018
     remote = "https://github.com/Tencent/rapidjson.git",
     strip_prefix = "include",
 )

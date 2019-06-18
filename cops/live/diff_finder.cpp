@@ -505,7 +505,7 @@ void Diff_finder::generate_modules(std::set<Graph_Node> &different_nodes, const 
         switch (original->node_type_get(node.idx).op) {
           case SubGraph_Op:
             // I(name2graph.find(original->get_subgraph_name(node.idx)) != name2graph.end());
-            new_module->node_subgraph_set(idx, original->subgraph_id_get(node.idx));
+            new_module->node_sub_set(idx, original->subgraph_id_get(node.idx));
             break;
           case TechMap_Op:
             new_module->node_tmap_set(idx, original->tmap_id_get(node.idx));

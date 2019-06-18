@@ -28,22 +28,67 @@ protected:
 
   void add_child(LGraph *parent, LGraph *child, std::string_view iname, bool randomize) {
 
-    children[absl::StrCat(parent->get_name(), ":", child->get_name())]++;
+    Node node;
 
-    auto node = parent->create_node();
-    node.set_type_subgraph(child->lg_id());
+    if (child) {
+      children[absl::StrCat(parent->get_name(), ":", child->get_name())]++;
+
+      if (rand_r(&rseed)&1) // Should be the same because the lgraph is already created
+        node = parent->create_node_sub(child->get_lgid());
+      else
+        node = parent->create_node_sub(child->get_name());
+
+    }else{
+      children[absl::StrCat(parent->get_name(), ":", iname)]++;
+
+      node = parent->create_node_sub(iname);
+
+      auto sub = node.get_type_sub_node();
+      auto parent_sub = parent->get_self_sub_node();
+
+      // Match parent names in tmap
+      for(const auto &io_pin:parent_sub.get_io_pins()) {
+        Port_ID pid;
+
+        if (io_pin.dir == Sub_node::Direction::Input) {
+          if (!sub.has_pin(io_pin.name)) {
+            pid = sub.add_pin(io_pin.name, Sub_node::Direction::Input);
+
+            auto dpin = parent->get_graph_input(io_pin.name);
+
+            dpin.connect_sink(node.setup_sink_pin(pid));
+          }
+
+        }else if (io_pin.dir == Sub_node::Direction::Output) {
+          if (!sub.has_pin(io_pin.name)) {
+            pid = sub.add_pin(io_pin.name, Sub_node::Direction::Output);
+            auto spin = parent->get_graph_output(io_pin.name);
+            if (!spin.get_node().has_inputs()) {
+              node.setup_driver_pin(pid).connect_sink(spin);
+            }
+          }
+        }else if (io_pin.dir == Sub_node::Direction::Invalid) {
+        }else{
+          I(false);// For LGraph sub there should be no undefined iopins
+          I(io_pin.graph_io_pos != Port_invalid); // graph_io_pos must be defined too
+        }
+      }
+      node.set_type_sub(sub.get_lgid());
+    }
+
     if (rand_r(&rseed)&1 || !randomize)
       node.set_name(iname);
   }
 
   void add_io(LGraph *g) {
     int inps = rand_r(&rseed) % 4; // 0..3 inputs
+    int pos = 0;
     for(int j = 0; j < inps; j++) {
-      g->add_graph_input(("i" + std::to_string(j)).c_str(), rand_r(&rseed)&15, 0);
+      g->add_graph_input(("i" + std::to_string(j)).c_str(), pos++, rand_r(&rseed)&15);
     }
     inps =rand_r(&rseed) % 5; // 0..4 outputs
     for(int j = 0; j < inps; j++) {
-      g->add_graph_output(("o" + std::to_string(j)).c_str(), rand_r(&rseed)&15, 0);
+      g->add_graph_output(("o" + std::to_string(j)), pos++, rand_r(&rseed)&15);
     }
   }
 
@@ -88,7 +133,11 @@ protected:
     add_child(top, c2, "ti2a", randomize);
     add_child(top, c2, "ti2b", randomize); // 2 instances of c2 in top
 
+    add_child(top, nullptr, "tmap1", randomize);
+
     add_child(c1, gc11, "ci1_11a", randomize);
+    add_child(c1, nullptr, "tmap1", randomize);
+    add_child(c1, nullptr, "tmap2", randomize);
     add_child(c1, gc11, "ci1_11b", randomize);
 
     add_child(c3, gc31, "ci3_31", randomize);
@@ -103,10 +152,8 @@ protected:
   }
 
   void TearDown() override {
-    // No needed to clear/delete every time, but it should work too
-    for(auto &lg:lgs) {
-      if(lg) lg->close();
-      lg = 0;
+    for(auto *lg:lgs) {
+      delete lg;
     }
     lgs.clear();
   }
@@ -118,8 +165,8 @@ TEST_F(Setup_graphs_test, each_sub_graph) {
 
   for(auto &parent:lgs) {
     fmt::print("checking parent:{}\n", parent->get_name());
-    parent->each_sub_graph_fast([parent,&children2,this](Node &node, Lg_type_id lgid) {
-        LGraph *child = LGraph::open(parent->get_path(),lgid);
+    parent->each_sub_fast([parent,&children2,this](Node &node, Lg_type_id lgid) {
+        LGraph *child = LGraph::open(parent->get_path(),node.get_type_sub());
 
         ASSERT_NE(child,nullptr);
 
@@ -137,7 +184,6 @@ TEST_F(Setup_graphs_test, each_sub_graph) {
         else
           children2[id]++;
 
-        child->close();
     });
   }
 
@@ -155,8 +201,8 @@ TEST_F(Setup_graphs_test, each_sub_graph_twice) {
 
   for(auto &parent:lgs) {
     fmt::print("checking parent:{}\n", parent->get_name());
-    parent->each_sub_graph_fast([parent,&children2,this](Node &node, Lg_type_id lgid) {
-        LGraph *child = LGraph::open(parent->get_path(),lgid);
+    parent->each_sub_fast([parent,&children2,this](Node &node, Lg_type_id lgid) {
+        LGraph *child = LGraph::open(parent->get_path(),node.get_type_sub());
 
         ASSERT_NE(child,nullptr);
 
@@ -174,7 +220,6 @@ TEST_F(Setup_graphs_test, each_sub_graph_twice) {
         else
           children2[id]++;
 
-        child->close();
     });
   }
 
@@ -189,24 +234,11 @@ TEST_F(Setup_graphs_test, each_sub_graph_twice) {
 TEST_F(Setup_graphs_test, hierarchy) {
 
   for(auto &parent:lgs) {
-    const auto hier = parent->get_hierarchy();
     fmt::print("hierarchy for {}\n",parent->get_name());
-    for(auto &[name,lgid]:hier) {
-      fmt::print("  {} {}\n",name,lgid);
-    }
-  }
-
-  EXPECT_TRUE(true);
-}
-
-TEST_F(Setup_graphs_test, hierarchy_twice) {
-
-  for(auto &parent:lgs) {
-    const auto hier = parent->get_hierarchy();
-    fmt::print("hierarchy for {}\n",parent->get_name());
-    for(auto &[name,lgid]:hier) {
-      fmt::print("  {} {}\n",name,lgid);
-    }
+    parent->each_sub_fast([](Node &node, Lg_type_id lgid) {
+      fmt::print("  {} {}\n",node.get_name(), lgid);
+      }
+    );
   }
 
   EXPECT_TRUE(true);
@@ -215,7 +247,7 @@ TEST_F(Setup_graphs_test, hierarchy_twice) {
 TEST_F(Setup_graphs_test, No_each_input) {
 
   for(auto &parent:lgs) {
-    parent->each_graph_input([](Node_pin &pin) {
+    parent->each_graph_input([](const Node_pin &pin) {
       EXPECT_TRUE(pin.is_graph_input());
       EXPECT_TRUE(!pin.is_graph_output());
       EXPECT_FALSE(pin.get_node().has_inputs());
@@ -228,7 +260,7 @@ TEST_F(Setup_graphs_test, No_each_input) {
 TEST_F(Setup_graphs_test, No_each_output) {
 
   for(auto &parent:lgs) {
-    parent->each_graph_output([](Node_pin &pin) {
+    parent->each_graph_output([](const Node_pin &pin) {
       EXPECT_TRUE(!pin.is_graph_input());
       EXPECT_TRUE(pin.is_graph_output());
       EXPECT_FALSE(pin.get_node().has_outputs());

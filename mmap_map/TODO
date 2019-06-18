@@ -1,0 +1,75 @@
+
+BUGS:
+
+Short term TODOs:
+
+ 1-Ramdonly offset mKeyVals (0,128,256bytes) to reduce cache conflicts when
+multiple maps are traversed with the same indexes.
+
+Long term TODOs:
+
+ 1-Remove mInfo, use 1 bit mValid. The traversal has 64bits to potentially skip.
+
+   ITerator, use mValid. increase = mValid next valid bit (+64 iterator if zero)
+
+ 2-Split mMask in 4 chunks. Each with a nEntries[4] (++ at insert, -- at erase).
+
+   if nEntries[1..3] == 0 , ShiftDown
+   if nLoad>XX, shiftUp
+
+   ShiftDown:
+    Traverse mValids to transfer nEntries[0] and expand to nEntries[0..3]
+    We can shrink file size to 1/4 (or 1/2 to be convervative)
+
+   ShiftUp:
+    Traverse mValids and shitUp when upper bits in mValids are set (01, 10, or 11 for quad expansion). Move
+    mEntry to upper space.
+    If there is space. Expand file (double size), if capacity in file is there extend with Quad expansion
+
+ 3-Do double and quad expansion. If file space is there (it was that big before) do quad expansion. Otherwise do double expansion.
+
+ 4-Dense opt?
+
+   In many cases, the max id/nMask is similar to nEntries/mMask. In this case, the best hash is just do nothing.
+
+   This cases do not tend to have much erase (like net names). This means that the max_id is a conservative.
+   Erase does not adjust max_id because it is very costly (at most max_id--).
+
+   When max_id/mMask < 0.2, it is worth to use dense. If it ever falls down, it switches to sparse. If it ever gets to this, the next rehash
+switches to dense. In dense, no need to check the Key field (it must be kept in case that we switch back). It may be good to have the
+keys in a separate array when in dense (different memory layout, flat for sparse, 2 vectors for dense).
+
+ 5-Large data field (like string_view)
+
+   mmap_map<key,data> becomes:
+    mmap_map<key,data_pos>
+    vector<data>
+
+    mmap.get(key) : mmap<key,pos> -> vector<pos>
+
+ 6-Base class for mmap_map, mmap_bimap, mmap_set
+
+   mmap_set only has a mValid and key, no data
+
+   mmap_bimap is a 2 mmap_map with the optimization.
+
+   mmap_bimap<Pin,Sview>
+
+     mmap_map<Pin,Str_pos> and mmap_map<sview, Str_pos>
+
+     vector<str_pos> has sview and pin_hash.
+
+     bimap.has_key(pin) : mmap_map<Pin,str_pos>.has(pin)
+     bimap.has_val(str) : mmap_map<sview,...>.has(str)
+
+     bimap.get_val(pin) : mmap_map<Pin,str_pos> -> vector[str_pos]
+
+     bimap.get_key(sview) : mmap_map<sview, pair<Str_pos,Pin>>
+
+   mmap_bimap<Pin,Data>
+
+    if (sizeof(Pin)<=sizeof(Data))
+       mmap_map<pin, data_pos>
+       mmap_map<data, pin>
+       vector<data>
+

@@ -8,7 +8,6 @@
 
 #include "dense.hpp"
 #include "iassert.hpp"
-#include "char_array.hpp"
 #include "lgraph_base_core.hpp"
 #include "lgedge.hpp"
 
@@ -16,33 +15,20 @@ class Edge_raw_iterator;
 class Forward_edge_iterator;
 class Backward_edge_iterator;
 class Fast_edge_iterator;
+class Graph_library;
 
 class LGraph_Base : public Lgraph_base_core {
 private:
-
 protected:
-  struct IO_port {
-    Index_ID nid;
-    Port_ID  pos;
-    Port_ID  original_pos;
-    bool     original_set;
-
-    IO_port(Index_ID _nid, Port_ID _opos, bool force) : nid(_nid), pos(_opos), original_pos(_opos), original_set(force){};
-  };
-
-  // typedef std::pair<Index_ID, Port_ID> io_t; // node id and position at verilog
-
-  Port_ID             max_io_port_pid;
-  Char_Array<IO_port> input_array;
-  Char_Array<IO_port> output_array;
   Dense<Node_Internal> node_internal;
 
   static inline constexpr std::string_view unknown_io = "unknown";
+  Graph_library       *library;
 
   Index_ID         create_node_space(const Index_ID idx, const Port_ID dst_pid, const Index_ID master_nid, const Index_ID root_nid);
   Index_ID         get_space_output_pin(const Index_ID idx, const Port_ID dst_pid, Index_ID &root_nid);
   Index_ID         get_space_output_pin(const Index_ID master_nid, const Index_ID idx, const Port_ID dst_pid, const Index_ID root_nid);
-  Index_ID         get_space_input_pin(const Index_ID master_nid, const Index_ID idx, bool large = false);
+  //Index_ID         get_space_input_pin(const Index_ID master_nid, const Index_ID idx, bool large = false);
   virtual Index_ID create_node_int() = 0;
 
   Index_ID add_edge_int(Index_ID dst_nid, Port_ID dst_pid, Index_ID src_nid, Port_ID inp_pid);
@@ -54,19 +40,28 @@ protected:
   Index_ID find_idx_from_pid(const Index_ID idx, const Port_ID pid) const;
   Index_ID setup_idx_from_pid(const Index_ID nid, const Port_ID pid);
 
-  friend Forward_edge_iterator;
-  friend Backward_edge_iterator;
+  void setup_driver(const Index_ID idx) {
+    I(idx < node_internal.size());
+    node_internal[idx].set_driver_setup();
+  }
+  void setup_sink(const Index_ID idx) {
+    I(idx < node_internal.size());
+    node_internal[idx].set_sink_setup();
+  }
 
-  friend Fast_edge_iterator;
-  Index_ID fast_next(Index_ID nid) const {
-    while (true) {
-      nid.value++;
-      if (nid >= static_cast<Index_ID>(node_internal.size())) return 0;
-      if (!node_internal[nid].is_node_state()) continue;
-      if (node_internal[nid].is_master_root()) return nid;
-    }
-
-    return 0;
+  int get_hid_bits() const {
+    // NOTE: possible to used sub_nodes.size(). It would be a more compact
+    // tree, but it requires an extra indirection using sub_nodes to find the
+    // nid when traversing.
+    uint32_t n = node_internal.size();
+    if (n<16)
+      return 4;
+    n |= (n >>  1);
+    n |= (n >>  2);
+    n |= (n >>  4);
+    n |= (n >>  8);
+    n |= (n >> 16);
+    return n - (n >> 1);
   }
 
   void del_node(Index_ID idx);
@@ -79,10 +74,10 @@ public:
 
   LGraph_Base(const LGraph_Base &) = delete;
 
-  explicit LGraph_Base(const std::string &path, const std::string &_name, Lg_type_id lgid) noexcept;
-  virtual ~LGraph_Base();
+  Hierarchy_id get_sub_hierarchy_id(Hierarchy_id hid, Index_ID nid) const;
 
-  virtual bool close();
+  explicit LGraph_Base(std::string_view _path, std::string_view _name, Lg_type_id lgid) noexcept;
+  virtual ~LGraph_Base();
 
   virtual void clear();
   virtual void sync();
@@ -111,17 +106,6 @@ public:
   }
 #endif
 
-  // get internal nid from given pid
-  Index_ID get_graph_input_nid_from_pid(Port_ID pid) const;
-  // get internal nid from given pid
-  Index_ID get_graph_output_nid_from_pid(Port_ID pid) const;
-
-  // get external pid from internal nid
-  Port_ID get_graph_pid_from_nid(Index_ID nid) const;
-
-  std::string_view get_graph_input_name_from_pid(Port_ID pid) const;
-  std::string_view get_graph_output_name_from_pid(Port_ID pid) const;
-
   void add_edge(const Index_ID dst_idx, const Index_ID src_idx) {
     I(src_idx < node_internal.size());
     I(node_internal[src_idx].is_root());
@@ -140,6 +124,18 @@ public:
   const Node_Internal &get_node_int(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
     return node_internal[idx];
+  }
+
+  bool is_valid_node(Index_ID nid) const {
+    if (nid >= node_internal.size())
+      return false;
+    return node_internal[nid].is_master_root();
+  }
+
+  bool is_valid_node_pin(Index_ID idx) const {
+    if (idx >= node_internal.size())
+      return false;
+    return node_internal[idx].is_root();
   }
 
   Node_Internal &get_node_int(Index_ID idx) {
@@ -168,6 +164,6 @@ public:
     _init();
   } _static_initializer;
 
-
+  const Graph_library &get_library() const { return *library; }
+  Graph_library *ref_library() const { return library; }
 };
-

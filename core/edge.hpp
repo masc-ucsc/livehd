@@ -6,9 +6,9 @@
 
 class XEdge { // FIXME: s/XEdge/Edge/g
 protected:
-  friend LGraph;
-  friend Node;
-  friend Node_pin;
+  friend class LGraph;
+  friend class Node;
+  friend class Node_pin;
 public:
   struct __attribute__((packed)) Compact {
     const uint64_t driver_idx : Index_bits;
@@ -31,31 +31,37 @@ public:
       ,pad4(0) {
     };
 
-    bool operator==(const Compact &other) const {
+    constexpr bool is_invalid() const { return driver_idx == 0; }
+
+    constexpr bool operator==(const Compact &other) const {
       return (driver_idx == other.driver_idx)
           && (driver_pid == other.driver_pid)
           && (sink_idx   == other.sink_idx  )
           && (sink_pid   == other.sink_pid  );
     }
+    constexpr bool operator!=(const Compact &other) const { return !(*this == other); };
 
     template <typename H>
     friend H AbslHashValue(H h, const Compact& s) {
       return H::combine(std::move(h), s.driver_idx, s.sink_idx, s.driver_pid, s.sink_pid);
-    };
+    }
 
   };
+
   template <typename H>
   friend H AbslHashValue(H h, const XEdge& s) {
     return H::combine(std::move(h), s.driver, s.sink);
-  };
+  }
+
   Node_pin driver;
   Node_pin sink;
 
   XEdge(const Node_pin &src_, const Node_pin &dst_);
 
-  bool operator==(const XEdge &other) const { return (driver == other.driver) && (sink == other.sink); }
+  constexpr bool is_invalid() const { return driver.is_invalid(); }
 
-  bool operator!=(const XEdge &other) const { return (driver != other.driver) || (sink != other.sink); }
+  constexpr bool operator==(const XEdge &other) const { return (driver == other.driver) && (sink == other.sink); }
+  constexpr bool operator!=(const XEdge &other) const { return !(*this == other); };
 
   inline Compact get_compact() const {
     return Compact(driver.get_idx(),driver.get_pid(),sink.get_idx(),sink.get_pid());
@@ -71,5 +77,3 @@ public:
 
   // END ATTRIBUTE ACCESSORS
 };
-
-

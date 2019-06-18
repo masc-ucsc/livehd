@@ -3,13 +3,12 @@
 
 #include "assert.h"
 #include "pass.hpp"
-#include "lghierarchy.hpp"
 #include <string_view>
 
 class Pass_punch : public Pass {
 protected:
-  LGraph_Hierarchy src_hierarchy;
-  LGraph_Hierarchy dst_hierarchy;
+  Hierarchy_id src_hierarchy;
+  Hierarchy_id dst_hierarchy;
 
   static void work(Eprp_var &var);
 

@@ -7,10 +7,25 @@
 #include "lgedge.hpp"
 #include "lgedgeiter.hpp"
 
-Fast_edge_iterator::CFast_edge_iterator Fast_edge_iterator::CFast_edge_iterator::operator++() {
-  CFast_edge_iterator i(nid, g);
+CFast_edge_iterator CFast_edge_iterator::operator++() {
+  CFast_edge_iterator i(top_g, hid, nid, visit_sub);
 
-  nid = g->fast_next(nid);
+  nid = top_g->fast_next(hid, nid);
+  if (visit_sub) {
+    if (top_g->is_sub(hid, nid)) {
+      h_stack.emplace_back(hid, nid);
+      hid = top_g->get_sub_hierarchy_id(hid, nid);
+      nid = top_g->fast_next(0);
+    }
+  }else if (nid ==0) {
+    if (!h_stack.empty()) {
+      I(hid != h_stack.back().hid);
+      I(h_stack.back().hid);
+      hid = h_stack.back().hid;
+      nid = h_stack.back().nid;
+      h_stack.pop_back();
+    }
+  }
 
   return i;
 };
@@ -24,7 +39,7 @@ Edge_raw_iterator::CPod_iterator Edge_raw_iterator::CPod_iterator::operator++() 
 
   if ((inputs && !ptr->is_last_input()) || (!inputs && !ptr->is_last_output())) {
     ptr += ptr->next_node_inc();
-    assert(&node == &Node_Internal::get(ptr));
+    I(&node == &Node_Internal::get(ptr));
     return i;
   }
 
@@ -41,7 +56,7 @@ Edge_raw_iterator::CPod_iterator Edge_raw_iterator::CPod_iterator::operator++() 
     Index_ID idx   = Node_Internal::get(ptr2).get_next();
     Index_ID delta = idx - root_page.get_idx();
 
-    assert(node.get_master_root_nid() == root[delta].get_master_root_nid());
+    I(node.get_master_root_nid() == root[delta].get_master_root_nid());
 
     I(root[delta].is_node_state());
 
@@ -63,7 +78,7 @@ Edge_raw_iterator::CPod_iterator Edge_raw_iterator::CPod_iterator::operator++() 
       ptr = e;
       // if ((root[delta].has_local_outputs() && !inputs)
       //   ||(root[delta].has_local_inputs() && inputs))
-      assert(&node == &Node_Internal::get(ptr));
+      I(&node == &Node_Internal::get(ptr));
       break;  // No more in this iterator
     }
   }
@@ -71,47 +86,121 @@ Edge_raw_iterator::CPod_iterator Edge_raw_iterator::CPod_iterator::operator++() 
   return i;
 }
 
-bool Edge_raw_iterator_base::check_frontier() {
+void Edge_raw_iterator_base::find_dce_nodes() {
+
+  Node_set_type  discovered;
+  Node_set_type  dc_visited;
+  Node_set_type  floating;
+
+  for (auto it : *frontier) {
+    auto current = it.first;
+    floating.insert(current);
+
+    do{
+      dc_visited.insert(current);
+      floating.erase(current);
+
+      Node node(top_g,current);
+      for (const auto &e : node.out_edges()) {
+
+        const Node::Compact key = e.sink.get_node().get_compact();
+
+        if (!dc_visited.contains(key) && !global_visited.contains(key)) {
+          discovered.insert(key);
+          floating.insert(key);
+        }
+      }
+      if (discovered.empty())
+        break;
+      auto it = discovered.begin();
+      current = *it;
+      discovered.erase(it);
+    }while(true);
+  }
+
+  if (!floating.empty()) {
+    Pass::warn(fmt::format("graph {} is not DCE free, consider running the DCE pass\n", top_g->get_name()));
+    pending->insert(floating.begin(),floating.end());
+  }else{
+    // FIXME: CHeck if the number of visited nodes matches n_nodes
+    // Otherwise, insert disconnected nodes that may exist in the graph
+  }
+}
+
+bool Edge_raw_iterator_base::update_frontier() {
+
+  I(pending->empty());
   bool pushed = false;
   for (auto &it : *frontier) {
-    if (it.second > 0) {
-      auto node = Node(g,0,Node::Compact(it.first));
-      // FIXME: What if it is a sub-module just pure combinational or with flops? How to distinguish???
-      if (node.get_type().is_pipelined()) {
-        pending->push_back(it.first);
-        it.second = -1;  // Mark as pipelined, but keep not to visit twice
-        pushed    = true;
-      }
+    if (it.second <= 0)
+      continue;
+
+    auto node = Node(top_g,it.first);
+
+    if (*hardcoded_nid == Node::Hardcoded_output_nid && node.has_outputs()) {
+      continue;
+    }else if (*hardcoded_nid == Node::Hardcoded_input_nid && node.has_inputs()) {
+      continue;
+    }else if (!node.get_type().is_pipelined()) {
+      continue;
     }
+
+    //fmt::print("Adding node {}\n", node.debug_name());
+
+    pending->insert(it.first);
+    it.second = -1;  // Mark as pipelined, but keep not to visit twice
+    pushed    = true;
+    frontier->erase(it.first);
+    break;
   }
   if (!pushed) {
+    //find_dce_nodes();
+    if (!pending->empty())
+      return true;
+
+    if (*hardcoded_nid) {
+      pending->insert(Node(top_g, 0, *hardcoded_nid).get_compact());
+      nid = *hardcoded_nid;
+      *hardcoded_nid = 0;
+      return true;
+    }
+
     return false;
   }
   return true;
 }
 
-void Forward_edge_iterator::CForward_edge_iterator::add_node(const Index_ID nid) {
-  assert(g->get_node_int(nid).is_master_root());
+void CForward_edge_iterator::set_current_node_as_visited() {
 
-  for (const auto &c : g->out_edges_raw(nid)) {
-    I(g->get_node_int(c.get_idx()).is_root());
-    Index_ID    master_root_nid = g->get_node_int(c.get_idx()).get_nid();
-    I(g->get_node_int(master_root_nid).is_master_root());
+  I(top_g->get_node_int(nid).is_master_root());
 
-    Frontier_type::iterator fit = frontier->find(master_root_nid);
+  global_visited.insert(Node::Compact(hid, nid));
+
+  Node node(top_g,hid,nid);
+  for (const auto &e : node.out_edges()) {
+    const auto sink_node = e.sink.get_node();
+    // FIXME: put hardcoded in global_visited?? (speed reasons)
+    if (sink_node.get_nid() == Node::Hardcoded_output_nid)
+      continue;
+
+    const Node::Compact key = sink_node.get_compact();
+    if (global_visited.find(key) != global_visited.end())
+      continue;
+
+    Frontier_type::iterator fit = frontier->find(key);
 
     if (fit == frontier->end()) {
-      int32_t ninputs = g->get_node_int(master_root_nid).get_node_num_inputs() - 1;
-      assert(ninputs >= 0);
+      auto ninputs = sink_node.get_num_inputs()-1; // -1 for self
+      I(ninputs >= 0);
       if (ninputs == 0) {  // Done already
-        pending->push_back(master_root_nid);
+        pending->insert(key);
       } else {
-        (*frontier)[master_root_nid] = ninputs;
+        (*frontier)[key] = ninputs;
       }
     } else {
-      int ninputs = (fit->second) - 1;
+      auto ninputs = (fit->second) - 1;
       if (ninputs == 0) {  // Done
-        pending->push_back(master_root_nid);
+        pending->insert(key);
         frontier->erase(fit);
       } else {
         fit->second = ninputs;
@@ -120,134 +209,99 @@ void Forward_edge_iterator::CForward_edge_iterator::add_node(const Index_ID nid)
   }
 }
 
-Forward_edge_iterator::CForward_edge_iterator Forward_edge_iterator::begin() {
-  for (auto it = g->input_array.begin(); it != g->input_array.end(); ++it) {
-    pending.push_back(it.get_field().nid);
+CForward_edge_iterator Forward_edge_iterator::begin() {
+
+  pending.insert(Node::Compact(0,Node::Hardcoded_input_nid));
+
+  hardcoded_nid = Node::Hardcoded_output_nid;
+
+  for(const auto it:top_g->get_const_value_map()) {
+    pending.insert(Node::Compact(0,it.second.nid));
+  }
+  for(const auto it:top_g->get_const_sview_map()) {
+    pending.insert(Node::Compact(0,it.second.nid));
   }
 
-  for (auto it = g->output_array.begin(); it != g->output_array.end(); ++it) {
-    if (!g->get_node_int(it.get_field().nid).has_node_inputs())
-      pending.push_back(it.get_field().nid);
-  }
-
-  // for forward iteration we want to start from constants as well
-  const LGraph *lgr     = const_cast<LGraph *>(g);
-  const auto &constants = lgr->get_const_node_ids();
-  Index_ID    cid       = constants.get_first();
-  while (cid) {
-    assert(cid);
-    pending.push_back(cid);
-    cid = constants.get_next(cid);
-  }
-
-  Index_ID b = 0;
-  if (!pending.empty()) {
-    b = pending.back();
-    pending.pop_back();
-  }
-
-  CForward_edge_iterator it(b, g, &frontier, &pending);
-
-  return it;
-}
-
-void Backward_edge_iterator::CBackward_edge_iterator::find_dce_nodes() {
-  Pending_type       discovered;
-  std::set<Index_ID> dc_visited;
-  std::set<Index_ID> floating;
-  // floating.set_empty_key(0);     // 0 is not allowed as key
-  // floating.set_deleted_key(0); // 128 is not allowed as key (4KB aligned)
-
-  for (const auto &_idx : *frontier) {
-    Index_ID nid = _idx.first;
-    floating.insert(nid);
-    discovered.push_back(nid);
-    while (discovered.size() > 0) {
-      Index_ID current = discovered.back();
-      discovered.pop_back();
-      dc_visited.insert(current);
-      for (const auto &c : g->out_edges_raw(current)) {
-        floating.erase(current);
-
-        I(g->get_node_int(c.get_idx()).is_root());
-        Index_ID    nid = g->get_node_int(c.get_idx()).get_nid();
-        I(g->get_node_int(nid).is_master_root());
-
-        if (dc_visited.find(nid) == dc_visited.end() && global_visited.find(nid) == global_visited.end()) {
-          discovered.push_back(nid);
-          floating.insert(nid);
-        }
-      }
+  // Add any sub node that has no inputs but has outputs (not hit with forward)
+  for(auto it:top_g->get_sub_nodes_map()) {
+    Node n_sub(top_g,it.first);
+    if (n_sub.has_outputs() && !n_sub.has_inputs()) {
+      pending.insert(Node::Compact(0,it.first.nid));
     }
   }
 
-  if (floating.size() > 0) {
-    Pass::warn(fmt::format("graph {} is not DCE free, consider running the DCE pass\n", g->get_name()));
-    for (const auto &nid : floating) {
-      pending->push_back(nid);
-    }
-  }else{
-    // FIXME: CHeck if the number of visited nodes matches n_nodes
-    // Otherwise, insert disconnected nodes that may exist in the graph
-  }
+  I(!pending.empty());
+  auto it = pending.begin();
+  auto it_nid = it->nid;
+  auto it_hid = it->hid;
+  pending.erase(it);
+
+  CForward_edge_iterator it2(top_g, it_hid, it_nid, &frontier, &pending, &hardcoded_nid);
+
+  return it2;
 }
 
-void Backward_edge_iterator::CBackward_edge_iterator::add_node(const Index_ID nid) {
-  assert(g->get_node_int(nid).is_master_root());
+void CBackward_edge_iterator::set_current_node_as_visited() {
 
-  for (const auto &c : g->inp_edges_raw(nid)) {
-    I(g->get_node_int(c.get_idx()).is_root());
-    Index_ID    master_root_nid = g->get_node_int(c.get_idx()).get_nid();
-    I(g->get_node_int(master_root_nid).is_master_root());
+  I(top_g->get_node_int(nid).is_master_root());
 
-    Frontier_type::iterator fit = frontier->find(master_root_nid);
+  global_visited.insert(Node::Compact(hid, nid));
+
+  Node node(top_g,hid,nid);
+  for (const auto &e : node.inp_edges()) {
+    const auto driver_node = e.driver.get_node();
+    if (driver_node.get_nid() == Node::Hardcoded_input_nid)
+      continue;
+
+    const Node::Compact key = driver_node.get_compact();
+    if (global_visited.find(key) != global_visited.end())
+      continue;
+
+    Frontier_type::iterator fit = frontier->find(key);
 
     if (fit == frontier->end()) {
-      int32_t noutputs = g->get_node_int(master_root_nid).get_node_num_outputs() - 1;
-      assert(noutputs >= 0);
+      auto noutputs = driver_node.get_num_outputs()-1; // -1 for self
+      I(noutputs >= 0);
       if (noutputs == 0) {  // Done already
-        pending->push_back(master_root_nid);
+        pending->insert(key);
       } else {
-        (*frontier)[master_root_nid] = noutputs;
+        (*frontier)[key] = noutputs;
       }
     } else {
-      int noutputs = (fit->second) - 1;
+      auto noutputs = (fit->second) - 1;
+      I(noutputs >= 0);
       if (noutputs == 0) {  // Done
-        pending->push_back(master_root_nid);
+        pending->insert(key);
         frontier->erase(fit);
       } else {
         fit->second = noutputs;
       }
     }
   }
+
 }
 
-Backward_edge_iterator::CBackward_edge_iterator Backward_edge_iterator::begin() {
-  // FIXME: This may need to be moved to nid==0. If any input not visited, then add it (but only
-  // if full input/output)
+CBackward_edge_iterator Backward_edge_iterator::begin() {
 
-  // FIXME: pending has WAY too much redundant entries
+  pending.insert(Node::Compact(0,Node::Hardcoded_output_nid));
 
-  for (auto it = g->input_array.begin(); it != g->input_array.end(); ++it) {  // inputs without connection to preserve them
-    if (!g->get_node_int(it.get_field().nid).has_node_outputs()) {
-      I(g->get_node_int(it.get_field().nid).is_master_root());
-      pending.push_back(it.get_field().nid);
-    }
-  }
-  for (auto it = g->output_array.begin(); it != g->output_array.end(); ++it) {
-    if (!g->get_node_int(it.get_field().nid).has_node_outputs()) {  // do not add outputs with connections
-      I(g->get_node_int(it.get_field().nid).is_master_root());
-      pending.push_back(it.get_field().nid);
+  hardcoded_nid = Node::Hardcoded_input_nid;
+
+  // Add any sub node that has no outputs but has inputs (not hit with backward)
+  for(auto it:top_g->get_sub_nodes_map()) {
+    Node n_sub(top_g,it.first);
+    if (!n_sub.has_outputs() && n_sub.has_inputs()) {
+      pending.insert(n_sub.get_compact());
     }
   }
 
-  Index_ID b = 0;
-  if (!pending.empty()) {
-    b = pending.back();
-    pending.pop_back();
-  }
+  I(!pending.empty());
+  auto it = pending.begin();
+  auto it_nid = it->nid;
+  auto it_hid = it->hid;
+  pending.erase(it);
 
-  CBackward_edge_iterator it(b, g, &frontier, &pending);
+  CBackward_edge_iterator it2(top_g, it_hid, it_nid, &frontier, &pending, &hardcoded_nid);
 
-  return it;
+  return it2;
 }

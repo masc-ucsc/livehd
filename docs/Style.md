@@ -28,15 +28,32 @@ Use std::string_view instead of "const char &ast" or "const std::string &" in th
 
 Avoid pointers, use std::unique_ptr with RAII
 
-## No camelCase. Use underscores to separate words:
 
+## Variable naming rules
+
+* No camelCase. Use underscores to separate words:
 ```cpp
 foo_bar = Foo_bar(3);
 ```
+* Use plural for containers with multiple entries like vector, singular otherwise
+```cpp
+elem = entries[index];
+```
+* Classes/types/enums start with uppercase. Lowercase otherwise
+```cpp
+val = My_enum::Big;
+class Sweet_potato {
+```
 
-## Exceptions
+## Error handling and exceptions
 
-Unexpected non-recoverable behavior should raise an exception. They are captured at the top level to notify user and move to next task.
+Use the Pass::error or Pass:warn for error and likely error (warn). Internally, error generates
+and exception capture by the main lgshell to move to the next task.
+
+```cpp
+Pass::error("inou_yaml: can only have a yaml_input or a graph_name, not both");
+Pass::warn("inou_yaml.to_lg: output:{} input:{} graph:{}", output, input, graph_name);
+```
 
 ## No tabs, indentation is 2 spaces
 
@@ -69,12 +86,6 @@ You can configure your text editor to do this automatically
 
 You can configure your text editor to highlight them.
  https://github.com/ntpeters/vim-better-whitespace
-
-## Classes start with upper case, but just first word.
-
-```cpp
-class Sweet_potato {
-```
 
 ## Use C++14 iterators not ::iterator
 
@@ -120,7 +131,6 @@ and traversal overheads.
 
 ## Do not use std::unordered_set, use flat_hash_map or flat_hash_set from abseil
 
-
 ```cpp
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -148,12 +158,29 @@ if (set.contains(key_value)) {
 }
 ```
 
+## Use absl::Span instead of std::vector as return argument
+
+absl::Span is the equivalent of string_view for a string but for vectors. Like
+string_view, it does not have ownership, and the size in the span can decrease
+(not increase) without changing the original vector with "subspan". Faster and
+more functional, no reason to return "const std::vector<Foo> &", instead return
+"absl::Span<Foo>".
+
+```cpp
+#include "absl/types/span.h"
+
+absl::Span<Sub_node>    get_sub_nodes() const {
+  I(sub_nodes.size()>=1);
+  return absl::MakeSpan(sub_nodes).subspan(1); // Skip first element from vector
+};
+```
+
 ## Pass by reference and use "const" when possible
 
 ```cpp
-void print(const LGraph& g); //or
+void print(const Sub_node& g); //or
 
-void edit(LGraph& g);
+void edit(Sub_node& g);
 ```
 
 Note that older code still uses pointers, this is no longer allowed.
@@ -193,13 +220,6 @@ foo = new Sweet_potato(3, 7)
 
 ```cpp
 fmt::print("This is a debug message, name = {}, id = {}\n",g->get_name(), idx);
-```
-
-## Use Pass:: report errors/warnings/info
-
-```cpp
-Pass::error("inou_yaml: can only have a yaml_input or a graph_name, not both");
-Pass::warn("inou_yaml.to_lg: output:{} input:{} graph:{}", output, input, graph_name);
 ```
 
 ## Use accessors consistently
@@ -258,6 +278,60 @@ std::vector<LGraph *> Inou_yaml::generate() {
      // ..
   }
 ```
+
+## Decide how to use attributes
+
+Attributes are parameters or information that an be per Node, Node_pin or Edge. In LGraph, attributes are
+persistent. This means that they are kept across execution runs in the LGraph database (E.g: in lgdb).
+
+
+For persistent attributes, the structures to use are defined in core/annotate.hpp. Any new attribute
+must be added to "annotate.hpp" to preserve persistence and to make sure that they are cleared when needed.
+
+
+Many times it is important to have information per node, but that it is not persistent across runs. For example,
+when building a LGraph from Yosys, there is a need to remember pointers from yosys to LGraph. This by definition can not be persistent because pointers change across runs. For this case, there are several options.
+
+
+### The Non-Persistent Annotations use Node, Node_pin, or Edge as data
+
+In this case, there is some index value like a pointer or a string or an integer. The index for the map
+is not a LGraph structure. E.g:
+
+```cpp
+absl::flat_hash_map<SomeData, Node_pin> s2pin;
+absl::flat_hash_map<SomeData, Node>     s2node;
+
+SomeData d1;
+s2pin[d1]  = node.get_driver_pin(); // Example of use getting a pint
+s2node[d1] = node;
+auto name = s2pin[d1].get_name();   // Pick previously set driver name
+```
+
+In this case, it is fine to use the full Node, Node_pin, or Edge. This has some pointers inside, but it is OK because it is not persistent.
+
+### The Non-Persistent Annotations use Node, Node_pin, or Edge as Index
+
+When using the Node, Node_pin, Edge as index for a map-like structure, it is NOT ok to use the Node, Node_pin, Edge directly. The reason is that the internal pointer is going to confuse the hash function. The value to use
+is the Node::Compact, Node_pin::Compact, Edge::Compact. The ::Compact already comes with the hash functions for abseil map structures that are the recommended by default for performance reasons.
+
+
+```cpp
+absl::flat_hash_map<Node_pin::Compact, RTLIL::Wire *>  input_map;
+
+input_map[pin.get_compact()] = wire;
+
+auto *wire = input_map[pin.get_compact()];
+
+for(const auto &[key, value]:input_map) {
+  Node_pin pin(lg, 0, key); // Key is a ::Compact, not a Node_pin. Must provide LGraph pointer back. 0 is for no hierarchy
+  auto name  = pin.get_name();
+  auto *wire = value;
+  // ... Some use here
+}
+```
+
+The persistent attribute class does something similar internally, but it is hidden from the external usage.
 
 ## Check if a string starts with a substring
 

@@ -1,0 +1,24 @@
+clang
+%cpp -std=c++17
+%hpp -std=c++17
+-Icore
+-Imain
+-Ielab
+-Itask
+-Ipass/abc
+-Ipass/mockturtle
+-Ipass/dfg
+-Ipass/bitwidth
+-Ipass/punch
+-Ipass/sample
+-Ipass/dce
+-Ipass/opentimer
+-Iinou/liveparse
+-Iinou/yosys
+-Iinou/sat
+-Iinou/cfg
+-Ieprp
+-Immap_map/include
+-Immap_map/tests
+-Ibench/include
+
