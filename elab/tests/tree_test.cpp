@@ -38,6 +38,8 @@ public:
     (void)c113;
     auto c114 = ast.add_sibling(c113, "child1.1.4");
     (void)c114;
+    auto c115 = ast.add_sibling(c111, "child1.1.5");
+    (void)c115;
     auto c13  = ast.add_sibling(c12, "child1.3");
     (void)c13;
 
@@ -103,6 +105,7 @@ TEST_F(Elab_test, Create_with_lazy_check) {
   ast2.set_root("root");
 
   ast2.add_lazy_child(2, "child1.1.1");
+  ast2.add_lazy_child(2, "child1.1.5");
   ast2.add_lazy_child(2, "child1.1.2");
   ast2.add_lazy_child(2, "child1.1.3");
   ast2.add_lazy_child(2, "child1.1.4");
@@ -141,21 +144,22 @@ TEST_F(Elab_test, Create_with_lazy_check) {
 }
 
 TEST_F(Elab_test, Preorder_traversal_check) {
-  std::vector<std::string> ast_preorder_traversal_check;
+  std::vector<std::string> ast_preorder_traversal_golden;
   std::vector<std::string> ast_preorder_traversal;
 
-  ast_preorder_traversal_check.push_back("root");
-  ast_preorder_traversal_check.push_back("child1.1");
-  ast_preorder_traversal_check.push_back("child1.1.1");
-  ast_preorder_traversal_check.push_back("child1.1.1.1");
-  ast_preorder_traversal_check.push_back("child1.1.2");
-  ast_preorder_traversal_check.push_back("child1.1.3");
-  ast_preorder_traversal_check.push_back("child1.1.4");
-  ast_preorder_traversal_check.push_back("child1.2");
-  ast_preorder_traversal_check.push_back("child1.2.1");
-  ast_preorder_traversal_check.push_back("child1.2.2");
-  ast_preorder_traversal_check.push_back("child1.2.3");
-  ast_preorder_traversal_check.push_back("child1.3");
+  ast_preorder_traversal_golden.push_back("root");
+  ast_preorder_traversal_golden.push_back("child1.1");
+  ast_preorder_traversal_golden.push_back("child1.1.1");
+  ast_preorder_traversal_golden.push_back("child1.1.1.1");
+  ast_preorder_traversal_golden.push_back("child1.1.5");
+  ast_preorder_traversal_golden.push_back("child1.1.2");
+  ast_preorder_traversal_golden.push_back("child1.1.3");
+  ast_preorder_traversal_golden.push_back("child1.1.4");
+  ast_preorder_traversal_golden.push_back("child1.2");
+  ast_preorder_traversal_golden.push_back("child1.2.1");
+  ast_preorder_traversal_golden.push_back("child1.2.2");
+  ast_preorder_traversal_golden.push_back("child1.2.3");
+  ast_preorder_traversal_golden.push_back("child1.3");
 
   for(const auto &it:ast.depth_preorder(ast.get_root())) {
     ast_preorder_traversal.push_back(ast.get_data(it));
@@ -165,5 +169,5 @@ TEST_F(Elab_test, Preorder_traversal_check) {
     fmt::print("{}\n", *it);
   }
 
-  EXPECT_EQ(ast_preorder_traversal, ast_preorder_traversal_check);
+  EXPECT_EQ(ast_preorder_traversal, ast_preorder_traversal_golden);
 }

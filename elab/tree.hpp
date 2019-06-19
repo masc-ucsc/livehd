@@ -46,46 +46,46 @@ class Tree {
   void adjust_to_level(Tree_level level);
 
 public:
-class Tree_depth_preorder_iterator {
-public:
-  class CTree_depth_preorder_iterator {
+  class Tree_depth_preorder_iterator {
   public:
-    CTree_depth_preorder_iterator(const Tree_index &_ti, const Tree<X> *_t) : ti(_ti), t(_t) {}
-    CTree_depth_preorder_iterator operator++() {
-      CTree_depth_preorder_iterator i(ti, t);
+    class CTree_depth_preorder_iterator {
+    public:
+      CTree_depth_preorder_iterator(const Tree_index &_ti, const Tree<X> *_t) : ti(_ti), t(_t) {}
+      CTree_depth_preorder_iterator operator++() {
+        CTree_depth_preorder_iterator i(ti, t);
 
-      ti = t->get_depth_preorder_next(ti);
+        ti = t->get_depth_preorder_next(ti);
 
-      return i;
+        return i;
+      };
+      bool operator!=(const CTree_depth_preorder_iterator &other) {
+        I(t == other.t);
+        return ti != other.ti;
+      }
+      const Tree_index &operator*() const { return ti; }
+
+    private:
+      Tree_index     ti;
+      const Tree<X> *t;
     };
-    bool operator!=(const CTree_depth_preorder_iterator &other) {
-      I(t == other.t);
-      return ti != other.ti;
-    }
-    const Tree_index &operator*() const { return ti; }
 
   private:
+  protected:
     Tree_index     ti;
     const Tree<X> *t;
+
+  public:
+    Tree_depth_preorder_iterator() = delete;
+    explicit Tree_depth_preorder_iterator(const Tree_index &_b, const Tree<X> *_t) : ti(_b), t(_t) {}
+
+    CTree_depth_preorder_iterator begin() const { return CTree_depth_preorder_iterator(ti, t); }
+    CTree_depth_preorder_iterator end()   const { return CTree_depth_preorder_iterator(Tree_index(-1,-1), t); }  // 0 is end index for iterator
   };
-
-private:
-protected:
-  Tree_index     ti;
-  const Tree<X> *t;
-
-public:
-  Tree_depth_preorder_iterator() = delete;
-  explicit Tree_depth_preorder_iterator(const Tree_index &_b, const Tree<X> *_t) : ti(_b), t(_t) {}
-
-  CTree_depth_preorder_iterator begin() const { return CTree_depth_preorder_iterator(ti, t); }
-  CTree_depth_preorder_iterator end() const { return CTree_depth_preorder_iterator(Tree_index(-1,-1), t); }  // 0 is end index for iterator
-};
   Tree();
 
   // WARNING: can not return Tree_index & because future additions can move the pointer (vector realloc)
-  const Tree_index add_child(const Tree_index &parent, const X &data);
-  const Tree_index add_sibling(const Tree_index &sibling, const X &data);
+  const Tree_index add_child             (const Tree_index &parent, const X &data);
+  const Tree_index add_sibling           (const Tree_index &sibling, const X &data);
 
   X &      get_data(const Tree_index &leaf);
   const X &get_data(const Tree_index &leaf) const;
@@ -158,13 +158,16 @@ const Tree_index Tree<X>::add_child(const Tree_index &parent, const X &data) {
   if (pointers_stack[parent_level][parent_pos].eldest_child < 0) {
     I(pointers_stack[parent_level][parent_pos].younger_child < 0);
     pointers_stack[parent_level][parent_pos].younger_child = child_pos;
+    pointers_stack[parent_level][parent_pos].eldest_child  = child_pos;
   }else{
-    auto older_sibling = pointers_stack[parent_level][parent_pos].eldest_child;
+    //auto older_sibling = pointers_stack[parent_level][parent_pos].eldest_child;
+    auto older_sibling = pointers_stack[parent_level][parent_pos].younger_child;
+    pointers_stack[parent_level][parent_pos].younger_child = child_pos;
     I(pointers_stack[child_level][older_sibling].younger_sibling<0);
     pointers_stack[child_level][older_sibling].younger_sibling = child_pos;
   }
-  pointers_stack[parent_level][parent_pos].eldest_child  = child_pos;
 
+  //pointers_stack[parent_level][parent_pos].eldest_child  = child_pos;
   return Tree_index(child_level, child_pos);
 };
 
@@ -190,12 +193,13 @@ const Tree_index Tree<X>::add_sibling(const Tree_index &sibling, const X &data) 
   pointers_stack[child_level].emplace_back(parent_pos);
 
   I(pointers_stack[parent_level][parent_pos].eldest_child >= 0);
-  auto older_sibling = pointers_stack[parent_level][parent_pos].eldest_child;
-  pointers_stack[parent_level][parent_pos].eldest_child  = child_pos;
-  pointers_stack[child_level][older_sibling].younger_sibling = child_pos;
+  auto ori_younger_sibling = pointers_stack[sibling_level][sibling_pos].younger_sibling;
+  pointers_stack[child_level][child_pos].younger_sibling = ori_younger_sibling;
+  pointers_stack[sibling_level][sibling_pos].younger_sibling = child_pos;
 
   return Tree_index(child_level, child_pos);
 }
+
 
 template <typename X>
 X &Tree<X>::get_data(const Tree_index &leaf) {
@@ -263,15 +267,21 @@ const Tree_index Tree<X>::get_depth_preorder_next(const Tree_index &child) const
   I(child.level < pointers_stack.size());
   I(child.pos   < pointers_stack[child.level].size());
 
-  if(pointers_stack.size()-1 > child.level) {
-    Tree_pos i = 0;
-    for(auto it = begin(pointers_stack[child.level+1]); it != end(pointers_stack[child.level+1]); ++it) {
-      if(it->parent == child.pos){ // the node on the next level is a child of our node
-        return Tree_index(child.level+1, i);
-      }
-      i = i + 1;
-    }
+  //if(pointers_stack.size()-1 > child.level) {
+  //  Tree_pos i = 0;
+  //  for(auto it = begin(pointers_stack[child.level+1]); it != end(pointers_stack[child.level+1]); ++it) {
+  //    if(it->parent == child.pos) { // the node on the next level is a child of our node
+  //      return Tree_index(child.level+1, i);
+  //    }
+  //    i = i + 1;
+  //  }
+  //}
+
+  if(pointers_stack[child.level][child.pos].eldest_child != -1) {
+    return Tree_index(child.level+1, pointers_stack[child.level][child.pos].eldest_child);
   }
+
+
 
   if (pointers_stack[child.level][child.pos].younger_sibling != -1) {
     return Tree_index(child.level, pointers_stack[child.level][child.pos].younger_sibling);
