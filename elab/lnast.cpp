@@ -7,18 +7,18 @@ Language_neutral_ast::Language_neutral_ast(std::string_view _buffer, Lnast_ntype
   set_root(Lnast_node(ntype_top, Token(), 0));
 }
 
-void Language_neutral_ast::ssa_transform() {
-  add_phi_nodes();
-  renaming();
-}
-
-void add_phi_nodes() {
-  ;
-}
-
-void renaming() {
-  ;
-}
+//void Language_neutral_ast::ssa_transform() {
+//  add_phi_nodes();
+//  renaming();
+//}
+//
+//void add_phi_nodes() {
+//  ;
+//}
+//
+//void renaming() {
+//  ;
+//}
 
 
 //------------- Lnast_parser member function start -------------
