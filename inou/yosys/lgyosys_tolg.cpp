@@ -409,7 +409,7 @@ static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path
 
     Sub_node *sub = nullptr;
 
-    if (cell->type.c_str()[0] == '\\') { // sub_cell type
+    if (cell->type.c_str()[0] == '\\' || strncmp(cell->type.c_str(), "$paramod\\", 9) == 0) { // sub_cell type
       std::string_view mod_name(&(cell->type.c_str()[1]));
 
       sub = &g->ref_library()->setup_sub(mod_name);
@@ -1338,7 +1338,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
     for(auto &it : design->modules_) {
       RTLIL::Module *module = it.second;
       log("yosys2lg NOT look_for_cell_outputs pass for module %s:\n", module->name.c_str());
-        if(design->selected_module(it.first)) {
+      if(design->selected_module(it.first)) {
         look_for_cell_outputs(module, path);
         LGraph *g = process_module(module, path);
 

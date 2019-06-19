@@ -567,7 +567,7 @@ void LGraph::dump() {
     if (!node_internal[i].is_master_root())
       continue;
     auto node = Node(this,Node::Compact_class(i)); // NOTE: To remove once new iterators are finished
-    fmt::print("nid:{} type:{}\n", node.nid, node.get_type().get_name());
+    fmt::print("nid:{} type:{} name:{}\n", node.nid, node.get_type().get_name(), node.debug_name());
     if (node.get_type().get_name()=="lut") {
       fmt::print("  lut_id=0x{:x}\n",node.get_type_lut());
     }

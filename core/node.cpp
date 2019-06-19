@@ -331,6 +331,9 @@ std::string Node::debug_name() const {
   if (it != ref->end()) {
     name = ref->get_val(it);
   }
+  if (get_type().op == SubGraph_Op) {
+    absl::StrAppend(&name, "_sub_", get_type_sub_node().get_name());
+  }
 
   return absl::StrCat("node_", std::to_string(nid), "_", get_type().get_name() , "_", name);
 }
