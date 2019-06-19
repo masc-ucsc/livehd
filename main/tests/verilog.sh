@@ -59,16 +59,16 @@ do
     let fail++
     fail_list+=" "$base
   fi
-  LC=$(wc -l tmp_yosys/${input}.err | cut -d" " -f1)
+  LC=$(grep -iv Warning tmp_yosys/${input}.err | wc -l | cut -d" " -f1)
   if [[ $LC -gt 0 ]]; then
-    echo "FAIL: Faulty log verilog file tmp_yosys/${base}.err"
+    echo "FAIL: Faulty err verilog file tmp_yosys/${base}.err"
     let fail++
     fail_list+=" "$base
     continue
   fi
-  LC=$(grep signal tmp_yosys/${input}.log | wc -l | cut -d" " -f1)
+  LC=$(grep -i signal tmp_yosys/${input}.log | wc -l | cut -d" " -f1)
   if [[ $LC -gt 0 ]]; then
-    echo "FAIL: Faulty err verilog file tmp_yosys/${base}.err"
+    echo "FAIL: Faulty log verilog file tmp_yosys/${base}.log"
     let fail++
     fail_list+=" "$base
     continue
