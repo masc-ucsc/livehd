@@ -7,6 +7,19 @@ Language_neutral_ast::Language_neutral_ast(std::string_view _buffer, Lnast_ntype
   set_root(Lnast_node(ntype_top, Token(), 0));
 }
 
+void Language_neutral_ast::ssa_transform() {
+  add_phi_nodes();
+  renaming();
+}
+
+void add_phi_nodes() {
+  ;
+}
+
+void renaming() {
+  ;
+}
+
 
 //------------- Lnast_parser member function start -------------
 
@@ -378,7 +391,6 @@ void Lnast_parser::setup_ntype_str_mapping(){
   ntype2str [Lnast_ntype_func_def]    = "func_def"   ;
   ntype2str [Lnast_ntype_sub]         = "sub"        ;
   ntype2str [Lnast_ntype_top]         = "top"        ;
-
 }
 
 std::string Lnast_parser::ntype_dbg(Lnast_ntype_id ntype) {
