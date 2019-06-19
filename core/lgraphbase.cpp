@@ -13,7 +13,7 @@
 
 LGraph_Base::LGraph_Base(std::string_view _path, std::string_view _name, Lg_type_id lgid) noexcept
     : Lgraph_base_core(_path, _name, lgid)
-    , node_internal(absl::StrCat(path, "/lgraph_", std::to_string(lgid), "_nodes")) {
+    , node_internal(absl::StrCat(path, "/lg_", std::to_string(lgid), "_nodes")) {
   I(lgid);  // No id zero allowed
 
   library  = Graph_library::instance(path);
