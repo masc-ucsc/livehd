@@ -428,14 +428,17 @@ static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path
           int pos = atoi(pin_name.c_str());
 
           if (!sub->has_graph_pin(pos)) {
+#if 1
+            printf("FIXME module %s cell type %s has pin_name %s but it is disconnected\n",module->name.c_str(), cell->type.c_str(), pin_name.c_str());
+#else
 HERE: Add pin, allow to map later
             if (cell->output(conn.first)) {
               sub->map_pin(Sub_node::Direction::Output, pos);
             } else if (cell->input(conn.first)) {
               sub->map_pin(Sub_node::Direction::Input, pos);
             }
+#endif
 
-            printf("module %s cell type %s has pin_name %s but it is disconnected\n",module->name.c_str(), cell->type.c_str(), pin_name.c_str());
             if (cell->output(conn.first)) {
               assert(false); // TODO: We could add as a sub without name
             }
