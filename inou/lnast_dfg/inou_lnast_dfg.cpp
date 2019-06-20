@@ -35,8 +35,9 @@ void Inou_lnast_dfg::tolg(Eprp_var &var){
   //cfg_text to lnast
   p.memblock = p.setup_memblock();
   p.lnast_parser.parse("lnast", p.memblock);
-  p.lnast = p.lnast_parser.get_ast().get(); //unique_ptr lend its ownership
 
+  p.lnast = p.lnast_parser.get_ast().get(); //unique_ptr lend its ownership
+  p.lnast->ssa_trans();
   //lnast to lgraph
   std::vector<LGraph *> lgs = p.do_tolg();
 
@@ -56,10 +57,10 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
 
   for (const auto &it: lnast->depth_preorder(lnast->get_root()) ) {
     const auto& node_data = lnast->get_data(it);
-    std::string node_name(node_data.node_token.get_text(memblock)); //str_view to string
-    std::string node_type  = lnast_parser.ntype_dbg(node_data.node_type);
+    std::string name(node_data.token.get_text(memblock)); //str_view to string
+    std::string type  = lnast_parser.ntype_dbg(node_data.type);
     auto        node_scope = node_data.scope;
-    fmt::print("name:{}, type:{}, scope:{}\n", node_name, node_type, node_scope);
+    fmt::print("name:{}, type:{}, scope:{}\n", name, type, node_scope);
   }
 
   //lnast to dfg
@@ -82,7 +83,7 @@ void Inou_lnast_dfg::process_ast_top(LGraph *dfg){
 
 void Inou_lnast_dfg::process_ast_statements(LGraph *dfg, const std::vector<Tree_index> &sts){
   for (const auto& ast_idx : sts) {
-    const auto& op = lnast->get_data(ast_idx).node_type;
+    const auto& op = lnast->get_data(ast_idx).type;
     if (is_pure_assign_op(op)) {
       process_ast_pure_assign_op(dfg, ast_idx);
     } else if (is_binary_op(op)) {

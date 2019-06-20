@@ -34,7 +34,7 @@ K18  K19   0  98  121  =    result  ___g
 END
 */
 
-using tuple = std::tuple<std::string, std::string , uint8_t>;// <node_name, node_type, scope>
+using tuple = std::tuple<std::string, std::string , uint8_t>;// <name, type, scope>
 
 class Lnast_test : public ::testing::Test, public Lnast_parser {
   std::vector<std::vector<tuple>> ast_sorted_golden;
@@ -241,18 +241,18 @@ TEST_F(Lnast_test, Traverse_breadth_first_check_on_ast) {
       while (static_cast<size_t>(self.level)>=ast_sorted_testee.size())
           ast_sorted_testee.emplace_back();
 
-      std::string node_name(node_data.node_token.get_text(memblock));
-      std::string node_type  = ntype_dbg(node_data.node_type);
+      std::string name(node_data.token.get_text(memblock));
+      std::string type  = ntype_dbg(node_data.type);
       auto        node_scope = node_data.scope;
 
-      std::string pname(lnast->get_data(parent).node_token.get_text(memblock));
-      std::string ptype  = ntype_dbg(lnast->get_data(parent).node_type);
+      std::string pname(lnast->get_data(parent).token.get_text(memblock));
+      std::string ptype  = ntype_dbg(lnast->get_data(parent).type);
       auto        pscope = lnast->get_data(parent).scope;
 
-      fmt::print("nname:{}, ntype:{}, nscope:{}\n", node_name, node_type, node_scope);
+      fmt::print("nname:{}, ntype:{}, nscope:{}\n", name, type, node_scope);
       fmt::print("pname:{}, ptype:{}, pscope:{}\n\n", pname, ptype, pscope);
 
-      tuple tuple_data = std::make_tuple(node_name, node_type, node_scope);
+      tuple tuple_data = std::make_tuple(name, type, node_scope);
       ast_sorted_testee[self.level].emplace_back(tuple_data);
       EXPECT_EQ(lnast-> get_parent(self), parent);
     });
@@ -270,10 +270,10 @@ TEST_F(Lnast_test,Traverse_preorder_traverse_check_on_lnast){
     for (const auto &it: lnast->depth_preorder(lnast->get_root()) ) {
 
         const auto& node_data = lnast->get_data(it);
-        std::string node_name(node_data.node_token.get_text(memblock)); //str_view to string
-        std::string node_type  = ntype_dbg(node_data.node_type);
+        std::string name(node_data.token.get_text(memblock)); //str_view to string
+        std::string type  = ntype_dbg(node_data.type);
         auto        node_scope = node_data.scope;
-        tuple tuple_data = std::make_tuple(node_name, node_type, node_scope);
+        tuple tuple_data = std::make_tuple(name, type, node_scope);
 
         while (static_cast<size_t>(it.level)>=ast_preorder_testee.size())
             ast_preorder_testee.emplace_back();
