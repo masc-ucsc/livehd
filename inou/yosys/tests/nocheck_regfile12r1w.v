@@ -32,7 +32,7 @@ WITH THE SOFTWARE.
 
 ****************************************************************************/
 
-module regfile12r1w
+module nocheck_regfile12r1w
     (input                    clk
 
      ,input [7-1:0]           waddr0

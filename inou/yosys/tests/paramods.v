@@ -1,5 +1,5 @@
 
-module pm_test1(a, b, x, y);
+module paramods(a, b, x, y);
 
 input [7:0] a, b;
 output [7:0] x, y;

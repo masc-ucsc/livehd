@@ -35,24 +35,24 @@ WITH THE SOFTWARE.
 module regfile2r1w
     (input                    clk
 
-     ,input [7-1:0]           waddr0
+     ,input [4-1:0]           waddr0
 
      ,input                   we0
 
-     ,input [64-1:0]          din0
+     ,input [3-1:0]          din0
 
-     ,input [7-1:0]           raddr0
-     ,input [7-1:0]           raddr1
+     ,input [4-1:0]           raddr0
+     ,input [4-1:0]           raddr1
 
-     ,output [64-1:0]         q0
-     ,output [64-1:0]         q1
+     ,output [3-1:0]         q0
+     ,output [3-1:0]         q1
 
      );
 
-   reg [64-1:0]                      rf[128-1:0]; // synthesis syn_ramstyle = "block_ram"
+   reg [3-1:0]                      rf[16-1:0]; // synthesis syn_ramstyle = "block_ram"
 
-   reg [64-1:0] q0_next;
-   reg [64-1:0] q1_next;
+   reg [3-1:0] q0_next;
+   reg [3-1:0] q1_next;
    always @(*) begin
      if (we0 && raddr0 == waddr0)
        q0_next = din0;

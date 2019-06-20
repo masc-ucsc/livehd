@@ -2,16 +2,16 @@
 
 module mem2
     (input                clk
-     ,input [7:0]         waddr0
+     ,input [1:0]         waddr0
      ,input               we0
-     ,input [63:0]        din0
-     ,input [7:0]         raddr1
-     ,output reg [63:0]   q1
-     ,input [7:0]         raddr2
-     ,output reg [63:0]   q2
+     ,input [16:0]        din0
+     ,input [1:0]         raddr1
+     ,output reg [16:0]   q1
+     ,input [1:0]         raddr2
+     ,output reg [16:0]   q2
      );
 
-   reg [63:0] rf[255:0];
+   reg [16:0] rf[3:0];
 
    always @(posedge clk) begin
      q1 <= rf[raddr1];

@@ -1,4 +1,4 @@
-module gcd_small(input clk,
+module nocheck_gcd_small(input clk,
            input reset,
            input [14:0] a,
            input [14:0] b,

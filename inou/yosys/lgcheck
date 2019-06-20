@@ -111,7 +111,7 @@ yosys_read="read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; proc; flatten; renam
 yosys_prep="proc; memory -nomap; equiv_make gold gate equiv; prep -flatten -top equiv; hierarchy -top equiv; hierarchy -check; flatten; proc; opt_clean;"
 
 yosys_equiv="equiv_simple; equiv_struct; equiv_simple; equiv_struct -icells; equiv_simple;"
-yosys_equiv_extra="${yosys_simple}; equiv_simple -seq 5; equiv_induct -seq 5;"
+yosys_equiv_extra="${yosys_simple}; equiv_simple -seq 4; equiv_induct -seq 4;"
 
 #try fast script first, if it fails, goes to more complex one
 if [ "$OPT_DEBUG" != "" ]; then
@@ -147,7 +147,7 @@ ${YOSYS} -p " read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; opt ; prep; memory
 
               miter -equiv -make_assert -make_outcmp -flatten gold gate equiv
               hierarchy -top equiv
-              sat -prove-asserts -seq 10 -show-public -verify -set-init-undef -ignore_unknown_cells equiv"
+              sat -prove-asserts -seq 4 -show-public -verify -set-init-undef -ignore_unknown_cells equiv"
 if [ $? -eq 0 ]; then
   echo "Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
   exit 0

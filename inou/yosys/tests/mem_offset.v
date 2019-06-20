@@ -1,14 +1,14 @@
 module mem_offset
    (
     input 		                  clk,
-    input [32-1:0]      raddr,
-    input [32-1:0]      waddr,
+    input [2-1:0]      raddr,
+    input [2-1:0]      waddr,
     input 		                  we,
-    input      [32-1:0] din,
-    output reg [32-1:0] dout
+    input      [2-1:0] din,
+    output reg [2-1:0] dout
     );
 
-   reg [32-1:0] mem [5:50];
+   reg [2-1:0] mem [5:50];
 
   always @(posedge clk) begin
     mem[waddr] <= din;
