@@ -14,7 +14,7 @@ void Inou_lnast_dfg::setup() {
 
   Eprp_method m1("inou.lnast_dfg.tolg", "parse cfg_text -> build lnast -> generate lgraph", &Inou_lnast_dfg::tolg);
   m1.add_label_required("files",  "cfg_text files to process (comma separated)");
-  m1.add_label_optional("path",  "path to build the lgraph[s]", "lgdb");
+  m1.add_label_optional("path",   "path to put the lgraph[s]", "lgdb");
 
   register_inou(m1);  
 }
@@ -23,7 +23,7 @@ void Inou_lnast_dfg::setup() {
 void Inou_lnast_dfg::tolg(Eprp_var &var){
   Inou_lnast_dfg p;
 
-  p.opack.files  = var.get("files");
+  p.opack.files = var.get("files");
   p.opack.path  = var.get("path");
 
   if (p.opack.files.empty()) {

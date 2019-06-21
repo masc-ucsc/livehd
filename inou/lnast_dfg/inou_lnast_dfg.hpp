@@ -13,12 +13,12 @@ public:
   std::string path;
 };
 
-class Inou_lnast_dfg : public Pass, public Lnast_parser { //SH:FIXME: just want the inside enum type?
+class Inou_lnast_dfg : public Pass{
 private:
   Inou_lnast_dfg_options opack;
   std::string_view       memblock;     //SH:FIXME:cannot initialize through constructor?
   Lnast_parser           lnast_parser; //SH:FIXME:cannot initialize through constructor?
-  Language_neutral_ast*  lnast;        //SH:FIXME:cannot initialize through constructor?
+  Language_neutral_ast  *lnast;        //SH:FIXME:cannot initialize through constructor?
 
 protected:
 

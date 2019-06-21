@@ -16,7 +16,8 @@ static inline constexpr int   CFG_SCOPE_OP_TOKEN1ST_RANGE = -7; //K9  K14  0 59 
 static inline constexpr int   CFG_OP_FUNC_ROOT_RANGE      =  2; //K9  K14  0 59 96 ::{  ___e  K11  $a  $b  %o
 static inline constexpr int   CFG_OP_FUNC_TMP_REF_RANGE   =  2; //K14 K15  0 59 96   =  fun1  \___e
 
-//SH:FIXME: temporarily used string for lnast google testing
+//SH:FIXME: temporarily replace Token to std::string for lnast nested if-else golden construction
+//SH:FIXME: should be deprecated after Akash finish his part.
 struct Lnast_node_str {
   const Lnast_ntype_id   type;
   std::string            token;

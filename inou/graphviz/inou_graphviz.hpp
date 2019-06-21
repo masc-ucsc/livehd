@@ -6,23 +6,34 @@
 
 #include "lgraph.hpp"
 #include "pass.hpp"
+#include "lnast.hpp"
 
 class Inou_graphviz : public Pass {
 private:
+  std::string_view       memblock;
+  Lnast_parser           lnast_parser;
 protected:
-  std::string odir;
   bool        bits;
   bool        verbose;
+  std::string files;
+  std::string odir;
 
   std::atomic<int> total;
   void             inc_total(Index_ID idx) {
     total++;
   };
 
-  static void fromlg(Eprp_var &var);
+  static void  fromlg(Eprp_var &var);
+  static void  fromlnast(Eprp_var &var);
 
-  void do_fromlg(std::vector<LGraph *> &out);
-  void populate_data(LGraph* lg);
+  void  do_fromlg(std::vector<LGraph *> &out);
+  void  populate_lg_data(LGraph* lg);
+
+
+  void  do_fromlnast(std::string_view files);
+  void  populate_lnast_data(std::string_view files);
+
+  std::string_view  setup_memblock(std::string_view files);
 
 public:
   Inou_graphviz();
