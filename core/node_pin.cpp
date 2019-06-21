@@ -109,9 +109,8 @@ void Node_pin::nuke() {
 
 std::string Node_pin::debug_name() const {
 #ifndef NDEBUG
-  static int conta = 0;
-  if (conta==0) {
-    conta=1;
+  static uint16_t conta = 8192;
+  if (conta++==0) {
     fmt::print("WARNING: Node_pin::debug_name should not be called during release (Slowww!)\n");
   }
 #endif

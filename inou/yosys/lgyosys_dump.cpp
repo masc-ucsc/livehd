@@ -343,7 +343,12 @@ void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
 }
 
 void Lgyosys_dump::to_yosys(LGraph *g) {
-  auto name = g->get_name();
+  std::string name(g->get_name());
+
+  if (g->empty()) {
+    fprintf(stderr,"Warning: lgraph %s is empty. Skiping dump\n", name.c_str());
+    return;
+  }
 
   RTLIL::Module *module = design->addModule(absl::StrCat("\\",name));
 

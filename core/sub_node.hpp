@@ -188,7 +188,7 @@ public:
   }
 
   bool has_pin(std::string_view name) const { I(lgid); return name2id.find(name) != name2id.end(); }
-  bool has_graph_pin(Port_ID graph_pos) const { I(lgid); return graph_pos2instance_pid.size()>graph_pos && graph_pos2instance_pid[graph_pos]!=0; }
+  bool has_graph_pin(Port_ID graph_pos) const { I(lgid); return graph_pos2instance_pid.size()>graph_pos && graph_pos2instance_pid[graph_pos]!=Port_invalid; }
   bool has_instance_pin(Port_ID instance_pid) const { I(lgid); return io_pins.size()>instance_pid; }
 
   Port_ID get_instance_pid(std::string_view name) const {

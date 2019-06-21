@@ -34,6 +34,7 @@ struct GlobalPin {
 };
 
 static CellTypes ct_all;
+static absl::flat_hash_set<size_t> driven_signals;
 static absl::flat_hash_set<std::string> cell_port_inputs;
 static absl::flat_hash_set<std::string> cell_port_outputs;
 
@@ -424,34 +425,46 @@ static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path
       if (sub) {
         std::string pin_name(&(conn.first.c_str()[1]));
 
-        printf("module %s cell type %s has pin_name %s\n",module->name.c_str(), cell->type.c_str(), pin_name.c_str());
-
         if (isdigit(pin_name[0])) {
           // hardcoded pin position
           int pos = atoi(pin_name.c_str());
 
           if (!sub->has_graph_pin(pos)) {
-#if 1
-            printf("FIXME module %s cell type %s has pin_name %s but it is disconnected\n",module->name.c_str(), cell->type.c_str(), pin_name.c_str());
-#else
-HERE: Add pin, allow to map later
             if (cell->output(conn.first)) {
-              sub->map_pin(Sub_node::Direction::Output, pos);
+              sub->add_pin(pin_name, Sub_node::Direction::Output, pos);
             } else if (cell->input(conn.first)) {
-              sub->map_pin(Sub_node::Direction::Input, pos);
+              sub->add_pin(pin_name, Sub_node::Direction::Input, pos);
+            } else if (conn.second.is_fully_undef()) {
+              sub->add_pin(pin_name, Sub_node::Direction::Output, pos);
+            } else if (conn.second.is_fully_const()) {
+              sub->add_pin(pin_name, Sub_node::Direction::Input, pos);
+            } else {
+              bool is_input  = false;
+              bool is_output = false;
+              for (auto &chunk : conn.second.chunks()) {
+                const RTLIL::Wire *wire = chunk.wire;
+                if (wire->port_input) is_input = true;
+                if (wire->port_output) is_output = true;
+                if (driven_signals.count(wire->hash()) != 0) {
+                  is_input = true;
+                }
+              }
+              if (is_input && !is_output) {
+                sub->add_pin(pin_name, Sub_node::Direction::Input, pos);
+              } else if (!is_input && is_output) {
+                sub->add_pin(pin_name, Sub_node::Direction::Output, pos);
+              } else {
+                fprintf(stderr,"Warning: impossible to figure out direction in module %s cell type %s pin_name to %s\n",module->name.c_str(), cell->type.c_str(), pin_name.c_str());
+                continue;
+              }
             }
-#endif
-
-            if (cell->output(conn.first)) {
-              assert(false); // TODO: We could add as a sub without name
-            }
-            continue;
           }
           auto io_pin = sub->get_io_pin_from_graph_pos(pos);
           if (io_pin.dir == Sub_node::Direction::Input)
             continue;
 
-          printf("module %s cell type %s maps from %s pin_name to %s\n",module->name.c_str(), cell->type.c_str(), pin_name.c_str(), io_pin.name.c_str());
+          printf("module %s cell type %s has output pin_name %s\n",module->name.c_str(), cell->type.c_str(), pin_name.c_str());
+
           pid = sub->get_instance_pid(io_pin.name);
         }else{
 
@@ -1038,6 +1051,10 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
         if (isdigit(name[0])) {
           // hardcoded pin position
           int  pos    = atoi(name.c_str());
+          if (!sub.has_graph_pin(pos)) {
+            fprintf(stderr,"ERROR: could not figure out if pin %s in module %s is input or output\n", name.c_str(), std::string(sub.get_name()).c_str());
+            continue;
+          }
           auto io_pin = sub.get_io_pin_from_graph_pos(pos);
           if (io_pin.dir == Sub_node::Direction::Output) continue;
 
@@ -1270,11 +1287,11 @@ struct Yosys2lg_Pass : public Yosys::Pass {
 
 		ct_all.setup(design);
 
+    driven_signals.clear();
     for(auto &it : design->modules_) {
       RTLIL::Module *module = it.second;
       std::string    name   = &module->name.c_str()[1];
 
-      std::set<size_t> driven_signals;
       SigMap sigmap(module);
 
       for (auto wire : module->wires()) {
