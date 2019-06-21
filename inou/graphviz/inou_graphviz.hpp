@@ -25,6 +25,9 @@ protected:
 
   static void  fromlg(Eprp_var &var);
   static void  fromlnast(Eprp_var &var);
+  static void  hierarchy(Eprp_var &var);
+
+  void  do_hierarchy(LGraph* lg);
 
   void  do_fromlg(std::vector<LGraph *> &out);
   void  populate_lg_data(LGraph* lg);

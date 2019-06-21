@@ -23,7 +23,7 @@ void Pass::register_inou(Eprp_method &method) {
   } else if (method.get_name() == std::string{"inou." + name + ".fromlnast"}) { //for dot
     method.add_label_required("files", "input file[s]");
     method.add_label_optional("odir", "output directory", ".");
-  } else if (method.get_name() == std::string{"inou." + name}) {
+  } else if (method.get_name().rfind(std::string{"inou." + name},0) == 0) {
     method.add_label_optional("path", "lgraph path", "lgdb");
     method.add_label_optional("files", "input file[s]");
     method.add_label_optional("odir", "output directory", ".");

@@ -144,9 +144,10 @@ protected:
   }
 
   Index_ID fast_next(Hierarchy_id hid, Index_ID nid) const {
-    I(find_sub_lgraph(hid));
+    const LGraph *sub_g = find_sub_lgraph(hid);
+    I(sub_g);
 
-    return fast_next(nid);
+    return sub_g->fast_next(nid);
   }
 
   bool is_sub(Index_ID nid) const {
@@ -166,8 +167,12 @@ protected:
 
     bool it_is_sub = sub_g->is_sub(nid);
 
+    auto it = sub_g->sub_nodes.find(Node::Compact_class(nid));
     GI( it_is_sub, sub_g->sub_nodes.find(Node::Compact_class(nid)) != sub_g->sub_nodes.end());
     GI(!it_is_sub, sub_g->sub_nodes.find(Node::Compact_class(nid)) == sub_g->sub_nodes.end());
+    if (!it_is_sub) {
+      I(it == sub_g->sub_nodes.end());
+    }
 
     return it_is_sub;
   }
@@ -235,6 +240,7 @@ public:
   Sub_node         &get_self_sub_node() const; // Access all input/outputs
 
   void dump();
+  void dump_sub_nodes();
 
   Node_pin get_graph_input(std::string_view str);
   Node_pin get_graph_output(std::string_view str);

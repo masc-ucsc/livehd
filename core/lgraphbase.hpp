@@ -53,15 +53,11 @@ protected:
     // NOTE: possible to used sub_nodes.size(). It would be a more compact
     // tree, but it requires an extra indirection using sub_nodes to find the
     // nid when traversing.
-    uint32_t n = node_internal.size();
-    if (n<16)
+
+    int val = 32 - __builtin_clz(node_internal.size());
+    if (val<4)
       return 4;
-    n |= (n >>  1);
-    n |= (n >>  2);
-    n |= (n >>  4);
-    n |= (n >>  8);
-    n |= (n >> 16);
-    return n - (n >> 1);
+    return val;
   }
 
   void del_node(Index_ID idx);

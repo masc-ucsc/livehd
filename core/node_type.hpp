@@ -59,5 +59,6 @@ public:
   const Node_sview_map &get_const_sview_map() const { return const_sview; };
   const Node_value_map &get_const_value_map() const { return const_value; };
   const Node_sub_map   &get_sub_nodes_map()   const { return sub_nodes; };
+
 };
 

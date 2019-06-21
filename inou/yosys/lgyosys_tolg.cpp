@@ -1288,6 +1288,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
 		ct_all.setup(design);
 
     driven_signals.clear();
+
     for(auto &it : design->modules_) {
       RTLIL::Module *module = it.second;
       std::string    name   = &module->name.c_str()[1];

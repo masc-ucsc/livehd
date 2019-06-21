@@ -27,10 +27,16 @@ void Inou_graphviz::setup() {
 
   Eprp_method m2("inou.graphviz.fromlnast", "export lnast to graphviz dot format", &Inou_graphviz::fromlnast);
 
-  m2.add_label_required("files",  "cfg_text files to process (comma separated)");
-  m2.add_label_optional("odir",   "path to put the dot", ".");
+  //m2.add_label_required("files",  "cfg_text files to process (comma separated)");
+  //m2.add_label_optional("odir",   "path to put the dot", ".");
 
   register_inou(m2);
+
+  Eprp_method m3("inou.graphviz.fromlg.hierarchy", "export lgraph hierarchy to graphviz dot format", &Inou_graphviz::hierarchy);
+
+  //m3.add_label_optional("odir",   "path to put the dot", ".");
+
+  register_inou(m3);
 }
 
 Inou_graphviz::Inou_graphviz() : Pass("graphviz") {
@@ -40,6 +46,38 @@ Inou_graphviz::Inou_graphviz() : Pass("graphviz") {
   odir    = ".";
 }
 
+void Inou_graphviz::hierarchy(Eprp_var &var) {
+  Inou_graphviz p;
+
+  p.odir    = var.get("odir");
+  p.verbose = var.get("verbose") == "true";
+
+  bool ok = p.setup_directory(p.odir);
+  if (!ok) return;
+
+  for (const auto &l : var.lgs) {
+    p.do_hierarchy(l);
+  }
+}
+
+void Inou_graphviz::do_hierarchy(LGraph *g) {
+  std::string data = "digraph {\n";
+
+  g->dump_sub_nodes();
+
+  for (const auto node : g->fast(true)) {
+    data += fmt::format("lg:{} node:{} type:{}\n", node.get_class_lgraph()->get_name(), node.debug_name(), node.get_type().get_name());
+  }
+
+  std::string file = absl::StrCat(odir, "/", g->get_name(), "_hier.dot");
+  int         fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
+  if (fd < 0) {
+    Pass::error("inou.graphviz unable to create {}", file);
+    return;
+  }
+  write(fd, data.c_str(), data.size());
+  close(fd);
+}
 
 void Inou_graphviz::fromlg(Eprp_var &var) {
   Inou_graphviz p;

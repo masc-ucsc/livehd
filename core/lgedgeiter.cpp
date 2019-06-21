@@ -11,19 +11,20 @@ CFast_edge_iterator CFast_edge_iterator::operator++() {
   CFast_edge_iterator i(top_g, hid, nid, visit_sub);
 
   nid = top_g->fast_next(hid, nid);
-  if (visit_sub) {
+
+  if (nid ==0) {
+    if (!h_stack.empty()) {
+      I(visit_sub);
+      I(hid != h_stack.back().hid);
+      hid = h_stack.back().hid;
+      nid = h_stack.back().nid;
+      h_stack.pop_back();
+    }
+  }else if (visit_sub) {
     if (top_g->is_sub(hid, nid)) {
       h_stack.emplace_back(hid, nid);
       hid = top_g->get_sub_hierarchy_id(hid, nid);
       nid = top_g->fast_next(0);
-    }
-  }else if (nid ==0) {
-    if (!h_stack.empty()) {
-      I(hid != h_stack.back().hid);
-      I(h_stack.back().hid);
-      hid = h_stack.back().hid;
-      nid = h_stack.back().nid;
-      h_stack.pop_back();
     }
   }
 
