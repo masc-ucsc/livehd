@@ -113,19 +113,14 @@ void Chunkify_verilog::write_file(std::string_view filename, std::string_view te
   close(fd);
 }
 
-void Chunkify_verilog::add_io(LGraph *lg, bool input, std::string_view io_name) {
+void Chunkify_verilog::add_io(Sub_node *sub, bool input, std::string_view io_name, Port_ID pos) {
 
-  assert(lg);
+  I(sub);
 
-  if(input) {
-    if (lg->is_graph_input(io_name))
-      return;
-    lg->add_graph_input(io_name, 0, 0);
-  } else {
-    if (lg->is_graph_output(io_name))
-      return;
-    lg->add_graph_output(io_name, 0, 0);
-  }
+  auto dir = input? Sub_node::Direction::Input : Sub_node::Direction::Output;
+
+  I(!sub->has_pin(io_name)); // reset_sub clears all the pins
+  sub->add_pin(io_name, dir, pos);
 }
 
 void Chunkify_verilog::elaborate() {
@@ -153,8 +148,9 @@ void Chunkify_verilog::elaborate() {
       return;
     }
   }
+  auto source = absl::StrCat(parse_path, "file_", format_name);
 
-  write_file(absl::StrCat(parse_path, "file_", format_name), buffer);
+  write_file(source, buffer);
   chunk_dir = absl::StrCat(parse_path, "chunk_", format_name);
   Eprp_utils::clean_dir(chunk_dir);
 
@@ -170,7 +166,7 @@ void Chunkify_verilog::elaborate() {
   bool last_output = false;
 
   std::string module;
-  Port_ID     module_io_pos = 1;
+  Port_ID     module_io_pos = 0;
 
   // This has to be cut&pasted to each file
   std::string not_in_module_text;
@@ -185,7 +181,7 @@ void Chunkify_verilog::elaborate() {
   in_module_text.reserve(buffer.size());
   in_module_token.reserve(token_list.size());
 
-  LGraph *lg = 0;
+  Sub_node *sub = nullptr;
 
   while(!scan_is_end()) {
     bool endmodule_found = false;
@@ -199,15 +195,11 @@ void Chunkify_verilog::elaborate() {
         scan_token_append(in_module_token);
         scan_next();
         scan_append(module);
-        module_io_pos = 1; // pos 0 means I do not care
+        module_io_pos = 0;
         in_module     = true;
 
-        lg = library->try_find_lgraph(module);
-        if(lg == 0) {
-          // fmt::print("chunkify_verilog::add_io create module {}\n",mod_name);
-          const std::string &source = chunk_dir + "/" + module + ".v";
-          lg = LGraph::create(path, module, source);
-        }
+        sub = &library->reset_sub(module, source);
+        I(sub);
 
       } else if(txt == "input") {
         last_input = true;
@@ -232,7 +224,7 @@ void Chunkify_verilog::elaborate() {
           auto label = scan_prev_sview();
 #endif
 
-          add_io(lg, last_input, label);
+          add_io(sub, last_input, label, module_io_pos);
 
           module_io_pos++;
         }

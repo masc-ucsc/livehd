@@ -92,6 +92,10 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
     io_pins[instance_pid].name = name;
     io_pins[instance_pid].dir  = dir;
     io_pins[instance_pid].graph_io_pos  = pid;
+
+    if (pid != Port_invalid) {
+      map_pin_int(instance_pid, pid);
+    }
   }
 
 }

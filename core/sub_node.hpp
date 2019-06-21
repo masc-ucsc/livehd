@@ -70,6 +70,7 @@ private:
   void map_pin_int(Port_ID instance_pid, Port_ID graph_pos) {
     I(graph_pos!=Port_invalid);
     I(instance_pid); // Must be non zero for input/output pid
+    I(io_pins[instance_pid].graph_io_pos == graph_pos);
 
     if (graph_pos2instance_pid.size()<=graph_pos) {
       graph_pos2instance_pid.resize(graph_pos+1, Port_invalid);
@@ -91,13 +92,18 @@ public:
   void to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer) const;
   void from_json(const rapidjson::Value &entry);
 
-  void setup(std::string_view _name, Lg_type_id _lgid) {
-    name = _name;
-    lgid = _lgid;
-
+  void reset_pins() {
     clear_io_pins();
     io_pins.clear();   // WARNING: Do NOT remove mappings, just port id. (allows to reload designs)
     io_pins.resize(1); // No id ZERO
+    name2id.clear();
+  }
+
+  void reset(std::string_view _name, Lg_type_id _lgid) {
+    name = _name;
+    lgid = _lgid;
+
+    reset_pins();
   }
 
   void rename(std::string_view _name) {
@@ -136,12 +142,29 @@ public:
     return add_pin(name, Direction::Output);
   }
 
+#if 0
+  // Possible but why? Too error prone. Just call reset_sub...
+  void reset_pin(std::string_view name, Direction dir, Port_ID graph_pos = Port_invalid) {
+    I(has_pin(name));
+    auto instance_pid = name2id.at(name);
+    I(io_pins[instance_pid].name == name);
+    io_pins[instance_pid].dir = dir;
+    auto old_pos = io_pins[instance_pid].graph_io_pos;
+    if (old_pos != Port_invalid) {
+      I(graph_pos2instance_pid.size() > old_pos);
+      graph_pos2instance_pid[old_pos] = Port_invalid;
+    }
+
+    io_pins[instance_pid].graph_io_pos = graph_pos;
+    map_pin_int(instance_pid, graph_pos);
+  }
+#endif
+
   Port_ID add_pin(std::string_view name, Direction dir, Port_ID graph_pos=Port_invalid) {
     I(lgid);
     I(!has_pin(name));
     Port_ID instance_pid = io_pins.size();
     io_pins.emplace_back(name, dir, graph_pos);
-    fmt::print("add_pin name:{} instance_pid:{} name2id{}\n", name, instance_pid, name2id.size());
     name2id[name] = instance_pid;
     I(io_pins[instance_pid].name == name);
     if (graph_pos != Port_invalid)

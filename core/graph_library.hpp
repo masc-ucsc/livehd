@@ -87,8 +87,10 @@ public:
   static LGraph *try_find_lgraph(std::string_view path, std::string_view name);
   LGraph        *try_find_lgraph(std::string_view name);
 
-  Sub_node      &setup_sub(std::string_view name);
-  Sub_node      &get_sub(Lg_type_id lgid) {
+  Sub_node &reset_sub(std::string_view name, std::string_view source);
+  Sub_node &setup_sub(std::string_view name, std::string_view source);
+  Sub_node &setup_sub(std::string_view name) { return setup_sub(name, "-"); }
+  Sub_node &get_sub(Lg_type_id lgid) {
     graph_library_clean = false;
     I(lgid > 0);  // 0 is invalid lgid
     I(attributes.size() > lgid);

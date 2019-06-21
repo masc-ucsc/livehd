@@ -462,6 +462,7 @@ int main(int argc, char** argv) {
       std::cout << input << "\n";
 
       Main_api::parse(input);
+      Graph_library::sync_all();
 
       rx.history_add(input);
       continue;
@@ -471,6 +472,8 @@ int main(int argc, char** argv) {
   if (!option_quiet) std::cerr << "See you soon\n";
 
   if (history) rx.history_save(history_file);
+
+  Graph_library::sync_all();
 
   if (Main_api::has_errors()) return 1;
 

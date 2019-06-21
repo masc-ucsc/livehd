@@ -106,13 +106,32 @@ LGraph *Graph_library::try_find_lgraph(std::string_view name) {
   return nullptr;
 }
 
-Sub_node &Graph_library::setup_sub(std::string_view name) {
+Sub_node &Graph_library::reset_sub(std::string_view name, std::string_view source) {
+  graph_library_clean = false;
+
+  Lg_type_id lgid = get_lgid(name);
+  if (lgid) {
+    if (attributes[lgid].source != source) {
+      Pass::warn("module {} changed source changed from {} to {}\n", name, attributes[lgid].source, source);
+      attributes[lgid].source  = source;
+    }
+    auto &sub = sub_nodes[lgid];
+    sub.reset_pins();
+    return sub;
+  }
+
+  lgid = add_name(name, source);
+  I(lgid);
+  return sub_nodes[lgid];
+}
+
+Sub_node &Graph_library::setup_sub(std::string_view name, std::string_view source) {
   Lg_type_id lgid = get_lgid(name);
   if (lgid) {
     return sub_nodes[lgid];
   }
 
-  lgid = add_name(name,"-");
+  lgid = add_name(name,source);
   I(lgid);
   return sub_nodes[lgid];
 }
@@ -129,7 +148,7 @@ Lg_type_id Graph_library::add_name(std::string_view name, std::string_view sourc
 
   I(id < attributes.size());
   I(id < sub_nodes.size());
-  sub_nodes[id].setup(name, id);
+  sub_nodes[id].reset(name, id);
   attributes[id].source  = source;
   attributes[id].version = max_next_version.value++;
 
@@ -455,6 +474,9 @@ void Graph_library::sync_all() {
     for(auto &it2:it.second) {
       it2.second->sync();
     }
+  }
+  for(auto &it:global_instances) {
+    it.second->clean_library();
   }
 }
 

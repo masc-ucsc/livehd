@@ -5,7 +5,7 @@
 #include "lgedge.hpp"
 
 class Graph_library;
-class LGraph;
+class Sub_node;
 
 class Chunkify_verilog : public Elab_scanner {
 protected:
@@ -25,7 +25,7 @@ protected:
   void write_file(std::string_view filename, std::string_view text1, std::string_view text2) const;
   void write_file(std::string_view filename, std::string_view text) const;
 
-  void add_io(LGraph *lg, bool input, std::string_view io_name);
+  void add_io(Sub_node *sub, bool input, std::string_view io_name, Port_ID pos);
 
 public:
   Chunkify_verilog(std::string_view outd, std::string_view _elab_path);
