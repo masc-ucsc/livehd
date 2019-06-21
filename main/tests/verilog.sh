@@ -59,16 +59,16 @@ do
     let fail++
     fail_list+=" "$base
   fi
-  LC=$(grep -iv Warning tmp_yosys/${input}.err | wc -l | cut -d" " -f1)
+  LC=$(grep -iv Warning tmp_yosys/${input}.err | grep -v "recommended to use " | wc -l | cut -d" " -f1)
   if [[ $LC -gt 0 ]]; then
-    echo "FAIL: Faulty err verilog file tmp_yosys/${base}.err"
+    echo "FAIL: Faulty "$LC" err verilog file tmp_yosys/${input}.err"
     let fail++
     fail_list+=" "$base
     continue
   fi
   LC=$(grep -i signal tmp_yosys/${input}.log | wc -l | cut -d" " -f1)
   if [[ $LC -gt 0 ]]; then
-    echo "FAIL: Faulty log verilog file tmp_yosys/${base}.log"
+    echo "FAIL: Faulty "$LC" log verilog file tmp_yosys/${input}.log"
     let fail++
     fail_list+=" "$base
     continue
@@ -81,7 +81,14 @@ do
 
   #${YOSYS} -g${base} -h > ./yosys-test/log_to_yosys_${input} 2> ./yosys-test/err_to_yosys_${input}
 
-  echo "lgraph.match path:lgdb_yosys |> inou.yosys.fromlg odir:tmp_yosys" | ${LGSHELL} -q
+  echo "lgraph.match path:lgdb_yosys |> inou.yosys.fromlg odir:tmp_yosys" | ${LGSHELL} -q 2>tmp_yosys/${input}.err
+  LC=$(grep -iv Warning tmp_yosys/${input}.err | grep -v "recommended to use " | wc -l | cut -d" " -f1)
+  if [[ $LC -gt 0 ]]; then
+    echo "FAIL: Faulty "$LC" err verilog file tmp_yosys/${input}.err"
+    let fail++
+    fail_list+=" "$base
+    continue
+  fi
   if [ $? -eq 0 ]; then
     echo "Successfully created verilog from graph ${input}"
   else

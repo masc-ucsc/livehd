@@ -67,7 +67,9 @@ static void look_for_module_outputs(RTLIL::Module *module, const std::string &pa
       I(wire->name.c_str()[0] == '\\');
       auto pin = g->add_graph_output(&wire->name.c_str()[1], wire->port_id, wire->width);
       if (wire->start_offset) {
-        pin.set_offset(wire->start_offset);
+        auto dpin = g->get_graph_output_driver(&wire->name.c_str()[1]);
+        I(dpin.get_pid() == pin.get_pid());
+        dpin.set_offset(wire->start_offset);
       }
     }
   }
