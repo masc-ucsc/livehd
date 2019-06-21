@@ -215,6 +215,7 @@ static Node resolve_memory(LGraph *g, RTLIL::Cell *cell) {
   for(uint32_t rdport = 0; rdport < rdports; rdport++) {
     RTLIL::SigSpec ss       = cell->getPort("\\RD_DATA").extract(rdport * bits, bits);
     auto           dpin     = node.setup_driver_pin(rdport);
+    dpin.set_bits(bits);
 
     uint32_t offset = 0;
     for(auto &chunk : ss.chunks()) {
@@ -583,8 +584,8 @@ static void process_assigns(RTLIL::Module *module, LGraph *g) {
           } else {
             I(dpin.get_bits());
             I(wire2pin[lhs_wire].get_bits() == dpin.get_bits());
-
-            printf("WARNING: unclear code\n");
+            //auto dpin2 = wire2pin[lhs_wire];
+            I(dpin==wire2pin[lhs_wire]); // "WARNING: unclear code FIXME\n";
             //auto spin = wire2pin[lhs_wire];
             //assert(false);// FIXME: find test case to debug/fix this
             //g->add_edge(dpin, spin);
@@ -1216,9 +1217,11 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
   // we need to connect global outputs to the cell that drives it
   for(auto wire : module->wires()) {
     if(wire->port_output && wire2pin.find(wire) != wire2pin.end()) {
+      Node_pin &dpin = wire2pin[wire];
+      if (dpin.is_graph_output())
+        continue;
 
       Node_pin spin = g->get_graph_output(&wire->name.c_str()[1]);
-      Node_pin dpin = wire2pin[wire];
       g->add_edge(dpin, spin, wire->width);
     }
   }

@@ -182,16 +182,16 @@ public:
     I(!src.is_input());
     I(dst.is_input());
     I(dst.get_class_lgraph() == src.get_class_lgraph());
+    // Do not loop back unless pipelined or subgraph
+    GI(src.get_node().get_nid() == dst.get_node().get_nid(), src.get_node().get_type().is_pipelined());
 
     return add_edge_int(dst.get_idx(), dst.get_pid(), src.get_idx(), src.get_pid());
   }
 
   Index_ID add_edge(const Node_pin &src, const Node_pin &dst, uint16_t bits) {
-    I(!src.is_input());
-    I(dst.is_input());
-    I(dst.get_class_lgraph() == src.get_class_lgraph());
-    Index_ID idx = add_edge_int(dst.get_idx(), dst.get_pid(), src.get_idx(), src.get_pid());
-    set_bits(src.get_idx(), bits);
+    Index_ID idx = add_edge(src, dst);
+    I(idx = src.get_idx());
+    set_bits(idx, bits);
     return idx;
   }
 

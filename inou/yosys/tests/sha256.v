@@ -37,7 +37,7 @@
 
 (* top =  1  *)
 (* src = "sha256_core.v:40" *)
-module sha256_core(clk, reset_n, init, next, mode, block, ready, digest, digest_valid);
+module sha256(clk, reset_n, init, next, mode, block, ready, digest, digest_valid);
   (* src = "sha256_core.v:199" *)
   wire [31:0] _000_;
   (* src = "sha256_core.v:199" *)

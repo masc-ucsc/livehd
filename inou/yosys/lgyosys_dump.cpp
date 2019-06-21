@@ -608,6 +608,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
           assert(0); // pids > 1 not supported
         }
       }
+      assert(node.get_driver_pin().get_bits());
       upper = lower + node.get_driver_pin().get_bits() - 1;
       if(upper - lower + 1 > picked_wire->width) {
         upper = lower + picked_wire->width - 1;
