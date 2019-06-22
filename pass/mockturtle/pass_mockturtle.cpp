@@ -386,7 +386,7 @@ mockturtle::mig_network::signal Pass_mockturtle::compare_op(const comparator_inp
     }
   }
 
-  //create the final comparation result
+  //create the final comparison result
   if (res.size() == 1) {
     output = eq_op? mig.create_not(res[0]) : res[0];
   } else {
@@ -398,7 +398,7 @@ mockturtle::mig_network::signal Pass_mockturtle::compare_op(const comparator_inp
 
 //creating and mapping a compare-op LGraph node to a mig node
 //mapping it's both input and output LGraph edges to mig signals
-void Pass_mockturtle::mapping_comparation_cell_lg2mig(const bool &lt_op, const bool &eq_op,
+void Pass_mockturtle::mapping_comparison_cell_lg2mig(const bool &lt_op, const bool &eq_op,
                                                       mockturtle::mig_network &mig_ntk, const Node &node,
                                                       const unsigned int &group_id)
 {
@@ -503,7 +503,10 @@ void Pass_mockturtle::create_n_bit_k_input_mux(std::vector<std::vector<mockturtl
   }
 }
 
-void Pass_mockturtle::mapping_shift_cell_lg2mig() {
+void Pass_mockturtle::mapping_shift_cell_lg2mig(const bool &sign_ext, mockturtle::mig_network &mig_ntk,
+                                                const Node &node, const unsigned int &group_id)
+{
+
 }
 
 void Pass_mockturtle::create_MIG_network(LGraph *g) {
@@ -594,28 +597,28 @@ void Pass_mockturtle::create_MIG_network(LGraph *g) {
       case LessThan_Op: {
         fmt::print("LessThan_Op in gid:{}\n",group_id);
         I(node.inp_edges().size()>=2 && node.out_edges().size()>0);
-        mapping_comparation_cell_lg2mig(true, false, mig_ntk, node, group_id);
+        mapping_comparison_cell_lg2mig(true, false, mig_ntk, node, group_id);
         break;
       }
 
       case GreaterThan_Op: {
         fmt::print("GreaterThan_Op in gid:{}\n",group_id);
         I(node.inp_edges().size()>=2 && node.out_edges().size()>0);
-        mapping_comparation_cell_lg2mig(false, false, mig_ntk, node, group_id);
+        mapping_comparison_cell_lg2mig(false, false, mig_ntk, node, group_id);
         break;
       }
 
       case LessEqualThan_Op: {
         fmt::print("LessEqualThan_Op in gid:{}\n",group_id);
         I(node.inp_edges().size()>=2 && node.out_edges().size()>0);
-        mapping_comparation_cell_lg2mig(true, true, mig_ntk, node, group_id);
+        mapping_comparison_cell_lg2mig(true, true, mig_ntk, node, group_id);
         break;
       }
 
       case GreaterEqualThan_Op: {
         fmt::print("GreaterEqualThan_Op in gid:{}\n",group_id);
         I(node.inp_edges().size()>=2 && node.out_edges().size()>0);
-        mapping_comparation_cell_lg2mig(false, true, mig_ntk, node, group_id);
+        mapping_comparison_cell_lg2mig(false, true, mig_ntk, node, group_id);
         break;
       }
 
@@ -665,6 +668,8 @@ void Pass_mockturtle::create_MIG_network(LGraph *g) {
 
       case ArithShiftRight_Op: {
         fmt::print("ArithShiftRight_Op in gid:{}\n",group_id);
+        I(node.inp_edges().size()==2 && node.out_edges().size()>0);
+        I(node.inp_edges()[0].sink.get_pid() != node.inp_edges()[1].sink.get_pid());
         break;
       }
 /*
