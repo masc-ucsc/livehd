@@ -506,7 +506,41 @@ void Pass_mockturtle::create_n_bit_k_input_mux(std::vector<std::vector<mockturtl
 void Pass_mockturtle::mapping_shift_cell_lg2mig(const bool &sign_ext, mockturtle::mig_network &mig_ntk,
                                                 const Node &node, const unsigned int &group_id)
 {
+  XEdge opr_A_edge = node.inp_edges()[0].sink.get_pid() == 0
+                     ? opr_A_edge = node.inp_edges()[0]
+                     : opr_A_edge = node.inp_edges()[1];
+  XEdge opr_B_edge = node.inp_edges()[0].sink.get_pid() == 1
+                     ? opr_B_edge = node.inp_edges()[0]
+                     : opr_B_edge = node.inp_edges()[1];
 
+  std::vector<mockturtle::mig_network::signal> opr_A_sig, out_sig;
+  //processing input signal
+  //fmt::print("opr_A_bit_width:{}\n",opr_A_edge.get_bits());
+  //fmt::print("opr_B_bit_width:{}\n",opr_B_edge.get_bits());
+  setup_input_signal(group_id, opr_A_edge, opr_A_sig, mig_ntk);
+  if (opr_B_edge.driver.get_node().get_type().op == U32Const_Op) {
+    //creating output signal for const shift
+    uint32_t offset = opr_B_edge.driver.get_node().get_type_const_value();
+    shr_op(out_sig, opr_A_sig, sign_ext, offset, mig_ntk);
+  } else {
+    std::vector<mockturtle::mig_network::signal> opr_B_sig, temp_out;
+    std::vector<std::vector<mockturtle::mig_network::signal>> out_enum;
+    I(opr_B_edge.get_bits() != 0);
+    setup_input_signal(group_id, opr_B_edge, opr_B_sig, mig_ntk);
+    for (long unsigned int ofs = 0; ofs < (long unsigned int)(1<<opr_B_sig.size()); ofs++) {
+      temp_out.clear();
+      shr_op(temp_out, opr_A_sig, sign_ext, ofs, mig_ntk);
+      out_enum.emplace_back(temp_out);
+    }
+    //using B to select output (mux)
+    //create a mux
+    create_n_bit_k_input_mux(out_enum, opr_B_sig, out_sig, mig_ntk);
+  }
+  //processing output signal
+  for (const auto &out_edge : node.out_edges()) {
+    I(out_edge.get_bits() == out_sig.size());
+    setup_output_signal(group_id, out_edge, out_sig, mig_ntk);
+  }
 }
 
 void Pass_mockturtle::create_MIG_network(LGraph *g) {
@@ -627,42 +661,7 @@ void Pass_mockturtle::create_MIG_network(LGraph *g) {
         fmt::print("LogicShiftRight_Op in gid:{}\n",group_id);
         I(node.inp_edges().size()==2 && node.out_edges().size()>0);
         I(node.inp_edges()[0].sink.get_pid() != node.inp_edges()[1].sink.get_pid());
-
-        XEdge opr_A_edge = node.inp_edges()[0].sink.get_pid() == 0
-                           ? opr_A_edge = node.inp_edges()[0]
-                           : opr_A_edge = node.inp_edges()[1];
-        XEdge opr_B_edge = node.inp_edges()[0].sink.get_pid() == 1
-                           ? opr_B_edge = node.inp_edges()[0]
-                           : opr_B_edge = node.inp_edges()[1];
-
-        std::vector<mockturtle::mig_network::signal> opr_A_sig, out_sig;
-        //processing input signal
-        fmt::print("opr_A_bit_width:{}\n",opr_A_edge.get_bits());
-        fmt::print("opr_B_bit_width:{}\n",opr_B_edge.get_bits());
-        setup_input_signal(group_id, opr_A_edge, opr_A_sig, mig_ntk);
-        if (opr_B_edge.driver.get_node().get_type().op == U32Const_Op) {
-          //creating output signal for const shift
-          uint32_t offset = opr_B_edge.driver.get_node().get_type_const_value();
-          shr_op(out_sig, opr_A_sig, false, offset, mig_ntk);
-        } else {
-          std::vector<mockturtle::mig_network::signal> opr_B_sig, temp_out;
-          std::vector<std::vector<mockturtle::mig_network::signal>> out_enum;
-          I(opr_B_edge.get_bits() != 0);
-          setup_input_signal(group_id, opr_B_edge, opr_B_sig, mig_ntk);
-          for (long unsigned int ofs = 0; ofs < (long unsigned int)(1<<opr_B_sig.size()); ofs++) {
-            temp_out.clear();
-            shr_op(temp_out, opr_A_sig, false, ofs, mig_ntk);
-            out_enum.emplace_back(temp_out);
-          }
-          //using B to select output (mux)
-          //create a mux
-          create_n_bit_k_input_mux(out_enum, opr_B_sig, out_sig, mig_ntk);
-        }
-        //processing output signal
-        for (const auto &out_edge : node.out_edges()) {
-          I(out_edge.get_bits() == out_sig.size());
-          setup_output_signal(group_id, out_edge, out_sig, mig_ntk);
-        }
+        mapping_shift_cell_lg2mig(false, mig_ntk, node, group_id);
         break;
       }
 
@@ -670,6 +669,7 @@ void Pass_mockturtle::create_MIG_network(LGraph *g) {
         fmt::print("ArithShiftRight_Op in gid:{}\n",group_id);
         I(node.inp_edges().size()==2 && node.out_edges().size()>0);
         I(node.inp_edges()[0].sink.get_pid() != node.inp_edges()[1].sink.get_pid());
+        mapping_shift_cell_lg2mig(true, mig_ntk, node, group_id);
         break;
       }
 /*
