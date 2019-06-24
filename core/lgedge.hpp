@@ -144,8 +144,8 @@ public:
     I(snode == reinterpret_cast<const SEdge_Internal *>(this)->is_snode());
   }
 
-  Node_pin get_out_pin(LGraph *g, const Hierarchy_id hid) const;
-  Node_pin get_inp_pin(LGraph *g, const Hierarchy_id hid) const;
+  Node_pin get_out_pin(LGraph *g, LGraph *cg, const Hierarchy_index &hidx) const;
+  Node_pin get_inp_pin(LGraph *g, LGraph *cg, const Hierarchy_index &hidx) const;
 
   Index_ID get_self_nid() const;
   Index_ID get_idx() const {

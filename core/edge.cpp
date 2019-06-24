@@ -17,7 +17,7 @@ XEdge::XEdge(const Node_pin &src_, const Node_pin &dst_)
   I(sink.is_sink());
   I(driver.is_driver());
 
-  I(driver.get_hid()        == sink.get_hid());
+  I(driver.get_hidx()       == sink.get_hidx());
   I(driver.get_top_lgraph() == sink.get_top_lgraph());
 }
 

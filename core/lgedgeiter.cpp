@@ -8,23 +8,29 @@
 #include "lgedgeiter.hpp"
 
 CFast_edge_iterator CFast_edge_iterator::operator++() {
-  CFast_edge_iterator i(top_g, hid, nid, visit_sub);
+  CFast_edge_iterator i(top_g, current_g, hidx, nid, visit_sub);
 
-  nid = top_g->fast_next(hid, nid);
+  nid = current_g->fast_next(nid);
 
-  if (nid ==0) {
+  if (nid==0) {
     if (!h_stack.empty()) {
       I(visit_sub);
-      I(hid != h_stack.back().hid);
-      hid = h_stack.back().hid;
-      nid = h_stack.back().nid;
+      I(hidx != h_stack.back().hidx);
+      hidx      = h_stack.back().get_hidx();
+      nid       = h_stack.back().get_nid();
+      current_g = h_stack.back().get_class_lgraph();
       h_stack.pop_back();
     }
-  }else if (visit_sub) {
-    if (top_g->is_sub(hid, nid)) {
-      h_stack.emplace_back(hid, nid);
-      hid = top_g->get_sub_hierarchy_id(hid, nid);
-      nid = top_g->fast_next(0);
+  }else if (visit_sub && current_g->is_sub(nid)) {
+    const auto &sub = current_g->get_type_sub_node(nid);
+    if (!sub.is_black_box()) {
+      h_stack.emplace_back(Node(top_g, current_g, hidx, nid));
+
+      hidx = current_g->hierarchy_go_down(hidx, nid);
+
+      current_g = LGraph::open(top_g->get_path(), sub.get_name());
+
+      nid = current_g->fast_next(0);
     }
   }
 
@@ -160,7 +166,7 @@ bool Edge_raw_iterator_base::update_frontier() {
       return true;
 
     if (*hardcoded_nid) {
-      pending->insert(Node(top_g, 0, *hardcoded_nid).get_compact());
+      pending->insert(Node(top_g, top_g->hierarchy_root(), *hardcoded_nid).get_compact());
       nid = *hardcoded_nid;
       *hardcoded_nid = 0;
       return true;
@@ -175,9 +181,9 @@ void CForward_edge_iterator::set_current_node_as_visited() {
 
   I(top_g->get_node_int(nid).is_master_root());
 
-  global_visited.insert(Node::Compact(hid, nid));
+  global_visited.insert(Node::Compact(hidx, nid));
 
-  Node node(top_g,hid,nid);
+  Node node(top_g,hidx,nid);
   for (const auto &e : node.out_edges()) {
     const auto sink_node = e.sink.get_node();
     // FIXME: put hardcoded in global_visited?? (speed reasons)
@@ -212,32 +218,34 @@ void CForward_edge_iterator::set_current_node_as_visited() {
 
 CForward_edge_iterator Forward_edge_iterator::begin() {
 
-  pending.insert(Node::Compact(0,Node::Hardcoded_input_nid));
+  auto hidx = top_g->hierarchy_root();
+
+  pending.insert(Node::Compact(hidx, Node::Hardcoded_input_nid));
 
   hardcoded_nid = Node::Hardcoded_output_nid;
 
   for(const auto it:top_g->get_const_value_map()) {
-    pending.insert(Node::Compact(0,it.second.nid));
+    pending.insert(Node::Compact(hidx, it.second.nid));
   }
   for(const auto it:top_g->get_const_sview_map()) {
-    pending.insert(Node::Compact(0,it.second.nid));
+    pending.insert(Node::Compact(hidx, it.second.nid));
   }
 
   // Add any sub node that has no inputs but has outputs (not hit with forward)
   for(auto it:top_g->get_sub_nodes_map()) {
     Node n_sub(top_g,it.first);
     if (n_sub.has_outputs() && !n_sub.has_inputs()) {
-      pending.insert(Node::Compact(0,it.first.nid));
+      pending.insert(Node::Compact(hidx, it.first.nid));
     }
   }
 
   I(!pending.empty());
   auto it = pending.begin();
   auto it_nid = it->nid;
-  auto it_hid = it->hid;
+  auto it_hidx = it->hidx;
   pending.erase(it);
 
-  CForward_edge_iterator it2(top_g, it_hid, it_nid, &frontier, &pending, &hardcoded_nid);
+  CForward_edge_iterator it2(top_g, current_g, it_hidx, it_nid, visit_sub, &frontier, &pending, &hardcoded_nid);
 
   return it2;
 }
@@ -246,9 +254,9 @@ void CBackward_edge_iterator::set_current_node_as_visited() {
 
   I(top_g->get_node_int(nid).is_master_root());
 
-  global_visited.insert(Node::Compact(hid, nid));
+  global_visited.insert(Node::Compact(hidx, nid));
 
-  Node node(top_g,hid,nid);
+  Node node(top_g,hidx,nid);
   for (const auto &e : node.inp_edges()) {
     const auto driver_node = e.driver.get_node();
     if (driver_node.get_nid() == Node::Hardcoded_input_nid)
@@ -284,7 +292,7 @@ void CBackward_edge_iterator::set_current_node_as_visited() {
 
 CBackward_edge_iterator Backward_edge_iterator::begin() {
 
-  pending.insert(Node::Compact(0,Node::Hardcoded_output_nid));
+  pending.insert(Node::Compact(top_g->hierarchy_root(), Node::Hardcoded_output_nid));
 
   hardcoded_nid = Node::Hardcoded_input_nid;
 
@@ -299,10 +307,10 @@ CBackward_edge_iterator Backward_edge_iterator::begin() {
   I(!pending.empty());
   auto it = pending.begin();
   auto it_nid = it->nid;
-  auto it_hid = it->hid;
+  auto it_hidx = it->hidx;
   pending.erase(it);
 
-  CBackward_edge_iterator it2(top_g, it_hid, it_nid, &frontier, &pending, &hardcoded_nid);
+  CBackward_edge_iterator it2(top_g, current_g, it_hidx, it_nid, visit_sub, &frontier, &pending, &hardcoded_nid);
 
   return it2;
 }

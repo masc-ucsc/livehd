@@ -6,10 +6,10 @@
 
 #include "annotate.hpp"
 
-Node_pin::Node_pin(LGraph *_g, LGraph *_c_g, Hierarchy_id _hid, Index_ID _idx, Port_ID _pid, bool _sink)
+Node_pin::Node_pin(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _idx, Port_ID _pid, bool _sink)
   :top_g(_g)
   ,current_g(_c_g)
-  ,hid(_hid)
+  ,hidx(_hidx)
   ,idx(_idx)
   ,pid(_pid)
   ,sink(_sink) {
@@ -21,30 +21,33 @@ Node_pin::Node_pin(LGraph *_g, LGraph *_c_g, Hierarchy_id _hid, Index_ID _idx, P
 
 Node_pin::Node_pin(LGraph *_g, Compact comp)
   :top_g(_g)
-  ,hid(comp.hid)
+  ,hidx(comp.hidx)
   ,idx(comp.idx)
   ,pid(_g->get_dst_pid(comp.idx))
   ,sink(comp.sink) {
-  current_g = top_g->find_sub_lgraph(hid);
+  current_g = top_g->find_sub_lgraph(hidx);
   I(current_g->is_valid_node_pin(idx));
 }
 
 Node_pin::Node_pin(LGraph *_g, Compact_driver comp)
   :top_g(_g)
-  ,hid(comp.hid)
+  ,hidx(comp.hidx)
   ,idx(comp.idx)
   ,pid(_g->get_dst_pid(comp.idx))
   ,sink(true) {
-  current_g = top_g->find_sub_lgraph(hid);
+
+  I(hidx);
+  current_g = top_g->find_sub_lgraph(hidx);
   I(current_g->is_valid_node_pin(idx));
 }
 
 Node_pin::Node_pin(LGraph *_g, Compact_class_driver comp)
   :top_g(_g)
-  ,hid(0)
+  ,hidx(_g->hierarchy_root())
   ,idx(comp.idx)
   ,pid(_g->get_dst_pid(comp.idx))
   ,sink(false) {
+
   current_g = top_g; // top_g->find_sub_lgraph(hid);
   I(current_g->is_valid_node_pin(idx));
 }
@@ -64,7 +67,7 @@ bool Node_pin::is_graph_output() const {
 Node Node_pin::get_node() const {
   auto nid = current_g->get_node_nid(idx);
 
-  return Node(top_g, current_g, hid, nid);
+  return Node(top_g, current_g, hidx, nid);
 }
 
 void Node_pin::connect_sink(Node_pin &spin) {
@@ -165,7 +168,8 @@ void Node_pin::set_offset(uint16_t offset) {
 uint16_t Node_pin::get_offset() const {
   auto ref = Ann_node_pin_offset::ref(current_g);
   if (!ref->has(get_compact_class_driver()))
-			return 0;
+    return 0;
+
 	auto off = ref->get(get_compact_class_driver());
 	I(off);
 	return off;

@@ -7,8 +7,8 @@
 
 class Pass_punch : public Pass {
 protected:
-  Hierarchy_id src_hierarchy;
-  Hierarchy_id dst_hierarchy;
+  Hierarchy_index src_hierarchy; // FIXME: _index does not include information about the pin or internal node
+  Hierarchy_index dst_hierarchy;
 
   static void work(Eprp_var &var);
 

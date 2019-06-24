@@ -279,6 +279,9 @@ void Graph_library::reload() {
 
     auto version = lg_entry["version"].GetUint64();;
     if (version != 0) {
+      if (max_next_version<version)
+        max_next_version = version;
+
       I(lg_entry.HasMember("nentries"));
       I(lg_entry.HasMember("source"));
       attributes[id].nentries = lg_entry["nentries"].GetUint64();;

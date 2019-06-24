@@ -8,52 +8,55 @@
 Node::Node(LGraph *_g, Compact comp)
   :top_g(_g)
   ,current_g(0)
-  ,hid(comp.hid)
+  ,hidx(comp.hidx)
   ,nid(comp.nid) {
+  I(hidx);
   I(nid);
   I(top_g);
-  current_g = top_g->find_sub_lgraph(hid);
+  current_g = top_g->find_sub_lgraph(hidx);
   I(current_g->is_valid_node(nid));
 }
 
-Node::Node(LGraph *_g, Hierarchy_id _hid, Compact_class comp)
+Node::Node(LGraph *_g, const Hierarchy_index &_hidx, Compact_class comp)
   :top_g(_g)
   ,current_g(0)
-  ,hid(_hid)
+  ,hidx(_hidx)
   ,nid(comp.nid) {
+  I(hidx);
   I(nid);
   I(top_g);
-  current_g = top_g->find_sub_lgraph(hid);
+  current_g = top_g->find_sub_lgraph(hidx);
   I(current_g->is_valid_node(nid));
 }
 
 Node::Node(LGraph *_g, Compact_class comp)
   :top_g(_g)
   ,current_g(0)
-  ,hid(0)
+  ,hidx(_g->hierarchy_root())
   ,nid(comp.nid) {
+  I(hidx);
   I(nid);
   I(top_g);
   current_g = top_g;
   I(current_g->is_valid_node(nid));
 }
 
-Node::Node(LGraph *_g, LGraph *_c_g, Hierarchy_id _hid, Index_ID _nid)
+Node::Node(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _nid)
   :top_g(_g)
   ,current_g(_c_g)
-  ,hid(_hid)
+  ,hidx(_hidx)
   ,nid(_nid) {
 
+  I(hidx);
   I(nid);
   I(top_g);
   I(current_g);
   I(current_g->is_valid_node(nid));
 }
 
-
 Node_pin Node::get_driver_pin() const {
   I(top_g->get_type(nid).has_single_output());
-  return Node_pin(top_g, current_g, hid, nid, 0, false);
+  return Node_pin(top_g, current_g, hidx, nid, 0, false);
 }
 
 Node_pin Node::get_driver_pin(Port_ID pid) const {
@@ -61,19 +64,19 @@ Node_pin Node::get_driver_pin(Port_ID pid) const {
   I(current_g->get_type(nid).has_output(pid));
   Index_ID idx = current_g->find_idx_from_pid(nid,pid);
   I(idx);
-  return Node_pin(top_g, current_g, hid, idx, pid, false);
+  return Node_pin(top_g, current_g, hidx, idx, pid, false);
 }
 
 Node_pin Node::get_sink_pin(Port_ID pid) const {
   I(current_g->get_type(nid).has_input(pid));
   Index_ID idx = current_g->find_idx_from_pid(nid,pid);
   I(idx);
-  return Node_pin(top_g, current_g, hid, idx, pid, true);
+  return Node_pin(top_g, current_g, hidx, idx, pid, true);
 }
 
 Node_pin Node::get_sink_pin() const {
   GI(current_g,current_g->get_type(nid).has_single_input());
-  return Node_pin(top_g, current_g, hid, nid, 0, true);
+  return Node_pin(top_g, current_g, hidx, nid, 0, true);
 }
 
 bool Node::has_inputs() const {
@@ -100,13 +103,13 @@ Node_pin Node::setup_driver_pin(Port_ID pid) {
   I(current_g->get_type(nid).has_output(pid));
   Index_ID idx = current_g->setup_idx_from_pid(nid,pid);
   current_g->setup_driver(idx);
-  return Node_pin(top_g, current_g, hid, idx, pid, false);
+  return Node_pin(top_g, current_g, hidx, idx, pid, false);
 }
 
 Node_pin Node::setup_driver_pin() const {
   I(current_g->get_type(nid).has_single_output());
   current_g->setup_driver(nid);
-  return Node_pin(top_g, current_g, hid, nid, 0, false);
+  return Node_pin(top_g, current_g, hidx, nid, 0, false);
 }
 
 const Node_Type &Node::get_type() const {
@@ -179,7 +182,7 @@ Node_pin Node::setup_driver_pin(std::string_view name) {
     if (pid)
       idx = current_g->setup_idx_from_pid(nid,pid);
     current_g->setup_driver(idx);
-    return Node_pin(top_g, current_g, hid, idx, pid, false);
+    return Node_pin(top_g, current_g, hidx, idx, pid, false);
   }
 
   I(type.op == SubGraph_Op);
@@ -198,7 +201,7 @@ Node_pin Node::setup_driver_pin(std::string_view name) {
 
   Index_ID idx = current_g->setup_idx_from_pid(nid, pid);
   current_g->setup_driver(idx);
-  return Node_pin(top_g, current_g, hid, idx, pid, false);
+  return Node_pin(top_g, current_g, hidx, idx, pid, false);
 }
 
 void Node::nuke() {
@@ -215,9 +218,9 @@ Node_pin Node::setup_sink_pin(std::string_view name) {
       auto idx = nid;
       if (pid) idx = current_g->setup_idx_from_pid(nid, pid);
       current_g->setup_sink(idx);
-      return Node_pin(top_g, current_g, hid, idx, pid, true);
+      return Node_pin(top_g, current_g, hidx, idx, pid, true);
     }
-    return Node_pin(top_g, current_g, hid, 0, Port_invalid, true);
+    return Node_pin(top_g, current_g, hidx, 0, Port_invalid, true);
   }
 
   I(type.op == SubGraph_Op);
@@ -229,7 +232,7 @@ Node_pin Node::setup_sink_pin(std::string_view name) {
   auto pid = internal_pin.get_pid();
   Index_ID idx = current_g->setup_idx_from_pid(nid,pid);
   current_g->setup_sink(idx);
-  return Node_pin(top_g, current_g, hid, idx, pid, true);
+  return Node_pin(top_g, current_g, hidx, idx, pid, true);
 }
 
 Node_pin Node::setup_sink_pin(Port_ID pid) {
@@ -237,14 +240,14 @@ Node_pin Node::setup_sink_pin(Port_ID pid) {
   I(current_g->get_type(nid).has_input(pid));
   Index_ID idx = current_g->setup_idx_from_pid(nid,pid);
   current_g->setup_sink(idx);
-  return Node_pin(top_g, current_g, hid, idx, pid, true);
+  return Node_pin(top_g, current_g, hidx, idx, pid, true);
 }
 
 Node_pin Node::setup_sink_pin() const {
 
   I(current_g->get_type(nid).has_single_input());
   current_g->setup_sink(nid);
-  return Node_pin(top_g, current_g, hid, nid, 0, true);
+  return Node_pin(top_g, current_g, hidx, nid, 0, true);
 }
 
 XEdge_iterator Node::inp_edges() const {

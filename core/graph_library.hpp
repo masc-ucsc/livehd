@@ -160,6 +160,15 @@ public:
     return max_next_version - 1;
   }
 
+  unsigned int get_lgid_bits() const {
+    // FIXME: if the lgid_bits increases (more lgraphs) all the attributes must be recomputed (create callback interface)
+    uint32_t sz = attributes.size();
+    int val = sizeof(sz)*8 - __builtin_clz(sz+1);
+    if (val<8)
+      return 8;
+    return val;
+  }
+
   //deprecated bool expunge_lgraph(std::string_view name, LGraph *lg);
 
   Lg_type_id copy_lgraph(std::string_view name, std::string_view new_name);

@@ -49,17 +49,6 @@ protected:
     node_internal[idx].set_sink_setup();
   }
 
-  int get_hid_bits() const {
-    // NOTE: possible to used sub_nodes.size(). It would be a more compact
-    // tree, but it requires an extra indirection using sub_nodes to find the
-    // nid when traversing.
-
-    int val = 32 - __builtin_clz(node_internal.size());
-    if (val<4)
-      return 4;
-    return val;
-  }
-
   void del_node(Index_ID idx);
   void del_edge(const Edge_raw *edge_raw);
 
@@ -69,8 +58,6 @@ public:
   LGraph_Base() = delete;
 
   LGraph_Base(const LGraph_Base &) = delete;
-
-  Hierarchy_id get_sub_hierarchy_id(Hierarchy_id hid, Index_ID nid) const;
 
   explicit LGraph_Base(std::string_view _path, std::string_view _name, Lg_type_id lgid) noexcept;
   virtual ~LGraph_Base();

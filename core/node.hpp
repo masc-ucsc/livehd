@@ -17,7 +17,7 @@ class Node {
 protected:
   LGraph            *top_g;
   mutable LGraph    *current_g;
-  const Hierarchy_id hid;
+  const Hierarchy_index hidx;
   const Index_ID     nid;
 
   friend class LGraph;
@@ -31,7 +31,7 @@ protected:
 
   Index_ID get_nid() const { return nid; }
 
-  Node(LGraph *_g, LGraph *_c_g, Hierarchy_id _hid, Index_ID _nid);
+  Node(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _nid);
 
 public:
   static constexpr Index_ID Hardcoded_input_nid  = 1;
@@ -39,7 +39,7 @@ public:
 
   class __attribute__((packed)) Compact {
   protected:
-    Hierarchy_id  hid;
+    Hierarchy_index  hidx;
     uint64_t      nid:Index_bits;
 
     friend class LGraph;
@@ -58,11 +58,11 @@ public:
 
     //constexpr operator size_t() const { I(0); return nid; }
 
-    Compact(Hierarchy_id _hid, Index_ID _nid) :hid(_hid), nid(_nid) { I(nid); };
-    Compact() :hid(0),nid(0) { };
+    Compact(const Hierarchy_index &_hidx, Index_ID _nid) :hidx(_hidx), nid(_nid) { I(nid); };
+    Compact() :hidx(0),nid(0) { };
     Compact &operator=(const Compact &obj) {
       I(this != &obj);
-      hid  = obj.hid;
+      hidx  = obj.hidx;
       nid  = obj.nid;
 
       return *this;
@@ -73,13 +73,13 @@ public:
     constexpr bool is_invalid() const { return nid == 0; }
 
     constexpr bool operator==(const Compact &other) const {
-      return hid == other.hid && nid == other.nid;
+      return hidx == other.hidx && nid == other.nid;
     }
     constexpr bool operator!=(const Compact &other) const { return !(*this == other); }
 
     template <typename H>
     friend H AbslHashValue(H h, const Compact& s) {
-      return H::combine(std::move(h), s.hid, s.nid);
+      return H::combine(std::move(h), s.hidx, s.nid);
     };
   };
 
@@ -128,27 +128,27 @@ public:
   };
   template <typename H>
   friend H AbslHashValue(H h, const Node& s) {
-    return H::combine(std::move(h), (int)s.hid, (int)s.nid); // Ignore lgraph pointer in hash
+    return H::combine(std::move(h), (int)s.hidx, (int)s.nid); // Ignore lgraph pointer in hash
   };
 
   // NOTE: No operator<() needed for std::set std::map to avoid their use. Use flat_map_set for speed
 
-  Node() :top_g(0) ,current_g(0) ,hid(0) ,nid(0) { }
+  Node() :top_g(0) ,current_g(0) ,hidx(0) ,nid(0) { }
   Node(LGraph *_g, Compact comp);
-  Node(LGraph *_g, Hierarchy_id _hid, Compact_class comp);
+  Node(LGraph *_g, const Hierarchy_index &_hidx, Compact_class comp);
   Node(LGraph *_g, Compact_class comp);
   Node &operator=(const Node &obj) {
     I(this != &obj); // Do not assign object to itself. works but wastefull
     top_g     = obj.top_g;
     current_g = obj.current_g;
     const_cast<Index_ID&>(nid)     = obj.nid;
-    const_cast<Hierarchy_id&>(hid) = obj.hid;
+    const_cast<Hierarchy_index&>(hidx) = obj.hidx;
 
     return *this;
   };
 
   inline Compact get_compact() const {
-    return Compact(hid, nid);
+    return Compact(hidx, nid);
   }
   inline Compact_class get_compact_class() const {
     return Compact_class(nid);
@@ -157,7 +157,7 @@ public:
   LGraph *get_top_lgraph() const { I(top_g); return top_g; }
   LGraph *get_class_lgraph() const { I(current_g); return current_g; }
 
-  Hierarchy_id  get_hid()  const { return hid;   }
+  Hierarchy_index  get_hidx()  const { return hidx;   }
 
   Node_pin get_driver_pin() const;
   Node_pin get_driver_pin(Port_ID pid) const;
@@ -172,7 +172,7 @@ public:
   constexpr bool is_invalid() const { return nid==0; }
 
   constexpr bool operator==(const Node &other) const {
-    return top_g == other.top_g && hid == other.hid && nid == other.nid;
+    return top_g == other.top_g && hidx == other.hidx && nid == other.nid;
   }
   constexpr bool operator!=(const Node& other) const { return !(*this == other); };
 
@@ -242,7 +242,7 @@ template <>
 struct hash<Node::Compact> {
   size_t operator()(Node::Compact const &o) const {
     uint64_t h = o.nid;
-    h = (h<<12) ^ o.hid ^ o.nid;
+    h = (h<<12) ^ o.hidx ^ o.nid;
     return hash<uint64_t>{}(h);
   }
 };

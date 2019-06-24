@@ -23,18 +23,18 @@ protected:
 
   LGraph       *top_g;
   LGraph       *current_g;
-  Hierarchy_id  hid;
+  Hierarchy_index  hidx;
   Index_ID      idx;
   Port_ID       pid;
   bool          sink;
 
-  Node_pin(LGraph *_g, LGraph *_c_g, const Hierarchy_id _hid, Index_ID _idx, Port_ID _pid, bool _sink);
+  Node_pin(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _idx, Port_ID _pid, bool _sink);
 
   const Index_ID get_idx() const { I(idx); return idx;    }
 public:
   class __attribute__((packed)) Compact {
   protected:
-    Hierarchy_id   hid;
+    Hierarchy_index hidx;
     uint32_t idx  : Index_bits;
     uint32_t sink : 1;
 
@@ -52,12 +52,12 @@ public:
 
     //constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
-    Compact(const Compact &obj): hid(obj.hid), idx(obj.idx), sink(obj.sink) { }
-    Compact(const Hierarchy_id _hid, Index_ID _idx, bool _sink) :hid(_hid), idx(_idx) ,sink(_sink) { };
-    Compact() :hid(0), idx(0) ,sink(0) { };
+    Compact(const Compact &obj): hidx(obj.hidx), idx(obj.idx), sink(obj.sink) { }
+    Compact(const Hierarchy_index _hidx, Index_ID _idx, bool _sink) :hidx(_hidx), idx(_idx) ,sink(_sink) { };
+    Compact() :hidx(0), idx(0) ,sink(0) { };
     Compact &operator=(const Compact &obj) {
       I(this != &obj);
-      hid  = obj.hid;
+      hidx  = obj.hidx;
       idx  = obj.idx;
       sink = obj.sink;
 
@@ -67,18 +67,18 @@ public:
     constexpr bool is_invalid() const { return idx == 0; }
 
     constexpr bool operator==(const Compact &other) const {
-      return hid == other.hid && idx == other.idx && sink == other.sink;
+      return hidx == other.hidx && idx == other.idx && sink == other.sink;
     }
     constexpr bool operator!=(const Compact &other) const { return !(*this == other); }
 
     template <typename H>
     friend H AbslHashValue(H h, const Compact& s) {
-      return H::combine(std::move(h), s.hid, s.idx, s.sink);
+      return H::combine(std::move(h), s.hidx, s.idx, s.sink);
     };
   };
   class __attribute__((packed)) Compact_driver {
   protected:
-    Hierarchy_id   hid;
+    Hierarchy_index   hidx;
     uint32_t idx  : Index_bits;
 
     friend class LGraph;
@@ -95,12 +95,12 @@ public:
 
     //constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
-    Compact_driver(const Compact_driver &obj): hid(obj.hid), idx(obj.idx) { }
-    Compact_driver(const Hierarchy_id _hid, Index_ID _idx) :hid(_hid), idx(_idx) { };
-    Compact_driver() :hid(0), idx(0) { };
+    Compact_driver(const Compact_driver &obj): hidx(obj.hidx), idx(obj.idx) { }
+    Compact_driver(const Hierarchy_index _hidx, Index_ID _idx) :hidx(_hidx), idx(_idx) { };
+    Compact_driver() :hidx(0), idx(0) { };
     Compact_driver &operator=(const Compact_driver &obj) {
       I(this != &obj);
-      hid  = obj.hid;
+      hidx  = obj.hidx;
       idx  = obj.idx;
 
       return *this;
@@ -109,13 +109,13 @@ public:
     constexpr bool is_invalid() const { return idx == 0; }
 
     constexpr bool operator==(const Compact_driver &other) const {
-      return hid == other.hid && idx == other.idx;
+      return hidx == other.hidx && idx == other.idx;
     }
     constexpr bool operator!=(const Compact_driver &other) const { return !(*this == other); }
 
     template <typename H>
     friend H AbslHashValue(H h, const Compact_driver &s) {
-      return H::combine(std::move(h), s.hid, s.idx);
+      return H::combine(std::move(h), s.hidx, s.idx);
     };
   };
   class __attribute__((packed)) Compact_class {
@@ -203,23 +203,22 @@ public:
 
   template <typename H>
   friend H AbslHashValue(H h, const Node_pin& s) {
-    return H::combine(std::move(h), (int)s.hid, (int)s.idx, s.sink); // Ignore lgraph pointer in hash
+    return H::combine(std::move(h), (int)s.hidx, (int)s.idx, s.sink); // Ignore lgraph pointer in hash
   }
 
-  Node_pin() : top_g(0), current_g(0), hid(0), idx(0), pid(0), sink(false) { }
+  Node_pin() : top_g(0), current_g(0), hidx(0), idx(0), pid(0), sink(false) { }
   Node_pin(LGraph *_g, Compact comp);
   Node_pin(LGraph *_g, Compact_driver comp);
-  //Node_pin(LGraph *_g, Hierarchy_id _hid, Compact_class comp);
   Node_pin(LGraph *_g, Compact_class comp);
   Node_pin(LGraph *_g, Compact_class_driver comp);
 
   Compact get_compact() const {
-    return Compact(hid,idx,sink);
+    return Compact(hidx,idx,sink);
   }
 
   Compact_driver get_compact_driver() const {
     I(!sink);
-    return Compact_driver(hid,idx);
+    return Compact_driver(hidx,idx);
   }
 
   Compact_class get_compact_class() const {
@@ -233,7 +232,7 @@ public:
 
   LGraph       *get_top_lgraph() const { return top_g; };
   LGraph       *get_class_lgraph() const { return current_g; };
-  Hierarchy_id  get_hid() const { return hid; };
+  Hierarchy_index  get_hidx() const { return hidx; };
 
   const Port_ID  get_pid()   const { I(idx); return pid;    }
 
@@ -267,7 +266,7 @@ public:
     current_g = obj.current_g;
     idx       = obj.idx;
     pid       = obj.pid;
-    hid       = obj.hid;
+    hidx       = obj.hidx;
     sink      = obj.sink;
 
     return *this;
@@ -280,7 +279,7 @@ public:
 
   constexpr bool is_invalid() const { return idx==0; }
 
-  constexpr bool operator==(const Node_pin &other) const { return (top_g == other.top_g) && (idx == other.idx) && (pid == other.pid) && (sink == other.sink) && (hid == other.hid); }
+  constexpr bool operator==(const Node_pin &other) const { return (top_g == other.top_g) && (idx == other.idx) && (pid == other.pid) && (sink == other.sink) && (hidx == other.hidx); }
   constexpr bool operator!=(const Node_pin &other) const { return !(*this == other); }
 
   void nuke(); // Delete all the edges, and attributes of this node_pin
@@ -316,7 +315,7 @@ template <>
 struct hash<Node_pin::Compact> {
   size_t operator()(Node_pin::Compact const &o) const {
     uint64_t h = o.idx;
-    h = (h<<12) ^ o.hid ^ o.idx;
+    h = (h<<12) ^ o.hidx ^ o.idx;
     return hash<uint64_t>{}((h<<1) + o.sink);
   }
 };
@@ -325,7 +324,7 @@ template <>
 struct hash<Node_pin::Compact_driver> {
   size_t operator()(Node_pin::Compact_driver const &o) const {
     uint64_t h = o.idx;
-    h = (h<<12) ^ o.hid ^ o.idx;
+    h = (h<<12) ^ o.hidx ^ o.idx;
     return hash<uint64_t>{}(h);
   }
 };

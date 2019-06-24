@@ -22,6 +22,7 @@
 #include "node_pin.hpp"
 #include "node.hpp"
 #include "edge.hpp"
+#include "hierarchy.hpp"
 
 class LGraph : public LGraph_Node_Type
 {
@@ -36,9 +37,74 @@ protected:
   friend class Backward_edge_iterator;
   friend class Fast_edge_iterator;
 
-  using Hierarchy_cache = absl::flat_hash_map<Lg_type_id, Lg_type_id, Lg_type_id_hash>;
-
   void add_hierarchy_entry(std::string_view base, Lg_type_id lgid);
+
+  unsigned int get_hierarchy_local_class_nid_bits() const {
+    int val = 32 - __builtin_clz(node_internal.size());
+    if (val<3)
+      return 3;
+    return val;
+  }
+
+  Lg_type_id get_hierarchy_class_lgid(Hierarchy_index hidx) const {
+    auto lgid_bits = library->get_lgid_bits();
+    hidx >>=1; // Drop compress/expand bit
+    Lg_type_id class_lgid = hidx & ((1ULL<<lgid_bits)-1);
+
+    return class_lgid;
+  }
+
+  std::pair<Lg_type_id, Index_ID> get_hierarchy_class(Hierarchy_index hidx) const {
+    auto lgid_bits = library->get_lgid_bits();
+    auto n_bits = get_hierarchy_local_class_nid_bits();
+    I(lgid_bits+n_bits+1<sizeof(Hierarchy_index)*8); // For sure
+
+    if (hidx & 1) {
+      // Compressed upper 32bits history
+      I(false); // FIXME: implement the compressed
+    }
+    hidx >>=1; // Drop compress/expand bit
+    Index_ID   class_nid  = (hidx>>lgid_bits) & ((1ULL<<n_bits)-1);
+    Lg_type_id class_lgid = hidx & ((1ULL<<lgid_bits)-1);
+
+    return std::pair(class_lgid, class_nid);
+  }
+
+  Hierarchy_index hierarchy_go_down(Hierarchy_index hidx, Index_ID nid) const {
+
+    I(is_sub(nid));
+    auto lgid_bits = library->get_lgid_bits();
+    auto n_bits = get_hierarchy_local_class_nid_bits();
+    I(((hidx>>1) & ((1ULL<<lgid_bits)-1)) == lgid); // Use current_g for going down
+
+    if (hidx & 1) {
+      // Compressed upper 32bits history
+      I(false);  // FIXME: implement compressed mode
+    }
+    // Check space left
+    auto val = sizeof(Hierarchy_index)*8 - __builtin_clz(hidx);
+    if (lgid_bits + n_bits + 1 >= val) { // +1 for compressed
+      // Must use compressed
+      I(false);// FIXME: implement compressed mode
+    }
+
+    Lg_type_id child_lgid = get_type_sub(nid);
+
+    hidx >>= 1;       // Drop compressed
+
+    hidx >>= lgid_bits;  // Drop the parent lgid
+
+    hidx <<= n_bits;  // Add space for child nid
+    I( nid == (nid & ((1ULL<<n_bits)-1)));
+    hidx |= nid;
+
+    hidx <<= lgid_bits;  // Add Space child lgid
+    I( child_lgid == (child_lgid & ((1ULL<<lgid_bits)-1)));
+    hidx |= child_lgid;
+    hidx <<=1;        // No compressed
+
+    return hidx;
+  }
 
   Index_ID create_node_int() final;
 
@@ -92,7 +158,14 @@ protected:
   XEdge_iterator out_edges(const Node &node) const;
   XEdge_iterator inp_edges(const Node &node) const;
 
-  const LGraph *find_sub_lgraph_const(const Hierarchy_id hid) const;
+  const LGraph *find_sub_lgraph_const(const Hierarchy_index &hidx) const {
+
+    auto class_lgid = get_hierarchy_class_lgid(hidx);
+    auto *current_g = LGraph::open(path, class_lgid);
+    I(current_g);
+
+    return current_g;
+  }
 
   bool has_outputs(const Node_pin &pin) const {
     I(pin.get_idx() < node_internal.size());
@@ -143,13 +216,6 @@ protected:
     return 0;
   }
 
-  Index_ID fast_next(Hierarchy_id hid, Index_ID nid) const {
-    const LGraph *sub_g = find_sub_lgraph(hid);
-    I(sub_g);
-
-    return sub_g->fast_next(nid);
-  }
-
   bool is_sub(Index_ID nid) const {
     I(nid < node_type_table.size());
     I(node_internal[nid].is_node_state());
@@ -160,28 +226,19 @@ protected:
     return op >= SubGraphMin_Op && op <= SubGraphMax_Op;
   }
 
-  bool is_sub(Hierarchy_id hid, Index_ID nid) const {
-    const LGraph *sub_g = find_sub_lgraph(hid);
-    if (sub_g==0)
-      return false; // This can be if the subgraph is not present (bbox)
-
-    bool it_is_sub = sub_g->is_sub(nid);
-
-    auto it = sub_g->sub_nodes.find(Node::Compact_class(nid));
-    GI( it_is_sub, sub_g->sub_nodes.find(Node::Compact_class(nid)) != sub_g->sub_nodes.end());
-    GI(!it_is_sub, sub_g->sub_nodes.find(Node::Compact_class(nid)) == sub_g->sub_nodes.end());
-    if (!it_is_sub) {
-      I(it == sub_g->sub_nodes.end());
-    }
-
-    return it_is_sub;
-  }
-
 public:
   LGraph()               = delete;
   LGraph(const LGraph &) = delete;
 
   virtual ~LGraph();
+
+  Hierarchy_index hierarchy_root() const {
+    Hierarchy_index hidx = 0;
+    hidx                 = lgid;
+    hidx <<= 1; // No compress for simple hidx
+
+    return hidx;
+  }
 
   Index_ID add_edge(const Node_pin &src, const Node_pin &dst) {
     I(!src.is_input());
@@ -200,8 +257,8 @@ public:
     return idx;
   }
 
-  Forward_edge_iterator  forward();
-  Backward_edge_iterator backward();
+  Forward_edge_iterator  forward(bool visit_sub=false);
+  Backward_edge_iterator backward(bool visit_sub=false);
   Fast_edge_iterator fast(bool visit_sub=false);
 
   static bool    exists(std::string_view path, std::string_view name);
@@ -215,11 +272,11 @@ public:
   void sync() override;
   void emplace_back() override;
 
-  const LGraph *find_sub_lgraph(const Hierarchy_id hid) const {
-    return find_sub_lgraph_const(hid);
+  const LGraph *find_sub_lgraph(const Hierarchy_index &hidx) const {
+    return find_sub_lgraph_const(hidx);
   }
-  LGraph *find_sub_lgraph(const Hierarchy_id hid) {
-    return const_cast<LGraph *>(find_sub_lgraph_const(hid));
+  LGraph *find_sub_lgraph(const Hierarchy_index &hidx) {
+    return const_cast<LGraph *>(find_sub_lgraph_const(hidx));
   }
 
   Node_pin add_graph_input(std::string_view str, Port_ID pos, uint16_t bits);
