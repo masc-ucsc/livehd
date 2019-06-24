@@ -81,9 +81,10 @@ protected:
   void setup_output_signal(const unsigned int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
   void split_input_signal(const std::vector<mockturtle::mig_network::signal> &, std::vector<std::vector<mockturtle::mig_network::signal>> &);
   void convert_signed_to_unsigned(const comparator_input_signal &, comparator_input_signal &, mockturtle::mig_network &);
-  void shr_op(std::vector<mockturtle::mig_network::signal> &,
-              const std::vector<mockturtle::mig_network::signal> &,
-              const bool &, const long unsigned int &, mockturtle::mig_network &);
+  void shift_op(std::vector<mockturtle::mig_network::signal> &,
+                const std::vector<mockturtle::mig_network::signal> &,
+                const bool &, const bool &, const long unsigned int &,
+                mockturtle::mig_network &);
   void create_n_bit_k_input_mux(std::vector<std::vector<mockturtle::mig_network::signal>> const &,
                                 std::vector<mockturtle::mig_network::signal> const &,
                                 std::vector<mockturtle::mig_network::signal> &,
@@ -103,7 +104,7 @@ protected:
   void mapping_logic_cell_lg2mig(mockturtle::mig_network::signal (mockturtle::mig_network::*)(std::vector<mockturtle::mig_network::signal> const &),
                                  mockturtle::mig_network &, const Node &, const unsigned int &);
   void mapping_comparison_cell_lg2mig(const bool &, const bool &, mockturtle::mig_network &, const Node &, const unsigned int &);
-  void mapping_shift_cell_lg2mig(const bool &, mockturtle::mig_network &, const Node &, const unsigned int &);
+  void mapping_shift_cell_lg2mig(const bool &, const bool &, mockturtle::mig_network &, const Node &, const unsigned int &);
   void connect_complemented_signal(LGraph *, Node_pin &, Node_pin &, const mockturtle::klut_network &, const mockturtle::klut_network::signal &);
 
   template<typename signal, typename Ntk>
@@ -151,9 +152,16 @@ protected:
       case GreaterEqualThan_Op:
         //fmt::print("Node: GreaterEqualThan_Op\n");
         break;
+      case ShiftLeft_Op:
+        //fmt::print("Node: ShiftLeft_Op\n");
+        //check if Node_Pin "B" is a constant or of small bit_width
+        for (const auto &in_edge : cell.inp_edges()) {
+          if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD)
+            return false;
+        }
+        break;
       case LogicShiftRight_Op: {
         //fmt::print("Node: LogicShiftRight_Op\n");
-        //if Node_Pin "B" is a constant or of small bit_width
         for (const auto &in_edge : cell.inp_edges()) {
           if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD)
             return false;
@@ -174,9 +182,6 @@ protected:
         break;
       case ShiftRight_Op:
         //fmt::print("Node: ShiftRight_Op\n");
-        break;
-      case ShiftLeft_Op:
-        //fmt::print("Node: ShiftLeft_Op\n");
         break;
 */
       default:
