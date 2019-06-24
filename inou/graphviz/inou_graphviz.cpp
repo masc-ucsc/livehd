@@ -138,30 +138,32 @@ void Inou_graphviz::do_fromlnast( std::string_view files) {
 }
 
 void Inou_graphviz::populate_lnast_data(std::string_view files) {
-  auto lnast = lnast_parser.get_ast().get(); //unique_ptr lend its ownership
+  const auto& lnast = lnast_parser.get_ast().get(); //unique_ptr lend its ownership
   std::string data = "digraph {\n";
 
   for(const auto& itr : lnast->depth_preorder(lnast->get_root())){
-    auto node_data = lnast->get_data(itr);
-    std::string type  = lnast_parser.ntype_dbg(node_data.type);
-    auto        scope = node_data.scope;
+    const auto &node_data = lnast->get_data(itr);
+    const auto &type  = lnast_parser.ntype_dbg(node_data.type);
+    const auto &scope = node_data.scope;
     std::string name(node_data.token.get_text(memblock));
     if(node_data.type == Lnast_ntype_top)
       name = "top";
 
 
-    data += fmt::format(" {} [label=\"{}:{}:{}\"];\n", name, type, name, scope);
+    auto id = std::to_string(itr.level)+std::to_string(itr.pos);
+    data += fmt::format(" {} [label=\"{}:{}:{}\"];\n", id, type, name, scope);
     if(node_data.type == Lnast_ntype_top)
       continue;
 
     //get parent data for link
-    auto ptype = lnast->get_data(lnast->get_parent(itr)).type;
-    std::string pname(lnast->get_data(lnast->get_parent(itr)).token.get_text(memblock));
+    const auto &p = lnast->get_parent(itr);
+    const auto &ptype = lnast->get_data(p).type;
+    std::string pname(lnast->get_data(p).token.get_text(memblock));
     if(ptype == Lnast_ntype_top)
       pname = "top";
 
-    //SH:FIXME:buggy! the name used for link should be unique!!
-    data += fmt::format(" {}->{};\n", pname, name);
+    auto parent_id = std::to_string(p.level)+std::to_string(p.pos);
+    data += fmt::format(" {}->{};\n", parent_id, id);
   }
 
   data += "}\n";
