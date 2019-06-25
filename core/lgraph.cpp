@@ -187,8 +187,6 @@ bool LGraph::is_graph_output(std::string_view name) const {
 Node_pin LGraph::add_graph_input(std::string_view str, Port_ID pos, uint16_t bits) {
   I(!is_graph_output(str));
 
-  fmt::print("add_input {} {} {}\n", name, str, pos);
-
   Port_ID inst_pid;
   if (get_self_sub_node().has_pin(str)) {
     // reset pin stats
@@ -211,8 +209,6 @@ Node_pin LGraph::add_graph_input(std::string_view str, Port_ID pos, uint16_t bit
 
 Node_pin LGraph::add_graph_output(std::string_view str, Port_ID pos, uint16_t bits) {
   I(!is_graph_input(str));
-
-  fmt::print("add_output {} {} {}\n", name, str, pos);
 
   Port_ID inst_pid;
   if (get_self_sub_node().has_pin(str)) {
@@ -529,12 +525,12 @@ Index_ID LGraph::create_node_int() {
   return node_internal.size() - 1;
 }
 
-Forward_edge_iterator LGraph::forward(bool visit_sub) { return Forward_edge_iterator(this, this, visit_sub); }
+Forward_edge_iterator LGraph::forward(bool visit_sub) { return Forward_edge_iterator(this, visit_sub); }
 
-Backward_edge_iterator LGraph::backward(bool visit_sub) { return Backward_edge_iterator(this, this, visit_sub); }
+Backward_edge_iterator LGraph::backward(bool visit_sub) { return Backward_edge_iterator(this, visit_sub); }
 
 // Skip after 1, but first may be deleted, so fast_next
-Fast_edge_iterator LGraph::fast(bool visit_sub) { return Fast_edge_iterator(this, this, hierarchy_root(), fast_next(0), visit_sub);  }
+Fast_edge_iterator LGraph::fast(bool visit_sub) { return Fast_edge_iterator(this, visit_sub);  }
 
 void LGraph::dump() {
   fmt::print("lgraph name:{} size:{}\n", name, node_internal.size());

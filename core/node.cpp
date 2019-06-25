@@ -5,16 +5,42 @@
 #include "node.hpp"
 #include "annotate.hpp"
 
-Node::Node(LGraph *_g, Compact comp)
-  :top_g(_g)
-  ,current_g(0)
-  ,hidx(comp.hidx)
-  ,nid(comp.nid) {
-  I(hidx);
-  I(nid);
-  I(top_g);
+void Node::invalidate(LGraph *_g) {
+  top_g = _g;
+  current_g = _g;
+  nid = 0;
+  hidx = top_g->hierarchy_root();
+}
+
+void Node::update(const Hierarchy_index &_hidx, Index_ID _nid) {
+  if (_hidx==hidx) {
+    current_g = top_g->find_sub_lgraph(_hidx);
+  }
+  nid = _nid;
+}
+
+void Node::update(LGraph *_g, const Node::Compact &comp) {
+  I(comp.hidx);
+  I(comp.nid);
+  I(_g);
+
+  top_g     = _g;
+  nid       = comp.nid;
+  if (hidx==comp.hidx)
+    return;
+  hidx      = comp.hidx;
   current_g = top_g->find_sub_lgraph(hidx);
+
   I(current_g->is_valid_node(nid));
+}
+
+Node::Node(LGraph *_g)
+  :top_g(_g)
+  ,current_g(_g)
+  ,hidx(_g->hierarchy_root())
+  ,nid(0) {
+  I(hidx);
+  I(top_g);
 }
 
 Node::Node(LGraph *_g, const Hierarchy_index &_hidx, Compact_class comp)
@@ -128,6 +154,15 @@ void Node::set_type(const Node_Type_Op op, uint16_t bits) {
 
 bool Node::is_type(const Node_Type_Op op) const {
   return current_g->get_type(nid).op == op;
+}
+
+bool Node::is_type_sub() const {
+  return current_g->is_sub(nid);
+}
+
+Hierarchy_index Node::hierarchy_go_down() const {
+  I(current_g->is_sub(nid));
+  return current_g->hierarchy_go_down(hidx, nid);
 }
 
 void Node::set_type_sub(Lg_type_id subid) {

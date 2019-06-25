@@ -78,9 +78,12 @@ void generate_graphs(int n) {
       if (edges.find(std::make_pair(src, dst)) != edges.end())
         break;
 
-      edges.insert(std::make_pair(src, dst));
       Node_pin dpin(g,src);
       Node_pin spin(g,dst);
+      if (dpin.get_node() == spin.get_node())
+        continue; // No self-loops
+
+      edges.insert(std::make_pair(src, dst));
       g->add_edge(dpin, spin);
     }
 
@@ -263,7 +266,10 @@ void simple() {
 
   std::vector<std::string> fwd;
   int conta=0;
-  for(const auto node : g->forward()) {
+  //for(const auto node : g->forward()) {
+  auto iter = g->forward();
+  for(auto it = iter.begin() ; it!= iter.end() ; ++it) {
+    auto node = *it;
     //fmt::print(" fwd:{}\n", node.debug_name());
     fwd.emplace_back(node.debug_name());
     conta++;
@@ -347,7 +353,7 @@ int main() {
   }
 #endif
 
-  int n = 200;
+  int n = 20;
   generate_graphs(n);
 
 #if 1

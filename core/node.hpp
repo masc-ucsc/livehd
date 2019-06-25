@@ -15,10 +15,10 @@ using Node_pin_iterator = std::vector<Node_pin>;
 
 class Node {
 protected:
-  LGraph            *top_g;
-  mutable LGraph    *current_g;
-  const Hierarchy_index hidx;
-  const Index_ID     nid;
+  LGraph         *top_g;
+  mutable LGraph *current_g;
+  Hierarchy_index hidx;
+  Index_ID        nid;
 
   friend class LGraph;
   friend class LGraph_Node_Type;
@@ -32,6 +32,10 @@ protected:
   Index_ID get_nid() const { return nid; }
 
   Node(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _nid);
+
+  void invalidate(LGraph *_g);
+  void update(const Hierarchy_index &_hidx, Index_ID _nid);
+  void update(Index_ID _nid) { nid = _nid; }
 
 public:
   static constexpr Index_ID Hardcoded_input_nid  = 1;
@@ -132,9 +136,13 @@ public:
   };
 
   // NOTE: No operator<() needed for std::set std::map to avoid their use. Use flat_map_set for speed
+  void update(LGraph *_g, const Node::Compact &comp);
 
   Node() :top_g(0) ,current_g(0) ,hidx(0) ,nid(0) { }
-  Node(LGraph *_g, Compact comp);
+  Node(LGraph *_g);
+  Node(LGraph *_g, const Compact &comp) {
+    update(_g, comp);
+  }
   Node(LGraph *_g, const Hierarchy_index &_hidx, Compact_class comp);
   Node(LGraph *_g, Compact_class comp);
   Node &operator=(const Node &obj) {
@@ -174,7 +182,10 @@ public:
   constexpr bool operator==(const Node &other) const {
     return top_g == other.top_g && hidx == other.hidx && nid == other.nid;
   }
-  constexpr bool operator!=(const Node& other) const { return !(*this == other); };
+  constexpr bool operator!=(const Node& other) const {
+    I(top_g == other.top_g);
+    return (nid!=other.nid || hidx != other.hidx);
+  };
 
   bool is_root() const;
 
@@ -185,6 +196,9 @@ public:
   void              set_type(const Node_Type_Op op);
   void              set_type(const Node_Type_Op op, uint16_t bits);
   bool              is_type(const Node_Type_Op op) const;
+  bool              is_type_sub() const;
+
+  Hierarchy_index   hierarchy_go_down() const;
 
   void              set_type_sub(Lg_type_id subid);
   Lg_type_id        get_type_sub() const;
