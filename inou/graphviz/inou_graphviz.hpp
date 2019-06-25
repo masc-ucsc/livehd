@@ -6,7 +6,7 @@
 
 #include "lgraph.hpp"
 #include "pass.hpp"
-#include "lnast.hpp"
+#include "lnast_parser.hpp"
 
 class Inou_graphviz : public Pass {
 private:

@@ -12,7 +12,79 @@
 
 #include "gtest/gtest.h"
 #include "fmt/format.h"
-#include "lnast.hpp"
+#include "lnast_parser.hpp"
+
+using tuple = std::tuple<std::string, std::string , uint8_t>;// <name, type, scope>
+
+class Lnast_test : public ::testing::Test, public Lnast_parser {
+  std::vector<std::vector<tuple>> ast_sorted_golden;
+  std::vector<std::vector<tuple>> ast_preorder_golden;
+
+public:
+  Tree<Lnast_node_str>  ast_gld;
+  Language_neutral_ast<Lnast_node_str>  ast_hcoded;// hard-coded
+  Lnast_parser lnast_parser;
+
+  void SetUp() override {
+    setup_lnast_golden();
+    setup_lnast_testee();
+
+    setup_lnast_ssa_golden();
+    setup_lnast_ssa_testee();
+  }
+
+/*
+ * x = $a
+ * y = $a
+ * if (cond1) {
+ *   x = $e
+ *   if (cond2) {
+ *     x = $b
+ *     y = $b
+ *   } else if (cond3) {
+ *     x = $c
+ *     y = $c
+ *   } else {
+ *     x = $d
+ *     y = $d
+ *   }
+ *   y = $e
+ * }
+ *
+ * %o1 = x + $a
+ * %o2 = y + $a
+ *
+ * */
+
+  void setup_lnast_ssa_golden(){
+    ;
+  }
+
+  void setup_lnast_ssa_testee(){
+    //hard coded initial lnast
+    //root and statement
+    ast_hcoded.set_root(Lnast_node_str(Lnast_ntype_top, "", 0));
+    auto c1    = ast_hcoded.add_child(Tree_index(0,0), Lnast_node_str(Lnast_ntype_statement, "K1", 0));
+
+    auto c11   = ast_hcoded.add_child(c1,   Lnast_node_str(Lnast_ntype_label,     "K1", 0));
+    auto c111  = ast_hcoded.add_child(c11,  Lnast_node_str(Lnast_ntype_ref,       "___a", 0));
+    auto c112  = ast_hcoded.add_child(c11,  Lnast_node_str(Lnast_ntype_attr_bits, "__bits", 0));
+    auto c1121 = ast_hcoded.add_child(c112, Lnast_node_str(Lnast_ntype_const,     "0d1", 0));
+    (void) c111; // for turning off un-used warning
+    (void) c1121;
+
+    auto c12   = ast_hcoded.add_child(c1,   Lnast_node_str(Lnast_ntype_as,     "K2", 0));
+    auto c121  = ast_hcoded.add_child(c12,  Lnast_node_str(Lnast_ntype_input,  "$a", 0));
+    auto c122  = ast_hcoded.add_child(c12,  Lnast_node_str(Lnast_ntype_ref,    "___a", 0));
+    (void) c121;
+    (void) c122;
+
+    //balabala
+
+    ast_hcoded.ssa_trans();
+  }
+
+
 /*
  * CFG text input for lnast parser
 K1   K2    0  0   14   :    ___a    __bits  0d1
@@ -34,17 +106,7 @@ K18  K19   0  98  121  =    result  ___g
 END
 */
 
-using tuple = std::tuple<std::string, std::string , uint8_t>;// <name, type, scope>
-
-class Lnast_test : public ::testing::Test, public Lnast_parser {
-  std::vector<std::vector<tuple>> ast_sorted_golden;
-  std::vector<std::vector<tuple>> ast_preorder_golden;
-
-public:
-  Tree<Lnast_node_str>  ast_gld;
-  Lnast_parser lnast_parser;
-
-  void SetUp() override {
+  void setup_lnast_golden(){
     //root and statement
     ast_gld.set_root(Lnast_node_str(Lnast_ntype_top, "", 0));
     auto c1    = ast_gld.add_child(Tree_index(0,0), Lnast_node_str(Lnast_ntype_statement, "K1", 0));
@@ -53,7 +115,7 @@ public:
     auto c111  = ast_gld.add_child(c11,  Lnast_node_str(Lnast_ntype_ref,       "___a", 0));
     auto c112  = ast_gld.add_child(c11,  Lnast_node_str(Lnast_ntype_attr_bits, "__bits", 0));
     auto c1121 = ast_gld.add_child(c112, Lnast_node_str(Lnast_ntype_const,     "0d1", 0));
-    (void) c111; // for turn off un-used warning
+    (void) c111; // for turning off un-used warning
     (void) c1121;
 
     auto c12   = ast_gld.add_child(c1,   Lnast_node_str(Lnast_ntype_as,     "K2", 0));
@@ -66,7 +128,7 @@ public:
     auto c131  = ast_gld.add_child(c13,  Lnast_node_str(Lnast_ntype_ref,       "___b", 0));
     auto c132  = ast_gld.add_child(c13,  Lnast_node_str(Lnast_ntype_attr_bits, "__bits", 0));
     auto c1321 = ast_gld.add_child(c132, Lnast_node_str(Lnast_ntype_const,     "0d1", 0));
-    (void) c131; // for turn off un-used warning
+    (void) c131; // for turning off un-used warning
     (void) c1321;
 
     auto c14   = ast_gld.add_child(c1,   Lnast_node_str(Lnast_ntype_as,     "K4", 0));
@@ -79,7 +141,7 @@ public:
     auto c151  = ast_gld.add_child(c15,  Lnast_node_str(Lnast_ntype_ref,       "___c", 0));
     auto c152  = ast_gld.add_child(c15,  Lnast_node_str(Lnast_ntype_attr_bits, "__bits", 0));
     auto c1521 = ast_gld.add_child(c152, Lnast_node_str(Lnast_ntype_const,     "0d1", 0));
-    (void) c151; // for turn off un-used warning
+    (void) c151; // for turning off un-used warning
     (void) c1521;
 
     auto c16   = ast_gld.add_child(c1,   Lnast_node_str(Lnast_ntype_as,         "K6", 0));
@@ -164,145 +226,148 @@ public:
     (void) c1d1;
     (void) c1d2;
 
+    setup_ast_sorted_golden();
+    setup_ast_preorder_golden();
+  }
 
-      ast_gld.each_breadth_first_fast([this] (const Tree_index &parent, const Tree_index &self, const Lnast_node_str &node_data) {
-        while (static_cast<size_t>(self.level)>=ast_sorted_golden.size())
-            ast_sorted_golden.emplace_back();
 
-        std::string name(node_data.token);
-        std::string type  = ntype_dbg(node_data.type);
-        auto        scope = node_data.scope;
+  void setup_ast_sorted_golden(){
+    ast_gld.each_breadth_first_fast([this] (const Tree_index &parent, const Tree_index &self, const Lnast_node_str &node_data) {
+      while (static_cast<size_t>(self.level)>=ast_sorted_golden.size())
+          ast_sorted_golden.emplace_back();
 
-        std::string pname(ast_gld.get_data(parent).token);
-        std::string ptype  = ntype_dbg(ast_gld.get_data(parent).type);
-        auto        pscope = ast_gld.get_data(parent).scope;
+      std::string name(node_data.token);
+      std::string type  = ntype_dbg(node_data.type);
+      auto        scope = node_data.scope;
 
-        fmt::print("nname:{}, ntype:{}, nscope:{}\n", name, type, scope);
-        fmt::print("pname:{}, ptype:{}, pscope:{}\n\n", pname, ptype, pscope);
+      std::string pname(ast_gld.get_data(parent).token);
+      std::string ptype  = ntype_dbg(ast_gld.get_data(parent).type);
+      auto        pscope = ast_gld.get_data(parent).scope;
 
-        tuple tuple_data = std::make_tuple(name, type, scope);
-        ast_sorted_golden[self.level].emplace_back(tuple_data);
-        EXPECT_EQ(ast_gld.get_parent(self), parent);
-      });
+      fmt::print("nname:{}, ntype:{}, nscope:{}\n", name, type, scope);
+      fmt::print("pname:{}, ptype:{}, pscope:{}\n\n", pname, ptype, pscope);
+
+      tuple tuple_data = std::make_tuple(name, type, scope);
+      ast_sorted_golden[self.level].emplace_back(tuple_data);
+      EXPECT_EQ(ast_gld.get_parent(self), parent);
+    });
 
     for(auto &a:ast_sorted_golden) {
         std::sort(a.begin(), a.end());
     }
+  };
 
-
+  void setup_ast_preorder_golden(){
     for (const auto &it:ast_gld.depth_preorder(ast_gld.get_root())) {
-        while (static_cast<size_t>(it.level)>=ast_preorder_golden.size())
-            ast_preorder_golden.emplace_back();
+      while (static_cast<size_t>(it.level)>=ast_preorder_golden.size())
+        ast_preorder_golden.emplace_back();
 
-        auto node_data = ast_gld.get_data(it);
-        std::string name(node_data.token);
-        std::string type  = ntype_dbg(node_data.type);
-        auto        scope = node_data.scope;
-        tuple tuple_data = std::make_tuple(name, type, scope);
+      auto node_data = ast_gld.get_data(it);
+      std::string name(node_data.token);
+      std::string type  = ntype_dbg(node_data.type);
+      auto        scope = node_data.scope;
+      tuple tuple_data = std::make_tuple(name, type, scope);
 
-        ast_preorder_golden[it.level].emplace_back(tuple_data);
+      ast_preorder_golden[it.level].emplace_back(tuple_data);
     }
-
-    setup_testee();
   }
 
   void check_sorted_against_ast(std::vector<std::vector<tuple>> &ast_sorted_testee) {
-      for(auto &a:ast_sorted_testee) {
-          std::sort(a.begin(), a.end());
-      }
-      EXPECT_EQ(ast_sorted_golden, ast_sorted_testee);
+    for(auto &a:ast_sorted_testee) {
+        std::sort(a.begin(), a.end());
+    }
+    EXPECT_EQ(ast_sorted_golden, ast_sorted_testee);
   }
 
   void check_preorder_against_ast(std::vector<std::vector<tuple>> &ast_preorder_testee) {
-      EXPECT_EQ(ast_preorder_golden, ast_preorder_testee);
+    EXPECT_EQ(ast_preorder_golden, ast_preorder_testee);
   }
 
   std::string get_current_working_dir(){
-      std::string cwd("\0", FILENAME_MAX + 1);
-      return getcwd(&cwd[0],cwd.capacity());
+    std::string cwd("\0", FILENAME_MAX + 1);
+    return getcwd(&cwd[0],cwd.capacity());
   }
 
   std::string_view setup_memblock(){
-      std::string tmp_str = get_current_working_dir();
-      std::string file_path = tmp_str + "/inou/cfg/tests/ast_test.cfg";
-      int fd = open(file_path.c_str(), O_RDONLY);
-      if(fd < 0) {
-          fprintf(stderr, "error, could not open %s\n", file_path.c_str());
-          exit(-3);
-      }
+    std::string tmp_str = get_current_working_dir();
+    std::string file_path = tmp_str + "/inou/cfg/tests/ast_test.cfg";
+    int fd = open(file_path.c_str(), O_RDONLY);
+    if(fd < 0) {
+        fprintf(stderr, "error, could not open %s\n", file_path.c_str());
+        exit(-3);
+    }
 
-      struct stat sb;
-      fstat(fd, &sb);
-      printf("Size: %lu\n", (uint64_t)sb.st_size);
+    struct stat sb;
+    fstat(fd, &sb);
+    printf("Size: %lu\n", (uint64_t)sb.st_size);
 
-      char *memblock = (char *)mmap(NULL, sb.st_size, PROT_WRITE, MAP_PRIVATE, fd, 0);
-      fprintf(stderr, "Content of memblock: \n%s\n", memblock);
-      if(memblock == MAP_FAILED) {
-          fprintf(stderr, "error, mmap failed\n");
-          exit(-3);
-      }
-      return memblock;
+    char *memblock = (char *)mmap(NULL, sb.st_size, PROT_WRITE, MAP_PRIVATE, fd, 0);
+    fprintf(stderr, "Content of memblock: \n%s\n", memblock);
+    if(memblock == MAP_FAILED) {
+        fprintf(stderr, "error, mmap failed\n");
+        exit(-3);
+    }
+    return memblock;
   }
 
-  void setup_testee(){
+  void setup_lnast_testee(){
     std::string_view memblock = setup_memblock();
     lnast_parser.parse("lnast", memblock);
   }
 };
 
 TEST_F(Lnast_test, Traverse_breadth_first_check_on_ast) {
+  auto lnast = lnast_parser.get_ast().get(); //unique_ptr lend its ownership
+  std::vector<std::vector<tuple>> ast_sorted_testee;
+  std::string_view memblock = setup_memblock();
 
-    auto lnast = lnast_parser.get_ast().get(); //unique_ptr lend its ownership
-    std::vector<std::vector<tuple>> ast_sorted_testee;
-    std::string_view memblock = setup_memblock();
+  lnast->each_breadth_first_fast([this, &ast_sorted_testee, &memblock, &lnast] (const Tree_index &parent,
+                                                                                const Tree_index &self,
+                                                                                const Lnast_node &node_data) {
+    while (static_cast<size_t>(self.level)>=ast_sorted_testee.size())
+        ast_sorted_testee.emplace_back();
 
-    lnast->each_breadth_first_fast([this, &ast_sorted_testee, &memblock, &lnast] (const Tree_index &parent,
-                                                                                  const Tree_index &self,
-                                                                                  const Lnast_node &node_data) {
-      while (static_cast<size_t>(self.level)>=ast_sorted_testee.size())
-          ast_sorted_testee.emplace_back();
+    std::string name(node_data.token.get_text(memblock));
+    std::string type  = ntype_dbg(node_data.type);
+    auto        scope = node_data.scope;
 
-      std::string name(node_data.token.get_text(memblock));
-      std::string type  = ntype_dbg(node_data.type);
-      auto        scope = node_data.scope;
+    std::string pname(lnast->get_data(parent).token.get_text(memblock));
+    std::string ptype  = ntype_dbg(lnast->get_data(parent).type);
+    auto        pscope = lnast->get_data(parent).scope;
 
-      std::string pname(lnast->get_data(parent).token.get_text(memblock));
-      std::string ptype  = ntype_dbg(lnast->get_data(parent).type);
-      auto        pscope = lnast->get_data(parent).scope;
+    fmt::print("nname:{}, ntype:{}, nscope:{}\n", name, type, scope);
+    fmt::print("pname:{}, ptype:{}, pscope:{}\n\n", pname, ptype, pscope);
 
-      fmt::print("nname:{}, ntype:{}, nscope:{}\n", name, type, scope);
-      fmt::print("pname:{}, ptype:{}, pscope:{}\n\n", pname, ptype, pscope);
+    tuple tuple_data = std::make_tuple(name, type, scope);
+    ast_sorted_testee[self.level].emplace_back(tuple_data);
+    EXPECT_EQ(lnast-> get_parent(self), parent);
+  });
 
-      tuple tuple_data = std::make_tuple(name, type, scope);
-      ast_sorted_testee[self.level].emplace_back(tuple_data);
-      EXPECT_EQ(lnast-> get_parent(self), parent);
-    });
-
-    check_sorted_against_ast(ast_sorted_testee);
+  check_sorted_against_ast(ast_sorted_testee);
 }
 
 
 TEST_F(Lnast_test,Traverse_preorder_traverse_check_on_lnast){
 
-    auto lnast = lnast_parser.get_ast().get(); //unique_ptr lend its ownership
-    std::vector<std::vector<tuple>> ast_preorder_testee;
-    std::string_view memblock = setup_memblock();
+  auto lnast = lnast_parser.get_ast().get(); //unique_ptr lend its ownership
+  std::vector<std::vector<tuple>> ast_preorder_testee;
+  std::string_view memblock = setup_memblock();
 
-    for (const auto &it: lnast->depth_preorder(lnast->get_root()) ) {
+  for (const auto &it: lnast->depth_preorder(lnast->get_root()) ) {
 
-        const auto& node_data = lnast->get_data(it);
-        std::string name(node_data.token.get_text(memblock)); //str_view to string
-        std::string type  = ntype_dbg(node_data.type);
-        auto        scope = node_data.scope;
-        tuple tuple_data = std::make_tuple(name, type, scope);
+    const auto& node_data = lnast->get_data(it);
+    std::string name(node_data.token.get_text(memblock)); //str_view to string
+    std::string type  = ntype_dbg(node_data.type);
+    auto        scope = node_data.scope;
+    tuple tuple_data = std::make_tuple(name, type, scope);
 
-        while (static_cast<size_t>(it.level)>=ast_preorder_testee.size())
-            ast_preorder_testee.emplace_back();
+    while (static_cast<size_t>(it.level)>=ast_preorder_testee.size())
+      ast_preorder_testee.emplace_back();
 
-        ast_preorder_testee[it.level].emplace_back(tuple_data);
-    }
+    ast_preorder_testee[it.level].emplace_back(tuple_data);
+  }
 
-    check_preorder_against_ast(ast_preorder_testee);
+  check_preorder_against_ast(ast_preorder_testee);
 }
 
 //ast_gld.set_root(std::make_tuple("", ntype_dbg(Lnast_ntype_top), 0));

@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "pass.hpp"
-#include "lnast.hpp"
+#include "lnast_parser.hpp"
 
 class Inou_lnast_dfg_options {
 public:
@@ -15,10 +15,10 @@ public:
 
 class Inou_lnast_dfg : public Pass{
 private:
-  Inou_lnast_dfg_options opack;
-  std::string_view       memblock;     //SH:FIXME:cannot initialize through constructor?
-  Lnast_parser           lnast_parser; //SH:FIXME:cannot initialize through constructor?
-  Language_neutral_ast  *lnast;        //SH:FIXME:cannot initialize through constructor?
+  Inou_lnast_dfg_options             opack;
+  std::string_view                   memblock;     //SH:FIXME:cannot initialize through constructor?
+  Lnast_parser                       lnast_parser; //SH:FIXME:cannot initialize through constructor?
+  Language_neutral_ast<Lnast_node>  *lnast;        //SH:FIXME:cannot initialize through constructor?
 
 protected:
 

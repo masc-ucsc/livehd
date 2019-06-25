@@ -10,7 +10,7 @@
 
 #include "gtest/gtest.h"
 #include "fmt/format.h"
-#include "lnast.hpp"
+#include "lnast_parser.hpp"
 
 using tuple = std::tuple<std::string, uint8_t , uint8_t>;// <node_name, node_type, scope>
 

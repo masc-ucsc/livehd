@@ -1,30 +1,10 @@
 
-#include "lnast.hpp"
+#include "lnast_parser.hpp"
 
-//------------- Language_neutral_ast member function start -----
-Language_neutral_ast::Language_neutral_ast(std::string_view _buffer, Lnast_ntype_id ntype_top) : buffer(_buffer) {
-  I(!buffer.empty());
-  set_root(Lnast_node(ntype_top, Token(), 0));
-}
-
-
-void Language_neutral_ast::ssa_trans() {
-  add_phi_nodes();
-  renaming();
-}
-
-void Language_neutral_ast::add_phi_nodes() {
-  ;
-}
-
-void Language_neutral_ast::renaming() {
-  ;
-}
-
-//------------- Lnast_parser member function start -------------
 
 void Lnast_parser::elaborate(){
-  lnast = std::make_unique<Language_neutral_ast>(get_buffer(), Lnast_ntype_top);
+  lnast = std::make_unique<Language_neutral_ast<Lnast_node>>(get_buffer());
+  lnast->set_root(Lnast_node(Lnast_ntype_top, Token(), 0));
   build_statements(lnast->get_root(), 0);
   subgraph_scope_sync();
 }
