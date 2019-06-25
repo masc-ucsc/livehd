@@ -46,15 +46,14 @@ protected:
     return val;
   }
 
-  Lg_type_id get_hierarchy_class_lgid(Hierarchy_index hidx) const {
+  Lg_type_id get_hierarchy_class_lgid(const Hierarchy_index &hidx) const {
     auto lgid_bits = library->get_lgid_bits();
-    hidx >>=1; // Drop compress/expand bit
-    Lg_type_id class_lgid = hidx & ((1ULL<<lgid_bits)-1);
+    Lg_type_id class_lgid = (hidx>>1) & ((1ULL<<lgid_bits)-1);
 
     return class_lgid;
   }
 
-  std::pair<Lg_type_id, Index_ID> get_hierarchy_class(Hierarchy_index hidx) const {
+  std::pair<Lg_type_id, Index_ID> get_hierarchy_class(const Hierarchy_index &hidx) const {
     auto lgid_bits = library->get_lgid_bits();
     auto n_bits = get_hierarchy_local_class_nid_bits();
     I(lgid_bits+n_bits+1<sizeof(Hierarchy_index)*8); // For sure
@@ -63,9 +62,8 @@ protected:
       // Compressed upper 32bits history
       I(false); // FIXME: implement the compressed
     }
-    hidx >>=1; // Drop compress/expand bit
-    Index_ID   class_nid  = (hidx>>lgid_bits) & ((1ULL<<n_bits)-1);
-    Lg_type_id class_lgid = hidx & ((1ULL<<lgid_bits)-1);
+    Index_ID   class_nid  = (hidx>>(lgid_bits+1)) & ((1ULL<<n_bits)-1);
+    Lg_type_id class_lgid = (hidx>>1) & ((1ULL<<lgid_bits)-1);
 
     return std::pair(class_lgid, class_nid);
   }

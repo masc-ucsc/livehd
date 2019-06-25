@@ -66,6 +66,7 @@ void Inou_graphviz::do_hierarchy(LGraph *g) {
   g->dump_sub_nodes();
 
   for (const auto node : g->fast(true)) {
+    fmt::print("lg:{} node:{} type:{}\n", node.get_class_lgraph()->get_name(), node.debug_name(), node.get_type().get_name());
     data += fmt::format("lg:{} node:{} type:{}\n", node.get_class_lgraph()->get_name(), node.debug_name(), node.get_type().get_name());
   }
 

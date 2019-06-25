@@ -6,17 +6,20 @@
 #include "annotate.hpp"
 
 void Node::invalidate(LGraph *_g) {
-  top_g = _g;
+  top_g     = _g;
   current_g = _g;
-  nid = 0;
-  hidx = top_g->hierarchy_root();
+  nid       = 0;
+  hidx      = top_g->hierarchy_root();
 }
 
 void Node::update(const Hierarchy_index &_hidx, Index_ID _nid) {
-  if (_hidx==hidx) {
+  if (_hidx!=hidx) {
     current_g = top_g->find_sub_lgraph(_hidx);
+    hidx      = _hidx;
   }
   nid = _nid;
+  I(current_g->is_valid_node(nid));
+  I(current_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
 }
 
 void Node::update(LGraph *_g, const Node::Compact &comp) {
@@ -24,13 +27,14 @@ void Node::update(LGraph *_g, const Node::Compact &comp) {
   I(comp.nid);
   I(_g);
 
-  top_g     = _g;
   nid       = comp.nid;
-  if (hidx==comp.hidx)
+  if (hidx==comp.hidx && _g == top_g)
     return;
+  top_g     = _g;
   hidx      = comp.hidx;
   current_g = top_g->find_sub_lgraph(hidx);
 
+  I(current_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
   I(current_g->is_valid_node(nid));
 }
 
@@ -52,6 +56,8 @@ Node::Node(LGraph *_g, const Hierarchy_index &_hidx, Compact_class comp)
   I(nid);
   I(top_g);
   current_g = top_g->find_sub_lgraph(hidx);
+
+  I(current_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
   I(current_g->is_valid_node(nid));
 }
 
@@ -63,8 +69,11 @@ Node::Node(LGraph *_g, Compact_class comp)
   I(hidx);
   I(nid);
   I(top_g);
+
   current_g = top_g;
+
   I(current_g->is_valid_node(nid));
+  I(current_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
 }
 
 Node::Node(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _nid)
@@ -78,6 +87,7 @@ Node::Node(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _nid
   I(top_g);
   I(current_g);
   I(current_g->is_valid_node(nid));
+  I(current_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
 }
 
 Node_pin Node::get_driver_pin() const {
