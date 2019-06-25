@@ -102,7 +102,7 @@ int Inou_yosys_api::create_lib(std::string_view lib_file, std::string_view lgdb)
 }
 
 int Inou_yosys_api::do_work(std::string_view yosys, std::string_view liblg, std::string_view script_file, mustache::data &vars) {
-  fmt::print("yosys do work {} -m {} using {}", yosys, liblg, script_file);
+  fmt::print("yosys do work {} -m {} using {}\n", yosys, liblg, script_file);
 
   std::ifstream inFile;
   inFile.open(std::string(script_file));
@@ -114,6 +114,18 @@ int Inou_yosys_api::do_work(std::string_view yosys, std::string_view liblg, std:
   mustache::mustache tmpl(strStream.str());
   tmpl.set_custom_escape([](const std::string& s) { return s; }); // No HTML escape
 
+  const std::string yosys_cmd = tmpl.render(vars);
+  char filename[1024];
+  strcpy(filename,"yosys_script.XXXXXX");
+
+  int fd = mkstemp(filename);
+  if (fd<0) {
+    Main_api::error("Could not create yosys_script.XXXXXX file\n");
+    return -1;
+  }
+  write(fd, yosys_cmd.c_str(), yosys_cmd.size());
+  close(fd);
+
   int pid = fork();
   if (pid < 0) {
     Main_api::error(fmt::format("inou.yosys: unable to fork??"));
@@ -121,13 +133,13 @@ int Inou_yosys_api::do_work(std::string_view yosys, std::string_view liblg, std:
   }
 
   if (pid == 0) {  // Child
-    const std::string yosys_cmd = tmpl.render(vars);
+
     char *            argv[]    = {strdup(std::string(yosys).c_str()),
                     strdup("-q"),
                     strdup("-m"),
                     strdup(std::string(liblg).c_str()),
-                    strdup("-p"),
-                    strdup(std::string(yosys_cmd).c_str()),
+                    strdup("-s"),
+                    strdup(filename),
                     0};
 
     if (execvp(std::string(yosys).c_str(), argv) < 0) {
