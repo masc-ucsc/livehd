@@ -93,6 +93,8 @@ enum Lnast_node_type : Lnast_ntype_id {
   Lnast_ntype_attr_bits,    // __bits
   Lnast_ntype_assert,       // I
   Lnast_ntype_if,
+  Lnast_ntype_cond,
+  Lnast_ntype_else,
   Lnast_ntype_uif,
   Lnast_ntype_for,
   Lnast_ntype_while,

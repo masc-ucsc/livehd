@@ -181,9 +181,9 @@ void Inou_graphviz::populate_lnast_data(std::string_view files) {
   std::string data = "digraph {\n";
 
   for(const auto& itr : lnast->depth_preorder(lnast->get_root())){
-    const auto &node_data = lnast->get_data(itr);
-    const auto &type  = lnast_parser.ntype_dbg(node_data.type);
-    const auto &scope = node_data.scope;
+    auto node_data = lnast->get_data(itr);
+    auto type  = lnast_parser.ntype_dbg(node_data.type);
+    auto scope = node_data.scope;
     std::string name(node_data.token.get_text(memblock));
     if(node_data.type == Lnast_ntype_top)
       name = "top";
@@ -195,8 +195,8 @@ void Inou_graphviz::populate_lnast_data(std::string_view files) {
       continue;
 
     //get parent data for link
-    const auto &p = lnast->get_parent(itr);
-    const auto &ptype = lnast->get_data(p).type;
+    auto p = lnast->get_parent(itr);
+    auto ptype = lnast->get_data(p).type;
     std::string pname(lnast->get_data(p).token.get_text(memblock));
     if(ptype == Lnast_ntype_top)
       pname = "top";

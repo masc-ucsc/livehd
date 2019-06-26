@@ -21,9 +21,9 @@ class Lnast_test : public ::testing::Test, public Lnast_parser {
   std::vector<std::vector<tuple>> ast_preorder_golden;
 
 public:
-  Tree<Lnast_node_str>  ast_gld;
+  Tree<Lnast_node_str>                  ast_gld;
   Language_neutral_ast<Lnast_node_str>  ast_hcoded;// hard-coded
-  Lnast_parser lnast_parser;
+  Lnast_parser                          lnast_parser;
 
   void SetUp() override {
     setup_lnast_golden();
@@ -34,59 +34,123 @@ public:
   }
 
 /*
- * x = $a
- * y = $a
- * if (cond1) {
- *   x = $e
- *   if (cond2) {
- *     x = $b
- *     y = $b
- *   } else if (cond3) {
- *     x = $c
- *     y = $c
- *   } else {
- *     x = $d
- *     y = $d
- *   }
- *   y = $e
- * }
  *
- * %o1 = x + $a
- * %o2 = y + $a
- *
- * */
-
-  void setup_lnast_ssa_golden(){
-    ;
+  x = $a
+  y = $a
+  if (2>1) {
+    x = $e
+    if (3>2) {
+      x = $b
+      y = $b
+    } else if (4>3) {
+      x = $c
+      y = $c
+    } else {
+      x = $d
+      y = $d
+    }
+    y = $e
   }
 
-  void setup_lnast_ssa_testee(){
-    //hard coded initial lnast
-    //root and statement
-    ast_hcoded.set_root(Lnast_node_str(Lnast_ntype_top, "", 0));
-    auto c1    = ast_hcoded.add_child(Tree_index(0,0), Lnast_node_str(Lnast_ntype_statement, "K1", 0));
+  %o1 = x + $a
+  %o2 = y + $a
+*
+*/
 
-    auto c11   = ast_hcoded.add_child(c1,   Lnast_node_str(Lnast_ntype_label,     "K1", 0));
-    auto c111  = ast_hcoded.add_child(c11,  Lnast_node_str(Lnast_ntype_ref,       "___a", 0));
-    auto c112  = ast_hcoded.add_child(c11,  Lnast_node_str(Lnast_ntype_attr_bits, "__bits", 0));
-    auto c1121 = ast_hcoded.add_child(c112, Lnast_node_str(Lnast_ntype_const,     "0d1", 0));
-    (void) c111; // for turning off un-used warning
-    (void) c1121;
+void setup_lnast_ssa_golden(){
+  ;
+}
 
-    auto c12   = ast_hcoded.add_child(c1,   Lnast_node_str(Lnast_ntype_as,     "K2", 0));
-    auto c121  = ast_hcoded.add_child(c12,  Lnast_node_str(Lnast_ntype_input,  "$a", 0));
-    auto c122  = ast_hcoded.add_child(c12,  Lnast_node_str(Lnast_ntype_ref,    "___a", 0));
-    (void) c121;
-    (void) c122;
+void setup_lnast_ssa_testee(){
+  //hard coded initial lnast
+  //root and statement
+  ast_hcoded.set_root(Lnast_node_str(Lnast_ntype_top, "", 0));
+  auto sts         = ast_hcoded.add_child(Tree_index(0,0), Lnast_node_str(Lnast_ntype_statement, "", 0));
 
-    //balabala
+  auto c1          = ast_hcoded.add_child(sts,          Lnast_node_str(Lnast_ntype_pure_assign, ""  , 0));
+  auto c11         = ast_hcoded.add_child(c1,           Lnast_node_str(Lnast_ntype_ref,         "x" , 0));
+  auto c12         = ast_hcoded.add_child(c1,           Lnast_node_str(Lnast_ntype_ref,         "$a", 0));
 
-    ast_hcoded.ssa_trans();
-  }
+  auto c2          = ast_hcoded.add_child(sts,          Lnast_node_str(Lnast_ntype_pure_assign, ""  , 0));
+  auto c21         = ast_hcoded.add_child(c2,           Lnast_node_str(Lnast_ntype_ref,         "y" , 0));
+  auto c22         = ast_hcoded.add_child(c2,           Lnast_node_str(Lnast_ntype_ref,         "$a", 0));
+
+  auto c3          = ast_hcoded.add_child(sts,          Lnast_node_str(Lnast_ntype_if,         ""      , 0));
+  auto c31_cond1   = ast_hcoded.add_child(c3,           Lnast_node_str(Lnast_ntype_cond,       "___a"  , 0));
+  auto c311        = ast_hcoded.add_child(c31_cond1,    Lnast_node_str(Lnast_ntype_gt,         ""      , 0));
+  auto c3111       = ast_hcoded.add_child(c311,         Lnast_node_str(Lnast_ntype_const,      "0d2"   , 0));
+  auto c3112       = ast_hcoded.add_child(c311,         Lnast_node_str(Lnast_ntype_const,      "0d1"   , 0));
+
+  auto c32_sts     = ast_hcoded.add_child(c3,           Lnast_node_str(Lnast_ntype_statement,   ""    , 0));
+  auto c321        = ast_hcoded.add_child(c32_sts,      Lnast_node_str(Lnast_ntype_pure_assign, ""    , 0));
+  auto c3211       = ast_hcoded.add_child(c321,         Lnast_node_str(Lnast_ntype_ref,         "x"   , 0));
+  auto c3212       = ast_hcoded.add_child(c321,         Lnast_node_str(Lnast_ntype_ref,         "$e"  , 0));
+
+  auto c322_if     = ast_hcoded.add_child(c32_sts,      Lnast_node_str(Lnast_ntype_if,          ""    , 0));
+
+  auto c3221_cond2 = ast_hcoded.add_child(c322_if,      Lnast_node_str(Lnast_ntype_cond,       "___b"  , 0));
+  auto c32211      = ast_hcoded.add_child(c3221_cond2,  Lnast_node_str(Lnast_ntype_gt,         ""      , 0));
+  auto c322111     = ast_hcoded.add_child(c32211,       Lnast_node_str(Lnast_ntype_const,      "0d3"   , 0));
+  auto c322112     = ast_hcoded.add_child(c32211,       Lnast_node_str(Lnast_ntype_const,      "0d2"   , 0));
+  auto c3222_sts   = ast_hcoded.add_child(c322_if,      Lnast_node_str(Lnast_ntype_statement,     ""  , 0));
+  auto c32221      = ast_hcoded.add_child(c3222_sts,    Lnast_node_str(Lnast_ntype_pure_assign, ""  , 0));
+  auto c322211     = ast_hcoded.add_child(c32221,       Lnast_node_str(Lnast_ntype_ref,         "x" , 0));
+  auto c322212     = ast_hcoded.add_child(c32221,       Lnast_node_str(Lnast_ntype_ref,         "$b", 0));
+  auto c32222      = ast_hcoded.add_child(c3222_sts,    Lnast_node_str(Lnast_ntype_pure_assign, ""  , 0));
+  auto c322221     = ast_hcoded.add_child(c32222,       Lnast_node_str(Lnast_ntype_ref,         "y" , 0));
+  auto c322222     = ast_hcoded.add_child(c32222,       Lnast_node_str(Lnast_ntype_ref,         "$b", 0));
+
+  auto c3223_cond3 = ast_hcoded.add_child(c322_if,      Lnast_node_str(Lnast_ntype_cond,       "___c"  , 0));
+  auto c32231      = ast_hcoded.add_child(c3223_cond3,  Lnast_node_str(Lnast_ntype_gt,         ""      , 0));
+  auto c322311     = ast_hcoded.add_child(c32231,       Lnast_node_str(Lnast_ntype_const,      "0d4"   , 0));
+  auto c322312     = ast_hcoded.add_child(c32231,       Lnast_node_str(Lnast_ntype_const,      "0d3"   , 0));
+  auto c3224_sts   = ast_hcoded.add_child(c322_if,      Lnast_node_str(Lnast_ntype_statement,   ""  , 0));
+  auto c32241      = ast_hcoded.add_child(c3224_sts,    Lnast_node_str(Lnast_ntype_pure_assign, ""  , 0));
+  auto c322411     = ast_hcoded.add_child(c32241,       Lnast_node_str(Lnast_ntype_ref,         "x" , 0));
+  auto c322412     = ast_hcoded.add_child(c32241,       Lnast_node_str(Lnast_ntype_ref,         "$c", 0));
+  auto c32242      = ast_hcoded.add_child(c3224_sts,    Lnast_node_str(Lnast_ntype_pure_assign, ""  , 0));
+  auto c322421     = ast_hcoded.add_child(c32242,       Lnast_node_str(Lnast_ntype_ref,         "y" , 0));
+  auto c322422     = ast_hcoded.add_child(c32242,       Lnast_node_str(Lnast_ntype_ref,         "$c", 0));
+
+  auto c3225_else  = ast_hcoded.add_child(c322_if,      Lnast_node_str(Lnast_ntype_else,       "___d"  , 0));
+  auto c3226_sts   = ast_hcoded.add_child(c322_if,      Lnast_node_str(Lnast_ntype_statement,   ""  , 0));
+  auto c32261      = ast_hcoded.add_child(c3226_sts,    Lnast_node_str(Lnast_ntype_pure_assign, ""  , 0));
+  auto c322611     = ast_hcoded.add_child(c32261,       Lnast_node_str(Lnast_ntype_ref,         "x" , 0));
+  auto c322612     = ast_hcoded.add_child(c32261,       Lnast_node_str(Lnast_ntype_ref,         "$d", 0));
+  auto c32262      = ast_hcoded.add_child(c3226_sts,    Lnast_node_str(Lnast_ntype_pure_assign, ""  , 0));
+  auto c322621     = ast_hcoded.add_child(c32262,       Lnast_node_str(Lnast_ntype_ref,         "y" , 0));
+  auto c322622     = ast_hcoded.add_child(c32262,       Lnast_node_str(Lnast_ntype_ref,         "$d", 0));
+
+  auto c323        = ast_hcoded.add_child(c32_sts,      Lnast_node_str(Lnast_ntype_pure_assign, ""    , 0));
+  auto c3231       = ast_hcoded.add_child(c323,         Lnast_node_str(Lnast_ntype_ref,         "y"   , 0));
+  auto c3232       = ast_hcoded.add_child(c323,         Lnast_node_str(Lnast_ntype_ref,         "$e"  , 0));
+
+  auto c4          = ast_hcoded.add_child(sts,          Lnast_node_str(Lnast_ntype_plus,        ""     , 0));
+  auto c41         = ast_hcoded.add_child(c4,           Lnast_node_str(Lnast_ntype_ref,         "___e" , 0));
+  auto c42         = ast_hcoded.add_child(c4,           Lnast_node_str(Lnast_ntype_ref,         "$x"   , 0));
+  auto c43         = ast_hcoded.add_child(c4,           Lnast_node_str(Lnast_ntype_ref,         "$a"   , 0));
+
+  auto c5          = ast_hcoded.add_child(sts,          Lnast_node_str(Lnast_ntype_pure_assign,        ""       , 0));
+  auto c51         = ast_hcoded.add_child(c5,           Lnast_node_str(Lnast_ntype_ref,                "%o1"    , 0));
+  auto c52         = ast_hcoded.add_child(c5,           Lnast_node_str(Lnast_ntype_ref,                "___e"   , 0));
+
+  auto c6          = ast_hcoded.add_child(sts,          Lnast_node_str(Lnast_ntype_plus,        ""     , 0));
+  auto c61         = ast_hcoded.add_child(c6,           Lnast_node_str(Lnast_ntype_ref,         "___f" , 0));
+  auto c62         = ast_hcoded.add_child(c6,           Lnast_node_str(Lnast_ntype_ref,         "$y"   , 0));
+  auto c63         = ast_hcoded.add_child(c6,           Lnast_node_str(Lnast_ntype_ref,         "$a"   , 0));
+
+  auto c7          = ast_hcoded.add_child(sts,          Lnast_node_str(Lnast_ntype_pure_assign,        ""       , 0));
+  auto c71         = ast_hcoded.add_child(c7,           Lnast_node_str(Lnast_ntype_ref,                "%o2"    , 0));
+  auto c72         = ast_hcoded.add_child(c7,           Lnast_node_str(Lnast_ntype_ref,                "___f"   , 0));
+
+  populate_lnast_data("ast_hcoded", &ast_hcoded);
+  ast_hcoded.ssa_trans();
+}
 
 
 /*
- * CFG text input for lnast parser
+ *
+CFG text input for lnast parser
 K1   K2    0  0   14   :    ___a    __bits  0d1
 K2   K3    0  0   14   as   $a      ___a
 K3   K4    0  15  29   :    ___b    __bits  0d1
@@ -104,7 +168,8 @@ K16  K17   0  98  121  :    ___i    b       0d4
 K17  K18   0  98  121  .()  ___g    fun1    ___h  ___i
 K18  K19   0  98  121  =    result  ___g
 END
-*/
+ *
+ */
 
   void setup_lnast_golden(){
     //root and statement
@@ -313,6 +378,50 @@ END
   void setup_lnast_testee(){
     std::string_view memblock = setup_memblock();
     lnast_parser.parse("lnast", memblock);
+  }
+
+  //SH:FIXME: temporarily use Lnast_node_str
+  void populate_lnast_data(std::string_view files, const Language_neutral_ast<Lnast_node_str> *lnast) {
+    std::string data = "digraph {\n";
+
+    for(const auto& itr : lnast->depth_preorder(lnast->get_root())){
+      const auto &node_data = lnast->get_data(itr);
+      const auto &type  = lnast_parser.ntype_dbg(node_data.type);
+      const auto &scope = node_data.scope;
+      //std::string name(node_data.token.get_text(memblock));
+      auto name  = node_data.token;
+      if(node_data.type == Lnast_ntype_top)
+        name = "top";
+
+
+      auto id = std::to_string(itr.level)+std::to_string(itr.pos);
+      data += fmt::format(" {} [label=\"{}:{}:{}\"];\n", id, type, name, scope);
+      if(node_data.type == Lnast_ntype_top)
+        continue;
+
+      //get parent data for link
+      const auto &p = lnast->get_parent(itr);
+      const auto &ptype = lnast->get_data(p).type;
+      //std::string pname(lnast->get_data(p).token.get_text(memblock));
+      auto pname  = lnast->get_data(p).token;
+
+      if(ptype == Lnast_ntype_top)
+        pname = "top";
+
+      auto parent_id = std::to_string(p.level)+std::to_string(p.pos);
+      data += fmt::format(" {}->{};\n", parent_id, id);
+    }
+
+    data += "}\n";
+
+    std::string file = absl::StrCat( "./", files, ".dot");
+    int         fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    if (fd < 0) {
+      //Pass::error("inou.graphviz_lnast unable to create {}", file);
+      return;
+    }
+    write(fd, data.c_str(), data.size());
+    close(fd);
   }
 };
 
