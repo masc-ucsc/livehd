@@ -6,6 +6,7 @@
 class Pass_sample : public Pass {
 protected:
   static void work(Eprp_var &var);
+  static void wirecount(Eprp_var &var);
 
   void compute_histogram(LGraph *g);
   void compute_max_depth(LGraph *g);
@@ -18,5 +19,6 @@ public:
   void setup() final;
 
   void do_work(LGraph *g);
+  void do_wirecount(LGraph *g);
 };
 

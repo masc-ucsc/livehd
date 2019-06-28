@@ -16,6 +16,9 @@ void Pass_sample::setup() {
   Eprp_method m1("pass.sample", "counts number of nodes in an lgraph", &Pass_sample::work);
 
   register_pass(m1);
+
+  Eprp_method m2("pass.sample.wirecount", "counts number of wires the hierarchy", &Pass_sample::wirecount);
+  register_pass(m2);
 }
 
 Pass_sample::Pass_sample()
@@ -35,6 +38,37 @@ void Pass_sample::work(Eprp_var &var) {
   for(const auto &g : var.lgs) {
     pass.do_work(g);
   }
+}
+
+void Pass_sample::wirecount(Eprp_var &var) {
+  Pass_sample pass;
+
+  for(const auto &g : var.lgs) {
+    pass.do_wirecount(g);
+  }
+}
+
+void Pass_sample::do_wirecount(LGraph *g) {
+  LGBench b("pass.sample.wirecount");
+
+  int i_num=0;
+  int i_bits=0;
+  g->each_graph_input([this,&i_num,&i_bits](const Node_pin &pin) {
+    i_num++;
+    i_bits += pin.get_bits();
+  });
+
+  int o_num=0;
+  int o_bits=0;
+  g->each_graph_output([this,&o_num,&o_bits](const Node_pin &pin) {
+    o_num++;
+    o_bits += pin.get_bits();
+  });
+
+  fmt::print("Module {} : inputs {} {} : outputs {} {}\n"
+      ,g->get_name()
+      ,i_num ,i_bits
+      ,o_num ,o_bits);
 }
 
 void Pass_sample::compute_histogram(LGraph *g) {

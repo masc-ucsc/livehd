@@ -45,34 +45,40 @@ static absl::flat_hash_map<const RTLIL::Wire *, Node_pin>  wire2pin;
 static absl::flat_hash_map<const RTLIL::Cell *, Node>      cell2node; // Points to the exit_node for the block
 static absl::flat_hash_map<const RTLIL::Wire *, Node_pin_iterator>      partially_assigned;
 
-static void look_for_module_outputs(RTLIL::Module *module, const std::string &path) {
-#ifndef NDEBUG
-  log("yosys2lg look_for_module_outputs pass for module %s:\n", module->name.c_str());
-#endif
-  auto  library = Graph_library::instance(path);
-  auto *g       = library->try_find_lgraph(&module->name.c_str()[1]);
-  assert(g);
-
-  for(auto &wire_iter : module->wires_) {
-    RTLIL::Wire *wire = wire_iter.second;
+static void look_for_wire(LGraph *g, const RTLIL::Wire *wire) {
     if(wire->port_input) {
-      log("input %s\n",wire->name.c_str());
+      //log("input %s\n",wire->name.c_str());
       I(!wire->port_output); // any bidirectional port?
       I(wire->name.c_str()[0] == '\\');
       auto pin = g->add_graph_input(&wire->name.c_str()[1], wire->port_id, wire->width);
       if (wire->start_offset) {
         pin.set_offset(wire->start_offset);
       }
+      wire2pin[wire] = pin;
     }else if (wire->port_output) {
-      log("output %s\n",wire->name.c_str());
+      //log("output %s\n",wire->name.c_str());
       I(wire->name.c_str()[0] == '\\');
-      auto pin = g->add_graph_output(&wire->name.c_str()[1], wire->port_id, wire->width);
+      g->add_graph_output(&wire->name.c_str()[1], wire->port_id, wire->width);
+      auto pin = g->get_graph_output_driver(&wire->name.c_str()[1]);
       if (wire->start_offset) {
         auto dpin = g->get_graph_output_driver(&wire->name.c_str()[1]);
         I(dpin.get_pid() == pin.get_pid());
         dpin.set_offset(wire->start_offset);
       }
+      wire2pin[wire] = pin;
     }
+}
+
+static void look_for_module_io(RTLIL::Module *module, const std::string &path) {
+#ifndef NDEBUG
+  log("yosys2lg look_for_module_io pass for module %s:\n", module->name.c_str());
+#endif
+  auto  library = Graph_library::instance(path);
+  auto *g       = library->try_find_lgraph(&module->name.c_str()[1]);
+  assert(g);
+
+  for(auto &wire_iter : module->wires_) {
+    look_for_wire(g, wire_iter.second);
   }
 }
 
@@ -95,15 +101,8 @@ static Node_pin &get_edge_pin(LGraph *g, const RTLIL::Wire *wire) {
     return wire2pin[wire];
   }
 
-  if(wire->port_input) {
-    wire2pin[wire] = g->get_graph_input(&wire->name.c_str()[1]);
-    return wire2pin[wire];
-  }
-
-  if(wire->port_output) {
-    wire2pin[wire] = g->get_graph_output_driver(&wire->name.c_str()[1]);
-    return wire2pin[wire];
-  }
+  assert(!wire->port_input);  // Added before at look_for_module_io
+  assert(!wire->port_output);
 
   auto node = g->create_node(Join_Op, wire->width);
 
@@ -507,9 +506,9 @@ static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path
           continue;
 
         if(chunk.width == wire->width) {
-          assert(wire2pin.find(wire) == wire2pin.end());
-
-          if(chunk.width == ss.size()) {
+          if(wire2pin.find(wire) != wire2pin.end()) {
+            log("io wire %s from module %s cell type %s\n",wire->name.c_str(), module->name.c_str(), cell->type.c_str());
+          }else if(chunk.width == ss.size()) {
             // output port drives a single wire
             wire2pin[wire]     = driver_pin;
             set_bits_wirename(driver_pin, wire);
@@ -525,7 +524,9 @@ static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path
           if(partially_assigned.find(wire) == partially_assigned.end()) {
             partially_assigned[wire].resize(wire->width);
 
-            assert(wire2pin.find(wire) == wire2pin.end());
+            if(wire2pin.find(wire) != wire2pin.end()) {
+              printf("partial wire %s from module %s cell type %s (switching to partial)\n",wire->name.c_str(), module->name.c_str(), cell->type.c_str());
+            }
             auto join = g->create_node(Join_Op, wire->width);
             wire2pin[wire] = join.setup_driver_pin();
           }
@@ -1322,17 +1323,57 @@ struct Yosys2lg_Pass : public Yosys::Pass {
         }
       }
 
+      auto library = Graph_library::instance(path);
+
       for (auto cell : module->cells()) {
         if (!ct_all.cell_known(cell->type)) {
+          std::string_view mod_name(&(cell->type.c_str()[1]));
+
+          if (library->has_name(mod_name))
+            continue;
+
           for (auto &conn : cell->connections()) {
             for(auto &chunk : conn.second.chunks()) {
               const RTLIL::Wire *wire = chunk.wire;
               if (wire == nullptr)
                 continue;
+              std::string cell_port = absl::StrCat(cell->type.str(),"_:_",conn.first.str());
+              if (cell_port_inputs.count(cell_port))
+                continue;
 
               bool is_input  = wire->port_input  || driven_signals.count(wire->hash())>0;
-              bool is_output = wire->port_output || driven_signals.count(wire->hash())==0;
+              bool is_output = wire->port_output; // NOTE: May be module to module and still no driver || driven_signals.count(wire->hash())==0;
 
+              if (!is_input && !is_output) {
+                if (conn.first.str() == "\\A" || conn.first.str() == "\\B" || conn.first.str() == "\\C" || conn.first.str() == "\\D")
+                  is_input = true;
+                if (conn.first.str() == "\\A0" || conn.first.str() == "\\B0" || conn.first.str() == "\\C0" || conn.first.str() == "\\D0")
+                  is_input = true;
+                if (conn.first.str() == "\\A1" || conn.first.str() == "\\A2" || conn.first.str() == "\\A3" || conn.first.str() == "\\A4" || conn.first.str() == "\\A5" || conn.first.str() == "\\A6")
+                  is_input = true;
+                if (conn.first.str() == "\\B1" || conn.first.str() == "\\B2" || conn.first.str() == "\\B3" || conn.first.str() == "\\B4" || conn.first.str() == "\\B5" || conn.first.str() == "\\B6")
+                  is_input = true;
+                if (conn.first.str() == "\\C1" || conn.first.str() == "\\C2" || conn.first.str() == "\\C3" || conn.first.str() == "\\C4" || conn.first.str() == "\\C5" || conn.first.str() == "\\C6")
+                  is_input = true;
+                if (conn.first.str() == "\\D1" || conn.first.str() == "\\D2" || conn.first.str() == "\\D3" || conn.first.str() == "\\D4" || conn.first.str() == "\\D5" || conn.first.str() == "\\D6")
+                  is_input = true;
+
+                if (conn.first.str() == "\\CK" || conn.first.str() == "\\SI" || conn.first.str() == "\\SE" || conn.first.str() == "\\EN")
+                  is_input = true;
+                if (conn.first.str() == "\\TEN" || conn.first.str() == "\\S" || conn.first.str() == "\\SE" || conn.first.str() == "\\EN")
+                  is_input = true;
+                if (conn.first.str() == "\\ADRA" || conn.first.str() == "\\ADRB" || conn.first.str() == "\\ENCLK")
+                  is_input = true;
+                if (conn.first.c_str()[0] == '\\' && conn.first.c_str()[1] == 'I' && conn.first.str()[2] == 'N')
+                  is_input = true;
+
+                if (conn.first.str() == "\\X" || conn.first.str() == "\\Y" || conn.first.str() == "\\Z"  || conn.first.str() == "\\SO" || conn.first.str() == "\\Q" || conn.first.str() == "\\QN")
+                  is_output = true;
+                if (conn.first.str() == "\\CO") // carry out
+                  is_output = true;
+                if (conn.first.c_str()[0] == '\\' && conn.first.c_str()[1] == 'O')
+                  is_output = true;
+              }
 #if 0
               std::cout << "unknown cell_type:" << cell->type.str() << " cell_instance:" << cell->name.str() << " port_name:" << conn.first.str() << " wire_name:" << wire->name.str()
                 << " sig:" << wire->hash()
@@ -1340,7 +1381,6 @@ struct Yosys2lg_Pass : public Yosys::Pass {
                 << "\n";
 #endif
 
-              std::string cell_port = absl::StrCat(cell->type.str(),"_:_",conn.first.str());
               if (is_input)
                 cell_port_inputs.insert(cell_port);
               if (is_output)
@@ -1350,17 +1390,13 @@ struct Yosys2lg_Pass : public Yosys::Pass {
         }
       }
 
-
-
       auto *g            = LGraph::create(path, name, "-"); // No source, unable to track
       I(g);
-      log("yosys2lg look_for_module_outputs pass for module %s:\n", module->name.c_str());
-      look_for_module_outputs(module, path);
+      look_for_module_io(module, path);
     }
 
     for(auto &it : design->modules_) {
       RTLIL::Module *module = it.second;
-      log("yosys2lg NOT look_for_cell_outputs pass for module %s:\n", module->name.c_str());
       if(design->selected_module(it.first)) {
         look_for_cell_outputs(module, path);
         LGraph *g = process_module(module, path);
