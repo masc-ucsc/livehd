@@ -283,11 +283,11 @@ static bool is_black_box_output(const RTLIL::Module *module, const RTLIL::Cell *
   std::string cell_port = absl::StrCat(cell->type.str(), "_:_", port_name.str());
 
   if (cell_port_outputs.find(cell_port) != cell_port_outputs.end()) {
-    //std::cout << "1.output " << cell_port << std::endl;
+    fprintf(stderr,"WARNING: lgyosys_tolg guessing that cell %s pin %s is an output\n", cell->name.c_str(), port_name.c_str());
     return true;
   }
   if (cell_port_inputs.find(cell_port) != cell_port_inputs.end()) {
-    //std::cout << "1.input " << cell_port << std::endl;
+    fprintf(stderr,"WARNING: lgyosys_tolg guessing that cell %s pin %s is an input\n", cell->name.c_str(), port_name.c_str());
     return false;
   }
 
@@ -318,11 +318,11 @@ static bool is_black_box_input(const RTLIL::Module *module, const RTLIL::Cell *c
 
   // Opposite of is_black_box_output
   if (cell_port_outputs.find(cell_port) != cell_port_outputs.end()) {
-    //std::cout << "2.output " << cell_port << std::endl;
+    fprintf(stderr,"WARNING: lgyosys_tolg guessing that cell %s pin %s is an output\n", cell->name.c_str(), port_name.c_str());
     return false;
   }
   if (cell_port_inputs.find(cell_port) != cell_port_inputs.end()) {
-    //std::cout << "2.input " << cell_port << std::endl;
+    fprintf(stderr,"WARNING: lgyosys_tolg guessing that cell %s pin %s is an input\n", cell->name.c_str(), port_name.c_str());
     return true;
   }
 
@@ -1344,37 +1344,75 @@ struct Yosys2lg_Pass : public Yosys::Pass {
               bool is_input  = wire->port_input  || driven_signals.count(wire->hash())>0;
               bool is_output = wire->port_output; // NOTE: May be module to module and still no driver || driven_signals.count(wire->hash())==0;
 
-              if (!is_input && !is_output) {
-                if (conn.first.str() == "\\A" || conn.first.str() == "\\B" || conn.first.str() == "\\C" || conn.first.str() == "\\D")
-                  is_input = true;
-                if (conn.first.str() == "\\A0" || conn.first.str() == "\\B0" || conn.first.str() == "\\C0" || conn.first.str() == "\\D0")
-                  is_input = true;
-                if (conn.first.str() == "\\A1" || conn.first.str() == "\\A2" || conn.first.str() == "\\A3" || conn.first.str() == "\\A4" || conn.first.str() == "\\A5" || conn.first.str() == "\\A6")
-                  is_input = true;
-                if (conn.first.str() == "\\B1" || conn.first.str() == "\\B2" || conn.first.str() == "\\B3" || conn.first.str() == "\\B4" || conn.first.str() == "\\B5" || conn.first.str() == "\\B6")
-                  is_input = true;
-                if (conn.first.str() == "\\C1" || conn.first.str() == "\\C2" || conn.first.str() == "\\C3" || conn.first.str() == "\\C4" || conn.first.str() == "\\C5" || conn.first.str() == "\\C6")
-                  is_input = true;
-                if (conn.first.str() == "\\D1" || conn.first.str() == "\\D2" || conn.first.str() == "\\D3" || conn.first.str() == "\\D4" || conn.first.str() == "\\D5" || conn.first.str() == "\\D6")
+              const char *str = conn.first.c_str();
+              if (!is_input && !is_output && str[0] == '\\') {
+                str++;
+                if (str[0]== 'A' || str[0]=='B' || str[0]=='C' || str[0]=='D' || str[0]=='S') {
+                  if (isdigit(str[1]) || str[1]==0)
+                    is_input = true;
+                }
+                if (strncmp(str,"CK",2)==0
+                   || strncmp(str,"CLK",3)==0
+                   || strcmp(str,"clock")==0
+                   || strcmp(str,"EN")==0
+                   || strcmp(str,"RD")==0
+                   || strcmp(str,"en")==0
+                   || strcmp(str,"enable")==0
+                   || strcmp(str,"reset")==0
+                   || strcmp(str,"RST")==0)
                   is_input = true;
 
-                if (conn.first.str() == "\\CK" || conn.first.str() == "\\SI" || conn.first.str() == "\\SE" || conn.first.str() == "\\EN")
+                if ((strncmp(cell->type.c_str(), "\\sa", 5)==0) && (strncmp(str,"ME",2)==0 || strncmp(str,"QPB",3)==0 || strncmp(str,"RME",3)==0))
                   is_input = true;
-                if (conn.first.str() == "\\TEN" || conn.first.str() == "\\S" || conn.first.str() == "\\SE" || conn.first.str() == "\\EN")
+                if ((strncmp(cell->type.c_str(), "\\sa", 3)==0) && (strcmp(str,"BC2")==0 || strncmp(str,"DFT",3)==0 || strncmp(str,"SO_CNT",6)==0))
                   is_input = true;
+
+                if (cell->type.str()[1]=='H' && cell->type.str()[2]=='D') {
+                  if (strcmp(str,"SI")==0
+                      ||strcmp(str,"SE")==0
+                      ||strcmp(str,"CI")==0
+                      ||strcmp(str,"TE")==0
+                      ||strcmp(str,"TEN")==0
+                      ||strcmp(str,"S")==0
+                      ||strcmp(str,"SE")==0)
+                  is_input = true;
+                }
+
                 if (conn.first.str() == "\\ADRA" || conn.first.str() == "\\ADRB" || conn.first.str() == "\\ENCLK")
                   is_input = true;
-                if (conn.first.c_str()[0] == '\\' && conn.first.c_str()[1] == 'I' && conn.first.str()[2] == 'N')
+
+                if (strncmp(str,"io_is",5)==0
+                  ||strncmp(str,"io_in",5)==0)
                   is_input = true;
 
-                if (conn.first.str() == "\\X" || conn.first.str() == "\\Y" || conn.first.str() == "\\Z"  || conn.first.str() == "\\SO" || conn.first.str() == "\\Q" || conn.first.str() == "\\QN")
+                if (strncmp(str,"IN",2)==0
+                  ||strncmp(str,"in",2)==0)
+                  is_input = true;
+
+                if (str[1]==0 && (str[0]=='X' || str[0]=='Y' || str[0]=='Z' || str[0]=='Q'))
                   is_output = true;
-                if (conn.first.str() == "\\CO") // carry out
+
+                if ((strncmp(cell->type.c_str(), "\\sa", 3)==0)
+                    && (strcmp(str,"RSCOUT")==0 || strncmp(str,"SO_CN",5)==0))
                   is_output = true;
-                if (conn.first.c_str()[0] == '\\' && conn.first.c_str()[1] == 'O')
+
+                if (cell->type.str()[1]=='H' && cell->type.str()[2]=='D') {
+                  if (strcmp(str,"CON")==0)
+                    is_output = true;
+                }
+
+                if (strcmp(str,"SO")==0
+                  ||strncmp(str,"io_out",6)==0
+                  ||strcmp(str,"QN")==0
+                  ||strcmp(str,"CO")==0
+                  ||strcmp(str,"QP")==0)
+                  is_output = true;
+
+                if (strncmp(str,"OU",2)==0
+                  ||strncmp(str,"ou",2)==0)
                   is_output = true;
               }
-#if 0
+#if 1
               std::cout << "unknown cell_type:" << cell->type.str() << " cell_instance:" << cell->name.str() << " port_name:" << conn.first.str() << " wire_name:" << wire->name.str()
                 << " sig:" << wire->hash()
                 << " io:" << (is_input?"I":"") << (is_output?"O":"")

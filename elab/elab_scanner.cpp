@@ -161,6 +161,10 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock) {
   parse(name, memblock, tlist);
 }
 
+static inline bool is_newline(char c) {
+  return c == '\n' || c == '\r' || c == '\f';
+}
+
 void Elab_scanner::parse(std::string_view name, std::string_view memblock, Token_list &tlist) {
   buffer_name = name;
   buffer      = memblock;  // To allow error reporting before chunking
@@ -189,7 +193,7 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, Token
     // int pos = (&memblock[i] - ptr_section); // same as "i" unless chunking
 
     t.adjust_len(pos);
-    if (unlikely(c == '\n' || c == '\r' || c == '\f')) {
+    if (unlikely(is_newline(c))) {
       nlines++;
       if (!in_comment && t.tok != Token_id_nop) {
         add_token(t);
@@ -264,9 +268,19 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, Token
       starting_comment  = false;
       finishing_comment = false;
 
-      // TODO: Convert this to a word base (not byte based) skip
-      while(memblock[pos+1]!='\n' && memblock[pos+1]!='*' && pos<memblock.size())
-        pos++;
+      if (in_singleline_comment) {
+        if(!is_newline(memblock[pos]) && (pos+1)<memblock.size()) {
+          // TODO: Convert this to a word base (not byte based) skip
+          while(!is_newline(memblock[pos+1]) && (pos+3)<memblock.size())
+            pos++;
+        }
+      }else{
+        if(!is_newline(memblock[pos]) && memblock[pos]!='*' && (pos+3)<memblock.size()) {
+          // TODO: Convert this to a word base (not byte based) skip
+          while(!is_newline(memblock[pos+1]) && memblock[pos+1]!='*' && (pos+3)<memblock.size())
+            pos++;
+        }
+      }
 
     } else if (unlikely(in_string_pos)) {
       if (c == '"' && last_c != '\\') {
@@ -445,16 +459,14 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
 
   size_t line_pos_start = 0;
   for (int i = token_list[max_pos].pos; i > 0; i--) {
-    char c = buffer[i];
-    if (c == '\n' || c == '\r' || c == '\f') {
+    if (is_newline(buffer[i])) {
       line_pos_start = i;
       break;
     }
   }
   size_t line_pos_end = buffer.size();
   for (size_t i = token_list[max_pos].pos; i < buffer.size(); i++) {
-    char c = buffer[i];
-    if (c == '\n' || c == '\r' || c == '\f') {
+    if (is_newline(buffer[i])) {
       line_pos_end = i;
       break;
     }
@@ -479,7 +491,7 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
   fmt::print("{}:{}:{} {}: ", buffer_name, line, col, cat);
   std::cout << text;  // NOTE: no fmt::print because it can contain {}
 
-  if (buffer[line_pos_start] != '\n') std::cout << std::endl;
+  if (is_newline(buffer[line_pos_start])) std::cout << std::endl;
 
   assert(line_pos_end > line_pos_start);
   std::cout << line_txt << "\n";

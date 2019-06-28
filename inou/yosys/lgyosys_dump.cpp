@@ -634,7 +634,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         inps.push_back(get_wire(e.driver));
       }
 
-      Port_ID pid;
+      Port_ID pid=0;
       if (inps.size() == 1) {
         pid = 1;
       } else {

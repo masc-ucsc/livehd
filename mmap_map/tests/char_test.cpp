@@ -71,6 +71,7 @@ void test3(int n) {
   for(int i = 0; i < n; i++) {
     uint32_t val = 0xdead0000 | (i & 0xFFFF);
     assert(test.get_field(std::to_string(i)) == val);
+    (void)val;
   }
   assert(test.get_field("c") == 2);
 }
@@ -81,6 +82,7 @@ void test4(int n) {
   for(int i = 0; i < n; i++) {
     uint32_t val = 0xdead0000 | (i & 0xFFFF);
     assert(test.get_field(std::to_string(i)) == val);
+    (void)val;
   }
   assert(test.get_field("c") == 2);
 
@@ -110,6 +112,7 @@ void test5(size_t n) {
 
   for(size_t i = 0; i < n; i++) {
     const Test5_data &d = test.get_field(std::to_string(i));
+    (void)d;
     assert(d.potato == (0xdead0000 | (i & 0xFFFF)));
     assert(d.banana == (0xbeef0000 | (i & 0xFFFF)));
     assert(d.id == i);
@@ -124,10 +127,12 @@ void test5(size_t n) {
     assert(idlist[conta] == it.get_id());
 
     const auto str = it.get_name();
+    (void)str;
 
     assert(std::atoi(std::string(str).c_str()) == (int)conta);
 
     const auto &d = it.get_field();
+    (void)d;
     assert(d.potato == (0xdead0000 | (conta & 0xFFFF)));
     assert(d.banana == (0xbeef0000 | (conta & 0xFFFF)));
     assert(d.id == conta);

@@ -73,10 +73,14 @@ void Inou_graphviz::do_hierarchy(LGraph *g) {
   std::string file = absl::StrCat(odir, "/", g->get_name(), "_hier.dot");
   int         fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
   if (fd < 0) {
-    Pass::error("inou.graphviz unable to create {}", file);
+    Pass::error("inou.graphviz.do_hierarchy unable to create {}", file);
     return;
   }
-  write(fd, data.c_str(), data.size());
+  size_t sz = write(fd, data.c_str(), data.size());
+  if (sz!=data.size()) {
+    Pass::error("inou.graphviz.do_hierarchy unexpected write missmatch");
+    return;
+  }
   close(fd);
 }
 
@@ -150,7 +154,11 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
     Pass::error("inou.graphviz unable to create {}", file);
     return;
   }
-  write(fd, data.c_str(), data.size());
+  size_t sz = write(fd, data.c_str(), data.size());
+  if (sz!=data.size()) {
+    Pass::error("inou.graphviz unexpected write missmatch");
+    return;
+  }
   close(fd);
 }
 
@@ -213,7 +221,11 @@ void Inou_graphviz::populate_lnast_data(std::string_view files) {
     Pass::error("inou.graphviz_lnast unable to create {}", file);
     return;
   }
-  write(fd, data.c_str(), data.size());
+  size_t sz = write(fd, data.c_str(), data.size());
+  if (sz!=data.size()) {
+    Pass::error("inou.graphviz_lnast unexpected write missmatch");
+    return;
+  }
   close(fd);
 }
 

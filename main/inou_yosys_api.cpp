@@ -102,7 +102,6 @@ int Inou_yosys_api::create_lib(std::string_view lib_file, std::string_view lgdb)
 }
 
 int Inou_yosys_api::do_work(std::string_view yosys, std::string_view liblg, std::string_view script_file, mustache::data &vars) {
-  fmt::print("yosys do work {} -m {} using {}\n", yosys, liblg, script_file);
 
   std::ifstream inFile;
   inFile.open(std::string(script_file));
@@ -126,6 +125,8 @@ int Inou_yosys_api::do_work(std::string_view yosys, std::string_view liblg, std:
   write(fd, yosys_cmd.c_str(), yosys_cmd.size());
   close(fd);
 
+  fmt::print("yosys {} synthesis cmd: {} -m {} using {}\n", filename, yosys, liblg, script_file);
+
   int pid = fork();
   if (pid < 0) {
     Main_api::error(fmt::format("inou.yosys: unable to fork??"));
@@ -134,16 +135,37 @@ int Inou_yosys_api::do_work(std::string_view yosys, std::string_view liblg, std:
 
   if (pid == 0) {  // Child
 
-    char *            argv[]    = {strdup(std::string(yosys).c_str()),
-                    strdup("-q"),
-                    strdup("-m"),
-                    strdup(std::string(liblg).c_str()),
-                    strdup("-s"),
-                    strdup(filename),
-                    0};
+    char filename2[1024+32];
+
+    sprintf(filename2,"%s.log", filename);
+    int fd_out = open(filename2, O_CREAT|O_WRONLY|O_TRUNC, 0644);
+    if (fd_out<0) {
+      fprintf(stderr,"ERROR inou_yosys_api could not create %s file\n", filename);
+      exit(-3);
+    }
+    sprintf(filename2,"%s.err", filename);
+    int fd_err = open(filename2, O_CREAT|O_WRONLY|O_TRUNC, 0644);
+    if (fd_err<0) {
+      fprintf(stderr,"ERROR inou_yosys_api could not create %s file\n", filename);
+      exit(-3);
+    }
+
+    dup2(fd_out, STDOUT_FILENO);
+    dup2(fd_err, STDERR_FILENO);
+    close(fd_err);
+    close(fd_out);
+
+    char *argv[]    = {strdup(std::string(yosys).c_str()),
+      strdup("-q"),
+      strdup("-m"),
+      strdup(std::string(liblg).c_str()),
+      strdup("-s"),
+      strdup(filename),
+      0};
 
     if (execvp(std::string(yosys).c_str(), argv) < 0) {
-      Main_api::error(fmt::format("inou.yosys: execvp fail with {}", strerror(errno)));
+      Main_api::error("inou.yosys: execvp fail with {}", strerror(errno));
+      exit(-3);
     }
 
     exit(0);
