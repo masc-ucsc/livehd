@@ -87,6 +87,9 @@ static bool is_yosys_output(const std::string &idstring) {
 }
 
 static Node_pin &get_edge_pin(LGraph *g, const RTLIL::Wire *wire) {
+  if (wire2pin.find(wire) == wire2pin.end()) {
+    look_for_wire(g, wire);
+  }
 
   if(wire2pin.find(wire) != wire2pin.end()) {
     if(wire->width != wire2pin[wire].get_bits()) {
@@ -101,7 +104,7 @@ static Node_pin &get_edge_pin(LGraph *g, const RTLIL::Wire *wire) {
     return wire2pin[wire];
   }
 
-  assert(!wire->port_input);  // Added before at look_for_module_io
+  assert(!wire->port_input);  // Added before at look_for_wire
   assert(!wire->port_output);
 
   auto node = g->create_node(Join_Op, wire->width);
@@ -1351,15 +1354,20 @@ struct Yosys2lg_Pass : public Yosys::Pass {
                   if (isdigit(str[1]) || str[1]==0)
                     is_input = true;
                 }
+                if (str[0]== 'a' || str[0]=='b' || str[0]=='c' || str[0]=='d' || str[0]=='s') {
+                  if ((isdigit(str[1]) && str[2]==0) || str[1]==0)
+                    is_input = true;
+                }
                 if (strncmp(str,"CK",2)==0
-                   || strncmp(str,"CLK",3)==0
+                   || strstr(str,"CLK")
+                   || strstr(str,"clk")
                    || strcmp(str,"clock")==0
                    || strcmp(str,"EN")==0
                    || strcmp(str,"RD")==0
                    || strcmp(str,"en")==0
                    || strcmp(str,"enable")==0
-                   || strcmp(str,"reset")==0
-                   || strcmp(str,"RST")==0)
+                   || strstr(str,"reset")
+                   || strstr(str,"RST"))
                   is_input = true;
 
                 if ((strncmp(cell->type.c_str(), "\\sa", 5)==0) && (strncmp(str,"ME",2)==0 || strncmp(str,"QPB",3)==0 || strncmp(str,"RME",3)==0))
@@ -1378,18 +1386,34 @@ struct Yosys2lg_Pass : public Yosys::Pass {
                   is_input = true;
                 }
 
-                if (conn.first.str() == "\\ADRA" || conn.first.str() == "\\ADRB" || conn.first.str() == "\\ENCLK")
+                if (conn.first.str() == "\\ADRA" || conn.first.str() == "\\ADRB")
                   is_input = true;
 
                 if (strncmp(str,"io_is",5)==0
                   ||strncmp(str,"io_in",5)==0)
                   is_input = true;
 
+                if (strstr(cell->type.c_str(), "mem")) {
+                  if (strcmp(str, "R0_data") == 0 || strcmp(str, "R0_en") == 0 ||
+                      strcmp(str, "R0_addr") == 0 ||
+                      strcmp(str, "W0_addr") == 0 || strcmp(str, "W0_mask") == 0 || strcmp(str, "W0_en") == 0)
+                    is_input = true;
+
+                  if (strcmp(str, "R0_wdata") == 0) is_output = true;
+                }
+                if (strstr(cell->type.c_str(), "array")) {
+                  if (strcmp(str, "RW0_rdata") == 0) is_input = true;
+
+                  if (strcmp(str, "RW0_wdata") == 0) is_output = true;
+                }
+
                 if (strncmp(str,"IN",2)==0
                   ||strncmp(str,"in",2)==0)
                   is_input = true;
 
                 if (str[1]==0 && (str[0]=='X' || str[0]=='Y' || str[0]=='Z' || str[0]=='Q'))
+                  is_output = true;
+                if (str[1]==0 && (str[0]=='x' || str[0]=='y' || str[0]=='z' || str[0]=='q'))
                   is_output = true;
 
                 if ((strncmp(cell->type.c_str(), "\\sa", 3)==0)
@@ -1412,6 +1436,8 @@ struct Yosys2lg_Pass : public Yosys::Pass {
                   ||strncmp(str,"ou",2)==0)
                   is_output = true;
               }
+
+              assert(!(is_input && is_output));
 #if 1
               std::cout << "unknown cell_type:" << cell->type.str() << " cell_instance:" << cell->name.str() << " port_name:" << conn.first.str() << " wire_name:" << wire->name.str()
                 << " sig:" << wire->hash()
