@@ -116,6 +116,24 @@ bool fwd(int n) { for(int i = 0; i < n; i++) {
 
       visited.insert(node.get_compact());
     }
+    visited.clear();
+    for(auto node : g->forward(true)) {
+
+      if (!node.get_type().is_pipelined() && node.get_type().op != GraphIO_Op) {
+        // check if all incoming edges were visited
+        for(auto &inp : node.inp_edges()) {
+          if (!inp.driver.get_node().get_type().is_pipelined() && inp.driver.get_node().get_type().op != GraphIO_Op) {
+            if(visited.find(inp.driver.get_node().get_compact()) == visited.end()) {
+              fmt::print("fwd failed for lgraph node:{} fwd:{}\n", node.debug_name(), inp.driver.get_node().debug_name());
+              I(false);
+              return false;
+            }
+          }
+        }
+      }
+
+      visited.insert(node.get_compact());
+    }
 
   }
 
@@ -133,6 +151,26 @@ bool bwd(int n) {
     //fmt::print("----------------------\n");
     absl::flat_hash_set<Node::Compact> visited;
     for(auto node : g->backward()) {
+      //fmt::print(" bwd {}\n", node.debug_name());
+
+      visited.insert(node.get_compact());
+
+      if (!node.get_type().is_pipelined() && node.get_type().op != GraphIO_Op) {
+        // check if all incoming edges were visited
+        for(auto &out : node.out_edges()) {
+          if (!out.sink.get_node().get_type().is_pipelined() && out.sink.get_node().get_type().op != GraphIO_Op) {
+            if(visited.find(out.sink.get_node().get_compact()) == visited.end()) {
+              fmt::print("bwd failed for lgraph node:{} bwd:{}\n", node.debug_name(), out.sink.get_node().debug_name());
+              I(false);
+              return false;
+            }
+          }
+        }
+      }
+
+    }
+    visited.clear();
+    for(auto node : g->backward(true)) {
       //fmt::print(" bwd {}\n", node.debug_name());
 
       visited.insert(node.get_compact());
@@ -297,6 +335,106 @@ void simple() {
     fast.emplace_back(node.debug_name());
     conta++;
   }
+  std::vector<std::string> fast_true;
+  conta =0;
+  for(const auto node : g->fast(true)) {
+    fast_true.emplace_back(node.debug_name());
+    conta++;
+  }
+  std::vector<std::string> fwd_true;
+  conta =0;
+  for(const auto node : g->forward(true)) {
+    fwd_true.emplace_back(node.debug_name());
+    conta++;
+  }
+  std::vector<std::string> bwd_true;
+  conta =0;
+  for(const auto node : g->backward(true)) {
+    bwd_true.emplace_back(node.debug_name());
+    conta++;
+  }
+
+  std::sort(fwd_true.begin() , fwd_true.end());
+  std::sort(bwd_true.begin() , bwd_true.end());
+  std::sort(fast_true.begin(), fast_true.end());
+
+  std::sort(fwd.begin() , fwd.end());
+  std::sort(bwd.begin() , bwd.end());
+  std::sort(fast.begin(), fast.end());
+
+  I(fwd.size() == fwd_true.size());
+  I(bwd.size() == bwd_true.size());
+  I(fast.size() == fast_true.size());
+  {
+    auto it1 = fast.begin();
+    auto it2 = fast_true.begin();
+    while(it1 != fast.end()) {
+      if (*it1 != *it2) {
+        fmt::print("missmatch fast {} vs fast_true {}\n", *it1, *it2);
+        failed = true;
+      }
+      it1++;
+      it2++;
+      if (it1 == fast.end() && it2 == fast_true.end()) break;
+      if (it1 != fast.end() && it2 != fast_true.end()) continue;
+      fmt::print("fast fast_true not matching size\n");
+
+      fmt::print("fast    :");
+      for(auto txt:fast)
+        fmt::print(" {}",txt);
+      fmt::print("\n");
+      fmt::print("fast_tru:");
+      for(auto txt:fast_true)
+        fmt::print(" {}",txt);
+      fmt::print("\n");
+      failed = true;
+      return;
+    }
+  }
+  {
+    auto it1 = fwd.begin();
+    auto it2 = fwd_true.begin();
+    while(it1 != fwd.end()) {
+      if (*it1 != *it2) {
+        fmt::print("missmatch fwd {} vs fwd_true {}\n", *it1, *it2);
+        failed = true;
+        fmt::print("fwd     :");
+        for(auto txt:fwd)
+          fmt::print(" {}",txt);
+        fmt::print("\n");
+        fmt::print("fwd_tru :");
+        for(auto txt:fwd_true)
+          fmt::print(" {}",txt);
+        fmt::print("\n");
+        return;
+      }
+      it1++;
+      it2++;
+      if (it1 == fwd.end() && it2 == fwd_true.end()) break;
+      if (it1 != fwd.end() && it2 != fwd_true.end()) continue;
+      fmt::print("fwd fwd_true not matching size\n");
+      failed = true;
+      return;
+    }
+  }
+  {
+    auto it1 = bwd.begin();
+    auto it2 = bwd_true.begin();
+    while(it1 != bwd.end()) {
+      if (*it1 != *it2) {
+        fmt::print("missmatch bwd {} vs bwd_true {}\n", *it1, *it2);
+        failed = true;
+        return;
+      }
+      it1++;
+      it2++;
+      if (it1 == bwd.end() && it2 == bwd_true.end()) break;
+      if (it1 != bwd.end() && it2 != bwd_true.end()) continue;
+      fmt::print("bwd bwd_true not matching size\n");
+      failed = true;
+      return;
+    }
+  }
 
   fmt::print("fwd :");
   for(auto txt:fwd)
@@ -312,10 +450,6 @@ void simple() {
   for(auto txt:fast)
     fmt::print(" {}",txt);
   fmt::print("\n");
-
-  std::sort(fwd.begin() , fwd.end());
-  std::sort(bwd.begin() , bwd.end());
-  std::sort(fast.begin(), fast.end());
 
   auto fwd_it  = fwd.begin();
   auto bwd_it  = bwd.begin();
@@ -346,25 +480,25 @@ void simple() {
 int main() {
 
 #if 1
-  for(int i=0;i<20;i++) {
+  for(int i=0;i<40;i++) {
     simple();
     if (failed)
       return -3;
   }
 #endif
 
-  int n = 20;
+#if 1
+  int n = 40;
   generate_graphs(n);
 
-#if 1
   if(!fwd(n)) {
     failed = true;
   }
-#endif
 
   if(!bwd(n)) {
     failed = true;
   }
+#endif
 
   return failed ? 1 : 0;
 }
