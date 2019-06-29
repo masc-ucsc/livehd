@@ -44,9 +44,7 @@ void LGraph_Base::clear() {
 }
 
 void LGraph_Base::sync() {
-
   node_internal.sync();
-
   Lgraph_base_core::sync();
 
   library->update_nentries(lgid, node_internal.size());

@@ -89,8 +89,12 @@ void Pass_sample::do_wirecount(LGraph *g, int indent) {
   auto path = g->get_path();
   g->each_sub_fast([this,path,indent](Node &node, Lg_type_id lgid) {
       LGraph *sub_lg = LGraph::open(path,lgid);
-      if (sub_lg)
-        this->do_wirecount(sub_lg, indent+1);
+      if (!sub_lg)
+        return;
+      if (sub_lg->empty())
+        return; // No blackboxes
+
+      this->do_wirecount(sub_lg, indent+1);
   });
 
 }
