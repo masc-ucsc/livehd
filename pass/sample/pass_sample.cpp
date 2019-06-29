@@ -41,15 +41,15 @@ void Pass_sample::work(Eprp_var &var) {
 }
 
 void Pass_sample::wirecount(Eprp_var &var) {
+  LGBench b("pass.sample.wirecount");
   Pass_sample pass;
 
   for(const auto &g : var.lgs) {
-    pass.do_wirecount(g);
+    pass.do_wirecount(g, 0);
   }
 }
 
-void Pass_sample::do_wirecount(LGraph *g) {
-  LGBench b("pass.sample.wirecount");
+void Pass_sample::do_wirecount(LGraph *g, int indent) {
 
   int i_num=0;
   int i_bits=0;
@@ -65,10 +65,34 @@ void Pass_sample::do_wirecount(LGraph *g) {
     o_bits += pin.get_bits();
   });
 
-  fmt::print("Module {} : inputs {} {} : outputs {} {}\n"
-      ,g->get_name()
-      ,i_num ,i_bits
-      ,o_num ,o_bits);
+  int n_wire=0;
+  int n_wire_bits=0;
+  int n_nodes=0;
+  for (auto node : g->fast()) {
+    n_nodes++;
+    for (const auto &edge : node.out_edges()) {
+      n_wire++;
+      n_wire_bits += edge.driver.get_bits();
+    }
+  }
+
+  std::string space;
+  for(int i=0;i<indent;i++)
+    space.append("  ");
+
+  fmt::print("{}module {} : inputs {} bits {} : outputs {} bits {} : nodes {} subs {} consts {} : wire {} bits {}\n"
+      , space
+      ,g->get_name(), i_num, i_bits, o_num, o_bits
+      ,n_nodes, g->get_sub_nodes_map().size() ,g->get_const_value_map().size() + g->get_const_sview_map().size()
+      ,n_wire, n_wire_bits);
+
+  auto path = g->get_path();
+  g->each_sub_fast([this,path,indent](Node &node, Lg_type_id lgid) {
+      LGraph *sub_lg = LGraph::open(path,lgid);
+      if (sub_lg)
+        this->do_wirecount(sub_lg, indent+1);
+  });
+
 }
 
 void Pass_sample::compute_histogram(LGraph *g) {

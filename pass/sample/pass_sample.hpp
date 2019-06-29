@@ -19,6 +19,6 @@ public:
   void setup() final;
 
   void do_work(LGraph *g);
-  void do_wirecount(LGraph *g);
+  void do_wirecount(LGraph *g, int indent);
 };
 
