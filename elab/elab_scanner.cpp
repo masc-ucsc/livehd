@@ -334,7 +334,7 @@ Elab_scanner::Elab_scanner() {
   n_errors     = 0;
   n_warnings   = 0;
 
-  buffer = 0;  // just to be clean
+  buffer = "";  // just to be clean
 }
 
 bool Elab_scanner::scan_next() {
