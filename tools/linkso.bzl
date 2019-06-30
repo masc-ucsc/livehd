@@ -13,7 +13,12 @@ def get_libs_for_static_executable(dep):
     """
     libraries_to_link = dep[CcInfo].linking_context.libraries_to_link
     libs = []
-    for library_to_link in libraries_to_link:
+    if "to_list" in dir(libraries_to_link):
+      list_to_link = libraries_to_link.to_list()
+    else:
+      list_to_link = libraries_to_link
+
+    for library_to_link in list_to_link:
         if library_to_link.static_library != None:
             libs.append(library_to_link.static_library)
         elif library_to_link.pic_static_library != None:
@@ -22,6 +27,7 @@ def get_libs_for_static_executable(dep):
             libs.append(library_to_link.interface_library)
         elif library_to_link.dynamic_library != None:
             libs.append(library_to_link.dynamic_library)
+    print("libs:",libs)
     return depset(libs)
 
 def _impl(ctx):
@@ -37,10 +43,11 @@ def _impl(ctx):
 
   for dep in ctx.attr.deps:
     #print("src_libs:",dep.files)
-    resolved_srcs = dep.files + get_libs_for_static_executable(dep) + resolved_srcs
+    resolved_srcs = depset(transitive = [resolved_srcs, dep.files])
+    resolved_srcs = depset(transitive = [resolved_srcs, get_libs_for_static_executable(dep)])
 
   src_libs2    = [f for f in resolved_srcs.to_list() if f.path.endswith('a')]
-  #print("src_libs2:",src_libs2)
+  print("src_libs2:",src_libs2)
   #print("src_objs:",[f.dirname for f in src_libs])
 
   #versions.check(minimum_bazel_version = "0.5.4")
