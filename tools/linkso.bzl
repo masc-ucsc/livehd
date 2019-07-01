@@ -27,7 +27,7 @@ def get_libs_for_static_executable(dep):
             libs.append(library_to_link.interface_library)
         elif library_to_link.dynamic_library != None:
             libs.append(library_to_link.dynamic_library)
-    print("libs:",libs)
+    #print("libs:",libs)
     return depset(libs)
 
 def _impl(ctx):
@@ -47,7 +47,7 @@ def _impl(ctx):
     resolved_srcs = depset(transitive = [resolved_srcs, get_libs_for_static_executable(dep)])
 
   src_libs2    = [f for f in resolved_srcs.to_list() if f.path.endswith('a')]
-  print("src_libs2:",src_libs2)
+  #print("src_libs2:",src_libs2)
   #print("src_objs:",[f.dirname for f in src_libs])
 
   #versions.check(minimum_bazel_version = "0.5.4")
