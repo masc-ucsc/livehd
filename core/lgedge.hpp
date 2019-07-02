@@ -213,14 +213,14 @@ enum Node_State {
 
 class Node_Internal;
 
-struct alignas(64) Node_Internal_Page {
+struct __attribute__((packed)) Node_Internal_Page {
   Node_State state : 3;  // 1byte
   uint8_t    pad1[7];    // 7bytes waste just to get Index_ID aligned
-  Index_ID   idx;        // 4bytes 32bits but for speed
-  Index_ID   free_idx;   // 4bytes 32bits to the first free node
+  uint32_t   idx;        // 4bytes 32bits but for speed
+  uint32_t   free_idx;   // 4bytes 32bits to the first free node
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused"
-  uint8_t pad2[64 - 24];
+  uint8_t pad2[64 - 16];
 #pragma clang diagnostic pop
 
   Index_ID get_idx() const { return idx; }

@@ -14,20 +14,26 @@ struct Lnast_node_str {
   const Lnast_ntype_id   type;
   std::string            token;
   Scope_id               scope;
-  uint32_t               sbs; //ssa subscript
-  Lnast_node_str(Lnast_ntype_id type, std::string token, Scope_id scope):type(type), token(token), scope(scope), sbs(0) {
-    I(type);
-  }
+  uint32_t               knum; //record K number in cfg_text
+  uint32_t               sbs;  //ssa subscript
+  Lnast_node_str(Lnast_ntype_id type, std::string token, Scope_id scope)
+  :type(type), token(token), scope(scope), knum(0) , sbs(0){ I(type); }
+
+  Lnast_node_str(Lnast_ntype_id type, std::string token, Scope_id scope, uint32_t knum)
+    :type(type), token(token), scope(scope), knum(knum), sbs(0) { I(type); }
 };
 
 struct Lnast_node {
   const Lnast_ntype_id   type;
   Token                  token;
   Scope_id               scope;
-  uint32_t               sbs; //ssa subscript
-  Lnast_node(Lnast_ntype_id type, Token token, Scope_id scope):type(type), token(token), scope(scope), sbs(0) {
-    I(type);
-  }
+  uint32_t               knum; //record K number in cfg_text
+  uint32_t               sbs;  //ssa subscript
+  Lnast_node(Lnast_ntype_id type, Token token, Scope_id scope)
+  :type(type), token(token), scope(scope), knum(0), sbs(0) { I(type);}
+
+  Lnast_node(Lnast_ntype_id type, Token token, Scope_id scope, uint32_t knum)
+    :type(type), token(token), scope(scope), knum(knum), sbs(0) { I(type);}
 };
 
 
@@ -35,7 +41,7 @@ template <typename X>
 class Language_neutral_ast : public Tree<X> {
 public:
   Language_neutral_ast() = default;
-  explicit Language_neutral_ast(std::string_view _buffer): buffer(_buffer) {I(!buffer.empty());}
+  explicit Language_neutral_ast(std::string_view _buffer): buffer(_buffer) { I(!buffer.empty());}
   void ssa_trans();
 
 private:
@@ -53,6 +59,7 @@ void Language_neutral_ast<X>::ssa_trans() {
 
 template <typename X>
 void Language_neutral_ast<X>::add_phi_nodes() {
+
   ;
 }
 

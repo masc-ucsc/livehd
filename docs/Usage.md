@@ -91,12 +91,27 @@ $ ls lgdb/*.v
 
 ```bash
 $ ./bazel-bin/main/lgshell
-
 lgraph> inou.yosys.tolg files:./inou/yosys/tests/trivial.v |> @a
 lgraph> @a |> inou.json.fromlg output:trivial.json
 lgraph> exit
 
 $ ls trivial.json
+```
+
+### RocketChip example pass
+
+Load RocketChip to the DB for the first time
+```bash
+$ ./bazel-bin/main/lgshell
+lgraph> files path:projects/rocketchip/ |> inou.liveparse
+lgraph> inou.yosys.tolg files:lgdb/parse/file_freechips.rocketchip.system.DefaultConfig.v
+lgraph> lgraph.open name:RocketTile |> pass.sample.wirecount
+```
+
+Perform a pass over RocketTile (top level module in RocketChip)
+```bash
+$ ./bazel-bin/main/lgshell
+lgraph> lgraph.open name:RocketTile |> pass.sample.wirecount
 ```
 
 ### Low level directed build

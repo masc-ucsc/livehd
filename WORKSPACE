@@ -2,11 +2,12 @@
 
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 #git_repository(
     #name = "bazel_skylib",
     #remote = "https://github.com/bazelbuild/bazel-skylib.git",
-    #tag = "0.6.0",  # change this to use a different release
+    #tag = "0.8.0",  # change this to use a different release
 #)
 
 new_git_repository(
@@ -83,13 +84,6 @@ git_repository(
     commit = "6ee26181af5c719fa4f6ac1fa1aa3c85d070bcea", # May 12, 2019
     remote = "https://github.com/masc-ucsc/cryptominisat.git",
 )
-#new_git_repository(
-    #name = "cryptominisat",
-    #build_file = "BUILD.cryptominisat",
-    #commit = "f5609bfda3edbe373999fa5f79bc153ee619a7ca", # May 12, 2019 4c26a766aab2a452aed9a8fe6f28f4171bcb8690", # October 10, 2018
-    #remote = "https://github.com/msoos/cryptominisat.git",
-    #patches = ["//external:patch.cryptominisat"],
-#)
 new_git_repository(
     name = "rapidjson",
     build_file = "BUILD.rapidjson",
@@ -156,20 +150,6 @@ new_git_repository(
     #patches = ["//external:patch.verilator"],
     #strip_prefix = "include",
 )
-#load(
-#    "//tools:externals.bzl",
-#    "new_patched_http_archive",
-#)
-#
-#new_patched_http_archive(
-#    name = "abc",
-#    build_file = "//third_party/fork:BUILD.abc",
-#    patch_file = "//third_party/fork:abc.patch",
-#    sha256 = "9164cb6044dcb6e430555721e3318d5a8f38871c2da9fd9256665746a69351e0",
-#    strip_prefix = "libdivsufsort-2.0.1",
-#    type = "tgz",
-#    url = "https://codeload.github.com/y-256/libdivsufsort/tar.gz/2.0.1",
-#)
 
 # BOOST Libraries dependences
 #git_repository(
@@ -188,14 +168,28 @@ new_git_repository(
 #)
 
 # Hermetic even for the toolchain :D
-load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 http_archive(
-  name = "bazel_toolchains",
-  sha256 = "109a99384f9d08f9e75136d218ebaebc68cc810c56897aea2224c57932052d30",
-  strip_prefix = "bazel-toolchains-94d31935a2c94fe7e7c7379a0f3393e181928ff7",
-  urls = [
-    "https://mirror.bazel.build/github.com/bazelbuild/bazel-toolchains/archive/94d31935a2c94fe7e7c7379a0f3393e181928ff7.tar.gz",
-    "https://github.com/bazelbuild/bazel-toolchains/archive/94d31935a2c94fe7e7c7379a0f3393e181928ff7.tar.gz",
-  ],
+    name = "bazel_toolchains",
+    sha256 = "4598bf5a8b4f5ced82c782899438a7ba695165d47b3bf783ce774e89a8c6e617",
+    strip_prefix = "bazel-toolchains-0.27.0",
+    urls = [
+        "https://mirror.bazel.build/github.com/bazelbuild/bazel-toolchains/archive/0.27.0.tar.gz",
+        "https://github.com/bazelbuild/bazel-toolchains/archive/0.27.0.tar.gz",
+    ],
+)
+
+load("@bazel_toolchains//rules:rbe_repo.bzl", "rbe_autoconfig")
+
+git_repository(
+    name = "rules_graal",
+    commit = "54c18d0c002670d755c1a709b94336f74375e21d",
+    remote = "git://github.com/andyscott/rules_graal",
+)
+
+load("@rules_graal//graal:graal_bindist.bzl", "graal_bindist_repository")
+
+graal_bindist_repository(
+    name = "graal",
+    version = "19.0.0",
 )
 
