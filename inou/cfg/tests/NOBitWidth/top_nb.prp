@@ -1,2 +1,0 @@
-B as sp_add_nb
-%out = B.(a:$a, b:$b)

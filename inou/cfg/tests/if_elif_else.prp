@@ -12,3 +12,5 @@ elif ($a == 3) {
 else {
   %out = $a ^ $b
 }
+
+tmp = $a

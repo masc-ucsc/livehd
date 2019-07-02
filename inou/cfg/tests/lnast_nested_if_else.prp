@@ -1,0 +1,19 @@
+x = $a
+y = $a
+if ($a>1) {
+  x = $e
+  if ($a>2) {
+    x = $b
+    y = $b
+  } elif ($a>3) {
+    x = $c
+    y = $c
+  } else {
+    x = $d
+    y = $d
+  }
+  y = $e
+}
+
+%o1 = x + $a
+%o2 = y + $a

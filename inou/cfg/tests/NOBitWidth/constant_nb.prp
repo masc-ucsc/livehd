@@ -1,4 +1,0 @@
-a = 3
-b = 4u3bits
-$c as __bits:2
-%out = a + b + $c + $d

@@ -32,28 +32,52 @@ public:
     setup_lnast_ssa_golden();
     setup_lnast_ssa_testee();
   }
-
 /*
- *
-  x = $a
-  y = $a
-  if (2>1) {
-    x = $e
-    if (3>2) {
-      x = $b
-      y = $b
-    } else if (4>3) {
-      x = $c
-      y = $c
-    } else {
-      x = $d
-      y = $d
-    }
-    y = $e
+ * 
+---------- pyrope code -------------------
+x = $a                         
+y = $a
+if ($a>1) {
+  x = $e
+  if ($a>2) {
+    x = $b
+    y = $b
+  } else if ($a>3) {
+    x = $c
+    y = $c
+  } else {
+    x = $d
+    y = $d
   }
+  y = $e
+}
 
-  %o1 = x + $a
-  %o2 = y + $a
+%o1 = x + $a
+%o2 = y + $a
+
+----------- expected cfg ----------------
+K1   K2   0  xx  yy  =    x       $a
+K2   K3   0  xx  yy  =    y       $a  
+K3   K4   0  xx  yy  >    ___m    $a    0d1
+K5   K6   0  xx  yy  if   ___m    K6    K18
+K6   K7   0  xx  yy  =    x       $e
+K7   K8   0  xx  yy  >    ___n    $a    0d2
+K8   K9   0  xx  yy  if   ___n    K9    K11
+K9   K10  0  xx  yy  =    x       $b
+K10  K11  0  xx  yy  =    y       $b  
+K11  K12  0  xx  yy  >    ___o    $a    0d3
+K12  K13  0  xx  yy  if   ___o    K13   K15
+K13  K14  0  xx  yy  =    x       $c
+K14  K15  0  xx  yy  =    y       $c
+K15  K16  0  xx  yy  =    x       $d
+K16  K17  0  xx  yy  =    y       $d    // no boundary between "y = $d" and "y = $e" !!?
+K17  K18  0  xx  yy  =    y       $e
+K18  K19  0  xx  yy  +    ___p    x     $a
+K19  K20  0  xx  yy  =    %o1     ___p
+K20  K21  0  xx  yy  +    ___q    y     $a
+K21  K22  0  xx  yy  =    %o2     ___q
+
+
 *
 */
 
@@ -67,16 +91,12 @@ void setup_lnast_ssa_testee(){
   ast_hcoded.set_root(Lnast_node_str(Lnast_ntype_top, "", 0));
   auto sts         = ast_hcoded.add_child(Tree_index(0,0), Lnast_node_str(Lnast_ntype_statement, "", 0));
 
-  auto c1          = ast_hcoded.add_child(sts,          Lnast_node_str(Lnast_ntype_pure_assign, ""  , 0));
-  auto c11         = ast_hcoded.add_child(c1,           Lnast_node_str(Lnast_ntype_ref,         "x" , 0));
+  auto c1          = ast_hcoded.add_child(sts,          Lnast_node_str(Lnast_ntype_pure_assign, "x"  , 0));
   auto c12         = ast_hcoded.add_child(c1,           Lnast_node_str(Lnast_ntype_ref,         "$a", 0));
-  (void) c11;
   (void) c12;
 
-  auto c2          = ast_hcoded.add_child(sts,          Lnast_node_str(Lnast_ntype_pure_assign, ""  , 0));
-  auto c21         = ast_hcoded.add_child(c2,           Lnast_node_str(Lnast_ntype_ref,         "y" , 0));
+  auto c2          = ast_hcoded.add_child(sts,          Lnast_node_str(Lnast_ntype_pure_assign, "y"  , 0));
   auto c22         = ast_hcoded.add_child(c2,           Lnast_node_str(Lnast_ntype_ref,         "$a", 0));
-  (void) c21;
   (void) c22;
 
   auto c3          = ast_hcoded.add_child(sts,          Lnast_node_str(Lnast_ntype_if,         ""      , 0));
