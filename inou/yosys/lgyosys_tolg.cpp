@@ -1397,7 +1397,8 @@ struct Yosys2lg_Pass : public Yosys::Pass {
                   is_output = true;
 
                 if (cell->type.str()[1]=='H' && cell->type.str()[2]=='D') {
-                  if (strcmp(str,"CON")==0)
+                  if (strcmp(str,"CON")==0
+                   || strcmp(str,"SN")==0)
                     is_output = true;
                 }
 
