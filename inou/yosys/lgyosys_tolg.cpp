@@ -1370,9 +1370,11 @@ struct Yosys2lg_Pass : public Yosys::Pass {
                    || strstr(str,"RST"))
                   is_input = true;
 
-                if ((strncmp(cell->type.c_str(), "\\sa", 5)==0) && (strncmp(str,"ME",2)==0 || strncmp(str,"QPB",3)==0 || strncmp(str,"RME",3)==0))
+                if ((strncmp(cell->type.c_str(), "\\sa", 3)==0) && (strncmp(str,"ME",2)==0 || strncmp(str,"QPB",3)==0 || strncmp(str,"RME",3)==0))
                   is_input = true;
-                if ((strncmp(cell->type.c_str(), "\\sa", 3)==0) && (strcmp(str,"BC2")==0 || strncmp(str,"DFT",3)==0 || strncmp(str,"SO_CNT",6)==0))
+
+                if ((strncmp(cell->type.c_str(), "\\sa", 3)==0)
+                    && (strcmp(str,"BC2")==0 || strncmp(str,"DFT",3)==0 || strncmp(str,"SO_CNT",6)==0 || strcmp(str,"SO_D")==0))
                   is_input = true;
 
                 if (cell->type.str()[1]=='H' && cell->type.str()[2]=='D') {
@@ -1417,7 +1419,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
                   is_output = true;
 
                 if ((strncmp(cell->type.c_str(), "\\sa", 3)==0)
-                    && (strcmp(str,"RSCOUT")==0 || strncmp(str,"SO_CN",5)==0))
+                    && (strcmp(str,"RSCOUT")==0 || strcmp(str,"SO_CN")==0 || strcmp(str,"SO_Q")==0))
                   is_output = true;
 
                 if (cell->type.str()[1]=='H' && cell->type.str()[2]=='D') {
@@ -1438,13 +1440,13 @@ struct Yosys2lg_Pass : public Yosys::Pass {
                   is_output = true;
               }
 
-              assert(!(is_input && is_output));
 #if 1
               std::cout << "unknown cell_type:" << cell->type.str() << " cell_instance:" << cell->name.str() << " port_name:" << conn.first.str() << " wire_name:" << wire->name.str()
                 << " sig:" << wire->hash()
                 << " io:" << (is_input?"I":"") << (is_output?"O":"")
                 << "\n";
 #endif
+              assert(!(is_input && is_output));
 
               if (is_input)
                 cell_port_inputs.insert(cell_port);

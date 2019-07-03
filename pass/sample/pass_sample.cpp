@@ -87,12 +87,23 @@ void Pass_sample::do_wirecount(LGraph *g, int indent) {
       ,n_wire, n_wire_bits);
 
   auto path = g->get_path();
-  g->each_sub_fast([this,path,indent](Node &node, Lg_type_id lgid) {
+  g->each_sub_fast([this,path,indent,space](Node &node, Lg_type_id lgid) {
       LGraph *sub_lg = LGraph::open(path,lgid);
       if (!sub_lg)
         return;
-      if (sub_lg->empty())
-        return; // No blackboxes
+      if (sub_lg->empty()) {
+        int n_inp=0;
+        int n_out=0;
+        for(auto io_pin:sub_lg->get_self_sub_node().get_io_pins()) {
+          if (io_pin.is_input())
+            n_inp++;
+          if (io_pin.is_output())
+            n_out++;
+        }
+        fmt::print("{}  module {} BBOX : inputs {} outputs {}\n", space, sub_lg->get_name(), n_inp, n_out);
+
+      return; // No blackboxes
+      }
 
       this->do_wirecount(sub_lg, indent+1);
   });
