@@ -1,9 +1,0 @@
-### Is it the same?
-case I:
-B as FA
-X = B.(a:1, b:0, ci:0)
-
-case II:
-X = FA.(a:1, b:0, ci:0)
-
-

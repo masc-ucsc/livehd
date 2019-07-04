@@ -278,7 +278,7 @@ END
 
     auto c19    = ast_gld.add_child(c1,     Lnast_node_str(Lnast_ntype_sub,        "",1));
     auto c191   = ast_gld.add_child(c19,    Lnast_node_str(Lnast_ntype_statement,  "",1));
-    auto c1911  = ast_gld.add_child(c191,   Lnast_node_str(Lnast_ntype_plus,       "___f",1));
+    auto c1911  = ast_gld.add_child(c191,   Lnast_node_str(Lnast_ntype_xor,        "___f",1));
     auto c19112 = ast_gld.add_child(c1911,  Lnast_node_str(Lnast_ntype_input,      "$a",1));
     auto c19113 = ast_gld.add_child(c1911,  Lnast_node_str(Lnast_ntype_input,      "$b",1));
     (void) c19112;

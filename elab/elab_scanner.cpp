@@ -400,16 +400,6 @@ int Elab_scanner::scan_calc_lineno() const {
   size_t max_pos = scanner_pos;
   if (max_pos >= token_list.size()) max_pos = token_list.size() - 1;
   return token_list[max_pos].line;
-
-  //original
-  //int nlines = 0;
-  //size_t max_pos = scanner_pos;
-  //for (size_t i = 0; i < token_list[max_pos].pos; i++) {
-  //  char c = buffer[i];
-  //  nlines += (c == '\n' || c == '\r' || c == '\f') ? 1 : 0;
-  //}
-
-  //return nlines;
 }
 
 void Elab_scanner::lex_error(std::string_view text) {

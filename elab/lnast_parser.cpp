@@ -1,10 +1,19 @@
 
 #include "lnast_parser.hpp"
 
+#ifndef likely
+#define likely(x) __builtin_expect((x), 1)
+#endif
+#ifndef unlikely
+#define unlikely(x) __builtin_expect((x), 0)
+#endif
 
 void Lnast_parser::elaborate(){
   lnast = std::make_unique<Language_neutral_ast<Lnast_node>>(get_buffer());
   lnast->set_root(Lnast_node(Lnast_ntype_top, Token(), 0));
+  if(scan_calc_lineno() == 1) //SH:FIXME: ask Akash to remove the "END" line if you really don't need it
+    scan_next();
+
   build_statements(lnast->get_root(), 0);
   subgraph_scope_sync();
 }
@@ -19,9 +28,6 @@ void Lnast_parser::build_statements(const Tree_index& tree_idx_top, Scope_id cur
 Scope_id Lnast_parser::add_statement(const Tree_index& tree_idx_sts, Scope_id cur_scope) {
   fmt::print("line:{}, statement:{}\n", line_num, scan_text());
 
-  if(scan_sview() == "END")
-    return 0;
-
   Token          target;
   Lnast_ntype_id type = Lnast_ntype_invalid;
   Scope_id       token_scope = cur_scope;
@@ -34,27 +40,40 @@ Scope_id Lnast_parser::add_statement(const Tree_index& tree_idx_sts, Scope_id cu
     if(scan_is_end())
       return token_scope;
 
+
     switch (line_tkcnt) {
-    case CFG_NODE_NAME_POS:
+    case CFG_NODE_NAME_POS:{
       knum = (uint32_t)std::stoi(scan_text().substr(1));
       break;
+    }
     case CFG_SCOPE_ID_POS:{
       token_scope = process_scope(tree_idx_sts, cur_scope); //recursive build sub-graph
-      if (token_scope < cur_scope) {
+      if (token_scope < cur_scope)
         return token_scope; //go back to parent scope
-      }
       break;
     }
-    case CFG_TOKEN_POS_BEG:
+    case CFG_TOKEN_POS_BEG:{
       cfg_token_beg = scan_token();
       break;
-    case CFG_TOKEN_POS_END:
+    }
+    case CFG_TOKEN_POS_END:{
       cfg_token_end = scan_token();
       break;
+    }
     case CFG_OP_POS_BEG: { //no regular pattern, scan_next() internally case by case
       type   = operator_analysis(line_tkcnt);
 
+      if (type == Lnast_ntype_func_def) {
+        auto new_scope = next_new_scope;
+        add_subgraph(tree_idx_sts, new_scope, cur_scope);
+        next_new_scope += 1;
+        for(int i = 0; i < CFG_OP_POS_BEG-1; i++) // re-parse
+          scan_prev();
+        break;
+      }
+
       scan_next(); line_tkcnt += 1;
+
       I(scan_is_token(Token_id_alnum) || scan_is_token(Token_id_output) || scan_is_token(Token_id_input));
       target = scan_get_token();
 
@@ -88,18 +107,19 @@ Tree_index Lnast_parser::add_operator_node(const Tree_index& tree_idx_sts, Token
       return tree_idx_sts; // don't create a new operator child.
     }
 
-  } else if (type == Lnast_ntype_func_def) { //connect to sub-graph-statements
-    for (const auto &it:lnast->depth_preorder(lnast->get_root())) {
-      auto it_knum   = lnast->get_data(it).knum;
-      auto it_type   = lnast->get_data(it).type;
-      auto it_scope  = lnast->get_data(it).scope;
+  //} else if (type == Lnast_ntype_func_def) { //connect to sub-graph-statements
+  //  for (const auto &it:lnast->depth_preorder(lnast->get_root())) {
+  //    auto it_knum   = lnast->get_data(it).knum;
+  //    auto it_type   = lnast->get_data(it).type;
+  //    auto it_scope  = lnast->get_data(it).scope;
 
-      std::string knum_in_func_def(scan_peep_sview(CFG_OP_FUNC_ROOT_RANGE).substr(1));
+  //    std::string knum_in_func_def(scan_peep_sview(CFG_OP_FUNC_ROOT_RANGE).substr(1));
 
-      if (it_knum == std::stoi(knum_in_func_def) && it_type == Lnast_ntype_statement)
-        return lnast->add_child(it, Lnast_node(Lnast_ntype_func_def, scan_get_token(), it_scope));
-    }
-    I(false); //must found the function definition in the lnast traverse
+  //    if (it_knum == std::stoi(knum_in_func_def) && it_type == Lnast_ntype_statement){
+  //      return lnast->add_child(it, Lnast_node(Lnast_ntype_func_def, scan_get_token(), it_scope));
+  //    }
+  //  }
+  //  I(false); //must found the function definition in the lnast traverse
   }
 
   return lnast->add_child(tree_idx_sts, Lnast_node(type, token, cur_scope)); //connect to top-statements
@@ -223,12 +243,12 @@ void Lnast_parser::process_label_op(const Tree_index& tree_idx_op, int& line_tkc
 
 Scope_id Lnast_parser::process_scope(const Tree_index& tree_idx_sts, Scope_id cur_scope) {
   auto token_scope = (uint8_t)std::stoi(scan_text());
-  fmt::print("token_scope:{}, cur_scope:{}\n", token_scope, cur_scope);
-  if(token_scope > cur_scope) {
-    for(int i = 0; i < CFG_SCOPE_ID_POS-1; i++) // re-parse
-      scan_prev();
-    add_subgraph(tree_idx_sts, token_scope, cur_scope);
-  }
+  //fmt::print("token_scope:{}, cur_scope:{}\n", token_scope, cur_scope);
+  //if(token_scope > cur_scope) {
+  //  for(int i = 0; i < CFG_SCOPE_ID_POS-1; i++) // re-parse
+  //    scan_prev();
+  //  add_subgraph(tree_idx_sts, token_scope, cur_scope);
+  //}
   return token_scope;
 }
 

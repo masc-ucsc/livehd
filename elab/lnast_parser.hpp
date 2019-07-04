@@ -17,7 +17,7 @@ static inline constexpr int   CFG_TARGET_TMP_REF_RANGE    =  1; //K14 K15  0 59 
 
 class Lnast_parser : public Elab_scanner {
 public:
-  Lnast_parser() : line_num(0) { setup_ntype_str_mapping();};
+  Lnast_parser() : line_num(0), next_new_scope(1) { setup_ntype_str_mapping();};
   const std::unique_ptr<Language_neutral_ast<Lnast_node>>&  get_ast(){return lnast;};
   std::string                                               ntype_dbg(Lnast_ntype_id ntype);
 protected:
@@ -27,7 +27,7 @@ protected:
   void            build_statements                  (const Tree_index& tree_idx_top, Scope_id scope);
   Scope_id        add_statement                     (const Tree_index& tree_idx_sts, Scope_id cur_scope);
   Scope_id        process_scope                     (const Tree_index& tree_idx_sts, Scope_id cur_scope );
-  void            add_subgraph                      (const Tree_index& tree_idx_std, Scope_id new_scope, Scope_id cur_scope);
+  void            add_subgraph                      (const Tree_index& tree_idx_sts, Scope_id new_scope, Scope_id cur_scope);
   void            process_assign_like_op            (const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
   void            process_function_name_replacement (const Tree_index& tree_idx_op, int& line_tkcnt);
   void            process_label_op                  (const Tree_index& tree_idx_op, int& line_tkcnt, Scope_id);
@@ -47,5 +47,6 @@ private:
   std::unique_ptr<Language_neutral_ast<Lnast_node>>   lnast;
   absl::flat_hash_map<Lnast_ntype_id , std::string>   ntype2str;
   int  line_num;
+  uint8_t next_new_scope;
 };
 

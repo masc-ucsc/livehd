@@ -79,9 +79,9 @@ enum Lnast_node_type : Lnast_ntype_id {
   Lnast_ntype_dot,          // .
   Lnast_ntype_logical_and,  // and
   Lnast_ntype_logical_or,   // or
-  Lnast_ntype_and,
-  Lnast_ntype_or,
-  Lnast_ntype_xor,
+  Lnast_ntype_and,          // &
+  Lnast_ntype_or,           // |
+  Lnast_ntype_xor,          // ^
   Lnast_ntype_plus,
   Lnast_ntype_minus,
   Lnast_ntype_mult,
