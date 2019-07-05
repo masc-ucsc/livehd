@@ -201,7 +201,7 @@ void Lnast_parser::process_binary_op(const Tree_index& tree_idx_op, int& line_tk
 void Lnast_parser::process_function_name_replacement(const Tree_index& tree_idx_op, int& line_tkcnt) {
   if(scan_is_token(Token_id_reference) && scan_sview().substr(1,3) == "___"){
     //won't create new node, just search and replace the correct func name
-    for (const auto &it:lnast->depth_preorder(lnast->get_root())) {
+    for (const auto &it:lnast->depth_preorder()) {
       auto it_name = lnast->get_data(it).token.get_text(buffer) ;
       auto it_type = lnast->get_data(it).type;
       if (it_name == scan_sview().substr(1) && it_type == Lnast_ntype_func_def){
@@ -401,7 +401,7 @@ std::string Lnast_parser::ntype_dbg(Lnast_ntype_id ntype) {
 }
 
 void Lnast_parser::subgraph_scope_sync() {
-  for (const auto &it:lnast->depth_preorder(lnast->get_root())) {
+  for (const auto &it:lnast->depth_preorder()) {
     auto parent = lnast->get_parent(it);
     if (lnast->get_data(it).scope < lnast->get_data(parent).scope)
       lnast->get_data(it).scope = lnast->get_data(parent).scope;

@@ -16,6 +16,15 @@ cc_library(
 )
 
 cc_test(
+    name = "hierarchy_test",
+    srcs = ["tests/hierarchy_test.cpp"],
+    deps = [
+        "@gtest//:gtest_main",
+        ":core",
+    ],
+)
+
+cc_test(
     name = "attribute_test",
     srcs = ["tests/attribute_test.cpp"],
     deps = [
