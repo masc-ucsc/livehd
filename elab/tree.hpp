@@ -91,7 +91,7 @@ public:
 
   // WARNING: can not return Tree_index & because future additions can move the pointer (vector realloc)
   const Tree_index add_child             (const Tree_index &parent, const X &data);
-  const Tree_index add_sibling           (const Tree_index &sibling, const X &data);
+  const Tree_index add_younger_sibling   (const Tree_index &sibling, const X &data);
   size_t get_tree_width(const Tree_level &level) const {
     if (level>=data_stack.size())
       return 0;
@@ -128,6 +128,13 @@ public:
   const Tree_index              get_child   (const Tree_index &start_index) const;
   Tree_depth_preorder_iterator  depth_preorder(const Tree_index &start_index) const {
     return Tree_depth_preorder_iterator(start_index, this);
+  }
+
+  bool is_leaf(const Tree_index &index) const {
+    I(index.level< (int)pointers_stack.size());
+    I(index.pos  < (int)pointers_stack[index.level].size());
+
+    return pointers_stack[index.level][index.pos].younger_child < 0;
   }
 
   Tree_depth_preorder_iterator  depth_preorder() const {
@@ -188,7 +195,7 @@ const Tree_index Tree<X>::add_child(const Tree_index &parent, const X &data) {
 };
 
 template <typename X>
-const Tree_index Tree<X>::add_sibling(const Tree_index &sibling, const X &data) {
+const Tree_index Tree<X>::add_younger_sibling(const Tree_index &sibling, const X &data) {
   const auto sibling_level = sibling.level;
   const auto sibling_pos   = sibling.pos;
 
@@ -206,17 +213,26 @@ const Tree_index Tree<X>::add_sibling(const Tree_index &sibling, const X &data) 
 
   auto parent_level = child_level - 1;
   auto parent_pos   = pointers_stack[sibling_level][sibling_pos].parent;
+  auto append_to_pos = pointers_stack[parent_level][parent_pos].younger_child;
 
   pointers_stack[child_level].emplace_back(parent_pos);
-
+  I(append_to_pos>=0); // It has to have a child
   I(pointers_stack[parent_level][parent_pos].eldest_child >= 0);
-  auto ori_younger_sibling = pointers_stack[sibling_level][sibling_pos].younger_sibling;
-  pointers_stack[child_level][child_pos].younger_sibling = ori_younger_sibling;
+
+  if (append_to_pos == sibling_pos) { // new child is the youngest now
+    I(pointers_stack[sibling_level][sibling_pos].younger_sibling == -1); // It is the youngest
+    I(pointers_stack[child_level][child_pos].younger_sibling == -1);
+
+    pointers_stack[parent_level][parent_pos].younger_child = child_pos;
+  } else {
+    auto ori_younger_sibling = pointers_stack[sibling_level][sibling_pos].younger_sibling;
+
+    pointers_stack[sibling_level][child_pos  ].younger_sibling = ori_younger_sibling;
+  }
   pointers_stack[sibling_level][sibling_pos].younger_sibling = child_pos;
 
   return Tree_index(child_level, child_pos);
 }
-
 
 template <typename X>
 X &Tree<X>::get_data(const Tree_index &leaf) {

@@ -36,11 +36,11 @@ public:
     (void)c123;
     auto c113 = ast.add_child(c11, "child1.1.3");
     (void)c113;
-    auto c114 = ast.add_sibling(c113, "child1.1.4");
+    auto c114 = ast.add_younger_sibling(c113, "child1.1.4");
     (void)c114;
-    auto c115 = ast.add_sibling(c111, "child1.1.5");
+    auto c115 = ast.add_younger_sibling(c111, "child1.1.5");
     (void)c115;
-    auto c13  = ast.add_sibling(c12, "child1.3");
+    auto c13  = ast.add_younger_sibling(c12, "child1.3");
     (void)c13;
 
     ast.each_breadth_first_fast([this](const Tree_index &parent, const Tree_index &self, std::string str) {
