@@ -399,7 +399,7 @@ void Inou_cfg::lgraph_2_cfg(LGraph *g, const std::string &filename) {
   int line_cnt = 0;
   for(auto node : g->fast()) {
 
-    if(node.get_name() != nullptr) {
+    if(node.has_name()) {
       fmt::print("{}\n", node.get_name()); // for now, just print out cfg, maybe mmap write later
       ++line_cnt;
     }

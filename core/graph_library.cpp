@@ -26,6 +26,18 @@
 Graph_library::Global_instances   Graph_library::global_instances;
 Graph_library::Global_name2lgraph Graph_library::global_name2lgraph;
 
+class Cleanup_graph_library {
+public:
+  Cleanup_graph_library() {
+  };
+  ~Cleanup_graph_library() {
+    //fmt::print("Shutting down...\n");
+    Graph_library::sync_all();
+  };
+};
+
+static Cleanup_graph_library private_instance;
+
 Graph_library *Graph_library::instance(std::string_view path) {
 #if 0
   auto it = Graph_library::global_instances.find(path);
@@ -64,8 +76,8 @@ Lg_type_id Graph_library::reset_id(std::string_view name, std::string_view sourc
     attributes[it->second].version = max_next_version.value++;
     if (attributes[it->second].source != source) {
       if (attributes[it->second].source == "-") {
-        attributes[it->second].source = source;
         Pass::warn("overwrite lgraph:{} source from {} to {}", name, attributes[it->second].source, source);  // LCOV_EXCL_LINE
+        attributes[it->second].source = source;
       } else if (source == "-") {
         Pass::warn("keeping lgraph:{} source {}", name, attributes[it->second].source);  // LCOV_EXCL_LINE
       } else if (attributes[it->second].source.empty()) {

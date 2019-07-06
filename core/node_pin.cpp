@@ -71,11 +71,15 @@ Node Node_pin::get_node() const {
 }
 
 void Node_pin::connect_sink(Node_pin &spin) {
+  I(spin.is_sink());
+  I(is_driver());
   I(current_g == spin.current_g); // Use punch otherwise
   current_g->add_edge(*this,spin);
 }
 
 void Node_pin::connect_driver(Node_pin &dpin) {
+  I(dpin.is_driver());
+  I(is_sink());
   I(current_g == dpin.current_g);
   current_g->add_edge(dpin, *this);
 }
