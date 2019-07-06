@@ -7,30 +7,15 @@
 using Lnast_ntype_id = uint8_t;
 using Scope_id       = uint8_t;
 
-
-//SH:FIXME: temporarily replace Token to std::string for lnast nested if-else golden construction
-//SH:FIXME: should be deprecated after Akash finish his part.
-struct Lnast_node_str {
-  const Lnast_ntype_id   type;
-  std::string            token;
-  Scope_id               scope;
-  uint32_t               knum; //record K number in cfg_text
-  uint32_t               sbs;  //ssa subscript
-  Lnast_node_str(Lnast_ntype_id type, std::string token, Scope_id scope)
-  :type(type), token(token), scope(scope), knum(0) , sbs(0){ I(type); }
-
-  Lnast_node_str(Lnast_ntype_id type, std::string token, Scope_id scope, uint32_t knum)
-    :type(type), token(token), scope(scope), knum(knum), sbs(0) { I(type); }
-};
-
 struct Lnast_node {
   const Lnast_ntype_id   type;
   Token                  token;
   Scope_id               scope;
   uint32_t               knum; //record K number in cfg_text
-  uint32_t               sbs;  //ssa subscript
+  uint16_t               sbs;  //ssa subscript
+
   Lnast_node(Lnast_ntype_id type, Token token, Scope_id scope)
-  :type(type), token(token), scope(scope), knum(0), sbs(0) { I(type);}
+    :type(type), token(token), scope(scope), knum(0), sbs(0) { I(type);}
 
   Lnast_node(Lnast_ntype_id type, Token token, Scope_id scope, uint32_t knum)
     :type(type), token(token), scope(scope), knum(knum), sbs(0) { I(type);}
@@ -72,6 +57,7 @@ void Language_neutral_ast<X>::renaming() {
 enum Lnast_node_type : Lnast_ntype_id {
   Lnast_ntype_invalid = 0,  // zero is not a valid Lnast_ntype_id
   Lnast_ntype_statement,
+  Lnast_ntype_cstatement,   // statement for condition determination, ex: "foo+1" in if((foo+1) > 3)
   Lnast_ntype_pure_assign,  // =
   Lnast_ntype_dp_assign,    // :=, dp = deprecate
   Lnast_ntype_as,           // as
