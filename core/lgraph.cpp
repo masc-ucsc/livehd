@@ -257,9 +257,9 @@ Node_pin LGraph::add_graph_output(std::string_view str, Port_ID pos, uint16_t bi
   setup_sink(idx);
   setup_driver(idx); // outputs can also drive internal nodes. So both sink/driver
 
-  Node_pin pin(this, this, hierarchy_root(), idx, inst_pid, false);
-  pin.set_name(str);
-  pin.set_bits(bits);
+  Node_pin dpin(this, this, hierarchy_root(), idx, inst_pid, false);
+  dpin.set_name(str);
+  dpin.set_bits(bits);
 
   return Node_pin(this, this, hierarchy_root(), idx, inst_pid, true);
 }

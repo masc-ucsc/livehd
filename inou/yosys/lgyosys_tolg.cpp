@@ -517,6 +517,12 @@ static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path
         if(chunk.width == wire->width) {
           if(wire2pin.find(wire) != wire2pin.end()) {
             log("io wire %s from module %s cell type %s\n",wire->name.c_str(), module->name.c_str(), cell->type.c_str());
+            if (wire->port_output) {
+              auto spin = g->get_graph_output(&wire->name.c_str()[1]);
+              g->add_edge(driver_pin, spin);
+            } else {
+              assert(false);
+            }
           }else if(chunk.width == ss.size()) {
             // output port drives a single wire
             wire2pin[wire]     = driver_pin;
@@ -607,6 +613,8 @@ static void process_assigns(RTLIL::Module *module, LGraph *g) {
         if(lhs_wire->port_output) {
           Node_pin spin = g->get_graph_output(&lhs_wire->name.c_str()[1]);
           g->add_edge(dpin, spin, lhs_wire->width);
+        } else if(wire2pin.find(lhs_wire) == wire2pin.end()) {
+          wire2pin[lhs_wire] = dpin;
         } else {
           if(wire2pin.find(lhs_wire) == wire2pin.end()) {
             wire2pin[lhs_wire] = dpin;
@@ -620,12 +628,11 @@ static void process_assigns(RTLIL::Module *module, LGraph *g) {
             //g->add_edge(dpin, spin);
           }
         }
-
       } else {
         if(partially_assigned.find(lhs_wire) == partially_assigned.end()) {
           partially_assigned[lhs_wire].resize(lhs_wire->width);
 
-          if(wire2pin.find(lhs_wire) == wire2pin.end()) {
+          if(lhs_wire->port_output || wire2pin.find(lhs_wire) == wire2pin.end()) {
             auto join  = g->create_node(Join_Op);
             wire2pin[lhs_wire] = join.setup_driver_pin();
           }
