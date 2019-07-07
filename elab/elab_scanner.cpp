@@ -396,7 +396,7 @@ std::string Elab_scanner::scan_text() const {
   return text;
 }
 
-int Elab_scanner::scan_calc_lineno() const {
+uint32_t Elab_scanner::scan_calc_lineno() const {
   size_t max_pos = scanner_pos;
   if (max_pos >= token_list.size()) max_pos = token_list.size() - 1;
   return token_list[max_pos].line;
@@ -462,8 +462,8 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
     }
   }
 
-  int line = scan_calc_lineno();
-  int col  = token_list[max_pos].pos - line_pos_start;
+  auto line = scan_calc_lineno();
+  auto col  = token_list[max_pos].pos - line_pos_start;
 
   std::string line_txt;
 

@@ -260,7 +260,7 @@ public:
   }
 
   std::string scan_text() const;
-  int         scan_calc_lineno() const;
+  uint32_t    scan_calc_lineno() const;
 
   size_t get_token_pos() const { return token_list[scan_token()].pos; }
 

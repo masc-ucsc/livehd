@@ -69,7 +69,6 @@ private:
   constexpr bool  is_uif_op         (Lnast_ntype_id op) const { return (op == Lnast_ntype_uif); }
   constexpr bool  is_func_call_op   (Lnast_ntype_id op) const { return (op == Lnast_ntype_func_call); }
   constexpr bool  is_func_def_op    (Lnast_ntype_id op) const { return (op == Lnast_ntype_func_def); }
-  constexpr bool  is_sub_op         (Lnast_ntype_id op) const { return (op == Lnast_ntype_sub); }
   constexpr bool  is_for_op         (Lnast_ntype_id op) const { return (op == Lnast_ntype_for); }
   constexpr bool  is_while_op       (Lnast_ntype_id op) const { return (op == Lnast_ntype_while); }
   constexpr bool  is_dp_assign_op   (Lnast_ntype_id op) const { return (op == Lnast_ntype_dp_assign); }

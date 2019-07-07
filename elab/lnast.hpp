@@ -10,15 +10,15 @@ using Scope_id       = uint8_t;
 struct Lnast_node {
   const Lnast_ntype_id   type;
   Token                  token;
-  Scope_id               scope;
+  Scope_id               scope;//SH:FIXME: might deprecate later, set 0 for now
   uint32_t               knum; //record K number in cfg_text
   uint16_t               sbs;  //ssa subscript
 
-  Lnast_node(Lnast_ntype_id type, Token token, Scope_id scope)
-    :type(type), token(token), scope(scope), knum(0), sbs(0) { I(type);}
+  Lnast_node(Lnast_ntype_id type, Token token)
+    :type(type), token(token), scope(0), knum(0), sbs(0) { I(type);}
 
-  Lnast_node(Lnast_ntype_id type, Token token, Scope_id scope, uint32_t knum)
-    :type(type), token(token), scope(scope), knum(knum), sbs(0) { I(type);}
+  Lnast_node(Lnast_ntype_id type, Token token, uint32_t knum)
+    :type(type), token(token), scope(0), knum(knum), sbs(0) { I(type);}
 };
 
 
@@ -56,8 +56,8 @@ void Language_neutral_ast<X>::renaming() {
 
 enum Lnast_node_type : Lnast_ntype_id {
   Lnast_ntype_invalid = 0,  // zero is not a valid Lnast_ntype_id
-  Lnast_ntype_statement,
-  Lnast_ntype_cstatement,   // statement for condition determination, ex: "foo+1" in if((foo+1) > 3)
+  Lnast_ntype_statements,
+  Lnast_ntype_cstatements,  // statement for condition determination, ex: if ((foo+1) > 3) { ... }
   Lnast_ntype_pure_assign,  // =
   Lnast_ntype_dp_assign,    // :=, dp = deprecate
   Lnast_ntype_as,           // as
@@ -92,7 +92,6 @@ enum Lnast_node_type : Lnast_ntype_id {
   Lnast_ntype_for,
   Lnast_ntype_while,
   Lnast_ntype_func_call,    // .()
-  Lnast_ntype_func_def,     // ::{
-  Lnast_ntype_sub,
+  Lnast_ntype_func_def,     // ::{   func_def = sub-graph in lgraph
   Lnast_ntype_top
 };

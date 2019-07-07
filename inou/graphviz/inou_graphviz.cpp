@@ -191,14 +191,13 @@ void Inou_graphviz::populate_lnast_data(std::string_view files) {
   for(const auto& itr : lnast->depth_preorder(lnast->get_root())){
     auto node_data = lnast->get_data(itr);
     auto type  = lnast_parser.ntype_dbg(node_data.type);
-    auto scope = node_data.scope;
     std::string name(node_data.token.get_text(memblock));
-    if(node_data.type == Lnast_ntype_top)
-      name = "top";
+    //if(node_data.type == Lnast_ntype_top)
+    //  name = "top";
 
 
     auto id = std::to_string(itr.level)+std::to_string(itr.pos);
-    data += fmt::format(" {} [label=\"{}:{}:{}\"];\n", id, type, name, scope);
+    data += fmt::format(" {} [label=\"{}, {}\"];\n", id, type, name);
     if(node_data.type == Lnast_ntype_top)
       continue;
 
@@ -206,8 +205,8 @@ void Inou_graphviz::populate_lnast_data(std::string_view files) {
     auto p = lnast->get_parent(itr);
     auto ptype = lnast->get_data(p).type;
     std::string pname(lnast->get_data(p).token.get_text(memblock));
-    if(ptype == Lnast_ntype_top)
-      pname = "top";
+    //if(ptype == Lnast_ntype_top)
+    //  pname = "top";
 
     auto parent_id = std::to_string(p.level)+std::to_string(p.pos);
     data += fmt::format(" {}->{};\n", parent_id, id);

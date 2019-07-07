@@ -10,6 +10,8 @@
 
 #include "gtest/gtest.h"
 #include "fmt/format.h"
+
+#include "lnast.hpp"
 #include "lnast_parser.hpp"
 
 using tuple = std::tuple<std::string, uint8_t , uint8_t>;// <node_name, node_type, scope>
@@ -36,22 +38,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "error, mmap failed\n");
     exit(-3);
   }
-
   Lnast_parser lnast_parser;
-
   lnast_parser.parse(argv[1], memblock);
 
-  std::vector<std::vector<tuple>> ast_sorted_testee;
-  lnast_parser.get_ast()->each_breadth_first_fast([&memblock, &ast_sorted_testee](const Tree_index &parent, const Tree_index &self, const Lnast_node &node_data) {
-    while (static_cast<size_t>(self.level)>=ast_sorted_testee.size())
-      ast_sorted_testee.emplace_back();
-
-    std::string node_name(node_data.node_token.get_text(memblock));
-    auto        node_type  = node_data.node_type;
-    auto        node_scope = node_data.scope;
-    fmt::print("nname:{>18}, ntype:{>18}, nscope:{>18}\n", node_name, node_type, node_scope);
-
-    tuple tuple_data = std::make_tuple(node_name, node_type, node_scope);
-    ast_sorted_testee[self.level].emplace_back(tuple_data);
-  });
 }

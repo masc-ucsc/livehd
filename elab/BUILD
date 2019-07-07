@@ -75,6 +75,15 @@ cc_test(
 )
 
 cc_binary(
+    name = "lnast_parser_test",
+    srcs = ["tests/lnast_parser_test.cpp"],
+    data = ["//inou/cfg:cfg_pts"],
+    deps = [
+        ":elab",
+    ],
+)
+
+cc_binary(
     name = "elab_pyrope_test",
     srcs = ["elab_pyrope_test.cpp"],
     # args = ["$(location tests/synth1.elab)"],

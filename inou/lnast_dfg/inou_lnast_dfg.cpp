@@ -106,8 +106,6 @@ void Inou_lnast_dfg::process_ast_statements(LGraph *dfg, const std::vector<Tree_
       process_ast_func_call_op(dfg, ast_idx);
     } else if (is_func_def_op(op)) {
       process_ast_func_def_op(dfg, ast_idx);
-    } else if (is_sub_op(op)) {
-      process_ast_sub_op(dfg, ast_idx);
     } else if (is_for_op(op)) {
       process_ast_for_op(dfg, ast_idx);
     } else if (is_while_op(op)) {
