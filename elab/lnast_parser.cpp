@@ -168,11 +168,19 @@ void  Lnast_parser::process_func_def_op(const Tree_index& tree_idx_opr){
 
 //scan pos start: first operand token, stop: last operand
 void  Lnast_parser::process_func_call_op(const Tree_index& tree_idx_opr){
-  //K17  K18  0  98  121  .()  ___g  fun1  ___h   ___i
+  //true function call case: K17  K18  0  98  121  .()  ___g  fun1  ___h   ___i
+  //fake function call case: K19  K20  0  123 129  .()  ___j  $a
 
   I(scan_is_token(Token_id_alnum) || scan_is_token(Token_id_output) || scan_is_token(Token_id_input));
   lnast->add_child(tree_idx_opr, Lnast_node(operand_analysis(), scan_get_token()));
   scan_next(); line_tkcnt += 1; //go to ___h
+
+  if(scan_calc_lineno() == line_num +1){
+    //SH:FIXME: only one operand, fake function call for now!!!
+    lnast->get_data(tree_idx_opr).type = Lnast_ntype_pure_assign;
+    scan_prev();
+    return;
+  }
 
   auto local_line_num = scan_calc_lineno();
   while (scan_calc_lineno() == local_line_num) {

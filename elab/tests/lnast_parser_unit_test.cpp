@@ -176,6 +176,23 @@ K50  K51   0  280  292   =    %o2     ___v
     auto K18_op1  = ast_gld.add_child(K18,      std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___g"));
     (void) K18_op1;
 
+    auto K19      = ast_gld.add_child(top_sts, std::make_tuple(ntype_dbg(Lnast_ntype_pure_assign), "___j"));
+    auto K19_op1  = ast_gld.add_child(K19,     std::make_tuple(ntype_dbg(Lnast_ntype_input),       "$a"));
+    (void) K19_op1;
+
+    auto K20      = ast_gld.add_child(top_sts, std::make_tuple(ntype_dbg(Lnast_ntype_pure_assign), "x"));
+    auto K20_op1  = ast_gld.add_child(K20,     std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___j"));
+    (void) K20_op1;
+
+    auto K21      = ast_gld.add_child(top_sts, std::make_tuple(ntype_dbg(Lnast_ntype_gt),          "___k"));
+    auto K21_op1  = ast_gld.add_child(K21,     std::make_tuple(ntype_dbg(Lnast_ntype_input),       "$a"));
+    auto K21_op2  = ast_gld.add_child(K21,     std::make_tuple(ntype_dbg(Lnast_ntype_const),       "0d1"));
+    (void) K21_op1;
+    (void) K21_op2;
+
+
+
+
     setup_ast_sorted_golden();
     setup_ast_preorder_golden();
     graphvis_lnast_golden_data("lnast_golden", ast_gld);
@@ -305,10 +322,6 @@ K50  K51   0  280  292   =    %o2     ___v
     close(fd);
   }
 };
-
-
-
-
 
 TEST_F(Lnast_test, Traverse_breadth_first_check_on_ast) {
   auto lnast = lnast_parser.get_ast().get(); //unique_ptr lend its ownership
