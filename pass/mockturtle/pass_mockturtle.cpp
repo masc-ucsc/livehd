@@ -575,9 +575,9 @@ void Pass_mockturtle::complement_to_SMR(std::vector<mockturtle::mig_network::sig
   std::vector<std::vector<mockturtle::mig_network::signal>> in_arr;
   in_arr.emplace_back(unsigned_sig);
   in_arr.emplace_back(signed_sig);
-  std::vector<mockturtle::mig_network::signal> sel;
-  sel.emplace_back(sign_bit);
-  create_n_bit_k_input_mux(in_arr, sel, SMR_sig, mig_ntk);
+  std::vector<mockturtle::mig_network::signal> selector;
+  selector.emplace_back(sign_bit);
+  create_n_bit_k_input_mux(in_arr, selector, SMR_sig, mig_ntk);
   SMR_sig.emplace_back(sign_bit);
 }
 
@@ -600,6 +600,28 @@ void Pass_mockturtle::mapping_dynamic_shift_cell_lg2mig(const bool &is_shift_rig
     //creating output signal for const shift
     uint32_t FIX_ME = opr_B_edge.driver.get_node().get_type_const_value();
   } else {
+    std::vector<mockturtle::mig_network::signal> opr_B_sig, temp_out, opr_B_SMR_sig;
+    std::vector<mockturtle::mig_network::signal> ofs_sel, sign_sel, out_shr_sig, out_shl_sig;
+    std::vector<std::vector<mockturtle::mig_network::signal>> out_shr_enum, out_shl_enum, out_enum;
+    I(opr_B_edge.get_bits() != 0);
+    setup_input_signal(group_id, opr_B_edge, opr_B_sig, mig_ntk);
+    for (long unsigned int ofs = 0; ofs < (long unsigned int)(1<<opr_B_sig.size()); ofs++) {
+      temp_out.clear();
+      shift_op(temp_out, opr_A_sig, is_shift_right, false, ofs, mig_ntk);
+      out_shr_enum.emplace_back(temp_out);
+      temp_out.clear();
+      shift_op(temp_out, opr_A_sig, !is_shift_right, false, ofs, mig_ntk);
+      out_shl_enum.emplace_back(temp_out);
+    }
+    complement_to_SMR(opr_B_sig, opr_B_SMR_sig, mig_ntk);
+    sign_sel.emplace_back(opr_B_SMR_sig[opr_B_SMR_sig.size()-1]);
+    ofs_sel = opr_B_SMR_sig;
+    ofs_sel.pop_back();
+    create_n_bit_k_input_mux(out_shr_enum, ofs_sel, out_shr_sig, mig_ntk);
+    create_n_bit_k_input_mux(out_shl_enum, ofs_sel, out_shl_sig, mig_ntk);
+    out_enum.emplace_back(out_shr_sig);
+    out_enum.emplace_back(out_shl_sig);
+    create_n_bit_k_input_mux(out_enum, sign_sel, out_sig, mig_ntk);
   }
   //processing output signal
   for (const auto &out_edge : node.out_edges()) {
