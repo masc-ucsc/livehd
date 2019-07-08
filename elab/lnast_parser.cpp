@@ -175,7 +175,7 @@ void  Lnast_parser::process_func_call_op(const Tree_index& tree_idx_opr){
   lnast->add_child(tree_idx_opr, Lnast_node(operand_analysis(), scan_get_token()));
   scan_next(); line_tkcnt += 1; //go to ___h
 
-  if(scan_calc_lineno() == line_num +1){
+  if(scan_calc_lineno() == line_num + 1){
     //SH:FIXME: only one operand, fake function call for now!!!
     lnast->get_data(tree_idx_opr).type = Lnast_ntype_pure_assign;
     scan_prev();
@@ -186,7 +186,7 @@ void  Lnast_parser::process_func_call_op(const Tree_index& tree_idx_opr){
   while (scan_calc_lineno() == local_line_num) {
     I(scan_is_token(Token_id_alnum) || scan_is_token(Token_id_output) || scan_is_token(Token_id_input));
     lnast->add_child(tree_idx_opr, Lnast_node(operand_analysis(), scan_get_token()));
-    scan_next(); line_tkcnt += 1; //@ ___i -> ___j ...
+    scan_next(); line_tkcnt += 1; //go to ___i -> ___j ...
   }
   scan_prev(); //for the final dummy scan_next() in while loop
 }
@@ -207,22 +207,6 @@ void Lnast_parser::process_binary_op(const Tree_index& tree_idx_opr) {
 }
 
 
-//void Lnast_parser::process_function_name_replacement(const Tree_index& tree_idx_opr, int& line_tkcnt) {
-//  if(scan_is_token(Token_id_reference) && scan_sview().substr(1,3) == "___"){
-//    //won't create new node, just search and replace the correct func name
-//    for (const auto &it:lnast->depth_preorder()) {
-//      auto it_name = lnast->get_data(it).token.get_text(buffer) ;
-//      auto it_type = lnast->get_data(it).type;
-//      if (it_name == scan_sview().substr(1) && it_type == Lnast_ntype_func_def){
-//        fmt::print("original node name:{}\n", lnast->get_data(it).token.get_text(buffer));
-//        lnast->get_data(it).token = scan_get_token(-1);
-//        fmt::print("new node name:{}\n", lnast->get_data(it).token.get_text(buffer));
-//        return;
-//      }
-//    }
-//    I(false); //must found the function definition in the lnast traverse
-//  }
-//}
 
 //scan pos start: first operand token, stop: last operand
 void Lnast_parser::process_assign_like_op(const Tree_index& tree_idx_opr) {
