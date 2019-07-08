@@ -554,6 +554,60 @@ void Pass_mockturtle::mapping_shift_cell_lg2mig(const bool &is_shift_right, cons
   }
 }
 
+void Pass_mockturtle::complement_to_SMR(std::vector<mockturtle::mig_network::signal> const &complement_sig,
+                                        std::vector<mockturtle::mig_network::signal> &SMR_sig,
+                                        mockturtle::mig_network &mig_ntk)
+{
+  auto bit_width = complement_sig.size();
+  I(bit_width > 0);
+  std::vector<mockturtle::mig_network::signal> unsigned_sig, signed_sig;
+  mockturtle::mig_network::signal c_in = mig_ntk.get_constant(true);
+  mockturtle::mig_network::signal sign_bit = complement_sig[bit_width-1];
+  for (long unsigned int i = 0; i < bit_width-1; i++) {
+    unsigned_sig.emplace_back(complement_sig[i]);
+    mockturtle::mig_network::signal c_out, sum;
+    create_half_adder(mig_ntk.create_not(complement_sig[i]), c_in, sum, c_out, mig_ntk);
+    c_in = c_out;
+    signed_sig.emplace_back(sum);
+  }
+  unsigned_sig.emplace_back(mig_ntk.get_constant(false));
+  signed_sig.emplace_back(c_in);
+  std::vector<std::vector<mockturtle::mig_network::signal>> in_arr;
+  in_arr.emplace_back(unsigned_sig);
+  in_arr.emplace_back(signed_sig);
+  std::vector<mockturtle::mig_network::signal> sel;
+  sel.emplace_back(sign_bit);
+  create_n_bit_k_input_mux(in_arr, sel, SMR_sig, mig_ntk);
+  SMR_sig.emplace_back(sign_bit);
+}
+
+void Pass_mockturtle::mapping_dynamic_shift_cell_lg2mig(const bool &is_shift_right,
+                                                        mockturtle::mig_network &mig_ntk,
+                                                        const Node &node, const unsigned int &group_id)
+{
+  XEdge opr_A_edge = node.inp_edges()[0].sink.get_pid() == 0
+                     ? opr_A_edge = node.inp_edges()[0]
+                     : opr_A_edge = node.inp_edges()[1];
+  XEdge opr_B_edge = node.inp_edges()[0].sink.get_pid() == 1
+                     ? opr_B_edge = node.inp_edges()[0]
+                     : opr_B_edge = node.inp_edges()[1];
+  std::vector<mockturtle::mig_network::signal> opr_A_sig, out_sig;
+  //processing input signal
+  //fmt::print("opr_A_bit_width:{}\n",opr_A_edge.get_bits());
+  //fmt::print("opr_B_bit_width:{}\n",opr_B_edge.get_bits());
+  setup_input_signal(group_id, opr_A_edge, opr_A_sig, mig_ntk);
+  if (opr_B_edge.driver.get_node().get_type().op == U32Const_Op) {
+    //creating output signal for const shift
+    uint32_t FIX_ME = opr_B_edge.driver.get_node().get_type_const_value();
+  } else {
+  }
+  //processing output signal
+  for (const auto &out_edge : node.out_edges()) {
+    I(out_edge.get_bits() == out_sig.size());
+    setup_output_signal(group_id, out_edge, out_sig, mig_ntk);
+  }
+}
+
 void Pass_mockturtle::create_MIG_network(LGraph *g) {
   for(const auto node : g->forward()) {
     if (node2gid.find(node.get_compact())==node2gid.end())
@@ -669,7 +723,7 @@ void Pass_mockturtle::create_MIG_network(LGraph *g) {
 
       //A << B
       case ShiftLeft_Op:
-        //fmt::print("Node: ShiftLeft_Op\n");
+        fmt::print("Node: ShiftLeft_Op\n");
         I(node.inp_edges().size()==2 && node.out_edges().size()>0);
         I(node.inp_edges()[0].sink.get_pid() != node.inp_edges()[1].sink.get_pid());
         mapping_shift_cell_lg2mig(false, false, mig_ntk, node, group_id);
@@ -689,6 +743,14 @@ void Pass_mockturtle::create_MIG_network(LGraph *g) {
         I(node.inp_edges().size()==2 && node.out_edges().size()>0);
         I(node.inp_edges()[0].sink.get_pid() != node.inp_edges()[1].sink.get_pid());
         mapping_shift_cell_lg2mig(true, true, mig_ntk, node, group_id);
+        break;
+      }
+
+      case DynamicShiftRight_Op: {
+        fmt::print("DynamicShiftRight_Op in gid:{}\n",group_id);
+        I(node.inp_edges().size()==2 && node.out_edges().size()>0);
+        I(node.inp_edges()[0].sink.get_pid() != node.inp_edges()[1].sink.get_pid());
+        mapping_dynamic_shift_cell_lg2mig(true, mig_ntk, node, group_id);
         break;
       }
 

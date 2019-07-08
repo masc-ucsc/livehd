@@ -81,6 +81,8 @@ protected:
   void setup_output_signal(const unsigned int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
   void split_input_signal(const std::vector<mockturtle::mig_network::signal> &, std::vector<std::vector<mockturtle::mig_network::signal>> &);
   void convert_signed_to_unsigned(const comparator_input_signal &, comparator_input_signal &, mockturtle::mig_network &);
+  void complement_to_SMR(std::vector<mockturtle::mig_network::signal> const &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
+
   void shift_op(std::vector<mockturtle::mig_network::signal> &,
                 const std::vector<mockturtle::mig_network::signal> &,
                 const bool &, const bool &, const long unsigned int &,
@@ -105,12 +107,22 @@ protected:
                                  mockturtle::mig_network &, const Node &, const unsigned int &);
   void mapping_comparison_cell_lg2mig(const bool &, const bool &, mockturtle::mig_network &, const Node &, const unsigned int &);
   void mapping_shift_cell_lg2mig(const bool &, const bool &, mockturtle::mig_network &, const Node &, const unsigned int &);
+  void mapping_dynamic_shift_cell_lg2mig(const bool &, mockturtle::mig_network &, const Node &, const unsigned int &);
   void connect_complemented_signal(LGraph *, Node_pin &, Node_pin &, const mockturtle::klut_network &, const mockturtle::klut_network::signal &);
 
   template<typename signal, typename Ntk>
   void create_half_adder(const signal &x, const signal &y, signal &s, signal &c, Ntk &net) {
     s = net.create_xor(x, y);
     c = net.create_and(x, y);
+  }
+
+  template<typename signal, typename Ntk>
+  void create_full_adder(const signal &a, const signal &b, const signal &c_in, signal &s, signal &c_out, Ntk &net) {
+    signal a_xor_b = net.create_xor(a, b);
+    signal a_and_b = net.create_and(a, b);
+    signal axorb_and_cin = net.create_and(a_xor_b, c_in);
+    c_out = net.create_or(a_and_b, axorb_and_cin);
+    s = net.create_xor(a_xor_b, c_in);
   }
 
   template<typename signal, typename Ntk>
