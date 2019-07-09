@@ -56,6 +56,7 @@ enum Node_Type_Op : uint64_t {
   LogicShiftRight_Op,
   ArithShiftRight_Op,
   DynamicShiftRight_Op,
+  DynamicShiftLeft_Op,
   ShiftRight_Op, //FIX ME: should be superseded by above Ops
   ShiftLeft_Op,
 #endif
@@ -459,6 +460,16 @@ public:
 class Node_Type_DynamicShiftRight : public Node_Type {
 public:
   Node_Type_DynamicShiftRight() : Node_Type("dshr", DynamicShiftRight_Op, false) {
+    inputs.push_back("A");
+    inputs.push_back("B");
+    outputs.push_back("Y");
+  };
+};
+
+// Y = A[$signed(B) -: bit_width(A)]
+class Node_Type_DynamicShiftLeft : public Node_Type {
+public:
+  Node_Type_DynamicShiftLeft() : Node_Type("dshl", DynamicShiftLeft_Op, false) {
     inputs.push_back("A");
     inputs.push_back("B");
     outputs.push_back("Y");

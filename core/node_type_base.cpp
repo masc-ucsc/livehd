@@ -37,6 +37,7 @@ Node_Type::_init::_init() {
   Node_Type::table[LogicShiftRight_Op]   = new Node_Type_LogicShiftRight();
   Node_Type::table[ArithShiftRight_Op]   = new Node_Type_ArithShiftRight();
   Node_Type::table[DynamicShiftRight_Op] = new Node_Type_DynamicShiftRight();
+  Node_Type::table[DynamicShiftLeft_Op]  = new Node_Type_DynamicShiftLeft();
   Node_Type::table[ShiftRight_Op]        = new Node_Type_ShiftRight();
   Node_Type::table[ShiftLeft_Op]         = new Node_Type_ShiftLeft();
   Node_Type::table[LUT_Op]               = new Node_Type_LUT();
