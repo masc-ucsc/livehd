@@ -5,9 +5,20 @@
 
 #include "lgraph.hpp"
 #include "pass.hpp"
+#include "lnast_parser.hpp"
+
+class Inou_cgen_options {
+public:
+  std::string files;
+  std::string path;
+};
 
 class Inou_cgen : public Pass {
 private:
+  Inou_cgen_options opack;
+  std::string_view memblock;
+  Lnast_parser lnast_parser;
+  Language_neutral_ast<Lnast_node> *lnast;
   typedef std::ostringstream Out_string;
 
   enum Declaration_type { Decl_local, Decl_inp, Decl_out, Decl_sflop, Decl_aflop, Decl_fflop, Decl_latch };
@@ -38,6 +49,11 @@ protected:
 
 public:
   Inou_cgen();
+  static void tocfg(Eprp_var &var);
 
   void setup() final;
+
+private:
+  std::string_view setup_memblock();
+  void do_tocfg();
 };

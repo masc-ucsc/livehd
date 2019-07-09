@@ -17,12 +17,6 @@ void Inou_lnast_dfg::setup() {
   m1.add_label_optional("path",   "path to put the lgraph[s]", "lgdb");
 
   register_inou(m1);
-
-  Eprp_method m2("inou.last_dfg.tocgf", "parse cfg_text -> build lnast -> generate cfg_text", &Inou_lnast_dfg::tocfg);
-  m2.add_label_required("files", "cfg_text files to process (comma separated)");
-  m2.add_label_optional("path", "path to put the cgf[s]", "lgdb");
-
-  register_inou(m2);
 }
 
 
@@ -51,43 +45,32 @@ void Inou_lnast_dfg::tolg(Eprp_var &var){
     error(fmt::format("fail to generate lgraph from lnast"));
     I(false);
   } else {
-    var.add(lgs[0]);
+    var.add(lgs[0]); 
   }
 }
 
-void Inou_lnast_dfg::tocfg(Eprp_var &var){
-  error(fmt::format("method not created yet"));
-  I(false);
+std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
+  I(!opack.files.empty());
+  I(!opack.path.empty());
+  LGraph *dfg = LGraph::create(opack.path, opack.files, "inou_lnast_dfg");
 
-  Inou_lnast_dfg p;
-
-  p.opack.files = var.get("files");
-  p.opack.path = var.get("path");
-
-  if (p.opack.files.empty()) {
-    error(fmt::format("inou.lnast_dft.tolg needs an input cfg_text!"));
-    I(false);
-    return;
-  }
-
-  // cfg_text to lnast
-  p.memblock = p.setup_memblock();
-  p.lnast_parser.parse("lnast", p.memblock);
-
-  p.lnast = p.lnast_parser.get_ast().get();
-  p.lnast->ssa_trans();
-
-  // lnast to cfg_text
   for (const auto &it: lnast->depth_preorder(lnast->get_root())) {
     const auto& node_data = lnast->get_data(it);
-    std::string name(node_data.token.get_text(memblock)); //str_view to string
+    std::string name(node_data.token.get_text(memblock));  //str_view to string
     std::string type = lnast_parser.ntype_dbg(node_data.type);
     auto node_scope = node_data.scope;
-    fmt::print(""name:{}, type{}, scope:{}\n", name, type, node_scope);
+    fmt::print("name:{}, type:{}, scope:{}\n", name, type, node_scope);
   }
+
+  //lnast to dfg
+  process_ast_top(dfg);
+
+  dfg->sync();
+  std::vector<LGraph *> lgs;
+  lgs.push_back(dfg);
+
   return lgs;
 }
-
 
 void Inou_lnast_dfg::process_ast_top(LGraph *dfg){
   const auto& top = lnast->get_root();

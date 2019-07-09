@@ -24,6 +24,12 @@ void Inou_cgen::setup() {
   Eprp_method m1("inou.cgen.fromlg", "generate a cgen output", &Inou_cgen::fromlg);
 
   register_inou(m1);
+
+  Eprp_method m2("inou.cgen.fromlnast", "parse cfg_test -> build lnast -> generate cfg_text", &Inou_cgen::tocfg);
+  m2.add_label_required("files", "cfg_text files to process (comma separated)");
+  m2.add_label_optional("path", "path to put the cfg[s]", "lgdb");
+
+  register_inou(m2);
 }
 
 void Inou_cgen::fromlg(Eprp_var &var) {
@@ -40,6 +46,72 @@ void Inou_cgen::fromlg(Eprp_var &var) {
 
     p.to_pyrope(g, filename);
   }
+}
+
+void Inou_cgen::tocfg(Eprp_var &var) {
+  /*
+  error(fmt::format("method not created yet\n"));
+  I(false);
+  */
+
+  Inou_cgen p;
+  
+  p.opack.files = var.get("files");
+  p.opack.path = var.get("path");
+
+  if (p.opack.files.empty()) {
+    error(fmt::format("inou.cgen.tocfg needs an input cfg_text!"));
+    I(false);
+    return;
+  }
+
+  // cfg_text to lnast
+  p.memblock = p.setup_memblock();
+  p.lnast_parser.parse("lnast", p.memblock);
+
+  p.lnast = p.lnast_parser.get_ast().get();
+  p.lnast->ssa_trans();
+
+  // lnast to cfg_text
+  p.do_tocfg();
+}
+
+void Inou_cgen::do_tocfg() {
+  int i = 0;
+  fmt::print("starting do_tocfg:\n\n\n");
+  fmt::print("start: {}\n", i++);
+
+  for (const auto &it: lnast->depth_preorder(lnast->get_root())) {
+    const auto& node_data = lnast->get_data(it);
+    std::string name(node_data.token.get_text(memblock)); // str_view to string
+    std::string type = lnast_parser.ntype_dbg(node_data.type);
+    auto node_scope = node_data.scope;
+
+    fmt::print("tree index: K{} {}\n", it.pos, it.level);
+    fmt::print("node: {} {} {} {} {}\n", name, type, node_scope, node_data.knum, node_data.sbs);
+  }
+  fmt::print("end\n\n");
+}
+
+std::string_view Inou_cgen::setup_memblock() {
+  auto file_path = opack.files;
+  int fd = open(file_path.c_str(), O_RDONLY);
+  if (fd < 0) {
+    fprintf(stderr, "error, could not open %s\n", file_path.c_str());
+    exit(-3);
+  }
+
+  struct stat sb;
+  fstat(fd, &sb);
+  printf("Size: %lu\n", (uint64_t)sb.st_size);
+
+  char *memblock = (char *)mmap(NULL, sb.st_size, PROT_WRITE, MAP_PRIVATE, fd, 0);
+  fprintf(stderr, "Content of memblock: \n%s\n", memblock);
+  if (memblock == MAP_FAILED) {
+    fprintf(stderr, "error, mmap failed\n");
+    exit(-3);
+  }
+  return memblock;
 }
 
 void Inou_cgen::Declaration::format_raw(Out_string &w) const {

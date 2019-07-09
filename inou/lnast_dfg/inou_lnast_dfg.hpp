@@ -25,7 +25,6 @@ protected:
 public:
   Inou_lnast_dfg() : Pass("lnast_dfg") {};
   static void   tolg(Eprp_var &var);
-  static void   tocfg(Eprp_var &var);
   void          setup() final;
 
 private:
