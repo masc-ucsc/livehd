@@ -135,6 +135,16 @@ protected:
     return net.create_lt(y, x);
   }
 
+  void converting_uint32_to_signed_SMR(const uint32_t &in, uint32_t &out, bool &is_neg) {
+      if (((1ULL<<31)&in) != 0) {
+        out = (~in) + 1;
+        is_neg = true;
+      } else {
+        out = in;
+        is_neg = false;
+      }
+  }
+
   bool eligable_cell_op(const Node &cell) {
     switch (cell.get_type().op) {
       case Not_Op:

@@ -598,7 +598,14 @@ void Pass_mockturtle::mapping_dynamic_shift_cell_lg2mig(const bool &is_shift_rig
   setup_input_signal(group_id, opr_A_edge, opr_A_sig, mig_ntk);
   if (opr_B_edge.driver.get_node().get_type().op == U32Const_Op) {
     //creating output signal for const shift
-    uint32_t FIX_ME = opr_B_edge.driver.get_node().get_type_const_value();
+    uint32_t ofs;
+    bool is_negative;
+    converting_uint32_to_signed_SMR(opr_B_edge.driver.get_node().get_type_const_value(), ofs, is_negative);
+    if (is_negative) {
+      shift_op(out_sig, opr_A_sig, !is_shift_right, false, ofs, mig_ntk);
+    } else {
+      shift_op(out_sig, opr_A_sig, is_shift_right, false, ofs, mig_ntk);
+    }
   } else {
     std::vector<mockturtle::mig_network::signal> opr_B_sig, temp_out, opr_B_SMR_sig;
     std::vector<mockturtle::mig_network::signal> ofs_sel, sign_sel, out_shr_sig, out_shl_sig;
