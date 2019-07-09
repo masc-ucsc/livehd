@@ -783,6 +783,14 @@ void Pass_mockturtle::create_MIG_network(LGraph *g) {
         break;
       }
 
+      case DynamicShiftLeft_Op: {
+        fmt::print("DynamicShiftLeft_Op in gid:{}\n",group_id);
+        I(node.inp_edges().size()==2 && node.out_edges().size()>0);
+        I(node.inp_edges()[0].sink.get_pid() != node.inp_edges()[1].sink.get_pid());
+        mapping_dynamic_shift_cell_lg2mig(false, mig_ntk, node, group_id);
+        break;
+      }
+
       default:
         fmt::print("Unknown_Op in gid:{}\n",group_id);
         break;

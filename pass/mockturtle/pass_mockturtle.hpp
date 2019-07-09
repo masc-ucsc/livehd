@@ -198,10 +198,23 @@ protected:
         }
         break;
       }
-/*
-      case DynamicShiftRight_Op:
+      case DynamicShiftRight_Op: {
         //fmt::print("Node: DynamicShiftRight_Op\n");
+        for (const auto &in_edge : cell.inp_edges()) {
+          if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD - 1)
+            return false;
+        }
         break;
+      }
+      case DynamicShiftLeft_Op: {
+        //fmt::print("Node: DynamicShiftLeft_Op\n");
+        for (const auto &in_edge : cell.inp_edges()) {
+          if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD - 1)
+            return false;
+        }
+        break;
+      }
+/*
       case ShiftRight_Op:
         //fmt::print("Node: ShiftRight_Op\n");
         break;
