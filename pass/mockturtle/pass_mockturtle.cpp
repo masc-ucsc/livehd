@@ -443,15 +443,16 @@ void Pass_mockturtle::mapping_comparison_cell_lg2mock(const bool &lt_op, const b
   }
 }
 
-void Pass_mockturtle::shift_op(std::vector<mockturtle::mig_network::signal> &res,
-                             const std::vector<mockturtle::mig_network::signal> &opr,
-                             const bool &is_shift_right, const bool &is_signed,
-                             const long unsigned int &shift_bits, mockturtle::mig_network &mig) {
+template<typename sig_type, typename ntk_type>
+void Pass_mockturtle::shift_op(const std::vector<sig_type> &opr,
+                               const bool &is_shift_right, const bool &is_signed,
+                               const long unsigned int &shift_bits,
+                               std::vector<sig_type> &res, ntk_type &mig) {
   I(opr.size() != 0);
   I(res.size() == 0);
-  mockturtle::mig_network::signal signed_bit = is_signed
-                                               ? opr[opr.size() - 1]
-                                               : mig.get_constant(false);
+  sig_type signed_bit = is_signed
+                      ? opr[opr.size() - 1]
+                      : mig.get_constant(false);
   long unsigned int start_point = shift_bits;
   if (is_shift_right) {
     while (start_point < opr.size()) {
@@ -532,7 +533,7 @@ void Pass_mockturtle::mapping_shift_cell_lg2mock(const bool &is_shift_right, con
   if (opr_B_edge.driver.get_node().get_type().op == U32Const_Op) {
     //creating output signal for const shift
     uint32_t offset = opr_B_edge.driver.get_node().get_type_const_value();
-    shift_op(out_sig, opr_A_sig, is_shift_right, sign_ext, offset, mig_ntk);
+    shift_op(opr_A_sig, is_shift_right, sign_ext, offset, out_sig, mig_ntk);
   } else {
     std::vector<mockturtle::mig_network::signal> opr_B_sig, temp_out;
     std::vector<std::vector<mockturtle::mig_network::signal>> out_enum;
@@ -540,7 +541,7 @@ void Pass_mockturtle::mapping_shift_cell_lg2mock(const bool &is_shift_right, con
     setup_input_signal(group_id, opr_B_edge, opr_B_sig, mig_ntk);
     for (long unsigned int ofs = 0; ofs < (long unsigned int)(1<<opr_B_sig.size()); ofs++) {
       temp_out.clear();
-      shift_op(temp_out, opr_A_sig, is_shift_right, sign_ext, ofs, mig_ntk);
+      shift_op(opr_A_sig, is_shift_right, sign_ext, ofs, temp_out, mig_ntk);
       out_enum.emplace_back(temp_out);
     }
     //using B to select output (mux)
@@ -603,9 +604,9 @@ void Pass_mockturtle::mapping_dynamic_shift_cell_lg2mock(const bool &is_shift_ri
     bool is_negative;
     converting_uint32_to_signed_SMR(opr_B_edge.driver.get_node().get_type_const_value(), ofs, is_negative);
     if (is_negative) {
-      shift_op(out_sig, opr_A_sig, !is_shift_right, false, ofs, mig_ntk);
+      shift_op(opr_A_sig, !is_shift_right, false, ofs, out_sig, mig_ntk);
     } else {
-      shift_op(out_sig, opr_A_sig, is_shift_right, false, ofs, mig_ntk);
+      shift_op(opr_A_sig, is_shift_right, false, ofs, out_sig, mig_ntk);
     }
   } else {
     std::vector<mockturtle::mig_network::signal> opr_B_sig, temp_out, opr_B_SMR_sig;
@@ -615,10 +616,10 @@ void Pass_mockturtle::mapping_dynamic_shift_cell_lg2mock(const bool &is_shift_ri
     setup_input_signal(group_id, opr_B_edge, opr_B_sig, mig_ntk);
     for (long unsigned int ofs = 0; ofs < (long unsigned int)(1<<opr_B_sig.size()); ofs++) {
       temp_out.clear();
-      shift_op(temp_out, opr_A_sig, is_shift_right, false, ofs, mig_ntk);
+      shift_op(opr_A_sig, is_shift_right, false, ofs, temp_out, mig_ntk);
       out_shr_enum.emplace_back(temp_out);
       temp_out.clear();
-      shift_op(temp_out, opr_A_sig, !is_shift_right, false, ofs, mig_ntk);
+      shift_op(opr_A_sig, !is_shift_right, false, ofs, temp_out, mig_ntk);
       out_shl_enum.emplace_back(temp_out);
     }
     complement_to_SMR(opr_B_sig, opr_B_SMR_sig, mig_ntk);

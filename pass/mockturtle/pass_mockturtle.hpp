@@ -92,10 +92,11 @@ protected:
   template<typename sig_type, typename ntk_type>
   void complement_to_SMR(std::vector<sig_type> const &, std::vector<sig_type> &, ntk_type &);
 
-  void shift_op(std::vector<mockturtle::mig_network::signal> &,
-                const std::vector<mockturtle::mig_network::signal> &,
-                const bool &, const bool &, const long unsigned int &,
-                mockturtle::mig_network &);
+  template<typename sig_type, typename ntk_type>
+  void shift_op(const std::vector<sig_type> &,
+                const bool &, const bool &,
+                const long unsigned int &,
+                std::vector<sig_type> &, ntk_type &);
 
   void create_n_bit_k_input_mux(std::vector<std::vector<mockturtle::mig_network::signal>> const &,
                                 std::vector<mockturtle::mig_network::signal> const &,
