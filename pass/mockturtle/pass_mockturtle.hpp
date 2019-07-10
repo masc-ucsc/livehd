@@ -98,10 +98,11 @@ protected:
                 const long unsigned int &,
                 std::vector<sig_type> &, ntk_type &);
 
-  void create_n_bit_k_input_mux(std::vector<std::vector<mockturtle::mig_network::signal>> const &,
-                                std::vector<mockturtle::mig_network::signal> const &,
-                                std::vector<mockturtle::mig_network::signal> &,
-                                mockturtle::mig_network &);
+  template<typename sig_type, typename ntk_type>
+  void create_n_bit_k_input_mux(std::vector<std::vector<sig_type>> const &,
+                                std::vector<sig_type> const &,
+                                std::vector<sig_type> &,
+                                ntk_type &);
 
   template<typename sig_type, typename ntk_type>
   sig_type is_equal_op(const comparator_input_signal<sig_type> &,

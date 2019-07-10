@@ -473,10 +473,11 @@ void Pass_mockturtle::shift_op(const std::vector<sig_type> &opr,
   }
 }
 
-void Pass_mockturtle::create_n_bit_k_input_mux(std::vector<std::vector<mockturtle::mig_network::signal>> const &input_sig_array,
-                                               std::vector<mockturtle::mig_network::signal> const &sel_sig,
-                                               std::vector<mockturtle::mig_network::signal> &res,
-                                               mockturtle::mig_network &mig)
+template<typename sig_type, typename ntk_type>
+void Pass_mockturtle::create_n_bit_k_input_mux(std::vector<std::vector<sig_type>> const &input_sig_array,
+                                               std::vector<sig_type> const &sel_sig,
+                                               std::vector<sig_type> &res,
+                                               ntk_type &net)
 {
   I(sel_sig.size() != 0);
   const long unsigned int k = sel_sig.size();
@@ -487,10 +488,10 @@ void Pass_mockturtle::create_n_bit_k_input_mux(std::vector<std::vector<mockturtl
     I(input_sig_array[i].size() == n);
   }
   //FIX ME: optimize the calculation of coefficient of each term
-  std::vector<mockturtle::mig_network::signal> coeffi, temp, sel_not_sig;
+  std::vector<sig_type> coeffi, temp, sel_not_sig;
   //creating complemented signals for selection signals
   for (long unsigned int i = 0; i < k; i++) {
-    sel_not_sig.emplace_back(mig.create_not(sel_sig[i]));
+    sel_not_sig.emplace_back(net.create_not(sel_sig[i]));
   }
   //creating coefficient signals for each term
   for (long unsigned int i = 0; i < inp_num; i++) {
@@ -502,15 +503,15 @@ void Pass_mockturtle::create_n_bit_k_input_mux(std::vector<std::vector<mockturtl
         temp.emplace_back(sel_not_sig[j]);
       }
     }
-    coeffi.emplace_back(mig.create_nary_and(temp));
+    coeffi.emplace_back(net.create_nary_and(temp));
   }
   //creating output arranged by bits
   for (long unsigned int i = 0; i < n; i++) {
     temp.clear();
     for (long unsigned int j = 0; j < inp_num; j++) {
-      temp.emplace_back(mig.create_and(input_sig_array[j][i], coeffi[j]));
+      temp.emplace_back(net.create_and(input_sig_array[j][i], coeffi[j]));
     }
-    res.emplace_back(mig.create_nary_or(temp));
+    res.emplace_back(net.create_nary_or(temp));
   }
 }
 
