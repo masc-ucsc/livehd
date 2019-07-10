@@ -64,9 +64,9 @@ protected:
 
   absl::flat_hash_set<XEdge> input_edges, output_edges;
   absl::flat_hash_map<Node::Compact, unsigned int> node2gid;
-  absl::flat_hash_map<unsigned int, mockturtle::mig_network> gid2mig;
+  absl::flat_hash_map<unsigned int, mockturtle::mig_network> gid2mock;
   absl::flat_hash_map<unsigned int, mockturtle::klut_network> gid2klut;
-  absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle::mig_network::signal>> edge2signal_mig;
+  absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle::mig_network::signal>> edge2signal_mock;
   absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle::klut_network::signal>> edge2signal_klut;
   absl::flat_hash_map<Node::Compact, Node::Compact> old_node_to_new_node, new_node_to_old_node;
   absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::node>, Node::Compact> gidMTnode2LGnode;
@@ -74,8 +74,8 @@ protected:
                       std::vector<std::pair<mockturtle::klut_network::node, Port_ID>>> gid_fanin2parent_pid;
   bool lg_partition(LGraph *);
   void dfs_populate_gid(Node, const unsigned int);
-  void create_MIG_network(LGraph *);
-  void convert_MIG_to_KLUT(LGraph *);
+  void create_mockturtle_network(LGraph *);
+  void convert_mockturtle_to_KLUT(LGraph *);
   void create_lutified_lgraph(LGraph *);
   void setup_input_signal(const unsigned int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
   void setup_output_signal(const unsigned int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
@@ -103,11 +103,11 @@ protected:
                                          comparator_input_signal &,
                                          comparator_input_signal &,
                                          mockturtle::mig_network &);
-  void mapping_logic_cell_lg2mig(mockturtle::mig_network::signal (mockturtle::mig_network::*)(std::vector<mockturtle::mig_network::signal> const &),
+  void mapping_logic_cell_lg2mock(mockturtle::mig_network::signal (mockturtle::mig_network::*)(std::vector<mockturtle::mig_network::signal> const &),
                                  mockturtle::mig_network &, const Node &, const unsigned int &);
-  void mapping_comparison_cell_lg2mig(const bool &, const bool &, mockturtle::mig_network &, const Node &, const unsigned int &);
-  void mapping_shift_cell_lg2mig(const bool &, const bool &, mockturtle::mig_network &, const Node &, const unsigned int &);
-  void mapping_dynamic_shift_cell_lg2mig(const bool &, mockturtle::mig_network &, const Node &, const unsigned int &);
+  void mapping_comparison_cell_lg2mock(const bool &, const bool &, mockturtle::mig_network &, const Node &, const unsigned int &);
+  void mapping_shift_cell_lg2mock(const bool &, const bool &, mockturtle::mig_network &, const Node &, const unsigned int &);
+  void mapping_dynamic_shift_cell_lg2mock(const bool &, mockturtle::mig_network &, const Node &, const unsigned int &);
   void connect_complemented_signal(LGraph *, Node_pin &, Node_pin &, const mockturtle::klut_network &, const mockturtle::klut_network::signal &);
 
   template<typename signal, typename Ntk>
