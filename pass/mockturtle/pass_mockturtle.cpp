@@ -157,10 +157,10 @@ void Pass_mockturtle::split_input_signal(const std::vector<mockturtle::mig_netwo
 }
 
 //extend sign bit so that the bit width of two signals matches each other
-void Pass_mockturtle::match_bit_width_by_sign_extension(const comparator_input_signal &sig1,
-                                                        const comparator_input_signal &sig2,
-                                                        comparator_input_signal &new_sig1,
-                                                        comparator_input_signal &new_sig2,
+void Pass_mockturtle::match_bit_width_by_sign_extension(const comparator_input_signal<mockturtle::mig_network::signal> &sig1,
+                                                        const comparator_input_signal<mockturtle::mig_network::signal> &sig2,
+                                                        comparator_input_signal<mockturtle::mig_network::signal> &new_sig1,
+                                                        comparator_input_signal<mockturtle::mig_network::signal> &new_sig2,
                                                         mockturtle::mig_network &net)
 {
   const long unsigned int &sig1_bit_width = sig1.signals.size();
@@ -266,8 +266,8 @@ void Pass_mockturtle::mapping_logic_cell_lg2mock(mockturtle::mig_network::signal
 //1. old_sign_bit += 1
 //2. new_sign_bit = input signal is signed? 0 : carry
 //3. out = new_sign_bit concatenated by input_signal
-void Pass_mockturtle::convert_signed_to_unsigned(const comparator_input_signal &signed_signal,
-                                                 comparator_input_signal &unsigned_signal,
+void Pass_mockturtle::convert_signed_to_unsigned(const comparator_input_signal<mockturtle::mig_network::signal> &signed_signal,
+                                                 comparator_input_signal<mockturtle::mig_network::signal> &unsigned_signal,
                                                  mockturtle::mig_network &mig)
 {
   I(signed_signal.signals.size() >= 1);
@@ -290,15 +290,15 @@ void Pass_mockturtle::convert_signed_to_unsigned(const comparator_input_signal &
 
 //(A[i]==B[i]) = X[i] = A[i]B[i] + A[i]'B[i]' = XNOR(A[i], B[i])
 //(A==B) = X[n]X[n-1]X[n-2]...X[2]X[1]X[0]
-mockturtle::mig_network::signal Pass_mockturtle::is_equal_op(const comparator_input_signal &l_op,
-                                                             const comparator_input_signal &r_op,
+mockturtle::mig_network::signal Pass_mockturtle::is_equal_op(const comparator_input_signal<mockturtle::mig_network::signal> &l_op,
+                                                             const comparator_input_signal<mockturtle::mig_network::signal> &r_op,
                                                              mockturtle::mig_network &mig)
 {
-  comparator_input_signal l_op_ext, r_op_ext;
+  comparator_input_signal<mockturtle::mig_network::signal> l_op_ext, r_op_ext;
   match_bit_width_by_sign_extension(l_op, r_op, l_op_ext, r_op_ext, mig);
   I(l_op_ext.signals.size() == r_op_ext.signals.size());
 
-  comparator_input_signal left_op, right_op;
+  comparator_input_signal<mockturtle::mig_network::signal> left_op, right_op;
   convert_signed_to_unsigned(l_op_ext, left_op, mig);
   convert_signed_to_unsigned(r_op_ext, right_op, mig);
   I(left_op.signals.size() == right_op.signals.size());
@@ -337,17 +337,17 @@ mockturtle::mig_network::signal Pass_mockturtle::is_equal_op(const comparator_in
 //          X[n]X[n-1]X[n-2]X[n-3]G[n-4]
 //          + ... +
 //          X[n]X[n-1]X[n-2]...X[3]X[2]X[1]G[0]
-mockturtle::mig_network::signal Pass_mockturtle::compare_op(const comparator_input_signal &l_op,
-                                                            const comparator_input_signal &r_op,
+mockturtle::mig_network::signal Pass_mockturtle::compare_op(const comparator_input_signal<mockturtle::mig_network::signal> &l_op,
+                                                            const comparator_input_signal<mockturtle::mig_network::signal> &r_op,
                                                             const bool &lt_op,
                                                             const bool &eq_op,
                                                             mockturtle::mig_network &mig)
 {
-  comparator_input_signal l_op_ext, r_op_ext;
+  comparator_input_signal<mockturtle::mig_network::signal> l_op_ext, r_op_ext;
   match_bit_width_by_sign_extension(l_op, r_op, l_op_ext, r_op_ext, mig);
   I(l_op_ext.signals.size() == r_op_ext.signals.size());
 
-  comparator_input_signal left_op, right_op;
+  comparator_input_signal<mockturtle::mig_network::signal> left_op, right_op;
   convert_signed_to_unsigned(l_op_ext, left_op, mig);
   convert_signed_to_unsigned(r_op_ext, right_op, mig);
   I(left_op.signals.size() == right_op.signals.size());
@@ -405,10 +405,10 @@ void Pass_mockturtle::mapping_comparison_cell_lg2mock(const bool &lt_op, const b
   //mapping input edge to input signal
   //must differentiate between signed and unsigned input
   std::vector<mockturtle::mig_network::signal> out_sig, med_sig;
-  std::vector<comparator_input_signal> left_operant_sigs, right_operant_sigs;
+  std::vector<comparator_input_signal<mockturtle::mig_network::signal>> left_operant_sigs, right_operant_sigs;
   for (const auto &in_edge : node.inp_edges()) {
     fmt::print("input_bit_width:{}\n",in_edge.get_bits());
-    comparator_input_signal inp_sig;
+    comparator_input_signal<mockturtle::mig_network::signal> inp_sig;
     setup_input_signal(group_id, in_edge, inp_sig.signals, mig_ntk);
     if (node.get_type().is_input_signed(in_edge.sink.get_pid())) {
       inp_sig.is_signed = true;
@@ -697,10 +697,10 @@ void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
         //mapping input edge to input signal
         //must differentiate between signed and unsigned input
         std::vector<mockturtle::mig_network::signal> out_sig, med_sig;
-        std::vector<comparator_input_signal> operant_sigs;
+        std::vector<comparator_input_signal<mockturtle::mig_network::signal>> operant_sigs;
         for (const auto &in_edge : node.inp_edges()) {
           fmt::print("input_bit_width:{}\n",in_edge.get_bits());
-          comparator_input_signal inp_sig;
+          comparator_input_signal<mockturtle::mig_network::signal> inp_sig;
           setup_input_signal(group_id, in_edge, inp_sig.signals, mig_ntk);
           if (node.get_type().is_input_signed(in_edge.sink.get_pid())) {
             inp_sig.is_signed = true;

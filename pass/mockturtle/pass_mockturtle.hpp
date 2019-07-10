@@ -39,6 +39,9 @@
 #define LUTIFIED_NETWORK_NAME_SIGNATURE "_lutified"
 #define BIT_WIDTH_THRESHOLD 2
 
+using mock_network = mockturtle::mig_network;
+using mock_signal = mockturtle::mig_network::signal;
+
 //NOTE: In a vector of signals, the LSB signal is represented by index[0]
 //while the MSB signal is represented by index[size()-1]
 template<typename sig>
@@ -47,9 +50,10 @@ struct Ntk_Sigs {
   std::vector<sig> signals;
 };
 
+template<typename sig>
 struct comparator_input_signal {
   bool is_signed;
-  std::vector<mockturtle::mig_network::signal> signals;
+  std::vector<sig> signals;
   comparator_input_signal &operator=(const comparator_input_signal &obj) {
     I(this != &obj); // Do not assign object to itself. works but wastefull
     is_signed  = obj.is_signed;
@@ -80,7 +84,7 @@ protected:
   void setup_input_signal(const unsigned int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
   void setup_output_signal(const unsigned int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
   void split_input_signal(const std::vector<mockturtle::mig_network::signal> &, std::vector<std::vector<mockturtle::mig_network::signal>> &);
-  void convert_signed_to_unsigned(const comparator_input_signal &, comparator_input_signal &, mockturtle::mig_network &);
+  void convert_signed_to_unsigned(const comparator_input_signal<mockturtle::mig_network::signal> &, comparator_input_signal<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
   void complement_to_SMR(std::vector<mockturtle::mig_network::signal> const &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
 
   void shift_op(std::vector<mockturtle::mig_network::signal> &,
@@ -91,17 +95,17 @@ protected:
                                 std::vector<mockturtle::mig_network::signal> const &,
                                 std::vector<mockturtle::mig_network::signal> &,
                                 mockturtle::mig_network &);
-  mockturtle::mig_network::signal is_equal_op(const comparator_input_signal &,
-                                              const comparator_input_signal &,
+  mockturtle::mig_network::signal is_equal_op(const comparator_input_signal<mockturtle::mig_network::signal> &,
+                                              const comparator_input_signal<mockturtle::mig_network::signal> &,
                                               mockturtle::mig_network &);
-  mockturtle::mig_network::signal compare_op(const comparator_input_signal &,
-                                             const comparator_input_signal &,
+  mockturtle::mig_network::signal compare_op(const comparator_input_signal<mockturtle::mig_network::signal> &,
+                                             const comparator_input_signal<mockturtle::mig_network::signal> &,
                                              const bool &, const bool &,
                                              mockturtle::mig_network &);
-  void match_bit_width_by_sign_extension(const comparator_input_signal &,
-                                         const comparator_input_signal &,
-                                         comparator_input_signal &,
-                                         comparator_input_signal &,
+  void match_bit_width_by_sign_extension(const comparator_input_signal<mockturtle::mig_network::signal> &,
+                                         const comparator_input_signal<mockturtle::mig_network::signal> &,
+                                         comparator_input_signal<mockturtle::mig_network::signal> &,
+                                         comparator_input_signal<mockturtle::mig_network::signal> &,
                                          mockturtle::mig_network &);
   void mapping_logic_cell_lg2mock(mockturtle::mig_network::signal (mockturtle::mig_network::*)(std::vector<mockturtle::mig_network::signal> const &),
                                  mockturtle::mig_network &, const Node &, const unsigned int &);
