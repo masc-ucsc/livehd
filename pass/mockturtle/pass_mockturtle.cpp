@@ -554,30 +554,31 @@ void Pass_mockturtle::mapping_shift_cell_lg2mock(const bool &is_shift_right, con
   }
 }
 
-void Pass_mockturtle::complement_to_SMR(std::vector<mockturtle::mig_network::signal> const &complement_sig,
-                                        std::vector<mockturtle::mig_network::signal> &SMR_sig,
-                                        mockturtle::mig_network &mig_ntk)
+template<typename sig_type, typename ntk_type>
+void Pass_mockturtle::complement_to_SMR(std::vector<sig_type> const &complement_sig,
+                                        std::vector<sig_type> &SMR_sig,
+                                        ntk_type &mock_ntk)
 {
   auto bit_width = complement_sig.size();
   I(bit_width > 0);
-  std::vector<mockturtle::mig_network::signal> unsigned_sig, signed_sig;
-  mockturtle::mig_network::signal c_in = mig_ntk.get_constant(true);
-  mockturtle::mig_network::signal sign_bit = complement_sig[bit_width-1];
+  std::vector<sig_type> unsigned_sig, signed_sig;
+  sig_type c_in = mock_ntk.get_constant(true);
+  sig_type sign_bit = complement_sig[bit_width-1];
   for (long unsigned int i = 0; i < bit_width-1; i++) {
     unsigned_sig.emplace_back(complement_sig[i]);
-    mockturtle::mig_network::signal c_out, sum;
-    create_half_adder(mig_ntk.create_not(complement_sig[i]), c_in, sum, c_out, mig_ntk);
+    sig_type c_out, sum;
+    create_half_adder(mock_ntk.create_not(complement_sig[i]), c_in, sum, c_out, mock_ntk);
     c_in = c_out;
     signed_sig.emplace_back(sum);
   }
-  unsigned_sig.emplace_back(mig_ntk.get_constant(false));
+  unsigned_sig.emplace_back(mock_ntk.get_constant(false));
   signed_sig.emplace_back(c_in);
-  std::vector<std::vector<mockturtle::mig_network::signal>> in_arr;
+  std::vector<std::vector<sig_type>> in_arr;
   in_arr.emplace_back(unsigned_sig);
   in_arr.emplace_back(signed_sig);
-  std::vector<mockturtle::mig_network::signal> selector;
+  std::vector<sig_type> selector;
   selector.emplace_back(sign_bit);
-  create_n_bit_k_input_mux(in_arr, selector, SMR_sig, mig_ntk);
+  create_n_bit_k_input_mux(in_arr, selector, SMR_sig, mock_ntk);
   SMR_sig.emplace_back(sign_bit);
 }
 

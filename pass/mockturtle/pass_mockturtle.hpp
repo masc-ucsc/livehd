@@ -81,6 +81,7 @@ protected:
   void create_mockturtle_network(LGraph *);
   void convert_mockturtle_to_KLUT(LGraph *);
   void create_lutified_lgraph(LGraph *);
+
   void setup_input_signal(const unsigned int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
   void setup_output_signal(const unsigned int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
   void split_input_signal(const std::vector<mockturtle::mig_network::signal> &, std::vector<std::vector<mockturtle::mig_network::signal>> &);
@@ -88,7 +89,8 @@ protected:
   template<typename sig_type, typename ntk_type>
   void convert_signed_to_unsigned(const comparator_input_signal<sig_type> &, comparator_input_signal<sig_type> &, ntk_type &);
 
-  void complement_to_SMR(std::vector<mockturtle::mig_network::signal> const &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
+  template<typename sig_type, typename ntk_type>
+  void complement_to_SMR(std::vector<sig_type> const &, std::vector<sig_type> &, ntk_type &);
 
   void shift_op(std::vector<mockturtle::mig_network::signal> &,
                 const std::vector<mockturtle::mig_network::signal> &,
