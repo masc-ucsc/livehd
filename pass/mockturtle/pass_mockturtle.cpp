@@ -209,20 +209,20 @@ void Pass_mockturtle::match_bit_width_by_sign_extension(const comparator_input_s
 
 //creating and mapping a logic-op LGraph node to a mig node
 //mapping it's both input and output LGraph edges to mig signals
-void Pass_mockturtle::mapping_logic_cell_lg2mock(mockturtle::mig_network::signal (mockturtle::mig_network::*create_nary_op)
-                                                                                 (std::vector<mockturtle::mig_network::signal> const &),
-                                                 mockturtle::mig_network &mig_ntk, const Node &node, const unsigned int &group_id)
+template<typename sig_type, typename ntk_type>
+void Pass_mockturtle::mapping_logic_cell_lg2mock(sig_type (ntk_type::*create_nary_op) (std::vector<sig_type> const &),
+                                                 ntk_type &mock_ntk, const Node &node, const unsigned int &group_id)
 {
   //mapping input edge to input signal
   //out_sig_0: regular OP
   //out_sig_1: reduced OP
-  std::vector<mockturtle::mig_network::signal> out_sig_0, out_sig_1;
-  std::vector<std::vector<mockturtle::mig_network::signal>> inp_sig_group_by_bit;
+  std::vector<sig_type> out_sig_0, out_sig_1;
+  std::vector<std::vector<sig_type>> inp_sig_group_by_bit;
   //processing input signal
   for (const auto &in_edge : node.inp_edges()) {
     //fmt::print("input_bit_width:{}\n",in_edge.get_bits());
-    std::vector<mockturtle::mig_network::signal> inp_sig;
-    setup_input_signal(group_id, in_edge, inp_sig, mig_ntk);
+    std::vector<sig_type> inp_sig;
+    setup_input_signal(group_id, in_edge, inp_sig, mock_ntk);
     split_input_signal(inp_sig, inp_sig_group_by_bit);
   }
   //creating output signal
@@ -235,23 +235,23 @@ void Pass_mockturtle::mapping_logic_cell_lg2mock(mockturtle::mig_network::signal
     }
     default: {
       for (long unsigned int i = 0; i < inp_sig_group_by_bit.size(); i++) {
-        out_sig_0.emplace_back((mig_ntk.*create_nary_op)(inp_sig_group_by_bit[i]));
+        out_sig_0.emplace_back((mock_ntk.*create_nary_op)(inp_sig_group_by_bit[i]));
       }
       break;
     }
   }
-  out_sig_1.emplace_back((mig_ntk.*create_nary_op)(out_sig_0));
+  out_sig_1.emplace_back((mock_ntk.*create_nary_op)(out_sig_0));
   //processing output signal
   for (const auto &out_edge : node.out_edges()) {
     switch (out_edge.driver.get_pid()) {
       case 0: {
         I(out_edge.get_bits()==out_sig_0.size());
-        setup_output_signal(group_id, out_edge, out_sig_0, mig_ntk);
+        setup_output_signal(group_id, out_edge, out_sig_0, mock_ntk);
         break;
       }
       case 1: {
         I(out_edge.get_bits()==out_sig_1.size());
-        setup_output_signal(group_id, out_edge, out_sig_1, mig_ntk);
+        setup_output_signal(group_id, out_edge, out_sig_1, mock_ntk);
         break;
       }
       default:

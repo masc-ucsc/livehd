@@ -39,8 +39,8 @@
 #define LUTIFIED_NETWORK_NAME_SIGNATURE "_lutified"
 #define BIT_WIDTH_THRESHOLD 2
 
-using mock_network = mockturtle::mig_network;
-using mock_signal = mockturtle::mig_network::signal;
+using mockturtle_network = mockturtle::mig_network;
+using mockturtle_signal = mockturtle::mig_network::signal;
 
 //NOTE: In a vector of signals, the LSB signal is represented by index[0]
 //while the MSB signal is represented by index[size()-1]
@@ -84,35 +84,44 @@ protected:
   void setup_input_signal(const unsigned int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
   void setup_output_signal(const unsigned int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
   void split_input_signal(const std::vector<mockturtle::mig_network::signal> &, std::vector<std::vector<mockturtle::mig_network::signal>> &);
+
   template<typename sig_type, typename ntk_type>
   void convert_signed_to_unsigned(const comparator_input_signal<sig_type> &, comparator_input_signal<sig_type> &, ntk_type &);
+
   void complement_to_SMR(std::vector<mockturtle::mig_network::signal> const &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
 
   void shift_op(std::vector<mockturtle::mig_network::signal> &,
                 const std::vector<mockturtle::mig_network::signal> &,
                 const bool &, const bool &, const long unsigned int &,
                 mockturtle::mig_network &);
+
   void create_n_bit_k_input_mux(std::vector<std::vector<mockturtle::mig_network::signal>> const &,
                                 std::vector<mockturtle::mig_network::signal> const &,
                                 std::vector<mockturtle::mig_network::signal> &,
                                 mockturtle::mig_network &);
+
   template<typename sig_type, typename ntk_type>
   sig_type is_equal_op(const comparator_input_signal<sig_type> &,
                        const comparator_input_signal<sig_type> &,
                        ntk_type &);
+
   template<typename sig_type, typename ntk_type>
   sig_type compare_op(const comparator_input_signal<sig_type> &,
                       const comparator_input_signal<sig_type> &,
                       const bool &, const bool &,
                       ntk_type &);
+
   template<typename sig_type, typename ntk_type>
   void match_bit_width_by_sign_extension(const comparator_input_signal<sig_type> &,
                                          const comparator_input_signal<sig_type> &,
                                          comparator_input_signal<sig_type> &,
                                          comparator_input_signal<sig_type> &,
                                          ntk_type &);
-  void mapping_logic_cell_lg2mock(mockturtle::mig_network::signal (mockturtle::mig_network::*)(std::vector<mockturtle::mig_network::signal> const &),
-                                  mockturtle::mig_network &, const Node &, const unsigned int &);
+
+  template<typename sig_type, typename ntk_type>
+  void mapping_logic_cell_lg2mock(sig_type (ntk_type::*)(std::vector<sig_type> const &),
+                                  ntk_type &, const Node &, const unsigned int &);
+
   void mapping_comparison_cell_lg2mock(const bool &, const bool &, mockturtle::mig_network &, const Node &, const unsigned int &);
   void mapping_shift_cell_lg2mock(const bool &, const bool &, mockturtle::mig_network &, const Node &, const unsigned int &);
   void mapping_dynamic_shift_cell_lg2mock(const bool &, mockturtle::mig_network &, const Node &, const unsigned int &);
