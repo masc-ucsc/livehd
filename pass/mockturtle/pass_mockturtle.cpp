@@ -400,7 +400,7 @@ sig_type Pass_mockturtle::compare_op(const comparator_input_signal<sig_type> &l_
 //mapping it's both input and output LGraph edges to mig signals
 template<typename ntk_type>
 void Pass_mockturtle::mapping_comparison_cell_lg2mock(const bool &lt_op, const bool &eq_op,
-                                                      ntk_type &mig_ntk, const Node &node,
+                                                      ntk_type &mock_ntk, const Node &node,
                                                       const unsigned int &group_id)
 {
   //mapping input edge to input signal
@@ -410,7 +410,7 @@ void Pass_mockturtle::mapping_comparison_cell_lg2mock(const bool &lt_op, const b
   for (const auto &in_edge : node.inp_edges()) {
     fmt::print("input_bit_width:{}\n",in_edge.get_bits());
     comparator_input_signal<typename ntk_type::signal> inp_sig;
-    setup_input_signal(group_id, in_edge, inp_sig.signals, mig_ntk);
+    setup_input_signal(group_id, in_edge, inp_sig.signals, mock_ntk);
     if (node.get_type().is_input_signed(in_edge.sink.get_pid())) {
       inp_sig.is_signed = true;
     } else {
@@ -427,20 +427,20 @@ void Pass_mockturtle::mapping_comparison_cell_lg2mock(const bool &lt_op, const b
   I(right_operant_sigs.size() >= 1);
   //creating output signal
   if (left_operant_sigs.size() == 1 && right_operant_sigs.size() == 1) {
-    out_sig.emplace_back(compare_op(left_operant_sigs[0], right_operant_sigs[0], lt_op, eq_op, mig_ntk));
+    out_sig.emplace_back(compare_op(left_operant_sigs[0], right_operant_sigs[0], lt_op, eq_op, mock_ntk));
   }
   else {
     for (const auto &l_op : left_operant_sigs) {
       for (const auto &r_op : right_operant_sigs) {
-        med_sig.emplace_back(compare_op(l_op, r_op, lt_op, eq_op, mig_ntk));
+        med_sig.emplace_back(compare_op(l_op, r_op, lt_op, eq_op, mock_ntk));
       }
     }
-    out_sig.emplace_back(mig_ntk.create_nary_and(med_sig));
+    out_sig.emplace_back(mock_ntk.create_nary_and(med_sig));
   }
   //processing output signal
   for (const auto &out_edge : node.out_edges()) {
     I(out_edge.get_bits()==1);
-    setup_output_signal(group_id, out_edge, out_sig, mig_ntk);
+    setup_output_signal(group_id, out_edge, out_sig, mock_ntk);
   }
 }
 
@@ -448,12 +448,12 @@ template<typename sig_type, typename ntk_type>
 void Pass_mockturtle::shift_op(const std::vector<sig_type> &opr,
                                const bool &is_shift_right, const bool &is_signed,
                                const long unsigned int &shift_bits,
-                               std::vector<sig_type> &res, ntk_type &mig) {
+                               std::vector<sig_type> &res, ntk_type &net) {
   I(opr.size() != 0);
   I(res.size() == 0);
   sig_type signed_bit = is_signed
                       ? opr[opr.size() - 1]
-                      : mig.get_constant(false);
+                      : net.get_constant(false);
   long unsigned int start_point = shift_bits;
   if (is_shift_right) {
     while (start_point < opr.size()) {
@@ -465,7 +465,7 @@ void Pass_mockturtle::shift_op(const std::vector<sig_type> &opr,
     }
   } else {
     for (long unsigned int i = 0; i < start_point; i++) {
-      res.emplace_back(mig.get_constant(false));
+      res.emplace_back(net.get_constant(false));
     }
     while (res.size() < opr.size()) {
       res.emplace_back(opr[start_point]);
@@ -518,7 +518,7 @@ void Pass_mockturtle::create_n_bit_k_input_mux(std::vector<std::vector<sig_type>
 
 template<typename ntk_type>
 void Pass_mockturtle::mapping_shift_cell_lg2mock(const bool &is_shift_right, const bool &sign_ext,
-                                                 ntk_type &mig_ntk, const Node &node,
+                                                 ntk_type &mock_ntk, const Node &node,
                                                  const unsigned int &group_id)
 {
   XEdge opr_A_edge = node.inp_edges()[0].sink.get_pid() == 0
@@ -532,29 +532,29 @@ void Pass_mockturtle::mapping_shift_cell_lg2mock(const bool &is_shift_right, con
   //processing input signal
   //fmt::print("opr_A_bit_width:{}\n",opr_A_edge.get_bits());
   //fmt::print("opr_B_bit_width:{}\n",opr_B_edge.get_bits());
-  setup_input_signal(group_id, opr_A_edge, opr_A_sig, mig_ntk);
+  setup_input_signal(group_id, opr_A_edge, opr_A_sig, mock_ntk);
   if (opr_B_edge.driver.get_node().get_type().op == U32Const_Op) {
     //creating output signal for const shift
     uint32_t offset = opr_B_edge.driver.get_node().get_type_const_value();
-    shift_op(opr_A_sig, is_shift_right, sign_ext, offset, out_sig, mig_ntk);
+    shift_op(opr_A_sig, is_shift_right, sign_ext, offset, out_sig, mock_ntk);
   } else {
     std::vector<typename ntk_type::signal> opr_B_sig, temp_out;
     std::vector<std::vector<typename ntk_type::signal>> out_enum;
     I(opr_B_edge.get_bits() != 0);
-    setup_input_signal(group_id, opr_B_edge, opr_B_sig, mig_ntk);
+    setup_input_signal(group_id, opr_B_edge, opr_B_sig, mock_ntk);
     for (long unsigned int ofs = 0; ofs < (long unsigned int)(1<<opr_B_sig.size()); ofs++) {
       temp_out.clear();
-      shift_op(opr_A_sig, is_shift_right, sign_ext, ofs, temp_out, mig_ntk);
+      shift_op(opr_A_sig, is_shift_right, sign_ext, ofs, temp_out, mock_ntk);
       out_enum.emplace_back(temp_out);
     }
     //using B to select output (mux)
     //create a mux
-    create_n_bit_k_input_mux(out_enum, opr_B_sig, out_sig, mig_ntk);
+    create_n_bit_k_input_mux(out_enum, opr_B_sig, out_sig, mock_ntk);
   }
   //processing output signal
   for (const auto &out_edge : node.out_edges()) {
     I(out_edge.get_bits() == out_sig.size());
-    setup_output_signal(group_id, out_edge, out_sig, mig_ntk);
+    setup_output_signal(group_id, out_edge, out_sig, mock_ntk);
   }
 }
 
@@ -588,7 +588,7 @@ void Pass_mockturtle::complement_to_SMR(std::vector<sig_type> const &complement_
 
 template<typename ntk_type>
 void Pass_mockturtle::mapping_dynamic_shift_cell_lg2mock(const bool &is_shift_right,
-                                                         ntk_type &mig_ntk,
+                                                         ntk_type &mock_ntk,
                                                          const Node &node, const unsigned int &group_id)
 {
   XEdge opr_A_edge = node.inp_edges()[0].sink.get_pid() == 0
@@ -601,45 +601,45 @@ void Pass_mockturtle::mapping_dynamic_shift_cell_lg2mock(const bool &is_shift_ri
   //processing input signal
   //fmt::print("opr_A_bit_width:{}\n",opr_A_edge.get_bits());
   //fmt::print("opr_B_bit_width:{}\n",opr_B_edge.get_bits());
-  setup_input_signal(group_id, opr_A_edge, opr_A_sig, mig_ntk);
+  setup_input_signal(group_id, opr_A_edge, opr_A_sig, mock_ntk);
   if (opr_B_edge.driver.get_node().get_type().op == U32Const_Op) {
     //creating output signal for const shift
     uint32_t ofs;
     bool is_negative;
     converting_uint32_to_signed_SMR(opr_B_edge.driver.get_node().get_type_const_value(), ofs, is_negative);
     if (is_negative) {
-      shift_op(opr_A_sig, !is_shift_right, false, ofs, out_sig, mig_ntk);
+      shift_op(opr_A_sig, !is_shift_right, false, ofs, out_sig, mock_ntk);
     } else {
-      shift_op(opr_A_sig, is_shift_right, false, ofs, out_sig, mig_ntk);
+      shift_op(opr_A_sig, is_shift_right, false, ofs, out_sig, mock_ntk);
     }
   } else {
     std::vector<typename ntk_type::signal> opr_B_sig, temp_out, opr_B_SMR_sig;
     std::vector<typename ntk_type::signal> ofs_sel, sign_sel, out_shr_sig, out_shl_sig;
     std::vector<std::vector<typename ntk_type::signal>> out_shr_enum, out_shl_enum, out_enum;
     I(opr_B_edge.get_bits() != 0);
-    setup_input_signal(group_id, opr_B_edge, opr_B_sig, mig_ntk);
+    setup_input_signal(group_id, opr_B_edge, opr_B_sig, mock_ntk);
     for (long unsigned int ofs = 0; ofs < (long unsigned int)(1<<opr_B_sig.size()); ofs++) {
       temp_out.clear();
-      shift_op(opr_A_sig, is_shift_right, false, ofs, temp_out, mig_ntk);
+      shift_op(opr_A_sig, is_shift_right, false, ofs, temp_out, mock_ntk);
       out_shr_enum.emplace_back(temp_out);
       temp_out.clear();
-      shift_op(opr_A_sig, !is_shift_right, false, ofs, temp_out, mig_ntk);
+      shift_op(opr_A_sig, !is_shift_right, false, ofs, temp_out, mock_ntk);
       out_shl_enum.emplace_back(temp_out);
     }
-    complement_to_SMR(opr_B_sig, opr_B_SMR_sig, mig_ntk);
+    complement_to_SMR(opr_B_sig, opr_B_SMR_sig, mock_ntk);
     sign_sel.emplace_back(opr_B_SMR_sig[opr_B_SMR_sig.size()-1]);
     ofs_sel = opr_B_SMR_sig;
     ofs_sel.pop_back();
-    create_n_bit_k_input_mux(out_shr_enum, ofs_sel, out_shr_sig, mig_ntk);
-    create_n_bit_k_input_mux(out_shl_enum, ofs_sel, out_shl_sig, mig_ntk);
+    create_n_bit_k_input_mux(out_shr_enum, ofs_sel, out_shr_sig, mock_ntk);
+    create_n_bit_k_input_mux(out_shl_enum, ofs_sel, out_shl_sig, mock_ntk);
     out_enum.emplace_back(out_shr_sig);
     out_enum.emplace_back(out_shl_sig);
-    create_n_bit_k_input_mux(out_enum, sign_sel, out_sig, mig_ntk);
+    create_n_bit_k_input_mux(out_enum, sign_sel, out_sig, mock_ntk);
   }
   //processing output signal
   for (const auto &out_edge : node.out_edges()) {
     I(out_edge.get_bits() == out_sig.size());
-    setup_output_signal(group_id, out_edge, out_sig, mig_ntk);
+    setup_output_signal(group_id, out_edge, out_sig, mock_ntk);
   }
 }
 
