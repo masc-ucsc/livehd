@@ -96,10 +96,11 @@ void Pass_mockturtle::dfs_populate_gid(Node node, const unsigned int group_id) {
   }
 }
 
+template<typename sig_type, typename ntk_type>
 void Pass_mockturtle::setup_input_signal(const unsigned int &group_id,
                                          const XEdge &input_edge,
-                                         std::vector<mockturtle::mig_network::signal> &input_signal,
-                                         mockturtle::mig_network &mig)
+                                         std::vector<sig_type> &input_signal,
+                                         ntk_type &mig)
 {
   //check if this input edge is already in the output mapping table
   //then setup the input signal accordingly
@@ -122,10 +123,11 @@ void Pass_mockturtle::setup_input_signal(const unsigned int &group_id,
   }
 }
 
+template<typename sig_type, typename ntk_type>
 void Pass_mockturtle::setup_output_signal(const unsigned int &group_id,
                                           const XEdge &output_edge,
-                                          std::vector<mockturtle::mig_network::signal> &output_signal,
-                                          mockturtle::mig_network &mig)
+                                          std::vector<sig_type> &output_signal,
+                                          ntk_type &mig)
 {
   //check if the output edge is already in the input mapping table
   //then setup/update the output/input table
@@ -133,7 +135,7 @@ void Pass_mockturtle::setup_output_signal(const unsigned int &group_id,
     I(group_id == edge2signal_mock[output_edge].gid);
     I(output_edge.get_bits() == edge2signal_mock[output_edge].signals.size());
     for (auto i = 0; i < output_edge.get_bits(); i++) {
-      mockturtle::mig_network::node old_node = mig.get_node(edge2signal_mock[output_edge].signals[i]);
+      typename ntk_type::node old_node = mig.get_node(edge2signal_mock[output_edge].signals[i]);
       mig.substitute_node(old_node,output_signal[i]);
       mig.take_out_node(old_node);
     }
@@ -145,8 +147,9 @@ void Pass_mockturtle::setup_output_signal(const unsigned int &group_id,
 }
 
 //split the input signal by bits
-void Pass_mockturtle::split_input_signal(const std::vector<mockturtle::mig_network::signal> &input_signal,
-                                         std::vector<std::vector<mockturtle::mig_network::signal>> &splitted_input_signal)
+template<typename signal>
+void Pass_mockturtle::split_input_signal(const std::vector<signal> &input_signal,
+                                         std::vector<std::vector<signal>> &splitted_input_signal)
 {
   for (long unsigned int i = 0; i < input_signal.size(); i++) {
     if (splitted_input_signal.size()<=i) {
