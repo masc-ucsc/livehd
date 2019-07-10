@@ -157,11 +157,12 @@ void Pass_mockturtle::split_input_signal(const std::vector<mockturtle::mig_netwo
 }
 
 //extend sign bit so that the bit width of two signals matches each other
-void Pass_mockturtle::match_bit_width_by_sign_extension(const comparator_input_signal<mockturtle::mig_network::signal> &sig1,
-                                                        const comparator_input_signal<mockturtle::mig_network::signal> &sig2,
-                                                        comparator_input_signal<mockturtle::mig_network::signal> &new_sig1,
-                                                        comparator_input_signal<mockturtle::mig_network::signal> &new_sig2,
-                                                        mockturtle::mig_network &net)
+template<typename sig_type, typename ntk_type>
+void Pass_mockturtle::match_bit_width_by_sign_extension(const comparator_input_signal<sig_type> &sig1,
+                                                        const comparator_input_signal<sig_type> &sig2,
+                                                        comparator_input_signal<sig_type> &new_sig1,
+                                                        comparator_input_signal<sig_type> &new_sig2,
+                                                        ntk_type &net)
 {
   const long unsigned int &sig1_bit_width = sig1.signals.size();
   const long unsigned int &sig2_bit_width = sig2.signals.size();
@@ -209,8 +210,8 @@ void Pass_mockturtle::match_bit_width_by_sign_extension(const comparator_input_s
 //creating and mapping a logic-op LGraph node to a mig node
 //mapping it's both input and output LGraph edges to mig signals
 void Pass_mockturtle::mapping_logic_cell_lg2mock(mockturtle::mig_network::signal (mockturtle::mig_network::*create_nary_op)
-                                                                                (std::vector<mockturtle::mig_network::signal> const &),
-                                                mockturtle::mig_network &mig_ntk, const Node &node, const unsigned int &group_id)
+                                                                                 (std::vector<mockturtle::mig_network::signal> const &),
+                                                 mockturtle::mig_network &mig_ntk, const Node &node, const unsigned int &group_id)
 {
   //mapping input edge to input signal
   //out_sig_0: regular OP
@@ -266,13 +267,14 @@ void Pass_mockturtle::mapping_logic_cell_lg2mock(mockturtle::mig_network::signal
 //1. old_sign_bit += 1
 //2. new_sign_bit = input signal is signed? 0 : carry
 //3. out = new_sign_bit concatenated by input_signal
-void Pass_mockturtle::convert_signed_to_unsigned(const comparator_input_signal<mockturtle::mig_network::signal> &signed_signal,
-                                                 comparator_input_signal<mockturtle::mig_network::signal> &unsigned_signal,
-                                                 mockturtle::mig_network &mig)
+template<typename sig_type, typename ntk_type>
+void Pass_mockturtle::convert_signed_to_unsigned(const comparator_input_signal<sig_type> &signed_signal,
+                                                 comparator_input_signal<sig_type> &unsigned_signal,
+                                                 ntk_type &mig)
 {
   I(signed_signal.signals.size() >= 1);
   const auto old_sign_bit = signed_signal.signals[signed_signal.signals.size()-1];
-  mockturtle::mig_network::signal sum, carry, new_sign_bit;
+  sig_type sum, carry, new_sign_bit;
 
   create_half_adder(old_sign_bit, mig.get_constant(true), sum, carry, mig);
   if (signed_signal.is_signed) {
@@ -290,23 +292,24 @@ void Pass_mockturtle::convert_signed_to_unsigned(const comparator_input_signal<m
 
 //(A[i]==B[i]) = X[i] = A[i]B[i] + A[i]'B[i]' = XNOR(A[i], B[i])
 //(A==B) = X[n]X[n-1]X[n-2]...X[2]X[1]X[0]
-mockturtle::mig_network::signal Pass_mockturtle::is_equal_op(const comparator_input_signal<mockturtle::mig_network::signal> &l_op,
-                                                             const comparator_input_signal<mockturtle::mig_network::signal> &r_op,
-                                                             mockturtle::mig_network &mig)
+template<typename sig_type, typename ntk_type>
+sig_type Pass_mockturtle::is_equal_op(const comparator_input_signal<sig_type> &l_op,
+                                      const comparator_input_signal<sig_type> &r_op,
+                                      ntk_type &mig)
 {
-  comparator_input_signal<mockturtle::mig_network::signal> l_op_ext, r_op_ext;
+  comparator_input_signal<sig_type> l_op_ext, r_op_ext;
   match_bit_width_by_sign_extension(l_op, r_op, l_op_ext, r_op_ext, mig);
   I(l_op_ext.signals.size() == r_op_ext.signals.size());
 
-  comparator_input_signal<mockturtle::mig_network::signal> left_op, right_op;
+  comparator_input_signal<sig_type> left_op, right_op;
   convert_signed_to_unsigned(l_op_ext, left_op, mig);
   convert_signed_to_unsigned(r_op_ext, right_op, mig);
   I(left_op.signals.size() == right_op.signals.size());
   I(left_op.is_signed == false && right_op.is_signed == false);
   //create is_equal signal for each bit
   const auto bit_width = left_op.signals.size();
-  mockturtle::mig_network::signal output;
-  std::vector<mockturtle::mig_network::signal> xor_bit_sigs;
+  sig_type output;
+  std::vector<sig_type> xor_bit_sigs;
   for (long unsigned int i = 0; i < bit_width; i++) {
     xor_bit_sigs.emplace_back(mig.create_xor(left_op.signals[i], right_op.signals[i]));
   }
@@ -337,35 +340,32 @@ mockturtle::mig_network::signal Pass_mockturtle::is_equal_op(const comparator_in
 //          X[n]X[n-1]X[n-2]X[n-3]G[n-4]
 //          + ... +
 //          X[n]X[n-1]X[n-2]...X[3]X[2]X[1]G[0]
-mockturtle::mig_network::signal Pass_mockturtle::compare_op(const comparator_input_signal<mockturtle::mig_network::signal> &l_op,
-                                                            const comparator_input_signal<mockturtle::mig_network::signal> &r_op,
-                                                            const bool &lt_op,
-                                                            const bool &eq_op,
-                                                            mockturtle::mig_network &mig)
+template<typename sig_type, typename ntk_type>
+sig_type Pass_mockturtle::compare_op(const comparator_input_signal<sig_type> &l_op,
+                                     const comparator_input_signal<sig_type> &r_op,
+                                     const bool &lt_op, const bool &eq_op,
+                                     ntk_type &mig)
 {
-  comparator_input_signal<mockturtle::mig_network::signal> l_op_ext, r_op_ext;
+  comparator_input_signal<sig_type> l_op_ext, r_op_ext;
   match_bit_width_by_sign_extension(l_op, r_op, l_op_ext, r_op_ext, mig);
   I(l_op_ext.signals.size() == r_op_ext.signals.size());
 
-  comparator_input_signal<mockturtle::mig_network::signal> left_op, right_op;
+  comparator_input_signal<sig_type> left_op, right_op;
   convert_signed_to_unsigned(l_op_ext, left_op, mig);
   convert_signed_to_unsigned(r_op_ext, right_op, mig);
   I(left_op.signals.size() == right_op.signals.size());
   I(left_op.is_signed == false && right_op.is_signed == false);
 
   const auto bit_width = left_op.signals.size();
-  mockturtle::mig_network::signal output;
-  std::vector<mockturtle::mig_network::signal> is_equal_bit_sigs, comp_op_bit_sigs, res, kth_term;
+  sig_type output;
+  std::vector<sig_type> is_equal_bit_sigs, comp_op_bit_sigs, res, kth_term;
 
   //create X[i] and L[i] = A[i]'B[i] for LessThan and GreaterEqualThan
   //create X[i] and G[i] = A[i]B[i]' for GreaterThan and LessEqualThan
-  mockturtle::mig_network::signal
-    (Pass_mockturtle::*comp_op) (const mockturtle::mig_network::signal&,
-                                 const mockturtle::mig_network::signal&,
-                                 mockturtle::mig_network&) =
-    ((lt_op && !eq_op) || (!lt_op && eq_op))
-      ? &Pass_mockturtle::create_lt<mockturtle::mig_network::signal, mockturtle::mig_network>
-      : &Pass_mockturtle::create_gt<mockturtle::mig_network::signal, mockturtle::mig_network>;
+  sig_type (Pass_mockturtle::*comp_op) (const sig_type &, const sig_type &, ntk_type &)
+    = ((lt_op && !eq_op) || (!lt_op && eq_op))
+      ? &Pass_mockturtle::create_lt<sig_type, ntk_type>
+      : &Pass_mockturtle::create_gt<sig_type, ntk_type>;
 
   for (long unsigned int i = 0; i < bit_width; i++) {
     is_equal_bit_sigs.emplace_back(mig.create_not(mig.create_xor(left_op.signals[i], right_op.signals[i])));

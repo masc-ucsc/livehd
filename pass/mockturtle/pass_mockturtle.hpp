@@ -84,7 +84,8 @@ protected:
   void setup_input_signal(const unsigned int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
   void setup_output_signal(const unsigned int &, const XEdge &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
   void split_input_signal(const std::vector<mockturtle::mig_network::signal> &, std::vector<std::vector<mockturtle::mig_network::signal>> &);
-  void convert_signed_to_unsigned(const comparator_input_signal<mockturtle::mig_network::signal> &, comparator_input_signal<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
+  template<typename sig_type, typename ntk_type>
+  void convert_signed_to_unsigned(const comparator_input_signal<sig_type> &, comparator_input_signal<sig_type> &, ntk_type &);
   void complement_to_SMR(std::vector<mockturtle::mig_network::signal> const &, std::vector<mockturtle::mig_network::signal> &, mockturtle::mig_network &);
 
   void shift_op(std::vector<mockturtle::mig_network::signal> &,
@@ -95,33 +96,36 @@ protected:
                                 std::vector<mockturtle::mig_network::signal> const &,
                                 std::vector<mockturtle::mig_network::signal> &,
                                 mockturtle::mig_network &);
-  mockturtle::mig_network::signal is_equal_op(const comparator_input_signal<mockturtle::mig_network::signal> &,
-                                              const comparator_input_signal<mockturtle::mig_network::signal> &,
-                                              mockturtle::mig_network &);
-  mockturtle::mig_network::signal compare_op(const comparator_input_signal<mockturtle::mig_network::signal> &,
-                                             const comparator_input_signal<mockturtle::mig_network::signal> &,
-                                             const bool &, const bool &,
-                                             mockturtle::mig_network &);
-  void match_bit_width_by_sign_extension(const comparator_input_signal<mockturtle::mig_network::signal> &,
-                                         const comparator_input_signal<mockturtle::mig_network::signal> &,
-                                         comparator_input_signal<mockturtle::mig_network::signal> &,
-                                         comparator_input_signal<mockturtle::mig_network::signal> &,
-                                         mockturtle::mig_network &);
+  template<typename sig_type, typename ntk_type>
+  sig_type is_equal_op(const comparator_input_signal<sig_type> &,
+                       const comparator_input_signal<sig_type> &,
+                       ntk_type &);
+  template<typename sig_type, typename ntk_type>
+  sig_type compare_op(const comparator_input_signal<sig_type> &,
+                      const comparator_input_signal<sig_type> &,
+                      const bool &, const bool &,
+                      ntk_type &);
+  template<typename sig_type, typename ntk_type>
+  void match_bit_width_by_sign_extension(const comparator_input_signal<sig_type> &,
+                                         const comparator_input_signal<sig_type> &,
+                                         comparator_input_signal<sig_type> &,
+                                         comparator_input_signal<sig_type> &,
+                                         ntk_type &);
   void mapping_logic_cell_lg2mock(mockturtle::mig_network::signal (mockturtle::mig_network::*)(std::vector<mockturtle::mig_network::signal> const &),
-                                 mockturtle::mig_network &, const Node &, const unsigned int &);
+                                  mockturtle::mig_network &, const Node &, const unsigned int &);
   void mapping_comparison_cell_lg2mock(const bool &, const bool &, mockturtle::mig_network &, const Node &, const unsigned int &);
   void mapping_shift_cell_lg2mock(const bool &, const bool &, mockturtle::mig_network &, const Node &, const unsigned int &);
   void mapping_dynamic_shift_cell_lg2mock(const bool &, mockturtle::mig_network &, const Node &, const unsigned int &);
   void connect_complemented_signal(LGraph *, Node_pin &, Node_pin &, const mockturtle::klut_network &, const mockturtle::klut_network::signal &);
 
-  template<typename signal, typename Ntk>
-  void create_half_adder(const signal &x, const signal &y, signal &s, signal &c, Ntk &net) {
+  template<typename signal, typename ntk>
+  void create_half_adder(const signal &x, const signal &y, signal &s, signal &c, ntk &net) {
     s = net.create_xor(x, y);
     c = net.create_and(x, y);
   }
 
-  template<typename signal, typename Ntk>
-  void create_full_adder(const signal &a, const signal &b, const signal &c_in, signal &s, signal &c_out, Ntk &net) {
+  template<typename signal, typename ntk>
+  void create_full_adder(const signal &a, const signal &b, const signal &c_in, signal &s, signal &c_out, ntk &net) {
     signal a_xor_b = net.create_xor(a, b);
     signal a_and_b = net.create_and(a, b);
     signal axorb_and_cin = net.create_and(a_xor_b, c_in);
@@ -129,13 +133,13 @@ protected:
     s = net.create_xor(a_xor_b, c_in);
   }
 
-  template<typename signal, typename Ntk>
-  signal create_lt(const signal &x, const signal &y, Ntk &net) {
+  template<typename signal, typename ntk>
+  signal create_lt(const signal &x, const signal &y, ntk &net) {
     return net.create_lt(x, y);
   }
 
-  template<typename signal, typename Ntk>
-  signal create_gt(const signal &x, const signal &y, Ntk &net) {
+  template<typename signal, typename ntk>
+  signal create_gt(const signal &x, const signal &y, ntk &net) {
     return net.create_lt(y, x);
   }
 
