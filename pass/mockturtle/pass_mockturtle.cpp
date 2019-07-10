@@ -270,15 +270,15 @@ void Pass_mockturtle::mapping_logic_cell_lg2mock(sig_type (ntk_type::*create_nar
 template<typename sig_type, typename ntk_type>
 void Pass_mockturtle::convert_signed_to_unsigned(const comparator_input_signal<sig_type> &signed_signal,
                                                  comparator_input_signal<sig_type> &unsigned_signal,
-                                                 ntk_type &mig)
+                                                 ntk_type &net)
 {
   I(signed_signal.signals.size() >= 1);
   const auto old_sign_bit = signed_signal.signals[signed_signal.signals.size()-1];
   sig_type sum, carry, new_sign_bit;
 
-  create_half_adder(old_sign_bit, mig.get_constant(true), sum, carry, mig);
+  create_half_adder(old_sign_bit, net.get_constant(true), sum, carry, net);
   if (signed_signal.is_signed) {
-    new_sign_bit = mig.get_constant(false);
+    new_sign_bit = net.get_constant(false);
   } else {
     new_sign_bit = carry;
   }
@@ -295,15 +295,15 @@ void Pass_mockturtle::convert_signed_to_unsigned(const comparator_input_signal<s
 template<typename sig_type, typename ntk_type>
 sig_type Pass_mockturtle::is_equal_op(const comparator_input_signal<sig_type> &l_op,
                                       const comparator_input_signal<sig_type> &r_op,
-                                      ntk_type &mig)
+                                      ntk_type &net)
 {
   comparator_input_signal<sig_type> l_op_ext, r_op_ext;
-  match_bit_width_by_sign_extension(l_op, r_op, l_op_ext, r_op_ext, mig);
+  match_bit_width_by_sign_extension(l_op, r_op, l_op_ext, r_op_ext, net);
   I(l_op_ext.signals.size() == r_op_ext.signals.size());
 
   comparator_input_signal<sig_type> left_op, right_op;
-  convert_signed_to_unsigned(l_op_ext, left_op, mig);
-  convert_signed_to_unsigned(r_op_ext, right_op, mig);
+  convert_signed_to_unsigned(l_op_ext, left_op, net);
+  convert_signed_to_unsigned(r_op_ext, right_op, net);
   I(left_op.signals.size() == right_op.signals.size());
   I(left_op.is_signed == false && right_op.is_signed == false);
   //create is_equal signal for each bit
@@ -311,16 +311,16 @@ sig_type Pass_mockturtle::is_equal_op(const comparator_input_signal<sig_type> &l
   sig_type output;
   std::vector<sig_type> xor_bit_sigs;
   for (long unsigned int i = 0; i < bit_width; i++) {
-    xor_bit_sigs.emplace_back(mig.create_xor(left_op.signals[i], right_op.signals[i]));
+    xor_bit_sigs.emplace_back(net.create_xor(left_op.signals[i], right_op.signals[i]));
   }
   //create the final result
   if (xor_bit_sigs.size() == 1){
     output = xor_bit_sigs[0];
   } else {
-    output = mig.create_nary_or(xor_bit_sigs);
+    output = net.create_nary_or(xor_bit_sigs);
   }
 
-  return mig.create_not(output);
+  return net.create_not(output);
 }
 
 //(A[i]==B[i]) = X[i] = A[i]B[i] + A[i]'B[i]' = XNOR(A[i], B[i])
@@ -344,15 +344,15 @@ template<typename sig_type, typename ntk_type>
 sig_type Pass_mockturtle::compare_op(const comparator_input_signal<sig_type> &l_op,
                                      const comparator_input_signal<sig_type> &r_op,
                                      const bool &lt_op, const bool &eq_op,
-                                     ntk_type &mig)
+                                     ntk_type &net)
 {
   comparator_input_signal<sig_type> l_op_ext, r_op_ext;
-  match_bit_width_by_sign_extension(l_op, r_op, l_op_ext, r_op_ext, mig);
+  match_bit_width_by_sign_extension(l_op, r_op, l_op_ext, r_op_ext, net);
   I(l_op_ext.signals.size() == r_op_ext.signals.size());
 
   comparator_input_signal<sig_type> left_op, right_op;
-  convert_signed_to_unsigned(l_op_ext, left_op, mig);
-  convert_signed_to_unsigned(r_op_ext, right_op, mig);
+  convert_signed_to_unsigned(l_op_ext, left_op, net);
+  convert_signed_to_unsigned(r_op_ext, right_op, net);
   I(left_op.signals.size() == right_op.signals.size());
   I(left_op.is_signed == false && right_op.is_signed == false);
 
@@ -368,8 +368,8 @@ sig_type Pass_mockturtle::compare_op(const comparator_input_signal<sig_type> &l_
       : &Pass_mockturtle::create_gt<sig_type, ntk_type>;
 
   for (long unsigned int i = 0; i < bit_width; i++) {
-    is_equal_bit_sigs.emplace_back(mig.create_not(mig.create_xor(left_op.signals[i], right_op.signals[i])));
-    comp_op_bit_sigs.emplace_back((this->*comp_op)(left_op.signals[i], right_op.signals[i], mig));
+    is_equal_bit_sigs.emplace_back(net.create_not(net.create_xor(left_op.signals[i], right_op.signals[i])));
+    comp_op_bit_sigs.emplace_back((this->*comp_op)(left_op.signals[i], right_op.signals[i], net));
   }
 
   //create each term and push to res
@@ -382,15 +382,15 @@ sig_type Pass_mockturtle::compare_op(const comparator_input_signal<sig_type> &l_
     if (kth_term.size() == 1) {
       res.emplace_back(kth_term[0]);
     } else {
-      res.emplace_back(mig.create_nary_and(kth_term));
+      res.emplace_back(net.create_nary_and(kth_term));
     }
   }
 
   //create the final comparison result
   if (res.size() == 1) {
-    output = eq_op? mig.create_not(res[0]) : res[0];
+    output = eq_op? net.create_not(res[0]) : res[0];
   } else {
-    output = eq_op? mig.create_not(mig.create_nary_or(res)) : mig.create_nary_or(res);
+    output = eq_op? net.create_not(net.create_nary_or(res)) : net.create_nary_or(res);
   }
 
   return output;
