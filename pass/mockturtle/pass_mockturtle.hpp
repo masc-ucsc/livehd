@@ -126,9 +126,15 @@ protected:
   void mapping_logic_cell_lg2mock(sig_type (ntk_type::*)(std::vector<sig_type> const &),
                                   ntk_type &, const Node &, const unsigned int &);
 
-  void mapping_comparison_cell_lg2mock(const bool &, const bool &, mockturtle::mig_network &, const Node &, const unsigned int &);
-  void mapping_shift_cell_lg2mock(const bool &, const bool &, mockturtle::mig_network &, const Node &, const unsigned int &);
-  void mapping_dynamic_shift_cell_lg2mock(const bool &, mockturtle::mig_network &, const Node &, const unsigned int &);
+  template<typename ntk_type>
+  void mapping_comparison_cell_lg2mock(const bool &, const bool &, ntk_type &, const Node &, const unsigned int &);
+
+  template<typename ntk_type>
+  void mapping_shift_cell_lg2mock(const bool &, const bool &, ntk_type &, const Node &, const unsigned int &);
+
+  template<typename ntk_type>
+  void mapping_dynamic_shift_cell_lg2mock(const bool &, ntk_type &, const Node &, const unsigned int &);
+
   void connect_complemented_signal(LGraph *, Node_pin &, Node_pin &, const mockturtle::klut_network &, const mockturtle::klut_network::signal &);
 
   template<typename signal, typename ntk>
@@ -137,11 +143,11 @@ protected:
     c = net.create_and(x, y);
   }
 
-  template<typename signal, typename ntk>
-  void create_full_adder(const signal &a, const signal &b, const signal &c_in, signal &s, signal &c_out, ntk &net) {
-    signal a_xor_b = net.create_xor(a, b);
-    signal a_and_b = net.create_and(a, b);
-    signal axorb_and_cin = net.create_and(a_xor_b, c_in);
+  template<typename ntk>
+  void create_full_adder(const typename ntk::signal &a, const typename ntk::signal &b, const typename ntk::signal &c_in, typename ntk::signal &s, typename ntk::signal &c_out, ntk &net) {
+    typename ntk::signal a_xor_b = net.create_xor(a, b);
+    typename ntk::signal a_and_b = net.create_and(a, b);
+    typename ntk::signal axorb_and_cin = net.create_and(a_xor_b, c_in);
     c_out = net.create_or(a_and_b, axorb_and_cin);
     s = net.create_xor(a_xor_b, c_in);
   }

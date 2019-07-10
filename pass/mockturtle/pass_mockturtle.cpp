@@ -398,17 +398,18 @@ sig_type Pass_mockturtle::compare_op(const comparator_input_signal<sig_type> &l_
 
 //creating and mapping a compare-op LGraph node to a mig node
 //mapping it's both input and output LGraph edges to mig signals
+template<typename ntk_type>
 void Pass_mockturtle::mapping_comparison_cell_lg2mock(const bool &lt_op, const bool &eq_op,
-                                                      mockturtle::mig_network &mig_ntk, const Node &node,
+                                                      ntk_type &mig_ntk, const Node &node,
                                                       const unsigned int &group_id)
 {
   //mapping input edge to input signal
   //must differentiate between signed and unsigned input
-  std::vector<mockturtle::mig_network::signal> out_sig, med_sig;
-  std::vector<comparator_input_signal<mockturtle::mig_network::signal>> left_operant_sigs, right_operant_sigs;
+  std::vector<typename ntk_type::signal> out_sig, med_sig;
+  std::vector<comparator_input_signal<typename ntk_type::signal>> left_operant_sigs, right_operant_sigs;
   for (const auto &in_edge : node.inp_edges()) {
     fmt::print("input_bit_width:{}\n",in_edge.get_bits());
-    comparator_input_signal<mockturtle::mig_network::signal> inp_sig;
+    comparator_input_signal<typename ntk_type::signal> inp_sig;
     setup_input_signal(group_id, in_edge, inp_sig.signals, mig_ntk);
     if (node.get_type().is_input_signed(in_edge.sink.get_pid())) {
       inp_sig.is_signed = true;
@@ -515,9 +516,10 @@ void Pass_mockturtle::create_n_bit_k_input_mux(std::vector<std::vector<sig_type>
   }
 }
 
+template<typename ntk_type>
 void Pass_mockturtle::mapping_shift_cell_lg2mock(const bool &is_shift_right, const bool &sign_ext,
-                                                mockturtle::mig_network &mig_ntk,
-                                                const Node &node, const unsigned int &group_id)
+                                                 ntk_type &mig_ntk, const Node &node,
+                                                 const unsigned int &group_id)
 {
   XEdge opr_A_edge = node.inp_edges()[0].sink.get_pid() == 0
                      ? opr_A_edge = node.inp_edges()[0]
@@ -526,7 +528,7 @@ void Pass_mockturtle::mapping_shift_cell_lg2mock(const bool &is_shift_right, con
                      ? opr_B_edge = node.inp_edges()[0]
                      : opr_B_edge = node.inp_edges()[1];
 
-  std::vector<mockturtle::mig_network::signal> opr_A_sig, out_sig;
+  std::vector<typename ntk_type::signal> opr_A_sig, out_sig;
   //processing input signal
   //fmt::print("opr_A_bit_width:{}\n",opr_A_edge.get_bits());
   //fmt::print("opr_B_bit_width:{}\n",opr_B_edge.get_bits());
@@ -536,8 +538,8 @@ void Pass_mockturtle::mapping_shift_cell_lg2mock(const bool &is_shift_right, con
     uint32_t offset = opr_B_edge.driver.get_node().get_type_const_value();
     shift_op(opr_A_sig, is_shift_right, sign_ext, offset, out_sig, mig_ntk);
   } else {
-    std::vector<mockturtle::mig_network::signal> opr_B_sig, temp_out;
-    std::vector<std::vector<mockturtle::mig_network::signal>> out_enum;
+    std::vector<typename ntk_type::signal> opr_B_sig, temp_out;
+    std::vector<std::vector<typename ntk_type::signal>> out_enum;
     I(opr_B_edge.get_bits() != 0);
     setup_input_signal(group_id, opr_B_edge, opr_B_sig, mig_ntk);
     for (long unsigned int ofs = 0; ofs < (long unsigned int)(1<<opr_B_sig.size()); ofs++) {
@@ -584,9 +586,10 @@ void Pass_mockturtle::complement_to_SMR(std::vector<sig_type> const &complement_
   SMR_sig.emplace_back(sign_bit);
 }
 
+template<typename ntk_type>
 void Pass_mockturtle::mapping_dynamic_shift_cell_lg2mock(const bool &is_shift_right,
-                                                        mockturtle::mig_network &mig_ntk,
-                                                        const Node &node, const unsigned int &group_id)
+                                                         ntk_type &mig_ntk,
+                                                         const Node &node, const unsigned int &group_id)
 {
   XEdge opr_A_edge = node.inp_edges()[0].sink.get_pid() == 0
                      ? opr_A_edge = node.inp_edges()[0]
@@ -594,7 +597,7 @@ void Pass_mockturtle::mapping_dynamic_shift_cell_lg2mock(const bool &is_shift_ri
   XEdge opr_B_edge = node.inp_edges()[0].sink.get_pid() == 1
                      ? opr_B_edge = node.inp_edges()[0]
                      : opr_B_edge = node.inp_edges()[1];
-  std::vector<mockturtle::mig_network::signal> opr_A_sig, out_sig;
+  std::vector<typename ntk_type::signal> opr_A_sig, out_sig;
   //processing input signal
   //fmt::print("opr_A_bit_width:{}\n",opr_A_edge.get_bits());
   //fmt::print("opr_B_bit_width:{}\n",opr_B_edge.get_bits());
@@ -610,9 +613,9 @@ void Pass_mockturtle::mapping_dynamic_shift_cell_lg2mock(const bool &is_shift_ri
       shift_op(opr_A_sig, is_shift_right, false, ofs, out_sig, mig_ntk);
     }
   } else {
-    std::vector<mockturtle::mig_network::signal> opr_B_sig, temp_out, opr_B_SMR_sig;
-    std::vector<mockturtle::mig_network::signal> ofs_sel, sign_sel, out_shr_sig, out_shl_sig;
-    std::vector<std::vector<mockturtle::mig_network::signal>> out_shr_enum, out_shl_enum, out_enum;
+    std::vector<typename ntk_type::signal> opr_B_sig, temp_out, opr_B_SMR_sig;
+    std::vector<typename ntk_type::signal> ofs_sel, sign_sel, out_shr_sig, out_shl_sig;
+    std::vector<std::vector<typename ntk_type::signal>> out_shr_enum, out_shl_enum, out_enum;
     I(opr_B_edge.get_bits() != 0);
     setup_input_signal(group_id, opr_B_edge, opr_B_sig, mig_ntk);
     for (long unsigned int ofs = 0; ofs < (long unsigned int)(1<<opr_B_sig.size()); ofs++) {
