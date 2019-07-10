@@ -88,8 +88,16 @@ void Inou_cgen::do_tocfg() {
     std::string type = lnast_parser.ntype_dbg(node_data.type);
     auto node_scope = node_data.scope;
 
+/*
     fmt::print("tree index: K{} {}\n", it.pos, it.level);
-    fmt::print("node: {} {} {} {} {}\n\n", name, type, node_scope, node_data.knum, node_data.sbs);
+    fmt::print("node: n:{} t:{} s:{} k:{} b:{}\n\n", name, type, node_scope, node_data.knum, node_data.sbs);
+*/
+
+    if (name == "") {
+      fmt::print("\n{} ", type);
+    } else {
+      fmt::print("{} ", name);
+    }
 
     auto node = nodes.find(it.pos);
     if (node == nodes.end()) {
@@ -101,6 +109,7 @@ void Inou_cgen::do_tocfg() {
     }
   }
 
+  fmt::print("\nformal print:\n");
   for (auto const& node : nodes) {
     fmt::print("{} ", node.first);
     for (auto const& ele : node.second) {
