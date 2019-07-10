@@ -40,7 +40,6 @@
 #define BIT_WIDTH_THRESHOLD 2
 
 using mockturtle_network = mockturtle::mig_network;
-using mockturtle_signal = mockturtle::mig_network::signal;
 
 //NOTE: In a vector of signals, the LSB signal is represented by index[0]
 //while the MSB signal is represented by index[size()-1]
@@ -68,9 +67,9 @@ protected:
 
   absl::flat_hash_set<XEdge> input_edges, output_edges;
   absl::flat_hash_map<Node::Compact, unsigned int> node2gid;
-  absl::flat_hash_map<unsigned int, mockturtle::mig_network> gid2mock;
+  absl::flat_hash_map<unsigned int, mockturtle_network> gid2mock;
   absl::flat_hash_map<unsigned int, mockturtle::klut_network> gid2klut;
-  absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle::mig_network::signal>> edge2signal_mock;
+  absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle_network::signal>> edge2signal_mock;
   absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle::klut_network::signal>> edge2signal_klut;
   absl::flat_hash_map<Node::Compact, Node::Compact> old_node_to_new_node, new_node_to_old_node;
   absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::node>, Node::Compact> gidMTnode2LGnode;
@@ -81,6 +80,8 @@ protected:
   void create_mockturtle_network(LGraph *);
   void convert_mockturtle_to_KLUT(LGraph *);
   void create_lutified_lgraph(LGraph *);
+
+  void connect_complemented_signal(LGraph *, Node_pin &, Node_pin &, const mockturtle::klut_network &, const mockturtle::klut_network::signal &);
 
   template<typename sig_type, typename ntk_type>
   void setup_input_signal(const unsigned int &, const XEdge &, std::vector<sig_type> &, ntk_type &);
@@ -139,8 +140,6 @@ protected:
 
   template<typename ntk_type>
   void mapping_dynamic_shift_cell_lg2mock(const bool &, ntk_type &, const Node &, const unsigned int &);
-
-  void connect_complemented_signal(LGraph *, Node_pin &, Node_pin &, const mockturtle::klut_network &, const mockturtle::klut_network::signal &);
 
   template<typename signal, typename ntk>
   void create_half_adder(const signal &x, const signal &y, signal &s, signal &c, ntk &net) {

@@ -652,7 +652,7 @@ void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
       continue;
     unsigned int group_id = node2gid[node.get_compact()];
     if (gid2mock.find(group_id)==gid2mock.end())
-      gid2mock[group_id] = mockturtle::mig_network();
+      gid2mock[group_id] = mockturtle_network();
     auto &mig_ntk = gid2mock[group_id];
 
     switch (node.get_type().op) {
@@ -662,7 +662,7 @@ void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
         //Not_Op should only have single input edge
         I(node.inp_edges().size()==1 && node.out_edges().size()>0);
 
-        std::vector<mockturtle::mig_network::signal> inp_sig, out_sig;
+        std::vector<mockturtle_network::signal> inp_sig, out_sig;
         //processing input signal
         fmt::print("input_bit_width:{}\n",node.inp_edges()[0].get_bits());
         setup_input_signal(group_id, node.inp_edges()[0], inp_sig, mig_ntk);
@@ -683,21 +683,21 @@ void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
       case And_Op: {
         fmt::print("And_Op in gid:{}\n",group_id);
         I(node.inp_edges().size()>0 && node.out_edges().size()>0);
-        mapping_logic_cell_lg2mock(&mockturtle::mig_network::create_nary_and, mig_ntk, node, group_id);
+        mapping_logic_cell_lg2mock(&mockturtle_network::create_nary_and, mig_ntk, node, group_id);
         break;
       }
 
       case Or_Op: {
         fmt::print("Or_Op in gid:{}\n",group_id);
         I(node.inp_edges().size()>0 && node.out_edges().size()>0);
-        mapping_logic_cell_lg2mock(&mockturtle::mig_network::create_nary_or, mig_ntk, node, group_id);
+        mapping_logic_cell_lg2mock(&mockturtle_network::create_nary_or, mig_ntk, node, group_id);
         break;
       }
 
       case Xor_Op:
         fmt::print("Xor_Op in gid:{}\n",group_id);
         I(node.inp_edges().size()>0 && node.out_edges().size()>0);
-        mapping_logic_cell_lg2mock(&mockturtle::mig_network::create_nary_xor, mig_ntk, node, group_id);
+        mapping_logic_cell_lg2mock(&mockturtle_network::create_nary_xor, mig_ntk, node, group_id);
         break;
 
       case Equals_Op: {
@@ -705,11 +705,11 @@ void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
         I(node.inp_edges().size()>=2 && node.out_edges().size()>0);
         //mapping input edge to input signal
         //must differentiate between signed and unsigned input
-        std::vector<mockturtle::mig_network::signal> out_sig, med_sig;
-        std::vector<comparator_input_signal<mockturtle::mig_network::signal>> operant_sigs;
+        std::vector<mockturtle_network::signal> out_sig, med_sig;
+        std::vector<comparator_input_signal<mockturtle_network::signal>> operant_sigs;
         for (const auto &in_edge : node.inp_edges()) {
           fmt::print("input_bit_width:{}\n",in_edge.get_bits());
-          comparator_input_signal<mockturtle::mig_network::signal> inp_sig;
+          comparator_input_signal<mockturtle_network::signal> inp_sig;
           setup_input_signal(group_id, in_edge, inp_sig.signals, mig_ntk);
           if (node.get_type().is_input_signed(in_edge.sink.get_pid())) {
             inp_sig.is_signed = true;
