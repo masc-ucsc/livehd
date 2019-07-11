@@ -69,6 +69,7 @@ void Inou_cgen::tocfg(Eprp_var &var) {
 
   // lnast to cfg_text
   p.lnast_to_cfg_parser = new Lnast_to_cfg_parser(p.memblock, p.lnast);
+  p.lnast_to_cfg_parser->stringify();
 }
 
 std::string_view Inou_cgen::setup_memblock() {

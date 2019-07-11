@@ -57,4 +57,5 @@ public:
 
 private:
   std::string_view setup_memblock();
+  void do_tocfg();
 };
