@@ -6,6 +6,7 @@
 #include "lgraph.hpp"
 #include "pass.hpp"
 #include "lnast_parser.hpp"
+#include "lnast_to_cfg_parser.hpp"
 
 class Inou_cgen_options {
 public:
@@ -18,6 +19,7 @@ private:
   Inou_cgen_options opack;
   std::string_view memblock;
   Lnast_parser lnast_parser;
+  Lnast_to_cfg_parser *lnast_to_cfg_parser;
   Language_neutral_ast<Lnast_node> *lnast;
   typedef std::ostringstream Out_string;
 
@@ -55,5 +57,4 @@ public:
 
 private:
   std::string_view setup_memblock();
-  void do_tocfg();
 };

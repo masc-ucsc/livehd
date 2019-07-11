@@ -49,11 +49,6 @@ void Inou_cgen::fromlg(Eprp_var &var) {
 }
 
 void Inou_cgen::tocfg(Eprp_var &var) {
-  /*
-  error(fmt::format("method not created yet\n"));
-  I(false);
-  */
-
   Inou_cgen p;
   
   p.opack.files = var.get("files");
@@ -73,52 +68,7 @@ void Inou_cgen::tocfg(Eprp_var &var) {
   p.lnast->ssa_trans();
 
   // lnast to cfg_text
-  p.do_tocfg();
-}
-
-void Inou_cgen::do_tocfg() {
-  int i = 0;
-  fmt::print("starting do_tocfg:\n\n\n");
-  fmt::print("start: {}\n", i++);
-
-  std::map<Tree_pos, std::map<Tree_level, std::string>> nodes;
-  for (const auto &it: lnast->depth_preorder(lnast->get_root())) {
-    const auto& node_data = lnast->get_data(it);
-    std::string name(node_data.token.get_text(memblock)); // str_view to string
-    std::string type = lnast_parser.ntype_dbg(node_data.type);
-    auto node_scope = node_data.scope;
-
-/*
-    fmt::print("tree index: K{} {}\n", it.pos, it.level);
-    fmt::print("node: n:{} t:{} s:{} k:{} b:{}\n\n", name, type, node_scope, node_data.knum, node_data.sbs);
-*/
-
-    if (name == "") {
-      fmt::print("\n{} ", type);
-    } else {
-      fmt::print("{} ", name);
-    }
-
-    auto node = nodes.find(it.pos);
-    if (node == nodes.end()) {
-      std::map<Tree_level, std::string> tmp;
-      tmp.insert(std::pair<Tree_level, std::string>(it.level, name));
-      nodes.insert(std::pair<Tree_pos, std::map<Tree_level, std::string>>(it.pos, tmp));
-    } else {
-      node->second.insert(std::pair<Tree_level, std::string>(it.level, name));
-    }
-  }
-
-  fmt::print("\nformal print:\n");
-  for (auto const& node : nodes) {
-    fmt::print("{} ", node.first);
-    for (auto const& ele : node.second) {
-      fmt::print(" {}", ele.second);
-    }
-    fmt::print("\n");
-  }
-
-  fmt::print("end\n\n");
+  p.lnast_to_cfg_parser = new Lnast_to_cfg_parser(p.memblock, p.lnast);
 }
 
 std::string_view Inou_cgen::setup_memblock() {
