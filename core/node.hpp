@@ -197,6 +197,7 @@ public:
   void              set_type(const Node_Type_Op op, uint16_t bits);
   bool              is_type(const Node_Type_Op op) const;
   bool              is_type_sub() const;
+  bool              is_type_io() const;
 
   Hierarchy_index   hierarchy_go_down() const;
 

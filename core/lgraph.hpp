@@ -108,14 +108,16 @@ protected:
 
   explicit LGraph(std::string_view _path, std::string_view _name, std::string_view _source, bool clear);
 
-  bool has_node_outputs(Index_ID nid) const {
-    I(nid < node_internal.size());
-    return node_internal[nid].has_node_outputs();
+  bool has_node_outputs(Index_ID idx) const {
+    I(idx < node_internal.size());
+    I(node_internal[idx].is_root());
+    return node_internal[idx].has_node_outputs();
   }
 
-  bool has_node_inputs(Index_ID nid) const {
-    I(nid < node_internal.size());
-    return node_internal[nid].has_node_inputs();
+  bool has_node_inputs(Index_ID idx) const {
+    I(idx < node_internal.size());
+    I(node_internal[idx].is_root());
+    return node_internal[idx].has_node_inputs();
   }
 
   Index_ID find_idx(const Node_pin &pin) const {

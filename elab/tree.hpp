@@ -81,6 +81,42 @@ public:
     CTree_depth_preorder_iterator begin() const { return CTree_depth_preorder_iterator(ti, t); }
     CTree_depth_preorder_iterator end()   const { return CTree_depth_preorder_iterator(Tree_index(-1,-1), t); }  // 0 is end index for iterator
   };
+
+  class Tree_breadth_first_iterator {
+  public:
+    class CTree_breadth_first_iterator {
+    public:
+      CTree_breadth_first_iterator(const Tree_index &_ti, const Tree<X> *_t) : ti(_ti), t(_t) {}
+      CTree_breadth_first_iterator operator++() {
+        CTree_breadth_first_iterator i(ti, t);
+
+        ti = t->get_breadth_first_next(ti);
+
+        return i;
+      };
+      bool operator!=(const CTree_breadth_first_iterator &other) {
+        I(t == other.t);
+        return ti != other.ti;
+      }
+      const Tree_index &operator*() const { return ti; }
+
+    private:
+      Tree_index     ti;
+      const Tree<X> *t;
+    };
+
+  private:
+  protected:
+    Tree_index     ti;
+    const Tree<X> *t;
+
+  public:
+    Tree_breadth_first_iterator() = delete;
+    explicit Tree_breadth_first_iterator(const Tree_index &_b, const Tree<X> *_t) : ti(_b), t(_t) {}
+
+    CTree_breadth_first_iterator begin() const { return CTree_breadth_first_iterator(ti, t); }
+    CTree_breadth_first_iterator end()   const { return CTree_breadth_first_iterator(Tree_index(-1,-1), t); }  // 0 is end index for iterator
+  };
   Tree();
 
   void clear() {
@@ -103,6 +139,7 @@ public:
   const X &get_data(const Tree_index &leaf) const;
 
   const Tree_index get_depth_preorder_next(const Tree_index &child) const;
+  const Tree_index get_breadth_first_next(const Tree_index &child) const;
 
   const Tree_index get_parent     (const Tree_index &child) const;
   const Tree_index get_grandparent(const Tree_index &grandson) const;
@@ -118,17 +155,26 @@ public:
   // NOTE: not a typical depth first traversal, goes to bottom without touching
   // parents first. It is also not a bottom-up traversal because it touches all
   // the tree level before going to next level
-  void each_bottom_first_fast(std::function<void(const Tree_index &parent, const Tree_index &self, const X &)> fn) const;
+  void each_bottom_up_fast(std::function<void(const Tree_index &parent, const Tree_index &self, const X &)> fn) const;
 
-  void each_breadth_first_fast(std::function<void(const Tree_index &parent, const Tree_index &self, const X &)> fn) const;
+  void each_top_down_fast(std::function<void(const Tree_index &parent, const Tree_index &self, const X &)> fn) const;
 
   // void each_bottom_up(std::function<void(const Tree_index &parent, const Tree_index &self, const X &)> fn) const;
   // void each_depth_first(const Tree_index &start_index, std::function<void(const Tree_index &parent, const Tree_index &self, const
   // X &)> fn) const
   const std::vector<Tree_index> get_children       (const Tree_index &start_index) const;
+
+  // Tree traversals: https://en.wikipedia.org/wiki/Tree_traversal
   Tree_depth_preorder_iterator  depth_preorder(const Tree_index &start_index) const {
     return Tree_depth_preorder_iterator(start_index, this);
   }
+
+  Tree_breadth_first_iterator  breadth_first(const Tree_index &start_index) const {
+    return Tree_breadth_first_iterator(start_index, this);
+  }
+
+  Tree_depth_preorder_iterator  depth_preorder() const { return Tree_depth_preorder_iterator(get_root(), this); }
+  Tree_breadth_first_iterator   breadth_first()  const { return Tree_breadth_first_iterator(get_root(), this); }
 
   bool is_leaf(const Tree_index &index) const {
     I(index.level< (int)pointers_stack.size());
@@ -137,9 +183,24 @@ public:
     return pointers_stack[index.level][index.pos].younger_child < 0;
   }
 
-  Tree_depth_preorder_iterator  depth_preorder() const {
-    return Tree_depth_preorder_iterator(get_root(), this);
+  bool is_child_of(const Tree_index &child, const Tree_index &parent) const {
+    I(child.level< (int)pointers_stack.size());
+    I(child.pos  < (int)pointers_stack[child.level].size());
+    I(parent.level< (int)pointers_stack.size());
+    I(parent.pos  < (int)pointers_stack[parent.level].size());
+
+    auto level_stop_at = parent.level;
+    auto level = child.level-1;
+    auto pos = pointers_stack[child.level][child.pos].parent;
+
+    while(level>level_stop_at) {
+      pos = pointers_stack[level][pos].parent;
+      level--;
+    }
+
+    return parent.level == level && parent.pos == pos;
   }
+
 };
 
 //--------------------- Template Implementation ----
@@ -300,21 +361,9 @@ const Tree_index Tree<X>::get_depth_preorder_next(const Tree_index &child) const
   I(child.level < (int)pointers_stack.size());
   I(child.pos   < (int)pointers_stack[child.level].size());
 
-  //if(pointers_stack.size()-1 > child.level) {
-  //  Tree_pos i = 0;
-  //  for(auto it = begin(pointers_stack[child.level+1]); it != end(pointers_stack[child.level+1]); ++it) {
-  //    if(it->parent == child.pos) { // the node on the next level is a child of our node
-  //      return Tree_index(child.level+1, i);
-  //    }
-  //    i = i + 1;
-  //  }
-  //}
-
   if(pointers_stack[child.level][child.pos].eldest_child != -1) {
     return Tree_index(child.level+1, pointers_stack[child.level][child.pos].eldest_child);
   }
-
-
 
   if (pointers_stack[child.level][child.pos].younger_sibling != -1) {
     return Tree_index(child.level, pointers_stack[child.level][child.pos].younger_sibling);
@@ -334,43 +383,48 @@ const Tree_index Tree<X>::get_depth_preorder_next(const Tree_index &child) const
   }
 
   return Tree_index(-1,-1);
+}
 
-  /*fmt::print("Starting node: level: {}, position: {}\n", child.level, child.pos);
-  auto node = pointers_stack[child.level][child.pos];
-  fmt::print("Starting node: eldest child: {}, youngest child: {}, parent: {}, younger sibling: {}\n", node.younger_child, node.eldest_child, node.parent, node.younger_sibling);
+template <typename X>
+const Tree_index Tree<X>::get_breadth_first_next(const Tree_index &child) const {
+  I(child.level < (int)pointers_stack.size());
+  I(child.pos   < (int)pointers_stack[child.level].size());
 
-  if(node.younger_child != -1){ // case: has children
-    fmt::print("Has children\n");
-    // return the eldest child
-    Tree_index return_index = Tree_index(child.level+1, node.younger_child);
-    return return_index;
+  // Go for sibling
+  if (pointers_stack[child.level][child.pos].younger_sibling != -1) {
+    return Tree_index(child.level, pointers_stack[child.level][child.pos].younger_sibling);
   }
-  else{ // case: does not have children
-    if(node.younger_sibling != -1){
-      fmt::print("Has no children, but has at least one sibling\n");
-      return Tree_index(child.level, node.younger_sibling); // return the younger sibling
-    }
-    else{
-      fmt::print("Has no children and no siblings\n");
-      Tree_level prev_level = child.level - 1;
-      Tree_pos parent_pos = node.parent;
-      while(1){
-        auto next_node = pointers_stack[prev_level][parent_pos];
-        if(next_node.younger_sibling != -1){
-          return Tree_index(prev_level, next_node.younger_sibling);
-        }
-        if(prev_level == 0){ // we're at the root, and we're done
-          return Tree_index(-1,-1);
-        }
-        prev_level = prev_level - 1;
-        parent_pos = next_node.parent;
+
+  // No siblings left, go for another uncle/aunt
+  if (child.level) { // Not if root already
+    auto parent_pos   = pointers_stack[child.level][child.pos].parent;
+    auto parent_level = child.level -1;
+    parent_pos.value++;
+    while (parent_pos < pointers_stack[parent_level].size()) {
+      auto eldest_child = pointers_stack[parent_level][parent_pos].eldest_child;
+      if (eldest_child != -1) {
+        return Tree_index(child.level, eldest_child);
       }
+      parent_pos.value++;
     }
-  }*/
+  }
 
-  // I(pointers_stack[0].size() == 1); // One single root
+  // No siblings or uncles/aunts left, go for first descendent in tree.
+  auto descendent_level = child.level+1;
+  if (pointers_stack.size()<= descendent_level)
+    return Tree_index(-1,-1); // DONE
 
-  // return Tree_index(0,0);
+  size_t pos = 0;
+  while (pos < pointers_stack[child.level].size()) {
+    auto eldest_child = pointers_stack[child.level][pos].eldest_child;
+    if (eldest_child != -1) {
+      return Tree_index(descendent_level, eldest_child);
+    }
+    pos++;
+  }
+
+  I(false); // There was a descendent. WHere is it?
+  return Tree_index(-1,-1);
 }
 
 template <typename X>
@@ -411,7 +465,7 @@ void Tree<X>::set_root(const X &data) {
 }
 
 template <typename X>
-void Tree<X>::each_bottom_first_fast(std::function<void(const Tree_index &parent, const Tree_index &self, const X &)> fn) const {
+void Tree<X>::each_bottom_up_fast(std::function<void(const Tree_index &parent, const Tree_index &self, const X &)> fn) const {
   auto sz = data_stack.size();
   for (int i = sz - 1; i >= 0; --i) {  // WARNING: must be signed to handle -1 for loop exit
     auto sz2 = data_stack[i].size();
@@ -428,7 +482,7 @@ void Tree<X>::each_bottom_first_fast(std::function<void(const Tree_index &parent
 }
 
 template <typename X>
-void Tree<X>::each_breadth_first_fast(std::function<void(const Tree_index &parent, const Tree_index &self, const X &)> fn) const {
+void Tree<X>::each_top_down_fast(std::function<void(const Tree_index &parent, const Tree_index &self, const X &)> fn) const {
   auto sz = data_stack.size();
   for (size_t i = 0; i < sz; i++) {
     auto sz2 = data_stack[i].size();

@@ -52,6 +52,14 @@ Node_pin::Node_pin(LGraph *_g, Compact_class_driver comp)
   I(current_g->is_valid_node_pin(idx));
 }
 
+bool Node_pin::has_inputs() const {
+  return current_g->has_inputs(*this);
+}
+
+bool Node_pin::has_outputs() const {
+  return current_g->has_outputs(*this);
+}
+
 bool Node_pin::is_graph_io() const {
   return current_g->is_graph_io(idx);
 }

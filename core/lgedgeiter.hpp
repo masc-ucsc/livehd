@@ -80,6 +80,8 @@ protected:
   Index_ID       *hardcoded_nid;
   Node_set_type  *global_visited;
 
+  static inline std::vector<Node::Compact> delayed; // FIXME: HACK TO CHECK FAST
+
   Edge_raw_iterator_base(const Edge_raw_iterator_base &other)
     :current_node(other.current_node)
     ,visit_sub(other.visit_sub)
@@ -93,6 +95,7 @@ public:
       : visit_sub(_visit_sub), frontier(_frontier), pending(_pending), hardcoded_nid(_hardcoded_nid), global_visited(_global_visited) { }
 
   virtual void    set_current_node_as_visited() = 0;
+  virtual void    propagate_io(const Node &node) = 0;
 
   Node operator*() const { return current_node; }
   // FIXME: Try this instead const &Node operator*() const { return current_node; }
@@ -102,7 +105,7 @@ public:
   void set_next_node_to_visit() {
     if (unlikely(pending->empty())) {
       if (!update_frontier()) {
-        current_node.update(0);
+        current_node.invalidate(current_node.get_top_lgraph());
         I(current_node.is_invalid());
         return;
       }
@@ -120,6 +123,7 @@ class CForward_edge_iterator : public Edge_raw_iterator_base {
 protected:
 
   void insert_forward_graph_start_points(LGraph *lg, Hierarchy_index down_hidx);
+  void propagate_io(const Node &node);
 
 public:
   CForward_edge_iterator(const CForward_edge_iterator &other)
@@ -153,6 +157,7 @@ public:
 class CBackward_edge_iterator : public Edge_raw_iterator_base {
 private:
   void insert_backward_graph_start_points(LGraph *lg, Hierarchy_index down_hidx);
+  void propagate_io(const Node &node);
 
 public:
   CBackward_edge_iterator(const CBackward_edge_iterator &other)

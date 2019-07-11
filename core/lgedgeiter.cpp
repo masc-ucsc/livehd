@@ -128,11 +128,19 @@ bool Edge_raw_iterator_base::update_frontier() {
     if (!pending->empty())
       return true;
 
+    while (!delayed.empty()) {
+      I(visit_sub);
+      Node node(current_node.get_top_lgraph(), delayed.back());
+      propagate_io(node);
+      delayed.pop_back();
+      if (!pending->empty())
+        return true;
+    }
+
     if (*hardcoded_nid) {
       // NOTE: Not very fast API, but it is called once per iterator
-      Node node(current_node);
-      node.update(*hardcoded_nid);
-      I(node.get_class_lgraph() == node.get_top_lgraph()); // End of iteration
+      auto *top_lg = current_node.get_top_lgraph();
+      Node node(top_lg, top_lg, top_lg->hierarchy_root(), *hardcoded_nid);
       pending->insert(node.get_compact());
       *hardcoded_nid = 0;
       return true;
@@ -145,7 +153,7 @@ bool Edge_raw_iterator_base::update_frontier() {
 
 void CForward_edge_iterator::set_current_node_as_visited() {
 
-  global_visited->insert(current_node.get_compact());
+  global_visited->insert(current_node.get_compact()); // FIXME: Just insert nodes that can have loops (pipelined and some subs)
 
   if (visit_sub && current_node.is_type_sub()) {
     const auto &sub = current_node.get_type_sub_node();
@@ -153,11 +161,21 @@ void CForward_edge_iterator::set_current_node_as_visited() {
       LGraph *lg      = current_node.get_class_lgraph();
       LGraph *down_lg = LGraph::open(lg->get_path(), sub.get_name());
 
-      insert_forward_graph_start_points(down_lg, current_node.hierarchy_go_down());
+      if (!down_lg->empty()) {
+        insert_forward_graph_start_points(down_lg, current_node.hierarchy_go_down());
+
+        delayed.push_back(current_node.get_compact()); // Do sub hierarchy first
+        return;
+      }
     }
   }
 
-  for (const auto &e : current_node.out_edges()) {
+  propagate_io(current_node);
+}
+
+void CForward_edge_iterator::propagate_io(const Node &node) {
+
+  for (const auto &e : node.out_edges()) {
     const auto sink_node = e.sink.get_node();
     if (sink_node.get_nid() == Node::Hardcoded_output_nid)
       continue;
@@ -209,6 +227,10 @@ void CForward_edge_iterator::insert_forward_graph_start_points(LGraph *lg, Hiera
     }
   }
 
+}
+
+void CBackward_edge_iterator::propagate_io(const Node &node) {
+  I(false);// FIXME: implement me
 }
 
 void CBackward_edge_iterator::insert_backward_graph_start_points(LGraph *lg, Hierarchy_index down_hidx) {
@@ -294,7 +316,8 @@ void CBackward_edge_iterator::set_current_node_as_visited() {
       LGraph *lg      = current_node.get_class_lgraph();
       LGraph *down_lg = LGraph::open(lg->get_path(), sub.get_name());
 
-      insert_backward_graph_start_points(down_lg, current_node.hierarchy_go_down());
+      if (!down_lg->empty())
+        insert_backward_graph_start_points(down_lg, current_node.hierarchy_go_down());
     }
   }
 

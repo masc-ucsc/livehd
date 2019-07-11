@@ -236,6 +236,9 @@ public:
 
   const Port_ID  get_pid()   const { I(idx); return pid;    }
 
+  bool has_inputs () const;
+  bool has_outputs() const;
+
   bool     is_graph_io()  const;
   bool     is_graph_input()  const;
   bool     is_graph_output() const;

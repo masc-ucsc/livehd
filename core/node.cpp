@@ -177,6 +177,10 @@ bool Node::is_type(const Node_Type_Op op) const {
   return current_g->get_type(nid).op == op;
 }
 
+bool Node::is_type_io() const {
+  return current_g->is_graph_io(nid);
+}
+
 bool Node::is_type_sub() const {
   return current_g->is_sub(nid);
 }

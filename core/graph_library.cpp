@@ -75,13 +75,13 @@ Lg_type_id Graph_library::reset_id(std::string_view name, std::string_view sourc
     // Maybe it was a sub before, or reloaded, or the ID got recycled
     attributes[it->second].version = max_next_version.value++;
     if (attributes[it->second].source != source) {
-      if (attributes[it->second].source == "-") {
-        Pass::warn("overwrite lgraph:{} source from {} to {}", name, attributes[it->second].source, source);  // LCOV_EXCL_LINE
-        attributes[it->second].source = source;
-      } else if (source == "-") {
+      if (source == "-") {
         Pass::warn("keeping lgraph:{} source {}", name, attributes[it->second].source);  // LCOV_EXCL_LINE
       } else if (attributes[it->second].source.empty()) {
         // Blackbox with a newly populated. OK
+        attributes[it->second].source = source;
+      }else if (attributes[it->second].source == "-") {
+        //Pass::warn("overwrite lgraph:{} source from {} to {}", name, attributes[it->second].source, source);  // LCOV_EXCL_LINE
         attributes[it->second].source = source;
       } else {
         Pass::error("No overwrite lgraph:{} because it changed source from {} to {} (LGraph::delete first)", name, attributes[it->second].source, source);  // LCOV_EXCL_LINE

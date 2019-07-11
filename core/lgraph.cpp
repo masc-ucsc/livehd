@@ -24,7 +24,7 @@ LGraph::LGraph(std::string_view _path, std::string_view _name, std::string_view 
   I(_name == get_name());
   if (_clear) {  // Create
     clear();
-    sync();
+    //sync();
   } else {  // open
     reload();
     // I(node_internal.size()); // WEIRD, but possible to have an empty lgraph

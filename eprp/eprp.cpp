@@ -243,14 +243,12 @@ void Eprp::process_ast_handler(const Tree_index &parent, const Tree_index &self,
 }
 
 void Eprp::process_ast() {
-  // ast->each_depth_first
 
   for(const auto &ti:ast->depth_preorder(ast->get_root())) {
     fmt::print("ti.level:{} ti.pos:{}\n", ti.level, ti.pos);
   }
 
-  ast->each_bottom_first_fast(
-      std::bind(&Eprp::process_ast_handler, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+  ast->each_bottom_up_fast(std::bind(&Eprp::process_ast_handler, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
 }
 
 void Eprp::run_cmd(const std::string &cmd, Eprp_var &var) {
