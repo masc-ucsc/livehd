@@ -16,8 +16,8 @@ cc_library(
 )
 
 cc_test(
-    name = "hierarchy_test",
-    srcs = ["tests/hierarchy_test.cpp"],
+    name = "traversal_hierarchy_test",
+    srcs = ["tests/traversal_hierarchy_test.cpp"],
     deps = [
         "@gtest//:gtest_main",
         ":core",
