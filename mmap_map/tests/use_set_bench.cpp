@@ -6,7 +6,7 @@
 #include <vector>
 #include <iostream>
 
-#include "bm.h"
+//#include "bm.h"
 #include "rng.hpp"
 #include "lgbench.hpp"
 #include "dense.hpp"
@@ -488,6 +488,7 @@ void random_vector_set(int max) {
   printf("inserts random %d\n",conta);
 }
 
+#if 0
 void random_bm_set(int max) {
   Rng rng(123);
 
@@ -546,6 +547,7 @@ void random_bm_set(int max) {
 
   printf("inserts random %d\n",conta);
 }
+#endif
 
 int main(int argc, char **argv) {
 
@@ -555,7 +557,6 @@ int main(int argc, char **argv) {
   bool run_random_abseil_set = false;
   bool run_random_ska_set    = false;
   bool run_random_vector_set = false;
-  bool run_random_bm_set     = false;
 
   if (argc>1) {
     if (strcasecmp(argv[1],"std")==0)
@@ -570,8 +571,6 @@ int main(int argc, char **argv) {
       run_random_ska_set = true;
     else if (strcasecmp(argv[1],"vector")==0)
       run_random_vector_set = true;
-    else if (strcasecmp(argv[1],"bm")==0)
-      run_random_bm_set = true;
   }else{
     run_random_std_set    = true;
     run_random_robin_set  = true;
@@ -579,7 +578,6 @@ int main(int argc, char **argv) {
     run_random_abseil_set = true;
     run_random_ska_set    = true;
     run_random_vector_set = true;
-    run_random_bm_set     = true;
   }
 
   for(int i=1000;i<1'000'001;i*=1000) {
@@ -602,9 +600,6 @@ int main(int argc, char **argv) {
 
     if (run_random_vector_set)
       random_vector_set(i);
-
-    if (run_random_bm_set)
-      random_bm_set(i);
   }
 
   return 0;

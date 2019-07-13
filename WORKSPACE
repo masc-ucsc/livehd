@@ -82,13 +82,13 @@ new_git_repository(
     commit = "5ca6de766db32b3fb08a040636423cd3988d2d4f", # Jun 8, 2018
     remote = "https://github.com/sparsehash/sparsehash-c11.git",
 )
-new_git_repository(
-    name = "bm",
-    build_file = "BUILD.bm",
-    commit = "93a8ba2c50c039cfe6b95f9d6fe128603a14e0ed", # March 20, 2019
-    remote = "https://github.com/tlk00/BitMagic.git",
-    strip_prefix = "src",
-)
+#new_git_repository(
+    #name = "bm",
+    #build_file = "BUILD.bm",
+    #commit = "93a8ba2c50c039cfe6b95f9d6fe128603a14e0ed", # March 20, 2019
+    #remote = "https://github.com/tlk00/BitMagic.git",
+    #strip_prefix = "src",
+#)
 git_repository(
     name = "cryptominisat",
     #build_file = "BUILD.abseil", # relative to external path
