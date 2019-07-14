@@ -302,7 +302,7 @@ public:
   Sub_node         &get_self_sub_node() const; // Access all input/outputs
 
   void dump();
-  void dump_sub_nodes();
+  void dump_down_nodes();
 
   Node get_graph_input_node();
   Node get_graph_output_node();

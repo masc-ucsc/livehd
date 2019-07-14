@@ -63,7 +63,7 @@ void Inou_graphviz::hierarchy(Eprp_var &var) {
 void Inou_graphviz::do_hierarchy(LGraph *g) {
   std::string data = "digraph {\n";
 
-  g->dump_sub_nodes();
+  g->dump_down_nodes();
 
   for (const auto node : g->fast(true)) {
     fmt::print("lg:{} node:{} type:{}\n", node.get_class_lgraph()->get_name(), node.debug_name(), node.get_type().get_name());

@@ -11,7 +11,7 @@
 
 using Node_sview_map = mmap_map::map<std::string_view, Node::Compact_class>;
 using Node_value_map = mmap_map::map<uint32_t, Node::Compact_class>;
-using Node_sub_map   = mmap_map::map<Node::Compact_class, Lg_type_id>;
+using Node_down_map  = mmap_map::map<Node::Compact_class, Lg_type_id>;
 
 class LGraph_Node_Type : virtual public LGraph_Base {
 protected:
@@ -19,7 +19,7 @@ protected:
 
   Node_sview_map   const_sview;
   Node_value_map   const_value;
-  Node_sub_map     sub_nodes;
+  Node_down_map    down_nodes;
 
   void clear();
   void reload();
@@ -60,7 +60,7 @@ public:
 
   const Node_sview_map &get_const_sview_map() const { return const_sview; };
   const Node_value_map &get_const_value_map() const { return const_value; };
-  const Node_sub_map   &get_sub_nodes_map()   const { return sub_nodes; };
+  const Node_down_map  &get_down_nodes_map()  const { return down_nodes; };
 
 };
 

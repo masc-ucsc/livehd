@@ -66,7 +66,7 @@ protected:
     RandomBool rbool;
 
     for(const auto &index:index_order) {
-      const auto &data       = tree.get_data(index);
+      auto &data       = tree.get_data(index);
 
       I(index.level || index.pos); // skip root
 

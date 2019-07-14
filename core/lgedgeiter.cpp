@@ -254,7 +254,7 @@ void CForward_edge_iterator::insert_graph_start_points(LGraph *lg, Hierarchy_ind
   }
 
   // Add any sub node that has no inputs but has outputs (not hit with forward)
-  for(auto it:lg->get_sub_nodes_map()) {
+  for(auto it:lg->get_down_nodes_map()) {
     Node n_sub(lg, it.first);
     if (n_sub.has_outputs() && !n_sub.has_inputs()) {
       pending->insert(n_sub.get_compact());
@@ -271,7 +271,7 @@ void CBackward_edge_iterator::insert_graph_start_points(LGraph *lg, Hierarchy_in
   pending->insert(Node::Compact(down_hidx, Node::Hardcoded_output_nid));
 
   // Add any sub node that has no outputs but has inputs (not hit with backward)
-  for(auto it:lg->get_sub_nodes_map()) {
+  for(auto it:lg->get_down_nodes_map()) {
     Node n_sub(lg, it.first);
     if (!n_sub.has_outputs() && n_sub.has_inputs()) {
       pending->insert(n_sub.get_compact());

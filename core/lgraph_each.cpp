@@ -84,7 +84,7 @@ void LGraph::each_output_edge_fast(std::function<void(XEdge &edge)> f1) {
 
 void LGraph::each_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)> fn) {
 
-  const auto &m = get_sub_nodes_map();
+  const auto &m = get_down_nodes_map();
   for (auto it = m.begin(), end = m.end(); it != end; ++it) {
     Index_ID    cid = it->first.nid;
     I(cid);

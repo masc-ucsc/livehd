@@ -9,14 +9,14 @@ LGraph_Node_Type::LGraph_Node_Type(std::string_view path, std::string_view name,
     , node_type_table(absl::StrCat(path, "/lg_", std::to_string(lgid), "_type"))
     , const_sview(absl::StrCat(path, "/lg_", std::to_string(lgid), "_sview"))
     , const_value(absl::StrCat(path, "/lg_", std::to_string(lgid), "_value"))
-    , sub_nodes(absl::StrCat(path, "/lg_", std::to_string(lgid)  , "_subnode")) {
+    , down_nodes(absl::StrCat(path, "/lg_", std::to_string(lgid)  , "_down")) {
 }
 
 void LGraph_Node_Type::clear() {
 
   const_sview.clear();
   const_value.clear();
-  sub_nodes.clear();
+  down_nodes.clear();
 
   node_type_table.clear();
 }
@@ -85,7 +85,7 @@ void LGraph_Node_Type::set_type_sub(Index_ID nid, Lg_type_id subgraphid) {
   I((node_type_table[nid] >=SubGraphMin_Op && node_type_table[nid] <SubGraphMax_Op)
   || node_type_table[nid] == Invalid_Op);
 
-  sub_nodes.set(Node::Compact_class(nid), subgraphid.value);
+  down_nodes.set(Node::Compact_class(nid), subgraphid.value);
 
   node_type_table[nid] = (Node_Type_Op)(SubGraphMin_Op + subgraphid);
 }

@@ -83,7 +83,7 @@ void Pass_sample::do_wirecount(LGraph *g, int indent) {
   fmt::print("{}module {} : inputs {} bits {} : outputs {} bits {} : nodes {} subs {} consts {} : wire {} bits {}\n"
       , space
       ,g->get_name(), i_num, i_bits, o_num, o_bits
-      ,n_nodes, g->get_sub_nodes_map().size() ,g->get_const_value_map().size() + g->get_const_sview_map().size()
+      ,n_nodes, g->get_down_nodes_map().size() ,g->get_const_value_map().size() + g->get_const_sview_map().size()
       ,n_wire, n_wire_bits);
 
   auto path = g->get_path();

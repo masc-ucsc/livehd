@@ -657,8 +657,8 @@ void LGraph::dump() {
 #endif
 }
 
-void LGraph::dump_sub_nodes() {
-  for (auto &cnode : sub_nodes) {
+void LGraph::dump_down_nodes() {
+  for (auto &cnode : down_nodes) {
     fmt::print(" sub:{}\n", cnode.first.get_node(this).debug_name());
   }
 }
