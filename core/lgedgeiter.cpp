@@ -257,7 +257,8 @@ void CForward_edge_iterator::insert_graph_start_points(LGraph *lg, Hierarchy_ind
   for(auto it:lg->get_down_nodes_map()) {
     Node n_sub(lg, it.first);
     if (n_sub.has_outputs() && !n_sub.has_inputs()) {
-      pending->insert(n_sub.get_compact());
+      I(it.first==n_sub.get_comact());
+      pending->insert(it.first);
     }
   }
 }
@@ -274,10 +275,10 @@ void CBackward_edge_iterator::insert_graph_start_points(LGraph *lg, Hierarchy_in
   for(auto it:lg->get_down_nodes_map()) {
     Node n_sub(lg, it.first);
     if (!n_sub.has_outputs() && n_sub.has_inputs()) {
-      pending->insert(n_sub.get_compact());
+      I(it.first==n_sub.get_comact());
+      pending->insert(it.first);
     }
   }
-
 }
 
 CForward_edge_iterator::CForward_edge_iterator(
