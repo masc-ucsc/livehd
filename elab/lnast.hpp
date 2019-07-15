@@ -81,9 +81,6 @@ enum Lnast_node_type : Lnast_ntype_id {
   Lnast_ntype_tuple,        // ()
   Lnast_ntype_ref,
   Lnast_ntype_const,
-  Lnast_ntype_input,
-  Lnast_ntype_output,
-  Lnast_ntype_reg,
   Lnast_ntype_attr_bits,    // __bits
   Lnast_ntype_assert,       // I
   Lnast_ntype_if,
