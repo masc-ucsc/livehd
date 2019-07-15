@@ -62,18 +62,128 @@ void Lnast_to_cfg_parser::add_to_buffer(Lnast_node node) {
 void Lnast_to_cfg_parser::process_buffer() {
   if (!node_buffer.size()) return;
 
-  fmt::print("buffer size: {} : ", node_buffer.size());
+  Lnast_ntype_id type = node_buffer.front().type;
+
+  if (type == Lnast_ntype_pure_assign) {
+    process_pure_assign();
+  } else if (type == Lnast_ntype_as) {
+    process_as();
+  } else if (type == Lnast_ntype_label) {
+    process_label();
+  } else if (type == Lnast_ntype_and) {
+    process_and();
+  } else if (type == Lnast_ntype_xor) {
+    process_xor();
+  } else if (type == Lnast_ntype_gt) {
+    process_gt();
+  } else if (type == Lnast_ntype_func_call) {
+    process_func_call();
+  } else if (type == Lnast_ntype_func_def) {
+    process_func_def();
+  }
+
+  // fmt::print("buffer size: {} : ", node_buffer.size());
+  /*
   for (auto const& node : node_buffer) {
     std::string name(node.token.get_text(memblock)); // str_view to string
     std::string type = ntype_dbg(node.type);
     if (name == "") {
-      fmt::print("{} ", type);
+      fmt::print("{}({}) ", type, node.type);
     } else {
       fmt::print("{} ", name);
     }
   }
   fmt::print("\n");
+  */
+
   node_buffer.clear();
+}
+
+std::string_view Lnast_to_cfg_parser::get_node_name(Lnast_node node) {
+  return node.token.get_text(memblock);
+}
+
+std::string Lnast_to_cfg_parser::cat_buffer(std::vector<Lnast_node>::iterator it) {
+  std::string tmp = "";
+  while (it != node_buffer.end()) {
+    tmp += get_node_name(*it);
+    if (++it != node_buffer.end()) {
+      tmp += " ";
+    }
+  }
+  return tmp;
+}
+
+void Lnast_to_cfg_parser::process_pure_assign() {
+  std::string tmp = "";
+  std::vector<Lnast_node>::iterator it = node_buffer.begin();
+  tmp += "= ";
+  it++;
+  tmp += cat_buffer(it);
+  fmt::print("{}\n", tmp);
+}
+
+void Lnast_to_cfg_parser::process_as() {
+  std::string tmp = "";
+  std::vector<Lnast_node>::iterator it = node_buffer.begin();
+  tmp += "as ";
+  it++;
+  tmp += cat_buffer(it);
+  fmt::print("{}\n", tmp);
+}
+
+void Lnast_to_cfg_parser::process_label() {
+  std::string tmp = "";
+  std::vector<Lnast_node>::iterator it = node_buffer.begin();
+  tmp += ": ";
+  it++;
+  tmp += cat_buffer(it);
+  fmt::print("{}\n", tmp);
+}
+
+void Lnast_to_cfg_parser::process_and() {
+  std::string tmp = "";
+  std::vector<Lnast_node>::iterator it = node_buffer.begin();
+  tmp += "& ";
+  it++;
+  tmp += cat_buffer(it);
+  fmt::print("{}\n", tmp);
+}
+
+void Lnast_to_cfg_parser::process_xor() {
+  std::string tmp = "";
+  std::vector<Lnast_node>::iterator it = node_buffer.begin();
+  tmp += "^ ";
+  it++;
+  tmp += cat_buffer(it);
+  fmt::print("{}\n", tmp);
+}
+
+void Lnast_to_cfg_parser::process_gt() {
+  std::string tmp = "";
+  std::vector<Lnast_node>::iterator it = node_buffer.begin();
+  tmp += "> ";
+  it++;
+  tmp += cat_buffer(it);
+  fmt::print("{}\n", tmp);
+}
+
+void Lnast_to_cfg_parser::process_func_call() {
+  std::string tmp = "";
+  std::vector<Lnast_node>::iterator it = node_buffer.begin();
+  tmp += ".() ";
+  it++;
+  tmp += cat_buffer(it);
+  fmt::print("{}\n", tmp);
+}
+
+void Lnast_to_cfg_parser::process_func_def() {
+  std::string tmp = "";
+  std::vector<Lnast_node>::iterator it = node_buffer.begin();
+  tmp += "::{ ";
+  it++;
+  tmp += cat_buffer(it);
+  fmt::print("{}\n", tmp);
 }
 
 void Lnast_to_cfg_parser::setup_ntype_str_mapping() {

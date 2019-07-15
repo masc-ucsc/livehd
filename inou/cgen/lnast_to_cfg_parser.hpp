@@ -30,5 +30,17 @@ private:
   void pop_statement();
   void add_to_buffer(Lnast_node node);
   void process_buffer();
+
+  std::string_view get_node_name(Lnast_node node);
+  std::string cat_buffer(std::vector<Lnast_node>::iterator it);
+
+  void process_pure_assign();
+  void process_as();
+  void process_label();
+  void process_and();
+  void process_xor();
+  void process_gt();
+  void process_func_call();
+  void process_func_def();
 };
 
