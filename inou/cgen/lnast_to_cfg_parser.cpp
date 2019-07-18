@@ -24,7 +24,7 @@ void Lnast_to_cfg_parser::stringify() {
 
 
     // for printing out individual node values
-    // fmt::print("\ntree index: pos:{} level:{} node: n:{} t:{} s:{} k:{} b:{}\n", it.pos, it.level, name, type, node_scope, node_data.knum, node_data.sbs);
+    // fmt::print("\ntree index: pos:{} level:{} node: k:{} b:{}\n", it.pos, it.level, node_data.knum, node_data.sbs);
   }
   process_buffer();
 }
