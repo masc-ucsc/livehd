@@ -10,16 +10,16 @@ using Scope_id       = uint8_t;
 struct Lnast_node {
   Lnast_ntype_id type; //not const as possible fake function call ...
   Token          token;
-  Scope_id       scope;//SH:FIXME: might deprecate later, set 0 for now
-  uint32_t       knum; //record K number in cfg_text
-  uint32_t       loc;
-  uint16_t       sbs;  //ssa subscript
+  Scope_id       scope;//SH:FIXME: deprecated, could rely on tree structure
+  uint32_t       knum; //SH:FIXME: deprecated, record K number in cfg_text
+  uint32_t       loc;  //SH:FIXME: wait for Akash
+  uint16_t       subs; //ssa subscript
 
   Lnast_node(Lnast_ntype_id type, Token token)
-    :type(type), token(token), scope(0), knum(0), loc(0), sbs(0) { I(type);}
+    :type(type), token(token), scope(0), knum(0), loc(0), subs(0) { I(type);}
 
   Lnast_node(Lnast_ntype_id type, Token token, uint32_t knum)
-    :type(type), token(token), scope(0), knum(knum), loc(0), sbs(0) { I(type);}
+    :type(type), token(token), scope(0), knum(knum), loc(0), subs(0) { I(type);}
 };
 
 

@@ -22,6 +22,9 @@ public:
   std::string                                               ntype_dbg(Lnast_ntype_id ntype);
 
 protected:
+  void       ssa_phi_node_insertion(const Tree_index& top);
+  void       ssa_uniquify_subscript(const Tree_index& top);
+  void       ssa_transform(const Tree_index& top);
   void       elaborate() override;
   void       build_top_statements              (const Tree_index& tree_idx_top);
   void       add_statement                     (const Tree_index& tree_top_sts);

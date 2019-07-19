@@ -58,7 +58,7 @@ we use the table entry number of `Index_ID`.
 When a new node is added to the graph a new `Index_ID` is generated. The node
 always has a `Index_ID` for the port zero, different `Index_ID` for other
 node/port pairs, and potentially additional `Index_ID` for extra storage to keep
-the graph edges. Each `Index_ID` can be used to store metainformation in
+the graph edges. Each `Index_ID` can be used to store meta information in
 additional tables like the delay, or operation, but in reality we only store
 information for the whole node or for each node/port pair.
 
