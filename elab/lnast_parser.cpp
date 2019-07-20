@@ -19,7 +19,7 @@ void Lnast_parser::ssa_phi_node_insertion(const Tree_index& top) {
     if(node_data.type == Lnast_ntype_func_def){
       ssa_transform(itr);
     } else if (node_data.type == Lnast_ntype_if){
-
+      ;
     }
   }
 }
@@ -57,7 +57,7 @@ void Lnast_parser::add_statement(const Tree_index& tree_top_sts) {
   Token          loc;
   Lnast_ntype_id type = Lnast_ntype_invalid;
   Token          target_name;
-  Tree_index     opr_parent_sts = tree_top_sts; //opr is operator
+  Tree_index     opr_parent_sts = tree_top_sts; //opr means operator
 
   knum1 = 0;
   knum2 = 0;
@@ -120,11 +120,9 @@ void Lnast_parser::add_statement(const Tree_index& tree_top_sts) {
           } else if (sts_parent_type == Lnast_ntype_func_def && knum1 == max) {
             function_name_correction(type, sts_stack_top);
             range_stack.pop_back();
-            fmt::print("pop!\n");
             break; //won't create opr-subtree as it is just a renaming statement
           } else {
             range_stack.pop_back();
-            fmt::print("pop!\n");
             if(!range_stack.empty()){
               auto new_sts_stack_top   = std::get<0>(range_stack.back());
               opr_parent_sts = new_sts_stack_top;
@@ -431,6 +429,8 @@ Lnast_ntype_id Lnast_parser::operator_analysis() {
     type = Lnast_ntype_div;
   } else if (scan_is_token(Token_id_eq)) {
     type = Lnast_ntype_eq;
+  } else if (scan_is_token(Token_id_same)) {
+    type = Lnast_ntype_same;
   } else if (scan_is_token(Token_id_le)) {
     type = Lnast_ntype_le;
   } else if (scan_is_token(Token_id_lt)) {
@@ -463,7 +463,8 @@ void Lnast_parser::setup_ntype_str_mapping(){
   ntype2str [Lnast_ntype_minus]       = "-"      ;
   ntype2str [Lnast_ntype_mult]        = "*"       ;
   ntype2str [Lnast_ntype_div]         = "/"        ;
-  ntype2str [Lnast_ntype_eq]          = "=="         ;
+  ntype2str [Lnast_ntype_eq]          = "="         ;
+  ntype2str [Lnast_ntype_same]        = "=="         ;
   ntype2str [Lnast_ntype_lt]          = "<"         ;
   ntype2str [Lnast_ntype_le]          = "<="         ;
   ntype2str [Lnast_ntype_gt]          = ">"         ;
@@ -471,9 +472,6 @@ void Lnast_parser::setup_ntype_str_mapping(){
   ntype2str [Lnast_ntype_tuple]       = "()"      ;
   ntype2str [Lnast_ntype_ref]         = "ref"        ;
   ntype2str [Lnast_ntype_const]       = "const"      ;
-  //ntype2str [Lnast_ntype_input]       = "input"      ;
-  //ntype2str [Lnast_ntype_output]      = "output"     ;
-  //ntype2str [Lnast_ntype_reg]         = "reg"        ;
   ntype2str [Lnast_ntype_attr_bits]   = "attr_bits"  ;
   ntype2str [Lnast_ntype_assert]      = "I"     ;
   ntype2str [Lnast_ntype_if]          = "if"         ;
@@ -485,6 +483,19 @@ void Lnast_parser::setup_ntype_str_mapping(){
   ntype2str [Lnast_ntype_func_call]   = "func_call"  ;
   ntype2str [Lnast_ntype_func_def]    = "func_def"   ;
   ntype2str [Lnast_ntype_top]         = "top"        ;
+  /* *
+   * ntype2str [Lnast_ntype_input]       = "input"      ;
+   * ntype2str [Lnast_ntype_output]      = "output"     ;
+   * ntype2str [Lnast_ntype_reg]         = "reg"        ;
+   *
+   * Note:
+   * for Verilog, the input, output and reg token must be assign as Lnast_ntype_ref type
+   * such as
+   * $foo    --- input
+   * %bar    --- output
+   * @potato --- register
+   *
+   * */
 }
 
 std::string Lnast_parser::ntype_dbg(Lnast_ntype_id ntype) {

@@ -1,7 +1,6 @@
 #!/bin/bash
 rm -f *.cfg
-./prp lnast_nested_if_else.prp | sort -n -tK -k2 > y && column -t y > x && rm -f y && mv x lnast_nested_if_else.cfg
-./prp ast_test.prp             | sort -n -tK -k2 > y && column -t y > x && rm -f y && mv x ast_test.cfg
+./prp lnast_utest.prp          | sort -n -tK -k2 > y && column -t y > x && rm -f y && mv x lnast_utest.cfg
 ./prp logic_bitwise_op.prp     | sort -n -tK -k2 > y && column -t y > x && rm -f y && mv x logic_bitwise_op.cfg
 ./prp sp_punch.prp             | sort -n -tK -k2 > y && column -t y > x && rm -f y && mv x sp_punch.cfg
 ./prp sp_and.prp               | sort -n -tK -k2 > y && column -t y > x && rm -f y && mv x sp_and.cfg
@@ -21,7 +20,8 @@ rm -f *.cfg
 ./prp nested_if_1.prp          | sort -n -tK -k2 > y && column -t y > x && rm -f y && mv x nested_if_1.cfg 
 ./prp nested_if_2.prp          | sort -n -tK -k2 > y && column -t y > x && rm -f y && mv x nested_if_2.cfg 
 ./prp nested_if_3.prp          | sort -n -tK -k2 > y && column -t y > x && rm -f y && mv x nested_if_3.cfg 
-./prp if_elif_else.prp         | sort -n -tK -k2 > y && column -t y > x && rm -f y && mv x if_elif_else.cfg 
+./prp if_elif_elif.prp         | sort -n -tK -k2 > y && column -t y > x && rm -f y && mv x if_elif_elif.cfg 
+./prp if_elif_elif_else.prp    | sort -n -tK -k2 > y && column -t y > x && rm -f y && mv x if_elif_elif_else.cfg 
 
 cp top.cfg        top_ooo.cfg
 

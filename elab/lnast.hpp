@@ -74,6 +74,7 @@ enum Lnast_node_type : Lnast_ntype_id {
   Lnast_ntype_mult,
   Lnast_ntype_div,
   Lnast_ntype_eq,
+  Lnast_ntype_same,
   Lnast_ntype_lt,
   Lnast_ntype_le,
   Lnast_ntype_gt,

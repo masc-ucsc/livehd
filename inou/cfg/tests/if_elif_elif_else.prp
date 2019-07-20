@@ -1,0 +1,32 @@
+$a  as __bits:1
+$b  as __bits:1
+w   as __bits:1
+x   as __bits:1
+y   as __bits:1
+z   as __bits:1
+%wo as __bits:1
+%xo as __bits:1
+%yo as __bits:1
+%zo as __bits:1
+
+w = 0
+x = 0
+y = 0
+z = 0
+
+if ($a & $b == 1) {
+  x = $a
+} elif (($a & $b) == 0) {
+  x = $b
+  y = $a | $b
+} elif (($a & $b) > 0) {
+  w = $a
+} else {
+  y = $a & $b
+  z = $b
+}
+
+%wo = w  
+%xo = x
+%yo = y
+%zo = z

@@ -450,7 +450,7 @@ K50  K51   0  280  292   =    %o2     ___v
 
   std::string_view setup_memblock(){
     std::string tmp_str = get_current_working_dir();
-    std::string file_path = tmp_str + "/inou/cfg/tests/ast_test.cfg";
+    std::string file_path = tmp_str + "/inou/cfg/tests/lnast_utest.cfg";
     int fd = open(file_path.c_str(), O_RDONLY);
     if(fd < 0) {
         fprintf(stderr, "error, could not open %s\n", file_path.c_str());

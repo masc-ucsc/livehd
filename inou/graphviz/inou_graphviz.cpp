@@ -203,10 +203,7 @@ void Inou_graphviz::populate_lnast_data(std::string_view files) {
 
     //get parent data for link
     auto p = lnast->get_parent(itr);
-    auto ptype = lnast->get_data(p).type;
     std::string pname(lnast->get_data(p).token.get_text(memblock));
-    //if(ptype == Lnast_ntype_top)
-    //  pname = "top";
 
     auto parent_id = std::to_string(p.level)+std::to_string(p.pos);
     data += fmt::format(" {}->{};\n", parent_id, id);
