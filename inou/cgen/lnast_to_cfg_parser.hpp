@@ -12,11 +12,11 @@ private:
   std::vector<std::vector<Lnast_node>> buffer_stack;
   std::vector<Lnast_node> node_buffer;
   std::string_view memblock;
-  Language_neutral_ast<Lnast_node> *lnast;
+  Language_neutral_ast *lnast;
   Lnast_parser lnast_parser;
 
 public:
-  Lnast_to_cfg_parser(std::string_view memblock, Language_neutral_ast<Lnast_node> *lnast) 
+  Lnast_to_cfg_parser(std::string_view memblock, Language_neutral_ast *lnast)
     : memblock(memblock), lnast(lnast) { setup_ntype_str_mapping(); };
   std::string ntype_dbg(Lnast_ntype_id ntype);
   void stringify();

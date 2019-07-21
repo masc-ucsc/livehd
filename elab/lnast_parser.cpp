@@ -7,31 +7,10 @@
 #define unlikely(x) __builtin_expect((x), 0)
 #endif
 
-void Lnast_parser::ssa_transform(const Tree_index& top){
-  ssa_phi_node_insertion(top);
-  ssa_uniquify_subscript(top);
-}
-
-void Lnast_parser::ssa_phi_node_insertion(const Tree_index& top) {
-  absl::flat_hash_map<int, u_int8_t > phi_table; //<token, condition_hierarchy>
-  for (const auto &itr: lnast->depth_preorder(top)) {
-    const auto& node_data = lnast->get_data(itr);
-    if(node_data.type == Lnast_ntype_func_def){
-      ssa_transform(itr);
-    } else if (node_data.type == Lnast_ntype_if){
-      ;
-    }
-  }
-}
-
-void Lnast_parser::ssa_uniquify_subscript(const Tree_index& top) {
-  ;
-}
-
 
 void Lnast_parser::elaborate(){
   fmt::print("start elaborate!\n");
-  lnast = std::make_unique<Language_neutral_ast<Lnast_node>>(get_buffer());
+  lnast = std::make_unique<Language_neutral_ast>(get_buffer());
   lnast->set_root(Lnast_node(Lnast_ntype_top, Token()));
   if(scan_calc_lineno() == 0) //SH:FIXME: ask Akash to remove the "END" line if you really don't need it
     scan_next();

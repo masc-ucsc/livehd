@@ -18,13 +18,10 @@ static inline constexpr int   CFG_TARGET_TMP_REF_RANGE =  1; //K14 K15  0 59 96 
 class Lnast_parser : public Elab_scanner {
 public:
   Lnast_parser() : line_num(0), line_tkcnt(0), knum1(0), knum2(0) { setup_ntype_str_mapping();};
-  const std::unique_ptr<Language_neutral_ast<Lnast_node>>&  get_ast(){return lnast;};
-  std::string                                               ntype_dbg(Lnast_ntype_id ntype);
+  const std::unique_ptr<Language_neutral_ast>&  get_ast(){return lnast;};
+  std::string                                   ntype_dbg(Lnast_ntype_id ntype);
 
 protected:
-  void       ssa_phi_node_insertion(const Tree_index& top);
-  void       ssa_uniquify_subscript(const Tree_index& top);
-  void       ssa_transform(const Tree_index& top);
   void       elaborate() override;
   void       build_top_statements              (const Tree_index& tree_idx_top);
   void       add_statement                     (const Tree_index& tree_top_sts);
@@ -44,8 +41,9 @@ protected:
   void            function_name_correction(Lnast_ntype_id type, const Tree_index& sts_idx);
   void            process_if_else_sts_range(const Tree_index& tree_idx_if);
   void            final_else_sts_type_correction();
+
 private:
-  std::unique_ptr<Language_neutral_ast<Lnast_node>>   lnast;
+  std::unique_ptr<Language_neutral_ast>               lnast;
   absl::flat_hash_map<Lnast_ntype_id , std::string>   ntype2str;
   uint32_t line_num;
   uint8_t  line_tkcnt;

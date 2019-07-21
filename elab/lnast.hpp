@@ -23,36 +23,16 @@ struct Lnast_node {
 };
 
 
-template <typename X>
-class Language_neutral_ast : public Tree<X> {
+class Language_neutral_ast : public Tree<Lnast_node> {
 public:
   Language_neutral_ast() = default;
   explicit Language_neutral_ast(std::string_view _buffer): buffer(_buffer) { I(!buffer.empty());}
   void ssa_trans();
-
 private:
   const std::string_view buffer;  // const because it can not change at runtime
-  void            add_phi_nodes();
-  void            renaming();
+  void do_ssa_trans(const Tree_index& top);
 protected:
 };
-
-template <typename X>
-void Language_neutral_ast<X>::ssa_trans() {
-  add_phi_nodes();
-  renaming();
-}
-
-template <typename X>
-void Language_neutral_ast<X>::add_phi_nodes() {
-
-  ;
-}
-
-template <typename X>
-void Language_neutral_ast<X>::renaming() {
-  ;
-}
 
 
 enum Lnast_node_type : Lnast_ntype_id {
@@ -94,3 +74,6 @@ enum Lnast_node_type : Lnast_ntype_id {
   Lnast_ntype_func_def,     // ::{   func_def = sub-graph in lgraph
   Lnast_ntype_top
 };
+
+
+
