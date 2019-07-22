@@ -204,7 +204,7 @@ void Lnast_to_cfg_parser::setup_ntype_str_mapping() {
   ntype2str[Lnast_ntype_minus] = "-";
   ntype2str[Lnast_ntype_mult] = "*";
   ntype2str[Lnast_ntype_div] = "/";
-  ntype2str[Lnast_ntype_eq] = "==";
+  ntype2str[Lnast_ntype_same] = "==";
   ntype2str[Lnast_ntype_lt] = "<";
   ntype2str[Lnast_ntype_le] = "<=";
   ntype2str[Lnast_ntype_gt] = ">";

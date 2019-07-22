@@ -73,15 +73,15 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
 }
 
 void Inou_lnast_dfg::process_ast_top(LGraph *dfg){
-  const auto& top = lnast->get_root();
-  const auto& statement  = lnast->get_child(top);
-  const auto& statements = lnast->get_children(statement);
+  const auto top = lnast->get_root();
+  const auto statement  = lnast->get_children(top)[0];
+  const auto statements = lnast->get_children(statement);
   process_ast_statements(dfg, statements);
 }
 
 void Inou_lnast_dfg::process_ast_statements(LGraph *dfg, const std::vector<Tree_index> &sts){
   for (const auto& ast_idx : sts) {
-    const auto& op = lnast->get_data(ast_idx).type;
+    const auto op = lnast->get_data(ast_idx).type;
     if (is_pure_assign_op(op)) {
       process_ast_pure_assign_op(dfg, ast_idx);
     } else if (is_binary_op(op)) {

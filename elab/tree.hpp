@@ -458,14 +458,6 @@ const std::vector<Tree_index> Tree<X>::get_children(const Tree_index &top) const
 }
 
 template <typename X>
-const Tree_index Tree<X>::get_child(const Tree_index &top) const {
-  I(top.level < pointers_stack.size());
-  I(get_children(top).size() == 1);
-  return Tree_index(top.level+1, 0);
-}
-
-
-template <typename X>
 const Tree_index Tree<X>::get_eldest_child(const Tree_index &top) const {
   I(top.level < pointers_stack.size());
   return Tree_index(top.level+1, 0);

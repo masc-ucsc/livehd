@@ -28,6 +28,16 @@ public:
   Language_neutral_ast() = default;
   explicit Language_neutral_ast(std::string_view _buffer): buffer(_buffer) { I(!buffer.empty());}
   void ssa_trans();
+
+  std::string_view get_token_sview(const Token &tk) const {
+    I(!buffer.empty());
+    I((tk.pos + tk.len)< buffer.size());
+    return std::string_view(&buffer[tk.pos], tk.len);
+  }
+
+  std::string_view get_buffer(){
+    return buffer;
+  }
 private:
   const std::string_view buffer;  // const because it can not change at runtime
   void do_ssa_trans(const Tree_index& top);

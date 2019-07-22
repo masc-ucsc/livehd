@@ -406,8 +406,6 @@ Lnast_ntype_id Lnast_parser::operator_analysis() {
     type = Lnast_ntype_mult;
   } else if (scan_is_token(Token_id_div)) {
     type = Lnast_ntype_div;
-  } else if (scan_is_token(Token_id_eq)) {
-    type = Lnast_ntype_eq;
   } else if (scan_is_token(Token_id_same)) {
     type = Lnast_ntype_same;
   } else if (scan_is_token(Token_id_le)) {

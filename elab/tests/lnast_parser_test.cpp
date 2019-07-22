@@ -40,5 +40,6 @@ int main(int argc, char **argv) {
   }
   Lnast_parser lnast_parser;
   lnast_parser.parse(argv[1], memblock);
-
+  auto lnast = lnast_parser.get_ast().get(); //unique_ptr lend its ownership
+  lnast->ssa_trans();
 }

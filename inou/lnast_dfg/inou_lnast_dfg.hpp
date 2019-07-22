@@ -57,7 +57,7 @@ private:
                                                                        (op == Lnast_ntype_minus) or
                                                                        (op == Lnast_ntype_mult) or
                                                                        (op == Lnast_ntype_div) or
-                                                                       (op == Lnast_ntype_eq) or
+                                                                       (op == Lnast_ntype_same) or
                                                                        (op == Lnast_ntype_lt) or
                                                                        (op == Lnast_ntype_le) or
                                                                        (op == Lnast_ntype_gt) or
