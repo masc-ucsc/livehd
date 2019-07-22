@@ -22,6 +22,7 @@ rm -f *.cfg
 ./prp nested_if_3.prp          | sort -n -tK -k2 > y && column -t y > x && rm -f y && mv x nested_if_3.cfg 
 ./prp if_elif_elif.prp         | sort -n -tK -k2 > y && column -t y > x && rm -f y && mv x if_elif_elif.cfg 
 ./prp if_elif_elif_else.prp    | sort -n -tK -k2 > y && column -t y > x && rm -f y && mv x if_elif_elif_else.cfg 
+./prp if_elif_elif_else_nested.prp    | sort -n -tK -k2 > y && column -t y > x && rm -f y && mv x if_elif_elif_else_nested.cfg 
 
 cp top.cfg        top_ooo.cfg
 

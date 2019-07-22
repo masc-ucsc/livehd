@@ -23,14 +23,14 @@ void Language_neutral_ast::do_ssa_trans(const Tree_index& top){
       if(target_name.substr(0,3) == "___")
         continue;
 
-      auto it = rename_table.find(target_name);
-      if (it != rename_table.end()) {
-        it->second += 1;
-        target_data.subs = it->second;
+      auto itr = rename_table.find(target_name);
+      if (itr != rename_table.end()) {
+        itr->second += 1;
+        target_data.subs = itr->second;
       } else {
         rename_table[target_name] = 0;
       }
-      fmt::print("target name:{}, subs:{}\n", target_name, target_data.subs);
+      fmt::print("target name:{}{}\n", target_name, target_data.subs);
     }
   }
 }
