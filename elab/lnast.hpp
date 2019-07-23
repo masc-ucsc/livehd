@@ -6,6 +6,8 @@
 
 using Lnast_ntype_id = uint8_t;
 using Scope_id       = uint8_t;
+using Rename_table = absl::flat_hash_map<std::string_view, u_int8_t >;
+using Phi_tree = std::unique_ptr<Tree<std::vector<Token>>>;
 
 struct Lnast_node {
   Lnast_ntype_id type; //not const as possible fake function call ...
@@ -29,18 +31,11 @@ public:
   explicit Language_neutral_ast(std::string_view _buffer): buffer(_buffer) { I(!buffer.empty());}
   void ssa_trans();
 
-  std::string_view get_token_sview(const Token &tk) const {
-    I(!buffer.empty());
-    I((tk.pos + tk.len)< buffer.size());
-    return std::string_view(&buffer[tk.pos], tk.len);
-  }
-
-  std::string_view get_buffer(){
-    return buffer;
-  }
 private:
   const std::string_view buffer;  // const because it can not change at runtime
   void do_ssa_trans(const Tree_index& top);
+  void ssa_normal_subtree(const Tree_index& opr_node, Rename_table& rename_table, Phi_tree& phi_tree);
+  void ssa_if_subtree    (const Tree_index& if_node,  Rename_table& rename_table, Phi_tree& phi_tree);
 protected:
 };
 
