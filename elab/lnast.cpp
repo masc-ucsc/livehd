@@ -20,7 +20,7 @@ void Language_neutral_ast::do_ssa_trans(const Tree_index& top){
   }
 }
 
-void Language_neutral_ast::ssa_if_subtree(const Tree_index& opr_node, Rename_table& rename_table, Phi_tree& phi_tree){
+void Language_neutral_ast::ssa_if_subtree(const Tree_index& opr_if, Rename_table& rename_table, Phi_tree& phi_tree){
   ;
 }
 
@@ -29,9 +29,11 @@ void Language_neutral_ast::ssa_normal_subtree(const Tree_index& opr_node, Rename
   if(type == Lnast_ntype_pure_assign || type == Lnast_ntype_as){
     auto target_data = this->get_data( this->get_children(opr_node)[0] ); //operator target is the eldest child
     const auto target_name = target_data.token.get_text(buffer);
-    if (target_name.substr(0,3) == "___"){
+    if (target_name.substr(0,3) == "___")
       return;
-    }
+
+    if(elder_sibling_is_label(opr_node))
+      return;
 
     auto itr = rename_table.find(target_name);
     if (itr != rename_table.end()) {
@@ -43,3 +45,17 @@ void Language_neutral_ast::ssa_normal_subtree(const Tree_index& opr_node, Rename
     fmt::print("target name:{}{}\n", target_name, target_data.subs);
   }
 }
+
+bool Language_neutral_ast::elder_sibling_is_label(const Tree_index& opr_node) {
+  auto all_siblings = this->get_children(this->get_parent(opr_node));
+  if(all_siblings.at(0) == opr_node){
+    return false;
+  } else {
+    auto it = std::find(all_siblings.begin(), all_siblings.end(), opr_node);
+    auto elder_sibling = *std::prev(it);
+    if(this->get_data(elder_sibling).type == Lnast_ntype_label)
+      return true;
+  }
+  return false;
+}
+
