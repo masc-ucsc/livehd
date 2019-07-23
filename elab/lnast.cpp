@@ -41,41 +41,5 @@ void Language_neutral_ast::ssa_normal_subtree(const Tree_index& opr_node, Rename
       rename_table[target_name] = 0;
     }
     fmt::print("target name:{}{}\n", target_name, target_data.subs);
-
   }
-
-  //for (const auto &node: this->depth_preorder(opr_node)) {
-  //  if(this->is_leaf(node))
-  //    continue;
-
-  //  const auto type = this->get_data(node).type;
-  //  if (type == Lnast_ntype_func_def) {
-  //    ;//do_ssa_trans(node);
-  //  } else if (type == Lnast_ntype_if) {
-  //    ;
-  //  } else if (type == Lnast_ntype_label) {
-  //    label_target_flag = true;
-  //  } else if (type == Lnast_ntype_pure_assign || type == Lnast_ntype_as) {
-  //    auto target_data = this->get_data( this->get_children(node)[0] ); //operator target is the eldest child
-  //    const auto target_name = target_data.token.get_text(buffer);
-
-  //    if (label_target_flag) { //repel case of "$a as __bits:1"
-  //      label_target_flag = false;
-  //      continue;
-  //    }
-
-  //    if (target_name.substr(0,3) == "___"){
-  //      continue;
-  //    }
-
-  //    auto itr = rename_table.find(target_name);
-  //    if (itr != rename_table.end()) {
-  //      itr->second += 1;
-  //      target_data.subs = itr->second;
-  //    } else {
-  //      rename_table[target_name] = 0;
-  //    }
-  //    fmt::print("target name:{}{}\n", target_name, target_data.subs);
-  //  }
-  //}
 }
