@@ -9,27 +9,26 @@ z   as __bits:1
 %yo as __bits:1
 %zo as __bits:1
 
-w = 0
+w = 1
 x = 0
-y = 0
+y = 1
 z = 0
+w = 0
+y = 0
 
-if (($a & $b)==1) {
+if (($a & $b) == 1) {
   x = $a
+  w = $a
 } elif (($a & $b) == 0) {
-  x = $b
   y = $a | $b
-  if (3>4) {
-    y = $a
-  } elif (3<4) {
-    y = $b
+  x = $a & $b
+  if (x > y) {
+    x = $a
   } else {
+    x = $b
     y = 0
   }
-} elif (($a & $b) > 0) {
-  w = $a
 } else {
-  y = $a & $b
   z = $b
 }
 

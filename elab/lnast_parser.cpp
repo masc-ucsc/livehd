@@ -333,8 +333,9 @@ void Lnast_parser::final_else_sts_type_correction() {
       I(lnast->get_data(last_else_sts).type == Lnast_ntype_cstatements);
       I(lnast->get_data(second_last_exe_sts).type == Lnast_ntype_statements);
       lnast->get_data(last_else_sts).type = Lnast_ntype_statements;
-      lnast->add_younger_sibling(second_last_exe_sts, Lnast_node(Lnast_ntype_cond, Token()));
-      lnast->add_younger_sibling(second_last_exe_sts, Lnast_node(Lnast_ntype_cstatements, Token()));
+      //SH:FIXME:bugy on add_younger_sibling, try not to use it for now and keep the "else" along without csts and cond
+      //auto tmp = lnast->add_younger_sibling(second_last_exe_sts, Lnast_node(Lnast_ntype_cstatements, Token()));
+      //lnast->add_younger_sibling(tmp, Lnast_node(Lnast_ntype_cond, Token()));
     }
   }
 }

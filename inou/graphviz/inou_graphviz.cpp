@@ -186,18 +186,25 @@ void Inou_graphviz::do_fromlnast( std::string_view files) {
 
 void Inou_graphviz::populate_lnast_data(std::string_view files) {
   const auto& lnast = lnast_parser.get_ast().get(); //unique_ptr lend its ownership
+  lnast->ssa_trans();//SH:Todo: option for ssa or not
   std::string data = "digraph {\n";
 
   for(const auto& itr : lnast->depth_preorder(lnast->get_root())){
-    auto node_data = lnast->get_data(itr);
-    auto type  = lnast_parser.ntype_dbg(node_data.type);
+    auto node_data   = lnast->get_data(itr);
+    auto str_type    = lnast_parser.ntype_dbg(node_data.type);
+    std::string subs = std::to_string(node_data.subs);
     std::string name(node_data.token.get_text(memblock));
-    //if(node_data.type == Lnast_ntype_top)
-    //  name = "top";
+
 
 
     auto id = std::to_string(itr.level)+std::to_string(itr.pos);
-    data += fmt::format(" {} [label=\"{}, {}\"];\n", id, type, name);
+    if(node_data.type == Lnast_ntype_ref){
+      data += fmt::format(" {} [label=\"{}, {}\"];\n", id, str_type, name+"["+subs+"]");
+    } else {
+      data += fmt::format(" {} [label=\"{}, {}\"];\n", id, str_type, name);
+    }
+
+
     if(node_data.type == Lnast_ntype_top)
       continue;
 

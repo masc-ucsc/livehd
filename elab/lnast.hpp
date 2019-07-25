@@ -6,8 +6,12 @@
 
 using Lnast_ntype_id = uint8_t;
 using Scope_id       = uint8_t;
-using Rename_table = absl::flat_hash_map<std::string_view, u_int8_t >;
-using Phi_tree = std::unique_ptr<Tree<std::vector<Token>>>;
+using Rename_table   = absl::flat_hash_map<std::string_view, u_int8_t >;
+using Lnast_index    = Tree_index;
+//using Phi_tree       = std::unique_ptr<Tree<absl::flat_hash_map<std::string_view, Lnast_index>>>;
+using Phi_tree_table = absl::flat_hash_map<std::string_view, Lnast_index>;
+using Phi_tree       = Tree<Phi_tree_table>;
+using Phi_tree_index = Tree_index; //SH:FIXME:buggy but ....
 
 struct Lnast_node {
   Lnast_ntype_id type; //not const as possible fake function call ...
@@ -33,10 +37,11 @@ public:
 
 private:
   const std::string_view buffer;  // const because it can not change at runtime
-  void do_ssa_trans(const Tree_index& top);
-  void ssa_normal_subtree(const Tree_index& opr_node, Rename_table& rename_table, Phi_tree& phi_tree);
-  void ssa_if_subtree    (const Tree_index& if_node,  Rename_table& rename_table, Phi_tree& phi_tree);
-  bool elder_sibling_is_label(const Tree_index&);
+  void do_ssa_trans(const Lnast_index &top);
+  void ssa_normal_subtree(const Lnast_index &opr_node, Rename_table &rename_table, Phi_tree &phi_tree, const Phi_tree_index &phi_parent);
+  void ssa_if_subtree    (const Lnast_index &if_node,  Rename_table &rename_table, Phi_tree &phi_tree, const Phi_tree_index &phi_parent);
+  bool elder_sibling_is_label(const Lnast_index &self);
+  bool elder_sibling_is_cond (const Lnast_index &self);
 protected:
 };
 
