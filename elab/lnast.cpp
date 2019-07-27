@@ -42,21 +42,17 @@ void Language_neutral_ast::ssa_if_subtree(const Lnast_index &opr_if, Rename_tabl
     I(this->get_parent(itr) == opr_if);
     auto type = this->get_data(itr).type;//this ptr = lnast
     fmt::print("if child, type:{}, level:{}, pos:{}\n", type, itr.level, itr.pos);
-    //if (type == Lnast_ntype_cond && this->get_data(itr).token.get_text(buffer) == ""){
-    //  has_else_block = true;
-    //  fmt::print("there is a condition node\n");
-    //} else if(type == Lnast_ntype_statements){
-    //  I(elder_sibling_is_cond(itr));
-    //  auto phi_sts_idx = phi_tree.add_child(phi_parent, Phi_tree_table());
-    //  for(const auto &opr_node : this->get_children(itr)){
-    //    I(this->get_data(opr_node).type != Lnast_ntype_func_def);
-    //    if(this->get_data(opr_node).type == Lnast_ntype_if){
-    //      ssa_if_subtree(opr_node, rename_table, phi_tree, phi_sts_idx);
-    //    } else {
-    //      ssa_normal_subtree(opr_node, rename_table, phi_tree, phi_sts_idx);
-    //    }
-    //  }
-    //}
+    if(type == Lnast_ntype_statements){
+      auto phi_sts_idx = phi_tree.add_child(phi_parent, Phi_tree_table());
+      for(const auto &opr_node : this->get_children(itr)){
+        I(this->get_data(opr_node).type != Lnast_ntype_func_def);
+        if(this->get_data(opr_node).type == Lnast_ntype_if)
+          ssa_if_subtree(opr_node, rename_table, phi_tree, phi_sts_idx);
+        else
+          ssa_normal_subtree(opr_node, rename_table, phi_tree, phi_sts_idx);
+
+      }
+    }
   }
 }
 
