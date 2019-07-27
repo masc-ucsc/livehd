@@ -80,6 +80,7 @@ cc_binary(
     data = ["//inou/cfg:cfg_pts"],
     deps = [
         ":elab",
+        "@gtest//:gtest_main",
     ],
 )
 
