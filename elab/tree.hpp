@@ -104,7 +104,8 @@ public:
 
   const Tree_index get_depth_preorder_next(const Tree_index &child) const;
 
-  const Tree_index get_parent(const Tree_index &child) const;
+  const Tree_index get_parent     (const Tree_index &child) const;
+  const Tree_index get_grandparent(const Tree_index &grandson) const;
   const Tree_index get_root() const;
   void             set_root(const X &data);
 
@@ -383,6 +384,11 @@ const Tree_index Tree<X>::get_parent(const Tree_index &child) const {
   I(pointers_stack[0].size() == 1); // One single root
 
   return Tree_index(0,0);
+}
+
+template <typename X>
+const Tree_index Tree<X>::get_grandparent(const Tree_index &grandson) const {
+  return get_parent(get_parent(grandson));
 }
 
 template <typename X>

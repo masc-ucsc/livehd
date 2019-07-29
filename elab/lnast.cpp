@@ -8,11 +8,14 @@ void Lnast::do_ssa_trans(const Lnast_index &top){
 
   Rename_table rename_table; //global table except func_def subtree
   Phi_tree     phi_tree;
-  phi_tree.set_root(Phi_tree_table());
-  auto  phi_top_sts_idx = phi_tree.get_root();
 
-  const std::vector<Lnast_index > top_sts = this->get_children( this->get_children(top)[0] );
-  for(const auto &opr_node : top_sts){
+  absl::flat_hash_map<std::string_view, Lnast_index> raw_phi_tree_table;
+  phi_tree.set_root(Phi_tree_table_pair(this->get_children(top)[0], raw_phi_tree_table));
+
+  auto  phi_top_sts_idx = phi_tree.get_root();
+  const std::vector<Lnast_index > top_sts_children = this->get_children( this->get_children(top)[0] );
+
+  for(const auto &opr_node : top_sts_children){
     if(this->get_data(opr_node).type == Lnast_ntype_if){
       ssa_if_subtree(opr_node, rename_table, phi_tree, phi_top_sts_idx);
     } else if (this->get_data(opr_node).type == Lnast_ntype_func_def){
@@ -38,14 +41,15 @@ void Lnast::do_ssa_trans(const Lnast_index &top){
 }
 
 void Lnast::ssa_if_subtree(const Lnast_index &if_node, Rename_table &rename_table, Phi_tree &phi_tree, const Phi_tree_index &phi_psts_idx){
-
+  fmt::print("hi! if-subtree!\n");
   auto lnast_if_children = this->get_children(if_node);
 
   for (const auto &itr : lnast_if_children){
     I(this->get_parent(itr) == if_node);
     auto type = this->get_data(itr).type;//this ptr = lnast
     if(type == Lnast_ntype_statements){
-      auto phi_sts_idx = phi_tree.add_child(phi_psts_idx, Phi_tree_table());
+      absl::flat_hash_map<std::string_view, Lnast_index> raw_phi_tree_table;
+      auto phi_sts_idx = phi_tree.add_child(phi_psts_idx, Phi_tree_table_pair(itr, raw_phi_tree_table));
       for(const auto &opr_node : this->get_children(itr)){
         I(this->get_data(opr_node).type != Lnast_ntype_func_def);
         if(this->get_data(opr_node).type == Lnast_ntype_if)
@@ -65,13 +69,15 @@ void Lnast::phi_node_insertion(const Lnast_index &if_node, Rename_table &rename_
   bool has_the_else_block = check_else_block_existence(if_node);
   const auto phi_psts_children_idxes = phi_tree.get_children(phi_psts_idx);
 
-  for(int i = phi_psts_children_idxes.size()-1; i < 1; i--){
+  fmt::print("\nhi! phi-node-insertion!\n");
+
+  for(int i = phi_psts_children_idxes.size()-1; i >= 1; i--){
     if(i == phi_psts_children_idxes.size()-1 && !has_the_else_block){
-      auto& phi_true_table = phi_tree.get_data(phi_psts_children_idxes[i-1]);
+      auto& phi_true_table = phi_tree.get_data(phi_psts_children_idxes[i-1]).second;
       for (auto const& [key, val] : phi_true_table){
         Lnast_index lnast_true_idx  = val;
         Lnast_index lnast_false_idx = get_complement_lnast_idx_from_parent(key, phi_tree, phi_psts_idx);
-        Lnast_index lnast_cond_idx  = get_elder_sibling( this->get_parent(lnast_true_idx));
+        Lnast_index lnast_cond_idx  = get_elder_sibling( this->get_grandparent(lnast_true_idx));
 
         auto& lnast_tidx_data = this->get_data(lnast_true_idx);  //tidx = true_idx
         auto& lnast_fidx_data = this->get_data(lnast_false_idx); //fidx = false_idx
@@ -92,13 +98,20 @@ void Lnast::phi_node_insertion(const Lnast_index &if_node, Rename_table &rename_
         this->add_child(phi_node, Lnast_node(Lnast_ntype_ref,  lnast_fidx_data.token, lnast_fidx_data.subs));
       }
     } else {
-      auto& phi_false_table = phi_tree.get_data(phi_psts_children_idxes[i]);
-      auto& phi_true_table  = phi_tree.get_data(phi_psts_children_idxes[i-1]);
+      auto& phi_false_table = phi_tree.get_data(phi_psts_children_idxes[i]).second;
+      auto& phi_true_table  = phi_tree.get_data(phi_psts_children_idxes[i-1]).second;
+
+      auto& lnast_true_sts_idx = phi_tree.get_data(phi_psts_children_idxes[i-1]).first;
+      Lnast_index lnast_cond_idx  = get_elder_sibling(lnast_true_sts_idx);
 
       for (auto const& [key, val] : phi_true_table){
         Lnast_index lnast_true_idx  = val;
         Lnast_index lnast_false_idx = get_complement_lnast_idx(key, phi_false_table, phi_tree, phi_psts_idx);
-        Lnast_index lnast_cond_idx  = get_elder_sibling( this->get_parent(lnast_true_idx));
+        //Lnast_index lnast_cond_idx  = get_elder_sibling(this->get_grandparent(lnast_true_idx));
+        fmt::print("now deal with true table\n");
+        fmt::print("lnast_true_idx level:{}, pos:{}\n", lnast_true_idx.level, lnast_true_idx.pos);
+        fmt::print("lnast_false_idx level:{}, pos:{}\n", lnast_false_idx.level, lnast_false_idx.pos);
+        fmt::print("lnast_cond_idx level:{}, pos:{}\n", lnast_cond_idx.level, lnast_cond_idx.pos);
 
 
 
@@ -124,8 +137,12 @@ void Lnast::phi_node_insertion(const Lnast_index &if_node, Rename_table &rename_
       for (auto const& [key, val] : phi_false_table){
         Lnast_index lnast_false_idx = val;
         Lnast_index lnast_true_idx  = get_complement_lnast_idx(key, phi_true_table, phi_tree, phi_psts_idx);
-        Lnast_index lnast_cond_idx  = get_elder_sibling( this->get_parent(lnast_true_idx));
+        //Lnast_index lnast_cond_idx  = get_elder_sibling( this->get_grandparent(lnast_true_idx));
 
+        fmt::print("now deal with false table\n");
+        fmt::print("lnast_true_idx level:{}, pos:{}\n", lnast_true_idx.level, lnast_true_idx.pos);
+        fmt::print("lnast_false_idx level:{}, pos:{}\n", lnast_false_idx.level, lnast_false_idx.pos);
+        fmt::print("lnast_cond_idx level:{}, pos:{}\n", lnast_cond_idx.level, lnast_cond_idx.pos);
 
         auto& lnast_tidx_data = this->get_data(lnast_true_idx);  //tidx = true_idx
         auto& lnast_fidx_data = this->get_data(lnast_false_idx); //fidx = false_idx
@@ -145,27 +162,48 @@ void Lnast::phi_node_insertion(const Lnast_index &if_node, Rename_table &rename_
         this->add_child(phi_node, Lnast_node(Lnast_ntype_ref,  lnast_tidx_data.token, lnast_tidx_data.subs));
         this->add_child(phi_node, Lnast_node(Lnast_ntype_ref,  lnast_fidx_data.token, lnast_fidx_data.subs));
       }
-
     }
   }
 }
 
-Lnast_index Lnast::get_complement_lnast_idx (std::string_view lnast_var, const Phi_tree_table &phi_complement_table, Phi_tree &phi_tree, const Phi_tree_index &phi_psts_idx) {
+Lnast_index Lnast::get_complement_lnast_idx (std::string_view lnast_var, Phi_tree_table &phi_complement_table, Phi_tree &phi_tree, const Phi_tree_index &phi_psts_idx) {
   //search direction: sibling table -> parent -> grand-parent -> ...
-  for(auto const & [key, val] : phi_complement_table){
-    if(lnast_var == key)
-      return val;
+  Lnast_index ret_idx(-1,-1);
+  for(auto it = phi_complement_table.cbegin(); it != phi_complement_table.cend();){
+    if(lnast_var == it->first){
+      ret_idx = it->second;
+      phi_complement_table.erase(it++);
+      return ret_idx;
+    } else {
+      ++it;
+    }
   }
+
+  //for(auto const & [var, idx] : phi_complement_table){
+  //  if(lnast_var == var)
+  //    return idx;
+  //}
   return get_complement_lnast_idx_from_parent(lnast_var, phi_tree, phi_psts_idx);
 }
 
 Lnast_index Lnast::get_complement_lnast_idx_from_parent (std::string_view lnast_var, Phi_tree &phi_tree, const Phi_tree_index &phi_psts_idx) {
-  auto &phi_psts_table = phi_tree.get_data(phi_psts_idx);
-  for(auto const & [key, val] : phi_psts_table){
-    if(lnast_var == key){
-      return val;
+  auto &phi_psts_table = phi_tree.get_data(phi_psts_idx).second;
+  Lnast_index ret_idx(-1,-1);
+  for(auto it = phi_psts_table.cbegin(); it != phi_psts_table.cend();){
+    if(lnast_var == it->first){
+      ret_idx = it->second;
+      phi_psts_table.erase(it++);
+      return ret_idx;
+    } else {
+      ++it;
     }
   }
+
+  //for(auto const & [var, idx] : phi_psts_table){
+  //  if(lnast_var == var){
+  //    return idx;
+  //  }
+  //}
 
   if(phi_tree.get_root() == phi_psts_idx)
     I(false, "variable is not defined in upper scopes");
@@ -207,7 +245,7 @@ void Lnast::ssa_normal_subtree(const Lnast_index &opr_node, Rename_table &rename
     }
 
     //phi_table[target_name] = target_idx; //operator [] of map won't work as it need default constructor of Tree_index
-    phi_table.insert_or_assign(target_name, target_idx); //always keep up with the latest index update on variable
+    phi_table.second.insert_or_assign(target_name, target_idx); //always keep up with the latest index update on variable
 
   }
 }

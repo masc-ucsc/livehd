@@ -4,13 +4,14 @@
 #include "elab_scanner.hpp"
 #include "tree.hpp"
 
-using Scope_id       = uint8_t;
-using Rename_table   = absl::flat_hash_map<std::string_view, u_int8_t >;
-using Lnast_ntype_id = uint8_t;
-using Lnast_index    = Tree_index;
-using Phi_tree_table = absl::flat_hash_map<std::string_view, Lnast_index>;
-using Phi_tree       = Tree<Phi_tree_table>;
-using Phi_tree_index = Tree_index; //SH:FIXME:buggy but ....
+using Scope_id            = uint8_t;
+using Rename_table        = absl::flat_hash_map<std::string_view, u_int8_t >;
+using Lnast_ntype_id      = uint8_t;
+using Lnast_index         = Tree_index;
+using Phi_tree_table      = absl::flat_hash_map<std::string_view, Lnast_index>;
+using Phi_tree_table_pair = std::pair<Lnast_index, absl::flat_hash_map<std::string_view, Lnast_index>>;//<corresponding lnast sts index, <lnast leaf ref var name, lnast leaf index>>
+using Phi_tree            = Tree<Phi_tree_table_pair>;
+using Phi_tree_index      = Tree_index; //SH:FIXME:buggy but ....
 
 struct Lnast_node {
   Lnast_ntype_id type; //not const as possible fake function call ...
@@ -44,7 +45,7 @@ private:
   void ssa_if_subtree        (const Lnast_index &if_node,  Rename_table &rename_table, Phi_tree &phi_tree, const Phi_tree_index &phi_psts_idx);
   void phi_node_insertion    (const Lnast_index &if_node,  Rename_table &rename_table, Phi_tree &phi_tree, const Phi_tree_index &phi_psts_idx);
   bool check_else_block_existence(const Lnast_index &if_node);
-  Lnast_index get_complement_lnast_idx (std::string_view lnast_var, const Phi_tree_table &phi_complement_table, Phi_tree &phi_tree, const Phi_tree_index &phi_psts_idx);
+  Lnast_index get_complement_lnast_idx (std::string_view lnast_var, Phi_tree_table &phi_complement_table, Phi_tree &phi_tree, const Phi_tree_index &phi_psts_idx);
   Lnast_index get_complement_lnast_idx_from_parent (std::string_view lnast_var, Phi_tree &phi_tree, const Phi_tree_index &phi_psts_idx);
   bool        elder_sibling_is_label(const Lnast_index &self);
   bool        elder_sibling_is_cond (const Lnast_index &self);
