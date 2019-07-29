@@ -18,7 +18,7 @@ static inline constexpr int   CFG_TARGET_TMP_REF_RANGE =  1; //K14 K15  0 59 96 
 class Lnast_parser : public Elab_scanner {
 public:
   Lnast_parser() : line_num(0), line_tkcnt(0), knum1(0), knum2(0) { setup_ntype_str_mapping();};
-  const std::unique_ptr<Language_neutral_ast>&  get_ast(){return lnast;};
+  const std::unique_ptr<Lnast>&  get_ast(){return lnast;};
   std::string                                   ntype_dbg(Lnast_ntype_id ntype);
 
 protected:
@@ -43,7 +43,7 @@ protected:
   void            final_else_sts_type_correction();
 
 private:
-  std::unique_ptr<Language_neutral_ast>               lnast;
+  std::unique_ptr<Lnast>               lnast;
   absl::flat_hash_map<Lnast_ntype_id , std::string>   ntype2str;
   uint32_t line_num;
   uint8_t  line_tkcnt;

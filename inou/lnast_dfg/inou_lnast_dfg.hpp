@@ -18,7 +18,7 @@ private:
   Inou_lnast_dfg_options opack;
   std::string_view       memblock;     //SH:FIXME:cannot initialize through constructor?
   Lnast_parser           lnast_parser; //SH:FIXME:cannot initialize through constructor?
-  Language_neutral_ast   *lnast;       //SH:FIXME:cannot initialize through constructor?
+  Lnast                 *lnast;        //SH:FIXME:cannot initialize through constructor?
 
 protected:
 

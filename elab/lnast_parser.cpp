@@ -10,7 +10,7 @@
 
 void Lnast_parser::elaborate(){
   fmt::print("start elaborate!\n");
-  lnast = std::make_unique<Language_neutral_ast>(get_buffer());
+  lnast = std::make_unique<Lnast>(get_buffer());
   lnast->set_root(Lnast_node(Lnast_ntype_top, Token()));
   if(scan_calc_lineno() == 0) //SH:FIXME: ask Akash to remove the "END" line if you really don't need it
     scan_next();
@@ -22,8 +22,9 @@ void Lnast_parser::elaborate(){
 
 void Lnast_parser::build_top_statements(const Tree_index& tree_idx_top){
   I(scan_text().at(0) == 'K');
-  uint32_t knum = (uint32_t)std::stoi(scan_text().substr(1));  //the token must be a complete alnum
-  auto tree_top_sts = lnast->add_child(tree_idx_top, Lnast_node(Lnast_ntype_statements, Token(), knum));
+  //uint32_t knum = (uint32_t)std::stoi(scan_text().substr(1));  //the token must be a complete alnum
+  //auto tree_top_sts = lnast->add_child(tree_idx_top, Lnast_node(Lnast_ntype_statements, Token(), knum));
+  auto tree_top_sts = lnast->add_child(tree_idx_top, Lnast_node(Lnast_ntype_statements, Token()));
   add_statement(tree_top_sts);
 }
 
@@ -456,6 +457,7 @@ void Lnast_parser::setup_ntype_str_mapping(){
   ntype2str [Lnast_ntype_else]        = "else"       ;
   ntype2str [Lnast_ntype_cond]        = "cond"       ;
   ntype2str [Lnast_ntype_uif]         = "uif"        ;
+  ntype2str [Lnast_ntype_phi]         = "phi"        ;
   ntype2str [Lnast_ntype_for]         = "for"        ;
   ntype2str [Lnast_ntype_while]       = "while"      ;
   ntype2str [Lnast_ntype_func_call]   = "func_call"  ;

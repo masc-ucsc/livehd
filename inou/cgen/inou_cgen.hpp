@@ -20,7 +20,7 @@ private:
   std::string_view memblock;
   Lnast_parser lnast_parser;
   Lnast_to_cfg_parser *lnast_to_cfg_parser;
-  Language_neutral_ast *lnast;
+  Lnast       *lnast;
   typedef std::ostringstream Out_string;
 
   enum Declaration_type { Decl_local, Decl_inp, Decl_out, Decl_sflop, Decl_aflop, Decl_fflop, Decl_latch };
