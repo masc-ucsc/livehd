@@ -41,17 +41,17 @@ public:
 private:
   const std::string_view buffer;  // const because it can not change at runtime
   void do_ssa_trans          (const Lnast_index &top);
-  void ssa_normal_subtree    (const Lnast_index &opr_node, Rename_table &rename_table, Phi_tree &phi_tree, const Phi_tree_index &phi_sts_idx);
-  void ssa_if_subtree        (const Lnast_index &if_node,  Rename_table &rename_table, Phi_tree &phi_tree, const Phi_tree_index &phi_psts_idx);
-  void phi_node_insertion    (const Lnast_index &if_node,  Rename_table &rename_table, Phi_tree &phi_tree, const Phi_tree_index &phi_psts_idx);
+  void ssa_normal_subtree    (const Lnast_index &opr_node, Rename_table &rename_table);
+  void ssa_if_subtree        (const Lnast_index &if_node,  Rename_table &rename_table);
+  void phi_node_insertion    (const Lnast_index &if_node,  Rename_table &rename_table);
   bool check_else_block_existence(const Lnast_index &if_node);
-  Lnast_index get_complement_lnast_idx (std::string_view lnast_var, Phi_tree_table &phi_complement_table, Phi_tree &phi_tree, const Phi_tree_index &phi_psts_idx);
-  Lnast_index get_complement_lnast_idx_from_parent (std::string_view lnast_var, Phi_tree &phi_tree, const Phi_tree_index &phi_psts_idx);
   bool        elder_sibling_is_label(const Lnast_index &self);
   bool        elder_sibling_is_cond (const Lnast_index &self);
   Lnast_index get_elder_sibling     (const Lnast_index &self);
   void        update_or_insert_rename_table(std::string_view target_name, Lnast_node &target_data, Rename_table &rename_table);
   void        update_rename_table(std::string_view target_name, Rename_table &rename_table);
+  //Lnast_index get_complement_lnast_idx (std::string_view lnast_var, Phi_tree_table &phi_complement_table, Phi_tree &phi_tree, const Phi_tree_index &phi_psts_idx);
+  //Lnast_index get_complement_lnast_idx_from_parent (std::string_view lnast_var, Phi_tree &phi_tree, const Phi_tree_index &phi_psts_idx);
 protected:
 };
 
