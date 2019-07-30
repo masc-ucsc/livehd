@@ -59,8 +59,13 @@ TEST_F(Setup_mmap_map_test, string_data) {
       (void)it;
       if(it.getFirst() == 0)
         zero_found = true;
+      auto key = map.get_key(it);
+      EXPECT_TRUE(map.has(key));
 
-      EXPECT_EQ(map.get(it), std::to_string(it.first) + "foo");
+      std::string_view val1 = map.get_sview(it.second);
+      std::string_view val = map.get(it);
+      EXPECT_EQ(val1, val);
+      EXPECT_EQ(val, std::to_string(it.first) + "foo");
       conta--;
     }
     for(auto it:map2) {
@@ -87,7 +92,7 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
     auto it = map.set(3,"test");
     EXPECT_EQ(it->first,3);
     EXPECT_NE(it->second,0);
-    EXPECT_EQ(map.get(*it),"test");
+    EXPECT_EQ(map.get(it->first),"test");
     map.clear();
     map2.clear();
 
@@ -128,7 +133,8 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
       EXPECT_EQ(txt1,txt2);
       EXPECT_EQ(txt1,txt3);
       EXPECT_EQ(txt1,txt4);
-      EXPECT_EQ(map.get(it), std::to_string(it.first) + "foo");
+      std::string_view val = map.get(it);
+      EXPECT_EQ(val, std::to_string(it.first) + "foo");
       conta--;
     }
     for(auto it:map2) {

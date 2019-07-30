@@ -1165,7 +1165,7 @@ public:
 		}
     assert(using_sview);
 		assert(key_pos<mmap_txt_base[0]);
-		std::string_view sview(reinterpret_cast<char *>(&mmap_txt_base[key_pos+1]),mmap_txt_base[key_pos]);
+		std::string_view sview(reinterpret_cast<const char *>(&mmap_txt_base[key_pos+1]),mmap_txt_base[key_pos]);
 		return sview;
 	}
 
