@@ -1181,7 +1181,7 @@ public:
     }
 	}
 
-	[[nodiscard]] T get(const value_type& it) const {
+	[[nodiscard]] const T &get(const value_type& it) const {
 		if constexpr (using_val_sview) {
       return get_sview(it.second);
     }else{
@@ -1189,7 +1189,7 @@ public:
     }
 	}
 
-	[[nodiscard]] T get(const_iterator it) const {
+	[[nodiscard]] const T &get(const_iterator it) const {
 		if constexpr (using_val_sview) {
       return get_sview(it->second);
     }else{

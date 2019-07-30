@@ -24,10 +24,7 @@
 #include "edge.hpp"
 #include "hierarchy.hpp"
 
-class LGraph : public LGraph_Node_Type
-{
-private:
-public:
+class LGraph : public LGraph_Node_Type {
 protected:
   friend class Node;
   friend class Node_pin;
@@ -37,71 +34,70 @@ protected:
   friend class Backward_edge_iterator;
   friend class Fast_edge_iterator;
 
-  void add_hierarchy_entry(std::string_view base, Lg_type_id lgid);
+  struct Expanded_hierarchy_index {
+    Expanded_hierarchy_index(uint64_t gpehidx, Lg_type_id plgid, Index_ID pnid)
+        : grand_parent_ehidx(gpehidx)
+        , parent_lgid(plgid)
+        , parent_nid(pnid) {}
+    uint64_t   grand_parent_ehidx;
+    Lg_type_id parent_lgid;
+    Index_ID   parent_nid;
+  };
 
-  unsigned int get_hierarchy_local_class_nid_bits() const {
-    int val = 32 - __builtin_clz(node_internal.size());
-    if (val<3)
-      return 3;
-    return val;
+  using Hierarchy_map = mmap_map::map<Hierarchy_index, Expanded_hierarchy_index>;
+
+  Hierarchy_map hierarchy_map;
+
+  Lg_type_id get_hierarchy_lgid(const Hierarchy_index &hidx) const {
+    if (!hidx)
+      return lgid;
+
+    Hierarchy_map_key up_hkey(hidx, 0);
+    auto up_it = top_g->hierarchy_map.find(up_hkey);
+    I(up_it != top_g->hierarchy_map.end());
+    return top_g->hierarchy_map.get(up_it).lgid;
   }
 
-  Lg_type_id get_hierarchy_class_lgid(const Hierarchy_index &hidx) const {
-    auto lgid_bits = library->get_lgid_bits();
-    Lg_type_id class_lgid = (hidx>>1) & ((1ULL<<lgid_bits)-1);
+  Hierarchy_index hierarchy_go_down(LGraph *top_g, const Hierarchy_index &hidx, Index_ID current_nid) const {
 
-    return class_lgid;
-  }
+    Hierarchy_index down_hidx;
 
-  std::pair<Lg_type_id, Index_ID> get_hierarchy_class(const Hierarchy_index &hidx) const {
-    auto lgid_bits = library->get_lgid_bits();
-    auto n_bits = get_hierarchy_local_class_nid_bits();
-    I(lgid_bits+n_bits+1<sizeof(Hierarchy_index)*8); // For sure
+    Hierarchy_map_key up_hkey(child_hidx, 0);
+    Hierarchy_map_key down_hkey(hidx, current_nid);
 
-    if (hidx & 1) {
-      // Compressed upper 32bits history
-      I(false); // FIXME: implement the compressed
-    }
-    Index_ID   class_nid  = (hidx>>(lgid_bits+1)) & ((1ULL<<n_bits)-1);
-    Lg_type_id class_lgid = (hidx>>1) & ((1ULL<<lgid_bits)-1);
+    auto down_it = top_g->hierarchy_map.find(down_key);
+    if (down_it != top_g->hierarchy_map.end()) {
+#ifndef NDEBUG
+      auto up_it = top_g->hierarchy_map.find(up_hkey);
+      I(up_it != top_g->hierarchy_map.end());
+      const auto &up_data = top_g->hierarchy_map.get(up_it);
+      I(up_data.hidx == hidx);
+      I(up_data.nid  == current_nid);
+      I(up_data.lgid == lgid);
+#endif
 
-    return std::pair(class_lgid, class_nid);
-  }
-
-  Hierarchy_index hierarchy_go_down(Hierarchy_index hidx, Index_ID nid) const {
-
-    I(is_sub(nid));
-    auto lgid_bits = library->get_lgid_bits();
-    auto n_bits = get_hierarchy_local_class_nid_bits();
-    I(((hidx>>1) & ((1ULL<<lgid_bits)-1)) == lgid); // Use current_g for going down
-
-    if (hidx & 1) {
-      // Compressed upper 32bits history
-      I(false);  // FIXME: implement compressed mode
-    }
-    // Check space left
-    auto val = sizeof(Hierarchy_index)*8 - __builtin_clz(hidx);
-    if (lgid_bits + n_bits + 1 >= val) { // +1 for compressed
-      // Must use compressed
-      I(false);// FIXME: implement compressed mode
+      const auto &data = top_g->hierarchy_map.get(down_it);
+      return data.hidx;
     }
 
-    Lg_type_id child_lgid = get_type_sub(nid);
+    uint64_t child_hidx = top_g->hierarchy_map.size();
 
-    hidx >>= 1;       // Drop compressed
+    auto child_lgid = get_type_sub(current_nid);
+    auto up_it = top_g->hierarchy_map.find(up_hkey);
+    if (up_it == top_g->hierarchy_map.end()) {
+      top_g->hierarchy_map.set(up_hkey, {hidx, current_nid, lgid});
+    } else {
+      const auto &up_data = top_g->hierarchy_map.get(up_it);
+      I(up_data.hidx == hidx);
+      I(up_data.nid  == current_nid);
+      I(up_data.lgid == lgid);
+    }
 
-    hidx >>= lgid_bits;  // Drop the parent lgid
+    top_g->hierarchy_map.set(down_key, {hidx, current_nid, child_lgid});
 
-    hidx <<= n_bits;  // Add space for child nid
-    I( nid == (nid & ((1ULL<<n_bits)-1)));
-    hidx |= nid;
+    I(get_hierarchy_lgid(child_hidx) == child_lgid);
 
-    hidx <<= lgid_bits;  // Add Space child lgid
-    I( child_lgid == (child_lgid & ((1ULL<<lgid_bits)-1)));
-    hidx |= child_lgid;
-    hidx <<=1;        // No compressed
-
-    return hidx;
+    return child_hidx;
   }
 
   Index_ID create_node_int() final;
@@ -160,11 +156,22 @@ protected:
 
   const LGraph *find_sub_lgraph_const(const Hierarchy_index &hidx) const {
 
+    if (!hidx)
+      return this;
+
     auto class_lgid = get_hierarchy_class_lgid(hidx);
     auto *current_g = LGraph::open(path, library->get_name(class_lgid));
     I(current_g);
 
-    return current_g;
+    auto [p_lgid, p_nid] = get_hierarchy_parent_class(hidx);
+    auto *parent_g = LGraph::open(path, p_lgid);
+    I(parent_g);
+    auto child_lgid = parent_g->get_type_sub(p_nid);
+
+    auto *child_g = LGraph::open(path, child_lgid);
+    I(child_g);
+
+    return child_g;
   }
 
   bool has_outputs(const Node_pin &pin) const {
@@ -232,12 +239,8 @@ public:
 
   virtual ~LGraph();
 
-  Hierarchy_index hierarchy_root() const {
-    Hierarchy_index hidx = 0;
-    hidx                 = lgid;
-    hidx <<= 1; // No compress for simple hidx
-
-    return hidx;
+  Hierarchy_index get_hierarchy_root() const {
+    return 0; // 0 is hierarchy_root
   }
 
   bool has_edge(const Node_pin &driver, const Node_pin &sink) const;

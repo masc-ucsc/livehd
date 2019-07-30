@@ -279,9 +279,9 @@ const Tree_index Tree<X>::add_younger_sibling(const Tree_index &sibling, const X
 
   I(sibling_level > 0);  // No siblings to root
 
-  I(data_stack.size() > sibling_level);
-  I(data_stack[sibling_level].size() > sibling_pos);
-  I(pointers_stack[sibling_level].size() > sibling_pos);
+  I(data_stack.size() > (size_t)sibling_level);
+  I(data_stack[sibling_level].size() > (size_t)sibling_pos);
+  I(pointers_stack[sibling_level].size() > (size_t)sibling_pos);
 
   auto child_level = sibling_level;
   auto child_pos   = data_stack[child_level].size();
@@ -522,7 +522,7 @@ const std::vector<Tree_index> Tree<X>::get_children(const Tree_index &top) const
   // FIXME: build iterator
 
   I((size_t)top.level < pointers_stack.size());
-  if (top.level.value == (pointers_stack.size())) return children;
+  if ((size_t)top.level.value == pointers_stack.size()) return children;
 
   for (size_t j = 0; j < pointers_stack[top.level + 1].size(); j++) {
     if (pointers_stack[top.level + 1][j].parent == top.pos)

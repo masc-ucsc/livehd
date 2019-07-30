@@ -9,7 +9,7 @@ void Node::invalidate(LGraph *_g) {
   top_g     = _g;
   current_g = _g;
   nid       = 0;
-  hidx      = top_g->hierarchy_root();
+  hidx      = top_g->get_hierarchy_root();
 }
 
 void Node::update(const Hierarchy_index &_hidx, Index_ID _nid) {
@@ -19,11 +19,10 @@ void Node::update(const Hierarchy_index &_hidx, Index_ID _nid) {
   }
   nid = _nid;
   I(current_g->is_valid_node(nid));
-  I(current_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
+  //I(top_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
 }
 
 void Node::update(LGraph *_g, const Node::Compact &comp) {
-  I(comp.hidx);
   I(comp.nid);
   I(_g);
 
@@ -34,8 +33,8 @@ void Node::update(LGraph *_g, const Node::Compact &comp) {
   hidx      = comp.hidx;
   current_g = top_g->find_sub_lgraph(hidx);
 
-  I(current_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
   I(current_g->is_valid_node(nid));
+  //I(top_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
 }
 
 void Node::update(const Node::Compact &comp) {
@@ -56,9 +55,8 @@ void Node::update(const Node::Compact &comp) {
 Node::Node(LGraph *_g)
   :top_g(_g)
   ,current_g(_g)
-  ,hidx(_g->hierarchy_root())
+  ,hidx(_g->get_hierarchy_root())
   ,nid(0) {
-  I(hidx);
   I(top_g);
 }
 
@@ -67,28 +65,26 @@ Node::Node(LGraph *_g, const Hierarchy_index &_hidx, Compact_class comp)
   ,current_g(0)
   ,hidx(_hidx)
   ,nid(comp.nid) {
-  I(hidx);
   I(nid);
   I(top_g);
   current_g = top_g->find_sub_lgraph(hidx);
 
-  I(current_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
   I(current_g->is_valid_node(nid));
+  //I(top_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
 }
 
 Node::Node(LGraph *_g, Compact_class comp)
   :top_g(_g)
   ,current_g(0)
-  ,hidx(_g->hierarchy_root())
+  ,hidx(_g->get_hierarchy_root())
   ,nid(comp.nid) {
-  I(hidx);
   I(nid);
   I(top_g);
 
   current_g = top_g;
 
   I(current_g->is_valid_node(nid));
-  I(current_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
+  //I(top_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
 }
 
 Node::Node(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _nid)
@@ -97,12 +93,11 @@ Node::Node(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _nid
   ,hidx(_hidx)
   ,nid(_nid) {
 
-  I(hidx);
   I(nid);
   I(top_g);
   I(current_g);
   I(current_g->is_valid_node(nid));
-  I(current_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
+  //I(top_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
 }
 
 Node_pin Node::get_driver_pin() const {
@@ -187,7 +182,7 @@ bool Node::is_type_sub() const {
 
 Hierarchy_index Node::hierarchy_go_down() const {
   I(current_g->is_sub(nid));
-  return current_g->hierarchy_go_down(hidx, nid);
+  return current_g->hierarchy_go_down(top_g, hidx, nid);
 }
 
 void Node::set_type_sub(Lg_type_id subid) {

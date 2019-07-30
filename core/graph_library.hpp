@@ -165,6 +165,8 @@ public:
     return max_next_version - 1;
   }
 
+#if 0
+  // DEPRECATED
   unsigned int get_lgid_bits() const {
     // FIXME: if the lgid_bits increases (more lgraphs) all the attributes must be recomputed (create callback interface)
     uint32_t sz = attributes.size();
@@ -173,6 +175,7 @@ public:
       return 8;
     return val;
   }
+#endif
 
   //deprecated bool expunge_lgraph(std::string_view name, LGraph *lg);
 

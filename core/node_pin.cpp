@@ -43,7 +43,7 @@ Node_pin::Node_pin(LGraph *_g, Compact_driver comp)
 
 Node_pin::Node_pin(LGraph *_g, Compact_class_driver comp)
   :top_g(_g)
-  ,hidx(_g->hierarchy_root())
+  ,hidx(_g->get_hierarchy_root())
   ,idx(comp.idx)
   ,pid(_g->get_dst_pid(comp.idx))
   ,sink(false) {

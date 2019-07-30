@@ -17,7 +17,7 @@
 
 using testing::HasSubstr;
 
-class Setup_hierarchy : public Tree_lgdb_setup {
+class Setup_traverse : public Tree_lgdb_setup {
 protected:
   void check_lgraph_fwd(int rseed) {
     I(lg_root);
@@ -93,7 +93,7 @@ protected:
   }
 };
 
-TEST_F(Setup_hierarchy, check_attributes) {
+TEST_F(Setup_traverse, check_attributes) {
 
   int rseed=123;
   populate_tree(rseed, 10, 100, 0.5, true);
@@ -113,7 +113,7 @@ TEST_F(Setup_hierarchy, check_attributes) {
   }
 }
 
-TEST_F(Setup_hierarchy, simple_check_fwd) {
+TEST_F(Setup_traverse, simple_check_fwd) {
 
   int rseed=30;
   Rng rint(rseed);
@@ -127,9 +127,9 @@ TEST_F(Setup_hierarchy, simple_check_fwd) {
 }
 
 
-TEST_F(Setup_hierarchy, check_fwd) {
+TEST_F(Setup_traverse, check_fwd) {
 
-  return;
+  return; // FIXME
 
   int rseed=30;
   Rng rint(rseed);

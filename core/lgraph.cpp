@@ -140,6 +140,8 @@ void LGraph::clear() {
 
   set_type(nid1, GraphIO_Op);
   set_type(nid2, GraphIO_Op);
+
+  hierarchy_map.clear();
 }
 
 void LGraph::sync() {
@@ -158,19 +160,19 @@ Node_pin LGraph::get_graph_input(std::string_view str) {
 
   auto io_pid = get_self_sub_node().get_instance_pid(str);
 
-  return Node(this, hierarchy_root(), Node::Hardcoded_input_nid).setup_driver_pin(io_pid);
+  return Node(this, get_hierarchy_root(), Node::Hardcoded_input_nid).setup_driver_pin(io_pid);
 }
 
 Node_pin LGraph::get_graph_output(std::string_view str) {
   auto io_pid = get_self_sub_node().get_instance_pid(str);
 
-  return Node(this, hierarchy_root(), Node::Hardcoded_output_nid).setup_sink_pin(io_pid);
+  return Node(this, get_hierarchy_root(), Node::Hardcoded_output_nid).setup_sink_pin(io_pid);
 }
 
 Node_pin LGraph::get_graph_output_driver(std::string_view str) {
   auto io_pid = get_self_sub_node().get_instance_pid(str);
 
-  return Node(this, hierarchy_root(), Node::Hardcoded_output_nid).setup_driver_pin(io_pid);
+  return Node(this, get_hierarchy_root(), Node::Hardcoded_output_nid).setup_driver_pin(io_pid);
 }
 
 bool LGraph::is_graph_input(std::string_view name) const {
@@ -242,7 +244,7 @@ Node_pin LGraph::add_graph_input(std::string_view str, Port_ID pos, uint16_t bit
   auto idx = setup_idx_from_pid(Node::Hardcoded_input_nid, inst_pid);
   setup_driver(idx); // Just driver, no sink
 
-  Node_pin pin(this, this, hierarchy_root(), idx, inst_pid, false);
+  Node_pin pin(this, this, get_hierarchy_root(), idx, inst_pid, false);
 
   pin.set_name(str);
   pin.set_bits(bits);
@@ -266,11 +268,11 @@ Node_pin LGraph::add_graph_output(std::string_view str, Port_ID pos, uint16_t bi
   setup_sink(idx);
   setup_driver(idx); // outputs can also drive internal nodes. So both sink/driver
 
-  Node_pin dpin(this, this, hierarchy_root(), idx, inst_pid, false);
+  Node_pin dpin(this, this, get_hierarchy_root(), idx, inst_pid, false);
   dpin.set_name(str);
   dpin.set_bits(bits);
 
-  return Node_pin(this, this, hierarchy_root(), idx, inst_pid, true);
+  return Node_pin(this, this, get_hierarchy_root(), idx, inst_pid, true);
 }
 
 Node_pin_iterator LGraph::out_connected_pins(const Node &node) const {
@@ -468,7 +470,7 @@ XEdge_iterator LGraph::inp_edges(const Node &node) const {
 
 Node LGraph::create_node() {
   Index_ID nid = create_node_int();
-  return Node(this, hierarchy_root(), nid);
+  return Node(this, get_hierarchy_root(), nid);
 }
 
 Node LGraph::create_node(const Node &old_node) {
@@ -509,7 +511,7 @@ Node LGraph::create_node(Node_Type_Op op) {
   I(op!=GraphIO_Op);  // Special case, must use add input/output API
   I(op!=SubGraph_Op); // Do not build by steps. call create_node_sub
 
-  return Node(this, hierarchy_root(), nid);
+  return Node(this, get_hierarchy_root(), nid);
 }
 
 Node LGraph::create_node(Node_Type_Op op, uint16_t bits) {
@@ -532,7 +534,18 @@ Node LGraph::create_node_const(uint32_t value) {
   I(node_internal[nid].get_dst_pid()==0);
   I(node_internal[nid].is_master_root());
 
-  return Node(this, hierarchy_root(), nid);
+  return Node(this, get_hierarchy_root(), nid);
+}
+
+Node LGraph::create_node_const(std::string_view value) {
+
+  auto nid = find_type_const_sview(value);
+  if (unlikely(nid)) {
+    nid = create_node_int();
+    set_type_const_sview(nid, value);
+  }
+
+  return Node(this, get_hierarchy_root(), nid);
 }
 
 Node LGraph::create_node_sub(Lg_type_id sub_id) {
@@ -541,7 +554,7 @@ Node LGraph::create_node_sub(Lg_type_id sub_id) {
   auto nid = create_node().get_nid();
   set_type_sub(nid, sub_id);
 
-  return Node(this, hierarchy_root(), nid);
+  return Node(this, get_hierarchy_root(), nid);
 }
 
 Node LGraph::create_node_sub(std::string_view sub_name) {
@@ -551,7 +564,7 @@ Node LGraph::create_node_sub(std::string_view sub_name) {
   auto &sub = library->setup_sub(sub_name);
   set_type_sub(nid, sub.get_lgid());
 
-  return Node(this, hierarchy_root(), nid);
+  return Node(this, get_hierarchy_root(), nid);
 }
 
 Sub_node &LGraph::get_self_sub_node() const {
@@ -584,7 +597,7 @@ Node LGraph::create_node_const(std::string_view value, uint16_t bits) {
   I(node_internal[nid].get_dst_pid()==0);
   I(node_internal[nid].is_master_root());
 
-  return Node(this, hierarchy_root(), nid);
+  return Node(this, get_hierarchy_root(), nid);
 }
 
 Index_ID LGraph::create_node_int() {

@@ -19,7 +19,9 @@ class Tree_lgdb_setup : public ::testing::Test {
 protected:
   struct Node_data {
     int create_pos;
-    Node::Compact cnode;
+    LGraph         *lg;
+    Hierarchy_index hidx;
+    Node::Compact_class cnode;
     int fwd_pos;
     int bwd_pos;
     bool leaf;
@@ -101,7 +103,7 @@ protected:
           sub_lg->add_graph_output(name, pos, rint.uniform<int>(60));
         }
       }
-      data.cnode = node.get_compact();
+      data.cnode = node.get_compact_class();
 
       node.set_name(data.name);
 
@@ -112,6 +114,26 @@ protected:
 
       //fmt::print("create {} class {}\n", hnode.debug_name(), hnode.get_class_lgraph()->get_name());
       node_order.emplace_back(node);
+    }
+
+    // Populated hidx
+    for (const auto &index : tree.breadth_first()) {
+      auto &data = tree.get_data(index);
+      data.lg   = nullptr;
+      data.hidx = 0;
+      if (index.level <= 1) {
+        data.hidx = lg_root->get_hierarchy_root();
+        data.lg   = lg_root;
+        continue;
+      }
+
+      const auto parent_index = tree.get_parent(index);
+      auto &parent_data = tree.get_data(parent_index);
+
+      Node parent_node(lg_root, parent_data.hidx, parent_data.cnode);
+      data.hidx = parent_node.hierarchy_go_down();
+      data.lg   = parent_node.get_type_sub_lgraph();
+      I(parent_data.name == data.lg->get_name());
     }
 
     {

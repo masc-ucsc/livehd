@@ -31,7 +31,7 @@ bool Prp::rule_code_blocks(){
     return false;
   }
   while(rule_code_block_int());
-  
+
   rule_call_trace.push_back("Matched rule_code_blocks\n");
   return true;
 }
@@ -95,7 +95,7 @@ bool Prp::rule_if_statement(){
   debug_stat.rules_called++;
   rule_call_trace.push_back("Called rule_if_statement\n");
   int tokens_consumed = 0;
-  
+
   if (scan_is_token(Pyrope_id_unique)){
     debug_consume(); // consume the unique token
     tokens_consumed++;
@@ -202,7 +202,7 @@ bool Prp::rule_for_index(){
   debug_stat.rules_called++;
   rule_call_trace.push_back("Called rule_for_index\n");
   int tokens_consumed = 0;
-  
+
   if(rule_rhs_expression_property()){
     // zero or more
     bool next = true;
@@ -238,7 +238,7 @@ bool Prp::rule_else_statement(){
   debug_stat.rules_called++;
   rule_call_trace.push_back("Called rule_else_statement\n");
   int tokens_consumed = 0;
-  
+
   // option one
   if(scan_is_token(Pyrope_id_elif)){
     debug_consume(); // consume the elif
@@ -271,7 +271,7 @@ bool Prp::rule_else_statement(){
       }
     }
   }
-    
+
   // option two
   go_back(tokens_consumed);
   tokens_consumed = 0;
@@ -315,7 +315,7 @@ bool Prp::rule_while_statement(){
   debug_stat.rules_called++;
   rule_call_trace.push_back("Called rule_while_statement\n");
   int tokens_consumed = 0;
-  
+
   if(scan_is_token(Pyrope_id_while)){
     debug_consume(); // consume the while
     tokens_consumed++;
@@ -357,7 +357,7 @@ bool Prp::rule_try_statement(){
   debug_stat.rules_called++;
   rule_call_trace.push_back("Called rule_try_statement\n");
   int tokens_consumed = 0;
-  
+
   if(scan_is_token(Pyrope_id_try)){
     debug_consume(); // consume the try
     tokens_consumed++;
@@ -435,14 +435,14 @@ bool Prp::rule_scope_body(){
     debug_stat.rules_matched++;
     return true;
   }
-  
+
   // option two
   if(rule_logical_expression()){
     rule_call_trace.push_back("Matched rule_scope_body\n");
     debug_stat.rules_matched++;
     return true;
   }
-  
+
   rule_call_trace.push_back("Failed rule_scope_body\n");
   return false;
 }
@@ -451,7 +451,7 @@ bool Prp::rule_scope(){
   rule_call_trace.push_back("Called rule_scope\n");
   debug_stat.rules_called++;
   int tokens_consumed = 0;
-  
+
   if(scan_is_token(Token_id_colon)){
     // optional
     debug_consume();
@@ -464,7 +464,7 @@ bool Prp::rule_scope(){
       return true;
     }
   }
-  
+
   go_back(tokens_consumed);
   rule_call_trace.push_back("Failed rule_scope\n");
   return false;
@@ -474,7 +474,7 @@ bool Prp::rule_scope_condition(){
   rule_call_trace.push_back("Called rule_scope_condition\n");
   debug_stat.rules_called++;
   int tokens_consumed = 0;
-  
+
   // option one
   if(rule_scope_argument()){
     if(scan_is_token(Pyrope_id_when)){
@@ -487,7 +487,7 @@ bool Prp::rule_scope_condition(){
       }
     }
   }
-  
+
   // option 2
   go_back(tokens_consumed);
   tokens_consumed = 0;
@@ -502,7 +502,7 @@ bool Prp::rule_scope_condition(){
       return true;
     }
   }
-  
+
   go_back(tokens_consumed);
   rule_call_trace.push_back("Failed rule_scope_condition\n");
   return false;
@@ -512,7 +512,7 @@ bool Prp::rule_scope_argument(){
   rule_call_trace.push_back("Called rule_scope_argument\n");
   debug_stat.rules_called++;
   int tokens_consumed = 0;
-  
+
   // option one
   if(scan_is_token(Token_id_op)){
     debug_consume(); // consume the open parenthesis
@@ -528,10 +528,10 @@ bool Prp::rule_scope_argument(){
       }
     }
   }
-  
+
   go_back(tokens_consumed);
   tokens_consumed = 0;
-  
+
   // option 2
   if(scan_is_token(Token_id_op)){
     debug_consume();
@@ -558,7 +558,7 @@ bool Prp::rule_scope_argument(){
       }
     }
   }
-  
+
   go_back(tokens_consumed);
   rule_call_trace.push_back("Matched rule_scope_argument\n");
   debug_stat.rules_matched++;
@@ -569,7 +569,7 @@ bool Prp::rule_scope_declaration(){
   debug_stat.rules_called++;
   rule_call_trace.push_back("Called rule_scope_declaration\n");
   int tokens_consumed = 0;
-  
+
   if(rule_scope()){
     if(scan_is_token(Token_id_ob)){
       debug_consume();
@@ -596,7 +596,7 @@ bool Prp::rule_punch_format(){
   rule_call_trace.push_back("Called rule_punch_format\n");
   debug_stat.rules_called++;
   int tokens_consumed = 0;
-  
+
   if(scan_is_token(Pyrope_id_punch)){
     debug_consume();
     tokens_consumed++;
@@ -623,7 +623,7 @@ bool Prp::rule_punch_rhs(){
   debug_stat.rules_called++;
   int tokens_consumed = 0;
   bool next;
-  
+
   // option 1
   if(scan_is_token(Token_id_div)){
     debug_consume(); // consume the div
@@ -669,10 +669,10 @@ bool Prp::rule_punch_rhs(){
       }
     }
   }
-  
+
   go_back(tokens_consumed);
   tokens_consumed = 0;
-  
+
   // option 2
   if(scan_is_token(Token_id_div)){
     debug_consume(); // consume the div
@@ -712,7 +712,7 @@ bool Prp::rule_punch_rhs(){
       }
     }
   }
-  
+
   go_back(tokens_consumed);
   rule_call_trace.push_back("Failed rule_punch_rhs\n");
   return false;
@@ -722,7 +722,7 @@ bool Prp::rule_function_pipe(){
   debug_stat.rules_called++;
   fmt::print("Hello from rule_function_pipe.\n");
   int tokens_consumed = 0;
-  
+
   if(rule_fcall_implicit() || rule_logical_expression()){
     if(scan_is_token(Token_id_pipe)){
       debug_consume();
@@ -740,7 +740,7 @@ bool Prp::rule_function_pipe(){
 bool Prp::rule_fcall_explicit(){
   debug_stat.rules_called++;
   int tokens_consumed = 0;
-  
+
   if(!rule_constant()){
     if(rule_tuple_dot_notation()){
       if(scan_is_token(Token_id_dot)){
@@ -760,7 +760,7 @@ bool Prp::rule_fcall_explicit(){
       }
     }
   }
-  
+
   go_back(tokens_consumed);
   return false;
 }
@@ -769,7 +769,7 @@ bool Prp::rule_fcall_arg_notation(){
   debug_stat.rules_called++;
   int tokens_consumed = 0;
   bool next;
-  
+
   // option 1
   if(scan_is_token(Token_id_op)){
     debug_consume();
@@ -783,10 +783,10 @@ bool Prp::rule_fcall_arg_notation(){
       }
     }
   }
-  
+
   tokens_consumed = 0;
   go_back(tokens_consumed);
-  
+
   //option 2
   if(scan_is_token(Token_id_op)){
     debug_consume();
@@ -811,10 +811,10 @@ bool Prp::rule_fcall_arg_notation(){
       }
     }
   }
-  
+
   tokens_consumed = 0;
   go_back(tokens_consumed);
-  
+
   //option 3
   if(scan_is_token(Token_id_op)){
     debug_consume();
@@ -824,7 +824,7 @@ bool Prp::rule_fcall_arg_notation(){
       return true;
     }
   }
-  
+
   go_back(tokens_consumed);
   return false;
 }
@@ -840,11 +840,11 @@ bool Prp::rule_assignment_expression(){
 	if(rule_constant()){
 		return false;
 	}
-	
+
 	debug_down();
 	bool next = rule_lhs_expression() || rule_overload_notation();
   debug_up(0);
-	
+
 	if(next){
     debug_down();
 		next = rule_assignment_operator();
@@ -891,7 +891,7 @@ bool Prp::rule_tuple_notation(){
   debug_stat.rules_called++;
   fmt::print("Hello from rule_tuple_notation\n");
   int tokens_consumed = 0;
-  
+
   // option 1
   if(!scan_is_token(Token_id_op)){
     fmt::print("rule_tuple_notation: trying option 1.\n");
@@ -907,7 +907,7 @@ bool Prp::rule_tuple_notation(){
     fmt::print("rule_tuple_notation: trying options 2 and 3.\n");
     if(rule_rhs_expression_property() || rule_logical_expression()){
       bool next = true;
-      
+
       // zero or more of the following
       while(next){
         if(scan_is_token(Token_id_comma)){
@@ -977,7 +977,7 @@ bool Prp::rule_tuple_dot_dot(){
   fmt::print("Hello from rule_tuple_dot_dot.\n");
   bool next = true;
   int tokens_consumed = 0;
-  
+
   while(next){
     next = scan_is_token(Token_id_dot);
     if(next){
@@ -1016,7 +1016,7 @@ bool Prp::rule_tuple_array_bracket(){
   fmt::print("Hello from rule_tuple_array_bracket.\n");
   bool next = true;
   int tokens_consumed = 0;
-  
+
   /* zero or more */
   while(next){
     next = scan_is_token(Token_id_obr);
@@ -1049,7 +1049,7 @@ bool Prp::rule_tuple_notation_no_bracket(){
     while(rule_bit_selection_notation());
     return true;
   }
-	
+
 	return false;
 }
 
@@ -1060,10 +1060,10 @@ bool Prp::rule_identifier(){
     //debug_up(Prp_rule_identifier);
 		return false;
 	}
-	
+
 	ast->add(Prp_rule_identifier, scan_token());
 	debug_consume(); // consume the ID, need to check for optional "?"
-	
+
 	if(scan_is_token(Token_id_qmark)){
     ast->add(Prp_rule_identifier, scan_token());
 		debug_consume();
@@ -1102,7 +1102,7 @@ bool Prp::rule_assignment_operator(){
     fmt::print("Fits rule_assignment_operator.\n");
 		return true;
 	}
-	
+
 	/* op= tokens*/
   if (scan_is_token(Token_id_mult) || scan_is_token(Token_id_plus) || scan_is_token(Token_id_minus)){
     ast->add(Prp_rule_assignment_operator, scan_token());
@@ -1117,10 +1117,10 @@ bool Prp::rule_assignment_operator(){
     go_back(tokens_consumed);
     return false;
   }
-	
+
   go_back(tokens_consumed);
   tokens_consumed = 0;
-	
+
 	/* left and right shift */
   if (scan_is_token(Token_id_lt)){
     ast->add(Prp_rule_assignment_operator, scan_token());
@@ -1142,10 +1142,10 @@ bool Prp::rule_assignment_operator(){
     debug_up(Prp_rule_assignment_operator);
     return false;
   }
-  
+
   go_back(tokens_consumed);
   tokens_consumed = 0;
-  
+
   if (scan_is_token(Token_id_gt)){
     ast->add(Prp_rule_assignment_operator, scan_token());
     debug_consume();
@@ -1189,11 +1189,11 @@ bool Prp::rule_bit_selection_bracket(){
   fmt::print("Hello from rule_bit_selection_bracket.\n");
   bool next = true;
   int tokens_consumed = 0;
-  
+
   // zero or more of the following
   while(next){
     next = false;
-    
+
     if(scan_is_token(Token_id_obr)){
       debug_consume();
       tokens_consumed++;
@@ -1213,7 +1213,7 @@ bool Prp::rule_bit_selection_bracket(){
             return false;
           }
         }
-        
+
         else if(rule_logical_expression() || rule_tuple_notation_no_bracket()){
           if(scan_is_token(Token_id_cbr)){
             debug_consume();
@@ -1225,12 +1225,12 @@ bool Prp::rule_bit_selection_bracket(){
             }
           }
         }
-        
+
         else{
           go_back(tokens_consumed);
           return false;
         }
-        
+
       }
     }
   }
@@ -1274,7 +1274,7 @@ bool Prp::rule_relational_expression(){
   debug_stat.rules_called++;
   int tokens_consumed = 0;
   bool next = true;
-  
+
   fmt::print("Hello from rule_relational_expression.\n");
   debug_down();
   if(rule_additive_expression()){
@@ -1308,7 +1308,7 @@ bool Prp::rule_additive_expression(){
   debug_stat.rules_called++;
   int tokens_consumed = 0;
   bool next = true;
-  
+
   fmt::print("Hello from rule_additive_expression.\n");
   debug_down();
   if(rule_bitwise_expression()){
@@ -1336,7 +1336,7 @@ bool Prp::rule_additive_expression(){
         }
         debug_up(Prp_rule_bitwise_expression);
       }
-      
+
       next = scan_is_token(Token_id_mult);
       if(next){
         debug_down();
@@ -1355,7 +1355,7 @@ bool Prp::rule_additive_expression(){
           }
         }
       }
-      
+
       next = scan_is_token(Token_id_lt);
       if(next){
         debug_down();
@@ -1379,7 +1379,7 @@ bool Prp::rule_additive_expression(){
           return false;
         }
       }
-      
+
       next = scan_is_token(Token_id_gt);
       if(next){
         debug_down();
@@ -1403,7 +1403,7 @@ bool Prp::rule_additive_expression(){
           return false;
         }
       }
-      
+
       next = (scan_is_token(Token_id_minus) || scan_is_token(Pyrope_id_union) || scan_is_token(Pyrope_id_intersect));
       if(next){
         debug_down();
@@ -1423,7 +1423,7 @@ bool Prp::rule_additive_expression(){
         }
       }
     }
-    
+
     /* optional */
     if(scan_is_token(Token_id_dot)){
       debug_down();
@@ -1455,7 +1455,7 @@ bool Prp::rule_bitwise_expression(){
   debug_stat.rules_called++;
   int tokens_consumed = 0;
   bool next = true;
-  
+
   fmt::print("Hello from rule_bitwise_expression().\n");
   if(rule_multiplicative_expression()){
     /* zero or more of the following */
@@ -1482,7 +1482,7 @@ bool Prp::rule_multiplicative_expression(){
   debug_stat.rules_called++;
   int tokens_consumed = 0;
   bool next = true;
-  
+
   fmt::print("Hello from rule_multiplicative_expression.\n");
   if(rule_unary_expression()){
     while(next){
@@ -1512,7 +1512,7 @@ bool Prp::rule_unary_expression(){
     fmt::print("Fits rule_unary_expression.\n");
     return true;
   }
-  
+
   if(scan_is_token(Token_id_bang)){
     debug_consume();
     tokens_consumed++;
@@ -1528,12 +1528,12 @@ bool Prp::rule_unary_expression(){
 bool Prp::rule_factor(){
   debug_stat.rules_called++;
   int tokens_consumed = 0;
-  
+
   if(rule_rhs_expression()){
     fmt::print("Fits rule_factor (option 2).\n");
     return true;
   }
-  
+
   fmt::print("Hello from rule_factor.\n");
   if(scan_is_token(Token_id_op)){
     fmt::print("rule_factor: found an open parenthesis.\n");
@@ -1556,7 +1556,7 @@ bool Prp::rule_factor(){
       return false;
     }
   }
-  
+
   go_back(tokens_consumed);
   tokens_consumed = 0;
   go_back(tokens_consumed);
@@ -1580,9 +1580,9 @@ void Prp::elaborate(){
   patch_pass(pyrope_keyword);
   ast = std::make_unique<Ast_parser>(get_buffer(), Prp_rule);
   debug_down();
-  
+
   int failed = 0;
-  
+
   while(!scan_is_end()){
     dump_token();
     eat_comments();
@@ -1591,37 +1591,37 @@ void Prp::elaborate(){
       break;
     }
   }
-  
+
   debug_up(Prp_rule_code_blocks);
-  
+
   if(failed){
     write_log("Parsing FAILED!\n");
   }
   else{
     write_log("Parsing SUCCESSFUL!\n");
   }
-  
+
   write_log("\nPART 1: RULE CALL TRACE\n\n");
-  
+
   // create the debug log; first write the rule call trace
   for(auto m = rule_call_trace.begin(); m != rule_call_trace.end(); ++m){
     write_log(*m);
   }
-  
+
   write_log("\nPART 2: AST CALL TRACE\n\n");
-  
+
   // second, write the ast call trace
   for(auto m = ast_call_trace.begin(); m != ast_call_trace.end(); ++m){
     write_log(*m);
   }
-  
+
   write_log("\nPART 3: AST PREORDER TRAVERSAL\n\n");
-  
+
   // next, write the AST traversal
   ast_handler();
-  
+
   write_log("\nPART 4: STATISTICS\n\n");
-  
+
   // finally, write the statistics
   write_log(fmt::format("Number of rules called: {}\n", debug_stat.rules_called));
   write_log(fmt::format("Number of rules matched: {}\n", debug_stat.rules_matched));
@@ -1633,7 +1633,7 @@ void Prp::elaborate(){
 
   // close the log
   close_log();
-  
+
   ast = nullptr;
 }
 
@@ -1696,7 +1696,7 @@ void Prp::ast_handler(){
   std::string rule_name;
   for(const auto &it:ast->depth_preorder(ast->get_root())) {
     auto node = ast->get_data(it);
-    
+
     switch(node.rule_id){
       case Prp_invalid:
         rule_name.assign("Invalid");

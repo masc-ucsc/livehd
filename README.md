@@ -9,15 +9,18 @@ Long CI: [![Build Status](https://dev.azure.com/renau0400/renau/_apis/build/stat
 
 LGraph is a graph optimized for live synthesis (Live Synthesizes Graph or
 LGraph for short). By live, we mean that small changes in the design should
-have results in few seconds. The goal is that any code change can have its
-synthesis and simulation setup ready under 30 seconds with a goal of under 4
-seconds in most cases.
+have results in few seconds. While fast interactive systems may need response
+sub-second, Live systems need to respond in few seconds. The goal is that any
+incremental code change can have its synthesis and simulation setup ready in
+few seconds.
 
-Notice that this is different goal from having a incremental synthesis were many
-edges are added and removed. The typical graph reconstruction is in the order of
-thousands of nodes.
+Since there are "seconds", we do not need to perform too fine grain incremental
+work. Notice that this is different goal from having a incremental synthesis
+were many edges are added and removed. The typical incremental graph
+reconstruction is in the order of thousands of nodes.
 
-LGraph is built to interface with other tools like Yosys, ABC, OpenTimer...
+LGraph is built to interface with other tools like Yosys, ABC, Mockturtle,
+OpenTimer...
 
 ![LGraph overall flow](./docs/lgraph.svg)
 

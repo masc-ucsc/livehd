@@ -4,6 +4,9 @@ cc_library(
     hdrs = glob(["include/*.hpp"]),
     visibility = ["//visibility:public"],
     includes = ["include"],
+    deps = [
+        "@iassert//:iassert",
+    ],
 )
 
 cc_library(
@@ -24,6 +27,16 @@ cc_test(
 )
 
 cc_test(
+    name = "tree_test",
+    srcs = ["tests/tree_test.cpp"],
+    deps = [
+        ":mmap_map_test_lib",
+        "@gtest//:gtest_main",
+        "@fmt//:fmt",
+    ],
+)
+
+cc_test(
     name = "use_map_bench",
     srcs = ["tests/use_map_bench.cpp"],
     deps = [
@@ -31,7 +44,6 @@ cc_test(
         "//bench:headers",
         "@sparsehash//:headers",
         "@fmt//:fmt",
-        "@iassert//:iassert",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:node_hash_map",
     ],
@@ -61,7 +73,6 @@ cc_test(
         "@com_google_absl//absl/container:flat_hash_map",
         "@gtest//:gtest_main",
         "@fmt//:fmt",
-        "@iassert//:iassert",
     ],
 )
 
