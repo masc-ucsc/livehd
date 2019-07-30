@@ -50,6 +50,8 @@ private:
   bool        elder_sibling_is_label(const Lnast_index &self);
   bool        elder_sibling_is_cond (const Lnast_index &self);
   Lnast_index get_elder_sibling     (const Lnast_index &self);
+  void        update_or_insert_rename_table(std::string_view target_name, Lnast_node &target_data, Rename_table &rename_table);
+  void        update_rename_table(std::string_view target_name, Rename_table &rename_table);
 protected:
 };
 

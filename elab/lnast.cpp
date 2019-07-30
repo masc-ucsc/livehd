@@ -25,19 +25,19 @@ void Lnast::do_ssa_trans(const Lnast_index &top){
     }
   }
 
-  //for (const auto &itr: phi_tree.depth_preorder()) {
-  //  const auto& phi_table = phi_tree.get_data(itr);
-  //  fmt::print("\nphi_table[{}][{}] content\n\n", itr.level, itr.pos);
-  //  for (auto const& [key, val] : phi_table){
-  //    auto var_subscript = this->get_data(val).subs;
-  //    fmt::print("var:{:<12}, subs:{}\n", key, var_subscript);
-  //  }
-  //}
+  for (const auto &itr: phi_tree.depth_preorder()) {
+    const auto& phi_table = phi_tree.get_data(itr).second;
+    fmt::print("\nphi_table[{}][{}] content\n\n", itr.level, itr.pos);
+    for (auto const& [key, val] : phi_table){
+      auto var_subscript = this->get_data(val).subs;
+      fmt::print("var:{:<12}, subs:{}\n", key, var_subscript);
+    }
+  }
 
-  //fmt::print("\nrename_table content\n\n");
-  //for (auto const& [key, val] : rename_table){
-  //  fmt::print("var:{:<12}, subs:{}\n", key, val);
-  //}
+  fmt::print("\nrename_table content\n\n");
+  for (auto const& [key, val] : rename_table){
+    fmt::print("var:{:<12}, subs:{}\n", key, val);
+  }
 }
 
 void Lnast::ssa_if_subtree(const Lnast_index &if_node, Rename_table &rename_table, Phi_tree &phi_tree, const Phi_tree_index &phi_psts_idx){
@@ -68,6 +68,7 @@ void Lnast::phi_node_insertion(const Lnast_index &if_node, Rename_table &rename_
 
   bool has_the_else_block = check_else_block_existence(if_node);
   const auto phi_psts_children_idxes = phi_tree.get_children(phi_psts_idx);
+  auto& phi_parent_table = phi_tree.get_data(phi_psts_idx).second;
 
   fmt::print("\nhi! phi-node-insertion!\n");
 
@@ -107,13 +108,10 @@ void Lnast::phi_node_insertion(const Lnast_index &if_node, Rename_table &rename_
       for (auto const& [key, val] : phi_true_table){
         Lnast_index lnast_true_idx  = val;
         Lnast_index lnast_false_idx = get_complement_lnast_idx(key, phi_false_table, phi_tree, phi_psts_idx);
-        //Lnast_index lnast_cond_idx  = get_elder_sibling(this->get_grandparent(lnast_true_idx));
         fmt::print("now deal with true table\n");
         fmt::print("lnast_true_idx level:{}, pos:{}\n", lnast_true_idx.level, lnast_true_idx.pos);
         fmt::print("lnast_false_idx level:{}, pos:{}\n", lnast_false_idx.level, lnast_false_idx.pos);
         fmt::print("lnast_cond_idx level:{}, pos:{}\n", lnast_cond_idx.level, lnast_cond_idx.pos);
-
-
 
         auto& lnast_tidx_data = this->get_data(lnast_true_idx);  //tidx = true_idx
         auto& lnast_fidx_data = this->get_data(lnast_false_idx); //fidx = false_idx
@@ -123,21 +121,24 @@ void Lnast::phi_node_insertion(const Lnast_index &if_node, Rename_table &rename_
         Lnast_index phi_node = this->add_younger_sibling(if_node, Lnast_node(Lnast_ntype_phi, Token()));
         auto target_token = this->get_data(lnast_true_idx).token;
 
-        auto itr = rename_table.find(target_token.get_text(buffer));
-        if (itr != rename_table.end())
-          itr->second += 1;
+        //auto itr = rename_table.find(target_token.get_text(buffer));
+        //if (itr != rename_table.end())
+        //  itr->second += 1;
+
+        update_rename_table(target_token.get_text(buffer), rename_table);
         auto target_subs = rename_table[target_token.get_text(buffer)];
 
-        this->add_child(phi_node, Lnast_node(Lnast_ntype_ref,  target_token, target_subs));
+        auto new_phi_idx = this->add_child(phi_node, Lnast_node(Lnast_ntype_ref,  target_token, target_subs));
+        auto phi_token = target_token;
         this->add_child(phi_node, Lnast_node(Lnast_ntype_cond, lnast_cidx_data.token));
         this->add_child(phi_node, Lnast_node(Lnast_ntype_ref,  lnast_tidx_data.token, lnast_tidx_data.subs));
         this->add_child(phi_node, Lnast_node(Lnast_ntype_ref,  lnast_fidx_data.token, lnast_fidx_data.subs));
+        phi_parent_table.insert_or_assign(target_token, new_phi_idx); //always keep up with the latest index update on variable
       }
 
       for (auto const& [key, val] : phi_false_table){
         Lnast_index lnast_false_idx = val;
         Lnast_index lnast_true_idx  = get_complement_lnast_idx(key, phi_true_table, phi_tree, phi_psts_idx);
-        //Lnast_index lnast_cond_idx  = get_elder_sibling( this->get_grandparent(lnast_true_idx));
 
         fmt::print("now deal with false table\n");
         fmt::print("lnast_true_idx level:{}, pos:{}\n", lnast_true_idx.level, lnast_true_idx.pos);
@@ -152,15 +153,19 @@ void Lnast::phi_node_insertion(const Lnast_index &if_node, Rename_table &rename_
         Lnast_index phi_node = this->add_younger_sibling(if_node, Lnast_node(Lnast_ntype_phi, Token()));
         auto target_token = this->get_data(lnast_true_idx).token;
 
-        auto itr = rename_table.find(target_token.get_text(buffer));
-        if (itr != rename_table.end())
-          itr->second += 1;
+        //auto itr = rename_table.find(target_token.get_text(buffer));
+        //if (itr != rename_table.end())
+        //  itr->second += 1;
+
+        update_rename_table(target_token.get_text(buffer), rename_table);
+
         auto target_subs = rename_table[target_token.get_text(buffer)];
 
         this->add_child(phi_node, Lnast_node(Lnast_ntype_ref,  target_token, target_subs));
         this->add_child(phi_node, Lnast_node(Lnast_ntype_cond, lnast_cidx_data.token));
         this->add_child(phi_node, Lnast_node(Lnast_ntype_ref,  lnast_tidx_data.token, lnast_tidx_data.subs));
         this->add_child(phi_node, Lnast_node(Lnast_ntype_ref,  lnast_fidx_data.token, lnast_fidx_data.subs));
+        !!!update table of phi_psts_idx
       }
     }
   }
@@ -236,17 +241,30 @@ void Lnast::ssa_normal_subtree(const Lnast_index &opr_node, Rename_table &rename
     if(elder_sibling_is_label(opr_node))
       return;
 
-    auto itr = rename_table.find(target_name);
-    if (itr != rename_table.end()) {
-      itr->second += 1;
-      target_data.subs = itr->second;
-    } else {
-      rename_table[target_name] = 0;
-    }
+    update_or_insert_rename_table(target_name, target_data, rename_table);
 
     //phi_table[target_name] = target_idx; //operator [] of map won't work as it need default constructor of Tree_index
     phi_table.second.insert_or_assign(target_name, target_idx); //always keep up with the latest index update on variable
+  }
+}
 
+
+void Lnast::update_rename_table(std::string_view target_name, Rename_table &rename_table){
+  auto itr = rename_table.find(target_name);
+  if (itr != rename_table.end())
+    itr->second += 1;
+  else
+    I(false, "variable undefined before");
+}
+
+
+void Lnast::update_or_insert_rename_table(std::string_view target_name, Lnast_node &target_data, Rename_table &rename_table){
+  auto itr = rename_table.find(target_name);
+  if (itr != rename_table.end()) {
+    itr->second += 1;
+    target_data.subs = itr->second;
+  } else {
+    rename_table[target_name] = 0;
   }
 }
 
