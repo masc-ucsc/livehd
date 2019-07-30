@@ -7,7 +7,8 @@ void Lnast::ssa_trans() {
 void Lnast::do_ssa_trans(const Lnast_index &top){
 
   Rename_table rename_table; //global table except func_def subtree
-
+  //Phi_sts_table  phi_sts_table;
+  //Phi_sts_tables phi_sts_tables;
 
   const std::vector<Lnast_index > top_sts_children = this->get_children( this->get_children(top)[0] );
 
