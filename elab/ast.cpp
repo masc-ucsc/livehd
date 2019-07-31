@@ -15,7 +15,7 @@ void Ast_parser::add_track_parent(const mmap_map::Tree_index &index) {
   for (int i = last_added.size(); i < index.level + 1; ++i) {
     last_added.emplace_back(-1, -1);
   }
-  I(last_added.size()>index.level);
+  I(last_added.size()>(size_t)index.level);
 
   down_added = index.level;
   last_added[down_added] = index;
@@ -47,7 +47,7 @@ void Ast_parser::up(Rule_id rule_id) {
 void Ast_parser::add(Rule_id rule_id, Token_entry te) {
   I(level > 0, "no rule add for ast root");
 
-  I(last_added.size()>=down_added);
+  I(last_added.size()>=(size_t)down_added);
 
   // Populate parents if needed
   for (int i = down_added; i < level; ++i) {
@@ -56,7 +56,7 @@ void Ast_parser::add(Rule_id rule_id, Token_entry te) {
     add_track_parent(child_index);
   }
   I(down_added+1>=level);
-  I(last_added.size() == level);
+  I(last_added.size() == (size_t)level);
 
   auto child_index = add_child(last_added.back(), Ast_parser_node(rule_id, te));
   GI(!last_added.back().is_invalid(), get_parent(last_added.back()) == get_parent(child_index));
