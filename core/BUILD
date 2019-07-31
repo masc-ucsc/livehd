@@ -5,40 +5,42 @@ cc_library(
     hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
     includes = ["."],
-    deps = ["@rapidjson//:headers",
-            "@iassert//:iassert",
-            "//eprp:eprp",
-            "//mmap_map:headers",
-            "//bench:headers",
-            "@yas//:headers",
-            ],
-)
+    deps = [
+        "@rapidjson//:headers",
+        "@iassert//:iassert",
+        "//eprp:eprp",
+        "//mmap_map:headers",
+        "//bench:headers",
+        "@yas//:headers",
+        ],
+    )
 
 cc_library(
     name = "tree_lgdb_test",
     hdrs = glob(["tests/tree_lgdb_setup.hpp"]),
     visibility = ["//visibility:public"],
     includes = ["."],
-    deps = [":core",
-            "@gtest//:gtest_main",
-            ],
-)
+    deps = [
+        ":core",
+        "@gtest//:gtest_main",
+        ],
+    )
 
 cc_test(
     name = "traversal_hierarchy_test",
     srcs = ["tests/traversal_hierarchy_test.cpp"],
     deps = [
         ":tree_lgdb_test",
-    ],
-)
+        ],
+    )
 
 cc_test(
     name = "traverse_test",
     srcs = ["tests/traverse_test.cpp"],
     deps = [
         ":tree_lgdb_test",
-    ],
-)
+        ],
+    )
 
 cc_test(
     name = "attribute_test",
@@ -46,8 +48,8 @@ cc_test(
     deps = [
         "@gtest//:gtest_main",
         ":core",
-    ],
-)
+        ],
+    )
 
 cc_test(
     name = "lgraph_each",
@@ -55,8 +57,8 @@ cc_test(
     deps = [
         "@gtest//:gtest_main",
         ":core",
-    ],
-)
+        ],
+    )
 
 cc_test(
     name = "node_test",
@@ -64,16 +66,16 @@ cc_test(
     deps = [
         "@gtest//:gtest_main",
         ":core",
-    ],
-)
+        ],
+    )
 
 cc_test(
     name = "iter_test",
     srcs = ["tests/iter_test.cpp"],
     deps = [
         ":core",
-    ],
-)
+        ],
+    )
 
 
 cc_test(
@@ -81,5 +83,6 @@ cc_test(
     srcs = ["tests/edge_test.cpp"],
     deps = [
         ":core",
-    ],
-)
+        ],
+    )
+

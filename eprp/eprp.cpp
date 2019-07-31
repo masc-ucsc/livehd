@@ -220,7 +220,7 @@ void Eprp::elaborate() {
   last_cmd_var.clear();
 };
 
-void Eprp::process_ast_handler(const Tree_index &parent, const Tree_index &self, const Ast_parser_node &node) {
+void Eprp::process_ast_handler(const mmap_map::Tree_index &parent, const mmap_map::Tree_index &self, const Ast_parser_node &node) {
   auto txt = scan_text(node.token_entry);
   fmt::print("level:{} pos:{} te:{} rid:{} txt:{}\n", self.level, self.pos, node.token_entry, node.rule_id, txt);
 

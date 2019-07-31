@@ -228,7 +228,7 @@ public:
   }
 
   // WARNING: can not return Tree_index & because future additions can move the pointer (vector realloc)
-  const Tree_index add_child             (const Tree_index &parent, const X &data);
+  const Tree_index add_child          (const Tree_index &parent, const X &data);
   const Tree_index add_next_sibling   (const Tree_index &sibling, const X &data);
   size_t get_tree_width(const Tree_level &level) const {
     if (level>=data_stack.size())

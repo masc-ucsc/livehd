@@ -2,22 +2,28 @@
 #pragma once
 
 #include "elab_scanner.hpp"
-#include "tree.hpp"
+#include "mmap_tree.hpp"
 
 using Rule_id = int;  // FIXME explicit_type
 
 struct Ast_parser_node {
-  const Rule_id     rule_id;
-  const Token_entry token_entry;
-  Ast_parser_node(Rule_id rid, Token_entry te) : rule_id(rid), token_entry(te) { I(rid); }
+  Rule_id     rule_id;
+  Token_entry token_entry;
+  Ast_parser_node() : rule_id(0), token_entry(0) {}
+  Ast_parser_node(const Ast_parser_node &other) : rule_id(other.rule_id), token_entry(other.token_entry) {}
+  Ast_parser_node(const Rule_id rid, const Token_entry te) : rule_id(rid), token_entry(te) { I(rid); }
 };
 
-class Ast_parser : public Tree<Ast_parser_node> {
+class Ast_parser : public mmap_map::tree<Ast_parser_node> {
 private:
 protected:
-  Tree_level             level;
-  Tree_level             down_added;
+  mmap_map::Tree_level             level;
+  mmap_map::Tree_level             down_added;
   const std::string_view buffer;  // const because it can not change at runtime
+
+  std::vector<mmap_map::Tree_index> last_added;
+
+  void add_track_parent(const mmap_map::Tree_index &index);
 public:
   Ast_parser(std::string_view buffer, Rule_id top_rule);
 

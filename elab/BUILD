@@ -4,7 +4,7 @@ cc_library(
     srcs = glob(
         ["*.cpp"],
         exclude = ["*test*.cpp"],
-    ),
+        ),
     hdrs = glob(["*.hpp"]),
     includes = ["."],
     linkopts = ["-lpthread"],
@@ -12,15 +12,16 @@ cc_library(
     deps = [
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
+        "//mmap_map:headers",
         "@fmt",
         "@iassert",
-    ],
-)
+        ],
+    )
 
 filegroup(
     name = "elab_scripts",
     srcs = ["tests/synth1.eprp"],
-)
+    )
 
 cc_test(
     name = "elab_scanner_test",
@@ -28,11 +29,11 @@ cc_test(
     args = ["$(location :elab_scripts)"],
     data = [
         ":elab_scripts",
-    ],
+        ],
     deps = [
         ":elab",
-    ],
-)
+        ],
+    )
 
 cc_test(
     name = "elab_scanner_unit_test",
@@ -41,8 +42,8 @@ cc_test(
     deps = [
         ":elab",
         "@gtest//:gtest_main",
-    ],
-)
+        ],
+    )
 
 cc_test(
     name = "elab_verilog_test",
@@ -50,11 +51,11 @@ cc_test(
     args = ["$(location :elab_scripts)"],
     data = [
         ":elab_scripts",
-    ],
+        ],
     deps = [
         ":elab",
-    ],
-)
+        ],
+    )
 
 cc_test(
     name = "tree_test",
@@ -62,8 +63,8 @@ cc_test(
     deps = [
         ":elab",
         "@gtest//:gtest_main",
-    ],
-)
+        ],
+    )
 
 cc_test(
     name = "lnast_parser_unit_test",
@@ -72,8 +73,8 @@ cc_test(
     deps = [
         ":elab",
         "@gtest//:gtest_main",
-    ],
-)
+        ],
+    )
 
 cc_binary(
     name = "lnast_parser_test",
@@ -82,8 +83,8 @@ cc_binary(
     deps = [
         ":elab",
         "@gtest//:gtest_main",
-    ],
-)
+        ],
+    )
 
 cc_binary(
     name = "elab_pyrope_test",
@@ -91,5 +92,5 @@ cc_binary(
     # args = ["$(location tests/synth1.elab)"],
     deps = [
         ":elab",
-    ],
-)
+        ],
+    )

@@ -44,7 +44,7 @@ protected:
   bool rule_cmd_or_reg(bool first);
   bool rule_top();
 
-  void process_ast_handler(const Tree_index &parent, const Tree_index &self, const Ast_parser_node &node);
+  void process_ast_handler(const mmap_map::Tree_index &parent, const mmap_map::Tree_index &self, const Ast_parser_node &node);
   void process_ast();
 
 public:
