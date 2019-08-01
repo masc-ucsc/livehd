@@ -122,7 +122,7 @@ void Pass_mockturtle::setup_input_signal(const unsigned int &group_id,
     edge2signal_mock[input_edge].signals=input_signal;
   }
 }
-
+//collect single bit output from mt for future mapping back to lg
 template<typename sig_type, typename ntk_type>
 void Pass_mockturtle::setup_output_signal(const unsigned int &group_id,
                                           const XEdge &output_edge,
@@ -838,7 +838,7 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT(LGraph *g) {
     //create klut network for each group
     //converting mig to klut
     fmt::print("Converting mockturtle network (gid:{}) to KLUT network...\n", group_id);
-    mockturtle::mapping_view<mockturtle::mig_network, true> mapped_mig{cleaned_mig_ntk};
+    mockturtle::mapping_view<mockturtle::mig_network, true> mapped_mig{cleaned_mig_ntk};//todo:might not suit for xag
     mockturtle::lut_mapping_params ps;
     ps.cut_enumeration_ps.cut_size = LUT_input_bits;
     mockturtle::lut_mapping<mockturtle::mapping_view<mockturtle::mig_network, true>, true>(mapped_mig, ps);

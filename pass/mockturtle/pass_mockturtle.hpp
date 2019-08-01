@@ -39,7 +39,7 @@
 #define LUTIFIED_NETWORK_NAME_SIGNATURE "_lutified"
 #define BIT_WIDTH_THRESHOLD 2
 
-using mockturtle_network = mockturtle::mig_network;
+using mockturtle_network = mockturtle::mig_network; //chose mig or xag
 
 //NOTE: In a vector of signals, the LSB signal is represented by index[0]
 //while the MSB signal is represented by index[size()-1]
@@ -66,11 +66,11 @@ protected:
   static void work(Eprp_var &var);
 
   absl::flat_hash_set<XEdge> input_edges, output_edges;
-  absl::flat_hash_map<Node::Compact, unsigned int> node2gid;
+  absl::flat_hash_map<Node::Compact, unsigned int> node2gid; //gid == group id
   absl::flat_hash_map<unsigned int, mockturtle_network> gid2mock;
   absl::flat_hash_map<unsigned int, mockturtle::klut_network> gid2klut;
-  absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle_network::signal>> edge2signal_mock;
-  absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle::klut_network::signal>> edge2signal_klut;
+  absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle_network::signal>> edge2signal_mock; //lg<->mig, including all boundary i/o and internal wires
+  absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle::klut_network::signal>> edge2signal_klut; //lg<->klut, search edge2signal_mock table, only record i/o mapping
   absl::flat_hash_map<Node::Compact, Node::Compact> old_node_to_new_node, new_node_to_old_node;
   absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::node>, Node::Compact> gidMTnode2LGnode;
   absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::signal>,

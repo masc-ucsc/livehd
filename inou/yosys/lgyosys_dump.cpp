@@ -625,6 +625,26 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
       }
       break;
     }
+    case LUT_Op: {
+      std::vector<RTLIL::SigChunk> joined_inp_wires;
+      bool      has_inputs = false;
+      uint8_t   inp_num = 0;
+      for(const auto &e:node.inp_edges()) {
+        RTLIL::Wire *join              = get_wire(e.driver);
+        joined_inp_wires.emplace_back(RTLIL::SigChunk(join));
+        has_inputs = true;
+        inp_num += 1;
+      }
+
+      if(!has_inputs) {
+        continue;
+      }
+
+      assert(cell_output_map.find(node.get_driver_pin().get_compact())!=cell_output_map.end());
+
+      module->addLut(next_id(g), RTLIL::SigSpec(joined_inp_wires), cell_output_map[node.get_driver_pin().get_compact()],inp_num);
+      break;
+    }
     case And_Op:
     case Or_Op:
     case Xor_Op: {
@@ -812,6 +832,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
       switch(node.get_type().op) {
       case LessThan_Op:
         module->addLt(next_id(g), lhs, rhs, cell_output_map[node.get_driver_pin().get_compact()], sign);
+
         break;
       case LessEqualThan_Op:
         module->addLe(next_id(g), lhs, rhs, cell_output_map[node.get_driver_pin().get_compact()], sign);
