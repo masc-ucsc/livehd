@@ -187,8 +187,6 @@ public:
     return (nid!=other.nid || hidx != other.hidx);
   };
 
-  bool is_root() const;
-
   void              set_type_lut(Lut_type_id lutid);
   Lut_type_id       get_type_lut() const;
 

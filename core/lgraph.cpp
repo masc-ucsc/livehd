@@ -44,6 +44,38 @@ LGraph *LGraph::create(std::string_view path, std::string_view name, std::string
   return new LGraph(path, name, source, true);
 }
 
+LGraph *LGraph::clone_skeleton(std::string_view extended_name) {
+
+  auto lg_source = get_library().get_source(get_lgid());
+  auto lg_name   = absl::StrCat(get_name(), extended_name);
+  LGraph *new_lg = LGraph::create(get_path(), lg_name, lg_source);
+
+  auto &new_sub = new_lg->get_self_sub_node();
+  new_sub.reset_pins(); // NOTE: it may have been created before. Clear to keep same order/attributes
+
+  for(const auto &old_io_pin:get_self_sub_node().get_io_pins()) {
+    new_sub.add_pin(old_io_pin.name, old_io_pin.dir, old_io_pin.graph_io_pos);
+  }
+
+  auto inp_node = Node(this, hierarchy_root(), Node::Hardcoded_input_nid);
+  for(const auto &pin:inp_node.out_setup_pins()) {
+    auto pos = get_self_sub_node().get_graph_pos_from_instance_pid(pin.get_pid());
+    assert(pin.is_graph_input());
+    auto dpin = new_lg->add_graph_input(pin.get_name(), pos, pin.get_bits());
+    I(dpin.get_pid() == pin.get_pid()); // WARNING: pins created in same order should match
+  }
+
+  auto out_node = Node(this, hierarchy_root(), Node::Hardcoded_output_nid);
+  for(const auto &pin:out_node.out_setup_pins()) {
+    auto pos = get_self_sub_node().get_graph_pos_from_instance_pid(pin.get_pid());
+    assert(pin.is_graph_output());
+    auto dpin = new_lg->add_graph_output(pin.get_name(), pos, pin.get_bits());
+    I(dpin.get_pid() == pin.get_pid()); // WARNING: pins created in same order should match
+  }
+
+  return new_lg;
+}
+
 LGraph *LGraph::open(std::string_view path, int lgid) {
   std::string_view name = Graph_library::instance(path)->get_name(lgid);
 
@@ -401,33 +433,37 @@ Node LGraph::create_node(const Node &old_node) {
 
   // TODO: We can just copy the node_type_table AND update the tracking (graphio, consts)
 
+  Node new_node;
+
   Node_Type_Op op = old_node.get_type().op;
 
   if (op == LUT_Op ) {
-    auto new_node = create_node();
+    new_node = create_node();
     new_node.set_type_lut(old_node.get_type_lut());
-    return new_node;
+  }else if (op == SubGraph_Op) {
+    new_node = create_node_sub(old_node.get_type_sub());
+  }else if (op == U32Const_Op) {
+    new_node = create_node_const(old_node.get_type_const_value(), old_node.get_driver_pin().get_bits());
+  }else if (op == StrConst_Op) {
+    new_node = create_node_const(old_node.get_type_const_sview(), old_node.get_driver_pin().get_bits());
+  }else{
+    I(op != GraphIO_Op); // Special case, must use add input/output API
+    new_node = create_node(op);
   }
 
-  if (op == SubGraph_Op) {
-    return create_node_sub(old_node.get_type_sub());
+  for(auto old_dpin:old_node.out_setup_pins()) {
+    auto new_dpin = new_node.setup_driver_pin(old_dpin.get_pid());
+    new_dpin.set_bits(old_dpin.get_bits());
   }
 
-  if (op == U32Const_Op) {
-    return create_node_const(old_node.get_type_const_value(), old_node.get_driver_pin().get_bits());
-  }
-
-  if (op == StrConst_Op) {
-    return create_node_const(old_node.get_type_const_sview(), old_node.get_driver_pin().get_bits());
-  }
-
-  return create_node(op);
+  return new_node;
 }
 
 Node LGraph::create_node(Node_Type_Op op) {
   Index_ID nid = create_node_int();
   set_type(nid, op);
 
+  I(op!=GraphIO_Op);  // Special case, must use add input/output API
   I(op!=SubGraph_Op); // Do not build by steps. call create_node_sub
 
   return Node(this, hierarchy_root(), nid);
@@ -554,9 +590,19 @@ void LGraph::dump() {
       fmt::print("  inp bits:{} pid:{} from nid:{} pid:{} name:{}\n", edge.get_bits(), edge.sink.get_pid(), edge.driver.get_node().nid,
                  edge.driver.get_pid(), edge.driver.debug_name());
     }
+    for(const auto &spin : node.inp_setup_pins()) {
+      if (spin.is_connected()) // Already printed
+        continue;
+      fmt::print("  inp bits:{} pid:{} name:{} UNCONNECTED\n", spin.get_bits(), spin.get_pid(), spin.debug_name());
+    }
     for(const auto &edge : node.out_edges()) {
       fmt::print("  out bits:{} pid:{} name:{} to nid:{} pid:{}\n", edge.get_bits(), edge.driver.get_pid(), edge.driver.debug_name(),
                  edge.sink.get_node().nid, edge.sink.get_pid());
+    }
+    for(const auto &dpin : node.out_setup_pins()) {
+      if (dpin.is_connected()) // Already printed
+        continue;
+      fmt::print("  out bits:{} pid:{} name:{} UNCONNECTED\n", dpin.get_bits(), dpin.get_pid(), dpin.debug_name());
     }
   }
 #endif
@@ -568,5 +614,12 @@ void LGraph::dump_sub_nodes() {
   }
 }
 
+Node LGraph::get_graph_input_node() {
+  return Node(this, hierarchy_root(), Node::Hardcoded_input_nid);
+}
+
+Node LGraph::get_graph_output_node() {
+  return Node(this, hierarchy_root(), Node::Hardcoded_output_nid);
+}
 
 

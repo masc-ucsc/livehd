@@ -132,6 +132,7 @@ std::string Node_pin::debug_name() const {
 }
 
 std::string_view Node_pin::get_name() const {
+  I(has_name()); // get_name should be called for named driver_pins
   return Ann_node_pin_name::ref(current_g)->get_val(get_compact_class_driver());
 }
 
@@ -199,5 +200,12 @@ Ann_bitwidth *Node_pin::ref_bitwidth() {
 
 bool Node_pin::has_bitwidth() const {
   return Ann_node_pin_bitwidth::ref(top_g)->has(get_compact_driver());
+}
+
+bool Node_pin::is_connected() const {
+  if (is_driver())
+    return current_g->has_outputs(*this);
+
+  return current_g->has_inputs(*this);
 }
 

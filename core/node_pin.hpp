@@ -306,6 +306,7 @@ public:
   const Ann_bitwidth &get_bitwidth() const;
   Ann_bitwidth       *ref_bitwidth();
   bool                has_bitwidth() const;
+  bool                is_connected() const;
 
   // END ATTRIBUTE ACCESSORS
 };

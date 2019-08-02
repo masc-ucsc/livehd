@@ -23,7 +23,8 @@ RTLIL::Wire *Lgyosys_dump::get_wire(const Node_pin &pin) {
     return cell_it->second;
   }
 
-  fmt::print("trying to get wire for pin {}\n", pin.get_name());
+  fmt::print("trying to get wire for non existing driver pin {} ??\n", pin.debug_name());
+  assert(pin.is_driver());
   assert(false);
 }
 

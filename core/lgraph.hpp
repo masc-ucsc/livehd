@@ -259,6 +259,8 @@ public:
   Backward_edge_iterator backward(bool visit_sub=false);
   Fast_edge_iterator fast(bool visit_sub=false);
 
+  LGraph *clone_skeleton(std::string_view extended_name);
+
   static bool    exists(std::string_view path, std::string_view name);
   static LGraph *create(std::string_view path, std::string_view name, std::string_view source);
   static LGraph *open(std::string_view path, int lgid);
@@ -296,6 +298,9 @@ public:
 
   void dump();
   void dump_sub_nodes();
+
+  Node get_graph_input_node();
+  Node get_graph_output_node();
 
   Node_pin get_graph_input(std::string_view str);
   Node_pin get_graph_output(std::string_view str);

@@ -131,10 +131,6 @@ int Node::get_num_outputs() const {
   return current_g->get_num_outputs(nid);
 }
 
-bool Node::is_root() const {
-  return current_g->is_root(nid);
-}
-
 Node_pin Node::setup_driver_pin(Port_ID pid) {
   I(current_g->get_type(nid).has_output(pid));
   Index_ID idx = current_g->setup_idx_from_pid(nid,pid);
