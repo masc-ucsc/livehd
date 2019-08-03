@@ -947,7 +947,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
       auto old_node_edge_bits = in_edge.driver.get_bits();//sh
       fmt::print("old_node_edge_bits:{}\n", old_node_edge_bits);
       I(driver_pin.get_bits() == in_edge.driver.get_bits());
-      new_lg->add_edge(driver_pin, sink_pin);//sh
+      new_lg->add_edge(driver_pin, sink_pin, old_node_edge_bits);//sh
     }
     for (const auto &out_edge : old_node.out_edges()) {
       if (edge2signal_mock.find(out_edge)==edge2signal_mock.end()) {
@@ -961,16 +961,12 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
         auto old_node_edge_bits = out_edge.driver.get_bits();//sh
         fmt::print("old_node_edge_bits:{}\n", old_node_edge_bits);
         I(driver_pin.get_bits() == out_edge.driver.get_bits());
-        new_lg->add_edge(driver_pin, sink_pin);//sh
+        new_lg->add_edge(driver_pin, sink_pin, old_node_edge_bits);//sh
       }
     }
   }
-
   fmt::print("Unchanged part mapped.\n");
-  fmt::print("old_node -> new_node:\n");
-  for (const auto &it : old_node_to_new_node) {
-    fmt::print("{}->{}\n",it.first.get_node(new_lg).debug_name(),it.second.get_node(new_lg).debug_name());
-  }
+
 
   //create lutified portion
   fmt::print("Start mapping lutified part...\n");
@@ -1009,7 +1005,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
     } );
     fmt::print("finished.\n");
 
-    //create new inner edges connecting nodes already created
+    //create inner edges to connect lg_nodes already created
     fmt::print("Creating KLUT network (gid:{}) inner edges in LGraph...\n", group_id);
     klut_ntk.foreach_node( [&](const auto &klut_ntk_node) {
       if (klut_ntk.is_pi(klut_ntk_node) || klut_ntk.is_constant(klut_ntk_node)) {
@@ -1029,7 +1025,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
         auto sink_node = Node(new_lg,gidMTnode2LGnode[std::make_pair(group_id, parent)]);
         auto driver_pin = driver_node.setup_driver_pin(0);
         auto sink_pin = sink_node.setup_sink_pin(i);
-        new_lg->add_edge(driver_pin, sink_pin);
+        new_lg->add_edge(driver_pin, sink_pin, 1);//lut io should always be 1 bit
       } );
     } );
     fmt::print("finished.\n");
@@ -1052,7 +1048,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
         auto sink_node = Node(new_lg,gidMTnode2LGnode[std::make_pair(group_id, parent_and_pid.first)]);
         const auto pid = parent_and_pid.second;
         auto sink_pin = sink_node.setup_sink_pin(pid);
-        new_lg->add_edge(driver_pin, sink_pin);
+        new_lg->add_edge(driver_pin, sink_pin, 1);
       }
     } else {
       for (auto i = 0; i < bit_width; i++) {
@@ -1069,9 +1065,9 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
           auto const_node_for_bit_select = new_lg->create_node_const(i, 0);
           auto bit_select_signal = const_node_for_bit_select.setup_driver_pin(0);
           pick_node_driver_pin.set_bits(1);
-          new_lg->add_edge(bit_select_signal, pick_node_offset_pin);
-          new_lg->add_edge(driver_pin, pick_node_sink_pin);
-          new_lg->add_edge(pick_node_driver_pin, sink_pin);
+          new_lg->add_edge(bit_select_signal, pick_node_offset_pin, 1);
+          new_lg->add_edge(driver_pin, pick_node_sink_pin, 1);
+          new_lg->add_edge(pick_node_driver_pin, sink_pin, 1);
         }
       }
     }
@@ -1104,22 +1100,22 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
         connect_complemented_signal(new_lg, kth_driver_pin, kth_sink_pin, klut, sigs[i]);
       }
       auto driver_pin = join_node.setup_driver_pin(0);
-      new_lg->add_edge(driver_pin, sink_pin);
+      new_lg->add_edge(driver_pin, sink_pin, 1);
     }
   }
   fmt::print("finished.\n");
 
 }
 
-//slove complemented signal
+//solve complemented signal
 void Pass_mockturtle::connect_complemented_signal(LGraph *g, Node_pin &driver_pin, Node_pin &sink_pin, const mockturtle::klut_network &klut, const mockturtle::klut_network::signal &signal) {
   if (klut.is_complemented(signal)) {
     auto not_gate = g->create_node(Not_Op);
     auto not_gate_sink_pin = not_gate.setup_sink_pin(0);
     auto not_gate_driver_pin = not_gate.setup_driver_pin(0);
-    g->add_edge(driver_pin, not_gate_sink_pin);
-    g->add_edge(not_gate_driver_pin, sink_pin);
+    g->add_edge(driver_pin, not_gate_sink_pin, 1);
+    g->add_edge(not_gate_driver_pin, sink_pin, 1);
   } else {
-    g->add_edge(driver_pin, sink_pin);
+    g->add_edge(driver_pin, sink_pin, 1);
   }
 }
