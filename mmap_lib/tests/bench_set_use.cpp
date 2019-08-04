@@ -9,12 +9,12 @@
 //#include "bm.h"
 #include "rng.hpp"
 #include "lgbench.hpp"
-#include "dense.hpp"
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/flat_hash_map.h"
 #include "flat_hash_map.hpp"
-#include "mmap_map.hpp"
 #include "robin_hood.hpp"
+
+#include "mmap_map.hpp"
 
 using Rng = sfc64;
 
@@ -160,12 +160,18 @@ void random_robin_set(int max) {
   printf("inserts random %d\n",conta);
 }
 
-void random_lgraph_set(int max) {
+void random_mmap_set(int max, std::string_view name) {
   Rng rng(123);
 
-  LGBench b("random_lgraph_set");
+  std::string type_test("mmap_map_set ");
+  if (name.empty())
+    type_test += "(effemeral)";
+  else
+    type_test += "(persistent)";
 
-  mmap_map::map<uint32_t,bool> map("use_set_bench_db");
+  LGBench b(type_test);
+
+  mmap_lib::map<uint32_t,bool> map(name);
 
   for (int n = 1; n < BENCH_OUT_SIZE; ++n) {
     for (int i = 0; i < BENCH_INN_SIZE; ++i) {
@@ -243,6 +249,7 @@ void random_lgraph_set(int max) {
   b.sample("traversal dense");
 
   printf("inserts random %d\n",conta);
+
 }
 
 void random_abseil_set(int max) {
@@ -553,7 +560,7 @@ int main(int argc, char **argv) {
 
   bool run_random_std_set    = false;
   bool run_random_robin_set  = false;
-  bool run_random_lgraph_set = false;
+  bool run_random_mmap_set = false;
   bool run_random_abseil_set = false;
   bool run_random_ska_set    = false;
   bool run_random_vector_set = false;
@@ -563,8 +570,8 @@ int main(int argc, char **argv) {
       run_random_std_set = true;
     else if (strcasecmp(argv[1],"robin")==0)
       run_random_robin_set = true;
-    else if (strcasecmp(argv[1],"lgraph")==0)
-      run_random_lgraph_set = true;
+    else if (strcasecmp(argv[1],"mmap")==0)
+      run_random_mmap_set = true;
     else if (strcasecmp(argv[1],"abseil")==0)
       run_random_abseil_set = true;
     else if (strcasecmp(argv[1],"ska")==0)
@@ -574,7 +581,7 @@ int main(int argc, char **argv) {
   }else{
     run_random_std_set    = true;
     run_random_robin_set  = true;
-    run_random_lgraph_set = true;
+    run_random_mmap_set = true;
     run_random_abseil_set = true;
     run_random_ska_set    = true;
     run_random_vector_set = true;
@@ -583,23 +590,25 @@ int main(int argc, char **argv) {
   for(int i=1000;i<1'000'001;i*=1000) {
     printf("-----------------------------------------------\n");
     printf("        %d max\n",i);
-    if (run_random_std_set)
-      random_std_set(i);
-
     if (run_random_robin_set)
       random_robin_set(i);
-
-    if (run_random_lgraph_set)
-      random_lgraph_set(i);
-
-    if (run_random_abseil_set)
-      random_abseil_set(i);
 
     if (run_random_ska_set)
       random_ska_set(i);
 
     if (run_random_vector_set)
       random_vector_set(i);
+
+    if (run_random_std_set)
+      random_std_set(i);
+
+    if (run_random_abseil_set)
+      random_abseil_set(i);
+
+    if (run_random_mmap_set) {
+      random_mmap_set(i,"");
+      random_mmap_set(i,"mmap_map_set.data");
+    }
   }
 
   return 0;

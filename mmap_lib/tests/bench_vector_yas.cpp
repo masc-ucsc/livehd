@@ -5,20 +5,20 @@
 #include <iostream>
 
 #include "lgbench.hpp"
-#include "dense.hpp"
+#include "mmap_map.hpp"
 
 #include "yas/serialize.hpp"
 #include "yas/std_types.hpp"
 
-void run_dense(int test_size) {
+void run_mmap_vector(int test_size) {
 
-  LGBench b("dense.vector");
+  LGBench b("mmap_vector");
 
   size_t size=0;
-  const char *filename = "array.dense.data";
+  const char *filename = "bench_vector_array.data";
   {
     // unnecessary? unlink(filename);
-    Dense<int> array(filename);
+    mmap_lib::vector<int> array(filename);
 
     for(int i=0;i<test_size;i++) {
       array.emplace_back(i);
@@ -29,14 +29,14 @@ void run_dense(int test_size) {
       total += array[i];
     }
 
-    std::cout << "dense.result:" << total << std::endl;
+    std::cout << "mmap_vector.result:" << total << std::endl;
 
     size = array.size();
 
     b.sample("setup+serialize");
   }
 
-  Dense<int> array2(filename);
+  mmap_lib::vector<int> array2(filename);
   array2.reload(size);
 
   b.sample("unserialize");
@@ -46,12 +46,12 @@ void run_dense(int test_size) {
     total += array2[i];
   }
 
-  std::cout << "dense.check:" << total << std::endl;
+  std::cout << "mmap_vector.check:" << total << std::endl;
 }
 
-void run_yas(int test_size) {
+void run_std_vector_yas(int test_size) {
 
-  LGBench b("yas.vector");
+  LGBench b("std_vector_yas");
 
   std::vector<int> array;
   std::vector<int> array2;
@@ -112,17 +112,17 @@ void run_yas(int test_size) {
 int main() {
 
   for(int i=0;i<32;i++) {
-    run_yas(4000);
-    run_dense(4000);
+    run_std_vector_yas(4000);
+    run_mmap_vector(4000);
   }
 
   for(int i=0;i<4;i++) {
-    run_yas(4000000);
-    run_dense(4000000);
+    run_std_vector_yas(4000000);
+    run_mmap_vector(4000000);
   }
 
-  run_yas(60000000);
-  run_dense(60000000);
+  run_std_vector_yas(60000000);
+  run_mmap_vector(60000000);
 
   return 0;
 }

@@ -10,7 +10,7 @@ cc_library(
 )
 
 cc_library(
-    name = "mmap_map_test_lib",
+    name = "mmap_lib_test_lib",
     hdrs = glob(["tests/*.hpp"]),
     visibility = ["//visibility:public"],
     deps = [
@@ -19,10 +19,10 @@ cc_library(
 )
 
 cc_test(
-    name = "dense_test",
-    srcs = ["tests/dense_test.cpp"],
+    name = "mmap_vector_test",
+    srcs = ["tests/mmap_vector_test.cpp"],
     deps = [
-        ":mmap_map_test_lib",
+        ":mmap_lib_test_lib",
     ],
 )
 
@@ -30,17 +30,17 @@ cc_test(
     name = "tree_test",
     srcs = ["tests/tree_test.cpp"],
     deps = [
-        ":mmap_map_test_lib",
+        ":mmap_lib_test_lib",
         "@gtest//:gtest_main",
         "@fmt//:fmt",
     ],
 )
 
 cc_test(
-    name = "use_map_bench",
-    srcs = ["tests/use_map_bench.cpp"],
+    name = "bench_map_use",
+    srcs = ["tests/bench_map_use.cpp"],
     deps = [
-        ":mmap_map_test_lib",
+        ":mmap_lib_test_lib",
         "//bench:headers",
         "@sparsehash//:headers",
         "@fmt//:fmt",
@@ -50,10 +50,10 @@ cc_test(
 )
 
 cc_test(
-    name = "use_set_bench",
-    srcs = ["tests/use_set_bench.cpp"],
+    name = "bench_set_use",
+    srcs = ["tests/bench_set_use.cpp"],
     deps = [
-        ":mmap_map_test_lib",
+        ":mmap_lib_test_lib",
         "//bench:headers",
         "@sparsehash//:headers",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -64,10 +64,10 @@ cc_test(
 )
 
 cc_test(
-    name = "use_dense_bench",
-    srcs = ["tests/use_dense_bench.cpp"],
+    name = "bench_vector_use",
+    srcs = ["tests/bench_vector_use.cpp"],
     deps = [
-        ":mmap_map_test_lib",
+        ":mmap_lib_test_lib",
         "//bench:headers",
         "@sparsehash//:headers",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -80,7 +80,7 @@ cc_test(
     name = "mmap_map_test",
     srcs = ["tests/mmap_map_test.cpp"],
     deps = [
-        ":mmap_map_test_lib",
+        ":mmap_lib_test_lib",
         "//bench:headers",
         "@sparsehash//:headers",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -93,7 +93,7 @@ cc_test(
     name = "map_test",
     srcs = ["tests/map_test.cpp"],
     deps = [
-        ":mmap_map_test_lib",
+        ":mmap_lib_test_lib",
         "//bench:headers",
         "@gtest//:gtest_main",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -102,10 +102,10 @@ cc_test(
 )
 
 cc_test(
-    name = "dense_bench",
-    srcs = ["tests/dense_bench.cpp"],
+    name = "bench_vector_yas",
+    srcs = ["tests/bench_vector_yas.cpp"],
     deps = [
-        ":mmap_map_test_lib",
+        ":mmap_lib_test_lib",
         "//bench:headers",
         "@yas//:headers",
     ],
@@ -115,7 +115,7 @@ cc_test(
     name = "char_test",
     srcs = ["tests/char_test.cpp"],
     deps = [
-        ":mmap_map_test_lib",
+        ":mmap_lib_test_lib",
         "@sparsehash//:headers",
     ],
 )

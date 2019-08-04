@@ -14,15 +14,15 @@ class Elab_test : public ::testing::Test {
   std::vector<std::vector<std::string>> ast_sorted_verification;
 
 public:
-  mmap_map::tree<std::string> ast;
+  mmap_lib::tree<std::string> ast;
 
   void SetUp() override {
 
     ast.set_root("root");
 
-    auto c11 = ast.add_child(mmap_map::Tree_index(0,0), "child1.0");
+    auto c11 = ast.add_child(mmap_lib::Tree_index(0,0), "child1.0");
     I(c11.level == 1 && c11.pos == 0);
-    auto c12 = ast.add_child(mmap_map::Tree_index(0,0), "child1.1");
+    auto c12 = ast.add_child(mmap_lib::Tree_index(0,0), "child1.1");
     I(c12.level == 1 && c12.pos == 1);
 
     auto c111 = ast.add_child(c11, "child1.0.0");
@@ -48,7 +48,7 @@ public:
     auto c13  = ast.add_next_sibling(c12, "child1.2");
     I(c13.level == 1 && c13.pos == 2);
 
-    ast.each_bottom_up_fast([this](const mmap_map::Tree_index &self, std::string str) {
+    ast.each_bottom_up_fast([this](const mmap_lib::Tree_index &self, std::string str) {
       while (static_cast<size_t>(self.level)>=ast_sorted_verification.size())
         ast_sorted_verification.emplace_back();
       ast_sorted_verification[self.level].emplace_back(str);
@@ -71,7 +71,7 @@ TEST_F(Elab_test, Traverse_breadth_first_check_on_ast) {
 
   std::vector<std::vector<std::string>> ast2_sorted_verification;
 
-  ast.each_bottom_up_fast([this,&ast2_sorted_verification](const mmap_map::Tree_index &self, const std::string &str) {
+  ast.each_bottom_up_fast([this,&ast2_sorted_verification](const mmap_lib::Tree_index &self, const std::string &str) {
       while (static_cast<size_t>(self.level)>=ast2_sorted_verification.size())
         ast2_sorted_verification.emplace_back();
       ast2_sorted_verification[self.level].emplace_back(str);
@@ -86,7 +86,7 @@ TEST_F(Elab_test, Traverse_bottom_first_check_on_ast) {
 
   std::vector<std::vector<std::string>> ast2_sorted_verification;
 
-  ast.each_bottom_up_fast([this,&ast2_sorted_verification](const mmap_map::Tree_index &self, const std::string &str) {
+  ast.each_bottom_up_fast([this,&ast2_sorted_verification](const mmap_lib::Tree_index &self, const std::string &str) {
       while (static_cast<size_t>(self.level)>=ast2_sorted_verification.size())
         ast2_sorted_verification.emplace_back();
       ast2_sorted_verification[self.level].emplace_back(str);

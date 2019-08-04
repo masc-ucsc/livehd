@@ -45,15 +45,14 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <queue>
-#include <algorithm>
 #include <cstring>
-#include <functional>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
 #include <iostream>
+
+#include "mmap_gc.hpp"
 
 //#define mmap_map_LOG_ENABLED
 #ifdef mmap_map_LOG_ENABLED
@@ -133,7 +132,7 @@
 #endif
 
 // umul
-namespace mmap_map {
+namespace mmap_lib {
 namespace detail {
 #if defined(__SIZEOF_INT128__)
 #    define mmap_map_UMULH(a, b) \
@@ -157,7 +156,7 @@ inline uint64_t umul128(uint64_t a, uint64_t b, uint64_t* high) {
 }
 #endif
 } // namespace detail
-} // namespace mmap_map
+} // namespace mmap_lib
 
 // likely/unlikely
 #if __GNUC__ >= 4
@@ -167,7 +166,7 @@ inline uint64_t umul128(uint64_t a, uint64_t b, uint64_t* high) {
 #    define mmap_map_LIKELY(condition) condition
 #    define mmap_map_UNLIKELY(condition) condition
 #endif
-namespace mmap_map {
+namespace mmap_lib {
 
 namespace detail {
 
@@ -279,7 +278,7 @@ struct pair {
 };
 
 // A thin wrapper around std::hash, performing a single multiplication to (hopefully) get nicely
-// randomized upper bits, which are used by the mmap_map.
+// randomized upper bits, which are used by the mmap_lib.
 template <typename T>
 struct hash : public std::hash<T> {
 	size_t operator()(T const& obj) const {
@@ -406,7 +405,7 @@ namespace detail {
 
 // A highly optimized hashmap implementation, using the Robin Hood algorithm.
 //
-// In most cases, this map should be usable as a drop-in replacement for std::mmap_map, but be
+// In most cases, this map should be usable as a drop-in replacement for std::map, but be
 // about 2x faster in most cases and require much less allocations.
 //
 // This implementation uses the following memory layout:
@@ -437,20 +436,20 @@ class map
 public:
 	using key_type    = Key;
 	using mapped_type = typename std::conditional<std::is_same<T  , std::string_view>::value, uint32_t, T  >::type;
-	using value_type  = mmap_map::pair<typename std::conditional<std::is_same<Key, std::string_view>::value, uint32_t, Key>::type
+	using value_type  = mmap_lib::pair<typename std::conditional<std::is_same<Key, std::string_view>::value, uint32_t, Key>::type
                                     ,typename std::conditional<std::is_same<T  , std::string_view>::value, uint32_t, T  >::type>;
 	using size_type   = size_t;
 	using hasher      = Hash;
 	using Self        = map<MaxLoadFactor100, key_type, T, hasher>;
 
 private:
-	static_assert(!std::is_same<Key, std::string>::value     ,"mmap_map uses string_view as key (not slow std::string)\n");
-	//static_assert(!std::is_same<Key, std::string_view>::value,"mmap_map does not deal with strings or string_views (pointers). Use char_array\n");
-	static_assert(!std::is_same<T, std::string>::value       ,"mmap_map uses string_view as value (not slow std::string)\n");
-	//static_assert(!std::is_same<T, std::string_view>::value  ,"mmap_map does not deal with strings or string_views (pointers). Use char_array\n");
+	static_assert(!std::is_same<Key, std::string>::value     ,"mmap_lib::map uses string_view as key (not slow std::string)\n");
+	//static_assert(!std::is_same<Key, std::string_view>::value,"mmap_lib::map does not deal with strings or string_views (pointers). Use char_array\n");
+	static_assert(!std::is_same<T, std::string>::value       ,"mmap_lib::map uses string_view as value (not slow std::string)\n");
+	//static_assert(!std::is_same<T, std::string_view>::value  ,"mmap_lib::map does not deal with strings or string_views (pointers). Use char_array\n");
 
 	static_assert(!(std::is_same<Key, std::string_view>::value && std::is_same<T, std::string_view>::value)
-        ,"mmap_map can not have std::string_view for key and value simultaneously\n");
+        ,"mmap_lib::map can not have std::string_view for key and value simultaneously\n");
 	static_assert(MaxLoadFactor100 > 10 && MaxLoadFactor100 < 100, "MaxLoadFactor100 needs to be >10 && < 100");
 
   static constexpr bool    using_key_sview      = std::is_same<Key, std::string_view>::value;
@@ -650,7 +649,7 @@ private:
 		bool is_empty = empty();
 
 		if(mmap_base) {
-			munmap(mmap_base, mmap_size);
+      Mmap_gc::munmap(mmap_base, mmap_size);
 			mmap_base = 0;
 			mmap_size = 0;
 		}
@@ -683,63 +682,18 @@ private:
 
 	void grow_txt_mmap(size_t size) {
     assert(mmap_txt_size<size);
-    mmap_txt_base = reinterpret_cast<uint64_t *>(mremap(mmap_txt_base, mmap_txt_size, size, MREMAP_MAYMOVE));
-    if (mmap_txt_base == MAP_FAILED) {
-      std::cerr << "ERROR: remmap could not allocate" << mmap_name << "txt with " << size << "bytes\n";
-      exit(-1);
-    }
-    if (mmap_txt_fd>=0) {
-      int ret = ftruncate(mmap_txt_fd, size);
-      if(ret<0) {
-        std::cerr << "ERROR: ftruncate could not allocate " << mmap_name << " to " << size << "\n";
-        mmap_base = 0;
-        exit(-1);
-      }
-    }
 
+    mmap_txt_base = reinterpret_cast<uint64_t *>(Mmap_gc::remap(mmap_name, mmap_txt_base, mmap_txt_size, size));
     mmap_txt_size = size;
   }
 
 	std::tuple<uint64_t *, size_t> create_mmap(int fd, size_t size) const {
     void *base;
 
-    if (fd < 0) {
-      base = mmap(0, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, fd, 0); // superpages
-    }else{
-      struct stat s;
-      int status = fstat(fd, &s);
-      if (status < 0) {
-        std::cerr << "mmap_map::reload ERROR Could not check file status " << mmap_name << std::endl;
-        exit(-3);
-      }
-      if (s.st_size <= size) {
-        int ret = ftruncate(fd, size);
-        if (ret<0) {
-          std::cerr << "mmap_map::reload ERROR ftruncate could not resize  " << mmap_name << " to " << size << "\n";
-          exit(-1);
-        }
-      } else {
-        size = s.st_size;
-      }
-
-      base = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0); // no superpages
-    }
-
-    if(base == MAP_FAILED) {
-			std::cerr << "mmap_map::reload ERROR mmap could not adjust\n";
-			exit(-1);
-		}
+    std::tie(base, size) = Mmap_gc::mmap(mmap_name, fd, size, std::bind(&map<MaxLoadFactor100, Key, T, Hash>::garbage_collect, this));
 
 		return std::make_tuple(reinterpret_cast<uint64_t *>(base),size);
 	}
-
-  void try_reclaim_mmaps() const {
-    while(!gc_queue.empty()) {
-      auto func = gc_queue.front();
-      gc_queue.pop();
-      func();
-    }
-  }
 
   void setup_mmap(size_t n_entries) const {
 
@@ -754,11 +708,11 @@ private:
       if (mmap_fd<0) {
         mmap_fd = open(mmap_name.c_str(), O_RDWR | O_CREAT, 0644);
         if (mmap_fd<0) {
-          try_reclaim_mmaps();
+          Mmap_gc::try_reclaim();
 
           mmap_fd = open(mmap_name.c_str(), O_RDWR | O_CREAT, 0644);
           if (mmap_fd<0) {
-            std::cerr << "mmap_map::reload ERROR failed to setup " << mmap_name << std::endl;
+            std::cerr << "mmap_lib::map::reload ERROR failed to setup " << mmap_name << std::endl;
             exit(-4);
           }
         }
@@ -778,11 +732,11 @@ private:
         if (mmap_txt_fd<0) {
           mmap_txt_fd = open((mmap_name + "txt").c_str(), O_RDWR | O_CREAT, 0644);
           if (mmap_txt_fd < 0) {
-            try_reclaim_mmaps();
+            Mmap_gc::try_reclaim();
 
             mmap_txt_fd = open((mmap_name + "txt").c_str(), O_RDWR | O_CREAT, 0644);
             if (mmap_txt_fd < 0) {
-              std::cerr << "mmap_map::reload ERROR failed to setup " << mmap_name << "txt\n";
+              std::cerr << "mmap_lib::map::reload ERROR failed to setup " << mmap_name << "txt\n";
               exit(-4);
             }
           }
@@ -790,7 +744,7 @@ private:
       }
     }
 
-    std::tie(mmap_base    , mmap_size    ) = create_mmap(mmap_fd    , calc_mmap_size(n_entries));
+    std::tie(mmap_base    , mmap_size    ) = create_mmap(mmap_fd, calc_mmap_size(n_entries));
     if constexpr (using_sview) {
       if (mmap_txt_size==0) {
         std::tie(mmap_txt_base, mmap_txt_size) = create_mmap(mmap_txt_fd, 8192);
@@ -820,7 +774,6 @@ private:
       *mInfoHashShift = InitialInfoHashShift;
 			mKeyVals = reinterpret_cast<Node*>(&mmap_base[5+(*mMask+9)/sizeof(uint64_t)]); // 9 to be 8 byte aligned
 		}
-
 	}
 
 	void reload() const {
@@ -830,8 +783,6 @@ private:
 
 		setup_mmap(0);
 
-		gc_queue.push(std::bind(&map<MaxLoadFactor100, Key, T, Hash>::garbage_collect, this));
-
 		loaded = true;
 	}
 
@@ -840,7 +791,7 @@ private:
 	// The upper 1-5 bits need to be a reasonable good hash, to save comparisons.
 	void keyToIdx(const Key &key, int& idx, InfoType& info) const {
 		static constexpr size_t bad_hash_prevention =
-			std::is_same<::mmap_map::hash<key_type>, hasher>::value
+			std::is_same<::mmap_lib::hash<key_type>, hasher>::value
 			? 1
 			: (mmap_map_BITNESS == 64 ? UINT64_C(0xb3727c1f779b8d8b) : UINT32_C(0xda4afe47));
 
@@ -1437,7 +1388,7 @@ private:
 		}
 
 		// don't destroy old data: put it into the pool instead
-		munmap(old_mmap_base, old_mmap_size);
+    Mmap_gc::munmap(old_mmap_base, old_mmap_size);
 		close(old_mmap_fd);
 
 		unlink((mmap_name + "old").c_str());
@@ -1715,13 +1666,6 @@ private:
     if (!loaded)
       return;
 
-		// Destroy is very infrequent in LGraph, must GC everybody
-		while(!gc_queue.empty()) {
-			auto func = gc_queue.front();
-			gc_queue.pop();
-			func();
-		}
-
     assert(!loaded);
 	}
 
@@ -1741,7 +1685,6 @@ private:
 	mutable int       mmap_txt_fd   = -1;
 	mutable size_t    mmap_txt_size = 0;
 	mutable uint64_t *mmap_txt_base = 0;
-	inline static std::queue<std::function<void(void)>> gc_queue;
 #ifndef NDEBUG
 	size_t conflicts = 0;
 #endif
@@ -1753,6 +1696,6 @@ template <typename Key, typename T, typename Hash = hash<Key>, size_t MaxLoadFac
 using map = detail::map<MaxLoadFactor100, Key, T, Hash>;
 
 
-} // namespace mmap_map
+} // namespace mmap_lib
 
 

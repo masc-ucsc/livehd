@@ -3,16 +3,16 @@
 #include <iostream>
 #include <string>
 
-#include "dense.hpp"
+#include "mmap_vector.hpp"
 
 class CharPtr {
 public:
   CharPtr(const std::string &str) {
-    ptr = str.c_str(); // FIXME: Allocate in dense
+    ptr = str.c_str();
     std::cout << "1.CharPtr constructor\n";
   }
   CharPtr(const char *ptr_) {
-    ptr = ptr_; // FIXME: Allocate in Dense
+    ptr = ptr_;
     std::cout << "2.CharPtr constructor\n";
   }
   const char *get_charptr() const {
@@ -26,7 +26,8 @@ std::ostream &operator<<(std::ostream &os, const CharPtr &obj) {
   os << obj.get_charptr();
   return os;
 }
-Dense<CharPtr> vec("str");
+
+mmap_lib::vector<CharPtr> vec("vector_test_str.data");
 
 int main(int argc, char **argv) {
 
@@ -48,3 +49,4 @@ int main(int argc, char **argv) {
   }
   std::cout << std::endl;
 }
+

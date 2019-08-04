@@ -30,7 +30,7 @@ TEST_F(Setup_mmap_map_test, string_data) {
 
   bool zero_found = false;
   while(!zero_found) {
-    mmap_map::map<uint32_t, std::string_view> map;
+    mmap_lib::map<uint32_t, std::string_view> map;
     map.clear();
     absl::flat_hash_map<uint32_t, std::string> map2;
 
@@ -88,7 +88,7 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
 
   int conta;
   for(int i=0;i<3;i++) {
-    mmap_map::map<uint32_t, std::string_view> map("mmap_map_test_sview_data");
+    mmap_lib::map<uint32_t, std::string_view> map("mmap_map_test_sview_data");
     auto it = map.set(3,"test");
     EXPECT_EQ(it->first,3);
     EXPECT_NE(it->second,0);
@@ -122,7 +122,7 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
   EXPECT_EQ(access("mmap_map_test_sview_datatxt", F_OK), 0);
 
   {
-    mmap_map::map<uint32_t, std::string_view> map("mmap_map_test_sview_data");
+    mmap_lib::map<uint32_t, std::string_view> map("mmap_map_test_sview_data");
     for(auto it:map) {
       auto txt1 = map.get(it);
       auto txt2 = map.get(it.first);
@@ -151,7 +151,7 @@ TEST_F(Setup_mmap_map_test, string_key) {
   Rng rng(123);
 
   for(int i=0;i<4;++i) {
-    mmap_map::map<std::string_view,uint32_t> map;
+    mmap_lib::map<std::string_view,uint32_t> map;
     map.clear();
     absl::flat_hash_map<std::string, uint32_t> map2;
 
@@ -206,7 +206,7 @@ TEST_F(Setup_mmap_map_test, string_key_persistance) {
 
   int conta;
   {
-    mmap_map::map<std::string_view,uint32_t> map("mmap_map_test_str");
+    mmap_lib::map<std::string_view,uint32_t> map("mmap_map_test_str");
     map.clear(); // Clear the garbage from before
 
     conta = 0;
@@ -233,7 +233,7 @@ TEST_F(Setup_mmap_map_test, string_key_persistance) {
   }
 
   {
-    mmap_map::map<std::string_view,uint32_t> map("mmap_map_test_str");
+    mmap_lib::map<std::string_view,uint32_t> map("mmap_map_test_str");
 
     for(auto it:map) {
       (void)it;
@@ -300,7 +300,7 @@ public:
 TEST_F(Setup_mmap_map_test, big_entry) {
   Rng rng(123);
 
-  mmap_map::map<uint32_t,Big_entry> map("mmap_map_test_se");
+  mmap_lib::map<uint32_t,Big_entry> map("mmap_map_test_se");
   absl::flat_hash_map<uint32_t,Big_entry> map2;
 	auto cap = map.capacity();
 
@@ -402,7 +402,7 @@ struct hash<Big_entry> {
 TEST_F(Setup_mmap_map_test, big_key) {
   Rng rng(123);
 
-  mmap_map::map<Big_entry,uint32_t> map("mmap_map_test_be");
+  mmap_lib::map<Big_entry,uint32_t> map("mmap_map_test_be");
 	map.clear(); // Remove data from previous runs
   absl::flat_hash_map<Big_entry, uint32_t> map2;
 

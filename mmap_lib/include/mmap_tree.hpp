@@ -7,7 +7,7 @@
 
 #include "iassert.hpp"
 
-namespace mmap_map {
+namespace mmap_lib {
 using Tree_level = int32_t;
 using Tree_pos   = int32_t;
 
@@ -520,5 +520,6 @@ const Tree_index tree<X>::get_child(const Tree_index &top) const {
   return Tree_index(top.level + 1, *fc);
 }
 
-} // namespace mmap_map
+} // namespace mmap_lib
+
 
