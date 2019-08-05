@@ -643,7 +643,9 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
 
       assert(cell_output_map.find(node.get_driver_pin().get_compact())!=cell_output_map.end());
 
-      module->addLut(next_id(g), RTLIL::SigSpec(joined_inp_wires), cell_output_map[node.get_driver_pin().get_compact()],inp_num);
+      uint64_t lut_code = node.get_type_lut();
+
+      module->addLut(next_id(g), RTLIL::SigSpec(joined_inp_wires), cell_output_map[node.get_driver_pin().get_compact()], lut_code);
       break;
     }
     case And_Op:
