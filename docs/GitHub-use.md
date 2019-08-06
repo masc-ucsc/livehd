@@ -125,5 +125,19 @@ See the differences against the server (still not pushed). Everything may be com
 
     git diff @{u}
 
+### Git Hercules statistics
+
+    hercules --languages C++ --burndown --burndown-people --pb https://github.com/masc-ucsc/lgraph >hercules1.data
+    labours -f pb -m overwrites-matrix -o hercules1a.pdf <hercules1.data
+    labours -f pb -m ownership -o hercules1b.pdf <hercules1.data
+
+    hercules --languages C++ --burndown --first-parent --pb https://github.com/masc-ucsc/lgraph >hercules2.data
+    labours -f pb -m burndown-project -o hercules2.pdf <hercules2.data
+
+    hercules --languages C++ --devs --pb https://github.com/masc-ucsc/lgraph >hercules3.data
+    labours -f pb -m old-vs-new -o hercules3a.pdf <hercules3.data 
+    labours -f pb -m devs -o hercules3b.pdf <hercules3.data
+    labours -f pb -m devs-efforts -o hercules3c.pdf <hercules3.data
+
 [pull]: https://help.github.com/articles/creating-a-pull-request
 [masc]: http://masc.soe.ucsc.edu/
