@@ -18,8 +18,8 @@
 
 using Rng = sfc64;
 
-#define NITERS 100
-#define NIT 1
+#define NITERS 10
+#define NIT 2
 
 void use_std_vector(int max) {
   Rng rng(123);
@@ -179,9 +179,7 @@ int main(int argc, char **argv) {
     run_use_mmap_vector = true;
   }
 
-  std::vector<int> nums = {100000, 500000, 1000000, 2000000, 3000000, 4000000, 5000000, 6000000, 7000000, 8000000, 9000000, 10000000};
-
-
+  const std::vector<int> nums = {100000, 500000, 1000000, 2000000, 3000000, 4000000, 5000000, 6000000, 7000000, 8000000, 9000000, 10000000};
   for(auto i:nums) {
     if (run_use_std_vector)
       use_std_vector(i);

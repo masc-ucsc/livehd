@@ -19,14 +19,6 @@ cc_library(
 )
 
 cc_test(
-    name = "mmap_vector_test",
-    srcs = ["tests/mmap_vector_test.cpp"],
-    deps = [
-        ":mmap_lib_test_lib",
-    ],
-)
-
-cc_test(
     name = "tree_test",
     srcs = ["tests/tree_test.cpp"],
     deps = [
@@ -90,8 +82,8 @@ cc_test(
 )
 
 cc_test(
-    name = "map_test",
-    srcs = ["tests/map_test.cpp"],
+    name = "mmap_vector_test",
+    srcs = ["tests/mmap_vector_test.cpp"],
     deps = [
         ":mmap_lib_test_lib",
         "//bench:headers",
@@ -108,15 +100,6 @@ cc_test(
         ":mmap_lib_test_lib",
         "//bench:headers",
         "@yas//:headers",
-    ],
-)
-
-cc_test(
-    name = "char_test",
-    srcs = ["tests/char_test.cpp"],
-    deps = [
-        ":mmap_lib_test_lib",
-        "@sparsehash//:headers",
     ],
 )
 

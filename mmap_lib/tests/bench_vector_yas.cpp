@@ -6,6 +6,7 @@
 
 #include "lgbench.hpp"
 #include "mmap_map.hpp"
+#include "mmap_vector.hpp"
 
 #include "yas/serialize.hpp"
 #include "yas/std_types.hpp"
@@ -14,7 +15,6 @@ void run_mmap_vector(int test_size) {
 
   LGBench b("mmap_vector");
 
-  size_t size=0;
   const char *filename = "bench_vector_array.data";
   {
     // unnecessary? unlink(filename);
@@ -31,13 +31,10 @@ void run_mmap_vector(int test_size) {
 
     std::cout << "mmap_vector.result:" << total << std::endl;
 
-    size = array.size();
-
     b.sample("setup+serialize");
   }
 
   mmap_lib::vector<int> array2(filename);
-  array2.reload(size);
 
   b.sample("unserialize");
 

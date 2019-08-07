@@ -386,7 +386,7 @@ TEST_F(Setup_mmap_map_test, big_entry) {
 }
 
 
-namespace mmap_map {
+namespace mmap_lib {
 template <>
 struct hash<Big_entry> {
   size_t operator()(Big_entry const &o) const {

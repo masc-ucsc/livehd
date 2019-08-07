@@ -158,14 +158,6 @@ inline uint64_t umul128(uint64_t a, uint64_t b, uint64_t* high) {
 } // namespace detail
 } // namespace mmap_lib
 
-// likely/unlikely
-#if __GNUC__ >= 4
-#    define mmap_map_LIKELY(condition) __builtin_expect(static_cast<bool>(condition), 1)
-#    define mmap_map_UNLIKELY(condition) __builtin_expect(static_cast<bool>(condition), 0)
-#else
-#    define mmap_map_LIKELY(condition) condition
-#    define mmap_map_UNLIKELY(condition) condition
-#endif
 namespace mmap_lib {
 
 namespace detail {
@@ -179,7 +171,7 @@ namespace detail {
 
 	template <typename E, typename T, typename... Args>
 		static T* assertNotNull(T* t, Args&&... args) {
-			if (mmap_map_UNLIKELY(nullptr == t)) {
+			if (MMAP_LIB_UNLIKELY(nullptr == t)) {
 				doThrow<E>(std::forward<Args>(args)...);
 			}
 			return t;
@@ -604,7 +596,7 @@ private:
 #endif
 						mInfo += inc;
 						mKeyVals += inc;
-					} while (mmap_map_UNLIKELY(inc == sizeof(uint64_t)));
+					} while (MMAP_LIB_UNLIKELY(inc == sizeof(uint64_t)));
 #else
           while(true) {
 						if (*mInfo)
@@ -641,18 +633,16 @@ private:
 		return s;
 	}
 
-	void garbage_collect() const {
-		if (mmap_map_UNLIKELY(!loaded))
-			return;
+	void gc_function(void *mmap_base_addr) const {
+    if (MMAP_LIB_UNLIKELY(mmap_base != mmap_base_addr)) {
+      // Triggers mmap for an older mmap
+      return;
+    }
 
-		loaded = false;
 		bool is_empty = empty();
 
-		if(mmap_base) {
-      Mmap_gc::munmap(mmap_base, mmap_size);
-			mmap_base = 0;
-			mmap_size = 0;
-		}
+    mmap_base = nullptr;
+    mmap_size = 0;
 
 		if(mmap_fd >= 0) {
 			close(mmap_fd);
@@ -683,14 +673,14 @@ private:
 	void grow_txt_mmap(size_t size) {
     assert(mmap_txt_size<size);
 
-    mmap_txt_base = reinterpret_cast<uint64_t *>(Mmap_gc::remap(mmap_name, mmap_txt_base, mmap_txt_size, size));
+    mmap_txt_base = reinterpret_cast<uint64_t *>(mmap_gc::remap(mmap_name, mmap_txt_base, mmap_txt_size, size));
     mmap_txt_size = size;
   }
 
 	std::tuple<uint64_t *, size_t> create_mmap(int fd, size_t size) const {
     void *base;
 
-    std::tie(base, size) = Mmap_gc::mmap(mmap_name, fd, size, std::bind(&map<MaxLoadFactor100, Key, T, Hash>::garbage_collect, this));
+    std::tie(base, size) = mmap_gc::mmap(mmap_name, fd, size, std::bind(&map<MaxLoadFactor100, Key, T, Hash>::gc_function, this, std::placeholders::_1));
 
 		return std::make_tuple(reinterpret_cast<uint64_t *>(base),size);
 	}
@@ -706,16 +696,7 @@ private:
         n_entries = InitialNumElements;
     }else{
       if (mmap_fd<0) {
-        mmap_fd = open(mmap_name.c_str(), O_RDWR | O_CREAT, 0644);
-        if (mmap_fd<0) {
-          Mmap_gc::try_reclaim();
-
-          mmap_fd = open(mmap_name.c_str(), O_RDWR | O_CREAT, 0644);
-          if (mmap_fd<0) {
-            std::cerr << "mmap_lib::map::reload ERROR failed to setup " << mmap_name << std::endl;
-            exit(-4);
-          }
-        }
+        mmap_fd = mmap_gc::open(mmap_name);
       }
 
       if (n_entries==0) { // reload
@@ -730,16 +711,7 @@ private:
 
       if constexpr (using_sview) {
         if (mmap_txt_fd<0) {
-          mmap_txt_fd = open((mmap_name + "txt").c_str(), O_RDWR | O_CREAT, 0644);
-          if (mmap_txt_fd < 0) {
-            Mmap_gc::try_reclaim();
-
-            mmap_txt_fd = open((mmap_name + "txt").c_str(), O_RDWR | O_CREAT, 0644);
-            if (mmap_txt_fd < 0) {
-              std::cerr << "mmap_lib::map::reload ERROR failed to setup " << mmap_name << "txt\n";
-              exit(-4);
-            }
-          }
+          mmap_txt_fd = mmap_gc::open(mmap_name + "txt");
         }
       }
     }
@@ -777,13 +749,13 @@ private:
 	}
 
 	void reload() const {
-		assert(!loaded);
+		assert(mmap_base == nullptr);
 
 		assert(mmap_fd <0);
 
 		setup_mmap(0);
 
-		loaded = true;
+    assert(mmap_base);
 	}
 
 	// highly performance relevant code.
@@ -795,7 +767,7 @@ private:
 			? 1
 			: (mmap_map_BITNESS == 64 ? UINT64_C(0xb3727c1f779b8d8b) : UINT32_C(0xda4afe47));
 
-		if (mmap_map_UNLIKELY(!loaded)) {
+		if (MMAP_LIB_UNLIKELY(mmap_base == nullptr)) {
 			reload();
 		}
 
@@ -826,11 +798,11 @@ private:
 	// Fals if no shift has occured (entry under idx is unconstructed memory)
 	void shiftUp(int idx, int const insertion_idx) {
 #if 0
-		if (mmap_map_LIKELY(idx>insertion_idx)) {
+		if (MMAP_LIB_LIKELY(idx>insertion_idx)) {
 			memmove(&mKeyVals[insertion_idx+1],&mKeyVals[insertion_idx],(idx-insertion_idx)*sizeof(Node));
 			for(auto i=idx;i>insertion_idx;--i) {
 				mInfo[i] = static_cast<uint8_t>(mInfo[i-1] + *mInfoInc);
-				if (mmap_map_UNLIKELY(mInfo[i] + *mInfoInc > 0xFF)) {
+				if (MMAP_LIB_UNLIKELY(mInfo[i] + *mInfoInc > 0xFF)) {
 					*mMaxNumElementsAllowed = 0;
 				}
 			}
@@ -850,7 +822,7 @@ private:
 			}
 #endif
 			mInfo[idx] = static_cast<uint8_t>(mInfo[prev_idx] + *mInfoInc);
-			if (mmap_map_UNLIKELY(mInfo[idx] + *mInfoInc > 0xFF)) {
+			if (MMAP_LIB_UNLIKELY(mInfo[idx] + *mInfoInc > 0xFF)) {
 				*mMaxNumElementsAllowed = 0;
 			}
 			idx = prev_idx;
@@ -940,7 +912,7 @@ private:
 		// key not found, so we are now exactly where we want to insert it.
 		auto const insertion_idx = idx;
 		auto const insertion_info = static_cast<uint8_t>(info);
-		if (mmap_map_UNLIKELY(insertion_info + *mInfoInc > 0xFF)) {
+		if (MMAP_LIB_UNLIKELY(insertion_info + *mInfoInc > 0xFF)) {
 			*mMaxNumElementsAllowed = 0;
 		}
 
@@ -967,7 +939,7 @@ private:
 		static int conta=0;
 		if (((++conta)&0xFFFF)==0 && *mNumElements>100) {
 			if (conflict_factor()>0.05) {
-				std::cerr << "potential bad hash for mmap_name:" << mmap_name << ", try to debug it\n";
+				std::cerr << "potential bad hash for mmap_name:" << mmap_name << ", conflicts " << conflicts << "try to debug it\n";
 			}
 		}
 #endif
@@ -1032,7 +1004,7 @@ public:
 
 	// Clears all data, without resizing.
 	void clear() {
-		if (mmap_map_UNLIKELY(!loaded)) {
+		if (MMAP_LIB_UNLIKELY(mmap_base == nullptr)) {
 			unlink(mmap_name.c_str());
 			if constexpr (using_sview) {
 				clear_sview();
@@ -1040,7 +1012,8 @@ public:
 			return;
 		}
 		if (empty()) {
-			garbage_collect();
+      assert(mmap_base);
+      mmap_gc::garbage_collect(mmap_base, mmap_size);
 			return;
 		}
 
@@ -1111,7 +1084,7 @@ public:
 	}
 
 	std::string_view get_sview(uint32_t key_pos) const {
-		if (mmap_map_UNLIKELY(!loaded)) {
+		if (MMAP_LIB_UNLIKELY(mmap_base == nullptr)) {
 			reload();
 		}
     assert(using_sview);
@@ -1224,7 +1197,7 @@ public:
 		}
 
 	[[nodiscard]] iterator begin() {
-		if (mmap_map_UNLIKELY(!loaded)) {
+		if (MMAP_LIB_UNLIKELY(mmap_base == nullptr)) {
 			reload();
 		}
 
@@ -1237,7 +1210,7 @@ public:
 		return cbegin();
 	}
 	[[nodiscard]] const_iterator cbegin() const {
-		if (mmap_map_UNLIKELY(!loaded)) {
+		if (MMAP_LIB_UNLIKELY(mmap_base == nullptr)) {
 			reload();
 		}
 
@@ -1320,7 +1293,7 @@ public:
 	}
 
 	[[nodiscard]] size_t capacity() const {
-		if (loaded)
+		if (mmap_base)
 			return *mMaxNumElementsAllowed;
 		return calcMaxNumElementsAllowed(InitialNumElements);
 	}
@@ -1352,20 +1325,25 @@ public:
 
 private:
 	void rehash(size_t numBuckets) {
-		assert(mmap_map_UNLIKELY((numBuckets & (numBuckets - 1)) == 0)); // rehash only allowed for power of two
+		assert(MMAP_LIB_UNLIKELY((numBuckets & (numBuckets - 1)) == 0)); // rehash only allowed for power of two
 
-		if (mmap_map_UNLIKELY(!loaded))
+		if (MMAP_LIB_UNLIKELY(mmap_base == nullptr))
 			reload();
 
 		const size_t oldMaxElements = *mMask + 1;
 		if (oldMaxElements >= numBuckets)
 			return; // done
 
-		rename(mmap_name.c_str(), (mmap_name + "old").c_str());
-
-		const size_t  old_mmap_size = mmap_size;
-		uint64_t     *old_mmap_base = mmap_base;
+#if 1
+		close(mmap_fd);
+		unlink(mmap_name.c_str());
+#else
+		rename(mmap_name.c_str(), (mmap_name + "old").c_str()); // TODO: Check if delete works
 		const int     old_mmap_fd   = mmap_fd;
+#endif
+
+		uint64_t     *old_mmap_base = mmap_base;
+		const size_t  old_mmap_size = mmap_size;
 
 		Node* const oldKeyVals        = mKeyVals;
 		uint8_t const* const oldInfo  = mInfo;
@@ -1388,10 +1366,13 @@ private:
 		}
 
 		// don't destroy old data: put it into the pool instead
-    Mmap_gc::munmap(old_mmap_base, old_mmap_size);
+    mmap_gc::garbage_collect(old_mmap_base, old_mmap_size);
+#if 0
+    // WARNING: Since we changed the mmap_base, the gc_function does not close fd and delete file
 		close(old_mmap_fd);
 
 		unlink((mmap_name + "old").c_str());
+#endif
 	}
 	size_t mask() const {
 		return *mMask;
@@ -1399,7 +1380,7 @@ private:
 
 	uint32_t allocate_sview_id(std::string_view txt) {
 
-		if (mmap_map_UNLIKELY(!loaded))
+		if (MMAP_LIB_UNLIKELY(mmap_base == nullptr))
 			reload();
 
     assert(using_sview);
@@ -1466,13 +1447,13 @@ private:
 				auto const insertion_info = info;
         if (!found) {
           // unlikely that this evaluates to true
-          if (mmap_map_UNLIKELY(*mNumElements >= *mMaxNumElementsAllowed)) {
+          if (MMAP_LIB_UNLIKELY(*mNumElements >= *mMaxNumElementsAllowed)) {
             increase_size();
             continue;
           }
 
           // key not found, so we are now exactly where we want to insert it.
-          if (mmap_map_UNLIKELY(insertion_info + *mInfoInc > 0xFF)) {
+          if (MMAP_LIB_UNLIKELY(insertion_info + *mInfoInc > 0xFF)) {
             *mMaxNumElementsAllowed = 0;
           }
 
@@ -1558,7 +1539,7 @@ private:
 				}
 
 				// unlikely that this evaluates to true
-				if (mmap_map_UNLIKELY(*mNumElements >= *mMaxNumElementsAllowed)) {
+				if (MMAP_LIB_UNLIKELY(*mNumElements >= *mMaxNumElementsAllowed)) {
 					increase_size();
 					continue;
 				}
@@ -1566,7 +1547,7 @@ private:
 				// key not found, so we are now exactly where we want to insert it.
 				auto const insertion_idx = idx;
 				auto const insertion_info = info;
-				if (mmap_map_UNLIKELY(insertion_info + *mInfoInc > 0xFF)) {
+				if (MMAP_LIB_UNLIKELY(insertion_info + *mInfoInc > 0xFF)) {
 					*mMaxNumElementsAllowed = 0;
 				}
 
@@ -1663,10 +1644,10 @@ private:
 	}
 
 	void destroy() {
-    if (!loaded)
+    if (mmap_base == nullptr)
       return;
 
-    assert(!loaded);
+    mmap_gc::garbage_collect(mmap_base, mmap_size);
 	}
 
 	// members are sorted so no padding occurs
@@ -1677,7 +1658,6 @@ private:
 	mutable size_t *mMaxNumElementsAllowed;                                         // 8 byte 40
 	mutable InfoType *mInfoInc;                                                     // 4 byte 44
 	mutable InfoType *mInfoHashShift;                                               // 4 byte 48
-	mutable bool loaded = false;
 	std::string       mmap_name;
 	mutable int       mmap_fd       = -1;
 	mutable size_t    mmap_size     = 0;

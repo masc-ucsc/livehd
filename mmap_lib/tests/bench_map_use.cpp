@@ -14,6 +14,7 @@
 #include "robin_hood.hpp"
 
 #include "mmap_map.hpp"
+#include "mmap_vector.hpp"
 
 #include <type_traits>
 
@@ -147,14 +148,14 @@ void random_mmap_vector(int max) {
     LGBench b("random_mmap_vector (persistent)");
 
     mmap_lib::vector<uint32_t> map("bench_map_use_vector.data");
-    map.resize(max);
+    map.reserve(max);
 
     for (int n = 1; n < 400; ++n) {
       for (int i = 0; i < 10'000; ++i) {
         int pos = rng.uniform<int>(max);
-        map[pos] = i;
+        map.set(pos, i);
         pos = rng.uniform<int>(max);
-        map[pos] = 0;
+        map.set(pos, 0);
       }
     }
   }
@@ -162,14 +163,14 @@ void random_mmap_vector(int max) {
     LGBench b("random_mmap_vector (effemeral)");
 
     mmap_lib::vector<uint32_t> map;
-    map.resize(max);
+    map.reserve(max);
 
     for (int n = 1; n < 400; ++n) {
       for (int i = 0; i < 10'000; ++i) {
         int pos = rng.uniform<int>(max);
-        map[pos] = i;
+        map.set(pos,i);
         pos = rng.uniform<int>(max);
-        map[pos] = 0;
+        map.set(pos,0);
       }
     }
   }

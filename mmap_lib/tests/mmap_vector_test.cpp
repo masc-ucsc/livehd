@@ -1,52 +1,77 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include <iostream>
+#include "gmock/gmock.h"
+#include "gtest/gtest.h"
+
+#include <vector>
 #include <string>
+
+#include "absl/container/flat_hash_set.h"
 
 #include "mmap_vector.hpp"
 
-class CharPtr {
-public:
-  CharPtr(const std::string &str) {
-    ptr = str.c_str();
-    std::cout << "1.CharPtr constructor\n";
-  }
-  CharPtr(const char *ptr_) {
-    ptr = ptr_;
-    std::cout << "2.CharPtr constructor\n";
-  }
-  const char *get_charptr() const {
-    return ptr;
+using testing::HasSubstr;
+
+class Setup_map_test : public ::testing::Test {
+protected:
+  void SetUp() override {
   }
 
-private:
-  const char *ptr;
+  void TearDown() override {
+  }
 };
-std::ostream &operator<<(std::ostream &os, const CharPtr &obj) {
-  os << obj.get_charptr();
-  return os;
+
+TEST_F(Setup_map_test, ilist_to_set) {
+
+  int vec_list[] = {1,3,5,7,9};
+
+  absl::flat_hash_set<int> my_set;
+
+  const std::vector<int> ilist(&vec_list[0],&vec_list[5]);
+
+  my_set.insert(ilist.begin(),ilist.end());
+
+  for(auto v:vec_list) {
+    EXPECT_TRUE(my_set.contains(v));
+  }
+  EXPECT_FALSE(my_set.contains(100));
 }
 
-mmap_lib::vector<CharPtr> vec("vector_test_str.data");
+TEST_F(Setup_map_test, mmap_vector_to_set) {
 
-int main(int argc, char **argv) {
+  mmap_lib::vector<int> dense("mmap_vector_test_persist");
+  dense.clear();
+  dense.emplace_back(1);
+  dense.emplace_back(3);
+  dense.emplace_back(5);
+  dense.emplace_back(7);
+  dense.emplace_back(9);
 
-  std::string str = "p" + std::to_string(vec.size()) + "x";
+  absl::flat_hash_set<int> my_set;
 
-  vec.emplace_back(CharPtr("potato"));
-  std::cout << "1.last = " << &vec.back() << std::endl;
-  vec.emplace_back(CharPtr(str.c_str()));
-  std::cout << "2.last = " << &vec.back() << std::endl;
-  vec.emplace_back(CharPtr(""));
-  std::cout << "3.last = " << &vec.back() << std::endl;
-  vec.emplace_back(CharPtr("0123456789"));
-  std::cout << "4.last = " << &vec.back() << std::endl;
+  my_set.insert(dense.begin(),dense.end());
 
-  std::cout << "size=" << vec.size() << " base=" << vec.data() << std::endl;
-
-  for(const auto &v : vec) {
-    std::cout << v;
+  for(auto v:{1,3,5,7,9}) {
+    EXPECT_TRUE(my_set.contains(v));
   }
-  std::cout << std::endl;
+  EXPECT_FALSE(my_set.contains(100));
+}
+
+TEST_F(Setup_map_test, iter_test_set) {
+
+  mmap_lib::vector<int> dense("mmap_vector_test_persist");
+
+  absl::flat_hash_set<int> my_set;
+
+  my_set.insert(dense.begin(),dense.end());
+
+  for(auto v:{1,3,5,7,9}) {
+    EXPECT_TRUE(my_set.contains(v));
+  }
+
+  EXPECT_FALSE(my_set.contains(100));
+
+  dense.reserve(101);
+  dense.set(100, 100);
 }
 

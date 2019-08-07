@@ -41,9 +41,9 @@ keys in a separate array when in dense (different memory layout, flat for sparse
 
  5-Large data field (like string_view)
 
-   mmap_map<key,data> becomes:
-    mmap_map<key,data_pos>
-    vector<data>
+   mmap_lib::mmap<key,data> becomes:
+    mmap_lib::mmap<key,data_pos>
+    mmap_lib::vector<data>
 
     mmap.get(key) : mmap<key,pos> -> vector<pos>
 

@@ -71,16 +71,17 @@ new_git_repository(
     remote = "https://github.com/fmtlib/fmt.git",
     #strip_prefix = "include",
 )
-new_git_repository(
+git_repository(
     name = "iassert",
     build_file = "BUILD.iassert",
     commit = "58eaafa459060a72560adf22acb63e083a95d03b", # August 11, 2019
     remote = "https://github.com/masc-ucsc/iassert.git",
-    strip_prefix = "src",
+    #strip_prefix = "src",
 )
 new_git_repository(
     name = "sparsehash",
     build_file = "BUILD.sparsehash",
+    shallow_since = "1528448703 +0200",
     commit = "5ca6de766db32b3fb08a040636423cd3988d2d4f", # Jun 8, 2018
     remote = "https://github.com/sparsehash/sparsehash-c11.git",
 )
