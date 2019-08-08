@@ -63,7 +63,7 @@ TEST_F(Setup_mmap_map_test, string_data) {
       EXPECT_TRUE(map.has(key));
 
       std::string_view val1 = map.get_sview(it.second);
-      std::string_view val = map.get(it);
+      std::string_view val  = map.get_sview(it);
       EXPECT_EQ(val1, val);
       EXPECT_EQ(val, std::to_string(it.first) + "foo");
       conta--;
@@ -124,16 +124,16 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
   {
     mmap_lib::map<uint32_t, std::string_view> map("mmap_map_test_sview_data");
     for(auto it:map) {
-      auto txt1 = map.get(it);
+      auto txt1 = map.get_sview(it);
       auto txt2 = map.get(it.first);
-      auto txt3 = map.get(it);
+      auto txt3 = map.get_sview(it);
       auto it2 = map.find(it.first);
       EXPECT_NE(it2, map.end());
-      auto txt4 = map.get(it2);
+      auto txt4 = map.get_sview(it2);
       EXPECT_EQ(txt1,txt2);
       EXPECT_EQ(txt1,txt3);
       EXPECT_EQ(txt1,txt4);
-      std::string_view val = map.get(it);
+      std::string_view val = map.get_sview(it);
       EXPECT_EQ(val, std::to_string(it.first) + "foo");
       conta--;
     }

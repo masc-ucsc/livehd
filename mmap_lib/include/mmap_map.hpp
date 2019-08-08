@@ -1105,20 +1105,24 @@ public:
     }
 	}
 
+	[[nodiscard]] std::string_view get_sview(const value_type& it) const {
+    static_assert(using_val_sview,"mmap_lib::map::get_sview should be called only when 'value' is a string_view\n");
+    return get_sview(it.second);
+	}
+
+	[[nodiscard]] std::string_view get_sview(const_iterator it) const {
+    static_assert(using_val_sview,"mmap_lib::map::get_sview should be called only when 'value' is a string_view\n");
+    return get_sview(it->second);
+  }
+
 	[[nodiscard]] const T &get(const value_type& it) const {
-		if constexpr (using_val_sview) {
-      return get_sview(it.second);
-    }else{
-      return it.second;
-    }
+    static_assert(!using_val_sview,"mmap_lib::map::get should not be called when 'value' is a string_view. Use get_sview instead.\n");
+    return it.second;
 	}
 
 	[[nodiscard]] const T &get(const_iterator it) const {
-		if constexpr (using_val_sview) {
-      return get_sview(it->second);
-    }else{
-      return it->second;
-    }
+    static_assert(!using_val_sview,"mmap_lib::map::get should not be called when 'value' is a string_view. Use get_sview instead.\n");
+    return it->second;
 	}
 
 	[[nodiscard]] Key get_key(const_iterator it) const {
@@ -1137,33 +1141,23 @@ public:
 	}
 
 	[[nodiscard]] T *ref(key_type const& key) {
+    static_assert(!using_val_sview,"mmap_lib::map::ref can not be called for a string_view. Use get_sview instead.\n");
+
 		auto idx = findIdx(key);
 		assert(idx>=0);
 
-		if constexpr (using_val_sview) {
-      assert(false); // Do not get a reference to a std::string_view
-      return &get_sview(mKeyVals[idx].getSecond());
-    }else{
-      return &mKeyVals[idx].getSecond();
-    }
+    return &mKeyVals[idx].getSecond();
 	}
 
 	[[nodiscard]] T *ref(const value_type& it) {
-		if constexpr (using_val_sview) {
-      assert(false); // Do not get a reference to a std::string_view
-      return &get_sview(it.second);
-    }else{
-      return &it.second;
-    }
+    static_assert(!using_val_sview,"mmap_lib::map::ref can not be called for a string_view. Use get_sview instead.\n");
+
+    return &it.second;
 	}
 
 	[[nodiscard]] T *ref(iterator it) {
-		if constexpr (using_val_sview) {
-      assert(false); // Do not get a reference to a std::string_view
-      return &get_sview(it->second);
-    }else{
-      return &it->second;
-    }
+    static_assert(!using_val_sview,"mmap_lib::map::ref can not be called for a string_view. Use get_sview instead.\n");
+    return &it->second;
 	}
 
 	[[nodiscard]] const_iterator find(const key_type& key) const {
