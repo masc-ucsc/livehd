@@ -947,7 +947,8 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
           auto driver_node = old_node_to_new_node[peer_driver_node.get_compact()].get_node(new_lg);
           auto driver_pin = driver_node.setup_driver_pin(in_edge.driver.get_pid());
           auto sink_pin = new_node.setup_sink_pin(in_edge.sink.get_pid());
-          new_lg->add_edge(driver_pin, sink_pin);
+          if(!new_lg->has_edge(driver_pin, sink_pin))
+            new_lg->add_edge(driver_pin, sink_pin);
         }
       }
     }
@@ -958,12 +959,13 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
           auto sink_node = old_node_to_new_node[peer_sink_node.get_compact()].get_node(new_lg);
           auto sink_pin = sink_node.setup_sink_pin(out_edge.sink.get_pid());
           auto driver_pin = new_node.setup_driver_pin(out_edge.driver.get_pid());
-          new_lg->add_edge(driver_pin, sink_pin);
+          if(!new_lg->has_edge(driver_pin, sink_pin))
+            new_lg->add_edge(driver_pin, sink_pin);
         }
       }
     }
   }
-  fmt::print("Unchanged part mapped.\n");
+  fmt::print("Unchanged part mapped.\n\n");
 
 
   //create lutified portion
@@ -974,11 +976,9 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
     //create new lut nodes
     fmt::print("Creating KLUT network (gid:{}) cells in LGraph...\n", group_id);
     klut_ntk.foreach_node( [&](const auto &klut_ntk_node) {
-      if (klut_ntk.is_pi(klut_ntk_node)) {
-        //this is an primary input of the klut network
-        //does not have any fanin
-        return; //continue
-      }
+      //this is an primary input of the klut network, does not have any fanin, continue
+      if (klut_ntk.is_pi(klut_ntk_node))
+        return;
 
       //check whether there is a complemented fanin,
       //a signal that is the opposite of the original signal
@@ -990,14 +990,16 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
         }
         if (klut_ntk.is_pi(klut_ntk.get_node(sig))) {
           auto pid = (uint32_t) i;
-          gid_fanin2parent_pid[std::make_pair(group_id, sig)].emplace_back(std::make_pair(klut_ntk_node, pid));
+          auto key = std::make_pair(group_id, sig);
+          auto tmp = std::make_pair(klut_ntk_node, pid);
+          gid_fanin2parent_pid[key].emplace_back(tmp);
+          fmt::print("gid_fanin2parent_pid key:{},{}, size:{}\n", key.first, key.second, gid_fanin2parent_pid[key].size());
         }
       } );
 
       auto encoding = std::stoul(kitty::to_hex(func), nullptr, 16);
       auto new_node = new_lg->create_node();
-      //if (!klut_ntk.is_constant(klut_ntk_node))
-      //  fmt::print("LUT created!\n");
+
       new_node.set_type_lut(encoding);
       gidMTnode2LGnode[std::make_pair(group_id, klut_ntk_node)] = new_node.get_compact();
     } );
@@ -1028,7 +1030,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
     } );
     fmt::print("finished.\n");
   }
-  fmt::print("Lutified part mapped.\n");
+  fmt::print("Lutified part mapped.\n\n");
 
   //create edges for input signals
   fmt::print("Creating KLUT network input edges in LGraph...\n");
@@ -1036,14 +1038,19 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
     const auto group_id = edge2signal_klut[in_edge].gid;
     const std::vector<mockturtle::klut_network::signal> &sigs = edge2signal_klut[in_edge].signals;
     I(old_node_to_new_node.find(in_edge.driver.get_node().get_compact()) != old_node_to_new_node.end());
-    auto driver_node = Node(new_lg,old_node_to_new_node[in_edge.driver.get_node().get_compact()]);
+    //auto driver_node = Node(new_lg,old_node_to_new_node[in_edge.driver.get_node().get_compact()]);
+    auto driver_node = old_node_to_new_node[in_edge.driver.get_node().get_compact()].get_node(new_lg);
     auto driver_pin = driver_node.setup_driver_pin(in_edge.driver.get_pid());
     const auto bit_width = in_edge.get_bits();
     I(bit_width == sigs.size());
     if (bit_width == 1) {
+      fmt::print("group_id:{}, sigs[0]:{}\n", group_id, sigs[0]);
       for (const auto &parent_and_pid : gid_fanin2parent_pid[std::make_pair(group_id, sigs[0])]) {
+        fmt::print("hello2!!\n");
         I(gidMTnode2LGnode.find(std::make_pair(group_id, parent_and_pid.first)) != gidMTnode2LGnode.end());
-        auto sink_node = Node(new_lg,gidMTnode2LGnode[std::make_pair(group_id, parent_and_pid.first)]);
+        //auto sink_node = Node(new_lg,gidMTnode2LGnode[std::make_pair(group_id, parent_and_pid.first)]);
+        auto sink_node = gidMTnode2LGnode[std::make_pair(group_id, parent_and_pid.first)].get_node(new_lg);
+
         const auto pid = parent_and_pid.second;
         auto sink_pin = sink_node.setup_sink_pin(pid);
         new_lg->add_edge(driver_pin, sink_pin, 1);
@@ -1052,7 +1059,8 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
       for (auto i = 0; i < bit_width; i++) {
         for (const auto &parent_and_pid : gid_fanin2parent_pid[std::make_pair(group_id, sigs[i])]) {
           I(gidMTnode2LGnode.find(std::make_pair(group_id, parent_and_pid.first)) != gidMTnode2LGnode.end());
-          auto sink_node = Node(new_lg,gidMTnode2LGnode[std::make_pair(group_id, parent_and_pid.first)]);
+          //auto sink_node = Node(new_lg,gidMTnode2LGnode[std::make_pair(group_id, parent_and_pid.first)]);
+          auto sink_node = gidMTnode2LGnode[std::make_pair(group_id, parent_and_pid.first)].get_node(new_lg);
           const auto pid = parent_and_pid.second;
           auto sink_pin = sink_node.setup_sink_pin(pid);
           //NOTE: update this simple Pick_Op node when the more powerful Pick_Op is readly
@@ -1079,20 +1087,23 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
     const auto klut = gid2klut[group_id];
     const std::vector<mockturtle::klut_network::signal> &sigs = edge2signal_klut[out_edge].signals;
     I(old_node_to_new_node.find(out_edge.sink.get_node().get_compact()) != old_node_to_new_node.end());
-    auto sink_node = Node(new_lg,old_node_to_new_node[out_edge.sink.get_node().get_compact()]);
+    //auto sink_node = Node(new_lg,old_node_to_new_node[out_edge.sink.get_node().get_compact()]);
+    auto sink_node = old_node_to_new_node[out_edge.sink.get_node().get_compact()].get_node(new_lg);
     auto sink_pin = sink_node.setup_sink_pin(out_edge.sink.get_pid());
     const auto bit_width = out_edge.get_bits();
     I(bit_width == sigs.size());
     if (bit_width == 1) {
       I(gidMTnode2LGnode.find(std::make_pair(group_id, gid2klut[group_id].get_node(sigs[0]))) != gidMTnode2LGnode.end());
-      auto driver_node = Node(new_lg,gidMTnode2LGnode[std::make_pair(group_id, klut.get_node(sigs[0]))]);
+      //auto driver_node = Node(new_lg,gidMTnode2LGnode[std::make_pair(group_id, klut.get_node(sigs[0]))]);
+      auto driver_node = gidMTnode2LGnode[std::make_pair(group_id, klut.get_node(sigs[0]))].get_node(new_lg);
       auto driver_pin = driver_node.setup_driver_pin(0);
       connect_complemented_signal(new_lg, driver_pin, sink_pin, klut, sigs[0]);
     } else {
       auto join_node = new_lg->create_node(Join_Op);
       for (auto i = 0; i < bit_width; i++) {
         I(gidMTnode2LGnode.find(std::make_pair(group_id, gid2klut[group_id].get_node(sigs[i]))) != gidMTnode2LGnode.end());
-        auto driver_node = Node(new_lg,gidMTnode2LGnode[std::make_pair(group_id, klut.get_node(sigs[i]))]);
+        //auto driver_node = Node(new_lg,gidMTnode2LGnode[std::make_pair(group_id, klut.get_node(sigs[i]))]);
+        auto driver_node = gidMTnode2LGnode[std::make_pair(group_id, klut.get_node(sigs[i]))].get_node(new_lg);
         auto kth_driver_pin = driver_node.setup_driver_pin(0);
         auto kth_sink_pin = join_node.setup_sink_pin(i);
         connect_complemented_signal(new_lg, kth_driver_pin, kth_sink_pin, klut, sigs[i]);
@@ -1102,7 +1113,6 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
     }
   }
   fmt::print("finished.\n");
-
 }
 
 //solve complemented signal

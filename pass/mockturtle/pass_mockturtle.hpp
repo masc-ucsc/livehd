@@ -74,7 +74,7 @@ protected:
   absl::flat_hash_map<Node::Compact, Node::Compact> old_node_to_new_node;
   absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::node>, Node::Compact> gidMTnode2LGnode;
   absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::signal>,
-                      std::vector<std::pair<mockturtle::klut_network::node, Port_ID>>> gid_fanin2parent_pid;
+                      std::vector<std::pair<mockturtle::klut_network::node, Port_ID>> > gid_fanin2parent_pid;
   bool lg_partition(LGraph *);
   void dfs_populate_gid(Node, const unsigned int);
   void create_mockturtle_network(LGraph *);
