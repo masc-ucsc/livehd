@@ -357,6 +357,7 @@ Index_ID LGraph_Base::get_space_input_pin(const Index_ID start_nid, const Index_
 }
 #endif
 
+
 Index_ID LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid, Index_ID src_idx, Port_ID dst_pid) {
   bool            sused;
   SEdge_Internal *sedge;

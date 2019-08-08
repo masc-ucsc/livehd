@@ -84,7 +84,9 @@ void generate_graphs(int n) {
         continue; // No self-loops
 
       edges.insert(std::make_pair(src, dst));
+      I(!g->has_edge(dpin, spin));
       g->add_edge(dpin, spin);
+      I(g->has_edge(dpin, spin));
     }
 
   }

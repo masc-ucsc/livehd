@@ -238,6 +238,8 @@ public:
     return hidx;
   }
 
+  bool has_edge(const Node_pin &driver, const Node_pin &sink) const;
+
   Index_ID add_edge(const Node_pin &src, const Node_pin &dst) {
     I(!src.is_input());
     I(dst.is_input());

@@ -75,8 +75,10 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
       dir = Direction::Output;
     else if (dir_str == "inp")
       dir = Direction::Input;
-    else
+    else {
+      dir = Direction::Invalid;
       I(false);
+    }
 
     Port_ID  pid = Port_invalid;
     if (io_pin.HasMember("graph_io_pos")) {

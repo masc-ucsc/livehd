@@ -370,6 +370,37 @@ Node_pin_iterator LGraph::inp_setup_pins(const Node &node) const {
   return xiter;
 }
 
+bool LGraph::has_edge(const Node_pin &driver, const Node_pin &sink) const {
+  I(driver.get_class_lgraph() == this);
+  I(sink.get_class_lgraph() == this);
+
+  Index_ID idx2 = driver.get_node().get_nid();
+  I(node_internal[idx2].is_master_root());
+
+  while (true) {
+    if (node_internal[idx2].get_dst_pid() == driver.get_pid()) {
+      auto n = node_internal[idx2].get_num_local_outputs();
+      uint8_t i;
+      const Edge_raw *redge;
+      for(i=0, redge = node_internal[idx2].get_output_begin()
+          ;i<n
+          ;i++,redge += redge->next_node_inc()) {
+        I(redge->get_self_idx() == idx2);
+        I(!redge->is_input());
+
+        if (redge->get_idx() == sink.get_idx() && redge->get_inp_pid() == sink.get_pid())
+          return true;
+      }
+    }
+    if (node_internal[idx2].is_last_state()) break;
+    Index_ID tmp = node_internal[idx2].get_next();
+    I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
+    idx2 = tmp;
+  }
+
+  return false;
+}
+
 XEdge_iterator LGraph::out_edges(const Node &node) const {
   I(node.get_class_lgraph() == this);
   XEdge_iterator xiter;
