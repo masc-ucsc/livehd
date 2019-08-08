@@ -1045,6 +1045,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
     auto driver_pin = driver_node.setup_driver_pin(in_edge.driver.get_pid());
     const auto bit_width = in_edge.get_bits();
     I(bit_width == sigs.size());
+    I(gid_fanin2parent_pid.find(std::make_pair(group_id, sigs[0])) != gid_fanin2parent_pid.end());
     if (bit_width == 1) {
       fmt::print("group_id:{}, sigs[0]:{}\n", group_id, sigs[0]);
       for (const auto &parent_and_pid : gid_fanin2parent_pid[std::make_pair(group_id, sigs[0])]) {
