@@ -54,7 +54,7 @@ struct comparator_input_signal {
   bool is_signed;
   std::vector<sig> signals;
   comparator_input_signal &operator=(const comparator_input_signal &obj) {
-    I(this != &obj); // Do not assign object to itself. works but wastefull
+    I(this != &obj); // Do not assign object to itself. works but wasteful
     is_signed  = obj.is_signed;
     signals = obj.signals;
     return *this;
@@ -65,16 +65,16 @@ class Pass_mockturtle : public Pass {
 protected:
   static void work(Eprp_var &var);
 
-  absl::flat_hash_set<XEdge>                                                                  input_edges, output_edges;
-  absl::flat_hash_map<Node::Compact, unsigned int>                                            node2gid; //gid == group id
-  absl::flat_hash_map<unsigned int, mockturtle_network>                                       gid2mock;
-  absl::flat_hash_map<unsigned int, mockturtle::klut_network>                                 gid2klut;
-  absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle_network::signal>>                            edge2signal_mock; //lg<->mig, including all boundary i/o and internal wires
-  absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle::klut_network::signal>>                      edge2signal_klut; //lg<->klut, search edge2signal_mock table, only record i/o mapping
-  absl::flat_hash_map<Node::Compact, Node::Compact>                                           old_node_to_new_node;
+  absl::flat_hash_set<XEdge> bdinp_edges, bdout_edges;//boundary_input/output_edges
+  absl::flat_hash_map<Node::Compact, unsigned int> node2gid; //gid == group id, nodes in node2gid should be lutified
+  absl::flat_hash_map<unsigned int, mockturtle_network> gid2mock;
+  absl::flat_hash_map<unsigned int, mockturtle::klut_network> gid2klut;
+  absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle_network::signal>> edge2signals_mock; //lg<->mig, including all boundary i/o and internal wires
+  absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle::klut_network::signal>> edge2signal_klut; //lg<->klut, search edge2signals_mock table, only record i/o mapping
+  absl::flat_hash_map<Node::Compact, Node::Compact> old_node_to_new_node;
   absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::node>, Node::Compact> gidMTnode2LGnode;
   absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::signal>,
-                      std::vector<std::pair<mockturtle::klut_network::node, Port_ID>>>        gid_fanin2parent_pid;
+                      std::vector<std::pair<mockturtle::klut_network::node, Port_ID>>> gid_fanin2parent_pid;
   bool lg_partition(LGraph *);
   void dfs_populate_gid(Node, const unsigned int);
   void create_mockturtle_network(LGraph *);
@@ -84,10 +84,10 @@ protected:
   void connect_complemented_signal(LGraph *, Node_pin &, Node_pin &, const mockturtle::klut_network &, const mockturtle::klut_network::signal &);
 
   template<typename sig_type, typename ntk_type>
-  void setup_input_signal(const unsigned int &, const XEdge &, std::vector<sig_type> &, ntk_type &);
+  void setup_input_signals(const unsigned int &, const XEdge &, std::vector<sig_type> &, ntk_type &);
 
   template<typename sig_type, typename ntk_type>
-  void setup_output_signal(const unsigned int &, const XEdge &, std::vector<sig_type> &, ntk_type &);
+  void setup_output_signals(const unsigned int &, const XEdge &, std::vector<sig_type> &, ntk_type &);
 
   template<typename signal>
   void split_input_signal(const std::vector<signal> &, std::vector<std::vector<signal>> &);
@@ -176,7 +176,7 @@ protected:
       }
   }
 
-  bool eligable_cell_op(const Node &cell) {
+  bool eligible_cell_op(const Node &cell) {
     switch (cell.get_type().op) {
       case Not_Op:
         //fmt::print("Node: Not_Op\n");

@@ -637,9 +637,8 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         inp_num += 1;
       }
 
-      if(!has_inputs) {
+      if(!has_inputs)
         continue;
-      }
 
       assert(cell_output_map.find(node.get_driver_pin().get_compact())!=cell_output_map.end());
 
