@@ -45,6 +45,7 @@ cc_binary(
 sh_test(
     name = "lgshell_test.sh",
     srcs = ["tests/lgshell_test.sh"],
+    tags = ["fixme"],
     data = [
         "//inou/yosys:liblgraph_yosys.so",
         "//inou/yosys:verilog_tests",
