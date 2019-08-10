@@ -81,8 +81,9 @@ new_git_repository(
 git_repository(
     name = "cryptominisat",
     #build_file = "BUILD.abseil", # relative to external path
-    commit = "798cbbe58b0ab0bbf9fbb3ad9b53e919e4a64741", # August 10, 2019 6ee26181af5c719fa4f6ac1fa1aa3c85d070bcea", # May 12, 2019
+    commit = "d522ab933584ea812429bfb22f752088ed7be599", # August 10, 2019 6ee26181af5c719fa4f6ac1fa1aa3c85d070bcea", # May 12, 2019
     remote = "https://github.com/masc-ucsc/cryptominisat.git",
+    shallow_since = "1565452382 -0700",
 )
 new_git_repository(
     name = "rapidjson",

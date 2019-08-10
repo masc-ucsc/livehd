@@ -122,7 +122,8 @@ int Inou_yosys_api::do_work(std::string_view yosys, std::string_view liblg, std:
     Main_api::error("Could not create yosys_script.XXXXXX file\n");
     return -1;
   }
-  write(fd, yosys_cmd.c_str(), yosys_cmd.size());
+  int sz_check = write(fd, yosys_cmd.c_str(), yosys_cmd.size());
+  I(sz_check == yosys_cmd.size());
   close(fd);
 
   fmt::print("yosys {} synthesis cmd: {} -m {} using {}\n", filename, yosys, liblg, script_file);

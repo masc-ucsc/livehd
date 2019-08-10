@@ -26,6 +26,8 @@ RTLIL::Wire *Lgyosys_dump::get_wire(const Node_pin &pin) {
   fmt::print("trying to get wire for non existing driver pin {} ??\n", pin.debug_name());
   assert(pin.is_driver());
   assert(false);
+
+  return nullptr;
 }
 
 RTLIL::Wire *Lgyosys_dump::add_wire(RTLIL::Module *module, const Node_pin &pin) {
@@ -184,7 +186,7 @@ void Lgyosys_dump::create_memory(LGraph *g, RTLIL::Module *module, Node &node) {
       // rd_en.append(RTLIL::SigSpec(RTLIL::State::Sx));
 
     } else {
-      log_error("Unrecognized input pid %hu\n", input_pin);
+      log_error("Unrecognized input pid %d\n", input_pin);
       assert(false);
     }
   }

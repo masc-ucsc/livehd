@@ -463,15 +463,17 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
   }
 
   auto line = scan_calc_lineno();
-  auto col  = token_list[max_pos].pos - line_pos_start;
+  int s_col  = token_list[max_pos].pos - line_pos_start;
+  I(s_col>=0);
+  size_t col = s_col;
 
   std::string line_txt;
 
-  int xtra_col = 0;
+  size_t xtra_col = 0;
   for (size_t i = 0; i < (line_pos_end - line_pos_start); i++) {
     if (buffer[line_pos_start + i] == '\t') {
       line_txt += "  ";  // 2 spaces
-      if (static_cast<int>(i) <= col) xtra_col++;
+      if (i <= col) xtra_col++;
     } else {
       line_txt += buffer[line_pos_start + i];
     }
