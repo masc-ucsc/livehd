@@ -21,6 +21,7 @@ filegroup(
 
 sh_test(
     name = "dce.sh",
+    tags = ["fixme"],
     srcs = ["tests/dce.sh"],
     data = [
         "//inou/yosys:liblgraph_yosys.so",

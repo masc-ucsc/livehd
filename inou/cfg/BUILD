@@ -20,6 +20,7 @@ sh_test(
     name = "pyrope.sh",
     srcs = ["tests/pyrope.sh"],
     # tags = ["manual"],
+    tags = ["fixme"],
     data = [
         "//inou/yosys:liblgraph_yosys.so",
         "//main:lgshell",

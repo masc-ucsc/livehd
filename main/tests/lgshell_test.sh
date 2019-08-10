@@ -36,7 +36,9 @@ SHELL_ODIR=./shell_test/
 rm -rf ${SHELL_ODIR}
 mkdir ${SHELL_ODIR}
 
-declare -a inputs=("trivial.v" "null_port.v" "simple_flop.v")
+mkdir -p mlgdb
+
+declare -a inputs=("trivial.v" "mux.v" "hierarchy.v")
 for input in ${inputs[@]}
 do
   base=${input%.*}
@@ -65,7 +67,7 @@ do
     exit 3
   fi
 
-  echo "lgraph.open name:${base} path:mlgdb |> dump |> inou.yosys.fromlg odir:${SHELL_ODIR} |> inou.graphviz" | ${LGSHELL}
+  echo "lgraph.open name:${base} path:mlgdb |> dump |> inou.yosys.fromlg odir:${SHELL_ODIR} |> inou.graphviz.fromlg" | ${LGSHELL}
 
   if [ $? -eq 0 ] && [ -f ${SHELL_ODIR}/${base}.v ]; then
     echo "Successfully created verilog from graph ${file}"
@@ -75,25 +77,9 @@ do
   fi
 done
 
-echo "lgraph.open name:simple_flop path:mlgdb |> lgraph.stats" | ${LGSHELL}
+echo "lgraph.open name:trivial path:mlgdb |> lgraph.stats" | ${LGSHELL}
 if [ $? -ne 0 ]; then
-  echo "FAIL: it should open simple_flop"
-  exit 1
-fi
-
-touch mlgdb/lgraph_33_nodes
-echo "lgraph.open name:simple_flop path:mlgdb |> lgraph.stats" | ${LGSHELL} | grep warning: >mlgdb/pp
-if [ $(wc -l mlgdb/pp) -lt 1 ]; then
-  echo "FAIL: (1) it should open simple_flop, but return error for corrupted graph_library"
-  exit 1
-fi
-
-rm mlgdb/lgraph_33_nodes
-rm mlgdb/lgraph_1_nodes
-ls mlgdb/lgraph*type
-echo "lgraph.open name:simple_flop path:mlgdb |> lgraph.stats" | ${LGSHELL}
-if [ $? -eq 0 ]; then
-  echo "FAIL: (2) it should open simple_flop, but return error for corrupted graph_library"
+  echo "FAIL: it should open trivial"
   exit 1
 fi
 

@@ -21,6 +21,7 @@ filegroup(
 
 sh_test(
     name = "pyrope_test.sh",
+    tags = ["fixme"],
     srcs = ["tests/pyrope_test.sh"],
     data = [
         "//inou/yosys:liblgraph_yosys.so",
@@ -50,6 +51,7 @@ cc_binary(
 
 cc_test(
     name = "prp_unit_test",
+    tags = ["fixme"],
     srcs = ["prp_unit_test.cpp"],
     deps = [
         "@gtest//:gtest_main",

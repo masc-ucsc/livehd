@@ -187,9 +187,9 @@ void Pass_sample::create_sample_graph(LGraph *g) {
   auto lg_source = g->get_library().get_source(g->get_lgid());
   LGraph *lg = LGraph::create(lg_path, "pass_sample", lg_source);
   fmt::print("Creating new sample LGraph...\n");
-  auto graph_inp_a = lg->add_graph_input("g_inp_a", 8, 0);
-  auto graph_inp_b = lg->add_graph_input("g_inp_b", 8, 0);
-  auto graph_out = lg->add_graph_output("g_out", 8, 0);
+  auto graph_inp_a = lg->add_graph_input("g_inp_a", 0, 4); // First io in module, 4 bits
+  auto graph_inp_b = lg->add_graph_input("g_inp_b", 1, 1); // Module position 1, 1 bit
+  auto graph_out = lg->add_graph_output("g_out", 2, 3); // Module possition 2, 3 bits
 
   auto shr_node = lg->create_node(ShiftRight_Op);
   auto shr_inp_sink = shr_node.setup_sink_pin(0);

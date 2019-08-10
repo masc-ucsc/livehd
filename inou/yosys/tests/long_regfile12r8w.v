@@ -32,7 +32,7 @@ WITH THE SOFTWARE.
 
 ****************************************************************************/
 
-module long_regfile12r8w
+module regfile12r8w
     (input                    clk
 
      ,input [7-1:0]           waddr0

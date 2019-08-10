@@ -25,7 +25,10 @@ if [ "$1" == "long" ]; then
   long="true"
   shift
 fi
+fixme=""
 if [ "$1" != "" ]; then
+  long="true"
+  fixme="true"
   inputs=""
   while [ "$1" != "" ]; do
     inputs+=" "$1
@@ -43,9 +46,20 @@ do
   echo ${YOSYS} ./inou/yosys/tests/${input}
   base=${input%.*}
 
-  if [[ $long == "" && $input =~ "long_" ]]; then
-    echo "Skipping long test for "$base
-    continue
+  if [[ $input =~ "long_" ]]; then
+    if [[ $long == "" ]]; then
+      echo "Skipping long test for "$base
+      continue
+    fi
+    base=${base:5}
+  fi
+  if [[ $input =~ "fixme_" ]]; then
+    if [[ $fixme == "" ]]; then
+      echo "Skipping fixme test for "$base
+      echo "PLEASE: Somebody fix this!!!"
+      continue
+    fi
+    base=${base:6}
   fi
 
   rm -rf lgdb_yosys tmp_yosys

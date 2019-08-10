@@ -189,7 +189,7 @@ TEST_F(MainTest, Help) {
 
 TEST_F(MainTest, HelpPass) {
   drain_stdin();
-  std::string cmd = "help inou.graphviz #\n ";  // # is a marker for the stupid espace lines
+  std::string cmd = "help inou.graphviz.fromlg #\n ";  // # is a marker for the stupid espace lines
 
   auto sz = write(master, cmd.c_str(), cmd.size());
   EXPECT_EQ(sz, cmd.size());

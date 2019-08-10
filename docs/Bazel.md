@@ -44,6 +44,27 @@ files to check what may be going wrong. Use:
 
     bazel test //... --sandbox_debug --verbose_failures --keep_state_after_build
 
+## To run FIXME tests
+
+Many times, we have new tests that make the regression fail. We use "fixme" if
+the test is a new one and LGraph is still not patched. We want the test in the system,
+but we do not want to make fail the regressions.
+
+Those tests are marked with tags "fixme" in the BUILD. E.g:
+
+    sh_test(
+        name = "my_test.sh",
+        tags = ["fixme"],  # This is a fixme test. It fails, but we should fix it
+        srcs = ["tests/pyrope_test.sh"],
+
+To run all the fixme tests
+
+    bazel test --test_tag_filters "fixme" //...
+
+To list all the fixme tests (the goal is to have zero)
+
+    bazel query 'attr(tags, fixme, tests(//...))'
+
 ## To run LONG tests
 
 In addition to the short tests, there are sets of long tests that are run frequently

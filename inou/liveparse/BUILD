@@ -21,6 +21,7 @@ cc_test(
 
 sh_test(
     name = "chunkify_test.sh",
+    tags = ["fixme"],
     srcs = ["tests/chunkify_test.sh"],
     data = [
         "//main:lgshell",

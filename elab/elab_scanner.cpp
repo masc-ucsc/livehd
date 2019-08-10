@@ -275,9 +275,9 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, Token
             pos++;
         }
       }else{
-        if(!is_newline(memblock[pos]) && memblock[pos]!='*' && (pos+3)<memblock.size()) {
+        if(!is_newline(memblock[pos]) && memblock[pos]!='*' && memblock[pos]!='/' && (pos+3)<memblock.size()) {
           // TODO: Convert this to a word base (not byte based) skip
-          while(!is_newline(memblock[pos+1]) && memblock[pos+1]!='*' && (pos+3)<memblock.size())
+          while(!is_newline(memblock[pos+1]) && memblock[pos+1]!='*' && memblock[pos+1]!='/' && (pos+3)<memblock.size())
             pos++;
         }
       }
