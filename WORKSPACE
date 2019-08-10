@@ -81,7 +81,7 @@ new_git_repository(
 git_repository(
     name = "cryptominisat",
     #build_file = "BUILD.abseil", # relative to external path
-    commit = "6ee26181af5c719fa4f6ac1fa1aa3c85d070bcea", # May 12, 2019
+    commit = "798cbbe58b0ab0bbf9fbb3ad9b53e919e4a64741", # August 10, 2019 6ee26181af5c719fa4f6ac1fa1aa3c85d070bcea", # May 12, 2019
     remote = "https://github.com/masc-ucsc/cryptominisat.git",
 )
 new_git_repository(
@@ -178,18 +178,18 @@ http_archive(
     ],
 )
 
-load("@bazel_toolchains//rules:rbe_repo.bzl", "rbe_autoconfig")
+#load("@bazel_toolchains//rules:rbe_repo.bzl", "rbe_autoconfig")
 
-git_repository(
-    name = "rules_graal",
-    commit = "54c18d0c002670d755c1a709b94336f74375e21d",
-    remote = "git://github.com/andyscott/rules_graal",
-)
+#git_repository(
+    #name = "rules_graal",
+    #commit = "54c18d0c002670d755c1a709b94336f74375e21d",
+    #remote = "git://github.com/andyscott/rules_graal",
+#)
 
-load("@rules_graal//graal:graal_bindist.bzl", "graal_bindist_repository")
+#load("@rules_graal//graal:graal_bindist.bzl", "graal_bindist_repository")
 
-graal_bindist_repository(
-    name = "graal",
-    version = "19.0.0",
-)
+#graal_bindist_repository(
+    #name = "graal",
+    #version = "19.0.0",
+#)
 

@@ -16,3 +16,22 @@ a pass and integrate it with lgshell.
 [GitHub-use](GitHub-use.md) explains how to operated with git and LGraph, how to
 handle branches, merges and the lack of submodules.
 
+# Use clang and gcc for the builds
+
+The regression system builds both for gcc and clang. To force clang build in
+the command line (better warnings, faster compile, but a bit worse execution
+time in some cases).
+
+     CXX=clang++ CC=clang bazel build -c dbg //...
+
+# GDB usage
+
+For most tests, you can debug with
+
+     gdb ./bazel-bin/main/lgshell
+
+Sometimes the failure is yosys/lgraph bridge. In this case, you need to gdb yosys directly
+
+     gdb `which gdb`
+     (gdb) r -m ./bazel-bin/inou/yosys/liblgraph_yosys.so 
+

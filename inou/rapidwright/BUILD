@@ -1,10 +1,10 @@
-load("@rules_graal//graal:graal.bzl", "graal_binary")
+#load("@rules_graal//graal:graal.bzl", "graal_binary")
 
-java_library(
-    name = "rw4lg",
-    #main_class = "Main",
-    srcs = glob(["Main_test.java"]),
-)
+#java_library(
+#    name = "rw4lg",
+#    #main_class = "Main",
+#    srcs = glob(["Main_test.java"]),
+#)
 
 #graal_binary(
 #    name = "main-native",
