@@ -74,7 +74,7 @@ sh_test(
         "//inou/yosys:verilog_tests",
         ":lgshell",
         ],
-    tags = ["long2"],
+    tags = ["long1"],
     size = "large",
     args = ["long"],
     deps = [

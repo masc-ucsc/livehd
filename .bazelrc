@@ -3,6 +3,8 @@
 build --cxxopt="-std=c++17" --cxxopt="-Wno-unknown-pragmas" --force_pic
 # test --cache_test_results=no
 test --test_tag_filters "-long1,-long2,-long3,-long4,-long5,-long6,-long7,-long8,-manual,-fixme"
+coverage --test_tag_filters "-long1,-long2,-long3,-long4,-long5,-long6,-long7,-long8,-manual,-fixme"
+coverage --cache_test_results=no
 
 # mada local (no GCP build) but with remote cache
 #build --remote_http_cache=http://mada2.cse.ucsc.edu:8082

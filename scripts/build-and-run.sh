@@ -9,12 +9,6 @@ if [ ! -e ${LGRAPH_SRC}/WORKSPACE ]; then
   exit -1
 fi
 
-${LGRAPH_SRC}/scripts/build.sh
-if [ $? -ne 0 ]; then
-  echo "build-and-run.sh: build error"
-  exit -1
-fi
-
 if [[ $(which lcov) && ${COVERAGE_RUN} == "coverage" ]] ; then
   cd $LGRAPH_SRC
   ./scripts/gencoverage.sh
@@ -24,6 +18,12 @@ if [[ $(which lcov) && ${COVERAGE_RUN} == "coverage" ]] ; then
     exit -1
   fi
 else
+  ${LGRAPH_SRC}/scripts/build.sh
+  if [ $? -ne 0 ]; then
+    echo "build-and-run.sh: build error"
+    exit -1
+  fi
+
   ${LGRAPH_SRC}/scripts/run-test.sh
   if [ $? -ne 0 ]; then
     echo "build-and-run.sh: test error"
