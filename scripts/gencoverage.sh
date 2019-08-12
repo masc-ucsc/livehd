@@ -1,7 +1,7 @@
 #!/bin/sh
 
 mkdir -p cov
-rm -f cov/coverage.*
+rm -f ./cov/coverage.*
 
 # -k keep going, --experimental_cc_coverage for gcc newer patches
 bazel coverage -k --experimental_cc_coverage  //...

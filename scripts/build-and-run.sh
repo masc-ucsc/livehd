@@ -2,7 +2,12 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 # Default for LGRAPH source code location
-: LGRAPH_SRC=${LGRAPH_SRC:=${HOME}/lgraph}
+if [[ -v LGRAPH_SRC ]]; then
+  echo "lgraph_src defined as "$LGRAPH_SRC
+else
+  echo "lgraph_src undefined"
+  export LGRAPH_SRC=${HOME}/lgraph
+fi
 
 if [ ! -e ${LGRAPH_SRC}/WORKSPACE ]; then
   echo "BUILD ERROR: '${LGRAPH_SRC}' does not contain LGRAPH source code"
