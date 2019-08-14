@@ -13,8 +13,6 @@
 
 using testing::HasSubstr;
 
-unsigned int rseed = 123;
-
 class Setup_mmap_map_test : public ::testing::Test {
 protected:
 

@@ -14,6 +14,7 @@
 #include "mmap_gc.hpp"
 
 namespace mmap_lib {
+namespace mmap_lib {
 #define MMAPA_MIN_ENTRIES  (1ULL << 10)
 #define MMAPA_INCR_ENTRIES (1ULL << 14)
 #define MMAPA_MAX_ENTRIES  (1ULL << 31)

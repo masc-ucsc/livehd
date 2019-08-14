@@ -6,6 +6,7 @@ cc_library(
     includes = ["include"],
     deps = [
         "@iassert//:iassert",
+        "@com_google_absl//absl/container:flat_hash_map",
     ],
 )
 
@@ -78,6 +79,16 @@ cc_test(
         "@com_google_absl//absl/container:flat_hash_map",
         "@gtest//:gtest_main",
         "@fmt//:fmt",
+    ],
+)
+
+cc_test(
+    name = "mmap_gc_test",
+    srcs = ["tests/mmap_gc_test.cpp"],
+    deps = [
+        ":headers",
+        "@gtest//:gtest_main",
+        "//bench:headers",
     ],
 )
 
