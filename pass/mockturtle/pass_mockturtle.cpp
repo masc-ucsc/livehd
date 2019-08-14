@@ -1059,7 +1059,6 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
       fmt::print("group_id:{}, sigs[0]:{}\n", group_id, sigs[0]);
       const auto & parent_and_pid = gid_fanin2parent_pid[std::make_pair(group_id, sigs[0])];
 
-      fmt::print("hello2!!\n");
       I(gidMTnode2LGnode.find(std::make_pair(group_id, parent_and_pid.first)) != gidMTnode2LGnode.end());
       //auto sink_node = Node(new_lg,gidMTnode2LGnode[std::make_pair(group_id, parent_and_pid.first)]);
       auto sink_node = gidMTnode2LGnode[std::make_pair(group_id, parent_and_pid.first)].get_node(new_lg);

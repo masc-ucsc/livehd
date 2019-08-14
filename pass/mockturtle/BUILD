@@ -21,3 +21,17 @@ cc_test(
         "@fmt//:fmt",
     ],
 )
+
+
+sh_test(
+    name = "mockturtle_test.sh",
+    srcs = ["tests/mockturtle_test.sh"],
+    data = [
+        "//inou/yosys:liblgraph_yosys.so",
+        "//main:lgshell",
+        "//inou/yosys:verilog_tests"
+        ],
+    deps = [
+        "//inou/yosys:scripts",
+        ]
+)
