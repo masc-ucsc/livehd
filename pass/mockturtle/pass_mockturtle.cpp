@@ -686,7 +686,7 @@ void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
 
       case Or_Op: {
         fmt::print("Or_Op in gid:{}\n",group_id);
-        I(!node.inp_edges().empty() && node.out_edges().empty());
+        I(!node.inp_edges().empty() && !node.out_edges().empty());
         mapping_logic_cell_lg2mock(&mockturtle_network::create_nary_or, mt_ntk, node, group_id);
         break;
       }

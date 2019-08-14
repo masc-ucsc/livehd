@@ -10,7 +10,11 @@ rm -f  ./lgshell_cmds
 rm -f  ./lgshell_cmds_opt
 pwd
 
-pts='trivial trivial2a trivial3'
+#unsupported ShiftOp
+#pts = params satlarge satsmall satpick shiftx shiftx_simple test simple_add simple_rf2 
+#worth to try first
+#pts = reduce unconnected wires
+pts='operators trivial trivial2a trivial3'
 
 LGSHELL=./bazel-bin/main/lgshell
 
