@@ -850,12 +850,13 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT(LGraph *g) {
     //but in klut network, you can regard them as the same
     fmt::print("(Group ID:{}) Mapping mockturtle network IO signal to KLUT network IO signal...\n", group_id);
     I(mt_ntk.num_pis()==klut_ntk.num_pis() && mt_ntk.num_pos()==klut_ntk.num_pos());
-    std::vector<mockturtle::mig_network::node> mig_signal;
+    std::vector<mockturtle::mig_network::node>    mig_signal;
     std::vector<mockturtle::klut_network::signal> klut_signal;
     mt_ntk.foreach_pi( [&](const auto& n) { mig_signal.emplace_back(n); } );
     mt_ntk.foreach_po( [&](const auto& n) { mig_signal.emplace_back(mt_ntk.get_node(n)); } );
-    klut_ntk.foreach_pi( [&](const auto& n) { klut_signal.emplace_back(n); } );
-    klut_ntk.foreach_po( [&](const auto& n) { klut_signal.emplace_back(n); } );
+    klut_ntk.foreach_pi( [&](const auto& n) { klut_signal.emplace_back(n); fmt::print("@inp, klut_signal size:{}\n", klut_signal.size());} );
+    klut_ntk.foreach_po( [&](const auto& n) { klut_signal.emplace_back(n); fmt::print("@out, klut_signal size:{}\n", klut_signal.size());} );
+
     int pos = 0;
     for (const auto &in_edge : bdinp_edges) {
       I(klut_ntk.size() > pos);
@@ -896,9 +897,11 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT(LGraph *g) {
 
   //print out the signal mapping information
   for (const auto &edge : boundary_edges) {
+    fmt::print("IO_XEdge:{}_to_{}\n", edge.driver.get_node().debug_name(), edge.sink.get_node().debug_name());
     I(edge2signals_mock[edge].gid == edge2signals_klut[edge].gid);
     const auto gid = edge2signals_klut[edge].gid;
-    fmt::print("Group_ID:{} IO_XEdge:{}_to_{}\n", gid, edge.driver.get_node().debug_name(), edge.sink.get_node().debug_name());
+    fmt::print("Group_ID:{}\n", gid);
+    fmt::print("klut[edge] size:{}, mock[edge] size:{}\n", edge2signals_klut[edge].signals.size(), edge2signals_mock[edge].signals.size());
     I(edge2signals_klut[edge].signals.size() == edge2signals_mock[edge].signals.size());
     const long unsigned int signal_width = edge2signals_mock[edge].signals.size();
     for (long unsigned int i = 0; i < signal_width; i++) {

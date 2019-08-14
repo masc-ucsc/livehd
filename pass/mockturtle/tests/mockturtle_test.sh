@@ -13,8 +13,8 @@ pwd
 #unsupported ShiftOp
 #pts = params satlarge satsmall satpick shiftx shiftx_simple test simple_add simple_rf2 
 #worth to try first
-#pts = reduce unconnected wires
-pts='operators trivial trivial2a trivial3'
+#pts = operators reduce unconnected wires
+pts='trivial_and trivial trivial2a trivial3'
 
 LGSHELL=./bazel-bin/main/lgshell
 
@@ -57,7 +57,7 @@ for pt in $pts
 do
   echo "lgraph.open name:${pt}_lutified |> inou.yosys.fromlg" | ${LGSHELL}
   if [ $? -eq 0 ] && [ -f ${pt}_lutified.v ]; then
-    echo "Successfully created verilog:${pt}.v"
+    echo "Successfully created verilog:${pt}_lutified.v"
   else
     echo "FAIL: verilog generation terminated with an error, testcase: ${pt}.v"
     exit 1
