@@ -348,7 +348,7 @@ endmodule
 
 //-----------------------------------------------------------------------------
 // ASYNC RESETABLE FLIP FLOP
-module nocheck_cells(out, in, async_reset_l, clock) ;
+module cells(out, in, async_reset_l, clock) ;
 	output out ;
 	input in ;
 	input async_reset_l ;

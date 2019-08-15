@@ -117,7 +117,7 @@ do
   fi
   $(cat tmp_yosys/*.v >tmp_yosys/all_${base}.v)
 
-  if [[ $base =~ "nocheck_" ]]; then
+  if [[ $input =~ "nocheck_" ]]; then
     LC=$(wc -l tmp_yosys/all_${base}.v | cut -d" " -f1)
     echo "Skipping check for "$base" LC:"$LC
     if [[ $LC -lt 2 ]]; then

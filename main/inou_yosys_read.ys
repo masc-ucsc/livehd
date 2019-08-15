@@ -14,7 +14,6 @@ hierarchy {{top}}
 {{/hierarchy}}
 
 proc
-# Breaks yosys. Weird
 #opt -fast
 pmuxtree
 memory_dff

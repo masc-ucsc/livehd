@@ -620,7 +620,7 @@ void LGraph::dump() {
     }else if (node.get_type().op == U32Const_Op) {
       fmt::print(" u32=0x{:x}\n",node.get_type_const_value());
     }else if (node.get_type().op == StrConst_Op) {
-      fmt::print(" str=0x{:x}\n",node.get_type_const_sview());
+      fmt::print(" str={}\n",node.get_type_const_sview());
     }else{
       fmt::print("\n");
     }

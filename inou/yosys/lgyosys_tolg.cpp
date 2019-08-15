@@ -46,27 +46,31 @@ static absl::flat_hash_map<const RTLIL::Cell *, Node>      cell2node; // Points 
 static absl::flat_hash_map<const RTLIL::Wire *, Node_pin_iterator>      partially_assigned;
 
 static void look_for_wire(LGraph *g, const RTLIL::Wire *wire) {
-    if(wire->port_input) {
-      //log("input %s\n",wire->name.c_str());
-      I(!wire->port_output); // any bidirectional port?
-      I(wire->name.c_str()[0] == '\\');
-      auto pin = g->add_graph_input(&wire->name.c_str()[1], wire->port_id, wire->width);
-      if (wire->start_offset) {
-        pin.set_offset(wire->start_offset);
-      }
-      wire2pin[wire] = pin;
-    }else if (wire->port_output) {
-      //log("output %s\n",wire->name.c_str());
-      I(wire->name.c_str()[0] == '\\');
-      g->add_graph_output(&wire->name.c_str()[1], wire->port_id, wire->width);
-      auto pin = g->get_graph_output_driver(&wire->name.c_str()[1]);
-      if (wire->start_offset) {
-        auto dpin = g->get_graph_output_driver(&wire->name.c_str()[1]);
-        I(dpin.get_pid() == pin.get_pid());
-        dpin.set_offset(wire->start_offset);
-      }
-      wire2pin[wire] = pin;
+  if(wire->port_input) {
+    //log("input %s\n",wire->name.c_str());
+    I(!wire->port_output); // any bidirectional port?
+    I(wire->name.c_str()[0] == '\\');
+    auto pin = g->add_graph_input(&wire->name.c_str()[1], wire->port_id, wire->width);
+    if (wire->start_offset) {
+      pin.set_offset(wire->start_offset);
     }
+    wire2pin[wire] = pin;
+  }else if (wire->port_output) {
+    //log("output %s\n",wire->name.c_str());
+    I(wire->name.c_str()[0] == '\\');
+    g->add_graph_output(&wire->name.c_str()[1], wire->port_id, wire->width);
+    auto pin = g->get_graph_output(&wire->name.c_str()[1]);
+    if (wire->start_offset) {
+      auto dpin = g->get_graph_output_driver(&wire->name.c_str()[1]);
+      I(dpin.get_pid() == pin.get_pid());
+      dpin.set_offset(wire->start_offset);
+    }
+    auto node = g->create_node(Join_Op, wire->width);
+
+    wire2pin[wire] = node.setup_driver_pin();
+
+    //g->add_edge(node.get_driver_pin(), pin);
+  }
 }
 
 static void look_for_module_io(RTLIL::Module *module, const std::string &path) {
@@ -98,9 +102,10 @@ static Node_pin &get_edge_pin(LGraph *g, const RTLIL::Wire *wire) {
           ,wire->width
           ,wire2pin[wire].get_pid()
           ,wire2pin[wire].get_bits());
+      assert(false); // WHY?
+      wire2pin[wire].set_bits(wire->width);
+      assert(wire->width == wire2pin[wire].get_bits());
     }
-    wire2pin[wire].set_bits(wire->width);
-    assert(wire->width == wire2pin[wire].get_bits());
     return wire2pin[wire];
   }
 
@@ -224,9 +229,16 @@ static Node resolve_memory(LGraph *g, RTLIL::Cell *cell) {
         continue;
 
       if(chunk.width == wire->width) {
-        assert(wire2pin.find(wire) == wire2pin.end());
+        if (wire2pin.find(wire) != wire2pin.end()) {
+          auto join_dpin = wire2pin[wire];
+          auto join_node = join_dpin.get_node();
+          I(join_node.get_type().op == Join_Op);
+          I(join_node.inp_connected_pins().size() == 0);
 
-        if(chunk.width == ss.size()) {
+          auto spin_join = join_node.setup_sink_pin(0);
+          g->add_edge(dpin, spin_join);
+          assert(join_dpin.get_bits() == wire->width);
+        }else if(chunk.width == ss.size()) {
           // output port drives a single wire
           wire2pin[wire]     = dpin;
           set_bits_wirename(dpin, wire);
@@ -582,6 +594,8 @@ static void process_assigns(RTLIL::Module *module, LGraph *g) {
     for(auto &chunk : lhs.chunks()) {
       const RTLIL::Wire *lhs_wire = chunk.wire;
 
+      printf("Assignment to %s\n", lhs_wire->name.c_str());
+
       if(lhs_wire->port_input) {
         log_error("Assignment to input port %s\n", lhs_wire->name.c_str());
 
@@ -600,7 +614,7 @@ static void process_assigns(RTLIL::Module *module, LGraph *g) {
           } else {
             I(dpin.get_bits());
             I(wire2pin[lhs_wire].get_bits() == dpin.get_bits());
-            //auto dpin2 = wire2pin[lhs_wire];
+            auto dpin2 = wire2pin[lhs_wire];
             I(dpin==wire2pin[lhs_wire]); // "WARNING: unclear code FIXME\n";
             //auto spin = wire2pin[lhs_wire];
             //assert(false);// FIXME: find test case to debug/fix this
@@ -1188,10 +1202,11 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
   for(auto &kv : partially_assigned) {
     const RTLIL::Wire *wire = kv.first;
 
-    auto     join_node = wire2pin[wire].get_node();
+    auto     join_dpin = wire2pin[wire];
+    auto     join_node = join_dpin.get_node();
+    I(join_node.get_type().op == Join_Op);
     Port_ID  join_pid  = 0;
 
-    auto join_dpin = join_node.setup_driver_pin();
     set_bits_wirename(join_dpin, wire);
 
     Node_pin current;

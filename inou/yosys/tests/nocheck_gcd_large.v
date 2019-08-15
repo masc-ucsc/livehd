@@ -1,7 +1,7 @@
 
 // IT IS OK, but fairly slow in checking
 
-module nocheck_gcd_large(input clk, 
+module gcd_large(input clk, 
            input reset, 
            input [40:0] a,
            input [40:0] b, 
