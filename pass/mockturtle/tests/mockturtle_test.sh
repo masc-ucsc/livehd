@@ -2,19 +2,12 @@
 
 
 rm -rf ./lgdb 
-rm -f  ./logs/*.json
-rm -f  ./logs/*.v
-rm -f  ./logs/*.dot
-rm -f  ./logs/*.log
-rm -f  ./lgshell_cmds
-rm -f  ./lgshell_cmds_opt
-pwd
 
 #unsupported ShiftOp
 #pts = params satlarge satsmall satpick shiftx shiftx_simple test simple_add simple_rf2 
 #worth to try first
 #pts = operators reduce unconnected wires
-pts='trivial_and trivial trivial2a trivial3'
+pts='trivial trivial2a trivial3'
 
 LGSHELL=./bazel-bin/main/lgshell
 
@@ -83,9 +76,4 @@ do
 done
 
 
-rm -f *_dirty.v
-rm -f *_gld.v
-mv *.v    ./logs
-rm -f fm_*
-rm -f formality.log
 
