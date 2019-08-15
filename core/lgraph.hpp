@@ -253,7 +253,7 @@ public:
   Index_ID add_edge(const Node_pin &src, const Node_pin &dst, uint16_t bits) {
     Index_ID idx = add_edge(src, dst);
     I(idx = src.get_idx());
-    I(!is_type_const(node_internal[idx].get_nid())); // Do not overwrite bits in constants
+    GI(bits!=get_bits(idx), !is_type_const(node_internal[idx].get_nid())); // Do not overwrite bits in constants
     set_bits(idx, bits);
     return idx;
   }

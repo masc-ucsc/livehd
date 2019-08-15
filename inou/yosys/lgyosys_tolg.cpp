@@ -370,7 +370,7 @@ static Node_pin resolve_constant(LGraph *g, const std::vector<RTLIL::State> &dat
 
   if(u32_const && data.size() <= 32) {
     auto node = g->create_node_const(value);
-    I(node.get_driver_pin().get_bits() == data.size());
+    I(node.get_driver_pin().get_bits() <= data.size());
     return node.setup_driver_pin();
   }
 
@@ -547,7 +547,10 @@ static Node_pin create_join_operator(LGraph *g, const RTLIL::SigSpec &ss) {
 
   for(auto &chunk : ss.chunks()) {
     if(chunk.wire == nullptr) {
-      inp_pins.push_back(resolve_constant(g, chunk.data));
+      auto dpin = resolve_constant(g, chunk.data);
+      inp_pins.push_back(dpin);
+      for(size_t i=dpin.get_bits();i<chunk.data.size();++i)
+        inp_pins.push_back(g->create_node_const(0).setup_driver_pin());
     } else {
       inp_pins.push_back(create_pick_operator(g, chunk.wire, chunk.offset, chunk.width));
     }

@@ -79,7 +79,7 @@ std::vector<LGraph *> Inou_rand::do_tolg() {
 
   for(int i = 0; i < opack.rand_size; i++) {
     if(rnd_const(rnd) < opack.rand_crate) {
-      created.emplace_back(g->create_node_const(rnd_u32op(rnd),rnd_bits1(rnd)));
+      created.emplace_back(g->create_node_const(rnd_u32op(rnd)));
     } else {
       created.emplace_back(g->create_node(static_cast<Node_Type_Op>(rnd_op(rnd))));
     }

@@ -32,7 +32,7 @@ protected:
       if ((i&0xFFF)==0) {
         top->create_node_sub(subs[rand()&1023]->get_lgid());
       }
-      top->create_node_const(i, i&0xFF);
+      top->create_node_const(i);
     }
 
   };

@@ -216,8 +216,8 @@ void simple() {
   auto o7 = g->add_graph_output("o2", pos++, rand()&0xF); // 7
   auto o8 = g->add_graph_output("o3", pos++, rand()&0xF); // 8
 
-  auto c9 = g->create_node_const(1,3); //  9
-  auto c10 = g->create_node_const(21,4); //  10
+  auto c9 = g->create_node_const(1); //  9
+  auto c10 = g->create_node_const(21); //  10
   auto c11 = g->create_node_const("xxx",3); //  11
   auto c12 = g->create_node_const("yyyy",4); // 12
 
