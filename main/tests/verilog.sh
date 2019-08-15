@@ -61,6 +61,9 @@ do
     fi
     base=${base:6}
   fi
+  if [[ $input =~ "nocheck_" ]]; then
+    base=${base:8}
+  fi
 
   rm -rf lgdb_yosys tmp_yosys
   mkdir -p tmp_yosys
