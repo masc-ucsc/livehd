@@ -29,6 +29,8 @@ protected:
   void             set_type(Index_ID nid, Node_Type_Op op);
   const Node_Type &get_type(Index_ID nid) const;
 
+  bool             is_type_const(Index_ID nid) const;
+
   void             set_type_sub(Index_ID nid, Lg_type_id subgraphid);
   Lg_type_id       get_type_sub(Index_ID nid) const;
   Sub_node        &get_type_sub_node(Index_ID nid);

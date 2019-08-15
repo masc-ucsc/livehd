@@ -1105,13 +1105,13 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
         auto pick_node = new_lg->create_node(Pick_Op);
         auto pick_node_sink_pin = pick_node.setup_sink_pin(0);
         auto pick_node_offset_pin = pick_node.setup_sink_pin(1);
-        auto pick_node_driver_pin = pick_node.setup_driver_pin(0);
-        auto const_node_for_bit_select = new_lg->create_node_const(i, 0);
-        auto bit_select_signal = const_node_for_bit_select.setup_driver_pin(0);
+        auto pick_node_driver_pin = pick_node.setup_driver_pin();
+        auto const_node_for_bit_select = new_lg->create_node_const(i);
+        auto bit_select_signal = const_node_for_bit_select.get_driver_pin();
         pick_node_driver_pin.set_bits(1);
-        new_lg->add_edge(bit_select_signal, pick_node_offset_pin, 1);
-        new_lg->add_edge(driver_pin, pick_node_sink_pin, 1);
-        new_lg->add_edge(pick_node_driver_pin, sink_pin, 1);
+        new_lg->add_edge(bit_select_signal, pick_node_offset_pin);
+        new_lg->add_edge(driver_pin, pick_node_sink_pin);
+        new_lg->add_edge(pick_node_driver_pin, sink_pin);
       }
     }
   }
@@ -1133,7 +1133,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
       I(gidMTnode2LGnode.find(std::make_pair(group_id, gid2klut[group_id].get_node(sigs[0]))) != gidMTnode2LGnode.end());
       //auto driver_node = Node(new_lg,gidMTnode2LGnode[std::make_pair(group_id, klut.get_node(sigs[0]))]);
       auto driver_node = gidMTnode2LGnode[std::make_pair(group_id, klut.get_node(sigs[0]))].get_node(new_lg);
-      auto driver_pin = driver_node.setup_driver_pin(0);
+      auto driver_pin = driver_node.setup_driver_pin();
       connect_complemented_signal(new_lg, driver_pin, sink_pin, klut, sigs[0]);
     } else {
       auto join_node = new_lg->create_node(Join_Op);
@@ -1141,11 +1141,11 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
         I(gidMTnode2LGnode.find(std::make_pair(group_id, gid2klut[group_id].get_node(sigs[i]))) != gidMTnode2LGnode.end());
         //auto driver_node = Node(new_lg,gidMTnode2LGnode[std::make_pair(group_id, klut.get_node(sigs[i]))]);
         auto driver_node = gidMTnode2LGnode[std::make_pair(group_id, klut.get_node(sigs[i]))].get_node(new_lg);
-        auto kth_driver_pin = driver_node.setup_driver_pin(0);
+        auto kth_driver_pin = driver_node.setup_driver_pin();
         auto kth_sink_pin = join_node.setup_sink_pin(i);
         connect_complemented_signal(new_lg, kth_driver_pin, kth_sink_pin, klut, sigs[i]);
       }
-      auto driver_pin = join_node.setup_driver_pin(0);
+      auto driver_pin = join_node.setup_driver_pin();
       new_lg->add_edge(driver_pin, sink_pin, bit_width);
     }
   }
@@ -1157,7 +1157,7 @@ void Pass_mockturtle::connect_complemented_signal(LGraph *g, Node_pin &driver_pi
   if (klut.is_complemented(signal)) {
     auto not_gate = g->create_node(Not_Op);
     auto not_gate_sink_pin = not_gate.setup_sink_pin(0);
-    auto not_gate_driver_pin = not_gate.setup_driver_pin(0);
+    auto not_gate_driver_pin = not_gate.setup_driver_pin();
     g->add_edge(driver_pin, not_gate_sink_pin, 1);
     g->add_edge(not_gate_driver_pin, sink_pin, 1);
   } else {

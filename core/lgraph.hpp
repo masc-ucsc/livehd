@@ -253,6 +253,7 @@ public:
   Index_ID add_edge(const Node_pin &src, const Node_pin &dst, uint16_t bits) {
     Index_ID idx = add_edge(src, dst);
     I(idx = src.get_idx());
+    I(!is_type_const(node_internal[idx].get_nid())); // Do not overwrite bits in constants
     set_bits(idx, bits);
     return idx;
   }
@@ -290,8 +291,8 @@ public:
 
   Node create_node(Node_Type_Op op);
   Node create_node(Node_Type_Op op, uint16_t bits);
-  Node create_node_const(uint32_t value, uint16_t bits);
-  Node create_node_const(std::string_view value);
+  Node create_node_const(uint32_t value);
+  //Node create_node_const(std::string_view value);
   Node create_node_const(std::string_view value, uint16_t bits);
   Node create_node_sub(Lg_type_id sub);
   Node create_node_sub(std::string_view sub_name);

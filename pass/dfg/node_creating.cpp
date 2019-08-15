@@ -47,21 +47,21 @@ Node_pin Pass_dfg::create_const32(LGraph *g, uint32_t val, uint16_t node_bit_wid
 }
 
 Node_pin Pass_dfg::create_default_const(LGraph *g) {
-  Node_pin pin = g->create_node_const(0,1).setup_driver_pin();
+  Node_pin pin = g->create_node_const(0).setup_driver_pin();
   if(!pin.has_name())
     pin.set_name("default_const");
   return pin;
 }
 
 Node_pin Pass_dfg::create_true_const(LGraph *g) {
-  Node_pin pin = g->create_node_const(1,1).setup_driver_pin();
+  Node_pin pin = g->create_node_const(1).setup_driver_pin();
   if(!pin.has_name())
     pin.set_name("true");
   return pin;
 }
 
 Node_pin Pass_dfg::create_false_const(LGraph *g) {
-  Node_pin pin = g->create_node_const(0,1).setup_driver_pin();
+  Node_pin pin = g->create_node_const(0).setup_driver_pin();
   if(!pin.has_name())
     pin.set_name("false");
   return pin;
