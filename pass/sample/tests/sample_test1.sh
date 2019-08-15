@@ -19,7 +19,7 @@ echo "files path:inou/yosys/tests match:\".*_square.v$\" |> inou.yosys.tolg" | $
 # If many files are needed sample inou/yosys/tests/*.v and/or projects/boom/*
 
 echo "Sample pass"
-regresult=$(echo "lgraph.open name:nocheck_iwls_square |> pass.sample" | $LGSHELL | grep "Pass: cells ")
+regresult=$(echo "lgraph.open name:iwls_square |> pass.sample" | $LGSHELL | grep "Pass: cells ")
 if [ "${regresult}" ]; then
   echo "PASS: found ${regresult}"
   exit 0

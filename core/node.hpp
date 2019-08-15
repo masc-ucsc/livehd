@@ -141,6 +141,7 @@ public:
   Node() :top_g(0) ,current_g(0) ,hidx(0) ,nid(0) { }
   Node(LGraph *_g);
   Node(LGraph *_g, const Compact &comp) {
+    hidx=0;
     update(_g, comp);
   }
   Node(LGraph *_g, const Hierarchy_index &_hidx, Compact_class comp);
