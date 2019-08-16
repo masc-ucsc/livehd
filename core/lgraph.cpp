@@ -36,8 +36,7 @@ LGraph::~LGraph() {
 bool LGraph::exists(std::string_view path, std::string_view name) { return Graph_library::try_find_lgraph(path, name) != nullptr; }
 
 LGraph *LGraph::create(std::string_view path, std::string_view name, std::string_view source) {
-  auto *lib = Graph_library::instance(path);
-  LGraph *lg = lib->try_find_lgraph(name);
+  LGraph *lg = Graph_library::try_find_lgraph(path, name);
   if (lg)
     return new (lg) LGraph(path, name, source, true);
 
@@ -91,18 +90,18 @@ void LGraph::rename(std::string_view path, std::string_view orig, std::string_vi
 }
 
 LGraph *LGraph::open(std::string_view path, std::string_view name) {
-  auto *lib = Graph_library::instance(path);
-  if (lib == 0)
-    return 0;
 
-  LGraph *lg = lib->try_find_lgraph(path, name);
+  LGraph *lg = Graph_library::try_find_lgraph(path, name);
   if (lg) {
-    I(name == lg->get_name());
     return lg;
   }
 
+  auto *lib = Graph_library::instance(path);
+  if(lib == nullptr)
+    return nullptr;
+
   if(!lib->has_name(name))
-    return 0;
+    return nullptr;
 
   auto source = lib->get_source(name);
 

@@ -38,6 +38,21 @@ void Node::update(LGraph *_g, const Node::Compact &comp) {
   I(current_g->is_valid_node(nid));
 }
 
+void Node::update(const Node::Compact &comp) {
+  I(comp.hidx);
+  I(comp.nid);
+  I(top_g);
+
+  nid       = comp.nid;
+  if (hidx==comp.hidx)
+    return;
+  hidx      = comp.hidx;
+  current_g = top_g->find_sub_lgraph(hidx);
+
+  I(current_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
+  I(current_g->is_valid_node(nid));
+}
+
 Node::Node(LGraph *_g)
   :top_g(_g)
   ,current_g(_g)

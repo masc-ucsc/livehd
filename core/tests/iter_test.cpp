@@ -92,7 +92,9 @@ void generate_graphs(int n) {
   }
 }
 
-bool fwd(int n) { for(int i = 0; i < n; i++) {
+bool fwd(int n) {
+
+  for(int i = 0; i < n; i++) {
     std::string gname = "test_" + std::to_string(i);
     LGraph *    g     = LGraph::open("lgdb_iter_test", gname);
     if(g == 0)
@@ -289,6 +291,7 @@ void simple() {
   g->add_edge(t16.setup_driver_pin(random()&0xFF), o8);
   g->add_edge(t20.setup_driver_pin(random()&0xFF), o8);
 
+#if 0
   for(const auto &node : g->fast()) {
 
     fmt::print("node:{}\n", node.debug_name());
@@ -303,6 +306,7 @@ void simple() {
     }
     fmt::print("\n");
   }
+#endif
 
   std::vector<std::string> fwd;
   int conta=0;
@@ -438,6 +442,7 @@ void simple() {
     }
   }
 
+#if 0
   fmt::print("fwd :");
   for(auto txt:fwd)
     fmt::print(" {}",txt);
@@ -452,6 +457,7 @@ void simple() {
   for(auto txt:fast)
     fmt::print(" {}",txt);
   fmt::print("\n");
+#endif
 
   auto fwd_it  = fwd.begin();
   auto bwd_it  = bwd.begin();

@@ -159,7 +159,7 @@ protected:
   const LGraph *find_sub_lgraph_const(const Hierarchy_index &hidx) const {
 
     auto class_lgid = get_hierarchy_class_lgid(hidx);
-    auto *current_g = LGraph::open(path, class_lgid);
+    auto *current_g = LGraph::open(path, library->get_name(class_lgid));
     I(current_g);
 
     return current_g;

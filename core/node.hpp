@@ -137,6 +137,7 @@ public:
 
   // NOTE: No operator<() needed for std::set std::map to avoid their use. Use flat_map_set for speed
   void update(LGraph *_g, const Node::Compact &comp);
+  void update(const Node::Compact &comp);
 
   Node() :top_g(0) ,current_g(0) ,hidx(0) ,nid(0) { }
   Node(LGraph *_g);

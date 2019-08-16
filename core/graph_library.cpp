@@ -39,12 +39,11 @@ public:
 static Cleanup_graph_library private_instance;
 
 Graph_library *Graph_library::instance(std::string_view path) {
-#if 0
-  auto it = Graph_library::global_instances.find(path);
-  if(it != Graph_library::global_instances.end()) {
-    return it->second;
+
+  auto it1 = Graph_library::global_instances.find(path);
+  if(it1 != Graph_library::global_instances.end()) {
+    return it1->second;
   }
-#endif
 
   std::string spath(path);
 
@@ -63,6 +62,7 @@ Graph_library *Graph_library::instance(std::string_view path) {
 
   Graph_library *graph_library = new Graph_library(full_path);
   Graph_library::global_instances.insert(std::make_pair(std::string(full_path), graph_library));
+  Graph_library::global_instances.insert(std::make_pair(std::string(path), graph_library));
 
   return graph_library;
 }
@@ -99,20 +99,24 @@ bool Graph_library::exists(std::string_view path, std::string_view name) {
 }
 
 LGraph *Graph_library::try_find_lgraph(std::string_view path, std::string_view name) {
-  Graph_library *lib = instance(path);
-  return lib->try_find_lgraph(name);
+  const Graph_library *lib = instance(path); // path must be full path
+
+  const auto &glib2 = global_name2lgraph[lib->path];// WARNING: This inserts name too when needed
+  const auto it = glib2.find(name);
+  if (it != glib2.end()) {
+    return it->second;
+  }
+
+  return nullptr;
 }
 
 LGraph *Graph_library::try_find_lgraph(std::string_view name) {
-  if (global_name2lgraph.find(path) == global_name2lgraph.end()) {
-    return nullptr;  // Library exists, but not the instance for lgraph
-  }
+  I(global_name2lgraph.find(path) != global_name2lgraph.end());
 
-  if (global_name2lgraph[path].find(name) != global_name2lgraph[path].end()) {
-    LGraph *lg = global_name2lgraph[path][name];
-    I(get_lgid(name) != 0);
-
-    return lg;
+  const auto &glib2 = global_name2lgraph[path];
+  const auto it = glib2.find(name);
+  if (it != glib2.end()) {
+    return it->second;
   }
 
   return nullptr;
@@ -454,6 +458,11 @@ Lg_type_id Graph_library::copy_lgraph(std::string_view name, std::string_view ne
 
 Lg_type_id Graph_library::register_lgraph(std::string_view name, std::string_view source, LGraph *lg) {
 
+  LGraph *lg2=nullptr;
+  if(global_name2lgraph[path].find(name) != global_name2lgraph[path].end()) {
+    lg2 = global_name2lgraph[path][name];
+    I(lg2);
+  }
   GI(global_name2lgraph[path].find(name) != global_name2lgraph[path].end(), global_name2lgraph[path][name] == lg);
 
   global_name2lgraph[path][name] = lg;

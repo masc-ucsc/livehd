@@ -101,7 +101,14 @@ bool Edge_raw_iterator_base::update_frontier() {
     if (it.second <= 0)
       continue;
 
+#if 1
+    // Faster
+    Node node = current_node;
+    node.update(it.first);
+#else
+    // Slower
     Node node(current_node.get_top_lgraph(), it.first);
+#endif
 
     if (*hardcoded_nid == Node::Hardcoded_output_nid && node.has_outputs()) {
       continue;
