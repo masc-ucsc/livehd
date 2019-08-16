@@ -62,7 +62,7 @@ using Ann_node_place       = Attribute<Ann_name::nodeplace
 
 using Ann_node_file_loc    = Attribute<Ann_name::file_loc
                                        ,Node
-                                       ,mmap_map::map<Node::Compact, Ann_file_loc>
+                                       ,mmap_map::map<Node::Compact_class, Ann_file_loc>
                                        >;
 
 struct Ann_support {
