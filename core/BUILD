@@ -9,7 +9,7 @@ cc_library(
         "@rapidjson//:headers",
         "@iassert//:iassert",
         "//eprp:eprp",
-        "//mmap_map:headers",
+        "//mmap_lib:headers",
         "//bench:headers",
         "@yas//:headers",
         ],

@@ -155,12 +155,6 @@ inline uint64_t umul128(uint64_t a, uint64_t b, uint64_t* high) {
     return _umul128(a, b, high);
 }
 #endif
-} // namespace detail
-} // namespace mmap_lib
-
-namespace mmap_lib {
-
-namespace detail {
 
 	// make sure this is not inlined as it is slow and dramatically enlarges code, thus making other
 	// inlinings more difficult. Throws are also generally the slow path.
