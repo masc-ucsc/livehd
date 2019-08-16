@@ -7,7 +7,8 @@ rm -rf ./lgdb
 #pts = params satlarge satsmall satpick shiftx shiftx_simple test simple_add simple_rf2 
 #worth to try first
 #pts = operators reduce unconnected wires
-pts='trivial trivial2a trivial3'
+# pts='trivial_and trivial trivial2a trivial3'
+pts='trivial_and'
 
 LGSHELL=./bazel-bin/main/lgshell
 

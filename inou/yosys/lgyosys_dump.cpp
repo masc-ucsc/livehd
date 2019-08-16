@@ -629,12 +629,12 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
       break;
     }
     case LUT_Op: {
-      std::vector<RTLIL::SigChunk> joined_inp_wires;
+      RTLIL::SigSpec joined_inp_wires;
       bool      has_inputs = false;
       uint8_t   inp_num = 0;
       for(const auto &e:node.inp_edges()) {
-        RTLIL::Wire *join              = get_wire(e.driver);
-        joined_inp_wires.emplace_back(RTLIL::SigChunk(join));
+        RTLIL::Wire *join = get_wire(e.driver);
+        joined_inp_wires.append(RTLIL::SigSpec(join));
         has_inputs = true;
         inp_num += 1;
       }
@@ -646,7 +646,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
 
       uint64_t lut_code = node.get_type_lut();
 
-      module->addLut(next_id(g), RTLIL::SigSpec(joined_inp_wires), cell_output_map[node.get_driver_pin().get_compact()], lut_code);
+      module->addLut(next_id(g), joined_inp_wires, cell_output_map[node.get_driver_pin().get_compact()], lut_code);
       break;
     }
     case And_Op:

@@ -24,8 +24,8 @@ cc_test(
 
 
 sh_test(
-    name = "mockturtle_test.sh",
-    srcs = ["tests/mockturtle_test.sh"],
+    name = "mt_test.sh",
+    srcs = ["tests/mt_test.sh"],
     data = [
         "//inou/yosys:liblgraph_yosys.so",
         "//main:lgshell",

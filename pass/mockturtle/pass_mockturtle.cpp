@@ -59,7 +59,7 @@ void Pass_mockturtle::do_work(LGraph *g) {
   edge2signals_klut.clear();
   old_node_to_new_node.clear();
   gidMTnode2LGnode.clear();
-  gid_fanin2parent_pid.clear();
+  gid_fanin_sig2klut_node_lg_pid.clear();
 }
 
 bool Pass_mockturtle::lg_partition(LGraph *g) {
@@ -938,7 +938,7 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT(LGraph *g) {
 }
 
 void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
-
+  I(false);
   LGraph *new_lg = old_lg->clone_skeleton(LUTIFIED_NETWORK_NAME_SIGNATURE);
 
   auto old_inp_node = old_lg->get_graph_input_node();
@@ -1014,26 +1014,17 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
       //then change the truth table accordingly
       auto func = klut_ntk.node_function(klut_ntk_node);
 
-      //might be constructed in reverse order, try it. Also see how many signals are generated.
-      std::vector<std::pair<mockturtle::klut_network::signal, Port_ID >> dbg_vec;
-      //bug? only one input, different sig in the same klut_ntk??? the returned sig should be 3
       klut_ntk.foreach_fanin(klut_ntk_node, [&](const auto &sig, auto i) {
         if (klut_ntk.is_complemented(sig))
           kitty::flip_inplace(func, i);
 
         if (klut_ntk.is_pi(klut_ntk.get_node(sig))) {
-          dbg_vec.emplace_back(std::make_pair(sig, (uint32_t)i ));
           auto pid = (uint32_t) i;
           auto key = std::make_pair(group_id, sig);
-          gid_fanin2parent_pid[key] = std::make_pair(klut_ntk_node, pid);
-          fmt::print("gid_fanin2parent_pid group:{}, signal:{}, pid:{}\n", key.first, key.second, pid);
+          gid_fanin_sig2klut_node_lg_pid[key] = std::make_pair(klut_ntk_node, pid);
+          fmt::print("gid_fanin_sig2klut_node_lg_pid group:{}, signal:{}, pid:{}\n", key.first, key.second, pid);
         }
       } );
-
-      fmt::print("dbg sig returns from klut foreach_fanin function\n");
-      for(const auto &it : dbg_vec){
-        fmt::print("sig:{}, i:{}\n", it.first, it.second);
-      }
 
       auto encoding = std::stoul(kitty::to_hex(func), nullptr, 16);
       auto new_node = new_lg->create_node();
@@ -1077,29 +1068,27 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
     const std::vector<mockturtle::klut_network::signal> &sigs = edge2signals_klut[in_edge].signals;
 
     I(old_node_to_new_node.find(in_edge.driver.get_node().get_compact()) != old_node_to_new_node.end());
-    //auto driver_node = Node(new_lg,old_node_to_new_node[in_edge.driver.get_node().get_compact()]);
     auto driver_node = old_node_to_new_node[in_edge.driver.get_node().get_compact()].get_node(new_lg);
     auto driver_pin = driver_node.setup_driver_pin(in_edge.driver.get_pid());
     const auto bit_width = in_edge.get_bits();
     I(bit_width == sigs.size());
-    I(gid_fanin2parent_pid.find(std::make_pair(group_id, sigs[0])) != gid_fanin2parent_pid.end());
+    I(gid_fanin_sig2klut_node_lg_pid.find(std::make_pair(group_id, sigs[0])) != gid_fanin_sig2klut_node_lg_pid.end());
     if (bit_width == 1) {
       fmt::print("group_id:{}, sigs[0]:{}\n", group_id, sigs[0]);
-      const auto & parent_and_pid = gid_fanin2parent_pid[std::make_pair(group_id, sigs[0])];
+      const auto & klut_node_and_lg_pid = gid_fanin_sig2klut_node_lg_pid[std::make_pair(group_id, sigs[0])];
 
-      I(gidMTnode2LGnode.find(std::make_pair(group_id, parent_and_pid.first)) != gidMTnode2LGnode.end());
-      //auto sink_node = Node(new_lg,gidMTnode2LGnode[std::make_pair(group_id, parent_and_pid.first)]);
-      auto sink_node = gidMTnode2LGnode[std::make_pair(group_id, parent_and_pid.first)].get_node(new_lg);
-      const auto pid = parent_and_pid.second;
+      I(gidMTnode2LGnode.find(std::make_pair(group_id, klut_node_and_lg_pid.first)) != gidMTnode2LGnode.end());
+      auto sink_node = gidMTnode2LGnode[std::make_pair(group_id, klut_node_and_lg_pid.first)].get_node(new_lg);
+      const auto pid = klut_node_and_lg_pid.second;
       auto sink_pin = sink_node.setup_sink_pin(pid);
       new_lg->add_edge(driver_pin, sink_pin, 1);
     } else {
       for (auto i = 0; i < bit_width; i++) {
-        const auto & parent_and_pid = gid_fanin2parent_pid[std::make_pair(group_id, sigs[i])];
-        I(gidMTnode2LGnode.find(std::make_pair(group_id, parent_and_pid.first)) != gidMTnode2LGnode.end());
-        //auto sink_node = Node(new_lg,gidMTnode2LGnode[std::make_pair(group_id, parent_and_pid.first)]);
-        auto sink_node = gidMTnode2LGnode[std::make_pair(group_id, parent_and_pid.first)].get_node(new_lg);
-        const auto pid = parent_and_pid.second;
+        fmt::print("group_id:{}, sigs[i]:{}\n", group_id, sigs[i]);
+        const auto & klut_node_and_lg_pid = gid_fanin_sig2klut_node_lg_pid[std::make_pair(group_id, sigs[i])];
+        I(gidMTnode2LGnode.find(std::make_pair(group_id, klut_node_and_lg_pid.first)) != gidMTnode2LGnode.end());
+        auto sink_node = gidMTnode2LGnode[std::make_pair(group_id, klut_node_and_lg_pid.first)].get_node(new_lg);
+        const auto pid = klut_node_and_lg_pid.second;
         auto sink_pin = sink_node.setup_sink_pin(pid);
         //NOTE: update this simple Pick_Op node when the more powerful Pick_Op is readly
         auto pick_node = new_lg->create_node(Pick_Op);
