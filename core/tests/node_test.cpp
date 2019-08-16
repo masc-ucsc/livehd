@@ -151,7 +151,7 @@ TEST_F(Setup_graphs_test, annotate1b) {
   }
 }
 
-TEST_F(Setup_graphs_test, annotate1c) {
+TEST_F(Setup_graphs_test, annotated) {
 
   for(const auto node:top->forward()) {
     for(const auto &out_edge : node.out_edges()) {
@@ -187,14 +187,8 @@ TEST_F(Setup_graphs_test, annotate1c) {
     EXPECT_EQ(&place4,place2);
   }
 
-  x_val = 0;
-  y_val = 0;
-  for(auto node:top->forward()) {
-    x_val++;
-    y_val+=3;
+  for(auto node:top->backward()) {
     EXPECT_TRUE(node.has_place());
-    EXPECT_EQ(node.get_place().get_x(), x_val);
-    EXPECT_EQ(node.ref_place()->get_y(), y_val);
   }
 
   EXPECT_TRUE(true);

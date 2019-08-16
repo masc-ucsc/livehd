@@ -98,8 +98,7 @@ bool Edge_raw_iterator_base::update_frontier() {
   I(pending->empty());
   bool pushed = false;
   for (auto &it : *frontier) {
-    if (it.second <= 0)
-      continue;
+    I(it.second >= 0);
 
 #if 1
     // Faster
@@ -121,7 +120,6 @@ bool Edge_raw_iterator_base::update_frontier() {
     //fmt::print("Adding node {}\n", node.debug_name());
 
     pending->insert(it.first);
-    it.second = -1;  // Mark as pipelined, but keep not to visit twice
     pushed    = true;
     frontier->erase(it.first);
     break;
