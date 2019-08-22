@@ -21,6 +21,7 @@ private:
   absl::flat_hash_map<Lnast_ntype_id, std::string> ntype2str;
   void setup_ntype_str_mapping();
 
+  void process_node(const Tree_index &it);
   void process_top(Tree_level level);
   void push_statement(Tree_level level); // prepare for next statement
   void pop_statement();
@@ -35,7 +36,9 @@ private:
   void process_label();
   void process_and();
   void process_xor();
+  void process_plus();
   void process_gt();
+  void process_if();
   void process_func_call();
   void process_func_def();
 
