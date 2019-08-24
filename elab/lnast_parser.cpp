@@ -454,7 +454,7 @@ void Lnast_parser::setup_ntype_str_mapping(){
   ntype2str [Lnast_ntype_attr_bits]   = "attr_bits"  ;
   ntype2str [Lnast_ntype_assert]      = "I"     ;
   ntype2str [Lnast_ntype_if]          = "if"         ;
-  ntype2str [Lnast_ntype_else]        = "else"       ;
+  //ntype2str [Lnast_ntype_else]        = "else"       ;
   ntype2str [Lnast_ntype_cond]        = "cond"       ;
   ntype2str [Lnast_ntype_uif]         = "uif"        ;
   ntype2str [Lnast_ntype_phi]         = "phi"        ;

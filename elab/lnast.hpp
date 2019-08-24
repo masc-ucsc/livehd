@@ -56,8 +56,20 @@ protected:
 
 enum Lnast_node_type : Lnast_ntype_id {
   Lnast_ntype_invalid = 0,  // zero is not a valid Lnast_ntype_id
+  //group: tree structure
+  Lnast_ntype_top,
   Lnast_ntype_statements,
   Lnast_ntype_cstatements,  // statement for condition determination, ex: if ((foo+1) > 3) { ... }
+  Lnast_ntype_if,
+  Lnast_ntype_cond,
+  Lnast_ntype_uif,
+  Lnast_ntype_for,
+  Lnast_ntype_while,
+  Lnast_ntype_phi,
+  Lnast_ntype_func_call,    // .()
+  Lnast_ntype_func_def,     // ::{   func_def = sub-graph in lgraph
+
+  //group: primitive operator
   Lnast_ntype_pure_assign,  // =
   Lnast_ntype_dp_assign,    // :=, dp = deprecate
   Lnast_ntype_as,           // as
@@ -79,20 +91,16 @@ enum Lnast_node_type : Lnast_ntype_id {
   Lnast_ntype_gt,
   Lnast_ntype_ge,
   Lnast_ntype_tuple,        // ()
+
+  //group: language variable
   Lnast_ntype_ref,
   Lnast_ntype_const,
+
+  //group: attribute
   Lnast_ntype_attr_bits,    // __bits
-  Lnast_ntype_assert,       // I
-  Lnast_ntype_if,
-  Lnast_ntype_cond,
-  Lnast_ntype_else,
-  Lnast_ntype_uif,
-  Lnast_ntype_phi,
-  Lnast_ntype_for,
-  Lnast_ntype_while,
-  Lnast_ntype_func_call,    // .()
-  Lnast_ntype_func_def,     // ::{   func_def = sub-graph in lgraph
-  Lnast_ntype_top
+
+  //group: others
+    Lnast_ntype_assert,       // I
 };
 
 
