@@ -594,11 +594,10 @@ static void process_assigns(RTLIL::Module *module, LGraph *g) {
     for(auto &chunk : lhs.chunks()) {
       const RTLIL::Wire *lhs_wire = chunk.wire;
 
-      printf("Assignment to %s\n", lhs_wire->name.c_str());
+      //printf("Assignment to %s\n", lhs_wire->name.c_str());
 
       if(lhs_wire->port_input) {
         log_error("Assignment to input port %s\n", lhs_wire->name.c_str());
-
       } else if(chunk.width == lhs_wire->width) {
         if(chunk.width == 0)
           continue;
@@ -1357,8 +1356,10 @@ struct Yosys2lg_Pass : public Yosys::Pass {
               if (cell_port_inputs.count(cell_port))
                 continue;
 
-              bool is_input  = wire->port_input  || driven_signals.count(wire->hash())>0;
+              bool is_input  = wire->port_input;
               bool is_output = wire->port_output; // NOTE: May be module to module and still no driver || driven_signals.count(wire->hash())==0;
+              if (!is_input && !is_output)
+                is_input = driven_signals.count(wire->hash())>0;
 
               const char *str = conn.first.c_str();
               if (!is_input && !is_output && str[0] == '\\') {
@@ -1451,6 +1452,18 @@ struct Yosys2lg_Pass : public Yosys::Pass {
                 if (strncmp(str,"OU",2)==0
                   ||strncmp(str,"ou",2)==0)
                   is_output = true;
+
+                if (cell->type.str() == "\\$memrd") {
+                  is_input  = false;
+                  is_output = false;
+                  if (strcmp(str, "DATA") == 0)
+                    is_output = true;
+                  else
+                    is_input = true;
+                }else if (cell->type.str() == "\\$memwr") {
+                  is_input = true;
+                  is_output = false;
+                }
               }
 
 #if 1

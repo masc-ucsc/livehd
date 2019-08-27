@@ -34,7 +34,7 @@ new_git_repository(
 new_git_repository(
     name = "yosys",
     build_file = "BUILD.yosys", # relative to external path
-    commit = "349c47250a9779bc58634870d2e3facfe95fbff8", #May 28, 2019 dfb242c905ff10bb4038f080aeb74a820e8fbd00", # April 6, 2019 
+    commit = "8a4c6e6563eea979dc96cada14abb08d63a8e3d1", #Aug 26, 2019 "349c47250a9779bc58634870d2e3facfe95fbff8", #May 28, 2019
     remote = "https://github.com/YosysHQ/yosys.git",
     #strip_prefix = "kernel",
 )
