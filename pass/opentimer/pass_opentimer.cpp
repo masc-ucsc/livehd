@@ -39,9 +39,9 @@ void Pass_opentimer::work(Eprp_var &var) {
   auto spef = var.get("spef");
 
   for(const auto &g : var.lgs) {
-      pass.read_file(g, lib, lib_max, lib_min, spef, sdc);          // Task1: Read input files (Read user from input) | Status: 75% done
-    //  pass.build_circuit(g);                                   // Task2: Traverse the lgraph and build the equivalent circuit (No dependencies) | Status: 50% done
-      pass.read_sdc(sdc);                                        // Task3: Traverse the lgraph and create fake SDC numbers | Status: 100% done
+      pass.read_file(g, lib, lib_max, lib_min, spef, sdc);     // Task1: Read input files (Read user from input) | Status: 75% done
+      pass.build_circuit(g);                                   // Task2: Traverse the lgraph and build the equivalent circuit (No dependencies) | Status: 50% done
+      pass.read_sdc(sdc);                                      // Task3: Traverse the lgraph and create fake SDC numbers | Status: 100% done
       pass.compute_timing();                                   // Task4: Compute Timing | Status: 100% done
       pass.populate_table();                                   // Task5: Traverse the lgraph and populate the tables | Status: 0% done
   }
@@ -58,7 +58,7 @@ void Pass_opentimer::read_file(LGraph *g, std::string_view lib, std::string_view
     timer.read_celllib (lib_min,ot::MIN);
   }
   //pass.read_sdc(sdc);
-  timer.read_verilog ("pass/opentimer/tests/simple.v"); //USING THIS FOR THE MOMENT AS THE CIRCUIT IS NOT CONSTRUCTED FROM LGRAPH YET
+  //timer.read_verilog ("pass/opentimer/tests/simple.v"); //USING THIS FOR THE MOMENT AS THE CIRCUIT IS NOT CONSTRUCTED FROM LGRAPH YET
   timer.read_spef (spef);
 
 }
