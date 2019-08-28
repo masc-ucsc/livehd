@@ -13,6 +13,8 @@ private:
   std::vector<uint32_t> k_stack;
   std::vector<std::vector<Lnast_node>> buffer_stack;
   std::vector<Lnast_node> node_buffer;
+  std::vector<std::vector<uint32_t>> if_buffer_stack;
+  std::vector<uint32_t> if_buffer;
   std::string_view memblock;
   Lnast *lnast;
   Lnast_parser lnast_parser;
@@ -24,7 +26,7 @@ private:
   void process_node(const Tree_index &it);
   void process_top(Tree_level level);
   void push_statement(Tree_level level); // prepare for next statement
-  void pop_statement();
+  void pop_statement(Tree_level level);
   void add_to_buffer(Lnast_node node);
   void process_buffer();
 

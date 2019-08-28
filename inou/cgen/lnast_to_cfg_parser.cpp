@@ -16,17 +16,29 @@ void Lnast_to_cfg_parser::process_node(const Tree_index& it) {
   const auto& node_data = lnast->get_data(it);
 
   // for printing out individual node values
-  // std::string name(node_data.token.get_text(memblock)); // str_view to string
-  // std::string type = ntype_dbg(node_data.type);
-  // fmt::print("current node : prev:{}\tcurr:{}\tit: {}\t", prev_statement_level, curr_statement_level, it.level);
-  // fmt::print("tree index: pos:{}\tlevel:{}\tnode: {}\ttype: {}\tk:{}\n", it.pos, it.level, name, type, node_data.knum);
+  /*
+  std::string name(node_data.token.get_text(memblock)); // str_view to string
+  std::string type = ntype_dbg(node_data.type);
+  fmt::print("current node : prev:{}\tcurr:{}\tit: {}\t", prev_statement_level, curr_statement_level, it.level);
+  fmt::print("tree index: pos:{}\tlevel:{}\tnode: {}\ttype: {}\tk:{}\n", it.pos, it.level, name, type, node_data.knum);
+  */
 
-  // std::string type = ntype_dbg(node_data.type);
+  std::string type = ntype_dbg(node_data.type);
   // fmt::print("start: it.level: {}; curr_level: {}, type: {}\n", it.level, curr_statement_level, type);
-  while (it.level < curr_statement_level) {
-    // type = ntype_dbg(node_data.type);
-    // fmt::print("while: it.level: {}; curr_level: {}; type: {}\n", it.level, curr_statement_level, type);
-    pop_statement();
+
+  // add while to see pop_statement and to add buffer
+  if (it.level < curr_statement_level) {
+    fmt::print("pop\n");
+    pop_statement(it.level);
+
+    while (it.level + 1 < curr_statement_level) {
+      fmt::print("pop pop\n");
+      type = ntype_dbg(node_data.type);
+      fmt::print("while: it.level: {}; curr_level: {}; type: {}\n", it.level, curr_statement_level, type);
+      pop_statement(it.level);
+      fmt::print("after pop pop\n");
+    }
+    fmt::print("after pop\n");
   }
 
   if (node_data.type == Lnast_ntype_top) {
@@ -34,12 +46,36 @@ void Lnast_to_cfg_parser::process_node(const Tree_index& it) {
   } else if (node_data.type == Lnast_ntype_statements) {
     // check the buffer to see if this is an if statement
     // and if it is, check if this is an ifel or an else
+    if (node_buffer.size() > 0) {
+      if (node_buffer.front().type == Lnast_ntype_if) {
+        if (node_buffer.size() > 3 && node_buffer.back().type != Lnast_ntype_statements) {
+          fmt::print("within sts_1\n");
+          if_buffer.push_back(k_num);
+          k_num = k_next;
+          k_next++;
+          fmt::print("k_num: {}\t; k_next: {}\t; if_buffer: {}\t; k_stack: {}\n", k_num, k_next, if_buffer.back(), k_stack.back());
+          fmt::print("end sts_1\n");
+          /*
+          if_buffer.push_back(k_stack.back());
+          k_stack.pop_back();
+          k_stack.push_back(k_num);
+          k_num = k_next;
+          k_next++;
+          */
+        }
+        if_buffer.push_back(k_next);
+      }
+    }
+    add_to_buffer(node_data);
     push_statement(it.level);
   } else if (node_data.type == Lnast_ntype_cstatements) {
+    if (node_buffer.size() > 0) {
+      if (node_buffer.back().type == Lnast_ntype_statements) {
+        if_buffer.push_back(k_next);
+      }
+    }
+    add_to_buffer(node_data);
     push_statement(it.level);
-  // } else if (it.level < curr_statement_level) {
-    // add while to see pop_statement and to add buffer
-    // and/or to continue processing buffer
   } else if (it.level == curr_statement_level) {
     process_buffer();
     add_to_buffer(node_data);
@@ -57,6 +93,8 @@ void Lnast_to_cfg_parser::process_top(Tree_level level) {
 }
 
 void Lnast_to_cfg_parser::push_statement(Tree_level level) {
+  fmt::print("push\n");
+
   level = level + 1;
   level_stack.push_back(level);
   prev_statement_level = curr_statement_level;
@@ -65,25 +103,57 @@ void Lnast_to_cfg_parser::push_statement(Tree_level level) {
   buffer_stack.push_back(node_buffer);
   node_buffer.clear();
 
+  if_buffer_stack.push_back(if_buffer);
+  if_buffer.clear();
+
+  fmt::print("saved k_num: {}, k_next: {}\n", k_num, k_next);
+
   k_stack.push_back(k_num);
   k_num = k_next;
   k_next = k_num + 1;
+
+  fmt::print("after push\n");
 }
 
-void Lnast_to_cfg_parser::pop_statement() {
+void Lnast_to_cfg_parser::pop_statement(Tree_level level) {
+  fmt::print("before level flush\n");
+  fmt::print("level: {}; curr: {}; prev: {}\n", level, curr_statement_level, prev_statement_level);
+  fmt::print("levels:\t");
+  for (auto const& value : level_stack) {
+    fmt::print("{}\t", value);
+  }
+  fmt::print("\n");
+  fmt::print("k:\t");
+  for (auto const& value : k_stack) {
+    fmt::print("{}\t", value);
+  }
+  fmt::print("\n");
   level_stack.pop_back();
   curr_statement_level = prev_statement_level;
   prev_statement_level = level_stack.back();
+  fmt::print("level: {}; curr: {}; prev: {}\n", level, curr_statement_level, prev_statement_level);
+  fmt::print("after level flush\n");
 
   uint32_t tmp_k = k_next;
-  k_next = 0;
+  if (curr_statement_level != level) {
+    k_next = 0;
+    fmt::print("preparing for null: num: {}; next: {}\n", k_num, k_next);
+  } else {
+    //k_next = k_stack.back();
+    fmt::print("preparing to use old values: num: {}; next: {}\n", k_num, k_next);
+  }
 
   process_buffer();
   node_buffer = buffer_stack.back();
   buffer_stack.pop_back();
 
-  k_next = tmp_k;
-  k_num = k_stack.back();
+  if_buffer = if_buffer_stack.back();
+  if_buffer_stack.pop_back();
+
+  if (curr_statement_level != level) {
+    k_next = tmp_k;
+    k_num = k_stack.back();
+  }
   k_stack.pop_back();
 }
 
@@ -151,11 +221,15 @@ std::string_view Lnast_to_cfg_parser::get_node_name(Lnast_node node) {
 
 void Lnast_to_cfg_parser::flush_it(std::vector<Lnast_node>::iterator it) {
   while (it != node_buffer.end()) {
+    Lnast_ntype_id type = (*it).type;
+    if (type == Lnast_ntype_statements || type == Lnast_ntype_cstatements) {
+      it++;
+      continue;
+    }
+
     node_str_buffer = absl::StrCat(node_str_buffer, get_node_name(*it));
     if (++it != node_buffer.end()) {
       node_str_buffer = absl::StrCat(node_str_buffer, "\t");
-    } else {
-      node_str_buffer = absl::StrCat(node_str_buffer, "\n");
     }
   }
 }
@@ -165,6 +239,7 @@ void Lnast_to_cfg_parser::process_pure_assign() {
   node_str_buffer = absl::StrCat(node_str_buffer, "=\t");
   it++;
   flush_it(it);
+  node_str_buffer = absl::StrCat(node_str_buffer, "\n");
 }
 
 void Lnast_to_cfg_parser::process_as() {
@@ -172,6 +247,7 @@ void Lnast_to_cfg_parser::process_as() {
   node_str_buffer = absl::StrCat(node_str_buffer, "as\t");
   it++;
   flush_it(it);
+  node_str_buffer = absl::StrCat(node_str_buffer, "\n");
 }
 
 void Lnast_to_cfg_parser::process_label() {
@@ -179,6 +255,7 @@ void Lnast_to_cfg_parser::process_label() {
   node_str_buffer = absl::StrCat(node_str_buffer, ":\t");
   it++;
   flush_it(it);
+  node_str_buffer = absl::StrCat(node_str_buffer, "\n");
 }
 
 void Lnast_to_cfg_parser::process_and() {
@@ -186,6 +263,7 @@ void Lnast_to_cfg_parser::process_and() {
   node_str_buffer = absl::StrCat(node_str_buffer, "&\t");
   it++;
   flush_it(it);
+  node_str_buffer = absl::StrCat(node_str_buffer, "\n");
 }
 
 void Lnast_to_cfg_parser::process_xor() {
@@ -193,6 +271,7 @@ void Lnast_to_cfg_parser::process_xor() {
   node_str_buffer = absl::StrCat(node_str_buffer, "^\t");
   it++;
   flush_it(it);
+  node_str_buffer = absl::StrCat(node_str_buffer, "\n");
 }
 
 void Lnast_to_cfg_parser::process_plus() {
@@ -200,6 +279,7 @@ void Lnast_to_cfg_parser::process_plus() {
   node_str_buffer = absl::StrCat(node_str_buffer, "+\t");
   it++;
   flush_it(it);
+  node_str_buffer = absl::StrCat(node_str_buffer, "\n");
 }
 
 void Lnast_to_cfg_parser::process_gt() {
@@ -207,13 +287,53 @@ void Lnast_to_cfg_parser::process_gt() {
   node_str_buffer = absl::StrCat(node_str_buffer, ">\t");
   it++;
   flush_it(it);
+  node_str_buffer = absl::StrCat(node_str_buffer, "\n");
 }
 
 void Lnast_to_cfg_parser::process_if() {
-  std::vector<Lnast_node>::iterator it = node_buffer.begin();
+  fmt::print("start process_if\n");
+  fmt::print("node:\t");
+  for (auto const& value : node_buffer) {
+    fmt::print("{}\t", get_node_name(value));
+  }
+  fmt::print("\n");
+
+  fmt::print("if:\t");
+  for (auto const& value : if_buffer) {
+    fmt::print("{}\t", value);
+  }
+  fmt::print("\n");
+  fmt::print("after process_if\n");
+
+  std::vector<Lnast_node>::iterator node_it = node_buffer.begin();
+  std::vector<uint32_t>::iterator if_it = if_buffer.begin();
+
   node_str_buffer = absl::StrCat(node_str_buffer, "if\t");
-  it++; // csts
-  flush_it(it);
+  node_it++; // if
+  node_it++; // csts
+  node_str_buffer = absl::StrCat(node_str_buffer, get_node_name(*node_it), "\t");
+  node_str_buffer = absl::StrCat(node_str_buffer, "K", *if_it, "\t");
+  if_it++;
+  node_str_buffer = absl::StrCat(node_str_buffer, "K", *if_it, "\t");
+  if_it++;
+  node_it++; // cond
+  node_it++; // sts
+  node_str_buffer = absl::StrCat(node_str_buffer, "\n");
+
+  while (node_it != node_buffer.end()) {
+    if ((*node_it).type == Lnast_ntype_cond) {
+      node_str_buffer = absl::StrCat(node_str_buffer, "K", *if_it, "\t");
+      if_it++;
+      node_str_buffer = absl::StrCat(node_str_buffer, "null", "\tif\t");
+      node_str_buffer = absl::StrCat(node_str_buffer, get_node_name(*node_it), "\t");
+      node_str_buffer = absl::StrCat(node_str_buffer, "K", *if_it, "\t");
+      if_it++;
+      node_str_buffer = absl::StrCat(node_str_buffer, "K", *if_it, "\t");
+      if_it++;
+      node_str_buffer = absl::StrCat(node_str_buffer, "\n");
+    }
+    node_it++;
+  }
 }
 
 void Lnast_to_cfg_parser::process_func_call() {
@@ -221,6 +341,7 @@ void Lnast_to_cfg_parser::process_func_call() {
   node_str_buffer = absl::StrCat(node_str_buffer, ".()\t");
   it++;
   flush_it(it);
+  node_str_buffer = absl::StrCat(node_str_buffer, "\n");
 }
 
 void Lnast_to_cfg_parser::process_func_def() {
@@ -231,6 +352,7 @@ void Lnast_to_cfg_parser::process_func_def() {
   it++;
   node_str_buffer = absl::StrCat(node_str_buffer, "K", k_num + 1, "\t");
   flush_it(it);
+  node_str_buffer = absl::StrCat(node_str_buffer, "\n");
 }
 
 void Lnast_to_cfg_parser::setup_ntype_str_mapping() {
