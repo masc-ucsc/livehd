@@ -1,6 +1,3 @@
----
-title: Projects
----
 
 # Projects
 
