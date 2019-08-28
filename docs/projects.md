@@ -9,7 +9,7 @@ on any of them to provide more details.
 If you are an UCSC student, contact Professor Jose Renau
 (https://users.soe.ucsc.edu/~renau/) to coordinate, the idea is that you can do
 a MS thesis/project or an undergraduate senior design project. It should take 2
-quarters. If there is enough progress and funds are available, it may be
+full quarters. If there is enough progress and funds are available, it may be
 possible to provide 1 quarter GSR in the last quarter for master students.
 
 At the end of the document there is a list of finished projects as example, and
@@ -61,15 +61,21 @@ Dependence: This project can not be started until the C++ from LNAST is not fini
 
 Main features:
 
+* Client/server
+    * Client is the console
+    * Server is running the simulation. Create a unique URL id for each run
+    * A console can attach to different servers if URL is known (server.connect(url) command)
 * Checkpointing
     * Run simulation and capacity to checkpoint contents
     * create simulation checkpoints (push/pop command)
 * Waveform
-    * Capacity to dump test waveforms on screen
-    * Capacity to generate LXT2 (gtkwave)
+    * Capacity to dump test waveforms on screen (wave.save command)
     * Live binary format with mmaps that allow the simulation to run and the console to monitor the values
+    * Capacity to generate LXT2 (gtkwave). (wave.lxt2 command)
 * Console
+    * Use replxx for the console (same as lgshell)
     * A gdb-like deamon (remote zero-MQ?) and console to debug hardware
+    * The console is a chaiscript language with extensions for the auto-complete
     * autocomplete in variables/wires
     * Show paths. From X to Y. Some similarity: https://www.jameswhanlon.com/querying-logical-paths-in-a-verilog-design.html
     * Allow to peek/poke variables
@@ -81,7 +87,8 @@ Main features:
 
 Live Hardware Development Viewer. The long term goal is to create an
 verdi/simvision alternative with a Live focus. This is a large project that
-should be split for 2 thesis (waveform and rest).
+should be split for 2 thesis (waveform and rest). The plan is to use nana++
+(http://nanapro.org/en-us/). Prof Renau has a skeleton for the application. 
 
 Some example screenshot:
  https://www.cadence.com/content/dam/cadence-www/global/en_US/images/old-tools/system-design-verification/debug_fig_sim_vision_windows.jpg
@@ -152,7 +159,7 @@ Main features:
 
 ## OpenWare
 
-We need a set of set of implementations with different trade-offs for each basic LGraph gate. The implemnentations
+We need a set of set of implementations with different trade-offs for each basic LGraph gate. The implementations
 could optimize for FPGA and ASIC.
 
 Dependence: none
@@ -429,17 +436,20 @@ Main requirements:
 
 Some potential implementation:
 
-* REST API for all the servers
+* REST API for all the servers. 
+* Use httplib. See lgraph/main/userver_test.cpp and lgraph/main/uclient_test.cpp
 * lgshell commands
     * cloud.server
     * cloud.ping     ; ping a server or front-end
     * cloud.frontend ; setup a front-end server to distributue the work to existing servers
     * cloud.client   ; setup lgshell as client. next commands may go to server
-* Server client must have same git clone token (version)
+* Server and client must have same git clone token (version) check for consistency.
 * When in server mode, transfer client files, monitor server files, and transfer back
-* bazel has the option of creating a docker image directly to deploy lgraph in the cloud as an rest API service
-
-https://www.google.com/url?q=https%3A%2F%2Fgithub.com%2Fbazelbuild%2Frules_docker&sa=D&sntz=1&usg=AFQjCNG-cvtKUpS2dBfJFv7gd8fJDWdrjg
+* Add bazel the option of creating a alpine docker image directly to deploy lgraph in the cloud as an rest API service
+* Create bringup and shutdown inside lgshell. Allow for local machines and gcloud/aws
+    * cloud.start ssh:mada1 ssh:mada2
+    * cloud.start gcloud xxx-parameters-for-gcloud
+    * cloud.shutdown # kills any cloud.start that was spawned before
 
 ## SAT Solver
 
@@ -513,4 +523,10 @@ performance impact. Setup mada0 and script to setup for multiusers hugeTLBfs
 
 We have several dockers for testing, a simple vagrant (ubuntu based?) for most users may
 be nice to have. Maybe based on https://github.com/VLSIDA/openram-vagrant-image
+
+## Fix lgshell
+
+* *Autocompletion for lgraph names too (now, it is just files).
+* Autocompletion patch for directories. Now finished with "foo", it should be "foo/"
+* Upgrade to the latest replxx. There was a change in API, and it requires to rework lgshell
 
