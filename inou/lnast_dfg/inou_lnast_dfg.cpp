@@ -37,7 +37,8 @@ void Inou_lnast_dfg::tolg(Eprp_var &var){
   p.lnast_parser.parse("lnast", p.memblock);
 
   p.lnast = p.lnast_parser.get_ast().get(); //unique_ptr lend its ownership
-  p.lnast->ssa_trans();
+  //p.lnast->ssa_trans();
+
   //lnast to lgraph
   std::vector<LGraph *> lgs = p.do_tolg();
 
@@ -65,7 +66,6 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
   //lnast to dfg
   process_ast_top(dfg);
 
-  dfg->sync();
   std::vector<LGraph *> lgs;
   lgs.push_back(dfg);
 
@@ -74,8 +74,7 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
 
 void Inou_lnast_dfg::process_ast_top(LGraph *dfg){
   const auto top = lnast->get_root();
-  const auto statement  = lnast->get_children(top)[0];
-  const auto statements = lnast->get_children(statement);
+  const auto statements = lnast->get_children(lnast->get_children(top)[0]);
   process_ast_statements(dfg, statements);
 }
 
@@ -116,8 +115,38 @@ void Inou_lnast_dfg::process_ast_statements(LGraph *dfg, const std::vector<Tree_
 }
 
 
+void  Inou_lnast_dfg::process_ast_binary_op      (LGraph *dfg, const Tree_index &lnast_op_idx){
+  const Node_pin  &opr    = create_binary_operator_node(dfg, lnast_op_idx);
+  const auto  &children   = lnast->get_children(lnast_op_idx);
+  I(children.size() == 3);
+  const Node_pin  &target = create_node(dfg, children[0]);
+  const Node_pin  &opd1   = create_node(dfg, children[1]);
+  const Node_pin  &opd2   = create_node(dfg, children[2]);
+
+};
+Node_pin Inou_lnast_dfg::create_binary_operator_node (LGraph *dfg, const Tree_index &lnast_op_idx) {
+  const auto &lg_ntype_op = decode_lnast_op(lnast_op_idx);
+  return dfg->create_node(lg_ntype_op).setup_driver_pin();
+}
+
+Node_pin Inou_lnast_dfg::create_node(LGraph *dfg, const Tree_index &ast_idx){
+  const auto name = lnast->get_data(ast_idx).token.get_text(memblock);
+  if (name.at(0) == '%') {
+    dfg->add_graph_output(name, lgout_cnt++, 1);
+  } else if (name.at(0) == '$') {
+    dfg->add_graph_input(name, lginp_cnt++, 1);
+  } else {
+    ;//TBD
+  }
+}
+
+Node_Type_Op Inou_lnast_dfg::decode_lnast_op(const Tree_index &ast_op_idx) {
+  const auto op = lnast->get_data(ast_op_idx).type;
+  return primitive_type_lnast2lg[op];
+}
+
+
 void  Inou_lnast_dfg::process_ast_pure_assign_op (LGraph *dfg, const Tree_index &ast_idx){;};
-void  Inou_lnast_dfg::process_ast_binary_op      (LGraph *dfg, const Tree_index &ast_idx){;};
 void  Inou_lnast_dfg::process_ast_unary_op       (LGraph *dfg, const Tree_index &ast_idx){;};
 void  Inou_lnast_dfg::process_ast_logical_op     (LGraph *dfg, const Tree_index &ast_idx){;};
 void  Inou_lnast_dfg::process_ast_as_op          (LGraph *dfg, const Tree_index &ast_idx){;};
@@ -145,7 +174,7 @@ std::string_view Inou_lnast_dfg::setup_memblock(){
   printf("Size: %lu\n", (uint64_t)sb.st_size);
 
   char *memblock = (char *)mmap(NULL, sb.st_size, PROT_WRITE, MAP_PRIVATE, fd, 0);
-  fprintf(stderr, "Content of memblock: \n%s\n", memblock);
+  fprintf(stderr, "Content of memblock: \n%s\n", memblock); //SH_FIXME: remove when benchmarking
   if(memblock == MAP_FAILED) {
     fprintf(stderr, "error, mmap failed\n");
     exit(-3);
@@ -153,3 +182,21 @@ std::string_view Inou_lnast_dfg::setup_memblock(){
   return memblock;
 }
 
+void Inou_lnast_dfg::setup_lnast_to_lgraph_primitive_type_mapping(){
+  primitive_type_lnast2lg [Lnast_ntype_invalid]     = Invalid_Op ;
+  primitive_type_lnast2lg [Lnast_ntype_logical_and] = And_Op ;
+  primitive_type_lnast2lg [Lnast_ntype_logical_or]  = Or_Op ;
+  primitive_type_lnast2lg [Lnast_ntype_and]         = And_Op ;
+  primitive_type_lnast2lg [Lnast_ntype_or]          = Or_Op ;
+  primitive_type_lnast2lg [Lnast_ntype_xor]         = Xor_Op ;
+  primitive_type_lnast2lg [Lnast_ntype_plus]        = Sum_Op ;
+  primitive_type_lnast2lg [Lnast_ntype_minus]       = Sum_Op ;
+  primitive_type_lnast2lg [Lnast_ntype_mult]        = Mult_Op ;
+  primitive_type_lnast2lg [Lnast_ntype_div]         = Div_Op ;
+  primitive_type_lnast2lg [Lnast_ntype_same]        = Equals_Op ;
+  primitive_type_lnast2lg [Lnast_ntype_lt]          = LessThan_Op ;
+  primitive_type_lnast2lg [Lnast_ntype_le]          = LessEqualThan_Op ;
+  primitive_type_lnast2lg [Lnast_ntype_gt]          = GreaterThan_Op ;
+  primitive_type_lnast2lg [Lnast_ntype_ge]          = GreaterEqualThan_Op ;
+  //sh_fixme: to be extended ...
+}

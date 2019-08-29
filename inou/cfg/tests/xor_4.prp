@@ -1,0 +1,10 @@
+$a as __bits:1
+$b as __bits:1
+%s as __bits:1
+
+t0 = $a ^ $b 
+t1 = t0 ^ t0 
+t2 = t1 ^ t1 
+t3 = t2 ^ t2 
+
+%s = t3 

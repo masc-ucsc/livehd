@@ -6,6 +6,10 @@
 
 #include "pass.hpp"
 #include "lnast_parser.hpp"
+#include "lgbench.hpp"
+#include "lgedgeiter.hpp"
+#include "lgraph.hpp"
+
 
 class Inou_lnast_dfg_options {
 public:
@@ -19,11 +23,14 @@ private:
   std::string_view       memblock;     //SH:FIXME:cannot initialize through constructor?
   Lnast_parser           lnast_parser; //SH:FIXME:cannot initialize through constructor?
   Lnast                 *lnast;        //SH:FIXME:cannot initialize through constructor?
+  absl::flat_hash_map<Lnast_ntype_id , Node_Type_Op>   primitive_type_lnast2lg;
+  int                    lginp_cnt;
+  int                    lgout_cnt;
 
 protected:
 
 public:
-  Inou_lnast_dfg() : Pass("lnast_dfg") {};
+  Inou_lnast_dfg() : Pass("lnast_dfg"), lginp_cnt(0), lgout_cnt(0) {};
   static void   tolg(Eprp_var &var);
   void          setup() final;
 
@@ -32,7 +39,7 @@ private:
   std::vector<LGraph *>         do_tolg();
 
   void  process_ast_top            (LGraph *dfg);
-  void  process_ast_statements     (LGraph *dfg, const std::vector<Tree_index> &sts);
+  void  process_ast_statements     (LGraph *dfg, const std::vector<Tree_index> &sts );
   void  process_ast_pure_assign_op (LGraph *dfg, const Tree_index &ast_idx);
   void  process_ast_binary_op      (LGraph *dfg, const Tree_index &ast_idx);
   void  process_ast_unary_op       (LGraph *dfg, const Tree_index &ast_idx);
@@ -48,9 +55,9 @@ private:
   void  process_ast_while_op       (LGraph *dfg, const Tree_index &ast_idx);
   void  process_ast_dp_assign_op   (LGraph *dfg, const Tree_index &ast_idx);
 
-  constexpr bool  is_logical_op     (Lnast_ntype_id op) const { return (op == Lnast_ntype_logical_and) or
+  constexpr bool  is_logical_op    (Lnast_ntype_id op) const { return  (op == Lnast_ntype_logical_and) or
                                                                        (op == Lnast_ntype_logical_or); }
-  constexpr bool  is_binary_op      (Lnast_ntype_id op) const { return (op == Lnast_ntype_and) or
+  constexpr bool  is_binary_op     (Lnast_ntype_id op) const { return  (op == Lnast_ntype_and) or
                                                                        (op == Lnast_ntype_or) or
                                                                        (op == Lnast_ntype_xor) or
                                                                        (op == Lnast_ntype_plus) or
@@ -73,6 +80,15 @@ private:
   constexpr bool  is_while_op       (Lnast_ntype_id op) const { return (op == Lnast_ntype_while); }
   constexpr bool  is_dp_assign_op   (Lnast_ntype_id op) const { return (op == Lnast_ntype_dp_assign); }
   constexpr bool  is_unary_op       (Lnast_ntype_id op) const { return false; } //sh:todo
+
+
+
+
+  Node_pin     create_binary_operator_node (LGraph *dfg, const Tree_index &ast_op_idx);
+  Node_pin     create_node                 (LGraph *dfg, const Tree_index &ast_idx);
+  Node_Type_Op decode_lnast_op             (const Tree_index &ast_op_idx);
+  void         setup_lnast_to_lgraph_primitive_type_mapping();
+
 };
 
 

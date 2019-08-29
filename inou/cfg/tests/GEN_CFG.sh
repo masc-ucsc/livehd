@@ -1,5 +1,6 @@
 #!/bin/bash
 rm -f *.cfg
+./prp xor_4.prp                | sort -n -tK -k2 > y && column -t y > x && rm -f y && mv x xor_4.cfg
 ./prp lnast_utest.prp          | sort -n -tK -k2 > y && column -t y > x && rm -f y && mv x lnast_utest.cfg
 ./prp logic_bitwise_op.prp     | sort -n -tK -k2 > y && column -t y > x && rm -f y && mv x logic_bitwise_op.cfg
 ./prp sp_punch.prp             | sort -n -tK -k2 > y && column -t y > x && rm -f y && mv x sp_punch.cfg
