@@ -114,30 +114,64 @@ void Inou_lnast_dfg::process_ast_statements(LGraph *dfg, const std::vector<Tree_
   }
 }
 
-
-void  Inou_lnast_dfg::process_ast_binary_op      (LGraph *dfg, const Tree_index &lnast_op_idx){
-  const Node_pin  &opr    = create_binary_operator_node(dfg, lnast_op_idx);
-  const auto  &children   = lnast->get_children(lnast_op_idx);
-  I(children.size() == 3);
-  const Node_pin  &target = create_node(dfg, children[0]);
-  const Node_pin  &opd1   = create_node(dfg, children[1]);
-  const Node_pin  &opd2   = create_node(dfg, children[2]);
-
-};
-Node_pin Inou_lnast_dfg::create_binary_operator_node (LGraph *dfg, const Tree_index &lnast_op_idx) {
-  const auto &lg_ntype_op = decode_lnast_op(lnast_op_idx);
-  return dfg->create_node(lg_ntype_op).setup_driver_pin();
+void  Inou_lnast_dfg::process_ast_pure_assign_op (LGraph *dfg, const Tree_index &lnast_op_idx) {
+  const Node_pin  opr    = setup_node_operator_and_target(dfg, lnast_op_idx);
+  const Node_pin  opd1   = setup_node_operand(dfg, lnast->get_children(lnast_op_idx)[1]);
+  dfg->add_edge(opd1, opr.get_node().setup_sink_pin(0), 1); //maybe sink_pin 1, try and error
 }
 
-Node_pin Inou_lnast_dfg::create_node(LGraph *dfg, const Tree_index &ast_idx){
+void  Inou_lnast_dfg::process_ast_binary_op (LGraph *dfg, const Tree_index &lnast_op_idx) {
+  const Node_pin  opr    = setup_node_operator_and_target(dfg, lnast_op_idx);
+  const auto  children   = lnast->get_children(lnast_op_idx);
+  I(children.size() == 3);
+  //note: children[0] is the operator name and has been processed in setup_binary_operator_node
+  const Node_pin  opd1   = setup_node_operand(dfg, children[1]);
+  const Node_pin  opd2   = setup_node_operand(dfg, children[2]);
+  I(opd1 != opd2);
+  //sh_fixme: the sink_pin should be determined by the functionality, not just zero
+  dfg->add_edge(opd1, opr.get_node().setup_sink_pin(0), 1);
+  dfg->add_edge(opd2, opr.get_node().setup_sink_pin(0), 1);
+
+};
+
+
+//note: for operator, we must create a new node and dpin as it represents a new gate in the netlist
+Node_pin Inou_lnast_dfg::setup_node_operator_and_target (LGraph *dfg, const Tree_index &lnast_op_idx) {
+  const auto eldest_child = lnast->get_children(lnast_op_idx)[0];
+  const auto name         = lnast->get_data(eldest_child).token.get_text(memblock);
+
+  if(name2dpin.find(name) != name2dpin.end())
+    return name2dpin[name];
+
+  const auto lg_ntype_op  = decode_lnast_op(lnast_op_idx);
+  //sh_fixme: temporarily set driver_pin 0
+  //const auto node_dpin    = dfg->create_node(lg_ntype_op, 1).setup_driver_pin(0); // wait the patch from Jose
+  const auto node_dpin    = dfg->create_node(lg_ntype_op).setup_driver_pin(0);
+  name2dpin[name]         = node_dpin;
+  return node_dpin;
+}
+
+//note: for operand, except the new io and reg, the node and dpin should already be in the table as the operand comes from existing operator output
+Node_pin Inou_lnast_dfg::setup_node_operand(LGraph *dfg, const Tree_index &ast_idx){
   const auto name = lnast->get_data(ast_idx).token.get_text(memblock);
+  fmt::print("operand name:{}\n", name);
+  Node_pin node_dpin;
+
+  if(name2dpin.find(name) != name2dpin.end())
+    return name2dpin[name];
+
   if (name.at(0) == '%') {
-    dfg->add_graph_output(name, lgout_cnt++, 1);
+    node_dpin = dfg->add_graph_output(name, lgout_cnt++, 1);
   } else if (name.at(0) == '$') {
-    dfg->add_graph_input(name, lginp_cnt++, 1);
+    node_dpin = dfg->add_graph_input(name, lginp_cnt++, 1);
+  } else if (name.at(0) == '@') {
+    node_dpin = dfg->create_node(FFlop_Op).setup_driver_pin();
   } else {
-    ;//TBD
+    I(false);
   }
+
+  name2dpin[name] = node_dpin; //note: for io, the %$ identifier also recorded
+  return node_dpin;
 }
 
 Node_Type_Op Inou_lnast_dfg::decode_lnast_op(const Tree_index &ast_op_idx) {
@@ -146,7 +180,6 @@ Node_Type_Op Inou_lnast_dfg::decode_lnast_op(const Tree_index &ast_op_idx) {
 }
 
 
-void  Inou_lnast_dfg::process_ast_pure_assign_op (LGraph *dfg, const Tree_index &ast_idx){;};
 void  Inou_lnast_dfg::process_ast_unary_op       (LGraph *dfg, const Tree_index &ast_idx){;};
 void  Inou_lnast_dfg::process_ast_logical_op     (LGraph *dfg, const Tree_index &ast_idx){;};
 void  Inou_lnast_dfg::process_ast_as_op          (LGraph *dfg, const Tree_index &ast_idx){;};
@@ -184,6 +217,7 @@ std::string_view Inou_lnast_dfg::setup_memblock(){
 
 void Inou_lnast_dfg::setup_lnast_to_lgraph_primitive_type_mapping(){
   primitive_type_lnast2lg [Lnast_ntype_invalid]     = Invalid_Op ;
+  primitive_type_lnast2lg [Lnast_ntype_pure_assign] = Or_Op ;
   primitive_type_lnast2lg [Lnast_ntype_logical_and] = And_Op ;
   primitive_type_lnast2lg [Lnast_ntype_logical_or]  = Or_Op ;
   primitive_type_lnast2lg [Lnast_ntype_and]         = And_Op ;

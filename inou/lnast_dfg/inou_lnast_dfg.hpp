@@ -23,14 +23,16 @@ private:
   std::string_view       memblock;     //SH:FIXME:cannot initialize through constructor?
   Lnast_parser           lnast_parser; //SH:FIXME:cannot initialize through constructor?
   Lnast                 *lnast;        //SH:FIXME:cannot initialize through constructor?
-  absl::flat_hash_map<Lnast_ntype_id , Node_Type_Op>   primitive_type_lnast2lg;
+
+  absl::flat_hash_map<Lnast_ntype_id , Node_Type_Op> primitive_type_lnast2lg;
+  absl::flat_hash_map<std::string_view , Node_pin>   name2dpin; //record dpin instead of node because the asymmetry between gio and normal node  ...
   int                    lginp_cnt;
   int                    lgout_cnt;
 
 protected:
 
 public:
-  Inou_lnast_dfg() : Pass("lnast_dfg"), lginp_cnt(0), lgout_cnt(0) {};
+  Inou_lnast_dfg() : Pass("lnast_dfg"), lginp_cnt(0), lgout_cnt(0) { setup_lnast_to_lgraph_primitive_type_mapping();};
   static void   tolg(Eprp_var &var);
   void          setup() final;
 
@@ -84,9 +86,9 @@ private:
 
 
 
-  Node_pin     create_binary_operator_node (LGraph *dfg, const Tree_index &ast_op_idx);
-  Node_pin     create_node                 (LGraph *dfg, const Tree_index &ast_idx);
-  Node_Type_Op decode_lnast_op             (const Tree_index &ast_op_idx);
+  Node_pin     setup_node_operator_and_target (LGraph *dfg, const Tree_index &ast_op_idx);
+  Node_pin     setup_node_operand  (LGraph *dfg, const Tree_index &ast_idx);
+  Node_Type_Op decode_lnast_op    (const Tree_index &ast_op_idx);
   void         setup_lnast_to_lgraph_primitive_type_mapping();
 
 };

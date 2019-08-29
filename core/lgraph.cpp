@@ -504,7 +504,7 @@ Node LGraph::create_node(Node_Type_Op op, uint16_t bits) {
 
   auto node = create_node(op);
 
-  node.setup_driver_pin().set_bits(bits);
+  node.setup_driver_pin(0).set_bits(bits);
 
   return node;
 }
