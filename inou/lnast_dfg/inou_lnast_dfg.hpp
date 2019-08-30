@@ -20,9 +20,9 @@ public:
 class Inou_lnast_dfg : public Pass{
 private:
   Inou_lnast_dfg_options opack;
-  std::string_view       memblock;     //SH:FIXME:cannot initialize through constructor?
-  Lnast_parser           lnast_parser; //SH:FIXME:cannot initialize through constructor?
-  Lnast                 *lnast;        //SH:FIXME:cannot initialize through constructor?
+  std::string_view       memblock;
+  Lnast_parser           lnast_parser;
+  Lnast                 *lnast;
 
   absl::flat_hash_map<Lnast_ntype_id , Node_Type_Op> primitive_type_lnast2lg;
   absl::flat_hash_map<std::string_view , Node_pin>   name2dpin; //record dpin instead of node because the asymmetry between gio and normal node  ...
@@ -32,8 +32,12 @@ private:
 protected:
 
 public:
-  Inou_lnast_dfg() : Pass("lnast_dfg"), lginp_cnt(0), lgout_cnt(0) { setup_lnast_to_lgraph_primitive_type_mapping();};
+  Inou_lnast_dfg() : Pass("lnast_dfg"), lginp_cnt(0), lgout_cnt(0)
+  {
+    setup_lnast_to_lgraph_primitive_type_mapping();
+  };
   static void   tolg(Eprp_var &var);
+  static void   build_lnast(Inou_lnast_dfg &p, Eprp_var &var);
   void          setup() final;
 
 private:

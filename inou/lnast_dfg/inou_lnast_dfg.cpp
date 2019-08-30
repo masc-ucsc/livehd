@@ -23,18 +23,7 @@ void Inou_lnast_dfg::setup() {
 void Inou_lnast_dfg::tolg(Eprp_var &var){
   Inou_lnast_dfg p;
 
-  p.opack.files = var.get("files");
-  p.opack.path  = var.get("path");
-
-  if (p.opack.files.empty()) {
-    error(fmt::format("inou.lnast_dfg.tolg needs an input cfg_text!"));
-    I(false);
-    return;
-  }
-
-  //cfg_text to lnast
-  p.memblock = p.setup_memblock();
-  p.lnast_parser.parse("lnast", p.memblock);
+  build_lnast(p, var);
 
   p.lnast = p.lnast_parser.get_ast().get(); //unique_ptr lend its ownership
   //p.lnast->ssa_trans();
@@ -50,11 +39,29 @@ void Inou_lnast_dfg::tolg(Eprp_var &var){
   }
 }
 
+void Inou_lnast_dfg::build_lnast(Inou_lnast_dfg &p, Eprp_var &var) {
+  LGBench b("inou.lnast_dfg.build_lnast");
+  p.opack.files = var.get("files");
+  p.opack.path  = var.get("path");
+
+  if (p.opack.files.empty()) {
+    error(fmt::format("inou.lnast_dfg.tolg needs an input cfg_text!"));
+    I(false);
+    return;
+  }
+
+  //cfg_text to lnast
+  p.memblock = p.setup_memblock();
+  p.lnast_parser.parse("lnast", p.memblock);
+}
+
 std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
+  LGBench b("inou.lnast_dfg.do_tolg");
   I(!opack.files.empty());
   I(!opack.path.empty());
   LGraph *dfg = LGraph::create(opack.path, opack.files, "inou_lnast_dfg");
 
+  /*
   for (const auto &it: lnast->depth_preorder(lnast->get_root())) {
     const auto& node_data = lnast->get_data(it);
     std::string name(node_data.token.get_text(memblock));  //str_view to string
@@ -62,6 +69,8 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
     auto node_scope = node_data.scope;
     fmt::print("name:{}, type:{}, scope:{}\n", name, type, node_scope);
   }
+  */
+
 
   //lnast to dfg
   process_ast_top(dfg);
@@ -115,7 +124,7 @@ void Inou_lnast_dfg::process_ast_statements(LGraph *dfg, const std::vector<Tree_
 }
 
 void  Inou_lnast_dfg::process_ast_pure_assign_op (LGraph *dfg, const Tree_index &lnast_op_idx) {
-  fmt::print("purse_assign\n");
+  //fmt::print("purse_assign\n");
   const Node_pin  opr    = setup_node_pure_assign_and_target(dfg, lnast_op_idx);
   const Node_pin  opd1   = setup_node_operand(dfg, lnast->get_children(lnast_op_idx)[1]);
   if(opr.is_graph_output()){
@@ -167,7 +176,7 @@ Node_pin Inou_lnast_dfg::setup_node_pure_assign_and_target (LGraph *dfg, const T
 //note: for operand, except the new io and reg, the node and dpin should already be in the table as the operand comes from existing operator output
 Node_pin Inou_lnast_dfg::setup_node_operand(LGraph *dfg, const Tree_index &ast_idx){
   const auto name = lnast->get_data(ast_idx).token.get_text(memblock);
-  fmt::print("operand name:{}\n", name);
+  //fmt::print("operand name:{}\n", name);
   Node_pin node_dpin;
 
   if(name2dpin.find(name) != name2dpin.end())
@@ -221,7 +230,7 @@ std::string_view Inou_lnast_dfg::setup_memblock(){
   printf("Size: %lu\n", (uint64_t)sb.st_size);
 
   char *memblock = (char *)mmap(NULL, sb.st_size, PROT_WRITE, MAP_PRIVATE, fd, 0);
-  fprintf(stderr, "Content of memblock: \n%s\n", memblock); //SH_FIXME: remove when benchmarking
+  //fprintf(stderr, "Content of memblock: \n%s\n", memblock); //SH_FIXME: remove when benchmarking
   if(memblock == MAP_FAILED) {
     fprintf(stderr, "error, mmap failed\n");
     exit(-3);

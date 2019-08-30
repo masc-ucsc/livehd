@@ -218,7 +218,7 @@ void Inou_graphviz::populate_lnast_data(std::string_view files) {
 
   data += "}\n";
 
-  std::string file = absl::StrCat(odir, "/", files, ".dot");
+  std::string file = absl::StrCat(odir, "/", files, ".lnast.dot");
   int         fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
   if (fd < 0) {
     Pass::error("inou.graphviz_lnast unable to create {}", file);

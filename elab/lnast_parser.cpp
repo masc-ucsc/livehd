@@ -9,7 +9,7 @@
 
 
 void Lnast_parser::elaborate(){
-  fmt::print("start elaborate!\n");
+  //fmt::print("start elaborate!\n");
   lnast = std::make_unique<Lnast>(get_buffer());
   lnast->set_root(Lnast_node(Lnast_ntype_top, Token()));
   if(scan_calc_lineno() == 0) //SH:FIXME: ask Akash to remove the "END" line if you really don't need it
@@ -29,7 +29,7 @@ void Lnast_parser::build_top_statements(const Tree_index& tree_idx_top){
 }
 
 void Lnast_parser::add_statement(const Tree_index& tree_top_sts) {
-  fmt::print("line:{}, statement:{}\n", line_num, scan_text());
+  //fmt::print("line:{}, statement:{}\n", line_num, scan_text());
 
   Scope_id       token_scope = 0;
   Token          cfg_token_beg;
@@ -90,11 +90,11 @@ void Lnast_parser::add_statement(const Tree_index& tree_top_sts) {
           auto sts_parent_type = std::get<1>(range_stack.back());
           auto min             = std::get<2>(range_stack.back());
           auto max             = std::get<3>(range_stack.back());
-          fmt::print("sts_stack_top:{}\n", ntype_dbg(lnast->get_data(sts_stack_top).type));
-          fmt::print("sts_parent_type:{}\n", ntype_dbg(sts_parent_type));
-          fmt::print("min:{}\n", min);
-          fmt::print("max:{}\n", max);
-          fmt::print("knum1:{}\n", knum1);
+          //fmt::print("sts_stack_top:{}\n", ntype_dbg(lnast->get_data(sts_stack_top).type));
+          //fmt::print("sts_parent_type:{}\n", ntype_dbg(sts_parent_type));
+          //fmt::print("min:{}\n", min);
+          //fmt::print("max:{}\n", max);
+          //fmt::print("knum1:{}\n", knum1);
           if (knum1 >= min && knum1 < max) {
             opr_parent_sts = sts_stack_top;
           } else if (sts_parent_type == Lnast_ntype_func_def && knum1 == max) {
@@ -144,8 +144,8 @@ Tree_index Lnast_parser::process_operator_node(const Tree_index& opr_parent_sts,
       I(!range_stack.empty());
       auto sts_stack_top   = std::get<0>(range_stack.back());
       auto sts_parent_type = std::get<1>(range_stack.back());
-      fmt::print("sts_stack_top:{}\n", ntype_dbg(lnast->get_data(sts_stack_top).type));
-      fmt::print("sts_parent_type:{}\n", ntype_dbg(sts_parent_type));
+      //fmt::print("sts_stack_top:{}\n", ntype_dbg(lnast->get_data(sts_stack_top).type));
+      //fmt::print("sts_parent_type:{}\n", ntype_dbg(sts_parent_type));
       return lnast->get_parent(std::get<0>(range_stack.back()));
     }
   }
@@ -155,7 +155,7 @@ Tree_index Lnast_parser::process_operator_node(const Tree_index& opr_parent_sts,
 
 //scan pos start: first operand token, stop: last operand
 void Lnast_parser::add_operator_subtree(const Tree_index& tree_idx_opr, const Token& target_name) {
-  fmt::print("token is :{}\n", scan_text());
+  //fmt::print("token is :{}\n", scan_text());
 
   auto nt = lnast->get_data(tree_idx_opr).type;
   if (nt == Lnast_ntype_pure_assign || nt == Lnast_ntype_dp_assign || nt == Lnast_ntype_as || nt == Lnast_ntype_tuple) {//SH:FIXME: handle tuple seperately
@@ -274,7 +274,7 @@ void Lnast_parser::process_assign_like_op(const Tree_index& tree_idx_opr, const 
   lnast->add_child(tree_idx_opr, Lnast_node(Lnast_ntype_ref, target_name));
   I(scan_is_token(Token_id_alnum) || scan_is_token(Token_id_output) || scan_is_token(Token_id_input) || scan_is_token(Token_id_reference));
   lnast->add_child(tree_idx_opr, Lnast_node(operand_analysis(), scan_get_token()));
-  fmt::print("add operand:{}\n", scan_text());
+  //fmt::print("add operand:{}\n", scan_text());
 }
 
 //scan pos start: first operand token, stop: last operand
@@ -282,10 +282,10 @@ void Lnast_parser::process_label_op(const Tree_index& tree_idx_label, const Toke
   lnast->add_child(tree_idx_label, Lnast_node(Lnast_ntype_ref, target_name));
   I(scan_is_token(Token_id_alnum) || scan_is_token(Token_id_output) || scan_is_token(Token_id_input));
   if (scan_is_token(Token_id_alnum) && scan_sview() == "__bits") {
-    fmt::print("label op, 1st opd\n", scan_text());
+    //fmt::print("label op, 1st opd\n", scan_text());
     auto tree_idx_attr_bits = lnast->add_child(tree_idx_label, Lnast_node(Lnast_ntype_attr_bits, scan_get_token()));
     scan_next(); line_tkcnt += 1;
-    fmt::print("label op, 2nd opd\n", scan_text());
+    //fmt::print("label op, 2nd opd\n", scan_text());
     I(token_is_valid_ref());
     lnast->add_child(tree_idx_attr_bits, Lnast_node(Lnast_ntype_const, scan_get_token()));
   } else { //case of function argument assignment

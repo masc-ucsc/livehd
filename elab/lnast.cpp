@@ -22,14 +22,13 @@ void Lnast::do_ssa_trans(const Lnast_index &top){
     }
   }
 
-  fmt::print("\nrename_table content\n\n");
+  //fmt::print("\nrename_table content\n\n");
   for (auto const& [key, val] : rename_table){
-    fmt::print("var:{:<12}, subs:{}\n", key, val);
+    //fmt::print("var:{:<12}, subs:{}\n", key, val);
   }
 }
 
 void Lnast::ssa_if_subtree(const Lnast_index &if_node, Rename_table &rename_table){
-  fmt::print("hi! if-subtree!\n");
   auto lnast_if_children = this->get_children(if_node);
 
   for (const auto &itr : lnast_if_children){
