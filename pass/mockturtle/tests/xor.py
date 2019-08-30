@@ -1,3 +1,5 @@
+#!/usr/bin/python
+
 def main():
     nums = [1, 10, 100, 1000, 10000, 100000]
     for num in nums:
@@ -21,5 +23,6 @@ def main():
               f.write("    wire t%d = t%d ^ t%d;\n" % (i, i-1, i-1))
       f.write("\n\nendmodule")
       f.close()
+
 if __name__ == "__main__":
     main()

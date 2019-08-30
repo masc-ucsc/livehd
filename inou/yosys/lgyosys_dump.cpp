@@ -274,14 +274,13 @@ void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
   uint32_t port_id = 0;
   g->each_sorted_graph_io([&port_id,module,this](const Node_pin &pin, Port_ID pos) {
     port_id++;
-    assert(port_id == pos);
     if(pin.is_graph_output()) {
-      output_map[pin.get_compact()] = create_io_wire(pin, module, pos);
+      output_map[pin.get_compact()] = create_io_wire(pin, module, port_id);
       output_map[pin.get_compact()]->port_input  = false;
       output_map[pin.get_compact()]->port_output = true;
     }else{
       assert(pin.is_graph_input());
-      input_map[pin.get_compact()] = create_io_wire(pin, module, pos);
+      input_map[pin.get_compact()] = create_io_wire(pin, module, port_id);
       input_map[pin.get_compact()]->port_input  = true;
       input_map[pin.get_compact()]->port_output = false;
     }

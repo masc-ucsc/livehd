@@ -21,10 +21,17 @@ void LGraph::each_sorted_graph_io(std::function<void(const Node_pin &pin, Port_I
   }
 
   std::sort(pin_pair.begin(), pin_pair.end()
-           ,[](const std::pair<Node_pin,Port_ID>& a, const std::pair<Node_pin,Port_ID>& b)
-            {
-                return a.second < b.second;
-            });
+   ,[](const std::pair<Node_pin,Port_ID>& a, const std::pair<Node_pin,Port_ID>& b)
+    {
+      if (a.second==Port_invalid && b.second==Port_invalid)
+        return a.first.get_pid() < b.first.get_pid();
+      if (a.second==Port_invalid)
+        return true;
+      if (b.second==Port_invalid)
+        return false;
+
+      return a.second < b.second;
+    });
 
   for(auto &pp:pin_pair) {
     f1(pp.first, pp.second);

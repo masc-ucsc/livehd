@@ -18,6 +18,9 @@
 LGraph::LGraph(std::string_view _path, std::string_view _name, std::string_view _source, bool _clear)
     :LGraph_Base(_path, _name, Graph_library::instance(_path)->register_lgraph(_name, _source, this))
     ,LGraph_Node_Type(_path, _name, get_lgid()) {
+
+  I(_name.find('/') == std::string::npos); // No path in name
+
   I(_name == get_name());
   if (_clear) {  // Create
     clear();

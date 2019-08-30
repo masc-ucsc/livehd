@@ -1,3 +1,5 @@
+#!/usr/bin/python
+
 def main():
     import subprocess
     nums = [1, 10, 100, 1000, 10000, 100000]

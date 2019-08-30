@@ -32,7 +32,7 @@ private:
 protected:
 
 public:
-  Inou_lnast_dfg() : Pass("lnast_dfg"), lginp_cnt(0), lgout_cnt(0)
+  Inou_lnast_dfg() : Pass("lnast_dfg"), lginp_cnt(1), lgout_cnt(0)
   {
     setup_lnast_to_lgraph_primitive_type_mapping();
   };

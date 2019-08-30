@@ -59,7 +59,18 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
   LGBench b("inou.lnast_dfg.do_tolg");
   I(!opack.files.empty());
   I(!opack.path.empty());
-  LGraph *dfg = LGraph::create(opack.path, opack.files, "inou_lnast_dfg");
+  auto pos = opack.files.rfind('/');
+  std::string basename;
+  if (pos != std::string::npos) {
+    basename = opack.files.substr(pos+1);
+  } else {
+    basename = opack.files;
+  }
+  auto pos2 = basename.rfind('.');
+  if (pos2 != std::string::npos)
+    basename = basename.substr(0,pos2);
+
+  LGraph *dfg = LGraph::create(opack.path, basename, opack.files);
 
   /*
   for (const auto &it: lnast->depth_preorder(lnast->get_root())) {
@@ -183,10 +194,10 @@ Node_pin Inou_lnast_dfg::setup_node_operand(LGraph *dfg, const Tree_index &ast_i
     return name2dpin[name];
 
   if (name.at(0) == '%') {
-    //node_dpin = dfg->add_graph_output(name.substr(1), lgout_cnt++, 1); //ask Jose
-    node_dpin = dfg->add_graph_output(name.substr(1), 100, 1);
+    // FIXME: tuples have possition, the possition for $/% tuples is the verilog position
+    node_dpin = dfg->add_graph_output(name.substr(1),Port_invalid, 1); // Port_invalid pos, means I do not care about position
   } else if (name.at(0) == '$') {
-    node_dpin = dfg->add_graph_input(name.substr(1), lginp_cnt++, 1);
+    node_dpin = dfg->add_graph_input(name.substr(1), Port_invalid, 1);
   } else if (name.at(0) == '@') {
     node_dpin = dfg->create_node(FFlop_Op).setup_driver_pin();
   } else {

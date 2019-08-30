@@ -614,7 +614,7 @@ static void process_assigns(RTLIL::Module *module, LGraph *g) {
             I(dpin.get_bits());
             I(wire2pin[lhs_wire].get_bits() == dpin.get_bits());
             auto dpin2 = wire2pin[lhs_wire];
-            I(dpin==wire2pin[lhs_wire]); // "WARNING: unclear code FIXME\n";
+            I(dpin==dpin2);
             //auto spin = wire2pin[lhs_wire];
             //assert(false);// FIXME: find test case to debug/fix this
             //g->add_edge(dpin, spin);

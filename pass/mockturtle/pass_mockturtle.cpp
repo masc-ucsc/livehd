@@ -64,37 +64,38 @@ void Pass_mockturtle::do_work(LGraph *g) {
 
 bool Pass_mockturtle::lg_partition(LGraph *g) {
   unsigned int new_group_id = 0;
+
   for(const auto node : g->forward()) {
+    if (node2gid.find(node.get_compact()) != node2gid.end())
+      continue;
+    if (!eligible_cell_op(node))
+      continue;
+
     fmt::print("Node identifier:{}\n", node.debug_name());
-    if (node2gid.find(node.get_compact()) == node2gid.end() && eligible_cell_op(node)) {
-      new_group_id++;
-      dfs_populate_gid(node, new_group_id);
+    int propagate_id = -1;
+    for(const auto &in_edge : node.inp_edges()) {
+      auto peer_driver_node = in_edge.driver.get_node();
+      if (!eligible_cell_op(peer_driver_node))
+        continue;
+
+      auto it = node2gid.find(peer_driver_node.get_compact());
+      if (it != node2gid.end()) {
+        GI(propagate_id>=0, it->second == propagate_id);
+        propagate_id = it->second;
+#ifndef NDEBUG
+        break;  // First is enough for non-debug
+#endif
+      }
     }
+    if (propagate_id<0)
+      propagate_id = new_group_id++;
+
+    node2gid[node.get_compact()] = propagate_id;
   }
+
   return !node2gid.empty();
 }
 
-void Pass_mockturtle::dfs_populate_gid(Node node, const unsigned int group_id) {
-  if (node2gid.find(node.get_compact()) != node2gid.end()) {
-    I(node2gid[node.get_compact()] == group_id);
-    return;
-  }
-  I(node2gid.find(node.get_compact()) == node2gid.end());
-  node2gid[node.get_compact()] = group_id;
-
-  for(const auto &in_edge : node.inp_edges()) {
-    auto peer_driver_node = in_edge.driver.get_node();
-    if (eligible_cell_op(peer_driver_node)) {
-      dfs_populate_gid(peer_driver_node, group_id);
-    }
-  }
-  for(const auto &out_edge : node.out_edges()) {
-    auto peer_sink_node = out_edge.sink.get_node();
-    if (eligible_cell_op(peer_sink_node)) {
-      dfs_populate_gid(peer_sink_node, group_id);
-    }
-  }
-}
 
 template<typename sig_type, typename ntk_type>
 void Pass_mockturtle::setup_input_signals(const unsigned int    &group_id,

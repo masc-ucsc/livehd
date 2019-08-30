@@ -174,6 +174,7 @@ public:
   }
 
   Port_ID map_graph_pos(std::string_view name, Port_ID graph_pos) {
+    I(graph_pos>0); // 0 possition is also not used (to catch bugs)
     I(has_pin(name));
     I(graph_pos != Port_invalid);
 
