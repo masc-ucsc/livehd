@@ -4,6 +4,7 @@ load("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
+
 #git_repository(
     #name = "bazel_skylib",
     #remote = "https://github.com/bazelbuild/bazel-skylib.git",
@@ -45,10 +46,20 @@ new_git_repository(
     remote = "https://github.com/kainjow/Mustache.git",
     #strip_prefix = "kernel",
 )
+# Needed for bazel abseil package
+http_archive(
+    name = "rules_cc",
+    sha256 = "67412176974bfce3f4cf8bdaff39784a72ed709fc58def599d1f68710b58d68b",
+    strip_prefix = "rules_cc-b7fe9697c0c76ab2fd431a891dbb9a6a32ed7c3e",
+    urls = [
+        "https://mirror.bazel.build/github.com/bazelbuild/rules_cc/archive/b7fe9697c0c76ab2fd431a891dbb9a6a32ed7c3e.zip",
+        "https://github.com/bazelbuild/rules_cc/archive/b7fe9697c0c76ab2fd431a891dbb9a6a32ed7c3e.zip",
+        ],
+    )
 git_repository(
     name = "com_google_absl",
     #build_file = "BUILD.abseil", # relative to external path
-    commit = "6cc6ac44e065b9e8975fadfd6ccb99cbcf89aac4", # April 6 2019
+    commit = "a0d1e098c2f99694fa399b175a7ccf920762030e", # August 27 2019 6cc6ac44e065b9e8975fadfd6ccb99cbcf89aac4", # April 6 2019
     remote = "https://github.com/abseil/abseil-cpp.git",
 )
 new_git_repository(
