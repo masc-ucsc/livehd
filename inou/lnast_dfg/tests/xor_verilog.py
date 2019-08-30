@@ -1,9 +1,9 @@
 def main():
     import subprocess
-    nums = [1, 10, 100, 1000, 10000, 100000, 1000000]
+    nums = [1, 10, 100, 1000, 10000, 100000]
     for num in nums:
       f = open("xor_" + str(num) + ".v", "w+")
-  #Heading
+
       f.write("module xor_" + str(num) + "(\n")
       f.write("    input a,\n")
       f.write("    input b,\n")

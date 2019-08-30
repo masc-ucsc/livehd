@@ -1,10 +1,9 @@
 def main():
     import subprocess
-    nums = [1, 10, 100, 1000, 10000, 1000000]
+    nums = [1, 2, 10, 100, 1000, 10000, 100000]
     for num in nums:
       f = open("xor_" + str(num) + ".prp", "w+")
   
-  #Heading
       for i in range(num):
           if num == 1:
               f.write("    %s = $a ^ $b\n")
