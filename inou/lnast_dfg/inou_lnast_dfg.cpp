@@ -116,13 +116,12 @@ void Inou_lnast_dfg::process_ast_statements(LGraph *dfg, const std::vector<Tree_
 
 void  Inou_lnast_dfg::process_ast_pure_assign_op (LGraph *dfg, const Tree_index &lnast_op_idx) {
   fmt::print("purse_assign\n");
-  const Node_pin  opr    = setup_node_operator_and_target(dfg, lnast_op_idx);
+  const Node_pin  opr    = setup_node_pure_assign_and_target(dfg, lnast_op_idx);
   const Node_pin  opd1   = setup_node_operand(dfg, lnast->get_children(lnast_op_idx)[1]);
   if(opr.is_graph_output()){
     dfg->add_edge(opd1, opr, 1);
   } else {
-    dfg->add_edge(opd1, opr.get_node().setup_sink_pin(), 1); //maybe sink_pin 1, try and error
-  }
+    dfg->add_edge(opd1, opr.get_node().setup_sink_pin(0), 1);   }
 }
 
 void  Inou_lnast_dfg::process_ast_binary_op (LGraph *dfg, const Tree_index &lnast_op_idx) {
@@ -153,6 +152,17 @@ Node_pin Inou_lnast_dfg::setup_node_operator_and_target (LGraph *dfg, const Tree
   return node_dpin;
 }
 
+Node_pin Inou_lnast_dfg::setup_node_pure_assign_and_target (LGraph *dfg, const Tree_index &lnast_op_idx) {
+  const auto eldest_child = lnast->get_children(lnast_op_idx)[0];
+  const auto name         = lnast->get_data(eldest_child).token.get_text(memblock);
+  if (name.at(0) == '%')
+    return setup_node_operand(dfg, eldest_child);
+
+  //maybe driver_pin 1, try and error
+  const auto node_dpin    = dfg->create_node(Or_Op, 1).setup_driver_pin(1);
+  name2dpin[name] = node_dpin;
+  return node_dpin;
+}
 
 //note: for operand, except the new io and reg, the node and dpin should already be in the table as the operand comes from existing operator output
 Node_pin Inou_lnast_dfg::setup_node_operand(LGraph *dfg, const Tree_index &ast_idx){

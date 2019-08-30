@@ -87,6 +87,7 @@ private:
 
 
   Node_pin     setup_node_operator_and_target (LGraph *dfg, const Tree_index &ast_op_idx);
+  Node_pin     setup_node_pure_assign_and_target (LGraph *dfg, const Tree_index &ast_op_idx);
   Node_pin     setup_node_operand  (LGraph *dfg, const Tree_index &ast_idx);
   Node_Type_Op decode_lnast_op    (const Tree_index &ast_op_idx);
   void         setup_lnast_to_lgraph_primitive_type_mapping();
