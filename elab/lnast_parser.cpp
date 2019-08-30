@@ -297,7 +297,7 @@ void Lnast_parser::process_label_op(const Tree_index& tree_idx_label, const Toke
 }
 
 Scope_id Lnast_parser::process_scope() {
-  return (uint8_t)std::stoi(scan_text());
+  return (uint32_t)std::stoi(scan_text());
 }
 
 Lnast_ntype_id  Lnast_parser::operand_analysis() {

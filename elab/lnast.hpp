@@ -4,7 +4,7 @@
 #include "elab_scanner.hpp"
 #include "tree.hpp"
 
-using Scope_id            = uint8_t;
+using Scope_id            = uint32_t;
 using Rename_table        = absl::flat_hash_map<std::string_view, u_int8_t >;
 using Lnast_ntype_id      = uint8_t;
 using Lnast_index         = Tree_index;

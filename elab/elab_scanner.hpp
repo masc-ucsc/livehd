@@ -107,7 +107,8 @@ public:
   Token_id tok;  // Token (identifier, if, while...)
   uint32_t pos;  // Position in buffer
   uint32_t line; // line of code
-  uint16_t len;  // length in buffer
+  //uint16_t len;  // length in buffer
+  uint32_t len;  // length in buffer
 
   std::string_view get_text(std::string_view buffer) const {
     I(buffer.size() > (pos + len));

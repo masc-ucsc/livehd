@@ -3,7 +3,7 @@
 #include "lnast.hpp"
 
 using Lnast_ntype_id = uint8_t;
-using Scope_id       = uint8_t;
+using Scope_id       = uint32_t;
 
 static inline constexpr int   CFG_KNUM1_POS            =  1;
 static inline constexpr int   CFG_KNUM2_POS            =  2;
@@ -19,7 +19,7 @@ class Lnast_parser : public Elab_scanner {
 public:
   Lnast_parser() : line_num(0), line_tkcnt(0), knum1(0), knum2(0) { setup_ntype_str_mapping();};
   const std::unique_ptr<Lnast>&  get_ast(){return lnast;};
-  std::string                                   ntype_dbg(Lnast_ntype_id ntype);
+  std::string                    ntype_dbg(Lnast_ntype_id ntype);
 
 protected:
   void       elaborate() override;
