@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
 def main():
-    nums = [1, 10, 100, 1000, 10000, 100000]
+    nums = [1, 10, 100, 1000, 10000, 100000, 1000000]
     for num in nums:
       f = open("xor_" + str(num) + ".v", "w+")
 
