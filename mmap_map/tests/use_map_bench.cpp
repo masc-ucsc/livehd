@@ -153,7 +153,7 @@ int main(int argc, char **argv) {
     run_random_vector_map = true;
   }
 
-  for(int i=1000;i<10'000'001;i*=1000) {
+  for(int i=1000;i<10000001;i*=10) {
     if (run_random_std_map)
       random_std_map(i);
 
@@ -171,6 +171,7 @@ int main(int argc, char **argv) {
 
     if (run_random_vector_map)
       random_vector_map(i);
+    fmt::print("\n");
   }
 
   return 0;

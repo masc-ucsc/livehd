@@ -18,7 +18,7 @@
 using Rng = sfc64;
 
 #define NITERS 100
-#define NIT 2
+#define NIT 1
 
 void use_std_vector(int max) {
   Rng rng(123);
@@ -178,7 +178,7 @@ int main(int argc, char **argv) {
     run_use_dense      = true;
   }
 
-  for(int i=10000;i<100'001;i*=100) {
+  for(int i=1000;i<10000001 ;i*=10) {
     if (run_use_std_vector)
       use_std_vector(i);
 
@@ -193,6 +193,7 @@ int main(int argc, char **argv) {
 
     if (run_use_dense)
       use_dense(i);
+    fmt::print("\n");
   }
 
   return 0;
