@@ -1,9 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include "bm.h"
-#include "bmsparsevec.h"
-
 #include "rapidjson/document.h"
 #include "rapidjson/error/en.h"
 #include "rapidjson/filereadstream.h"

@@ -216,7 +216,7 @@ protected:
     return 0;
   }
 
-  bool is_sub(Index_ID nid) const {
+  bool is_sub(Index_ID nid) const { // Very common function (shoud be fast)
     I(nid < node_type_table.size());
     I(node_internal[nid].is_node_state());
     I(node_internal[nid].is_master_root());
@@ -268,7 +268,7 @@ public:
 
   static bool    exists(std::string_view path, std::string_view name);
   static LGraph *create(std::string_view path, std::string_view name, std::string_view source);
-  static LGraph *open(std::string_view path, int lgid);
+  static LGraph *open(std::string_view path, Lg_type_id lgid);
   static LGraph *open(std::string_view path, std::string_view name);
   static void    rename(std::string_view path, std::string_view orig, std::string_view dest);
 

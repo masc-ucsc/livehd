@@ -94,8 +94,11 @@ public:
   Edge_raw_iterator_base(bool _visit_sub, Frontier_type *_frontier, Node_set_type *_pending, Index_ID *_hardcoded_nid, Node_set_type *_global_visited)
       : visit_sub(_visit_sub), frontier(_frontier), pending(_pending), hardcoded_nid(_hardcoded_nid), global_visited(_global_visited) { }
 
+  bool try_insert_pending(const Node &node, const Node::Compact &compact);
+
   virtual void    set_current_node_as_visited() = 0;
   virtual void    propagate_io(const Node &node) = 0;
+  virtual void    insert_graph_start_points(LGraph *lg, Hierarchy_index down_hidx) = 0;
 
   Node operator*() const { return current_node; }
   // FIXME: Try this instead const &Node operator*() const { return current_node; }
@@ -103,26 +106,26 @@ public:
   bool update_frontier();
 
   void set_next_node_to_visit() {
-    if (unlikely(pending->empty())) {
-      if (!update_frontier()) {
-        current_node.invalidate(current_node.get_top_lgraph());
-        I(current_node.is_invalid());
-        return;
-      }
+    if (unlikely(!pending->empty())) {
+      auto it = pending->begin();
+      current_node.update(it->hidx, it->nid);
+      I(!current_node.is_invalid());
+      pending->erase(it);
+      return;
     }
 
-    I(!pending->empty());
-    auto it = pending->begin();
-    current_node.update(it->hidx, it->nid);
-    I(!current_node.is_invalid());
-    pending->erase(it);
+    I(pending->empty());
+    if (!update_frontier()) {
+      current_node.invalidate(current_node.get_top_lgraph());
+      I(current_node.is_invalid());
+    }
   }
 };
 
 class CForward_edge_iterator : public Edge_raw_iterator_base {
 protected:
 
-  void insert_forward_graph_start_points(LGraph *lg, Hierarchy_index down_hidx);
+  void insert_graph_start_points(LGraph *lg, Hierarchy_index down_hidx);
   void propagate_io(const Node &node);
 
 public:
@@ -156,7 +159,7 @@ public:
 
 class CBackward_edge_iterator : public Edge_raw_iterator_base {
 private:
-  void insert_backward_graph_start_points(LGraph *lg, Hierarchy_index down_hidx);
+  void insert_graph_start_points(LGraph *lg, Hierarchy_index down_hidx);
   void propagate_io(const Node &node);
 
 public:

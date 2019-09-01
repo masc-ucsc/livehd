@@ -198,6 +198,16 @@ Lg_type_id Node::get_type_sub() const {
   return current_g->get_type_sub(nid);
 }
 
+LGraph *Node::get_type_sub_lgraph() const {
+  auto lgid = current_g->get_type_sub(nid);
+  return LGraph::open(top_g->get_path(), lgid);
+}
+
+bool Node::is_type_sub_empty() const {
+  auto sub_lgid = current_g->get_type_sub(nid);
+  return top_g->get_library().is_empty(sub_lgid);
+}
+
 void Node::set_type_lut(Lut_type_id lutid) {
   current_g->set_type_lut(nid, lutid);
 }

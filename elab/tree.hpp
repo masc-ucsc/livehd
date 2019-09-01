@@ -183,6 +183,16 @@ public:
     return pointers_stack[index.level][index.pos].younger_child < 0;
   }
 
+  bool has_single_child(const Tree_index &index) const {
+    I(index.level< (int)pointers_stack.size());
+    I(index.pos  < (int)pointers_stack[index.level].size());
+
+    bool valid  = pointers_stack[index.level][index.pos].younger_child >=0 ;
+    bool single = pointers_stack[index.level][index.pos].younger_child == pointers_stack[index.level][index.pos].eldest_child;
+
+    return valid && single;
+  }
+
   bool is_child_of(const Tree_index &child, const Tree_index &parent) const {
     I(child.level< (int)pointers_stack.size());
     I(child.pos  < (int)pointers_stack[child.level].size());
@@ -199,6 +209,13 @@ public:
     }
 
     return parent.level == level && parent.pos == pos;
+  }
+
+  void dump() const {
+    for(const auto &index:depth_preorder()) {
+      std::string indent(index.level, ' ');
+      printf("%s l:%d p:%d\n", indent.c_str(), index.level, index.pos);
+    }
   }
 
 };
@@ -504,7 +521,7 @@ const std::vector<Tree_index> Tree<X>::get_children(const Tree_index &top) const
 
   // FIXME: build iterator
 
-  I(top.level < pointers_stack.size());
+  I((size_t)top.level < pointers_stack.size());
   if (top.level.value == (pointers_stack.size())) return children;
 
   for (size_t j = 0; j < pointers_stack[top.level + 1].size(); j++) {

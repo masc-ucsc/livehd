@@ -5,8 +5,7 @@ cc_library(
     hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
     includes = ["."],
-    deps = ["@bm//:headers",
-            "@rapidjson//:headers",
+    deps = ["@rapidjson//:headers",
             "@iassert//:iassert",
             "//eprp:eprp",
             "//mmap_map:headers",
@@ -15,12 +14,21 @@ cc_library(
             ],
 )
 
+cc_library(
+    name = "tree_lgdb_test",
+    hdrs = glob(["tests/tree_lgdb_setup.hpp"]),
+    visibility = ["//visibility:public"],
+    includes = ["."],
+    deps = [":core",
+            "@gtest//:gtest_main",
+            ],
+)
+
 cc_test(
-    name = "traversal_hierarchy_test",
-    srcs = ["tests/traversal_hierarchy_test.cpp"],
+    name = "hierarchy_test",
+    srcs = ["tests/hierarchy_test.cpp"],
     deps = [
-        "@gtest//:gtest_main",
-        ":core",
+        ":tree_lgdb_test",
     ],
 )
 

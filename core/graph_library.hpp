@@ -10,8 +10,8 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/types/span.h"
-#include "bm.h"
 
 #include "lgraphbase.hpp"
 #include "tech_library.hpp"
@@ -25,11 +25,13 @@ class LGraph;
 class Graph_library {
 protected:
   struct Graph_attributes {
+    LGraph     *lg;
     uint64_t    nentries; // TODO: deprecate with the new attributes (once all the old attributes are gone)
     std::string source;   // File were this module came from. If file updated (all the associated lgraphs must be deleted). If empty, it ies not present (blackbox)
     Lg_type_id  version;  // In which sequence order were the graphs last modified
     Graph_attributes() { expunge(); }
     void expunge() {
+      lg       = 0;
       version  = 0;
       nentries = 0;
       source   = "-";
@@ -48,7 +50,7 @@ protected:
   using Global_instances   = absl::flat_hash_map<std::string, Graph_library *>;
   using Global_name2lgraph = absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, LGraph *>>;
   using Name2id            = absl::flat_hash_map<std::string, Lg_type_id::type>;
-  using Recycled_id        = bm::bvector<>; // TODO: get rid of bm::bvector
+  using Recycled_id        = absl::flat_hash_set<uint64_t>;
 
   Lg_type_id                    max_next_version;
   const std::string             path;
@@ -85,7 +87,9 @@ public:
 
   static bool    exists(std::string_view path, std::string_view name);
   static LGraph *try_find_lgraph(std::string_view path, std::string_view name);
+  static LGraph *try_find_lgraph(std::string_view path, Lg_type_id lgid);
   LGraph        *try_find_lgraph(std::string_view name);
+  LGraph        *try_find_lgraph(Lg_type_id lgid);
 
   Sub_node &reset_sub(std::string_view name, std::string_view source);
   Sub_node &setup_sub(std::string_view name, std::string_view source);
@@ -151,6 +155,7 @@ public:
   }
 
   bool has_name(std::string_view name) const { return name2id.find(name) != name2id.end(); }
+  bool is_empty(Lg_type_id lgid) const;
 
   // TODO: Change to Graph_library &instance...
   static Graph_library *instance(std::string_view path);

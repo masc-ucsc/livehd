@@ -43,7 +43,7 @@ public:
     auto c13  = ast.add_younger_sibling(c12, "child1.3");
     (void)c13;
 
-    ast.each_bottom_first_fast([this](const Tree_index &parent, const Tree_index &self, std::string str) {
+    ast.each_bottom_up_fast([this](const Tree_index &parent, const Tree_index &self, std::string str) {
       while (static_cast<size_t>(self.level)>=ast_sorted_verification.size())
         ast_sorted_verification.emplace_back();
       ast_sorted_verification[self.level].emplace_back(str);
@@ -82,7 +82,7 @@ TEST_F(Elab_test, Traverse_bottom_first_check_on_ast) {
 
   std::vector<std::vector<std::string>> ast2_sorted_verification;
 
-  ast.each_bottom_first_fast([this,&ast2_sorted_verification](const Tree_index &parent, const Tree_index &self, const std::string &str) {
+  ast.each_bottom_up_fast([this,&ast2_sorted_verification](const Tree_index &parent, const Tree_index &self, const std::string &str) {
       while (static_cast<size_t>(self.level)>=ast2_sorted_verification.size())
         ast2_sorted_verification.emplace_back();
       ast2_sorted_verification[self.level].emplace_back(str);
@@ -121,7 +121,7 @@ TEST_F(Elab_test, Create_with_lazy_check) {
   std::cout << "-----------LAZY\n";
   std::vector<std::vector<std::string>> ast2_sorted_verification;
 
-  ast2.each_bottom_first_fast([&ast2,&ast2_sorted_verification](const Tree_index &parent, const Tree_index &self, std::string str) {
+  ast2.each_bottom_up_fast([&ast2,&ast2_sorted_verification](const Tree_index &parent, const Tree_index &self, std::string str) {
       while (static_cast<size_t>(self.level)>=ast2_sorted_verification.size())
         ast2_sorted_verification.emplace_back();
       ast2_sorted_verification[self.level].emplace_back(str);

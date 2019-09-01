@@ -38,6 +38,15 @@ public:
 
 static Cleanup_graph_library private_instance;
 
+bool Graph_library::is_empty(Lg_type_id lgid) const {
+  I(attributes.size() > lgid);
+  LGraph *lg = attributes[lgid].lg;
+  if (lg)
+    return lg->empty();
+
+  return attributes[lgid].nentries<=3;
+}
+
 Graph_library *Graph_library::instance(std::string_view path) {
 
   auto it1 = Graph_library::global_instances.find(path);
@@ -120,6 +129,26 @@ LGraph *Graph_library::try_find_lgraph(std::string_view name) {
   }
 
   return nullptr;
+}
+
+LGraph *Graph_library::try_find_lgraph(Lg_type_id lgid) {
+  if (lgid>=attributes.size())
+    return nullptr;
+
+  LGraph *lg = attributes[lgid].lg;
+
+#ifndef NDEBUG
+  // Check consistency across
+  auto name = get_name(lgid);
+
+  if (global_name2lgraph[path].find(name) != global_name2lgraph[path].end()) {
+    I(lg == global_name2lgraph[path][name]);
+  } else {
+    I(lg==nullptr);
+  }
+#endif
+
+  return lg;
 }
 
 Sub_node &Graph_library::reset_sub(std::string_view name, std::string_view source) {
@@ -306,11 +335,11 @@ void Graph_library::reload() {
 
       sub_nodes[id].from_json(lg_entry);
 
-      // NOTE: must use attribute to keep the string in memory
+      // NOTE: must use attributes to keep the string in memory
       name2id[sub_nodes[id].get_name()] = id;
       I(sub_nodes[id].get_lgid() == id); // for consistency
     } else {
-      recycled_id.set_bit(id);
+      recycled_id.insert(id);
     }
   }
 
@@ -322,42 +351,33 @@ Graph_library::Graph_library(std::string_view _path) : path(_path), library_file
 }
 
 Lg_type_id Graph_library::try_get_recycled_id() {
-  if (recycled_id.none()) return 0;
+  if (recycled_id.empty()) return 0;
 
-  Lg_type_id lgid = recycled_id.get_first();
+  auto it = recycled_id.begin();
+  Lg_type_id lgid = *it;
   I(lgid <= attributes.size());
   I(lgid <= sub_nodes.size());
-  recycled_id.clear(lgid);
+  recycled_id.erase(it);
 
   return lgid;
 }
 
 void Graph_library::recycle_id(Lg_type_id lgid) {
-  if (lgid < attributes.size()) {
-    recycled_id.set_bit(lgid);
-    return;
-  }
-
-  size_t end_pos = attributes.size();
-  while (attributes.back().version == 0) {
-    attributes.pop_back();
-    sub_nodes.pop_back();
-    I(attributes.size() == sub_nodes.size());
-    if (attributes.empty()) break;
-  }
-
-  recycled_id.set_range(attributes.size(), end_pos, false);
+  recycled_id.insert(lgid);
 }
 
 void Graph_library::expunge(std::string_view name) {
-  auto it = global_name2lgraph[path].find(name);
-  if (it != global_name2lgraph[path].end()) {
-    global_name2lgraph[path].erase(it);
-  }
 
   auto it2 = name2id.find(name);
-  if (it2 == name2id.end())
-    return; // already gone
+  if (it2 == name2id.end()) {
+    I(global_name2lgraph[path].find(name) == global_name2lgraph[path].end());
+    return;  // already gone
+  }
+
+  auto it3 = global_name2lgraph[path].find(name);
+  if (it3 != global_name2lgraph[path].end()) {
+    global_name2lgraph[path].erase(it3);
+  }
 
   auto id = it2->second;
 
@@ -457,17 +477,20 @@ Lg_type_id Graph_library::copy_lgraph(std::string_view name, std::string_view ne
 }
 
 Lg_type_id Graph_library::register_lgraph(std::string_view name, std::string_view source, LGraph *lg) {
-
-  LGraph *lg2=nullptr;
-  if(global_name2lgraph[path].find(name) != global_name2lgraph[path].end()) {
-    lg2 = global_name2lgraph[path][name];
-    I(lg2);
+  if (global_name2lgraph[path].find(name) != global_name2lgraph[path].end()) {
+    I(global_name2lgraph[path][name] == lg);
+    I(attributes.size() > lg->get_lgid());
+    I(attributes[lg->get_lgid()].lg == lg);
+    return lg->get_lgid();
   }
+
   GI(global_name2lgraph[path].find(name) != global_name2lgraph[path].end(), global_name2lgraph[path][name] == lg);
+  Lg_type_id id = reset_id(name, source);
 
   global_name2lgraph[path][name] = lg;
 
-  Lg_type_id id = reset_id(name, source);
+  I(attributes[id].lg == nullptr);
+  attributes[id].lg = lg;
 
 #ifndef NDEBUG
   const auto &it = name2id.find(name);
@@ -485,6 +508,7 @@ void Graph_library::unregister(std::string_view name, Lg_type_id lgid, LGraph *l
     I(it != global_name2lgraph[path].end());
     I(it->second == lg);
     global_name2lgraph[path].erase(it);
+    attributes[lgid].lg = 0;
   }else{
     I(it == global_name2lgraph[path].end());
   }

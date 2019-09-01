@@ -78,22 +78,23 @@ LGraph *LGraph::clone_skeleton(std::string_view extended_name) {
   return new_lg;
 }
 
-LGraph *LGraph::open(std::string_view path, int lgid) {
-  std::string_view name = Graph_library::instance(path)->get_name(lgid);
+LGraph *LGraph::open(std::string_view path, Lg_type_id lgid) {
+  auto *lib = Graph_library::instance(path);
+  if (unlikely(lib == nullptr))
+    return nullptr;
 
-  return open(path, name);
-}
+  LGraph *lg = lib->try_find_lgraph(path, lgid);
+  if (likely(lg!=nullptr)) {
+    return lg;
+  }
 
-void LGraph::rename(std::string_view path, std::string_view orig, std::string_view dest) {
-  bool valid = Graph_library::instance(path)->rename_name(orig, dest);
-  if (valid)
-    Pass::warn("lgraph::rename find original graph {} in path {}", orig, path);
-  else
-    Pass::error("cannot find original graph {} in path {}", orig, path);
+  auto name   = lib->get_name(lgid);
+  auto source = lib->get_source(lgid);
+
+  return new LGraph(path, name, source, false);
 }
 
 LGraph *LGraph::open(std::string_view path, std::string_view name) {
-
   LGraph *lg = Graph_library::try_find_lgraph(path, name);
   if (lg) {
     return lg;
@@ -103,12 +104,20 @@ LGraph *LGraph::open(std::string_view path, std::string_view name) {
   if(lib == nullptr)
     return nullptr;
 
-  if(!lib->has_name(name))
+  if(unlikely(!lib->has_name(name)))
     return nullptr;
 
   auto source = lib->get_source(name);
 
   return new LGraph(path, name, source, false);
+}
+
+void LGraph::rename(std::string_view path, std::string_view orig, std::string_view dest) {
+  bool valid = Graph_library::instance(path)->rename_name(orig, dest);
+  if (valid)
+    Pass::warn("lgraph::rename find original graph {} in path {}", orig, path);
+  else
+    Pass::error("cannot find original graph {} in path {}", orig, path);
 }
 
 void LGraph::reload() {
