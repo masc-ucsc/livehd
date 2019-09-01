@@ -58,7 +58,7 @@ protected:
 
     munmap(it->first, it->second.size);
 
-    std::cerr << "mmap_gc_pool del name:" << it->second.name << " fd:" << it->second.fd << " base:" << it->first << std::endl;
+    //std::cerr << "mmap_gc_pool del name:" << it->second.name << " fd:" << it->second.fd << " base:" << it->first << std::endl;
     mmap_gc_pool.erase(it);
   }
 
@@ -126,7 +126,7 @@ protected:
   }
 
 public:
-  static int delete_file(void *base) {
+  static void delete_file(void *base) {
     auto it = mmap_gc_pool.find(base);
     assert(it!=mmap_gc_pool.end());
     assert(it->second.fd>=0);
@@ -144,7 +144,7 @@ public:
     for(const auto &e:mmap_gc_pool) {
       if(e.second.fd <0)
         continue;
-      assert(e.second.name != name); // No name duplicate
+      assert(e.second.name != name); // No name duplicate (may be OK for multithreaded access)
     }
 #endif
 
@@ -194,7 +194,7 @@ public:
     entry.gc_function = gc_function;
 
     assert(mmap_gc_pool.find(base) == mmap_gc_pool.end());
-    std::cerr << "mmap_gc_pool add name:" << name << " fd:" << fd << " base:" << base << std::endl;
+    //std::cerr << "mmap_gc_pool add name:" << name << " fd:" << fd << " base:" << base << std::endl;
     mmap_gc_pool[base] = entry;
 
     return {base, final_size};
@@ -228,10 +228,10 @@ public:
     auto entry = it->second;
     entry.size = new_size;
 
-    std::cerr << "mmap_gc_pool del name:" << entry.name << " fd:" << entry.fd << " base:" << mmap_old_base << std::endl;
+    //std::cerr << "mmap_gc_pool del name:" << entry.name << " fd:" << entry.fd << " base:" << mmap_old_base << std::endl;
     mmap_gc_pool.erase(it); // old mmap_old_base
 
-    std::cerr << "mmap_gc_pool add name:" << entry.name << " fd:" << entry.fd << " base:" << base << std::endl;
+    //std::cerr << "mmap_gc_pool add name:" << entry.name << " fd:" << entry.fd << " base:" << base << std::endl;
     mmap_gc_pool[base] = entry;
 
     return base;

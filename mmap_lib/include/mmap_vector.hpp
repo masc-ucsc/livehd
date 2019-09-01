@@ -195,6 +195,13 @@ public:
       , mmap_fd(-1) {
   }
 
+  ~vector() {
+    if (mmap_base) {
+      mmap_gc::recycle(mmap_base);
+      assert(mmap_base == nullptr);
+    }
+  }
+
   // Allocates space, but it does not touch contents
   void reserve(size_t n) const {
     reserve_int(n);
