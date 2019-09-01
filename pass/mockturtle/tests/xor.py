@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
 def main():
-    nums = [1, 10, 100, 1000, 10000, 100000, 1000000]
+    nums = [1, 10, 100, 1000, 5000, 10000, 25000, 50000, 75000, 100000, 250000, 500000, 750000, 1000000]
     for num in nums:
       f = open("xor_" + str(num) + ".v", "w+")
 
@@ -18,9 +18,9 @@ def main():
           if i == 0:
               f.write("    wire t0 = a ^ b;\n")
           elif i == num-1:
-              f.write("    wire z = t%d ^ t%d;\n" % (i-1, i-1))
+              f.write("    wire z = t%d ^ a;\n" % (i-1))
           else:
-              f.write("    wire t%d = t%d ^ t%d;\n" % (i, i-1, i-1))
+              f.write("    wire t%d = t%d ^ a;\n" % (i, i-1))
       f.write("\n\nendmodule")
       f.close()
 

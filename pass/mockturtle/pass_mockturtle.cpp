@@ -829,7 +829,7 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT(LGraph *g) {
 
     mockturtle::mig_network cleaned_mt_ntk = cleanup_dangling(mt_ntk);
     //fmt::print("Mockturtle network (gid:{}):\n", group_id);
-    mockturtle::write_bench(mt_ntk,std::cout);
+    //mockturtle::write_bench(mt_ntk,std::cout);
 
     //fmt::print("\nConverting mockturtle network (gid:{}) to KLUT network...\n", group_id);
     mockturtle::mapping_view<mockturtle::mig_network, true> mapped_mig{cleaned_mt_ntk};//todo:might not suit for xag
@@ -839,7 +839,7 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT(LGraph *g) {
     mockturtle::klut_network klut_ntk =*mockturtle::collapse_mapped_network<mockturtle::klut_network>(mapped_mig);
     //fmt::print("finished.\n");
     //fmt::print("KLUT network (gid:{}):\n", group_id);
-    mockturtle::write_bench(klut_ntk,std::cout);
+    //mockturtle::write_bench(klut_ntk,std::cout);
     //equivalence checking using miter
     //const auto miter = *mockturtle::miter<mockturtle::mig_network>(cleaned_mt_ntk, klut_ntk);
     gid2klut[group_id]=klut_ntk;
