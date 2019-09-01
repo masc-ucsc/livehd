@@ -627,34 +627,33 @@ private:
 		return s;
 	}
 
-	void gc_function(void *mmap_base_addr) const {
-    if (MMAP_LIB_UNLIKELY(mmap_base != mmap_base_addr)) {
-      // Triggers mmap for an older mmap
+  // gc_done can be called for mmap_base or mmap_txt_base
+	void gc_done(void *base) const {
+    if (mmap_base == base) {
+      if(mmap_fd >= 0 && empty()) {
+        unlink(mmap_name.c_str());
+      }
+
+      mmap_base = nullptr;
+      mmap_size = 0;
+      mmap_fd   = -1;
       return;
     }
 
-		bool is_empty = empty();
-
-    mmap_base = nullptr;
-    mmap_size = 0;
-
-		if(mmap_fd >= 0) {
-			close(mmap_fd);
-			mmap_fd = -1;
-		}
     if constexpr (using_sview) {
-      if (mmap_txt_fd >= 0) {
-        close(mmap_txt_fd);
-        mmap_txt_fd = -1;
+      if (mmap_txt_base == base) {
+        if (mmap_txt_fd>=0 && mmap_txt_base[0] == 0) {
+          unlink((mmap_name+"txt").c_str());
+        }
+
+        mmap_txt_base = nullptr;
+        mmap_txt_size = 0;
+        mmap_txt_fd   = -1;
+        return;
       }
     }
 
-		if (is_empty) {
-			unlink(mmap_name.c_str());
-      if constexpr (using_sview) {
-        unlink((mmap_name+"txt").c_str());
-      }
-		}
+    // WARNING: It may be neither for resize (old_mmap_base)
 	}
 
 	size_t calc_mmap_size(size_t nelems) const {
@@ -671,10 +670,11 @@ private:
     mmap_txt_size = size;
   }
 
-	std::tuple<uint64_t *, size_t> create_mmap(int fd, size_t size) const {
-    void *base;
+	std::tuple<uint64_t *, size_t> create_mmap(std::string name, int fd, size_t size) const {
+    auto gc_func = std::bind(&map<MaxLoadFactor100, Key, T, Hash>::gc_done, this, std::placeholders::_1);
 
-    std::tie(base, size) = mmap_gc::mmap(mmap_name, fd, size, std::bind(&map<MaxLoadFactor100, Key, T, Hash>::gc_function, this, std::placeholders::_1));
+    void *base = nullptr;
+    std::tie(base, size) = mmap_gc::mmap(name, fd, size, gc_func);
 
 		return std::make_tuple(reinterpret_cast<uint64_t *>(base),size);
 	}
@@ -682,15 +682,14 @@ private:
   void setup_mmap(size_t n_entries) const {
 
     if (mmap_name.empty()) {
-      mmap_fd     = -1;
-      if constexpr (using_sview) {
-        mmap_txt_fd = -1;
-      }
+      assert(mmap_fd == -1);
+      assert(mmap_txt_fd == -1);
       if (n_entries == 0)
         n_entries = InitialNumElements;
     }else{
       if (mmap_fd<0) {
         mmap_fd = mmap_gc::open(mmap_name);
+        assert(mmap_fd>=0);
       }
 
       if (n_entries==0) { // reload
@@ -706,14 +705,15 @@ private:
       if constexpr (using_sview) {
         if (mmap_txt_fd<0) {
           mmap_txt_fd = mmap_gc::open(mmap_name + "txt");
+          assert(mmap_txt_fd>=0);
         }
       }
     }
 
-    std::tie(mmap_base    , mmap_size    ) = create_mmap(mmap_fd, calc_mmap_size(n_entries));
+    std::tie(mmap_base    , mmap_size    ) = create_mmap(mmap_name, mmap_fd, calc_mmap_size(n_entries));
     if constexpr (using_sview) {
       if (mmap_txt_size==0) {
-        std::tie(mmap_txt_base, mmap_txt_size) = create_mmap(mmap_txt_fd, 8192);
+        std::tie(mmap_txt_base, mmap_txt_size) = create_mmap(mmap_name + "txt", mmap_txt_fd, 8192);
       }
     }
 
@@ -1007,7 +1007,8 @@ public:
 		}
 		if (empty()) {
       assert(mmap_base);
-      mmap_gc::garbage_collect(mmap_base, mmap_size);
+      mmap_gc::recycle(mmap_base);
+      assert(mmap_base==nullptr);
 			return;
 		}
 
@@ -1322,21 +1323,19 @@ private:
 		if (oldMaxElements >= numBuckets)
 			return; // done
 
-#if 1
-		close(mmap_fd);
-		unlink(mmap_name.c_str());
-#else
-		rename(mmap_name.c_str(), (mmap_name + "old").c_str()); // TODO: Check if delete works
-		const int     old_mmap_fd   = mmap_fd;
-#endif
+    if (mmap_fd >= 0) {
+      mmap_gc::delete_file(mmap_base);
+      mmap_fd = -1;
+    }
 
-		uint64_t     *old_mmap_base = mmap_base;
+    uint64_t     *old_mmap_base = mmap_base;
 		const size_t  old_mmap_size = mmap_size;
 
 		Node* const oldKeyVals        = mKeyVals;
 		uint8_t const* const oldInfo  = mInfo;
 
-    mmap_fd = -1;
+    assert(mmap_fd == -1);
+    mmap_base = nullptr;
 		setup_mmap(numBuckets);
 
 		assert(*mNumElements == 0);
@@ -1354,13 +1353,7 @@ private:
 		}
 
 		// don't destroy old data: put it into the pool instead
-    mmap_gc::garbage_collect(old_mmap_base, old_mmap_size);
-#if 0
-    // WARNING: Since we changed the mmap_base, the gc_function does not close fd and delete file
-		close(old_mmap_fd);
-
-		unlink((mmap_name + "old").c_str());
-#endif
+    mmap_gc::recycle(old_mmap_base);
 	}
 	size_t mask() const {
 		return *mMask;
@@ -1632,11 +1625,20 @@ private:
 	}
 
 	void destroy() {
-    if (mmap_base == nullptr)
-      return;
+    if (mmap_base) {
+      mmap_gc::recycle(mmap_base);
+      assert(mmap_base == nullptr);
+      assert(mmap_fd   == -1);
+    }
 
-    mmap_gc::garbage_collect(mmap_base, mmap_size);
-	}
+    if constexpr (using_sview) {
+      if (mmap_txt_base) {
+        mmap_gc::recycle(mmap_txt_base);
+        assert(mmap_txt_base == nullptr);
+        assert(mmap_txt_fd   == -1);
+      }
+    }
+  }
 
 	// members are sorted so no padding occurs
 	mutable Node *mKeyVals = nullptr;

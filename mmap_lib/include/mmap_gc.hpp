@@ -24,7 +24,8 @@ struct mmap_gc_entry {
   std::function<void(void *)> gc_function;
 };
 
-static inline absl::flat_hash_map<void *, mmap_gc_entry> mmap_gc_pool;
+using gc_pool_type=absl::flat_hash_map<void *, mmap_gc_entry>;
+static inline gc_pool_type mmap_gc_pool;
 static inline void *next_mmap=nullptr;
 
 class mmap_gc {
@@ -35,23 +36,45 @@ protected:
   static inline int n_max_mmaps = 256;
   static inline int n_max_fds   = 256;
 
+  static void recycle_int(gc_pool_type::iterator it) {
+#ifndef NDEBUG
+    static bool recursion_mode=false;
+    assert(!recursion_mode); // do not call recycle inside the gc_function
+    recursion_mode = true;
+#endif
+
+    it->second.gc_function(it->first);
+
+#ifndef NDEBUG
+    recursion_mode = false;
+#endif
+
+    if (it->second.fd >= 0) {
+      close(it->second.fd);
+      n_open_fds--;
+    }
+
+    n_open_mmaps--;
+
+    munmap(it->first, it->second.size);
+
+    std::cerr << "mmap_gc_pool del name:" << it->second.name << " fd:" << it->second.fd << " base:" << it->first << std::endl;
+    mmap_gc_pool.erase(it);
+  }
+
   static void try_collect_step() {
     auto it = mmap_gc_pool.find(next_mmap);
     if (it == mmap_gc_pool.end())
       it = mmap_gc_pool.begin();
     if (it == mmap_gc_pool.end())
       return;
-    if (it->second.fd >= 0)
-      n_open_fds--;
-
-    n_open_mmaps--;
     it->second.gc_function(it->first);
 
     auto it2 = it;
     ++it2;
     next_mmap = it2->first;
 
-    mmap_gc_pool.erase(it);
+    mmap_gc::recycle_int(it);
   }
 
   static void try_collect_fd() {
@@ -103,13 +126,25 @@ protected:
   }
 
 public:
+  static int delete_file(void *base) {
+    auto it = mmap_gc_pool.find(base);
+    assert(it!=mmap_gc_pool.end());
+    assert(it->second.fd>=0);
+    close(it->second.fd);
+    unlink(it->second.name.c_str());
+    it->second.fd = -1;
+  }
+
   // mmap_map.hpp:    mmap_fd     = mmap_gc::open(mmap_name);
+  //
   // mmap_map.hpp:    mmap_txt_fd = mmap_gc::open(mmap_name + "txt");
   // mmap_vector.hpp: mmap_fd     = mmap_gc::open(mmap_name);
   static int open(const std::string &name) {
 #ifndef NDEBUG
     for(const auto &e:mmap_gc_pool) {
-      assert(e.second.fd >=0 && e.second.name != name); // No name duplicate
+      if(e.second.fd <0)
+        continue;
+      assert(e.second.name != name); // No name duplicate
     }
 #endif
 
@@ -127,13 +162,15 @@ public:
 
     return -1;
   }
-  // mmap_map.hpp:    mmap_gc::garbage_collect(mmap_base, mmap_size);
-  // mmap_map.hpp:    mmap_gc::garbage_collect(old_mmap_base, old_mmap_size);
-  // mmap_map.hpp:    mmap_gc::garbage_collect(mmap_base, mmap_size);
-  // mmap_vector.hpp: mmap_gc::garbage_collect(mmap_base, mmap_size);
-  static void garbage_collect(void *base, size_t size) {
-    assert(false);
 
+  // mmap_map.hpp:    mmap_gc::recycle(mmap_base);
+  // mmap_vector.hpp: mmap_gc::recycle(mmap_base);
+  static void recycle(void *base) {
+    // Remove from gc
+    auto it = mmap_gc_pool.find(base);
+    assert(it!=mmap_gc_pool.end());
+
+    recycle_int(it);
   }
 
   // mmap_vector.hpp: std::tie(base, mmap_size) = mmap_gc::mmap(mmap_name, mmap_fd, mmap_size, std::bind(&vector<T>::gc_function, this, std::placeholders::_1));
@@ -157,17 +194,48 @@ public:
     entry.gc_function = gc_function;
 
     assert(mmap_gc_pool.find(base) == mmap_gc_pool.end());
+    std::cerr << "mmap_gc_pool add name:" << name << " fd:" << fd << " base:" << base << std::endl;
     mmap_gc_pool[base] = entry;
 
     return {base, final_size};
   }
+
   // mmap_vector.hpp: mmap_base     = reinterpret_cast<uint8_t *>(mmap_gc::remap(mmap_name, mmap_base, old_mmap_size, mmap_size));
   // mmap_map.hpp:    mmap_txt_base = reinterpret_cast<uint64_t *>(mmap_gc::remap(mmap_name, mmap_txt_base, mmap_txt_size, size));
-  static void *remap(std::string_view name, void *mmap_txt_base, size_t old_size, size_t new_size) {
-    assert(false);
+  static void *remap(std::string_view mmap_name, void *mmap_old_base, size_t old_size, size_t new_size) {
+    auto it = mmap_gc_pool.find(mmap_old_base);
+    assert(it!=mmap_gc_pool.end());
 
-    return nullptr;
-  };
+    assert(old_size == it->second.size);
+    assert(old_size!=new_size);
+
+    void *base = mremap(mmap_old_base, old_size, new_size, MREMAP_MAYMOVE);
+    if (base == MAP_FAILED) {
+      try_collect_mmap();
+      base = mremap(mmap_old_base, old_size, new_size, MREMAP_MAYMOVE);
+      if (base == MAP_FAILED) {
+        std::cerr << "ERROR: remmap could not allocate" << mmap_name << "txt with " << new_size << "bytes\n";
+        exit(-1);
+      }
+    }
+    if (it->second.fd>=0) {
+      int ret = ftruncate(it->second.fd, new_size);
+      if(ret<0) {
+        std::cerr << "ERROR: ftruncate could not allocate " << mmap_name << " to " << new_size << "\n";
+        exit(-1);
+      }
+    }
+    auto entry = it->second;
+    entry.size = new_size;
+
+    std::cerr << "mmap_gc_pool del name:" << entry.name << " fd:" << entry.fd << " base:" << mmap_old_base << std::endl;
+    mmap_gc_pool.erase(it); // old mmap_old_base
+
+    std::cerr << "mmap_gc_pool add name:" << entry.name << " fd:" << entry.fd << " base:" << base << std::endl;
+    mmap_gc_pool[base] = entry;
+
+    return base;
+  }
 };
 
 } // namespace mmap_lib

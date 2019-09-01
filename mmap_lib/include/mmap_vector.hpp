@@ -86,7 +86,7 @@ protected:
     assert(mmap_size>=calc_min_mmap_size());
 
     void *base;
-    std::tie(base, mmap_size) = mmap_gc::mmap(mmap_name, mmap_fd, mmap_size, std::bind(&vector<T>::gc_function, this, std::placeholders::_1));
+    std::tie(base, mmap_size) = mmap_gc::mmap(mmap_name, mmap_fd, mmap_size, std::bind(&vector<T>::gc_done, this, std::placeholders::_1));
 
     entries_capacity = (mmap_size-4096)/sizeof(T);
     mmap_base        = reinterpret_cast<uint8_t *>(base);
@@ -141,23 +141,16 @@ protected:
   mutable int       mmap_fd;
   const std::string mmap_name;
 
-  void gc_function(void *mmap_base_addr) const {
-    assert(mmap_base_addr == mmap_base);
+  void gc_done(void *base) const {
+    assert(base == mmap_base);
 
-    assert(mmap_base); // mmap_gc calls munmap afterwards
-
-    bool can_delete_when_all_zeroes=(*entries_size==0);
-
-    mmap_base    = nullptr;
-    entries_size = nullptr;
-
-    if (mmap_fd >= 0) {
-      close(mmap_fd);
-      mmap_fd = -1;
-
-      if (can_delete_when_all_zeroes) unlink(mmap_name.c_str());
+    if (mmap_fd >= 0 && *entries_size == 0) {
+      unlink(mmap_name.c_str());
     }
 
+    mmap_base        = nullptr;
+    entries_size     = nullptr;
+    mmap_fd          = -1;
     entries_capacity = 0;
   }
 
@@ -317,10 +310,11 @@ public:
       return;
     }
 
-    *entries_size    = 0; // Setting zero, triggers an unlink when calling gc_function
+    *entries_size    = 0; // Setting zero, triggers an unlink when calling gc_done
 
-    mmap_gc::garbage_collect(mmap_base, mmap_size);
-    entries_capacity = 0; // Deleted, no capacity
+    mmap_gc::recycle(mmap_base);
+    assert(entries_capacity == 0);
+    assert(entries_size     == nullptr);
   }
 
   inline std::string_view get_filename() const { return mmap_name; }
