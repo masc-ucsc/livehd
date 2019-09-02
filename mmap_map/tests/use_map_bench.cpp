@@ -25,8 +25,8 @@ void random_std_map(int max) {
 
   std::unordered_map<uint32_t,uint32_t> map;
 
-  for (int n = 1; n < 400; ++n) {
-    for (int i = 0; i < 10'000; ++i) {
+  for (int n = 1; n < 100; ++n) {
+    for (int i = 0; i < 100'000; ++i) {
       int pos = rng.uniform<int>(max);
       map[pos] = i;
       pos = rng.uniform<int>(max);
@@ -42,8 +42,8 @@ void random_robin_map(int max) {
 
   robin_hood::unordered_map<uint32_t,uint32_t> map;
 
-  for (int n = 1; n < 400; ++n) {
-    for (int i = 0; i < 10'000; ++i) {
+  for (int n = 1; n < 100; ++n) {
+    for (int i = 0; i < 100'000; ++i) {
       int pos = rng.uniform<int>(max);
       map[pos] = i;
       pos = rng.uniform<int>(max);
@@ -60,8 +60,8 @@ void random_lgraph_map(int max) {
   mmap_map::map<uint32_t,uint32_t> map("use_map_bench_db");
   map.clear();
 
-  for (int n = 1; n < 400; ++n) {
-    for (int i = 0; i < 10'000; ++i) {
+  for (int n = 1; n < 100; ++n) {
+    for (int i = 0; i < 100000; ++i) {
       uint32_t pos = rng.uniform<int>(max);
       map.set(pos,i);
       pos = rng.uniform<int>(max);
@@ -73,12 +73,12 @@ void random_lgraph_map(int max) {
 void random_abseil_map(int max) {
   Rng rng(123);
 
-  LGBench b("random_abseil_map");
+  LGBench b("random_abseil_map" + std::to_string(max));
 
   absl::flat_hash_map<uint32_t,uint32_t> map;
 
-  for (int n = 1; n < 400; ++n) {
-    for (int i = 0; i < 10'000; ++i) {
+  for (int n = 1; n < 100; ++n) {
+    for (int i = 0; i < 100000; ++i) {
       int pos = rng.uniform<int>(max);
       map[pos] = i;
       pos = rng.uniform<int>(max);
@@ -90,12 +90,12 @@ void random_abseil_map(int max) {
 void random_ska_map(int max) {
   Rng rng(123);
 
-  LGBench b("random_ska_map");
+  LGBench b("random_ska_map" + std::to_string(max));
 
   ska::flat_hash_map<uint32_t,uint32_t> map;
 
-  for (int n = 1; n < 400; ++n) {
-    for (int i = 0; i < 10'000; ++i) {
+  for (int n = 1; n < 100; ++n) {
+    for (int i = 0; i < 100000; ++i) {
       int pos = rng.uniform<int>(max);
       map[pos] = i;
       pos = rng.uniform<int>(max);
@@ -107,13 +107,13 @@ void random_ska_map(int max) {
 void random_vector_map(int max) {
   Rng rng(123);
 
-  LGBench b("random_vector_map");
+  LGBench b("random_vector_map" + std::to_string(max));
 
   std::vector<uint32_t> map;
   map.resize(max);
 
-  for (int n = 1; n < 400; ++n) {
-    for (int i = 0; i < 10'000; ++i) {
+  for (int n = 1; n < 100; ++n) {
+    for (int i = 0; i < 100000; ++i) {
       int pos = rng.uniform<int>(max);
       map[pos] = i;
       pos = rng.uniform<int>(max);
@@ -153,7 +153,11 @@ int main(int argc, char **argv) {
     run_random_vector_map = true;
   }
 
-  for(int i=1000;i<10000001;i*=10) {
+
+  std::vector<int> nums = {100000, 500000, 1000000, 2000000, 3000000, 4000000, 5000000, 6000000, 7000000, 8000000, 9000000, 10000000};
+
+  //for(int i=100000;i<10000001;i*=10) {
+  for(auto i:nums) {
     if (run_random_std_map)
       random_std_map(i);
 

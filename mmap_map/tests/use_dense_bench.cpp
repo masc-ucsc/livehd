@@ -172,13 +172,16 @@ int main(int argc, char **argv) {
       run_use_dense = true;
   }else{
     run_use_std_vector = true;
-    run_use_robin_map  = true;
-    run_use_lgraph_map = true;
-    run_use_abseil_map = true;
+    run_use_robin_map  = false;
+    run_use_lgraph_map = false;
+    run_use_abseil_map = false;
     run_use_dense      = true;
   }
 
-  for(int i=1000;i<10000001 ;i*=10) {
+  std::vector<int> nums = {100000, 500000, 1000000, 2000000, 3000000, 4000000, 5000000, 6000000, 7000000, 8000000, 9000000, 10000000};
+
+
+  for(auto i:nums) {
     if (run_use_std_vector)
       use_std_vector(i);
 
