@@ -5,7 +5,6 @@
 
 class Lnast_to_cfg_parser {
 private:
-  uint32_t k_num;
   uint32_t k_next;
   Tree_level curr_statement_level = -1;
   Tree_level prev_statement_level = -1;
@@ -26,7 +25,7 @@ private:
   void process_node(const Tree_index &it);
   void process_top(Tree_level level);
   void push_statement(Tree_level level); // prepare for next statement
-  void pop_statement(Tree_level level);
+  void pop_statement(Tree_level level, Lnast_ntype_id type);
   void add_to_buffer(Lnast_node node);
   void process_buffer();
 
