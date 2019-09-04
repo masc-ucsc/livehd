@@ -2,6 +2,14 @@
 
 #include "pass_mockturtle.hpp"
 
+#include <mockturtle/algorithms/node_resynthesis.hpp>
+#include <mockturtle/algorithms/node_resynthesis/akers.hpp>
+#include <mockturtle/algorithms/node_resynthesis/direct.hpp>
+#include <mockturtle/algorithms/node_resynthesis/mig_npn.hpp>
+#include <mockturtle/algorithms/node_resynthesis/xmg_npn.hpp>
+// FIXME: exact needs percy package in WORKSPACE
+//#include <mockturtle/algorithms/node_resynthesis/exact.hpp>
+
 void setup_pass_mockturtle() {
   Pass_mockturtle p;
   p.setup();
@@ -33,9 +41,9 @@ void Pass_mockturtle::do_work(LGraph *g) {
     //fmt::print("There is no node to be lutified!\n");
     return;
   }
-  for (const auto &group_id_it : node2gid) {
+  //for (const auto &group_id_it : node2gid) {
     //fmt::print("node:{} -> gid:{}\n", group_id_it.first.get_node(g).debug_name(), group_id_it.second);
-  }
+  //}
   //fmt::print("Partition finished.\n");
 
   //fmt::print("Creating mockturtle network...\n");
@@ -832,11 +840,22 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT(LGraph *g) {
     //mockturtle::write_bench(mt_ntk,std::cout);
 
     //fmt::print("\nConverting mockturtle network (gid:{}) to KLUT network...\n", group_id);
+#if 1
+    mockturtle::mig_npn_resynthesis resyn;
+    const auto mig_again = mockturtle::node_resynthesis<mockturtle::mig_network>( cleaned_mt_ntk, resyn );
+
+    //mockturtle::exact_resynthesis<klut_network> resyn(4);
+    //mockturtle::cut_rewriting(mt_ntk, resyn);
+    //klut_ntk = mockturtle::cleanup_dangling(klut_ntk);
+    mockturtle::mapping_view<mockturtle::mig_network, true> mapped_mig{mig_again};
+#else
     mockturtle::mapping_view<mockturtle::mig_network, true> mapped_mig{cleaned_mt_ntk};//todo:might not suit for xag
+#endif
     mockturtle::lut_mapping_params ps;
     ps.cut_enumeration_ps.cut_size = LUT_input_bits;
     mockturtle::lut_mapping<mockturtle::mapping_view<mockturtle::mig_network, true>, true>(mapped_mig, ps);
     mockturtle::klut_network klut_ntk =*mockturtle::collapse_mapped_network<mockturtle::klut_network>(mapped_mig);
+
     //fmt::print("finished.\n");
     //fmt::print("KLUT network (gid:{}):\n", group_id);
     //mockturtle::write_bench(klut_ntk,std::cout);
@@ -925,7 +944,7 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT(LGraph *g) {
   for (const auto &edge : boundary_edges) {
     //fmt::print("IO_XEdge:{}_to_{}\n", edge.driver.get_node().debug_name(), edge.sink.get_node().debug_name());
     I(edge2signals_mock[edge].gid == edge2signals_klut[edge].gid);
-    const auto gid = edge2signals_klut[edge].gid;
+    //const auto gid = edge2signals_klut[edge].gid;
     //fmt::print("Group_ID:{}\n", gid);
     //fmt::print("klut[edge] size:{}, mock[edge] size:{}\n", edge2signals_klut[edge].signals.size(), edge2signals_mock[edge].signals.size());
     I(edge2signals_klut[edge].signals.size() == edge2signals_mock[edge].signals.size());
