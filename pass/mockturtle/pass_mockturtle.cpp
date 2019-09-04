@@ -123,9 +123,12 @@ void Pass_mockturtle::setup_input_signals(const unsigned int    &group_id,
     bdinp_edges.insert(input_edge);
     edge2signals_mock[input_edge].gid = group_id;
     //create new input signals and map them back
-    fmt::print("crete_pi {}->{}\n",input_edge.driver.debug_name(), input_edge.sink.debug_name());
+#ifndef NDEBUG
+    // To fix, change the edge2signal for a pin2signals (same pin, same signal)
+    fmt::print("FIXME: create_pi {}->{}\n",input_edge.driver.debug_name(), input_edge.sink.debug_name());
+#endif
     for (auto i = 0; i < input_edge.get_bits(); i++) {
-      inp_sigs_mt.emplace_back(mig.create_pi()); // note: since topo traverse in lg, if the edge is not in the hash, it must be a new mt network io
+      inp_sigs_mt.emplace_back(mig.create_pi());
     }
     edge2signals_mock[input_edge].signals = inp_sigs_mt;
   }
@@ -847,14 +850,6 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT(LGraph *g) {
     mockturtle::mig_npn_resynthesis resyn1;
     mockturtle::refactoring(net0, resyn1, rf_ps);
     net0 = mockturtle::cleanup_dangling(net0);
-
-#if 0
-    mockturtle::refactoring_params rf_ps;
-    rf_ps.max_pis = 4;
-    mockturtle::mig_npn_resynthesis resyn1;
-    mockturtle::refactoring(mig0, resyn1, rf_ps);
-    mig0 = mockturtle::cleanup_dangling(mig0);
-#endif
 
     mockturtle::akers_resynthesis<mockturtle::mig_network> resyn2;
     const auto mig = mockturtle::node_resynthesis<mockturtle::mig_network>( net0, resyn2 );

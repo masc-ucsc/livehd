@@ -18,6 +18,7 @@ cc_test(
     srcs = ["mock_test.cpp"],
     deps = [
         "@mockturtle//:mockturtle",
+        "//bench:headers",
         "@fmt//:fmt",
     ],
 )

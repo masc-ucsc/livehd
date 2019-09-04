@@ -1,6 +1,9 @@
 
 #include <iostream>
 #include <sstream>
+#include <cassert>
+
+#include "lgbench.hpp"
 
 #include <mockturtle/algorithms/cut_enumeration.hpp>
 
@@ -28,36 +31,7 @@
 
 using namespace mockturtle;
 
-int main() {
-#if 0
-  klut_network lut;
-  auto p1 = lut.create_pi();
-  auto p2 = lut.create_pi();
-  auto o1 = lut.create_xor(p1, p2);
-  lut.create_po(o1);
-  lut.foreach_node([&](auto const& n){
-     auto func = lut.node_function(n);
-     fmt::print("n{} func = {}\n", lut.node_to_index(n),kitty::to_hex(func));
-  });
-#endif
-
-  mig_network net;
-
-  std::vector<mig_network::signal> array;
-  mig_network::signal array2[32];
-
-  for(int i=0;i<32;i++) {
-    array.emplace_back(net.create_pi());
-  }
-
-  array2[0] = net.create_or(array[0],array[1]);
-  for(int i=1;i<32;i++) {
-    array2[i] = net.create_or(array[0],array2[i-1]);
-  }
-
-  net.create_po( array2[31] );
-  //net.create_po( net.create_nary_xor(array) );
-
+void synthesize(mig_network &net) {
   // OPT1
   refactoring_params rf_ps;
   rf_ps.max_pis = 4;
@@ -66,22 +40,97 @@ int main() {
   net = cleanup_dangling(net);
 
   // OPT1
-  //resubstitution(net);
-  //net = cleanup_dangling(net);
+  // resubstitution(net);
+  // net = cleanup_dangling(net);
 
   // OPT3
   akers_resynthesis<mig_network> resyn2;
-  const auto mig = node_resynthesis<mig_network>( net, resyn2 );
-  net = cleanup_dangling(net);
 
+  node_resynthesis<mig_network>(net, resyn2);
+  net = cleanup_dangling(net);
+}
+
+int tmap(mig_network &net) {
   mapping_view<mig_network, true> mapped_mig{net};
 
   lut_mapping_params ps;
   ps.cut_enumeration_ps.cut_size = 6;
-  lut_mapping<mapping_view<mig_network, true>, true>( mapped_mig, ps);
+  lut_mapping<mapping_view<mig_network, true>, true>(mapped_mig, ps);
   mockturtle::klut_network nt_lut = *mockturtle::collapse_mapped_network<mockturtle::klut_network>(mapped_mig);
 
-  write_bench(nt_lut, std::cout);
+  std::cout << "size: " << nt_lut.num_gates() << std::endl;
+  //write_bench(nt_lut, std::cout);
+
+  return nt_lut.num_gates();
+}
+
+void mock_test_or(int net_size) {
+
+  LGBench b("mock_test_or" + std::to_string(net_size));
+
+  b.sample("setup");
+  mig_network net;
+
+  std::vector<mig_network::signal> array;
+  mig_network::signal array2[net_size];
+
+  for(int i=0;i<net_size;i++) {
+    array.emplace_back(net.create_pi());
+  }
+
+
+  array2[0] = net.create_or(array[0],array[1]);
+  for(int i=1;i<net_size;i++) {
+    array2[i] = net.create_or(array[0],array2[i-1]);
+  }
+
+  net.create_po( array2[net_size-1] );
+
+  b.sample("synthesis");
+  synthesize(net);
+
+  b.sample("tmap");
+  int sz = tmap(net);
+  assert(sz==1);
+}
+
+void mock_test_xor(int net_size) {
+
+  LGBench b("mock_test_xor" + std::to_string(net_size));
+
+  b.sample("setup");
+  mig_network net;
+
+  std::vector<mig_network::signal> array;
+  mig_network::signal array2[net_size];
+
+  for(int i=0;i<net_size;i++) {
+    array.emplace_back(net.create_pi());
+  }
+
+
+  array2[0] = net.create_xor(array[0],array[1]);
+  for(int i=1;i<net_size;i++) {
+    array2[i] = net.create_xor(array[i],array2[i-1]);
+  }
+
+  net.create_po( array2[net_size-1] );
+  //net.create_po( net.create_nary_xor(array) );
+
+  b.sample("synthesis");
+  synthesize(net);
+
+  b.sample("tmap");
+  int sz = tmap(net);
+  assert(sz>1 && sz < net_size/2);
+}
+
+int main() {
+
+  mock_test_or(256);
+  mock_test_xor(256);
+
+  return 0;
 }
 
 // g++ -std=c++17 -I ../../lib/sparsepp/ -I ../../lib/fmt/ -I ../../lib/ez/ -I ../../lib/kitty/ -I ../../include/ test1.cpp ../../lib/fmt/fmt/*.cc
