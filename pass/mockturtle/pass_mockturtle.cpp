@@ -123,8 +123,10 @@ void Pass_mockturtle::setup_input_signals(const unsigned int    &group_id,
     bdinp_edges.insert(input_edge);
     edge2signals_mock[input_edge].gid = group_id;
     //create new input signals and map them back
-    for (auto i = 0; i < input_edge.get_bits(); i++)
+    fmt::print("crete_pi {}->{}\n",input_edge.driver.debug_name(), input_edge.sink.debug_name());
+    for (auto i = 0; i < input_edge.get_bits(); i++) {
       inp_sigs_mt.emplace_back(mig.create_pi()); // note: since topo traverse in lg, if the edge is not in the hash, it must be a new mt network io
+    }
     edge2signals_mock[input_edge].signals = inp_sigs_mt;
   }
 }
@@ -835,20 +837,33 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT(LGraph *g) {
     const unsigned int           group_id = gid2mock_iter.first;
     const mockturtle::mig_network &mt_ntk = gid2mock_iter.second;
 
-    mockturtle::mig_network cleaned_mt_ntk = cleanup_dangling(mt_ntk);
-    //fmt::print("Mockturtle network (gid:{}):\n", group_id);
-    //mockturtle::write_bench(mt_ntk,std::cout);
-
-    //fmt::print("\nConverting mockturtle network (gid:{}) to KLUT network...\n", group_id);
 #if 1
-    mockturtle::mig_npn_resynthesis resyn;
-    const auto mig_again = mockturtle::node_resynthesis<mockturtle::mig_network>( cleaned_mt_ntk, resyn );
+    auto net0 = mt_ntk;
 
-    //mockturtle::exact_resynthesis<klut_network> resyn(4);
-    //mockturtle::cut_rewriting(mt_ntk, resyn);
-    //klut_ntk = mockturtle::cleanup_dangling(klut_ntk);
-    mockturtle::mapping_view<mockturtle::mig_network, true> mapped_mig{mig_again};
+    // net0 = mockturtle::cleanup_dangling(net0);
+
+    mockturtle::refactoring_params rf_ps;
+    rf_ps.max_pis = 4;
+    mockturtle::mig_npn_resynthesis resyn1;
+    mockturtle::refactoring(net0, resyn1, rf_ps);
+    net0 = mockturtle::cleanup_dangling(net0);
+
+#if 0
+    mockturtle::refactoring_params rf_ps;
+    rf_ps.max_pis = 4;
+    mockturtle::mig_npn_resynthesis resyn1;
+    mockturtle::refactoring(mig0, resyn1, rf_ps);
+    mig0 = mockturtle::cleanup_dangling(mig0);
+#endif
+
+    mockturtle::akers_resynthesis<mockturtle::mig_network> resyn2;
+    const auto mig = mockturtle::node_resynthesis<mockturtle::mig_network>( net0, resyn2 );
+    net0 = mockturtle::cleanup_dangling(net0);
+
+    mockturtle::mapping_view<mockturtle::mig_network, true> mapped_mig{net0};
 #else
+    mockturtle::mig_network cleaned_mt_ntk = cleanup_dangling(mt_ntk);
+
     mockturtle::mapping_view<mockturtle::mig_network, true> mapped_mig{cleaned_mt_ntk};//todo:might not suit for xag
 #endif
     mockturtle::lut_mapping_params ps;
@@ -858,7 +873,7 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT(LGraph *g) {
 
     //fmt::print("finished.\n");
     //fmt::print("KLUT network (gid:{}):\n", group_id);
-    //mockturtle::write_bench(klut_ntk,std::cout);
+    mockturtle::write_bench(klut_ntk,std::cout);
     //equivalence checking using miter
     //const auto miter = *mockturtle::miter<mockturtle::mig_network>(cleaned_mt_ntk, klut_ntk);
     gid2klut[group_id]=klut_ntk;
@@ -902,12 +917,10 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT(LGraph *g) {
       klut_out_signal_iter++;
     }
 
-
     int pos = 0;
     for (const auto &inp_edge : bdinp_edges) {
       I(klut_ntk.size() > pos);
       edge2signals_klut[inp_edge].gid = group_id;
-      //edge2signals_klut[inp_edge].signals.emplace_back(klut_signal[pos++]); //signals are not necessary only one signal
       auto stored_mig_signals = edge2signals_mock[inp_edge].signals;
       for(const auto &itr_mig_sig : stored_mig_signals)
         edge2signals_klut[inp_edge].signals.emplace_back(mig2klut_inp_signal[mt_ntk.get_node(itr_mig_sig)]);
@@ -916,7 +929,6 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT(LGraph *g) {
     for (const auto &out_edge : bdout_edges) {
       I(klut_ntk.size() > pos);
       edge2signals_klut[out_edge].gid = group_id;
-      //edge2signals_klut[out_edge].signals.emplace_back(klut_signal[pos++]);
       auto stored_mig_signals = edge2signals_mock[out_edge].signals;
       for(const auto &itr_mig_sig : stored_mig_signals)
         edge2signals_klut[out_edge].signals.emplace_back(mig2klut_out_signal[mt_ntk.get_node(itr_mig_sig)]);
@@ -939,22 +951,26 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT(LGraph *g) {
   boundary_edges.insert(bdinp_edges.begin(),bdinp_edges.end());
   boundary_edges.insert(bdout_edges.begin(),bdout_edges.end());
 
-
+#ifndef NDEBUG
   //print out the signal mapping information
   for (const auto &edge : boundary_edges) {
     //fmt::print("IO_XEdge:{}_to_{}\n", edge.driver.get_node().debug_name(), edge.sink.get_node().debug_name());
     I(edge2signals_mock[edge].gid == edge2signals_klut[edge].gid);
+    I(edge2signals_klut[edge].signals.size() == edge2signals_mock[edge].signals.size());
+
     //const auto gid = edge2signals_klut[edge].gid;
     //fmt::print("Group_ID:{}\n", gid);
     //fmt::print("klut[edge] size:{}, mock[edge] size:{}\n", edge2signals_klut[edge].signals.size(), edge2signals_mock[edge].signals.size());
-    I(edge2signals_klut[edge].signals.size() == edge2signals_mock[edge].signals.size());
+#if 0
     const long unsigned int signal_width = edge2signals_mock[edge].signals.size();
     for (long unsigned int i = 0; i < signal_width; i++) {
       //fmt::print("Mockturtle IO({}) -> KLUT IO({})\n",
       //  gid2mock[gid].node_to_index(gid2mock[gid].get_node(edge2signals_mock[edge].signals[i])),
       //  gid2klut[gid].node_to_index(gid2klut[gid].get_node(edge2signals_klut[edge].signals[i])));
     }
+#endif
   }
+#endif
 }
 
 void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
