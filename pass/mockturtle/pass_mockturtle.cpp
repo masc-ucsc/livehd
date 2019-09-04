@@ -868,7 +868,7 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT(LGraph *g) {
 
     //fmt::print("finished.\n");
     //fmt::print("KLUT network (gid:{}):\n", group_id);
-    mockturtle::write_bench(klut_ntk,std::cout);
+    //mockturtle::write_bench(klut_ntk,std::cout);
     //equivalence checking using miter
     //const auto miter = *mockturtle::miter<mockturtle::mig_network>(cleaned_mt_ntk, klut_ntk);
     gid2klut[group_id]=klut_ntk;
