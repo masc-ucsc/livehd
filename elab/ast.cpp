@@ -11,7 +11,7 @@ Ast_parser::Ast_parser(std::string_view _buffer, Rule_id top_rule) : buffer(_buf
   level      = 0;
 }
 
-void Ast_parser::add_track_parent(const mmap_map::Tree_index &index) {
+void Ast_parser::add_track_parent(const mmap_lib::Tree_index &index) {
   for (int i = last_added.size(); i < index.level + 1; ++i) {
     last_added.emplace_back(-1, -1);
   }

@@ -527,6 +527,7 @@ Some tasks that were not finished that a potential future project can address: (
 * Split the graph coloring code out of pass/mockturtle to pass/coloring
 * Extend the LUTs to have "bit-width". If a LUT operates over a "bus", it can have a multi-bit input per port".
 * Avoid simple NOTs by having negated ports. E.g: 0-3 are possitive, ports 4-7 are negated inputs.
+* Go over the [cleanup.md](cleanup.md) pending tasks.
 
 ## ABC (Yunxun Qiu)
 

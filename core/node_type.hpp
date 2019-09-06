@@ -1,7 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include "dense.hpp"
+#include "mmap_vector.hpp"
 #include "mmap_map.hpp"
 
 #include "node.hpp"
@@ -9,21 +9,19 @@
 #include "node_type_base.hpp"
 #include "sub_node.hpp"
 
-using Node_sview_map = mmap_map::map<std::string_view, Node::Compact_class>;
-using Node_value_map = mmap_map::map<uint32_t, Node::Compact_class>;
-using Node_down_map  = mmap_map::map<Node::Compact_class, Lg_type_id>;
+using Node_sview_map = mmap_lib::map<std::string_view, Node::Compact_class>;
+using Node_value_map = mmap_lib::map<uint32_t, Node::Compact_class>;
+using Node_down_map  = mmap_lib::map<Node::Compact_class, Lg_type_id>;
 
 class LGraph_Node_Type : virtual public LGraph_Base {
 protected:
-  Dense<Node_Type_Op>  node_type_table;
+  mmap_lib::vector<Node_Type_Op>  node_type_table;
 
   Node_sview_map   const_sview;
   Node_value_map   const_value;
   Node_down_map    down_nodes;
 
   void clear();
-  void reload();
-  void sync();
   void emplace_back();
 
   void             set_type(Index_ID nid, Node_Type_Op op);

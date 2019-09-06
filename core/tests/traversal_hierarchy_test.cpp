@@ -35,8 +35,8 @@ protected:
 
   static constexpr char fwd_name[]     = "fwd_pos";
   static constexpr char bwd_name[]     = "bwd_pos";
-  using Fwd_pos_attr  = Attribute<fwd_name,Node ,mmap_map::map<Node::Compact, uint64_t> >;
-  using Bwd_pos_attr  = Attribute<bwd_name,Node ,mmap_map::map<Node::Compact, uint64_t> >;
+  using Fwd_pos_attr  = Attribute<fwd_name,Node ,mmap_lib::map<Node::Compact, uint64_t> >;
+  using Bwd_pos_attr  = Attribute<bwd_name,Node ,mmap_lib::map<Node::Compact, uint64_t> >;
 
   void map_tree_to_lgraph(int rseed) {
     std::vector<Tree_index> index_order;

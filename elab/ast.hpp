@@ -14,16 +14,16 @@ struct Ast_parser_node {
   Ast_parser_node(const Rule_id rid, const Token_entry te) : rule_id(rid), token_entry(te) { I(rid); }
 };
 
-class Ast_parser : public mmap_map::tree<Ast_parser_node> {
+class Ast_parser : public mmap_lib::tree<Ast_parser_node> {
 private:
 protected:
-  mmap_map::Tree_level             level;
-  mmap_map::Tree_level             down_added;
+  mmap_lib::Tree_level             level;
+  mmap_lib::Tree_level             down_added;
   const std::string_view buffer;  // const because it can not change at runtime
 
-  std::vector<mmap_map::Tree_index> last_added;
+  std::vector<mmap_lib::Tree_index> last_added;
 
-  void add_track_parent(const mmap_map::Tree_index &index);
+  void add_track_parent(const mmap_lib::Tree_index &index);
 public:
   Ast_parser(std::string_view buffer, Rule_id top_rule);
 

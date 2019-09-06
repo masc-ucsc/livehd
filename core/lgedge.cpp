@@ -6,8 +6,6 @@
 #include "lgedge.hpp"
 #include "node_pin.hpp"
 
-#include "mmap_allocator.hpp"
-
 #include "lgraph.hpp"
 
 static_assert(sizeof(LEdge) == 8, "LEdge should be 8 bytes");
@@ -428,7 +426,9 @@ void Node_Internal::dump_full() const {
 }
 // LCOV_EXCL_STOP
 
-void Node_Internal::assimilate_edges(Node_Internal &other) {
+void Node_Internal::assimilate_edges(Node_Internal *other_ptr) {
+  Node_Internal &other = *other_ptr; // to avoid -> all the time
+
   I(inp_pos == 0);
   I(out_pos == 0);
   I(dst_pid == other.dst_pid);

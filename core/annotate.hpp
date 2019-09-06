@@ -27,42 +27,42 @@ struct Ann_name {
 
 using Ann_node_pin_offset  = Attribute<Ann_name::wireoffset
                                       ,Node_pin
-                                      ,mmap_map::map<Node_pin::Compact_class_driver, uint16_t>
+                                      ,mmap_lib::map<Node_pin::Compact_class_driver, uint16_t>
                                       >;
 
 using Ann_node_pin_name    = Attribute<Ann_name::wirename
                                       ,Node_pin
-                                      ,mmap_map::bimap<Node_pin::Compact_class_driver, std::string_view>
+                                      ,mmap_lib::bimap<Node_pin::Compact_class_driver, std::string_view>
                                       >;
 
 using Ann_node_pin_bitwidth= Attribute<Ann_name::bitwidth
                                       ,Node_pin
-                                      ,mmap_map::map<Node_pin::Compact_driver , Ann_bitwidth>
+                                      ,mmap_lib::map<Node_pin::Compact_driver , Ann_bitwidth>
                                       >;
 
 using Ann_node_pin_delay   = Attribute<Ann_name::delay
                                       ,Node_pin
-                                      ,mmap_map::map<Node_pin::Compact_driver , float>
+                                      ,mmap_lib::map<Node_pin::Compact_driver , float>
                                       >;
 
 using Ann_node_name        = Attribute<Ann_name::nodename
                                        ,Node
-                                       ,mmap_map::bimap<Node::Compact_class, std::string_view>
+                                       ,mmap_lib::bimap<Node::Compact_class, std::string_view>
                                        >;
 
 using Ann_node_cfgmeta     = Attribute<Ann_name::cfgmeta
                                        ,Node
-                                       ,mmap_map::map<Node::Compact_class, std::string_view>
+                                       ,mmap_lib::map<Node::Compact_class, std::string_view>
                                        >;
 
 using Ann_node_place       = Attribute<Ann_name::nodeplace
                                        ,Node
-                                       ,mmap_map::map<Node::Compact, Ann_place>
+                                       ,mmap_lib::map<Node::Compact, Ann_place>
                                        >;
 
 using Ann_node_file_loc    = Attribute<Ann_name::file_loc
                                        ,Node
-                                       ,mmap_map::map<Node::Compact_class, Ann_file_loc>
+                                       ,mmap_lib::map<Node::Compact_class, Ann_file_loc>
                                        >;
 
 struct Ann_support {

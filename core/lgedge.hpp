@@ -452,7 +452,7 @@ public:
     I(is_next_state());
   }
 
-  void assimilate_edges(Node_Internal &other);
+  void assimilate_edges(Node_Internal *other);
 
   void set_last_state() { state = Last_Node_State; }
   void set_free_state() {

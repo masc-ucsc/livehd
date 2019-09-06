@@ -6,7 +6,7 @@
 #include <type_traits>
 #include <vector>
 
-#include "dense.hpp"
+#include "mmap_vector.hpp"
 #include "iassert.hpp"
 #include "lgraph_base_core.hpp"
 #include "lgedge.hpp"
@@ -20,7 +20,7 @@ class Graph_library;
 class LGraph_Base : public Lgraph_base_core {
 private:
 protected:
-  Dense<Node_Internal> node_internal;
+  mmap_lib::vector<Node_Internal> node_internal;
 
   static inline constexpr std::string_view unknown_io = "unknown";
   Graph_library       *library;
@@ -42,11 +42,11 @@ protected:
 
   void setup_driver(const Index_ID idx) {
     I(idx < node_internal.size());
-    node_internal[idx].set_driver_setup();
+    node_internal.ref(idx)->set_driver_setup();
   }
   void setup_sink(const Index_ID idx) {
     I(idx < node_internal.size());
-    node_internal[idx].set_sink_setup();
+    node_internal.ref(idx)->set_sink_setup();
   }
 
   void del_node(Index_ID idx);
@@ -65,7 +65,6 @@ public:
   virtual void clear();
   virtual void sync();
 
-  virtual void reload();
   virtual void emplace_back();
 
 #if 1
@@ -85,7 +84,7 @@ public:
   void set_bits(Index_ID idx, uint16_t bits) {
     I(idx < node_internal.size());
     I(node_internal[idx].is_root());
-    node_internal[idx].set_bits(bits);
+    node_internal.ref(idx)->set_bits(bits);
   }
 #endif
 
@@ -109,6 +108,13 @@ public:
     return node_internal[idx];
   }
 
+  /*
+  Node_Internal &get_node_int(Index_ID idx) {
+    I(static_cast<Index_ID>(node_internal.size()) > idx);
+    return node_internal[idx];
+  }
+  */
+
   bool is_valid_node(Index_ID nid) const {
     if (nid >= node_internal.size())
       return false;
@@ -121,10 +127,6 @@ public:
     return node_internal[idx].is_root();
   }
 
-  Node_Internal &get_node_int(Index_ID idx) {
-    I(static_cast<Index_ID>(node_internal.size()) > idx);
-    return node_internal[idx];
-  }
 
   Port_ID get_dst_pid(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);

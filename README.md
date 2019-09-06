@@ -22,6 +22,8 @@ reconstruction is in the order of thousands of nodes.
 LGraph is built to interface with other tools like Yosys, ABC, Mockturtle,
 OpenTimer...
 
+There is a list of available [projects.md](docs/projects.md) to further improve LGraph.
+
 ![LGraph overall flow](./docs/lgraph.svg)
 
 ## Building

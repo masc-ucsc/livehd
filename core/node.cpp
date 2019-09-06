@@ -9,17 +9,16 @@ void Node::invalidate(LGraph *_g) {
   top_g     = _g;
   current_g = _g;
   nid       = 0;
-  hidx      = top_g->get_hierarchy_root();
+  hidx      = Hierarchy_tree::root_index();
 }
 
 void Node::update(const Hierarchy_index &_hidx, Index_ID _nid) {
   if (_hidx!=hidx) {
-    current_g = top_g->find_sub_lgraph(_hidx);
+    current_g = top_g->ref_htree()->ref_lgraph(_hidx);
     hidx      = _hidx;
   }
   nid = _nid;
   I(current_g->is_valid_node(nid));
-  //I(top_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
 }
 
 void Node::update(LGraph *_g, const Node::Compact &comp) {
@@ -31,14 +30,13 @@ void Node::update(LGraph *_g, const Node::Compact &comp) {
     return;
   top_g     = _g;
   hidx      = comp.hidx;
-  current_g = top_g->find_sub_lgraph(hidx);
+  current_g = top_g->ref_htree()->ref_lgraph(hidx);
 
   I(current_g->is_valid_node(nid));
-  //I(top_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
 }
 
 void Node::update(const Node::Compact &comp) {
-  I(comp.hidx);
+  I(!comp.hidx.is_invalid());
   I(comp.nid);
   I(top_g);
 
@@ -46,16 +44,16 @@ void Node::update(const Node::Compact &comp) {
   if (hidx==comp.hidx)
     return;
   hidx      = comp.hidx;
-  current_g = top_g->find_sub_lgraph(hidx);
+  current_g = top_g->ref_htree()->ref_lgraph(hidx);
 
-  I(current_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
+  I(top_g->ref_htree()->get_lgid(hidx) == current_g->get_lgid());
   I(current_g->is_valid_node(nid));
 }
 
 Node::Node(LGraph *_g)
   :top_g(_g)
   ,current_g(_g)
-  ,hidx(_g->get_hierarchy_root())
+  ,hidx(Hierarchy_tree::root_index())
   ,nid(0) {
   I(top_g);
 }
@@ -67,7 +65,7 @@ Node::Node(LGraph *_g, const Hierarchy_index &_hidx, Compact_class comp)
   ,nid(comp.nid) {
   I(nid);
   I(top_g);
-  current_g = top_g->find_sub_lgraph(hidx);
+  current_g = top_g->ref_htree()->ref_lgraph(hidx);
 
   I(current_g->is_valid_node(nid));
   //I(top_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
@@ -76,7 +74,7 @@ Node::Node(LGraph *_g, const Hierarchy_index &_hidx, Compact_class comp)
 Node::Node(LGraph *_g, Compact_class comp)
   :top_g(_g)
   ,current_g(0)
-  ,hidx(_g->get_hierarchy_root())
+  ,hidx(Hierarchy_tree::root_index())
   ,nid(comp.nid) {
   I(nid);
   I(top_g);
@@ -182,7 +180,7 @@ bool Node::is_type_sub() const {
 
 Hierarchy_index Node::hierarchy_go_down() const {
   I(current_g->is_sub(nid));
-  return current_g->hierarchy_go_down(top_g, hidx, nid);
+  return top_g->ref_htree()->go_down(*this);
 }
 
 void Node::set_type_sub(Lg_type_id subid) {
@@ -350,11 +348,11 @@ std::string_view Node::create_name() const {
   auto *ref = Ann_node_name::ref(current_g);
   const auto it = ref->find(get_compact_class());
   if (it != ref->end())
-    return ref->get_val(it);
+    return ref->get_val_sview(it);
 
   std::string sig = absl::StrCat("lg_", get_type().get_name(), std::to_string(nid));
   const auto it2 = ref->set(get_compact_class(), sig);
-  return ref->get_val(it2);
+  return ref->get_val_sview(it2);
 #if 0
   // FIXME: HERE. Does not scale for large designs (too much recursion)
 
@@ -382,7 +380,7 @@ std::string_view Node::create_name() const {
 }
 
 std::string_view Node::get_name() const {
-  return Ann_node_name::ref(current_g)->get_val(get_compact_class());
+  return Ann_node_name::ref(current_g)->get_val_sview(get_compact_class());
 }
 
 std::string Node::debug_name() const {
@@ -396,7 +394,7 @@ std::string Node::debug_name() const {
   std::string name;
   const auto it = ref->find(get_compact_class());
   if (it != ref->end()) {
-    name = ref->get_val(it);
+    name = ref->get_val_sview(it);
   }
   if (get_type().op == SubGraph_Op) {
     absl::StrAppend(&name, "_sub_", get_type_sub_node().get_name());

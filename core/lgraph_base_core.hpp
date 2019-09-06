@@ -5,18 +5,39 @@
 #include <string>
 #include <cstdint>
 
+#ifndef likely
+#define likely(x) __builtin_expect((x), 1)
+#endif
+#ifndef unlikely
+#define unlikely(x) __builtin_expect((x), 0)
+#endif
+
 #include "fmt/format.h"
 
-#include "dense.hpp"
 #include "explicit_type.hpp"
 #include "iassert.hpp"
+#include "mmap_tree.hpp"
 
 // LGraph basic core types used all over
 using Lg_type_id   = Explicit_type<uint32_t, struct Lg_type_id_struct>;  // Global used all over
-using Index_ID     = Explicit_type<uint64_t, struct Index_ID_struct>;
+using Index_ID     = Explicit_type<uint32_t, struct Index_ID_struct>;
 using Lut_type_id  = Explicit_type<uint32_t, struct Lut_type_id_struct>;
 
-using Hierarchy_index = uint64_t;
+class Hierarchy_data { // 64bits total
+public:
+  Lg_type_id lgid;
+  Index_ID   nid;
+  Hierarchy_data() : lgid(0), nid(0) {}
+  Hierarchy_data(const Lg_type_id &_class_id, const Index_ID &_nid)
+   :lgid(_class_id)
+   ,nid(_nid) {
+   }
+
+  bool is_invalid() const { return lgid == 0; }
+};
+
+using Hierarchy_index=mmap_lib::Tree_index;
+
 
 struct Lg_type_id_hash {
   size_t operator()(const Lg_type_id& obj) const { return obj.value; }

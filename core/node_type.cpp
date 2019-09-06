@@ -6,10 +6,10 @@
 
 LGraph_Node_Type::LGraph_Node_Type(std::string_view path, std::string_view name, Lg_type_id lgid) noexcept
     : LGraph_Base(path, name, lgid)
-    , node_type_table(absl::StrCat(path, "/lg_", std::to_string(lgid), "_type"))
-    , const_sview(absl::StrCat(path, "/lg_", std::to_string(lgid), "_sview"))
-    , const_value(absl::StrCat(path, "/lg_", std::to_string(lgid), "_value"))
-    , down_nodes(absl::StrCat(path, "/lg_", std::to_string(lgid)  , "_down")) {
+    , node_type_table(path, absl::StrCat("lg_", std::to_string(lgid), "_type"))
+    , const_sview(path, absl::StrCat("lg_", std::to_string(lgid), "_sview"))
+    , const_value(path, absl::StrCat("lg_", std::to_string(lgid), "_value"))
+    , down_nodes(path, absl::StrCat("lg_", std::to_string(lgid)  , "_down")) {
 }
 
 void LGraph_Node_Type::clear() {
@@ -23,16 +23,6 @@ void LGraph_Node_Type::clear() {
 
 static_assert(StrConstMin_Op == U32ConstMax_Op+1); // Check opt in reload
 
-void LGraph_Node_Type::reload() {
-
-  uint64_t sz = library->get_nentries(get_lgid());
-  node_type_table.reload(sz);
-}
-
-void LGraph_Node_Type::sync() {
-  node_type_table.sync();
-}
-
 void LGraph_Node_Type::emplace_back() { node_type_table.emplace_back(Invalid_Op); }
 
 void LGraph_Node_Type::set_type(Index_ID nid, Node_Type_Op op) {
@@ -45,7 +35,7 @@ void LGraph_Node_Type::set_type(Index_ID nid, Node_Type_Op op) {
 
   I(node_type_table[node_internal[nid].get_nid()] == Invalid_Op || node_type_table[node_internal[nid].get_nid()] == op);
 
-  node_type_table[node_internal[nid].get_nid()] = op;
+  node_type_table.set(node_internal[nid].get_nid(), op);
 }
 
 const Node_Type &LGraph_Node_Type::get_type(Index_ID nid) const {
@@ -87,7 +77,7 @@ void LGraph_Node_Type::set_type_sub(Index_ID nid, Lg_type_id subgraphid) {
 
   down_nodes.set(Node::Compact_class(nid), subgraphid.value);
 
-  node_type_table[nid] = (Node_Type_Op)(SubGraphMin_Op + subgraphid);
+  node_type_table.set(nid, (Node_Type_Op)(SubGraphMin_Op + subgraphid));
 }
 
 Lg_type_id LGraph_Node_Type::get_type_sub(Index_ID nid) const {
@@ -110,7 +100,7 @@ void LGraph_Node_Type::set_type_lut(Index_ID nid, Lut_type_id lutid) {
   I(node_internal[nid].get_nid() < node_type_table.size());
   I(lutid.value <= (uint32_t)(LUTMax_Op - LUTMin_Op));
 
-  node_type_table[node_internal[nid].get_nid()] = (Node_Type_Op)(LUTMin_Op + lutid);
+  node_type_table.set(node_internal[nid].get_nid(), (Node_Type_Op)(LUTMin_Op + lutid));
 }
 
 Lut_type_id LGraph_Node_Type::get_type_lut(Index_ID nid) const {
@@ -180,7 +170,7 @@ void LGraph_Node_Type::set_type_const_value(Index_ID nid, uint32_t value) {
 
   const_value.set(value, Node::Compact_class(nid));
 
-  node_type_table[node_internal[nid].get_nid()] = (Node_Type_Op)(U32ConstMin_Op + value);
+  node_type_table.set(node_internal[nid].get_nid(), (Node_Type_Op)(U32ConstMin_Op + value));
   int bits = (64 - __builtin_clzll(value));
   I(bits<=32);
 
@@ -221,7 +211,7 @@ void LGraph_Node_Type::set_type_const_sview(Index_ID nid, std::string_view value
   }
   I(char_id < (uint32_t)(StrConstMax_Op - StrConstMin_Op));
 
-  node_type_table[node_internal[nid].get_nid()] = static_cast<Node_Type_Op>(StrConstMin_Op + char_id);
+  node_type_table.set(node_internal[nid].get_nid(), static_cast<Node_Type_Op>(StrConstMin_Op + char_id));
 }
 
 uint32_t LGraph_Node_Type::get_type_const_value(Index_ID nid) const {

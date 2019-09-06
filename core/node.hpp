@@ -28,6 +28,7 @@ protected:
   friend class Edge_raw_iterator_base;
   friend class CForward_edge_iterator;
   friend class CBackward_edge_iterator;
+  friend class Hierarchy_tree;
 
   Index_ID get_nid() const { return nid; }
 
@@ -57,13 +58,13 @@ public:
     friend class CBackward_edge_iterator;
     friend class Forward_edge_iterator;
     friend class Backward_edge_iterator;
-    friend class mmap_map::hash<Node::Compact>;
+    friend class mmap_lib::hash<Node::Compact>;
   public:
 
     //constexpr operator size_t() const { I(0); return nid; }
 
     Compact(const Hierarchy_index &_hidx, Index_ID _nid) :hidx(_hidx), nid(_nid) { I(nid); };
-    Compact() :hidx(0),nid(0) { };
+    Compact() :nid(0) { };
     Compact &operator=(const Compact &obj) {
       I(this != &obj);
       hidx  = obj.hidx;
@@ -83,7 +84,7 @@ public:
 
     template <typename H>
     friend H AbslHashValue(H h, const Compact& s) {
-      return H::combine(std::move(h), s.hidx, s.nid);
+      return H::combine(std::move(h), s.hidx.get_hash(), s.nid);
     };
   };
 
@@ -102,7 +103,7 @@ public:
     friend class CBackward_edge_iterator;
     friend class Forward_edge_iterator;
     friend class Backward_edge_iterator;
-    friend class mmap_map::hash<Node::Compact_class>;
+    friend class mmap_lib::hash<Node::Compact_class>;
   public:
 
     // constexpr operator size_t() const { return nid; }
@@ -132,17 +133,16 @@ public:
   };
   template <typename H>
   friend H AbslHashValue(H h, const Node& s) {
-    return H::combine(std::move(h), (int)s.hidx, (int)s.nid); // Ignore lgraph pointer in hash
+    return H::combine(std::move(h), (int)s.hidx.get_hash(), (int)s.nid); // Ignore lgraph pointer in hash
   };
 
   // NOTE: No operator<() needed for std::set std::map to avoid their use. Use flat_map_set for speed
   void update(LGraph *_g, const Node::Compact &comp);
   void update(const Node::Compact &comp);
 
-  Node() :top_g(0) ,current_g(0) ,hidx(0) ,nid(0) { }
+  Node() :top_g(0) ,current_g(0) ,nid(0) { }
   Node(LGraph *_g);
   Node(LGraph *_g, const Compact &comp) {
-    hidx=0;
     update(_g, comp);
   }
   Node(LGraph *_g, const Hierarchy_index &_hidx, Compact_class comp);
@@ -167,7 +167,7 @@ public:
   LGraph *get_top_lgraph() const { I(top_g); return top_g; }
   LGraph *get_class_lgraph() const { I(current_g); return current_g; }
 
-  Hierarchy_index  get_hidx()  const { return hidx;   }
+  Hierarchy_index get_hidx()  const { return hidx;   }
 
   Node_pin get_driver_pin() const;
   Node_pin get_driver_pin(Port_ID pid) const;
@@ -254,12 +254,12 @@ public:
   // END ATTRIBUTE ACCESSORS
 };
 
-namespace mmap_map {
+namespace mmap_lib {
 template <>
 struct hash<Node::Compact> {
   size_t operator()(Node::Compact const &o) const {
     uint64_t h = o.nid;
-    h = (h<<12) ^ o.hidx ^ o.nid;
+    h = (h<<12) ^ o.hidx.get_hash() ^ o.nid;
     return hash<uint64_t>{}(h);
   }
 };

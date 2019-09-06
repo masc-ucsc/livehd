@@ -1,6 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <sys/stat.h>
+#include <sys/types.h>
+
 #include <stdint.h>
 #include <functional>
 #include <vector>
@@ -11,16 +14,24 @@ namespace mmap_lib {
 using Tree_level = int32_t;
 using Tree_pos   = int32_t;
 
-class Tree_index {
+class __attribute__((packed)) Tree_index {
 public:
   Tree_level level;
   Tree_pos   pos;
 
-  Tree_index() = delete;
+  Tree_index() { invalidate(); };
   Tree_index(Tree_level l, Tree_pos i) : level(l), pos(i) {}
 
-  bool operator==(const Tree_index &i) const { return level == i.level && pos == i.pos; }
-  bool operator!=(const Tree_index &i) const { return level != i.level || pos != i.pos; }
+  constexpr inline uint64_t get_hash() const {
+    uint64_t at = level;
+    at <<=32;
+    at |= pos;
+
+    return at;
+  }
+
+  constexpr bool operator==(const Tree_index &i) const { return level == i.level && pos == i.pos; }
+  constexpr bool operator!=(const Tree_index &i) const { return level != i.level || pos != i.pos; }
   Tree_index operator=(const Tree_index &i) {
     level = i.level;
     pos = i.pos;
@@ -54,6 +65,9 @@ protected:
     Tree_pos        first_child[4];
     Tree_pos        last_child[4];
   };
+
+	const std::string                       mmap_name;
+	const std::string                       mmap_path;
   std::vector<std::vector<X>>             data_stack;
   std::vector<std::vector<Tree_pointers>> pointers_stack;
   int                                     pending_parent;  // Must be signed
@@ -218,6 +232,10 @@ public:
   };
 
   tree();
+  tree(std::string_view _path, std::string_view _map_name);
+
+  [[nodiscard]] inline std::string_view get_name() const { return mmap_name; }
+  [[nodiscard]] inline std::string_view get_path() const { return mmap_path; }
 
   void clear() {
     pending_parent = -1;  // Nobody pending
@@ -226,6 +244,8 @@ public:
     data_stack.clear();
     pointers_stack.clear();
   }
+
+  [[nodiscard]] bool empty() const { return data_stack.empty(); }
 
   // WARNING: can not return Tree_index & because future additions can move the pointer (vector realloc)
   const Tree_index add_child          (const Tree_index &parent, const X &data);
@@ -271,8 +291,10 @@ public:
 
     return Tree_index(level, pos);
   }
-  const Tree_index get_root() const;
-  void             set_root(const X &data);
+
+  static Tree_index root_index() { return Tree_index(0,0); }
+  const  Tree_index get_root() const { return Tree_index(0,0); }
+  void              set_root(const X &data);
 
   // NOTE: not a typical depth first traversal, goes to bottom without touching
   // parents first. It is also not a bottom-up traversal because it touches all
@@ -350,6 +372,23 @@ void tree<X>::adjust_to_level(Tree_level level) {
     pointers_stack.emplace_back();
   }
 };
+
+template <typename X>
+tree<X>::tree(std::string_view _path, std::string_view _map_name)
+  : mmap_path(_path.empty()?".":_path)
+  , mmap_name{std::string(_path) + std::string("/") + std::string(_map_name)} {
+
+  if (mmap_path != ".") {
+    struct stat sb;
+    if (stat(mmap_path.c_str(), &sb) != 0 || !S_ISDIR(sb.st_mode)) {
+      int e = mkdir(mmap_path.c_str(), 0755);
+      I(e>=0);
+    }
+  }
+
+  pending_parent = -1;  // Nobody pending
+  pending_child  = -1;  // Nobody pending
+}
 
 template <typename X>
 tree<X>::tree() {
@@ -458,12 +497,6 @@ const Tree_index tree<X>::get_depth_preorder_next(const Tree_index &child) const
   }
 
   return Tree_index(-1,-1);
-}
-
-
-template <typename X>
-const Tree_index tree<X>::get_root() const {
-  return Tree_index(0,0);
 }
 
 template <typename X>

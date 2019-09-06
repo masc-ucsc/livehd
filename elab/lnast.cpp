@@ -23,9 +23,9 @@ void Lnast::do_ssa_trans(const Lnast_index &top){
   }
 
   //fmt::print("\nrename_table content\n\n");
-  for (auto const& [key, val] : rename_table){
+  //for (auto const& [key, val] : rename_table){
     //fmt::print("var:{:<12}, subs:{}\n", key, val);
-  }
+  //}
 }
 
 void Lnast::ssa_if_subtree(const Lnast_index &if_node, Rename_table &rename_table){

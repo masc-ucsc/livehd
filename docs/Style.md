@@ -224,10 +224,10 @@ fmt::print("This is a debug message, name = {}, id = {}\n",g->get_name(), idx);
 
 ## Use accessors consistently
 
-* get_XX(): gets XX from object without side effects, it should return always
-  (assert if it does not exist)
-* find_XX(): gets XX from object without side effects, if it does not exist,
-  returns null or false, or ??
+* get_XX(): gets "const XX &" from object without side effects (assert if it does not exist)
+    * operator(Y) is an alias for get_XX(Y)
+* ref_XX(): gets "XX * " (nullptr if it does not exist)
+* find_XX(): similar to get_XX but, if it does not exist return invalid object (is_invalid())
 * setup_XX(): gets XX from object, if it does not exists, it creates it
 * create_XX(): clears previous XX from object, and creates a new and returns it
 * set_XX(): sets XX to object, it creates if it does not exist. Similar to

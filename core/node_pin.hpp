@@ -47,14 +47,14 @@ public:
     friend class Edge_raw_iterator_base;
     friend class CForward_edge_iterator;
     friend class CBackward_edge_iterator;
-    friend class mmap_map::hash<Node_pin::Compact>;
+    friend class mmap_lib::hash<Node_pin::Compact>;
   public:
 
     //constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
     Compact(const Compact &obj): hidx(obj.hidx), idx(obj.idx), sink(obj.sink) { }
     Compact(const Hierarchy_index _hidx, Index_ID _idx, bool _sink) :hidx(_hidx), idx(_idx) ,sink(_sink) { };
-    Compact() :hidx(0), idx(0) ,sink(0) { };
+    Compact() :idx(0) ,sink(0) { };
     Compact &operator=(const Compact &obj) {
       I(this != &obj);
       hidx  = obj.hidx;
@@ -73,7 +73,7 @@ public:
 
     template <typename H>
     friend H AbslHashValue(H h, const Compact& s) {
-      return H::combine(std::move(h), s.hidx, s.idx, s.sink);
+      return H::combine(std::move(h), s.hidx.get_hash(), s.idx, s.sink);
     };
   };
   class __attribute__((packed)) Compact_driver {
@@ -90,14 +90,14 @@ public:
     friend class Edge_raw_iterator_base;
     friend class CForward_edge_iterator;
     friend class CBackward_edge_iterator;
-    friend class mmap_map::hash<Node_pin::Compact_driver>;
+    friend class mmap_lib::hash<Node_pin::Compact_driver>;
   public:
 
     //constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
     Compact_driver(const Compact_driver &obj): hidx(obj.hidx), idx(obj.idx) { }
     Compact_driver(const Hierarchy_index _hidx, Index_ID _idx) :hidx(_hidx), idx(_idx) { };
-    Compact_driver() :hidx(0), idx(0) { };
+    Compact_driver() :idx(0) { };
     Compact_driver &operator=(const Compact_driver &obj) {
       I(this != &obj);
       hidx  = obj.hidx;
@@ -115,7 +115,7 @@ public:
 
     template <typename H>
     friend H AbslHashValue(H h, const Compact_driver &s) {
-      return H::combine(std::move(h), s.hidx, s.idx);
+      return H::combine(std::move(h), s.hidx.get_hash(), s.idx);
     };
   };
   class __attribute__((packed)) Compact_class {
@@ -132,7 +132,7 @@ public:
     friend class Edge_raw_iterator_base;
     friend class CForward_edge_iterator;
     friend class CBackward_edge_iterator;
-    friend class mmap_map::hash<Node_pin::Compact_class>;
+    friend class mmap_lib::hash<Node_pin::Compact_class>;
   public:
 
     //constexpr operator size_t() const { I(0); return idx|(sink<<31); }
@@ -173,7 +173,7 @@ public:
     friend class Edge_raw_iterator_base;
     friend class CForward_edge_iterator;
     friend class CBackward_edge_iterator;
-    friend class mmap_map::hash<Node_pin::Compact_class_driver>;
+    friend class mmap_lib::hash<Node_pin::Compact_class_driver>;
   public:
 
     //constexpr operator size_t() const { I(0); return idx|(sink<<31); }
@@ -203,26 +203,26 @@ public:
 
   template <typename H>
   friend H AbslHashValue(H h, const Node_pin& s) {
-    return H::combine(std::move(h), (int)s.hidx, (int)s.idx, s.sink); // Ignore lgraph pointer in hash
+    return H::combine(std::move(h), s.hidx.get_hash(), (int)s.idx, s.sink); // Ignore lgraph pointer in hash
   }
 
-  Node_pin() : top_g(0), current_g(0), hidx(0), idx(0), pid(0), sink(false) { }
+  Node_pin() : top_g(0), current_g(0), idx(0), pid(0), sink(false) { }
   Node_pin(LGraph *_g, Compact comp);
   Node_pin(LGraph *_g, Compact_driver comp);
   Node_pin(LGraph *_g, Compact_class comp);
   Node_pin(LGraph *_g, Compact_class_driver comp);
 
   Compact get_compact() const {
-    return Compact(hidx,idx,sink);
+    return Compact(hidx, idx, sink);
   }
 
   Compact_driver get_compact_driver() const {
     I(!sink);
-    return Compact_driver(hidx,idx);
+    return Compact_driver(hidx, idx);
   }
 
   Compact_class get_compact_class() const {
-    return Compact_class(idx,sink);
+    return Compact_class(idx, sink);
   }
 
   Compact_class_driver get_compact_class_driver() const {
@@ -269,7 +269,7 @@ public:
     current_g = obj.current_g;
     idx       = obj.idx;
     pid       = obj.pid;
-    hidx       = obj.hidx;
+    hidx      = obj.hidx;
     sink      = obj.sink;
 
     return *this;
@@ -314,12 +314,12 @@ public:
   // END ATTRIBUTE ACCESSORS
 };
 
-namespace mmap_map {
+namespace mmap_lib {
 template <>
 struct hash<Node_pin::Compact> {
   size_t operator()(Node_pin::Compact const &o) const {
     uint64_t h = o.idx;
-    h = (h<<12) ^ o.hidx ^ o.idx;
+    h = (h<<12) ^ o.hidx.get_hash() ^ o.idx;
     return hash<uint64_t>{}((h<<1) + o.sink);
   }
 };
@@ -328,7 +328,7 @@ template <>
 struct hash<Node_pin::Compact_driver> {
   size_t operator()(Node_pin::Compact_driver const &o) const {
     uint64_t h = o.idx;
-    h = (h<<12) ^ o.hidx ^ o.idx;
+    h = (h<<12) ^ o.hidx.get_hash() ^ o.idx;
     return hash<uint64_t>{}(h);
   }
 };

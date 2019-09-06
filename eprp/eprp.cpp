@@ -220,7 +220,7 @@ void Eprp::elaborate() {
   last_cmd_var.clear();
 };
 
-void Eprp::process_ast_handler(const mmap_map::Tree_index &parent, const mmap_map::Tree_index &self, const Ast_parser_node &node) {
+void Eprp::process_ast_handler(const mmap_lib::Tree_index &self, const Ast_parser_node &node) {
   auto txt = scan_text(node.token_entry);
   fmt::print("level:{} pos:{} te:{} rid:{} txt:{}\n", self.level, self.pos, node.token_entry, node.rule_id, txt);
 
@@ -248,7 +248,7 @@ void Eprp::process_ast() {
     fmt::print("ti.level:{} ti.pos:{}\n", ti.level, ti.pos);
   }
 
-  ast->each_bottom_up_fast(std::bind(&Eprp::process_ast_handler, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+  ast->each_bottom_up_fast(std::bind(&Eprp::process_ast_handler, this, std::placeholders::_1, std::placeholders::_2));
 }
 
 void Eprp::run_cmd(const std::string &cmd, Eprp_var &var) {

@@ -88,8 +88,8 @@ public:
   static bool    exists(std::string_view path, std::string_view name);
   static LGraph *try_find_lgraph(std::string_view path, std::string_view name);
   static LGraph *try_find_lgraph(std::string_view path, Lg_type_id lgid);
-  LGraph        *try_find_lgraph(std::string_view name);
-  LGraph        *try_find_lgraph(Lg_type_id lgid);
+  LGraph        *try_find_lgraph(std::string_view name) const;
+  LGraph        *try_find_lgraph(Lg_type_id lgid) const;
 
   Sub_node &reset_sub(std::string_view name, std::string_view source);
   Sub_node &setup_sub(std::string_view name, std::string_view source);

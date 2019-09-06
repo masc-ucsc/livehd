@@ -3,13 +3,6 @@
 
 #include "absl/container/flat_hash_map.h"
 
-#ifndef likely
-#define likely(x) __builtin_expect((x), 1)
-#endif
-#ifndef unlikely
-#define unlikely(x) __builtin_expect((x), 0)
-#endif
-
 #include "lgedge.hpp"
 #include "lgraphbase.hpp"
 #include "node_type_base.hpp"
@@ -34,70 +27,13 @@ protected:
   friend class Backward_edge_iterator;
   friend class Fast_edge_iterator;
 
-  struct Expanded_hierarchy_index {
-    Expanded_hierarchy_index(uint64_t gpehidx, Lg_type_id plgid, Index_ID pnid)
-        : grand_parent_ehidx(gpehidx)
-        , parent_lgid(plgid)
-        , parent_nid(pnid) {}
-    uint64_t   grand_parent_ehidx;
-    Lg_type_id parent_lgid;
-    Index_ID   parent_nid;
-  };
+  Hierarchy_tree  htree;
 
-  using Hierarchy_map = mmap_map::map<Hierarchy_index, Expanded_hierarchy_index>;
-
-  Hierarchy_map hierarchy_map;
-
-  Lg_type_id get_hierarchy_lgid(const Hierarchy_index &hidx) const {
-    if (!hidx)
-      return lgid;
-
-    Hierarchy_map_key up_hkey(hidx, 0);
-    auto up_it = top_g->hierarchy_map.find(up_hkey);
-    I(up_it != top_g->hierarchy_map.end());
-    return top_g->hierarchy_map.get(up_it).lgid;
-  }
-
-  Hierarchy_index hierarchy_go_down(LGraph *top_g, const Hierarchy_index &hidx, Index_ID current_nid) const {
-
-    Hierarchy_index down_hidx;
-
-    Hierarchy_map_key up_hkey(child_hidx, 0);
-    Hierarchy_map_key down_hkey(hidx, current_nid);
-
-    auto down_it = top_g->hierarchy_map.find(down_key);
-    if (down_it != top_g->hierarchy_map.end()) {
-#ifndef NDEBUG
-      auto up_it = top_g->hierarchy_map.find(up_hkey);
-      I(up_it != top_g->hierarchy_map.end());
-      const auto &up_data = top_g->hierarchy_map.get(up_it);
-      I(up_data.hidx == hidx);
-      I(up_data.nid  == current_nid);
-      I(up_data.lgid == lgid);
-#endif
-
-      const auto &data = top_g->hierarchy_map.get(down_it);
-      return data.hidx;
-    }
-
-    uint64_t child_hidx = top_g->hierarchy_map.size();
-
-    auto child_lgid = get_type_sub(current_nid);
-    auto up_it = top_g->hierarchy_map.find(up_hkey);
-    if (up_it == top_g->hierarchy_map.end()) {
-      top_g->hierarchy_map.set(up_hkey, {hidx, current_nid, lgid});
-    } else {
-      const auto &up_data = top_g->hierarchy_map.get(up_it);
-      I(up_data.hidx == hidx);
-      I(up_data.nid  == current_nid);
-      I(up_data.lgid == lgid);
-    }
-
-    top_g->hierarchy_map.set(down_key, {hidx, current_nid, child_lgid});
-
-    I(get_hierarchy_lgid(child_hidx) == child_lgid);
-
-    return child_hidx;
+  void htree_rebuild();
+  Hierarchy_tree *ref_htree() {
+    if (htree.empty())
+      htree_rebuild();
+    return &htree;
   }
 
   Index_ID create_node_int() final;
@@ -154,26 +90,6 @@ protected:
   XEdge_iterator out_edges(const Node &node) const;
   XEdge_iterator inp_edges(const Node &node) const;
 
-  const LGraph *find_sub_lgraph_const(const Hierarchy_index &hidx) const {
-
-    if (!hidx)
-      return this;
-
-    auto class_lgid = get_hierarchy_class_lgid(hidx);
-    auto *current_g = LGraph::open(path, library->get_name(class_lgid));
-    I(current_g);
-
-    auto [p_lgid, p_nid] = get_hierarchy_parent_class(hidx);
-    auto *parent_g = LGraph::open(path, p_lgid);
-    I(parent_g);
-    auto child_lgid = parent_g->get_type_sub(p_nid);
-
-    auto *child_g = LGraph::open(path, child_lgid);
-    I(child_g);
-
-    return child_g;
-  }
-
   bool has_outputs(const Node_pin &pin) const {
     I(pin.get_idx() < node_internal.size());
     I(node_internal[pin.get_idx()].is_root());
@@ -191,7 +107,7 @@ protected:
     I(node_internal[src.get_idx()].is_root());
     I(node_internal[dst.get_idx()].is_root());
 
-    return node_internal[src.get_idx()].del(dst.get_idx(),dst.get_pid(),dst.is_input());
+    return node_internal.ref(src.get_idx())->del(dst.get_idx(),dst.get_pid(),dst.is_input());
   }
 
   bool is_graph_io(Index_ID idx) const {
@@ -239,10 +155,6 @@ public:
 
   virtual ~LGraph();
 
-  Hierarchy_index get_hierarchy_root() const {
-    return 0; // 0 is hierarchy_root
-  }
-
   bool has_edge(const Node_pin &driver, const Node_pin &sink) const;
 
   Index_ID add_edge(const Node_pin &src, const Node_pin &dst) {
@@ -276,16 +188,8 @@ public:
   static void    rename(std::string_view path, std::string_view orig, std::string_view dest);
 
   void clear() override;
-  void reload() override;
   void sync() override;
   void emplace_back() override;
-
-  const LGraph *find_sub_lgraph(const Hierarchy_index &hidx) const {
-    return find_sub_lgraph_const(hidx);
-  }
-  LGraph *find_sub_lgraph(const Hierarchy_index &hidx) {
-    return const_cast<LGraph *>(find_sub_lgraph_const(hidx));
-  }
 
   Node_pin add_graph_input(std::string_view str, Port_ID pos, uint16_t bits);
   Node_pin add_graph_output(std::string_view str, Port_ID pos, uint16_t bits);

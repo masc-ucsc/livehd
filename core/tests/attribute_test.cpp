@@ -60,7 +60,7 @@ TEST_F(Setup_attr_test, data_test1) {
     char b;
   };
   static constexpr char name[] = "dest1";
-  using dtest1 = Attribute<name,Node, mmap_map::map<Node::Compact_class, Data> >;
+  using dtest1 = Attribute<name,Node, mmap_lib::map<Node::Compact_class, Data> >;
 
   b.sample("setup");
 

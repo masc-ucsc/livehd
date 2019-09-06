@@ -26,9 +26,10 @@ CFast_edge_iterator CFast_edge_iterator::operator++() {
     if (!sub.is_black_box()) {
       h_stack.emplace_back(Node(top_g, current_g, hidx, nid));
 
-      hidx = current_g->hierarchy_go_down(top_g, hidx, nid);
+      hidx = top_g->ref_htree()->get_depth_preorder_next(hidx);
 
       current_g = LGraph::open(top_g->get_path(), sub.get_name());
+      I(current_g == top_g->ref_htree()->ref_lgraph(hidx));
 
       nid = current_g->fast_next(0);
     }
@@ -95,20 +96,6 @@ Edge_raw_iterator::CPod_iterator Edge_raw_iterator::CPod_iterator::operator++() 
 
 bool Edge_raw_iterator_base::try_insert_pending(const Node &node, const Node::Compact &compact) {
   I(node.get_compact() == compact);
-
-  I(pending->empty());
-  bool pushed = false;
-  for (auto &it : *frontier) {
-    I(it.second >= 0);
-
-#if 1
-    // Faster
-    Node node = current_node;
-    node.update(it.first);
-#else
-    // Slower
-    Node node(current_node.get_top_lgraph(), it.first);
-#endif
 
   if (global_visited->find(node.get_compact())!=global_visited->end())
     return false;
@@ -184,7 +171,7 @@ bool Edge_raw_iterator_base::update_frontier() {
   if (*hardcoded_nid) {
     // NOTE: Not very fast API, but it is called once per iterator
     auto *top_lg = current_node.get_top_lgraph();
-    Node node(top_lg, top_lg, top_lg->get_hierarchy_root(), *hardcoded_nid);
+    Node node(top_lg, top_lg, Hierarchy_tree::root_index(), *hardcoded_nid);
     pending->insert(node.get_compact());
     *hardcoded_nid = 0;
     return true;
@@ -295,7 +282,7 @@ CForward_edge_iterator::CForward_edge_iterator(
 
   I(pending->empty());
 
-  insert_graph_start_points(lg, lg->get_hierarchy_root());
+  insert_graph_start_points(lg, Hierarchy_tree::root_index());
 
   I(!pending->empty());
   auto it = pending->begin();
@@ -321,7 +308,7 @@ CBackward_edge_iterator::CBackward_edge_iterator(
 
   I(pending->empty());
 
-  insert_graph_start_points(lg, lg->get_hierarchy_root());
+  insert_graph_start_points(lg, Hierarchy_tree::root_index());
 
   I(!pending->empty());
   auto it = pending->begin();

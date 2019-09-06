@@ -25,7 +25,7 @@ Node_pin::Node_pin(LGraph *_g, Compact comp)
   ,idx(comp.idx)
   ,pid(_g->get_dst_pid(comp.idx))
   ,sink(comp.sink) {
-  current_g = top_g->find_sub_lgraph(hidx);
+  current_g = top_g->ref_htree()->ref_lgraph(hidx);
   I(current_g->is_valid_node_pin(idx));
 }
 
@@ -36,19 +36,19 @@ Node_pin::Node_pin(LGraph *_g, Compact_driver comp)
   ,pid(_g->get_dst_pid(comp.idx))
   ,sink(true) {
 
-  I(hidx);
-  current_g = top_g->find_sub_lgraph(hidx);
+  I(!hidx.is_invalid());
+  current_g = top_g->ref_htree()->ref_lgraph(hidx);
   I(current_g->is_valid_node_pin(idx));
 }
 
 Node_pin::Node_pin(LGraph *_g, Compact_class_driver comp)
   :top_g(_g)
-  ,hidx(_g->get_hierarchy_root())
+  ,hidx(Hierarchy_tree::root_index())
   ,idx(comp.idx)
   ,pid(_g->get_dst_pid(comp.idx))
   ,sink(false) {
 
-  current_g = top_g; // top_g->find_sub_lgraph(hid);
+  current_g = top_g; // top_g->ref_htree()->ref_lgraph(hid);
   I(current_g->is_valid_node_pin(idx));
 }
 
@@ -132,7 +132,7 @@ std::string Node_pin::debug_name() const {
   std::string name;
   if (!sink)
     if (Ann_node_pin_name::ref(current_g)->has_key(get_compact_class_driver()))
-      name = Ann_node_pin_name::ref(current_g)->get_val(get_compact_class_driver());
+      name = Ann_node_pin_name::ref(current_g)->get_val_sview(get_compact_class_driver());
 
   return absl::StrCat("node_pin_", std::to_string(get_node().nid), "_", name, ":", std::to_string(pid), sink?"s":"d");
   //not a acceptable format for dot
@@ -141,14 +141,14 @@ std::string Node_pin::debug_name() const {
 
 std::string_view Node_pin::get_name() const {
   I(has_name()); // get_name should be called for named driver_pins
-  return Ann_node_pin_name::ref(current_g)->get_val(get_compact_class_driver());
+  return Ann_node_pin_name::ref(current_g)->get_val_sview(get_compact_class_driver());
 }
 
 std::string_view Node_pin::create_name() const {
   auto ref = Ann_node_pin_name::ref(current_g);
 
   if (ref->has_key(get_compact_class_driver()))
-    return ref->get_val(get_compact_class_driver());
+    return ref->get_val_sview(get_compact_class_driver());
 
   std::string signature(get_node().create_name());
 
@@ -164,7 +164,7 @@ std::string_view Node_pin::create_name() const {
   }
 
   const auto it = ref->set(get_compact_class_driver(), signature);
-  return ref->get_val(it);
+  return ref->get_val_sview(it);
 }
 
 bool Node_pin::has_name() const {

@@ -119,7 +119,7 @@ LGraph *Graph_library::try_find_lgraph(std::string_view path, std::string_view n
   return nullptr;
 }
 
-LGraph *Graph_library::try_find_lgraph(std::string_view name) {
+LGraph *Graph_library::try_find_lgraph(std::string_view name) const {
   I(global_name2lgraph.find(path) != global_name2lgraph.end());
 
   const auto &glib2 = global_name2lgraph[path];
@@ -131,7 +131,7 @@ LGraph *Graph_library::try_find_lgraph(std::string_view name) {
   return nullptr;
 }
 
-LGraph *Graph_library::try_find_lgraph(Lg_type_id lgid) {
+LGraph *Graph_library::try_find_lgraph(Lg_type_id lgid) const {
   if (lgid>=attributes.size())
     return nullptr;
 
@@ -149,6 +149,11 @@ LGraph *Graph_library::try_find_lgraph(Lg_type_id lgid) {
 #endif
 
   return lg;
+}
+
+LGraph *Graph_library::try_find_lgraph(std::string_view path, Lg_type_id lgid) {
+  const Graph_library *lib = instance(path); // path must be full path
+  return lib->try_find_lgraph(lgid);
 }
 
 Sub_node &Graph_library::reset_sub(std::string_view name, std::string_view source) {

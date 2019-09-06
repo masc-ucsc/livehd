@@ -9,6 +9,9 @@
 #include "tech_library.hpp"
 #include "graph_library.hpp"
 
+static_assert(sizeof(Hierarchy_data) == 8);
+static_assert(sizeof(Hierarchy_index) == 8);
+
 std::string Lgraph_base_core::Setup_path::last_path = "";
 
 Lgraph_base_core::Setup_path::Setup_path(std::string_view path) {

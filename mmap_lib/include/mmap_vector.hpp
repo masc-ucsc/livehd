@@ -139,6 +139,7 @@ protected:
   mutable size_t    entries_capacity; // size/sizeof - space_control
   mutable size_t    mmap_size;
   mutable int       mmap_fd;
+  const std::string mmap_path;
   const std::string mmap_name;
 
   void gc_done(void *base) const {
@@ -177,14 +178,22 @@ protected:
   }
 
 public:
+  explicit vector(std::string_view _path, std::string_view _map_name)
+		: mmap_base(0)
+		, entries_size(nullptr)
+		, entries_capacity(0)
+		, mmap_size(0)
+		, mmap_fd(-1)
+	  , mmap_path(_path.empty()?".":_path)
+		, mmap_name{std::string(_path) + std::string("/") + std::string(_map_name)} {
 
-  explicit vector(std::string_view filename)
-      : mmap_base(0)
-      , entries_size(nullptr)
-      , entries_capacity(0)
-      , mmap_size(0)
-      , mmap_fd(-1)
-      , mmap_name(filename) {
+		if (mmap_path != ".") {
+			struct stat sb;
+      if (stat(mmap_path.c_str(), &sb) != 0 || !S_ISDIR(sb.st_mode)) {
+        int e = mkdir(mmap_path.c_str(), 0755);
+        assert(e>=0);
+      }
+    }
   }
 
   explicit vector()
@@ -262,7 +271,7 @@ public:
   }
 
 	[[nodiscard]] T *ref(size_t const& idx) {
-    const auto *base = ref_base();
+    auto *base = ref_base();
     assert(idx < size());
     return &base[idx];
   }
@@ -324,8 +333,10 @@ public:
     assert(entries_size     == nullptr);
   }
 
-  inline std::string_view get_filename() const { return mmap_name; }
-  inline size_t capacity() const { return entries_capacity; }
+  [[nodiscard]] inline std::string_view get_name() const { return mmap_name; }
+  [[nodiscard]] inline std::string_view get_path() const { return mmap_path; }
+
+  [[nodiscard]] inline size_t capacity() const { return entries_capacity; }
 
   uint64_t *ref_config_data(int offset) const {
     assert(offset<4096/8);

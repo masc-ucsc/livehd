@@ -961,22 +961,15 @@ public:
 	using iterator = Iter<false>;
 	using const_iterator = Iter<true>;
 
-	explicit map(std::string_view _map_name)
-		: Hash{Hash{}}
-	  , mmap_name{_map_name} {
-
-    setup_pointers();
-	}
-
 	explicit map(std::string_view _path, std::string_view _map_name)
 		: Hash{Hash{}}
+	  , mmap_path(_path.empty()?".":_path)
 	  , mmap_name{std::string(_path) + std::string("/") + std::string(_map_name)} {
 
-    struct stat sb;
-    if (_path != ".") {
-      std::string path(_path);
-      if (stat(path.c_str(), &sb) != 0 || !S_ISDIR(sb.st_mode)) {
-        int e = mkdir(path.c_str(), 0755);
+    if (mmap_path != ".") {
+			struct stat sb;
+      if (stat(mmap_path.c_str(), &sb) != 0 || !S_ISDIR(sb.st_mode)) {
+        int e = mkdir(mmap_path.c_str(), 0755);
         assert(e>=0);
       }
     }
@@ -1280,6 +1273,9 @@ public:
 	[[nodiscard]] bool empty() const {
 		return 0 == *mNumElements;
 	}
+
+  [[nodiscard]] inline std::string_view get_name() const { return mmap_name; }
+  [[nodiscard]] inline std::string_view get_path() const { return mmap_path; }
 
 	[[nodiscard]] size_t capacity() const {
 		if (mmap_base)
@@ -1641,20 +1637,21 @@ private:
   }
 
 	// members are sorted so no padding occurs
-	mutable Node *mKeyVals = nullptr;
-	mutable uint8_t *mInfo = nullptr;
-	mutable size_t *mNumElements;                                                   // 8 byte 24
-	mutable size_t *mMask;                                                          // 8 byte 32
-	mutable size_t *mMaxNumElementsAllowed;                                         // 8 byte 40
-	mutable InfoType *mInfoInc;                                                     // 4 byte 44
-	mutable InfoType *mInfoHashShift;                                               // 4 byte 48
-	std::string       mmap_name;
-	mutable int       mmap_fd       = -1;
-	mutable size_t    mmap_size     = 0;
-	mutable uint64_t *mmap_base     = 0;
-	mutable int       mmap_txt_fd   = -1;
-	mutable size_t    mmap_txt_size = 0;
-	mutable uint64_t *mmap_txt_base = 0;
+	mutable Node      *mKeyVals = nullptr;
+	mutable uint8_t   *mInfo = nullptr;
+	mutable size_t    *mNumElements;
+	mutable size_t    *mMask;
+	mutable size_t    *mMaxNumElementsAllowed;
+	mutable InfoType  *mInfoInc;
+	mutable InfoType  *mInfoHashShift;
+	const std::string  mmap_name;
+	const std::string  mmap_path;
+	mutable int        mmap_fd       = -1;
+	mutable size_t     mmap_size     = 0;
+	mutable uint64_t  *mmap_base     = 0;
+	mutable int        mmap_txt_fd   = -1;
+	mutable size_t     mmap_txt_size = 0;
+	mutable uint64_t  *mmap_txt_base = 0;
 #ifndef NDEBUG
 	size_t conflicts = 0;
 #endif

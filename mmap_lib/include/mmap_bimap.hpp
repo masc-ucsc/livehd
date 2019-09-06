@@ -4,12 +4,12 @@
 
 #include "mmap_map.hpp"
 
-namespace mmap_map {
+namespace mmap_lib {
 template <typename Key, typename T>
 class bimap {
 public:
-  using Key2val_type = typename mmap_map::map<Key,T>;
-  using Val2key_type = typename mmap_map::map<T,Key>;
+  using Key2val_type = typename mmap_lib::map<Key,T>;
+  using Val2key_type = typename mmap_lib::map<T,Key>;
   Key2val_type key2val;
   Val2key_type val2key;
 
@@ -51,7 +51,8 @@ public:
   [[nodiscard]] bool has_key(const Key &key) const { return key2val.has(key); }
   [[nodiscard]] bool has_val(const T   &val) const { return val2key.has(val); }
 
-	[[nodiscard]] T    get_val(const Key &key) const { return key2val.get(key); }
+	[[nodiscard]] std::string_view get_val_sview(const Key &key) const { return key2val.get(key); }
+	[[nodiscard]] const T &get_val(const Key &key) const { return key2val.get(key); }
 	[[nodiscard]] Key  get_key(const T &val  ) const { return val2key.get(val); }
 
   [[nodiscard]] iterator        find(const Key &key)       { return key2val.find(key); }
@@ -108,10 +109,11 @@ public:
 
 	[[nodiscard]] Key get_key(const iterator &it) const       { return key2val.get_key(it); }
 	[[nodiscard]] Key get_key(const const_iterator &it) const { return key2val.get_key(it); }
-  [[nodiscard]] T get_val(const iterator &it) const       { return key2val.get(it); }
-	[[nodiscard]] T get_val(const const_iterator &it) const { return key2val.get(it); }
+  [[nodiscard]] const T &get_val(const iterator &it) const       { return key2val.get(it); }
+	[[nodiscard]] const T &get_val(const const_iterator &it) const { return key2val.get(it); }
+	[[nodiscard]] std::string_view get_val_sview(const const_iterator &it) const { return key2val.get_sview(it); }
 
 };
 
-} // namespace mmap_map
+} // namespace mmap_lib
 

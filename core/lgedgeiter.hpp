@@ -207,10 +207,10 @@ protected:
 
 public:
   Fast_edge_iterator() = delete;
-  explicit Fast_edge_iterator(LGraph *_g, bool _visit_sub) : top_g(_g), it_hidx(_g->get_hierarchy_root()), it_nid(0), visit_sub(_visit_sub) { }
+  explicit Fast_edge_iterator(LGraph *_g, bool _visit_sub) : top_g(_g), it_hidx(Hierarchy_tree::root_index()), it_nid(0), visit_sub(_visit_sub) { }
 
   CFast_edge_iterator begin() const;
-  CFast_edge_iterator end() const { return CFast_edge_iterator(top_g, top_g, top_g->get_hierarchy_root(), 0, visit_sub); }  // 0 is end index for iterator
+  CFast_edge_iterator end() const { return CFast_edge_iterator(top_g, top_g, Hierarchy_tree::root_index(), 0, visit_sub); }  // 0 is end index for iterator
 };
 
 class Backward_edge_iterator {
