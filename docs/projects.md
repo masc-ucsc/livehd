@@ -303,6 +303,16 @@ Main features:
 * Do hierarchy. Hierarchy preserves symmetry. Bassed on "A hierarchical approach for generating regular ﬂoorplans"
 * Different partitions are marked with different colors.
 
+Some related papers in clustering:
+* FADE: Graph dra wing, clustering and visual abstraction
+* A Semi-Persistent Clustering Technique for VLSI Circuit Placement
+* Net Cluster: A Net-Reduction-Based Clustering Preprocessing Algorithm for Partitioning and Placement
+* LSC: A large-scale consensus-based clustering algorithm for high-performance FPGAs
+* Enumeration technique in very large-scale integration fixed-outline floorplanning
+* A hierarchical approach for generating regular ﬂoorplans
+* Network Flow Based Datapath Bit Slicing
+
+
 ## Performance Monitoring Infrastructure
 
 We perform regression for correctness, we should have regressions for

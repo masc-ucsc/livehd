@@ -1007,7 +1007,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
           auto driver_node = old_node_to_new_node[peer_driver_node.get_compact()].get_node(new_lg);
           auto driver_pin = driver_node.setup_driver_pin(in_edge.driver.get_pid());
           auto sink_pin = new_node.setup_sink_pin(in_edge.sink.get_pid());
-          if(!new_lg->has_edge(driver_pin, sink_pin))
+          if(!new_lg->has_edge(driver_pin, sink_pin)) // TODO: THis is slow. Can we do better?
             new_lg->add_edge(driver_pin, sink_pin);
         }
       }
@@ -1019,7 +1019,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
           auto sink_node = old_node_to_new_node[peer_sink_node.get_compact()].get_node(new_lg);
           auto sink_pin = sink_node.setup_sink_pin(out_edge.sink.get_pid());
           auto driver_pin = new_node.setup_driver_pin(out_edge.driver.get_pid());
-          if(!new_lg->has_edge(driver_pin, sink_pin))
+          if(!new_lg->has_edge(driver_pin, sink_pin)) // TODO: THis is slow. Can we do better?
             new_lg->add_edge(driver_pin, sink_pin);
         }
       }
