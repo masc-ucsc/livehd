@@ -416,6 +416,19 @@ Main features:
     * Have DB with fuzz regex to point potentially similar variables
 * Have a fuzz regex to find very similar messages to collapse at entry ("missing string" or "string not found")
 
+## RippleFPGA
+
+RippleFPGA is one of the best open source placers avaiable for FPGAs (ICCD competition). The idea is to integrate
+it with LGraph.
+
+https://github.com/cuhk-eda/ripple-fpga
+
+Dependence: none
+
+Main features:
+* Create a bridge to/from LGraph and ripple-fpga
+* Being able to transfer placed design to Rapidwright
+
 ## NextPNR
 
 Integrate with the FPGA synthesis from Yosys
@@ -424,6 +437,7 @@ Dependence: none
 
 Main features:
 * Create a bridge to/from LGraph and nextpntr
+* Being able to transfer placed design to Rapidwright
 
 ## VPR
 
@@ -433,6 +447,7 @@ Dependence: none
 
 Main features:
 * Create a bridge to/from LGraph and nextpntr
+* Being able to transfer placed design to Rapidwright
 
 # Active Projects (already selected)
 
