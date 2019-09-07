@@ -107,11 +107,17 @@ Main features:
 
  * Shows current and previou[s] values for each variable
  * double click on the variable gets you to the driver.
- * clicking on variable shows on the "search window" the driver (top) and consumers (bottom) from the variable
+ * Clicking on variable shows on the "search window" the driver (top) and consumers (bottom) from the variable
  * It uses source map (https://github.com/mgreter/sourcemap.cpp) to show the "original" code, not the "generated" verilog or "C".
  * Variables can be draged to/from the waveform window. (shift+click adds to waveform view, shift+double click adds driver to waveform)
  * There can be several source windows
- * Maybe integrate/leverage scintilla (must integrate with GUI, and other waveform viewer)
+ * Style: avoid dialogs, minimalist, multiple panels, tune for dark background, vi-like, fuzzy search, focus on read code (not edit, but allow edit)
+ * Some edits to potentially leverage code/ideas:
+     * Very fast load times: https://github.com/arximboldi/ewig
+     * Clean value search (debug): https://gitlab.com/cppit/jucipp
+     * neovim component (implement vim commands): https://github.com/rhysd/neovim-component
+ * Option: juice integrated with neovim, variables underneath, add verilog/pyrope style, read value dump (mmap-VCD), go back/forth time...
+ * Option: integrate/leverage scintilla (must integrate with GUI, and other waveform viewer) and neovim
 
 ### Waveform Window
 
@@ -429,7 +435,11 @@ Dependence: none
 
 Main features:
 * Create a bridge to/from LGraph and ripple-fpga
+* Replace solver with https://developers.google.com/optimization/lp/glop
+* Replace patoh with https://github.com/SebastianSchlag/kahypar
 * Being able to transfer placed design to Rapidwright
+* Remove boost
+* Target Alveo U250
 
 ## NextPNR
 
