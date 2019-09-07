@@ -65,7 +65,10 @@ Node::Node(LGraph *_g, const Hierarchy_index &_hidx, Compact_class comp)
   ,nid(comp.nid) {
   I(nid);
   I(top_g);
-  current_g = top_g->ref_htree()->ref_lgraph(hidx);
+  if (hidx.is_root())
+    current_g = top_g;
+  else
+    current_g = top_g->ref_htree()->ref_lgraph(hidx);
 
   I(current_g->is_valid_node(nid));
   //I(top_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());

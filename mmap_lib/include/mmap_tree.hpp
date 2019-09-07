@@ -40,6 +40,7 @@ public:
 
   bool is_invalid() const { return level == -1 || pos == -1; }
   void invalidate() { level == -1; pos = -1; }
+  bool is_root() const { return level == 0; }
 };
 
 template <typename X>
@@ -184,7 +185,7 @@ public:
 
     bool all_used = ((*next_sibling) >> 2) != 0 || *next_sibling == 3;
     if ((sibling.pos&3)+1 > *next_sibling) {
-      return Tree_index(-1,-1); // No more siblings
+      return invalid_index(); // No more siblings
     }
 
     auto pos = sibling.pos + 1;
@@ -264,7 +265,7 @@ public:
     explicit Tree_sibling_iterator(const Tree_index &_b, const tree<X> *_t) : ti(_b), t(_t) {}
 
     CTree_sibling_iterator begin() const { return CTree_sibling_iterator(ti, t); }
-    CTree_sibling_iterator end()   const { return CTree_sibling_iterator(Tree_index(-1,-1), t); }
+    CTree_sibling_iterator end()   const { return CTree_sibling_iterator(invalid_index(), t); }
   };
 
   tree();
@@ -328,6 +329,7 @@ public:
     return Tree_index(level, pos);
   }
 
+  static Tree_index invalid_index() { return Tree_index(-1,-1); }
   static Tree_index root_index() { return Tree_index(0,0); }
   const  Tree_index get_root() const { return Tree_index(0,0); }
   void              set_root(const X &data);
@@ -356,7 +358,7 @@ public:
   }
   Tree_sibling_iterator  children(const Tree_index &start_index) const {
     if (is_leaf(start_index))
-      return Tree_sibling_iterator(Tree_index(-1,-1), this);
+      return Tree_sibling_iterator(invalid_index(), this);
 
     return Tree_sibling_iterator(get_first_child(start_index), this);
   }
@@ -366,12 +368,7 @@ public:
     return (*ref_first_child_pos(index)) == -1;
   }
 
-  bool is_root(const Tree_index &index) const {
-
-    GI(index.level == 0, index.pos == 0);
-
-    return index.level == 0;
-  }
+  bool is_root(const Tree_index &index) const { return index.is_root(); }
 
   bool has_single_child(const Tree_index &index) const {
     auto *fc_pos = ref_first_child_pos(index);
@@ -533,7 +530,7 @@ const Tree_index tree<X>::get_depth_preorder_next(const Tree_index &child) const
 
   // It was leaf, without more siblings. Go to parent with sibling
   auto parent = get_parent(child);
-  while (!is_root(parent)) {
+  while (!parent.is_root()) {
     auto parent_next = get_sibling_next(parent);
     if (!parent_next.is_invalid())
       return parent_next;
@@ -541,7 +538,7 @@ const Tree_index tree<X>::get_depth_preorder_next(const Tree_index &child) const
     parent = get_parent(parent);
   }
 
-  return Tree_index(-1,-1);
+  return invalid_index();
 }
 
 template <typename X>
@@ -593,7 +590,7 @@ void tree<X>::each_top_down_fast(std::function<void(const Tree_index &self, cons
 template <typename X>
 const Tree_index tree<X>::get_child(const Tree_index &top) const {
   auto *fc = ref_first_child_pos(top);
-  if (*fc == -1) return Tree_index(-1, -1);
+  if (*fc == -1) return invalid_index();
 
   return Tree_index(top.level + 1, *fc);
 }

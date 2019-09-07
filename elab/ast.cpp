@@ -49,9 +49,9 @@ void Ast_parser::up(Rule_id rid_up) {
   }
 
   level = level - 1;
-  if (last_added.size()>level) {
+  if ((int)last_added.size()>level) {
     last_added.pop_back();
-    I(last_added.size() == level);
+    I((int)last_added.size() == level);
   }
   if (down_added>level) {
     down_added--;
