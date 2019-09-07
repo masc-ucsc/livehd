@@ -21,13 +21,14 @@ protected:
   mmap_lib::Tree_level             down_added;
   const std::string_view buffer;  // const because it can not change at runtime
 
+  std::vector<Rule_id>              down_rid;
   std::vector<mmap_lib::Tree_index> last_added;
 
   void add_track_parent(const mmap_lib::Tree_index &index);
 public:
   Ast_parser(std::string_view buffer, Rule_id top_rule);
 
-  void down() { level = level + 1; }
+  void down(Rule_id rid);
   void up(Rule_id rid);
   void add(Rule_id rid, Token_entry te);
 };

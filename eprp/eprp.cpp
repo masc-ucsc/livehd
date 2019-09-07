@@ -48,7 +48,7 @@ bool Eprp::rule_label_path(const std::string &cmd_line, Eprp_var &next_var) {
   }
 
   std::string path;
-  ast->down();
+  ast->down(Eprp_rule_label_path);
   bool ok = rule_path(path);
   ast->up(Eprp_rule_label_path);
   if (!ok) {
@@ -112,19 +112,19 @@ bool Eprp::rule_cmd_full() {
 
   Eprp_var next_var;
 
-  ast->down();
+  ast->down(Eprp_rule_cmd_full);
   bool cmd_found = rule_cmd_line(cmd_line);
   ast->up(Eprp_rule_cmd_full);
   if (!cmd_found) return false;
 
   bool path_found;
   do {
-    ast->down();
+    ast->down(Eprp_rule_cmd_full);
     path_found = rule_label_path(cmd_line, next_var);
     ast->up(Eprp_rule_cmd_full);
   } while (path_found);
 
-  ast->down();
+  ast->down(Eprp_rule_cmd_full);
   run_cmd(cmd_line, next_var);
   ast->up(Eprp_rule_cmd_full);
 
@@ -140,7 +140,7 @@ bool Eprp::rule_pipe() {
   scan_next();
   eat_comments();
 
-  ast->down();
+  ast->down(Eprp_rule_pipe);
   bool try_either = rule_cmd_or_reg(false);
   ast->up(Eprp_rule_pipe);
   if (!try_either) {
@@ -153,12 +153,12 @@ bool Eprp::rule_pipe() {
 
 // rule_cmd_or_reg = rule_reg | rule_cmd_full
 bool Eprp::rule_cmd_or_reg(bool first) {
-  ast->down();
+  ast->down(Eprp_rule_cmd_or_reg);
   bool try_reg_rule = rule_reg(first);
   ast->up(Eprp_rule_cmd_or_reg);
   if (try_reg_rule) return true;
 
-  ast->down();
+  ast->down(Eprp_rule_cmd_or_reg);
   bool cmd_found = rule_cmd_full();
   ast->up(Eprp_rule_cmd_or_reg);
   return cmd_found;
@@ -166,7 +166,7 @@ bool Eprp::rule_cmd_or_reg(bool first) {
 
 // rule_top = rule_cmd_or_reg(first) rule_pipe*
 bool Eprp::rule_top() {
-  ast->down();
+  ast->down(Eprp_rule_top);
   bool try_either = rule_cmd_or_reg(true);
   ast->up(Eprp_rule_top);
   if (!try_either) {
@@ -202,7 +202,7 @@ bool Eprp::rule_top() {
 // top = parse_top+
 void Eprp::elaborate() {
   ast = std::make_unique<Ast_parser>(get_buffer(), Eprp_rule);
-  ast->down();
+  ast->down(Eprp_rule);
 
   while (!scan_is_end()) {
     eat_comments();
@@ -230,7 +230,7 @@ void Eprp::process_ast_handler(const mmap_lib::Tree_index &self, const Ast_parse
     // HERE: Children should iterate FAST, over all the children recursively
     // HERE: Move this iterate over children as a handle_command
 
-    for (const auto &ti : ast->get_children(self)) {
+    for (const auto &ti : ast->children(self)) {
       auto txt2 = scan_text(ast->get_data(ti).token_entry);
       if (ast->get_data(ti).rule_id == Eprp_rule_label_path)
         absl::StrAppend(&children_txt, " ", txt2, ":");

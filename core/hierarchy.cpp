@@ -33,5 +33,13 @@ Node Hierarchy_tree::get_instance_node(const Hierarchy_index &hidx) const {
   return Node(top, lg, hidx, data.nid);
 }
 
-void Hierarchy_tree::regenerate() {}
+void Hierarchy_tree::regenerate() {
+  I(false); // FIXME: implement (only for hierarchical)
+}
+
+Hierarchy_index Hierarchy_tree::go_down(const Node &node) const {
+  I(false); // FIXME: implement (only for hierarchical)
+
+  return Hierarchy_tree::root_index();
+}
 

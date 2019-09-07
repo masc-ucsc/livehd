@@ -29,10 +29,9 @@ protected:
 
   Hierarchy_tree  htree;
 
-  void htree_rebuild();
   Hierarchy_tree *ref_htree() {
     if (htree.empty())
-      htree_rebuild();
+      htree.regenerate();
     return &htree;
   }
 

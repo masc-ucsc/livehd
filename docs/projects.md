@@ -88,7 +88,8 @@ Main features:
 Live Hardware Development Viewer. The long term goal is to create an
 verdi/simvision alternative with a Live focus. This is a large project that
 should be split for 2 thesis (waveform and rest). The plan is to use nana++
-(http://nanapro.org/en-us/). Prof Renau has a skeleton for the application. 
+(http://nanapro.org/en-us/) or QT. Prof Renau has a skeleton for the
+application. 
 
 Some example screenshot:
  https://www.cadence.com/content/dam/cadence-www/global/en_US/images/old-tools/system-design-verification/debug_fig_sim_vision_windows.jpg
@@ -110,6 +111,7 @@ Main features:
  * It uses source map (https://github.com/mgreter/sourcemap.cpp) to show the "original" code, not the "generated" verilog or "C".
  * Variables can be draged to/from the waveform window. (shift+click adds to waveform view, shift+double click adds driver to waveform)
  * There can be several source windows
+ * Maybe integrate/leverage scintilla (must integrate with GUI, and other waveform viewer)
 
 ### Waveform Window
 

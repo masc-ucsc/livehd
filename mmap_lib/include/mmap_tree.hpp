@@ -165,7 +165,7 @@ public:
   Tree_index get_last_child(const Tree_index &parent_index) const {
     Tree_index child_index(parent_index.level+1, *ref_last_child_pos(parent_index));
 
-    GI(!child_index.is_invalid(), get_next_sibling(child_index).is_invalid());
+    GI(!child_index.is_invalid(), get_sibling_next(child_index).is_invalid());
 
     return child_index;
   }
@@ -174,12 +174,12 @@ public:
 
     Tree_index child_index(parent_index.level+1, *ref_first_child_pos(parent_index));
 
-    GI(!child_index.is_invalid(), get_next_sibling(child_index).is_invalid());
+    GI(!child_index.is_invalid(), get_sibling_next(child_index).is_invalid());
 
     return child_index;
   }
 
-  Tree_index get_next_sibling(const Tree_index &sibling) const {
+  Tree_index get_sibling_next(const Tree_index &sibling) const {
     const auto *next_sibling = ref_next_sibling_pos(sibling);
 
     bool all_used = ((*next_sibling) >> 2) != 0 || *next_sibling == 3;
@@ -229,6 +229,42 @@ public:
 
     CTree_depth_preorder_iterator begin() const { return CTree_depth_preorder_iterator(ti, t); }
     CTree_depth_preorder_iterator end()   const { return CTree_depth_preorder_iterator(Tree_index(-1,-1), t); }  // 0 is end index for iterator
+  };
+
+  class Tree_sibling_iterator {
+  public:
+    class CTree_sibling_iterator {
+    public:
+      CTree_sibling_iterator(const Tree_index &_ti, const tree<X> *_t) : ti(_ti), t(_t) {}
+      CTree_sibling_iterator operator++() {
+        CTree_sibling_iterator i(ti, t);
+
+        ti = t->get_sibling_next(ti);
+
+        return i;
+      };
+      bool operator!=(const CTree_sibling_iterator &other) {
+        I(t == other.t);
+        return ti != other.ti;
+      }
+      const Tree_index &operator*() const { return ti; }
+
+    private:
+      Tree_index     ti;
+      const tree<X> *t;
+    };
+
+  private:
+  protected:
+    Tree_index     ti;
+    const tree<X> *t;
+
+  public:
+    Tree_sibling_iterator() = delete;
+    explicit Tree_sibling_iterator(const Tree_index &_b, const tree<X> *_t) : ti(_b), t(_t) {}
+
+    CTree_sibling_iterator begin() const { return CTree_sibling_iterator(ti, t); }
+    CTree_sibling_iterator end()   const { return CTree_sibling_iterator(Tree_index(-1,-1), t); }
   };
 
   tree();
@@ -306,7 +342,6 @@ public:
   // void each_bottom_up(std::function<void(const Tree_index &parent, const Tree_index &self, const X &)> fn) const;
   // void each_depth_first(const Tree_index &start_index, std::function<void(const Tree_index &parent, const Tree_index &self, const
   // X &)> fn) const
-  const std::vector<Tree_index> get_children       (const Tree_index &start_index) const;
   const Tree_index              get_child          (const Tree_index &start_index) const;
 
   // tree traversals: https://en.wikipedia.org/wiki/Tree_traversal
@@ -315,6 +350,16 @@ public:
   }
 
   Tree_depth_preorder_iterator  depth_preorder() const { return Tree_depth_preorder_iterator(get_root(), this); }
+
+  Tree_sibling_iterator  siblings(const Tree_index &start_index) const {
+    return Tree_sibling_iterator(start_index, this);
+  }
+  Tree_sibling_iterator  children(const Tree_index &start_index) const {
+    if (is_leaf(start_index))
+      return Tree_sibling_iterator(Tree_index(-1,-1), this);
+
+    return Tree_sibling_iterator(get_first_child(start_index), this);
+  }
 
   bool is_leaf(const Tree_index &index) const {
 
@@ -481,7 +526,7 @@ const Tree_index tree<X>::get_depth_preorder_next(const Tree_index &child) const
 
   I(is_leaf(child));
 
-  auto next = get_next_sibling(child);
+  auto next = get_sibling_next(child);
   if (!next.is_invalid()) {
     return next;
   }
@@ -489,7 +534,7 @@ const Tree_index tree<X>::get_depth_preorder_next(const Tree_index &child) const
   // It was leaf, without more siblings. Go to parent with sibling
   auto parent = get_parent(child);
   while (!is_root(parent)) {
-    auto parent_next = get_next_sibling(parent);
+    auto parent_next = get_sibling_next(parent);
     if (!parent_next.is_invalid())
       return parent_next;
 

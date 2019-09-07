@@ -40,7 +40,7 @@ bool Prp::rule_code_block_int(){
   debug_stat.rules_called++;
   rule_call_trace.push_back("Called rule_code_block_int\n");
   eat_comments();
-  debug_down();
+  debug_down(0); // Should be overwritten
   if (rule_if_statement()){
     debug_up(Prp_rule_if_statement);
     rule_call_trace.push_back("Matched rule_code_block_int\n");
@@ -841,16 +841,16 @@ bool Prp::rule_assignment_expression(){
 		return false;
 	}
 
-	debug_down();
+	debug_down(0);
 	bool next = rule_lhs_expression() || rule_overload_notation();
   debug_up(0);
 
 	if(next){
-    debug_down();
+    debug_down(Prp_rule_assignment_operator);
 		next = rule_assignment_operator();
     debug_up(Prp_rule_assignment_operator);
 		if(next){
-      debug_down();
+      debug_down(Prp_rule_logical_expression);
 			next = rule_logical_expression() || rule_function_pipe() || rule_fcall_implicit();
       debug_up(Prp_rule_logical_expression);
       fmt::print("Fits rule_assignment_expression.\n");
@@ -876,7 +876,7 @@ bool Prp:: rule_rhs_expression_property(){
   debug_stat.rules_called++;
   fmt::print("Hello from rule_rhs_expression_property.\n");
   if(scan_is_token(Token_id_label)){
-    debug_down();
+    debug_down(0); // unnecessary due to ast->add
     ast->add(Prp_rule_identifier, scan_token());
     debug_consume(); // consume the label
     rule_tuple_notation(); // optional
@@ -899,8 +899,8 @@ bool Prp::rule_tuple_notation(){
   }
   // options 2 and 3
   else{
-    debug_down();
-    debug_down();
+    debug_down(0);
+    debug_down(0);
     ast->add(Prp_rule_tuple_notation, scan_token());
     debug_consume();
     tokens_consumed++;
@@ -1243,7 +1243,7 @@ bool Prp::rule_logical_expression(){
   int tokens_consumed = 0;
   bool next = true;
   fmt::print("Hello from rule_logical_expression.\n");
-  debug_down();
+  debug_down(Prp_rule_relational_expression);
   if (rule_relational_expression()){
     debug_up(Prp_rule_relational_expression);
     /* zero or more of the following */
@@ -1251,9 +1251,7 @@ bool Prp::rule_logical_expression(){
       fmt::print("rule_logical_expression: looking for a logical operator. Next token:\n");
       next = scan_is_token(Pyrope_id_or) || scan_is_token(Pyrope_id_and);
       if(next){
-        debug_down();
         ast->add(Prp_rule_logical_expression, scan_token());
-        debug_up(Prp_rule_logical_expression);
         debug_consume();
         tokens_consumed++;
         if (!rule_relational_expression()){
@@ -1276,8 +1274,8 @@ bool Prp::rule_relational_expression(){
   bool next = true;
 
   fmt::print("Hello from rule_relational_expression.\n");
-  debug_down();
-  if(rule_additive_expression()){
+  debug_down(Prp_rule_additive_expression);
+  if(rule_additive_expression()) {
     debug_up(Prp_rule_additive_expression);
     /* zero or more of the following */
     while(next){
@@ -1310,8 +1308,8 @@ bool Prp::rule_additive_expression(){
   bool next = true;
 
   fmt::print("Hello from rule_additive_expression.\n");
-  debug_down();
-  if(rule_bitwise_expression()){
+  debug_down(Prp_rule_bitwise_expression);
+  if(rule_bitwise_expression()) {
     debug_up(Prp_rule_bitwise_expression);
     /* zero or more of the following */
     while(next){
@@ -1319,7 +1317,7 @@ bool Prp::rule_additive_expression(){
       // dump_token();
       next = scan_is_token(Token_id_plus);
       if(next){
-        debug_down();
+        debug_down(0);
         ast->add(Prp_rule_additive_expression, scan_token());
         debug_consume();
         tokens_consumed++;
@@ -1339,7 +1337,7 @@ bool Prp::rule_additive_expression(){
 
       next = scan_is_token(Token_id_mult);
       if(next){
-        debug_down();
+        debug_down(0);
         ast->add(Prp_rule_additive_expression, scan_token());
         debug_consume();
         tokens_consumed++;
@@ -1358,7 +1356,7 @@ bool Prp::rule_additive_expression(){
 
       next = scan_is_token(Token_id_lt);
       if(next){
-        debug_down();
+        debug_down(0);
         ast->add(Prp_rule_additive_expression, scan_token());
         debug_consume();
         tokens_consumed++;
@@ -1382,7 +1380,7 @@ bool Prp::rule_additive_expression(){
 
       next = scan_is_token(Token_id_gt);
       if(next){
-        debug_down();
+        debug_down(0);
         ast->add(Prp_rule_additive_expression, scan_token());
         debug_consume();
         tokens_consumed++;
@@ -1406,7 +1404,7 @@ bool Prp::rule_additive_expression(){
 
       next = (scan_is_token(Token_id_minus) || scan_is_token(Pyrope_id_union) || scan_is_token(Pyrope_id_intersect));
       if(next){
-        debug_down();
+        debug_down(0);
         ast->add(Prp_rule_additive_expression, scan_token());
         debug_up(Prp_rule_additive_expression);
         debug_consume();
@@ -1426,7 +1424,7 @@ bool Prp::rule_additive_expression(){
 
     /* optional */
     if(scan_is_token(Token_id_dot)){
-      debug_down();
+      debug_down(0);
       ast->add(Prp_rule_additive_expression, scan_token());
       debug_consume();
       tokens_consumed++;
@@ -1579,7 +1577,7 @@ bool Prp::rule_rhs_expression(){
 void Prp::elaborate(){
   patch_pass(pyrope_keyword);
   ast = std::make_unique<Ast_parser>(get_buffer(), Prp_rule);
-  debug_down();
+  debug_down(Prp_rule_code_blocks);
 
   int failed = 0;
 
@@ -1664,14 +1662,14 @@ bool Prp::go_back(int num_tok){
   return ok;
 }
 
-void Prp::debug_up(Rule_id rid){
+void Prp::debug_up(Rule_id rid) {
   debug_stat.ast_up_calls++;
   ast->up(rid);
 }
 
-void Prp::debug_down(){
+void Prp::debug_down(Rule_id rid) {
   debug_stat.ast_down_calls++;
-  ast->down();
+  ast->down(rid);
 }
 
 /*void Prp::debug_up(std::string rule_name, Rule_id rid){

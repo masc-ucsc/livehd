@@ -21,8 +21,16 @@ void Ast_parser::add_track_parent(const mmap_lib::Tree_index &index) {
   last_added[down_added] = index;
 }
 
-void Ast_parser::up(Rule_id rule_id) {
+void Ast_parser::down(Rule_id rid) {
+  down_rid.emplace_back(rid);
+  level = level + 1;
+  I(down_rid.size()==level);
+}
+
+void Ast_parser::up(Rule_id rid_up) {
   I(level > 0);
+  I(!down_rid.empty());
+  down_rid.pop_back();
 
   if (down_added == level) {
     // Child was added, nothing to do now
@@ -31,10 +39,9 @@ void Ast_parser::up(Rule_id rule_id) {
     I((down_added - 1) == level);
     // It has descendents but not current node (add one now)
     I(!last_added[level].is_invalid());
-    I(get_data(last_added[level]).rule_id == 0); // rule_id should be zero create OoO
 
-    Ast_parser_node a(rule_id, 0);
-    set_data(last_added[down_added], a);
+    Ast_parser_node a(rid_up, 0);
+    set_data(last_added[down_added], a); // Allow to fix the rule when going up
     down_added = level;
   } else {
     I(down_added < level);
@@ -42,6 +49,14 @@ void Ast_parser::up(Rule_id rule_id) {
   }
 
   level = level - 1;
+  if (last_added.size()>level) {
+    last_added.pop_back();
+    I(last_added.size() == level);
+  }
+  if (down_added>level) {
+    down_added--;
+    I(down_added == level);
+  }
 }
 
 void Ast_parser::add(Rule_id rule_id, Token_entry te) {
@@ -50,16 +65,19 @@ void Ast_parser::add(Rule_id rule_id, Token_entry te) {
   I(last_added.size()>=(size_t)down_added);
 
   // Populate parents if needed
-  for (int i = down_added; i < level; ++i) {
+  for (int i = down_added; i < level-1; ++i) {
     I(!last_added[i].is_invalid());
-    auto child_index = add_child(last_added[i], Ast_parser_node(0,0));
+    auto child_index = add_child(last_added[i], Ast_parser_node(down_rid[i],0));
     add_track_parent(child_index);
   }
   I(down_added+1>=level);
-  I(last_added.size() == (size_t)level);
 
-  auto child_index = add_child(last_added.back(), Ast_parser_node(rule_id, te));
-  GI(!last_added.back().is_invalid(), get_parent(last_added.back()) == get_parent(child_index));
-  add_track_parent(child_index);
+  if (last_added.size() == level) {
+    auto child_index = add_next_sibling(last_added.back(), Ast_parser_node(rule_id, te));
+    add_track_parent(child_index);
+  }else{
+    auto child_index = add_child(last_added.back(), Ast_parser_node(rule_id, te));
+    add_track_parent(child_index);
+  }
 }
 

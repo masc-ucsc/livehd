@@ -66,15 +66,15 @@ protected:
     uint16_t ast_down_calls;
     uint16_t ast_add_calls;
   };
-  
+
   debug_statistics debug_stat{0,0,0,0,0,0,0};
   std::vector<std::string> rule_call_trace;
   std::vector<std::string> ast_call_trace;
-  
+
   std::unique_ptr<Ast_parser> ast;
   absl::flat_hash_map<std::string, Token_id> pyrope_keyword;
   std::ofstream debug_log;
-  
+
   enum Prp_rules: Rule_id {
     Prp_invalid = 0,
     Prp_rule,
@@ -89,7 +89,7 @@ protected:
     Prp_rule_punch_format,
     Prp_rule_function_pipe,
     Prp_rule_fcall_explicit,
-    Prp_rule_fcall_implicit, 
+    Prp_rule_fcall_implicit,
     Prp_rule_for_index,
     Prp_rule_assignment_expression,
     Prp_rule_logical_expression,
@@ -127,11 +127,11 @@ protected:
     Prp_rule_punch_rhs,
     Prp_rule_fcall_arg_notation,
   };
-  
+
   void elaborate();
-  
+
   void eat_comments();
-  
+
   bool rule_top();
   bool rule_code_blocks();
   bool rule_code_block_int();
@@ -180,21 +180,21 @@ protected:
   bool rule_scope_argument();
   bool rule_punch_rhs();
   bool rule_fcall_arg_notation();
-  
+
   bool debug_unconsume();
   bool debug_consume();
   bool go_back(int num_tok);
   void debug_up(Rule_id rid);
-  void debug_down();
+  void debug_down(Rule_id rid);
   //void debug_add(std::string rule_name, Rule_id, rid);
-  
+
   void ast_handler();
   void process_ast();
-  
+
   void open_log();
   void close_log();
   void write_log(std::string log_message);
-  
+
 public:
   Prp() {
     pyrope_keyword["if"]     = Pyrope_id_if;
