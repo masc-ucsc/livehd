@@ -235,7 +235,6 @@ public:
     assert(mmap_gc_pool.find(base) == mmap_gc_pool.end());
     //std::cerr << "mmap_gc_pool add name:" << name << " fd:" << fd << " base:" << base << std::endl;
     mmap_gc_pool[base] = entry;
-    dump();
 
     return {base, final_size};
   }
@@ -243,7 +242,6 @@ public:
   // mmap_vector.hpp: mmap_base     = reinterpret_cast<uint8_t *>(mmap_gc::remap(mmap_name, mmap_base, old_mmap_size, mmap_size));
   // mmap_map.hpp:    mmap_txt_base = reinterpret_cast<uint64_t *>(mmap_gc::remap(mmap_name, mmap_txt_base, mmap_txt_size, size));
   static std::tuple<void *, size_t> remap(std::string_view mmap_name, void *mmap_old_base, size_t old_size, size_t new_size) {
-    dump();
     if (new_size & 0xFFF) {
       new_size>>=12;
       new_size++;

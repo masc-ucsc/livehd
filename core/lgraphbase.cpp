@@ -378,8 +378,8 @@ Index_ID LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid
   Index_ID idx;
   //-----------------------
   // ADD output edge in source (src_nid) with dst_pid to the destination (dst_idx) with inp_pid
-  Index_ID root_idx = 0;
-  idx               = get_space_output_pin(src_nid, dst_pid, root_idx);
+  Index_ID root_idx = src_idx;
+  idx               = get_space_output_pin(src_nid, src_idx, dst_pid, root_idx);
   I(root_idx != 0);
   I(node_internal[root_idx].is_root());
 
@@ -405,8 +405,8 @@ Index_ID LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid
   // Reverse from before:
   // ADD input edge in destination (dst_nid) with ANY inp_pid (0) to  (src_nid) with dst_pid
 
-  Index_ID inp_root_nid = 0;
-  idx                   = get_space_output_pin(dst_nid, inp_pid, inp_root_nid);
+  Index_ID inp_root_nid = dst_idx;
+  idx                   = get_space_output_pin(dst_nid, dst_idx, inp_pid, inp_root_nid);
   I(inp_root_nid != 0);
   I(node_internal[inp_root_nid].is_root());
   int i = node_internal[idx].next_free_input_pos();
