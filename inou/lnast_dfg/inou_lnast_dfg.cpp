@@ -35,7 +35,7 @@ void Inou_lnast_dfg::tolg(Eprp_var &var){
     error(fmt::format("fail to generate lgraph from lnast"));
     I(false);
   } else {
-    var.add(lgs[0]); 
+    var.add(lgs[0]);
   }
 }
 
@@ -51,8 +51,8 @@ void Inou_lnast_dfg::build_lnast(Inou_lnast_dfg &p, Eprp_var &var) {
   }
 
   //cfg_text to lnast
-  p.memblock = p.setup_memblock();
-  p.lnast_parser.parse("lnast", p.memblock);
+  p.setup_memblock();
+  p.lnast_parser.parse("lnast", p.memblock, p.token_list);
 }
 
 std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
@@ -82,7 +82,6 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
   }
   */
 
-
   //lnast to dfg
   process_ast_top(dfg);
 
@@ -94,12 +93,12 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
 
 void Inou_lnast_dfg::process_ast_top(LGraph *dfg){
   const auto top = lnast->get_root();
-  const auto statements = lnast->get_children(lnast->get_children(top)[0]);
-  process_ast_statements(dfg, statements);
+  const auto stmt_parent = lnast->get_first_child(top);
+  process_ast_statements(dfg, stmt_parent);
 }
 
-void Inou_lnast_dfg::process_ast_statements(LGraph *dfg, const std::vector<Tree_index> &sts){
-  for (const auto& ast_idx : sts) {
+void Inou_lnast_dfg::process_ast_statements(LGraph *dfg, const mmap_lib::Tree_index &stmt_parent) {
+  for (const auto& ast_idx : lnast->children(stmt_parent)) {
     const auto op = lnast->get_data(ast_idx).type;
     if (is_pure_assign_op(op)) {
       process_ast_pure_assign_op(dfg, ast_idx);
@@ -134,34 +133,39 @@ void Inou_lnast_dfg::process_ast_statements(LGraph *dfg, const std::vector<Tree_
   }
 }
 
-void  Inou_lnast_dfg::process_ast_pure_assign_op (LGraph *dfg, const Tree_index &lnast_op_idx) {
+void  Inou_lnast_dfg::process_ast_pure_assign_op (LGraph *dfg, const mmap_lib::Tree_index &lnast_op_idx) {
   //fmt::print("purse_assign\n");
   const Node_pin  opr    = setup_node_pure_assign_and_target(dfg, lnast_op_idx);
-  const Node_pin  opd1   = setup_node_operand(dfg, lnast->get_children(lnast_op_idx)[1]);
-  if(opr.is_graph_output()){
+  const auto child0 = lnast->get_first_child(lnast_op_idx);
+  const auto child1 = lnast->get_sibling_next(child0);
+  const Node_pin  opd1   = setup_node_operand(dfg, child1);
+  if(opr.is_graph_output()) {
     dfg->add_edge(opd1, opr, 1);
   } else {
     dfg->add_edge(opd1, opr.get_node().setup_sink_pin(0), 1);   }
 }
 
-void  Inou_lnast_dfg::process_ast_binary_op (LGraph *dfg, const Tree_index &lnast_op_idx) {
+void  Inou_lnast_dfg::process_ast_binary_op (LGraph *dfg, const mmap_lib::Tree_index &lnast_op_idx) {
   const Node_pin  opr    = setup_node_operator_and_target(dfg, lnast_op_idx);
-  const auto  children   = lnast->get_children(lnast_op_idx);
-  I(children.size() == 3);
-  //note: children[0] is the operator name and has been processed in setup_binary_operator_node
-  const Node_pin  opd1   = setup_node_operand(dfg, children[1]);
-  const Node_pin  opd2   = setup_node_operand(dfg, children[2]);
+
+  const auto child0 = lnast->get_first_child(lnast_op_idx);
+  const auto child1 = lnast->get_sibling_next(child0);
+  const auto child2 = lnast->get_sibling_next(child1);
+  I(lnast->get_sibling_next(child2).is_invalid());
+
+  const Node_pin  opd1   = setup_node_operand(dfg, child1);
+  const Node_pin  opd2   = setup_node_operand(dfg, child2);
   I(opd1 != opd2);
   //sh_fixme: the sink_pin should be determined by the functionality, not just zero
+
   dfg->add_edge(opd1, opr.get_node().setup_sink_pin(0), 1);
   dfg->add_edge(opd2, opr.get_node().setup_sink_pin(0), 1);
-
 };
 
 
 //note: for operator, we must create a new node and dpin as it represents a new gate in the netlist
-Node_pin Inou_lnast_dfg::setup_node_operator_and_target (LGraph *dfg, const Tree_index &lnast_op_idx) {
-  const auto eldest_child = lnast->get_children(lnast_op_idx)[0];
+Node_pin Inou_lnast_dfg::setup_node_operator_and_target (LGraph *dfg, const mmap_lib::Tree_index &lnast_op_idx) {
+  const auto eldest_child = lnast->get_first_child(lnast_op_idx);
   const auto name         = lnast->get_data(eldest_child).token.get_text(memblock);
   if (name.at(0) == '%')
     return setup_node_operand(dfg, eldest_child);
@@ -172,8 +176,8 @@ Node_pin Inou_lnast_dfg::setup_node_operator_and_target (LGraph *dfg, const Tree
   return node_dpin;
 }
 
-Node_pin Inou_lnast_dfg::setup_node_pure_assign_and_target (LGraph *dfg, const Tree_index &lnast_op_idx) {
-  const auto eldest_child = lnast->get_children(lnast_op_idx)[0];
+Node_pin Inou_lnast_dfg::setup_node_pure_assign_and_target (LGraph *dfg, const mmap_lib::Tree_index &lnast_op_idx) {
+  const auto eldest_child = lnast->get_first_child(lnast_op_idx);
   const auto name         = lnast->get_data(eldest_child).token.get_text(memblock);
   if (name.at(0) == '%')
     return setup_node_operand(dfg, eldest_child);
@@ -181,25 +185,32 @@ Node_pin Inou_lnast_dfg::setup_node_pure_assign_and_target (LGraph *dfg, const T
   //maybe driver_pin 1, try and error
   const auto node_dpin    = dfg->create_node(Or_Op, 1).setup_driver_pin(1);
   name2dpin[name] = node_dpin;
+
   return node_dpin;
 }
 
 //note: for operand, except the new io and reg, the node and dpin should already be in the table as the operand comes from existing operator output
-Node_pin Inou_lnast_dfg::setup_node_operand(LGraph *dfg, const Tree_index &ast_idx){
-  const auto name = lnast->get_data(ast_idx).token.get_text(memblock);
+Node_pin Inou_lnast_dfg::setup_node_operand(LGraph *dfg, const mmap_lib::Tree_index &ast_idx){
   //fmt::print("operand name:{}\n", name);
+
+  auto       name = lnast->get_data(ast_idx).token.get_text(memblock);
+  assert(!name.empty());
+
+  const auto it = name2dpin.find(name);
+  if(it != name2dpin.end()) {
+    return it->second;
+  }
+
   Node_pin node_dpin;
+  char first_char = name[0];
 
-  if(name2dpin.find(name) != name2dpin.end())
-    return name2dpin[name];
-
-  if (name.at(0) == '%') {
-    // FIXME: tuples have possition, the possition for $/% tuples is the verilog position
-    node_dpin = dfg->add_graph_output(name.substr(1),Port_invalid, 1); // Port_invalid pos, means I do not care about position
-  } else if (name.at(0) == '$') {
+  if (first_char == '%') {
+    node_dpin = dfg->add_graph_output(name.substr(1), Port_invalid, 1); // Port_invalid pos, means I do not care about position
+  } else if (first_char == '$') {
     node_dpin = dfg->add_graph_input(name.substr(1), Port_invalid, 1);
-  } else if (name.at(0) == '@') {
+  } else if (first_char == '@') {
     node_dpin = dfg->create_node(FFlop_Op).setup_driver_pin();
+    // FIXME: set flop name
   } else {
     I(false);
   }
@@ -208,27 +219,27 @@ Node_pin Inou_lnast_dfg::setup_node_operand(LGraph *dfg, const Tree_index &ast_i
   return node_dpin;
 }
 
-Node_Type_Op Inou_lnast_dfg::decode_lnast_op(const Tree_index &ast_op_idx) {
+Node_Type_Op Inou_lnast_dfg::decode_lnast_op(const mmap_lib::Tree_index &ast_op_idx) {
   const auto op = lnast->get_data(ast_op_idx).type;
   return primitive_type_lnast2lg[op];
 }
 
 
-void  Inou_lnast_dfg::process_ast_unary_op       (LGraph *dfg, const Tree_index &ast_idx){;};
-void  Inou_lnast_dfg::process_ast_logical_op     (LGraph *dfg, const Tree_index &ast_idx){;};
-void  Inou_lnast_dfg::process_ast_as_op          (LGraph *dfg, const Tree_index &ast_idx){;};
-void  Inou_lnast_dfg::process_ast_label_op       (LGraph *dfg, const Tree_index &ast_idx){;};
-void  Inou_lnast_dfg::process_ast_if_op          (LGraph *dfg, const Tree_index &ast_idx){;};
-void  Inou_lnast_dfg::process_ast_uif_op         (LGraph *dfg, const Tree_index &ast_idx){;};
-void  Inou_lnast_dfg::process_ast_func_call_op   (LGraph *dfg, const Tree_index &ast_idx){;};
-void  Inou_lnast_dfg::process_ast_func_def_op    (LGraph *dfg, const Tree_index &ast_idx){;};
-void  Inou_lnast_dfg::process_ast_sub_op         (LGraph *dfg, const Tree_index &ast_idx){;};
-void  Inou_lnast_dfg::process_ast_for_op         (LGraph *dfg, const Tree_index &ast_idx){;};
-void  Inou_lnast_dfg::process_ast_while_op       (LGraph *dfg, const Tree_index &ast_idx){;};
-void  Inou_lnast_dfg::process_ast_dp_assign_op   (LGraph *dfg, const Tree_index &ast_idx){;};
+void  Inou_lnast_dfg::process_ast_unary_op       (LGraph *dfg, const mmap_lib::Tree_index &ast_idx){;};
+void  Inou_lnast_dfg::process_ast_logical_op     (LGraph *dfg, const mmap_lib::Tree_index &ast_idx){;};
+void  Inou_lnast_dfg::process_ast_as_op          (LGraph *dfg, const mmap_lib::Tree_index &ast_idx){;};
+void  Inou_lnast_dfg::process_ast_label_op       (LGraph *dfg, const mmap_lib::Tree_index &ast_idx){;};
+void  Inou_lnast_dfg::process_ast_if_op          (LGraph *dfg, const mmap_lib::Tree_index &ast_idx){;};
+void  Inou_lnast_dfg::process_ast_uif_op         (LGraph *dfg, const mmap_lib::Tree_index &ast_idx){;};
+void  Inou_lnast_dfg::process_ast_func_call_op   (LGraph *dfg, const mmap_lib::Tree_index &ast_idx){;};
+void  Inou_lnast_dfg::process_ast_func_def_op    (LGraph *dfg, const mmap_lib::Tree_index &ast_idx){;};
+void  Inou_lnast_dfg::process_ast_sub_op         (LGraph *dfg, const mmap_lib::Tree_index &ast_idx){;};
+void  Inou_lnast_dfg::process_ast_for_op         (LGraph *dfg, const mmap_lib::Tree_index &ast_idx){;};
+void  Inou_lnast_dfg::process_ast_while_op       (LGraph *dfg, const mmap_lib::Tree_index &ast_idx){;};
+void  Inou_lnast_dfg::process_ast_dp_assign_op   (LGraph *dfg, const mmap_lib::Tree_index &ast_idx){;};
 
 
-std::string_view Inou_lnast_dfg::setup_memblock(){
+void Inou_lnast_dfg::setup_memblock(){
   auto file_path = opack.files;
   int fd = open(file_path.c_str(), O_RDONLY);
   if(fd < 0) {
@@ -238,15 +249,14 @@ std::string_view Inou_lnast_dfg::setup_memblock(){
 
   struct stat sb;
   fstat(fd, &sb);
-  printf("Size: %lu\n", (uint64_t)sb.st_size);
+  printf("Size: %lu FIXME: munmap at the end of the pass or memory leak\n", (uint64_t)sb.st_size);
 
-  char *memblock = (char *)mmap(NULL, sb.st_size, PROT_WRITE, MAP_PRIVATE, fd, 0);
+  char *mem = (char *)mmap(NULL, sb.st_size, PROT_WRITE, MAP_PRIVATE, fd, 0);
   //fprintf(stderr, "Content of memblock: \n%s\n", memblock); //SH_FIXME: remove when benchmarking
-  if(memblock == MAP_FAILED) {
-    fprintf(stderr, "error, mmap failed\n");
-    exit(-3);
+  if(mem == MAP_FAILED) {
+    Pass::error("inou_lnast_dfg: mmap failed for file:{} and size:{}", file_path, sb.st_size);
   }
-  return memblock;
+  memblock = mem;
 }
 
 void Inou_lnast_dfg::setup_lnast_to_lgraph_primitive_type_mapping(){

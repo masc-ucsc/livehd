@@ -171,7 +171,7 @@ void random_mmap_set(int max, std::string_view name) {
 
   LGBench b(type_test);
 
-  mmap_lib::map<uint32_t,bool> map(name);
+  mmap_lib::map<uint32_t,bool> map(name.empty()?"":"lgdb_bench", name);
 
   for (int n = 1; n < BENCH_OUT_SIZE; ++n) {
     for (int i = 0; i < BENCH_INN_SIZE; ++i) {

@@ -120,7 +120,7 @@ protected:
     for (const auto &index : tree.breadth_first()) {
       auto &data = tree.get_data(index);
       data.lg   = nullptr;
-      data.hidx = 0;
+      data.hidx.invalidate();
       if (index.level <= 1) {
         data.hidx = lg_root->get_hierarchy_root();
         data.lg   = lg_root;

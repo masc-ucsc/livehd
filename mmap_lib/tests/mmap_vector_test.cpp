@@ -39,7 +39,7 @@ TEST_F(Setup_map_test, ilist_to_set) {
 
 TEST_F(Setup_map_test, mmap_vector_to_set) {
 
-  mmap_lib::vector<int> dense("mmap_vector_test_persist");
+  mmap_lib::vector<int> dense("lgdb_bench", "mmap_vector_test_persist");
   dense.clear();
   dense.emplace_back(1);
   dense.emplace_back(3);
@@ -59,7 +59,7 @@ TEST_F(Setup_map_test, mmap_vector_to_set) {
 
 TEST_F(Setup_map_test, iter_test_set) {
 
-  mmap_lib::vector<int> dense("mmap_vector_test_persist");
+  mmap_lib::vector<int> dense("lgdb_bench", "mmap_vector_test_persist");
 
   absl::flat_hash_set<int> my_set;
 

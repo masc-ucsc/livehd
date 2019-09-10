@@ -12,4 +12,7 @@ Classes should have only first character upper case. E.g:
 
 Replace all the calls that return a pointer for XXX * ref_XXX
 
+Replace all the get_text for get_sview (explicit to std::string_view)
+
+Increase the token position to 64 bits
 

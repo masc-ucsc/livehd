@@ -185,7 +185,7 @@ protected:
   bool debug_consume();
   bool go_back(int num_tok);
   void debug_up(Rule_id rid);
-  void debug_down(Rule_id rid);
+  void debug_down();
   //void debug_add(std::string rule_name, Rule_id, rid);
 
   void ast_handler();

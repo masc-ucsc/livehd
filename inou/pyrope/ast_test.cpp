@@ -5,7 +5,7 @@
 
 class Test_scanner: public Elab_scanner{
 protected:
-  enum test_rules: Rule_id 
+  enum test_rules: Rule_id
   {
     test_rule_invalid = 0,
     test_rule,
@@ -16,7 +16,7 @@ protected:
   };
 
   std::unique_ptr<Ast_parser> ast;
-  
+
 public:
   void elaborate(){
     ast = std::make_unique<Ast_parser>(get_buffer(), test_rule);
@@ -37,10 +37,10 @@ public:
     ast->up(test_rule_add_expression); // at level 3
     ast->up(test_rule_statement); // at level 2
     ast->up(test_rule_top); // at level 1
-    
+
     //ast->each_bottom_first_fast(
       //std::bind(&Test_scanner::ast_handler, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
-    
+
     for(const auto &it:ast->depth_preorder(ast->get_root())){
       auto node = ast->get_data(it);
       auto rule_value = node.rule_id;
@@ -68,11 +68,11 @@ public:
       auto token_text = scan_text(node.token_entry);
       fmt::print("Rule name: {}, Token text: {}\n", rule_name, token_text);
     }
-    
+
     ast = nullptr;
   }
-  
-  void ast_handler(const Tree_index &parent, const Tree_index &self, const Ast_parser_node &node){
+
+  void ast_handler(const mmap_lib::Tree_index &parent, const mmap_lib::Tree_index &self, const Ast_parser_node &node){
     auto rule_value = node.rule_id;
     std::string rule_name;
     switch(rule_value){
@@ -102,7 +102,7 @@ public:
 
 int main(int argc, char **argv){
   char statement[] = "a+b=c\n";
-  
+
   Test_scanner scanner;
 
   scanner.parse("test", statement);

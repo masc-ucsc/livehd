@@ -19,13 +19,14 @@ public:
 
 class Inou_lnast_dfg : public Pass{
 private:
-  Inou_lnast_dfg_options opack;
-  std::string_view       memblock;
-  Lnast_parser           lnast_parser;
-  Lnast                 *lnast;
+  Inou_lnast_dfg_options   opack;
+  Elab_scanner::Token_list token_list;
+  std::string_view         memblock;
+  Lnast_parser             lnast_parser;
+  Lnast                   *lnast;
 
   absl::flat_hash_map<Lnast_ntype_id , Node_Type_Op> primitive_type_lnast2lg;
-  absl::flat_hash_map<std::string_view , Node_pin>   name2dpin; //record dpin instead of node because the asymmetry between gio and normal node  ...
+  absl::flat_hash_map<std::string, Node_pin>   name2dpin; //record dpin instead of node because the asymmetry between gio and normal node  ...
   int                    lginp_cnt;
   int                    lgout_cnt;
 
@@ -41,25 +42,25 @@ public:
   void          setup() final;
 
 private:
-  std::string_view              setup_memblock();
+  void                          setup_memblock();
   std::vector<LGraph *>         do_tolg();
 
   void  process_ast_top            (LGraph *dfg);
-  void  process_ast_statements     (LGraph *dfg, const std::vector<Tree_index> &sts );
-  void  process_ast_pure_assign_op (LGraph *dfg, const Tree_index &ast_idx);
-  void  process_ast_binary_op      (LGraph *dfg, const Tree_index &ast_idx);
-  void  process_ast_unary_op       (LGraph *dfg, const Tree_index &ast_idx);
-  void  process_ast_logical_op     (LGraph *dfg, const Tree_index &ast_idx);
-  void  process_ast_as_op          (LGraph *dfg, const Tree_index &ast_idx);
-  void  process_ast_label_op       (LGraph *dfg, const Tree_index &ast_idx);
-  void  process_ast_if_op          (LGraph *dfg, const Tree_index &ast_idx);
-  void  process_ast_uif_op         (LGraph *dfg, const Tree_index &ast_idx);
-  void  process_ast_func_call_op   (LGraph *dfg, const Tree_index &ast_idx);
-  void  process_ast_func_def_op    (LGraph *dfg, const Tree_index &ast_idx);
-  void  process_ast_sub_op         (LGraph *dfg, const Tree_index &ast_idx);
-  void  process_ast_for_op         (LGraph *dfg, const Tree_index &ast_idx);
-  void  process_ast_while_op       (LGraph *dfg, const Tree_index &ast_idx);
-  void  process_ast_dp_assign_op   (LGraph *dfg, const Tree_index &ast_idx);
+  void  process_ast_statements     (LGraph *dfg, const mmap_lib::Tree_index &stmt_parent);
+  void  process_ast_pure_assign_op (LGraph *dfg, const mmap_lib::Tree_index &ast_idx);
+  void  process_ast_binary_op      (LGraph *dfg, const mmap_lib::Tree_index &ast_idx);
+  void  process_ast_unary_op       (LGraph *dfg, const mmap_lib::Tree_index &ast_idx);
+  void  process_ast_logical_op     (LGraph *dfg, const mmap_lib::Tree_index &ast_idx);
+  void  process_ast_as_op          (LGraph *dfg, const mmap_lib::Tree_index &ast_idx);
+  void  process_ast_label_op       (LGraph *dfg, const mmap_lib::Tree_index &ast_idx);
+  void  process_ast_if_op          (LGraph *dfg, const mmap_lib::Tree_index &ast_idx);
+  void  process_ast_uif_op         (LGraph *dfg, const mmap_lib::Tree_index &ast_idx);
+  void  process_ast_func_call_op   (LGraph *dfg, const mmap_lib::Tree_index &ast_idx);
+  void  process_ast_func_def_op    (LGraph *dfg, const mmap_lib::Tree_index &ast_idx);
+  void  process_ast_sub_op         (LGraph *dfg, const mmap_lib::Tree_index &ast_idx);
+  void  process_ast_for_op         (LGraph *dfg, const mmap_lib::Tree_index &ast_idx);
+  void  process_ast_while_op       (LGraph *dfg, const mmap_lib::Tree_index &ast_idx);
+  void  process_ast_dp_assign_op   (LGraph *dfg, const mmap_lib::Tree_index &ast_idx);
 
   constexpr bool  is_logical_op    (Lnast_ntype_id op) const { return  (op == Lnast_ntype_logical_and) or
                                                                        (op == Lnast_ntype_logical_or); }
@@ -90,10 +91,10 @@ private:
 
 
 
-  Node_pin     setup_node_operator_and_target (LGraph *dfg, const Tree_index &ast_op_idx);
-  Node_pin     setup_node_pure_assign_and_target (LGraph *dfg, const Tree_index &ast_op_idx);
-  Node_pin     setup_node_operand  (LGraph *dfg, const Tree_index &ast_idx);
-  Node_Type_Op decode_lnast_op    (const Tree_index &ast_op_idx);
+  Node_pin     setup_node_operator_and_target (LGraph *dfg, const mmap_lib::Tree_index &ast_op_idx);
+  Node_pin     setup_node_pure_assign_and_target (LGraph *dfg, const mmap_lib::Tree_index &ast_op_idx);
+  Node_pin     setup_node_operand  (LGraph *dfg, const mmap_lib::Tree_index &ast_idx);
+  Node_Type_Op decode_lnast_op    (const mmap_lib::Tree_index &ast_op_idx);
   void         setup_lnast_to_lgraph_primitive_type_mapping();
 
 };

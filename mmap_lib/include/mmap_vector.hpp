@@ -76,7 +76,9 @@ protected:
     if (mmap_size == old_mmap_size)
       return;
 
-    mmap_base = reinterpret_cast<uint8_t *>(mmap_gc::remap(mmap_name, mmap_base, old_mmap_size, mmap_size));
+    void *base;
+    std::tie(base,mmap_size) = mmap_gc::remap(mmap_name, mmap_base, old_mmap_size, mmap_size);
+    mmap_base = reinterpret_cast<uint8_t *>(base);
     entries_capacity = (mmap_size-4096) / sizeof(T);
     entries_size     = (uint64_t *)mmap_base; // First word in mmap
   }
@@ -218,6 +220,9 @@ public:
 
   void emplace_back() {
     ref_base();
+    if (MMAP_LIB_UNLIKELY(capacity() <= *entries_size)) {
+      reserve_int(size()+1);
+    }
     (*entries_size)++;
   }
 
@@ -348,7 +353,7 @@ public:
     return (uint64_t *)&mmap_base[offset];
   }
 
-  size_t size() const {
+  [[nodiscard]] size_t size() const {
     ref_base(); // Force to get entries_size
     return *entries_size;
   }

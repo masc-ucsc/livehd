@@ -56,9 +56,11 @@ void Inou_liveparse::tolg(Eprp_var &var) {
       return;
     }
 
+    Elab_scanner::Token_list tlist;
+
     if(absl::EndsWith(f, ".v") || absl::EndsWith(f, ".sv")) {
       Chunkify_verilog chunker(path, elab_path);
-      chunker.parse(f, memblock);
+      chunker.parse(f, memblock, tlist);
     } else if(absl::EndsWith(f, ".prp")) {
       error(fmt::format("inou.liveparse pyrope chunkify NOT implemented for {}", f));
       close(fd);

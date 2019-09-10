@@ -18,7 +18,7 @@ void run_mmap_vector(int test_size) {
   const char *filename = "bench_vector_array.data";
   {
     // unnecessary? unlink(filename);
-    mmap_lib::vector<int> array(filename);
+    mmap_lib::vector<int> array("lgdb_bench", filename);
 
     for(int i=0;i<test_size;i++) {
       array.emplace_back(i);
@@ -34,7 +34,7 @@ void run_mmap_vector(int test_size) {
     b.sample("setup+serialize");
   }
 
-  mmap_lib::vector<int> array2(filename);
+  mmap_lib::vector<int> array2("lgdb_bench", filename);
 
   b.sample("unserialize");
 

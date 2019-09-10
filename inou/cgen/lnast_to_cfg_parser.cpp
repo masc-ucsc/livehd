@@ -4,7 +4,7 @@
 std::string Lnast_to_cfg_parser::stringify() {
   fmt::print("\nstart Lnast_to_cfg_parser::stringify\n");
 
-  for (const Tree_index &it: lnast->depth_preorder(lnast->get_root())) {
+  for (const mmap_lib::Tree_index &it: lnast->depth_preorder(lnast->get_root())) {
     process_node(it);
   }
   process_buffer();
@@ -12,7 +12,7 @@ std::string Lnast_to_cfg_parser::stringify() {
   return buffer;
 }
 
-void Lnast_to_cfg_parser::process_node(const Tree_index& it) {
+void Lnast_to_cfg_parser::process_node(const mmap_lib::Tree_index& it) {
   const auto& node_data = lnast->get_data(it);
 
   // for printing out individual node values
@@ -74,13 +74,13 @@ void Lnast_to_cfg_parser::process_node(const Tree_index& it) {
 
 }
 
-void Lnast_to_cfg_parser::process_top(Tree_level level) {
+void Lnast_to_cfg_parser::process_top(mmap_lib::Tree_level level) {
   level_stack.push_back(level);
   curr_statement_level = level;
   k_next = 1;
 }
 
-void Lnast_to_cfg_parser::push_statement(Tree_level level) {
+void Lnast_to_cfg_parser::push_statement(mmap_lib::Tree_level level) {
   fmt::print("push\n");
 
   level = level + 1;
@@ -99,7 +99,7 @@ void Lnast_to_cfg_parser::push_statement(Tree_level level) {
   fmt::print("after push\n");
 }
 
-void Lnast_to_cfg_parser::pop_statement(Tree_level level, Lnast_ntype_id type) {
+void Lnast_to_cfg_parser::pop_statement(mmap_lib::Tree_level level, Lnast_ntype_id type) {
   uint32_t tmp_k = k_next;
 
   if (curr_statement_level != level && type != Lnast_ntype_cond) {

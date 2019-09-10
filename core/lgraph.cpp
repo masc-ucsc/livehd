@@ -226,8 +226,7 @@ Node_pin LGraph::add_graph_input(std::string_view str, Port_ID pos, uint16_t bit
 
   Port_ID inst_pid;
   if (get_self_sub_node().has_pin(str)) {
-    // reset pin stats
-    inst_pid = get_self_sub_node().map_graph_pos(str, pos);
+    inst_pid = get_self_sub_node().map_graph_pos(str, Sub_node::Direction::Input, pos); // reset pin stats
   }else{
     inst_pid = get_self_sub_node().add_pin(str, Sub_node::Direction::Input, pos);
   }
@@ -249,8 +248,7 @@ Node_pin LGraph::add_graph_output(std::string_view str, Port_ID pos, uint16_t bi
 
   Port_ID inst_pid;
   if (get_self_sub_node().has_pin(str)) {
-    // reset pin stats
-    inst_pid = get_self_sub_node().map_graph_pos(str, pos);
+    inst_pid = get_self_sub_node().map_graph_pos(str, Sub_node::Direction::Output, pos); // reset pin stats
   }else{
     inst_pid = get_self_sub_node().add_pin(str, Sub_node::Direction::Output, pos);
   }

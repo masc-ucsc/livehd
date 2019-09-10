@@ -28,7 +28,7 @@ void random_std_map(int max) {
   std::unordered_map<uint32_t,uint32_t> map;
 
   for (int n = 1; n < 100; ++n) {
-    for (int i = 0; i < 100'000; ++i) {
+    for (int i = 0; i < 10'000; ++i) {
       int pos = rng.uniform<int>(max);
       map[pos] = i;
       pos = rng.uniform<int>(max);
@@ -45,7 +45,7 @@ void random_robin_map(int max) {
   robin_hood::unordered_map<uint32_t,uint32_t> map;
 
   for (int n = 1; n < 100; ++n) {
-    for (int i = 0; i < 100'000; ++i) {
+    for (int i = 0; i < 10'000; ++i) {
       int pos = rng.uniform<int>(max);
       map[pos] = i;
       pos = rng.uniform<int>(max);
@@ -60,11 +60,11 @@ void random_mmap_map(int max) {
   {
     LGBench b("random_mmap_map (persistent) " + std::to_string(max));
 
-    mmap_lib::map<uint32_t,uint32_t> map("bench_map_use_mmap.data");
+    mmap_lib::map<uint32_t,uint32_t> map("lgdb_bench","bench_map_use_mmap.data");
     map.clear();
 
   for (int n = 1; n < 100; ++n) {
-    for (int i = 0; i < 100000; ++i) {
+    for (int i = 0; i < 10'000; ++i) {
       uint32_t pos = rng.uniform<int>(max);
       map.set(pos,i);
       pos = rng.uniform<int>(max);
@@ -78,7 +78,7 @@ void random_mmap_map(int max) {
     mmap_lib::map<uint32_t,uint32_t> map;
     map.clear();
 
-    for (int n = 1; n < 400; ++n) {
+    for (int n = 1; n < 100; ++n) {
       for (int i = 0; i < 10'000; ++i) {
         uint32_t pos = rng.uniform<int>(max);
         map.set(pos,i);
@@ -97,7 +97,7 @@ void random_abseil_map(int max) {
   absl::flat_hash_map<uint32_t,uint32_t> map;
 
   for (int n = 1; n < 100; ++n) {
-    for (int i = 0; i < 100000; ++i) {
+    for (int i = 0; i < 10'000; ++i) {
       int pos = rng.uniform<int>(max);
       map[pos] = i;
       pos = rng.uniform<int>(max);
@@ -114,7 +114,7 @@ void random_ska_map(int max) {
   ska::flat_hash_map<uint32_t,uint32_t> map;
 
   for (int n = 1; n < 100; ++n) {
-    for (int i = 0; i < 100000; ++i) {
+    for (int i = 0; i < 10'000; ++i) {
       int pos = rng.uniform<int>(max);
       map[pos] = i;
       pos = rng.uniform<int>(max);
@@ -132,7 +132,7 @@ void random_vector_map(int max) {
   map.resize(max);
 
   for (int n = 1; n < 100; ++n) {
-    for (int i = 0; i < 100000; ++i) {
+    for (int i = 0; i < 10'000; ++i) {
       int pos = rng.uniform<int>(max);
       map[pos] = i;
       pos = rng.uniform<int>(max);
@@ -147,10 +147,10 @@ void random_mmap_vector(int max) {
   {
     LGBench b("random_mmap_vector (persistent)");
 
-    mmap_lib::vector<uint32_t> map("bench_map_use_vector.data");
+    mmap_lib::vector<uint32_t> map("lgdb_bench","bench_map_use_vector.data");
     map.reserve(max);
 
-    for (int n = 1; n < 400; ++n) {
+    for (int n = 1; n < 100; ++n) {
       for (int i = 0; i < 10'000; ++i) {
         int pos = rng.uniform<int>(max);
         map.set(pos, i);
@@ -165,7 +165,7 @@ void random_mmap_vector(int max) {
     mmap_lib::vector<uint32_t> map;
     map.reserve(max);
 
-    for (int n = 1; n < 400; ++n) {
+    for (int n = 1; n < 100; ++n) {
       for (int i = 0; i < 10'000; ++i) {
         int pos = rng.uniform<int>(max);
         map.set(pos,i);
@@ -211,7 +211,8 @@ int main(int argc, char **argv) {
     run_random_vector_map  = true;
   }
 
-  const std::vector<int> nums = {100000, 500000, 1000000, 2000000, 3000000, 4000000, 5000000, 6000000, 7000000, 8000000, 9000000, 10000000};
+  //const std::vector<int> nums = {100000, 500000, 1000000, 2000000, 3000000, 4000000, 5000000, 6000000, 7000000, 8000000, 9000000, 10000000};
+  const std::vector<int> nums = {10000, 100000};
 
   for(auto i:nums) {
     if (run_random_std_map)

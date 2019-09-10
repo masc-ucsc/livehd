@@ -6,8 +6,12 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#include "absl/container/node_hash_map.h"
+
 #include <cassert>
-#include "absl/container/flat_hash_map.h"
+#include <climits>
+#include <functional>
+#include <map>
 
 #ifndef MMAP_LIB_LIKELY
 #define MMAP_LIB_LIKELY(x) __builtin_expect((x), 1)
@@ -18,23 +22,59 @@
 
 namespace mmap_lib {
 struct mmap_gc_entry {
+  static inline int global_age=1;
+  int age; // signed (to do quadrants in cleanup)
+  mmap_gc_entry() {
+    age = global_age++;
+  }
   std::string name; // Mostly for debugging
   int         fd;
   size_t      size;
   std::function<void(void *)> gc_function;
 };
 
-using gc_pool_type=absl::flat_hash_map<void *, mmap_gc_entry>;
-static inline gc_pool_type mmap_gc_pool;
-static inline void *next_mmap=nullptr;
 
 class mmap_gc {
 protected:
+  using gc_pool_type=absl::node_hash_map<void *, mmap_gc_entry>; // pointer stability for delete
+  static inline gc_pool_type mmap_gc_pool;
+
   static inline int n_open_mmaps = 0;
   static inline int n_open_fds   = 0;
 
   static inline int n_max_mmaps = 256;
   static inline int n_max_fds   = 256;
+
+  static void recycle_older() {
+    // Recycle around 1/2 of the newer open fds
+
+    int recycle_age = 0;
+    int min_age = INT_MAX;
+    for (auto it : mmap_gc_pool) {
+      if (it.second.age<min_age)
+        min_age = it.second.age;
+
+      if (it.second.fd<0)
+        continue;
+
+      if ((recycle_age + n_open_fds/2) < it.second.age)
+        recycle_age = it.second.age;
+    }
+    auto it = mmap_gc_pool.begin();
+    int max_age = 0;
+    while (it != mmap_gc_pool.end()) {
+      if (recycle_age > it->second.age && it->second.fd>=0) {
+        mmap_gc::recycle_int(it);
+        mmap_gc_pool.erase(it++); // abseil has iterator stability
+      } else {
+        it->second.age -= min_age;
+        if (it->second.age>max_age)
+          max_age = it->second.age;
+        ++it;
+      }
+    }
+    mmap_gc_entry::global_age = max_age+1;
+  }
 
   static void recycle_int(gc_pool_type::iterator it) {
 #ifndef NDEBUG
@@ -59,22 +99,6 @@ protected:
     munmap(it->first, it->second.size);
 
     //std::cerr << "mmap_gc_pool del name:" << it->second.name << " fd:" << it->second.fd << " base:" << it->first << std::endl;
-    mmap_gc_pool.erase(it);
-  }
-
-  static void try_collect_step() {
-    auto it = mmap_gc_pool.find(next_mmap);
-    if (it == mmap_gc_pool.end())
-      it = mmap_gc_pool.begin();
-    if (it == mmap_gc_pool.end())
-      return;
-    it->second.gc_function(it->first);
-
-    auto it2 = it;
-    ++it2;
-    next_mmap = it2->first;
-
-    mmap_gc::recycle_int(it);
   }
 
   static void try_collect_fd() {
@@ -83,8 +107,9 @@ protected:
       n_max_fds = n;
     if (n_max_fds<24)
       n_max_fds = 24;
-    while(n_open_fds >= n_max_fds)
-      try_collect_step();
+    if(n_open_fds >= n_max_fds) {
+      recycle_older();
+    }
   }
 
   static void try_collect_mmap() {
@@ -93,11 +118,18 @@ protected:
       n_max_mmaps = n;
     if (n_max_mmaps<24)
       n_max_mmaps = 24;
-    while(n_open_mmaps >= n_max_mmaps)
-      try_collect_step();
+    if(n_open_mmaps >= n_max_mmaps)
+      recycle_older();
   }
 
   static std::tuple<void *, size_t> mmap_step(std::string_view name, int fd, size_t size) {
+
+    if (size & 0xFFF) {
+      size>>=12;
+      size++;
+      size<<=12;
+    }
+    assert((size&0xFFF)==0);
 
     if (fd < 0) {
       void *base = ::mmap(0, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, fd, 0); // superpages
@@ -126,6 +158,12 @@ protected:
   }
 
 public:
+  static void dump() {
+    for (auto it : mmap_gc_pool) {
+      std::cerr << "name:" << it.second.name << " base:" << it.first << " age:" << it.second.age << " fd:" << it.second.fd
+                << std::endl;
+    }
+  }
   static void delete_file(void *base) {
     auto it = mmap_gc_pool.find(base);
     assert(it!=mmap_gc_pool.end());
@@ -171,6 +209,7 @@ public:
     assert(it!=mmap_gc_pool.end());
 
     recycle_int(it);
+    mmap_gc_pool.erase(it);
   }
 
   // mmap_vector.hpp: std::tie(base, mmap_size) = mmap_gc::mmap(mmap_name, mmap_fd, mmap_size, std::bind(&vector<T>::gc_function, this, std::placeholders::_1));
@@ -196,13 +235,22 @@ public:
     assert(mmap_gc_pool.find(base) == mmap_gc_pool.end());
     //std::cerr << "mmap_gc_pool add name:" << name << " fd:" << fd << " base:" << base << std::endl;
     mmap_gc_pool[base] = entry;
+    dump();
 
     return {base, final_size};
   }
 
   // mmap_vector.hpp: mmap_base     = reinterpret_cast<uint8_t *>(mmap_gc::remap(mmap_name, mmap_base, old_mmap_size, mmap_size));
   // mmap_map.hpp:    mmap_txt_base = reinterpret_cast<uint64_t *>(mmap_gc::remap(mmap_name, mmap_txt_base, mmap_txt_size, size));
-  static void *remap(std::string_view mmap_name, void *mmap_old_base, size_t old_size, size_t new_size) {
+  static std::tuple<void *, size_t> remap(std::string_view mmap_name, void *mmap_old_base, size_t old_size, size_t new_size) {
+    dump();
+    if (new_size & 0xFFF) {
+      new_size>>=12;
+      new_size++;
+      new_size<<=12;
+    }
+    assert((new_size&0xFFF)==0);
+
     auto it = mmap_gc_pool.find(mmap_old_base);
     assert(it!=mmap_gc_pool.end());
 
@@ -234,8 +282,9 @@ public:
     //std::cerr << "mmap_gc_pool add name:" << entry.name << " fd:" << entry.fd << " base:" << base << std::endl;
     mmap_gc_pool[base] = entry;
 
-    return base;
+    return std::make_tuple(base, new_size);
   }
+
 };
 
 } // namespace mmap_lib

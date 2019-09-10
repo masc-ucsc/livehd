@@ -13,6 +13,8 @@
 #include <string>
 #include <vector>
 
+#include "absl/strings/str_split.h"
+
 #include "cfg_node_data.hpp"
 #include "inou_cfg.hpp"
 #include "lgedgeiter.hpp"
@@ -96,14 +98,16 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, std::vector<LGraph *> &lgs,
   char *p                       = strtok_r(*memblock, "\n\r\f", &str_ptr);
 
   while(p) {
-    std::vector<std::string> words = split(p);
+    std::vector<std::string> words = absl::StrSplit(p,' ', absl::SkipWhitespace());
 
     if(*(words.begin()) == "END")
-      break;
+      continue;
 
-    std::string w1st = *(words.begin());
-    std::string w3rd = *(words.begin() + 2);
-    std::string w6th = *(words.begin() + 5);
+    I(words.size()>5);
+
+    auto w1st = words[0];
+    auto w3rd = words[2];
+    auto w6th = words[5];
 
     auto subgraph_id = (uint32_t)std::stoi(w3rd);
 
@@ -138,13 +142,13 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, std::vector<LGraph *> &lgs,
    // create in/out GIO for every graph
    for(long unsigned int i = 0; i < lgs.size(); i++) {
     //Graph input
-    auto ipin = lgs[i]->add_graph_input("cfg_inp", 0, 0);
+    auto ipin = lgs[i]->add_graph_input("cfg_inp", 1, 0);
     auto dst_node = name2node_lgs[i][first_node_name_lgs[i]];
     I(dst_node.get_type().op != GraphIO_Op);
     lgs[i]->add_edge(ipin, dst_node.setup_sink_pin(0));
 
     //Graph output
-    auto opin = lgs[i]->add_graph_output("cfg_out", 0, 0);
+    auto opin = lgs[i]->add_graph_output("cfg_out", 2, 0);
     auto src_node = final_node_lgs[i];
     lgs[i]->add_edge(src_node.setup_driver_pin(0), opin);
   }

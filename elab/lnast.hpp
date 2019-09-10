@@ -2,12 +2,12 @@
 #pragma once
 
 #include "elab_scanner.hpp"
-#include "tree.hpp"
+#include "mmap_tree.hpp"
 
 using Scope_id            = uint32_t;
 using Rename_table        = absl::flat_hash_map<std::string_view, u_int8_t >;
 using Lnast_ntype_id      = uint8_t;
-using Lnast_index         = Tree_index;
+using Lnast_index         = mmap_lib::Tree_index;
 using Phi_sts_table       = absl::flat_hash_map<std::string_view, Lnast_index>;
 using Phi_sts_tables      = absl::flat_hash_map<Lnast_index, Phi_sts_table>;
 
@@ -18,6 +18,9 @@ struct Lnast_node {
   uint32_t       knum; //SH:FIXME: deprecated, record K number in cfg_text
   uint32_t       loc;  //SH:FIXME: wait for Akash
   uint16_t       subs; //ssa subscript
+
+  Lnast_node()
+    :type(0), scope(0), knum(0), loc(0), subs(0) { }
 
   Lnast_node(Lnast_ntype_id type, Token token)
     :type(type), token(token), scope(0), knum(0), loc(0), subs(0) { I(type);}
@@ -30,7 +33,7 @@ struct Lnast_node {
 };
 
 
-class Lnast : public Tree<Lnast_node> {
+class Lnast : public mmap_lib::tree<Lnast_node> {
 public:
   Lnast() = default;
   explicit Lnast(std::string_view _buffer): buffer(_buffer) { I(!buffer.empty());}

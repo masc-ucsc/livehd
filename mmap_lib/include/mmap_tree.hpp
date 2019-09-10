@@ -83,6 +83,7 @@ protected:
     data_stack[parent.level+1].emplace_back();
     data_stack[parent.level+1].emplace_back();
     data_stack[parent.level+1].emplace_back();
+    assert((parent.pos>>2)<pointers_stack[parent.level].size());
     pointers_stack[parent.level+1].emplace_back(parent.pos);
 
     return pos;
@@ -130,11 +131,11 @@ protected:
     return true;
   }
 
-  const Tree_pos *ref_next_sibling_pos(const Tree_index &index) const {
+  const Tree_pos get_next_sibling_pos(const Tree_index &index) const {
     I(index.level < (int)pointers_stack.size());
     I((index.pos >> 2) < (int)pointers_stack[index.level].size());
 
-    return &pointers_stack[index.level][index.pos >> 2].next_sibling;
+    return pointers_stack[index.level][index.pos >> 2].next_sibling;
   }
 
   Tree_pos *ref_next_sibling_pos(const Tree_index &index) {
@@ -145,9 +146,9 @@ protected:
   }
 
   bool is_last_next_sibling_chunk(const Tree_index &sibling) const {
-    const auto *next_sibling = ref_next_sibling_pos(sibling);
+    const auto next_sibling = get_next_sibling_pos(sibling);
 
-    return ((*next_sibling)>>2) == 0;
+    return (next_sibling>>2) == 0;
   }
 
   bool has_next_sibling_space(const Tree_index &sibling) const {
@@ -155,7 +156,7 @@ protected:
     I(data_stack[sibling.level].size() > (size_t)sibling.pos);
     I(pointers_stack[sibling.level].size() > (size_t)sibling.pos>>2);
 
-    const auto &next_sibling = pointers_stack[sibling.level][sibling.pos>>2].next_sibling;
+    const auto next_sibling = get_next_sibling_pos(sibling);
     if ((next_sibling>>2) != 0)
       return false;
 
@@ -175,25 +176,42 @@ public:
 
     Tree_index child_index(parent_index.level+1, *ref_first_child_pos(parent_index));
 
-    GI(!child_index.is_invalid(), get_sibling_next(child_index).is_invalid());
-
     return child_index;
   }
 
   Tree_index get_sibling_next(const Tree_index &sibling) const {
-    const auto *next_sibling = ref_next_sibling_pos(sibling);
+    const auto next_bucket_pos = get_next_sibling_pos(sibling);
 
-    bool all_used = ((*next_sibling) >> 2) != 0 || *next_sibling == 3;
-    if ((sibling.pos&3)+1 > *next_sibling) {
-      return invalid_index(); // No more siblings
+    if ((sibling.pos & 3) == next_bucket_pos) {
+      return invalid_index();  // No more siblings
+    }else if ((sibling.pos & 3) == 3) {
+      return Tree_index(sibling.level, next_bucket_pos); // Last in bucket
     }
 
-    auto pos = sibling.pos + 1;
-    if (all_used && pos >= 4) {
-      return Tree_index(sibling.level, *next_sibling);
+    return Tree_index(sibling.level, sibling.pos + 1);
+  }
+
+  Tree_index get_sibling_prev(const Tree_index &sibling) const {
+    int pos = sibling.pos - 1;
+    if (pos>=0) {
+      return Tree_index(sibling.level, pos);
     }
 
-    return Tree_index(sibling.level, pos);
+    auto index = get_first_child(get_parent(sibling));
+    Tree_index prev;
+    while(true) {
+      if (index == sibling)
+        return prev; // Returns invalid if first chipd ast for prev
+
+      prev.level = index.level;
+      prev.pos = 3; // Last position
+
+      index.pos = get_next_sibling_pos(index);
+    }
+
+    I(false); // Previous traversal should always hit
+
+    return invalid_index();
   }
 
   class Tree_depth_preorder_iterator {
@@ -301,11 +319,11 @@ public:
     data_stack[index.level][index.pos] = data;
   }
 
-  X &      get_data(const Tree_index &leaf) {
+  X       *ref_data(const Tree_index &leaf) {
     I((int)data_stack.size() > leaf.level);
     I((int)data_stack[leaf.level].size() > leaf.pos);
 
-    return data_stack[leaf.level][leaf.pos];
+    return &data_stack[leaf.level][leaf.pos];
   }
   const X &get_data(const Tree_index &leaf) const {
     I(data_stack.size() > leaf.level);
@@ -322,7 +340,7 @@ public:
 
     auto pos   = pointers_stack[index.level][index.pos >> 2].parent;
     auto level = index.level - 1;
-    if (level < 0) level = 0;
+    if (level < 0) level = 0; // TODO: cleaner to return invalid_index()
 
     GI(index.level == 0, level == 0 && pos == 0);  // parent of root is root
 
@@ -491,6 +509,7 @@ const Tree_index tree<X>::add_next_sibling(const Tree_index &sibling, const X &d
     auto *next_sibling  = ref_next_sibling_pos(sibling);
     (*next_sibling)++;
 
+    assert(((*next_sibling)>>2) == 0);
     child.pos   = ((sibling.pos>>2)<<2) + *next_sibling;
 
     set_data(child, data);

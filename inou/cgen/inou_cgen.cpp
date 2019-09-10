@@ -62,7 +62,7 @@ void Inou_cgen::tocfg(Eprp_var &var) {
 
   // cfg_text to lnast
   p.memblock = p.setup_memblock();
-  p.lnast_parser.parse("lnast", p.memblock);
+  p.lnast_parser.parse("lnast", p.memblock, p.token_list);
 
   p.lnast = p.lnast_parser.get_ast().get();
   p.lnast->ssa_trans();

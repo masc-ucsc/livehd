@@ -429,6 +429,7 @@ public:
 	using Self        = map<MaxLoadFactor100, key_type, T, hasher>;
 
 private:
+  static_assert(std::is_trivially_destructible<Key>::value, "Objects in map should be simple without pointer (simple destruction)");
 	static_assert(!std::is_same<Key, std::string>::value     ,"mmap_lib::map uses string_view as key (not slow std::string)\n");
 	//static_assert(!std::is_same<Key, std::string_view>::value,"mmap_lib::map does not deal with strings or string_views (pointers). Use char_array\n");
 	static_assert(!std::is_same<T, std::string>::value       ,"mmap_lib::map uses string_view as value (not slow std::string)\n");
@@ -629,31 +630,32 @@ private:
 
   // gc_done can be called for mmap_base or mmap_txt_base
 	void gc_done(void *base) const {
-    if (mmap_base == base) {
-      if(mmap_fd >= 0 && empty()) {
-        unlink(mmap_name.c_str());
-      }
-
-      mmap_base = nullptr;
-      mmap_size = 0;
-      mmap_fd   = -1;
+    if (mmap_base != base) {  // WARNING: Possible because 2 mmaps can be active during rehash
       return;
     }
 
-    if constexpr (using_sview) {
-      if (mmap_txt_base == base) {
-        if (mmap_txt_fd>=0 && mmap_txt_base[0] == 0) {
-          unlink((mmap_name+"txt").c_str());
-        }
-
-        mmap_txt_base = nullptr;
-        mmap_txt_size = 0;
-        mmap_txt_fd   = -1;
-        return;
-      }
+    if(mmap_fd >= 0 && empty()) {
+      unlink(mmap_name.c_str());
     }
 
-    // WARNING: It may be neither for resize (old_mmap_base)
+    mmap_base = nullptr;
+    // NOTE: preserve mmap_size to avoid read file in reload
+    // mmap_size = 0;
+    mmap_fd   = -1;
+	}
+
+	void gc_txt_done(void *base) const {
+    assert(using_sview);
+    assert(mmap_txt_base == base);
+
+    if (mmap_txt_fd>=0 && mmap_txt_base[0] == 0) {
+      unlink((mmap_name+"txt").c_str());
+    }
+
+    mmap_txt_base = nullptr;
+    // NOTE: preserve mmap_txt_size to avoid read file in reload
+    // mmap_txt_size = 0;
+    mmap_txt_fd   = -1;
 	}
 
 	size_t calc_mmap_size(size_t nelems) const {
@@ -665,9 +667,11 @@ private:
 
 	void grow_txt_mmap(size_t size) {
     assert(mmap_txt_size<size);
+    assert(mmap_txt_base);
 
-    mmap_txt_base = reinterpret_cast<uint64_t *>(mmap_gc::remap(mmap_name, mmap_txt_base, mmap_txt_size, size));
-    mmap_txt_size = size;
+    void *base;
+    std::tie(base, mmap_txt_size) = mmap_gc::remap(mmap_name, mmap_txt_base, mmap_txt_size, size);
+    mmap_txt_base = reinterpret_cast<uint64_t *>(base);
   }
 
 	std::tuple<uint64_t *, size_t> create_mmap(std::string name, int fd, size_t size) const {
@@ -679,20 +683,31 @@ private:
 		return std::make_tuple(reinterpret_cast<uint64_t *>(base),size);
 	}
 
-  void setup_mmap(size_t n_entries) const {
+  __attribute__((noinline,cold)) void setup_mmap(size_t n_entries) const {
+		assert(mmap_base == nullptr);
+
+    auto new_mmap_size     = mmap_size;
 
     if (mmap_name.empty()) {
+      // MMAP----------------------------------
       assert(mmap_fd == -1);
-      assert(mmap_txt_fd == -1);
-      if (n_entries == 0)
+      if (n_entries) {  // force a size
+        new_mmap_size = calc_mmap_size(n_entries);
+      } else {
+        assert(mmap_size == 0);  // Reload should not be called unless file backup set
+        new_mmap_size = calc_mmap_size(InitialNumElements);
         n_entries = InitialNumElements;
+      }
     }else{
+      // MMAP----------------------------------
       if (mmap_fd<0) {
         mmap_fd = mmap_gc::open(mmap_name);
         assert(mmap_fd>=0);
       }
 
-      if (n_entries==0) { // reload
+      if (n_entries) { // force a size
+        new_mmap_size = calc_mmap_size(n_entries);
+      }else if (mmap_size==0) { // first reload
         int sz = read(mmap_fd,&n_entries,8);
         if (sz!=8) {
           n_entries = InitialNumElements;
@@ -700,33 +715,29 @@ private:
           n_entries++; // We read mMask at base 0
           assert(n_entries>=InitialNumElements);
         }
-      }
-
-      if constexpr (using_sview) {
-        if (mmap_txt_fd<0) {
-          mmap_txt_fd = mmap_gc::open(mmap_name + "txt");
-          assert(mmap_txt_fd>=0);
-        }
+        new_mmap_size = calc_mmap_size(n_entries);
+      } else {
+        assert(new_mmap_size); // preserve last size
       }
     }
 
-    std::tie(mmap_base    , mmap_size    ) = create_mmap(mmap_name, mmap_fd, calc_mmap_size(n_entries));
-    if constexpr (using_sview) {
-      if (mmap_txt_size==0) {
-        std::tie(mmap_txt_base, mmap_txt_size) = create_mmap(mmap_name + "txt", mmap_txt_fd, 8192);
-      }
+    {
+      auto  gc_func             = std::bind(&map<MaxLoadFactor100, Key, T, Hash>::gc_done, this, std::placeholders::_1);
+      void* base                = nullptr;
+      std::tie(base, mmap_size) = mmap_gc::mmap(mmap_name, mmap_fd, new_mmap_size, gc_func);
+      mmap_base                 = reinterpret_cast<uint64_t*>(base);
     }
 
-		mMask                  = &mmap_base[0];
+    mMask                  = &mmap_base[0];
     mNumElements           = &mmap_base[1];
 		mMaxNumElementsAllowed = &mmap_base[2];
 		mInfoInc               = reinterpret_cast<InfoType *>(&mmap_base[3]);
 		mInfoHashShift         = reinterpret_cast<InfoType *>(&mmap_base[4]);
 
 		mInfo = reinterpret_cast<uint8_t*>(&mmap_base[5]);
-		if (*mMask == n_entries - 1) {
+		if (*mMask == n_entries - 1 || n_entries==0) {
 			assert(*mMaxNumElementsAllowed<*mMask);
-			assert(calc_mmap_size(*mMask+1)==mmap_size);
+			assert(calc_mmap_size(*mMask+1)<=mmap_size);
 			assert(mInfo[*mMask+1] == 1); // Sentinel
 			mKeyVals = reinterpret_cast<Node*>(&mmap_base[5+(*mMask+9)/sizeof(uint64_t)]);
     }else{
@@ -742,17 +753,67 @@ private:
 		}
 	}
 
-	void reload() const {
-		assert(mmap_base == nullptr);
+  __attribute__((noinline,cold)) void setup_mmap_txt() const {
+    if constexpr (!using_sview) {
+      return;
+    }
+		assert(mmap_txt_base == nullptr);
 
-		assert(mmap_fd <0);
+    auto new_mmap_txt_size = mmap_txt_size;
 
-		setup_mmap(0);
+    if (mmap_name.empty()) {
+      // MMAP_TXT------------------------------
+      assert(mmap_txt_fd == -1);
+      if (mmap_txt_size == 0) {  // First reload
+        new_mmap_txt_size = 8192;
+      }
+    }else{
+      // MMAP_TXT------------------------------
+      if (mmap_txt_fd<0) {
+        mmap_txt_fd = mmap_gc::open(mmap_name + "txt");
+        assert(mmap_txt_fd>=0);
+      }
+      if (mmap_txt_size==0) { // First reload
+        size_t entries;
+        int sz = read(mmap_txt_fd,&entries,8);
+        if (sz!=8) {
+          entries = 1024;
+        } else {
+          entries++;  // We read base 0
+        }
 
-    assert(mmap_base);
+        new_mmap_txt_size = entries*8;
+      }
+    }
+
+    auto gc_func = std::bind(&map<MaxLoadFactor100, Key, T, Hash>::gc_txt_done, this, std::placeholders::_1);
+    void *base = nullptr;
+    std::tie(base, mmap_txt_size) = mmap_gc::mmap(mmap_name + "txt", mmap_txt_fd, new_mmap_txt_size, gc_func);
+		mmap_txt_base = reinterpret_cast<uint64_t *>(base);
 	}
 
-	// highly performance relevant code.
+	__attribute__((inline)) void reload() const {
+    if (MMAP_LIB_UNLIKELY(mmap_base==nullptr)) {
+      assert(mmap_base == nullptr);
+      assert(mmap_fd < 0);
+
+      setup_mmap(0);
+
+      assert(mmap_base);
+    }
+    if constexpr (using_sview) {
+      if (MMAP_LIB_UNLIKELY(mmap_txt_base == nullptr)) {
+        assert(mmap_txt_base == nullptr);
+        assert(mmap_txt_fd < 0);
+
+        setup_mmap_txt();
+
+        assert(mmap_txt_base);
+      }
+    }
+  }
+
+        // highly performance relevant code.
 	// Lower bits are used for indexing into the array (2^n size)
 	// The upper 1-5 bits need to be a reasonable good hash, to save comparisons.
 	void keyToIdx(const Key &key, int& idx, InfoType& info) const {
@@ -761,11 +822,9 @@ private:
 			? 1
 			: (mmap_map_BITNESS == 64 ? UINT64_C(0xb3727c1f779b8d8b) : UINT32_C(0xda4afe47));
 
-		if (MMAP_LIB_UNLIKELY(mmap_base == nullptr)) {
-			reload();
-		}
+    reload();
 
-		idx = Hash::operator()(key) * bad_hash_prevention;
+    idx = Hash::operator()(key) * bad_hash_prevention;
 		info = static_cast<InfoType>(*mInfoInc + static_cast<InfoType>(idx >> *mInfoHashShift));
 		idx &= *mMask;
 	}
@@ -775,6 +834,7 @@ private:
 		idx = (idx + 1) & *mMask;
     return idx;
 	}
+
 	inline InfoType next_info(InfoType info) const {
 		return static_cast<InfoType>(info + *mInfoInc);
 	}
@@ -857,6 +917,7 @@ private:
 	// copy of find(), except that it returns iterator instead of const_iterator.
 	template <typename Other>
 		int findIdx(Other const& key) const {
+      reload();
 			int idx;
 			InfoType info;
 			keyToIdx(key, idx, info);
@@ -964,7 +1025,7 @@ public:
 	explicit map(std::string_view _path, std::string_view _map_name)
 		: Hash{Hash{}}
 	  , mmap_path(_path.empty()?".":_path)
-	  , mmap_name{std::string(_path) + std::string("/") + std::string(_map_name)} {
+	  , mmap_name{_map_name.empty()?"":(std::string(_path) + std::string("/") + std::string(_map_name))} {
 
     if (mmap_path != ".") {
 			struct stat sb;
@@ -989,34 +1050,27 @@ public:
 	map& operator=(map const& o) = delete;
 	void swap(map& o) = delete;
 
-	// Clears all data, without resizing.
 	void clear() {
-		if (MMAP_LIB_UNLIKELY(mmap_base == nullptr)) {
-			unlink(mmap_name.c_str());
-			if constexpr (using_sview) {
-				clear_sview();
-			}
-			return;
-		}
-		if (empty()) {
-      assert(mmap_base);
+		if (mmap_base != nullptr) {
       mmap_gc::recycle(mmap_base);
-      assert(mmap_base==nullptr);
-			return;
 		}
+    if (!mmap_name.empty()) {
+      unlink(mmap_name.c_str());
+    }
+    mmap_base = nullptr;
+    mmap_size = 0;
 
-		static_assert(std::is_trivially_destructible<Node>::value,"Objects in map should be simple without pointer (simple destruction)");
-
-		// clear everything except the sentinel
-		// std::memset(mInfo, 0, sizeof(uint8_t) * (mMask + 1));
-		uint8_t const z = 0;
-		std::fill(mInfo, mInfo + (sizeof(uint8_t) * (*mMask + 1)), z);
-
-		*mInfoInc = InitialInfoInc;
-		*mInfoHashShift = InitialInfoHashShift;
-
-    *mNumElements = 0;
-		// Do not clear mmap_name or loaded
+    if constexpr (using_sview) {
+      assert(using_sview);
+      if (mmap_txt_base != nullptr) {
+        mmap_gc::recycle(mmap_txt_base);
+      }
+      if (!mmap_name.empty()) {
+        unlink((mmap_name + "txt").c_str());
+      }
+      mmap_txt_base = nullptr;
+      mmap_txt_size = 0;
+    }
 	}
 
 	// Destroys the map and all it's contents.
@@ -1072,9 +1126,7 @@ public:
 	}
 
 	std::string_view get_sview(uint32_t key_pos) const {
-		if (MMAP_LIB_UNLIKELY(mmap_base == nullptr)) {
-			reload();
-		}
+    reload();
     assert(using_sview);
 		assert(key_pos<mmap_txt_base[0]);
 		std::string_view sview(reinterpret_cast<const char *>(&mmap_txt_base[key_pos+1]),mmap_txt_base[key_pos]);
@@ -1179,9 +1231,7 @@ public:
 		}
 
 	[[nodiscard]] iterator begin() {
-		if (MMAP_LIB_UNLIKELY(mmap_base == nullptr)) {
-			reload();
-		}
+    reload();
 
 		if (empty()) {
 			return end();
@@ -1192,9 +1242,7 @@ public:
 		return cbegin();
 	}
 	[[nodiscard]] const_iterator cbegin() const {
-		if (MMAP_LIB_UNLIKELY(mmap_base == nullptr)) {
-			reload();
-		}
+    reload();
 
 		if (empty()) {
 			return cend();
@@ -1312,8 +1360,7 @@ private:
 	void rehash(size_t numBuckets) {
 		assert(MMAP_LIB_UNLIKELY((numBuckets & (numBuckets - 1)) == 0)); // rehash only allowed for power of two
 
-		if (MMAP_LIB_UNLIKELY(mmap_base == nullptr))
-			reload();
+    reload();
 
 		const size_t oldMaxElements = *mMask + 1;
 		if (oldMaxElements >= numBuckets)
@@ -1357,8 +1404,7 @@ private:
 
 	uint32_t allocate_sview_id(std::string_view txt) {
 
-		if (MMAP_LIB_UNLIKELY(mmap_base == nullptr))
-			reload();
+    reload();
 
     assert(using_sview);
 
@@ -1389,15 +1435,6 @@ private:
     mmap_txt_base[0] += 1+(bytes+xtra_space+7)/8; // +7 to cheaply round up, +1 for the strlen
 
 		return insert_point;
-	}
-
-	void clear_sview() const {
-    assert(using_sview);
-    if (mmap_txt_base == nullptr) {
-      unlink((mmap_name+"txt").c_str());
-      return;
-    }
-    mmap_txt_base[0] = 0;
 	}
 
 	template <typename Arg, typename Data>
@@ -1600,7 +1637,7 @@ private:
 
 	void increase_size() {
 		// nothing allocated yet? just allocate InitialNumElements
-		if (0 == *mMask) {
+		if (*mMask == 0) {
 			reload();
 			return;
 		}

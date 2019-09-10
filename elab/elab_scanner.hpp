@@ -117,8 +117,9 @@ public:
 };
 
 class Elab_scanner {
-protected:
+public:
   typedef std::vector<Token> Token_list;
+protected:
 
   std::string      buffer_name;
   std::string_view buffer;
@@ -287,7 +288,7 @@ public:
 
   void patch_pass(const absl::flat_hash_map<std::string, Token_id> &keywords);
 
-  void parse(std::string_view name, std::string_view str);
+  //void parse(std::string_view name, std::string_view str);
   void parse(std::string_view name, std::string_view str, Token_list &tlist);
 
   void dump_token() const;

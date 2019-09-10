@@ -9,6 +9,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "mmap_map.hpp"
+#include "mmap_bimap.hpp"
 #include "rng.hpp"
 
 using testing::HasSubstr;
@@ -81,12 +82,12 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
 
   absl::flat_hash_map<uint32_t, std::string> map2;
 
-  unlink("mmap_map_test_sview_data");
-  EXPECT_EQ(access("mmap_map_test_sview_data", F_OK), -1);
+  unlink("lgdb_bench/mmap_map_test_sview_data");
+  EXPECT_EQ(access("lgdb_bench/mmap_map_test_sview_data", F_OK), -1);
 
   int conta;
   for(int i=0;i<3;i++) {
-    mmap_lib::map<uint32_t, std::string_view> map("mmap_map_test_sview_data");
+    mmap_lib::map<uint32_t, std::string_view> map("lgdb_bench", "mmap_map_test_sview_data");
     auto it = map.set(3,"test");
     EXPECT_EQ(it->first,3);
     EXPECT_NE(it->second,0);
@@ -116,11 +117,11 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
     }
   }
 
-  EXPECT_EQ(access("mmap_map_test_sview_data", F_OK), 0);
-  EXPECT_EQ(access("mmap_map_test_sview_datatxt", F_OK), 0);
+  EXPECT_EQ(access("lgdb_bench/mmap_map_test_sview_data", F_OK), 0);
+  EXPECT_EQ(access("lgdb_bench/mmap_map_test_sview_datatxt", F_OK), 0);
 
   {
-    mmap_lib::map<uint32_t, std::string_view> map("mmap_map_test_sview_data");
+    mmap_lib::map<uint32_t, std::string_view> map("lgdb_bench", "mmap_map_test_sview_data");
     for(auto it:map) {
       auto txt1 = map.get_sview(it);
       auto txt2 = map.get(it.first);
@@ -194,9 +195,10 @@ TEST_F(Setup_mmap_map_test, string_key) {
 TEST_F(Setup_mmap_map_test, string_key_persistance) {
   Rng rng(123);
 
-  int fd = open("mmap_map_test_str",O_WRONLY | O_CREAT,0600); // Try to create a bogus mmap
+  mkdir("lgdb_bench");
+  int fd = open("lgdb_bench/mmap_map_test_str",O_WRONLY | O_CREAT,0600); // Try to create a bogus mmap
   if (fd>=0) {
-    //write(fd, "bunch of garbage", strlen("bunch of garbage"));
+    write(fd, "bunch of garbage", strlen("bunch of garbage"));
     close(fd);
   }
 
@@ -204,7 +206,7 @@ TEST_F(Setup_mmap_map_test, string_key_persistance) {
 
   int conta;
   {
-    mmap_lib::map<std::string_view,uint32_t> map("mmap_map_test_str");
+    mmap_lib::map<std::string_view,uint32_t> map("lgdb_bench", "mmap_map_test_str");
     map.clear(); // Clear the garbage from before
 
     conta = 0;
@@ -231,7 +233,7 @@ TEST_F(Setup_mmap_map_test, string_key_persistance) {
   }
 
   {
-    mmap_lib::map<std::string_view,uint32_t> map("mmap_map_test_str");
+    mmap_lib::map<std::string_view,uint32_t> map("lgdb_bench", "mmap_map_test_str");
 
     for(auto it:map) {
       (void)it;
@@ -298,7 +300,7 @@ public:
 TEST_F(Setup_mmap_map_test, big_entry) {
   Rng rng(123);
 
-  mmap_lib::map<uint32_t,Big_entry> map("mmap_map_test_se");
+  mmap_lib::map<uint32_t,Big_entry> map("lgdb_bench", "mmap_map_test_se");
   absl::flat_hash_map<uint32_t,Big_entry> map2;
 	auto cap = map.capacity();
 
@@ -400,7 +402,7 @@ struct hash<Big_entry> {
 TEST_F(Setup_mmap_map_test, big_key) {
   Rng rng(123);
 
-  mmap_lib::map<Big_entry,uint32_t> map("mmap_map_test_be");
+  mmap_lib::map<Big_entry,uint32_t> map("lgdb_bench", "mmap_map_test_be");
 	map.clear(); // Remove data from previous runs
   absl::flat_hash_map<Big_entry, uint32_t> map2;
 
@@ -433,5 +435,54 @@ TEST_F(Setup_mmap_map_test, big_key) {
   EXPECT_EQ(conta,0);
 
   fmt::print("load_factor:{} conflict_factor:{}\n",map.load_factor(), map.conflict_factor());
+}
+
+TEST_F(Setup_mmap_map_test, lots_of_strings) {
+
+  const std::vector<std::string> roots = {"potato", "__t", "very_long_string", "a"};
+
+  {
+    Rng                                rng(123);
+    mmap_lib::bimap<uint32_t, std::string_view> bimap("lgdb_bench", "mmap_map_large_sview");
+    bimap.clear(); // Remove data from previous runs
+
+    for (uint32_t i = 0; i < 60'000; ++i) {
+      std::string str = roots[rng.uniform<int>(roots.size())];
+      str             = str + ":" + std::to_string(i);
+
+      EXPECT_FALSE(bimap.has_key(i));
+      EXPECT_FALSE(bimap.has_val(str));
+
+      bimap.set(i, str);
+
+      EXPECT_TRUE(bimap.has_key(i));
+      EXPECT_TRUE(bimap.has_val(str));
+
+      auto str2 = bimap.get_val_sview(i);
+      auto i2   = bimap.get_key(str);
+
+      EXPECT_EQ(str, str2);
+      EXPECT_EQ(i, i2);
+    }
+  }
+
+  {
+    Rng                                rng(123); // Same seed
+    mmap_lib::bimap<uint32_t, std::string_view> bimap("lgdb_bench", "mmap_map_large_sview");
+
+    for (uint32_t i = 0; i < 60'000; ++i) {
+      std::string str = roots[rng.uniform<int>(roots.size())];
+      str             = str + ":" + std::to_string(i);
+
+      EXPECT_TRUE(bimap.has_key(i));
+      EXPECT_TRUE(bimap.has_val(str));
+
+      auto str2 = bimap.get_val_sview(i);
+      auto i2   = bimap.get_key(str);
+
+      EXPECT_EQ(str, str2);
+      EXPECT_EQ(i, i2);
+    }
+  }
 }
 

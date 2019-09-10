@@ -156,10 +156,13 @@ void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, Token_id> &
     t.tok = it->second;
   }
 }
+
+#if 0
 void Elab_scanner::parse(std::string_view name, std::string_view memblock) {
   Token_list tlist;
   parse(name, memblock, tlist);
 }
+#endif
 
 static inline bool is_newline(char c) {
   return c == '\n' || c == '\r' || c == '\f';

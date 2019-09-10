@@ -10,8 +10,9 @@
 
 class Inou_graphviz : public Pass {
 private:
-  std::string_view       memblock;
-  Lnast_parser           lnast_parser;
+  Elab_scanner::Token_list token_list;
+  std::string_view         memblock;
+  Lnast_parser             lnast_parser;
 protected:
   bool        bits;
   bool        verbose;

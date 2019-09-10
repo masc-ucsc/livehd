@@ -23,23 +23,23 @@ public:
 
 protected:
   void       elaborate() override;
-  void       build_top_statements              (const Tree_index& tree_idx_top);
-  void       add_statement                     (const Tree_index& tree_top_sts);
-  void       process_assign_like_op            (const Tree_index& tree_idx_opr, const Token& target_name);
-  void       process_label_op                  (const Tree_index& tree_idx_opr, const Token& target_name);
-  void       process_binary_op                 (const Tree_index& tree_idx_opr, const Token& target_name);
-  void       process_func_call_op              (const Tree_index& tree_idx_opr, const Token& target_name);
-  void       process_func_def_op               (const Tree_index& tree_idx_opr, const Token& target_name);
-  void       process_if_op                     (const Tree_index& tree_idx_opr, const Token& target_name);
-  void       add_operator_subtree              (const Tree_index& tree_idx_opr, const Token& target_name);
-  Tree_index process_operator_node             (const Tree_index& opr_parent_sts, Lnast_ntype_id type);
+  void       build_top_statements              (const mmap_lib::Tree_index& tree_idx_top);
+  void       add_statement                     (const mmap_lib::Tree_index& tree_top_sts);
+  void       process_assign_like_op            (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);
+  void       process_label_op                  (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);
+  void       process_binary_op                 (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);
+  void       process_func_call_op              (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);
+  void       process_func_def_op               (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);
+  void       process_if_op                     (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);
+  void       add_operator_subtree              (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);
+  mmap_lib::Tree_index process_operator_node             (const mmap_lib::Tree_index& opr_parent_sts, Lnast_ntype_id type);
   Scope_id        process_scope();
   Lnast_ntype_id  operand_analysis();
   Lnast_ntype_id  operator_analysis();
   bool            token_is_valid_ref();
   void            setup_ntype_str_mapping();
-  void            function_name_correction(Lnast_ntype_id type, const Tree_index& sts_idx);
-  void            process_if_else_sts_range(const Tree_index& tree_idx_if);
+  void            function_name_correction(Lnast_ntype_id type, const mmap_lib::Tree_index& sts_idx);
+  void            process_if_else_sts_range(const mmap_lib::Tree_index& tree_idx_if);
   void            final_else_sts_type_correction();
 
 private:
@@ -49,6 +49,6 @@ private:
   uint8_t  line_tkcnt;
   uint32_t knum1;
   uint32_t knum2;//for if-else or fdef chunk
-  std::vector<std::tuple<Tree_index, Lnast_ntype_id, uint32_t, uint32_t>> range_stack; //(parent_sts, sts_type, min, max)
+  std::vector<std::tuple<mmap_lib::Tree_index, Lnast_ntype_id, uint32_t, uint32_t>> range_stack; //(parent_sts, sts_type, min, max)
 };
 

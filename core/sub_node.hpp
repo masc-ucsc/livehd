@@ -170,17 +170,19 @@ public:
     return instance_pid;
   }
 
-  Port_ID map_graph_pos(std::string_view name, Port_ID graph_pos) {
-    I(graph_pos>0); // 0 possition is also not used (to catch bugs)
+  Port_ID map_graph_pos(std::string_view name, Direction dir, Port_ID graph_pos) {
+    I(graph_pos); // 0 possition is also not used (to catch bugs)
     I(has_pin(name));
-    I(graph_pos != Port_invalid);
 
     Port_ID instance_pid = name2id[name];
     I(io_pins[instance_pid].name == name);
     I(io_pins[instance_pid].graph_io_pos == graph_pos || !has_graph_pin(graph_pos));
-    io_pins[instance_pid].graph_io_pos = graph_pos;
+    io_pins[instance_pid].dir = dir;
 
-    map_pin_int(instance_pid, graph_pos);
+    if (graph_pos != Port_invalid) {
+      io_pins[instance_pid].graph_io_pos = graph_pos;
+      map_pin_int(instance_pid, graph_pos);
+    }
 
     return instance_pid;
   }

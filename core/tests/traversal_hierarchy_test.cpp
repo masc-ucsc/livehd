@@ -7,7 +7,7 @@
 #include <string>
 
 #include "rng.hpp"
-#include "tree.hpp"
+#include "mmap_tree.hpp"
 
 #include "attribute.hpp"
 #include "lgedgeiter.hpp"
@@ -101,7 +101,7 @@ protected:
           sub_lg->add_graph_output(name, pos, rint.uniform<int>(60));
         }
       }
-      data.cnode = node.get_compact();
+      tree.ref_data(index)->cnode = node.get_compact();
 
       node.set_name(data.name);
 

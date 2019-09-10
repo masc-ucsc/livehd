@@ -17,6 +17,7 @@ public:
 class Inou_cgen : public Pass {
 private:
   Inou_cgen_options opack;
+  Elab_scanner::Token_list token_list;
   std::string_view memblock;
   Lnast_parser lnast_parser;
   Lnast_to_cfg_parser *lnast_to_cfg_parser;

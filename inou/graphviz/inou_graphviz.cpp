@@ -174,7 +174,7 @@ void Inou_graphviz::fromlnast(Eprp_var &var) {
 
   //cfg_text to lnast
   p.memblock = p.setup_memblock(p.files);
-  p.lnast_parser.parse("lnast", p.memblock);
+  p.lnast_parser.parse("lnast", p.memblock, p.token_list);
 
   //lnast->ssa_trans();
   p.do_fromlnast(p.files);
