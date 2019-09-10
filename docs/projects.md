@@ -558,3 +558,16 @@ be nice to have. Maybe based on https://github.com/VLSIDA/openram-vagrant-image
 * Autocompletion patch for directories. Now finished with "foo", it should be "foo/"
 * Upgrade to the latest replxx. There was a change in API, and it requires to rework lgshell
 
+## Benchmark API in lgshell
+
+* Able to get time and performance statistics for tasks in lghsell
+* perf.start, perf.stop, perf.dump commands to allow things like:
+```
+lgshell> perf.start
+lgshell> lgraph.open name:foo |> ....
+lgshell> perf.stop
+
+## Smaller tasks
+
+For even smaller tasks check the [cleanup.md](cleanup.md) file
+
