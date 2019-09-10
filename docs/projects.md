@@ -558,6 +558,15 @@ be nice to have. Maybe based on https://github.com/VLSIDA/openram-vagrant-image
 * Autocompletion patch for directories. Now finished with "foo", it should be "foo/"
 * Upgrade to the latest replxx. There was a change in API, and it requires to rework lgshell
 
+## Elab parser
+
+The memblock is typically mmap, and the token list is managed manually. It would be nice to have a Scanner_context class
+that keeps the memblock and token list. It can serialize the token list if needed.
+
+ * Clearer API
+ * Capacity to serialize (optional)
+ * Callback when a memmap changes to retrigger parse, and pass token list to step down the flow
+
 ## Benchmark API in lgshell
 
 * Able to get time and performance statistics for tasks in lghsell
