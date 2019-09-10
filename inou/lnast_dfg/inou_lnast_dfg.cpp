@@ -183,7 +183,7 @@ Node_pin Inou_lnast_dfg::setup_node_pure_assign_and_target (LGraph *dfg, const m
     return setup_node_operand(dfg, eldest_child);
 
   //maybe driver_pin 1, try and error
-  const auto node_dpin    = dfg->create_node(Or_Op, 1).setup_driver_pin(1);
+  const auto node_dpin    = dfg->create_node(Or_Op, 1).setup_driver_pin(0);
   name2dpin[name] = node_dpin;
 
   return node_dpin;

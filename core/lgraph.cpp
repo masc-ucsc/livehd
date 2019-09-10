@@ -232,7 +232,11 @@ Node_pin LGraph::add_graph_input(std::string_view str, Port_ID pos, uint16_t bit
   }
   I(node_type_table[Node::Hardcoded_input_nid] == GraphIO_Op);
 
-  auto idx = setup_idx_from_pid(Node::Hardcoded_input_nid, inst_pid);
+  I(!find_idx_from_pid(Node::Hardcoded_input_nid, inst_pid)); // Just added, so it should not be there
+  Index_ID root_idx=0;
+  auto idx = get_space_output_pin(Node::Hardcoded_input_nid, inst_pid, root_idx);
+
+  //auto idx = setup_idx_from_pid(Node::Hardcoded_input_nid, inst_pid);
   setup_driver(idx); // Just driver, no sink
 
   Node_pin pin(this, this, Hierarchy_tree::root_index(), idx, inst_pid, false);
@@ -254,7 +258,10 @@ Node_pin LGraph::add_graph_output(std::string_view str, Port_ID pos, uint16_t bi
   }
   I(node_type_table[Node::Hardcoded_output_nid] == GraphIO_Op);
 
-  auto idx = setup_idx_from_pid(Node::Hardcoded_output_nid, inst_pid);
+  I(!find_idx_from_pid(Node::Hardcoded_output_nid, inst_pid)); // Just added, so it should not be there
+  Index_ID root_idx=0;
+  auto idx = get_space_output_pin(Node::Hardcoded_output_nid, inst_pid, root_idx);
+  //auto idx = setup_idx_from_pid(Node::Hardcoded_output_nid, inst_pid);
   setup_sink(idx);
   setup_driver(idx); // outputs can also drive internal nodes. So both sink/driver
 

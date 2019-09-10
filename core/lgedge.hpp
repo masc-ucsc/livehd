@@ -429,8 +429,7 @@ public:
   Index_ID get_next() const {
     I(is_next_state());
     uint32_t *idx_upp = (uint32_t *)(&sedge[0]);
-    uint64_t  idx_val = *idx_upp;
-    return idx_val;
+    return *idx_upp;
   }
 
   void set_next_state(Index_ID _idx) {

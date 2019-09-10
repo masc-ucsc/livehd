@@ -37,7 +37,14 @@ protected:
 
   void del_int_node(const Index_ID idx);
 
-  Index_ID find_idx_from_pid(const Index_ID idx, const Port_ID pid) const;
+  Index_ID find_idx_from_pid_int(const Index_ID idx, const Port_ID pid) const;
+  Index_ID find_idx_from_pid(const Index_ID idx, const Port_ID pid) const {
+    if (likely(node_internal[idx].get_dst_pid() == pid)) { // Common case
+      return idx;
+    }
+    return find_idx_from_pid_int(idx, pid);
+  }
+
   Index_ID setup_idx_from_pid(const Index_ID nid, const Port_ID pid);
 
   void setup_driver(const Index_ID idx) {
