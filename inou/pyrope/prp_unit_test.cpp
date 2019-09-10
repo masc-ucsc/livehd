@@ -216,7 +216,8 @@ TEST_F(Prp_test, assignment_expression1){
   
   std::string_view parse_txt("\%out as (__bits:8)\n");
   
-  scanner.parse("assignment_expression1", parse_txt.data());
+  Elab_scanner::Token_list tlist;
+  scanner.parse("assignment_expression1", parse_txt.data(), tlist);
   EXPECT_EQ(tree_traversal_check_tokens, scanner.tree_traversal_tokens);
   EXPECT_EQ(tree_traversal_check_rules, scanner.tree_traversal_rules);
 }

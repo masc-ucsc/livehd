@@ -105,5 +105,6 @@ int main(int argc, char **argv){
 
   Test_scanner scanner;
 
-  scanner.parse("test", statement);
+  Elab_scanner::Token_list tlist;
+  scanner.parse("test", statement, tlist);
 }

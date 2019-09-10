@@ -22,7 +22,7 @@ class Lnast_test : public ::testing::Test, public Lnast_parser {
   std::vector<std::vector<tuple>> ast_preorder_golden;
 
 public:
-  Tree<tuple>  ast_gld;
+  mmap_lib::tree<tuple>  ast_gld;
   Lnast_parser lnast_parser;
 
   void SetUp() override {
@@ -94,7 +94,7 @@ K50  K51   0  280  292   =    %o2     ___v
 
   void setup_lnast_golden(){
     ast_gld.set_root(std::make_tuple(ntype_dbg(Lnast_ntype_top), "")); //knum = K1
-    auto top_sts = ast_gld.add_child(Tree_index(0,0), std::make_tuple(ntype_dbg(Lnast_ntype_statements), "")); //knum = K1
+    auto top_sts = ast_gld.add_child(ast_gld.get_root(), std::make_tuple(ntype_dbg(Lnast_ntype_statements), "")); //knum = K1
 
     auto K1      = ast_gld.add_child(top_sts,   std::make_tuple(ntype_dbg(Lnast_ntype_label),         ""      ));
     auto K1_tar  = ast_gld.add_child(K1,        std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___a"  ));
@@ -393,7 +393,7 @@ K50  K51   0  280  292   =    %o2     ___v
   }
 
   void setup_ast_sorted_golden(){
-    ast_gld.each_top_down_fast([this] (const Tree_index &parent, const Tree_index &self, const tuple &node_data) {
+    ast_gld.each_top_down_fast([this] (const mmap_lib::Tree_index &parent, const mmap_lib::Tree_index &self, const tuple &node_data) {
       while (static_cast<size_t>(self.level)>=ast_sorted_golden.size())
           ast_sorted_golden.emplace_back();
 
@@ -471,7 +471,8 @@ K50  K51   0  280  292   =    %o2     ___v
 
   void setup_lnast_testee(){
     std::string_view memblock = setup_memblock();
-    lnast_parser.parse("lnast", memblock);
+    Elab_scanner::Token_list tlist;
+    lnast_parser.parse("lnast", memblock, tlist);
   }
 };//end class
 
@@ -480,8 +481,8 @@ TEST_F(Lnast_test, Traverse_breadth_first_check_on_ast) {
   std::vector<std::vector<tuple>> ast_sorted_testee;
   std::string_view memblock = setup_memblock();
 
-  lnast->each_top_down_fast([this, &ast_sorted_testee, &memblock, &lnast] (const Tree_index &parent,
-                                                                                const Tree_index &self,
+  lnast->each_top_down_fast([this, &ast_sorted_testee, &memblock, &lnast] (const mmap_lib::Tree_index &parent,
+                                                                                const mmap_lib::Tree_index &self,
                                                                                 const Lnast_node &node_data) {
     while (static_cast<size_t>(self.level)>=ast_sorted_testee.size())
         ast_sorted_testee.emplace_back();

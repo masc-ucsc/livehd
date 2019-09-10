@@ -39,7 +39,8 @@ int main(int argc, char **argv) {
     exit(-3);
   }
   Lnast_parser lnast_parser;
-  lnast_parser.parse(argv[1], memblock);
+  Elab_scanner::Token_list tlist;
+  lnast_parser.parse(argv[1], memblock, tlist);
   auto lnast = lnast_parser.get_ast().get(); //unique_ptr lend its ownership
   lnast->ssa_trans();
 }

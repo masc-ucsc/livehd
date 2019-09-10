@@ -7,7 +7,6 @@
 #include <string>
 
 #include "rng.hpp"
-#include "tree.hpp"
 
 #include "attribute.hpp"
 #include "lgedgeiter.hpp"

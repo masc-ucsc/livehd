@@ -195,7 +195,7 @@ TEST_F(Setup_mmap_map_test, string_key) {
 TEST_F(Setup_mmap_map_test, string_key_persistance) {
   Rng rng(123);
 
-  mkdir("lgdb_bench");
+  mkdir("lgdb_bench", 0755);
   int fd = open("lgdb_bench/mmap_map_test_str",O_WRONLY | O_CREAT,0600); // Try to create a bogus mmap
   if (fd>=0) {
     write(fd, "bunch of garbage", strlen("bunch of garbage"));

@@ -58,15 +58,6 @@ cc_test(
     )
 
 cc_test(
-    name = "tree_test",
-    srcs = ["tests/tree_test.cpp"],
-    deps = [
-        ":elab",
-        "@gtest//:gtest_main",
-        ],
-    )
-
-cc_test(
     name = "lnast_parser_unit_test",
     srcs = ["tests/lnast_parser_unit_test.cpp"],
     data = ["//inou/cfg:cfg_pts"],

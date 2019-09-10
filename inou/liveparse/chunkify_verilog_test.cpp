@@ -46,7 +46,8 @@ TEST_F(VTest1, interface) {
                               " typo in this block of code \"module\" \n"
                               "endmodule"; // No return/space after endmodule
 
-  chunker.parse("test1.v", test1_verilog.c_str());
+  Elab_scanner::Token_list tlist;
+  chunker.parse("test1.v", test1_verilog.c_str(), tlist);
 
   EXPECT_NE(access("tbase/parse/file_test1.v", R_OK), -1);
   EXPECT_NE(access("tbase/parse/chunk_test1.v/test1_moda.v", R_OK), -1);
@@ -54,7 +55,7 @@ TEST_F(VTest1, interface) {
 
   // No code change delta
   Chunkify_verilog chunker2("tdelta", "tbase");
-  chunker2.parse("test1.v", test1_verilog.c_str());
+  chunker2.parse("test1.v", test1_verilog.c_str(), tlist);
   EXPECT_EQ(access("tdelta/parse/chunk_test1.v/test1_moda.v", R_OK), -1);
   EXPECT_EQ(access("tdelta/parse/chunk_test1.v/test1_modb.v", R_OK), -1);
 
@@ -63,7 +64,7 @@ TEST_F(VTest1, interface) {
                               "  output signed [1:0] h\n"
                               ");\n endmodule\n";
   // test1_moda different
-  chunker2.parse("test1.v", test2_verilog.c_str());
+  chunker2.parse("test1.v", test2_verilog.c_str(), tlist);
   EXPECT_NE(access("tdelta/parse/chunk_test1.v/test1_moda.v", R_OK), -1);
   EXPECT_EQ(access("tdelta/parse/chunk_test1.v/test1_modb.v", R_OK), -1);
 }
@@ -72,7 +73,8 @@ TEST_F(VTest1, noaccess) {
   std::string test2_verilog = "";
 
   Chunkify_verilog chunker("/proc", "");
-  chunker.parse("test1.v", test2_verilog.c_str());
+  Elab_scanner::Token_list tlist;
+  chunker.parse("test1.v", test2_verilog.c_str(), tlist);
 
   EXPECT_TRUE(true); // it if did not creep out, it is fine
 }
