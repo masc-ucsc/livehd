@@ -6,7 +6,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
-#include "absl/container/node_hash_map.h"
+#include "absl/container/flat_hash_map.h"
 
 #include <cassert>
 #include <climits>
@@ -36,7 +36,7 @@ struct mmap_gc_entry {
 
 class mmap_gc {
 protected:
-  using gc_pool_type=absl::node_hash_map<void *, mmap_gc_entry>; // pointer stability for delete
+  using gc_pool_type=absl::flat_hash_map<void *, mmap_gc_entry>; // pointer stability for delete
   static inline gc_pool_type mmap_gc_pool;
 
   static inline int n_open_mmaps = 0;
