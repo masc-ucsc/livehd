@@ -182,7 +182,6 @@ bool LGraph::is_graph_input(std::string_view name) const {
   auto ref = Ann_node_pin_name::ref(this);
   const auto it = ref->find_val(name);
   if (it == ref->end()) {
-    I(!alt);
     return false;
   }
   auto compact = ref->get_key(it);
@@ -209,7 +208,6 @@ bool LGraph::is_graph_output(std::string_view name) const {
   auto ref = Ann_node_pin_name::ref(this);
   const auto it = ref->find_val(name);
   if (it == ref->end()) {
-    I(!alt);
     return false;
   }
   auto compact = ref->get_key(it);
@@ -614,7 +612,12 @@ void LGraph::dump() {
   fmt::print("lgraph name:{} size:{}\n", name, node_internal.size());
 
   for(const auto &io_pin:get_self_sub_node().get_io_pins()) {
-    fmt::print("io {} pid:{} {}\n", io_pin.name, io_pin.graph_io_pos, io_pin.dir==Sub_node::Direction::Input?"input":"output");
+
+    fmt::print("io {} pos:{} pid:{} {}\n"
+        ,io_pin.name
+        ,io_pin.graph_io_pos
+        ,get_self_sub_node().get_instance_pid(io_pin.name)
+        ,io_pin.dir == Sub_node::Direction::Input ? "input" : "output");
   }
 
 #if 1

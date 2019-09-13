@@ -55,9 +55,9 @@ const Edge_raw *Edge_raw::find_edge(const Edge_raw *bt, const Edge_raw *et, Inde
 const Edge_raw *Edge_raw::get_reverse_for_deletion() const {
   I(is_root());
   Node_Internal *ptr_node = &Node_Internal::get(this);
-  Index_ID       ptr_idx  = ptr_node->get_self_idx();
+  SIndex_ID       ptr_idx  = ptr_node->get_self_idx();
 
-  Index_ID       dst_idx = get_idx();
+  SIndex_ID       dst_idx = get_idx();
   Node_Internal *ptr_inp2 = &ptr_node[dst_idx - ptr_idx];
   const Node_Internal *ptr_inp = &(ptr_inp2->get_master_root());
 
@@ -96,20 +96,24 @@ Index_ID Edge_raw::get_self_idx() const {
   const auto &root_page = Node_Internal_Page::get(this);
   const auto &root_self = Node_Internal::get(this);
 
-  int delta = &root_self - (const Node_Internal *)&root_page;
+  SIndex_ID delta = &root_self - (const Node_Internal *)&root_page; // Signed and bigger than Index_ID
+  I(delta<64 && delta>0); // 64 entries between page aligned
 
-  return delta + root_page.get_idx();
+  SIndex_ID idx = delta + root_page.get_idx();
+
+  return static_cast<Index_ID>(idx);
 }
 
 Index_ID Edge_raw::get_self_root_idx() const {
   const auto &root_page = Node_Internal_Page::get(this);
   const auto &root_self = Node_Internal::get(this);
 
-  int delta = &root_self - (const Node_Internal *)&root_page;
+  SIndex_ID delta = &root_self - (const Node_Internal *)&root_page;
+  I(delta<64 && delta>0); // 64 entries between page aligned
 
-  Index_ID self_idx = delta + root_page.get_idx();
+  SIndex_ID self_idx = delta + root_page.get_idx();
   if (root_self.is_root())
-    return self_idx;
+    return static_cast<Index_ID>(self_idx);
 
   return root_self.get_nid();
 }
@@ -117,7 +121,7 @@ Index_ID Edge_raw::get_self_root_idx() const {
 Index_ID Node_Internal::get_self_idx() const {
   const auto &root_page = Node_Internal_Page::get(this);
 
-  int delta = this - (const Node_Internal *)&root_page;
+  SIndex_ID delta = this - (const Node_Internal *)&root_page;
 
   return delta + root_page.get_idx();
 }
@@ -233,7 +237,7 @@ const Node_Internal &Node_Internal::get_root() const {
   const auto &         root_page = Node_Internal_Page::get(this);
   const Node_Internal *root_ptr  = (const Node_Internal *)&root_page;
 
-  Index_ID delta = nid - root_page.get_idx();
+  SIndex_ID delta = nid - root_page.get_idx(); // Signed and bigger than Index_ID
   root_ptr       = (root_ptr + delta);
   I(root_ptr->is_root());
   I(root_ptr->is_node_state());
@@ -248,7 +252,7 @@ const Node_Internal &Node_Internal::get_master_root() const {
   const auto &         root_page = Node_Internal_Page::get(this);
   const Node_Internal *root_ptr;
 
-  Index_ID delta = nid - root_page.get_idx();
+  SIndex_ID delta = nid - root_page.get_idx(); // Signed and bigger than Index_ID
   root_ptr       = ((const Node_Internal *)&root_page) + delta;
   I(root_ptr->is_root());
   I(root_ptr->is_node_state());
@@ -276,8 +280,8 @@ void Node_Internal::try_recycle() {
   Index_ID       root_idx = root->get_nid();
   I(root_idx == root->get_self_idx());
 
-  Index_ID self_idx = get_self_idx();
-  Index_ID prev_idx = root_idx;
+  SIndex_ID self_idx = get_self_idx();
+  SIndex_ID prev_idx = root_idx;
   I(prev_idx != self_idx);  // because it is not a root
 
   while (root[prev_idx - root_idx].get_next() != self_idx) {

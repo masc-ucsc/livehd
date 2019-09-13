@@ -46,11 +46,20 @@ static absl::flat_hash_map<const RTLIL::Cell *, Node>      cell2node; // Points 
 static absl::flat_hash_map<const RTLIL::Wire *, Node_pin_iterator>      partially_assigned;
 
 static void look_for_wire(LGraph *g, const RTLIL::Wire *wire) {
+  if (wire2pin.find(wire) != wire2pin.end())
+    return;
+
   if(wire->port_input) {
     //log("input %s\n",wire->name.c_str());
     I(!wire->port_output); // any bidirectional port?
     I(wire->name.c_str()[0] == '\\');
-    auto pin = g->add_graph_input(&wire->name.c_str()[1], wire->port_id, wire->width);
+    Node_pin pin;
+    if (g->is_graph_input(&wire->name.c_str()[1])) {
+      pin = g->get_graph_input(&wire->name.c_str()[1]);
+      assert(pin.get_bits() == wire->width);
+    } else {
+      pin = g->add_graph_input(&wire->name.c_str()[1], wire->port_id, wire->width);
+    }
     if (wire->start_offset) {
       pin.set_offset(wire->start_offset);
     }
@@ -58,8 +67,11 @@ static void look_for_wire(LGraph *g, const RTLIL::Wire *wire) {
   }else if (wire->port_output) {
     //log("output %s\n",wire->name.c_str());
     I(wire->name.c_str()[0] == '\\');
-    g->add_graph_output(&wire->name.c_str()[1], wire->port_id, wire->width);
+    if (!g->is_graph_output(&wire->name.c_str()[1])) {
+      g->add_graph_output(&wire->name.c_str()[1], wire->port_id, wire->width);
+    }
     auto pin = g->get_graph_output(&wire->name.c_str()[1]);
+    assert(pin.get_bits() == wire->width);
     if (wire->start_offset) {
       auto dpin = g->get_graph_output_driver(&wire->name.c_str()[1]);
       I(dpin.get_pid() == pin.get_pid());
