@@ -7,6 +7,8 @@
 #include "pass.hpp"
 #include "lnast_parser.hpp"
 #include "lnast_to_cfg_parser.hpp"
+#include "lnast_to_verilog_parser.hpp"
+#include "lnast_to_pyrope_parser.hpp"
 
 class Inou_cgen_options {
 public:
@@ -21,6 +23,8 @@ private:
   std::string_view memblock;
   Lnast_parser lnast_parser;
   Lnast_to_cfg_parser *lnast_to_cfg_parser;
+  Lnast_to_verilog_parser *lnast_to_verilog_parser;
+  Lnast_to_pyrope_parser *lnast_to_pyrope_parser;
   Lnast       *lnast;
   typedef std::ostringstream Out_string;
 
@@ -53,10 +57,11 @@ protected:
 public:
   Inou_cgen();
   static void tocfg(Eprp_var &var);
+  static void toverilog(Eprp_var &var);
+  static void topyrope(Eprp_var &var);
 
   void setup() final;
 
 private:
   std::string_view setup_memblock();
-  void do_tocfg();
 };
