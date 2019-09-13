@@ -6,9 +6,9 @@
 class Lnast_to_verilog_parser {
 private:
   uint32_t k_next;
-  Tree_level curr_statement_level = -1;
-  Tree_level prev_statement_level = -1;
-  std::vector<Tree_level> level_stack;
+  mmap_lib::Tree_level curr_statement_level = -1;
+  mmap_lib::Tree_level prev_statement_level = -1;
+  std::vector<mmap_lib::Tree_level> level_stack;
   std::vector<uint32_t> k_stack;
   std::vector<std::vector<Lnast_node>> buffer_stack;
   std::vector<Lnast_node> node_buffer;
@@ -24,10 +24,10 @@ private:
   absl::flat_hash_map<Lnast_ntype_id, std::string> ntype2str;
   void setup_ntype_str_mapping();
 
-  void process_node(const Tree_index &it);
-  void process_top(Tree_level level);
-  void push_statement(Tree_level level); // prepare for next statement
-  void pop_statement(Tree_level level, Lnast_ntype_id type);
+  void process_node(const mmap_lib::Tree_index &it);
+  void process_top(mmap_lib::Tree_level level);
+  void push_statement(mmap_lib::Tree_level level); // prepare for next statement
+  void pop_statement(mmap_lib::Tree_level level, Lnast_ntype_id type);
   void add_to_buffer(Lnast_node node);
   void process_buffer();
 

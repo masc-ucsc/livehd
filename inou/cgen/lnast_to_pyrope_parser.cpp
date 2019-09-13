@@ -4,7 +4,7 @@
 std::string Lnast_to_pyrope_parser::stringify() {
   fmt::print("\nstart Lnast_to_pyrope_parser::stringify\n");
 
-  for (const Tree_index &it: lnast->depth_preorder(lnast->get_root())) {
+  for (const mmap_lib::Tree_index &it: lnast->depth_preorder(lnast->get_root())) {
     process_node(it);
   }
   process_buffer();
@@ -13,7 +13,7 @@ std::string Lnast_to_pyrope_parser::stringify() {
   return buffer;
 }
 
-void Lnast_to_pyrope_parser::process_node(const Tree_index& it) {
+void Lnast_to_pyrope_parser::process_node(const mmap_lib::Tree_index& it) {
   const auto& node_data = lnast->get_data(it);
   std::string type = ntype_dbg(node_data.type);
 
@@ -47,12 +47,12 @@ void Lnast_to_pyrope_parser::process_node(const Tree_index& it) {
 
 }
 
-void Lnast_to_pyrope_parser::process_top(Tree_level level) {
+void Lnast_to_pyrope_parser::process_top(mmap_lib::Tree_level level) {
   level_stack.push_back(level);
   curr_statement_level = level;
 }
 
-void Lnast_to_pyrope_parser::push_statement(Tree_level level, Lnast_ntype_id type) {
+void Lnast_to_pyrope_parser::push_statement(mmap_lib::Tree_level level, Lnast_ntype_id type) {
   fmt::print("push\n");
 
   level = level + 1;
@@ -72,7 +72,7 @@ void Lnast_to_pyrope_parser::push_statement(Tree_level level, Lnast_ntype_id typ
   fmt::print("after push\n");
 }
 
-void Lnast_to_pyrope_parser::pop_statement(Tree_level level, Lnast_ntype_id type) {
+void Lnast_to_pyrope_parser::pop_statement(mmap_lib::Tree_level level, Lnast_ntype_id type) {
   fmt::print("pop\n");
 
   process_buffer();

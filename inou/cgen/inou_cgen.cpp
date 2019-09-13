@@ -98,7 +98,7 @@ void Inou_cgen::toverilog(Eprp_var &var) {
 
   // cfg text to lnast
   p.memblock = p.setup_memblock();
-  p.lnast_parser.parse("lnast", p.memblock);
+  p.lnast_parser.parse("lnast", p.memblock, p.token_list);
 
   p.lnast = p.lnast_parser.get_ast().get();
   p.lnast->ssa_trans();
@@ -122,7 +122,7 @@ void Inou_cgen::topyrope(Eprp_var &var) {
 
   // cfg text to lnast
   p.memblock = p.setup_memblock();
-  p.lnast_parser.parse("lnast", p.memblock);
+  p.lnast_parser.parse("lnast", p.memblock, p.token_list);
 
   p.lnast = p.lnast_parser.get_ast().get();
   p.lnast->ssa_trans();
