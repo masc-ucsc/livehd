@@ -372,7 +372,15 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
 
       RTLIL::SigSpec rhs = RTLIL::SigSpec(get_wire(e.driver));
       assert(rhs != lhs);
-      module->connect(lhs, rhs);
+      if (lhs.size() == rhs.size()) {
+        module->connect(lhs, rhs);
+      } else if (lhs.size() < rhs.size()) { // Drop bits
+        assert(rhs.is_wire());
+        module->connect(lhs, RTLIL::SigSpec(rhs.as_wire(), 0 , lhs.size()));
+      } else {                                // add disconnected bits?
+        assert(0); // TODO: once we have a case
+        module->connect(RTLIL::SigSpec(lhs.as_wire(), 0 , rhs.size()), rhs);
+      }
     }
   });
 
