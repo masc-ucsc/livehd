@@ -619,27 +619,19 @@ static void process_assigns(RTLIL::Module *module, LGraph *g) {
       } else if(chunk.width == lhs_wire->width) {
         if(chunk.width == 0)
           continue;
-        Node_pin dpin = create_join_operator(g, rhs.extract(offset, chunk.width));
 
-        offset += chunk.width;
         if(lhs_wire->port_output) {
+          Node_pin dpin = create_join_operator(g, rhs.extract(offset, chunk.width));
           Node_pin spin = g->get_graph_output(&lhs_wire->name.c_str()[1]);
           g->add_edge(dpin, spin, lhs_wire->width);
         } else if(wire2pin.find(lhs_wire) == wire2pin.end()) {
+          Node_pin dpin = create_join_operator(g, rhs.extract(offset, chunk.width));
           wire2pin[lhs_wire] = dpin;
         } else {
-          if(wire2pin.find(lhs_wire) == wire2pin.end()) {
-            wire2pin[lhs_wire] = dpin;
-          } else {
-            I(dpin.get_bits());
-            I(wire2pin[lhs_wire].get_bits() == dpin.get_bits());
-            auto dpin2 = wire2pin[lhs_wire];
-            I(dpin==dpin2);
-            //auto spin = wire2pin[lhs_wire];
-            //assert(false);// FIXME: find test case to debug/fix this
-            //g->add_edge(dpin, spin);
-          }
+          I(wire2pin[lhs_wire].get_bits() == lhs_wire->width);
         }
+
+        offset += chunk.width;
       } else {
         if(partially_assigned.find(lhs_wire) == partially_assigned.end()) {
           partially_assigned[lhs_wire].resize(lhs_wire->width);
