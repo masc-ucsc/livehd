@@ -216,7 +216,7 @@ void Lnast_to_pyrope_parser::dec_indent_buffer() {
 }
 
 std::string Lnast_to_pyrope_parser::indent_buffer() {
-  return std::string(indent_buffer_size, ' ');
+  return std::string(indent_buffer_size * 2, ' ');
 }
 
 /*
@@ -428,7 +428,7 @@ void Lnast_to_pyrope_parser::process_func_def() {
   std::vector<Lnast_node>::iterator it = node_buffer.begin();
   it++; // func_def
   it++; // sts
-  node_str_buffer = absl::StrCat(node_str_buffer, get_node_name(*it), " = :(");
+  node_str_buffer = absl::StrCat(node_str_buffer, indent_buffer(), get_node_name(*it), " = :(");
   it++; // ref
   while (it != node_buffer.end()) {
     node_str_buffer = absl::StrCat(node_str_buffer, get_node_name(*it));
@@ -439,7 +439,7 @@ void Lnast_to_pyrope_parser::process_func_def() {
       node_str_buffer = absl::StrCat(node_str_buffer, "):{\n");
     }
   }
-  node_str_buffer = absl::StrCat(node_str_buffer, sts_buffer_queue.front(), "}\n");
+  node_str_buffer = absl::StrCat(node_str_buffer, sts_buffer_queue.front(), indent_buffer(), "}\n");
   sts_buffer_queue.erase(sts_buffer_queue.begin());
 }
 
