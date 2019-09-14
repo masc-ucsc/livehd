@@ -55,7 +55,7 @@ void Lnast::phi_node_insertion(const Lnast_index &if_node, Rename_table &rename_
 
 
 bool Lnast::check_else_block_existence(const Lnast_index &if_node){
-  I(false);
+  // I(false);
 #if 0
   // VERY inneficient to iterate just to get the last
   const auto lnast_if_children = children(if_node);
