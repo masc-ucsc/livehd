@@ -335,7 +335,7 @@ void Lnast_parser::final_else_sts_type_correction() {
     if (node_data.type == Lnast_ntype_if) {
 
       auto last_else_sts       = lnast->get_last_child(it);
-      auto second_last_exe_sts = lnast->get_sibling_prev(lnast->get_sibling_prev(it));
+      auto second_last_exe_sts = lnast->get_sibling_prev(last_else_sts);
 
       I(lnast->get_data(last_else_sts).type == Lnast_ntype_cstatements);
       I(lnast->get_data(second_last_exe_sts).type == Lnast_ntype_statements);
