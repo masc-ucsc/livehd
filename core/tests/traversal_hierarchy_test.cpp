@@ -26,7 +26,7 @@ protected:
     std::string name;
   };
 
-  Tree<Node_data> tree;
+  mmap_lib::tree<Node_data> tree;
   std::vector<Node> node_order;
   LGraph *lg_root;
 
@@ -39,17 +39,14 @@ protected:
   using Bwd_pos_attr  = Attribute<bwd_name,Node ,mmap_lib::map<Node::Compact, uint64_t> >;
 
   void map_tree_to_lgraph(int rseed) {
-    std::vector<Tree_index> index_order;
+    std::vector<mmap_lib::Tree_index> index_order;
 
-    for (const auto &index : tree.breadth_first()) {
-#if 0
-      const auto &data       = tree.get_data(index);
-      fmt::print(" level:{} pos:{} create_pos:{} fwd:{} bwd:{} leaf:{}\n", index.level, index.pos, data.create_pos, data.fwd_pos, data.bwd_pos, data.leaf);
-#endif
+    tree.each_top_down_fast([&index_order](const mmap_lib::Tree_index &index, const Node_data &node) {
+      fmt::print(" level:{} pos:{} create_pos:{} fwd:{} bwd:{} leaf:{}\n", index.level, index.pos, node.create_pos, node.fwd_pos, node.bwd_pos, node.leaf);
 
       if (index.level || index.pos)
         index_order.emplace_back(index);
-    }
+    });
 
     lg_root = LGraph::create("lgdb_hierarchy_test", "node_l0p0", "hierarchy_test");
     lg_root->add_graph_output("o0",0,17);
@@ -66,7 +63,7 @@ protected:
     RandomBool rbool;
 
     for(const auto &index:index_order) {
-      const auto &data       = tree.get_data(index);
+      const auto &data = tree.get_data(index);
 
       I(index.level || index.pos); // skip root
 
@@ -255,7 +252,7 @@ protected:
       level = rint.uniform<int>(max_level);
       I(level<max_depth);
 
-      Tree_index index(level, rint.uniform<int>(tree.get_tree_width(level)));
+      mmap_lib::Tree_index index(level, rint.uniform<int>(tree.get_tree_width(level)));
 
       Node_data data;
       data.create_pos = i+1;
@@ -267,7 +264,7 @@ protected:
       //fmt::print("leaf_ratio:{} {} {}\n", leaf_ratio,n_leafs, i);
 
       if (leaf_ratio < leaf_ratio_goal && index.level) { // Not to root
-        tree.add_younger_sibling(index, data);
+        tree.add_next_sibling(index, data);
         n_leafs++;
       }else{
         //index.pos = tree.get_tree_width(index.level)-1; // Add child at the end
@@ -284,25 +281,25 @@ protected:
     int pos = 0;
     n_leafs = 0;
     for (auto index : tree.depth_preorder()) {
-      auto &data = tree.get_data(index);
-      data.fwd_pos = pos;
-      data.bwd_pos = size-pos;
-      data.leaf    = tree.is_leaf(index);
-      if (data.leaf) {
+      auto *data = tree.ref_data(index);
+      data->fwd_pos = pos;
+      data->bwd_pos = size-pos;
+      data->leaf    = tree.is_leaf(index);
+      if (data->leaf) {
         std::string name("leaf_l" + std::to_string(index.level) + "p" + std::to_string(index.pos));
-        data.name = name;
+        data->name = name;
         n_leafs++;
       } else {
         std::string name("node_l" + std::to_string(index.level) + "p" + std::to_string(index.pos));
-        data.name = name;
+        data->name = name;
       }
       ++pos;
     }
 
     if (!unique) {
       for(int i=0;i<size/32;i++) {
-        Tree_index insert_point(rint.uniform<int>(max_level), rint.uniform<int>(tree.get_tree_width(max_level)));
-        Tree_index copy_point(rint.uniform<int>(max_level), rint.uniform<int>(tree.get_tree_width(max_level)));
+        mmap_lib::Tree_index insert_point(rint.uniform<int>(max_level), rint.uniform<int>(tree.get_tree_width(max_level)));
+        mmap_lib::Tree_index copy_point(rint.uniform<int>(max_level), rint.uniform<int>(tree.get_tree_width(max_level)));
 
         if (tree.is_child_of(copy_point,insert_point)) // No recursion insert
           continue;
