@@ -393,7 +393,9 @@ K50  K51   0  280  292   =    %o2     ___v
   }
 
   void setup_ast_sorted_golden(){
-    ast_gld.each_top_down_fast([this] (const mmap_lib::Tree_index &parent, const mmap_lib::Tree_index &self, const tuple &node_data) {
+    ast_gld.each_top_down_fast([this] (const mmap_lib::Tree_index &self, const tuple &node_data) {
+      const mmap_lib::Tree_index &parent = ast_gld.get_parent(self);
+
       while (static_cast<size_t>(self.level)>=ast_sorted_golden.size())
           ast_sorted_golden.emplace_back();
 
@@ -481,9 +483,10 @@ TEST_F(Lnast_test, Traverse_breadth_first_check_on_ast) {
   std::vector<std::vector<tuple>> ast_sorted_testee;
   std::string_view memblock = setup_memblock();
 
-  lnast->each_top_down_fast([this, &ast_sorted_testee, &memblock, &lnast] (const mmap_lib::Tree_index &parent,
-                                                                                const mmap_lib::Tree_index &self,
-                                                                                const Lnast_node &node_data) {
+  lnast->each_top_down_fast([this, &ast_sorted_testee, &memblock, &lnast] (const mmap_lib::Tree_index &self,
+                                                                           const Lnast_node &node_data) {
+    const mmap_lib::Tree_index &parent = lnast->get_parent(self);
+
     while (static_cast<size_t>(self.level)>=ast_sorted_testee.size())
         ast_sorted_testee.emplace_back();
 
