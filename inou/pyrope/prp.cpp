@@ -9,1805 +9,1344 @@ void Prp::eat_comments(){
 	while (scan_is_token(Token_id_comment) && !scan_is_end()) scan_next();
 }
 
-bool Prp::rule_top(){
-  debug_stat.rules_called++;
-  rule_call_trace.push_back("Called rule_top.\n");
+bool Prp::rule_start(){
+  //fmt::print("Called rule_start.\n");
+  
   bool ok = rule_code_blocks();
   if(ok){
-    rule_call_trace.push_back("Matched rule_top\n");
+    //fmt::print("Matched rule_start.\n");
+    return true;
   }
   else{
-    rule_call_trace.push_back("Failed rule_top\n");
+    //fmt::print("Failed rule_start.\n");
+    return false;
   }
-  return ok;
 }
 
 bool Prp::rule_code_blocks(){
-  debug_stat.rules_called++;
-  rule_call_trace.push_back("Called rule_code_blocks\n");
+  INIT_FUNCTION("Called rule_code_blocks.\n");
+  
   eat_comments();
   if (!rule_code_block_int()){
-    rule_call_trace.push_back("Failed rule_code_blocks\n");
-    return false;
+    RULE_FAILED("Failed rule_code_blocks.\n");
   }
-  while(rule_code_block_int());
-
-  rule_call_trace.push_back("Matched rule_code_blocks\n");
-  return true;
+  while(rule_code_block_int() && !scan_is_end());
+  
+  RULE_SUCCESS("Matched rule_code_blocks.\n", Prp_rule_code_blocks);
 }
 
 bool Prp::rule_code_block_int(){
-  debug_stat.rules_called++;
-  rule_call_trace.push_back("Called rule_code_block_int\n");
+  INIT_FUNCTION("Called rule_code_block_int.\n");
+  
   eat_comments();
-  debug_down(); // Should be overwritten
-  if (rule_if_statement()){
-    debug_up(Prp_rule_if_statement);
-    rule_call_trace.push_back("Matched rule_code_block_int\n");
-    return true;
-  }
-  else if (rule_for_statement()){
-    debug_up(Prp_rule_for_statement);
-    rule_call_trace.push_back("Matched rule_code_block_int\n");
-    return true;
-  }
-  else if (rule_while_statement()){
-    debug_up(Prp_rule_while_statement);
-    rule_call_trace.push_back("Matched rule_code_block_int\n");
-    return true;
-  }
-  else if (rule_try_statement()){
-    debug_up(Prp_rule_try_statement);
-    rule_call_trace.push_back("Matched rule_code_block_int\n");
-    return true;
-  }
-  else if (rule_punch_format()){
-    debug_up(Prp_rule_punch_format);
-    rule_call_trace.push_back("Matched rule_code_block_int\n");
-    return true;
-  }
-  else if (rule_assignment_expression()){
-    debug_up(Prp_rule_assignment_expression);
-    rule_call_trace.push_back("Matched rule_code_block_int\n");
-    return true;
-  }
-  else if (rule_function_pipe()){
-    debug_up(Prp_rule_function_pipe);
-    rule_call_trace.push_back("Matched rule_code_block_int\n");
-    return true;
-  }
-  else if (rule_fcall_implicit()){
-    debug_up(Prp_rule_fcall_implicit);
-    rule_call_trace.push_back("Matched rule_code_block_int\n");
-    return true;
-  }
-  else if (rule_fcall_explicit()){
-    debug_up(Prp_rule_fcall_explicit);
-    rule_call_trace.push_back("Matched rule_code_block_int\n");
-    return true;
-  }
-  rule_call_trace.push_back("Failed rule_code_block_int\n");
-  debug_up(Prp_invalid);
-  return false;
+  
+  if (rule_if_statement()){ RULE_SUCCESS("Matched rule_code_block_int.\n", Prp_rule_code_block_int); }
+  else if (rule_for_statement()){ RULE_SUCCESS("Matched rule_code_block_int.\n", Prp_rule_code_block_int); }
+  else if (rule_while_statement()){ RULE_SUCCESS("Matched rule_code_block_int.\n", Prp_rule_code_block_int); }
+  else if (rule_try_statement()){ RULE_SUCCESS("Matched rule_code_block_int.\n", Prp_rule_code_block_int); }
+  else if (rule_punch_format()){ RULE_SUCCESS("Matched rule_code_block_int.\n", Prp_rule_code_block_int); }
+  else if (rule_assignment_expression()){ RULE_SUCCESS("Matched rule_code_block_int.\n", Prp_rule_code_block_int); }
+  else if (rule_fcall_implicit()){ RULE_SUCCESS("Matched rule_code_block_int.\n", Prp_rule_code_block_int); }
+  else if (rule_fcall_explicit()){ RULE_SUCCESS("Matched rule_code_block_int.\n", Prp_rule_code_block_int); }
+  else if (rule_return_statement()){ RULE_SUCCESS("Matched rule_code_block_int.\n", Prp_rule_code_block_int); }
+  else if (rule_compile_check_statement()){ RULE_SUCCESS("Matched rule_code_block_int.\n", Prp_rule_code_block_int); }
+  else if (rule_assertion_statement()){ RULE_SUCCESS("Matched rule_code_block_int.\n", Prp_rule_code_block_int); }
+  
+  RULE_FAILED("Failed rule_code_block_int.\n");
 }
 
 bool Prp::rule_if_statement(){
-  debug_stat.rules_called++;
-  rule_call_trace.push_back("Called rule_if_statement\n");
-  int tokens_consumed = 0;
-
-  if (scan_is_token(Pyrope_id_unique)){
-    debug_consume(); // consume the unique token
-    tokens_consumed++;
-    if (scan_is_token(Pyrope_id_if)){
-      debug_consume(); // consume the if token
-      tokens_consumed++;
-    }
-    else{
-      go_back(tokens_consumed);
-      rule_call_trace.push_back("Failed rule_if_statement\n");
-      return false;
-    }
-  }
-  else if (scan_is_token(Pyrope_id_if)){
-    fmt::print("rule_if_statement: Found an if.\n");
-    debug_consume(); // consume the if token
-    tokens_consumed++;
-  }
-  else{
-    go_back(tokens_consumed);
-    rule_call_trace.push_back("Failed rule_if_statement\n");
-    return false;
-  }
-  if(rule_logical_expression()){
-    dump_token();
-    // optional
-    if(scan_is_token(Token_id_colon)){
-      debug_consume(); // consume the colon
-      tokens_consumed++;
-      if(scan_is_token(Token_id_colon)){
-        debug_consume(); // consume the colon
-        tokens_consumed++;
-      }
-      else{
-        go_back(tokens_consumed);
-        rule_call_trace.push_back("Failed rule_if_statement\n");
-        return false;
-      }
-    }
-    if(scan_is_token(Token_id_ob)){
-      debug_consume(); // consume the open brace
-      tokens_consumed++;
-      // optional
-      rule_code_blocks(); // PROBLEM: occurs many times; doesn't account for code block syntax being incorrect
-      // optional
-      if(scan_is_token(Token_id_cb)){
-        debug_consume(); // consume the close brace
-        tokens_consumed++;
-        rule_else_statement(); // PROBLEM: same as above
-        rule_call_trace.push_back("Matched rule_if_statement\n");
-        debug_stat.rules_matched++;
-        return true;
-      }
-    }
-  }
-  rule_call_trace.push_back("Failed rule_if_statement\n");
-  go_back(tokens_consumed);
-  return false;
+  INIT_FUNCTION("Called rule_if_statement.\n");
+  
+  if(!(SCAN_IS_TOKEN(Pyrope_id_if, Prp_rule_if_statement) || SCAN_IS_TOKEN(Pyrope_id_unique))){ RULE_FAILED("Failed rule_if_statement; couldn't find an if or a unique token.\n"); }
+  if(!rule_logical_expression()){ RULE_FAILED("Failed rule_if_statement; couldn't find a logical_expression.\n"); }
+  if(!rule_empty_scope_colon()){ RULE_FAILED("Failed rule_if_statement; couldn't find an empty_scope_colon.\n"); }
+  if(!rule_block_body()){ RULE_FAILED("Failed rule_if_statement; couldn't find a block_body.\n"); }
+  // optional
+  rule_else_statement();
+  
+  RULE_SUCCESS("Matched rule_if_statement.\n", Prp_rule_if_statement);
 }
 
 bool Prp::rule_for_statement(){
-  debug_stat.rules_called++;
-  rule_call_trace.push_back("Called rule_for_statement\n");
-  int tokens_consumed = 0;
-  if(scan_is_token(Pyrope_id_for)){
-    debug_consume();
-    tokens_consumed++;
-    if(rule_for_index()){
-      // optional
-      if(scan_is_token(Token_id_colon)){
-        debug_consume(); // consume the colon
-        tokens_consumed++;
-        if(scan_is_token(Token_id_colon)){
-          debug_consume(); // consume the colon
-          tokens_consumed++;
-        }
-        else{
-          go_back(tokens_consumed);
-          rule_call_trace.push_back("Failed rule_for_statement\n");
-          return false;
-        }
-      }
-      if(scan_is_token(Token_id_ob)){
-        debug_consume(); // consume the open brace
-        tokens_consumed++;
-        // optional
-        rule_code_blocks();
-        if(scan_is_token(Token_id_cb)){
-          debug_consume(); // consume the open brace
-          tokens_consumed++;
-          rule_call_trace.push_back("Matched rule_for_statement\n");
-          debug_stat.rules_matched++;
-          return true;
-        }
-      }
-    }
-  }
-  go_back(tokens_consumed);
-  rule_call_trace.push_back("Failed rule_for_statement\n");
-  return false;
+  INIT_FUNCTION("Called rule_for_statement.\n");
+  
+  if(!SCAN_IS_TOKEN(Pyrope_id_for)){ RULE_FAILED("Failed rule_for_statement; couldn't find a for token.\n"); }
+  if(!rule_for_index()){ RULE_FAILED("Failed rule_for_statement; couldn't find a for_index.\n"); }
+  if(!rule_empty_scope_colon()){ RULE_FAILED("Failed rule_for_statement; couldn't find an empty_scope_colon.\n"); }
+  if(!rule_block_body()){ RULE_FAILED("Failed rule_for_statement; couldn't find a block_body.\n"); }
+  
+  RULE_SUCCESS("Matched rule_for_statement.\n", Prp_rule_for_statement);
 }
 
 bool Prp::rule_for_index(){
-  debug_stat.rules_called++;
-  rule_call_trace.push_back("Called rule_for_index\n");
-  int tokens_consumed = 0;
-
-  if(rule_rhs_expression_property()){
-    // zero or more
-    bool next = true;
-    while(next){
-      next = rule_rhs_expression_property();
-    }
-    next = true;
-    while(next){
+  INIT_FUNCTION("Called rule_for_index.\n");
+  
+  if(!rule_rhs_expression_property()){ RULE_FAILED("Failed rule_for_index; couldn't find an rhs_expression_property.\n"); }
+  
+  bool next = true;
+  while(next){
+    if(!rule_rhs_expression_property()){
       next = false;
-      if(scan_is_token(Token_id_comma)){
-        debug_consume();
-        tokens_consumed++;
-        if(rule_rhs_expression_property()){
-          next = true;
-        }
-        else{
-          go_back(tokens_consumed);
-          rule_call_trace.push_back("Failed rule_for_index\n");
-          return false;
-        }
-      }
     }
-    rule_call_trace.push_back("Matched rule_for_index\n");
-    debug_stat.rules_matched++;
-    return true;
   }
-  go_back(tokens_consumed);
-  rule_call_trace.push_back("Failed rule_for_index\n");
-  return false;
+  
+  RULE_SUCCESS("Matched rule_for_index.\n", Prp_rule_for_index);
 }
 
 bool Prp::rule_else_statement(){
-  debug_stat.rules_called++;
-  rule_call_trace.push_back("Called rule_else_statement\n");
-  int tokens_consumed = 0;
-
-  // option one
-  if(scan_is_token(Pyrope_id_elif)){
-    debug_consume(); // consume the elif
-    tokens_consumed++;
-    if(rule_logical_expression()){
-      // optional
-      if(scan_is_token(Token_id_colon)){
-        debug_consume();
-        tokens_consumed++;
-        if(scan_is_token(Token_id_colon)){
-          debug_consume();
-          tokens_consumed++;
-        }
-        else{
-          go_back(tokens_consumed);
-          rule_call_trace.push_back("Failed rule_else_statement\n");
-          return false;
-        }
-      }
-      if(scan_is_token(Token_id_ob)){
-        // optional
-        rule_code_blocks();
-        if(scan_is_token(Token_id_cb)){
-          // optional
-          rule_else_statement();
-          rule_call_trace.push_back("Matched rule_else_statement\n");
-          debug_stat.rules_matched++;
-          return true;
-        }
-      }
-    }
-  }
-
-  // option two
-  go_back(tokens_consumed);
-  tokens_consumed = 0;
-  if(scan_is_token(Pyrope_id_else)){
-    debug_consume(); // consume the else
-    tokens_consumed++;
+  INIT_FUNCTION("Called rule_else_statement.\n");
+  
+  // option 1
+  if(SCAN_IS_TOKEN(Pyrope_id_elif, Prp_rule_else_statement)){
+    if(!rule_logical_expression()){ RULE_FAILED("Failed rule_else_statement (ELIF path); couldn't find a condition for the elif.\n"); }
+    if(!rule_empty_scope_colon()){ RULE_FAILED("Failed rule_else_statement; couldn't find an empty_scope_colon.\n"); }
+    if(!rule_block_body()){ RULE_FAILED("Failed rule_else_statement; couldn't find a block_body.\n"); }
     // optional
-    if(scan_is_token(Token_id_colon)){
-      debug_consume();
-      tokens_consumed++;
-      if(scan_is_token(Token_id_colon)){
-        debug_consume();
-        tokens_consumed++;
-      }
-      else{
-        go_back(tokens_consumed);
-        rule_call_trace.push_back("Failed rule_else_statement\n");
-        return false;
-      }
-    }
-    if(scan_is_token(Token_id_ob)){
-      debug_consume(); // consume the open brace
-      tokens_consumed++;
-      // optional
-      rule_code_blocks();
-      if(scan_is_token(Token_id_cb)){
-        debug_consume(); // consume the open brace
-        tokens_consumed++;
-        rule_call_trace.push_back("Matched rule_else_statement\n");
-        debug_stat.rules_matched++;
-        return true;
-      }
-    }
+    rule_else_statement();
+    RULE_SUCCESS("Matched rule_else_statement (ELIF path).\n", Prp_rule_else_statement);
   }
-  go_back(tokens_consumed);
-  rule_call_trace.push_back("Failed rule_else_statement\n");
-  return false;
+  else if(!SCAN_IS_TOKEN(Pyrope_id_else, Prp_rule_else_statement)){ RULE_FAILED("Failed rule_else_statement; couldn't find either an else or an elif.\n"); }
+  if(!rule_empty_scope_colon()){ RULE_FAILED("Failed rule_else_statement (ELSE path); couldn't find an empty_scope_colon.\n"); }
+  if(!rule_block_body()){ RULE_FAILED("Failed rule_else_statement; couldn't find a block_body.\n"); }
+  
+  RULE_SUCCESS("Matched rule_else_statement.\n", Prp_rule_else_statement);
 }
 
 bool Prp::rule_while_statement(){
-  debug_stat.rules_called++;
-  rule_call_trace.push_back("Called rule_while_statement\n");
-  int tokens_consumed = 0;
-
-  if(scan_is_token(Pyrope_id_while)){
-    debug_consume(); // consume the while
-    tokens_consumed++;
-    if(rule_logical_expression()){
-      // optional
-      if(scan_is_token(Token_id_colon)){
-        debug_consume();
-        tokens_consumed++;
-        if(scan_is_token(Token_id_colon)){
-          debug_consume();
-          tokens_consumed++;
-        }
-        else{
-          go_back(tokens_consumed);
-          rule_call_trace.push_back("Failed rule_while_statement\n");
-          return false;
-        }
-      }
-      if(scan_is_token(Token_id_ob)){
-        debug_consume(); // consume the open bracket
-        tokens_consumed++;
-        // optional
-        rule_code_blocks();
-        if(scan_is_token(Token_id_cb)){
-          debug_consume(); // consume the open bracket
-          rule_call_trace.push_back("Matched rule_while_statement\n");
-          debug_stat.rules_matched++;
-          return true;
-        }
-      }
-    }
-  }
-  go_back(tokens_consumed);
-  rule_call_trace.push_back("Failed rule_while_statement\n");
-  return false;
+  INIT_FUNCTION("Called rule_while_statement.\n");
+  
+  if(!SCAN_IS_TOKEN(Pyrope_id_while)){ RULE_FAILED("Failed rule_while_statement; couldn't find a while.\n"); }
+  if(!rule_logical_expression()){ RULE_FAILED("Failed rule_while_statement; couldn't find a logical_expression.\n"); }
+  if(!rule_empty_scope_colon()){ RULE_FAILED("Failed rule_while_statement; couldn't find an empty_scope_colon.\n"); }
+  if(!rule_block_body()){ RULE_FAILED("Failed rule_while_statement; couldn't find a block_body.\n"); }
+  
+  RULE_SUCCESS("Failed rule_while_statement; couldn't find a while token.\n", Prp_rule_while_statement);
 }
 
 bool Prp::rule_try_statement(){
-  debug_stat.rules_called++;
-  rule_call_trace.push_back("Called rule_try_statement\n");
-  int tokens_consumed = 0;
+  INIT_FUNCTION("Called rule_try_statement.\n");
+  
+  if(!SCAN_IS_TOKEN(Pyrope_id_try, Prp_rule_try_statement)){ RULE_FAILED("Failed rule_try_statement; couldn't find a try token.\n"); }
+  if(!rule_empty_scope_colon()){ RULE_FAILED("Failed rule_try_statement; couldn't find an empty_scope_colon\n"); }
+  if(!rule_block_body()){ RULE_FAILED("Failed rule_try_statement; couldn't find a block_body.\n"); }
+  //if(!SCAN_IS_TOKEN(Pyrope_id_else, Prp_rule_try_statement)){ RULE_FAILED("Failed rule_try_statement; couldn't find an else token.\n"); }
+  
+  // optional
+  rule_scope_else();
+  
+  RULE_SUCCESS("Matched rule_try_statement.\n", Prp_rule_try_statement);
+}
 
-  if(scan_is_token(Pyrope_id_try)){
-    debug_consume(); // consume the try
-    tokens_consumed++;
-    if(rule_logical_expression()){
-      // optional
-      if(scan_is_token(Token_id_colon)){
-        debug_consume();
-        tokens_consumed++;
-        if(scan_is_token(Token_id_colon)){
-          debug_consume();
-          tokens_consumed++;
-        }
-        else{
-          go_back(tokens_consumed);
-          rule_call_trace.push_back("Failed rule_try_statement\n");
-          return false;
-        }
-      }
-      if(scan_is_token(Token_id_ob)){
-        debug_consume(); // consume the open bracket
-        tokens_consumed++;
-        // optional
-        rule_code_blocks();
-        if(scan_is_token(Token_id_cb)){
-          debug_consume(); // consume the open bracket
-          tokens_consumed++;
-          // optional
-          rule_scope_else();
-          rule_call_trace.push_back("Matched rule_try_statement\n");
-          debug_stat.rules_matched++;
-          return true;
-        }
-      }
-    }
+
+// TODO: check correctness of scanner with ASSERTION token ("I")
+bool Prp::rule_assertion_statement(){
+  INIT_FUNCTION("Called rule_assertion_statement.\n");
+  
+  if(!SCAN_IS_TOKEN(Pyrope_id_assertion, Prp_rule_assertion_statement)){ RULE_FAILED("Failed rule_assertion_statement; couldn't find an assertion token.\n"); }
+  else{
+    if(!rule_logical_expression()){ RULE_FAILED("Failed rule_assertion_statement; couldn't find a logical_expression.\n"); }
   }
-  go_back(tokens_consumed);
-  rule_call_trace.push_back("Failed rule_try_statement\n");
-  return false;
+  
+  RULE_SUCCESS("Matched rule_assertion_statement.\n", Prp_rule_assertion_statement);
+}
+
+// TODO: check correctness of scanner with NEGATION token ("N")
+bool Prp::rule_negation_statement(){
+  INIT_FUNCTION("Called rule_negation_statement.\n");
+  
+  if(!SCAN_IS_TOKEN(Pyrope_id_negation)){ RULE_FAILED("Failed rule_negation_statement; couldn't find a negation token.\n"); }
+  else{
+    if(!rule_logical_expression()){ RULE_FAILED("Failed rule_negation_statement; couldn't find a logical_expression.\n"); }
+  }
+  
+  RULE_SUCCESS("Matched rule_logical_expression.\n", Prp_rule_negation_statement);
+}
+
+bool Prp::rule_empty_scope_colon(){
+  INIT_FUNCTION("Called rule_empty_scope_colon.\n");
+  
+  // optional
+  if(SCAN_IS_TOKEN(Token_id_colon, Prp_rule_empty_scope_colon)){
+    if(!SCAN_IS_TOKEN(Token_id_colon), Prp_rule_empty_scope_colon){ RULE_FAILED("Failed rule_empty_scope_colon; couldn't find a second colon.\n"); }
+  }
+  
+  if(!SCAN_IS_TOKEN(Token_id_ob, Prp_rule_empty_scope_colon)){ RULE_FAILED("Failed rule_empty_scope_colon; couldn't find an opening brace.\n"); }
+
+  RULE_SUCCESS("Matched rule_empty_scope_colon.\n", Prp_rule_empty_scope_colon);
 }
 
 bool Prp::rule_scope_else(){
-  debug_stat.rules_called++;
-  rule_call_trace.push_back("Called rule_scope_else\n");
-  int tokens_consumed = 0;
-  if(scan_is_token(Pyrope_id_else)){
-    debug_consume();
-    tokens_consumed++;
-    if(scan_is_token(Token_id_ob)){
-      debug_consume();
-      tokens_consumed++;
-      // optional
-      rule_scope_body();
-      if(scan_is_token(Token_id_cb)){
-        debug_consume();
-        tokens_consumed++;
-        rule_call_trace.push_back("Matched rule_scope_else\n");
-        debug_stat.rules_matched++;
-        return true;
-      }
-    }
-  }
-  go_back(tokens_consumed);
-  rule_call_trace.push_back("Failed rule_scope_else\n");
-  return false;
+  INIT_FUNCTION("Called rule_scope_else.\n");
+  
+  if(!SCAN_IS_TOKEN(Pyrope_id_else, Prp_rule_scope_else)){ RULE_FAILED("Failed rule_scope_else; couldn't find an else token.\n"); }
+  
+  if(!SCAN_IS_TOKEN(Token_id_ob, Prp_rule_scope_else)){ RULE_FAILED("Failed rule_scope_else; couldn't find an open brace.\n"); }
+  
+  // optional
+  rule_scope_body();
+  
+  if(!SCAN_IS_TOKEN(Token_id_cb, Prp_rule_scope_else))
+  
+  RULE_SUCCESS("Matched rule_scope_else.\n", Prp_rule_scope_else);
 }
 
 bool Prp::rule_scope_body(){
-  debug_stat.rules_called++;
-  rule_call_trace.push_back("Called rule_scope_body\n");
-  // option one
-  if(rule_code_blocks()){
-    // optional
-    rule_logical_expression();
-    rule_call_trace.push_back("Matched rule_scope_body\n");
-    debug_stat.rules_matched++;
-    return true;
+  INIT_FUNCTION("Called rule_scope_body.\n");
+  
+  if(!rule_code_blocks()){
+    if(!rule_logical_expression()){ RULE_FAILED("Failed rule_scope_body; couldn't find either a logical_expression or a code_blocks.\n"); }
+    RULE_SUCCESS("Matched rule_scope_body", Prp_rule_scope_body);
   }
-
-  // option two
-  if(rule_logical_expression()){
-    rule_call_trace.push_back("Matched rule_scope_body\n");
-    debug_stat.rules_matched++;
-    return true;
-  }
-
-  rule_call_trace.push_back("Failed rule_scope_body\n");
-  return false;
+  
+  // option 2
+  if(!rule_logical_expression()){ RULE_FAILED("Failed rule_scope_body\n", Prp_rule_scope_body); }
+  
+  RULE_SUCCESS("Matched rule_scope_body.\n", Prp_rule_scope_body);
 }
 
 bool Prp::rule_scope(){
-  rule_call_trace.push_back("Called rule_scope\n");
-  debug_stat.rules_called++;
-  int tokens_consumed = 0;
-
-  if(scan_is_token(Token_id_colon)){
+  INIT_FUNCTION("Called rule_scope.\n");
+  
+  if(SCAN_IS_TOKEN(Token_id_colon)){
     // optional
-    debug_consume();
-    tokens_consumed++;
     rule_scope_condition();
-    if(scan_is_token(Token_id_colon)){
-      debug_consume(); // consume the colon
-      rule_call_trace.push_back("Matched rule_scope\n");
-      debug_stat.rules_matched++;
-      return true;
+    if(SCAN_IS_TOKEN(Token_id_colon)){
+      // optional
+      rule_logical_expression();
+      RULE_SUCCESS("Matched rule_scope.\n", Prp_rule_scope);
     }
   }
-
-  go_back(tokens_consumed);
-  rule_call_trace.push_back("Failed rule_scope\n");
-  return false;
+  
+  RULE_FAILED("Failed rule_scope; generic.\n");
 }
 
 bool Prp::rule_scope_condition(){
-  rule_call_trace.push_back("Called rule_scope_condition\n");
-  debug_stat.rules_called++;
-  int tokens_consumed = 0;
-
-  // option one
-  if(rule_scope_argument()){
-    if(scan_is_token(Pyrope_id_when)){
-      debug_consume();
-      tokens_consumed++;
-      if(rule_logical_expression()){
-        rule_call_trace.push_back("Matched rule_scope_condition\n");
-        debug_stat.rules_matched++;
-        return true;
-      }
-    }
-  }
-
-  // option 2
-  go_back(tokens_consumed);
-  tokens_consumed = 0;
+  INIT_FUNCTION("Called rule_scope_condition.\n");
+  
   // optional
   rule_scope_argument();
-  if(scan_is_token(Pyrope_id_when)){
-    debug_consume();
-    tokens_consumed++;
-    if(rule_logical_expression()){
-      rule_call_trace.push_back("Matched rule_scope_condition\n");
-      debug_stat.rules_matched++;
-      return true;
-    }
+  
+  if(SCAN_IS_TOKEN(Pyrope_id_when)){
+    if(!rule_logical_expression()){ RULE_FAILED("Failed rule_scope_condition; couldn't find an answering logical expression.\n"); }
   }
+  
+  RULE_SUCCESS("Matched rule_scope_condition.\n", Prp_rule_scope_condition);
+}
 
-  go_back(tokens_consumed);
-  rule_call_trace.push_back("Failed rule_scope_condition\n");
-  return false;
+bool Prp::rule_scope_colon(){
+  INIT_FUNCTION("Called rule_scope_colon.\n");
+  
+  if(!rule_scope()){ RULE_FAILED("Failed rule_scope_colon; couldn't find a scope.\n"); }
+  if(!SCAN_IS_TOKEN(Token_id_ob)){ RULE_FAILED("Failed rule_scope_colon; couldn't find an opening brace.\n"); }
+  
+  RULE_SUCCESS("Matched rule_scope_colon.\n", Prp_rule_scope_colon);
 }
 
 bool Prp::rule_scope_argument(){
-  rule_call_trace.push_back("Called rule_scope_argument\n");
-  debug_stat.rules_called++;
-  int tokens_consumed = 0;
-
-  // option one
-  if(scan_is_token(Token_id_op)){
-    debug_consume(); // consume the open parenthesis
-    tokens_consumed++;
-    if(rule_identifier()){
-      // zero or more
-      while(rule_identifier());
-      if(scan_is_token(Token_id_cp)){
-        debug_consume();
-        rule_call_trace.push_back("Matched rule_scope_argument\n");
-        debug_stat.rules_matched++;
-        return true;
-      }
-    }
+  INIT_FUNCTION("Called rule_scope_argument.\n");
+  if(!rule_fcall_arg_notation()){ 
+    RULE_FAILED("Failed rule_scope_argument; couldn't find an fcall_arg_notation.\n"); 
   }
-
-  go_back(tokens_consumed);
-  tokens_consumed = 0;
-
-  // option 2
-  if(scan_is_token(Token_id_op)){
-    debug_consume();
-    tokens_consumed++;
-    if(rule_identifier()){
-      bool next = true;
-      while(next){
-        next = scan_is_token(Token_id_comma);
-        if(next){
-          debug_consume();
-          tokens_consumed++;
-          if(!rule_identifier()){
-            go_back(tokens_consumed);
-            rule_call_trace.push_back("Failed rule_scope_argument\n");
-            return false;
-          }
-        }
-      }
-      if(scan_is_token(Token_id_cp)){
-        debug_consume();
-        rule_call_trace.push_back("Matched rule_scope_argument\n");
-        debug_stat.rules_matched++;
-        return true;
-      }
-    }
-  }
-
-  go_back(tokens_consumed);
-  rule_call_trace.push_back("Matched rule_scope_argument\n");
-  debug_stat.rules_matched++;
-  return true;
-}
-
-bool Prp::rule_scope_declaration(){
-  debug_stat.rules_called++;
-  rule_call_trace.push_back("Called rule_scope_declaration\n");
-  int tokens_consumed = 0;
-
-  if(rule_scope()){
-    if(scan_is_token(Token_id_ob)){
-      debug_consume();
-      tokens_consumed++;
-      // optional
-      rule_scope_body();
-      if(scan_is_token(Token_id_cb)){
-        debug_consume();
-        tokens_consumed++;
-        // optional
-        rule_scope_else();
-        rule_call_trace.push_back("Matched rule_scope_declaration\n");
-        debug_stat.rules_matched++;
-        return true;
-      }
-    }
-  }
-  go_back(tokens_consumed);
-  rule_call_trace.push_back("Failed rule_scope_declaration\n");
-  return false;
+  
+  RULE_SUCCESS("Matched rule_scope_argument.\n", Prp_rule_scope_argument);
 }
 
 bool Prp::rule_punch_format(){
-  rule_call_trace.push_back("Called rule_punch_format\n");
-  debug_stat.rules_called++;
-  int tokens_consumed = 0;
-
-  if(scan_is_token(Pyrope_id_punch)){
-    debug_consume();
-    tokens_consumed++;
-    if(rule_identifier()){
-      if(scan_is_token(Token_id_at) || scan_is_token(Token_id_percent)){
-        debug_consume();
-        tokens_consumed++;
-        if(rule_punch_rhs()){
-          rule_call_trace.push_back("Matched rule_punch_format\n");
-          debug_stat.rules_matched++;
-          return true;
-        }
-      }
-    }
-  }
-  go_back(tokens_consumed);
-  rule_call_trace.push_back("Failed rule_punch_format\n");
-  return false;
+  INIT_FUNCTION("Called rule_punch_format.\n");
+  
+  if(!SCAN_IS_TOKEN(Pyrope_id_punch)){ RULE_FAILED("Failed rule_punch_format; couldn't find a punch token.\n"); }
+  if(!rule_identifier()){ RULE_FAILED("Failed rule_punch_format; couldn't find an identifier.\n"); }
+  
+  if(!SCAN_IS_TOKEN(Token_id_at) || SCAN_IS_TOKEN(Token_id_percent)){ RULE_FAILED("Failed rule_punch_format; couldn't find a percent or an at symbol.\n"); }
+  if(!rule_punch_rhs()){ RULE_FAILED("Failed rule_punch_format; couldn't find a punch_rhs.\n"); }
+  
+  RULE_SUCCESS("Matched rule_punch_format.\n", Prp_rule_punch_format);
 }
 
-/* FIXME: never returns true */
+bool Prp::rule_scope_declaration(){
+  INIT_FUNCTION("Called rule_scope_declaration.\n");
+  
+  if(!rule_scope()){ RULE_FAILED("Failed rule_scope_declaration; couldn't find a scope.\n"); }
+  if(!SCAN_IS_TOKEN(Token_id_ob)){ RULE_FAILED("Failed rule_scope_declaration; couldn't find an open brace.\n"); }
+  
+  // optional
+  rule_scope_body();
+  
+  if(!SCAN_IS_TOKEN(Token_id_cb)){ RULE_FAILED("Failed rule_scope_declaration; couldn't find a closing brace.\n"); }
+  
+  // optional
+  rule_scope_else();
+  
+  RULE_SUCCESS("Matched rule_scope_declaration.\n", Prp_rule_scope_declaration);
+}
+
 bool Prp::rule_punch_rhs(){
-  rule_call_trace.push_back("Called rule_punch_rhs\n");
-  debug_stat.rules_called++;
-  int tokens_consumed = 0;
-  bool next;
-
-  // option 1
-  if(scan_is_token(Token_id_div)){
-    debug_consume(); // consume the div
-    tokens_consumed++;
-    // optional
-    if(rule_identifier()){
-      // zero or more of the following:
-      next = true;
-      while(next){
-        next = scan_is_token(Token_id_dot);
-        if(next){
-          debug_consume(); // consume the dot
-          tokens_consumed++;
-          if(!rule_identifier()){
-            go_back(tokens_consumed);
-            rule_call_trace.push_back("Failed rule_punch_rhs\n");
-            return false;
-          }
-        }
-      }
-    }
-    if(scan_is_token(Token_id_div)){
-      debug_consume(); // consume the div
-      tokens_consumed++;
-      if(scan_is_token(Token_id_dot)){
-        debug_consume(); // consume the div
-        tokens_consumed++;
-        if(rule_identifier()){
-          next = true;
-          // zero or more of the following
-          while(next){
-            if(scan_is_token(Token_id_dot)){
-              debug_consume(); // consume the div
-              tokens_consumed++;
-              if(!rule_identifier()){
-                go_back(tokens_consumed);
-                rule_call_trace.push_back("Failed rule_punch_rhs\n");
-                return false;
-              }
-            }
-          }
-        }
+  INIT_FUNCTION("Called rule_punch_rhs.\n");
+  
+  if(!SCAN_IS_TOKEN(Token_id_div)){ RULE_FAILED("Failed rule_punch_rhs; couldn't find a div token.\n"); }
+  
+  // optional
+  bool next = true;
+  if(rule_identifier()){
+    while(next){
+      if(!SCAN_IS_TOKEN(Token_id_dot))
+        next = false;
+      else{
+        if(!rule_identifier()){ RULE_FAILED("Failed rule_punch_rhs; couldn't find an identifier.\n") ;}
       }
     }
   }
-
-  go_back(tokens_consumed);
-  tokens_consumed = 0;
-
-  // option 2
-  if(scan_is_token(Token_id_div)){
-    debug_consume(); // consume the div
-    tokens_consumed++;
-    // optional
-    if(rule_identifier()){
-      // zero or more of the following:
-      next = true;
-      while(next){
-        next = scan_is_token(Token_id_dot);
-        if(next){
-          debug_consume(); // consume the dot
-          tokens_consumed++;
-          if(!rule_identifier()){
-            go_back(tokens_consumed);
-            rule_call_trace.push_back("Failed rule_punch_rhs\n");
-            return false;
-          }
-        }
-      }
+  
+  if(!SCAN_IS_TOKEN(Token_id_div)){ RULE_FAILED("Failed rule_punch_rhs; couldn't find a div token."); }
+  
+  next = true;
+  while(next){
+    if(!SCAN_IS_TOKEN(Token_id_dot)){
+      next = false;
     }
-    if(scan_is_token(Token_id_div)){
-      debug_consume(); // consume the div
-      tokens_consumed++;
-      next = true;
-      // zero or more of the following
-      while(next){
-        if(scan_is_token(Token_id_dot)){
-          debug_consume(); // consume the div
-          tokens_consumed++;
-          if(!rule_identifier()){
-            go_back(tokens_consumed);
-            rule_call_trace.push_back("Failed rule_punch_rhs\n");
-            return false;
-          }
-        }
-      }
+    else{
+      if(!rule_identifier()){ RULE_FAILED("Failed rule_punch_rhs; couldn't find an identifier.\n") ;}
     }
   }
-
-  go_back(tokens_consumed);
-  rule_call_trace.push_back("Failed rule_punch_rhs\n");
-  return false;
+  
+  RULE_SUCCESS("Matched rule_punch_rhs.\n", Prp_rule_punch_rhs);
 }
 
 bool Prp::rule_function_pipe(){
-  debug_stat.rules_called++;
-  fmt::print("Hello from rule_function_pipe.\n");
-  int tokens_consumed = 0;
-
-  if(rule_fcall_implicit() || rule_logical_expression()){
-    if(scan_is_token(Token_id_pipe)){
-      debug_consume();
-      tokens_consumed++;
-      if(rule_fcall_implicit() || rule_fcall_explicit()){
-        return true;
+  INIT_FUNCTION("Called rule_function_pipe.\n");
+  
+  if(!SCAN_IS_TOKEN(Token_id_pipe)){ RULE_FAILED("Failed rule_function_pipe; couldn't find a pipe token."); }
+  else{
+    debug_consume();
+    tokens_consumed++;
+    if(!(rule_fcall_implicit() || rule_fcall_explicit())){ RULE_FAILED("Failed rule_function_pipe; couldn't find a function call.\n"); }
+    else{
+      bool next = true;
+      /* zero or more of the following */
+      while(next){
+        if(!(rule_fcall_implicit() || rule_fcall_explicit())){
+          next = false;
+        }
       }
     }
   }
-  go_back(tokens_consumed);
-  fmt::print("Doesn't fit rule_function_pipe.\n");
-  return false;
+  
+  RULE_SUCCESS("Matched rule_function_pipe.\n", Prp_rule_function_pipe);
 }
 
 bool Prp::rule_fcall_explicit(){
-  debug_stat.rules_called++;
-  int tokens_consumed = 0;
-
-  if(!rule_constant()){
-    if(rule_tuple_dot_notation()){
-      if(scan_is_token(Token_id_dot)){
-        debug_consume(); // consume the dot
-        tokens_consumed++;
-        if(rule_fcall_arg_notation()){
-          // optional
-          rule_scope_declaration();
-          if(scan_is_token(Token_id_dot)){
-            debug_consume();
-            tokens_consumed++;
-            if(rule_fcall_explicit() || rule_tuple_dot_notation()){
-              return true;
-            }
-          }
-        }
-      }
-    }
+  INIT_FUNCTION("Called rule_fcall_explicit.\n");
+  
+  if(rule_constant()){ RULE_FAILED("Failed rule_fcall_explicit; found a constant.\n"); }
+  
+  // optional
+  if(rule_tuple_notation()){
+    if(!SCAN_IS_TOKEN(Token_id_dot)){ RULE_FAILED("Failed rule_fcall_explicit; couldn't find an answering dot token.\n"); }
   }
-
-  go_back(tokens_consumed);
-  return false;
+  
+  if(!rule_tuple_dot_notation()){ RULE_FAILED("Failed rule_fcall_explicit; couldn't find a tuple_dot_notation.\n"); }
+  
+  if(!rule_fcall_arg_notation()){ RULE_FAILED("Failed rule_fcall_explicit; couldn't find an fcall_arg_notation.\n"); }
+  
+  // optional
+  rule_scope_declaration();
+  
+  bool next = true;
+  while(next){
+    if(SCAN_IS_TOKEN(Token_id_dot)){
+      if(!(rule_fcall_explicit() || rule_tuple_dot_notation())){ RULE_FAILED("Failed rule_fcall_explicit; couldn't find answering fcall_explicit or tuple_dot_notation\n"); }
+    }
+    else 
+      next = false;
+  }
+  
+  RULE_SUCCESS("Matched rule_fcall_explicit", Prp_rule_fcall_explicit);
 }
 
 bool Prp::rule_fcall_arg_notation(){
-  debug_stat.rules_called++;
-  int tokens_consumed = 0;
-  bool next;
+  INIT_FUNCTION("Called rule_fcall_arg_notation.\n");
+  bool next = true;
+  
+  if(!SCAN_IS_TOKEN(Token_id_op)){ RULE_FAILED("Failed rule_fcall_arg_notation; couldn't find an opening parenthesis.\n"); }
+  
+  if(SCAN_IS_TOKEN(Token_id_cp)){ RULE_SUCCESS("Matched rule_fcall_arg_notation.\n", Prp_rule_fcall_arg_notation); }
 
-  // option 1
-  if(scan_is_token(Token_id_op)){
-    debug_consume();
-    tokens_consumed++;
-    if(rule_rhs_expression_property() || rule_lhs_var_name()){
-      // zero or more of the following
-      while(rule_rhs_expression_property() || rule_lhs_var_name());
-      if(scan_is_token(Token_id_cp)){
-        debug_consume();
-        return true;
-      }
+  if(!(rule_rhs_expression_property() || rule_logical_expression())){ RULE_FAILED("Failed rule_fcall_arg_notation; couldn't find either an rhs_expression_property or a logical_expression.\n"); }
+  // zero or more of the following
+  while(next){
+    if(SCAN_IS_TOKEN(Token_id_comma)){
+      if(!(rule_rhs_expression_property() || rule_logical_expression())){ RULE_FAILED("Failed rule_fcall_arg_notation; couldn't find either an rhs_expression_property or a logical_expression."); }
     }
+    else 
+      next = false;
   }
-
-  tokens_consumed = 0;
-  go_back(tokens_consumed);
-
-  //option 2
-  if(scan_is_token(Token_id_op)){
-    debug_consume();
-    tokens_consumed++;
-    if(rule_rhs_expression_property() || rule_logical_expression()){
-      // zero or more of the following
-      next = true;
-      while(next){
-        next = scan_is_token(Token_id_comma);
-        if(next){
-          debug_consume();
-          tokens_consumed++;
-          if(!(rule_rhs_expression_property() || rule_logical_expression())){
-            go_back(tokens_consumed);
-            return false;
-          }
-        }
-      }
-      if(scan_is_token(Token_id_cp)){
-        debug_consume();
-        return true;
-      }
-    }
-  }
-
-  tokens_consumed = 0;
-  go_back(tokens_consumed);
-
-  //option 3
-  if(scan_is_token(Token_id_op)){
-    debug_consume();
-    tokens_consumed++;
-    if(scan_is_token(Token_id_cp)){
-      debug_consume();
-      return true;
-    }
-  }
-
-  go_back(tokens_consumed);
-  return false;
+  // optional
+  SCAN_IS_TOKEN(Token_id_comma);
+  
+  if(!SCAN_IS_TOKEN(Token_id_cp)){ RULE_FAILED("Failed rule_fcall_arg_notation; couldn't find a closing parenthesis.\n"); }
+  
+  RULE_SUCCESS("Matched rule_fcall_arg_notation.\n", Prp_rule_fcall_arg_notation);
 }
 
 bool Prp::rule_fcall_implicit(){
-  debug_stat.rules_called++;
-  return true;
+  INIT_FUNCTION("Called rule_fcall_implicit.\n");
+  
+  if(rule_constant()){ RULE_FAILED("Failed rule_fcall_implicit; found a constant.\n"); }
+  if(!rule_tuple_dot_notation()){ RULE_FAILED("Failed rule_fcall_implicit; couldn't find a tuple_dot_notation.\n"); }
+  if(!rule_scope_declaration()){ RULE_FAILED("Failed rule_fcall_implicit; couldnt find a scope_declaration.\n"); }
+  
+  RULE_SUCCESS("Matched rule_fcall_implicit.\n", Prp_rule_fcall_implicit);
 }
 
 bool Prp::rule_assignment_expression(){
-  debug_stat.rules_called++;
-	fmt::print("Hello from rule_assignment_expression.\n");
-	if(rule_constant()){
-		return false;
-	}
-
-	debug_down();
-	bool next = rule_lhs_expression() || rule_overload_notation();
-  debug_up(0);
-
-	if(next){
-    debug_down();
-		next = rule_assignment_operator();
-    debug_up(Prp_rule_assignment_operator);
-		if(next){
-      debug_down();
-			next = rule_logical_expression() || rule_function_pipe() || rule_fcall_implicit();
-      debug_up(Prp_rule_logical_expression);
-      fmt::print("Fits rule_assignment_expression.\n");
-			return true;
-		}
-	}
-	else{
-    //fmt::print("Parse error at line {}: Expected left hand side expression.\n", scan_calc_lineno());
-  }
-	return false;
+  INIT_FUNCTION("Called rule_assignment_expression.\n");
+  
+  if(rule_constant()){ RULE_FAILED("Failed rule_assignment_expression; found a constant.\n"); }
+  if(!(rule_lhs_expression() || rule_overload_notation())){ RULE_FAILED("Failed rule_assignment_expression; couldn't find either an overload_notation or an lhs_expression.\n"); }
+  if(!rule_assignment_operator()){ RULE_FAILED("Failed rule_assignment_expression; couldn't find an assignment_operator.\n"); }
+  if(!(rule_rhs_expression_property() || rule_logical_expression() || rule_fcall_implicit())){ RULE_FAILED("Failed rule_assignment_expression; couldn't find an rhs_expression_property, an fcall_implicit, or a logical_expression.\n"); }
+  
+  
+  RULE_SUCCESS("Matched rule_assignment_expression.\n", Prp_rule_assignment_expression);
 }
 
-/* FIXME: add range notation rule */
+bool Prp::rule_return_statement(){
+  INIT_FUNCTION("Called rule_return_statement.\n");
+  
+  if(!SCAN_IS_TOKEN(Pyrope_id_return)){ RULE_FAILED("Failed rule_return_statement; couldn't find a return token.\n"); }
+  if(!rule_logical_expression()){ RULE_FAILED("Failed rule_return_statement; couldn't a logical_expression.\n"); }
+  
+  RULE_SUCCESS("Matched rule_return_statement.\n", Prp_rule_return_statement);
+}
+
+bool Prp::rule_compile_check_statement(){
+  INIT_FUNCTION("Called rule_compile_check_statement.\n");
+  
+  if(!scan_is_token(Token_id_pound)){ RULE_FAILED("Failed rule_compile_check_statement; couldn't find a pound operator.\n"); }
+  if(!rule_code_block_int()){ RULE_FAILED("Failed rule_compile_check_statement; couldn't find a code_block_int.\n"); }
+  
+  RULE_SUCCESS("Matched rule_compile_check_statement.\n", Prp_rule_compile_check_statement);
+}
+
+bool Prp::rule_block_body(){
+  INIT_FUNCTION("Called rule_block_body.\n");
+  
+  // optional
+  rule_code_blocks();
+  
+  if(!SCAN_IS_TOKEN(Token_id_cb, Prp_rule_block_body)){ RULE_FAILED("Failed rule_block_body; couldn't find a closing brace.\n"); }
+  
+  RULE_SUCCESS("Matched rule_block_body.\n", Prp_rule_block_body);
+}
+
 bool Prp::rule_lhs_expression(){
-  debug_stat.rules_called++;
-  fmt::print("Hello from rule_lhs_expression.\n");
-  bool ok = rule_tuple_notation() || rule_range_notation();
-  return ok;
+  INIT_FUNCTION("Called rule_lhs_expression.\n");
+  
+  if(SCAN_IS_TOKEN(Token_id_backslash)){
+    if(!SCAN_IS_TOKEN(Token_id_backslash)){ RULE_FAILED("Failed rule_lhs_expression; couldn't find a second backslash.\n"); }
+  }
+  if(!( rule_tuple_notation() || rule_range_notation())){ RULE_FAILED("Failed rule_lhs_expression; couldn't find either a range_notation or a tuple_notation.\n"); }
+  
+  RULE_SUCCESS("Matched rule_lhs_expression.\n", Prp_rule_lhs_expression);
 }
 
-/* FIXME: incomplete */
-bool Prp:: rule_rhs_expression_property(){
-  debug_stat.rules_called++;
-  fmt::print("Hello from rule_rhs_expression_property.\n");
-  if(scan_is_token(Token_id_label)){
-    debug_down(); // unnecessary due to ast->add
-    ast->add(Prp_rule_identifier, scan_token());
-    debug_consume(); // consume the label
-    rule_tuple_notation(); // optional
-    debug_up(Prp_rule_rhs_expression_property);
-    ast->add(Prp_rule_rhs_expression_property, 0);
-    return true;
-  }
-  return false;
+bool Prp::rule_rhs_expression_property(){
+  INIT_FUNCTION("Called rule_rhs_expression_property.\n");
+  
+  if(!(rule_identifier() == 2)){ RULE_FAILED("Failed rule_rhs_expression_property; couldn't find an identifier that was a label.\n"); }
+  
+  // optional
+  rule_fcall_explicit() || rule_tuple_notation();
+  
+  RULE_SUCCESS("Matched rule_rhs_expression_property.\n", Prp_rule_rhs_expression_property);
 }
 
 bool Prp::rule_tuple_notation(){
-  debug_stat.rules_called++;
-  fmt::print("Hello from rule_tuple_notation\n");
-  int tokens_consumed = 0;
-
-  // option 1
-  if(!scan_is_token(Token_id_op)){
-    fmt::print("rule_tuple_notation: trying option 1.\n");
-    if(!rule_bit_selection_notation()){ return false; }
-  }
-  // options 2 and 3
-  else{
-    debug_down();
-    debug_down();
-    ast->add(Prp_rule_tuple_notation, scan_token());
-    debug_consume();
-    tokens_consumed++;
-    fmt::print("rule_tuple_notation: trying options 2 and 3.\n");
-    if(rule_rhs_expression_property() || rule_logical_expression()){
-      bool next = true;
-
-      // zero or more of the following
-      while(next){
-        if(scan_is_token(Token_id_comma)){
-          ast->add(Prp_rule_tuple_notation, scan_token());
-          debug_consume();
-          tokens_consumed++;
-          if(!(rule_rhs_expression_property() || rule_logical_expression())){
-            next = false; // NOTE: not a parse error; it's allowed to just have a comma.
-          }
-        }
-        else{ next = false; }
-      }
-      if(!scan_is_token(Token_id_cp)){ return false; }
+  INIT_FUNCTION("Called rule_tuple_notation.\n");
+  
+  // options 1 and 2
+  if(SCAN_IS_TOKEN(Token_id_op, Prp_rule_tuple_notation)){
+    if(SCAN_IS_TOKEN(Token_id_cp, Prp_rule_tuple_notation)){ RULE_SUCCESS("Matched rule_tuple_notation; first option.\n", Prp_rule_tuple_notation); }
+    
+    if(!(rule_rhs_expression_property() || rule_logical_expression())){ RULE_FAILED("Failed rule_tuple_notation; couldn't find either an rhs_expression_property or a logical_expression.\n"); }
+    
+    bool next = true;
+    while(next){
+      if(!SCAN_IS_TOKEN(Token_id_comma, Prp_rule_tuple_notation)){ next = false; }
       else{
-        ast->add(Prp_rule_tuple_notation, scan_token());
-        debug_consume();
-        tokens_consumed++;
-        rule_tuple_by_notation() || rule_bit_selection_bracket(); // optional
+        if(!(rule_rhs_expression_property() || rule_logical_expression())){ RULE_FAILED("Failed rule_tuple_notation; couldn't find either an rhs_expression_property or a logical_expression.\n"); }
       }
     }
-    else{
-      if(!scan_is_token(Token_id_cp)){ return false; }
-      else{
-        ast->add(Prp_rule_tuple_notation, scan_token());
-        debug_consume();
-        tokens_consumed++;
-        rule_tuple_by_notation() || rule_bit_selection_bracket(); // optional
-      }
+    
+    // optional
+    SCAN_IS_TOKEN(Token_id_comma, Prp_rule_tuple_notation);
+    
+    if(SCAN_IS_TOKEN(Token_id_cp, Prp_rule_tuple_notation)){
+      // optional
+      rule_tuple_by_notation() || rule_bit_selection_bracket();
+      
+      RULE_SUCCESS("Matched rule_tuple_notation; second option.\n", Prp_rule_tuple_notation); 
     }
-    debug_up(Prp_rule_tuple_notation);
-    debug_up(Prp_rule_tuple_notation);
   }
-  fmt::print("fits rule_tuple_notation\n");
-  return true;
+  
+  // option 3
+  if(!rule_bit_selection_notation()){ RULE_FAILED("Failed rule_tuple_notation; couldn't match any options.\n"); }
+  
+  RULE_SUCCESS("Matched rule_tuple_notation; third option.\n", Prp_rule_tuple_notation);
 }
 
 bool Prp::rule_range_notation(){
-  debug_stat.rules_called++;
-  return false;
+  INIT_FUNCTION("Called rule_range_notation.\n");
+  
+  // optional
+  rule_bit_selection_notation();
+  
+  if(!SCAN_IS_TOKEN(Token_id_dot)){ RULE_FAILED("Failed rule_range_notation; couldn't find the first dot.\n"); }
+  if(!SCAN_IS_TOKEN(Token_id_dot)){ RULE_FAILED("Failed rule_range_notation; couldn't find the second dot.\n"); }
+  
+  // optional
+  rule_additive_expression();
+  
+  // optional
+  rule_tuple_by_notation();
+  
+  RULE_SUCCESS("Matched rule_range_notation.\n", Prp_rule_range_notation);
 }
 
 bool Prp::rule_bit_selection_notation(){
-  debug_stat.rules_called++;
-  fmt::print("Hello from rule_bit_selection_notation.\n");
-	bool next = rule_tuple_dot_notation();
-	if (next){
-		next = rule_bit_selection_bracket();
-    if(next) fmt::print("Fits rule_bit_selection_notation.\n");
-    return next;
-	}
-	return false;
+  INIT_FUNCTION("Called rule_bit_selection_notation.\n");
+  
+  if(!rule_tuple_dot_notation()){ RULE_FAILED("Failed rule_bit_selection_notation; couldn't find a tuple_dot_notation.\n"); }
+  if(!rule_bit_selection_bracket()){ RULE_FAILED("Failed rule_bit_selection_notation; couldn't find a bit_selection_bracket.\n"); }
+  
+  RULE_SUCCESS("Matched rule_bit_selection_notation.\n", Prp_rule_bit_selection_notation);
 }
 
 bool Prp::rule_tuple_dot_notation(){
-  debug_stat.rules_called++;
-  fmt::print("Hello from rule_tuple_dot_notation.\n");
-	bool next = rule_tuple_array_notation();
-	if(next){
-		next = rule_tuple_dot_dot();
-		return next;
-	}
-	return false;
+  INIT_FUNCTION("Called rule_tuple_dot_notation.\n");
+  
+  if(!rule_tuple_array_notation()){ RULE_FAILED("Failed tuple_dot_notation; couldn't find a tuple_array_notation.\n"); }
+  if(!rule_tuple_dot_dot()){ RULE_FAILED("Failed rule_tuple_dot_notation; couldn't find a tuple_dot_dot.\n"); }
+  
+  RULE_SUCCESS("Matched rule_tuple_dot_notation.\n", Prp_rule_tuple_dot_notation);
 }
 
 bool Prp::rule_tuple_dot_dot(){
-  debug_stat.rules_called++;
-  fmt::print("Hello from rule_tuple_dot_dot.\n");
+  INIT_FUNCTION("Called rule_tuple_dot_dot.\n");
   bool next = true;
-  int tokens_consumed = 0;
-
+  
   while(next){
-    next = scan_is_token(Token_id_dot);
-    if(next){
-      debug_consume(); // consume the dot
-      tokens_consumed++;
-      if(!rule_tuple_array_notation()) {return false;}
+    if(!SCAN_IS_TOKEN(Token_id_dot)){ next = false; }
+    else{
+      if(!rule_tuple_array_notation()){ RULE_FAILED("Failed rule_tuple_dot_dot; couldn't find a tuple_array_notation.\n"); }
     }
   }
-  fmt::print("Fits rule_tuple_dot_dot.\n");
-  return true;
+  
+  RULE_SUCCESS("Matched rule_tuple_dot_dot\n", Prp_rule_tuple_dot_dot);
 }
 
 bool Prp::rule_tuple_array_notation(){
-  debug_stat.rules_called++;
-  fmt::print("Hello from rule_tuple_array_notation.\n");
-	bool next = rule_lhs_var_name();
-	if(next){
-		next = rule_tuple_array_bracket();
-    if(next) fmt::print("Fits rule_tuple_array_notation.\n");
-		return next;
-	}
-	return false;
+  INIT_FUNCTION("Called rule_tuple_array_notation.\n");
+  
+  if(!rule_lhs_var_name()){ RULE_FAILED("Failed rule_tuple_array_notation; couldn't find an lhs_var_name.\n"); }
+  if(!rule_tuple_array_bracket()){ RULE_FAILED("Failed rule_tuple_array_notation; couldn't find a tuple_array_bracket.\n"); }
+  
+  RULE_SUCCESS("Matched rule_tuple_array_notation.\n", Prp_rule_tuple_array_notation);
 }
 
 bool Prp::rule_lhs_var_name(){
-  debug_stat.rules_called++;
-  fmt::print("Hello from rule_lhs_var_name.\n");
-	if(rule_identifier() || rule_constant()){
-    return true;
-  }
-  return false;
+  INIT_FUNCTION("Called rule_lhs_var_name.\n");
+  
+  if(!(rule_identifier() || rule_constant())){ RULE_FAILED("Failed rule_lhs_var_name; couldn't find an identifier or a constant.\n"); }
+  
+  RULE_SUCCESS("Matched rule_lhs_var_name.\n", Prp_rule_lhs_var_name);
 }
 
 bool Prp::rule_tuple_array_bracket(){
-  debug_stat.rules_called++;
-  fmt::print("Hello from rule_tuple_array_bracket.\n");
+  INIT_FUNCTION("Called rule_tuple_array_bracket.\n");
   bool next = true;
-  int tokens_consumed = 0;
-
-  /* zero or more */
+  
   while(next){
-    next = scan_is_token(Token_id_obr);
-    if(next){
-      debug_consume(); // consume the LBRK
-      tokens_consumed++;
-      next = rule_logical_expression() || rule_tuple_notation_no_bracket();
-      if(next){
-        next = scan_is_token(Token_id_cbr);
-        if(next){
-          debug_consume(); // consume the RBRK
-          tokens_consumed++;
-        }
-        else{
-          go_back(tokens_consumed);
-          return false;
-        }
-      }
+    if(!SCAN_IS_TOKEN(Token_id_obr)){ next = false; }
+    else{
+      if(!rule_logical_expression()){ RULE_FAILED("Failed rule_tuple_array_bracket; couldn't find a logical_expression.\n"); }
+      if(!SCAN_IS_TOKEN(Token_id_cbr)){ RULE_FAILED("Failed rule_tuple_array_bracket; couldn't find a closing bracket.\n"); }
     }
   }
-  fmt::print("Fits rule_tuple_array_bracket.\n");
-	return true;
+  
+  RULE_SUCCESS("Matched rule_tuple_array_bracket.\n", Prp_rule_tuple_array_bracket);
 }
 
-bool Prp::rule_tuple_notation_no_bracket(){
-  debug_stat.rules_called++;
-  fmt::print("Hello from rule_tuple_notation_no_bracket.\n");
-  /* bit_selection_notation+ */
-  if(rule_bit_selection_notation()){
-    while(rule_bit_selection_notation());
-    return true;
+uint8_t Prp::rule_identifier(){
+  INIT_FUNCTION("Called rule_identifier.\n");
+  
+  // optional
+  SCAN_IS_TOKEN(Token_id_bang) || SCAN_IS_TOKEN(Pyrope_id_tilde);
+  
+  if(SCAN_IS_TOKEN(Token_id_label, Prp_rule_identifier)){
+    //fmt::print("Matched rule_identifier; found a label.\n");
+    debug_stat.rules_matched++;
+    DEBUG_UP(Prp_rule_identifier);
+    return 2;
   }
-
-	return false;
+  
+  if(!(SCAN_IS_TOKEN(Token_id_register, Prp_rule_identifier) || SCAN_IS_TOKEN(Token_id_input, Prp_rule_identifier) || SCAN_IS_TOKEN(Token_id_output, Prp_rule_identifier) || SCAN_IS_TOKEN(Token_id_alnum, Prp_rule_identifier))){ RULE_FAILED("Failed rule_identifier; couldn't find a name.\n"); }
+  
+  // optional
+  SCAN_IS_TOKEN(Token_id_qmark);
+  
+  RULE_SUCCESS("Matched rule_identifier.\n", Prp_rule_identifier);
 }
 
-bool Prp::rule_identifier(){
-  debug_stat.rules_called++;
-  fmt::print("Hello from rule_identifier.\n");
-	if(!(scan_is_token(Token_id_register) || scan_is_token(Token_id_input) || scan_is_token(Token_id_output) || scan_is_token(Token_id_alnum) || scan_is_token(Token_id_label))){
-    //debug_up(Prp_rule_identifier);
-		return false;
-	}
-
-	ast->add(Prp_rule_identifier, scan_token());
-	debug_consume(); // consume the ID, need to check for optional "?"
-
-	if(scan_is_token(Token_id_qmark)){
-    ast->add(Prp_rule_identifier, scan_token());
-		debug_consume();
-	}
-	fmt::print("Fits rule_identifier.\n");
-	return true;
-}
-
-/* FIXME: support for string constants */
+// some rules want there to not be a constant; in this case, we don't want AST changes or tokens consumed if the rule is matched.
 bool Prp::rule_constant(){
-  debug_stat.rules_called++;
-  int tokens_consumed = 0;
-  fmt::print("Hello from rule_constant.\n");
-  if(scan_is_token(Token_id_minus)){
-    ast->add(Prp_rule_constant, scan_token());
-    debug_consume();
-    tokens_consumed++;
-  }
-	if(scan_is_token(Token_id_num)){
-    ast->add(Prp_rule_constant, scan_token());
-		debug_consume();
-		return true;
-	}
-	go_back(tokens_consumed);
-	return false;
+  INIT_FUNCTION("Called rule_constant\n");
+  
+  // option 1
+  if(rule_numerical_constant()){ RULE_SUCCESS("Matched rule_constant.\n", Prp_rule_constant); }
+  
+  // option 2
+  if(!rule_string_constant()){ RULE_FAILED("Failed rule_constant; couldn't find either a numerical or string constant.\n"); }
+  
+  RULE_SUCCESS("Matched rule_constant.\n", Prp_rule_constant);
+}
+
+// TODO: check if hex constants are supported.
+bool Prp::rule_numerical_constant(){
+  INIT_FUNCTION("Called rule_numerical_constant.\n");
+  
+  if(!SCAN_IS_TOKEN(Token_id_num, Prp_rule_numerical_constant)){ RULE_FAILED("Failed rule_numerical_constant; couldn't find a number.\n"); }
+  
+  RULE_SUCCESS("Matched rule_numerical_constant.\n", Prp_rule_numerical_constant);
+}
+
+// FIXME: add support for single tick strings.
+bool Prp::rule_string_constant(){
+  INIT_FUNCTION("Called rule_string_constant.\n");
+  
+  if(!SCAN_IS_TOKEN(Token_id_string, Prp_rule_string_constant)){ RULE_FAILED("Failed rule_string_constant; couldn't find a double string.\n"); }
+  
+  RULE_SUCCESS("Matched rule_string_constant.\n", Prp_rule_string_constant);
 }
 
 bool Prp::rule_assignment_operator(){
-  debug_stat.rules_called++;
-  fmt::print("Hello from rule_assignment_operator.\n");
-  int tokens_consumed = 0;
-
-	if(scan_is_token(Token_id_coloneq) || scan_is_token(Token_id_eq) || scan_is_token(Pyrope_id_as)){
-    ast->add(Prp_rule_assignment_operator, scan_token());
-    debug_consume(); // consume the operator
-    fmt::print("Fits rule_assignment_operator.\n");
-		return true;
-	}
-
-	/* op= tokens*/
-  if (scan_is_token(Token_id_mult) || scan_is_token(Token_id_plus) || scan_is_token(Token_id_minus)){
-    ast->add(Prp_rule_assignment_operator, scan_token());
-    debug_consume();
-    tokens_consumed++;
-    if (scan_is_token(Token_id_eq)){
-      ast->add(Prp_rule_assignment_operator, scan_token());
-      debug_consume();
-      fmt::print("Fits rule_assignment_operator.\n");
-      return true;
-    }
-    go_back(tokens_consumed);
-    return false;
+  INIT_FUNCTION("Called rule_assignment_operator.\n");
+  
+  if(SCAN_IS_TOKEN(Token_id_eq, Prp_rule_assignment_operator)){ RULE_SUCCESS("Matched rule_assignment_operator; found an equals.\n", Prp_rule_assignment_operator); }
+  
+  if(SCAN_IS_TOKEN(Pyrope_id_as, Prp_rule_assignment_operator)){ RULE_SUCCESS("Matched rule_assignment_operator; found an as.\n", Prp_rule_assignment_operator); }
+  
+  if(SCAN_IS_TOKEN(Token_id_plus, Prp_rule_assignment_operator) || SCAN_IS_TOKEN(Token_id_mult) || SCAN_IS_TOKEN(Token_id_minus)){
+    SCAN_IS_TOKEN(Token_id_plus, Prp_rule_assignment_operator); // possible to have a second plus
+    if(SCAN_IS_TOKEN(Token_id_eq, Prp_rule_assignment_operator)){ RULE_SUCCESS("Matched rule_assignment_operator; found an [operator] equals (two tokens or ++=).\n", Prp_rule_assignment_operator); }
   }
-
-  go_back(tokens_consumed);
-  tokens_consumed = 0;
-
-	/* left and right shift */
-  if (scan_is_token(Token_id_lt)){
-    ast->add(Prp_rule_assignment_operator, scan_token());
-    debug_consume();
-    tokens_consumed++;
-    if(scan_is_token(Token_id_lt)){
-      ast->add(Prp_rule_assignment_operator, scan_token());
-      debug_consume();
-      tokens_consumed++;
-      if(scan_is_token(Token_id_eq)){
-        ast->add(Prp_rule_assignment_operator, scan_token());
-        debug_consume();
-        fmt::print("Fits rule_assignment_operator.\n");
-        debug_up(Prp_rule_assignment_operator);
-        return true;
-      }
-    }
-    go_back(tokens_consumed);
-    debug_up(Prp_rule_assignment_operator);
-    return false;
+  
+  if(SCAN_IS_TOKEN(Token_id_lt, Prp_rule_assignment_operator)){
+    if(!SCAN_IS_TOKEN(Token_id_lt, Prp_rule_assignment_operator)){ RULE_FAILED("Failed rule_assignment_operator; only found one less than.\n"); }
+    if(!SCAN_IS_TOKEN(Token_id_eq, Prp_rule_assignment_operator)){ RULE_FAILED("Failed rule_assignment_operator; couldn't find an equals.\n"); }
+    
+    RULE_SUCCESS("Matched rule_assignment_operator; found a <<=.\n", Prp_rule_assignment_operator);
   }
-
-  go_back(tokens_consumed);
-  tokens_consumed = 0;
-
-  if (scan_is_token(Token_id_gt)){
-    ast->add(Prp_rule_assignment_operator, scan_token());
-    debug_consume();
-    tokens_consumed++;
-    if(scan_is_token(Token_id_gt)){
-      ast->add(Prp_rule_assignment_operator, scan_token());
-      debug_consume();
-      tokens_consumed++;
-      if(scan_is_token(Token_id_eq)){
-        ast->add(Prp_rule_assignment_operator, scan_token());
-        debug_consume();
-        fmt::print("Fits rule_assignment_operator.\n");
-        debug_up(Prp_rule_assignment_operator);
-        return true;
-      }
-    }
+  
+  if(SCAN_IS_TOKEN(Token_id_gt, Prp_rule_assignment_operator)){
+    if(!SCAN_IS_TOKEN(Token_id_gt, Prp_rule_assignment_operator)){ RULE_FAILED("Failed rule_assignment_operator; only found one greater than.\n"); }
+    if(!SCAN_IS_TOKEN(Token_id_eq, Prp_rule_assignment_operator)){ RULE_FAILED("Failed rule_assignment_operator; couldn't find an equals.\n"); }
+    
+    RULE_SUCCESS("Matched rule_assignment_operator; found a >>=.\n", Prp_rule_assignment_operator);
   }
-	go_back(tokens_consumed);
-  debug_up(Prp_rule_assignment_operator);
-	return false;
+  
+  RULE_FAILED("Failed rule_assignment_operator; couldn't find any of the operators.\n");
 }
 
 bool Prp::rule_tuple_by_notation(){
-  debug_stat.rules_called++;
-  int tokens_consumed = 0;
-  fmt::print("Hello from rule_tuple_by_notation.\n");
-  if (scan_is_token(Pyrope_id_by)){
-    debug_consume();
-    tokens_consumed++;
-    if(rule_lhs_var_name()){
-      fmt::print("Fits rule_tuple_by_notation.\n");
-      return true;
-    }
-  }
-  go_back(tokens_consumed);
-  return false;
+  INIT_FUNCTION("Called rule_tuple_by_notation.\n");
+  
+  if(!SCAN_IS_TOKEN(Pyrope_id_by)){ RULE_FAILED("Failed rule_tuple_by_notation; couldn't find a by token.\n"); }
+  if(!rule_lhs_var_name()){ RULE_FAILED("Failed rule_tuple_by_notation; couldn't find a rule_lhs_var_name.\n"); }
+  
+  RULE_SUCCESS("Matched rule_tuple_by_notation.\n", Prp_rule_tuple_by_notation);
 }
 
 bool Prp::rule_bit_selection_bracket(){
-  debug_stat.rules_called++;
-  fmt::print("Hello from rule_bit_selection_bracket.\n");
+  INIT_FUNCTION("Called rule_bit_selection_bracket.\n");
   bool next = true;
-  int tokens_consumed = 0;
-
-  // zero or more of the following
   while(next){
-    next = false;
-
-    if(scan_is_token(Token_id_obr)){
-      debug_consume();
-      tokens_consumed++;
-      if(scan_is_token(Token_id_obr)){
-        debug_consume();
-        tokens_consumed++;
-        if(scan_is_token(Token_id_cbr)){
-          debug_consume();
-          tokens_consumed++;
-          if(scan_is_token(Token_id_cbr)){
-            debug_consume();
-            tokens_consumed++;
-            next = true;
-          }
-          else{
-            go_back(tokens_consumed);
-            return false;
-          }
-        }
-
-        else if(rule_logical_expression() || rule_tuple_notation_no_bracket()){
-          if(scan_is_token(Token_id_cbr)){
-            debug_consume();
-            tokens_consumed++;
-            if(scan_is_token(Token_id_cbr)){
-              debug_consume();
-              tokens_consumed++;
-              next = true;
-            }
-          }
-        }
-
-        else{
-          go_back(tokens_consumed);
-          return false;
-        }
-
-      }
+    if(!SCAN_IS_TOKEN(Token_id_obr)){ next = false; }
+    else{
+      if(!SCAN_IS_TOKEN(Token_id_obr)){ RULE_FAILED("Failed rule_bit_selection_bracket; couldn't find a second open bracket.\n"); }
+      // optional
+      rule_logical_expression();
+      if(!SCAN_IS_TOKEN(Token_id_cbr)){ RULE_FAILED("Failed rule_bit_selection_bracket; couldn't find a closing bracket.\n"); }
+      if(!SCAN_IS_TOKEN(Token_id_cbr)){ RULE_FAILED("Failed rule_bit_selection_bracket; couldn't find a second closing bracket.\n"); }
     }
   }
-  fmt::print("Fits rule_bit_selection_bracket.\n");
-  return true;
+  
+  RULE_SUCCESS("Matched rule_bit_selection_bracket.\n", Prp_rule_bit_selection_bracket);
 }
 
 bool Prp::rule_logical_expression(){
-  debug_stat.rules_called++;
-  int tokens_consumed = 0;
+  INIT_FUNCTION("Called rule_logical_expression.\n");
+  
+  if(!rule_relational_expression()){ RULE_FAILED("Failed rule_logical_expression; couldn't find a relational_expression.\n"); }
+  
   bool next = true;
-  fmt::print("Hello from rule_logical_expression.\n");
-  debug_down();
-  if (rule_relational_expression()){
-    debug_up(Prp_rule_relational_expression);
-    /* zero or more of the following */
-    while(next){
-      fmt::print("rule_logical_expression: looking for a logical operator. Next token:\n");
-      next = scan_is_token(Pyrope_id_or) || scan_is_token(Pyrope_id_and);
-      if(next){
-        ast->add(Prp_rule_logical_expression, scan_token());
-        debug_consume();
-        tokens_consumed++;
-        if (!rule_relational_expression()){
-          go_back(tokens_consumed);
-          return false;
-        }
-      }
+  
+  while(next){
+    if(SCAN_IS_TOKEN(Pyrope_id_or, Prp_rule_logical_expression) || SCAN_IS_TOKEN(Pyrope_id_and, Prp_rule_logical_expression) || SCAN_IS_TOKEN(Pyrope_id_xor, Prp_rule_logical_expression)){
+      if(!rule_relational_expression()){ RULE_FAILED("Failed rule_logical_expression; couldn't find an answering relational_expression.\n"); }
     }
-    fmt::print("Fits rule_logical_expression.\n");
-    return true;
+    else{ next = false; }
   }
-  debug_up(Prp_rule_relational_expression);
-  go_back(tokens_consumed);
-  return false;
+  
+  RULE_SUCCESS("Matched rule_logical_expression.\n", Prp_rule_logical_expression);
 }
 
 bool Prp::rule_relational_expression(){
-  debug_stat.rules_called++;
-  int tokens_consumed = 0;
+  INIT_FUNCTION("Called rule_relational_expression.\n");
+  
+  if(!rule_additive_expression()){ RULE_FAILED("Failed rule_relational_expression; couldn't find an additive_expression.\n"); }
+  
   bool next = true;
-
-  fmt::print("Hello from rule_relational_expression.\n");
-  debug_down();
-  if(rule_additive_expression()) {
-    debug_up(Prp_rule_additive_expression);
-    /* zero or more of the following */
-    while(next){
-      fmt::print("rule_relational_expression: looking for a relational operator. Next token:\n");
-      dump_token();
-      next = scan_is_token(Token_id_le) || scan_is_token(Token_id_ge) || scan_is_token(Token_id_lt) || scan_is_token(Token_id_gt) || scan_is_token(Token_id_same) || scan_is_token(Token_id_diff) || scan_is_token(Pyrope_id_is);
-      fmt::print("rule_relational_expression: did we find our operator? {}\n", scan_is_token(Token_id_same));
-      if(next){
-        ast->add(Prp_rule_relational_expression, scan_token());
-        debug_consume();
-        tokens_consumed++;
-        if (!rule_additive_expression()){
-          go_back(tokens_consumed);
-          return false;
-        }
-      }
+  while(next){
+    if(SCAN_IS_TOKEN(Token_id_le, Prp_rule_relational_expression) || SCAN_IS_TOKEN(Token_id_ge, Prp_rule_relational_expression) || SCAN_IS_TOKEN(Token_id_lt, Prp_rule_relational_expression) || SCAN_IS_TOKEN(Token_id_gt, Prp_rule_relational_expression) || SCAN_IS_TOKEN(Token_id_same, Prp_rule_relational_expression) || SCAN_IS_TOKEN(Token_id_diff, Prp_rule_relational_expression) || SCAN_IS_TOKEN(Pyrope_id_is, Prp_rule_relational_expression)){
+      if(!rule_additive_expression()){ RULE_FAILED("Failed Prp_rule_relational_expression; couldn't find an answering additive_expression.\n"); }
     }
-    fmt::print("Fits rule_relational_expression.\n");
-    return true;
+    else{ next = false; }
   }
-  debug_up(Prp_rule_additive_expression);
-  go_back(tokens_consumed);
-  return false;
+  
+  RULE_SUCCESS("Matched rule_relational_expression.\n", Prp_rule_relational_expression);
 }
 
-/* FIXME: need to add overload notation */
 bool Prp::rule_additive_expression(){
-  debug_stat.rules_called++;
-  int tokens_consumed = 0;
+  INIT_FUNCTION("Called rule_additive_expression.\n");
+  
+  if(!rule_bitwise_expression()){ RULE_FAILED("Failed rule_additive_expression; couldn't find a bitwise expression.\n"); }
+  
   bool next = true;
-
-  fmt::print("Hello from rule_additive_expression.\n");
-  debug_down();
-  if(rule_bitwise_expression()) {
-    debug_up(Prp_rule_bitwise_expression);
-    /* zero or more of the following */
-    while(next){
-      fmt::print("Entering main loop of rule_additive_expression; current token: \n");
-      // dump_token();
-      next = scan_is_token(Token_id_plus);
-      if(next){
-        debug_down();
-        ast->add(Prp_rule_additive_expression, scan_token());
+  bool found_op = false;
+  
+  int second_phase_starting_tokens = tokens_consumed;
+  
+  while(next){
+    if(SCAN_IS_TOKEN(Token_id_plus, Prp_rule_additive_expression)){ // can be +, ++, or +*
+      // optional
+      SCAN_IS_TOKEN(Token_id_plus, Prp_rule_additive_expression) || SCAN_IS_TOKEN(Token_id_mult, Prp_rule_additive_expression);
+      found_op = true;
+    }
+    else if(SCAN_IS_TOKEN(Token_id_lt)){ // left and right shift operators
+      if(SCAN_IS_TOKEN(Token_id_lt, Prp_rule_additive_expression)){
+        debug_unconsume();
+        debug_add(Prp_rule_additive_expression, scan_token());
         debug_consume();
-        tokens_consumed++;
-        if(scan_is_token(Token_id_plus)){ // increment operator
-          ast->add(Prp_rule_additive_expression, scan_token());
-          debug_consume();
-          tokens_consumed++;
-        }
-        if(!rule_bitwise_expression()){
-          debug_up(Prp_rule_bitwise_expression);
-          fmt::print("rule_additive_expression: going back1.\n");
-          go_back(tokens_consumed);
-          return false;
-        }
-        debug_up(Prp_rule_bitwise_expression);
+        found_op = true;
       }
-
-      next = scan_is_token(Token_id_mult);
-      if(next){
-        debug_down();
-        ast->add(Prp_rule_additive_expression, scan_token());
-        debug_consume();
-        tokens_consumed++;
-        if(scan_is_token(Token_id_mult)){ // ** operator
-          ast->add(Prp_rule_additive_expression, scan_token());
-          debug_up(Prp_rule_additive_expression);
-          debug_consume();
-          tokens_consumed++;
-          if(!rule_bitwise_expression()){
-            fmt::print("rule_additive_expression: going back2.\n");
-            go_back(tokens_consumed);
-            return false;
-          }
-        }
-      }
-
-      next = scan_is_token(Token_id_lt);
-      if(next){
-        debug_down();
-        ast->add(Prp_rule_additive_expression, scan_token());
-        debug_consume();
-        tokens_consumed++;
-        if(scan_is_token(Token_id_lt)){
-          ast->add(Prp_rule_additive_expression, scan_token());
-          debug_up(Prp_rule_additive_expression);
-          debug_consume();
-          tokens_consumed++;
-          if(!rule_bitwise_expression()){
-            fmt::print("rule_additive_expression: going back3.\n");
-            go_back(tokens_consumed);
-            return false;
-          }
-        }
-        else { // unlike the previous, one token isn't enough
-          fmt::print("rule_additive_expression: going back4.\n");
-          go_back(tokens_consumed);
-          return false;
-        }
-      }
-
-      next = scan_is_token(Token_id_gt);
-      if(next){
-        debug_down();
-        ast->add(Prp_rule_additive_expression, scan_token());
-        debug_consume();
-        tokens_consumed++;
-        if(scan_is_token(Token_id_gt)){
-          ast->add(Prp_rule_additive_expression, scan_token());
-          debug_up(Prp_rule_additive_expression);
-          debug_consume();
-          tokens_consumed++;
-          if(!rule_bitwise_expression()){
-            fmt::print("rule_additive_expression: going back5.\n");
-            go_back(tokens_consumed);
-            return false;
-          }
-        }
-        else {
-          fmt::print("rule_additive_expression: going back6.\n");
-          go_back(tokens_consumed);
-          return false;
-        }
-      }
-
-      next = (scan_is_token(Token_id_minus) || scan_is_token(Pyrope_id_union) || scan_is_token(Pyrope_id_intersect));
-      if(next){
-        debug_down();
-        ast->add(Prp_rule_additive_expression, scan_token());
-        debug_up(Prp_rule_additive_expression);
-        debug_consume();
-        tokens_consumed++;
-        if(!rule_bitwise_expression()){
-          fmt::print("rule_additive_expression: going back7.\n");
-          go_back(tokens_consumed);
-          return false;
-        }
-        else{
-          fmt::print("rule_additive_expression: going back8.\n");
-          go_back(tokens_consumed);
-          return false;
-        }
+      else{
+        go_back(tokens_consumed - second_phase_starting_tokens);
+        next = false;
       }
     }
-
-    /* optional */
-    if(scan_is_token(Token_id_dot)){
-      debug_down();
-      ast->add(Prp_rule_additive_expression, scan_token());
-      debug_consume();
-      tokens_consumed++;
-      if(scan_is_token(Token_id_dot)){
-        ast->add(Prp_rule_additive_expression, scan_token());
-        debug_up(Prp_rule_additive_expression);
+    else if(SCAN_IS_TOKEN(Token_id_gt)){
+      if(SCAN_IS_TOKEN(Token_id_gt, Prp_rule_additive_expression)){
+        debug_unconsume();
+        debug_add(Prp_rule_additive_expression, scan_token());
         debug_consume();
-        tokens_consumed++;
-        /* FIXME (maybe): this is optional, but it must either fully fit rule_additive_expression or
-         not fit it at all, this will miss if there is an incorrectly described additive expression
-         because it will just return false, the same as if it weren't there at all. */
-        fmt::print("rule_additive_expression: danger.\n");
-        rule_additive_expression();
+        found_op = true;
+      }
+      else{
+        go_back(tokens_consumed - second_phase_starting_tokens);
+        next = false;
       }
     }
-    fmt::print("Fits rule_additive_expression.\n");
-    return true;
+    else if(SCAN_IS_TOKEN(Token_id_minus, Prp_rule_additive_expression) || SCAN_IS_TOKEN(Pyrope_id_intersect, Prp_rule_additive_expression) || SCAN_IS_TOKEN(Pyrope_id_union, Prp_rule_additive_expression)){ // can only be a single token
+      found_op = true;
+    }
+    else if(rule_overload_notation()){
+      found_op = true;
+    }
+    else{
+      next = false;
+    }
+    if(found_op){
+      if(!rule_bitwise_expression()){ RULE_FAILED("Failed rule_additive_expression; couldn't find an answering bitwise expression.\n"); }
+      found_op = false;
+    }
   }
-  debug_up(Prp_rule_bitwise_expression);
-  go_back(tokens_consumed);
-  fmt::print("Doesn't fit rule_additive_expression.\n");
-  return false;
+  // optional
+  if(SCAN_IS_TOKEN(Token_id_dot, Prp_rule_additive_expression)){
+    if(!SCAN_IS_TOKEN(Token_id_dot, Prp_rule_additive_expression)){
+      RULE_FAILED("Failed rule_additive_expression; couldn't find a second dot.\n");
+      // optional
+      rule_additive_expression();
+    }
+  }
+  
+  RULE_SUCCESS("Matched rule_additive_expression.\n", Prp_rule_additive_expression);
 }
 
 bool Prp::rule_bitwise_expression(){
-  debug_stat.rules_called++;
-  int tokens_consumed = 0;
+  INIT_FUNCTION("Called rule_bitwise_expression.\n");
+  
+  if(!rule_multiplicative_expression()){ RULE_FAILED("Failed rule_bitwise_expression; couldn't find a multiplicative_expression.\n"); }
+  
   bool next = true;
-
-  fmt::print("Hello from rule_bitwise_expression().\n");
-  if(rule_multiplicative_expression()){
-    /* zero or more of the following */
-    while(next){
-      next = scan_is_token(Token_id_pipe) || scan_is_token(Token_id_and) || scan_is_token(Token_id_xor);
-      if(next){
-        ast->add(Prp_rule_additive_expression, scan_token());
-        debug_consume();
-        tokens_consumed++;
-        if(!rule_multiplicative_expression()){
-          go_back(tokens_consumed);
-          return false;
-        }
-      }
+  while(next){
+    if(SCAN_IS_TOKEN(Token_id_or, Prp_rule_bitwise_expression) || SCAN_IS_TOKEN(Token_id_and, Prp_rule_bitwise_expression) || SCAN_IS_TOKEN(Token_id_xor, Prp_rule_bitwise_expression)){
+      if(!rule_multiplicative_expression()){ RULE_FAILED("Failed rule_bitwise_expression; couldn't find an answering multiplicative expression.\n"); }
     }
-    fmt::print("Fits rule_bitwise_expression.\n");
-    return true;
+    else{ next = false; }
   }
-  go_back(tokens_consumed);
-  return false;
+  
+  RULE_SUCCESS("Matched rule_bitwise_expression.\n", Prp_rule_bitwise_expression);
 }
 
 bool Prp::rule_multiplicative_expression(){
-  debug_stat.rules_called++;
-  int tokens_consumed = 0;
+  INIT_FUNCTION("Called rule_multiplicative_expression.\n");
+  
+  if(!rule_unary_expression()){ RULE_FAILED("Failed rule_multiplicative_expression; couldn't find a unary_expression.\n"); }
+  
   bool next = true;
-
-  fmt::print("Hello from rule_multiplicative_expression.\n");
-  if(rule_unary_expression()){
-    while(next){
-      next = scan_is_token(Token_id_mult) || scan_is_token(Token_id_div);
-      if(next){
-        ast->add(Prp_rule_additive_expression, scan_token());
-        debug_consume();
-        tokens_consumed++;
-        if(!rule_unary_expression()){
-          go_back(tokens_consumed);
-          return false;
-        }
-      }
+  while(next){
+    if(SCAN_IS_TOKEN(Token_id_mult, Prp_rule_multiplicative_expression) || SCAN_IS_TOKEN(Token_id_div, Prp_rule_multiplicative_expression)){
+      if(!rule_unary_expression()){ RULE_FAILED("Failed rule_multiplicative_expression; couldn't find an answering unary expression.\n"); }
     }
-    fmt::print("Fits rule_multiplicative_expression.\n");
-    return true;
+    else{ next = false; }
   }
-  go_back(tokens_consumed);
-  return false;
+  
+  RULE_SUCCESS("Matched rule_multiplicative_expression.\n", Prp_rule_multiplicative_expression);
 }
 
 bool Prp::rule_unary_expression(){
-  debug_stat.rules_called++;
-  int tokens_consumed = 0;
-  fmt::print("Hello from rule_unary_expression().\n");
-  if(rule_factor()){
-    fmt::print("Fits rule_unary_expression.\n");
-    return true;
-  }
-
-  if(scan_is_token(Token_id_bang)){
-    debug_consume();
-    tokens_consumed++;
-    if(rule_factor()){
-      fmt::print("Fits rule_unary_expression.\n");
-      return true;
-    }
-  }
-  go_back(tokens_consumed);
-  return false;
+  INIT_FUNCTION("Called rule_unary_expression.\n");
+  
+  // option 1
+  if(rule_factor()){ RULE_SUCCESS("Matched rule_unary_expression.\n", Prp_rule_unary_expression); }
+  if(!(SCAN_IS_TOKEN(Token_id_bang, Prp_rule_unary_expression) || SCAN_IS_TOKEN(Pyrope_id_tilde, Prp_rule_unary_expression))){ RULE_FAILED("Failed rule_unary_expression; couldn't find a factor or a unary operator.\n"); }
+  if(!rule_factor()){ RULE_FAILED("Failed rule_unary_expression; couldn't find an answering factor.\n"); }
+  
+  RULE_SUCCESS("Matched rule_unary_expression.\n", Prp_rule_unary_expression);
 }
 
 bool Prp::rule_factor(){
-  debug_stat.rules_called++;
-  int tokens_consumed = 0;
-
-  if(rule_rhs_expression()){
-    fmt::print("Fits rule_factor (option 2).\n");
-    return true;
+  INIT_FUNCTION("Called rule_factor.\n");
+  
+  // option 1
+  if(rule_rhs_expression()){ RULE_SUCCESS("Matched rule_factor; option 1.\n", Prp_rule_factor); }
+  
+  // option 2
+  else if(SCAN_IS_TOKEN(Token_id_op, Prp_rule_factor)){
+    if(!rule_logical_expression()){ RULE_FAILED("Failed rule_factor; couldn't find a logical_expression.\n"); }
+    if(!SCAN_IS_TOKEN(Token_id_cp, Prp_rule_factor)){ RULE_FAILED("Failed rule_factor; couldn't find a closing parenthesis.\n"); }
+    
+    // optional
+    rule_bit_selection_bracket();
   }
-
-  fmt::print("Hello from rule_factor.\n");
-  if(scan_is_token(Token_id_op)){
-    fmt::print("rule_factor: found an open parenthesis.\n");
-    debug_consume();
-    tokens_consumed++;
-    if(rule_logical_expression()){
-      if(scan_is_token(Token_id_cp)){
-        debug_consume();
-        tokens_consumed++;
-        rule_bit_selection_bracket(); // same problem as we saw in rule_additive_expression
-        return true;
-      }
-      else{
-        go_back(tokens_consumed);
-        return false;
-      }
-    }
-    else{
-      go_back(tokens_consumed);
-      return false;
-    }
-  }
-
-  go_back(tokens_consumed);
-  tokens_consumed = 0;
-  go_back(tokens_consumed);
-  return false;
+  
+  RULE_SUCCESS("Matched rule_factor; option 2.\n", Prp_rule_factor);
 }
 
-/* FIXME: Incomplete */
 bool Prp::rule_overload_notation(){
-  debug_stat.rules_called++;
-  return false;
+  INIT_FUNCTION("Called rule_overload_notation.\n");
+  
+  if(!SCAN_IS_TOKEN(Token_id_dot)){ RULE_FAILED("Failed rule_overload_notation; couldn't find a starting dot.\n"); }
+  if(!SCAN_IS_TOKEN(Token_id_dot)){ RULE_FAILED("Failed rule_overload_notation; couldn't find a second dot.\n"); }
+  if(!rule_overload_name()){ RULE_FAILED("Failed rule_overload_notation; couldn't find an overload name.\n"); }
+  if(!SCAN_IS_TOKEN(Token_id_dot)){ RULE_FAILED("Failed rule_overload_notation; couldn't find a first trailing dot.\n"); }
+  if(!SCAN_IS_TOKEN(Token_id_dot)){ RULE_FAILED("Failed rule_overload_notation; couldn't find a second trailing dot.\n"); }
+  
+  RULE_SUCCESS("Matched rule_overload_notation.\n", Prp_rule_overload_notation);
 }
 
-/* FIXME: Incomplete */
+bool Prp::rule_overload_name(){
+  INIT_FUNCTION("Called rule_overload_name.\n");
+  
+  bool next = rule_overload_exception();
+  if(!next){ RULE_FAILED("Failed rule_overload_notation; found an overload_exception.\n"); }
+  while(next)
+    next = rule_overload_exception();
+  
+  RULE_SUCCESS("Matched rule_overload_name.\n", Prp_rule_overload_name);
+}
+
+bool Prp::rule_overload_exception(){
+  INIT_FUNCTION("Called rule_overload_exception.\n");
+  
+  if(SCAN_IS_TOKEN(Token_id_dot) || SCAN_IS_TOKEN(Token_id_pound) || SCAN_IS_TOKEN(Token_id_semicolon) || SCAN_IS_TOKEN(Token_id_comma) || SCAN_IS_TOKEN(Token_id_eq) || SCAN_IS_TOKEN(Token_id_op)  || SCAN_IS_TOKEN(Token_id_cp)  || SCAN_IS_TOKEN(Token_id_obr) || SCAN_IS_TOKEN(Token_id_cbr) || SCAN_IS_TOKEN(Token_id_ob) || SCAN_IS_TOKEN(Token_id_cb) || SCAN_IS_TOKEN(Token_id_backslash) || SCAN_IS_TOKEN(Token_id_qmark) || SCAN_IS_TOKEN(Token_id_bang) || SCAN_IS_TOKEN(Token_id_or) || SCAN_IS_TOKEN(Token_id_tick)){ RULE_SUCCESS("Matched rule_overload_exception.\n", Prp_rule_overload_exception); }
+  
+  RULE_FAILED("Failed rule_overload_exception; couldn't find an excepting character.\n");
+}
+
 bool Prp::rule_rhs_expression(){
-  debug_stat.rules_called++;
-  fmt::print("Hello from rule_rhs_expression().\n");
-  return rule_lhs_expression();
+  INIT_FUNCTION("Called rule_rhs_expression.\n");
+  
+  if(!(rule_fcall_explicit() || rule_lhs_expression() || rule_scope_declaration())){ RULE_FAILED("Failed rule_rhs_expression; couldn't find an expression.\n"); }
+  
+  RULE_SUCCESS("Matched rule_rhs_expression.\n", Prp_rule_rhs_expression);
 }
 
 void Prp::elaborate(){
   patch_pass(pyrope_keyword);
+  
+  fmt::print("PART 1: RULE AND AST CALL TRACE \n\n");
+  
   ast = std::make_unique<Ast_parser>(get_buffer(), Prp_rule);
-  debug_down();
-
+  
   int failed = 0;
-
+  
   while(!scan_is_end()){
-    dump_token();
+    ////dump_token();
     eat_comments();
-    if(!rule_top()){
+    if(!rule_start()){
       failed = 1;
       break;
     }
   }
-
-  debug_up(Prp_rule_code_blocks);
-
+  
   if(failed){
-    write_log("Parsing FAILED!\n");
+    fmt::print("\nParsing FAILED!\n");
   }
   else{
-    write_log("Parsing SUCCESSFUL!\n");
+    fmt::print("\nParsing SUCCESSFUL!\n");
   }
-
-  write_log("\nPART 1: RULE CALL TRACE\n\n");
-
-  // create the debug log; first write the rule call trace
-  for(auto m = rule_call_trace.begin(); m != rule_call_trace.end(); ++m){
-    write_log(*m);
+  
+  fmt::print("\nPART 2: SUBTREE STACK\n\n");
+  for(auto it = subtree_stack.begin(); it != subtree_stack.end(); ++it){
+    fmt::print("Operation: {}, Rule: {}, Token: {}\n", std::get<1>(*it), rule_id_to_string(std::get<2>(*it)), scan_text(std::get<3>(*it)));
   }
-
-  write_log("\nPART 2: AST CALL TRACE\n\n");
-
-  // second, write the ast call trace
-  for(auto m = ast_call_trace.begin(); m != ast_call_trace.end(); ++m){
-    write_log(*m);
-  }
-
-  write_log("\nPART 3: AST PREORDER TRAVERSAL\n\n");
-
+  
+  fmt::print("\nPART 3: AST BUILD LOG\n\n");
+  
+  // build the ast
+  ast_builder();
+  
+  fmt::print("\nPART 4: AST PREORDER TRAVERSAL\n\n");
+  
   // next, write the AST traversal
   ast_handler();
-
-  write_log("\nPART 4: STATISTICS\n\n");
-
+  
+  fmt::print("\nPART 5: STATISTICS\n\n");
+  
   // finally, write the statistics
-  write_log(fmt::format("Number of rules called: {}\n", debug_stat.rules_called));
-  write_log(fmt::format("Number of rules matched: {}\n", debug_stat.rules_matched));
-  write_log(fmt::format("Number of tokens consumed: {}\n", debug_stat.tokens_consumed));
-  write_log(fmt::format("Number of tokens unconsumed: {}\n", debug_stat.tokens_unconsumed));
-  write_log(fmt::format("Number of ast->up() calls: {}\n", debug_stat.ast_up_calls));
-  write_log(fmt::format("Number of ast->down() calls: {}\n", debug_stat.ast_down_calls));
-  write_log(fmt::format("Number of ast->add() calls: {}\n", debug_stat.ast_add_calls));
-
-  // close the log
-  close_log();
-
+  fmt::print(fmt::format("Number of rules called: {}\n", debug_stat.rules_called));
+  fmt::print(fmt::format("Number of rules matched: {}\n", debug_stat.rules_matched));
+  fmt::print(fmt::format("Number of rules failed: {}\n", debug_stat.rules_failed));
+  fmt::print(fmt::format("Number of tokens consumed: {}\n", debug_stat.tokens_consumed));
+  fmt::print(fmt::format("Number of tokens unconsumed: {}\n", debug_stat.tokens_unconsumed));
+  fmt::print(fmt::format("Number of ast->up() calls: {}\n", debug_stat.ast_up_calls));
+  fmt::print(fmt::format("Number of ast->down() calls: {}\n", debug_stat.ast_down_calls));
+  fmt::print(fmt::format("Number of debug_add() calls: {}\n", debug_stat.ast_add_calls));
+  
   ast = nullptr;
 }
 
 /* Consumes a token and dumps the new one */
 bool Prp::debug_consume(){
-  fmt::print("Consuming token: ");
+  //fmt::print("Consuming token: ");
   debug_stat.tokens_consumed++;
-  dump_token();
+  tokens_consumed++;
+  ////dump_token();
   bool ok = scan_next();
   return ok;
 }
 
 /* Unconsumes a token and dumps it */
 bool Prp::debug_unconsume(){
-  fmt::print("Unconsuming token: ");
+  //fmt::print("Unconsuming token: ");
   debug_stat.tokens_unconsumed++;
+  tokens_consumed--;
   bool ok = scan_prev();
-  dump_token();
+  ////dump_token();
   return ok;
 }
 
-bool Prp::go_back(int num_tok){
-  int i;
+bool Prp::go_back(uint64_t num_tok){
+  uint64_t i;
   bool ok;
+  //fmt::print("Tokens consumed: {}\n", tokens_consumed);
   for(i=0;i<num_tok;i++){
     ok = debug_unconsume();
   }
   return ok;
 }
 
-void Prp::debug_up(Rule_id rid) {
-  debug_stat.ast_up_calls++;
-  ast->up(rid);
-}
-
-void Prp::debug_down() {
+void Prp::debug_down(){
   debug_stat.ast_down_calls++;
-  ast->down();
+  //fmt::print("Added down call.\n");
+  ast_call_trace.push_back(fmt::format("Added down call.\n"));
+  down_stack.push_back(std::make_tuple(subtree_index++, 0, 0, 0));
 }
 
-/*void Prp::debug_up(std::string rule_name, Rule_id rid){
-  ast_call_trace.push_back(fmt::format("went up from rule {}\n", rule_name));
+void Prp::debug_up(Rule_id rid){
   debug_stat.ast_up_calls++;
-  ast->up(rid);
+  //fmt::print("Processing up call with rule {}.\n", rule_id_to_string(rid));
+  
+  if(add_stack.empty() && subtree_stack.empty()){
+    down_stack.pop_back();
+  }
+  else{
+    // we can define a good node recursively as follows:
+    // base case: a good node has two leaf nodes as its children
+    // base case: a leaf node is a good node
+    // recursive cases: a good node has more than one good node and no leaf nodes as its children
+    // or a good node has at least one leaf node and at least one good node as its children
+    
+    // a bad node is defined recursively as follows
+    // base case: a bad node has one leaf node as its child and no others
+    // recursive case: a bad node has only one bad node as its child and no others
+    
+    // remember, each up call adds a new node to the tree, if it was built correctly.
+    
+    // always keep these nodes:
+    
+    uint32_t add_cnt = 0;
+    uint32_t sub_cnt = 0;
+    
+    if(!add_stack.empty()){
+      while(std::get<0>(add_stack[add_stack.size()-1 - add_cnt]) > std::get<0>(down_stack.back())){
+        add_cnt++;
+        if(add_cnt >= add_stack.size()){
+          break;
+        }
+      }
+    }
+    
+    if(!subtree_indices.empty()){
+      while(std::get<0>(subtree_stack[std::get<1>(subtree_indices[subtree_indices.size()-1-sub_cnt])]) > std::get<0>(down_stack.back())){
+        sub_cnt++;
+        if(sub_cnt >= subtree_indices.size())
+          break;
+      }
+    }
+    
+    // first base case for good node: has 2 leaf nodes
+    if(add_cnt > 1 && sub_cnt == 0){
+      //fmt::print("Merging add calls only together for up call with rule {}.\n", rule_id_to_string(rid));
+      // push all the operations for the subtree onto the subtree stack.
+      uint32_t start_index = subtree_stack.size();
+      subtree_stack.push_back(down_stack.back());
+      down_stack.pop_back();
+      std::tuple<uint32_t, uint8_t, Rule_id, Token_entry> temp_add_array[add_cnt];
+//       //fmt::print("PRINTING THE ADD STACK.\n");
+//       for(int k = 0; k < add_stack.size(); k++){
+//         //fmt::print("Add stack index {}; rule: {} token: {}\n", k, std::get<2>(add_stack[k]), std::get<3>(add_stack[k]));
+//       }
+      for(uint32_t j = 0; j<add_cnt; j++){
+        //fmt::print("Base case: saw add call for a {} token.\n", scan_text(std::get<3>(add_stack.back())));
+        temp_add_array[j] = add_stack.back();
+        add_stack.pop_back();
+      }
+      for(uint32_t j = 0; j<add_cnt; j++){
+        subtree_stack.push_back(temp_add_array[(add_cnt-1)-j]);
+      }
+      //fmt::print("Pushing an up call with rule {} to the subtree stack.\n", rule_id_to_string(rid));
+      subtree_stack.push_back(std::make_tuple(subtree_index++, 1, rid, 0));
+      subtree_indices.push_back(std::make_tuple(start_index, subtree_stack.size()-1));
+    }
+    else if((add_cnt + sub_cnt) > 1){
+      //fmt::print("Merging subtrees and add calls together for up call with rule {}.\n", rule_id_to_string(rid));
+      uint32_t subtree_start = std::get<0>(subtree_indices[subtree_indices.size() - sub_cnt]);
+      
+      while((add_cnt + sub_cnt) > 0){
+        // if the subtrees have already been placed at the top, just put the tokens in the front
+        //fmt::print("add_cnt: {}, add_stack size: {}\n", add_cnt, add_stack.size());
+        if(sub_cnt == 0){
+          //fmt::print("Sub_cnt reached zero; placing an add call with token {} at the beginning of the subtree stack.\n", scan_text(std::get<3>(add_stack.back())));
+          subtree_stack.emplace(subtree_stack.begin() + subtree_start, add_stack.back());
+          //fmt::print("1 add_cnt: {}, add_stack size: {}\n", add_cnt, add_stack.size());
+          add_stack.pop_back();
+          add_cnt--;
+          //fmt::print("2 add_cnt: {}, add_stack size: {}\n", add_cnt, add_stack.size());
+        }
+        else{
+          // if the add calls came later, put them on first
+          if(add_cnt == 0){
+            //fmt::print("Subtree ending with call {} and rule {} at index {} comes after add call or is the last thing.\n", std::get<1>(subtree_stack[std::get<1>(subtree_indices.back())]), rule_id_to_string(std::get<2>(subtree_stack[std::get<1>(subtree_indices.back())])), std::get<1>(subtree_indices.back()));
+            subtree_indices.pop_back();
+            sub_cnt--;
+          }
+          else{
+            if(std::get<0>(add_stack.back()) > std::get<0>(subtree_stack[std::get<1>(subtree_indices.back())])){
+              //fmt::print("Placing an add call with token {} at index {} in the subtree stack; it had op {} at that position before.\n", scan_text(std::get<3>(add_stack.back())), std::get<1>(subtree_indices.back())+1, std::get<1>(subtree_stack[std::get<1>(subtree_indices.back())]));
+              subtree_stack.emplace(subtree_stack.begin() + (std::get<1>(subtree_indices.back())+1), add_stack.back());
+              add_stack.pop_back();
+              add_cnt--;
+              //fmt::print("add_cnt: {}, add_stack size: {}\n", add_cnt, add_stack.size());
+            }
+            // otherwise, just leave the subtree where it is; it is being merged into a single new subtree
+            else{
+              //fmt::print("Subtree ending with call {} and rule {} at index {} comes after add call with token {}.\n", std::get<1>(subtree_stack[std::get<1>(subtree_indices.back())]), rule_id_to_string(std::get<2>(subtree_stack[std::get<1>(subtree_indices.back())])), std::get<1>(subtree_indices.back()), scan_text(std::get<3>(add_stack.back())));
+              subtree_indices.pop_back();
+              sub_cnt--;
+            }
+          }
+        }
+      }
+      //fmt::print("Down stack size should not be zero; down stack size: {}; subtree_start: {}\n", down_stack.size(), subtree_start);
+      subtree_stack.emplace(subtree_stack.begin() + subtree_start, down_stack.back());
+      down_stack.pop_back();
+      //fmt::print("Pushing an up call with rule {} to the subtree stack.\n", rule_id_to_string(rid));
+      subtree_stack.push_back(std::make_tuple(subtree_index++, 1, rid, 0));
+      subtree_indices.push_back(std::make_tuple(subtree_start, subtree_stack.size()-1));
+    }
+    // we have a bad node, just pop the down call and move on.
+    else{
+      //fmt::print("Couldn't find 2 good children for up call to {}. Popping matching down call.\n", rule_id_to_string(rid));
+      //subtree_stack[std::get<1>(subtree_indices.back())]
+      down_stack.pop_back();
+    }
+    // print the entire subtree stack for debugging
+//           //fmt::print("PRINTING THE SUBTREE STACK\n");
+//           for(uint32_t j = 0; j<subtree_stack.size(); j++){
+//             //fmt::print("Operation: {} Rule: {} Token: {}\n", std::get<0>(std::get<1>(subtree_stack[j])), rule_id_to_string(std::get<1>(std::get<1>(subtree_stack[j]))), scan_text(std::get<2>(std::get<1>(subtree_stack[j]))));
+//           }
+//           //fmt::print("PRINTING THE SUBTREE INDICES STACK.\n");
+//           for(uint32_t j = 0; j<subtree_indices.size(); j++){
+//             //fmt::print("Subtree {} indices: ({},{})\n", j, std::get<0>(subtree_indices[j]), std::get<1>(subtree_indices[j]));
+//           }
+  }
 }
 
-void Prp::debug_down(std::string rule_name){
-  ast_call_trace.push_back(fmt::format("went down from rule {}\n", rule_name));
-  debug_stat.ast_down_calls++;
-  ast->down();
-}
-
-void debug_add(std::string rule_name, Rule_id, rid){
-  ast_call_trace.push_back("added token {} from rule {}", scan_text(), rule_name)
+void Prp::debug_add(Rule_id rid, Token_entry token){
+  fmt::print("Added add call with token {} from rule {}.\n", scan_text(), rule_id_to_string(rid));
+  ast_call_trace.push_back(fmt::format("Added add call with token {} from rule {}.\n", scan_text(), rule_id_to_string(rid)));
   debug_stat.ast_add_calls++;
-  ast->add(rid, scan_token());
-}*/
+  add_stack.push_back(std::make_tuple(subtree_index++, 2, rid, token));
+}
+
+bool Prp::chk_and_consume(Token_id tok, Rule_id rid){
+  fmt::print("called chk_and_consume: trying to match token {} to token {}\n", scan_is_end() ? "no token" : scan_text(), tok_id_to_string(tok));
+  if(scan_is_token(tok)){
+    fmt::print("chk_and_consume: matched a token.\n");
+    if(rid != Prp_invalid){
+      fmt::print("chk_and_consume: added a token {} to the ast.\n", rule_id_to_string(rid));
+      debug_add(rid, scan_token());
+    }
+    debug_consume();
+    return true;
+  }
+  return false;
+}
 
 void Prp::ast_handler(){
   std::string rule_name;
   for(const auto &it:ast->depth_preorder(ast->get_root())) {
     auto node = ast->get_data(it);
-
-    switch(node.rule_id){
-      case Prp_invalid:
-        rule_name.assign("Invalid");
-        break;
-      case Prp_rule:
-        rule_name.assign("Program");
-        break;
-      case Prp_rule_code_blocks:
-        rule_name.assign("Top level");
-        break;
-      case Prp_rule_code_block_int:
-        rule_name.assign("Code block");
-        break;
-      case Prp_rule_assignment_expression:
-        rule_name.assign("Assignment expression");
-        break;
-      case Prp_rule_logical_expression:
-        rule_name.assign("Logical expression");
-        break;
-      case Prp_rule_relational_expression:
-        rule_name.assign("Relational expression");
-        break;
-      case Prp_rule_additive_expression:
-        rule_name.assign("Additive expression");
-        break;
-      case Prp_rule_bitwise_expression:
-        rule_name.assign("Bitwise expression");
-        break;
-      case Prp_rule_multiplicative_expression:
-        rule_name.assign("Multiplicative expression");
-        break;
-      case Prp_rule_unary_expression:
-        rule_name.assign("Unary expressiion");
-        break;
-      case Prp_rule_factor:
-        rule_name.assign("Factor");
-        break;
-      case Prp_rule_tuple_by_notation:
-        rule_name.assign("Tuple by notation");
-        break;
-      case Prp_rule_tuple_notation_no_bracket:
-        rule_name.assign("Tuple notation non bracket");
-        break;
-      case Prp_rule_tuple_notation:
-        rule_name.assign("Tuple notation");
-        break;
-      case Prp_rule_tuple_notation_with_object:
-        rule_name.assign("Tuple notation with object");
-        break;
-      case Prp_rule_range_notation:
-        rule_name.assign("Range notation");
-        break;
-      case Prp_rule_bit_selection_bracket:
-        rule_name.assign("Bit selection bracket");
-        break;
-      case Prp_rule_bit_selection_notation:
-        rule_name.assign("Bit selection notation");
-        break;
-      case Prp_rule_tuple_array_bracket:
-        rule_name.assign("Tuple array bracket");
-        break;
-      case Prp_rule_tuple_array_notation:
-        rule_name.assign("Tuple array notation");
-        break;
-      case Prp_rule_lhs_expression:
-        rule_name.assign("LHS expression");
-        break;
-      case Prp_rule_lhs_var_name:
-        rule_name.assign("LHS variable name");
-        break;
-      case Prp_rule_rhs_expression_property:
-        rule_name.assign("RHS expression property");
-        break;
-      case Prp_rule_rhs_expression:
-        rule_name.assign("RHS expression");
-        break;
-      case Prp_rule_identifier:
-        rule_name.assign("Identifier");
-        break;
-      case Prp_rule_constant:
-        rule_name.assign("Constant");
-        break;
-      case Prp_rule_assignment_operator:
-        rule_name.assign("Assignment operator");
-        break;
-      case Prp_rule_tuple_dot_notation:
-        rule_name.assign("Tuple dot notation");
-        break;
-      case Prp_rule_tuple_dot_dot:
-        rule_name.assign("Tuple dot dot");
-        break;
-    }
+    rule_name = rule_id_to_string(node.rule_id);
     auto token_text = scan_text(node.token_entry);
-    write_log(fmt::format("Rule name: {}, Token text: {}, Tree level: {}\n", rule_name, token_text, it.level));
+    fmt::print("Rule name: {}, Token text: {}, Tree level: {}\n", rule_name, token_text, it.level);
   }
 }
 
-void Prp::open_log(){
-#ifndef NDEBUG
-  debug_log.open("debug_log");
-#endif
+void Prp::ast_builder(){
+  for(auto it = subtree_stack.begin(); it != subtree_stack.end(); ++it){
+    auto ast_op = *it;
+    switch(std::get<1>(ast_op)){
+      case 0:
+        ast->down();
+        fmt::print("Went down; now at level {}.\n", ast->get_level());
+        break;
+      case 1:
+        ast->up(std::get<2>(ast_op));
+        fmt::print("Went up with rule {}, now at level {}.\n", rule_id_to_string(std::get<2>(ast_op)), ast->get_level());
+        break;
+      case 2:
+        ast->down();
+        ast->add(std::get<2>(ast_op), std::get<3>(ast_op));
+        fmt::print("Added token {} from rule {} at level {}\n", scan_text(std::get<3>(ast_op)), rule_id_to_string(std::get<2>(ast_op)), ast->get_level());
+        ast->up(std::get<2>(ast_op));
+        break;
+    }
+  }
 }
 
-void Prp::close_log(){
-#ifndef NDEBUG
-  debug_log.close();
-#endif
+std::string Prp::rule_id_to_string(Rule_id rid){
+  switch(rid){
+    case Prp_invalid:
+      return "Invalid";
+    case Prp_rule:
+      return "Program";
+    case Prp_rule_start:
+      return "Top level";
+    case Prp_rule_code_blocks:
+      return "Code blocks";
+    case Prp_rule_code_block_int:
+      return "Code block int";
+    case Prp_rule_assignment_expression:
+      return "Assignment expression";
+    case Prp_rule_logical_expression:
+      return "Logical expression";
+    case Prp_rule_relational_expression:
+      return "Relational expression";
+    case Prp_rule_additive_expression:
+      return "Additive expression";
+    case Prp_rule_bitwise_expression:
+      return "Bitwise expression";
+    case Prp_rule_multiplicative_expression:
+      return "Multiplicative expression";
+    case Prp_rule_unary_expression:
+      return "Unary expression";
+    case Prp_rule_factor:
+      return "Factor";
+    case Prp_rule_tuple_by_notation:
+      return "Tuple by notation";
+    case Prp_rule_tuple_notation_no_bracket:
+      return "Tuple notation non bracket";
+    case Prp_rule_tuple_notation:
+      return "Tuple notation";
+    case Prp_rule_tuple_notation_with_object:
+      return "Tuple notation with object";
+    case Prp_rule_range_notation:
+      return "Range notation";
+    case Prp_rule_bit_selection_bracket:
+      return "Bit selection bracket";
+    case Prp_rule_bit_selection_notation:
+      return "Bit selection notation";
+    case Prp_rule_tuple_array_bracket:
+      return "Tuple array bracket";
+    case Prp_rule_tuple_array_notation:
+      return "Tuple array notation";
+    case Prp_rule_lhs_expression:
+      return "LHS expression";
+    case Prp_rule_lhs_var_name:
+      return "LHS variable name";
+    case Prp_rule_rhs_expression_property:
+      return "RHS expression property";
+    case Prp_rule_rhs_expression:
+      return "RHS expression";
+    case Prp_rule_identifier:
+      return "Identifier";
+    case Prp_rule_constant:
+      return "Constant";
+    case Prp_rule_assignment_operator:
+      return "Assignment operator";
+    case Prp_rule_tuple_dot_notation:
+      return "Tuple dot notation";
+    case Prp_rule_tuple_dot_dot:
+      return "Tuple dot dot";
+    case Prp_rule_numerical_constant:
+      return "Numerical constant";
+    case Prp_rule_string_constant:
+      return "String constant";
+    case Prp_rule_if_statement:
+      return "If statement";
+    case Prp_rule_block_body:
+      return "Block body";
+    case Prp_rule_empty_scope_colon:
+      return "Empty scope colon";
+    case Prp_rule_else_statement:
+      return "Else statement";
+    case Prp_rule_while_statement:
+      return "While statement";
+    case Prp_rule_try_statement:
+      return "Try statement";
+    case Prp_rule_scope_else:
+      return "Scope else";
+    case Prp_rule_assertion_statement:
+      return "Assertion statement";
+    default: return fmt::format("{}", rid);
+  }
 }
-
-void Prp::write_log(std::string message){
-#ifndef NDEBUG
-  debug_log << message;
-#else
-  (void)message;
-#endif
+  
+std::string Prp::tok_id_to_string(Token_id tok){
+  switch(tok){
+    case Token_id_nop:           // invalid token
+      return "nop";
+    case Token_id_comment:       // c-like comments
+      return "comment";
+    case Token_id_register:      // @asd @_asd
+      return "register";
+    case Token_id_pipe:          // |>
+      return "|>";
+    case Token_id_alnum:         // a..z..0..9.._
+      return "alnum";
+    case Token_id_ob:            // {
+      return "{";
+    case Token_id_cb:            // }
+      return "}";
+    case Token_id_colon:         // :
+      return ":";
+    case Token_id_gt:            // >
+      return ">";
+    case Token_id_or:            // |
+      return "|";
+    case Token_id_at:            // @
+      return "@";
+    case Token_id_label:         // foo:
+      return "label";
+    case Token_id_output:        // %outasd
+      return "output";
+    case Token_id_input:         // $asd
+      return "input";
+    case Token_id_dollar:        // $
+      return "$";
+    case Token_id_percent:       // %
+      return "%";
+    case Token_id_dot:           // .
+      return ".";
+    case Token_id_div:           // /
+      return "/";
+    case Token_id_string:        // "asd23*.v" string (double quote)
+      return "double string";
+    case Token_id_semicolon:     // ;
+      return ";";
+    case Token_id_comma:         // ,
+      return ",";
+    case Token_id_op:            // (
+      return "(";
+    case Token_id_cp:            // )
+      return ")";
+    case Token_id_pound:         // #
+      return "#";
+    case Token_id_mult:          // *
+      return "*";
+    case Token_id_num:           // 0123123 or 123123 or 0123ubits
+      return "number";
+    case Token_id_backtick:      // `ifdef
+      return "backtick";
+    case Token_id_synopsys:      // synopsys... directive in comment
+      return "synopsys";
+    case Token_id_plus:          // +
+      return "+";
+    case Token_id_minus:         // -
+      return "_";
+    case Token_id_bang:          // !
+      return "!";
+    case Token_id_lt:            // <
+      return "<";
+    case Token_id_eq:            // =
+      return "=";
+    case Token_id_same:          // ==
+      return "==";
+    case Token_id_diff:          // !=
+      return "!=";
+    case Token_id_coloneq:       // :=
+      return ":=";
+    case Token_id_ge:            // >=
+      return ">=";
+    case Token_id_le:            // <=
+      return "<=";
+    case Token_id_and:           // &
+      return "&";
+    case Token_id_xor:           // ^
+      return "^";
+    case Token_id_qmark:         // ?
+      return "?";
+    case Token_id_tick:          // '
+      return "'";
+    case Token_id_obr:           // [
+      return "[";
+    case Token_id_cbr:           // ]
+      return "]";
+    case Token_id_backslash:     // \ back slash
+      return "\\";
+    case Token_id_reference:     // \foo
+      return "reference";
+    case Token_id_keyword_first:
+      return "first";
+    case Token_id_keyword_last:
+      return "last";
+    case Pyrope_id_elif:
+      return "elif";
+    default: return fmt::format("{}", tok);
+  }
 }

@@ -27,7 +27,6 @@ int main(int argc, char **argv){
 	}
 
 	Prp scanner;
-  Elab_scanner::Token_list tlist;
-	scanner.parse(argv[1], memblock, tlist);
+	scanner.parse(argv[1], memblock);
 }
 
