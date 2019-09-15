@@ -1,16 +1,22 @@
 
 #include "lnast_to_verilog_parser.hpp"
 
-std::string Lnast_to_verilog_parser::stringify() {
-  fmt::print("\nstart Lnast_to_verilog_parser::stringify\n");
-
+std::string Lnast_to_verilog_parser::stringify(std::string filepath) {
+  inc_indent_buffer();
   inc_indent_buffer();
   for (const mmap_lib::Tree_index &it: lnast->depth_preorder(lnast->get_root())) {
     process_node(it);
   }
   process_buffer();
+  dec_indent_buffer();
 
-  buffer = absl::StrCat("\n\n", create_header("friends"), buffer, create_footer());
+  create_always();
+  create_next();
+
+  create_header(get_filename(filepath));
+  create_footer();
+
+  buffer = absl::StrCat("\n\n", buffer);
   return buffer;
 }
 
@@ -219,14 +225,71 @@ std::string Lnast_to_verilog_parser::indent_buffer() {
   return std::string(indent_buffer_size * 2, ' ');
 }
 
-std::string Lnast_to_verilog_parser::create_header(std::string name) {
+void Lnast_to_verilog_parser::create_header(std::string name) {
   // TODO(joapena): add in the arguments
-  return absl::StrCat("module ", name, " ();\n");
+  std::string inputs = "input clk,\ninput reset";
+  std::string outputs;
+  std::string wires;
+
+  for (auto var_name : statefull_set) {
+    uint32_t var_type = get_variable_type(var_name);
+    if (var_type == 1) {
+      inputs = absl::StrCat(inputs, ",\ninput ", var_name);
+    } else if (var_type == 2) {
+      outputs = absl::StrCat(outputs, ",\noutput ", var_name);
+    } else {
+      wires = absl::StrCat(wires, "  wire ", var_name, ";\n");
+    }
+
+    fmt::print("keys: {}\n", var_name);
+  }
+
+  fmt::print("wires: {}\n", wires);
+  fmt::print("inputs: {}\n", inputs);
+  fmt::print("outputs: {}\n", outputs);
+
+  buffer = absl::StrCat("module ", name, " (", inputs, outputs, ");\n", wires, "\n", buffer);
 }
 
-std::string Lnast_to_verilog_parser::create_footer() {
+void Lnast_to_verilog_parser::create_footer() {
   // TODO(joapena): probably didn't need this, will evaulate later
-  return absl::StrCat("end module\n");
+  buffer =  absl::StrCat(buffer, "end module\n");
+}
+
+void Lnast_to_verilog_parser::create_always() {
+  buffer = absl::StrCat(indent_buffer(), "always @(*) begin\n", buffer, indent_buffer(), "end\n");
+}
+
+void Lnast_to_verilog_parser::create_next() {
+  std::string tmp = absl::StrCat(indent_buffer(), "always @(posedge clk) begin\n");
+  inc_indent_buffer();
+  for (auto ele : statefull_set) {
+    if (get_variable_type(ele) == 2) {
+      tmp = absl::StrCat(tmp, indent_buffer(), ele, " = ", ele, "_next\n");
+    }
+  }
+  dec_indent_buffer();
+  tmp = absl::StrCat(tmp, indent_buffer(), "end\n");
+  buffer = absl::StrCat(buffer, tmp);
+}
+
+std::string Lnast_to_verilog_parser::get_filename(std::string filepath) {
+  std::vector<std::string> filepath_split = absl::StrSplit(filepath, '/');
+  std::pair<std::string, std::string> filename = absl::StrSplit(filepath_split[filepath_split.size() - 1], '.');
+  return filename.first;
+}
+
+// returns 1 if input
+// returns 2 if output
+// otherwise returns 0
+uint32_t Lnast_to_verilog_parser::get_variable_type(std::string var_name) {
+  if (var_name.at(0) == '$') {
+    return 1;
+  } else if (var_name.at(0) == '%'){
+    return 2;
+  }
+
+  return 0;
 }
 
 void Lnast_to_verilog_parser::process_pure_assign() {
@@ -250,9 +313,15 @@ void Lnast_to_verilog_parser::process_pure_assign() {
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
   } else {
     fmt::print("statefull_set:\tinserting:\tkey:{}\n", key);
-    statefull_set.insert(key);
-    key = absl::StrCat(key, "_next");
-    node_str_buffer = absl::StrCat(node_str_buffer, indent_buffer(), key, " = ", value, "\n");
+
+    std::string tmp = absl::StrCat(key);
+    if (get_variable_type(tmp) == 2) {
+      node_str_buffer = absl::StrCat(node_str_buffer, indent_buffer(), key, "_next = ", value, "\n");
+    } else {
+      node_str_buffer = absl::StrCat(node_str_buffer, indent_buffer(), key, " = ", value, "\n");
+    }
+
+    statefull_set.insert(tmp);
   }
 
   fmt::print("pure_assign value:\tkey: {}\tvalue: {}\n", key, value);

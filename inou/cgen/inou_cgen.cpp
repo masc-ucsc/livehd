@@ -105,7 +105,7 @@ void Inou_cgen::toverilog(Eprp_var &var) {
 
   // lnast to verilog
   p.lnast_to_verilog_parser = new Lnast_to_verilog_parser(p.memblock, p.lnast);
-  fmt::print("{}\n", p.lnast_to_verilog_parser->stringify());
+  fmt::print("{}\n", p.lnast_to_verilog_parser->stringify(p.opack.files));
 }
 
 void Inou_cgen::topyrope(Eprp_var &var) {
