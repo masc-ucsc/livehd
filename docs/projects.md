@@ -335,10 +335,26 @@ Main features:
 * Create scbench to gather stats and performance counters
 * stat.begin, stat.end, stat.pause
 * Aggregate stats in a single json file even across many runs
-* Gather performance counters (when avialable) like bniss, cache miss...
+* Gather performance counters (when available) like branch miss, L1/LLC cache miss, DTLB...
 * Integrate with some plotting system for performance CD/CI
 * Have some way to easily mark/detect outliners after a commit. Pointing top perf increase/decrease as a result from a commit.
-* Create a prometheous/grafana setup that feeds from runs autimatically
+* Create a prometheous/grafana setup that feeds from runs automatically.
+* Promethous/grafana server notifies on new outliers on regression commit
+* scbench should gather performance counters (PAPI?)
+* Integrate with MALT to track memory (mmap and no mmap) usage
+* Statistics on system calls to detect potential issues
+
+Some reference codes:
+
+https://github.com/yse/easy_profiler
+https://github.com/nickbruun/hayai
+https://github.com/david-grs/geiger
+https://github.com/NERSC/timemory
+https://epfl-vlsc.github.io/memoro/
+https://memtt.github.io/malt/
+https://github.com/jonasmr/microprofile
+
+Some good collection of links https://github.com/MattPD/cpplinks/blob/master/performance.tools.md
 
 ## OpenSTA
 
