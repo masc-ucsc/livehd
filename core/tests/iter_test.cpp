@@ -7,6 +7,10 @@
 
 bool failed = false;
 
+//#define VERBOSE
+#define VERBOSE2
+//#define VERBOSE3
+
 void generate_graphs(int n) {
 
   unsigned int rseed = 123;
@@ -203,7 +207,15 @@ void simple() {
   LGraph *g     = LGraph::create("lgdb_iter_test", gname, "test");
   LGraph *sub_g = LGraph::create("lgdb_iter_test", "sub", "test");
 
-  int pos = 0;
+  for (int i = 0; i < 256; i++) {
+    auto ipin = sub_g->add_graph_input("i" + std::to_string(i), i+1, 0);
+    auto opin = sub_g->add_graph_output("o" + std::to_string(i), 256+i+1, 0);
+    auto node = sub_g->create_node(Or_Op);
+    sub_g->add_edge(ipin, node.setup_sink_pin(0));
+    sub_g->add_edge(node.setup_driver_pin(rand()&1), opin);
+  }
+
+  int pos = 1; // Start with pos 1
   auto i1 = g->add_graph_input("i0", pos++, 0); // 1
   i1.set_bits(1);
   auto i2 = g->add_graph_input("i1", pos++, rand()&0xF); // 2
@@ -291,7 +303,7 @@ void simple() {
   g->add_edge(t16.setup_driver_pin(random()&0xFF), o8);
   g->add_edge(t20.setup_driver_pin(random()&0xFF), o8);
 
-#if 0
+#ifdef VERBOSE
   for(const auto &node : g->fast()) {
 
     fmt::print("node:{}\n", node.debug_name());
@@ -308,13 +320,34 @@ void simple() {
   }
 #endif
 
+  std::vector<std::string> fast;
+  int conta =0;
+  for(const auto node : g->fast()) {
+#ifdef VERBOSE3
+    fmt::print(" fast1:{} lg:{}\n", node.debug_name(), node.get_class_lgraph()->get_name());
+#endif
+    fast.emplace_back(node.debug_name());
+    conta++;
+  }
+  std::vector<std::string> fast_true;
+  conta =0;
+  for(const auto node : g->fast(true)) {
+#ifdef VERBOSE3
+    fmt::print(" fast2:{} lg:{}\n", node.debug_name(), node.get_class_lgraph()->get_name());
+#endif
+    fast_true.emplace_back(node.debug_name());
+    conta++;
+  }
+
   std::vector<std::string> fwd;
-  int conta=0;
+  conta=0;
   //for(const auto node : g->forward()) {
   auto iter = g->forward();
   for(auto it = iter.begin() ; it!= iter.end() ; ++it) {
     auto node = *it;
-    //fmt::print(" fwd:{}\n", node.debug_name());
+#ifdef VERBOSE2
+    fmt::print(" fwd1:{} lg:{}\n", node.debug_name(), node.get_class_lgraph()->get_name());
+#endif
     fwd.emplace_back(node.debug_name());
     conta++;
   }
@@ -322,11 +355,25 @@ void simple() {
     fmt::print("ERROR. expected 16 nodes in forward traversal. Found {}\n",conta);
     failed = true;
   }
+  std::vector<std::string> fwd_true;
+  conta =0;
+  for(const auto node : g->forward(true)) {
+#ifdef VERBOSE2
+    fmt::print(" fwd2:{} lg:{}\n", node.debug_name(), node.get_class_lgraph()->get_name());
+#endif
+    fwd_true.emplace_back(node.debug_name());
+    conta++;
+  }
+#ifdef VERBOSE2
+  return;
+#endif
 
   std::vector<std::string> bwd;
   conta =0;
   for(const auto node : g->backward()) {
-    //fmt::print(" bwd:{}\n", node.debug_name());
+#ifdef VERBOSE2
+    fmt::print(" bwd:{}\n", node.debug_name());
+#endif
     bwd.emplace_back(node.debug_name());
     conta++;
   }
@@ -335,24 +382,6 @@ void simple() {
     failed = true;
   }
 
-  std::vector<std::string> fast;
-  conta =0;
-  for(const auto node : g->fast()) {
-    fast.emplace_back(node.debug_name());
-    conta++;
-  }
-  std::vector<std::string> fast_true;
-  conta =0;
-  for(const auto node : g->fast(true)) {
-    fast_true.emplace_back(node.debug_name());
-    conta++;
-  }
-  std::vector<std::string> fwd_true;
-  conta =0;
-  for(const auto node : g->forward(true)) {
-    fwd_true.emplace_back(node.debug_name());
-    conta++;
-  }
   std::vector<std::string> bwd_true;
   conta =0;
   for(const auto node : g->backward(true)) {
@@ -487,7 +516,9 @@ void simple() {
 
 int main() {
 
-#if 1
+  simple();
+
+#if 0
   for(int i=0;i<40;i++) {
     simple();
     if (failed)
@@ -495,7 +526,7 @@ int main() {
   }
 #endif
 
-#if 1
+#if 0
   int n = 40;
   generate_graphs(n);
 

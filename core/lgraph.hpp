@@ -26,6 +26,7 @@ protected:
   friend class Forward_edge_iterator;
   friend class Backward_edge_iterator;
   friend class Fast_edge_iterator;
+  friend class Edge_raw_iterator_base;
 
   Hierarchy_tree  htree;
 

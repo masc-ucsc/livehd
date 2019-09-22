@@ -103,6 +103,7 @@ public:
     friend class CBackward_edge_iterator;
     friend class Forward_edge_iterator;
     friend class Backward_edge_iterator;
+    friend class Hierarchy_tree;
     friend class mmap_lib::hash<Node::Compact_class>;
   public:
 

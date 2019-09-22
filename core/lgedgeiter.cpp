@@ -101,10 +101,13 @@ bool Edge_raw_iterator_base::try_insert_pending(const Node &node, const Node::Co
     return false;
 
   if (visit_sub) {
-    auto empty = node.is_type_sub_empty();
-    if (!empty) {
+    auto hidx = node.hierarchy_go_down();
+
+    if (!hidx.is_invalid()) {
+      I(node.is_type_sub_empty());
       LGraph *sub_lg = node.get_type_sub_lgraph();
-      insert_graph_start_points(sub_lg, node.hierarchy_go_down());
+      I(sub_lg->get_lgid() == node.get_top_lgraph()->ref_htree()->get_data(hidx).lgid);
+      insert_graph_start_points(sub_lg, hidx);
 
       fmt::print(" adddel:{} from:{}\n", node.debug_name(), node.get_class_lgraph()->get_name());
       delayed.push_back(node.get_compact()); // Do sub hierarchy first
@@ -322,10 +325,20 @@ CFast_edge_iterator Fast_edge_iterator::begin() const {
   if (top_g->empty())
     return end();
 
-  return CFast_edge_iterator(top_g, top_g, it_hidx, top_g->fast_next(0), visit_sub);
+  Index_ID nid = 0;
+  while (true) {
+    nid = top_g->fast_next(nid);
+    if (nid == 0) return end();
+    if (nid == Node::Hardcoded_input_nid) continue;
+    if (nid == Node::Hardcoded_output_nid) continue;
+    break;
+  }
+
+  return CFast_edge_iterator(top_g, top_g, it_hidx, nid, visit_sub);
 }
 
 void CBackward_edge_iterator::set_current_node_as_visited() {
+
 
   global_visited->insert(current_node.get_compact());
 

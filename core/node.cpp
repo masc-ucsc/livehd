@@ -26,10 +26,17 @@ void Node::update(LGraph *_g, const Node::Compact &comp) {
   I(_g);
 
   nid       = comp.nid;
-  if (hidx==comp.hidx && _g == top_g)
+  if (top_g == nullptr) {
+    top_g     = _g;
+    hidx      = comp.hidx;
+  }else if (hidx==comp.hidx && _g == top_g)
     return;
   top_g     = _g;
   hidx      = comp.hidx;
+  if (hidx == Hierarchy_tree::root_index()) {
+    current_g = top_g;
+    return;
+  }
   current_g = top_g->ref_htree()->ref_lgraph(hidx);
 
   I(current_g->is_valid_node(nid));
@@ -200,6 +207,9 @@ LGraph *Node::get_type_sub_lgraph() const {
 }
 
 bool Node::is_type_sub_empty() const {
+  if (!top_g->is_type_sub(nid))
+    return true;
+
   auto sub_lgid = current_g->get_type_sub(nid);
   return top_g->get_library().is_empty(sub_lgid);
 }

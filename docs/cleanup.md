@@ -16,3 +16,4 @@ Replace all the get_text for get_sview (explicit to std::string_view)
 
 Increase the token position to 64 bits
 
+mmap_lib::tree should support move operators like doCreate in mmap_lib::map. Implement it.

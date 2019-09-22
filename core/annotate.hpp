@@ -23,6 +23,7 @@ struct Ann_name {
   static constexpr char cfgmeta[]   = "cfgmeta";
   static constexpr char bitwidth[]  = "bitwidth";
   static constexpr char file_loc[]  = "file_loc";
+  static constexpr char tree_pos[]  = "tree_pos";
 };
 
 using Ann_node_pin_offset  = Attribute<Ann_name::wireoffset
@@ -65,6 +66,11 @@ using Ann_node_file_loc    = Attribute<Ann_name::file_loc
                                        ,mmap_lib::map<Node::Compact_class, Ann_file_loc>
                                        >;
 
+using Ann_node_tree_pos    = Attribute<Ann_name::tree_pos
+                                       ,Node
+                                       ,mmap_lib::map<Node::Compact_class, uint32_t>
+                                       >;
+
 struct Ann_support {
   // TODO: Change to object to register annotations, and have an "update" for incremental
   static void clear(LGraph *lg) {
@@ -78,6 +84,7 @@ struct Ann_support {
     Ann_node_place::clear(lg);
     Ann_node_cfgmeta::clear(lg);
     Ann_node_file_loc::clear(lg);
+    Ann_node_tree_pos::clear(lg);
   };
 };
 

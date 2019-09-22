@@ -7,8 +7,10 @@
 #include "node.hpp"
 
 class Hierarchy_tree : public mmap_lib::tree<Hierarchy_data> {
+protected:
   LGraph *top;
 
+  void regenerate_step(LGraph *lg, const Hierarchy_index &parent);
 public:
   Hierarchy_tree(LGraph *top);
 

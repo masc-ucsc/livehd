@@ -1,5 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "annotate.hpp"
 #include "node_type.hpp"
 #include "graph_library.hpp"
 #include "pass.hpp"
@@ -63,6 +64,16 @@ bool LGraph_Node_Type::is_type_const(Index_ID nid) const {
       StrConstMin_Op && op <= StrConstMax_Op);
 }
 
+bool LGraph_Node_Type::is_type_sub(Index_ID nid) const {
+  I(nid < node_type_table.size());
+  I(node_internal[nid].is_node_state());
+  I(node_internal[nid].is_master_root());
+
+  const Node_Type_Op &op = node_type_table[nid];
+
+  return (op >= SubGraphMin_Op && op <= SubGraphMax_Op);
+}
+
 void LGraph_Node_Type::set_type_sub(Index_ID nid, Lg_type_id subgraphid) {
   I(nid < node_type_table.size());
   I(node_internal[nid].is_node_state());
@@ -76,6 +87,7 @@ void LGraph_Node_Type::set_type_sub(Index_ID nid, Lg_type_id subgraphid) {
   || node_type_table[nid] == Invalid_Op);
 
   down_nodes.set(Node::Compact_class(nid), subgraphid.value);
+  Ann_node_tree_pos::ref(static_cast<const LGraph *>(this))->set(Node::Compact_class(nid), down_nodes.size());
 
   node_type_table.set(nid, (Node_Type_Op)(SubGraphMin_Op + subgraphid));
 }
