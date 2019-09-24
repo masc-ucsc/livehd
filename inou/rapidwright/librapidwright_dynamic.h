@@ -22,10 +22,6 @@ typedef void (*RW_route_Design_fn_t)(graal_isolatethread_t*, int);
 
 typedef void (*RW_write_DCP_fn_t)(graal_isolatethread_t*, char*, int);
 
-typedef void (*loadDevice_fn_t)(graal_isolatethread_t*, char*);
-
-typedef char* (*getTileName_fn_t)(graal_isolatethread_t*, char*, int, int);
-
 typedef void (*addLogicGate_fn_t)(graal_isolatethread_t*, char*, char*);
 
 #if defined(__cplusplus)

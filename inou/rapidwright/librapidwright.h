@@ -22,10 +22,6 @@ void RW_route_Design(graal_isolatethread_t*, int);
 
 void RW_write_DCP(graal_isolatethread_t*, char*, int);
 
-void loadDevice(graal_isolatethread_t*, char*);
-
-char* getTileName(graal_isolatethread_t*, char*, int, int);
-
 void addLogicGate(graal_isolatethread_t*, char*, char*);
 
 #if defined(__cplusplus)
