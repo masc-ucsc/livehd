@@ -159,7 +159,7 @@ protected:
 
   size_t calc_min_mmap_size() const { return sizeof(T) * MMAPA_MIN_ENTRIES + 4096; }
 
-  inline T *ref_base() const {
+  __attribute__((inline)) T *ref_base() const {
     if (MMAP_LIB_LIKELY(mmap_base != nullptr)) {
       return (T *)(mmap_base + 4096);
     }
@@ -354,6 +354,9 @@ public:
   }
 
   [[nodiscard]] size_t size() const {
+    if (MMAP_LIB_LIKELY(entries_size != nullptr)) {
+      return *entries_size;
+    }
     ref_base(); // Force to get entries_size
     return *entries_size;
   }
