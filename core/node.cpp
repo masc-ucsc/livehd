@@ -170,7 +170,7 @@ void Node::set_type(const Node_Type_Op op) {
   current_g->set_type(nid,op);
 }
 
-void Node::set_type(const Node_Type_Op op, uint16_t bits) {
+void Node::set_type(const Node_Type_Op op, uint32_t bits) {
   current_g->set_type(nid, op);
 
   setup_driver_pin().set_bits(bits); // bits only possible when the cell has a single output

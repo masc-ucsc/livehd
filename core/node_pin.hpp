@@ -298,8 +298,8 @@ public:
   void  set_delay(float val);
   float get_delay() const;
 
-  uint16_t get_bits() const;
-  void     set_bits(uint16_t bits);
+  uint32_t get_bits() const;
+  void     set_bits(uint32_t bits);
 
   std::string_view get_type_sub_io_name() const;
 

@@ -69,11 +69,11 @@ public:
 
   void del_edge();
   void add_edge();
-  void add_edge(uint16_t bits);
+  void add_edge(uint32_t bits);
 
   // BEGIN ATTRIBUTE ACCESSORS
 
-  uint16_t get_bits() const { return driver.get_bits(); }
+  uint32_t get_bits() const { return driver.get_bits(); }
 
   // END ATTRIBUTE ACCESSORS
 };

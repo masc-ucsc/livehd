@@ -219,7 +219,7 @@ bool LGraph::is_graph_output(std::string_view name) const {
   return cond;
 }
 
-Node_pin LGraph::add_graph_input(std::string_view str, Port_ID pos, uint16_t bits) {
+Node_pin LGraph::add_graph_input(std::string_view str, Port_ID pos, uint32_t bits) {
   I(!is_graph_output(str));
 
   Port_ID inst_pid;
@@ -245,7 +245,7 @@ Node_pin LGraph::add_graph_input(std::string_view str, Port_ID pos, uint16_t bit
   return pin;
 }
 
-Node_pin LGraph::add_graph_output(std::string_view str, Port_ID pos, uint16_t bits) {
+Node_pin LGraph::add_graph_output(std::string_view str, Port_ID pos, uint32_t bits) {
   I(!is_graph_input(str));
 
   Port_ID inst_pid;
@@ -509,7 +509,7 @@ Node LGraph::create_node(Node_Type_Op op) {
   return Node(this, Hierarchy_tree::root_index(), nid);
 }
 
-Node LGraph::create_node(Node_Type_Op op, uint16_t bits) {
+Node LGraph::create_node(Node_Type_Op op, uint32_t bits) {
 
   auto node = create_node(op);
 
@@ -568,7 +568,7 @@ Node LGraph::create_node_const(std::string_view value) {
 }
 #endif
 
-Node LGraph::create_node_const(std::string_view value, uint16_t bits) {
+Node LGraph::create_node_const(std::string_view value, uint32_t bits) {
 
   auto nid = find_type_const_sview(value);
 

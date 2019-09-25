@@ -167,7 +167,7 @@ public:
     return add_edge_int(dst.get_idx(), dst.get_pid(), src.get_idx(), src.get_pid());
   }
 
-  Index_ID add_edge(const Node_pin &src, const Node_pin &dst, uint16_t bits) {
+  Index_ID add_edge(const Node_pin &src, const Node_pin &dst, uint32_t bits) {
     Index_ID idx = add_edge(src, dst);
     I(idx = src.get_idx());
     GI(bits!=get_bits(idx), !is_type_const(node_internal[idx].get_nid())); // Do not overwrite bits in constants
@@ -191,18 +191,18 @@ public:
   void sync() override;
   void emplace_back() override;
 
-  Node_pin add_graph_input(std::string_view str, Port_ID pos, uint16_t bits);
-  Node_pin add_graph_output(std::string_view str, Port_ID pos, uint16_t bits);
+  Node_pin add_graph_input(std::string_view str, Port_ID pos, uint32_t bits);
+  Node_pin add_graph_output(std::string_view str, Port_ID pos, uint32_t bits);
 
   Node create_node();
 
   Node create_node(const Node &old_node);
 
   Node create_node(Node_Type_Op op);
-  Node create_node(Node_Type_Op op, uint16_t bits);
+  Node create_node(Node_Type_Op op, uint32_t bits);
   Node create_node_const(uint32_t value);
   //Node create_node_const(std::string_view value);
-  Node create_node_const(std::string_view value, uint16_t bits);
+  Node create_node_const(std::string_view value, uint32_t bits);
   Node create_node_sub(Lg_type_id sub);
   Node create_node_sub(std::string_view sub_name);
 

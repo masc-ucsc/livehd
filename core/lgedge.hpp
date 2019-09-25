@@ -163,7 +163,7 @@ public:
     fmt::print("snode:{} page_idx:{} a:{} addr:{:x}", is_snode(), get_page_idx(), a, (uint64_t)this);
   }
 
-  uint16_t get_bits() const;
+  uint32_t get_bits() const;
   bool     is_root() const;
 
   bool is_page_align() const {
@@ -263,12 +263,11 @@ class  __attribute__((packed)) Node_Internal {
 private:
   // BEGIN 12 Bytes common payload
   Node_State state : 3;  // State must be the first thing (Node_Internal_Page)
-  uint16_t   root : 1;
   uint16_t   inp_pos : 5;
   uint16_t   driver_setup : 1;
   uint16_t   sink_setup : 1;
   uint16_t   out_pos : 5;
-  uint16_t   bits : Bits_bits; // 2 byte aligned
+  uint32_t   bits : Bits_bits;
   // 4 bytes aligned
 public:
   // WARNING: This must be here not at the end of the structure. OTherwise the
@@ -277,7 +276,7 @@ public:
   SEdge                sedge[Num_SEdges];    // WARNING: Must not be the last field in struct or iterators fail
 private:
   uint64_t nid : Index_bits;     // 31bits, 4 byte aligned
-  uint16_t pad: 1; // To get nicer alignment
+  uint16_t root: 1;
   Port_ID  dst_pid : Port_bits;  // 26bits, 4 byte aligned
   uint16_t inp_long : 2; // 8 bytes each. Just 3 at most
   uint16_t out_long : 2;
@@ -409,12 +408,12 @@ public:
     GI(nid == get_self_idx().value, root);
   }
 
-  const Node_Internal &get(Index_ID idx2) const {
+  inline const Node_Internal &get(Index_ID idx2) const {
     const Node_Internal *root_n = this;
     return root_n[idx2.value - get_self_idx().value];
   }
 
-  static Node_Internal &get(const Edge_raw *ptr) {
+  inline static Node_Internal &get(const Edge_raw *ptr) {
     // WARNING: this belongs to a structure that it is cache aligned (32 bytes)
     uint64_t root_int = (uint64_t)ptr;
     root_int          = root_int >> 6;
@@ -529,13 +528,13 @@ public:
     return (inp_pos + out_pos + reserve) < Num_SEdges;  // pos 0 uses 2 entries (4bytes ptr next)
   }
 
-  uint16_t get_bits() const {
+  uint32_t get_bits() const {
     I(is_root());
     return bits;
   }
-  void set_bits(uint16_t _bits) {
+  void set_bits(uint32_t _bits) {
+    I(_bits < (1UL<<Bits_bits));
     I(is_root());
-    static_assert(Bits_bits == 8*sizeof(uint16_t));
     bits = _bits;
   }
   bool is_driver_setup() const { return driver_setup != 0; }

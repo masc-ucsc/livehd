@@ -557,7 +557,7 @@ Node_pin Edge_raw::get_inp_pin(LGraph *g, LGraph *cg, const Hierarchy_index &hid
 
 Index_ID Edge_raw::get_self_nid() const { return Node_Internal::get(this).get_nid(); }
 
-uint16_t Edge_raw::get_bits() const {
+uint32_t Edge_raw::get_bits() const {
   const auto &node = Node_Internal::get(this);
 
   if (node.is_root()) return node.get_bits();

@@ -34,7 +34,7 @@ void XEdge::add_edge() {
   driver.get_class_lgraph()->add_edge(driver, sink);
 }
 
-void XEdge::add_edge(uint16_t bits) {
+void XEdge::add_edge(uint32_t bits) {
   driver.get_class_lgraph()->add_edge(driver, sink, bits);
 }
 

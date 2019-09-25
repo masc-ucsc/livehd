@@ -76,19 +76,19 @@ public:
 
 #if 1
   // WARNING: deprecated: Use get/set_bits(const Node_pin)
-  void     set_bits_pid(Index_ID nid, Port_ID pid, uint16_t bits);
-  uint16_t get_bits_pid(Index_ID nid, Port_ID pid) const;
-  uint16_t get_bits_pid(Index_ID nid, Port_ID pid);
+  void     set_bits_pid(Index_ID nid, Port_ID pid, uint32_t bits);
+  uint32_t get_bits_pid(Index_ID nid, Port_ID pid) const;
+  uint32_t get_bits_pid(Index_ID nid, Port_ID pid);
 #endif
 
 #if 1
   // WARNING: deprecated, move to protected
-  uint16_t get_bits(Index_ID idx) const {
+  uint32_t get_bits(Index_ID idx) const {
     I(idx < node_internal.size());
     I(node_internal[idx].is_root());
     return node_internal[idx].get_bits();
   }
-  void set_bits(Index_ID idx, uint16_t bits) {
+  void set_bits(Index_ID idx, uint32_t bits) {
     I(idx < node_internal.size());
     I(node_internal[idx].is_root());
     node_internal.ref(idx)->set_bits(bits);

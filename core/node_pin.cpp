@@ -92,11 +92,11 @@ void Node_pin::connect_driver(Node_pin &dpin) {
   current_g->add_edge(dpin, *this);
 }
 
-uint16_t Node_pin::get_bits() const {
+uint32_t Node_pin::get_bits() const {
   return current_g->get_bits(idx);
 }
 
-void Node_pin::set_bits(uint16_t bits) {
+void Node_pin::set_bits(uint32_t bits) {
   I(is_driver());
   current_g->set_bits(idx, bits);
 }

@@ -182,7 +182,7 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
       }
       auto tpin_driver_bw = tpin_driver.get_bits();
       auto fpin_driver_bw = fpin_driver.get_bits();
-      auto bw_diff = (uint16_t)abs(tpin_driver_bw - fpin_driver_bw);
+      bool same_bw = tpin_driver_bw == fpin_driver_bw;
       node.get_driver_pin().set_bits(std::max(tpin_driver_bw, fpin_driver_bw));
 
       //delete original edge
@@ -194,7 +194,7 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
       }
 
       //create internal Join_Op to resolve bitwidth mismatch
-      if(bw_diff == 0){
+      if(same_bw){
         continue;
       } else if (tpin_driver_bw > fpin_driver_bw){
         Node node_join = dfg -> create_node();
@@ -202,7 +202,7 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
         node_join.setup_driver_pin().set_bits(tpin_driver_bw);
 
         Node_pin node_pin_unsign_ext = dfg->create_node_const(0).setup_driver_pin();
-        I(false); // FIXME: add as many edges as bw_diff
+        I(false); // FIXME: add as many edges as same_bw
         dfg->add_edge(node_pin_unsign_ext, node_join.setup_sink_pin(1));
         dfg->add_edge(fpin_driver, node_join.setup_sink_pin(0));
         dfg->add_edge(node_join.setup_driver_pin(0), node.setup_sink_pin(1));
@@ -213,7 +213,7 @@ void Pass_dfg::do_finalize_bitwidth(LGraph *dfg) {
         node_join.setup_driver_pin().set_bits(fpin_driver_bw);
 
         Node_pin node_pin_unsign_ext = dfg->create_node_const(0).setup_driver_pin();
-        I(false); // FIXME: add as many edges as bw_diff
+        I(false); // FIXME: add as many edges as same_bw
         dfg->add_edge(node_pin_unsign_ext, node_join.setup_sink_pin(1));
         dfg->add_edge(tpin_driver, node_join.setup_sink_pin(0));
         dfg->add_edge(node_join.setup_driver_pin(0), node.setup_sink_pin(2));

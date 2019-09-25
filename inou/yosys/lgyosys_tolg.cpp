@@ -10,7 +10,6 @@
 #include "kernel/yosys.h"
 #include "kernel/celltypes.h"
 
-#include <assert.h>
 #include <map>
 #include <set>
 #include <string>
@@ -56,7 +55,7 @@ static void look_for_wire(LGraph *g, const RTLIL::Wire *wire) {
     Node_pin pin;
     if (g->is_graph_input(&wire->name.c_str()[1])) {
       pin = g->get_graph_input(&wire->name.c_str()[1]);
-      assert(pin.get_bits() == wire->width);
+      I(pin.get_bits() == wire->width);
     } else {
       pin = g->add_graph_input(&wire->name.c_str()[1], wire->port_id, wire->width);
     }
@@ -71,7 +70,7 @@ static void look_for_wire(LGraph *g, const RTLIL::Wire *wire) {
       g->add_graph_output(&wire->name.c_str()[1], wire->port_id, wire->width);
     }
     auto pin = g->get_graph_output(&wire->name.c_str()[1]);
-    assert(pin.get_bits() == wire->width);
+    I(pin.get_bits() == wire->width);
     if (wire->start_offset) {
       auto dpin = g->get_graph_output_driver(&wire->name.c_str()[1]);
       I(dpin.get_pid() == pin.get_pid());
@@ -91,7 +90,7 @@ static void look_for_module_io(RTLIL::Module *module, const std::string &path) {
 #endif
   auto  library = Graph_library::instance(path);
   auto *g       = library->try_find_lgraph(&module->name.c_str()[1]);
-  assert(g);
+  I(g);
 
   for(auto &wire_iter : module->wires_) {
     look_for_wire(g, wire_iter.second);
@@ -108,21 +107,21 @@ static Node_pin &get_edge_pin(LGraph *g, const RTLIL::Wire *wire) {
   }
 
   if(wire2pin.find(wire) != wire2pin.end()) {
-    if(wire->width != wire2pin[wire].get_bits()) {
+    if(wire->width != (int)wire2pin[wire].get_bits()) {
       fmt::print("w_name:{} w_w:{} | pid:{} bits:{}\n"
           ,wire->name.c_str()
           ,wire->width
           ,wire2pin[wire].get_pid()
           ,wire2pin[wire].get_bits());
-      assert(false); // WHY?
+      I(false); // WHY?
       wire2pin[wire].set_bits(wire->width);
-      assert(wire->width == wire2pin[wire].get_bits());
+      I(wire->width == wire2pin[wire].get_bits());
     }
     return wire2pin[wire];
   }
 
-  assert(!wire->port_input);  // Added before at look_for_wire
-  assert(!wire->port_output);
+  I(!wire->port_input);  // Added before at look_for_wire
+  I(!wire->port_output);
 
   auto node = g->create_node(Join_Op, wire->width);
 
@@ -166,7 +165,7 @@ bool operator==(const Pick_ID &lhs, const Pick_ID &rhs) {
 absl::flat_hash_map<Pick_ID, Node_pin> picks; // NODE, not flat to preserve pointer stability
 
 static Node_pin &create_pick_operator(LGraph *g, Node_pin &driver, int offset, int width) {
-  if(offset == 0 && driver.get_bits() == width)
+  if(offset == 0 && (int)driver.get_bits() == width)
     return driver;
 
   Pick_ID pick_id(driver, offset, width);
@@ -249,7 +248,7 @@ static Node resolve_memory(LGraph *g, RTLIL::Cell *cell) {
 
           auto spin_join = join_node.setup_sink_pin(0);
           g->add_edge(dpin, spin_join);
-          assert(join_dpin.get_bits() == wire->width);
+          I(join_dpin.get_bits() == wire->width);
         }else if(chunk.width == ss.size()) {
           // output port drives a single wire
           wire2pin[wire]     = dpin;
@@ -265,7 +264,7 @@ static Node resolve_memory(LGraph *g, RTLIL::Cell *cell) {
         if(partially_assigned.find(wire) == partially_assigned.end()) {
           partially_assigned[wire].resize(wire->width);
 
-          assert(wire2pin.find(wire) == wire2pin.end());
+          I(wire2pin.find(wire) == wire2pin.end());
           auto node = g->create_node(Join_Op, wire->width);
 
           wire2pin[wire] = node.setup_driver_pin();
@@ -315,7 +314,7 @@ static bool is_black_box_output(const RTLIL::Module *module, const RTLIL::Cell *
                  cell->type.str(), port_name.str());
 
   log_error("unknown port %s at module %s cell %s\n", port_name.c_str(), module->name.c_str(), cell->type.c_str());
-  assert(false); // TODO: is it possible to resolve this case?
+  I(false); // TODO: is it possible to resolve this case?
   return false;
 }
 
@@ -350,7 +349,7 @@ static bool is_black_box_input(const RTLIL::Module *module, const RTLIL::Cell *c
                  cell->type.str(), port_name.str());
 
   log_error("unknown port %s at module %s cell %s\n", port_name.c_str(), module->name.c_str(), cell->type.c_str());
-  assert(false); // TODO: is it possible to resolve this case?
+  I(false); // TODO: is it possible to resolve this case?
   return false;
 }
 
@@ -387,7 +386,7 @@ static Node_pin resolve_constant(LGraph *g, const std::vector<RTLIL::State> &dat
       u32_const = false;
       break;
     default:
-      assert(false);
+      I(false);
     }
     current_bit++;
   }
@@ -419,7 +418,7 @@ static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path
 
   auto  library = Graph_library::instance(path);
   auto *g       = library->try_find_lgraph(&module->name.c_str()[1]);
-  assert(g);
+  I(g);
 
   for(auto cell : module->cells()) {
 
@@ -533,7 +532,7 @@ static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path
               auto spin = g->get_graph_output(&wire->name.c_str()[1]);
               g->add_edge(driver_pin, spin);
             } else {
-              assert(false);
+              I(false);
             }
           }else if(chunk.width == ss.size()) {
             // output port drives a single wire
@@ -573,7 +572,7 @@ static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path
 
 static Node_pin create_join_operator(LGraph *g, const RTLIL::SigSpec &ss) {
   std::vector<Node_pin> inp_pins;
-  assert(ss.chunks().size() != 0);
+  I(ss.chunks().size() != 0);
 
   for(auto &chunk : ss.chunks()) {
     if(chunk.wire == nullptr) {
@@ -667,7 +666,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
 
   auto  library = Graph_library::instance(path);
   auto *g       = library->try_find_lgraph(&module->name.c_str()[1]);
-  assert(g);
+  I(g);
 
   process_assigns(module, g);
 
@@ -679,7 +678,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
   for(auto cell : module->cells()) {
     //log("Looking for cell %s:\n", cell->type.c_str());
 
-    assert(cell2node.find(cell) != cell2node.end());
+    I(cell2node.find(cell) != cell2node.end());
     Node exit_node  = cell2node[cell];
     Node entry_node = exit_node; // Same entry/exit unless multiple cells are needed to model
 
@@ -750,7 +749,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
 
       RTLIL::Const clk_polarity = cell->parameters["\\CLK_POLARITY"];
       for(int i=1;i<clk_polarity.size();i++) {
-        assert(clk_polarity[0] == clk_polarity[i]);
+        I(clk_polarity[0] == clk_polarity[i]);
       }
       if (clk_polarity.size() && clk_polarity[0] != RTLIL::S1)
         connect_constant(g, 0, exit_node, 5); // POL is 5 in SFlop_Op
@@ -763,7 +762,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
 
       RTLIL::Const clk_polarity = cell->parameters["\\EN_POLARITY"];
       for(int i=1;i<clk_polarity.size();i++) {
-        assert(clk_polarity[0] == clk_polarity[i]);
+        I(clk_polarity[0] == clk_polarity[i]);
       }
       if (clk_polarity.size() && clk_polarity[0] != RTLIL::S1)
         connect_constant(g, 0, exit_node, 2); // POL is 3 in Latch_Op
@@ -930,12 +929,12 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
 
         if (rd_clkp[i] == RTLIL::S1) {
           if (rd_clk_enabled)
-            assert(rd_clk_polarity); // All the read ports are equal
+            I(rd_clk_polarity); // All the read ports are equal
           rd_clk_enabled = 1;
           rd_clk_polarity = 1;
         }else if (rd_clkp[i] == RTLIL::S0) {
           if (rd_clk_enabled)
-            assert(!rd_clk_polarity); // All the read ports are equal
+            I(!rd_clk_polarity); // All the read ports are equal
           rd_clk_enabled = 1;
           rd_clk_polarity = 0;
         }
@@ -956,12 +955,12 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
           continue;
         if (wr_clkp[i] == RTLIL::S1) {
           if (wr_clk_enabled)
-            assert(wr_clk_polarity); // All the read ports are equal
+            I(wr_clk_polarity); // All the read ports are equal
           wr_clk_enabled = 1;
           wr_clk_polarity = 1;
         }else if (wr_clkp[i] == RTLIL::S0) {
           if (wr_clk_enabled)
-            assert(!wr_clk_polarity); // All the read ports are equal
+            I(!wr_clk_polarity); // All the read ports are equal
           wr_clk_enabled = 1;
           wr_clk_polarity = 0;
         }
@@ -978,7 +977,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
 
       // TODO: get a test case to patch
       if(cell->parameters.find("\\INIT") != cell->parameters.end()) {
-        assert(cell->parameters["\\INIT"].as_string()[0] == 'x');
+        I(cell->parameters["\\INIT"].as_string()[0] == 'x');
       }
 
       clock = cell->getPort("\\RD_CLK")[0].wire;
@@ -996,12 +995,12 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
         size = cell->parameters["\\Y_WIDTH"].as_int();
       log_error("ERROR: add this cell type %s to lgraph size:%d\n", cell->type.c_str(), size);
 
-      assert(false);
+      I(false);
 
     } else if(g->get_library().get_lgid(&cell->type.c_str()[1])) {
       // external graph reference
       auto sub_lgid = g->get_library().get_lgid(&cell->type.c_str()[1]);
-      assert(sub_lgid);
+      I(sub_lgid);
       log("module name original was %s\n", cell->type.c_str());
 
       entry_node.set_type_sub(sub_lgid);
@@ -1055,12 +1054,12 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
 
       // TODO: add support for those DFF types
       log_error("Found complex yosys DFFs, run `techmap -map +/adff2dff.v` before calling the yosys2lg pass\n");
-      assert(false);
+      I(false);
 
     } else {
       // blackbox addition
       ::Pass::info("Black box addition from yosys frontend, cell type {} not found instance {}", cell->type.c_str(), cell->name.c_str());
-      assert(false);
+      I(false);
     }
 
     absl::flat_hash_set<XEdge::Compact> added_edges;
@@ -1109,7 +1108,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
             sink_pid = entry_node.get_type().get_input_match("C");
           else
             sink_pid = entry_node.get_type().get_input_match(&conn.first.c_str()[1]);
-          assert(sink_pid < Port_invalid);
+          I(sink_pid < Port_invalid);
           // printf("input_match[%s] -> pid:%d\n", &conn.first.c_str()[1], sink_pid);
         } else if (entry_node.is_type(AFlop_Op)) {
           if (conn.first.str() == "\\ARST")
@@ -1134,7 +1133,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
           if (conn.first.str() == "\\WR_CLK") {
 #ifndef NDEBUG
             for(auto &clk_chunk : conn.second.chunks()) {
-              assert(clk_chunk.wire == clock);
+              I(clk_chunk.wire == clock);
             }
 #endif
             sink_pid = LGRAPH_MEMOP_CLK;
@@ -1163,7 +1162,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
           } else if(std::strncmp(conn.first.c_str(), "\\RD_CLK", 7) == 0) {
 #ifndef NDEBUG
             for(auto &clk_chunk : conn.second.chunks()) {
-              assert(clk_chunk.wire == clock || !clk_chunk.wire);
+              I(clk_chunk.wire == clock || !clk_chunk.wire);
             }
 #endif
             continue;
@@ -1188,7 +1187,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
             }
             continue;
           } else {
-            assert(false); // port not found
+            I(false); // port not found
           }
         }
       }
@@ -1220,7 +1219,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
     set_bits_wirename(join_dpin, wire);
 
     Node_pin current;
-    int       size    = 0;
+    auto       size   = 0UL;
     bool      first   = true;
     for(auto pin : kv.second) {
       if(first)
@@ -1235,7 +1234,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
           dpin = node.setup_driver_pin();
         }
 
-        assert(size < dpin.get_bits() || size % dpin.get_bits() == 0);
+        I(size < dpin.get_bits() || size % dpin.get_bits() == 0);
         int times = size < dpin.get_bits() ? 1 : size / dpin.get_bits();
         for(int i = 0; i < times; i++) {
           g->add_edge(dpin, join_node.setup_sink_pin(join_pid++));
@@ -1253,9 +1252,9 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
       auto node = g->create_node_const(std::string(size, 'x'), size);
       dpin = node.setup_driver_pin();
     }
-    assert(size < dpin.get_bits() || size % dpin.get_bits() == 0);
-    int times = size < dpin.get_bits() ? 1 : size / dpin.get_bits();
-    for(int i = 0; i < times; i++) {
+    I(size < dpin.get_bits() || size % dpin.get_bits() == 0);
+    auto times = size < dpin.get_bits() ? 1 : size / dpin.get_bits();
+    for(auto i = 0UL; i < times; i++) {
       g->add_edge(dpin, join_node.setup_sink_pin(join_pid++));
     }
   }
@@ -1483,7 +1482,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
                 << " io:" << (is_input?"I":"") << (is_output?"O":"")
                 << "\n";
 #endif
-              assert(!(is_input && is_output));
+              I(!(is_input && is_output));
 
               if (is_input)
                 cell_port_inputs.insert(cell_port);
