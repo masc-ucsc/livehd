@@ -11,6 +11,9 @@
 
 #include "attribute.hpp"
 
+// Checks internal invalid insertions. Worth only if the node_internal is patched
+// #define DEBUG_SLOW
+
 LGraph_Base::LGraph_Base(std::string_view _path, std::string_view _name, Lg_type_id lgid) noexcept
     : Lgraph_base_core(_path, _name, lgid)
     , node_internal(path, absl::StrCat("lg_", std::to_string(lgid), "_nodes")) {
@@ -187,9 +190,10 @@ void LGraph_Base::print_stats() const {
 }
 
 Index_ID LGraph_Base::get_space_output_pin(const Index_ID master_nid, const Index_ID start_nid, const Port_ID dst_pid, const Index_ID root_idx) {
-  //I(node_internal[master_nid].is_root());
-
-  //I(node_internal[start_nid].is_node_state());
+#ifdef DEBUG_SLOW
+  I(node_internal[master_nid].is_root());
+  I(node_internal[start_nid].is_node_state());
+#endif
   if (node_internal[start_nid].get_dst_pid() == dst_pid && node_internal[start_nid].has_space_long_out()) {
     return start_nid;
   }
@@ -207,7 +211,9 @@ Index_ID LGraph_Base::get_space_output_pin(const Index_ID master_nid, const Inde
     if (node_internal[idx].is_last_state()) return create_node_space(idx, dst_pid, master_nid, root_idx);
 
     Index_ID idx2 = node_internal[idx].get_next();
-    //I(node_internal[idx2].get_master_root_nid() == node_internal[idx].get_master_root_nid());
+#ifdef DEBUG_SLOW
+    I(node_internal[idx2].get_master_root_nid() == node_internal[idx].get_master_root_nid());
+#endif
     idx = idx2;
   }
 
@@ -427,7 +433,7 @@ Index_ID LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid
     node_internal.ref(idx)->inc_inputs(true);  // WARNING: after next_free_input_pos (increasing insert)
   }
 
-#ifndef NDEBUG
+#ifdef DEBUG_SLOW
   Index_ID master_nid = src_nid;
   I(node_internal[master_nid].is_master_root());
   Index_ID          j = master_nid;
