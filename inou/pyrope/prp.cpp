@@ -1793,19 +1793,21 @@ void Prp::ast_handler(){
 }
 
 void Prp::open_log(){
-#ifdef DEBUG
+#ifndef NDEBUG
   debug_log.open("debug_log");
 #endif
 }
 
 void Prp::close_log(){
-#ifdef DEBUG
+#ifndef NDEBUG
   debug_log.close();
 #endif
 }
 
 void Prp::write_log(std::string message){
-#ifdef DEBUG
+#ifndef NDEBUG
   debug_log << message;
+#else
+  (void)message;
 #endif
 }

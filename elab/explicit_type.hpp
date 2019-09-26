@@ -12,7 +12,7 @@ struct Explicit_type {
   constexpr Explicit_type(T value) : value(value) {}
 
   //! Implicit conversion back to the fundamental data type.
-  constexpr inline operator T() const { return value; }
+  [[nodiscard]] constexpr inline operator T() const noexcept { return value; }
 
   //! The actual fundamental value.
   T         value;

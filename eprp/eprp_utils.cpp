@@ -33,6 +33,9 @@ std::string Eprp_utils::get_exe_path() {
 }
 
 static int rm_file(const char *pathname, const struct stat *sbuf, int type, struct FTW *ftwb) {
+  (void)sbuf;
+  (void)type;
+  (void)ftwb;
   remove(pathname);
   return 0;
 }
