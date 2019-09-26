@@ -20,6 +20,8 @@ private:
   std::vector<std::string> sts_buffer_queue;
   int32_t indent_buffer_size = -1;
   std::set<std::string> statefull_set;
+  std::string filename;
+  std::map<std::string, std::string> file_map;
 
   absl::flat_hash_map<Lnast_ntype_id, std::string> ntype2str;
   void setup_ntype_str_mapping();
@@ -40,10 +42,11 @@ private:
   void inc_indent_buffer();
   void dec_indent_buffer();
   std::string indent_buffer();
-  void create_header(std::string name);
-  void create_footer();
-  void create_always();
-  void create_next();
+
+  std::string create_header(std::string name);
+  std::string create_footer();
+  std::string create_always(std::string logic);
+  std::string create_next();
   std::string get_filename(std::string filepath);
   uint32_t get_variable_type(std::string var_name);
 
@@ -70,6 +73,6 @@ public:
   Lnast_to_verilog_parser(std::string_view memblock, Lnast *lnast)
     : memblock(memblock), lnast(lnast) { setup_ntype_str_mapping(); };
   std::string ntype_dbg(Lnast_ntype_id ntype);
-  std::string stringify(std::string filepath);
+  std::map<std::string, std::string> stringify(std::string filepath);
 };
 
