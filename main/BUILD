@@ -40,6 +40,7 @@ cc_binary(
     ],
     visibility = ["//visibility:public"],
     #linkopts = ["-static"],
+    linkstatic=False,
 )
 
 sh_test(
