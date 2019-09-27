@@ -616,6 +616,15 @@ lgshell> perf.start
 lgshell> lgraph.open name:foo |> ....
 lgshell> perf.stop
 
+## Setup gupm for Pyrope and LiveHD
+
+https://github.com/azukaar/GuPM
+
+* Create pyrope repo for gupm
+* Allow to have pyrope libraries (adder, multipler, corex....) as packages
+* Allow to specify a specific lgraph library
+* Allow to specify passes/commands in lgraph
+
 ## Smaller tasks
 
 For even smaller tasks check the [cleanup.md](cleanup.md) file
