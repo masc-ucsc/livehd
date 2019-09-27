@@ -57,6 +57,15 @@ perf stat ${LGSHELL} "inou.yosys.tolg files:./pass/mockturtle/tests/mt_xor_20000
 perf stat ${LGSHELL} "inou.yosys.tolg files:./pass/mockturtle/tests/mt_xor_21000.v " 2>>ppv2y2lg>pp
 perf stat ${LGSHELL} "inou.yosys.tolg files:./pass/mockturtle/tests/mt_xor_22000.v " 2>>ppv2y2lg>pp
 perf stat ${LGSHELL} "inou.yosys.tolg files:./pass/mockturtle/tests/mt_xor_23000.v " 2>>ppv2y2lg>pp
+perf stat ${LGSHELL} "inou.yosys.tolg files:./pass/mockturtle/tests/mt_xor_30000.v " 2>>ppv2y2lg>pp
+perf stat ${LGSHELL} "inou.yosys.tolg files:./pass/mockturtle/tests/mt_xor_40000.v " 2>>ppv2y2lg>pp
+perf stat ${LGSHELL} "inou.yosys.tolg files:./pass/mockturtle/tests/mt_xor_50000.v " 2>>ppv2y2lg>pp
+perf stat ${LGSHELL} "inou.yosys.tolg files:./pass/mockturtle/tests/mt_xor_60000.v " 2>>ppv2y2lg>pp
+perf stat ${LGSHELL} "inou.yosys.tolg files:./pass/mockturtle/tests/mt_xor_65000.v " 2>>ppv2y2lg>pp
+perf stat ${LGSHELL} "inou.yosys.tolg files:./pass/mockturtle/tests/mt_xor_67500.v " 2>>ppv2y2lg>pp
+perf stat ${LGSHELL} "inou.yosys.tolg files:./pass/mockturtle/tests/mt_xor_70000.v " 2>>ppv2y2lg>pp
+perf stat ${LGSHELL} "inou.yosys.tolg files:./pass/mockturtle/tests/mt_xor_72500.v " 2>>ppv2y2lg>pp
+perf stat ${LGSHELL} "inou.yosys.tolg files:./pass/mockturtle/tests/mt_xor_75000.v " 2>>ppv2y2lg>pp
 
 #CFG -> LNAST -> LGraph
                                                          echo "10" >>ppcfg2lnast2lg

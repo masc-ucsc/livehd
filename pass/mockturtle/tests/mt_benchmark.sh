@@ -21,51 +21,36 @@ LGSHELL=./bazel-bin/main/lgshell
 # perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_72500.v; proc;' 2>>ppyosys_pre>pp
 # perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_75000.v; proc;' 2>>ppyosys_pre>pp
 
-# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_1.v;   synth_xilinx;' 2>>ppyosys_synth>pp
-# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_10.v;  synth_xilinx;' 2>>ppyosys_synth>pp
-# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_100.v; synth_xilinx;' 2>>ppyosys_synth>pp
-# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_1000.v; synth_xilinx;' 2>>ppyosys_synth>pp
-# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_5000.v; synth_xilinx;' 2>>ppyosys_synth>pp
-# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_10000.v; synth_xilinx;' 2>>ppyosys_synth>pp
-# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_20000.v; synth_xilinx;' 2>>ppyosys_synth>pp
-# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_30000.v; synth_xilinx;' 2>>ppyosys_synth>pp
-# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_40000.v; synth_xilinx;' 2>>ppyosys_synth>pp
-# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_50000.v; synth_xilinx;' 2>>ppyosys_synth>pp
-# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_60000.v; synth_xilinx;' 2>>ppyosys_synth>pp
-# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_65000.v; synth_xilinx;' 2>>ppyosys_synth>pp
-# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_67500.v; synth_xilinx;' 2>>ppyosys_synth>pp
-# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_70000.v; synth_xilinx;' 2>>ppyosys_synth>pp
-# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_72500.v; synth_xilinx;' 2>>ppyosys_synth>pp
-# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_75000.v; synth_xilinx;' 2>>ppyosys_synth>pp
 
-perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_1.v;     proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
-perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_10.v;    proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
-perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_100.v;   proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
-perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_1000.v;  proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
-perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_5000.v;  proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
-perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_10000.v; proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
-perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_20000.v; proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
-perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_30000.v; proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
-perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_40000.v; proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
-perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_50000.v; proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
-perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_60000.v; proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
-perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_65000.v; proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
-perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_67500.v; proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
-perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_70000.v; proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
-perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_72500.v; proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
-perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_75000.v; proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
+# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_1.v;     proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
+# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_10.v;    proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
+# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_100.v;   proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
+# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_1000.v;  proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
+# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_5000.v;  proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
+# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_10000.v; proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
+# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_20000.v; proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
+# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_30000.v; proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
+# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_40000.v; proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
+# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_50000.v; proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
+perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_55000.v; proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
+# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_60000.v; proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
+# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_65000.v; proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
+# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_67500.v; proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
+# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_70000.v; proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
+# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_72500.v; proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
+# perf stat yosys -p 'read_verilog ./pass/mockturtle/tests/mt_xor_75000.v; proc; techmap; abc -lut 4;' 2>>ppyosys_synth>pp
 
-# perf stat ${LGSHELL} "lgraph.open name:mt_xor_1 |> pass.mockturtle" 2>>ppmt>pp
-# perf stat ${LGSHELL} "lgraph.open name:mt_xor_10 |> pass.mockturtle" 2>>ppmt>pp
-# perf stat ${LGSHELL} "lgraph.open name:mt_xor_100 |> pass.mockturtle" 2>>ppmt>pp
-# perf stat ${LGSHELL} "lgraph.open name:mt_xor_1000 > pass.mockturtle" 2>>ppmt>pp
-# perf stat ${LGSHELL} "lgraph.open name:mt_xor_5000 |> pass.mockturtle" 2>>ppmt>pp
+# perf stat ${LGSHELL} "lgraph.open name:mt_xor_1     |> pass.mockturtle" 2>>ppmt>pp
+# perf stat ${LGSHELL} "lgraph.open name:mt_xor_10    |> pass.mockturtle" 2>>ppmt>pp
+# perf stat ${LGSHELL} "lgraph.open name:mt_xor_100   |> pass.mockturtle" 2>>ppmt>pp
+# perf stat ${LGSHELL} "lgraph.open name:mt_xor_1000  |> pass.mockturtle" 2>>ppmt>pp
+# perf stat ${LGSHELL} "lgraph.open name:mt_xor_5000  |> pass.mockturtle" 2>>ppmt>pp
 # perf stat ${LGSHELL} "lgraph.open name:mt_xor_10000 |> pass.mockturtle" 2>>ppmt>pp
 # perf stat ${LGSHELL} "lgraph.open name:mt_xor_20000 |> pass.mockturtle" 2>>ppmt>pp
 # perf stat ${LGSHELL} "lgraph.open name:mt_xor_30000 |> pass.mockturtle" 2>>ppmt>pp
 # perf stat ${LGSHELL} "lgraph.open name:mt_xor_40000 |> pass.mockturtle" 2>>ppmt>pp
 # perf stat ${LGSHELL} "lgraph.open name:mt_xor_50000 |> pass.mockturtle" 2>>ppmt>pp
-# perf stat ${LGSHELL} "lgraph.open name:mt_xor_55000 |> pass.mockturtle" 2>>ppmt>pp
+perf stat ${LGSHELL} "lgraph.open name:mt_xor_55000 |> pass.mockturtle" 2>>ppmt>pp
 # perf stat ${LGSHELL} "lgraph.open name:mt_xor_60000 |> pass.mockturtle" 2>>ppmt>pp
 # perf stat ${LGSHELL} "lgraph.open name:mt_xor_65000 |> pass.mockturtle" 2>>ppmt>pp
 # perf stat ${LGSHELL} "lgraph.open name:mt_xor_67500 |> pass.mockturtle" 2>>ppmt>pp
