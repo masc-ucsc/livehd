@@ -90,13 +90,12 @@ protected:
 #endif
 
     if (it->second.fd >= 0) {
-      close(it->second.fd);
+      ::close(it->second.fd);
       n_open_fds--;
     }
 
+    ::munmap(it->first, it->second.size);
     n_open_mmaps--;
-
-    munmap(it->first, it->second.size);
 
     //std::cerr << "mmap_gc_pool del name:" << it->second.name << " fd:" << it->second.fd << " base:" << it->first << std::endl;
   }
@@ -164,11 +163,13 @@ public:
                 << std::endl;
     }
   }
+
   static void delete_file(void *base) {
     auto it = mmap_gc_pool.find(base);
     assert(it!=mmap_gc_pool.end());
     assert(it->second.fd>=0);
-    close(it->second.fd);
+    ::close(it->second.fd);
+    n_open_fds--;
     unlink(it->second.name.c_str());
     it->second.fd = -1;
   }
@@ -187,16 +188,23 @@ public:
 #endif
 
     int fd = ::open(name.c_str(), O_RDWR | O_CREAT, 0644);
-    if (fd>=0)
+    if (fd>=0) {
+      n_open_fds++;
       return fd;
+    }
 
     if (fd == EACCES)
       return -1; // No access, no need to recycle
 
     try_collect_fd();
     fd = ::open(name.c_str(), O_RDWR | O_CREAT, 0644);
-    if (fd>=0)
+    if (fd>=0) {
+      n_open_fds++;
       return fd;
+    }
+
+    dump();
+    assert(false);
 
     return -1;
   }
@@ -225,6 +233,7 @@ public:
         exit(-3);
       }
     }
+    n_open_mmaps++;
 
     mmap_gc_entry entry;
     entry.name = name;
