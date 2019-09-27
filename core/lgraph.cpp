@@ -167,12 +167,12 @@ Node_pin LGraph::get_graph_output_driver(std::string_view str) {
   return Node(this, Hierarchy_tree::root_index(), Node::Hardcoded_output_nid).setup_driver_pin(io_pid);
 }
 
-bool LGraph::is_graph_input(std::string_view name) const {
+bool LGraph::is_graph_input(std::string_view io_name) const {
 
   bool alt=false;
 #ifndef NDEBUG
-  if (get_self_sub_node().has_pin(name)) {
-    const auto &io_pin = get_self_sub_node().get_pin(name);
+  if (get_self_sub_node().has_pin(io_name)) {
+    const auto &io_pin = get_self_sub_node().get_pin(io_name);
     alt = io_pin.dir == Sub_node::Direction::Input;
   } else {
     alt = false;
@@ -180,7 +180,7 @@ bool LGraph::is_graph_input(std::string_view name) const {
 #endif
 
   auto ref = Ann_node_pin_name::ref(this);
-  const auto it = ref->find_val(name);
+  const auto it = ref->find_val(io_name);
   if (it == ref->end()) {
     return false;
   }
@@ -193,12 +193,12 @@ bool LGraph::is_graph_input(std::string_view name) const {
   return cond;
 }
 
-bool LGraph::is_graph_output(std::string_view name) const {
+bool LGraph::is_graph_output(std::string_view io_name) const {
 
   bool alt = false;
 #ifndef NDEBUG
-  if (get_self_sub_node().has_pin(name)) {
-    const auto &io_pin = get_self_sub_node().get_pin(name);
+  if (get_self_sub_node().has_pin(io_name)) {
+    const auto &io_pin = get_self_sub_node().get_pin(io_name);
     alt = io_pin.dir == Sub_node::Direction::Output;
   } else {
     alt = false;
@@ -206,7 +206,7 @@ bool LGraph::is_graph_output(std::string_view name) const {
 #endif
 
   auto ref = Ann_node_pin_name::ref(this);
-  const auto it = ref->find_val(name);
+  const auto it = ref->find_val(io_name);
   if (it == ref->end()) {
     return false;
   }

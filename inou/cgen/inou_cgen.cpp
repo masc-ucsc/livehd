@@ -164,6 +164,8 @@ void Inou_cgen::Declaration::format_raw(Out_string &w) const {
 }
 
 void Inou_cgen::iterate_declarations(Node_pin &pin) {
+  (void)pin;
+  I(false);
   /*
   auto wn = pin.get_name();
   if(wn.empty())

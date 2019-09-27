@@ -77,6 +77,8 @@ void Lnast_to_verilog_parser::push_statement(mmap_lib::Tree_level level, Lnast_n
 }
 
 void Lnast_to_verilog_parser::pop_statement(mmap_lib::Tree_level level, Lnast_ntype_id type) {
+  (void)level;
+  (void)type;
   fmt::print("pop\n");
 
   process_buffer();
@@ -136,9 +138,9 @@ void Lnast_to_verilog_parser::process_buffer() {
 
   for (auto const& node : node_buffer) {
     std::string name(node.token.get_text(memblock)); // str_view to string
-    std::string type = ntype_dbg(node.type);
+    std::string type_dbg = ntype_dbg(node.type);
     if (name == "") {
-      fmt::print("{}({}) ", type, node.type);
+      fmt::print("{}({}) ", type_dbg, node.type);
     } else {
       fmt::print("{} ", name);
     }
@@ -264,8 +266,8 @@ std::string Lnast_to_verilog_parser::create_next() {
 
 std::string Lnast_to_verilog_parser::get_filename(std::string filepath) {
   std::vector<std::string> filepath_split = absl::StrSplit(filepath, '/');
-  std::pair<std::string, std::string> filename = absl::StrSplit(filepath_split[filepath_split.size() - 1], '.');
-  return filename.first;
+  std::pair<std::string, std::string> fname = absl::StrSplit(filepath_split[filepath_split.size() - 1], '.');
+  return fname.first;
 }
 
 // returns 1 if input
