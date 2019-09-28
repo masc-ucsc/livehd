@@ -51,6 +51,12 @@ to handle classes.
     * CHISEL generated verilog. Mostly firesim (https://fires.im/) generated for rocket and BOOM
     * Titan23 (http://www.eecg.utoronto.ca/~kmurray/titan.html).
     * Anubis (https://github.com/masc-ucsc/anubis)
+* Regression set
+    * slang->lnast->lgraph->lnast->cgen (C++ and verilog+lgcheck)
+        * https://github.com/zachjs/sv2v/tree/master/test
+    * slang->lnast->lgraph->lnast->cgen (verilog+lgcheck)
+        * BOOM
+        * https://github.com/SymbiFlow/sv-tests
 
 ## Hot-Reload Simulation Console
 
