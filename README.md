@@ -52,14 +52,15 @@ $ bazel build //main:lgshell
 A single LGraph represents a single netlist module. LGraph is composed of nodes,
 node pins, edges and tables of attributes. An LGraph node is affiliated with a
 node type and each type defines different amounts of input and output node pins.
-For example, a node can have 3 input ports and 2 output pins. Each of the IO
-pins can have many edges to other graph nodes. Every node pin has an affiliated
-node pid. In the code, every node_pin has a `Port_ID`. 
+For example, a node can have 3 input ports and 2 output pins. Each of the
+input/output pins can have many edges to other graph nodes. Every node pin has
+an affiliated node pid. In the code, every node_pin has a `Port_ID`. 
 
 A pair of driver pin and sink pin constitutes an edge. In the
 following API example, an edge is connected from a driver pin (pid1) to a sink
 pin (pid3). The bitwidth of the driver pin determines the edge bitwidth.
 
+### Node, Node_pin, and Edge Construction 
 ```cpp
 auto node = lg->create_node(Node_Type_Op);
 
@@ -73,7 +74,7 @@ dpin.connect(spin);
 ```
 
 
-## Iterators
+### Non-Hierarchical Traversal Iterators
 
 LGraph allows forward and backward traversals in the nodes (bidirectional
 graph). The reason is that some algorithms need a forward and some a backward
@@ -89,7 +90,7 @@ for (const auto &node:lg->backward()) {...} // propagates backward from each out
 ```
 
 
-## Hierarchical Traversal
+### Hierarchical Traversal Iterators
 
 LGraph supports hierarchical traversal. Each sub-module of a hierarchical
 design will be transformed into a new LGraph and represented as a sub-graph node
@@ -106,7 +107,7 @@ for (const auto &node:lg->forward_hier()) {...}
 ```
 
 
-## Edge Iterators
+### Edge Iterators
 
 To iterate over the input edges of node, simply call:
 
@@ -131,7 +132,7 @@ structure should be able to represent both non-hierarchical and hierarchical
 characteristic.
 
 
-## Non-Hierarchical Attribute
+### Non-Hierarchical Attribute
 Non-hierarchical LGraph attributes include pin name, node name and line of
 source code. Such properties should be the same across different LGraph
 instantia- tions. Two instantiations of the same LGraph module will have the
@@ -144,7 +145,7 @@ node.set_name(std::string_view name);
 ```
 
 
-## Hierarchical Attribute
+### Hierarchical Attribute
 LGraph also support hierarchical attribute. It is achieved by using a tree data
 structure to record the design hierarchy. In LGraph, every graph has a unique
 id (lg_id), every instantiation of a graph would form some nodes in the tree and
