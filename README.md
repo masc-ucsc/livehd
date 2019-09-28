@@ -1,4 +1,4 @@
-# LiveHD: Live Hardware Design
+# LiveHD: Live Hardware Development
 
 Code quality: [![CodeFactor](https://www.codefactor.io/repository/github/masc-ucsc/livehd/badge)](https://www.codefactor.io/repository/github/masc-ucsc/livehd)
 [![Codacy Badge](https://api.codacy.com/project/badge/Grade/4cae3de3de714e13b6003002f74b7375)](https://www.codacy.com/app/renau/livehd?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=masc-ucsc/livehd&amp;utm_campaign=Badge_Grade)
@@ -7,15 +7,15 @@ Code quality: [![CodeFactor](https://www.codefactor.io/repository/github/masc-uc
 Short CI: [![Build Status](https://travis-ci.org/masc-ucsc/livehd.svg?branch=master)](https://travis-ci.org/masc-ucsc/livehd)
 Long CI: [![Build Status](https://dev.azure.com/renau0400/renau/_apis/build/status/masc-ucsc.livehd?branchName=master)](https://dev.azure.com/renau0400/renau/_build/latest?definitionId=2&branchName=master)
 
-LiveHD is an infrastructure designed for Live Hardware Design.  By live, we
-mean that small changes in the design should have results in few seconds. While
-fast interactive systems may need response sub-second, Live systems need to
-respond in few seconds. The goal is that any incremental code change can have
+LiveHD is an infrastructure designed for Live Hardware Development. By live, we
+mean that small changes in the design should have results in a few seconds. As the
+fast interactive systems usually response in sub-second, Live systems need to
+respond in a few seconds. The goal is that any incremental code change can have
 its synthesis and simulation setup ready in few seconds.
 
-Since there are "seconds", we do not need to perform too fine grain incremental
-work. Notice that this is different goal from having a incremental synthesis
-were many edges are added and removed. The typical incremental graph
+Since the goal of "seconds," we do not need to perform too fine grain incremental
+work. Notice that this is a different goal from having an incremental synthesis
+where many edges are added and removed. The typical incremental graph
 reconstruction is in the order of thousands of nodes.
 
 LiveHD is built to interface with other tools like Yosys, ABC, Mockturtle,
@@ -39,10 +39,10 @@ $ bazel build //main:lgshell
 ## Structure
 
 LiveHD is optimized for synthesis and simulation. The core of LiveHD is a graph
-structure called LGraph (or Live Graph or graph for short). LGraph allows
+structure called LGraph (or Live Graph or LGraph for short). LGraph allows
 forward and backward traversals in the nodes (bidirectional graph). The reason
-is that some algorithms need a forward and some a backward traversal.  Being
-bidirectional helps.
+is that some algorithms need a forward and some a backward traversal, being
+bidirectional would help.
 
 The graph structure is based on synthesis graph requirements. Each conceptual
 graph node has many inputs and outputs like a normal graph, but the inputs and
@@ -56,16 +56,16 @@ pair. The port identifier is an integer with up to 1024 (10 bits) value per
 node. In the code, the port is a `Port_ID`.
 
 
-The graph is build over a table structure. Each table entry is 64 bytes and
+The graph is built over a table structure. Each table entry is 64 bytes and
 contains a full or part of a graph node information. To access the information,
 we use the table entry number of `Index_ID`.
 
 
-When a new node is added to the graph a new `Index_ID` is generated. The node
-always has a `Index_ID` for the port zero, different `Index_ID` for other
+When a new node is added to the graph, a new `Index_ID` is generated. The node
+always has an `Index_ID` for the port zero, different `Index_ID` for other
 node/port pairs, and potentially additional `Index_ID` for extra storage to keep
-the graph edges. Each `Index_ID` can be used to store meta information in
-additional tables like the delay, or operation, but in reality we only store
+the graph edges. Each `Index_ID` can be used to store meta-information in
+additional tables like the delay, or operation, but in reality, we only store
 information for the whole node or for each node/port pair.
 
 
