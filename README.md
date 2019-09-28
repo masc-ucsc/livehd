@@ -7,28 +7,28 @@ Short CI: [![Build Status](https://travis-ci.org/masc-ucsc/livehd.svg?branch=mas
 Long CI: [![Build Status](https://dev.azure.com/renau0400/renau/_apis/build/status/masc-ucsc.livehd?branchName=master)](https://dev.azure.com/renau0400/renau/_build/latest?definitionId=2&branchName=master)
 
 LiveHD is an infrastructure designed for Live Hardware Development. By live, we
-mean that small changes in the design should have results in a few seconds. As
-the fast interactive systems usually response in sub-second, Live systems need
-to respond in a few seconds. The goal is that any incremental code change can
-have its synthesis and simulation setup ready in few seconds.
+mean that small changes in the design should have the synthesis and simulation
+results in a few seconds, as the fast interactive systems usually response in
+sub-second.
 
-Since the goal of "seconds," we do not need to perform too fine grain
-incremental work. Notice that this is a different goal from having an
-incremental synthesis where many edges are added and removed. The typical
-incremental graph reconstruction is in the order of thousands of nodes.
+As the goal of "seconds," we do not need to perform too fine grain incremental
+work. Notice that this is a different goal from having an typical incremental
+synthesis, where many edges are added and removed in the order of thousands of
+nodes/edges. 
 
+
+## LiveHD framework
 LiveHD is optimized for synthesis and simulation. The main components of LiveHD
-includes LGraph, LNAST, integrated 3rd-party tools, code generation. The core of
-LiveHD is a graph structure called LGraph (or Live Graph or LGraph for short).
-LGraph is built for fast synthesis and simulation and interfaces other tools
-like Yosys, ABC, OpenTimer, and Mockturtle. LNAST stands for language neutral
-AST, which is a high-level IR on both front/back-end of LGraph. LNAST helps to
-bridge different HDLs and HLS into LiveHD and is useful for HDLs/C++ code
-generation.
+includes LGraph, LNAST, integrated 3rd-party tools, code generation, and "live"
+techniques. The core of LiveHD is a graph structure called LGraph (or Live Graph
+or LGraph for short).  LGraph is built for fast synthesis and simulation and
+interfaces other tools like Yosys, ABC, OpenTimer, and Mockturtle. LNAST stands
+for language neutral AST, which is a high-level IR on both front/back-end of
+LGraph. LNAST helps to bridge different HDLs and HLS into LiveHD and is useful
+for HDLs/C++ code generation.
 
-For more detailed information and paper reference, please refer to 
-our publications in [docs](docs).
 
+## Available projects to improve LiveHD
 There is a list of available [projects.md](docs/projects.md) to further improve
 LiveHD.
 
@@ -45,7 +45,7 @@ For a simple release build:
 $ bazel build //main:lgshell
 ```
 
-## Structure
+## LGraph Structure
 
 A single LGraph represents a single netlist module. LGraph is composed of nodes,
 node pins, edges and tables of attributes. An LGraph node is affiliated with a
@@ -73,10 +73,10 @@ dpin.connect(spin);
 
 ## Iterators
 
-LGraph allows
-forward and backward traversals in the nodes (bidirectional graph). The reason
-is that some algorithms need a forward and some a backward traversal, being
-bidirectional would help. Whenever possible, the fast iterator should be used.
+LGraph allows forward and backward traversals in the nodes (bidirectional
+graph). The reason is that some algorithms need a forward and some a backward
+traversal, being bidirectional would help. Whenever possible, the fast iterator
+should be used.
 
 ```cpp
 for (const auto &node:lg->fast())     {...} // unordered but very fast traversal
@@ -119,7 +119,7 @@ for (const auto &out_edge : node.out_edges()) {...}
 ```
 
 
-## LGraph Design Attribute
+## LGraph Attribute Design
 Design attribute stands for the characteristic given to a LGraph node or node
 pin. For instance, the characteristic of a node name and node physical
 placement. Despite a single LGraph stands for a particular module, it could be
@@ -157,7 +157,7 @@ node_pin.set_delay(float delay);
 
 ## InOu
 
-InOus are inputs and/or outputs to/from LiveHD. An input will create a graph,
+InOus are inputs and/or outputs to/from LiveHD. An input will create a LGraph,
 e.g., from a verilog description, an json representation, or randomly.
 Similarly, an output will read an existing LGraph and generate an alternative
 representation, eg., verilog or json.
@@ -221,4 +221,36 @@ warning during development, but remember to clean up afterwards.
 
 If you are not one of the code owners, you need to create a pull request as
 indicated in [CONTRIBUTING.md](docs/CONTRIBUTING.md) and [GitHub-use.md](docs/GitHub-use.md).
+
+
+
+
+# Publications
+For more detailed information and paper reference, please refer to 
+the following publications. If you are doing research or projects corresponding
+to LiveHD, please send us a notification, we are glad to add your paper.
+
+## Live techniques 
+
+1. [SMatch: Structural Matching for Fast Resynthesis in FPGAs](docs/SMatch_DAC19.pdf), Rafael T.
+   Possignolo, Sheng Hong Wang and Jose Renau, Design Automation Conference
+   (DAC), June 2019]
+
+2. [LiveSynth: Towards an Interactive Synthesis Flow](docs/LiveSynth_DAC17.pdf), Rafael T. Possignolo, and
+   Jose Renau, Design Automation Conference (DAC), June 2017.]
+
+## LGraph 
+3. [LGraph: A Unified Data Model and API for Productive Open-Source Hardware Design](docs/LGraph_WOSET19.pdf), 
+   Sheng-Hong Wang, Rafael T. Possignolo, Qian Chen, Rohan Ganpati, and
+   Jose Renau, Second Workshop on Open-Source EDA Technology (WOSET), November 2019.
+
+4. [LGraph: A multi-language open-source database for VLSI](docs/LGraph_WOSET18.pdf), Rafael T. Possignolo,
+   Sheng-Hong Wang, Haven Skinner, and Jose Renau. First Workshop on Open-Source
+   EDA Technology (WOSET), November 2018.
+
+## LNAST 
+5. [LNAST: A Language Neutral Intermediate Representation for Hardware Description Languages](docs/LNAST_WOSET19.pdf), Sheng-Hong Wang, Akash Sridhar, and Jose Renau,
+   Second Workshop on Open-Source EDA Technology (WOSET), 2019.
+
+
 
