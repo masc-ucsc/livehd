@@ -17,7 +17,7 @@ synthesis, where many edges are added and removed in the order of thousands of
 nodes/edges. 
 
 
-## LiveHD framework
+## LiveHD Framework
 LiveHD is optimized for synthesis and simulation. The main components of LiveHD
 includes LGraph, LNAST, integrated 3rd-party tools, code generation, and "live"
 techniques. The core of LiveHD is a graph structure called LGraph (or Live Graph
@@ -30,7 +30,7 @@ for HDLs/C++ code generation.
 ![LiveHD overall flow](./docs/livehd.svg)
 
 
-## Contribute to improve LiveHD
+## Contribute to Improve LiveHD
 There is a list of available [projects.md](docs/projects.md) to further improve
 LiveHD. If you want to contribute or seek for MS/undergraduate thesis projects, please
 contact renau@ucsc.edu to query about them.
@@ -106,7 +106,7 @@ for (const auto &node:lg->forward_hier()) {...}
 ```
 
 
-## Edge iterators
+## Edge Iterators
 
 To iterate over the input edges of node, simply call:
 
