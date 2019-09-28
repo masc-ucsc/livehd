@@ -83,19 +83,19 @@ Main features:
     * Allow to create markers for passing failing code to other people
     * Aloow to have command script file (load checkpoint, run X, mark Y, insert assert Y, continue x, peek X, poke Y, save waveform)
 
-## lhdview 
+## lhdview
 
 Live Hardware Development Viewer. The long term goal is to create an
 verdi/simvision alternative with a Live focus. This is a large project that
 should be split for 2 thesis (waveform and rest). The plan is to use nana++
 (http://nanapro.org/en-us/) or QT. Prof Renau has a skeleton for the
-application. 
+application.
 
 Some example screenshot:
  https://www.cadence.com/content/dam/cadence-www/global/en_US/images/old-tools/system-design-verification/debug_fig_sim_vision_windows.jpg
 
 Dependence: This project can needs the binary format with mmap from Hot Reload
- 
+
 Main features:
 
  * Annotated source window: A window that shows text (verilog/pyrope) and the values for variables. Simvision calls this the "source browser window".
@@ -128,7 +128,7 @@ Main features:
  * Struct-like support for signals (groups)
  * markers
 
-### Search Window 
+### Search Window
 
  * Fuzzy regex search for signals (fzf like https://github.com/hansonw/fuzzy-native/blob/master/src/score_match.cpp) but tuned for verilog/pyrope search
  * capacity to show hierarchy (alphabetically sorted) and restrict search per level (or sub-levels)
@@ -270,7 +270,7 @@ Legalize ASIC/FPGA cell/LUT placement.
 
 Dependence: Rapidwright
 
-Main features: 
+Main features:
 
 * Based on " A Fast, Robust Network Flow-based Standard-Cell Legalization Method for Minimizing Maximum Movement" but applied to ASIC and FPGA
 * Handle incremental. Only marked blocks need to be legalized. Already legalized blocks should not move (faster incremental that avoids re-routing blocks)
@@ -489,7 +489,7 @@ Main requirements:
 
 Some potential implementation:
 
-* REST API for all the servers. 
+* REST API for all the servers.
 * Use httplib. See lgraph/main/userver_test.cpp and lgraph/main/uclient_test.cpp
 * lgshell commands
     * cloud.server
@@ -561,9 +561,9 @@ Some tasks that were not finished that a potential future project can address: (
 
 Integrate ABC with LGraph. The interface use the C-API, bit the file dump format.
 
-# Open Tasks
+# Open Medium Size Tasks (not MS project/thesis)
 
-This is a list of small tasks. Each should take 1-2 weeks to implement. These
+This is a list of small tasks. Each should take 1-3 weeks to implement. These
 are not thesis/projects but good ideas to get to know the setup and help, and they
 can evolve for undergraduate senior design.
 
@@ -580,18 +580,32 @@ be nice to have. Maybe based on https://github.com/VLSIDA/openram-vagrant-image
 
 ## Fix lgshell
 
-* *Autocompletion for lgraph names too (now, it is just files).
+https://github.com/rubund/netlist-analyzer
+
+## Fix lgshell
+
+* **Autocompletion for lgraph names too (now, it is just files).
 * Autocompletion patch for directories. Now finished with "foo", it should be "foo/"
 * Upgrade to the latest replxx. There was a change in API, and it requires to rework lgshell
 
 ## Elab parser
 
-The memblock is typically mmap, and the token list is managed manually. It would be nice to have a Scanner_context class
-that keeps the memblock and token list. It can serialize the token list if needed.
+The memblock is typically mmap, and the token list is managed manually. It
+would be nice to have a Scanner context class that keeps the memblock and token
+list. It can serialize the token list if needed.
 
  * Clearer API
  * Capacity to serialize (optional)
  * Callback when a memmap changes to retrigger parse, and pass token list to step down the flow
+
+## Query shell (not lgshell) to query graphs
+
+* Based on replxx (like lgshell)
+* Query bits, ports...  like
+    * https://github.com/rubund/netlist-analyzer
+    * https://www.jameswhanlon.com/querying-logical-paths-in-a-verilog-design.html
+* It would be cool if subsections (selected) parts can be visualized with something like https://github.com/nturley/netlistsvg
+* The shell may be expanded to support simulation in the future
 
 ## Benchmark API in lgshell
 
@@ -601,6 +615,15 @@ that keeps the memblock and token list. It can serialize the token list if neede
 lgshell> perf.start
 lgshell> lgraph.open name:foo |> ....
 lgshell> perf.stop
+
+## Setup gupm for Pyrope and LiveHD
+
+https://github.com/azukaar/GuPM
+
+* Create pyrope repo for gupm
+* Allow to have pyrope libraries (adder, multipler, corex....) as packages
+* Allow to specify a specific lgraph library
+* Allow to specify passes/commands in lgraph
 
 ## Smaller tasks
 
