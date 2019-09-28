@@ -27,12 +27,12 @@ for language neutral AST, which is a high-level IR on both front/back-end of
 LGraph. LNAST helps to bridge different HDLs and HLS into LiveHD and is useful
 for HDLs/C++ code generation.
 
+![LiveHD overall flow](./docs/livehd.svg)
 
 ## Available projects to improve LiveHD
 There is a list of available [projects.md](docs/projects.md) to further improve
 LiveHD.
 
-![LiveHD overall flow](./docs/livehd.svg)
 
 ## Building
 
