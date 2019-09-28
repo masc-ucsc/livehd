@@ -17,8 +17,17 @@ incremental work. Notice that this is a different goal from having an
 incremental synthesis where many edges are added and removed. The typical
 incremental graph reconstruction is in the order of thousands of nodes.
 
-LiveHD is built to interface with other tools like Yosys, ABC, Mockturtle,
-OpenTimer...
+LiveHD is optimized for synthesis and simulation. The main components of LiveHD
+includes LGraph, LNAST, integrated 3rd-party tools, code generation. The core of
+LiveHD is a graph structure called LGraph (or Live Graph or LGraph for short).
+LGraph is built for fast synthesis and simulation and interfaces other tools
+like Yosys, ABC, OpenTimer, and Mockturtle. LNAST stands for language neutral
+AST, which is a high-level IR on both front/back-end of LGraph. LNAST helps to
+bridge different HDLs and HLS into LiveHD and is useful for HDLs/C++ code
+generation.
+
+For more detailed information and paper reference, please refer to 
+our publications in [docs](docs).
 
 There is a list of available [projects.md](docs/projects.md) to further improve
 LiveHD.
@@ -37,13 +46,6 @@ $ bazel build //main:lgshell
 ```
 
 ## Structure
-
-LiveHD is optimized for synthesis and simulation. The core of LiveHD is a graph
-structure called LGraph (or Live Graph or LGraph for short). LGraph allows
-forward and backward traversals in the nodes (bidirectional graph). The reason
-is that some algorithms need a forward and some a backward traversal, being
-bidirectional would help.
-
 
 A single LGraph represents a single netlist module. LGraph is composed of nodes,
 node pins, edges and tables of attributes. An LGraph node is affiliated with a
@@ -71,8 +73,10 @@ dpin.connect(spin);
 
 ## Iterators
 
-There are 3 types of iterators available over node is LGraph, whenever possible,
-the fast iterator should be used.
+LGraph allows
+forward and backward traversals in the nodes (bidirectional graph). The reason
+is that some algorithms need a forward and some a backward traversal, being
+bidirectional would help. Whenever possible, the fast iterator should be used.
 
 ```cpp
 for (const auto &node:lg->fast())     {...} // unordered but very fast traversal
@@ -83,7 +87,7 @@ for (const auto &node:lg->backward()) {...} // propagates backward from each out
 ```
 
 
-### Hierarchical Traversal
+## Hierarchical Traversal
 
 LGraph supports hierarchical traversal. Each sub-module of a hierarchical
 design will be transformed into a new LGraph and represented as a sub-graph node
@@ -115,7 +119,7 @@ for (const auto &out_edge : node.out_edges()) {...}
 ```
 
 
-### LGraph Design Attribute
+## LGraph Design Attribute
 Design attribute stands for the characteristic given to a LGraph node or node
 pin. For instance, the characteristic of a node name and node physical
 placement. Despite a single LGraph stands for a particular module, it could be
