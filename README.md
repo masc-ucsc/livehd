@@ -29,9 +29,11 @@ for HDLs/C++ code generation.
 
 ![LiveHD overall flow](./docs/livehd.svg)
 
-## Available projects to improve LiveHD
+
+## Contribute to improve LiveHD
 There is a list of available [projects.md](docs/projects.md) to further improve
-LiveHD.
+LiveHD. If you want to contribute or seek for MS/undergraduate thesis projects, please
+contact renau@ucsc.edu to query about them.
 
 
 ## Building
@@ -173,9 +175,7 @@ Examples of passes can be found in `pass/sample`, which compute the histogram
 and count wire numbers of a LGraph.
 
 
-# Coding and contributing
-
-We have several projects (and MS/undergraduate thesis project options). Contact renau@ucsc.edu to query about them.
+# Coding Style and Organization
 
 ## Style
 
@@ -230,7 +230,7 @@ For more detailed information and paper reference, please refer to
 the following publications. If you are doing research or projects corresponding
 to LiveHD, please send us a notification, we are glad to add your paper.
 
-## Live techniques 
+#### Live techniques 
 
 1. [SMatch: Structural Matching for Fast Resynthesis in FPGAs](docs/SMatch_DAC19.pdf), Rafael T.
    Possignolo, Sheng Hong Wang and Jose Renau, Design Automation Conference
@@ -239,7 +239,7 @@ to LiveHD, please send us a notification, we are glad to add your paper.
 2. [LiveSynth: Towards an Interactive Synthesis Flow](docs/LiveSynth_DAC17.pdf), Rafael T. Possignolo, and
    Jose Renau, Design Automation Conference (DAC), June 2017.]
 
-## LGraph 
+#### LGraph 
 3. [LGraph: A Unified Data Model and API for Productive Open-Source Hardware Design](docs/LGraph_WOSET19.pdf), 
    Sheng-Hong Wang, Rafael T. Possignolo, Qian Chen, Rohan Ganpati, and
    Jose Renau, Second Workshop on Open-Source EDA Technology (WOSET), November 2019.
@@ -248,7 +248,7 @@ to LiveHD, please send us a notification, we are glad to add your paper.
    Sheng-Hong Wang, Haven Skinner, and Jose Renau. First Workshop on Open-Source
    EDA Technology (WOSET), November 2018.
 
-## LNAST 
+#### LNAST 
 5. [LNAST: A Language Neutral Intermediate Representation for Hardware Description Languages](docs/LNAST_WOSET19.pdf), Sheng-Hong Wang, Akash Sridhar, and Jose Renau,
    Second Workshop on Open-Source EDA Technology (WOSET), 2019.
 
