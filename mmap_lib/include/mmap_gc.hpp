@@ -42,8 +42,8 @@ protected:
   static inline int n_open_mmaps = 0;
   static inline int n_open_fds   = 0;
 
-  static inline int n_max_mmaps = 256;
-  static inline int n_max_fds   = 256;
+  static inline int n_max_mmaps = 512;
+  static inline int n_max_fds   = 512;
 
   static void recycle_older() {
     // Recycle around 1/2 of the newer open fds
@@ -101,22 +101,26 @@ protected:
   }
 
   static void try_collect_fd() {
-    int n = 3 * n_open_fds / 4;
-    if (n>n_max_fds)
-      n_max_fds = n;
-    if (n_max_fds<24)
-      n_max_fds = 24;
+    if (n_open_fds < n_max_fds) { // readjust max
+      int n = 3 * n_open_fds / 4;
+      if (n>n_max_fds)
+        n_max_fds = n;
+      if (n_max_fds<24)
+        n_max_fds = 24;
+    }
     if(n_open_fds >= n_max_fds) {
       recycle_older();
     }
   }
 
   static void try_collect_mmap() {
-    int n = 3 * n_open_mmaps / 4;
-    if (n>n_max_mmaps)
-      n_max_mmaps = n;
-    if (n_max_mmaps<24)
-      n_max_mmaps = 24;
+    if (n_open_mmaps < n_max_mmaps) { // readjust max
+      int n = 3 * n_open_mmaps / 4;
+      if (n>n_max_mmaps)
+        n_max_mmaps = n;
+      if (n_max_mmaps<24)
+        n_max_mmaps = 24;
+    }
     if(n_open_mmaps >= n_max_mmaps)
       recycle_older();
   }
@@ -186,18 +190,11 @@ public:
       assert(e.second.name != name); // No name duplicate (may be OK for multithreaded access)
     }
 #endif
-
-    int fd = ::open(name.c_str(), O_RDWR | O_CREAT, 0644);
-    if (fd>=0) {
-      n_open_fds++;
-      return fd;
+    if(n_open_fds >= n_max_fds) {
+      recycle_older();
     }
 
-    if (fd == EACCES)
-      return -1; // No access, no need to recycle
-
-    try_collect_fd();
-    fd = ::open(name.c_str(), O_RDWR | O_CREAT, 0644);
+    int fd = ::open(name.c_str(), O_RDWR | O_CREAT, 0644);
     if (fd>=0) {
       n_open_fds++;
       return fd;
@@ -223,6 +220,10 @@ public:
   // mmap_vector.hpp: std::tie(base, mmap_size) = mmap_gc::mmap(mmap_name, mmap_fd, mmap_size, std::bind(&vector<T>::gc_function, this, std::placeholders::_1));
   // mmap_map.hpp:    std::tie(base, size)      = mmap_gc::mmap(mmap_name, fd, size, std::bind(&map<MaxLoadFactor100, Key, T, Hash>::gc_function, this, std::placeholders::_1));
   static std::tuple<void *, size_t> mmap(std::string_view name, int fd, size_t size, std::function<void(void *)> gc_function) {
+
+    if (n_open_mmaps >= n_max_mmaps) {
+      recycle_older();
+    }
 
     auto [base, final_size] = mmap_step(name, fd, size);
     if (base == MAP_FAILED) {
