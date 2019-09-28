@@ -1,34 +1,33 @@
-# LGraph
+# LiveHD: Live Hardware Design
 
-Code quality: [![CodeFactor](https://www.codefactor.io/repository/github/masc-ucsc/lgraph/badge)](https://www.codefactor.io/repository/github/masc-ucsc/lgraph)
-[![Codacy Badge](https://api.codacy.com/project/badge/Grade/4cae3de3de714e13b6003002f74b7375)](https://www.codacy.com/app/renau/lgraph?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=masc-ucsc/lgraph&amp;utm_campaign=Badge_Grade)
-[![Coverage Status](https://coveralls.io/repos/github/masc-ucsc/lgraph/badge.svg?branch=HEAD&service=github)](https://coveralls.io/github/masc-ucsc/lgraph?branch=HEAD)
+Code quality: [![CodeFactor](https://www.codefactor.io/repository/github/masc-ucsc/livehd/badge)](https://www.codefactor.io/repository/github/masc-ucsc/livehd)
+[![Codacy Badge](https://api.codacy.com/project/badge/Grade/4cae3de3de714e13b6003002f74b7375)](https://www.codacy.com/app/renau/livehd?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=masc-ucsc/livehd&amp;utm_campaign=Badge_Grade)
+[![Coverage Status](https://coveralls.io/repos/github/masc-ucsc/livehd/badge.svg?branch=HEAD&service=github)](https://coveralls.io/github/masc-ucsc/livehd?branch=HEAD)
 
-Short CI: [![Build Status](https://travis-ci.org/masc-ucsc/lgraph.svg?branch=master)](https://travis-ci.org/masc-ucsc/lgraph)
-Long CI: [![Build Status](https://dev.azure.com/renau0400/renau/_apis/build/status/masc-ucsc.lgraph)](https://dev.azure.com/renau0400/renau/_build/latest?definitionId=1)
+Short CI: [![Build Status](https://travis-ci.org/masc-ucsc/livehd.svg?branch=master)](https://travis-ci.org/masc-ucsc/livehd)
+Long CI: [![Build Status](https://dev.azure.com/renau0400/renau/_apis/build/status/masc-ucsc.livehd)](https://dev.azure.com/renau0400/renau/_build/latest?definitionId=1)
 
-LGraph is a graph optimized for live synthesis (Live Synthesizes Graph or
-LGraph for short). By live, we mean that small changes in the design should
-have results in few seconds. While fast interactive systems may need response
-sub-second, Live systems need to respond in few seconds. The goal is that any
-incremental code change can have its synthesis and simulation setup ready in
-few seconds.
+LiveHD is an infrastructure designed for Live Hardware Design.  By live, we
+mean that small changes in the design should have results in few seconds. While
+fast interactive systems may need response sub-second, Live systems need to
+respond in few seconds. The goal is that any incremental code change can have
+its synthesis and simulation setup ready in few seconds.
 
 Since there are "seconds", we do not need to perform too fine grain incremental
 work. Notice that this is different goal from having a incremental synthesis
 were many edges are added and removed. The typical incremental graph
 reconstruction is in the order of thousands of nodes.
 
-LGraph is built to interface with other tools like Yosys, ABC, Mockturtle,
+LiveHD is built to interface with other tools like Yosys, ABC, Mockturtle,
 OpenTimer...
 
-There is a list of available [projects.md](docs/projects.md) to further improve LGraph.
+There is a list of available [projects.md](docs/projects.md) to further improve LiveHD.
 
-![LGraph overall flow](./docs/lgraph.svg)
+![LiveHD overall flow](./docs/livehd.svg)
 
 ## Building
 
-LGraph uses bazel as a build system. [Bazel.md](docs/Bazel.md) has more details
+LiveHD uses bazel as a build system. [Bazel.md](docs/Bazel.md) has more details
 about how to build, test, and debug with bazel.
 
 For a simple release build:
@@ -39,9 +38,11 @@ $ bazel build //main:lgshell
 
 ## Structure
 
-LGraph is optimized for synthesis, allowing forward and backward traversals in
-the nodes (bidirectional graph). The reason is that some algorithms need a
-forward and some a backward traversal. Being bidirectional helps.
+LiveHD is optimized for synthesis and simulation. The core of LiveHD is a graph
+structure called LGraph (or Live Graph or graph for short). LGraph allows
+forward and backward traversals in the nodes (bidirectional graph). The reason
+is that some algorithms need a forward and some a backward traversal.  Being
+bidirectional helps.
 
 The graph structure is based on synthesis graph requirements. Each conceptual
 graph node has many inputs and outputs like a normal graph, but the inputs and
@@ -140,7 +141,7 @@ edge.
 
 ## InOu
 
-InOus are inputs and/or outputs to/from LGraph. An input will create a graph,
+InOus are inputs and/or outputs to/from LiveHD. An input will create a graph,
 eg., from a verilog description, an json representation, or randomly. Similarly,
 an output will read an existing LGraph and generate an alternative
 representation, eg., verilog or json.
@@ -150,11 +151,12 @@ inou/json.
 
 ## Passes
 
-Passes are transformations over an existing LGraph. A pass will read an LGraph
-and make changes to it. Usually this is done for optimizations. When creating a
-new pass, use the binary from `pass/lgopt/`, examples of passes can be found in
-`pass/lgopt_dce` which deletes any node that is not used by outputs of the
-LGraph.
+Passes are transformations over an existing LGraph. In the future, there may be
+passes over LNAST, but for the moment, we just have LGraph passes. A pass will
+read an LGraph and make changes to it. Usually this is done for optimizations.
+When creating a new pass, use the binary from `pass/lgopt/`, examples of passes
+can be found in `pass/lgopt_dce` which deletes any node that is not used by
+outputs of the LGraph.
 
 
 # Coding and contributing
@@ -165,7 +167,7 @@ We have several projects (and MS/undergraduate thesis project options). Contact 
 
 For coding, please follow the coding styles from [Style.md](docs/Style.md). To contribute,
 check [policy](docs/CONTRIBUTING.md) document that explains how to create pull requests
-and more details about license and copyrights. Also, contributors to LGraph are
+and more details about license and copyrights. Also, contributors to LiveHD are
 expected to adhere to the [Code of Conduct](docs/CODE_OF_CONDUCT.md).
 
 ## Code Organization
@@ -180,7 +182,7 @@ The code is organized as:
 - [`misc/`](./misc) - External libraries and other misc code
 - [`test/`](./test) - Testing code, scripts, cases and infrastructure (Note: unit tests
   should be placed inside the corresponding subfolder)
-- [`docs/`](./docs) - Documentation of LGraph
+- [`docs/`](./docs) - Documentation of LiveHD
 
 ## Git Policies
 
@@ -198,7 +200,7 @@ off:
 #endif
 ```
 
-Pull at least once a day when working, LGraph is in active development.
+Pull at least once a day when working, LiveHD is in active development.
 
 Always target warning free compilation. It is okay to commit code that triggers
 warning during development, but remember to clean up afterwards.

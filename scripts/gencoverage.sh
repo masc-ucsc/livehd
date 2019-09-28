@@ -21,7 +21,7 @@ done
 echo "rtp"
 if [ -s cov/coverage.info ]; then
   gem install coveralls-lcov
-  coveralls-lcov --repo-token Z2cNEUdoWLokSj16laePFXdCWIwckDRHK cov/coverage.info >/dev/null
+  coveralls-lcov --repo-token 5NLVFoEBYOmYdG8FaMPtqOnZD6S6qjmJb cov/coverage.info >/dev/null
 
   echo "coverall"
   curl -s https://codecov.io/bash >cov/codecov
