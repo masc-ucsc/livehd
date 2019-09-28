@@ -7,20 +7,21 @@ Short CI: [![Build Status](https://travis-ci.org/masc-ucsc/livehd.svg?branch=mas
 Long CI: [![Build Status](https://dev.azure.com/renau0400/renau/_apis/build/status/masc-ucsc.livehd?branchName=master)](https://dev.azure.com/renau0400/renau/_build/latest?definitionId=2&branchName=master)
 
 LiveHD is an infrastructure designed for Live Hardware Development. By live, we
-mean that small changes in the design should have results in a few seconds. As the
-fast interactive systems usually response in sub-second, Live systems need to
-respond in a few seconds. The goal is that any incremental code change can have
-its synthesis and simulation setup ready in few seconds.
+mean that small changes in the design should have results in a few seconds. As
+the fast interactive systems usually response in sub-second, Live systems need
+to respond in a few seconds. The goal is that any incremental code change can
+have its synthesis and simulation setup ready in few seconds.
 
-Since the goal of "seconds," we do not need to perform too fine grain incremental
-work. Notice that this is a different goal from having an incremental synthesis
-where many edges are added and removed. The typical incremental graph
-reconstruction is in the order of thousands of nodes.
+Since the goal of "seconds," we do not need to perform too fine grain
+incremental work. Notice that this is a different goal from having an
+incremental synthesis where many edges are added and removed. The typical
+incremental graph reconstruction is in the order of thousands of nodes.
 
 LiveHD is built to interface with other tools like Yosys, ABC, Mockturtle,
 OpenTimer...
 
-There is a list of available [projects.md](docs/projects.md) to further improve LiveHD.
+There is a list of available [projects.md](docs/projects.md) to further improve
+LiveHD.
 
 ![LiveHD overall flow](./docs/livehd.svg)
 
@@ -43,119 +44,129 @@ forward and backward traversals in the nodes (bidirectional graph). The reason
 is that some algorithms need a forward and some a backward traversal, being
 bidirectional would help.
 
-The graph structure is based on synthesis graph requirements. Each conceptual
-graph node has many inputs and outputs like a normal graph, but the inputs and
-outputs are numbered. For example, a node can have 3 input ports and 2 output
-ports. Each of the input and output ports can have many edges to other graph
-nodes.
 
-Each graph edge is between a specific graph node/port pair and another node/port
-pair. The graph supports to add meta-information on each node and node/port
-pair. The port identifier is an integer with up to 1024 (10 bits) value per
-node. In the code, the port is a `Port_ID`.
+A single LGraph represents a single netlist module. LGraph is composed of nodes,
+node pins, edges and tables of attributes. An LGraph node is affiliated with a
+node type and each type defines different amounts of input and output node pins.
+For example, a node can have 3 input ports and 2 output pins. Each of the IO
+pins can have many edges to other graph nodes. Every node pin has an affiliated
+node pid. In the code, every node_pin has a `Port_ID`. 
 
-
-The graph is built over a table structure. Each table entry is 64 bytes and
-contains a full or part of a graph node information. To access the information,
-we use the table entry number of `Index_ID`.
-
-
-When a new node is added to the graph, a new `Index_ID` is generated. The node
-always has an `Index_ID` for the port zero, different `Index_ID` for other
-node/port pairs, and potentially additional `Index_ID` for extra storage to keep
-the graph edges. Each `Index_ID` can be used to store meta-information in
-additional tables like the delay, or operation, but in reality, we only store
-information for the whole node or for each node/port pair.
-
-
-The `Index_ID` that uniquely identifies the whole node is called `Node_ID` in
-LGraph. This is typically accessed with methods like `get_nid()`.
-
-The `Index_ID` that uniquely identifies a node/port pair is called `Outp_ID`
-(Output Pair ID). This is typically accessed with methods like `get_oid()`. The
-`Node_ID` and the `Outp_ID` is the same number when the port is zero.
-
-
-When traversing the edges in the graph, it is possible to ask for:
+A pair of driver pin and sink pin constitutes an edge. In the
+following API example, an edge is connected from a driver pin (pid1) to a sink
+pin (pid3). The bitwidth of the driver pin determines the edge bitwidth.
 
 ```cpp
-get_nid // Node_ID/Index_ID that uniquely identifies the node
-get_oid // Outp_ID/Index_ID that uniquely identifies the node/port pair
-get_idx // Index_ID raw index pointer where the info is stored
-get_inp_pid // Port_ID Input port for this edge
-get_out_pid // Port_ID for the output port driving this edge
+auto node = lg->create_node(Node_Type_Op);
+
+auto dpin = node.setup_driver_pin(1);
+
+dpin.set_bits(8);
+
+auto spin = node2.setup_sink_pin(3);
+
+dpin.connect(spin);
 ```
 
-
-A graph edge does not have a unique id. LGraph does not allow to store
-meta-information for generic edges. It allows to store meta-information
-for `Outp_ID`. This is different than edge because the same node/port output can
-have many destinations and all have to share the same meta-information. This
-would be an issue if we want to store information like resistance/capacitance
-or distance per edge. If this becomes necessary, a potential solution would be
-to modify the graph so that at most an output edge is inserted for each
-`Index_ID`.
-
-```
-Index_ID // 37 bit index. Either a Outp_ID, Node_ID, or additional storage
-Outp_ID  // 37 bit index, uniquely identifies a node/port pair
-Node_ID  // 37 bit index, uniquely identifies a node
-Port_ID  // 10bits, per node input/output port identifier
-```
 
 ## Iterators
 
-There are 3 types of iterators available over node is LGraph:
+There are 3 types of iterators available over node is LGraph, whenever possible,
+the fast iterator should be used.
 
 ```cpp
-for(auto nid : g.fast())     { } // unordered but very fast traversal
+for (const auto &node:lg->fast())     {...} // unordered but very fast traversal
 
-for(auto nid : g.forward())  { } // propagates forward from each input/constant
+for (const auto &node:lg->forward())  {...} // propagates forward from each input/constant
 
-for(auto nid : g.backward()) { } // propagates backward from each output
+for (const auto &node:lg->backward()) {...} // propagates backward from each output
 ```
 
-Whenever possible, fast should be used. The type of `nid` is `Index_ID`.
 
+### Hierarchical Traversal
 
-### Edge iterators
-
-To iterate over the input edges of node `nid` simply call:
+LGraph supports hierarchical traversal. Each sub-module of a hierarchical
+design will be transformed into a new LGraph and represented as a sub-graph node
+in the parent module. If the hierarchical traversal is used, every time the
+iterator encounters a sub-graph node, it will load the sub-graph persistent
+tables to the memory and traverse the subgraph recursively, ignoring the
+sub-graph input/outputs.  This cross-module traversal treats the hierarchical
+netlist just like a flattened design. In this way, all integrated third-party
+tools could automatically achieve global design optimization or analysis by
+leveraging the LGraph hierarchical traversal feature.
 
 ```cpp
-for(auto& edge : g.inp_edges(nid))
+for (const auto &node:lg->forward_hier()) {...}
+```
+
+
+## Edge iterators
+
+To iterate over the input edges of node, simply call:
+
+```cpp
+for (const auto &inp_edge : node.inp_edges()) {...}
 ```
 
 And for output edges:
 
 ```cpp
-for(auto& edge : g.out_edges(nid))
+for (const auto &out_edge : node.out_edges()) {...}
 ```
 
-Note that you *have* to use reference here (`&` required) since LGraph is
-heavily optimized and uses memory positions. Not using reference would imply in
-a copy-constructor, and thus a different memory position, generating an invalid
-edge.
+
+### LGraph Design Attribute
+Design attribute stands for the characteristic given to a LGraph node or node
+pin. For instance, the characteristic of a node name and node physical
+placement. Despite a single LGraph stands for a particular module, it could be
+instantiated multiple times. In this case, same module could have different
+attribute at different hierarchy of the netlist. A good design of attribute
+structure should be able to represent both non-hierarchical and hierarchical
+characteristic.
+
+
+## Non-Hierarchical Attribute
+Non-hierarchical LGraph attributes include pin name, node name and line of
+source code. Such properties should be the same across different LGraph
+instantia- tions. Two instantiations of the same LGraph module will have the
+exact same user-defined node name on every node. For example, instantiations of
+a subgraph-2 in both top and subgraph-1 would maintain the same non-hierarchical
+attribute table.  
+
+```cpp
+node.set_name(std::string_view name);
+```
+
+
+## Hierarchical Attribute
+LGraph also support hierarchical attribute. It is achieved by using a tree data
+structure to record the design hierarchy. In LGraph, every graph has a unique
+id (lg_id), every instantiation of a graph would form some nodes in the tree and
+every tree node is indexed by a unique hierarchical id (hid). We are able to
+identify a unique instantiation of a graph and generate its own hierarchical
+attribute table. An example of hierarchical attribute is wire-delay.
+
+```cpp
+node_pin.set_delay(float delay);
+```
 
 
 ## InOu
 
 InOus are inputs and/or outputs to/from LiveHD. An input will create a graph,
-eg., from a verilog description, an json representation, or randomly. Similarly,
-an output will read an existing LGraph and generate an alternative
+e.g., from a verilog description, an json representation, or randomly.
+Similarly, an output will read an existing LGraph and generate an alternative
 representation, eg., verilog or json.
 
-Examples of inou can be found in inou/yosys (for verilog handling) and
-inou/json.
+Examples of inou can be found in inou/yosys (for verilog handling) and inou/json.
 
 ## Passes
 
 Passes are transformations over an existing LGraph. In the future, there may be
 passes over LNAST, but for the moment, we just have LGraph passes. A pass will
 read an LGraph and make changes to it. Usually this is done for optimizations.
-When creating a new pass, use the binary from `pass/lgopt/`, examples of passes
-can be found in `pass/lgopt_dce` which deletes any node that is not used by
-outputs of the LGraph.
+Examples of passes can be found in `pass/sample`, which compute the histogram
+and count wire numbers of a LGraph.
 
 
 # Coding and contributing
