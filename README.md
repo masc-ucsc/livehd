@@ -5,7 +5,7 @@ Code quality: [![CodeFactor](https://www.codefactor.io/repository/github/masc-uc
 [![Coverage Status](https://coveralls.io/repos/github/masc-ucsc/livehd/badge.svg?branch=HEAD&service=github)](https://coveralls.io/github/masc-ucsc/livehd?branch=HEAD)
 
 Short CI: [![Build Status](https://travis-ci.org/masc-ucsc/livehd.svg?branch=master)](https://travis-ci.org/masc-ucsc/livehd)
-Long CI: [![Build Status](https://dev.azure.com/renau0400/renau/_apis/build/status/masc-ucsc.livehd)](https://dev.azure.com/renau0400/renau/_build/latest?definitionId=1)
+Long CI: [![Build Status](https://dev.azure.com/renau0400/renau/_apis/build/status/masc-ucsc.livehd?branchName=master)](https://dev.azure.com/renau0400/renau/_build/latest?definitionId=2&branchName=master)
 
 LiveHD is an infrastructure designed for Live Hardware Design.  By live, we
 mean that small changes in the design should have results in few seconds. While
