@@ -325,6 +325,10 @@ Some related papers in clustering:
 * Enumeration technique in very large-scale integration fixed-outline floorplanning
 * A hierarchical approach for generating regular ﬂoorplans
 * Network Flow Based Datapath Bit Slicing
+* For planar/clustering ideas papers:
+    * Visualizing fuzzy overlapping communities in networks
+    * modularity and community structure in networks
+    * The State of the Art in Visualizing Group Structures in Graphs
 
 
 ## Performance Monitoring Infrastructure
