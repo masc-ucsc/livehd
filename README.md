@@ -30,7 +30,7 @@ for HDLs/C++ code generation.
 ![LiveHD overall flow](./docs/livehd.svg)
 
 
-## Contribute to Improve LiveHD
+## Contribute to LiveHD
 There is a list of available [projects.md](docs/projects.md) to further improve
 LiveHD. If you want to contribute or seek for MS/undergraduate thesis projects, please
 contact renau@ucsc.edu to query about them.
@@ -59,6 +59,7 @@ an affiliated node pid. In the code, every node_pin has a `Port_ID`.
 A pair of driver pin and sink pin constitutes an edge. In the
 following API example, an edge is connected from a driver pin (pid1) to a sink
 pin (pid3). The bitwidth of the driver pin determines the edge bitwidth.
+
 
 ### Node, Node_pin, and Edge Construction 
 ```cpp
@@ -235,10 +236,10 @@ to LiveHD, please send us a notification, we are glad to add your paper.
 
 1. [SMatch: Structural Matching for Fast Resynthesis in FPGAs](docs/SMatch_DAC19.pdf), Rafael T.
    Possignolo, Sheng Hong Wang and Jose Renau, Design Automation Conference
-   (DAC), June 2019]
+   (DAC), June 2019
 
 2. [LiveSynth: Towards an Interactive Synthesis Flow](docs/LiveSynth_DAC17.pdf), Rafael T. Possignolo, and
-   Jose Renau, Design Automation Conference (DAC), June 2017.]
+   Jose Renau, Design Automation Conference (DAC), June 2017.
 
 #### LGraph 
 3. [LGraph: A Unified Data Model and API for Productive Open-Source Hardware Design](docs/LGraph_WOSET19.pdf), 
