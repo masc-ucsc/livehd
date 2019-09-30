@@ -21,10 +21,7 @@ if (($a & $b) == 1) {
   y = $a | $b
 } elif (($a & $b) > 0) {
   w = $a
-} else {
-  y = $a & $b
-  z = $b
-}
+} 
 
 %wo = w  
 %xo = x
