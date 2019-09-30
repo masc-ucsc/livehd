@@ -393,6 +393,7 @@ K50  K51   0  280  292   =    %o2     ___v
   }
 
   void setup_ast_sorted_golden(){
+    fmt::print("setup_ast_sorted_golden\n");
     ast_gld.each_top_down_fast([this] (const mmap_lib::Tree_index &self, const tuple &node_data) {
       const mmap_lib::Tree_index &parent = ast_gld.get_parent(self);
 
@@ -419,6 +420,7 @@ K50  K51   0  280  292   =    %o2     ___v
   };
 
   void setup_ast_preorder_golden(){
+    fmt::print("setup_ast_preorder_golden\n");
     for (const auto &it:ast_gld.depth_preorder(ast_gld.get_root())) {
       while (static_cast<size_t>(it.level)>=ast_preorder_golden.size())
         ast_preorder_golden.emplace_back();
@@ -444,6 +446,14 @@ K50  K51   0  280  292   =    %o2     ___v
     EXPECT_EQ(ast_preorder_golden, ast_preorder_testee);
   }
 
+  void check_goldens_sorted_against_preorder(){
+    for(auto &a:ast_preorder_golden) {
+      std::sort(a.begin(), a.end());
+    }
+    EXPECT_EQ(ast_preorder_golden, ast_sorted_golden);
+  }
+
+
   std::string get_current_working_dir(){
     std::string cwd("\0", FILENAME_MAX + 1);
     return getcwd(&cwd[0],cwd.capacity());
@@ -463,7 +473,7 @@ K50  K51   0  280  292   =    %o2     ___v
     printf("Size: %lu\n", (uint64_t)sb.st_size);
 
     char *memblock = (char *)mmap(NULL, sb.st_size, PROT_WRITE, MAP_PRIVATE, fd, 0);
-    fprintf(stderr, "Content of memblock: \n%s\n", memblock);
+    //fprintf(stderr, "Content of memblock: \n%s\n", memblock);
     if(memblock == MAP_FAILED) {
         fprintf(stderr, "error, mmap failed\n");
         exit(-3);
@@ -479,6 +489,7 @@ K50  K51   0  280  292   =    %o2     ___v
 };//end class
 
 TEST_F(Lnast_test, Traverse_breadth_first_check_on_ast) {
+  fmt::print("Traverse_breadth_first_check_on_ast\n");
   auto lnast = lnast_parser.get_ast().get(); //unique_ptr lend its ownership
   std::vector<std::vector<tuple>> ast_sorted_testee;
   std::string_view memblock = setup_memblock();
@@ -508,8 +519,8 @@ TEST_F(Lnast_test, Traverse_breadth_first_check_on_ast) {
 }
 
 
-TEST_F(Lnast_test,Traverse_preorder_traverse_check_on_lnast){
-
+TEST_F(Lnast_test,Traverse_preorder_check_on_lnast){
+  fmt::print("Traverse_preorder_check_on_ast\n");
   auto lnast = lnast_parser.get_ast().get(); //unique_ptr lend its ownership
   std::vector<std::vector<tuple>> ast_preorder_testee;
   std::string_view memblock = setup_memblock();
@@ -528,5 +539,10 @@ TEST_F(Lnast_test,Traverse_preorder_traverse_check_on_lnast){
   }
 
   check_preorder_against_ast(ast_preorder_testee);
+}
+
+
+TEST_F(Lnast_test, Preorder_golden_vs_sorted_golden){
+  check_goldens_sorted_against_preorder();
 }
 

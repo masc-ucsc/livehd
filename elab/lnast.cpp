@@ -10,7 +10,6 @@ void Lnast::do_ssa_trans(const Lnast_index &top){
   //Phi_sts_table  phi_sts_table;
   //Phi_sts_tables phi_sts_tables;
 
-  // Iterate over the children of the first child (Really??)
   for(const auto &opr_node : children(get_first_child(top))) {
     if(this->get_data(opr_node).type == Lnast_ntype_if) {
       ssa_if_subtree(opr_node, rename_table);
