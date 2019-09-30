@@ -1,0 +1,71 @@
+$a as __bits:1
+$b as __bits:1
+%s as __bits:1
+%s = $a & $b
+
+fun1 = :($a,$b,%o):{
+  %o = $a ^ $b
+}
+
+result = fun1(a:3, b:4)
+
+x = $a
+if ($x) {
+  x = $e
+} elif ($p){
+  if ($y) {
+    x = $b
+  } elif (z) {
+    x = $c
+  } else {
+    x = $d
+  }
+} else {
+  x = $f
+}
+
+%o1 = x + $a
+%o2 = y + $a
+
+
+
+x = $a
+if ($x) {
+  x = $e
+} else {
+  if(p) {
+  }
+}
+
+x = $a
+if ($x) {
+  x = $e
+} elif ($p){
+}
+
+
+
+
+//if 4<4 {
+//  if 55>44 {
+//    total = fun1(a:3,b:4)
+//  } else {
+//    total = fun1(a:5,b:6)
+//  }
+//} elif 4>4 {
+//  total = 3 + $a;
+//} else {
+//  total = 5 + $b;
+//}
+
+//I total == 7
+//
+//unique if 3<3 {
+// a = 1
+//}elif 3<4 {
+// a = 2
+//}elif 6<5 {
+// a = 3
+//}else{
+// a = 4
+//}
