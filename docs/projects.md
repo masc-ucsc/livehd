@@ -249,20 +249,25 @@ Main features:
 * Export LEF/DEF and liberty from internal DB. E.g: read several liberty, and then export a single one which is the aggregated.
 * LEF/DEF export can be tagged for a color
 
-## Analytical Placer
+## ASIC Analytical Placer
 
-Implement an analytical placer that should work with FPGA/ASIC.
+Implement an analytical placer that should work with ASIC. The idea is to share functionality with rippleFPGA, but to have
+a separate code too. E.g: FLOP clustering does not make sensor for FPGAs.
 
-Dependence: Rapidwright
+Dependence: Rapidwright, RippleFPGA
 
 Main features:
 
-* FPGA and ASIC targets
-* Use stanford semidefinite
-* Use timing in feedback
+* ASIC targets
 * Flop Clustering: "Flip-ﬂop Clustering by Weighted K-means Algorithm"
+* Use global router to be routing aware (maybe the RippleFPGA can leverage this too)
 * Overall flow based on: "BonnPlace: A Self-Stabilizing Placement Framework"
-* Do not assume shape (square) in contour. Allow to place around each floorplan area (amorphous. A center of gravity per floorplan block)
+
+Common goals with RippleFPGA:
+
+* If floorplaner is there, leverage floorplan, but fo not assume shape (square) in contour. Allow to place around each floorplan area (amorphous. A center of gravity per floorplan block)
+* Use timing in feedback
+* Use SuperSCS semidefinite
 * To allow fast incremental placement. Allow to do analytical over subset of design, and other areas are fixed (legalization to handle)
 * Critical paths are aligned
 * Support "annotations"
@@ -453,7 +458,7 @@ Main features:
 ## RippleFPGA
 
 RippleFPGA is one of the best open source placers avaiable for FPGAs (ICCD competition). The idea is to integrate
-it with LGraph.
+it with LGraph. RippleFPGA is an analytical placer.
 
 https://github.com/cuhk-eda/ripple-fpga
 
@@ -467,25 +472,35 @@ Main features:
 * Remove boost
 * Target Alveo U250
 
+Common goals with ASIC Analytical Placer:
+
+* If floorplaner is there, leverage floorplan, but fo not assume shape (square) in contour. Allow to place around each floorplan area (amorphous. A center of gravity per floorplan block)
+* Use timing in feedback
+* Use SuperSCS semidefinite
+* To allow fast incremental placement. Allow to do analytical over subset of design, and other areas are fixed (legalization to handle)
+* Critical paths are aligned
+* Support "annotations"
+    * Relative place (left/right/top/bottom)
+    * Alignment (true/false)
+    * Close by (add anchor)
+
 ## NextPNR
 
-Integrate with the FPGA synthesis from Yosys
+Integrate with the nextPNR FPGA placement/routing
 
-Dependence: none
+Dependence: Rapidwright
 
 Main features:
 * Create a bridge to/from LGraph and nextpntr
-* Being able to transfer placed design to Rapidwright
+* Create common API that can talk with RapidWright and/or NextPNR
+    * Being able to transfer placed design to Rapidwright
+    * Common API to query FPGA properties (LUT map, dps map...)
 
 ## VPR
 
-Integrate LGraph wiht VPR
+Integrate LGraph wiht VPR. Similar to  NextPNR project, but with VPR.
 
-Dependence: none
-
-Main features:
-* Create a bridge to/from LGraph and nextpntr
-* Being able to transfer placed design to Rapidwright
+Dependence: Rapidwright
 
 # Active Projects (already selected)
 
