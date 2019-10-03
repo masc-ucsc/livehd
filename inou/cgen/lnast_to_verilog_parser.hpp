@@ -6,7 +6,9 @@
 class Verilog_parser_module {
 private:
   std::vector<std::pair<int32_t, std::string>> node_str_buffer;
-  std::set<std::string> statefull_set;
+  std::set<std::string_view> statefull_set;
+  std::vector<std::vector<std::pair<int32_t, std::string>>> sts_buffer_stack;
+  std::vector<std::vector<std::pair<int32_t, std::string>>> sts_buffer_queue;
 
   std::string create_header();
   std::string create_footer();
@@ -15,12 +17,18 @@ private:
 
   std::string indent_buffer(int32_t size);
 
+  std::vector<std::vector<std::pair<int32_t, std::string>>> file_buffer;
+
 public:
   std::string filename;
-  void add_to_buffer(std::pair<int32_t, std::string> next, std::set<std::string> new_vars);
+  void add_to_buffer_single(std::pair<int32_t, std::string> next, std::set<std::string_view> new_vars);
+  void add_to_buffer_multiple(std::vector<std::pair<int32_t, std::string>> nodes, std::set<std::string_view> new_vars);
+  void node_buffer_stack();
+  void node_buffer_queue();
+  std::vector<std::pair<int32_t, std::string>> pop_queue();
   std::string create_file();
 
-  uint32_t get_variable_type(std::string var_name);
+  uint32_t get_variable_type(std::string_view var_name);
 
   Verilog_parser_module() {};
   Verilog_parser_module(std::string filename) : filename(filename) {};
@@ -39,12 +47,12 @@ private:
   Lnast_parser lnast_parser;
 
   // infustructure for multiple modules
+  std::string root_filename;
   Verilog_parser_module *curr_module;
   std::map<std::string, std::string> file_map;
   // key, pair(value, variables)
-  std::map<std::string_view, std::pair<std::string, std::set<std::string>>> ref_map;
-  std::vector<std::string> sts_buffer_stack;
-  std::vector<std::string> sts_buffer_queue;
+  std::map<std::string_view, std::pair<std::string, std::set<std::string_view>>> ref_map;
+  std::vector<Verilog_parser_module*> module_stack;
 
   // references
   absl::flat_hash_map<Lnast_ntype_id, std::string> ntype2str;
