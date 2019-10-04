@@ -228,8 +228,11 @@ void Chunkify_verilog::elaborate() {
 
           module_io_pos++;
         }
-        last_input  = false;
-        last_output = false;
+        if (!scan_is_token(Token_id_comma)) {
+          // E.g: input a, b, d;
+          last_input  = false;
+          last_output = false;
+        }
       }
       if (scan_is_token(Token_id_comment)) {
         if (in_module)

@@ -27,9 +27,9 @@ to use Bazel in the LGraph project.
     # Fast Build with assertions
     bazel build       //inou/json:inou_json
 
-## See the command line executed
+## See the commands executed
 
-    bazel build -s //core
+    bazel build -s //main:all
 
 ## To run SHORT tests
 

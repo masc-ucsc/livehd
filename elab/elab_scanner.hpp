@@ -241,6 +241,12 @@ public:
     return std::string_view(&buffer[token_list[p].pos], token_list[p].len);
   }
 
+  bool scan_next_is_token(Token_id tok) const {
+    size_t p = scanner_pos + 1;
+    if (p >= token_list.size())
+      return false;
+    return token_list[p].tok == tok;
+  }
 
   std::string_view scan_peep_sview(int offset) const {
     I(offset != 0);
