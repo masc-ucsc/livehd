@@ -527,7 +527,8 @@ static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path
 
         if(chunk.width == wire->width) {
           if(wire2pin.find(wire) != wire2pin.end()) {
-            log("io wire %s from module %s cell type %s\n",wire->name.c_str(), module->name.c_str(), cell->type.c_str());
+            auto pin2 = wire2pin[wire];
+            log("io wire %s from module %s cell type %s (%s vs %s)\n",wire->name.c_str(), module->name.c_str(), cell->type.c_str(), driver_pin.debug_name().c_str(), pin2.debug_name().c_str());
             if (wire->port_output) {
               auto spin = g->get_graph_output(&wire->name.c_str()[1]);
               g->add_edge(driver_pin, spin);

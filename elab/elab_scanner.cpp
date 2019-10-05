@@ -333,7 +333,7 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, Token
 Elab_scanner::Elab_scanner() {
   setup_translate();
   max_errors   = 1;
-  max_warnings = 1024;
+  max_warnings = 0; // Unlimited 1024;
   n_errors     = 0;
   n_warnings   = 0;
 
@@ -436,7 +436,7 @@ void Elab_scanner::parser_error(std::string_view text) const {
 void Elab_scanner::parser_warn(std::string_view text) const {
   scan_raw_msg("warning", text, false);
   n_warnings++;
-  if (n_warnings > max_warnings) exit(-3);
+  if (max_warnings && n_warnings > max_warnings) exit(-3);
 }
 
 void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, bool third) const {
