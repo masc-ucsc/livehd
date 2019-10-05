@@ -291,9 +291,9 @@ static bool is_black_box_output(const RTLIL::Module *module, const RTLIL::Cell *
   if(!wire)
     return false;
 
-  // global output
-  if(wire->port_output)
-    return true;
+  // WARNING: It can be forward: NOT TRUE global output
+  // if(wire->port_output)
+  //  return true;
 
   // global input
   if(wire->port_input)
@@ -325,9 +325,9 @@ static bool is_black_box_input(const RTLIL::Module *module, const RTLIL::Cell *c
   if(!wire)
     return true;
 
-  // global output
-  if(wire->port_output)
-    return false;
+  // WARNING: It can be used for output in another cell global output
+  //if(wire->port_output)
+    //return false;
 
   // global input
   if(wire->port_input)
@@ -463,7 +463,7 @@ static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path
               for (auto &chunk : conn.second.chunks()) {
                 const RTLIL::Wire *wire = chunk.wire;
                 if (wire->port_input) is_input = true;
-                if (wire->port_output) is_output = true;
+                // WARNING: Not always if (wire->port_output) is_output = true;
                 if (driven_signals.count(wire->hash()) != 0) {
                   is_input = true;
                 }
@@ -1368,7 +1368,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
                 continue;
 
               bool is_input  = wire->port_input;
-              bool is_output = wire->port_output; // NOTE: May be module to module and still no driver || driven_signals.count(wire->hash())==0;
+              bool is_output = false; // WARNING: wire->port_output is NOT ALWAYS. The output can go to other internal
               if (!is_input && !is_output)
                 is_input = driven_signals.count(wire->hash())>0;
 
