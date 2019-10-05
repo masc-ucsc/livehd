@@ -10,12 +10,12 @@ fun1 = :($a,$b,%o):{
 result = fun1(a:3, b:4)
 
 x = $a
-if ($x) {
+if ($x + 1 > 1) {
   x = $e
-} elif ($p){
+} elif ($p + 2 > 1){
   if ($y) {
     x = $b
-  } elif (z) {
+  } elif ($z + 3 > 1) {
     x = $c
   } else {
     x = $d
@@ -29,19 +29,19 @@ if ($x) {
 
 
 
-x = $a
-if ($x) {
-  x = $e
-} else {
-  if(p) {
-  }
-}
-
-x = $a
-if ($x) {
-  x = $e
-} elif ($p){
-}
+//x = $a
+//if ($x) {
+//  x = $e
+//} else {
+//  if(p) {
+//  }
+//}
+//
+//x = $a
+//if ($x) {
+//  x = $e
+//} elif ($p){
+//}
 
 
 
