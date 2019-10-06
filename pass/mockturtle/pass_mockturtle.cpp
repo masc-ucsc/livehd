@@ -36,27 +36,27 @@ void Pass_mockturtle::work(Eprp_var &var) {
 void Pass_mockturtle::do_work(LGraph *g) {
   //LGBench b("pass.mockturtle");
 
-  //fmt::print("Partitioning...\n");
+  fmt::print("Partitioning...\n");
   if (!lg_partition(g)) {
-    //fmt::print("There is no node to be lutified!\n");
+    fmt::print("There is no node to be lutified!\n");
     return;
   }
-  //for (const auto &group_id_it : node2gid) {
-    //fmt::print("node:{} -> gid:{}\n", group_id_it.first.get_node(g).debug_name(), group_id_it.second);
-  //}
-  //fmt::print("Partition finished.\n");
+  for (const auto &group_id_it : node2gid) {
+    fmt::print("node:{} -> gid:{}\n", group_id_it.first.get_node(g).debug_name(), group_id_it.second);
+  }
+  fmt::print("Partition finished.\n");
 
-  //fmt::print("Creating mockturtle network...\n");
+  fmt::print("Creating mockturtle network...\n");
   create_mockturtle_network(g);
-  //fmt::print("Mockturtle network created.\n\n");
+  fmt::print("Mockturtle network created.\n\n");
 
-  //fmt::print("Converting mockturtle networks to KLUT networks...\n");
+  fmt::print("Converting mockturtle networks to KLUT networks...\n");
   convert_mockturtle_to_KLUT(g);
-  //fmt::print("All mockturtle networks are converted to KLUT networks.\n\n");
+  fmt::print("All mockturtle networks are converted to KLUT networks.\n\n");
 
-  //fmt::print("Creating lutified LGraph...\n");
+  fmt::print("Creating lutified LGraph...\n");
   create_lutified_lgraph(g);
-  //fmt::print("Lutified LGraph created.\n\n");
+  fmt::print("Lutified LGraph created.\n\n");
 
   node2gid.clear();
   gid2mock.clear();
@@ -79,7 +79,7 @@ bool Pass_mockturtle::lg_partition(LGraph *g) {
     if (!eligible_cell_op(node))
       continue;
 
-    //fmt::print("Node identifier:{}\n", node.debug_name());
+    fmt::print("Node identifier:{}\n", node.debug_name());
     int propagate_id = -1;
     for(const auto &in_edge : node.inp_edges()) {
       auto peer_driver_node = in_edge.driver.get_node();
@@ -126,6 +126,7 @@ void Pass_mockturtle::setup_input_signals(const unsigned int    &group_id,
 #ifndef NDEBUG
     // To fix, change the edge2signal for a pin2signals (same pin, same signal)
     fmt::print("FIXME: create_pi {}->{}\n",input_edge.driver.debug_name(), input_edge.sink.debug_name());
+    fmt::print("Hello");
 #endif
     for (auto i = 0UL; i < input_edge.get_bits(); i++) {
       inp_sigs_mt.emplace_back(mig.create_pi());

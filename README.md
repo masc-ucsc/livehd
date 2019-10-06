@@ -20,12 +20,12 @@ nodes/edges.
 ## LiveHD Framework
 LiveHD is optimized for synthesis and simulation. The main components of LiveHD
 includes LGraph, LNAST, integrated 3rd-party tools, code generation, and "live"
-techniques. The core of LiveHD is a graph structure called LGraph (or Live Graph
-or LGraph for short).  LGraph is built for fast synthesis and simulation and
-interfaces other tools like Yosys, ABC, OpenTimer, and Mockturtle. LNAST stands
-for language neutral AST, which is a high-level IR on both front/back-end of
-LGraph. LNAST helps to bridge different HDLs and HLS into LiveHD and is useful
-for HDLs/C++ code generation.
+techniques. The core of LiveHD is a graph structure called LGraph (Live Graph).
+LGraph is built for fast synthesis and simulation, and interfaces other tools
+like Yosys, ABC, OpenTimer, and Mockturtle. LNAST stands for language neutral
+AST, which is a high-level IR on both front/back-end of LGraph. LNAST helps to
+bridge different HDLs and HLS into LiveHD and is useful for HDLs/C++ code
+generation.
 
 ![LiveHD overall flow](./docs/livehd.svg)
 
@@ -235,8 +235,7 @@ to LiveHD, please send us a notification, we are glad to add your paper.
 #### Live techniques 
 
 1. [SMatch: Structural Matching for Fast Resynthesis in FPGAs](docs/SMatch_DAC19.pdf), Rafael T.
-   Possignolo, Sheng Hong Wang and Jose Renau, Design Automation Conference
-   (DAC), June 2019
+   Possignolo and Jose Renau, Design Automation Conference (DAC), June 2019
 
 2. [LiveSynth: Towards an Interactive Synthesis Flow](docs/LiveSynth_DAC17.pdf), Rafael T. Possignolo, and
    Jose Renau, Design Automation Conference (DAC), June 2017.
