@@ -67,13 +67,13 @@ protected:
 
   absl::flat_hash_set<XEdge> bdinp_edges, bdout_edges;//boundary_input/output_edges
   absl::flat_hash_map<Node::Compact, unsigned int> node2gid; //gid == group id, nodes in node2gid should be lutified
-  absl::flat_hash_map<unsigned int, mockturtle_network> gid2mock;
+  absl::flat_hash_map<unsigned int, mockturtle_network> gid2mt;
   absl::flat_hash_map<unsigned int, mockturtle::klut_network> gid2klut;
-  absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle_network::signal>> edge2signals_mock; //lg<->mig, including all boundary i/o and internal wires
-  absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle::klut_network::signal>> edge2signals_klut; //lg<->klut, search edge2signals_mock table, only record i/o mapping
+  absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle_network::signal>> edge2mt_sigs; //lg<->mig, including all boundary i/o and "internal" wires
+  absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle::klut_network::signal>> edge2klut_io_sigs; //lg<->klut, search edge2mt_sigs table, only record i/o mapping
   absl::flat_hash_map<Node::Compact, Node::Compact> old_node_to_new_node;
-  absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::node>, Node::Compact> gidMTnode2LGnode;
-  absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::signal>, std::pair<mockturtle::klut_network::node, Port_ID>> gid_fanin_sig2klut_node_lg_pid;
+  absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::node>, Node::Compact> gid_klut_node2lg_node;
+  absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::signal>, std::pair<mockturtle::klut_network::node, Port_ID>> gid_pi2pi_sink_node_lg_pid;
   bool lg_partition(LGraph *);
   void create_mockturtle_network(LGraph *);
   void convert_mockturtle_to_KLUT(LGraph *);
@@ -176,9 +176,9 @@ protected:
 
   bool eligible_cell_op(const Node &cell) {
     switch (cell.get_type().op) {
-      //case GraphIO_Op:
-      //  //fmt::print("Node: GraphIO_Op");
-      //  break;
+      case GraphIO_Op:
+        //fmt::print("Node: GraphIO_Op");
+        break;
       case Not_Op:
         //fmt::print("Node: Not_Op\n");
         break;
