@@ -619,12 +619,21 @@ performance impact. Setup mada0 and script to setup for multiusers hugeTLBfs
 We have several dockers for testing, a simple vagrant (ubuntu based?) for most users may
 be nice to have. Maybe based on https://github.com/VLSIDA/openram-vagrant-image
 
-
 ## Fix lgshell
 
 * **Autocompletion for lgraph names too (now, it is just files).
 * Autocompletion patch for directories. Now finished with "foo", it should be "foo/"
 * Upgrade to the latest replxx. There was a change in API, and it requires to rework lgshell
+
+## lgshell ctrl+C
+
+* Intercept the CTRL+C and finish the current command. Do not kill/terminate the lgshell
+* This may require to spawn the commands as threads and kill them for ctrl+c
+
+## lgshell perf summary
+
+* Record the time (and perf stats) for each lgshell command executed.
+* Print the statistics when clossing the lgshell
 
 ## Elab parser
 
