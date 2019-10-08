@@ -72,6 +72,7 @@ void Pass_mockturtle::do_work(LGraph *g) {
 
 bool Pass_mockturtle::lg_partition(LGraph *g) {
   unsigned int new_group_id = 0;
+  node2gid[g->get_graph_input_node().get_compact()] = 0;
 
   for(const auto node : g->forward()) {
     if (node2gid.find(node.get_compact()) != node2gid.end())
@@ -88,7 +89,7 @@ bool Pass_mockturtle::lg_partition(LGraph *g) {
 
       auto it = node2gid.find(peer_driver_node.get_compact());
       if (it != node2gid.end()) {
-        GI(propagate_id>=0, it->second == propagate_id);
+        GI((propagate_id>=0), (it->second == propagate_id));
         propagate_id = it->second;
 #ifndef NDEBUG
         break;  // First is enough for non-debug
@@ -100,6 +101,7 @@ bool Pass_mockturtle::lg_partition(LGraph *g) {
 
     node2gid[node.get_compact()] = propagate_id;
   }
+
 
   return !node2gid.empty();
 }
@@ -114,6 +116,8 @@ void Pass_mockturtle::setup_input_signals(const unsigned int    &group_id,
   //check if this input edge is already in the output mapping table
   //then setup the input signal accordingly
   if (edge2signals_mock.count(input_edge)!=0) {
+    fmt::print("group_id:{}\n", group_id);
+    fmt::print("gid:{}\n", edge2signals_mock[input_edge].gid);
     I(group_id == edge2signals_mock[input_edge].gid);
     I(input_edge.get_bits() == edge2signals_mock[input_edge].signals.size());
     for (auto i = 0UL; i < input_edge.get_bits(); i++)
@@ -126,7 +130,6 @@ void Pass_mockturtle::setup_input_signals(const unsigned int    &group_id,
 #ifndef NDEBUG
     // To fix, change the edge2signal for a pin2signals (same pin, same signal)
     fmt::print("FIXME: create_pi {}->{}\n",input_edge.driver.debug_name(), input_edge.sink.debug_name());
-    fmt::print("Hello");
 #endif
     for (auto i = 0UL; i < input_edge.get_bits(); i++) {
       inp_sigs_mt.emplace_back(mig.create_pi());
@@ -166,6 +169,7 @@ void Pass_mockturtle::split_input_signal(const std::vector<signal> &input_signal
     if (splitted_input_signal.size()<=i) {
       splitted_input_signal.resize(i+1);
     }
+    //sh: it's just transpose the horizontal to vertical, possible bug here!?
     splitted_input_signal[i].emplace_back(input_signal[i]);
   }
 }
@@ -234,7 +238,7 @@ void Pass_mockturtle::mapping_logic_cell_lg2mock(sig_type (ntk_type::*create_nar
   std::vector<std::vector<sig_type>> inp_sig_group_by_bit;
   //processing input signal
   for (const auto &in_edge : node.inp_edges()) {
-    ////fmt::print("input_bit_width:{}\n",in_edge.get_bits());
+    //fmt::print("input_bit_width:{}\n",in_edge.get_bits());
     std::vector<sig_type> inp_sigs;
     setup_input_signals(group_id, in_edge, inp_sigs, mock_ntk);
     split_input_signal(inp_sigs, inp_sig_group_by_bit);
@@ -671,21 +675,19 @@ void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
     switch (node.get_type().op) {
       case Not_Op: {
         //Note: Don't need to check the node_pin pid since Not_Op has only one sink pin and one driver pin
-        //fmt::print("Not_Op in gid:{}\n",group_id);
+        fmt::print("Not_Op in gid:{}\n",group_id);
         I(node.inp_edges().size()==1 && !node.out_edges().empty()); //Not_Op should only have single input edge
 
         std::vector<mockturtle_network::signal> inp_sigs_mt, out_sigs_mt;
         //processing input signal
-        //fmt::print("input_bit_width:{}\n",node.inp_edges()[0].get_bits());
         setup_input_signals(group_id, node.inp_edges()[0], inp_sigs_mt, mt_ntk);
         //creating output signal
-        for (long unsigned int i = 0; i < inp_sigs_mt.size(); i++)
-          out_sigs_mt.emplace_back(mt_ntk.create_not(inp_sigs_mt[i]));
+        for (const auto i : inp_sigs_mt)
+          out_sigs_mt.emplace_back(mt_ntk.create_not(i));
 
         //processing output signal
         for (const auto &out_edge : node.out_edges()) {
           //fmt::print("output_bit_width:{}\n",out_edge.get_bits());
-          //make sure the bit-width matches each other
           I(out_edge.get_bits()==out_sigs_mt.size());
           setup_output_signals(group_id, out_edge, out_sigs_mt, mt_ntk);
         }

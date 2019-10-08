@@ -115,7 +115,7 @@ bool Edge_raw_iterator_base::try_insert_pending(const Node &node, const Node::Co
     }
   }
 
-  fmt::print(" 2pending:{} from:{}\n", node.debug_name(), node.get_class_lgraph()->get_name());
+  //fmt::print(" 2pending:{} from:{}\n", node.debug_name(), node.get_class_lgraph()->get_name());
   pending->insert(compact);
   return true;
 }
@@ -191,7 +191,7 @@ void CForward_edge_iterator::set_current_node_as_visited() {
 
 void CForward_edge_iterator::propagate_io(const Node &node) {
 
-  fmt::print("  prop:{} from:{}\n", node.debug_name(), node.get_class_lgraph()->get_name());
+  //fmt::print("  prop:{} from:{}\n", node.debug_name(), node.get_class_lgraph()->get_name());
 
   if (global_visited->find(node.get_compact())!=global_visited->end())
     return;
@@ -210,7 +210,7 @@ void CForward_edge_iterator::propagate_io(const Node &node) {
 
     if (fit == frontier->end()) {
       auto ninputs = sink_node.get_num_inputs()-1; // -1 for self
-      fmt::print("    out_new:{} {}\n", sink_node.debug_name(), ninputs);
+      //fmt::print("    out_new:{} {}\n", sink_node.debug_name(), ninputs);
       I(ninputs >= 0);
       if (ninputs == 0) {  // Done already
         try_insert_pending(sink_node, sink_node_compact);
@@ -219,7 +219,7 @@ void CForward_edge_iterator::propagate_io(const Node &node) {
       }
     } else {
       auto ninputs = (fit->second) - 1;
-      fmt::print("    out_old:{} {}\n", sink_node.debug_name(), ninputs);
+      //fmt::print("    out_old:{} {}\n", sink_node.debug_name(), ninputs);
       if (ninputs == 0) {  // Done
         try_insert_pending(sink_node, sink_node_compact);
         frontier->erase(fit);

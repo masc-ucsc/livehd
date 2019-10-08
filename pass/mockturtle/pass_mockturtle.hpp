@@ -176,6 +176,9 @@ protected:
 
   bool eligible_cell_op(const Node &cell) {
     switch (cell.get_type().op) {
+      //case GraphIO_Op:
+      //  //fmt::print("Node: GraphIO_Op");
+      //  break;
       case Not_Op:
         //fmt::print("Node: Not_Op\n");
         break;

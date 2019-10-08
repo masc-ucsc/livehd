@@ -120,12 +120,11 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
     auto node_name = node.has_name() ? node.get_name() : "";
 
     if (node.get_type().op == U32Const_Op)
-      data += fmt::format(" {} [label=\"{} :{} :{} :{}\"];\n"
-             , node.debug_name(), node.debug_name(), node.get_type().get_name()
-             , node_name, node.get_type_const_value());
-    else
       data += fmt::format(" {} [label=\"{} :{} :{}\"];\n"
-             , node.debug_name(), node.debug_name(), node.get_type().get_name(), node_name);
+             , node.debug_name(), node.debug_name(), node_name, node.get_type_const_value());
+    else
+      data += fmt::format(" {} [label=\"{} :{}\"];\n"
+             , node.debug_name(), node.debug_name(), node_name);
 
 
     for (auto &out : node.out_edges()) {
