@@ -592,6 +592,22 @@ This is a list of small tasks. Each should take 1-3 weeks to implement. These
 are not thesis/projects but good ideas to get to know the setup and help, and they
 can evolve for undergraduate senior design.
 
+## mmap_lib sview delete
+
+The mmap_lib used strings for mmap_map and mmap_bimap. The current version
+appends the string to an mmap. It should have a counter to garbage collect the
+mmap entry once nobody uses it. This means that it needs to track
+create/delete. Maybe a mmap_map tracking sviews.
+
+For the bimap, the sview is replicated for both directions. Again, the refactor
+should share the sview across the two mmap_maps.
+
+## mmap_lib::vector erase (pop_back)
+
+The current only way to shrink a mmap_lib::vector is with a resize command. It
+should be good to allow a pop_back (erase last element). Notice that the mmap
+call is expensive, we just need to really reduce size when there is a
+significant fraction to be saved.
 
 ## mmap_lib benchmark tune
 
@@ -603,9 +619,6 @@ performance impact. Setup mada0 and script to setup for multiusers hugeTLBfs
 We have several dockers for testing, a simple vagrant (ubuntu based?) for most users may
 be nice to have. Maybe based on https://github.com/VLSIDA/openram-vagrant-image
 
-## Fix lgshell
-
-https://github.com/rubund/netlist-analyzer
 
 ## Fix lgshell
 

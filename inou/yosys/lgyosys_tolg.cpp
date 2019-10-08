@@ -1355,9 +1355,6 @@ struct Yosys2lg_Pass : public Yosys::Pass {
         if (!ct_all.cell_known(cell->type)) {
           std::string_view mod_name(&(cell->type.c_str()[1]));
 
-          if (library->has_name(mod_name))
-            continue;
-
           for (auto &conn : cell->connections()) {
             for(auto &chunk : conn.second.chunks()) {
               const RTLIL::Wire *wire = chunk.wire;
@@ -1371,6 +1368,15 @@ struct Yosys2lg_Pass : public Yosys::Pass {
               bool is_output = false; // WARNING: wire->port_output is NOT ALWAYS. The output can go to other internal
               if (!is_input && !is_output)
                 is_input = driven_signals.count(wire->hash())>0;
+
+              if (library->has_name(mod_name)) {
+                const auto &sub = library->get_sub(mod_name);
+                if (sub.has_pin(name)) {
+                  is_input  = sub.is_input(mod_name);
+                  is_output = sub.is_output(mod_name);
+                  continue;
+                }
+              }
 
               const char *str = conn.first.c_str();
               if (!is_input && !is_output && str[0] == '\\') {
@@ -1413,9 +1419,6 @@ struct Yosys2lg_Pass : public Yosys::Pass {
                   is_input = true;
                 }
 
-                if (conn.first.str() == "\\ADRA" || conn.first.str() == "\\ADRB")
-                  is_input = true;
-
                 if (strncmp(str,"io_is",5)==0
                   ||strncmp(str,"io_in",5)==0)
                   is_input = true;
@@ -1441,10 +1444,6 @@ struct Yosys2lg_Pass : public Yosys::Pass {
                 if (str[1]==0 && (str[0]=='X' || str[0]=='Y' || str[0]=='Z' || str[0]=='Q'))
                   is_output = true;
                 if (str[1]==0 && (str[0]=='x' || str[0]=='y' || str[0]=='z' || str[0]=='q'))
-                  is_output = true;
-
-                if ((strncmp(cell->type.c_str(), "\\sa", 3)==0)
-                    && (strcmp(str,"RSCOUT")==0 || strcmp(str,"SO_CN")==0 || strcmp(str,"SO_Q")==0))
                   is_output = true;
 
                 if (cell->type.str()[1]=='H' && cell->type.str()[2]=='D') {
@@ -1474,6 +1473,14 @@ struct Yosys2lg_Pass : public Yosys::Pass {
                 }else if (cell->type.str() == "\\$memwr") {
                   is_input = true;
                   is_output = false;
+                }
+
+                // Last fix for SRAMs
+                if (strncmp(cell->type.c_str(), "\\sa", 3)==0 && strstr(cell->type.c_str(),"rw")) {
+                  if (strcmp(str,"RSCOUT")==0 || strcmp(str,"SO_CN")==0 || strcmp(str,"SO_Q")==0)
+                    is_output = true;
+                  if (!is_output)
+                    is_input = true;
                 }
               }
 
