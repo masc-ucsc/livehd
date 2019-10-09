@@ -117,8 +117,7 @@ void Lnast_to_verilog_parser::process_buffer() {
     // check if should be in combinational or stateful
     process_pure_assign();
   } else if (type == Lnast_ntype_as) {
-    process_operator();
-    // process_as();
+    process_as();
   } else if (type == Lnast_ntype_label) {
     process_label();
   } else if (type == Lnast_ntype_and) {
@@ -245,33 +244,34 @@ void Lnast_to_verilog_parser::process_pure_assign() {
   fmt::print("pure_assign value:\tkey: {}\tvalue: {}\n", key, value);
 }
 
-/*
 void Lnast_to_verilog_parser::process_as() {
+  std::string value = "";
+  std::set<std::string_view> new_vars;
+
   std::vector<Lnast_node>::iterator it = node_buffer.begin();
   it++;
-  node_str_buffer = absl::StrCat(node_str_buffer, "process_as:\t");
   std::string_view key = get_node_name(*it);
   it++;
 
-  std::string value = "";
-  std::map<std::string_view, std::string>::iterator map_it;
+  std::map<std::string_view, std::pair<std::string, std::set<std::string_view>>>::iterator map_it;
   std::string_view ref = get_node_name(*it);
   map_it = ref_map.find(ref);
   if (map_it != ref_map.end()) {
-    ref = map_it->second;
+    ref = map_it->second.first;
   }
   value = absl::StrCat(value, ref);
 
   if (is_ref(key)) {
     fmt::print("inserting:\tkey:{}\tvalue:{}\n", key, value);
-    ref_map.insert(std::pair<std::string_view, std::string>(key, value));
+    ref_map.insert(std::pair<std::string_view, std::pair<std::string, std::set<std::string_view>>>(key, std::pair<std::string, std::set<std::string_view>>(value, new_vars)));
+  } else {
+    std::string phrase = absl::StrCat("(* LNAST: ", key, " as " , value, "*)\n");
+    curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(indent_buffer_size, phrase), new_vars);
   }
 
   fmt::print("process_as value:\tkey: {}\tvalue: {}\n", key, value);
 
-  node_str_buffer = absl::StrCat(node_str_buffer, key, " as " , value, "\n");
 }
-*/
 
 void Lnast_to_verilog_parser::process_label() {
   std::string value = "";
@@ -330,7 +330,12 @@ void Lnast_to_verilog_parser::process_operator() {
     std::map<std::string_view, std::pair<std::string, std::set<std::string_view>>>::iterator map_it;
     map_it = ref_map.find(ref);
     if (map_it != ref_map.end()) {
-      ref = map_it->second.first;
+      if (std::count(map_it->second.first.begin(), map_it->second.first.end(), ' ')) {
+        ref = absl::StrCat("(", map_it->second.first, ")");
+      } else {
+        ref = map_it->second.first;
+      }
+
       new_vars.insert(map_it->second.second.begin(), map_it->second.second.end());
       fmt::print("map_it find: {} | {}\n", map_it->first, map_it->second.first);
     } else if (ref.size() > 2 && !is_number(ref)) {
