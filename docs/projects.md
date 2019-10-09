@@ -672,6 +672,17 @@ https://github.com/azukaar/GuPM
 * Allow to specify a specific lgraph library
 * Allow to specify passes/commands in lgraph
 
+## LGraph and LNAST check pass
+
+Create a pass that checks that the LGraph (and/or LNAST) is sementically correct. Some checks:
+
+* No combinational loops
+* No missmatch in bit widths
+* No disconnected nodes
+* No nodes that could be DCE
+* Check for innefficient splits (do not split busses that can be combined)
+* Transformations stages should not drop names if same net is preserved
+
 ## Smaller tasks
 
 For even smaller tasks check the [cleanup.md](cleanup.md) file
