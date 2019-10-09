@@ -234,7 +234,7 @@ public:
   LGraph       *get_class_lgraph() const { return current_g; };
   Hierarchy_index  get_hidx() const { return hidx; };
 
-  const Port_ID  get_pid()   const { I(idx); return pid;    }
+  Port_ID  get_pid()   const { I(idx); return pid;    }
 
   bool has_inputs () const;
   bool has_outputs() const;
@@ -287,6 +287,7 @@ public:
 
   void nuke(); // Delete all the edges, and attributes of this node_pin
 
+
   // BEGIN ATTRIBUTE ACCESSORS
   std::string      debug_name() const;
 
@@ -312,6 +313,8 @@ public:
   bool                is_connected() const;
 
   // END ATTRIBUTE ACCESSORS
+
+  Node_pin get_down_pin() const;
 };
 
 namespace mmap_lib {

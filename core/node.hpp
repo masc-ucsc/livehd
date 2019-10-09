@@ -35,10 +35,12 @@ protected:
   Node(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _nid);
 
   void invalidate(LGraph *_g);
-  void update(const Hierarchy_index &_hidx, Index_ID _nid);
   void update(Index_ID _nid) { nid = _nid; }
+  void update(const Hierarchy_index &_hidx, Index_ID _nid);
 
 public:
+  void update(const Hierarchy_index &_hidx);
+
   static constexpr Index_ID Hardcoded_input_nid  = 1;
   static constexpr Index_ID Hardcoded_output_nid = 2;
 
@@ -201,6 +203,8 @@ public:
   bool              is_type_io() const;
 
   Hierarchy_index   hierarchy_go_down() const;
+  Hierarchy_index   hierarchy_go_up() const;
+  bool              is_root() const;
 
   void              set_type_sub(Lg_type_id subid);
   Lg_type_id        get_type_sub() const;
@@ -234,9 +238,9 @@ public:
   XEdge_iterator    out_edges() const;
   XEdge_iterator    inp_edges() const;
 
-  bool              has_graph_io()  const;
-  bool              has_graph_input()  const;
-  bool              has_graph_output() const;
+  bool              is_graph_io()     const { return nid == Hardcoded_input_nid || nid == Hardcoded_output_nid; }
+  bool              is_graph_input()  const { return nid == Hardcoded_input_nid;                                }
+  bool              is_graph_output() const { return nid == Hardcoded_output_nid;                               }
 
   void del_node();
 

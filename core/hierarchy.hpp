@@ -23,5 +23,8 @@ public:
 
   Hierarchy_index go_down(const Node &node) const;
 
+  Hierarchy_index go_up(const Node &node) const { return get_parent(node.get_hidx()); }
+  bool is_root(const Node &node) const { return node.get_hidx().is_root(); }
+
 };
 

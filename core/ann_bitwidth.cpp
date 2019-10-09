@@ -102,22 +102,22 @@ int64_t Ann_bitwidth::Implicit_range::round_power2(int64_t x) const {
   return -ux_r;
 }
 
-bool Ann_bitwidth::Implicit_range::expand(const Implicit_range &i, bool round2) {
+bool Ann_bitwidth::Implicit_range::expand(const Implicit_range &imp_range, bool round2) {
   bool updated = false;
 
-  if (sign & !i.sign) updated = true;
+  if (sign & !imp_range.sign) updated = true;
 
-  sign = sign & i.sign;
+  sign = sign & imp_range.sign;
 
-  if (!i.overflow && overflow) {
+  if (!imp_range.overflow && overflow) {
     // Nothing to do (!overflow is always smaller than overflow)
-  } else if (i.overflow && !overflow) {
+  } else if (imp_range.overflow && !overflow) {
     overflow = true;
     updated  = true;
-    max      = i.max;
-    min      = i.min;
+    max      = imp_range.max;
+    min      = imp_range.min;
   } else {
-    auto tmp = std::max(max, i.max);
+    auto tmp = std::max(max, imp_range.max);
     if (round2 && !overflow) {
       tmp = round_power2(tmp);
       if (sign) tmp--;
@@ -138,38 +138,38 @@ bool Ann_bitwidth::Implicit_range::expand(const Implicit_range &i, bool round2) 
   return updated;
 }
 
-void Ann_bitwidth::Implicit_range::pick(const Explicit_range &e) {
-  if (!e.overflow && !overflow) {
-    if (e.sign && sign) {
-    } else if (e.sign && !sign) {
+void Ann_bitwidth::Implicit_range::pick(const Explicit_range &exp_range) {
+  if (!exp_range.overflow && !overflow) {
+    if (exp_range.sign && sign) {
+    } else if (exp_range.sign && !sign) {
       max = max / 2;
       min = -min / 2;
-    } else if (!e.sign && sign) {
+    } else if (!exp_range.sign && sign) {
       // max = max;
       min = 0;
     }
 
-    if (max > e.max) max = e.max;
+    if (max > exp_range.max) max = exp_range.max;
 
-    if (min < e.min) min = e.min;
-  } else if (e.overflow && overflow) {
-    if (e.sign && sign) {
-    } else if (e.sign && !sign) {
+    if (min < exp_range.min) min = exp_range.min;
+  } else if (exp_range.overflow && overflow) {
+    if (exp_range.sign && sign) {
+    } else if (exp_range.sign && !sign) {
       max = max - 1;
       min = min + 1;
-    } else if (!e.sign && sign) {
+    } else if (!exp_range.sign && sign) {
       // max = max;
       min = 0;
     }
 
-    if (max > e.max) max = e.max;
+    if (max > exp_range.max) max = exp_range.max;
 
-    if (min < e.min) min = e.min;
-  } else if (e.overflow && !overflow) {
-  } else if (!e.overflow && overflow) {
-    overflow = e.overflow;
-    max      = e.max;
-    min      = e.min;
+    if (min < exp_range.min) min = exp_range.min;
+  } else if (exp_range.overflow && !overflow) {
+  } else if (!exp_range.overflow && overflow) {
+    overflow = exp_range.overflow;
+    max      = exp_range.max;
+    min      = exp_range.min;
   }
 }
 

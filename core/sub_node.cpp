@@ -86,12 +86,12 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
     }
     size_t instance_pid = io_pin["instance_pid"].GetUint();
 
-    auto name = io_pin["name"].GetString();
-    name2id[name] = instance_pid;
+    auto io_name = io_pin["name"].GetString();
+    name2id[io_name] = instance_pid;
     if (io_pins.size()<=instance_pid)
       io_pins.resize(instance_pid+1);
 
-    io_pins[instance_pid].name = name;
+    io_pins[instance_pid].name = io_name;
     io_pins[instance_pid].dir  = dir;
     io_pins[instance_pid].graph_io_pos  = pid;
 

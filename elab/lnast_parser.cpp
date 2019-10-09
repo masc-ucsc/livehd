@@ -142,8 +142,8 @@ mmap_lib::Tree_index Lnast_parser::process_operator_node(const mmap_lib::Tree_in
       return lnast->add_child(opr_parent_sts, Lnast_node(Lnast_ntype_if, Token()));
     } else {
       I(!range_stack.empty());
-      auto sts_stack_top   = std::get<0>(range_stack.back());
-      auto sts_parent_type = std::get<1>(range_stack.back());
+      //auto sts_stack_top   = std::get<0>(range_stack.back());
+      //auto sts_parent_type = std::get<1>(range_stack.back());
       //fmt::print("sts_stack_top:{}\n", ntype_dbg(lnast->get_data(sts_stack_top).type));
       //fmt::print("sts_parent_type:{}\n", ntype_dbg(sts_parent_type));
       return lnast->get_parent(std::get<0>(range_stack.back()));

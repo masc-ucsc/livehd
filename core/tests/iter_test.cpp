@@ -7,8 +7,8 @@
 
 bool failed = false;
 
-//#define VERBOSE
-#define VERBOSE2
+#define VERBOSE
+//#define VERBOSE2
 //#define VERBOSE3
 
 void generate_graphs(int n) {
@@ -202,6 +202,72 @@ bool bwd(int n) {
   return true;
 }
 
+void topo_add_chain_fwd(absl::flat_hash_set<Node::Compact> &discovered_node
+    , std::vector<Node> &node_stack
+    , const XEdge &edge) {
+
+  const auto dst_node = edge.driver.get_node(); // fwd
+
+  if (hier) {
+    if (dst_node.is_type_sub() && !dst_node.is_type_sub_empty()) { // DOWN??
+      fmt::print("dfs adding subnode:{} (many types, opt for speed!)\n", dst_node.debug_name());
+
+      auto down_pin = edge.driver.get_down_pin(); // fwd
+      I(down_pin.is_driver_pin()); // fwd
+
+      for (auto &edge2 : down_pin.inp_edges()) {  // fwd
+        topo_add_chain_fwd(discovered_node, node_stack, edge2);
+      }
+
+      return;
+    }else if (node2.is_graph_input() && !node2.is_root()) { // UP??
+      auto up_hidx = node2.hierarchy_go_up();
+      auto up_node = node2;
+      up_node.update(up_hidx);
+      node_stack.push_back(up_node);
+
+      fmt::print("prop_up node:{} lg:{} -> lg:{}\n", node2.debug_name(), node2.get_class_lgraph()->get_name(),
+          up_node.get_class_lgraph()->get_name());
+    }
+  }
+
+  if (discovered_node.count(dst_node.get_compact()))
+    return;
+
+  node_stack.push_back(dst_node);
+}
+
+// performs Topological Sort on a given DAG
+void doTopologicalSort(LGraph *lg) {
+
+  absl::flat_hash_set<Node::Compact>     discovered_node;
+  std::vector<Node> node_stack;
+
+  discovered_node.clear();
+
+  bool hier= true;
+
+  for (auto node : lg->fast()) { // FIXME: to flow, no fast (start with inputs for fwd, outputs for bwd)
+    if (discovered_node.count(node.get_compact())) continue;
+
+    node_stack.push_back(node);
+    while(!node_stack.empty()) {
+      auto node2 = node_stack.back();
+      node_stack.pop_back();
+
+      if (!discovered_node.count(node2.get_compact())) {
+        fmt::print("topo node:{} lg:{}\n", node2.debug_name(), node2.get_class_lgraph()->get_name());
+        discovered_node.insert(node2.get_compact());
+      }
+      // forward traversal : inp_edges ; out.driver
+      // backward traversal: out_edges ; out.sink
+      for (auto &edge : node2.inp_edges()) {
+        topo_add_chain_fwd(discovered_node, node_stack, edge);
+      }
+    }
+  }
+}
+
 void simple() {
   std::string gname = "simple_iter";
   LGraph *g     = LGraph::create("lgdb_iter_test", gname, "test");
@@ -319,6 +385,10 @@ void simple() {
     fmt::print("\n");
   }
 #endif
+
+  doTopologicalSort(g);
+
+  exit(0); // FIXME
 
   std::vector<std::string> fast;
   int conta =0;

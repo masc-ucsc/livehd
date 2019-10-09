@@ -217,3 +217,32 @@ bool Node_pin::is_connected() const {
   return current_g->has_inputs(*this);
 }
 
+Node_pin Node::get_down_pin() const {
+  auto node = get_node();
+  I(node.is_type_sub());
+  I(!node.is_type_sub_empty());
+  I(!top_g->ref_htree()->is_leaf(hidx));
+
+  // 1st: Get down_hidx
+  auto *tree_pos = Ann_node_tree_pos::ref(current_g);
+  I(tree_pos);
+  I(tree_pos->has(node.get_compact_class()));
+  auto pos = tree_pos->get(node.get_compact_class());
+
+  Hierarchy_index down_hidx(hidx.level+1, pos);
+
+  // 2nd: get down_pid
+  I(pid != Port_invalid);
+  auto down_pid  = node.get_type_sub_node().get_instance_pid_from_graph_pos(pid);
+  I(down_pid != Port_invalid);
+
+  // 3rd: get down_current_g
+  auto *down_current_g = top_g->ref_htree()->ref_lgraph(down_hidx);
+
+  // 4th: get down_idx
+  Index_ID down_idx = down_current_g->find_idx_from_pid(driver?Node::Hardcoded_output_nid: Node::Hardcoded_input_nid, down_pid);
+  I(down_idx);
+
+  return Node_pin(top_g, down_current_g, down_hidx, down_idx, down_pid, false);
+}
+
