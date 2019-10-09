@@ -161,13 +161,21 @@ std::string_view Lnast_to_verilog_parser::get_node_name(Lnast_node node) {
 
 bool Lnast_to_verilog_parser::is_number(std::string_view test_string) {
   // TODO(joapena): check how to use regex
-  return test_string.at(1) == 'd';
+  if (test_string.find("0d") == 0) {
+    return true;
+  } else if (test_string.find("0b") == 0) {
+    return true;
+  } else if (test_string.find("0x") == 0) {
+    return true;
+  }
+  return false;
 }
 
-std::string_view Lnast_to_verilog_parser::process_number(std::string_view num) {
-    std::string::size_type n;
-    n = num.find("d");
-    return num.substr(n + 1);
+std::string_view Lnast_to_verilog_parser::process_number(std::string_view num_string) {
+  if (num_string.find("0d") == 0) {
+    return num_string.substr(2);
+  }
+  return num_string;
 }
 
 bool Lnast_to_verilog_parser::is_ref(std::string_view test_string) {
@@ -327,6 +335,8 @@ void Lnast_to_verilog_parser::process_operator() {
       fmt::print("map_it find: {} | {}\n", map_it->first, map_it->second.first);
     } else if (ref.size() > 2 && !is_number(ref)) {
       new_vars.insert(ref);
+    } else if (is_number(ref)) {
+      ref = process_number(ref);
     }
     // check if a number
 

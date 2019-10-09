@@ -12,7 +12,6 @@ private:
   std::vector<Lnast_node> node_buffer;
   std::string_view memblock;
   Lnast *lnast;
-  Lnast_parser lnast_parser;
   std::string node_str_buffer;
 
   std::map<std::string_view, std::string> ref_map;
@@ -26,7 +25,7 @@ private:
   void process_node(const mmap_lib::Tree_index &it);
   void process_top(mmap_lib::Tree_level level);
   void push_statement(mmap_lib::Tree_level level, Lnast_ntype_id type); // prepare for next statement
-  void pop_statement(mmap_lib::Tree_level level, Lnast_ntype_id type);
+  void pop_statement();
   void add_to_buffer(Lnast_node node);
   void process_buffer();
 
@@ -34,14 +33,14 @@ private:
   void flush_it(std::vector<Lnast_node>::iterator it);
   std::string_view join_it(std::vector<Lnast_node>::iterator it, std::string del);
   bool is_number(std::string_view test_string);
-  std::string_view process_number(std::string_view num);
+  std::string_view process_number(std::string_view num_string);
   bool is_ref(std::string_view test_string);
   void inc_indent_buffer();
   void dec_indent_buffer();
   std::string indent_buffer();
 
-  /*
   void process_pure_assign();
+  /*
   void process_as();
   */
   void process_label();
@@ -60,8 +59,8 @@ private:
 public:
   std::string buffer;
 
-  Lnast_to_pyrope_parser(std::string_view memblock, Lnast *lnast)
-    : memblock(memblock), lnast(lnast) { setup_ntype_str_mapping(); };
+  Lnast_to_pyrope_parser(std::string_view m_memblock, Lnast *m_lnast)
+    : memblock(m_memblock), lnast(m_lnast) { setup_ntype_str_mapping(); };
   std::string ntype_dbg(Lnast_ntype_id ntype);
   std::string stringify();
 };

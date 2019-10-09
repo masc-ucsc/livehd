@@ -19,10 +19,10 @@ void Lnast_to_pyrope_parser::process_node(const mmap_lib::Tree_index& it) {
 
   // add while to see pop_statement and to add buffer
   if (it.level < curr_statement_level) {
-    pop_statement(it.level, node_data.type);
+    pop_statement();
 
     while (it.level + 1 < curr_statement_level) {
-      pop_statement(it.level, node_data.type);
+      pop_statement();
     }
     type = ntype_dbg(node_data.type);
   }
@@ -72,7 +72,7 @@ void Lnast_to_pyrope_parser::push_statement(mmap_lib::Tree_level level, Lnast_nt
   fmt::print("after push\n");
 }
 
-void Lnast_to_pyrope_parser::pop_statement(mmap_lib::Tree_level level, Lnast_ntype_id type) {
+void Lnast_to_pyrope_parser::pop_statement() {
   fmt::print("pop\n");
 
   process_buffer();
@@ -104,8 +104,8 @@ void Lnast_to_pyrope_parser::process_buffer() {
 
   if (type == Lnast_ntype_pure_assign) {
     // check if should be in combinational or stateful
-    process_operator();
-    // process_pure_assign();
+    // process_operator();
+    process_pure_assign();
   } else if (type == Lnast_ntype_as) {
     process_operator();
     // process_as();
@@ -186,14 +186,21 @@ std::string_view Lnast_to_pyrope_parser::join_it(std::vector<Lnast_node>::iterat
 }
 
 bool Lnast_to_pyrope_parser::is_number(std::string_view test_string) {
-  // TODO(joapena): check how to use regex
+  if (test_string.find("0d") == 0) {
+    return true;
+  } else if (test_string.find("0b") == 0) {
+    return true;
+  } else if (test_string.find("0x") == 0) {
+    return true;
+  }
   return false;
 }
 
-std::string_view Lnast_to_pyrope_parser::process_number(std::string_view num) {
-    std::string::size_type n;
-    n = num.find("d");
-    return num.substr(n + 1);
+std::string_view Lnast_to_pyrope_parser::process_number(std::string_view num_string) {
+  if (num_string.find("0d") == 0) {
+    return num_string.substr(2);
+  }
+  return num_string;
 }
 
 bool Lnast_to_pyrope_parser::is_ref(std::string_view test_string) {
@@ -219,11 +226,9 @@ std::string Lnast_to_pyrope_parser::indent_buffer() {
   return std::string(indent_buffer_size * 2, ' ');
 }
 
-/*
 void Lnast_to_pyrope_parser::process_pure_assign() {
   std::vector<Lnast_node>::iterator it = node_buffer.begin();
   it++;
-  node_str_buffer = absl::StrCat(node_str_buffer, "pure_assign:\t");
   std::string_view key = get_node_name(*it);
   it++;
 
@@ -234,18 +239,21 @@ void Lnast_to_pyrope_parser::process_pure_assign() {
   if (map_it != ref_map.end()) {
     ref = map_it->second;
     fmt::print("map_it find: {} | {}\n", map_it->first, map_it->second);
+  } else if (is_number(ref)) {
+    ref = process_number(ref);
   }
   value = absl::StrCat(value, ref);
 
+  fmt::print("pure_assign value:\tkey: {}\tvalue: {}\n", key, value);
   if (is_ref(key)) {
     fmt::print("inserting:\tkey:{}\tvalue:{}\n", key, value);
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
+  } else {
+    node_str_buffer = absl::StrCat(node_str_buffer, indent_buffer(), key, " = ", value, "\n");
   }
-
-  fmt::print("pure_assign value:\tkey: {}\tvalue: {}\n", key, value);
-  node_str_buffer = absl::StrCat(node_str_buffer, key, " = ", value, "\n");
 }
 
+/*
 void Lnast_to_pyrope_parser::process_as() {
   std::vector<Lnast_node>::iterator it = node_buffer.begin();
   it++;
@@ -324,8 +332,14 @@ void Lnast_to_pyrope_parser::process_operator() {
     std::map<std::string_view, std::string>::iterator map_it;
     map_it = ref_map.find(ref);
     if (map_it != ref_map.end()) {
-      ref = map_it->second;
-      fmt::print("map_it find: {} | {}\n", map_it->first, map_it->second);
+      if (std::count(map_it->second.begin(), map_it->second.end(), ' ')) {
+        ref = absl::StrCat("(", map_it->second, ")");
+      } else {
+        ref = map_it->second;
+      }
+      fmt::print("map_it find: {} | {}\n", map_it->first, ref);
+    } else if (is_number(ref)) {
+      ref = process_number(ref);
     }
     // check if a number
 
