@@ -17,6 +17,8 @@ std::string Verilog_parser_module::create_header() {
       inputs = absl::StrCat(inputs, ",\ninput ", var_name);
     } else if (var_type == 2) {
       outputs = absl::StrCat(outputs, ",\noutput ", var_name);
+    } else if (var_type == 3) {
+      outputs = absl::StrCat(outputs, ",\noutput ", var_name);
     } else {
       wires = absl::StrCat(wires, " wire ", var_name, ";\n");
     }
@@ -40,15 +42,15 @@ std::string Verilog_parser_module::create_always() {
 }
 
 std::string Verilog_parser_module::create_next() {
-  std::string buffer = absl::StrCat(indent_buffer(1), "always @(posedge clk) begin\n");
+  std::string buffer;
 
   for (auto ele : statefull_set) {
-    if (get_variable_type(ele) == 2) {
-      buffer = absl::StrCat(buffer, indent_buffer(2), ele, " = ", ele, "_next\n");
+    if (get_variable_type(ele) == 3) {
+      buffer = absl::StrCat(buffer, "\n", indent_buffer(1), "always @(posedge clk) begin\n", indent_buffer(2), ele, " <= ", ele, "_next\n", indent_buffer(1), "end\n");
     }
   }
 
-  return absl::StrCat(buffer, indent_buffer(1), "end\n");
+  return buffer;
 }
 
 std::string Verilog_parser_module::create_file() {
@@ -67,6 +69,7 @@ void Verilog_parser_module::add_to_buffer_multiple(std::vector<std::pair<int32_t
 
 // returns 1 if input
 // returns 2 if output
+// returns 3 if latch
 // otherwise returns 0
 
 uint32_t Verilog_parser_module::get_variable_type(std::string_view var_name) {
@@ -74,6 +77,8 @@ uint32_t Verilog_parser_module::get_variable_type(std::string_view var_name) {
    return 1;
   } else if (var_name.at(0) == '%') {
     return 2;
+  } else if (var_name.at(0) == '@') {
+    return 3;
   }
 
   return 0;

@@ -231,7 +231,7 @@ void Lnast_to_verilog_parser::process_pure_assign() {
     fmt::print("statefull_set:\tinserting:\tkey:{}\n", key);
 
     std::string phrase = absl::StrCat(key);
-    if (curr_module->get_variable_type(key) == 2) {
+    if (curr_module->get_variable_type(key) == 3) {
       phrase = absl::StrCat(phrase, "_next");
     }
     phrase = absl::StrCat(phrase, " = ", value, ";\n");
