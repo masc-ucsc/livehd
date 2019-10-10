@@ -148,8 +148,8 @@ public:
   Node(LGraph *_g, const Compact &comp) {
     update(_g, comp);
   }
-  Node(LGraph *_g, const Hierarchy_index &_hidx, Compact_class comp);
-  Node(LGraph *_g, Compact_class comp);
+  Node(LGraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp);
+  Node(LGraph *_g, const Compact_class &comp);
   Node &operator=(const Node &obj) {
     I(this != &obj); // Do not assign object to itself. works but wastefull
     top_g     = obj.top_g;

@@ -82,7 +82,7 @@ Node::Node(LGraph *_g)
   I(top_g);
 }
 
-Node::Node(LGraph *_g, const Hierarchy_index &_hidx, Compact_class comp)
+Node::Node(LGraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp)
   :top_g(_g)
   ,current_g(0)
   ,hidx(_hidx)
@@ -98,7 +98,7 @@ Node::Node(LGraph *_g, const Hierarchy_index &_hidx, Compact_class comp)
   //I(top_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
 }
 
-Node::Node(LGraph *_g, Compact_class comp)
+Node::Node(LGraph *_g, const Compact_class &comp)
   :top_g(_g)
   ,current_g(0)
   ,hidx(Hierarchy_tree::root_index())

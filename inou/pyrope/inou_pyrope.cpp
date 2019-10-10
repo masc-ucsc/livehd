@@ -40,15 +40,15 @@ void Inou_pyrope::compute_histogram(LGraph *g) {
   for(const auto node : g->forward()) {
 
     cells++;
-    std::string name(node.get_type().get_name());
+    std::string tmp_name(node.get_type().get_name());
     for(const auto &edge : node.inp_edges()) {
-      absl::StrAppend(&name, "_i", std::to_string(edge.get_bits()));
+      absl::StrAppend(&tmp_name, "_i", std::to_string(edge.get_bits()));
     }
     for(const auto &edge : node.out_edges()) {
-      absl::StrAppend(&name, "_o", std::to_string(edge.get_bits()));
+      absl::StrAppend(&tmp_name, "_o", std::to_string(edge.get_bits()));
     }
 
-    histogram[name]++;
+    histogram[tmp_name]++;
   }
 
   for(auto it=histogram.begin(); it != histogram.end(); it++) {

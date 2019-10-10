@@ -238,8 +238,8 @@ public:
     if constexpr (std::is_invocable_r_v<bool, FN &, Node &, Lg_type_id>) {  // WARNING: bool must be before void
       each_sub_fast_direct(f1);
     } else if constexpr (std::is_invocable_r_v<void, FN &, Node &, Lg_type_id>) {
-      auto f2 = [&f1](Node &node, Lg_type_id lgid) {
-        f1(node, lgid);
+      auto f2 = [&f1](Node &node, Lg_type_id l_lgid) {
+        f1(node, l_lgid);
         return true;
       };
       each_sub_fast_direct(f2);

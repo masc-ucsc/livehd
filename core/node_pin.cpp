@@ -217,7 +217,7 @@ bool Node_pin::is_connected() const {
   return current_g->has_inputs(*this);
 }
 
-Node_pin Node::get_down_pin() const {
+Node_pin Node_pin::get_down_pin() const {
   auto node = get_node();
   I(node.is_type_sub());
   I(!node.is_type_sub_empty());
@@ -240,7 +240,7 @@ Node_pin Node::get_down_pin() const {
   auto *down_current_g = top_g->ref_htree()->ref_lgraph(down_hidx);
 
   // 4th: get down_idx
-  Index_ID down_idx = down_current_g->find_idx_from_pid(driver?Node::Hardcoded_output_nid: Node::Hardcoded_input_nid, down_pid);
+  Index_ID down_idx = down_current_g->find_idx_from_pid(is_driver()?Node::Hardcoded_output_nid: Node::Hardcoded_input_nid, down_pid);
   I(down_idx);
 
   return Node_pin(top_g, down_current_g, down_hidx, down_idx, down_pid, false);

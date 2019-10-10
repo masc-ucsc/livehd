@@ -230,7 +230,7 @@ public:
 
   std::string_view scan_prev_sview() const {
     size_t p = scanner_pos - 1;
-    if (p < 0) p = 0;
+    if (scanner_pos <= 0) p = 0;
     return std::string_view(&buffer[token_list[p].pos], token_list[p].len);
   }
 
@@ -253,7 +253,7 @@ public:
     size_t p = scanner_pos + offset;
     if (p >= token_list.size())
       p = token_list.size()-1;
-    else if (p < 0)
+    else if (offset > static_cast<int>(scanner_pos))
       p = 0 ;
     return std::string_view(&buffer[token_list[p].pos], token_list[p].len);
   }
@@ -287,7 +287,7 @@ public:
     size_t p = scanner_pos + offset;
     if (p >= token_list.size())
       p = token_list.size() - 1;
-    else if (p < 0)
+    else if (offset > static_cast<int>(scanner_pos))
       p = 0 ;
     return token_list[p].tok == tok;;
   }
@@ -307,7 +307,7 @@ public:
     size_t p = scanner_pos + offset;
     if (p >= token_list.size())
       p = token_list.size() - 1;
-    else if (p < 0)
+    else if (offset > static_cast<int>(scanner_pos))
       p = 0 ;
     return token_list[p];
   }

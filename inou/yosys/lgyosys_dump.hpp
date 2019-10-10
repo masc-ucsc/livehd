@@ -78,8 +78,8 @@ private:
 
 protected:
 public:
-  Lgyosys_dump(RTLIL::Design *design, bool hier = false)
-      : design(design) {
+  Lgyosys_dump(RTLIL::Design *d, bool hier = false)
+      : design(d) {
     hierarchy = hier;
   };
 
