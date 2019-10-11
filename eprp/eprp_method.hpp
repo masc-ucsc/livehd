@@ -31,9 +31,9 @@ public:
   bool check_labels(const Eprp_var &var, std::string &err_msg) const;
 
   bool has_label(const std::string &label) const;
-  void add_label_optional(const std::string &attr, const std::string &help, const std::string &default_value = "") {
-    add_label(attr, help, false, default_value);
+  void add_label_optional(const std::string &attr, const std::string &help_txt, const std::string &default_value = "") {
+    add_label(attr, help_txt, false, default_value);
   };
-  void               add_label_required(const std::string &attr, const std::string &help) { add_label(attr, help, true); };
+  void               add_label_required(const std::string &attr, const std::string &help_txt) { add_label(attr, help_txt, true); };
   const std::string &get_label_help(const std::string &label) const;
 };

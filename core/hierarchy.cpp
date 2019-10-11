@@ -13,6 +13,7 @@ Hierarchy_tree::Hierarchy_tree(LGraph *_top)
 
 LGraph *Hierarchy_tree::ref_lgraph(const Hierarchy_index &hidx) const {
 
+  // NOTE: if this becomes a bottleneck, we can memorize the LGraph *
   const auto &data = get_data(hidx);
 
   I(data.lgid);
@@ -36,18 +37,30 @@ Node Hierarchy_tree::get_instance_node(const Hierarchy_index &hidx) const {
 }
 
 void Hierarchy_tree::regenerate_step(LGraph *lg, const Hierarchy_index &parent) {
-  for (const auto it : lg->get_down_nodes_map()) {
-    auto child_lgid = it.second;
+  auto *tree_pos = Ann_node_tree_pos::ref(lg);
 
-    Hierarchy_data data(child_lgid, it.first.nid); // FIXME: inline once move operator is added to mmap_lib::tree
+// FIXME: remove down_maps from node_type
+
+  int conta = 0;
+  for(auto it:*tree_pos) {
+    auto node     = it.first.get_node(lg);
+    I(node.is_type_sub());
+    if (node.is_type_sub_empty())
+      continue;
+
+    tree_pos->set(it.first, conta);
+
+    auto child_lgid = node.get_type_sub();
+
+    Hierarchy_data data(child_lgid, conta);
     auto child = add_child(parent, data);
 
     auto *child_lg = lg->get_library().try_find_lgraph(child_lgid);
     if (child_lg) {
-      I(Ann_node_tree_pos::ref(lg)->get(Node::Compact_class(it.first.nid)) == child.pos); // down_nodes should be consistent with add_child
-
       regenerate_step(child_lg, child);
     }
+
+    conta++;
   }
 }
 
@@ -56,17 +69,26 @@ void Hierarchy_tree::regenerate() {
   set_root(data);
 
   regenerate_step(top, Hierarchy_tree::root_index());
+
+  for(const auto &index:depth_preorder()) {
+    std::string indent(index.level, ' ');
+    const auto &index_data = get_data(index);
+    fmt::print("{} l:{} p:{} lgid:{} nid:{}\n", indent, index.level, index.pos, index_data.lgid, index_data.nid);
+  }
+  auto *tree_pos = Ann_node_tree_pos::ref(top);
+  for(auto it:*tree_pos) {
+    fmt::print("top first:{} second:{}\n", it.first.nid, it.second);
+  }
 }
 
 Hierarchy_index Hierarchy_tree::go_down(const Node &node) const {
-  // FIXME: Move to node.cpp
   auto *tree_pos = Ann_node_tree_pos::ref(node.get_class_lgraph());
   I(tree_pos);
   I(tree_pos->has(node.get_compact_class()));
   auto pos = tree_pos->get(node.get_compact_class());
 
   I(!is_leaf(node.get_hidx()));
-  Hierarchy_index child(node.get_hidx().level, pos);
+  Hierarchy_index child(node.get_hidx().level+1, pos);
   return child;
 }
 

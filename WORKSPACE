@@ -71,10 +71,24 @@ new_git_repository(
     remote = "https://github.com/fmtlib/fmt.git",
     #strip_prefix = "include",
 )
+new_git_repository(
+    name = "slang",
+    build_file = "BUILD.slang",
+    commit = "7044cea55f10eb9d37048293bf5287ea15559dec", # Obtober 3, 2019
+    remote = "https://github.com/MikePopoloski/slang.git",
+    #strip_prefix = "include",
+)
+new_git_repository(
+    name = "json",
+    build_file = "BUILD.json",
+    commit = "d187488e0db0533bdd7c53ec0c687ca1745b8b9e", # Obtober 3, 2019
+    remote = "https://github.com/nlohmann/json.git",
+    #strip_prefix = "include",
+)
 git_repository(
     name = "iassert",
     #build_file = "BUILD.iassert",
-    commit = "b7b1dbaaa5980a82cc0d12a24b1c0bfd5c3abd0b", # September 26, 2019
+    commit = "5bea9d5d1a9605ec52ec2085bd86a627cff643ab", # October 1st, 2019
     remote = "https://github.com/masc-ucsc/iassert.git",
     #strip_prefix = "src",
 )

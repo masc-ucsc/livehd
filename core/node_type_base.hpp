@@ -154,9 +154,9 @@ public:
     }
 #ifndef NDEBUG
     for (size_t i = 0; i < inputs.size(); i++) {
-      std::string data(inputs[i]);
-      std::transform(data.begin(), data.end(), data.begin(), ::toupper);
-      I(inputs[i] == data);  // must be set uppercase
+      std::string d_data(inputs[i]);
+      std::transform(d_data.begin(), d_data.end(), d_data.begin(), ::toupper);
+      I(inputs[i] == d_data);  // must be set uppercase
     }
 #endif
 
@@ -184,9 +184,9 @@ public:
     }
 #ifndef NDEBUG
     for (size_t i = 0; i < outputs.size(); i++) {
-      std::string data(outputs[i]);
-      std::transform(data.begin(), data.end(), data.begin(), ::toupper);
-      I(outputs[i] == data);  // must be set uppercase
+      std::string d_data(outputs[i]);
+      std::transform(d_data.begin(), d_data.end(), d_data.begin(), ::toupper);
+      I(outputs[i] == d_data);  // must be set uppercase
     }
 #endif
 

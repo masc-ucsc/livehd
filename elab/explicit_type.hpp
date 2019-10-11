@@ -9,7 +9,7 @@ struct Explicit_type {
   constexpr Explicit_type() {}
 
   //! Construction from a fundamental value.
-  constexpr Explicit_type(T value) : value(value) {}
+  constexpr Explicit_type(T _value) : value(_value) {}
 
   //! Implicit conversion back to the fundamental data type.
   [[nodiscard]] constexpr inline operator T() const noexcept { return value; }

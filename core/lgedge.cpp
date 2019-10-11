@@ -276,29 +276,29 @@ void Node_Internal::try_recycle() {
 
   if (is_root()) return;  // Keep node
 
-  Node_Internal *root     = (Node_Internal *)&get_root();
-  Index_ID       root_idx = root->get_nid();
-  I(root_idx == root->get_self_idx());
+  Node_Internal *root_ptr     = (Node_Internal *)&get_root();
+  Index_ID       root_idx = root_ptr->get_nid();
+  I(root_idx == root_ptr->get_self_idx());
 
   SIndex_ID self_idx = get_self_idx();
   SIndex_ID prev_idx = root_idx;
-  I(prev_idx != self_idx);  // because it is not a root
+  I(prev_idx != self_idx);  // because it is not a root_ptr
 
-  while (root[prev_idx - root_idx].get_next() != self_idx) {
-    I(root[prev_idx - root_idx].is_next_state());
-    prev_idx = root[prev_idx - root_idx].get_next();
+  while (root_ptr[prev_idx - root_idx].get_next() != self_idx) {
+    I(root_ptr[prev_idx - root_idx].is_next_state());
+    prev_idx = root_ptr[prev_idx - root_idx].get_next();
   }
 
   if (is_next_state()) {
-    root[prev_idx - root_idx].set_next_state(get_next());
+    root_ptr[prev_idx - root_idx].set_next_state(get_next());
   } else {
-    root[prev_idx - root_idx].set_last_state();
+    root_ptr[prev_idx - root_idx].set_last_state();
   }
 
   set_free_state();
-  I(root[-root_idx].is_page_state());
+  I(root_ptr[-root_idx].is_page_state());
 
-  Node_Internal_Page master_page = Node_Internal_Page::get(root[-root_idx].sedge);
+  Node_Internal_Page master_page = Node_Internal_Page::get(root_ptr[-root_idx].sedge);
 
   nid                  = master_page.free_idx;
   master_page.free_idx = self_idx;
@@ -413,15 +413,15 @@ void Node_Internal::dump() const {
 
 // LCOV_EXCL_START
 void Node_Internal::dump_full() const {
-  Node_Internal *root = (Node_Internal *)&get_root();
+  Node_Internal *root_ptr = (Node_Internal *)&get_root();
 
-  Index_ID             root_idx = root->get_nid();
+  Index_ID             root_idx = root_ptr->get_nid();
   const Node_Internal *node     = this;
 
   node->dump();
   while (true) {
     Index_ID idx = node->get_next();
-    node         = &root[idx - root_idx];
+    node         = &root_ptr[idx - root_idx];
 
     node->dump();
 
@@ -452,56 +452,58 @@ void Node_Internal::assimilate_edges(Node_Internal *other_ptr) {
   }
   int original_start_pos = other_pos;
 
-  int self_pos = 0;
+  {
+    int self_pos = 0;
 
-  int other_inp_long_removed = 0;
+    int other_inp_long_removed = 0;
 
-  for (int i = 0; i < other.inp_pos;) {
-    if (other.sedge[other_pos].is_snode()) {
-      SEdge_Internal *sedge_i = (SEdge_Internal *)&sedge[self_pos];
+    for (int i = 0; i < other.inp_pos;) {
+      if (other.sedge[other_pos].is_snode()) {
+        SEdge_Internal *sedge_i = (SEdge_Internal *)&sedge[self_pos];
 
-      bool done = sedge_i->set(other.sedge[other_pos].get_idx(), other.sedge[other_pos].get_inp_pid(), true);
-      if (done) {
-        self_pos++;
-        inc_inputs(false);
+        bool done = sedge_i->set(other.sedge[other_pos].get_idx(), other.sedge[other_pos].get_inp_pid(), true);
+        if (done) {
+          self_pos++;
+          inc_inputs(false);
+        } else {
+          if (self_pos >= (Num_SEdges - 4 - 2) || inp_long>=3) break;
+
+          LEdge_Internal *ledge_i = (LEdge_Internal *)&sedge[self_pos];
+          ledge_i->set(other.sedge[other_pos].get_idx(), other.sedge[other_pos].get_inp_pid(), true  // input
+              );
+
+          self_pos += 4;
+          inc_inputs(true);
+        }
+        other_pos++;
+        i += 1;
       } else {
         if (self_pos >= (Num_SEdges - 4 - 2) || inp_long>=3) break;
-
-        LEdge_Internal *ledge_i = (LEdge_Internal *)&sedge[self_pos];
-        ledge_i->set(other.sedge[other_pos].get_idx(), other.sedge[other_pos].get_inp_pid(), true  // input
-        );
-
-        self_pos += 4;
+        sedge[self_pos++] = other.sedge[other_pos++];
+        sedge[self_pos++] = other.sedge[other_pos++];
+        sedge[self_pos++] = other.sedge[other_pos++];
+        sedge[self_pos++] = other.sedge[other_pos++];
+        i += 4;
         inc_inputs(true);
+        other_inp_long_removed++;
       }
-      other_pos++;
-      i += 1;
-    } else {
-      if (self_pos >= (Num_SEdges - 4 - 2) || inp_long>=3) break;
-      sedge[self_pos++] = other.sedge[other_pos++];
-      sedge[self_pos++] = other.sedge[other_pos++];
-      sedge[self_pos++] = other.sedge[other_pos++];
-      sedge[self_pos++] = other.sedge[other_pos++];
-      i += 4;
-      inc_inputs(true);
-      other_inp_long_removed++;
+
+      if (self_pos >= (Num_SEdges - 1 - 2))  // at least an snode
+        break;
+      I(has_space_short());
     }
 
-    if (self_pos >= (Num_SEdges - 1 - 2))  // at least an snode
-      break;
-    I(has_space_short());
-  }
+    int start_pos = original_start_pos;
+    for (int j = other_pos; j < other_end; j++) {
+      other.sedge[start_pos++] = other.sedge[j];
+    }
 
-  int start_pos = original_start_pos;
-  for (int j = other_pos; j < other_end; j++) {
-    other.sedge[start_pos++] = other.sedge[j];
+    I(other_end >= other_pos);
+    other.inp_pos -= (other_pos - original_start_pos);
+    I(other_inp_long_removed <= other.inp_long);
+    other.inp_long -= other_inp_long_removed;
+    I(other.inp_pos >= (4 * other.inp_long));
   }
-
-  I(other_end >= other_pos);
-  other.inp_pos -= (other_pos - original_start_pos);
-  I(other_inp_long_removed <= other.inp_long);
-  other.inp_long -= other_inp_long_removed;
-  I(other.inp_pos >= (4 * other.inp_long));
 
   if (!has_space_short())
     return;

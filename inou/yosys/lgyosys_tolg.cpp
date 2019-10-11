@@ -313,7 +313,7 @@ static bool is_black_box_output(const RTLIL::Module *module, const RTLIL::Cell *
   ::Pass::error("Could not find a definition for module {}, treating as a blackbox but could not determine whether {} is an output",
                  cell->type.str(), port_name.str());
 
-  log_error("unknown port %s at module %s cell %s\n", port_name.c_str(), module->name.c_str(), cell->type.c_str());
+  log_error("output unknown port %s at module %s cell %s\n", port_name.c_str(), module->name.c_str(), cell->type.c_str());
   I(false); // TODO: is it possible to resolve this case?
   return false;
 }
@@ -348,7 +348,7 @@ static bool is_black_box_input(const RTLIL::Module *module, const RTLIL::Cell *c
   ::Pass::error("Could not find a definition for module {}, treating as a blackbox but could not determine whether {} is an input",
                  cell->type.str(), port_name.str());
 
-  log_error("unknown port %s at module %s cell %s\n", port_name.c_str(), module->name.c_str(), cell->type.c_str());
+  log_error("input unknown port %s at module %s cell %s\n", port_name.c_str(), module->name.c_str(), cell->type.c_str());
   I(false); // TODO: is it possible to resolve this case?
   return false;
 }

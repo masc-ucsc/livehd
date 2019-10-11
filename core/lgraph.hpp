@@ -90,6 +90,9 @@ protected:
   XEdge_iterator out_edges(const Node &node) const;
   XEdge_iterator inp_edges(const Node &node) const;
 
+  XEdge_iterator out_edges(const Node_pin &pin) const;
+  XEdge_iterator inp_edges(const Node_pin &pin) const;
+
   bool has_outputs(const Node_pin &pin) const {
     I(pin.get_idx() < node_internal.size());
     I(node_internal[pin.get_idx()].is_root());
@@ -238,8 +241,8 @@ public:
     if constexpr (std::is_invocable_r_v<bool, FN &, Node &, Lg_type_id>) {  // WARNING: bool must be before void
       each_sub_fast_direct(f1);
     } else if constexpr (std::is_invocable_r_v<void, FN &, Node &, Lg_type_id>) {
-      auto f2 = [&f1](Node &node, Lg_type_id lgid) {
-        f1(node, lgid);
+      auto f2 = [&f1](Node &node, Lg_type_id l_lgid) {
+        f1(node, l_lgid);
         return true;
       };
       each_sub_fast_direct(f2);

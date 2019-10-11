@@ -463,6 +463,64 @@ XEdge_iterator LGraph::inp_edges(const Node &node) const {
   return xiter;
 }
 
+XEdge_iterator LGraph::out_edges(const Node_pin &pin) const {
+  I(pin.get_class_lgraph() == this);
+  XEdge_iterator xiter;
+
+  Index_ID idx2 = pin.get_idx();
+  I(node_internal[idx2].is_root());
+
+  while (true) {
+    auto n = node_internal[idx2].get_num_local_outputs();
+    uint8_t i;
+    const Edge_raw *redge;
+    if (pin.get_pid() == node_internal[idx2].get_dst_pid()) { // Only add edges with same source
+      for(i=0, redge = node_internal[idx2].get_output_begin()
+          ;i<n
+          ;i++,redge += redge->next_node_inc()) {
+        I(redge->get_self_idx() == idx2);
+        xiter.emplace_back(redge->get_out_pin(pin.get_top_lgraph(), pin.get_class_lgraph(), pin.get_hidx())
+            ,redge->get_inp_pin(pin.get_top_lgraph(), pin.get_class_lgraph(), pin.get_hidx())
+            );
+      }
+    }
+    if (node_internal[idx2].is_last_state()) break;
+    Index_ID tmp = node_internal[idx2].get_next();
+    I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
+    idx2 = tmp;
+  }
+
+  return xiter;
+}
+
+XEdge_iterator LGraph::inp_edges(const Node_pin &pin) const {
+  I(pin.get_class_lgraph() == this);
+  XEdge_iterator xiter;
+
+  Index_ID idx2 = pin.get_idx();
+  I(node_internal[idx2].is_root());
+
+  while (true) {
+    auto n = node_internal[idx2].get_num_local_inputs();
+    uint8_t i;
+    const Edge_raw *redge;
+    if (pin.get_pid() == node_internal[idx2].get_dst_pid()) { // Only add edges with same source
+      for(i=0, redge = node_internal[idx2].get_input_begin()
+          ;i<n
+          ;i++,redge += redge->next_node_inc()) {
+        I(redge->get_self_idx() == idx2);
+        xiter.emplace_back(redge->get_out_pin(pin.get_top_lgraph(),pin.get_class_lgraph(), pin.get_hidx()),redge->get_inp_pin(pin.get_top_lgraph(),pin.get_class_lgraph(), pin.get_hidx()));
+      }
+    }
+    if (node_internal[idx2].is_last_state()) break;
+    Index_ID tmp = node_internal[idx2].get_next();
+    I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
+    idx2 = tmp;
+  }
+
+  return xiter;
+}
+
 Node LGraph::create_node() {
   Index_ID nid = create_node_int();
   return Node(this, Hierarchy_tree::root_index(), nid);

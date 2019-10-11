@@ -21,6 +21,23 @@ void Node::update(const Hierarchy_index &_hidx, Index_ID _nid) {
   I(current_g->is_valid_node(nid));
 }
 
+void Node::update(const Hierarchy_index &_hidx) {
+  I(_hidx!=hidx);
+  current_g = top_g->ref_htree()->ref_lgraph(_hidx);
+  hidx      = _hidx;
+
+  nid = 0;
+  while (true) {
+    nid = current_g->fast_next(nid);
+    I(nid); // Do not call update for an empty sub graph
+    if (nid == Node::Hardcoded_input_nid) continue;
+    if (nid == Node::Hardcoded_output_nid) continue;
+    break;
+  }
+
+  I(current_g->is_valid_node(nid));
+}
+
 void Node::update(LGraph *_g, const Node::Compact &comp) {
   I(comp.nid);
   I(_g);
@@ -65,7 +82,7 @@ Node::Node(LGraph *_g)
   I(top_g);
 }
 
-Node::Node(LGraph *_g, const Hierarchy_index &_hidx, Compact_class comp)
+Node::Node(LGraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp)
   :top_g(_g)
   ,current_g(0)
   ,hidx(_hidx)
@@ -81,7 +98,7 @@ Node::Node(LGraph *_g, const Hierarchy_index &_hidx, Compact_class comp)
   //I(top_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
 }
 
-Node::Node(LGraph *_g, Compact_class comp)
+Node::Node(LGraph *_g, const Compact_class &comp)
   :top_g(_g)
   ,current_g(0)
   ,hidx(Hierarchy_tree::root_index())
@@ -191,6 +208,17 @@ bool Node::is_type_sub() const {
 Hierarchy_index Node::hierarchy_go_down() const {
   I(current_g->is_sub(nid));
   return top_g->ref_htree()->go_down(*this);
+}
+
+Hierarchy_index Node::hierarchy_go_up() const {
+  I(current_g != top_g);
+  return top_g->ref_htree()->go_up(*this);
+}
+
+bool Node::is_root() const {
+  bool ans = top_g==current_g;
+  I(top_g->ref_htree()->is_root(*this) == ans);
+  return ans;
 }
 
 void Node::set_type_sub(Lg_type_id subid) {

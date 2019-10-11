@@ -22,11 +22,11 @@ struct Lnast_node {
   Lnast_node()
     :type(0), scope(0), knum(0), loc(0), subs(0) { }
 
-  Lnast_node(Lnast_ntype_id type, Token token)
-    :type(type), token(token), scope(0), knum(0), loc(0), subs(0) { I(type);}
+  Lnast_node(Lnast_ntype_id _type, Token _token)
+    :type(_type), token(_token), scope(0), knum(0), loc(0), subs(0) { I(type);}
 
-  Lnast_node(Lnast_ntype_id type, Token token, uint16_t subs)
-    :type(type), token(token), scope(0), knum(0), loc(0), subs(subs) { I(type);}
+  Lnast_node(Lnast_ntype_id _type, Token _token, uint16_t _subs)
+    :type(_type), token(_token), scope(0), knum(0), loc(0), subs(_subs) { I(type);}
 
   //Lnast_node(Lnast_ntype_id type, Token token, uint32_t knum)
   //  :type(type), token(token), scope(0), knum(knum), loc(0), subs(0) { I(type);}

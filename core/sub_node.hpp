@@ -131,51 +131,33 @@ public:
 
   std::string_view get_name() const { I(lgid); return name; }
 
-  Port_ID add_input_pin(std::string_view name) {
-    return add_pin(name, Direction::Input);
+  Port_ID add_input_pin(std::string_view io_name) {
+    return add_pin(io_name, Direction::Input);
   }
 
-  Port_ID add_output_pin(std::string_view name) {
-    return add_pin(name, Direction::Output);
+  Port_ID add_output_pin(std::string_view io_name) {
+    return add_pin(io_name, Direction::Output);
   }
 
-#if 0
-  // Possible but why? Too error prone. Just call reset_sub...
-  void reset_pin(std::string_view name, Direction dir, Port_ID graph_pos = Port_invalid) {
-    I(has_pin(name));
-    auto instance_pid = name2id.at(name);
-    I(io_pins[instance_pid].name == name);
-    io_pins[instance_pid].dir = dir;
-    auto old_pos = io_pins[instance_pid].graph_io_pos;
-    if (old_pos != Port_invalid) {
-      I(graph_pos2instance_pid.size() > old_pos);
-      graph_pos2instance_pid[old_pos] = Port_invalid;
-    }
-
-    io_pins[instance_pid].graph_io_pos = graph_pos;
-    map_pin_int(instance_pid, graph_pos);
-  }
-#endif
-
-  Port_ID add_pin(std::string_view name, Direction dir, Port_ID graph_pos=Port_invalid) {
+  Port_ID add_pin(std::string_view io_name, Direction dir, Port_ID graph_pos=Port_invalid) {
     I(lgid);
-    I(!has_pin(name));
+    I(!has_pin(io_name));
     Port_ID instance_pid = io_pins.size();
-    io_pins.emplace_back(name, dir, graph_pos);
-    name2id[name] = instance_pid;
-    I(io_pins[instance_pid].name == name);
+    io_pins.emplace_back(io_name, dir, graph_pos);
+    name2id[io_name] = instance_pid;
+    I(io_pins[instance_pid].name == io_name);
     if (graph_pos != Port_invalid)
       map_pin_int(instance_pid, graph_pos);
 
     return instance_pid;
   }
 
-  Port_ID map_graph_pos(std::string_view name, Direction dir, Port_ID graph_pos) {
+  Port_ID map_graph_pos(std::string_view io_name, Direction dir, Port_ID graph_pos) {
     I(graph_pos); // 0 possition is also not used (to catch bugs)
-    I(has_pin(name));
+    I(has_pin(io_name));
 
-    Port_ID instance_pid = name2id[name];
-    I(io_pins[instance_pid].name == name);
+    Port_ID instance_pid = name2id[io_name];
+    I(io_pins[instance_pid].name == io_name);
     I(io_pins[instance_pid].graph_io_pos == graph_pos || !has_graph_pin(graph_pos));
     io_pins[instance_pid].dir = dir;
 
@@ -187,13 +169,13 @@ public:
     return instance_pid;
   }
 
-  bool has_pin(std::string_view name) const { I(lgid); return name2id.find(name) != name2id.end(); }
+  bool has_pin(std::string_view io_name) const { I(lgid); return name2id.find(io_name) != name2id.end(); }
   bool has_graph_pin(Port_ID graph_pos) const { I(lgid); return graph_pos2instance_pid.size()>graph_pos && graph_pos2instance_pid[graph_pos]!=Port_invalid; }
   bool has_instance_pin(Port_ID instance_pid) const { I(lgid); return io_pins.size()>instance_pid; }
 
-  Port_ID get_instance_pid(std::string_view name) const {
-    has_pin(name);
-    return name2id.at(name);
+  Port_ID get_instance_pid(std::string_view io_name) const {
+    has_pin(io_name);
+    return name2id.at(io_name);
   }
 
   Port_ID get_instance_pid_from_graph_pos(Port_ID graph_pos) const {
@@ -211,33 +193,33 @@ public:
     return io_pins[instance_pid].graph_io_pos;
   }
 
-  const IO_pin &get_pin(std::string_view name) const {
-    I(has_pin(name));
-    auto instance_pid = name2id.at(name);
-    I(io_pins[instance_pid].name == name);
+  const IO_pin &get_pin(std::string_view io_name) const {
+    I(has_pin(io_name));
+    auto instance_pid = name2id.at(io_name);
+    I(io_pins[instance_pid].name == io_name);
     return io_pins[instance_pid];
   }
 
-  const IO_pin &get_graph_output_io_pin(std::string_view name) const {
-    I(has_pin(name));
-    auto instance_pid = name2id.at(name);
-    I(io_pins[instance_pid].name == name);
+  const IO_pin &get_graph_output_io_pin(std::string_view io_name) const {
+    I(has_pin(io_name));
+    auto instance_pid = name2id.at(io_name);
+    I(io_pins[instance_pid].name == io_name);
     I(io_pins[instance_pid].dir == Direction::Output);
     return io_pins[instance_pid];
   }
 
-  const IO_pin &get_graph_input_io_pin(std::string_view name) const {
-    I(has_pin(name));
-    auto instance_pid = name2id.at(name);
-    I(io_pins[instance_pid].name == name);
+  const IO_pin &get_graph_input_io_pin(std::string_view io_name) const {
+    I(has_pin(io_name));
+    auto instance_pid = name2id.at(io_name);
+    I(io_pins[instance_pid].name == io_name);
     I(io_pins[instance_pid].dir == Direction::Input);
     return io_pins[instance_pid];
   }
 
-  const Port_ID get_graph_io_pos(std::string_view name) const {
-    I(has_pin(name));
-    auto instance_pid = name2id.at(name);
-    I(io_pins[instance_pid].name == name);
+  Port_ID get_graph_io_pos(std::string_view io_name) const {
+    I(has_pin(io_name));
+    auto instance_pid = name2id.at(io_name);
+    I(io_pins[instance_pid].name == io_name);
     return io_pins[instance_pid].graph_io_pos;
   }
 
@@ -247,7 +229,7 @@ public:
   }
 
   std::string_view get_name_from_graph_pos(Port_ID graph_pos) const {
-    I(has_graph_pin(graph_pos));
+    I(has_graph_pin(graph_pos)); // The pos does not seem to exist
     return io_pins[graph_pos2instance_pid[graph_pos]].name;
   }
 
@@ -261,11 +243,11 @@ public:
     return io_pins[graph_pos2instance_pid[graph_pos]].dir == Direction::Input;
   }
 
-  bool is_input(std::string_view name) const {
-    I(has_pin(name));
+  bool is_input(std::string_view io_name) const {
+    I(has_pin(io_name));
 
-    auto instance_pid = name2id.at(name);
-    I(io_pins[instance_pid].name == name);
+    auto instance_pid = name2id.at(io_name);
+    I(io_pins[instance_pid].name == io_name);
     return (io_pins.at(instance_pid).dir == Direction::Input);
   }
 
@@ -279,17 +261,17 @@ public:
     return io_pins[graph_pos2instance_pid[graph_pos]].dir == Direction::Output;
   }
 
-  bool is_output(std::string_view name) const {
-    I(has_pin(name));
+  bool is_output(std::string_view io_name) const {
+    I(has_pin(io_name));
 
-    auto instance_pid = name2id.at(name);
-    I(io_pins[instance_pid].name == name);
+    auto instance_pid = name2id.at(io_name);
+    I(io_pins[instance_pid].name == io_name);
     return (io_pins[instance_pid].dir == Direction::Output);
   }
 
-  void add_phys_pin(std::string_view name, const Tech_pin &ppin) {
-    I(has_pin(name));
-    add_phys_pin_int(name2id[name], ppin);
+  void add_phys_pin(std::string_view io_name, const Tech_pin &ppin) {
+    I(has_pin(io_name));
+    add_phys_pin_int(name2id[io_name], ppin);
   }
 
   void add_phys_pin_from_instance_pid(Port_ID instance_pid, const Tech_pin &ppin) {
