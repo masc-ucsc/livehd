@@ -48,12 +48,14 @@ void Lnast::ssa_if_subtree(const Lnast_index &if_node, Rename_table &rename_tabl
 
 
 void Lnast::phi_node_insertion(const Lnast_index &if_node, Rename_table &rename_table){
+  (void)rename_table;
   check_else_block_existence(if_node);
 }
 
 
 
 bool Lnast::check_else_block_existence(const Lnast_index &if_node){
+  (void)if_node;
   // I(false);
 #if 0
   // VERY inneficient to iterate just to get the last

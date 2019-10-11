@@ -90,6 +90,9 @@ protected:
   XEdge_iterator out_edges(const Node &node) const;
   XEdge_iterator inp_edges(const Node &node) const;
 
+  XEdge_iterator out_edges_ordered(const Node &node) const;
+  XEdge_iterator inp_edges_ordered(const Node &node) const;
+
   XEdge_iterator out_edges(const Node_pin &pin) const;
   XEdge_iterator inp_edges(const Node_pin &pin) const;
 

@@ -198,7 +198,7 @@ Index_ID LGraph_Base::get_space_output_pin(const Index_ID master_nid, const Inde
   I(node_internal[master_nid].is_root());
   I(node_internal[start_nid].is_node_state());
 #endif
-  if (node_internal[start_nid].get_dst_pid() == dst_pid && node_internal[start_nid].has_space_long_out()) {
+  if (node_internal[start_nid].get_dst_pid() == dst_pid && node_internal[start_nid].has_space_long()) {
     return start_nid;
   }
 
@@ -209,7 +209,7 @@ Index_ID LGraph_Base::get_space_output_pin(const Index_ID master_nid, const Inde
     if (node_internal[idx].get_dst_pid() == dst_pid) {
       //GI(node_internal[idx].is_root(), root_idx == idx);
 
-      if (node_internal[idx].has_space_long_out()) return idx;
+      if (node_internal[idx].has_space_long()) return idx;
     }
 
     if (node_internal[idx].is_last_state()) return create_node_space(idx, dst_pid, master_nid, root_idx);

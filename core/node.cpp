@@ -362,6 +362,14 @@ XEdge_iterator Node::out_edges() const {
   return current_g->out_edges(*this);
 }
 
+XEdge_iterator Node::inp_edges_ordered() const {
+  return current_g->inp_edges_ordered(*this);
+}
+
+XEdge_iterator Node::out_edges_ordered() const {
+  return current_g->out_edges_ordered(*this);
+}
+
 Node_pin_iterator Node::inp_connected_pins() const {
   return current_g->inp_connected_pins(*this);
 }

@@ -521,7 +521,7 @@ void Node_Internal::assimilate_edges(Node_Internal *other_ptr) {
     if (done) {
       inc_outputs(false);
     } else {
-      if (!has_space_long_out()) break; // We need long space
+      if (!has_space_long()) break; // We need long space
       self_pos -= (4-1);
       LEdge_Internal *ledge_i = (LEdge_Internal *)&sedge[self_pos];   // became an ledge
       ledge_i->set(other_out->get_idx(), other_out->get_inp_pid(), false); // output

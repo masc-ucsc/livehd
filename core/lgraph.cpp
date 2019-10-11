@@ -463,6 +463,28 @@ XEdge_iterator LGraph::inp_edges(const Node &node) const {
   return xiter;
 }
 
+XEdge_iterator LGraph::inp_edges_ordered(const Node &node) const {
+
+  auto iter = inp_edges(node);
+
+  std::sort(iter.begin(),iter.end(), [](const XEdge &a, const XEdge &b) -> bool {
+      return a.sink.get_pid() < b.sink.get_pid();
+      });
+
+  return iter;
+}
+
+XEdge_iterator LGraph::out_edges_ordered(const Node &node) const {
+
+  auto iter = out_edges(node);
+
+  std::sort(iter.begin(),iter.end(), [](const XEdge &a, const XEdge &b) -> bool {
+      return a.driver.get_pid() < b.driver.get_pid();
+      });
+
+  return iter;
+}
+
 XEdge_iterator LGraph::out_edges(const Node_pin &pin) const {
   I(pin.get_class_lgraph() == this);
   XEdge_iterator xiter;

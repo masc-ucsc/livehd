@@ -475,7 +475,7 @@ public:
 
   void inc_outputs(bool large = false) {
     if (large) {
-      I(has_space_long_out());
+      I(has_space_long());
       I(!sedge[next_free_output_pos()-3].is_snode());
       out_pos += 4;
       I(out_long<3); // To avoid overflow
@@ -488,7 +488,7 @@ public:
   }
   void inc_inputs(bool large = false) {
     if (large) {
-      I(has_space_long_inp());
+      I(has_space_long());
       I(!sedge[next_free_input_pos()].is_snode());
       inp_pos += 4;
       I(inp_long<3); // To avoid overflow
@@ -514,14 +514,6 @@ public:
   bool has_space_long() const {
     int reserve = state == Last_Node_State ? 0 : 2;
     return inp_long<3 && out_long<3 && (reserve + inp_pos + out_pos + 4) < Num_SEdges;
-  }
-  bool has_space_long_inp() const {
-    int reserve = state == Last_Node_State ? 0 : 2;
-    return inp_long<3 && (reserve + inp_pos + out_pos + 4) < Num_SEdges;
-  }
-  bool has_space_long_out() const {
-    int reserve = state == Last_Node_State ? 0 : 2;
-    return out_long<3 && (reserve + inp_pos + out_pos + 4) < Num_SEdges;
   }
   bool has_space_short() const {
     int reserve = state == Last_Node_State ? 0 : 2;

@@ -61,7 +61,7 @@ http_archive(
 git_repository(
     name = "com_google_absl",
     #build_file = "BUILD.abseil", # relative to external path
-    commit = "a0d1e098c2f99694fa399b175a7ccf920762030e", # August 27 2019 6cc6ac44e065b9e8975fadfd6ccb99cbcf89aac4", # April 6 2019
+    commit = "e9f9000c7c80993cb589d011616b7a8016e42f4a", # October 11, 2019 a0d1e098c2f99694fa399b175a7ccf920762030e"
     remote = "https://github.com/abseil/abseil-cpp.git",
 )
 new_git_repository(

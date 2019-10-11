@@ -50,13 +50,19 @@ bool test0() {
     g->add_edge(s,p);
   }
   conta = 0;
-  for(auto &out : n1.out_edges()) {
+  Port_ID last_pid=0;
+  for(auto &out : n1.out_edges_ordered()) {
+    I(last_pid<=out.driver.get_pid());
+    last_pid = out.driver.get_pid();
     conta++;
     (void)out;
   }
   I(conta == (1+300+1000));
   conta = 0;
-  for(auto &out : n2.inp_edges()) {
+  last_pid=0;
+  for(auto &out : n2.inp_edges_ordered()) {
+    I(last_pid<=out.sink.get_pid());
+    last_pid = out.sink.get_pid();
     conta++;
     (void)out;
   }
