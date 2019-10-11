@@ -126,7 +126,8 @@ void Pass_mockturtle::setup_input_signals(const unsigned int    &group_id,
       inp_sigs_mt.emplace_back(edge2mt_sigs[input_edge].signals[i]);
 
   } else {
-    bdinp_edges.insert(input_edge);
+    //bdinp_edges.insert(input_edge);
+    bdinp_edges.emplace_back(input_edge);
     edge2mt_sigs[input_edge].gid = group_id;
     //create new input signals and map them back
 #ifndef NDEBUG
@@ -837,8 +838,10 @@ void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
             hit = true;
         }
 
-        if(!hit)
-          bdout_edges.insert(out_edge);
+        if(!hit){
+          bdout_edges.emplace_back(out_edge);
+          //bdout_edges.insert(out_edge);
+        }
 
 
         //bdout_edges.insert(out_edge);
@@ -1103,6 +1106,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
   //create edges for input signals
   fmt::print("Creating KLUT boundary input edges in LGraph...\n");
   for (const auto &inp_edge : bdinp_edges) { //sh:fixme:bug here? bdinp_edges out of order?
+    fmt::print("\n");
     fmt::print("inp_edge driver:{}, dpin:{}, sink:{}, spin:{}\n", inp_edge.driver.debug_name(), inp_edge.driver.get_pid(), inp_edge.sink.debug_name(), inp_edge.sink.get_pid());
     const auto group_id = edge2klut_inp_sigs[inp_edge].gid;
     const std::vector<mockturtle::klut_network::signal> &sigs = edge2klut_inp_sigs[inp_edge].signals;
@@ -1121,6 +1125,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
       auto sink_node = gid_klut_node2lg_node[std::make_pair(group_id, klut_node_and_lg_pid.first)].get_node(new_lg);
       const auto pid = klut_node_and_lg_pid.second;
       auto sink_pin = sink_node.setup_sink_pin(pid);
+      fmt::print("KLUT inp_boundary=>driver_pin:{}, sink_pin:{}\n", driver_pin.debug_name(), sink_pin.debug_name());
       new_lg->add_edge(driver_pin, sink_pin, 1);
     } else {
       for (auto i = 0UL; i < bit_width; i++) {
