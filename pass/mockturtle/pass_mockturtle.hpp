@@ -70,7 +70,6 @@ protected:
   absl::flat_hash_map<unsigned int, mockturtle_network> gid2mt;
   absl::flat_hash_map<unsigned int, mockturtle::klut_network> gid2klut;
   absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle_network::signal>> edge2mt_sigs; //lg<->mig, including all boundary i/o and "internal" wires
-  absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle::klut_network::signal>> edge2klut_io_sigs; //lg<->klut, search edge2mt_sigs table, only record i/o mapping
   absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle::klut_network::signal>> edge2klut_inp_sigs; //lg<->klut, search edge2mt_sigs table, only input mapping
   absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle::klut_network::signal>> edge2klut_out_sigs; //lg<->klut, search edge2mt_sigs table, only output mapping
   absl::flat_hash_map<Node::Compact, Node::Compact> old_node_to_new_node;
@@ -78,7 +77,7 @@ protected:
   absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::signal>, std::pair<mockturtle::klut_network::node, Port_ID>> gid_pi2pi_sink_node_lg_pid;
   bool lg_partition(LGraph *);
   void create_mockturtle_network(LGraph *);
-  void convert_mockturtle_to_KLUT(LGraph *);
+  void convert_mockturtle_to_KLUT();
   void create_lutified_lgraph(LGraph *);
 
   void connect_complemented_signal(LGraph *, Node_pin &, Node_pin &, const mockturtle::klut_network &, const mockturtle::klut_network::signal &);
@@ -129,17 +128,17 @@ protected:
                                          ntk_type &);
 
   template<typename sig_type, typename ntk_type>
-  void mapping_logic_cell_lg2mock(sig_type (ntk_type::*)(std::vector<sig_type> const &),
+  void mapping_logic_cell_lg2mt(sig_type (ntk_type::*)(std::vector<sig_type> const &),
                                   ntk_type &, const Node &, const unsigned int &);
 
   template<typename ntk_type>
-  void mapping_comparison_cell_lg2mock(const bool &, const bool &, ntk_type &, const Node &, const unsigned int &);
+  void mapping_comparison_cell_lg2mt(const bool &, const bool &, ntk_type &, const Node &, const unsigned int &);
 
   template<typename ntk_type>
-  void mapping_shift_cell_lg2mock(const bool &, const bool &, ntk_type &, const Node &, const unsigned int &);
+  void mapping_shift_cell_lg2mt(const bool &, const bool &, ntk_type &, const Node &, const unsigned int &);
 
   template<typename ntk_type>
-  void mapping_dynamic_shift_cell_lg2mock(const bool &, ntk_type &, const Node &, const unsigned int &);
+  void mapping_dynamic_shift_cell_lg2mt(const bool &, ntk_type &, const Node &, const unsigned int &);
 
   template<typename signal, typename ntk>
   void create_half_adder(const signal &x, const signal &y, signal &s, signal &c, ntk &net) {

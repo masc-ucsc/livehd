@@ -4,7 +4,7 @@ rm -f   yosys_srcipt.*
 rm -f   *.v
 
 # pts='trivial trivial2a trivial1'
-pts='trivial'
+pts='trivial trivial2a trivial1'
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
 
@@ -32,6 +32,7 @@ do
   ${LGSHELL} "lgraph.open name:${pt}          |> inou.graphviz.fromlg"
   ${LGSHELL} "lgraph.open name:${pt}          |> pass.mockturtle"
   ${LGSHELL} "lgraph.open name:${pt}_lutified |> inou.yosys.fromlg"
+  ${LGSHELL} "lgraph.open name:${pt}_lutified |> inou.graphviz.fromlg"
 
   if [ $? -eq 0 ] && [ -f ${pt}_lutified.v ]; then
     echo "Successfully created lutified verilog:${pt}_lutified.v"
