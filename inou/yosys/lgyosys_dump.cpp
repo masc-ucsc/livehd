@@ -588,7 +588,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
       joined_wires.resize(cell_output_map[node.get_driver_pin().get_compact()]->width);
       uint32_t width      = 0;
       bool     has_inputs = false;
-      for(const auto &e:node.inp_edges()) {
+      for(const auto &e:node.inp_edges_ordered()) {
         RTLIL::Wire *join              = get_wire(e.driver);
         joined_wires[e.sink.get_pid()] = RTLIL::SigChunk(join);
         width += join->width;
@@ -639,7 +639,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
       RTLIL::SigSpec joined_inp_wires;
       bool      has_inputs = false;
       uint8_t   inp_num = 0;
-      for(const auto &e:node.inp_edges()) {
+      for(const auto &e:node.inp_edges_ordered()) {
         RTLIL::Wire *join = get_wire(e.driver);
         joined_inp_wires.append(RTLIL::SigSpec(join));
         has_inputs = true;
@@ -1050,116 +1050,6 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
       create_subgraph(g, module, node);
       break;
     }
-#if 0
-    case TechMap_Op: {
-
-      const Tech_cell *tcell = node.get_type_tmap_cell();
-
-      std::string name;
-      if (tcell->get_name()[0] == '$' || tcell->get_name()[0] == '\\')
-        name = absl::StrCat(tcell->get_name());
-      else
-        name = absl::StrCat("\\",tcell->get_name());
-
-      RTLIL::Cell *new_cell = module->addCell(absl::StrCat("\\",node.create_name()), name);
-
-      for(const auto &e:node.inp_edges()) {
-        if(e.sink.get_pid() >= tcell->n_inps())
-          log_error("I could not find a port associated with inp pin %hu\n", e.sink.get_pid());
-
-        auto port_name = e.sink.get_type_tmap_io_name();
-
-        RTLIL::Wire *wire = get_wire(e.driver);
-        assert(wire);
-        new_cell->setPort(absl::StrCat("\\", port_name).c_str(), wire);
-      }
-
-      for(const auto &e:node.out_edges()) {
-        if(e.driver.get_pid() >= tcell->n_outs())
-          log_error("I could not find a port associated with out pin %hu\n", e.driver.get_pid());
-
-        auto port_name = e.driver.get_type_tmap_io_name();
-        RTLIL::Wire *wire = get_wire(e.driver);
-        assert(wire);
-        new_cell->setPort(absl::StrCat("\\", port_name).c_str(), wire);
-      }
-      break;
-    }
-#endif
-#if 0
-    case BlackBox_Op: {
-      std::string_view celltype;
-      std::string_view instance_name;
-
-      for(const auto &e:node.inp_edges()) {
-        if(e.sink.get_pid() == LGRAPH_BBOP_TYPE) {
-          if(e.driver.get_node().get_type().op != StrConst_Op)
-            log_error("Internal Error: BB type is not a string.\n");
-          celltype = e.driver.get_node().get_type_const_sview();
-        } else if(e.sink.get_pid() == LGRAPH_BBOP_NAME) {
-          // instance name
-          if(e.driver.get_node().get_type().op != StrConst_Op)
-            log_error("Internal Error: BB name is not a string.\n");
-          instance_name = e.driver.get_node().get_type_const_sview();
-        } else if(e.sink.get_pid() < LGRAPH_BBOP_OFFSET) {
-          log_error("Unrecognized blackbox option, pid %hu\n", e.sink.get_pid());
-        }
-      }
-
-      if (celltype.empty() || instance_name.empty()) {
-        log_error("could not find instance name or celltype for blackbox\n");
-      }
-
-      RTLIL::Cell *cell = module->addCell(absl::StrCat("\\",instance_name), RTLIL::IdString(absl::StrCat("\\", celltype)));
-      bool is_param = false;
-      std::string current_name= "bbox";
-      for(const auto &e:node.inp_edges()) {
-        if(e.sink.get_pid() < LGRAPH_BBOP_OFFSET)
-          continue;
-
-        auto dpin_node = e.driver.get_node();
-
-        if(LGRAPH_BBOP_ISIPARAM(e.sink.get_pid())) {
-          //is_param = dpin_node.get_type_const_value() == 1;
-          current_name = dpin_node.get_type_const_sview();
-        } else if(LGRAPH_BBOP_ISICONNECT(e.sink.get_pid())) {
-          if(is_param) {
-            if(dpin_node.get_type().op == U32Const_Op) {
-              cell->setParam(absl::StrCat("\\",current_name), RTLIL::Const(dpin_node.get_type_const_value()));
-            } else if(dpin_node.get_type().op == StrConst_Op) {
-              cell->setParam(absl::StrCat("\\",current_name), RTLIL::Const(std::string(dpin_node.get_type_const_sview())));
-            } else {
-              assert(false); // parameter is not a constant
-            }
-          } else {
-            if(dpin_node.get_type().op == U32Const_Op) {
-              cell->setPort(absl::StrCat("\\",current_name), RTLIL::Const(dpin_node.get_type_const_value()));
-            } else if(dpin_node.get_type().op == StrConst_Op) {
-              cell->setPort(absl::StrCat("\\",current_name), RTLIL::Const(std::string(dpin_node.get_type_const_sview())));
-            } else {
-              cell->setPort(absl::StrCat("\\",current_name), get_wire(e.driver));
-            }
-          }
-        }
-      }
-
-      for(const auto &e:node.inp_edges()) {
-        if (e.driver.is_graph_input())
-          continue;
-        if(LGRAPH_BBOP_ISICONNECT(e.sink.get_pid())) {
-          std::string wname;
-          if (e.driver.has_name()) {
-            wname = absl::StrCat("\\",e.driver.get_name());
-          } else {
-            wname = "\\wire_";
-            wname = unique_name(g, wname);
-          }
-          cell->setPort(wname, cell_output_map[e.driver.get_compact()]);
-        }
-      }
-      break;
-    }
-#endif
 
     default:
       log_error("Operation %s not supported, please add to lgyosys_dump.\n", std::string(node.get_type().get_name()).c_str());
