@@ -5,9 +5,15 @@ class LGraph;
 class XEdge;
 class Node;
 
+#include <vector>
+
 #include "mmap_map.hpp"
 #include "ann_bitwidth.hpp"
 #include "lgedge.hpp"
+
+using XEdge_iterator    = std::vector<XEdge>;
+using Node_pin_iterator = std::vector<Node_pin>;
+
 
 class Node_pin {
 protected:
@@ -30,7 +36,7 @@ protected:
 
   Node_pin(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _idx, Port_ID _pid, bool _sink);
 
-  const Index_ID get_idx() const { I(idx); return idx;    }
+  const Index_ID get_idx() const { I(idx); return idx; }
 public:
   class __attribute__((packed)) Compact {
   protected:
@@ -263,6 +269,7 @@ public:
     return connect_driver(dst);
   }
 
+#if 0
   Node_pin &operator=(const Node_pin &obj) {
     I(this != &obj); // Do not assign object to itself. works but wastefull
     top_g     = obj.top_g;
@@ -274,6 +281,7 @@ public:
 
     return *this;
   };
+#endif
 
   // NOTE: No operator<() needed for std::set std::map to avoid their use. Use flat_map_set for speed
 
@@ -313,8 +321,11 @@ public:
   bool                is_connected() const;
 
   // END ATTRIBUTE ACCESSORS
+  XEdge_iterator    out_edges() const;
+  XEdge_iterator    inp_edges() const;
 
   Node_pin get_down_pin() const;
+  Node_pin get_up_pin() const;
 };
 
 namespace mmap_lib {

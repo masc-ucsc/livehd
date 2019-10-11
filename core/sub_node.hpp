@@ -229,7 +229,7 @@ public:
   }
 
   std::string_view get_name_from_graph_pos(Port_ID graph_pos) const {
-    I(has_graph_pin(graph_pos));
+    I(has_graph_pin(graph_pos)); // The pos does not seem to exist
     return io_pins[graph_pos2instance_pid[graph_pos]].name;
   }
 

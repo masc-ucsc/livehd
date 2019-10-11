@@ -153,7 +153,7 @@ std::string_view Node_pin::create_name() const {
   std::string signature(get_node().create_name());
 
   if (is_driver()) {
-    for(auto &e:get_node().inp_edges()) {
+    for(auto &e:inp_edges()) {
       absl::StrAppend(&signature, "_p", std::to_string(e.driver.get_pid()), "_", e.driver.create_name());
     }
   }
@@ -233,16 +233,47 @@ Node_pin Node_pin::get_down_pin() const {
 
   // 2nd: get down_pid
   I(pid != Port_invalid);
-  auto down_pid  = node.get_type_sub_node().get_instance_pid_from_graph_pos(pid);
+  auto down_pid = node.get_type_sub_node().get_instance_pid_from_graph_pos(pid);
   I(down_pid != Port_invalid);
 
   // 3rd: get down_current_g
   auto *down_current_g = top_g->ref_htree()->ref_lgraph(down_hidx);
 
   // 4th: get down_idx
-  Index_ID down_idx = down_current_g->find_idx_from_pid(is_driver()?Node::Hardcoded_output_nid: Node::Hardcoded_input_nid, down_pid);
+  Index_ID down_idx = down_current_g->find_idx_from_pid(is_driver()?Node::Hardcoded_input_nid: Node::Hardcoded_output_nid, down_pid);
   I(down_idx);
 
-  return Node_pin(top_g, down_current_g, down_hidx, down_idx, down_pid, false);
+  bool up_sink = is_sink(); // A top driver, should connect to an down input. A top sink, should connect to an down output
+  return Node_pin(top_g, down_current_g, down_hidx, down_idx, down_pid, up_sink);
+}
+
+Node_pin Node_pin::get_up_pin() const {
+  I(get_node().is_graph_io());
+
+  // 1st: Get up_hidx
+  auto up_hidx = top_g->ref_htree()->get_parent(hidx);
+
+  // 2nd: get up_pid
+  I(pid != Port_invalid);
+  auto up_pid  = current_g->get_self_sub_node().get_graph_pos_from_instance_pid(pid);
+  I(up_pid != Port_invalid);
+
+  // 3rd: get up_current_g
+  auto up_node = top_g->ref_htree()->get_instance_node(up_hidx);
+
+  // 4th: get up_idx
+  Index_ID up_idx = current_g->find_idx_from_pid(up_node.get_nid(), up_pid);
+  I(up_idx);
+
+  bool up_sink = get_node().is_graph_input(); // down input, must be a sink on instance
+  return Node_pin(top_g, up_node.get_class_lgraph(), up_hidx, up_idx, up_pid, up_sink);
+}
+
+XEdge_iterator Node_pin::inp_edges() const {
+  return current_g->inp_edges(*this);
+}
+
+XEdge_iterator Node_pin::out_edges() const {
+  return current_g->out_edges(*this);
 }
 

@@ -1,17 +1,12 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include <vector>
-
 #include "lgraph_base_core.hpp"
 #include "node_type_base.hpp"
 #include "node_pin.hpp"
 #include "sub_node.hpp"
 
 class Ann_place;
-
-using XEdge_iterator    = std::vector<XEdge>;
-using Node_pin_iterator = std::vector<Node_pin>;
 
 class Node {
 protected:
@@ -150,6 +145,7 @@ public:
   }
   Node(LGraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp);
   Node(LGraph *_g, const Compact_class &comp);
+#if 0
   Node &operator=(const Node &obj) {
     I(this != &obj); // Do not assign object to itself. works but wastefull
     top_g     = obj.top_g;
@@ -159,6 +155,7 @@ public:
 
     return *this;
   };
+#endif
 
   inline Compact get_compact() const {
     return Compact(hidx, nid);
@@ -167,8 +164,8 @@ public:
     return Compact_class(nid);
   }
 
-  LGraph *get_top_lgraph() const { I(top_g); return top_g; }
-  LGraph *get_class_lgraph() const { I(current_g); return current_g; }
+  LGraph *get_top_lgraph() const { return top_g; }
+  LGraph *get_class_lgraph() const { return current_g; }
 
   Hierarchy_index get_hidx()  const { return hidx;   }
 

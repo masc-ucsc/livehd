@@ -31,13 +31,14 @@ protected:
   }
 };
 
-static void trigger_clean(void *) {}
+int clean_called;
+static void trigger_clean(void *) { clean_called++; }
 
 TEST_F(Setup_mmap_gc_test, fd_limit) {
 
   int nfailed = 0;
   std::vector<int> open_fd;
-  for (int i = 0; i < 17; ++i) {
+  for (int i = 0; i < 10; ++i) {
     std::string name("mmap_gc_test_file");
     name   = name + std::to_string(i) + ".data";
     int fd = mmap_lib::mmap_gc::open(name);
@@ -48,7 +49,7 @@ TEST_F(Setup_mmap_gc_test, fd_limit) {
   }
 
   EXPECT_GE(nfailed, 0);
-  EXPECT_GE(open_fd.size(),12);
+  EXPECT_GE(open_fd.size(),9);
 
   for(auto fd:open_fd)
     close(fd);
@@ -63,7 +64,8 @@ TEST_F(Setup_mmap_gc_test, mmap_limit) {
   };
   std::vector<track_entry> open_tracks;
 
-  for (int i = 0; i < 17; ++i) {
+  clean_called = 0;
+  for (int i = 0; i < 1057; ++i) {
     track_entry entry;
     std::string name("mmap_gc_test_file");
 
@@ -80,5 +82,7 @@ TEST_F(Setup_mmap_gc_test, mmap_limit) {
 
     open_tracks.emplace_back(entry);
   }
+
+  EXPECT_GE(clean_called, 10); // ulimit was set to 18
 }
 

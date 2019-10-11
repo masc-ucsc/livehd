@@ -90,6 +90,9 @@ protected:
   XEdge_iterator out_edges(const Node &node) const;
   XEdge_iterator inp_edges(const Node &node) const;
 
+  XEdge_iterator out_edges(const Node_pin &pin) const;
+  XEdge_iterator inp_edges(const Node_pin &pin) const;
+
   bool has_outputs(const Node_pin &pin) const {
     I(pin.get_idx() < node_internal.size());
     I(node_internal[pin.get_idx()].is_root());

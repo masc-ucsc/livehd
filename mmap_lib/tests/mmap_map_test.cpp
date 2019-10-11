@@ -86,7 +86,7 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
   EXPECT_EQ(access("lgdb_bench/mmap_map_test_sview_data", F_OK), -1);
 
   int conta;
-  for(int i=0;i<3;i++) {
+  for(int n=0;n<3;n++) {
     mmap_lib::map<uint32_t, std::string_view> map("lgdb_bench", "mmap_map_test_sview_data");
     auto it = map.set(3,"test");
     EXPECT_EQ(it->first,3);
@@ -149,15 +149,15 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
 TEST_F(Setup_mmap_map_test, string_key) {
   Rng rng(123);
 
-  for(int i=0;i<4;++i) {
+  for(int n=0;n<4;++n) {
     mmap_lib::map<std::string_view,uint32_t> map;
     map.clear();
     absl::flat_hash_map<std::string, uint32_t> map2;
 
     int conta = 0;
-    for(int i=0;i<10000;i++) {
-      int sz = rng.uniform<int>(0xFFFF);
-      std::string sz_str = std::to_string(sz)+"foo";
+    for(int i=0;i<100000;i++) {
+      int sz = rng.uniform<int>(0xFFFFF);
+      std::string sz_str = "base" + std::to_string(sz)+"foo";
       std::string_view key{sz_str};
 
       if (map.has(key)) {
@@ -178,7 +178,7 @@ TEST_F(Setup_mmap_map_test, string_key) {
 
     for(const auto it:map) {
       (void)it;
-      EXPECT_EQ(map.get_key(it), std::to_string(it.second) + "foo");
+      EXPECT_EQ(map.get_key(it), "base" + std::to_string(it.second) + "foo");
       EXPECT_EQ(map2.count(map.get_key(it)), 1);
       conta--;
     }
@@ -304,7 +304,7 @@ TEST_F(Setup_mmap_map_test, big_entry) {
   absl::flat_hash_map<uint32_t,Big_entry> map2;
 	auto cap = map.capacity();
 
-	for(auto i=0;i<1000;i++) {
+	for(auto n=0;n<1000;n++) {
 		map.clear();
 		map.clear(); // 2 calls to clear triggers a delete to map file
 

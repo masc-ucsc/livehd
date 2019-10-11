@@ -202,32 +202,41 @@ bool bwd(int n) {
   return true;
 }
 
+bool top_hier= true;
+
 void topo_add_chain_fwd(absl::flat_hash_set<Node::Compact> &discovered_node
     , std::vector<Node> &node_stack
     , const XEdge &edge) {
 
-  const auto dst_node = edge.driver.get_node(); // fwd
+  const auto &dst_pin  = edge.driver; // fwd
+  const auto  dst_node = dst_pin.get_node();
 
-  if (hier) {
+  if (top_hier) {
     if (dst_node.is_type_sub() && !dst_node.is_type_sub_empty()) { // DOWN??
       fmt::print("dfs adding subnode:{} (many types, opt for speed!)\n", dst_node.debug_name());
 
-      auto down_pin = edge.driver.get_down_pin(); // fwd
-      I(down_pin.is_driver_pin()); // fwd
+      auto down_pin = dst_pin.get_down_pin();
+      I(down_pin.is_driver()); // fwd
 
       for (auto &edge2 : down_pin.inp_edges()) {  // fwd
+        I(edge2.sink.get_pid() == down_pin.get_pid());
         topo_add_chain_fwd(discovered_node, node_stack, edge2);
       }
 
       return;
-    }else if (node2.is_graph_input() && !node2.is_root()) { // UP??
-      auto up_hidx = node2.hierarchy_go_up();
-      auto up_node = node2;
-      up_node.update(up_hidx);
-      node_stack.push_back(up_node);
+    }else if (dst_node.is_graph_input() && !dst_node.is_root()) { // fwd: UP??
+      auto up_pin = dst_pin.get_up_pin();
+      I(up_pin.is_driver()); // fwd
 
-      fmt::print("prop_up node:{} lg:{} -> lg:{}\n", node2.debug_name(), node2.get_class_lgraph()->get_name(),
-          up_node.get_class_lgraph()->get_name());
+      for (auto &edge2 : up_pin.inp_edges()) {  // fwd
+        I(edge2.sink.get_pid() == up_pin.get_pid());
+        topo_add_chain_fwd(discovered_node, node_stack, edge2);
+      }
+
+      // node_stack.push_back(up_pin.get_node());
+
+      fmt::print("prop_up node:{} lg:{} -> lg:{}\n", dst_node.debug_name(), dst_node.get_class_lgraph()->get_name(),
+          up_pin.get_class_lgraph()->get_name());
     }
   }
 
@@ -245,7 +254,6 @@ void doTopologicalSort(LGraph *lg) {
 
   discovered_node.clear();
 
-  bool hier= true;
 
   for (auto node : lg->fast()) { // FIXME: to flow, no fast (start with inputs for fwd, outputs for bwd)
     if (discovered_node.count(node.get_compact())) continue;
@@ -274,6 +282,11 @@ void simple() {
   LGraph *sub_g = LGraph::create("lgdb_iter_test", "sub", "test");
 
   for (int i = 0; i < 256; i++) {
+    // Unconnection IOs from 1000-1512
+    sub_g->add_graph_input("di" + std::to_string(i), 1000+i+1, 0);
+    sub_g->add_graph_output("do" + std::to_string(i), 1000+256+i+1, 0);
+
+    // Connected IOs from 1-512
     auto ipin = sub_g->add_graph_input("i" + std::to_string(i), i+1, 0);
     auto opin = sub_g->add_graph_output("o" + std::to_string(i), 256+i+1, 0);
     auto node = sub_g->create_node(Or_Op);

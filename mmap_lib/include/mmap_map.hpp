@@ -851,6 +851,7 @@ private:
 	// True if some shifting has occured (entry under idx is a constructed object)
 	// Fals if no shift has occured (entry under idx is unconstructed memory)
 	void shiftUp(int idx, int const insertion_idx) {
+    // FIXME: if the values are trivial, a simple for loop without constructors should be faster/cleaner
 #if 0
 		if (MMAP_LIB_LIKELY(idx>insertion_idx)) {
 			memmove(&mKeyVals[insertion_idx+1],&mKeyVals[insertion_idx],(idx-insertion_idx)*sizeof(Node));
@@ -1128,7 +1129,10 @@ public:
 	std::string_view get_sview(uint32_t key_pos) const {
     reload();
     assert(using_sview);
-		assert(key_pos<mmap_txt_base[0]);
+		if(key_pos>=mmap_txt_base[0]) {
+      std::string_view sview("");
+      return sview;
+    }
 		std::string_view sview(reinterpret_cast<const char *>(&mmap_txt_base[key_pos+1]),mmap_txt_base[key_pos]);
 		return sview;
 	}
@@ -1381,6 +1385,9 @@ private:
     mmap_base = nullptr;
 		setup_mmap(numBuckets);
 
+    assert(old_mmap_base != mmap_base);
+    assert(oldKeyVals != mKeyVals);
+    assert(oldInfo != mInfo);
 		assert(*mNumElements == 0);
 		assert(*mMask == numBuckets - 1);
 		assert(*mMaxNumElementsAllowed == calcMaxNumElementsAllowed(numBuckets));
@@ -1406,12 +1413,14 @@ private:
 
     reload();
 
-    assert(using_sview);
+    static_assert(using_sview);
+
+    assert(txt.size()<40000); // OK to go bigger but likely bug
 
     auto insert_point = mmap_txt_base[0]+1;
-    if (mmap_txt_size <= (8*insert_point+4096))
-      grow_txt_mmap(std::max(mmap_txt_size*2,8*insert_point+8192));
-    assert(mmap_txt_size > (8*insert_point+4096));
+    if (mmap_txt_size <= (8*insert_point+2*txt.size()))
+      grow_txt_mmap(std::max(mmap_txt_size*2,8*insert_point+2*txt.size()));
+    assert(mmap_txt_size > (8*insert_point+txt.size()));
 
     char *ptr = reinterpret_cast<char *>(&mmap_txt_base[insert_point+1]);
     size_t sz=0;

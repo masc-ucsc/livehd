@@ -50,6 +50,12 @@ protected:
 
     int recycle_age = 0;
     int min_age = INT_MAX;
+
+    int n_recycle = n_open_fds/2;
+    if (n_open_fds > n_max_fds) {
+      n_recycle = n_open_fds - n_max_fds;
+      n_recycle += 2;
+    }
     for (auto it : mmap_gc_pool) {
       if (it.second.age<min_age)
         min_age = it.second.age;
@@ -57,7 +63,7 @@ protected:
       if (it.second.fd<0)
         continue;
 
-      if ((recycle_age + n_open_fds/2) < it.second.age)
+      if ((recycle_age + n_recycle) < it.second.age)
         recycle_age = it.second.age;
     }
     auto it = mmap_gc_pool.begin();
@@ -148,7 +154,7 @@ protected:
     if (s.st_size <= size) {
       int ret = ::ftruncate(fd, size);
       if (ret<0) {
-        std::cerr << "mmap_map::reload ERROR ftruncate could not resize  " << name << " to " << size << "\n";
+        std::cerr << "mmap_map::reload ERROR ftruncate could not resize " << name << " to " << size << "\n";
         exit(-1);
       }
     } else {
@@ -199,8 +205,15 @@ public:
       n_open_fds++;
       return fd;
     }
+    n_max_fds = 3+n_open_fds/2;
+    recycle_older();
+    fd = ::open(name.c_str(), O_RDWR | O_CREAT, 0644);
+    if (fd>=0) {
+      n_open_fds++;
+      return fd;
+    }
 
-    dump();
+    dump(); // We were not able to find fds to recycle
     assert(false);
 
     return -1;
@@ -265,19 +278,20 @@ public:
     assert(old_size == it->second.size);
     assert(old_size!=new_size);
 
+    if (it->second.fd>=0) {
+      int ret = ftruncate(it->second.fd, new_size);
+      if(ret<0) {
+        std::cerr << "ERROR: ftruncate could not allocate " << mmap_name << " to " << new_size << "\n";
+        exit(-1);
+      }
+    }
+
     void *base = mremap(mmap_old_base, old_size, new_size, MREMAP_MAYMOVE);
     if (base == MAP_FAILED) {
       try_collect_mmap();
       base = mremap(mmap_old_base, old_size, new_size, MREMAP_MAYMOVE);
       if (base == MAP_FAILED) {
         std::cerr << "ERROR: remmap could not allocate" << mmap_name << "txt with " << new_size << "bytes\n";
-        exit(-1);
-      }
-    }
-    if (it->second.fd>=0) {
-      int ret = ftruncate(it->second.fd, new_size);
-      if(ret<0) {
-        std::cerr << "ERROR: ftruncate could not allocate " << mmap_name << " to " << new_size << "\n";
         exit(-1);
       }
     }
