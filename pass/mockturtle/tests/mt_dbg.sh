@@ -3,8 +3,17 @@ rm -rf ./lgdb
 rm -f   yosys_srcipt.*
 rm -f   *.v
 
-# pts='trivial trivial2a trivial1'
-pts='trivial trivial2a trivial1 trivial3 trivial_and trivial_join'
+# TBD
+# pts='test simple_weird fflop join_fadd'
+
+# wait for hierarchical traversal
+# pts='trivial2 unconnected hierarchy '
+
+# SH:todo
+# pts='trivial_join compare compare2 consts cse_basic dce2 dce3 expression_00002
+# graphtest kogg_stone_64'
+pts='trivial trivial2a trivial1 trivial3 trivial_and 
+     dce1 gates'
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
 

@@ -65,8 +65,8 @@ class Pass_mockturtle : public Pass {
 protected:
   static void work(Eprp_var &var);
 
-  //std::vector<XEdge> bdinp_edges, bdout_edges;//boundary_input/output_edges
-  absl::flat_hash_set<XEdge> bdinp_edges, bdout_edges;//boundary_input/output_edges
+  std::vector<XEdge> bdinp_edges, bdout_edges;//boundary_input/output_edges
+  //absl::flat_hash_set<XEdge> bdinp_edges, bdout_edges;//boundary_input/output_edges
   absl::flat_hash_map<Node::Compact, unsigned int> node2gid; //gid == group id, nodes in node2gid should be lutified
   absl::flat_hash_map<unsigned int, mockturtle_network> gid2mt;
   absl::flat_hash_map<unsigned int, mockturtle::klut_network> gid2klut;

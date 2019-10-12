@@ -126,8 +126,8 @@ void Pass_mockturtle::setup_input_signals(const unsigned int    &group_id,
       inp_sigs_mt.emplace_back(edge2mt_sigs[input_edge].signals[i]);
 
   } else {
-    bdinp_edges.insert(input_edge);
-    //bdinp_edges.emplace_back(input_edge);
+    //bdinp_edges.insert(input_edge);
+    bdinp_edges.emplace_back(input_edge);
     edge2mt_sigs[input_edge].gid = group_id;
     //create new input signals and map them back
 #ifndef NDEBUG
@@ -240,7 +240,7 @@ void Pass_mockturtle::mapping_logic_cell_lg2mt(sig_type (ntk_type::*create_nary_
   std::vector<sig_type> out_sigs_0, out_sigs_1;
   std::vector<std::vector<sig_type>> inp_sig_group_by_bit;
   //processing input signal
-  for (const auto &inp_edge : node.inp_edges()) {
+  for (const auto &inp_edge : node.inp_edges_ordered()) {
     fmt::print("mapping_logic_cell_lg2mt, node:{}, driver:{}\n", node.debug_name(), inp_edge.driver.debug_name());
     std::vector<sig_type> inp_sigs;
     setup_input_signals(group_id, inp_edge, inp_sigs, mock_ntk);
@@ -263,7 +263,7 @@ void Pass_mockturtle::mapping_logic_cell_lg2mt(sig_type (ntk_type::*create_nary_
   }
   out_sigs_1.emplace_back((mock_ntk.*create_nary_op)(out_sigs_0));
   //processing output signal
-  for (const auto &out_edge : node.out_edges()) {
+  for (const auto &out_edge : node.out_edges_ordered()) {
     switch (out_edge.driver.get_pid()) {
       case 0: {
         I(out_edge.get_bits()==out_sigs_0.size());
@@ -428,7 +428,7 @@ void Pass_mockturtle::mapping_comparison_cell_lg2mt(const bool &lt_op, const boo
   //must differentiate between signed and unsigned input
   std::vector<typename ntk_type::signal> out_sigs, med_sig;
   std::vector<comparator_input_signal<typename ntk_type::signal>> left_operant_sigs, right_operant_sigs;
-  for (const auto &inp_edge : node.inp_edges()) {
+  for (const auto &inp_edge : node.inp_edges_ordered()) {
     //fmt::print("input_bit_width:{}\n",inp_edge.get_bits());
     comparator_input_signal<typename ntk_type::signal> inp_sigs;
     setup_input_signals(group_id, inp_edge, inp_sigs.signals, mock_ntk);
@@ -459,7 +459,7 @@ void Pass_mockturtle::mapping_comparison_cell_lg2mt(const bool &lt_op, const boo
     out_sigs.emplace_back(mock_ntk.create_nary_and(med_sig));
   }
   //processing output signal
-  for (const auto &out_edge : node.out_edges()) {
+  for (const auto &out_edge : node.out_edges_ordered()) {
     I(out_edge.get_bits()==1);
     setup_output_signals(group_id, out_edge, out_sigs, mock_ntk);
   }
@@ -573,7 +573,7 @@ void Pass_mockturtle::mapping_shift_cell_lg2mt(const bool &is_shift_right, const
     create_n_bit_k_input_mux(out_enum, opr_B_sigs, out_sigs, mock_ntk);
   }
   //processing output signal
-  for (const auto &out_edge : node.out_edges()) {
+  for (const auto &out_edge : node.out_edges_ordered()) {
     I(out_edge.get_bits() == out_sigs.size());
     setup_output_signals(group_id, out_edge, out_sigs, mock_ntk);
   }
@@ -658,7 +658,7 @@ void Pass_mockturtle::mapping_dynamic_shift_cell_lg2mt(const bool &is_shift_righ
     create_n_bit_k_input_mux(out_enum, sign_sel, out_sigs, mock_ntk);
   }
   //processing output signal
-  for (const auto &out_edge : node.out_edges()) {
+  for (const auto &out_edge : node.out_edges_ordered()) {
     I(out_edge.get_bits() == out_sigs.size());
     setup_output_signals(group_id, out_edge, out_sigs, mock_ntk);
   }
@@ -689,7 +689,7 @@ void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
           out_sigs_mt.emplace_back(mt_ntk.create_not(i));
 
         //processing output signal
-        for (const auto &out_edge : node.out_edges()) {
+        for (const auto &out_edge : node.out_edges_ordered()) {
           //fmt::print("output_bit_width:{}\n",out_edge.get_bits());
           I(out_edge.get_bits()==out_sigs_mt.size());
           setup_output_signals(group_id, out_edge, out_sigs_mt, mt_ntk);
@@ -724,7 +724,7 @@ void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
         //must differentiate between signed and unsigned input
         std::vector<mockturtle_network::signal> out_sigs, med_sig;
         std::vector<comparator_input_signal<mockturtle_network::signal>> operant_sigs;
-        for (const auto &inp_edge : node.inp_edges()) {
+        for (const auto &inp_edge : node.inp_edges_ordered()) {
           //fmt::print("input_bit_width:{}\n",inp_edge.get_bits());
           comparator_input_signal<mockturtle_network::signal> inp_sig;
           setup_input_signals(group_id, inp_edge, inp_sig.signals, mt_ntk);
@@ -741,7 +741,7 @@ void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
         }
         out_sigs.emplace_back(mt_ntk.create_nary_and(med_sig));
         //processing output signal
-        for (const auto &out_edge : node.out_edges()) {
+        for (const auto &out_edge : node.out_edges_ordered()) {
           I(out_edge.get_bits()==1);
           setup_output_signals(group_id, out_edge, out_sigs, mt_ntk);
         }
@@ -828,7 +828,7 @@ void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
   for(const auto node : g->forward()) {
     if (node2gid.find(node.get_compact()) == node2gid.end())
       continue;
-    for (const auto &out_edge : node.out_edges()) {
+    for (const auto &out_edge : node.out_edges_ordered()) {
       if (node2gid.find(out_edge.sink.get_node().get_compact())==node2gid.end()) {
         //SH:FIXME: LGraph bug! edge iterator will traverse the same edge(NOT->gout) twice!
         //SH:FIXME: for now, temporarily use for-loop to exclude duplicated edge traversal.
@@ -839,8 +839,8 @@ void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
         }
 
         if(!hit){
-          //bdout_edges.emplace_back(out_edge);
-          bdout_edges.insert(out_edge);
+          bdout_edges.emplace_back(out_edge);
+          //bdout_edges.insert(out_edge);
         }
 
 
@@ -1012,7 +1012,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
     }
 
     //create edges which connect unchanged parts in lgraph
-    for (const auto &inp_edge : old_node.inp_edges()) {
+    for (const auto &inp_edge : old_node.inp_edges_ordered()) {
       if (edge2mt_sigs.find(inp_edge)==edge2mt_sigs.end()) {
         auto peer_driver_node = inp_edge.driver.get_node();
         if (old_node_to_new_node.find(peer_driver_node.get_compact())!=old_node_to_new_node.end()) {
@@ -1024,7 +1024,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
         }
       }
     }
-    for (const auto &out_edge : old_node.out_edges()) {
+    for (const auto &out_edge : old_node.out_edges_ordered()) {
       if (edge2mt_sigs.find(out_edge) == edge2mt_sigs.end()) {
         auto peer_sink_node = out_edge.sink.get_node();
         if (old_node_to_new_node.find(peer_sink_node.get_compact()) != old_node_to_new_node.end()) {

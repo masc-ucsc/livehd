@@ -4,7 +4,7 @@ output f, output g);
 
 assign f = ~(a^b);
 assign g = ~^c;
-assign e = ~(c^d);
+/* assign e = ~(c^d); */
 
 endmodule
 
