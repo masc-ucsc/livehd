@@ -4,7 +4,7 @@ rm -f   yosys_srcipt.*
 rm -f   *.v
 
 # pts='trivial trivial2a trivial1'
-pts='trivial trivial2a trivial1'
+pts='trivial trivial2a trivial1 trivial3 trivial_and trivial_join'
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
 

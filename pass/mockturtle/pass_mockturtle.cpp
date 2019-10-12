@@ -126,8 +126,8 @@ void Pass_mockturtle::setup_input_signals(const unsigned int    &group_id,
       inp_sigs_mt.emplace_back(edge2mt_sigs[input_edge].signals[i]);
 
   } else {
-    //bdinp_edges.insert(input_edge);
-    bdinp_edges.emplace_back(input_edge);
+    bdinp_edges.insert(input_edge);
+    //bdinp_edges.emplace_back(input_edge);
     edge2mt_sigs[input_edge].gid = group_id;
     //create new input signals and map them back
 #ifndef NDEBUG
@@ -839,8 +839,8 @@ void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
         }
 
         if(!hit){
-          bdout_edges.emplace_back(out_edge);
-          //bdout_edges.insert(out_edge);
+          //bdout_edges.emplace_back(out_edge);
+          bdout_edges.insert(out_edge);
         }
 
 
