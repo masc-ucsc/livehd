@@ -44,7 +44,7 @@ void Pass_mockturtle::do_work(LGraph *g) {
   for (const auto &group_id_it : node2gid) {
     fmt::print("node:{} -> gid:{}\n", group_id_it.first.get_node(g).debug_name(), group_id_it.second);
   }
-  fmt::print("Partition finished.\n");
+  fmt::print("Partition finished.\n\n");
 
   fmt::print("Creating mockturtle network...\n");
   create_mockturtle_network(g);
@@ -665,7 +665,14 @@ void Pass_mockturtle::mapping_dynamic_shift_cell_lg2mt(const bool &is_shift_righ
 }
 
 void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
+  absl::flat_hash_set<Node::Compact> lg_node_visited;
   for(const auto node : g->forward()) {
+    //SH:FIXME: temporarily exclude the visited node
+    if (lg_node_visited.find(node.get_compact()) != lg_node_visited.end())
+      continue;
+    else
+      lg_node_visited.insert(node.get_compact());
+
     if (node2gid.find(node.get_compact())==node2gid.end())
       continue;
 
