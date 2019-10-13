@@ -663,6 +663,14 @@ lgshell> perf.start
 lgshell> lgraph.open name:foo |> ....
 lgshell> perf.stop
 
+## Use SLATE to document key API
+
+Go over public methods in node, node pin, graph library, sub node, and create a
+SLATE entry.
+
+Point to some of the unit tests using the API, and create. Feel free to create
+trivial examples that run with unit tests as sample of usage.
+
 ## Setup gupm for Pyrope and LiveHD
 
 https://github.com/azukaar/GuPM
