@@ -658,10 +658,12 @@ list. It can serialize the token list if needed.
 
 * Able to get time and performance statistics for tasks in lghsell
 * perf.start, perf.stop, perf.dump commands to allow things like:
+
 ```
 lgshell> perf.start
 lgshell> lgraph.open name:foo |> ....
 lgshell> perf.stop
+```
 
 ## Use SLATE to document key API
 
