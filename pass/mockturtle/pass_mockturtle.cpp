@@ -894,12 +894,21 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT() {
     const unsigned int           group_id = gid2mt_iter.first;
     const mockturtle::mig_network &mt_ntk = gid2mt_iter.second;
 
+    //mapping the po driving signal between original mig and the synthsized one
+    std::vector<mockturtle::mig_network::signal>    mig_pos_drivers_original;
+    std::vector<mockturtle::mig_network::signal>    mig_pos_drivers_synth;
+    absl::flat_hash_map<mockturtle::mig_network::signal, mockturtle::mig_network::signal> mig_synth_po_sigs_map;
+
+    mt_ntk.foreach_po( [&](const auto& n)   {
+      mig_pos_drivers_original.emplace_back(n);
+    } );
+
+
     //sh:fixme:dbg
     mt_ntk.foreach_po( [&](const auto& n)   {
       fmt::print("1. the node drive mt_ntk po is :{}\n", mt_ntk.get_node(n));
     } );
 
-    fmt::print("numb of gates in mt_ntk:{}\n", mt_ntk.num_gates());
 
 #if 1
     auto net0 = mt_ntk;
@@ -917,6 +926,7 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT() {
     net0 = mockturtle::cleanup_dangling(net0);
 
     mockturtle::mapping_view<mockturtle::mig_network, true> mapped_mig{net0};
+
 #else
     mockturtle::mig_network cleaned_mt_ntk = cleanup_dangling(mt_ntk);
 
@@ -930,8 +940,25 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT() {
     //equivalence checking using miter
     //const auto miter = *mockturtle::miter<mockturtle::mig_network>(mapped_mig, klut_ntk);
 
-    gid2klut[group_id]=klut_ntk;
 
+    mt_ntk.foreach_po( [&](const auto& n)   {
+      mig_pos_drivers_synth.emplace_back(n);
+    } );
+
+
+    //mapping the po driving signal between original mig and the synthsized one
+    for(unsigned long int i=0 ; i < mig_pos_drivers_original.size(); i++)
+      mig_synth_po_sigs_map[mig_pos_drivers_original[i]] = mig_pos_drivers_synth[i];
+
+
+    //after po driver mapping, change the lgraph edge2mt_sigs mapping accordingly
+    for (const auto &out_edge : bdout_edges) {
+      for(auto& itr : edge2mt_sigs[out_edge].signals)
+        itr = mig_synth_po_sigs_map[itr];
+    }
+
+
+    gid2klut[group_id]=klut_ntk;
     //mapping mig IO signal to klut IO signal
     //FIXME: foreach_pi returns node while foreach_po returns signal, but in klut network, you can regard them as the same
 
@@ -994,55 +1021,56 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT() {
       }
     }
 
+#if 0
+    std::vector<mockturtle::mig_network::node>      mig_inps;
+    std::vector<mockturtle::mig_network::node>      mig_outs;
+    std::vector<mockturtle::klut_network::signal>   klut_inps;
+    std::vector<mockturtle::klut_network::signal>   klut_outs;
+    mt_ntk.foreach_pi( [&](const auto& n)   {mig_inps.emplace_back(n);} );
+    mt_ntk.foreach_po( [&](const auto& n)   { mig_outs.emplace_back(mt_ntk.get_node(n));} );
 
-    //std::vector<mockturtle::mig_network::node>      mig_inps;
-    //std::vector<mockturtle::mig_network::node>      mig_outs;
-    //std::vector<mockturtle::klut_network::signal>   klut_inps;
-    //std::vector<mockturtle::klut_network::signal>   klut_outs;
-    //mt_ntk.foreach_pi( [&](const auto& n)   {mig_inps.emplace_back(n);} );
-    //mt_ntk.foreach_po( [&](const auto& n)   { mig_outs.emplace_back(mt_ntk.get_node(n));} );
-
-    //klut_ntk.foreach_pi( [&](const auto& n) { klut_inps.emplace_back(n); } );
-    //klut_ntk.foreach_po( [&](const auto& n) { klut_outs.emplace_back(klut_ntk.get_node(n)); } );
+    klut_ntk.foreach_pi( [&](const auto& n) { klut_inps.emplace_back(n); } );
+    klut_ntk.foreach_po( [&](const auto& n) { klut_outs.emplace_back(klut_ntk.get_node(n)); } );
 
 
-    //absl::flat_hash_map<mockturtle::mig_network::node, mockturtle::klut_network::signal> mig_pi2klut_pi;
-    //absl::flat_hash_map<mockturtle::mig_network::node, mockturtle::klut_network::signal> mig_po2klut_po;
-    //auto mig_inp_iter = mig_inps.begin();
-    //auto klut_inp_iter = klut_inps.begin();
-    //while (mig_inp_iter!=mig_inps.end()) {
-    //  mig_pi2klut_pi[*mig_inp_iter] = *klut_inp_iter;
-    //  fmt::print("Mockturtle Input({}) -> KLUT Input({})\n", mt_ntk.node_to_index(*mig_inp_iter), klut_ntk.node_to_index(*klut_inp_iter));
-    //  mig_inp_iter++;
-    //  klut_inp_iter++;
-    //}
+    absl::flat_hash_map<mockturtle::mig_network::node, mockturtle::klut_network::signal> mig_pi2klut_pi;
+    absl::flat_hash_map<mockturtle::mig_network::node, mockturtle::klut_network::signal> mig_po2klut_po;
+    auto mig_inp_iter = mig_inps.begin();
+    auto klut_inp_iter = klut_inps.begin();
+    while (mig_inp_iter!=mig_inps.end()) {
+      mig_pi2klut_pi[*mig_inp_iter] = *klut_inp_iter;
+      fmt::print("Mockturtle Input({}) -> KLUT Input({})\n", mt_ntk.node_to_index(*mig_inp_iter), klut_ntk.node_to_index(*klut_inp_iter));
+      mig_inp_iter++;
+      klut_inp_iter++;
+    }
 
-    //auto mig_out_iter = mig_outs.begin();
-    //auto klut_out_iter = klut_outs.begin();
-    //while (mig_out_iter!=mig_outs.end()) {
-    //  mig_po2klut_po[*mig_out_iter] = *klut_out_iter;
-    //  fmt::print("Mockturtle Output({}) -> KLUT Output({})\n", mt_ntk.node_to_index(*mig_out_iter), klut_ntk.node_to_index(*klut_out_iter));
-    //  fmt::print("the klut po node is constant node: {}\n", klut_ntk.is_constant(klut_ntk.get_node(*klut_out_iter)));
-    //  mig_out_iter++;
-    //  klut_out_iter++;
-    //}
+    auto mig_out_iter = mig_outs.begin();
+    auto klut_out_iter = klut_outs.begin();
+    while (mig_out_iter!=mig_outs.end()) {
+      mig_po2klut_po[*mig_out_iter] = *klut_out_iter;
+      fmt::print("Mockturtle Output({}) -> KLUT Output({})\n", mt_ntk.node_to_index(*mig_out_iter), klut_ntk.node_to_index(*klut_out_iter));
+      fmt::print("the klut po node is constant node: {}\n", klut_ntk.is_constant(klut_ntk.get_node(*klut_out_iter)));
+      mig_out_iter++;
+      klut_out_iter++;
+    }
 
-    //for (const auto &inp_edge : bdinp_edges) {
-    //  I(klut_ntk.size() > 0);
-    //  edge2klut_inp_sigs[inp_edge].gid = group_id;
-    //  for(const auto &itr_mig_sig : edge2mt_sigs[inp_edge].signals)
-    //    edge2klut_inp_sigs[inp_edge].signals.emplace_back(mig_pi2klut_pi[mt_ntk.get_node(itr_mig_sig)]);
-    //}
+    for (const auto &inp_edge : bdinp_edges) {
+      I(klut_ntk.size() > 0);
+      edge2klut_inp_sigs[inp_edge].gid = group_id;
+      for(const auto &itr_mig_sig : edge2mt_sigs[inp_edge].signals)
+        edge2klut_inp_sigs[inp_edge].signals.emplace_back(mig_pi2klut_pi[mt_ntk.get_node(itr_mig_sig)]);
+    }
 
-    //for (const auto &out_edge : bdout_edges) {
-    //  I(klut_ntk.size() > 0);
-    //  edge2klut_out_sigs[out_edge].gid = group_id;
-    //  for(const auto &itr_mig_sig : edge2mt_sigs[out_edge].signals){
-    //    edge2klut_out_sigs[out_edge].signals.emplace_back(mig_po2klut_po[mt_ntk.get_node(itr_mig_sig)]);
-    //    fmt::print("mt_ntk po is driven by a constant node:{}\n", mt_ntk.is_constant(mt_ntk.get_node(itr_mig_sig)));
-    //    fmt::print("klut_ntk po is driven by a constant node:{}\n", klut_ntk.is_constant(klut_ntk.get_node(mig_po2klut_po[mt_ntk.get_node(itr_mig_sig)])));
-    //  }
-    //}
+    for (const auto &out_edge : bdout_edges) {
+      I(klut_ntk.size() > 0);
+      edge2klut_out_sigs[out_edge].gid = group_id;
+      for(const auto &itr_mig_sig : edge2mt_sigs[out_edge].signals){
+        edge2klut_out_sigs[out_edge].signals.emplace_back(mig_po2klut_po[mt_ntk.get_node(itr_mig_sig)]);
+        fmt::print("mt_ntk po is driven by a constant node:{}\n", mt_ntk.is_constant(mt_ntk.get_node(itr_mig_sig)));
+        fmt::print("klut_ntk po is driven by a constant node:{}\n", klut_ntk.is_constant(klut_ntk.get_node(mig_po2klut_po[mt_ntk.get_node(itr_mig_sig)])));
+      }
+    }
+#endif
     fmt::print("finished.\n\n");
   }
 }
