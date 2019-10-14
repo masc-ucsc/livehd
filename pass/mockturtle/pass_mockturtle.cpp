@@ -894,6 +894,7 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT() {
     const unsigned int           group_id = gid2mt_iter.first;
     const mockturtle::mig_network &mt_ntk = gid2mt_iter.second;
 
+    //sh:fixme:dbg
     mt_ntk.foreach_po( [&](const auto& n)   {
       fmt::print("1. the node drive mt_ntk po is :{}\n", mt_ntk.get_node(n));
     } );
