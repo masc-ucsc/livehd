@@ -17,6 +17,7 @@
 #include "mockturtle/algorithms/node_resynthesis/direct.hpp"
 #include "mockturtle/algorithms/node_resynthesis/mig_npn.hpp"
 #include "mockturtle/algorithms/node_resynthesis/xmg_npn.hpp"
+//#include "mockturtle/algorithms/equivalence_checking.hpp"
 
 #include "mockturtle/algorithms/cleanup.hpp"
 #include "mockturtle/generators/arithmetic.hpp"
@@ -44,16 +45,16 @@ using mockturtle_network = mockturtle::mig_network; //chose mig or xag
 //NOTE: In a vector of signals, the LSB signal is represented by index[0]
 //while the MSB signal is represented by index[size()-1]
 template<typename sig>
-struct Ntk_Sigs {
+struct Ntk_sigs {
   unsigned int gid;
   std::vector<sig> signals;
 };
 
 template<typename sig>
-struct comparator_input_signal {
+struct Comparator_input_signal {
   bool is_signed;
   std::vector<sig> signals;
-  comparator_input_signal &operator=(const comparator_input_signal &obj) {
+  Comparator_input_signal &operator=(const Comparator_input_signal &obj) {
     I(this != &obj); // Do not assign object to itself. works but wasteful
     is_signed  = obj.is_signed;
     signals = obj.signals;
@@ -70,9 +71,9 @@ protected:
   absl::flat_hash_map<Node::Compact, unsigned int> node2gid; //gid == group id, nodes in node2gid should be lutified
   absl::flat_hash_map<unsigned int, mockturtle_network> gid2mt;
   absl::flat_hash_map<unsigned int, mockturtle::klut_network> gid2klut;
-  absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle_network::signal>> edge2mt_sigs; //lg<->mig, including all boundary i/o and "internal" wires
-  absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle::klut_network::signal>> edge2klut_inp_sigs; //lg<->klut, search edge2mt_sigs table, only input mapping
-  absl::flat_hash_map<XEdge, Ntk_Sigs<mockturtle::klut_network::signal>> edge2klut_out_sigs; //lg<->klut, search edge2mt_sigs table, only output mapping
+  absl::flat_hash_map<XEdge, Ntk_sigs<mockturtle_network::signal>> edge2mt_sigs; //lg<->mig, including all boundary i/o and "internal" wires
+  absl::flat_hash_map<XEdge, Ntk_sigs<mockturtle::klut_network::signal>> edge2klut_inp_sigs; //lg<->klut, search edge2mt_sigs table, only input mapping
+  absl::flat_hash_map<XEdge, Ntk_sigs<mockturtle::klut_network::signal>> edge2klut_out_sigs; //lg<->klut, search edge2mt_sigs table, only output mapping
   absl::flat_hash_map<Node::Compact, Node::Compact> old_node_to_new_node;
   absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::node>, Node::Compact> gid_klut_node2lg_node;
   absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::signal>, std::pair<mockturtle::klut_network::node, Port_ID>> gid_pi2pi_sink_node_lg_pid;
@@ -93,7 +94,7 @@ protected:
   void split_input_signal(const std::vector<signal> &, std::vector<std::vector<signal>> &);
 
   template<typename sig_type, typename ntk_type>
-  void convert_signed_to_unsigned(const comparator_input_signal<sig_type> &, comparator_input_signal<sig_type> &, ntk_type &);
+  void convert_signed_to_unsigned(const Comparator_input_signal<sig_type> &, Comparator_input_signal<sig_type> &, ntk_type &);
 
   template<typename sig_type, typename ntk_type>
   void complement_to_SMR(std::vector<sig_type> const &, std::vector<sig_type> &, ntk_type &);
@@ -111,21 +112,21 @@ protected:
                                 ntk_type &);
 
   template<typename sig_type, typename ntk_type>
-  sig_type is_equal_op(const comparator_input_signal<sig_type> &,
-                       const comparator_input_signal<sig_type> &,
+  sig_type is_equal_op(const Comparator_input_signal<sig_type> &,
+                       const Comparator_input_signal<sig_type> &,
                        ntk_type &);
 
   template<typename sig_type, typename ntk_type>
-  sig_type compare_op(const comparator_input_signal<sig_type> &,
-                      const comparator_input_signal<sig_type> &,
+  sig_type compare_op(const Comparator_input_signal<sig_type> &,
+                      const Comparator_input_signal<sig_type> &,
                       const bool &, const bool &,
                       ntk_type &);
 
   template<typename sig_type, typename ntk_type>
-  void match_bit_width_by_sign_extension(const comparator_input_signal<sig_type> &,
-                                         const comparator_input_signal<sig_type> &,
-                                         comparator_input_signal<sig_type> &,
-                                         comparator_input_signal<sig_type> &,
+  void match_bit_width_by_sign_extension(const Comparator_input_signal<sig_type> &,
+                                         const Comparator_input_signal<sig_type> &,
+                                         Comparator_input_signal<sig_type> &,
+                                         Comparator_input_signal<sig_type> &,
                                          ntk_type &);
 
   template<typename sig_type, typename ntk_type>
@@ -163,6 +164,7 @@ protected:
 
   template<typename signal, typename ntk>
   signal create_gt(const signal &x, const signal &y, ntk &net) {
+    //return net.create_gt(y, x);
     return net.create_lt(y, x);
   }
 

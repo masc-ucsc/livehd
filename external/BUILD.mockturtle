@@ -4,8 +4,10 @@ cc_library(
    hdrs = glob(["include/**/*.hpp"])
         + glob(["lib/ez/ez/*.hpp"])
         + glob(["lib/kitty/**/*.hpp"])
+        + glob(["lib/percy/**/*.hpp"])
+        + glob(["lib/abcsat/abc/*.h"])
         + glob(["lib/sparsepp/sparsepp/*.h"]),
    #srcs = glob(["src/*.cc"]),
-   includes = ["include", "lib/ez", "lib/kitty", "lib/sparsepp"],
+   includes = ["include", "lib/ez", "lib/kitty", "lib/sparsepp", "lib/percy", "lib/abcsat/abc"],
    visibility = ["//visibility:public"],
 )

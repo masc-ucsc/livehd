@@ -2,6 +2,12 @@
 rm -rf ./lgdb
 rm -f   yosys_srcipt.*
 rm -f   *.v
+rm -r  ./logs/*.v
+rm -f  ./logs/*.dot
+rm -f  ./logs/yosys_log/yosys_script.*
+
+mkdir logs
+mkdir -p logs/yosys_log
 
 # TBD
 # pts='test simple_weird fflop join_fadd'
@@ -11,9 +17,9 @@ rm -f   *.v
 
 # SH:todo
 # pts='compare compare2 consts cse_basic dce2 dce3 expression_00002
-# graphtest kogg_stone_64 '
+# graphtest kogg_stone_64 trivial_join'
 pts='trivial1 trivial trivial2a trivial3 trivial_and 
-     dce1 gates trivial1 trivial_join'
+     dce1 gates trivial1 compare '
 # pts='gates'
 
 LGSHELL=./bazel-bin/main/lgshell
@@ -52,12 +58,15 @@ do
     exit 1
   fi
   
+  mv *.v ./logs
+  mv *.dot ./logs
+  mv yosys_script.* ./logs/yosys_log
 
   echo ""
   echo "Logic Equivalence Check"
   echo ""
   
-  ${LGCHECK} -r./inou/yosys/tests/${pt}.v -i${pt}_lutified.v
+  ${LGCHECK} -r./inou/yosys/tests/${pt}.v -i./logs/${pt}_lutified.v
   if [ $? -eq 0 ]; then
     echo "Successfully pass logic equivilence check!"
     echo "=========================================="
@@ -69,7 +78,6 @@ do
   fi
 
 done
-
 
 
 
