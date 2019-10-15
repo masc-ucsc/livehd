@@ -693,7 +693,7 @@ void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
         std::vector<mockturtle_network::signal> inp_sigs_mt, out_sigs_mt;
         //processing input signal
         setup_input_signals(group_id, node.inp_edges()[0], inp_sigs_mt, mt_ntk);
-        I(inp_sigs_mt.size()==1);
+
         //creating output signal
         for (const auto i : inp_sigs_mt)
           out_sigs_mt.emplace_back(mt_ntk.create_not(i));
