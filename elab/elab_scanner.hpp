@@ -16,7 +16,7 @@
 
 using Token_id = uint8_t;
 
-using Token_entry = Explicit_type<uint32_t, struct Token_entry_struct>;
+using Token_entry = Explicit_type<uint32_t, struct Token_entry_struct, 0>;
 
 // WARNING:
 //

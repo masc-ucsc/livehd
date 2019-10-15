@@ -16,8 +16,8 @@ public:
 
   void regenerate(); // Triggered when the hierarchy may have changed
 
-  Lg_type_id get_lgid(const Hierarchy_index &hidx) const { return get_data(hidx).lgid; }
-  Node get_instance_node(const Hierarchy_index &hidx) const;
+  //Lg_type_id get_lgid(const Hierarchy_index &hidx) const { return get_data(hidx).lgid; }
+  Node get_instance_up_node(const Hierarchy_index &hidx) const;
 
   LGraph *ref_lgraph(const Hierarchy_index &hidx) const;
 

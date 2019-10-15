@@ -16,7 +16,7 @@
 class Sub_node {
 protected:
 
-  void add_phys_pin_int(Port_ID instance_pid, const Tech_pin &ppin) {
+  void add_phys_pin_int(const Port_ID instance_pid, const Tech_pin &ppin) {
     I(io_pins.size() > instance_pid);
 #ifndef NDEBUG
     // Make sure not to double insert
@@ -52,6 +52,7 @@ public:
     bool is_mapped() const { return graph_io_pos != Port_invalid; }
     bool is_input()  const { return dir == Direction::Input; }
     bool is_output() const { return dir == Direction::Output; }
+    Port_ID get_graph_pos() const { return graph_io_pos; }
   };
 
 private:
@@ -178,14 +179,24 @@ public:
     return name2id.at(io_name);
   }
 
+  Port_ID get_graph_pos(std::string_view io_name) const {
+    auto instance_pid = get_instance_pid(io_name);
+    return io_pins[instance_pid].graph_io_pos;
+  }
+
   Port_ID get_instance_pid_from_graph_pos(Port_ID graph_pos) const {
     I(has_graph_pin(graph_pos));
     return graph_pos2instance_pid[graph_pos];
   }
 
-  const IO_pin get_io_pin_from_graph_pos(Port_ID graph_pos) const {
+  const IO_pin &get_io_pin_from_graph_pos(Port_ID graph_pos) const {
     I(has_graph_pin(graph_pos));
     return io_pins[graph_pos2instance_pid[graph_pos]];
+  }
+
+  const IO_pin &get_io_pin_from_instance_pid(Port_ID instance_pid) const {
+    I(has_instance_pin(instance_pid));
+    return io_pins[instance_pid];
   }
 
   Port_ID get_graph_pos_from_instance_pid(Port_ID instance_pid) const {
@@ -271,7 +282,7 @@ public:
 
   void add_phys_pin(std::string_view io_name, const Tech_pin &ppin) {
     I(has_pin(io_name));
-    add_phys_pin_int(name2id[io_name], ppin);
+    add_phys_pin_int(name2id.at(io_name), ppin);
   }
 
   void add_phys_pin_from_instance_pid(Port_ID instance_pid, const Tech_pin &ppin) {

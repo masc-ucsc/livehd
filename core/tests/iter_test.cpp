@@ -210,13 +210,16 @@ void topo_add_chain_fwd(absl::flat_hash_set<Node::Compact> &discovered_node
 
   const auto &dst_pin  = edge.driver; // fwd
   const auto  dst_node = dst_pin.get_node();
+  if (!dst_node.is_graph_io() && !(dst_node.is_type_sub() && !dst_node.is_type_sub_empty()))
+    fmt::print("topo visit node:{} lg:{}\n", dst_node.debug_name(),dst_node.get_class_lgraph()->get_name());
 
   if (top_hier) {
     if (dst_node.is_type_sub() && !dst_node.is_type_sub_empty()) { // DOWN??
-      fmt::print("dfs adding subnode:{} (many types, opt for speed!)\n", dst_node.debug_name());
 
       auto down_pin = dst_pin.get_down_pin();
-      I(down_pin.is_driver()); // fwd
+      I(down_pin.is_sink()); // fwd
+
+      fmt::print("topo       down node:{} down_pin:{}\n", dst_node.debug_name(), down_pin.debug_name());
 
       for (auto &edge2 : down_pin.inp_edges()) {  // fwd
         I(edge2.sink.get_pid() == down_pin.get_pid());
@@ -226,7 +229,12 @@ void topo_add_chain_fwd(absl::flat_hash_set<Node::Compact> &discovered_node
       return;
     }else if (dst_node.is_graph_input() && !dst_node.is_root()) { // fwd: UP??
       auto up_pin = dst_pin.get_up_pin();
-      I(up_pin.is_driver()); // fwd
+      if (up_pin.is_invalid())
+        return; // Pin is not connected
+
+      I(up_pin.is_sink()); // fwd
+
+      fmt::print("topo          up node:{} up_pin:{} up_lg:{}\n", dst_node.debug_name(), up_pin.debug_name(), up_pin.get_class_lgraph()->get_name());
 
       for (auto &edge2 : up_pin.inp_edges()) {  // fwd
         I(edge2.sink.get_pid() == up_pin.get_pid());
@@ -234,9 +242,6 @@ void topo_add_chain_fwd(absl::flat_hash_set<Node::Compact> &discovered_node
       }
 
       // node_stack.push_back(up_pin.get_node());
-
-      fmt::print("prop_up node:{} lg:{} -> lg:{}\n", dst_node.debug_name(), dst_node.get_class_lgraph()->get_name(),
-          up_pin.get_class_lgraph()->get_name());
     }
   }
 
@@ -274,6 +279,41 @@ void doTopologicalSort(LGraph *lg) {
       }
     }
   }
+}
+void simple_line() {
+  std::string gname = "top_0";
+  LGraph *g0 = LGraph::create("lgdb_iter_test", "g0", "test");
+  LGraph *s0 = LGraph::create("lgdb_iter_test", "s0", "test");
+  LGraph *s1 = LGraph::create("lgdb_iter_test", "s1", "test");
+
+  auto g0_i_pin = g0->add_graph_input("g0_i", 1, 0);
+  auto g0_o_pin = g0->add_graph_output("g0_o", 2, 0);
+
+  auto s0_i_pin = s0->add_graph_input("s0_i", 3, 0);
+  auto s0_o_pin = s0->add_graph_output("s0_o", 4, 0);
+
+  auto s1_i_pin = s1->add_graph_input("s1_i", 5, 0);
+  auto s1_o_pin = s1->add_graph_output("s1_o", 6, 0);
+
+  auto g0_node0 = g0->create_node(Or_Op);
+  auto g0_node1 = g0->create_node_sub(s0->get_lgid());
+  auto g0_node2 = g0->create_node_sub(s1->get_lgid());
+
+  auto s0_node = s0->create_node(Or_Op);
+  auto s1_node = s1->create_node(Or_Op);
+
+  g0->add_edge(g0_i_pin, g0_node0.setup_sink_pin(0));
+  g0->add_edge(g0_node0.setup_driver_pin(0), g0_node1.setup_sink_pin(3));
+  g0->add_edge(g0_node1.setup_driver_pin(4), g0_node2.setup_sink_pin(5));
+  g0->add_edge(g0_node2.setup_driver_pin(6), g0_o_pin);
+
+  s0->add_edge(s0_i_pin, s0_node.setup_sink_pin(0));
+  s0->add_edge(s0_node.setup_driver_pin(0), s0_o_pin);
+
+  s1->add_edge(s1_i_pin, s1_node.setup_sink_pin(0));
+  s1->add_edge(s1_node.setup_driver_pin(0), s1_o_pin);
+
+  doTopologicalSort(g0);
 }
 
 void simple() {
@@ -357,7 +397,7 @@ void simple() {
 
   g->add_edge(c9.setup_driver_pin(), t16.setup_sink_pin(random()&0xFF));
   g->add_edge(c10.setup_driver_pin(), t16.setup_sink_pin(random()&0xFF));
-  g->add_edge(t23.setup_driver_pin(random()&0xFF), t16.setup_sink_pin(random()&0xFF));
+  g->add_edge(t23.setup_driver_pin(256+(random()&0xFF)), t16.setup_sink_pin(random()&0xFF));
 
   g->add_edge(c11.setup_driver_pin(), t17.setup_sink_pin(random()&0xFF));
   if (rand()&1)
@@ -365,22 +405,22 @@ void simple() {
   g->add_edge(c12.setup_driver_pin(), t17.setup_sink_pin(random()&0xFF));
   g->add_edge(c12.setup_driver_pin(), t18.setup_sink_pin(random()&0xFF));
 
-  g->add_edge(t13.setup_driver_pin(random()&0xFF), o5);
-  g->add_edge(t13.setup_driver_pin(random()&0xFF), o6);
+  g->add_edge(t13.setup_driver_pin(256+(random()&0xFF)), o5);
+  g->add_edge(t13.setup_driver_pin(256+(random()&0xFF)), o6);
   if (rand()&1)
-    g->add_edge(t14.setup_driver_pin(1000+(random()&0xFF)), o6);
-  g->add_edge(t14.setup_driver_pin(random()&0xFF), o6);
-  g->add_edge(t14.setup_driver_pin(random()&0xFF), o7);
+    g->add_edge(t14.setup_driver_pin(1000+256+(random()&0xFF)), o6);
+  g->add_edge(t14.setup_driver_pin(256+(random()&0xFF)), o6);
+  g->add_edge(t14.setup_driver_pin(256+(random()&0xFF)), o7);
 
-  g->add_edge(t17.setup_driver_pin(random()&0xFF), t20.setup_sink_pin(random()&0xFF));
+  g->add_edge(t17.setup_driver_pin(256+(random()&0xFF)), t20.setup_sink_pin(random()&0xFF));
   if (rand()&1)
-    g->add_edge(t17.setup_driver_pin(1000+(random()&0xFF)), t20.setup_sink_pin(random()&0xFF));
-  g->add_edge(t17.setup_driver_pin(random()&0xFF), t19.setup_sink_pin(random()&0xFF));
-  g->add_edge(t18.setup_driver_pin(random()&0xFF), t19.setup_sink_pin(random()&0xFF));
-  g->add_edge(t18.setup_driver_pin(random()&0xFF), t21.setup_sink_pin(random()&0xFF));
+    g->add_edge(t17.setup_driver_pin(1000+256+(random()&0xFF)), t20.setup_sink_pin(random()&0xFF));
+  g->add_edge(t17.setup_driver_pin(256+(random()&0xFF)), t19.setup_sink_pin(random()&0xFF));
+  g->add_edge(t18.setup_driver_pin(256+(random()&0xFF)), t19.setup_sink_pin(random()&0xFF));
+  g->add_edge(t18.setup_driver_pin(256+(random()&0xFF)), t21.setup_sink_pin(random()&0xFF));
 
-  g->add_edge(t16.setup_driver_pin(random()&0xFF), o8);
-  g->add_edge(t20.setup_driver_pin(random()&0xFF), o8);
+  g->add_edge(t16.setup_driver_pin(256+(random()&0xFF)), o8);
+  g->add_edge(t20.setup_driver_pin(256+(random()&0xFF)), o8);
 
 #ifdef VERBOSE
   for(const auto &node : g->fast()) {
@@ -599,6 +639,8 @@ void simple() {
 
 int main() {
 
+  simple_line();
+  exit(0);
   simple();
 
 #if 0

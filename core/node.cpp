@@ -70,7 +70,6 @@ void Node::update(const Node::Compact &comp) {
   hidx      = comp.hidx;
   current_g = top_g->ref_htree()->ref_lgraph(hidx);
 
-  I(top_g->ref_htree()->get_lgid(hidx) == current_g->get_lgid());
   I(current_g->is_valid_node(nid));
 }
 
@@ -167,7 +166,17 @@ int Node::get_num_outputs() const {
 }
 
 Node_pin Node::setup_driver_pin(Port_ID pid) {
+
   I(current_g->get_type(nid).has_output(pid));
+#ifndef NDEBUG
+  if (current_g->is_type_sub(nid)) {
+    Lg_type_id sub_lgid = current_g->get_type_sub(nid);
+    const auto &sub = current_g->get_library().get_sub(sub_lgid);
+    I(sub.has_graph_pin(pid));
+    I(sub.is_output_from_graph_pos(pid),"ERROR: An input can not be a driver pin");
+  }
+#endif
+
   Index_ID idx = current_g->setup_idx_from_pid(nid,pid);
   current_g->setup_driver(idx);
   return Node_pin(top_g, current_g, hidx, idx, pid, false);
@@ -291,17 +300,14 @@ Node_pin Node::setup_driver_pin(std::string_view name) {
 
   I(type.op == SubGraph_Op);
 
-  Lg_type_id id2 = current_g->get_type_sub(nid);
+  Lg_type_id sub_lgid = current_g->get_type_sub(nid);
+  I(current_g->get_library().exists(sub_lgid)); // Must be a valid lgid
 
-  auto &sub_node = current_g->get_library().get_sub(id2);
-  pid = sub_node.get_instance_pid(name);
+  const auto &sub = current_g->get_library().get_sub(sub_lgid);
+  I(sub.has_pin(name));
+  I(sub.is_output(name));
 
-#ifndef NDEBUG
-  LGraph *g2 = LGraph::open(top_g->get_path(), id2);
-  I(g2);
-  auto pid2 = g2->get_graph_output(name).get_pid();
-  I(pid == pid2);
-#endif
+  pid = sub.get_graph_pos(name);
 
   Index_ID idx = current_g->setup_idx_from_pid(nid, pid);
   current_g->setup_driver(idx);
@@ -329,12 +335,16 @@ Node_pin Node::setup_sink_pin(std::string_view name) {
 
   I(type.op == SubGraph_Op);
 
-  Lg_type_id id2 = current_g->get_type_sub(nid);
-  LGraph *g2 = LGraph::open(current_g->get_path(), id2);
-  I(g2);
-  auto internal_pin = g2->get_graph_input(name);
-  auto pid = internal_pin.get_pid();
-  Index_ID idx = current_g->setup_idx_from_pid(nid,pid);
+  Lg_type_id sub_lgid = current_g->get_type_sub(nid);
+  I(current_g->get_library().exists(sub_lgid)); // Must be a valid lgid
+
+  const auto &sub = current_g->get_library().get_sub(sub_lgid);
+  I(sub.has_pin(name));
+  I(sub.is_input(name));
+
+  auto pid = sub.get_graph_pos(name);
+
+  Index_ID idx = current_g->setup_idx_from_pid(nid, pid);
   current_g->setup_sink(idx);
   return Node_pin(top_g, current_g, hidx, idx, pid, true);
 }
@@ -342,7 +352,16 @@ Node_pin Node::setup_sink_pin(std::string_view name) {
 Node_pin Node::setup_sink_pin(Port_ID pid) {
 
   I(current_g->get_type(nid).has_input(pid));
-  Index_ID idx = current_g->setup_idx_from_pid(nid,pid);
+#ifndef NDEBUG
+  if (current_g->is_type_sub(nid)) {
+    Lg_type_id sub_lgid = current_g->get_type_sub(nid);
+    const auto &sub = current_g->get_library().get_sub(sub_lgid);
+    I(sub.has_graph_pin(pid));
+    I(sub.is_input_from_graph_pos(pid),"ERROR: An output can not be a sink pin");
+  }
+#endif
+
+  Index_ID idx = current_g->setup_idx_from_pid(nid, pid);
   current_g->setup_sink(idx);
   return Node_pin(top_g, current_g, hidx, idx, pid, true);
 }
@@ -445,7 +464,7 @@ std::string Node::debug_name() const {
   if (it != ref->end()) {
     name = ref->get_val_sview(it);
   }
-  if (get_type().op == SubGraph_Op) {
+  if (current_g->is_type_sub(nid)) {
     absl::StrAppend(&name, "_sub_", get_type_sub_node().get_name());
   }
 

@@ -3,10 +3,10 @@
 
 //#include "absl/hash/hash.h"
 
-template <typename T, typename Meaning>
+template <typename T, typename Meaning, T inv_val>
 struct Explicit_type {
   //! Default constructor does not initialize the value.
-  constexpr Explicit_type() {}
+  constexpr Explicit_type() : value(inv_val) {}
 
   //! Construction from a fundamental value.
   constexpr Explicit_type(T _value) : value(_value) {}
@@ -17,6 +17,9 @@ struct Explicit_type {
   //! The actual fundamental value.
   T         value;
   typedef T type;
+
+  bool is_invalid() const { return value == inv_val; }
+  void invalidate() { value = inv_val; }
 
   //bool operator==(const Explicit_type<T,Meaning> &other) const { return value == other.value; }
 };

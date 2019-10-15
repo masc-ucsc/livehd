@@ -23,23 +23,29 @@ LGraph *Hierarchy_tree::ref_lgraph(const Hierarchy_index &hidx) const {
   return lg;
 }
 
-Node Hierarchy_tree::get_instance_node(const Hierarchy_index &hidx) const {
+Node Hierarchy_tree::get_instance_up_node(const Hierarchy_index &hidx) const {
 
   const auto &data = get_data(hidx);
 
+  auto up_hidx = get_parent(hidx);
+
   I(data.lgid);
 
-  auto *lg = LGraph::open(get_path(), data.lgid);
+  LGraph *lg;
+  if (up_hidx.is_root()) {
+    lg = top;
+  }else{
+    const auto &up_data = get_data(up_hidx);
+    lg = LGraph::open(get_path(), up_data.lgid);
+    I(top!=lg);
+  }
   I(lg);
-  I(top!=lg);
 
-  return Node(top, lg, hidx, data.nid);
+  return Node(top, lg, up_hidx, data.up_nid);
 }
 
 void Hierarchy_tree::regenerate_step(LGraph *lg, const Hierarchy_index &parent) {
   auto *tree_pos = Ann_node_tree_pos::ref(lg);
-
-// FIXME: remove down_maps from node_type
 
   int conta = 0;
   for(auto it:*tree_pos) {
@@ -52,7 +58,7 @@ void Hierarchy_tree::regenerate_step(LGraph *lg, const Hierarchy_index &parent) 
 
     auto child_lgid = node.get_type_sub();
 
-    Hierarchy_data data(child_lgid, conta);
+    Hierarchy_data data(child_lgid, node.get_nid());
     auto child = add_child(parent, data);
 
     auto *child_lg = lg->get_library().try_find_lgraph(child_lgid);
@@ -73,7 +79,7 @@ void Hierarchy_tree::regenerate() {
   for(const auto &index:depth_preorder()) {
     std::string indent(index.level, ' ');
     const auto &index_data = get_data(index);
-    fmt::print("{} l:{} p:{} lgid:{} nid:{}\n", indent, index.level, index.pos, index_data.lgid, index_data.nid);
+    fmt::print("{} l:{} p:{} lgid:{} nid:{}\n", indent, index.level, index.pos, index_data.lgid, index_data.up_nid);
   }
   auto *tree_pos = Ann_node_tree_pos::ref(top);
   for(auto it:*tree_pos) {

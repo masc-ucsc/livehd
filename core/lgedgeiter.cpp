@@ -289,6 +289,7 @@ void CForward_edge_iterator::insert_graph_start_points(LGraph *lg, Hierarchy_ind
 }
 
 void CBackward_edge_iterator::propagate_io(const Node &node) {
+  (void)node;
   I(false);// FIXME: implement me
 }
 

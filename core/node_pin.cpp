@@ -134,7 +134,16 @@ std::string Node_pin::debug_name() const {
     if (Ann_node_pin_name::ref(current_g)->has_key(get_compact_class_driver()))
       name = Ann_node_pin_name::ref(current_g)->get_val_sview(get_compact_class_driver());
 
-  return absl::StrCat("node_pin_", std::to_string(get_node().nid), "_", name, ":", std::to_string(pid), sink?"s":"d");
+  if (name.empty()) {
+    const auto node = get_node();
+    if (node.is_type_sub()) {
+      name = node.get_type_sub_node().get_name_from_graph_pos(pid);
+    }else if(node.has_name()) {
+      name = node.get_name();
+    }
+  }
+
+  return absl::StrCat("node_pin_", std::to_string(get_node().nid), ":", name, ":", std::to_string(pid), sink?"s":"d");
   //not a acceptable format for dot
   //return absl::StrCat("node_pin_", std::to_string(idx), ":", std::to_string(pid), sink?"s":"d", "(", name ,")");
 }
@@ -240,33 +249,41 @@ Node_pin Node_pin::get_down_pin() const {
   auto *down_current_g = top_g->ref_htree()->ref_lgraph(down_hidx);
 
   // 4th: get down_idx
-  Index_ID down_idx = down_current_g->find_idx_from_pid(is_driver()?Node::Hardcoded_input_nid: Node::Hardcoded_output_nid, down_pid);
+  Index_ID down_idx = down_current_g->find_idx_from_pid(is_driver()?Node::Hardcoded_output_nid: Node::Hardcoded_input_nid, down_pid);
   I(down_idx);
 
-  bool up_sink = is_sink(); // A top driver, should connect to an down input. A top sink, should connect to an down output
-  return Node_pin(top_g, down_current_g, down_hidx, down_idx, down_pid, up_sink);
+  bool down_sink = is_driver(); // top driver goes to an down output which should be a sink
+  return Node_pin(top_g, down_current_g, down_hidx, down_idx, down_pid, down_sink);
 }
 
 Node_pin Node_pin::get_up_pin() const {
   I(get_node().is_graph_io());
 
-  // 1st: Get up_hidx
-  auto up_hidx = top_g->ref_htree()->get_parent(hidx);
+  bool up_sink = get_node().is_graph_input(); // down input, must be a sink on instance
 
-  // 2nd: get up_pid
+  // 1st: get up_pid
   I(pid != Port_invalid);
-  auto up_pid  = current_g->get_self_sub_node().get_graph_pos_from_instance_pid(pid);
+  const auto &io_pin = current_g->get_self_sub_node().get_io_pin_from_instance_pid(pid);
+
+  if (io_pin.is_input() != up_sink) {
+    // IO port is not found (different direction is there)
+    return Node_pin(); // Invalid, the input is not connected
+  }
+
+  auto up_pid  = io_pin.get_graph_pos();
   I(up_pid != Port_invalid);
 
-  // 3rd: get up_current_g
-  auto up_node = top_g->ref_htree()->get_instance_node(up_hidx);
+  // 2nd: get up_current_g
+  auto up_node = top_g->ref_htree()->get_instance_up_node(hidx);
 
-  // 4th: get up_idx
-  Index_ID up_idx = current_g->find_idx_from_pid(up_node.get_nid(), up_pid);
+  // 3rd: get up_idx
+  Index_ID up_idx = up_node.get_class_lgraph()->find_idx_from_pid(up_node.get_nid(), up_pid);
+  if (up_idx.is_invalid())
+    return Node_pin(); // Invalid, the input is not connected
+
   I(up_idx);
 
-  bool up_sink = get_node().is_graph_input(); // down input, must be a sink on instance
-  return Node_pin(top_g, up_node.get_class_lgraph(), up_hidx, up_idx, up_pid, up_sink);
+  return Node_pin(top_g, up_node.get_class_lgraph(), up_node.get_hidx(), up_idx, up_pid, up_sink);
 }
 
 XEdge_iterator Node_pin::inp_edges() const {

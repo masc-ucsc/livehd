@@ -91,6 +91,12 @@ public:
   LGraph        *try_find_lgraph(std::string_view name) const;
   LGraph        *try_find_lgraph(Lg_type_id lgid) const;
 
+  bool          exists(Lg_type_id lgid) const {
+    if (attributes.size() >= lgid || lgid.is_invalid())
+      return false;
+    return sub_nodes[lgid].get_lgid() == lgid;
+  }
+
   Sub_node &reset_sub(std::string_view name, std::string_view source);
   Sub_node &setup_sub(std::string_view name, std::string_view source);
   Sub_node &setup_sub(std::string_view name) { return setup_sub(name, "-"); }
