@@ -1143,16 +1143,16 @@ void Prp::ast_builder(){
     switch(std::get<1>(ast_op)){
       case 0:
         ast->down();
-        fmt::print("Went down; now at level {}.\n", ast->get_level());
+        //fmt::print("Went down; now at level {}.\n", ast->get_level());
         break;
       case 1:
         ast->up(std::get<2>(ast_op));
-        fmt::print("Went up with rule {}, now at level {}.\n", rule_id_to_string(std::get<2>(ast_op)), ast->get_level());
+        //fmt::print("Went up with rule {}, now at level {}.\n", rule_id_to_string(std::get<2>(ast_op)), ast->get_level());
         break;
       case 2:
         ast->down();
         ast->add(std::get<2>(ast_op), std::get<3>(ast_op));
-        fmt::print("Added token {} from rule {} at level {}\n", scan_text(std::get<3>(ast_op)), rule_id_to_string(std::get<2>(ast_op)), ast->get_level());
+        //fmt::print("Added token {} from rule {} at level {}\n", scan_text(std::get<3>(ast_op)), rule_id_to_string(std::get<2>(ast_op)), ast->get_level());
         ast->up(std::get<2>(ast_op));
         break;
     }

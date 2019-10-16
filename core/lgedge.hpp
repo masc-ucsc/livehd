@@ -532,7 +532,7 @@ public:
   bool is_driver_setup() const { return driver_setup != 0; }
   bool is_sink_setup()   const { return sink_setup   != 0; }
   void set_driver_setup() { driver_setup=1; }
-  void set_sink_setup()   { driver_setup=1; }
+  void set_sink_setup()   { sink_setup=1; }
 
   const SEdge *get_input_begin() const { return &sedge[get_input_begin_pos_int()]; }
   const SEdge *get_input_end() const { return &sedge[get_input_end_pos_int()]; }
