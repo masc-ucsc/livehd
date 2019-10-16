@@ -83,7 +83,7 @@ void Hierarchy_tree::regenerate() {
   }
   auto *tree_pos = Ann_node_tree_pos::ref(top);
   for(auto it:*tree_pos) {
-    fmt::print("top first:{} second:{}\n", it.first.nid, it.second);
+    fmt::print("top first:{} second:{}\n", it.first.get_nid(), it.second);
   }
 }
 

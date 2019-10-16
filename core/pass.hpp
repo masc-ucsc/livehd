@@ -35,17 +35,26 @@ public:
   }
 
   template <typename... Args>
-  static void error(std::string_view format, const Args &... args) {
-    eprp.parser_error(fmt::vformat(format, fmt::make_format_args(args...)));
+  static void error(const char *format, const Args &... args) {
+    fmt::format_args fargs = fmt::make_format_args(args...);
+    fmt::memory_buffer tmp;
+    fmt::vformat_to(tmp, format, fargs);
+    eprp.parser_error(std::string_view(tmp.data(), tmp.size()));
   }
 
   template <typename... Args>
   static void warn(std::string_view format, const Args &... args) {
-    eprp.parser_warn(fmt::vformat(format, fmt::make_format_args(args...)));
+    fmt::format_args fargs = fmt::make_format_args(args...);
+    fmt::memory_buffer tmp;
+    fmt::vformat_to(tmp, format, fargs);
+    eprp.parser_warn(std::string_view(tmp.data(), tmp.size()));
   }
 
   template <typename... Args>
   static void info(std::string_view format, const Args &... args) {
-    eprp.parser_info(fmt::vformat(format, fmt::make_format_args(args...)));
+    fmt::format_args fargs = fmt::make_format_args(args...);
+    fmt::memory_buffer tmp;
+    fmt::vformat_to(tmp, format, fargs);
+    eprp.parser_info(std::string_view(tmp.data(), tmp.size()));
   }
 };

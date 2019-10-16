@@ -115,6 +115,8 @@ public:
       return *this;
     }
 
+    Index_ID get_nid() const { return nid; }
+
     Node get_node(LGraph *lg) const { return Node(lg, *this); }
 
     constexpr bool is_invalid() const { return nid == 0; }

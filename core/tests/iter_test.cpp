@@ -206,26 +206,39 @@ bool top_hier= true;
 
 void topo_add_chain_fwd(absl::flat_hash_set<Node::Compact> &discovered_node
     , std::vector<Node> &node_stack
+    , const XEdge &edge);
+
+void topo_add_chain_down(absl::flat_hash_set<Node::Compact> &discovered_node
+    , std::vector<Node> &node_stack
+    , const Node_pin &dst_pin) {
+
+  const auto node = dst_pin.get_node();
+  I(node.is_type_sub() && !node.is_type_sub_empty());
+
+  auto down_pin = dst_pin.get_down_pin();
+  I(down_pin.is_sink()); // fwd
+
+  fmt::print("topo       down node:{} down_pin:{}\n", down_pin.get_node().debug_name(), down_pin.debug_name());
+
+  for (auto &edge2 : down_pin.inp_edges()) {  // fwd
+    I(edge2.sink.get_pid() == down_pin.get_pid());
+    topo_add_chain_fwd(discovered_node, node_stack, edge2);
+  }
+}
+
+void topo_add_chain_fwd(absl::flat_hash_set<Node::Compact> &discovered_node
+    , std::vector<Node> &node_stack
     , const XEdge &edge) {
 
   const auto &dst_pin  = edge.driver; // fwd
   const auto  dst_node = dst_pin.get_node();
+  fmt::print("1.topo visit node:{} lg:{}\n", dst_node.debug_name(),dst_node.get_class_lgraph()->get_name());
   if (!dst_node.is_graph_io() && !(dst_node.is_type_sub() && !dst_node.is_type_sub_empty()))
     fmt::print("topo visit node:{} lg:{}\n", dst_node.debug_name(),dst_node.get_class_lgraph()->get_name());
 
   if (top_hier) {
     if (dst_node.is_type_sub() && !dst_node.is_type_sub_empty()) { // DOWN??
-
-      auto down_pin = dst_pin.get_down_pin();
-      I(down_pin.is_sink()); // fwd
-
-      fmt::print("topo       down node:{} down_pin:{}\n", dst_node.debug_name(), down_pin.debug_name());
-
-      for (auto &edge2 : down_pin.inp_edges()) {  // fwd
-        I(edge2.sink.get_pid() == down_pin.get_pid());
-        topo_add_chain_fwd(discovered_node, node_stack, edge2);
-      }
-
+      topo_add_chain_down(discovered_node, node_stack, dst_pin);
       return;
     }else if (dst_node.is_graph_input() && !dst_node.is_root()) { // fwd: UP??
       auto up_pin = dst_pin.get_up_pin();
@@ -259,6 +272,9 @@ void doTopologicalSort(LGraph *lg) {
 
   discovered_node.clear();
 
+  //for (auto &edge : lg->get_graph_output_node().inp_edges()) {
+    //topo_add_chain_fwd(discovered_node, node_stack, edge);
+  //}
 
   for (auto node : lg->fast()) { // FIXME: to flow, no fast (start with inputs for fwd, outputs for bwd)
     if (discovered_node.count(node.get_compact())) continue;
@@ -268,9 +284,15 @@ void doTopologicalSort(LGraph *lg) {
       auto node2 = node_stack.back();
       node_stack.pop_back();
 
+      fmt::print("1.topo node:{} lg:{}\n", node2.debug_name(), node2.get_class_lgraph()->get_name());
       if (!discovered_node.count(node2.get_compact())) {
         fmt::print("topo node:{} lg:{}\n", node2.debug_name(), node2.get_class_lgraph()->get_name());
         discovered_node.insert(node2.get_compact());
+      }
+      if (node2.is_type_sub() && !node2.is_type_sub_empty()) {
+        for (auto &pin : node2.out_connected_pins()) {
+          topo_add_chain_down(discovered_node, node_stack, pin);
+        }
       }
       // forward traversal : inp_edges ; out.driver
       // backward traversal: out_edges ; out.sink

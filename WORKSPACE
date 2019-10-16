@@ -67,16 +67,16 @@ git_repository(
 new_git_repository(
     name = "fmt",
     build_file = "BUILD.fmt",
-    commit = "ab1474ef661a82175de693f79926f38bf11d6815", # April 6, 2019 91acfe685234534b8f8b379031d00cd62240ce3f", # March 20, 2019 "a084495d7e35436304e9ad0df999e06b2faf2a0b", # Nov 29, 2018
+    commit = "7512a55aa3ae309587ca89668ef9ec4074a51a1f", # 6.0.0 October 12, 2019 ab1474ef661a82175de693f79926f38bf11d6815", # April 6, 2019 
     remote = "https://github.com/fmtlib/fmt.git",
     #strip_prefix = "include",
 )
 new_git_repository(
     name = "slang",
     build_file = "BUILD.slang",
-    commit = "7044cea55f10eb9d37048293bf5287ea15559dec", # Obtober 3, 2019
+    commit = "77a31619e27dc25f6b29a53a5003e1781c6b3034", # Obtober 16, 2019
     remote = "https://github.com/MikePopoloski/slang.git",
-    #strip_prefix = "include",
+    patches = ["//external:patch.slang"],
 )
 new_git_repository(
     name = "json",
