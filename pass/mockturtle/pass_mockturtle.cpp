@@ -399,7 +399,7 @@ void Pass_mockturtle::mapping_comparison_cell_lg2mt(const bool &lt_op, const boo
   std::vector<typename ntk_type::signal> out_sigs, med_sig;
   std::vector<Comparator_input_signal<typename ntk_type::signal>> left_opd_sigs, right_opd_sigs;
 
-  for (const auto &inp_edge : node.inp_edges_ordered()) {
+  for (const auto &inp_edge : node.inp_edges()) {
     Comparator_input_signal<typename ntk_type::signal> inp_sigs;
     setup_input_signals(group_id, inp_edge, inp_sigs.signals, mt_ntk);
 
@@ -860,10 +860,12 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT() {
     mockturtle::lut_mapping<mockturtle::mapping_view<mockturtle::mig_network, true>, true>(mapped_mig, ps);
     mockturtle::klut_network klut_ntk =*mockturtle::collapse_mapped_network<mockturtle::klut_network>(mapped_mig);
 
+#ifndef NDEBUG
     //equivalence checking using miter
-    //const auto miter  = *mockturtle::miter<mockturtle::mig_network>(mapped_mig, klut_ntk);
-    //const auto result = *mockturtle::equivalence_checking(miter);
-    //I(result);
+    const auto miter  = *mockturtle::miter<mockturtle::klut_network>(mapped_mig, klut_ntk);
+    const auto result = *mockturtle::equivalence_checking(miter);
+    I(result);
+#endif
 
     //mapping the po driving signal between original mig and the synthsized one
     mt_ntk.foreach_po( [&](const auto& n)   {mig_pos_drivers_synth.emplace_back(n);} );

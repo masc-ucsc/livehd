@@ -4,10 +4,11 @@ cc_library(
    hdrs = glob(["include/**/*.hpp"])
         + glob(["lib/ez/ez/*.hpp"])
         + glob(["lib/kitty/**/*.hpp"])
- #       + glob(["lib/percy/percy/solvers/*.hpp"])
- #       + glob(["lib/abcsat/abc/*.h"])
+        + glob(["lib/percy/percy/solvers/*.hpp"])
+        + glob(["lib/abcsat/abc/*.h"])
         + glob(["lib/sparsepp/sparsepp/*.h"]),
- #  srcs = glob(["lib/abcsat/*.cpp"]),
+    srcs = glob(["lib/abcsat/*.cpp"]),
    includes = ["include", "lib/ez", "lib/kitty", "lib/sparsepp", "lib/percy", "lib/abcsat"],
    visibility = ["//visibility:public"],
+   defines = ["LIN64", "ABC_NAMESPACE=pabc"],
 )

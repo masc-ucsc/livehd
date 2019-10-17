@@ -17,9 +17,10 @@
 #include "mockturtle/algorithms/node_resynthesis/direct.hpp"
 #include "mockturtle/algorithms/node_resynthesis/mig_npn.hpp"
 #include "mockturtle/algorithms/node_resynthesis/xmg_npn.hpp"
-//#include "mockturtle/algorithms/equivalence_checking.hpp"
-
 #include "mockturtle/algorithms/cleanup.hpp"
+#include "mockturtle/algorithms/miter.hpp"
+#include "mockturtle/algorithms/equivalence_checking.hpp"
+
 #include "mockturtle/generators/arithmetic.hpp"
 #include "mockturtle/io/write_bench.hpp"
 //#include "mockturtle/networks/aig.hpp"
@@ -29,7 +30,6 @@
 #include "mockturtle/algorithms/lut_mapping.hpp"
 #include "mockturtle/views/mapping_view.hpp"
 
-//#include "mockturtle/algorithms/miter.hpp"
 
 #include "lgbench.hpp"
 #include "lgedgeiter.hpp"
