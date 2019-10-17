@@ -29,7 +29,7 @@
 #include "mockturtle/algorithms/lut_mapping.hpp"
 #include "mockturtle/views/mapping_view.hpp"
 
-#include "mockturtle/algorithms/miter.hpp"
+//#include "mockturtle/algorithms/miter.hpp"
 
 #include "lgbench.hpp"
 #include "lgedgeiter.hpp"

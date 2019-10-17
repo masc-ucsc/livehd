@@ -17,9 +17,9 @@ mkdir -p logs/yosys_log
 
 # SH:todo
 # pts='compare compare2 consts cse_basic dce2 dce3 expression_00002
-# graphtest kogg_stone_64 trivial_join'
+# graphtest kogg_stone_64 compare'
 pts='trivial1 trivial trivial2a trivial3 trivial_and 
-     dce1 gates trivial1 compare '
+     dce1 gates trivial1 trivial_join compare'
 # pts='gates'
 
 LGSHELL=./bazel-bin/main/lgshell

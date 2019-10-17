@@ -77,8 +77,9 @@ TEST_F(Prp_test, assignment_expression1){
   tree_traversal_check_rules.push_back("Identifier");
   tree_traversal_check_rules.push_back("Numerical constant");
   tree_traversal_check_rules.push_back("Tuple notation");
-  
-  scanner.parse("assignment_expression1", "\%out as (__bits:8)\n");
+
+  std::vector<Token> tlist;
+  scanner.parse("assignment_expression1", "\%out as (__bits:8)\n", tlist);
   EXPECT_EQ(tree_traversal_check_tokens, scanner.tree_traversal_tokens);
   EXPECT_EQ(tree_traversal_check_rules, scanner.tree_traversal_rules);
 }
@@ -117,8 +118,9 @@ TEST_F(Prp_test, assignment_expression2){
   tree_traversal_check_rules.push_back("RHS expression property");
   tree_traversal_check_rules.push_back("Identifier");
   tree_traversal_check_rules.push_back("Numerical constant");
-  
-  scanner.parse("assignment_expression2", "\%out as (__bits:8)\n\%out1 as __bits:10\n");
+
+  std::vector<Token> tlist;
+  scanner.parse("assignment_expression2", "\%out as (__bits:8)\n\%out1 as __bits:10\n", tlist);
   EXPECT_EQ(tree_traversal_check_tokens, scanner.tree_traversal_tokens);
   EXPECT_EQ(tree_traversal_check_rules, scanner.tree_traversal_rules);
 }
@@ -171,8 +173,10 @@ TEST_F(Prp_test, if_statement1){
   tree_traversal_check_rules.push_back("Additive expression");
   tree_traversal_check_rules.push_back("Identifier");
   tree_traversal_check_rules.push_back("Block body");
-  
-  scanner.parse("if_statement1", "if (x>5){\nb = 10\n c = 10 + x\n}\n");
+
+
+  std::vector<Token> tlist;
+  scanner.parse("if_statement1", "if (x>5){\nb = 10\n c = 10 + x\n}\n", tlist);
   EXPECT_EQ(tree_traversal_check_tokens, scanner.tree_traversal_tokens);
   EXPECT_EQ(tree_traversal_check_rules, scanner.tree_traversal_rules);
 }
