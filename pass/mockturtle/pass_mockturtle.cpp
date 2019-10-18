@@ -1,5 +1,16 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+
+//sh:fixme: the mockturtle project will be paused for a while, some debug thought
+//1. the 3 bits comparison is passed but 4 bits comparison of two inputs is failed, I've
+//checked the input/output io connection, should be fine, the problem would be result from
+//klut inter edge <-> LG edges mapping
+//2. the bdinp<->mig signal mapping seems wrong, the boundary input edge now maps to the signal returns
+//from mig->create_pi(), however, a pi could have multiple fan-out, so there should be multiple signals
+//pointed to a same pi? if this is the case, we should create a lgraph buffer for a pi in mig-network,
+//now we just assume a pi has only one signal fanout.
+
+
 #include "pass_mockturtle.hpp"
 
 #include <mockturtle/algorithms/node_resynthesis.hpp>
@@ -864,10 +875,12 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT() {
     //equivalence checking using miter
     const auto miter  = *mockturtle::miter<mockturtle::klut_network>(mapped_mig, klut_ntk);
     const auto result = *mockturtle::equivalence_checking(miter);
+    if(result)
+      fmt::print("mig->klut is equivalent!!\n");
     I(result);
 #endif
 
-    //mapping the po driving signal between original mig and the synthsized one
+    //mapping the po driving signal and pi node between original mig and the synthsized one
     mt_ntk.foreach_po( [&](const auto& n)   {mig_pos_drivers_synth.emplace_back(n);} );
 
     for(unsigned long int i=0 ; i < mig_pos_drivers_original.size(); i++)
@@ -880,6 +893,7 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT() {
       for(auto& itr : edge2mt_sigs[out_edge].signals)
         itr = mig_synth_po_sigs_map[itr];
     }
+
 
 
     gid2klut[group_id]=klut_ntk;
@@ -1022,13 +1036,14 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
       if (klut_ntk.is_pi(klut_ntk_node))
         return;
 
-      //sh:fixme: assume this is correct and continue
-      if(klut_ntk.is_constant(klut_ntk_node))
-        return;
+      ////sh:fixme: assume this is correct and continue
+      //if(klut_ntk.is_constant(klut_ntk_node))
+      //  return;
 
       auto func = klut_ntk.node_function(klut_ntk_node);
 
       klut_ntk.foreach_fanin(klut_ntk_node, [&](const auto &sig, auto i) {
+
         //check if a fanin is complemented, then change the truth table accordingly
         if (klut_ntk.is_complemented(sig))
           kitty::flip_inplace(func, i);
@@ -1060,6 +1075,8 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
 
       //"i" indicates the order of the fanin signals and can be used as pid.
       klut_ntk.foreach_fanin(klut_ntk_node, [&](auto const& sig, auto i) {
+        if (klut_ntk.is_complemented(sig))
+          I(false);
         //the klut_ntk_node is the front-border of klut(except the pi), continue
         if (klut_ntk.is_pi(klut_ntk.get_node(sig)))
           return;
