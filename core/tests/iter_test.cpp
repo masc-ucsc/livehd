@@ -212,8 +212,7 @@ void topo_add_chain_down(absl::flat_hash_set<Node::Compact> &discovered_node
     , std::vector<Node> &node_stack
     , const Node_pin &dst_pin) {
 
-  const auto node = dst_pin.get_node();
-  I(node.is_type_sub() && !node.is_type_sub_empty());
+  I(dst_pin.get_node().is_type_sub() && !dst_pin.get_node().is_type_sub_empty());
 
   auto down_pin = dst_pin.get_down_pin();
   I(down_pin.is_sink()); // fwd
@@ -232,9 +231,7 @@ void topo_add_chain_fwd(absl::flat_hash_set<Node::Compact> &discovered_node
 
   const auto &dst_pin  = edge.driver; // fwd
   const auto  dst_node = dst_pin.get_node();
-  fmt::print("1.topo visit node:{} lg:{}\n", dst_node.debug_name(),dst_node.get_class_lgraph()->get_name());
-  if (!dst_node.is_graph_io() && !(dst_node.is_type_sub() && !dst_node.is_type_sub_empty()))
-    fmt::print("topo visit node:{} lg:{}\n", dst_node.debug_name(),dst_node.get_class_lgraph()->get_name());
+  //fmt::print("1.topo visit node:{} lg:{}\n", dst_node.debug_name(),dst_node.get_class_lgraph()->get_name());
 
   if (top_hier) {
     if (dst_node.is_type_sub() && !dst_node.is_type_sub_empty()) { // DOWN??
@@ -272,11 +269,14 @@ void doTopologicalSort(LGraph *lg) {
 
   discovered_node.clear();
 
-  //for (auto &edge : lg->get_graph_output_node().inp_edges()) {
-    //topo_add_chain_fwd(discovered_node, node_stack, edge);
-  //}
-
-  for (auto node : lg->fast()) { // FIXME: to flow, no fast (start with inputs for fwd, outputs for bwd)
+  // TODO:
+  //  Fast hierarchical should work, but it requires to remember
+  //  discovered_nodes for all the traversed nodes. If we have a stack of
+  //  iterators (one for node in hierarchy or tree node), we can keep iterating
+  //  the tree (in stack) and just remember as many _compact_class (not
+  //  _compact) as max depth.  This should have a significant footprint
+  //  advantage in discovered_node
+  for (auto node : lg->fast(true)) {
     if (discovered_node.count(node.get_compact())) continue;
 
     node_stack.push_back(node);
@@ -284,29 +284,55 @@ void doTopologicalSort(LGraph *lg) {
       auto node2 = node_stack.back();
       node_stack.pop_back();
 
-      fmt::print("1.topo node:{} lg:{}\n", node2.debug_name(), node2.get_class_lgraph()->get_name());
       if (!discovered_node.count(node2.get_compact())) {
-        fmt::print("topo node:{} lg:{}\n", node2.debug_name(), node2.get_class_lgraph()->get_name());
+        if (!node2.is_graph_io()) {
+          //fmt::print("debug topo node:{} lg:{} hidx.pos:{}\n", node2.debug_name(), node2.get_class_lgraph()->get_name(),node2.get_hidx().pos);
+          if (!top_hier || !(node2.is_type_sub() && !node2.is_type_sub_empty())) {
+            if (node2.is_root()) {
+              fmt::print("ROOT topo node:{} lg:{} hidx.pos:{}\n", node2.debug_name(), node2.get_class_lgraph()->get_name(),node2.get_hidx().pos);
+            }else{
+              auto up_node = node2.get_up_node();
+              fmt::print("topo node:{} lg:{} hidx.pos:{} up_node:{}\n", node2.debug_name(), node2.get_class_lgraph()->get_name(),node2.get_hidx().pos, up_node.debug_name());
+            }
+          }
+        }
         discovered_node.insert(node2.get_compact());
       }
-      if (node2.is_type_sub() && !node2.is_type_sub_empty()) {
-        for (auto &pin : node2.out_connected_pins()) {
-          topo_add_chain_down(discovered_node, node_stack, pin);
+
+      if (top_hier) {
+        if (node2.is_type_sub() && !node2.is_type_sub_empty()) {
+          bool any_propagated=false;
+          for (auto &pin : node2.out_connected_pins()) { // fwd
+            topo_add_chain_down(discovered_node, node_stack, pin);
+            any_propagated=true;
+          }
+          I(discovered_node.count(node2.get_compact())); // All IO traversed, so, it is fully discovered
+          if (any_propagated)
+            continue;
         }
       }
-      // forward traversal : inp_edges ; out.driver
-      // backward traversal: out_edges ; out.sink
-      for (auto &edge : node2.inp_edges()) {
+      for (auto &edge : node2.inp_edges()) { // fwd
         topo_add_chain_fwd(discovered_node, node_stack, edge);
       }
     }
   }
 }
+
 void simple_line() {
+
+
   std::string gname = "top_0";
   LGraph *g0 = LGraph::create("lgdb_iter_test", "g0", "test");
+  auto &sfuture = g0->ref_library()->setup_sub("future", "test");
+  if (!sfuture.has_pin("fut_i"))
+    sfuture.add_input_pin("fut_i",10);
+  if (!sfuture.has_pin("fut_o"))
+    sfuture.add_output_pin("fut_o",11);
+  g0->ref_library()->sync();
+
   LGraph *s0 = LGraph::create("lgdb_iter_test", "s0", "test");
   LGraph *s1 = LGraph::create("lgdb_iter_test", "s1", "test");
+  LGraph *s2 = LGraph::create("lgdb_iter_test", "s2", "test");
 
   auto g0_i_pin = g0->add_graph_input("g0_i", 1, 0);
   auto g0_o_pin = g0->add_graph_output("g0_o", 2, 0);
@@ -317,25 +343,54 @@ void simple_line() {
   auto s1_i_pin = s1->add_graph_input("s1_i", 5, 0);
   auto s1_o_pin = s1->add_graph_output("s1_o", 6, 0);
 
+  auto s2_i_pin = s2->add_graph_input("s2_i", 7, 0);
+  auto s2_o_pin = s2->add_graph_output("s2_o", 8, 0);
+  (void)s2_o_pin; // disconnected
+
+
   auto g0_node0 = g0->create_node(Or_Op);
+  g0_node0.set_name("g0_node0");
   auto g0_node1 = g0->create_node_sub(s0->get_lgid());
+  g0_node1.set_name("g0_node1");
   auto g0_node2 = g0->create_node_sub(s1->get_lgid());
+  g0_node2.set_name("g0_node2");
+  auto g0_node3 = g0->create_node_sub("future");
+  g0_node3.set_name("g0_future");
+  auto g0_node4 = g0->create_node_sub(s2->get_lgid());
+  g0_node4.set_name("g0_disc0");
+  auto g0_node5 = g0->create_node_sub(s2->get_lgid());
+  g0_node5.set_name("g0_disc1");
 
   auto s0_node = s0->create_node(Or_Op);
   auto s1_node = s1->create_node(Or_Op);
+  auto s2_node = s2->create_node(Or_Op);
 
+  // g0
   g0->add_edge(g0_i_pin, g0_node0.setup_sink_pin(0));
   g0->add_edge(g0_node0.setup_driver_pin(0), g0_node1.setup_sink_pin(3));
   g0->add_edge(g0_node1.setup_driver_pin(4), g0_node2.setup_sink_pin(5));
   g0->add_edge(g0_node2.setup_driver_pin(6), g0_o_pin);
+  g0->add_edge(g0_node2.setup_driver_pin(6), g0_node3.setup_sink_pin(10));
+  g0->add_edge(g0_node3.setup_driver_pin(11), g0_node4.setup_sink_pin(7));
+  g0->add_edge(g0_node4.setup_driver_pin(8), g0_node5.setup_sink_pin(7));
 
+  // s0
   s0->add_edge(s0_i_pin, s0_node.setup_sink_pin(0));
   s0->add_edge(s0_node.setup_driver_pin(0), s0_o_pin);
 
+  // s1
   s1->add_edge(s1_i_pin, s1_node.setup_sink_pin(0));
   s1->add_edge(s1_node.setup_driver_pin(0), s1_o_pin);
 
+  // s2
+  s2->add_edge(s2_i_pin, s2_node.setup_sink_pin(0));
+
   doTopologicalSort(g0);
+
+  // FIXME: Add assertion check:
+  // topo node:node_5_or_ lg:g0
+  // topo node:node_5_or_ lg:s0
+  // topo node:node_5_or_ lg:s1
 }
 
 void simple() {
@@ -377,17 +432,27 @@ void simple() {
   auto c12 = g->create_node_const("yyyy",4); // 12
 
   auto t13 = g->create_node_sub(sub_g->get_lgid()); // 13
+  t13.set_name("13g");
   auto t14 = g->create_node_sub(sub_g->get_lgid()); // 14
+  t14.set_name("14g");
   auto t15 = g->create_node_sub(sub_g->get_lgid()); // 15
+  t15.set_name("15g");
   auto t16 = g->create_node_sub(sub_g->get_lgid()); // 16
+  t16.set_name("16g");
   auto t17 = g->create_node_sub(sub_g->get_lgid()); // 17
+  t17.set_name("17g");
   auto t18 = g->create_node_sub(sub_g->get_lgid()); // 18
+  t18.set_name("18g");
   auto t19 = g->create_node_sub(sub_g->get_lgid()); // 19
+  t19.set_name("19g");
   auto t20 = g->create_node_sub(sub_g->get_lgid()); // 20
+  t20.set_name("20g");
   auto t21 = g->create_node_sub(sub_g->get_lgid()); // 21
+  t21.set_name("21g");
   auto t22 = g->create_node_sub(sub_g->get_lgid()); // 22
-  (void)t22; // Disconnected node. Source of bug when fully disconnected
+  t22.set_name("22g");
   auto t23 = g->create_node_sub(sub_g->get_lgid()); // 23
+  t23.set_name("23g");
 
   /*
   // nodes:

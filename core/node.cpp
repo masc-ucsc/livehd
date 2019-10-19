@@ -26,14 +26,8 @@ void Node::update(const Hierarchy_index &_hidx) {
   current_g = top_g->ref_htree()->ref_lgraph(_hidx);
   hidx      = _hidx;
 
-  nid = 0;
-  while (true) {
-    nid = current_g->fast_next(nid);
-    I(nid); // Do not call update for an empty sub graph
-    if (nid == Node::Hardcoded_input_nid) continue;
-    if (nid == Node::Hardcoded_output_nid) continue;
-    break;
-  }
+  nid = current_g->fast_first();
+  I(!nid.is_invalid()); // No update call if it is an empty graph
 
   I(current_g->is_valid_node(nid));
 }
@@ -228,6 +222,13 @@ bool Node::is_root() const {
   bool ans = top_g==current_g;
   I(top_g->ref_htree()->is_root(*this) == ans);
   return ans;
+}
+
+Node Node::get_up_node() const {
+  I(!is_root());
+  auto up_node = top_g->ref_htree()->get_instance_up_node(hidx);
+
+  return up_node;
 }
 
 void Node::set_type_sub(Lg_type_id subid) {

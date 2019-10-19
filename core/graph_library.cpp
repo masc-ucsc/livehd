@@ -417,14 +417,6 @@ void Graph_library::clear(Lg_type_id lgid) {
   sub_nodes[lgid].clear_io_pins();
 }
 
-Lg_type_id Graph_library::register_sub(std::string_view name) {
-  I(global_name2lgraph[path].find(name) == global_name2lgraph[path].end());
-
-  I(false);
-
-  return true;
-}
-
 Lg_type_id Graph_library::copy_lgraph(std::string_view name, std::string_view new_name) {
   graph_library_clean = false;
   auto it2 = global_name2lgraph[path].find(name);

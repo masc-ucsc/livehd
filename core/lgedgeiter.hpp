@@ -57,7 +57,6 @@ public:
   }
 
 private:
-  std::vector<Node> h_stack;
   LGraph           *top_g;
   LGraph           *current_g;
   Hierarchy_index   hidx;

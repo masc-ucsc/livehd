@@ -132,12 +132,12 @@ public:
 
   std::string_view get_name() const { I(lgid); return name; }
 
-  Port_ID add_input_pin(std::string_view io_name) {
-    return add_pin(io_name, Direction::Input);
+  Port_ID add_input_pin(std::string_view io_name, Port_ID graph_pos=Port_invalid) {
+    return add_pin(io_name, Direction::Input, graph_pos);
   }
 
-  Port_ID add_output_pin(std::string_view io_name) {
-    return add_pin(io_name, Direction::Output);
+  Port_ID add_output_pin(std::string_view io_name, Port_ID graph_pos=Port_invalid) {
+    return add_pin(io_name, Direction::Output, graph_pos);
   }
 
   Port_ID add_pin(std::string_view io_name, Direction dir, Port_ID graph_pos=Port_invalid) {

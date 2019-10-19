@@ -203,6 +203,7 @@ public:
 
   Hierarchy_index   hierarchy_go_down() const;
   Hierarchy_index   hierarchy_go_up() const;
+  Node              get_up_node() const;
   bool              is_root() const;
 
   void              set_type_sub(Lg_type_id subid);

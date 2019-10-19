@@ -48,6 +48,19 @@ CFast_edge_iterator CFast_edge_iterator::operator++() {
 
   nid = current_g->fast_next(nid);
 
+  if (visit_sub && nid.is_invalid()) {
+    auto next_hidx = top_g->ref_htree()->get_depth_preorder_next(hidx);
+    if (!next_hidx.is_invalid()) {
+      hidx = next_hidx;
+      current_g = top_g->ref_htree()->ref_lgraph(hidx);
+      nid = current_g->fast_first();
+    }else{
+      nid = 0;
+      current_g = top_g;
+      hidx = Hierarchy_tree::root_index(); // Root, last
+    }
+  }
+#if 0
   if (nid==0) {
     if (!h_stack.empty()) {
       I(visit_sub);
@@ -70,6 +83,7 @@ CFast_edge_iterator CFast_edge_iterator::operator++() {
       nid = current_g->fast_next(0);
     }
   }
+#endif
 
   return i;
 };

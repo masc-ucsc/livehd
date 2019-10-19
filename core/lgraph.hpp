@@ -145,6 +145,11 @@ protected:
     return 0;
   }
 
+  Index_ID fast_first() const {
+    static_assert(Node::Hardcoded_output_nid>Node::Hardcoded_input_nid);
+    return fast_next(Node::Hardcoded_output_nid);
+  }
+
   bool is_sub(Index_ID nid) const { // Very common function (shoud be fast)
     I(nid < node_type_table.size());
     I(node_internal[nid].is_node_state());
