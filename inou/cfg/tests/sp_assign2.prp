@@ -42,7 +42,7 @@ m9 = $a + $b
 
 %o1 = m1
 %o2 = m2
-%o3 = m3 13u4bits
+%o3 = m3 
 %o4 = m4
 %o5 = m5
 %o6 = mcnt
