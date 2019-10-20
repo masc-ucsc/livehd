@@ -52,7 +52,7 @@ void Lnast_to_pyrope_parser::process_top(mmap_lib::Tree_level level) {
   curr_statement_level = level;
 }
 
-void Lnast_to_pyrope_parser::push_statement(mmap_lib::Tree_level level, Lnast_ntype_id type) {
+void Lnast_to_pyrope_parser::push_statement(mmap_lib::Tree_level level, Lnast_ntype type) {
   fmt::print("push\n");
 
   level = level + 1;
@@ -100,7 +100,7 @@ void Lnast_to_pyrope_parser::add_to_buffer(Lnast_node node) {
 void Lnast_to_pyrope_parser::process_buffer() {
   if (!node_buffer.size()) return;
 
-  Lnast_ntype_id type = node_buffer.front().type;
+  Lnast_ntype type = node_buffer.front().type;
 
   if (type == Lnast_ntype_pure_assign) {
     // check if should be in combinational or stateful
@@ -154,7 +154,7 @@ std::string_view Lnast_to_pyrope_parser::get_node_name(Lnast_node node) {
 
 void Lnast_to_pyrope_parser::flush_it(std::vector<Lnast_node>::iterator it) {
   while (it != node_buffer.end()) {
-    Lnast_ntype_id type = (*it).type;
+    Lnast_ntype type = (*it).type;
     if (type == Lnast_ntype_statements || type == Lnast_ntype_cstatements) {
       it++;
       continue;
@@ -170,7 +170,7 @@ void Lnast_to_pyrope_parser::flush_it(std::vector<Lnast_node>::iterator it) {
 std::string_view Lnast_to_pyrope_parser::join_it(std::vector<Lnast_node>::iterator it, std::string del) {
   std::string value = "";
   while (it != node_buffer.end()) {
-    Lnast_ntype_id type = (*it).type;
+    Lnast_ntype type = (*it).type;
     if (type == Lnast_ntype_statements || type == Lnast_ntype_cstatements) {
       it++;
       continue;
@@ -496,7 +496,7 @@ void Lnast_to_pyrope_parser::setup_ntype_str_mapping() {
   ntype2str[Lnast_ntype_top] = "top";
 }
 
-std::string Lnast_to_pyrope_parser::ntype_dbg(Lnast_ntype_id ntype) {
+std::string Lnast_to_pyrope_parser::ntype_dbg(Lnast_ntype ntype) {
   return ntype2str[ntype];
 }
 

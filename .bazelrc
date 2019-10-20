@@ -7,7 +7,7 @@ coverage --test_tag_filters "-long1,-long2,-long3,-long4,-long5,-long6,-long7,-l
 coverage --cache_test_results=no
 
 # mada local (no GCP build) but with remote cache
-build --remote_cache=http://mada2.cse.ucsc.edu:8082 --remote_timeout=5
+# build --remote_cache=http://mada2.cse.ucsc.edu:8082 --remote_timeout=5
 
 # Needed for hermetic toolchain
 

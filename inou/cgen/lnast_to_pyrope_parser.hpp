@@ -19,12 +19,12 @@ private:
   std::vector<std::string> sts_buffer_queue;
   int32_t indent_buffer_size = -1;
 
-  absl::flat_hash_map<Lnast_ntype_id, std::string> ntype2str;
+  absl::flat_hash_map<Lnast_ntype, std::string> ntype2str;
   void setup_ntype_str_mapping();
 
   void process_node(const mmap_lib::Tree_index &it);
   void process_top(mmap_lib::Tree_level level);
-  void push_statement(mmap_lib::Tree_level level, Lnast_ntype_id type); // prepare for next statement
+  void push_statement(mmap_lib::Tree_level level, Lnast_ntype type); // prepare for next statement
   void pop_statement();
   void add_to_buffer(Lnast_node node);
   void process_buffer();
@@ -61,7 +61,7 @@ public:
 
   Lnast_to_pyrope_parser(std::string_view m_memblock, Lnast *m_lnast)
     : memblock(m_memblock), lnast(m_lnast) { setup_ntype_str_mapping(); };
-  std::string ntype_dbg(Lnast_ntype_id ntype);
+  std::string ntype_dbg(Lnast_ntype ntype);
   std::string stringify();
 };
 

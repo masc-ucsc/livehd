@@ -65,7 +65,7 @@ void Lnast_to_verilog_parser::process_top(mmap_lib::Tree_level level) {
 }
 
 // no change
-void Lnast_to_verilog_parser::push_statement(mmap_lib::Tree_level level, Lnast_ntype_id type) {
+void Lnast_to_verilog_parser::push_statement(mmap_lib::Tree_level level, Lnast_ntype type) {
   fmt::print("push\n");
 
   level = level + 1;
@@ -84,7 +84,7 @@ void Lnast_to_verilog_parser::push_statement(mmap_lib::Tree_level level, Lnast_n
   fmt::print("after push\n");
 }
 
-void Lnast_to_verilog_parser::pop_statement(mmap_lib::Tree_level level, Lnast_ntype_id type) {
+void Lnast_to_verilog_parser::pop_statement(mmap_lib::Tree_level level, Lnast_ntype type) {
   (void)level;
   (void)type;
   fmt::print("pop\n");
@@ -111,7 +111,7 @@ void Lnast_to_verilog_parser::add_to_buffer(Lnast_node node) {
 void Lnast_to_verilog_parser::process_buffer() {
   if (!node_buffer.size()) return;
 
-  Lnast_ntype_id type = node_buffer.front().type;
+  Lnast_ntype type = node_buffer.front().type;
 
   if (type == Lnast_ntype_pure_assign) {
     // check if should be in combinational or stateful
@@ -520,7 +520,7 @@ void Lnast_to_verilog_parser::setup_ntype_str_mapping() {
   ntype2str[Lnast_ntype_top] = "top";
 }
 
-std::string Lnast_to_verilog_parser::ntype_dbg(Lnast_ntype_id ntype) {
+std::string Lnast_to_verilog_parser::ntype_dbg(Lnast_ntype ntype) {
   return ntype2str[ntype];
 }
 

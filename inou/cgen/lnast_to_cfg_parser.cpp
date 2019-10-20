@@ -41,7 +41,7 @@ void Lnast_to_cfg_parser::process_node(const mmap_lib::Tree_index& it) {
     // check the buffer to see if this is an if statement
     // and if it is, check if this is an ifel or an else
     if (node_buffer.size() > 0) {
-      Lnast_ntype_id type = node_buffer.front().type;
+      Lnast_ntype type = node_buffer.front().type;
       if (type == Lnast_ntype_if) {
         if (node_buffer.size() > 3 && node_buffer.back().type != Lnast_ntype_statements) {
           if_buffer.push_back(k_next);
@@ -99,7 +99,7 @@ void Lnast_to_cfg_parser::push_statement(mmap_lib::Tree_level level) {
   fmt::print("after push\n");
 }
 
-void Lnast_to_cfg_parser::pop_statement(mmap_lib::Tree_level level, Lnast_ntype_id type) {
+void Lnast_to_cfg_parser::pop_statement(mmap_lib::Tree_level level, Lnast_ntype type) {
   uint32_t tmp_k = k_next;
 
   if (curr_statement_level != level && type != Lnast_ntype_cond) {
@@ -135,7 +135,7 @@ void Lnast_to_cfg_parser::process_buffer() {
 
   fmt::print("process_buffer k_next: {}\n", k_next);
 
-  Lnast_ntype_id type = node_buffer.front().type;
+  Lnast_ntype type = node_buffer.front().type;
 
   if (type == Lnast_ntype_pure_assign) {
     process_pure_assign();
@@ -190,7 +190,7 @@ std::string_view Lnast_to_cfg_parser::get_node_name(Lnast_node node) {
 
 void Lnast_to_cfg_parser::flush_it(std::vector<Lnast_node>::iterator it) {
   while (it != node_buffer.end()) {
-    Lnast_ntype_id type = (*it).type;
+    Lnast_ntype type = (*it).type;
     if (type == Lnast_ntype_statements || type == Lnast_ntype_cstatements) {
       it++;
       continue;
@@ -351,7 +351,7 @@ void Lnast_to_cfg_parser::setup_ntype_str_mapping() {
   ntype2str[Lnast_ntype_top] = "top";
 }
 
-std::string Lnast_to_cfg_parser::ntype_dbg(Lnast_ntype_id ntype) {
+std::string Lnast_to_cfg_parser::ntype_dbg(Lnast_ntype ntype) {
   return ntype2str[ntype];
 }
 

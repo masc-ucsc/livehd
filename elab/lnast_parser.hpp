@@ -2,12 +2,11 @@
 #pragma once
 #include "lnast.hpp"
 
-using Lnast_ntype_id = uint8_t;
-using Scope_id       = uint32_t;
+using Lnast_ntype = uint8_t;
 
-static inline constexpr int   CFG_KNUM1_POS            =  1;
-static inline constexpr int   CFG_KNUM2_POS            =  2;
-static inline constexpr int   CFG_SCOPE_ID_POS         =  3;
+static inline constexpr int   CFG_IDX_POS              =  1;
+static inline constexpr int   CFG_PARENT_POS           =  2;
+static inline constexpr int   CFG_CHILD_POS            =  3;
 static inline constexpr int   CFG_TOKEN_POS_BEG        =  4;
 static inline constexpr int   CFG_TOKEN_POS_END        =  5;
 static inline constexpr int   CFG_OP_POS_BEG           =  6;
@@ -17,38 +16,33 @@ static inline constexpr int   CFG_TARGET_TMP_REF_RANGE =  1; //K14 K15  0 59 96 
 
 class Lnast_parser : public Elab_scanner {
 public:
-  Lnast_parser() : line_num(0), line_tkcnt(0), knum1(0), knum2(0) { setup_ntype_str_mapping();};
+  Lnast_parser() : line_num(0), line_tkcnt(0){ setup_ntype_str_mapping();};
   const std::unique_ptr<Lnast>&  get_ast(){return lnast;};
-  std::string                    ntype_dbg(Lnast_ntype_id ntype);
+  std::string                    ntype_dbg(Lnast_ntype ntype);
 
 protected:
-  void       elaborate() override;
-  void       build_top_statements              (const mmap_lib::Tree_index& tree_idx_top);
-  void       add_statement                     (const mmap_lib::Tree_index& tree_top_sts);
-  void       process_assign_like_op            (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);
-  void       process_label_op                  (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);
-  void       process_binary_op                 (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);
-  void       process_func_call_op              (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);
-  void       process_func_def_op               (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);
-  void       process_if_op                     (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);
-  void       add_operator_subtree              (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);
-  mmap_lib::Tree_index process_operator_node             (const mmap_lib::Tree_index& opr_parent_sts, Lnast_ntype_id type);
-  Scope_id        process_scope();
-  Lnast_ntype_id  operand_analysis();
-  Lnast_ntype_id  operator_analysis();
-  bool            token_is_valid_ref();
-  void            setup_ntype_str_mapping();
-  void            function_name_correction(Lnast_ntype_id type, const mmap_lib::Tree_index& sts_idx);
-  void            process_if_else_sts_range(const mmap_lib::Tree_index& tree_idx_if);
-  void            final_else_sts_type_correction();
+  void         elaborate() override;
+  void         build_statements_op     (const mmap_lib::Tree_index& tree_idx_top);
+  void         add_statement           (const mmap_lib::Tree_index& tree_top_sts);
+  void         process_assign_like_op  (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);
+  void         process_label_op        (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);
+  void         process_binary_op       (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);
+  void         process_func_call_op    (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);
+  void         process_func_def_op     (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);
+  void         process_if_op           (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);
+  void         add_operator_subtree    (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);
+  Lnast_ntype  operand_analysis();
+  Lnast_ntype  operator_analysis();
+  bool         token_is_valid_ref();
+  void         setup_ntype_str_mapping();
+  void         function_name_correction(Lnast_ntype type, const mmap_lib::Tree_index& sts_idx);
+  mmap_lib::Tree_index process_operator_node             (const mmap_lib::Tree_index& opr_parent_sts, Lnast_ntype type);
 
 private:
-  std::unique_ptr<Lnast>               lnast;
-  absl::flat_hash_map<Lnast_ntype_id , std::string>   ntype2str;
-  uint32_t line_num;
-  uint8_t  line_tkcnt;
-  uint32_t knum1;
-  uint32_t knum2;//for if-else or fdef chunk
-  std::vector<std::tuple<mmap_lib::Tree_index, Lnast_ntype_id, uint32_t, uint32_t>> range_stack; //(parent_sts, sts_type, min, max)
+  std::unique_ptr<Lnast> lnast;
+  uint32_t               line_num;
+  uint8_t                line_tkcnt;
+  mmap_lib::Tree_index   buffer_next_sts_parent;
+  absl::flat_hash_map<Lnast_ntype, std::string> ntype2str;
 };
 

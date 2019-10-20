@@ -4,32 +4,29 @@
 #include "elab_scanner.hpp"
 #include "mmap_tree.hpp"
 
-using Scope_id            = uint32_t;
 using Rename_table        = absl::flat_hash_map<std::string_view, u_int8_t >;
-using Lnast_ntype_id      = uint8_t;
+using Lnast_ntype         = uint8_t;
 using Lnast_index         = mmap_lib::Tree_index;
 using Phi_sts_table       = absl::flat_hash_map<std::string_view, Lnast_index>;
 using Phi_sts_tables      = absl::flat_hash_map<Lnast_index, Phi_sts_table>;
 
 struct Lnast_node {
-  Lnast_ntype_id type; //not const as possible fake function call ...
+  Lnast_ntype type; //not const as possible fake function call ...
   Token          token;
-  Scope_id       scope;//SH:FIXME: deprecated, could rely on tree structure
-  uint32_t       knum; //SH:FIXME: deprecated, record K number in cfg_text
   uint32_t       loc;  //SH:FIXME: wait for Akash
   uint16_t       subs; //ssa subscript
 
   Lnast_node()
-    :type(0), scope(0), knum(0), loc(0), subs(0) { }
+    :type(0), loc(0), subs(0) { }
 
-  Lnast_node(Lnast_ntype_id _type, Token _token)
-    :type(_type), token(_token), scope(0), knum(0), loc(0), subs(0) { I(type);}
+  Lnast_node(Lnast_ntype _type, Token _token)
+    :type(_type), token(_token), loc(0), subs(0) { I(type);}
 
-  Lnast_node(Lnast_ntype_id _type, Token _token, uint16_t _subs)
-    :type(_type), token(_token), scope(0), knum(0), loc(0), subs(_subs) { I(type);}
+  Lnast_node(Lnast_ntype _type, Token _token, uint16_t _subs)
+    :type(_type), token(_token), loc(0), subs(_subs) { I(type);}
 
-  //Lnast_node(Lnast_ntype_id type, Token token, uint32_t knum)
-  //  :type(type), token(token), scope(0), knum(knum), loc(0), subs(0) { I(type);}
+  //Lnast_node(Lnast_ntype type, Token token, uint32_t)
+  //  :type(type), token(token), loc(0), subs(0) { I(type);}
 };
 
 
@@ -55,8 +52,8 @@ protected:
 };
 
 
-enum Lnast_node_type : Lnast_ntype_id {
-  Lnast_ntype_invalid = 0,  // zero is not a valid Lnast_ntype_id
+enum Lnast_node_type : Lnast_ntype {
+  Lnast_ntype_invalid = 0,  // zero is not a valid Lnast_ntype
   //group: tree structure
   Lnast_ntype_top,
   Lnast_ntype_statements,
@@ -101,7 +98,7 @@ enum Lnast_node_type : Lnast_ntype_id {
   Lnast_ntype_attr_bits,    // __bits
 
   //group: others
-    Lnast_ntype_assert,       // I
+  Lnast_ntype_assert,       // I
 };
 
 
