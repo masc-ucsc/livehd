@@ -7,7 +7,7 @@ fun1 = :($a,$b,%o):{
   %o = $a ^ $b
 }
 
-//result = fun1(a:3, b:4)
+result = fun1(a:3, b:4)
 
 //x = $a
 //if ($a>1) {

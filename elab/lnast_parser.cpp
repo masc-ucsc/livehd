@@ -146,6 +146,7 @@ void  Lnast_parser::process_func_def_op(const mmap_lib::Tree_index& tree_idx_fde
 
   last_tmp_func_name_idx = lnast->add_child(tree_idx_fdef, Lnast_node(Lnast_ntype_ref, target_name));
 
+  walk_next_token(); //sh:fixme: jump across strange null in func_def cfg
   auto local_line_num = scan_calc_lineno();
   while (scan_calc_lineno() == local_line_num) {
     I(token_is_valid_ref());
