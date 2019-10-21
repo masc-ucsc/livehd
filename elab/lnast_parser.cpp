@@ -44,7 +44,10 @@ void Lnast_parser::build_lnast() {
       if(unlikely(scan_is_end()))
         return;
 
-      if(unlikely(line_num == 0)) { scan_next(); continue; }  //ask Akash to remove the "END" if you really don't need it
+      if(unlikely(line_num == 0)) {
+        scan_next();
+        continue;
+      }  //ask Akash to remove the "END" if you really don't need it
 
       switch (line_tkcnt) {
         case CFG_IDX_POS:{
@@ -87,6 +90,7 @@ void Lnast_parser::build_lnast() {
           scan_next(); line_tkcnt += 1; // go to operator target_name
           I(token_is_valid_ref());
 
+
           target_name = scan_get_token();
           auto tree_idx_opr = process_operator_node(opr_parent_sts, type);
           scan_next(); line_tkcnt += 1; //go to 1st operand
@@ -108,7 +112,6 @@ mmap_lib::Tree_index Lnast_parser::process_operator_node(const mmap_lib::Tree_in
   if (type == Lnast_ntype_func_def) {
     auto func_def_root = lnast->add_child(opr_parent_sts, Lnast_node(Lnast_ntype_func_def, Token()));
     buffer_next_sts_parent = func_def_root;
-
     return func_def_root;
   } else if (type == Lnast_ntype_if) {
     //sh:todo

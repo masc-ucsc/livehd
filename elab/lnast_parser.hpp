@@ -43,7 +43,7 @@ private:
   uint32_t               line_num;
   uint8_t                line_tkcnt;
   mmap_lib::Tree_index   buffer_next_sts_parent;
-  absl::flat_hash_map<Lnast_ntype, std::string> ntype2str;
+  absl::flat_hash_map<Lnast_ntype, std::string>       ntype2str;
   absl::flat_hash_map<uint32_t, mmap_lib::Tree_index> cfg_idx2sts_node;
 };
 
