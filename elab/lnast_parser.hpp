@@ -22,8 +22,8 @@ public:
 
 protected:
   void         elaborate() override;
-  void         build_statements_op     (const mmap_lib::Tree_index& tree_idx_top);
-  void         add_statement           (const mmap_lib::Tree_index& tree_top_sts);
+  void         process_statements_op   (const mmap_lib::Tree_index& tree_idx_top, uint32_t);
+  void         build_lnast();
   void         process_assign_like_op  (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);
   void         process_label_op        (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);
   void         process_binary_op       (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);
@@ -44,5 +44,6 @@ private:
   uint8_t                line_tkcnt;
   mmap_lib::Tree_index   buffer_next_sts_parent;
   absl::flat_hash_map<Lnast_ntype, std::string> ntype2str;
+  absl::flat_hash_map<uint32_t, mmap_lib::Tree_index> cfg_idx2sts_node;
 };
 
