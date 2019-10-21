@@ -17,13 +17,14 @@ void Lnast_parser::elaborate(){
 void Lnast_parser::process_statements_op(const mmap_lib::Tree_index& tree_idx_sts_parent, uint32_t self_idx){
   if(lnast->get_data(tree_idx_sts_parent).type == Lnast_ntype_top){
     auto tree_top_sts = lnast->add_child(tree_idx_sts_parent, Lnast_node(Lnast_ntype_statements, Token()));
-    cfg_idx2sts_node[self_idx] = tree_top_sts;
+    cfg_pidx2sts_node[self_idx] = tree_top_sts;
   } else if (lnast->get_data(tree_idx_sts_parent).type == Lnast_ntype_if){
-    return;
+    lnast->add_child(tree_idx_sts_parent, Lnast_node(Lnast_ntype_cond, buffer_if_condition));
+    auto if_sts = lnast->add_child(tree_idx_sts_parent, Lnast_node(Lnast_ntype_statements, Token()));
+    cfg_pidx2sts_node[self_idx] = if_sts;
   } else if (lnast->get_data(tree_idx_sts_parent).type == Lnast_ntype_func_def) {
     auto tree_func_def_sts = lnast->add_child(tree_idx_sts_parent, Lnast_node(Lnast_ntype_statements, Token()));
-    cfg_idx2sts_node[self_idx] = tree_func_def_sts;
-    return;
+    cfg_pidx2sts_node[self_idx] = tree_func_def_sts;
   }
 }
 
@@ -51,18 +52,26 @@ void Lnast_parser::build_lnast() {
       continue;
     }
 
+
     I(line_tkcnt == CFG_IDX_POS);
+    fmt::print("pos1 scan_text:{}\n", scan_text());
     cfg_nidx = (uint32_t)std::stoi(scan_text());
     walk_next_token();
 
+
     I(line_tkcnt == CFG_PARENT_POS);
+    fmt::print("pos2 scan_text:{}\n", scan_text());
     cfg_nparent = (uint32_t)std::stoi(scan_text());
     walk_next_token();
-    opr_parent_sts = cfg_idx2sts_node[cfg_nparent];
+    opr_parent_sts = cfg_pidx2sts_node[cfg_nparent];
+
 
     I(line_tkcnt == CFG_CHILD_POS);
+    fmt::print("pos3 scan_text:{}\n", scan_text());
     cfg_nchild = (uint32_t)std::stoi(scan_text());
     walk_next_token();
+
+
     I(line_tkcnt == CFG_TOKEN_POS_BEG);
     if (unlikely(scan_text().substr(0,4) == "SEQ0")){
       walk_next_line();
@@ -75,29 +84,43 @@ void Lnast_parser::build_lnast() {
       cfg_token_beg = scan_get_token();
       walk_next_token();
     }
+
+
     I(line_tkcnt == CFG_TOKEN_POS_END);
     cfg_token_end = scan_get_token();
     walk_next_token();
 
+
     I(line_tkcnt == CFG_OP_POS);
-    //no regular pattern, scan_next() internally case by case
+    //no regular pattern, might walk_next_token() internally case by case
     type = operator_analysis();
-    walk_next_token(); // go to operator target_name
+    walk_next_token(); // go to the target_name of operator
+
+
     I(token_is_valid_ref());
-
-
     target_name = scan_get_token();
 
+
     if(type == Lnast_ntype_pure_assign) {
-      if (function_name_correction(type, target_name)){
+      if (unlikely(function_name_correction(type, target_name))){
         walk_next_line();
         continue;
       }
     }
 
+
+
     auto tree_idx_opr = process_operator_node(opr_parent_sts, type, target_name);
+
+    //don't need to build subtree at the cfg line of if ___k condition
+    if(unlikely(tree_idx_opr.is_invalid())){
+      walk_next_line();
+      continue;
+    }
+
     walk_next_token(); //go to 1st operand
 
+    I(!tree_idx_opr.is_invalid());
     add_operator_subtree(tree_idx_opr, target_name);
     walk_next_line();
   }
@@ -111,7 +134,16 @@ mmap_lib::Tree_index Lnast_parser::process_operator_node(const mmap_lib::Tree_in
     buffer_parent4next_sts = func_def_root;
     return func_def_root;
   } else if (type == Lnast_ntype_if) {
-    //sh:todo
+    auto if_node = lnast->add_child(opr_parent_sts, Lnast_node(Lnast_ntype_if, Token()));
+    buffer_parent4next_sts = if_node;
+    buffer_if_condition = target_name;
+    return mmap_lib::Tree_index(-1, -1);
+  } else if (type == Lnast_ntype_elif) {
+    // when elif, no need to create a new elif_node,
+    // and the sts should point to the if_node as the parent,
+    // which is already recorded in buffer_parent4next_sts
+    buffer_if_condition = target_name;
+    return mmap_lib::Tree_index(-1, -1);
   }
 
   return lnast->add_child(opr_parent_sts, Lnast_node(type, Token()));
@@ -144,7 +176,7 @@ void Lnast_parser::add_operator_subtree(const mmap_lib::Tree_index& tree_idx_opr
 void  Lnast_parser::process_func_def_op(const mmap_lib::Tree_index& tree_idx_fdef, const Token& target_name){
   //10  1  8  59  96  ::{  ___e   $a    $b  %o
 
-  last_tmp_func_name_idx = lnast->add_child(tree_idx_fdef, Lnast_node(Lnast_ntype_ref, target_name));
+  buffer_tmp_func_name_idx = lnast->add_child(tree_idx_fdef, Lnast_node(Lnast_ntype_ref, target_name));
 
   walk_next_token(); //sh:fixme: jump across strange null in func_def cfg
   auto local_line_num = scan_calc_lineno();
@@ -187,6 +219,7 @@ void  Lnast_parser::process_func_call_op(const mmap_lib::Tree_index& tree_idx_fc
 
 //scan pos start: first operand token, stop: last operand
 void  Lnast_parser::process_if_op(const mmap_lib::Tree_index& tree_idx_if, const Token& cond){
+  ;
 }
 
 
@@ -241,7 +274,7 @@ Lnast_ntype  Lnast_parser::operand_analysis() {
 bool Lnast_parser::function_name_correction(Lnast_ntype type, const Token& target_name) {
   I(type == Lnast_ntype_pure_assign);
   if (scan_peep_is_token(Token_id_reference, 2) && scan_peep_sview(2).substr(1,3) == "___") {
-    lnast->ref_data(last_tmp_func_name_idx)->token = target_name;
+    lnast->ref_data(buffer_tmp_func_name_idx)->token = target_name;
     return true;
   }
   return false;
@@ -286,6 +319,8 @@ Lnast_ntype Lnast_parser::operator_analysis() {
     type = Lnast_ntype_if;
   } else if (scan_is_token(Token_id_alnum) && scan_text() == "uif") {
     type = Lnast_ntype_uif;
+  } else if (scan_is_token(Token_id_alnum) && scan_text() == "elif"){
+    type = Lnast_ntype_elif;
   } else if (scan_is_token(Token_id_alnum) && scan_text() == "I") {
     type = Lnast_ntype_assert;
   } else if (scan_is_token(Token_id_alnum) && scan_text() == "and") {
@@ -356,6 +391,7 @@ void Lnast_parser::setup_ntype_str_mapping(){
   ntype2str [Lnast_ntype_if]          = "if"         ;
   ntype2str [Lnast_ntype_cond]        = "cond"       ;
   ntype2str [Lnast_ntype_uif]         = "uif"        ;
+  ntype2str [Lnast_ntype_elif]         = "elif"        ;
   ntype2str [Lnast_ntype_phi]         = "phi"        ;
   ntype2str [Lnast_ntype_for]         = "for"        ;
   ntype2str [Lnast_ntype_while]       = "while"      ;

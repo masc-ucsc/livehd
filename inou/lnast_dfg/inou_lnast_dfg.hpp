@@ -81,6 +81,7 @@ private:
   constexpr bool  is_label_op       (Lnast_ntype op) const { return (op == Lnast_ntype_label); }
   constexpr bool  is_if_op          (Lnast_ntype op) const { return (op == Lnast_ntype_if); }
   constexpr bool  is_uif_op         (Lnast_ntype op) const { return (op == Lnast_ntype_uif); }
+  constexpr bool  is_elif_op        (Lnast_ntype op) const { return (op == Lnast_ntype_elif); }
   constexpr bool  is_func_call_op   (Lnast_ntype op) const { return (op == Lnast_ntype_func_call); }
   constexpr bool  is_func_def_op    (Lnast_ntype op) const { return (op == Lnast_ntype_func_def); }
   constexpr bool  is_for_op         (Lnast_ntype op) const { return (op == Lnast_ntype_for); }

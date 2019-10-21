@@ -513,6 +513,7 @@ void Lnast_to_verilog_parser::setup_ntype_str_mapping() {
   //ntype2str[Lnast_ntype_else] = "else";
   ntype2str[Lnast_ntype_cond] = "cond";
   ntype2str[Lnast_ntype_uif] = "uif";
+  ntype2str[Lnast_ntype_elif] = "elif";
   ntype2str[Lnast_ntype_for] = "for";
   ntype2str[Lnast_ntype_while] = "while";
   ntype2str[Lnast_ntype_func_call] = "func_call";

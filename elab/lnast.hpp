@@ -61,6 +61,7 @@ enum Lnast_node_type : Lnast_ntype {
   Lnast_ntype_if,
   Lnast_ntype_cond,
   Lnast_ntype_uif,
+  Lnast_ntype_elif,
   Lnast_ntype_for,
   Lnast_ntype_while,
   Lnast_ntype_phi,

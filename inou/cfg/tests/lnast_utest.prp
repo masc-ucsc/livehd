@@ -9,21 +9,21 @@ fun1 = :($a,$b,%o):{
 
 result = fun1(a:3, b:4)
 
-//x = $a
-//if ($a>1) {
-//  x = $e
-//  if ($a>2) {
-//    x = $b
-//  } elif (($a + 1)>3) {
-//    x = $c
-//  } else {
-//    x = $d
-//  }
-//  y = $e
-//} else {
-//  x = $f
-//}
-//
+x = $a
+if ($a>1) {
+  x = $e
+  if ($a>2) {
+    x = $b
+  } elif (($a + 1)>3) {
+    x = $c
+  } else {
+    x = $d
+  }
+  y = $e
+} else {
+  x = $f
+}
+
 //%o1 = x + $a
 //%o2 = y + $a
 

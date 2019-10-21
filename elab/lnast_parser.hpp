@@ -35,18 +35,19 @@ protected:
   Lnast_ntype  operator_analysis();
   bool         token_is_valid_ref();
   void         setup_ntype_str_mapping();
-  bool         function_name_correction(Lnast_ntype type, const Token& target_name);
-  mmap_lib::Tree_index process_operator_node             (const mmap_lib::Tree_index& opr_parent_sts, Lnast_ntype type, const Token& target_name);
+  bool         function_name_correction (Lnast_ntype type, const Token& target_name);
+  mmap_lib::Tree_index process_operator_node (const mmap_lib::Tree_index& opr_parent_sts, Lnast_ntype type, const Token& target_name);
   void         walk_next_token() {scan_next(); line_tkcnt +=1;              };
-  void         walk_next_line()  {scan_next(); line_tkcnt =1;  line_num+=1; };
+  void         walk_next_line()  {scan_next(); line_tkcnt =1 ; line_num+=1; };
 
 private:
   std::unique_ptr<Lnast> lnast;
   uint32_t               line_num;
   uint8_t                line_tkcnt;
   mmap_lib::Tree_index   buffer_parent4next_sts;
-  mmap_lib::Tree_index   last_tmp_func_name_idx;
+  Token                  buffer_if_condition;
+  mmap_lib::Tree_index   buffer_tmp_func_name_idx;
   absl::flat_hash_map<Lnast_ntype, std::string>       ntype2str;
-  absl::flat_hash_map<uint32_t, mmap_lib::Tree_index> cfg_idx2sts_node;
+  absl::flat_hash_map<uint32_t, mmap_lib::Tree_index> cfg_pidx2sts_node; //translate the parent column idx to corresponding sts node
 };
 
