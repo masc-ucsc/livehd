@@ -203,6 +203,45 @@ bool bwd(int n) {
 }
 
 bool top_hier= true;
+absl::flat_hash_map<Node::Compact,int> test_order;
+int test_order_sequence;
+
+void setup_test_order() {
+  test_order.clear();
+  test_order_sequence = 1;
+}
+
+void check_test_order(LGraph *top) {
+  for(auto node:top->fast(true)) {
+    if (node.is_type_sub() && !node.is_type_sub_empty())
+      continue;
+
+    auto it_node = test_order.find(node.get_compact());
+    if (it_node == test_order.end()) {
+      fmt::print("ERROR: missing node:{}\n",node.debug_name());
+      I(false);
+    }
+
+    int max_input = 0;
+    Node_pin max_input_pin;
+    for(auto edge:node.inp_edges()) {
+      auto it = test_order.find(edge.driver.get_node().get_compact());
+      if (it==test_order.end())
+       continue;
+      if (it->second<max_input)
+        continue;
+      if (node.get_type().is_pipelined())
+        continue;
+
+      max_input = it->second;
+      max_input_pin = edge.driver;
+    }
+    if (max_input>it_node->second) {
+      fmt::print("ERROR: wrong order node:{} is earlier than pin:{}\n",node.debug_name(), max_input_pin.debug_name());
+      I(false);
+    }
+  }
+}
 
 void topo_add_chain_fwd(absl::flat_hash_set<Node::Compact> &discovered_node
     , std::vector<Node> &node_stack
@@ -217,7 +256,7 @@ void topo_add_chain_down(absl::flat_hash_set<Node::Compact> &discovered_node
   auto down_pin = dst_pin.get_down_pin();
   I(down_pin.is_sink()); // fwd
 
-  fmt::print("topo       down node:{} down_pin:{}\n", down_pin.get_node().debug_name(), down_pin.debug_name());
+  //fmt::print("topo       down node:{} down_pin:{}\n", down_pin.get_node().debug_name(), down_pin.debug_name());
 
   for (auto &edge2 : down_pin.inp_edges()) {  // fwd
     I(edge2.sink.get_pid() == down_pin.get_pid());
@@ -244,7 +283,7 @@ void topo_add_chain_fwd(absl::flat_hash_set<Node::Compact> &discovered_node
 
       I(up_pin.is_sink()); // fwd
 
-      fmt::print("topo          up node:{} up_pin:{} up_lg:{}\n", dst_node.debug_name(), up_pin.debug_name(), up_pin.get_class_lgraph()->get_name());
+      //fmt::print("topo          up node:{} up_pin:{} up_lg:{}\n", dst_node.debug_name(), up_pin.debug_name(), up_pin.get_class_lgraph()->get_name());
 
       for (auto &edge2 : up_pin.inp_edges()) {  // fwd
         I(edge2.sink.get_pid() == up_pin.get_pid());
@@ -288,12 +327,18 @@ void doTopologicalSort(LGraph *lg) {
         if (!node2.is_graph_io()) {
           //fmt::print("debug topo node:{} lg:{} hidx.pos:{}\n", node2.debug_name(), node2.get_class_lgraph()->get_name(),node2.get_hidx().pos);
           if (!top_hier || !(node2.is_type_sub() && !node2.is_type_sub_empty())) {
+
+            I(test_order.find(node2.get_compact()) == test_order.end());
+            test_order[node2.get_compact()] = test_order_sequence++;
+
+#if 0
             if (node2.is_root()) {
               fmt::print("ROOT topo node:{} lg:{} hidx.pos:{}\n", node2.debug_name(), node2.get_class_lgraph()->get_name(),node2.get_hidx().pos);
             }else{
               auto up_node = node2.get_up_node();
               fmt::print("topo node:{} lg:{} hidx.pos:{} up_node:{}\n", node2.debug_name(), node2.get_class_lgraph()->get_name(),node2.get_hidx().pos, up_node.debug_name());
             }
+#endif
           }
         }
         discovered_node.insert(node2.get_compact());
@@ -385,12 +430,11 @@ void simple_line() {
   // s2
   s2->add_edge(s2_i_pin, s2_node.setup_sink_pin(0));
 
+  setup_test_order();
+
   doTopologicalSort(g0);
 
-  // FIXME: Add assertion check:
-  // topo node:node_5_or_ lg:g0
-  // topo node:node_5_or_ lg:s0
-  // topo node:node_5_or_ lg:s1
+  check_test_order(g0);
 }
 
 void simple() {
@@ -475,39 +519,39 @@ void simple() {
   //        2o   2o       2o           2o
   */
 
-  g->add_edge(i1, t13.setup_sink_pin(random()&0xFF));
-  g->add_edge(i2, t13.setup_sink_pin(random()&0xFF));
+  g->add_edge(i1, t13.setup_sink_pin(1+(random()&0xFF)));
+  g->add_edge(i2, t13.setup_sink_pin(1+(random()&0xFF)));
 
-  g->add_edge(i3, t14.setup_sink_pin(random()&0xFF));
-  g->add_edge(i4, t14.setup_sink_pin(random()&0xFF));
-  g->add_edge(i4, t15.setup_sink_pin(random()&0xFF));
+  g->add_edge(i3, t14.setup_sink_pin(1+(random()&0xFF)));
+  g->add_edge(i4, t14.setup_sink_pin(1+(random()&0xFF)));
+  g->add_edge(i4, t15.setup_sink_pin(1+(random()&0xFF)));
 
-  g->add_edge(c9.setup_driver_pin(), t16.setup_sink_pin(random()&0xFF));
-  g->add_edge(c10.setup_driver_pin(), t16.setup_sink_pin(random()&0xFF));
-  g->add_edge(t23.setup_driver_pin(256+(random()&0xFF)), t16.setup_sink_pin(random()&0xFF));
+  g->add_edge(c9.setup_driver_pin() , t16.setup_sink_pin(1+(random()&0xFF)));
+  g->add_edge(c10.setup_driver_pin(), t16.setup_sink_pin(1+(random()&0xFF)));
+  g->add_edge(t23.setup_driver_pin(256+1+(random()&0xFF)), t16.setup_sink_pin(1+(random()&0xFF)));
 
-  g->add_edge(c11.setup_driver_pin(), t17.setup_sink_pin(random()&0xFF));
+  g->add_edge(c11.setup_driver_pin(), t17.setup_sink_pin(1+(random()&0xFF)));
   if (rand()&1)
     g->add_edge(c12.setup_driver_pin(), t17.setup_sink_pin(1000+(random()&0xFF)));
-  g->add_edge(c12.setup_driver_pin(), t17.setup_sink_pin(random()&0xFF));
-  g->add_edge(c12.setup_driver_pin(), t18.setup_sink_pin(random()&0xFF));
+  g->add_edge(c12.setup_driver_pin(), t17.setup_sink_pin(1+(random()&0xFF)));
+  g->add_edge(c12.setup_driver_pin(), t18.setup_sink_pin(1+(random()&0xFF)));
 
-  g->add_edge(t13.setup_driver_pin(256+(random()&0xFF)), o5);
-  g->add_edge(t13.setup_driver_pin(256+(random()&0xFF)), o6);
+  g->add_edge(t13.setup_driver_pin(256+1+(random()&0xFF)), o5);
+  g->add_edge(t13.setup_driver_pin(256+1+(random()&0xFF)), o6);
   if (rand()&1)
-    g->add_edge(t14.setup_driver_pin(1000+256+(random()&0xFF)), o6);
-  g->add_edge(t14.setup_driver_pin(256+(random()&0xFF)), o6);
-  g->add_edge(t14.setup_driver_pin(256+(random()&0xFF)), o7);
+    g->add_edge(t14.setup_driver_pin(1000+256+1+(random()&0xFF)), o6);
+  g->add_edge(t14.setup_driver_pin(256+1+(random()&0xFF)), o6);
+  g->add_edge(t14.setup_driver_pin(256+1+(random()&0xFF)), o7);
 
-  g->add_edge(t17.setup_driver_pin(256+(random()&0xFF)), t20.setup_sink_pin(random()&0xFF));
+  g->add_edge(t17.setup_driver_pin(256+1+(random()&0xFF)), t20.setup_sink_pin(1+(random()&0xFF)));
   if (rand()&1)
-    g->add_edge(t17.setup_driver_pin(1000+256+(random()&0xFF)), t20.setup_sink_pin(random()&0xFF));
-  g->add_edge(t17.setup_driver_pin(256+(random()&0xFF)), t19.setup_sink_pin(random()&0xFF));
-  g->add_edge(t18.setup_driver_pin(256+(random()&0xFF)), t19.setup_sink_pin(random()&0xFF));
-  g->add_edge(t18.setup_driver_pin(256+(random()&0xFF)), t21.setup_sink_pin(random()&0xFF));
+    g->add_edge(t17.setup_driver_pin(1000+256+1+(random()&0xFF)), t20.setup_sink_pin(1+(random()&0xFF)));
+  g->add_edge(t17.setup_driver_pin(256+1+(random()&0xFF)), t19.setup_sink_pin(1+(random()&0xFF)));
+  g->add_edge(t18.setup_driver_pin(256+1+(random()&0xFF)), t19.setup_sink_pin(1+(random()&0xFF)));
+  g->add_edge(t18.setup_driver_pin(256+1+(random()&0xFF)), t21.setup_sink_pin(1+(random()&0xFF)));
 
-  g->add_edge(t16.setup_driver_pin(256+(random()&0xFF)), o8);
-  g->add_edge(t20.setup_driver_pin(256+(random()&0xFF)), o8);
+  g->add_edge(t16.setup_driver_pin(256+1+(random()&0xFF)), o8);
+  g->add_edge(t20.setup_driver_pin(256+1+(random()&0xFF)), o8);
 
 #ifdef VERBOSE
   for(const auto &node : g->fast()) {
@@ -526,217 +570,24 @@ void simple() {
   }
 #endif
 
+  setup_test_order();
+
   doTopologicalSort(g);
 
-  exit(0); // FIXME
-
-  std::vector<std::string> fast;
-  int conta =0;
-  for(const auto node : g->fast()) {
-#ifdef VERBOSE3
-    fmt::print(" fast1:{} lg:{}\n", node.debug_name(), node.get_class_lgraph()->get_name());
-#endif
-    fast.emplace_back(node.debug_name());
-    conta++;
-  }
-  std::vector<std::string> fast_true;
-  conta =0;
-  for(const auto node : g->fast(true)) {
-#ifdef VERBOSE3
-    fmt::print(" fast2:{} lg:{}\n", node.debug_name(), node.get_class_lgraph()->get_name());
-#endif
-    fast_true.emplace_back(node.debug_name());
-    conta++;
-  }
-
-  std::vector<std::string> fwd;
-  conta=0;
-  //for(const auto node : g->forward()) {
-  auto iter = g->forward();
-  for(auto it = iter.begin() ; it!= iter.end() ; ++it) {
-    auto node = *it;
-#ifdef VERBOSE2
-    fmt::print(" fwd1:{} lg:{}\n", node.debug_name(), node.get_class_lgraph()->get_name());
-#endif
-    fwd.emplace_back(node.debug_name());
-    conta++;
-  }
-  if (conta!=16) {
-    fmt::print("ERROR. expected 16 nodes in forward traversal. Found {}\n",conta);
-    failed = true;
-  }
-  std::vector<std::string> fwd_true;
-  conta =0;
-  for(const auto node : g->forward(true)) {
-#ifdef VERBOSE2
-    fmt::print(" fwd2:{} lg:{}\n", node.debug_name(), node.get_class_lgraph()->get_name());
-#endif
-    fwd_true.emplace_back(node.debug_name());
-    conta++;
-  }
-#ifdef VERBOSE2
-  return;
-#endif
-
-  std::vector<std::string> bwd;
-  conta =0;
-  for(const auto node : g->backward()) {
-#ifdef VERBOSE2
-    fmt::print(" bwd:{}\n", node.debug_name());
-#endif
-    bwd.emplace_back(node.debug_name());
-    conta++;
-  }
-  if (conta!=16) {
-    fmt::print("ERROR. expected 16 nodes in backward traversal. Found {}\n",conta);
-    failed = true;
-  }
-
-  std::vector<std::string> bwd_true;
-  conta =0;
-  for(const auto node : g->backward(true)) {
-    bwd_true.emplace_back(node.debug_name());
-    conta++;
-  }
-
-  std::sort(fwd_true.begin() , fwd_true.end());
-  std::sort(bwd_true.begin() , bwd_true.end());
-  std::sort(fast_true.begin(), fast_true.end());
-
-  std::sort(fwd.begin() , fwd.end());
-  std::sort(bwd.begin() , bwd.end());
-  std::sort(fast.begin(), fast.end());
-
-  I(fwd.size() == fwd_true.size());
-  I(bwd.size() == bwd_true.size());
-  I(fast.size() == fast_true.size());
-  {
-    auto it1 = fast.begin();
-    auto it2 = fast_true.begin();
-    while(it1 != fast.end()) {
-      if (*it1 != *it2) {
-        fmt::print("missmatch fast {} vs fast_true {}\n", *it1, *it2);
-        failed = true;
-      }
-      it1++;
-      it2++;
-      if (it1 == fast.end() && it2 == fast_true.end()) break;
-      if (it1 != fast.end() && it2 != fast_true.end()) continue;
-      fmt::print("fast fast_true not matching size\n");
-
-      fmt::print("fast    :");
-      for(auto txt:fast)
-        fmt::print(" {}",txt);
-      fmt::print("\n");
-      fmt::print("fast_tru:");
-      for(auto txt:fast_true)
-        fmt::print(" {}",txt);
-      fmt::print("\n");
-      failed = true;
-      return;
-    }
-  }
-  {
-    auto it1 = fwd.begin();
-    auto it2 = fwd_true.begin();
-    while(it1 != fwd.end()) {
-      if (*it1 != *it2) {
-        fmt::print("missmatch fwd {} vs fwd_true {}\n", *it1, *it2);
-        failed = true;
-        fmt::print("fwd     :");
-        for(auto txt:fwd)
-          fmt::print(" {}",txt);
-        fmt::print("\n");
-        fmt::print("fwd_tru :");
-        for(auto txt:fwd_true)
-          fmt::print(" {}",txt);
-        fmt::print("\n");
-        return;
-      }
-      it1++;
-      it2++;
-      if (it1 == fwd.end() && it2 == fwd_true.end()) break;
-      if (it1 != fwd.end() && it2 != fwd_true.end()) continue;
-      fmt::print("fwd fwd_true not matching size\n");
-      failed = true;
-      return;
-    }
-  }
-  {
-    auto it1 = bwd.begin();
-    auto it2 = bwd_true.begin();
-    while(it1 != bwd.end()) {
-      if (*it1 != *it2) {
-        fmt::print("missmatch bwd {} vs bwd_true {}\n", *it1, *it2);
-        failed = true;
-        return;
-      }
-      it1++;
-      it2++;
-      if (it1 == bwd.end() && it2 == bwd_true.end()) break;
-      if (it1 != bwd.end() && it2 != bwd_true.end()) continue;
-      fmt::print("bwd bwd_true not matching size\n");
-      failed = true;
-      return;
-    }
-  }
-
-#if 0
-  fmt::print("fwd :");
-  for(auto txt:fwd)
-    fmt::print(" {}",txt);
-  fmt::print("\n");
-
-  fmt::print("bwd :");
-  for(auto txt:bwd)
-    fmt::print(" {}",txt);
-  fmt::print("\n");
-
-  fmt::print("fast:");
-  for(auto txt:fast)
-    fmt::print(" {}",txt);
-  fmt::print("\n");
-#endif
-
-  auto fwd_it  = fwd.begin();
-  auto bwd_it  = bwd.begin();
-
-  while(fwd_it != fwd.end()) {
-    if (*bwd_it != *fwd_it) {
-      fmt::print("missmatch bwd {} vs fwd {}\n",*bwd_it, *fwd_it);
-      failed = true;
-    }
-    fwd_it++;
-    bwd_it++;
-    if (fwd_it == fwd.end() && bwd_it == bwd.end())
-      break;
-
-    if (fwd_it == fwd.end()) {
-      fmt::print("fwd is shorter\n");
-      failed = true;
-      break;
-    }
-    if (bwd_it == bwd.end()) {
-      fmt::print("bwd is shorter\n");
-      failed = true;
-      break;
-    }
-  }
+  check_test_order(g);
 }
 
 int main() {
 
   simple_line();
-  exit(0);
+
   simple();
 
-#if 0
   for(int i=0;i<40;i++) {
     simple();
     if (failed)
       return -3;
   }
-#endif
 
 #if 0
   int n = 40;

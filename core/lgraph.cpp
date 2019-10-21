@@ -15,7 +15,7 @@
 #include "lgraph.hpp"
 #include "annotate.hpp"
 
-LGraph::LGraph(std::string_view _path, std::string_view _name, std::string_view _source, bool _clear)
+LGraph::LGraph(std::string_view _path, std::string_view _name, std::string_view _source)
     :LGraph_Base(_path, _name, Graph_library::instance(_path)->register_lgraph(_name, _source, this))
     ,LGraph_Node_Type(_path, _name, get_lgid())
     ,htree(this) {
@@ -23,9 +23,6 @@ LGraph::LGraph(std::string_view _path, std::string_view _name, std::string_view 
   I(_name.find('/') == std::string::npos); // No path in name
 
   I(_name == get_name());
-  if (_clear) {  // Create
-    clear();
-  }
 }
 
 LGraph::~LGraph() {
@@ -37,10 +34,13 @@ bool LGraph::exists(std::string_view path, std::string_view name) { return Graph
 
 LGraph *LGraph::create(std::string_view path, std::string_view name, std::string_view source) {
   LGraph *lg = Graph_library::try_find_lgraph(path, name);
-  if (lg)
-    return new (lg) LGraph(path, name, source, true);
+  if (lg==nullptr) {
+    lg = new LGraph(path, name, source);
+  }
 
-  return new LGraph(path, name, source, true);
+  lg->clear();
+
+  return lg;
 }
 
 LGraph *LGraph::clone_skeleton(std::string_view extended_name) {
@@ -88,7 +88,7 @@ LGraph *LGraph::open(std::string_view path, Lg_type_id lgid) {
   auto name   = lib->get_name(lgid);
   auto source = lib->get_source(lgid);
 
-  return new LGraph(path, name, source, false);
+  return new LGraph(path, name, source);
 }
 
 LGraph *LGraph::open(std::string_view path, std::string_view name) {
@@ -106,7 +106,7 @@ LGraph *LGraph::open(std::string_view path, std::string_view name) {
 
   auto source = lib->get_source(name);
 
-  return new LGraph(path, name, source, false);
+  return new LGraph(path, name, source);
 }
 
 void LGraph::rename(std::string_view path, std::string_view orig, std::string_view dest) {
@@ -146,7 +146,6 @@ void LGraph::emplace_back() {
   LGraph_Base::emplace_back();
   LGraph_Node_Type::emplace_back();
 }
-
 
 Node_pin LGraph::get_graph_input(std::string_view str) {
 

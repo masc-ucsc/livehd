@@ -38,7 +38,7 @@ protected:
 
   Index_ID create_node_int() final;
 
-  explicit LGraph(std::string_view _path, std::string_view _name, std::string_view _source, bool clear);
+  explicit LGraph(std::string_view _path, std::string_view _name, std::string_view _source);
 
   bool has_node_outputs(Index_ID idx) const {
     I(idx < node_internal.size());

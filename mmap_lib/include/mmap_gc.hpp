@@ -189,6 +189,7 @@ public:
   // mmap_map.hpp:    mmap_txt_fd = mmap_gc::open(mmap_name + "txt");
   // mmap_vector.hpp: mmap_fd     = mmap_gc::open(mmap_name);
   static int open(const std::string &name) {
+    //std::cerr << "mmap_gc_pool open filename:" << name << std::endl;
 #ifndef NDEBUG
     for(const auto &e:mmap_gc_pool) {
       if(e.second.fd <0)
@@ -227,6 +228,8 @@ public:
     assert(it!=mmap_gc_pool.end());
 
     recycle_int(it);
+    //auto entry = it->second;
+    //std::cerr << "mmap_gc_pool del name:" << entry.name << " fd:" << entry.fd << std::endl;
     mmap_gc_pool.erase(it);
   }
 

@@ -328,7 +328,6 @@ public:
     }
     if (*entries_size!=0) {
       *entries_size = 0;
-      return;
     }
 
     *entries_size    = 0; // Setting zero, triggers an unlink when calling gc_done
