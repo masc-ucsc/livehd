@@ -40,70 +40,59 @@ void Lnast_parser::build_lnast() {
   Lnast_ntype type = Lnast_ntype_invalid;
   mmap_lib::Tree_index opr_parent_sts; //opr means operator
 
-    while (line_num == scan_get_token().line) {
-      if(unlikely(scan_is_end()))
-        return;
+  line_tkcnt = 1;
+  while (line_num == scan_get_token().line) {
+    if(unlikely(scan_is_end()))
+      return;
 
-      if(unlikely(line_num == 0)) {
-        scan_next();
-        continue;
-      }  //ask Akash to remove the "END" if you really don't need it
+    //ask Akash to remove the "END" if you really don't need it
+    if(unlikely(line_num == 0)) {
+      walk_next_line();
+      continue;
+    }
 
-      switch (line_tkcnt) {
-        case CFG_IDX_POS:{
-          cfg_nidx = (uint32_t)std::stoi(scan_text());
-          scan_next(); line_tkcnt += 1;
-          break;
-        }
-        case CFG_PARENT_POS:{
-          cfg_nparent = (uint32_t)std::stoi(scan_text());
-          scan_next(); line_tkcnt += 1;
-          opr_parent_sts = cfg_idx2sts_node[cfg_nparent];
-          break;
-        }
-        case CFG_CHILD_POS:{
-          cfg_nchild = (uint32_t)std::stoi(scan_text());
-          scan_next(); line_tkcnt += 1;
-          break;
-        }
-        case CFG_TOKEN_POS_BEG:{
-          if (unlikely(scan_text().substr(0,4) == "SEQ0")){
-            scan_next(); line_tkcnt += 1;
-            break;
-          } else if (unlikely(scan_text().substr(0,3) == "SEQ")){
-            process_statements_op(buffer_next_sts_parent, cfg_nidx);
-            scan_next(); line_tkcnt += 1;
-            break;
-          } else {
-            cfg_token_beg = scan_get_token();
-            scan_next(); line_tkcnt += 1;
-            break;
-          }
-        }
-        case CFG_TOKEN_POS_END:{
-          cfg_token_end = scan_get_token();
-          scan_next(); line_tkcnt += 1;
-          break;
-        }
-        case CFG_OP_POS_BEG: { //no regular pattern, scan_next() internally case by case
-          type = operator_analysis();
-          scan_next(); line_tkcnt += 1; // go to operator target_name
-          I(token_is_valid_ref());
+    I(line_tkcnt == CFG_IDX_POS);
+    cfg_nidx = (uint32_t)std::stoi(scan_text());
+    walk_next_token();
+
+    I(line_tkcnt == CFG_PARENT_POS);
+    cfg_nparent = (uint32_t)std::stoi(scan_text());
+    walk_next_token();
+    opr_parent_sts = cfg_idx2sts_node[cfg_nparent];
+
+    I(line_tkcnt == CFG_CHILD_POS);
+    cfg_nchild = (uint32_t)std::stoi(scan_text());
+    walk_next_token();
+    I(line_tkcnt == CFG_TOKEN_POS_BEG);
+    if (unlikely(scan_text().substr(0,4) == "SEQ0")){
+      walk_next_line();
+      continue;
+    } else if (unlikely(scan_text().substr(0,3) == "SEQ")){
+      process_statements_op(buffer_next_sts_parent, cfg_nidx);
+      walk_next_line();
+      continue;
+    } else {
+      cfg_token_beg = scan_get_token();
+      walk_next_token();
+    }
+    I(line_tkcnt == CFG_TOKEN_POS_END);
+    cfg_token_end = scan_get_token();
+    walk_next_token();
+
+    I(line_tkcnt == CFG_OP_POS_BEG);
+    //no regular pattern, scan_next() internally case by case
+    type = operator_analysis();
+    walk_next_token(); // go to operator target_name
+    I(token_is_valid_ref());
 
 
-          target_name = scan_get_token();
-          auto tree_idx_opr = process_operator_node(opr_parent_sts, type);
-          scan_next(); line_tkcnt += 1; //go to 1st operand
+    target_name = scan_get_token();
+    auto tree_idx_opr = process_operator_node(opr_parent_sts, type);
+    walk_next_token(); //go to 1st operand
 
-          add_operator_subtree(tree_idx_opr, target_name);
-          scan_next(); line_tkcnt += 1; //go to next line
-          break;
-        }
-        default: ;
-      } //end switch
-      line_tkcnt = 1;
-      line_num += 1;
-    } //end while
+    add_operator_subtree(tree_idx_opr, target_name);
+    walk_next_line();
+  }
 }
 
 

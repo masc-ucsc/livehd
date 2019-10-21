@@ -16,7 +16,7 @@ static inline constexpr int   CFG_TARGET_TMP_REF_RANGE =  1; //K14 K15  0 59 96 
 
 class Lnast_parser : public Elab_scanner {
 public:
-  Lnast_parser() : line_num(0), line_tkcnt(0){ setup_ntype_str_mapping();};
+  Lnast_parser() : line_num(0), line_tkcnt(1){ setup_ntype_str_mapping();};
   const std::unique_ptr<Lnast>&  get_ast(){return lnast;};
   std::string                    ntype_dbg(Lnast_ntype ntype);
 
@@ -37,6 +37,8 @@ protected:
   void         setup_ntype_str_mapping();
   void         function_name_correction(Lnast_ntype type, const mmap_lib::Tree_index& sts_idx);
   mmap_lib::Tree_index process_operator_node             (const mmap_lib::Tree_index& opr_parent_sts, Lnast_ntype type);
+  void         walk_next_token() {scan_next(); line_tkcnt +=1;              };
+  void         walk_next_line()  {scan_next(); line_tkcnt =1;  line_num+=1; };
 
 private:
   std::unique_ptr<Lnast> lnast;
