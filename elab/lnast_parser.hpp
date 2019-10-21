@@ -9,7 +9,7 @@ static inline constexpr int   CFG_PARENT_POS           =  2;
 static inline constexpr int   CFG_CHILD_POS            =  3;
 static inline constexpr int   CFG_TOKEN_POS_BEG        =  4;
 static inline constexpr int   CFG_TOKEN_POS_END        =  5;
-static inline constexpr int   CFG_OP_POS_BEG           =  6;
+static inline constexpr int   CFG_OP_POS               =  6;
 static inline constexpr int   CFG_OP_FUNC_ROOT_RANGE   =  1; //K9  K14  0 59 96 ::{  ___e  K11  $a  $b  %o
 static inline constexpr int   CFG_TARGET_TMP_REF_RANGE =  1; //K14 K15  0 59 96   =  fun1  \___e
 
@@ -35,8 +35,8 @@ protected:
   Lnast_ntype  operator_analysis();
   bool         token_is_valid_ref();
   void         setup_ntype_str_mapping();
-  void         function_name_correction(Lnast_ntype type, const mmap_lib::Tree_index& sts_idx);
-  mmap_lib::Tree_index process_operator_node             (const mmap_lib::Tree_index& opr_parent_sts, Lnast_ntype type);
+  bool         function_name_correction(Lnast_ntype type, const Token& target_name);
+  mmap_lib::Tree_index process_operator_node             (const mmap_lib::Tree_index& opr_parent_sts, Lnast_ntype type, const Token& target_name);
   void         walk_next_token() {scan_next(); line_tkcnt +=1;              };
   void         walk_next_line()  {scan_next(); line_tkcnt =1;  line_num+=1; };
 
@@ -44,7 +44,8 @@ private:
   std::unique_ptr<Lnast> lnast;
   uint32_t               line_num;
   uint8_t                line_tkcnt;
-  mmap_lib::Tree_index   buffer_next_sts_parent;
+  mmap_lib::Tree_index   buffer_parent4next_sts;
+  mmap_lib::Tree_index   last_tmp_func_name_idx;
   absl::flat_hash_map<Lnast_ntype, std::string>       ntype2str;
   absl::flat_hash_map<uint32_t, mmap_lib::Tree_index> cfg_idx2sts_node;
 };

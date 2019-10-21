@@ -150,11 +150,11 @@ K50  K51   0  280  292   =    %o2     ___v
     (void) K8_tar;
 
     auto func_def     = ast_gld.add_child(top_sts,  std::make_tuple(ntype_dbg(Lnast_ntype_func_def),      ""    )); //knum = K9
-    auto func_def_sts = ast_gld.add_child(func_def, std::make_tuple(ntype_dbg(Lnast_ntype_statements),    ""));     //knum = K9
     auto K9_tar       = ast_gld.add_child(func_def, std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "fun1"));
     auto K9_op1       = ast_gld.add_child(func_def, std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "$a"));
     auto K9_op2       = ast_gld.add_child(func_def, std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "$b"));
     auto K9_op3       = ast_gld.add_child(func_def, std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "%o"));
+    auto func_def_sts = ast_gld.add_child(func_def, std::make_tuple(ntype_dbg(Lnast_ntype_statements),    ""));
     (void) K9_tar;
     (void) K9_op1;
     (void) K9_op2;
