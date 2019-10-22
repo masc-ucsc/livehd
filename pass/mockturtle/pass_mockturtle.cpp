@@ -1089,7 +1089,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
         const auto klut_dst_node = klut_ntk_node;
         I(gid_klut_node2lg_node.find(std::make_pair(group_id, klut_src_node)) != gid_klut_node2lg_node.end());
         I(gid_klut_node2lg_node.find(std::make_pair(group_id, klut_dst_node)) != gid_klut_node2lg_node.end());
-        auto driver_node = Node(new_lg,gid_klut_node2lg_node[std::make_pair(group_id, klut_src_node)]); //SH:FIXME: why a klut child node drives a klut parent node? bug sources?
+        auto driver_node = Node(new_lg,gid_klut_node2lg_node[std::make_pair(group_id, klut_src_node)]);
         auto sink_node = Node(new_lg,gid_klut_node2lg_node[std::make_pair(group_id, klut_dst_node)]);
         auto driver_pin = driver_node.setup_driver_pin(0);
         auto sink_pin = sink_node.setup_sink_pin(i);
