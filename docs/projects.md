@@ -602,6 +602,20 @@ create/delete. Maybe a mmap_map tracking sviews.
 For the bimap, the sview is replicated for both directions. Again, the refactor
 should share the sview across the two mmap_maps.
 
+## mmap_lib set optimized for lgraph
+
+Most lgraph have consecutive (or just 1-3 skip) node ids. Several algorithms
+use sets. Currently, we use the absl::flat_hash_set. This has a high overhead
+(store hash+xtra is around 8 bytes per entry) for when a simple bit enough if
+the set is dense (consecutive nids).
+
+We can not use dense arrays because we have the hierarchy which creates "gaps".
+A potential "good enough" solution is to use the mmap_lib map but store 64
+(8bytes) consecutive bit vector. This means that the index hash is (xx>>5) and
+the lower bits (xx&0x1F) are used to select the bit in the map entry. This
+amortizes the map entry costs over several "likely consecutive" entries in the
+map.
+
 ## mmap_lib::vector erase (pop_back)
 
 The current only way to shrink a mmap_lib::vector is with a resize command. It
