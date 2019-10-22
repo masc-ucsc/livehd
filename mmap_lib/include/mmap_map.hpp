@@ -267,7 +267,7 @@ struct pair {
 // randomized upper bits, which are used by the mmap_lib.
 template <typename T>
 struct hash : public std::hash<T> {
-	size_t operator()(T const& obj) const {
+	size_t operator()(T const& obj) const noexcept {
 		return std::hash<T>::operator()(obj);
 	}
 };
@@ -275,7 +275,7 @@ struct hash : public std::hash<T> {
 // specialization used for uint64_t and int64_t. Uses 128bit multiplication
 template <>
 struct hash<uint64_t> {
-	size_t operator()(uint64_t const& obj) const {
+	size_t operator()(uint64_t const& obj) const noexcept {
 #if defined(mmap_map_HAS_UMUL128)
 		// 167079903232 masksum, 120428523 ops best: 0xde5fb9d2630458e9
 		static constexpr uint64_t k = UINT64_C(0xde5fb9d2630458e9);
@@ -303,14 +303,14 @@ struct hash<uint64_t> {
 
 template <>
 struct hash<int64_t> {
-	size_t operator()(int64_t const& obj) const {
+	size_t operator()(int64_t const& obj) const noexcept {
 		return hash<uint64_t>{}(static_cast<uint64_t>(obj));
 	}
 };
 
 template <>
 struct hash<uint32_t> {
-	size_t operator()(uint32_t const& h) const {
+	size_t operator()(uint32_t const& h) const noexcept {
 //#if mmap_map_BITNESS == 32
 		return static_cast<size_t>((UINT64_C(0xca4bcaa75ec3f625) * (uint64_t)h) >> 32);
 //#else
@@ -321,7 +321,7 @@ struct hash<uint32_t> {
 
 template <>
 struct hash<int32_t> {
-	size_t operator()(int32_t const& obj) const {
+	size_t operator()(int32_t const& obj) const noexcept {
 		return hash<uint32_t>{}(static_cast<uint32_t>(obj));
 	}
 };
@@ -382,7 +382,7 @@ inline size_t hash_bytes(void const* ptr, size_t const len) {
 
 template <>
 struct hash<std::string> {
-	size_t operator()(std::string const& str) const {
+	size_t operator()(std::string const& str) const noexcept {
 		return hash_bytes(str.data(), str.size());
 	}
 };
@@ -471,38 +471,38 @@ private:
 			void destroy(M& mmap_map_UNUSED(map) /*unused*/) {}
 			void destroyDoNotDeallocate() {}
 
-			value_type const* operator->() const {
+			value_type const* operator->() const noexcept {
 				return &mData;
 			}
-			value_type* operator->() {
+			value_type* operator->() noexcept {
 				return &mData;
 			}
 
-			const value_type& operator*() const {
+			const value_type& operator*() const noexcept {
 				return mData;
 			}
 
-			value_type& operator*() {
+			value_type& operator*() noexcept {
 				return mData;
 			}
 
-			typename value_type::first_type& getFirst() {
+			typename value_type::first_type& getFirst() noexcept {
 				return mData.first;
 			}
 
-			typename value_type::first_type const& getFirst() const {
+			typename value_type::first_type const& getFirst() const noexcept {
 				return mData.first;
 			}
 
-			typename value_type::second_type& getSecond() {
+			typename value_type::second_type& getSecond() noexcept {
 				return mData.second;
 			}
 
-			typename value_type::second_type const& getSecond() const {
+			typename value_type::second_type const& getSecond() const noexcept {
 				return mData.second;
 			}
 
-			void swap(DataNode<M>& o) {
+			void swap(DataNode<M>& o) noexcept {
 				mData.swap(o.mData);
 			}
 
@@ -609,18 +609,18 @@ private:
 
 	////////////////////////////////////////////////////////////////////
 
-	size_t calcNumBytesInfo(size_t numElements) const {
+	size_t calcNumBytesInfo(size_t numElements) const noexcept {
 		const size_t s = sizeof(uint8_t) * (numElements + 1);
 		assert(s / sizeof(uint8_t) == numElements + 1);
 		// make sure it's a bit larger, so we can load 64bit numbers
 		return s + sizeof(uint64_t);
 	}
-	size_t calcNumBytesNode(size_t numElements) const {
+	size_t calcNumBytesNode(size_t numElements) const noexcept {
 		const size_t s = sizeof(Node) * numElements;
 		assert(s / sizeof(Node) == numElements);
 		return s;
 	}
-	size_t calcNumBytesTotal(size_t numElements) const {
+	size_t calcNumBytesTotal(size_t numElements) const noexcept {
 		const size_t si = calcNumBytesInfo(numElements);
 		const size_t sn = calcNumBytesNode(numElements);
 		const size_t s = si + sn;
@@ -629,7 +629,7 @@ private:
 	}
 
   // gc_done can be called for mmap_base or mmap_txt_base
-	void gc_done(void *base) const {
+	void gc_done(void *base) const noexcept {
     if (mmap_base != base) {  // WARNING: Possible because 2 mmaps can be active during rehash
       return;
     }
