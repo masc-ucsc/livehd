@@ -870,6 +870,9 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT() {
     ps.cut_enumeration_ps.cut_size = LUT_input_bits;
     mockturtle::lut_mapping<mockturtle::mapping_view<mockturtle::mig_network, true>, true>(mapped_mig, ps);
     mockturtle::klut_network klut_ntk =*mockturtle::collapse_mapped_network<mockturtle::klut_network>(mapped_mig);
+    write_bench(mapped_mig, std::cout);
+    fmt::print("----------------------\n");
+    write_bench(klut_ntk, std::cout);
 
 #ifndef NDEBUG
     //equivalence checking using miter
@@ -1043,12 +1046,14 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
       auto func = klut_ntk.node_function(klut_ntk_node);
 
       klut_ntk.foreach_fanin(klut_ntk_node, [&](const auto &sig, auto i) {
+        fmt::print("each_fain lut:{} i:{}\n", kitty::to_hex(func), (int)i);
 
         //check if a fanin is complemented, then change the truth table accordingly
         if (klut_ntk.is_complemented(sig))
           kitty::flip_inplace(func, i);
 
         if (klut_ntk.is_pi(klut_ntk.get_node(sig))) {
+        fmt::print("2.each_fain lut:{} i:{}\n", kitty::to_hex(func), (int)i);
           auto pid = (uint32_t) i;
           auto key = std::make_pair(group_id, sig);
           gid_pi2pi_sink_node_lg_pid[key] = std::make_pair(klut_ntk_node, pid);

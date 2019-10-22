@@ -202,7 +202,7 @@ bool bwd(int n) {
   return true;
 }
 
-bool top_hier= true;
+bool visit_sub= true;
 absl::flat_hash_map<Node::Compact,int> test_order;
 int test_order_sequence;
 
@@ -272,7 +272,7 @@ void topo_add_chain_fwd(absl::flat_hash_set<Node::Compact> &discovered_node
   const auto  dst_node = dst_pin.get_node();
   //fmt::print("1.topo visit node:{} lg:{}\n", dst_node.debug_name(),dst_node.get_class_lgraph()->get_name());
 
-  if (top_hier) {
+  if (visit_sub) {
     if (dst_node.is_type_sub() && !dst_node.is_type_sub_empty()) { // DOWN??
       topo_add_chain_down(discovered_node, node_stack, dst_pin);
       return;
@@ -326,7 +326,7 @@ void doTopologicalSort(LGraph *lg) {
       if (!discovered_node.count(node2.get_compact())) {
         if (!node2.is_graph_io()) {
           //fmt::print("debug topo node:{} lg:{} hidx.pos:{}\n", node2.debug_name(), node2.get_class_lgraph()->get_name(),node2.get_hidx().pos);
-          if (!top_hier || !(node2.is_type_sub() && !node2.is_type_sub_empty())) {
+          if (!visit_sub || !(node2.is_type_sub() && !node2.is_type_sub_empty())) {
 
             I(test_order.find(node2.get_compact()) == test_order.end());
             test_order[node2.get_compact()] = test_order_sequence++;
@@ -344,7 +344,7 @@ void doTopologicalSort(LGraph *lg) {
         discovered_node.insert(node2.get_compact());
       }
 
-      if (top_hier) {
+      if (visit_sub) {
         if (node2.is_type_sub() && !node2.is_type_sub_empty()) {
           bool any_propagated=false;
           for (auto &pin : node2.out_connected_pins()) { // fwd
