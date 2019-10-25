@@ -680,9 +680,8 @@ Index_ID LGraph::create_node_int() {
   return node_internal.size() - 1;
 }
 
-Forward_edge_iterator LGraph::forward(bool visit_sub) { return Forward_edge_iterator(this, visit_sub); }
-
-Backward_edge_iterator LGraph::backward(bool visit_sub) { return Backward_edge_iterator(this, visit_sub); }
+Fwd_edge_iterator LGraph::forward(bool visit_sub) { return Fwd_edge_iterator(this, visit_sub); }
+Bwd_edge_iterator LGraph::backward(bool visit_sub) { return Bwd_edge_iterator(this, visit_sub); }
 
 // Skip after 1, but first may be deleted, so fast_next
 Fast_edge_iterator LGraph::fast(bool visit_sub) { return Fast_edge_iterator(this, visit_sub);  }

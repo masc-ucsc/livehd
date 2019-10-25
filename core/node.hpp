@@ -19,10 +19,10 @@ protected:
   friend class LGraph_Node_Type;
   friend class Node_pin;
   friend class XEdge;
-  friend class CFast_edge_iterator;
-  friend class Edge_raw_iterator_base;
-  friend class CForward_edge_iterator;
-  friend class CBackward_edge_iterator;
+  friend class Fast_edge_iterator;
+  friend class Flow_base_iterator;
+  friend class Fwd_edge_iterator;
+  friend class Bwd_edge_iterator;
   friend class Hierarchy_tree;
 
   Index_ID get_nid() const { return nid; }
@@ -49,12 +49,10 @@ public:
     friend class Node;
     friend class Node_pin;
     friend class XEdge;
-    friend class CFast_edge_iterator;
-    friend class Edge_raw_iterator_base;
-    friend class CForward_edge_iterator;
-    friend class CBackward_edge_iterator;
-    friend class Forward_edge_iterator;
-    friend class Backward_edge_iterator;
+    friend class Fast_edge_iterator;
+    friend class Flow_base_iterator;
+    friend class Fwd_edge_iterator;
+    friend class Bwd_edge_iterator;
     friend class mmap_lib::hash<Node::Compact>;
   public:
 
@@ -94,20 +92,18 @@ public:
     friend class Node;
     friend class Node_pin;
     friend class XEdge;
-    friend class CFast_edge_iterator;
-    friend class Edge_raw_iterator_base;
-    friend class CForward_edge_iterator;
-    friend class CBackward_edge_iterator;
-    friend class Forward_edge_iterator;
-    friend class Backward_edge_iterator;
+    friend class Fast_edge_iterator;
+    friend class Flow_base_iterator;
+    friend class Fwd_edge_iterator;
+    friend class Bwd_edge_iterator;
     friend class Hierarchy_tree;
     friend class mmap_lib::hash<Node::Compact_class>;
   public:
 
     // constexpr operator size_t() const { return nid; }
+    constexpr Compact_class() :nid(0) { };
 
     Compact_class(const Index_ID &_nid) :nid(_nid) { I(nid); };
-    Compact_class() :nid(0) { };
     Compact_class &operator=(const Compact_class &obj) {
       I(this != &obj);
       nid  = obj.nid;
@@ -115,16 +111,13 @@ public:
       return *this;
     }
 
-    Index_ID get_nid() const { return nid; }
+    Node get_node(LGraph *lg) const noexcept { return Node(lg, *this); }
 
-    Node get_node(LGraph *lg) const { return Node(lg, *this); }
+    constexpr Index_ID get_nid() const noexcept { return nid; }
+    constexpr bool is_invalid() const noexcept { return nid == 0; }
 
-    constexpr bool is_invalid() const { return nid == 0; }
-
-    constexpr bool operator==(const Compact_class &other) const {
-      return nid == other.nid;
-    }
-    constexpr bool operator!=(const Compact_class &other) const { return !(*this == other); }
+    constexpr bool operator==(const Compact_class &other) const noexcept { return nid == other.nid; }
+    constexpr bool operator!=(const Compact_class &other) const noexcept { return nid != other.nid; }
 
     template <typename H>
     friend H AbslHashValue(H h, const Compact_class& s) {

@@ -23,8 +23,8 @@ protected:
   friend class Node_pin;
   friend class XEdge;
   friend class CFast_edge_iterator;
-  friend class Forward_edge_iterator;
-  friend class Backward_edge_iterator;
+  friend class Fwd_edge_iterator;
+  friend class Bwd_edge_iterator;
   friend class Fast_edge_iterator;
   friend class Edge_raw_iterator_base;
 
@@ -186,8 +186,8 @@ public:
     return idx;
   }
 
-  Forward_edge_iterator  forward(bool visit_sub=false);
-  Backward_edge_iterator backward(bool visit_sub=false);
+  Fwd_edge_iterator  forward(bool visit_sub=false);
+  Bwd_edge_iterator  backward(bool visit_sub=false);
   Fast_edge_iterator fast(bool visit_sub=false);
 
   LGraph *clone_skeleton(std::string_view extended_name);

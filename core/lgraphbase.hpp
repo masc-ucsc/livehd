@@ -12,8 +12,8 @@
 #include "lgedge.hpp"
 
 class Edge_raw_iterator;
-class Forward_edge_iterator;
-class Backward_edge_iterator;
+class Fwd_edge_iterator;
+class Bwd_edge_iterator;
 class Fast_edge_iterator;
 class Graph_library;
 

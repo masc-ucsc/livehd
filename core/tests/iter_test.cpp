@@ -243,12 +243,12 @@ void check_test_order(LGraph *top) {
   }
 }
 
-void topo_add_chain_fwd(absl::flat_hash_set<Node::Compact> &discovered_node
-    , std::vector<Node> &node_stack
+void topo_add_chain_fwd(absl::flat_hash_set<Node::Compact> &visited
+    , std::vector<Node> &pending_stack
     , const XEdge &edge);
 
-void topo_add_chain_down(absl::flat_hash_set<Node::Compact> &discovered_node
-    , std::vector<Node> &node_stack
+void topo_add_chain_down(absl::flat_hash_set<Node::Compact> &visited
+    , std::vector<Node> &pending_stack
     , const Node_pin &dst_pin) {
 
   I(dst_pin.get_node().is_type_sub() && !dst_pin.get_node().is_type_sub_empty());
@@ -260,12 +260,12 @@ void topo_add_chain_down(absl::flat_hash_set<Node::Compact> &discovered_node
 
   for (auto &edge2 : down_pin.inp_edges()) {  // fwd
     I(edge2.sink.get_pid() == down_pin.get_pid());
-    topo_add_chain_fwd(discovered_node, node_stack, edge2);
+    topo_add_chain_fwd(visited, pending_stack, edge2);
   }
 }
 
-void topo_add_chain_fwd(absl::flat_hash_set<Node::Compact> &discovered_node
-    , std::vector<Node> &node_stack
+void topo_add_chain_fwd(absl::flat_hash_set<Node::Compact> &visited
+    , std::vector<Node> &pending_stack
     , const XEdge &edge) {
 
   const auto &dst_pin  = edge.driver; // fwd
@@ -274,7 +274,7 @@ void topo_add_chain_fwd(absl::flat_hash_set<Node::Compact> &discovered_node
 
   if (visit_sub) {
     if (dst_node.is_type_sub() && !dst_node.is_type_sub_empty()) { // DOWN??
-      topo_add_chain_down(discovered_node, node_stack, dst_pin);
+      topo_add_chain_down(visited, pending_stack, dst_pin);
       return;
     }else if (dst_node.is_graph_input() && !dst_node.is_root()) { // fwd: UP??
       auto up_pin = dst_pin.get_up_pin();
@@ -287,26 +287,26 @@ void topo_add_chain_fwd(absl::flat_hash_set<Node::Compact> &discovered_node
 
       for (auto &edge2 : up_pin.inp_edges()) {  // fwd
         I(edge2.sink.get_pid() == up_pin.get_pid());
-        topo_add_chain_fwd(discovered_node, node_stack, edge2);
+        topo_add_chain_fwd(visited, pending_stack, edge2);
       }
 
-      // node_stack.push_back(up_pin.get_node());
+      // pending_stack.push_back(up_pin.get_node());
     }
   }
 
-  if (discovered_node.count(dst_node.get_compact()))
+  if (visited.count(dst_node.get_compact()))
     return;
 
-  node_stack.push_back(dst_node);
+  pending_stack.push_back(dst_node);
 }
 
 // performs Topological Sort on a given DAG
 void doTopologicalSort(LGraph *lg) {
 
-  absl::flat_hash_set<Node::Compact>     discovered_node;
-  std::vector<Node> node_stack;
+  absl::flat_hash_set<Node::Compact>     visited;
+  std::vector<Node> pending_stack;
 
-  discovered_node.clear();
+  visited.clear();
 
   // TODO:
   //  Fast hierarchical should work, but it requires to remember
@@ -314,16 +314,16 @@ void doTopologicalSort(LGraph *lg) {
   //  iterators (one for node in hierarchy or tree node), we can keep iterating
   //  the tree (in stack) and just remember as many _compact_class (not
   //  _compact) as max depth.  This should have a significant footprint
-  //  advantage in discovered_node
+  //  advantage in visited
   for (auto node : lg->fast(true)) {
-    if (discovered_node.count(node.get_compact())) continue;
+    if (visited.count(node.get_compact())) continue;
 
-    node_stack.push_back(node);
-    while(!node_stack.empty()) {
-      auto node2 = node_stack.back();
-      node_stack.pop_back();
+    pending_stack.push_back(node);
+    while(!pending_stack.empty()) {
+      auto node2 = pending_stack.back();
+      pending_stack.pop_back();
 
-      if (!discovered_node.count(node2.get_compact())) {
+      if (!visited.count(node2.get_compact())) {
         if (!node2.is_graph_io()) {
           //fmt::print("debug topo node:{} lg:{} hidx.pos:{}\n", node2.debug_name(), node2.get_class_lgraph()->get_name(),node2.get_hidx().pos);
           if (!visit_sub || !(node2.is_type_sub() && !node2.is_type_sub_empty())) {
@@ -341,23 +341,23 @@ void doTopologicalSort(LGraph *lg) {
 #endif
           }
         }
-        discovered_node.insert(node2.get_compact());
+        visited.insert(node2.get_compact());
       }
 
       if (visit_sub) {
         if (node2.is_type_sub() && !node2.is_type_sub_empty()) {
           bool any_propagated=false;
           for (auto &pin : node2.out_connected_pins()) { // fwd
-            topo_add_chain_down(discovered_node, node_stack, pin);
+            topo_add_chain_down(visited, pending_stack, pin);
             any_propagated=true;
           }
-          I(discovered_node.count(node2.get_compact())); // All IO traversed, so, it is fully discovered
+          I(visited.count(node2.get_compact())); // All IO traversed, so, it is fully discovered
           if (any_propagated)
             continue;
         }
       }
       for (auto &edge : node2.inp_edges()) { // fwd
-        topo_add_chain_fwd(discovered_node, node_stack, edge);
+        topo_add_chain_fwd(visited, pending_stack, edge);
       }
     }
   }

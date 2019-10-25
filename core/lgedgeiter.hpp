@@ -7,32 +7,31 @@
 #include "lgedge.hpp"
 
 class Edge_raw_iterator {
-public:
-  class CPod_iterator {
-  public:
-    CPod_iterator(const Edge_raw *_ptr, const Edge_raw *_e, bool _inputs) : ptr(_ptr), e(_e), inputs(_inputs) {}
-    CPod_iterator operator++();
-    CPod_iterator operator--() {
-      CPod_iterator i(ptr, e, inputs);
-      ptr -= ptr->next_node_inc();
-      return i;
-    }
-    bool        operator!=(const CPod_iterator &other) { return ptr != other.ptr; }
-    const Edge_raw &operator*() const { return *ptr; }
-
-  private:
-    const Edge_raw *ptr;
-    const Edge_raw *e;
-    const bool  inputs;
-  };
-
-private:
 protected:
   const bool  inputs;
   const Edge_raw *b;
   const Edge_raw *e;
 
 public:
+  class CPod_iterator {
+  private:
+    const Edge_raw *ptr;
+    const Edge_raw *e;
+    const bool  inputs;
+
+  public:
+    CPod_iterator(const Edge_raw *_ptr, const Edge_raw *_e, bool _inputs) : ptr(_ptr), e(_e), inputs(_inputs) {}
+    CPod_iterator operator++();  // FIXME: CPod_iterator &operator++()
+    CPod_iterator operator--() { // FIXME: CPod_iterator &operator--()
+      CPod_iterator i(ptr, e, inputs);
+      ptr -= ptr->next_node_inc();
+      return i;
+    }
+    bool        operator!=(const CPod_iterator &other) const noexcept { return ptr != other.ptr; }
+    const Edge_raw &operator*() const { return *ptr; }
+
+  };
+
   Edge_raw_iterator() = delete;
   explicit Edge_raw_iterator(const Edge_raw *_b, const Edge_raw *_e, bool _inputs) : inputs(_inputs) {
     b = _b;
@@ -44,231 +43,137 @@ public:
   CPod_iterator end() const { return CPod_iterator(e, e, inputs); }
 };
 
-class CFast_edge_iterator {
-public:
-  CFast_edge_iterator(LGraph *_g, LGraph *_cg, const Hierarchy_index &_hidx, const Index_ID _nid, bool _visit_sub) : top_g(_g), current_g(_cg), hidx(_hidx), nid(_nid), visit_sub(_visit_sub) { }
-  CFast_edge_iterator operator++();
-  bool operator!=(const CFast_edge_iterator &other) {
-    I(top_g == other.top_g);
-    return nid != other.nid || hidx != other.hidx;
-  }
-  Node operator*() const {
-    return Node(top_g, current_g, hidx, nid);
-  }
 
-private:
-  LGraph           *top_g;
-  LGraph           *current_g;
-  Hierarchy_index   hidx;
-  Index_ID          nid;
-  bool              visit_sub;
-};
-
-
-using Frontier_type = absl::flat_hash_map<Node::Compact, int32_t>;
-using Node_set_type = absl::flat_hash_set<Node::Compact>;
-
-class Edge_raw_iterator_base {
+class Flow_base_iterator {
 protected:
   Node            current_node;
 
   // State built during iteration
   const bool      visit_sub;
-  Frontier_type  *frontier;      // 2G inputs at most
-  Node_set_type  *pending;       // vertex that cleared the frontier
-  Index_ID       *hardcoded_nid;
-  Node_set_type  *global_visited;
+  absl::flat_hash_set<Node::Compact>  visited;
+  std::vector<Node>                   pending_stack;
 
-  static inline std::vector<Node::Compact> delayed; // FIXME: HACK TO CHECK FAST
-
-  Edge_raw_iterator_base(const Edge_raw_iterator_base &other)
-    :current_node(other.current_node)
-    ,visit_sub(other.visit_sub)
-    ,frontier(other.frontier)
-    ,pending(other.pending)
-    ,hardcoded_nid(other.hardcoded_nid)
-    ,global_visited(other.global_visited) {
-  }
+  Flow_base_iterator(const Flow_base_iterator &other) = delete;
 public:
-  Edge_raw_iterator_base(bool _visit_sub, Frontier_type *_frontier, Node_set_type *_pending, Index_ID *_hardcoded_nid, Node_set_type *_global_visited)
-      : visit_sub(_visit_sub), frontier(_frontier), pending(_pending), hardcoded_nid(_hardcoded_nid), global_visited(_global_visited) { }
+  Flow_base_iterator(bool _visit_sub) : visit_sub(_visit_sub) { }
 
-  bool try_insert_pending(const Node &node, const Node::Compact &compact);
-
-  virtual void    set_current_node_as_visited() = 0;
-  virtual void    propagate_io(const Node &node) = 0;
-  virtual void    insert_graph_start_points(LGraph *lg, Hierarchy_index down_hidx) = 0;
-
-  Node operator*() const { return current_node; }
-  // FIXME: Try this instead const &Node operator*() const { return current_node; }
-
-  bool update_frontier();
-
-  void set_next_node_to_visit() {
-    if (unlikely(!pending->empty())) {
-      auto it = pending->begin();
-      current_node.update(it->hidx, it->nid);
-      I(!current_node.is_invalid());
-      pending->erase(it);
-      return;
-    }
-
-    I(pending->empty());
-    if (!update_frontier()) {
-      current_node.invalidate(current_node.get_top_lgraph());
-      I(current_node.is_invalid());
-    }
-  }
+  const Node &operator*() const { return current_node; }
 };
 
-class CForward_edge_iterator : public Edge_raw_iterator_base {
-protected:
-
-  void insert_graph_start_points(LGraph *lg, Hierarchy_index down_hidx);
-  void propagate_io(const Node &node);
-
-public:
-  CForward_edge_iterator(const CForward_edge_iterator &other)
-    :Edge_raw_iterator_base(other) {
-  }
-
-  CForward_edge_iterator(LGraph *_g, bool _visit_sub, Frontier_type *_frontier, Node_set_type *_pending, Index_ID *_hardcoded_nid, Node_set_type *_global_visited);
-  CForward_edge_iterator(LGraph *lg, bool _visit_sub)
-    : Edge_raw_iterator_base(_visit_sub, nullptr, nullptr, nullptr, nullptr) {
-
-    current_node.invalidate(lg);
-  }
-
-  bool operator!=(const CForward_edge_iterator &other) {
-    I(current_node.get_top_lgraph() == other.current_node.get_top_lgraph());
-    return current_node != other.current_node;
-  }
-
-  void set_current_node_as_visited();
-
-  CForward_edge_iterator operator++() {
-    I(!current_node.is_invalid());  // Do not call ++ after end
-    CForward_edge_iterator i(*this);
-    set_current_node_as_visited();
-    set_next_node_to_visit();
-    return i;
-  }
-};
-
-
-class CBackward_edge_iterator : public Edge_raw_iterator_base {
-private:
-  void insert_graph_start_points(LGraph *lg, Hierarchy_index down_hidx);
-  void propagate_io(const Node &node);
-
-public:
-  CBackward_edge_iterator(const CBackward_edge_iterator &other)
-    :Edge_raw_iterator_base(other) {
-  }
-
-  CBackward_edge_iterator(LGraph *_g, bool _visit_sub, Frontier_type *_frontier, Node_set_type *_pending, Index_ID *_hardcoded_nid, Node_set_type *_global_visited);
-  CBackward_edge_iterator(LGraph *lg, bool _visit_sub)
-    : Edge_raw_iterator_base(_visit_sub, nullptr, nullptr, nullptr, nullptr) {
-
-    current_node.invalidate(lg);
-  }
-
-  bool operator!=(const CBackward_edge_iterator &other) {
-    I(current_node.get_top_lgraph() == other.current_node.get_top_lgraph());
-    return current_node != other.current_node;
-  }
-
-  // find nodes not connected to output that are preventing the propagation
-  // only use in case the backward fails
-  void set_current_node_as_visited();
-
-  CBackward_edge_iterator operator++() {
-    I(!current_node.is_invalid());  // Do not call ++ after end
-    CBackward_edge_iterator i(*this);
-
-    set_current_node_as_visited();
-    set_next_node_to_visit();
-    return i;
-  }
-};
-
-// Main iterator entry points: Fast_edge_iterator, Forward_edge_iterator, Backward_edge_iterator
 
 class Fast_edge_iterator {
-public:
-
-private:
 protected:
   LGraph                *top_g;
-  const Hierarchy_index  it_hidx;
-  const Index_ID         it_nid;
   const bool             visit_sub;
 
 public:
+  class Fast_iter {
+  private:
+    // TODO: It may be clear to have Node, not all the Node fileds here (historical reasons before Node existed)
+    LGraph           *top_g;
+    LGraph           *current_g;
+    Hierarchy_index   hidx;
+    Index_ID          nid;
+    const bool        visit_sub;
+
+  public:
+    Fast_iter(LGraph *_g, LGraph *_cg, const Hierarchy_index &_hidx, const Index_ID _nid, bool _visit_sub) : top_g(_g), current_g(_cg), hidx(_hidx), nid(_nid), visit_sub(_visit_sub) { }
+
+    Fast_iter &operator++();
+
+    bool operator!=(const Fast_iter &other) const {
+      I(top_g == other.top_g);
+      return nid != other.nid || hidx != other.hidx;
+    }
+
+    Node operator*() const {
+      return Node(top_g, current_g, hidx, nid);
+    }
+  };
+
   Fast_edge_iterator() = delete;
-  explicit Fast_edge_iterator(LGraph *_g, bool _visit_sub) : top_g(_g), it_hidx(Hierarchy_tree::root_index()), it_nid(0), visit_sub(_visit_sub) { }
+  explicit Fast_edge_iterator(LGraph *_g, bool _visit_sub) : top_g(_g), visit_sub(_visit_sub) { }
 
-  CFast_edge_iterator begin() const;
-  CFast_edge_iterator end() const { return CFast_edge_iterator(top_g, top_g, Hierarchy_tree::root_index(), 0, visit_sub); }  // 0 is end index for iterator
+  Fast_iter begin() const;
+  Fast_iter end() const { return Fast_iter(top_g, top_g, Hierarchy_tree::root_index(), 0, visit_sub); }  // 0 is end index for iterator
 };
 
-class Backward_edge_iterator {
+class Fwd_edge_iterator {
 public:
-
-private:
+class Fwd_iter : public Flow_base_iterator {
 protected:
-  LGraph        *top_g;
-  const bool     visit_sub;
-  Frontier_type  frontier;  // 2G inputs at most
-  Node_set_type  pending;   // vertex that cleared the frontier
-  Index_ID       hardcoded_nid;
-  Node_set_type  global_visited;
+
+  void fwd_first(LGraph *lg);
+  void fwd_next();
 
 public:
-  Backward_edge_iterator() = delete;
-  explicit Backward_edge_iterator(LGraph *_g, bool _visit_sub) : top_g(_g), visit_sub(_visit_sub) {
-    hardcoded_nid = Node::Hardcoded_input_nid;
+  Fwd_iter(bool _visit_sub) : Flow_base_iterator(_visit_sub) { }
+
+  Fwd_iter(LGraph *lg, bool _visit_sub) :Flow_base_iterator(_visit_sub) {
+    fwd_first(lg);
   }
 
-  CBackward_edge_iterator begin() {
-    if (top_g->empty())
-      return end();
-
-    CBackward_edge_iterator it2(top_g, visit_sub, &frontier, &pending, &hardcoded_nid, &global_visited);
-
-    return it2;
+  bool operator!=(const Fwd_iter &other) const {
+    GI(!current_node.is_invalid() && !other.current_node.is_invalid(), current_node.get_top_lgraph() == other.current_node.get_top_lgraph());
+    return current_node != other.current_node;
   }
 
-  CBackward_edge_iterator end() { return CBackward_edge_iterator(top_g, visit_sub); }
+  Fwd_iter &operator++() {
+    I(!current_node.is_invalid());  // Do not call ++ after end
+    fwd_next();
+    return *this;
+  }
+
 };
-
-class Forward_edge_iterator {
-public:
-
-private:
 protected:
-  LGraph        *top_g;
-  const bool     visit_sub;
-  Frontier_type  frontier;  // 2G inputs at most
-  Node_set_type  pending;   // vertex that cleared the frontier
-  Node_set_type  global_visited;
-  Index_ID       hardcoded_nid;
+  LGraph *top_g;
+  const bool visit_sub;
 
 public:
-  Forward_edge_iterator() = delete;
-  explicit Forward_edge_iterator(LGraph *_g, bool _visit_sub) : top_g(_g), visit_sub(_visit_sub) {
-    hardcoded_nid = Node::Hardcoded_output_nid;
-  }
+  Fwd_edge_iterator() = delete;
+  explicit Fwd_edge_iterator(LGraph *_g, bool _visit_sub) : top_g(_g), visit_sub(_visit_sub) { }
 
-  CForward_edge_iterator begin() {
-    if (top_g->empty())
-      return end();
+  Fwd_iter begin() const { return Fwd_iter(top_g, visit_sub); }
 
-    CForward_edge_iterator it2(top_g, visit_sub, &frontier, &pending, &hardcoded_nid, &global_visited);
-
-    return it2;
-  }
-
-  CForward_edge_iterator end() { return CForward_edge_iterator(top_g, visit_sub); }
+  Fwd_iter end() const { return Fwd_iter(visit_sub); }
 };
 
+class Bwd_edge_iterator {
+public:
+class Bwd_iter : public Flow_base_iterator {
+protected:
+
+  void bwd_first(LGraph *lg);
+  void bwd_next();
+
+public:
+  Bwd_iter(bool _visit_sub) : Flow_base_iterator(_visit_sub) { }
+
+  Bwd_iter(LGraph *lg, bool _visit_sub) :Flow_base_iterator(_visit_sub) {
+    bwd_first(lg);
+  }
+
+  bool operator!=(const Bwd_iter &other) const {
+    GI(!current_node.is_invalid() && !other.current_node.is_invalid(), current_node.get_top_lgraph() == other.current_node.get_top_lgraph());
+    return current_node != other.current_node;
+  }
+
+  Bwd_iter &operator++() {
+    I(!current_node.is_invalid());  // Do not call ++ after end
+    bwd_next();
+    return *this;
+  }
+
+};
+protected:
+  LGraph *top_g;
+  const bool visit_sub;
+
+public:
+  Bwd_edge_iterator() = delete;
+  explicit Bwd_edge_iterator(LGraph *_g, bool _visit_sub) : top_g(_g), visit_sub(_visit_sub) { }
+
+  Bwd_iter begin() const { return Bwd_iter(top_g, visit_sub); }
+
+  Bwd_iter end() const { return Bwd_iter(visit_sub); }
+};

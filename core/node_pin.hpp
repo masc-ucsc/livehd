@@ -21,10 +21,10 @@ protected:
   friend class LGraph_Node_Type;
   friend class XEdge;
   friend class Node;
-  friend class CFast_edge_iterator;
-  friend class Edge_raw_iterator_base;
-  friend class CForward_edge_iterator;
-  friend class CBackward_edge_iterator;
+  friend class Fast_edge_iterator;
+  friend class Flow_base_iterator;
+  friend class Fwd_edge_iterator;
+  friend class Bwd_edge_iterator;
   friend class Edge_raw;
 
   LGraph       *top_g;
@@ -49,10 +49,10 @@ public:
     friend class Node;
     friend class Node_pin;
     friend class XEdge;
-    friend class CFast_edge_iterator;
-    friend class Edge_raw_iterator_base;
-    friend class CForward_edge_iterator;
-    friend class CBackward_edge_iterator;
+    friend class Fast_edge_iterator;
+    friend class Flow_base_iterator;
+    friend class Fwd_edge_iterator;
+    friend class Bwd_edge_iterator;
     friend class mmap_lib::hash<Node_pin::Compact>;
   public:
 
@@ -92,10 +92,10 @@ public:
     friend class Node;
     friend class Node_pin;
     friend class XEdge;
-    friend class CFast_edge_iterator;
-    friend class Edge_raw_iterator_base;
-    friend class CForward_edge_iterator;
-    friend class CBackward_edge_iterator;
+    friend class Fast_edge_iterator;
+    friend class Flow_base_iterator;
+    friend class Fwd_edge_iterator;
+    friend class Bwd_edge_iterator;
     friend class mmap_lib::hash<Node_pin::Compact_driver>;
   public:
 
@@ -134,10 +134,10 @@ public:
     friend class Node;
     friend class Node_pin;
     friend class XEdge;
-    friend class CFast_edge_iterator;
-    friend class Edge_raw_iterator_base;
-    friend class CForward_edge_iterator;
-    friend class CBackward_edge_iterator;
+    friend class Fast_edge_iterator;
+    friend class Flow_base_iterator;
+    friend class Fwd_edge_iterator;
+    friend class Bwd_edge_iterator;
     friend class mmap_lib::hash<Node_pin::Compact_class>;
   public:
 
@@ -175,10 +175,10 @@ public:
     friend class Node;
     friend class Node_pin;
     friend class XEdge;
-    friend class CFast_edge_iterator;
-    friend class Edge_raw_iterator_base;
-    friend class CForward_edge_iterator;
-    friend class CBackward_edge_iterator;
+    friend class Fast_edge_iterator;
+    friend class Flow_base_iterator;
+    friend class Fwd_edge_iterator;
+    friend class Bwd_edge_iterator;
     friend class mmap_lib::hash<Node_pin::Compact_class_driver>;
   public:
 

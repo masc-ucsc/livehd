@@ -7,87 +7,6 @@
 #include "lgedge.hpp"
 #include "lgedgeiter.hpp"
 
-/* DFS iterator:
- for(n:fast()) {
-   if is_permanent_mark(n)
-     continue;
-   nodes_to_visit.push_back(n)
-   permanent_mark(n);
-   while( !nodes_to_visit.empty()) {
-     currentnode = nodes_to_visit.back(); // pop_back too
-     for(child:current_node.forward()) {
-       nodes_to_visit.push_back(child);
-       permanent_mark(child);
-     }
-
-     // DFS: visit for current_node
-   }
- }
-
-*/
-
-/* recursive (bad) Cormen algorithm using the DFS
- L ← Empty list that will contain the sorted nodes
-while exists nodes without a permanent mark do
-    select an unmarked node n
-    visit(n)
-
-function visit(node n)
-    if n has a permanent mark then return
-    if n has a temporary mark then stop   (not a DAG)
-    mark n with a temporary mark
-    for each node m with an edge from n to m do
-        visit(m)
-    remove temporary mark from n
-    mark n with a permanent mark
-    add n to head of L
-*/
-
-CFast_edge_iterator CFast_edge_iterator::operator++() {
-  CFast_edge_iterator i(top_g, current_g, hidx, nid, visit_sub);
-
-  nid = current_g->fast_next(nid);
-
-  if (visit_sub && nid.is_invalid()) {
-    auto next_hidx = top_g->ref_htree()->get_depth_preorder_next(hidx);
-    if (!next_hidx.is_invalid()) {
-      hidx = next_hidx;
-      current_g = top_g->ref_htree()->ref_lgraph(hidx);
-      nid = current_g->fast_first();
-    }else{
-      nid = 0;
-      current_g = top_g;
-      hidx = Hierarchy_tree::root_index(); // Root, last
-    }
-  }
-#if 0
-  if (nid==0) {
-    if (!h_stack.empty()) {
-      I(visit_sub);
-      I(hidx != h_stack.back().hidx);
-      hidx      = h_stack.back().get_hidx();
-      nid       = h_stack.back().get_nid();
-      current_g = h_stack.back().get_class_lgraph();
-      h_stack.pop_back();
-    }
-  }else if (visit_sub && current_g->is_sub(nid)) {
-    const auto &sub = current_g->get_type_sub_node(nid);
-    if (!sub.is_black_box()) {
-      h_stack.emplace_back(Node(top_g, current_g, hidx, nid));
-
-      hidx = top_g->ref_htree()->get_depth_preorder_next(hidx);
-
-      current_g = LGraph::open(top_g->get_path(), sub.get_name());
-      I(current_g == top_g->ref_htree()->ref_lgraph(hidx));
-
-      nid = current_g->fast_next(0);
-    }
-  }
-#endif
-
-  return i;
-};
-
 Edge_raw_iterator::CPod_iterator Edge_raw_iterator::CPod_iterator::operator++() {
   CPod_iterator i(ptr, e, inputs);
   I(Node_Internal::get(e).is_node_state());
@@ -144,295 +63,43 @@ Edge_raw_iterator::CPod_iterator Edge_raw_iterator::CPod_iterator::operator++() 
   return i;
 }
 
-bool Edge_raw_iterator_base::try_insert_pending(const Node &node, const Node::Compact &compact) {
-  I(node.get_compact() == compact);
+Fast_edge_iterator::Fast_iter &Fast_edge_iterator::Fast_iter::operator++() {
+  I(nid!=0);
 
-  if (global_visited->find(node.get_compact())!=global_visited->end())
-    return false;
+  nid = current_g->fast_next(nid);
 
-  if (visit_sub) {
-    auto hidx = node.hierarchy_go_down();
-
-    if (!hidx.is_invalid()) {
-      I(node.is_type_sub_empty());
-      LGraph *sub_lg = node.get_type_sub_lgraph();
-      I(sub_lg->get_lgid() == node.get_top_lgraph()->ref_htree()->get_data(hidx).lgid);
-      insert_graph_start_points(sub_lg, hidx);
-
-      fmt::print(" adddel:{} from:{}\n", node.debug_name(), node.get_class_lgraph()->get_name());
-      delayed.push_back(node.get_compact()); // Do sub hierarchy first
-      return false;
+  if (visit_sub && nid.is_invalid()) {
+    auto next_hidx = top_g->ref_htree()->get_depth_preorder_next(hidx);
+    if (!next_hidx.is_invalid()) {
+      hidx = next_hidx;
+      current_g = top_g->ref_htree()->ref_lgraph(hidx);
+      nid = current_g->fast_first();
+    }else{
+      nid = 0;
+      current_g = top_g;
+      hidx = Hierarchy_tree::root_index(); // Root, last
     }
   }
 
-  //fmt::print(" 2pending:{} from:{}\n", node.debug_name(), node.get_class_lgraph()->get_name());
-  pending->insert(compact);
-  return true;
+  return *this;
+};
+
+Fast_edge_iterator::Fast_iter Fast_edge_iterator::begin() const {
+  auto nid = top_g->fast_first();
+
+  return Fast_edge_iterator::Fast_iter(top_g, top_g, Hierarchy_tree::root_index(), nid, visit_sub);
 }
 
-bool Edge_raw_iterator_base::update_frontier() {
-
-  I(pending->empty());
-
-  while (!delayed.empty()) {
-    I(visit_sub);
-    if (global_visited->find(delayed.back()) != global_visited->end()) {
-      delayed.pop_back();
-      continue;
-    }
-
-    Node node(current_node.get_top_lgraph(), delayed.back());
-    delayed.pop_back();
-
-    fmt::print(" delayed:{} from:{}\n", node.debug_name(), node.get_class_lgraph()->get_name());
-    propagate_io(node);
-    if (!pending->empty())
-      return true;
-  }
-
-  std::vector<Node::Compact> delayed_frontier_erase;
-
-  for (auto &it : *frontier) {
-    I(it.second > 0);
-
-    Node node(current_node.get_top_lgraph(), it.first);
-
-#if 0
-    if (*hardcoded_nid == Node::Hardcoded_output_nid && node.has_outputs()) { // Forward_iterator
-      continue;
-    }else if (*hardcoded_nid == Node::Hardcoded_input_nid && node.has_inputs()) { // Backward_iterator
-      continue;
-    }
-#endif
-    if (!node.get_type().is_pipelined()) { // Flops/latches/rams or subgraphs
-      continue;
-    }
-
-    bool inserted =  try_insert_pending(node, it.first);
-    if (inserted) {
-      fmt::print("  frontier.erase:{} from:{}\n",node.debug_name(), node.get_class_lgraph()->get_name());
-      delayed_frontier_erase.emplace_back(it.first);
-    }
-  }
-  for (const auto &c_node : delayed_frontier_erase) {
-    frontier->erase(c_node);
-  }
-
-  if (!pending->empty())
-    return true;
-
-  if (*hardcoded_nid) {
-    // NOTE: Not very fast API, but it is called once per iterator
-    auto *top_lg = current_node.get_top_lgraph();
-    Node node(top_lg, top_lg, Hierarchy_tree::root_index(), *hardcoded_nid);
-    pending->insert(node.get_compact());
-    *hardcoded_nid = 0;
-    return true;
-  }
-
-  return false;
+void Fwd_edge_iterator::Fwd_iter::fwd_first(LGraph *lg) {
 }
 
-void CForward_edge_iterator::set_current_node_as_visited() {
-  GI(visit_sub, !(current_node.is_type_sub() && !current_node.is_type_sub_empty()));
-
-  propagate_io(current_node);
+void Fwd_edge_iterator::Fwd_iter::fwd_next() {
 }
 
-void CForward_edge_iterator::propagate_io(const Node &node) {
 
-  //fmt::print("  prop:{} from:{}\n", node.debug_name(), node.get_class_lgraph()->get_name());
-
-  if (global_visited->find(node.get_compact())!=global_visited->end())
-    return;
-  global_visited->insert(node.get_compact());
-
-  for (const auto &e : node.out_edges()) {
-    const auto sink_node = e.sink.get_node();
-    if (sink_node.get_nid() == Node::Hardcoded_output_nid)
-      continue;
-
-    const Node::Compact sink_node_compact = sink_node.get_compact();
-    if (global_visited->find(sink_node_compact) != global_visited->end())
-      continue;
-
-    Frontier_type::iterator fit = frontier->find(sink_node_compact);
-
-    if (fit == frontier->end()) {
-      auto ninputs = sink_node.get_num_inputs()-1; // -1 for self
-      //fmt::print("    out_new:{} {}\n", sink_node.debug_name(), ninputs);
-      I(ninputs >= 0);
-      if (ninputs == 0) {  // Done already
-        try_insert_pending(sink_node, sink_node_compact);
-      } else {
-        (*frontier)[sink_node_compact] = ninputs;
-      }
-    } else {
-      auto ninputs = (fit->second) - 1;
-      //fmt::print("    out_old:{} {}\n", sink_node.debug_name(), ninputs);
-      if (ninputs == 0) {  // Done
-        try_insert_pending(sink_node, sink_node_compact);
-        frontier->erase(fit);
-      } else {
-        fit->second = ninputs;
-      }
-    }
-  }
+void Bwd_edge_iterator::Bwd_iter::bwd_first(LGraph *lg) {
 }
 
-void CForward_edge_iterator::insert_graph_start_points(LGraph *lg, Hierarchy_index down_hidx) {
-
-  Node::Compact compact(down_hidx, Node::Hardcoded_input_nid);
-
-  pending->insert(compact);
-
-  for(const auto it:lg->get_const_value_map()) {
-    pending->insert(Node::Compact(down_hidx, it.second.nid));
-  }
-  for(const auto it:lg->get_const_sview_map()) {
-    pending->insert(Node::Compact(down_hidx, it.second.nid));
-  }
-
-  // Add any sub node that has no inputs but has outputs (not hit with forward)
-  for(auto it:lg->get_down_nodes_map()) {
-    Node n_sub(lg, it.first);
-    if (n_sub.has_outputs() && !n_sub.has_inputs()) {
-      pending->insert(n_sub.get_compact());
-    }
-  }
-}
-
-void CBackward_edge_iterator::propagate_io(const Node &node) {
-  (void)node;
-  I(false);// FIXME: implement me
-}
-
-void CBackward_edge_iterator::insert_graph_start_points(LGraph *lg, Hierarchy_index down_hidx) {
-
-  pending->insert(Node::Compact(down_hidx, Node::Hardcoded_output_nid));
-
-  // Add any sub node that has no outputs but has inputs (not hit with backward)
-  for(auto it:lg->get_down_nodes_map()) {
-    Node n_sub(lg, it.first);
-    if (!n_sub.has_outputs() && n_sub.has_inputs()) {
-      pending->insert(n_sub.get_compact());
-    }
-  }
-}
-
-CForward_edge_iterator::CForward_edge_iterator(
-    LGraph *lg
-    ,bool _visit_sub
-    ,Frontier_type *_frontier
-    ,Node_set_type *_pending
-    ,Index_ID *_hardcoded_nid
-    ,Node_set_type *_global_visited)
-  : Edge_raw_iterator_base(
-      _visit_sub
-      ,_frontier
-      ,_pending
-      ,_hardcoded_nid
-      ,_global_visited) {
-
-  I(pending->empty());
-
-  insert_graph_start_points(lg, Hierarchy_tree::root_index());
-
-  I(!pending->empty());
-  auto it = pending->begin();
-
-  current_node.update(lg, *it);
-
-  pending->erase(it);
-}
-
-CBackward_edge_iterator::CBackward_edge_iterator(
-    LGraph *lg
-    ,bool _visit_sub
-    ,Frontier_type *_frontier
-    ,Node_set_type *_pending
-    ,Index_ID *_hardcoded_nid
-    ,Node_set_type *_global_visited)
-  : Edge_raw_iterator_base(
-      _visit_sub
-      ,_frontier
-      ,_pending
-      ,_hardcoded_nid
-      ,_global_visited) {
-
-  I(pending->empty());
-
-  insert_graph_start_points(lg, Hierarchy_tree::root_index());
-
-  I(!pending->empty());
-  auto it = pending->begin();
-
-  current_node.update(lg, *it);
-
-  pending->erase(it);
-}
-
-CFast_edge_iterator Fast_edge_iterator::begin() const {
-  if (top_g->empty())
-    return end();
-
-  Index_ID nid = 0;
-  while (true) {
-    nid = top_g->fast_next(nid);
-    if (nid == 0) return end();
-    if (nid == Node::Hardcoded_input_nid) continue;
-    if (nid == Node::Hardcoded_output_nid) continue;
-    break;
-  }
-
-  return CFast_edge_iterator(top_g, top_g, it_hidx, nid, visit_sub);
-}
-
-void CBackward_edge_iterator::set_current_node_as_visited() {
-
-
-  global_visited->insert(current_node.get_compact());
-
-  if (visit_sub && current_node.is_type_sub()) {
-    const auto &sub = current_node.get_type_sub_node();
-    if (!sub.is_black_box()) {
-      LGraph *down_lg = current_node.get_type_sub_lgraph();
-
-      if (!down_lg->empty())
-        insert_graph_start_points(down_lg, current_node.hierarchy_go_down());
-    }
-  }
-
-  for (const auto &e : current_node.inp_edges()) {
-    const auto driver_node = e.driver.get_node();
-    if (driver_node.get_nid() == Node::Hardcoded_input_nid)
-      continue;
-
-    const Node::Compact driver_node_compact = driver_node.get_compact();
-    if (global_visited->find(driver_node_compact) != global_visited->end())
-      continue;
-
-    Frontier_type::iterator fit = frontier->find(driver_node_compact);
-
-    if (fit == frontier->end()) {
-      auto noutputs = driver_node.get_num_outputs()-1; // -1 for self
-      I(noutputs >= 0);
-      if (noutputs == 0) {  // Done already
-        try_insert_pending(driver_node, driver_node_compact);
-      } else {
-        (*frontier)[driver_node_compact] = noutputs;
-      }
-    } else {
-      auto noutputs = (fit->second) - 1;
-      I(noutputs >= 0);
-      if (noutputs == 0) {  // Done
-        try_insert_pending(driver_node, driver_node_compact);
-        frontier->erase(fit);
-      } else {
-        fit->second = noutputs;
-      }
-    }
-  }
-
+void Bwd_edge_iterator::Bwd_iter::bwd_next() {
 }
 
