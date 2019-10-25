@@ -221,16 +221,19 @@ void Lnast_to_verilog_parser::process_pure_assign() {
     fmt::print("map_it: find: {} | {}\n", map_it->first, map_it->second.first);
   } else if (!is_number(ref)) {
     new_vars.insert(ref);
+  } else if (is_number(ref)) {
+    ref = process_number(ref);
   }
-  value = absl::StrCat(value, ref);
 
   if (is_ref(key)) {
+    value = absl::StrCat(value, ref);
     fmt::print("map_it: inserting:\tkey:{}\tvalue:{}\n", key, value);
     ref_map.insert(std::pair<std::string_view, std::pair<std::string, std::set<std::string_view>>>(key, std::pair<std::string, std::set<std::string_view>>(value, new_vars)));
   } else {
     fmt::print("statefull_set:\tinserting:\tkey:{}\n", key);
+    value = curr_module->process_variable(ref);
 
-    std::string phrase = absl::StrCat(key);
+    std::string phrase = curr_module->process_variable(key);
     if (curr_module->get_variable_type(key) == 3) {
       phrase = absl::StrCat(phrase, "_next");
     }
@@ -342,6 +345,8 @@ void Lnast_to_verilog_parser::process_operator() {
       new_vars.insert(ref);
     } else if (is_number(ref)) {
       ref = process_number(ref);
+    } else {
+      ref = curr_module->process_variable(ref);
     }
     // check if a number
 

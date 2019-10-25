@@ -52,6 +52,7 @@ public:
   std::string create_file();
 
   uint32_t get_variable_type(std::string_view var_name);
+  std::string process_variable(std::string_view var_name);
 
   Verilog_parser_module() {};
   Verilog_parser_module(std::string m_filename) : filename(m_filename) {};

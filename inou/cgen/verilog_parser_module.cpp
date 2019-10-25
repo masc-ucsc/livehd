@@ -14,11 +14,11 @@ std::string Verilog_parser_module::create_header() {
     fmt::print("variable names: {}\n", var_name);
     uint32_t var_type = get_variable_type(var_name);
     if (var_type == 1) {
-      inputs = absl::StrCat(inputs, ",\ninput ", var_name);
+      inputs = absl::StrCat(inputs, ",\ninput ", process_variable(var_name));
     } else if (var_type == 2) {
-      outputs = absl::StrCat(outputs, ",\noutput ", var_name);
+      outputs = absl::StrCat(outputs, ",\noutput ", process_variable(var_name));
     } else if (var_type == 3) {
-      outputs = absl::StrCat(outputs, ",\noutput ", var_name);
+      outputs = absl::StrCat(outputs, ",\noutput ", process_variable(var_name));
     } else {
       wires = absl::StrCat(wires, " wire ", var_name, ";\n");
     }
@@ -82,6 +82,36 @@ uint32_t Verilog_parser_module::get_variable_type(std::string_view var_name) {
   }
 
   return 0;
+}
+
+std::string Verilog_parser_module::process_variable(std::string_view var_name) {
+  if (var_name.at(0) == '$') {
+    var_name = absl::StrCat(var_name, "_i");
+
+    if (var_name.at(1) == '\\') {
+      return std::string(var_name.substr(2)).c_str();
+    } else {
+      return std::string(var_name.substr(1)).c_str();
+    }
+  } else if (var_name.at(0) == '%') {
+    var_name = absl::StrCat(var_name, "_o");
+
+    if (var_name.at(1) == '\\') {
+      return std::string(var_name.substr(2)).c_str();
+    } else {
+      return std::string(var_name.substr(1)).c_str();
+    }
+  } else if (var_name.at(0) == '@') {
+    var_name = absl::StrCat(var_name, "_r");
+
+    if (var_name.at(1) == '\\') {
+      return std::string(var_name.substr(2)).c_str();
+    } else {
+      return std::string(var_name.substr(1)).c_str();
+    }
+  } else {
+    return std::string(var_name).c_str();
+  }
 }
 
 void Verilog_parser_module::node_buffer_stack() {
