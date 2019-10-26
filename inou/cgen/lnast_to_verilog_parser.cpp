@@ -431,7 +431,7 @@ void Lnast_to_verilog_parser::process_func_call() {
   std::string_view key = get_node_name(*it);
   it++; // sts
 
-  value = absl::StrCat(value, root_filename, "_",  get_node_name(*it), "(");
+  value = absl::StrCat(value, root_filename, "_",  get_node_name(*it), "(clk, reset, ");
   it++; // ref
   while (it != node_buffer.end()) {
     std::string_view ref = get_node_name(*it);

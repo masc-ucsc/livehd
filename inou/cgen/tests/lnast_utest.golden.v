@@ -14,9 +14,9 @@ module lnast_utest (input clk,
   wire y;
 
   always @(*) begin
-    *(LNAST: a_i as __bits:1)*
-    *(LNAST: b_i as __bits:1)*
-    *(LNAST: s_o as __bits:1)*
+    *(LNAST: $a as __bits:1)*
+    *(LNAST: $b as __bits:1)*
+    *(LNAST: %s as __bits:1)*
     s_o = a_i & b_i;
     result = lnast_utest_fun1(clk, reset, a:3, b:4);
     x = a_i;
@@ -24,7 +24,7 @@ module lnast_utest (input clk,
       x = e_i;
       if (a_i > 2) {
         x = b_i;
-      } elif (a_i + 1 > 3) {
+      } elif ((a_i + 1) > 3) {
         x = c_i;
       } else {
         x = d_i;
