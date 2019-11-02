@@ -80,7 +80,7 @@ void Pass_mockturtle::do_work(LGraph *g) {
   edge2klut_out_sigs.clear();
   old_node_to_new_node.clear();
   gid_klut_node2lg_node.clear();
-  gid_pi2pi_sink_node_lg_pid.clear();
+  gid_pi2sink_node_lg_pid.clear();
 }
 
 bool Pass_mockturtle::lg_partition(LGraph *g) {
@@ -1035,7 +1035,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
     //create new lut nodes
     fmt::print("Step-II-a: Creating KLUT network (gid:{}) cells in LGraph...\n", group_id);
     klut_ntk.foreach_node( [&](const auto &klut_ntk_node) {
-      //this is an primary input of the klut network, does not have any fanin, continue
+      //pi does not have any fan-in, continue
       if (klut_ntk.is_pi(klut_ntk_node))
         return;
 
@@ -1046,17 +1046,20 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
       auto func = klut_ntk.node_function(klut_ntk_node);
 
       klut_ntk.foreach_fanin(klut_ntk_node, [&](const auto &sig, auto i) {
-        fmt::print("each_fain lut:{} i:{}\n", kitty::to_hex(func), (int)i);
-
         //check if a fanin is complemented, then change the truth table accordingly
         if (klut_ntk.is_complemented(sig))
           kitty::flip_inplace(func, i);
 
         if (klut_ntk.is_pi(klut_ntk.get_node(sig))) {
-        fmt::print("2.each_fain lut:{} i:{}\n", kitty::to_hex(func), (int)i);
+          fmt::print("each_pi_fain lut:{} pi_sig:{}, dst_pid:{}\n", kitty::to_hex(func), (int)sig, (int)i);
           auto pid = (uint32_t) i;
           auto key = std::make_pair(group_id, sig);
-          gid_pi2pi_sink_node_lg_pid[key] = std::make_pair(klut_ntk_node, pid);
+          //std::vector<std::pair<mockturtle::klut_network::node, Port_ID>> sink_node_lg_pid_pairs{std::make_pair(klut_ntk_node, pid)};
+          //if(gid_pi2sink_node_lg_pid.find(key) == gid_pi2sink_node_lg_pid.end())
+          //  gid_pi2sink_node_lg_pid[key] = sink_node_lg_pid_pairs;
+          //else
+          gid_pi2sink_node_lg_pid[key].emplace_back(std::make_pair(klut_ntk_node, pid));
+
         }
       } );
 
@@ -1111,35 +1114,39 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
     auto driver_pin = driver_node.setup_driver_pin(inp_edge.driver.get_pid());
     const auto bit_width = inp_edge.get_bits();
     I(bit_width == sigs.size());
-    I(gid_pi2pi_sink_node_lg_pid.find(std::make_pair(group_id, sigs[0])) != gid_pi2pi_sink_node_lg_pid.end());
-    if (bit_width == 1) {
-      //fmt::print("group_id:{}, sigs[0]:{}\n", group_id, sigs[0]);
-      const auto & klut_node_and_lg_pid = gid_pi2pi_sink_node_lg_pid[std::make_pair(group_id, sigs[0])];
+    I(gid_pi2sink_node_lg_pid.find(std::make_pair(group_id, sigs[0])) != gid_pi2sink_node_lg_pid.end());
 
-      I(gid_klut_node2lg_node.find(std::make_pair(group_id, klut_node_and_lg_pid.first)) != gid_klut_node2lg_node.end());
-      auto sink_node = gid_klut_node2lg_node[std::make_pair(group_id, klut_node_and_lg_pid.first)].get_node(new_lg);
-      const auto pid = klut_node_and_lg_pid.second;
-      auto sink_pin = sink_node.setup_sink_pin(pid);
-      new_lg->add_edge(driver_pin, sink_pin, 1);
-    } else {
-      for (auto i = 0UL; i < bit_width; i++) {
-        //fmt::print("group_id:{}, sigs[i]:{}\n", group_id, sigs[i]);
-        const auto & klut_node_and_lg_pid = gid_pi2pi_sink_node_lg_pid[std::make_pair(group_id, sigs[i])];
+    if(bit_width == 1){
+      const auto & vec_klut_node_and_lg_pid = gid_pi2sink_node_lg_pid[std::make_pair(group_id, sigs[0])];
+      for(const auto& klut_node_and_lg_pid : vec_klut_node_and_lg_pid){
         I(gid_klut_node2lg_node.find(std::make_pair(group_id, klut_node_and_lg_pid.first)) != gid_klut_node2lg_node.end());
         auto sink_node = gid_klut_node2lg_node[std::make_pair(group_id, klut_node_and_lg_pid.first)].get_node(new_lg);
         const auto pid = klut_node_and_lg_pid.second;
         auto sink_pin = sink_node.setup_sink_pin(pid);
-        //NOTE: update this simple Pick_Op node when the more powerful Pick_Op is readly
-        auto pick_node = new_lg->create_node(Pick_Op);
-        auto pick_node_sink_pin = pick_node.setup_sink_pin(0);
-        auto pick_node_offset_pin = pick_node.setup_sink_pin(1);
-        auto pick_node_driver_pin = pick_node.setup_driver_pin();
-        auto const_node_for_bit_select = new_lg->create_node_const(i);
-        auto bit_select_signal = const_node_for_bit_select.get_driver_pin();
-        pick_node_driver_pin.set_bits(1);
-        new_lg->add_edge(bit_select_signal, pick_node_offset_pin);
-        new_lg->add_edge(driver_pin, pick_node_sink_pin);
-        new_lg->add_edge(pick_node_driver_pin, sink_pin);
+        new_lg->add_edge(driver_pin, sink_pin, 1);
+      }
+    } else{
+      for (auto i = 0UL; i < bit_width; i++) {
+        const auto & vec_klut_node_and_lg_pid = gid_pi2sink_node_lg_pid[std::make_pair(group_id, sigs[i])];
+        for(const auto& klut_node_and_lg_pid : vec_klut_node_and_lg_pid){
+          //const auto & klut_node_and_lg_pid = gid_pi2sink_node_lg_pid[std::make_pair(group_id, sigs[i])];
+          I(gid_klut_node2lg_node.find(std::make_pair(group_id, klut_node_and_lg_pid.first)) != gid_klut_node2lg_node.end());
+          auto sink_node = gid_klut_node2lg_node[std::make_pair(group_id, klut_node_and_lg_pid.first)].get_node(new_lg);
+          const auto pid = klut_node_and_lg_pid.second;
+          auto sink_pin = sink_node.setup_sink_pin(pid);
+          //NOTE: update this simple Pick_Op node when the more powerful Pick_Op is readly
+          auto pick_node = new_lg->create_node(Pick_Op);
+          auto pick_node_sink_pin = pick_node.setup_sink_pin(0);
+          auto pick_node_offset_pin = pick_node.setup_sink_pin(1);
+          auto pick_node_driver_pin = pick_node.setup_driver_pin();
+          auto const_node_for_bit_select = new_lg->create_node_const(i);
+          auto bit_select_signal = const_node_for_bit_select.get_driver_pin();
+          pick_node_driver_pin.set_bits(1);
+          new_lg->add_edge(bit_select_signal, pick_node_offset_pin);
+          new_lg->add_edge(driver_pin, pick_node_sink_pin);
+          new_lg->add_edge(pick_node_driver_pin, sink_pin);
+
+        }
       }
     }
   }

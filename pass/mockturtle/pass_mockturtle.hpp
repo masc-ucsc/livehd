@@ -76,7 +76,7 @@ protected:
   absl::flat_hash_map<XEdge, Ntk_sigs<mockturtle::klut_network::signal>> edge2klut_out_sigs; //lg<->klut, search edge2mt_sigs table, only output mapping
   absl::flat_hash_map<Node::Compact, Node::Compact> old_node_to_new_node;
   absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::node>, Node::Compact> gid_klut_node2lg_node;
-  absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::signal>, std::pair<mockturtle::klut_network::node, Port_ID>> gid_pi2pi_sink_node_lg_pid;
+  absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::signal>, std::vector<std::pair<mockturtle::klut_network::node, Port_ID>>> gid_pi2sink_node_lg_pid;
   bool lg_partition(LGraph *);
   void create_mockturtle_network(LGraph *);
   void convert_mockturtle_to_KLUT();
