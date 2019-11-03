@@ -186,6 +186,11 @@ protected:
       case Not_Op:
         //fmt::print("Node: Not_Op\n");
         break;
+#if 0
+      case Pick_Op:
+        //fmt::print("Node: And_Op\n");
+        break;
+#endif
       case And_Op:
         //fmt::print("Node: And_Op\n");
         break;

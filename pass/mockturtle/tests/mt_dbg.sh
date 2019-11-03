@@ -16,11 +16,13 @@ mkdir -p logs/yosys_log
 # pts='trivial2 unconnected hierarchy '
 
 # SH:todo
-# pts='compare compare2 consts cse_basic dce2 dce3 expression_00002
-# graphtest kogg_stone_64 compare'
-pts='trivial1 trivial trivial2a trivial3 trivial_and 
-     dce1 gates trivial1 trivial_join compare'
+# pts='compare2 consts cse_basic dce2 dce3 expression_00002
+# graphtest kogg_stone_64 '
+#pts='trivial1 trivial trivial2a trivial3 trivial_and 
+#     dce1 gates trivial1 trivial_join compare compare2'
 
+pts='compare compare2'
+     
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
 

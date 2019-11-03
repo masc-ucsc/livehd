@@ -53,8 +53,8 @@ void Pass_mockturtle::do_work(LGraph *g) {
     return;
   }
 
-  for (const auto &group_id_it : node2gid)
-    fmt::print("node:{} -> gid:{}\n", group_id_it.first.get_node(g).debug_name(), group_id_it.second);
+  for (const auto& gid_itr : node2gid)
+    fmt::print("node:{} -> gid:{}\n", gid_itr.first.get_node(g).debug_name(), gid_itr.second);
   fmt::print("Partition finished.\n\n");
 
   fmt::print("Creating mockturtle network...\n");
@@ -96,26 +96,30 @@ bool Pass_mockturtle::lg_partition(LGraph *g) {
     int propagate_id = -1;
     for(const auto &inp_edge : node.inp_edges()) {
       auto peer_driver_node = inp_edge.driver.get_node();
-      //all combinational groups linked to graph input should be in the same group
+      fmt::print("peer_driver_node:{}\n", peer_driver_node.debug_name());
+
+      //all combinational linked to graph input should be in the same group
       if (peer_driver_node == g->get_graph_input_node())
         propagate_id = 0;
 
+      //sh:fixme:should we set Pickup_Op as eligible cell? if not, the Pickup will be the new group isolator...
       if (!eligible_cell_op(peer_driver_node))
-        continue;
+          continue;
 
       auto it = node2gid.find(peer_driver_node.get_compact());
       if (it != node2gid.end()) {
-        GI((propagate_id>=0), (it->second == propagate_id));
+        //GI((propagate_id>=0), (it->second == propagate_id));
         propagate_id = it->second;
-#ifndef NDEBUG
-        break;  // First is enough for non-debug
-#endif
+      } else {
+        I(false); //impossible for g->forward()
       }
     }
-    if (propagate_id<0)
+
+    if (propagate_id < 0)
       propagate_id = new_group_id++;
 
     node2gid[node.get_compact()] = propagate_id;
+
   }
 
 
@@ -668,7 +672,27 @@ void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
         }
         break;
       }
+#if 0
+      case Pick_Op: {
+        fmt::print("Pick_Op in gid:{}\n",group_id);
+        I(!node.out_edges().empty());
+        std::vector<mockturtle_network::signal> inp_sigs_mt, out_sigs_mt;
+        //processing input signal
+        setup_input_signals(group_id, node.inp_edges()[0], inp_sigs_mt, mt_ntk);
 
+        //creating output signal
+        //I(inp_sigs_mt.size() == 1);
+        for (const auto i : inp_sigs_mt)
+          out_sigs_mt.emplace_back(mt_ntk.create_buf(i));
+
+        //processing output signal
+        for (const auto &out_edge : node.out_edges_ordered()) {
+          I(out_edge.get_bits()==out_sigs_mt.size());
+          setup_output_signals(group_id, out_edge, out_sigs_mt, mt_ntk);
+        }
+        break;
+      }
+#endif
       case And_Op: {
         fmt::print("And_Op in gid:{}\n",group_id);
         I(!node.inp_edges().empty() && !node.out_edges().empty());
@@ -1054,12 +1078,8 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
           fmt::print("each_pi_fain lut:{} pi_sig:{}, dst_pid:{}\n", kitty::to_hex(func), (int)sig, (int)i);
           auto pid = (uint32_t) i;
           auto key = std::make_pair(group_id, sig);
-          //std::vector<std::pair<mockturtle::klut_network::node, Port_ID>> sink_node_lg_pid_pairs{std::make_pair(klut_ntk_node, pid)};
-          //if(gid_pi2sink_node_lg_pid.find(key) == gid_pi2sink_node_lg_pid.end())
-          //  gid_pi2sink_node_lg_pid[key] = sink_node_lg_pid_pairs;
-          //else
+          //notice that a pi-signal could have multiple fan-out, so you need to record every fan-out klut-node with vector
           gid_pi2sink_node_lg_pid[key].emplace_back(std::make_pair(klut_ntk_node, pid));
-
         }
       } );
 
