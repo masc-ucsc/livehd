@@ -1,4 +1,4 @@
-module gcd(input clk,
+module long_gcd(input clk,
            input reset,
            input [35:0] a,
            input [35:0] b,

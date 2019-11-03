@@ -1,4 +1,4 @@
-module missmatch(input [3:0] a, output [4:0] b);
+module mismatch(input [3:0] a, output [4:0] b);
 
   wire [2:0] tmp;
 

@@ -1,5 +1,5 @@
 
-module simple_rf1
+module long_simple_rf1
     (input                    clk
      ,input [7-1:0]           waddr0
      ,input                   we0
