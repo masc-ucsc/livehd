@@ -122,7 +122,7 @@ public:
 
   void clear_io_pins() {
     graph_pos2instance_pid.clear();
-    //io_pins.clear();   // WARNING: Do NOT remove mappings, just port id. (allows to reload designs)
+    //io_pins.clear();   // FIXME: version?? Do NOT remove mappings, just port id. (allows to reload designs)
     //io_pins.resize(1); // No id ZERO
   }
 

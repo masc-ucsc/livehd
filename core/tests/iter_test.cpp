@@ -7,9 +7,61 @@
 
 bool failed = false;
 
-#define VERBOSE
+//#define VERBOSE
 //#define VERBOSE2
 //#define VERBOSE3
+
+
+absl::flat_hash_map<Node::Compact,int> test_order;
+int test_order_sequence;
+void setup_test_order() {
+  test_order.clear();
+  test_order_sequence = 1;
+}
+
+void check_test_order(LGraph *top) {
+  for(auto node:top->fast(true)) {
+    if (node.is_type_sub_present())
+      continue;
+
+    auto it_node = test_order.find(node.get_compact());
+    if (it_node == test_order.end()) {
+      fmt::print("ERROR: missing node:{}\n",node.debug_name());
+      I(false);
+    }
+
+    int max_input = 0;
+    Node_pin max_input_pin;
+    for(auto edge:node.inp_edges()) {
+      auto it = test_order.find(edge.driver.get_node().get_compact());
+      if (it==test_order.end())
+       continue;
+      if (it->second<max_input)
+        continue;
+      if (node.get_type().is_pipelined())
+        continue;
+
+      max_input = it->second;
+      max_input_pin = edge.driver;
+    }
+    if (max_input>it_node->second) {
+      fmt::print("ERROR: wrong order node:{} is earlier than pin:{}\n",node.debug_name(), max_input_pin.debug_name());
+      I(false);
+    }
+  }
+}
+
+// performs Topological Sort on a given DAG
+void do_fwd_traversal(LGraph *lg) {
+
+  for (auto node : lg->forward(true)) {
+    I(!node.is_graph_io());
+    //fmt::print("visiting {}\n", node.debug_name());
+    I(test_order.find(node.get_compact()) == test_order.end());
+    test_order[node.get_compact()] = test_order_sequence++;
+  }
+}
+
 
 void generate_graphs(int n) {
 
@@ -23,13 +75,13 @@ void generate_graphs(int n) {
 
     int inps = 10 + rand_r(&rseed) % 100;
     for(int j = 0; j < inps; j++) {
-      auto pin = g->add_graph_input("i" + std::to_string(j), j, 1);
+      auto pin = g->add_graph_input("i" + std::to_string(j), 1+j, 1);
       dpins.push_back(pin.get_compact());
     }
 
     int outs = 10 + rand_r(&rseed) % 100;
     for(int j = 0; j < outs; j++) {
-      auto pin = g->add_graph_output("o" + std::to_string(j), inps+j,1);
+      auto pin = g->add_graph_output("o" + std::to_string(j), 1+inps+j,1);
       spins.push_back(pin.get_compact());
       dpins.push_back(g->get_graph_output_driver(("o" + std::to_string(j))).get_compact());
     }
@@ -37,7 +89,7 @@ void generate_graphs(int n) {
     int nnodes = 100 + rand_r(&rseed) % 1000;
     for(int j = 0; j < nnodes; j++) { // Simple output nodes
       auto node = g->create_node();
-      Node_Type_Op op  = (Node_Type_Op)(1 + rand_r(&rseed) % 22); // regular node types range
+      Node_Type_Op op  = (Node_Type_Op)(1+(rand_r(&rseed) % FFlop_Op)); // regular node types range
       node.set_type(op);
       dpins.push_back(node.setup_driver_pin(0).get_compact());
       spins.push_back(node.setup_sink_pin(0).get_compact());
@@ -45,8 +97,7 @@ void generate_graphs(int n) {
 
     int const_nodes = 10 + rand_r(&rseed) % 100;
     for(int j = 0; j < const_nodes; j++) { // Simple output nodes
-      auto node = g->create_node();
-      node.set_type(U32Const_Op);
+      auto node = g->create_node_const(rand_r(&rseed) & 0xFF);
       dpins.push_back(node.setup_driver_pin().get_compact());
     }
 
@@ -74,10 +125,32 @@ void generate_graphs(int n) {
       Node_pin::Compact src;
       Node_pin::Compact dst;
       do {
-        src = dpins[rand_r(&rseed) % (dpins.size())];
-        dst = spins[rand_r(&rseed) % (spins.size())];
+        do{
+          // Loop to always link forward (avoid loops)
+          src = dpins[rand_r(&rseed) % (dpins.size())];
+          dst = spins[rand_r(&rseed) % (spins.size())];
+
+          Node_pin dpin(g,src);
+          Node_pin spin(g,dst);
+          if (dpin.is_graph_output())
+            continue;
+          if (spin.is_graph_input())
+            continue;
+
+          if (i&1) {
+            if (spin.get_node().get_compact().get_nid() > dpin.get_node().get_compact().get_nid())
+              break;
+          }else{
+            if (spin.get_node().get_compact().get_nid() < dpin.get_node().get_compact().get_nid())
+              break;
+          }
+        }while (true);
+
         counter++;
       } while(edges.find(std::make_pair(src, dst)) != edges.end() && counter < 1000);
+
+      if (counter>=1000)
+        break;
 
       if (edges.find(std::make_pair(src, dst)) != edges.end())
         break;
@@ -93,6 +166,7 @@ void generate_graphs(int n) {
       I(g->has_edge(dpin, spin));
     }
 
+    g->sync();
   }
 }
 
@@ -101,48 +175,15 @@ bool fwd(int n) {
   for(int i = 0; i < n; i++) {
     std::string gname = "test_" + std::to_string(i);
     LGraph *    g     = LGraph::open("lgdb_iter_test", gname);
-    if(g == 0)
+    if(g == nullptr)
       return false;
 
-    //g->dump();
-    //fmt::print("----------------------\n");
-    absl::flat_hash_set<Node::Compact> visited;
-    for(auto node : g->forward()) {
+    setup_test_order();
 
-      if (!node.get_type().is_pipelined() && node.get_type().op != GraphIO_Op) {
-        // check if all incoming edges were visited
-        for(auto &inp : node.inp_edges()) {
-          if (!inp.driver.get_node().get_type().is_pipelined() && inp.driver.get_node().get_type().op != GraphIO_Op) {
-            if(visited.find(inp.driver.get_node().get_compact()) == visited.end()) {
-              fmt::print("fwd failed for lgraph node:{} fwd:{}\n", node.debug_name(), inp.driver.get_node().debug_name());
-              I(false);
-              return false;
-            }
-          }
-        }
-      }
+    fmt::print("FWD {}\n", gname);
+    do_fwd_traversal(g);
 
-      visited.insert(node.get_compact());
-    }
-    visited.clear();
-    for(auto node : g->forward(true)) {
-
-      if (!node.get_type().is_pipelined() && node.get_type().op != GraphIO_Op) {
-        // check if all incoming edges were visited
-        for(auto &inp : node.inp_edges()) {
-          if (!inp.driver.get_node().get_type().is_pipelined() && inp.driver.get_node().get_type().op != GraphIO_Op) {
-            if(visited.find(inp.driver.get_node().get_compact()) == visited.end()) {
-              fmt::print("fwd failed for lgraph node:{} fwd:{}\n", node.debug_name(), inp.driver.get_node().debug_name());
-              I(false);
-              return false;
-            }
-          }
-        }
-      }
-
-      visited.insert(node.get_compact());
-    }
-
+    check_test_order(g);
   }
 
   return true;
@@ -200,167 +241,6 @@ bool bwd(int n) {
 
   }
   return true;
-}
-
-bool visit_sub= true;
-absl::flat_hash_map<Node::Compact,int> test_order;
-int test_order_sequence;
-
-void setup_test_order() {
-  test_order.clear();
-  test_order_sequence = 1;
-}
-
-void check_test_order(LGraph *top) {
-  for(auto node:top->fast(true)) {
-    if (node.is_type_sub() && !node.is_type_sub_empty())
-      continue;
-
-    auto it_node = test_order.find(node.get_compact());
-    if (it_node == test_order.end()) {
-      fmt::print("ERROR: missing node:{}\n",node.debug_name());
-      I(false);
-    }
-
-    int max_input = 0;
-    Node_pin max_input_pin;
-    for(auto edge:node.inp_edges()) {
-      auto it = test_order.find(edge.driver.get_node().get_compact());
-      if (it==test_order.end())
-       continue;
-      if (it->second<max_input)
-        continue;
-      if (node.get_type().is_pipelined())
-        continue;
-
-      max_input = it->second;
-      max_input_pin = edge.driver;
-    }
-    if (max_input>it_node->second) {
-      fmt::print("ERROR: wrong order node:{} is earlier than pin:{}\n",node.debug_name(), max_input_pin.debug_name());
-      I(false);
-    }
-  }
-}
-
-void topo_add_chain_fwd(absl::flat_hash_set<Node::Compact> &visited
-    , std::vector<Node> &pending_stack
-    , const XEdge &edge);
-
-void topo_add_chain_down(absl::flat_hash_set<Node::Compact> &visited
-    , std::vector<Node> &pending_stack
-    , const Node_pin &dst_pin) {
-
-  I(dst_pin.get_node().is_type_sub() && !dst_pin.get_node().is_type_sub_empty());
-
-  auto down_pin = dst_pin.get_down_pin();
-  I(down_pin.is_sink()); // fwd
-
-  //fmt::print("topo       down node:{} down_pin:{}\n", down_pin.get_node().debug_name(), down_pin.debug_name());
-
-  for (auto &edge2 : down_pin.inp_edges()) {  // fwd
-    I(edge2.sink.get_pid() == down_pin.get_pid());
-    topo_add_chain_fwd(visited, pending_stack, edge2);
-  }
-}
-
-void topo_add_chain_fwd(absl::flat_hash_set<Node::Compact> &visited
-    , std::vector<Node> &pending_stack
-    , const XEdge &edge) {
-
-  const auto &dst_pin  = edge.driver; // fwd
-  const auto  dst_node = dst_pin.get_node();
-  //fmt::print("1.topo visit node:{} lg:{}\n", dst_node.debug_name(),dst_node.get_class_lgraph()->get_name());
-
-  if (visit_sub) {
-    if (dst_node.is_type_sub() && !dst_node.is_type_sub_empty()) { // DOWN??
-      topo_add_chain_down(visited, pending_stack, dst_pin);
-      return;
-    }else if (dst_node.is_graph_input() && !dst_node.is_root()) { // fwd: UP??
-      auto up_pin = dst_pin.get_up_pin();
-      if (up_pin.is_invalid())
-        return; // Pin is not connected
-
-      I(up_pin.is_sink()); // fwd
-
-      //fmt::print("topo          up node:{} up_pin:{} up_lg:{}\n", dst_node.debug_name(), up_pin.debug_name(), up_pin.get_class_lgraph()->get_name());
-
-      for (auto &edge2 : up_pin.inp_edges()) {  // fwd
-        I(edge2.sink.get_pid() == up_pin.get_pid());
-        topo_add_chain_fwd(visited, pending_stack, edge2);
-      }
-
-      // pending_stack.push_back(up_pin.get_node());
-    }
-  }
-
-  if (visited.count(dst_node.get_compact()))
-    return;
-
-  pending_stack.push_back(dst_node);
-}
-
-// performs Topological Sort on a given DAG
-void doTopologicalSort(LGraph *lg) {
-
-  absl::flat_hash_set<Node::Compact>     visited;
-  std::vector<Node> pending_stack;
-
-  visited.clear();
-
-  // TODO:
-  //  Fast hierarchical should work, but it requires to remember
-  //  discovered_nodes for all the traversed nodes. If we have a stack of
-  //  iterators (one for node in hierarchy or tree node), we can keep iterating
-  //  the tree (in stack) and just remember as many _compact_class (not
-  //  _compact) as max depth.  This should have a significant footprint
-  //  advantage in visited
-  for (auto node : lg->fast(true)) {
-    if (visited.count(node.get_compact())) continue;
-
-    pending_stack.push_back(node);
-    while(!pending_stack.empty()) {
-      auto node2 = pending_stack.back();
-      pending_stack.pop_back();
-
-      if (!visited.count(node2.get_compact())) {
-        if (!node2.is_graph_io()) {
-          //fmt::print("debug topo node:{} lg:{} hidx.pos:{}\n", node2.debug_name(), node2.get_class_lgraph()->get_name(),node2.get_hidx().pos);
-          if (!visit_sub || !(node2.is_type_sub() && !node2.is_type_sub_empty())) {
-
-            I(test_order.find(node2.get_compact()) == test_order.end());
-            test_order[node2.get_compact()] = test_order_sequence++;
-
-#if 0
-            if (node2.is_root()) {
-              fmt::print("ROOT topo node:{} lg:{} hidx.pos:{}\n", node2.debug_name(), node2.get_class_lgraph()->get_name(),node2.get_hidx().pos);
-            }else{
-              auto up_node = node2.get_up_node();
-              fmt::print("topo node:{} lg:{} hidx.pos:{} up_node:{}\n", node2.debug_name(), node2.get_class_lgraph()->get_name(),node2.get_hidx().pos, up_node.debug_name());
-            }
-#endif
-          }
-        }
-        visited.insert(node2.get_compact());
-      }
-
-      if (visit_sub) {
-        if (node2.is_type_sub() && !node2.is_type_sub_empty()) {
-          bool any_propagated=false;
-          for (auto &pin : node2.out_connected_pins()) { // fwd
-            topo_add_chain_down(visited, pending_stack, pin);
-            any_propagated=true;
-          }
-          I(visited.count(node2.get_compact())); // All IO traversed, so, it is fully discovered
-          if (any_propagated)
-            continue;
-        }
-      }
-      for (auto &edge : node2.inp_edges()) { // fwd
-        topo_add_chain_fwd(visited, pending_stack, edge);
-      }
-    }
-  }
 }
 
 void simple_line() {
@@ -432,7 +312,7 @@ void simple_line() {
 
   setup_test_order();
 
-  doTopologicalSort(g0);
+  do_fwd_traversal(g0);
 
   check_test_order(g0);
 }
@@ -572,13 +452,14 @@ void simple() {
 
   setup_test_order();
 
-  doTopologicalSort(g);
+  do_fwd_traversal(g);
 
   check_test_order(g);
 }
 
 int main() {
 
+#if 1
   simple_line();
 
   simple();
@@ -588,15 +469,16 @@ int main() {
     if (failed)
       return -3;
   }
+#endif
 
-#if 0
-  int n = 40;
+  int n = 20;
   generate_graphs(n);
 
   if(!fwd(n)) {
     failed = true;
   }
 
+#if 0
   if(!bwd(n)) {
     failed = true;
   }

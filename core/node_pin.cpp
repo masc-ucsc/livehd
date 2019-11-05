@@ -143,9 +143,7 @@ std::string Node_pin::debug_name() const {
     }
   }
 
-  return absl::StrCat("node_pin_", std::to_string(get_node().nid), ":", name, ":", std::to_string(pid), sink?"s":"d");
-  //not a acceptable format for dot
-  //return absl::StrCat("node_pin_", std::to_string(idx), ":", std::to_string(pid), sink?"s":"d", "(", name ,")");
+  return absl::StrCat("node_pin_", std::to_string(get_node().nid), "_", name, "_", std::to_string(pid), sink?"s":"d", "_lg_", current_g->get_name());
 }
 
 std::string_view Node_pin::get_name() const {
@@ -228,8 +226,7 @@ bool Node_pin::is_connected() const {
 
 Node_pin Node_pin::get_down_pin() const {
   auto node = get_node();
-  I(node.is_type_sub());
-  I(!node.is_type_sub_empty());
+  I(node.is_type_sub_present());
   I(!top_g->ref_htree()->is_leaf(hidx));
 
   // 1st: Get down_hidx

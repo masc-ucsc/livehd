@@ -149,8 +149,6 @@ public:
   static size_t max_size() { return (((size_t)1) << Index_bits) - 1; }
   size_t        size() const { return node_internal.size(); }
 
-  bool empty() const { return node_internal.size() <= 3; } // IOs should not count
-
   class _init {
   public:
     _init();

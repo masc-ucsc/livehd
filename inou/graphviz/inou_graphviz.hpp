@@ -20,7 +20,7 @@ protected:
   std::string odir;
 
   std::atomic<int> total;
-  void             inc_total(Index_ID idx) {
+  void             inc_total() {
     total++;
   };
 

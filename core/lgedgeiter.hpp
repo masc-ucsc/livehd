@@ -44,23 +44,6 @@ public:
 };
 
 
-class Flow_base_iterator {
-protected:
-  Node            current_node;
-
-  // State built during iteration
-  const bool      visit_sub;
-  absl::flat_hash_set<Node::Compact>  visited;
-  std::vector<Node>                   pending_stack;
-
-  Flow_base_iterator(const Flow_base_iterator &other) = delete;
-public:
-  Flow_base_iterator(bool _visit_sub) : visit_sub(_visit_sub) { }
-
-  const Node &operator*() const { return current_node; }
-};
-
-
 class Fast_edge_iterator {
 protected:
   LGraph                *top_g;
@@ -78,12 +61,17 @@ public:
 
   public:
     Fast_iter(LGraph *_g, LGraph *_cg, const Hierarchy_index &_hidx, const Index_ID _nid, bool _visit_sub) : top_g(_g), current_g(_cg), hidx(_hidx), nid(_nid), visit_sub(_visit_sub) { }
+    Fast_iter(bool _visit_sub) : top_g(nullptr), current_g(nullptr), visit_sub(_visit_sub) { }
 
     Fast_iter &operator++();
 
     bool operator!=(const Fast_iter &other) const {
-      I(top_g == other.top_g);
+      GI(nid && other.nid, top_g == other.top_g); // Same or invalid
       return nid != other.nid || hidx != other.hidx;
+    }
+    bool operator==(const Fast_iter &other) const {
+      GI(nid && other.nid, top_g == other.top_g); // Same or invalid
+      return nid == other.nid && hidx == other.hidx;
     }
 
     Node operator*() const {
@@ -95,22 +83,46 @@ public:
   explicit Fast_edge_iterator(LGraph *_g, bool _visit_sub) : top_g(_g), visit_sub(_visit_sub) { }
 
   Fast_iter begin() const;
-  Fast_iter end() const { return Fast_iter(top_g, top_g, Hierarchy_tree::root_index(), 0, visit_sub); }  // 0 is end index for iterator
+  Fast_iter end() const { return Fast_iter(visit_sub); }
 };
+
+class Flow_base_iterator {
+protected:
+  Node               current_node;
+  Fast_edge_iterator::Fast_iter global_it;
+  Fast_edge_iterator::Fast_iter global_it_end;
+
+  // State built during iteration
+  const bool      visit_sub;
+  absl::flat_hash_set<Node::Compact>  visited;
+  std::vector<Node>                   pending_stack;
+
+  Flow_base_iterator(LGraph *lg, bool _visit_sub);
+  Flow_base_iterator(bool _visit_sub);
+public:
+
+  const Node &operator*() const { return current_node; }
+};
+
+
 
 class Fwd_edge_iterator {
 public:
 class Fwd_iter : public Flow_base_iterator {
 protected:
 
+  void topo_add_chain_down(const Node_pin &dst_pin);
+  void topo_add_chain_fwd(const Node_pin &driver_pin);
+  void fwd_get_from_pending();
   void fwd_first(LGraph *lg);
   void fwd_next();
 
 public:
-  Fwd_iter(bool _visit_sub) : Flow_base_iterator(_visit_sub) { }
-
-  Fwd_iter(LGraph *lg, bool _visit_sub) :Flow_base_iterator(_visit_sub) {
+  Fwd_iter(LGraph *lg, bool _visit_sub) :Flow_base_iterator(lg, _visit_sub) {
     fwd_first(lg);
+  }
+  Fwd_iter(bool _visit_sub) :Flow_base_iterator(_visit_sub) {
+    I(current_node.is_invalid());
   }
 
   bool operator!=(const Fwd_iter &other) const {
@@ -147,10 +159,11 @@ protected:
   void bwd_next();
 
 public:
-  Bwd_iter(bool _visit_sub) : Flow_base_iterator(_visit_sub) { }
-
-  Bwd_iter(LGraph *lg, bool _visit_sub) :Flow_base_iterator(_visit_sub) {
+  Bwd_iter(LGraph *lg, bool _visit_sub) :Flow_base_iterator(lg, _visit_sub) {
     bwd_first(lg);
+  }
+  Bwd_iter(bool _visit_sub) :Flow_base_iterator(_visit_sub) {
+    I(current_node.is_invalid());
   }
 
   bool operator!=(const Bwd_iter &other) const {

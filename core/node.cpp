@@ -8,8 +8,15 @@
 void Node::invalidate(LGraph *_g) {
   top_g     = _g;
   current_g = _g;
+  hidx.invalidate();
   nid       = 0;
-  hidx      = Hierarchy_tree::root_index();
+}
+
+void Node::invalidate() {
+  I(top_g);
+  current_g = top_g;
+  hidx.invalidate();
+  nid       = 0;
 }
 
 void Node::update(const Hierarchy_index &_hidx, Index_ID _nid) {
@@ -30,6 +37,13 @@ void Node::update(const Hierarchy_index &_hidx) {
   I(!nid.is_invalid()); // No update call if it is an empty graph
 
   I(current_g->is_valid_node(nid));
+}
+
+void Node::update(const Node &node) {
+  top_g     = node.top_g;
+  current_g = node.current_g;
+  hidx      = node.hidx;
+  nid       = node.nid;
 }
 
 void Node::update(LGraph *_g, const Node::Compact &comp) {
@@ -67,6 +81,7 @@ void Node::update(const Node::Compact &comp) {
   I(current_g->is_valid_node(nid));
 }
 
+#if 0
 Node::Node(LGraph *_g)
   :top_g(_g)
   ,current_g(_g)
@@ -74,6 +89,7 @@ Node::Node(LGraph *_g)
   ,nid(0) {
   I(top_g);
 }
+#endif
 
 Node::Node(LGraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp)
   :top_g(_g)
@@ -187,6 +203,7 @@ const Node_Type &Node::get_type() const {
 }
 
 void Node::set_type(const Node_Type_Op op) {
+  I(op!=SubGraph_Op && op!= U32Const_Op && op != StrConst_Op && op != LUT_Op); // do not set type directly, call set_type_const_value ....
   current_g->set_type(nid,op);
 }
 
@@ -244,12 +261,15 @@ LGraph *Node::get_type_sub_lgraph() const {
   return LGraph::open(top_g->get_path(), lgid);
 }
 
-bool Node::is_type_sub_empty() const {
-  if (!top_g->is_type_sub(nid))
-    return true;
+bool Node::is_type_sub_present() const {
+  if (!current_g->is_type_sub(nid))
+    return false;
 
-  auto sub_lgid = current_g->get_type_sub(nid);
-  return top_g->get_library().is_empty(sub_lgid);
+  auto *sub_lg = get_type_sub_lgraph();
+  if (sub_lg)
+    return sub_lg->is_empty();
+
+  return false;
 }
 
 void Node::set_type_lut(Lut_type_id lutid) {
@@ -469,7 +489,9 @@ std::string Node::debug_name() const {
     absl::StrAppend(&name, "_sub_", get_type_sub_node().get_name());
   }
 
-  return absl::StrCat("node_", std::to_string(nid), "_", get_type().get_name() , "_", name);
+  if (name.empty())
+    return absl::StrCat("node_", std::to_string(nid), "_", get_type().get_name() , "_lg_", current_g->get_name());
+  return absl::StrCat("node_", std::to_string(nid), "_", get_type().get_name() , "_", name, "_lg_", current_g->get_name());
 }
 
 bool Node::has_name() const {

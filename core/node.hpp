@@ -30,6 +30,7 @@ protected:
   Node(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _nid);
 
   void invalidate(LGraph *_g);
+  void invalidate();
   void update(Index_ID _nid) { nid = _nid; }
   void update(const Hierarchy_index &_hidx, Index_ID _nid);
 
@@ -67,6 +68,8 @@ public:
 
       return *this;
     }
+
+    Index_ID get_nid() const { return nid; } // Mostly for debugging or to know order
 
     Node get_node(LGraph *lg) const { return Node(lg, *this); }
 
@@ -132,9 +135,10 @@ public:
   // NOTE: No operator<() needed for std::set std::map to avoid their use. Use flat_map_set for speed
   void update(LGraph *_g, const Node::Compact &comp);
   void update(const Node::Compact &comp);
+  void update(const Node &node);
 
   Node() :top_g(0) ,current_g(0) ,nid(0) { }
-  Node(LGraph *_g);
+  //Node(LGraph *_g);
   Node(LGraph *_g, const Compact &comp) {
     update(_g, comp);
   }
@@ -177,10 +181,14 @@ public:
   constexpr bool is_invalid() const { return nid==0; }
 
   constexpr bool operator==(const Node &other) const {
+    GI(nid==0, hidx.is_invalid());
+    GI(other.nid==0, other.hidx.is_invalid());
     return top_g == other.top_g && hidx == other.hidx && nid == other.nid;
   }
   constexpr bool operator!=(const Node& other) const {
-    I(top_g == other.top_g);
+    GI(nid==0, hidx.is_invalid());
+    GI(other.nid==0, other.hidx.is_invalid());
+    GI(nid && other.nid, top_g == other.top_g);
     return (nid!=other.nid || hidx != other.hidx);
   };
 
@@ -203,7 +211,7 @@ public:
   Lg_type_id        get_type_sub() const;
   Sub_node         &get_type_sub_node() const;
   LGraph           *get_type_sub_lgraph() const; // Slower than other get_type_sub
-  bool              is_type_sub_empty() const;
+  bool              is_type_sub_present() const;
 
   // WARNING: Do not call this. Use create_node_const... to reuse node if already exists
   //void              set_type_const_value(std::string_view str);

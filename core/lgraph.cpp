@@ -85,6 +85,9 @@ LGraph *LGraph::open(std::string_view path, Lg_type_id lgid) {
     return lg;
   }
 
+  if (!lib->exists(lgid))
+    return nullptr;
+
   auto name   = lib->get_name(lgid);
   auto source = lib->get_source(lgid);
 

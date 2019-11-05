@@ -38,15 +38,6 @@ public:
 
 static Cleanup_graph_library private_instance;
 
-bool Graph_library::is_empty(Lg_type_id lgid) const {
-  I(attributes.size() > lgid);
-  LGraph *lg = attributes[lgid].lg;
-  if (lg)
-    return lg->empty();
-
-  return attributes[lgid].nentries<=3;
-}
-
 Graph_library *Graph_library::instance(std::string_view path) {
 
   auto it1 = Graph_library::global_instances.find(path);
@@ -265,15 +256,6 @@ void Graph_library::update(Lg_type_id lgid) {
   attributes[lgid].version = max_next_version.value++;
 }
 
-void Graph_library::update_nentries(Lg_type_id lgid, uint64_t nentries) {
-  I(lgid < attributes.size());
-
-  if (attributes[lgid].nentries != nentries) {
-    graph_library_clean      = false;
-    attributes[lgid].nentries = nentries;
-  }
-}
-
 void Graph_library::reload() {
   I(graph_library_clean);
 
@@ -332,9 +314,7 @@ void Graph_library::reload() {
       if (max_next_version<version)
         max_next_version = version;
 
-      I(lg_entry.HasMember("nentries"));
       I(lg_entry.HasMember("source"));
-      attributes[id].nentries = lg_entry["nentries"].GetUint64();;
       attributes[id].source   = lg_entry["source"].GetString();;
       attributes[id].version  = version;
 
@@ -413,8 +393,7 @@ void Graph_library::expunge(std::string_view name) {
 void Graph_library::clear(Lg_type_id lgid) {
   I(lgid < attributes.size());
 
-  attributes[lgid].nentries = 0;
-  sub_nodes[lgid].clear_io_pins();
+  sub_nodes[lgid].reset_pins();
 }
 
 Lg_type_id Graph_library::copy_lgraph(std::string_view name, std::string_view new_name) {
@@ -542,9 +521,6 @@ void Graph_library::clean_library() {
 
     writer.Key("version");
     writer.Uint64(it.version);
-
-    writer.Key("nentries");
-    writer.Uint64(it.nentries);
 
     writer.Key("source");
     writer.String(it.source.c_str());

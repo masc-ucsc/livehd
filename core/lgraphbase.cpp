@@ -14,9 +14,9 @@
 // Checks internal invalid insertions. Worth only if the node_internal is patched
 // #define DEBUG_SLOW
 
-LGraph_Base::LGraph_Base(std::string_view _path, std::string_view _name, Lg_type_id lgid) noexcept
-    : Lgraph_base_core(_path, _name, lgid)
-    , node_internal(path, absl::StrCat("lg_", std::to_string(lgid), "_nodes")) {
+LGraph_Base::LGraph_Base(std::string_view _path, std::string_view _name, Lg_type_id _lgid) noexcept
+    : Lgraph_base_core(_path, _name, _lgid)
+    , node_internal(path, absl::StrCat("lg_", std::to_string(_lgid), "_nodes")) {
   I(lgid);  // No id zero allowed
 
   library  = Graph_library::instance(path);
@@ -48,8 +48,6 @@ void LGraph_Base::clear() {
 
 void LGraph_Base::sync() {
   Lgraph_base_core::sync();
-
-  library->update_nentries(lgid, node_internal.size());
   library->sync();
 }
 
@@ -583,3 +581,4 @@ Edge_raw_iterator LGraph_Base::inp_edges_raw(const Index_ID idx) const {
 
   return Edge_raw_iterator(s, e, true);
 }
+

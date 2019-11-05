@@ -106,6 +106,7 @@ void Inou_graphviz::do_fromlg(std::vector<LGraph *> &lgs) {
   for (const auto &lg_parent : lgs) {
     populate_lg_data(lg_parent);
     lg_parent->each_sub_fast([lg_parent, this](Node &node, Lg_type_id lgid) {
+      (void)node;
       fmt::print("subgraph lgid:{}\n", lgid);
       LGraph *lg_child = LGraph::open(lg_parent->get_path(), lgid);
       populate_lg_data(lg_child);
@@ -132,17 +133,17 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
       auto  dnode_name = dpin.get_node().debug_name();
       auto  snode_name = out.sink.get_node().debug_name();
       auto  dpin_name  = dpin.has_name() ? dpin.get_name() : "";
-      auto  bits       = dpin.get_bits();
+      auto  dbits      = dpin.get_bits();
 
       data += fmt::format(" {}->{}[label=\"{}b :{} :{} :{}\"];\n"
-          , dnode_name, snode_name, bits, dpin.get_pid(), out.sink.get_pid(), dpin_name);
+          , dnode_name, snode_name, dbits, dpin.get_pid(), out.sink.get_pid(), dpin_name);
     }
   });
 
   g->each_graph_output([&data](const Node_pin &pin) {
     std::string_view dst_str = "virtual_dst_module";
-    auto             bits    = pin.get_bits();
-    data += fmt::format(" {}->{}[label=\"{}b\"];\n", pin.get_node().debug_name(), dst_str, bits);
+    auto            dbits    = pin.get_bits();
+    data += fmt::format(" {}->{}[label=\"{}b\"];\n", pin.get_node().debug_name(), dst_str, dbits);
   });
 
   data += "}\n";

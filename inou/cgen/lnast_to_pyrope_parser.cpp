@@ -133,9 +133,9 @@ void Lnast_to_pyrope_parser::process_buffer() {
 
   for (auto const& node : node_buffer) {
     std::string name(node.token.get_text(memblock)); // str_view to string
-    std::string type = ntype_dbg(node.type);
-    if (name == "") {
-      fmt::print("{}({}) ", type, node.type);
+    std::string ntype = ntype_dbg(node.type);
+    if (name.empty()) {
+      fmt::print("{}({}) ", ntype, node.type);
     } else {
       fmt::print("{} ", name);
     }

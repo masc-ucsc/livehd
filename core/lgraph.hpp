@@ -139,6 +139,7 @@ protected:
       nid.value++;
       if (nid >= static_cast<Index_ID>(node_internal.size())) return 0;
       if (!node_internal[nid].is_node_state()) continue;
+      if (is_graph_io(nid)) continue;
       if (node_internal[nid].is_master_root()) return nid;
     }
 
@@ -165,6 +166,8 @@ public:
   LGraph(const LGraph &) = delete;
 
   virtual ~LGraph();
+
+  bool is_empty() const { return fast_first() == 0; }
 
   bool has_edge(const Node_pin &driver, const Node_pin &sink) const;
 

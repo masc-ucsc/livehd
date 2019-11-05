@@ -39,7 +39,7 @@ public:
   }
 
   bool is_invalid() const { return level == -1 || pos == -1; }
-  void invalidate() { level == -1; pos = -1; }
+  void invalidate() { level = -1; pos = -1; }
   bool is_root() const { return level == 0; }
 };
 

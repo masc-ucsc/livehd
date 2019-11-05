@@ -26,14 +26,12 @@ class Graph_library {
 protected:
   struct Graph_attributes {
     LGraph     *lg;
-    uint64_t    nentries; // TODO: deprecate with the new attributes (once all the old attributes are gone)
     std::string source;   // File were this module came from. If file updated (all the associated lgraphs must be deleted). If empty, it ies not present (blackbox)
     Lg_type_id  version;  // In which sequence order were the graphs last modified
     Graph_attributes() { expunge(); }
     void expunge() {
       lg       = 0;
       version  = 0;
-      nentries = 0;
       source   = "-";
     }
   };
@@ -161,7 +159,6 @@ public:
   }
 
   bool has_name(std::string_view name) const { return name2id.find(name) != name2id.end(); }
-  bool is_empty(Lg_type_id lgid) const;
 
   // TODO: Change to Graph_library &instance...
   static Graph_library *instance(std::string_view path);
@@ -192,13 +189,6 @@ public:
   void       expunge(std::string_view name); // Delete completely, even if open instances exists
 
   void     clear(Lg_type_id lgid);
-
-  void     update_nentries(Lg_type_id lgid, uint64_t nentries);
-  uint64_t get_nentries(Lg_type_id lgid) const {
-    assert(attributes.size() >= lgid);
-
-    return attributes[lgid].nentries;
-  };
 
   void sync() { clean_library(); }
 

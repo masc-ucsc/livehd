@@ -5,12 +5,12 @@
 #include "graph_library.hpp"
 #include "pass.hpp"
 
-LGraph_Node_Type::LGraph_Node_Type(std::string_view path, std::string_view name, Lg_type_id lgid) noexcept
-    : LGraph_Base(path, name, lgid)
-    , node_type_table(path, absl::StrCat("lg_", std::to_string(lgid), "_type"))
-    , const_sview(path, absl::StrCat("lg_", std::to_string(lgid), "_sview"))
-    , const_value(path, absl::StrCat("lg_", std::to_string(lgid), "_value"))
-    , down_nodes(path, absl::StrCat("lg_", std::to_string(lgid)  , "_down")) {
+LGraph_Node_Type::LGraph_Node_Type(std::string_view _path, std::string_view _name, Lg_type_id _lgid) noexcept
+    : LGraph_Base(_path, _name, _lgid)
+    , node_type_table(_path, absl::StrCat("lg_", std::to_string(_lgid), "_type"))
+    , const_sview(_path, absl::StrCat("lg_", std::to_string(_lgid), "_sview"))
+    , const_value(_path, absl::StrCat("lg_", std::to_string(_lgid), "_value"))
+    , down_nodes(_path, absl::StrCat("lg_", std::to_string(_lgid)  , "_down")) {
 }
 
 void LGraph_Node_Type::clear() {

@@ -91,7 +91,7 @@ void Pass_sample::do_wirecount(LGraph *g, int indent) {
       LGraph *sub_lg = LGraph::open(path,lgid);
       if (!sub_lg)
         return;
-      if (sub_lg->empty()) {
+      if (sub_lg->is_empty()) {
         int n_inp=0;
         int n_out=0;
         for(auto io_pin:sub_lg->get_self_sub_node().get_io_pins()) {

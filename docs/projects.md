@@ -155,7 +155,9 @@ Dependence: none
 
 Main features:
 
-* Implement paper: A Fast Heuristic Algorithm for Disjoint Decomposition of Boolean Functions
+* Implement some fast decomposition algorithms:
+* "Bottom-Up Disjoint-Support Decomposition Based on Cofactor and Boolean Difference Analysis" https://ieeexplore.ieee.org/abstract/document/7357181/
+* "Bi-decomposition of large Boolean functions using blocking edge graphs" https://dl.acm.org/citation.cfm?id=2133553
 * Break graph partitions in disjoin sets and areas that do not have cross optimization (disjoin)
 * Mark graph with hypergraph partition
 * Patch traversal so that we have fast/forward/backward for a "color graph"
