@@ -178,7 +178,7 @@ protected:
     lg_root->get_library().each_lgraph([this](Lg_type_id lgid, std::string_view name) {
         LGraph *lg = LGraph::open(lg_root->get_path(), name);
         I(lg);
-        if (lg->empty())
+        if (lg->is_empty())
           return;
 
         int sz=0;
