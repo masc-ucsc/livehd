@@ -45,7 +45,7 @@ void Ast_parser::up(Rule_id rid_up) {
   }
 
   level = level - 1;
-  if ((int)last_added.size()>level) {
+  if ((int)last_added.size()>level && level>0) {
     last_added.pop_back();
     I((int)last_added.size() == level);
   }
@@ -68,7 +68,7 @@ void Ast_parser::add(Rule_id rule_id, Token_entry te) {
   }
   I(down_added+1>=level);
 
-  if ((int)last_added.size() == level) {
+  if (down_added == level) {
     auto child_index = add_next_sibling(last_added.back(), Ast_parser_node(rule_id, te));
     add_track_parent(child_index);
   }else{

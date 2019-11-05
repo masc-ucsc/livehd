@@ -20,11 +20,11 @@ protected:
 public:
   void elaborate(){
     ast = std::make_unique<Ast_parser>(get_buffer(), test_rule);
-    
+
     ast->down();
     ast->add(test_rule_identifier, scan_token());
     ast->up(test_rule_identifier);
-    
+
     ast_handler();
 
     ast = nullptr;
