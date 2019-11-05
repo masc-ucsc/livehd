@@ -16,10 +16,10 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 new_git_repository(
     name = "opentimer",
     build_file = "BUILD.opentimer", # relative to external path
-    commit = "6552db088d45a94d108b34a5448a5d5da1a30cf7", # April 29
+    commit = "62f809407ec3a8ac7e6d4f67e7410b92cfc2dbae", # May 18
     remote = "https://github.com/OpenTimer/OpenTimer.git",
     #strip_prefix = "ot", OpenTimer uses ot/... so, we have to keep it
-    #patches = ["//external:patch.opentimer"],
+    patches = ["//external:patch.opentimer"],  # For generated ot/config.hpp
 )
 new_git_repository( # Open_timer user taskflow
     name = "taskflow",
@@ -130,7 +130,7 @@ new_git_repository(
 new_git_repository(
     name = "httplib",
     build_file = "BUILD.httplib",
-    commit = "8483e5931fb8a07ba8be078c59ee641eff661769", # April 6 2019 b5927aec123351dcf796e1fba8a6a1805d294cbe", # Dec 20, 2018
+    commit = "e4fd9f19cab6eeaf6489ebb129178b3407e76624", # October 24, 2019
     remote = "https://github.com/yhirose/cpp-httplib.git",
 )
 new_git_repository(
@@ -142,7 +142,7 @@ new_git_repository(
 new_git_repository(
     name = "gtest",
     build_file = "BUILD.gtest",
-    commit = "5ba69d5cb93779fba14bf438dfdaf589e2b92071", # APril 6 2019
+    commit = "37f322783175a66c11785d17fc153477b0777753", # October 24, 2019
     remote = "https://github.com/google/googletest",
     #tag = "release-1.8.0",
 )

@@ -5,7 +5,7 @@ cc_library(
   copts = ["-w","-O2"],  # Always fast, no warnings to avoid spurious messages
   srcs = glob(["ot/**/*.cpp"])
        ,
-  hdrs = glob(["ot/**/*.hpp"])
+  hdrs = glob(["ot/**/*.hpp", "ot/*.hpp"])
        ,
    linkopts = ["-lstdc++fs"],
   includes = ["."],

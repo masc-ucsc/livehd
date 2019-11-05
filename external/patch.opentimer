@@ -1,0 +1,12 @@
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./ot/config.hpp ../OpenTimer/ot/config.hpp
+--- ./ot/config.hpp	1970-01-01 00:00:00.000000000 +0000
++++ ../OpenTimer/ot/config.hpp	2019-11-05 19:16:06.134114100 +0000
+@@ -0,0 +1,8 @@
++#define OT_VERSION_MAJOR 2
++#define OT_VERSION_MINOR 0
++#define OT_VERSION_PATCH 0
++#define OT_VERSION "2.0.0 (alpha)"
++#define OT_HOME "xxx/OpenTimer"
++#define OT_HOST_SYSTEM "Linux"
++#define OT_INSTALL_PREFIX "/usr/local"
++#define OT_TCLSH_PATH "/bin/tclsh"

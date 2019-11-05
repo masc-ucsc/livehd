@@ -151,6 +151,7 @@ void Pass_sample::compute_max_depth(LGraph *g) {
       if (local_max<=d)
         local_max = d+1;
     }
+    fmt::print("{} {}\n",node.debug_name(), local_max);
     depth[node.get_compact()] = local_max;
   }
 
@@ -164,7 +165,7 @@ void Pass_sample::annotate_placement(LGraph *g) {
 
   Ann_node_place::clear(g); // Not needed, but clears all the previous placement info
 
-  for(auto node : g->backward()) {
+  for(auto node : g->forward()) {
 
     auto *p = node.ref_place();
     p->replace(x_pos++,0);
