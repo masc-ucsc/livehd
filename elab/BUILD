@@ -24,6 +24,15 @@ filegroup(
     )
 
 cc_test(
+    name = "ast_test",
+    srcs = ["tests/ast_test.cpp"],
+    deps = [
+        "@gtest//:gtest_main",
+        ":elab",
+        ],
+    )
+
+cc_test(
     name = "elab_scanner_test",
     srcs = ["tests/elab_scanner_test.cpp"],
     args = ["$(location :elab_scripts)"],

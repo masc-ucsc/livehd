@@ -30,6 +30,10 @@ void Ast_parser::up(Rule_id rid_up) {
 
   if (down_added == level) {
     // Child was added, nothing to do now
+    auto *data = ref_data(last_added[level]);
+    if (!data->rule_id) {
+      data->rule_id = rid_up;
+    }
     last_added[down_added].invalidate(); // Not needed, but helps asserts
   } else if (down_added > level) {
     I((down_added - 1) == level);
@@ -47,7 +51,7 @@ void Ast_parser::up(Rule_id rid_up) {
   level = level - 1;
   if ((int)last_added.size()>level && level>0) {
     last_added.pop_back();
-    I((int)last_added.size() == level);
+    I((int)last_added.size() == level+1);
   }
   if (down_added>level) {
     down_added--;
