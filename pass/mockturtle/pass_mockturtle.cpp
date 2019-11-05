@@ -634,14 +634,7 @@ void Pass_mockturtle::mapping_dynamic_shift_cell_lg2mt(const bool &is_shift_righ
 }
 
 void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
-  absl::flat_hash_set<Node::Compact> lg_node_visited1;
   for(const auto node : g->forward()) {
-    //SH:FIXME: temporarily solution for visiting the same node twice
-    if (lg_node_visited1.find(node.get_compact()) != lg_node_visited1.end())
-      continue;
-    else
-      lg_node_visited1.insert(node.get_compact());
-
     if (node2gid.find(node.get_compact())==node2gid.end())
       continue;
 
@@ -818,32 +811,13 @@ void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
 
 
 
-  //sh:fixme: temporarily solution for visiting the same node twice
-  absl::flat_hash_set<Node::Compact> lg_node_visited2;
   //create mig network output signal for each group
   for(const auto &node : g->forward()) {
-    if (lg_node_visited2.find(node.get_compact()) != lg_node_visited2.end())
-      continue;
-    else
-      lg_node_visited2.insert(node.get_compact());
 
     if (node2gid.find(node.get_compact()) == node2gid.end())
       continue;
     for (const auto &out_edge : node.out_edges_ordered()) {
       if (node2gid.find(out_edge.sink.get_node().get_compact())==node2gid.end()) {
-        //sh:fixme: LGraph bug! edge iterator will traverse the same edge(NOT->gout) twice!
-        //sh:fixme: for now, temporarily use for-loop to exclude duplicated edge traversal.
-        //bool hit = false;
-        //for(const auto bdout_itr:bdout_edges){
-        //  if(bdout_itr == out_edge)
-        //    hit = true;
-        //}
-
-        //if(!hit){
-          //bdout_edges.emplace_back(out_edge);
-          //bdout_edges.insert(out_edge);
-        //}
-
         bdout_edges.emplace_back(out_edge);
 
         I(node2gid[node.get_compact()] == edge2mt_sigs[out_edge].gid);
@@ -855,7 +829,6 @@ void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
 }
 
 void Pass_mockturtle::convert_mockturtle_to_KLUT() {
-
   for (const auto &gid2mt_iter : gid2mt) {
     const unsigned int           group_id = gid2mt_iter.first;
     const mockturtle::mig_network &mt_ntk = gid2mt_iter.second;
@@ -981,31 +954,31 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT() {
 }
 
 void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
-  //I(false);
   LGraph *new_lg = old_lg->clone_skeleton(LUTIFIED_NETWORK_NAME_SIGNATURE);
 
-  auto old_inp_node = old_lg->get_graph_input_node();
-  auto old_out_node = old_lg->get_graph_output_node();
-  auto new_inp_node = new_lg->get_graph_input_node();
-  auto new_out_node = new_lg->get_graph_output_node();
-  old_node_to_new_node[old_inp_node.get_compact()] = new_inp_node.get_compact();
-  old_node_to_new_node[old_out_node.get_compact()] = new_out_node.get_compact();
+  auto old_ginp_node = old_lg->get_graph_input_node();
+  auto old_gout_node = old_lg->get_graph_output_node();
+  auto new_ginp_node = new_lg->get_graph_input_node();
+  auto new_gout_node = new_lg->get_graph_output_node();
+  old_node_to_new_node[old_ginp_node.get_compact()] = new_ginp_node.get_compact();
+  old_node_to_new_node[old_gout_node.get_compact()] = new_gout_node.get_compact();
 
   //create unchanged portion
   //FIX ME: 1. copy name of the driver_pin
   //        2. add graph_io into internal_node_mapping
 
+  //handle special case: edge mapping of graph_inp->graph_out
+  for(const auto &inp_edge : old_gout_node.inp_edges_ordered()){
+    if(inp_edge.driver.get_node() == old_ginp_node){
+      auto dpid = inp_edge.driver.get_pid();
+      auto spid = inp_edge.sink.get_pid();
+      new_lg->add_edge(new_ginp_node.get_driver_pin(dpid), new_gout_node.get_sink_pin(spid));
+    }
+  }
 
 
-  //sh:fixme: temporarily solution for visiting the same node twice
-  absl::flat_hash_set<Node::Compact> lg_node_visited3;
   fmt::print("Step-I: Start mapping unchanged part...\n");
-  for (const auto old_node : old_lg->forward()) { // TODO?: It may be faster to do two passes with fast (first create nodes, then connect edges.
-    if (lg_node_visited3.find(old_node.get_compact()) != lg_node_visited3.end())
-      continue;
-    else
-      lg_node_visited3.insert(old_node.get_compact());
-
+  for (const auto old_node : old_lg->forward()) {
     if (node2gid.find(old_node.get_compact())!=node2gid.end())
       continue;
 
@@ -1014,12 +987,15 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
     if (!old_node.is_type(GraphIO_Op)) {
       new_node = new_lg->create_node(old_node);
       old_node_to_new_node[old_node.get_compact()] = new_node.get_compact();
+
     } else {
       new_node = old_node_to_new_node[old_node.get_compact()].get_node(new_lg);
     }
 
     //create edges which connect unchanged parts in lgraph
     for (const auto &inp_edge : old_node.inp_edges_ordered()) {
+      if(old_node.get_type().op == GraphIO_Op)
+        fmt::print("hit!\n");
       if (edge2mt_sigs.find(inp_edge)==edge2mt_sigs.end()) {
         auto peer_driver_node = inp_edge.driver.get_node();
         if (old_node_to_new_node.find(peer_driver_node.get_compact())!=old_node_to_new_node.end()) {

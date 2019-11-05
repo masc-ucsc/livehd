@@ -27,12 +27,11 @@ mkdir -p logs/yosys_log
 #      long_gcd long_simple_rf1 long_regfile1r1w'
 
 
-pts='trivial1 trivial trivial3 trivial_and 
+pts='trivial2a trivial trivial3 trivial_and 
      dce1 gates trivial1 trivial_join compare cse_basic 
      simple_weird2 mt_basic_test reduce null_port 
-     trivial_offset trivial2a'
+     trivial_offset'
 
-# pts='compare compare2'
      
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
