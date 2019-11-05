@@ -306,7 +306,8 @@ public:
 // Y = A[i,j]
 // pid 0 : A
 // pid 1 : offset
-// j = offset + bits
+// j = offset
+// i = offset + Y-bitwidth
 class Node_Type_Pick : public Node_Type {
 public:
   Node_Type_Pick() : Node_Type("pick", Pick_Op, false) {
