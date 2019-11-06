@@ -8,11 +8,11 @@
 extern "C" {
 #endif
 
-int RW_Create_Design(graal_isolatethread_t*, char*);
+int RW_create_Design(graal_isolatethread_t*, char*);
 
-void RW_Create_FF(graal_isolatethread_t*, char*, int);
+void RW_create_FF(graal_isolatethread_t*, char*, int);
 
-void RW_Create_AND2(graal_isolatethread_t*, char*, int);
+void RW_create_AND2(graal_isolatethread_t*, char*, int);
 
 int RW_set_IO_Buffer(graal_isolatethread_t*, int, int);
 

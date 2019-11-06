@@ -1,5 +1,4 @@
 package com.xilinx.rapidwright.examples;
-
 import org.graalvm.nativeimage.IsolateThread;
 import org.graalvm.nativeimage.ObjectHandle;
 import org.graalvm.nativeimage.ObjectHandles;
@@ -32,7 +31,9 @@ import org.graalvm.word.WordFactory;
 
 import com.xilinx.rapidwright.design.Cell;
 import com.xilinx.rapidwright.design.Design;
-import com.xilinx.rapidwright.design.NetType;
+import com.xilinx.rapidwright.design.DesignTools;
+import com.xilinx.rapidwright.design.Net;
+import com.xilinx.rapidwright.design.PinType;
 import com.xilinx.rapidwright.design.Unisim;
 import com.xilinx.rapidwright.device.Device;
 import com.xilinx.rapidwright.util.FileTools;
@@ -46,10 +47,18 @@ import com.xilinx.rapidwright.edif.EDIFNetlist;
 import com.xilinx.rapidwright.edif.EDIFPort;
 import com.xilinx.rapidwright.edif.EDIFPortInst;
 import com.xilinx.rapidwright.edif.EDIFTools;
+import com.xilinx.rapidwright.placer.blockplacer.Point;
+import com.xilinx.rapidwright.placer.blockplacer.SmallestEnclosingCircle;
+import com.xilinx.rapidwright.router.RouteNode;
+import com.xilinx.rapidwright.router.Router;
+import com.xilinx.rapidwright.edif.EDIFParser;
+import com.xilinx.rapidwright.edif.EDIFTools;
 import com.xilinx.rapidwright.placer.blockplacer.BlockPlacer;
 import com.xilinx.rapidwright.placer.blockplacer.BlockPlacer2;
 import com.xilinx.rapidwright.placer.blockplacer.Point;
 import com.xilinx.rapidwright.placer.blockplacer.SmallestEnclosingCircle;
+import com.xilinx.rapidwright.device.PIP;
+import com.xilinx.rapidwright.router.Router;
 import com.xilinx.rapidwright.router.RouteNode;
 import com.xilinx.rapidwright.router.Router;
 import com.xilinx.rapidwright.edif.EDIFParser;
@@ -60,24 +69,24 @@ import java.util.*;
 import java.io.FileNotFoundException;
 import java.io.PrintWriter;
 
-import com.xilinx.rapidwright.examples.RapidWrightAPI.cInterfaceHeaderFunctions;
+//import com.xilinx.rapidwright.examples.RapidWrightAPI.cInterfaceHeaderFunctions;
 
-@CContext(cInterfaceHeaderFunctions.class)
+//@CContext(cInterfaceHeaderFunctions.class)
 public class RapidWrightAPI {
   //static final HashMap<Integer, Design> DESIGNID_LIST = new HashMap<Integer, Design>(); //vector<>
-  private static ArrayList<Design> DESIGNID_LIST = new ArrayList<Design>();
-  static class cInterfaceHeaderFunctions implements CContext.Directives {
+  private static List<Design> DESIGNID_LIST = new ArrayList<Design>();
+  /*static class cInterfaceHeaderFunctions implements CContext.Directives {
       @Override
       public List<String> getHeaderFiles() {
           /*
            * The header file with the C declarations that are imported. We use a helper class that
            * locates the file in our project structure.
            */
-          return Collections.singletonList("</mnt/c/Users/27688/Desktop/Lgraph_rapidwright/xilinx/GraalVMExample/myObjects.h>");
+  /*        return Collections.singletonList("</mnt/c/Users/27688/Desktop/Lgraph_rapidwright/xilinx/GraalVMExample/myObjects.h>");
       }
-  }
+  }*/
   /* Import a C structure, with accessor methods for every field. */
-    @CStruct("my_design")
+    /*@CStruct("my_design")
     interface myDesign extends PointerBase {
 
         @CField("java_object_handle")
@@ -85,19 +94,19 @@ public class RapidWrightAPI {
 
         @CField("java_object_handle")
         void setJavaObject(ObjectHandle value);
-    }
+    }*/
 
     /*
      *java functions to create a new Design
      */
-    @CEntryPoint( name = "RW_Create_Design")
-    public static int RW_Create_Design(IsolateThread thread, CCharPointer designName)
+    @CEntryPoint( name = "RW_create_Design")
+    public static int RW_create_Design(IsolateThread thread, CCharPointer designName)
     {
       String desName = CTypeConversion.toJavaString(designName);
       Design design = new Design(desName, Device.PYNQ_Z1);
       //inserts the specific ID in the arraylist
       DESIGNID_LIST.add(design);
-      int id = DESIGNID_LIST.size()-1;
+      int id = DESIGNID_LIST.size() - 1;
       return id;
     }
 
@@ -105,38 +114,33 @@ public class RapidWrightAPI {
      *java functions to create a flipflop on the design.
      */
 
-    @CEntryPoint( name = "RW_Create_FF")
-    public static void RW_Create_FF(IsolateThread thread, CCharPointer flipflopName, int designID)
+    @CEntryPoint( name = "RW_create_FF")
+    public static void RW_Create_FF(IsolateThread thread, CCharPointer flipflopName_c, int designID)
     {
-      Design d = DESIGNID_LIST.get(designID);
-      EDIFNetlist netlist = d.getNetlist();
-      EDIFCell top = netlist.getTopCell();
+      Design design = DESIGNID_LIST.get(designID);
+      //EDIFNetlist netlist = design.getNetlist();
+      //EDIFCell top = netlist.getTopCell();
 
-      EDIFCell ff = netlist.getHDIPrimitive(Unisim.FDRE);
-      String ffName = CTypeConversion.toJavaString(flipflopName);
-      EDIFCellInst ffInst = top.createChildCellInst(ffName, ff);
+      String ffName = CTypeConversion.toJavaString(flipflopName_c);
+      Cell ff = design.createCell("ff", Unisim.FDRE);
+      DesignTools.placeCell(ff, design);
 
     }
 
     /*
-     *java functions to create an and gate on the design
+     *java functions to create an AND gate on the design
      */
-
-    @CEntryPoint( name = "RW_Create_AND2")
-    public static void RW_Create_AND2(IsolateThread thread, CCharPointer gateName, int designID)
+    @CEntryPoint( name = "RW_create_AND2")
+    public static void RW_Create_AND2(IsolateThread thread, CCharPointer gateName_c, int designID)
     {
 
-      Design d = DESIGNID_LIST.get(designID);
-      EDIFNetlist netlist = d.getNetlist();
-      EDIFCell top = netlist.getTopCell();
-      EDIFCell and2Wrapper = new EDIFCell(netlist.getWorkLibrary(), "and2Wrapper");
-      EDIFCellInst and2WrapperInst = top.createChildCellInst("and2WrapperInst", and2Wrapper);
-
-      EDIFCell and2 = netlist.getHDIPrimitive(Unisim.AND2);
-      String gName = CTypeConversion.toJavaString(gateName);
-      EDIFCellInst and2Inst = and2Wrapper.createChildCellInst(gName,and2);
+      Design design = DESIGNID_LIST.get(designID);
+      String gateName = CTypeConversion.toJavaString(gateName_c);
+      Cell and2 = design.createCell(gateName, Unisim.AND2);
+      DesignTools.placeCell(and2, design);
 
     }
+
 
     @CEntryPoint( name = "RW_set_IO_Buffer")
     public static boolean RW_set_IO_Buffer(IsolateThread thread, boolean bool, int designID)
@@ -171,25 +175,25 @@ public class RapidWrightAPI {
     }
 
 
-/*Create an example design with an AND Gate place on the cell and generate its dcp file*/
-  @CEntryPoint( name = "addLogicGate")
-  public static void addLogicGate(IsolateThread thread, CCharPointer deviceName, CCharPointer gateName)
-  {
-    String devName = CTypeConversion.toJavaString(deviceName);
-    Design d = null;
-    try
+    /*Create an example design with an AND Gate place on the cell and generate its dcp file*/
+    @CEntryPoint( name = "addLogicGate")
+    public static void addLogicGate(IsolateThread thread, CCharPointer deviceName, CCharPointer gateName)
     {
-      d = new Design(devName, Device.PYNQ_Z1);
-    } catch(IllegalArgumentException e)
-    {
-      e.printStackTrace();
+      String devName = CTypeConversion.toJavaString(deviceName);
+      Design d = null;
+      try
+      {
+        d = new Design(devName, Device.PYNQ_Z1);
+      } catch(IllegalArgumentException e)
+      {
+        e.printStackTrace();
+      }
+      System.out.println(devName);
+      String gName = CTypeConversion.toJavaString(gateName);
+      Cell or2 = d.createAndPlaceCell(gName, Unisim.AND2, "SLICE_X100Y100/A6LUT");
+      System.out.println(gName);
+      d.setAutoIOBuffers(false);
+      d.writeCheckpoint("and2.dcp");
     }
-    System.out.println(devName);
-    String gName = CTypeConversion.toJavaString(gateName);
-    Cell or2 = d.createAndPlaceCell(gName, Unisim.AND2, "SLICE_X100Y100/A6LUT");
-    System.out.println(gName);
-    d.setAutoIOBuffers(false);
-    d.writeCheckpoint("and2.dcp");
-  }
 
 }

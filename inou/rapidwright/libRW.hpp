@@ -1,7 +1,6 @@
 #ifndef __libRW_H
 #define __libRW_H
 
-
 #include <graal_isolate.h>
 #include <iostream>
 #include <librapidwright.h>
@@ -14,12 +13,14 @@ private:
 
 public:
   graalThread();
+  ~graalThread();
   int create_Design(char* designName);
   void create_FF(char* ff_name, int id);
+  void create_AND2(char* gate_name, int id);
   int set_IO_Buffer(bool boolean, int id);
   void place_Design(int id);
+  void route_Design(int id);
   void write_DCP(char* file_name, int id);
-
 
 };
 
@@ -31,23 +32,27 @@ graalThread::graalThread() {
 }
 
 int graalThread::create_Design(char* designName) {
-  return RW_Create_Design(thread, designName);
+  return RW_create_Design(thread, designName);
 }
 
 void graalThread::create_FF(char* ff_name, int id) {
-  RW_Create_FF(thread, ff_name, id);
+  RW_create_FF(thread, ff_name, id);
 }
 
-void graalThread::RW_Create_AND2(char* gate_name, int id) {
-  RW_Create_AND2(thread, gate_name, id);
+void graalThread::create_AND2(char* gate_name, int id) {
+  RW_create_AND2(thread, gate_name, id);
 }
 
 int graalThread::set_IO_Buffer(bool boolean, int id) {
   return RW_set_IO_Buffer(thread, boolean, id);
 }
 
-void graalThread::place_Design(int id) {
+/*void graalThread::place_Design(int id) {
   RW_place_Design(thread, id);
+}*/
+
+void graalThread::route_Design(int id) {
+  RW_route_Design(thread, id);
 }
 
 void graalThread::write_DCP(char* file_name, int id) {

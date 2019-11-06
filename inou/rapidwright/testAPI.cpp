@@ -4,7 +4,7 @@
 using namespace std;
 
 int main(int argc, char **argv) {
-  
+
   graalThread* thread = new graalThread();
 
   char * designName_ff = const_cast<char*>("HelloCounter");
@@ -16,6 +16,8 @@ int main(int argc, char **argv) {
   thread->create_FF(gName_ff, DesignID_ff);
 
   thread->set_IO_Buffer(false, DesignID_ff);
+
+  thread->route_Design(DesignID_ff);
 
   thread->write_DCP(fileName_ff, DesignID_ff);
 
