@@ -166,7 +166,7 @@ void Chunkify_verilog::elaborate() {
   bool last_output = false;
 
   std::string module;
-  Port_ID     module_io_pos = 0;
+  Port_ID     module_io_pos = 1;
 
   // This has to be cut&pasted to each file
   std::string not_in_module_text;
@@ -195,7 +195,7 @@ void Chunkify_verilog::elaborate() {
         scan_token_append(in_module_token);
         scan_next();
         scan_append(module);
-        module_io_pos = 0;
+        module_io_pos = 1;
         in_module     = true;
 
         sub = &library->reset_sub(module, source);

@@ -16,9 +16,9 @@ public:
     void elaborate(){
       patch_pass(pyrope_keyword);
       ast = std::make_unique<Ast_parser>(get_buffer(), Prp_rule);
-      
+
       fmt::print("Starting to parse\n");
-      
+
       while(!scan_is_end()){
         dump_token();
         eat_comments();
@@ -28,10 +28,10 @@ public:
           return;
         }
       }
-      
+
       fmt::print("Finished Parsing\n");
       ast_builder();
-      
+
       ast_handler();
 
       ast = nullptr;
@@ -56,17 +56,17 @@ public:
 
 TEST_F(Prp_test, assignment_expression1){
   Prp_test_class scanner;
-  
+
   std::vector<std::string_view> tree_traversal_check_tokens;
   std::vector<std::string> tree_traversal_check_rules;
-  
+
   tree_traversal_check_tokens.push_back("\%out");
   tree_traversal_check_tokens.push_back("as");
   tree_traversal_check_tokens.push_back("(");
   tree_traversal_check_tokens.push_back("__bits");
   tree_traversal_check_tokens.push_back("8");
   tree_traversal_check_tokens.push_back(")");
-  
+
   tree_traversal_check_rules.push_back("Program");
   tree_traversal_check_rules.push_back("Assignment expression");
   tree_traversal_check_rules.push_back("Identifier");
@@ -86,10 +86,10 @@ TEST_F(Prp_test, assignment_expression1){
 
 TEST_F(Prp_test, assignment_expression2){
   Prp_test_class scanner;
-  
+
   std::vector<std::string_view> tree_traversal_check_tokens;
   std::vector<std::string> tree_traversal_check_rules;
-  
+
   tree_traversal_check_tokens.push_back("\%out");
   tree_traversal_check_tokens.push_back("as");
   tree_traversal_check_tokens.push_back("(");
@@ -100,7 +100,7 @@ TEST_F(Prp_test, assignment_expression2){
   tree_traversal_check_tokens.push_back("as");
   tree_traversal_check_tokens.push_back("__bits");
   tree_traversal_check_tokens.push_back("10");
-  
+
   tree_traversal_check_rules.push_back("Program");
   tree_traversal_check_rules.push_back("Code blocks");
   tree_traversal_check_rules.push_back("Assignment expression");
@@ -127,10 +127,10 @@ TEST_F(Prp_test, assignment_expression2){
 
 TEST_F(Prp_test, if_statement1){
   Prp_test_class scanner;
-  
+
   std::vector<std::string_view> tree_traversal_check_tokens;
   std::vector<std::string> tree_traversal_check_rules;
-  
+
   tree_traversal_check_tokens.push_back("if");
   tree_traversal_check_tokens.push_back("(");
   tree_traversal_check_tokens.push_back("x");
@@ -147,7 +147,7 @@ TEST_F(Prp_test, if_statement1){
   tree_traversal_check_tokens.push_back("+");
   tree_traversal_check_tokens.push_back("x");
   tree_traversal_check_tokens.push_back("}");
-  
+
   tree_traversal_check_rules.push_back("Program");
   tree_traversal_check_rules.push_back("If statement");
   tree_traversal_check_rules.push_back("If statement");

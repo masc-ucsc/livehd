@@ -46,6 +46,9 @@ void Ast_parser::up(Rule_id rid_up) {
   } else {
     I(down_added < level);
     // nothing to do, no descendents
+    I((int)last_added.size() <= level);
+    level = level - 1;
+    return;
   }
 
   level = level - 1;

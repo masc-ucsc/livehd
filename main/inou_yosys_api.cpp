@@ -31,7 +31,7 @@ void Inou_yosys_api::set_script_liblg(Eprp_var &var, std::string &script_file, s
       // sandbox path
       const std::string liblg3 = main_path + "/inou/yosys/liblgraph_yosys.so";
       if (access(liblg3.c_str(), X_OK) == -1) {
-        Main_api::error(fmt::format("could not find liblgraph_yosys.so, the {} is not executable ", liblg));
+        Main_api::error("could not find liblgraph_yosys.so, the {} is not executable ", liblg);
         return;
       } else {
         liblg = liblg3;
@@ -53,14 +53,14 @@ void Inou_yosys_api::set_script_liblg(Eprp_var &var, std::string &script_file, s
       // Maybe it is installed in /usr/local/bin/lgraph and /usr/local/share/lgraph/inou/yosys/liblgrapth...
       const std::string script_file2 = main_path + "/../share/lgraph/main/" + do_read_str;
       if (access(script_file2.c_str(), R_OK) == -1) {
-        Main_api::error(fmt::format("could not find the default script:{} file", script_file));
+        Main_api::error("could not find the default script:{} file", script_file);
         return;
       }
       script_file = script_file2;
     }
   } else {
     if (access(std::string(script).c_str(), X_OK) == -1) {
-      Main_api::error(fmt::format("could not find the provided script:{} file", script));
+      Main_api::error("could not find the provided script:{} file", script);
       return;
     }
     script_file = script;
@@ -77,7 +77,7 @@ int Inou_yosys_api::create_lib(std::string_view lib_file, std::string_view lgdb)
 
   int pid = fork();
   if (pid < 0) {
-    Main_api::error(fmt::format("inou.yosys: unable to fork??"));
+    Main_api::error("inou.yosys: unable to fork??");
     return -1;
   }
 
@@ -92,7 +92,7 @@ int Inou_yosys_api::create_lib(std::string_view lib_file, std::string_view lgdb)
     char *      argv[]      = {strdup(tech_parser.c_str()), strdup(std::string(lib_file).c_str()), 0};
 
     if (execvp(tech_parser.c_str(), argv) < 0) {
-      Main_api::error(fmt::format("tech_library generation failed for {} in {}, will not call yosys", lib_file, ofile));
+      Main_api::error("tech_library generation failed for {} in {}, will not call yosys", lib_file, ofile);
     }
     exit(0);
   }
@@ -130,7 +130,7 @@ int Inou_yosys_api::do_work(std::string_view yosys, std::string_view liblg, std:
 
   int pid = fork();
   if (pid < 0) {
-    Main_api::error(fmt::format("inou.yosys: unable to fork??"));
+    Main_api::error("inou.yosys: unable to fork??");
     return -1;
   }
 
@@ -177,7 +177,7 @@ int Inou_yosys_api::do_work(std::string_view yosys, std::string_view liblg, std:
   do {
     int w = waitpid(pid, &wstatus, WUNTRACED | WCONTINUED);
     if (w == -1) {
-      Main_api::error(fmt::format("inou.yosys: waitpid fail with {}", strerror(errno)));
+      Main_api::error("inou.yosys: waitpid fail with {}", strerror(errno));
       return errno;
     }
 
@@ -212,7 +212,7 @@ void Inou_yosys_api::tolg(Eprp_var &var) {
   set_script_liblg(var, script_file, liblg, true);
 
   if (files.empty()) {
-    Main_api::error(fmt::format("inou.yosys.tolg: no files provided"));
+    Main_api::error("inou.yosys.tolg: no files provided");
     return;
   }
 
@@ -253,7 +253,7 @@ void Inou_yosys_api::tolg(Eprp_var &var) {
       // Nothing
     }
   } else {
-    Main_api::error(fmt::format("inou.yosys.tolf: unrecognized techmap {} option. Either full or alumacc", techmap));
+    Main_api::error("inou.yosys.tolf: unrecognized techmap {} option. Either full or alumacc", techmap);
     return;
   }
   if (abc == "true" || abc == "1") {
@@ -261,7 +261,7 @@ void Inou_yosys_api::tolg(Eprp_var &var) {
   } else if (abc == "false" || abc == "0") {
     // Nothing to do
   } else {
-    Main_api::error(fmt::format("inou.yosys.tolf: unrecognized abc {} option. Either true or false", techmap));
+    Main_api::error("inou.yosys.tolf: unrecognized abc {} option. Either true or false", techmap);
   }
 
   auto gl = Graph_library::instance(path);
@@ -279,7 +279,7 @@ void Inou_yosys_api::tolg(Eprp_var &var) {
     if (gl->get_version(id) > max_version) {
       LGraph *lg = LGraph::open(path, id);
       if (lg == 0) {
-        Main_api::warn(fmt::format("could not open graph {}", name));
+        Main_api::warn(fmt::format("inou.yosys.tolf: could not open graph lgid:{} in path:{}", (int)id, path));
       } else {
         lgs.push_back(lg);
       }
