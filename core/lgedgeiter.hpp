@@ -59,6 +59,14 @@ public:
     Index_ID          nid;
     const bool        visit_sub;
 
+    Fast_iter &operator=(const Fast_iter &it) {
+      top_g     = it.top_g;
+      current_g = it.current_g;
+      hidx      = it.hidx;
+      nid       = it.nid;
+      I(visit_sub==it.visit_sub);
+    }
+
   public:
     Fast_iter(LGraph *_g, LGraph *_cg, const Hierarchy_index &_hidx, const Index_ID _nid, bool _visit_sub) : top_g(_g), current_g(_cg), hidx(_hidx), nid(_nid), visit_sub(_visit_sub) { }
     Fast_iter(bool _visit_sub) : top_g(nullptr), current_g(nullptr), visit_sub(_visit_sub) { }
@@ -88,6 +96,7 @@ public:
 
 class Flow_base_iterator {
 protected:
+  bool               linear_phase;
   Node               current_node;
   Fast_edge_iterator::Fast_iter global_it;
   Fast_edge_iterator::Fast_iter global_it_end;
@@ -113,6 +122,7 @@ protected:
 
   void topo_add_chain_down(const Node_pin &dst_pin);
   void topo_add_chain_fwd(const Node_pin &driver_pin);
+  void fwd_get_from_linear(LGraph *top);
   void fwd_get_from_pending();
   void fwd_first(LGraph *lg);
   void fwd_next();

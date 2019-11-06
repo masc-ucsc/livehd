@@ -99,12 +99,16 @@ Flow_base_iterator::Flow_base_iterator(bool _visit_sub)
   :global_it(Fast_edge_iterator::Fast_iter(_visit_sub))
   ,global_it_end(Fast_edge_iterator::Fast_iter(_visit_sub))
   ,visit_sub(_visit_sub) {
+
+  linear_phase = true;
 }
 
 Flow_base_iterator::Flow_base_iterator(LGraph *lg, bool _visit_sub)
   :global_it(lg->fast(_visit_sub).begin())
   ,global_it_end(Fast_edge_iterator::Fast_iter(_visit_sub))
   ,visit_sub(_visit_sub) {
+
+  linear_phase = true;
 }
 
 void Fwd_edge_iterator::Fwd_iter::topo_add_chain_down(const Node_pin &dst_pin) {
@@ -150,6 +154,50 @@ void Fwd_edge_iterator::Fwd_iter::topo_add_chain_fwd(const Node_pin &dst_pin) {
   }
 
   pending_stack.push_back(dst_node);
+}
+
+void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear(LGraph *top) {
+
+  I(linear_phase);
+
+  if (global_it == global_it_end) {
+    current_node.invalidate();
+    linear_phase = false;
+    global_it = top->fast(visit_sub).begin();
+    return;
+  }
+
+  while(linear_phase) {
+
+    auto next_node = *global_it;
+    ++global_it;
+    if (global_it == global_it_end) {
+      linear_phase = false;
+      global_it = top->fast(visit_sub).begin();
+    }
+
+    const auto &next_type = next_node.get_type();
+
+    bool is_topo_sorted;
+    if (next_type.is_pipelined()) {
+      // FIXME: do not assume that all the subs are pipelined (WRONG)
+      is_topo_sorted = true;
+    }else{
+      for(const auto edge:next_node.inp_edges()) {
+        if (!visited.count(next_node.get_compact())) {
+          is_topo_sorted = false;
+          break;
+        }
+      }
+    }
+
+    if (is_topo_sorted) {
+      visited.insert(next_node.get_compact());
+      current_node.update(next_node);
+      return;
+    }
+  }
+
 }
 
 void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
@@ -221,8 +269,13 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
 
 void Fwd_edge_iterator::Fwd_iter::fwd_first(LGraph *lg) {
   I(current_node.is_invalid());
+  I(linear_phase);
 
-  fwd_get_from_pending();
+  fwd_get_from_linear(lg);
+  if (current_node.is_invalid()) {
+    I(!linear_phase);
+    fwd_get_from_pending();
+  }
 
   I(!current_node.is_invalid());
 }
@@ -231,7 +284,14 @@ void Fwd_edge_iterator::Fwd_iter::fwd_next() {
 
   I(!current_node.is_invalid());
 
-  fwd_get_from_pending();
+  if (linear_phase) {
+    fwd_get_from_linear(current_node.get_top_lgraph());
+  }
+
+  if (current_node.is_invalid()) {
+    I(!linear_phase);
+    fwd_get_from_pending();
+  }
 }
 
 void Bwd_edge_iterator::Bwd_iter::bwd_first(LGraph *lg) {
@@ -240,5 +300,6 @@ void Bwd_edge_iterator::Bwd_iter::bwd_first(LGraph *lg) {
 }
 
 void Bwd_edge_iterator::Bwd_iter::bwd_next() {
+  I(false); // FIXME: forward works, now do backward
 }
 

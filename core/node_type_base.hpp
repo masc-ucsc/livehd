@@ -624,7 +624,6 @@ public:
 
 class Node_Type_SubGraph : public Node_Type {
 public:
-  // TODO: Create 2 subgraphs? one pipelined and another not
   Node_Type_SubGraph() : Node_Type("subgraph", SubGraph_Op, true){};
 };
 
