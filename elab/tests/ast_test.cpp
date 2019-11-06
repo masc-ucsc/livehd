@@ -29,81 +29,121 @@ public:
     test_rule_statement,
   };
 
+  void elaborate() {
+    patch_pass(); // Fix token_id_num or allow custom
 
-  void elaborate(){
     ast = std::make_unique<Ast_parser>(get_buffer(), test_rule);
 
-    EXPECT_TRUE(scan_is_token(Token_id_alnum));
-    std::string test = scan_text();
+    while(!scan_is_end()) {
+      EXPECT_TRUE(scan_is_token(Token_id_alnum));
+      std::string cmd = scan_text();
+      scan_next();
 
-    if (test == "a") {
-      ast->down();
-      ast->add(test_rule_identifier, scan_token());
-      ast->add(test_rule_top, scan_token());
-      ast->up(test_rule_statement);
-    }else if (test == "b") {
-      ast->down();
-      ast->down();
-      ast->add(test_rule_identifier, scan_token());
-      ast->add(test_rule_top, scan_token());
-      ast->up(test_rule_statement);
-      ast->up(test_rule_add);
-    }else if (test == "c") {
-      ast->down();
-      ast->add(test_rule_identifier, scan_token());
-      ast->down();
-      ast->add(test_rule_top, scan_token());
-      ast->up(test_rule_statement);
-      ast->up(test_rule_add);
-    }else{
-      EXPECT_TRUE(false); // test should match
+      if (cmd == "up") {
+        EXPECT_TRUE(scan_is_token(Token_id_num));
+        std::string val = scan_text();
+        scan_next();
+
+        auto rid_int = std::atoi(val.c_str());
+        Rule_id rid = static_cast<Rule_id>(rid_int);
+
+        ast->up(rid);
+      }else if (cmd == "down") {
+
+        ast->down();
+      }else if (cmd == "add") {
+        EXPECT_TRUE(scan_is_token(Token_id_num));
+        std::string val = scan_text();
+        scan_next();
+
+        auto rid_int = std::atoi(val.c_str());
+        Rule_id rid = static_cast<Rule_id>(rid_int);
+
+        ast->add(rid, scan_token());
+      }else{
+        EXPECT_TRUE(false); // What cmd??
+      }
     }
-
   }
 };
 
 TEST_F(Ast_test_setup, ast_trivial) {
 
-  char statement[] = "a+b=c\n";
+  char statement[] = "down add 13 add 17 up 18\n";
 
   Test_scanner scanner;
 
   Elab_scanner::Token_list tlist;
   scanner.parse("test", statement, tlist);
 
-  EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(1,0)).rule_id, Test_scanner::test_rules::test_rule_identifier);
-  EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(1,1)).rule_id, Test_scanner::test_rules::test_rule_top);
+  EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(1,0)).rule_id, 13);
+  EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(1,1)).rule_id, 17);
 
   ast = nullptr;
 }
 
 TEST_F(Ast_test_setup, ast_trivial2) {
 
-  char statement[] = "b\n";
+  char statement[] = " down down add 1 add 2 up 3 up 4 ";
 
   Test_scanner scanner;
 
   Elab_scanner::Token_list tlist;
   scanner.parse("test", statement, tlist);
 
-  EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(1,0)).rule_id, Test_scanner::test_rules::test_rule_add);
-  EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(2,0)).rule_id, Test_scanner::test_rules::test_rule_identifier);
-  EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(2,1)).rule_id, Test_scanner::test_rules::test_rule_top);
+  EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(1,0)).rule_id, 4);
+  EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(2,0)).rule_id, 1);
+  EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(2,1)).rule_id, 2);
 
   ast = nullptr;
 }
 
 TEST_F(Ast_test_setup, ast_trivialc) {
 
-  char statement[] = "c\n";
+  char statement[] = " down add 3 down add 6 up 7 up 8";
 
   Test_scanner scanner;
 
   Elab_scanner::Token_list tlist;
   scanner.parse("test", statement, tlist);
 
-  EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(1,0)).rule_id, Test_scanner::test_rules::test_rule_identifier);
-  EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(2,0)).rule_id, Test_scanner::test_rules::test_rule_top);
+  EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(1,0)).rule_id, 3);
+  EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(2,0)).rule_id, 6);
+
+  ast = nullptr;
+}
+
+TEST_F(Ast_test_setup, pseudo_eprp) {
+
+  char statement[] = " down add 3 down add 6 down up 7 add 8 up 9";
+
+  Test_scanner scanner;
+
+  Elab_scanner::Token_list tlist;
+  scanner.parse("test", statement, tlist);
+
+  EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(1,0)).rule_id, 3);
+  EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(2,0)).rule_id, 6);
+  EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(2,1)).rule_id, 8);
+
+  ast = nullptr;
+}
+
+
+TEST_F(Ast_test_setup, pseudo_eprp3) {
+
+  char statement[] = " down add 3 down add 6 down down down down up 66 up 33 add 88 up 77 up 7 add 8 up 9";
+
+  Test_scanner scanner;
+
+  Elab_scanner::Token_list tlist;
+  scanner.parse("test", statement, tlist);
+
+  EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(1,0)).rule_id, 3);
+  EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(2,0)).rule_id, 6);
+  EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(2,1)).rule_id, 8);
+  EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(3,0)).rule_id, 7);
+  EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(4,0)).rule_id, 88);
 
   ast = nullptr;
 }

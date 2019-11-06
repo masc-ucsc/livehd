@@ -309,6 +309,11 @@ public:
 
   void patch_pass(const absl::flat_hash_map<std::string, Token_id> &keywords);
 
+  void patch_pass() {
+      absl::flat_hash_map<std::string, Token_id> no_keywords;
+      patch_pass(no_keywords);
+  }
+
   //void parse(std::string_view name, std::string_view str);
   void parse(std::string_view name, std::string_view str, Token_list &tlist);
 
