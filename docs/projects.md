@@ -231,84 +231,34 @@ Main features:
 * Estimate clock gating efficiency, recommend clock gating points after dynamic run
 * Read liberty for power and have some approximate model for interconnect. The idea is good average out, not exact per cell.
 
-## Liberty/LEF/DEF
+## Liberty
 
-Liberty, LEF, and DEF are de-factor industry standards. The goal is to parse them and populate the graph library accordingly.
+Liberty is de-factor industry standards. The goal is to parse them and populate the graph library accordingly.
 
 Dependence: none
 
 Main features:
 
-* Liberty, LEF, and DEF are standard EDA file formats. We have some "read" pass in lgraph.
-* Capacity to read/write the three formats (load/save)
-* Create an object to hide the interface with a C++17 iterator.
-* Capacity to merge many files in the same object (inou_lef, inou_def, inout_liberty)
+* Liberty. We have some "read" pass in lgraph
+* Create an object to hide the interface with a C++17 iterator
+* Capacity to merge many files in the same object (inou_liberty)
 * The read formats should be backed with mmap_lib (zero load time). Single per lgdb directory
 * Multithread ready (infrequent update, frequent read)
 * Unit tests for correctness and performance
-* Populate subgraphs for Liberty and LEF
-* Create connectivity for LEF/DEF
-* Export LEF/DEF and liberty from internal DB. E.g: read several liberty, and then export a single one which is the aggregated.
-* LEF/DEF export can be tagged for a color
+* Wrapper to get timing for cells considering load
 
-## ASIC Analytical Placer
+## FPGA Legalization
 
-Implement an analytical placer that should work with ASIC. The idea is to share functionality with rippleFPGA, but to have
-a separate code too. E.g: FLOP clustering does not make sensor for FPGAs.
+Legalize FPGA cell/LUT placement.
 
-Dependence: Rapidwright, RippleFPGA
+Dependence: FPGA Placer and RapidWright
 
 Main features:
 
-* ASIC targets
-* Flop Clustering: "Flip-ﬂop Clustering by Weighted K-means Algorithm"
-* Use global router to be routing aware (maybe the RippleFPGA can leverage this too)
-* Overall flow based on: "BonnPlace: A Self-Stabilizing Placement Framework"
-
-Common goals with RippleFPGA:
-
-* If floorplaner is there, leverage floorplan, but fo not assume shape (square) in contour. Allow to place around each floorplan area (amorphous. A center of gravity per floorplan block)
-* Use timing in feedback
-* Use SuperSCS semidefinite
-* To allow fast incremental placement. Allow to do analytical over subset of design, and other areas are fixed (legalization to handle)
-* Critical paths are aligned
-* Support "annotations"
-    * Relative place (left/right/top/bottom)
-    * Alignment (true/false)
-    * Close by (add anchor)
-
-## Legalization
-
-Legalize ASIC/FPGA cell/LUT placement.
-
-Dependence: Rapidwright
-
-Main features:
-
-* Based on " A Fast, Robust Network Flow-based Standard-Cell Legalization Method for Minimizing Maximum Movement" but applied to ASIC and FPGA
+* Based on "A Fast, Robust Network Flow-based Standard-Cell Legalization Method for Minimizing Maximum Movement" but applied to FPGA
 * Handle incremental. Only marked blocks need to be legalized. Already legalized blocks should not move (faster incremental that avoids re-routing blocks)
 * Handle macros (SRAMs, DSPs, ....) that can have floating or fix location
-
-## Placer simulation annealing
-
-Implement a simulation annealing placer that should work with FPGA/ASIC.
-
-Dependence: Rapidwright
-
-Main features:
-
-* FPGA and ASIC targets
-* Can have many constraints:
-    * cluster flops
-    * Timing
-    * pin aligment
-    * favour structure
-    * Easy to add extra rules
-* It should be slow than analytical, but to speedup the search, it can start with an analitical place design.
-* Support "annotations"
-    * Relative place (left/right/top/bottom)
-    * Alignment (true/false)
-    * Close by (add anchor)
+* Handle packing and clock domains
 
 ## Floorplanner
 
@@ -403,15 +353,15 @@ Main features:
 
 * Do a full flow of LGraph for F1. Fast incremental
 
-## OpenRoad
+## OpenDB
 
-Integrate OpenRoad flows with LGraph
+Integrate OpenDB flows with LGraph
 
-Dependence: Liberty, LEF/DEF
+Dependence: none
 
 Main features:
-* Pick one of the OpenROAD projects and port it to LGraph. Compare against original.
-* Mostly a show cases for OpenROAD of the advantages of using LGraph as the core.
+* The new OpenDB from OpenRoad is a good backend (ASIC) bridge that we may want to build.
+* Through OpenDB we can leverage full ASIC synthesis and tools like OpenSTA
 
 ## Pyrope to LNAST (Kenneth Mayer)
 
@@ -457,30 +407,30 @@ Main features:
     * Have DB with fuzz regex to point potentially similar variables
 * Have a fuzz regex to find very similar messages to collapse at entry ("missing string" or "string not found")
 
-## RippleFPGA
+## FPGA Placer
 
-RippleFPGA is one of the best open source placers avaiable for FPGAs (ICCD competition). The idea is to integrate
-it with LGraph. RippleFPGA is an analytical placer.
-
-https://github.com/cuhk-eda/ripple-fpga
+Build an analytical placer for FPGAs. We do not reuse existing to have better target for incremental. 
 
 Dependence: none
 
 Main features:
-* Create a bridge to/from LGraph and ripple-fpga
-* Replace solver with https://developers.google.com/optimization/lp/glop
-* Replace patoh with https://github.com/SebastianSchlag/kahypar
+* Use https://developers.google.com/optimization/lp/glop as solver
+* Use with https://github.com/SebastianSchlag/kahypar for min-cut
 * Being able to transfer placed design to Rapidwright
-* Remove boost
 * Target Alveo U250
 
-Common goals with ASIC Analytical Placer:
+Some characteristics
 
-* If floorplaner is there, leverage floorplan, but fo not assume shape (square) in contour. Allow to place around each floorplan area (amorphous. A center of gravity per floorplan block)
+* Overall flow based on: "BonnPlace: A Self-Stabilizing Placement Framework"
+* If floorplaner is there, leverage floorplan, but do not assume shape (square) in contour. Allow to place around each floorplan area (amorphous. A center of gravity per floorplan block)
 * Use timing in feedback
-* Use SuperSCS semidefinite
+* Cluster flops (buses)
+* Decide SuperSCS semidefinite or eigen++ or in-place solver
 * To allow fast incremental placement. Allow to do analytical over subset of design, and other areas are fixed (legalization to handle)
 * Critical paths are aligned
+* Use timing
+* Use a rough global router to "spread" when needed.
+* Use constraint solver for packing
 * Support "annotations"
     * Relative place (left/right/top/bottom)
     * Alignment (true/false)
@@ -566,10 +516,14 @@ Maybe use https://github.com/Boolector/boolector
 
 ## Mockturtle (Qian Chen)
 
-Integrate EPFL mockturtle (https://github.com/lsils/mockturtle) with LGraph. The main charactersistics:
+Integrate EPFL mockturtle (https://github.com/lsils/mockturtle) with LGraph. The main characteristics:
 
 * Use mockturtle to tmap to LUTs
 * Use mockturtle to synthesize (optimize) logic
+* Enable cut-rewrite as an option
+* Enable hierarchy cross optimization
+* Explore cross cuts optimization (flops/arith/...)
+* Re-timing
 * Map to LUTs only gates and non-wide arithmetic. E.g: 32bit add is not mapped to LUTS, but a 2-bit add is mapped.
 * List of resources to not map:
     * Large ALUs. Large ALUs should have an OpenWare block (hardcoded in FPGAs and advanced adder options in ASIC)
