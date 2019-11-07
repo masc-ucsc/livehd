@@ -201,6 +201,7 @@ public:
   bool              is_type(const Node_Type_Op op) const;
   bool              is_type_sub() const;
   bool              is_type_io() const;
+  bool              is_type_loop_breaker() const;
 
   Hierarchy_index   hierarchy_go_down() const;
   Hierarchy_index   hierarchy_go_up() const;

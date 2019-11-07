@@ -221,6 +221,10 @@ bool Node::is_type_io() const {
   return current_g->is_graph_io(nid);
 }
 
+bool Node::is_type_loop_breaker() const {
+  return current_g->is_type_loop_breaker(nid);
+}
+
 bool Node::is_type_sub() const {
   return current_g->is_sub(nid);
 }

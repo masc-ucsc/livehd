@@ -90,8 +90,9 @@ public:
   LGraph        *try_find_lgraph(Lg_type_id lgid) const;
 
   bool          exists(Lg_type_id lgid) const {
-    if (attributes.size() >= lgid || lgid.is_invalid())
+    if (attributes.size() <= lgid || lgid.is_invalid())
       return false;
+    I(attributes.size() == sub_nodes.size());
     return sub_nodes[lgid].get_lgid() == lgid;
   }
 

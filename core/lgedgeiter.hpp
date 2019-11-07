@@ -59,17 +59,21 @@ public:
     Index_ID          nid;
     const bool        visit_sub;
 
+
+  public:
+    Fast_iter(LGraph *_g, LGraph *_cg, const Hierarchy_index &_hidx, const Index_ID _nid, bool _visit_sub) : top_g(_g), current_g(_cg), hidx(_hidx), nid(_nid), visit_sub(_visit_sub) { }
+    Fast_iter(bool _visit_sub) : top_g(nullptr), current_g(nullptr), visit_sub(_visit_sub) { }
+
     Fast_iter &operator=(const Fast_iter &it) {
+      // TO allow rewind/recover the iterator
       top_g     = it.top_g;
       current_g = it.current_g;
       hidx      = it.hidx;
       nid       = it.nid;
       I(visit_sub==it.visit_sub);
-    }
 
-  public:
-    Fast_iter(LGraph *_g, LGraph *_cg, const Hierarchy_index &_hidx, const Index_ID _nid, bool _visit_sub) : top_g(_g), current_g(_cg), hidx(_hidx), nid(_nid), visit_sub(_visit_sub) { }
-    Fast_iter(bool _visit_sub) : top_g(nullptr), current_g(nullptr), visit_sub(_visit_sub) { }
+      return *this;
+    }
 
     Fast_iter &operator++();
 

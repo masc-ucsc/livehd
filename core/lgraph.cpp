@@ -80,7 +80,7 @@ LGraph *LGraph::open(std::string_view path, Lg_type_id lgid) {
   if (unlikely(lib == nullptr))
     return nullptr;
 
-  LGraph *lg = lib->try_find_lgraph(path, lgid);
+  LGraph *lg = lib->try_find_lgraph(lgid);
   if (likely(lg!=nullptr)) {
     return lg;
   }

@@ -23,11 +23,6 @@ Node_Type::_init::_init() {
   Node_Type::table[And_Op]               = new Node_Type_And();
   Node_Type::table[Or_Op]                = new Node_Type_Or();
   Node_Type::table[Xor_Op]               = new Node_Type_Xor();
-  Node_Type::table[SFlop_Op]             = new Node_Type_Flop();
-  Node_Type::table[AFlop_Op]             = new Node_Type_AFlop();
-  Node_Type::table[Latch_Op]             = new Node_Type_Latch();
-  Node_Type::table[FFlop_Op]             = new Node_Type_FFlop();
-  Node_Type::table[Memory_Op]            = new Node_Type_Memory();
   Node_Type::table[LessThan_Op]          = new Node_Type_LessThan();
   Node_Type::table[GreaterThan_Op]       = new Node_Type_GreaterThan();
   Node_Type::table[LessEqualThan_Op]     = new Node_Type_LessEqualThan();
@@ -42,9 +37,7 @@ Node_Type::_init::_init() {
   Node_Type::table[ShiftLeft_Op]         = new Node_Type_ShiftLeft();
   Node_Type::table[LUT_Op]               = new Node_Type_LUT();
   Node_Type::table[GraphIO_Op]           = new Node_Type_GraphIO();
-  Node_Type::table[SubGraph_Op]          = new Node_Type_SubGraph();
-  Node_Type::table[U32Const_Op]          = new Node_Type_U32Const();
-  Node_Type::table[StrConst_Op]          = new Node_Type_StrConst();
+
   Node_Type::table[CfgAssign_Op]         = new Node_Type_CfgAssign();
   Node_Type::table[CfgIf_Op]             = new Node_Type_CfgIf();
   Node_Type::table[CfgFunctionCall_Op]   = new Node_Type_CfgFunctionCall();
@@ -55,6 +48,16 @@ Node_Type::_init::_init() {
   Node_Type::table[DontCare_Op]          = new Node_Type_DontCare();
   Node_Type::table[DfgRef_Op]            = new Node_Type_DfgRef();
   Node_Type::table[DfgPendingGraph_Op]   = new Node_Type_DfgPendingGraph();
+
+  Node_Type::table[Loop_breaker_begin]   = new Node_Type_Invalid();
+  Node_Type::table[SFlop_Op]             = new Node_Type_Flop();
+  Node_Type::table[AFlop_Op]             = new Node_Type_AFlop();
+  Node_Type::table[Latch_Op]             = new Node_Type_Latch();
+  Node_Type::table[FFlop_Op]             = new Node_Type_FFlop();
+  Node_Type::table[Memory_Op]            = new Node_Type_Memory();
+  Node_Type::table[SubGraph_Op]          = new Node_Type_SubGraph();
+  Node_Type::table[U32Const_Op]          = new Node_Type_U32Const();
+  Node_Type::table[StrConst_Op]          = new Node_Type_StrConst();
 
   I(Invalid_Op == 0);
   for (size_t i = Invalid_Op; i <= SubGraph_Op; i++) {
@@ -79,3 +82,4 @@ Node_Type_Op Node_Type::get(std::string_view opname) {
 }
 
 bool Node_Type::is_type(std::string_view opname) { return (name2node.find(opname) != name2node.end()); }
+

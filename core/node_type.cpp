@@ -64,6 +64,16 @@ bool LGraph_Node_Type::is_type_const(Index_ID nid) const {
       StrConstMin_Op && op <= StrConstMax_Op);
 }
 
+bool LGraph_Node_Type::is_type_loop_breaker(Index_ID nid) const {
+  I(nid < node_type_table.size());
+  I(node_internal[nid].is_node_state());
+  I(node_internal[nid].is_master_root());
+
+  const Node_Type_Op &op = node_type_table[nid];
+
+  return op > Loop_breaker_begin && op < Loop_breaker_end;
+}
+
 bool LGraph_Node_Type::is_type_sub(Index_ID nid) const {
   I(nid < node_type_table.size());
   I(node_internal[nid].is_node_state());

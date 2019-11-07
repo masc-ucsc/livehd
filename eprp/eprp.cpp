@@ -37,6 +37,7 @@ bool Eprp::rule_label_path(const std::string &cmd_line, Eprp_var &next_var) {
   if (!scan_is_token(Token_id_label)) return false;
 
   std::string label = scan_text();
+
   ast->add(Eprp_rule_label_path, scan_token());
 
   scan_next();  // Skip LABEL token

@@ -176,15 +176,17 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear(LGraph *top) {
       global_it = top->fast(visit_sub).begin();
     }
 
-    const auto &next_type = next_node.get_type();
-
-    bool is_topo_sorted;
-    if (next_type.is_pipelined()) {
-      // FIXME: do not assume that all the subs are pipelined (WRONG)
-      is_topo_sorted = true;
+    bool is_topo_sorted = true;
+    if (next_node.is_type_loop_breaker()) {
+      // FIXME: next_node.is_type_sub()
+      // FIXME: do not assume that all the subs are loop_breakers. Check with sub
     }else{
       for(const auto edge:next_node.inp_edges()) {
-        if (!visited.count(next_node.get_compact())) {
+        auto driver_node = edge.driver.get_node();
+        // NOTE: For hierarchical, if the driver_node is an IO (input). It
+        // could try to go up to see if the node is pipelined or not visited
+
+        if (!visited.count(driver_node.get_compact()) && !driver_node.is_type_loop_breaker()) { // fwd
           is_topo_sorted = false;
           break;
         }
@@ -197,7 +199,6 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear(LGraph *top) {
       return;
     }
   }
-
 }
 
 void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
@@ -286,12 +287,13 @@ void Fwd_edge_iterator::Fwd_iter::fwd_next() {
 
   if (linear_phase) {
     fwd_get_from_linear(current_node.get_top_lgraph());
+    GI(current_node.is_invalid(), !linear_phase);
+    if (current_node.is_invalid())
+      fwd_get_from_pending();
+    return;
   }
 
-  if (current_node.is_invalid()) {
-    I(!linear_phase);
-    fwd_get_from_pending();
-  }
+  fwd_get_from_pending();
 }
 
 void Bwd_edge_iterator::Bwd_iter::bwd_first(LGraph *lg) {

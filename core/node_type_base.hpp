@@ -27,20 +27,6 @@ enum Node_Type_Op : uint64_t {
   Pick_Op,
 #if 1
   // WARNING: deprecated once we have LUTs working (mockturtle)
-  // op_class: logic
-  And_Op,
-  Or_Op,
-  Xor_Op,
-#endif
-  // op_class: register
-  SFlop_Op,  // sync reset flop
-  AFlop_Op,  // async reset flop
-  Latch_Op,
-  FFlop_Op,
-  // op_class: memory
-  Memory_Op,
-#if 1
-  // WARNING: deprecated once we have LUTs working (mockturtle)
   // op_class: cmp
   LessThan_Op,
   GreaterThan_Op,
@@ -77,6 +63,22 @@ enum Node_Type_Op : uint64_t {
   DfgRef_Op,
   DfgPendingGraph_Op,
   // Add here, operators needed
+#if 1
+  // WARNING: deprecated once we have LUTs working (mockturtle)
+  // op_class: logic
+  And_Op,
+  Or_Op,
+  Xor_Op,
+#endif
+  //------------------BEGIN PIPELINED (break LOOPS)
+  Loop_breaker_begin,
+  // op_class: register
+  SFlop_Op,  // sync reset flop
+  AFlop_Op,  // async reset flop
+  Latch_Op,
+  FFlop_Op,
+  // op_class: memory
+  Memory_Op,
   SubGraph_Op,
   U32Const_Op,
   StrConst_Op,
@@ -89,9 +91,8 @@ enum Node_Type_Op : uint64_t {
   // op_class: str
   StrConstMin_Op,
   StrConstMax_Op = StrConstMin_Op + ((1ULL << 32) - 1),
-  // op_class: sub
-  TechMapMin_Op,
-  TechMapMax_Op = TechMapMin_Op + ((1ULL << 32) - 1),
+  Loop_breaker_end,
+  //------------------END PIPELINED (break LOOPS)
   //op_class: lut
   LUTMin_Op,
   LUTMax_Op = LUTMin_Op + ((1ULL << (1ULL << LUT_input_bits)) - 1)
@@ -629,12 +630,12 @@ public:
 
 class Node_Type_U32Const : public Node_Type {
 public:
-  Node_Type_U32Const() : Node_Type("u32const", U32Const_Op, false) { outputs.push_back("Y"); };
+  Node_Type_U32Const() : Node_Type("u32const", U32Const_Op, true) { outputs.push_back("Y"); };
 };
 
 class Node_Type_StrConst : public Node_Type {
 public:
-  Node_Type_StrConst() : Node_Type("strconst", StrConst_Op, false) { outputs.push_back("Y"); };
+  Node_Type_StrConst() : Node_Type("strconst", StrConst_Op, true) { outputs.push_back("Y"); };
 };
 
 class Node_Type_LUT : public Node_Type {
