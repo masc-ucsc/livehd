@@ -381,8 +381,7 @@ Node_pin Node::setup_sink_pin(Port_ID pid) {
   if (current_g->is_type_sub(nid)) {
     Lg_type_id sub_lgid = current_g->get_type_sub(nid);
     const auto &sub = current_g->get_library().get_sub(sub_lgid);
-    I(sub.has_graph_pin(pid));
-    I(sub.is_input_from_graph_pos(pid),"ERROR: An output can not be a sink pin");
+    I(sub.has_instance_pin(pid));
   }
 #endif
 
