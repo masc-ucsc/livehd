@@ -30,4 +30,3 @@ int main(int argc, char **argv){
   std::vector<Token> tlist;
 	scanner.parse(argv[1], memblock, tlist);
 }
-

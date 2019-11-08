@@ -20,6 +20,8 @@
 #include "ast.hpp"
 #include "elab_scanner.hpp"
 
+#define DEBUG
+
 // variable argument number macro (adapted from stackoverflow.com/questions/3046889/optional-parameters-with-c-macros)
 #define SCAN_IS_TOKEN_1_ARGS(tok) chk_and_consume(tok)
 #define SCAN_IS_TOKEN_2_ARGS(tok, rid) chk_and_consume(tok, rid)
@@ -27,46 +29,86 @@
 #define GET_3RD_ARG(arg1, arg2, arg3, ...) arg3
 #define SCAN_IS_TOKEN_MACRO_CHOOSER(...) \
   GET_3RD_ARG(__VA_ARGS__, SCAN_IS_TOKEN_2_ARGS, SCAN_IS_TOKEN_1_ARGS)
-
+  
 #define SCAN_IS_TOKEN(...) SCAN_IS_TOKEN_MACRO_CHOOSER(__VA_ARGS__)(__VA_ARGS__)
 
+#ifdef DEBUG
+#define PRINT(...) fmt::print(__VA_ARGS__);
+#else
+#define PRINT(...)
+#endif
+  
 // function-like macros
-#define INIT_FUNCTION(...) \
-  debug_stat.rules_called++; \
-  uint64_t starting_tokens = tokens_consumed; \
-  uint32_t starting_add = add_stack.size(); \
-  uint32_t starting_down = down_stack.size(); \
-  uint32_t starting_subtree = subtree_stack.size(); \
-  uint32_t starting_subtree_indices = subtree_indices.size(); \
-  int down_calls = 0; \
-  int up_calls = 0; \
-  DEBUG_DOWN()
+#ifdef DEBUG
+    #define INIT_FUNCTION(...) \
+    debug_stat.rules_called++; \
+    fmt::print(__VA_ARGS__); \
+    uint64_t starting_tokens = tokens_consumed; \
+    uint32_t starting_add = add_stack.size(); \
+    uint32_t starting_down = down_stack.size(); \
+    uint32_t starting_subtree = subtree_stack.size(); \
+    uint32_t starting_subtree_indices = subtree_indices.size(); \
+    int down_calls = 0; \
+    int up_calls = 0; \
+    AST_DOWN()
+#else
+    #define INIT_FUNCTION(...) \
+    uint64_t starting_tokens = tokens_consumed; \
+    uint32_t starting_add = add_stack.size(); \
+    uint32_t starting_down = down_stack.size(); \
+    uint32_t starting_subtree = subtree_stack.size(); \
+    uint32_t starting_subtree_indices = subtree_indices.size(); \
+    int down_calls = 0; \
+    int up_calls = 0; \
+    AST_DOWN()
+#endif
 
-#define RULE_FAILED(...) \
-  if(tokens_consumed - starting_tokens > 0){ \
-    go_back(tokens_consumed - starting_tokens); \
-  }\
-  debug_stat.rules_failed++; \
-  DEBUG_UP(0); \
-  add_stack.resize(starting_add); \
-  down_stack.resize(starting_down); \
-  subtree_stack.resize(starting_subtree); \
-  subtree_indices.resize(starting_subtree_indices); \
-  return false
+#ifdef DEBUG
+    #define RULE_FAILED(...) \
+    fmt::print(__VA_ARGS__); \
+    if(tokens_consumed - starting_tokens > 0){ \
+        go_back(tokens_consumed - starting_tokens); \
+    }\
+    debug_stat.rules_failed++; \
+    AST_UP(0); \
+    add_stack.resize(starting_add); \
+    down_stack.resize(starting_down); \
+    subtree_stack.resize(starting_subtree); \
+    subtree_indices.resize(starting_subtree_indices); \
+    return false
+#else
+    #define RULE_FAILED(...) \
+    if(tokens_consumed - starting_tokens > 0){ \
+        go_back(tokens_consumed - starting_tokens); \
+    }\
+    AST_UP(0); \
+    add_stack.resize(starting_add); \
+    down_stack.resize(starting_down); \
+    subtree_stack.resize(starting_subtree); \
+    subtree_indices.resize(starting_subtree_indices); \
+    return false
+#endif
 
+#ifdef DEBUG
 #define RULE_SUCCESS(message, rule) \
-  DEBUG_UP(rule); \
+  fmt::print(message); \
+  AST_UP(rule); \
   debug_stat.rules_matched++;\
   return true
+#else
+#define RULE_SUCCESS(message, rule) \
+  AST_UP(rule); \
+  return true
+#endif
 
-#define DEBUG_DOWN() \
+#define AST_DOWN() \
   down_calls++; \
-  debug_down()
+  ast_down()
 
-#define DEBUG_UP(rule) \
+#define AST_UP(rule) \
   up_calls++; \
-  debug_up(rule)
-
+  ast_up(rule)
+  
 // control
 constexpr Token_id Pyrope_id_if     = 128;
 constexpr Token_id Pyrope_id_else   = 129;
@@ -115,21 +157,21 @@ protected:
     uint16_t ast_down_calls;
     uint16_t ast_add_calls;
   };
-
+  
   debug_statistics debug_stat{0,0,0,0,0,0,0,0};
   std::vector<std::string> ast_call_trace;
-
+  
   std::vector<std::tuple<uint64_t, uint8_t, Rule_id, Token_entry>> add_stack;
   std::vector<std::tuple<uint64_t, uint8_t, Rule_id, Token_entry>> down_stack;
   std::vector<std::tuple<uint64_t, uint8_t, Rule_id, Token_entry>> subtree_stack;
   std::vector<std::tuple<uint32_t, uint32_t>> subtree_indices;
-
+  
   uint64_t tokens_consumed = 0;
   uint64_t subtree_index = 0;
-
+  
   std::unique_ptr<Ast_parser> ast;
   absl::flat_hash_map<std::string, Token_id> pyrope_keyword;
-
+  
   enum Prp_rules: Rule_id {
     Prp_invalid = 0,
     Prp_rule,
@@ -144,7 +186,7 @@ protected:
     Prp_rule_punch_format,
     Prp_rule_function_pipe,
     Prp_rule_fcall_explicit,
-    Prp_rule_fcall_implicit,
+    Prp_rule_fcall_implicit, 
     Prp_rule_for_index,
     Prp_rule_assignment_expression,
     Prp_rule_logical_expression,
@@ -192,13 +234,13 @@ protected:
     Prp_rule_string_constant,
     Prp_rule_overload_name,
     Prp_rule_overload_exception,
-
+    
   };
-
+  
   void elaborate();
-
+  
   void eat_comments();
-
+  
   bool rule_start();
   bool rule_code_blocks();
   bool rule_code_block_int();
@@ -258,22 +300,22 @@ protected:
   bool rule_scope_colon();
   bool rule_numerical_constant();
   bool rule_string_constant();
-
-  bool debug_unconsume();
-  bool debug_consume();
+  
+  bool unconsume_token();
+  bool consume_token();
   bool go_back(uint64_t num_tok);
-  void debug_up(Rule_id rid);
-  void debug_down();
-  void debug_add(Rule_id rid, Token_entry token);
+  void ast_up(Rule_id rid);
+  void ast_down();
+  void ast_add(Rule_id rid, Token_entry token);
   bool chk_and_consume(Token_id tok, Rule_id rid=Prp_invalid);
   std::string rule_id_to_string(Rule_id rid);
   std::string tok_id_to_string(Token_id tok);
-
+  
   void ast_handler();
   void ast_builder();
   void ast_trimmer();
   void process_ast();
-
+  
 public:
   Prp() {
     pyrope_keyword["if"]     = Pyrope_id_if;
@@ -305,7 +347,7 @@ public:
     pyrope_keyword["in"]        = Pyrope_id_in;
     pyrope_keyword["by"]        = Pyrope_id_by;
     pyrope_keyword["punch"]     = Pyrope_id_punch;
-
+    
     pyrope_keyword["I"] = Pyrope_id_assertion;
     pyrope_keyword["N"] = Pyrope_id_negation;
     pyrope_keyword["~"] = Pyrope_id_tilde;

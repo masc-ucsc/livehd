@@ -16,9 +16,9 @@ public:
     void elaborate(){
       patch_pass(pyrope_keyword);
       ast = std::make_unique<Ast_parser>(get_buffer(), Prp_rule);
-
+      
       fmt::print("Starting to parse\n");
-
+      
       while(!scan_is_end()){
         dump_token();
         eat_comments();
@@ -28,10 +28,10 @@ public:
           return;
         }
       }
-
+      
       fmt::print("Finished Parsing\n");
       ast_builder();
-
+      
       ast_handler();
 
       ast = nullptr;
@@ -56,17 +56,17 @@ public:
 
 TEST_F(Prp_test, assignment_expression1){
   Prp_test_class scanner;
-
+  
   std::vector<std::string_view> tree_traversal_check_tokens;
   std::vector<std::string> tree_traversal_check_rules;
-
+  
   tree_traversal_check_tokens.push_back("\%out");
   tree_traversal_check_tokens.push_back("as");
   tree_traversal_check_tokens.push_back("(");
   tree_traversal_check_tokens.push_back("__bits");
   tree_traversal_check_tokens.push_back("8");
   tree_traversal_check_tokens.push_back(")");
-
+  
   tree_traversal_check_rules.push_back("Program");
   tree_traversal_check_rules.push_back("Assignment expression");
   tree_traversal_check_rules.push_back("Identifier");
@@ -77,19 +77,18 @@ TEST_F(Prp_test, assignment_expression1){
   tree_traversal_check_rules.push_back("Identifier");
   tree_traversal_check_rules.push_back("Numerical constant");
   tree_traversal_check_rules.push_back("Tuple notation");
-
-  std::vector<Token> tlist;
-  scanner.parse("assignment_expression1", "\%out as (__bits:8)\n", tlist);
+  
+  scanner.parse("assignment_expression1", "\%out as (__bits:8)\n");
   EXPECT_EQ(tree_traversal_check_tokens, scanner.tree_traversal_tokens);
   EXPECT_EQ(tree_traversal_check_rules, scanner.tree_traversal_rules);
 }
 
 TEST_F(Prp_test, assignment_expression2){
   Prp_test_class scanner;
-
+  
   std::vector<std::string_view> tree_traversal_check_tokens;
   std::vector<std::string> tree_traversal_check_rules;
-
+  
   tree_traversal_check_tokens.push_back("\%out");
   tree_traversal_check_tokens.push_back("as");
   tree_traversal_check_tokens.push_back("(");
@@ -100,7 +99,7 @@ TEST_F(Prp_test, assignment_expression2){
   tree_traversal_check_tokens.push_back("as");
   tree_traversal_check_tokens.push_back("__bits");
   tree_traversal_check_tokens.push_back("10");
-
+  
   tree_traversal_check_rules.push_back("Program");
   tree_traversal_check_rules.push_back("Code blocks");
   tree_traversal_check_rules.push_back("Assignment expression");
@@ -118,19 +117,18 @@ TEST_F(Prp_test, assignment_expression2){
   tree_traversal_check_rules.push_back("RHS expression property");
   tree_traversal_check_rules.push_back("Identifier");
   tree_traversal_check_rules.push_back("Numerical constant");
-
-  std::vector<Token> tlist;
-  scanner.parse("assignment_expression2", "\%out as (__bits:8)\n\%out1 as __bits:10\n", tlist);
+  
+  scanner.parse("assignment_expression2", "\%out as (__bits:8)\n\%out1 as __bits:10\n");
   EXPECT_EQ(tree_traversal_check_tokens, scanner.tree_traversal_tokens);
   EXPECT_EQ(tree_traversal_check_rules, scanner.tree_traversal_rules);
 }
 
 TEST_F(Prp_test, if_statement1){
   Prp_test_class scanner;
-
+  
   std::vector<std::string_view> tree_traversal_check_tokens;
   std::vector<std::string> tree_traversal_check_rules;
-
+  
   tree_traversal_check_tokens.push_back("if");
   tree_traversal_check_tokens.push_back("(");
   tree_traversal_check_tokens.push_back("x");
@@ -147,7 +145,7 @@ TEST_F(Prp_test, if_statement1){
   tree_traversal_check_tokens.push_back("+");
   tree_traversal_check_tokens.push_back("x");
   tree_traversal_check_tokens.push_back("}");
-
+  
   tree_traversal_check_rules.push_back("Program");
   tree_traversal_check_rules.push_back("If statement");
   tree_traversal_check_rules.push_back("If statement");
@@ -173,10 +171,8 @@ TEST_F(Prp_test, if_statement1){
   tree_traversal_check_rules.push_back("Additive expression");
   tree_traversal_check_rules.push_back("Identifier");
   tree_traversal_check_rules.push_back("Block body");
-
-
-  std::vector<Token> tlist;
-  scanner.parse("if_statement1", "if (x>5){\nb = 10\n c = 10 + x\n}\n", tlist);
+  
+  scanner.parse("if_statement1", "if (x>5){\nb = 10\n c = 10 + x\n}\n");
   EXPECT_EQ(tree_traversal_check_tokens, scanner.tree_traversal_tokens);
   EXPECT_EQ(tree_traversal_check_rules, scanner.tree_traversal_rules);
 }
