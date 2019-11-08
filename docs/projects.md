@@ -466,20 +466,38 @@ Main requirements:
 
 Some potential implementation:
 
+Need to have a way to generate a "patch/diff" from the lgdb. The idea is that
+we send commands to the could with a lgdb, then we do a merge. If there are
+conflicts (merge), we need to retrigger.  Similar to the "development" process
+but with livehd (lgdb directory) runs. For the diff/patch command, I would start with
+https://github.com/sisong/HDiffPatch
+
+The hdiffpatch should be fine for everything but graph_library. This one may require a special program
+to merge. E.g:
+
+```
+hdiffz -g#lgdb/graph_library.json  lgdb lgdb2 patch
+hpatchz  lgdb patch lgdb3
+```
+
+After each command, the "delta" is sent back and applied to the front
+
 * REST API for all the servers.
 * Use httplib. See lgraph/main/userver_test.cpp and lgraph/main/uclient_test.cpp
 * lgshell commands
     * cloud.server
     * cloud.ping     ; ping a server or front-end
     * cloud.frontend ; setup a front-end server to distributue the work to existing servers
-    * cloud.client   ; setup lgshell as client. next commands may go to server
+    * cloud.link     ; setup lgshell as client. Next commands may go to server (in priority order)
 * Server and client must have same git clone token (version) check for consistency.
-* When in server mode, transfer client files, monitor server files, and transfer back
+* When in server mode, transfer client files, monitor server files, and transfer back. The trasfer uses the patch/diff. If patch files, it retriggers again.
 * Add bazel the option of creating a alpine docker image directly to deploy lgraph in the cloud as an rest API service
 * Create bringup and shutdown inside lgshell. Allow for local machines and gcloud/aws
-    * cloud.start ssh:mada1 ssh:mada2
-    * cloud.start gcloud xxx-parameters-for-gcloud
+    * cloud.start priority:1 local:true
+    * cloud.start priority:2 ssh:mada1
+    * cloud.start priority:33 cloud:xxx-parameters-for-gcloud
     * cloud.shutdown # kills any cloud.start that was spawned before
+    * cloud.list   # list servers available at this lgdb setup (previous clould.start...)
 
 ## SAT Solver
 
