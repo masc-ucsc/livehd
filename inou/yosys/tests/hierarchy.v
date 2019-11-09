@@ -14,8 +14,8 @@ parameter c = 0;
 parameter [7:0] d = 0;
 input [3:0] a, b;
 output [7:0] y1, y2, y3, y4;
-assign y1 = a;
-assign y2 = b;
-assign y3 = c;
+assign y1 = a^b;
+assign y2 = b+c;
+assign y3 = y2+a;
 assign y4 = d;
 endmodule

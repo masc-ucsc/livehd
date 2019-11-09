@@ -79,11 +79,7 @@ void Hierarchy_tree::regenerate() {
   for(const auto &index:depth_preorder()) {
     std::string indent(index.level, ' ');
     const auto &index_data = get_data(index);
-    fmt::print("{} l:{} p:{} lgid:{} nid:{}\n", indent, index.level, index.pos, index_data.lgid, index_data.up_nid);
-  }
-  auto *tree_pos = Ann_node_tree_pos::ref(top);
-  for(auto it:*tree_pos) {
-    fmt::print("top first:{} second:{}\n", it.first.get_nid(), it.second);
+    //fmt::print("{} l:{} p:{} lgid:{} nid:{}\n", indent, index.level, index.pos, index_data.lgid, index_data.up_nid);
   }
 }
 

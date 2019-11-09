@@ -271,7 +271,7 @@ bool Node::is_type_sub_present() const {
 
   auto *sub_lg = get_type_sub_lgraph();
   if (sub_lg)
-    return sub_lg->is_empty();
+    return !sub_lg->is_empty();
 
   return false;
 }

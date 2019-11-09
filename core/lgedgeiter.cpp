@@ -167,13 +167,15 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear(LGraph *top) {
     return;
   }
 
-  while(linear_phase) {
+  while(true) {
 
     auto next_node = *global_it;
     ++global_it;
     if (global_it.is_invalid()) {
-      linear_phase = false;
       global_it = top->fast(visit_sub).begin();
+      linear_phase = false;
+			current_node.invalidate();
+			return;
     }
 
     bool is_topo_sorted = true;

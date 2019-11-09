@@ -66,9 +66,15 @@ void Inou_graphviz::do_hierarchy(LGraph *g) {
   g->dump_down_nodes();
 
   for (const auto node : g->fast(true)) {
-    fmt::print("lg:{} node:{} type:{}\n", node.get_class_lgraph()->get_name(), node.debug_name(), node.get_type().get_name());
-    data += fmt::format("lg:{} node:{} type:{}\n", node.get_class_lgraph()->get_name(), node.debug_name(), node.get_type().get_name());
+    if (!node.is_type_sub())
+      continue;
+    //fmt::print("lg:{} node:{} type:{}\n", node.get_class_lgraph()->get_name(), node.debug_name(), node.get_type().get_name());
+
+    const auto &child_sub = node.get_type_sub_node();
+    data += fmt::format(" {}->{};", node.get_class_lgraph()->get_name(), child_sub.get_name());
   }
+
+  data += "\n}\n";
 
   std::string file = absl::StrCat(odir, "/", g->get_name(), "_hier.dot");
   int         fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
