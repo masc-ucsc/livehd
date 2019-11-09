@@ -71,15 +71,17 @@ Fast_edge_iterator::Fast_iter &Fast_edge_iterator::Fast_iter::operator++() {
   if (nid.is_invalid()) {
     if (visit_sub) {
       auto next_hidx = top_g->ref_htree()->get_depth_preorder_next(hidx);
-      if (!next_hidx.is_invalid()) {
+      while (!next_hidx.is_invalid()) {
         hidx = next_hidx;
         current_g = top_g->ref_htree()->ref_lgraph(hidx);
         nid = current_g->fast_first();
-      }else{
-        current_g = top_g;
-        I(nid == 0);
-        hidx.invalidate();
+        if(!nid.is_invalid())
+          return *this;
+        next_hidx = top_g->ref_htree()->get_depth_preorder_next(hidx);
       }
+      current_g = top_g;
+      I(nid == 0);
+      hidx.invalidate();
     }else{
       I(nid == 0);
       hidx.invalidate();
@@ -97,7 +99,6 @@ Fast_edge_iterator::Fast_iter Fast_edge_iterator::begin() const {
 
 Flow_base_iterator::Flow_base_iterator(bool _visit_sub)
   :global_it(Fast_edge_iterator::Fast_iter(_visit_sub))
-  ,global_it_end(Fast_edge_iterator::Fast_iter(_visit_sub))
   ,visit_sub(_visit_sub) {
 
   linear_phase = true;
@@ -105,7 +106,6 @@ Flow_base_iterator::Flow_base_iterator(bool _visit_sub)
 
 Flow_base_iterator::Flow_base_iterator(LGraph *lg, bool _visit_sub)
   :global_it(lg->fast(_visit_sub).begin())
-  ,global_it_end(Fast_edge_iterator::Fast_iter(_visit_sub))
   ,visit_sub(_visit_sub) {
 
   linear_phase = true;
@@ -160,7 +160,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear(LGraph *top) {
 
   I(linear_phase);
 
-  if (global_it == global_it_end) {
+  if (global_it.is_invalid()) {
     current_node.invalidate();
     linear_phase = false;
     global_it = top->fast(visit_sub).begin();
@@ -171,7 +171,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear(LGraph *top) {
 
     auto next_node = *global_it;
     ++global_it;
-    if (global_it == global_it_end) {
+    if (global_it.is_invalid()) {
       linear_phase = false;
       global_it = top->fast(visit_sub).begin();
     }
@@ -186,7 +186,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear(LGraph *top) {
         // NOTE: For hierarchical, if the driver_node is an IO (input). It
         // could try to go up to see if the node is pipelined or not visited
 
-        if (!visited.count(driver_node.get_compact()) && !driver_node.is_type_loop_breaker()) { // fwd
+        if (!visited.count(driver_node.get_compact())) { // fwd
           is_topo_sorted = false;
           break;
         }
@@ -248,7 +248,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
       }
     }
 
-    if (global_it == global_it_end) {
+    if (global_it.is_invalid()) {
       current_node.invalidate();
       return;
     }

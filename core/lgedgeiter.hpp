@@ -59,7 +59,6 @@ public:
     Index_ID          nid;
     const bool        visit_sub;
 
-
   public:
     Fast_iter(LGraph *_g, LGraph *_cg, const Hierarchy_index &_hidx, const Index_ID _nid, bool _visit_sub) : top_g(_g), current_g(_cg), hidx(_hidx), nid(_nid), visit_sub(_visit_sub) { }
     Fast_iter(bool _visit_sub) : top_g(nullptr), current_g(nullptr), visit_sub(_visit_sub) { }
@@ -89,6 +88,8 @@ public:
     Node operator*() const {
       return Node(top_g, current_g, hidx, nid);
     }
+
+    bool is_invalid() const { return nid == 0; }
   };
 
   Fast_edge_iterator() = delete;
@@ -103,7 +104,6 @@ protected:
   bool               linear_phase;
   Node               current_node;
   Fast_edge_iterator::Fast_iter global_it;
-  Fast_edge_iterator::Fast_iter global_it_end;
 
   // State built during iteration
   const bool      visit_sub;
