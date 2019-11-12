@@ -12,7 +12,7 @@ cc_library(
     ],
 )
 
-cc_test(
+cc_binary(
     name = "rewriter",
     srcs = ["tests/rewriter.cpp"],
     deps = [
