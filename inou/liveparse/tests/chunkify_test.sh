@@ -12,28 +12,28 @@ if [ ! -f $LGSHELL ]; then
   fi
 fi
 
-echo "files path:inou/yosys/tests match:\"v$\" |> inou.liveparse path:tmp1" | $LGSHELL
+echo "files path:inou/yosys/tests match:\"v$\" filter:\"(long|nocheck)\" |> inou.liveparse path:lgdb_tmp1" | $LGSHELL
 if [ $? -ne 0 ]; then
-  echo "FAILED: liveparse error tmp1"
+  echo "FAILED: liveparse error lgdb_tmp1"
   exit -3
 fi
 
-N1=$(grep ^[[:blank:]]*module inou/yosys/tests/*.v | grep -v endmodule | wc -l)
-N2=$(grep ^[[:blank:]]*module tmp1/parse/chunk*/*.v | grep -v endmodule | wc -l)
+N1=$(grep ^[[:blank:]]*module inou/yosys/tests/*.v  | grep -v long | grep -v nocheck| grep -v endmodule | wc -l)
+N2=$(grep ^[[:blank:]]*module lgdb_tmp1/parse/chunk*/*.v | grep -v endmodule | wc -l)
 
 if [ $N1 -ne $N2 ]; then
   echo "tests"
   grep ^[[:blank:]]*module inou/yosys/tests/*.v | grep -v endmodule
   echo "chunk"
-  grep ^[[:blank:]]*module tmp1/parse/chunk*/*.v | grep -v endmodule
+  grep ^[[:blank:]]*module lgdb_tmp1/parse/chunk*/*.v | grep -v endmodule
   echo "FAILED: yosys/tests inconsistent number of modules detected by inou.liveparse orig:${N1} vs live:${N2}"
   exit -3
 else
   echo "PASS: yosys/tests inou.liveparse orig:"$N1" vs live:"$N2
 fi
 
-N1=$(ls -al tmp1/parse/file* | wc -l)
-N2=$(ls -al inou/yosys/tests/*.v | wc -l)
+N1=$(ls -al lgdb_tmp1/parse/file* | wc -l)
+N2=$(ls -al inou/yosys/tests/*.v  | grep -v long | grep -v nocheck | wc -l)
 if [ $N1 -ne $N2 ]; then
   echo "FAILED: yosys/tests inconsistent number of files. It should be "$N2", not "$N1
   exit -3

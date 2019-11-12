@@ -13,9 +13,11 @@
 void Top_api::files(Eprp_var &var) {
   std::string path(var.get("path"));
   std::string match(var.get("match"));
+  std::string filter(var.get("filter"));
 
   try {
     const std::regex txt_regex(match);
+    const std::regex filter_regex(filter);
 
     DIR *dirp = opendir(path.c_str());
     if (dirp == 0) {
@@ -27,9 +29,17 @@ void Top_api::files(Eprp_var &var) {
     while ((dp = readdir(dirp)) != NULL) {
       if (dp->d_type == DT_DIR) continue;
       if (match.empty()) {
-        sort_files.push_back(dp->d_name);
+        if (filter.empty()) {
+          sort_files.push_back(dp->d_name);
+        } else if (!std::regex_search(dp->d_name, filter_regex)) {
+          sort_files.push_back(dp->d_name);
+        }
       } else if (std::regex_search(dp->d_name, txt_regex)) {
-        sort_files.push_back(dp->d_name);
+        if (filter.empty()) {
+          sort_files.push_back(dp->d_name);
+        } else if (!std::regex_search(dp->d_name, filter_regex)) {
+          sort_files.push_back(dp->d_name);
+        }
       }
     }
     closedir(dirp);
@@ -48,7 +58,7 @@ void Top_api::files(Eprp_var &var) {
 
   } catch (const std::regex_error &e) {
     Main_api::error(
-        fmt::format("invalid match:{} regex. It is a FULL regex unlike bash. To test, try: `ls path | grep -E \"match\"`", match));
+        fmt::format("invalid regex. It is a FULL regex unlike bash. To test, try: `ls path | grep -E \"match\" | grep -v \"filter\"`", match));
   }
 }
 
@@ -56,7 +66,8 @@ void Top_api::setup(Eprp &eprp) {
   // Alphabetical order sorted to avoid undeterminism in different file orders
   Eprp_method m1("files", "match file names in alphabetical order. Like `ls {path} | grep -E {match} | sort`", &Top_api::files);
   m1.add_label_optional("path", "path to match the search . by default", ".");
-  m1.add_label_optional("match", "quoted string of regex to match . E.g: match:\"\\.v$\" for verilog files.");
+  m1.add_label_optional("match", "quoted string of regex to match. E.g: match:\"\\.v$\" for verilog files.");
+  m1.add_label_optional("filter", "quoted string of regex to filter.");
 
   eprp.register_method(m1);
 }
