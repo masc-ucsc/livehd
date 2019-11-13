@@ -73,8 +73,9 @@ import java.io.PrintWriter;
 
 //@CContext(cInterfaceHeaderFunctions.class)
 public class RapidWrightAPI {
-  //static final HashMap<Integer, Design> DESIGNID_LIST = new HashMap<Integer, Design>(); //vector<>
-  private static List<Design> DESIGNID_LIST = new ArrayList<Design>();
+  //static final HashMap<Integer, Design> DESIGN_ID_LIST = new HashMap<Integer, Design>(); //vector<>
+  private static List<Design> DESIGN_ID_LIST = new ArrayList<Design>();
+  private static List<Cell> CELL_ID_LIST = new ArrayList<Cell>();
   /*static class cInterfaceHeaderFunctions implements CContext.Directives {
       @Override
       public List<String> getHeaderFiles() {
@@ -100,13 +101,13 @@ public class RapidWrightAPI {
      *java functions to create a new Design
      */
     @CEntryPoint( name = "RW_create_Design")
-    public static int RW_create_Design(IsolateThread thread, CCharPointer designName)
+    public static int RW_create_Design(IsolateThread thread, CCharPointer design_name)
     {
-      String desName = CTypeConversion.toJavaString(designName);
+      String desName = CTypeConversion.toJavaString(design_name);
       Design design = new Design(desName, Device.PYNQ_Z1);
       //inserts the specific ID in the arraylist
-      DESIGNID_LIST.add(design);
-      int id = DESIGNID_LIST.size() - 1;
+      DESIGN_ID_LIST.add(design);
+      int id = DESIGN_ID_LIST.size() - 1;
       return id;
     }
 
@@ -115,15 +116,13 @@ public class RapidWrightAPI {
      */
 
     @CEntryPoint( name = "RW_create_FF")
-    public static void RW_Create_FF(IsolateThread thread, CCharPointer flipflopName_c, int designID)
+    public static int RW_Create_FF(IsolateThread thread, CCharPointer flipflopName_c, int design_ID)
     {
-      Design design = DESIGNID_LIST.get(designID);
-      //EDIFNetlist netlist = design.getNetlist();
-      //EDIFCell top = netlist.getTopCell();
-
+      Design design = DESIGN_ID_LIST.get(design_ID);
       String ffName = CTypeConversion.toJavaString(flipflopName_c);
       Cell ff = design.createCell("ff", Unisim.FDRE);
-      DesignTools.placeCell(ff, design);
+      CELL_ID_LIST.add(ff);
+      return CELL_ID_LIST.size() - 1;
 
     }
 
@@ -131,46 +130,58 @@ public class RapidWrightAPI {
      *java functions to create an AND gate on the design
      */
     @CEntryPoint( name = "RW_create_AND2")
-    public static void RW_Create_AND2(IsolateThread thread, CCharPointer gateName_c, int designID)
+    public static int RW_Create_AND2(IsolateThread thread, CCharPointer gateName_c, int design_ID)
     {
 
-      Design design = DESIGNID_LIST.get(designID);
+      Design design = DESIGN_ID_LIST.get(design_ID);
       String gateName = CTypeConversion.toJavaString(gateName_c);
       Cell and2 = design.createCell(gateName, Unisim.AND2);
-      DesignTools.placeCell(and2, design);
+      CELL_ID_LIST.add(and2);
+      return CELL_ID_LIST.size() - 1;
+    }
+
+    /*
+     *A separte function to place cells
+     */
+    @CEntryPoint( name = "RW_place_Cell")
+    public static void RW_place_Cell(IsolateThread thread, int cell_ID, int design_ID)
+    {
+
+      Design design = DESIGN_ID_LIST.get(design_ID);
+      Cell cell = CELL_ID_LIST.get(cell_ID);
+      DesignTools.placeCell(cell, design);
 
     }
 
-
     @CEntryPoint( name = "RW_set_IO_Buffer")
-    public static boolean RW_set_IO_Buffer(IsolateThread thread, boolean bool, int designID)
+    public static boolean RW_set_IO_Buffer(IsolateThread thread, boolean bool, int design_ID)
     {
-      Design d = DESIGNID_LIST.get(designID);
+      Design d = DESIGN_ID_LIST.get(design_ID);
       d.setAutoIOBuffers(bool);
       return bool;
     }
 
     @CEntryPoint( name = "RW_place_Design")
-    public static void RW_place_Design(IsolateThread thread, int designID)
+    public static void RW_place_Design(IsolateThread thread, int design_ID)
     {
-      Design d = DESIGNID_LIST.get(designID);
+      Design d = DESIGN_ID_LIST.get(design_ID);
       Design placed_design = new BlockPlacer2().placeDesign(d, false);
     }
 
     @CEntryPoint( name = "RW_route_Design")
-    public static void RW_route_Design(IsolateThread thread, int designID)
+    public static void RW_route_Design(IsolateThread thread, int design_ID)
     {
-      Design d = DESIGNID_LIST.get(designID);
+      Design d = DESIGN_ID_LIST.get(design_ID);
       d.routeSites();
   		new Router(d).routeDesign();
     }
 
 
     @CEntryPoint( name = "RW_write_DCP")
-    public static void RW_write_DCP(IsolateThread thread, CCharPointer fileName, int designID)
+    public static void RW_write_DCP(IsolateThread thread, CCharPointer file_name, int design_ID)
     {
-      Design d = DESIGNID_LIST.get(designID);
-      String fName = CTypeConversion.toJavaString(fileName);
+      Design d = DESIGN_ID_LIST.get(design_ID);
+      String fName = CTypeConversion.toJavaString(file_name);
       d.writeCheckpoint(fName);
     }
 

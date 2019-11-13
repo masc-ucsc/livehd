@@ -10,9 +10,11 @@ extern "C" {
 
 int RW_create_Design(graal_isolatethread_t*, char*);
 
-void RW_create_FF(graal_isolatethread_t*, char*, int);
+int RW_create_FF(graal_isolatethread_t*, char*, int);
 
-void RW_create_AND2(graal_isolatethread_t*, char*, int);
+int RW_create_AND2(graal_isolatethread_t*, char*, int);
+
+void RW_place_Cell(graal_isolatethread_t*, int, int);
 
 int RW_set_IO_Buffer(graal_isolatethread_t*, int, int);
 

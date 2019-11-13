@@ -15,12 +15,13 @@ public:
   graalThread();
   ~graalThread();
   int create_Design(char* designName);
-  void create_FF(char* ff_name, int id);
-  void create_AND2(char* gate_name, int id);
-  int set_IO_Buffer(bool boolean, int id);
-  void place_Design(int id);
-  void route_Design(int id);
-  void write_DCP(char* file_name, int id);
+  int create_FF(char* ff_name, int design_ID);
+  int create_AND2(char* gate_name, int design_ID);
+  void place_Cell(int, int);
+  int set_IO_Buffer(bool boolean, int design_ID);
+  void place_Design(int design_ID);
+  void route_Design(int design_ID);
+  void write_DCP(char* file_name, int design_ID);
 
 };
 
@@ -35,28 +36,32 @@ int graalThread::create_Design(char* designName) {
   return RW_create_Design(thread, designName);
 }
 
-void graalThread::create_FF(char* ff_name, int id) {
-  RW_create_FF(thread, ff_name, id);
+int graalThread::create_FF(char* ff_name, int design_ID) {
+  return RW_create_FF(thread, ff_name, design_ID);
 }
 
-void graalThread::create_AND2(char* gate_name, int id) {
-  RW_create_AND2(thread, gate_name, id);
+int graalThread::create_AND2(char* gate_name, int design_ID) {
+  return RW_create_AND2(thread, gate_name, design_ID);
 }
 
-int graalThread::set_IO_Buffer(bool boolean, int id) {
-  return RW_set_IO_Buffer(thread, boolean, id);
+void graalThread::place_Cell(int cell_ID, int design_ID) {
+  RW_place_Cell(thread, cell_ID, design_ID);
 }
 
-/*void graalThread::place_Design(int id) {
-  RW_place_Design(thread, id);
-}*/
-
-void graalThread::route_Design(int id) {
-  RW_route_Design(thread, id);
+int graalThread::set_IO_Buffer(bool boolean, int design_ID) {
+  return RW_set_IO_Buffer(thread, boolean, design_ID);
 }
 
-void graalThread::write_DCP(char* file_name, int id) {
-  RW_write_DCP(thread, file_name, id);
+void graalThread::place_Design(int design_ID) {
+  RW_place_Design(thread, design_ID);
+}
+
+void graalThread::route_Design(int design_ID) {
+  RW_route_Design(thread, design_ID);
+}
+
+void graalThread::write_DCP(char* file_name, int design_ID) {
+  RW_write_DCP(thread, file_name, design_ID);
 }
 
 
