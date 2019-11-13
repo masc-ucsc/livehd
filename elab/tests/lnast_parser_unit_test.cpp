@@ -218,21 +218,20 @@ K50  K51   0  280  292   =    %o2     ___v
     (void) K20_tar;
     (void) K20_op1;
 
-    auto K21      = ast_gld.add_child(top_sts, std::make_tuple(ntype_dbg(Lnast_ntype_gt),          ""    ));
-    auto K21_tar  = ast_gld.add_child(K21,     std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___k"));
-    auto K21_op1  = ast_gld.add_child(K21,     std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "$a"  ));
-    auto K21_op2  = ast_gld.add_child(K21,     std::make_tuple(ntype_dbg(Lnast_ntype_const),       "0d1"  ));
-    (void) K21_tar;
-    (void) K21_op1;
-    (void) K21_op2;
 
 
     auto K22         = ast_gld.add_child(top_sts,  std::make_tuple(ntype_dbg(Lnast_ntype_if),          ""));
     auto K22_c0sts   = ast_gld.add_child(K22,      std::make_tuple(ntype_dbg(Lnast_ntype_cstatements), ""));
+    auto K21      = ast_gld.add_child(K22_c0sts,   std::make_tuple(ntype_dbg(Lnast_ntype_gt),          ""    ));
+    auto K21_tar  = ast_gld.add_child(K21,         std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___k"));
+    auto K21_op1  = ast_gld.add_child(K21,         std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "$a"  ));
+    auto K21_op2  = ast_gld.add_child(K21,         std::make_tuple(ntype_dbg(Lnast_ntype_const),       "0d1"  ));
+    (void) K21_tar;
+    (void) K21_op1;
+    (void) K21_op2;
+
     auto K22_c0      = ast_gld.add_child(K22,      std::make_tuple(ntype_dbg(Lnast_ntype_cond),         "___k"));
     auto K24sts      = ast_gld.add_child(K22,      std::make_tuple(ntype_dbg(Lnast_ntype_statements),  ""));
-    //auto K22_c1sts   = ast_gld.add_child(K22,      std::make_tuple(ntype_dbg(Lnast_ntype_cstatements), ""));//no condition for else chunk
-    //auto K22_c1      = ast_gld.add_child(K22,      std::make_tuple(ntype_dbg(Lnast_ntype_cond),        ""));//no condition for else
     auto K44sts      = ast_gld.add_child(K22,      std::make_tuple(ntype_dbg(Lnast_ntype_statements),  ""));
     (void) K22_c0sts ;
     (void) K22_c0    ;
@@ -253,16 +252,16 @@ K50  K51   0  280  292   =    %o2     ___v
     (void) K25_op1;
     (void) K25_tar;
 
-    auto K26         = ast_gld.add_child(K24sts, std::make_tuple(ntype_dbg(Lnast_ntype_gt),          ""));
-    auto K26_tar     = ast_gld.add_child(K26,    std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___m"));
-    auto K26_op1     = ast_gld.add_child(K26,    std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "$a"));
-    auto K26_op2     = ast_gld.add_child(K26,    std::make_tuple(ntype_dbg(Lnast_ntype_const),       "0d2"));
+
+    auto K27         = ast_gld.add_child(K24sts,    std::make_tuple(ntype_dbg(Lnast_ntype_if),          ""));
+    auto K27_c0sts   = ast_gld.add_child(K27,       std::make_tuple(ntype_dbg(Lnast_ntype_cstatements), ""));
+    auto K26         = ast_gld.add_child(K27_c0sts, std::make_tuple(ntype_dbg(Lnast_ntype_gt),          ""));
+    auto K26_tar     = ast_gld.add_child(K26,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___m"));
+    auto K26_op1     = ast_gld.add_child(K26,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "$a"));
+    auto K26_op2     = ast_gld.add_child(K26,       std::make_tuple(ntype_dbg(Lnast_ntype_const),       "0d2"));
     (void) K26_tar;
     (void) K26_op1;
     (void) K26_op2;
-
-    auto K27         = ast_gld.add_child(K24sts,  std::make_tuple(ntype_dbg(Lnast_ntype_if),          ""));
-    auto K27_c0sts   = ast_gld.add_child(K27,     std::make_tuple(ntype_dbg(Lnast_ntype_cstatements), ""));
     auto K27_c0      = ast_gld.add_child(K27,     std::make_tuple(ntype_dbg(Lnast_ntype_cond),        "___m"));
     auto K29sts      = ast_gld.add_child(K27,     std::make_tuple(ntype_dbg(Lnast_ntype_statements),  ""));
     auto K27_c1sts   = ast_gld.add_child(K27,     std::make_tuple(ntype_dbg(Lnast_ntype_cstatements),  "")); //K32sts
@@ -289,8 +288,6 @@ K50  K51   0  280  292   =    %o2     ___v
 
     auto K27_c1      = ast_gld.add_child(K27,    std::make_tuple(ntype_dbg(Lnast_ntype_cond),        "___o"));
     auto K36sts      = ast_gld.add_child(K27,    std::make_tuple(ntype_dbg(Lnast_ntype_statements),  ""));
-    //auto K27_c2sts   = ast_gld.add_child(K27,    std::make_tuple(ntype_dbg(Lnast_ntype_cstatements), ""));
-    //auto K27_c2      = ast_gld.add_child(K27,    std::make_tuple(ntype_dbg(Lnast_ntype_cond),        ""));
     auto K39sts      = ast_gld.add_child(K27,    std::make_tuple(ntype_dbg(Lnast_ntype_statements),  ""));
     (void) K27_c1     ;
     (void) K36sts     ;

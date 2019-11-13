@@ -408,7 +408,7 @@ void Lnast_parser::setup_ntype_str_mapping(){
    * such as
    * $foo    --- input
    * %bar    --- output
-   * @potato --- register
+   * #potato --- register
    *
    * */
 }

@@ -12,9 +12,9 @@ using Phi_sts_tables      = absl::flat_hash_map<Lnast_index, Phi_sts_table>;
 
 struct Lnast_node {
   Lnast_ntype type; //not const as possible fake function call ...
-  Token          token;
-  uint32_t       loc;  //SH:FIXME: wait for Akash
-  uint16_t       subs; //ssa subscript
+  Token       token;
+  uint32_t    loc;  //SH:FIXME: wait for Akash
+  uint16_t    subs; //ssa subscript
 
   Lnast_node()
     :type(0), loc(0), subs(0) { }
