@@ -21,24 +21,29 @@
 
 void Inou_yosys_api::set_script_liblg(Eprp_var &var, std::string &script_file, std::string &liblg, bool do_read) {
   auto script = var.get("script");
+  liblg = var.get("liblg");
 
   const auto &main_path = Main_api::get_main_path();
-  liblg                 = main_path + "/lgshell.runfiles/lgraph/inou/yosys/liblgraph_yosys.so";
-  if (access(liblg.c_str(), X_OK) == -1) {
-    // Maybe it is installed in /usr/local/bin/lgraph and /usr/local/share/lgraph/inou/yosys/liblgrapth...
-    const std::string liblg2 = main_path + "/../share/lgraph/inou/yosys/liblgraph_yosys.so";
-    if (access(liblg2.c_str(), X_OK) == -1) {
-      // sandbox path
-      const std::string liblg3 = main_path + "/inou/yosys/liblgraph_yosys.so";
-      if (access(liblg3.c_str(), X_OK) == -1) {
-        Main_api::error("could not find liblgraph_yosys.so, the {} is not executable ", liblg);
-        return;
+
+  if (liblg.empty()) {
+    liblg                 = main_path + "/lgshell.runfiles/lgraph/inou/yosys/liblgraph_yosys.so";
+    if (access(liblg.c_str(), X_OK) == -1) {
+      // Maybe it is installed in /usr/local/bin/lgraph and /usr/local/share/lgraph/inou/yosys/liblgrapth...
+      const std::string liblg2 = main_path + "/../share/lgraph/inou/yosys/liblgraph_yosys.so";
+      if (access(liblg2.c_str(), X_OK) == -1) {
+        // sandbox path
+        const std::string liblg3 = main_path + "/inou/yosys/liblgraph_yosys.so";
+        if (access(liblg3.c_str(), X_OK) != -1) {
+          liblg = liblg3;
+        }
       } else {
-        liblg = liblg3;
+        liblg = liblg2;
       }
-    } else {
-      liblg = liblg2;
     }
+  }
+  if (access(liblg.c_str(), X_OK) == -1) {
+    Main_api::error(fmt::format("could not find liblgraph_yosys.so, the {} is not executable\n", liblg));
+    return;
   }
 
   if (script.empty()) {
@@ -336,6 +341,7 @@ void Inou_yosys_api::setup(Eprp &eprp) {
   m1.add_label_optional("abc", "run ABC inside yosys before loading lgraph", "false");
   m1.add_label_optional("script", "alternative custom inou_yosys_read.ys command");
   m1.add_label_optional("yosys", "path for yosys command", yosys);
+  m1.add_label_optional("liblg", "path for libgraph_yosys.so library");
   m1.add_label_optional("top", "define top module, will call yosys hierarchy pass (-auto-top allowed)");
 
   eprp.register_method(m1);
