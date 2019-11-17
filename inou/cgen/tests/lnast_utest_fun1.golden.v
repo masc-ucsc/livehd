@@ -6,5 +6,5 @@ module lnast_utest_fun1 (input clk,
   always @(*) begin
     o_o = a_i ^ b_i;
   end
-end module
+endmodule
 

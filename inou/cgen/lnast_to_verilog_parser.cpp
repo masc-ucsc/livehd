@@ -4,6 +4,7 @@
 std::map<std::string, std::string> Lnast_to_verilog_parser::stringify(std::string filepath) {
   root_filename = get_filename(filepath);
   curr_module = new Verilog_parser_module(root_filename);
+  var_manager = new Cgen_variable_manager();
 
   inc_indent_buffer();
   inc_indent_buffer();
@@ -31,6 +32,10 @@ void Lnast_to_verilog_parser::process_node(const mmap_lib::Tree_index& it) {
       pop_statement(it.level, node_data.type);
     }
     type = ntype_dbg(node_data.type);
+  }
+
+  if (node_data.type == Lnast_ntype_if) {
+    curr_module->inc_if_counter();
   }
 
   if (node_data.type == Lnast_ntype_top) {
@@ -223,6 +228,7 @@ void Lnast_to_verilog_parser::process_pure_assign() {
     new_vars.insert(ref);
   } else if (is_number(ref)) {
     ref = process_number(ref);
+    var_manager->insert_variable(ref);
   }
 
   if (is_ref(key)) {
@@ -240,8 +246,10 @@ void Lnast_to_verilog_parser::process_pure_assign() {
     phrase = absl::StrCat(phrase, " = ", value, ";\n");
 
     new_vars.insert(key);
+    var_manager->insert_variable(key);
 
-    curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(indent_buffer_size, phrase), new_vars);
+    curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(indent_buffer_size, phrase));
+    curr_module->var_manager.merge_multiple(var_manager->pop(new_vars));
   }
 
   fmt::print("pure_assign value:\tkey: {}\tvalue: {}\n", key, value);
@@ -269,7 +277,8 @@ void Lnast_to_verilog_parser::process_as() {
     ref_map.insert(std::pair<std::string_view, std::pair<std::string, std::set<std::string_view>>>(key, std::pair<std::string, std::set<std::string_view>>(value, new_vars)));
   } else {
     std::string phrase = absl::StrCat("(* LNAST: ", key, " as " , value, "*)\n");
-    curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(indent_buffer_size, phrase), new_vars);
+    curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(indent_buffer_size, phrase));
+    curr_module->var_manager.merge_multiple(var_manager->pop(new_vars));
   }
 
   fmt::print("process_as value:\tkey: {}\tvalue: {}\n", key, value);
@@ -343,6 +352,7 @@ void Lnast_to_verilog_parser::process_operator() {
       fmt::print("map_it find: {} | {}\n", map_it->first, map_it->second.first);
     } else if (ref.size() > 2 && !is_number(ref)) {
       new_vars.insert(ref);
+      var_manager->insert_variable(ref);
     } else if (is_number(ref)) {
       ref = process_number(ref);
     } else {
@@ -362,7 +372,8 @@ void Lnast_to_verilog_parser::process_operator() {
     ref_map.insert(std::pair<std::string_view, std::pair<std::string, std::set<std::string_view>>>(key, std::pair<std::string, std::set<std::string_view>>(value, new_vars)));
   } else {
     std::string phrase = absl::StrCat(key, " ", op_type,"  ", value, "\n");
-    curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(indent_buffer_size, phrase), new_vars);
+    curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(indent_buffer_size, phrase));
+    curr_module->var_manager.merge_multiple(var_manager->pop(new_vars));
   }
 }
 
@@ -419,7 +430,9 @@ void Lnast_to_verilog_parser::process_if() {
   }
   new_nodes.push_back(std::pair<int32_t, std::string>(indent_buffer_size, "\n"));
 
-  curr_module->add_to_buffer_multiple(new_nodes, new_vars);
+  curr_module->add_to_buffer_multiple(new_nodes);
+  curr_module->var_manager.merge_multiple(var_manager->pop(new_vars));
+  curr_module->dec_if_counter();
 }
 
 void Lnast_to_verilog_parser::process_func_call() {
@@ -457,7 +470,8 @@ void Lnast_to_verilog_parser::process_func_call() {
     ref_map.insert(std::pair<std::string_view, std::pair<std::string, std::set<std::string_view>>>(key, std::pair<std::string, std::set<std::string_view>>(value, new_vars)));
   } else {
     // std::string phrase = absl::StrCat(key, " ", op_type,"  ", value, "\n");
-    curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(indent_buffer_size, value), new_vars);
+    curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(indent_buffer_size, value));
+    curr_module->var_manager.merge_multiple(var_manager->pop(new_vars));
   }
 }
 
@@ -473,10 +487,12 @@ void Lnast_to_verilog_parser::process_func_def() {
   std::set<std::string_view> new_vars;
   while (it != node_buffer.end()) {
     new_vars.insert(get_node_name(*it));
+    var_manager->insert_variable(get_node_name(*it));
     it++;
   }
 
-  curr_module->add_to_buffer_multiple(curr_module->pop_queue(), new_vars);
+  curr_module->add_to_buffer_multiple(curr_module->pop_queue());
+  curr_module->var_manager.merge_multiple(var_manager->pop(new_vars));
 
   file_map.insert(std::pair<std::string, std::string>(func_name, curr_module->create_file()));
 

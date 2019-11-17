@@ -10,19 +10,21 @@ std::string Verilog_parser_module::create_header() {
   std::string outputs;
   std::string wires;
 
-  for(auto var_name : statefull_set) {
-    fmt::print("variable names: {}\n", var_name);
-    uint32_t var_type = get_variable_type(var_name);
+  fmt::print("creating header: {}\n", var_manager.variable_map.size());
+  for(auto var_name : var_manager.variable_map) {
+    fmt::print("variable names: {}\n", var_name.first);
+    uint32_t var_type = get_variable_type(var_name.first);
     if (var_type == 1) {
-      inputs = absl::StrCat(inputs, ",\ninput ", process_variable(var_name));
+      inputs = absl::StrCat(inputs, ",\ninput ", process_variable(var_name.first));
     } else if (var_type == 2) {
-      outputs = absl::StrCat(outputs, ",\noutput ", process_variable(var_name));
+      outputs = absl::StrCat(outputs, ",\noutput ", process_variable(var_name.first));
     } else if (var_type == 3) {
-      outputs = absl::StrCat(outputs, ",\noutput ", process_variable(var_name));
+      outputs = absl::StrCat(outputs, ",\noutput ", process_variable(var_name.first));
     } else {
-      wires = absl::StrCat(wires, " wire ", var_name, ";\n");
+      wires = absl::StrCat(wires, " wire ", var_name.first, ";\n");
     }
   }
+  fmt::print("finished with the header\n");
 
   return absl::StrCat("module ", filename, " (", inputs, outputs, ");\n", wires, "\n");
 }
@@ -44,9 +46,9 @@ std::string Verilog_parser_module::create_always() {
 std::string Verilog_parser_module::create_next() {
   std::string buffer;
 
-  for (auto ele : statefull_set) {
-    if (get_variable_type(ele) == 3) {
-      buffer = absl::StrCat(buffer, "\n", indent_buffer(1), "always @(posedge clk) begin\n", indent_buffer(2), ele, " <= ", ele, "_next\n", indent_buffer(1), "end\n");
+  for(auto ele : var_manager.variable_map) {
+    if (get_variable_type(ele.first) == 3) {
+      buffer = absl::StrCat(buffer, "\n", indent_buffer(1), "always @(posedge clk) begin\n", indent_buffer(2), ele.first, " <= ", ele.first, "_next\n", indent_buffer(1), "end\n");
     }
   }
 
@@ -57,14 +59,22 @@ std::string Verilog_parser_module::create_file() {
   return absl::StrCat(create_header(), create_always(), create_next(), create_footer());
 }
 
-void Verilog_parser_module::add_to_buffer_single(std::pair<int32_t, std::string> next, std::set<std::string_view> new_vars) {
-  node_str_buffer.push_back(next);
-  statefull_set.insert(std::make_move_iterator(new_vars.begin()), std::make_move_iterator(new_vars.end()));
+void Verilog_parser_module::inc_if_counter() {
+  if_counter++;
 }
 
-void Verilog_parser_module::add_to_buffer_multiple(std::vector<std::pair<int32_t, std::string>> nodes, std::set<std::string_view> new_vars) {
+void Verilog_parser_module::dec_if_counter() {
+  if_counter--;
+}
+
+void Verilog_parser_module::add_to_buffer_single(std::pair<int32_t, std::string> next) {
+  node_str_buffer.push_back(next);
+  // statefull_set.insert(std::make_move_iterator(new_vars.begin()), std::make_move_iterator(new_vars.end()));
+}
+
+void Verilog_parser_module::add_to_buffer_multiple(std::vector<std::pair<int32_t, std::string>> nodes) {
   node_str_buffer.insert(node_str_buffer.end(), std::make_move_iterator(nodes.begin()), std::make_move_iterator(nodes.end()));
-  statefull_set.insert(std::make_move_iterator(new_vars.begin()), std::make_move_iterator(new_vars.end()));
+  // statefull_set.insert(std::make_move_iterator(new_vars.begin()), std::make_move_iterator(new_vars.end()));
 }
 
 // returns 1 if input

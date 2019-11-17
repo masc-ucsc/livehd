@@ -7,30 +7,12 @@
 
 #include "fmt/format.h"
 #include "absl/strings/substitute.h"
-
-class Verilog_variable_options {
-private:
-  // Flop / Latch / SRAM Specific
-  uint32_t bits = 0;
-  bool posedge = true;
-  uint32_t last; // do not know what this does
-  uint32_t size; // do not know what this does
-  bool latch = false;
-  std::string clk_pin;
-  std::string clk_rd_pin;
-  std::string clk_wr_pin;
-  std::string reset; // check what this does
-  std::string reset_pin;
-  uint32_t reset_cycles = 2;
-  bool reset_async = false;
-
-  // Generic
-};
+#include "cgen_variable_manager.hpp"
 
 class Verilog_parser_module {
 private:
   std::vector<std::pair<int32_t, std::string>> node_str_buffer;
-  std::set<std::string_view> statefull_set;
+  // std::map<std::string, Verilog_variable_options> variable_map;
   std::vector<std::vector<std::pair<int32_t, std::string>>> sts_buffer_stack;
   std::vector<std::vector<std::pair<int32_t, std::string>>> sts_buffer_queue;
 
@@ -40,16 +22,20 @@ private:
   std::string create_next();
 
   std::string indent_buffer(int32_t size);
+  uint32_t if_counter = 0;
 
 public:
   std::string filename;
+  Cgen_variable_manager var_manager;
 
-  void add_to_buffer_single(std::pair<int32_t, std::string> next, std::set<std::string_view> new_vars);
-  void add_to_buffer_multiple(std::vector<std::pair<int32_t, std::string>> nodes, std::set<std::string_view> new_vars);
+  void add_to_buffer_single(std::pair<int32_t, std::string> next);
+  void add_to_buffer_multiple(std::vector<std::pair<int32_t, std::string>> nodes);
   void node_buffer_stack();
   void node_buffer_queue();
   std::vector<std::pair<int32_t, std::string>> pop_queue();
   std::string create_file();
+  void inc_if_counter();
+  void dec_if_counter();
 
   uint32_t get_variable_type(std::string_view var_name);
   std::string process_variable(std::string_view var_name);

@@ -3,6 +3,7 @@
 #include "lnast.hpp"
 #include "lnast_parser.hpp"
 #include "verilog_parser_module.hpp"
+#include "cgen_variable_manager.hpp"
 
 class Lnast_to_verilog_parser {
 private:
@@ -19,6 +20,7 @@ private:
   // infustructure for multiple modules
   std::string root_filename;
   Verilog_parser_module *curr_module;
+  Cgen_variable_manager *var_manager;
   std::map<std::string, std::string> file_map;
   // key, pair(value, variables)
   std::map<std::string_view, std::pair<std::string, std::set<std::string_view>>> ref_map;
