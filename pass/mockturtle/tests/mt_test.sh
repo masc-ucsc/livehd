@@ -1,15 +1,41 @@
 #!/bin/bash
+rm -rf ./lgdb
+rm -f   yosys_srcipt.*
+rm -f   *.v
+rm -r  ./logs/*.v
+rm -f  ./logs/*.dot
+rm -f  ./logs/yosys_log/yosys_script.*
+
+mkdir logs
+mkdir -p logs/yosys_log
+
+### Don't need LUT-synth
+# pts='wires simple_rf2 simple_flop simple_add satsmall satpick satlarge
+#      params nlatch mem3 flop async assigns arith add'
 
 
-rm -rf ./lgdb 
+### wait for hierarchical traversal
+# pts='trivial2 unconnected hierarchy submodule submodule_offset punching
+#      punching_3 params_submodule paramods join_fadd common_sub arraycells'
 
-#unsupported ShiftOp
-#pts = params satlarge satsmall satpick shiftx shiftx_simple test simple_add simple_rf2 
-#worth to try first
-#pts = operators reduce unconnected wires
-pts='trivial_and trivial trivial2a trivial3'
 
+### sh:todo
+# pts='dce2 dce3 compare2 offset operators consts not_vslogicnot 
+#      mux mismatch expression_00002 
+#      graphtest kogg_stone_64 test simple_weird 
+#      shift shiftx_simple shiftx shared_ports 
+#      long_gcd long_simple_rf1 long_regfile1r1w'
+
+
+pts='trivial_offset trivial2a trivial trivial3 trivial_and 
+     dce1 gates trivial1 trivial_join compare cse_basic 
+     simple_weird2 mt_basic_test reduce null_port 
+     '
+
+     
 LGSHELL=./bazel-bin/main/lgshell
+LGCHECK=./inou/yosys/lgcheck
+
 
 if [ ! -f $LGSHELL ]; then
   if [ -f ./main/lgshell ]; then
@@ -21,58 +47,47 @@ if [ ! -f $LGSHELL ]; then
 fi
 
 
-for pt in $pts
-do
-  if [ ! -f ./inou/yosys/tests/${pt}.v ]; then
-    echo "could not find ${pt}.v in ./inou/yosys/tests"
-    exit 1
-  fi
-
-  echo ""
-  echo "Verilog->LGraph->LGraph_Lutified"
-  echo ""
-
-  echo "inou.yosys.tolg files:./inou/yosys/tests/${pt}.v" | ${LGSHELL}
-  echo "lgraph.open name:${pt} |> pass.mockturtle"        | ${LGSHELL}
-
-  if [ $? -ne 0 ]; then
-    echo "mockturtle.sh failed @ (${pt})"
-    exit 3
-  fi
-done
-
-
-echo ""
-echo "LGraph_lutified->Verilog code generation"
-echo ""
 
 for pt in $pts
 do
-  echo "lgraph.open name:${pt}_lutified |> inou.yosys.fromlg" | ${LGSHELL}
+  echo "Pattern:${pt}.v"
+  echo "Pattern:${pt}.v"
+  echo "Pattern:${pt}.v"
+  echo ""
+  echo "Mockturtle LUT Synthesis Flow"
+  echo ""
+  ${LGSHELL} "inou.yosys.tolg files:inou/yosys/tests/${pt}.v"
+  ${LGSHELL} "lgraph.open name:${pt}          |> inou.graphviz.fromlg"
+  ${LGSHELL} "lgraph.open name:${pt}          |> pass.mockturtle"
+  ${LGSHELL} "lgraph.open name:${pt}_lutified |> inou.yosys.fromlg"
+  ${LGSHELL} "lgraph.open name:${pt}_lutified |> inou.graphviz.fromlg"
+
   if [ $? -eq 0 ] && [ -f ${pt}_lutified.v ]; then
-    echo "Successfully created verilog:${pt}_lutified.v"
+    echo "Successfully created lutified verilog:${pt}_lutified.v"
   else
     echo "FAIL: verilog generation terminated with an error, testcase: ${pt}.v"
     exit 1
   fi
-done
+  
+  mv *.v ./logs
+  mv *.dot ./logs
+  mv yosys_script.* ./logs/yosys_log
 
-
-echo ""
-echo "Logic Equivalence Check"
-echo ""
-
-for pt in $pts
-do
-  ./inou/yosys/lgcheck -r"$pt"_lutified.v -i./inou/yosys/tests/"$pt".v
-
-
+  echo ""
+  echo "Logic Equivalence Check"
+  echo ""
+  
+  ${LGCHECK} -r./inou/yosys/tests/${pt}.v -i./logs/${pt}_lutified.v
   if [ $? -eq 0 ]; then
     echo "Successfully pass logic equivilence check!"
+    echo "=========================================="
+    echo "=========================================="
+    echo ""
   else
-    echo "FAIL: "$pt".v !== "$pt"_lutified.v"
+    echo "FAIL: "$pt".v !== "$pt"_gld.v"
     exit 1
   fi
+
 done
 
 
