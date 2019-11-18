@@ -25,9 +25,12 @@ public:
   bool reset_async = false;
 
   // Generic
+
+  void update_attr(std::string test_string);
 };
 
 class Cgen_variable_manager {
+private:
 public:
   std::map<std::string_view, Variable_options*> variable_map;
 
@@ -36,5 +39,6 @@ public:
   void merge_single(std::pair<std::string_view, Variable_options*> new_var);
   void merge_multiple(std::vector<std::pair<std::string_view, Variable_options*>> var_vector);
   std::vector<std::pair<std::string_view, Variable_options*>> pop(std::set<std::string_view> outgoing_vars);
+  Variable_options* get(std::string_view var_name);
 };
 

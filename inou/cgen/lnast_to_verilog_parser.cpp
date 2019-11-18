@@ -107,6 +107,8 @@ void Lnast_to_verilog_parser::pop_statement(mmap_lib::Tree_level level, Lnast_nt
   level_stack.pop_back();
   curr_statement_level = prev_statement_level;
   prev_statement_level = level_stack.back();
+
+  fmt::print("after pop\n");
 }
 
 void Lnast_to_verilog_parser::add_to_buffer(Lnast_node node) {
@@ -191,6 +193,10 @@ bool Lnast_to_verilog_parser::is_ref(std::string_view test_string) {
   return test_string.find("___") == 0;
 }
 
+bool Lnast_to_verilog_parser::is_attr(std::string_view test_string) {
+  return test_string.find("__") == 0 && !is_ref(test_string);
+}
+
 void Lnast_to_verilog_parser::inc_indent_buffer(){
   // indent_buffer() = absl::StrCat(indent_buffer(), "  ");
   indent_buffer_size++;
@@ -269,20 +275,28 @@ void Lnast_to_verilog_parser::process_as() {
   map_it = ref_map.find(ref);
   if (map_it != ref_map.end()) {
     ref = map_it->second.first;
+    new_vars.insert(map_it->second.second.begin(), map_it->second.second.end());
   }
   value = absl::StrCat(value, ref);
+
+  // change the variable properties
 
   if (is_ref(key)) {
     fmt::print("inserting:\tkey:{}\tvalue:{}\n", key, value);
     ref_map.insert(std::pair<std::string_view, std::pair<std::string, std::set<std::string_view>>>(key, std::pair<std::string, std::set<std::string_view>>(value, new_vars)));
   } else {
-    std::string phrase = absl::StrCat("(* LNAST: ", key, " as " , value, "*)\n");
+    std::string phrase = absl::StrCat("(* LNAST: ", key, " as " , value, " *)\n");
     curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(indent_buffer_size, phrase));
+    var_manager->insert_variable(key);
     curr_module->var_manager.merge_multiple(var_manager->pop(new_vars));
+
+    if (is_attr(value)) {
+      Variable_options* attr_var = var_manager->get(key);
+      attr_var->update_attr(value);
+    }
   }
 
   fmt::print("process_as value:\tkey: {}\tvalue: {}\n", key, value);
-
 }
 
 void Lnast_to_verilog_parser::process_label() {
