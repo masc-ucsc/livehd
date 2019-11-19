@@ -14,14 +14,26 @@ std::string Verilog_parser_module::create_header() {
   for(auto var_name : var_manager.variable_map) {
     fmt::print("variable names: {}\n", var_name.first);
     uint32_t var_type = get_variable_type(var_name.first);
-    if (var_type == 1) {
-      inputs = absl::StrCat(inputs, ",\ninput ", process_variable(var_name.first));
-    } else if (var_type == 2) {
-      outputs = absl::StrCat(outputs, ",\noutput ", process_variable(var_name.first));
-    } else if (var_type == 3) {
-      outputs = absl::StrCat(outputs, ",\noutput ", process_variable(var_name.first));
+    if (var_type == 0) {
+      wires = absl::StrCat(wires, " wire ", process_variable(var_name.first), ";\n");
     } else {
-      wires = absl::StrCat(wires, " wire ", var_name.first, ";\n");
+      std::string bits_string;
+
+      if (var_name.second->bits == 1) { // default setting
+        bits_string = absl::StrCat("[0]");
+      } else if (var_name.second->bits > 1) {
+        bits_string = absl::StrCat("[", var_name.second->bits - 1, ":0]");
+      }
+
+      std::string phrase = absl::StrCat(bits_string, " ", process_variable(var_name.first));
+
+      if (var_type == 1) {
+        inputs = absl::StrCat(inputs, ",\ninput ", phrase);
+      } else if (var_type == 2) {
+        outputs = absl::StrCat(outputs, ",\noutput ", phrase);
+      } else if (var_type == 3) {
+        outputs = absl::StrCat(outputs, ",\noutput ", phrase);
+      }
     }
   }
   fmt::print("finished with the header\n");
@@ -65,6 +77,10 @@ void Verilog_parser_module::inc_if_counter() {
 
 void Verilog_parser_module::dec_if_counter() {
   if_counter--;
+}
+
+uint32_t Verilog_parser_module::get_if_counter() {
+  return if_counter;
 }
 
 void Verilog_parser_module::add_to_buffer_single(std::pair<int32_t, std::string> next) {

@@ -36,6 +36,7 @@ public:
   std::string create_file();
   void inc_if_counter();
   void dec_if_counter();
+  uint32_t get_if_counter();
 
   uint32_t get_variable_type(std::string_view var_name);
   std::string process_variable(std::string_view var_name);

@@ -290,7 +290,7 @@ void Lnast_to_verilog_parser::process_as() {
     var_manager->insert_variable(key);
     curr_module->var_manager.merge_multiple(var_manager->pop(new_vars));
 
-    if (is_attr(value)) {
+    if (is_attr(value) && !curr_module->get_if_counter()) {
       Variable_options* attr_var = var_manager->get(key);
       attr_var->update_attr(value);
     }
