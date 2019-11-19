@@ -120,7 +120,7 @@ public class RapidWrightAPI {
     {
       Design design = DESIGN_ID_LIST.get(design_ID);
       String ffName = CTypeConversion.toJavaString(flipflopName_c);
-      Cell ff = design.createCell("ff", Unisim.FDRE);
+      Cell ff = design.createCell(ffName, Unisim.FDRE);
       CELL_ID_LIST.add(ff);
       return CELL_ID_LIST.size() - 1;
 
@@ -137,7 +137,7 @@ public class RapidWrightAPI {
       String gateName = CTypeConversion.toJavaString(gateName_c);
       Cell and2 = design.createCell(gateName, Unisim.AND2);
       CELL_ID_LIST.add(and2);
-      return CELL_ID_LIST.size() - 1;
+      return CELL_ID_LIST.indexOf(and2);
     }
 
     /*
@@ -156,33 +156,44 @@ public class RapidWrightAPI {
     @CEntryPoint( name = "RW_set_IO_Buffer")
     public static boolean RW_set_IO_Buffer(IsolateThread thread, boolean bool, int design_ID)
     {
-      Design d = DESIGN_ID_LIST.get(design_ID);
-      d.setAutoIOBuffers(bool);
+      Design design = DESIGN_ID_LIST.get(design_ID);
+      design.setAutoIOBuffers(bool);
       return bool;
     }
 
     @CEntryPoint( name = "RW_place_Design")
     public static void RW_place_Design(IsolateThread thread, int design_ID)
     {
-      Design d = DESIGN_ID_LIST.get(design_ID);
-      Design placed_design = new BlockPlacer2().placeDesign(d, false);
+      Design design = DESIGN_ID_LIST.get(design_ID);
+      Design placed_design = new BlockPlacer2().placeDesign(design, false);
+    }
+
+    @CEntryPoint( name = "RW_costumRoute")
+    public static void RW_costumRoute(IsolateThread thread, int design_ID, int src_ID, int snk_ID)
+    {
+      Design design = DESIGN_ID_LIST.get(design_ID);
+      Cell src = CELL_ID_LIST.get(src_ID);
+      Cell snk = CELL_ID_LIST.get(snk_ID);
+      Net customRoutedNet = design.createNet("src");
+      customRoutedNet.connect(src, "Q");
+		  customRoutedNet.connect(snk, "D");
     }
 
     @CEntryPoint( name = "RW_route_Design")
     public static void RW_route_Design(IsolateThread thread, int design_ID)
     {
-      Design d = DESIGN_ID_LIST.get(design_ID);
-      d.routeSites();
-  		new Router(d).routeDesign();
+      Design design = DESIGN_ID_LIST.get(design_ID);
+      design.routeSites();
+  		new Router(design).routeDesign();
     }
 
 
     @CEntryPoint( name = "RW_write_DCP")
     public static void RW_write_DCP(IsolateThread thread, CCharPointer file_name, int design_ID)
     {
-      Design d = DESIGN_ID_LIST.get(design_ID);
+      Design design = DESIGN_ID_LIST.get(design_ID);
       String fName = CTypeConversion.toJavaString(file_name);
-      d.writeCheckpoint(fName);
+      design.writeCheckpoint(fName);
     }
 
 
@@ -191,20 +202,20 @@ public class RapidWrightAPI {
     public static void addLogicGate(IsolateThread thread, CCharPointer deviceName, CCharPointer gateName)
     {
       String devName = CTypeConversion.toJavaString(deviceName);
-      Design d = null;
+      Design design = null;
       try
       {
-        d = new Design(devName, Device.PYNQ_Z1);
+        design = new Design(devName, Device.PYNQ_Z1);
       } catch(IllegalArgumentException e)
       {
         e.printStackTrace();
       }
       System.out.println(devName);
       String gName = CTypeConversion.toJavaString(gateName);
-      Cell or2 = d.createAndPlaceCell(gName, Unisim.AND2, "SLICE_X100Y100/A6LUT");
+      Cell or2 = design.createAndPlaceCell(gName, Unisim.AND2, "SLICE_X100Y100/A6LUT");
       System.out.println(gName);
-      d.setAutoIOBuffers(false);
-      d.writeCheckpoint("and2.dcp");
+      design.setAutoIOBuffers(false);
+      design.writeCheckpoint("and2.dcp");
     }
 
 }

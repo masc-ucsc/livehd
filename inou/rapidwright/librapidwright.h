@@ -20,6 +20,8 @@ int RW_set_IO_Buffer(graal_isolatethread_t*, int, int);
 
 void RW_place_Design(graal_isolatethread_t*, int);
 
+void RW_costumRoute(graal_isolatethread_t*, int, int, int);
+
 void RW_route_Design(graal_isolatethread_t*, int);
 
 void RW_write_DCP(graal_isolatethread_t*, char*, int);
