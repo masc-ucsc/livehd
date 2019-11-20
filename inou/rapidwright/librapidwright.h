@@ -14,13 +14,13 @@ int RW_create_FF(graal_isolatethread_t*, char*, int);
 
 int RW_create_AND2(graal_isolatethread_t*, char*, int);
 
-void RW_place_Cell(graal_isolatethread_t*, int, int);
+int RW_place_Cell(graal_isolatethread_t*, int, int);
 
 int RW_set_IO_Buffer(graal_isolatethread_t*, int, int);
 
 void RW_place_Design(graal_isolatethread_t*, int);
 
-void RW_costumRoute(graal_isolatethread_t*, int, int, int);
+void RW_connect_Ports(graal_isolatethread_t*, int, int, char*, int, char*);
 
 void RW_route_Design(graal_isolatethread_t*, int);
 

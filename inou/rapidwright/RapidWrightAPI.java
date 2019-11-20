@@ -144,12 +144,14 @@ public class RapidWrightAPI {
      *A separte function to place cells
      */
     @CEntryPoint( name = "RW_place_Cell")
-    public static void RW_place_Cell(IsolateThread thread, int cell_ID, int design_ID)
+    public static boolean RW_place_Cell(IsolateThread thread, int cell_ID, int design_ID)
     {
 
       Design design = DESIGN_ID_LIST.get(design_ID);
       Cell cell = CELL_ID_LIST.get(cell_ID);
-      DesignTools.placeCell(cell, design);
+      System.out.println("cellID: " + cell_ID);
+      System.out.println("cell's name: " + cell.getName());
+      return DesignTools.placeCell(cell, design);
 
     }
 
@@ -158,6 +160,7 @@ public class RapidWrightAPI {
     {
       Design design = DESIGN_ID_LIST.get(design_ID);
       design.setAutoIOBuffers(bool);
+      
       return bool;
     }
 
@@ -168,15 +171,21 @@ public class RapidWrightAPI {
       Design placed_design = new BlockPlacer2().placeDesign(design, false);
     }
 
-    @CEntryPoint( name = "RW_costumRoute")
-    public static void RW_costumRoute(IsolateThread thread, int design_ID, int src_ID, int snk_ID)
+    @CEntryPoint( name = "RW_connect_Ports")
+    public static void RW_connect_Ports(IsolateThread thread, int design_ID, int src_ID, CCharPointer src_port, int snk_ID, CCharPointer snk_port)
     {
       Design design = DESIGN_ID_LIST.get(design_ID);
       Cell src = CELL_ID_LIST.get(src_ID);
+      String src_portName = CTypeConversion.toJavaString(src_port);
+      if (src == null) {
+        System.out.println("src and2 is null!!!");
+        return;
+      }
       Cell snk = CELL_ID_LIST.get(snk_ID);
-      Net customRoutedNet = design.createNet("src");
-      customRoutedNet.connect(src, "Q");
-		  customRoutedNet.connect(snk, "D");
+      String snk_portName = CTypeConversion.toJavaString(snk_port);
+      Net net = design.createNet(src_portName + "to" + snk_portName);
+      net.connect(src, src_portName);
+      net.connect(snk, snk_portName);
     }
 
     @CEntryPoint( name = "RW_route_Design")

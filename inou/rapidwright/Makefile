@@ -19,6 +19,10 @@ LiveHD_PATH := $(shell pwd)/livehd/inou/rapidwright
 # This target will run all steps in order (installing RapidWright and Graal, updating RapidWright, compiling the .so and the compiling and running the example)
 all: testAPI
 
+update_graal:
+	wget https://github.com/oracle/graal/releases/download/vm-19.2.1/graalvm-ce-linux-amd64-19.2.1.tar.gz
+	tar zxf graalvm-ce-linux-amd64-19.2.1.tar.gz
+	$(GRAAL_PATH)/gu install native-image
 
 # Installs RapidWright with source code
 install_rapidwright:

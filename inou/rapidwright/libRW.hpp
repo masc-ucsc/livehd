@@ -17,10 +17,10 @@ public:
   int create_Design(char* designName);
   int create_FF(char* ff_name, int design_ID);
   int create_AND2(char* gate_name, int design_ID);
-  void place_Cell(int, int);
+  bool place_Cell(int, int);
   int set_IO_Buffer(bool boolean, int design_ID);
   void place_Design(int design_ID);
-  void costumRoute(int design_ID, int src_ID, int snk_ID);
+  void connect_Ports(int design_ID, int src_ID, char* src_port, int snk_ID, char* snk_port);
   void route_Design(int design_ID);
   void write_DCP(char* file_name, int design_ID);
 
@@ -45,13 +45,14 @@ int graalThread::create_AND2(char* gate_name, int design_ID) {
   return RW_create_AND2(thread, gate_name, design_ID);
 }
 
-void graalThread::place_Cell(int cell_ID, int design_ID) {
-  RW_place_Cell(thread, cell_ID, design_ID);
+bool graalThread::place_Cell(int cell_ID, int design_ID) {
+  return RW_place_Cell(thread, cell_ID, design_ID);
 }
 
-void graalThread::costumRoute(int design_ID, int src_ID, int snk_ID) {
-  RW_costumRoute(thread, design_ID, src_ID, snk_ID);
+void graalThread::connect_Ports(int design_ID, int src_ID, char* src_port, int snk_ID, char* snk_port) {
+  RW_connect_Ports(thread, design_ID, src_ID, src_port, snk_ID, snk_port);
 }
+
 
 int graalThread::set_IO_Buffer(bool boolean, int design_ID) {
   return RW_set_IO_Buffer(thread, boolean, design_ID);

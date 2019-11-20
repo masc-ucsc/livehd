@@ -14,13 +14,13 @@ typedef int (*RW_create_FF_fn_t)(graal_isolatethread_t*, char*, int);
 
 typedef int (*RW_create_AND2_fn_t)(graal_isolatethread_t*, char*, int);
 
-typedef void (*RW_place_Cell_fn_t)(graal_isolatethread_t*, int, int);
+typedef int (*RW_place_Cell_fn_t)(graal_isolatethread_t*, int, int);
 
 typedef int (*RW_set_IO_Buffer_fn_t)(graal_isolatethread_t*, int, int);
 
 typedef void (*RW_place_Design_fn_t)(graal_isolatethread_t*, int);
 
-typedef void (*RW_costumRoute_fn_t)(graal_isolatethread_t*, int, int, int);
+typedef void (*RW_connect_Ports_fn_t)(graal_isolatethread_t*, int, int, char*, int, char*);
 
 typedef void (*RW_route_Design_fn_t)(graal_isolatethread_t*, int);
 
