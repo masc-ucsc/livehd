@@ -435,6 +435,8 @@ Some characteristics
     * Relative place (left/right/top/bottom)
     * Alignment (true/false)
     * Close by (add anchor)
+* benchmark against:
+    * https://github.com/YosysHQ/nextpnr-bench
 
 ## NextPNR
 
