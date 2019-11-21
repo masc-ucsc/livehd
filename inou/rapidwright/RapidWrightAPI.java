@@ -136,6 +136,7 @@ public class RapidWrightAPI {
       Design design = DESIGN_ID_LIST.get(design_ID);
       String gateName = CTypeConversion.toJavaString(gateName_c);
       Cell and2 = design.createCell(gateName, Unisim.AND2);
+      //DesignTools.placeCell(and2, design);
       CELL_ID_LIST.add(and2);
       return CELL_ID_LIST.indexOf(and2);
     }
@@ -151,7 +152,9 @@ public class RapidWrightAPI {
       Cell cell = CELL_ID_LIST.get(cell_ID);
       System.out.println("cellID: " + cell_ID);
       System.out.println("cell's name: " + cell.getName());
-      return DesignTools.placeCell(cell, design);
+      boolean placed = DesignTools.placeCell(cell, design);
+      System.out.println(cell.getSiteName());
+      return placed;
 
     }
 
@@ -160,7 +163,7 @@ public class RapidWrightAPI {
     {
       Design design = DESIGN_ID_LIST.get(design_ID);
       design.setAutoIOBuffers(bool);
-      
+
       return bool;
     }
 
