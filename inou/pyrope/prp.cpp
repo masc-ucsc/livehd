@@ -1253,7 +1253,7 @@ std::string Prp::tok_id_to_string(Token_id tok){
       return "nop";
     case Token_id_comment:       // c-like comments
       return "comment";
-    case Token_id_register:      // @asd @_asd
+    case Token_id_register:      // #asd #_asd
       return "register";
     case Token_id_pipe:          // |>
       return "|>";

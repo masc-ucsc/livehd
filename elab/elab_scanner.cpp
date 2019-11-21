@@ -106,7 +106,7 @@ void Elab_scanner::add_token(Token &t) {
       return;
     }
   } else if (t.tok == Token_id_alnum) {
-    if (last_tok.tok == Token_id_at) {  // @foo
+    if (last_tok.tok == Token_id_pound) {  // #foo
       token_list.back().tok = Token_id_register;
       token_list.back().len += t.len;
       return;

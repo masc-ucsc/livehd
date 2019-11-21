@@ -417,7 +417,7 @@ std::string Lnast_parser::ntype_dbg(Lnast_ntype ntype) {
 }
 
 bool Lnast_parser::token_is_valid_ref(){
-  return (scan_is_token(Token_id_alnum) || scan_is_token(Token_id_output) || scan_is_token(Token_id_input) || scan_is_token(Token_id_at));
+  return (scan_is_token(Token_id_alnum) || scan_is_token(Token_id_output) || scan_is_token(Token_id_input) || scan_is_token(Token_id_register));
 }
 
 

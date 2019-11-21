@@ -32,7 +32,7 @@ using Token_entry = Explicit_type<uint32_t, struct Token_entry_struct, 0>;
 //
 constexpr Token_id Token_id_nop           = 0;   // invalid token
 constexpr Token_id Token_id_comment       = 1;   // c-like comments
-constexpr Token_id Token_id_register      = 2;   // @asd @_asd
+constexpr Token_id Token_id_register      = 2;   // #asd #_asd
 constexpr Token_id Token_id_pipe          = 3;   // |>
 constexpr Token_id Token_id_alnum         = 4;   // a..z..0..9.._
 constexpr Token_id Token_id_ob            = 5;   // {
