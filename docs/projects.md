@@ -57,6 +57,7 @@ to handle classes.
     * slang->lnast->lgraph->lnast->cgen (verilog+lgcheck)
         * BOOM
         * https://github.com/SymbiFlow/sv-tests
+        * https://github.com/taichi-ishitani/tnoc
 
 ## Hot-Reload Simulation Console
 
