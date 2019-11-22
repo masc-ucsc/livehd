@@ -441,13 +441,12 @@ void Lnast_to_pyrope_parser::process_func_call() {
 void Lnast_to_pyrope_parser::process_func_def() {
   std::vector<Lnast_node>::iterator it = node_buffer.begin();
   it++; // func_def
-  it++; // sts
   node_str_buffer = absl::StrCat(node_str_buffer, indent_buffer(), get_node_name(*it), " = :(");
   it++; // ref
-  while (it != node_buffer.end()) {
+  while ((*it).type != Lnast_ntype_statements) {
     node_str_buffer = absl::StrCat(node_str_buffer, get_node_name(*it));
 
-    if (++it != node_buffer.end()) {
+    if ((*++it).type != Lnast_ntype_statements) {
       node_str_buffer = absl::StrCat(node_str_buffer, ",");
     } else {
       node_str_buffer = absl::StrCat(node_str_buffer, "):{\n");

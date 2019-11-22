@@ -492,18 +492,19 @@ void Lnast_to_verilog_parser::process_func_call() {
 void Lnast_to_verilog_parser::process_func_def() {
   std::vector<Lnast_node>::iterator it = node_buffer.begin();
   it++; // func_def
-  it++; // sts
   std::string func_name = absl::StrCat(root_filename, "_", get_node_name(*it));
   curr_module->filename = func_name;
+  fmt::print("func def : {}\n", get_node_name(*it));
   // function name
   it++; // ref
   // the variables
   std::set<std::string_view> new_vars;
-  while (it != node_buffer.end()) {
+  while ((*it).type != Lnast_ntype_statements) {
     new_vars.insert(get_node_name(*it));
     var_manager->insert_variable(get_node_name(*it));
     it++;
   }
+  it++; // sts
 
   curr_module->add_to_buffer_multiple(curr_module->pop_queue());
   curr_module->var_manager.merge_multiple(var_manager->pop(new_vars));
