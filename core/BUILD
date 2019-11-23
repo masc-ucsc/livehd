@@ -11,7 +11,6 @@ cc_library(
         "//eprp:eprp",
         "//mmap_lib:headers",
         "//bench:headers",
-        "@yas//:headers",
         ],
     )
 

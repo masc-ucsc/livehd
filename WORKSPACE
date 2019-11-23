@@ -30,7 +30,7 @@ new_git_repository( # Open_timer user taskflow
 new_git_repository(
     name = "abc",
     build_file = "BUILD.abc", # relative to external path
-    commit = "362b2d9d08f4dbc8dfc751b68ddf7bd3f9c4ed54", # April 6 14d985a8c4597bc70765cb889be160b7af5fa128", # Oct 20, 2018
+    commit = "362b2d9d08f4dbc8dfc751b68ddf7bd3f9c4ed54", # April 6 2019 14d985a8c4597bc70765cb889be160b7af5fa128", # Oct 20, 2018
     remote = "https://github.com/berkeley-abc/abc.git",
     patches = ["//external:patch.abc"],
 )
@@ -95,20 +95,6 @@ git_repository(
     remote = "https://github.com/masc-ucsc/iassert.git",
     #strip_prefix = "src",
 )
-new_git_repository(
-    name = "sparsehash",
-    build_file = "BUILD.sparsehash",
-    shallow_since = "1528448703 +0200",
-    commit = "5ca6de766db32b3fb08a040636423cd3988d2d4f", # Jun 8, 2018
-    remote = "https://github.com/sparsehash/sparsehash-c11.git",
-)
-#new_git_repository(
-    #name = "bm",
-    #build_file = "BUILD.bm",
-    #commit = "93a8ba2c50c039cfe6b95f9d6fe128603a14e0ed", # March 20, 2019
-    #remote = "https://github.com/tlk00/BitMagic.git",
-    #strip_prefix = "src",
-#)
 git_repository(
     name = "cryptominisat",
     #build_file = "BUILD.abseil", # relative to external path
@@ -119,15 +105,8 @@ git_repository(
 new_git_repository(
     name = "rapidjson",
     build_file = "BUILD.rapidjson",
-    commit = "663f076c7b44ce96526d1acfda3fa46971c8af31", # October 6, 2018
+    commit = "6534506e829a489bda78bc5eac5faa34da0a2c51", # Nov 23, 2019 663f076c7b44ce96526d1acfda3fa46971c8af31", # October 6, 2018
     remote = "https://github.com/Tencent/rapidjson.git",
-    strip_prefix = "include",
-)
-new_git_repository(
-    name = "yas",
-    build_file = "BUILD.yas",
-    commit = "f705a06735b87fd97e4f785c31c5791a907f155a", # Dec 21, 2018
-    remote = "https://github.com/niXman/yas.git",
     strip_prefix = "include",
 )
 new_git_repository(
