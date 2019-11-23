@@ -1,4 +1,4 @@
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/external/xxhash/xxhash.c ./external/xxhash/xxhash.c
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/external/xxhash/xxhash.c ./external/xxhash/xxhash.c
 --- ../slang_orig/external/xxhash/xxhash.c	2019-10-15 18:26:53.568949244 -0700
 +++ ./external/xxhash/xxhash.c	1969-12-31 16:00:00.000000000 -0800
 @@ -1,1029 +0,0 @@
@@ -1031,9 +1031,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 -}
 -
 -#endif  /* XXH_NO_LONG_LONG */
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/external/xxhash/xxhash.cpp ./external/xxhash/xxhash.cpp
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/external/xxhash/xxhash.cpp ./external/xxhash/xxhash.cpp
 --- ../slang_orig/external/xxhash/xxhash.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ./external/xxhash/xxhash.cpp	2019-07-25 22:39:21.278496754 -0700
++++ ./external/xxhash/xxhash.cpp	2019-11-23 10:36:56.926380085 -0800
 @@ -0,0 +1,1029 @@
 +/*
 +*  xxHash - Fast Hash algorithm
@@ -2064,9 +2064,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 +
 +#endif  /* XXH_NO_LONG_LONG */
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/external/xxhash/xxhash.h ./external/xxhash/xxhash.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/external/xxhash/xxhash.h ./external/xxhash/xxhash.h
 --- ../slang_orig/external/xxhash/xxhash.h	2019-10-15 18:26:53.568949244 -0700
-+++ ./external/xxhash/xxhash.h	2019-10-15 18:47:01.491670065 -0700
++++ ./external/xxhash/xxhash.h	2019-11-23 10:37:36.745536367 -0800
 @@ -313,11 +313,11 @@
  
  # endif
@@ -2080,10 +2080,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
  #endif /* XXH_STATIC_LINKING_ONLY */
  
  
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/AllSyntax.cpp ./generated/AllSyntax.cpp
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/AllSyntax.cpp ./generated/AllSyntax.cpp
 --- ../slang_orig/generated/AllSyntax.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/AllSyntax.cpp	2019-10-16 10:35:24.214063794 -0700
-@@ -0,0 +1,12425 @@
++++ ./generated/AllSyntax.cpp	2019-11-23 10:40:28.821890357 -0800
+@@ -0,0 +1,12494 @@
 +//------------------------------------------------------------------------------
 +// AllSyntax.cpp
 +// All generated syntax node data structures.
@@ -2221,8 +2221,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::ElseClause: return 2;
 +        case SyntaxKind::ElseConstraintClause: return 2;
 +        case SyntaxKind::ElseDirective: return 2;
-+        case SyntaxKind::EmptyArgument: return 0;
-+        case SyntaxKind::EmptyIdentifierName: return 0;
++        case SyntaxKind::EmptyArgument: return 1;
++        case SyntaxKind::EmptyIdentifierName: return 1;
 +        case SyntaxKind::EmptyMember: return 3;
 +        case SyntaxKind::EmptyQueueExpression: return 2;
 +        case SyntaxKind::EmptyStatement: return 3;
@@ -2499,6 +2499,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::VariablePattern: return 2;
 +        case SyntaxKind::VariablePortHeader: return 3;
 +        case SyntaxKind::VirtualInterfaceType: return 5;
++        case SyntaxKind::VoidCastedCallStatement: return 8;
 +        case SyntaxKind::VoidType: return 1;
 +        case SyntaxKind::WaitForkStatement: return 5;
 +        case SyntaxKind::WaitOrderStatement: return 7;
@@ -5733,18 +5734,24 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 +
 +TokenOrSyntax EmptyArgumentSyntax::getChild(size_t index) {
-+    (void)index;
-+    return nullptr;
++    switch (index) {
++        case 0: return placeholder;
++        default: return nullptr;
++    }
 +}
 +
 +ConstTokenOrSyntax EmptyArgumentSyntax::getChild(size_t index) const {
-+    (void)index;
-+    return nullptr;
++    switch (index) {
++        case 0: return placeholder;
++        default: return nullptr;
++    }
 +}
 +
 +void EmptyArgumentSyntax::setChild(size_t index, TokenOrSyntax child) {
-+    (void)index;
-+    (void)child;
++    switch (index) {
++        case 0: placeholder = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
 +}
 +
 +EmptyArgumentSyntax* EmptyArgumentSyntax::clone(BumpAllocator& alloc) const {
@@ -5756,18 +5763,24 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 +
 +TokenOrSyntax EmptyIdentifierNameSyntax::getChild(size_t index) {
-+    (void)index;
-+    return nullptr;
++    switch (index) {
++        case 0: return placeholder;
++        default: return nullptr;
++    }
 +}
 +
 +ConstTokenOrSyntax EmptyIdentifierNameSyntax::getChild(size_t index) const {
-+    (void)index;
-+    return nullptr;
++    switch (index) {
++        case 0: return placeholder;
++        default: return nullptr;
++    }
 +}
 +
 +void EmptyIdentifierNameSyntax::setChild(size_t index, TokenOrSyntax child) {
-+    (void)index;
-+    (void)child;
++    switch (index) {
++        case 0: placeholder = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
 +}
 +
 +EmptyIdentifierNameSyntax* EmptyIdentifierNameSyntax::clone(BumpAllocator& alloc) const {
@@ -7037,7 +7050,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    switch (index) {
 +        case 0: return keyword;
 +        case 1: return lifetime;
-+        case 2: return returnType;
++        case 2: return returnType.get();
 +        case 3: return name.get();
 +        case 4: return portList;
 +        default: return nullptr;
@@ -7048,7 +7061,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    switch (index) {
 +        case 0: return keyword;
 +        case 1: return lifetime;
-+        case 2: return returnType;
++        case 2: return returnType.get();
 +        case 3: return name.get();
 +        case 4: return portList;
 +        default: return nullptr;
@@ -11532,6 +11545,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::ReturnStatement:
 +        case SyntaxKind::SequentialBlockStatement:
 +        case SyntaxKind::TimingControlStatement:
++        case SyntaxKind::VoidCastedCallStatement:
 +        case SyntaxKind::WaitForkStatement:
 +        case SyntaxKind::WaitOrderStatement:
 +        case SyntaxKind::WaitStatement:
@@ -12689,6 +12703,56 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return alloc.emplace<VirtualInterfaceTypeSyntax>(*this);
 +}
 +
++bool VoidCastedCallStatementSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::VoidCastedCallStatement;
++}
++
++TokenOrSyntax VoidCastedCallStatementSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return label;
++        case 1: return &attributes;
++        case 2: return voidKeyword;
++        case 3: return apostrophe;
++        case 4: return openParen;
++        case 5: return expr.get();
++        case 6: return closeParen;
++        case 7: return semi;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax VoidCastedCallStatementSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return label;
++        case 1: return &attributes;
++        case 2: return voidKeyword;
++        case 3: return apostrophe;
++        case 4: return openParen;
++        case 5: return expr.get();
++        case 6: return closeParen;
++        case 7: return semi;
++        default: return nullptr;
++    }
++}
++
++void VoidCastedCallStatementSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: label = &child.node()->as<NamedLabelSyntax>(); return;
++        case 1: attributes = child.node()->as<SyntaxList<AttributeInstanceSyntax>>(); return;
++        case 2: voidKeyword = child.token(); return;
++        case 3: apostrophe = child.token(); return;
++        case 4: openParen = child.token(); return;
++        case 5: expr = &child.node()->as<ExpressionSyntax>(); return;
++        case 6: closeParen = child.token(); return;
++        case 7: semi = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++VoidCastedCallStatementSyntax* VoidCastedCallStatementSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<VoidCastedCallStatementSyntax>(*this);
++}
++
 +bool WaitForkStatementSyntax::isKind(SyntaxKind kind) {
 +    return kind == SyntaxKind::WaitForkStatement;
 +}
@@ -13365,12 +13429,12 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return *alloc.emplace<ElseConstraintClauseSyntax>(elseKeyword, constraints);
 +}
 +
-+EmptyArgumentSyntax& SyntaxFactory::emptyArgument() {
-+    return *alloc.emplace<EmptyArgumentSyntax>();
++EmptyArgumentSyntax& SyntaxFactory::emptyArgument(Token placeholder) {
++    return *alloc.emplace<EmptyArgumentSyntax>(placeholder);
 +}
 +
-+EmptyIdentifierNameSyntax& SyntaxFactory::emptyIdentifierName() {
-+    return *alloc.emplace<EmptyIdentifierNameSyntax>();
++EmptyIdentifierNameSyntax& SyntaxFactory::emptyIdentifierName(Token placeholder) {
++    return *alloc.emplace<EmptyIdentifierNameSyntax>(placeholder);
 +}
 +
 +EmptyMemberSyntax& SyntaxFactory::emptyMember(const SyntaxList<AttributeInstanceSyntax>& attributes, const TokenList& qualifiers, Token semi) {
@@ -13485,7 +13549,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return *alloc.emplace<FunctionPortSyntax>(attributes, constKeyword, direction, varKeyword, dataType, declarator);
 +}
 +
-+FunctionPrototypeSyntax& SyntaxFactory::functionPrototype(Token keyword, Token lifetime, DataTypeSyntax* returnType, NameSyntax& name, FunctionPortListSyntax* portList) {
++FunctionPrototypeSyntax& SyntaxFactory::functionPrototype(Token keyword, Token lifetime, DataTypeSyntax& returnType, NameSyntax& name, FunctionPortListSyntax* portList) {
 +    return *alloc.emplace<FunctionPrototypeSyntax>(keyword, lifetime, returnType, name, portList);
 +}
 +
@@ -14045,6 +14109,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return *alloc.emplace<VirtualInterfaceTypeSyntax>(virtualKeyword, interfaceKeyword, name, parameters, modport);
 +}
 +
++VoidCastedCallStatementSyntax& SyntaxFactory::voidCastedCallStatement(NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token voidKeyword, Token apostrophe, Token openParen, ExpressionSyntax& expr, Token closeParen, Token semi) {
++    return *alloc.emplace<VoidCastedCallStatementSyntax>(label, attributes, voidKeyword, apostrophe, openParen, expr, closeParen, semi);
++}
++
 +WaitForkStatementSyntax& SyntaxFactory::waitForkStatement(NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token wait, Token fork, Token semi) {
 +    return *alloc.emplace<WaitForkStatementSyntax>(label, attributes, wait, fork, semi);
 +}
@@ -14488,6 +14556,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::VariablePattern: return "VariablePattern";
 +        case SyntaxKind::VariablePortHeader: return "VariablePortHeader";
 +        case SyntaxKind::VirtualInterfaceType: return "VirtualInterfaceType";
++        case SyntaxKind::VoidCastedCallStatement: return "VoidCastedCallStatement";
 +        case SyntaxKind::VoidType: return "VoidType";
 +        case SyntaxKind::WaitForkStatement: return "WaitForkStatement";
 +        case SyntaxKind::WaitOrderStatement: return "WaitOrderStatement";
@@ -14509,7803 +14578,11 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/CMakeFiles/CMakeDirectoryInformation.cmake ./generated/CMakeFiles/CMakeDirectoryInformation.cmake
---- ../slang_orig/generated/CMakeFiles/CMakeDirectoryInformation.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/CMakeFiles/CMakeDirectoryInformation.cmake	2019-10-16 10:35:14.474364038 -0700
-@@ -0,0 +1,16 @@
-+# CMAKE generated file: DO NOT EDIT!
-+# Generated by "Unix Makefiles" Generator, CMake Version 3.15
-+
-+# Relative path conversion top directories.
-+set(CMAKE_RELATIVE_PATH_TOP_SOURCE "/soe/renau/projs/synth/slang_orig")
-+set(CMAKE_RELATIVE_PATH_TOP_BINARY "/soe/renau/projs/synth/slang_orig/build")
-+
-+# Force unix paths in dependencies.
-+set(CMAKE_FORCE_UNIX_PATHS 1)
-+
-+
-+# The C and CXX include file regular expressions for this directory.
-+set(CMAKE_C_INCLUDE_REGEX_SCAN "^.*$")
-+set(CMAKE_C_INCLUDE_REGEX_COMPLAIN "^$")
-+set(CMAKE_CXX_INCLUDE_REGEX_SCAN ${CMAKE_C_INCLUDE_REGEX_SCAN})
-+set(CMAKE_CXX_INCLUDE_REGEX_COMPLAIN ${CMAKE_C_INCLUDE_REGEX_COMPLAIN})
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/CMakeFiles/gen_version.dir/build.make ./generated/CMakeFiles/gen_version.dir/build.make
---- ../slang_orig/generated/CMakeFiles/gen_version.dir/build.make	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/CMakeFiles/gen_version.dir/build.make	2019-10-16 10:35:14.454364655 -0700
-@@ -0,0 +1,76 @@
-+# CMAKE generated file: DO NOT EDIT!
-+# Generated by "Unix Makefiles" Generator, CMake Version 3.15
-+
-+# Delete rule output on recipe failure.
-+.DELETE_ON_ERROR:
-+
-+
-+#=============================================================================
-+# Special targets provided by cmake.
-+
-+# Disable implicit rules so canonical targets will work.
-+.SUFFIXES:
-+
-+
-+# Remove some rules from gmake that .SUFFIXES does not remove.
-+SUFFIXES =
-+
-+.SUFFIXES: .hpux_make_needs_suffix_list
-+
-+
-+# Suppress display of executed commands.
-+$(VERBOSE).SILENT:
-+
-+
-+# A target that is always out of date.
-+cmake_force:
-+
-+.PHONY : cmake_force
-+
-+#=============================================================================
-+# Set environment variables for the build.
-+
-+# The shell in which to execute make rules.
-+SHELL = /bin/sh
-+
-+# The CMake executable.
-+CMAKE_COMMAND = /usr/bin/cmake
-+
-+# The command to remove a file.
-+RM = /usr/bin/cmake -E remove -f
-+
-+# Escaping for special characters.
-+EQUALS = =
-+
-+# The top-level source directory on which CMake was run.
-+CMAKE_SOURCE_DIR = /soe/renau/projs/synth/slang_orig
-+
-+# The top-level build directory on which CMake was run.
-+CMAKE_BINARY_DIR = /soe/renau/projs/synth/slang_orig/build
-+
-+# Utility rule file for gen_version.
-+
-+# Include the progress variables for this target.
-+include source/CMakeFiles/gen_version.dir/progress.make
-+
-+source/CMakeFiles/gen_version: ../source/util/Version.cpp.in
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/cmake -Dinfile="/soe/renau/projs/synth/slang_orig/source/util/Version.cpp.in" -Doutfile="/soe/renau/projs/synth/slang_orig/build/source/Version.cpp" -Dlocal_dir="/soe/renau/projs/synth/slang_orig/source" -D_version_major=0 -D_version_minor=1 -P /soe/renau/projs/synth/slang_orig/source/../cmake/gitversion.cmake
-+
-+gen_version: source/CMakeFiles/gen_version
-+gen_version: source/CMakeFiles/gen_version.dir/build.make
-+
-+.PHONY : gen_version
-+
-+# Rule to build all files generated by this target.
-+source/CMakeFiles/gen_version.dir/build: gen_version
-+
-+.PHONY : source/CMakeFiles/gen_version.dir/build
-+
-+source/CMakeFiles/gen_version.dir/clean:
-+	cd /soe/renau/projs/synth/slang_orig/build/source && $(CMAKE_COMMAND) -P CMakeFiles/gen_version.dir/cmake_clean.cmake
-+.PHONY : source/CMakeFiles/gen_version.dir/clean
-+
-+source/CMakeFiles/gen_version.dir/depend:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /soe/renau/projs/synth/slang_orig /soe/renau/projs/synth/slang_orig/source /soe/renau/projs/synth/slang_orig/build /soe/renau/projs/synth/slang_orig/build/source /soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/gen_version.dir/DependInfo.cmake --color=$(COLOR)
-+.PHONY : source/CMakeFiles/gen_version.dir/depend
-+
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/CMakeFiles/gen_version.dir/cmake_clean.cmake ./generated/CMakeFiles/gen_version.dir/cmake_clean.cmake
---- ../slang_orig/generated/CMakeFiles/gen_version.dir/cmake_clean.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/CMakeFiles/gen_version.dir/cmake_clean.cmake	2019-10-16 10:35:14.454364655 -0700
-@@ -0,0 +1,9 @@
-+file(REMOVE_RECURSE
-+  "CMakeFiles/gen_version"
-+  "Version.cpp"
-+)
-+
-+# Per-language clean rules from dependency scanning.
-+foreach(lang )
-+  include(CMakeFiles/gen_version.dir/cmake_clean_${lang}.cmake OPTIONAL)
-+endforeach()
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/CMakeFiles/gen_version.dir/DependInfo.cmake ./generated/CMakeFiles/gen_version.dir/DependInfo.cmake
---- ../slang_orig/generated/CMakeFiles/gen_version.dir/DependInfo.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/CMakeFiles/gen_version.dir/DependInfo.cmake	2019-10-16 10:35:14.454364655 -0700
-@@ -0,0 +1,11 @@
-+# The set of languages for which implicit dependencies are needed:
-+set(CMAKE_DEPENDS_LANGUAGES
-+  )
-+# The set of files for implicit dependencies of each language:
-+
-+# Targets to which this target links.
-+set(CMAKE_TARGET_LINKED_INFO_FILES
-+  )
-+
-+# Fortran module output directory.
-+set(CMAKE_Fortran_TARGET_MODULE_DIR "")
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/CMakeFiles/gen_version.dir/depend.internal ./generated/CMakeFiles/gen_version.dir/depend.internal
---- ../slang_orig/generated/CMakeFiles/gen_version.dir/depend.internal	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/CMakeFiles/gen_version.dir/depend.internal	2019-10-16 10:35:24.054068727 -0700
-@@ -0,0 +1,3 @@
-+# CMAKE generated file: DO NOT EDIT!
-+# Generated by "Unix Makefiles" Generator, CMake Version 3.15
-+
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/CMakeFiles/gen_version.dir/depend.make ./generated/CMakeFiles/gen_version.dir/depend.make
---- ../slang_orig/generated/CMakeFiles/gen_version.dir/depend.make	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/CMakeFiles/gen_version.dir/depend.make	2019-10-16 10:35:24.054068727 -0700
-@@ -0,0 +1,3 @@
-+# CMAKE generated file: DO NOT EDIT!
-+# Generated by "Unix Makefiles" Generator, CMake Version 3.15
-+
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/CMakeFiles/progress.marks ./generated/CMakeFiles/progress.marks
---- ../slang_orig/generated/CMakeFiles/progress.marks	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/CMakeFiles/progress.marks	2019-10-16 10:35:14.484363730 -0700
-@@ -0,0 +1 @@
-+61
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/AllSyntax.cpp.o and ./generated/CMakeFiles/slang.dir/AllSyntax.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/binding/BindContext.cpp.o and ./generated/CMakeFiles/slang.dir/binding/BindContext.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o and ./generated/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/binding/EvalContext.cpp.o and ./generated/CMakeFiles/slang.dir/binding/EvalContext.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/binding/Expressions.cpp.o and ./generated/CMakeFiles/slang.dir/binding/Expressions.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o and ./generated/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/binding/Statements.cpp.o and ./generated/CMakeFiles/slang.dir/binding/Statements.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o and ./generated/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/binding/TimingControl.cpp.o and ./generated/CMakeFiles/slang.dir/binding/TimingControl.cpp.o differ
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/CMakeFiles/slang.dir/build.make ./generated/CMakeFiles/slang.dir/build.make
---- ../slang_orig/generated/CMakeFiles/slang.dir/build.make	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/CMakeFiles/slang.dir/build.make	2019-10-16 10:35:14.464364347 -0700
-@@ -0,0 +1,977 @@
-+# CMAKE generated file: DO NOT EDIT!
-+# Generated by "Unix Makefiles" Generator, CMake Version 3.15
-+
-+# Delete rule output on recipe failure.
-+.DELETE_ON_ERROR:
-+
-+
-+#=============================================================================
-+# Special targets provided by cmake.
-+
-+# Disable implicit rules so canonical targets will work.
-+.SUFFIXES:
-+
-+
-+# Remove some rules from gmake that .SUFFIXES does not remove.
-+SUFFIXES =
-+
-+.SUFFIXES: .hpux_make_needs_suffix_list
-+
-+
-+# Suppress display of executed commands.
-+$(VERBOSE).SILENT:
-+
-+
-+# A target that is always out of date.
-+cmake_force:
-+
-+.PHONY : cmake_force
-+
-+#=============================================================================
-+# Set environment variables for the build.
-+
-+# The shell in which to execute make rules.
-+SHELL = /bin/sh
-+
-+# The CMake executable.
-+CMAKE_COMMAND = /usr/bin/cmake
-+
-+# The command to remove a file.
-+RM = /usr/bin/cmake -E remove -f
-+
-+# Escaping for special characters.
-+EQUALS = =
-+
-+# The top-level source directory on which CMake was run.
-+CMAKE_SOURCE_DIR = /soe/renau/projs/synth/slang_orig
-+
-+# The top-level build directory on which CMake was run.
-+CMAKE_BINARY_DIR = /soe/renau/projs/synth/slang_orig/build
-+
-+# Include any dependencies generated for this target.
-+include source/CMakeFiles/slang.dir/depend.make
-+
-+# Include the progress variables for this target.
-+include source/CMakeFiles/slang.dir/progress.make
-+
-+# Include the compile flags for this target's objects.
-+include source/CMakeFiles/slang.dir/flags.make
-+
-+source/slang/diagnostics/AllDiags.h: ../source/../scripts/diagnostic_gen.py
-+source/slang/diagnostics/AllDiags.h: ../source/../scripts/diagnostics.txt
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --blue --bold --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Generating diagnostics"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/python3.7 /soe/renau/projs/synth/slang_orig/source/../scripts/diagnostic_gen.py --outDir /soe/renau/projs/synth/slang_orig/build/source --srcDir /soe/renau/projs/synth/slang_orig/source --incDir /soe/renau/projs/synth/slang_orig/source/../include/slang
-+
-+source/DiagCode.cpp: source/slang/diagnostics/AllDiags.h
-+	@$(CMAKE_COMMAND) -E touch_nocreate source/DiagCode.cpp
-+
-+source/slang/syntax/AllSyntax.h: ../source/../scripts/syntax_gen.py
-+source/slang/syntax/AllSyntax.h: ../source/../scripts/syntax.txt
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --blue --bold --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Generating syntax"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/python3.7 /soe/renau/projs/synth/slang_orig/source/../scripts/syntax_gen.py --dir /soe/renau/projs/synth/slang_orig/build/source
-+
-+source/AllSyntax.cpp: source/slang/syntax/AllSyntax.h
-+	@$(CMAKE_COMMAND) -E touch_nocreate source/AllSyntax.cpp
-+
-+source/slang/syntax/SyntaxKind.h: source/slang/syntax/AllSyntax.h
-+	@$(CMAKE_COMMAND) -E touch_nocreate source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../source/binding/BindContext.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object source/CMakeFiles/slang.dir/binding/BindContext.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/binding/BindContext.cpp.o -c /soe/renau/projs/synth/slang_orig/source/binding/BindContext.cpp
-+
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/binding/BindContext.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/binding/BindContext.cpp > CMakeFiles/slang.dir/binding/BindContext.cpp.i
-+
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/binding/BindContext.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/binding/BindContext.cpp -o CMakeFiles/slang.dir/binding/BindContext.cpp.s
-+
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: ../source/binding/ConstantValue.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/binding/ConstantValue.cpp.o -c /soe/renau/projs/synth/slang_orig/source/binding/ConstantValue.cpp
-+
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/binding/ConstantValue.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/binding/ConstantValue.cpp > CMakeFiles/slang.dir/binding/ConstantValue.cpp.i
-+
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/binding/ConstantValue.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/binding/ConstantValue.cpp -o CMakeFiles/slang.dir/binding/ConstantValue.cpp.s
-+
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../source/binding/EvalContext.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/binding/EvalContext.cpp.o -c /soe/renau/projs/synth/slang_orig/source/binding/EvalContext.cpp
-+
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/binding/EvalContext.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/binding/EvalContext.cpp > CMakeFiles/slang.dir/binding/EvalContext.cpp.i
-+
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/binding/EvalContext.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/binding/EvalContext.cpp -o CMakeFiles/slang.dir/binding/EvalContext.cpp.s
-+
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../source/binding/Expressions.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Building CXX object source/CMakeFiles/slang.dir/binding/Expressions.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/binding/Expressions.cpp.o -c /soe/renau/projs/synth/slang_orig/source/binding/Expressions.cpp
-+
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/binding/Expressions.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/binding/Expressions.cpp > CMakeFiles/slang.dir/binding/Expressions.cpp.i
-+
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/binding/Expressions.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/binding/Expressions.cpp -o CMakeFiles/slang.dir/binding/Expressions.cpp.s
-+
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../source/binding/Expressions_eval.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Building CXX object source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o -c /soe/renau/projs/synth/slang_orig/source/binding/Expressions_eval.cpp
-+
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/binding/Expressions_eval.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/binding/Expressions_eval.cpp > CMakeFiles/slang.dir/binding/Expressions_eval.cpp.i
-+
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/binding/Expressions_eval.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/binding/Expressions_eval.cpp -o CMakeFiles/slang.dir/binding/Expressions_eval.cpp.s
-+
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../source/binding/Statements.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_8) "Building CXX object source/CMakeFiles/slang.dir/binding/Statements.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/binding/Statements.cpp.o -c /soe/renau/projs/synth/slang_orig/source/binding/Statements.cpp
-+
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/binding/Statements.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/binding/Statements.cpp > CMakeFiles/slang.dir/binding/Statements.cpp.i
-+
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/binding/Statements.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/binding/Statements.cpp -o CMakeFiles/slang.dir/binding/Statements.cpp.s
-+
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../source/binding/SystemSubroutine.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_9) "Building CXX object source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o -c /soe/renau/projs/synth/slang_orig/source/binding/SystemSubroutine.cpp
-+
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/binding/SystemSubroutine.cpp > CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.i
-+
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/binding/SystemSubroutine.cpp -o CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.s
-+
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../source/binding/TimingControl.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_10) "Building CXX object source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/binding/TimingControl.cpp.o -c /soe/renau/projs/synth/slang_orig/source/binding/TimingControl.cpp
-+
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/binding/TimingControl.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/binding/TimingControl.cpp > CMakeFiles/slang.dir/binding/TimingControl.cpp.i
-+
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/binding/TimingControl.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/binding/TimingControl.cpp -o CMakeFiles/slang.dir/binding/TimingControl.cpp.s
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../source/compilation/builtins/ArrayMethods.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_11) "Building CXX object source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o -c /soe/renau/projs/synth/slang_orig/source/compilation/builtins/ArrayMethods.cpp
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/compilation/builtins/ArrayMethods.cpp > CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.i
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/compilation/builtins/ArrayMethods.cpp -o CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.s
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../source/compilation/builtins/EnumMethods.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_12) "Building CXX object source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o -c /soe/renau/projs/synth/slang_orig/source/compilation/builtins/EnumMethods.cpp
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/compilation/builtins/EnumMethods.cpp > CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.i
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/compilation/builtins/EnumMethods.cpp -o CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.s
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../source/compilation/builtins/MathFuncs.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_13) "Building CXX object source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o -c /soe/renau/projs/synth/slang_orig/source/compilation/builtins/MathFuncs.cpp
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/compilation/builtins/MathFuncs.cpp > CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.i
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/compilation/builtins/MathFuncs.cpp -o CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.s
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../source/compilation/builtins/MiscSystemFuncs.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_14) "Building CXX object source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o -c /soe/renau/projs/synth/slang_orig/source/compilation/builtins/MiscSystemFuncs.cpp
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/compilation/builtins/MiscSystemFuncs.cpp > CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.i
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/compilation/builtins/MiscSystemFuncs.cpp -o CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.s
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../source/compilation/builtins/NonConstFuncs.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_15) "Building CXX object source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o -c /soe/renau/projs/synth/slang_orig/source/compilation/builtins/NonConstFuncs.cpp
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/compilation/builtins/NonConstFuncs.cpp > CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.i
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/compilation/builtins/NonConstFuncs.cpp -o CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.s
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../source/compilation/builtins/QueryFuncs.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_16) "Building CXX object source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o -c /soe/renau/projs/synth/slang_orig/source/compilation/builtins/QueryFuncs.cpp
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/compilation/builtins/QueryFuncs.cpp > CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.i
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/compilation/builtins/QueryFuncs.cpp -o CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.s
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../source/compilation/builtins/StringMethods.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_17) "Building CXX object source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o -c /soe/renau/projs/synth/slang_orig/source/compilation/builtins/StringMethods.cpp
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/compilation/builtins/StringMethods.cpp > CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.i
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/compilation/builtins/StringMethods.cpp -o CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.s
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../source/compilation/builtins/SystemTasks.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_18) "Building CXX object source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o -c /soe/renau/projs/synth/slang_orig/source/compilation/builtins/SystemTasks.cpp
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/compilation/builtins/SystemTasks.cpp > CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.i
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/compilation/builtins/SystemTasks.cpp -o CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.s
-+
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../source/compilation/Compilation.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_19) "Building CXX object source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/compilation/Compilation.cpp.o -c /soe/renau/projs/synth/slang_orig/source/compilation/Compilation.cpp
-+
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/compilation/Compilation.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/compilation/Compilation.cpp > CMakeFiles/slang.dir/compilation/Compilation.cpp.i
-+
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/compilation/Compilation.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/compilation/Compilation.cpp -o CMakeFiles/slang.dir/compilation/Compilation.cpp.s
-+
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../source/compilation/ScriptSession.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_20) "Building CXX object source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o -c /soe/renau/projs/synth/slang_orig/source/compilation/ScriptSession.cpp
-+
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/compilation/ScriptSession.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/compilation/ScriptSession.cpp > CMakeFiles/slang.dir/compilation/ScriptSession.cpp.i
-+
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/compilation/ScriptSession.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/compilation/ScriptSession.cpp -o CMakeFiles/slang.dir/compilation/ScriptSession.cpp.s
-+
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../source/compilation/SemanticModel.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_21) "Building CXX object source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o -c /soe/renau/projs/synth/slang_orig/source/compilation/SemanticModel.cpp
-+
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/compilation/SemanticModel.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/compilation/SemanticModel.cpp > CMakeFiles/slang.dir/compilation/SemanticModel.cpp.i
-+
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/compilation/SemanticModel.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/compilation/SemanticModel.cpp -o CMakeFiles/slang.dir/compilation/SemanticModel.cpp.s
-+
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: source/DiagCode.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_22) "Building CXX object source/CMakeFiles/slang.dir/DiagCode.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/DiagCode.cpp.o -c /soe/renau/projs/synth/slang_orig/build/source/DiagCode.cpp
-+
-+source/CMakeFiles/slang.dir/DiagCode.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/DiagCode.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/build/source/DiagCode.cpp > CMakeFiles/slang.dir/DiagCode.cpp.i
-+
-+source/CMakeFiles/slang.dir/DiagCode.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/DiagCode.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/build/source/DiagCode.cpp -o CMakeFiles/slang.dir/DiagCode.cpp.s
-+
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: ../source/diagnostics/DiagnosticClient.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_23) "Building CXX object source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o -c /soe/renau/projs/synth/slang_orig/source/diagnostics/DiagnosticClient.cpp
-+
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/diagnostics/DiagnosticClient.cpp > CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.i
-+
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/diagnostics/DiagnosticClient.cpp -o CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.s
-+
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../source/diagnostics/DiagnosticEngine.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_24) "Building CXX object source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o -c /soe/renau/projs/synth/slang_orig/source/diagnostics/DiagnosticEngine.cpp
-+
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/diagnostics/DiagnosticEngine.cpp > CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.i
-+
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/diagnostics/DiagnosticEngine.cpp -o CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.s
-+
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../source/diagnostics/Diagnostics.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_25) "Building CXX object source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o -c /soe/renau/projs/synth/slang_orig/source/diagnostics/Diagnostics.cpp
-+
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/diagnostics/Diagnostics.cpp > CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.i
-+
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/diagnostics/Diagnostics.cpp -o CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.s
-+
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../source/diagnostics/TextDiagnosticClient.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_26) "Building CXX object source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o -c /soe/renau/projs/synth/slang_orig/source/diagnostics/TextDiagnosticClient.cpp
-+
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/diagnostics/TextDiagnosticClient.cpp > CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.i
-+
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/diagnostics/TextDiagnosticClient.cpp -o CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.s
-+
-+source/CMakeFiles/slang.dir/numeric/SVInt.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/numeric/SVInt.cpp.o: ../source/numeric/SVInt.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_27) "Building CXX object source/CMakeFiles/slang.dir/numeric/SVInt.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/numeric/SVInt.cpp.o -c /soe/renau/projs/synth/slang_orig/source/numeric/SVInt.cpp
-+
-+source/CMakeFiles/slang.dir/numeric/SVInt.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/numeric/SVInt.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/numeric/SVInt.cpp > CMakeFiles/slang.dir/numeric/SVInt.cpp.i
-+
-+source/CMakeFiles/slang.dir/numeric/SVInt.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/numeric/SVInt.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/numeric/SVInt.cpp -o CMakeFiles/slang.dir/numeric/SVInt.cpp.s
-+
-+source/CMakeFiles/slang.dir/numeric/Time.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/numeric/Time.cpp.o: ../source/numeric/Time.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_28) "Building CXX object source/CMakeFiles/slang.dir/numeric/Time.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/numeric/Time.cpp.o -c /soe/renau/projs/synth/slang_orig/source/numeric/Time.cpp
-+
-+source/CMakeFiles/slang.dir/numeric/Time.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/numeric/Time.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/numeric/Time.cpp > CMakeFiles/slang.dir/numeric/Time.cpp.i
-+
-+source/CMakeFiles/slang.dir/numeric/Time.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/numeric/Time.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/numeric/Time.cpp -o CMakeFiles/slang.dir/numeric/Time.cpp.s
-+
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o: ../source/numeric/VectorBuilder.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_29) "Building CXX object source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o -c /soe/renau/projs/synth/slang_orig/source/numeric/VectorBuilder.cpp
-+
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/numeric/VectorBuilder.cpp > CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.i
-+
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/numeric/VectorBuilder.cpp -o CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.s
-+
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: ../source/parsing/Lexer.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_30) "Building CXX object source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/parsing/Lexer.cpp.o -c /soe/renau/projs/synth/slang_orig/source/parsing/Lexer.cpp
-+
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/parsing/Lexer.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/parsing/Lexer.cpp > CMakeFiles/slang.dir/parsing/Lexer.cpp.i
-+
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/parsing/Lexer.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/parsing/Lexer.cpp -o CMakeFiles/slang.dir/parsing/Lexer.cpp.s
-+
-+source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o: ../source/parsing/LexerFacts.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_31) "Building CXX object source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o -c /soe/renau/projs/synth/slang_orig/source/parsing/LexerFacts.cpp
-+
-+source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/parsing/LexerFacts.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/parsing/LexerFacts.cpp > CMakeFiles/slang.dir/parsing/LexerFacts.cpp.i
-+
-+source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/parsing/LexerFacts.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/parsing/LexerFacts.cpp -o CMakeFiles/slang.dir/parsing/LexerFacts.cpp.s
-+
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../source/parsing/Parser.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_32) "Building CXX object source/CMakeFiles/slang.dir/parsing/Parser.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/parsing/Parser.cpp.o -c /soe/renau/projs/synth/slang_orig/source/parsing/Parser.cpp
-+
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/parsing/Parser.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/parsing/Parser.cpp > CMakeFiles/slang.dir/parsing/Parser.cpp.i
-+
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/parsing/Parser.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/parsing/Parser.cpp -o CMakeFiles/slang.dir/parsing/Parser.cpp.s
-+
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../source/parsing/Parser_expressions.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_33) "Building CXX object source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o -c /soe/renau/projs/synth/slang_orig/source/parsing/Parser_expressions.cpp
-+
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/parsing/Parser_expressions.cpp > CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.i
-+
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/parsing/Parser_expressions.cpp -o CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.s
-+
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: ../source/parsing/Parser_statements.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_34) "Building CXX object source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o -c /soe/renau/projs/synth/slang_orig/source/parsing/Parser_statements.cpp
-+
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/parsing/Parser_statements.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/parsing/Parser_statements.cpp > CMakeFiles/slang.dir/parsing/Parser_statements.cpp.i
-+
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/parsing/Parser_statements.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/parsing/Parser_statements.cpp -o CMakeFiles/slang.dir/parsing/Parser_statements.cpp.s
-+
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../source/parsing/ParserBase.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_35) "Building CXX object source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/parsing/ParserBase.cpp.o -c /soe/renau/projs/synth/slang_orig/source/parsing/ParserBase.cpp
-+
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/parsing/ParserBase.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/parsing/ParserBase.cpp > CMakeFiles/slang.dir/parsing/ParserBase.cpp.i
-+
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/parsing/ParserBase.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/parsing/ParserBase.cpp -o CMakeFiles/slang.dir/parsing/ParserBase.cpp.s
-+
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../source/parsing/Preprocessor.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_36) "Building CXX object source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o -c /soe/renau/projs/synth/slang_orig/source/parsing/Preprocessor.cpp
-+
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/parsing/Preprocessor.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/parsing/Preprocessor.cpp > CMakeFiles/slang.dir/parsing/Preprocessor.cpp.i
-+
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/parsing/Preprocessor.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/parsing/Preprocessor.cpp -o CMakeFiles/slang.dir/parsing/Preprocessor.cpp.s
-+
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: ../source/parsing/Token.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_37) "Building CXX object source/CMakeFiles/slang.dir/parsing/Token.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/parsing/Token.cpp.o -c /soe/renau/projs/synth/slang_orig/source/parsing/Token.cpp
-+
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/parsing/Token.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/parsing/Token.cpp > CMakeFiles/slang.dir/parsing/Token.cpp.i
-+
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/parsing/Token.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/parsing/Token.cpp -o CMakeFiles/slang.dir/parsing/Token.cpp.s
-+
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../source/symbols/DeclaredType.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_38) "Building CXX object source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o -c /soe/renau/projs/synth/slang_orig/source/symbols/DeclaredType.cpp
-+
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/symbols/DeclaredType.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/symbols/DeclaredType.cpp > CMakeFiles/slang.dir/symbols/DeclaredType.cpp.i
-+
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/symbols/DeclaredType.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/symbols/DeclaredType.cpp -o CMakeFiles/slang.dir/symbols/DeclaredType.cpp.s
-+
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../source/symbols/HierarchySymbols.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_39) "Building CXX object source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o -c /soe/renau/projs/synth/slang_orig/source/symbols/HierarchySymbols.cpp
-+
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/symbols/HierarchySymbols.cpp > CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.i
-+
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/symbols/HierarchySymbols.cpp -o CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.s
-+
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../source/symbols/Lookup.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_40) "Building CXX object source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/symbols/Lookup.cpp.o -c /soe/renau/projs/synth/slang_orig/source/symbols/Lookup.cpp
-+
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/symbols/Lookup.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/symbols/Lookup.cpp > CMakeFiles/slang.dir/symbols/Lookup.cpp.i
-+
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/symbols/Lookup.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/symbols/Lookup.cpp -o CMakeFiles/slang.dir/symbols/Lookup.cpp.s
-+
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../source/symbols/MemberSymbols.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_41) "Building CXX object source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o -c /soe/renau/projs/synth/slang_orig/source/symbols/MemberSymbols.cpp
-+
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/symbols/MemberSymbols.cpp > CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.i
-+
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/symbols/MemberSymbols.cpp -o CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.s
-+
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../source/symbols/Scope.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_42) "Building CXX object source/CMakeFiles/slang.dir/symbols/Scope.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/symbols/Scope.cpp.o -c /soe/renau/projs/synth/slang_orig/source/symbols/Scope.cpp
-+
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/symbols/Scope.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/symbols/Scope.cpp > CMakeFiles/slang.dir/symbols/Scope.cpp.i
-+
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/symbols/Scope.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/symbols/Scope.cpp -o CMakeFiles/slang.dir/symbols/Scope.cpp.s
-+
-+source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o: ../source/symbols/SemanticFacts.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_43) "Building CXX object source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o -c /soe/renau/projs/synth/slang_orig/source/symbols/SemanticFacts.cpp
-+
-+source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/symbols/SemanticFacts.cpp > CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.i
-+
-+source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/symbols/SemanticFacts.cpp -o CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.s
-+
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../source/symbols/Symbol.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_44) "Building CXX object source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/symbols/Symbol.cpp.o -c /soe/renau/projs/synth/slang_orig/source/symbols/Symbol.cpp
-+
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/symbols/Symbol.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/symbols/Symbol.cpp > CMakeFiles/slang.dir/symbols/Symbol.cpp.i
-+
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/symbols/Symbol.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/symbols/Symbol.cpp -o CMakeFiles/slang.dir/symbols/Symbol.cpp.s
-+
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../source/symbols/TypePrinter.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_45) "Building CXX object source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o -c /soe/renau/projs/synth/slang_orig/source/symbols/TypePrinter.cpp
-+
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/symbols/TypePrinter.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/symbols/TypePrinter.cpp > CMakeFiles/slang.dir/symbols/TypePrinter.cpp.i
-+
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/symbols/TypePrinter.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/symbols/TypePrinter.cpp -o CMakeFiles/slang.dir/symbols/TypePrinter.cpp.s
-+
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../source/symbols/TypeSymbols.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_46) "Building CXX object source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o -c /soe/renau/projs/synth/slang_orig/source/symbols/TypeSymbols.cpp
-+
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/symbols/TypeSymbols.cpp > CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.i
-+
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/symbols/TypeSymbols.cpp -o CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.s
-+
-+source/CMakeFiles/slang.dir/AllSyntax.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/AllSyntax.cpp.o: source/AllSyntax.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_47) "Building CXX object source/CMakeFiles/slang.dir/AllSyntax.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/AllSyntax.cpp.o -c /soe/renau/projs/synth/slang_orig/build/source/AllSyntax.cpp
-+
-+source/CMakeFiles/slang.dir/AllSyntax.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/AllSyntax.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/build/source/AllSyntax.cpp > CMakeFiles/slang.dir/AllSyntax.cpp.i
-+
-+source/CMakeFiles/slang.dir/AllSyntax.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/AllSyntax.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/build/source/AllSyntax.cpp -o CMakeFiles/slang.dir/AllSyntax.cpp.s
-+
-+source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o: ../source/syntax/SyntaxFacts.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_48) "Building CXX object source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o -c /soe/renau/projs/synth/slang_orig/source/syntax/SyntaxFacts.cpp
-+
-+source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/syntax/SyntaxFacts.cpp > CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.i
-+
-+source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/syntax/SyntaxFacts.cpp -o CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.s
-+
-+source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o: ../source/syntax/SyntaxNode.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_49) "Building CXX object source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o -c /soe/renau/projs/synth/slang_orig/source/syntax/SyntaxNode.cpp
-+
-+source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/syntax/SyntaxNode.cpp > CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.i
-+
-+source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/syntax/SyntaxNode.cpp -o CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.s
-+
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../source/syntax/SyntaxPrinter.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_50) "Building CXX object source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o -c /soe/renau/projs/synth/slang_orig/source/syntax/SyntaxPrinter.cpp
-+
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/syntax/SyntaxPrinter.cpp > CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.i
-+
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/syntax/SyntaxPrinter.cpp -o CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.s
-+
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../source/syntax/SyntaxTree.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_51) "Building CXX object source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o -c /soe/renau/projs/synth/slang_orig/source/syntax/SyntaxTree.cpp
-+
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/syntax/SyntaxTree.cpp > CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.i
-+
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/syntax/SyntaxTree.cpp -o CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.s
-+
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../source/syntax/SyntaxVisitor.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_52) "Building CXX object source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o -c /soe/renau/projs/synth/slang_orig/source/syntax/SyntaxVisitor.cpp
-+
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/syntax/SyntaxVisitor.cpp > CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.i
-+
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/syntax/SyntaxVisitor.cpp -o CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.s
-+
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../source/text/SFormat.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_53) "Building CXX object source/CMakeFiles/slang.dir/text/SFormat.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/text/SFormat.cpp.o -c /soe/renau/projs/synth/slang_orig/source/text/SFormat.cpp
-+
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/text/SFormat.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/text/SFormat.cpp > CMakeFiles/slang.dir/text/SFormat.cpp.i
-+
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/text/SFormat.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/text/SFormat.cpp -o CMakeFiles/slang.dir/text/SFormat.cpp.s
-+
-+source/CMakeFiles/slang.dir/text/SourceManager.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/text/SourceManager.cpp.o: ../source/text/SourceManager.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_54) "Building CXX object source/CMakeFiles/slang.dir/text/SourceManager.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/text/SourceManager.cpp.o -c /soe/renau/projs/synth/slang_orig/source/text/SourceManager.cpp
-+
-+source/CMakeFiles/slang.dir/text/SourceManager.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/text/SourceManager.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/text/SourceManager.cpp > CMakeFiles/slang.dir/text/SourceManager.cpp.i
-+
-+source/CMakeFiles/slang.dir/text/SourceManager.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/text/SourceManager.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/text/SourceManager.cpp -o CMakeFiles/slang.dir/text/SourceManager.cpp.s
-+
-+source/CMakeFiles/slang.dir/Version.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/Version.cpp.o: source/Version.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_55) "Building CXX object source/CMakeFiles/slang.dir/Version.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/Version.cpp.o -c /soe/renau/projs/synth/slang_orig/build/source/Version.cpp
-+
-+source/CMakeFiles/slang.dir/Version.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/Version.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/build/source/Version.cpp > CMakeFiles/slang.dir/Version.cpp.i
-+
-+source/CMakeFiles/slang.dir/Version.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/Version.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/build/source/Version.cpp -o CMakeFiles/slang.dir/Version.cpp.s
-+
-+source/CMakeFiles/slang.dir/util/Assert.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/util/Assert.cpp.o: ../source/util/Assert.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_56) "Building CXX object source/CMakeFiles/slang.dir/util/Assert.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/util/Assert.cpp.o -c /soe/renau/projs/synth/slang_orig/source/util/Assert.cpp
-+
-+source/CMakeFiles/slang.dir/util/Assert.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/util/Assert.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/util/Assert.cpp > CMakeFiles/slang.dir/util/Assert.cpp.i
-+
-+source/CMakeFiles/slang.dir/util/Assert.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/util/Assert.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/util/Assert.cpp -o CMakeFiles/slang.dir/util/Assert.cpp.s
-+
-+source/CMakeFiles/slang.dir/util/BumpAllocator.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/util/BumpAllocator.cpp.o: ../source/util/BumpAllocator.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_57) "Building CXX object source/CMakeFiles/slang.dir/util/BumpAllocator.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/util/BumpAllocator.cpp.o -c /soe/renau/projs/synth/slang_orig/source/util/BumpAllocator.cpp
-+
-+source/CMakeFiles/slang.dir/util/BumpAllocator.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/util/BumpAllocator.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/util/BumpAllocator.cpp > CMakeFiles/slang.dir/util/BumpAllocator.cpp.i
-+
-+source/CMakeFiles/slang.dir/util/BumpAllocator.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/util/BumpAllocator.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/util/BumpAllocator.cpp -o CMakeFiles/slang.dir/util/BumpAllocator.cpp.s
-+
-+source/CMakeFiles/slang.dir/util/CommandLine.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/util/CommandLine.cpp.o: ../source/util/CommandLine.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_58) "Building CXX object source/CMakeFiles/slang.dir/util/CommandLine.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/util/CommandLine.cpp.o -c /soe/renau/projs/synth/slang_orig/source/util/CommandLine.cpp
-+
-+source/CMakeFiles/slang.dir/util/CommandLine.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/util/CommandLine.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/util/CommandLine.cpp > CMakeFiles/slang.dir/util/CommandLine.cpp.i
-+
-+source/CMakeFiles/slang.dir/util/CommandLine.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/util/CommandLine.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/util/CommandLine.cpp -o CMakeFiles/slang.dir/util/CommandLine.cpp.s
-+
-+source/CMakeFiles/slang.dir/util/Hash.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/util/Hash.cpp.o: ../source/util/Hash.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_59) "Building CXX object source/CMakeFiles/slang.dir/util/Hash.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/util/Hash.cpp.o -c /soe/renau/projs/synth/slang_orig/source/util/Hash.cpp
-+
-+source/CMakeFiles/slang.dir/util/Hash.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/util/Hash.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/util/Hash.cpp > CMakeFiles/slang.dir/util/Hash.cpp.i
-+
-+source/CMakeFiles/slang.dir/util/Hash.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/util/Hash.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/util/Hash.cpp -o CMakeFiles/slang.dir/util/Hash.cpp.s
-+
-+source/CMakeFiles/slang.dir/util/String.cpp.o: source/CMakeFiles/slang.dir/flags.make
-+source/CMakeFiles/slang.dir/util/String.cpp.o: ../source/util/String.cpp
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_60) "Building CXX object source/CMakeFiles/slang.dir/util/String.cpp.o"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++  $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -o CMakeFiles/slang.dir/util/String.cpp.o -c /soe/renau/projs/synth/slang_orig/source/util/String.cpp
-+
-+source/CMakeFiles/slang.dir/util/String.cpp.i: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/slang.dir/util/String.cpp.i"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /soe/renau/projs/synth/slang_orig/source/util/String.cpp > CMakeFiles/slang.dir/util/String.cpp.i
-+
-+source/CMakeFiles/slang.dir/util/String.cpp.s: cmake_force
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/slang.dir/util/String.cpp.s"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /soe/renau/projs/synth/slang_orig/source/util/String.cpp -o CMakeFiles/slang.dir/util/String.cpp.s
-+
-+# Object files for target slang
-+slang_OBJECTS = \
-+"CMakeFiles/slang.dir/binding/BindContext.cpp.o" \
-+"CMakeFiles/slang.dir/binding/ConstantValue.cpp.o" \
-+"CMakeFiles/slang.dir/binding/EvalContext.cpp.o" \
-+"CMakeFiles/slang.dir/binding/Expressions.cpp.o" \
-+"CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o" \
-+"CMakeFiles/slang.dir/binding/Statements.cpp.o" \
-+"CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o" \
-+"CMakeFiles/slang.dir/binding/TimingControl.cpp.o" \
-+"CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o" \
-+"CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o" \
-+"CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o" \
-+"CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o" \
-+"CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o" \
-+"CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o" \
-+"CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o" \
-+"CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o" \
-+"CMakeFiles/slang.dir/compilation/Compilation.cpp.o" \
-+"CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o" \
-+"CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o" \
-+"CMakeFiles/slang.dir/DiagCode.cpp.o" \
-+"CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o" \
-+"CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o" \
-+"CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o" \
-+"CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o" \
-+"CMakeFiles/slang.dir/numeric/SVInt.cpp.o" \
-+"CMakeFiles/slang.dir/numeric/Time.cpp.o" \
-+"CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o" \
-+"CMakeFiles/slang.dir/parsing/Lexer.cpp.o" \
-+"CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o" \
-+"CMakeFiles/slang.dir/parsing/Parser.cpp.o" \
-+"CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o" \
-+"CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o" \
-+"CMakeFiles/slang.dir/parsing/ParserBase.cpp.o" \
-+"CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o" \
-+"CMakeFiles/slang.dir/parsing/Token.cpp.o" \
-+"CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o" \
-+"CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o" \
-+"CMakeFiles/slang.dir/symbols/Lookup.cpp.o" \
-+"CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o" \
-+"CMakeFiles/slang.dir/symbols/Scope.cpp.o" \
-+"CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o" \
-+"CMakeFiles/slang.dir/symbols/Symbol.cpp.o" \
-+"CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o" \
-+"CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o" \
-+"CMakeFiles/slang.dir/AllSyntax.cpp.o" \
-+"CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o" \
-+"CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o" \
-+"CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o" \
-+"CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o" \
-+"CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o" \
-+"CMakeFiles/slang.dir/text/SFormat.cpp.o" \
-+"CMakeFiles/slang.dir/text/SourceManager.cpp.o" \
-+"CMakeFiles/slang.dir/Version.cpp.o" \
-+"CMakeFiles/slang.dir/util/Assert.cpp.o" \
-+"CMakeFiles/slang.dir/util/BumpAllocator.cpp.o" \
-+"CMakeFiles/slang.dir/util/CommandLine.cpp.o" \
-+"CMakeFiles/slang.dir/util/Hash.cpp.o" \
-+"CMakeFiles/slang.dir/util/String.cpp.o"
-+
-+# External object files for target slang
-+slang_EXTERNAL_OBJECTS =
-+
-+lib/libslang.a: source/CMakeFiles/slang.dir/binding/BindContext.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/binding/Expressions.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/binding/Statements.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/DiagCode.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/numeric/SVInt.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/numeric/Time.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/parsing/Parser.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/parsing/Token.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/symbols/Scope.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/AllSyntax.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/text/SFormat.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/text/SourceManager.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/Version.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/util/Assert.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/util/BumpAllocator.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/util/CommandLine.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/util/Hash.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/util/String.cpp.o
-+lib/libslang.a: source/CMakeFiles/slang.dir/build.make
-+lib/libslang.a: source/CMakeFiles/slang.dir/link.txt
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --bold --progress-dir=/soe/renau/projs/synth/slang_orig/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_61) "Linking CXX static library ../lib/libslang.a"
-+	cd /soe/renau/projs/synth/slang_orig/build/source && $(CMAKE_COMMAND) -P CMakeFiles/slang.dir/cmake_clean_target.cmake
-+	cd /soe/renau/projs/synth/slang_orig/build/source && $(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/slang.dir/link.txt --verbose=$(VERBOSE)
-+
-+# Rule to build all files generated by this target.
-+source/CMakeFiles/slang.dir/build: lib/libslang.a
-+
-+.PHONY : source/CMakeFiles/slang.dir/build
-+
-+source/CMakeFiles/slang.dir/clean:
-+	cd /soe/renau/projs/synth/slang_orig/build/source && $(CMAKE_COMMAND) -P CMakeFiles/slang.dir/cmake_clean.cmake
-+.PHONY : source/CMakeFiles/slang.dir/clean
-+
-+source/CMakeFiles/slang.dir/depend: source/slang/diagnostics/AllDiags.h
-+source/CMakeFiles/slang.dir/depend: source/DiagCode.cpp
-+source/CMakeFiles/slang.dir/depend: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/depend: source/AllSyntax.cpp
-+source/CMakeFiles/slang.dir/depend: source/slang/syntax/SyntaxKind.h
-+	cd /soe/renau/projs/synth/slang_orig/build && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /soe/renau/projs/synth/slang_orig /soe/renau/projs/synth/slang_orig/source /soe/renau/projs/synth/slang_orig/build /soe/renau/projs/synth/slang_orig/build/source /soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/DependInfo.cmake --color=$(COLOR)
-+.PHONY : source/CMakeFiles/slang.dir/depend
-+
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/CMakeFiles/slang.dir/cmake_clean.cmake ./generated/CMakeFiles/slang.dir/cmake_clean.cmake
---- ../slang_orig/generated/CMakeFiles/slang.dir/cmake_clean.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/CMakeFiles/slang.dir/cmake_clean.cmake	2019-10-16 10:35:14.464364347 -0700
-@@ -0,0 +1,72 @@
-+file(REMOVE_RECURSE
-+  "../lib/libslang.a"
-+  "../lib/libslang.pdb"
-+  "AllSyntax.cpp"
-+  "CMakeFiles/slang.dir/AllSyntax.cpp.o"
-+  "CMakeFiles/slang.dir/DiagCode.cpp.o"
-+  "CMakeFiles/slang.dir/Version.cpp.o"
-+  "CMakeFiles/slang.dir/binding/BindContext.cpp.o"
-+  "CMakeFiles/slang.dir/binding/ConstantValue.cpp.o"
-+  "CMakeFiles/slang.dir/binding/EvalContext.cpp.o"
-+  "CMakeFiles/slang.dir/binding/Expressions.cpp.o"
-+  "CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o"
-+  "CMakeFiles/slang.dir/binding/Statements.cpp.o"
-+  "CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o"
-+  "CMakeFiles/slang.dir/binding/TimingControl.cpp.o"
-+  "CMakeFiles/slang.dir/compilation/Compilation.cpp.o"
-+  "CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o"
-+  "CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o"
-+  "CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o"
-+  "CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o"
-+  "CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o"
-+  "CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o"
-+  "CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o"
-+  "CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o"
-+  "CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o"
-+  "CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o"
-+  "CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o"
-+  "CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o"
-+  "CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o"
-+  "CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o"
-+  "CMakeFiles/slang.dir/numeric/SVInt.cpp.o"
-+  "CMakeFiles/slang.dir/numeric/Time.cpp.o"
-+  "CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o"
-+  "CMakeFiles/slang.dir/parsing/Lexer.cpp.o"
-+  "CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o"
-+  "CMakeFiles/slang.dir/parsing/Parser.cpp.o"
-+  "CMakeFiles/slang.dir/parsing/ParserBase.cpp.o"
-+  "CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o"
-+  "CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o"
-+  "CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o"
-+  "CMakeFiles/slang.dir/parsing/Token.cpp.o"
-+  "CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o"
-+  "CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o"
-+  "CMakeFiles/slang.dir/symbols/Lookup.cpp.o"
-+  "CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o"
-+  "CMakeFiles/slang.dir/symbols/Scope.cpp.o"
-+  "CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o"
-+  "CMakeFiles/slang.dir/symbols/Symbol.cpp.o"
-+  "CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o"
-+  "CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o"
-+  "CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o"
-+  "CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o"
-+  "CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o"
-+  "CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o"
-+  "CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o"
-+  "CMakeFiles/slang.dir/text/SFormat.cpp.o"
-+  "CMakeFiles/slang.dir/text/SourceManager.cpp.o"
-+  "CMakeFiles/slang.dir/util/Assert.cpp.o"
-+  "CMakeFiles/slang.dir/util/BumpAllocator.cpp.o"
-+  "CMakeFiles/slang.dir/util/CommandLine.cpp.o"
-+  "CMakeFiles/slang.dir/util/Hash.cpp.o"
-+  "CMakeFiles/slang.dir/util/String.cpp.o"
-+  "DiagCode.cpp"
-+  "slang/diagnostics/AllDiags.h"
-+  "slang/syntax/AllSyntax.h"
-+  "slang/syntax/SyntaxKind.h"
-+)
-+
-+# Per-language clean rules from dependency scanning.
-+foreach(lang CXX)
-+  include(CMakeFiles/slang.dir/cmake_clean_${lang}.cmake OPTIONAL)
-+endforeach()
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/CMakeFiles/slang.dir/cmake_clean_target.cmake ./generated/CMakeFiles/slang.dir/cmake_clean_target.cmake
---- ../slang_orig/generated/CMakeFiles/slang.dir/cmake_clean_target.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/CMakeFiles/slang.dir/cmake_clean_target.cmake	2019-10-16 10:35:14.464364347 -0700
-@@ -0,0 +1,3 @@
-+file(REMOVE_RECURSE
-+  "../lib/libslang.a"
-+)
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o and ./generated/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o and ./generated/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o and ./generated/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o and ./generated/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o and ./generated/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o and ./generated/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o and ./generated/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o and ./generated/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/compilation/Compilation.cpp.o and ./generated/CMakeFiles/slang.dir/compilation/Compilation.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o and ./generated/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o and ./generated/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o differ
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/CMakeFiles/slang.dir/CXX.includecache ./generated/CMakeFiles/slang.dir/CXX.includecache
---- ../slang_orig/generated/CMakeFiles/slang.dir/CXX.includecache	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/CMakeFiles/slang.dir/CXX.includecache	2019-10-16 10:35:24.304061021 -0700
-@@ -0,0 +1,2082 @@
-+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
-+
-+#IncludeRegexScan: ^.*$
-+
-+#IncludeRegexComplain: ^$
-+
-+#IncludeRegexTransform: 
-+
-+../external/bitmask.hpp
-+type_traits
-+-
-+functional
-+-
-+limits
-+-
-+cassert
-+-
-+
-+../external/flat_hash_map.hpp
-+cstdint
-+-
-+cstddef
-+-
-+functional
-+-
-+cmath
-+-
-+algorithm
-+-
-+iterator
-+-
-+utility
-+-
-+type_traits
-+-
-+
-+../external/ieee1800/vpi_compatibility.h
-+
-+../external/ieee1800/vpi_user.h
-+stdarg.h
-+-
-+stdint.h
-+-
-+inttypes.h
-+-
-+sys/types.h
-+-
-+vpi_compatibility.h
-+../external/ieee1800/vpi_compatibility.h
-+
-+../external/span.hpp
-+span
-+-
-+algorithm
-+-
-+memory
-+-
-+array
-+-
-+cstddef
-+-
-+iterator
-+-
-+type_traits
-+-
-+vector
-+-
-+cstdio
-+-
-+stdexcept
-+-
-+
-+../external/xxhash/xxhash.c
-+stdlib.h
-+-
-+string.h
-+-
-+assert.h
-+-
-+xxhash.h
-+../external/xxhash/xxhash.h
-+stdint.h
-+-
-+stdint.h
-+-
-+
-+../external/xxhash/xxhash.h
-+stddef.h
-+-
-+stdint.h
-+-
-+xxhash.c
-+../external/xxhash/xxhash.c
-+
-+../include/slang/binding/BindContext.h
-+slang/binding/ConstantValue.h
-+../include/slang/binding/slang/binding/ConstantValue.h
-+slang/symbols/Lookup.h
-+../include/slang/binding/slang/symbols/Lookup.h
-+slang/util/Util.h
-+../include/slang/binding/slang/util/Util.h
-+
-+../include/slang/binding/ConstantValue.h
-+nlohmann/json_fwd.hpp
-+-
-+string
-+-
-+variant
-+-
-+slang/numeric/SVInt.h
-+../include/slang/binding/slang/numeric/SVInt.h
-+
-+../include/slang/binding/EvalContext.h
-+map
-+-
-+stack
-+-
-+vector
-+-
-+slang/binding/ConstantValue.h
-+../include/slang/binding/slang/binding/ConstantValue.h
-+slang/symbols/Scope.h
-+../include/slang/binding/slang/symbols/Scope.h
-+slang/symbols/Symbol.h
-+../include/slang/binding/slang/symbols/Symbol.h
-+
-+../include/slang/binding/Expressions.h
-+slang/binding/BindContext.h
-+../include/slang/binding/slang/binding/BindContext.h
-+slang/binding/EvalContext.h
-+../include/slang/binding/slang/binding/EvalContext.h
-+
-+../include/slang/binding/Statements.h
-+slang/binding/EvalContext.h
-+../include/slang/binding/slang/binding/EvalContext.h
-+slang/symbols/SemanticFacts.h
-+../include/slang/binding/slang/symbols/SemanticFacts.h
-+slang/util/ScopeGuard.h
-+../include/slang/binding/slang/util/ScopeGuard.h
-+
-+../include/slang/binding/SystemSubroutine.h
-+slang/binding/Expressions.h
-+../include/slang/binding/slang/binding/Expressions.h
-+slang/symbols/SemanticFacts.h
-+../include/slang/binding/slang/symbols/SemanticFacts.h
-+slang/util/SmallVector.h
-+../include/slang/binding/slang/util/SmallVector.h
-+slang/symbols/TypeSymbols.h
-+../include/slang/binding/slang/symbols/TypeSymbols.h
-+slang/util/Util.h
-+../include/slang/binding/slang/util/Util.h
-+
-+../include/slang/binding/TimingControl.h
-+slang/symbols/SemanticFacts.h
-+../include/slang/binding/slang/symbols/SemanticFacts.h
-+slang/util/Util.h
-+../include/slang/binding/slang/util/Util.h
-+
-+../include/slang/compilation/Compilation.h
-+memory
-+-
-+slang/diagnostics/Diagnostics.h
-+../include/slang/compilation/slang/diagnostics/Diagnostics.h
-+slang/numeric/Time.h
-+../include/slang/compilation/slang/numeric/Time.h
-+slang/symbols/Scope.h
-+../include/slang/compilation/slang/symbols/Scope.h
-+slang/symbols/Symbol.h
-+../include/slang/compilation/slang/symbols/Symbol.h
-+slang/syntax/SyntaxNode.h
-+../include/slang/compilation/slang/syntax/SyntaxNode.h
-+slang/util/BumpAllocator.h
-+../include/slang/compilation/slang/util/BumpAllocator.h
-+slang/util/SafeIndexedVector.h
-+../include/slang/compilation/slang/util/SafeIndexedVector.h
-+
-+../include/slang/compilation/ScriptSession.h
-+slang/binding/EvalContext.h
-+../include/slang/compilation/slang/binding/EvalContext.h
-+slang/compilation/Compilation.h
-+../include/slang/compilation/slang/compilation/Compilation.h
-+slang/syntax/SyntaxTree.h
-+../include/slang/compilation/slang/syntax/SyntaxTree.h
-+
-+../include/slang/compilation/SemanticModel.h
-+flat_hash_map.hpp
-+-
-+slang/symbols/HierarchySymbols.h
-+../include/slang/compilation/slang/symbols/HierarchySymbols.h
-+slang/symbols/MemberSymbols.h
-+../include/slang/compilation/slang/symbols/MemberSymbols.h
-+slang/symbols/TypeSymbols.h
-+../include/slang/compilation/slang/symbols/TypeSymbols.h
-+
-+../include/slang/diagnostics/DiagnosticClient.h
-+slang/diagnostics/DiagnosticEngine.h
-+../include/slang/diagnostics/slang/diagnostics/DiagnosticEngine.h
-+slang/text/FormatBuffer.h
-+../include/slang/diagnostics/slang/text/FormatBuffer.h
-+slang/util/Util.h
-+../include/slang/diagnostics/slang/util/Util.h
-+
-+../include/slang/diagnostics/DiagnosticEngine.h
-+flat_hash_map.hpp
-+-
-+memory
-+-
-+string
-+-
-+slang/diagnostics/Diagnostics.h
-+../include/slang/diagnostics/slang/diagnostics/Diagnostics.h
-+
-+../include/slang/diagnostics/Diagnostics.h
-+string
-+-
-+vector
-+-
-+slang/binding/ConstantValue.h
-+../include/slang/diagnostics/slang/binding/ConstantValue.h
-+slang/text/SourceLocation.h
-+../include/slang/diagnostics/slang/text/SourceLocation.h
-+slang/util/SmallVector.h
-+../include/slang/diagnostics/slang/util/SmallVector.h
-+slang/diagnostics/GeneralDiags.h
-+../include/slang/diagnostics/slang/diagnostics/GeneralDiags.h
-+
-+../include/slang/diagnostics/TextDiagnosticClient.h
-+slang/diagnostics/DiagnosticClient.h
-+../include/slang/diagnostics/slang/diagnostics/DiagnosticClient.h
-+
-+../include/slang/numeric/MathUtils.h
-+climits
-+-
-+cmath
-+-
-+intrin.h
-+-
-+
-+../include/slang/numeric/SVInt.h
-+ostream
-+-
-+slang/numeric/MathUtils.h
-+../include/slang/numeric/slang/numeric/MathUtils.h
-+slang/util/SmallVector.h
-+../include/slang/numeric/slang/util/SmallVector.h
-+
-+../include/slang/numeric/Time.h
-+slang/util/Util.h
-+../include/slang/numeric/slang/util/Util.h
-+
-+../include/slang/numeric/VectorBuilder.h
-+slang/numeric/SVInt.h
-+../include/slang/numeric/slang/numeric/SVInt.h
-+slang/parsing/Token.h
-+../include/slang/numeric/slang/parsing/Token.h
-+slang/text/SourceLocation.h
-+../include/slang/numeric/slang/text/SourceLocation.h
-+slang/util/SmallVector.h
-+../include/slang/numeric/slang/util/SmallVector.h
-+
-+../include/slang/parsing/Lexer.h
-+slang/diagnostics/Diagnostics.h
-+../include/slang/parsing/slang/diagnostics/Diagnostics.h
-+slang/parsing/Token.h
-+../include/slang/parsing/slang/parsing/Token.h
-+slang/text/SourceLocation.h
-+../include/slang/parsing/slang/text/SourceLocation.h
-+slang/util/SmallVector.h
-+../include/slang/parsing/slang/util/SmallVector.h
-+slang/util/Util.h
-+../include/slang/parsing/slang/util/Util.h
-+
-+../include/slang/parsing/Parser.h
-+flat_hash_map.hpp
-+-
-+slang/numeric/VectorBuilder.h
-+../include/slang/parsing/slang/numeric/VectorBuilder.h
-+slang/parsing/ParserBase.h
-+../include/slang/parsing/slang/parsing/ParserBase.h
-+slang/parsing/Token.h
-+../include/slang/parsing/slang/parsing/Token.h
-+slang/syntax/AllSyntax.h
-+../include/slang/parsing/slang/syntax/AllSyntax.h
-+slang/util/Bag.h
-+../include/slang/parsing/slang/util/Bag.h
-+
-+../include/slang/parsing/ParserBase.h
-+slang/diagnostics/Diagnostics.h
-+../include/slang/parsing/slang/diagnostics/Diagnostics.h
-+slang/parsing/Token.h
-+../include/slang/parsing/slang/parsing/Token.h
-+slang/syntax/SyntaxNode.h
-+../include/slang/parsing/slang/syntax/SyntaxNode.h
-+slang/text/SourceLocation.h
-+../include/slang/parsing/slang/text/SourceLocation.h
-+slang/util/SmallVector.h
-+../include/slang/parsing/slang/util/SmallVector.h
-+
-+../include/slang/parsing/Preprocessor.h
-+deque
-+-
-+memory
-+-
-+unordered_map
-+-
-+slang/parsing/Lexer.h
-+../include/slang/parsing/slang/parsing/Lexer.h
-+slang/parsing/Token.h
-+../include/slang/parsing/slang/parsing/Token.h
-+slang/syntax/SyntaxNode.h
-+../include/slang/parsing/slang/syntax/SyntaxNode.h
-+slang/text/SourceLocation.h
-+../include/slang/parsing/slang/text/SourceLocation.h
-+slang/util/Bag.h
-+../include/slang/parsing/slang/util/Bag.h
-+slang/util/SmallVector.h
-+../include/slang/parsing/slang/util/SmallVector.h
-+slang/util/StackContainer.h
-+../include/slang/parsing/slang/util/StackContainer.h
-+
-+../include/slang/parsing/Token.h
-+slang/numeric/SVInt.h
-+../include/slang/parsing/slang/numeric/SVInt.h
-+slang/numeric/Time.h
-+../include/slang/parsing/slang/numeric/Time.h
-+slang/text/SourceLocation.h
-+../include/slang/parsing/slang/text/SourceLocation.h
-+slang/util/SmallVector.h
-+../include/slang/parsing/slang/util/SmallVector.h
-+slang/util/StringTable.h
-+../include/slang/parsing/slang/util/StringTable.h
-+slang/util/Util.h
-+../include/slang/parsing/slang/util/Util.h
-+
-+../include/slang/symbols/ASTVisitor.h
-+slang/binding/Expressions.h
-+../include/slang/symbols/slang/binding/Expressions.h
-+slang/binding/Statements.h
-+../include/slang/symbols/slang/binding/Statements.h
-+slang/symbols/HierarchySymbols.h
-+../include/slang/symbols/slang/symbols/HierarchySymbols.h
-+slang/symbols/MemberSymbols.h
-+../include/slang/symbols/slang/symbols/MemberSymbols.h
-+slang/symbols/TypeSymbols.h
-+../include/slang/symbols/slang/symbols/TypeSymbols.h
-+slang/util/TypeTraits.h
-+../include/slang/symbols/slang/util/TypeTraits.h
-+
-+../include/slang/symbols/DeclaredType.h
-+slang/syntax/SyntaxNode.h
-+../include/slang/symbols/slang/syntax/SyntaxNode.h
-+
-+../include/slang/symbols/HierarchySymbols.h
-+slang/binding/ConstantValue.h
-+../include/slang/symbols/slang/binding/ConstantValue.h
-+slang/binding/Statements.h
-+../include/slang/symbols/slang/binding/Statements.h
-+slang/symbols/SemanticFacts.h
-+../include/slang/symbols/slang/symbols/SemanticFacts.h
-+slang/symbols/Symbol.h
-+../include/slang/symbols/slang/symbols/Symbol.h
-+
-+../include/slang/symbols/Lookup.h
-+slang/diagnostics/Diagnostics.h
-+../include/slang/symbols/slang/diagnostics/Diagnostics.h
-+slang/text/SourceLocation.h
-+../include/slang/symbols/slang/text/SourceLocation.h
-+slang/util/Util.h
-+../include/slang/symbols/slang/util/Util.h
-+
-+../include/slang/symbols/MemberSymbols.h
-+slang/binding/ConstantValue.h
-+../include/slang/symbols/slang/binding/ConstantValue.h
-+slang/binding/Statements.h
-+../include/slang/symbols/slang/binding/Statements.h
-+slang/symbols/SemanticFacts.h
-+../include/slang/symbols/slang/symbols/SemanticFacts.h
-+slang/symbols/Symbol.h
-+../include/slang/symbols/slang/symbols/Symbol.h
-+
-+../include/slang/symbols/Scope.h
-+flat_hash_map.hpp
-+-
-+slang/diagnostics/Diagnostics.h
-+../include/slang/symbols/slang/diagnostics/Diagnostics.h
-+slang/symbols/Lookup.h
-+../include/slang/symbols/slang/symbols/Lookup.h
-+slang/symbols/Symbol.h
-+../include/slang/symbols/slang/symbols/Symbol.h
-+slang/util/Iterator.h
-+../include/slang/symbols/slang/util/Iterator.h
-+slang/util/Util.h
-+../include/slang/symbols/slang/util/Util.h
-+
-+../include/slang/symbols/SemanticFacts.h
-+optional
-+-
-+slang/parsing/Token.h
-+../include/slang/symbols/slang/parsing/Token.h
-+slang/syntax/SyntaxNode.h
-+../include/slang/symbols/slang/syntax/SyntaxNode.h
-+slang/util/Enum.h
-+../include/slang/symbols/slang/util/Enum.h
-+
-+../include/slang/symbols/Symbol.h
-+nlohmann/json_fwd.hpp
-+-
-+slang/symbols/DeclaredType.h
-+../include/slang/symbols/slang/symbols/DeclaredType.h
-+slang/text/SourceLocation.h
-+../include/slang/symbols/slang/text/SourceLocation.h
-+slang/util/Enum.h
-+../include/slang/symbols/slang/util/Enum.h
-+slang/util/Util.h
-+../include/slang/symbols/slang/util/Util.h
-+
-+../include/slang/symbols/TypePrinter.h
-+slang/symbols/TypeSymbols.h
-+../include/slang/symbols/slang/symbols/TypeSymbols.h
-+slang/text/FormatBuffer.h
-+../include/slang/symbols/slang/text/FormatBuffer.h
-+
-+../include/slang/symbols/TypeSymbols.h
-+slang/binding/ConstantValue.h
-+../include/slang/symbols/slang/binding/ConstantValue.h
-+slang/symbols/MemberSymbols.h
-+../include/slang/symbols/slang/symbols/MemberSymbols.h
-+slang/symbols/Scope.h
-+../include/slang/symbols/slang/symbols/Scope.h
-+slang/symbols/Symbol.h
-+../include/slang/symbols/slang/symbols/Symbol.h
-+
-+../include/slang/syntax/SyntaxNode.h
-+string
-+-
-+variant
-+-
-+slang/parsing/Token.h
-+../include/slang/syntax/slang/parsing/Token.h
-+slang/syntax/SyntaxKind.h
-+../include/slang/syntax/slang/syntax/SyntaxKind.h
-+slang/util/Iterator.h
-+../include/slang/syntax/slang/util/Iterator.h
-+slang/util/SmallVector.h
-+../include/slang/syntax/slang/util/SmallVector.h
-+slang/util/Util.h
-+../include/slang/syntax/slang/util/Util.h
-+
-+../include/slang/syntax/SyntaxPrinter.h
-+string
-+-
-+slang/syntax/SyntaxNode.h
-+../include/slang/syntax/slang/syntax/SyntaxNode.h
-+
-+../include/slang/syntax/SyntaxTree.h
-+memory
-+-
-+slang/diagnostics/Diagnostics.h
-+../include/slang/syntax/slang/diagnostics/Diagnostics.h
-+slang/parsing/Parser.h
-+../include/slang/syntax/slang/parsing/Parser.h
-+slang/util/Bag.h
-+../include/slang/syntax/slang/util/Bag.h
-+slang/util/BumpAllocator.h
-+../include/slang/syntax/slang/util/BumpAllocator.h
-+
-+../include/slang/syntax/SyntaxVisitor.h
-+flat_hash_map.hpp
-+-
-+vector
-+-
-+slang/syntax/AllSyntax.h
-+../include/slang/syntax/slang/syntax/AllSyntax.h
-+slang/syntax/SyntaxTree.h
-+../include/slang/syntax/slang/syntax/SyntaxTree.h
-+slang/util/TypeTraits.h
-+../include/slang/syntax/slang/util/TypeTraits.h
-+
-+../include/slang/text/FormatBuffer.h
-+fmt/format.h
-+-
-+string_view
-+-
-+
-+../include/slang/text/SFormat.h
-+slang/diagnostics/Diagnostics.h
-+../include/slang/text/slang/diagnostics/Diagnostics.h
-+slang/text/SourceLocation.h
-+../include/slang/text/slang/text/SourceLocation.h
-+slang/util/Util.h
-+../include/slang/text/slang/util/Util.h
-+
-+../include/slang/text/SourceLocation.h
-+slang/util/Hash.h
-+../include/slang/text/slang/util/Hash.h
-+slang/util/Util.h
-+../include/slang/text/slang/util/Util.h
-+
-+../include/slang/text/SourceManager.h
-+deque
-+-
-+filesystem
-+-
-+flat_hash_map.hpp
-+-
-+memory
-+-
-+set
-+-
-+variant
-+-
-+slang/text/SourceLocation.h
-+../include/slang/text/slang/text/SourceLocation.h
-+slang/util/Util.h
-+../include/slang/text/slang/util/Util.h
-+
-+../include/slang/util/Assert.h
-+stdexcept
-+-
-+
-+../include/slang/util/Bag.h
-+any
-+-
-+flat_hash_map.hpp
-+-
-+typeindex
-+-
-+typeinfo
-+-
-+
-+../include/slang/util/BumpAllocator.h
-+slang/util/Util.h
-+../include/slang/util/slang/util/Util.h
-+
-+../include/slang/util/CommandLine.h
-+map
-+-
-+variant
-+-
-+slang/util/Util.h
-+../include/slang/util/slang/util/Util.h
-+
-+../include/slang/util/Enum.h
-+
-+../include/slang/util/Hash.h
-+slang/util/Util.h
-+../include/slang/util/slang/util/Util.h
-+
-+../include/slang/util/Iterator.h
-+
-+../include/slang/util/NotNull.h
-+slang/util/Assert.h
-+../include/slang/util/slang/util/Assert.h
-+
-+../include/slang/util/SafeIndexedVector.h
-+deque
-+-
-+vector
-+-
-+
-+../include/slang/util/ScopeGuard.h
-+
-+../include/slang/util/SmallVector.h
-+cstdlib
-+-
-+cstring
-+-
-+iterator
-+-
-+slang/util/BumpAllocator.h
-+../include/slang/util/slang/util/BumpAllocator.h
-+
-+../include/slang/util/StackContainer.h
-+flat_hash_map.hpp
-+-
-+
-+../include/slang/util/String.h
-+slang/util/Util.h
-+../include/slang/util/slang/util/Util.h
-+
-+../include/slang/util/StringTable.h
-+slang/util/Util.h
-+../include/slang/util/slang/util/Util.h
-+
-+../include/slang/util/TypeTraits.h
-+type_traits
-+-
-+
-+../include/slang/util/Util.h
-+climits
-+-
-+cstddef
-+-
-+cstdint
-+-
-+new
-+-
-+optional
-+-
-+string_view
-+-
-+utility
-+-
-+slang/util/Assert.h
-+../include/slang/util/slang/util/Assert.h
-+slang/util/NotNull.h
-+../include/slang/util/slang/util/NotNull.h
-+span.hpp
-+-
-+bitmask.hpp
-+-
-+
-+../include/slang/util/Version.h
-+string_view
-+-
-+
-+/soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/core.h
-+cassert
-+-
-+cstdio
-+-
-+cstring
-+-
-+iterator
-+-
-+string
-+-
-+type_traits
-+-
-+string_view
-+-
-+experimental/string_view
-+-
-+fmt/core.h
-+-
-+
-+/soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format-inl.h
-+format.h
-+/soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format.h
-+string.h
-+-
-+cctype
-+-
-+cerrno
-+-
-+climits
-+-
-+cmath
-+-
-+cstdarg
-+-
-+cstddef
-+-
-+cstring
-+-
-+cwchar
-+-
-+locale
-+-
-+windows.h
-+-
-+windows.h
-+-
-+
-+/soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format.h
-+algorithm
-+-
-+cassert
-+-
-+cmath
-+-
-+cstdint
-+-
-+cstring
-+-
-+iterator
-+-
-+limits
-+-
-+memory
-+-
-+stdexcept
-+-
-+core.h
-+/soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/core.h
-+intrin.h
-+-
-+fmt/format.h
-+-
-+fmt/format.h
-+-
-+format-inl.h
-+/soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format-inl.h
-+
-+/soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/ostream.h
-+ostream
-+-
-+format.h
-+/soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format.h
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/adl_serializer.hpp
-+utility
-+-
-+nlohmann/detail/conversions/from_json.hpp
-+-
-+nlohmann/detail/conversions/to_json.hpp
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/from_json.hpp
-+algorithm
-+-
-+array
-+-
-+ciso646
-+-
-+forward_list
-+-
-+iterator
-+-
-+map
-+-
-+string
-+-
-+tuple
-+-
-+type_traits
-+-
-+unordered_map
-+-
-+utility
-+-
-+valarray
-+-
-+nlohmann/detail/exceptions.hpp
-+-
-+nlohmann/detail/macro_scope.hpp
-+-
-+nlohmann/detail/meta/cpp_future.hpp
-+-
-+nlohmann/detail/meta/type_traits.hpp
-+-
-+nlohmann/detail/value_t.hpp
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_chars.hpp
-+array
-+-
-+cassert
-+-
-+ciso646
-+-
-+cmath
-+-
-+cstdint
-+-
-+cstring
-+-
-+limits
-+-
-+type_traits
-+-
-+nlohmann/detail/macro_scope.hpp
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_json.hpp
-+algorithm
-+-
-+ciso646
-+-
-+iterator
-+-
-+string
-+-
-+tuple
-+-
-+type_traits
-+-
-+utility
-+-
-+valarray
-+-
-+vector
-+-
-+nlohmann/detail/iterators/iteration_proxy.hpp
-+-
-+nlohmann/detail/meta/cpp_future.hpp
-+-
-+nlohmann/detail/meta/type_traits.hpp
-+-
-+nlohmann/detail/value_t.hpp
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/exceptions.hpp
-+exception
-+-
-+stdexcept
-+-
-+string
-+-
-+nlohmann/detail/input/position_t.hpp
-+-
-+nlohmann/detail/macro_scope.hpp
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/binary_reader.hpp
-+algorithm
-+-
-+array
-+-
-+cassert
-+-
-+cmath
-+-
-+cstddef
-+-
-+cstdint
-+-
-+cstdio
-+-
-+cstring
-+-
-+iterator
-+-
-+limits
-+-
-+string
-+-
-+utility
-+-
-+nlohmann/detail/exceptions.hpp
-+-
-+nlohmann/detail/input/input_adapters.hpp
-+-
-+nlohmann/detail/input/json_sax.hpp
-+-
-+nlohmann/detail/macro_scope.hpp
-+-
-+nlohmann/detail/meta/is_sax.hpp
-+-
-+nlohmann/detail/value_t.hpp
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/input_adapters.hpp
-+array
-+-
-+cassert
-+-
-+cstddef
-+-
-+cstdio
-+-
-+cstring
-+-
-+istream
-+-
-+iterator
-+-
-+memory
-+-
-+numeric
-+-
-+string
-+-
-+type_traits
-+-
-+utility
-+-
-+nlohmann/detail/iterators/iterator_traits.hpp
-+-
-+nlohmann/detail/macro_scope.hpp
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/json_sax.hpp
-+cassert
-+-
-+cstddef
-+-
-+string
-+-
-+utility
-+-
-+vector
-+-
-+nlohmann/detail/exceptions.hpp
-+-
-+nlohmann/detail/macro_scope.hpp
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/lexer.hpp
-+array
-+-
-+clocale
-+-
-+cstddef
-+-
-+cstdio
-+-
-+cstdlib
-+-
-+initializer_list
-+-
-+string
-+-
-+utility
-+-
-+vector
-+-
-+nlohmann/detail/input/input_adapters.hpp
-+-
-+nlohmann/detail/input/position_t.hpp
-+-
-+nlohmann/detail/macro_scope.hpp
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/parser.hpp
-+cassert
-+-
-+cmath
-+-
-+cstdint
-+-
-+functional
-+-
-+string
-+-
-+utility
-+-
-+vector
-+-
-+nlohmann/detail/exceptions.hpp
-+-
-+nlohmann/detail/input/input_adapters.hpp
-+-
-+nlohmann/detail/input/json_sax.hpp
-+-
-+nlohmann/detail/input/lexer.hpp
-+-
-+nlohmann/detail/macro_scope.hpp
-+-
-+nlohmann/detail/meta/is_sax.hpp
-+-
-+nlohmann/detail/value_t.hpp
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/position_t.hpp
-+cstddef
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/internal_iterator.hpp
-+nlohmann/detail/iterators/primitive_iterator.hpp
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iter_impl.hpp
-+ciso646
-+-
-+iterator
-+-
-+type_traits
-+-
-+nlohmann/detail/exceptions.hpp
-+-
-+nlohmann/detail/iterators/internal_iterator.hpp
-+-
-+nlohmann/detail/iterators/primitive_iterator.hpp
-+-
-+nlohmann/detail/macro_scope.hpp
-+-
-+nlohmann/detail/meta/cpp_future.hpp
-+-
-+nlohmann/detail/meta/type_traits.hpp
-+-
-+nlohmann/detail/value_t.hpp
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iteration_proxy.hpp
-+cstddef
-+-
-+iterator
-+-
-+string
-+-
-+tuple
-+-
-+nlohmann/detail/meta/type_traits.hpp
-+-
-+nlohmann/detail/value_t.hpp
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iterator_traits.hpp
-+iterator
-+-
-+nlohmann/detail/meta/void_t.hpp
-+-
-+nlohmann/detail/meta/cpp_future.hpp
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/json_reverse_iterator.hpp
-+cstddef
-+-
-+iterator
-+-
-+utility
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/primitive_iterator.hpp
-+cstddef
-+-
-+limits
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_pointer.hpp
-+algorithm
-+-
-+cassert
-+-
-+cctype
-+-
-+numeric
-+-
-+string
-+-
-+utility
-+-
-+vector
-+-
-+nlohmann/detail/exceptions.hpp
-+-
-+nlohmann/detail/macro_scope.hpp
-+-
-+nlohmann/detail/value_t.hpp
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_ref.hpp
-+initializer_list
-+-
-+utility
-+-
-+nlohmann/detail/meta/type_traits.hpp
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_scope.hpp
-+utility
-+-
-+nlohmann/thirdparty/hedley/hedley.hpp
-+-
-+cstdlib
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_unscope.hpp
-+nlohmann/thirdparty/hedley/hedley_undef.hpp
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/cpp_future.hpp
-+ciso646
-+-
-+cstddef
-+-
-+type_traits
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/detected.hpp
-+type_traits
-+-
-+nlohmann/detail/meta/void_t.hpp
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/is_sax.hpp
-+cstdint
-+-
-+utility
-+-
-+string
-+-
-+nlohmann/detail/meta/detected.hpp
-+-
-+nlohmann/detail/meta/type_traits.hpp
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/type_traits.hpp
-+ciso646
-+-
-+limits
-+-
-+type_traits
-+-
-+utility
-+-
-+nlohmann/detail/iterators/iterator_traits.hpp
-+-
-+nlohmann/detail/macro_scope.hpp
-+-
-+nlohmann/detail/meta/cpp_future.hpp
-+-
-+nlohmann/detail/meta/detected.hpp
-+-
-+nlohmann/json_fwd.hpp
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/void_t.hpp
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/binary_writer.hpp
-+algorithm
-+-
-+array
-+-
-+cstdint
-+-
-+cstring
-+-
-+limits
-+-
-+string
-+-
-+nlohmann/detail/input/binary_reader.hpp
-+-
-+nlohmann/detail/macro_scope.hpp
-+-
-+nlohmann/detail/output/output_adapters.hpp
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/output_adapters.hpp
-+algorithm
-+-
-+cstddef
-+-
-+ios
-+-
-+iterator
-+-
-+memory
-+-
-+ostream
-+-
-+string
-+-
-+vector
-+-
-+nlohmann/detail/macro_scope.hpp
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/serializer.hpp
-+algorithm
-+-
-+array
-+-
-+cassert
-+-
-+ciso646
-+-
-+clocale
-+-
-+cmath
-+-
-+cstddef
-+-
-+cstdint
-+-
-+cstdio
-+-
-+limits
-+-
-+string
-+-
-+type_traits
-+-
-+utility
-+-
-+nlohmann/detail/conversions/to_chars.hpp
-+-
-+nlohmann/detail/exceptions.hpp
-+-
-+nlohmann/detail/macro_scope.hpp
-+-
-+nlohmann/detail/meta/cpp_future.hpp
-+-
-+nlohmann/detail/output/binary_writer.hpp
-+-
-+nlohmann/detail/output/output_adapters.hpp
-+-
-+nlohmann/detail/value_t.hpp
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/value_t.hpp
-+array
-+-
-+ciso646
-+-
-+cstddef
-+-
-+cstdint
-+-
-+string
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json.hpp
-+algorithm
-+-
-+cassert
-+-
-+ciso646
-+-
-+cstddef
-+-
-+functional
-+-
-+initializer_list
-+-
-+iosfwd
-+-
-+iterator
-+-
-+memory
-+-
-+numeric
-+-
-+string
-+-
-+utility
-+-
-+vector
-+-
-+nlohmann/adl_serializer.hpp
-+-
-+nlohmann/detail/conversions/from_json.hpp
-+-
-+nlohmann/detail/conversions/to_json.hpp
-+-
-+nlohmann/detail/exceptions.hpp
-+-
-+nlohmann/detail/input/binary_reader.hpp
-+-
-+nlohmann/detail/input/input_adapters.hpp
-+-
-+nlohmann/detail/input/lexer.hpp
-+-
-+nlohmann/detail/input/parser.hpp
-+-
-+nlohmann/detail/iterators/internal_iterator.hpp
-+-
-+nlohmann/detail/iterators/iter_impl.hpp
-+-
-+nlohmann/detail/iterators/iteration_proxy.hpp
-+-
-+nlohmann/detail/iterators/json_reverse_iterator.hpp
-+-
-+nlohmann/detail/iterators/primitive_iterator.hpp
-+-
-+nlohmann/detail/json_pointer.hpp
-+-
-+nlohmann/detail/json_ref.hpp
-+-
-+nlohmann/detail/macro_scope.hpp
-+-
-+nlohmann/detail/meta/cpp_future.hpp
-+-
-+nlohmann/detail/meta/type_traits.hpp
-+-
-+nlohmann/detail/output/binary_writer.hpp
-+-
-+nlohmann/detail/output/output_adapters.hpp
-+-
-+nlohmann/detail/output/serializer.hpp
-+-
-+nlohmann/detail/value_t.hpp
-+-
-+nlohmann/json_fwd.hpp
-+-
-+nlohmann/detail/macro_unscope.hpp
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+cstdint
-+-
-+map
-+-
-+memory
-+-
-+string
-+-
-+vector
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley.hpp
-+stdint.h
-+-
-+stdint.h
-+-
-+
-+/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley_undef.hpp
-+
-+/soe/renau/projs/synth/slang_orig/build/source/AllSyntax.cpp
-+slang/syntax/AllSyntax.h
-+/soe/renau/projs/synth/slang_orig/build/source/slang/syntax/AllSyntax.h
-+
-+/soe/renau/projs/synth/slang_orig/build/source/DiagCode.cpp
-+slang/diagnostics/AllDiags.h
-+/soe/renau/projs/synth/slang_orig/build/source/slang/diagnostics/AllDiags.h
-+flat_hash_map.hpp
-+-
-+
-+/soe/renau/projs/synth/slang_orig/build/source/Version.cpp
-+slang/util/Version.h
-+/soe/renau/projs/synth/slang_orig/build/source/slang/util/Version.h
-+
-+/soe/renau/projs/synth/slang_orig/build/source/slang/diagnostics/AllDiags.h
-+slang/diagnostics/ConstEvalDiags.h
-+/soe/renau/projs/synth/slang_orig/build/source/slang/diagnostics/slang/diagnostics/ConstEvalDiags.h
-+slang/diagnostics/DeclarationsDiags.h
-+/soe/renau/projs/synth/slang_orig/build/source/slang/diagnostics/slang/diagnostics/DeclarationsDiags.h
-+slang/diagnostics/ExpressionsDiags.h
-+/soe/renau/projs/synth/slang_orig/build/source/slang/diagnostics/slang/diagnostics/ExpressionsDiags.h
-+slang/diagnostics/GeneralDiags.h
-+/soe/renau/projs/synth/slang_orig/build/source/slang/diagnostics/slang/diagnostics/GeneralDiags.h
-+slang/diagnostics/LexerDiags.h
-+/soe/renau/projs/synth/slang_orig/build/source/slang/diagnostics/slang/diagnostics/LexerDiags.h
-+slang/diagnostics/LookupDiags.h
-+/soe/renau/projs/synth/slang_orig/build/source/slang/diagnostics/slang/diagnostics/LookupDiags.h
-+slang/diagnostics/NumericDiags.h
-+/soe/renau/projs/synth/slang_orig/build/source/slang/diagnostics/slang/diagnostics/NumericDiags.h
-+slang/diagnostics/ParserDiags.h
-+/soe/renau/projs/synth/slang_orig/build/source/slang/diagnostics/slang/diagnostics/ParserDiags.h
-+slang/diagnostics/PreprocessorDiags.h
-+/soe/renau/projs/synth/slang_orig/build/source/slang/diagnostics/slang/diagnostics/PreprocessorDiags.h
-+slang/diagnostics/StatementsDiags.h
-+/soe/renau/projs/synth/slang_orig/build/source/slang/diagnostics/slang/diagnostics/StatementsDiags.h
-+slang/diagnostics/SysFuncsDiags.h
-+/soe/renau/projs/synth/slang_orig/build/source/slang/diagnostics/slang/diagnostics/SysFuncsDiags.h
-+slang/diagnostics/TypesDiags.h
-+/soe/renau/projs/synth/slang_orig/build/source/slang/diagnostics/slang/diagnostics/TypesDiags.h
-+
-+/soe/renau/projs/synth/slang_orig/build/source/slang/syntax/AllSyntax.h
-+slang/parsing/Token.h
-+/soe/renau/projs/synth/slang_orig/build/source/slang/syntax/slang/parsing/Token.h
-+slang/syntax/SyntaxNode.h
-+/soe/renau/projs/synth/slang_orig/build/source/slang/syntax/slang/syntax/SyntaxNode.h
-+slang/util/BumpAllocator.h
-+/soe/renau/projs/synth/slang_orig/build/source/slang/syntax/slang/util/BumpAllocator.h
-+
-+/soe/renau/projs/synth/slang_orig/source/binding/BindContext.cpp
-+slang/binding/BindContext.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/binding/BindContext.h
-+slang/binding/Expressions.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/binding/Expressions.h
-+slang/compilation/Compilation.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/compilation/Compilation.h
-+slang/diagnostics/DeclarationsDiags.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/diagnostics/DeclarationsDiags.h
-+slang/diagnostics/ExpressionsDiags.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/diagnostics/ExpressionsDiags.h
-+slang/diagnostics/NumericDiags.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/diagnostics/NumericDiags.h
-+slang/symbols/TypeSymbols.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/symbols/TypeSymbols.h
-+slang/syntax/AllSyntax.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/syntax/AllSyntax.h
-+
-+/soe/renau/projs/synth/slang_orig/source/binding/ConstantValue.cpp
-+slang/binding/ConstantValue.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/binding/ConstantValue.h
-+fmt/format.h
-+-
-+nlohmann/json.hpp
-+-
-+slang/text/FormatBuffer.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/text/FormatBuffer.h
-+
-+/soe/renau/projs/synth/slang_orig/source/binding/EvalContext.cpp
-+slang/binding/EvalContext.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/binding/EvalContext.h
-+slang/binding/BindContext.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/binding/BindContext.h
-+slang/diagnostics/ConstEvalDiags.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/diagnostics/ConstEvalDiags.h
-+slang/symbols/MemberSymbols.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/symbols/MemberSymbols.h
-+slang/symbols/TypeSymbols.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/symbols/TypeSymbols.h
-+slang/text/FormatBuffer.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/text/FormatBuffer.h
-+
-+/soe/renau/projs/synth/slang_orig/source/binding/Expressions.cpp
-+slang/binding/Expressions.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/binding/Expressions.h
-+nlohmann/json.hpp
-+-
-+slang/binding/SystemSubroutine.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/binding/SystemSubroutine.h
-+slang/compilation/Compilation.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/compilation/Compilation.h
-+slang/diagnostics/ExpressionsDiags.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/diagnostics/ExpressionsDiags.h
-+slang/diagnostics/LookupDiags.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/diagnostics/LookupDiags.h
-+slang/diagnostics/NumericDiags.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/diagnostics/NumericDiags.h
-+slang/symbols/ASTVisitor.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/symbols/ASTVisitor.h
-+slang/symbols/TypeSymbols.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/symbols/TypeSymbols.h
-+slang/syntax/AllSyntax.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/syntax/AllSyntax.h
-+slang/util/StackContainer.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/util/StackContainer.h
-+
-+/soe/renau/projs/synth/slang_orig/source/binding/Expressions_eval.cpp
-+slang/binding/Expressions.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/binding/Expressions.h
-+slang/binding/Statements.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/binding/Statements.h
-+slang/binding/SystemSubroutine.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/binding/SystemSubroutine.h
-+slang/compilation/Compilation.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/compilation/Compilation.h
-+slang/diagnostics/ConstEvalDiags.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/diagnostics/ConstEvalDiags.h
-+slang/symbols/ASTVisitor.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/symbols/ASTVisitor.h
-+
-+/soe/renau/projs/synth/slang_orig/source/binding/Statements.cpp
-+slang/binding/Statements.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/binding/Statements.h
-+slang/binding/Expressions.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/binding/Expressions.h
-+slang/binding/TimingControl.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/binding/TimingControl.h
-+slang/compilation/Compilation.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/compilation/Compilation.h
-+slang/diagnostics/ConstEvalDiags.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/diagnostics/ConstEvalDiags.h
-+slang/diagnostics/ExpressionsDiags.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/diagnostics/ExpressionsDiags.h
-+slang/diagnostics/NumericDiags.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/diagnostics/NumericDiags.h
-+slang/diagnostics/StatementsDiags.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/diagnostics/StatementsDiags.h
-+slang/symbols/ASTVisitor.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/symbols/ASTVisitor.h
-+slang/syntax/AllSyntax.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/syntax/AllSyntax.h
-+
-+/soe/renau/projs/synth/slang_orig/source/binding/SystemSubroutine.cpp
-+slang/binding/SystemSubroutine.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/binding/SystemSubroutine.h
-+slang/binding/BindContext.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/binding/BindContext.h
-+slang/binding/Expressions.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/binding/Expressions.h
-+slang/compilation/Compilation.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/compilation/Compilation.h
-+slang/diagnostics/ExpressionsDiags.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/diagnostics/ExpressionsDiags.h
-+slang/diagnostics/SysFuncsDiags.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/diagnostics/SysFuncsDiags.h
-+slang/syntax/AllSyntax.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/syntax/AllSyntax.h
-+slang/text/SFormat.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/text/SFormat.h
-+
-+/soe/renau/projs/synth/slang_orig/source/binding/TimingControl.cpp
-+slang/binding/TimingControl.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/binding/TimingControl.h
-+slang/binding/Expressions.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/binding/Expressions.h
-+slang/compilation/Compilation.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/compilation/Compilation.h
-+slang/diagnostics/ExpressionsDiags.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/diagnostics/ExpressionsDiags.h
-+slang/diagnostics/StatementsDiags.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/diagnostics/StatementsDiags.h
-+slang/symbols/TypeSymbols.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/symbols/TypeSymbols.h
-+slang/syntax/AllSyntax.h
-+/soe/renau/projs/synth/slang_orig/source/binding/slang/syntax/AllSyntax.h
-+
-+/soe/renau/projs/synth/slang_orig/source/compilation/Compilation.cpp
-+slang/compilation/Compilation.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/slang/compilation/Compilation.h
-+nlohmann/json.hpp
-+-
-+slang/binding/SystemSubroutine.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/slang/binding/SystemSubroutine.h
-+slang/diagnostics/DiagnosticEngine.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/slang/diagnostics/DiagnosticEngine.h
-+slang/parsing/Preprocessor.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/slang/parsing/Preprocessor.h
-+slang/symbols/ASTVisitor.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/slang/symbols/ASTVisitor.h
-+slang/syntax/SyntaxTree.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/slang/syntax/SyntaxTree.h
-+slang/text/SourceManager.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/slang/text/SourceManager.h
-+
-+/soe/renau/projs/synth/slang_orig/source/compilation/ScriptSession.cpp
-+slang/compilation/ScriptSession.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/slang/compilation/ScriptSession.h
-+slang/binding/Expressions.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/slang/binding/Expressions.h
-+slang/symbols/HierarchySymbols.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/slang/symbols/HierarchySymbols.h
-+slang/symbols/MemberSymbols.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/slang/symbols/MemberSymbols.h
-+
-+/soe/renau/projs/synth/slang_orig/source/compilation/SemanticModel.cpp
-+slang/compilation/SemanticModel.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/slang/compilation/SemanticModel.h
-+slang/compilation/Compilation.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/slang/compilation/Compilation.h
-+slang/syntax/AllSyntax.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/slang/syntax/AllSyntax.h
-+
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/ArrayMethods.cpp
-+slang/binding/SystemSubroutine.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/slang/binding/SystemSubroutine.h
-+slang/compilation/Compilation.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/slang/compilation/Compilation.h
-+slang/diagnostics/SysFuncsDiags.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/slang/diagnostics/SysFuncsDiags.h
-+
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/EnumMethods.cpp
-+slang/binding/SystemSubroutine.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/slang/binding/SystemSubroutine.h
-+slang/compilation/Compilation.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/slang/compilation/Compilation.h
-+slang/diagnostics/SysFuncsDiags.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/slang/diagnostics/SysFuncsDiags.h
-+slang/syntax/AllSyntax.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/slang/syntax/AllSyntax.h
-+
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/MathFuncs.cpp
-+slang/binding/SystemSubroutine.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/slang/binding/SystemSubroutine.h
-+slang/compilation/Compilation.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/slang/compilation/Compilation.h
-+slang/diagnostics/SysFuncsDiags.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/slang/diagnostics/SysFuncsDiags.h
-+
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/MiscSystemFuncs.cpp
-+slang/binding/SystemSubroutine.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/slang/binding/SystemSubroutine.h
-+slang/compilation/Compilation.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/slang/compilation/Compilation.h
-+slang/diagnostics/SysFuncsDiags.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/slang/diagnostics/SysFuncsDiags.h
-+slang/text/SFormat.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/slang/text/SFormat.h
-+
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/NonConstFuncs.cpp
-+slang/binding/SystemSubroutine.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/slang/binding/SystemSubroutine.h
-+slang/compilation/Compilation.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/slang/compilation/Compilation.h
-+
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/QueryFuncs.cpp
-+slang/binding/SystemSubroutine.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/slang/binding/SystemSubroutine.h
-+slang/compilation/Compilation.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/slang/compilation/Compilation.h
-+slang/diagnostics/SysFuncsDiags.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/slang/diagnostics/SysFuncsDiags.h
-+
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/StringMethods.cpp
-+slang/binding/SystemSubroutine.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/slang/binding/SystemSubroutine.h
-+slang/compilation/Compilation.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/slang/compilation/Compilation.h
-+slang/diagnostics/SysFuncsDiags.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/slang/diagnostics/SysFuncsDiags.h
-+
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/SystemTasks.cpp
-+slang/binding/SystemSubroutine.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/slang/binding/SystemSubroutine.h
-+slang/compilation/Compilation.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/slang/compilation/Compilation.h
-+slang/diagnostics/SysFuncsDiags.h
-+/soe/renau/projs/synth/slang_orig/source/compilation/builtins/slang/diagnostics/SysFuncsDiags.h
-+
-+/soe/renau/projs/synth/slang_orig/source/diagnostics/DiagnosticClient.cpp
-+slang/diagnostics/DiagnosticClient.h
-+/soe/renau/projs/synth/slang_orig/source/diagnostics/slang/diagnostics/DiagnosticClient.h
-+slang/text/SourceManager.h
-+/soe/renau/projs/synth/slang_orig/source/diagnostics/slang/text/SourceManager.h
-+
-+/soe/renau/projs/synth/slang_orig/source/diagnostics/DiagnosticEngine.cpp
-+slang/diagnostics/DiagnosticEngine.h
-+/soe/renau/projs/synth/slang_orig/source/diagnostics/slang/diagnostics/DiagnosticEngine.h
-+FmtlibWrapper.h
-+/soe/renau/projs/synth/slang_orig/source/diagnostics/FmtlibWrapper.h
-+slang/diagnostics/DiagnosticClient.h
-+/soe/renau/projs/synth/slang_orig/source/diagnostics/slang/diagnostics/DiagnosticClient.h
-+slang/diagnostics/TextDiagnosticClient.h
-+/soe/renau/projs/synth/slang_orig/source/diagnostics/slang/diagnostics/TextDiagnosticClient.h
-+slang/text/SourceManager.h
-+/soe/renau/projs/synth/slang_orig/source/diagnostics/slang/text/SourceManager.h
-+slang/util/StackContainer.h
-+/soe/renau/projs/synth/slang_orig/source/diagnostics/slang/util/StackContainer.h
-+
-+/soe/renau/projs/synth/slang_orig/source/diagnostics/Diagnostics.cpp
-+slang/diagnostics/Diagnostics.h
-+/soe/renau/projs/synth/slang_orig/source/diagnostics/slang/diagnostics/Diagnostics.h
-+slang/symbols/HierarchySymbols.h
-+/soe/renau/projs/synth/slang_orig/source/diagnostics/slang/symbols/HierarchySymbols.h
-+slang/symbols/TypeSymbols.h
-+/soe/renau/projs/synth/slang_orig/source/diagnostics/slang/symbols/TypeSymbols.h
-+slang/text/SourceManager.h
-+/soe/renau/projs/synth/slang_orig/source/diagnostics/slang/text/SourceManager.h
-+
-+/soe/renau/projs/synth/slang_orig/source/diagnostics/FmtlibWrapper.h
-+flat_hash_map.hpp
-+-
-+fmt/ostream.h
-+-
-+slang/symbols/TypePrinter.h
-+/soe/renau/projs/synth/slang_orig/source/diagnostics/slang/symbols/TypePrinter.h
-+
-+/soe/renau/projs/synth/slang_orig/source/diagnostics/TextDiagnosticClient.cpp
-+slang/diagnostics/TextDiagnosticClient.h
-+/soe/renau/projs/synth/slang_orig/source/diagnostics/slang/diagnostics/TextDiagnosticClient.h
-+slang/symbols/Symbol.h
-+/soe/renau/projs/synth/slang_orig/source/diagnostics/slang/symbols/Symbol.h
-+slang/syntax/AllSyntax.h
-+/soe/renau/projs/synth/slang_orig/source/diagnostics/slang/syntax/AllSyntax.h
-+slang/text/SourceManager.h
-+/soe/renau/projs/synth/slang_orig/source/diagnostics/slang/text/SourceManager.h
-+
-+/soe/renau/projs/synth/slang_orig/source/numeric/SVInt.cpp
-+slang/numeric/SVInt.h
-+/soe/renau/projs/synth/slang_orig/source/numeric/slang/numeric/SVInt.h
-+../text/CharInfo.h
-+/soe/renau/projs/synth/slang_orig/source/text/CharInfo.h
-+SVIntHelpers.h
-+/soe/renau/projs/synth/slang_orig/source/numeric/SVIntHelpers.h
-+fmt/format.h
-+-
-+stdexcept
-+-
-+slang/util/Hash.h
-+/soe/renau/projs/synth/slang_orig/source/numeric/slang/util/Hash.h
-+
-+/soe/renau/projs/synth/slang_orig/source/numeric/SVIntHelpers.h
-+x86intrin.h
-+-
-+
-+/soe/renau/projs/synth/slang_orig/source/numeric/Time.cpp
-+slang/numeric/Time.h
-+/soe/renau/projs/synth/slang_orig/source/numeric/slang/numeric/Time.h
-+fmt/format.h
-+-
-+slang/util/StringTable.h
-+/soe/renau/projs/synth/slang_orig/source/numeric/slang/util/StringTable.h
-+
-+/soe/renau/projs/synth/slang_orig/source/numeric/VectorBuilder.cpp
-+slang/numeric/VectorBuilder.h
-+/soe/renau/projs/synth/slang_orig/source/numeric/slang/numeric/VectorBuilder.h
-+../text/CharInfo.h
-+/soe/renau/projs/synth/slang_orig/source/text/CharInfo.h
-+slang/diagnostics/LexerDiags.h
-+/soe/renau/projs/synth/slang_orig/source/numeric/slang/diagnostics/LexerDiags.h
-+slang/diagnostics/NumericDiags.h
-+/soe/renau/projs/synth/slang_orig/source/numeric/slang/diagnostics/NumericDiags.h
-+
-+/soe/renau/projs/synth/slang_orig/source/parsing/Lexer.cpp
-+slang/parsing/Lexer.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/parsing/Lexer.h
-+../text/CharInfo.h
-+/soe/renau/projs/synth/slang_orig/source/text/CharInfo.h
-+algorithm
-+-
-+cmath
-+-
-+slang/diagnostics/LexerDiags.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/diagnostics/LexerDiags.h
-+slang/diagnostics/NumericDiags.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/diagnostics/NumericDiags.h
-+slang/syntax/SyntaxNode.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/syntax/SyntaxNode.h
-+slang/text/SourceManager.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/text/SourceManager.h
-+slang/util/BumpAllocator.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/util/BumpAllocator.h
-+slang/util/String.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/util/String.h
-+
-+/soe/renau/projs/synth/slang_orig/source/parsing/LexerFacts.cpp
-+slang/parsing/Token.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/parsing/Token.h
-+slang/syntax/SyntaxNode.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/syntax/SyntaxNode.h
-+
-+/soe/renau/projs/synth/slang_orig/source/parsing/Parser.cpp
-+slang/parsing/Parser.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/parsing/Parser.h
-+slang/diagnostics/ParserDiags.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/diagnostics/ParserDiags.h
-+slang/parsing/Preprocessor.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/parsing/Preprocessor.h
-+
-+/soe/renau/projs/synth/slang_orig/source/parsing/ParserBase.cpp
-+slang/parsing/ParserBase.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/parsing/ParserBase.h
-+slang/diagnostics/ParserDiags.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/diagnostics/ParserDiags.h
-+slang/parsing/Preprocessor.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/parsing/Preprocessor.h
-+slang/util/BumpAllocator.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/util/BumpAllocator.h
-+
-+/soe/renau/projs/synth/slang_orig/source/parsing/Parser_expressions.cpp
-+slang/diagnostics/NumericDiags.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/diagnostics/NumericDiags.h
-+slang/diagnostics/ParserDiags.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/diagnostics/ParserDiags.h
-+slang/parsing/Lexer.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/parsing/Lexer.h
-+slang/parsing/Parser.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/parsing/Parser.h
-+slang/parsing/Preprocessor.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/parsing/Preprocessor.h
-+slang/util/String.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/util/String.h
-+
-+/soe/renau/projs/synth/slang_orig/source/parsing/Parser_statements.cpp
-+slang/diagnostics/ParserDiags.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/diagnostics/ParserDiags.h
-+slang/parsing/Parser.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/parsing/Parser.h
-+
-+/soe/renau/projs/synth/slang_orig/source/parsing/Preprocessor.cpp
-+slang/parsing/Preprocessor.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/parsing/Preprocessor.h
-+slang/diagnostics/PreprocessorDiags.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/diagnostics/PreprocessorDiags.h
-+slang/syntax/AllSyntax.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/syntax/AllSyntax.h
-+slang/text/SourceManager.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/text/SourceManager.h
-+slang/util/BumpAllocator.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/util/BumpAllocator.h
-+slang/util/String.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/util/String.h
-+slang/util/Version.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/util/Version.h
-+
-+/soe/renau/projs/synth/slang_orig/source/parsing/Token.cpp
-+slang/parsing/Token.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/parsing/Token.h
-+slang/diagnostics/ParserDiags.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/diagnostics/ParserDiags.h
-+slang/diagnostics/PreprocessorDiags.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/diagnostics/PreprocessorDiags.h
-+slang/syntax/SyntaxPrinter.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/syntax/SyntaxPrinter.h
-+slang/util/BumpAllocator.h
-+/soe/renau/projs/synth/slang_orig/source/parsing/slang/util/BumpAllocator.h
-+
-+/soe/renau/projs/synth/slang_orig/source/symbols/DeclaredType.cpp
-+slang/symbols/DeclaredType.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/DeclaredType.h
-+slang/binding/Expressions.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/binding/Expressions.h
-+slang/compilation/Compilation.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/compilation/Compilation.h
-+slang/symbols/Scope.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/Scope.h
-+slang/symbols/Symbol.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/Symbol.h
-+slang/symbols/TypeSymbols.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/TypeSymbols.h
-+slang/syntax/AllSyntax.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/syntax/AllSyntax.h
-+
-+/soe/renau/projs/synth/slang_orig/source/symbols/HierarchySymbols.cpp
-+slang/symbols/HierarchySymbols.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/HierarchySymbols.h
-+nlohmann/json.hpp
-+-
-+slang/binding/Expressions.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/binding/Expressions.h
-+slang/compilation/Compilation.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/compilation/Compilation.h
-+slang/diagnostics/DeclarationsDiags.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/diagnostics/DeclarationsDiags.h
-+slang/diagnostics/LookupDiags.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/diagnostics/LookupDiags.h
-+slang/diagnostics/PreprocessorDiags.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/diagnostics/PreprocessorDiags.h
-+slang/util/StackContainer.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/util/StackContainer.h
-+slang/symbols/MemberSymbols.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/MemberSymbols.h
-+slang/symbols/TypeSymbols.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/TypeSymbols.h
-+slang/syntax/AllSyntax.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/syntax/AllSyntax.h
-+
-+/soe/renau/projs/synth/slang_orig/source/symbols/Lookup.cpp
-+slang/symbols/Lookup.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/Lookup.h
-+slang/symbols/Scope.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/Scope.h
-+slang/symbols/Symbol.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/Symbol.h
-+
-+/soe/renau/projs/synth/slang_orig/source/symbols/MemberSymbols.cpp
-+slang/symbols/MemberSymbols.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/MemberSymbols.h
-+PortBuilder.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/PortBuilder.h
-+nlohmann/json.hpp
-+-
-+slang/compilation/Compilation.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/compilation/Compilation.h
-+slang/symbols/HierarchySymbols.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/HierarchySymbols.h
-+slang/syntax/AllSyntax.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/syntax/AllSyntax.h
-+slang/util/StackContainer.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/util/StackContainer.h
-+
-+/soe/renau/projs/synth/slang_orig/source/symbols/PortBuilder.h
-+slang/binding/Expressions.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/binding/Expressions.h
-+slang/compilation/Compilation.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/compilation/Compilation.h
-+slang/diagnostics/DeclarationsDiags.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/diagnostics/DeclarationsDiags.h
-+slang/diagnostics/LookupDiags.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/diagnostics/LookupDiags.h
-+slang/symbols/HierarchySymbols.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/HierarchySymbols.h
-+slang/symbols/MemberSymbols.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/MemberSymbols.h
-+slang/symbols/TypeSymbols.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/TypeSymbols.h
-+slang/util/StackContainer.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/util/StackContainer.h
-+slang/syntax/AllSyntax.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/syntax/AllSyntax.h
-+
-+/soe/renau/projs/synth/slang_orig/source/symbols/Scope.cpp
-+slang/symbols/Scope.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/Scope.h
-+slang/binding/Expressions.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/binding/Expressions.h
-+slang/compilation/Compilation.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/compilation/Compilation.h
-+slang/diagnostics/ConstEvalDiags.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/diagnostics/ConstEvalDiags.h
-+slang/diagnostics/LookupDiags.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/diagnostics/LookupDiags.h
-+slang/symbols/HierarchySymbols.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/HierarchySymbols.h
-+slang/symbols/MemberSymbols.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/MemberSymbols.h
-+slang/symbols/TypeSymbols.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/TypeSymbols.h
-+slang/syntax/AllSyntax.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/syntax/AllSyntax.h
-+slang/util/StackContainer.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/util/StackContainer.h
-+
-+/soe/renau/projs/synth/slang_orig/source/symbols/SemanticFacts.cpp
-+slang/symbols/SemanticFacts.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/SemanticFacts.h
-+
-+/soe/renau/projs/synth/slang_orig/source/symbols/Symbol.cpp
-+slang/symbols/Symbol.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/Symbol.h
-+nlohmann/json.hpp
-+-
-+slang/compilation/Compilation.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/compilation/Compilation.h
-+slang/diagnostics/DeclarationsDiags.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/diagnostics/DeclarationsDiags.h
-+slang/symbols/ASTVisitor.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/ASTVisitor.h
-+slang/symbols/HierarchySymbols.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/HierarchySymbols.h
-+slang/symbols/MemberSymbols.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/MemberSymbols.h
-+slang/symbols/TypeSymbols.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/TypeSymbols.h
-+slang/syntax/AllSyntax.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/syntax/AllSyntax.h
-+slang/text/SourceManager.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/text/SourceManager.h
-+slang/util/StackContainer.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/util/StackContainer.h
-+
-+/soe/renau/projs/synth/slang_orig/source/symbols/TypePrinter.cpp
-+slang/symbols/TypePrinter.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/TypePrinter.h
-+slang/symbols/ASTVisitor.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/ASTVisitor.h
-+
-+/soe/renau/projs/synth/slang_orig/source/symbols/TypeSymbols.cpp
-+slang/symbols/TypeSymbols.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/TypeSymbols.h
-+nlohmann/json.hpp
-+-
-+slang/binding/ConstantValue.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/binding/ConstantValue.h
-+slang/compilation/Compilation.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/compilation/Compilation.h
-+slang/diagnostics/LookupDiags.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/diagnostics/LookupDiags.h
-+slang/diagnostics/TypesDiags.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/diagnostics/TypesDiags.h
-+slang/symbols/ASTVisitor.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/ASTVisitor.h
-+slang/symbols/TypePrinter.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/symbols/TypePrinter.h
-+slang/syntax/AllSyntax.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/syntax/AllSyntax.h
-+slang/util/StackContainer.h
-+/soe/renau/projs/synth/slang_orig/source/symbols/slang/util/StackContainer.h
-+
-+/soe/renau/projs/synth/slang_orig/source/syntax/SyntaxFacts.cpp
-+slang/parsing/Token.h
-+/soe/renau/projs/synth/slang_orig/source/syntax/slang/parsing/Token.h
-+slang/syntax/SyntaxNode.h
-+/soe/renau/projs/synth/slang_orig/source/syntax/slang/syntax/SyntaxNode.h
-+slang/syntax/AllSyntax.h
-+/soe/renau/projs/synth/slang_orig/source/syntax/slang/syntax/AllSyntax.h
-+
-+/soe/renau/projs/synth/slang_orig/source/syntax/SyntaxNode.cpp
-+slang/syntax/SyntaxNode.h
-+/soe/renau/projs/synth/slang_orig/source/syntax/slang/syntax/SyntaxNode.h
-+slang/syntax/AllSyntax.h
-+/soe/renau/projs/synth/slang_orig/source/syntax/slang/syntax/AllSyntax.h
-+slang/syntax/SyntaxPrinter.h
-+/soe/renau/projs/synth/slang_orig/source/syntax/slang/syntax/SyntaxPrinter.h
-+
-+/soe/renau/projs/synth/slang_orig/source/syntax/SyntaxPrinter.cpp
-+slang/syntax/SyntaxPrinter.h
-+/soe/renau/projs/synth/slang_orig/source/syntax/slang/syntax/SyntaxPrinter.h
-+slang/syntax/SyntaxTree.h
-+/soe/renau/projs/synth/slang_orig/source/syntax/slang/syntax/SyntaxTree.h
-+slang/text/SourceManager.h
-+/soe/renau/projs/synth/slang_orig/source/syntax/slang/text/SourceManager.h
-+
-+/soe/renau/projs/synth/slang_orig/source/syntax/SyntaxTree.cpp
-+slang/syntax/SyntaxTree.h
-+/soe/renau/projs/synth/slang_orig/source/syntax/slang/syntax/SyntaxTree.h
-+slang/parsing/Parser.h
-+/soe/renau/projs/synth/slang_orig/source/syntax/slang/parsing/Parser.h
-+slang/parsing/Preprocessor.h
-+/soe/renau/projs/synth/slang_orig/source/syntax/slang/parsing/Preprocessor.h
-+slang/text/SourceManager.h
-+/soe/renau/projs/synth/slang_orig/source/syntax/slang/text/SourceManager.h
-+
-+/soe/renau/projs/synth/slang_orig/source/syntax/SyntaxVisitor.cpp
-+slang/syntax/SyntaxVisitor.h
-+/soe/renau/projs/synth/slang_orig/source/syntax/slang/syntax/SyntaxVisitor.h
-+
-+/soe/renau/projs/synth/slang_orig/source/text/CharInfo.h
-+
-+/soe/renau/projs/synth/slang_orig/source/text/SFormat.cpp
-+slang/text/SFormat.h
-+/soe/renau/projs/synth/slang_orig/source/text/slang/text/SFormat.h
-+../text/CharInfo.h
-+/soe/renau/projs/synth/slang_orig/source/text/CharInfo.h
-+ieee1800/vpi_user.h
-+-
-+slang/diagnostics/SysFuncsDiags.h
-+/soe/renau/projs/synth/slang_orig/source/text/slang/diagnostics/SysFuncsDiags.h
-+slang/symbols/TypeSymbols.h
-+/soe/renau/projs/synth/slang_orig/source/text/slang/symbols/TypeSymbols.h
-+
-+/soe/renau/projs/synth/slang_orig/source/text/SourceManager.cpp
-+slang/text/SourceManager.h
-+/soe/renau/projs/synth/slang_orig/source/text/slang/text/SourceManager.h
-+fstream
-+-
-+string
-+-
-+slang/util/StackContainer.h
-+/soe/renau/projs/synth/slang_orig/source/text/slang/util/StackContainer.h
-+slang/util/String.h
-+/soe/renau/projs/synth/slang_orig/source/text/slang/util/String.h
-+
-+/soe/renau/projs/synth/slang_orig/source/util/Assert.cpp
-+slang/util/Assert.h
-+/soe/renau/projs/synth/slang_orig/source/util/slang/util/Assert.h
-+fmt/format.h
-+-
-+
-+/soe/renau/projs/synth/slang_orig/source/util/BumpAllocator.cpp
-+slang/util/BumpAllocator.h
-+/soe/renau/projs/synth/slang_orig/source/util/slang/util/BumpAllocator.h
-+cstdlib
-+-
-+
-+/soe/renau/projs/synth/slang_orig/source/util/CommandLine.cpp
-+slang/util/CommandLine.h
-+/soe/renau/projs/synth/slang_orig/source/util/slang/util/CommandLine.h
-+../text/CharInfo.h
-+/soe/renau/projs/synth/slang_orig/source/text/CharInfo.h
-+charconv
-+-
-+filesystem
-+-
-+fmt/format.h
-+-
-+slang/util/SmallVector.h
-+/soe/renau/projs/synth/slang_orig/source/util/slang/util/SmallVector.h
-+slang/util/String.h
-+/soe/renau/projs/synth/slang_orig/source/util/slang/util/String.h
-+
-+/soe/renau/projs/synth/slang_orig/source/util/Hash.cpp
-+slang/util/Hash.h
-+/soe/renau/projs/synth/slang_orig/source/util/slang/util/Hash.h
-+cstdlib
-+-
-+xxhash/xxhash.h
-+-
-+
-+/soe/renau/projs/synth/slang_orig/source/util/String.cpp
-+slang/util/String.h
-+/soe/renau/projs/synth/slang_orig/source/util/slang/util/String.h
-+slang/util/SmallVector.h
-+/soe/renau/projs/synth/slang_orig/source/util/slang/util/SmallVector.h
-+Windows.h
-+-
-+
-+source/slang/diagnostics/ConstEvalDiags.h
-+slang/diagnostics/Diagnostics.h
-+source/slang/diagnostics/slang/diagnostics/Diagnostics.h
-+
-+source/slang/diagnostics/DeclarationsDiags.h
-+slang/diagnostics/Diagnostics.h
-+source/slang/diagnostics/slang/diagnostics/Diagnostics.h
-+
-+source/slang/diagnostics/ExpressionsDiags.h
-+slang/diagnostics/Diagnostics.h
-+source/slang/diagnostics/slang/diagnostics/Diagnostics.h
-+
-+source/slang/diagnostics/GeneralDiags.h
-+slang/diagnostics/Diagnostics.h
-+source/slang/diagnostics/slang/diagnostics/Diagnostics.h
-+
-+source/slang/diagnostics/LexerDiags.h
-+slang/diagnostics/Diagnostics.h
-+source/slang/diagnostics/slang/diagnostics/Diagnostics.h
-+
-+source/slang/diagnostics/LookupDiags.h
-+slang/diagnostics/Diagnostics.h
-+source/slang/diagnostics/slang/diagnostics/Diagnostics.h
-+
-+source/slang/diagnostics/NumericDiags.h
-+slang/diagnostics/Diagnostics.h
-+source/slang/diagnostics/slang/diagnostics/Diagnostics.h
-+
-+source/slang/diagnostics/ParserDiags.h
-+slang/diagnostics/Diagnostics.h
-+source/slang/diagnostics/slang/diagnostics/Diagnostics.h
-+
-+source/slang/diagnostics/PreprocessorDiags.h
-+slang/diagnostics/Diagnostics.h
-+source/slang/diagnostics/slang/diagnostics/Diagnostics.h
-+
-+source/slang/diagnostics/StatementsDiags.h
-+slang/diagnostics/Diagnostics.h
-+source/slang/diagnostics/slang/diagnostics/Diagnostics.h
-+
-+source/slang/diagnostics/SysFuncsDiags.h
-+slang/diagnostics/Diagnostics.h
-+source/slang/diagnostics/slang/diagnostics/Diagnostics.h
-+
-+source/slang/diagnostics/TypesDiags.h
-+slang/diagnostics/Diagnostics.h
-+source/slang/diagnostics/slang/diagnostics/Diagnostics.h
-+
-+source/slang/syntax/AllSyntax.h
-+slang/parsing/Token.h
-+source/slang/syntax/slang/parsing/Token.h
-+slang/syntax/SyntaxNode.h
-+source/slang/syntax/slang/syntax/SyntaxNode.h
-+slang/util/BumpAllocator.h
-+source/slang/syntax/slang/util/BumpAllocator.h
-+
-+source/slang/syntax/SyntaxKind.h
-+
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/CMakeFiles/slang.dir/DependInfo.cmake ./generated/CMakeFiles/slang.dir/DependInfo.cmake
---- ../slang_orig/generated/CMakeFiles/slang.dir/DependInfo.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/CMakeFiles/slang.dir/DependInfo.cmake	2019-10-16 10:35:14.464364347 -0700
-@@ -0,0 +1,90 @@
-+# The set of languages for which implicit dependencies are needed:
-+set(CMAKE_DEPENDS_LANGUAGES
-+  "CXX"
-+  )
-+# The set of files for implicit dependencies of each language:
-+set(CMAKE_DEPENDS_CHECK_CXX
-+  "/soe/renau/projs/synth/slang_orig/build/source/AllSyntax.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/AllSyntax.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/build/source/DiagCode.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/DiagCode.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/build/source/Version.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/Version.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/binding/BindContext.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/binding/BindContext.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/binding/ConstantValue.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/binding/EvalContext.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/binding/Expressions.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/binding/Expressions.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/binding/Expressions_eval.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/binding/Statements.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/binding/Statements.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/binding/SystemSubroutine.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/binding/TimingControl.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/compilation/Compilation.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/compilation/ScriptSession.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/compilation/SemanticModel.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/compilation/builtins/ArrayMethods.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/compilation/builtins/EnumMethods.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/compilation/builtins/MathFuncs.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/compilation/builtins/MiscSystemFuncs.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/compilation/builtins/NonConstFuncs.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/compilation/builtins/QueryFuncs.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/compilation/builtins/StringMethods.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/compilation/builtins/SystemTasks.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/diagnostics/DiagnosticClient.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/diagnostics/DiagnosticEngine.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/diagnostics/Diagnostics.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/diagnostics/TextDiagnosticClient.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/numeric/SVInt.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/numeric/SVInt.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/numeric/Time.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/numeric/Time.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/numeric/VectorBuilder.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/parsing/Lexer.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/parsing/LexerFacts.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/parsing/Parser.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/parsing/Parser.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/parsing/ParserBase.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/parsing/Parser_expressions.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/parsing/Parser_statements.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/parsing/Preprocessor.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/parsing/Token.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/parsing/Token.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/symbols/DeclaredType.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/symbols/HierarchySymbols.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/symbols/Lookup.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/symbols/MemberSymbols.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/symbols/Scope.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/symbols/Scope.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/symbols/SemanticFacts.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/symbols/Symbol.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/symbols/TypePrinter.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/symbols/TypeSymbols.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/syntax/SyntaxFacts.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/syntax/SyntaxNode.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/syntax/SyntaxPrinter.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/syntax/SyntaxTree.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/syntax/SyntaxVisitor.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/text/SFormat.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/text/SFormat.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/text/SourceManager.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/text/SourceManager.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/util/Assert.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/util/Assert.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/util/BumpAllocator.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/util/BumpAllocator.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/util/CommandLine.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/util/CommandLine.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/util/Hash.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/util/Hash.cpp.o"
-+  "/soe/renau/projs/synth/slang_orig/source/util/String.cpp" "/soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/slang.dir/util/String.cpp.o"
-+  )
-+set(CMAKE_CXX_COMPILER_ID "GNU")
-+
-+# The include file search paths:
-+set(CMAKE_CXX_TARGET_INCLUDE_PATH
-+  "../source/../include"
-+  "source"
-+  "../source/../external"
-+  "/soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include"
-+  "/soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include"
-+  )
-+
-+# Pairs of files generated by the same build rule.
-+set(CMAKE_MULTIPLE_OUTPUT_PAIRS
-+  "/soe/renau/projs/synth/slang_orig/build/source/AllSyntax.cpp" "/soe/renau/projs/synth/slang_orig/build/source/slang/syntax/AllSyntax.h"
-+  "/soe/renau/projs/synth/slang_orig/build/source/DiagCode.cpp" "/soe/renau/projs/synth/slang_orig/build/source/slang/diagnostics/AllDiags.h"
-+  "/soe/renau/projs/synth/slang_orig/build/source/slang/syntax/SyntaxKind.h" "/soe/renau/projs/synth/slang_orig/build/source/slang/syntax/AllSyntax.h"
-+  )
-+
-+
-+# Targets to which this target links.
-+set(CMAKE_TARGET_LINKED_INFO_FILES
-+  )
-+
-+# Fortran module output directory.
-+set(CMAKE_Fortran_TARGET_MODULE_DIR "")
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/CMakeFiles/slang.dir/depend.internal ./generated/CMakeFiles/slang.dir/depend.internal
---- ../slang_orig/generated/CMakeFiles/slang.dir/depend.internal	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/CMakeFiles/slang.dir/depend.internal	2019-10-16 10:35:24.304061021 -0700
-@@ -0,0 +1,2125 @@
-+# CMAKE generated file: DO NOT EDIT!
-+# Generated by "Unix Makefiles" Generator, CMake Version 3.15
-+
-+source/CMakeFiles/slang.dir/AllSyntax.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/span.hpp
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/projs/synth/slang_orig/build/source/AllSyntax.cpp
-+ /soe/renau/projs/synth/slang_orig/build/source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/build/source/DiagCode.cpp
-+ /soe/renau/projs/synth/slang_orig/build/source/slang/diagnostics/AllDiags.h
-+ source/slang/diagnostics/ConstEvalDiags.h
-+ source/slang/diagnostics/DeclarationsDiags.h
-+ source/slang/diagnostics/ExpressionsDiags.h
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/LexerDiags.h
-+ source/slang/diagnostics/LookupDiags.h
-+ source/slang/diagnostics/NumericDiags.h
-+ source/slang/diagnostics/ParserDiags.h
-+ source/slang/diagnostics/PreprocessorDiags.h
-+ source/slang/diagnostics/StatementsDiags.h
-+ source/slang/diagnostics/SysFuncsDiags.h
-+ source/slang/diagnostics/TypesDiags.h
-+source/CMakeFiles/slang.dir/Version.cpp.o
-+ ../include/slang/util/Version.h
-+ /soe/renau/projs/synth/slang_orig/build/source/Version.cpp
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/BindContext.h
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Expressions.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/compilation/Compilation.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SafeIndexedVector.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/binding/BindContext.cpp
-+ source/slang/diagnostics/DeclarationsDiags.h
-+ source/slang/diagnostics/ExpressionsDiags.h
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/NumericDiags.h
-+ source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/text/FormatBuffer.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/core.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format-inl.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/adl_serializer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/from_json.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_chars.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_json.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/exceptions.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/binary_reader.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/input_adapters.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/json_sax.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/lexer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/parser.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/position_t.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/internal_iterator.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iter_impl.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iteration_proxy.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iterator_traits.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/json_reverse_iterator.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/primitive_iterator.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_pointer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_ref.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_scope.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_unscope.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/cpp_future.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/detected.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/is_sax.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/type_traits.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/void_t.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/binary_writer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/output_adapters.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/serializer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/value_t.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley_undef.hpp
-+ /soe/renau/projs/synth/slang_orig/source/binding/ConstantValue.cpp
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/BindContext.h
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/FormatBuffer.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/core.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format-inl.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/binding/EvalContext.cpp
-+ source/slang/diagnostics/ConstEvalDiags.h
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/BindContext.h
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Expressions.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/binding/SystemSubroutine.h
-+ ../include/slang/compilation/Compilation.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/ASTVisitor.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/HierarchySymbols.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SafeIndexedVector.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StackContainer.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/TypeTraits.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/adl_serializer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/from_json.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_chars.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_json.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/exceptions.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/binary_reader.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/input_adapters.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/json_sax.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/lexer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/parser.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/position_t.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/internal_iterator.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iter_impl.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iteration_proxy.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iterator_traits.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/json_reverse_iterator.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/primitive_iterator.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_pointer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_ref.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_scope.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_unscope.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/cpp_future.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/detected.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/is_sax.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/type_traits.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/void_t.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/binary_writer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/output_adapters.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/serializer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/value_t.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley_undef.hpp
-+ /soe/renau/projs/synth/slang_orig/source/binding/Expressions.cpp
-+ source/slang/diagnostics/ExpressionsDiags.h
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/LookupDiags.h
-+ source/slang/diagnostics/NumericDiags.h
-+ source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/BindContext.h
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Expressions.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/binding/SystemSubroutine.h
-+ ../include/slang/compilation/Compilation.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/ASTVisitor.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/HierarchySymbols.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SafeIndexedVector.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/TypeTraits.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/binding/Expressions_eval.cpp
-+ source/slang/diagnostics/ConstEvalDiags.h
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/BindContext.h
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Expressions.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/binding/TimingControl.h
-+ ../include/slang/compilation/Compilation.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/ASTVisitor.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/HierarchySymbols.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SafeIndexedVector.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/TypeTraits.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/binding/Statements.cpp
-+ source/slang/diagnostics/ConstEvalDiags.h
-+ source/slang/diagnostics/ExpressionsDiags.h
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/NumericDiags.h
-+ source/slang/diagnostics/StatementsDiags.h
-+ source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/BindContext.h
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Expressions.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/binding/SystemSubroutine.h
-+ ../include/slang/compilation/Compilation.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SFormat.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SafeIndexedVector.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/binding/SystemSubroutine.cpp
-+ source/slang/diagnostics/ExpressionsDiags.h
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/SysFuncsDiags.h
-+ source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/BindContext.h
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Expressions.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/binding/TimingControl.h
-+ ../include/slang/compilation/Compilation.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SafeIndexedVector.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/binding/TimingControl.cpp
-+ source/slang/diagnostics/ExpressionsDiags.h
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/StatementsDiags.h
-+ source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/BindContext.h
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Expressions.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/binding/SystemSubroutine.h
-+ ../include/slang/compilation/Compilation.h
-+ ../include/slang/diagnostics/DiagnosticEngine.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/numeric/VectorBuilder.h
-+ ../include/slang/parsing/Lexer.h
-+ ../include/slang/parsing/Parser.h
-+ ../include/slang/parsing/ParserBase.h
-+ ../include/slang/parsing/Preprocessor.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/ASTVisitor.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/HierarchySymbols.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/syntax/SyntaxTree.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/text/SourceManager.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/Bag.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SafeIndexedVector.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StackContainer.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/TypeTraits.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/adl_serializer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/from_json.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_chars.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_json.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/exceptions.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/binary_reader.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/input_adapters.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/json_sax.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/lexer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/parser.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/position_t.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/internal_iterator.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iter_impl.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iteration_proxy.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iterator_traits.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/json_reverse_iterator.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/primitive_iterator.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_pointer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_ref.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_scope.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_unscope.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/cpp_future.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/detected.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/is_sax.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/type_traits.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/void_t.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/binary_writer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/output_adapters.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/serializer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/value_t.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley_undef.hpp
-+ /soe/renau/projs/synth/slang_orig/source/compilation/Compilation.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/BindContext.h
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Expressions.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/compilation/Compilation.h
-+ ../include/slang/compilation/ScriptSession.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/numeric/VectorBuilder.h
-+ ../include/slang/parsing/Parser.h
-+ ../include/slang/parsing/ParserBase.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/HierarchySymbols.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/syntax/SyntaxTree.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/Bag.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SafeIndexedVector.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/compilation/ScriptSession.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/compilation/Compilation.h
-+ ../include/slang/compilation/SemanticModel.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/HierarchySymbols.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SafeIndexedVector.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/compilation/SemanticModel.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/BindContext.h
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Expressions.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/binding/SystemSubroutine.h
-+ ../include/slang/compilation/Compilation.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SafeIndexedVector.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/compilation/builtins/ArrayMethods.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/SysFuncsDiags.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/BindContext.h
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Expressions.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/binding/SystemSubroutine.h
-+ ../include/slang/compilation/Compilation.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SafeIndexedVector.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/compilation/builtins/EnumMethods.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/SysFuncsDiags.h
-+ source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/BindContext.h
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Expressions.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/binding/SystemSubroutine.h
-+ ../include/slang/compilation/Compilation.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SafeIndexedVector.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/compilation/builtins/MathFuncs.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/SysFuncsDiags.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/BindContext.h
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Expressions.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/binding/SystemSubroutine.h
-+ ../include/slang/compilation/Compilation.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SFormat.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SafeIndexedVector.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/compilation/builtins/MiscSystemFuncs.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/SysFuncsDiags.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/BindContext.h
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Expressions.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/binding/SystemSubroutine.h
-+ ../include/slang/compilation/Compilation.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SafeIndexedVector.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/compilation/builtins/NonConstFuncs.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/BindContext.h
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Expressions.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/binding/SystemSubroutine.h
-+ ../include/slang/compilation/Compilation.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SafeIndexedVector.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/compilation/builtins/QueryFuncs.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/SysFuncsDiags.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/BindContext.h
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Expressions.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/binding/SystemSubroutine.h
-+ ../include/slang/compilation/Compilation.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SafeIndexedVector.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/compilation/builtins/StringMethods.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/SysFuncsDiags.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/BindContext.h
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Expressions.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/binding/SystemSubroutine.h
-+ ../include/slang/compilation/Compilation.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SafeIndexedVector.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/compilation/builtins/SystemTasks.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/SysFuncsDiags.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/diagnostics/DiagnosticClient.h
-+ ../include/slang/diagnostics/DiagnosticEngine.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/text/FormatBuffer.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/text/SourceManager.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/core.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format-inl.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/diagnostics/DiagnosticClient.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/diagnostics/DiagnosticClient.h
-+ ../include/slang/diagnostics/DiagnosticEngine.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/diagnostics/TextDiagnosticClient.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypePrinter.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/FormatBuffer.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/text/SourceManager.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StackContainer.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/core.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format-inl.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/ostream.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/diagnostics/DiagnosticEngine.cpp
-+ /soe/renau/projs/synth/slang_orig/source/diagnostics/FmtlibWrapper.h
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/HierarchySymbols.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/text/SourceManager.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/diagnostics/Diagnostics.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/diagnostics/DiagnosticClient.h
-+ ../include/slang/diagnostics/DiagnosticEngine.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/diagnostics/TextDiagnosticClient.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/FormatBuffer.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/text/SourceManager.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/core.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format-inl.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/diagnostics/TextDiagnosticClient.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/numeric/SVInt.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/span.hpp
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/core.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format-inl.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format.h
-+ /soe/renau/projs/synth/slang_orig/source/numeric/SVInt.cpp
-+ /soe/renau/projs/synth/slang_orig/source/numeric/SVIntHelpers.h
-+ /soe/renau/projs/synth/slang_orig/source/text/CharInfo.h
-+source/CMakeFiles/slang.dir/numeric/Time.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/span.hpp
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/core.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format-inl.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format.h
-+ /soe/renau/projs/synth/slang_orig/source/numeric/Time.cpp
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/numeric/VectorBuilder.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/numeric/VectorBuilder.cpp
-+ /soe/renau/projs/synth/slang_orig/source/text/CharInfo.h
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/LexerDiags.h
-+ source/slang/diagnostics/NumericDiags.h
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Lexer.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/text/SourceManager.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/String.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/parsing/Lexer.cpp
-+ /soe/renau/projs/synth/slang_orig/source/text/CharInfo.h
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/LexerDiags.h
-+ source/slang/diagnostics/NumericDiags.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/span.hpp
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/projs/synth/slang_orig/source/parsing/LexerFacts.cpp
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/numeric/VectorBuilder.h
-+ ../include/slang/parsing/Lexer.h
-+ ../include/slang/parsing/Parser.h
-+ ../include/slang/parsing/ParserBase.h
-+ ../include/slang/parsing/Preprocessor.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/Bag.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StackContainer.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/parsing/Parser.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/ParserDiags.h
-+ source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Lexer.h
-+ ../include/slang/parsing/ParserBase.h
-+ ../include/slang/parsing/Preprocessor.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/Bag.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StackContainer.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/parsing/ParserBase.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/ParserDiags.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/numeric/VectorBuilder.h
-+ ../include/slang/parsing/Lexer.h
-+ ../include/slang/parsing/Parser.h
-+ ../include/slang/parsing/ParserBase.h
-+ ../include/slang/parsing/Preprocessor.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/Bag.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StackContainer.h
-+ ../include/slang/util/String.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/parsing/Parser_expressions.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/NumericDiags.h
-+ source/slang/diagnostics/ParserDiags.h
-+ source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/numeric/VectorBuilder.h
-+ ../include/slang/parsing/Parser.h
-+ ../include/slang/parsing/ParserBase.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/Bag.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/parsing/Parser_statements.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/ParserDiags.h
-+ source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Lexer.h
-+ ../include/slang/parsing/Preprocessor.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/text/SourceManager.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/Bag.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StackContainer.h
-+ ../include/slang/util/String.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ ../include/slang/util/Version.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/parsing/Preprocessor.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/PreprocessorDiags.h
-+ source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/syntax/SyntaxPrinter.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/parsing/Token.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/ParserDiags.h
-+ source/slang/diagnostics/PreprocessorDiags.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/BindContext.h
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Expressions.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/compilation/Compilation.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SafeIndexedVector.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/symbols/DeclaredType.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/BindContext.h
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Expressions.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/compilation/Compilation.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/HierarchySymbols.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SafeIndexedVector.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StackContainer.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/adl_serializer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/from_json.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_chars.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_json.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/exceptions.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/binary_reader.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/input_adapters.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/json_sax.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/lexer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/parser.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/position_t.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/internal_iterator.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iter_impl.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iteration_proxy.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iterator_traits.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/json_reverse_iterator.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/primitive_iterator.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_pointer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_ref.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_scope.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_unscope.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/cpp_future.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/detected.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/is_sax.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/type_traits.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/void_t.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/binary_writer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/output_adapters.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/serializer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/value_t.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley_undef.hpp
-+ /soe/renau/projs/synth/slang_orig/source/symbols/HierarchySymbols.cpp
-+ source/slang/diagnostics/DeclarationsDiags.h
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/LookupDiags.h
-+ source/slang/diagnostics/PreprocessorDiags.h
-+ source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/symbols/Lookup.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/BindContext.h
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Expressions.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/compilation/Compilation.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/HierarchySymbols.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SafeIndexedVector.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StackContainer.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/adl_serializer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/from_json.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_chars.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_json.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/exceptions.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/binary_reader.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/input_adapters.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/json_sax.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/lexer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/parser.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/position_t.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/internal_iterator.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iter_impl.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iteration_proxy.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iterator_traits.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/json_reverse_iterator.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/primitive_iterator.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_pointer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_ref.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_scope.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_unscope.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/cpp_future.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/detected.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/is_sax.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/type_traits.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/void_t.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/binary_writer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/output_adapters.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/serializer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/value_t.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley_undef.hpp
-+ /soe/renau/projs/synth/slang_orig/source/symbols/MemberSymbols.cpp
-+ /soe/renau/projs/synth/slang_orig/source/symbols/PortBuilder.h
-+ source/slang/diagnostics/DeclarationsDiags.h
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/LookupDiags.h
-+ source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/BindContext.h
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Expressions.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/compilation/Compilation.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/HierarchySymbols.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SafeIndexedVector.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StackContainer.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/symbols/Scope.cpp
-+ source/slang/diagnostics/ConstEvalDiags.h
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/LookupDiags.h
-+ source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/span.hpp
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/projs/synth/slang_orig/source/symbols/SemanticFacts.cpp
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/BindContext.h
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Expressions.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/compilation/Compilation.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/ASTVisitor.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/HierarchySymbols.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/text/SourceManager.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SafeIndexedVector.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StackContainer.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/TypeTraits.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/adl_serializer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/from_json.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_chars.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_json.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/exceptions.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/binary_reader.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/input_adapters.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/json_sax.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/lexer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/parser.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/position_t.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/internal_iterator.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iter_impl.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iteration_proxy.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iterator_traits.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/json_reverse_iterator.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/primitive_iterator.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_pointer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_ref.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_scope.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_unscope.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/cpp_future.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/detected.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/is_sax.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/type_traits.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/void_t.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/binary_writer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/output_adapters.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/serializer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/value_t.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley_undef.hpp
-+ /soe/renau/projs/synth/slang_orig/source/symbols/Symbol.cpp
-+ source/slang/diagnostics/DeclarationsDiags.h
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/BindContext.h
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Expressions.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/ASTVisitor.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/HierarchySymbols.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypePrinter.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/FormatBuffer.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/TypeTraits.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/core.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format-inl.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/symbols/TypePrinter.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/BindContext.h
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Expressions.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/compilation/Compilation.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/ASTVisitor.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/HierarchySymbols.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypePrinter.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/FormatBuffer.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SafeIndexedVector.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StackContainer.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/TypeTraits.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/core.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format-inl.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/adl_serializer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/from_json.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_chars.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_json.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/exceptions.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/binary_reader.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/input_adapters.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/json_sax.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/lexer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/parser.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/position_t.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/internal_iterator.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iter_impl.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iteration_proxy.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iterator_traits.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/json_reverse_iterator.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/primitive_iterator.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_pointer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_ref.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_scope.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_unscope.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/cpp_future.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/detected.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/is_sax.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/type_traits.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/void_t.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/binary_writer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/output_adapters.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/serializer.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/value_t.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley.hpp
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley_undef.hpp
-+ /soe/renau/projs/synth/slang_orig/source/symbols/TypeSymbols.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/LookupDiags.h
-+ source/slang/diagnostics/TypesDiags.h
-+ source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/span.hpp
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/projs/synth/slang_orig/source/syntax/SyntaxFacts.cpp
-+ source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/span.hpp
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/syntax/SyntaxPrinter.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/projs/synth/slang_orig/source/syntax/SyntaxNode.cpp
-+ source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/numeric/VectorBuilder.h
-+ ../include/slang/parsing/Parser.h
-+ ../include/slang/parsing/ParserBase.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/syntax/SyntaxPrinter.h
-+ ../include/slang/syntax/SyntaxTree.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/text/SourceManager.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/Bag.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/syntax/SyntaxPrinter.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/numeric/VectorBuilder.h
-+ ../include/slang/parsing/Lexer.h
-+ ../include/slang/parsing/Parser.h
-+ ../include/slang/parsing/ParserBase.h
-+ ../include/slang/parsing/Preprocessor.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/syntax/SyntaxTree.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/text/SourceManager.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/Bag.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StackContainer.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/syntax/SyntaxTree.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/numeric/VectorBuilder.h
-+ ../include/slang/parsing/Parser.h
-+ ../include/slang/parsing/ParserBase.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/syntax/SyntaxTree.h
-+ ../include/slang/syntax/SyntaxVisitor.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/Bag.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/TypeTraits.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/syntax/SyntaxVisitor.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/syntax/AllSyntax.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/ieee1800/vpi_compatibility.h
-+ ../external/ieee1800/vpi_user.h
-+ ../external/span.hpp
-+ ../include/slang/binding/ConstantValue.h
-+ ../include/slang/binding/EvalContext.h
-+ ../include/slang/binding/Statements.h
-+ ../include/slang/diagnostics/Diagnostics.h
-+ ../include/slang/numeric/MathUtils.h
-+ ../include/slang/numeric/SVInt.h
-+ ../include/slang/numeric/Time.h
-+ ../include/slang/parsing/Token.h
-+ ../include/slang/symbols/DeclaredType.h
-+ ../include/slang/symbols/Lookup.h
-+ ../include/slang/symbols/MemberSymbols.h
-+ ../include/slang/symbols/Scope.h
-+ ../include/slang/symbols/SemanticFacts.h
-+ ../include/slang/symbols/Symbol.h
-+ ../include/slang/symbols/TypeSymbols.h
-+ ../include/slang/syntax/SyntaxNode.h
-+ ../include/slang/text/SFormat.h
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/Enum.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/Iterator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/ScopeGuard.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/StringTable.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+ /soe/renau/projs/synth/slang_orig/source/text/CharInfo.h
-+ /soe/renau/projs/synth/slang_orig/source/text/SFormat.cpp
-+ source/slang/diagnostics/GeneralDiags.h
-+ source/slang/diagnostics/SysFuncsDiags.h
-+ source/slang/syntax/SyntaxKind.h
-+source/CMakeFiles/slang.dir/text/SourceManager.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/flat_hash_map.hpp
-+ ../external/span.hpp
-+ ../include/slang/text/SourceLocation.h
-+ ../include/slang/text/SourceManager.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/StackContainer.h
-+ ../include/slang/util/String.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/projs/synth/slang_orig/source/text/SourceManager.cpp
-+source/CMakeFiles/slang.dir/util/Assert.cpp.o
-+ ../include/slang/util/Assert.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/core.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format-inl.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format.h
-+ /soe/renau/projs/synth/slang_orig/source/util/Assert.cpp
-+source/CMakeFiles/slang.dir/util/BumpAllocator.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/span.hpp
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/projs/synth/slang_orig/source/util/BumpAllocator.cpp
-+source/CMakeFiles/slang.dir/util/CommandLine.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/span.hpp
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/CommandLine.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/String.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/core.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format-inl.h
-+ /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format.h
-+ /soe/renau/projs/synth/slang_orig/source/text/CharInfo.h
-+ /soe/renau/projs/synth/slang_orig/source/util/CommandLine.cpp
-+source/CMakeFiles/slang.dir/util/Hash.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/span.hpp
-+ ../external/xxhash/xxhash.c
-+ ../external/xxhash/xxhash.h
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/Hash.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/projs/synth/slang_orig/source/util/Hash.cpp
-+source/CMakeFiles/slang.dir/util/String.cpp.o
-+ ../external/bitmask.hpp
-+ ../external/span.hpp
-+ ../include/slang/util/Assert.h
-+ ../include/slang/util/BumpAllocator.h
-+ ../include/slang/util/NotNull.h
-+ ../include/slang/util/SmallVector.h
-+ ../include/slang/util/String.h
-+ ../include/slang/util/Util.h
-+ /soe/renau/projs/synth/slang_orig/source/util/String.cpp
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/CMakeFiles/slang.dir/depend.make ./generated/CMakeFiles/slang.dir/depend.make
---- ../slang_orig/generated/CMakeFiles/slang.dir/depend.make	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/CMakeFiles/slang.dir/depend.make	2019-10-16 10:35:24.304061021 -0700
-@@ -0,0 +1,2125 @@
-+# CMAKE generated file: DO NOT EDIT!
-+# Generated by "Unix Makefiles" Generator, CMake Version 3.15
-+
-+source/CMakeFiles/slang.dir/AllSyntax.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/AllSyntax.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/AllSyntax.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/AllSyntax.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/AllSyntax.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/AllSyntax.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/AllSyntax.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/AllSyntax.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/AllSyntax.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/AllSyntax.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/AllSyntax.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/AllSyntax.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/AllSyntax.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/AllSyntax.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/AllSyntax.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/AllSyntax.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/AllSyntax.cpp.o: source/AllSyntax.cpp
-+source/CMakeFiles/slang.dir/AllSyntax.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/AllSyntax.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: source/DiagCode.cpp
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: source/slang/diagnostics/AllDiags.h
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: source/slang/diagnostics/ConstEvalDiags.h
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: source/slang/diagnostics/DeclarationsDiags.h
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: source/slang/diagnostics/ExpressionsDiags.h
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: source/slang/diagnostics/LexerDiags.h
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: source/slang/diagnostics/LookupDiags.h
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: source/slang/diagnostics/NumericDiags.h
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: source/slang/diagnostics/ParserDiags.h
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: source/slang/diagnostics/PreprocessorDiags.h
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: source/slang/diagnostics/StatementsDiags.h
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: source/slang/diagnostics/SysFuncsDiags.h
-+source/CMakeFiles/slang.dir/DiagCode.cpp.o: source/slang/diagnostics/TypesDiags.h
-+
-+source/CMakeFiles/slang.dir/Version.cpp.o: ../include/slang/util/Version.h
-+source/CMakeFiles/slang.dir/Version.cpp.o: source/Version.cpp
-+
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/binding/BindContext.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/binding/Expressions.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/compilation/Compilation.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/util/SafeIndexedVector.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: ../source/binding/BindContext.cpp
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: source/slang/diagnostics/DeclarationsDiags.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: source/slang/diagnostics/ExpressionsDiags.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: source/slang/diagnostics/NumericDiags.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/binding/BindContext.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: ../include/slang/text/FormatBuffer.h
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/core.h
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format-inl.h
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format.h
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/adl_serializer.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/from_json.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_chars.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_json.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/exceptions.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/binary_reader.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/input_adapters.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/json_sax.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/lexer.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/parser.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/position_t.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/internal_iterator.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iter_impl.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iteration_proxy.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iterator_traits.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/json_reverse_iterator.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/primitive_iterator.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_pointer.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_ref.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_scope.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_unscope.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/cpp_future.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/detected.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/is_sax.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/type_traits.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/void_t.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/binary_writer.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/output_adapters.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/serializer.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/value_t.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley_undef.hpp
-+source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o: ../source/binding/ConstantValue.cpp
-+
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/binding/BindContext.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/text/FormatBuffer.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/core.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format-inl.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: ../source/binding/EvalContext.cpp
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: source/slang/diagnostics/ConstEvalDiags.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/binding/BindContext.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/binding/Expressions.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/binding/SystemSubroutine.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/compilation/Compilation.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/symbols/ASTVisitor.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/symbols/HierarchySymbols.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/util/SafeIndexedVector.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/util/StackContainer.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/util/TypeTraits.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/adl_serializer.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/from_json.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_chars.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_json.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/exceptions.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/binary_reader.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/input_adapters.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/json_sax.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/lexer.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/parser.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/position_t.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/internal_iterator.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iter_impl.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iteration_proxy.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iterator_traits.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/json_reverse_iterator.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/primitive_iterator.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_pointer.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_ref.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_scope.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_unscope.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/cpp_future.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/detected.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/is_sax.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/type_traits.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/void_t.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/binary_writer.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/output_adapters.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/serializer.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/value_t.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley_undef.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: ../source/binding/Expressions.cpp
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: source/slang/diagnostics/ExpressionsDiags.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: source/slang/diagnostics/LookupDiags.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: source/slang/diagnostics/NumericDiags.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/binding/Expressions.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/binding/BindContext.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/binding/Expressions.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/binding/SystemSubroutine.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/compilation/Compilation.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/symbols/ASTVisitor.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/symbols/HierarchySymbols.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/util/SafeIndexedVector.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/util/TypeTraits.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: ../source/binding/Expressions_eval.cpp
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: source/slang/diagnostics/ConstEvalDiags.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/binding/BindContext.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/binding/Expressions.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/binding/TimingControl.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/compilation/Compilation.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/symbols/ASTVisitor.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/symbols/HierarchySymbols.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/util/SafeIndexedVector.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/util/TypeTraits.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: ../source/binding/Statements.cpp
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: source/slang/diagnostics/ConstEvalDiags.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: source/slang/diagnostics/ExpressionsDiags.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: source/slang/diagnostics/NumericDiags.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: source/slang/diagnostics/StatementsDiags.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/binding/Statements.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/binding/BindContext.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/binding/Expressions.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/binding/SystemSubroutine.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/compilation/Compilation.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/text/SFormat.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/util/SafeIndexedVector.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: ../source/binding/SystemSubroutine.cpp
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: source/slang/diagnostics/ExpressionsDiags.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: source/slang/diagnostics/SysFuncsDiags.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/binding/BindContext.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/binding/Expressions.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/binding/TimingControl.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/compilation/Compilation.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/util/SafeIndexedVector.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: ../source/binding/TimingControl.cpp
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: source/slang/diagnostics/ExpressionsDiags.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: source/slang/diagnostics/StatementsDiags.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/binding/BindContext.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/binding/Expressions.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/binding/SystemSubroutine.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/compilation/Compilation.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/diagnostics/DiagnosticEngine.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/numeric/VectorBuilder.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/parsing/Lexer.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/parsing/Parser.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/parsing/ParserBase.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/parsing/Preprocessor.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/symbols/ASTVisitor.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/symbols/HierarchySymbols.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/syntax/SyntaxTree.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/text/SourceManager.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/util/Bag.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/util/SafeIndexedVector.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/util/StackContainer.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/util/TypeTraits.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/adl_serializer.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/from_json.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_chars.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_json.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/exceptions.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/binary_reader.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/input_adapters.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/json_sax.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/lexer.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/parser.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/position_t.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/internal_iterator.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iter_impl.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iteration_proxy.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iterator_traits.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/json_reverse_iterator.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/primitive_iterator.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_pointer.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_ref.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_scope.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_unscope.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/cpp_future.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/detected.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/is_sax.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/type_traits.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/void_t.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/binary_writer.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/output_adapters.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/serializer.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/value_t.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley_undef.hpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: ../source/compilation/Compilation.cpp
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/binding/BindContext.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/binding/Expressions.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/compilation/Compilation.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/compilation/ScriptSession.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/numeric/VectorBuilder.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/parsing/Parser.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/parsing/ParserBase.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/symbols/HierarchySymbols.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/syntax/SyntaxTree.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/util/Bag.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/util/SafeIndexedVector.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: ../source/compilation/ScriptSession.cpp
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/compilation/Compilation.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/compilation/SemanticModel.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/symbols/HierarchySymbols.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/util/SafeIndexedVector.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: ../source/compilation/SemanticModel.cpp
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/binding/BindContext.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/binding/Expressions.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/binding/SystemSubroutine.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/compilation/Compilation.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/util/SafeIndexedVector.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: ../source/compilation/builtins/ArrayMethods.cpp
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: source/slang/diagnostics/SysFuncsDiags.h
-+source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/binding/BindContext.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/binding/Expressions.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/binding/SystemSubroutine.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/compilation/Compilation.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/util/SafeIndexedVector.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: ../source/compilation/builtins/EnumMethods.cpp
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: source/slang/diagnostics/SysFuncsDiags.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/binding/BindContext.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/binding/Expressions.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/binding/SystemSubroutine.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/compilation/Compilation.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/util/SafeIndexedVector.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: ../source/compilation/builtins/MathFuncs.cpp
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: source/slang/diagnostics/SysFuncsDiags.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/binding/BindContext.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/binding/Expressions.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/binding/SystemSubroutine.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/compilation/Compilation.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/text/SFormat.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/util/SafeIndexedVector.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: ../source/compilation/builtins/MiscSystemFuncs.cpp
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: source/slang/diagnostics/SysFuncsDiags.h
-+source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/binding/BindContext.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/binding/Expressions.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/binding/SystemSubroutine.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/compilation/Compilation.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/util/SafeIndexedVector.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: ../source/compilation/builtins/NonConstFuncs.cpp
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/binding/BindContext.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/binding/Expressions.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/binding/SystemSubroutine.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/compilation/Compilation.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/util/SafeIndexedVector.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: ../source/compilation/builtins/QueryFuncs.cpp
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: source/slang/diagnostics/SysFuncsDiags.h
-+source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/binding/BindContext.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/binding/Expressions.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/binding/SystemSubroutine.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/compilation/Compilation.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/util/SafeIndexedVector.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: ../source/compilation/builtins/StringMethods.cpp
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: source/slang/diagnostics/SysFuncsDiags.h
-+source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/binding/BindContext.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/binding/Expressions.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/binding/SystemSubroutine.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/compilation/Compilation.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/util/SafeIndexedVector.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: ../source/compilation/builtins/SystemTasks.cpp
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: source/slang/diagnostics/SysFuncsDiags.h
-+source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: ../include/slang/diagnostics/DiagnosticClient.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: ../include/slang/diagnostics/DiagnosticEngine.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: ../include/slang/text/FormatBuffer.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: ../include/slang/text/SourceManager.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/core.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format-inl.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: ../source/diagnostics/DiagnosticClient.cpp
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/diagnostics/DiagnosticClient.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/diagnostics/DiagnosticEngine.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/diagnostics/TextDiagnosticClient.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/symbols/TypePrinter.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/text/FormatBuffer.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/text/SourceManager.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/util/StackContainer.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/core.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format-inl.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/ostream.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../source/diagnostics/DiagnosticEngine.cpp
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: ../source/diagnostics/FmtlibWrapper.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/symbols/HierarchySymbols.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/text/SourceManager.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: ../source/diagnostics/Diagnostics.cpp
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../include/slang/diagnostics/DiagnosticClient.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../include/slang/diagnostics/DiagnosticEngine.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../include/slang/diagnostics/TextDiagnosticClient.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../include/slang/text/FormatBuffer.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../include/slang/text/SourceManager.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/core.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format-inl.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: ../source/diagnostics/TextDiagnosticClient.cpp
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/numeric/SVInt.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/numeric/SVInt.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/numeric/SVInt.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/numeric/SVInt.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/numeric/SVInt.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/numeric/SVInt.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/numeric/SVInt.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/numeric/SVInt.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/numeric/SVInt.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/numeric/SVInt.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/numeric/SVInt.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/core.h
-+source/CMakeFiles/slang.dir/numeric/SVInt.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format-inl.h
-+source/CMakeFiles/slang.dir/numeric/SVInt.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format.h
-+source/CMakeFiles/slang.dir/numeric/SVInt.cpp.o: ../source/numeric/SVInt.cpp
-+source/CMakeFiles/slang.dir/numeric/SVInt.cpp.o: ../source/numeric/SVIntHelpers.h
-+source/CMakeFiles/slang.dir/numeric/SVInt.cpp.o: ../source/text/CharInfo.h
-+
-+source/CMakeFiles/slang.dir/numeric/Time.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/numeric/Time.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/numeric/Time.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/numeric/Time.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/numeric/Time.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/numeric/Time.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/numeric/Time.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/numeric/Time.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/core.h
-+source/CMakeFiles/slang.dir/numeric/Time.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format-inl.h
-+source/CMakeFiles/slang.dir/numeric/Time.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format.h
-+source/CMakeFiles/slang.dir/numeric/Time.cpp.o: ../source/numeric/Time.cpp
-+
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o: ../include/slang/numeric/VectorBuilder.h
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o: ../source/numeric/VectorBuilder.cpp
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o: ../source/text/CharInfo.h
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o: source/slang/diagnostics/LexerDiags.h
-+source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o: source/slang/diagnostics/NumericDiags.h
-+
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: ../include/slang/parsing/Lexer.h
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: ../include/slang/text/SourceManager.h
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: ../include/slang/util/String.h
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: ../source/parsing/Lexer.cpp
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: ../source/text/CharInfo.h
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: source/slang/diagnostics/LexerDiags.h
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: source/slang/diagnostics/NumericDiags.h
-+source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o: ../source/parsing/LexerFacts.cpp
-+source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../include/slang/numeric/VectorBuilder.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../include/slang/parsing/Lexer.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../include/slang/parsing/Parser.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../include/slang/parsing/ParserBase.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../include/slang/parsing/Preprocessor.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../include/slang/util/Bag.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../include/slang/util/StackContainer.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: ../source/parsing/Parser.cpp
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: source/slang/diagnostics/ParserDiags.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/parsing/Parser.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../include/slang/parsing/Lexer.h
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../include/slang/parsing/ParserBase.h
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../include/slang/parsing/Preprocessor.h
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../include/slang/util/Bag.h
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../include/slang/util/StackContainer.h
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: ../source/parsing/ParserBase.cpp
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: source/slang/diagnostics/ParserDiags.h
-+source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../include/slang/numeric/VectorBuilder.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../include/slang/parsing/Lexer.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../include/slang/parsing/Parser.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../include/slang/parsing/ParserBase.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../include/slang/parsing/Preprocessor.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../include/slang/util/Bag.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../include/slang/util/StackContainer.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../include/slang/util/String.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: ../source/parsing/Parser_expressions.cpp
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: source/slang/diagnostics/NumericDiags.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: source/slang/diagnostics/ParserDiags.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: ../include/slang/numeric/VectorBuilder.h
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: ../include/slang/parsing/Parser.h
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: ../include/slang/parsing/ParserBase.h
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: ../include/slang/util/Bag.h
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: ../source/parsing/Parser_statements.cpp
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: source/slang/diagnostics/ParserDiags.h
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../include/slang/parsing/Lexer.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../include/slang/parsing/Preprocessor.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../include/slang/text/SourceManager.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../include/slang/util/Bag.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../include/slang/util/StackContainer.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../include/slang/util/String.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../include/slang/util/Version.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: ../source/parsing/Preprocessor.cpp
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: source/slang/diagnostics/PreprocessorDiags.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: ../include/slang/syntax/SyntaxPrinter.h
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: ../source/parsing/Token.cpp
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: source/slang/diagnostics/ParserDiags.h
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: source/slang/diagnostics/PreprocessorDiags.h
-+source/CMakeFiles/slang.dir/parsing/Token.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/binding/BindContext.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/binding/Expressions.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/compilation/Compilation.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/util/SafeIndexedVector.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: ../source/symbols/DeclaredType.cpp
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/binding/BindContext.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/binding/Expressions.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/compilation/Compilation.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/symbols/HierarchySymbols.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/util/SafeIndexedVector.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/util/StackContainer.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/adl_serializer.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/from_json.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_chars.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_json.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/exceptions.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/binary_reader.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/input_adapters.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/json_sax.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/lexer.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/parser.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/position_t.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/internal_iterator.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iter_impl.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iteration_proxy.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iterator_traits.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/json_reverse_iterator.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/primitive_iterator.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_pointer.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_ref.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_scope.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_unscope.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/cpp_future.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/detected.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/is_sax.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/type_traits.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/void_t.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/binary_writer.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/output_adapters.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/serializer.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/value_t.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley_undef.hpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: ../source/symbols/HierarchySymbols.cpp
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: source/slang/diagnostics/DeclarationsDiags.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: source/slang/diagnostics/LookupDiags.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: source/slang/diagnostics/PreprocessorDiags.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: ../source/symbols/Lookup.cpp
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/binding/BindContext.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/binding/Expressions.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/compilation/Compilation.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/symbols/HierarchySymbols.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/util/SafeIndexedVector.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/util/StackContainer.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/adl_serializer.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/from_json.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_chars.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_json.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/exceptions.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/binary_reader.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/input_adapters.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/json_sax.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/lexer.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/parser.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/position_t.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/internal_iterator.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iter_impl.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iteration_proxy.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iterator_traits.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/json_reverse_iterator.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/primitive_iterator.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_pointer.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_ref.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_scope.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_unscope.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/cpp_future.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/detected.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/is_sax.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/type_traits.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/void_t.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/binary_writer.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/output_adapters.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/serializer.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/value_t.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley_undef.hpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../source/symbols/MemberSymbols.cpp
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: ../source/symbols/PortBuilder.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: source/slang/diagnostics/DeclarationsDiags.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: source/slang/diagnostics/LookupDiags.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/binding/BindContext.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/binding/Expressions.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/compilation/Compilation.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/symbols/HierarchySymbols.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/util/SafeIndexedVector.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/util/StackContainer.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: ../source/symbols/Scope.cpp
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: source/slang/diagnostics/ConstEvalDiags.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: source/slang/diagnostics/LookupDiags.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/symbols/Scope.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o: ../source/symbols/SemanticFacts.cpp
-+source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/binding/BindContext.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/binding/Expressions.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/compilation/Compilation.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/symbols/ASTVisitor.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/symbols/HierarchySymbols.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/text/SourceManager.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/util/SafeIndexedVector.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/util/StackContainer.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/util/TypeTraits.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/adl_serializer.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/from_json.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_chars.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_json.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/exceptions.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/binary_reader.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/input_adapters.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/json_sax.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/lexer.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/parser.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/position_t.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/internal_iterator.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iter_impl.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iteration_proxy.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iterator_traits.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/json_reverse_iterator.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/primitive_iterator.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_pointer.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_ref.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_scope.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_unscope.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/cpp_future.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/detected.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/is_sax.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/type_traits.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/void_t.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/binary_writer.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/output_adapters.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/serializer.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/value_t.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley_undef.hpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: ../source/symbols/Symbol.cpp
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: source/slang/diagnostics/DeclarationsDiags.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/binding/BindContext.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/binding/Expressions.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/symbols/ASTVisitor.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/symbols/HierarchySymbols.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/symbols/TypePrinter.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/text/FormatBuffer.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/util/TypeTraits.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/core.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format-inl.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: ../source/symbols/TypePrinter.cpp
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/binding/BindContext.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/binding/Expressions.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/compilation/Compilation.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/symbols/ASTVisitor.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/symbols/HierarchySymbols.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/symbols/TypePrinter.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/text/FormatBuffer.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/util/SafeIndexedVector.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/util/StackContainer.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/util/TypeTraits.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/core.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format-inl.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/adl_serializer.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/from_json.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_chars.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/conversions/to_json.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/exceptions.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/binary_reader.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/input_adapters.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/json_sax.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/lexer.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/parser.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/input/position_t.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/internal_iterator.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iter_impl.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iteration_proxy.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/iterator_traits.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/json_reverse_iterator.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/iterators/primitive_iterator.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_pointer.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/json_ref.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_scope.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/macro_unscope.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/cpp_future.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/detected.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/is_sax.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/type_traits.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/meta/void_t.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/binary_writer.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/output_adapters.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/output/serializer.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/detail/value_t.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/thirdparty/hedley/hedley_undef.hpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: ../source/symbols/TypeSymbols.cpp
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: source/slang/diagnostics/LookupDiags.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: source/slang/diagnostics/TypesDiags.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o: ../source/syntax/SyntaxFacts.cpp
-+source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o: ../include/slang/syntax/SyntaxPrinter.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o: ../source/syntax/SyntaxNode.cpp
-+source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../include/slang/numeric/VectorBuilder.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../include/slang/parsing/Parser.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../include/slang/parsing/ParserBase.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../include/slang/syntax/SyntaxPrinter.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../include/slang/syntax/SyntaxTree.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../include/slang/text/SourceManager.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../include/slang/util/Bag.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: ../source/syntax/SyntaxPrinter.cpp
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../include/slang/numeric/VectorBuilder.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../include/slang/parsing/Lexer.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../include/slang/parsing/Parser.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../include/slang/parsing/ParserBase.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../include/slang/parsing/Preprocessor.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../include/slang/syntax/SyntaxTree.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../include/slang/text/SourceManager.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../include/slang/util/Bag.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../include/slang/util/StackContainer.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: ../source/syntax/SyntaxTree.cpp
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../include/slang/numeric/VectorBuilder.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../include/slang/parsing/Parser.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../include/slang/parsing/ParserBase.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../include/slang/syntax/SyntaxTree.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../include/slang/syntax/SyntaxVisitor.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../include/slang/util/Bag.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../include/slang/util/TypeTraits.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: ../source/syntax/SyntaxVisitor.cpp
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: source/slang/syntax/AllSyntax.h
-+source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../external/ieee1800/vpi_compatibility.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../external/ieee1800/vpi_user.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/binding/ConstantValue.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/binding/EvalContext.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/binding/Statements.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/diagnostics/Diagnostics.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/numeric/MathUtils.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/numeric/SVInt.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/numeric/Time.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/parsing/Token.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/symbols/DeclaredType.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/symbols/Lookup.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/symbols/MemberSymbols.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/symbols/Scope.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/symbols/SemanticFacts.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/symbols/Symbol.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/symbols/TypeSymbols.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/syntax/SyntaxNode.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/text/SFormat.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/util/Enum.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/util/Iterator.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/util/ScopeGuard.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/util/StringTable.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include/nlohmann/json_fwd.hpp
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../source/text/CharInfo.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: ../source/text/SFormat.cpp
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: source/slang/diagnostics/GeneralDiags.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: source/slang/diagnostics/SysFuncsDiags.h
-+source/CMakeFiles/slang.dir/text/SFormat.cpp.o: source/slang/syntax/SyntaxKind.h
-+
-+source/CMakeFiles/slang.dir/text/SourceManager.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/text/SourceManager.cpp.o: ../external/flat_hash_map.hpp
-+source/CMakeFiles/slang.dir/text/SourceManager.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/text/SourceManager.cpp.o: ../include/slang/text/SourceLocation.h
-+source/CMakeFiles/slang.dir/text/SourceManager.cpp.o: ../include/slang/text/SourceManager.h
-+source/CMakeFiles/slang.dir/text/SourceManager.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/text/SourceManager.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/text/SourceManager.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/text/SourceManager.cpp.o: ../include/slang/util/StackContainer.h
-+source/CMakeFiles/slang.dir/text/SourceManager.cpp.o: ../include/slang/util/String.h
-+source/CMakeFiles/slang.dir/text/SourceManager.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/text/SourceManager.cpp.o: ../source/text/SourceManager.cpp
-+
-+source/CMakeFiles/slang.dir/util/Assert.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/util/Assert.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/core.h
-+source/CMakeFiles/slang.dir/util/Assert.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format-inl.h
-+source/CMakeFiles/slang.dir/util/Assert.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format.h
-+source/CMakeFiles/slang.dir/util/Assert.cpp.o: ../source/util/Assert.cpp
-+
-+source/CMakeFiles/slang.dir/util/BumpAllocator.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/util/BumpAllocator.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/util/BumpAllocator.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/util/BumpAllocator.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/util/BumpAllocator.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/util/BumpAllocator.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/util/BumpAllocator.cpp.o: ../source/util/BumpAllocator.cpp
-+
-+source/CMakeFiles/slang.dir/util/CommandLine.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/util/CommandLine.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/util/CommandLine.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/util/CommandLine.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/util/CommandLine.cpp.o: ../include/slang/util/CommandLine.h
-+source/CMakeFiles/slang.dir/util/CommandLine.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/util/CommandLine.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/util/CommandLine.cpp.o: ../include/slang/util/String.h
-+source/CMakeFiles/slang.dir/util/CommandLine.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/util/CommandLine.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/core.h
-+source/CMakeFiles/slang.dir/util/CommandLine.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format-inl.h
-+source/CMakeFiles/slang.dir/util/CommandLine.cpp.o: /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include/fmt/format.h
-+source/CMakeFiles/slang.dir/util/CommandLine.cpp.o: ../source/text/CharInfo.h
-+source/CMakeFiles/slang.dir/util/CommandLine.cpp.o: ../source/util/CommandLine.cpp
-+
-+source/CMakeFiles/slang.dir/util/Hash.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/util/Hash.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/util/Hash.cpp.o: ../external/xxhash/xxhash.c
-+source/CMakeFiles/slang.dir/util/Hash.cpp.o: ../external/xxhash/xxhash.h
-+source/CMakeFiles/slang.dir/util/Hash.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/util/Hash.cpp.o: ../include/slang/util/Hash.h
-+source/CMakeFiles/slang.dir/util/Hash.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/util/Hash.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/util/Hash.cpp.o: ../source/util/Hash.cpp
-+
-+source/CMakeFiles/slang.dir/util/String.cpp.o: ../external/bitmask.hpp
-+source/CMakeFiles/slang.dir/util/String.cpp.o: ../external/span.hpp
-+source/CMakeFiles/slang.dir/util/String.cpp.o: ../include/slang/util/Assert.h
-+source/CMakeFiles/slang.dir/util/String.cpp.o: ../include/slang/util/BumpAllocator.h
-+source/CMakeFiles/slang.dir/util/String.cpp.o: ../include/slang/util/NotNull.h
-+source/CMakeFiles/slang.dir/util/String.cpp.o: ../include/slang/util/SmallVector.h
-+source/CMakeFiles/slang.dir/util/String.cpp.o: ../include/slang/util/String.h
-+source/CMakeFiles/slang.dir/util/String.cpp.o: ../include/slang/util/Util.h
-+source/CMakeFiles/slang.dir/util/String.cpp.o: ../source/util/String.cpp
-+
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/DiagCode.cpp.o and ./generated/CMakeFiles/slang.dir/DiagCode.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o and ./generated/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o and ./generated/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o and ./generated/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o differ
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/CMakeFiles/slang.dir/flags.make ./generated/CMakeFiles/slang.dir/flags.make
---- ../slang_orig/generated/CMakeFiles/slang.dir/flags.make	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/CMakeFiles/slang.dir/flags.make	2019-10-16 10:35:14.464364347 -0700
-@@ -0,0 +1,10 @@
-+# CMAKE generated file: DO NOT EDIT!
-+# Generated by "Unix Makefiles" Generator, CMake Version 3.15
-+
-+# compile CXX with /usr/bin/c++
-+CXX_FLAGS =   -O3 -DNDEBUG   -g -Wall -Wextra -Werror -Wunused-value -Wformat-security -Wnull-dereference -Wimplicit-fallthrough=5 -Walloc-zero -Wlogical-op -Wlogical-not-parentheses -Wvla -Wnoexcept -Wduplicated-cond -Wtype-limits -Wno-maybe-uninitialized -std=c++17
-+
-+CXX_DEFINES = 
-+
-+CXX_INCLUDES = -I/soe/renau/projs/synth/slang_orig/source/../include -I/soe/renau/projs/synth/slang_orig/build/source -isystem /soe/renau/projs/synth/slang_orig/source/../external -isystem /soe/renau/.conan/data/jsonformoderncpp/3.7.0/vthiery/stable/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include -isystem /soe/renau/.conan/data/fmt/6.0.0/_/_/package/b911f48570f9bb2902d9e83b2b9ebf9d376c8c56/include 
-+
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/CMakeFiles/slang.dir/link.txt ./generated/CMakeFiles/slang.dir/link.txt
---- ../slang_orig/generated/CMakeFiles/slang.dir/link.txt	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/CMakeFiles/slang.dir/link.txt	2019-10-16 10:35:14.464364347 -0700
-@@ -0,0 +1,2 @@
-+/usr/bin/ar qc ../lib/libslang.a  CMakeFiles/slang.dir/binding/BindContext.cpp.o CMakeFiles/slang.dir/binding/ConstantValue.cpp.o CMakeFiles/slang.dir/binding/EvalContext.cpp.o CMakeFiles/slang.dir/binding/Expressions.cpp.o CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o CMakeFiles/slang.dir/binding/Statements.cpp.o CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o CMakeFiles/slang.dir/binding/TimingControl.cpp.o CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o CMakeFiles/slang.dir/compilation/Compilation.cpp.o CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o CMakeFiles/slang.dir/DiagCode.cpp.o CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o CMakeFiles/slang.dir/numeric/SVInt.cpp.o CMakeFiles/slang.dir/numeric/Time.cpp.o CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o CMakeFiles/slang.dir/parsing/Lexer.cpp.o CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o CMakeFiles/slang.dir/parsing/Parser.cpp.o CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o CMakeFiles/slang.dir/parsing/ParserBase.cpp.o CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o CMakeFiles/slang.dir/parsing/Token.cpp.o CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o CMakeFiles/slang.dir/symbols/Lookup.cpp.o CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o CMakeFiles/slang.dir/symbols/Scope.cpp.o CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o CMakeFiles/slang.dir/symbols/Symbol.cpp.o CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o CMakeFiles/slang.dir/AllSyntax.cpp.o CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o CMakeFiles/slang.dir/text/SFormat.cpp.o CMakeFiles/slang.dir/text/SourceManager.cpp.o CMakeFiles/slang.dir/Version.cpp.o CMakeFiles/slang.dir/util/Assert.cpp.o CMakeFiles/slang.dir/util/BumpAllocator.cpp.o CMakeFiles/slang.dir/util/CommandLine.cpp.o CMakeFiles/slang.dir/util/Hash.cpp.o CMakeFiles/slang.dir/util/String.cpp.o
-+/usr/bin/ranlib ../lib/libslang.a
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/numeric/SVInt.cpp.o and ./generated/CMakeFiles/slang.dir/numeric/SVInt.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/numeric/Time.cpp.o and ./generated/CMakeFiles/slang.dir/numeric/Time.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o and ./generated/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/parsing/Lexer.cpp.o and ./generated/CMakeFiles/slang.dir/parsing/Lexer.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o and ./generated/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o and ./generated/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/parsing/Parser.cpp.o and ./generated/CMakeFiles/slang.dir/parsing/Parser.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o and ./generated/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o and ./generated/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o and ./generated/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/parsing/Token.cpp.o and ./generated/CMakeFiles/slang.dir/parsing/Token.cpp.o differ
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/CMakeFiles/slang.dir/progress.make ./generated/CMakeFiles/slang.dir/progress.make
---- ../slang_orig/generated/CMakeFiles/slang.dir/progress.make	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/CMakeFiles/slang.dir/progress.make	2019-10-16 10:35:14.484363730 -0700
-@@ -0,0 +1,62 @@
-+CMAKE_PROGRESS_1 = 5
-+CMAKE_PROGRESS_2 = 6
-+CMAKE_PROGRESS_3 = 7
-+CMAKE_PROGRESS_4 = 8
-+CMAKE_PROGRESS_5 = 9
-+CMAKE_PROGRESS_6 = 10
-+CMAKE_PROGRESS_7 = 11
-+CMAKE_PROGRESS_8 = 12
-+CMAKE_PROGRESS_9 = 13
-+CMAKE_PROGRESS_10 = 14
-+CMAKE_PROGRESS_11 = 15
-+CMAKE_PROGRESS_12 = 16
-+CMAKE_PROGRESS_13 = 17
-+CMAKE_PROGRESS_14 = 18
-+CMAKE_PROGRESS_15 = 19
-+CMAKE_PROGRESS_16 = 20
-+CMAKE_PROGRESS_17 = 21
-+CMAKE_PROGRESS_18 = 22
-+CMAKE_PROGRESS_19 = 23
-+CMAKE_PROGRESS_20 = 24
-+CMAKE_PROGRESS_21 = 25
-+CMAKE_PROGRESS_22 = 26
-+CMAKE_PROGRESS_23 = 27
-+CMAKE_PROGRESS_24 = 28
-+CMAKE_PROGRESS_25 = 29
-+CMAKE_PROGRESS_26 = 30
-+CMAKE_PROGRESS_27 = 31
-+CMAKE_PROGRESS_28 = 32
-+CMAKE_PROGRESS_29 = 33
-+CMAKE_PROGRESS_30 = 34
-+CMAKE_PROGRESS_31 = 35
-+CMAKE_PROGRESS_32 = 36
-+CMAKE_PROGRESS_33 = 37
-+CMAKE_PROGRESS_34 = 38
-+CMAKE_PROGRESS_35 = 39
-+CMAKE_PROGRESS_36 = 40
-+CMAKE_PROGRESS_37 = 41
-+CMAKE_PROGRESS_38 = 42
-+CMAKE_PROGRESS_39 = 43
-+CMAKE_PROGRESS_40 = 44
-+CMAKE_PROGRESS_41 = 45
-+CMAKE_PROGRESS_42 = 46
-+CMAKE_PROGRESS_43 = 47
-+CMAKE_PROGRESS_44 = 48
-+CMAKE_PROGRESS_45 = 49
-+CMAKE_PROGRESS_46 = 50
-+CMAKE_PROGRESS_47 = 51
-+CMAKE_PROGRESS_48 = 52
-+CMAKE_PROGRESS_49 = 53
-+CMAKE_PROGRESS_50 = 54
-+CMAKE_PROGRESS_51 = 55
-+CMAKE_PROGRESS_52 = 56
-+CMAKE_PROGRESS_53 = 57
-+CMAKE_PROGRESS_54 = 58
-+CMAKE_PROGRESS_55 = 59
-+CMAKE_PROGRESS_56 = 60
-+CMAKE_PROGRESS_57 = 61
-+CMAKE_PROGRESS_58 = 62
-+CMAKE_PROGRESS_59 = 63
-+CMAKE_PROGRESS_60 = 64
-+CMAKE_PROGRESS_61 = 65
-+
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o and ./generated/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o and ./generated/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/symbols/Lookup.cpp.o and ./generated/CMakeFiles/slang.dir/symbols/Lookup.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o and ./generated/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/symbols/Scope.cpp.o and ./generated/CMakeFiles/slang.dir/symbols/Scope.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o and ./generated/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/symbols/Symbol.cpp.o and ./generated/CMakeFiles/slang.dir/symbols/Symbol.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o and ./generated/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o and ./generated/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o and ./generated/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o and ./generated/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o and ./generated/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o and ./generated/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o and ./generated/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/text/SFormat.cpp.o and ./generated/CMakeFiles/slang.dir/text/SFormat.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/text/SourceManager.cpp.o and ./generated/CMakeFiles/slang.dir/text/SourceManager.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/util/Assert.cpp.o and ./generated/CMakeFiles/slang.dir/util/Assert.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/util/BumpAllocator.cpp.o and ./generated/CMakeFiles/slang.dir/util/BumpAllocator.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/util/CommandLine.cpp.o and ./generated/CMakeFiles/slang.dir/util/CommandLine.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/util/Hash.cpp.o and ./generated/CMakeFiles/slang.dir/util/Hash.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/util/String.cpp.o and ./generated/CMakeFiles/slang.dir/util/String.cpp.o differ
-Binary files ../slang_orig/generated/CMakeFiles/slang.dir/Version.cpp.o and ./generated/CMakeFiles/slang.dir/Version.cpp.o differ
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/cmake_install.cmake ./generated/cmake_install.cmake
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/cmake_install.cmake ./generated/cmake_install.cmake
 --- ../slang_orig/generated/cmake_install.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/cmake_install.cmake	2019-10-16 10:35:14.474364038 -0700
++++ ./generated/cmake_install.cmake	2019-11-23 10:40:22.972014303 -0800
 @@ -0,0 +1,39 @@
-+# Install script for directory: /soe/renau/projs/synth/slang_orig/source
++# Install script for directory: /soe/renau/projs/synth/slang/source
 +
 +# Set the install prefix
 +if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -22344,10 +14621,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +  set(CMAKE_CROSSCOMPILING "FALSE")
 +endif()
 +
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/DiagCode.cpp ./generated/DiagCode.cpp
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/DiagCode.cpp ./generated/DiagCode.cpp
 --- ../slang_orig/generated/DiagCode.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/DiagCode.cpp	2019-10-16 10:35:24.214063794 -0700
-@@ -0,0 +1,352 @@
++++ ./generated/DiagCode.cpp	2019-11-23 10:40:28.831890148 -0800
+@@ -0,0 +1,378 @@
 +//------------------------------------------------------------------------------
 +// DiagCode.cpp
 +// Generated diagnostic helpers.
@@ -22363,6 +14640,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +static const flat_hash_map<DiagCode, std::tuple<string_view, string_view, DiagnosticSeverity, string_view>> data = {
 +    {diag::ExpressionNotConstant, std::make_tuple("ExpressionNotConstant"sv, "expression is not constant"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NoteInCallTo, std::make_tuple("NoteInCallTo"sv, "in call to '{}'"sv, DiagnosticSeverity::Note, ""sv)},
++    {diag::NoteSkippingFrames, std::make_tuple("NoteSkippingFrames"sv, "(skipping {} calls in backtrace; use --constexpr-backtrace-limit=0 to see all)"sv, DiagnosticSeverity::Note, ""sv)},
 +    {diag::NoteNonConstVariable, std::make_tuple("NoteNonConstVariable"sv, "reference to non-constant variable '{}' is not allowed in a constant expression"sv, DiagnosticSeverity::Note, ""sv)},
 +    {diag::NoteArrayIndexInvalid, std::make_tuple("NoteArrayIndexInvalid"sv, "cannot refer to element {} of array of type {} in a constant expression"sv, DiagnosticSeverity::Note, ""sv)},
 +    {diag::NotePartSelectInvalid, std::make_tuple("NotePartSelectInvalid"sv, "cannot select range of {}:{} from array of type {} in a constant expression"sv, DiagnosticSeverity::Note, ""sv)},
@@ -22373,8 +14651,11 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::NoteParamUsedInCEBeforeDecl, std::make_tuple("NoteParamUsedInCEBeforeDecl"sv, "parameter '{}' is declared after the invocation of the current constant function"sv, DiagnosticSeverity::Note, ""sv)},
 +    {diag::NoteNoCaseItemsMatched, std::make_tuple("NoteNoCaseItemsMatched"sv, "no items in {} case statement matched value {}"sv, DiagnosticSeverity::Note, ""sv)},
 +    {diag::NoteCaseItemsNotUnique, std::make_tuple("NoteCaseItemsNotUnique"sv, "more than one match found in unique case statement for value {}"sv, DiagnosticSeverity::Note, ""sv)},
-+    {diag::NoteTimedStmtNotConst, std::make_tuple("NoteTimedStmtNotConst"sv, "constant functions cannot schedule events"sv, DiagnosticSeverity::Note, ""sv)},
++    {diag::NoteTimedStmtNotConst, std::make_tuple("NoteTimedStmtNotConst"sv, "constant expressions cannot schedule events"sv, DiagnosticSeverity::Note, ""sv)},
 +    {diag::NoteAssertionFailed, std::make_tuple("NoteAssertionFailed"sv, "assertion failed"sv, DiagnosticSeverity::Note, ""sv)},
++    {diag::NoteParallelBlockNotConst, std::make_tuple("NoteParallelBlockNotConst"sv, "parallel blocks are not allowed in constant expressions"sv, DiagnosticSeverity::Note, ""sv)},
++    {diag::NoteExceededMaxCallDepth, std::make_tuple("NoteExceededMaxCallDepth"sv, "constant evaluation exceeded maximum depth of {} calls"sv, DiagnosticSeverity::Note, ""sv)},
++    {diag::NoteExceededMaxSteps, std::make_tuple("NoteExceededMaxSteps"sv, "constant evaluation hit maximum step limit; possible infinite loop?"sv, DiagnosticSeverity::Note, ""sv)},
 +    {diag::LocalParamNoInitializer, std::make_tuple("LocalParamNoInitializer"sv, "local parameter is missing an initializer"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::BodyParamNoInitializer, std::make_tuple("BodyParamNoInitializer"sv, "parameter declaration is missing an initializer"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidDimensionRange, std::make_tuple("InvalidDimensionRange"sv, "invalid dimension range"sv, DiagnosticSeverity::Error, ""sv)},
@@ -22415,6 +14696,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::GenvarUnknownBits, std::make_tuple("GenvarUnknownBits"sv, "value of {} is invalid for loop generation value"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ImplicitNamedPortNotFound, std::make_tuple("ImplicitNamedPortNotFound"sv, "could not find connection for implicit named port '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ImplicitNamedPortTypeMismatch, std::make_tuple("ImplicitNamedPortTypeMismatch"sv, "implicit named port '{}' of type {} connects to value of inequivalent type {}"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::MaxInstanceDepthExceeded, std::make_tuple("MaxInstanceDepthExceeded"sv, "module instantiation exceeded maximum depth of {}"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::MaxGenerateStepsExceeded, std::make_tuple("MaxGenerateStepsExceeded"sv, "generate loop hit maximum step limit; possible infinite loop?"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::MixingSubroutinePortKinds, std::make_tuple("MixingSubroutinePortKinds"sv, "port declarations not allowed when subroutine defines a formal argument list"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::CaseGenerateDup, std::make_tuple("CaseGenerateDup"sv, "more than one case generate block matches the value {}"sv, DiagnosticSeverity::Warning, "case-gen-dup"sv)},
 +    {diag::CaseGenerateNoBlock, std::make_tuple("CaseGenerateNoBlock"sv, "no case generate expression matches the value {}"sv, DiagnosticSeverity::Warning, "case-gen-none"sv)},
 +    {diag::UnconnectedNamedPort, std::make_tuple("UnconnectedNamedPort"sv, "port '{}' has no connection"sv, DiagnosticSeverity::Warning, "unconnected-port"sv)},
@@ -22428,6 +14712,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::BadIndexExpression, std::make_tuple("BadIndexExpression"sv, "value of type {} cannot be indexed"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::BadConcatExpression, std::make_tuple("BadConcatExpression"sv, "invalid operand type {} in concatenation"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::BadReplicationExpression, std::make_tuple("BadReplicationExpression"sv, "invalid operands to replication expression ({} and {})"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::BadCastType, std::make_tuple("BadCastType"sv, "invalid casting type {}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ConcatWithStringInt, std::make_tuple("ConcatWithStringInt"sv, "cannot mix strings and integers in a concatenation (use a cast if this is desired)"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::BadRangeExpression, std::make_tuple("BadRangeExpression"sv, "cannot select range of {}:{} from array of type {}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::RangeWidthTooLarge, std::make_tuple("RangeWidthTooLarge"sv, "cannot select range of {} elements from array of type {}"sv, DiagnosticSeverity::Error, ""sv)},
@@ -22452,13 +14737,15 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::AssignmentPatternNoContext, std::make_tuple("AssignmentPatternNoContext"sv, "assignment pattern target type cannot be deduced in this context"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::BadAssignmentPatternType, std::make_tuple("BadAssignmentPatternType"sv, "invalid target type {} for assignment pattern"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::WrongNumberAssignmentPatterns, std::make_tuple("WrongNumberAssignmentPatterns"sv, "assignment pattern for type {} requires {} elements but {} were provided"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::StructAssignmentPatternKey, std::make_tuple("StructAssignmentPatternKey"sv, "expression is not a valid struct assignment pattern member name or type"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::AssignmentPatternKeyExpr, std::make_tuple("AssignmentPatternKeyExpr"sv, "expression is not a valid assignment pattern member name or type"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::AssignmentPatternKeyDupDefault, std::make_tuple("AssignmentPatternKeyDupDefault"sv, "assignment pattern has multiple default keys"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::AssignmentPatternKeyDupValue, std::make_tuple("AssignmentPatternKeyDupValue"sv, "assignment pattern has multiple keys for value {}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::AssignmentPatternKeyDupName, std::make_tuple("AssignmentPatternKeyDupName"sv, "assignment pattern has multiple keys for member '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::AssignmentPatternNoMember, std::make_tuple("AssignmentPatternNoMember"sv, "member '{}' is not covered by any assignment pattern key"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::AssignmentPatternNestedNoMember, std::make_tuple("AssignmentPatternNestedNoMember"sv, "member '{}' has nested elements that are not covered by any assignment pattern key"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::AssignmentPatternMissingElements, std::make_tuple("AssignmentPatternMissingElements"sv, "not all elements of array are covered by an assignment pattern key"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::EmptyArgNotAllowed, std::make_tuple("EmptyArgNotAllowed"sv, "empty argument not allowed"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::NamedArgNotAllowed, std::make_tuple("NamedArgNotAllowed"sv, "named argument not allowed"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NotYetSupported, std::make_tuple("NotYetSupported"sv, "language feature not yet supported"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedExpression, std::make_tuple("ExpectedExpression"sv, "expected expression"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NotePreviousDefinition, std::make_tuple("NotePreviousDefinition"sv, "previous definition here"sv, DiagnosticSeverity::Note, ""sv)},
@@ -22518,6 +14805,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::CouldNotResolveHierarchicalPath, std::make_tuple("CouldNotResolveHierarchicalPath"sv, "could not resolve hierarchical path name '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::UnresolvedForwardTypedef, std::make_tuple("UnresolvedForwardTypedef"sv, "forward typedef '{}' does not resolve to a data type"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::DuplicateImport, std::make_tuple("DuplicateImport"sv, "duplicate import declaration is redundant"sv, DiagnosticSeverity::Warning, "dup-import"sv)},
++    {diag::TooManyErrors, std::make_tuple("TooManyErrors"sv, "too many errors emitted, stopping now [--error-limit=]"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::UnknownWarningOption, std::make_tuple("UnknownWarningOption"sv, "unknown warning option '{}'"sv, DiagnosticSeverity::Warning, "unknown-warning-option"sv)},
 +    {diag::LiteralSizeIsZero, std::make_tuple("LiteralSizeIsZero"sv, "size of vector literal cannot be zero"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::LiteralSizeTooLarge, std::make_tuple("LiteralSizeTooLarge"sv, "size of vector literal is too large (> {} bits)"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::SignedIntegerOverflow, std::make_tuple("SignedIntegerOverflow"sv, "signed integer overflows 32 bits"sv, DiagnosticSeverity::Error, ""sv)},
@@ -22561,6 +14850,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::ExpectedDistItem, std::make_tuple("ExpectedDistItem"sv, "expected dist item"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedIfOrCase, std::make_tuple("ExpectedIfOrCase"sv, "expected 'if' or 'case' after '{}' keyword"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedClassScope, std::make_tuple("ExpectedClassScope"sv, "expected class scope before new keyword"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ExpectedNetStrength, std::make_tuple("ExpectedNetStrength"sv, "expected net strength keyword"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ExpectedEnumBase, std::make_tuple("ExpectedEnumBase"sv, "expected enum base type"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NoLabelOnSemicolon, std::make_tuple("NoLabelOnSemicolon"sv, "labels are not allowed on empty semicolon"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::DeferredDelayMustBeZero, std::make_tuple("DeferredDelayMustBeZero"sv, "deferred assertion delay must be zero"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidGenvarIterExpression, std::make_tuple("InvalidGenvarIterExpression"sv, "invalid genvar iteration expression"sv, DiagnosticSeverity::Error, ""sv)},
@@ -22577,6 +14868,11 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::ExpectedSampleKeyword, std::make_tuple("ExpectedSampleKeyword"sv, "expected 'sample' keyword"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::MultipleGenerateDefaultCases, std::make_tuple("MultipleGenerateDefaultCases"sv, "case generate has multiple default cases"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::CaseGenerateEmpty, std::make_tuple("CaseGenerateEmpty"sv, "case generate has no items"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::LabelAndName, std::make_tuple("LabelAndName"sv, "cannot specify both a label and a name for the same block"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::EndNameMismatch, std::make_tuple("EndNameMismatch"sv, "'{}' doesn't match previous name '{}'"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::EndNameNotEmpty, std::make_tuple("EndNameNotEmpty"sv, "trailing name not allowed on previously unnamed block"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::DeclarationsAtStart, std::make_tuple("DeclarationsAtStart"sv, "declaration must come before all statements in the block"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::VoidNotAllowed, std::make_tuple("VoidNotAllowed"sv, "'void' type not allowed"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NonStandardGenBlock, std::make_tuple("NonStandardGenBlock"sv, "standalone generate block without loop or condition is not allowed in SystemVerilog"sv, DiagnosticSeverity::Warning, "nonstandard-generate"sv)},
 +    {diag::CouldNotOpenIncludeFile, std::make_tuple("CouldNotOpenIncludeFile"sv, "could not find or open include file"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExceededMaxIncludeDepth, std::make_tuple("ExceededMaxIncludeDepth"sv, "exceeded max include depth"sv, DiagnosticSeverity::Error, ""sv)},
@@ -22608,8 +14904,11 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::CoverStmtNoFail, std::make_tuple("CoverStmtNoFail"sv, "cover statement cannot have a fail statement"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::StatementNotInLoop, std::make_tuple("StatementNotInLoop"sv, "statement can only be used inside a loop"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExprNotStatement, std::make_tuple("ExprNotStatement"sv, "expression is not allowed as a statement"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::VoidCastFuncCall, std::make_tuple("VoidCastFuncCall"sv, "void casting is only allowed for function calls"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::EventExpressionConstant, std::make_tuple("EventExpressionConstant"sv, "edge expression is constant"sv, DiagnosticSeverity::Warning, "event-const"sv)},
 +    {diag::EmptyStatement, std::make_tuple("EmptyStatement"sv, "empty statement has no effect"sv, DiagnosticSeverity::Warning, "empty-stmt"sv)},
++    {diag::PointlessVoidCast, std::make_tuple("PointlessVoidCast"sv, "cast to void for void-returning function '{}' has no effect"sv, DiagnosticSeverity::Warning, "pointless-void-cast"sv)},
++    {diag::UnusedResult, std::make_tuple("UnusedResult"sv, "ignoring return value of '{}', cast to void to suppress"sv, DiagnosticSeverity::Warning, "unused-result"sv)},
 +    {diag::BadSystemSubroutineArg, std::make_tuple("BadSystemSubroutineArg"sv, "invalid argument type {} to system {}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::UnknownFormatSpecifier, std::make_tuple("UnknownFormatSpecifier"sv, "unknown format specifier '%{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::MissingFormatSpecifier, std::make_tuple("MissingFormatSpecifier"sv, "missing format specifier"sv, DiagnosticSeverity::Error, ""sv)},
@@ -22619,6 +14918,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::FormatUnspecifiedType, std::make_tuple("FormatUnspecifiedType"sv, "cannot format values of type {} without a specification string"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::FormatMismatchedType, std::make_tuple("FormatMismatchedType"sv, "value of type {} is invalid for '%{}' format specifier"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidFormatStringType, std::make_tuple("InvalidFormatStringType"sv, "value of type {} is not valid as a format string"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::FormatEmptyArg, std::make_tuple("FormatEmptyArg"sv, "empty argument not allowed -- expecting value for '%{}' format specifier"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ArrayReductionIntegral, std::make_tuple("ArrayReductionIntegral"sv, "array reduction methods can only be called on unpacked arrays of integral values"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::BadFinishNum, std::make_tuple("BadFinishNum"sv, "finish argument must have value of 0, 1, or 2"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidEnumBase, std::make_tuple("InvalidEnumBase"sv, "invalid enum base type {} (must be a single dimensional integer type)"sv, DiagnosticSeverity::Error, ""sv)},
@@ -22643,6 +14943,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {"dup-attr"sv, diag::DuplicateAttribute},
 +    {"empty-member"sv, diag::EmptyMember},
 +    {"dup-import"sv, diag::DuplicateImport},
++    {"unknown-warning-option"sv, diag::UnknownWarningOption},
 +    {"real-underflow"sv, diag::RealLiteralUnderflow},
 +    {"real-overflow"sv, diag::RealLiteralOverflow},
 +    {"literal-overflow"sv, diag::VectorLiteralOverflow},
@@ -22651,10 +14952,12 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {"redef-macro"sv, diag::RedefiningMacro},
 +    {"event-const"sv, diag::EventExpressionConstant},
 +    {"empty-stmt"sv, diag::EmptyStatement},
++    {"pointless-void-cast"sv, diag::PointlessVoidCast},
++    {"unused-result"sv, diag::UnusedResult},
 +};
 +
 +static const flat_hash_map<string_view, DiagGroup> groupMap = {
-+    {"default"sv, DiagGroup("default", { diag::RealLiteralUnderflow, diag::RealLiteralOverflow, diag::VectorLiteralOverflow, diag::IgnoredMacroPaste, diag::CaseGenerateDup, diag::CaseGenerateNoBlock, diag::UnconnectedNamedPort, diag::UnconnectedUnnamedPort, diag::DuplicateAttribute, diag::EventExpressionConstant, diag::DuplicateImport, diag::RedefiningMacro, diag::NonStandardGenBlock })},
++    {"default"sv, DiagGroup("default", { diag::RealLiteralUnderflow, diag::RealLiteralOverflow, diag::VectorLiteralOverflow, diag::IgnoredMacroPaste, diag::CaseGenerateDup, diag::CaseGenerateNoBlock, diag::UnconnectedNamedPort, diag::UnconnectedUnnamedPort, diag::DuplicateAttribute, diag::EventExpressionConstant, diag::DuplicateImport, diag::RedefiningMacro, diag::NonStandardGenBlock, diag::PointlessVoidCast, diag::UnusedResult })},
 +    {"extra"sv, DiagGroup("extra", { diag::EmptyMember, diag::EmptyStatement })},
 +};
 +
@@ -22700,10 +15003,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/Makefile ./generated/Makefile
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/Makefile ./generated/Makefile
 --- ../slang_orig/generated/Makefile	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/Makefile	2019-10-16 10:35:14.474364038 -0700
-@@ -0,0 +1,1918 @@
++++ ./generated/Makefile	2019-11-23 10:40:22.972014303 -0800
+@@ -0,0 +1,2188 @@
 +# CMAKE generated file: DO NOT EDIT!
 +# Generated by "Unix Makefiles" Generator, CMake Version 3.15
 +
@@ -22754,10 +15057,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +EQUALS = =
 +
 +# The top-level source directory on which CMake was run.
-+CMAKE_SOURCE_DIR = /soe/renau/projs/synth/slang_orig
++CMAKE_SOURCE_DIR = /soe/renau/projs/synth/slang
 +
 +# The top-level build directory on which CMake was run.
-+CMAKE_BINARY_DIR = /soe/renau/projs/synth/slang_orig/build
++CMAKE_BINARY_DIR = /soe/renau/projs/synth/slang/build
 +
 +#=============================================================================
 +# Targets provided globally by CMake.
@@ -22797,14 +15100,14 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# The main all target
 +all: cmake_check_build_system
-+	cd /soe/renau/projs/synth/slang_orig/build && $(CMAKE_COMMAND) -E cmake_progress_start /soe/renau/projs/synth/slang_orig/build/CMakeFiles /soe/renau/projs/synth/slang_orig/build/source/CMakeFiles/progress.marks
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f CMakeFiles/Makefile2 source/all
-+	$(CMAKE_COMMAND) -E cmake_progress_start /soe/renau/projs/synth/slang_orig/build/CMakeFiles 0
++	cd /soe/renau/projs/synth/slang/build && $(CMAKE_COMMAND) -E cmake_progress_start /soe/renau/projs/synth/slang/build/CMakeFiles /soe/renau/projs/synth/slang/build/source/CMakeFiles/progress.marks
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f CMakeFiles/Makefile2 source/all
++	$(CMAKE_COMMAND) -E cmake_progress_start /soe/renau/projs/synth/slang/build/CMakeFiles 0
 +.PHONY : all
 +
 +# The main clean target
 +clean:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f CMakeFiles/Makefile2 source/clean
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f CMakeFiles/Makefile2 source/clean
 +.PHONY : clean
 +
 +# The main clean target
@@ -22814,22 +15117,22 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# Prepare targets for installation.
 +preinstall: all
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f CMakeFiles/Makefile2 source/preinstall
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f CMakeFiles/Makefile2 source/preinstall
 +.PHONY : preinstall
 +
 +# Prepare targets for installation.
 +preinstall/fast:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f CMakeFiles/Makefile2 source/preinstall
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f CMakeFiles/Makefile2 source/preinstall
 +.PHONY : preinstall/fast
 +
 +# clear depends
 +depend:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 1
++	cd /soe/renau/projs/synth/slang/build && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 1
 +.PHONY : depend
 +
 +# Convenience name for target.
 +source/CMakeFiles/gen_version.dir/rule:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f CMakeFiles/Makefile2 source/CMakeFiles/gen_version.dir/rule
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f CMakeFiles/Makefile2 source/CMakeFiles/gen_version.dir/rule
 +.PHONY : source/CMakeFiles/gen_version.dir/rule
 +
 +# Convenience name for target.
@@ -22839,12 +15142,12 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# fast build rule for target.
 +gen_version/fast:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/gen_version.dir/build.make source/CMakeFiles/gen_version.dir/build
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/gen_version.dir/build.make source/CMakeFiles/gen_version.dir/build
 +.PHONY : gen_version/fast
 +
 +# Convenience name for target.
 +source/CMakeFiles/slang.dir/rule:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f CMakeFiles/Makefile2 source/CMakeFiles/slang.dir/rule
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f CMakeFiles/Makefile2 source/CMakeFiles/slang.dir/rule
 +.PHONY : source/CMakeFiles/slang.dir/rule
 +
 +# Convenience name for target.
@@ -22854,7 +15157,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# fast build rule for target.
 +slang/fast:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/build
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/build
 +.PHONY : slang/fast
 +
 +AllSyntax.o: AllSyntax.cpp.o
@@ -22863,7 +15166,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +AllSyntax.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/AllSyntax.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/AllSyntax.cpp.o
 +.PHONY : AllSyntax.cpp.o
 +
 +AllSyntax.i: AllSyntax.cpp.i
@@ -22872,7 +15175,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +AllSyntax.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/AllSyntax.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/AllSyntax.cpp.i
 +.PHONY : AllSyntax.cpp.i
 +
 +AllSyntax.s: AllSyntax.cpp.s
@@ -22881,7 +15184,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +AllSyntax.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/AllSyntax.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/AllSyntax.cpp.s
 +.PHONY : AllSyntax.cpp.s
 +
 +DiagCode.o: DiagCode.cpp.o
@@ -22890,7 +15193,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +DiagCode.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/DiagCode.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/DiagCode.cpp.o
 +.PHONY : DiagCode.cpp.o
 +
 +DiagCode.i: DiagCode.cpp.i
@@ -22899,7 +15202,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +DiagCode.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/DiagCode.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/DiagCode.cpp.i
 +.PHONY : DiagCode.cpp.i
 +
 +DiagCode.s: DiagCode.cpp.s
@@ -22908,7 +15211,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +DiagCode.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/DiagCode.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/DiagCode.cpp.s
 +.PHONY : DiagCode.cpp.s
 +
 +Version.o: Version.cpp.o
@@ -22917,7 +15220,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +Version.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/Version.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/Version.cpp.o
 +.PHONY : Version.cpp.o
 +
 +Version.i: Version.cpp.i
@@ -22926,7 +15229,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +Version.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/Version.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/Version.cpp.i
 +.PHONY : Version.cpp.i
 +
 +Version.s: Version.cpp.s
@@ -22935,7 +15238,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +Version.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/Version.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/Version.cpp.s
 +.PHONY : Version.cpp.s
 +
 +binding/BindContext.o: binding/BindContext.cpp.o
@@ -22944,7 +15247,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +binding/BindContext.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/BindContext.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/BindContext.cpp.o
 +.PHONY : binding/BindContext.cpp.o
 +
 +binding/BindContext.i: binding/BindContext.cpp.i
@@ -22953,7 +15256,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +binding/BindContext.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/BindContext.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/BindContext.cpp.i
 +.PHONY : binding/BindContext.cpp.i
 +
 +binding/BindContext.s: binding/BindContext.cpp.s
@@ -22962,7 +15265,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +binding/BindContext.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/BindContext.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/BindContext.cpp.s
 +.PHONY : binding/BindContext.cpp.s
 +
 +binding/ConstantValue.o: binding/ConstantValue.cpp.o
@@ -22971,7 +15274,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +binding/ConstantValue.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.o
 +.PHONY : binding/ConstantValue.cpp.o
 +
 +binding/ConstantValue.i: binding/ConstantValue.cpp.i
@@ -22980,7 +15283,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +binding/ConstantValue.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.i
 +.PHONY : binding/ConstantValue.cpp.i
 +
 +binding/ConstantValue.s: binding/ConstantValue.cpp.s
@@ -22989,7 +15292,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +binding/ConstantValue.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/ConstantValue.cpp.s
 +.PHONY : binding/ConstantValue.cpp.s
 +
 +binding/EvalContext.o: binding/EvalContext.cpp.o
@@ -22998,7 +15301,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +binding/EvalContext.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/EvalContext.cpp.o
 +.PHONY : binding/EvalContext.cpp.o
 +
 +binding/EvalContext.i: binding/EvalContext.cpp.i
@@ -23007,7 +15310,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +binding/EvalContext.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/EvalContext.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/EvalContext.cpp.i
 +.PHONY : binding/EvalContext.cpp.i
 +
 +binding/EvalContext.s: binding/EvalContext.cpp.s
@@ -23016,7 +15319,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +binding/EvalContext.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/EvalContext.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/EvalContext.cpp.s
 +.PHONY : binding/EvalContext.cpp.s
 +
 +binding/Expressions.o: binding/Expressions.cpp.o
@@ -23025,7 +15328,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +binding/Expressions.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Expressions.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Expressions.cpp.o
 +.PHONY : binding/Expressions.cpp.o
 +
 +binding/Expressions.i: binding/Expressions.cpp.i
@@ -23034,7 +15337,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +binding/Expressions.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Expressions.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Expressions.cpp.i
 +.PHONY : binding/Expressions.cpp.i
 +
 +binding/Expressions.s: binding/Expressions.cpp.s
@@ -23043,7 +15346,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +binding/Expressions.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Expressions.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Expressions.cpp.s
 +.PHONY : binding/Expressions.cpp.s
 +
 +binding/Expressions_eval.o: binding/Expressions_eval.cpp.o
@@ -23052,7 +15355,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +binding/Expressions_eval.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o
 +.PHONY : binding/Expressions_eval.cpp.o
 +
 +binding/Expressions_eval.i: binding/Expressions_eval.cpp.i
@@ -23061,7 +15364,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +binding/Expressions_eval.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.i
 +.PHONY : binding/Expressions_eval.cpp.i
 +
 +binding/Expressions_eval.s: binding/Expressions_eval.cpp.s
@@ -23070,7 +15373,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +binding/Expressions_eval.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.s
 +.PHONY : binding/Expressions_eval.cpp.s
 +
 +binding/Statements.o: binding/Statements.cpp.o
@@ -23079,7 +15382,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +binding/Statements.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Statements.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Statements.cpp.o
 +.PHONY : binding/Statements.cpp.o
 +
 +binding/Statements.i: binding/Statements.cpp.i
@@ -23088,7 +15391,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +binding/Statements.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Statements.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Statements.cpp.i
 +.PHONY : binding/Statements.cpp.i
 +
 +binding/Statements.s: binding/Statements.cpp.s
@@ -23097,7 +15400,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +binding/Statements.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Statements.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Statements.cpp.s
 +.PHONY : binding/Statements.cpp.s
 +
 +binding/SystemSubroutine.o: binding/SystemSubroutine.cpp.o
@@ -23106,7 +15409,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +binding/SystemSubroutine.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.o
 +.PHONY : binding/SystemSubroutine.cpp.o
 +
 +binding/SystemSubroutine.i: binding/SystemSubroutine.cpp.i
@@ -23115,7 +15418,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +binding/SystemSubroutine.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.i
 +.PHONY : binding/SystemSubroutine.cpp.i
 +
 +binding/SystemSubroutine.s: binding/SystemSubroutine.cpp.s
@@ -23124,7 +15427,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +binding/SystemSubroutine.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/SystemSubroutine.cpp.s
 +.PHONY : binding/SystemSubroutine.cpp.s
 +
 +binding/TimingControl.o: binding/TimingControl.cpp.o
@@ -23133,7 +15436,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +binding/TimingControl.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/TimingControl.cpp.o
 +.PHONY : binding/TimingControl.cpp.o
 +
 +binding/TimingControl.i: binding/TimingControl.cpp.i
@@ -23142,7 +15445,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +binding/TimingControl.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/TimingControl.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/TimingControl.cpp.i
 +.PHONY : binding/TimingControl.cpp.i
 +
 +binding/TimingControl.s: binding/TimingControl.cpp.s
@@ -23151,7 +15454,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +binding/TimingControl.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/TimingControl.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/TimingControl.cpp.s
 +.PHONY : binding/TimingControl.cpp.s
 +
 +compilation/Compilation.o: compilation/Compilation.cpp.o
@@ -23160,7 +15463,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +compilation/Compilation.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/Compilation.cpp.o
 +.PHONY : compilation/Compilation.cpp.o
 +
 +compilation/Compilation.i: compilation/Compilation.cpp.i
@@ -23169,7 +15472,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +compilation/Compilation.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/Compilation.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/Compilation.cpp.i
 +.PHONY : compilation/Compilation.cpp.i
 +
 +compilation/Compilation.s: compilation/Compilation.cpp.s
@@ -23178,7 +15481,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +compilation/Compilation.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/Compilation.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/Compilation.cpp.s
 +.PHONY : compilation/Compilation.cpp.s
 +
 +compilation/ScriptSession.o: compilation/ScriptSession.cpp.o
@@ -23187,7 +15490,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +compilation/ScriptSession.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.o
 +.PHONY : compilation/ScriptSession.cpp.o
 +
 +compilation/ScriptSession.i: compilation/ScriptSession.cpp.i
@@ -23196,7 +15499,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +compilation/ScriptSession.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.i
 +.PHONY : compilation/ScriptSession.cpp.i
 +
 +compilation/ScriptSession.s: compilation/ScriptSession.cpp.s
@@ -23205,7 +15508,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +compilation/ScriptSession.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/ScriptSession.cpp.s
 +.PHONY : compilation/ScriptSession.cpp.s
 +
 +compilation/SemanticModel.o: compilation/SemanticModel.cpp.o
@@ -23214,7 +15517,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +compilation/SemanticModel.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.o
 +.PHONY : compilation/SemanticModel.cpp.o
 +
 +compilation/SemanticModel.i: compilation/SemanticModel.cpp.i
@@ -23223,7 +15526,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +compilation/SemanticModel.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.i
 +.PHONY : compilation/SemanticModel.cpp.i
 +
 +compilation/SemanticModel.s: compilation/SemanticModel.cpp.s
@@ -23232,7 +15535,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +compilation/SemanticModel.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/SemanticModel.cpp.s
 +.PHONY : compilation/SemanticModel.cpp.s
 +
 +compilation/builtins/ArrayMethods.o: compilation/builtins/ArrayMethods.cpp.o
@@ -23241,7 +15544,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +compilation/builtins/ArrayMethods.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.o
 +.PHONY : compilation/builtins/ArrayMethods.cpp.o
 +
 +compilation/builtins/ArrayMethods.i: compilation/builtins/ArrayMethods.cpp.i
@@ -23250,7 +15553,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +compilation/builtins/ArrayMethods.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.i
 +.PHONY : compilation/builtins/ArrayMethods.cpp.i
 +
 +compilation/builtins/ArrayMethods.s: compilation/builtins/ArrayMethods.cpp.s
@@ -23259,8 +15562,35 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +compilation/builtins/ArrayMethods.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/ArrayMethods.cpp.s
 +.PHONY : compilation/builtins/ArrayMethods.cpp.s
++
++compilation/builtins/ConversionFuncs.o: compilation/builtins/ConversionFuncs.cpp.o
++
++.PHONY : compilation/builtins/ConversionFuncs.o
++
++# target to build an object file
++compilation/builtins/ConversionFuncs.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/ConversionFuncs.cpp.o
++.PHONY : compilation/builtins/ConversionFuncs.cpp.o
++
++compilation/builtins/ConversionFuncs.i: compilation/builtins/ConversionFuncs.cpp.i
++
++.PHONY : compilation/builtins/ConversionFuncs.i
++
++# target to preprocess a source file
++compilation/builtins/ConversionFuncs.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/ConversionFuncs.cpp.i
++.PHONY : compilation/builtins/ConversionFuncs.cpp.i
++
++compilation/builtins/ConversionFuncs.s: compilation/builtins/ConversionFuncs.cpp.s
++
++.PHONY : compilation/builtins/ConversionFuncs.s
++
++# target to generate assembly for a file
++compilation/builtins/ConversionFuncs.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/ConversionFuncs.cpp.s
++.PHONY : compilation/builtins/ConversionFuncs.cpp.s
 +
 +compilation/builtins/EnumMethods.o: compilation/builtins/EnumMethods.cpp.o
 +
@@ -23268,7 +15598,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +compilation/builtins/EnumMethods.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.o
 +.PHONY : compilation/builtins/EnumMethods.cpp.o
 +
 +compilation/builtins/EnumMethods.i: compilation/builtins/EnumMethods.cpp.i
@@ -23277,7 +15607,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +compilation/builtins/EnumMethods.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.i
 +.PHONY : compilation/builtins/EnumMethods.cpp.i
 +
 +compilation/builtins/EnumMethods.s: compilation/builtins/EnumMethods.cpp.s
@@ -23286,7 +15616,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +compilation/builtins/EnumMethods.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/EnumMethods.cpp.s
 +.PHONY : compilation/builtins/EnumMethods.cpp.s
 +
 +compilation/builtins/MathFuncs.o: compilation/builtins/MathFuncs.cpp.o
@@ -23295,7 +15625,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +compilation/builtins/MathFuncs.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.o
 +.PHONY : compilation/builtins/MathFuncs.cpp.o
 +
 +compilation/builtins/MathFuncs.i: compilation/builtins/MathFuncs.cpp.i
@@ -23304,7 +15634,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +compilation/builtins/MathFuncs.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.i
 +.PHONY : compilation/builtins/MathFuncs.cpp.i
 +
 +compilation/builtins/MathFuncs.s: compilation/builtins/MathFuncs.cpp.s
@@ -23313,7 +15643,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +compilation/builtins/MathFuncs.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/MathFuncs.cpp.s
 +.PHONY : compilation/builtins/MathFuncs.cpp.s
 +
 +compilation/builtins/MiscSystemFuncs.o: compilation/builtins/MiscSystemFuncs.cpp.o
@@ -23322,7 +15652,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +compilation/builtins/MiscSystemFuncs.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.o
 +.PHONY : compilation/builtins/MiscSystemFuncs.cpp.o
 +
 +compilation/builtins/MiscSystemFuncs.i: compilation/builtins/MiscSystemFuncs.cpp.i
@@ -23331,7 +15661,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +compilation/builtins/MiscSystemFuncs.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.i
 +.PHONY : compilation/builtins/MiscSystemFuncs.cpp.i
 +
 +compilation/builtins/MiscSystemFuncs.s: compilation/builtins/MiscSystemFuncs.cpp.s
@@ -23340,7 +15670,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +compilation/builtins/MiscSystemFuncs.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/MiscSystemFuncs.cpp.s
 +.PHONY : compilation/builtins/MiscSystemFuncs.cpp.s
 +
 +compilation/builtins/NonConstFuncs.o: compilation/builtins/NonConstFuncs.cpp.o
@@ -23349,7 +15679,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +compilation/builtins/NonConstFuncs.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.o
 +.PHONY : compilation/builtins/NonConstFuncs.cpp.o
 +
 +compilation/builtins/NonConstFuncs.i: compilation/builtins/NonConstFuncs.cpp.i
@@ -23358,7 +15688,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +compilation/builtins/NonConstFuncs.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.i
 +.PHONY : compilation/builtins/NonConstFuncs.cpp.i
 +
 +compilation/builtins/NonConstFuncs.s: compilation/builtins/NonConstFuncs.cpp.s
@@ -23367,7 +15697,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +compilation/builtins/NonConstFuncs.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/NonConstFuncs.cpp.s
 +.PHONY : compilation/builtins/NonConstFuncs.cpp.s
 +
 +compilation/builtins/QueryFuncs.o: compilation/builtins/QueryFuncs.cpp.o
@@ -23376,7 +15706,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +compilation/builtins/QueryFuncs.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.o
 +.PHONY : compilation/builtins/QueryFuncs.cpp.o
 +
 +compilation/builtins/QueryFuncs.i: compilation/builtins/QueryFuncs.cpp.i
@@ -23385,7 +15715,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +compilation/builtins/QueryFuncs.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.i
 +.PHONY : compilation/builtins/QueryFuncs.cpp.i
 +
 +compilation/builtins/QueryFuncs.s: compilation/builtins/QueryFuncs.cpp.s
@@ -23394,7 +15724,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +compilation/builtins/QueryFuncs.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/QueryFuncs.cpp.s
 +.PHONY : compilation/builtins/QueryFuncs.cpp.s
 +
 +compilation/builtins/StringMethods.o: compilation/builtins/StringMethods.cpp.o
@@ -23403,7 +15733,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +compilation/builtins/StringMethods.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.o
 +.PHONY : compilation/builtins/StringMethods.cpp.o
 +
 +compilation/builtins/StringMethods.i: compilation/builtins/StringMethods.cpp.i
@@ -23412,7 +15742,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +compilation/builtins/StringMethods.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.i
 +.PHONY : compilation/builtins/StringMethods.cpp.i
 +
 +compilation/builtins/StringMethods.s: compilation/builtins/StringMethods.cpp.s
@@ -23421,7 +15751,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +compilation/builtins/StringMethods.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/StringMethods.cpp.s
 +.PHONY : compilation/builtins/StringMethods.cpp.s
 +
 +compilation/builtins/SystemTasks.o: compilation/builtins/SystemTasks.cpp.o
@@ -23430,7 +15760,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +compilation/builtins/SystemTasks.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.o
 +.PHONY : compilation/builtins/SystemTasks.cpp.o
 +
 +compilation/builtins/SystemTasks.i: compilation/builtins/SystemTasks.cpp.i
@@ -23439,7 +15769,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +compilation/builtins/SystemTasks.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.i
 +.PHONY : compilation/builtins/SystemTasks.cpp.i
 +
 +compilation/builtins/SystemTasks.s: compilation/builtins/SystemTasks.cpp.s
@@ -23448,7 +15778,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +compilation/builtins/SystemTasks.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/builtins/SystemTasks.cpp.s
 +.PHONY : compilation/builtins/SystemTasks.cpp.s
 +
 +diagnostics/DiagnosticClient.o: diagnostics/DiagnosticClient.cpp.o
@@ -23457,7 +15787,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +diagnostics/DiagnosticClient.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.o
 +.PHONY : diagnostics/DiagnosticClient.cpp.o
 +
 +diagnostics/DiagnosticClient.i: diagnostics/DiagnosticClient.cpp.i
@@ -23466,7 +15796,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +diagnostics/DiagnosticClient.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.i
 +.PHONY : diagnostics/DiagnosticClient.cpp.i
 +
 +diagnostics/DiagnosticClient.s: diagnostics/DiagnosticClient.cpp.s
@@ -23475,7 +15805,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +diagnostics/DiagnosticClient.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/diagnostics/DiagnosticClient.cpp.s
 +.PHONY : diagnostics/DiagnosticClient.cpp.s
 +
 +diagnostics/DiagnosticEngine.o: diagnostics/DiagnosticEngine.cpp.o
@@ -23484,7 +15814,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +diagnostics/DiagnosticEngine.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.o
 +.PHONY : diagnostics/DiagnosticEngine.cpp.o
 +
 +diagnostics/DiagnosticEngine.i: diagnostics/DiagnosticEngine.cpp.i
@@ -23493,7 +15823,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +diagnostics/DiagnosticEngine.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.i
 +.PHONY : diagnostics/DiagnosticEngine.cpp.i
 +
 +diagnostics/DiagnosticEngine.s: diagnostics/DiagnosticEngine.cpp.s
@@ -23502,7 +15832,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +diagnostics/DiagnosticEngine.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/diagnostics/DiagnosticEngine.cpp.s
 +.PHONY : diagnostics/DiagnosticEngine.cpp.s
 +
 +diagnostics/Diagnostics.o: diagnostics/Diagnostics.cpp.o
@@ -23511,7 +15841,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +diagnostics/Diagnostics.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.o
 +.PHONY : diagnostics/Diagnostics.cpp.o
 +
 +diagnostics/Diagnostics.i: diagnostics/Diagnostics.cpp.i
@@ -23520,7 +15850,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +diagnostics/Diagnostics.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.i
 +.PHONY : diagnostics/Diagnostics.cpp.i
 +
 +diagnostics/Diagnostics.s: diagnostics/Diagnostics.cpp.s
@@ -23529,7 +15859,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +diagnostics/Diagnostics.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/diagnostics/Diagnostics.cpp.s
 +.PHONY : diagnostics/Diagnostics.cpp.s
 +
 +diagnostics/TextDiagnosticClient.o: diagnostics/TextDiagnosticClient.cpp.o
@@ -23538,7 +15868,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +diagnostics/TextDiagnosticClient.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.o
 +.PHONY : diagnostics/TextDiagnosticClient.cpp.o
 +
 +diagnostics/TextDiagnosticClient.i: diagnostics/TextDiagnosticClient.cpp.i
@@ -23547,7 +15877,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +diagnostics/TextDiagnosticClient.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.i
 +.PHONY : diagnostics/TextDiagnosticClient.cpp.i
 +
 +diagnostics/TextDiagnosticClient.s: diagnostics/TextDiagnosticClient.cpp.s
@@ -23556,7 +15886,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +diagnostics/TextDiagnosticClient.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/diagnostics/TextDiagnosticClient.cpp.s
 +.PHONY : diagnostics/TextDiagnosticClient.cpp.s
 +
 +numeric/SVInt.o: numeric/SVInt.cpp.o
@@ -23565,7 +15895,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +numeric/SVInt.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/numeric/SVInt.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/numeric/SVInt.cpp.o
 +.PHONY : numeric/SVInt.cpp.o
 +
 +numeric/SVInt.i: numeric/SVInt.cpp.i
@@ -23574,7 +15904,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +numeric/SVInt.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/numeric/SVInt.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/numeric/SVInt.cpp.i
 +.PHONY : numeric/SVInt.cpp.i
 +
 +numeric/SVInt.s: numeric/SVInt.cpp.s
@@ -23583,7 +15913,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +numeric/SVInt.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/numeric/SVInt.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/numeric/SVInt.cpp.s
 +.PHONY : numeric/SVInt.cpp.s
 +
 +numeric/Time.o: numeric/Time.cpp.o
@@ -23592,7 +15922,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +numeric/Time.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/numeric/Time.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/numeric/Time.cpp.o
 +.PHONY : numeric/Time.cpp.o
 +
 +numeric/Time.i: numeric/Time.cpp.i
@@ -23601,7 +15931,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +numeric/Time.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/numeric/Time.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/numeric/Time.cpp.i
 +.PHONY : numeric/Time.cpp.i
 +
 +numeric/Time.s: numeric/Time.cpp.s
@@ -23610,7 +15940,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +numeric/Time.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/numeric/Time.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/numeric/Time.cpp.s
 +.PHONY : numeric/Time.cpp.s
 +
 +numeric/VectorBuilder.o: numeric/VectorBuilder.cpp.o
@@ -23619,7 +15949,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +numeric/VectorBuilder.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o
 +.PHONY : numeric/VectorBuilder.cpp.o
 +
 +numeric/VectorBuilder.i: numeric/VectorBuilder.cpp.i
@@ -23628,7 +15958,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +numeric/VectorBuilder.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.i
 +.PHONY : numeric/VectorBuilder.cpp.i
 +
 +numeric/VectorBuilder.s: numeric/VectorBuilder.cpp.s
@@ -23637,7 +15967,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +numeric/VectorBuilder.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.s
 +.PHONY : numeric/VectorBuilder.cpp.s
 +
 +parsing/Lexer.o: parsing/Lexer.cpp.o
@@ -23646,7 +15976,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +parsing/Lexer.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Lexer.cpp.o
 +.PHONY : parsing/Lexer.cpp.o
 +
 +parsing/Lexer.i: parsing/Lexer.cpp.i
@@ -23655,7 +15985,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +parsing/Lexer.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Lexer.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Lexer.cpp.i
 +.PHONY : parsing/Lexer.cpp.i
 +
 +parsing/Lexer.s: parsing/Lexer.cpp.s
@@ -23664,7 +15994,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +parsing/Lexer.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Lexer.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Lexer.cpp.s
 +.PHONY : parsing/Lexer.cpp.s
 +
 +parsing/LexerFacts.o: parsing/LexerFacts.cpp.o
@@ -23673,7 +16003,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +parsing/LexerFacts.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.o
 +.PHONY : parsing/LexerFacts.cpp.o
 +
 +parsing/LexerFacts.i: parsing/LexerFacts.cpp.i
@@ -23682,7 +16012,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +parsing/LexerFacts.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.i
 +.PHONY : parsing/LexerFacts.cpp.i
 +
 +parsing/LexerFacts.s: parsing/LexerFacts.cpp.s
@@ -23691,7 +16021,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +parsing/LexerFacts.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.s
 +.PHONY : parsing/LexerFacts.cpp.s
 +
 +parsing/Parser.o: parsing/Parser.cpp.o
@@ -23700,7 +16030,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +parsing/Parser.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Parser.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Parser.cpp.o
 +.PHONY : parsing/Parser.cpp.o
 +
 +parsing/Parser.i: parsing/Parser.cpp.i
@@ -23709,7 +16039,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +parsing/Parser.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Parser.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Parser.cpp.i
 +.PHONY : parsing/Parser.cpp.i
 +
 +parsing/Parser.s: parsing/Parser.cpp.s
@@ -23718,7 +16048,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +parsing/Parser.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Parser.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Parser.cpp.s
 +.PHONY : parsing/Parser.cpp.s
 +
 +parsing/ParserBase.o: parsing/ParserBase.cpp.o
@@ -23727,7 +16057,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +parsing/ParserBase.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.o
 +.PHONY : parsing/ParserBase.cpp.o
 +
 +parsing/ParserBase.i: parsing/ParserBase.cpp.i
@@ -23736,7 +16066,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +parsing/ParserBase.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.i
 +.PHONY : parsing/ParserBase.cpp.i
 +
 +parsing/ParserBase.s: parsing/ParserBase.cpp.s
@@ -23745,7 +16075,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +parsing/ParserBase.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/ParserBase.cpp.s
 +.PHONY : parsing/ParserBase.cpp.s
 +
 +parsing/Parser_expressions.o: parsing/Parser_expressions.cpp.o
@@ -23754,7 +16084,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +parsing/Parser_expressions.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.o
 +.PHONY : parsing/Parser_expressions.cpp.o
 +
 +parsing/Parser_expressions.i: parsing/Parser_expressions.cpp.i
@@ -23763,7 +16093,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +parsing/Parser_expressions.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.i
 +.PHONY : parsing/Parser_expressions.cpp.i
 +
 +parsing/Parser_expressions.s: parsing/Parser_expressions.cpp.s
@@ -23772,8 +16102,35 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +parsing/Parser_expressions.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Parser_expressions.cpp.s
 +.PHONY : parsing/Parser_expressions.cpp.s
++
++parsing/Parser_members.o: parsing/Parser_members.cpp.o
++
++.PHONY : parsing/Parser_members.o
++
++# target to build an object file
++parsing/Parser_members.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Parser_members.cpp.o
++.PHONY : parsing/Parser_members.cpp.o
++
++parsing/Parser_members.i: parsing/Parser_members.cpp.i
++
++.PHONY : parsing/Parser_members.i
++
++# target to preprocess a source file
++parsing/Parser_members.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Parser_members.cpp.i
++.PHONY : parsing/Parser_members.cpp.i
++
++parsing/Parser_members.s: parsing/Parser_members.cpp.s
++
++.PHONY : parsing/Parser_members.s
++
++# target to generate assembly for a file
++parsing/Parser_members.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Parser_members.cpp.s
++.PHONY : parsing/Parser_members.cpp.s
 +
 +parsing/Parser_statements.o: parsing/Parser_statements.cpp.o
 +
@@ -23781,7 +16138,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +parsing/Parser_statements.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.o
 +.PHONY : parsing/Parser_statements.cpp.o
 +
 +parsing/Parser_statements.i: parsing/Parser_statements.cpp.i
@@ -23790,7 +16147,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +parsing/Parser_statements.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.i
 +.PHONY : parsing/Parser_statements.cpp.i
 +
 +parsing/Parser_statements.s: parsing/Parser_statements.cpp.s
@@ -23799,7 +16156,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +parsing/Parser_statements.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Parser_statements.cpp.s
 +.PHONY : parsing/Parser_statements.cpp.s
 +
 +parsing/Preprocessor.o: parsing/Preprocessor.cpp.o
@@ -23808,7 +16165,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +parsing/Preprocessor.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.o
 +.PHONY : parsing/Preprocessor.cpp.o
 +
 +parsing/Preprocessor.i: parsing/Preprocessor.cpp.i
@@ -23817,7 +16174,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +parsing/Preprocessor.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.i
 +.PHONY : parsing/Preprocessor.cpp.i
 +
 +parsing/Preprocessor.s: parsing/Preprocessor.cpp.s
@@ -23826,7 +16183,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +parsing/Preprocessor.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.s
 +.PHONY : parsing/Preprocessor.cpp.s
 +
 +parsing/Token.o: parsing/Token.cpp.o
@@ -23835,7 +16192,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +parsing/Token.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Token.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Token.cpp.o
 +.PHONY : parsing/Token.cpp.o
 +
 +parsing/Token.i: parsing/Token.cpp.i
@@ -23844,7 +16201,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +parsing/Token.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Token.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Token.cpp.i
 +.PHONY : parsing/Token.cpp.i
 +
 +parsing/Token.s: parsing/Token.cpp.s
@@ -23853,8 +16210,89 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +parsing/Token.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Token.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Token.cpp.s
 +.PHONY : parsing/Token.cpp.s
++
++symbols/AllTypes.o: symbols/AllTypes.cpp.o
++
++.PHONY : symbols/AllTypes.o
++
++# target to build an object file
++symbols/AllTypes.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/AllTypes.cpp.o
++.PHONY : symbols/AllTypes.cpp.o
++
++symbols/AllTypes.i: symbols/AllTypes.cpp.i
++
++.PHONY : symbols/AllTypes.i
++
++# target to preprocess a source file
++symbols/AllTypes.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/AllTypes.cpp.i
++.PHONY : symbols/AllTypes.cpp.i
++
++symbols/AllTypes.s: symbols/AllTypes.cpp.s
++
++.PHONY : symbols/AllTypes.s
++
++# target to generate assembly for a file
++symbols/AllTypes.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/AllTypes.cpp.s
++.PHONY : symbols/AllTypes.cpp.s
++
++symbols/BlockSymbols.o: symbols/BlockSymbols.cpp.o
++
++.PHONY : symbols/BlockSymbols.o
++
++# target to build an object file
++symbols/BlockSymbols.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/BlockSymbols.cpp.o
++.PHONY : symbols/BlockSymbols.cpp.o
++
++symbols/BlockSymbols.i: symbols/BlockSymbols.cpp.i
++
++.PHONY : symbols/BlockSymbols.i
++
++# target to preprocess a source file
++symbols/BlockSymbols.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/BlockSymbols.cpp.i
++.PHONY : symbols/BlockSymbols.cpp.i
++
++symbols/BlockSymbols.s: symbols/BlockSymbols.cpp.s
++
++.PHONY : symbols/BlockSymbols.s
++
++# target to generate assembly for a file
++symbols/BlockSymbols.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/BlockSymbols.cpp.s
++.PHONY : symbols/BlockSymbols.cpp.s
++
++symbols/CompilationUnitSymbols.o: symbols/CompilationUnitSymbols.cpp.o
++
++.PHONY : symbols/CompilationUnitSymbols.o
++
++# target to build an object file
++symbols/CompilationUnitSymbols.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/CompilationUnitSymbols.cpp.o
++.PHONY : symbols/CompilationUnitSymbols.cpp.o
++
++symbols/CompilationUnitSymbols.i: symbols/CompilationUnitSymbols.cpp.i
++
++.PHONY : symbols/CompilationUnitSymbols.i
++
++# target to preprocess a source file
++symbols/CompilationUnitSymbols.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/CompilationUnitSymbols.cpp.i
++.PHONY : symbols/CompilationUnitSymbols.cpp.i
++
++symbols/CompilationUnitSymbols.s: symbols/CompilationUnitSymbols.cpp.s
++
++.PHONY : symbols/CompilationUnitSymbols.s
++
++# target to generate assembly for a file
++symbols/CompilationUnitSymbols.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/CompilationUnitSymbols.cpp.s
++.PHONY : symbols/CompilationUnitSymbols.cpp.s
 +
 +symbols/DeclaredType.o: symbols/DeclaredType.cpp.o
 +
@@ -23862,7 +16300,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +symbols/DeclaredType.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.o
 +.PHONY : symbols/DeclaredType.cpp.o
 +
 +symbols/DeclaredType.i: symbols/DeclaredType.cpp.i
@@ -23871,7 +16309,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +symbols/DeclaredType.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.i
 +.PHONY : symbols/DeclaredType.cpp.i
 +
 +symbols/DeclaredType.s: symbols/DeclaredType.cpp.s
@@ -23880,35 +16318,35 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +symbols/DeclaredType.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.s
 +.PHONY : symbols/DeclaredType.cpp.s
 +
-+symbols/HierarchySymbols.o: symbols/HierarchySymbols.cpp.o
++symbols/DefinitionSymbols.o: symbols/DefinitionSymbols.cpp.o
 +
-+.PHONY : symbols/HierarchySymbols.o
++.PHONY : symbols/DefinitionSymbols.o
 +
 +# target to build an object file
-+symbols/HierarchySymbols.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.o
-+.PHONY : symbols/HierarchySymbols.cpp.o
++symbols/DefinitionSymbols.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/DefinitionSymbols.cpp.o
++.PHONY : symbols/DefinitionSymbols.cpp.o
 +
-+symbols/HierarchySymbols.i: symbols/HierarchySymbols.cpp.i
++symbols/DefinitionSymbols.i: symbols/DefinitionSymbols.cpp.i
 +
-+.PHONY : symbols/HierarchySymbols.i
++.PHONY : symbols/DefinitionSymbols.i
 +
 +# target to preprocess a source file
-+symbols/HierarchySymbols.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.i
-+.PHONY : symbols/HierarchySymbols.cpp.i
++symbols/DefinitionSymbols.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/DefinitionSymbols.cpp.i
++.PHONY : symbols/DefinitionSymbols.cpp.i
 +
-+symbols/HierarchySymbols.s: symbols/HierarchySymbols.cpp.s
++symbols/DefinitionSymbols.s: symbols/DefinitionSymbols.cpp.s
 +
-+.PHONY : symbols/HierarchySymbols.s
++.PHONY : symbols/DefinitionSymbols.s
 +
 +# target to generate assembly for a file
-+symbols/HierarchySymbols.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/HierarchySymbols.cpp.s
-+.PHONY : symbols/HierarchySymbols.cpp.s
++symbols/DefinitionSymbols.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/DefinitionSymbols.cpp.s
++.PHONY : symbols/DefinitionSymbols.cpp.s
 +
 +symbols/Lookup.o: symbols/Lookup.cpp.o
 +
@@ -23916,7 +16354,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +symbols/Lookup.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/Lookup.cpp.o
 +.PHONY : symbols/Lookup.cpp.o
 +
 +symbols/Lookup.i: symbols/Lookup.cpp.i
@@ -23925,7 +16363,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +symbols/Lookup.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/Lookup.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/Lookup.cpp.i
 +.PHONY : symbols/Lookup.cpp.i
 +
 +symbols/Lookup.s: symbols/Lookup.cpp.s
@@ -23934,7 +16372,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +symbols/Lookup.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/Lookup.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/Lookup.cpp.s
 +.PHONY : symbols/Lookup.cpp.s
 +
 +symbols/MemberSymbols.o: symbols/MemberSymbols.cpp.o
@@ -23943,7 +16381,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +symbols/MemberSymbols.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.o
 +.PHONY : symbols/MemberSymbols.cpp.o
 +
 +symbols/MemberSymbols.i: symbols/MemberSymbols.cpp.i
@@ -23952,7 +16390,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +symbols/MemberSymbols.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.i
 +.PHONY : symbols/MemberSymbols.cpp.i
 +
 +symbols/MemberSymbols.s: symbols/MemberSymbols.cpp.s
@@ -23961,8 +16399,62 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +symbols/MemberSymbols.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/MemberSymbols.cpp.s
 +.PHONY : symbols/MemberSymbols.cpp.s
++
++symbols/ParameterSymbols.o: symbols/ParameterSymbols.cpp.o
++
++.PHONY : symbols/ParameterSymbols.o
++
++# target to build an object file
++symbols/ParameterSymbols.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/ParameterSymbols.cpp.o
++.PHONY : symbols/ParameterSymbols.cpp.o
++
++symbols/ParameterSymbols.i: symbols/ParameterSymbols.cpp.i
++
++.PHONY : symbols/ParameterSymbols.i
++
++# target to preprocess a source file
++symbols/ParameterSymbols.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/ParameterSymbols.cpp.i
++.PHONY : symbols/ParameterSymbols.cpp.i
++
++symbols/ParameterSymbols.s: symbols/ParameterSymbols.cpp.s
++
++.PHONY : symbols/ParameterSymbols.s
++
++# target to generate assembly for a file
++symbols/ParameterSymbols.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/ParameterSymbols.cpp.s
++.PHONY : symbols/ParameterSymbols.cpp.s
++
++symbols/PortSymbols.o: symbols/PortSymbols.cpp.o
++
++.PHONY : symbols/PortSymbols.o
++
++# target to build an object file
++symbols/PortSymbols.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/PortSymbols.cpp.o
++.PHONY : symbols/PortSymbols.cpp.o
++
++symbols/PortSymbols.i: symbols/PortSymbols.cpp.i
++
++.PHONY : symbols/PortSymbols.i
++
++# target to preprocess a source file
++symbols/PortSymbols.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/PortSymbols.cpp.i
++.PHONY : symbols/PortSymbols.cpp.i
++
++symbols/PortSymbols.s: symbols/PortSymbols.cpp.s
++
++.PHONY : symbols/PortSymbols.s
++
++# target to generate assembly for a file
++symbols/PortSymbols.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/PortSymbols.cpp.s
++.PHONY : symbols/PortSymbols.cpp.s
 +
 +symbols/Scope.o: symbols/Scope.cpp.o
 +
@@ -23970,7 +16462,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +symbols/Scope.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/Scope.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/Scope.cpp.o
 +.PHONY : symbols/Scope.cpp.o
 +
 +symbols/Scope.i: symbols/Scope.cpp.i
@@ -23979,7 +16471,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +symbols/Scope.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/Scope.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/Scope.cpp.i
 +.PHONY : symbols/Scope.cpp.i
 +
 +symbols/Scope.s: symbols/Scope.cpp.s
@@ -23988,7 +16480,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +symbols/Scope.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/Scope.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/Scope.cpp.s
 +.PHONY : symbols/Scope.cpp.s
 +
 +symbols/SemanticFacts.o: symbols/SemanticFacts.cpp.o
@@ -23997,7 +16489,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +symbols/SemanticFacts.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.o
 +.PHONY : symbols/SemanticFacts.cpp.o
 +
 +symbols/SemanticFacts.i: symbols/SemanticFacts.cpp.i
@@ -24006,7 +16498,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +symbols/SemanticFacts.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.i
 +.PHONY : symbols/SemanticFacts.cpp.i
 +
 +symbols/SemanticFacts.s: symbols/SemanticFacts.cpp.s
@@ -24015,7 +16507,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +symbols/SemanticFacts.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/SemanticFacts.cpp.s
 +.PHONY : symbols/SemanticFacts.cpp.s
 +
 +symbols/Symbol.o: symbols/Symbol.cpp.o
@@ -24024,7 +16516,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +symbols/Symbol.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/Symbol.cpp.o
 +.PHONY : symbols/Symbol.cpp.o
 +
 +symbols/Symbol.i: symbols/Symbol.cpp.i
@@ -24033,7 +16525,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +symbols/Symbol.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/Symbol.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/Symbol.cpp.i
 +.PHONY : symbols/Symbol.cpp.i
 +
 +symbols/Symbol.s: symbols/Symbol.cpp.s
@@ -24042,8 +16534,62 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +symbols/Symbol.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/Symbol.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/Symbol.cpp.s
 +.PHONY : symbols/Symbol.cpp.s
++
++symbols/TimeScaleSymbolBase.o: symbols/TimeScaleSymbolBase.cpp.o
++
++.PHONY : symbols/TimeScaleSymbolBase.o
++
++# target to build an object file
++symbols/TimeScaleSymbolBase.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/TimeScaleSymbolBase.cpp.o
++.PHONY : symbols/TimeScaleSymbolBase.cpp.o
++
++symbols/TimeScaleSymbolBase.i: symbols/TimeScaleSymbolBase.cpp.i
++
++.PHONY : symbols/TimeScaleSymbolBase.i
++
++# target to preprocess a source file
++symbols/TimeScaleSymbolBase.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/TimeScaleSymbolBase.cpp.i
++.PHONY : symbols/TimeScaleSymbolBase.cpp.i
++
++symbols/TimeScaleSymbolBase.s: symbols/TimeScaleSymbolBase.cpp.s
++
++.PHONY : symbols/TimeScaleSymbolBase.s
++
++# target to generate assembly for a file
++symbols/TimeScaleSymbolBase.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/TimeScaleSymbolBase.cpp.s
++.PHONY : symbols/TimeScaleSymbolBase.cpp.s
++
++symbols/Type.o: symbols/Type.cpp.o
++
++.PHONY : symbols/Type.o
++
++# target to build an object file
++symbols/Type.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/Type.cpp.o
++.PHONY : symbols/Type.cpp.o
++
++symbols/Type.i: symbols/Type.cpp.i
++
++.PHONY : symbols/Type.i
++
++# target to preprocess a source file
++symbols/Type.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/Type.cpp.i
++.PHONY : symbols/Type.cpp.i
++
++symbols/Type.s: symbols/Type.cpp.s
++
++.PHONY : symbols/Type.s
++
++# target to generate assembly for a file
++symbols/Type.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/Type.cpp.s
++.PHONY : symbols/Type.cpp.s
 +
 +symbols/TypePrinter.o: symbols/TypePrinter.cpp.o
 +
@@ -24051,7 +16597,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +symbols/TypePrinter.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.o
 +.PHONY : symbols/TypePrinter.cpp.o
 +
 +symbols/TypePrinter.i: symbols/TypePrinter.cpp.i
@@ -24060,7 +16606,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +symbols/TypePrinter.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.i
 +.PHONY : symbols/TypePrinter.cpp.i
 +
 +symbols/TypePrinter.s: symbols/TypePrinter.cpp.s
@@ -24069,35 +16615,35 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +symbols/TypePrinter.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/TypePrinter.cpp.s
 +.PHONY : symbols/TypePrinter.cpp.s
 +
-+symbols/TypeSymbols.o: symbols/TypeSymbols.cpp.o
++symbols/VariableSymbols.o: symbols/VariableSymbols.cpp.o
 +
-+.PHONY : symbols/TypeSymbols.o
++.PHONY : symbols/VariableSymbols.o
 +
 +# target to build an object file
-+symbols/TypeSymbols.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.o
-+.PHONY : symbols/TypeSymbols.cpp.o
++symbols/VariableSymbols.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/VariableSymbols.cpp.o
++.PHONY : symbols/VariableSymbols.cpp.o
 +
-+symbols/TypeSymbols.i: symbols/TypeSymbols.cpp.i
++symbols/VariableSymbols.i: symbols/VariableSymbols.cpp.i
 +
-+.PHONY : symbols/TypeSymbols.i
++.PHONY : symbols/VariableSymbols.i
 +
 +# target to preprocess a source file
-+symbols/TypeSymbols.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.i
-+.PHONY : symbols/TypeSymbols.cpp.i
++symbols/VariableSymbols.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/VariableSymbols.cpp.i
++.PHONY : symbols/VariableSymbols.cpp.i
 +
-+symbols/TypeSymbols.s: symbols/TypeSymbols.cpp.s
++symbols/VariableSymbols.s: symbols/VariableSymbols.cpp.s
 +
-+.PHONY : symbols/TypeSymbols.s
++.PHONY : symbols/VariableSymbols.s
 +
 +# target to generate assembly for a file
-+symbols/TypeSymbols.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/TypeSymbols.cpp.s
-+.PHONY : symbols/TypeSymbols.cpp.s
++symbols/VariableSymbols.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/VariableSymbols.cpp.s
++.PHONY : symbols/VariableSymbols.cpp.s
 +
 +syntax/SyntaxFacts.o: syntax/SyntaxFacts.cpp.o
 +
@@ -24105,7 +16651,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +syntax/SyntaxFacts.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.o
 +.PHONY : syntax/SyntaxFacts.cpp.o
 +
 +syntax/SyntaxFacts.i: syntax/SyntaxFacts.cpp.i
@@ -24114,7 +16660,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +syntax/SyntaxFacts.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.i
 +.PHONY : syntax/SyntaxFacts.cpp.i
 +
 +syntax/SyntaxFacts.s: syntax/SyntaxFacts.cpp.s
@@ -24123,7 +16669,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +syntax/SyntaxFacts.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxFacts.cpp.s
 +.PHONY : syntax/SyntaxFacts.cpp.s
 +
 +syntax/SyntaxNode.o: syntax/SyntaxNode.cpp.o
@@ -24132,7 +16678,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +syntax/SyntaxNode.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.o
 +.PHONY : syntax/SyntaxNode.cpp.o
 +
 +syntax/SyntaxNode.i: syntax/SyntaxNode.cpp.i
@@ -24141,7 +16687,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +syntax/SyntaxNode.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.i
 +.PHONY : syntax/SyntaxNode.cpp.i
 +
 +syntax/SyntaxNode.s: syntax/SyntaxNode.cpp.s
@@ -24150,7 +16696,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +syntax/SyntaxNode.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxNode.cpp.s
 +.PHONY : syntax/SyntaxNode.cpp.s
 +
 +syntax/SyntaxPrinter.o: syntax/SyntaxPrinter.cpp.o
@@ -24159,7 +16705,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +syntax/SyntaxPrinter.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.o
 +.PHONY : syntax/SyntaxPrinter.cpp.o
 +
 +syntax/SyntaxPrinter.i: syntax/SyntaxPrinter.cpp.i
@@ -24168,7 +16714,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +syntax/SyntaxPrinter.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.i
 +.PHONY : syntax/SyntaxPrinter.cpp.i
 +
 +syntax/SyntaxPrinter.s: syntax/SyntaxPrinter.cpp.s
@@ -24177,7 +16723,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +syntax/SyntaxPrinter.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxPrinter.cpp.s
 +.PHONY : syntax/SyntaxPrinter.cpp.s
 +
 +syntax/SyntaxTree.o: syntax/SyntaxTree.cpp.o
@@ -24186,7 +16732,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +syntax/SyntaxTree.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.o
 +.PHONY : syntax/SyntaxTree.cpp.o
 +
 +syntax/SyntaxTree.i: syntax/SyntaxTree.cpp.i
@@ -24195,7 +16741,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +syntax/SyntaxTree.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.i
 +.PHONY : syntax/SyntaxTree.cpp.i
 +
 +syntax/SyntaxTree.s: syntax/SyntaxTree.cpp.s
@@ -24204,7 +16750,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +syntax/SyntaxTree.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxTree.cpp.s
 +.PHONY : syntax/SyntaxTree.cpp.s
 +
 +syntax/SyntaxVisitor.o: syntax/SyntaxVisitor.cpp.o
@@ -24213,7 +16759,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +syntax/SyntaxVisitor.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.o
 +.PHONY : syntax/SyntaxVisitor.cpp.o
 +
 +syntax/SyntaxVisitor.i: syntax/SyntaxVisitor.cpp.i
@@ -24222,7 +16768,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +syntax/SyntaxVisitor.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.i
 +.PHONY : syntax/SyntaxVisitor.cpp.i
 +
 +syntax/SyntaxVisitor.s: syntax/SyntaxVisitor.cpp.s
@@ -24231,7 +16777,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +syntax/SyntaxVisitor.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.s
 +.PHONY : syntax/SyntaxVisitor.cpp.s
 +
 +text/SFormat.o: text/SFormat.cpp.o
@@ -24240,7 +16786,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +text/SFormat.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/text/SFormat.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/text/SFormat.cpp.o
 +.PHONY : text/SFormat.cpp.o
 +
 +text/SFormat.i: text/SFormat.cpp.i
@@ -24249,7 +16795,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +text/SFormat.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/text/SFormat.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/text/SFormat.cpp.i
 +.PHONY : text/SFormat.cpp.i
 +
 +text/SFormat.s: text/SFormat.cpp.s
@@ -24258,7 +16804,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +text/SFormat.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/text/SFormat.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/text/SFormat.cpp.s
 +.PHONY : text/SFormat.cpp.s
 +
 +text/SourceManager.o: text/SourceManager.cpp.o
@@ -24267,7 +16813,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +text/SourceManager.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/text/SourceManager.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/text/SourceManager.cpp.o
 +.PHONY : text/SourceManager.cpp.o
 +
 +text/SourceManager.i: text/SourceManager.cpp.i
@@ -24276,7 +16822,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +text/SourceManager.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/text/SourceManager.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/text/SourceManager.cpp.i
 +.PHONY : text/SourceManager.cpp.i
 +
 +text/SourceManager.s: text/SourceManager.cpp.s
@@ -24285,7 +16831,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +text/SourceManager.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/text/SourceManager.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/text/SourceManager.cpp.s
 +.PHONY : text/SourceManager.cpp.s
 +
 +util/Assert.o: util/Assert.cpp.o
@@ -24294,7 +16840,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +util/Assert.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/Assert.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/Assert.cpp.o
 +.PHONY : util/Assert.cpp.o
 +
 +util/Assert.i: util/Assert.cpp.i
@@ -24303,7 +16849,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +util/Assert.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/Assert.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/Assert.cpp.i
 +.PHONY : util/Assert.cpp.i
 +
 +util/Assert.s: util/Assert.cpp.s
@@ -24312,7 +16858,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +util/Assert.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/Assert.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/Assert.cpp.s
 +.PHONY : util/Assert.cpp.s
 +
 +util/BumpAllocator.o: util/BumpAllocator.cpp.o
@@ -24321,7 +16867,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +util/BumpAllocator.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/BumpAllocator.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/BumpAllocator.cpp.o
 +.PHONY : util/BumpAllocator.cpp.o
 +
 +util/BumpAllocator.i: util/BumpAllocator.cpp.i
@@ -24330,7 +16876,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +util/BumpAllocator.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/BumpAllocator.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/BumpAllocator.cpp.i
 +.PHONY : util/BumpAllocator.cpp.i
 +
 +util/BumpAllocator.s: util/BumpAllocator.cpp.s
@@ -24339,7 +16885,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +util/BumpAllocator.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/BumpAllocator.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/BumpAllocator.cpp.s
 +.PHONY : util/BumpAllocator.cpp.s
 +
 +util/CommandLine.o: util/CommandLine.cpp.o
@@ -24348,7 +16894,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +util/CommandLine.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/CommandLine.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/CommandLine.cpp.o
 +.PHONY : util/CommandLine.cpp.o
 +
 +util/CommandLine.i: util/CommandLine.cpp.i
@@ -24357,7 +16903,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +util/CommandLine.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/CommandLine.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/CommandLine.cpp.i
 +.PHONY : util/CommandLine.cpp.i
 +
 +util/CommandLine.s: util/CommandLine.cpp.s
@@ -24366,7 +16912,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +util/CommandLine.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/CommandLine.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/CommandLine.cpp.s
 +.PHONY : util/CommandLine.cpp.s
 +
 +util/Hash.o: util/Hash.cpp.o
@@ -24375,7 +16921,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +util/Hash.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/Hash.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/Hash.cpp.o
 +.PHONY : util/Hash.cpp.o
 +
 +util/Hash.i: util/Hash.cpp.i
@@ -24384,7 +16930,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +util/Hash.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/Hash.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/Hash.cpp.i
 +.PHONY : util/Hash.cpp.i
 +
 +util/Hash.s: util/Hash.cpp.s
@@ -24393,7 +16939,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +util/Hash.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/Hash.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/Hash.cpp.s
 +.PHONY : util/Hash.cpp.s
 +
 +util/String.o: util/String.cpp.o
@@ -24402,7 +16948,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to build an object file
 +util/String.cpp.o:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/String.cpp.o
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/String.cpp.o
 +.PHONY : util/String.cpp.o
 +
 +util/String.i: util/String.cpp.i
@@ -24411,7 +16957,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to preprocess a source file
 +util/String.cpp.i:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/String.cpp.i
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/String.cpp.i
 +.PHONY : util/String.cpp.i
 +
 +util/String.s: util/String.cpp.s
@@ -24420,7 +16966,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# target to generate assembly for a file
 +util/String.cpp.s:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/String.cpp.s
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/String.cpp.s
 +.PHONY : util/String.cpp.s
 +
 +# Help Target
@@ -24479,6 +17025,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +	@echo "... compilation/builtins/ArrayMethods.o"
 +	@echo "... compilation/builtins/ArrayMethods.i"
 +	@echo "... compilation/builtins/ArrayMethods.s"
++	@echo "... compilation/builtins/ConversionFuncs.o"
++	@echo "... compilation/builtins/ConversionFuncs.i"
++	@echo "... compilation/builtins/ConversionFuncs.s"
 +	@echo "... compilation/builtins/EnumMethods.o"
 +	@echo "... compilation/builtins/EnumMethods.i"
 +	@echo "... compilation/builtins/EnumMethods.s"
@@ -24536,6 +17085,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +	@echo "... parsing/Parser_expressions.o"
 +	@echo "... parsing/Parser_expressions.i"
 +	@echo "... parsing/Parser_expressions.s"
++	@echo "... parsing/Parser_members.o"
++	@echo "... parsing/Parser_members.i"
++	@echo "... parsing/Parser_members.s"
 +	@echo "... parsing/Parser_statements.o"
 +	@echo "... parsing/Parser_statements.i"
 +	@echo "... parsing/Parser_statements.s"
@@ -24545,18 +17097,33 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +	@echo "... parsing/Token.o"
 +	@echo "... parsing/Token.i"
 +	@echo "... parsing/Token.s"
++	@echo "... symbols/AllTypes.o"
++	@echo "... symbols/AllTypes.i"
++	@echo "... symbols/AllTypes.s"
++	@echo "... symbols/BlockSymbols.o"
++	@echo "... symbols/BlockSymbols.i"
++	@echo "... symbols/BlockSymbols.s"
++	@echo "... symbols/CompilationUnitSymbols.o"
++	@echo "... symbols/CompilationUnitSymbols.i"
++	@echo "... symbols/CompilationUnitSymbols.s"
 +	@echo "... symbols/DeclaredType.o"
 +	@echo "... symbols/DeclaredType.i"
 +	@echo "... symbols/DeclaredType.s"
-+	@echo "... symbols/HierarchySymbols.o"
-+	@echo "... symbols/HierarchySymbols.i"
-+	@echo "... symbols/HierarchySymbols.s"
++	@echo "... symbols/DefinitionSymbols.o"
++	@echo "... symbols/DefinitionSymbols.i"
++	@echo "... symbols/DefinitionSymbols.s"
 +	@echo "... symbols/Lookup.o"
 +	@echo "... symbols/Lookup.i"
 +	@echo "... symbols/Lookup.s"
 +	@echo "... symbols/MemberSymbols.o"
 +	@echo "... symbols/MemberSymbols.i"
 +	@echo "... symbols/MemberSymbols.s"
++	@echo "... symbols/ParameterSymbols.o"
++	@echo "... symbols/ParameterSymbols.i"
++	@echo "... symbols/ParameterSymbols.s"
++	@echo "... symbols/PortSymbols.o"
++	@echo "... symbols/PortSymbols.i"
++	@echo "... symbols/PortSymbols.s"
 +	@echo "... symbols/Scope.o"
 +	@echo "... symbols/Scope.i"
 +	@echo "... symbols/Scope.s"
@@ -24566,12 +17133,18 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +	@echo "... symbols/Symbol.o"
 +	@echo "... symbols/Symbol.i"
 +	@echo "... symbols/Symbol.s"
++	@echo "... symbols/TimeScaleSymbolBase.o"
++	@echo "... symbols/TimeScaleSymbolBase.i"
++	@echo "... symbols/TimeScaleSymbolBase.s"
++	@echo "... symbols/Type.o"
++	@echo "... symbols/Type.i"
++	@echo "... symbols/Type.s"
 +	@echo "... symbols/TypePrinter.o"
 +	@echo "... symbols/TypePrinter.i"
 +	@echo "... symbols/TypePrinter.s"
-+	@echo "... symbols/TypeSymbols.o"
-+	@echo "... symbols/TypeSymbols.i"
-+	@echo "... symbols/TypeSymbols.s"
++	@echo "... symbols/VariableSymbols.o"
++	@echo "... symbols/VariableSymbols.i"
++	@echo "... symbols/VariableSymbols.s"
 +	@echo "... syntax/SyntaxFacts.o"
 +	@echo "... syntax/SyntaxFacts.i"
 +	@echo "... syntax/SyntaxFacts.s"
@@ -24619,13 +17192,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +# No rule that depends on this can have commands that come from listfiles
 +# because they might be regenerated.
 +cmake_check_build_system:
-+	cd /soe/renau/projs/synth/slang_orig/build && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 0
++	cd /soe/renau/projs/synth/slang/build && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 0
 +.PHONY : cmake_check_build_system
 +
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/slang/diagnostics/AllDiags.h ./generated/slang/diagnostics/AllDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/AllDiags.h ./generated/slang/diagnostics/AllDiags.h
 --- ../slang_orig/generated/slang/diagnostics/AllDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/AllDiags.h	2019-10-16 10:35:24.204064103 -0700
-@@ -0,0 +1,21 @@
++++ ./generated/slang/diagnostics/AllDiags.h	2019-11-23 10:40:28.821890357 -0800
+@@ -0,0 +1,22 @@
 +//------------------------------------------------------------------------------
 +// AllDiags.h
 +// Combined header that includes all subsystem-specific diagnostic headers.
@@ -24640,6 +17213,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +#include "slang/diagnostics/GeneralDiags.h"
 +#include "slang/diagnostics/LexerDiags.h"
 +#include "slang/diagnostics/LookupDiags.h"
++#include "slang/diagnostics/MetaDiags.h"
 +#include "slang/diagnostics/NumericDiags.h"
 +#include "slang/diagnostics/ParserDiags.h"
 +#include "slang/diagnostics/PreprocessorDiags.h"
@@ -24647,10 +17221,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +#include "slang/diagnostics/SysFuncsDiags.h"
 +#include "slang/diagnostics/TypesDiags.h"
 +
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/slang/diagnostics/ConstEvalDiags.h ./generated/slang/diagnostics/ConstEvalDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/ConstEvalDiags.h ./generated/slang/diagnostics/ConstEvalDiags.h
 --- ../slang_orig/generated/slang/diagnostics/ConstEvalDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/ConstEvalDiags.h	2019-10-16 10:35:24.204064103 -0700
-@@ -0,0 +1,28 @@
++++ ./generated/slang/diagnostics/ConstEvalDiags.h	2019-11-23 10:40:28.821890357 -0800
+@@ -0,0 +1,32 @@
 +//------------------------------------------------------------------------------
 +// ConstEvalDiags.h
 +// Generated diagnostic enums for the ConstEval subsystem.
@@ -24665,24 +17239,28 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +inline constexpr DiagCode ExpressionNotConstant(DiagSubsystem::ConstEval, 0);
 +inline constexpr DiagCode NoteInCallTo(DiagSubsystem::ConstEval, 1);
-+inline constexpr DiagCode NoteNonConstVariable(DiagSubsystem::ConstEval, 2);
-+inline constexpr DiagCode NoteArrayIndexInvalid(DiagSubsystem::ConstEval, 3);
-+inline constexpr DiagCode NotePartSelectInvalid(DiagSubsystem::ConstEval, 4);
-+inline constexpr DiagCode NoteStringIndexInvalid(DiagSubsystem::ConstEval, 5);
-+inline constexpr DiagCode NoteReplicationCountInvalid(DiagSubsystem::ConstEval, 6);
-+inline constexpr DiagCode NoteHierarchicalNameInCE(DiagSubsystem::ConstEval, 7);
-+inline constexpr DiagCode NoteFunctionIdentifiersMustBeLocal(DiagSubsystem::ConstEval, 8);
-+inline constexpr DiagCode NoteParamUsedInCEBeforeDecl(DiagSubsystem::ConstEval, 9);
-+inline constexpr DiagCode NoteNoCaseItemsMatched(DiagSubsystem::ConstEval, 10);
-+inline constexpr DiagCode NoteCaseItemsNotUnique(DiagSubsystem::ConstEval, 11);
-+inline constexpr DiagCode NoteTimedStmtNotConst(DiagSubsystem::ConstEval, 12);
-+inline constexpr DiagCode NoteAssertionFailed(DiagSubsystem::ConstEval, 13);
++inline constexpr DiagCode NoteSkippingFrames(DiagSubsystem::ConstEval, 2);
++inline constexpr DiagCode NoteNonConstVariable(DiagSubsystem::ConstEval, 3);
++inline constexpr DiagCode NoteArrayIndexInvalid(DiagSubsystem::ConstEval, 4);
++inline constexpr DiagCode NotePartSelectInvalid(DiagSubsystem::ConstEval, 5);
++inline constexpr DiagCode NoteStringIndexInvalid(DiagSubsystem::ConstEval, 6);
++inline constexpr DiagCode NoteReplicationCountInvalid(DiagSubsystem::ConstEval, 7);
++inline constexpr DiagCode NoteHierarchicalNameInCE(DiagSubsystem::ConstEval, 8);
++inline constexpr DiagCode NoteFunctionIdentifiersMustBeLocal(DiagSubsystem::ConstEval, 9);
++inline constexpr DiagCode NoteParamUsedInCEBeforeDecl(DiagSubsystem::ConstEval, 10);
++inline constexpr DiagCode NoteNoCaseItemsMatched(DiagSubsystem::ConstEval, 11);
++inline constexpr DiagCode NoteCaseItemsNotUnique(DiagSubsystem::ConstEval, 12);
++inline constexpr DiagCode NoteTimedStmtNotConst(DiagSubsystem::ConstEval, 13);
++inline constexpr DiagCode NoteAssertionFailed(DiagSubsystem::ConstEval, 14);
++inline constexpr DiagCode NoteParallelBlockNotConst(DiagSubsystem::ConstEval, 15);
++inline constexpr DiagCode NoteExceededMaxCallDepth(DiagSubsystem::ConstEval, 16);
++inline constexpr DiagCode NoteExceededMaxSteps(DiagSubsystem::ConstEval, 17);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/slang/diagnostics/DeclarationsDiags.h ./generated/slang/diagnostics/DeclarationsDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/DeclarationsDiags.h ./generated/slang/diagnostics/DeclarationsDiags.h
 --- ../slang_orig/generated/slang/diagnostics/DeclarationsDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/DeclarationsDiags.h	2019-10-16 10:35:24.204064103 -0700
-@@ -0,0 +1,61 @@
++++ ./generated/slang/diagnostics/DeclarationsDiags.h	2019-11-23 10:40:28.821890357 -0800
+@@ -0,0 +1,64 @@
 +//------------------------------------------------------------------------------
 +// DeclarationsDiags.h
 +// Generated diagnostic enums for the Declarations subsystem.
@@ -24735,19 +17313,22 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode GenvarUnknownBits(DiagSubsystem::Declarations, 37);
 +inline constexpr DiagCode ImplicitNamedPortNotFound(DiagSubsystem::Declarations, 38);
 +inline constexpr DiagCode ImplicitNamedPortTypeMismatch(DiagSubsystem::Declarations, 39);
-+inline constexpr DiagCode CaseGenerateDup(DiagSubsystem::Declarations, 40);
-+inline constexpr DiagCode CaseGenerateNoBlock(DiagSubsystem::Declarations, 41);
-+inline constexpr DiagCode UnconnectedNamedPort(DiagSubsystem::Declarations, 42);
-+inline constexpr DiagCode UnconnectedUnnamedPort(DiagSubsystem::Declarations, 43);
-+inline constexpr DiagCode ImplicitNetPortNoDefault(DiagSubsystem::Declarations, 44);
-+inline constexpr DiagCode DuplicateAttribute(DiagSubsystem::Declarations, 45);
-+inline constexpr DiagCode EmptyMember(DiagSubsystem::Declarations, 46);
++inline constexpr DiagCode MaxInstanceDepthExceeded(DiagSubsystem::Declarations, 40);
++inline constexpr DiagCode MaxGenerateStepsExceeded(DiagSubsystem::Declarations, 41);
++inline constexpr DiagCode MixingSubroutinePortKinds(DiagSubsystem::Declarations, 42);
++inline constexpr DiagCode CaseGenerateDup(DiagSubsystem::Declarations, 43);
++inline constexpr DiagCode CaseGenerateNoBlock(DiagSubsystem::Declarations, 44);
++inline constexpr DiagCode UnconnectedNamedPort(DiagSubsystem::Declarations, 45);
++inline constexpr DiagCode UnconnectedUnnamedPort(DiagSubsystem::Declarations, 46);
++inline constexpr DiagCode ImplicitNetPortNoDefault(DiagSubsystem::Declarations, 47);
++inline constexpr DiagCode DuplicateAttribute(DiagSubsystem::Declarations, 48);
++inline constexpr DiagCode EmptyMember(DiagSubsystem::Declarations, 49);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/slang/diagnostics/ExpressionsDiags.h ./generated/slang/diagnostics/ExpressionsDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/ExpressionsDiags.h ./generated/slang/diagnostics/ExpressionsDiags.h
 --- ../slang_orig/generated/slang/diagnostics/ExpressionsDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/ExpressionsDiags.h	2019-10-16 10:35:24.204064103 -0700
-@@ -0,0 +1,51 @@
++++ ./generated/slang/diagnostics/ExpressionsDiags.h	2019-11-23 10:40:28.821890357 -0800
+@@ -0,0 +1,54 @@
 +//------------------------------------------------------------------------------
 +// ExpressionsDiags.h
 +// Generated diagnostic enums for the Expressions subsystem.
@@ -24766,42 +17347,45 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode BadIndexExpression(DiagSubsystem::Expressions, 3);
 +inline constexpr DiagCode BadConcatExpression(DiagSubsystem::Expressions, 4);
 +inline constexpr DiagCode BadReplicationExpression(DiagSubsystem::Expressions, 5);
-+inline constexpr DiagCode ConcatWithStringInt(DiagSubsystem::Expressions, 6);
-+inline constexpr DiagCode BadRangeExpression(DiagSubsystem::Expressions, 7);
-+inline constexpr DiagCode RangeWidthTooLarge(DiagSubsystem::Expressions, 8);
-+inline constexpr DiagCode CannotIndexScalar(DiagSubsystem::Expressions, 9);
-+inline constexpr DiagCode ExprMustBeIntegral(DiagSubsystem::Expressions, 10);
-+inline constexpr DiagCode IndexValueInvalid(DiagSubsystem::Expressions, 11);
-+inline constexpr DiagCode SelectEndianMismatch(DiagSubsystem::Expressions, 12);
-+inline constexpr DiagCode BadAssignment(DiagSubsystem::Expressions, 13);
-+inline constexpr DiagCode BadConversion(DiagSubsystem::Expressions, 14);
-+inline constexpr DiagCode BadIntegerCast(DiagSubsystem::Expressions, 15);
-+inline constexpr DiagCode NoImplicitConversion(DiagSubsystem::Expressions, 16);
-+inline constexpr DiagCode TooManyArguments(DiagSubsystem::Expressions, 17);
-+inline constexpr DiagCode TooFewArguments(DiagSubsystem::Expressions, 18);
-+inline constexpr DiagCode ExpressionNotAssignable(DiagSubsystem::Expressions, 19);
-+inline constexpr DiagCode ReplicationZeroOutsideConcat(DiagSubsystem::Expressions, 20);
-+inline constexpr DiagCode InvalidMemberAccess(DiagSubsystem::Expressions, 21);
-+inline constexpr DiagCode ExpressionNotCallable(DiagSubsystem::Expressions, 22);
-+inline constexpr DiagCode NotBooleanConvertible(DiagSubsystem::Expressions, 23);
-+inline constexpr DiagCode EnumValueSizeMismatch(DiagSubsystem::Expressions, 24);
-+inline constexpr DiagCode InvalidCaseStmtType(DiagSubsystem::Expressions, 25);
-+inline constexpr DiagCode NoCommonCaseStmtType(DiagSubsystem::Expressions, 26);
-+inline constexpr DiagCode AssignmentPatternNoContext(DiagSubsystem::Expressions, 27);
-+inline constexpr DiagCode BadAssignmentPatternType(DiagSubsystem::Expressions, 28);
-+inline constexpr DiagCode WrongNumberAssignmentPatterns(DiagSubsystem::Expressions, 29);
-+inline constexpr DiagCode StructAssignmentPatternKey(DiagSubsystem::Expressions, 30);
-+inline constexpr DiagCode AssignmentPatternKeyDupDefault(DiagSubsystem::Expressions, 31);
-+inline constexpr DiagCode AssignmentPatternKeyDupValue(DiagSubsystem::Expressions, 32);
-+inline constexpr DiagCode AssignmentPatternKeyDupName(DiagSubsystem::Expressions, 33);
-+inline constexpr DiagCode AssignmentPatternNoMember(DiagSubsystem::Expressions, 34);
-+inline constexpr DiagCode AssignmentPatternNestedNoMember(DiagSubsystem::Expressions, 35);
-+inline constexpr DiagCode AssignmentPatternMissingElements(DiagSubsystem::Expressions, 36);
++inline constexpr DiagCode BadCastType(DiagSubsystem::Expressions, 6);
++inline constexpr DiagCode ConcatWithStringInt(DiagSubsystem::Expressions, 7);
++inline constexpr DiagCode BadRangeExpression(DiagSubsystem::Expressions, 8);
++inline constexpr DiagCode RangeWidthTooLarge(DiagSubsystem::Expressions, 9);
++inline constexpr DiagCode CannotIndexScalar(DiagSubsystem::Expressions, 10);
++inline constexpr DiagCode ExprMustBeIntegral(DiagSubsystem::Expressions, 11);
++inline constexpr DiagCode IndexValueInvalid(DiagSubsystem::Expressions, 12);
++inline constexpr DiagCode SelectEndianMismatch(DiagSubsystem::Expressions, 13);
++inline constexpr DiagCode BadAssignment(DiagSubsystem::Expressions, 14);
++inline constexpr DiagCode BadConversion(DiagSubsystem::Expressions, 15);
++inline constexpr DiagCode BadIntegerCast(DiagSubsystem::Expressions, 16);
++inline constexpr DiagCode NoImplicitConversion(DiagSubsystem::Expressions, 17);
++inline constexpr DiagCode TooManyArguments(DiagSubsystem::Expressions, 18);
++inline constexpr DiagCode TooFewArguments(DiagSubsystem::Expressions, 19);
++inline constexpr DiagCode ExpressionNotAssignable(DiagSubsystem::Expressions, 20);
++inline constexpr DiagCode ReplicationZeroOutsideConcat(DiagSubsystem::Expressions, 21);
++inline constexpr DiagCode InvalidMemberAccess(DiagSubsystem::Expressions, 22);
++inline constexpr DiagCode ExpressionNotCallable(DiagSubsystem::Expressions, 23);
++inline constexpr DiagCode NotBooleanConvertible(DiagSubsystem::Expressions, 24);
++inline constexpr DiagCode EnumValueSizeMismatch(DiagSubsystem::Expressions, 25);
++inline constexpr DiagCode InvalidCaseStmtType(DiagSubsystem::Expressions, 26);
++inline constexpr DiagCode NoCommonCaseStmtType(DiagSubsystem::Expressions, 27);
++inline constexpr DiagCode AssignmentPatternNoContext(DiagSubsystem::Expressions, 28);
++inline constexpr DiagCode BadAssignmentPatternType(DiagSubsystem::Expressions, 29);
++inline constexpr DiagCode WrongNumberAssignmentPatterns(DiagSubsystem::Expressions, 30);
++inline constexpr DiagCode AssignmentPatternKeyExpr(DiagSubsystem::Expressions, 31);
++inline constexpr DiagCode AssignmentPatternKeyDupDefault(DiagSubsystem::Expressions, 32);
++inline constexpr DiagCode AssignmentPatternKeyDupValue(DiagSubsystem::Expressions, 33);
++inline constexpr DiagCode AssignmentPatternKeyDupName(DiagSubsystem::Expressions, 34);
++inline constexpr DiagCode AssignmentPatternNoMember(DiagSubsystem::Expressions, 35);
++inline constexpr DiagCode AssignmentPatternNestedNoMember(DiagSubsystem::Expressions, 36);
++inline constexpr DiagCode AssignmentPatternMissingElements(DiagSubsystem::Expressions, 37);
++inline constexpr DiagCode EmptyArgNotAllowed(DiagSubsystem::Expressions, 38);
++inline constexpr DiagCode NamedArgNotAllowed(DiagSubsystem::Expressions, 39);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/slang/diagnostics/GeneralDiags.h ./generated/slang/diagnostics/GeneralDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/GeneralDiags.h ./generated/slang/diagnostics/GeneralDiags.h
 --- ../slang_orig/generated/slang/diagnostics/GeneralDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/GeneralDiags.h	2019-10-16 10:35:24.204064103 -0700
++++ ./generated/slang/diagnostics/GeneralDiags.h	2019-11-23 10:40:28.821890357 -0800
 @@ -0,0 +1,21 @@
 +//------------------------------------------------------------------------------
 +// GeneralDiags.h
@@ -24824,9 +17408,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode AttributesNotAllowed(DiagSubsystem::General, 6);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/slang/diagnostics/LexerDiags.h ./generated/slang/diagnostics/LexerDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/LexerDiags.h ./generated/slang/diagnostics/LexerDiags.h
 --- ../slang_orig/generated/slang/diagnostics/LexerDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/LexerDiags.h	2019-10-16 10:35:24.204064103 -0700
++++ ./generated/slang/diagnostics/LexerDiags.h	2019-11-23 10:40:28.821890357 -0800
 @@ -0,0 +1,37 @@
 +//------------------------------------------------------------------------------
 +// LexerDiags.h
@@ -24865,9 +17449,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode TooManyLexerErrors(DiagSubsystem::Lexer, 22);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/slang/diagnostics/LookupDiags.h ./generated/slang/diagnostics/LookupDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/LookupDiags.h ./generated/slang/diagnostics/LookupDiags.h
 --- ../slang_orig/generated/slang/diagnostics/LookupDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/LookupDiags.h	2019-10-16 10:35:24.204064103 -0700
++++ ./generated/slang/diagnostics/LookupDiags.h	2019-11-23 10:40:28.821890357 -0800
 @@ -0,0 +1,43 @@
 +//------------------------------------------------------------------------------
 +// LookupDiags.h
@@ -24912,9 +17496,29 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode DuplicateImport(DiagSubsystem::Lookup, 28);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/slang/diagnostics/NumericDiags.h ./generated/slang/diagnostics/NumericDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/MetaDiags.h ./generated/slang/diagnostics/MetaDiags.h
+--- ../slang_orig/generated/slang/diagnostics/MetaDiags.h	1969-12-31 16:00:00.000000000 -0800
++++ ./generated/slang/diagnostics/MetaDiags.h	2019-11-23 10:40:28.821890357 -0800
+@@ -0,0 +1,16 @@
++//------------------------------------------------------------------------------
++// MetaDiags.h
++// Generated diagnostic enums for the Meta subsystem.
++//
++// File is under the MIT license; see LICENSE for details.
++//------------------------------------------------------------------------------
++#pragma once
++
++#include "slang/diagnostics/Diagnostics.h"
++
++namespace slang::diag {
++
++inline constexpr DiagCode TooManyErrors(DiagSubsystem::Meta, 0);
++inline constexpr DiagCode UnknownWarningOption(DiagSubsystem::Meta, 1);
++
++}
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/NumericDiags.h ./generated/slang/diagnostics/NumericDiags.h
 --- ../slang_orig/generated/slang/diagnostics/NumericDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/NumericDiags.h	2019-10-16 10:35:24.204064103 -0700
++++ ./generated/slang/diagnostics/NumericDiags.h	2019-11-23 10:40:28.821890357 -0800
 @@ -0,0 +1,25 @@
 +//------------------------------------------------------------------------------
 +// NumericDiags.h
@@ -24941,10 +17545,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode VectorLiteralOverflow(DiagSubsystem::Numeric, 10);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/slang/diagnostics/ParserDiags.h ./generated/slang/diagnostics/ParserDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/ParserDiags.h ./generated/slang/diagnostics/ParserDiags.h
 --- ../slang_orig/generated/slang/diagnostics/ParserDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/ParserDiags.h	2019-10-16 10:35:24.204064103 -0700
-@@ -0,0 +1,63 @@
++++ ./generated/slang/diagnostics/ParserDiags.h	2019-11-23 10:40:28.821890357 -0800
+@@ -0,0 +1,70 @@
 +//------------------------------------------------------------------------------
 +// ParserDiags.h
 +// Generated diagnostic enums for the Parser subsystem.
@@ -24989,28 +17593,35 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode ExpectedDistItem(DiagSubsystem::Parser, 29);
 +inline constexpr DiagCode ExpectedIfOrCase(DiagSubsystem::Parser, 30);
 +inline constexpr DiagCode ExpectedClassScope(DiagSubsystem::Parser, 31);
-+inline constexpr DiagCode NoLabelOnSemicolon(DiagSubsystem::Parser, 32);
-+inline constexpr DiagCode DeferredDelayMustBeZero(DiagSubsystem::Parser, 33);
-+inline constexpr DiagCode InvalidGenvarIterExpression(DiagSubsystem::Parser, 34);
-+inline constexpr DiagCode ExpectedGenvarIterVar(DiagSubsystem::Parser, 35);
-+inline constexpr DiagCode ConstFunctionPortRequiresRef(DiagSubsystem::Parser, 36);
-+inline constexpr DiagCode ExpectedClockingSkew(DiagSubsystem::Parser, 37);
-+inline constexpr DiagCode ExpectedDPISpecString(DiagSubsystem::Parser, 38);
-+inline constexpr DiagCode ParseTreeTooDeep(DiagSubsystem::Parser, 39);
-+inline constexpr DiagCode MissingModportPortDirection(DiagSubsystem::Parser, 40);
-+inline constexpr DiagCode CaseStatementEmpty(DiagSubsystem::Parser, 41);
-+inline constexpr DiagCode MultipleDefaultCases(DiagSubsystem::Parser, 42);
-+inline constexpr DiagCode DirectionOnInterfacePort(DiagSubsystem::Parser, 43);
-+inline constexpr DiagCode UnexpectedQualifiers(DiagSubsystem::Parser, 44);
-+inline constexpr DiagCode ExpectedSampleKeyword(DiagSubsystem::Parser, 45);
-+inline constexpr DiagCode MultipleGenerateDefaultCases(DiagSubsystem::Parser, 46);
-+inline constexpr DiagCode CaseGenerateEmpty(DiagSubsystem::Parser, 47);
-+inline constexpr DiagCode NonStandardGenBlock(DiagSubsystem::Parser, 48);
++inline constexpr DiagCode ExpectedNetStrength(DiagSubsystem::Parser, 32);
++inline constexpr DiagCode ExpectedEnumBase(DiagSubsystem::Parser, 33);
++inline constexpr DiagCode NoLabelOnSemicolon(DiagSubsystem::Parser, 34);
++inline constexpr DiagCode DeferredDelayMustBeZero(DiagSubsystem::Parser, 35);
++inline constexpr DiagCode InvalidGenvarIterExpression(DiagSubsystem::Parser, 36);
++inline constexpr DiagCode ExpectedGenvarIterVar(DiagSubsystem::Parser, 37);
++inline constexpr DiagCode ConstFunctionPortRequiresRef(DiagSubsystem::Parser, 38);
++inline constexpr DiagCode ExpectedClockingSkew(DiagSubsystem::Parser, 39);
++inline constexpr DiagCode ExpectedDPISpecString(DiagSubsystem::Parser, 40);
++inline constexpr DiagCode ParseTreeTooDeep(DiagSubsystem::Parser, 41);
++inline constexpr DiagCode MissingModportPortDirection(DiagSubsystem::Parser, 42);
++inline constexpr DiagCode CaseStatementEmpty(DiagSubsystem::Parser, 43);
++inline constexpr DiagCode MultipleDefaultCases(DiagSubsystem::Parser, 44);
++inline constexpr DiagCode DirectionOnInterfacePort(DiagSubsystem::Parser, 45);
++inline constexpr DiagCode UnexpectedQualifiers(DiagSubsystem::Parser, 46);
++inline constexpr DiagCode ExpectedSampleKeyword(DiagSubsystem::Parser, 47);
++inline constexpr DiagCode MultipleGenerateDefaultCases(DiagSubsystem::Parser, 48);
++inline constexpr DiagCode CaseGenerateEmpty(DiagSubsystem::Parser, 49);
++inline constexpr DiagCode LabelAndName(DiagSubsystem::Parser, 50);
++inline constexpr DiagCode EndNameMismatch(DiagSubsystem::Parser, 51);
++inline constexpr DiagCode EndNameNotEmpty(DiagSubsystem::Parser, 52);
++inline constexpr DiagCode DeclarationsAtStart(DiagSubsystem::Parser, 53);
++inline constexpr DiagCode VoidNotAllowed(DiagSubsystem::Parser, 54);
++inline constexpr DiagCode NonStandardGenBlock(DiagSubsystem::Parser, 55);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/slang/diagnostics/PreprocessorDiags.h ./generated/slang/diagnostics/PreprocessorDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/PreprocessorDiags.h ./generated/slang/diagnostics/PreprocessorDiags.h
 --- ../slang_orig/generated/slang/diagnostics/PreprocessorDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/PreprocessorDiags.h	2019-10-16 10:35:24.204064103 -0700
++++ ./generated/slang/diagnostics/PreprocessorDiags.h	2019-11-23 10:40:28.821890357 -0800
 @@ -0,0 +1,38 @@
 +//------------------------------------------------------------------------------
 +// PreprocessorDiags.h
@@ -25050,10 +17661,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode RedefiningMacro(DiagSubsystem::Preprocessor, 23);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/slang/diagnostics/StatementsDiags.h ./generated/slang/diagnostics/StatementsDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/StatementsDiags.h ./generated/slang/diagnostics/StatementsDiags.h
 --- ../slang_orig/generated/slang/diagnostics/StatementsDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/StatementsDiags.h	2019-10-16 10:35:24.204064103 -0700
-@@ -0,0 +1,22 @@
++++ ./generated/slang/diagnostics/StatementsDiags.h	2019-11-23 10:40:28.821890357 -0800
+@@ -0,0 +1,25 @@
 +//------------------------------------------------------------------------------
 +// StatementsDiags.h
 +// Generated diagnostic enums for the Statements subsystem.
@@ -25072,14 +17683,17 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode CoverStmtNoFail(DiagSubsystem::Statements, 3);
 +inline constexpr DiagCode StatementNotInLoop(DiagSubsystem::Statements, 4);
 +inline constexpr DiagCode ExprNotStatement(DiagSubsystem::Statements, 5);
-+inline constexpr DiagCode EventExpressionConstant(DiagSubsystem::Statements, 6);
-+inline constexpr DiagCode EmptyStatement(DiagSubsystem::Statements, 7);
++inline constexpr DiagCode VoidCastFuncCall(DiagSubsystem::Statements, 6);
++inline constexpr DiagCode EventExpressionConstant(DiagSubsystem::Statements, 7);
++inline constexpr DiagCode EmptyStatement(DiagSubsystem::Statements, 8);
++inline constexpr DiagCode PointlessVoidCast(DiagSubsystem::Statements, 9);
++inline constexpr DiagCode UnusedResult(DiagSubsystem::Statements, 10);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/slang/diagnostics/SysFuncsDiags.h ./generated/slang/diagnostics/SysFuncsDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/SysFuncsDiags.h ./generated/slang/diagnostics/SysFuncsDiags.h
 --- ../slang_orig/generated/slang/diagnostics/SysFuncsDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/SysFuncsDiags.h	2019-10-16 10:35:24.204064103 -0700
-@@ -0,0 +1,25 @@
++++ ./generated/slang/diagnostics/SysFuncsDiags.h	2019-11-23 10:40:28.821890357 -0800
+@@ -0,0 +1,26 @@
 +//------------------------------------------------------------------------------
 +// SysFuncsDiags.h
 +// Generated diagnostic enums for the SysFuncs subsystem.
@@ -25101,13 +17715,14 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode FormatUnspecifiedType(DiagSubsystem::SysFuncs, 6);
 +inline constexpr DiagCode FormatMismatchedType(DiagSubsystem::SysFuncs, 7);
 +inline constexpr DiagCode InvalidFormatStringType(DiagSubsystem::SysFuncs, 8);
-+inline constexpr DiagCode ArrayReductionIntegral(DiagSubsystem::SysFuncs, 9);
-+inline constexpr DiagCode BadFinishNum(DiagSubsystem::SysFuncs, 10);
++inline constexpr DiagCode FormatEmptyArg(DiagSubsystem::SysFuncs, 9);
++inline constexpr DiagCode ArrayReductionIntegral(DiagSubsystem::SysFuncs, 10);
++inline constexpr DiagCode BadFinishNum(DiagSubsystem::SysFuncs, 11);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/slang/diagnostics/TypesDiags.h ./generated/slang/diagnostics/TypesDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/TypesDiags.h ./generated/slang/diagnostics/TypesDiags.h
 --- ../slang_orig/generated/slang/diagnostics/TypesDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/TypesDiags.h	2019-10-16 10:35:24.204064103 -0700
++++ ./generated/slang/diagnostics/TypesDiags.h	2019-11-23 10:40:28.821890357 -0800
 @@ -0,0 +1,25 @@
 +//------------------------------------------------------------------------------
 +// TypesDiags.h
@@ -25134,10 +17749,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode PackedUnionWidthMismatch(DiagSubsystem::Types, 10);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/slang/syntax/AllSyntax.h ./generated/slang/syntax/AllSyntax.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/syntax/AllSyntax.h ./generated/slang/syntax/AllSyntax.h
 --- ../slang_orig/generated/slang/syntax/AllSyntax.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/syntax/AllSyntax.h	2019-10-16 10:35:24.204064103 -0700
-@@ -0,0 +1,6265 @@
++++ ./generated/slang/syntax/AllSyntax.h	2019-11-23 10:40:28.811890570 -0800
+@@ -0,0 +1,6291 @@
 +//------------------------------------------------------------------------------
 +// AllSyntax.h
 +// All generated syntax node data structures.
@@ -25301,9 +17916,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +};
 +
 +struct EmptyArgumentSyntax : public ArgumentSyntax {
++    Token placeholder;
 +
-+    EmptyArgumentSyntax() :
-+        ArgumentSyntax(SyntaxKind::EmptyArgument) {
++    EmptyArgumentSyntax(Token placeholder) :
++        ArgumentSyntax(SyntaxKind::EmptyArgument), placeholder(placeholder) {
 +    }
 +
 +    static bool isKind(SyntaxKind kind);
@@ -26046,9 +18662,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +};
 +
 +struct EmptyIdentifierNameSyntax : public NameSyntax {
++    Token placeholder;
 +
-+    EmptyIdentifierNameSyntax() :
-+        NameSyntax(SyntaxKind::EmptyIdentifierName) {
++    EmptyIdentifierNameSyntax(Token placeholder) :
++        NameSyntax(SyntaxKind::EmptyIdentifierName), placeholder(placeholder) {
 +    }
 +
 +    static bool isKind(SyntaxKind kind);
@@ -27999,6 +20616,28 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    ExpressionStatementSyntax* clone(BumpAllocator& alloc) const;
 +};
 +
++struct VoidCastedCallStatementSyntax : public StatementSyntax {
++    Token voidKeyword;
++    Token apostrophe;
++    Token openParen;
++    not_null<ExpressionSyntax*> expr;
++    Token closeParen;
++    Token semi;
++
++    VoidCastedCallStatementSyntax(NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token voidKeyword, Token apostrophe, Token openParen, ExpressionSyntax& expr, Token closeParen, Token semi) :
++        StatementSyntax(SyntaxKind::VoidCastedCallStatement, label, attributes), voidKeyword(voidKeyword), apostrophe(apostrophe), openParen(openParen), expr(&expr), closeParen(closeParen), semi(semi) {
++        this->expr->parent = this;
++    }
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    VoidCastedCallStatementSyntax* clone(BumpAllocator& alloc) const;
++};
++
 +struct ProceduralAssignStatementSyntax : public StatementSyntax {
 +    Token keyword;
 +    not_null<ExpressionSyntax*> lvalue;
@@ -28992,13 +21631,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +struct FunctionPrototypeSyntax : public SyntaxNode {
 +    Token keyword;
 +    Token lifetime;
-+    DataTypeSyntax* returnType;
++    not_null<DataTypeSyntax*> returnType;
 +    not_null<NameSyntax*> name;
 +    FunctionPortListSyntax* portList;
 +
-+    FunctionPrototypeSyntax(Token keyword, Token lifetime, DataTypeSyntax* returnType, NameSyntax& name, FunctionPortListSyntax* portList) :
-+        SyntaxNode(SyntaxKind::FunctionPrototype), keyword(keyword), lifetime(lifetime), returnType(returnType), name(&name), portList(portList) {
-+        if (this->returnType) this->returnType->parent = this;
++    FunctionPrototypeSyntax(Token keyword, Token lifetime, DataTypeSyntax& returnType, NameSyntax& name, FunctionPortListSyntax* portList) :
++        SyntaxNode(SyntaxKind::FunctionPrototype), keyword(keyword), lifetime(lifetime), returnType(&returnType), name(&name), portList(portList) {
++        this->returnType->parent = this;
 +        this->name->parent = this;
 +        if (this->portList) this->portList->parent = this;
 +    }
@@ -30780,8 +23419,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    ElementSelectSyntax& elementSelect(Token openBracket, SelectorSyntax* selector, Token closeBracket);
 +    ElseClauseSyntax& elseClause(Token elseKeyword, SyntaxNode& clause);
 +    ElseConstraintClauseSyntax& elseConstraintClause(Token elseKeyword, ConstraintItemSyntax& constraints);
-+    EmptyArgumentSyntax& emptyArgument();
-+    EmptyIdentifierNameSyntax& emptyIdentifierName();
++    EmptyArgumentSyntax& emptyArgument(Token placeholder);
++    EmptyIdentifierNameSyntax& emptyIdentifierName(Token placeholder);
 +    EmptyMemberSyntax& emptyMember(const SyntaxList<AttributeInstanceSyntax>& attributes, const TokenList& qualifiers, Token semi);
 +    EmptyQueueExpressionSyntax& emptyQueueExpression(Token openBrace, Token closeBrace);
 +    EmptyStatementSyntax& emptyStatement(NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token semicolon);
@@ -30810,7 +23449,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    FunctionDeclarationSyntax& functionDeclaration(SyntaxKind kind, const SyntaxList<AttributeInstanceSyntax>& attributes, FunctionPrototypeSyntax& prototype, Token semi, const SyntaxList<SyntaxNode>& items, Token end, NamedBlockClauseSyntax* endBlockName);
 +    FunctionPortListSyntax& functionPortList(Token openParen, const SeparatedSyntaxList<FunctionPortSyntax>& ports, Token closeParen);
 +    FunctionPortSyntax& functionPort(const SyntaxList<AttributeInstanceSyntax>& attributes, Token constKeyword, Token direction, Token varKeyword, DataTypeSyntax* dataType, DeclaratorSyntax& declarator);
-+    FunctionPrototypeSyntax& functionPrototype(Token keyword, Token lifetime, DataTypeSyntax* returnType, NameSyntax& name, FunctionPortListSyntax* portList);
++    FunctionPrototypeSyntax& functionPrototype(Token keyword, Token lifetime, DataTypeSyntax& returnType, NameSyntax& name, FunctionPortListSyntax* portList);
 +    GenerateBlockSyntax& generateBlock(const SyntaxList<AttributeInstanceSyntax>& attributes, NamedLabelSyntax* label, Token begin, NamedBlockClauseSyntax* beginName, const SyntaxList<MemberSyntax>& members, Token end, NamedBlockClauseSyntax* endName);
 +    GenerateRegionSyntax& generateRegion(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, const SyntaxList<MemberSyntax>& members, Token endgenerate);
 +    GenvarDeclarationSyntax& genvarDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, const SeparatedSyntaxList<IdentifierNameSyntax>& identifiers, Token semi);
@@ -30950,6 +23589,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    VariablePatternSyntax& variablePattern(Token dot, Token variableName);
 +    VariablePortHeaderSyntax& variablePortHeader(Token direction, Token varKeyword, DataTypeSyntax& dataType);
 +    VirtualInterfaceTypeSyntax& virtualInterfaceType(Token virtualKeyword, Token interfaceKeyword, Token name, ParameterValueAssignmentSyntax* parameters, DotMemberClauseSyntax* modport);
++    VoidCastedCallStatementSyntax& voidCastedCallStatement(NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token voidKeyword, Token apostrophe, Token openParen, ExpressionSyntax& expr, Token closeParen, Token semi);
 +    WaitForkStatementSyntax& waitForkStatement(NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token wait, Token fork, Token semi);
 +    WaitOrderStatementSyntax& waitOrderStatement(NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token wait_order, Token openParen, const SeparatedSyntaxList<NameSyntax>& names, Token closeParen, ActionBlockSyntax& action);
 +    WaitStatementSyntax& waitStatement(NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token wait, Token openParen, ExpressionSyntax& expr, Token closeParen, StatementSyntax& statement);
@@ -31370,6 +24010,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::VariablePattern: return visitor.visit(*static_cast<std::conditional_t<isConst, const VariablePatternSyntax*, VariablePatternSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::VariablePortHeader: return visitor.visit(*static_cast<std::conditional_t<isConst, const VariablePortHeaderSyntax*, VariablePortHeaderSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::VirtualInterfaceType: return visitor.visit(*static_cast<std::conditional_t<isConst, const VirtualInterfaceTypeSyntax*, VirtualInterfaceTypeSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::VoidCastedCallStatement: return visitor.visit(*static_cast<std::conditional_t<isConst, const VoidCastedCallStatementSyntax*, VoidCastedCallStatementSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::VoidType: return visitor.visit(*static_cast<std::conditional_t<isConst, const KeywordTypeSyntax*, KeywordTypeSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::WaitForkStatement: return visitor.visit(*static_cast<std::conditional_t<isConst, const WaitForkStatementSyntax*, WaitForkStatementSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::WaitOrderStatement: return visitor.visit(*static_cast<std::conditional_t<isConst, const WaitOrderStatementSyntax*, WaitOrderStatementSyntax*>>(node), std::forward<Args>(args)...);
@@ -31403,10 +24044,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/slang/syntax/SyntaxKind.h ./generated/slang/syntax/SyntaxKind.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/syntax/SyntaxKind.h ./generated/slang/syntax/SyntaxKind.h
 --- ../slang_orig/generated/slang/syntax/SyntaxKind.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/syntax/SyntaxKind.h	2019-10-16 10:35:24.214063794 -0700
-@@ -0,0 +1,432 @@
++++ ./generated/slang/syntax/SyntaxKind.h	2019-11-23 10:40:28.821890357 -0800
+@@ -0,0 +1,433 @@
 +//------------------------------------------------------------------------------
 +// SyntaxKind.h
 +// Generated SyntaxKind enum.
@@ -31817,6 +24458,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    VariablePattern,
 +    VariablePortHeader,
 +    VirtualInterfaceType,
++    VoidCastedCallStatement,
 +    VoidType,
 +    WaitForkStatement,
 +    WaitOrderStatement,
@@ -31839,9 +24481,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +string_view toString(SyntaxKind kind);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ../slang_orig/generated/Version.cpp ./generated/Version.cpp
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/Version.cpp ./generated/Version.cpp
 --- ../slang_orig/generated/Version.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/Version.cpp	2019-10-16 10:35:24.084067802 -0700
++++ ./generated/Version.cpp	2019-11-23 10:40:28.691893113 -0800
 @@ -0,0 +1,26 @@
 +//------------------------------------------------------------------------------
 +// Version.cpp.in
@@ -31865,7 +24507,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 +
 +string_view VersionInfo::getRevision() {
-+    return "77a31619"sv;
++    return "0e2381c9"sv;
 +}
 +
 +}

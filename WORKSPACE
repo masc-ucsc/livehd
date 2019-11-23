@@ -71,10 +71,13 @@ new_git_repository(
     remote = "https://github.com/fmtlib/fmt.git",
     #strip_prefix = "include",
 )
+# Move xxhash.c to xxhash.cpp, fix include inside xxhash.h
+# mkdir build; cd build ; cmake ../ ; make ; mv source ../generated/ ; cd ..
+# mkpatch --exclude=CMakeFiles ../slang_orig/ .
 new_git_repository(
     name = "slang",
     build_file = "BUILD.slang",
-    commit = "77a31619e27dc25f6b29a53a5003e1781c6b3034", # Obtober 16, 2019
+    commit = "0e2381c9b408cef18950f928e5c411ed58c54eb6", # Nov 23, 2019 77a31619e27dc25f6b29a53a5003e1781c6b3034", # Obtober 16, 2019
     remote = "https://github.com/MikePopoloski/slang.git",
     patches = ["//external:patch.slang"],
 )
