@@ -74,6 +74,7 @@ new_git_repository(
 # Move xxhash.c to xxhash.cpp, fix include inside xxhash.h
 # mkdir build; cd build ; cmake ../ ; make ; mv source ../generated/ ; cd ..
 # mkpatch --exclude=CMakeFiles ../slang_orig/ .
+# s/\.\/slang_orig//g
 new_git_repository(
     name = "slang",
     build_file = "BUILD.slang",

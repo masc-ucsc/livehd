@@ -1,5 +1,5 @@
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/external/xxhash/xxhash.c ./external/xxhash/xxhash.c
---- ../slang_orig/external/xxhash/xxhash.c	2019-10-15 18:26:53.568949244 -0700
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./external/xxhash/xxhash.c ./external/xxhash/xxhash.c
+--- ./external/xxhash/xxhash.c	2019-10-15 18:26:53.568949244 -0700
 +++ ./external/xxhash/xxhash.c	1969-12-31 16:00:00.000000000 -0800
 @@ -1,1029 +0,0 @@
 -/*
@@ -1031,8 +1031,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 -}
 -
 -#endif  /* XXH_NO_LONG_LONG */
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/external/xxhash/xxhash.cpp ./external/xxhash/xxhash.cpp
---- ../slang_orig/external/xxhash/xxhash.cpp	1969-12-31 16:00:00.000000000 -0800
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./external/xxhash/xxhash.cpp ./external/xxhash/xxhash.cpp
+--- ./external/xxhash/xxhash.cpp	1969-12-31 16:00:00.000000000 -0800
 +++ ./external/xxhash/xxhash.cpp	2019-11-23 10:36:56.926380085 -0800
 @@ -0,0 +1,1029 @@
 +/*
@@ -2064,8 +2064,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 +
 +#endif  /* XXH_NO_LONG_LONG */
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/external/xxhash/xxhash.h ./external/xxhash/xxhash.h
---- ../slang_orig/external/xxhash/xxhash.h	2019-10-15 18:26:53.568949244 -0700
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./external/xxhash/xxhash.h ./external/xxhash/xxhash.h
+--- ./external/xxhash/xxhash.h	2019-10-15 18:26:53.568949244 -0700
 +++ ./external/xxhash/xxhash.h	2019-11-23 10:37:36.745536367 -0800
 @@ -313,11 +313,11 @@
  
@@ -2080,8 +2080,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
  #endif /* XXH_STATIC_LINKING_ONLY */
  
  
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/AllSyntax.cpp ./generated/AllSyntax.cpp
---- ../slang_orig/generated/AllSyntax.cpp	1969-12-31 16:00:00.000000000 -0800
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/AllSyntax.cpp ./generated/AllSyntax.cpp
+--- ./generated/AllSyntax.cpp	1969-12-31 16:00:00.000000000 -0800
 +++ ./generated/AllSyntax.cpp	2019-11-23 10:40:28.821890357 -0800
 @@ -0,0 +1,12494 @@
 +//------------------------------------------------------------------------------
@@ -14578,8 +14578,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/cmake_install.cmake ./generated/cmake_install.cmake
---- ../slang_orig/generated/cmake_install.cmake	1969-12-31 16:00:00.000000000 -0800
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/cmake_install.cmake ./generated/cmake_install.cmake
+--- ./generated/cmake_install.cmake	1969-12-31 16:00:00.000000000 -0800
 +++ ./generated/cmake_install.cmake	2019-11-23 10:40:22.972014303 -0800
 @@ -0,0 +1,39 @@
 +# Install script for directory: /soe/renau/projs/synth/slang/source
@@ -14621,8 +14621,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +  set(CMAKE_CROSSCOMPILING "FALSE")
 +endif()
 +
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/DiagCode.cpp ./generated/DiagCode.cpp
---- ../slang_orig/generated/DiagCode.cpp	1969-12-31 16:00:00.000000000 -0800
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/DiagCode.cpp ./generated/DiagCode.cpp
+--- ./generated/DiagCode.cpp	1969-12-31 16:00:00.000000000 -0800
 +++ ./generated/DiagCode.cpp	2019-11-23 10:40:28.831890148 -0800
 @@ -0,0 +1,378 @@
 +//------------------------------------------------------------------------------
@@ -15003,8 +15003,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/Makefile ./generated/Makefile
---- ../slang_orig/generated/Makefile	1969-12-31 16:00:00.000000000 -0800
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/Makefile ./generated/Makefile
+--- ./generated/Makefile	1969-12-31 16:00:00.000000000 -0800
 +++ ./generated/Makefile	2019-11-23 10:40:22.972014303 -0800
 @@ -0,0 +1,2188 @@
 +# CMAKE generated file: DO NOT EDIT!
@@ -17195,8 +17195,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +	cd /soe/renau/projs/synth/slang/build && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 0
 +.PHONY : cmake_check_build_system
 +
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/AllDiags.h ./generated/slang/diagnostics/AllDiags.h
---- ../slang_orig/generated/slang/diagnostics/AllDiags.h	1969-12-31 16:00:00.000000000 -0800
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/AllDiags.h ./generated/slang/diagnostics/AllDiags.h
+--- ./generated/slang/diagnostics/AllDiags.h	1969-12-31 16:00:00.000000000 -0800
 +++ ./generated/slang/diagnostics/AllDiags.h	2019-11-23 10:40:28.821890357 -0800
 @@ -0,0 +1,22 @@
 +//------------------------------------------------------------------------------
@@ -17221,8 +17221,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +#include "slang/diagnostics/SysFuncsDiags.h"
 +#include "slang/diagnostics/TypesDiags.h"
 +
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/ConstEvalDiags.h ./generated/slang/diagnostics/ConstEvalDiags.h
---- ../slang_orig/generated/slang/diagnostics/ConstEvalDiags.h	1969-12-31 16:00:00.000000000 -0800
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/ConstEvalDiags.h ./generated/slang/diagnostics/ConstEvalDiags.h
+--- ./generated/slang/diagnostics/ConstEvalDiags.h	1969-12-31 16:00:00.000000000 -0800
 +++ ./generated/slang/diagnostics/ConstEvalDiags.h	2019-11-23 10:40:28.821890357 -0800
 @@ -0,0 +1,32 @@
 +//------------------------------------------------------------------------------
@@ -17257,8 +17257,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode NoteExceededMaxSteps(DiagSubsystem::ConstEval, 17);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/DeclarationsDiags.h ./generated/slang/diagnostics/DeclarationsDiags.h
---- ../slang_orig/generated/slang/diagnostics/DeclarationsDiags.h	1969-12-31 16:00:00.000000000 -0800
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/DeclarationsDiags.h ./generated/slang/diagnostics/DeclarationsDiags.h
+--- ./generated/slang/diagnostics/DeclarationsDiags.h	1969-12-31 16:00:00.000000000 -0800
 +++ ./generated/slang/diagnostics/DeclarationsDiags.h	2019-11-23 10:40:28.821890357 -0800
 @@ -0,0 +1,64 @@
 +//------------------------------------------------------------------------------
@@ -17325,8 +17325,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode EmptyMember(DiagSubsystem::Declarations, 49);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/ExpressionsDiags.h ./generated/slang/diagnostics/ExpressionsDiags.h
---- ../slang_orig/generated/slang/diagnostics/ExpressionsDiags.h	1969-12-31 16:00:00.000000000 -0800
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/ExpressionsDiags.h ./generated/slang/diagnostics/ExpressionsDiags.h
+--- ./generated/slang/diagnostics/ExpressionsDiags.h	1969-12-31 16:00:00.000000000 -0800
 +++ ./generated/slang/diagnostics/ExpressionsDiags.h	2019-11-23 10:40:28.821890357 -0800
 @@ -0,0 +1,54 @@
 +//------------------------------------------------------------------------------
@@ -17383,8 +17383,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode NamedArgNotAllowed(DiagSubsystem::Expressions, 39);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/GeneralDiags.h ./generated/slang/diagnostics/GeneralDiags.h
---- ../slang_orig/generated/slang/diagnostics/GeneralDiags.h	1969-12-31 16:00:00.000000000 -0800
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/GeneralDiags.h ./generated/slang/diagnostics/GeneralDiags.h
+--- ./generated/slang/diagnostics/GeneralDiags.h	1969-12-31 16:00:00.000000000 -0800
 +++ ./generated/slang/diagnostics/GeneralDiags.h	2019-11-23 10:40:28.821890357 -0800
 @@ -0,0 +1,21 @@
 +//------------------------------------------------------------------------------
@@ -17408,8 +17408,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode AttributesNotAllowed(DiagSubsystem::General, 6);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/LexerDiags.h ./generated/slang/diagnostics/LexerDiags.h
---- ../slang_orig/generated/slang/diagnostics/LexerDiags.h	1969-12-31 16:00:00.000000000 -0800
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/LexerDiags.h ./generated/slang/diagnostics/LexerDiags.h
+--- ./generated/slang/diagnostics/LexerDiags.h	1969-12-31 16:00:00.000000000 -0800
 +++ ./generated/slang/diagnostics/LexerDiags.h	2019-11-23 10:40:28.821890357 -0800
 @@ -0,0 +1,37 @@
 +//------------------------------------------------------------------------------
@@ -17449,8 +17449,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode TooManyLexerErrors(DiagSubsystem::Lexer, 22);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/LookupDiags.h ./generated/slang/diagnostics/LookupDiags.h
---- ../slang_orig/generated/slang/diagnostics/LookupDiags.h	1969-12-31 16:00:00.000000000 -0800
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/LookupDiags.h ./generated/slang/diagnostics/LookupDiags.h
+--- ./generated/slang/diagnostics/LookupDiags.h	1969-12-31 16:00:00.000000000 -0800
 +++ ./generated/slang/diagnostics/LookupDiags.h	2019-11-23 10:40:28.821890357 -0800
 @@ -0,0 +1,43 @@
 +//------------------------------------------------------------------------------
@@ -17496,8 +17496,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode DuplicateImport(DiagSubsystem::Lookup, 28);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/MetaDiags.h ./generated/slang/diagnostics/MetaDiags.h
---- ../slang_orig/generated/slang/diagnostics/MetaDiags.h	1969-12-31 16:00:00.000000000 -0800
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/MetaDiags.h ./generated/slang/diagnostics/MetaDiags.h
+--- ./generated/slang/diagnostics/MetaDiags.h	1969-12-31 16:00:00.000000000 -0800
 +++ ./generated/slang/diagnostics/MetaDiags.h	2019-11-23 10:40:28.821890357 -0800
 @@ -0,0 +1,16 @@
 +//------------------------------------------------------------------------------
@@ -17516,8 +17516,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode UnknownWarningOption(DiagSubsystem::Meta, 1);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/NumericDiags.h ./generated/slang/diagnostics/NumericDiags.h
---- ../slang_orig/generated/slang/diagnostics/NumericDiags.h	1969-12-31 16:00:00.000000000 -0800
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/NumericDiags.h ./generated/slang/diagnostics/NumericDiags.h
+--- ./generated/slang/diagnostics/NumericDiags.h	1969-12-31 16:00:00.000000000 -0800
 +++ ./generated/slang/diagnostics/NumericDiags.h	2019-11-23 10:40:28.821890357 -0800
 @@ -0,0 +1,25 @@
 +//------------------------------------------------------------------------------
@@ -17545,8 +17545,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode VectorLiteralOverflow(DiagSubsystem::Numeric, 10);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/ParserDiags.h ./generated/slang/diagnostics/ParserDiags.h
---- ../slang_orig/generated/slang/diagnostics/ParserDiags.h	1969-12-31 16:00:00.000000000 -0800
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/ParserDiags.h ./generated/slang/diagnostics/ParserDiags.h
+--- ./generated/slang/diagnostics/ParserDiags.h	1969-12-31 16:00:00.000000000 -0800
 +++ ./generated/slang/diagnostics/ParserDiags.h	2019-11-23 10:40:28.821890357 -0800
 @@ -0,0 +1,70 @@
 +//------------------------------------------------------------------------------
@@ -17619,8 +17619,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode NonStandardGenBlock(DiagSubsystem::Parser, 55);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/PreprocessorDiags.h ./generated/slang/diagnostics/PreprocessorDiags.h
---- ../slang_orig/generated/slang/diagnostics/PreprocessorDiags.h	1969-12-31 16:00:00.000000000 -0800
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/PreprocessorDiags.h ./generated/slang/diagnostics/PreprocessorDiags.h
+--- ./generated/slang/diagnostics/PreprocessorDiags.h	1969-12-31 16:00:00.000000000 -0800
 +++ ./generated/slang/diagnostics/PreprocessorDiags.h	2019-11-23 10:40:28.821890357 -0800
 @@ -0,0 +1,38 @@
 +//------------------------------------------------------------------------------
@@ -17661,8 +17661,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode RedefiningMacro(DiagSubsystem::Preprocessor, 23);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/StatementsDiags.h ./generated/slang/diagnostics/StatementsDiags.h
---- ../slang_orig/generated/slang/diagnostics/StatementsDiags.h	1969-12-31 16:00:00.000000000 -0800
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/StatementsDiags.h ./generated/slang/diagnostics/StatementsDiags.h
+--- ./generated/slang/diagnostics/StatementsDiags.h	1969-12-31 16:00:00.000000000 -0800
 +++ ./generated/slang/diagnostics/StatementsDiags.h	2019-11-23 10:40:28.821890357 -0800
 @@ -0,0 +1,25 @@
 +//------------------------------------------------------------------------------
@@ -17690,8 +17690,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode UnusedResult(DiagSubsystem::Statements, 10);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/SysFuncsDiags.h ./generated/slang/diagnostics/SysFuncsDiags.h
---- ../slang_orig/generated/slang/diagnostics/SysFuncsDiags.h	1969-12-31 16:00:00.000000000 -0800
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/SysFuncsDiags.h ./generated/slang/diagnostics/SysFuncsDiags.h
+--- ./generated/slang/diagnostics/SysFuncsDiags.h	1969-12-31 16:00:00.000000000 -0800
 +++ ./generated/slang/diagnostics/SysFuncsDiags.h	2019-11-23 10:40:28.821890357 -0800
 @@ -0,0 +1,26 @@
 +//------------------------------------------------------------------------------
@@ -17720,8 +17720,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode BadFinishNum(DiagSubsystem::SysFuncs, 11);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/diagnostics/TypesDiags.h ./generated/slang/diagnostics/TypesDiags.h
---- ../slang_orig/generated/slang/diagnostics/TypesDiags.h	1969-12-31 16:00:00.000000000 -0800
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/TypesDiags.h ./generated/slang/diagnostics/TypesDiags.h
+--- ./generated/slang/diagnostics/TypesDiags.h	1969-12-31 16:00:00.000000000 -0800
 +++ ./generated/slang/diagnostics/TypesDiags.h	2019-11-23 10:40:28.821890357 -0800
 @@ -0,0 +1,25 @@
 +//------------------------------------------------------------------------------
@@ -17749,8 +17749,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode PackedUnionWidthMismatch(DiagSubsystem::Types, 10);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/syntax/AllSyntax.h ./generated/slang/syntax/AllSyntax.h
---- ../slang_orig/generated/slang/syntax/AllSyntax.h	1969-12-31 16:00:00.000000000 -0800
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/syntax/AllSyntax.h ./generated/slang/syntax/AllSyntax.h
+--- ./generated/slang/syntax/AllSyntax.h	1969-12-31 16:00:00.000000000 -0800
 +++ ./generated/slang/syntax/AllSyntax.h	2019-11-23 10:40:28.811890570 -0800
 @@ -0,0 +1,6291 @@
 +//------------------------------------------------------------------------------
@@ -24044,8 +24044,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/slang/syntax/SyntaxKind.h ./generated/slang/syntax/SyntaxKind.h
---- ../slang_orig/generated/slang/syntax/SyntaxKind.h	1969-12-31 16:00:00.000000000 -0800
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/syntax/SyntaxKind.h ./generated/slang/syntax/SyntaxKind.h
+--- ./generated/slang/syntax/SyntaxKind.h	1969-12-31 16:00:00.000000000 -0800
 +++ ./generated/slang/syntax/SyntaxKind.h	2019-11-23 10:40:28.821890357 -0800
 @@ -0,0 +1,433 @@
 +//------------------------------------------------------------------------------
@@ -24481,8 +24481,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +string_view toString(SyntaxKind kind);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ../slang_orig/generated/Version.cpp ./generated/Version.cpp
---- ../slang_orig/generated/Version.cpp	1969-12-31 16:00:00.000000000 -0800
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/Version.cpp ./generated/Version.cpp
+--- ./generated/Version.cpp	1969-12-31 16:00:00.000000000 -0800
 +++ ./generated/Version.cpp	2019-11-23 10:40:28.691893113 -0800
 @@ -0,0 +1,26 @@
 +//------------------------------------------------------------------------------

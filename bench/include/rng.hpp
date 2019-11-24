@@ -1,4 +1,6 @@
-
+// Get this a bit cleaner/faster
+// Benchmark against this:
+// https://lemire.me/blog/2019/03/19/the-fastest-conventional-random-number-generator-that-can-pass-big-crush/
 #pragma once
 
 #include <array>
