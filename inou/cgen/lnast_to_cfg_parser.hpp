@@ -32,13 +32,8 @@ private:
   std::string_view get_node_name(Lnast_node node);
   void flush_it(std::vector<Lnast_node>::iterator it);
 
-  void process_pure_assign();
-  void process_as();
-  void process_label();
-  void process_and();
-  void process_xor();
-  void process_plus();
-  void process_gt();
+  void process_operator();
+
   void process_if();
   void process_func_call();
   void process_func_def();
