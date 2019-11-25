@@ -103,7 +103,7 @@ uint32_t Verilog_parser_module::get_variable_type(std::string_view var_name) {
    return 1;
   } else if (var_name.at(0) == '%') {
     return 2;
-  } else if (var_name.at(0) == '@') {
+  } else if (var_name.at(0) == '#') {
     return 3;
   }
 

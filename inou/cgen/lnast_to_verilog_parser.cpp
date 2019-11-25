@@ -11,7 +11,7 @@ std::map<std::string, std::string> Lnast_to_verilog_parser::stringify(std::strin
   for (const mmap_lib::Tree_index &it: lnast->depth_preorder(lnast->get_root())) {
     process_node(it);
   }
-  process_buffer();
+  flush_statements();
   dec_indent_buffer();
 
   file_map.insert(std::pair<std::string, std::string>(curr_module->filename, curr_module->create_file()));
@@ -26,10 +26,10 @@ void Lnast_to_verilog_parser::process_node(const mmap_lib::Tree_index& it) {
 
   // add while to see pop_statement and to add buffer
   if (it.level < curr_statement_level) {
-    pop_statement(it.level, node_data.type);
+    pop_statement();
 
     while (it.level + 1 < curr_statement_level) {
-      pop_statement(it.level, node_data.type);
+      pop_statement();
     }
     type = ntype_dbg(node_data.type);
   }
@@ -89,9 +89,7 @@ void Lnast_to_verilog_parser::push_statement(mmap_lib::Tree_level level, Lnast_n
   fmt::print("after push\n");
 }
 
-void Lnast_to_verilog_parser::pop_statement(mmap_lib::Tree_level level, Lnast_ntype type) {
-  (void)level;
-  (void)type;
+void Lnast_to_verilog_parser::pop_statement() {
   fmt::print("pop\n");
 
   process_buffer();
@@ -109,6 +107,27 @@ void Lnast_to_verilog_parser::pop_statement(mmap_lib::Tree_level level, Lnast_nt
   prev_statement_level = level_stack.back();
 
   fmt::print("after pop\n");
+}
+
+void Lnast_to_verilog_parser::flush_statements() {
+  fmt::print("starting to flush statements\n");
+
+  while (buffer_stack.size() > 0) {
+    process_buffer();
+
+    node_buffer = buffer_stack.back();
+    buffer_stack.pop_back();
+
+    if (Lnast_ntype_statements == node_buffer.back().type && buffer_stack.size() > 0) {
+      curr_module->node_buffer_queue();
+      dec_indent_buffer();
+    }
+
+    level_stack.pop_back();
+    curr_statement_level = prev_statement_level;
+    prev_statement_level = level_stack.back();
+  }
+  fmt::print("ending flushing statements\n");
 }
 
 void Lnast_to_verilog_parser::add_to_buffer(Lnast_node node) {
