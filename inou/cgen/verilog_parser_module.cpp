@@ -18,7 +18,7 @@ std::string Verilog_parser_module::create_header() {
     fmt::print("variable names: {}\n", var_name.first);
     uint32_t var_type = get_variable_type(var_name.first);
     if (var_type == 0) {
-      wires = absl::StrCat(wires, " wire ", process_variable(var_name.first), ";\n");
+      wires = absl::StrCat(wires, "  wire ", process_variable(var_name.first), ";\n");
     } else {
       std::string bits_string;
 
@@ -36,6 +36,7 @@ std::string Verilog_parser_module::create_header() {
         outputs = absl::StrCat(outputs, ",\n", start_filler, "output ", phrase);
       } else if (var_type == 3) {
         outputs = absl::StrCat(outputs, ",\n", start_filler, "output ", phrase);
+        wires = absl::StrCat(wires, "  wire ", process_variable(var_name.first), "_next;\n");
       }
     }
   }
