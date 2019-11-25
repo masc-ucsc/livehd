@@ -6,7 +6,10 @@ std::string Verilog_parser_module::indent_buffer(int32_t size) {
 }
 
 std::string Verilog_parser_module::create_header() {
-  std::string inputs = "input clk,\ninput reset";
+  std::string module_start = absl::StrCat("module ", filename, " (");
+  std::string start_filler = std::string(module_start.length(), ' ');
+
+  std::string inputs = absl::StrCat("input clk,\n", start_filler, "input reset");
   std::string outputs;
   std::string wires;
 
@@ -28,17 +31,17 @@ std::string Verilog_parser_module::create_header() {
       std::string phrase = absl::StrCat(bits_string, " ", process_variable(var_name.first));
 
       if (var_type == 1) {
-        inputs = absl::StrCat(inputs, ",\ninput ", phrase);
+        inputs = absl::StrCat(inputs, ",\n", start_filler, "input ", phrase);
       } else if (var_type == 2) {
-        outputs = absl::StrCat(outputs, ",\noutput ", phrase);
+        outputs = absl::StrCat(outputs, ",\n", start_filler, "output ", phrase);
       } else if (var_type == 3) {
-        outputs = absl::StrCat(outputs, ",\noutput ", phrase);
+        outputs = absl::StrCat(outputs, ",\n", start_filler, "output ", phrase);
       }
     }
   }
   fmt::print("finished with the header\n");
 
-  return absl::StrCat("module ", filename, " (", inputs, outputs, ");\n", wires, "\n");
+  return absl::StrCat(module_start, inputs, outputs, ");\n", wires, "\n");
 }
 
 std::string Verilog_parser_module::create_footer() {
