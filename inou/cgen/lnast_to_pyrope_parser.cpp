@@ -102,33 +102,71 @@ void Lnast_to_pyrope_parser::process_buffer() {
 
   Lnast_ntype type = node_buffer.front().type;
 
-  if (type == Lnast_ntype_pure_assign) {
-    // check if should be in combinational or stateful
-    // process_operator();
-    process_pure_assign();
+  if (type == Lnast_ntype_invalid) {
+    // add error
+  } else if (type == Lnast_ntype_pure_assign) {
+    process_assign();
+  } else if (type == Lnast_ntype_dp_assign) {
+    process_assign();
   } else if (type == Lnast_ntype_as) {
     process_operator();
     // process_as();
   } else if (type == Lnast_ntype_label) {
     process_label();
+  } else if (type == Lnast_ntype_dot) {
+    process_operator();
+  } else if (type == Lnast_ntype_logical_and) {
+    process_operator();
+  } else if (type == Lnast_ntype_logical_or) {
+    process_operator();
   } else if (type == Lnast_ntype_and) {
     process_operator();
-    // process_and();
+  } else if (type == Lnast_ntype_or) {
+    process_operator();
   } else if (type == Lnast_ntype_xor) {
     process_operator();
-    // process_xor();
   } else if (type == Lnast_ntype_plus) {
     process_operator();
-    // process_plus();
+  } else if (type == Lnast_ntype_minus) {
+    process_operator();
+  } else if (type == Lnast_ntype_mult) {
+    process_operator();
+  } else if (type == Lnast_ntype_div) {
+    process_operator();
+  } else if (type == Lnast_ntype_same) {
+    process_operator();
+  } else if (type == Lnast_ntype_lt) {
+    process_operator();
+  } else if (type == Lnast_ntype_le) {
+    process_operator();
   } else if (type == Lnast_ntype_gt) {
     process_operator();
-    // process_gt();
+  } else if (type == Lnast_ntype_ge) {
+    process_operator();
+  } else if (type == Lnast_ntype_tuple) {
+    // add error that tuple is not supported
+  } else if (type == Lnast_ntype_ref) {
+    // is added to buffer
+  } else if (type == Lnast_ntype_const) {
+    // is added to buffer
+  } else if (type == Lnast_ntype_attr_bits) {
+    // is added to buffer
+  } else if (type == Lnast_ntype_assert) {
+    // check in for node configuration
   } else if (type == Lnast_ntype_if) {
     process_if();
+  } else if (type == Lnast_ntype_cond) {
+    // is added to buffer
+  } else if (type == Lnast_ntype_for) {
+    // not implemented in lnast
+  } else if (type == Lnast_ntype_while) {
+    // not implemented in lnast
   } else if (type == Lnast_ntype_func_call) {
     process_func_call();
   } else if (type == Lnast_ntype_func_def) {
     process_func_def();
+  } else if (type == Lnast_ntype_top) {
+    // not added to any buffer
   }
 
   for (auto const& node : node_buffer) {
@@ -226,8 +264,9 @@ std::string Lnast_to_pyrope_parser::indent_buffer() {
   return std::string(indent_buffer_size * 2, ' ');
 }
 
-void Lnast_to_pyrope_parser::process_pure_assign() {
+void Lnast_to_pyrope_parser::process_assign() {
   std::vector<Lnast_node>::iterator it = node_buffer.begin();
+  std::string assign_type = ntype_dbg((*it).type);
   it++;
   std::string_view key = get_node_name(*it);
   it++;
@@ -249,7 +288,7 @@ void Lnast_to_pyrope_parser::process_pure_assign() {
     fmt::print("inserting:\tkey:{}\tvalue:{}\n", key, value);
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
   } else {
-    node_str_buffer = absl::StrCat(node_str_buffer, indent_buffer(), key, " = ", value, "\n");
+    node_str_buffer = absl::StrCat(node_str_buffer, indent_buffer(), key, " ", assign_type, " ", value, "\n");
   }
 }
 

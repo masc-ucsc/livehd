@@ -39,7 +39,7 @@ private:
   void dec_indent_buffer();
   std::string indent_buffer();
 
-  void process_pure_assign();
+  void process_assign();
   /*
   void process_as();
   */

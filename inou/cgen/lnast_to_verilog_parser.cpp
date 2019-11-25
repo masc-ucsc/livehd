@@ -186,14 +186,16 @@ void Lnast_to_verilog_parser::process_buffer() {
     // is added to buffer
   } else if (type == Lnast_ntype_attr_bits) {
     // is added to buffer
+  } else if (type == Lnast_ntype_assert) {
+    // check in for node configuration
   } else if (type == Lnast_ntype_if) {
     process_if();
   } else if (type == Lnast_ntype_cond) {
     // is added to buffer
   } else if (type == Lnast_ntype_for) {
-    // not implemented
+    // not implemented in lnast
   } else if (type == Lnast_ntype_while) {
-    // not implemented
+    // not implemented in lnast
   } else if (type == Lnast_ntype_func_call) {
     process_func_call();
   } else if (type == Lnast_ntype_func_def) {
