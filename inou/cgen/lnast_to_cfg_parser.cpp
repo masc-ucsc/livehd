@@ -7,7 +7,7 @@ std::string Lnast_to_cfg_parser::stringify() {
   for (const mmap_lib::Tree_index &it: lnast->depth_preorder(lnast->get_root())) {
     process_node(it);
   }
-  process_buffer();
+  flush_statements();
 
   return buffer;
 }
@@ -124,6 +124,30 @@ void Lnast_to_cfg_parser::pop_statement(mmap_lib::Tree_level level, Lnast_ntype 
   prev_statement_level = level_stack.back();
 
   k_stack.pop_back();
+}
+
+void Lnast_to_cfg_parser::flush_statements() {
+  fmt::print("starting to flush statements\n");
+
+  while (buffer_stack.size() > 0) {
+    uint32_t tmp_k = k_next;
+
+    process_buffer();
+
+    node_buffer = buffer_stack.back();
+    buffer_stack.pop_back();
+
+    if_buffer = if_buffer_stack.back();
+    if_buffer_stack.pop_back();
+
+    level_stack.pop_back();
+    curr_statement_level = prev_statement_level;
+    prev_statement_level = level_stack.back();
+
+    k_stack.pop_back();
+  }
+
+  fmt::print("ending flushing statements\n");
 }
 
 void Lnast_to_cfg_parser::add_to_buffer(Lnast_node node) {
