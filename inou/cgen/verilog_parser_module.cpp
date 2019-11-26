@@ -64,7 +64,7 @@ std::string Verilog_parser_module::create_next() {
 
   for(auto ele : var_manager.variable_map) {
     if (get_variable_type(ele.first) == 3) {
-      buffer = absl::StrCat(buffer, "\n", indent_buffer(1), "always @(posedge clk) begin\n", indent_buffer(2), ele.first, " <= ", ele.first, "_next\n", indent_buffer(1), "end\n");
+      buffer = absl::StrCat(buffer, "\n", indent_buffer(1), "always @(posedge clk) begin\n", indent_buffer(2), process_variable(ele.first), " <= ", process_variable(ele.first), "_next\n", indent_buffer(1), "end\n");
     }
   }
 
@@ -131,7 +131,7 @@ std::string Verilog_parser_module::process_variable(std::string_view var_name) {
     } else {
       return std::string(var_name.substr(1)).c_str();
     }
-  } else if (var_name.at(0) == '@') {
+  } else if (var_name.at(0) == '#') {
     var_name = absl::StrCat(var_name, "_r");
 
     if (var_name.at(1) == '\\') {

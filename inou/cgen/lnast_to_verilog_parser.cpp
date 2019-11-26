@@ -290,6 +290,7 @@ void Lnast_to_verilog_parser::process_assign() {
     fmt::print("map_it: find: {} | {}\n", map_it->first, map_it->second.first);
   } else if (!is_number(ref)) {
     new_vars.insert(ref);
+    var_manager->insert_variable(ref);
   } else if (is_number(ref)) {
     ref = process_number(ref);
     var_manager->insert_variable(ref);
@@ -311,7 +312,6 @@ void Lnast_to_verilog_parser::process_assign() {
 
     new_vars.insert(key);
     var_manager->insert_variable(key);
-
     curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(indent_buffer_size, phrase));
     curr_module->var_manager.merge_multiple(var_manager->pop(new_vars));
   }
@@ -425,6 +425,7 @@ void Lnast_to_verilog_parser::process_operator() {
     } else if (ref.size() > 2 && !is_number(ref)) {
       new_vars.insert(ref);
       var_manager->insert_variable(ref);
+      ref = curr_module->process_variable(ref);
     } else if (is_number(ref)) {
       ref = process_number(ref);
     } else {
