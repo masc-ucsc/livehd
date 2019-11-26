@@ -47,7 +47,7 @@ void Pass_bitwidth::trans(Eprp_var &var) {
   }
 }
 
-void Pass_bitwidth::mark_all_outputs(const LGraph *lg, Index_ID idx) {
+/*void Pass_bitwidth::mark_all_outputs(const LGraph *lg, Index_ID idx) {
 
   for(const auto &out : lg->out_edges(idx)) {
     Index_ID dest_idx = out.get_idx();
@@ -55,9 +55,9 @@ void Pass_bitwidth::mark_all_outputs(const LGraph *lg, Index_ID idx) {
 
     next_pending.set_bit(dest_idx);
   }
-}
+}*/
 
-void Pass_bitwidth::iterate_graphio(const LGraph *lg, Index_ID idx) {
+/*void Pass_bitwidth::iterate_graphio(const LGraph *lg, Index_ID idx) {
 
   // This should be called only if we do cross module propagation
 
@@ -415,13 +415,13 @@ void Pass_bitwidth::iterate_subgraph(const LGraph *lg, Index_ID idx) {
   if(updated) {
     mark_all_outputs(lg,idx);
   }
-}
+}*/
 
 //------------------------------------------------------------------
 // MIT Algorithm
 void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
 
-  lg->each_graph_output([this, lg](const Node_pin &pin) {
+  /*lg->each_graph_output([this, lg](const Node_pin &pin) {
     if(lg->get_bits(pin) == 0)
       return;
 
@@ -467,10 +467,10 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
       nb.set_implicit();
     }
     pending.set_bit(pin.get_idx());
-  });
+  });*/
 }
 
-void Pass_bitwidth::iterate_node(LGraph *lg, Index_ID idx) {
+/*void Pass_bitwidth::iterate_node(LGraph *lg, Index_ID idx) {
 
   const auto &op = lg->node_type_get(idx);
 
@@ -597,19 +597,19 @@ bool Pass_bitwidth::bw_pass_iterate(LGraph *lg) {
   assert(false);
 
   return false;
-}
+}*/
 
 void Pass_bitwidth::do_trans(LGraph *lg) {
   {
     LGBench b("pass.bitwidth");
 
-    bw_pass_setup(lg);
+    //bw_pass_setup(lg);
 
-    bool done = bw_pass_iterate(lg);
+    bool done = true;//bw_pass_iterate(lg);
     if(!done) {
       Pass::error("could not converge in the iterations FIXME: dump nice message on why\n");
     }
   }
 
-  bw_pass_dump(lg);
+  //bw_pass_dump(lg);
 }

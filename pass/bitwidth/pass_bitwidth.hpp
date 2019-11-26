@@ -4,7 +4,7 @@
 
 #include <string>
 
-#include "bm.h"
+//#include "bm.h"
 
 #include "pass.hpp"
 
@@ -16,12 +16,12 @@ protected:
   };
   Pass_bitwidth_options_pack opack;
 
-  bm::bvector<> pending;
-  bm::bvector<> next_pending;
+  //bm::bvector<> pending;
+  //bm::bvector<> next_pending;
 
   void mark_all_outputs(const LGraph *lg, Index_ID idx);
 
-  void iterate_graphio(const LGraph *lg, Index_ID idx);
+  /*void iterate_graphio(const LGraph *lg, Index_ID idx);
   void iterate_logic(const LGraph *lg, Index_ID idx);
   void iterate_arith(const LGraph *lg, Index_ID idx);
   void iterate_shift(const LGraph *lg, Index_ID idx);
@@ -29,7 +29,7 @@ protected:
   void iterate_pick(const LGraph *lg, Index_ID idx);
   void iterate_mux(const LGraph *lg, Index_ID idx);
   void iterate_equals(const LGraph *lg, Index_ID idx);
-  void iterate_subgraph(const LGraph *lg, Index_ID idx);
+  void iterate_subgraph(const LGraph *lg, Index_ID idx);*/
 
   void iterate_node(LGraph *lg, Index_ID idx);
 

@@ -45,7 +45,7 @@ void Main_api::init() {
   setup_pass_sample();
   setup_pass_mockturtle();
   /* setup_pass_abc(); */
-  /* setup_pass_bitwidth(); */
+  setup_pass_bitwidth();
 
 
   setup_inou_cgen();

@@ -27,7 +27,7 @@ cc_binary(
             "//pass/opentimer:pass_opentimer",
             "//pass/punch:pass_punch",
             "//pass/sample:pass_sample",
-            # "//pass/bitwidth:pass_bitwidth",
+            "//pass/bitwidth:pass_bitwidth",
             "//pass/mockturtle:pass_mockturtle",
 
             # "//cops/live:cops_live",
