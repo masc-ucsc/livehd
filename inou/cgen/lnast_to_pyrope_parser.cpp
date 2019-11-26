@@ -358,7 +358,7 @@ void Lnast_to_pyrope_parser::process_label() {
     ref = map_it->second;
   }
   it++;
-  value = absl::StrCat(value, ref, ":", process_number(get_node_name(*it)));
+  value = absl::StrCat(value, ref, "=", process_number(get_node_name(*it)));
 
   fmt::print("process_label value:\tkey: {}\tvalue: {}\n", key, value);
   if (is_ref(key)) {
