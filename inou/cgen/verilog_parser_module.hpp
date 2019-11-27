@@ -28,6 +28,12 @@ public:
   std::string filename;
   Cgen_variable_manager var_manager;
 
+  std::vector<std::string> output_vars;
+  std::string func_calls;
+  std::vector<std::string> arg_vars;
+
+  bool has_sequential = false;
+
   void add_to_buffer_single(std::pair<int32_t, std::string> next);
   void add_to_buffer_multiple(std::vector<std::pair<int32_t, std::string>> nodes);
   void node_buffer_stack();

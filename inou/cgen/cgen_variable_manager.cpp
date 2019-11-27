@@ -86,7 +86,7 @@ Variable_options* Cgen_variable_manager::get(std::string_view var_name) {
 }
 
 void Variable_options::update_attr(std::string test_string) {
-  std::vector<std::string> split_str = absl::StrSplit(test_string, ":");
+  std::vector<std::string> split_str = absl::StrSplit(test_string, "=");
 
   if (split_str[0] == "__bits") {
     bits = std::stoi(split_str[1], nullptr);

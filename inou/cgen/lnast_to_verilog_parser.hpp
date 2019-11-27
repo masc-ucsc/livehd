@@ -20,7 +20,6 @@ private:
   // infustructure for multiple modules
   std::string root_filename;
   Verilog_parser_module *curr_module;
-  Cgen_variable_manager *var_manager;
   std::map<std::string, std::string> file_map;
   // key, pair(value, variables)
   std::map<std::string_view, std::pair<std::string, std::set<std::string_view>>> ref_map;
@@ -31,6 +30,7 @@ private:
   void setup_ntype_str_mapping();
   std::string_view get_node_name(Lnast_node node);
   std::string get_filename(std::string filepath);
+  std::map<std::string, Verilog_parser_module*> func_map;
 
   // infustructure
   void process_node(const mmap_lib::Tree_index &it);

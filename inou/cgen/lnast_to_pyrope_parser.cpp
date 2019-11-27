@@ -346,7 +346,7 @@ void Lnast_to_pyrope_parser::process_as() {
 
 void Lnast_to_pyrope_parser::process_label() {
   std::vector<Lnast_node>::iterator it = node_buffer.begin();
-  std::string access_type = ntype_dbg((*it).type);
+  std::string_view access_type = ntype_dbg((*it).type);
   it++;
   std::string_view key = get_node_name(*it);
   it++;

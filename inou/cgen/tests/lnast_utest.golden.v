@@ -22,7 +22,7 @@ module lnast_utest (input a_i,
     *(LNAST: $b as __bits:1)*
     *(LNAST: %s as __bits:1)*
     s_o = a_i & b_i;
-    s2_o as __bits:3
+    *(LNAST: %s2 as __bits:3)*
     s2_o = result_o1 + result_o2
     x = a_i;
     if (a_i > 1) {
