@@ -41,14 +41,14 @@ void Lnast_to_cfg_parser::process_node(const mmap_lib::Tree_index& it) {
     // check the buffer to see if this is an if statement
     // and if it is, check if this is an ifel or an else
     if (node_buffer.size() > 0) {
-      Lnast_ntype type = node_buffer.front().type;
-      if (type == Lnast_ntype_if) {
+      Lnast_ntype ntype = node_buffer.front().type;
+      if (ntype == Lnast_ntype_if) {
         if (node_buffer.size() > 3 && node_buffer.back().type != Lnast_ntype_statements) {
           if_buffer.push_back(k_next);
           k_next++;
         }
         if_buffer.push_back(k_next);
-      } else if (type == Lnast_ntype_func_def) {
+      } else if (ntype == Lnast_ntype_func_def) {
         if_buffer.push_back(k_next);
       }
     }
@@ -235,9 +235,9 @@ void Lnast_to_cfg_parser::process_buffer() {
 
   for (auto const& node : node_buffer) {
     std::string name(node.token.get_text(memblock)); // str_view to string
-    std::string type = ntype_dbg(node.type);
+    std::string ntype = ntype_dbg(node.type);
     if (name == "") {
-      fmt::print("{}({}) ", type, node.type);
+      fmt::print("{}({}) ", ntype, node.type);
     } else {
       fmt::print("{} ", name);
     }

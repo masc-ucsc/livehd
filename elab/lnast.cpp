@@ -1,5 +1,9 @@
 #include "lnast.hpp"
 
+void Lnast_node::dump() const {
+  fmt::print("type:{} loc:{}\n", Lnast_type_name[type], loc); // TODO: cleaner API to also dump token
+}
+
 void Lnast::ssa_trans() {
   do_ssa_trans(this->get_root());
 }

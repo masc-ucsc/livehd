@@ -27,6 +27,8 @@ struct Lnast_node {
 
   //Lnast_node(Lnast_ntype type, Token token, uint32_t)
   //  :type(type), token(token), loc(0), subs(0) { I(type);}
+
+  void dump() const;
 };
 
 
@@ -102,5 +104,54 @@ enum Lnast_node_type : Lnast_ntype {
   Lnast_ntype_assert,       // I
 };
 
+static inline std::string_view Lnast_type_name[] = {
+  "invalid",
+  //group: tree structure
+  "top",
+  "statements",
+  "cstatements",
+  "if",
+  "cond",
+  "uif",
+  "elif",
+  "for",
+  "while",
+  "phi",
+  "func_call",
+  "func_def",
+
+  //group: primitive operator
+  "pure_assign",
+  "dp_assign",
+  "as",
+  "label",
+  "dot",
+  "logical_and",
+  "logical_or",
+  "and",
+  "or",
+  "xor",
+  "plus",
+  "minus",
+  "mult",
+  "div",
+  "eq",
+  "same",
+  "lt",
+  "le",
+  "gt",
+  "ge",
+  "tuple",
+
+  //group: language variable
+  "ref",
+  "const",
+
+  //group: attribute
+  "attr_bits",
+
+  //group: others
+  "assert",
+};
 
 

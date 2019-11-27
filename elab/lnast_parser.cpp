@@ -12,6 +12,12 @@ void Lnast_parser::elaborate(){
   lnast->set_root(Lnast_node(Lnast_ntype_top, Token()));
   process_statements_op(lnast->get_root(), 1);
   build_lnast();
+
+  for(const auto &index:lnast->depth_preorder()) {
+    fmt::print("level:{} pos:{} ",index.level, index.pos);
+    lnast->get_data(index).dump();
+  }
+
 }
 
 void Lnast_parser::build_lnast() {
@@ -19,7 +25,7 @@ void Lnast_parser::build_lnast() {
 
   uint32_t    cfg_nidx    = 0;
   uint32_t    cfg_nparent = 0;
-  uint32_t    cfg_nchild  = 0;
+  //uint32_t    cfg_nchild  = 0;
   Token       cfg_token_beg;
   Token       cfg_token_end;
   Token       loc;
@@ -52,7 +58,7 @@ void Lnast_parser::build_lnast() {
 
 
     I(line_tkcnt == CFG_CHILD_POS);
-    cfg_nchild = (uint32_t)std::stoi(scan_text());
+    //cfg_nchild = (uint32_t)std::stoi(scan_text());
     walk_next_token();
 
 
@@ -210,7 +216,7 @@ void  Lnast_parser::process_func_call_op(const mmap_lib::Tree_index& tree_idx_fc
   }
 
   auto local_line_num = scan_calc_lineno();
-  while (scan_calc_lineno() == local_line_num) {
+  while (scan_calc_lineno() == local_line_num && !scan_is_end()) {
     I(token_is_valid_ref());
     lnast->add_child(tree_idx_fcall, Lnast_node(operand_analysis(), scan_get_token()));
     walk_next_token(); //go to ___i -> ___j ...
@@ -221,6 +227,8 @@ void  Lnast_parser::process_func_call_op(const mmap_lib::Tree_index& tree_idx_fc
 
 //scan pos start: first operand token, stop: last operand
 void  Lnast_parser::process_if_op(const mmap_lib::Tree_index& tree_idx_if, const Token& cond){
+  (void)tree_idx_if;
+  (void)cond;
   //lnast->add_child(parent_of_sts, Lnast_node(Lnast_ntype_cond, buffer_if_condition));
 }
 

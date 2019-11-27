@@ -42,8 +42,8 @@ private:
 public:
   std::string buffer;
 
-  Lnast_to_cfg_parser(std::string_view memblock, Lnast *lnast)
-    : memblock(memblock), lnast(lnast) { setup_ntype_str_mapping(); };
+  Lnast_to_cfg_parser(std::string_view _memblock, Lnast *_lnast)
+    : memblock(_memblock), lnast(_lnast) { setup_ntype_str_mapping(); };
   std::string ntype_dbg(Lnast_ntype ntype);
   std::string stringify();
 };
