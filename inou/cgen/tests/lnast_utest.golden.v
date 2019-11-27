@@ -1,24 +1,29 @@
-module lnast_utest (input clk,
-                    input reset,
-                    input [0] a_i,
-                    input [0] b_i,
-                    input     c_i,
-                    input     d_i,
-                    input     e_i,
-                    input     f_i,
-                    output     o1_o,
-                    output     o2_o,
-                    output [0] s_o);
-  wire result;
+module lnast_utest (input a_i,
+                    input b_i,
+                    input c_i,
+                    input d_i,
+                    input e_i,
+                    input f_i,
+                    output o1_o,
+                    output o2_o,
+                    output s_o
+                    output [2:0] s2_o);
+  wire result_o1;
+  wire result_o2;
   wire x;
   wire y;
 
-  always @(*) begin
+  lnast_utest_fun1(.a_i(3), .b_i(4), .o1_o(result_o1), .o2_o(result_o2));
+
+  always_comb begin
+    x = 0
+    y = 0
     *(LNAST: $a as __bits:1)*
     *(LNAST: $b as __bits:1)*
     *(LNAST: %s as __bits:1)*
     s_o = a_i & b_i;
-    result = lnast_utest_fun1(clk, reset, a:3, b:4);
+    s2_o as __bits:3
+    s2_o = result_o1 + result_o2
     x = a_i;
     if (a_i > 1) {
       x = e_i;
