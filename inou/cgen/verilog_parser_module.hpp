@@ -29,8 +29,8 @@ public:
   Cgen_variable_manager var_manager;
 
   std::vector<std::string> output_vars;
-  std::string func_calls;
   std::vector<std::string> arg_vars;
+  std::vector<std::string> func_calls;
 
   bool has_sequential = false;
 

@@ -48,9 +48,14 @@ std::string Verilog_parser_module::create_header() {
       }
     }
   }
-  fmt::print("finished with the header\n");
+  module_start = absl::StrCat(module_start, inputs, outputs, ");\n", wires, "\n");
 
-  return absl::StrCat(module_start, inputs, outputs, ");\n", wires, "\n");
+  for (auto ele : func_calls) {
+    module_start = absl::StrCat(module_start, "  ", ele, "\n");
+  }
+
+  fmt::print("finished with the header\n");
+  return absl::StrCat(module_start, "\n");
 }
 
 std::string Verilog_parser_module::create_footer() {

@@ -22,7 +22,7 @@ private:
   Verilog_parser_module *curr_module;
   std::map<std::string, std::string> file_map;
   // key, pair(value, variables)
-  std::map<std::string_view, std::pair<std::string, std::set<std::string_view>>> ref_map;
+  std::map<std::string_view, std::string> ref_map;
   std::vector<Verilog_parser_module*> module_stack;
 
   // references
