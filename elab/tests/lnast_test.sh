@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# pts='lnast_utest'
-pts='counter'
+pts='lnast_utest'
+# pts='counter'
 
 LGSHELL=./bazel-bin/main/lgshell
 

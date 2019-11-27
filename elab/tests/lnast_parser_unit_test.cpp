@@ -44,6 +44,7 @@ public:
 /*
  *
 CFG text input for lnast parser
+
 END
 1    0   99  SEQ0
 2    1   99  99    99   :     ___a    __bits  0d1
@@ -157,55 +158,132 @@ END
     (void) K8_op1;
     (void) K8_tar;
 
-    auto func_def     = ast_gld.add_child(top_sts,  std::make_tuple(ntype_dbg(Lnast_ntype_func_def),      ""    )); //knum = K9
+    auto func_def     = ast_gld.add_child(top_sts,  std::make_tuple(ntype_dbg(Lnast_ntype_func_def),      ""    ));
     auto K9_tar       = ast_gld.add_child(func_def, std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "fun1"));
     auto K9_op1       = ast_gld.add_child(func_def, std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "$a"));
     auto K9_op2       = ast_gld.add_child(func_def, std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "$b"));
-    auto K9_op3       = ast_gld.add_child(func_def, std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "%o"));
+    auto K9_op3       = ast_gld.add_child(func_def, std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "%o1"));
+    auto K9_op4       = ast_gld.add_child(func_def, std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "%o2"));
     auto func_def_sts = ast_gld.add_child(func_def, std::make_tuple(ntype_dbg(Lnast_ntype_statements),    ""));
     (void) K9_tar;
     (void) K9_op1;
     (void) K9_op2;
     (void) K9_op3;
-
-    auto K11      = ast_gld.add_child(func_def_sts, std::make_tuple(ntype_dbg(Lnast_ntype_xor),           ""    ));
-    auto K11_tar  = ast_gld.add_child(K11,          std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___f"));
-    auto K11_op1  = ast_gld.add_child(K11,          std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "$a"  ));
-    auto K11_op2  = ast_gld.add_child(K11,          std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "$b"  ));
-    (void) K11_tar;
-    (void) K11_op1;
-    (void) K11_op2;
-
-    auto K12      = ast_gld.add_child(func_def_sts,  std::make_tuple(ntype_dbg(Lnast_ntype_pure_assign),   ""    ));
-    auto K12_tar  = ast_gld.add_child(K12,           std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "%o"  ));
-    auto K12_op1  = ast_gld.add_child(K12,           std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___f"));
-    (void) K12_tar;
-    (void) K12_op1;
+    (void) K9_op4;
 
 
+
+    auto K100      = ast_gld.add_child(func_def_sts,   std::make_tuple(ntype_dbg(Lnast_ntype_label),      ""      ));
+    auto K100_tar  = ast_gld.add_child(K100,           std::make_tuple(ntype_dbg(Lnast_ntype_ref),        "___f"  ));
+    auto K100_op1  = ast_gld.add_child(K100,           std::make_tuple(ntype_dbg(Lnast_ntype_attr_bits),  "__bits"));
+    auto K100_op2  = ast_gld.add_child(K100_op1,       std::make_tuple(ntype_dbg(Lnast_ntype_const),      "0d2"   ));
+    (void) K100_tar;
+    (void) K100_op2;
+
+
+    auto K101      = ast_gld.add_child(func_def_sts,   std::make_tuple(ntype_dbg(Lnast_ntype_as),         ""    ));
+    auto K101_tar  = ast_gld.add_child(K101,           std::make_tuple(ntype_dbg(Lnast_ntype_ref),        "$a"  ));
+    auto K101_op1  = ast_gld.add_child(K101,           std::make_tuple(ntype_dbg(Lnast_ntype_ref),        "___f"));
+    (void) K101_op1;
+    (void) K101_tar;
+
+    auto K102      = ast_gld.add_child(func_def_sts,   std::make_tuple(ntype_dbg(Lnast_ntype_label),      ""      ));
+    auto K102_tar  = ast_gld.add_child(K102,           std::make_tuple(ntype_dbg(Lnast_ntype_ref),        "___g"  ));
+    auto K102_op1  = ast_gld.add_child(K102,           std::make_tuple(ntype_dbg(Lnast_ntype_attr_bits),  "__bits"));
+    auto K102_op2  = ast_gld.add_child(K102_op1,       std::make_tuple(ntype_dbg(Lnast_ntype_const),      "0d2"   ));
+    (void) K102_tar;
+    (void) K102_op2;
+
+
+    auto K103      = ast_gld.add_child(func_def_sts,   std::make_tuple(ntype_dbg(Lnast_ntype_as),         ""    ));
+    auto K103_tar  = ast_gld.add_child(K103,           std::make_tuple(ntype_dbg(Lnast_ntype_ref),        "$b"  ));
+    auto K103_op1  = ast_gld.add_child(K103,           std::make_tuple(ntype_dbg(Lnast_ntype_ref),        "___g"));
+    (void) K103_op1;
+    (void) K103_tar;
+
+    auto K104      = ast_gld.add_child(func_def_sts,   std::make_tuple(ntype_dbg(Lnast_ntype_label),      ""      ));
+    auto K104_tar  = ast_gld.add_child(K104,           std::make_tuple(ntype_dbg(Lnast_ntype_ref),        "___h"  ));
+    auto K104_op1  = ast_gld.add_child(K104,           std::make_tuple(ntype_dbg(Lnast_ntype_attr_bits),  "__bits"));
+    auto K104_op2  = ast_gld.add_child(K104_op1,       std::make_tuple(ntype_dbg(Lnast_ntype_const),      "0d2"   ));
+    (void) K104_tar;
+    (void) K104_op2;
+
+
+    auto K105      = ast_gld.add_child(func_def_sts,   std::make_tuple(ntype_dbg(Lnast_ntype_as),         ""    ));
+    auto K105_tar  = ast_gld.add_child(K105,           std::make_tuple(ntype_dbg(Lnast_ntype_ref),        "%o1"  ));
+    auto K105_op1  = ast_gld.add_child(K105,           std::make_tuple(ntype_dbg(Lnast_ntype_ref),        "___h"));
+    (void) K105_op1;
+    (void) K105_tar;
+
+    auto K106      = ast_gld.add_child(func_def_sts,   std::make_tuple(ntype_dbg(Lnast_ntype_label),      ""      ));
+    auto K106_tar  = ast_gld.add_child(K106,           std::make_tuple(ntype_dbg(Lnast_ntype_ref),        "___i"  ));
+    auto K106_op1  = ast_gld.add_child(K106,           std::make_tuple(ntype_dbg(Lnast_ntype_attr_bits),  "__bits"));
+    auto K106_op2  = ast_gld.add_child(K106_op1,       std::make_tuple(ntype_dbg(Lnast_ntype_const),      "0d2"   ));
+    (void) K106_tar;
+    (void) K106_op2;
+
+
+    auto K107      = ast_gld.add_child(func_def_sts,   std::make_tuple(ntype_dbg(Lnast_ntype_as),         ""    ));
+    auto K107_tar  = ast_gld.add_child(K107,           std::make_tuple(ntype_dbg(Lnast_ntype_ref),        "%o2"  ));
+    auto K107_op1  = ast_gld.add_child(K107,           std::make_tuple(ntype_dbg(Lnast_ntype_ref),        "___i"));
+    (void) K107_op1;
+    (void) K107_tar;
+
+
+
+
+
+    auto K108      = ast_gld.add_child(func_def_sts,  std::make_tuple(ntype_dbg(Lnast_ntype_xor),           ""    ));
+    auto K108_tar  = ast_gld.add_child(K108,          std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___j"));
+    auto K108_op1  = ast_gld.add_child(K108,          std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "$a"  ));
+    auto K108_op2  = ast_gld.add_child(K108,          std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "$b"  ));
+    (void) K108_tar;
+    (void) K108_op1;
+    (void) K108_op2;
+
+    auto K109      = ast_gld.add_child(func_def_sts,   std::make_tuple(ntype_dbg(Lnast_ntype_pure_assign),   ""    ));
+    auto K109_tar  = ast_gld.add_child(K109,           std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "%o1"  ));
+    auto K109_op1  = ast_gld.add_child(K109,           std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___j"));
+    (void) K109_tar;
+    (void) K109_op1;
+
+
+    auto K110      = ast_gld.add_child(func_def_sts,  std::make_tuple(ntype_dbg(Lnast_ntype_and),           ""    ));
+    auto K110_tar  = ast_gld.add_child(K110,          std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___k"));
+    auto K110_op1  = ast_gld.add_child(K110,          std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "$a"  ));
+    auto K110_op2  = ast_gld.add_child(K110,          std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "$b"  ));
+    (void) K110_tar;
+    (void) K110_op1;
+    (void) K110_op2;
+
+    auto K111      = ast_gld.add_child(func_def_sts,   std::make_tuple(ntype_dbg(Lnast_ntype_pure_assign),   ""    ));
+    auto K111_tar  = ast_gld.add_child(K111,           std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "%o2"  ));
+    auto K111_op1  = ast_gld.add_child(K111,           std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___k"));
+    (void) K111_tar;
+    (void) K111_op1;
 
 
     auto K15      = ast_gld.add_child(top_sts,  std::make_tuple(ntype_dbg(Lnast_ntype_label),         ""    ));
-    auto K15_tar  = ast_gld.add_child(K15,      std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___h"));
+    auto K15_tar  = ast_gld.add_child(K15,      std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___m"));
     auto K15_op1  = ast_gld.add_child(K15,      std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "a"   ));
-    auto K15_op2  = ast_gld.add_child(K15,      std::make_tuple(ntype_dbg(Lnast_ntype_const),         "0d3" ));
+    auto K15_op2  = ast_gld.add_child(K15,      std::make_tuple(ntype_dbg(Lnast_ntype_const),         "0d2" ));
     (void) K15_tar;
     (void) K15_op1;
     (void) K15_op2;
 
     auto K16      = ast_gld.add_child(top_sts,  std::make_tuple(ntype_dbg(Lnast_ntype_label),         ""    ));
-    auto K16_tar  = ast_gld.add_child(K16,      std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___i"));
+    auto K16_tar  = ast_gld.add_child(K16,      std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___n"));
     auto K16_op1  = ast_gld.add_child(K16,      std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "b"   ));
-    auto K16_op2  = ast_gld.add_child(K16,      std::make_tuple(ntype_dbg(Lnast_ntype_const),         "0d4" ));
+    auto K16_op2  = ast_gld.add_child(K16,      std::make_tuple(ntype_dbg(Lnast_ntype_const),         "0d3" ));
     (void) K16_tar;
     (void) K16_op1;
     (void) K16_op2;
 
     auto K17      = ast_gld.add_child(top_sts,  std::make_tuple(ntype_dbg(Lnast_ntype_func_call),     ""    ));
-    auto K17_tar  = ast_gld.add_child(K17,      std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___g"));
+    auto K17_tar  = ast_gld.add_child(K17,      std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___l"));
     auto K17_op1  = ast_gld.add_child(K17,      std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "fun1"));
-    auto K17_op2  = ast_gld.add_child(K17,      std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___h"));
-    auto K17_op3  = ast_gld.add_child(K17,      std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___i"));
+    auto K17_op2  = ast_gld.add_child(K17,      std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___m"));
+    auto K17_op3  = ast_gld.add_child(K17,      std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___n"));
     (void) K17_tar;
     (void) K17_op1;
     (void) K17_op2;
@@ -213,35 +291,87 @@ END
 
     auto K18      = ast_gld.add_child(top_sts,  std::make_tuple(ntype_dbg(Lnast_ntype_pure_assign),   ""      ));
     auto K18_tar  = ast_gld.add_child(K18,      std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "result"));
-    auto K18_op1  = ast_gld.add_child(K18,      std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___g"));
+    auto K18_op1  = ast_gld.add_child(K18,      std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___l"));
     (void) K18_tar;
     (void) K18_op1;
 
-    auto K19      = ast_gld.add_child(top_sts, std::make_tuple(ntype_dbg(Lnast_ntype_pure_assign), ""    ));
-    auto K19_tar  = ast_gld.add_child(K19,     std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___j"));
-    auto K19_op1  = ast_gld.add_child(K19,     std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "$a"));
-    (void) K19_tar;
-    (void) K19_op1;
 
-    auto K20      = ast_gld.add_child(top_sts, std::make_tuple(ntype_dbg(Lnast_ntype_pure_assign), ""    ));
-    auto K20_tar  = ast_gld.add_child(K20,     std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "x"   ));
-    auto K20_op1  = ast_gld.add_child(K20,     std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___j"));
-    (void) K20_tar;
-    (void) K20_op1;
+
+    auto K112      = ast_gld.add_child(top_sts,     std::make_tuple(ntype_dbg(Lnast_ntype_label),         ""      ));
+    auto K112_tar  = ast_gld.add_child(K112,        std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___o"  ));
+    auto K112_op1  = ast_gld.add_child(K112,        std::make_tuple(ntype_dbg(Lnast_ntype_attr_bits),     "__bits"));
+    auto K112_op2  = ast_gld.add_child(K112_op1,    std::make_tuple(ntype_dbg(Lnast_ntype_const),         "0d3"   ));
+    (void) K112_tar;
+    (void) K112_op2;
+
+    auto K113      = ast_gld.add_child(top_sts,     std::make_tuple(ntype_dbg(Lnast_ntype_as),            ""    ));
+    auto K113_tar  = ast_gld.add_child(K113,        std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "%s2"  ));
+    auto K113_op1  = ast_gld.add_child(K113,        std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___o"));
+    (void) K113_op1;
+    (void) K113_tar;
+
+
+    auto K114      = ast_gld.add_child(top_sts,  std::make_tuple(ntype_dbg(Lnast_ntype_dot),           ""    ));
+    auto K114_tar  = ast_gld.add_child(K114,     std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___q"));
+    auto K114_op1  = ast_gld.add_child(K114,     std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "result"  ));
+    auto K114_op2  = ast_gld.add_child(K114,     std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "o1"  ));
+    (void) K114_tar;
+    (void) K114_op1;
+    (void) K114_op2;
+
+
+    auto K115      = ast_gld.add_child(top_sts,  std::make_tuple(ntype_dbg(Lnast_ntype_dot),           ""    ));
+    auto K115_tar  = ast_gld.add_child(K115,     std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___r"));
+    auto K115_op1  = ast_gld.add_child(K115,     std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "result"  ));
+    auto K115_op2  = ast_gld.add_child(K115,     std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "o2"  ));
+    (void) K115_tar;
+    (void) K115_op1;
+    (void) K115_op2;
+
+
+    auto K116      = ast_gld.add_child(top_sts,  std::make_tuple(ntype_dbg(Lnast_ntype_plus),           ""    ));
+    auto K116_tar  = ast_gld.add_child(K116,     std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___p"));
+    auto K116_op1  = ast_gld.add_child(K116,     std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___q"  ));
+    auto K116_op2  = ast_gld.add_child(K116,     std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___r"  ));
+    (void) K116_tar;
+    (void) K116_op1;
+    (void) K116_op2;
+
+
+    auto K117      = ast_gld.add_child(top_sts,   std::make_tuple(ntype_dbg(Lnast_ntype_pure_assign),   ""    ));
+    auto K117_tar  = ast_gld.add_child(K117,      std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "%s2"  ));
+    auto K117_op1  = ast_gld.add_child(K117,      std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___p"));
+    (void) K117_tar;
+    (void) K117_op1;
+
+
+    auto   K118      = ast_gld.add_child(top_sts,   std::make_tuple(ntype_dbg(Lnast_ntype_pure_assign),   ""    ));
+    auto   K118_tar  = ast_gld.add_child(K118,      std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___s"  ));
+    auto   K118_op1  = ast_gld.add_child(K118,      std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "$a"));
+    (void) K118_tar;
+    (void) K118_op1;
+
+
+    auto   K119      = ast_gld.add_child(top_sts,   std::make_tuple(ntype_dbg(Lnast_ntype_pure_assign),   ""    ));
+    auto   K119_tar  = ast_gld.add_child(K119,      std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "x"  ));
+    auto   K119_op1  = ast_gld.add_child(K119,      std::make_tuple(ntype_dbg(Lnast_ntype_ref),           "___s"));
+    (void) K119_tar;
+    (void) K119_op1;
+
 
 
 
     auto K22         = ast_gld.add_child(top_sts,  std::make_tuple(ntype_dbg(Lnast_ntype_if),          ""));
     auto K22_c0sts   = ast_gld.add_child(K22,      std::make_tuple(ntype_dbg(Lnast_ntype_cstatements), ""));
     auto K21      = ast_gld.add_child(K22_c0sts,   std::make_tuple(ntype_dbg(Lnast_ntype_gt),          ""    ));
-    auto K21_tar  = ast_gld.add_child(K21,         std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___k"));
+    auto K21_tar  = ast_gld.add_child(K21,         std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___t"));
     auto K21_op1  = ast_gld.add_child(K21,         std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "$a"  ));
     auto K21_op2  = ast_gld.add_child(K21,         std::make_tuple(ntype_dbg(Lnast_ntype_const),       "0d1"  ));
     (void) K21_tar;
     (void) K21_op1;
     (void) K21_op2;
 
-    auto K22_c0      = ast_gld.add_child(K22,      std::make_tuple(ntype_dbg(Lnast_ntype_cond),         "___k"));
+    auto K22_c0      = ast_gld.add_child(K22,      std::make_tuple(ntype_dbg(Lnast_ntype_cond),         "___t"));
     auto K24sts      = ast_gld.add_child(K22,      std::make_tuple(ntype_dbg(Lnast_ntype_statements),  ""));
     auto K44sts      = ast_gld.add_child(K22,      std::make_tuple(ntype_dbg(Lnast_ntype_statements),  ""));
     (void) K22_c0sts ;
@@ -252,14 +382,14 @@ END
     (void) K44sts;
 
     auto K24         = ast_gld.add_child(K24sts, std::make_tuple(ntype_dbg(Lnast_ntype_pure_assign), ""));
-    auto K24_tar     = ast_gld.add_child(K24,    std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___l"));
+    auto K24_tar     = ast_gld.add_child(K24,    std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___u"));
     auto K24_op1     = ast_gld.add_child(K24,    std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "$e"));
     (void) K24_op1;
     (void) K24_tar;
 
     auto K25         = ast_gld.add_child(K24sts, std::make_tuple(ntype_dbg(Lnast_ntype_pure_assign), ""));
     auto K25_tar     = ast_gld.add_child(K25,    std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "x"));
-    auto K25_op1     = ast_gld.add_child(K25,    std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___l"));
+    auto K25_op1     = ast_gld.add_child(K25,    std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___u"));
     (void) K25_op1;
     (void) K25_tar;
 
@@ -267,13 +397,13 @@ END
     auto K27         = ast_gld.add_child(K24sts,    std::make_tuple(ntype_dbg(Lnast_ntype_if),          ""));
     auto K27_c0sts   = ast_gld.add_child(K27,       std::make_tuple(ntype_dbg(Lnast_ntype_cstatements), ""));
     auto K26         = ast_gld.add_child(K27_c0sts, std::make_tuple(ntype_dbg(Lnast_ntype_gt),          ""));
-    auto K26_tar     = ast_gld.add_child(K26,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___m"));
+    auto K26_tar     = ast_gld.add_child(K26,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___v"));
     auto K26_op1     = ast_gld.add_child(K26,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "$a"));
     auto K26_op2     = ast_gld.add_child(K26,       std::make_tuple(ntype_dbg(Lnast_ntype_const),       "0d2"));
     (void) K26_tar;
     (void) K26_op1;
     (void) K26_op2;
-    auto K27_c0      = ast_gld.add_child(K27,     std::make_tuple(ntype_dbg(Lnast_ntype_cond),        "___m"));
+    auto K27_c0      = ast_gld.add_child(K27,     std::make_tuple(ntype_dbg(Lnast_ntype_cond),        "___v"));
     auto K29sts      = ast_gld.add_child(K27,     std::make_tuple(ntype_dbg(Lnast_ntype_statements),  ""));
     auto K27_c1sts   = ast_gld.add_child(K27,     std::make_tuple(ntype_dbg(Lnast_ntype_cstatements),  "")); //K32sts
     (void) K27_c0sts ;
@@ -282,7 +412,7 @@ END
     (void) K27_c1sts;
 
     auto K32         = ast_gld.add_child(K27_c1sts, std::make_tuple(ntype_dbg(Lnast_ntype_plus),        ""));
-    auto K32_tar     = ast_gld.add_child(K32,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___p"));
+    auto K32_tar     = ast_gld.add_child(K32,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___y"));
     auto K32_op1     = ast_gld.add_child(K32,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "$a"));
     auto K32_op2     = ast_gld.add_child(K32,       std::make_tuple(ntype_dbg(Lnast_ntype_const),       "0d1"));
     (void) K32_tar;
@@ -290,14 +420,14 @@ END
     (void) K32_op2;
 
     auto K33         = ast_gld.add_child(K27_c1sts, std::make_tuple(ntype_dbg(Lnast_ntype_gt),       ""));
-    auto K33_tar     = ast_gld.add_child(K33,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),      "___o"));
-    auto K33_op1     = ast_gld.add_child(K33,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),      "___p"));
+    auto K33_tar     = ast_gld.add_child(K33,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),      "___x"));
+    auto K33_op1     = ast_gld.add_child(K33,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),      "___y"));
     auto K33_op2     = ast_gld.add_child(K33,       std::make_tuple(ntype_dbg(Lnast_ntype_const),    "0d3"));
     (void) K33_tar;
     (void) K33_op1;
     (void) K33_op2;
 
-    auto K27_c1      = ast_gld.add_child(K27,    std::make_tuple(ntype_dbg(Lnast_ntype_cond),        "___o"));
+    auto K27_c1      = ast_gld.add_child(K27,    std::make_tuple(ntype_dbg(Lnast_ntype_cond),        "___x"));
     auto K36sts      = ast_gld.add_child(K27,    std::make_tuple(ntype_dbg(Lnast_ntype_statements),  ""));
     auto K39sts      = ast_gld.add_child(K27,    std::make_tuple(ntype_dbg(Lnast_ntype_statements),  ""));
     (void) K27_c1     ;
@@ -307,69 +437,69 @@ END
     (void) K39sts     ;
 
     auto K29         = ast_gld.add_child(K29sts,    std::make_tuple(ntype_dbg(Lnast_ntype_pure_assign), ""));
-    auto K29_tar     = ast_gld.add_child(K29,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___n"));
+    auto K29_tar     = ast_gld.add_child(K29,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___w"));
     auto K29_op1     = ast_gld.add_child(K29,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "$b"));
     (void) K29_tar;
     (void) K29_op1;
 
     auto K30         = ast_gld.add_child(K29sts,    std::make_tuple(ntype_dbg(Lnast_ntype_pure_assign), ""));
     auto K30_tar     = ast_gld.add_child(K30,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "x"));
-    auto K30_op1     = ast_gld.add_child(K30,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___n"));
+    auto K30_op1     = ast_gld.add_child(K30,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___w"));
     (void) K30_tar;
     (void) K30_op1;
 
 
 
     auto K36         = ast_gld.add_child(K36sts,    std::make_tuple(ntype_dbg(Lnast_ntype_pure_assign), ""));
-    auto K36_tar     = ast_gld.add_child(K36,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___q"));
+    auto K36_tar     = ast_gld.add_child(K36,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___z"));
     auto K36_op1     = ast_gld.add_child(K36,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "$c"));
     (void) K36_tar;
     (void) K36_op1;
 
     auto K37         = ast_gld.add_child(K36sts,    std::make_tuple(ntype_dbg(Lnast_ntype_pure_assign), ""));
     auto K37_tar     = ast_gld.add_child(K37,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "x"));
-    auto K37_op1     = ast_gld.add_child(K37,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___q"));
+    auto K37_op1     = ast_gld.add_child(K37,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___z"));
     (void) K37_tar;
     (void) K37_op1;
 
     auto K39         = ast_gld.add_child(K39sts,    std::make_tuple(ntype_dbg(Lnast_ntype_pure_assign), ""));
-    auto K39_tar     = ast_gld.add_child(K39,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___r"));
+    auto K39_tar     = ast_gld.add_child(K39,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___aa"));
     auto K39_op1     = ast_gld.add_child(K39,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "$d"));
     (void) K39_tar;
     (void) K39_op1;
 
     auto K40         = ast_gld.add_child(K39sts,    std::make_tuple(ntype_dbg(Lnast_ntype_pure_assign), ""));
     auto K40_tar     = ast_gld.add_child(K40,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "x"));
-    auto K40_op1     = ast_gld.add_child(K40,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___r"));
+    auto K40_op1     = ast_gld.add_child(K40,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___aa"));
     (void) K40_tar;
     (void) K40_op1;
 
     auto K41         = ast_gld.add_child(K24sts,    std::make_tuple(ntype_dbg(Lnast_ntype_pure_assign), ""));
-    auto K41_tar     = ast_gld.add_child(K41,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___s"));
+    auto K41_tar     = ast_gld.add_child(K41,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___ab"));
     auto K41_op1     = ast_gld.add_child(K41,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "$e"));
     (void) K41_tar;
     (void) K41_op1;
 
     auto K42         = ast_gld.add_child(K24sts,    std::make_tuple(ntype_dbg(Lnast_ntype_pure_assign), ""));
     auto K42_tar     = ast_gld.add_child(K42,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "y"));
-    auto K42_op1     = ast_gld.add_child(K42,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___s"));
+    auto K42_op1     = ast_gld.add_child(K42,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___ab"));
     (void) K42_tar;
     (void) K42_op1;
 
     auto K44         = ast_gld.add_child(K44sts,    std::make_tuple(ntype_dbg(Lnast_ntype_pure_assign), ""));
-    auto K44_tar     = ast_gld.add_child(K44,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___t"));
+    auto K44_tar     = ast_gld.add_child(K44,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___ac"));
     auto K44_op1     = ast_gld.add_child(K44,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "$f"));
     (void) K44_tar;
     (void) K44_op1;
 
     auto K45         = ast_gld.add_child(K44sts,    std::make_tuple(ntype_dbg(Lnast_ntype_pure_assign), ""));
     auto K45_tar     = ast_gld.add_child(K45,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "x"));
-    auto K45_op1     = ast_gld.add_child(K45,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___t"));
+    auto K45_op1     = ast_gld.add_child(K45,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___ac"));
     (void) K45_op1;
     (void) K45_tar;
 
     auto K47         = ast_gld.add_child(top_sts,   std::make_tuple(ntype_dbg(Lnast_ntype_plus),        ""));
-    auto K47_tar     = ast_gld.add_child(K47,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___u"));
+    auto K47_tar     = ast_gld.add_child(K47,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___ad"));
     auto K47_op1     = ast_gld.add_child(K47,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "x"));
     auto K47_op2     = ast_gld.add_child(K47,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "$a"));
     (void) K47_op1;
@@ -378,12 +508,12 @@ END
 
     auto K48         = ast_gld.add_child(top_sts,   std::make_tuple(ntype_dbg(Lnast_ntype_pure_assign), ""));
     auto K48_tar     = ast_gld.add_child(K48,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "%o1"));
-    auto K48_op1     = ast_gld.add_child(K48,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___u"));
+    auto K48_op1     = ast_gld.add_child(K48,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___ad"));
     (void) K48_tar;
     (void) K48_op1;
 
     auto K49         = ast_gld.add_child(top_sts,   std::make_tuple(ntype_dbg(Lnast_ntype_plus),        ""));
-    auto K49_tar     = ast_gld.add_child(K49,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___v"));
+    auto K49_tar     = ast_gld.add_child(K49,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___ae"));
     auto K49_op1     = ast_gld.add_child(K49,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "y"));
     auto K49_op2     = ast_gld.add_child(K49,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "$a"));
     (void) K49_tar;
@@ -392,7 +522,7 @@ END
 
     auto K50         = ast_gld.add_child(top_sts,   std::make_tuple(ntype_dbg(Lnast_ntype_pure_assign), ""));
     auto K50_tar     = ast_gld.add_child(K50,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "%o2"));
-    auto K50_op1     = ast_gld.add_child(K50,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___v"));
+    auto K50_op1     = ast_gld.add_child(K50,       std::make_tuple(ntype_dbg(Lnast_ntype_ref),         "___ae"));
     (void) K50_tar;
     (void) K50_op1;
 
