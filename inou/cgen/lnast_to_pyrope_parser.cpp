@@ -138,7 +138,7 @@ void Lnast_to_pyrope_parser::process_buffer() {
   } else if (type == Lnast_ntype_label) {
     process_label();
   } else if (type == Lnast_ntype_dot) {
-    process_operator();
+    process_label();
   } else if (type == Lnast_ntype_logical_and) {
     process_operator();
   } else if (type == Lnast_ntype_logical_or) {
@@ -346,6 +346,7 @@ void Lnast_to_pyrope_parser::process_as() {
 
 void Lnast_to_pyrope_parser::process_label() {
   std::vector<Lnast_node>::iterator it = node_buffer.begin();
+  std::string access_type = ntype_dbg((*it).type);
   it++;
   std::string_view key = get_node_name(*it);
   it++;
@@ -358,7 +359,7 @@ void Lnast_to_pyrope_parser::process_label() {
     ref = map_it->second;
   }
   it++;
-  value = absl::StrCat(value, ref, "=", process_number(get_node_name(*it)));
+  value = absl::StrCat(value, ref, access_type, process_number(get_node_name(*it)));
 
   fmt::print("process_label value:\tkey: {}\tvalue: {}\n", key, value);
   if (is_ref(key)) {
@@ -526,8 +527,8 @@ void Lnast_to_pyrope_parser::setup_ntype_str_mapping() {
   ntype2str[Lnast_ntype_pure_assign] = "=";
   ntype2str[Lnast_ntype_dp_assign] = ":=";
   ntype2str[Lnast_ntype_as] = "as";
-  ntype2str[Lnast_ntype_label] = "label";
-  ntype2str[Lnast_ntype_dot] = "dot";
+  ntype2str[Lnast_ntype_label] = "=";
+  ntype2str[Lnast_ntype_dot] = ".";
   ntype2str[Lnast_ntype_logical_and] = "and";
   ntype2str[Lnast_ntype_logical_or] = "or";
   ntype2str[Lnast_ntype_and] = "&";
