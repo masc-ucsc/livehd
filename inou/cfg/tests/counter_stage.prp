@@ -1,0 +1,19 @@
+counter = :($enable):{
+  $enable as __bits:1
+  @cnt    as __bits:3
+
+  if ($enable == 1) {
+    @cnt = @cnt + 1
+  } 
+}
+
+cnt_inst0 as counter   
+
+cnt_inst1 as counter
+cnt_inst1 as __stage:true
+
+//cnt_inst2 = counter 
+//cnt_inst2.__stage:true
+
+//cnt_inst3 as counter ++ (__stage:true)
+
