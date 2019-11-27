@@ -12,8 +12,5 @@ cnt_inst0 as counter
 cnt_inst1 as counter
 cnt_inst1 as __stage:true
 
-//cnt_inst2 = counter 
-//cnt_inst2.__stage:true
-
 //cnt_inst3 as counter ++ (__stage:true)
 
