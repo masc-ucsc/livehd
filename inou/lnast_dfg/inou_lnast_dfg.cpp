@@ -99,32 +99,32 @@ void Inou_lnast_dfg::process_ast_top(LGraph *dfg){
 
 void Inou_lnast_dfg::process_ast_statements(LGraph *dfg, const mmap_lib::Tree_index &stmt_parent) {
   for (const auto& ast_idx : lnast->children(stmt_parent)) {
-    const auto op = lnast->get_data(ast_idx).type;
-    if (is_pure_assign_op(op)) {
+    const auto ntype = lnast->get_data(ast_idx).type;
+    if (ntype.is_pure_assign()) {
       process_ast_pure_assign_op(dfg, ast_idx);
-    } else if (is_binary_op(op)) {
+    } else if (ntype.is_binary_op()) {
       process_ast_binary_op(dfg, ast_idx);
-    } else if (is_unary_op(op)) {
+    } else if (ntype.is_unary_op()) {
       process_ast_unary_op(dfg, ast_idx);
-    } else if (is_logical_op(op)) {
+    } else if (ntype.is_logical_op()) {
       process_ast_logical_op(dfg, ast_idx);
-    } else if (is_as_op(op)) {
+    } else if (ntype.is_as()) {
       process_ast_as_op(dfg, ast_idx);
-    } else if (is_label_op(op)) {
+    } else if (ntype.is_label()) {
       process_ast_label_op(dfg, ast_idx);
-    } else if (is_dp_assign_op(op)) {
+    } else if (ntype.is_dp_assign()) {
       process_ast_dp_assign_op(dfg, ast_idx);
-    } else if (is_if_op(op)) {
+    } else if (ntype.is_if()) {
       process_ast_if_op(dfg, ast_idx);
-    } else if (is_uif_op(op)) {
+    } else if (ntype.is_uif()) {
       process_ast_uif_op(dfg, ast_idx);
-    } else if (is_func_call_op(op)) {
+    } else if (ntype.is_func_call()) {
       process_ast_func_call_op(dfg, ast_idx);
-    } else if (is_func_def_op(op)) {
+    } else if (ntype.is_func_def()) {
       process_ast_func_def_op(dfg, ast_idx);
-    } else if (is_for_op(op)) {
+    } else if (ntype.is_for()) {
       process_ast_for_op(dfg, ast_idx);
-    } else if (is_while_op(op)) {
+    } else if (ntype.is_while()) {
       process_ast_while_op(dfg, ast_idx);
     } else {
       I(false);
@@ -220,8 +220,8 @@ Node_pin Inou_lnast_dfg::setup_node_operand(LGraph *dfg, const mmap_lib::Tree_in
 }
 
 Node_Type_Op Inou_lnast_dfg::decode_lnast_op(const mmap_lib::Tree_index &ast_op_idx) {
-  const auto op = lnast->get_data(ast_op_idx).type;
-  return primitive_type_lnast2lg[op];
+  const auto raw_ntype = lnast->get_data(ast_op_idx).type.get_raw_ntype();
+  return primitive_type_lnast2lg[raw_ntype];
 }
 
 
@@ -260,21 +260,21 @@ void Inou_lnast_dfg::setup_memblock(){
 }
 
 void Inou_lnast_dfg::setup_lnast_to_lgraph_primitive_type_mapping(){
-  primitive_type_lnast2lg [Lnast_ntype_invalid]     = Invalid_Op ;
-  primitive_type_lnast2lg [Lnast_ntype_pure_assign] = Or_Op ;
-  primitive_type_lnast2lg [Lnast_ntype_logical_and] = And_Op ;
-  primitive_type_lnast2lg [Lnast_ntype_logical_or]  = Or_Op ;
-  primitive_type_lnast2lg [Lnast_ntype_and]         = And_Op ;
-  primitive_type_lnast2lg [Lnast_ntype_or]          = Or_Op ;
-  primitive_type_lnast2lg [Lnast_ntype_xor]         = Xor_Op ;
-  primitive_type_lnast2lg [Lnast_ntype_plus]        = Sum_Op ;
-  primitive_type_lnast2lg [Lnast_ntype_minus]       = Sum_Op ;
-  primitive_type_lnast2lg [Lnast_ntype_mult]        = Mult_Op ;
-  primitive_type_lnast2lg [Lnast_ntype_div]         = Div_Op ;
-  primitive_type_lnast2lg [Lnast_ntype_same]        = Equals_Op ;
-  primitive_type_lnast2lg [Lnast_ntype_lt]          = LessThan_Op ;
-  primitive_type_lnast2lg [Lnast_ntype_le]          = LessEqualThan_Op ;
-  primitive_type_lnast2lg [Lnast_ntype_gt]          = GreaterThan_Op ;
-  primitive_type_lnast2lg [Lnast_ntype_ge]          = GreaterEqualThan_Op ;
+  primitive_type_lnast2lg [Lnast_ntype::Lnast_ntype_invalid]     = Invalid_Op ;
+  primitive_type_lnast2lg [Lnast_ntype::Lnast_ntype_pure_assign] = Or_Op ;
+  primitive_type_lnast2lg [Lnast_ntype::Lnast_ntype_logical_and] = And_Op ;
+  primitive_type_lnast2lg [Lnast_ntype::Lnast_ntype_logical_or]  = Or_Op ;
+  primitive_type_lnast2lg [Lnast_ntype::Lnast_ntype_and]         = And_Op ;
+  primitive_type_lnast2lg [Lnast_ntype::Lnast_ntype_or]          = Or_Op ;
+  primitive_type_lnast2lg [Lnast_ntype::Lnast_ntype_xor]         = Xor_Op ;
+  primitive_type_lnast2lg [Lnast_ntype::Lnast_ntype_plus]        = Sum_Op ;
+  primitive_type_lnast2lg [Lnast_ntype::Lnast_ntype_minus]       = Sum_Op ;
+  primitive_type_lnast2lg [Lnast_ntype::Lnast_ntype_mult]        = Mult_Op ;
+  primitive_type_lnast2lg [Lnast_ntype::Lnast_ntype_div]         = Div_Op ;
+  primitive_type_lnast2lg [Lnast_ntype::Lnast_ntype_same]        = Equals_Op ;
+  primitive_type_lnast2lg [Lnast_ntype::Lnast_ntype_lt]          = LessThan_Op ;
+  primitive_type_lnast2lg [Lnast_ntype::Lnast_ntype_le]          = LessEqualThan_Op ;
+  primitive_type_lnast2lg [Lnast_ntype::Lnast_ntype_gt]          = GreaterThan_Op ;
+  primitive_type_lnast2lg [Lnast_ntype::Lnast_ntype_ge]          = GreaterEqualThan_Op ;
   //sh_fixme: to be extended ...
 }

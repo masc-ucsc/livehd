@@ -26,8 +26,6 @@ private:
   std::vector<Verilog_parser_module*> module_stack;
 
   // references
-  absl::flat_hash_map<Lnast_ntype, std::string> ntype2str;
-  void setup_ntype_str_mapping();
   std::string_view get_node_name(Lnast_node node);
   std::string get_filename(std::string filepath);
   std::map<std::string, Verilog_parser_module*> func_map;
@@ -68,8 +66,8 @@ public:
   int32_t indent_buffer_size = -1;
 
   Lnast_to_verilog_parser(std::string_view _memblock, Lnast *_lnast)
-    : memblock(_memblock), lnast(_lnast) { setup_ntype_str_mapping(); };
-  std::string ntype_dbg(Lnast_ntype ntype);
+    : memblock(_memblock), lnast(_lnast) { };
+
   std::map<std::string, std::string> stringify(std::string filepath);
 };
 

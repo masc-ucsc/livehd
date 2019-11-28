@@ -25,7 +25,7 @@ private:
   Lnast_parser             lnast_parser;
   Lnast                   *lnast;
 
-  absl::flat_hash_map<Lnast_ntype , Node_Type_Op> primitive_type_lnast2lg;
+  absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Node_Type_Op> primitive_type_lnast2lg;
   absl::flat_hash_map<std::string, Node_pin>   name2dpin; //record dpin instead of node because the asymmetry between gio and normal node  ...
   int                    lginp_cnt;
   int                    lgout_cnt;
@@ -61,36 +61,6 @@ private:
   void  process_ast_for_op         (LGraph *dfg, const mmap_lib::Tree_index &ast_idx);
   void  process_ast_while_op       (LGraph *dfg, const mmap_lib::Tree_index &ast_idx);
   void  process_ast_dp_assign_op   (LGraph *dfg, const mmap_lib::Tree_index &ast_idx);
-
-  constexpr bool  is_logical_op    (Lnast_ntype op) const { return  (op == Lnast_ntype_logical_and) or
-                                                                       (op == Lnast_ntype_logical_or); }
-  constexpr bool  is_binary_op     (Lnast_ntype op) const { return  (op == Lnast_ntype_and) or
-                                                                       (op == Lnast_ntype_or) or
-                                                                       (op == Lnast_ntype_xor) or
-                                                                       (op == Lnast_ntype_plus) or
-                                                                       (op == Lnast_ntype_minus) or
-                                                                       (op == Lnast_ntype_mult) or
-                                                                       (op == Lnast_ntype_div) or
-                                                                       (op == Lnast_ntype_same) or
-                                                                       (op == Lnast_ntype_lt) or
-                                                                       (op == Lnast_ntype_le) or
-                                                                       (op == Lnast_ntype_gt) or
-                                                                       (op == Lnast_ntype_ge); }
-  constexpr bool  is_pure_assign_op (Lnast_ntype op) const { return (op == Lnast_ntype_pure_assign); }
-  constexpr bool  is_as_op          (Lnast_ntype op) const { return (op == Lnast_ntype_as); }
-  constexpr bool  is_label_op       (Lnast_ntype op) const { return (op == Lnast_ntype_label); }
-  constexpr bool  is_if_op          (Lnast_ntype op) const { return (op == Lnast_ntype_if); }
-  constexpr bool  is_uif_op         (Lnast_ntype op) const { return (op == Lnast_ntype_uif); }
-  constexpr bool  is_elif_op        (Lnast_ntype op) const { return (op == Lnast_ntype_elif); }
-  constexpr bool  is_func_call_op   (Lnast_ntype op) const { return (op == Lnast_ntype_func_call); }
-  constexpr bool  is_func_def_op    (Lnast_ntype op) const { return (op == Lnast_ntype_func_def); }
-  constexpr bool  is_for_op         (Lnast_ntype op) const { return (op == Lnast_ntype_for); }
-  constexpr bool  is_while_op       (Lnast_ntype op) const { return (op == Lnast_ntype_while); }
-  constexpr bool  is_dp_assign_op   (Lnast_ntype op) const { return (op == Lnast_ntype_dp_assign); }
-  constexpr bool  is_unary_op       (Lnast_ntype op) const { return false; } //sh:todo
-
-
-
 
   Node_pin     setup_node_operator_and_target (LGraph *dfg, const mmap_lib::Tree_index &ast_op_idx);
   Node_pin     setup_node_pure_assign_and_target (LGraph *dfg, const mmap_lib::Tree_index &ast_op_idx);
