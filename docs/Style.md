@@ -333,6 +333,16 @@ for(const auto &[key, value]:input_map) {
 
 The persistent attribute class does something similar internally, but it is hidden from the external usage.
 
+## Avoid code duplication
+
+The rule is that if the same code appears in 3 places, it should be refactored
+
+Tool to detect duplication
+```
+    find . -name '*.?pp' | grep -v test >list.txt
+    duplo -ml 12 -pt 90 list.txt report.txt
+```
+
 ## Check if a string starts with a substring
 
 Use the STL rfind to handle the common case of finding a sub-string. Even for when checking if a string starts with a given substring.
