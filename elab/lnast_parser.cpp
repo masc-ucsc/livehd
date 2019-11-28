@@ -315,6 +315,13 @@ Lnast_ntype Lnast_parser::operator_analysis() {
       } else {
         type = Lnast_ntype::create_dot();
       }
+  } else if (scan_is_token(Token_id_plus)) {
+    if (scan_peep_is_token(Token_id_plus, 1)){
+      type = Lnast_ntype::create_tuple_cancat();
+      walk_next_token();
+    } else {
+      type = Lnast_ntype::create_plus();
+    }
   } else if (scan_is_token(Token_id_alnum) && scan_text() == "as") {
     type = Lnast_ntype::create_as();
   } else if (scan_is_token(Token_id_alnum) && scan_text() == "for") {
@@ -341,8 +348,6 @@ Lnast_ntype Lnast_parser::operator_analysis() {
     type = Lnast_ntype::create_or();
   } else if (scan_is_token(Token_id_xor)) {
     type = Lnast_ntype::create_xor();
-  } else if (scan_is_token(Token_id_plus)) {
-    type = Lnast_ntype::create_plus();
   } else if (scan_is_token(Token_id_minus)) {
     type = Lnast_ntype::create_minus();
   } else if (scan_is_token(Token_id_mult)) {

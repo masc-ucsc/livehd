@@ -43,6 +43,7 @@ public:
     Lnast_ntype_gt,
     Lnast_ntype_ge,
     Lnast_ntype_tuple,        // ()
+    Lnast_ntype_tuple_concat, // ++
 
     //group: language variable
     Lnast_ntype_ref,
@@ -94,6 +95,7 @@ protected:
     "gt",
     "ge",
     "tuple",
+    "tuple_concat",
 
     //group: language variable
     "ref",
@@ -117,7 +119,7 @@ public:
 
   static Lnast_ntype create_statements()   { return Lnast_ntype(Lnast_ntype_statements); }
   static Lnast_ntype create_cstatements()  { return Lnast_ntype(Lnast_ntype_cstatements); }
-  static Lnast_ntype create_if()          { return Lnast_ntype(Lnast_ntype_if); }
+  static Lnast_ntype create_if()           { return Lnast_ntype(Lnast_ntype_if); }
   static Lnast_ntype create_cond()         { return Lnast_ntype(Lnast_ntype_cond); }
   static Lnast_ntype create_uif()          { return Lnast_ntype(Lnast_ntype_uif); }
   static Lnast_ntype create_elif()         { return Lnast_ntype(Lnast_ntype_elif); }
@@ -148,6 +150,7 @@ public:
   static Lnast_ntype create_gt()           { return Lnast_ntype(Lnast_ntype_gt); }
   static Lnast_ntype create_ge()           { return Lnast_ntype(Lnast_ntype_ge); }
   static Lnast_ntype create_tuple()        { return Lnast_ntype(Lnast_ntype_tuple); }
+  static Lnast_ntype create_tuple_cancat() { return Lnast_ntype(Lnast_ntype_tuple_concat); }
 
   static Lnast_ntype create_ref()          { return Lnast_ntype(Lnast_ntype_ref); }
   static Lnast_ntype create_const()        { return Lnast_ntype(Lnast_ntype_const); }
@@ -156,42 +159,43 @@ public:
 
   static Lnast_ntype create_assert()       { return Lnast_ntype(Lnast_ntype_assert); }
 
-  bool is_invalid()     const { return val == Lnast_ntype_invalid; }
-  bool is_top()         const { return val == Lnast_ntype_top; }
+  bool is_invalid()      const { return val == Lnast_ntype_invalid; }
+  bool is_top()          const { return val == Lnast_ntype_top; }
 
-  bool is_statements()  const { return val == Lnast_ntype_statements; }
-  bool is_cstatements() const { return val == Lnast_ntype_cstatements; }
-  bool is_if()          const { return val == Lnast_ntype_if; }
-  bool is_cond()        const { return val == Lnast_ntype_cond; }
-  bool is_uif()         const { return val == Lnast_ntype_uif; }
-  bool is_elif()        const { return val == Lnast_ntype_elif; }
-  bool is_for()         const { return val == Lnast_ntype_for; }
-  bool is_while()       const { return val == Lnast_ntype_while; }
-  bool is_phi()         const { return val == Lnast_ntype_phi; }
-  bool is_func_call()   const { return val == Lnast_ntype_func_call; }
-  bool is_func_def()    const { return val == Lnast_ntype_func_def; }
+  bool is_statements()   const { return val == Lnast_ntype_statements; }
+  bool is_cstatements()  const { return val == Lnast_ntype_cstatements; }
+  bool is_if()           const { return val == Lnast_ntype_if; }
+  bool is_cond()         const { return val == Lnast_ntype_cond; }
+  bool is_uif()          const { return val == Lnast_ntype_uif; }
+  bool is_elif()         const { return val == Lnast_ntype_elif; }
+  bool is_for()          const { return val == Lnast_ntype_for; }
+  bool is_while()        const { return val == Lnast_ntype_while; }
+  bool is_phi()          const { return val == Lnast_ntype_phi; }
+  bool is_func_call()    const { return val == Lnast_ntype_func_call; }
+  bool is_func_def()     const { return val == Lnast_ntype_func_def; }
 
-  bool is_pure_assign() const { return val == Lnast_ntype_pure_assign; }
-  bool is_dp_assign()   const { return val == Lnast_ntype_dp_assign; }
-  bool is_as()          const { return val == Lnast_ntype_as; }
-  bool is_label()       const { return val == Lnast_ntype_label; }
-  bool is_dot()         const { return val == Lnast_ntype_dot; }
-  bool is_logical_and() const { return val == Lnast_ntype_logical_and; }
-  bool is_logical_or()  const { return val == Lnast_ntype_logical_or; }
-  bool is_and()         const { return val == Lnast_ntype_and; }
-  bool is_or()          const { return val == Lnast_ntype_or; }
-  bool is_xor()         const { return val == Lnast_ntype_xor; }
-  bool is_plus()        const { return val == Lnast_ntype_plus; }
-  bool is_minus()       const { return val == Lnast_ntype_minus; }
-  bool is_mult()        const { return val == Lnast_ntype_mult; }
-  bool is_div()         const { return val == Lnast_ntype_div; }
-  bool is_eq()          const { return val == Lnast_ntype_eq; }
-  bool is_same()        const { return val == Lnast_ntype_same; }
-  bool is_lt()          const { return val == Lnast_ntype_lt; }
-  bool is_le()          const { return val == Lnast_ntype_le; }
-  bool is_gt()          const { return val == Lnast_ntype_gt; }
-  bool is_ge()          const { return val == Lnast_ntype_ge; }
-  bool is_tuple()       const { return val == Lnast_ntype_tuple; }
+  bool is_pure_assign()  const { return val == Lnast_ntype_pure_assign; }
+  bool is_dp_assign()    const { return val == Lnast_ntype_dp_assign; }
+  bool is_as()           const { return val == Lnast_ntype_as; }
+  bool is_label()        const { return val == Lnast_ntype_label; }
+  bool is_dot()          const { return val == Lnast_ntype_dot; }
+  bool is_logical_and()  const { return val == Lnast_ntype_logical_and; }
+  bool is_logical_or()   const { return val == Lnast_ntype_logical_or; }
+  bool is_and()          const { return val == Lnast_ntype_and; }
+  bool is_or()           const { return val == Lnast_ntype_or; }
+  bool is_xor()          const { return val == Lnast_ntype_xor; }
+  bool is_plus()         const { return val == Lnast_ntype_plus; }
+  bool is_minus()        const { return val == Lnast_ntype_minus; }
+  bool is_mult()         const { return val == Lnast_ntype_mult; }
+  bool is_div()          const { return val == Lnast_ntype_div; }
+  bool is_eq()           const { return val == Lnast_ntype_eq; }
+  bool is_same()         const { return val == Lnast_ntype_same; }
+  bool is_lt()           const { return val == Lnast_ntype_lt; }
+  bool is_le()           const { return val == Lnast_ntype_le; }
+  bool is_gt()           const { return val == Lnast_ntype_gt; }
+  bool is_ge()           const { return val == Lnast_ntype_ge; }
+  bool is_tuple()        const { return val == Lnast_ntype_tuple; }
+  bool is_tuple_concat() const { return val == Lnast_ntype_tuple_concat; }
 
   bool is_ref()         const { return val == Lnast_ntype_ref; }
   bool is_const()       const { return val == Lnast_ntype_const; }
