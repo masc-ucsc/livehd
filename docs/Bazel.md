@@ -128,6 +128,9 @@ launch gdb with this new installed yosys binary and lgraph-yosys plugin
     # or better with runs
     bazel test --collect_code_coverage --test_output=all --nocache_test_results ...
 
+    # To run locally, and push the coverage reports
+    COVERAGE_RUN=coverage LGRAPH_SRC=`pwd` LGRAPH_BUILD_MODE=dbg LGRAPH_COMPILER=g++ RUN_TYPE=long ./scripts/build-and-run.sh
+
 ## To download the dependent packages and apply patches (abc, bm,...)
 
 No need to run this, as the bazel build will do it.
