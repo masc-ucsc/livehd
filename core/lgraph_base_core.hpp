@@ -5,12 +5,7 @@
 #include <string>
 #include <cstdint>
 
-#ifndef likely
-#define likely(x) __builtin_expect((x), 1)
-#endif
-#ifndef unlikely
-#define unlikely(x) __builtin_expect((x), 0)
-#endif
+#include "likely.hpp"
 
 #include "fmt/format.h"
 

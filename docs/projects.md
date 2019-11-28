@@ -300,6 +300,9 @@ Dependence: none
 
 Main features:
 
+* Create a webhook (mada3?) http://notes.spencerlyon.com/2016/01/04/github-pro-tips/
+* Script capable of queuing multiple requests, and execute in-order in a local disk
+* Mark some tests for benchmarking (bench?) and trigger only those tests separately
 * Create scbench to gather stats and performance counters
 * stat.begin, stat.end, stat.pause
 * Aggregate stats in a single json file even across many runs
