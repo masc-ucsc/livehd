@@ -2,9 +2,18 @@
 
 language: bash
 
+git:
+  depth: false
+  quiet: true
+
+branches:
+  only:
+  - master
+
 services:
   - docker
 
+# maybe add a stage with a trivial test
 env:
   matrix:
     - BUILD_MODE=opt       DOCKER=mascucsc/archlinux-masc DOCKER_LGRAPH_SRC=/root/livehd      LGRAPH_COMPILER=g++
