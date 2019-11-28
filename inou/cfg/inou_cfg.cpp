@@ -101,7 +101,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, std::vector<LGraph *> &lgs,
     std::vector<std::string> words = absl::StrSplit(p,' ', absl::SkipWhitespace());
 
     if(*(words.begin()) == "END")
-      continue;
+      break;
 
     I(words.size()>5);
 
@@ -138,7 +138,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, std::vector<LGraph *> &lgs,
     p = strtok_r(nullptr, "\n\r\f", &str_ptr);
   }
 
-
+#if 0
    // create in/out GIO for every graph
    for(long unsigned int i = 0; i < lgs.size(); i++) {
     //Graph input
@@ -152,6 +152,7 @@ void Inou_cfg::cfg_2_lgraph(char **memblock, std::vector<LGraph *> &lgs,
     auto src_node = final_node_lgs[i];
     lgs[i]->add_edge(src_node.setup_driver_pin(0), opin);
   }
+#endif
 
   //update_ifs(lgs, name2node_lgs);
 }

@@ -1,5 +1,7 @@
 #!/bin/bash
 
+exit 0
+
 OPT_MITBW=0
 
 rm -rf ./lgdb 
