@@ -7,10 +7,10 @@ services:
 
 env:
   matrix:
-    - BUILD_MODE=opt       DOCKER=mascucsc/archlinux-masc DOCKER_LGRAPH_SRC=/root/lgraph      LGRAPH_COMPILER=g++
-    - BUILD_MODE=dbg       DOCKER=mascucsc/archlinux-masc DOCKER_LGRAPH_SRC=/root/lgraph      LGRAPH_COMPILER=clang++
-    - BUILD_MODE=fastbuild DOCKER=mascucsc/alpine-masc    DOCKER_LGRAPH_SRC=/home/user/lgraph LGRAPH_COMPILER=g++
-    - BUILD_MODE=dbg       DOCKER=mascucsc/ubuntu-masc    DOCKER_LGRAPH_SRC=/root/lgraph      LGRAPH_COMPILER=g++
+    - BUILD_MODE=opt       DOCKER=mascucsc/archlinux-masc DOCKER_LGRAPH_SRC=/root/livehd      LGRAPH_COMPILER=g++
+    - BUILD_MODE=dbg       DOCKER=mascucsc/archlinux-masc DOCKER_LGRAPH_SRC=/root/livehd      LGRAPH_COMPILER=clang++
+    - BUILD_MODE=fastbuild DOCKER=mascucsc/alpine-masc    DOCKER_LGRAPH_SRC=/home/user/livehd LGRAPH_COMPILER=g++
+    - BUILD_MODE=dbg       DOCKER=mascucsc/ubuntu-masc    DOCKER_LGRAPH_SRC=/root/livehd      LGRAPH_COMPILER=g++
 
 before_install:
    - docker pull $DOCKER
