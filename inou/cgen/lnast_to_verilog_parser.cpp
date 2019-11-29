@@ -274,8 +274,7 @@ void Lnast_to_verilog_parser::process_assign() {
   it++;
 
   std::string_view ref = get_node_name(*it);
-  std::map<std::string_view, std::string>::iterator map_it;
-  map_it = ref_map.find(ref);
+  auto map_it = ref_map.find(ref);
   if (map_it != ref_map.end()) {
     ref = map_it->second;
     // connect the two stateful stuff
@@ -352,9 +351,8 @@ void Lnast_to_verilog_parser::process_as() {
   std::string_view key = get_node_name(*it);
   it++;
 
-  std::map<std::string_view, std::string>::iterator map_it;
   std::string_view ref = get_node_name(*it);
-  map_it = ref_map.find(ref);
+  auto map_it = ref_map.find(ref);
   if (map_it != ref_map.end()) {
     ref = map_it->second;
   }
@@ -389,8 +387,7 @@ void Lnast_to_verilog_parser::process_label() {
   it++;
 
   std::string_view ref = get_node_name(*it);
-  std::map<std::string_view, std::string>::iterator map_it;
-  map_it = ref_map.find(ref);
+  auto map_it = ref_map.find(ref);
   if (map_it != ref_map.end()) {
     ref = map_it->second;
   }
@@ -420,8 +417,7 @@ void Lnast_to_verilog_parser::process_operator() {
 
   while (it != node_buffer.end()) {
     std::string_view ref = get_node_name(*it);
-    std::map<std::string_view, std::string>::iterator map_it;
-    map_it = ref_map.find(ref);
+    auto map_it = ref_map.find(ref);
     if (map_it != ref_map.end()) {
       if (std::count(map_it->second.begin(), map_it->second.end(), ' ')) {
         ref = absl::StrCat("(", map_it->second, ")");
@@ -464,8 +460,7 @@ void Lnast_to_verilog_parser::process_if() {
   it++; // if
   it++; // csts
   std::string_view ref = get_node_name(*it);
-  std::map<std::string_view, std::string>::iterator map_it;
-  map_it = ref_map.find(ref);
+  auto map_it = ref_map.find(ref);
   if (map_it != ref_map.end()) {
     ref = map_it->second;
     fmt::print("map_it find: {} | {}\n", map_it->first, map_it->second);
@@ -530,8 +525,7 @@ void Lnast_to_verilog_parser::process_func_call() {
   it++; // ref
   while (it != node_buffer.end()) {
     std::string_view ref = get_node_name(*it);
-    std::map<std::string_view, std::string>::iterator map_it;
-    map_it = ref_map.find(ref);
+    auto map_it = ref_map.find(ref);
     if (map_it != ref_map.end()) {
       ref = map_it->second;
       fmt::print("map_it find: {} | {}\n", map_it->first, map_it->second);

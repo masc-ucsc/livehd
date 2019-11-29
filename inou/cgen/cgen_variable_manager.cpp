@@ -4,6 +4,7 @@
 void Cgen_variable_manager::insert_variable(std::string_view new_var_name) {
   // if exists, do nothing
   // else, create a variable options
+  fmt::print("cgen_variable_manager : insert_variable : new_key : {}\n", new_var_name);
   if (variable_map.find(new_var_name) == variable_map.end()) {
     variable_map.insert(std::pair<std::string_view, Variable_options*>(new_var_name, new Variable_options()));
   }
