@@ -139,10 +139,8 @@ void  Inou_lnast_dfg::process_ast_pure_assign_op (LGraph *dfg, const mmap_lib::T
   const auto child0 = lnast->get_first_child(lnast_op_idx);
   const auto child1 = lnast->get_sibling_next(child0);
   const Node_pin  opd1   = setup_node_operand(dfg, child1);
-  if(opr.is_graph_output()) {
-    dfg->add_edge(opd1, opr, 1);
-  } else {
-    dfg->add_edge(opd1, opr.get_node().setup_sink_pin(0), 1);   }
+
+  dfg->add_edge(opd1, opr, 1);
 }
 
 void  Inou_lnast_dfg::process_ast_binary_op (LGraph *dfg, const mmap_lib::Tree_index &lnast_op_idx) {
@@ -155,7 +153,7 @@ void  Inou_lnast_dfg::process_ast_binary_op (LGraph *dfg, const mmap_lib::Tree_i
 
   const Node_pin  opd1   = setup_node_operand(dfg, child1);
   const Node_pin  opd2   = setup_node_operand(dfg, child2);
-  I(opd1 != opd2);
+  //I(opd1 != opd2);
   //sh_fixme: the sink_pin should be determined by the functionality, not just zero
 
   dfg->add_edge(opd1, opr.get_node().setup_sink_pin(0), 1);
@@ -179,14 +177,13 @@ Node_pin Inou_lnast_dfg::setup_node_operator_and_target (LGraph *dfg, const mmap
 Node_pin Inou_lnast_dfg::setup_node_pure_assign_and_target (LGraph *dfg, const mmap_lib::Tree_index &lnast_op_idx) {
   const auto eldest_child = lnast->get_first_child(lnast_op_idx);
   const auto name         = lnast->get_data(eldest_child).token.get_text(memblock);
-  if (name.at(0) == '%')
-    return setup_node_operand(dfg, eldest_child);
+  if (name.at(0) == '%') {
+    setup_node_operand(dfg, eldest_child);
+    return dfg->get_graph_output(name.substr(1));
+  }
 
   //maybe driver_pin 1, try and error
-  const auto node_dpin    = dfg->create_node(Or_Op, 1).setup_driver_pin(0);
-  name2dpin[name] = node_dpin;
-
-  return node_dpin;
+  return dfg->create_node(Or_Op, 1).setup_sink_pin(0);
 }
 
 //note: for operand, except the new io and reg, the node and dpin should already be in the table as the operand comes from existing operator output
@@ -205,7 +202,8 @@ Node_pin Inou_lnast_dfg::setup_node_operand(LGraph *dfg, const mmap_lib::Tree_in
   char first_char = name[0];
 
   if (first_char == '%') {
-    node_dpin = dfg->add_graph_output(name.substr(1), Port_invalid, 1); // Port_invalid pos, means I do not care about position
+    dfg->add_graph_output(name.substr(1), Port_invalid, 1); // Port_invalid pos, means I do not care about position
+    node_dpin = dfg->get_graph_output_driver(name.substr(1));
   } else if (first_char == '$') {
     node_dpin = dfg->add_graph_input(name.substr(1), Port_invalid, 1);
   } else if (first_char == '@') {
