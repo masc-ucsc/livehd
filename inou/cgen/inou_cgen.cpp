@@ -37,11 +37,17 @@ void Inou_cgen::setup() {
 
   register_inou(m3);
 
-  Eprp_method m4("inou.cgen.pyrope.fromlnast", "parse cfg_test -> build lnast -> generator pyrope", &Inou_cgen::topyrope);
+  Eprp_method m4("inou.cgen.pyrope.fromlnast", "parse cfg_test -> build lnast -> generate pyrope", &Inou_cgen::topyrope);
   m4.add_label_required("files", "cfg_text files to process (comma separated)");
   m4.add_label_optional("path", "path to put the pyrope[s]", "lgdb");
 
   register_inou(m4);
+
+  Eprp_method m5("inou.cgen.cpp.fromlnast", "parse cfg_text -> build lnast -> generate cpp", &Inou_cgen::tocpp);
+  m4.add_label_required("files", "cfg_text files to process (comma separated)");
+  m4.add_label_optional("path", "path to put the cpp[s}", "lgdb");
+
+  register_inou(m5);
 }
 
 void Inou_cgen::fromlg(Eprp_var &var) {
@@ -84,6 +90,30 @@ void Inou_cgen::tocfg(Eprp_var &var) {
   fmt::print("{}\n", p.lnast_to_cfg_parser->stringify());
 }
 
+void Inou_cgen::topyrope(Eprp_var &var) {
+  Inou_cgen p;
+
+  p.opack.files = var.get("files");
+  p.opack.path = var.get("path");
+
+  if (p.opack.files.empty()) {
+    error(fmt::format("inou.cgen.topyrope needs an input cfg_text!"));
+    I(false);
+    return;
+  }
+
+  // cfg text to lnast
+  p.memblock = p.setup_memblock();
+  p.lnast_parser.parse("lnast", p.memblock, p.token_list);
+
+  p.lnast = p.lnast_parser.get_ast().get();
+  p.lnast->ssa_trans();
+
+  // lnast to pyrope
+  p.lnast_to_pyrope_parser = new Lnast_to_pyrope_parser(p.memblock, p.lnast);
+  fmt::print("{}\n", p.lnast_to_pyrope_parser->stringify());
+}
+
 void Inou_cgen::toverilog(Eprp_var &var) {
   Inou_cgen p;
 
@@ -112,14 +142,14 @@ void Inou_cgen::toverilog(Eprp_var &var) {
   }
 }
 
-void Inou_cgen::topyrope(Eprp_var &var) {
+void Inou_cgen::tocpp(Eprp_var &var) {
   Inou_cgen p;
 
   p.opack.files = var.get("files");
   p.opack.path = var.get("path");
 
   if (p.opack.files.empty()) {
-    error(fmt::format("inou.cgen.topyrope needs an input cfg_text!"));
+    error(fmt::format("inou.cgen.toverilog needs an input cfg_text!"));
     I(false);
     return;
   }
@@ -130,10 +160,6 @@ void Inou_cgen::topyrope(Eprp_var &var) {
 
   p.lnast = p.lnast_parser.get_ast().get();
   p.lnast->ssa_trans();
-
-  // lnast to pyrope
-  p.lnast_to_pyrope_parser = new Lnast_to_pyrope_parser(p.memblock, p.lnast);
-  fmt::print("{}\n", p.lnast_to_pyrope_parser->stringify());
 }
 
 std::string_view Inou_cgen::setup_memblock() {

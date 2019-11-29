@@ -59,6 +59,7 @@ public:
   static void tocfg(Eprp_var &var);
   static void toverilog(Eprp_var &var);
   static void topyrope(Eprp_var &var);
+  static void tocpp(Eprp_var &var);
 
   void setup() final;
 
