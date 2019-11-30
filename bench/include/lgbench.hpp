@@ -5,10 +5,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <signal.h>
 
 #include <chrono>
 #include <iostream>
 #include <vector>
+#include <sstream>
+
+#include "likely.hpp"
 
 class LGBench {
 private:
@@ -38,6 +47,10 @@ private:
     return result;
   }
 
+  static inline bool perf_setup   = false;
+  static inline bool perf_enabled = false;
+  pid_t perf_pid=0;
+
 protected:
   typedef std::chrono::time_point<std::chrono::system_clock> Time_Point;
   struct Time_Sample {
@@ -51,17 +64,60 @@ protected:
   int                      start_mem;
   bool                     end_called;
 
+  void perf_start(const std::string& name) {
+    if (unlikely(!perf_setup)) {
+      const char *do_perf = getenv("LGBENCH_PERF");
+      if (do_perf==nullptr) {
+        perf_enabled = false;
+      }else if (do_perf[0]=='0') {
+        perf_enabled = false;
+      }else{
+        perf_enabled = true;
+      }
+      if (access("/usr/bin/perf", X_OK) == -1) {
+        std::cerr << "ERROR: lgbench could not find /usr/bin/perf in system\n";
+        exit(-3);
+      }
+
+      perf_setup=true;
+    }
+    if (!perf_enabled)
+      return;
+
+    std::string filename = name.find(".data") == std::string::npos ? (name + ".data") : name;
+
+    std::stringstream s;
+    s << getpid();
+    perf_pid = fork();
+    if (perf_pid == 0) {
+      auto fd=open("/dev/null",O_RDWR);
+      dup2(fd,1);
+      dup2(fd,2);
+      exit(execl("/usr/bin/perf","perf","record","-o",filename.c_str(),"-p",s.str().c_str(),nullptr));
+    }
+  }
+
+  void perf_stop() {
+    if (!perf_enabled)
+      return;
+    // Kill profiler
+    kill(perf_pid,SIGINT);
+    waitpid(perf_pid,nullptr,0);
+  }
+
 public:
   explicit LGBench(const std::string &name)
       : sample_name(name) {
     end_called = false;
     start();
+    perf_start(name);
   };
 
   ~LGBench() {
     if(end_called)
       return;
     end();
+    perf_stop();
   }
 
   void start() {

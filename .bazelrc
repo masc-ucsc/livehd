@@ -1,6 +1,6 @@
 
 # lgraph specific bazel options
-build --output_filter='^//((?!(external/opentimer|external/httplib|external/yosys|external/httplib|external/mustache):).)*$' --cxxopt="-std=c++17" --cxxopt="-Wno-unknown-pragmas" --cxxopt="-Wextra" --cxxopt="-Wunused" --cxxopt="-Wshadow" --force_pic
+build --output_filter='^//((?!(external/opentimer|external/httplib|external/yosys|external/yosys|external/httplib|external/mustache):).)*$' --cxxopt="-std=c++17" --cxxopt="-Wno-unknown-pragmas" --cxxopt="-Wextra" --cxxopt="-Wunused" --cxxopt="-Wshadow" --force_pic
 # test --cache_test_results=no
 test --test_tag_filters "-long1,-long2,-long3,-long4,-long5,-long6,-long7,-long8,-manual,-fixme"
 coverage --test_tag_filters "-long1,-long2,-long3,-long4,-long5,-long6,-long7,-long8,-manual,-fixme"

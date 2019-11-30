@@ -48,6 +48,8 @@ void Pass_opentimer::work(Eprp_var &var) {
 }
 
 void Pass_opentimer::read_file(LGraph *g, std::string_view lib, std::string_view lib_max, std::string_view lib_min, std::string_view spef, std::string_view sdc) {
+  (void)g;
+  (void)sdc;
 //  LGBench b("pass.opentimer.read_file");      // Expand this method to reading from user input and later develop inou.add_liberty etc.
 
 
@@ -75,73 +77,73 @@ void Pass_opentimer::read_sdc(std::string_view sdc){
 
       if(line_vec[0] == "create_clock"){
         int period;
-        std::string name;
+        std::string pname;
         for(std::size_t i = 1; i < line_vec.size(); i++){
           if(line_vec[i] == "-period"){
             period = stoi(line_vec[++i]);
             continue;
           } else if(line_vec[i] == "-name"){
-              name = line_vec[++i];
+              pname = line_vec[++i];
               continue;
             }
         }
-        timer.create_clock(name, period);
+        timer.create_clock(pname, period);
       } else if(line_vec[0] == "set_input_delay"){
-          std::string name;
+          std::string pname;
           int delay = stoi(line_vec[1]);
           for(std::size_t i = 2; i < line_vec.size(); i++){
             if(line_vec[i] == "[get_ports"){
-              name = line_vec[++i];
-              name.pop_back();
+              pname = line_vec[++i];
+              pname.pop_back();
               continue;
             }
           }
           if(line_vec[2] == "-min" && line_vec[3] == "-rise"){
-            timer.set_at(name, ot::MIN, ot::RISE, delay);
+            timer.set_at(pname, ot::MIN, ot::RISE, delay);
           } else if(line_vec[2] == "-min" && line_vec[3] == "-fall"){
-            timer.set_at(name, ot::MIN, ot::FALL, delay);
+            timer.set_at(pname, ot::MIN, ot::FALL, delay);
           } else if(line_vec[2] == "-max" && line_vec[3] == "-rise"){
-            timer.set_at(name, ot::MAX, ot::RISE, delay);
+            timer.set_at(pname, ot::MAX, ot::RISE, delay);
           } else if(line_vec[2] == "-max" && line_vec[3] == "-fall"){
-            timer.set_at(name, ot::MIN, ot::FALL, delay);
+            timer.set_at(pname, ot::MIN, ot::FALL, delay);
           }
       } else if(line_vec[0] == "set_input_transition"){
-          std::string name;
+          std::string pname;
           int delay = stoi(line_vec[1]);
           for(std::size_t i = 2; i < line_vec.size(); i++){
             if(line_vec[i] == "[get_ports"){
-              name = line_vec[++i];
-              name.pop_back();
+              pname = line_vec[++i];
+              pname.pop_back();
               continue;
             }
           }
           if(line_vec[2] == "-min" && line_vec[3] == "-rise"){
-            timer.set_slew(name, ot::MIN, ot::RISE, delay);
+            timer.set_slew(pname, ot::MIN, ot::RISE, delay);
           } else if(line_vec[2] == "-min" && line_vec[3] == "-fall"){
-            timer.set_slew(name, ot::MIN, ot::FALL, delay);
+            timer.set_slew(pname, ot::MIN, ot::FALL, delay);
           } else if(line_vec[2] == "-max" && line_vec[3] == "-rise"){
-            timer.set_slew(name, ot::MAX, ot::RISE, delay);
+            timer.set_slew(pname, ot::MAX, ot::RISE, delay);
           } else if(line_vec[2] == "-max" && line_vec[3] == "-fall"){
-            timer.set_slew(name, ot::MIN, ot::FALL, delay);
+            timer.set_slew(pname, ot::MIN, ot::FALL, delay);
           }
       } else if(line_vec[0] == "set_output_delay"){
-          std::string name;
+          std::string pname;
           int delay = stoi(line_vec[1]);
           for(std::size_t i = 2; i < line_vec.size(); i++){
             if(line_vec[i] == "[get_ports"){
-              name = line_vec[++i];
-              name.pop_back();
+              pname = line_vec[++i];
+              pname.pop_back();
               continue;
             }
           }
           if(line_vec[2] == "-min" && line_vec[3] == "-rise"){
-            timer.set_rat(name, ot::MIN, ot::RISE, delay);
+            timer.set_rat(pname, ot::MIN, ot::RISE, delay);
           } else if(line_vec[2] == "-min" && line_vec[3] == "-fall"){
-            timer.set_rat(name, ot::MIN, ot::FALL, delay);
+            timer.set_rat(pname, ot::MIN, ot::FALL, delay);
           } else if(line_vec[2] == "-max" && line_vec[3] == "-rise"){
-            timer.set_rat(name, ot::MAX, ot::RISE, delay);
+            timer.set_rat(pname, ot::MAX, ot::RISE, delay);
           } else if(line_vec[2] == "-max" && line_vec[3] == "-fall"){
-            timer.set_rat(name, ot::MIN, ot::FALL, delay);
+            timer.set_rat(pname, ot::MIN, ot::FALL, delay);
           }
       }
       line_vec.clear();
