@@ -24,6 +24,14 @@ time in some cases).
 
      CXX=clang++ CC=clang bazel build -c dbg //...
 
+# Perf in lgbench
+
+Use lgbench to gather statistics in your code block. It also allows to run perf record
+for the code section (from lgbench construction to destruction). To enable perf record
+set LGBENCH_PERF environment variable
+
+     export LGBENCH_PERF=1
+
 # GDB usage
 
 For most tests, you can debug with
