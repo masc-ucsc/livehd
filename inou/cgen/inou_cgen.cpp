@@ -160,6 +160,14 @@ void Inou_cgen::tocpp(Eprp_var &var) {
 
   p.lnast = p.lnast_parser.get_ast().get();
   p.lnast->ssa_trans();
+
+  // lnast to c++
+  p.lnast_to_cpp_parser = new Lnast_to_cpp_parser(p.memblock, p.lnast);
+
+  std::map<std::string, std::string> files = p.lnast_to_cpp_parser->stringify(p.opack.files);
+  for (auto ele : files) {
+    fmt::print("{}:\n{}\n", ele.first, ele.second);
+  }
 }
 
 std::string_view Inou_cgen::setup_memblock() {
