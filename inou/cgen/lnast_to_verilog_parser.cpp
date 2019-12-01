@@ -203,7 +203,7 @@ void Lnast_to_verilog_parser::process_buffer() {
   for (auto const& node : node_buffer) {
     auto name{node.token.get_text(memblock)};
     if (name.empty()) {
-      fmt::print("{} ", node.type.debug_name());
+      fmt::print("{} ", node.type.debug_name_verilog());
     } else {
       fmt::print("{} ", name);
     }
@@ -392,7 +392,7 @@ void Lnast_to_verilog_parser::process_label() {
     ref = map_it->second;
   }
   it++;
-  value = absl::StrCat(value, ref, access_type.debug_name(), process_number(get_node_name(*it)));
+  value = absl::StrCat(value, ref, access_type.debug_name_verilog(), process_number(get_node_name(*it)));
 
   fmt::print("process_label value:\tkey: {}\tvalue: {}\n", key, value);
   if (is_ref(key)) {
@@ -438,16 +438,16 @@ void Lnast_to_verilog_parser::process_operator() {
 
     value = absl::StrCat(value, ref);
     if (++it != node_buffer.end()) {
-      value = absl::StrCat(value, " ", op_type.debug_name(), " ");
+      value = absl::StrCat(value, " ", op_type.debug_name_verilog(), " ");
     }
   }
 
-  //fmt::print("process_{} value:\tkey: {}\tvalue: {}\n", op_type.debug_name(), key, value);
+  //fmt::print("process_{} value:\tkey: {}\tvalue: {}\n", op_type.debug_name_verilog(), key, value);
   if (is_ref(key)) {
     fmt::print("inserting:\tkey:{}\tvalue:{}\n", key, value);
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
   } else {
-    std::string phrase = absl::StrCat(key, " ", op_type.debug_name(),"  ", value, "\n");
+    std::string phrase = absl::StrCat(key, " ", op_type.debug_name_verilog(),"  ", value, "\n");
     curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(indent_buffer_size, phrase));
   }
 }

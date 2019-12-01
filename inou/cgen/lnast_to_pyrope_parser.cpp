@@ -194,7 +194,7 @@ void Lnast_to_pyrope_parser::process_buffer() {
   for (auto const& node : node_buffer) {
     auto name{node.token.get_text(memblock)};
     if (name.empty()) {
-      fmt::print("{} ", node.type.debug_name());
+      fmt::print("{} ", node.type.debug_name_pyrope());
     } else {
       fmt::print("{} ", name);
     }
@@ -355,7 +355,7 @@ void Lnast_to_pyrope_parser::process_label() {
     ref = map_it->second;
   }
   it++;
-  value = absl::StrCat(value, ref, access_type.debug_name(), process_number(get_node_name(*it)));
+  value = absl::StrCat(value, ref, access_type.debug_name_pyrope(), process_number(get_node_name(*it)));
 
   fmt::print("process_label value:\tkey: {}\tvalue: {}\n", key, value);
   if (is_ref(key)) {
@@ -405,16 +405,16 @@ void Lnast_to_pyrope_parser::process_operator() {
 
     value = absl::StrCat(value, ref);
     if (++it != node_buffer.end()) {
-      value = absl::StrCat(value, " ", op_type.debug_name(), " ");
+      value = absl::StrCat(value, " ", op_type.debug_name_pyrope(), " ");
     }
   }
 
-  fmt::print("process_{} value:\tkey: {}\tvalue: {}\n", op_type.debug_name(), key, value);
+  fmt::print("process_{} value:\tkey: {}\tvalue: {}\n", op_type.debug_name_pyrope(), key, value);
   if (is_ref(key)) {
     fmt::print("inserting:\tkey:{}\tvalue:{}\n", key, value);
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
   } else {
-    node_str_buffer = absl::StrCat(node_str_buffer, indent_buffer(), key, " ", op_type.debug_name(),"  ", value, "\n");
+    node_str_buffer = absl::StrCat(node_str_buffer, indent_buffer(), key, " ", op_type.debug_name_pyrope(),"  ", value, "\n");
   }
 }
 

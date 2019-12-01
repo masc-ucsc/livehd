@@ -232,7 +232,7 @@ void Lnast_to_cfg_parser::process_buffer() {
   for (auto const& node : node_buffer) {
     auto name{node.token.get_text(memblock)};
     if (name.empty()) {
-      fmt::print("{} ", node.type.debug_name());
+      fmt::print("{} ", node.type.debug_name_cfg());
     } else {
       fmt::print("{} ", name);
     }

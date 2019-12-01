@@ -5,90 +5,64 @@ std::string Cpp_parser_module::indent_buffer(int32_t size) {
   return std::string(size * 2, ' ');
 }
 
-std::string Cpp_parser_module::create_header() {
-  std::string module_start = absl::StrCat("module ", filename, " (");
-  std::string start_filler = std::string(module_start.length(), ' ');
+void Cpp_parser_module::process_inputs() {
+  std::string hpp_file = absl::StrCat("class ", filename, " {\n");
+  std::string private_str = "";
+  std::string public_str = "";
+  combinational_str = "";
+  sequential_str = absl::StrCat("void ", filename, "::sequential() {\n");
 
-  std::string inputs;
-  if (has_sequential) {
-    inputs = absl::StrCat("input clk,\n", start_filler, "input reset");
-  }
-  std::string outputs;
-  std::string wires;
-
-  fmt::print("creating header: {}\n", var_manager.variable_map.size());
-  for(auto var_name : var_manager.variable_map) {
+  for (auto var_name : var_manager.variable_map) {
     fmt::print("variable names: {}\n", var_name.first);
     uint32_t var_type = get_variable_type(var_name.first);
+
     if (var_type == 0) {
-      wires = absl::StrCat(wires, "  wire ", process_variable(var_name.first), ";\n");
-    } else {
-      std::string bits_string;
-
-      if (var_name.second->bits > 1) { // default setting
-        bits_string = absl::StrCat("[", var_name.second->bits - 1, ":0]");
-      }
-
-      std::string phrase = absl::StrCat(bits_string, " ", process_variable(var_name.first));
-      arg_vars.push_back(process_variable(var_name.first));
-
-      if (var_type == 1) {
-        if (inputs.length()) {
-          inputs = absl::StrCat(inputs, ",\n", start_filler, "input ", phrase);
-        } else {
-          inputs = absl::StrCat("input ", phrase);
-        }
-      } else if (var_type == 2) {
-        outputs = absl::StrCat(outputs, ",\n", start_filler, "output ", phrase);
-        output_vars.push_back(process_variable(var_name.first));
-      } else if (var_type == 3) {
-        outputs = absl::StrCat(outputs, ",\n", start_filler, "output ", phrase);
-        wires = absl::StrCat(wires, "  wire ", process_variable(var_name.first), "_next;\n");
-        output_vars.push_back(process_variable(var_name.first));
+    }
+    // input
+    else if (var_type == 1) {
+      if (combinational_str.length()) {
+        combinational_str = absl::StrCat(combinational_str, ", uint32_t ", process_variable(var_name.first));
+      } else {
+        combinational_str = absl::StrCat("combinational (uint32_t ", process_variable(var_name.first));
       }
     }
-  }
-  module_start = absl::StrCat(module_start, inputs, outputs, ");\n", wires, "\n");
+    // output or register
+    else if (var_type == 2 || var_type == 3) {
+      if (!private_str.length()) {
+        private_str = "private:\n";
+        public_str = "public:\n";
+      }
+      private_str = absl::StrCat(private_str, "  uint32_t ", process_variable(var_name.first), "_next;\n");
+      public_str = absl::StrCat(public_str, "  uint32_t ", process_variable(var_name.first), ";\n");
 
-  for (auto ele : func_calls) {
-    module_start = absl::StrCat(module_start, "  ", ele, "\n");
+      sequential_str = absl::StrCat(sequential_str, "  ", process_variable(var_name.first), " = ", process_variable(var_name.first), "_next;\n");
+    }
   }
 
-  fmt::print("finished with the header\n");
-  return absl::StrCat(module_start, "\n");
+  header_str = absl::StrCat(hpp_file, private_str, public_str, "\n  void ", combinational_str, ");\n  void sequential();\n}");
 }
 
-std::string Cpp_parser_module::create_footer() {
-  return absl::StrCat("end module\n");
+std::string Cpp_parser_module::create_header() {
+  /*
+   * check for sequential
+   * check for bits
+  */
+  return header_str;
 }
 
-std::string Cpp_parser_module::create_always() {
-  std::string buffer = absl::StrCat(indent_buffer(1), "always_comb begin\n");
+std::string Cpp_parser_module::create_implementation() {
+  std::string buffer = "";
 
   for (auto node : node_str_buffer) {
     buffer = absl::StrCat(buffer, indent_buffer(node.first), node.second);
   }
 
-  return absl::StrCat(buffer, indent_buffer(1), "end\n");
-}
-
-std::string Cpp_parser_module::create_next() {
-  std::string buffer;
-
-  for(auto ele : var_manager.variable_map) {
-    if (get_variable_type(ele.first) == 3) {
-      buffer = absl::StrCat(buffer, "\n", indent_buffer(1), "always @(posedge clk) begin\n", indent_buffer(2), process_variable(ele.first), " <= ", process_variable(ele.first), "_next\n", indent_buffer(1), "end\n");
-
-      has_sequential = true;
-    }
-  }
-
-  return buffer;
+  return absl::StrCat("void ", filename, "::", combinational_str, ") {\n", buffer, "}\n", sequential_str, "}\n");
 }
 
 std::string Cpp_parser_module::create_file() {
-  std::string next_string = create_next();
-  return absl::StrCat(create_header(), create_always(), next_string, create_footer());
+  process_inputs();
+  return absl::StrCat("header:\n", create_header(), "\n\nimplementation:\n", create_implementation());
 }
 
 void Cpp_parser_module::inc_if_counter() {

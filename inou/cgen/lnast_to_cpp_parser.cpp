@@ -3,9 +3,9 @@
 
 std::map<std::string, std::string> Lnast_to_cpp_parser::stringify(std::string filepath) {
   root_filename = get_filename(filepath);
+  root_filename[0] = toupper(root_filename[0]);
   curr_module = new Cpp_parser_module(root_filename);
 
-  inc_indent_buffer();
   inc_indent_buffer();
   for (const mmap_lib::Tree_index &it: lnast->depth_preorder(lnast->get_root())) {
     process_node(it);
@@ -203,7 +203,7 @@ void Lnast_to_cpp_parser::process_buffer() {
   for (auto const& node : node_buffer) {
     auto name{node.token.get_text(memblock)};
     if (name.empty()) {
-      fmt::print("{} ", node.type.debug_name());
+      fmt::print("{} ", node.type.debug_name_cpp());
     } else {
       fmt::print("{} ", name);
     }
@@ -249,13 +249,11 @@ bool Lnast_to_cpp_parser::is_attr(std::string_view test_string) {
   return test_string.find("__") == 0 && !is_ref(test_string);
 }
 
-void Lnast_to_cpp_parser::inc_indent_buffer(){
-  // indent_buffer() = absl::StrCat(indent_buffer(), "  ");
+void Lnast_to_cpp_parser::inc_indent_buffer() {
   indent_buffer_size++;
 }
 
 void Lnast_to_cpp_parser::dec_indent_buffer() {
-  // indent_buffer() = indent_buffer().substr(0, indent_buffer().size() - 2);
   indent_buffer_size--;
 }
 
@@ -392,7 +390,7 @@ void Lnast_to_cpp_parser::process_label() {
     ref = map_it->second;
   }
   it++;
-  value = absl::StrCat(value, ref, access_type.debug_name(), process_number(get_node_name(*it)));
+  value = absl::StrCat(value, ref, access_type.debug_name_cpp(), process_number(get_node_name(*it)));
 
   fmt::print("process_label value:\tkey: {}\tvalue: {}\n", key, value);
   if (is_ref(key)) {
@@ -438,16 +436,16 @@ void Lnast_to_cpp_parser::process_operator() {
 
     value = absl::StrCat(value, ref);
     if (++it != node_buffer.end()) {
-      value = absl::StrCat(value, " ", op_type.debug_name(), " ");
+      value = absl::StrCat(value, " ", op_type.debug_name_cpp(), " ");
     }
   }
 
-  //fmt::print("process_{} value:\tkey: {}\tvalue: {}\n", op_type.debug_name(), key, value);
+  //fmt::print("process_{} value:\tkey: {}\tvalue: {}\n", op_type.debug_name_cpp(), key, value);
   if (is_ref(key)) {
     fmt::print("inserting:\tkey:{}\tvalue:{}\n", key, value);
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
   } else {
-    std::string phrase = absl::StrCat(key, " ", op_type.debug_name(),"  ", value, "\n");
+    std::string phrase = absl::StrCat(key, " ", op_type.debug_name_cpp(),"  ", value, "\n");
     curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(indent_buffer_size, phrase));
   }
 }
@@ -573,5 +571,4 @@ void Lnast_to_cpp_parser::process_func_def() {
   curr_module = module_stack.back();
   module_stack.pop_back();
 }
-
 
