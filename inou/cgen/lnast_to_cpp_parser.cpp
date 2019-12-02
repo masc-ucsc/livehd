@@ -13,7 +13,9 @@ std::map<std::string, std::string> Lnast_to_cpp_parser::stringify(std::string fi
   flush_statements();
   dec_indent_buffer();
 
-  file_map.insert(std::pair<std::string, std::string>(curr_module->filename, curr_module->create_file()));
+  std::pair<std::string, std::string> cpp_files = curr_module->create_files();
+  file_map.insert(std::pair<std::string, std::string>(absl::StrCat(curr_module->filename, ".cgen.hpp"), cpp_files.first));
+  file_map.insert(std::pair<std::string, std::string>(absl::StrCat(curr_module->filename, ".cgen.cpp"), cpp_files.second));
   return file_map;
 }
 
@@ -563,9 +565,9 @@ void Lnast_to_cpp_parser::process_func_def() {
 
   curr_module->add_to_buffer_multiple(curr_module->pop_queue());
 
-  file_map.insert(std::pair<std::string, std::string>(func_name, curr_module->create_file()));
-
-  fmt::print("new module:\n{}", curr_module->create_file());
+  std::pair<std::string, std::string> cpp_files = curr_module->create_files();
+  file_map.insert(std::pair<std::string, std::string>(absl::StrCat(curr_module->filename, ".cgen.hpp"), cpp_files.first));
+  file_map.insert(std::pair<std::string, std::string>(absl::StrCat(curr_module->filename, ".cgen.cpp"), cpp_files.second));
 
   func_map.insert(std::pair<std::string, Cpp_parser_module*>(curr_module->filename, curr_module));
   curr_module = module_stack.back();

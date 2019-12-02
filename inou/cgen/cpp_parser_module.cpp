@@ -60,9 +60,9 @@ std::string Cpp_parser_module::create_implementation() {
   return absl::StrCat("void ", filename, "::", combinational_str, ") {\n", buffer, "}\n", sequential_str, "}\n");
 }
 
-std::string Cpp_parser_module::create_file() {
+std::pair<std::string, std::string> Cpp_parser_module::create_files() {
   process_inputs();
-  return absl::StrCat("header:\n", create_header(), "\n\nimplementation:\n", create_implementation());
+  return std::pair<std::string, std::string>(create_header(), create_implementation());
 }
 
 void Cpp_parser_module::inc_if_counter() {

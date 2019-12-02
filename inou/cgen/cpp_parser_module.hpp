@@ -41,7 +41,7 @@ public:
   void node_buffer_stack();
   void node_buffer_queue();
   std::vector<std::pair<int32_t, std::string>> pop_queue();
-  std::string create_file();
+  std::pair<std::string, std::string> create_files();
   void inc_if_counter();
   void dec_if_counter();
   uint32_t get_if_counter();
