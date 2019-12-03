@@ -38,12 +38,14 @@ public:
     setup_lnast_to_lgraph_primitive_type_mapping();
   };
   static void   tolg(Eprp_var &var);
+  static void   gen_temp_lg(Eprp_var &var);
   static void   build_lnast(Inou_lnast_dfg &p, Eprp_var &var);
   void          setup() final;
 
 private:
   void                          setup_memblock();
   std::vector<LGraph *>         do_tolg();
+  std::vector<LGraph *>         do_gen_temp_lg();
 
   void  process_ast_top            (LGraph *dfg);
   void  process_ast_statements     (LGraph *dfg, const mmap_lib::Tree_index &stmt_parent);

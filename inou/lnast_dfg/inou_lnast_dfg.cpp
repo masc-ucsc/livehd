@@ -15,8 +15,11 @@ void Inou_lnast_dfg::setup() {
   Eprp_method m1("inou.lnast_dfg.tolg", "parse cfg_text -> build lnast -> generate lgraph", &Inou_lnast_dfg::tolg);
   m1.add_label_required("files",  "cfg_text files to process (comma separated)");
   m1.add_label_optional("path",   "path to put the lgraph[s]", "lgdb");
-
   register_inou(m1);
+
+  Eprp_method m2("inou.lnast_dfg.gen_temp_lg", "create temp lgraph for bitwidth", &Inou_lnast_dfg::gen_temp_lg);
+  m2.add_label_optional("path",   "path to put the lgraph[s]", "lgdb");
+  register_inou(m2);
 }
 
 
@@ -276,3 +279,44 @@ void Inou_lnast_dfg::setup_lnast_to_lgraph_primitive_type_mapping(){
   primitive_type_lnast2lg [Lnast_ntype::Lnast_ntype_ge]          = GreaterEqualThan_Op ;
   //sh_fixme: to be extended ...
 }
+
+
+
+
+
+
+void Inou_lnast_dfg::gen_temp_lg(Eprp_var &var){
+  Inou_lnast_dfg p;
+
+  //lnast to lgraph
+  std::vector<LGraph *> lgs = p.do_gen_temp_lg();
+
+  if(lgs.empty()) {
+    error(fmt::format("fail to generate lgraph from lnast"));
+    I(false);
+  } else {
+    var.add(lgs[0]);
+  }
+}
+
+
+std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
+  LGBench b("inou.gen_temp_lg.do_tolg");
+
+  LGraph *top = LGraph::create("lgdb", "temp_bitwidth_graph", "nosource");
+
+  //------------ construct your lgraph start-------------------
+
+  int pos = 0;
+  auto top_a = top->add_graph_input("a", pos++, 1);
+  auto top_b = top->add_graph_input("b", pos++, 1);
+
+  auto top_z = top->add_graph_output("z", pos++, 1);
+
+  //------------ construct your lgraph end-------------------
+
+  std::vector<LGraph *> lgs;
+  lgs.push_back(top);
+  return lgs;
+}
+
