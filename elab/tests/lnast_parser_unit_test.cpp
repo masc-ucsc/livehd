@@ -103,7 +103,7 @@ END
 
   void setup_lnast_golden(){
     ast_gld.set_root(std::make_tuple((std::string)Lnast_ntype::create_top().debug_name(), "")); //knum = K1
-    auto top_sts = ast_gld.add_child(ast_gld.get_root(), std::make_tuple((std::string)Lnast_ntype::create_statements().debug_name(), "")); //knum = K1
+    auto top_sts = ast_gld.add_child(ast_gld.get_root(), std::make_tuple((std::string)Lnast_ntype::create_statements().debug_name(), "SEQ0")); //knum = K1
 
     auto K1      = ast_gld.add_child(top_sts,   std::make_tuple((std::string)Lnast_ntype::create_label().debug_name(),         ""      ));
     auto K1_tar  = ast_gld.add_child(K1,        std::make_tuple((std::string)Lnast_ntype::create_ref().debug_name(),           "___a"  ));
@@ -164,7 +164,7 @@ END
     auto K9_op2       = ast_gld.add_child(func_def, std::make_tuple((std::string)Lnast_ntype::create_ref().debug_name(),           "$b"));
     auto K9_op3       = ast_gld.add_child(func_def, std::make_tuple((std::string)Lnast_ntype::create_ref().debug_name(),           "%o1"));
     auto K9_op4       = ast_gld.add_child(func_def, std::make_tuple((std::string)Lnast_ntype::create_ref().debug_name(),           "%o2"));
-    auto func_def_sts = ast_gld.add_child(func_def, std::make_tuple((std::string)Lnast_ntype::create_statements().debug_name(),    ""));
+    auto func_def_sts = ast_gld.add_child(func_def, std::make_tuple((std::string)Lnast_ntype::create_statements().debug_name(),    "SEQ1"));
     (void) K9_tar;
     (void) K9_op1;
     (void) K9_op2;
@@ -360,7 +360,7 @@ END
 
 
     auto K22         = ast_gld.add_child(top_sts,  std::make_tuple((std::string)Lnast_ntype::create_if().debug_name(),          ""));
-    auto K22_c0sts   = ast_gld.add_child(K22,      std::make_tuple((std::string)Lnast_ntype::create_cstatements().debug_name(), ""));
+    auto K22_c0sts   = ast_gld.add_child(K22,      std::make_tuple((std::string)Lnast_ntype::create_cstatements().debug_name(), "SEQ2"));
     auto K21      = ast_gld.add_child(K22_c0sts,   std::make_tuple((std::string)Lnast_ntype::create_gt().debug_name(),          ""    ));
     auto K21_tar  = ast_gld.add_child(K21,         std::make_tuple((std::string)Lnast_ntype::create_ref().debug_name(),         "___t"));
     auto K21_op1  = ast_gld.add_child(K21,         std::make_tuple((std::string)Lnast_ntype::create_ref().debug_name(),         "$a"  ));
@@ -370,8 +370,8 @@ END
     (void) K21_op2;
 
     auto K22_c0      = ast_gld.add_child(K22,      std::make_tuple((std::string)Lnast_ntype::create_cond().debug_name(),         "___t"));
-    auto K24sts      = ast_gld.add_child(K22,      std::make_tuple((std::string)Lnast_ntype::create_statements().debug_name(),  ""));
-    auto K44sts      = ast_gld.add_child(K22,      std::make_tuple((std::string)Lnast_ntype::create_statements().debug_name(),  ""));
+    auto K24sts      = ast_gld.add_child(K22,      std::make_tuple((std::string)Lnast_ntype::create_statements().debug_name(),  "SEQ3"));
+    auto K44sts      = ast_gld.add_child(K22,      std::make_tuple((std::string)Lnast_ntype::create_statements().debug_name(),  "SEQ9"));
     (void) K22_c0sts ;
     (void) K22_c0    ;
     (void) K24sts;
@@ -393,7 +393,7 @@ END
 
 
     auto K27         = ast_gld.add_child(K24sts,    std::make_tuple((std::string)Lnast_ntype::create_if().debug_name(),          ""));
-    auto K27_c0sts   = ast_gld.add_child(K27,       std::make_tuple((std::string)Lnast_ntype::create_cstatements().debug_name(), ""));
+    auto K27_c0sts   = ast_gld.add_child(K27,       std::make_tuple((std::string)Lnast_ntype::create_cstatements().debug_name(), "SEQ4"));
     auto K26         = ast_gld.add_child(K27_c0sts, std::make_tuple((std::string)Lnast_ntype::create_gt().debug_name(),          ""));
     auto K26_tar     = ast_gld.add_child(K26,       std::make_tuple((std::string)Lnast_ntype::create_ref().debug_name(),         "___v"));
     auto K26_op1     = ast_gld.add_child(K26,       std::make_tuple((std::string)Lnast_ntype::create_ref().debug_name(),         "$a"));
@@ -402,8 +402,8 @@ END
     (void) K26_op1;
     (void) K26_op2;
     auto K27_c0      = ast_gld.add_child(K27,     std::make_tuple((std::string)Lnast_ntype::create_cond().debug_name(),        "___v"));
-    auto K29sts      = ast_gld.add_child(K27,     std::make_tuple((std::string)Lnast_ntype::create_statements().debug_name(),  ""));
-    auto K27_c1sts   = ast_gld.add_child(K27,     std::make_tuple((std::string)Lnast_ntype::create_cstatements().debug_name(),  "")); //K32sts
+    auto K29sts      = ast_gld.add_child(K27,     std::make_tuple((std::string)Lnast_ntype::create_statements().debug_name(),  "SEQ5"));
+    auto K27_c1sts   = ast_gld.add_child(K27,     std::make_tuple((std::string)Lnast_ntype::create_cstatements().debug_name(),  "SEQ6")); //K32sts
     (void) K27_c0sts ;
     (void) K27_c0    ;
     (void) K29sts;
@@ -426,8 +426,8 @@ END
     (void) K33_op2;
 
     auto K27_c1      = ast_gld.add_child(K27,    std::make_tuple((std::string)Lnast_ntype::create_cond().debug_name(),        "___x"));
-    auto K36sts      = ast_gld.add_child(K27,    std::make_tuple((std::string)Lnast_ntype::create_statements().debug_name(),  ""));
-    auto K39sts      = ast_gld.add_child(K27,    std::make_tuple((std::string)Lnast_ntype::create_statements().debug_name(),  ""));
+    auto K36sts      = ast_gld.add_child(K27,    std::make_tuple((std::string)Lnast_ntype::create_statements().debug_name(),  "SEQ7"));
+    auto K39sts      = ast_gld.add_child(K27,    std::make_tuple((std::string)Lnast_ntype::create_statements().debug_name(),  "SEQ8"));
     (void) K27_c1     ;
     (void) K36sts     ;
     //(void) K27_c2sts  ;

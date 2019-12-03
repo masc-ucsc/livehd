@@ -1,8 +1,9 @@
 #!/bin/bash
 
-# pts='lnast_utest'
+# pts='lnast_ssa_utest'
+pts='lnast_utest'
 # pts='counter'
-pts='counter_stage'
+# pts='counter_stage'
 
 LGSHELL=./bazel-bin/main/lgshell
 

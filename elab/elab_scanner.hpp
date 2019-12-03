@@ -326,8 +326,10 @@ public:
     size_t p = scanner_pos + offset;
     if (p >= token_list.size())
       p = token_list.size() - 1;
-    else if (offset > static_cast<int>(scanner_pos))
-      p = 0 ;
+
+    //comment out by Sheng
+    //else if (offset > static_cast<int>(scanner_pos))
+    //  p = 0 ;
     return token_list[p];
   }
 };

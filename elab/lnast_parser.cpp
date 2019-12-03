@@ -1,7 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "likely.hpp"
-
 #include "lnast_parser.hpp"
 
 void Lnast_parser::elaborate(){
@@ -11,7 +10,6 @@ void Lnast_parser::elaborate(){
   build_lnast();
 
   for(const auto &index:lnast->depth_preorder()) {
-    fmt::print("level:{} pos:{} ",index.level, index.pos);
     lnast->get_data(index).dump();
   }
 
@@ -35,11 +33,6 @@ void Lnast_parser::build_lnast() {
     if(unlikely(scan_is_end()))
       return;
 
-    //ask Akash to remove the "END" if you really don't need it
-    if(unlikely(line_num == 0)) {
-      walk_next_line();
-      continue;
-    }
 
 
     I(line_tkcnt == CFG_IDX_POS);
@@ -114,20 +107,25 @@ void Lnast_parser::build_lnast() {
 
 void Lnast_parser::process_statements_op(const mmap_lib::Tree_index& parent_of_sts, uint32_t self_idx){
   if(lnast->get_data(parent_of_sts).type.is_top()){
-    auto tree_top_sts = lnast->add_child(parent_of_sts, Lnast_node(Lnast_ntype::create_statements(), Token()));
+    auto tree_top_sts = lnast->add_child(parent_of_sts, Lnast_node(Lnast_ntype::create_statements(), scan_get_token(3)));
+    fmt::print("statements name :{}\n", scan_get_token().get_text(buffer));
     cfg_parent_id2lnast_node[self_idx] = tree_top_sts;
   } else if (lnast->get_data(parent_of_sts).type.is_if()){
     if(!buffer_if_condition_used){
-      auto if_csts = lnast->add_child(parent_of_sts, Lnast_node(Lnast_ntype::create_cstatements(), Token()));
+      //no need to create SSA table for csts
+      auto if_csts = lnast->add_child(parent_of_sts, Lnast_node(Lnast_ntype::create_cstatements(), scan_get_token()));
+      fmt::print("statements name :{}\n", scan_get_token().get_text(buffer));
       cfg_parent_id2lnast_node[self_idx] = if_csts;
       lnast->add_child(parent_of_sts, Lnast_node(Lnast_ntype::create_cond(), buffer_if_condition));
       buffer_if_condition_used = true;
     } else { // normal statements
-      auto if_sts = lnast->add_child(parent_of_sts, Lnast_node(Lnast_ntype::create_statements(), Token()));
+      auto if_sts = lnast->add_child(parent_of_sts, Lnast_node(Lnast_ntype::create_statements(), scan_get_token()));
+      fmt::print("statements name :{}\n", scan_get_token().get_text(buffer));
       cfg_parent_id2lnast_node[self_idx] = if_sts;
     }
   } else if (lnast->get_data(parent_of_sts).type.is_func_def()) {
-    auto tree_func_def_sts = lnast->add_child(parent_of_sts, Lnast_node(Lnast_ntype::create_statements(), Token()));
+    auto tree_func_def_sts = lnast->add_child(parent_of_sts, Lnast_node(Lnast_ntype::create_statements(), scan_get_token()));
+    fmt::print("statements name :{}\n", scan_get_token().get_text(buffer));
     cfg_parent_id2lnast_node[self_idx] = tree_func_def_sts;
   }
 }
