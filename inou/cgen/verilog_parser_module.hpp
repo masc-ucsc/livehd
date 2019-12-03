@@ -16,11 +16,6 @@ private:
   std::vector<std::vector<std::pair<int32_t, std::string>>> sts_buffer_stack;
   std::vector<std::vector<std::pair<int32_t, std::string>>> sts_buffer_queue;
 
-  std::string create_header();
-  std::string create_footer();
-  std::string create_always();
-  std::string create_next();
-
   std::string indent_buffer(int32_t size);
   uint32_t if_counter = 0;
 

@@ -291,16 +291,12 @@ void Lnast_to_verilog_parser::process_assign() {
     fmt::print("map_it: inserting:\tkey:{}\tvalue:{}\n", key, value);
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
   } else {
-    std::vector<std::string> split_str = absl::StrSplit(ref, "(");
-    // fmt::print("split_str : {}\n", split);
-    std::map<std::string, Verilog_parser_module*>::iterator func_it;
-    func_it = func_map.find(split_str[0]);
+    std::size_t func_index = ref.find("(");
+    std::string_view func_name = ref.substr(0, func_index);
+    auto func_it = func_map.find((std::string)func_name);
     if (func_it != func_map.end()) {
-      std::string ref_tmp = absl::StrCat(ref);
       std::vector<std::string>::iterator output_vars = func_it->second->output_vars.begin();
-      fmt::print("output_vars : size : {}\n", func_it->second->output_vars.size());
-      std::string phrase = absl::StrCat(ref_tmp, ", ");
-      // std::string phrase = absl::StrCat(ref_tmp, ", .", *output_vars, "(", key, "))");
+      std::string phrase = absl::StrCat(func_name, " ", key, ref.substr(func_index), ", ");
       while (output_vars != func_it->second->output_vars.end()) {
         std::string tail = (*output_vars).substr((*output_vars).length() - 2, 2);
 
@@ -465,11 +461,11 @@ void Lnast_to_verilog_parser::process_if() {
     ref = map_it->second;
     fmt::print("map_it find: {} | {}\n", map_it->first, map_it->second);
   }
-  new_nodes.push_back(std::pair<int32_t, std::string>(indent_buffer_size, absl::StrCat("if(", ref, ") {\n")));
+  new_nodes.push_back(std::pair<int32_t, std::string>(indent_buffer_size, absl::StrCat("if (", ref, ") begin\n")));
   it++; // cond
   std::vector<std::pair<int32_t, std::string>> queue_nodes = curr_module->pop_queue();
   new_nodes.insert(new_nodes.end(), std::make_move_iterator(queue_nodes.begin()), std::make_move_iterator(queue_nodes.end()));
-  new_nodes.push_back(std::pair<int32_t, std::string>(indent_buffer_size, "}"));
+  new_nodes.push_back(std::pair<int32_t, std::string>(indent_buffer_size, "end"));
   it++; // sts
 
   while (it != node_buffer.end()) {
@@ -482,20 +478,20 @@ void Lnast_to_verilog_parser::process_if() {
         ref = map_it->second;
         fmt::print("map_it find: {} | {}\n", map_it->first, map_it->second);
       }
-      new_nodes.push_back(std::pair<int32_t, std::string>(0, absl::StrCat(" elif (", ref, ") {\n")));
+      new_nodes.push_back(std::pair<int32_t, std::string>(0, absl::StrCat(" else if (", ref, ") begin\n")));
       it++; // cond
       queue_nodes = curr_module->pop_queue();
       new_nodes.insert(new_nodes.end(), std::make_move_iterator(queue_nodes.begin()), std::make_move_iterator(queue_nodes.end()));
-      new_nodes.push_back(std::pair<int32_t, std::string>(indent_buffer_size, "}"));
+      new_nodes.push_back(std::pair<int32_t, std::string>(indent_buffer_size, "end"));
       it++; // sts
     }
 
     // this is the else
     else {
-      new_nodes.push_back(std::pair<int32_t, std::string>(0, " else {\n"));
+      new_nodes.push_back(std::pair<int32_t, std::string>(0, " else begin\n"));
       queue_nodes = curr_module->pop_queue();
       new_nodes.insert(new_nodes.end(), std::make_move_iterator(queue_nodes.begin()), std::make_move_iterator(queue_nodes.end()));
-      new_nodes.push_back(std::pair<int32_t, std::string>(indent_buffer_size, "}"));
+      new_nodes.push_back(std::pair<int32_t, std::string>(indent_buffer_size, "end"));
       it++; // sts
     }
   }
@@ -566,8 +562,6 @@ void Lnast_to_verilog_parser::process_func_def() {
   curr_module->add_to_buffer_multiple(curr_module->pop_queue());
 
   file_map.insert(std::pair<std::string, std::string>(func_name, curr_module->create_file()));
-
-  fmt::print("new module:\n{}", curr_module->create_file());
 
   func_map.insert(std::pair<std::string, Verilog_parser_module*>(curr_module->filename, curr_module));
   curr_module = module_stack.back();

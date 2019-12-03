@@ -5,7 +5,19 @@ std::string Verilog_parser_module::indent_buffer(int32_t size) {
   return std::string(size * 2, ' ');
 }
 
-std::string Verilog_parser_module::create_header() {
+
+std::string Verilog_parser_module::create_file() {
+  std::string next_str;
+  std::string always_str = absl::StrCat(indent_buffer(1), "always_comb begin\n");
+
+  for(auto ele : var_manager.variable_map) {
+    if (get_variable_type(ele.first) == 3) {
+      absl::StrAppend(&next_str, "\n", indent_buffer(1), "always @(posedge clk) begin\n", indent_buffer(2), process_variable(ele.first), " <= ", process_variable(ele.first), "_next;\n", indent_buffer(1), "end\n");
+
+      has_sequential = true;
+    }
+  }
+
   std::string module_start = absl::StrCat("module ", filename, " (");
   std::string start_filler = std::string(module_start.length(), ' ');
 
@@ -21,74 +33,48 @@ std::string Verilog_parser_module::create_header() {
     fmt::print("variable names: {}\n", var_name.first);
     uint32_t var_type = get_variable_type(var_name.first);
     if (var_type == 0) {
-      wires = absl::StrCat(wires, "  wire ", process_variable(var_name.first), ";\n");
+      absl::StrAppend(&wires, "  wire ", process_variable(var_name.first), ";\n");
+      absl::StrAppend(&always_str, indent_buffer(2), process_variable(var_name.first), " = 0;\n");
     } else {
       std::string bits_string;
 
       if (var_name.second->bits > 1) { // default setting
-        bits_string = absl::StrCat("[", var_name.second->bits - 1, ":0]");
+        bits_string = absl::StrCat("[", var_name.second->bits - 1, ":0] ");
       }
 
-      std::string phrase = absl::StrCat(bits_string, " ", process_variable(var_name.first));
+      std::string phrase = absl::StrCat(bits_string, process_variable(var_name.first));
       arg_vars.push_back(process_variable(var_name.first));
 
       if (var_type == 1) {
         if (inputs.length()) {
-          inputs = absl::StrCat(inputs, ",\n", start_filler, "input ", phrase);
+          absl::StrAppend(&inputs, ",\n", start_filler, "input ", phrase);
         } else {
           inputs = absl::StrCat("input ", phrase);
         }
       } else if (var_type == 2) {
-        outputs = absl::StrCat(outputs, ",\n", start_filler, "output ", phrase);
+        absl::StrAppend(&outputs, ",\n", start_filler, "output reg ", phrase);
         output_vars.push_back(process_variable(var_name.first));
       } else if (var_type == 3) {
-        outputs = absl::StrCat(outputs, ",\n", start_filler, "output ", phrase);
-        wires = absl::StrCat(wires, "  wire ", process_variable(var_name.first), "_next;\n");
+        absl::StrAppend(&outputs, ",\n", start_filler, "output reg ", phrase);
+        absl::StrAppend(&wires, "  wire ", process_variable(var_name.first), "_next;\n");
+        absl::StrAppend(&always_str, indent_buffer(2), process_variable(var_name.first), "_next = 0;\n");
         output_vars.push_back(process_variable(var_name.first));
       }
     }
   }
-  module_start = absl::StrCat(module_start, inputs, outputs, ");\n", wires, "\n");
+  absl::StrAppend(&module_start, inputs, outputs, ");\n", wires, "\n");
 
   for (auto ele : func_calls) {
-    module_start = absl::StrCat(module_start, "  ", ele, "\n");
+    absl::StrAppend(&module_start, "  ", ele, "\n");
   }
 
   fmt::print("finished with the header\n");
-  return absl::StrCat(module_start, "\n");
-}
-
-std::string Verilog_parser_module::create_footer() {
-  return absl::StrCat("end module\n");
-}
-
-std::string Verilog_parser_module::create_always() {
-  std::string buffer = absl::StrCat(indent_buffer(1), "always_comb begin\n");
 
   for (auto node : node_str_buffer) {
-    buffer = absl::StrCat(buffer, indent_buffer(node.first), node.second);
+    absl::StrAppend(&always_str, indent_buffer(node.first), node.second);
   }
 
-  return absl::StrCat(buffer, indent_buffer(1), "end\n");
-}
-
-std::string Verilog_parser_module::create_next() {
-  std::string buffer;
-
-  for(auto ele : var_manager.variable_map) {
-    if (get_variable_type(ele.first) == 3) {
-      buffer = absl::StrCat(buffer, "\n", indent_buffer(1), "always @(posedge clk) begin\n", indent_buffer(2), process_variable(ele.first), " <= ", process_variable(ele.first), "_next\n", indent_buffer(1), "end\n");
-
-      has_sequential = true;
-    }
-  }
-
-  return buffer;
-}
-
-std::string Verilog_parser_module::create_file() {
-  std::string next_string = create_next();
-  return absl::StrCat(create_header(), create_always(), next_string, create_footer());
+  return absl::StrCat(module_start, "\n", always_str, indent_buffer(1), "end\n", next_str, "end module\n");
 }
 
 void Verilog_parser_module::inc_if_counter() {
