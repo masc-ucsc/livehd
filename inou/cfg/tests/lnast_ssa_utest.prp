@@ -3,7 +3,6 @@ $c1 as bits:1
 #x as bits:6
 #_y as bits:6
 
-#x = 55
 #_y = 60
 #x = 50
 if ($c0 == 1) {

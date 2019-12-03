@@ -7,15 +7,15 @@ void Lnast_node::dump() const {
 
 void Lnast::do_ssa_trans(const Lnast_nid &top){
   Lnast_nid top_sts_node = get_first_child(top);
-  absl::flat_hash_map<std::string_view, uint8_t > top_sts_rename_table;
-  rename_tables[get_data(top_sts_node).token.get_text(buffer)] = top_sts_rename_table;
+  absl::flat_hash_map<std::string_view, uint8_t > top_phi_resolve_table;
+  phi_resolve_tables[get_data(top_sts_node).token.get_text(buffer)] = top_phi_resolve_table;
   for (const auto &opr_node : children(top_sts_node)) {
     if (get_data(opr_node).type.is_if()) {
       ssa_if_subtree(opr_node);
     } else if (get_data(opr_node).type.is_func_def()) {
       do_ssa_trans(opr_node);
     } else {
-      ssa_top_statements(top_sts_node, opr_node);
+      ssa_handle_statement(top_sts_node, opr_node);
     }
   }
   //fmt::print("\nrename_table content\n\n");
@@ -27,14 +27,14 @@ void Lnast::do_ssa_trans(const Lnast_nid &top){
 void Lnast::ssa_if_subtree(const Lnast_nid &if_node){
   for (const auto &itr : children(if_node)) {
     if (get_data(itr).type.is_statements()) {
-      absl::flat_hash_map<std::string_view, uint8_t> if_sts_rename_table;
-      rename_tables[get_data(itr).token.get_text(buffer)] = if_sts_rename_table;
+      absl::flat_hash_map<std::string_view, uint8_t> if_sts_phi_resolve_table;
+      phi_resolve_tables[get_data(itr).token.get_text(buffer)] = if_sts_phi_resolve_table;
       for (const auto &opr_node : children(itr)) {
         I(!get_data(opr_node).type.is_func_def());
         if (get_data(opr_node).type.is_if())
           ssa_if_subtree(opr_node);
         else
-          ssa_if_statements(itr, opr_node);
+          ssa_handle_statement(itr, opr_node);
       }
     }
   }
@@ -46,7 +46,7 @@ void Lnast::phi_node_insertion(const Lnast_nid &if_node) {
 }
 
 
-void Lnast::ssa_top_statements(const Lnast_nid &psts_node, const Lnast_nid &opr_node){
+void Lnast::ssa_handle_statement(const Lnast_nid &psts_node, const Lnast_nid &opr_node){
   const auto type = get_data(opr_node).type;
   if(type.is_pure_assign() || type.is_as()){
     const auto  target_node = get_first_child(opr_node);
@@ -56,34 +56,30 @@ void Lnast::ssa_top_statements(const Lnast_nid &psts_node, const Lnast_nid &opr_
     if ((target_name.substr(0,3) == "___") || elder_sibling_is_label(opr_node))
       return;
 
-    update_or_insert_rename_table(psts_node, target_data);
+    update_ssa_cnt_table(target_data);
+    update_phi_resolve_table(psts_node, target_data);
   }
 }
 
-void Lnast::ssa_if_statements(const Lnast_nid &psts_node, const Lnast_nid &opr_node){
-  const auto type = get_data(opr_node).type;
-  if(type.is_pure_assign() || type.is_as()){
-    const auto  target_node = get_first_child(opr_node);
-    auto& target_data = *ref_data(target_node);
-    const auto  target_name = target_data.token.get_text(buffer);
 
-    if ((target_name.substr(0,3) == "___") || elder_sibling_is_label(opr_node))
-      return;
-
-    update_or_insert_rename_table(psts_node, target_data);
-  }
-}
-void Lnast::update_or_insert_rename_table(const Lnast_nid &psts_node, Lnast_node& target_data){
+void Lnast::update_ssa_cnt_table(Lnast_node& target_data){
   const auto  target_name = target_data.token.get_text(buffer);
-  fmt::print("table name :{}\n", get_data(psts_node).token.get_text(buffer));
-  auto &rename_table = rename_tables[get_data(psts_node).token.get_text(buffer)];
-  auto itr = rename_table.find(target_name);
-  if (itr != rename_table.end()) {
+  auto itr = ssa_cnt_table.find(target_name);
+  if (itr != ssa_cnt_table.end()) {
     itr->second += 1;
     target_data.subs = itr->second;
   } else {
-    rename_table[target_name] = 0;
+    ssa_cnt_table[target_name] = 0;
   }
+}
+
+
+//sh:fixme:cannot using Tree_index as absl index...
+void Lnast::update_phi_resolve_table(const Lnast_nid &psts_node, Lnast_node& target_data){
+  const auto  target_name = target_data.token.get_text(buffer);
+  fmt::print("phi_resovle_table:{}\n", get_data(psts_node).token.get_text(buffer));
+  auto &phi_resolve_table = phi_resolve_tables[get_data(psts_node).token.get_text(buffer)];
+  phi_resolve_table[target_name] = target_data.subs;
 }
 
 bool Lnast::elder_sibling_is_label(const Lnast_nid &opr_node) {
