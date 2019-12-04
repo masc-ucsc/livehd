@@ -6,7 +6,7 @@
 #include "lnast_ntype.hpp"
 
 using Lnast_nid    = mmap_lib::Tree_index;
-using Rename_table = absl::flat_hash_map<std::string, absl::flat_hash_map<std::string_view, uint8_t >>;
+using Rename_table = absl::flat_hash_map<std::string_view, uint8_t>;
 
 
 struct Lnast_node {
@@ -38,18 +38,21 @@ public:
 
 private:
   const std::string_view buffer;  // const because it can not change at runtime
-  void do_ssa_trans                  (const Lnast_nid &top);
-  void ssa_handle_statement          (const Lnast_nid &psts_node, const Lnast_nid &opr_node);
-  void ssa_if_subtree                (const Lnast_nid &if_node);
-  void phi_node_resolve              (const Lnast_nid &if_node);
-  bool elder_sibling_is_label        (const Lnast_nid &self);
-  void update_ssa_cnt_table          (Lnast_node& target_data);
-  void update_phi_resolve_table      (const Lnast_nid &psts_node, Lnast_node& target_data);
-  bool has_else_statements           (const Lnast_nid &if_node);
+  void      do_ssa_trans                  (const Lnast_nid &top);
+  void      ssa_handle_statement          (const Lnast_nid &psts_node, const Lnast_nid &opr_node);
+  void      ssa_if_subtree                (const Lnast_nid &if_node);
+  void      ssa_handle_phi_nodes          (const Lnast_nid &if_node);
+  void      resolve_phi_nodes             (const Lnast_nid &cond, Rename_table &true_table, Rename_table &false_table);
+  bool      elder_sibling_is_label        (const Lnast_nid &self);
+  void      update_ssa_cnt_table          (Lnast_node &target_data);
+  void      update_phi_resolve_table      (const Lnast_nid &psts_node, Lnast_node &target_data);
+  bool      has_else_statements           (const Lnast_nid &if_node);
+  Lnast_nid add_phi_node                  (const Lnast_nid &cond, const std::string_view val, const uint8_t tcnt, const uint8_t fcnt);
 
-  absl::flat_hash_map<std::string_view, absl::flat_hash_map<std::string_view, uint8_t>> phi_resolve_tables;
-  absl::flat_hash_map<std::string_view, uint8_t> ssa_cnt_table;
-  absl::flat_hash_map<std::string_view, uint8_t> new_added_phi_node_table;
+  absl::flat_hash_map<std::string_view, Rename_table > phi_resolve_tables;
+  Rename_table ssa_cnt_table;
+  Rename_table new_added_phi_node_table;
+  Lnast_nid last_sibling;
 protected:
 };
 

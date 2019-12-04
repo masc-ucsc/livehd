@@ -40,31 +40,61 @@ void Lnast::ssa_if_subtree(const Lnast_nid &if_node){
       }
     }
   }
-  phi_node_resolve(if_node);
+  ssa_handle_phi_nodes(if_node);
 }
 
-void Lnast::phi_node_resolve(const Lnast_nid &if_node) {
+void Lnast::ssa_handle_phi_nodes(const Lnast_nid &if_node) {
   std::vector<Lnast_nid> if_statements_vec;
   for (const auto & itr : children(if_node)) {
     if (get_data(itr).type.is_statements()) {
       if_statements_vec.push_back(itr);
     }
   }
-
+  //2 possible cases: (1)if-elif-elif (2) if-elif-else
   for (auto itr = if_statements_vec.rbegin(); itr != if_statements_vec.rend(); ++itr ) {
-    //2 possible cases: (1)if-elif-elif (2) if-elif-else
-    if (itr == if_statements_vec.rbegin()) {
-      if (has_else_statements(if_node)) {
-        //handle last two statements first
-
-      } else {
-        ;//handle last and upper-scope statements first
-      }
-    } else {
-      ;//resolve normal case
+    if (itr == if_statements_vec.rbegin() && has_else_statements(if_node))
+      continue;
+    else if (itr == if_statements_vec.rbegin()+1 && has_else_statements(if_node)) {
+      Rename_table &true_table = phi_resolve_tables[get_data(*itr).token.get_text(buffer)];
+      Rename_table &false_table = phi_resolve_tables[get_data(*if_statements_vec.rbegin()).token.get_text(buffer)];
+      Lnast_nid condition_node = get_sibling_prev(*itr);
+      resolve_phi_nodes(condition_node, true_table, false_table);
+    }
+    else {
+      Rename_table &true_table = phi_resolve_tables[get_data(*itr).token.get_text(buffer)];
+      Rename_table &false_table = new_added_phi_node_table;
+      Lnast_nid condition_node = get_sibling_prev(*itr);
+      resolve_phi_nodes(condition_node, true_table, false_table);
     }
   }
 }
+
+void Lnast::resolve_phi_nodes(const Lnast_nid &cond, Rename_table &true_table, Rename_table &false_table) {
+ for (auto const& [key, val] : true_table) {
+    if(false_table.find(key)!= false_table.end()){
+      auto new_phi_node = add_phi_node(cond, key, val, false_table[key]);
+      //sh:todo: using this phi_node for add next siblings
+    }
+    ;//have to remove visited keys in both true/false tables or there will be duplicated phi node added
+ }
+
+ for (auto const& [key, val] : false_table) {
+    ;//have to update the false table
+ }
+
+ I(true_table.empty()); //even it's a new_added_phi_node_table
+ //I(false_table.empty()); not really, it's usually the new_added_phi_node_tables, there
+}
+
+
+Lnast_nid Lnast::add_phi_node(const Lnast_nid &cond, const std::string_view val, const uint8_t tcnt, const uint8_t fcnt) {
+   last_sibling = get_parent(cond);
+   auto new_phi_node = add_next_sibling(last_sibling, Lnast_node());
+   //sh:todo: add child of new_phi_node
+
+   return new_phi_node;
+}
+
 
 bool Lnast::has_else_statements(const Lnast_nid &if_node) {
     Lnast_nid last_child = get_last_child(if_node);
