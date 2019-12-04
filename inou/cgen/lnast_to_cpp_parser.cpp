@@ -327,7 +327,7 @@ void Lnast_to_cpp_parser::process_as() {
     fmt::print("inserting:\tkey:{}\tvalue:{}\n", key, value);
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
   } else {
-    std::string phrase = absl::StrCat("(* LNAST: ", key, " as " , value, " *)\n");
+    std::string phrase = absl::StrCat("// LNAST: ", key, " as " , value, "\n");
     curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(indent_buffer_size, phrase));
     curr_module->var_manager.insert_variable(key);
 
@@ -512,7 +512,7 @@ void Lnast_to_cpp_parser::process_func_call() {
   std::map<std::string, Cpp_parser_module*>::iterator func_module = func_map.find(func_name);
   fmt::print("found module : {} : size {}\n", func_module->first, func_module->second->arg_vars.size());
 
-  std::string value = absl::StrCat(func_name, "(");
+  std::string value = absl::StrCat(func_name, ".combinational(");
   if (func_module->second->has_sequential) {
     absl::StrAppend(&value, "clk, reset");
   }

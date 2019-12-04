@@ -41,7 +41,7 @@ std::string Cpp_parser_module::create_header() {
   absl::StrAppend(&return_struct, "};\n");
   std::string variable_str = absl::StrCat("private:\n", indent_buffer(1), filename, "_return return_vals_next;", "\n", "public:\n", indent_buffer(1), filename, "_return return_vals;", "\n");
 
-  return absl::StrCat(return_struct, hpp_file, variable_str, "\n  void ", combinational_str, ");\n  ", filename, "_return sequential();\n}");
+  return absl::StrCat(return_struct, hpp_file, variable_str, "\n  ", filename, "_return ", combinational_str, ");\n  void sequential();\n}");
 }
 
 std::string Cpp_parser_module::create_implementation() {
@@ -51,9 +51,9 @@ std::string Cpp_parser_module::create_implementation() {
     buffer = absl::StrCat(buffer, indent_buffer(node.first), node.second);
   }
 
-  std::string sequential_str = absl::StrCat(filename, "_return ", filename, "::sequential() {\n", indent_buffer(1), "std::memcpy(return_vals, return_vals_next, sizeof return_vals);\n}\n");
+  std::string sequential_str = absl::StrCat("void ", filename, "::sequential() {\n", indent_buffer(1), "std::memcpy(return_vals, return_vals_next, sizeof return_vals);\n}\n");
 
-  return absl::StrCat("void ", filename, "::", combinational_str, ") {\n", initial_output_str, buffer, "}\n", sequential_str);
+  return absl::StrCat(filename, "_return ", filename, "::", combinational_str, ") {\n", initial_output_str, buffer, indent_buffer(1), "return return_vals;\n", "}\n", sequential_str);
 }
 
 std::pair<std::string, std::string> Cpp_parser_module::create_files() {
