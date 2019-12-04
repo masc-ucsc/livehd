@@ -2,10 +2,10 @@
 #pragma once
 #include "lnast.hpp"
 #include "lnast_parser.hpp"
-#include "verilog_parser_module.hpp"
+#include "cpp_parser_module.hpp"
 #include "cgen_variable_manager.hpp"
 
-class Lnast_to_verilog_parser {
+class Lnast_to_cpp_parser {
 private:
   // infustructure to process the nodes
   mmap_lib::Tree_level curr_statement_level = -1;
@@ -19,16 +19,16 @@ private:
 
   // infustructure for multiple modules
   std::string root_filename;
-  Verilog_parser_module *curr_module;
+  Cpp_parser_module *curr_module;
   std::map<std::string, std::string> file_map;
   // key, pair(value, variables)
   std::map<std::string_view, std::string> ref_map;
-  std::vector<Verilog_parser_module*> module_stack;
+  std::vector<Cpp_parser_module*> module_stack;
 
   // references
   std::string_view get_node_name(Lnast_node node);
   std::string get_filename(std::string filepath);
-  std::map<std::string, Verilog_parser_module*> func_map;
+  std::map<std::string, Cpp_parser_module*> func_map;
 
   // infustructure
   void process_node(const mmap_lib::Tree_index &it);
@@ -47,17 +47,17 @@ private:
   void process_assign();
   void process_as();
   void process_label();
-
   void process_if();
   void process_func_call();
   void process_func_def();
 
   void process_operator();
+  void process_logical_operator();
 
 public:
   std::string buffer;
 
-  Lnast_to_verilog_parser(std::string_view _memblock, Lnast *_lnast)
+  Lnast_to_cpp_parser(std::string_view _memblock, Lnast *_lnast)
     : memblock(_memblock), lnast(_lnast) { };
 
   std::map<std::string, std::string> stringify(std::string filepath);

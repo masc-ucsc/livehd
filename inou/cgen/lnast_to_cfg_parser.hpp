@@ -19,9 +19,6 @@ private:
   Lnast_parser lnast_parser;
   std::string node_str_buffer;
 
-  absl::flat_hash_map<Lnast_ntype, std::string> ntype2str;
-  void setup_ntype_str_mapping();
-
   void process_node(const mmap_lib::Tree_index &it);
   void process_top(mmap_lib::Tree_level level);
   void push_statement(mmap_lib::Tree_level level); // prepare for next statement
@@ -42,9 +39,8 @@ private:
 public:
   std::string buffer;
 
-  Lnast_to_cfg_parser(std::string_view memblock, Lnast *lnast)
-    : memblock(memblock), lnast(lnast) { setup_ntype_str_mapping(); };
-  std::string ntype_dbg(Lnast_ntype ntype);
+  Lnast_to_cfg_parser(std::string_view _memblock, Lnast *_lnast)
+    : memblock(_memblock), lnast(_lnast) { };
   std::string stringify();
 };
 

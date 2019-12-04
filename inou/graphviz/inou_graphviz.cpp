@@ -186,8 +186,8 @@ void Inou_graphviz::fromlnast(Eprp_var &var) {
   p.do_fromlnast(p.files);
 }
 
-void Inou_graphviz::do_fromlnast( std::string_view files) {
-  populate_lnast_data(files);
+void Inou_graphviz::do_fromlnast( std::string_view _files) {
+  populate_lnast_data(_files);
 }
 
 void Inou_graphviz::populate_lnast_data(std::string_view files) {
@@ -196,22 +196,20 @@ void Inou_graphviz::populate_lnast_data(std::string_view files) {
   std::string data = "digraph {\n";
 
   for(const auto& itr : lnast->depth_preorder(lnast->get_root())){
-    auto node_data   = lnast->get_data(itr);
-    auto str_type    = lnast_parser.ntype_dbg(node_data.type);
-    std::string subs = std::to_string(node_data.subs);
-    std::string name(node_data.token.get_text(memblock));
+    auto node_data = lnast->get_data(itr);
 
-
+    auto subs      = node_data.subs;
+    auto name      = node_data.token.get_text(memblock);
 
     auto id = std::to_string(itr.level)+std::to_string(itr.pos);
-    if(node_data.type == Lnast_ntype_ref){
-      data += fmt::format(" {} [label=\"{}, {}\"];\n", id, str_type, name+"["+subs+"]");
+    if(node_data.type.is_ref()){
+      data += fmt::format(" {} [label=\"{}, {}[{}]\"];\n", id, node_data.type.debug_name(), name, subs);
     } else {
-      data += fmt::format(" {} [label=\"{}, {}\"];\n", id, str_type, name);
+      data += fmt::format(" {} [label=\"{}, {}\"];\n", id, node_data.type.debug_name(), name);
     }
 
 
-    if(node_data.type == Lnast_ntype_top)
+    if(node_data.type.is_top())
       continue;
 
     //get parent data for link

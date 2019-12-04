@@ -2,8 +2,6 @@
 #pragma once
 #include "lnast.hpp"
 
-using Lnast_ntype = uint8_t;
-
 static inline constexpr int   CFG_IDX_POS              =  1;
 static inline constexpr int   CFG_PARENT_POS           =  2;
 static inline constexpr int   CFG_CHILD_POS            =  3;
@@ -16,9 +14,8 @@ static inline constexpr int   CFG_TARGET_TMP_REF_RANGE =  1; //K14 K15  0 59 96 
 
 class Lnast_parser : public Elab_scanner {
 public:
-  Lnast_parser() : line_num(0), line_tkcnt(1){ setup_ntype_str_mapping();};
+  Lnast_parser() : line_num(0), line_tkcnt(1){};
   const std::unique_ptr<Lnast>&  get_ast(){return lnast;};
-  std::string                    ntype_dbg(Lnast_ntype ntype);
 
 protected:
   void         elaborate() override;
@@ -34,7 +31,6 @@ protected:
   Lnast_ntype  operand_analysis();
   Lnast_ntype  operator_analysis();
   bool         token_is_valid_ref();
-  void         setup_ntype_str_mapping();
   bool         function_name_correction (Lnast_ntype type, const Token& target_name);
   mmap_lib::Tree_index process_operator_node (const mmap_lib::Tree_index& opr_parent_sts, Lnast_ntype type, uint32_t , const Token& target_name);
   void         walk_next_token() {scan_next(); line_tkcnt += 1;              };
@@ -47,7 +43,6 @@ private:
   Token                  buffer_if_condition;
   bool                   buffer_if_condition_used;
   mmap_lib::Tree_index   buffer_tmp_func_name_idx;
-  absl::flat_hash_map<Lnast_ntype, std::string>       ntype2str;
   absl::flat_hash_map<uint32_t, mmap_lib::Tree_index> cfg_parent_id2lnast_node; //translate the parent column idx to corresponding sts node
 };
 

@@ -117,6 +117,19 @@ node.debug_name()
 ```
 node_pin.debug_name()
 ```
+* iterate output edges and get node/pin information from it
+```
+for (auto &out : node.out_edges()) {
+  auto  dpin       = out.driver;
+  auto  dpin_pid   = dpin.get_pid();  
+  auto  dnode_name = dpin.get_node().debug_name();
+  auto  snode_name = out.sink.get_node().debug_name();
+  auto  spin_pid   =  out.sink.get_pid();  
+  auto  dpin_name  = dpin.has_name() ? dpin.get_name() : "";
+  auto  dbits      = dpin.get_bits();
 
-
+  fmt::print(" {}->{}[label=\"{}b :{} :{} :{}\"];\n"
+      , dnode_name, snode_name, dbits, dpin_pid, spin_pid, dpin_name);
+}
+```
 #### To be continued ...

@@ -18,12 +18,9 @@ void Lnast_to_cfg_parser::process_node(const mmap_lib::Tree_index& it) {
   // for printing out individual node values
   /*
   std::string name(node_data.token.get_text(memblock)); // str_view to string
-  std::string type = ntype_dbg(node_data.type);
   fmt::print("current node : prev:{}\tcurr:{}\tit: {}\t", prev_statement_level, curr_statement_level, it.level);
   fmt::print("tree index: pos:{}\tlevel:{}\tnode: {}\ttype: {}\tk:{}\n", it.pos, it.level, name, type, node_data.knum);
   */
-
-  std::string type = ntype_dbg(node_data.type);
 
   // add while to see pop_statement and to add buffer
   if (it.level < curr_statement_level) {
@@ -32,31 +29,30 @@ void Lnast_to_cfg_parser::process_node(const mmap_lib::Tree_index& it) {
     while (it.level + 1 < curr_statement_level) {
       pop_statement(it.level, node_data.type);
     }
-    type = ntype_dbg(node_data.type);
   }
 
-  if (node_data.type == Lnast_ntype_top) {
+  if (node_data.type.is_top()) {
     process_top(it.level);
-  } else if (node_data.type == Lnast_ntype_statements) {
+  } else if (node_data.type.is_statements()) {
     // check the buffer to see if this is an if statement
     // and if it is, check if this is an ifel or an else
     if (node_buffer.size() > 0) {
-      Lnast_ntype type = node_buffer.front().type;
-      if (type == Lnast_ntype_if) {
-        if (node_buffer.size() > 3 && node_buffer.back().type != Lnast_ntype_statements) {
+      const auto ntype = node_buffer.front().type;
+      if (ntype.is_if()) {
+        if (node_buffer.size() > 3 && !node_buffer.back().type.is_statements()) {
           if_buffer.push_back(k_next);
           k_next++;
         }
         if_buffer.push_back(k_next);
-      } else if (type == Lnast_ntype_func_def) {
+      } else if (ntype.is_func_def()) {
         if_buffer.push_back(k_next);
       }
     }
     add_to_buffer(node_data);
     push_statement(it.level);
-  } else if (node_data.type == Lnast_ntype_cstatements) {
+  } else if (node_data.type.is_cstatements()) {
     if (node_buffer.size() > 0) {
-      if (node_buffer.back().type == Lnast_ntype_statements) {
+      if (node_buffer.back().type.is_statements()) {
         if_buffer.push_back(k_next);
       }
     }
@@ -102,7 +98,7 @@ void Lnast_to_cfg_parser::push_statement(mmap_lib::Tree_level level) {
 void Lnast_to_cfg_parser::pop_statement(mmap_lib::Tree_level level, Lnast_ntype type) {
   uint32_t tmp_k = k_next;
 
-  if (curr_statement_level != level && type != Lnast_ntype_cond) {
+  if (curr_statement_level != level && !type.is_cond()) {
     k_next = 0;
   }
 
@@ -159,85 +155,84 @@ void Lnast_to_cfg_parser::process_buffer() {
 
   fmt::print("process_buffer k_next: {}\n", k_next);
 
-  Lnast_ntype type = node_buffer.front().type;
+  const auto type = node_buffer.front().type;
 
-  if (type == Lnast_ntype_invalid) {
+  if (type.is_invalid()) {
     // cause an error
-  } else if (type == Lnast_ntype_statements) {
+  } else if (type.is_statements()) {
     // not processed from buffer
-  } else if (type == Lnast_ntype_cstatements) {
+  } else if (type.is_cstatements()) {
     // not processed from buffer
-  } else if (type == Lnast_ntype_pure_assign) {
+  } else if (type.is_pure_assign()) {
     process_operator();
-  } else if (type == Lnast_ntype_dp_assign) {
+  } else if (type.is_dp_assign()) {
     process_operator();
-  } else if (type == Lnast_ntype_as) {
+  } else if (type.is_as()) {
     process_operator();
-  } else if (type == Lnast_ntype_label) {
+  } else if (type.is_label()) {
     process_operator();
-  } else if (type == Lnast_ntype_dot) {
+  } else if (type.is_dot()) {
     process_operator();
-  } else if (type == Lnast_ntype_logical_and) {
+  } else if (type.is_logical_and()) {
     process_operator();
-  } else if (type == Lnast_ntype_logical_or) {
+  } else if (type.is_logical_or()) {
     process_operator();
-  } else if (type == Lnast_ntype_and) {
+  } else if (type.is_and()) {
     process_operator();
-  } else if (type == Lnast_ntype_or) {
+  } else if (type.is_or()) {
     process_operator();
-  } else if (type == Lnast_ntype_xor) {
+  } else if (type.is_xor()) {
     process_operator();
-  } else if (type == Lnast_ntype_plus) {
+  } else if (type.is_plus()) {
     process_operator();
-  } else if (type == Lnast_ntype_minus) {
+  } else if (type.is_minus()) {
     process_operator();
-  } else if (type == Lnast_ntype_mult) {
+  } else if (type.is_mult()) {
     process_operator();
-  } else if (type == Lnast_ntype_div) {
+  } else if (type.is_div()) {
     process_operator();
-  } else if (type == Lnast_ntype_same) {
+  } else if (type.is_same()) {
     process_operator();
-  } else if (type == Lnast_ntype_lt) {
+  } else if (type.is_lt()) {
     process_operator();
-  } else if (type == Lnast_ntype_le) {
+  } else if (type.is_le()) {
     process_operator();
-  } else if (type == Lnast_ntype_gt) {
+  } else if (type.is_gt()) {
     process_operator();
-  } else if (type == Lnast_ntype_ge) {
+  } else if (type.is_ge()) {
     process_operator();
-  } else if (type == Lnast_ntype_tuple) {
+  } else if (type.is_tuple()) {
     // not implemented in lnast
-  } else if (type == Lnast_ntype_ref) {
+  } else if (type.is_ref()) {
     // not processed from buffer
-  } else if (type == Lnast_ntype_const) {
+  } else if (type.is_const()) {
     // not processed from buffer
-  } else if (type == Lnast_ntype_attr_bits) {
+  } else if (type.is_attr()) {
     // not processed from buffer
-  } else if (type == Lnast_ntype_assert) {
+  } else if (type.is_assert()) {
     // check in on node representation
-  } else if (type == Lnast_ntype_if) {
+  } else if (type.is_if()) {
     process_if();
-  } else if (type == Lnast_ntype_cond) {
+  } else if (type.is_cond()) {
     // not processed from buffer
-  } else if (type == Lnast_ntype_for) {
+  } else if (type.is_for()) {
     // not implemented in lnast
-  } else if (type == Lnast_ntype_while) {
+  } else if (type.is_while()) {
     // not implemented in lnast
-  } else if (type == Lnast_ntype_func_call) {
+  } else if (type.is_func_call()) {
     process_func_call();
-  } else if (type == Lnast_ntype_func_def) {
+  } else if (type.is_func_def()) {
     process_func_def();
-  } else if (type == Lnast_ntype_top) {
+  } else if (type.is_top()) {
     // not processed from buffer
   } else {
     // throw error
   }
 
   for (auto const& node : node_buffer) {
-    std::string name(node.token.get_text(memblock)); // str_view to string
-    std::string type = ntype_dbg(node.type);
-    if (name == "") {
-      fmt::print("{}({}) ", type, node.type);
+    auto name{node.token.get_text(memblock)};
+    if (name.empty()) {
+      fmt::print("{} ", node.type.debug_name_cfg());
     } else {
       fmt::print("{} ", name);
     }
@@ -264,8 +259,8 @@ std::string_view Lnast_to_cfg_parser::get_node_name(Lnast_node node) {
 
 void Lnast_to_cfg_parser::flush_it(std::vector<Lnast_node>::iterator it) {
   while (it != node_buffer.end()) {
-    Lnast_ntype type = (*it).type;
-    if (type == Lnast_ntype_statements || type == Lnast_ntype_cstatements) {
+    const auto type = (*it).type;
+    if (type.is_statements() || type.is_cstatements()) {
       it++;
       continue;
     }
@@ -304,7 +299,7 @@ void Lnast_to_cfg_parser::process_if() {
   node_str_buffer = absl::StrCat(node_str_buffer, "\n");
 
   while (node_it != node_buffer.end()) {
-    if ((*node_it).type == Lnast_ntype_cond) {
+    if ((*node_it).type.is_cond()) {
       node_str_buffer = absl::StrCat(node_str_buffer, "K", *if_it, "\t");
       if_it++;
       node_str_buffer = absl::StrCat(node_str_buffer, "null", "\tif\t");
@@ -336,49 +331,5 @@ void Lnast_to_cfg_parser::process_func_def() {
   node_str_buffer = absl::StrCat(node_str_buffer, "K", if_buffer.front(), "\t");
   flush_it(it);
   node_str_buffer = absl::StrCat(node_str_buffer, "\n");
-}
-
-void Lnast_to_cfg_parser::setup_ntype_str_mapping() {
-  ntype2str[Lnast_ntype_invalid] = "invalid";
-  ntype2str[Lnast_ntype_statements] = "sts";
-  ntype2str[Lnast_ntype_cstatements] = "csts";
-  ntype2str[Lnast_ntype_pure_assign] = "=";
-  ntype2str[Lnast_ntype_dp_assign] = ":=";
-  ntype2str[Lnast_ntype_as] = "as";
-  ntype2str[Lnast_ntype_label] = "label";
-  ntype2str[Lnast_ntype_dot] = "dot";
-  ntype2str[Lnast_ntype_logical_and] = "and";
-  ntype2str[Lnast_ntype_logical_or] = "or";
-  ntype2str[Lnast_ntype_and] = "&";
-  ntype2str[Lnast_ntype_or] = "|";
-  ntype2str[Lnast_ntype_xor] = "^";
-  ntype2str[Lnast_ntype_plus] = "+";
-  ntype2str[Lnast_ntype_minus] = "-";
-  ntype2str[Lnast_ntype_mult] = "*";
-  ntype2str[Lnast_ntype_div] = "/";
-  ntype2str[Lnast_ntype_same] = "==";
-  ntype2str[Lnast_ntype_lt] = "<";
-  ntype2str[Lnast_ntype_le] = "<=";
-  ntype2str[Lnast_ntype_gt] = ">";
-  ntype2str[Lnast_ntype_ge] = ">=";
-  ntype2str[Lnast_ntype_tuple] = "()";
-  ntype2str[Lnast_ntype_ref] = "ref";
-  ntype2str[Lnast_ntype_const] = "const";
-  ntype2str[Lnast_ntype_attr_bits] = "attr_bits";
-  ntype2str[Lnast_ntype_assert] = "I";
-  ntype2str[Lnast_ntype_if] = "if";
-  //ntype2str[Lnast_ntype_else] = "else";
-  ntype2str[Lnast_ntype_cond] = "cond";
-  ntype2str[Lnast_ntype_uif] = "uif";
-  ntype2str[Lnast_ntype_elif] = "elif";
-  ntype2str[Lnast_ntype_for] = "for";
-  ntype2str[Lnast_ntype_while] = "while";
-  ntype2str[Lnast_ntype_func_call] = "func_call";
-  ntype2str[Lnast_ntype_func_def] = "func_def";
-  ntype2str[Lnast_ntype_top] = "top";
-}
-
-std::string Lnast_to_cfg_parser::ntype_dbg(Lnast_ntype ntype) {
-  return ntype2str[ntype];
 }
 

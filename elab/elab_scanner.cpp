@@ -10,13 +10,7 @@
 #include "iassert.hpp"
 
 #include "elab_scanner.hpp"
-
-#ifndef likely
-#define likely(x) __builtin_expect((x), 1)
-#endif
-#ifndef unlikely
-#define unlikely(x) __builtin_expect((x), 0)
-#endif
+#include "likely.hpp"
 
 void Elab_scanner::setup_translate() {
   translate.resize(256);
