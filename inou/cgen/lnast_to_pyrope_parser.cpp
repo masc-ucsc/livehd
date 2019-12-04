@@ -51,7 +51,7 @@ void Lnast_to_pyrope_parser::process_top(mmap_lib::Tree_level level) {
 }
 
 void Lnast_to_pyrope_parser::push_statement(mmap_lib::Tree_level level, Lnast_ntype type) {
-  fmt::print("push\n");
+  fmt::print("before push\n");
 
   level = level + 1;
   level_stack.push_back(curr_statement_level);
@@ -71,7 +71,7 @@ void Lnast_to_pyrope_parser::push_statement(mmap_lib::Tree_level level, Lnast_nt
 }
 
 void Lnast_to_pyrope_parser::pop_statement() {
-  fmt::print("pop\n");
+  fmt::print("before pop\n");
 
   process_buffer();
 
@@ -89,6 +89,8 @@ void Lnast_to_pyrope_parser::pop_statement() {
   level_stack.pop_back();
   curr_statement_level = prev_statement_level;
   prev_statement_level = level_stack.back();
+
+  fmt::print("after pop\n");
 }
 
 void Lnast_to_pyrope_parser::flush_statements() {
@@ -127,9 +129,9 @@ void Lnast_to_pyrope_parser::process_buffer() {
   if (type.is_invalid()) {
     // add error
   } else if (type.is_pure_assign()) {
-    process_assign("as");
-  } else if (type.is_dp_assign()) {
     process_assign("=");
+  } else if (type.is_dp_assign()) {
+    process_assign(":=");
   } else if (type.is_as()) {
     process_operator();
     // process_as();
@@ -201,7 +203,7 @@ void Lnast_to_pyrope_parser::process_buffer() {
   }
   fmt::print("\n");
 
-  buffer = absl::StrCat(buffer, node_str_buffer);
+  absl::StrAppend(&buffer, node_str_buffer);
   node_str_buffer = "";
 
   node_buffer.clear();
@@ -219,9 +221,9 @@ void Lnast_to_pyrope_parser::flush_it(std::vector<Lnast_node>::iterator it) {
       continue;
     }
 
-    node_str_buffer = absl::StrCat(node_str_buffer, get_node_name(*it));
+    absl::StrAppend(&node_str_buffer, get_node_name(*it));
     if (++it != node_buffer.end()) {
-      node_str_buffer = absl::StrCat(node_str_buffer, "\t");
+      absl::StrAppend(&node_str_buffer, "\t");
     }
   }
 }
@@ -235,9 +237,9 @@ std::string_view Lnast_to_pyrope_parser::join_it(std::vector<Lnast_node>::iterat
       continue;
     }
 
-    value = absl::StrCat(value, get_node_name(*it));
+    absl::StrAppend(&value, get_node_name(*it));
     if (++it != node_buffer.end()) {
-      value = absl::StrCat(value, " ", del, " ");
+      absl::StrAppend(&value, " ", del, " ");
     }
   }
   fmt::print("join_it: {}\n", value);
@@ -272,12 +274,10 @@ bool Lnast_to_pyrope_parser::is_ref(std::string_view test_string) {
 }
 
 void Lnast_to_pyrope_parser::inc_indent_buffer(){
-  // indent_buffer() = absl::StrCat(indent_buffer(), "  ");
   indent_buffer_size++;
 }
 
 void Lnast_to_pyrope_parser::dec_indent_buffer() {
-  // indent_buffer() = indent_buffer().substr(0, indent_buffer().size() - 2);
   indent_buffer_size--;
 }
 
@@ -286,101 +286,54 @@ std::string Lnast_to_pyrope_parser::indent_buffer() {
 }
 
 void Lnast_to_pyrope_parser::process_assign(std::string_view assign_type) {
-  std::vector<Lnast_node>::iterator it = node_buffer.begin();
+  auto it = node_buffer.begin();
   it++;
   std::string_view key = get_node_name(*it);
   it++;
 
-  std::string value = "";
-  std::map<std::string_view, std::string>::iterator map_it;
   std::string_view ref = get_node_name(*it);
-  map_it = ref_map.find(ref);
+  auto map_it = ref_map.find(ref);
   if (map_it != ref_map.end()) {
     ref = map_it->second;
     fmt::print("map_it find: {} | {}\n", map_it->first, map_it->second);
   } else if (is_number(ref)) {
     ref = process_number(ref);
   }
-  value = absl::StrCat(value, ref);
 
-  fmt::print("pure_assign value:\tkey: {}\tvalue: {}\n", key, value);
+  fmt::print("pure_assign map:\tkey: {}\tvalue: {}\n", key, ref);
   if (is_ref(key)) {
-    fmt::print("inserting:\tkey:{}\tvalue:{}\n", key, value);
-    ref_map.insert(std::pair<std::string_view, std::string>(key, value));
+    ref_map.insert(std::pair<std::string_view, std::string>(key, (std::string)ref));
   } else {
-    node_str_buffer = absl::StrCat(node_str_buffer, indent_buffer(), key, " ", assign_type, " ", value, "\n");
+    absl::StrAppend(&node_str_buffer, indent_buffer(), key, " ", assign_type, " ", (std::string)ref, "\n");
   }
 }
-
-/*
-void Lnast_to_pyrope_parser::process_as() {
-  std::vector<Lnast_node>::iterator it = node_buffer.begin();
-  it++;
-  node_str_buffer = absl::StrCat(node_str_buffer, "process_as:\t");
-  std::string_view key = get_node_name(*it);
-  it++;
-
-  std::string value = "";
-  std::map<std::string_view, std::string>::iterator map_it;
-  std::string_view ref = get_node_name(*it);
-  map_it = ref_map.find(ref);
-  if (map_it != ref_map.end()) {
-    ref = map_it->second;
-  }
-  value = absl::StrCat(value, ref);
-
-  if (is_ref(key)) {
-    fmt::print("inserting:\tkey:{}\tvalue:{}\n", key, value);
-    ref_map.insert(std::pair<std::string_view, std::string>(key, value));
-  }
-
-  fmt::print("process_as value:\tkey: {}\tvalue: {}\n", key, value);
-
-  node_str_buffer = absl::StrCat(node_str_buffer, key, " as " , value, "\n");
-}
-*/
 
 void Lnast_to_pyrope_parser::process_label() {
-  std::vector<Lnast_node>::iterator it = node_buffer.begin();
+  auto it = node_buffer.begin();
   const auto access_type = it->type;
   it++;
   std::string_view key = get_node_name(*it);
   it++;
 
-  std::string value = "";
   std::string_view ref = get_node_name(*it);
-  std::map<std::string_view, std::string>::iterator map_it;
-  map_it = ref_map.find(ref);
+  auto map_it = ref_map.find(ref);
   if (map_it != ref_map.end()) {
     ref = map_it->second;
   }
   it++;
-  value = absl::StrCat(value, ref, access_type.debug_name_pyrope(), process_number(get_node_name(*it)));
+  std::string value = absl::StrCat(ref, access_type.debug_name_pyrope(), process_number(get_node_name(*it)));
 
-  fmt::print("process_label value:\tkey: {}\tvalue: {}\n", key, value);
+  fmt::print("process_label map:\tkey: {}\tvalue: {}\n", key, value);
   if (is_ref(key)) {
-    fmt::print("inserting:\tkey:{}\tvalue:{}\n", key, value);
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
   } else {
-    node_str_buffer = absl::StrCat(node_str_buffer, key, " saved as ", value, "\n");
+    absl::StrAppend(&node_str_buffer, key, " saved as ", value, "\n");
+    // this should never be possible
   }
-  // TODO(joapena): check how labels are formated
-  /*
-  if (get_node_name(*it) == "__bits") {
-    it++;
-
-    std::string_view value = get_node_name(*it);
-    // std::smatch m;
-    // std::regex_search(value, m, std::regex("b|o|d|h"));
-    value = process_number(value);
-
-    node_str_buffer = absl::StrCat(node_str_buffer, "process_label:\t", key, " saved as ", value, "\n");
-  }
-  */
 }
 
 void Lnast_to_pyrope_parser::process_operator() {
-  std::vector<Lnast_node>::iterator it = node_buffer.begin();
+  auto it = node_buffer.begin();
   const auto op_type = it->type;
   it++;
   std::string_view key = get_node_name(*it);
@@ -389,8 +342,7 @@ void Lnast_to_pyrope_parser::process_operator() {
   std::string value = "";
   while (it != node_buffer.end()) {
     std::string_view ref = get_node_name(*it);
-    std::map<std::string_view, std::string>::iterator map_it;
-    map_it = ref_map.find(ref);
+    auto map_it = ref_map.find(ref);
     if (map_it != ref_map.end()) {
       if (std::count(map_it->second.begin(), map_it->second.end(), ' ')) {
         ref = absl::StrCat("(", map_it->second, ")");
@@ -403,42 +355,40 @@ void Lnast_to_pyrope_parser::process_operator() {
     }
     // check if a number
 
-    value = absl::StrCat(value, ref);
+    absl::StrAppend(&value, ref);
     if (++it != node_buffer.end()) {
-      value = absl::StrCat(value, " ", op_type.debug_name_pyrope(), " ");
+      absl::StrAppend(&value, " ", op_type.debug_name_pyrope(), " ");
     }
   }
 
-  fmt::print("process_{} value:\tkey: {}\tvalue: {}\n", op_type.debug_name_pyrope(), key, value);
+  fmt::print("process_{} map:\tkey: {}\tvalue: {}\n", op_type.debug_name_pyrope(), key, value);
   if (is_ref(key)) {
-    fmt::print("inserting:\tkey:{}\tvalue:{}\n", key, value);
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
   } else {
-    node_str_buffer = absl::StrCat(node_str_buffer, indent_buffer(), key, " ", op_type.debug_name_pyrope(),"  ", value, "\n");
+    absl::StrAppend(&node_str_buffer, indent_buffer(), key, " ", op_type.debug_name_pyrope(),"  ", value, "\n");
   }
 }
 
 void Lnast_to_pyrope_parser::process_if() {
   fmt::print("start process_if\n");
 
-  std::vector<Lnast_node>::iterator it = node_buffer.begin();
+  auto it = node_buffer.begin();
   it++; // if
   it++; // csts
   std::string_view ref = get_node_name(*it);
-  std::map<std::string_view, std::string>::iterator map_it;
-  map_it = ref_map.find(ref);
+  auto map_it = ref_map.find(ref);
   if (map_it != ref_map.end()) {
     ref = map_it->second;
     fmt::print("map_it find: {} | {}\n", map_it->first, map_it->second);
   }
-  node_str_buffer = absl::StrCat(node_str_buffer, indent_buffer(), "if(", ref, ") {\n");
+  absl::StrAppend(&node_str_buffer, indent_buffer(), "if (", ref, ") {\n");
   it++; // cond
-  node_str_buffer = absl::StrCat(node_str_buffer, sts_buffer_queue.front(), indent_buffer(), "}");
+  absl::StrAppend(&node_str_buffer, sts_buffer_queue.front(), indent_buffer(), "}");
   sts_buffer_queue.erase(sts_buffer_queue.begin());
   it++; // sts
 
   while (it != node_buffer.end()) {
-    // this is the elif
+    // this is the elif case
     if ((*it).type.is_cstatements()) {
       it++; // csts
       ref = get_node_name(*it);
@@ -447,72 +397,70 @@ void Lnast_to_pyrope_parser::process_if() {
         ref = map_it->second;
         fmt::print("map_it find: {} | {}\n", map_it->first, map_it->second);
       }
-      node_str_buffer = absl::StrCat(node_str_buffer, " elif (", ref, ") {\n");
+      absl::StrAppend(&node_str_buffer, " elif (", ref, ") {\n");
       it++; // cond
-      node_str_buffer = absl::StrCat(node_str_buffer, sts_buffer_queue.front(), indent_buffer(), "}");
+      absl::StrAppend(&node_str_buffer, sts_buffer_queue.front(), indent_buffer(), "}");
       sts_buffer_queue.erase(sts_buffer_queue.begin());
       it++; // sts
     }
-
-    // this is the else
+    // this is the else case
     else {
-      node_str_buffer = absl::StrCat(node_str_buffer, " else {\n", sts_buffer_queue.front(), indent_buffer(), "}\n");
+      absl::StrAppend(&node_str_buffer, " else {\n", sts_buffer_queue.front(), indent_buffer(), "}\n");
       sts_buffer_queue.erase(sts_buffer_queue.begin());
       it++; // sts
     }
   }
+
+  fmt::print("end process_if\n");
 }
 
 void Lnast_to_pyrope_parser::process_func_call() {
-  std::vector<Lnast_node>::iterator it = node_buffer.begin();
+  auto it = node_buffer.begin();
   it++; // func_def
   std::string_view key = get_node_name(*it);
   it++; // sts
 
-  std::string value = "";
-  value = absl::StrCat(value, get_node_name(*it), "(");
+  std::string value = absl::StrCat(get_node_name(*it), "(");
   it++; // ref
   while (it != node_buffer.end()) {
     std::string_view ref = get_node_name(*it);
-    std::map<std::string_view, std::string>::iterator map_it;
-    map_it = ref_map.find(ref);
+    auto map_it = ref_map.find(ref);
     if (map_it != ref_map.end()) {
       ref = map_it->second;
       fmt::print("map_it find: {} | {}\n", map_it->first, map_it->second);
     }
 
-    value = absl::StrCat(value, ref);
+    absl::StrAppend(&value, ref);
     if (++it != node_buffer.end()) {
-      value = absl::StrCat(value, ", ");
+      absl::StrAppend(&value, ", ");
     } else {
-      value = absl::StrCat(value, ")");
+      absl::StrAppend(&value, ")");
     }
   }
 
-  fmt::print("process_func_call: value:\tkey: {}\tvalue: {}\n", key, value);
+  fmt::print("process_func_call: map:\tkey: {}\tvalue: {}\n", key, value);
   if (is_ref(key)) {
-    fmt::print("inserting:\tkey:{}\tvalue:{}\n", key, value);
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
   } else {
-    node_str_buffer = absl::StrCat(node_str_buffer, value, "\n");
+    absl::StrAppend(&node_str_buffer, value, "\n");
   }
 }
 
 void Lnast_to_pyrope_parser::process_func_def() {
-  std::vector<Lnast_node>::iterator it = node_buffer.begin();
+  auto it = node_buffer.begin();
   it++; // func_def
-  node_str_buffer = absl::StrCat(node_str_buffer, indent_buffer(), get_node_name(*it), " = :(");
+  absl::StrAppend(&node_str_buffer, indent_buffer(), get_node_name(*it), " = :(");
   it++; // ref
   while (!(*it).type.is_statements()) {
-    node_str_buffer = absl::StrCat(node_str_buffer, get_node_name(*it));
+    absl::StrAppend(&node_str_buffer, get_node_name(*it));
 
     if ((*++it).type.is_statements()) {
-      node_str_buffer = absl::StrCat(node_str_buffer, "):{\n");
+      absl::StrAppend(&node_str_buffer, "):{\n");
     } else {
-      node_str_buffer = absl::StrCat(node_str_buffer, ",");
+      absl::StrAppend(&node_str_buffer, ",");
     }
   }
-  node_str_buffer = absl::StrCat(node_str_buffer, sts_buffer_queue.front(), indent_buffer(), "}\n");
+  absl::StrAppend(&node_str_buffer, sts_buffer_queue.front(), indent_buffer(), "}\n");
   sts_buffer_queue.erase(sts_buffer_queue.begin());
 }
 
