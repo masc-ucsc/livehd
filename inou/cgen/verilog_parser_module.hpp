@@ -23,9 +23,9 @@ public:
   std::string filename;
   Cgen_variable_manager var_manager;
 
-  std::vector<std::string> output_vars;
-  std::vector<std::string> arg_vars;
-  std::vector<std::string> func_calls;
+  std::vector<std::string> output_vars; // the outputs and registers
+  std::vector<std::string> arg_vars; // the inputs
+  std::vector<std::string> func_calls; // any functions called in the module
 
   bool has_sequential = false;
 
