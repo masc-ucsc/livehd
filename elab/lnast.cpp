@@ -52,9 +52,11 @@ void Lnast::phi_node_resolve(const Lnast_nid &if_node) {
   }
 
   for (auto itr = if_statements_vec.rbegin(); itr != if_statements_vec.rend(); ++itr ) {
+    //2 possible cases: (1)if-elif-elif (2) if-elif-else
     if (itr == if_statements_vec.rbegin()) {
       if (has_else_statements(if_node)) {
-        ;//handle last two statements first
+        //handle last two statements first
+
       } else {
         ;//handle last and upper-scope statements first
       }

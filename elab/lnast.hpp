@@ -49,6 +49,7 @@ private:
 
   absl::flat_hash_map<std::string_view, absl::flat_hash_map<std::string_view, uint8_t>> phi_resolve_tables;
   absl::flat_hash_map<std::string_view, uint8_t> ssa_cnt_table;
+  absl::flat_hash_map<std::string_view, uint8_t> new_added_phi_node_table;
 protected:
 };
 
