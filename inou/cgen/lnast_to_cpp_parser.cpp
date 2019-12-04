@@ -69,7 +69,7 @@ void Lnast_to_cpp_parser::process_top(mmap_lib::Tree_level level) {
 
 // no change
 void Lnast_to_cpp_parser::push_statement(mmap_lib::Tree_level level, Lnast_ntype type) {
-  fmt::print("push\n");
+  fmt::print("before push\n");
 
   level = level + 1;
   level_stack.push_back(curr_statement_level);
@@ -88,7 +88,7 @@ void Lnast_to_cpp_parser::push_statement(mmap_lib::Tree_level level, Lnast_ntype
 }
 
 void Lnast_to_cpp_parser::pop_statement() {
-  fmt::print("pop\n");
+  fmt::print("before pop\n");
 
   process_buffer();
 
@@ -239,11 +239,6 @@ std::string_view Lnast_to_cpp_parser::process_number(std::string_view num_string
 }
 
 bool Lnast_to_cpp_parser::is_ref(std::string_view test_string) {
-  /*
-  std::regex e("___[a-zA-Z]");
-  return std::regex_match(test_string, e);
-  */
-  // TODO(joapena): check for better way to compare string
   return test_string.find("___") == 0;
 }
 
@@ -266,9 +261,7 @@ std::string Lnast_to_cpp_parser::get_filename(std::string filepath) {
 }
 
 void Lnast_to_cpp_parser::process_assign() {
-  std::string value;
-
-  std::vector<Lnast_node>::iterator it = node_buffer.begin();
+  auto it = node_buffer.begin();
   it++;
   std::string_view key = get_node_name(*it);
   it++;
@@ -287,9 +280,8 @@ void Lnast_to_cpp_parser::process_assign() {
   }
 
   if (is_ref(key)) {
-    value = ref;
-    fmt::print("map_it: inserting:\tkey:{}\tvalue:{}\n", key, value);
-    ref_map.insert(std::pair<std::string_view, std::string>(key, value));
+    fmt::print("map_it: inserting:\tkey:{}\tvalue:{}\n", key, ref);
+    ref_map.insert(std::pair<std::string_view, std::string>(key, (std::string)ref));
   } else {
     // if function print to line and add func variables to module
     std::string phrase;
@@ -299,29 +291,27 @@ void Lnast_to_cpp_parser::process_assign() {
     auto func_it = func_map.find((std::string) func_name);
     if (func_it != func_map.end()) {
       phrase =  absl::StrCat(func_it->first, "_return ", key);
-      fmt::print("the phrase of the day is : {}\n", phrase);
 
+      fmt::print("the phrase of the day is : {}\n", phrase);
       curr_module->func_calls.push_back(std::pair<std::string, Cpp_parser_module*>(absl::StrCat(curr_module->filename, "_", key), func_it->second));
     } else {
       phrase = curr_module->process_variable(key);
       if (curr_module->get_variable_type(key) >= 2) {
-        phrase = absl::StrCat(phrase, "_next");
+        absl::StrAppend(&phrase, "_next");
       }
     }
-    value = curr_module->process_variable(ref);
-    phrase = absl::StrCat(phrase, " = ", value, ";\n");
+    std::string value = curr_module->process_variable(ref);
+    absl::StrAppend(&phrase, " = ", value, ";\n");
 
     curr_module->var_manager.insert_variable(key);
     curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(indent_buffer_size, phrase));
-  }
 
-  fmt::print("pure_assign value:\tkey: {}\tvalue: {}\n", key, value);
+    fmt::print("pure_assign value:\tkey: {}\tvalue: {}\n", key, value);
+  }
 }
 
 void Lnast_to_cpp_parser::process_as() {
-  std::string value = "";
-
-  std::vector<Lnast_node>::iterator it = node_buffer.begin();
+  auto it = node_buffer.begin();
   it++;
   std::string_view key = get_node_name(*it);
   it++;
@@ -331,10 +321,8 @@ void Lnast_to_cpp_parser::process_as() {
   if (map_it != ref_map.end()) {
     ref = map_it->second;
   }
-  value = absl::StrCat(value, ref);
 
-  // change the variable properties
-
+  std::string value = (std::string)ref;
   if (is_ref(key)) {
     fmt::print("inserting:\tkey:{}\tvalue:{}\n", key, value);
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
@@ -347,15 +335,12 @@ void Lnast_to_cpp_parser::process_as() {
       Variable_options* attr_var = curr_module->var_manager.get(key);
       attr_var->update_attr(value);
     }
+    fmt::print("process_as map:\tkey: {}\tvalue: {}\n", key, value);
   }
-
-  fmt::print("process_as value:\tkey: {}\tvalue: {}\n", key, value);
 }
 
 void Lnast_to_cpp_parser::process_label() {
-  std::string value = "";
-
-  std::vector<Lnast_node>::iterator it = node_buffer.begin();
+  auto it = node_buffer.begin();
   const auto access_type = it->type;
   it++;
   std::string_view key = get_node_name(*it);
@@ -367,29 +352,24 @@ void Lnast_to_cpp_parser::process_label() {
     ref = map_it->second;
   }
   it++;
-  value = absl::StrCat(value, ref, access_type.debug_name_cpp(), process_number(get_node_name(*it)));
+  std::string value = absl::StrCat(ref, access_type.debug_name_cpp(), process_number(get_node_name(*it)));
 
-  fmt::print("process_label value:\tkey: {}\tvalue: {}\n", key, value);
+  fmt::print("process_label map:\tkey: {}\tvalue: {}\n", key, value);
   if (is_ref(key)) {
-    fmt::print("inserting:\tkey:{}\tvalue:{}\n", key, value);
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
+  } else {
+    // it should not enter here
   }
-  /*
-  std::smatch m;
-  std::regex_search(value, m, std::regex("b|o|d|h"));
-  value = process_number(value);
-  */
 }
 
 void Lnast_to_cpp_parser::process_operator() {
-  std::string value = "";
-
-  std::vector<Lnast_node>::iterator it = node_buffer.begin();
+  auto it = node_buffer.begin();
   const auto op_type = it->type;
   it++;
   std::string_view key = get_node_name(*it);
   it++;
 
+  std::string value = "";
   while (it != node_buffer.end()) {
     std::string_view ref = get_node_name(*it);
     auto map_it = ref_map.find(ref);
@@ -409,24 +389,16 @@ void Lnast_to_cpp_parser::process_operator() {
     } else {
       ref = curr_module->process_variable(ref);
     }
-    // check if a number
-    /*
-    value = absl::StrCat(value, ref);
-    if (++it != node_buffer.end()) {
-      value = absl::StrCat(value, " ", op_type.debug_name_cpp(), " ");
-    }
-    */
     if (value.length()) {
-      value = absl::StrCat(value, ".", op_type.debug_name_cpp(), "(", ref, ")");
+      absl::StrAppend(&value, ".", op_type.debug_name_cpp(), "(", ref, ")");
     } else {
       value = ref;
     }
     it++;
   }
 
-  //fmt::print("process_{} value:\tkey: {}\tvalue: {}\n", op_type.debug_name_cpp(), key, value);
+  fmt::print("process_{} map:\tkey: {}\tvalue: {}\n", op_type.debug_name_cpp(), key, value);
   if (is_ref(key)) {
-    fmt::print("inserting:\tkey:{}\tvalue:{}\n", key, value);
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
   } else {
     std::string phrase = absl::StrCat(key, " ", op_type.debug_name_cpp(),"  ", value, "\n");
@@ -435,14 +407,13 @@ void Lnast_to_cpp_parser::process_operator() {
 }
 
 void Lnast_to_cpp_parser::process_logical_operator() {
-  std::string value = "";
-
-  std::vector<Lnast_node>::iterator it = node_buffer.begin();
+  auto it = node_buffer.begin();
   const auto op_type = it->type;
   it++;
   std::string_view key = get_node_name(*it);
   it++;
 
+  std::string value = "";
   while (it != node_buffer.end()) {
     std::string_view ref = get_node_name(*it);
     auto map_it = ref_map.find(ref);
@@ -464,15 +435,14 @@ void Lnast_to_cpp_parser::process_logical_operator() {
     }
     // check if a number
 
-    value = absl::StrCat(value, ref);
+    absl::StrAppend(&value, ref);
     if (++it != node_buffer.end()) {
-      value = absl::StrCat(value, " ", op_type.debug_name_cpp(), " ");
+      absl::StrAppend(&value, " ", op_type.debug_name_cpp(), " ");
     }
   }
 
-  //fmt::print("process_{} value:\tkey: {}\tvalue: {}\n", op_type.debug_name_cpp(), key, value);
+  fmt::print("process_{} map:\tkey: {}\tvalue: {}\n", op_type.debug_name_cpp(), key, value);
   if (is_ref(key)) {
-    fmt::print("inserting:\tkey:{}\tvalue:{}\n", key, value);
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
   } else {
     std::string phrase = absl::StrCat(key, " ", op_type.debug_name_cpp(),"  ", value, "\n");
@@ -493,7 +463,7 @@ void Lnast_to_cpp_parser::process_if() {
     ref = map_it->second;
     fmt::print("map_it find: {} | {}\n", map_it->first, map_it->second);
   }
-  new_nodes.push_back(std::pair<int32_t, std::string>(indent_buffer_size, absl::StrCat("if(", ref, ") {\n")));
+  new_nodes.push_back(std::pair<int32_t, std::string>(indent_buffer_size, absl::StrCat("if (", ref, ") {\n")));
   it++; // cond
   std::vector<std::pair<int32_t, std::string>> queue_nodes = curr_module->pop_queue();
   new_nodes.insert(new_nodes.end(), std::make_move_iterator(queue_nodes.begin()), std::make_move_iterator(queue_nodes.end()));
@@ -501,7 +471,7 @@ void Lnast_to_cpp_parser::process_if() {
   it++; // sts
 
   while (it != node_buffer.end()) {
-    // this is the elif
+    // this is the elif case
     if ((*it).type.is_cstatements()) {
       it++; // csts
       ref = get_node_name(*it);
@@ -517,14 +487,13 @@ void Lnast_to_cpp_parser::process_if() {
       new_nodes.push_back(std::pair<int32_t, std::string>(indent_buffer_size, "}"));
       it++; // sts
     }
-
     // this is the else
     else {
       new_nodes.push_back(std::pair<int32_t, std::string>(0, " else {\n"));
       queue_nodes = curr_module->pop_queue();
       new_nodes.insert(new_nodes.end(), std::make_move_iterator(queue_nodes.begin()), std::make_move_iterator(queue_nodes.end()));
       new_nodes.push_back(std::pair<int32_t, std::string>(indent_buffer_size, "}"));
-      it++; // sts
+      it++; // sts case
     }
   }
   new_nodes.push_back(std::pair<int32_t, std::string>(indent_buffer_size, "\n"));
@@ -534,9 +503,7 @@ void Lnast_to_cpp_parser::process_if() {
 }
 
 void Lnast_to_cpp_parser::process_func_call() {
-  std::string value = "";
-
-  std::vector<Lnast_node>::iterator it = node_buffer.begin();
+  auto it = node_buffer.begin();
   it++; // func_call
   std::string_view key = get_node_name(*it);
   it++; // sts
@@ -545,9 +512,9 @@ void Lnast_to_cpp_parser::process_func_call() {
   std::map<std::string, Cpp_parser_module*>::iterator func_module = func_map.find(func_name);
   fmt::print("found module : {} : size {}\n", func_module->first, func_module->second->arg_vars.size());
 
-  value = absl::StrCat(value, func_name, "(");
+  std::string value = absl::StrCat(func_name, "(");
   if (func_module->second->has_sequential) {
-    value = absl::StrCat(value, "clk, reset");
+    absl::StrAppend(&value, "clk, reset");
   }
 
   it++; // ref
@@ -560,30 +527,27 @@ void Lnast_to_cpp_parser::process_func_call() {
     }
 
     std::vector<std::string> split_str = absl::StrSplit(ref, "=");
-    value = absl::StrCat(value, split_str[1]);
+    absl::StrAppend(&value, split_str[1]);
     if (++it != node_buffer.end()) {
-      value = absl::StrCat(value, ", ");
+      absl::StrAppend(&value, ", ");
     } else {
-      value = absl::StrCat(value, ")");
+      absl::StrAppend(&value, ")");
     }
   }
 
-  fmt::print("process_func_call: value:\tkey: {}\tvalue: {}\n", key, value);
+  fmt::print("process_func_call: map:\tkey: {}\tvalue: {}\n", key, value);
   if (is_ref(key)) {
-    fmt::print("inserting:\tkey:{}\tvalue:{}\n", key, value);
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
   } else {
-    // std::string phrase = absl::StrCat(key, " ", op_type,"  ", value, "\n");
     curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(indent_buffer_size, value));
   }
 }
 
 void Lnast_to_cpp_parser::process_func_def() {
-  std::vector<Lnast_node>::iterator it = node_buffer.begin();
+  auto it = node_buffer.begin();
   it++; // func_def
-  std::string func_name = absl::StrCat(root_filename, "_", get_node_name(*it));
-  curr_module->filename = func_name;
-  fmt::print("func def : {}\n", get_node_name(*it));
+  curr_module->filename = absl::StrCat(root_filename, "_", get_node_name(*it));
+  fmt::print("func def : {}\n", curr_module->filename);
   // function name
   it++; // ref
   // the variables

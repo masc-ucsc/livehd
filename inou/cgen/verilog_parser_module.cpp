@@ -111,7 +111,7 @@ uint32_t Verilog_parser_module::get_variable_type(std::string_view var_name) {
 
 std::string Verilog_parser_module::process_variable(std::string_view var_name) {
   if (var_name.at(0) == '$') {
-    absl::StrAppend(&var_name, "_i");
+    var_name = absl::StrCat(var_name, "_i");
 
     if (var_name.at(1) == '\\') {
       return std::string(var_name.substr(2)).c_str();
@@ -119,7 +119,7 @@ std::string Verilog_parser_module::process_variable(std::string_view var_name) {
       return std::string(var_name.substr(1)).c_str();
     }
   } else if (var_name.at(0) == '%') {
-    absl::StrAppend(&var_name, "_o");
+    var_name = absl::StrCat(var_name, "_o");
 
     if (var_name.at(1) == '\\') {
       return std::string(var_name.substr(2)).c_str();
@@ -127,7 +127,7 @@ std::string Verilog_parser_module::process_variable(std::string_view var_name) {
       return std::string(var_name.substr(1)).c_str();
     }
   } else if (var_name.at(0) == '#') {
-    absl::StrAppend(&var_name, "_r");
+    var_name = absl::StrCat(var_name, "_r");
 
     if (var_name.at(1) == '\\') {
       return std::string(var_name.substr(2)).c_str();
