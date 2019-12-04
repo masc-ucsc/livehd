@@ -48,6 +48,7 @@ public:
     int64_t round_power2(int64_t x) const;
     bool    expand(const Implicit_range &i, bool round2);
     void    pick(const Explicit_range &e);
+    bool    update(const Implicit_range &i);
   };
 
   Implicit_range i;
