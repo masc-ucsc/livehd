@@ -5,18 +5,23 @@ std::string Cpp_parser_module::indent_buffer(int32_t size) {
   return std::string(size * 2, ' ');
 }
 
-void Cpp_parser_module::process_inputs() {
+std::string Cpp_parser_module::create_header() {
+  /*
+   * check for sequential
+   * check for bits
+  */
   std::string hpp_file = absl::StrCat("class ", filename, " {\n");
-  std::string private_str = "";
-  std::string public_str = "";
+  std::string return_struct = absl::StrCat("struct ", filename, "_return {\n");
+
   combinational_str = "";
-  sequential_str = absl::StrCat("void ", filename, "::sequential() {\n");
+  initial_output_str = "";
 
   for (auto var_name : var_manager.variable_map) {
     fmt::print("variable names: {}\n", var_name.first);
     uint32_t var_type = get_variable_type(var_name.first);
 
     if (var_type == 0) {
+      absl::StrAppend(&initial_output_str, indent_buffer(1), "uint32_t ", process_variable(var_name.first), " = 0;\n");
     }
     // input
     else if (var_type == 1) {
@@ -28,26 +33,15 @@ void Cpp_parser_module::process_inputs() {
     }
     // output or register
     else if (var_type == 2 || var_type == 3) {
-      if (!private_str.length()) {
-        private_str = "private:\n";
-        public_str = "public:\n";
-      }
-      private_str = absl::StrCat(private_str, "  uint32_t ", process_variable(var_name.first), "_next;\n");
-      public_str = absl::StrCat(public_str, "  uint32_t ", process_variable(var_name.first), ";\n");
-
-      sequential_str = absl::StrCat(sequential_str, "  ", process_variable(var_name.first), " = ", process_variable(var_name.first), "_next;\n");
+      absl::StrAppend(&return_struct, indent_buffer(1), "uint32_t ", process_variable(var_name.first), ";\n");
+      absl::StrAppend(&initial_output_str, indent_buffer(1), process_variable(var_name.first), " = 0;\n");
     }
   }
 
-  header_str = absl::StrCat(hpp_file, private_str, public_str, "\n  void ", combinational_str, ");\n  void sequential();\n}");
-}
+  absl::StrAppend(&return_struct, "};\n");
+  std::string variable_str = absl::StrCat("private:\n", indent_buffer(1), filename, "_return return_vals_next;", "\n", "public:\n", indent_buffer(1), filename, "_return return_vals;", "\n");
 
-std::string Cpp_parser_module::create_header() {
-  /*
-   * check for sequential
-   * check for bits
-  */
-  return header_str;
+  return absl::StrCat(return_struct, hpp_file, variable_str, "\n  void ", combinational_str, ");\n  ", filename, "_return sequential();\n}");
 }
 
 std::string Cpp_parser_module::create_implementation() {
@@ -57,12 +51,19 @@ std::string Cpp_parser_module::create_implementation() {
     buffer = absl::StrCat(buffer, indent_buffer(node.first), node.second);
   }
 
-  return absl::StrCat("void ", filename, "::", combinational_str, ") {\n", buffer, "}\n", sequential_str, "}\n");
+  std::string sequential_str = absl::StrCat(filename, "_return ", filename, "::sequential() {\n", indent_buffer(1), "std::memcpy(return_vals, return_vals_next, sizeof return_vals);\n}\n");
+
+  return absl::StrCat("void ", filename, "::", combinational_str, ") {\n", initial_output_str, buffer, "}\n", sequential_str);
 }
 
 std::pair<std::string, std::string> Cpp_parser_module::create_files() {
-  process_inputs();
-  return std::pair<std::string, std::string>(create_header(), create_implementation());
+  fmt::print("func_calls : {}\n", func_calls.size());
+  for (auto ele : func_calls) {
+    fmt::print("{}\n", ele.first);
+  }
+
+  std::string header_str = create_header();
+  return std::pair<std::string, std::string>(header_str, create_implementation());
 }
 
 void Cpp_parser_module::inc_if_counter() {

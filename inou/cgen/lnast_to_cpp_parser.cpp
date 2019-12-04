@@ -149,7 +149,7 @@ void Lnast_to_cpp_parser::process_buffer() {
   } else if (type.is_dot()) {
     process_label();
   } else if (type.is_logical_and()) {
-    process_operator();
+    process_logical_operator();
   } else if (type.is_logical_or()) {
     process_operator();
   } else if (type.is_and()) {
@@ -291,53 +291,28 @@ void Lnast_to_cpp_parser::process_assign() {
     fmt::print("map_it: inserting:\tkey:{}\tvalue:{}\n", key, value);
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
   } else {
-    std::vector<std::string> split_str = absl::StrSplit(ref, "(");
-    // fmt::print("split_str : {}\n", split);
-    std::map<std::string, Cpp_parser_module*>::iterator func_it;
-    func_it = func_map.find(split_str[0]);
+    // if function print to line and add func variables to module
+    std::string phrase;
+
+    std::size_t func_index = ref.find("(");
+    std::string_view func_name = ref.substr(0, func_index);
+    auto func_it = func_map.find((std::string) func_name);
     if (func_it != func_map.end()) {
-      std::string ref_tmp = absl::StrCat(ref);
-      std::vector<std::string>::iterator output_vars = func_it->second->output_vars.begin();
-      fmt::print("output_vars : size : {}\n", func_it->second->output_vars.size());
-      std::string phrase = absl::StrCat(ref_tmp, ", ");
-      // std::string phrase = absl::StrCat(ref_tmp, ", .", *output_vars, "(", key, "))");
-      while (output_vars != func_it->second->output_vars.end()) {
-        std::string tail = (*output_vars).substr((*output_vars).length() - 2, 2);
-
-        std::string new_key;
-        if (tail == "_o" || tail == "_r") {
-          new_key = absl::StrCat(key, "_", (*output_vars).substr(0, (*output_vars).length() - 2));
-        } else {
-          new_key = absl::StrCat(key, "_", *output_vars);
-        }
-        fmt::print("new_key is : {}\n", new_key);
-        curr_module->var_manager.insert_variable(new_key);
-
-        phrase = absl::StrCat(phrase, ".", *output_vars, "(", new_key, ")");
-
-        if (++output_vars != func_it->second->output_vars.end()) {
-          phrase = absl::StrCat(phrase, ", ");
-        } else {
-          phrase = absl::StrCat(phrase, ")");
-        }
-      }
-
+      phrase =  absl::StrCat(func_it->first, "_return ", key);
       fmt::print("the phrase of the day is : {}\n", phrase);
 
-      curr_module->func_calls.push_back(phrase);
+      curr_module->func_calls.push_back(std::pair<std::string, Cpp_parser_module*>(absl::StrCat(curr_module->filename, "_", key), func_it->second));
     } else {
-      fmt::print("statefull_set:\tinserting:\tkey:{}\n", key);
-      value = curr_module->process_variable(ref);
-
-      std::string phrase = curr_module->process_variable(key);
-      if (curr_module->get_variable_type(key) == 3) {
+      phrase = curr_module->process_variable(key);
+      if (curr_module->get_variable_type(key) >= 2) {
         phrase = absl::StrCat(phrase, "_next");
       }
-      phrase = absl::StrCat(phrase, " = ", value, ";\n");
-
-      curr_module->var_manager.insert_variable(key);
-      curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(indent_buffer_size, phrase));
     }
+    value = curr_module->process_variable(ref);
+    phrase = absl::StrCat(phrase, " = ", value, ";\n");
+
+    curr_module->var_manager.insert_variable(key);
+    curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(indent_buffer_size, phrase));
   }
 
   fmt::print("pure_assign value:\tkey: {}\tvalue: {}\n", key, value);
@@ -407,6 +382,59 @@ void Lnast_to_cpp_parser::process_label() {
 }
 
 void Lnast_to_cpp_parser::process_operator() {
+  std::string value = "";
+
+  std::vector<Lnast_node>::iterator it = node_buffer.begin();
+  const auto op_type = it->type;
+  it++;
+  std::string_view key = get_node_name(*it);
+  it++;
+
+  while (it != node_buffer.end()) {
+    std::string_view ref = get_node_name(*it);
+    auto map_it = ref_map.find(ref);
+    if (map_it != ref_map.end()) {
+      if (std::count(map_it->second.begin(), map_it->second.end(), ' ')) {
+        ref = absl::StrCat("(", map_it->second, ")");
+      } else {
+        ref = map_it->second;
+      }
+
+      fmt::print("map_it find: {} | {}\n", map_it->first, map_it->second);
+    } else if (ref.size() > 2 && !is_number(ref)) {
+      curr_module->var_manager.insert_variable(ref);
+      ref = curr_module->process_variable(ref);
+    } else if (is_number(ref)) {
+      ref = process_number(ref);
+    } else {
+      ref = curr_module->process_variable(ref);
+    }
+    // check if a number
+    /*
+    value = absl::StrCat(value, ref);
+    if (++it != node_buffer.end()) {
+      value = absl::StrCat(value, " ", op_type.debug_name_cpp(), " ");
+    }
+    */
+    if (value.length()) {
+      value = absl::StrCat(value, ".", op_type.debug_name_cpp(), "(", ref, ")");
+    } else {
+      value = ref;
+    }
+    it++;
+  }
+
+  //fmt::print("process_{} value:\tkey: {}\tvalue: {}\n", op_type.debug_name_cpp(), key, value);
+  if (is_ref(key)) {
+    fmt::print("inserting:\tkey:{}\tvalue:{}\n", key, value);
+    ref_map.insert(std::pair<std::string_view, std::string>(key, value));
+  } else {
+    std::string phrase = absl::StrCat(key, " ", op_type.debug_name_cpp(),"  ", value, "\n");
+    curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(indent_buffer_size, phrase));
+  }
+}
+
+void Lnast_to_cpp_parser::process_logical_operator() {
   std::string value = "";
 
   std::vector<Lnast_node>::iterator it = node_buffer.begin();
@@ -519,7 +547,7 @@ void Lnast_to_cpp_parser::process_func_call() {
 
   value = absl::StrCat(value, func_name, "(");
   if (func_module->second->has_sequential) {
-    value = absl::StrCat(value, ".clk(clk), .reset(reset)");
+    value = absl::StrCat(value, "clk, reset");
   }
 
   it++; // ref
@@ -532,9 +560,11 @@ void Lnast_to_cpp_parser::process_func_call() {
     }
 
     std::vector<std::string> split_str = absl::StrSplit(ref, "=");
-    value = absl::StrCat(value, ".", split_str[0],"(", split_str[1], ")");
+    value = absl::StrCat(value, split_str[1]);
     if (++it != node_buffer.end()) {
       value = absl::StrCat(value, ", ");
+    } else {
+      value = absl::StrCat(value, ")");
     }
   }
 

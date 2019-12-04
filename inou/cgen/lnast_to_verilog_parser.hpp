@@ -49,12 +49,6 @@ private:
   void process_assign();
   void process_as();
   void process_label();
-  /*
-  void process_and();
-  void process_xor();
-  void process_plus();
-  void process_gt();
-  */
   void process_if();
   void process_func_call();
   void process_func_def();

@@ -15,13 +15,11 @@ private:
   std::vector<std::vector<std::pair<int32_t, std::string>>> sts_buffer_stack;
   std::vector<std::vector<std::pair<int32_t, std::string>>> sts_buffer_queue;
 
-  void process_inputs();
   std::string create_header();
   std::string create_implementation();
 
   std::string combinational_str;
-  std::string sequential_str;
-  std::string header_str;
+  std::string initial_output_str;
 
   std::string indent_buffer(int32_t size);
   uint32_t if_counter = 0;
@@ -32,7 +30,7 @@ public:
 
   std::vector<std::string> output_vars;
   std::vector<std::string> arg_vars;
-  std::vector<std::string> func_calls;
+  std::vector<std::pair<std::string, Cpp_parser_module*>> func_calls;
 
   bool has_sequential = false;
 
