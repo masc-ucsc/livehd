@@ -43,8 +43,6 @@ private:
   std::string_view process_number(std::string_view num);
   bool is_ref(std::string_view test_string);
   bool is_attr(std::string_view test_string);
-  void inc_indent_buffer();
-  void dec_indent_buffer();
 
   void process_assign();
   void process_as();
@@ -58,7 +56,6 @@ private:
 
 public:
   std::string buffer;
-  int32_t indent_buffer_size = -1;
 
   Lnast_to_cpp_parser(std::string_view _memblock, Lnast *_lnast)
     : memblock(_memblock), lnast(_lnast) { };

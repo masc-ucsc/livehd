@@ -22,6 +22,7 @@ private:
   std::string initial_output_str;
 
   std::string indent_buffer(int32_t size);
+  uint32_t indent_buffer_size = 0;
   uint32_t if_counter = 0;
 
 public:
@@ -40,6 +41,9 @@ public:
   void node_buffer_queue();
   std::vector<std::pair<int32_t, std::string>> pop_queue();
   std::pair<std::string, std::string> create_files();
+  void inc_indent_buffer();
+  void dec_indent_buffer();
+  uint32_t get_indent_buffer();
   void inc_if_counter();
   void dec_if_counter();
   uint32_t get_if_counter();

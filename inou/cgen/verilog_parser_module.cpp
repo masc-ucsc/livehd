@@ -73,6 +73,18 @@ std::string Verilog_parser_module::create_file() {
   return absl::StrCat(module_start, "\n", always_str, indent_buffer(1), "end\n", next_str, "end module\n");
 }
 
+void Verilog_parser_module::inc_indent_buffer() {
+  indent_buffer_size++;
+}
+
+void Verilog_parser_module::dec_indent_buffer() {
+  indent_buffer_size--;
+}
+
+uint32_t Verilog_parser_module::get_indent_buffer() {
+  return indent_buffer_size;
+}
+
 void Verilog_parser_module::inc_if_counter() {
   if_counter++;
 }

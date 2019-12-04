@@ -66,6 +66,18 @@ std::pair<std::string, std::string> Cpp_parser_module::create_files() {
   return std::pair<std::string, std::string>(header_str, create_implementation());
 }
 
+void Cpp_parser_module::inc_indent_buffer() {
+  indent_buffer_size++;
+}
+
+void Cpp_parser_module::dec_indent_buffer() {
+  indent_buffer_size--;
+}
+
+uint32_t Cpp_parser_module::get_indent_buffer() {
+  return indent_buffer_size;
+}
+
 void Cpp_parser_module::inc_if_counter() {
   if_counter++;
 }

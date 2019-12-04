@@ -6,12 +6,11 @@ std::map<std::string, std::string> Lnast_to_cpp_parser::stringify(std::string fi
   root_filename[0] = toupper(root_filename[0]);
   curr_module = new Cpp_parser_module(root_filename);
 
-  inc_indent_buffer();
   for (const mmap_lib::Tree_index &it: lnast->depth_preorder(lnast->get_root())) {
     process_node(it);
   }
   flush_statements();
-  dec_indent_buffer();
+  curr_module->dec_indent_buffer();
 
   std::pair<std::string, std::string> cpp_files = curr_module->create_files();
   file_map.insert(std::pair<std::string, std::string>(absl::StrCat(curr_module->filename, ".cgen.hpp"), cpp_files.first));
@@ -81,7 +80,7 @@ void Lnast_to_cpp_parser::push_statement(mmap_lib::Tree_level level, Lnast_ntype
 
   if (type.is_statements()) {
     curr_module->node_buffer_stack();
-    inc_indent_buffer();
+    curr_module->inc_indent_buffer();
   }
 
   fmt::print("after push\n");
@@ -97,7 +96,7 @@ void Lnast_to_cpp_parser::pop_statement() {
 
   if (node_buffer.back().type.is_statements()) {
     curr_module->node_buffer_queue();
-    dec_indent_buffer();
+    curr_module->dec_indent_buffer();
   }
 
   level_stack.pop_back();
@@ -118,7 +117,7 @@ void Lnast_to_cpp_parser::flush_statements() {
 
     if (node_buffer.back().type.is_statements() && buffer_stack.size() > 0) {
       curr_module->node_buffer_queue();
-      dec_indent_buffer();
+      curr_module->dec_indent_buffer();
     }
 
     level_stack.pop_back();
@@ -246,14 +245,6 @@ bool Lnast_to_cpp_parser::is_attr(std::string_view test_string) {
   return test_string.find("__") == 0 && !is_ref(test_string);
 }
 
-void Lnast_to_cpp_parser::inc_indent_buffer() {
-  indent_buffer_size++;
-}
-
-void Lnast_to_cpp_parser::dec_indent_buffer() {
-  indent_buffer_size--;
-}
-
 std::string Lnast_to_cpp_parser::get_filename(std::string filepath) {
   std::vector<std::string> filepath_split = absl::StrSplit(filepath, '/');
   std::pair<std::string, std::string> fname = absl::StrSplit(filepath_split[filepath_split.size() - 1], '.');
@@ -304,7 +295,7 @@ void Lnast_to_cpp_parser::process_assign() {
     absl::StrAppend(&phrase, " = ", value, ";\n");
 
     curr_module->var_manager.insert_variable(key);
-    curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(indent_buffer_size, phrase));
+    curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(curr_module->get_indent_buffer(), phrase));
 
     fmt::print("pure_assign value:\tkey: {}\tvalue: {}\n", key, value);
   }
@@ -328,7 +319,7 @@ void Lnast_to_cpp_parser::process_as() {
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
   } else {
     std::string phrase = absl::StrCat("// LNAST: ", key, " as " , value, "\n");
-    curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(indent_buffer_size, phrase));
+    curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(curr_module->get_indent_buffer(), phrase));
     curr_module->var_manager.insert_variable(key);
 
     if (is_attr(value) && !curr_module->get_if_counter()) {
@@ -402,7 +393,7 @@ void Lnast_to_cpp_parser::process_operator() {
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
   } else {
     std::string phrase = absl::StrCat(key, " ", op_type.debug_name_cpp(),"  ", value, "\n");
-    curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(indent_buffer_size, phrase));
+    curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(curr_module->get_indent_buffer(), phrase));
   }
 }
 
@@ -446,7 +437,7 @@ void Lnast_to_cpp_parser::process_logical_operator() {
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
   } else {
     std::string phrase = absl::StrCat(key, " ", op_type.debug_name_cpp(),"  ", value, "\n");
-    curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(indent_buffer_size, phrase));
+    curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(curr_module->get_indent_buffer(), phrase));
   }
 }
 
@@ -463,11 +454,11 @@ void Lnast_to_cpp_parser::process_if() {
     ref = map_it->second;
     fmt::print("map_it find: {} | {}\n", map_it->first, map_it->second);
   }
-  new_nodes.push_back(std::pair<int32_t, std::string>(indent_buffer_size, absl::StrCat("if (", ref, ") {\n")));
+  new_nodes.push_back(std::pair<int32_t, std::string>(curr_module->get_indent_buffer(), absl::StrCat("if (", ref, ") {\n")));
   it++; // cond
   std::vector<std::pair<int32_t, std::string>> queue_nodes = curr_module->pop_queue();
   new_nodes.insert(new_nodes.end(), std::make_move_iterator(queue_nodes.begin()), std::make_move_iterator(queue_nodes.end()));
-  new_nodes.push_back(std::pair<int32_t, std::string>(indent_buffer_size, "}"));
+  new_nodes.push_back(std::pair<int32_t, std::string>(curr_module->get_indent_buffer(), "}"));
   it++; // sts
 
   while (it != node_buffer.end()) {
@@ -484,7 +475,7 @@ void Lnast_to_cpp_parser::process_if() {
       it++; // cond
       queue_nodes = curr_module->pop_queue();
       new_nodes.insert(new_nodes.end(), std::make_move_iterator(queue_nodes.begin()), std::make_move_iterator(queue_nodes.end()));
-      new_nodes.push_back(std::pair<int32_t, std::string>(indent_buffer_size, "}"));
+      new_nodes.push_back(std::pair<int32_t, std::string>(curr_module->get_indent_buffer(), "}"));
       it++; // sts
     }
     // this is the else
@@ -492,11 +483,11 @@ void Lnast_to_cpp_parser::process_if() {
       new_nodes.push_back(std::pair<int32_t, std::string>(0, " else {\n"));
       queue_nodes = curr_module->pop_queue();
       new_nodes.insert(new_nodes.end(), std::make_move_iterator(queue_nodes.begin()), std::make_move_iterator(queue_nodes.end()));
-      new_nodes.push_back(std::pair<int32_t, std::string>(indent_buffer_size, "}"));
+      new_nodes.push_back(std::pair<int32_t, std::string>(curr_module->get_indent_buffer(), "}"));
       it++; // sts case
     }
   }
-  new_nodes.push_back(std::pair<int32_t, std::string>(indent_buffer_size, "\n"));
+  new_nodes.push_back(std::pair<int32_t, std::string>(curr_module->get_indent_buffer(), "\n"));
 
   curr_module->add_to_buffer_multiple(new_nodes);
   curr_module->dec_if_counter();
@@ -539,7 +530,7 @@ void Lnast_to_cpp_parser::process_func_call() {
   if (is_ref(key)) {
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
   } else {
-    curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(indent_buffer_size, value));
+    curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(curr_module->get_indent_buffer(), value));
   }
 }
 
