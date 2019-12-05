@@ -22,7 +22,7 @@ cc_binary(
             "//inou/lnast_dfg:inou_lnast_dfg",
 
             # "//pass/abc:pass_abc",
-            "//pass/dfg:pass_dfg",
+            # "//pass/dfg:pass_dfg",
             "//pass/dce:pass_dce",
             "//pass/opentimer:pass_opentimer",
             "//pass/punch:pass_punch",

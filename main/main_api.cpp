@@ -39,7 +39,7 @@ void setup_cops_live();
 
 void Main_api::init() {
   setup_pass_dce();
-  setup_pass_dfg();
+  /* setup_pass_dfg(); */
   setup_pass_opentimer();
   setup_pass_punch();
   setup_pass_sample();
