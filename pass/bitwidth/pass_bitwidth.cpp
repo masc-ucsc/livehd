@@ -162,12 +162,13 @@ void Pass_bitwidth::iterate_arith(const LGraph *lg, Node_pin &pin, Node_Type_Op 
   bool first = true;
   for (const auto &inp_edge : curr_node.inp_edges()) {
     auto dpin = inp_edge.driver;
+    auto spin = inp_edge.sink;
     switch(op) {
       case Sum_Op:
         //FIXME: At this point in time, I'm just going to assume everything is +.
         //  Update later for -.
         //PID 0 = AS, 1 = AU, 2 = BS, 3 = BU, 4 = Y. Y = (AS+...+AS+AU+...+AU) - (BS+...+BS+BU+...+BU)
-        if(pin.get_pid() == 0 || pin.get_pid() == 1) {
+        if(spin.get_pid() == 0 || spin.get_pid() == 1) {//NOTE: I think this should be spin, rethink over this later.
           imp.max += dpin.get_bitwidth().i.max;
           imp.min += dpin.get_bitwidth().i.min;
           fmt::print("\tadd: ");
@@ -193,8 +194,10 @@ void Pass_bitwidth::iterate_arith(const LGraph *lg, Node_pin &pin, Node_Type_Op 
         }
         break;
       case Div_Op:
+        //FIXME: Implement
         break;
       case Mod_Op:
+        //FIXME: Implement
         break;
       default:
         fmt::print("Error: arith op not understood\n");
@@ -336,90 +339,64 @@ void Pass_bitwidth::iterate_arith(const LGraph *lg, Node_pin &pin, Node_Type_Op 
   if(updated) {
     mark_all_outputs(lg, idx);
   }
-}
+}*/
 
-void Pass_bitwidth::iterate_comparison(const LGraph *lg, Index_ID idx) {
+void Pass_bitwidth::iterate_comparison(const LGraph *lg, Node_pin &pin, Node_Type_Op op) {
   //NOTE: The system will take care of constant values such as (a >= 4'b0) or (4'b1111 > 4'b0111)
-  //      behind the scenes.
-  int64_t min1, max1;
-  bool first = true;
+  //      behind the scenes. FIXME: This was an old note. Is it still true?
+
   bool updated = false;
+  bool set = false;
+  Ann_bitwidth::Implicit_range imp;
+  imp.min = 1;
+  imp.max = 1;
 
-  auto &nb_output = lg->node_bitwidth_get(idx);
-  for (const auto &inp : lg->inp_edges(idx)) {
-    Index_ID inp_idx = inp.get_idx();
-    const auto &nb_input  = lg->node_bitwidth_get(inp_idx);
-
-    if (first) {
-      min1 = nb_input.i.min;
-      max1 = nb_input.i.max;
-      first = false;
-    } else {
-      const auto &op = lg->node_type_get(idx);
-      //NOTE: Need a data set to test on. I believe this functions are correct.
-      switch(op.op) {
-        case LessThan_Op:
-          if (nb_input.i.max < min1) {
-            //Output is always true
-            nb_output.i.min = 1;
-            nb_output.i.max = 1;
-            updated = true;
-          } else if (nb_input.i.min >= max1) {
-            //Output is always false
-            nb_output.i.min = 0;
-            nb_output.i.max = 0;
-            updated = true;
+  //Due to nature of comparison type nodes, I need to iterate over every BS|BU pin
+  //  for each AS|AU pin I iterate over.
+  for (const auto &inp_edge : pin.get_node().inp_edges()) {
+    auto dpin = inp_edge.driver;
+    auto spin = inp_edge.sink;
+    if(spin.get_pid() == 0 || spin.get_pid() == 1) {//If AS or AU pins
+      for (const auto &comp_edge : pin.get_node().inp_edges()) {
+        auto comp_dpin = comp_edge.driver;
+        auto comp_spin = comp_edge.sink;
+        if(comp_spin.get_pid() == 2 || comp_spin.get_pid() == 3) {//If BS or BU pins
+          set = true;
+          switch(op) {
+            //NOTE: At some point, go back over this logic and make sure it's right.
+            case LessThan_Op:
+              imp.min &= dpin.get_bitwidth().i.max < comp_dpin.get_bitwidth().i.min;
+              imp.max &= dpin.get_bitwidth().i.min < comp_dpin.get_bitwidth().i.max;
+              break;
+            case GreaterThan_Op:
+              imp.min &= dpin.get_bitwidth().i.min > comp_dpin.get_bitwidth().i.max;
+              imp.max &= dpin.get_bitwidth().i.max > comp_dpin.get_bitwidth().i.min;
+              break;
+            case LessEqualThan_Op:
+              imp.min &= dpin.get_bitwidth().i.max <= comp_dpin.get_bitwidth().i.min;
+              imp.max &= dpin.get_bitwidth().i.min <= comp_dpin.get_bitwidth().i.max;
+              break;
+            case GreaterEqualThan_Op:
+              imp.min &= dpin.get_bitwidth().i.min >= comp_dpin.get_bitwidth().i.max;
+              imp.max &= dpin.get_bitwidth().i.max >= comp_dpin.get_bitwidth().i.min;
+              break;
+            default:
+              fmt::print("Error: comparison op not understood\n");
           }
-          break;
-        case GreaterThan_Op:
-          if (nb_input.i.min > max1) {
-            //True always
-            nb_output.i.min = 1;
-            nb_output.i.max = 1;
-            updated = true;
-          } else if (nb_input.i.max <= min1) {
-            //False always
-            nb_output.i.min = 0;
-            nb_output.i.max = 0;
-            updated = true;
-          }
-          break;
-        case LessEqualThan_Op:
-          if (nb_input.i.max <= min1) {
-            //True always
-            nb_output.i.min = 1;
-            nb_output.i.max = 1;
-            updated = true;
-          } else if (nb_input.i.min > max1) {
-            //False always
-            nb_output.i.min = 0;
-            nb_output.i.max = 0;
-            updated = true;
-          }
-          break;
-        case GreaterEqualThan_Op:
-          if (nb_input.i.min >= max1) {
-            //True always
-            nb_output.i.min = 1;
-            nb_output.i.max = 1;
-            updated = true;
-          } else if (nb_input.i.max < max1) {
-            //False always
-            nb_output.i.min = 0;
-            nb_output.i.max = 0;
-            updated = true;
-          }
-          break;
-        default:
-          fmt::print("op not found!\n");
+        }
       }
     }
   }
 
-  if (updated) {
-    mark_all_outputs(lg, idx);
+  if(set) {
+    updated = pin.ref_bitwidth()->i.update(imp);
   }
-}*/
+
+  if(updated) {
+    fmt::print("\tDo update\n");
+    mark_all_outputs(lg,pin);
+  }
+}
 
 void Pass_bitwidth::iterate_join(const LGraph *lg, Node_pin &pin, Node_Type_Op op) {
   //FIXME: Still in progress.
@@ -632,6 +609,19 @@ void Pass_bitwidth::iterate_driver_pin(LGraph *lg, Node_pin &pin) {
       fmt::print("Arith Op\n");
       iterate_arith(lg, pin, node_type);
       break;
+    case LessThan_Op:
+    case GreaterThan_Op:
+    case LessEqualThan_Op:
+    case GreaterEqualThan_Op:
+      iterate_comparison(lg, pin, node_type);
+      break;
+    case Equals_Op:
+      //iterate_equals(lg, pin, node_type);
+      break;
+    case ShiftLeft_Op:
+    case ShiftRight_Op:
+      //iterate_shift(lg, pin, node_type);
+      break;
     case Join_Op:
       fmt::print("Join_Op\n");
       iterate_join(lg, pin, node_type);
@@ -639,6 +629,9 @@ void Pass_bitwidth::iterate_driver_pin(LGraph *lg, Node_pin &pin) {
     case Pick_Op:
       fmt::print("Pick_Op\n");
       iterate_pick(lg, pin, node_type);
+      break;
+    case U32Const_Op:
+      //Nothing needs to be done for constants.
       break;
     default:
       fmt::print("Op not yet supported in iterate_driver_pin\n");
