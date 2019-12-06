@@ -31,6 +31,8 @@ protected:
   mmap_lib::map<std::string_view, Node_pin> track_n1_out_setup_pins;
   mmap_lib::map<std::string_view, Node_pin> track_n2_out_setup_pins;
 
+  mmap_lib::map<XEdge::Compact, int> track_edge_count;
+
   void SetUp() override {
     g = LGraph::create("lgdb_core_test", "test0", "test");
 
@@ -142,20 +144,66 @@ protected:
     return spin;
   }
 
+  void check_edges() {
+
+    for(auto e:n1.inp_edges()) {
+      (void)e;
+      EXPECT_TRUE(false);
+    }
+    for(auto e:n2.out_edges()) {
+      (void)e;
+      EXPECT_TRUE(false);
+    }
+
+    int conta=0;
+    for(auto e:n1.out_edges()) {
+      auto it = track_edge_count.find(e.get_compact());
+      EXPECT_TRUE(it!=track_edge_count.end());
+      conta++;
+    }
+    EXPECT_EQ(track_edge_count.size(), conta);
+
+    conta=0;
+    for(auto e:n2.inp_edges()) {
+      auto it = track_edge_count.find(e.get_compact());
+      EXPECT_TRUE(it!=track_edge_count.end());
+      conta++;
+    }
+    EXPECT_EQ(track_edge_count.size(), conta);
+
+
+  }
+
+  void add_edge(Node_pin dpin, Node_pin spin) {
+    XEdge edge(dpin, spin);
+    auto it = track_edge_count.find(edge.get_compact());
+    if (g->has_edge(dpin,spin)) {
+      EXPECT_TRUE(it != track_edge_count.end());
+      return;
+    }
+    EXPECT_TRUE(it == track_edge_count.end());
+    g->add_edge(dpin,spin);
+
+    track_edge_count.set(edge.get_compact(),1);
+  }
+
 };
 
 TEST_F(Edge_test, random_insert) {
 
   check_setup_pins();
+  check_edges();
 
   auto dpin = add_n1_setup_driver_pin("\\random very long @ string with spaces and complicated stuff %");
   auto spin = add_n2_setup_sink_pin("\\   foo  \nbar");
+  check_edges();
 
   check_setup_pins();
 
-  g->add_edge(dpin,spin);
+  add_edge(dpin,spin);
 
   check_setup_pins();
+  check_edges();
 }
 
 #if 0

@@ -11,14 +11,14 @@ protected:
   friend class Node_pin;
 public:
   struct __attribute__((packed)) Compact {
-    const uint64_t driver_idx : Index_bits;
-    const uint16_t pad1 : 1; // Just to improve alignment of
-    const uint64_t sink_idx   : Index_bits;
-    const uint16_t pad2 : 1; // Just to improve alignment of
-    const uint32_t driver_pid : Port_bits;
-    const uint16_t pad3 : 2; // Just to improve alignment of
-    const uint32_t sink_pid   : Port_bits;
-    const uint32_t pad4 : 2; // Just to improve alignment of
+    uint64_t driver_idx : Index_bits;
+    uint16_t pad1 : 1; // Just to improve alignment of
+    uint64_t sink_idx   : Index_bits;
+    uint16_t pad2 : 1; // Just to improve alignment of
+    uint32_t driver_pid : Port_bits;
+    uint16_t pad3 : 2; // Just to improve alignment of
+    uint32_t sink_pid   : Port_bits;
+    uint32_t pad4 : 2; // Just to improve alignment of
 
     Compact(const Index_ID &d_idx, const Port_ID &d_pid, const Index_ID &s_idx, const Port_ID &s_pid)
       :driver_idx(d_idx)
@@ -30,6 +30,26 @@ public:
       ,sink_pid(s_pid)
       ,pad4(0) {
     };
+    Compact()
+      :driver_idx(0)
+      ,pad1(0)
+      ,sink_idx(0)
+      ,pad2(0)
+      ,driver_pid(0)
+      ,pad3(0)
+      ,sink_pid(0)
+      ,pad4(0) {
+    };
+
+    Compact &operator=(const Compact &obj) {
+      I(this != &obj);
+      driver_idx = obj.driver_idx;
+      driver_pid = obj.driver_pid;
+      sink_idx   = obj.sink_idx;
+      sink_pid   = obj.sink_pid;
+
+      return *this;
+    }
 
     constexpr bool is_invalid() const { return driver_idx == 0; }
 
@@ -77,3 +97,20 @@ public:
 
   // END ATTRIBUTE ACCESSORS
 };
+
+namespace mmap_lib {
+template <>
+struct hash<XEdge::Compact> {
+  size_t operator()(XEdge::Compact const &o) const {
+    uint64_t h = o.driver_idx;
+    h = (h<<12) ^ o.driver_pid;
+    auto h1 = hash<uint64_t>{}(h);
+
+    h = o.sink_idx;
+    h = (h<<12) ^ o.sink_pid;
+
+    return h1 ^ hash<uint64_t>{}(h);
+  }
+};
+}
+
