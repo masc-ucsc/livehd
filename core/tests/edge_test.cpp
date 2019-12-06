@@ -19,9 +19,6 @@ protected:
   Sub_node *n1_sub;
   Sub_node *n2_sub;
 
-  Port_ID n1_graph_pos;
-  Port_ID n2_graph_pos;
-
   Lrand<bool>  rbool;
   Lrand<int>   rint;
 
@@ -33,8 +30,11 @@ protected:
 
   mmap_lib::map<XEdge::Compact, int> track_edge_count;
 
+  mmap_lib::map<int,bool> n1_graph_pos_created;
+  mmap_lib::map<int,bool> n2_graph_pos_created;
+
   void SetUp() override {
-    g = LGraph::create("lgdb_core_test", "test0", "test");
+    g = LGraph::create("lgdb_edge_test", "test0", "test");
 
     n1 = g->create_node_sub("n1");
     n2 = g->create_node_sub("n2");
@@ -42,12 +42,37 @@ protected:
     n1_sub = g->ref_library()->ref_sub("n1");
     n2_sub = g->ref_library()->ref_sub("n2");
 
-    n1_graph_pos = 0;
-    n2_graph_pos = 0;
+    n1_sub->reset_pins();
+    n2_sub->reset_pins();
+
+    n1_graph_pos_created.clear();
+    n2_graph_pos_created.clear();
   }
 
   void TearDown() override {
     g->sync();
+  }
+
+  Port_ID get_free_n1_graph_pos() {
+    Port_ID pos;
+    do {
+      pos = rint.max((1<<Port_bits)-1);
+    }while(n1_graph_pos_created.find(pos) != n1_graph_pos_created.end());
+
+    n1_graph_pos_created.set(pos, true);
+
+    return pos;
+  }
+
+  Port_ID get_free_n2_graph_pos() {
+    Port_ID pos;
+    do {
+      pos = rint.max((1<<Port_bits)-1);
+    }while(n2_graph_pos_created.find(pos) != n2_graph_pos_created.end());
+
+    n2_graph_pos_created.set(pos, true);
+
+    return pos;
   }
 
   void check_setup_pins() {
@@ -93,7 +118,8 @@ protected:
     const auto &it = track_n1_out_setup_pins.find(pname);
     if (it == track_n1_out_setup_pins.end()) {
       EXPECT_FALSE(n1_sub->has_pin(pname));
-      n1_sub->add_output_pin(pname, n1_graph_pos++);
+
+      n1_sub->add_output_pin(pname, get_free_n1_graph_pos());
 
       auto dpin = n1.setup_driver_pin(pname);
       track_n1_out_setup_pins.set(pname, dpin);
@@ -121,7 +147,7 @@ protected:
     const auto &it = track_n2_inp_setup_pins.find(pname);
     if (it == track_n2_inp_setup_pins.end()) {
       EXPECT_FALSE(n2_sub->has_pin(pname));
-      n2_sub->add_input_pin(pname, n2_graph_pos++);
+      n2_sub->add_input_pin(pname, get_free_n2_graph_pos());
 
       auto spin = n2.setup_sink_pin(pname);
       track_n2_inp_setup_pins.set(pname, spin);
@@ -171,7 +197,6 @@ protected:
     }
     EXPECT_EQ(track_edge_count.size(), conta);
 
-
   }
 
   void add_edge(Node_pin dpin, Node_pin spin) {
@@ -204,6 +229,18 @@ TEST_F(Edge_test, random_insert) {
 
   check_setup_pins();
   check_edges();
+
+
+  for(int i=0;i<6000;++i) {
+    Node_pin d;
+    Node_pin s;
+    if (rbool.any())
+      d = add_n1_setup_driver_pin("driver_pin" + std::to_string(i));
+    if (rbool.any())
+      s = add_n2_setup_sink_pin("sink_pin" + std::to_string(i));
+    if (rbool.any() && !d.is_invalid() && !s.is_invalid())
+      add_edge(d, s);
+  }
 }
 
 #if 0

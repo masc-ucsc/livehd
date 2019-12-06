@@ -1004,12 +1004,13 @@ private:
 		return insertion_idx;
 	}
 
+  static inline size_t static_mNumElements           = 0;
+  static inline size_t static_mMask                  = 0;
+  static inline size_t static_mMaxNumElementsAllowed = 0;
+  static inline InfoType static_InitialInfoInc       = InitialInfoInc;
+  static inline InfoType static_InitialInfoHashShift = InitialInfoHashShift;
+
   void setup_pointers() {
-		static size_t static_mNumElements           = 0;
-		static size_t static_mMask                  = 0;
-		static size_t static_mMaxNumElementsAllowed = 0;
-		static InfoType static_InitialInfoInc       = InitialInfoInc;
-		static InfoType static_InitialInfoHashShift = InitialInfoHashShift;
 
 		assert(static_mMask==0);
 
