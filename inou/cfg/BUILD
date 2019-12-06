@@ -1,4 +1,11 @@
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
+filegroup(
+    name = "cfg_pts",
+    srcs = glob(["tests/*.cfg", "tests/verilog_gld/*.v"]),
+    visibility = ["//visibility:public"],
+)
+
 # cc_library(
 #     name = "inou_cfg",
 #     srcs = glob(["*.cpp"], exclude=["lgcfg.cpp"]),
@@ -9,12 +16,6 @@
 #         "//core:core",
 #     ],
 # )
-
-filegroup(
-    name = "cfg_pts",
-    srcs = glob(["tests/*.cfg", "tests/verilog_gld/*.v"]),
-    visibility = ["//visibility:public"],
-)
 
 # sh_test(
 #     name = "pyrope.sh",
