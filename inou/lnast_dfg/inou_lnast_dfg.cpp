@@ -312,8 +312,6 @@ std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
   auto top_b = top->add_graph_input("b", pos++, 1);
   auto top_z = top->add_graph_output("z", pos++, 1);
 
-  top->add_edge(top_a,top_z);
-
   auto sum = top->create_node(Sum_Op);
 
   auto sum_sink_1 = sum.setup_sink_pin("AU");
