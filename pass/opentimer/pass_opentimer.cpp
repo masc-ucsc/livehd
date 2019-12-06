@@ -1,6 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "lgbench.hpp"
+#include "lbench.hpp"
 
 #include "lgedgeiter.hpp"
 #include "annotate.hpp"
@@ -50,7 +50,7 @@ void Pass_opentimer::work(Eprp_var &var) {
 void Pass_opentimer::read_file(LGraph *g, std::string_view lib, std::string_view lib_max, std::string_view lib_min, std::string_view spef, std::string_view sdc) {
   (void)g;
   (void)sdc;
-//  LGBench b("pass.opentimer.read_file");      // Expand this method to reading from user input and later develop inou.add_liberty etc.
+//  Lbench b("pass.opentimer.read_file");      // Expand this method to reading from user input and later develop inou.add_liberty etc.
 
 
   if(lib_max.length()==0 || lib_min.length()==0){
@@ -153,7 +153,7 @@ void Pass_opentimer::read_sdc(std::string_view sdc){
 }
 
 void Pass_opentimer::build_circuit(LGraph *g) {       // Enhance this for build_circuit
-  //  LGBench b("pass.opentimer.build_circuit");
+  //  Lbench b("pass.opentimer.build_circuit");
 
   g->each_graph_input([this](const Node_pin &pin) {
     std::string driver_name(pin.get_name()); // OT needs std::string, not string_view support
@@ -209,7 +209,7 @@ void Pass_opentimer::build_circuit(LGraph *g) {       // Enhance this for build_
 }
 
 void Pass_opentimer::compute_timing(){                    // Expand this method to compute timing information
-//  LGBench b("pass.opentimer.compute_timing");
+//  Lbench b("pass.opentimer.compute_timing");
 
   timer.update_timing();
 
@@ -236,6 +236,6 @@ void Pass_opentimer::compute_timing(){                    // Expand this method 
 }
 
 void Pass_opentimer::populate_table(){                    // Expand this method to populate the tables in lgraph
-//  LGBench b("pass.opentimer.populate_table");
+//  Lbench b("pass.opentimer.populate_table");
 
 }

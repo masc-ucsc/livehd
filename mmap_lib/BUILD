@@ -34,7 +34,7 @@ cc_test(
     srcs = ["tests/bench_map_use.cpp"],
     deps = [
         ":mmap_lib_test_lib",
-        "//bench:headers",
+        "//lbench:headers",
         "@fmt//:fmt",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:node_hash_map",
@@ -46,7 +46,7 @@ cc_test(
     srcs = ["tests/bench_set_use.cpp"],
     deps = [
         ":mmap_lib_test_lib",
-        "//bench:headers",
+        "//lbench:headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/container:node_hash_map",
@@ -59,7 +59,7 @@ cc_test(
     srcs = ["tests/bench_vector_use.cpp"],
     deps = [
         ":mmap_lib_test_lib",
-        "//bench:headers",
+        "//lbench:headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@gtest//:gtest_main",
         "@fmt//:fmt",
@@ -71,7 +71,7 @@ cc_test(
     srcs = ["tests/mmap_map_test.cpp"],
     deps = [
         ":mmap_lib_test_lib",
-        "//bench:headers",
+        "//lbench:headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@gtest//:gtest_main",
         "@fmt//:fmt",
@@ -84,7 +84,7 @@ cc_test(
     deps = [
         ":headers",
         "@gtest//:gtest_main",
-        "//bench:headers",
+        "//lbench:headers",
     ],
 )
 
@@ -93,7 +93,7 @@ cc_test(
     srcs = ["tests/mmap_vector_test.cpp"],
     deps = [
         ":mmap_lib_test_lib",
-        "//bench:headers",
+        "//lbench:headers",
         "@gtest//:gtest_main",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",

@@ -2,7 +2,7 @@
 
 #include "inou_lnast_dfg.hpp"
 #include "lgraph.hpp"
-
+#include "lbench.hpp"
 
 void setup_inou_lnast_dfg() {
   Inou_lnast_dfg p;
@@ -43,7 +43,7 @@ void Inou_lnast_dfg::tolg(Eprp_var &var){
 }
 
 void Inou_lnast_dfg::build_lnast(Inou_lnast_dfg &p, Eprp_var &var) {
-  LGBench b("inou.lnast_dfg.build_lnast");
+  Lbench b("inou.lnast_dfg.build_lnast");
   p.opack.files = var.get("files");
   p.opack.path  = var.get("path");
 
@@ -59,7 +59,7 @@ void Inou_lnast_dfg::build_lnast(Inou_lnast_dfg &p, Eprp_var &var) {
 }
 
 std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
-  LGBench b("inou.lnast_dfg.do_tolg");
+  Lbench b("inou.lnast_dfg.do_tolg");
   I(!opack.files.empty());
   I(!opack.path.empty());
   auto pos = opack.files.rfind('/');

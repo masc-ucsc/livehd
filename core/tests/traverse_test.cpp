@@ -6,7 +6,7 @@
 #include <vector>
 #include <string>
 
-#include "rng.hpp"
+#include "lrand.hpp"
 #include "mmap_tree.hpp"
 
 #include "attribute.hpp"
@@ -19,7 +19,7 @@ using testing::HasSubstr;
 
 class Setup_traverse : public Tree_lgdb_setup {
 protected:
-  void check_lgraph_fwd(int rseed) {
+  void check_lgraph_fwd() {
     I(lg_root);
 
     int pos = 1;
@@ -95,9 +95,8 @@ protected:
 
 TEST_F(Setup_traverse, check_attributes) {
 
-  int rseed=123;
-  populate_tree(rseed, 10, 100, 0.5, true);
-  map_tree_to_lgraph(rseed);
+  populate_tree(10, 100, 0.5, true);
+  map_tree_to_lgraph();
 
   I(lg_root);
 
@@ -115,33 +114,24 @@ TEST_F(Setup_traverse, check_attributes) {
 
 TEST_F(Setup_traverse, simple_check_fwd) {
 
-  int rseed=30;
-  Rng rint(rseed);
-  RandomBool rbool;
-
-  populate_tree(rseed, 3, 12, 0.5, true);
-  map_tree_to_lgraph(rseed);
+  populate_tree(3, 12, 0.5, true);
+  map_tree_to_lgraph();
   Graph_library::sync_all();
 
-  check_lgraph_fwd(rseed);
+  check_lgraph_fwd();
 }
 
 
 TEST_F(Setup_traverse, check_fwd) {
 
-  return; // FIXME
+  Lrand<int> rint;
 
-  int rseed=30;
-  Rng rint(rseed);
-  RandomBool rbool;
-
-  for(int nlevels=3;nlevels<12;nlevels+=rint.uniform<int>(4)+1) {
+  for(int nlevels=3;nlevels<12;nlevels+=rint.max(4)+1) {
     for(int i=0;i<3;i++) {
-      rseed++;
-      populate_tree(rseed, nlevels, 8+rint.uniform<int>(nlevels*30*(1+i)), 0.5, true);
-      map_tree_to_lgraph(rseed);
+      populate_tree(nlevels, 8+rint.max(nlevels*30*(1+i)), 0.5, true);
+      map_tree_to_lgraph();
 
-      check_lgraph_fwd(rseed);
+      check_lgraph_fwd();
     }
   }
 }

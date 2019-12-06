@@ -1,6 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "lgbench.hpp"
+#include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
@@ -41,7 +41,7 @@ void Pass_sample::work(Eprp_var &var) {
 }
 
 void Pass_sample::wirecount(Eprp_var &var) {
-  LGBench b("pass.sample.wirecount");
+  Lbench b("pass.sample.wirecount");
   Pass_sample pass;
 
   for(const auto &g : var.lgs) {
@@ -111,7 +111,7 @@ void Pass_sample::do_wirecount(LGraph *g, int indent) {
 }
 
 void Pass_sample::compute_histogram(LGraph *g) {
-  LGBench b("pass.sample.compute_histogram");
+  Lbench b("pass.sample.compute_histogram");
 
   std::map<std::string, int> histogram;
 
@@ -138,7 +138,7 @@ void Pass_sample::compute_histogram(LGraph *g) {
 }
 
 void Pass_sample::compute_max_depth(LGraph *g) {
-  LGBench b("pass.sample.max_depth");
+  Lbench b("pass.sample.max_depth");
 
   absl::flat_hash_map<Node::Compact, int>  depth;
 
@@ -159,7 +159,7 @@ void Pass_sample::compute_max_depth(LGraph *g) {
 }
 
 void Pass_sample::annotate_placement(LGraph *g) {
-  LGBench b("pass.sample.replace_inline");
+  Lbench b("pass.sample.replace_inline");
 
   int x_pos = 0;
 

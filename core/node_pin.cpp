@@ -106,6 +106,13 @@ std::string_view Node_pin::get_type_sub_io_name() const {
   return sub_node.get_name_from_instance_pid(pid);
 }
 
+std::string_view Node_pin::get_type_sub_pin_name() const {
+  auto node = get_node();
+  I(node.is_type_sub());
+
+  return node.get_type_sub_node().get_name_from_graph_pos(pid);
+}
+
 float Node_pin::get_delay() const {
   return Ann_node_pin_delay::ref(top_g)->get(get_compact_driver());
 }

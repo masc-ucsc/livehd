@@ -99,25 +99,23 @@ public:
   Sub_node &reset_sub(std::string_view name, std::string_view source);
   Sub_node &setup_sub(std::string_view name, std::string_view source);
   Sub_node &setup_sub(std::string_view name) { return setup_sub(name, "-"); }
-  Sub_node &get_sub(Lg_type_id lgid) {
+  Sub_node *ref_sub(Lg_type_id lgid) {
     graph_library_clean = false;
+    I(lgid > 0);  // 0 is invalid lgid
+    I(attributes.size() > lgid);
+    I(attributes.size() == sub_nodes.size());
+    I(sub_nodes[lgid].get_lgid() == lgid);
+    return &sub_nodes[lgid];
+  }
+  const Sub_node &get_sub(Lg_type_id lgid) const {
     I(lgid > 0);  // 0 is invalid lgid
     I(attributes.size() > lgid);
     I(attributes.size() == sub_nodes.size());
     I(sub_nodes[lgid].get_lgid() == lgid);
     return sub_nodes[lgid];
   }
-  Sub_node      &get_sub(std::string_view name) {
-    graph_library_clean = false;
-    return get_sub(get_lgid(name));
-  }
-  const Sub_node      &get_sub(Lg_type_id lgid) const {
-    I(lgid > 0);  // 0 is invalid lgid
-    I(lgid > 0);  // 0 is invalid lgid
-    I(attributes.size() > lgid);
-    I(attributes.size() == sub_nodes.size());
-    I(sub_nodes[lgid].get_lgid() == lgid);
-    return sub_nodes[lgid];
+  Sub_node *ref_sub(std::string_view name) {
+    return ref_sub(get_lgid(name));
   }
   const Sub_node      &get_sub(std::string_view name) const {
     return get_sub(get_lgid(name));

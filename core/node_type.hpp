@@ -34,10 +34,10 @@ protected:
 
   void             set_type_sub(Index_ID nid, Lg_type_id subgraphid);
   Lg_type_id       get_type_sub(Index_ID nid) const;
-  Sub_node        &get_type_sub_node(Index_ID nid);
   const Sub_node  &get_type_sub_node(Index_ID nid) const;
-  Sub_node        &get_type_sub_node(std::string_view sub_name);
   const Sub_node  &get_type_sub_node(std::string_view sub_name) const;
+  Sub_node        *ref_type_sub_node(Index_ID nid);
+  Sub_node        *ref_type_sub_node(std::string_view sub_name);
 
   void             set_type_lut(Index_ID nid, Lut_type_id lutid);
   Lut_type_id      get_type_lut(Index_ID nid) const;

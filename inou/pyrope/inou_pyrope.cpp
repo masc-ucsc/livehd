@@ -1,6 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "lgbench.hpp"
+#include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
@@ -32,7 +32,7 @@ void Inou_pyrope::work(Eprp_var &var) {
 }
 
 void Inou_pyrope::compute_histogram(LGraph *g) {
-  LGBench b("inou.pyrope.compute_histogram");
+  Lbench b("inou.pyrope.compute_histogram");
 
   std::map<std::string, int> histogram;
 
@@ -59,7 +59,7 @@ void Inou_pyrope::compute_histogram(LGraph *g) {
 }
 
 void Inou_pyrope::compute_max_depth(LGraph *g) {
-  LGBench b("inou.pyrope.max_depth");
+  Lbench b("inou.pyrope.max_depth");
 
   absl::flat_hash_map<Node::Compact, int>  depth;
 

@@ -169,9 +169,13 @@ public:
   Hierarchy_index get_hidx()  const { return hidx;   }
 
   Node_pin get_driver_pin() const;
+  Node_pin get_sink_pin() const;
+
   Node_pin get_driver_pin(Port_ID pid) const;
   Node_pin get_sink_pin(Port_ID pid) const;
-  Node_pin get_sink_pin() const;
+
+  Node_pin get_driver_pin(std::string_view pname) const;
+  Node_pin get_sink_pin(std::string_view pname) const;
 
   bool has_inputs () const;
   bool has_outputs() const;
@@ -210,7 +214,7 @@ public:
 
   void              set_type_sub(Lg_type_id subid);
   Lg_type_id        get_type_sub() const;
-  Sub_node         &get_type_sub_node() const;
+  const Sub_node   &get_type_sub_node() const;
   LGraph           *get_type_sub_lgraph() const; // Slower than other get_type_sub
   bool              is_type_sub_present() const;
 

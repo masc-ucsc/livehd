@@ -139,6 +139,11 @@ Node_pin Node::get_driver_pin() const {
   return Node_pin(top_g, current_g, hidx, nid, 0, false);
 }
 
+Node_pin Node::get_sink_pin() const {
+  GI(current_g,current_g->get_type(nid).has_single_input());
+  return Node_pin(top_g, current_g, hidx, nid, 0, true);
+}
+
 Node_pin Node::get_driver_pin(Port_ID pid) const {
 
   I(current_g->get_type(nid).has_output(pid));
@@ -154,9 +159,31 @@ Node_pin Node::get_sink_pin(Port_ID pid) const {
   return Node_pin(top_g, current_g, hidx, idx, pid, true);
 }
 
-Node_pin Node::get_sink_pin() const {
-  GI(current_g,current_g->get_type(nid).has_single_input());
-  return Node_pin(top_g, current_g, hidx, nid, 0, true);
+
+Node_pin Node::get_driver_pin(std::string_view pname) const {
+  auto type = get_type();
+  I(current_g); // Get type sets it
+
+  auto pid = type.get_output_match(pname);
+  I(pid!=Port_invalid); // graph_pos must be valid if connected
+
+  auto idx = nid;
+  if (pid)
+    idx = current_g->setup_idx_from_pid(nid,pid);
+  return Node_pin(top_g, current_g, hidx, idx, pid, false);
+}
+
+Node_pin Node::get_sink_pin(std::string_view pname) const {
+  auto type = get_type();
+  I(current_g); // Get type sets it
+
+  auto pid = type.get_input_match(pname);
+  I(pid!=Port_invalid); // graph_pos must be valid if connected
+
+  auto idx = nid;
+  if (pid)
+    idx = current_g->setup_idx_from_pid(nid,pid);
+  return Node_pin(top_g, current_g, hidx, idx, pid, true);
 }
 
 bool Node::has_inputs() const {
@@ -284,7 +311,7 @@ Lut_type_id Node::get_type_lut() const {
   return current_g->get_type_lut(nid);
 }
 
-Sub_node &Node::get_type_sub_node() const {
+const Sub_node &Node::get_type_sub_node() const {
   return current_g->get_type_sub_node(nid);
 }
 
@@ -333,6 +360,7 @@ Node_pin Node::setup_driver_pin(std::string_view name) {
   I(sub.is_output(name));
 
   pid = sub.get_graph_pos(name);
+  I(pid!=Port_invalid); // graph_pos must be valid if connected
 
   Index_ID idx = current_g->setup_idx_from_pid(nid, pid);
   current_g->setup_driver(idx);
@@ -368,6 +396,7 @@ Node_pin Node::setup_sink_pin(std::string_view name) {
   I(sub.is_input(name));
 
   auto pid = sub.get_graph_pos(name);
+  I(pid!=Port_invalid); // graph_pos must be valid if connected
 
   Index_ID idx = current_g->setup_idx_from_pid(nid, pid);
   current_g->setup_sink(idx);

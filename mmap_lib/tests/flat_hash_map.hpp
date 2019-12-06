@@ -51,8 +51,8 @@ struct functor_storage<Result, Result (*)(Args...)>
 {
     typedef Result (*function_ptr)(Args...);
     function_ptr function;
-    functor_storage(function_ptr function)
-        : function(function)
+    functor_storage(function_ptr _function)
+        : function(_function)
     {
     }
     Result operator()(Args... args) const
@@ -162,8 +162,8 @@ struct sherwood_v3_entry
     sherwood_v3_entry()
     {
     }
-    sherwood_v3_entry(int8_t distance_from_desired)
-        : distance_from_desired(distance_from_desired)
+    sherwood_v3_entry(int8_t _distance_from_desired)
+        : distance_from_desired(_distance_from_desired)
     {
     }
     ~sherwood_v3_entry()
@@ -449,8 +449,8 @@ public:
     struct templated_iterator
     {
         templated_iterator() = default;
-        templated_iterator(EntryPointer current)
-            : current(current)
+        templated_iterator(EntryPointer _current)
+            : current(_current)
         {
         }
         EntryPointer current = EntryPointer();
@@ -656,9 +656,9 @@ public:
         deallocate_data(new_buckets, num_buckets, old_max_lookups);
     }
 
-    void reserve(size_t num_elements)
+    void reserve(size_t num)
     {
-        size_t required_buckets = num_buckets_for_reserve(num_elements);
+        size_t required_buckets = num_buckets_for_reserve(num);
         if (required_buckets > bucket_count())
             rehash(required_buckets);
     }
@@ -800,9 +800,9 @@ private:
         return std::max(detailv3::min_lookups, desired);
     }
 
-    size_t num_buckets_for_reserve(size_t num_elements) const
+    size_t num_buckets_for_reserve(size_t num) const
     {
-        return static_cast<size_t>(std::ceil(num_elements / std::min(0.5, static_cast<double>(_max_load_factor))));
+        return static_cast<size_t>(std::ceil(num / std::min(0.5, static_cast<double>(_max_load_factor))));
     }
     void rehash_for_other_container(const sherwood_v3_table & other)
     {
@@ -871,11 +871,11 @@ private:
         rehash(std::max(size_t(4), 2 * bucket_count()));
     }
 
-    void deallocate_data(EntryPointer begin, size_t num_slots_minus_one, int8_t max_lookups)
+    void deallocate_data(EntryPointer begin, size_t num_s, int8_t max_l)
     {
         if (begin != Entry::empty_default_table())
         {
-            AllocatorTraits::deallocate(*this, begin, num_slots_minus_one + max_lookups + 1);
+            AllocatorTraits::deallocate(*this, begin, num_s + max_l + 1);
         }
     }
 
@@ -1281,9 +1281,9 @@ struct fibonacci_hash_policy
         size = std::max(size_t(2), detailv3::next_power_of_two(size));
         return 64 - detailv3::log2(size);
     }
-    void commit(int8_t shift)
+    void commit(int8_t _shift)
     {
-        this->shift = shift;
+        shift = _shift;
     }
     void reset()
     {

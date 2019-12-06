@@ -1,27 +1,164 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "gmock/gmock.h"
+#include "gtest/gtest.h"
+
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
-bool test0() {
-  LGraph *g = LGraph::create("lgdb_core_test", "test0", "test");
+#include "lrand.hpp"
+#include "mmap_map.hpp"
 
-  auto n1 = g->create_node_sub("n1");
-  auto n2 = g->create_node_sub("n2");
+using testing::HasSubstr;
 
-  auto driver_pin20  = n1.setup_driver_pin(20);
-  auto sink_pin120 = n2.setup_sink_pin(120);
+class Edge_test : public ::testing::Test {
+protected:
+  LGraph *g;
+  Node  n1;
+  Node  n2;
+  Sub_node *n1_sub;
+  Sub_node *n2_sub;
 
-  for(auto &out : n1.out_edges()) {
-    I(false);
-    (void)out; // just to silence the warning
+  Port_ID n1_graph_pos;
+  Port_ID n2_graph_pos;
+
+  Lrand<bool>  rbool;
+  Lrand<int>   rint;
+
+  mmap_lib::map<std::string_view, Node_pin> track_n1_inp_setup_pins;
+  mmap_lib::map<std::string_view, Node_pin> track_n2_inp_setup_pins;
+
+  mmap_lib::map<std::string_view, Node_pin> track_n1_out_setup_pins;
+  mmap_lib::map<std::string_view, Node_pin> track_n2_out_setup_pins;
+
+  void SetUp() override {
+    g = LGraph::create("lgdb_core_test", "test0", "test");
+
+    n1 = g->create_node_sub("n1");
+    n2 = g->create_node_sub("n2");
+
+    n1_sub = g->ref_library()->ref_sub("n1");
+    n2_sub = g->ref_library()->ref_sub("n2");
+
+    n1_graph_pos = 0;
+    n2_graph_pos = 0;
   }
-  for(auto &out : n2.out_edges()) {
-    I(false);
-    (void)out; // just to silence the warning
+
+  void TearDown() override {
+    g->sync();
   }
 
-  g->add_edge(driver_pin20,sink_pin120);
+  void check_setup_pins() {
+
+    int n_hits;
+
+    n_hits=0;
+    for(auto &pin : n1.out_setup_pins()) {
+      EXPECT_TRUE(!pin.is_invalid());
+      EXPECT_TRUE(track_n1_out_setup_pins.has(pin.get_type_sub_pin_name()));
+      n_hits++;
+    }
+    EXPECT_EQ(track_n1_out_setup_pins.size(), n_hits);
+
+    n_hits=0;
+    for(auto &pin : n2.out_setup_pins()) {
+      EXPECT_TRUE(!pin.is_invalid());
+      EXPECT_TRUE(track_n2_out_setup_pins.has(pin.get_type_sub_pin_name()));
+      n_hits++;
+    }
+    EXPECT_EQ(track_n2_out_setup_pins.size(), n_hits);
+
+    n_hits=0;
+    for(auto &pin : n1.inp_setup_pins()) {
+      EXPECT_TRUE(!pin.is_invalid());
+      EXPECT_TRUE(track_n1_inp_setup_pins.has(pin.get_type_sub_pin_name()));
+      n_hits++;
+    }
+    EXPECT_EQ(track_n1_inp_setup_pins.size(), n_hits);
+
+    n_hits=0;
+    for(auto &pin : n2.inp_setup_pins()) {
+      EXPECT_TRUE(!pin.is_invalid());
+      EXPECT_TRUE(track_n2_inp_setup_pins.has(pin.get_type_sub_pin_name()));
+      n_hits++;
+    }
+    EXPECT_EQ(track_n2_inp_setup_pins.size(), n_hits);
+
+  }
+
+  Node_pin add_n1_setup_driver_pin(const std::string pname) {
+
+    const auto &it = track_n1_out_setup_pins.find(pname);
+    if (it == track_n1_out_setup_pins.end()) {
+      EXPECT_FALSE(n1_sub->has_pin(pname));
+      n1_sub->add_output_pin(pname, n1_graph_pos++);
+
+      auto dpin = n1.setup_driver_pin(pname);
+      track_n1_out_setup_pins.set(pname, dpin);
+      return dpin;
+    }
+
+    Node_pin dpin;
+    if (rbool.any())
+      dpin = n1.setup_driver_pin(pname);
+    else
+      dpin = n1.get_driver_pin(pname);
+    EXPECT_TRUE( dpin.is_driver());
+    EXPECT_TRUE(!dpin.is_sink());
+
+    if (rbool.any())
+      EXPECT_EQ(dpin.get_compact(), it->second.get_compact());
+    else
+      EXPECT_EQ(dpin, it->second);
+
+    return dpin;
+  }
+
+  Node_pin add_n2_setup_sink_pin(const std::string pname) {
+
+    const auto &it = track_n2_inp_setup_pins.find(pname);
+    if (it == track_n2_inp_setup_pins.end()) {
+      EXPECT_FALSE(n2_sub->has_pin(pname));
+      n2_sub->add_input_pin(pname, n2_graph_pos++);
+
+      auto spin = n2.setup_sink_pin(pname);
+      track_n2_inp_setup_pins.set(pname, spin);
+      return spin;
+    }
+
+    Node_pin spin;
+    if (rbool.any())
+      spin = n2.setup_sink_pin(pname);
+    else
+      spin = n2.setup_sink_pin(pname);
+    EXPECT_TRUE(!spin.is_driver());
+    EXPECT_TRUE( spin.is_sink());
+
+    if (rbool.any())
+      EXPECT_EQ(spin.get_compact(), it->second.get_compact());
+    else
+      EXPECT_EQ(spin, it->second);
+
+    return spin;
+  }
+
+};
+
+TEST_F(Edge_test, random_insert) {
+
+  check_setup_pins();
+
+  auto dpin = add_n1_setup_driver_pin("\\random very long @ string with spaces and complicated stuff %");
+  auto spin = add_n2_setup_sink_pin("\\   foo  \nbar");
+
+  check_setup_pins();
+
+  g->add_edge(dpin,spin);
+
+  check_setup_pins();
+}
+
+#if 0
   int conta=0;
   for(auto &out : n1.out_edges()) {
     conta++;
@@ -34,7 +171,7 @@ bool test0() {
   }
 
   for(int i=30;i<330;i++) {
-    auto s = n1.setup_driver_pin(i);
+    auto s = n1.setup_driver_pin("o" + std::to_string(i));
     g->add_edge(s,sink_pin120);
   }
   conta = 0;
@@ -45,8 +182,8 @@ bool test0() {
   I(conta == (1+300));
 
   for(int i=200;i<1200;i++) {
-    auto s = n1.setup_driver_pin((i&31) + 20);
-    auto p = n2.setup_sink_pin(i);
+    auto s = n1.setup_driver_pin("o" + std::to_string((i&31) + 20));
+    auto p = n2.setup_sink_pin("i" + std::to_string(i));
     g->add_edge(s,p);
   }
   conta = 0;
@@ -68,10 +205,7 @@ bool test0() {
   }
   I(conta == (1+300+1000));
 
-  return true;
-}
 
-bool test1() {
   LGraph *g = LGraph::create("lgdb_core_test", "test", "test");
 
   auto n1 = g->create_node_sub("n1");
@@ -261,14 +395,4 @@ bool test3() {
   return true;
 }
 
-int main() {
-  test0();
-  test1();
-  test20();
-  test21();
-  test2();
-  test22();
-  test3();
-
-  return 0;
-}
+#endif

@@ -30,8 +30,6 @@
 #include "mockturtle/algorithms/lut_mapping.hpp"
 #include "mockturtle/views/mapping_view.hpp"
 
-
-#include "lgbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 

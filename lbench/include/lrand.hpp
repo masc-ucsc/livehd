@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <cassert>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -155,23 +156,64 @@ private:
 
 inline std::ostream& operator<<(std::ostream& os, sfc64 const& rng) {
     return rng.print(os);
-}
-
-class RandomBool {
-public:
-    template <typename Rng>
-    bool operator()(Rng& rng) {
-        if (1 == m_rand) {
-            m_rand = std::uniform_int_distribution<size_t>{}(rng) | s_mask_left1;
-        }
-        bool const ret = m_rand & 1;
-        m_rand >>= 1;
-        return ret;
-    }
-
-private:
-    static constexpr const size_t s_mask_left1 = size_t(1) << (sizeof(size_t) * 8 - 1);
-    size_t m_rand = 1;
 };
 
-using Rng = sfc64;
+
+size_t lrand_get_seed() {
+  static bool initialized = false;
+  static sfc64 seed(1023);
+  if (__builtin_expect(initialized,1))
+    return seed.uniform<size_t>();
+
+  const char *lbench_seed = getenv("LBENCH_SEED");
+  if (lbench_seed) {
+    seed.seed(std::atoi(lbench_seed));
+  }
+
+  initialized = true;
+}
+
+template<typename T>
+class Lrand {
+protected:
+  sfc64 rint;
+public:
+  Lrand() : rint(lrand_get_seed()) {}
+  Lrand(uint64_t seed) : rint(seed) {}
+
+  T max(uint64_t m) {
+    return rint.uniform<T>(m);
+  }
+
+  T between(uint64_t m1, uint64_t m2) {
+    assert(m1<m2);
+    return m1+rint.uniform<T>(m2-m1);
+  }
+
+  T any() {
+    return rint.uniform<T>(std::numeric_limits<T>::max());
+  }
+};
+
+template<>
+class Lrand<bool> {
+protected:
+  static constexpr const size_t s_mask_left1 = size_t(1) << (sizeof(size_t) * 8 - 1);
+  uint64_t m_rand = 1;
+
+  sfc64 rint;
+public:
+  Lrand() : rint(getenv("LGBENCH_SEED")?std::atoi(getenv("LGBENCH_SEED")):1023) {}
+  Lrand(uint64_t seed) : rint(seed) {}
+
+  bool any() {
+    if (1 == m_rand) {
+      m_rand = rint.uniform<uint64_t>(std::numeric_limits<uint64_t>::max()) | s_mask_left1;
+    }
+    bool const ret = m_rand & 1;
+    m_rand >>= 1;
+    return ret;
+  }
+
+};
+

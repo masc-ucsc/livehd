@@ -1,7 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "iassert.hpp"
-#include "lgbench.hpp"
+#include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
@@ -59,7 +59,7 @@ void Pass_punch::work(Eprp_var &var) {
 }
 
 void Pass_punch::punch(LGraph *g, std::string_view src, std::string_view dst) {
-  LGBench b("pass.punch");
+  Lbench b("pass.punch");
 
   /////////////////////////////////////
   // find the level of common hierarchy between src and dst

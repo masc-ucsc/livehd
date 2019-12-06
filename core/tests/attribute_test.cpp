@@ -7,7 +7,8 @@
 #include <string>
 
 #include "attribute.hpp"
-#include "lgbench.hpp"
+#include "lbench.hpp"
+
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
@@ -53,7 +54,7 @@ TEST_F(Setup_attr_test, data_test1) {
   unlink("lgdb_attr/lgraph_dtest2_dense_attr_max");
   unlink("lgdb_attr/lgraph_dtest2_dense_attr_size");
 
-  LGBench b("attr_data_test1");
+  Lbench b("attr_data_test1");
 
   struct Data {
     int  a;

@@ -6,8 +6,8 @@
 
 #include <vector>
 
-#include "rng.hpp"
-#include "lgbench.hpp"
+#include "lrand.hpp"
+#include "lbench.hpp"
 #include "absl/container/node_hash_map.h"
 #include "absl/container/flat_hash_map.h"
 #include "flat_hash_map.hpp"
@@ -18,71 +18,69 @@
 
 #include <type_traits>
 
-using Rng = sfc64;
-
 void random_std_map(int max) {
-  Rng rng(123);
+  Lrand<int> rng;
 
-  LGBench b("random_std_map");
+  Lbench b("random_std_map");
 
   std::unordered_map<uint32_t,uint32_t> map;
 
   for (int n = 1; n < 100; ++n) {
     for (int i = 0; i < 10'000; ++i) {
-      int pos = rng.uniform<int>(max);
+      int pos = rng.max(max);
       map[pos] = i;
-      pos = rng.uniform<int>(max);
+      pos = rng.max(max);
       map.erase(pos);
     }
   }
 }
 
 void random_robin_map(int max) {
-  Rng rng(123);
+  Lrand<int> rng;
 
-  LGBench b("random_robin_map " + std::to_string(max));
+  Lbench b("random_robin_map " + std::to_string(max));
 
   robin_hood::unordered_map<uint32_t,uint32_t> map;
 
   for (int n = 1; n < 100; ++n) {
     for (int i = 0; i < 10'000; ++i) {
-      int pos = rng.uniform<int>(max);
+      int pos = rng.max(max);
       map[pos] = i;
-      pos = rng.uniform<int>(max);
+      pos = rng.max(max);
       map.erase(pos);
     }
   }
 }
 
 void random_mmap_map(int max) {
-  Rng rng(123);
+  Lrand<int> rng;
 
   {
-    LGBench b("random_mmap_map (persistent) " + std::to_string(max));
+    Lbench b("random_mmap_map (persistent) " + std::to_string(max));
 
     mmap_lib::map<uint32_t,uint32_t> map("lgdb_bench","bench_map_use_mmap.data");
     map.clear();
 
   for (int n = 1; n < 100; ++n) {
     for (int i = 0; i < 10'000; ++i) {
-      uint32_t pos = rng.uniform<int>(max);
+      uint32_t pos = rng.max(max);
       map.set(pos,i);
-      pos = rng.uniform<int>(max);
+      pos = rng.max(max);
       map.erase(pos);
       }
     }
   }
   {
-    LGBench b("random_mmap_map (effemeral) " + std::to_string(max));
+    Lbench b("random_mmap_map (effemeral) " + std::to_string(max));
 
     mmap_lib::map<uint32_t,uint32_t> map;
     map.clear();
 
     for (int n = 1; n < 100; ++n) {
       for (int i = 0; i < 10'000; ++i) {
-        uint32_t pos = rng.uniform<int>(max);
+        uint32_t pos = rng.max(max);
         map.set(pos,i);
-        pos = rng.uniform<int>(max);
+        pos = rng.max(max);
         map.erase(pos);
       }
     }
@@ -90,86 +88,86 @@ void random_mmap_map(int max) {
 }
 
 void random_abseil_map(int max) {
-  Rng rng(123);
+  Lrand<int> rng;
 
-  LGBench b("random_abseil_map" + std::to_string(max));
+  Lbench b("random_abseil_map" + std::to_string(max));
 
   absl::flat_hash_map<uint32_t,uint32_t> map;
 
   for (int n = 1; n < 100; ++n) {
     for (int i = 0; i < 10'000; ++i) {
-      int pos = rng.uniform<int>(max);
+      int pos = rng.max(max);
       map[pos] = i;
-      pos = rng.uniform<int>(max);
+      pos = rng.max(max);
       map.erase(pos);
     }
   }
 }
 
 void random_ska_map(int max) {
-  Rng rng(123);
+  Lrand<int> rng;
 
-  LGBench b("random_ska_map" + std::to_string(max));
+  Lbench b("random_ska_map" + std::to_string(max));
 
   ska::flat_hash_map<uint32_t,uint32_t> map;
 
   for (int n = 1; n < 100; ++n) {
     for (int i = 0; i < 10'000; ++i) {
-      int pos = rng.uniform<int>(max);
+      int pos = rng.max(max);
       map[pos] = i;
-      pos = rng.uniform<int>(max);
+      pos = rng.max(max);
       map.erase(pos);
     }
   }
 }
 
 void random_vector_map(int max) {
-  Rng rng(123);
+  Lrand<int> rng;
 
-  LGBench b("random_vector_map" + std::to_string(max));
+  Lbench b("random_vector_map" + std::to_string(max));
 
   std::vector<uint32_t> map;
   map.resize(max);
 
   for (int n = 1; n < 100; ++n) {
     for (int i = 0; i < 10'000; ++i) {
-      int pos = rng.uniform<int>(max);
+      int pos = rng.max(max);
       map[pos] = i;
-      pos = rng.uniform<int>(max);
+      pos = rng.max(max);
       map[pos] = 0;
     }
   }
 }
 
 void random_mmap_vector(int max) {
-  Rng rng(123);
+  Lrand<int> rng;
 
   {
-    LGBench b("random_mmap_vector (persistent)");
+    Lbench b("random_mmap_vector (persistent)");
 
     mmap_lib::vector<uint32_t> map("lgdb_bench","bench_map_use_vector.data");
     map.reserve(max);
 
     for (int n = 1; n < 100; ++n) {
       for (int i = 0; i < 10'000; ++i) {
-        int pos = rng.uniform<int>(max);
+        int pos = rng.max(max);
         map.set(pos, i);
-        pos = rng.uniform<int>(max);
+        pos = rng.max(max);
         map.set(pos, 0);
       }
     }
   }
   {
-    LGBench b("random_mmap_vector (effemeral)");
+    Lbench b("random_mmap_vector (effemeral)");
 
     mmap_lib::vector<uint32_t> map;
     map.reserve(max);
 
     for (int n = 1; n < 100; ++n) {
       for (int i = 0; i < 10'000; ++i) {
-        int pos = rng.uniform<int>(max);
+        int pos = rng.max(max);
         map.set(pos,i);
-        pos = rng.uniform<int>(max);
+        pos = rng.max(max);
         map.set(pos,0);
       }
     }

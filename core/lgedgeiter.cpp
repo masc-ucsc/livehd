@@ -299,6 +299,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_next() {
 }
 
 void Bwd_edge_iterator::Bwd_iter::bwd_first(LGraph *lg) {
+  (void)lg;
   I(pending_stack.empty());
   I(visited.empty());
 }

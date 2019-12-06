@@ -149,15 +149,15 @@ const Sub_node &LGraph_Node_Type::get_type_sub_node(std::string_view sub_name) c
   return library->get_sub(sub_name);
 }
 
-Sub_node &LGraph_Node_Type::get_type_sub_node(Index_ID nid) {
+Sub_node *LGraph_Node_Type::ref_type_sub_node(Index_ID nid) {
   auto sub_lgid = get_type_sub(nid);
   I(sub_lgid!=lgid); // No recursion
-  return library->get_sub(sub_lgid);
+  return library->ref_sub(sub_lgid);
 }
 
-Sub_node &LGraph_Node_Type::get_type_sub_node(std::string_view sub_name) {
+Sub_node *LGraph_Node_Type::ref_type_sub_node(std::string_view sub_name) {
   I(name!=sub_name); // No recursion
-  return library->get_sub(sub_name);
+  return library->ref_sub(sub_name);
 }
 
 void LGraph_Node_Type::set_type_const_value(Index_ID nid, std::string_view value) {

@@ -6,13 +6,11 @@
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-#include "rng.hpp"
+#include "lrand.hpp"
 
 #include "mmap_gc.hpp"
 
 using testing::HasSubstr;
-
-unsigned int rseed = 123;
 
 class Setup_mmap_gc_test : public ::testing::Test {
 protected:
@@ -56,7 +54,7 @@ TEST_F(Setup_mmap_gc_test, fd_limit) {
 }
 
 TEST_F(Setup_mmap_gc_test, mmap_limit) {
-  Rng rng(15);
+  Lrand<uint8_t> rng;
   struct track_entry {
     std::string name;
     void *base;
@@ -70,7 +68,7 @@ TEST_F(Setup_mmap_gc_test, mmap_limit) {
     std::string name("mmap_gc_test_file");
 
     entry.name = name + std::to_string(i) + ".data";
-    if (rng.uniform<char>(0x80) >= 0x60)
+    if (rng.max(0x80) >= 0x60)
       entry.fd  = mmap_lib::mmap_gc::open(name);
     else
       entry.fd  = -1;

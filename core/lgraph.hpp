@@ -220,7 +220,8 @@ public:
   Node create_node_sub(Lg_type_id sub);
   Node create_node_sub(std::string_view sub_name);
 
-  Sub_node         &get_self_sub_node() const; // Access all input/outputs
+  const Sub_node   &get_self_sub_node() const; // Access all input/outputs
+  Sub_node         *ref_self_sub_node(); // Access all input/outputs
 
   void dump();
   void dump_down_nodes();

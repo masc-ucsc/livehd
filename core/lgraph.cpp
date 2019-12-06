@@ -49,11 +49,11 @@ LGraph *LGraph::clone_skeleton(std::string_view extended_name) {
   auto lg_name   = absl::StrCat(get_name(), extended_name);
   LGraph *new_lg = LGraph::create(get_path(), lg_name, lg_source);
 
-  auto &new_sub = new_lg->get_self_sub_node();
-  new_sub.reset_pins(); // NOTE: it may have been created before. Clear to keep same order/attributes
+  auto *new_sub = new_lg->ref_self_sub_node();
+  new_sub->reset_pins(); // NOTE: it may have been created before. Clear to keep same order/attributes
 
   for(const auto &old_io_pin:get_self_sub_node().get_io_pins()) {
-    new_sub.add_pin(old_io_pin.name, old_io_pin.dir, old_io_pin.graph_io_pos);
+    new_sub->add_pin(old_io_pin.name, old_io_pin.dir, old_io_pin.graph_io_pos);
   }
 
   auto inp_node = Node(this, Hierarchy_tree::root_index(), Node::Hardcoded_input_nid);
@@ -226,9 +226,9 @@ Node_pin LGraph::add_graph_input(std::string_view str, Port_ID pos, uint32_t bit
 
   Port_ID inst_pid;
   if (get_self_sub_node().has_pin(str)) {
-    inst_pid = get_self_sub_node().map_graph_pos(str, Sub_node::Direction::Input, pos); // reset pin stats
+    inst_pid = ref_self_sub_node()->map_graph_pos(str, Sub_node::Direction::Input, pos); // reset pin stats
   }else{
-    inst_pid = get_self_sub_node().add_pin(str, Sub_node::Direction::Input, pos);
+    inst_pid = ref_self_sub_node()->add_pin(str, Sub_node::Direction::Input, pos);
   }
   I(node_type_table[Node::Hardcoded_input_nid] == GraphIO_Op);
 
@@ -252,9 +252,9 @@ Node_pin LGraph::add_graph_output(std::string_view str, Port_ID pos, uint32_t bi
 
   Port_ID inst_pid;
   if (get_self_sub_node().has_pin(str)) {
-    inst_pid = get_self_sub_node().map_graph_pos(str, Sub_node::Direction::Output, pos); // reset pin stats
+    inst_pid = ref_self_sub_node()->map_graph_pos(str, Sub_node::Direction::Output, pos); // reset pin stats
   }else{
-    inst_pid = get_self_sub_node().add_pin(str, Sub_node::Direction::Output, pos);
+    inst_pid = ref_self_sub_node()->add_pin(str, Sub_node::Direction::Output, pos);
   }
   I(node_type_table[Node::Hardcoded_output_nid] == GraphIO_Op);
 
@@ -633,8 +633,12 @@ Node LGraph::create_node_sub(std::string_view sub_name) {
   return Node(this, Hierarchy_tree::root_index(), nid);
 }
 
-Sub_node &LGraph::get_self_sub_node() const {
+const Sub_node &LGraph::get_self_sub_node() const {
   return library->get_sub(get_lgid());
+}
+
+Sub_node *LGraph::ref_self_sub_node() {
+  return library->ref_sub(get_lgid());
 }
 
 #if 0

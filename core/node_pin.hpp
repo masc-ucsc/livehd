@@ -311,6 +311,7 @@ public:
   void     set_bits(uint32_t bits);
 
   std::string_view get_type_sub_io_name() const;
+  std::string_view get_type_sub_pin_name() const;
 
   void set_offset(uint16_t offset);
   uint16_t get_offset() const;

@@ -6,7 +6,7 @@
 #include <vector>
 #include <string>
 
-#include "rng.hpp"
+#include "lrand.hpp"
 #include "mmap_tree.hpp"
 
 #include "attribute.hpp"
@@ -38,7 +38,7 @@ protected:
   using Fwd_pos_attr  = Attribute<fwd_name,Node ,mmap_lib::map<Node::Compact, uint64_t> >;
   using Bwd_pos_attr  = Attribute<bwd_name,Node ,mmap_lib::map<Node::Compact, uint64_t> >;
 
-  void map_tree_to_lgraph(int rseed) {
+  void map_tree_to_lgraph() {
     std::vector<mmap_lib::Tree_index> index_order;
 
     tree.each_top_down_fast([&index_order](const mmap_lib::Tree_index &index, const Node_data &node) {
@@ -59,8 +59,8 @@ protected:
 
     node_order.clear();
 
-    Rng rint(rseed);
-    RandomBool rbool;
+    Lrand<int>  rint;
+    Lrand<bool> rbool;
 
     for(const auto &index:index_order) {
       const auto &data = tree.get_data(index);
@@ -73,7 +73,7 @@ protected:
       LGraph *parent_lg = LGraph::open("lgdb_hierarchy_test", parent_data.name);
       I(parent_lg);
       Node node;
-      if (data.leaf && rbool(rint)) {
+      if (data.leaf && rbool.any()) {
         node = parent_lg->create_node(Sum_Op,10);
       } else {
         node = parent_lg->create_node_sub(data.name);
@@ -82,20 +82,20 @@ protected:
         I(node.get_class_lgraph() == parent_lg);
         I(node.get_type_sub() == sub_lg->get_lgid());
 
-        int n_inputs  = rint.uniform<int>(1)+1; // At least one
-        int n_outputs = rint.uniform<int>(1)+1; // At least one
+        int n_inputs  = rint.between(1,2);
+        int n_outputs = rint.between(1,2);
         int max_pos = 0;
         for(int i=0;i<n_inputs;++i) {
           std::string name = std::string("i") + std::to_string(i);
-          int pos = max_pos+rint.uniform<int>(4)+1;
+          int pos = max_pos+rint.between(1,5);
           max_pos = pos;
-          sub_lg->add_graph_input(name, pos, rint.uniform<int>(60));
+          sub_lg->add_graph_input(name, pos, rint.max(60));
         }
         for(int i=0;i<n_outputs;++i) {
           std::string name = std::string("o") + std::to_string(i);
-          int pos = max_pos+rint.uniform<int>(4)+1;
+          int pos = max_pos+rint.between(1,5);
           max_pos = pos;
-          sub_lg->add_graph_output(name, pos, rint.uniform<int>(60));
+          sub_lg->add_graph_output(name, pos, rint.max(60));
         }
       }
       tree.ref_data(index)->cnode = node.get_compact();
@@ -156,8 +156,8 @@ protected:
         I(curr_node.get_type().op == SubGraph_Op);
       }
 
-      bool connect_inp = rbool(rint);
-      bool connect_out = rbool(rint) || (i+1) == node_order.size(); // Add the last one
+      bool connect_inp = rbool.any();
+      bool connect_out = rbool.any() || (i+1) == node_order.size(); // Add the last one
       if (prev_node.get_class_lgraph() == curr_node.get_class_lgraph()) {
         dpin.connect_sink(spin);
       } else {
@@ -176,6 +176,7 @@ protected:
     }
 
     lg_root->get_library().each_lgraph([this](Lg_type_id lgid, std::string_view name) {
+        (void)lgid;
         LGraph *lg = LGraph::open(lg_root->get_path(), name);
         I(lg);
         if (lg->is_empty())
@@ -231,7 +232,7 @@ protected:
     }
   }
 
-  void populate_tree(int rseed, const int max_depth, const int size, const double leaf_ratio_goal, const bool unique) {
+  void populate_tree(const int max_depth, const int size, const double leaf_ratio_goal, const bool unique) {
 
     tree.clear();
 
@@ -242,17 +243,17 @@ protected:
 
     I(max_depth>1);
 
-    Rng rint(rseed);
-    RandomBool rbool;
+    Lrand<int>  rint;
+    Lrand<bool> rbool;
 
     int max_level=1;
     int n_leafs = 0;
     for(int i=0;i<size;++i) {
       int level = 0;
-      level = rint.uniform<int>(max_level);
+      level = rint.max(max_level);
       I(level<max_depth);
 
-      mmap_lib::Tree_index index(level, rint.uniform<int>(tree.get_tree_width(level)));
+      mmap_lib::Tree_index index(level, rint.max(tree.get_tree_width(level)));
 
       Node_data data;
       data.create_pos = i+1;
@@ -298,8 +299,8 @@ protected:
 
     if (!unique) {
       for(int i=0;i<size/32;i++) {
-        mmap_lib::Tree_index insert_point(rint.uniform<int>(max_level), rint.uniform<int>(tree.get_tree_width(max_level)));
-        mmap_lib::Tree_index copy_point(rint.uniform<int>(max_level), rint.uniform<int>(tree.get_tree_width(max_level)));
+        mmap_lib::Tree_index insert_point(rint.max(max_level), rint.max(tree.get_tree_width(max_level)));
+        mmap_lib::Tree_index copy_point(rint.max(max_level), rint.max(tree.get_tree_width(max_level)));
 
         if (tree.is_child_of(copy_point,insert_point)) // No recursion insert
           continue;

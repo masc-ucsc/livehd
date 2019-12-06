@@ -10,7 +10,7 @@ cc_library(
         "@iassert//:iassert",
         "//eprp:eprp",
         "//mmap_lib:headers",
-        "//bench:headers",
+        "//lbench:headers",
         ],
     )
 
@@ -81,6 +81,7 @@ cc_test(
     name = "edge_test",
     srcs = ["tests/edge_test.cpp"],
     deps = [
+        "@gtest//:gtest_main",
         ":core",
         ],
     )

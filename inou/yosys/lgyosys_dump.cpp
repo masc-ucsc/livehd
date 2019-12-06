@@ -248,12 +248,14 @@ void Lgyosys_dump::create_subgraph(LGraph *g, RTLIL::Module *module, Node &node)
   fmt::print("inou_yosys instance_name:{}, subgraph->get_name():{}\n", node.get_name(), sub.get_name());
   for(const auto &e:node.inp_edges()) {
     auto  port_name = e.sink.get_type_sub_io_name();
+    // auto  port_name = e.sink.get_type_sub_pin_name();
     fmt::print("input:{}\n", port_name);
     RTLIL::Wire *input = get_wire(e.driver);
     new_cell->setPort(absl::StrCat("\\", port_name).c_str(), input);
   }
   for(const auto &dpin:node.out_connected_pins()) {
     auto  port_name = dpin.get_type_sub_io_name();
+    // auto  port_name = dpin.get_type_sub_pin_name();
     fmt::print("output:{}\n", port_name);
     RTLIL::Wire *output = get_wire(dpin);
     new_cell->setPort(absl::StrCat("\\", port_name).c_str(), output);

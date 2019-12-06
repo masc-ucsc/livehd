@@ -8,6 +8,7 @@
 #include <functional>
 #include <vector>
 
+#include "mmap_map.hpp" // To add the hash for trees
 #include "iassert.hpp"
 
 namespace mmap_lib {
@@ -41,6 +42,15 @@ public:
   bool is_invalid() const { return level == -1 || pos == -1; }
   void invalidate() { level = -1; pos = -1; }
   bool is_root() const { return level == 0; }
+};
+
+template <>
+struct hash<Tree_index> {
+  size_t operator()(Tree_index const &o) const {
+    uint64_t h = o.level;
+    h = (h<<32) | o.pos;
+    return hash<uint64_t>{}(h);
+  }
 };
 
 template <typename X>

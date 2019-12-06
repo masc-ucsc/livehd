@@ -7,16 +7,14 @@
 #include <iostream>
 
 //#include "bm.h"
-#include "rng.hpp"
-#include "lgbench.hpp"
+#include "lrand.hpp"
+#include "lbench.hpp"
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/flat_hash_map.h"
 #include "flat_hash_map.hpp"
 #include "robin_hood.hpp"
 
 #include "mmap_map.hpp"
-
-using Rng = sfc64;
 
 #define BENCH_OUT_SIZE 500
 #define BENCH_INN_SIZE 200
@@ -25,18 +23,18 @@ using Rng = sfc64;
 //#define USE_MAP_FALSE
 
 void random_std_set(int max) {
-  Rng rng(123);
+  Lrand<int> rng;
 
-  LGBench b("random_std_set");
+  Lbench b("random_std_set");
 
   std::unordered_set<uint32_t> map;
 
   for (int n = 1; n < BENCH_OUT_SIZE; ++n) {
     for (int i = 0; i < BENCH_INN_SIZE; ++i) {
-      auto pos = rng.uniform<int>(max);
+      auto pos = rng.max(max);
       map.insert(pos);
-      pos = rng.uniform<int>(max); map.erase(pos);
-      pos = rng.uniform<int>(max);
+      pos = rng.max(max); map.erase(pos);
+      pos = rng.max(max);
       if (map.find(pos) != map.end())
         map.erase(pos);
     }
@@ -48,8 +46,8 @@ void random_std_set(int max) {
     for (auto it = map.begin(), end = map.end(); it != end;++it) {
       conta++;
     }
-    map.insert(rng.uniform<int>(max));
-    auto pos = rng.uniform<int>(max);
+    map.insert(rng.max(max));
+    auto pos = rng.max(max);
     if (map.find(pos) != map.end())
       map.erase(pos);
   }
@@ -59,10 +57,10 @@ void random_std_set(int max) {
   conta = 0;
 
   for (int i = 0; i < max; ++i) {
-    map.erase(rng.uniform<int>(max));
-    map.erase(rng.uniform<int>(max));
-    map.erase(rng.uniform<int>(max));
-    map.erase(rng.uniform<int>(max));
+    map.erase(rng.max(max));
+    map.erase(rng.max(max));
+    map.erase(rng.max(max));
+    map.erase(rng.max(max));
   }
 
   for (int i = 0; i < BENCH_INN_SIZE; ++i) {
@@ -76,24 +74,24 @@ void random_std_set(int max) {
 }
 
 void random_robin_set(int max) {
-  Rng rng(123);
+  Lrand<int> rng;
 
-  LGBench b("random_robin_set");
+  Lbench b("random_robin_set");
 
   robin_hood::unordered_map<uint32_t,bool> map;
 
   for (int n = 1; n < BENCH_OUT_SIZE; ++n) {
     for (int i = 0; i < BENCH_INN_SIZE; ++i) {
-      auto pos = rng.uniform<int>(max);
+      auto pos = rng.max(max);
       map[pos] = true;
 #ifdef USE_MAP_FALSE
-      map[rng.uniform<int>(max)] = false;
-      pos = rng.uniform<int>(max);
+      map[rng.max(max)] = false;
+      pos = rng.max(max);
       if (map.find(pos) != map.end())
         map[pos] = false;
 #else
-      pos = rng.uniform<int>(max); map.erase(pos);
-      pos = rng.uniform<int>(max);
+      pos = rng.max(max); map.erase(pos);
+      pos = rng.max(max);
       if (map.find(pos) != map.end())
         map.erase(pos);
 #endif
@@ -113,13 +111,13 @@ void random_robin_set(int max) {
       conta++;
 #endif
     }
-    map[rng.uniform<int>(max)] = true;
+    map[rng.max(max)] = true;
 #ifdef USE_MAP_FALSE
-    auto pos = rng.uniform<int>(max);
+    auto pos = rng.max(max);
     if (map.find(pos) != map.end())
       map[pos] = false;
 #else
-    auto pos = rng.uniform<int>(max);
+    auto pos = rng.max(max);
     if (map.find(pos) != map.end())
       map.erase(pos);
 #endif
@@ -131,15 +129,15 @@ void random_robin_set(int max) {
 
   for (int i = 0; i < max; ++i) {
 #ifdef USE_MAP_FALSE
-    map[rng.uniform<int>(max)] = false;
-    map[rng.uniform<int>(max)] = false;
-    map[rng.uniform<int>(max)] = false;
-    map[rng.uniform<int>(max)] = false;
+    map[rng.max(max)] = false;
+    map[rng.max(max)] = false;
+    map[rng.max(max)] = false;
+    map[rng.max(max)] = false;
 #else
-    map.erase(rng.uniform<int>(max));
-    map.erase(rng.uniform<int>(max));
-    map.erase(rng.uniform<int>(max));
-    map.erase(rng.uniform<int>(max));
+    map.erase(rng.max(max));
+    map.erase(rng.max(max));
+    map.erase(rng.max(max));
+    map.erase(rng.max(max));
 #endif
   }
 
@@ -161,7 +159,7 @@ void random_robin_set(int max) {
 }
 
 void random_mmap_set(int max, std::string_view name) {
-  Rng rng(123);
+  Lrand<int> rng;
 
   std::string type_test("mmap_map_set ");
   if (name.empty())
@@ -169,22 +167,22 @@ void random_mmap_set(int max, std::string_view name) {
   else
     type_test += "(persistent)";
 
-  LGBench b(type_test);
+  Lbench b(type_test);
 
   mmap_lib::map<uint32_t,bool> map(name.empty()?"":"lgdb_bench", name);
 
   for (int n = 1; n < BENCH_OUT_SIZE; ++n) {
     for (int i = 0; i < BENCH_INN_SIZE; ++i) {
-      auto pos = rng.uniform<uint32_t>(max);
+      auto pos = rng.max(max);
       map.set(pos,true);
 #ifdef USE_MAP_FALSE
-      map[rng.uniform<int>(max)] = false;
-      pos = rng.uniform<int>(max);
+      map[rng.max(max)] = false;
+      pos = rng.max(max);
       if (map.find(pos) != map.end())
         map[pos] = false;
 #else
-      pos = rng.uniform<int>(max); map.erase(pos);
-      pos = rng.uniform<int>(max);
+      pos = rng.max(max); map.erase(pos);
+      pos = rng.max(max);
       if (map.find(pos) != map.end())
         map.erase(pos);
 #endif
@@ -204,13 +202,13 @@ void random_mmap_set(int max, std::string_view name) {
       conta++;
 #endif
     }
-    map.set(rng.uniform<uint32_t>(max),true);
+    map.set(rng.max(max),true);
 #ifdef USE_MAP_FALSE
-    auto pos = rng.uniform<int>(max);
+    auto pos = rng.max(max);
     if (map.find(pos) != map.end())
       map.set(pos,false);
 #else
-    auto pos = rng.uniform<int>(max);
+    auto pos = rng.max(max);
     if (map.find(pos) != map.end())
       map.erase(pos);
 #endif
@@ -222,15 +220,15 @@ void random_mmap_set(int max, std::string_view name) {
 
   for (int i = 0; i < max; ++i) {
 #ifdef USE_MAP_FALSE
-    map.set(rng.uniform<uint32_t>(max),false);
-    map.set(rng.uniform<uint32_t>(max),false);
-    map.set(rng.uniform<uint32_t>(max),false);
-    map.set(rng.uniform<uint32_t>(max),false);
+    map.set(rng.max(max),false);
+    map.set(rng.max(max),false);
+    map.set(rng.max(max),false);
+    map.set(rng.max(max),false);
 #else
-    map.erase(rng.uniform<int>(max));
-    map.erase(rng.uniform<int>(max));
-    map.erase(rng.uniform<int>(max));
-    map.erase(rng.uniform<int>(max));
+    map.erase(rng.max(max));
+    map.erase(rng.max(max));
+    map.erase(rng.max(max));
+    map.erase(rng.max(max));
 #endif
   }
 
@@ -253,9 +251,9 @@ void random_mmap_set(int max, std::string_view name) {
 }
 
 void random_abseil_set(int max) {
-  Rng rng(123);
+  Lrand<int> rng;
 
-  LGBench b("random_abseil_set");
+  Lbench b("random_abseil_set");
 
 #ifdef ABSEIL_USE_MAP
   absl::flat_hash_map<uint32_t, bool> map;
@@ -265,22 +263,22 @@ void random_abseil_set(int max) {
 
   for (int n = 1; n < BENCH_OUT_SIZE; ++n) {
     for (int i = 0; i < BENCH_INN_SIZE; ++i) {
-      auto pos = rng.uniform<int>(max);
+      auto pos = rng.max(max);
 #ifdef ABSEIL_USE_MAP
       map[pos]=true;
 #else
       map.insert(pos);
 #endif
 
-      pos = rng.uniform<int>(max);
+      pos = rng.max(max);
 #ifdef USE_MAP_FALSE
       map[pos]=false;
-      pos = rng.uniform<int>(max);
+      pos = rng.max(max);
       if (map.find(pos) != map.end())
         map[pos]=false;
 #else
       map.erase(pos);
-      pos = rng.uniform<int>(max);
+      pos = rng.max(max);
       if (map.find(pos) != map.end())
         map.erase(pos);
 #endif
@@ -301,22 +299,22 @@ void random_abseil_set(int max) {
 #endif
     }
 #ifdef ABSEIL_USE_MAP
-    map[rng.uniform<int>(max)] = true;
+    map[rng.max(max)] = true;
 #ifdef USE_MAP_FALSE
-    map[rng.uniform<int>(max)] = false;
-    auto pos = rng.uniform<int>(max);
+    map[rng.max(max)] = false;
+    auto pos = rng.max(max);
     if (map.find(pos) != map.end())
       map[pos] = false;
 #else
-    map.erase(rng.uniform<int>(max));
-    auto pos = rng.uniform<int>(max);
+    map.erase(rng.max(max));
+    auto pos = rng.max(max);
     if (map.find(pos) != map.end())
       map.erase(pos);
 #endif
 #else
-    map.insert(rng.uniform<int>(max));
-    map.erase(rng.uniform<int>(max));
-    auto pos = rng.uniform<int>(max);
+    map.insert(rng.max(max));
+    map.erase(rng.max(max));
+    auto pos = rng.max(max);
     if (map.find(pos) != map.end())
       map.erase(pos);
 #endif
@@ -328,15 +326,15 @@ void random_abseil_set(int max) {
 
   for (int i = 0; i < max; ++i) {
 #ifdef USE_MAP_FALSE
-    map[rng.uniform<int>(max)] = false;
-    map[rng.uniform<int>(max)] = false;
-    map[rng.uniform<int>(max)] = false;
-    map[rng.uniform<int>(max)] = false;
+    map[rng.max(max)] = false;
+    map[rng.max(max)] = false;
+    map[rng.max(max)] = false;
+    map[rng.max(max)] = false;
 #else
-    map.erase(rng.uniform<int>(max));
-    map.erase(rng.uniform<int>(max));
-    map.erase(rng.uniform<int>(max));
-    map.erase(rng.uniform<int>(max));
+    map.erase(rng.max(max));
+    map.erase(rng.max(max));
+    map.erase(rng.max(max));
+    map.erase(rng.max(max));
 #endif
   }
 
@@ -358,26 +356,26 @@ void random_abseil_set(int max) {
 }
 
 void random_ska_set(int max) {
-  Rng rng(123);
+  Lrand<int> rng;
 
-  LGBench b("random_ska_set");
+  Lbench b("random_ska_set");
 
   ska::flat_hash_map<uint32_t,bool> map;
 
   for (int n = 1; n < BENCH_OUT_SIZE; ++n) {
     for (int i = 0; i < BENCH_INN_SIZE; ++i) {
-      int pos = rng.uniform<int>(max);
+      int pos = rng.max(max);
       map[pos] = true;
 #ifdef USE_MAP_FALSE
-      pos = rng.uniform<int>(max);
+      pos = rng.max(max);
       map[pos] = false;
-      pos = rng.uniform<int>(max);
+      pos = rng.max(max);
       if (map.find(pos) != map.end())
         map[pos] = false;
 #else
-      pos = rng.uniform<int>(max);
+      pos = rng.max(max);
       map.erase(pos);
-      pos = rng.uniform<int>(max);
+      pos = rng.max(max);
       if (map.find(pos) != map.end())
         map.erase(pos);
 #endif
@@ -398,11 +396,11 @@ void random_ska_set(int max) {
 #endif
     }
 #ifdef USE_MAP_FALSE
-    map[rng.uniform<int>(max)] = false;
+    map[rng.max(max)] = false;
 #else
-    map.erase(rng.uniform<int>(max));
+    map.erase(rng.max(max));
 #endif
-    map[rng.uniform<int>(max)] = true;
+    map[rng.max(max)] = true;
   }
   b.sample("traversal sparse");
 
@@ -411,15 +409,15 @@ void random_ska_set(int max) {
 
   for (int i = 0; i < max; ++i) {
 #ifdef USE_MAP_FALSE
-    map[rng.uniform<int>(max)] = false;
-    map[rng.uniform<int>(max)] = false;
-    map[rng.uniform<int>(max)] = false;
-    map[rng.uniform<int>(max)] = false;
+    map[rng.max(max)] = false;
+    map[rng.max(max)] = false;
+    map[rng.max(max)] = false;
+    map[rng.max(max)] = false;
 #else
-    map.erase(rng.uniform<int>(max));
-    map.erase(rng.uniform<int>(max));
-    map.erase(rng.uniform<int>(max));
-    map.erase(rng.uniform<int>(max));
+    map.erase(rng.max(max));
+    map.erase(rng.max(max));
+    map.erase(rng.max(max));
+    map.erase(rng.max(max));
 #endif
   }
 
@@ -441,20 +439,20 @@ void random_ska_set(int max) {
 }
 
 void random_vector_set(int max) {
-  Rng rng(123);
+  Lrand<int> rng;
 
-  LGBench b("random_vector_set");
+  Lbench b("random_vector_set");
 
   std::vector<bool> map;
   map.resize(max);
 
   for (int n = 1; n < BENCH_OUT_SIZE; ++n) {
     for (int i = 0; i < BENCH_INN_SIZE; ++i) {
-      int pos = rng.uniform<int>(max);
+      int pos = rng.max(max);
       map[pos] = true;
-      pos = rng.uniform<int>(max);
+      pos = rng.max(max);
       map[pos] = false;
-      pos = rng.uniform<int>(max);
+      pos = rng.max(max);
       if (map[pos] == true)
         map[pos] = false;
     }
@@ -467,8 +465,8 @@ void random_vector_set(int max) {
       if (e)
         conta++;
     }
-    map[rng.uniform<int>(max)] = true;
-    auto pos = rng.uniform<int>(max);
+    map[rng.max(max)] = true;
+    auto pos = rng.max(max);
     if (map[pos])
       map[pos] = false;
   }
@@ -478,10 +476,10 @@ void random_vector_set(int max) {
   conta = 0;
 
   for (int i = 0; i < max; ++i) {
-    map[rng.uniform<int>(max)] = false;
-    map[rng.uniform<int>(max)] = false;
-    map[rng.uniform<int>(max)] = false;
-    map[rng.uniform<int>(max)] = false;
+    map[rng.max(max)] = false;
+    map[rng.max(max)] = false;
+    map[rng.max(max)] = false;
+    map[rng.max(max)] = false;
   }
 
   for (int i = 0; i < BENCH_INN_SIZE; ++i) {
@@ -497,17 +495,17 @@ void random_vector_set(int max) {
 
 #if 0
 void random_bm_set(int max) {
-  Rng rng(123);
+  Lrand<int> rng;
 
-  LGBench b("random_bm_set");
+  Lbench b("random_bm_set");
 
   bm::bvector<> bm;
 
   for (int n = 1; n < BENCH_OUT_SIZE; ++n) {
     for (int i = 0; i < BENCH_INN_SIZE; ++i) {
-      int pos = rng.uniform<int>(max);
+      int pos = rng.max(max);
       bm.set_bit(pos);
-      pos = rng.uniform<int>(max);
+      pos = rng.max(max);
       if (bm.get_bit(pos)) {
         bm.clear_bit(pos);
       }
@@ -522,9 +520,9 @@ void random_bm_set(int max) {
       conta++;
       value = bm.get_next(value);
     } while(value);
-    int pos = rng.uniform<int>(max);
+    int pos = rng.max(max);
     bm.set_bit(pos);
-    pos = rng.uniform<int>(max);
+    pos = rng.max(max);
     if (bm.get_bit(pos)) {
       bm.clear_bit(pos);
     }
@@ -536,10 +534,10 @@ void random_bm_set(int max) {
   conta = 0;
 
   for (int i = 0; i < max; ++i) {
-    bm.clear_bit(rng.uniform<int>(max));
-    bm.clear_bit(rng.uniform<int>(max));
-    bm.clear_bit(rng.uniform<int>(max));
-    bm.clear_bit(rng.uniform<int>(max));
+    bm.clear_bit(rng.max(max));
+    bm.clear_bit(rng.max(max));
+    bm.clear_bit(rng.max(max));
+    bm.clear_bit(rng.max(max));
   }
 
   for (int i = 0; i < BENCH_INN_SIZE; ++i) {

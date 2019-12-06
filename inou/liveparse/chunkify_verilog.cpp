@@ -11,7 +11,7 @@
 #include <set>
 #include <string>
 
-#include "lgbench.hpp"
+#include "lbench.hpp"
 #include "eprp_utils.hpp"
 #include "graph_library.hpp"
 #include "inou_liveparse.hpp"
@@ -125,7 +125,7 @@ void Chunkify_verilog::add_io(Sub_node *sub, bool input, std::string_view io_nam
 
 void Chunkify_verilog::elaborate() {
 
-  LGBench bench("live.parse");
+  Lbench bench("live.parse");
 
   std::string format_name(buffer_name);
   for(size_t i = 0; i < buffer_name.size(); i++) {

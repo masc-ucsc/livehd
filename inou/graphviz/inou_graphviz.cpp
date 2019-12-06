@@ -5,7 +5,7 @@
 #include <fstream>
 
 #include "eprp_utils.hpp"
-#include "lgbench.hpp"
+#include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraphbase.hpp"
 

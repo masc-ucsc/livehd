@@ -15,7 +15,7 @@ cc_library(
         "//mmap_lib:headers",
         "@fmt",
         "@iassert",
-        "//bench:headers",
+        "//lbench:headers",
         ],
     )
 

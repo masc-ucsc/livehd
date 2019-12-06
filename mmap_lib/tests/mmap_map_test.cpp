@@ -10,7 +10,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "mmap_map.hpp"
 #include "mmap_bimap.hpp"
-#include "rng.hpp"
+#include "lrand.hpp"
 
 using testing::HasSubstr;
 
@@ -25,7 +25,7 @@ protected:
 };
 
 TEST_F(Setup_mmap_map_test, string_data) {
-  Rng rng(123);
+  Lrand<int> rng;
 
   bool zero_found = false;
   while(!zero_found) {
@@ -35,7 +35,7 @@ TEST_F(Setup_mmap_map_test, string_data) {
 
     int conta = 0;
     for(int i=0;i<10000;i++) {
-      int key = rng.uniform<int>(0xFFFF);
+      int key = rng.max(0xFFFF);
       std::string key_str = std::to_string(key)+"foo";
 
       if (map.has(key)) {
@@ -78,7 +78,7 @@ TEST_F(Setup_mmap_map_test, string_data) {
 }
 
 TEST_F(Setup_mmap_map_test, string_data_persistance) {
-  Rng rng(123);
+  Lrand<int> rng;
 
   absl::flat_hash_map<uint32_t, std::string> map2;
 
@@ -97,7 +97,7 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
 
     conta = 0;
     for(int i=0;i<10000;i++) {
-      int key = rng.uniform<int>(0xFFFF);
+      int key = rng.max(0xFFFF);
       std::string key_str = std::to_string(key)+"foo";
 
       if (map.has(key)) {
@@ -147,7 +147,7 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
 }
 
 TEST_F(Setup_mmap_map_test, string_key) {
-  Rng rng(123);
+  Lrand<int> rng;
 
   for(int n=0;n<4;++n) {
     mmap_lib::map<std::string_view,uint32_t> map;
@@ -156,7 +156,7 @@ TEST_F(Setup_mmap_map_test, string_key) {
 
     int conta = 0;
     for(int i=0;i<100000;i++) {
-      int sz = rng.uniform<int>(0xFFFFF);
+      int sz = rng.max(0xFFFFF);
       std::string sz_str = "base" + std::to_string(sz)+"foo";
       std::string_view key{sz_str};
 
@@ -193,7 +193,7 @@ TEST_F(Setup_mmap_map_test, string_key) {
 }
 
 TEST_F(Setup_mmap_map_test, string_key_persistance) {
-  Rng rng(123);
+  Lrand<int> rng;
 
   mkdir("lgdb_bench", 0755);
   int fd = open("lgdb_bench/mmap_map_test_str",O_WRONLY | O_CREAT,0600); // Try to create a bogus mmap
@@ -211,7 +211,7 @@ TEST_F(Setup_mmap_map_test, string_key_persistance) {
 
     conta = 0;
     for(int i=0;i<10000;i++) {
-      int sz = rng.uniform<int>(0xFFFF);
+      int sz = rng.max(0xFFFF);
       std::string sz_str = std::to_string(sz)+"foo";
       std::string_view key{sz_str};
 
@@ -298,7 +298,7 @@ public:
 };
 
 TEST_F(Setup_mmap_map_test, big_entry) {
-  Rng rng(123);
+  Lrand<int> rng;
 
   mmap_lib::map<uint32_t,Big_entry> map("lgdb_bench", "mmap_map_test_se");
   absl::flat_hash_map<uint32_t,Big_entry> map2;
@@ -327,8 +327,8 @@ TEST_F(Setup_mmap_map_test, big_entry) {
     map.erase(0);
 
 		int conta = 0;
-		for(int i=1;i<rng.uniform<int>(16);++i) {
-			int sz = rng.uniform<int>(0xFFFFFF);
+		for(int i=1;i<rng.max(16);++i) {
+			int sz = rng.max(0xFFFFFF);
 			if (map.find(sz)!=map.end()) {
 				map.erase(sz);
 			}else{
@@ -348,7 +348,7 @@ TEST_F(Setup_mmap_map_test, big_entry) {
 
   int conta = 0;
   for(int i=0;i<10000;i++) {
-    int sz = rng.uniform<int>(0xFFFFFF);
+    int sz = rng.max(0xFFFFFF);
 
     if (map2.find(sz) == map2.end()) {
       EXPECT_EQ(map.has(sz),0);
@@ -400,7 +400,8 @@ struct hash<Big_entry> {
 }
 
 TEST_F(Setup_mmap_map_test, big_key) {
-  Rng rng(123);
+  Lrand<int> rng;
+  Lrand<bool> rbool;
 
   mmap_lib::map<Big_entry,uint32_t> map("lgdb_bench", "mmap_map_test_be");
 	map.clear(); // Remove data from previous runs
@@ -408,10 +409,10 @@ TEST_F(Setup_mmap_map_test, big_key) {
 
   int conta = 0;
   for(int i=0;i<10000;i++) {
-    int sz = rng.uniform<int>(0xFFFFFF);
+    int sz = rng.max(0xFFFFFF);
     Big_entry key(sz);
 
-    if (rng.uniform<bool>()) {
+    if (rbool.any()) {
       map.set(key,sz);
     }else{
       map.set({sz},sz);
@@ -442,12 +443,12 @@ TEST_F(Setup_mmap_map_test, lots_of_strings) {
   const std::vector<std::string> roots = {"potato", "__t", "very_long_string", "a"};
 
   {
-    Rng                                rng(123);
+    Lrand<int> rng;
     mmap_lib::bimap<uint32_t, std::string_view> bimap("lgdb_bench", "mmap_map_large_sview");
     bimap.clear(); // Remove data from previous runs
 
     for (uint32_t i = 0; i < 60'000; ++i) {
-      std::string str = roots[rng.uniform<int>(roots.size())];
+      std::string str = roots[rng.max(roots.size())];
       str             = str + ":" + std::to_string(i);
 
       EXPECT_FALSE(bimap.has_key(i));
@@ -467,11 +468,11 @@ TEST_F(Setup_mmap_map_test, lots_of_strings) {
   }
 
   {
-    Rng                                rng(123); // Same seed
+    Lrand<int> rng; // Same seed
     mmap_lib::bimap<uint32_t, std::string_view> bimap("lgdb_bench", "mmap_map_large_sview");
 
     for (uint32_t i = 0; i < 60'000; ++i) {
-      std::string str = roots[rng.uniform<int>(roots.size())];
+      std::string str = roots[rng.max(roots.size())];
       str             = str + ":" + std::to_string(i);
 
       EXPECT_TRUE(bimap.has_key(i));

@@ -19,7 +19,7 @@
 
 #include "likely.hpp"
 
-class LGBench {
+class Lbench {
 private:
   int parseLine(char *line) {
     // This assumes that a digit will be found and the line ends in " Kb".
@@ -106,14 +106,14 @@ protected:
   }
 
 public:
-  explicit LGBench(const std::string &name)
+  explicit Lbench(const std::string &name)
       : sample_name(name) {
     end_called = false;
     start();
     perf_start(name);
   };
 
-  ~LGBench() {
+  ~Lbench() {
     if(end_called)
       return;
     end();

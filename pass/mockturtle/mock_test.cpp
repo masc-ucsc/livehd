@@ -3,7 +3,7 @@
 #include <sstream>
 #include <cassert>
 
-#include "lgbench.hpp"
+#include "lbench.hpp"
 
 #include <mockturtle/algorithms/cut_enumeration.hpp>
 
@@ -66,7 +66,7 @@ int tmap(mig_network &net) {
 
 void mock_test_or(int net_size) {
 
-  LGBench b("mock_test_or" + std::to_string(net_size));
+  Lbench b("mock_test_or" + std::to_string(net_size));
 
   b.sample("setup");
   mig_network net;
@@ -96,7 +96,7 @@ void mock_test_or(int net_size) {
 
 void mock_test_xor(int net_size) {
 
-  LGBench b("mock_test_xor" + std::to_string(net_size));
+  Lbench b("mock_test_xor" + std::to_string(net_size));
 
   b.sample("setup");
   mig_network net;

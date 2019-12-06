@@ -6,10 +6,8 @@
 
 #include "pass.hpp"
 #include "lnast_parser.hpp"
-#include "lgbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
-
 
 class Inou_lnast_dfg_options {
 public:
