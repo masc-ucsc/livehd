@@ -23,13 +23,14 @@ protected:
 
   void mark_all_outputs(const LGraph *lg, Node_pin &pin);
 
-  /*void iterate_graphio(const LGraph *lg, Index_ID idx);
-  void iterate_logic(const LGraph *lg, Index_ID idx);*/
+  //void iterate_graphio(const LGraph *lg, Index_ID idx);
+  void iterate_logic(const LGraph *lg, Node_pin &pin, Node_Type_Op op);
   void iterate_arith(const LGraph *lg, Node_pin &pin, Node_Type_Op op);
   /*void iterate_shift(const LGraph *lg, Index_ID idx);
-  void iterate_comparison(const LGraph *lg, Index_ID idx);
-  void iterate_pick(const LGraph *lg, Index_ID idx);
-  void iterate_mux(const LGraph *lg, Index_ID idx);
+  void iterate_comparison(const LGraph *lg, Index_ID idx);*/
+  void iterate_pick(const LGraph *lg, Node_pin &pin, Node_Type_Op op);
+  void iterate_join(const LGraph *lg, Node_pin &pin, Node_Type_Op op);
+  /*void iterate_mux(const LGraph *lg, Index_ID idx);
   void iterate_equals(const LGraph *lg, Index_ID idx);
   void iterate_subgraph(const LGraph *lg, Index_ID idx);*/
 

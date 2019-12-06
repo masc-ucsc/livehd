@@ -310,8 +310,32 @@ std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
   int pos = 0;
   auto top_a = top->add_graph_input("a", pos++, 1);
   auto top_b = top->add_graph_input("b", pos++, 1);
-
   auto top_z = top->add_graph_output("z", pos++, 1);
+
+  top->add_edge(top_a,top_z);
+
+  auto sum = top->create_node(Sum_Op);
+
+  auto sum_sink_1 = sum.setup_sink_pin("AU");
+  auto sum_sink_2 = sum.setup_sink_pin("BU");
+  auto sum_driver_1 = sum.setup_driver_pin("Y");
+
+  top->add_edge(top_a,sum_sink_1);
+  top->add_edge(top_b,sum_sink_2);
+  //top->add_edge(sum_driver_1,top_z);
+  sum_driver_1.connect(top_z);
+  sum_driver_1.set_bits(2);
+
+  for (const auto &inp_edge : sum.inp_edges()) {
+    auto dpin = inp_edge.driver;
+    auto spin = inp_edge.sink;
+    fmt::print("\tEDGE: {} -> {}\n", dpin.debug_name(), spin.debug_name());
+  }
+  for (const auto &out_edge : sum.out_edges()) {
+    auto dpin = out_edge.driver;
+    auto spin = out_edge.sink;
+    fmt::print("\tEDGE: {} -> {} {}\n", dpin.debug_name(), spin.debug_name(), spin.get_pid());
+  }
 
   //------------ construct your lgraph end-------------------
 
