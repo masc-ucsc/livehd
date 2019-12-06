@@ -129,7 +129,7 @@ protected:
 
       Node parent_node(lg_root, parent_data.hidx, parent_data.cnode);
       data->hidx = parent_node.hierarchy_go_down();
-      data->lg   = parent_node.get_type_sub_lgraph();
+      data->lg   = parent_node.ref_type_sub_lgraph();
       I(parent_data.name == data->lg->get_name());
     }
 

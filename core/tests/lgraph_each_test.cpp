@@ -43,28 +43,28 @@ protected:
 
       node = parent->create_node_sub(iname);
 
-      auto sub = node.get_type_sub_node();
-      auto parent_sub = parent->get_self_sub_node();
+      auto *sub = node.ref_type_sub_node();
+      const auto &parent_sub = parent->get_self_sub_node();
 
       // Match parent names in tmap
       for(const auto &io_pin:parent_sub.get_io_pins()) {
-        Port_ID pid;
+        Port_ID graph_pos = sub->size();
 
         if (io_pin.dir == Sub_node::Direction::Input) {
-          if (!sub.has_pin(io_pin.name)) {
-            pid = sub.add_pin(io_pin.name, Sub_node::Direction::Input);
+          if (!sub->has_pin(io_pin.name)) {
+            sub->add_pin(io_pin.name, Sub_node::Direction::Input, graph_pos);
 
             auto dpin = parent->get_graph_input(io_pin.name);
 
-            dpin.connect_sink(node.setup_sink_pin(pid));
+            dpin.connect_sink(node.setup_sink_pin(graph_pos));
           }
 
         }else if (io_pin.dir == Sub_node::Direction::Output) {
-          if (!sub.has_pin(io_pin.name)) {
-            pid = sub.add_pin(io_pin.name, Sub_node::Direction::Output);
+          if (!sub->has_pin(io_pin.name)) {
+            sub->add_pin(io_pin.name, Sub_node::Direction::Output, graph_pos);
             auto spin = parent->get_graph_output(io_pin.name);
             if (!spin.get_node().has_inputs()) {
-              node.setup_driver_pin(pid).connect_sink(spin);
+              node.setup_driver_pin(graph_pos).connect_sink(spin);
             }
           }
         }else if (io_pin.dir == Sub_node::Direction::Invalid) {
@@ -73,7 +73,7 @@ protected:
           I(io_pin.graph_io_pos != Port_invalid); // graph_io_pos must be defined too
         }
       }
-      node.set_type_sub(sub.get_lgid());
+      node.set_type_sub(sub->get_lgid());
     }
 
     if (rand_r(&rseed)&1 || !randomize)

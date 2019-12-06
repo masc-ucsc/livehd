@@ -1,6 +1,12 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+// NOTE:
+//
+// instace_pid is the PID used inside the lgraph to connect the input/output
+//
+// graph_pos is the PID used by the connecting module
+
 #include "rapidjson/document.h"
 #include "rapidjson/error/en.h"
 #include "rapidjson/filereadstream.h"
@@ -294,6 +300,8 @@ public:
     I(has_graph_pin(graph_pos));
     add_phys_pin_int(graph_pos2instance_pid[graph_pos], ppin);
   }
+
+  size_t size() const { return io_pins.size()-1; };
 
   const absl::Span<const IO_pin> get_io_pins() const { I(io_pins.size()>=1); return absl::MakeSpan(io_pins).subspan(1); }
 

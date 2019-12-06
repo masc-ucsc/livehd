@@ -287,7 +287,7 @@ Lg_type_id Node::get_type_sub() const {
   return current_g->get_type_sub(nid);
 }
 
-LGraph *Node::get_type_sub_lgraph() const {
+LGraph *Node::ref_type_sub_lgraph() const {
   auto lgid = current_g->get_type_sub(nid);
   return LGraph::open(top_g->get_path(), lgid);
 }
@@ -296,7 +296,7 @@ bool Node::is_type_sub_present() const {
   if (!current_g->is_type_sub(nid))
     return false;
 
-  auto *sub_lg = get_type_sub_lgraph();
+  auto *sub_lg = ref_type_sub_lgraph();
   if (sub_lg)
     return !sub_lg->is_empty();
 
@@ -314,6 +314,11 @@ Lut_type_id Node::get_type_lut() const {
 const Sub_node &Node::get_type_sub_node() const {
   return current_g->get_type_sub_node(nid);
 }
+
+Sub_node *Node::ref_type_sub_node() const {
+  return current_g->ref_type_sub_node(nid);
+}
+
 
 /* DEPRECATED
 void Node::set_type_const_value(std::string_view str) {
