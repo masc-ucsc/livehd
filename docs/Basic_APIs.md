@@ -124,7 +124,7 @@ for (auto &out : node.out_edges()) {
   auto  dpin_pid   = dpin.get_pid();  
   auto  dnode_name = dpin.get_node().debug_name();
   auto  snode_name = out.sink.get_node().debug_name();
-  auto  spin_pid   =  out.sink.get_pid();  
+  auto  spin_pid   = out.sink.get_pid();  
   auto  dpin_name  = dpin.has_name() ? dpin.get_name() : "";
   auto  dbits      = dpin.get_bits();
 
