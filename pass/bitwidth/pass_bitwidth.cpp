@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include "lgbench.hpp"
+#include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "graph_library.hpp"
@@ -706,7 +706,7 @@ bool Pass_bitwidth::bw_pass_iterate(LGraph *lg) {
 
 void Pass_bitwidth::do_trans(LGraph *lg) {
   {
-    LGBench b("pass.bitwidth");
+    Lbench b("pass.bitwidth");
 
     bw_pass_setup(lg);
 

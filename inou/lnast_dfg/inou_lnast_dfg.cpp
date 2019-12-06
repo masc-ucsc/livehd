@@ -301,7 +301,7 @@ void Inou_lnast_dfg::gen_temp_lg(Eprp_var &var){
 
 
 std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
-  LGBench b("inou.gen_temp_lg.do_tolg");
+  Lbench b("inou.gen_temp_lg.do_tolg");
 
   LGraph *top = LGraph::create("lgdb", "temp_bitwidth_graph", "nosource");
 

@@ -442,8 +442,10 @@ TEST_F(Setup_mmap_map_test, lots_of_strings) {
 
   const std::vector<std::string> roots = {"potato", "__t", "very_long_string", "a"};
 
+  Lrand<int> rseed;
+  auto seed =rseed.any();
   {
-    Lrand<int> rng;
+    Lrand<int> rng(seed);
     mmap_lib::bimap<uint32_t, std::string_view> bimap("lgdb_bench", "mmap_map_large_sview");
     bimap.clear(); // Remove data from previous runs
 
@@ -468,7 +470,7 @@ TEST_F(Setup_mmap_map_test, lots_of_strings) {
   }
 
   {
-    Lrand<int> rng; // Same seed
+    Lrand<int> rng(seed); // same seed
     mmap_lib::bimap<uint32_t, std::string_view> bimap("lgdb_bench", "mmap_map_large_sview");
 
     for (uint32_t i = 0; i < 60'000; ++i) {
