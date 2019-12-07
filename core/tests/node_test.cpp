@@ -35,28 +35,25 @@ protected:
 
     //---------------------------------------------------
     // Create graphs input/outputs
-    int pos = 0;
-    auto top_a = top->add_graph_input("a", pos++, 10);
-    auto top_b = top->add_graph_input("b", pos++, 10);
+    auto top_a = top->add_graph_input("a", 1, 10);
+    auto top_b = top->add_graph_input("b", 3, 10);
     top_b.set_offset(3);
-    auto top_z = top->add_graph_output("z", pos++, 1);
-    auto top_y = top->add_graph_output("Y", pos++, 10);
-    auto top_s2_out = top->add_graph_output("s2_out", pos++, 1);
+    auto top_z = top->add_graph_output("z", 5, 1);
+    auto top_y = top->add_graph_output("Y", 7, 10);
+    auto top_s2_out = top->add_graph_output("s2_out", 11, 1);
 
-    pos = 0;
-    auto c1_aaa = c1->add_graph_input("an_input", pos++, 10);
-    auto c1_sss = c1->add_graph_output("s1_output", pos++, 1);
+    auto c1_aaa = c1->add_graph_input("an_input", 13, 10);
+    auto c1_sss = c1->add_graph_output("s1_output", 17, 1);
 
-    pos = 0;
-    auto c2_aaa = c2->add_graph_input("a1", pos++, 10);
-    auto c2_bbb = c2->add_graph_input("anotherinput", pos++, 10);
-    auto c2_sss = c2->add_graph_output("Y", pos++, 1);
+    auto c2_aaa = c2->add_graph_input("a1", 19, 10);
+    auto c2_bbb = c2->add_graph_input("anotherinput", 29, 10);
+    auto c2_sss = c2->add_graph_output("Y", 300001, 1);
 
     //---------------------------------------------------
     // populate top graph with cells and instances
 
     auto s1 = top->create_node_sub(c1->get_lgid());
-    auto s2 = top->create_node_sub(c2->get_lgid());
+    auto s2 = top->create_node_sub("c2");
     auto sum = top->create_node(Sum_Op);
     auto mux = top->create_node(Mux_Op);
     auto mor = top->create_node(Xor_Op); // cell called mor to avoid xor reserved keyword
@@ -64,15 +61,15 @@ protected:
     auto s1_aaa = s1.setup_sink_pin("an_input");
     auto s1_sss = s1.setup_driver_pin("s1_output");
 
-    I(s1_aaa.get_pid() == c1_aaa.get_pid());
-    I(s1_sss.get_pid() == c1_sss.get_pid());
+    I(s1_aaa.get_pid() == 13);
+    I(s1_sss.get_pid() == 17);
 
     auto s2_aaa = s2.setup_sink_pin("a1");
     auto s2_bbb = s2.setup_sink_pin("anotherinput");
     auto s2_sss = s2.setup_driver_pin("Y");
-    I(s2_aaa.get_pid() == c2_aaa.get_pid());
-    I(s2_bbb.get_pid() == c2_bbb.get_pid());
-    I(s2_sss.get_pid() == c2_sss.get_pid());
+    I(s2_aaa.get_pid() == 19);
+    I(s2_bbb.get_pid() == 29);
+    I(s2_sss.get_pid() == 300001);
 
     auto sum_a = sum.setup_sink_pin("AU");
     auto sum_b = sum.setup_sink_pin("BU");
