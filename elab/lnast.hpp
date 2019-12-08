@@ -48,7 +48,7 @@ private:
   void      update_phi_resolve_table  (const Lnast_nid  &psts_nid, const Lnast_nid &target_nid);
   bool      has_else_statements       (const Lnast_nid  &if_nid);
   Lnast_nid add_phi_node              (const Lnast_nid  &cond_nid, const Lnast_nid &t_nid, const Lnast_nid &f_nid);
-  Lnast_nid get_complement_nid        (std::string_view brother_name, const Lnast_nid &psts_nid);
+  Lnast_nid get_complement_nid             (std::string_view brother_name, const Lnast_nid &psts_nid, bool false_path);
   Lnast_nid check_phi_table_parents_chain  (std::string_view brother_name, const Lnast_nid &psts_nid);
 
   absl::flat_hash_map<std::string_view, Phi_rtable> phi_resolve_tables;
