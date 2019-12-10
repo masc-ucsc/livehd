@@ -23,6 +23,24 @@ public:
   Tree_index() { invalidate(); };
   Tree_index(Tree_level l, Tree_pos i) : level(l), pos(i) {}
 
+  Tree_index &operator=(const Tree_index &o) {
+    level = o.level;
+    pos   = o.pos;
+    return *this;
+  }
+
+  constexpr bool operator==(const Tree_index &i) const { return level == i.level && pos == i.pos; }
+  constexpr bool operator!=(const Tree_index &i) const { return level != i.level || pos != i.pos; }
+
+  bool is_invalid() const { return level == -1 || pos == -1; }
+  void invalidate() { level = -1; pos = -1; }
+  bool is_root() const { return level == 0; }
+
+  template <typename H>
+  friend H AbslHashValue(H h, const Tree_index &s) {
+    return H::combine(std::move(h), s.level, s.pos);
+  };
+
   constexpr inline uint64_t get_hash() const {
     uint64_t at = level;
     at <<=32;
@@ -30,18 +48,6 @@ public:
 
     return at;
   }
-
-  constexpr bool operator==(const Tree_index &i) const { return level == i.level && pos == i.pos; }
-  constexpr bool operator!=(const Tree_index &i) const { return level != i.level || pos != i.pos; }
-  Tree_index operator=(const Tree_index &i) {
-    level = i.level;
-    pos = i.pos;
-    return *this;
-  }
-
-  bool is_invalid() const { return level == -1 || pos == -1; }
-  void invalidate() { level = -1; pos = -1; }
-  bool is_root() const { return level == 0; }
 };
 
 template <>
