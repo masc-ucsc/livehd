@@ -1,19 +1,25 @@
-$c0 as bits:1
-$c1 as bits:1
-#x as bits:6
-#_y as bits:6
+$c0 as __bits:1
+$c1 as __bits:1
+#x  as __bits:6
+#_y as __bits:6
 
-#_y = 60
-#x = 50
-if ($c0 == 1) {
-  #x = #x + 1
-  #_y = #_y + 2
+#_y = 60              //y0
+#x  = 50              //x0
+if ($c0 == 1) {  
+  #x = #x + 1         //x1
+  #_y = #_y + 2       //y1
 } elif ($c1 == 1) {
-  #x = 40
-} elif (#x == 50) {
-  #x = 30
-  #_y = 70
+  #x = 40             //x2
+} elif (#x == 50) {   
+  #x = 30             //x3
+  #_y = 70            //y2
 }
+//x4 = (c2, x3, x0)
+//x5 = (c1, x2, x4)
+//x6 = (c0, x1, x5)
+//y3 = (c2, y2, y0)
+//y4 = (c1, y0, y3)
+//y5 = (c0, y1, y4)
 
-#x = #x + 2
+#x = #x + 2          //x7 = x6 ...
 

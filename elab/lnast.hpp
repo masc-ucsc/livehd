@@ -40,6 +40,7 @@ private:
   const std::string_view buffer;  // const because it can not change at runtime
   void      do_ssa_trans              (const Lnast_nid  &top_nid);
   void      ssa_handle_a_statement    (const Lnast_nid  &psts_nid, const Lnast_nid &opr_nid);
+  void      ssa_handle_a_cstatement   (const Lnast_nid  &psts_nid, const Lnast_nid &opr_nid);
   void      ssa_if_subtree            (const Lnast_nid  &if_nid);
   void      ssa_handle_phi_nodes      (const Lnast_nid  &if_nid);
   void      resolve_phi_nodes         (const Lnast_nid  &cond_nid, Phi_rtable &true_table, Phi_rtable &false_table);
@@ -49,7 +50,7 @@ private:
   bool      has_else_statements       (const Lnast_nid  &if_nid);
   Lnast_nid add_phi_node              (const Lnast_nid  &cond_nid, const Lnast_nid &t_nid, const Lnast_nid &f_nid);
   Lnast_nid get_complement_nid             (std::string_view brother_name, const Lnast_nid &psts_nid, bool false_path);
-  Lnast_nid check_phi_table_parents_chain  (std::string_view brother_name, const Lnast_nid &psts_nid);
+  Lnast_nid check_phi_table_parents_chain  (std::string_view brother_name, const Lnast_nid &psts_nid, bool originate_from_csts);
 
   absl::flat_hash_map<std::string_view, Phi_rtable> phi_resolve_tables;
   absl::flat_hash_map<std::string_view, uint8_t >   ssa_cnt_table;

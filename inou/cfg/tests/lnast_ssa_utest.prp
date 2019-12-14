@@ -1,7 +1,7 @@
-$c0 as bits:1
-$c1 as bits:1
-#x as bits:6
-#_y as bits:6
+$c0 as __bits:1
+$c1 as __bits:1
+#x  as __bits:6
+#_y as __bits:6
 
 #_y = 60
 #x = 50

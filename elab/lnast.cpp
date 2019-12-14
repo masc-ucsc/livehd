@@ -38,6 +38,12 @@ void Lnast::ssa_if_subtree(const Lnast_nid &if_nid){
           ssa_handle_a_statement(itr_nid, opr_nid);
       }
     }
+
+    if (get_data(itr_nid).type.is_cstatements()){
+      for (const auto &opr_nid : children(itr_nid))
+        ssa_handle_a_cstatement(itr_nid, opr_nid);
+    }
+
   }
   ssa_handle_phi_nodes(if_nid);
 }
@@ -101,7 +107,7 @@ void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table,
       true_table.erase(key);
     }
   }
-  I(true_table.empty());
+  //I(true_table.empty()); not necessarily true
 }
 
 
@@ -109,22 +115,24 @@ Lnast_nid Lnast::get_complement_nid(std::string_view brother_name, const Lnast_n
   if(false_path and new_added_phi_node_table.find(brother_name) != new_added_phi_node_table.end())
     return new_added_phi_node_table[brother_name];
   else
-    return check_phi_table_parents_chain(brother_name, psts_nid);
+    return check_phi_table_parents_chain(brother_name, psts_nid, false);
 }
 
 
-Lnast_nid Lnast::check_phi_table_parents_chain(std::string_view brother_name, const Lnast_nid &psts_nid) {
+Lnast_nid Lnast::check_phi_table_parents_chain(std::string_view target_name, const Lnast_nid &psts_nid, bool originate_from_csts) {
   auto &parent_table = phi_resolve_tables[get_data(psts_nid).token.get_text(buffer)];
 
-  if(parent_table.find(brother_name) != parent_table.end())
-    return parent_table[brother_name];
+  if(parent_table.find(target_name) != parent_table.end())
+    return parent_table[target_name];
 
-  if (get_parent(psts_nid) == get_root()) {//current sts is top_sts
+  if (get_parent(psts_nid) == get_root() && originate_from_csts) {//current sts is top_sts
+    I(false);//variable not defined
+  } else if (get_parent(psts_nid) == get_root() && !originate_from_csts){
     return default_const_nid;
   } else {
     auto tmp_if_nid = get_parent(psts_nid);
     auto new_psts_nid = get_parent(tmp_if_nid);
-    return check_phi_table_parents_chain(brother_name, new_psts_nid);
+    return check_phi_table_parents_chain(target_name, new_psts_nid, originate_from_csts);
   }
 }
 
@@ -161,7 +169,6 @@ void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &o
     }
   }
 
-
   //handle statement lhs
   const auto type = get_data(opr_nid).type;
   if(type.is_pure_assign() || type.is_as()){
@@ -169,12 +176,35 @@ void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &o
           auto& target_data = *ref_data(target_nid);
     const auto  target_name = target_data.token.get_text(buffer);
 
-    if ((target_name.substr(0,3) == "___") || elder_sibling_is_label(opr_nid))
+//    if ((target_name.substr(0,3) == "___") || elder_sibling_is_label(opr_nid))
+//      return;
+    if (target_name.substr(0,3) == "___")
       return;
 
     update_ssa_cnt_table(target_nid);
     update_phi_resolve_table(psts_nid, target_nid);
   }
+}
+
+
+
+void Lnast::ssa_handle_a_cstatement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid){
+  //handle statement rhs
+  for (auto itr_opd : children(opr_nid)){
+    if(itr_opd == get_first_child(opr_nid))
+      continue;
+
+    const auto itr_opd_type = get_data(itr_opd).type;
+    if(itr_opd_type.is_const())
+      continue;
+
+    const auto itr_opd_name = get_data(itr_opd).token.get_text(buffer);
+    const auto ref_nid      = check_phi_table_parents_chain(itr_opd_name, psts_nid, true);
+    uint8_t    new_subs     = get_data(ref_nid).subs;
+    Token      ori_token    = get_data(itr_opd).token;
+    set_data(itr_opd, Lnast_node(itr_opd_type, ori_token, new_subs));
+  }
+  //no need to handle statement lhs in csts
 }
 
 

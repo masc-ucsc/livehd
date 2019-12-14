@@ -192,7 +192,7 @@ void Inou_graphviz::do_fromlnast( std::string_view _files) {
 
 void Inou_graphviz::populate_lnast_data(std::string_view files) {
   const auto& lnast = lnast_parser.get_ast().get(); //unique_ptr lend its ownership
-  lnast->ssa_trans();//SH:Todo: option for ssa or not
+  lnast->ssa_trans();
   std::string data = "digraph {\n";
 
   for(const auto& itr : lnast->depth_preorder(lnast->get_root())){
@@ -201,7 +201,7 @@ void Inou_graphviz::populate_lnast_data(std::string_view files) {
     auto subs      = node_data.subs;
     auto name      = node_data.token.get_text(memblock);
 
-    auto id = std::to_string(itr.level)+std::to_string(itr.pos);
+    auto id = std::to_string(itr.level) + std::to_string(itr.pos);
     if(node_data.type.is_ref()){
       data += fmt::format(" {} [label=\"{}, {}[{}]\"];\n", id, node_data.type.debug_name(), name, subs);
     } else {

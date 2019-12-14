@@ -1,6 +1,6 @@
 #!/bin/bash
 
-pts='lnast_ssa_utest lnast_ssa_utest2'
+pts='lnast_ssa_utest2'
 # pts='lnast_utest'
 # pts='counter'
 # pts='counter_stage'
