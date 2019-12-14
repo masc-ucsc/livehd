@@ -148,6 +148,21 @@ bool Lnast::has_else_statements(const Lnast_nid &if_nid) {
 }
 
 void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid){
+  //handle statement rhs
+  for (auto itr_opd : children(opr_nid)){
+    if(itr_opd == get_first_child(opr_nid))
+      continue;
+    if(ssa_cnt_table.find(get_data(itr_opd).token.get_text(buffer)) != ssa_cnt_table.end()){
+      const auto itr_opd_type = get_data(itr_opd).type;
+      uint8_t new_subs = ssa_cnt_table[get_data(itr_opd).token.get_text(buffer)];
+      fmt::print("new subs:{}\n", new_subs);
+      Token   ori_token = get_data(itr_opd).token;
+      set_data(itr_opd, Lnast_node(itr_opd_type, ori_token, new_subs));
+    }
+  }
+
+
+  //handle statement lhs
   const auto type = get_data(opr_nid).type;
   if(type.is_pure_assign() || type.is_as()){
     const auto  target_nid  = get_first_child(opr_nid);
