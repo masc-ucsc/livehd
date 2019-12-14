@@ -1,5 +1,6 @@
 #!/bin/bash
 rm -f *.cfg
+./prp lnast_ssa_nested_utest.prp  | sort -n  > y && column -t y > x && rm -f y && mv x lnast_ssa_nested_utest.cfg
 ./prp lnast_ssa_utest2.prp  | sort -n  > y && column -t y > x && rm -f y && mv x lnast_ssa_utest2.cfg
 ./prp lnast_ssa_utest.prp   | sort -n  > y && column -t y > x && rm -f y && mv x lnast_ssa_utest.cfg
 ./prp counter.prp           | sort -n  > y && column -t y > x && rm -f y && mv x counter.cfg

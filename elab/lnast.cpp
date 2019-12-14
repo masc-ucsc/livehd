@@ -195,13 +195,17 @@ void Lnast::ssa_handle_a_cstatement(const Lnast_nid &psts_nid, const Lnast_nid &
       continue;
 
     const auto itr_opd_type = get_data(itr_opd).type;
+    const auto itr_opd_name = get_data(itr_opd).token.get_text(buffer);
     if(itr_opd_type.is_const())
       continue;
+    if(itr_opd_name.substr(0,3) == "___")
+      continue;
 
-    const auto itr_opd_name = get_data(itr_opd).token.get_text(buffer);
     const auto ref_nid      = check_phi_table_parents_chain(itr_opd_name, psts_nid, true);
     uint8_t    new_subs     = get_data(ref_nid).subs;
     Token      ori_token    = get_data(itr_opd).token;
+
+
     set_data(itr_opd, Lnast_node(itr_opd_type, ori_token, new_subs));
   }
   //no need to handle statement lhs in csts

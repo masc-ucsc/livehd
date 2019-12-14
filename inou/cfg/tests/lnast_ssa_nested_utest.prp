@@ -1,0 +1,24 @@
+$c0 as __bits:1
+$c1 as __bits:1
+$c2 as __bits:1
+$c3 as __bits:1
+#x  as __bits:8           //x0
+
+#x = 10                   //x1
+
+if ($c0 == 1) {
+  #x = 20                 //x2
+  if ($c1 == 1) {
+    #x = 30               //x3
+  } elif ($c2 == 1) {
+    #x = 40               //x4
+  } else {
+    #x = 50               //x5
+  }
+                          //x6 = (c2, x4, x5)
+                          //x7 = (c1, x3, x6)
+} else {
+  #x = 30                 //x8
+}
+                          //x9 = (c0, x7, x8)
+#x = #x + 2               //x10 = x9 ...
