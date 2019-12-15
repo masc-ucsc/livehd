@@ -480,7 +480,7 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
   fmt::print("{}:{}:{} {}: ", buffer_name, line, col, cat);
   std::cout << text;  // NOTE: no fmt::print because it can contain {}
 
-  if (is_newline(buffer[line_pos_start])) std::cout << std::endl;
+  if (!is_newline(buffer[line_pos_start])) std::cout << std::endl;
 
   assert(line_pos_end > line_pos_start);
   std::cout << line_txt << "\n";

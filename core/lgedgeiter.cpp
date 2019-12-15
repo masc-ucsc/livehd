@@ -277,6 +277,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
 }
 
 void Fwd_edge_iterator::Fwd_iter::fwd_first(LGraph *lg) {
+	I(!lg->is_empty());
   I(current_node.is_invalid());
   I(linear_phase);
 

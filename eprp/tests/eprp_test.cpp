@@ -61,8 +61,6 @@ public:
 
     EXPECT_EQ(var.get("lgdb"), var.get("check1"));
 
-    EXPECT_EQ(var.get("graph_name"), "chacha");
-
     EXPECT_NE(var.get("lgdb"), "");
 
     fmt::print("var.get = {}\n", var.get("nofield2"));
@@ -72,6 +70,7 @@ public:
     is_equal_called = true;
   }
   static void pass(Eprp_var &var) {
+    fmt::print("pass called\n");
   }
 };
 
@@ -118,11 +117,13 @@ protected:
     EXPECT_TRUE(txt.empty());
 
     Eprp_method m2("test1.fff.test","fff::is_equal call", &test1::is_equal);
-    m2.add_label_required("lgdb","lgraph directory");
-    m2.add_label_required("check1","check1 super duper attribute");
-    // Missing check2 attribute on purpose to check warning generation
-    //
+    m2.add_label_optional("lgdb","lgraph directory","lgdb");
+    m2.add_label_optional("check1","check1 super duper attribute","lgdb");
+    m2.add_label_required("check2","check2 super duper attribute");
+
     Eprp_method m3("test1.pass", "pass value through", &test1::pass);
+    m3.add_label_required("check1","check1 super duper attribute");
+    m3.add_label_required("check2","check2 super duper attribute");
 
     eprp.register_method(m1);
     eprp.register_method(m2);
@@ -151,7 +152,7 @@ TEST_F(Eprp_files, ParseFiles) {
 
 TEST_F(Eprp_test, SimpleReadlinePipe) {
   is_equal_called = false;
-  const char *buffer =" test1.xyz.generate lgdb:./lgdb graph_name:chacha |> test1.fff.test     check2:chacha    check1:./lgdb   ";
+  const char *buffer =" test1.xyz.generate lgdb:./lgdb graph_name:chacha |> test1.fff.test check2:jeje    lgdb:potato   check1:potato   ";
   Elab_scanner::Token_list tlist;
 
   eprp.parse("inline", buffer, tlist);
@@ -159,11 +160,11 @@ TEST_F(Eprp_test, SimpleReadlinePipe) {
   EXPECT_TRUE(is_equal_called);
   is_equal_called=false;
 
-  buffer =" test1.pass graph_name:chacha check2:chacha  check1:./lgdb  lgdb:./lgdb test1_foo:field1 |> @a";
+  buffer =" test1.pass test1_foo:field1 check2:chacha  check1:lgdb |> #a";
   eprp.parse("inline", buffer, tlist);
 
-  buffer ="@a |> test1.fff.test";
+  buffer ="#a |> test1.fff.test check2:not_used";
   eprp.parse("inline", buffer, tlist);
   EXPECT_TRUE(is_equal_called);
-
 }
+

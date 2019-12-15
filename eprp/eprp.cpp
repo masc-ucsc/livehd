@@ -72,7 +72,7 @@ bool Eprp::rule_reg(bool first) {
 
   std::string var = scan_text();
   ast->add(Eprp_rule_reg, scan_token());
-  if (first) {  // First in line @a |> ...
+  if (first) {  // First in line #a |> ...
     if (variables.find(var) == variables.end()) {
       scan_error("variable {} is empty", var);
       return false;

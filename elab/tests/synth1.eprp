@@ -1,39 +1,39 @@
 
 // pipe like design
-inou.rand.generate lgdb:./lgdb graph_name:"potato" |> @a
+inou.rand.generate lgdb:./lgdb graph_name:"potato" |> #a
 
 // Each pipe passes a vector of eprp_variables. Each eprp_variable is a set of labels and lgraphs
-lgraph.open lgdb:./lgdb graph_name:potato |> @b
+lgraph.open lgdb:./lgdb graph_name:potato |> #b
 
 // passes keep the directory structure /inou/yosys/*.cpp should have inou.yosys.xxx
-@b |> inou.yosys.write_verilog file:foo.v
+#b |> inou.yosys.write_verilog file:foo.v
 
 // passes can get attributes (a eprp_variable without lgraphs)
-inou.yosys.read_verilog file:foo.v |> @c
+inou.yosys.read_verilog file:foo.v |> #c
 
-// vectors of eprp_variables can be stored in @e and passed arround
-@c |> pass.flatten |> pass.dce |> @e
+// vectors of eprp_variables can be stored in #e and passed arround
+#c |> pass.flatten |> pass.dce |> #e
 
 // vectors can be concatenated
-@c @e @b |> pass.equiv.same
+#c #e #b |> pass.equiv.same
 
-@c |> pass.filter name:potato |> @e
+#c |> pass.filter name:potato |> #e
 
-@e |> lgraph.stats
+#e |> lgraph.stats
 
 /*
  * comment
  */
 
 // no quotes, with autocomplete for file/dir names
-inou.yosys.read_verilog file:./tests/file1.v |> @a_orig
-@a_orig |> inou.pyrope.write_prp dir:./code
+inou.yosys.read_verilog file:./tests/file1.v |> #a_orig
+#a_orig |> inou.pyrope.write_prp dir:./code
 
-inou.prp2lg.read_prp dir:./code |> @cfg
-@cfg |> pass.dfg |> @dfg
-@dfg |> inou.yosys.write_verilog dir:./gen_verilog/
+inou.prp2lg.read_prp dir:./code |> #cfg
+#cfg |> pass.dfg |> #dfg
+#dfg |> inou.yosys.write_verilog dir:./gen_verilog/
 
-inou.yosys.read_verilog dir:./gen_verilog |> @a_pass
+inou.yosys.read_verilog dir:./gen_verilog |> #a_pass
 
-@a_pass @a_orig |> pass.equiv.same
+#a_pass #a_orig |> pass.equiv.same
 

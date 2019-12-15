@@ -159,7 +159,11 @@ public:
   Fwd_edge_iterator() = delete;
   explicit Fwd_edge_iterator(LGraph *_g, bool _visit_sub) : top_g(_g), visit_sub(_visit_sub) { }
 
-  Fwd_iter begin() const { return Fwd_iter(top_g, visit_sub); }
+  Fwd_iter begin() const {
+    if (top_g->is_empty())
+      return end();
+    return Fwd_iter(top_g, visit_sub);
+  }
 
   Fwd_iter end() const { return Fwd_iter(visit_sub); }
 };
