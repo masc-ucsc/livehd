@@ -151,8 +151,8 @@ protected:
       auto &curr_node = node_order[i];
       auto &prev_node = node_order[i-1];
 
-  //    fmt::print("prev   {} class {}\n", curr_node.debug_name(), curr_node.get_class_lgraph()->get_name());
-  //    fmt::print("curr   {} class {}\n", prev_node.debug_name(), prev_node.get_class_lgraph()->get_name());
+      fmt::print("prev   {} class {}\n", prev_node.debug_name(), prev_node.get_class_lgraph()->get_name());
+      fmt::print("curr   {} class {}\n", curr_node.debug_name(), curr_node.get_class_lgraph()->get_name());
 
       Node_pin dpin;
       if (prev_node.get_type().op == Sum_Op) {
@@ -161,7 +161,7 @@ protected:
       }else{
         LGraph *prev_lg = LGraph::open("lgdb_hierarchy_test", prev_data.name);
         I(prev_node.get_class_lgraph() != prev_lg);
-        auto d_pid = prev_node.get_class_lgraph()->get_self_sub_node().get_instance_pid("o0");
+        auto d_pid = prev_node.get_type_sub_node().get_graph_pos("o0");
         dpin = prev_node.setup_driver_pin(d_pid);
         I(prev_node.get_type().op == SubGraph_Op);
       }
@@ -173,13 +173,13 @@ protected:
       }else{
         LGraph *curr_lg = LGraph::open("lgdb_hierarchy_test", curr_data.name);
         I(curr_node.get_class_lgraph() != curr_lg);
-        auto s_pid = curr_node.get_class_lgraph()->get_self_sub_node().get_instance_pid("i0");
+        auto s_pid = curr_node.get_type_sub_node().get_graph_pos("i0");
         spin = curr_node.setup_sink_pin(s_pid);
         I(curr_node.get_type().op == SubGraph_Op);
       }
 
-      bool connect_inp = rbool.any();
-      bool connect_out = rbool.any() || (i+1) == node_order.size(); // Add the last one
+      bool connect_inp = true; // rbool.any();
+      bool connect_out = true; // rbool.any() || (i+1) == node_order.size(); // Add the last one
       if (prev_node.get_class_lgraph() == curr_node.get_class_lgraph()) {
         dpin.connect_sink(spin);
       } else {
@@ -201,14 +201,11 @@ protected:
         (void)lgid;
         LGraph *lg = LGraph::open(lg_root->get_path(), name);
         I(lg);
-        if (lg->is_empty())
-          return;
 
         int sz=0;
         Node last_node;
         for (auto node : lg->fast()) {
-          if (node.is_type_io())
-            continue;
+          I(!node.is_type_io());
           last_node = node;
           sz++;
         }
@@ -234,7 +231,7 @@ protected:
             dpin = last_node.setup_driver_pin(0);
           } else {
             I(last_node.get_class_lgraph() == lg);
-            auto d_pid = last_node.get_class_lgraph()->get_self_sub_node().get_instance_pid("o0");
+            auto d_pid = last_node.get_type_sub_node().get_graph_pos("o1");
             dpin       = last_node.setup_driver_pin(d_pid);
             I(last_node.get_type().op == SubGraph_Op);
           }
@@ -242,15 +239,23 @@ protected:
         }
     });
 
-    for (const auto node:node_order) {
+    int conta = 0;
+    for (const auto &node:node_order) {
       if (node.is_type_sub()) {
-        LGraph *sub_lg = LGraph::open("lgdb_hierarchy_test", node.get_type_sub());
-        I(sub_lg);
-        auto inp_pin = sub_lg->get_graph_input("i0");
-        I(inp_pin.has_outputs());
-        auto out_pin = sub_lg->get_graph_output("o0");
-        I(out_pin.has_inputs());
+        if (conta != (node_order.size()-1)) { // LAST NODE
+          auto d_pid   = node.get_type_sub_node().get_graph_pos("o0");
+          auto out_pin = node.get_driver_pin(d_pid);
+          I(out_pin.has_outputs());
+        }
+
+        if (conta!=0) { // FIRST NODE
+          auto s_pid   = node.get_type_sub_node().get_graph_pos("i0");
+          auto inp_pin = node.get_sink_pin(s_pid);
+
+          I(inp_pin.has_inputs());
+        }
       }
+      conta++;
     }
   }
 
@@ -268,7 +273,7 @@ protected:
     Lrand<int>  rint;
     Lrand<bool> rbool;
 
-    int max_level=1;
+    int max_level=0;
     int n_leafs = 0;
     for(int i=0;i<size;++i) {
       int level = 0;
@@ -294,8 +299,9 @@ protected:
         if (!tree.is_leaf(index))
           n_leafs++;
 
-        tree.add_child(index, data);
-        if ((index.level+1) == max_level && max_level<max_depth)
+        auto cindex = tree.add_child(index, data);
+        I(cindex.level == index.level+1);
+        if (index.level == max_level && max_level<max_depth)
           max_level++;
         I(max_level<=max_depth);
       }

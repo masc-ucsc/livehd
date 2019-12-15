@@ -87,6 +87,12 @@ public:
     line = 0;
     len  = 0;
   }
+  Token(Token_id _tok, uint32_t _pos, uint32_t _line, uint32_t _len) {
+    tok  = _tok;
+    pos  = _pos;
+    line = _line;
+    len  = _len;
+  }
   void clear(uint32_t p, uint32_t lno) {
     tok  = Token_id_nop;
     pos  = p;

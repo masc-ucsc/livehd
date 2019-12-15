@@ -34,7 +34,7 @@ protected:
       I(full_fwd_order[fwd_pos-1].empty());
       I(fwd_pos>0);
 
-      std::string txt = fmt::format("name:{} lg:{}",node.get_name(), node.get_class_lgraph()->get_name());
+      std::string txt = fmt::format("name:{} lg:{} debug:{}",node.get_name(), node.get_class_lgraph()->get_name(), node.debug_name());
       full_fwd_order[fwd_pos-1] = txt;
       pos++;
     }
@@ -52,9 +52,7 @@ protected:
     pos = 1;
     std::vector<std::string> iterator_order;
     for(auto node:lg_root->forward(true)) {
-      if (node.is_type_io()) {
-        continue;
-      }
+      I(!node.is_type_io());
 #if 0
       const auto &fwd_pos = Fwd_pos_attr::ref(lg_root)->get(node.get_compact());
       const auto &bwd_pos = Bwd_pos_attr::ref(lg_root)->get(node.get_compact());
@@ -68,7 +66,7 @@ protected:
       fmt::print("pos:{} fwd_pos:{}\n",pos, fwd_pos);
 #else
 #endif
-      std::string txt = fmt::format("name:{} lg:{}", node.get_name(), node.get_class_lgraph()->get_name());
+      std::string txt = fmt::format("name:{} lg:{} debug:{}", node.get_name(), node.get_class_lgraph()->get_name(), node.debug_name());
       fmt::print("iterator_order: {}\n",txt);
       iterator_order.push_back(txt);
 

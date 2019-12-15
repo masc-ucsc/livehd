@@ -13,7 +13,6 @@ void Node::invalidate(LGraph *_g) {
 }
 
 void Node::invalidate() {
-  I(top_g);
   current_g = top_g;
   hidx.invalidate();
   nid       = 0;
@@ -415,7 +414,7 @@ Node_pin Node::setup_sink_pin(Port_ID pid) {
   if (current_g->is_type_sub(nid)) {
     Lg_type_id sub_lgid = current_g->get_type_sub(nid);
     const auto &sub = current_g->get_library().get_sub(sub_lgid);
-    I(sub.has_instance_pin(pid));
+    I(sub.has_graph_pin(pid));
   }
 #endif
 

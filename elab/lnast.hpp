@@ -18,10 +18,13 @@ struct Lnast_node {
   Lnast_node()
     :loc(0), subs(0) { }
 
-  Lnast_node(Lnast_ntype _type, Token _token)
+  Lnast_node(Lnast_ntype _type)
+    :type(_type), loc(0), subs(0) { I(!type.is_invalid());}
+
+  Lnast_node(Lnast_ntype _type, const Token &_token)
     :type(_type), token(_token), loc(0), subs(0) { I(!type.is_invalid());}
 
-  Lnast_node(Lnast_ntype _type, Token _token, uint16_t _subs)
+  Lnast_node(Lnast_ntype _type, const Token &_token, uint16_t _subs)
     :type(_type), token(_token), loc(0), subs(_subs) { I(!type.is_invalid());}
 
   void dump() const;

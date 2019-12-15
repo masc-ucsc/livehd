@@ -1,6 +1,8 @@
 pp
 tags
-lgdb
+lgdb*
+cov
+tmp*
 cscope*
 *NBSD*
 *.swp

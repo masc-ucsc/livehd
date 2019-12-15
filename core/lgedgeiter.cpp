@@ -94,7 +94,10 @@ Fast_edge_iterator::Fast_iter &Fast_edge_iterator::Fast_iter::operator++() {
 Fast_edge_iterator::Fast_iter Fast_edge_iterator::begin() const {
   auto nid = top_g->fast_first();
 
-  return Fast_edge_iterator::Fast_iter(top_g, top_g, Hierarchy_tree::root_index(), nid, visit_sub);
+  if (nid)
+    return Fast_edge_iterator::Fast_iter(top_g, top_g, Hierarchy_tree::root_index(), nid, visit_sub);
+
+  return end();
 }
 
 Flow_base_iterator::Flow_base_iterator(bool _visit_sub)
@@ -180,10 +183,13 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear(LGraph *top) {
 
     bool is_topo_sorted = true;
     if (next_node.is_type_loop_breaker()) {
-      // FIXME: next_node.is_type_sub()
-      // FIXME: do not assume that all the subs are loop_breakers. Check with sub
+      if (visit_sub && next_node.is_type_sub())
+        is_topo_sorted = false;
     }else{
       for(const auto edge:next_node.inp_edges()) {
+        if (edge.driver.is_graph_input())
+          continue; // If input while in linear mode, we are still in linear mode
+
         auto driver_node = edge.driver.get_node();
         // NOTE: For hierarchical, if the driver_node is an IO (input). It
         // could try to go up to see if the node is pipelined or not visited
