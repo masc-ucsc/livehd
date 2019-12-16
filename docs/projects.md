@@ -90,62 +90,16 @@ Main features:
     * Allow to create markers for passing failing code to other people
     * Aloow to have command script file (load checkpoint, run X, mark Y, insert assert Y, continue x, peek X, poke Y, save waveform)
 
-## lhdview
+## Tree-sitter Pyrope
 
-Live Hardware Development Viewer. The long term goal is to create an
-verdi/simvision alternative with a Live focus. This is a large project that
-should be split for 2 thesis (waveform and rest). The plan is to use nana++
-(http://nanapro.org/en-us/) or QT. Prof Renau has a skeleton for the
-application.
+Build a tree-sitter Pyrope grammar that can spill CFG like the pegjs.
 
-Some example screenshot:
- https://www.cadence.com/content/dam/cadence-www/global/en_US/images/old-tools/system-design-verification/debug_fig_sim_vision_windows.jpg
-
-Dependence: This project can needs the binary format with mmap from Hot Reload
-
-Main features:
-
- * Annotated source window: A window that shows text (verilog/pyrope) and the values for variables. Simvision calls this the "source browser window".
- * Waveform window. A gtkwave like capacity to show waveforms.
- * Signals search window
- * Reads mmap_lib structures so that it automatically gets updated as the simulation runs (live updates)
-
- ### Source Window
-
- * Shows current and previou[s] values for each variable
- * double click on the variable gets you to the driver.
- * Clicking on variable shows on the "search window" the driver (top) and consumers (bottom) from the variable
- * It uses source map (https://github.com/mgreter/sourcemap.cpp) to show the "original" code, not the "generated" verilog or "C".
- * Variables can be draged to/from the waveform window. (shift+click adds to waveform view, shift+double click adds driver to waveform)
- * There can be several source windows
- * Style: avoid dialogs, minimalist, multiple panels, tune for dark background, vi-like, fuzzy search, focus on read code (not edit, but allow edit)
- * Some edits to potentially leverage code/ideas:
-     * Very fast load times: https://github.com/arximboldi/ewig
-     * Clean value search (debug): https://gitlab.com/cppit/jucipp
-     * neovim component (implement vim commands): https://github.com/rhysd/neovim-component
- * Option: juice integrated with neovim, variables underneath, add verilog/pyrope style, read value dump (mmap-VCD), go back/forth time...
- * Option: integrate/leverage scintilla (must integrate with GUI, and other waveform viewer) and neovim
-
-### Waveform Window
-
- * GTKwave like with capacity to drag to/from source window
- * Query to LGraph to have "order" in variables computed. This is shown in the wave form like small delays (up to 40% of the cycle for delays? maybe configurable)
- * Capacity to add edges (like in wavedrom, https://observablehq.com/@drom/wavedrom) leveraging producer consumer info from lgraph
- * load/save configured signal configuration through the console window
- * Struct-like support for signals (groups)
- * markers
-
-### Search Window
-
- * Fuzzy regex search for signals (fzf like https://github.com/hansonw/fuzzy-native/blob/master/src/score_match.cpp) but tuned for verilog/pyrope search
- * capacity to show hierarchy (alphabetically sorted) and restrict search per level (or sub-levels)
- * Only one search window
-
-### Console window
-
- * hot reload console. Mostly allow drag variables from/to windows.
- * source/waveform/search windows can be controlled from console
- * allow to load/save list of commands
+* Pyrope tree-sitter grammar
+* CFG dump that LNAST understands
+* Atom integration
+* Atom go definition, highlight, and attribute
+* Atom capacity to query LNAST/LGraph generated grammar for bit-width. The incremental grammar passed to LNAST, passed to LGraph,
+  and incremental bit-width inference.
 
 ## LGraph partition/decomposition/coloring
 
@@ -300,9 +254,6 @@ Dependence: none
 
 Main features:
 
-* Create a webhook (mada3?) http://notes.spencerlyon.com/2016/01/04/github-pro-tips/
-* Script capable of queuing multiple requests, and execute in-order in a local disk
-* Mark some tests for benchmarking (bench?) and trigger only those tests separately
 * Create scbench to gather stats and performance counters
 * stat.begin, stat.end, stat.pause
 * Aggregate stats in a single json file even across many runs
@@ -690,4 +641,76 @@ Create a pass that checks that the LGraph (and/or LNAST) is sementically correct
 ## Smaller tasks
 
 For even smaller tasks check the [cleanup.md](cleanup.md) file
+
+
+# Deprecated projects
+
+This is a list of projects that were proposed, but that they are dropped. It includes a justification of why they got dropped.
+This section of the document is to learn about the selection/deselection process.
+
+## lhdview
+
+DEPRECATION REASON: The lhdview was a "custom" application proposal. There is an external effort to bring wavedrom zoom and atom
+integration. The idea is to have the same functionality as the proposed lhdview but to complement/help/leverage the atom flow.
+The flow is fairly similar to liveOS, there is a web server collecting statistics and vcd traces. The client has the capacity to
+zoom/view signals (web client). An atom client can coordinate with the viewer and become a vivado like. A console could be open to
+interact with the remote server.
+
+
+Live Hardware Development Viewer. The long term goal is to create an
+verdi/simvision alternative with a Live focus. This is a large project that
+should be split for 2 thesis (waveform and rest). The plan is to use nana++
+(http://nanapro.org/en-us/) or QT. Prof Renau has a skeleton for the
+application.
+
+Some example screenshot:
+ https://www.cadence.com/content/dam/cadence-www/global/en_US/images/old-tools/system-design-verification/debug_fig_sim_vision_windows.jpg
+
+Dependence: This project can needs the binary format with mmap from Hot Reload
+
+Main features:
+
+ * Annotated source window: A window that shows text (verilog/pyrope) and the values for variables. Simvision calls this the "source browser window".
+ * Waveform window. A gtkwave like capacity to show waveforms.
+ * Signals search window
+ * Reads mmap_lib structures so that it automatically gets updated as the simulation runs (live updates)
+
+ ### Source Window
+
+ * Shows current and previou[s] values for each variable
+ * double click on the variable gets you to the driver.
+ * Clicking on variable shows on the "search window" the driver (top) and consumers (bottom) from the variable
+ * It uses source map (https://github.com/mgreter/sourcemap.cpp) to show the "original" code, not the "generated" verilog or "C".
+ * Variables can be draged to/from the waveform window. (shift+click adds to waveform view, shift+double click adds driver to waveform)
+ * There can be several source windows
+ * Style: avoid dialogs, minimalist, multiple panels, tune for dark background, vi-like, fuzzy search, focus on read code (not edit, but allow edit)
+ * Some edits to potentially leverage code/ideas:
+     * Very fast load times: https://github.com/arximboldi/ewig
+     * Clean value search (debug): https://gitlab.com/cppit/jucipp
+     * neovim component (implement vim commands): https://github.com/rhysd/neovim-component
+ * Option: juice integrated with neovim, variables underneath, add verilog/pyrope style, read value dump (mmap-VCD), go back/forth time...
+ * Option: integrate/leverage scintilla (must integrate with GUI, and other waveform viewer) and neovim
+
+### Waveform Window
+
+ * GTKwave like with capacity to drag to/from source window
+ * Query to LGraph to have "order" in variables computed. This is shown in the wave form like small delays (up to 40% of the cycle for delays? maybe configurable)
+ * Capacity to add edges (like in wavedrom, https://observablehq.com/@drom/wavedrom) leveraging producer consumer info from lgraph
+ * load/save configured signal configuration through the console window
+ * Struct-like support for signals (groups)
+ * markers
+
+### Search Window
+
+ * Fuzzy regex search for signals (fzf like https://github.com/hansonw/fuzzy-native/blob/master/src/score_match.cpp) but tuned for verilog/pyrope search
+ * capacity to show hierarchy (alphabetically sorted) and restrict search per level (or sub-levels)
+ * Only one search window
+
+### Console window
+
+ * hot reload console. Mostly allow drag variables from/to windows.
+ * source/waveform/search windows can be controlled from console
+ * allow to load/save list of commands
+
+
 
