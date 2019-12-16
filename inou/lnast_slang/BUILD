@@ -6,6 +6,7 @@ cc_library(
     hdrs = glob(["*.hpp"]),
     #alwayslink=1,
     visibility = ["//visibility:public"],
+    linkopts = ["-lstdc++fs"],  # Needed for gcc 7-8
     deps = [
         "//core:core",
         "@slang//:slang",

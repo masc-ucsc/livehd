@@ -74,7 +74,7 @@ protected:
       }else{
         perf_enabled = true;
       }
-      if (access("/usr/bin/perf", X_OK) == -1) {
+      if (perf_enabled && access("/usr/bin/perf", X_OK) == -1) {
         std::cerr << "ERROR: lgbench could not find /usr/bin/perf in system\n";
         exit(-3);
       }
