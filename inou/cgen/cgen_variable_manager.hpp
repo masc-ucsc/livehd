@@ -1,12 +1,8 @@
 
 #pragma once
 
-#include <vector>
+#include <unordered_map>
 #include <string>
-#include <set>
-
-#include "fmt/format.h"
-#include "absl/strings/substitute.h"
 
 class Variable_options {
 public:
@@ -32,7 +28,7 @@ public:
 class Cgen_variable_manager {
 private:
 public:
-  std::map<std::string, Variable_options*> variable_map;
+  std::unordered_map<std::string, Variable_options*> variable_map;
 
   void insert_variable(std::string new_var_name);
   void insert_variable(std::string_view new_var_name);

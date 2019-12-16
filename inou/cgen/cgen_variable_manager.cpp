@@ -1,4 +1,10 @@
 
+
+#include <vector>
+
+#include "fmt/format.h"
+#include "absl/strings/substitute.h"
+
 #include "cgen_variable_manager.hpp"
 
 void Cgen_variable_manager::insert_variable(std::string new_var_name) {
