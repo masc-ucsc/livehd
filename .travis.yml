@@ -18,8 +18,6 @@ env:
   matrix:
     - BUILD_MODE=opt       DOCKER=mascucsc/archlinux-masc DOCKER_LGRAPH_SRC=/root/livehd      LGRAPH_COMPILER=g++
     - BUILD_MODE=dbg       DOCKER=mascucsc/archlinux-masc DOCKER_LGRAPH_SRC=/root/livehd      LGRAPH_COMPILER=clang++
-# broken bazel (not livehd) gcc interaction
-# - BUILD_MODE=fastbuild DOCKER=mascucsc/alpine-masc    DOCKER_LGRAPH_SRC=/home/user/livehd LGRAPH_COMPILER=g++
     - BUILD_MODE=fastbuild DOCKER=mascucsc/kaliriscv-masc DOCKER_LGRAPH_SRC=/root/livehd      LGRAPH_COMPILER=g++
     - BUILD_MODE=dbg       DOCKER=mascucsc/ubuntu-masc    DOCKER_LGRAPH_SRC=/root/livehd      LGRAPH_COMPILER=g++
 
@@ -29,3 +27,5 @@ before_install:
 script:
   - scripts/run-docker-test.sh `pwd` $BUILD_MODE $DOCKER $DOCKER_LGRAPH_SRC $LGRAPH_COMPILER
 
+# broken bazel (not livehd) gcc interaction
+# - BUILD_MODE=fastbuild DOCKER=mascucsc/alpine-masc    DOCKER_LGRAPH_SRC=/home/user/livehd LGRAPH_COMPILER=g++
