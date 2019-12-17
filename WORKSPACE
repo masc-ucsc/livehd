@@ -30,7 +30,7 @@ new_git_repository( # Open_timer user taskflow
 new_git_repository(
     name = "abc",
     build_file = "BUILD.abc", # relative to external path
-    commit = "362b2d9d08f4dbc8dfc751b68ddf7bd3f9c4ed54", # April 6 2019 14d985a8c4597bc70765cb889be160b7af5fa128", # Oct 20, 2018
+    commit = "362b2d9d08f4dbc8dfc751b68ddf7bd3f9c4ed54", # April 6 2019
     remote = "https://github.com/berkeley-abc/abc.git",
     patches = ["//external:patch.abc"],
 )
@@ -44,7 +44,7 @@ new_git_repository(
 new_git_repository(
     name = "mustache",
     build_file = "BUILD.mustache", # relative to external path
-    commit = "40ddfe9daecc699eca319f1c739b0cfc7e5f3ae5", # April 6 2019 2c37b240f6d9147b4a7639c433fdde2f31b6868f", # Sep 22, 2018
+    commit = "40ddfe9daecc699eca319f1c739b0cfc7e5f3ae5", # April 6 2019
     remote = "https://github.com/kainjow/Mustache.git",
     #strip_prefix = "kernel",
 )
@@ -67,7 +67,7 @@ git_repository(
 new_git_repository(
     name = "fmt",
     build_file = "BUILD.fmt",
-    commit = "7512a55aa3ae309587ca89668ef9ec4074a51a1f", # 6.0.0 October 12, 2019 ab1474ef661a82175de693f79926f38bf11d6815", # April 6, 2019 
+    commit = "7512a55aa3ae309587ca89668ef9ec4074a51a1f", # 6.0.0 October 12, 2019
     remote = "https://github.com/fmtlib/fmt.git",
     #strip_prefix = "include",
 )
@@ -78,7 +78,7 @@ new_git_repository(
 new_git_repository(
     name = "slang",
     build_file = "BUILD.slang",
-    commit = "0e2381c9b408cef18950f928e5c411ed58c54eb6", # Nov 23, 2019 77a31619e27dc25f6b29a53a5003e1781c6b3034", # Obtober 16, 2019
+    commit = "0e2381c9b408cef18950f928e5c411ed58c54eb6", # Nov 23, 2019
     remote = "https://github.com/MikePopoloski/slang.git",
     patches = ["//external:patch.slang"],
 )
@@ -99,14 +99,14 @@ git_repository(
 git_repository(
     name = "cryptominisat",
     #build_file = "BUILD.abseil", # relative to external path
-    commit = "d522ab933584ea812429bfb22f752088ed7be599", # August 10, 2019 6ee26181af5c719fa4f6ac1fa1aa3c85d070bcea", # May 12, 2019
+    commit = "d522ab933584ea812429bfb22f752088ed7be599", # August 10, 2019
     remote = "https://github.com/masc-ucsc/cryptominisat.git",
     shallow_since = "1565452382 -0700",
 )
 new_git_repository(
     name = "rapidjson",
     build_file = "BUILD.rapidjson",
-    commit = "6534506e829a489bda78bc5eac5faa34da0a2c51", # Nov 23, 2019 663f076c7b44ce96526d1acfda3fa46971c8af31", # October 6, 2018
+    commit = "6534506e829a489bda78bc5eac5faa34da0a2c51", # Nov 23, 2019
     remote = "https://github.com/Tencent/rapidjson.git",
     strip_prefix = "include",
 )
@@ -148,7 +148,7 @@ new_git_repository(
 new_git_repository(
     name = "mockturtle",
     build_file = "BUILD.mockturtle",
-    commit = "19cb4376889a5d91ee947fcbdd3da7a808662a80", # Oct 16 2019, "28c18ecd78dac3e42876a7e0f044132b9c16f466", # May 8, 2019
+    commit = "19cb4376889a5d91ee947fcbdd3da7a808662a80", # Oct 16 2019
     remote = "https://github.com/lsils/mockturtle.git",
     #patches = ["//external:patch.verilator"],
     #strip_prefix = "include",
