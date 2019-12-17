@@ -26,12 +26,4 @@ jobs:
     steps:
       - bash: ./scripts/run-docker-test.sh `pwd` dbg mascucsc/archlinux-masc /root/livehd g++ . long1
 
-  - job: AlpineDebug
-    displayName: run alpine-masc with opt and g++
-
-    pool:
-      vmImage: 'Ubuntu 16.04'
-
-    steps:
-      - bash: ./scripts/run-docker-test.sh `pwd` opt mascucsc/alpine-masc /home/user/livehd g++
 

@@ -1,10 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#ifndef PASS_BITWIDTH_H
-#define PASS_BITWIDTH_H
-
-#include <string>
-
-//#include "bm.h"
+#pragma once
 
 #include "pass.hpp"
 
@@ -50,4 +45,3 @@ public:
   void setup() final;
 };
 
-#endif

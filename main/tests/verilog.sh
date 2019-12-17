@@ -52,6 +52,11 @@ do
       continue
     fi
     base=${base:5}
+  else
+    if [[ $long == "true" ]]; then
+      echo "Skipping short test for "$base
+      continue
+    fi
   fi
   if [[ $input =~ "fixme_" ]]; then
     if [[ $fixme == "" ]]; then
