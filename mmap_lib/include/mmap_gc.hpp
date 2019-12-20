@@ -30,7 +30,7 @@ struct mmap_gc_entry {
   std::string name; // Mostly for debugging
   int         fd;
   size_t      size;
-  std::function<bool(void *)> gc_function;
+  std::function<bool(void *, bool)> gc_function;
 };
 
 
@@ -92,11 +92,12 @@ protected:
     recursion_mode = true;
 #endif
 
-    bool aborted = it->second.gc_function(it->first);
+    bool aborted = it->second.gc_function(it->first, force_recycle);
 #ifndef NDEBUG
     recursion_mode = false;
 #endif
-    if (aborted && !force_recycle) {
+    if (aborted) {
+      assert(!force_recycle);
 #ifndef NDEBUG
       std::cerr << "ABORT GC for " << it->second.name << std::endl; // OK
 #endif
@@ -246,7 +247,7 @@ public:
 
   // mmap_vector.hpp: std::tie(base, mmap_size) = mmap_gc::mmap(mmap_name, mmap_fd, mmap_size, std::bind(&vector<T>::gc_function, this, std::placeholders::_1));
   // mmap_map.hpp:    std::tie(base, size)      = mmap_gc::mmap(mmap_name, fd, size, std::bind(&map<MaxLoadFactor100, Key, T, Hash>::gc_function, this, std::placeholders::_1));
-  static std::tuple<void *, size_t> mmap(std::string_view name, int fd, size_t size, std::function<bool(void *)> gc_function) {
+  static std::tuple<void *, size_t> mmap(std::string_view name, int fd, size_t size, std::function<bool(void *, bool)> gc_function) {
 
     if (n_open_mmaps >= n_max_mmaps) {
       recycle_older();

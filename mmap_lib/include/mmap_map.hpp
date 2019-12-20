@@ -660,8 +660,8 @@ private:
 	}
 
   // gc_done can be called for mmap_base or mmap_txt_base
-	bool gc_done(void *base) const noexcept {
-    if (iter_cntr)
+	bool gc_done(void *base, bool force_recycle) const noexcept {
+    if (iter_cntr && !force_recycle)
       return true;
 
     if (mmap_base != base) {  // WARNING: Possible because 2 mmaps can be active during rehash
@@ -680,8 +680,8 @@ private:
     return false;
 	}
 
-	bool gc_txt_done(void *base) const {
-    if (iter_cntr)
+	bool gc_txt_done(void *base, bool force_recycle) const {
+    if (iter_cntr && !force_recycle)
       return true; // abort
 
     assert(using_sview);
@@ -716,7 +716,7 @@ private:
   }
 
 	std::tuple<uint64_t *, size_t> create_mmap(std::string name, int fd, size_t size) const {
-    auto gc_func = std::bind(&map<MaxLoadFactor100, Key, T, Hash>::gc_done, this, std::placeholders::_1);
+    auto gc_func = std::bind(&map<MaxLoadFactor100, Key, T, Hash>::gc_done, this, std::placeholders::_1, std::placeholders::_2);
 
     void *base = nullptr;
     std::tie(base, size) = mmap_gc::mmap(name, fd, size, gc_func);
@@ -763,7 +763,7 @@ private:
     }
 
     {
-      auto  gc_func             = std::bind(&map<MaxLoadFactor100, Key, T, Hash>::gc_done, this, std::placeholders::_1);
+      auto  gc_func             = std::bind(&map<MaxLoadFactor100, Key, T, Hash>::gc_done, this, std::placeholders::_1, std::placeholders::_2);
       void* base                = nullptr;
       std::tie(base, mmap_size) = mmap_gc::mmap(mmap_name, mmap_fd, new_mmap_size, gc_func);
       mmap_base                 = reinterpret_cast<uint64_t*>(base);
@@ -827,7 +827,7 @@ private:
       }
     }
 
-    auto gc_func = std::bind(&map<MaxLoadFactor100, Key, T, Hash>::gc_txt_done, this, std::placeholders::_1);
+    auto gc_func = std::bind(&map<MaxLoadFactor100, Key, T, Hash>::gc_txt_done, this, std::placeholders::_1, std::placeholders::_2);
     void *base = nullptr;
     std::tie(base, mmap_txt_size) = mmap_gc::mmap(mmap_name + "txt", mmap_txt_fd, new_mmap_txt_size, gc_func);
 		mmap_txt_base = reinterpret_cast<uint64_t *>(base);

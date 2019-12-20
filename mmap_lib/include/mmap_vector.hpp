@@ -88,7 +88,7 @@ protected:
     assert(mmap_size>=calc_min_mmap_size());
 
     void *base;
-    std::tie(base, mmap_size) = mmap_gc::mmap(mmap_name, mmap_fd, mmap_size, std::bind(&vector<T>::gc_done, this, std::placeholders::_1));
+    std::tie(base, mmap_size) = mmap_gc::mmap(mmap_name, mmap_fd, mmap_size, std::bind(&vector<T>::gc_done, this, std::placeholders::_1, std::placeholders::_2));
 
     entries_capacity = (mmap_size-4096)/sizeof(T);
     mmap_base        = reinterpret_cast<uint8_t *>(base);
@@ -144,7 +144,7 @@ protected:
   const std::string mmap_path;
   const std::string mmap_name;
 
-  bool gc_done(void *base) const {
+  bool gc_done(void *base, bool force_recycle) const {
     assert(base == mmap_base);
 
     if (mmap_fd >= 0 && *entries_size == 0) {
