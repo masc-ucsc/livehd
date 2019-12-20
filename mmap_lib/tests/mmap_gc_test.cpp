@@ -30,7 +30,7 @@ protected:
 };
 
 int clean_called;
-static void trigger_clean(void *) { clean_called++; }
+static bool trigger_clean(void *) { clean_called++;  return false; }
 
 TEST_F(Setup_mmap_gc_test, fd_limit) {
 

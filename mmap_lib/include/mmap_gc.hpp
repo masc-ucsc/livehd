@@ -70,7 +70,7 @@ protected:
     int max_age = 0;
     while (it != mmap_gc_pool.end()) {
       if (recycle_age > it->second.age && it->second.fd>=0) {
-        bool done = mmap_gc::recycle_int(it);
+        bool done = mmap_gc::recycle_int(it, false);
         if (done)
           mmap_gc_pool.erase(it++); // abseil has iterator stability
         else
@@ -85,7 +85,7 @@ protected:
     mmap_gc_entry::global_age = max_age+1;
   }
 
-  static bool recycle_int(gc_pool_type::iterator it) {
+  static bool recycle_int(gc_pool_type::iterator it, bool force_recycle) {
 #ifndef NDEBUG
     static bool recursion_mode=false;
     assert(!recursion_mode); // do not call recycle inside the gc_function
@@ -96,7 +96,7 @@ protected:
 #ifndef NDEBUG
     recursion_mode = false;
 #endif
-    if (aborted) {
+    if (aborted && !force_recycle) {
 #ifndef NDEBUG
       std::cerr << "ABORT GC for " << it->second.name << std::endl; // OK
 #endif
@@ -237,7 +237,7 @@ public:
     auto it = mmap_gc_pool.find(base);
     assert(it!=mmap_gc_pool.end());
 
-    bool done = recycle_int(it);
+    bool done = recycle_int(it, true);
     //auto entry = it->second;
     //std::cerr << "mmap_gc_pool del name:" << entry.name << " fd:" << entry.fd << std::endl;
     assert(done); // Do not call recycle and then deny it!!!!
