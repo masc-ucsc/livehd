@@ -48,23 +48,27 @@ void Pass_bitwidth::trans(Eprp_var &var) {
 void Pass_bitwidth::mark_all_outputs(const LGraph *lg, Node_pin &pin) {
   //Mark driver pins that need to change based off current driver pin.
   Node curr_node = pin.get_node();
+
+  pin.get_bitwidth().i.dump();
+  fmt::print("\n");
   for (const auto &out_edge : curr_node.out_edges()) {
     auto spin = out_edge.sink;
     auto affected_node = spin.get_node();
     fmt::print("\t\tAFF_OUT EDGE {}\n", affected_node.get_type().op == GraphIO_Op);
     for (const auto &aff_out_edges : affected_node.out_edges()) {
       fmt::print("\t\t\tAFF_DRIVER_PIN\n");
-      next_pending.push_back(aff_out_edges.driver);
+      if(std::find(next_pending.begin(), next_pending.end(), aff_out_edges.driver) == next_pending.end()) {
+        //If pin is not already in next_pending, add it to vector.
+        next_pending.push_back(aff_out_edges.driver);
+      }
     }
   }
 }
 
-/*void Pass_bitwidth::iterate_graphio(const LGraph *lg, Index_ID idx) {
+/*void Pass_bitwidth::iterate_graphio(const LGraph *lg, Node_pin &pin, Node_Type_Op op) {
 
-  // This should be called only if we do cross module propagation
+  // This is called on the input GraphIO_Op node.
 
-  //This helps us detect if the IO node is an output.
-  //  If it is an output, we cascade range info down into it.
   for(const auto &inp : lg->inp_edges(idx)) {
     //An input node should have nothing as its input.
     //is_output_node = true;
@@ -103,6 +107,7 @@ void Pass_bitwidth::iterate_logic(const LGraph *lg, Node_pin &pin, Node_Type_Op 
         } else if(inp_edge.driver.get_bitwidth().i.max < imp.max) {
           imp.max = inp_edge.driver.get_bitwidth().i.max;
         }
+        fmt::print("\t\t{} {}\n", (int)imp.min, (int)imp.max);
         break;
       case Or_Op:
       //Make bw = <min(inputs), 2^n - 1> where n is the largest bitwidth of inputs to this node.
@@ -147,6 +152,7 @@ void Pass_bitwidth::iterate_logic(const LGraph *lg, Node_pin &pin, Node_Type_Op 
 
   updated = pin.ref_bitwidth()->i.update(imp);
   if(updated) {
+    fmt::print("\tUpdate: ");
     mark_all_outputs(lg, pin);
   }
 }
@@ -165,19 +171,15 @@ void Pass_bitwidth::iterate_arith(const LGraph *lg, Node_pin &pin, Node_Type_Op 
     auto spin = inp_edge.sink;
     switch(op) {
       case Sum_Op:
-        //FIXME: At this point in time, I'm just going to assume everything is +.
-        //  Update later for -.
         //PID 0 = AS, 1 = AU, 2 = BS, 3 = BU, 4 = Y. Y = (AS+...+AS+AU+...+AU) - (BS+...+BS+BU+...+BU)
         if(spin.get_pid() == 0 || spin.get_pid() == 1) {//NOTE: I think this should be spin, rethink over this later.
           imp.max += dpin.get_bitwidth().i.max;
           imp.min += dpin.get_bitwidth().i.min;
-          fmt::print("\tadd: ");
           imp.dump();
           fmt::print("\n");
         } else {
           imp.min -= dpin.get_bitwidth().i.max;
           imp.max -= dpin.get_bitwidth().i.min;
-          fmt::print("\tadd: ");
           imp.dump();
           fmt::print("\n");
           //fmt::print("\tsub: imp.max = {}, imp.min = {}\n", imp.max, imp.min);
@@ -194,10 +196,35 @@ void Pass_bitwidth::iterate_arith(const LGraph *lg, Node_pin &pin, Node_Type_Op 
         }
         break;
       case Div_Op:
-        //FIXME: Implement
+        //FIXME: I assume there's only one A (AS or AU) divided by one B (BS or BU). Could there be multiple As or Bs?
+        //NOTE: In Verilator, if I divide x by 0, the output is 0. We use that assumption here.
+        if(first) {
+          imp.min = dpin.get_bitwidth().i.min;
+          imp.max = dpin.get_bitwidth().i.max;
+          first = false;
+        } else {
+          if(dpin.get_bitwidth().i.max == 0) {
+            imp.min = 0;
+          } else {
+            imp.min /= dpin.get_bitwidth().i.max;
+          }
+          fmt::print("TRY: {}\n", (int)dpin.get_bitwidth().i.min);
+          if(dpin.get_bitwidth().i.min == 0) {
+            imp.max = 0;
+          } else {
+            imp.min /= dpin.get_bitwidth().i.min;
+          }
+          //imp.max /= (dpin.get_bitwidth().i.min == 0) ? 0 : dpin.get_bitwidth().i.min;//FIXME: This might need to undergo refinement.
+        }
         break;
       case Mod_Op:
-        //FIXME: Implement
+        //FIXME: Current thought process is that <A_min, A_max> % <B_min, B_max> can be <0, B_max - 1>.
+        if(first) {
+          first = false;
+        } else {
+          imp.min = 0;
+          imp.max = dpin.get_bitwidth().i.max - 1;
+        }
         break;
       default:
         fmt::print("Error: arith op not understood\n");
@@ -206,7 +233,7 @@ void Pass_bitwidth::iterate_arith(const LGraph *lg, Node_pin &pin, Node_Type_Op 
 
   updated = pin.ref_bitwidth()->i.update(imp);
   if(updated) {
-    fmt::print("\tDo update\n");
+    fmt::print("\tUpdate: ");
     mark_all_outputs(lg,pin);
   }
 
@@ -352,7 +379,7 @@ void Pass_bitwidth::iterate_comparison(const LGraph *lg, Node_pin &pin, Node_Typ
   imp.max = 1;
 
   //Due to nature of comparison type nodes, I need to iterate over every BS|BU pin
-  //  for each AS|AU pin I iterate over.
+  //  for each AS|AU pin I iterate over. (i.e. I have to check A1 > B1, A2 > B1, ..., A1 > B2, ...
   for (const auto &inp_edge : pin.get_node().inp_edges()) {
     auto dpin = inp_edge.driver;
     auto spin = inp_edge.sink;
@@ -393,7 +420,7 @@ void Pass_bitwidth::iterate_comparison(const LGraph *lg, Node_pin &pin, Node_Typ
   }
 
   if(updated) {
-    fmt::print("\tDo update\n");
+    fmt::print("\tUpdate: ");
     mark_all_outputs(lg,pin);
   }
 }
@@ -545,6 +572,7 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
     fmt::print("\n\timp: ");
     pin.get_bitwidth().i.dump();
     fmt::print("\n");
+    pending.push_back(pin);
   });
 
   fmt::print("\n");
@@ -560,26 +588,27 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
           dpin.debug_name(), dpin.get_bits(), dpin.get_pid(), spin.debug_name(), spin.get_pid());
 
       //FIXME: Currently, first iteration will iterate over same driver pins multiple times, in some cases. (If more than 1 edge has pin X as its driver)
-      pending.push_back(dpin);
 
       if(dpin.get_bits() == 0) {
         fmt::print(" -- implicit\n");
-        return;
-      }
-
-      //bool sign = false;
-      if(node.get_type().op == U32Const_Op) {
-        //FIXME: Need to find API to figure out what value for this pin is.
-        //uint32_t val = lg->node_value_get(dpin);
-        dpin.ref_bitwidth()->e.set_uconst(out_edge.get_bits());//FIXME: The argument to this function is way wrong, but needed for testing.
+        //return;
       } else {
-        //Set bitwidth for output edge driver.
-        //FIXME: Focused only on unsigned, will have to change later.
-        //FIXME x2: Should I even be doing this? Should be Sheng, I think.
-        dpin.ref_bitwidth()->e.set_ubits(out_edge.get_bits());
-        fmt::print("\t");
-        dpin.ref_bitwidth()->e.dump();
-        fmt::print("\n");
+
+        pending.push_back(dpin);
+        //bool sign = false;
+        if(node.get_type().op == U32Const_Op) {
+          //FIXME: Need to find API to figure out what value for this pin is.
+          //uint32_t val = lg->node_value_get(dpin);
+          dpin.ref_bitwidth()->e.set_uconst(out_edge.get_bits());//FIXME: The argument to this function is way wrong, but needed for testing.
+        } else {
+          //Set bitwidth for output edge driver.
+          //FIXME: Focused only on unsigned, will have to change later.
+          //FIXME x2: Should I even be doing this? Should be Sheng, I think.
+          dpin.ref_bitwidth()->e.set_ubits(out_edge.get_bits());
+          fmt::print("\t");
+          dpin.ref_bitwidth()->e.dump();
+          fmt::print("\n");
+        }
       }
     }
     fmt::print("-----------------------\n\n");
@@ -594,6 +623,7 @@ void Pass_bitwidth::iterate_driver_pin(LGraph *lg, Node_pin &pin) {
     //NOTE TO SELF/FIXME: GraphIO will never happen here, right? Maybe from subgraph nodes?
     case GraphIO_Op:
       fmt::print("GraphIO_Op\n");
+      mark_all_outputs(lg, pin);
       break;
     case And_Op:
     case Or_Op:
@@ -606,7 +636,7 @@ void Pass_bitwidth::iterate_driver_pin(LGraph *lg, Node_pin &pin) {
     case Mult_Op:
     case Div_Op:
     case Mod_Op:
-      fmt::print("Arith Op\n");
+      fmt::print("Arith Op -- {} {}\n", pending.size(), next_pending.size());
       iterate_arith(lg, pin, node_type);
       break;
     case LessThan_Op:
@@ -649,7 +679,20 @@ void Pass_bitwidth::bw_pass_dump(LGraph *lg) {
     fmt::print("\n");
   });
 
-  lg->each_graph_output([this, lg](const Node_pin &pin) {
+  bool once = false;
+  lg->each_graph_output([this, lg, &once](const Node_pin &pin) {
+    /*if(once == false) {
+      auto graph_out_node = pin.get_node();
+      for (const auto &inp_edge : graph_out_node.inp_edges()) {
+        fmt::print("iter! {} ", graph_out_node.get_type().op == GraphIO_Op);
+        auto dpin = inp_edge.driver;
+        auto spin = inp_edge.sink;
+        fmt::print("outp_name={},\n", dpin.get_name());
+      }
+      once = true;
+    }*/
+
+
       fmt::print("outp name={}, sink?={}, driver?={}, pid={}, has_bitwidth={}\n",
           pin.get_name(), pin.is_sink(), pin.is_driver(), pin.get_pid(), pin.has_bitwidth());
   });
@@ -667,6 +710,7 @@ bool Pass_bitwidth::bw_pass_iterate(LGraph *lg) {
   do {
     assert(next_pending.empty());
     fmt::print("Iteration {}:\n", iterations);
+
 
     auto &dpin = pending.back();
     pending.pop_back();

@@ -308,33 +308,74 @@ std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
   //------------ construct your lgraph start-------------------
 
   int pos = 0;
-  auto top_a = top->add_graph_input("a", pos++, 1);
-  auto top_b = top->add_graph_input("b", pos++, 1);
-  auto top_z = top->add_graph_output("z", pos++, 1);
 
-  auto sum = top->create_node(Sum_Op);
+  //IO
+  auto top_a = top->add_graph_input("a", pos++, 4);
+  auto top_b = top->add_graph_input("b", pos++, 3);
+  auto top_c = top->add_graph_input("c", pos++, 2);
+  auto top_d = top->add_graph_input("d", pos++, 2);
+  auto top_e = top->add_graph_input("e", pos++, 10);
 
-  auto sum_sink_1 = sum.setup_sink_pin("AU");
-  auto sum_sink_2 = sum.setup_sink_pin("BU");
-  auto sum_driver_1 = sum.setup_driver_pin("Y");
+  auto top_z = top->add_graph_output("z", pos++, 4);
+  auto top_y = top->add_graph_output("y", pos++, 5);
+  auto top_x = top->add_graph_output("x", pos++, 4);
+  auto top_w = top->add_graph_output("w", pos++, 4);
+  auto top_v = top->add_graph_output("v", pos++, 10);
 
-  top->add_edge(top_a,sum_sink_1);
-  top->add_edge(top_b,sum_sink_2);
-  //top->add_edge(sum_driver_1,top_z);
-  sum_driver_1.connect(top_z);
-  sum_driver_1.set_bits(2);
+  //Sum_Op (Sub): A:4 - B:3
+  auto sub = top->create_node(Sum_Op);
+  auto sub_sink_1 = sub.setup_sink_pin("AU");
+  auto sub_sink_2 = sub.setup_sink_pin("BU");
+  auto sub_driver_1 = sub.setup_driver_pin("Y");
+  top->add_edge(top_a,sub_sink_1);
+  top->add_edge(top_b,sub_sink_2);
+  top->add_edge(sub_driver_1,top_z);
 
-  for (const auto &inp_edge : sum.inp_edges()) {
-    auto dpin = inp_edge.driver;
-    auto spin = inp_edge.sink;
-    fmt::print("\tEDGE: {} -> {}\n", dpin.debug_name(), spin.debug_name());
-  }
-  for (const auto &out_edge : sum.out_edges()) {
-    auto dpin = out_edge.driver;
-    auto spin = out_edge.sink;
-    fmt::print("\tEDGE: {} -> {} {}\n", dpin.debug_name(), spin.debug_name(), spin.get_pid());
-  }
+  //Sum_Op (Add): A:4 + B:3
+  auto add = top->create_node(Sum_Op);
+  auto add_sink_1 = add.setup_sink_pin("AU");
+  auto add_sink_2 = add.setup_sink_pin("AU");
+  auto add_driver_1 = add.setup_driver_pin("Y");
+  top->add_edge(top_a,add_sink_1);
+  top->add_edge(top_c,add_sink_2);
+  top->add_edge(add_driver_1,top_y);
 
+  //Div_Op: A:4 / C:2
+  auto div = top->create_node(Div_Op);
+  auto div_sink_1 = div.setup_sink_pin("AU");
+  auto div_sink_2 = div.setup_sink_pin("BU");
+  auto div_driver_1 = div.setup_driver_pin("Y");
+  top->add_edge(top_a,div_sink_1);
+  top->add_edge(top_c,div_sink_2);
+  top->add_edge(div_driver_1,top_x);
+
+  //Mult_Op: C:2 * D:2
+  auto mult = top->create_node(Mult_Op);
+  auto mult_sink_1 = mult.setup_sink_pin("AU");
+  auto mult_sink_2 = mult.setup_sink_pin("AU");
+  auto mult_driver_1 = mult.setup_driver_pin("Y");
+  top->add_edge(top_c,mult_sink_1);
+  top->add_edge(top_d,mult_sink_2);
+  top->add_edge(mult_driver_1,top_w);
+
+  //Mod_Op: E:10 % D:2
+  auto mod = top->create_node(Mod_Op);
+  auto mod_sink_1 = mod.setup_sink_pin("AU");
+  auto mod_sink_2 = mod.setup_sink_pin("BU");
+  auto mod_driver_1 = mod.setup_driver_pin("Y");
+  top->add_edge(top_e,mod_sink_1);
+  top->add_edge(top_d,mod_sink_2);
+  top->add_edge(mod_driver_1,top_v);
+
+  /*auto andN = top->create_node(And_Op);
+  auto and_sink_1 = andN.setup_sink_pin("A");
+  auto and_sink_2 = andN.setup_sink_pin("A");
+  auto and_sink_3 = andN.setup_sink_pin("A");
+  auto and_driver_1 = andN.setup_driver_pin("Y");
+  top->add_edge(top_c, and_sink_1);
+  top->add_edge(top_d, and_sink_2);
+  top->add_edge(top_e, and_sink_3);
+  top->add_edge(and_driver_1,top_y);*/
   //------------ construct your lgraph end-------------------
 
   std::vector<LGraph *> lgs;
