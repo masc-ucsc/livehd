@@ -510,6 +510,15 @@ private:
 			value_type mData;
 	};
 
+  void iter_free() const {
+    assert(iter_cntr>0);
+    iter_cntr--;
+  }
+
+  void iter_new() const {
+    iter_cntr++;
+  }
+
 	using Node = DataNode<Self>;
 
 	// Iter ////////////////////////////////////////////////////////////
@@ -533,26 +542,47 @@ private:
 				// compared to end().
 				Iter()
 					: mKeyVals(nullptr)
-						, mInfo(nullptr) {}
+					, mInfo(nullptr)
+          , map_ptr(nullptr) {
+        }
+
+        ~Iter() {
+          if (map_ptr) {
+            map_ptr->iter_free();
+          }
+        }
+
+        void operator=(const Iter&) = delete;
 
 				// both const_iterator and iterator can be constructed from a non-const iterator
 				Iter(Iter<false> const& other)
 					: mKeyVals(other.mKeyVals)
-						, mInfo(other.mInfo) {}
+					, mInfo(other.mInfo)
+          , map_ptr(other.map_ptr) {
+          if (map_ptr) {
+            map_ptr->iter_new();
+          }
+        }
 
-				Iter(NodePtr valPtr, uint8_t const* infoPtr)
+				Iter(const map *_map_ptr, NodePtr valPtr, uint8_t const* infoPtr)
 					: mKeyVals(valPtr)
-						, mInfo(infoPtr) {}
+					, mInfo(infoPtr)
+          , map_ptr(_map_ptr) {
+          map_ptr->iter_new();
+        }
 
-				Iter(NodePtr valPtr, uint8_t const* infoPtr,
-						fast_forward_tag mmap_map_UNUSED(tag) /*unused*/)
+				Iter(const map *_map_ptr, NodePtr valPtr, uint8_t const* infoPtr, fast_forward_tag mmap_map_UNUSED(tag) /*unused*/)
 					: mKeyVals(valPtr)
-						, mInfo(infoPtr) {
-							fastForward();
-						}
+				  , mInfo(infoPtr)
+          , map_ptr(_map_ptr) {
+          map_ptr->iter_new();
+          fastForward();
+				}
 
 				// prefix increment. Undefined behavior if we are at end()!
 				Iter& operator++() {
+          assert(map_ptr); // true iter should have ptr to avoid gc
+          assert(map_ptr->mmap_base); // no gc
 					mInfo++;
 					mKeyVals++;
 					fastForward();
@@ -604,7 +634,8 @@ private:
 
 				friend class map<MaxLoadFactor100, key_type, T, hasher>;
 				NodePtr mKeyVals;
-				uint8_t const* mInfo;
+				uint8_t const *mInfo;
+        const map     *map_ptr;
 		};
 
 	////////////////////////////////////////////////////////////////////
@@ -629,9 +660,12 @@ private:
 	}
 
   // gc_done can be called for mmap_base or mmap_txt_base
-	void gc_done(void *base) const noexcept {
+	bool gc_done(void *base) const noexcept {
+    if (iter_cntr)
+      return true;
+
     if (mmap_base != base) {  // WARNING: Possible because 2 mmaps can be active during rehash
-      return;
+      return false;
     }
 
     if(mmap_fd >= 0 && empty()) {
@@ -642,9 +676,14 @@ private:
     // NOTE: preserve mmap_size to avoid read file in reload
     // mmap_size = 0;
     mmap_fd   = -1;
+
+    return false;
 	}
 
-	void gc_txt_done(void *base) const {
+	bool gc_txt_done(void *base) const {
+    if (iter_cntr)
+      return true; // abort
+
     assert(using_sview);
     assert(mmap_txt_base == base);
 
@@ -656,6 +695,8 @@ private:
     // NOTE: preserve mmap_txt_size to avoid read file in reload
     // mmap_txt_size = 0;
     mmap_txt_fd   = -1;
+
+    return false;
 	}
 
 	size_t calc_mmap_size(size_t nelems) const {
@@ -1140,7 +1181,7 @@ public:
 
 	// Returns a reference to the value found for key.
 	[[nodiscard]] T get(key_type const& key) const {
-		auto idx = findIdx(key);
+		const auto idx = findIdx(key);
 		assert(idx>=0);
 
 		if constexpr (using_val_sview) {
@@ -1155,7 +1196,7 @@ public:
     return get_sview(it.second);
 	}
 
-	[[nodiscard]] std::string_view get_sview(const_iterator it) const {
+	[[nodiscard]] std::string_view get_sview(const const_iterator &it) const {
     static_assert(using_val_sview,"mmap_lib::map::get_sview should be called only when 'value' is a string_view\n");
     return get_sview(it->second);
   }
@@ -1165,19 +1206,19 @@ public:
     return it.second;
 	}
 
-	[[nodiscard]] const T &get(const_iterator it) const {
+	[[nodiscard]] const T &get(const const_iterator &it) const {
     static_assert(!using_val_sview,"mmap_lib::map::get should not be called when 'value' is a string_view. Use get_sview instead.\n");
     return it->second;
 	}
 
-	[[nodiscard]] Key get_key(const_iterator it) const {
+	[[nodiscard]] Key get_key(const const_iterator &it) const {
 		if constexpr (using_key_sview) {
       return get_sview(it->first);
     }else{
       return it->first;
     }
 	}
-	[[nodiscard]] Key get_key(const value_type& it) const {
+	[[nodiscard]] Key get_key(const value_type &it) const {
 		if constexpr (using_key_sview) {
       return get_sview(it.first);
     }else{
@@ -1185,7 +1226,7 @@ public:
     }
 	}
 
-	[[nodiscard]] T *ref(key_type const& key) {
+	[[nodiscard]] T *ref(key_type const &key) {
     static_assert(!using_val_sview,"mmap_lib::map::ref can not be called for a string_view. Use get_sview instead.\n");
 
 		auto idx = findIdx(key);
@@ -1200,7 +1241,7 @@ public:
     return &it.second;
 	}
 
-	[[nodiscard]] T *ref(iterator it) {
+	[[nodiscard]] T *ref(iterator &it) {
     static_assert(!using_val_sview,"mmap_lib::map::ref can not be called for a string_view. Use get_sview instead.\n");
     return &it->second;
 	}
@@ -1209,7 +1250,7 @@ public:
 		const auto idx = findIdx(key);
     if (idx<0)
       return end();
-		return const_iterator{mKeyVals + idx, mInfo + idx};
+		return const_iterator{this, mKeyVals + idx, mInfo + idx};
 	}
 
 	template <typename OtherKey>
@@ -1217,14 +1258,14 @@ public:
 			const auto idx = findIdx(key);
       if (idx<0)
         return cend();
-			return const_iterator{mKeyVals + idx, mInfo + idx};
+			return const_iterator{this, mKeyVals + idx, mInfo + idx};
 		}
 
 	[[nodiscard]] iterator find(const key_type& key) {
 		const auto idx = findIdx(key);
     if (idx<0)
       return end();
-		return iterator{mKeyVals + idx, mInfo + idx};
+		return iterator{this, mKeyVals + idx, mInfo + idx};
 	}
 
 	template <typename OtherKey>
@@ -1232,7 +1273,7 @@ public:
 			const auto idx = findIdx(key);
       if (idx<0)
         return end();
-			return iterator{mKeyVals + idx, mInfo + idx};
+			return iterator{this, mKeyVals + idx, mInfo + idx};
 		}
 
 	[[nodiscard]] iterator begin() {
@@ -1241,7 +1282,7 @@ public:
 		if (empty()) {
 			return end();
 		}
-		return iterator(mKeyVals, mInfo, fast_forward_tag{});
+		return iterator{this, mKeyVals, mInfo, fast_forward_tag{}};
 	}
 	[[nodiscard]] const_iterator begin() const {
 		return cbegin();
@@ -1252,24 +1293,24 @@ public:
 		if (empty()) {
 			return cend();
 		}
-		return const_iterator(mKeyVals, mInfo, fast_forward_tag{});
+		return const_iterator{this, mKeyVals, mInfo, fast_forward_tag{}};
 	}
 
 	[[nodiscard]] iterator end() {
 		// no need to supply valid info pointer: end() must not be dereferenced, and only node
 		// pointer is compared.
-		return iterator{reinterpret_cast<Node*>(&mKeyVals[*mMask+1]), nullptr};
+		return iterator{this, reinterpret_cast<Node*>(&mKeyVals[*mMask+1]), nullptr};
 	}
 	[[nodiscard]] const_iterator end() const {
 		return cend();
 	}
 	[[nodiscard]] const_iterator cend() const {
-		return const_iterator{reinterpret_cast<Node*>(&mKeyVals[*mMask+1]), nullptr};
+		return const_iterator{this, reinterpret_cast<Node*>(&mKeyVals[*mMask+1]), nullptr};
 	}
 
 	iterator erase(const_iterator &pos) {
 		// its safe to perform const cast here
-		return erase(iterator{const_cast<Node*>(pos.mKeyVals), const_cast<uint8_t*>(pos.mInfo)});
+		return erase(iterator{nullptr, const_cast<Node*>(pos.mKeyVals), const_cast<uint8_t*>(pos.mInfo)});
 	}
 
 	// Erases element at pos, returns iterator to the next element.
@@ -1531,7 +1572,7 @@ private:
           ++(*mNumElements);
         }
 
-				return iterator(mKeyVals + insertion_idx, mInfo + insertion_idx);
+				return iterator{this, mKeyVals + insertion_idx, mInfo + insertion_idx};
         //return;
 			}
 		}
@@ -1623,6 +1664,7 @@ private:
 	mutable int        mmap_fd       = -1;
 	mutable size_t     mmap_size     = 0;
 	mutable uint64_t  *mmap_base     = 0;
+  mutable int        iter_cntr     = 0;
 	mutable int        mmap_txt_fd   = -1;
 	mutable size_t     mmap_txt_size = 0;
 	mutable uint64_t  *mmap_txt_base = 0;

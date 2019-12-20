@@ -30,7 +30,7 @@ struct mmap_gc_entry {
   std::string name; // Mostly for debugging
   int         fd;
   size_t      size;
-  std::function<void(void *)> gc_function;
+  std::function<bool(void *)> gc_function;
 };
 
 
@@ -70,8 +70,11 @@ protected:
     int max_age = 0;
     while (it != mmap_gc_pool.end()) {
       if (recycle_age > it->second.age && it->second.fd>=0) {
-        mmap_gc::recycle_int(it);
-        mmap_gc_pool.erase(it++); // abseil has iterator stability
+        bool done = mmap_gc::recycle_int(it);
+        if (done)
+          mmap_gc_pool.erase(it++); // abseil has iterator stability
+        else
+          ++it;
       } else {
         it->second.age -= min_age;
         if (it->second.age>max_age)
@@ -82,18 +85,23 @@ protected:
     mmap_gc_entry::global_age = max_age+1;
   }
 
-  static void recycle_int(gc_pool_type::iterator it) {
+  static bool recycle_int(gc_pool_type::iterator it) {
 #ifndef NDEBUG
     static bool recursion_mode=false;
     assert(!recursion_mode); // do not call recycle inside the gc_function
     recursion_mode = true;
 #endif
 
-    it->second.gc_function(it->first);
-
+    bool aborted = it->second.gc_function(it->first);
 #ifndef NDEBUG
     recursion_mode = false;
 #endif
+    if (aborted) {
+#ifndef NDEBUG
+      std::cerr << "ABORT GC for " << it->second.name << std::endl; // OK
+#endif
+      return false;
+    }
 
     if (it->second.fd >= 0) {
       ::close(it->second.fd);
@@ -104,6 +112,8 @@ protected:
     n_open_mmaps--;
 
     //std::cerr << "mmap_gc_pool del name:" << it->second.name << " fd:" << it->second.fd << " base:" << it->first << std::endl;
+
+    return true;
   }
 
   static void try_collect_fd() {
@@ -227,15 +237,16 @@ public:
     auto it = mmap_gc_pool.find(base);
     assert(it!=mmap_gc_pool.end());
 
-    recycle_int(it);
+    bool done = recycle_int(it);
     //auto entry = it->second;
     //std::cerr << "mmap_gc_pool del name:" << entry.name << " fd:" << entry.fd << std::endl;
+    assert(done); // Do not call recycle and then deny it!!!!
     mmap_gc_pool.erase(it);
   }
 
   // mmap_vector.hpp: std::tie(base, mmap_size) = mmap_gc::mmap(mmap_name, mmap_fd, mmap_size, std::bind(&vector<T>::gc_function, this, std::placeholders::_1));
   // mmap_map.hpp:    std::tie(base, size)      = mmap_gc::mmap(mmap_name, fd, size, std::bind(&map<MaxLoadFactor100, Key, T, Hash>::gc_function, this, std::placeholders::_1));
-  static std::tuple<void *, size_t> mmap(std::string_view name, int fd, size_t size, std::function<void(void *)> gc_function) {
+  static std::tuple<void *, size_t> mmap(std::string_view name, int fd, size_t size, std::function<bool(void *)> gc_function) {
 
     if (n_open_mmaps >= n_max_mmaps) {
       recycle_older();

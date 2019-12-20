@@ -1,1 +1,0 @@
-elab/tests/lnast_test.sh

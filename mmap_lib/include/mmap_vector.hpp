@@ -144,7 +144,7 @@ protected:
   const std::string mmap_path;
   const std::string mmap_name;
 
-  void gc_done(void *base) const {
+  bool gc_done(void *base) const {
     assert(base == mmap_base);
 
     if (mmap_fd >= 0 && *entries_size == 0) {
@@ -155,6 +155,8 @@ protected:
     entries_size     = nullptr;
     mmap_fd          = -1;
     entries_capacity = 0;
+
+    return false;
   }
 
   size_t calc_min_mmap_size() const { return sizeof(T) * MMAPA_MIN_ENTRIES + 4096; }
