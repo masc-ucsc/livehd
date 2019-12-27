@@ -282,9 +282,6 @@ void Inou_lnast_dfg::setup_lnast_to_lgraph_primitive_type_mapping(){
 
 
 
-
-
-
 void Inou_lnast_dfg::gen_temp_lg(Eprp_var &var){
   Inou_lnast_dfg p;
 
@@ -298,7 +295,6 @@ void Inou_lnast_dfg::gen_temp_lg(Eprp_var &var){
     var.add(lgs[0]);
   }
 }
-
 
 std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
   Lbench b("inou.gen_temp_lg.do_tolg");
@@ -321,6 +317,8 @@ std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
   auto top_x = top->add_graph_output("x", pos++, 4);
   auto top_w = top->add_graph_output("w", pos++, 4);
   auto top_v = top->add_graph_output("v", pos++, 10);
+  auto top_u = top->add_graph_output("u", pos++, 11);
+  auto top_t = top->add_graph_output("t", pos++, 1);
 
   //Sum_Op (Sub): A:4 - B:3
   auto sub = top->create_node(Sum_Op);
@@ -367,7 +365,7 @@ std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
   top->add_edge(top_d,mod_sink_2);
   top->add_edge(mod_driver_1,top_v);
 
-  /*auto andN = top->create_node(And_Op);
+  auto andN = top->create_node(And_Op);
   auto and_sink_1 = andN.setup_sink_pin("A");
   auto and_sink_2 = andN.setup_sink_pin("A");
   auto and_sink_3 = andN.setup_sink_pin("A");
@@ -375,7 +373,22 @@ std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
   top->add_edge(top_c, and_sink_1);
   top->add_edge(top_d, and_sink_2);
   top->add_edge(top_e, and_sink_3);
-  top->add_edge(and_driver_1,top_y);*/
+  top->add_edge(and_driver_1,top_y);
+
+  //Equals_Op
+  auto const_eq_node1 = top->create_node_const(10);
+  auto const_eq_node2 = top->create_node_const(10);
+  auto const_eq_node1_driver_1 = const_eq_node1.setup_driver_pin("Y");
+  auto const_eq_node2_driver_1 = const_eq_node2.setup_driver_pin("Y");
+
+  auto equal = top->create_node(Equals_Op);
+  auto equal_sink_1 = equal.setup_sink_pin("AU");
+  auto equal_sink_2 = equal.setup_sink_pin("AU");
+  auto equal_driver_1 = equal.setup_driver_pin("Y");
+  top->add_edge(const_eq_node1_driver_1, equal_sink_1);
+  top->add_edge(const_eq_node2_driver_1, equal_sink_2);
+  top->add_edge(equal_driver_1, top_t);
+
   //------------ construct your lgraph end-------------------
 
   std::vector<LGraph *> lgs;

@@ -466,21 +466,52 @@ void Pass_bitwidth::iterate_pick(const LGraph *lg, Node_pin &pin, Node_Type_Op o
   }*/
 }
 
-/*void Pass_bitwidth::iterate_equals(const LGraph *lg, Index_ID idx) {
-  bool updated;
-  for(const auto &inp : lg->inp_edges(idx)) {
-    Index_ID inp_idx = inp.get_idx();
-    auto       &nb_output = lg->node_bitwidth_get(idx);
-    const auto &nb_input  = lg->node_bitwidth_get(inp_idx);
-    updated |= nb_output.i.expand(nb_input.i,false);
+void Pass_bitwidth::iterate_equals(const LGraph *lg, Node_pin &pin, Node_Type_Op op) {
+  //FIXME: Is my understanding correct? Equals_Op is for comparison, not assigns? Read note below, this works for 2 inputs not more.
+  //NOTE: When using Verilog, "assign d = a == b == c" does (a == b) == c... thus you compare the result
+  //  of a == b (0 or 1) to c, not if all three (a, b, c) are equal.
+  bool updated = false;
+  bool first = true;
+  int64_t check_min;
+  int64_t check_max;
+  Ann_bitwidth::Implicit_range imp;
+  for (const auto &inp_edge : pin.get_node().inp_edges()) {
+    auto dpin = inp_edge.driver;
+    if(first) {
+      check_min = dpin.get_bitwidth().i.min;
+      check_max = dpin.get_bitwidth().i.max;
+      first = false;
+      fmt::print("\t{} {}\n", check_min, check_max);
+    } else {
+      fmt::print("\t{} {}\n", dpin.get_bitwidth().i.min, dpin.get_bitwidth().i.max);
+      if((check_min == dpin.get_bitwidth().i.min) & (check_max == dpin.get_bitwidth().i.max) & (check_min == check_max)) {
+        //Case: max_A == max_B == min_A == min_B... A always == B
+        fmt::print("\tAlways 1\n");
+        imp.min = 1;
+        imp.max = 1;
+      } else if((check_max < dpin.get_bitwidth().i.min) | (check_min > dpin.get_bitwidth().i.max)) {
+        //Case: A always > B... or A always < B... thus A never == B
+        fmt::print("\tAlways 0\n");
+        imp.min = 0;
+        imp.max = 0;
+      } else {
+        //Case: Result of comparison could be either 0 or 1
+        fmt::print("\tIndeterminable\n");
+        imp.min = 0;
+        imp.max = 1;
+      }
+    }
   }
 
+  updated = pin.ref_bitwidth()->i.update(imp);
+
   if(updated) {
-    mark_all_outputs(lg,idx);
+    fmt::print("\tUpdate\n");
+    mark_all_outputs(lg,pin);
   }
 }
 
-void Pass_bitwidth::iterate_mux(const LGraph *lg, Index_ID idx) {
+/*void Pass_bitwidth::iterate_mux(const LGraph *lg, Index_ID idx) {
   Node_bitwidth::Implicit_range imp;
 
   bool updated = false;
@@ -577,8 +608,8 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
 
   fmt::print("\n");
 
-  for (const auto &node:lg->forward()) {
-    fmt::print("type: {} {}\n", node.get_type().op, node.get_type().op == Join_Op);
+  for (const auto &node:lg->fast()) {
+    fmt::print("type: {}\n", node.get_type().op);
 
     //Iterate over inputs to some node.
     for (const auto &out_edge : node.out_edges()) {
@@ -593,13 +624,10 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
         fmt::print(" -- implicit\n");
         //return;
       } else {
-
-        pending.push_back(dpin);
         //bool sign = false;
         if(node.get_type().op == U32Const_Op) {
-          //FIXME: Need to find API to figure out what value for this pin is.
-          //uint32_t val = lg->node_value_get(dpin);
           dpin.ref_bitwidth()->e.set_uconst(out_edge.get_bits());//FIXME: The argument to this function is way wrong, but needed for testing.
+          dpin.ref_bitwidth()->set_implicit();
         } else {
           //Set bitwidth for output edge driver.
           //FIXME: Focused only on unsigned, will have to change later.
@@ -609,9 +637,10 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
           dpin.ref_bitwidth()->e.dump();
           fmt::print("\n");
         }
+        pending.push_back(dpin);
       }
     }
-    fmt::print("-----------------------\n\n");
+    fmt::print("{}-----------------------\n\n", pending.size());
   }
 }
 
@@ -646,7 +675,8 @@ void Pass_bitwidth::iterate_driver_pin(LGraph *lg, Node_pin &pin) {
       iterate_comparison(lg, pin, node_type);
       break;
     case Equals_Op:
-      //iterate_equals(lg, pin, node_type);
+      fmt::print("Equals Op --\n");
+      iterate_equals(lg, pin, node_type);
       break;
     case ShiftLeft_Op:
     case ShiftRight_Op:
@@ -661,7 +691,8 @@ void Pass_bitwidth::iterate_driver_pin(LGraph *lg, Node_pin &pin) {
       iterate_pick(lg, pin, node_type);
       break;
     case U32Const_Op:
-      //Nothing needs to be done for constants.
+      fmt::print("U32Const_Op\n");
+      mark_all_outputs(lg, pin);
       break;
     default:
       fmt::print("Op not yet supported in iterate_driver_pin\n");
