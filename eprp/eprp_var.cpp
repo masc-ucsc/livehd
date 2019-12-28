@@ -25,7 +25,8 @@ void Eprp_var::add(LGraph *lg) {
   if (std::find(lgs.begin(), lgs.end(), lg) == lgs.end()) lgs.push_back(lg);
 }
 
-void Eprp_var::add(const std::string &name, const std::string &value) { dict[name] = value; }
+void Eprp_var::add(const std::string &name, std::string_view value) { dict[name] = value; }
+void Eprp_var::add(std::string_view name, std::string_view value) { dict[std::string(name)] = value; }
 
 void Eprp_var::delete_label(const std::string &name) {
   auto it = dict.find(name);

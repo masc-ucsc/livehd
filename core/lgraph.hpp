@@ -189,9 +189,9 @@ public:
     return idx;
   }
 
-  Fwd_edge_iterator  forward(bool visit_sub=false) const;
-  Bwd_edge_iterator  backward(bool visit_sub=false) const;
-  Fast_edge_iterator fast(bool visit_sub=false) const;
+  Fwd_edge_iterator  forward(bool visit_sub=false);
+  Bwd_edge_iterator  backward(bool visit_sub=false);
+  Fast_edge_iterator fast(bool visit_sub=false);
 
   LGraph *clone_skeleton(std::string_view extended_name);
 
@@ -223,8 +223,8 @@ public:
   const Sub_node   &get_self_sub_node() const; // Access all input/outputs
   Sub_node         *ref_self_sub_node(); // Access all input/outputs
 
-  void dump() const;
-  void dump_down_nodes() const;
+  void dump();
+  void dump_down_nodes();
 
   Node get_graph_input_node();
   Node get_graph_output_node();

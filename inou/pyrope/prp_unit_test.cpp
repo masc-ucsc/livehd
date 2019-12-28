@@ -15,7 +15,7 @@ public:
   protected:
     void elaborate(){
       patch_pass(pyrope_keyword);
-      ast = std::make_unique<Ast_parser>(get_buffer(), Prp_rule);
+      ast = std::make_unique<Ast_parser>(get_memblock(), Prp_rule);
 
       fmt::print("Starting to parse\n");
 

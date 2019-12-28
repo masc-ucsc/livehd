@@ -37,7 +37,8 @@ public:
   void add(const Eprp_var &_var);
 
   void add(LGraph *lg);
-  void add(const std::string &name, const std::string &value);
+  void add(const std::string &name, std::string_view value);
+  void add(std::string_view name, std::string_view value);
 
   void delete_label(const std::string &name);
 

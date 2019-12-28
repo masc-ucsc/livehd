@@ -36,7 +36,7 @@ bool Eprp::rule_path(std::string &path) {
 bool Eprp::rule_label_path(const std::string &cmd_line, Eprp_var &next_var) {
   if (!scan_is_token(Token_id_label)) return false;
 
-  std::string label = scan_text();
+  auto label = scan_text();
 
   ast->add(Eprp_rule_label_path, scan_token());
 
@@ -70,7 +70,7 @@ bool Eprp::rule_label_path(const std::string &cmd_line, Eprp_var &next_var) {
 bool Eprp::rule_reg(bool first) {
   if (!scan_is_token(Token_id_register)) return false;
 
-  std::string var = scan_text();
+  std::string var{scan_text()};
   ast->add(Eprp_rule_reg, scan_token());
   if (first) {  // First in line #a |> ...
     if (variables.find(var) == variables.end()) {
@@ -202,7 +202,7 @@ bool Eprp::rule_top() {
 
 // top = parse_top+
 void Eprp::elaborate() {
-  ast = std::make_unique<Ast_parser>(get_buffer(), Eprp_rule);
+  ast = std::make_unique<Ast_parser>(get_memblock(), Eprp_rule);
   ast->down();
 
   while (!scan_is_end()) {

@@ -693,7 +693,7 @@ Bwd_edge_iterator LGraph::backward(bool visit_sub) { return Bwd_edge_iterator(th
 // Skip after 1, but first may be deleted, so fast_next
 Fast_edge_iterator LGraph::fast(bool visit_sub) { return Fast_edge_iterator(this, visit_sub);  }
 
-void LGraph::dump() const {
+void LGraph::dump() {
   fmt::print("lgraph name:{} size:{}\n", name, node_internal.size());
 
   for(const auto &io_pin:get_self_sub_node().get_io_pins()) {
@@ -744,7 +744,7 @@ void LGraph::dump() const {
 #endif
 }
 
-void LGraph::dump_down_nodes() const {
+void LGraph::dump_down_nodes() {
   for (auto &cnode : down_nodes) {
     fmt::print(" sub:{}\n", cnode.first.get_node(this).debug_name());
   }
