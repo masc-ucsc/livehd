@@ -26,7 +26,7 @@ Inou_pyrope::Inou_pyrope()
 void Inou_pyrope::setup() {
   Eprp_method m1("inou.pyrope.fromlg", "generate a pyrope output", &Inou_pyrope::fromlg);
 
-  register_inou(m1);
+  register_inou("pyrope", m1);
 }
 
 void Inou_pyrope::fromlg(Eprp_var &var) {

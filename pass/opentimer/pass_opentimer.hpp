@@ -8,11 +8,6 @@ class Pass_opentimer : public Pass {
 protected:
   ot::Timer timer;
 
-  //std::string_view lib;
-  //std::string_view lib_max;
-  //std::string_view lib_min;
-  //std::string_view spef;
-
   static void work(Eprp_var &var);
 
   void read_file(LGraph *g,std::string_view lib,std::string_view lib_max,std::string_view lib_min,std::string_view spef, std::string_view sdc);
@@ -22,7 +17,7 @@ protected:
   void populate_table();
 
 public:
-  Pass_opentimer();
+  Pass_opentimer() {};
 
-  void setup() final;
+  static void setup();
 };

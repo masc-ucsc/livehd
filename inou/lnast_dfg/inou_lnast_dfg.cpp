@@ -1,95 +1,90 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "inou_lnast_dfg.hpp"
 #include "lgraph.hpp"
 #include "lbench.hpp"
+#include "lnast_parser.hpp"
+
+#include "inou_lnast_dfg.hpp"
 
 void setup_inou_lnast_dfg() {
-  Inou_lnast_dfg p;
-  p.setup();
+  Inou_lnast_dfg::setup();
 }
-
 
 void Inou_lnast_dfg::setup() {
 
   Eprp_method m1("inou.lnast_dfg.tolg", "parse cfg_text -> build lnast -> generate lgraph", &Inou_lnast_dfg::tolg);
   m1.add_label_required("files",  "cfg_text files to process (comma separated)");
   m1.add_label_optional("path",   "path to put the lgraph[s]", "lgdb");
-  register_inou(m1);
+  register_inou("lnast_dfg", m1);
 
   Eprp_method m2("inou.lnast_dfg.gen_temp_lg", "create temp lgraph for bitwidth", &Inou_lnast_dfg::gen_temp_lg);
   m2.add_label_optional("path",   "path to put the lgraph[s]", "lgdb");
-  register_inou(m2);
+  register_inou("lnast_dfg", m2);
 }
 
+Inou_lnast_dfg::Inou_lnast_dfg(const Eprp_var &var)
+  : Pass("inou.lnast_dfg", var)
+  , lginp_cnt(1)
+  , lgout_cnt(0) {
+  setup_lnast_to_lgraph_primitive_type_mapping();
+}
 
 void Inou_lnast_dfg::tolg(Eprp_var &var){
-  Inou_lnast_dfg p;
+  Inou_lnast_dfg p(var);
 
-  build_lnast(p, var);
-
-  p.lnast = p.lnast_parser.get_ast().get(); //unique_ptr lend its ownership
-  //p.lnast->ssa_trans();
-
-  //lnast to lgraph
   std::vector<LGraph *> lgs = p.do_tolg();
 
-  if(lgs.empty()) {
-    error(fmt::format("fail to generate lgraph from lnast"));
-    I(false);
-  } else {
-    var.add(lgs[0]);
+  if (lgs.empty()) {
+    error("failed to generate any lgraph from lnast");
+  }else{
+    var.add(lgs);
   }
-}
-
-void Inou_lnast_dfg::build_lnast(Inou_lnast_dfg &p, Eprp_var &var) {
-  Lbench b("inou.lnast_dfg.build_lnast");
-  p.opack.files = var.get("files");
-  p.opack.path  = var.get("path");
-
-  if (p.opack.files.empty()) {
-    error(fmt::format("inou.lnast_dfg.tolg needs an input cfg_text!"));
-    I(false);
-    return;
-  }
-
-  //cfg_text to lnast
-  p.setup_memblock();
-  p.lnast_parser.parse("lnast", p.memblock, p.token_list);
 }
 
 std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
   Lbench b("inou.lnast_dfg.do_tolg");
-  I(!opack.files.empty());
-  I(!opack.path.empty());
-  auto pos = opack.files.rfind('/');
-  std::string basename;
-  if (pos != std::string::npos) {
-    basename = opack.files.substr(pos+1);
-  } else {
-    basename = opack.files;
-  }
-  auto pos2 = basename.rfind('.');
-  if (pos2 != std::string::npos)
-    basename = basename.substr(0,pos2);
-
-  LGraph *dfg = LGraph::create(opack.path, basename, opack.files);
-
-  /*
-  for (const auto &it: lnast->depth_preorder(lnast->get_root())) {
-    const auto& node_data = lnast->get_data(it);
-    std::string name(node_data.token.get_text(memblock));  //str_view to string
-    std::string type = lnast_parser.ntype_dbg(node_data.type);
-    auto node_scope = node_data.scope;
-    fmt::print("name:{}, type:{}, scope:{}\n", name, type, node_scope);
-  }
-  */
-
-  //lnast to dfg
-  process_ast_top(dfg);
+  I(!files.empty());
+  I(!path.empty());
 
   std::vector<LGraph *> lgs;
-  lgs.push_back(dfg);
+
+  for (const auto &f : absl::StrSplit(files, ',')) {
+    Lnast_parser lnast_parser(f);
+    memblock = lnast_parser.get_memblock();
+
+    //lnast = lnast_parser.get_ast().get();
+    //p.lnast->ssa_trans();
+
+    auto pos = f.rfind('/');
+    std::string basename;
+    if (pos != std::string::npos) {
+      basename = f.substr(pos+1);
+    } else {
+      basename = f;
+    }
+    auto pos2 = basename.rfind('.');
+    if (pos2 != std::string::npos)
+      basename = basename.substr(0,pos2);
+
+    LGraph *dfg = LGraph::create(path, basename, f);
+
+    /*
+       for (const auto &it: lnast->depth_preorder(lnast->get_root())) {
+       const auto& node_data = lnast->get_data(it);
+       std::string name(node_data.token.get_text(memblock));  //str_view to string
+       std::string type = lnast_parser.ntype_dbg(node_data.type);
+       auto node_scope = node_data.scope;
+       fmt::print("name:{}, type:{}, scope:{}\n", name, type, node_scope);
+       }
+       */
+
+    //lnast to dfg
+    process_ast_top(dfg);
+
+    lgs.push_back(dfg);
+  }
+
+  memblock = ""; // Not needed but to trigger a fault if incorrectly used afterwards
 
   return lgs;
 }
@@ -239,27 +234,6 @@ void  Inou_lnast_dfg::process_ast_for_op         (LGraph *dfg, const mmap_lib::T
 void  Inou_lnast_dfg::process_ast_while_op       (LGraph *dfg, const mmap_lib::Tree_index &ast_idx){;};
 void  Inou_lnast_dfg::process_ast_dp_assign_op   (LGraph *dfg, const mmap_lib::Tree_index &ast_idx){;};
 
-
-void Inou_lnast_dfg::setup_memblock(){
-  auto file_path = opack.files;
-  int fd = open(file_path.c_str(), O_RDONLY);
-  if(fd < 0) {
-    fprintf(stderr, "error, could not open %s\n", file_path.c_str());
-    exit(-3);
-  }
-
-  struct stat sb;
-  fstat(fd, &sb);
-  printf("Size: %lu FIXME: munmap at the end of the pass or memory leak\n", (uint64_t)sb.st_size);
-
-  char *mem = (char *)mmap(NULL, sb.st_size, PROT_WRITE, MAP_PRIVATE, fd, 0);
-  //fprintf(stderr, "Content of memblock: \n%s\n", memblock); //SH_FIXME: remove when benchmarking
-  if(mem == MAP_FAILED) {
-    Pass::error("inou_lnast_dfg: mmap failed for file:{} and size:{}", file_path, sb.st_size);
-  }
-  memblock = mem;
-}
-
 void Inou_lnast_dfg::setup_lnast_to_lgraph_primitive_type_mapping(){
   primitive_type_lnast2lg [Lnast_ntype::Lnast_ntype_invalid]     = Invalid_Op ;
   primitive_type_lnast2lg [Lnast_ntype::Lnast_ntype_pure_assign] = Or_Op ;
@@ -280,10 +254,8 @@ void Inou_lnast_dfg::setup_lnast_to_lgraph_primitive_type_mapping(){
   //sh_fixme: to be extended ...
 }
 
-
-
 void Inou_lnast_dfg::gen_temp_lg(Eprp_var &var){
-  Inou_lnast_dfg p;
+  Inou_lnast_dfg p(var);
 
   //lnast to lgraph
   std::vector<LGraph *> lgs = p.do_gen_temp_lg();

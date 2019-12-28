@@ -14,16 +14,17 @@
 #include "fmt/format.h"
 
 class Test_scanner : public Elab_scanner{
-  public:
-    std::vector<std::string> debug_token_list;
-    void elaborate(){
-      while(!scan_is_end()){
-        std::string token;
-        scan_append(token);
-        debug_token_list.push_back(token);
-        scan_next();
-      }
+public:
+  std::vector<std::string> debug_token_list;
+  void elaborate(){
+    while(!scan_is_end()){
+      debug_token_list.emplace_back(scan_text());
+      scan_next();
     }
+  }
+
+  const Token_list &get_token_list() const { return token_list; }
+
 };
 
 class Elab_test : public ::testing::Test{
@@ -33,10 +34,9 @@ public:
 
 TEST_F(Elab_test, token_comp1){
   std::string_view txt1("<<\n++\n--\n==\n<=\n>=");
-  Elab_scanner::Token_list tlist;
-  scanner.parse("txt1", txt1, tlist);
+  scanner.parse_inline(txt1);
   EXPECT_EQ(9, scanner.debug_token_list.size());
-  EXPECT_EQ(9, tlist.size());
+  EXPECT_EQ(9, scanner.get_token_list().size());
 
   int tok_num = 0;
 
@@ -77,8 +77,7 @@ TEST_F(Elab_test, token_comp1){
 
 TEST_F(Elab_test, token_comp2){
   std::string_view txt1("=>foo<=33+_foo");
-  Elab_scanner::Token_list tlist;
-  scanner.parse("txt1", txt1, tlist);
+  scanner.parse_inline(txt1);
   EXPECT_EQ(7, scanner.debug_token_list.size());
 
   EXPECT_EQ(scanner.debug_token_list[0], "=");
@@ -92,8 +91,7 @@ TEST_F(Elab_test, token_comp2){
 
 TEST_F(Elab_test, token_comp3){
   std::string_view txt1("100s3bit /*110 /* comment */ 33*/_3_44_u32bits");
-  Elab_scanner::Token_list tlist;
-  scanner.parse("txt1", txt1, tlist);
+  scanner.parse_inline(txt1);
   EXPECT_EQ(3, scanner.debug_token_list.size());
 
   EXPECT_EQ(scanner.debug_token_list[0], "100s3bit");
@@ -103,10 +101,9 @@ TEST_F(Elab_test, token_comp3){
 
 TEST_F(Elab_test, token_comp4){
   std::string_view txt1("\%in\n@out=a+b");
-  Elab_scanner::Token_list tlist;
-  scanner.parse("txt1", txt1, tlist);
+  scanner.parse_inline(txt1);
   EXPECT_EQ(6, scanner.debug_token_list.size());
-  
+
   EXPECT_EQ(scanner.debug_token_list[0], "\%in");
   EXPECT_EQ(scanner.debug_token_list[1], "@out");
   EXPECT_EQ(scanner.debug_token_list[2], "=");

@@ -32,15 +32,8 @@ struct Lnast_node {
 
 
 class Lnast : public mmap_lib::tree<Lnast_node> {
-public:
-  Lnast() = default;
-  explicit Lnast(std::string_view _buffer): buffer(_buffer) { I(!buffer.empty());}
-  void ssa_trans(){
-    do_ssa_trans(get_root());
-  };
-
 private:
-  const std::string_view buffer;  // const because it can not change at runtime
+  std::string top_module_name;
   void      do_ssa_trans              (const Lnast_nid  &top_nid);
   void      ssa_handle_a_statement    (const Lnast_nid  &psts_nid, const Lnast_nid &opr_nid);
   void      ssa_handle_a_cstatement   (const Lnast_nid  &psts_nid, const Lnast_nid &opr_nid);
@@ -60,7 +53,14 @@ private:
   Phi_rtable new_added_phi_node_table;
 
   Lnast_nid default_const_nid;
-protected:
+public:
+  Lnast() = default;
+  explicit Lnast(std::string_view _module_name): top_module_name(_module_name) { }
+  void ssa_trans(){
+    do_ssa_trans(get_root());
+  };
+
+  std::string_view get_top_module_name() const { return top_module_name; }
 };
 
 

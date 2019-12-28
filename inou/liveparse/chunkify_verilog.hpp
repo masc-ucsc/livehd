@@ -16,7 +16,6 @@ protected:
   std::string elab_chunk_dir;
 
   Graph_library *library;
-  Graph_library *elab_library;
 
   int open_write_file(std::string_view filename) const;
 
@@ -28,6 +27,6 @@ protected:
   void add_io(Sub_node *sub, bool input, std::string_view io_name, Port_ID pos);
 
 public:
-  Chunkify_verilog(std::string_view outd, std::string_view _elab_path);
+  Chunkify_verilog(std::string_view outd);
   void elaborate();
 };

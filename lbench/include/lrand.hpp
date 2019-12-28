@@ -1,17 +1,21 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
+
 // Get this a bit cleaner/faster
 // Benchmark against this:
 // https://lemire.me/blog/2019/03/19/the-fastest-conventional-random-number-generator-that-can-pass-big-crush/
+
 #pragma once
+
+#include <type_traits>
 
 #include <array>
 #include <cstdint>
 #include <cassert>
-#include <iomanip>
-#include <iostream>
 #include <limits>
-#include <random>
+//#include <random>
 #include <utility>
-#include <stdlib.h>
+//#include <stdlib.h>
 
 // this is probably the fastest high quality 64bit random number generator that exists.
 // Implements Small Fast Counting v4 RNG from PractRand.
@@ -60,9 +64,11 @@ public:
         return (std::numeric_limits<uint64_t>::max)();
     }
 
+#if 0
     void seed() {
         seed(std::random_device{}());
     }
+#endif
 
     void seed(uint64_t seed) {
         state(sfc64{seed}.state());
@@ -198,6 +204,53 @@ public:
     return rint.uniform<T>(std::numeric_limits<T>::max());
   }
 };
+
+template<typename T>
+class Lrand_range {
+protected:
+  sfc64 rint;
+
+  const int base;
+  const int delta;
+
+  static_assert(std::numeric_limits<T>::max()<std::numeric_limits<int>::max());
+
+public:
+  Lrand(int min, int max)
+    : rint(lrand_get_seed())
+    , base(min)
+    , delta(max-min) {
+    assert(max>min);
+  }
+  Lrand(int min, int max, uint64_t seed)
+    : rint(seed)
+    , base(min)
+    , delta(max-min) {
+    assert(max>min);
+  }
+
+  T max(uint64_t m) {
+    assert(m>base);
+    assert(m<(base+delta));
+    return base+rint.uniform<int>(m-base);
+  }
+
+  T min(uint64_t m) {
+    assert(m>base);
+    assert(m<(base+delta));
+    return base+m+rint.uniform<T>(delta-base-m);
+  }
+
+  T between(uint64_t m1, uint64_t m2) {
+    assert(m1<m2);
+    return m1+rint.uniform<T>(m2-m1);
+  }
+
+  T any() {
+    return base+rint.uniform<T>(delta);
+  }
+};
+
 
 template<>
 class Lrand<bool> {

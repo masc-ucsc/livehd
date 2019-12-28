@@ -14,9 +14,9 @@ protected:
   void create_sample_graph(LGraph *g);
 
 public:
-  Pass_sample();
+  Pass_sample(const Eprp_var &var);
 
-  void setup() final;
+  static void setup();
 
   void do_work(LGraph *g);
   void do_wirecount(LGraph *g, int indent);

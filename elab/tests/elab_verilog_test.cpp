@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <algorithm>
 #include <set>
 #include <string>
 
@@ -125,31 +126,30 @@ public:
 
     //printf("%s sz=%d pos=%d line=%d\n", buffer_name, buffer_sz, buffer_start_pos, buffer_start_line);
 
-    bool in_module=false;
     bool last_input = false;
     bool last_output = false;
 
-    std::string module;
+    std::string_view module;
     while(!scan_is_end()) {
       if (scan_is_token(Token_id_alnum)) {
-        std::string token;
-        scan_append(token);
-        if (strcasecmp(token.c_str(),"module")==0) {
-          if (in_module) {
+        std::string token{scan_text()};
+
+        std::transform(token.begin(), token.end(), token.begin(), [](unsigned char c){ return std::tolower(c); }); // verilog is can insensitive
+
+        if (token == "module") {
+          if (!module.empty()) {
             scan_error(fmt::format("unexpected nested modules"));
           }
           scan_next();
-          scan_append(module);
-          in_module = true;
-        }else if (strcasecmp(token.c_str(),"input")==0) {
+          module = scan_text();
+        }else if (token == "input") {
           last_input = true;
-        }else if (strcasecmp(token.c_str(),"output")==0) {
+        }else if (token == "output") {
           last_output = true;
-        }else if (strcasecmp(token.c_str(),"endmodule")==0) {
-          if (in_module) {
-            in_module = false;
+        }else if (token == "endmodule") {
+          if (module.size()) {
             fmt::print("{}={}\n", token, module);
-            module.clear();
+            module = std::string_view("");
           }else{
             scan_error(fmt::format("found endmodule without corresponding module"));
           }
@@ -157,8 +157,7 @@ public:
       }else if (scan_is_token(Token_id_comma) ||scan_is_token(Token_id_semicolon) || scan_is_token(Token_id_cp)) {
         if (last_input || last_output) {
           if (scan_is_prev_token(Token_id_alnum)) {
-            std::string label;
-            scan_prev_append(label);
+            auto label = scan_prev_text();
 
             if (last_input)
               fmt::print("  inp {}\n",label);
@@ -167,18 +166,6 @@ public:
           }
           last_input = false;
           last_output = false;
-#if 0
-        }else if (scan_is_token(Token_id_semicolon)) {
-          if (scan_is_next_token(1,Token_id_alnum)) {
-            std::string label;
-            scan_next_append(label);
-            if (scan_is_next_token(2,Token_id_alnum) || scan_is_next_token(2,Token_id_pound)) {
-              if (verilog_keyword.find(label) == verilog_keyword.end()) {
-                fmt::print("  instance {}\n",label);
-              }
-            }
-          }
-#endif
         }
       }
 
@@ -194,23 +181,7 @@ int main(int argc, char **argv) {
     exit(-3);
   }
 
-  int fd = open(argv[1], O_RDONLY);
-  if(fd < 0) {
-    fprintf(stderr, "error, could not open %s\n", argv[1]);
-    exit(-3);
-  }
-
-  struct stat sb;
-  fstat(fd, &sb);
-
-  char *memblock = (char *)mmap(NULL, sb.st_size, PROT_WRITE, MAP_PRIVATE, fd, 0);
-  if(memblock == MAP_FAILED) {
-    fprintf(stderr, "error, mmap failed\n");
-    exit(-3);
-  }
-
   Verilog_scanner scanner;
 
-  Elab_scanner::Token_list tlist;
-  scanner.parse(argv[1], memblock, tlist);
+  scanner.parse_file(argv[1]);
 }

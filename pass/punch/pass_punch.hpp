@@ -13,10 +13,8 @@ protected:
   static void work(Eprp_var &var);
 
 public:
-  Pass_punch();
-  Pass_punch(LGraph *top, std::string_view src, std::string_view dst);
-
-  void setup() final;
+  Pass_punch(const Eprp_var &var);
+  static void setup();
 
   void punch(LGraph *top, std::string_view src, std::string_view dst);
 

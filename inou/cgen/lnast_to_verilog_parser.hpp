@@ -1,26 +1,22 @@
-
 #pragma once
-#include "lnast.hpp"
-#include "lnast_parser.hpp"
+
+#include "lnast_to_xxx.hpp"
+
 #include "verilog_parser_module.hpp"
 #include "cgen_variable_manager.hpp"
 
-class Lnast_to_verilog_parser {
+class Lnast_to_verilog_parser : public Lnast_to_xxx {
 private:
-  // infustructure to process the nodes
+  // infrastructure to process the nodes
   mmap_lib::Tree_level curr_statement_level = -1;
   mmap_lib::Tree_level prev_statement_level = -1;
   std::vector<mmap_lib::Tree_level> level_stack;
   std::vector<std::vector<Lnast_node>> buffer_stack;
   std::vector<Lnast_node> node_buffer;
-  std::string_view memblock;
-  Lnast *lnast;
-  Lnast_parser lnast_parser;
 
-  // infustructure for multiple modules
+  // infrastructure for multiple modules
   std::string root_filename;
   Verilog_parser_module *curr_module;
-  std::map<std::string, std::string> file_map;
   // key, pair(value, variables)
   std::map<std::string_view, std::string> ref_map;
   std::vector<Verilog_parser_module*> module_stack;
@@ -30,7 +26,7 @@ private:
   std::string get_filename(std::string filepath);
   std::map<std::string, Verilog_parser_module*> func_map;
 
-  // infustructure
+  // infrastructure
   void process_node(const mmap_lib::Tree_index &it);
   void process_top(mmap_lib::Tree_level level);
   void push_statement(mmap_lib::Tree_level level, Lnast_ntype type); // prepare for next statement
@@ -53,13 +49,10 @@ private:
   void process_func_def();
 
   void process_operator();
-
 public:
-  std::string buffer;
-
   Lnast_to_verilog_parser(std::string_view _memblock, Lnast *_lnast)
-    : memblock(_memblock), lnast(_lnast) { };
+    : Last_to_xxx(_memblock, _lnast) { };
 
-  std::map<std::string, std::string> stringify(std::string filepath);
+  void generate(std::string_view path, std::string_view module_name) final;
 };
 

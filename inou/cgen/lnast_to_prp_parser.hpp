@@ -1,9 +1,8 @@
-
 #pragma once
-#include "lnast.hpp"
-#include "lnast_parser.hpp"
 
-class Lnast_to_pyrope_parser {
+#include "lnast_to_xxx.hpp"
+
+class Lnast_to_prp_parser : public Lnast_to_xxx {
 private:
   mmap_lib::Tree_level curr_statement_level = -1;
   mmap_lib::Tree_level prev_statement_level = -1;
@@ -45,12 +44,10 @@ private:
   void process_func_def();
 
   void process_operator();
-
 public:
-  std::string buffer;
+  Lnast_to_prp_parser(std::string_view _memblock, Lnast *_lnast)
+    : Last_to_xxx(_memblock, _lnast) { };
 
-  Lnast_to_pyrope_parser(std::string_view m_memblock, Lnast *m_lnast)
-    : memblock(m_memblock), lnast(m_lnast) { };
-  std::string stringify();
+  void generate(std::string_view path, std::string_view module_name) final;
 };
 

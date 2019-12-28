@@ -8,8 +8,7 @@
 #include "pass_opentimer.hpp"
 
 void setup_pass_opentimer() {
-  Pass_opentimer p;
-  p.setup();
+  Pass_opentimer::setup();
 }
 
 void Pass_opentimer::setup() {
@@ -23,11 +22,6 @@ void Pass_opentimer::setup() {
 
   register_pass(m1);
 }
-
-Pass_opentimer::Pass_opentimer()
-    : Pass("opentimer") {
-}
-
 
 void Pass_opentimer::work(Eprp_var &var) {
   Pass_opentimer pass;

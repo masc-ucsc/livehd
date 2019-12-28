@@ -30,5 +30,7 @@ public:
   void down();
   void up(Rule_id rid);
   void add(Rule_id rid, Token_entry te);
+
+  std::string_view get_memblock() const; // FIXME: memblock has to go. Support user provided strings (memblock should be inside lnast)
 };
 

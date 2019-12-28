@@ -8,8 +8,7 @@
 #include "pass_sample.hpp"
 
 void setup_pass_sample() {
-  Pass_sample p;
-  p.setup();
+  Pass_sample::setup();
 }
 
 void Pass_sample::setup() {
@@ -21,8 +20,8 @@ void Pass_sample::setup() {
   register_pass(m2);
 }
 
-Pass_sample::Pass_sample()
-    : Pass("sample") {
+Pass_sample::Pass_sample(const Eprp_var &var)
+  : Pass("pass.sample", var) {
 }
 
 void Pass_sample::do_work(LGraph *g) {
@@ -33,19 +32,19 @@ void Pass_sample::do_work(LGraph *g) {
 }
 
 void Pass_sample::work(Eprp_var &var) {
-  Pass_sample pass;
+  Pass_sample p(var);
 
   for(const auto &g : var.lgs) {
-    pass.do_work(g);
+    p.do_work(g);
   }
 }
 
 void Pass_sample::wirecount(Eprp_var &var) {
   Lbench b("pass.sample.wirecount");
-  Pass_sample pass;
+  Pass_sample p(var);
 
   for(const auto &g : var.lgs) {
-    pass.do_wirecount(g, 0);
+    p.do_wirecount(g, 0);
   }
 }
 
@@ -86,8 +85,7 @@ void Pass_sample::do_wirecount(LGraph *g, int indent) {
       ,n_nodes, g->get_down_nodes_map().size() ,g->get_const_value_map().size() + g->get_const_sview_map().size()
       ,n_wire, n_wire_bits);
 
-  auto path = g->get_path();
-  g->each_sub_fast([this,path,indent,space](Node &node, Lg_type_id lgid) {
+  g->each_sub_fast([this,indent,space](Node &node, Lg_type_id lgid) {
       LGraph *sub_lg = LGraph::open(path,lgid);
       if (!sub_lg)
         return;

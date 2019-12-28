@@ -1,87 +1,82 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include <random>
 #include <string>
-#include <time.h>
-
-#include <set>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 
-#include "inou_rand.hpp"
+#include "lbench.hpp"
+#include "lrand.hpp"
 #include "lgraph.hpp"
 
+#include "inou_rand.hpp"
+
 void setup_inou_rand() {
-  Inou_rand p;
-  p.setup();
+  Inou_rand::setup();
 }
 
 void Inou_rand::setup() {
   Eprp_method m1("inou.rand", "generate a random lgraph", &Inou_rand::tolg);
 
-  m1.add_label_optional("seed",   "random seed");
   m1.add_label_optional("size",   "lgraph size");
   m1.add_label_optional("eratio", "edge ratio for random");
   m1.add_label_required("name",   "lgraph name");
 
-  register_inou(m1);
+  register_inou("rand", m1);
 }
 
-Inou_rand::Inou_rand()
-    : Pass("rand") {
+Inou_rand::Inou_rand(const Eprp_var &var)
+  : Pass("rand", var) {
+
+  rand_size   = 8192;
+  rand_crate  = 10;
+  rand_eratio = 4;
+
+  if(var.has_label("crate")) {
+    auto sv = var.get("crate");
+    std::from_chars(sv.data(),sv.data()+sv.size(), rand_crate);
+  }
+
+  if(var.has_label("eratio")) {
+    auto sv = var.get("eratio");
+    std::from_chars(sv.data(),sv.data()+sv.size(), rand_eratio);
+  }
+
+  name = var.get("name");
+  I(!name.empty());
 }
 
 void Inou_rand::tolg(Eprp_var &var) {
-  Inou_rand p;
+  Inou_rand p(var);
 
-  p.opack.path = var.get("path");
-  p.opack.name = var.get("name");
+  LGraph *g = p.do_tolg();
 
-  if(var.has_label("seed"))
-    p.opack.rand_seed = std::stoi(std::string(var.get("seed")));
-
-  if(var.has_label("crate"))
-    p.opack.rand_crate = std::stoi(std::string(var.get("crate")));
-
-  if(var.has_label("eratio"))
-    p.opack.rand_eratio = std::stod(std::string(var.get("eratio")));
-
-  std::vector<LGraph *> lgs = p.do_tolg();
-
-  if(lgs.empty()) {
-    warn(fmt::format("inou.rand could not create a random {} lgraph in {} path", var.get("name"), var.get("path")));
-  } else {
-    assert(lgs.size() == 1); // rand only generated one graph at a time
-    var.add(lgs[0]);
-  }
+  var.add(g);
 }
 
-std::vector<LGraph *> Inou_rand::do_tolg() {
+LGraph * Inou_rand::do_tolg() {
 
-  assert(!opack.name.empty());
+  assert(!name.empty());
 
-  LGraph *g = LGraph::create(opack.path, opack.name, "inou_rand");
+  LGraph *g = LGraph::create(path, name, "inou_rand");
 
-  std::mt19937 rnd;
-  rnd.seed(opack.rand_seed);
+  Lrand_range<uint64_t> rnd_created(0, rand_size-1);
+  Lrand_range<Port_ID>  rnd_4(0,4);
+  Lrand_range<Port_ID>  rnd_port(0,(1<<Port_bits)-1);
 
-  std::uniform_int_distribution<uint64_t> rnd_created(0, opack.rand_size - 1);
-  std::uniform_int_distribution<Port_ID>  rnd_4(0, 4);
-  std::uniform_int_distribution<Port_ID>  rnd_port(0, (1<<Port_bits)-1);
-  std::uniform_int_distribution<uint16_t> rnd_bits1(1, 32);
-  std::uniform_int_distribution<uint16_t> rnd_bits2(1, 512);
-  std::uniform_int_distribution<uint8_t>  rnd_op(Sum_Op, SubGraph_Op - 1);
-  std::uniform_int_distribution<uint32_t> rnd_u32op(0, (uint32_t)(U32ConstMax_Op - U32ConstMin_Op));
-  std::uniform_int_distribution<uint8_t>  rnd_const(0, 100);
+  Lrand_range<uint16_t> rnd_bits1(1, 32);
+  Lrand_range<uint16_t> rnd_bits2(1, 512);
+  Lrand_range<uint8_t>  rnd_op(Sum_Op, SubGraph_Op - 1);
+  Lrand_range<uint32_t> rnd_u32op(0, (uint32_t)(U32ConstMax_Op - U32ConstMin_Op));
+  Lrand_range<uint8_t>  rnd_const(0, 100);
 
   std::vector<Node> created;
 
-  for(int i = 0; i < opack.rand_size; i++) {
-    if(rnd_const(rnd) < opack.rand_crate) {
-      created.emplace_back(g->create_node_const(rnd_u32op(rnd)));
+  for(int i = 0; i < rand_size; i++) {
+    if(rnd_const.any() < rand_crate) {
+      created.emplace_back(g->create_node_const(rnd_u32op.any()));
     } else {
-      created.emplace_back(g->create_node(static_cast<Node_Type_Op>(rnd_op(rnd))));
+      created.emplace_back(g->create_node(static_cast<Node_Type_Op>(rnd_op.any())));
     }
   }
 
@@ -90,35 +85,35 @@ std::vector<LGraph *> Inou_rand::do_tolg() {
 
   int i       = 0;
   int timeout = 0;
-  while(i < opack.rand_eratio * opack.rand_size) {
+  while(i < rand_eratio * rand_size) {
     uint16_t rbits = 1;
-    switch(rnd_4(rnd)) {
+    switch(rnd_4.any()) {
     case 0:
       rbits = 1;
       break;
     case 1:
-      rbits = 1 << rnd_4(rnd);
+      rbits = 1 << rnd_4.any();
       break;
     case 2:
-      rbits = rnd_bits2(rnd);
+      rbits = rnd_bits2.any();
       break;
     default:
-      rbits = rnd_bits1(rnd);
+      rbits = rnd_bits1.any();
     }
-    auto &sink_node = created[rnd_created(rnd)];
+    auto &sink_node = created[rnd_created.any()];
     auto dst_type = sink_node.get_type();
     // if constant, we don't allow inputs to sink_node
     if(dst_type.op > U32Const_Op && dst_type.op <= U32ConstMax_Op)
       continue;
 
-    auto spin = sink_node.setup_sink_pin(rnd_port(rnd) % dst_type.get_num_inputs());
+    auto spin = sink_node.setup_sink_pin(rnd_port.any() % dst_type.get_num_inputs());
     if(used_port.count(spin.get_compact()))
       continue;
 
     used_port.insert(spin.get_compact());
 
-    auto &driver_node = created[rnd_created(rnd)];
-    auto dpin = driver_node.setup_driver_pin(rnd_port(rnd) % driver_node.get_type().get_num_outputs());
+    auto &driver_node = created[rnd_created.any()];
+    auto dpin = driver_node.setup_driver_pin(rnd_port.any() % driver_node.get_type().get_num_outputs());
 
     XEdge e(dpin,spin);
     // prevent adding same edge twice
@@ -139,8 +134,5 @@ std::vector<LGraph *> Inou_rand::do_tolg() {
 
   g->sync();
 
-  std::vector<LGraph *> lgs;
-  lgs.push_back(g);
-
-  return lgs;
+  return g;
 }

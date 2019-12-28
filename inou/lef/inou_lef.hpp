@@ -1,10 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 //
 // Created by birdeclipse on 3/22/18.
-//
 
-#ifndef LGRAPH_INOU_LEF_HPP
-#define LGRAPH_INOU_LEF_HPP
+#pragma once
 
 #include "lefiDefs.hpp"
 #include "lefrReader.hpp"
@@ -45,4 +43,3 @@ public:
   static void lef_parsing(Tech_library &tlib, std::string &lef_file_name);
 };
 
-#endif // LGRAPH_INOU_LEF_HPP

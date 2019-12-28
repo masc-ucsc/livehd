@@ -20,20 +20,15 @@
 #include "inou_json.hpp"
 
 void setup_inou_json() {
-  Inou_json p;
-  p.setup();
-}
-
-Inou_json::Inou_json()
-    : Pass("json") {
+  Inou_json::setup();
 }
 
 void Inou_json::setup() {
   Eprp_method m1("inou.json.tolg", "import from json to lgraph", &Inou_json::tolg);
-  register_inou(m1);
+  register_inou("json", m1);
 
   Eprp_method m2("inou.json.fromlg", "export from lgraph to json", &Inou_json::fromlg);
-  register_inou(m2);
+  register_inou("json", m2);
 }
 
 void Inou_json::from_json(LGraph *g, rapidjson::Document &document) {

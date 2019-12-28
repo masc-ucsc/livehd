@@ -8,12 +8,12 @@
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraphbase.hpp"
+#include "lnast_parser.hpp"
 
 #include "inou_graphviz.hpp"
 
 void setup_inou_graphviz() {
-  Inou_graphviz p;
-  p.setup();
+  Inou_graphviz::setup();
 }
 
 void Inou_graphviz::setup() {
@@ -23,40 +23,56 @@ void Inou_graphviz::setup() {
   m1.add_label_optional("verbose", "dump bits and wirename (true/false)", "false");
   //m1.add_label_optional("odir",    "path to put the dot", ".");
 
-  register_inou(m1);
+  register_inou("graphviz", m1);
 
   Eprp_method m2("inou.graphviz.fromlnast", "export lnast to graphviz dot format", &Inou_graphviz::fromlnast);
 
   //m2.add_label_required("files",  "cfg_text files to process (comma separated)");
   //m2.add_label_optional("odir",   "path to put the dot", ".");
 
-  register_inou(m2);
+  register_inou("graphviz", m2);
 
   Eprp_method m3("inou.graphviz.fromlg.hierarchy", "export lgraph hierarchy to graphviz dot format", &Inou_graphviz::hierarchy);
 
   //m3.add_label_optional("odir",   "path to put the dot", ".");
 
-  register_inou(m3);
+  register_inou("graphviz", m3);
 }
 
-Inou_graphviz::Inou_graphviz() : Pass("graphviz") {
-  bits    = false;
-  verbose = false;
-  files   = "";
-  odir    = ".";
+Inou_graphviz::Inou_graphviz(const Eprp_var &var)
+  : Pass("inou.graphviz", var) {
+  if (var.has_label("bits")) {
+    auto b = var.get("bits");
+    bits = b != "false" && b != "0";
+  }else{
+    bits = false;
+  }
+
+  auto v = var.get("verbose");
+  verbose = v != "false" && v != "0";
+}
+
+void Inou_graphviz::fromlg(Eprp_var &var) {
+  Inou_graphviz p(var);
+
+  for (const auto &l : var.lgs) {
+    p.do_fromlg(l);
+  }
 }
 
 void Inou_graphviz::hierarchy(Eprp_var &var) {
-  Inou_graphviz p;
-
-  p.odir    = var.get("odir");
-  p.verbose = var.get("verbose") == "true";
-
-  bool ok = p.setup_directory(p.odir);
-  if (!ok) return;
+  Inou_graphviz p(var);
 
   for (const auto &l : var.lgs) {
     p.do_hierarchy(l);
+  }
+}
+
+void Inou_graphviz::fromlnast(Eprp_var &var) {
+  Inou_graphviz p(var);
+
+  for (const auto &f : absl::StrSplit(p.files, ',')) {
+    p.do_fromlnast(f);
   }
 }
 
@@ -90,34 +106,16 @@ void Inou_graphviz::do_hierarchy(LGraph *g) {
   close(fd);
 }
 
-void Inou_graphviz::fromlg(Eprp_var &var) {
-  Inou_graphviz p;
+void Inou_graphviz::do_fromlg(LGraph *lg_parent) {
 
-  p.odir    = var.get("odir");
-  p.bits    = var.get("bits") == "true";
-  p.verbose = var.get("verbose") == "true";
+  populate_lg_data(lg_parent);
 
-  bool ok = p.setup_directory(p.odir);
-  if (!ok) return;
-
-  std::vector<LGraph *> lgs;
-  for (const auto &l : var.lgs) {
-    lgs.push_back(l);
-  }
-
-  p.do_fromlg(lgs);
-}
-
-void Inou_graphviz::do_fromlg(std::vector<LGraph *> &lgs) {
-  for (const auto &lg_parent : lgs) {
-    populate_lg_data(lg_parent);
-    lg_parent->each_sub_fast([lg_parent, this](Node &node, Lg_type_id lgid) {
-      (void)node;
-      fmt::print("subgraph lgid:{}\n", lgid);
-      LGraph *lg_child = LGraph::open(lg_parent->get_path(), lgid);
-      populate_lg_data(lg_child);
-    });
-  }
+  lg_parent->each_sub_fast([lg_parent, this](Node &node, Lg_type_id lgid) {
+    (void)node;
+    fmt::print("subgraph lgid:{}\n", lgid);
+    LGraph *lg_child = LGraph::open(lg_parent->get_path(), lgid);
+    populate_lg_data(lg_child);
+  });
 }
 
 void Inou_graphviz::populate_lg_data(LGraph *g) {
@@ -168,30 +166,10 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
   close(fd);
 }
 
+void Inou_graphviz::do_fromlnast(std::string_view f) {
+  Lnast_parser lnast_parser(f);
 
-
-void Inou_graphviz::fromlnast(Eprp_var &var) {
-  Inou_graphviz p;
-  p.files   = var.get("files");
-  p.odir    = var.get("odir");
-
-  bool ok = p.setup_directory(p.odir);
-  if (!ok) return;
-
-  //cfg_text to lnast
-  p.memblock = p.setup_memblock(p.files);
-  p.lnast_parser.parse("lnast", p.memblock, p.token_list);
-
-  //lnast->ssa_trans();
-  p.do_fromlnast(p.files);
-}
-
-void Inou_graphviz::do_fromlnast( std::string_view _files) {
-  populate_lnast_data(_files);
-}
-
-void Inou_graphviz::populate_lnast_data(std::string_view files) {
-  const auto& lnast = lnast_parser.get_ast().get(); //unique_ptr lend its ownership
+  auto *lnast = lnast_parser.get_ast().get(); //unique_ptr lend its ownership
   lnast->ssa_trans();
   std::string data = "digraph {\n";
 
@@ -199,7 +177,7 @@ void Inou_graphviz::populate_lnast_data(std::string_view files) {
     auto node_data = lnast->get_data(itr);
 
     auto subs      = node_data.subs;
-    auto name      = node_data.token.get_text(memblock);
+    auto name      = node_data.token.get_text(lnast_parser.get_memblock());
 
     auto id = std::to_string(itr.level) + std::to_string(itr.pos);
     if(node_data.type.is_ref()){
@@ -208,13 +186,12 @@ void Inou_graphviz::populate_lnast_data(std::string_view files) {
       data += fmt::format(" {} [label=\"{}, {}\"];\n", id, node_data.type.debug_name(), name);
     }
 
-
     if(node_data.type.is_top())
       continue;
 
     //get parent data for link
     auto p = lnast->get_parent(itr);
-    std::string pname(lnast->get_data(p).token.get_text(memblock));
+    std::string pname(lnast->get_data(p).token.get_text(lnast_parser.get_memblock()));
 
     auto parent_id = std::to_string(p.level)+std::to_string(p.pos);
     data += fmt::format(" {}->{};\n", parent_id, id);
@@ -222,7 +199,7 @@ void Inou_graphviz::populate_lnast_data(std::string_view files) {
 
   data += "}\n";
 
-  std::string file = absl::StrCat(odir, "/", files, ".lnast.dot");
+  std::string file = absl::StrCat(odir, "/", f, ".lnast.dot");
   int         fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
   if (fd < 0) {
     Pass::error("inou.graphviz_lnast unable to create {}", file);
@@ -236,23 +213,3 @@ void Inou_graphviz::populate_lnast_data(std::string_view files) {
   close(fd);
 }
 
-std::string_view Inou_graphviz::setup_memblock(std::string_view files){
-  std::string file_path(files);
-  int fd = open(file_path.c_str(), O_RDONLY);
-  if(fd < 0) {
-    fprintf(stderr, "error, could not open %s\n", file_path.c_str());
-    exit(-3);
-  }
-
-  struct stat sb;
-  fstat(fd, &sb);
-  printf("Size: %lu\n", (uint64_t)sb.st_size);
-
-  char *memblock = (char *)mmap(NULL, sb.st_size, PROT_WRITE, MAP_PRIVATE, fd, 0);
-  fprintf(stderr, "Content of memblock: \n%s\n", memblock);
-  if(memblock == MAP_FAILED) {
-    fprintf(stderr, "error, mmap failed\n");
-    exit(-3);
-  }
-  return memblock;
-}

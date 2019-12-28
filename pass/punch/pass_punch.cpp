@@ -8,8 +8,10 @@
 #include "pass_punch.hpp"
 
 void setup_pass_punch() {
-  Pass_punch p;
-  p.setup();
+  Pass_punch::setup();
+}
+Pass_punch::Pass_punch(const Eprp_var &var)
+  : Pass("pass.punch", var) {
 }
 
 void Pass_punch::setup() {
@@ -19,10 +21,6 @@ void Pass_punch::setup() {
   m1.add_label_required("dst", "destination module:net name to connect. E.g: a_module_name:c_instance_name.d_instance_name->b_wire_name");
 
   register_pass(m1);
-}
-
-Pass_punch::Pass_punch()
-    : Pass("punch") {
 }
 
 #if 1

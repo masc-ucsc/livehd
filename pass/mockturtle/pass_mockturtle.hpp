@@ -265,11 +265,10 @@ protected:
     return true;
   }
 
-public:
-  Pass_mockturtle();
-
-  void setup() final;
-
   void do_work(LGraph *g);
+public:
+  Pass_mockturtle() { };
+
+  static void setup();
 };
 

@@ -5,193 +5,100 @@
 #include <string>
 #include <strings.h>
 
+#include "lnast_parser.hpp"
+#include "lnast_to_cfg_parser.hpp"
+#include "lnast_to_prp_parser.hpp"
+#include "lnast_to_verilog_parser.hpp"
+#include "lnast_to_cpp_parser.hpp"
+
 #include "eprp_utils.hpp"
 #include "inou_cgen.hpp"
 #include "lgedgeiter.hpp"
 
 void setup_inou_cgen() {
-  Inou_cgen p;
-  p.setup();
+  Inou_cgen::setup();
 }
 
-Inou_cgen::Inou_cgen()
-    : Pass("cgen") {
-
+Inou_cgen::Inou_cgen(const Eprp_var &var)
+  : Pass("inou_cgen", var) {
   lg = 0;
 }
 
 void Inou_cgen::setup() {
-  Eprp_method m1("inou.cgen.fromlg", "generate a cgen output", &Inou_cgen::fromlg);
 
-  register_inou(m1);
-
-  Eprp_method m2("inou.cgen.cfg.fromlnast", "parse cfg_test -> build lnast -> generate cfg_text", &Inou_cgen::tocfg);
+  Eprp_method m2("inou.cgen.cfg.fromlnast", "parse cfg_test -> build lnast -> generate cfg_text", &Inou_cgen::to_cfg);
   m2.add_label_required("files", "cfg_text files to process (comma separated)");
-  m2.add_label_optional("path", "path to put the cfg[s]", "lgdb");
+  m2.add_label_optional("odir", "path to put the cfg[s]", ".");
 
-  register_inou(m2);
+  register_inou("cgen", m2);
 
-  Eprp_method m3("inou.cgen.verilog.fromlnast", "parse cfg_test -> build lnast -> generate verilog", &Inou_cgen::toverilog);
+  Eprp_method m3("inou.cgen.verilog.fromlnast", "parse cfg_test -> build lnast -> generate verilog", &Inou_cgen::to_verilog);
   m3.add_label_required("files", "cfg_text files to process (comma separated)");
-  m3.add_label_optional("path", "path to put the verilog[s]", "lgdb");
+  m3.add_label_optional("odir", "path to put the verilog[s]", ".");
 
-  register_inou(m3);
+  register_inou("cgen", m3);
 
-  Eprp_method m4("inou.cgen.pyrope.fromlnast", "parse cfg_test -> build lnast -> generate pyrope", &Inou_cgen::topyrope);
+  Eprp_method m4("inou.cgen.prp.fromlnast", "parse cfg_test -> build lnast -> generate pyrope", &Inou_cgen::to_prp);
   m4.add_label_required("files", "cfg_text files to process (comma separated)");
-  m4.add_label_optional("path", "path to put the pyrope[s]", "lgdb");
+  m4.add_label_optional("odir", "path to put the pyrope[s]", ".");
 
-  register_inou(m4);
+  register_inou("cgen", m4);
 
-  Eprp_method m5("inou.cgen.cpp.fromlnast", "parse cfg_text -> build lnast -> generate cpp", &Inou_cgen::tocpp);
-  m4.add_label_required("files", "cfg_text files to process (comma separated)");
-  m4.add_label_optional("path", "path to put the cpp[s}", "lgdb");
+  Eprp_method m5("inou.cgen.cpp.fromlnast", "parse cfg_text -> build lnast -> generate cpp", &Inou_cgen::to_cpp);
+  m5.add_label_required("files", "cfg_text files to process (comma separated)");
+  m5.add_label_optional("odir", "path to put the cpp[s}", ".");
 
-  register_inou(m5);
+  register_inou("cgen", m5);
 }
 
-void Inou_cgen::fromlg(Eprp_var &var) {
+void Inou_cgen::to_xxx(Cgen_type cgen_type) {
 
-  Inou_cgen p;
+  for (const auto &f : absl::StrSplit(files, ',')) {
+    Lnast_parser lnast_parser(_f);
 
-  auto odir = var.get("odir");
-  bool  ok  = p.setup_directory(odir);
-  if(!ok)
-    return;
+    auto *lnast = lnast_parser.ref_lnast();
+    // needed??? lnast->ssa_trans();
 
-  for(const auto &g : var.lgs) {
-    const auto filename = absl::StrCat(odir,"/",g->get_name(),".prp");
-
-    p.to_pyrope(g, filename);
-  }
-}
-
-void Inou_cgen::tocfg(Eprp_var &var) {
-  Inou_cgen p;
-
-  p.opack.files = var.get("files");
-  p.opack.path = var.get("path");
-
-  if (p.opack.files.empty()) {
-    error(fmt::format("inou.cgen.tocfg needs an input cfg_text!"));
-    I(false);
-    return;
-  }
-
-  // cfg_text to lnast
-  p.memblock = p.setup_memblock();
-  p.lnast_parser.parse("lnast", p.memblock, p.token_list);
-
-  p.lnast = p.lnast_parser.get_ast().get();
-  p.lnast->ssa_trans();
-
-  // lnast to cfg_text
-  p.lnast_to_cfg_parser = new Lnast_to_cfg_parser(p.memblock, p.lnast);
-  fmt::print("{}\n", p.lnast_to_cfg_parser->stringify());
-}
-
-void Inou_cgen::topyrope(Eprp_var &var) {
-  Inou_cgen p;
-
-  p.opack.files = var.get("files");
-  p.opack.path = var.get("path");
-
-  if (p.opack.files.empty()) {
-    error(fmt::format("inou.cgen.topyrope needs an input cfg_text!"));
-    I(false);
-    return;
-  }
-
-  // cfg text to lnast
-  p.memblock = p.setup_memblock();
-  p.lnast_parser.parse("lnast", p.memblock, p.token_list);
-
-  p.lnast = p.lnast_parser.get_ast().get();
-  p.lnast->ssa_trans();
-
-  // lnast to pyrope
-  p.lnast_to_pyrope_parser = new Lnast_to_pyrope_parser(p.memblock, p.lnast);
-  fmt::print("{}\n", p.lnast_to_pyrope_parser->stringify());
-}
-
-void Inou_cgen::toverilog(Eprp_var &var) {
-  Inou_cgen p;
-
-  p.opack.files = var.get("files");
-  p.opack.path = var.get("path");
-
-  if (p.opack.files.empty()) {
-    error(fmt::format("inou.cgen.toverilog needs an input cfg_text!"));
-    I(false);
-    return;
-  }
-
-  // cfg text to lnast
-  p.memblock = p.setup_memblock();
-  p.lnast_parser.parse("lnast", p.memblock, p.token_list);
-
-  p.lnast = p.lnast_parser.get_ast().get();
-  p.lnast->ssa_trans();
-
-  // lnast to verilog
-  p.lnast_to_verilog_parser = new Lnast_to_verilog_parser(p.memblock, p.lnast);
-
-  std::map<std::string, std::string> files = p.lnast_to_verilog_parser->stringify(p.opack.files);
-  for (auto ele : files) {
-    fmt::print("{}:\n{}\n", ele.first, ele.second);
+    const std::map<std::string, std::string> &result;
+    if (cgen_type==Cgen_type::Type_verilog) { // TODO: Create base object for all the passes
+      Lnast_to_verilog_parser lnast_to_xxx_parser(lnast);
+      lnast_to_xxx_parser.generate(path);
+    }else if (cgen_type==Cgen_type::Type_prp) {
+      Lnast_to_prp_parser lnast_to_xxx_parser(lnast);
+      lnast_to_xxx_parser.generate(path);
+    }else if (cgen_type==Cgen_type::Type_cfg) {
+      Lnast_to_cfg_parser lnast_to_xxx_parser(lnast);
+      lnast_to_xxx_parser.generate(path);
+    }else if (cgen_type==Cgen_type::Type_cpp) {
+      Lnast_to_cpp_parser lnast_to_xxx_parser(lnast);
+      lnast_to_xxx_parser.generate(path);
+    }else{
+      I(false); // Invalid
+    }
   }
 }
 
-void Inou_cgen::tocpp(Eprp_var &var) {
-  Inou_cgen p;
-
-  p.opack.files = var.get("files");
-  p.opack.path = var.get("path");
-
-  if (p.opack.files.empty()) {
-    error(fmt::format("inou.cgen.toverilog needs an input cfg_text!"));
-    I(false);
-    return;
-  }
-
-  // cfg text to lnast
-  p.memblock = p.setup_memblock();
-  p.lnast_parser.parse("lnast", p.memblock, p.token_list);
-
-  p.lnast = p.lnast_parser.get_ast().get();
-  p.lnast->ssa_trans();
-
-  // lnast to c++
-  p.lnast_to_cpp_parser = new Lnast_to_cpp_parser(p.memblock, p.lnast);
-
-  std::map<std::string, std::string> files = p.lnast_to_cpp_parser->stringify(p.opack.files);
-  for (auto ele : files) {
-    fmt::print("{}:\n{}\n", ele.first, ele.second);
-  }
+void Inou_cgen::to_verilog(Eprp_var &var) {
+  Inou_cgen p(var);
+  p.to_xxx(Cgen_type::Type_verilog);
 }
 
-std::string_view Inou_cgen::setup_memblock() {
-  auto file_path = opack.files;
-  int fd = open(file_path.c_str(), O_RDONLY);
-  if (fd < 0) {
-    fprintf(stderr, "error, could not open %s\n", file_path.c_str());
-    exit(-3);
-  }
-
-  struct stat sb;
-  fstat(fd, &sb);
-  printf("Size: %lu\n", (uint64_t)sb.st_size);
-
-  char *memblock = (char *)mmap(NULL, sb.st_size, PROT_WRITE, MAP_PRIVATE, fd, 0);
-  fprintf(stderr, "Content of memblock: \n%s\n", memblock);
-  if (memblock == MAP_FAILED) {
-    fprintf(stderr, "error, mmap failed\n");
-    exit(-3);
-  }
-  return memblock;
+void Inou_cgen::to_prp(Eprp_var &var) {
+  Inou_cgen p(var);
+  p.to_xxx(Cgen_type::Type_prp);
 }
 
-void Inou_cgen::Declaration::format_raw(Out_string &w) const {
+void Inou_cgen::to_cfg(Eprp_var &var) {
+  Inou_cgen p(var);
+  p.to_xxx(Cgen_type::Type_cfg);
+}
+
+void Inou_cgen::to_cpp(Eprp_var &var) {
+  Inou_cgen p(var);
+  p.to_xxx(Cgen_type::Type_cpp);
+}
+
+void Inou_cgen::Declaration::format_raw(std::ostringstream &w) const {
   static std::string_view str_type[] = {"local", "input", "output", "sflop", "aflop", "fflop", "latch"};
 
   w << fmt::format("dec {} bits:{} pos:{} sign:{} order:{} type:{}\n", name, bits, pos, is_signed, order, str_type[type]);
@@ -293,13 +200,13 @@ void Inou_cgen::setup_declarations() {
   });
 }
 
-void Inou_cgen::to_pyrope(LGraph *g, std::string_view filename) {
+void Inou_cgen::generate_prp(LGraph *g, std::string_view filename) {
 
   assert(lg == nullptr);
   lg = g;
 
   setup_declarations();
-  Out_string w;
+  std::ostringstream w;
 
   w << fmt::format("// {} \n", filename);
 
@@ -328,3 +235,4 @@ void Inou_cgen::to_pyrope(LGraph *g, std::string_view filename) {
 
   lg = nullptr; // just being clean
 }
+

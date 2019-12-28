@@ -5,17 +5,17 @@
 
 class Inou_pyrope : public Pass {
 protected:
-  static void work(Eprp_var &var);
 
-  void compute_histogram(LGraph *g);
-  void compute_max_depth(LGraph *g);
-  void annotate_placement(LGraph *g);
-
-public:
-  Inou_pyrope();
-
-  void setup() final;
+  void to_lgraph(std::string_view file);
 
   void do_work(const LGraph *g);
+
+  // eprp callbacks
+  static void work(Eprp_var &var);
+
+public:
+  Inou_pyrope(const Eprp_var &var);
+
+  static void setup();
 };
 

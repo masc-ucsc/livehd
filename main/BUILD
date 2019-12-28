@@ -6,7 +6,6 @@ cc_binary(
           +glob(["*_api.hpp"]),
     deps = [
             "@replxx//:replxx",
-            "@mustache//:headers",
             "//elab:elab",
             "//eprp:eprp",
             "//core:core",
@@ -20,6 +19,7 @@ cc_binary(
             "//inou/graphviz:inou_graphviz",
             # "//inou/rand:inou_rand",
             "//inou/lnast_dfg:inou_lnast_dfg",
+            "//inou/yosys:lgyosys-api",
 
             # "//pass/abc:pass_abc",
             # "//pass/dfg:pass_dfg",
@@ -35,8 +35,6 @@ cc_binary(
             #add dependencies to new passes here
     ],
     data = ["//inou/yosys:liblgraph_yosys.so",   # A bit special as only libraries are used in yosys -m XXX
-            "inou_yosys_read.ys",
-            "inou_yosys_write.ys",
     ],
     visibility = ["//visibility:public"],
     #linkopts = ["-static"],

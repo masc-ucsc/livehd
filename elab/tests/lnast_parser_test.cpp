@@ -23,24 +23,10 @@ int main(int argc, char **argv) {
     exit(-3);
   }
 
-  int fd = open(argv[1], O_RDONLY);
-  if(fd < 0) {
-    fprintf(stderr, "error, could not open %s\n", argv[1]);
-    exit(-3);
-  }
-
-  struct stat sb;
-  fstat(fd, &sb);
-  printf("Size: %lu\n", (uint64_t)sb.st_size);
-
-  char *memblock = (char *)mmap(NULL, sb.st_size, PROT_WRITE, MAP_PRIVATE, fd, 0);
-  if(memblock == MAP_FAILED) {
-    fprintf(stderr, "error, mmap failed\n");
-    exit(-3);
-  }
   Lnast_parser lnast_parser;
-  Elab_scanner::Token_list tlist;
-  lnast_parser.parse(argv[1], memblock, tlist);
-  auto lnast = lnast_parser.get_ast().get(); //unique_ptr lend its ownership
-  lnast->ssa_trans();
+  lnast_parser.parse_file(argv[1]);
+
+  lnast_parser.ref_lnast()->ssa_trans();
+
+  // FIXME: Any check?
 }

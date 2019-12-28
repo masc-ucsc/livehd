@@ -595,52 +595,30 @@ END
     return getcwd(&cwd[0],cwd.capacity());
   }
 
-  std::string_view setup_memblock(){
+  void setup_lnast_testee() {
     std::string tmp_str = get_current_working_dir();
     std::string file_path = tmp_str + "/inou/cfg/tests/lnast_utest.cfg";
-    int fd = open(file_path.c_str(), O_RDONLY);
-    if(fd < 0) {
-        fprintf(stderr, "error, could not open %s\n", file_path.c_str());
-        exit(-3);
-    }
 
-    struct stat sb;
-    fstat(fd, &sb);
-    printf("Size: %lu\n", (uint64_t)sb.st_size);
-
-    char *memblock = (char *)mmap(NULL, sb.st_size, PROT_WRITE, MAP_PRIVATE, fd, 0);
-    //fprintf(stderr, "Content of memblock: \n%s\n", memblock);
-    if(memblock == MAP_FAILED) {
-        fprintf(stderr, "error, mmap failed\n");
-        exit(-3);
-    }
-    return memblock;
-  }
-
-  void setup_lnast_testee(){
-    std::string_view memblock = setup_memblock();
-    Elab_scanner::Token_list tlist;
-    lnast_parser.parse("lnast", memblock, tlist);
+    lnast_parser.parse_file(file_path);
   }
 };//end class
 
 TEST_F(Lnast_test, Traverse_breadth_first_check_on_ast) {
   fmt::print("Traverse_breadth_first_check_on_ast\n");
-  auto lnast = lnast_parser.get_ast().get(); //unique_ptr lend its ownership
+  auto *lnast = lnast_parser.ref_lnast();
   std::vector<std::vector<tuple>> ast_sorted_testee;
-  std::string_view memblock = setup_memblock();
 
-  lnast->each_top_down_fast([&ast_sorted_testee, &memblock, &lnast] (const mmap_lib::Tree_index &self,
+  lnast->each_top_down_fast([&ast_sorted_testee, &lnast] (const mmap_lib::Tree_index &self,
                                                                            const Lnast_node &node_data) {
     const mmap_lib::Tree_index &parent = lnast->get_parent(self);
 
     while (static_cast<size_t>(self.level)>=ast_sorted_testee.size())
         ast_sorted_testee.emplace_back();
 
-    std::string name(node_data.token.get_text(memblock));
+    std::string name(node_data.token.get_text());
     std::string type(node_data.type.debug_name());
 
-    std::string pname(lnast->get_data(parent).token.get_text(memblock));
+    std::string pname(lnast->get_data(parent).token.get_text());
     std::string ptype(lnast->get_data(parent).type.debug_name());
 
     fmt::print("nname:{}, ntype:{}\n", name, type);
@@ -657,14 +635,13 @@ TEST_F(Lnast_test, Traverse_breadth_first_check_on_ast) {
 
 TEST_F(Lnast_test,Traverse_preorder_check_on_lnast){
   fmt::print("Traverse_preorder_check_on_ast\n");
-  auto lnast = lnast_parser.get_ast().get(); //unique_ptr lend its ownership
+  auto *lnast = lnast_parser.ref_lnast();
   std::vector<std::vector<tuple>> ast_preorder_testee;
-  std::string_view memblock = setup_memblock();
 
   for (const auto &it: lnast->depth_preorder(lnast->get_root()) ) {
 
     const auto& node_data = lnast->get_data(it);
-    std::string name(node_data.token.get_text(memblock)); //str_view to string for sorting
+    std::string name(node_data.token.get_text()); //str_view to string for sorting
     std::string type(node_data.type.debug_name());
     auto tuple_data = std::make_tuple(name, type);
 

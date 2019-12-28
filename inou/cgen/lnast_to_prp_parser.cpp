@@ -1,8 +1,8 @@
 
-#include "lnast_to_pyrope_parser.hpp"
+#include "lnast_to_prp_parser.hpp"
 
-std::string Lnast_to_pyrope_parser::stringify() {
-  fmt::print("\nstart Lnast_to_pyrope_parser::stringify\n");
+std::string Lnast_to_prp_parser::stringify(std::string_view module_name) {
+  fmt::print("\nstart Lnast_to_prp_parser::stringify {}\n", module_name);
 
   for (const mmap_lib::Tree_index &it: lnast->depth_preorder(lnast->get_root())) {
     process_node(it);
@@ -13,7 +13,7 @@ std::string Lnast_to_pyrope_parser::stringify() {
   return buffer;
 }
 
-void Lnast_to_pyrope_parser::process_node(const mmap_lib::Tree_index& it) {
+void Lnast_to_prp_parser::process_node(const mmap_lib::Tree_index& it) {
   const auto& node_data = lnast->get_data(it);
 
   // add while to see pop_statement and to add buffer
@@ -45,12 +45,12 @@ void Lnast_to_pyrope_parser::process_node(const mmap_lib::Tree_index& it) {
 
 }
 
-void Lnast_to_pyrope_parser::process_top(mmap_lib::Tree_level level) {
+void Lnast_to_prp_parser::process_top(mmap_lib::Tree_level level) {
   level_stack.push_back(level);
   curr_statement_level = level;
 }
 
-void Lnast_to_pyrope_parser::push_statement(mmap_lib::Tree_level level, Lnast_ntype type) {
+void Lnast_to_prp_parser::push_statement(mmap_lib::Tree_level level, Lnast_ntype type) {
   fmt::print("before push\n");
 
   level = level + 1;
@@ -70,7 +70,7 @@ void Lnast_to_pyrope_parser::push_statement(mmap_lib::Tree_level level, Lnast_nt
   fmt::print("after push\n");
 }
 
-void Lnast_to_pyrope_parser::pop_statement() {
+void Lnast_to_prp_parser::pop_statement() {
   fmt::print("before pop\n");
 
   process_buffer();
@@ -93,7 +93,7 @@ void Lnast_to_pyrope_parser::pop_statement() {
   fmt::print("after pop\n");
 }
 
-void Lnast_to_pyrope_parser::flush_statements() {
+void Lnast_to_prp_parser::flush_statements() {
   fmt::print("starting to flush statements\n");
 
   while (buffer_stack.size() > 0) {
@@ -117,11 +117,11 @@ void Lnast_to_pyrope_parser::flush_statements() {
   fmt::print("ending flushing statements\n");
 }
 
-void Lnast_to_pyrope_parser::add_to_buffer(Lnast_node node) {
+void Lnast_to_prp_parser::add_to_buffer(Lnast_node node) {
   node_buffer.push_back(node);
 }
 
-void Lnast_to_pyrope_parser::process_buffer() {
+void Lnast_to_prp_parser::process_buffer() {
   if (!node_buffer.size()) return;
 
   const auto type = node_buffer.front().type;
@@ -209,11 +209,11 @@ void Lnast_to_pyrope_parser::process_buffer() {
   node_buffer.clear();
 }
 
-std::string_view Lnast_to_pyrope_parser::get_node_name(Lnast_node node) {
+std::string_view Lnast_to_prp_parser::get_node_name(Lnast_node node) {
   return node.token.get_text(memblock);
 }
 
-void Lnast_to_pyrope_parser::flush_it(std::vector<Lnast_node>::iterator it) {
+void Lnast_to_prp_parser::flush_it(std::vector<Lnast_node>::iterator it) {
   while (it != node_buffer.end()) {
     const auto type = (*it).type;
     if (type.is_statements() || type.is_cstatements()) {
@@ -228,7 +228,7 @@ void Lnast_to_pyrope_parser::flush_it(std::vector<Lnast_node>::iterator it) {
   }
 }
 
-std::string_view Lnast_to_pyrope_parser::join_it(std::vector<Lnast_node>::iterator it, std::string del) {
+std::string_view Lnast_to_prp_parser::join_it(std::vector<Lnast_node>::iterator it, std::string del) {
   std::string value = "";
   while (it != node_buffer.end()) {
     const auto type = (*it).type;
@@ -246,7 +246,7 @@ std::string_view Lnast_to_pyrope_parser::join_it(std::vector<Lnast_node>::iterat
   return value;
 }
 
-bool Lnast_to_pyrope_parser::is_number(std::string_view test_string) {
+bool Lnast_to_prp_parser::is_number(std::string_view test_string) {
   if (test_string.find("0d") == 0) {
     return true;
   } else if (test_string.find("0b") == 0) {
@@ -257,14 +257,14 @@ bool Lnast_to_pyrope_parser::is_number(std::string_view test_string) {
   return false;
 }
 
-std::string_view Lnast_to_pyrope_parser::process_number(std::string_view num_string) {
+std::string_view Lnast_to_prp_parser::process_number(std::string_view num_string) {
   if (num_string.find("0d") == 0) {
     return num_string.substr(2);
   }
   return num_string;
 }
 
-bool Lnast_to_pyrope_parser::is_ref(std::string_view test_string) {
+bool Lnast_to_prp_parser::is_ref(std::string_view test_string) {
   /*
   std::regex e("___[a-zA-Z]");
   return std::regex_match(test_string, e);
@@ -273,19 +273,19 @@ bool Lnast_to_pyrope_parser::is_ref(std::string_view test_string) {
   return test_string.find("___") == 0;
 }
 
-void Lnast_to_pyrope_parser::inc_indent_buffer(){
+void Lnast_to_prp_parser::inc_indent_buffer(){
   indent_buffer_size++;
 }
 
-void Lnast_to_pyrope_parser::dec_indent_buffer() {
+void Lnast_to_prp_parser::dec_indent_buffer() {
   indent_buffer_size--;
 }
 
-std::string Lnast_to_pyrope_parser::indent_buffer() {
+std::string Lnast_to_prp_parser::indent_buffer() {
   return std::string(indent_buffer_size * 2, ' ');
 }
 
-void Lnast_to_pyrope_parser::process_assign(std::string_view assign_type) {
+void Lnast_to_prp_parser::process_assign(std::string_view assign_type) {
   auto it = node_buffer.begin();
   it++;
   std::string_view key = get_node_name(*it);
@@ -308,7 +308,7 @@ void Lnast_to_pyrope_parser::process_assign(std::string_view assign_type) {
   }
 }
 
-void Lnast_to_pyrope_parser::process_label() {
+void Lnast_to_prp_parser::process_label() {
   auto it = node_buffer.begin();
   const auto access_type = it->type;
   it++;
@@ -332,7 +332,7 @@ void Lnast_to_pyrope_parser::process_label() {
   }
 }
 
-void Lnast_to_pyrope_parser::process_operator() {
+void Lnast_to_prp_parser::process_operator() {
   auto it = node_buffer.begin();
   const auto op_type = it->type;
   it++;
@@ -369,7 +369,7 @@ void Lnast_to_pyrope_parser::process_operator() {
   }
 }
 
-void Lnast_to_pyrope_parser::process_if() {
+void Lnast_to_prp_parser::process_if() {
   fmt::print("start process_if\n");
 
   auto it = node_buffer.begin();
@@ -414,7 +414,7 @@ void Lnast_to_pyrope_parser::process_if() {
   fmt::print("end process_if\n");
 }
 
-void Lnast_to_pyrope_parser::process_func_call() {
+void Lnast_to_prp_parser::process_func_call() {
   auto it = node_buffer.begin();
   it++; // func_def
   std::string_view key = get_node_name(*it);
@@ -446,7 +446,7 @@ void Lnast_to_pyrope_parser::process_func_call() {
   }
 }
 
-void Lnast_to_pyrope_parser::process_func_def() {
+void Lnast_to_prp_parser::process_func_def() {
   auto it = node_buffer.begin();
   it++; // func_def
   absl::StrAppend(&node_str_buffer, indent_buffer(), get_node_name(*it), " = :(");

@@ -5,23 +5,13 @@
 #include <vector>
 
 #include "pass.hpp"
-#include "lnast_parser.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
-class Inou_lnast_dfg_options {
-public:
-  std::string files;
-  std::string path;
-};
-
-class Inou_lnast_dfg : public Pass{
+class Inou_lnast_dfg : public Pass {
 private:
-  Inou_lnast_dfg_options   opack;
-  Elab_scanner::Token_list token_list;
   std::string_view         memblock;
-  Lnast_parser             lnast_parser;
-  Lnast                   *lnast;
+  std::unique_ptr<Lnast>   lnast;
 
   absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Node_Type_Op> primitive_type_lnast2lg;
   absl::flat_hash_map<std::string, Node_pin>   name2dpin; //record dpin instead of node because the asymmetry between gio and normal node  ...
@@ -29,18 +19,6 @@ private:
   int                    lgout_cnt;
 
 protected:
-
-public:
-  Inou_lnast_dfg() : Pass("lnast_dfg"), lginp_cnt(1), lgout_cnt(0)
-  {
-    setup_lnast_to_lgraph_primitive_type_mapping();
-  };
-  static void   tolg(Eprp_var &var);
-  static void   gen_temp_lg(Eprp_var &var);
-  static void   build_lnast(Inou_lnast_dfg &p, Eprp_var &var);
-  void          setup() final;
-
-private:
   void                          setup_memblock();
   std::vector<LGraph *>         do_tolg();
   std::vector<LGraph *>         do_gen_temp_lg();
@@ -68,6 +46,14 @@ private:
   Node_Type_Op decode_lnast_op    (const mmap_lib::Tree_index &ast_op_idx);
   void         setup_lnast_to_lgraph_primitive_type_mapping();
 
-};
+  static void   build_lnast(Inou_lnast_dfg &p, Eprp_var &var);
 
+  // eprp callbacks
+  static void   tolg(Eprp_var &var);
+  static void   gen_temp_lg(Eprp_var &var);
+public:
+  Inou_lnast_dfg(const Eprp_var &var);
+
+  static void   setup();
+};
 

@@ -84,14 +84,10 @@ public:
       total++;
 
       if (scan_is_token(Token_id_label)) {
-        std::string txt;
-        scan_append(txt);
-        fmt::print("LABEL [{}]\n", txt);
+        fmt::print("LABEL [{}]\n", scan_text());
       }
       if (scan_is_token(Pyrope_id_if)) {
-        std::string txt;
-        scan_append(txt);
-        fmt::print("IF [{}]\n", txt);
+        fmt::print("IF [{}]\n", scan_text());
       }
 
       scan_next();
@@ -106,23 +102,6 @@ int main(int argc, char **argv) {
     exit(-3);
   }
 
-  int fd = open(argv[1], O_RDONLY);
-  if (fd < 0) {
-    fprintf(stderr, "error, could not open %s\n", argv[1]);
-    exit(-3);
-  }
-
-  struct stat sb;
-  fstat(fd, &sb);
-
-  char *memblock = (char *)mmap(NULL, sb.st_size, PROT_WRITE, MAP_PRIVATE, fd, 0);
-  if (memblock == MAP_FAILED) {
-    fprintf(stderr, "error, mmap failed\n");
-    exit(-3);
-  }
-
   Pyrope_scanner scanner;
-
-  Elab_scanner::Token_list tlist;
-  scanner.parse(argv[1], memblock, tlist);
+  scanner.parse_file(argv[1]);
 }

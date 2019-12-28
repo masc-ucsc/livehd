@@ -8,7 +8,6 @@
 #include "cloud_api.hpp"
 
 #include "inou_lef_api.hpp"
-#include "inou_yosys_api.hpp"
 
 #include "eprp_utils.hpp"
 
@@ -31,6 +30,7 @@ void setup_inou_pyrope();
 void setup_inou_rand();
 void setup_inou_verific();
 void setup_inou_lnast_dfg();
+void setup_inou_yosys();
 
 void setup_cops_live();
 
@@ -52,6 +52,7 @@ void Main_api::init() {
   setup_inou_graphviz();
   setup_inou_pyrope();
   setup_inou_lnast_dfg();
+  setup_inou_yosys();
   /* setup_inou_json(); */
   /* setup_inou_rand(); */
   /* setup_inou_verific(); */
@@ -69,7 +70,6 @@ void Main_api::init() {
 
   /* Inou_cfg_api::setup(Pass::eprp);    // inou.cfg.* */
   /* Inou_lef_api::setup(Pass::eprp);    // inou.lef.* */
-  Inou_yosys_api::setup(Pass::eprp);  // inou.yosys.*
 
   main_path = Eprp_utils::get_exe_path();
 }

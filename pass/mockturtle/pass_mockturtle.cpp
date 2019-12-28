@@ -22,18 +22,13 @@
 //#include <mockturtle/algorithms/node_resynthesis/exact.hpp>
 
 void setup_pass_mockturtle() {
-  Pass_mockturtle p;
-  p.setup();
+  Pass_mockturtle::setup();
 }
 
 void Pass_mockturtle::setup() {
   Eprp_method m1("pass.mockturtle", "pass a lgraph using mockturtle", &Pass_mockturtle::work);
 
   register_pass(m1);
-}
-
-Pass_mockturtle::Pass_mockturtle()
-    : Pass("mockturtle") {
 }
 
 void Pass_mockturtle::work(Eprp_var &var) {

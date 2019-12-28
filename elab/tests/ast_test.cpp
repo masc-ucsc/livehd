@@ -32,16 +32,16 @@ public:
   void elaborate() {
     patch_pass(); // Fix token_id_num or allow custom
 
-    ast = std::make_unique<Ast_parser>(get_buffer(), test_rule);
+    ast = std::make_unique<Ast_parser>(get_memblock(), test_rule);
 
     while(!scan_is_end()) {
       EXPECT_TRUE(scan_is_token(Token_id_alnum));
-      std::string cmd = scan_text();
+      auto cmd = scan_text();
       scan_next();
 
       if (cmd == "up") {
         EXPECT_TRUE(scan_is_token(Token_id_num));
-        std::string val = scan_text();
+        std::string val{scan_text()};
         scan_next();
 
         auto rid_int = std::atoi(val.c_str());
@@ -53,7 +53,7 @@ public:
         ast->down();
       }else if (cmd == "add") {
         EXPECT_TRUE(scan_is_token(Token_id_num));
-        std::string val = scan_text();
+        std::string val{scan_text()};
         scan_next();
 
         auto rid_int = std::atoi(val.c_str());
@@ -73,8 +73,7 @@ TEST_F(Ast_test_setup, ast_trivial) {
 
   Test_scanner scanner;
 
-  Elab_scanner::Token_list tlist;
-  scanner.parse("test", statement, tlist);
+  scanner.parse_inline(statement);
 
   EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(1,0)).rule_id, 13);
   EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(1,1)).rule_id, 17);
@@ -88,8 +87,7 @@ TEST_F(Ast_test_setup, ast_trivial2) {
 
   Test_scanner scanner;
 
-  Elab_scanner::Token_list tlist;
-  scanner.parse("test", statement, tlist);
+  scanner.parse_inline(statement);
 
   EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(1,0)).rule_id, 4);
   EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(2,0)).rule_id, 1);
@@ -104,8 +102,7 @@ TEST_F(Ast_test_setup, ast_trivialc) {
 
   Test_scanner scanner;
 
-  Elab_scanner::Token_list tlist;
-  scanner.parse("test", statement, tlist);
+  scanner.parse_inline(statement);
 
   EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(1,0)).rule_id, 3);
   EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(2,0)).rule_id, 6);
@@ -119,8 +116,7 @@ TEST_F(Ast_test_setup, pseudo_eprp) {
 
   Test_scanner scanner;
 
-  Elab_scanner::Token_list tlist;
-  scanner.parse("test", statement, tlist);
+  scanner.parse_inline(statement);
 
   EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(1,0)).rule_id, 3);
   EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(2,0)).rule_id, 6);
@@ -136,8 +132,7 @@ TEST_F(Ast_test_setup, pseudo_eprp3) {
 
   Test_scanner scanner;
 
-  Elab_scanner::Token_list tlist;
-  scanner.parse("test", statement, tlist);
+  scanner.parse_inline(statement);
 
   EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(1,0)).rule_id, 3);
   EXPECT_EQ(ast->get_data(mmap_lib::Tree_index(2,0)).rule_id, 6);

@@ -1,6 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include <ctype.h>
+#include <sys/mman.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #include <cctype>
 #include <iostream>
@@ -74,56 +78,45 @@ void Elab_scanner::add_token(Token &t) {
   Token &last_tok = token_list.back();
 
   if (last_tok.tok == Token_id_or && t.tok == Token_id_gt) {
-    token_list.back().tok = Token_id_pipe;
-    token_list.back().len += t.len;
+    token_list.back().fuse_token(Token_id_pipe, t);
     return;
   } else if (t.tok == Token_id_eq) {    // <=
     if (last_tok.tok == Token_id_lt) {  // <=
-      token_list.back().tok = Token_id_le;
-      token_list.back().len += t.len;
+      token_list.back().fuse_token(Token_id_le, t);
       return;
     } else if (last_tok.tok == Token_id_gt) {  // >=
-      token_list.back().tok = Token_id_ge;
-      token_list.back().len += t.len;
+      token_list.back().fuse_token(Token_id_ge, t);
       return;
     } else if (last_tok.tok == Token_id_eq) {  // ==
-      token_list.back().tok = Token_id_same;
-      token_list.back().len += t.len;
+      token_list.back().fuse_token(Token_id_same, t);
       return;
     } else if (last_tok.tok == Token_id_bang) {  // !=
-      token_list.back().tok = Token_id_diff;
-      token_list.back().len += t.len;
+      token_list.back().fuse_token(Token_id_diff, t);
       return;
     } else if (last_tok.tok == Token_id_colon) {  // :=
-      token_list.back().tok = Token_id_coloneq;
-      token_list.back().len += t.len;
+      token_list.back().fuse_token(Token_id_colon, t);
       return;
     }
   } else if (t.tok == Token_id_alnum) {
     if (last_tok.tok == Token_id_pound) {  // #foo
-      token_list.back().tok = Token_id_register;
-      token_list.back().len += t.len;
+      token_list.back().fuse_token(Token_id_register, t);
       return;
     } else if (last_tok.tok == Token_id_percent) {  // %foo
-      token_list.back().tok = Token_id_output;
-      token_list.back().len += t.len;
+      token_list.back().fuse_token(Token_id_output, t);
       return;
     } else if (last_tok.tok == Token_id_dollar) {  // $foo
-      token_list.back().tok = Token_id_input;
-      token_list.back().len += t.len;
+      token_list.back().fuse_token(Token_id_input, t);
       return;
     } else if (last_tok.tok == Token_id_backslash){ // \foo
-      token_list.back().tok = Token_id_reference;
-      token_list.back().len += t.len;
+      token_list.back().fuse_token(Token_id_reference, t);
       return;
     } else if (last_tok.tok == Token_id_alnum || last_tok.tok == Token_id_register || last_tok.tok == Token_id_output
                                               || last_tok.tok == Token_id_input || last_tok.tok == Token_id_reference) {  // foo
-      token_list.back().len += t.len;
+      token_list.back().append_token(t);
       return;
     }
   } else if (last_tok.tok == Token_id_alnum && t.tok == Token_id_colon) {
     last_tok.tok = Token_id_label;
-    // token_list.back().len += t.len;
     return;
   }
 
@@ -135,13 +128,14 @@ void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, Token_id> &
   for (auto &t : token_list) {
     if (t.tok != Token_id_alnum) continue;
 
-    if (isdigit(buffer[t.pos])) {
+    I(t.get_text().size()>0); // at least a character
+
+    if (isdigit(t.get_text()[0])) {
       t.tok = Token_id_num;
       continue;
     }
 
-    std::string alnum(&buffer[t.pos], t.len);
-    auto        it = keywords.find(alnum);
+    auto it = keywords.find(t.get_text());
     if (it == keywords.end()) continue;
 
     assert(it->second >= static_cast<Token_id>(Token_id_keyword_first));
@@ -151,23 +145,51 @@ void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, Token_id> &
   }
 }
 
-#if 0
-void Elab_scanner::parse(std::string_view name, std::string_view memblock) {
-  Token_list tlist;
-  parse(name, memblock, tlist);
+void Elab_scanner::parse_setup(std::string_view filename) {
+  if(memblock_fd==-1) {
+    unregister_memblock();
+  }
+
+  memblock_fd = open(std::string(filename).c_str(), O_RDONLY);
+  if (memblock_fd < 0) {
+    parser_error("::parse could not open file {}", filename);
+    return;
+  }
+
+  struct stat sb;
+  fstat(memblock_fd, &sb);
+
+  char *b = (char *)mmap(NULL, sb.st_size, PROT_WRITE, MAP_PRIVATE, memblock_fd, 0);
+  if (b == MAP_FAILED) {
+    parser_error("parse mmap failed for file {} with size {}", filename, sb.st_size);
+    return;
+  }
+
+  memblock = std::string_view(b, sb.st_size);
+  buffer_name = filename;
+
+  token_list.clear();
 }
-#endif
+
+void Elab_scanner::parse_setup() {
+  if(memblock_fd==-1) {
+    unregister_memblock();
+  }
+
+  memblock_fd = -1;
+  buffer_name = "inline";
+
+  token_list.clear();
+}
 
 static inline bool is_newline(char c) {
   return c == '\n' || c == '\r' || c == '\f';
 }
 
-void Elab_scanner::parse(std::string_view name, std::string_view memblock, Token_list &tlist) {
-  buffer_name = name;
-  buffer      = memblock;  // To allow error reporting before chunking
+void Elab_scanner::parse_step() {
 
-  tlist.clear();
-  token_list.clear();
+  I(token_list.empty());
+
   token_list.emplace_back();  // bogus zero entry
   scanner_pos = 1;            // Skip zero to catch bugs
 
@@ -178,23 +200,20 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, Token
   bool in_singleline_comment = false;
   int  in_multiline_comment  = 0;  // Nesting support
 
-  std::string_view ptr_section = memblock;
-
   Token t;
-  t.clear(0,0);
+  t.clear(Token_id_nop, 0, std::string_view{&memblock[0],0});
 
   bool starting_comment  = false;  // Only for comments to avoid /*/* nested back to back */*/
   bool finishing_comment = false;  // Only for comments to avoid /*/* nested back to back */*/
   for (size_t pos = 0; pos < memblock.size(); pos++) {
     char c = memblock[pos];
-    // int pos = (&memblock[i] - ptr_section); // same as "i" unless chunking
 
-    t.adjust_len(pos);
+    t.adjust_token_size(pos);
     if (unlikely(is_newline(c))) {
       nlines++;
       if (!in_comment && t.tok != Token_id_nop) {
         add_token(t);
-        t.clear(pos, nlines);
+        t.clear(pos, nlines, std::string_view(&memblock[pos],0));
         trying_merge = false;
       } else {
         starting_comment      = false;
@@ -207,13 +226,13 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, Token
           }
 
           add_token(t);
-          t.clear(pos, nlines);
+          t.clear(pos, nlines, std::string_view(&memblock[pos],0));
           trying_merge = false;
         }
       }
       if (in_string_pos) {
         add_token(t);
-        t.clear(pos, nlines);
+        t.clear(pos, nlines, std::string_view(&memblock[pos],0));
         trying_merge = false;
 
         in_string_pos = false;
@@ -226,9 +245,9 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, Token
       if (!in_comment) {
         constexpr size_t len1 = std::char_traits<char>::length("synopsys ");
         size_t           npos = pos + 1;
-        while (buffer[npos] == ' ' && npos < memblock.size()) npos++;
+        while (memblock[npos] == ' ' && npos < memblock.size()) npos++;
         if ((npos + len1) < memblock.size()) {
-          if (strncmp(&buffer[npos], "synopsys ", len1) == 0) {
+          if (strncmp(&memblock[npos], "synopsys ", len1) == 0) {
             t.tok = Token_id_synopsys;
           }
         }
@@ -238,7 +257,7 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, Token
       assert(!starting_comment);
       assert(!finishing_comment);
     } else if (unlikely(!finishing_comment && ((last_c == '/' && c == '*') ||
-                                               (last_c == '(' && c == '*' && (memblock.size() > pos) && buffer[pos + 1] != ')' &&
+                                               (last_c == '(' && c == '*' && (memblock.size() > pos) && memblock[pos + 1] != ')' &&
                                                 token_list.size() && token_list.back().tok != Token_id_at)))) {
       t.tok        = Token_id_comment;
       trying_merge = false;
@@ -254,7 +273,7 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, Token
 
       in_multiline_comment--;
       if (in_multiline_comment < 0) {
-        scan_error(fmt::format("{}:{} found end of comment without matching beginning of comment", name, nlines));
+        scan_error("{}:{} found end of comment without matching beginning of comment", buffer_name, nlines);
       } else if (in_multiline_comment == 0) {
         in_singleline_comment = false;
         in_comment            = false;
@@ -282,14 +301,14 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, Token
     } else if (unlikely(in_string_pos)) {
       if (c == '"' && last_c != '\\') {
         add_token(t);
-        t.clear(pos, nlines);
+        t.clear(pos, nlines, std::string_view(&memblock[pos],0));
         trying_merge = false;
 
         in_string_pos = false;
       }
     } else if (unlikely(c == '"' && last_c != '\\')) {
       add_token(t);
-      t.adjust(Token_id_string, pos + 1);
+      t.reset(Token_id_string, pos + 1, nlines, std::string_view(&memblock[pos+1],1));
       trying_merge = false;
 
       in_string_pos = true;
@@ -298,15 +317,14 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, Token
       finishing_comment = false;
 
       add_token(t);
-      t.adjust(nt, pos);
+      t.reset(nt, pos, nlines, std::string_view(&memblock[pos],1));
       trying_merge = translate[c].try_merge;
-
     }
 
     last_c = c;
   }
   if (t.tok != Token_id_nop) {
-    t.adjust_len(memblock.size());
+    t.adjust_token_size(memblock.size());
     add_token(t);
   }
 
@@ -314,13 +332,8 @@ void Elab_scanner::parse(std::string_view name, std::string_view memblock, Token
     scan_error("scanner reached end of file with a multi-line comment");
   }
 
-  buffer = ptr_section;
-
   elaborate(); //build ast
 
-  tlist.swap(token_list);
-  token_list.clear();
-  token_list.emplace_back();
   scanner_pos = 1;
 }
 
@@ -331,7 +344,24 @@ Elab_scanner::Elab_scanner() {
   n_errors     = 0;
   n_warnings   = 0;
 
-  buffer = "";  // just to be clean
+  memblock = "";
+  memblock_fd = -1;
+}
+
+void Elab_scanner::unregister_memblock() {
+  if (memblock_fd==-1)
+    return;
+
+  int ok = munmap((void *)memblock.data(), memblock.size());
+  I(ok==0);
+  close(memblock_fd);
+
+  memblock = "";
+  memblock_fd = -1;
+}
+
+Elab_scanner::~Elab_scanner() {
+  unregister_memblock();
 }
 
 bool Elab_scanner::scan_next() {
@@ -350,50 +380,20 @@ bool Elab_scanner::scan_prev() {
   return true;
 }
 
-void Elab_scanner::scan_append(std::string &text) const {
-  I(scanner_pos < token_list.size());
-
-  text.append(&buffer[token_list[scanner_pos].pos], token_list[scanner_pos].len);
-}
-
 void Elab_scanner::scan_format_append(std::string &text) const {
   assert(scanner_pos < token_list.size());
-
-  int start_pos = token_list[scanner_pos].pos;
-  int len       = token_list[scanner_pos].len;
   if (scanner_pos > 0) {
-    int last_end_pos = token_list[scanner_pos - 1].pos + token_list[scanner_pos - 1].len;
-    len += (start_pos - last_end_pos);
-    start_pos = last_end_pos;
+    if (token_list[scanner_pos-1].line != token_list[scanner_pos].line) {
+      absl::StrAppend(&text, "\n", token_list[scanner_pos].get_text());
+      return;
+    }
+    absl::StrAppend(&text, " ", token_list[scanner_pos].get_text());
+    return;
   }
-  if (len > 0) text.append(&buffer[start_pos], len);
+  absl::StrAppend(&text, token_list[scanner_pos].get_text());
 }
 
-void Elab_scanner::scan_prev_append(std::string &text) const {
-  assert(scanner_pos < token_list.size());
-  int p = scanner_pos - 1;
-  if (p < 0) p = 0;
-
-  text.append(&buffer[token_list[p].pos], token_list[p].len);
-}
-
-void Elab_scanner::scan_next_append(std::string &text) const {
-  assert(scanner_pos < token_list.size());
-  size_t p = scanner_pos + 1;
-  if (p >= token_list.size()) p = token_list.size() - 1;
-
-  text.append(&buffer[token_list[p].pos], token_list[p].len);
-}
-
-std::string Elab_scanner::scan_text() const {
-  std::string text;
-
-  scan_append(text);
-
-  return text;
-}
-
-uint32_t Elab_scanner::scan_calc_lineno() const {
+uint32_t Elab_scanner::scan_line() const {
   size_t max_pos = scanner_pos;
   if (max_pos >= token_list.size()) max_pos = token_list.size() - 1;
   return token_list[max_pos].line;
@@ -434,10 +434,9 @@ void Elab_scanner::parser_warn(std::string_view text) const {
 }
 
 void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, bool third) const {
-  // Look at buffer for previous line change
 
   if (token_list.size() <= 1) {
-    fmt::print(fmt::format("{}:{}:{} {}: {}\n", buffer_name, 0, 0, cat, text));
+    fmt::print("{}:{}:{} {}: {}\n", buffer_name, 0, 0, cat, text);
     return;
   }
 
@@ -446,20 +445,20 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
 
   size_t line_pos_start = 0;
   for (int i = token_list[max_pos].pos; i > 0; i--) {
-    if (is_newline(buffer[i])) {
+    if (is_newline(memblock[i])) {
       line_pos_start = i;
       break;
     }
   }
-  size_t line_pos_end = buffer.size();
-  for (size_t i = token_list[max_pos].pos; i < buffer.size(); i++) {
-    if (is_newline(buffer[i])) {
+  size_t line_pos_end = memblock.size();
+  for (size_t i = token_list[max_pos].pos; i < memblock.size(); i++) {
+    if (is_newline(memblock[i])) {
       line_pos_end = i;
       break;
     }
   }
 
-  auto line = scan_calc_lineno();
+  auto line = scan_line();
   int s_col  = token_list[max_pos].pos - line_pos_start;
   I(s_col>=0);
   size_t col = s_col;
@@ -468,11 +467,11 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
 
   size_t xtra_col = 0;
   for (size_t i = 0; i < (line_pos_end - line_pos_start); i++) {
-    if (buffer[line_pos_start + i] == '\t') {
+    if (memblock[line_pos_start + i] == '\t') {
       line_txt += "  ";  // 2 spaces
       if (i <= col) xtra_col++;
     } else {
-      line_txt += buffer[line_pos_start + i];
+      line_txt += memblock[line_pos_start + i];
     }
   }
   col += xtra_col;
@@ -480,7 +479,7 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
   fmt::print("{}:{}:{} {}: ", buffer_name, line, col, cat);
   std::cout << text;  // NOTE: no fmt::print because it can contain {}
 
-  if (!is_newline(buffer[line_pos_start])) std::cout << std::endl;
+  if (!is_newline(memblock[line_pos_start])) std::cout << std::endl;
 
   assert(line_pos_end > line_pos_start);
   std::cout << line_txt << "\n";
@@ -489,7 +488,7 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
 
   if (!third) return;
 
-  int len = token_list[max_pos].len;
+  int len = token_list[max_pos].get_text().size();
   if ((token_list[max_pos].pos + len) > line_pos_end) len = line_pos_end - token_list[max_pos].pos;
 
   std::string third_1(col, ' ');
@@ -501,7 +500,6 @@ void Elab_scanner::dump_token() const {
   size_t pos = scanner_pos;
   if (pos >= token_list.size()) pos = token_list.size();
 
-  auto &      t = token_list[pos];
-  std::string raw(&buffer[t.pos], t.len);
-  fmt::print("tok:{} pos:{} len:{} raw:{}\n", t.tok, t.pos, t.len, raw);
+  auto &t = token_list[pos];
+  fmt::print("tok:{} pos:{} line:{} text:{}\n", t.tok, t.pos, t.line, t.text);
 }

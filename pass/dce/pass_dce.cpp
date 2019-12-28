@@ -8,8 +8,7 @@
 #include "pass_dce.hpp"
 
 void setup_pass_dce() {
-  Pass_dce p;
-  p.setup();
+  Pass_dce::setup();
 }
 
 void Pass_dce::setup() {
@@ -18,12 +17,12 @@ void Pass_dce::setup() {
   register_pass(m1);
 }
 
-Pass_dce::Pass_dce()
-    : Pass("dce") {
+Pass_dce::Pass_dce(const Eprp_var &var)
+  : Pass("pass.dce", var) {
 }
 
 void Pass_dce::optimize(Eprp_var &var) {
-  Pass_dce pass;
+  Pass_dce pass(var);
 
   for(auto &l : var.lgs) {
     pass.trans(l);

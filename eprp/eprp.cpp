@@ -18,7 +18,7 @@ bool Eprp::rule_path(std::string &path) {
     return false;
 
   do {
-    scan_append(path);  // Just get the raw text
+    absl::StrAppend(&path, scan_text());
 
     ast->add(Eprp_rule_path, scan_token());
 
@@ -95,7 +95,7 @@ bool Eprp::rule_cmd_line(std::string &path) {
   if (!scan_is_token(Token_id_alnum)) return false;
 
   do {
-    scan_append(path);  // Just get the raw text
+    absl::StrAppend(&path, scan_text());
     ast->add(Eprp_rule_cmd_line, scan_token());
 
     bool ok = scan_next();

@@ -1,10 +1,8 @@
 
 #include "lnast_to_cpp_parser.hpp"
 
-std::map<std::string, std::string> Lnast_to_cpp_parser::stringify(std::string filepath) {
-  root_filename = get_filename(filepath);
-  root_filename[0] = toupper(root_filename[0]);
-  curr_module = new Cpp_parser_module(root_filename);
+std::map<std::string, std::string> Lnast_to_cpp_parser::stringify(std::string_view module_name) {
+  curr_module = new Cpp_parser_module(module_name);
 
   for (const mmap_lib::Tree_index &it: lnast->depth_preorder(lnast->get_root())) {
     process_node(it);
@@ -243,12 +241,6 @@ bool Lnast_to_cpp_parser::is_ref(std::string_view test_string) {
 
 bool Lnast_to_cpp_parser::is_attr(std::string_view test_string) {
   return test_string.find("__") == 0 && !is_ref(test_string);
-}
-
-std::string Lnast_to_cpp_parser::get_filename(std::string filepath) {
-  std::vector<std::string> filepath_split = absl::StrSplit(filepath, '/');
-  std::pair<std::string, std::string> fname = absl::StrSplit(filepath_split[filepath_split.size() - 1], '.');
-  return fname.first;
 }
 
 void Lnast_to_cpp_parser::process_assign() {

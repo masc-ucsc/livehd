@@ -1,9 +1,8 @@
-
 #pragma once
-#include "lnast.hpp"
-#include "lnast_parser.hpp"
 
-class Lnast_to_cfg_parser {
+#include "lnast_to_xxx.hpp"
+
+class Lnast_to_cfg_parser : public Lnast_to_xxx {
 private:
   uint32_t k_next;
   mmap_lib::Tree_level curr_statement_level = -1;
@@ -14,9 +13,6 @@ private:
   std::vector<Lnast_node> node_buffer;
   std::vector<std::vector<uint32_t>> if_buffer_stack;
   std::vector<uint32_t> if_buffer;
-  std::string_view memblock;
-  Lnast *lnast;
-  Lnast_parser lnast_parser;
   std::string node_str_buffer;
 
   void process_node(const mmap_lib::Tree_index &it);
@@ -30,17 +26,15 @@ private:
   std::string_view get_node_name(Lnast_node node);
   void flush_it(std::vector<Lnast_node>::iterator it);
 
-  void process_operator();
-
   void process_if();
   void process_func_call();
   void process_func_def();
 
+  void process_operator();
 public:
-  std::string buffer;
+  Lnast_to_prp_parser(std::string_view _memblock, Lnast *_lnast)
+    : Last_to_xxx(_memblock, _lnast) { };
 
-  Lnast_to_cfg_parser(std::string_view _memblock, Lnast *_lnast)
-    : memblock(_memblock), lnast(_lnast) { };
-  std::string stringify();
+  void generate(std::string_view path, std::string_view module_name) final;
 };
 

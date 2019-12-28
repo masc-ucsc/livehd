@@ -26,8 +26,8 @@ protected:
   static void fromlg(Eprp_var &var);
 
 public:
-  Inou_json();
+  Inou_json() {};
 
-  void setup() final;
+  static void setup();
 };
 

@@ -1,15 +1,17 @@
 
 #include "lnast_to_cfg_parser.hpp"
 
-std::string Lnast_to_cfg_parser::stringify() {
-  fmt::print("\nstart Lnast_to_cfg_parser::stringify\n");
+std::map<std::string, std::string> Lnast_to_cfg_parser::stringify(std::string_view module_name) {
+  fmt::print("\nstart Lnast_to_cfg_parser::stringify {}\n", module_name);
 
   for (const mmap_lib::Tree_index &it: lnast->depth_preorder(lnast->get_root())) {
     process_node(it);
   }
   flush_statements();
 
-  return buffer;
+  std::map<std::string, std::string> file_map;
+  file_map.insert(std::pair<std::string, std::string>(absl::StrCat(module_name, ".lnast"), buffer));
+  return file_map;
 }
 
 void Lnast_to_cfg_parser::process_node(const mmap_lib::Tree_index& it) {

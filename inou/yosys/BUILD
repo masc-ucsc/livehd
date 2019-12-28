@@ -2,14 +2,29 @@
 
 cc_library(
     name = "lgyosys-lib",
-    srcs = glob(["lgyosys*.cpp"]),
-    hdrs = glob(["lgyosys*.hpp"]),
+    srcs = glob(["lg*.cpp"],exclude=["*test*.cpp"]),
+    hdrs = glob(["lg*.hpp"]),
     #alwayslink=1,
     defines = ["_YOSYS_","YOSYS_ENABLE_PLUGINS"],
     visibility = ["//visibility:public"],
     deps = [
         "//core:core",
         "@yosys//:headers",
+    ],
+)
+
+cc_library(
+    name = "lgyosys-api",
+    srcs = glob(["inou*.cpp"],exclude=["*test*.cpp"]),
+    hdrs = glob(["inou*.hpp"]),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//core:core",
+        ":lgyosys-lib",
+        "@mustache//:headers",
+    ],
+    data = ["inou_yosys_read.ys",
+            "inou_yosys_write.ys",
     ],
 )
 

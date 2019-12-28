@@ -19,16 +19,9 @@
 
 #include "chunkify_verilog.hpp"
 
-Chunkify_verilog::Chunkify_verilog(std::string_view _path, std::string_view _elab_path)
-    : path(_path)
-    , elab_path(_elab_path) {
-
+Chunkify_verilog::Chunkify_verilog(std::string_view _path)
+    : path(_path) {
   library = Graph_library::instance(path);
-
-  if(elab_path.empty())
-    elab_library = 0;
-  else
-    elab_library = Graph_library::instance(elab_path);
 }
 
 int Chunkify_verilog::open_write_file(std::string_view filename) const {
@@ -170,31 +163,26 @@ void Chunkify_verilog::elaborate() {
 
   // This has to be cut&pasted to each file
   std::string not_in_module_text;
-  Token_list  not_in_module_token;
 
   std::string in_module_text;
-  Token_list  in_module_token;
 
   not_in_module_text.reserve(buffer.size());
-  not_in_module_token.reserve(token_list.size());
 
   in_module_text.reserve(buffer.size());
-  in_module_token.reserve(token_list.size());
 
   Sub_node *sub = nullptr;
 
   while(!scan_is_end()) {
     bool endmodule_found = false;
     if(scan_is_token(Token_id_alnum)) {
-      auto txt = scan_sview();
+      auto txt = scan_text();
       if(txt == "module") {
         if(in_module) {
           scan_error(fmt::format("unexpected nested modules"));
         }
         scan_format_append(in_module_text);
-        scan_token_append(in_module_token);
         scan_next();
-        scan_append(module);
+        absl::StrAppend(&module, scan_text());
         module_io_pos = 1;
         in_module     = true;
 
@@ -218,10 +206,9 @@ void Chunkify_verilog::elaborate() {
         if(in_module && scan_is_prev_token(Token_id_alnum)) {
 #if 1
           // FIXME: bug in char_array prevents to use sview. Delete this once we move to LGraph 0.2 (mmap_map/mmap_bimap)
-          std::string label;
-          scan_prev_append(label);
+          std::string label{scan_prev_text()};
 #else
-          auto label = scan_prev_sview();
+          auto label = scan_prev_text();
 #endif
 
           add_io(sub, last_input, label, module_io_pos);
@@ -244,13 +231,10 @@ void Chunkify_verilog::elaborate() {
       }
     }
     if(!in_module && !endmodule_found) {
-      scan_token_append(not_in_module_token);
       scan_format_append(not_in_module_text);
     } else {
       scan_format_append(in_module_text);
-      scan_token_append(in_module_token);
       if(endmodule_found) {
-        // bar.Progressed(in_module_token.back().pos);
 
         bool same = is_same_file(module, not_in_module_text, in_module_text);
         if(!same) {
@@ -258,7 +242,6 @@ void Chunkify_verilog::elaborate() {
         }
         module.clear();
         in_module_text.clear();
-        in_module_token.clear();
       }
     }
 

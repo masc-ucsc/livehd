@@ -4,6 +4,7 @@
 #include <math.h>
 #include <string>
 #include <vector>
+#include <charconv>
 
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
@@ -13,8 +14,7 @@
 #include "pass_bitwidth.hpp"
 
 void setup_pass_bitwidth() {
-  Pass_bitwidth p;
-  p.setup();
+  Pass_bitwidth::setup();
 }
 
 void Pass_bitwidth::setup() {
@@ -25,23 +25,27 @@ void Pass_bitwidth::setup() {
   register_pass(m1);
 }
 
-Pass_bitwidth::Pass_bitwidth()
-    : Pass("bitwidth") {
+Pass_bitwidth::Pass_bitwidth(const Eprp_var &var)
+  : Pass("pass.bitwidth", var) {
+
+  auto miters = var.get("max_iterations");
+
+  std::from_chars(miters.data(), miters.data()+miters.size(), max_iterations);
+
+  if(max_iterations == 0) {
+    error("pass.bitwidth max_iterations:{} should be bigger than zero", miters);
+    return;
+  }
 }
 
 void Pass_bitwidth::trans(Eprp_var &var) {
 
-  Pass_bitwidth pass;
+  Pass_bitwidth p(var);
 
-  pass.opack.max_iterations = std::stoi(std::string(var.get("max_iterations")));
-  if(pass.opack.max_iterations == 0) {
-    error(fmt::format("pass.bitwidth max_iterations:{} should be bigger than zero", var.get("max_iterations")));
-    return;
-  }
 
   std::vector<const LGraph *> lgs;
   for(const auto &l : var.lgs) {
-    pass.do_trans(l);
+    p.do_trans(l);
   }
 }
 
@@ -747,7 +751,7 @@ bool Pass_bitwidth::bw_pass_iterate(LGraph *lg) {
     pending.pop_back();
     dpin.ref_bitwidth()->niters++;
 
-    if(dpin.ref_bitwidth()->niters > opack.max_iterations) {
+    if(dpin.ref_bitwidth()->niters > max_iterations) {
       //FIXME: With using the current std::vector, this might fire off much earlier
       //  than I'd want it to (if pin got added mult times due to mult out edges).
       fmt::print("\nbw_pass_iterate abort {}\n", iterations);
@@ -787,7 +791,7 @@ void Pass_bitwidth::do_trans(LGraph *lg) {
 
     bool done = bw_pass_iterate(lg);
     if(!done) {
-      Pass::error("could not converge in the iterations FIXME: dump nice message on why\n");
+      error("could not converge in the iterations FIXME: dump nice message on why\n");
     }
   }
 

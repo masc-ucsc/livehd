@@ -15,9 +15,9 @@ protected:
   void trans(LGraph *orig);
 
 public:
-  Pass_dce();
+  Pass_dce(const Eprp_var &var);
 
-  void setup() final;
+  static void setup();
 };
 
 #endif

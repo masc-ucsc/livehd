@@ -85,40 +85,53 @@ public:
     tok  = Token_id_nop;
     pos  = 0;
     line = 0;
-    len  = 0;
+    text = std::string_view{""};
   }
-  Token(Token_id _tok, uint32_t _pos, uint32_t _line, uint32_t _len) {
+  Token(Token_id _tok, uint64_t _pos, uint32_t _line, std::string_view _text) {
     tok  = _tok;
     pos  = _pos;
     line = _line;
-    len  = _len;
+    text = _text;
   }
-  void clear(uint32_t p, uint32_t lno) {
+  void reset(Token_id _tok, uint64_t _pos, uint32_t _line, std::string_view _text) {
+    tok  = _tok;
+    pos  = _pos;
+    line = _line;
+    text = _text;
+  }
+  void clear(uint64_t _pos, uint32_t _line, std::string_view _text) {
     tok  = Token_id_nop;
-    pos  = p;
-    line = lno;
-    len  = 0;
+    pos  = _pos;
+    line = _line;
+    text = _text;
   }
-  void adjust(Token_id t, uint32_t p) {
-    tok = t;
-    pos = p;
-    len = 1;
+
+  void fuse_token(Token_id new_tok, const Token &t2) {
+    I(text.data()+text.size() == t2.text.data()); // t2 must be continuous (otherwise, create new token)
+    tok = new_tok;
+
+    auto new_len = text.size() + t2.text.size();
+    text = std::string_view{text.data(), new_len};
   }
-  void adjust_inc() { len++; }
-  void adjust_len(uint32_t new_pos) {
-    GI(tok != Token_id_nop, new_pos >= pos);
-    len = new_pos - pos;
+  void append_token(const Token &t2) {
+    I(text.data()+text.size() == t2.text.data()); // t2 must be continuous (otherwise, create new token)
+
+    auto new_len = text.size() + t2.text.size();
+    text = std::string_view{text.data(), new_len};
+  }
+
+  void adjust_token_size(uint64_t end_pos) {
+    GI(tok != Token_id_nop, end_pos >= pos);
+    auto new_len = end_pos - pos;
+    text = std::string_view{text.data(), new_len};
   }
 
   Token_id tok;  // Token (identifier, if, while...)
-  uint32_t pos;  // Position in buffer
+  uint64_t pos;  // Position in original memblock for debugging
   uint32_t line; // line of code
-  uint32_t len;  // length in buffer
+  std::string_view text;
 
-  std::string_view get_text(std::string_view buffer) const {
-    I(buffer.size() > (pos + len));
-    return buffer.substr(pos, len);
-  }
+  std::string_view get_text() const { return text; }
 };
 
 class Elab_scanner {
@@ -126,18 +139,15 @@ public:
   typedef std::vector<Token> Token_list;
 protected:
 
-  std::string      buffer_name;
-  std::string_view buffer;
   Token_list       token_list;
 
-  void scan_token_append(Token_list &toklist) const {
-    assert(scanner_pos < token_list.size());
-    toklist.push_back(token_list[scanner_pos]);
-  }
-
-  std::string_view get_buffer() { return buffer; }
-
 private:
+  std::string      buffer_name;
+
+  std::string_view memblock;
+  int              memblock_fd;
+  void unregister_memblock();
+
   struct Translate_item {
     Translate_item() : tok(Token_id_nop), try_merge(false) {}
     Translate_item(Token_id t, bool tm = false) : tok(t), try_merge(tm) {}
@@ -170,14 +180,20 @@ private:
 
   void add_token(Token &t);
 
-  void chunked(std::string_view buffer);
-
   void scan_raw_msg(std::string_view cat, std::string_view text, bool third) const;
 
   void lex_error(std::string_view text);
 
+  void parse_setup(std::string_view filename);
+  void parse_setup();
+  void parse_step();
+
+protected:
+  std::string_view get_memblock() const { return memblock; }
+
 public:
   Elab_scanner();
+  virtual ~Elab_scanner();
 
   void scan_error(std::string_view text) const;  // Not really const, but to allow to be used by const methods
   void scan_warn(std::string_view text) const;
@@ -241,24 +257,17 @@ public:
     return scanner_pos;
   }
 
-  void scan_format_append(std::string &text) const;
-
-  std::string_view scan_sview() const {
-    I(scanner_pos < token_list.size());
-    return std::string_view(&buffer[token_list[scanner_pos].pos], token_list[scanner_pos].len);
-  }
-
-  std::string_view scan_prev_sview() const {
+  std::string_view scan_prev_text() const {
     size_t p = scanner_pos - 1;
     if (scanner_pos <= 0) p = 0;
-    return std::string_view(&buffer[token_list[p].pos], token_list[p].len);
+    return token_list[p].get_text();
   }
 
-  std::string_view scan_next_sview() const {
+  std::string_view scan_next_text() const {
     size_t p = scanner_pos + 1;
     if (p >= token_list.size())
       p = token_list.size()-1;
-    return std::string_view(&buffer[token_list[p].pos], token_list[p].len);
+    return token_list[p].get_text();
   }
 
   bool scan_next_is_token(Token_id tok) const {
@@ -268,33 +277,33 @@ public:
     return token_list[p].tok == tok;
   }
 
-  std::string_view scan_peep_sview(int offset) const {
+  std::string_view scan_peep_text(int offset) const {
     I(offset != 0);
     size_t p = scanner_pos + offset;
     if (p >= token_list.size())
       p = token_list.size()-1;
     else if (offset > static_cast<int>(scanner_pos))
       p = 0 ;
-    return std::string_view(&buffer[token_list[p].pos], token_list[p].len);
+    return token_list[p].get_text();
   }
 
-  void scan_append(std::string &text) const;
-  void scan_prev_append(std::string &text) const;
-  void scan_next_append(std::string &text) const;
+  void scan_format_append(std::string &text) const;
 
   inline std::string_view scan_text(const Token_entry te) const {
     I(token_list.size() > te);
-    return buffer.substr(token_list[te].pos, token_list[te].len);
+    return token_list[te].get_text();
   }
 
-  std::string scan_text() const;
-  uint32_t    scan_calc_lineno() const;
+  std::string_view scan_text() const {
+    return token_list[scanner_pos].get_text();
+  }
+  uint32_t    scan_line() const;
 
   size_t get_token_pos() const { return token_list[scan_token()].pos; }
 
   bool scan_is_prev_token(Token_id tok) const {
     if (scanner_pos == 0) return false;
-    assert(scanner_pos < token_list.size());
+    I(scanner_pos < token_list.size());
     return token_list[scanner_pos - 1].tok == tok;
   }
   bool scan_is_next_token(int pos, Token_id tok) const {
@@ -319,8 +328,16 @@ public:
       patch_pass(no_keywords);
   }
 
-  //void parse(std::string_view name, std::string_view str);
-  void parse(std::string_view name, std::string_view str, Token_list &tlist);
+  void parse_file(std::string_view filename) {
+    parse_setup(filename);
+    parse_step();
+  }
+
+  void parse_inline(std::string_view txt) {
+    parse_setup();
+    memblock = txt;
+    parse_step();
+  }
 
   void dump_token() const;
 
