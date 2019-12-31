@@ -48,15 +48,17 @@ TEST_F(VTest1, interface) {
 
   chunker.parse_inline(test1_verilog);
 
-  EXPECT_NE(access("tbase/parse/file_test1.v", R_OK), -1);
-  EXPECT_NE(access("tbase/parse/chunk_test1.v/test1_moda.v", R_OK), -1);
-  EXPECT_NE(access("tbase/parse/chunk_test1.v/test1_modb.v", R_OK), -1);
+  EXPECT_EQ(access("tbase/parse/file_inline", R_OK), F_OK);
+  EXPECT_EQ(access("tbase/parse/chunk_inline/test1_moda.v", R_OK), F_OK);
+  EXPECT_EQ(access("tbase/parse/chunk_inline/test1_modb.v", R_OK), F_OK);
 
   // No code change delta
   Chunkify_verilog chunker2("tdelta");
+  EXPECT_NE(access("tdelta/parse/chunk_inline/test1_moda.v", R_OK), F_OK);
+  EXPECT_NE(access("tdelta/parse/chunk_inline/test1_modb.v", R_OK), F_OK);
   chunker2.parse_inline(test1_verilog);
-  EXPECT_EQ(access("tdelta/parse/chunk_test1.v/test1_moda.v", R_OK), -1);
-  EXPECT_EQ(access("tdelta/parse/chunk_test1.v/test1_modb.v", R_OK), -1);
+  EXPECT_EQ(access("tdelta/parse/chunk_inline/test1_moda.v", R_OK), F_OK);
+  EXPECT_EQ(access("tdelta/parse/chunk_inline/test1_modb.v", R_OK), F_OK);
 
   std::string test2_verilog = "  "
                               "    module test1_moda(input [1:0] a, input [7:0] b,\n"
@@ -64,8 +66,8 @@ TEST_F(VTest1, interface) {
                               ");\n endmodule\n";
   // test1_moda different
   chunker2.parse_inline(test2_verilog);
-  EXPECT_NE(access("tdelta/parse/chunk_test1.v/test1_moda.v", R_OK), -1);
-  EXPECT_EQ(access("tdelta/parse/chunk_test1.v/test1_modb.v", R_OK), -1);
+  EXPECT_EQ(access("tdelta/parse/chunk_inline/test1_moda.v", R_OK), F_OK);
+  EXPECT_NE(access("tdelta/parse/chunk_inline/test1_modb.v", R_OK), F_OK);
 }
 
 TEST_F(VTest1, noaccess) {

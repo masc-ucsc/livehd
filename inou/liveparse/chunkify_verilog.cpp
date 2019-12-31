@@ -120,12 +120,6 @@ void Chunkify_verilog::elaborate() {
 
   Lbench bench("live.parse");
 
-  std::string format_name{get_filename()};
-  for(size_t i = 0; i < format_name.size(); i++) {
-    if(format_name[i] == '/')
-      format_name[i] = '.';
-  }
-
   std::string parse_path = absl::StrCat(path, "/parse/"); // Keep trailing /
   if (access(parse_path.c_str(), F_OK) != 0) {
     std::string spath(path);
@@ -141,9 +135,25 @@ void Chunkify_verilog::elaborate() {
       return;
     }
   }
+
+  std::string format_name;
+
+  if (is_parse_inline()) {
+    format_name = "inline";
+  }else{
+    format_name = get_filename();
+
+    std::string format_name{get_filename()};
+    for(size_t i = 0; i < format_name.size(); i++) {
+      if(format_name[i] == '/')
+        format_name[i] = '.';
+    }
+  }
+
   auto source = absl::StrCat(parse_path, "file_", format_name);
 
   write_file(source, get_memblock());
+
   chunk_dir = absl::StrCat(parse_path, "chunk_", format_name);
   Eprp_utils::clean_dir(chunk_dir);
 

@@ -87,6 +87,8 @@ void Pass_sample::do_wirecount(LGraph *g, int indent) {
       ,n_wire, n_wire_bits);
 
   g->each_sub_fast([this,indent,space](Node &node, Lg_type_id lgid) {
+      (void)node;
+
       LGraph *sub_lg = LGraph::open(path,lgid);
       if (!sub_lg)
         return;

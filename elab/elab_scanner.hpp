@@ -191,6 +191,7 @@ private:
 protected:
   std::string_view get_memblock() const { return memblock; }
   std::string_view get_filename() const { I(memblock_fd != -1); return buffer_name; }
+  bool is_parse_inline() const { return memblock_fd == -1; }
 
 public:
   Elab_scanner();

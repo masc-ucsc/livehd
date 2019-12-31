@@ -24,6 +24,7 @@ TEST_F(SampleMainTest, EmptyLGraph) {
   LGraph *g = LGraph::create("pass_test_lgdb", "empty", "nosource");
 
   Eprp_var var;
+  var.add(g);
   var.add("data","hello");
 
   EXPECT_FALSE(g->get_library().has_name("pass_sample"));
