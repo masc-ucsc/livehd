@@ -26,6 +26,5 @@ if [ "${regresult}" ]; then
 fi
 
 echo "FAIL: missing Pass cells:, found ${regresult}"
-exit -3
+exit 3
 
-exit 0

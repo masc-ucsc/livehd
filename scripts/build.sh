@@ -8,7 +8,7 @@
 
 if [ ! -e ${LGRAPH_SRC}/WORKSPACE ]; then
   echo "ERROR: '${LGRAPH_SRC}' does not contain LGRAPH source code"
-  exit -1
+  exit 1
 fi
 
 echo "build.sh: Building....."
@@ -28,7 +28,7 @@ elif [ $LGRAPH_COMPILER == "clang++" ]; then
   fi
 else
   echo "build.sh: ERROR, unrecognized $LGRAPH_COMPILER option"
-  exit -4
+  exit 4
 fi
 
 echo "build.sh: Build had an exit code condition"

@@ -149,7 +149,7 @@ if [ $fail -eq 0 ]; then
   exit 0
 else
   echo "FAIL: ${pass} tests passed but ${fail} failed verification: ${fail_list}"
-  exit -1
+  exit 1
 fi
 
 

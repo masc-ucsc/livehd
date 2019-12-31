@@ -3,7 +3,7 @@
 
 if [ "$#" -lt 1 ]; then
   echo "Usage: <lgraph_src_dir> [build_mode] [docker_image]"
-  exit -1
+  exit 1
 fi
 
 LGRAPH_SRC=$1
@@ -24,7 +24,7 @@ fi
 
 if [ ! -e ${LGRAPH_SRC}/WORKSPACE ]; then
   echo "BUILD ERROR: '${LGRAPH_SRC}' does not contain LGRAPH source code"
-  exit -1
+  exit 1
 fi
 
 # possibly add back -t command later
@@ -36,3 +36,4 @@ export RUN_TYPE
 
 echo scripts/build-and-run.sh
 
+exit 0
