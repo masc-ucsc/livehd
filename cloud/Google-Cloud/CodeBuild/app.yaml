@@ -1,4 +1,0 @@
-steps:
-- name: 'gcr.io/cloud-builders/docker'
-  args: ['build', '-t', 'gcr.io/lgraph-220219/myimage', '.']
-images: ['gcr.io/lgraph-220219/myimage']
