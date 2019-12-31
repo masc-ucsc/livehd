@@ -190,6 +190,7 @@ private:
 
 protected:
   std::string_view get_memblock() const { return memblock; }
+  std::string_view get_filename() const { I(memblock_fd != -1); return buffer_name; }
 
 public:
   Elab_scanner();

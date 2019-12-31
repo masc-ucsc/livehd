@@ -14,136 +14,149 @@ void setup_pass_opentimer() {
 void Pass_opentimer::setup() {
   Eprp_method m1("pass.opentimer", "timing analysis on lgraph", &Pass_opentimer::work);
 
-  m1.add_label_optional("lib:", "Liberty file for timing");
-  m1.add_label_optional("lib_max:", "Liberty file for timing");
-  m1.add_label_optional("lib_min:", "Liberty file for timing");
-  m1.add_label_optional("sdc:", "SDC file for timing");
-  m1.add_label_optional("spef:", "SPEF file for timing");
+  m1.add_label_required("lib", "Liberty file for timing");
+  m1.add_label_optional("lib_max", "Liberty file for timing");
+  m1.add_label_optional("lib_min", "Liberty file for timing");
+  m1.add_label_required("sdc", "SDC file for timing");
+  m1.add_label_required("spef", "SPEF file for timing");
 
   register_pass(m1);
 }
 
-void Pass_opentimer::work(Eprp_var &var) {
-  Pass_opentimer pass;
+Pass_opentimer::Pass_opentimer(const Eprp_var &var) 
+  : Pass("pass.opentimer", var) {
 
-  auto lib = var.get("lib");
-  auto lib_max = var.get("lib_max");
-  auto lib_min = var.get("lib_min");
-  auto sdc = var.get("sdc");
-  auto spef = var.get("spef");
+  opt_lib = var.get("lib");
+  if (var.has_label("lib_max")) {
+    opt_lib_max = var.get("lib_max");
+  }else{
+    opt_lib_max = opt_lib;
+  }
+  if (var.has_label("lib_min")) {
+    opt_lib_min = var.get("lib_min");
+  }else{
+    opt_lib_min = opt_lib;
+  }
+
+  opt_sdc  = var.get("opt_sdc");
+  opt_spef = var.get("opt_spef");
+
+}
+
+void Pass_opentimer::work(Eprp_var &var) {
+  Pass_opentimer pass(var);
+
+  Lbench b("pass.opentimer");
 
   for(const auto &g : var.lgs) {
-      pass.read_file(g, lib, lib_max, lib_min, spef, sdc);     // Task1: Read input files (Read user from input) | Status: 75% done
-      pass.build_circuit(g);                                   // Task2: Traverse the lgraph and build the equivalent circuit (No dependencies) | Status: 50% done
-      pass.read_sdc(sdc);                                      // Task3: Traverse the lgraph and create fake SDC numbers | Status: 100% done
-      pass.compute_timing();                                   // Task4: Compute Timing | Status: 100% done
-      pass.populate_table();                                   // Task5: Traverse the lgraph and populate the tables | Status: 0% done
+      pass.read_files();                     // Task1: Read input files (Read user from input) | Status: 75% done
+      pass.build_circuit(g);                 // Task2: Traverse the lgraph and build the equivalent circuit (No dependencies) | Status: 50% done
+      pass.read_sdc();                       // Task3: Traverse the lgraph and create fake SDC numbers | Status: 100% done
+      pass.compute_timing();                 // Task4: Compute Timing | Status: 100% done
+      pass.populate_table();                 // Task5: Traverse the lgraph and populate the tables | Status: 0% done
   }
 }
 
-void Pass_opentimer::read_file(LGraph *g, std::string_view lib, std::string_view lib_max, std::string_view lib_min, std::string_view spef, std::string_view sdc) {
-  (void)g;
-  (void)sdc;
-//  Lbench b("pass.opentimer.read_file");      // Expand this method to reading from user input and later develop inou.add_liberty etc.
+void Pass_opentimer::read_files() {
 
+  if(opt_lib_max != opt_lib)
+    timer.read_celllib(opt_lib_max,ot::MAX);
+  if(opt_lib_min != opt_lib)
+    timer.read_celllib(opt_lib_min,ot::MIN);
 
-  if(lib_max.length()==0 || lib_min.length()==0){
-    timer.read_celllib (lib);
-  }else{
-    timer.read_celllib (lib_max,ot::MAX);
-    timer.read_celllib (lib_min,ot::MIN);
-  }
-  //pass.read_sdc(sdc);
-  //timer.read_verilog ("pass/opentimer/tests/simple.v"); //USING THIS FOR THE MOMENT AS THE CIRCUIT IS NOT CONSTRUCTED FROM LGRAPH YET
-  timer.read_spef (spef);
-
+  timer.read_celllib(opt_lib);
+  timer.read_spef(opt_spef);
 }
 
-void Pass_opentimer::read_sdc(std::string_view sdc){
+void Pass_opentimer::read_sdc(){
   std::vector<std::string> line_vec;
-  std::ifstream file(static_cast<std::string>(sdc));
-  if(file.is_open()) {
-    std::string line;
+  std::ifstream file(opt_sdc);
 
-    while (getline(file, line)) {
-      std::stringstream datastream(line);
-      std::copy(std::istream_iterator<std::string>(datastream), std::istream_iterator<std::string>(),std::back_inserter(line_vec));
-
-      if(line_vec[0] == "create_clock"){
-        int period;
-        std::string pname;
-        for(std::size_t i = 1; i < line_vec.size(); i++){
-          if(line_vec[i] == "-period"){
-            period = stoi(line_vec[++i]);
-            continue;
-          } else if(line_vec[i] == "-name"){
-              pname = line_vec[++i];
-              continue;
-            }
-        }
-        timer.create_clock(pname, period);
-      } else if(line_vec[0] == "set_input_delay"){
-          std::string pname;
-          int delay = stoi(line_vec[1]);
-          for(std::size_t i = 2; i < line_vec.size(); i++){
-            if(line_vec[i] == "[get_ports"){
-              pname = line_vec[++i];
-              pname.pop_back();
-              continue;
-            }
-          }
-          if(line_vec[2] == "-min" && line_vec[3] == "-rise"){
-            timer.set_at(pname, ot::MIN, ot::RISE, delay);
-          } else if(line_vec[2] == "-min" && line_vec[3] == "-fall"){
-            timer.set_at(pname, ot::MIN, ot::FALL, delay);
-          } else if(line_vec[2] == "-max" && line_vec[3] == "-rise"){
-            timer.set_at(pname, ot::MAX, ot::RISE, delay);
-          } else if(line_vec[2] == "-max" && line_vec[3] == "-fall"){
-            timer.set_at(pname, ot::MIN, ot::FALL, delay);
-          }
-      } else if(line_vec[0] == "set_input_transition"){
-          std::string pname;
-          int delay = stoi(line_vec[1]);
-          for(std::size_t i = 2; i < line_vec.size(); i++){
-            if(line_vec[i] == "[get_ports"){
-              pname = line_vec[++i];
-              pname.pop_back();
-              continue;
-            }
-          }
-          if(line_vec[2] == "-min" && line_vec[3] == "-rise"){
-            timer.set_slew(pname, ot::MIN, ot::RISE, delay);
-          } else if(line_vec[2] == "-min" && line_vec[3] == "-fall"){
-            timer.set_slew(pname, ot::MIN, ot::FALL, delay);
-          } else if(line_vec[2] == "-max" && line_vec[3] == "-rise"){
-            timer.set_slew(pname, ot::MAX, ot::RISE, delay);
-          } else if(line_vec[2] == "-max" && line_vec[3] == "-fall"){
-            timer.set_slew(pname, ot::MIN, ot::FALL, delay);
-          }
-      } else if(line_vec[0] == "set_output_delay"){
-          std::string pname;
-          int delay = stoi(line_vec[1]);
-          for(std::size_t i = 2; i < line_vec.size(); i++){
-            if(line_vec[i] == "[get_ports"){
-              pname = line_vec[++i];
-              pname.pop_back();
-              continue;
-            }
-          }
-          if(line_vec[2] == "-min" && line_vec[3] == "-rise"){
-            timer.set_rat(pname, ot::MIN, ot::RISE, delay);
-          } else if(line_vec[2] == "-min" && line_vec[3] == "-fall"){
-            timer.set_rat(pname, ot::MIN, ot::FALL, delay);
-          } else if(line_vec[2] == "-max" && line_vec[3] == "-rise"){
-            timer.set_rat(pname, ot::MAX, ot::RISE, delay);
-          } else if(line_vec[2] == "-max" && line_vec[3] == "-fall"){
-            timer.set_rat(pname, ot::MIN, ot::FALL, delay);
-          }
-      }
-      line_vec.clear();
-    }
-    file.close();
+  if(!file.is_open()) {
+    error("pass.opentimer could not open sdc:{}", opt_sdc);
+    return;
   }
+
+  std::string line;
+
+  while (getline(file, line)) {
+    std::stringstream datastream(line);
+    std::copy(std::istream_iterator<std::string>(datastream), std::istream_iterator<std::string>(),std::back_inserter(line_vec));
+
+    if(line_vec[0] == "create_clock"){
+      int period;
+      std::string pname;
+      for(std::size_t i = 1; i < line_vec.size(); i++){
+        if(line_vec[i] == "-period"){
+          period = stoi(line_vec[++i]);
+          continue;
+        } else if(line_vec[i] == "-name"){
+          pname = line_vec[++i];
+          continue;
+        }
+      }
+      timer.create_clock(pname, period);
+    } else if(line_vec[0] == "set_input_delay"){
+      std::string pname;
+      int delay = stoi(line_vec[1]);
+      for(std::size_t i = 2; i < line_vec.size(); i++){
+        if(line_vec[i] == "[get_ports"){
+          pname = line_vec[++i];
+          pname.pop_back();
+          continue;
+        }
+      }
+      if(line_vec[2] == "-min" && line_vec[3] == "-rise"){
+        timer.set_at(pname, ot::MIN, ot::RISE, delay);
+      } else if(line_vec[2] == "-min" && line_vec[3] == "-fall"){
+        timer.set_at(pname, ot::MIN, ot::FALL, delay);
+      } else if(line_vec[2] == "-max" && line_vec[3] == "-rise"){
+        timer.set_at(pname, ot::MAX, ot::RISE, delay);
+      } else if(line_vec[2] == "-max" && line_vec[3] == "-fall"){
+        timer.set_at(pname, ot::MIN, ot::FALL, delay);
+      }
+    } else if(line_vec[0] == "set_input_transition"){
+      std::string pname;
+      int delay = stoi(line_vec[1]);
+      for(std::size_t i = 2; i < line_vec.size(); i++){
+        if(line_vec[i] == "[get_ports"){
+          pname = line_vec[++i];
+          pname.pop_back();
+          continue;
+        }
+      }
+      if(line_vec[2] == "-min" && line_vec[3] == "-rise"){
+        timer.set_slew(pname, ot::MIN, ot::RISE, delay);
+      } else if(line_vec[2] == "-min" && line_vec[3] == "-fall"){
+        timer.set_slew(pname, ot::MIN, ot::FALL, delay);
+      } else if(line_vec[2] == "-max" && line_vec[3] == "-rise"){
+        timer.set_slew(pname, ot::MAX, ot::RISE, delay);
+      } else if(line_vec[2] == "-max" && line_vec[3] == "-fall"){
+        timer.set_slew(pname, ot::MIN, ot::FALL, delay);
+      }
+    } else if(line_vec[0] == "set_output_delay"){
+      std::string pname;
+      int delay = stoi(line_vec[1]);
+      for(std::size_t i = 2; i < line_vec.size(); i++){
+        if(line_vec[i] == "[get_ports"){
+          pname = line_vec[++i];
+          pname.pop_back();
+          continue;
+        }
+      }
+      if(line_vec[2] == "-min" && line_vec[3] == "-rise"){
+        timer.set_rat(pname, ot::MIN, ot::RISE, delay);
+      } else if(line_vec[2] == "-min" && line_vec[3] == "-fall"){
+        timer.set_rat(pname, ot::MIN, ot::FALL, delay);
+      } else if(line_vec[2] == "-max" && line_vec[3] == "-rise"){
+        timer.set_rat(pname, ot::MAX, ot::RISE, delay);
+      } else if(line_vec[2] == "-max" && line_vec[3] == "-fall"){
+        timer.set_rat(pname, ot::MIN, ot::FALL, delay);
+      }
+    }
+    line_vec.clear();
+  }
+  file.close();
 }
 
 void Pass_opentimer::build_circuit(LGraph *g) {       // Enhance this for build_circuit

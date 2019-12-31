@@ -1,8 +1,8 @@
 
 #include "lnast_to_cpp_parser.hpp"
 
-std::map<std::string, std::string> Lnast_to_cpp_parser::stringify(std::string_view module_name) {
-  curr_module = new Cpp_parser_module(module_name);
+void Lnast_to_cpp_parser::generate() {
+  curr_module = new Cpp_parser_module(lnast->get_top_module_name());
 
   for (const mmap_lib::Tree_index &it: lnast->depth_preorder(lnast->get_root())) {
     process_node(it);
@@ -11,9 +11,24 @@ std::map<std::string, std::string> Lnast_to_cpp_parser::stringify(std::string_vi
   curr_module->dec_indent_buffer();
 
   std::pair<std::string, std::string> cpp_files = curr_module->create_files();
-  file_map.insert(std::pair<std::string, std::string>(absl::StrCat(curr_module->filename, ".cgen.hpp"), cpp_files.first));
-  file_map.insert(std::pair<std::string, std::string>(absl::StrCat(curr_module->filename, ".cgen.cpp"), cpp_files.second));
-  return file_map;
+
+  auto hpp_basename = absl::StrCat(lnast->get_top_module_name(), "_cgen.hpp");
+
+  fmt::print("lnast_to_cpp_parser path:{} file:{}\n", path, hpp_basename);
+  fmt::print("{}\n",cpp_files.first);
+  fmt::print("<<EOF\n");
+
+  auto cpp_basename = absl::StrCat(lnast->get_top_module_name(), "_cgen.cpp");
+
+  fmt::print("lnast_to_cpp_parser path:{} file:{}\n", path, cpp_basename);
+  fmt::print("{}\n",cpp_files.second);
+  fmt::print("<<EOF\n");
+
+  for(const auto it:file_map) {
+    fmt::print("lnast_to_cpp_parser path:{} file:{}\n", path, it.first);
+    fmt::print("{}\n",it.second);
+    fmt::print("<<EOF\n");
+  }
 }
 
 // infustructure
@@ -200,7 +215,7 @@ void Lnast_to_cpp_parser::process_buffer() {
   }
 
   for (auto const& node : node_buffer) {
-    auto name{node.token.get_text(memblock)};
+    auto name{node.token.get_text()};
     if (name.empty()) {
       fmt::print("{} ", node.type.debug_name_cpp());
     } else {
@@ -213,7 +228,7 @@ void Lnast_to_cpp_parser::process_buffer() {
 }
 
 std::string_view Lnast_to_cpp_parser::get_node_name(Lnast_node node) {
-  return node.token.get_text(memblock);
+  return node.token.get_text();
 }
 
 bool Lnast_to_cpp_parser::is_number(std::string_view test_string) {
@@ -543,8 +558,8 @@ void Lnast_to_cpp_parser::process_func_def() {
   curr_module->add_to_buffer_multiple(curr_module->pop_queue());
 
   std::pair<std::string, std::string> cpp_files = curr_module->create_files();
-  file_map.insert(std::pair<std::string, std::string>(absl::StrCat(curr_module->filename, ".cgen.hpp"), cpp_files.first));
-  file_map.insert(std::pair<std::string, std::string>(absl::StrCat(curr_module->filename, ".cgen.cpp"), cpp_files.second));
+  file_map.insert(std::pair<std::string, std::string>(absl::StrCat(curr_module->filename, "_cgen.hpp"), cpp_files.first));
+  file_map.insert(std::pair<std::string, std::string>(absl::StrCat(curr_module->filename, "_cgen.cpp"), cpp_files.second));
 
   func_map.insert(std::pair<std::string, Cpp_parser_module*>(curr_module->filename, curr_module));
   curr_module = module_stack.back();

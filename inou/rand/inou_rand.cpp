@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include <string>
+#include <charconv>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -19,6 +20,7 @@ void Inou_rand::setup() {
   Eprp_method m1("inou.rand", "generate a random lgraph", &Inou_rand::tolg);
 
   m1.add_label_optional("size",   "lgraph size");
+  m1.add_label_optional("crate",  "crate size for random");
   m1.add_label_optional("eratio", "edge ratio for random");
   m1.add_label_required("name",   "lgraph name");
 
@@ -39,7 +41,9 @@ Inou_rand::Inou_rand(const Eprp_var &var)
 
   if(var.has_label("eratio")) {
     auto sv = var.get("eratio");
-    std::from_chars(sv.data(),sv.data()+sv.size(), rand_eratio);
+    int val;
+    std::from_chars(sv.data(),sv.data()+sv.size(), val);
+    rand_eratio = val;
   }
 
   name = var.get("name");

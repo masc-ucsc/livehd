@@ -45,9 +45,9 @@ private:
 
   void process_operator();
 public:
-  Lnast_to_prp_parser(std::string_view _memblock, Lnast *_lnast)
-    : Last_to_xxx(_memblock, _lnast) { };
+  Lnast_to_prp_parser(Lnast *_lnast, std::string_view _path)
+    : Lnast_to_xxx(_lnast, _path) { };
 
-  void generate(std::string_view path, std::string_view module_name) final;
+  void generate() final;
 };
 

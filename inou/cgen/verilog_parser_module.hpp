@@ -47,6 +47,6 @@ public:
   std::string process_variable(std::string_view var_name);
 
   Verilog_parser_module() {};
-  Verilog_parser_module(std::string m_filename) : filename(m_filename) {};
+  Verilog_parser_module(std::string_view _filename) : filename(absl::StrCat(_filename, ".v")) {};
 };
 

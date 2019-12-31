@@ -28,5 +28,5 @@ protected:
 public:
   Inou_yosys_api(Eprp_var &var, bool do_read);
 
-  static void setup(Eprp &eprp);
+  static void setup();
 };

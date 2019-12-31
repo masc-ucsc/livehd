@@ -1,16 +1,19 @@
 
 #include "lnast_to_prp_parser.hpp"
 
-std::string Lnast_to_prp_parser::stringify(std::string_view module_name) {
-  fmt::print("\nstart Lnast_to_prp_parser::stringify {}\n", module_name);
+void Lnast_to_prp_parser::generate() {
+  fmt::print("\nstart Lnast_to_prp_parser::generate {}\n", lnast->get_top_module_name());
 
   for (const mmap_lib::Tree_index &it: lnast->depth_preorder(lnast->get_root())) {
     process_node(it);
   }
   flush_statements();
 
-  buffer = absl::StrCat("\n\n", buffer);
-  return buffer;
+  auto basename = absl::StrCat(lnast->get_top_module_name(), ".prp");
+
+  fmt::print("lnast_to_prp_parser path:{} file:{}\n", path, basename);
+  fmt::print("{}\n",buffer);
+  fmt::print("<<EOF\n");
 }
 
 void Lnast_to_prp_parser::process_node(const mmap_lib::Tree_index& it) {
@@ -194,7 +197,7 @@ void Lnast_to_prp_parser::process_buffer() {
   }
 
   for (auto const& node : node_buffer) {
-    auto name{node.token.get_text(memblock)};
+    auto name{node.token.get_text()};
     if (name.empty()) {
       fmt::print("{} ", node.type.debug_name_pyrope());
     } else {
@@ -210,7 +213,7 @@ void Lnast_to_prp_parser::process_buffer() {
 }
 
 std::string_view Lnast_to_prp_parser::get_node_name(Lnast_node node) {
-  return node.token.get_text(memblock);
+  return node.token.get_text();
 }
 
 void Lnast_to_prp_parser::flush_it(std::vector<Lnast_node>::iterator it) {

@@ -65,7 +65,5 @@ int main(int argc, char **argv){
   char statement[] = "a+b=c\n";
 
   Test_scanner scanner;
-
-  Elab_scanner::Token_list tlist;
-  scanner.parse("test", statement, tlist);
+  scanner.parse_inline(statement);
 }

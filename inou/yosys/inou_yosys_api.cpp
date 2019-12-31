@@ -19,6 +19,10 @@
 
 #include "inou_yosys_api.hpp"
 
+void setup_inou_yosys() {
+  Inou_yosys_api::setup();
+}
+
 Inou_yosys_api::Inou_yosys_api(Eprp_var &var, bool do_read)
   : Pass("inou.yosys", var) {
 
@@ -284,12 +288,13 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
 
   gl->sync();  // Before calling remote thread in call_yosys
 
-  call_yosys(liblg, script_file, vars);
+  call_yosys(vars);
 
   gl->reload();  // after the call_yosys
 
   std::vector<LGraph *> lgs;
-  gl->each_lgraph([&lgs, gl, max_version, path](Lg_type_id id, std::string_view name) {
+  gl->each_lgraph([&lgs, gl, max_version, this](Lg_type_id id, std::string_view name) {
+    (void)name;
     if (gl->get_version(id) > max_version) {
       LGraph *lg = LGraph::open(path, id);
       if (lg == 0) {
@@ -321,7 +326,7 @@ void Inou_yosys_api::fromlg(Eprp_var &var) {
   }
 }
 
-void Inou_yosys_api::setup(Eprp &eprp) {
+void Inou_yosys_api::setup() {
   std::string yosys;
   yosys = "/usr/bin/yosys";
   if (access(yosys.c_str(), X_OK) == -1) {
@@ -342,7 +347,7 @@ void Inou_yosys_api::setup(Eprp &eprp) {
   m1.add_label_optional("liblg", "path for libgraph_yosys.so library");
   m1.add_label_optional("top", "define top module, will call yosys hierarchy pass (-auto-top allowed)");
 
-  eprp.register_method(m1);
+  register_inou("yosys",m1);
 
   Eprp_method m2("inou.yosys.fromlg", "write verilog using yosys from lgraph", &Inou_yosys_api::fromlg);
   m2.add_label_optional("path", "path to read the lgraph[s]", "lgdb");
@@ -350,5 +355,5 @@ void Inou_yosys_api::setup(Eprp &eprp) {
   m2.add_label_optional("script", "alternative custom inou_yosys_write.ys command");
   m2.add_label_optional("yosys", "path for yosys command", yosys);
 
-  eprp.register_method(m2);
+  register_inou("yosys",m2);
 }

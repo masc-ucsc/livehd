@@ -23,7 +23,7 @@ void Inou_liveparse::do_tolg() {
 
   for (const auto &f : absl::StrSplit(files, ',')) {
     if(absl::EndsWith(f, ".v") || absl::EndsWith(f, ".sv")) {
-      chunker.parse(f);
+      chunker.parse_file(f);
     } else if(absl::EndsWith(f, ".prp")) {
       error("inou.liveparse pyrope chunkify NOT implemented for {}", f);
       return;

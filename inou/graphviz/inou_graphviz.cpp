@@ -169,7 +169,7 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
 void Inou_graphviz::do_fromlnast(std::string_view f) {
   Lnast_parser lnast_parser(f);
 
-  auto *lnast = lnast_parser.get_ast().get(); //unique_ptr lend its ownership
+  auto *lnast = lnast_parser.ref_lnast();
   lnast->ssa_trans();
   std::string data = "digraph {\n";
 
@@ -177,7 +177,7 @@ void Inou_graphviz::do_fromlnast(std::string_view f) {
     auto node_data = lnast->get_data(itr);
 
     auto subs      = node_data.subs;
-    auto name      = node_data.token.get_text(lnast_parser.get_memblock());
+    auto name      = node_data.token.get_text();
 
     auto id = std::to_string(itr.level) + std::to_string(itr.pos);
     if(node_data.type.is_ref()){
@@ -191,7 +191,7 @@ void Inou_graphviz::do_fromlnast(std::string_view f) {
 
     //get parent data for link
     auto p = lnast->get_parent(itr);
-    std::string pname(lnast->get_data(p).token.get_text(lnast_parser.get_memblock()));
+    std::string pname(lnast->get_data(p).token.get_text());
 
     auto parent_id = std::to_string(p.level)+std::to_string(p.pos);
     data += fmt::format(" {}->{};\n", parent_id, id);

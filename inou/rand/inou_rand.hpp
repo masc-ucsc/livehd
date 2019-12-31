@@ -9,7 +9,8 @@ private:
   int       rand_seed;
   int       rand_size;
   int       rand_crate;
-  double    rand_eratio;
+  float     rand_eratio;
+  std::string name;
 protected:
   LGraph   *do_tolg();
 

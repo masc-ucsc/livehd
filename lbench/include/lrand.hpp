@@ -223,7 +223,7 @@ protected:
   const int base;
   const int delta;
 
-  static_assert(std::numeric_limits<T>::max()<std::numeric_limits<int>::max());
+  static_assert(std::numeric_limits<T>::max()<=std::numeric_limits<uint64_t>::max(), "Lrand_rage only works for base types of less than 64bits");
 
 public:
   Lrand_range(int min, int max)

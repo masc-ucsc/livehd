@@ -20,7 +20,6 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//core:core",
-        ":lgyosys-lib",
         "@mustache//:headers",
     ],
     data = ["inou_yosys_read.ys",

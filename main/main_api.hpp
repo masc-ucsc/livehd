@@ -25,9 +25,8 @@ public:
 
   static void setup(std::function<void(Eprp &)> fn) { fn(Pass::eprp); }
 
-  static void parse(const std::string &line) {
-    Elab_scanner::Token_list tlist;
-    Pass::eprp.parse("stdin", line, tlist);
+  static void parse_inline(std::string_view line) {
+    Pass::eprp.parse_inline(line);
   }
 
   static void get_commands(std::function<void(const std::string &, const std::string &)> fn) { Pass::eprp.get_commands(fn); };

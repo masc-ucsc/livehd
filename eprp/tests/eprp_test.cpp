@@ -70,6 +70,7 @@ public:
     is_equal_called = true;
   }
   static void pass(Eprp_var &var) {
+    (void)var;
     fmt::print("pass called\n");
   }
 };
@@ -94,7 +95,6 @@ public:
 
 class Eprp_test : public ::testing::Test {
 public:
-  std::vector<Token> tlist;
 protected:
   Eprp eprp;
   void SetUp() override {
@@ -146,25 +146,23 @@ protected:
 TEST_F(Eprp_files, ParseFiles) {
   const char *buffer =" test1.files2 match:\"nothing\" files:g3xx,./f1/f1.v,xotato/../bar.prp,potato/bar.v";
 
-  Elab_scanner::Token_list tlist;
-  eprp.parse("parsefiles", buffer, tlist);
+  eprp.parse_inline(buffer);
 }
 
 TEST_F(Eprp_test, SimpleReadlinePipe) {
   is_equal_called = false;
   const char *buffer =" test1.xyz.generate lgdb:./lgdb graph_name:chacha |> test1.fff.test check2:jeje    lgdb:potato   check1:potato   ";
-  Elab_scanner::Token_list tlist;
 
-  eprp.parse("inline", buffer, tlist);
+  eprp.parse_inline(buffer);
 
   EXPECT_TRUE(is_equal_called);
   is_equal_called=false;
 
   buffer =" test1.pass test1_foo:field1 check2:chacha  check1:lgdb |> #a";
-  eprp.parse("inline", buffer, tlist);
+  eprp.parse_inline(buffer);
 
   buffer ="#a |> test1.fff.test check2:not_used";
-  eprp.parse("inline", buffer, tlist);
+  eprp.parse_inline(buffer);
   EXPECT_TRUE(is_equal_called);
 }
 

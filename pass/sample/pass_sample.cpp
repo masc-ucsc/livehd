@@ -13,6 +13,7 @@ void setup_pass_sample() {
 
 void Pass_sample::setup() {
   Eprp_method m1("pass.sample", "counts number of nodes in an lgraph", &Pass_sample::work);
+  m1.add_label_optional("data", "just a sample parameter");
 
   register_pass(m1);
 
@@ -184,6 +185,7 @@ void Pass_sample::annotate_placement(LGraph *g) {
 void Pass_sample::create_sample_graph(LGraph *g) {
   auto lg_path = g->get_path();
   auto lg_source = g->get_library().get_source(g->get_lgid());
+
   LGraph *lg = LGraph::create(lg_path, "pass_sample", lg_source);
   fmt::print("Creating new sample LGraph...\n");
   auto graph_inp_a = lg->add_graph_input("g_inp_a", 0, 4); // First io in module, 4 bits

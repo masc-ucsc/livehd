@@ -4,12 +4,12 @@
 
 class Lnast_to_xxx {
 protected:
-  std::string_view memblock;
   Lnast *lnast;
+  std::string_view path;
 
   std::map<std::string, std::string> file_map;
   std::string buffer;
 public:
-  Lnast_to_base(std::string_view _memblock, Lnast *_lnast);
-  virtual void generate(std::string_view path, std::string_view module_name) = 0;
+  Lnast_to_xxx(Lnast *_lnast, std::string_view _path);
+  virtual void generate() = 0;
 };

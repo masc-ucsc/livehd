@@ -10,8 +10,7 @@
 
 class Inou_lnast_dfg : public Pass {
 private:
-  std::string_view         memblock;
-  std::unique_ptr<Lnast>   lnast;
+  Lnast   *lnast;
 
   absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Node_Type_Op> primitive_type_lnast2lg;
   absl::flat_hash_map<std::string, Node_pin>   name2dpin; //record dpin instead of node because the asymmetry between gio and normal node  ...

@@ -32,7 +32,7 @@ void Pass_mockturtle::setup() {
 }
 
 void Pass_mockturtle::work(Eprp_var &var) {
-  Pass_mockturtle pass;
+  Pass_mockturtle pass(var);
 
   for(const auto &g : var.lgs) {
     pass.do_work(g);

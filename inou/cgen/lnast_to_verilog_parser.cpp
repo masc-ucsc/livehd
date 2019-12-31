@@ -1,8 +1,8 @@
 
 #include "lnast_to_verilog_parser.hpp"
 
-std::map<std::string, std::string> Lnast_to_verilog_parser::stringify(std::string_view module_name) {
-  curr_module = new Verilog_parser_module(module_name);
+void Lnast_to_verilog_parser::generate() {
+  curr_module = new Verilog_parser_module(lnast->get_top_module_name());
 
   for (const mmap_lib::Tree_index &it: lnast->depth_preorder(lnast->get_root())) {
     process_node(it);
@@ -10,8 +10,11 @@ std::map<std::string, std::string> Lnast_to_verilog_parser::stringify(std::strin
   flush_statements();
   curr_module->dec_indent_buffer();
 
-  file_map.insert(std::pair<std::string, std::string>(curr_module->filename, curr_module->create_file()));
-  return file_map;
+  for(const auto it:file_map) {
+    fmt::print("lnast_to_verilog_parser path:{} file:{}\n", path, it.first);
+    fmt::print("{}\n",it.second);
+    fmt::print("<<EOF\n");
+  }
 }
 
 // infustructure
@@ -196,7 +199,7 @@ void Lnast_to_verilog_parser::process_buffer() {
   }
 
   for (auto const& node : node_buffer) {
-    auto name{node.token.get_text(memblock)};
+    auto name{node.token.get_text()};
     if (name.empty()) {
       fmt::print("{} ", node.type.debug_name_verilog());
     } else {
@@ -209,7 +212,7 @@ void Lnast_to_verilog_parser::process_buffer() {
 }
 
 std::string_view Lnast_to_verilog_parser::get_node_name(Lnast_node node) {
-  return node.token.get_text(memblock);
+  return node.token.get_text();
 }
 
 bool Lnast_to_verilog_parser::is_number(std::string_view test_string) {

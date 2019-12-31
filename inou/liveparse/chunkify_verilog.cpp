@@ -53,21 +53,21 @@ bool Chunkify_verilog::is_same_file(std::string_view module, std::string_view te
     return false;
   }
 
-  char *memblock = (char *)mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0); // Read only mmap
-  if(memblock == MAP_FAILED) {
+  char *memblock2 = (char *)mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0); // Read only mmap
+  if(memblock2 == MAP_FAILED) {
     Inou_liveparse::error(fmt::format("mmap failed?? for {}", module));
     close(fd);
     return false;
   }
 
-  int n = memcmp(memblock, text1.data(), text1.size());
+  int n = memcmp(memblock2, text1.data(), text1.size());
   if(n) {
     close(fd);
-    munmap(memblock, sb.st_size);
+    munmap(memblock2, sb.st_size);
   }
-  n = memcmp(&memblock[text1.size()], text2.data(), text2.size());
+  n = memcmp(&memblock2[text1.size()], text2.data(), text2.size());
   close(fd);
-  munmap(memblock, sb.st_size);
+  munmap(memblock2, sb.st_size);
 
   return n == 0; // same file if n==0
 }
@@ -120,8 +120,8 @@ void Chunkify_verilog::elaborate() {
 
   Lbench bench("live.parse");
 
-  std::string format_name(buffer_name);
-  for(size_t i = 0; i < buffer_name.size(); i++) {
+  std::string format_name{get_filename()};
+  for(size_t i = 0; i < format_name.size(); i++) {
     if(format_name[i] == '/')
       format_name[i] = '.';
   }
@@ -143,7 +143,7 @@ void Chunkify_verilog::elaborate() {
   }
   auto source = absl::StrCat(parse_path, "file_", format_name);
 
-  write_file(source, buffer);
+  write_file(source, get_memblock());
   chunk_dir = absl::StrCat(parse_path, "chunk_", format_name);
   Eprp_utils::clean_dir(chunk_dir);
 
@@ -166,9 +166,9 @@ void Chunkify_verilog::elaborate() {
 
   std::string in_module_text;
 
-  not_in_module_text.reserve(buffer.size());
+  not_in_module_text.reserve(get_memblock().size());
 
-  in_module_text.reserve(buffer.size());
+  in_module_text.reserve(get_memblock().size());
 
   Sub_node *sub = nullptr;
 

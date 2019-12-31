@@ -26,7 +26,6 @@ void Eprp_var::add(LGraph *lg) {
 }
 
 void Eprp_var::add(const std::string &name, std::string_view value) { dict[name] = value; }
-void Eprp_var::add(std::string_view name, std::string_view value) { dict[std::string(name)] = value; }
 
 void Eprp_var::delete_label(const std::string &name) {
   auto it = dict.find(name);

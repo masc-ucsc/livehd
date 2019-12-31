@@ -38,7 +38,10 @@ public:
 
   void add(LGraph *lg);
   void add(const std::string &name, std::string_view value);
-  void add(std::string_view name, std::string_view value);
+  template<typename Str>
+    std::enable_if_t<std::is_convertible_v<std::string_view, Str>, void> add(const Str &name, std::string_view value) {
+      add(std::string(name), value);
+  }
 
   void delete_label(const std::string &name);
 

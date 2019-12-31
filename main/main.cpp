@@ -100,11 +100,11 @@ Replxx::completions_t hook_shared(std::string const& context, int index, void* u
     bool label_odir   = strcasecmp(label.c_str(), "odir") == 0;
     if (label_files || label_output || label_path || label_odir) {
       std::string path = ".";
-      auto        pos  = full_filename.find_last_of('/');
+      auto        pos2  = full_filename.find_last_of('/');
       std::string filename;
-      if (pos != std::string::npos) {
-        path     = full_filename.substr(0, pos);
-        filename = full_filename.substr(pos + 1);
+      if (pos2 != std::string::npos) {
+        path     = full_filename.substr(0, pos2);
+        filename = full_filename.substr(pos2 + 1);
         prefix_add += path + "/";
         prefix = filename;
       } else {
@@ -140,7 +140,7 @@ Replxx::completions_t hook_shared(std::string const& context, int index, void* u
     }
     // fmt::print("cmd[{}]\n", cmd);
     Main_api::get_labels(
-        cmd, [&fields](const std::string& label, const std::string txt, bool required) { fields.push_back(label + ":"); });
+        cmd, [&fields](const std::string& label, const std::string txt, bool required) { (void)txt; fields.push_back(label + ":"); });
     if (!fields.empty()) examples = &fields;
   }
 
@@ -275,7 +275,7 @@ int main(int argc, char** argv) {
 
   if (!cmd.empty()) {
     fmt::print("lgraph cmd {}\n", cmd);
-    Main_api::parse(cmd);
+    Main_api::parse_inline(cmd);
     exit(0);
   }
 
@@ -461,7 +461,7 @@ int main(int argc, char** argv) {
       // default action
       std::cout << input << "\n";
 
-      Main_api::parse(input);
+      Main_api::parse_inline(input);
       Graph_library::sync_all();
 
       rx.history_add(input);

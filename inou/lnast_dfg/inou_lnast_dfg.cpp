@@ -50,9 +50,8 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
 
   for (const auto &f : absl::StrSplit(files, ',')) {
     Lnast_parser lnast_parser(f);
-    memblock = lnast_parser.get_memblock();
 
-    //lnast = lnast_parser.get_ast().get();
+    lnast = lnast_parser.ref_lnast();
     //p.lnast->ssa_trans();
 
     auto pos = f.rfind('/');
@@ -83,8 +82,6 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
 
     lgs.push_back(dfg);
   }
-
-  memblock = ""; // Not needed but to trigger a fault if incorrectly used afterwards
 
   return lgs;
 }
@@ -162,7 +159,7 @@ void  Inou_lnast_dfg::process_ast_binary_op (LGraph *dfg, const mmap_lib::Tree_i
 //note: for operator, we must create a new node and dpin as it represents a new gate in the netlist
 Node_pin Inou_lnast_dfg::setup_node_operator_and_target (LGraph *dfg, const mmap_lib::Tree_index &lnast_op_idx) {
   const auto eldest_child = lnast->get_first_child(lnast_op_idx);
-  const auto name         = lnast->get_data(eldest_child).token.get_text(memblock);
+  const auto name         = lnast->get_data(eldest_child).token.get_text();
   if (name.at(0) == '%')
     return setup_node_operand(dfg, eldest_child);
 
@@ -174,7 +171,7 @@ Node_pin Inou_lnast_dfg::setup_node_operator_and_target (LGraph *dfg, const mmap
 
 Node_pin Inou_lnast_dfg::setup_node_pure_assign_and_target (LGraph *dfg, const mmap_lib::Tree_index &lnast_op_idx) {
   const auto eldest_child = lnast->get_first_child(lnast_op_idx);
-  const auto name         = lnast->get_data(eldest_child).token.get_text(memblock);
+  const auto name         = lnast->get_data(eldest_child).token.get_text();
   if (name.at(0) == '%') {
     setup_node_operand(dfg, eldest_child);
     return dfg->get_graph_output(name.substr(1));
@@ -188,7 +185,7 @@ Node_pin Inou_lnast_dfg::setup_node_pure_assign_and_target (LGraph *dfg, const m
 Node_pin Inou_lnast_dfg::setup_node_operand(LGraph *dfg, const mmap_lib::Tree_index &ast_idx){
   //fmt::print("operand name:{}\n", name);
 
-  auto       name = lnast->get_data(ast_idx).token.get_text(memblock);
+  auto       name = lnast->get_data(ast_idx).token.get_text();
   assert(!name.empty());
 
   const auto it = name2dpin.find(name);

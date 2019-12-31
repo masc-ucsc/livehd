@@ -267,7 +267,7 @@ protected:
 
   void do_work(LGraph *g);
 public:
-  Pass_mockturtle() { };
+  Pass_mockturtle(const Eprp_var &var) : Pass("pass.mockturtle", var) { };
 
   static void setup();
 };

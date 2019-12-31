@@ -52,6 +52,6 @@ public:
   std::string process_variable(std::string_view var_name);
 
   Cpp_parser_module() {};
-  Cpp_parser_module(std::string m_filename) : filename(m_filename) {};
+  Cpp_parser_module(std::string_view _filename) : filename(_filename) {};
 };
 

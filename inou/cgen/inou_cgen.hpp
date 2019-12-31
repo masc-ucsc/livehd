@@ -9,7 +9,7 @@ private:
 
   enum class Cgen_type { Type_verilog, Type_prp, Type_cfg, Type_cpp };
 
-  enum class Declaration_type { Decl_local, Decl_inp, Decl_out, Decl_sflop, Decl_aflop, Decl_fflop, Decl_latch };
+  enum class Declaration_type { Decl_local=0, Decl_inp, Decl_out, Decl_sflop, Decl_aflop, Decl_fflop, Decl_latch };
   struct Declaration {
     std::string_view name;
     int              bits;
