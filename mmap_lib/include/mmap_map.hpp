@@ -547,7 +547,7 @@ private:
         }
 
         ~Iter() {
-          if (map_ptr) {
+          if (map_ptr && map_ptr->iter_cntr>0) {
             map_ptr->iter_free();
           }
         }

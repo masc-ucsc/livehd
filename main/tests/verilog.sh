@@ -53,7 +53,7 @@ do
     fi
     base=${base:5}
   else
-    if [[ $long == "true" ]]; then
+    if [[ $long == "true" && $fixme != "true" ]]; then
       echo "Skipping short test for "$base
       continue
     fi
