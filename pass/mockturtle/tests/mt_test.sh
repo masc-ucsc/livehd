@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 rm -rf ./lgdb
 rm -f   yosys_srcipt.*
 rm -f   *.v
@@ -20,19 +20,19 @@ mkdir -p logs/yosys_log
 
 
 ### sh:todo
-# pts='dce2 dce3 compare2 offset operators consts not_vslogicnot 
-#      mux mismatch expression_00002 
-#      graphtest kogg_stone_64 test simple_weird 
-#      shift shiftx_simple shiftx shared_ports 
+# pts='dce2 dce3 compare2 offset operators consts not_vslogicnot
+#      mux mismatch expression_00002
+#      graphtest kogg_stone_64 test simple_weird
+#      shift shiftx_simple shiftx shared_ports
 #      long_gcd long_simple_rf1 long_regfile1r1w'
 
 
-pts='trivial_offset trivial2a trivial trivial3 trivial_and 
-     dce1 gates trivial1 trivial_join compare cse_basic 
-     simple_weird2 mt_basic_test reduce null_port 
+pts='trivial_offset trivial2a trivial trivial3 trivial_and
+     dce1 gates trivial1 trivial_join compare cse_basic
+     simple_weird2 mt_basic_test reduce null_port
      '
 
-     
+
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
 
@@ -68,7 +68,7 @@ do
     echo "FAIL: verilog generation terminated with an error, testcase: ${pt}.v"
     exit 1
   fi
-  
+
   mv *.v ./logs
   mv *.dot ./logs
   mv yosys_script.* ./logs/yosys_log
@@ -76,7 +76,7 @@ do
   echo ""
   echo "Logic Equivalence Check"
   echo ""
-  
+
   ${LGCHECK} -r./inou/yosys/tests/${pt}.v -i./logs/${pt}_lutified.v
   if [ $? -eq 0 ]; then
     echo "Successfully pass logic equivilence check!"
@@ -90,5 +90,5 @@ do
 
 done
 
-
+exit 0
 

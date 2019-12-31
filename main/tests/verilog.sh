@@ -146,8 +146,10 @@ done
 
 if [ $fail -eq 0 ]; then
   echo "SUCCESS: pass:${pass} tests without errors"
+  exit 0
 else
   echo "FAIL: ${pass} tests passed but ${fail} failed verification: ${fail_list}"
+  exit -1
 fi
 
 
