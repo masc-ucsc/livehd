@@ -78,20 +78,20 @@ do
     echo "Successfully created graph from ${input}"
   else
     echo "FAIL: lgyosys parsing terminated with an error (testcase ${input})"
-    let fail++
+    ((fail++))
     fail_list+=" "$base
   fi
   LC=$(grep -iv Warning tmp_yosys/${input}.err | grep -v "recommended to use " | wc -l | cut -d" " -f1)
   if [[ $LC -gt 0 ]]; then
     echo "FAIL: Faulty "$LC" err verilog file tmp_yosys/${input}.err"
-    let fail++
+    ((fail++))
     fail_list+=" "$base
     continue
   fi
   LC=$(grep -i signal tmp_yosys/${input}.log | wc -l | cut -d" " -f1)
   if [[ $LC -gt 0 ]]; then
     echo "FAIL: Faulty "$LC" log verilog file tmp_yosys/${input}.log"
-    let fail++
+    ((fail++))
     fail_list+=" "$base
     continue
   fi
@@ -107,7 +107,7 @@ do
   LC=$(grep -iv Warning tmp_yosys/${input}.err | grep -v "recommended to use " | wc -l | cut -d" " -f1)
   if [[ $LC -gt 0 ]]; then
     echo "FAIL: Faulty "$LC" err verilog file tmp_yosys/${input}.err"
-    let fail++
+    ((fail++))
     fail_list+=" "$base
     continue
   fi
@@ -116,7 +116,7 @@ do
   else
     echo ${YOSYS} -g${base} -h -d
     echo "FAIL: verilog generation terminated with an error (testcase ${input})"
-    let fail++
+    ((fail++))
     fail_list+=" "$base
     continue
   fi
@@ -127,7 +127,7 @@ do
     echo "Skipping check for "$base" LC:"$LC
     if [[ $LC -lt 2 ]]; then
       echo "FAIL: Generated verilog file tmp_yosys/all_${base}.v is too small"
-      let fail++
+      ((fail++))
       fail_list+=" "$base
     fi
   else
@@ -136,12 +136,12 @@ do
       echo "Successfully matched generated verilog with original verilog (${full_input})"
     else
       echo "FAIL: circuits are not equivalent (${full_input})"
-      let fail++
+      ((fail++))
       fail_list+=" "$base
     fi
   fi
 
-  let pass++
+  ((pass++))
 done
 
 if [ $fail -eq 0 ]; then
