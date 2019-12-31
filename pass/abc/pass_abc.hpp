@@ -7,7 +7,6 @@
 #include <string>
 
 #include "absl/container/flat_hash_map.h"
-
 #include "lgedgeiter.hpp"
 #include "lgraphbase.hpp"
 #include "options.hpp"
@@ -21,7 +20,6 @@ extern "C" {
 }
 
 class Pass_abc : public Pass {
-
 protected:
   class Pass_abc_options {
   public:
@@ -51,35 +49,32 @@ protected:
   void    dump_blif(const LGraph *g, const std::string &filename);
 
 public:
-  //customize a hash function for absl::flat_hash_map
+  // customize a hash function for absl::flat_hash_map
   struct IndexID_Hash {
-    inline std::size_t operator()(const Index_ID k) const {
-      return (size_t)k.value;
-    }
+    inline std::size_t operator()(const Index_ID k) const { return (size_t)k.value; }
   };
 
   struct Abc_primary_input {
-    Abc_Obj_t *PI;    // PI node
-    Abc_Obj_t *PIOut; // Fanout of this node type: nets
+    Abc_Obj_t *PI;     // PI node
+    Abc_Obj_t *PIOut;  // Fanout of this node type: nets
   };
 
   struct Abc_primary_output {
-    Abc_Obj_t *PO;    // PI node
-    Abc_Obj_t *POOut; // Fanout of this node type: nets
+    Abc_Obj_t *PO;     // PI node
+    Abc_Obj_t *POOut;  // Fanout of this node type: nets
   };
 
   struct Abc_latch {
-    Abc_Obj_t *pLatchInput;  // Node itself is the fanin
-    Abc_Obj_t *pLatchOutput; // Fanout of this node type: nets
+    Abc_Obj_t *pLatchInput;   // Node itself is the fanin
+    Abc_Obj_t *pLatchOutput;  // Fanout of this node type: nets
   };
 
   struct Abc_comb {
-    Abc_Obj_t *pNodeInput;  // Node it self is the fanin
-    Abc_Obj_t *pNodeOutput; // Fanout of this node type: nets
+    Abc_Obj_t *pNodeInput;   // Node it self is the fanin
+    Abc_Obj_t *pNodeOutput;  // Fanout of this node type: nets
   };
 
   struct index_offset {
-
     Index_ID idx;
     Port_ID  pid;
     int      offset[2];
@@ -89,12 +84,12 @@ public:
     }
 
     inline bool operator<(const index_offset &rhs) const {
-      if(idx < rhs.idx)
+      if (idx < rhs.idx)
         return true;
-      else if(idx == rhs.idx) {
-        if(pid < rhs.pid)
+      else if (idx == rhs.idx) {
+        if (pid < rhs.pid)
           return true;
-        else if(pid == rhs.pid) {
+        else if (pid == rhs.pid) {
           return offset[0] < rhs.offset[0];
         } else
           return false;
@@ -103,12 +98,12 @@ public:
     }
 
     inline bool operator()(const index_offset &lhs, const index_offset &rhs) const {
-      if(lhs.idx < rhs.idx)
+      if (lhs.idx < rhs.idx)
         return true;
-      else if(lhs.idx == rhs.idx) {
-        if(lhs.pid < rhs.pid)
+      else if (lhs.idx == rhs.idx) {
+        if (lhs.pid < rhs.pid)
           return true;
-        else if(lhs.pid == rhs.pid) {
+        else if (lhs.pid == rhs.pid) {
           return lhs.offset[0] < rhs.offset[0];
         } else
           return false;
@@ -122,24 +117,19 @@ public:
     int      offset;
     int      width;
 
-    Pick_ID(Node_pin driver, int offset, int width)
-        : driver(driver)
-        , offset(offset)
-        , width(width) {
-    }
+    Pick_ID(Node_pin driver, int offset, int width) : driver(driver), offset(offset), width(width) {}
 
     bool operator!=(const Pick_ID other) const {
       return (driver != other.driver) || (driver == other.driver && offset != other.offset) ||
              (driver == other.driver && offset == other.offset && width != other.width);
     }
     template <typename H>
-    friend H AbslHashValue(H h, const Pick_ID& s) {
+    friend H AbslHashValue(H h, const Pick_ID &s) {
       return H::combine(std::move(h), s.driver, s.offset, s.width);
     };
   };
 
   struct graph_topology {
-
     using topology_info = std::vector<index_offset>;
     using name2id       = absl::flat_hash_map<std::string, uint64_t>;
     using cell_group    = absl::flat_hash_map<uint64_t, Abc_comb, IndexID_Hash>;
@@ -155,10 +145,10 @@ public:
     using value_size    = std::pair<uint32_t, uint32_t>;
     using record        = absl::flat_hash_map<std::string, Abc_Obj_t *>;
 
-    using picks2pin     = absl::flat_hash_map<Pick_ID, Node_pin>;
-    using po_group      = std::map<index_offset, Abc_primary_output>;
-    using pi_group      = std::map<index_offset, Abc_primary_input>;
-    using pseduo_name   = std::map<index_offset, std::string>;
+    using picks2pin   = absl::flat_hash_map<Pick_ID, Node_pin>;
+    using po_group    = std::map<index_offset, Abc_primary_output>;
+    using pi_group    = std::map<index_offset, Abc_primary_input>;
+    using pseduo_name = std::map<index_offset, std::string>;
 
     std::vector<uint64_t> combinational_id;
     std::vector<uint64_t> latch_id;
@@ -189,13 +179,13 @@ public:
     pseduo_name memory_generated_input_wire;
     record      pseduo_record;
 
-    name2id   ck_remap;
-    name2id   rst_remap;
-    name2id   io_remap;
-    idremap   subgraph_remap;
-    idremap   memory_remap;
-    ptr2id    cell2id;
-    id2pid    cell_out_pid;
+    name2id ck_remap;
+    name2id rst_remap;
+    name2id io_remap;
+    idremap subgraph_remap;
+    idremap memory_remap;
+    ptr2id  cell2id;
+    id2pid  cell_out_pid;
   };
 
   Pass_abc();
@@ -213,7 +203,7 @@ private:
     std::string_view cell_name = tcell->get_name();
     std::string_view flop      = "FF";
     std::string_view latch     = "LATCH";
-    if(cell_name.find(flop) != std::string::npos) {
+    if (cell_name.find(flop) != std::string::npos) {
       return true;
     }
 
@@ -298,4 +288,3 @@ private:
 
   void gen_generic_lib(const std::string &buffer) const;
 };
-

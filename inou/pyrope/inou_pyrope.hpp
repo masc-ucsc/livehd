@@ -5,7 +5,6 @@
 
 class Inou_pyrope : public Pass {
 protected:
-
   void to_lgraph(std::string_view file);
 
   void do_work(const LGraph *g);
@@ -18,4 +17,3 @@ public:
 
   static void setup();
 };
-

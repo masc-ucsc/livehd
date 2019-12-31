@@ -1,13 +1,14 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "lgraph_base_core.hpp"
+
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "lgedgeiter.hpp"
-#include "lgraph_base_core.hpp"
-#include "tech_library.hpp"
 #include "graph_library.hpp"
+#include "lgedgeiter.hpp"
+#include "tech_library.hpp"
 
 static_assert(sizeof(Hierarchy_data) == 8);
 static_assert(sizeof(Hierarchy_index) == 8);
@@ -32,14 +33,8 @@ Lgraph_base_core::Setup_path::Setup_path(std::string_view path) {
 }
 
 Lgraph_base_core::Lgraph_base_core(std::string_view _path, std::string_view _name, Lg_type_id _lgid)
-    : p(_path)
-    , path(_path)
-    , name(_name)
-    , long_name(absl::StrCat("lgraph_", _name))
-    , lgid(_lgid)
-    , locked(false) {
+    : p(_path), path(_path), name(_name), long_name(absl::StrCat("lgraph_", _name)), lgid(_lgid), locked(false) {
   assert(lgid);
-
 }
 
 void Lgraph_base_core::get_lock() {
@@ -57,7 +52,7 @@ void Lgraph_base_core::get_lock() {
 }
 
 void Lgraph_base_core::clear() {
-  //if (!locked) return;
+  // if (!locked) return;
 
   // whenever we clean, we unlock
   std::string lock = absl::StrCat(path, "/", std::to_string(lgid), ".lock");

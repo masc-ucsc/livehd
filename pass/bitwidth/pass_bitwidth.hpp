@@ -1,6 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <vector>
+
+#include "node_pin.hpp"
+#include "node_type_base.hpp"
 #include "pass.hpp"
 
 class Pass_bitwidth : public Pass {
@@ -35,4 +39,3 @@ public:
 
   static void setup();
 };
-

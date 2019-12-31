@@ -1,43 +1,38 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "inou_yosys_api.hpp"
+
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <ext/stdio_filebuf.h>
 
+#include <ext/stdio_filebuf.h>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
 
+#include "eprp_utils.hpp"
 #include "iassert.hpp"
+#include "lgraph.hpp"
 #include "mustache.hpp"
 
-#include "eprp_utils.hpp"
-#include "lgraph.hpp"
+void setup_inou_yosys() { Inou_yosys_api::setup(); }
 
-#include "inou_yosys_api.hpp"
-
-void setup_inou_yosys() {
-  Inou_yosys_api::setup();
-}
-
-Inou_yosys_api::Inou_yosys_api(Eprp_var &var, bool do_read)
-  : Pass("inou.yosys", var) {
-
-  yosys   = var.get("yosys");
+Inou_yosys_api::Inou_yosys_api(Eprp_var &var, bool do_read) : Pass("inou.yosys", var) {
+  yosys = var.get("yosys");
   set_script_liblg(var, do_read);
 }
 
 void Inou_yosys_api::set_script_liblg(const Eprp_var &var, bool do_read) {
   auto script = var.get("script");
-  liblg = var.get("liblg");
+  liblg       = var.get("liblg");
 
   auto main_path = Eprp_utils::get_exe_path();
 
   if (liblg.empty()) {
-    liblg                 = main_path + "/lgshell.runfiles/lgraph/inou/yosys/liblgraph_yosys.so";
+    liblg = main_path + "/lgshell.runfiles/lgraph/inou/yosys/liblgraph_yosys.so";
     if (access(liblg.c_str(), X_OK) == -1) {
       // Maybe it is installed in /usr/local/bin/lgraph and /usr/local/share/lgraph/inou/yosys/liblgrapth...
       const std::string liblg2 = main_path + "/../share/lgraph/inou/yosys/liblgraph_yosys.so";
@@ -73,7 +68,7 @@ void Inou_yosys_api::set_script_liblg(const Eprp_var &var, bool do_read) {
         if (access(script_file3.c_str(), R_OK) != -1) {
           script_file = script_file3;
         }
-      }else{
+      } else {
         script_file = script_file2;
       }
     }
@@ -121,7 +116,6 @@ int Inou_yosys_api::create_lib(const std::string &lib_file, const std::string &l
 }
 
 int Inou_yosys_api::call_yosys(mustache::data &vars) {
-
   std::ifstream inFile;
   inFile.open(std::string(script_file));
   if (!inFile.good()) throw std::runtime_error(fmt::format("inou_yosys_api: could not open {}", script_file));
@@ -130,14 +124,14 @@ int Inou_yosys_api::call_yosys(mustache::data &vars) {
   strStream << inFile.rdbuf();  // read the whole file
 
   mustache::mustache tmpl(strStream.str());
-  tmpl.set_custom_escape([](const std::string& s) { return s; }); // No HTML escape
+  tmpl.set_custom_escape([](const std::string &s) { return s; });  // No HTML escape
 
   const std::string yosys_cmd = tmpl.render(vars);
-  char filename[1024];
-  strcpy(filename,"yosys_script.XXXXXX");
+  char              filename[1024];
+  strcpy(filename, "yosys_script.XXXXXX");
 
   int fd = mkstemp(filename);
-  if (fd<0) {
+  if (fd < 0) {
     error("Could not create yosys_script.XXXXXX file\n");
     return -1;
   }
@@ -155,18 +149,18 @@ int Inou_yosys_api::call_yosys(mustache::data &vars) {
 
   if (pid == 0) {  // Child
 
-    char filename2[1024+32];
+    char filename2[1024 + 32];
 
-    sprintf(filename2,"%s.log", filename);
-    int fd_out = open(filename2, O_CREAT|O_WRONLY|O_TRUNC, 0644);
-    if (fd_out<0) {
-      fprintf(stderr,"ERROR inou_yosys_api could not create %s file\n", filename);
+    sprintf(filename2, "%s.log", filename);
+    int fd_out = open(filename2, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    if (fd_out < 0) {
+      fprintf(stderr, "ERROR inou_yosys_api could not create %s file\n", filename);
       exit(-3);
     }
-    sprintf(filename2,"%s.err", filename);
-    int fd_err = open(filename2, O_CREAT|O_WRONLY|O_TRUNC, 0644);
-    if (fd_err<0) {
-      fprintf(stderr,"ERROR inou_yosys_api could not create %s file\n", filename);
+    sprintf(filename2, "%s.err", filename);
+    int fd_err = open(filename2, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    if (fd_err < 0) {
+      fprintf(stderr, "ERROR inou_yosys_api could not create %s file\n", filename);
       exit(-3);
     }
 
@@ -175,13 +169,13 @@ int Inou_yosys_api::call_yosys(mustache::data &vars) {
     close(fd_err);
     close(fd_out);
 
-    char *argv[]    = {strdup(std::string(yosys).c_str()),
-      strdup("-q"),
-      strdup("-m"),
-      strdup(std::string(liblg).c_str()),
-      strdup("-s"),
-      strdup(filename),
-      0};
+    char *argv[] = {strdup(std::string(yosys).c_str()),
+                    strdup("-q"),
+                    strdup("-m"),
+                    strdup(std::string(liblg).c_str()),
+                    strdup("-s"),
+                    strdup(filename),
+                    0};
 
     if (execvp(std::string(yosys).c_str(), argv) < 0) {
       error("execvp fail with {}", strerror(errno));
@@ -224,7 +218,6 @@ void Inou_yosys_api::tolg(Eprp_var &var) {
 }
 
 void Inou_yosys_api::do_tolg(Eprp_var &var) {
-
   if (files.empty()) {
     error("files can not be empty");
     return;
@@ -309,7 +302,6 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
 }
 
 void Inou_yosys_api::fromlg(Eprp_var &var) {
-
   Inou_yosys_api p(var, false);
 
   for (auto &lg : var.lgs) {
@@ -347,7 +339,7 @@ void Inou_yosys_api::setup() {
   m1.add_label_optional("liblg", "path for libgraph_yosys.so library");
   m1.add_label_optional("top", "define top module, will call yosys hierarchy pass (-auto-top allowed)");
 
-  register_inou("yosys",m1);
+  register_inou("yosys", m1);
 
   Eprp_method m2("inou.yosys.fromlg", "write verilog using yosys from lgraph", &Inou_yosys_api::fromlg);
   m2.add_label_optional("path", "path to read the lgraph[s]", "lgdb");
@@ -355,5 +347,5 @@ void Inou_yosys_api::setup() {
   m2.add_label_optional("script", "alternative custom inou_yosys_write.ys command");
   m2.add_label_optional("yosys", "path for yosys command", yosys);
 
-  register_inou("yosys",m2);
+  register_inou("yosys", m2);
 }

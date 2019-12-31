@@ -3,11 +3,9 @@
 #include <iostream>
 #include <random>
 
+#include "inou.hpp"
 #include "lgbench.hpp"
 #include "lgraph.hpp"
-
-#include "inou.hpp"
-
 #include "pass/fluid/pass_fluid.hpp"
 
 int main(int argc, const char **argv) {
@@ -23,13 +21,13 @@ int main(int argc, const char **argv) {
   std::vector<LGraph *> lgs = inou.generate();
   b.sample("setup");
 
-  for(auto g : lgs) {
+  for (auto g : lgs) {
     fluid.transform(g);
   }
 
   b.sample("fluid_pass");
 
-  for(auto g : lgs) {
+  for (auto g : lgs) {
     g->sync();
   }
 }

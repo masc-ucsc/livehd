@@ -1,6 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 //
 
+#include "inou_graphviz.hpp"
+
 #include <atomic>
 #include <fstream>
 
@@ -10,45 +12,40 @@
 #include "lgraphbase.hpp"
 #include "lnast_parser.hpp"
 
-#include "inou_graphviz.hpp"
-
-void setup_inou_graphviz() {
-  Inou_graphviz::setup();
-}
+void setup_inou_graphviz() { Inou_graphviz::setup(); }
 
 void Inou_graphviz::setup() {
   Eprp_method m1("inou.graphviz.fromlg", "export lgraph to graphviz dot format", &Inou_graphviz::fromlg);
 
-  m1.add_label_optional("bits",    "dump bits (true/false)", "false");
+  m1.add_label_optional("bits", "dump bits (true/false)", "false");
   m1.add_label_optional("verbose", "dump bits and wirename (true/false)", "false");
-  //m1.add_label_optional("odir",    "path to put the dot", ".");
+  // m1.add_label_optional("odir",    "path to put the dot", ".");
 
   register_inou("graphviz", m1);
 
   Eprp_method m2("inou.graphviz.fromlnast", "export lnast to graphviz dot format", &Inou_graphviz::fromlnast);
 
-  //m2.add_label_required("files",  "cfg_text files to process (comma separated)");
-  //m2.add_label_optional("odir",   "path to put the dot", ".");
+  // m2.add_label_required("files",  "cfg_text files to process (comma separated)");
+  // m2.add_label_optional("odir",   "path to put the dot", ".");
 
   register_inou("graphviz", m2);
 
   Eprp_method m3("inou.graphviz.fromlg.hierarchy", "export lgraph hierarchy to graphviz dot format", &Inou_graphviz::hierarchy);
 
-  //m3.add_label_optional("odir",   "path to put the dot", ".");
+  // m3.add_label_optional("odir",   "path to put the dot", ".");
 
   register_inou("graphviz", m3);
 }
 
-Inou_graphviz::Inou_graphviz(const Eprp_var &var)
-  : Pass("inou.graphviz", var) {
+Inou_graphviz::Inou_graphviz(const Eprp_var &var) : Pass("inou.graphviz", var) {
   if (var.has_label("bits")) {
     auto b = var.get("bits");
-    bits = b != "false" && b != "0";
-  }else{
+    bits   = b != "false" && b != "0";
+  } else {
     bits = false;
   }
 
-  auto v = var.get("verbose");
+  auto v  = var.get("verbose");
   verbose = v != "false" && v != "0";
 }
 
@@ -82,9 +79,8 @@ void Inou_graphviz::do_hierarchy(LGraph *g) {
   g->dump_down_nodes();
 
   for (const auto node : g->fast(true)) {
-    if (!node.is_type_sub())
-      continue;
-    //fmt::print("lg:{} node:{} type:{}\n", node.get_class_lgraph()->get_name(), node.debug_name(), node.get_type().get_name());
+    if (!node.is_type_sub()) continue;
+    // fmt::print("lg:{} node:{} type:{}\n", node.get_class_lgraph()->get_name(), node.debug_name(), node.get_type().get_name());
 
     const auto &child_sub = node.get_type_sub_node();
     data += fmt::format(" {}->{};", node.get_class_lgraph()->get_name(), child_sub.get_name());
@@ -99,7 +95,7 @@ void Inou_graphviz::do_hierarchy(LGraph *g) {
     return;
   }
   size_t sz = write(fd, data.c_str(), data.size());
-  if (sz!=data.size()) {
+  if (sz != data.size()) {
     Pass::error("inou.graphviz.do_hierarchy unexpected write missmatch");
     return;
   }
@@ -107,7 +103,6 @@ void Inou_graphviz::do_hierarchy(LGraph *g) {
 }
 
 void Inou_graphviz::do_fromlg(LGraph *lg_parent) {
-
   populate_lg_data(lg_parent);
 
   lg_parent->each_sub_fast([lg_parent, this](Node &node, Lg_type_id lgid) {
@@ -125,12 +120,10 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
     auto node_name = node.has_name() ? node.get_name() : "";
 
     if (node.get_type().op == U32Const_Op)
-      data += fmt::format(" {} [label=\"{} :{} :{}\"];\n"
-             , node.debug_name(), node.debug_name(), node_name, node.get_type_const_value());
+      data += fmt::format(" {} [label=\"{} :{} :{}\"];\n", node.debug_name(), node.debug_name(), node_name,
+                          node.get_type_const_value());
     else
-      data += fmt::format(" {} [label=\"{} :{}\"];\n"
-             , node.debug_name(), node.debug_name(), node_name);
-
+      data += fmt::format(" {} [label=\"{} :{}\"];\n", node.debug_name(), node.debug_name(), node_name);
 
     for (auto &out : node.out_edges()) {
       auto &dpin       = out.driver;
@@ -139,14 +132,14 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
       auto  dpin_name  = dpin.has_name() ? dpin.get_name() : "";
       auto  dbits      = dpin.get_bits();
 
-      data += fmt::format(" {}->{}[label=\"{}b :{} :{} :{}\"];\n"
-          , dnode_name, snode_name, dbits, dpin.get_pid(), out.sink.get_pid(), dpin_name);
+      data += fmt::format(" {}->{}[label=\"{}b :{} :{} :{}\"];\n", dnode_name, snode_name, dbits, dpin.get_pid(),
+                          out.sink.get_pid(), dpin_name);
     }
   });
 
   g->each_graph_output([&data](const Node_pin &pin) {
     std::string_view dst_str = "virtual_dst_module";
-    auto            dbits    = pin.get_bits();
+    auto             dbits   = pin.get_bits();
     data += fmt::format(" {}->{}[label=\"{}b\"];\n", pin.get_node().debug_name(), dst_str, dbits);
   });
 
@@ -159,7 +152,7 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
     return;
   }
   size_t sz = write(fd, data.c_str(), data.size());
-  if (sz!=data.size()) {
+  if (sz != data.size()) {
     Pass::error("inou.graphviz unexpected write missmatch");
     return;
   }
@@ -173,27 +166,26 @@ void Inou_graphviz::do_fromlnast(std::string_view f) {
   lnast->ssa_trans();
   std::string data = "digraph {\n";
 
-  for(const auto& itr : lnast->depth_preorder(lnast->get_root())){
+  for (const auto &itr : lnast->depth_preorder(lnast->get_root())) {
     auto node_data = lnast->get_data(itr);
 
-    auto subs      = node_data.subs;
-    auto name      = node_data.token.get_text();
+    auto subs = node_data.subs;
+    auto name = node_data.token.get_text();
 
     auto id = std::to_string(itr.level) + std::to_string(itr.pos);
-    if(node_data.type.is_ref()){
+    if (node_data.type.is_ref()) {
       data += fmt::format(" {} [label=\"{}, {}[{}]\"];\n", id, node_data.type.debug_name(), name, subs);
     } else {
       data += fmt::format(" {} [label=\"{}, {}\"];\n", id, node_data.type.debug_name(), name);
     }
 
-    if(node_data.type.is_top())
-      continue;
+    if (node_data.type.is_top()) continue;
 
-    //get parent data for link
-    auto p = lnast->get_parent(itr);
+    // get parent data for link
+    auto        p = lnast->get_parent(itr);
     std::string pname(lnast->get_data(p).token.get_text());
 
-    auto parent_id = std::to_string(p.level)+std::to_string(p.pos);
+    auto parent_id = std::to_string(p.level) + std::to_string(p.pos);
     data += fmt::format(" {}->{};\n", parent_id, id);
   }
 
@@ -206,10 +198,9 @@ void Inou_graphviz::do_fromlnast(std::string_view f) {
     return;
   }
   size_t sz = write(fd, data.c_str(), data.size());
-  if (sz!=data.size()) {
+  if (sz != data.size()) {
     Pass::error("inou.graphviz_lnast unexpected write missmatch");
     return;
   }
   close(fd);
 }
-

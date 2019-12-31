@@ -1,38 +1,32 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include <string_view>
-#include <string>
 #include <cstdint>
-
-#include "likely.hpp"
-
-#include "fmt/format.h"
+#include <string>
+#include <string_view>
 
 #include "explicit_type.hpp"
+#include "fmt/format.h"
 #include "iassert.hpp"
+#include "likely.hpp"
 #include "mmap_tree.hpp"
 
 // LGraph basic core types used all over
-using Lg_type_id   = Explicit_type<uint32_t, struct Lg_type_id_struct, 0>;  // Global used all over
-using Index_ID     = Explicit_type<uint32_t, struct Index_ID_struct, 0>;
-using Lut_type_id  = Explicit_type<uint32_t, struct Lut_type_id_struct, 0>;
+using Lg_type_id  = Explicit_type<uint32_t, struct Lg_type_id_struct, 0>;  // Global used all over
+using Index_ID    = Explicit_type<uint32_t, struct Index_ID_struct, 0>;
+using Lut_type_id = Explicit_type<uint32_t, struct Lut_type_id_struct, 0>;
 
-class Hierarchy_data { // 64bits total
+class Hierarchy_data {  // 64bits total
 public:
   Lg_type_id lgid;
   Index_ID   up_nid;
   Hierarchy_data() : lgid(0), up_nid(0) {}
-  Hierarchy_data(const Lg_type_id &_class_id, const Index_ID &_nid)
-   :lgid(_class_id)
-   ,up_nid(_nid) {
-   }
+  Hierarchy_data(const Lg_type_id& _class_id, const Index_ID& _nid) : lgid(_class_id), up_nid(_nid) {}
 
   bool is_invalid() const { return lgid == 0; }
 };
 
-using Hierarchy_index=mmap_lib::Tree_index;
-
+using Hierarchy_index = mmap_lib::Tree_index;
 
 struct Lg_type_id_hash {
   size_t operator()(const Lg_type_id& obj) const { return obj.value; }
@@ -42,13 +36,13 @@ struct Index_ID_hash {
   size_t operator()(const Index_ID& obj) const { return obj.value; }
 };
 
-using Port_ID    = uint32_t;    // ports have a set order (a-b != b-a)
+using Port_ID = uint32_t;  // ports have a set order (a-b != b-a)
 
-constexpr int Index_bits = 31; // 31 bit to have Sink/Driver + Index in 32 bits
-constexpr int Port_bits  = 28;
-constexpr int Bits_bits  = 17;
-constexpr Port_ID Port_invalid = ((1ULL<<Port_bits)-1); // Max Port_bits allowed
-constexpr int LUT_input_bits  = 4;
+constexpr int     Index_bits     = 31;  // 31 bit to have Sink/Driver + Index in 32 bits
+constexpr int     Port_bits      = 28;
+constexpr int     Bits_bits      = 17;
+constexpr Port_ID Port_invalid   = ((1ULL << Port_bits) - 1);  // Max Port_bits allowed
+constexpr int     LUT_input_bits = 4;
 
 class Graph_library;
 
@@ -84,5 +78,5 @@ public:
 
   const Lg_type_id get_lgid() const { return lgid; }
 
-  std::string_view     get_path() const { return path; }
+  std::string_view get_path() const { return path; }
 };

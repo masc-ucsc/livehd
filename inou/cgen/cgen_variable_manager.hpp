@@ -1,24 +1,24 @@
 
 #pragma once
 
-#include <unordered_map>
 #include <string>
+#include <unordered_map>
 
 class Variable_options {
 public:
   // flop / latch / SRAM Speific
-  uint32_t bits = 0;
-  bool posedge = true;
-  int32_t last = -1;
-  int32_t size = -1;
-  bool latch = false;
-  std::string clk_pin = "";
-  std::string clk_rd_pin = "";
-  std::string clk_wr_pin = "";
-  std::string reset = "";
-  std::string reset_pin = "";
-  uint32_t reset_cycles = 1;
-  bool reset_async = false;
+  uint32_t    bits         = 0;
+  bool        posedge      = true;
+  int32_t     last         = -1;
+  int32_t     size         = -1;
+  bool        latch        = false;
+  std::string clk_pin      = "";
+  std::string clk_rd_pin   = "";
+  std::string clk_wr_pin   = "";
+  std::string reset        = "";
+  std::string reset_pin    = "";
+  uint32_t    reset_cycles = 1;
+  bool        reset_async  = false;
 
   // Generic
 
@@ -36,4 +36,3 @@ public:
   Variable_options* get(std::string var_name);
   Variable_options* get(std::string_view var_name);
 };
-

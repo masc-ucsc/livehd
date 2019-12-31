@@ -1,16 +1,12 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "graph_library.hpp"
+
 #include <dirent.h>
 #include <limits.h>
 #include <stdlib.h>
-#include <sys/stat.h>
 #include <sys/sendfile.h>
-
-#include "rapidjson/document.h"
-#include "rapidjson/error/en.h"
-#include "rapidjson/filereadstream.h"
-#include "rapidjson/filewritestream.h"
-#include "rapidjson/prettywriter.h"
+#include <sys/stat.h>
 
 #include <cassert>
 #include <fstream>
@@ -18,20 +14,22 @@
 #include <set>
 
 #include "fmt/format.h"
-
-#include "graph_library.hpp"
 #include "lgraph.hpp"
 #include "pass.hpp"
+#include "rapidjson/document.h"
+#include "rapidjson/error/en.h"
+#include "rapidjson/filereadstream.h"
+#include "rapidjson/filewritestream.h"
+#include "rapidjson/prettywriter.h"
 
 Graph_library::Global_instances   Graph_library::global_instances;
 Graph_library::Global_name2lgraph Graph_library::global_name2lgraph;
 
 class Cleanup_graph_library {
 public:
-  Cleanup_graph_library() {
-  };
+  Cleanup_graph_library(){};
   ~Cleanup_graph_library() {
-    //fmt::print("Shutting down...\n");
+    // fmt::print("Shutting down...\n");
     Graph_library::sync_all();
   };
 };
@@ -39,9 +37,8 @@ public:
 static Cleanup_graph_library private_instance;
 
 Graph_library *Graph_library::instance(std::string_view path) {
-
   auto it1 = Graph_library::global_instances.find(path);
-  if(it1 != Graph_library::global_instances.end()) {
+  if (it1 != Graph_library::global_instances.end()) {
     return it1->second;
   }
 
@@ -80,11 +77,12 @@ Lg_type_id Graph_library::reset_id(std::string_view name, std::string_view sourc
       } else if (attributes[it->second].source.empty()) {
         // Blackbox with a newly populated. OK
         attributes[it->second].source = source;
-      }else if (attributes[it->second].source == "-") {
-        //Pass::warn("overwrite lgraph:{} source from {} to {}", name, attributes[it->second].source, source);  // LCOV_EXCL_LINE
+      } else if (attributes[it->second].source == "-") {
+        // Pass::warn("overwrite lgraph:{} source from {} to {}", name, attributes[it->second].source, source);  // LCOV_EXCL_LINE
         attributes[it->second].source = source;
       } else {
-        Pass::error("No overwrite lgraph:{} because it changed source from {} to {} (LGraph::delete first)", name, attributes[it->second].source, source);  // LCOV_EXCL_LINE
+        Pass::error("No overwrite lgraph:{} because it changed source from {} to {} (LGraph::delete first)", name,
+                    attributes[it->second].source, source);  // LCOV_EXCL_LINE
       }
     }
     return it->second;
@@ -99,10 +97,10 @@ bool Graph_library::exists(std::string_view path, std::string_view name) {
 }
 
 LGraph *Graph_library::try_find_lgraph(std::string_view path, std::string_view name) {
-  const Graph_library *lib = instance(path); // path must be full path
+  const Graph_library *lib = instance(path);  // path must be full path
 
-  const auto &glib2 = global_name2lgraph[lib->path];// WARNING: This inserts name too when needed
-  const auto it = glib2.find(name);
+  const auto &glib2 = global_name2lgraph[lib->path];  // WARNING: This inserts name too when needed
+  const auto  it    = glib2.find(name);
   if (it != glib2.end()) {
     return it->second;
   }
@@ -114,7 +112,7 @@ LGraph *Graph_library::try_find_lgraph(std::string_view name) const {
   I(global_name2lgraph.find(path) != global_name2lgraph.end());
 
   const auto &glib2 = global_name2lgraph[path];
-  const auto it = glib2.find(name);
+  const auto  it    = glib2.find(name);
   if (it != glib2.end()) {
     return it->second;
   }
@@ -123,8 +121,7 @@ LGraph *Graph_library::try_find_lgraph(std::string_view name) const {
 }
 
 LGraph *Graph_library::try_find_lgraph(Lg_type_id lgid) const {
-  if (lgid>=attributes.size())
-    return nullptr;
+  if (lgid >= attributes.size()) return nullptr;
 
   LGraph *lg = attributes[lgid].lg;
 
@@ -135,7 +132,7 @@ LGraph *Graph_library::try_find_lgraph(Lg_type_id lgid) const {
   if (global_name2lgraph[path].find(name) != global_name2lgraph[path].end()) {
     I(lg == global_name2lgraph[path][name]);
   } else {
-    I(lg==nullptr);
+    I(lg == nullptr);
   }
 #endif
 
@@ -143,7 +140,7 @@ LGraph *Graph_library::try_find_lgraph(Lg_type_id lgid) const {
 }
 
 LGraph *Graph_library::try_find_lgraph(std::string_view path, Lg_type_id lgid) {
-  const Graph_library *lib = instance(path); // path must be full path
+  const Graph_library *lib = instance(path);  // path must be full path
   return lib->try_find_lgraph(lgid);
 }
 
@@ -154,7 +151,7 @@ Sub_node &Graph_library::reset_sub(std::string_view name, std::string_view sourc
   if (lgid) {
     if (attributes[lgid].source != source) {
       Pass::warn("module {} changed source changed from {} to {}\n", name, attributes[lgid].source, source);
-      attributes[lgid].source  = source;
+      attributes[lgid].source = source;
     }
     auto &sub = sub_nodes[lgid];
     sub.reset_pins();
@@ -172,7 +169,7 @@ Sub_node &Graph_library::setup_sub(std::string_view name, std::string_view sourc
     return sub_nodes[lgid];
   }
 
-  lgid = add_name(name,source);
+  lgid = add_name(name, source);
   I(lgid);
   return sub_nodes[lgid];
 }
@@ -236,7 +233,7 @@ bool Graph_library::rename_name(std::string_view orig, std::string_view dest) {
   name2id.erase(it);
   I(name2id.find(orig) == name2id.end());
 
-  graph_library_clean    = false;
+  graph_library_clean = false;
   sub_nodes[id].rename(dest);
   I(sub_nodes[id].get_lgid() == id);
 
@@ -252,7 +249,7 @@ void Graph_library::update(Lg_type_id lgid) {
 
   if (attributes[lgid].version == (max_next_version - 1)) return;
 
-  graph_library_clean     = false;
+  graph_library_clean      = false;
   attributes[lgid].version = max_next_version.value++;
 }
 
@@ -264,21 +261,21 @@ void Graph_library::reload() {
 
   // FIXME: BEGIN DELETE THIS and replace with json reload
 
-  liberty_list.push_back("fake_bad.lib"); // FIXME
-  sdc_list.push_back("fake_bad.sdc"); // FIXME
-  spef_list.push_back("fake_bad.spef"); // FIXME
+  liberty_list.push_back("fake_bad.lib");  // FIXME
+  sdc_list.push_back("fake_bad.sdc");      // FIXME
+  spef_list.push_back("fake_bad.spef");    // FIXME
 
   name2id.clear();
   attributes.resize(1);  // 0 is not a valid ID
-  sub_nodes.resize(1);  // 0 is not a valid ID
+  sub_nodes.resize(1);   // 0 is not a valid ID
 
   if (access(library_file.c_str(), F_OK) == -1) {
     mkdir(path.c_str(), 0755);  // At least make sure directory exists for future
     return;
   }
   FILE *pFile = fopen(library_file.c_str(), "rb");
-  if (pFile==0) {
-    Pass::error("graph_library::reload could not open graph {} file",library_file);
+  if (pFile == 0) {
+    Pass::error("graph_library::reload could not open graph {} file", library_file);
     return;
   }
   char                      buffer[65536];
@@ -286,48 +283,47 @@ void Graph_library::reload() {
   rapidjson::Document       document;
   document.ParseStream<0, rapidjson::UTF8<>, rapidjson::FileReadStream>(is);
 
-  if(document.HasParseError()) {
-    Pass::error("graph_library::reload {} Error(offset {}): {}"
-        ,library_file
-        ,static_cast<unsigned>(document.GetErrorOffset())
-        ,rapidjson::GetParseError_En(document.GetParseError()));
+  if (document.HasParseError()) {
+    Pass::error("graph_library::reload {} Error(offset {}): {}", library_file, static_cast<unsigned>(document.GetErrorOffset()),
+                rapidjson::GetParseError_En(document.GetParseError()));
     return;
   }
 
   I(document.HasMember("lgraph"));
   const rapidjson::Value &lgraph_array = document["lgraph"];
   I(lgraph_array.IsArray());
-  for(const auto &lg_entry : lgraph_array.GetArray()) {
+  for (const auto &lg_entry : lgraph_array.GetArray()) {
     I(lg_entry.IsObject());
 
     I(lg_entry.HasMember("lgid"));
     I(lg_entry.HasMember("version"));
 
-    uint64_t id = lg_entry["lgid"].GetUint64();;
-    if (id>=attributes.size()) {
-      attributes.resize(id+1);
-      sub_nodes.resize(id+1);
+    uint64_t id = lg_entry["lgid"].GetUint64();
+    ;
+    if (id >= attributes.size()) {
+      attributes.resize(id + 1);
+      sub_nodes.resize(id + 1);
     }
 
-    auto version = lg_entry["version"].GetUint64();;
+    auto version = lg_entry["version"].GetUint64();
+    ;
     if (version != 0) {
-      if (max_next_version<version)
-        max_next_version = version;
+      if (max_next_version < version) max_next_version = version;
 
       I(lg_entry.HasMember("source"));
-      attributes[id].source   = lg_entry["source"].GetString();;
-      attributes[id].version  = version;
+      attributes[id].source = lg_entry["source"].GetString();
+      ;
+      attributes[id].version = version;
 
       sub_nodes[id].from_json(lg_entry);
 
       // NOTE: must use attributes to keep the string in memory
       name2id[sub_nodes[id].get_name()] = id;
-      I(sub_nodes[id].get_lgid() == id); // for consistency
+      I(sub_nodes[id].get_lgid() == id);  // for consistency
     } else {
       recycled_id.insert(id);
     }
   }
-
 }
 
 Graph_library::Graph_library(std::string_view _path) : path(_path), library_file(path + "/" + "graph_library.json") {
@@ -338,7 +334,7 @@ Graph_library::Graph_library(std::string_view _path) : path(_path), library_file
 Lg_type_id Graph_library::try_get_recycled_id() {
   if (recycled_id.empty()) return 0;
 
-  auto it = recycled_id.begin();
+  auto       it   = recycled_id.begin();
   Lg_type_id lgid = *it;
   I(lgid <= attributes.size());
   I(lgid <= sub_nodes.size());
@@ -347,12 +343,9 @@ Lg_type_id Graph_library::try_get_recycled_id() {
   return lgid;
 }
 
-void Graph_library::recycle_id(Lg_type_id lgid) {
-  recycled_id.insert(lgid);
-}
+void Graph_library::recycle_id(Lg_type_id lgid) { recycled_id.insert(lgid); }
 
 void Graph_library::expunge(std::string_view name) {
-
   auto it2 = name2id.find(name);
   if (it2 == name2id.end()) {
     I(global_name2lgraph[path].find(name) == global_name2lgraph[path].end());
@@ -376,11 +369,11 @@ void Graph_library::expunge(std::string_view name) {
   }
 
   struct dirent *de;  // Pointer for directory entry
-  std::string match = absl::StrCat("lgraph_", std::to_string(id));
+  std::string    match = absl::StrCat("lgraph_", std::to_string(id));
   while ((de = readdir(dr)) != NULL) {
     std::string chop_name(de->d_name, match.size());
     if (chop_name == match) {
-      std::string file = absl::StrCat(path,"/",de->d_name);
+      std::string file = absl::StrCat(path, "/", de->d_name);
       fmt::print("deleting... {}\n", file);
       unlink(file.c_str());
     }
@@ -398,7 +391,7 @@ void Graph_library::clear(Lg_type_id lgid) {
 
 Lg_type_id Graph_library::copy_lgraph(std::string_view name, std::string_view new_name) {
   graph_library_clean = false;
-  auto it2 = global_name2lgraph[path].find(name);
+  auto it2            = global_name2lgraph[path].find(name);
   if (it2 != global_name2lgraph[path].end()) {  // orig around, but not open
     it2->second->sync();
   }
@@ -418,13 +411,13 @@ Lg_type_id Graph_library::copy_lgraph(std::string_view name, std::string_view ne
   }
 
   struct dirent *de;  // Pointer for directory entry
-  std::string match = absl::StrCat("lgraph_", std::to_string(id_orig));
-  std::string rematch = absl::StrCat("lgraph_", std::to_string(id_new));
+  std::string    match   = absl::StrCat("lgraph_", std::to_string(id_orig));
+  std::string    rematch = absl::StrCat("lgraph_", std::to_string(id_new));
   while ((de = readdir(dr)) != NULL) {
     std::string chop_name(de->d_name, match.size());
     if (chop_name == match) {
       std::string_view dname(de->d_name);
-      std::string file = absl::StrCat(path,"/",dname);
+      std::string      file      = absl::StrCat(path, "/", dname);
       std::string_view extension = dname.substr(match.size());
 
       auto new_file = absl::StrCat(path, "/", rematch, extension);
@@ -432,7 +425,7 @@ Lg_type_id Graph_library::copy_lgraph(std::string_view name, std::string_view ne
       fmt::print("copying... {} to {}\n", file, new_file);
 
       int source = open(file.c_str(), O_RDONLY, 0);
-      int dest = open(new_file.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+      int dest   = open(new_file.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
 
       // struct required, rationale: function stat() exists also
       struct stat stat_source;
@@ -485,21 +478,20 @@ void Graph_library::unregister(std::string_view name, Lg_type_id lgid, LGraph *l
     I(it->second == lg);
     global_name2lgraph[path].erase(it);
     attributes[lgid].lg = 0;
-  }else{
+  } else {
     I(it == global_name2lgraph[path].end());
   }
 
-  if (sub_nodes[lgid].is_invalid())
-    expunge(name);
+  if (sub_nodes[lgid].is_invalid()) expunge(name);
 }
 
 void Graph_library::sync_all() {
-  for(auto &it:global_name2lgraph) {
-    for(auto &it2:it.second) {
+  for (auto &it : global_name2lgraph) {
+    for (auto &it2 : it.second) {
       it2.second->sync();
     }
   }
-  for(auto &it:global_instances) {
+  for (auto &it : global_instances) {
     it.second->clean_library();
   }
 }
@@ -515,7 +507,7 @@ void Graph_library::clean_library() {
   writer.Key("lgraph");
   writer.StartArray();
   // NOTE: insert in reverse order to reduce number of resizes when loading
-  for (size_t i = attributes.size()-1; i >= 1; --i) { // Not position zero
+  for (size_t i = attributes.size() - 1; i >= 1; --i) {  // Not position zero
     const auto &it = attributes[i];
     writer.StartObject();
 
@@ -533,7 +525,7 @@ void Graph_library::clean_library() {
 
   writer.Key("liberty");
   writer.StartArray();
-  for (const auto lib:liberty_list) {
+  for (const auto lib : liberty_list) {
     writer.StartObject();
 
     writer.Key("file");
@@ -545,7 +537,7 @@ void Graph_library::clean_library() {
 
   writer.Key("sdc");
   writer.StartArray();
-  for (const auto lib:sdc_list) {
+  for (const auto lib : sdc_list) {
     writer.StartObject();
 
     writer.Key("file");
@@ -557,7 +549,7 @@ void Graph_library::clean_library() {
 
   writer.Key("spef");
   writer.StartArray();
-  for (const auto lib:spef_list) {
+  for (const auto lib : spef_list) {
     writer.StartObject();
 
     writer.Key("file");
@@ -572,7 +564,7 @@ void Graph_library::clean_library() {
     std::ofstream fs;
 
     fs.open(library_file, std::ios::out | std::ios::trunc);
-    if(!fs.is_open()) {
+    if (!fs.is_open()) {
       Pass::error("graph_library::clean_library could not open graph_library file {}", library_file);
       return;
     }

@@ -5,7 +5,6 @@
 
 class Pass_sample : public Pass {
 protected:
-
   void compute_histogram(LGraph *g);
   void compute_max_depth(LGraph *g);
   void annotate_placement(LGraph *g);
@@ -16,12 +15,11 @@ protected:
 
   // eprp callbacks
   static void wirecount(Eprp_var &var);
+
 public:
   static void work(Eprp_var &var);
 
   Pass_sample(const Eprp_var &var);
 
   static void setup();
-
 };
-

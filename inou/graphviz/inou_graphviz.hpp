@@ -8,22 +8,22 @@ class Inou_graphviz : public Pass {
 private:
 protected:
   // bits/verbose are optional arguments to Inou_graphviz pass
-  bool        bits;
-  bool        verbose;
+  bool bits;
+  bool verbose;
 
-  void  do_hierarchy(LGraph* lg);
-  void  do_fromlg(LGraph *lg);
-  void  populate_lg_data(LGraph* lg);
+  void do_hierarchy(LGraph *lg);
+  void do_fromlg(LGraph *lg);
+  void populate_lg_data(LGraph *lg);
 
-  void  do_fromlnast(std::string_view files);
+  void do_fromlnast(std::string_view files);
 
   // eprp callback methods
-  static void  fromlg(Eprp_var &var);
-  static void  fromlnast(Eprp_var &var);
-  static void  hierarchy(Eprp_var &var);
+  static void fromlg(Eprp_var &var);
+  static void fromlnast(Eprp_var &var);
+  static void hierarchy(Eprp_var &var);
+
 public:
   Inou_graphviz(const Eprp_var &var);
 
   static void setup();
 };
-

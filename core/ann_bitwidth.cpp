@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "ann_bitwidth.hpp"
+
 #include "lgraph.hpp"
 
 void Ann_bitwidth::Explicit_range::dump() const {
@@ -174,17 +175,17 @@ void Ann_bitwidth::Implicit_range::pick(const Explicit_range &exp_range) {
 }
 
 bool Ann_bitwidth::Implicit_range::update(const Implicit_range &imp_range) {
-  bool min_diff = min != imp_range.min;
-  bool max_diff = max != imp_range.max;
+  bool min_diff  = min != imp_range.min;
+  bool max_diff  = max != imp_range.max;
   bool sign_diff = sign != imp_range.sign;
   bool ovfl_diff = overflow != imp_range.overflow;
 
   bool updated = false;
-  if(min_diff | max_diff | sign_diff | ovfl_diff) {
-    updated = true;
-    min = imp_range.min;
-    max = imp_range.max;
-    sign = imp_range.sign;
+  if (min_diff | max_diff | sign_diff | ovfl_diff) {
+    updated  = true;
+    min      = imp_range.min;
+    max      = imp_range.max;
+    sign     = imp_range.sign;
     overflow = imp_range.overflow;
   }
 

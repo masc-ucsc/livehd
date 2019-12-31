@@ -1,18 +1,16 @@
 
 #include "verilog_parser_module.hpp"
 
-std::string Verilog_parser_module::indent_buffer(int32_t size) {
-  return std::string(size * 2, ' ');
-}
-
+std::string Verilog_parser_module::indent_buffer(int32_t size) { return std::string(size * 2, ' '); }
 
 std::string Verilog_parser_module::create_file() {
   std::string always_str = absl::StrCat(indent_buffer(1), "always_comb begin\n");
   std::string next_str;
 
-  for(auto ele : var_manager.variable_map) {
+  for (auto ele : var_manager.variable_map) {
     if (get_variable_type(ele.first) == 3) {
-      absl::StrAppend(&next_str, "\n", indent_buffer(1), "always @(posedge clk) begin\n", indent_buffer(2), process_variable(ele.first), " <= ", process_variable(ele.first), "_next;\n", indent_buffer(1), "end\n");
+      absl::StrAppend(&next_str, "\n", indent_buffer(1), "always @(posedge clk) begin\n", indent_buffer(2),
+                      process_variable(ele.first), " <= ", process_variable(ele.first), "_next;\n", indent_buffer(1), "end\n");
 
       has_sequential = true;
     }
@@ -20,14 +18,14 @@ std::string Verilog_parser_module::create_file() {
 
   std::string module_start = absl::StrCat("module ", filename, " (");
   std::string start_filler = std::string(module_start.length(), ' ');
-  std::string inputs = "";
+  std::string inputs       = "";
   if (has_sequential) {
     inputs = absl::StrCat("input clk,\n", start_filler, "input reset");
   }
   std::string outputs = "";
-  std::string wires = "";
+  std::string wires   = "";
 
-  for(auto var_name : var_manager.variable_map) {
+  for (auto var_name : var_manager.variable_map) {
     fmt::print("variable names: {}\n", var_name.first);
     uint32_t var_type = get_variable_type(var_name.first);
     if (var_type == 0) {
@@ -36,7 +34,7 @@ std::string Verilog_parser_module::create_file() {
     } else {
       std::string bits_string;
 
-      if (var_name.second->bits > 1) { // default setting
+      if (var_name.second->bits > 1) {  // default setting
         bits_string = absl::StrCat("[", var_name.second->bits - 1, ":0] ");
       }
 
@@ -73,33 +71,19 @@ std::string Verilog_parser_module::create_file() {
   return absl::StrCat(module_start, "\n", always_str, indent_buffer(1), "end\n", next_str, "end module\n");
 }
 
-void Verilog_parser_module::inc_indent_buffer() {
-  indent_buffer_size++;
-}
+void Verilog_parser_module::inc_indent_buffer() { indent_buffer_size++; }
 
-void Verilog_parser_module::dec_indent_buffer() {
-  indent_buffer_size--;
-}
+void Verilog_parser_module::dec_indent_buffer() { indent_buffer_size--; }
 
-uint32_t Verilog_parser_module::get_indent_buffer() {
-  return indent_buffer_size;
-}
+uint32_t Verilog_parser_module::get_indent_buffer() { return indent_buffer_size; }
 
-void Verilog_parser_module::inc_if_counter() {
-  if_counter++;
-}
+void Verilog_parser_module::inc_if_counter() { if_counter++; }
 
-void Verilog_parser_module::dec_if_counter() {
-  if_counter--;
-}
+void Verilog_parser_module::dec_if_counter() { if_counter--; }
 
-uint32_t Verilog_parser_module::get_if_counter() {
-  return if_counter;
-}
+uint32_t Verilog_parser_module::get_if_counter() { return if_counter; }
 
-void Verilog_parser_module::add_to_buffer_single(std::pair<int32_t, std::string> next) {
-  node_str_buffer.push_back(next);
-}
+void Verilog_parser_module::add_to_buffer_single(std::pair<int32_t, std::string> next) { node_str_buffer.push_back(next); }
 
 void Verilog_parser_module::add_to_buffer_multiple(std::vector<std::pair<int32_t, std::string>> nodes) {
   node_str_buffer.insert(node_str_buffer.end(), std::make_move_iterator(nodes.begin()), std::make_move_iterator(nodes.end()));
@@ -111,7 +95,7 @@ void Verilog_parser_module::add_to_buffer_multiple(std::vector<std::pair<int32_t
 // otherwise returns 0
 uint32_t Verilog_parser_module::get_variable_type(std::string_view var_name) {
   if (var_name.at(0) == '$') {
-   return 1;
+    return 1;
   } else if (var_name.at(0) == '%') {
     return 2;
   } else if (var_name.at(0) == '#') {
@@ -167,4 +151,3 @@ std::vector<std::pair<int32_t, std::string>> Verilog_parser_module::pop_queue() 
   sts_buffer_queue.erase(sts_buffer_queue.begin());
   return queue_nodes;
 }
-

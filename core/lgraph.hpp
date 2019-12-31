@@ -2,20 +2,15 @@
 #pragma once
 
 #include "absl/container/flat_hash_map.h"
-
+#include "edge.hpp"
+#include "graph_library.hpp"
+#include "hierarchy.hpp"
 #include "lgedge.hpp"
 #include "lgraphbase.hpp"
-#include "node_type_base.hpp"
-#include "node_type.hpp"
-
-#include "node_type_base.hpp"
-
-#include "graph_library.hpp"
-
-#include "node_pin.hpp"
 #include "node.hpp"
-#include "edge.hpp"
-#include "hierarchy.hpp"
+#include "node_pin.hpp"
+#include "node_type.hpp"
+#include "node_type_base.hpp"
 
 class LGraph : public LGraph_Node_Type {
 protected:
@@ -28,11 +23,10 @@ protected:
   friend class Fast_edge_iterator;
   friend class Edge_raw_iterator_base;
 
-  Hierarchy_tree  htree;
+  Hierarchy_tree htree;
 
   Hierarchy_tree *ref_htree() {
-    if (htree.empty())
-      htree.regenerate();
+    if (htree.empty()) htree.regenerate();
     return &htree;
   }
 
@@ -53,10 +47,10 @@ protected:
   }
 
   Index_ID find_idx(const Node_pin &pin) const {
-    if (likely(node_internal[pin.get_idx()].get_dst_pid() == pin.get_pid())) { // Common case
+    if (likely(node_internal[pin.get_idx()].get_dst_pid() == pin.get_pid())) {  // Common case
       return pin.get_idx();
     }
-    return find_idx_from_pid(pin.get_idx(),pin.get_pid());
+    return find_idx_from_pid(pin.get_idx(), pin.get_pid());
   }
 
   int get_num_outputs(Index_ID nid) const {
@@ -74,8 +68,7 @@ protected:
   Index_ID get_node_nid(Index_ID idx) {
     I(node_internal.size() > idx);
     I(node_internal[idx].is_root());
-    if (node_internal[idx].is_master_root())
-      return idx;
+    if (node_internal[idx].is_master_root()) return idx;
 
     idx = node_internal[idx].get_nid();
     I(node_internal[idx].is_master_root());
@@ -108,12 +101,12 @@ protected:
   }
 
   bool del_edge(const Node_pin &src, const Node_pin &dst) {
-    I(node_internal.size()>src.get_idx());
-    I(node_internal.size()>dst.get_idx());
+    I(node_internal.size() > src.get_idx());
+    I(node_internal.size() > dst.get_idx());
     I(node_internal[src.get_idx()].is_root());
     I(node_internal[dst.get_idx()].is_root());
 
-    return node_internal.ref(src.get_idx())->del(dst.get_idx(),dst.get_pid(),dst.is_input());
+    return node_internal.ref(src.get_idx())->del(dst.get_idx(), dst.get_pid(), dst.is_input());
   }
 
   bool is_graph_io(Index_ID idx) const {
@@ -147,11 +140,11 @@ protected:
   }
 
   Index_ID fast_first() const {
-    static_assert(Node::Hardcoded_output_nid>Node::Hardcoded_input_nid);
+    static_assert(Node::Hardcoded_output_nid > Node::Hardcoded_input_nid);
     return fast_next(Node::Hardcoded_output_nid);
   }
 
-  bool is_sub(Index_ID nid) const { // Very common function (shoud be fast)
+  bool is_sub(Index_ID nid) const {  // Very common function (shoud be fast)
     I(nid < node_type_table.size());
     I(node_internal[nid].is_node_state());
     I(node_internal[nid].is_master_root());
@@ -184,14 +177,14 @@ public:
   Index_ID add_edge(const Node_pin &src, const Node_pin &dst, uint32_t bits) {
     Index_ID idx = add_edge(src, dst);
     I(idx = src.get_idx());
-    GI(bits!=get_bits(idx), !is_type_const(node_internal[idx].get_nid())); // Do not overwrite bits in constants
+    GI(bits != get_bits(idx), !is_type_const(node_internal[idx].get_nid()));  // Do not overwrite bits in constants
     set_bits(idx, bits);
     return idx;
   }
 
-  Fwd_edge_iterator  forward(bool visit_sub=false);
-  Bwd_edge_iterator  backward(bool visit_sub=false);
-  Fast_edge_iterator fast(bool visit_sub=false);
+  Fwd_edge_iterator  forward(bool visit_sub = false);
+  Bwd_edge_iterator  backward(bool visit_sub = false);
+  Fast_edge_iterator fast(bool visit_sub = false);
 
   LGraph *clone_skeleton(std::string_view extended_name);
 
@@ -215,13 +208,13 @@ public:
   Node create_node(Node_Type_Op op);
   Node create_node(Node_Type_Op op, uint32_t bits);
   Node create_node_const(uint32_t value);
-  //Node create_node_const(std::string_view value);
+  // Node create_node_const(std::string_view value);
   Node create_node_const(std::string_view value, uint32_t bits);
   Node create_node_sub(Lg_type_id sub);
   Node create_node_sub(std::string_view sub_name);
 
-  const Sub_node   &get_self_sub_node() const; // Access all input/outputs
-  Sub_node         *ref_self_sub_node(); // Access all input/outputs
+  const Sub_node &get_self_sub_node() const;  // Access all input/outputs
+  Sub_node *      ref_self_sub_node();        // Access all input/outputs
 
   void dump();
   void dump_down_nodes();

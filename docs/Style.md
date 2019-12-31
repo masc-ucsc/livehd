@@ -269,6 +269,11 @@ Use clang-format as configured to catch style errors. LGraph clang-format is
 based on google format, but it adds several alignment directives and wider
 terminal.
 
+```
+   cd XXXX
+   clang-format -i *pp
+```
+
 ```cpp
 std::vector<LGraph *> Inou_yaml::generate() {
 

@@ -26,13 +26,13 @@ class Def_row {
 public:
   std::string name;
   std::string site;
-  int         origx; // specifies the location of the first site in the row.
+  int         origx;  // specifies the location of the first site in the row.
   int         origy;
   std::string orient;
-  int numx; // specifies a repeating set of sites that create the row.
-  int numy;
-  int stepx;
-  int stepy;
+  int         numx;  // specifies a repeating set of sites that create the row.
+  int         numy;
+  int         stepx;
+  int         stepy;
 };
 
 class Def_track {
@@ -91,7 +91,7 @@ public:
 
 // TODO: Options_pack has been deprecated this needs to be updated to the new
 // eprp format.
-class Inou_def_options_pack { //: public Options_pack {
+class Inou_def_options_pack {  //: public Options_pack {
 public:
   Inou_def_options_pack();
 
@@ -102,7 +102,6 @@ public:
 };
 
 class Inou_def : public Inou {
-
 private:
   Def_info dinfo;
 
@@ -112,13 +111,11 @@ protected:
 public:
   Inou_def();
 
-  Inou_def_options_pack get_opack() {
-    return opack;
-  }
-  void set_def_info(Def_info &);
+  Inou_def_options_pack get_opack() { return opack; }
+  void                  set_def_info(Def_info &);
 
-  std::vector<LGraph *> generate();                                 // final;
-  void                  generate(std::vector<const LGraph *> &out); // final;
+  std::vector<LGraph *> generate();                                  // final;
+  void                  generate(std::vector<const LGraph *> &out);  // final;
 };
 
 #endif

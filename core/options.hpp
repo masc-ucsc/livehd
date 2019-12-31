@@ -3,6 +3,7 @@
 #define OPTIONS_H
 
 #include <strings.h>
+
 #include <string>
 
 class Options_base {

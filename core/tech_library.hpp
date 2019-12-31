@@ -7,8 +7,8 @@
 class Tech_via_layer {
 public:
   class Tech_rect {
-    public:
-      double x, y, xh, yh;
+  public:
+    double x, y, xh, yh;
   };
 
   std::string layer_name;
@@ -34,7 +34,6 @@ public:
 
 class Tech_via {
 public:
-
   std::string                 name;
   std::vector<Tech_via_layer> vlayers;
   // void to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer>&) const;
@@ -42,22 +41,18 @@ public:
 
 // Not an attribute because it is per pin class
 struct Tech_pin {
-  Tech_pin() : x(0), y(0), xw(0), yh(0), layer_id(0) { }
-  float       x;
-  float       y;
-  float       xw; // Width
-  float       yh; // height
-  uint8_t     layer_id;
+  Tech_pin() : x(0), y(0), xw(0), yh(0), layer_id(0) {}
+  float   x;
+  float   y;
+  float   xw;  // Width
+  float   yh;  // height
+  uint8_t layer_id;
 
   bool overlap(const Tech_pin &o) const {
-    if (layer_id!=o.layer_id)
-      return false;
+    if (layer_id != o.layer_id) return false;
 
-    if (o.x < x + xw && x < o.x + o.xw && o.y < y + yh)
-      return y < o.y + o.yh;
+    if (o.x < x + xw && x < o.x + o.xw && o.y < y + yh) return y < o.y + o.yh;
 
     return false;
   }
-
 };
-

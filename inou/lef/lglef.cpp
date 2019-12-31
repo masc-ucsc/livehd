@@ -9,7 +9,7 @@ int main(int argc, const char **argv) {
   Inou_lef lef;
   Options::setup_lock();
   std::vector<LGraph *> rvec = lef.generate();
-  for(auto &g : rvec) {
+  for (auto &g : rvec) {
     lef.generate(g);
   }
 }

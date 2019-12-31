@@ -1,12 +1,12 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "lgedge.hpp"
+
 #include <cassert>
 
 #include "iassert.hpp"
-#include "lgedge.hpp"
-#include "node_pin.hpp"
-
 #include "lgraph.hpp"
+#include "node_pin.hpp"
 
 static_assert(sizeof(LEdge) == 8, "LEdge should be 8 bytes");
 static_assert(sizeof(LEdge) == sizeof(LEdge_Internal), "LEdge should be 8 bytes");
@@ -55,28 +55,28 @@ const Edge_raw *Edge_raw::find_edge(const Edge_raw *bt, const Edge_raw *et, Inde
 const Edge_raw *Edge_raw::get_reverse_for_deletion() const {
   I(is_root());
   Node_Internal *ptr_node = &Node_Internal::get(this);
-  SIndex_ID       ptr_idx  = ptr_node->get_self_idx();
+  SIndex_ID      ptr_idx  = ptr_node->get_self_idx();
 
-  SIndex_ID       dst_idx = get_idx();
-  Node_Internal *ptr_inp2 = &ptr_node[dst_idx - ptr_idx];
-  const Node_Internal *ptr_inp = &(ptr_inp2->get_master_root());
+  SIndex_ID            dst_idx  = get_idx();
+  Node_Internal *      ptr_inp2 = &ptr_node[dst_idx - ptr_idx];
+  const Node_Internal *ptr_inp  = &(ptr_inp2->get_master_root());
 
   I(ptr_inp->is_master_root());
 
-  //Index_ID dst_pid = get_out_pin().get_pid();
-  //Index_ID inp_pid = get_inp_pin().get_pid();
+  // Index_ID dst_pid = get_out_pin().get_pid();
+  // Index_ID inp_pid = get_inp_pin().get_pid();
   Index_ID dst_pid;
   Index_ID inp_pid;
   if (is_input()) {
     dst_pid = get_inp_pid();
     inp_pid = get_dst_pid();
-  }else{
+  } else {
     dst_pid = get_dst_pid();
     inp_pid = get_inp_pid();
   }
 
   do {
-    const Edge_raw *eit=nullptr;
+    const Edge_raw *eit = nullptr;
     if (input)
       eit = find_edge(ptr_inp->get_output_begin(), ptr_inp->get_output_end(), ptr_idx, inp_pid, dst_pid);
     else
@@ -96,8 +96,8 @@ Index_ID Edge_raw::get_self_idx() const {
   const auto &root_page = Node_Internal_Page::get(this);
   const auto &root_self = Node_Internal::get(this);
 
-  SIndex_ID delta = &root_self - (const Node_Internal *)&root_page; // Signed and bigger than Index_ID
-  I(delta<64 && delta>0); // 64 entries between page aligned
+  SIndex_ID delta = &root_self - (const Node_Internal *)&root_page;  // Signed and bigger than Index_ID
+  I(delta < 64 && delta > 0);                                        // 64 entries between page aligned
 
   SIndex_ID idx = delta + root_page.get_idx();
 
@@ -109,11 +109,10 @@ Index_ID Edge_raw::get_self_root_idx() const {
   const auto &root_self = Node_Internal::get(this);
 
   SIndex_ID delta = &root_self - (const Node_Internal *)&root_page;
-  I(delta<64 && delta>0); // 64 entries between page aligned
+  I(delta < 64 && delta > 0);  // 64 entries between page aligned
 
   SIndex_ID self_idx = delta + root_page.get_idx();
-  if (root_self.is_root())
-    return static_cast<Index_ID>(self_idx);
+  if (root_self.is_root()) return static_cast<Index_ID>(self_idx);
 
   return root_self.get_nid();
 }
@@ -237,8 +236,8 @@ const Node_Internal &Node_Internal::get_root() const {
   const auto &         root_page = Node_Internal_Page::get(this);
   const Node_Internal *root_ptr  = (const Node_Internal *)&root_page;
 
-  SIndex_ID delta = static_cast<SIndex_ID>(nid) - root_page.get_idx(); // Signed and bigger than Index_ID
-  root_ptr       = (root_ptr + delta);
+  SIndex_ID delta = static_cast<SIndex_ID>(nid) - root_page.get_idx();  // Signed and bigger than Index_ID
+  root_ptr        = (root_ptr + delta);
   I(root_ptr->is_root());
   I(root_ptr->is_node_state());
 
@@ -252,8 +251,8 @@ const Node_Internal &Node_Internal::get_master_root() const {
   const auto &         root_page = Node_Internal_Page::get(this);
   const Node_Internal *root_ptr;
 
-  SIndex_ID delta = static_cast<SIndex_ID>(nid) - root_page.get_idx(); // Signed and bigger than Index_ID
-  root_ptr       = ((const Node_Internal *)&root_page) + delta;
+  SIndex_ID delta = static_cast<SIndex_ID>(nid) - root_page.get_idx();  // Signed and bigger than Index_ID
+  root_ptr        = ((const Node_Internal *)&root_page) + delta;
   I(root_ptr->is_root());
   I(root_ptr->is_node_state());
   if (root_ptr->is_master_root()) return *root_ptr;
@@ -276,7 +275,7 @@ void Node_Internal::try_recycle() {
 
   if (is_root()) return;  // Keep node
 
-  Node_Internal *root_ptr     = (Node_Internal *)&get_root();
+  Node_Internal *root_ptr = (Node_Internal *)&get_root();
   Index_ID       root_idx = root_ptr->get_nid();
   I(root_idx == root_ptr->get_self_idx());
 
@@ -366,14 +365,13 @@ void Node_Internal::del_output_int(const Edge_raw *out_edge) {
 }
 
 bool Node_Internal::del(Index_ID src_idx, Port_ID pid, bool input) {
-  const Edge_raw *eit=nullptr;
+  const Edge_raw *eit = nullptr;
   if (input)
     eit = Edge_raw::find_edge(get_output_begin(), get_output_end(), src_idx, pid, get_dst_pid());
   else
     eit = Edge_raw::find_edge(get_input_begin(), get_input_end(), src_idx, get_dst_pid(), pid);
 
-  if (eit==nullptr)
-    return false;
+  if (eit == nullptr) return false;
 
   del(eit);
 
@@ -431,7 +429,7 @@ void Node_Internal::dump_full() const {
 // LCOV_EXCL_STOP
 
 void Node_Internal::assimilate_edges(Node_Internal *other_ptr) {
-  Node_Internal &other = *other_ptr; // to avoid -> all the time
+  Node_Internal &other = *other_ptr;  // to avoid -> all the time
 
   I(inp_pos == 0);
   I(out_pos == 0);
@@ -466,11 +464,11 @@ void Node_Internal::assimilate_edges(Node_Internal *other_ptr) {
           self_pos++;
           inc_inputs(false);
         } else {
-          if (self_pos >= (Num_SEdges - 4 - 2) || inp_long>=3) break;
+          if (self_pos >= (Num_SEdges - 4 - 2) || inp_long >= 3) break;
 
           LEdge_Internal *ledge_i = (LEdge_Internal *)&sedge[self_pos];
           ledge_i->set(other.sedge[other_pos].get_idx(), other.sedge[other_pos].get_inp_pid(), true  // input
-              );
+          );
 
           self_pos += 4;
           inc_inputs(true);
@@ -478,7 +476,7 @@ void Node_Internal::assimilate_edges(Node_Internal *other_ptr) {
         other_pos++;
         i += 1;
       } else {
-        if (self_pos >= (Num_SEdges - 4 - 2) || inp_long>=3) break;
+        if (self_pos >= (Num_SEdges - 4 - 2) || inp_long >= 3) break;
         sedge[self_pos++] = other.sedge[other_pos++];
         sedge[self_pos++] = other.sedge[other_pos++];
         sedge[self_pos++] = other.sedge[other_pos++];
@@ -505,8 +503,7 @@ void Node_Internal::assimilate_edges(Node_Internal *other_ptr) {
     I(other.inp_pos >= (4 * other.inp_long));
   }
 
-  if (!has_space_short())
-    return;
+  if (!has_space_short()) return;
 
   // try transfer outputs if there is space in current
 
@@ -515,16 +512,16 @@ void Node_Internal::assimilate_edges(Node_Internal *other_ptr) {
 
     int self_pos = next_free_output_pos();
     I(self_pos < Num_SEdges);
-    SEdge_Internal *sedge_i = (SEdge_Internal *)&sedge[self_pos];   // became an sedge
-    bool done = sedge_i->set(other_out->get_idx(), other_out->get_inp_pid(), false);
+    SEdge_Internal *sedge_i = (SEdge_Internal *)&sedge[self_pos];  // became an sedge
+    bool            done    = sedge_i->set(other_out->get_idx(), other_out->get_inp_pid(), false);
 
     if (done) {
       inc_outputs(false);
     } else {
-      if (!has_space_long()) break; // We need long space
-      self_pos -= (4-1);
-      LEdge_Internal *ledge_i = (LEdge_Internal *)&sedge[self_pos];   // became an ledge
-      ledge_i->set(other_out->get_idx(), other_out->get_inp_pid(), false); // output
+      if (!has_space_long()) break;  // We need long space
+      self_pos -= (4 - 1);
+      LEdge_Internal *ledge_i = (LEdge_Internal *)&sedge[self_pos];         // became an ledge
+      ledge_i->set(other_out->get_idx(), other_out->get_inp_pid(), false);  // output
       inc_outputs(true);
     }
     if (other_out->is_snode()) {

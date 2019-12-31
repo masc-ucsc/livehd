@@ -4,9 +4,8 @@
 //#include <string>
 
 #include "absl/strings/substitute.h"
-#include "fmt/format.h"
-
 #include "eprp.hpp"
+#include "fmt/format.h"
 #include "iassert.hpp"
 
 class Pass {
@@ -28,6 +27,7 @@ protected:
   bool setup_directory(std::string_view dir) const;
 
   Pass(std::string_view _pass_name, const Eprp_var &var);
+
 public:
   static Eprp eprp;
 
@@ -41,7 +41,7 @@ public:
 
   template <typename... Args>
   static void error(const char *format, const Args &... args) {
-    fmt::format_args fargs = fmt::make_format_args(args...);
+    fmt::format_args   fargs = fmt::make_format_args(args...);
     fmt::memory_buffer tmp;
     fmt::vformat_to(tmp, format, fargs);
     eprp.parser_error(std::string_view(tmp.data(), tmp.size()));
@@ -49,7 +49,7 @@ public:
 
   template <typename... Args>
   static void warn(std::string_view format, const Args &... args) {
-    fmt::format_args fargs = fmt::make_format_args(args...);
+    fmt::format_args   fargs = fmt::make_format_args(args...);
     fmt::memory_buffer tmp;
     fmt::vformat_to(tmp, format, fargs);
     eprp.parser_warn(std::string_view(tmp.data(), tmp.size()));
@@ -57,7 +57,7 @@ public:
 
   template <typename... Args>
   static void info(std::string_view format, const Args &... args) {
-    fmt::format_args fargs = fmt::make_format_args(args...);
+    fmt::format_args   fargs = fmt::make_format_args(args...);
     fmt::memory_buffer tmp;
     fmt::vformat_to(tmp, format, fargs);
     eprp.parser_info(std::string_view(tmp.data(), tmp.size()));

@@ -3,10 +3,10 @@
 #ifndef PASS_CSE_H
 #define PASS_CSE_H
 
+#include <string>
+
 #include "options.hpp"
 #include "pass.hpp"
-
-#include <string>
 
 class Pass_cse_options_pack : public Options_pack {
 public:

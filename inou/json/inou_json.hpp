@@ -7,9 +7,8 @@
 
 #include <string>
 
-#include "rapidjson/document.h"
-
 #include "pass.hpp"
+#include "rapidjson/document.h"
 
 class Inou_json : public Pass {
 private:
@@ -26,8 +25,7 @@ protected:
   static void fromlg(Eprp_var &var);
 
 public:
-  Inou_json() {};
+  Inou_json(){};
 
   static void setup();
 };
-

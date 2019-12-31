@@ -6,10 +6,10 @@
 #include <type_traits>
 #include <vector>
 
-#include "mmap_vector.hpp"
 #include "iassert.hpp"
-#include "lgraph_base_core.hpp"
 #include "lgedge.hpp"
+#include "lgraph_base_core.hpp"
+#include "mmap_vector.hpp"
 
 class Edge_raw_iterator;
 class Fwd_edge_iterator;
@@ -23,12 +23,12 @@ protected:
   mmap_lib::vector<Node_Internal> node_internal;
 
   static inline constexpr std::string_view unknown_io = "unknown";
-  Graph_library       *library;
+  Graph_library *                          library;
 
-  Index_ID         create_node_space(const Index_ID idx, const Port_ID dst_pid, const Index_ID master_nid, const Index_ID root_nid);
-  Index_ID         get_space_output_pin(const Index_ID idx, const Port_ID dst_pid, Index_ID &root_nid);
-  Index_ID         get_space_output_pin(const Index_ID master_nid, const Index_ID idx, const Port_ID dst_pid, const Index_ID root_nid);
-  //Index_ID         get_space_input_pin(const Index_ID master_nid, const Index_ID idx, bool large = false);
+  Index_ID create_node_space(const Index_ID idx, const Port_ID dst_pid, const Index_ID master_nid, const Index_ID root_nid);
+  Index_ID get_space_output_pin(const Index_ID idx, const Port_ID dst_pid, Index_ID &root_nid);
+  Index_ID get_space_output_pin(const Index_ID master_nid, const Index_ID idx, const Port_ID dst_pid, const Index_ID root_nid);
+  // Index_ID         get_space_input_pin(const Index_ID master_nid, const Index_ID idx, bool large = false);
   virtual Index_ID create_node_int() = 0;
 
   Index_ID add_edge_int(Index_ID dst_nid, Port_ID dst_pid, Index_ID src_nid, Port_ID inp_pid);
@@ -39,7 +39,7 @@ protected:
 
   Index_ID find_idx_from_pid_int(const Index_ID idx, const Port_ID pid) const;
   Index_ID find_idx_from_pid(const Index_ID idx, const Port_ID pid) const {
-    if (likely(node_internal[idx].get_dst_pid() == pid)) { // Common case
+    if (likely(node_internal[idx].get_dst_pid() == pid)) {  // Common case
       return idx;
     }
     return find_idx_from_pid_int(idx, pid);
@@ -123,17 +123,14 @@ public:
   */
 
   bool is_valid_node(Index_ID nid) const {
-    if (nid >= node_internal.size())
-      return false;
+    if (nid >= node_internal.size()) return false;
     return node_internal[nid].is_master_root();
   }
 
   bool is_valid_node_pin(Index_ID idx) const {
-    if (idx >= node_internal.size())
-      return false;
+    if (idx >= node_internal.size()) return false;
     return node_internal[idx].is_root();
   }
-
 
   Port_ID get_dst_pid(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
@@ -155,5 +152,5 @@ public:
   } _static_initializer;
 
   const Graph_library &get_library() const { return *library; }
-  Graph_library *ref_library() const { return library; }
+  Graph_library *      ref_library() const { return library; }
 };

@@ -6,19 +6,20 @@
 
 class Inou_rand : public Pass {
 private:
-  int       rand_seed;
-  int       rand_size;
-  int       rand_crate;
-  float     rand_eratio;
+  int         rand_seed;
+  int         rand_size;
+  int         rand_crate;
+  float       rand_eratio;
   std::string name;
+
 protected:
-  LGraph   *do_tolg();
+  LGraph *do_tolg();
 
   // eprp callback
   static void tolg(Eprp_var &var);
+
 public:
   Inou_rand(const Eprp_var &var);
 
   static void setup();
 };
-

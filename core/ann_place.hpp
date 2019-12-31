@@ -4,13 +4,12 @@
 
 class __attribute__((packed)) Ann_place {
 private:
-
 protected:
   uint32_t posx;  // Enough for 1nm resolution and 100mm**2 die
   uint32_t posy;
 
 public:
-  constexpr Ann_place() : posx(0), posy(0) {};
+  constexpr Ann_place() : posx(0), posy(0){};
   Ann_place(uint32_t x, uint32_t y) : posx(x), posy(y){};
 
   void replace(uint32_t x, uint32_t y) {

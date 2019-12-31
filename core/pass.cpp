@@ -1,6 +1,6 @@
-#include <sys/stat.h>
-
 #include "pass.hpp"
+
+#include <sys/stat.h>
 
 Eprp Pass::eprp;
 
@@ -14,7 +14,7 @@ const std::string Pass::get_files(const Eprp_var &var) const {
         error("{} could not access file:{}", pass_name, f);
       }
     }
-  }else{
+  } else {
     _files = "/INVALID";
   }
 
@@ -30,7 +30,7 @@ const std::string Pass::get_path(const Eprp_var &var) const {
       _path = "/INVALID";
       error("{} could not gain access to path:{}", pass_name, _path);
     }
-  }else{
+  } else {
     _path = "/INVALID";
   }
 
@@ -46,7 +46,7 @@ const std::string Pass::get_odir(const Eprp_var &var) const {
       _odir = "/INVALID";
       error("{} could not gain access to odir:{}", pass_name, _odir);
     }
-  }else{
+  } else {
     _odir = "/INVALID";
   }
 
@@ -54,18 +54,14 @@ const std::string Pass::get_odir(const Eprp_var &var) const {
 }
 
 Pass::Pass(std::string_view _pass_name, const Eprp_var &var)
-  : pass_name(_pass_name)
-  , files(get_files(var))
-  , path(get_path(var))
-  , odir(get_odir(var)) {
-
-}
+    : pass_name(_pass_name), files(get_files(var)), path(get_path(var)), odir(get_odir(var)) {}
 
 void Pass::register_pass(Eprp_method &method) {
   eprp.register_method(method);
 
   // All the passses should start with pass.*
-  assert(method.get_name().substr(0, 5) == "pass." || method.get_name().substr(0, 5) == "live." || method.get_name().substr(0, 5) == "inou.");
+  assert(method.get_name().substr(0, 5) == "pass." || method.get_name().substr(0, 5) == "live." ||
+         method.get_name().substr(0, 5) == "inou.");
 }
 
 void Pass::register_inou(std::string_view _pname, Eprp_method &method) {
@@ -79,10 +75,10 @@ void Pass::register_inou(std::string_view _pname, Eprp_method &method) {
     method.add_label_required("files", "input file[s]");
   } else if (method.get_name() == std::string{"inou." + pname + ".fromlg"}) {
     method.add_label_optional("odir", "output directory", ".");
-  } else if (method.get_name() == std::string{"inou." + pname + ".fromlnast"}) { //for dot
+  } else if (method.get_name() == std::string{"inou." + pname + ".fromlnast"}) {  // for dot
     method.add_label_required("files", "input file[s]");
     method.add_label_optional("odir", "output directory", ".");
-  } else if (method.get_name().rfind(std::string{"inou." + pname},0) == 0) {
+  } else if (method.get_name().rfind(std::string{"inou." + pname}, 0) == 0) {
     method.add_label_optional("path", "lgraph path", "lgdb");
     method.add_label_optional("files", "input file[s]");
     method.add_label_optional("odir", "output directory", ".");
@@ -112,4 +108,3 @@ bool Pass::setup_directory(std::string_view dir) const {
 
   return true;
 }
-

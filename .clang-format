@@ -5,9 +5,10 @@ AlignConsecutiveAssignments: 'true'
 AlignConsecutiveDeclarations: 'true'
 AlignTrailingComments: 'true'
 AlignEscapedNewlines: 'true'
-AlignAfterOpenBracket: 'true'
+AlignAfterOpenBracket: 'Align'
 AlignOperands: 'true'
 AllowShortCaseLabelsOnASingleLine: 'true'
 BreakConstructorInitializers: 'BeforeComma'
+BreakStringLiterals: 'true'
 AccessModifierOffset: -2
 ...

@@ -1,15 +1,15 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include <string>
+#include "pass_gvn_pre.hpp"
+
 #include <time.h>
+
+#include <string>
 
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
-#include "pass_gvn_pre.hpp"
 
-Pass_gvn_pre::Pass_gvn_pre()
-    : Pass("gvn_pre") {
-}
+Pass_gvn_pre::Pass_gvn_pre() : Pass("gvn_pre") {}
 
 // OPs that should be processed differently:
 // IO
@@ -19,7 +19,7 @@ Pass_gvn_pre::Pass_gvn_pre()
 Node_pin_Plus Pass_gvn_pre::lookup_op_leader(Node_pin_Plus new_opnode) {
   Node_pin_Plus leader_opnode = Node_pin_Plus(-1, -1, false);
   // lookup leader in op_leader_map for the operand which has Invalid_Op
-  if(op_leader_map.find(new_opnode) != op_leader_map.end()) {
+  if (op_leader_map.find(new_opnode) != op_leader_map.end()) {
     leader_opnode = op_leader_map[new_opnode];
   } else {
     fmt::print("Error: No existing leader for operand.\n");
@@ -32,7 +32,7 @@ Node_pin_Plus Pass_gvn_pre::lookup_op_leader(Node_pin_Plus new_opnode) {
 Node_pin_Plus Pass_gvn_pre::lookup_exp_leader(Index_ID idx, Expression_Node new_exp_enode) {
   Node_pin_Plus result_opnode = Node_pin_Plus(idx, 0, false);
   // lookup expression in exp_leader_map
-  if(exp_leader_map.count(new_exp_enode)) {
+  if (exp_leader_map.count(new_exp_enode)) {
     // add the left hand result operand to OpLeaderMap; it's led by the found leader; no new expression added
     op_leader_map[result_opnode] = exp_leader_map[new_exp_enode];
     result_opnode                = exp_leader_map[new_exp_enode];
@@ -47,152 +47,150 @@ Node_pin_Plus Pass_gvn_pre::lookup_exp_leader(Index_ID idx, Expression_Node new_
 }
 
 void Pass_gvn_pre::build_sets(LGraph *g) {
-  for(auto idx : g->forward()) {
-    switch(g->node_type_get(idx).op) {
-    // combining simple Commutative ops:
-    case And_Op:
-    case Or_Op:
-    case Xor_Op: // there is no efficient way to store the sum of all products of an Xor, so treat it as a simple commutative op
-    {
-      bool         unsuported = false;
-      Node_pin_Vec new_exp_vec;
-      for(const auto &in_edge : g->inp_edges(idx)) {
-        // for each operand
-        Node_pin_Plus new_opnode = in_edge.get_out_pin();
-        if(op_leader_map.find(new_opnode) == op_leader_map.end()) {
-          unsuported = true;
-          break;
-        }
-        Node_pin_Plus leader_opnode = lookup_op_leader(new_opnode);
-        // add operand leader
-        new_exp_vec.push_back(leader_opnode);
-      }
-      if(!unsuported) {
-        // full expression
-        // Sort vec to achieve the Commutative property
-        sort(new_exp_vec.begin(), new_exp_vec.end());
-        Expression_Node new_exp_enode(g->node_type_get(idx).op, new_exp_vec);
-        Node_pin_Plus   result_opnode          = lookup_exp_leader(idx, new_exp_enode);
-        Node_pin_Plus   original_result_opnode = Node_pin_Plus(idx, 0, false);
-        if(result_opnode != original_result_opnode) {
-          index_id_to_replace[idx] = result_opnode;
-        }
-      }
-      break;
-    }
-    // Join: assert 1 operand
-    case Join_Op: {
-      Node_pin_Plus result_opnode = Node_pin_Plus(idx, 0, false);
-      int           i             = 1;
-      bool          unsuported    = false;
-      Node_pin_Plus leader_opnode(1, 0, false);
-      for(const auto &in_edge : g->inp_edges(idx)) {
-        if(i > 1) {
-          unsuported = true;
-          break;
-        } else {
+  for (auto idx : g->forward()) {
+    switch (g->node_type_get(idx).op) {
+      // combining simple Commutative ops:
+      case And_Op:
+      case Or_Op:
+      case Xor_Op:  // there is no efficient way to store the sum of all products of an Xor, so treat it as a simple commutative op
+      {
+        bool         unsuported = false;
+        Node_pin_Vec new_exp_vec;
+        for (const auto &in_edge : g->inp_edges(idx)) {
           // for each operand
           Node_pin_Plus new_opnode = in_edge.get_out_pin();
-          if(op_leader_map.find(new_opnode) == op_leader_map.end()) {
+          if (op_leader_map.find(new_opnode) == op_leader_map.end()) {
             unsuported = true;
             break;
           }
-          leader_opnode = lookup_op_leader(new_opnode);
-        }
-        i++;
-      }
-      if(!unsuported) {
-        // map result node to the leader node too
-        op_leader_map[result_opnode] = leader_opnode;
-        index_id_to_replace[idx]     = leader_opnode;
-      }
-      // for Join skip the expression lookup
-      break;
-    }
-
-    // Not: assert 1 operand
-    case Not_Op: {
-      Node_pin_Vec new_exp_vec;
-      int          i = 1;
-      for(const auto &in_edge : g->inp_edges(idx)) {
-        if(i > 1) {
-          Pass::error("pass_gvn_pre: This Not Op node has more than 1 input");
-          assert(0);
-        } else {
-          // for each operand
-          Node_pin_Plus new_opnode    = in_edge.get_out_pin();
           Node_pin_Plus leader_opnode = lookup_op_leader(new_opnode);
           // add operand leader
           new_exp_vec.push_back(leader_opnode);
         }
-        i++;
-      }
-      // full expression
-      // skip sort vec for Not Op
-      Expression_Node new_exp_enode(g->node_type_get(idx).op, new_exp_vec);
-      Node_pin_Plus   result_opnode          = lookup_exp_leader(idx, new_exp_enode);
-      Node_pin_Plus   original_result_opnode = Node_pin_Plus(idx, 0, false);
-      if(result_opnode != original_result_opnode) {
-        index_id_to_replace[idx] = result_opnode;
-      }
-      break;
-    }
-
-    // IO
-    case GraphIO_Op: {
-      fmt::print("GraphIO_Op.\n");
-      Node_pin_Plus new_pin(idx, 0, false);
-      /*
-        // getting output node pin (especially pid)
-        for(const auto &out_edge:g->out_edges(idx)) {
-          // weird behavior here
-          // TODO: ask why out_edge.get_inp_pin() cannot get the correct nid of this IO node
-          Node_pin_Plus new_pin_for_pid = out_edge.get_inp_pin();
-          new_pin = Node_pin_Plus(idx, new_pin_for_pid.get_pid(), false);
-          assert(idx > 0);
-          assert(new_pin.get_nid() > 0);
-          // one edge is enough to get the info
-          break;
+        if (!unsuported) {
+          // full expression
+          // Sort vec to achieve the Commutative property
+          sort(new_exp_vec.begin(), new_exp_vec.end());
+          Expression_Node new_exp_enode(g->node_type_get(idx).op, new_exp_vec);
+          Node_pin_Plus   result_opnode          = lookup_exp_leader(idx, new_exp_enode);
+          Node_pin_Plus   original_result_opnode = Node_pin_Plus(idx, 0, false);
+          if (result_opnode != original_result_opnode) {
+            index_id_to_replace[idx] = result_opnode;
+          }
         }
-        */
-      // make exception for IO, make the op type as invalid for general
-      // Expression_Node new_enode(g->node_type_get(idx).op, new_pin_vec);
-      if(op_leader_map.count(new_pin)) {
-        Pass::error("gnv_pre: this IO was enmaped");
-        new_pin.print_info();
-        assert(0);
-      } else {
-        op_leader_map[new_pin] = new_pin;
-        assert(new_pin.get_nid() > 0);
+        break;
       }
-    } break;
+      // Join: assert 1 operand
+      case Join_Op: {
+        Node_pin_Plus result_opnode = Node_pin_Plus(idx, 0, false);
+        int           i             = 1;
+        bool          unsuported    = false;
+        Node_pin_Plus leader_opnode(1, 0, false);
+        for (const auto &in_edge : g->inp_edges(idx)) {
+          if (i > 1) {
+            unsuported = true;
+            break;
+          } else {
+            // for each operand
+            Node_pin_Plus new_opnode = in_edge.get_out_pin();
+            if (op_leader_map.find(new_opnode) == op_leader_map.end()) {
+              unsuported = true;
+              break;
+            }
+            leader_opnode = lookup_op_leader(new_opnode);
+          }
+          i++;
+        }
+        if (!unsuported) {
+          // map result node to the leader node too
+          op_leader_map[result_opnode] = leader_opnode;
+          index_id_to_replace[idx]     = leader_opnode;
+        }
+        // for Join skip the expression lookup
+        break;
+      }
 
-    case Invalid_Op:
-    case Sum_Op:
-    case Mult_Op:
-    case SFlop_Op:
-    case LessThan_Op:
-    case GreaterThan_Op:
-    case Equals_Op:
-    case Mux_Op:
-    case SubGraph_Op:
-    case U32Const_Op:
-    case StrConst_Op:
-      break;
-    default:
-      Pass::error("gvn_pre: Unsuported OP {}", g->node_type_get(idx).get_name());
+      // Not: assert 1 operand
+      case Not_Op: {
+        Node_pin_Vec new_exp_vec;
+        int          i = 1;
+        for (const auto &in_edge : g->inp_edges(idx)) {
+          if (i > 1) {
+            Pass::error("pass_gvn_pre: This Not Op node has more than 1 input");
+            assert(0);
+          } else {
+            // for each operand
+            Node_pin_Plus new_opnode    = in_edge.get_out_pin();
+            Node_pin_Plus leader_opnode = lookup_op_leader(new_opnode);
+            // add operand leader
+            new_exp_vec.push_back(leader_opnode);
+          }
+          i++;
+        }
+        // full expression
+        // skip sort vec for Not Op
+        Expression_Node new_exp_enode(g->node_type_get(idx).op, new_exp_vec);
+        Node_pin_Plus   result_opnode          = lookup_exp_leader(idx, new_exp_enode);
+        Node_pin_Plus   original_result_opnode = Node_pin_Plus(idx, 0, false);
+        if (result_opnode != original_result_opnode) {
+          index_id_to_replace[idx] = result_opnode;
+        }
+        break;
+      }
+
+      // IO
+      case GraphIO_Op: {
+        fmt::print("GraphIO_Op.\n");
+        Node_pin_Plus new_pin(idx, 0, false);
+        /*
+          // getting output node pin (especially pid)
+          for(const auto &out_edge:g->out_edges(idx)) {
+            // weird behavior here
+            // TODO: ask why out_edge.get_inp_pin() cannot get the correct nid of this IO node
+            Node_pin_Plus new_pin_for_pid = out_edge.get_inp_pin();
+            new_pin = Node_pin_Plus(idx, new_pin_for_pid.get_pid(), false);
+            assert(idx > 0);
+            assert(new_pin.get_nid() > 0);
+            // one edge is enough to get the info
+            break;
+          }
+          */
+        // make exception for IO, make the op type as invalid for general
+        // Expression_Node new_enode(g->node_type_get(idx).op, new_pin_vec);
+        if (op_leader_map.count(new_pin)) {
+          Pass::error("gnv_pre: this IO was enmaped");
+          new_pin.print_info();
+          assert(0);
+        } else {
+          op_leader_map[new_pin] = new_pin;
+          assert(new_pin.get_nid() > 0);
+        }
+      } break;
+
+      case Invalid_Op:
+      case Sum_Op:
+      case Mult_Op:
+      case SFlop_Op:
+      case LessThan_Op:
+      case GreaterThan_Op:
+      case Equals_Op:
+      case Mux_Op:
+      case SubGraph_Op:
+      case U32Const_Op:
+      case StrConst_Op: break;
+      default: Pass::error("gvn_pre: Unsuported OP {}", g->node_type_get(idx).get_name());
     }
   }
 }
 
 void Pass_gvn_pre::insertion(LGraph *g) {
-  for(auto idx : g->forward()) {
-    if(index_id_to_replace.count(idx)) {
+  for (auto idx : g->forward()) {
+    if (index_id_to_replace.count(idx)) {
       // this node should be replaced
       // Insert new edges
       Node_pin_Plus leader_node = index_id_to_replace[idx];
       leader_node.reset_as_output();
-      for(const auto &out_edge : g->out_edges(idx)) {
+      for (const auto &out_edge : g->out_edges(idx)) {
         Node_pin src_np = Node_pin(leader_node.get_nid(), leader_node.get_pid(), false);
         Node_pin dst_np = Node_pin(out_edge.get_idx(), out_edge.get_out_pin().get_pid(), true);
         g->add_edge(src_np, dst_np);
@@ -202,40 +200,40 @@ void Pass_gvn_pre::insertion(LGraph *g) {
 }
 
 void Pass_gvn_pre::elimination(LGraph *g) {
-  for(auto idx : g->forward()) {
-    if(index_id_to_replace.count(idx)) {
+  for (auto idx : g->forward()) {
+    if (index_id_to_replace.count(idx)) {
       // this node should be replaced
       // Delete all edges
       bool deleted;
       do {
         deleted = false;
-        for(const auto &out_edge : g->out_edges(idx)) {
+        for (const auto &out_edge : g->out_edges(idx)) {
           g->del_edge(out_edge);
           deleted = true;
         }
-      } while(deleted);
+      } while (deleted);
 
       // Delete all inp edges
       do {
         deleted = false;
-        for(const auto &inp_edge : g->inp_edges(idx)) {
+        for (const auto &inp_edge : g->inp_edges(idx)) {
           g->del_edge(inp_edge);
           deleted = true;
         }
-      } while(deleted);
+      } while (deleted);
     }
   }
 }
 
 void Pass_gvn_pre::result_graph(LGraph *g) {
   fmt::print("\nResult graph: \n");
-  for(auto idx : g->forward()) {
+  for (auto idx : g->forward()) {
     fmt::print("\n*****Visiting idx:{}\n", idx);
-    for(const auto &out_edge : g->out_edges(idx)) {
+    for (const auto &out_edge : g->out_edges(idx)) {
       fmt::print("Printing out edge: \n");
       fmt::print("nid{} pid{} \n", out_edge.get_idx(), out_edge.get_inp_pin().get_pid());
     }
-    for(const auto &inp_edge : g->inp_edges(idx)) {
+    for (const auto &inp_edge : g->inp_edges(idx)) {
       fmt::print("Printting in edge: \n");
       fmt::print("nid{} pid{} \n", inp_edge.get_idx(), inp_edge.get_out_pin().get_pid());
     }
@@ -249,6 +247,4 @@ void Pass_gvn_pre::traverse(LGraph *g, int round) {
   g->sync();
   // result_graph(g);
 }
-void Pass_gvn_pre::transform(LGraph *g) {
-  traverse(g, 1);
-}
+void Pass_gvn_pre::transform(LGraph *g) { traverse(g, 1); }

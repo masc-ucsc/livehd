@@ -4,10 +4,10 @@
 
 // FIXME: names are not to standard (no camel-case)
 
+#include <string>
+
 #include "options.hpp"
 #include "pass.hpp"
-
-#include <string>
 
 class Pass_fluid_options_pack : public Options_pack {
 public:
@@ -15,34 +15,28 @@ public:
 
 class Node_pin_P : public Node_pin {
 public:
-  Node_pin_P(Index_ID _nid, Port_ID _pid, bool _input)
-      : Node_pin(_nid, _pid, _input) {
-  }
+  Node_pin_P(Index_ID _nid, Port_ID _pid, bool _input) : Node_pin(_nid, _pid, _input) {}
 
-  Node_pin_P(Node_pin _node_pin)
-      : Node_pin(_node_pin.get_nid(), _node_pin.get_pid(), _node_pin.is_input()) {
-  }
+  Node_pin_P(Node_pin _node_pin) : Node_pin(_node_pin.get_nid(), _node_pin.get_pid(), _node_pin.is_input()) {}
 
-  Node_pin_P()
-      : Node_pin(-1, -1, false) {
-  }
+  Node_pin_P() : Node_pin(-1, -1, false) {}
 
   bool operator<(const Node_pin &rhs) const {
-    if(this->get_nid() < rhs.get_nid()) {
+    if (this->get_nid() < rhs.get_nid()) {
       return 1;
-    } else if(this->get_nid() > rhs.get_nid())
+    } else if (this->get_nid() > rhs.get_nid())
       return 0;
-    else { // equal
-      if(this->get_pid() < rhs.get_pid())
+    else {  // equal
+      if (this->get_pid() < rhs.get_pid())
         return 1;
       else
         return 0;
     }
   }
   bool operator==(const Node_pin &rhs) const {
-    if(this->get_nid() != rhs.get_nid()) {
+    if (this->get_nid() != rhs.get_nid()) {
       return 0;
-    } else { // equal nid
+    } else {  // equal nid
       return (this->get_pid() == rhs.get_pid());
     }
   }
@@ -56,11 +50,11 @@ typedef std::vector<Node_pin_P> Node_pin_Vec;
 typedef std::vector<Index_ID>   Flop_Indx_Vec;
 
 typedef std::map<Index_ID, Flop_Indx_Vec>
-    IndexFlopMap; // Each Key is a node idx which locates the accumulated Flops pass through that node idx
+    IndexFlopMap;  // Each Key is a node idx which locates the accumulated Flops pass through that node idx
 typedef std::map<Index_ID, bool>
-                                     IndexHasFlopMap; // Each Key is a node idx which indicates whether there is any accumulated Flops pass through that node idx
-typedef std::vector<Index_ID>        IOFlopVec;   // Each Key is a node idx which indicates whether the node is a flop
-typedef std::map<Index_ID, Index_ID> FlopToVqMap; // Each Key is a node idx that locates the node id which contains its vq or sin
+                                     IndexHasFlopMap;  // Each Key is a node idx which indicates whether there is any accumulated Flops pass through that node idx
+typedef std::vector<Index_ID>        IOFlopVec;    // Each Key is a node idx which indicates whether the node is a flop
+typedef std::map<Index_ID, Index_ID> FlopToVqMap;  // Each Key is a node idx that locates the node id which contains its vq or sin
 
 class Pass_fluid : public Pass {
 private:

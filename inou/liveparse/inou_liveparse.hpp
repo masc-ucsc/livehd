@@ -10,6 +10,7 @@ protected:
 
   // eprp callbacks
   static void tolg(Eprp_var &var);
+
 public:
   Inou_liveparse(const Eprp_var &var);
 

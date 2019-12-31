@@ -2,10 +2,9 @@
 #include "lnast_to_cfg_parser.hpp"
 
 void Lnast_to_cfg_parser::generate() {
-
   fmt::print("\nstart Lnast_to_cfg_parser::stringify {}\n", lnast->get_top_module_name());
 
-  for (const mmap_lib::Tree_index &it: lnast->depth_preorder(lnast->get_root())) {
+  for (const mmap_lib::Tree_index& it : lnast->depth_preorder(lnast->get_root())) {
     process_node(it);
   }
   flush_statements();
@@ -13,10 +12,10 @@ void Lnast_to_cfg_parser::generate() {
   auto basename = absl::StrCat(lnast->get_top_module_name(), ".lnast");
 
   fmt::print("lnast_to_cfg_parser path:{} file:{}\n", path, basename);
-  fmt::print("{}\n",buffer);
+  fmt::print("{}\n", buffer);
   fmt::print("<<EOF\n");
 
-  I(false); // Go over files to print them
+  I(false);  // Go over files to print them
 }
 
 void Lnast_to_cfg_parser::process_node(const mmap_lib::Tree_index& it) {
@@ -74,13 +73,12 @@ void Lnast_to_cfg_parser::process_node(const mmap_lib::Tree_index& it) {
   } else {
     add_to_buffer(node_data);
   }
-
 }
 
 void Lnast_to_cfg_parser::process_top(mmap_lib::Tree_level level) {
   level_stack.push_back(level);
   curr_statement_level = level;
-  k_next = 1;
+  k_next               = 1;
 }
 
 void Lnast_to_cfg_parser::push_statement(mmap_lib::Tree_level level) {
@@ -151,9 +149,7 @@ void Lnast_to_cfg_parser::flush_statements() {
   fmt::print("ending flushing statements\n");
 }
 
-void Lnast_to_cfg_parser::add_to_buffer(Lnast_node node) {
-  node_buffer.push_back(node);
-}
+void Lnast_to_cfg_parser::add_to_buffer(Lnast_node node) { node_buffer.push_back(node); }
 
 void Lnast_to_cfg_parser::process_buffer() {
   if (!node_buffer.size()) return;
@@ -258,9 +254,7 @@ void Lnast_to_cfg_parser::process_buffer() {
   node_buffer.clear();
 }
 
-std::string_view Lnast_to_cfg_parser::get_node_name(Lnast_node node) {
-  return node.token.get_text();
-}
+std::string_view Lnast_to_cfg_parser::get_node_name(Lnast_node node) { return node.token.get_text(); }
 
 void Lnast_to_cfg_parser::flush_it(std::vector<Lnast_node>::iterator it) {
   while (it != node_buffer.end()) {
@@ -279,7 +273,7 @@ void Lnast_to_cfg_parser::flush_it(std::vector<Lnast_node>::iterator it) {
 
 void Lnast_to_cfg_parser::process_operator() {
   std::vector<Lnast_node>::iterator it = node_buffer.begin();
-  node_str_buffer = absl::StrCat(node_str_buffer, get_node_name(*it), "\t");
+  node_str_buffer                      = absl::StrCat(node_str_buffer, get_node_name(*it), "\t");
   it++;
   flush_it(it);
   node_str_buffer = absl::StrCat(node_str_buffer, "\n");
@@ -289,18 +283,18 @@ void Lnast_to_cfg_parser::process_if() {
   fmt::print("start process_if\n");
 
   std::vector<Lnast_node>::iterator node_it = node_buffer.begin();
-  std::vector<uint32_t>::iterator if_it = if_buffer.begin();
+  std::vector<uint32_t>::iterator   if_it   = if_buffer.begin();
 
   node_str_buffer = absl::StrCat(node_str_buffer, "if\t");
-  node_it++; // if
-  node_it++; // csts
+  node_it++;  // if
+  node_it++;  // csts
   node_str_buffer = absl::StrCat(node_str_buffer, get_node_name(*node_it), "\t");
   node_str_buffer = absl::StrCat(node_str_buffer, "K", *if_it, "\t");
   if_it++;
   node_str_buffer = absl::StrCat(node_str_buffer, "K", *if_it, "\t");
   if_it++;
-  node_it++; // cond
-  node_it++; // sts
+  node_it++;  // cond
+  node_it++;  // sts
   node_str_buffer = absl::StrCat(node_str_buffer, "\n");
 
   while (node_it != node_buffer.end()) {
@@ -321,7 +315,7 @@ void Lnast_to_cfg_parser::process_if() {
 
 void Lnast_to_cfg_parser::process_func_call() {
   std::vector<Lnast_node>::iterator it = node_buffer.begin();
-  node_str_buffer = absl::StrCat(node_str_buffer, ".()\t");
+  node_str_buffer                      = absl::StrCat(node_str_buffer, ".()\t");
   it++;
   flush_it(it);
   node_str_buffer = absl::StrCat(node_str_buffer, "\n");
@@ -329,7 +323,7 @@ void Lnast_to_cfg_parser::process_func_call() {
 
 void Lnast_to_cfg_parser::process_func_def() {
   std::vector<Lnast_node>::iterator it = node_buffer.begin();
-  node_str_buffer = absl::StrCat(node_str_buffer, "::{\t");
+  node_str_buffer                      = absl::StrCat(node_str_buffer, "::{\t");
   it++;
   node_str_buffer = absl::StrCat(node_str_buffer, get_node_name(*it), "\t");
   it++;
@@ -337,4 +331,3 @@ void Lnast_to_cfg_parser::process_func_def() {
   flush_it(it);
   node_str_buffer = absl::StrCat(node_str_buffer, "\n");
 }
-

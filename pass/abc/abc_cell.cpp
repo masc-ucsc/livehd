@@ -351,4 +351,3 @@ void Abc_object_assign_name(Abc_Obj_t *obj, const std::string name) {
   // NOTE: nasty const_cast because ABC does not have const in the C API
   Abc_ObjAssignName(obj, const_cast<char *>(name.c_str()), nullptr);
 }
-

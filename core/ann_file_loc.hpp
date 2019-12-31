@@ -16,4 +16,3 @@ public:
   uint32_t get_start() const { return (((uint32_t)start_hchunk) << 16) | start_lchunk; }
   uint32_t get_length() const { return length; }
 };
-

@@ -1,11 +1,11 @@
 
 
+#include "cgen_variable_manager.hpp"
+
 #include <vector>
 
-#include "fmt/format.h"
 #include "absl/strings/substitute.h"
-
-#include "cgen_variable_manager.hpp"
+#include "fmt/format.h"
 
 void Cgen_variable_manager::insert_variable(std::string new_var_name) {
   // if exists, do nothing
@@ -21,7 +21,7 @@ void Cgen_variable_manager::insert_variable(std::string_view new_var_name) {
   // if exists, do nothing
   // else, create a variable options
   fmt::print("cgen_variable_manager : insert_variable : new_key : {}\n", new_var_name);
-  std::string var_name = (std::string) new_var_name;
+  std::string var_name = (std::string)new_var_name;
   if (variable_map.find(var_name) == variable_map.end()) {
     fmt::print("cgen_variable_manager : adding variable to map : {}\n", var_name);
     variable_map.insert(std::pair<std::string_view, Variable_options*>(var_name, new Variable_options()));
@@ -36,7 +36,7 @@ Variable_options* Cgen_variable_manager::get(std::string var_name) {
 
 Variable_options* Cgen_variable_manager::get(std::string_view var_name) {
   fmt::print("attr_var: {}\n", var_name);
-  return variable_map.at((std::string) var_name);
+  return variable_map.at((std::string)var_name);
 }
 
 void Variable_options::update_attr(std::string test_string) {
@@ -80,5 +80,3 @@ void Variable_options::update_attr(std::string test_string) {
     }
   }
 }
-
-

@@ -1,12 +1,14 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#include <iostream>
-#include <random>
+#include "lglefdef.hpp"
+
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <iostream>
+#include <random>
+
 #include "inou_def.hpp"
 #include "lgbench.hpp"
-#include "lglefdef.hpp"
 #include "tech_library.hpp"
 
 int main(int argc, const char **argv) {
@@ -34,15 +36,14 @@ int main(int argc, const char **argv) {
   tlib->create_cell_id("chip_frame");
   Tech_cell &tmp_cell = tlib->get_vec_cell_types()->back();
 
-  for(auto iter_io = dinfo.ios.begin(); iter_io != dinfo.ios.end(); ++iter_io) {
-
+  for (auto iter_io = dinfo.ios.begin(); iter_io != dinfo.ios.end(); ++iter_io) {
     Tech_cell::Direction dir = Tech_cell::Direction::input;
-    if(iter_io->dir == 0)
+    if (iter_io->dir == 0)
       dir = Tech_cell::Direction::input;
-    else if(iter_io->dir == 1)
+    else if (iter_io->dir == 1)
       dir = Tech_cell::Direction::output;
     else
-      assert(false); // Unhandled direction option
+      assert(false);  // Unhandled direction option
 
     tmp_cell.add_pin(iter_io->io_name, dir);
     Tech_cell::Pin &tmp_pin = tmp_cell.get_vec_pins()->back();
@@ -54,7 +55,7 @@ int main(int argc, const char **argv) {
     tmp_phy.xl                       = iter_io->phy.xl;
     tmp_phy.yh                       = iter_io->phy.yh;
     tmp_phy.yl                       = iter_io->phy.yl;
-  } // end for
+  }  // end for
 
   b.sample("chip-level");
 

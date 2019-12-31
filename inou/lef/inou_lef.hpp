@@ -4,10 +4,9 @@
 
 #pragma once
 
+#include "inou.hpp"
 #include "lefiDefs.hpp"
 #include "lefrReader.hpp"
-
-#include "inou.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraphbase.hpp"
 #include "options.hpp"
@@ -34,12 +33,9 @@ public:
 
   std::vector<LGraph *> tolg() final;
 
-  void fromlg(std::vector<LGraph *> &out) ;
+  void fromlg(std::vector<LGraph *> &out);
 
-  void set(const std::string &key, const std::string &value) final {
-    opack.set(key, value);
-  }
+  void set(const std::string &key, const std::string &value) final { opack.set(key, value); }
 
   static void lef_parsing(Tech_library &tlib, std::string &lef_file_name);
 };
-

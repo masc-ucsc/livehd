@@ -24,4 +24,4 @@ Pass_abc::Abc_comb LGraph_CreateMUX(Abc_Ntk_t *pAig);
 
 void Abc_object_assign_name(Abc_Obj_t *, const std::string name);
 
-#endif // LGRAPH_ABC_CELL_HPP
+#endif  // LGRAPH_ABC_CELL_HPP

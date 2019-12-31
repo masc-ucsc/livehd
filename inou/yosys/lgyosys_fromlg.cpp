@@ -6,14 +6,14 @@
 // binary, for any purpose, commercial or non-commercial, and by any
 // means.
 
-#include "kernel/sigtools.h"
-#include "kernel/yosys.h"
-
 #include <assert.h>
+
 #include <map>
 #include <set>
 #include <string>
 
+#include "kernel/sigtools.h"
+#include "kernel/yosys.h"
 #include "lgyosys_dump.hpp"
 
 USING_YOSYS_NAMESPACE
@@ -22,9 +22,7 @@ PRIVATE_NAMESPACE_BEGIN
 // each pass contains a singleton object that is derived from Pass
 // note that this is a frontend to yosys
 struct LG2Yosys_Pass : public Yosys::Pass {
-  LG2Yosys_Pass()
-      : Pass("lg2yosys", "converts lgraph to yosys") {
-  }
+  LG2Yosys_Pass() : Pass("lg2yosys", "converts lgraph to yosys") {}
   virtual void help() {
     //   |---v---|---v---|---v---|---v---|---v---|---v---|---v---|---v---|---v---|---v---|
     log("\n");
@@ -52,17 +50,17 @@ struct LG2Yosys_Pass : public Yosys::Pass {
     std::string name;
     std::string path = "lgdb";
 
-    for(argidx = 1; argidx < args.size(); argidx++) {
-      if(args[argidx] == "-name") {
+    for (argidx = 1; argidx < args.size(); argidx++) {
+      if (args[argidx] == "-name") {
         single_graph_mode = true;
         name              = args[++argidx];
         continue;
       }
-      if(args[argidx] == "-path") {
+      if (args[argidx] == "-path") {
         path = args[++argidx];
         continue;
       }
-      if(args[argidx] == "-hierarchy") {
+      if (args[argidx] == "-hierarchy") {
         hierarchy = true;
         continue;
       }
@@ -73,14 +71,14 @@ struct LG2Yosys_Pass : public Yosys::Pass {
     extra_args(args, argidx, design);
 
     std::vector<LGraph *> lgs;
-    if(single_graph_mode) {
+    if (single_graph_mode) {
       LGraph *lg = LGraph::open(path, name);
-      if (lg==0) {
+      if (lg == 0) {
         log_error("could not open graph %s in path %s\n.", name.c_str(), path.c_str());
-      }else{
+      } else {
         lgs.push_back(lg);
       }
-      if(!hierarchy) {
+      if (!hierarchy) {
         log("converting graph %s in path %s\n.", name.c_str(), path.c_str());
       } else {
         log("converting graph %s and all its subgraphs in path %s\n.", name.c_str(), path.c_str());
@@ -91,10 +89,10 @@ struct LG2Yosys_Pass : public Yosys::Pass {
     }
 
     std::set<LGraph *> generated;
-    Lgyosys_dump             dumper(design, hierarchy);
+    Lgyosys_dump       dumper(design, hierarchy);
 
     dumper.fromlg(lgs);
-    for(auto *g : lgs) {
+    for (auto *g : lgs) {
       generated.insert(g);
     }
 

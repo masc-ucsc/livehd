@@ -1,18 +1,15 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "absl/strings/substitute.h"
-
 #include "hierarchy.hpp"
-#include "lgraph.hpp"
+
+#include "absl/strings/substitute.h"
 #include "annotate.hpp"
+#include "lgraph.hpp"
 
 Hierarchy_tree::Hierarchy_tree(LGraph *_top)
-  :mmap_lib::tree<Hierarchy_data>(_top->get_path(), absl::StrCat(_top->get_name(), "_htree"))
-  ,top(_top) {
-}
+    : mmap_lib::tree<Hierarchy_data>(_top->get_path(), absl::StrCat(_top->get_name(), "_htree")), top(_top) {}
 
 LGraph *Hierarchy_tree::ref_lgraph(const Hierarchy_index &hidx) const {
-
   // NOTE: if this becomes a bottleneck, we can memorize the LGraph *
   const auto &data = get_data(hidx);
 
@@ -24,7 +21,6 @@ LGraph *Hierarchy_tree::ref_lgraph(const Hierarchy_index &hidx) const {
 }
 
 Node Hierarchy_tree::get_instance_up_node(const Hierarchy_index &hidx) const {
-
   const auto &data = get_data(hidx);
 
   auto up_hidx = get_parent(hidx);
@@ -34,10 +30,10 @@ Node Hierarchy_tree::get_instance_up_node(const Hierarchy_index &hidx) const {
   LGraph *lg;
   if (up_hidx.is_root()) {
     lg = top;
-  }else{
+  } else {
     const auto &up_data = get_data(up_hidx);
-    lg = LGraph::open(get_path(), up_data.lgid);
-    I(top!=lg);
+    lg                  = LGraph::open(get_path(), up_data.lgid);
+    I(top != lg);
   }
   I(lg);
 
@@ -48,18 +44,17 @@ void Hierarchy_tree::regenerate_step(LGraph *lg, const Hierarchy_index &parent) 
   auto *tree_pos = Ann_node_tree_pos::ref(lg);
 
   int conta = 0;
-  for(auto it:*tree_pos) {
-    auto node     = it.first.get_node(lg);
+  for (auto it : *tree_pos) {
+    auto node = it.first.get_node(lg);
     I(node.is_type_sub());
-    if (!node.is_type_sub_present())
-      continue;
+    if (!node.is_type_sub_present()) continue;
 
     tree_pos->set(it.first, conta);
 
     auto child_lgid = node.get_type_sub();
 
     Hierarchy_data data(child_lgid, node.get_nid());
-    auto child = add_child(parent, data);
+    auto           child = add_child(parent, data);
 
     auto *child_lg = lg->get_library().try_find_lgraph(child_lgid);
     if (child_lg) {
@@ -92,7 +87,6 @@ Hierarchy_index Hierarchy_tree::go_down(const Node &node) const {
   auto pos = tree_pos->get(node.get_compact_class());
 
   I(!is_leaf(node.get_hidx()));
-  Hierarchy_index child(node.get_hidx().level+1, pos);
+  Hierarchy_index child(node.get_hidx().level + 1, pos);
   return child;
 }
-

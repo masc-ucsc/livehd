@@ -1,29 +1,28 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
+
 #include <cstdio>
 
-#include "gtest/gtest.h"
-
-#include "prp.hpp"
 #include "fmt/format.h"
+#include "gtest/gtest.h"
+#include "prp.hpp"
 
-class Prp_test: public ::testing::Test{
+class Prp_test : public ::testing::Test {
 public:
-
   class Prp_test_class : public Prp {
   protected:
-    void elaborate(){
+    void elaborate() {
       patch_pass(pyrope_keyword);
       ast = std::make_unique<Ast_parser>(get_memblock(), Prp_rule);
 
       fmt::print("Starting to parse\n");
 
-      while(!scan_is_end()){
+      while (!scan_is_end()) {
         dump_token();
         eat_comments();
-        if(scan_is_end()) return;
-        if(!rule_start()){
+        if (scan_is_end()) return;
+        if (!rule_start()) {
           fmt::print("Something went wrong.\n");
           return;
         }
@@ -36,29 +35,31 @@ public:
 
       ast = nullptr;
     }
-    void ast_handler(){
+    void ast_handler() {
       std::string rule_name;
-      for(const auto &it:ast->depth_preorder(ast->get_root())) {
-        auto node = ast->get_data(it);
+      for (const auto &it : ast->depth_preorder(ast->get_root())) {
+        auto node       = ast->get_data(it);
         auto token_text = scan_text(node.token_entry);
-        if(token_text != ""){
+        if (token_text != "") {
           tree_traversal_tokens.push_back(token_text);
         }
         tree_traversal_rules.push_back(rule_id_to_string(node.rule_id));
-        fmt::print("Rule name: {}, Token text: {}, Tree level: {}\n", rule_id_to_string(node.rule_id), scan_text(node.token_entry), it.level);
+        fmt::print("Rule name: {}, Token text: {}, Tree level: {}\n", rule_id_to_string(node.rule_id), scan_text(node.token_entry),
+                   it.level);
       }
     }
+
   public:
     std::vector<std::string_view> tree_traversal_tokens;
-    std::vector<std::string> tree_traversal_rules;
+    std::vector<std::string>      tree_traversal_rules;
   };
 };
 
-TEST_F(Prp_test, assignment_expression1){
+TEST_F(Prp_test, assignment_expression1) {
   Prp_test_class scanner;
 
   std::vector<std::string_view> tree_traversal_check_tokens;
-  std::vector<std::string> tree_traversal_check_rules;
+  std::vector<std::string>      tree_traversal_check_rules;
 
   tree_traversal_check_tokens.push_back("\%out");
   tree_traversal_check_tokens.push_back("as");
@@ -83,11 +84,11 @@ TEST_F(Prp_test, assignment_expression1){
   EXPECT_EQ(tree_traversal_check_rules, scanner.tree_traversal_rules);
 }
 
-TEST_F(Prp_test, assignment_expression2){
+TEST_F(Prp_test, assignment_expression2) {
   Prp_test_class scanner;
 
   std::vector<std::string_view> tree_traversal_check_tokens;
-  std::vector<std::string> tree_traversal_check_rules;
+  std::vector<std::string>      tree_traversal_check_rules;
 
   tree_traversal_check_tokens.push_back("\%out");
   tree_traversal_check_tokens.push_back("as");
@@ -123,11 +124,11 @@ TEST_F(Prp_test, assignment_expression2){
   EXPECT_EQ(tree_traversal_check_rules, scanner.tree_traversal_rules);
 }
 
-TEST_F(Prp_test, if_statement1){
+TEST_F(Prp_test, if_statement1) {
   Prp_test_class scanner;
 
   std::vector<std::string_view> tree_traversal_check_tokens;
-  std::vector<std::string> tree_traversal_check_rules;
+  std::vector<std::string>      tree_traversal_check_rules;
 
   tree_traversal_check_tokens.push_back("if");
   tree_traversal_check_tokens.push_back("(");

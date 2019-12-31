@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
-
 #include "lgraph_base_core.hpp"
 
 // nodetype should be at meta directory but the node type is needed all over in the base class. It may be good to integrate nodetype
@@ -35,7 +34,7 @@ enum Node_Type_Op : uint64_t {
   Equals_Op,
 #endif
   // op_class: mux
-  Mux_Op, // WARNING: Trivial MUX (not bus muxes) converted to LUT
+  Mux_Op,  // WARNING: Trivial MUX (not bus muxes) converted to LUT
 #if 1
   // WARNING: deprecated once we have LUTs working (mockturtle)
   // op_class: shift
@@ -43,7 +42,7 @@ enum Node_Type_Op : uint64_t {
   ArithShiftRight_Op,
   DynamicShiftRight_Op,
   DynamicShiftLeft_Op,
-  ShiftRight_Op, //FIX ME: should be superseded by above Ops
+  ShiftRight_Op,  // FIX ME: should be superseded by above Ops
   ShiftLeft_Op,
 #endif
   // op_class: LUT
@@ -62,7 +61,7 @@ enum Node_Type_Op : uint64_t {
   // op_class: dfg
   DfgRef_Op,
   DfgPendingGraph_Op,
-  // Add here, operators needed
+// Add here, operators needed
 #if 1
   // WARNING: deprecated once we have LUTs working (mockturtle)
   // op_class: logic
@@ -93,14 +92,14 @@ enum Node_Type_Op : uint64_t {
   StrConstMax_Op = StrConstMin_Op + ((1ULL << 32) - 1),
   Loop_breaker_end,
   //------------------END PIPELINED (break LOOPS)
-  //op_class: lut
+  // op_class: lut
   LUTMin_Op,
   LUTMax_Op = LUTMin_Op + ((1ULL << (1ULL << LUT_input_bits)) - 1)
 };
 
 class Node_Type {
 private:
-  static Node_Type *                        table[StrConst_Op + 1];
+  static Node_Type *                                   table[StrConst_Op + 1];
   static absl::flat_hash_map<std::string, Node_Type *> name2node;
 
 protected:
@@ -142,7 +141,7 @@ public:
   std::string_view get_name() const { return name; }
 
   Port_ID get_input_match(std::string_view str) const {
-    if (inputs.empty()) // blackbox, subgraph...
+    if (inputs.empty())  // blackbox, subgraph...
       return Port_invalid;
 
     std::string data(str);
@@ -165,15 +164,12 @@ public:
   }
 
   Port_ID get_output_match(std::string_view str) const {
-    if (outputs.empty()) // blackbox, subgraph...
+    if (outputs.empty())  // blackbox, subgraph...
       return Port_invalid;
 
-    if (str == "Y" && outputs[0] == "Y")
-      return 0;
-    if (str == "Q" && outputs[0] == "Q")
-      return 0;
-    if (str == "YREDUCE" && outputs[1] == "YREDUCE")
-      return 1;
+    if (str == "Y" && outputs[0] == "Y") return 0;
+    if (str == "Q" && outputs[0] == "Q") return 0;
+    if (str == "YREDUCE" && outputs[1] == "YREDUCE") return 1;
 
     std::string data(str);
     std::transform(data.begin(), data.end(), data.begin(), ::toupper);
@@ -201,21 +197,21 @@ public:
 
   size_t get_num_inputs() const {
     if (inputs.size()) return inputs.size();
-    return (1<<Port_bits) - 1;
+    return (1 << Port_bits) - 1;
   }
   size_t get_num_outputs() const {
     if (outputs.size()) return outputs.size();
-    return (1<<Port_bits) - 1;
+    return (1 << Port_bits) - 1;
   }
 
   bool has_output(Port_ID pid) const {
-    return outputs.size() > pid || outputs.empty(); // no default outputs subgraph
+    return outputs.size() > pid || outputs.empty();  // no default outputs subgraph
   }
   bool has_input(Port_ID pid) const {
-    return inputs.size() > pid || inputs.empty(); // no default inputs for subgraph
+    return inputs.size() > pid || inputs.empty();  // no default inputs for subgraph
   }
   bool has_single_output() const { return outputs.size() == 1; }
-  bool has_single_input() const  { return inputs.size()  == 1; }
+  bool has_single_input() const { return inputs.size() == 1; }
 
   bool is_pipelined() const { return pipelined; }  // Can create loops
 
@@ -299,9 +295,7 @@ public:
 // Y = {...,E,D,C,B,A} => modified by SH
 class Node_Type_Join : public Node_Type {
 public:
-  Node_Type_Join() : Node_Type("join", Join_Op, false) {
-    outputs.push_back("Y");
-  };
+  Node_Type_Join() : Node_Type("join", Join_Op, false) { outputs.push_back("Y"); };
 };
 
 // Y = A[i,j]
@@ -504,9 +498,10 @@ public:
 
 class Node_Type_GraphIO : public Node_Type {
 public:
-  Node_Type_GraphIO() : Node_Type("graphio", GraphIO_Op, false) {
-    // No pins because there are many pids (one per IO)
-  };
+  Node_Type_GraphIO()
+      : Node_Type("graphio", GraphIO_Op, false){
+            // No pins because there are many pids (one per IO)
+        };
 };
 
 class Node_Type_Flop : public Node_Type {
@@ -515,9 +510,9 @@ public:
     inputs.push_back("C");
     inputs.push_back("D");
     inputs.push_back("EN");
-    inputs.push_back("CLR");   // reset signal
+    inputs.push_back("CLR");  // reset signal
     inputs.push_back("SET");  // set value
-    inputs.push_back("POL");   // clock polarity (positive if not specified)
+    inputs.push_back("POL");  // clock polarity (positive if not specified)
     outputs.push_back("Q");
   };
 };
@@ -528,8 +523,8 @@ public:
     inputs.push_back("CLK");
     inputs.push_back("D");
     inputs.push_back("EN");
-    inputs.push_back("CLR");   // reset signal
-    inputs.push_back("SET");   // set value
+    inputs.push_back("CLR");  // reset signal
+    inputs.push_back("SET");  // set value
     outputs.push_back("Q");
   };
 };
@@ -560,29 +555,29 @@ public:
 };
 
 // Parameters
-#define LGRAPH_MEMOP_SIZE     0
-#define LGRAPH_MEMOP_OFFSET   1
-#define LGRAPH_MEMOP_ABITS    2
-#define LGRAPH_MEMOP_WRPORT   3
-#define LGRAPH_MEMOP_RDPORT   4
+#define LGRAPH_MEMOP_SIZE 0
+#define LGRAPH_MEMOP_OFFSET 1
+#define LGRAPH_MEMOP_ABITS 2
+#define LGRAPH_MEMOP_WRPORT 3
+#define LGRAPH_MEMOP_RDPORT 4
 #define LGRAPH_MEMOP_RDCLKPOL 5
 #define LGRAPH_MEMOP_WRCLKPOL 6
-#define LGRAPH_MEMOP_RDTRAN   7
+#define LGRAPH_MEMOP_RDTRAN 7
 
 // Shared signals
-#define LGRAPH_MEMOP_CLK      8
-#define LGRAPH_MEMOP_CE       9
+#define LGRAPH_MEMOP_CLK 8
+#define LGRAPH_MEMOP_CE 9
 
 // Port specific signals
 #define LGRAPH_MEMOP_POFFSET (LGRAPH_MEMOP_CE + 1)
-#define LGRAPH_MEMOP_PIDS     5
+#define LGRAPH_MEMOP_PIDS 5
 
 #define LGRAPH_MEMOP_WRADDR(_n) (LGRAPH_MEMOP_POFFSET + 0 + _n * (LGRAPH_MEMOP_PIDS))
 #define LGRAPH_MEMOP_WRDATA(_n) (LGRAPH_MEMOP_POFFSET + 1 + _n * (LGRAPH_MEMOP_PIDS))
-#define LGRAPH_MEMOP_WREN(_n)   (LGRAPH_MEMOP_POFFSET + 2 + _n * (LGRAPH_MEMOP_PIDS))
+#define LGRAPH_MEMOP_WREN(_n) (LGRAPH_MEMOP_POFFSET + 2 + _n * (LGRAPH_MEMOP_PIDS))
 
 #define LGRAPH_MEMOP_RDADDR(_n) (LGRAPH_MEMOP_POFFSET + 3 + _n * (LGRAPH_MEMOP_PIDS))
-#define LGRAPH_MEMOP_RDEN(_n)   (LGRAPH_MEMOP_POFFSET + 4 + _n * (LGRAPH_MEMOP_PIDS))
+#define LGRAPH_MEMOP_RDEN(_n) (LGRAPH_MEMOP_POFFSET + 4 + _n * (LGRAPH_MEMOP_PIDS))
 
 #define LGRAPH_MEMOP_ISWRADDR(_pid) (((_pid - LGRAPH_MEMOP_POFFSET) % (LGRAPH_MEMOP_PIDS)) == 0)
 #define LGRAPH_MEMOP_ISWRDATA(_pid) (((_pid - LGRAPH_MEMOP_POFFSET) % (LGRAPH_MEMOP_PIDS)) == 1)
@@ -607,7 +602,7 @@ public:
     inputs.push_back("CLK");  // single clock support only
     inputs.push_back("CE");   // shared chip enable (no connection means always enable)
 
-    for(int i=0;i<1024;i++) { // At most 1K ports?? Increase if needed
+    for (int i = 0; i < 1024; i++) {  // At most 1K ports?? Increase if needed
       std::string wr = "WR" + std::to_string(i);
       // wr / rd port 0
       inputs.push_back(wr + "_ADDR");

@@ -5,8 +5,7 @@
 
 class Node_pin;
 
-typedef int64_t  SIndex_ID;  // Short Edge_raw must be signed +- offset
-
+typedef int64_t SIndex_ID;  // Short Edge_raw must be signed +- offset
 
 struct __attribute__((packed)) LEdge_Internal {  // 6 bytes total
 
@@ -17,12 +16,12 @@ public:
   friend class Edge_raw;
 
   // TODO: the snode and input can be avoided by accessing the Node_Internal information
-  bool     snode   : 1;           // 1 bit
-  bool     input   : 1;           // 1 bit
-  Port_ID  inp_pid : Port_bits;   // 28 bits abs
-  int16_t  pad1: 2;
+  bool     snode : 1;            // 1 bit
+  bool     input : 1;            // 1 bit
+  Port_ID  inp_pid : Port_bits;  // 28 bits abs
+  int16_t  pad1 : 2;
   uint64_t raw_idx : Index_bits;  // 31 bits abs, 4 byte aligned
-  uint16_t pad2: 1;
+  uint16_t pad2 : 1;
 
   bool     is_snode() const { return snode; }
   bool     is_input() const { return input; }
@@ -32,7 +31,7 @@ public:
   }
 
   bool set(Index_ID _idx, Port_ID _inp_pid, bool _input) {
-    I(_idx < (1LL << (Index_bits-1)));
+    I(_idx < (1LL << (Index_bits - 1)));
     I(_inp_pid < (1 << Port_bits));
 
     snode   = 0;
@@ -185,17 +184,17 @@ public:
 #endif
 
 private:  // all constructor&assignment should be marked as private
-  Edge_raw()                = default;
+  Edge_raw()                    = default;
   Edge_raw(const Edge_raw &rhs) = default;
   Edge_raw(Edge_raw &&rhs)      = delete;
-  ~Edge_raw()               = default;
+  ~Edge_raw()                   = default;
   Edge_raw &operator=(const Edge_raw &rhs) = default;
   Edge_raw &operator=(Edge_raw &&rhs) = delete;
 };
 
 struct __attribute__((packed)) LEdge : public Edge_raw {  // 8 bytes total
   LEdge() { snode = 0; };
-  uint64_t pad_match:48;
+  uint64_t pad_match : 48;
 };
 
 struct __attribute__((packed)) SEdge : public Edge_raw {  // 2 bytes total
@@ -259,7 +258,7 @@ struct __attribute__((packed)) Node_Internal_Page {
 // should split in subgraphs large netlist. The split is transparent in reading
 // and output.
 //
-class  __attribute__((packed)) Node_Internal {
+class __attribute__((packed)) Node_Internal {
 private:
   // BEGIN 12 Bytes common payload
   Node_State state : 3;  // State must be the first thing (Node_Internal_Page)
@@ -275,10 +274,10 @@ public:
   static constexpr int Num_SEdges = 32 - 6;  // 6 entries for the 96 bits (12 bytes)
   SEdge                sedge[Num_SEdges];    // WARNING: Must not be the last field in struct or iterators fail
 private:
-  uint64_t nid : Index_bits;     // 31bits, 4 byte aligned
-  uint16_t root: 1;
+  uint64_t nid : Index_bits;  // 31bits, 4 byte aligned
+  uint16_t root : 1;
   Port_ID  dst_pid : Port_bits;  // 26bits, 4 byte aligned
-  uint16_t inp_long : 2; // 8 bytes each. Just 3 at most
+  uint16_t inp_long : 2;         // 8 bytes each. Just 3 at most
   uint16_t out_long : 2;
   // END 10 Bytes common payload
 
@@ -318,7 +317,7 @@ private:
 
 protected:
   friend class Edge_raw;
-  Index_ID get_self_idx() const; // WARNING: It can point to overflow
+  Index_ID get_self_idx() const;  // WARNING: It can point to overflow
 
 public:
   Node_Internal() { reset(); }
@@ -332,13 +331,13 @@ public:
   uint8_t get_num_local_inputs() const {
     uint8_t n = inp_pos;
     I(inp_long * (4) <= n);
-    n -= (4-1) * inp_long;
+    n -= (4 - 1) * inp_long;
     return n;
   }
   uint8_t get_num_local_outputs() const {
     uint8_t n = out_pos;
     I(out_long * (4) <= n);
-    n -= (4-1) * out_long;
+    n -= (4 - 1) * out_long;
     return n;
   }
 
@@ -347,8 +346,8 @@ public:
   bool    has_node_inputs() const;
   bool    has_node_outputs() const;
 
-  bool    has_pin_inputs() const;
-  bool    has_pin_outputs() const;
+  bool has_pin_inputs() const;
+  bool has_pin_outputs() const;
 
   void reset() {
     bits         = 0;
@@ -377,9 +376,7 @@ public:
   }
 
   void set_root() { root = true; }
-  void clear_root() {
-    root            = false;
-  }
+  void clear_root() { root = false; }
 
   Port_ID get_dst_pid() const { return dst_pid; }
   void    set_dst_pid(Port_ID eid) {
@@ -390,7 +387,7 @@ public:
     I(nid);
     return nid;
   }
-  Index_ID             get_master_root_nid() const {
+  Index_ID get_master_root_nid() const {
     I(nid);
     if (likely(root)) return nid;
 
@@ -476,9 +473,9 @@ public:
   void inc_outputs(bool large = false) {
     if (large) {
       I(has_space_long());
-      I(!sedge[next_free_output_pos()-3].is_snode());
+      I(!sedge[next_free_output_pos() - 3].is_snode());
       out_pos += 4;
-      I(out_long<3); // To avoid overflow
+      I(out_long < 3);  // To avoid overflow
       out_long++;
     } else {
       I(has_space_short());
@@ -491,7 +488,7 @@ public:
       I(has_space_long());
       I(!sedge[next_free_input_pos()].is_snode());
       inp_pos += 4;
-      I(inp_long<3); // To avoid overflow
+      I(inp_long < 3);  // To avoid overflow
       inp_long++;
     } else {
       I(has_space_short());
@@ -513,7 +510,7 @@ public:
 
   bool has_space_long() const {
     int reserve = state == Last_Node_State ? 0 : 2;
-    return inp_long<3 && out_long<3 && (reserve + inp_pos + out_pos + 4) < Num_SEdges;
+    return inp_long < 3 && out_long < 3 && (reserve + inp_pos + out_pos + 4) < Num_SEdges;
   }
   bool has_space_short() const {
     int reserve = state == Last_Node_State ? 0 : 2;
@@ -525,14 +522,14 @@ public:
     return bits;
   }
   void set_bits(uint32_t _bits) {
-    I(_bits < (1UL<<Bits_bits));
+    I(_bits < (1UL << Bits_bits));
     I(is_root());
     bits = _bits;
   }
   bool is_driver_setup() const { return driver_setup != 0; }
-  bool is_sink_setup()   const { return sink_setup   != 0; }
-  void set_driver_setup() { driver_setup=1; }
-  void set_sink_setup()   { sink_setup=1; }
+  bool is_sink_setup() const { return sink_setup != 0; }
+  void set_driver_setup() { driver_setup = 1; }
+  void set_sink_setup() { sink_setup = 1; }
 
   const SEdge *get_input_begin() const { return &sedge[get_input_begin_pos_int()]; }
   const SEdge *get_input_end() const { return &sedge[get_input_end_pos_int()]; }
@@ -555,7 +552,7 @@ public:
 
 private:
   int get_input_end_pos_int() const {
-    //if (inp_pos == 0) return get_input_begin_pos_int();
+    // if (inp_pos == 0) return get_input_begin_pos_int();
 
     int pos = inp_pos;
     if (state != Last_Node_State) pos += 2;
