@@ -9,8 +9,6 @@ private:
   std::vector<mmap_lib::Tree_level>    level_stack;
   std::vector<std::vector<Lnast_node>> buffer_stack;
   std::vector<Lnast_node>              node_buffer;
-  std::string_view                     memblock;
-  Lnast *                              lnast;
   std::string                          node_str_buffer;
 
   std::map<std::string_view, std::string> ref_map;

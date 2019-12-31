@@ -14,8 +14,6 @@ void Lnast_to_cfg_parser::generate() {
   fmt::print("lnast_to_cfg_parser path:{} file:{}\n", path, basename);
   fmt::print("{}\n", buffer);
   fmt::print("<<EOF\n");
-
-  I(false);  // Go over files to print them
 }
 
 void Lnast_to_cfg_parser::process_node(const mmap_lib::Tree_index& it) {
