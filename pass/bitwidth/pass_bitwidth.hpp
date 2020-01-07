@@ -23,6 +23,7 @@ protected:
   void iterate_pick(const LGraph *lg, Node_pin &pin, Node_Type_Op op);
   void iterate_join(const LGraph *lg, Node_pin &pin, Node_Type_Op op);
   void iterate_equals(const LGraph *lg, Node_pin &pin, Node_Type_Op op);
+  void iterate_mux(const LGraph *lg, Node_pin &pin, Node_Type_Op op);
 
   void iterate_node(LGraph *lg, Index_ID idx);
   void iterate_driver_pin(LGraph *lg, Node_pin &pin);

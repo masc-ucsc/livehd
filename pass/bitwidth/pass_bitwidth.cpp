@@ -93,7 +93,7 @@ void Pass_bitwidth::iterate_logic(const LGraph *lg, Node_pin &pin, Node_Type_Op 
   // FIXME: Currently treating everything as unsigned
   Ann_bitwidth::Implicit_range imp;
 
-  for (const auto &inp_edge : pin.get_node().inp_edges()) {
+  for (const auto &inp_edge : pin.get_node().inp_edges_ordered()) {
     fmt::print("\titer -- ");
     switch (op) {
       case And_Op:
@@ -163,7 +163,7 @@ void Pass_bitwidth::iterate_arith(const LGraph *lg, Node_pin &pin, Node_Type_Op 
 
   auto curr_node = pin.get_node();
   bool first     = true;
-  for (const auto &inp_edge : curr_node.inp_edges()) {
+  for (const auto &inp_edge : curr_node.inp_edges_ordered()) {
     auto dpin = inp_edge.driver;
     auto spin = inp_edge.sink;
     switch (op) {
@@ -323,47 +323,67 @@ void Pass_bitwidth::iterate_arith(const LGraph *lg, Node_pin &pin, Node_Type_Op 
   updated |= nb_output.i.expand(imp, false);*/
 }
 
-/*void Pass_bitwidth::iterate_shift(const LGraph *lg, Index_ID idx) {
-  //FIXME: This does not work for >>> currently. Only looks at first two node values.
+void Pass_bitwidth::iterate_shift(const LGraph *lg, Node_pin &pin, Node_Type_Op op) {
+  Ann_bitwidth::Implicit_range imp;
+
   bool updated = false;
+  int64_t pos = 0;
 
-  int pos = 0;
-  int64_t val_to_shift_min, val_to_shift_max;
-  for (const auto &inp : lg->inp_edges(idx)) {
-    Index_ID inp_idx = inp.get_idx();
+  int64_t shift_by_min, shift_by_max;
+  char s_extend_pin_min, s_extend_pin_max;
+          //double bits = ceil(log2(inp_edge.driver.get_bitwidth().i.max + 1));
 
-    if (pos == 0) {
-      auto &nb_input = lg->node_bitwidth_get(inp_idx);
-      val_to_shift_min = nb_input.i.min;
-      val_to_shift_max = nb_input.i.max;
+  for (const auto &inp_edge : pin.get_node().inp_edges_ordered()) {
+    auto dpin = inp_edge.driver;
+    if(pos == 0) { // "A" pin
+      imp.min = dpin.get_bitwidth().i.min;
+      imp.max = dpin.get_bitwidth().i.max;
+      pos++;
+    } else if(pos == 1) { // "B" pin
+      shift_by_min = dpin.get_bitwidth().i.min;
+      shift_by_max = dpin.get_bitwidth().i.max;
+      pos++;
+    } else if(pos == 2) { // "S" pin, if applicable
+      s_extend_pin_min = dpin.get_bitwidth().i.min;
+      s_extend_pin_max = dpin.get_bitwidth().i.max;
+      pos++;
     } else {
-      auto nb_input = lg->node_bitwidth_get(inp_idx);
-      auto &nb_output = lg->node_bitwidth_get(idx);
-
-      const auto &op = lg->node_type_get(idx);
-      switch(op.op) {
-        case ShiftLeft_Op:
-          nb_input.i.min = val_to_shift_min << nb_input.i.min;
-          nb_input.i.max = val_to_shift_max << nb_input.i.max;
-          break;
-        case ShiftRight_Op:
-          //FIXME: How to determine between >> and >>> ?
-          nb_input.i.min = val_to_shift_min >> nb_input.i.min;
-          nb_input.i.max = val_to_shift_max >> nb_input.i.max;
-          break;
-        default:
-          fmt::print("op not found!\n");
-      }
-
-      updated |= nb_output.i.expand(nb_input.i, false);
+      //FIXME: This should never occur, I think?
+      fmt::print("\tToo many pins connected to shift_op node.\n");
     }
-    pos++;
   }
 
-  if(updated) {
-    mark_all_outputs(lg, idx);
+  //FIXME: The logic for shifts is pretty tough. Reconsider if this is right.
+  //  The reason it's tough is because of how shifts can drop bits in explicit.
+  //  So 4'b0110 << 2 has a new max of 4'b1000 (8) not 'b011000 (24).
+  //SOLUTION?: Maybe I should just do it so if explicit is set, don't touch.
+  //  As of now, I only do it as if everything is implicit.
+  switch (op) {
+    case LogicShiftRight_Op:
+      //LogicShiftRight: A >> B
+      imp.min = imp.min >> shift_by_max;
+      imp.max = imp.max >> shift_by_min;
+      break;
+    case ShiftLeft_Op:
+      //ShiftLeft: A << B
+      //FIXME: Edge case exists where the below operation creates a # > 2^64.
+      imp.min = imp.min << shift_by_min;
+      imp.max = imp.max << shift_by_max;
+      break;
+    case ShiftRight_Op:
+      //ShiftRight: A >> B [S == 1 sign extend, S == 2 B is signed]
+    case DynamicShiftLeft_Op:
+      //DynamicShiftLeft: Y = A[$signed(B) -: bit_width(A)]
+    case DynamicShiftRight_Op:
+      //DynamicShiftRight: Y = A[$signed(B) +: bit_width(A)]
+    case ArithShiftRight_Op:
+      //ArithShiftRight: $signed(A) >>> B
+      fmt::print("This specific shift node type not yet supported.\n");
+      break;
+    default:
+      fmt::print("Unknown comparison operator used.\n");
   }
-}*/
+}
 
 void Pass_bitwidth::iterate_comparison(const LGraph *lg, Node_pin &pin, Node_Type_Op op) {
   // NOTE: The system will take care of constant values such as (a >= 4'b0) or (4'b1111 > 4'b0111)
@@ -424,9 +444,46 @@ void Pass_bitwidth::iterate_comparison(const LGraph *lg, Node_pin &pin, Node_Typ
 void Pass_bitwidth::iterate_join(const LGraph *lg, Node_pin &pin, Node_Type_Op op) {
   // FIXME: Still in progress.
   fmt::print("\titerate_join:\n");
-  for (const auto &inp_edge : pin.get_node().inp_edges()) {
-    auto spin = inp_edge.sink;
-    fmt::print("\t\t{} {}\n", spin.debug_name(), spin.get_pid());
+
+  Ann_bitwidth::Implicit_range imp;
+  int64_t total_bits_min = 0;
+  int64_t total_bits_max = 0;
+  bool ovfl = false;
+  bool first = true;
+
+  for (const auto &inp_edge : pin.get_node().inp_edges_ordered()) {
+    //FIXME: This will work for all non-negative numbers, I think.
+    //  Figure out how to get working for negatives.
+    //FIXME: My understanding is input 1 is A, input 2 is B, etc.,
+    //  the final output Y should be [...,C,B,A]
+    auto dpin = inp_edge.driver;
+    if(first) {
+      if(dpin.get_bitwidth().i.overflow) {//input in ovfl mode
+        ovfl = true;
+        imp.min = 0;//FIXME: Maybe set this to 1 bit? If so, need to also set t_b_min to 1
+        imp.max = dpin.get_bitwidth().i.max;//In this case, dpin max is max # bits.
+        total_bits_max = dpin.get_bitwidth().i.max;
+      } else {
+        imp.min = dpin.get_bitwidth().i.min;
+        imp.max = dpin.get_bitwidth().i.max;
+        total_bits_max = ceil(log2(dpin.get_bitwidth().i.max + 1));
+      }
+      first = false;
+    } else {
+      double bits_max = ceil(log2(dpin.get_bitwidth().i.max + 1));
+      double bits_min = ceil(log2(dpin.get_bitwidth().i.min + 1));
+
+      if((bits_max + total_bits_max) > 63) {
+        //Enter overflow mode.
+        
+      } else {
+
+        imp.max += imp.max << total_bits_max;
+        total_bits_max += bits_max;
+        imp.min += imp.min << total_bits_min;
+        total_bits_min += bits_min;
+      }
+    }
   }
   for (const auto &out_edge : pin.get_node().out_edges()) {
     auto dpin = out_edge.driver;
@@ -435,9 +492,11 @@ void Pass_bitwidth::iterate_join(const LGraph *lg, Node_pin &pin, Node_Type_Op o
 }
 
 void Pass_bitwidth::iterate_pick(const LGraph *lg, Node_pin &pin, Node_Type_Op op) {
+  //NOTE: Pick is used to choose a certain number of bits like A[3:1]
+  //Y = A[i,j]... pid 0 = A, pid 1 = offset... j = offset, i = offset + y-bw
   // FIXME: Still in progress.
   fmt::print("\titerate_pick:\n");
-  for (const auto &inp_edge : pin.get_node().inp_edges()) {
+  for (const auto &inp_edge : pin.get_node().inp_edges_ordered()) {
     auto spin = inp_edge.sink;
     fmt::print("\t\t{}\n", spin.get_pid());
   }
@@ -471,7 +530,7 @@ void Pass_bitwidth::iterate_equals(const LGraph *lg, Node_pin &pin, Node_Type_Op
   int64_t                      check_min;
   int64_t                      check_max;
   Ann_bitwidth::Implicit_range imp;
-  for (const auto &inp_edge : pin.get_node().inp_edges()) {
+  for (const auto &inp_edge : pin.get_node().inp_edges_ordered()) {
     auto dpin = inp_edge.driver;
     if (first) {
       check_min = dpin.get_bitwidth().i.min;
@@ -503,6 +562,35 @@ void Pass_bitwidth::iterate_equals(const LGraph *lg, Node_pin &pin, Node_Type_Op
 
   if (updated) {
     fmt::print("\tUpdate\n");
+    mark_all_outputs(lg, pin);
+  }
+}
+
+
+void Pass_bitwidth::iterate_mux(const LGraph *lg, Node_pin &pin, Node_Type_Op op) {
+  Ann_bitwidth::Implicit_range imp;
+
+  bool updated = false;
+  bool first = true;
+  for (const auto &inp_edge : pin.get_node().inp_edges_ordered()) {
+    auto dpin = inp_edge.driver;
+    auto spin = inp_edge.sink;
+    if(spin.get_pid() != 0) { // Bitwidth is the max / min
+      fmt::print("\tNot S pin bw: {} {}\n", dpin.get_bitwidth().i.min, dpin.get_bitwidth().i.max);
+      if(first) {
+        imp.min = dpin.get_bitwidth().i.min;
+        imp.max = dpin.get_bitwidth().i.max;
+        first = false;
+      } else {
+        imp.min = (imp.min > dpin.get_bitwidth().i.min) ? dpin.get_bitwidth().i.min : imp.min;
+        imp.max = (imp.max < dpin.get_bitwidth().i.max) ? dpin.get_bitwidth().i.max : imp.max;
+      }
+    }
+  }
+
+  updated = pin.ref_bitwidth()->i.update(imp);
+  if (updated) {
+    fmt::print("\tUpdate: ");
     mark_all_outputs(lg, pin);
   }
 }
@@ -608,7 +696,7 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
     fmt::print("type: {}\n", node.get_type().op);
 
     // Iterate over inputs to some node.
-    for (const auto &out_edge : node.out_edges()) {
+    for (const auto &out_edge : node.out_edges_ordered()) {
       auto dpin = out_edge.driver;
       auto spin = out_edge.sink;
       fmt::print("name_o:{} {} pid:{} -> name:{} pid:{}\n", dpin.debug_name(), dpin.get_bits(), dpin.get_pid(), spin.debug_name(),
@@ -676,7 +764,7 @@ void Pass_bitwidth::iterate_driver_pin(LGraph *lg, Node_pin &pin) {
       break;
     case ShiftLeft_Op:
     case ShiftRight_Op:
-      // iterate_shift(lg, pin, node_type);
+      iterate_shift(lg, pin, node_type);
       break;
     case Join_Op:
       fmt::print("Join_Op\n");
@@ -689,6 +777,10 @@ void Pass_bitwidth::iterate_driver_pin(LGraph *lg, Node_pin &pin) {
     case U32Const_Op:
       fmt::print("U32Const_Op\n");
       mark_all_outputs(lg, pin);
+      break;
+    case Mux_Op:
+      fmt::print("Mux_Op\n");
+      iterate_mux(lg, pin, node_type);
       break;
     default: fmt::print("Op not yet supported in iterate_driver_pin\n");
   }

@@ -349,6 +349,8 @@ std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
   top->add_edge(const_eq_node2_driver_1, equal_sink_2);
   top->add_edge(equal_driver_1, top_t);
 
+  //BW cases designed but no test cases written yet: mux, shift (LogicRight, Left)
+
   //------------ construct your lgraph end-------------------
 
   std::vector<LGraph *> lgs;
