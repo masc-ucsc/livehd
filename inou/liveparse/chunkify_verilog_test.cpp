@@ -1,8 +1,8 @@
 
+#include <iostream>
 
 #include "chunkify_verilog.hpp"
-
-#include <iostream>
+#include "eprp_utils.hpp"
 
 #include "gtest/gtest.h"
 
@@ -13,8 +13,8 @@ protected:
 };
 
 TEST_F(VTest1, interface) {
-  rmdir("tbase");
-  rmdir("tdelta");
+  Eprp_utils::clean_dir("tbase");
+  Eprp_utils::clean_dir("tdelta");
 
   Chunkify_verilog chunker("tbase");
 
