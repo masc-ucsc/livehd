@@ -1,0 +1,9 @@
+
+Sample runtime for pyrope.
+
+It allows single or multithreaded runtime. The single threaded is much faster
+unless the multithreaded has a "significant" amount of work per thread.
+
+The c++ code generates the same result as the sample.v code.
+
+
