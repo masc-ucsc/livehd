@@ -1,6 +1,4 @@
 
-// vcs -full64 -xzcheck +warn=noSV-LCM-PPWI +warn=noSV-LCM-RIPI +v2k -sverilog +cli -q sample.v
-
 // vcs -full64 +v2k -sverilog -q sample.v
 
 //Compiler version E-2011.03-SP1_Full64; Runtime version E-2011.03-SP1_Full64;  Mar 27 14:09 2012
@@ -14,14 +12,7 @@
 //memory[127] = 2895488477
 //memory[127] = 3636037032
 //memory[127] = 3231259825
-//$finish called from file "sample.v", line 206.
-//$finish at simulation time            100010000
-//           V C S   S i m u l a t i o n   R e p o r t 
-//Time: 100010000
-//CPU Time:      7.050 seconds;       Data structure size:   0.0Mb
-//Tue Mar 27 14:09:42 2012
-//
-//real    0m7.328s
+//...
 
 
 module sample_stage1
@@ -204,7 +195,7 @@ module top_sample();
     reset = 1;
     #10000
     reset = 0;
-    #100000000
+    #1000000000
     $finish();
   end
 
