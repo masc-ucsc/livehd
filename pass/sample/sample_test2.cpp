@@ -6,6 +6,8 @@
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+
+#include "eprp_utils.hpp"
 #include "lgraph.hpp"
 #include "pass_sample.hpp"
 
@@ -17,7 +19,8 @@ protected:
 };
 
 TEST_F(SampleMainTest, EmptyLGraph) {
-  rmdir("pass_test_lgdb");
+  Eprp_utils::clean_dir("pass_test_lgdb");
+
   LGraph *g = LGraph::create("pass_test_lgdb", "empty", "nosource");
 
   Eprp_var var;
