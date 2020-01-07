@@ -45,6 +45,8 @@ this Software.
 The following pieces of software have additional or alternate copyrights,
 licenses, and/or restrictions:
 
+simlib/?int.hpp: BSD 3-Clause
+
 third_party/lef: Apache-2 license
 third_party/def: Apache-2 license
 third_party/ezsat: ISC license

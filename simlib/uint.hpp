@@ -1,3 +1,4 @@
+//  This file extracted from the https://github.com/ucsc-vama/firrtl-sig repo with LICENSE.firrtl-sig license
 #pragma once
 
 #include <algorithm>
@@ -7,7 +8,6 @@
 #include <iostream>
 #include <random>
 #include <type_traits>
-
 
 // Internal RNG
 namespace {

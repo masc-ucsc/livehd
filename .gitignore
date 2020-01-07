@@ -9,6 +9,7 @@ cscope*
 *.swo
 *.swn
 *.pyc
+*.hpp.gch
 *.o
 *.log
 fm_*.tcl

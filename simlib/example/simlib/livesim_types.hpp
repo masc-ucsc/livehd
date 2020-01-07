@@ -1,5 +1,6 @@
 #pragma once
 
-#include "uint.h"
+#include "uint.hpp"
+#include "sint.hpp"
 #include <array>
 

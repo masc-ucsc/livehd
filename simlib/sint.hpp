@@ -1,10 +1,10 @@
-#ifndef SINT_H_
-#define SINT_H_
+//  This file extracted from the https://github.com/ucsc-vama/firrtl-sig repo with LICENSE.firrtl-sig license
+
+#pragma once
 
 #include <cinttypes>
 
-#include "uint.h"
-
+#include "uint.hpp"
 
 template<int w_>
 class SInt {
@@ -372,4 +372,3 @@ std::ostream& operator<<(std::ostream& os, const SInt<w>& si) {
   return os;
 }
 
-#endif  // SINT_H_
