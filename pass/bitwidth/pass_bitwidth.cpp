@@ -156,7 +156,7 @@ void Pass_bitwidth::iterate_logic(const LGraph *lg, Node_pin &pin, Node_Type_Op 
 }
 
 void Pass_bitwidth::iterate_arith(const LGraph *lg, Node_pin &pin, Node_Type_Op op) {
-  bool updated;
+  bool updated = false;
 
   // From this driver pin's node, look at inp edges and figure out bw info from those.
   Ann_bitwidth::Implicit_range imp;
@@ -233,94 +233,6 @@ void Pass_bitwidth::iterate_arith(const LGraph *lg, Node_pin &pin, Node_Type_Op 
     fmt::print("\tUpdate: ");
     mark_all_outputs(lg, pin);
   }
-
-  /*int64_t max = 0;
-  int64_t min = 0;
-
-  bool first = true;
-  bool add;
-  Node_bitwidth::Implicit_range imp;
-  auto &nb_output = lg->node_bitwidth_get(idx);
-
-  for(const auto &inp : lg->inp_edges(idx)) {
-    Index_ID inp_idx = inp.get_idx();
-    const auto &nb_input  = lg->node_bitwidth_get(inp_idx);
-
-    const auto &op = lg->node_type_get(idx);
-    switch(op.op) {
-      case Sum_Op:
-        if(first) {
-          if(inp.get_inp_pin().get_pid() == 0 || inp.get_inp_pin().get_pid() == 1) {
-            add = true;
-          } else {
-            add = false;
-          }
-          min = nb_input.i.min;
-          max = nb_input.i.max;
-          imp.sign = nb_input.i.sign;
-          first = false;
-        } else {
-          if (add) {
-            imp.min = nb_input.i.min + min;
-            imp.max = nb_input.i.max + max;
-          } else {
-            imp.min = nb_input.i.min - max;
-            imp.max = nb_input.i.max - min;
-          }
-          imp.sign &= nb_input.i.sign;
-        }
-        break;
-
-      case Mult_Op:
-        if (first) {
-          min = nb_input.i.min;
-          max = nb_input.i.max;
-          imp.sign = nb_input.i.sign;
-          first = false;
-        } else {
-          imp.min = nb_input.i.min * min;
-          imp.max = nb_input.i.max * max;
-          imp.sign &= nb_input.i.sign;
-        }
-        break;
-
-      // In Verilator if I divide x by 0, the output is 0. We use that assumption here.
-      case Div_Op:
-        if (first) {
-          min = nb_input.i.min;
-          max = nb_input.i.max;
-          imp.sign = nb_input.i.sign;
-          first = false;
-        } else {
-          if (max == 0) {
-            imp.min = 0;
-          } else {
-            imp.min = (int64_t)floor((double)nb_input.i.min / (double)max);
-          }
-
-          if (min == 0) {
-            if (max == 0) {
-              imp.max = 0;
-            } else {
-              imp.max = nb_input.i.max;
-            }
-          } else {
-            imp.max = (int64_t)floor((double)nb_input.i.max / (double)min);
-          }
-          imp.sign &= nb_input.i.sign;
-        }
-        break;
-
-      //FIXME: We have to make conservative estimates since modulo is hard to restrict range.
-      case Mod_Op:
-        updated |= imp.expand(nb_input.i, false);
-        break;
-
-      default:
-        fmt::print("FIXME! op not found!");
-    }
-  }
-  updated |= nb_output.i.expand(imp, false);*/
 }
 
 void Pass_bitwidth::iterate_shift(const LGraph *lg, Node_pin &pin, Node_Type_Op op) {
@@ -389,8 +301,9 @@ void Pass_bitwidth::iterate_comparison(const LGraph *lg, Node_pin &pin, Node_Typ
   // NOTE: The system will take care of constant values such as (a >= 4'b0) or (4'b1111 > 4'b0111)
   //      behind the scenes. FIXME: This was an old note. Is it still true?
 
-  bool                         updated = false;
-  bool                         set     = false;
+  bool                         updated   = false;
+  bool                         set       = false;
+  bool                         terminate = false;
   Ann_bitwidth::Implicit_range imp;
   imp.min = 1;
   imp.max = 1;
@@ -401,11 +314,26 @@ void Pass_bitwidth::iterate_comparison(const LGraph *lg, Node_pin &pin, Node_Typ
     auto dpin = inp_edge.driver;
     auto spin = inp_edge.sink;
     if (spin.get_pid() == 0 || spin.get_pid() == 1) {  // If AS or AU pins
+      if(dpin.get_bitwidth().i.overflow | terminate) {
+        //If overflow is involved, impossible to calculate.
+        fmt::print("\tOverflow involved\n");
+        imp.min = 0;
+        imp.max = 1;
+        set = true;
+        break;
+      }
+
       for (const auto &comp_edge : pin.get_node().inp_edges()) {
         auto comp_dpin = comp_edge.driver;
         auto comp_spin = comp_edge.sink;
         if (comp_spin.get_pid() == 2 || comp_spin.get_pid() == 3) {  // If BS or BU pins
           set = true;
+          if(comp_dpin.get_bitwidth().i.overflow) {
+            //B pin is set to overflow mode. Impossible to calculate bw now.
+            terminate = true;
+            break;
+          }
+
           switch (op) {
             // NOTE: At some point, go back over this logic and make sure it's right.
             case LessThan_Op:
@@ -442,7 +370,6 @@ void Pass_bitwidth::iterate_comparison(const LGraph *lg, Node_pin &pin, Node_Typ
 }
 
 void Pass_bitwidth::iterate_join(const LGraph *lg, Node_pin &pin, Node_Type_Op op) {
-  // FIXME: Still in progress.
   fmt::print("\titerate_join:\n");
 
   Ann_bitwidth::Implicit_range imp;
@@ -450,6 +377,7 @@ void Pass_bitwidth::iterate_join(const LGraph *lg, Node_pin &pin, Node_Type_Op o
   int64_t total_bits_max = 0;
   bool ovfl = false;
   bool first = true;
+  bool updated = false;
 
   for (const auto &inp_edge : pin.get_node().inp_edges_ordered()) {
     //FIXME: This will work for all non-negative numbers, I think.
@@ -459,35 +387,60 @@ void Pass_bitwidth::iterate_join(const LGraph *lg, Node_pin &pin, Node_Type_Op o
     auto dpin = inp_edge.driver;
     if(first) {
       if(dpin.get_bitwidth().i.overflow) {//input in ovfl mode
+        fmt::print("\t1\n");
         ovfl = true;
         imp.min = 0;//FIXME: Maybe set this to 1 bit? If so, need to also set t_b_min to 1
         imp.max = dpin.get_bitwidth().i.max;//In this case, dpin max is max # bits.
         total_bits_max = dpin.get_bitwidth().i.max;
       } else {
+        fmt::print("\t2\n");
         imp.min = dpin.get_bitwidth().i.min;
         imp.max = dpin.get_bitwidth().i.max;
         total_bits_max = ceil(log2(dpin.get_bitwidth().i.max + 1));
       }
       first = false;
+    } else if(dpin.get_bitwidth().i.overflow) {
+      if(ovfl) {
+        //Already in overflow mode, so no conversions necessary.
+        fmt::print("\t6\n");
+        imp.max += dpin.get_bitwidth().i.max;
+      } else {
+        //Convert current range to overflow mode.
+        fmt::print("\t7\n");
+        ovfl = true;
+        imp.max = ceil(log2(imp.max + 1));
+        imp.max += dpin.get_bitwidth().i.max;
+      }
     } else {
       double bits_max = ceil(log2(dpin.get_bitwidth().i.max + 1));
       double bits_min = ceil(log2(dpin.get_bitwidth().i.min + 1));
 
-      if((bits_max + total_bits_max) > 63) {
+      if(ovfl) {
+        fmt::print("\t3\n");
+        //Already in overflow mode.
+        imp.max += bits_max;
+      } else if ((bits_max + total_bits_max) > 63) {
+        fmt::print("\t4\n");
         //Enter overflow mode.
-        
+        ovfl = true;
+        imp.max = bits_max + total_bits_max;
+        imp.min = 0;//FIXME: Like FIXME above, maybe set this to 1 instead?
       } else {
-
-        imp.max += imp.max << total_bits_max;
+        fmt::print("\t5 -- {} {}\n", dpin.get_bitwidth().i.max, dpin.get_bitwidth().i.min);
+        //Not in overflow mode.
+        imp.max += dpin.get_bitwidth().i.max << total_bits_max;
         total_bits_max += bits_max;
-        imp.min += imp.min << total_bits_min;
+        imp.min += dpin.get_bitwidth().i.min << total_bits_min;
         total_bits_min += bits_min;
       }
     }
+    fmt::print("\t{} {} {}\n", (int64_t)imp.min, (int64_t)imp.max, total_bits_max);
   }
-  for (const auto &out_edge : pin.get_node().out_edges()) {
-    auto dpin = out_edge.driver;
-    fmt::print("\t\t{} {}\n", dpin.debug_name(), dpin.get_pid());
+  updated = pin.ref_bitwidth()->i.update(imp);
+
+  if (updated) {
+    fmt::print("\tUpdate\n");
+    mark_all_outputs(lg, pin);
   }
 }
 
@@ -575,13 +528,25 @@ void Pass_bitwidth::iterate_mux(const LGraph *lg, Node_pin &pin, Node_Type_Op op
   for (const auto &inp_edge : pin.get_node().inp_edges_ordered()) {
     auto dpin = inp_edge.driver;
     auto spin = inp_edge.sink;
-    if(spin.get_pid() != 0) { // Bitwidth is the max / min
+    if(spin.get_pid() != 0) { // Base bw off pins except "S" pin
       fmt::print("\tNot S pin bw: {} {}\n", dpin.get_bitwidth().i.min, dpin.get_bitwidth().i.max);
       if(first) {
         imp.min = dpin.get_bitwidth().i.min;
         imp.max = dpin.get_bitwidth().i.max;
+        imp.overflow = dpin.get_bitwidth().i.overflow;
         first = false;
-      } else {
+      } else if(dpin.get_bitwidth().i.overflow) {
+        if(imp.overflow) {
+          //Compare which overflow is larger (requires more bits).
+          imp.max = (imp.max < dpin.get_bitwidth().i.max) ? dpin.get_bitwidth().i.max : imp.max;
+        } else {
+          //Output bw isn't yet in overflow mode so this has to be biggest.
+          imp.min = 0;
+          imp.max = dpin.get_bitwidth().i.max;
+          imp.overflow = true;
+        }
+      } else if (!imp.overflow) {
+        //If neither are in overflow mode, widen BW range to contain both ranges.
         imp.min = (imp.min > dpin.get_bitwidth().i.min) ? dpin.get_bitwidth().i.min : imp.min;
         imp.max = (imp.max < dpin.get_bitwidth().i.max) ? dpin.get_bitwidth().i.max : imp.max;
       }
@@ -595,29 +560,7 @@ void Pass_bitwidth::iterate_mux(const LGraph *lg, Node_pin &pin, Node_Type_Op op
   }
 }
 
-/*void Pass_bitwidth::iterate_mux(const LGraph *lg, Index_ID idx) {
-  Node_bitwidth::Implicit_range imp;
-
-  bool updated = false;
-  bool first = true;
-  auto &nb_output = lg->node_bitwidth_get(idx);
-  for(const auto &inp : lg->inp_edges(idx)) {
-    Index_ID inp_idx = inp.get_idx();
-    const auto &nb_input  = lg->node_bitwidth_get(inp_idx);
-    if (first) {
-      //Selector value.
-      first = false;
-    } else {
-      updated |= nb_output.i.expand(nb_input.i, false);
-    }
-  }
-
-  if(updated) {
-    mark_all_outputs(lg,idx);
-  }
-}
-
-void Pass_bitwidth::iterate_subgraph(const LGraph *lg, Index_ID idx) {
+/*void Pass_bitwidth::iterate_subgraph(const LGraph *lg, Index_ID idx) {
 
   std::vector<LGraph *> lgs;
   bool updated = false;
@@ -696,7 +639,7 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
     fmt::print("type: {}\n", node.get_type().op);
 
     // Iterate over inputs to some node.
-    for (const auto &out_edge : node.out_edges_ordered()) {
+    for (const auto &out_edge : node.out_edges()) {
       auto dpin = out_edge.driver;
       auto spin = out_edge.sink;
       fmt::print("name_o:{} {} pid:{} -> name:{} pid:{}\n", dpin.debug_name(), dpin.get_bits(), dpin.get_pid(), spin.debug_name(),
@@ -751,19 +694,23 @@ void Pass_bitwidth::iterate_driver_pin(LGraph *lg, Node_pin &pin) {
     case Mult_Op:
     case Div_Op:
     case Mod_Op:
-      fmt::print("Arith Op -- {} {}\n", pending.size(), next_pending.size());
+      fmt::print("Arith Op --\n");
       iterate_arith(lg, pin, node_type);
       break;
     case LessThan_Op:
     case GreaterThan_Op:
     case LessEqualThan_Op:
-    case GreaterEqualThan_Op: iterate_comparison(lg, pin, node_type); break;
+    case GreaterEqualThan_Op:
+      fmt::print("Comparison Op --\n");
+      iterate_comparison(lg, pin, node_type);
+      break;
     case Equals_Op:
       fmt::print("Equals Op --\n");
       iterate_equals(lg, pin, node_type);
       break;
     case ShiftLeft_Op:
     case ShiftRight_Op:
+      fmt::print("Shift Op --\n");
       iterate_shift(lg, pin, node_type);
       break;
     case Join_Op:

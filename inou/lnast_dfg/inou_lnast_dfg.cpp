@@ -256,6 +256,13 @@ void Inou_lnast_dfg::gen_temp_lg(Eprp_var &var) {
   }
 }
 
+//FIXME: Move these later, just for isolating tests for now.
+
+//#define basic_tests
+//#define join_test //PASSING w/ exception of constants
+//#define mux_test //PASSING
+#define comparison_test
+
 std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
   Lbench b("inou.gen_temp_lg.do_tolg");
 
@@ -264,6 +271,8 @@ std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
   //------------ construct your lgraph start-------------------
 
   int pos = 0;
+
+#ifdef basic_tests
 
   // IO
   auto top_a = top->add_graph_input("a", pos++, 4);
@@ -349,7 +358,308 @@ std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
   top->add_edge(const_eq_node2_driver_1, equal_sink_2);
   top->add_edge(equal_driver_1, top_t);
 
-  //BW cases designed but no test cases written yet: mux, shift (LogicRight, Left)
+#endif
+
+#ifdef mux_test
+  //Simple 4-to-1 mux. BW should be 0 to (2^5 - 1).
+  auto top_mux_a = top->add_graph_input("mux_a", pos++, 2);
+  auto top_mux_b = top->add_graph_input("mux_b", pos++, 2);
+  auto top_mux_c = top->add_graph_input("mux_c", pos++, 3);
+  auto top_mux_d = top->add_graph_input("mux_d", pos++, 4);
+  auto top_mux_e = top->add_graph_input("mux_e", pos++, 5);
+  auto top_mux_z = top->add_graph_output("mux_z", pos++, 6);
+
+  auto mux          = top->create_node(Mux_Op);
+  auto mux_sink_1   = mux.setup_sink_pin("S");
+  auto mux_sink_2   = mux.setup_sink_pin("A");
+  auto mux_sink_3   = mux.setup_sink_pin("B");
+  auto mux_sink_4   = mux.setup_sink_pin("C");
+  auto mux_sink_5   = mux.setup_sink_pin("D");
+  auto mux_driver_1 = mux.setup_driver_pin("Y");
+  top->add_edge(top_mux_a, mux_sink_1);
+  top->add_edge(top_mux_b, mux_sink_2);
+  top->add_edge(top_mux_c, mux_sink_3);
+  top->add_edge(top_mux_d, mux_sink_4);
+  top->add_edge(top_mux_e, mux_sink_5);
+  top->add_edge(mux_driver_1, top_mux_z);
+
+  //Mux that has an input in overflow mode.
+  auto top_mux_f = top->add_graph_input("mux_f", pos++, 1);
+  auto top_mux_g = top->add_graph_input("mux_g", pos++, 10);
+  auto top_mux_h = top->add_graph_input("mux_h", pos++, 66);
+  auto top_mux_y = top->add_graph_output("mux_y", pos++, 70);
+
+  auto muxo         = top->create_node(Mux_Op);
+  auto muxo_sink_1   = muxo.setup_sink_pin("S");
+  auto muxo_sink_2   = muxo.setup_sink_pin("A");
+  auto muxo_sink_3   = muxo.setup_sink_pin("B");
+  auto muxo_driver_1 = muxo.setup_driver_pin("Y");
+  top->add_edge(top_mux_f, muxo_sink_1);
+  top->add_edge(top_mux_g, muxo_sink_2);
+  top->add_edge(top_mux_h, muxo_sink_3);
+  top->add_edge(muxo_driver_1, top_mux_y);
+#endif
+
+#ifdef comparison_test
+  //Defining all constants used.
+  auto const_node1 = top->create_node_const(10);
+  auto const_node2 = top->create_node_const(20);
+  auto const_node3 = top->create_node_const(7);
+  auto const_node4 = top->create_node_const(1);
+  auto const_node5 = top->create_node_const(100);
+  auto const_node1_driver = const_node1.setup_driver_pin("Y");
+  auto const_node2_driver = const_node2.setup_driver_pin("Y");
+  auto const_node3_driver = const_node3.setup_driver_pin("Y");
+  auto const_node4_driver = const_node4.setup_driver_pin("Y");
+  auto const_node5_driver = const_node5.setup_driver_pin("Y");
+
+  //LT: 10 < 20 & 10 < 7 ... always 0.
+  auto top_comp_z = top->add_graph_output("comp_z", pos++, 4);
+
+  auto lt          = top->create_node(LessThan_Op);
+  auto lt_sink_1   = lt.setup_sink_pin("AU");
+  auto lt_sink_2   = lt.setup_sink_pin("BU");
+  auto lt_sink_3   = lt.setup_sink_pin("BU");
+  auto lt_driver_1 = lt.setup_driver_pin("Y");
+  top->add_edge(const_node1_driver, lt_sink_1);
+  top->add_edge(const_node2_driver, lt_sink_2);
+  top->add_edge(const_node3_driver, lt_sink_3);
+
+  top->add_edge(lt_driver_1, top_comp_z);
+
+  //LT: 1 < 20 & 1 < 7 ... always 1.
+  auto top_comp_y = top->add_graph_output("comp_y", pos++, 1);
+
+  auto lt2          = top->create_node(LessThan_Op);
+  auto lt2_sink_1   = lt2.setup_sink_pin("AU");
+  auto lt2_sink_2   = lt2.setup_sink_pin("BU");
+  auto lt2_sink_3   = lt2.setup_sink_pin("BU");
+  auto lt2_driver_1 = lt2.setup_driver_pin("Y");
+  top->add_edge(const_node4_driver, lt2_sink_1);
+  top->add_edge(const_node2_driver, lt2_sink_2);
+  top->add_edge(const_node3_driver, lt2_sink_3);
+  top->add_edge(lt2_driver_1, top_comp_y);
+
+  //LT: [0,7] < [0,15] & [0,7] < [0,3] ... result = [0,1].
+  auto top_comp_a = top->add_graph_input("comp_a", pos++, 3);
+  auto top_comp_b = top->add_graph_input("comp_b", pos++, 4);
+  auto top_comp_c = top->add_graph_input("comp_c", pos++, 2);
+  auto top_comp_x = top->add_graph_output("comp_x", pos++, 1);
+
+  auto lt3          = top->create_node(LessThan_Op);
+  auto lt3_sink_1   = lt3.setup_sink_pin("AU");
+  auto lt3_sink_2   = lt3.setup_sink_pin("BU");
+  auto lt3_sink_3   = lt3.setup_sink_pin("BU");
+  auto lt3_driver_1 = lt3.setup_driver_pin("Y");
+  top->add_edge(top_comp_a, lt3_sink_1);
+  top->add_edge(top_comp_b, lt3_sink_2);
+  top->add_edge(top_comp_c, lt3_sink_3);
+  top->add_edge(lt3_driver_1, top_comp_x);
+
+  //GT: 10 > 20 & 10 > 7 ... always 0.
+  auto top_comp_w = top->add_graph_output("comp_w", pos++, 4);
+
+  auto gt          = top->create_node(GreaterThan_Op);
+  auto gt_sink_1   = gt.setup_sink_pin("AU");
+  auto gt_sink_2   = gt.setup_sink_pin("BU");
+  auto gt_sink_3   = gt.setup_sink_pin("BU");
+  auto gt_driver_1 = gt.setup_driver_pin("Y");
+  top->add_edge(const_node1_driver, gt_sink_1);
+  top->add_edge(const_node2_driver, gt_sink_2);
+  top->add_edge(const_node3_driver, gt_sink_3);
+  top->add_edge(gt_driver_1, top_comp_w);
+
+  //GT: 100 > 20 & 100 > 7 ... always 1.
+  auto top_comp_v = top->add_graph_output("comp_v", pos++, 4);
+
+  auto gt2          = top->create_node(GreaterThan_Op);
+  auto gt2_sink_1   = gt2.setup_sink_pin("AU");
+  auto gt2_sink_2   = gt2.setup_sink_pin("BU");
+  auto gt2_sink_3   = gt2.setup_sink_pin("BU");
+  auto gt2_driver_1 = gt2.setup_driver_pin("Y");
+  top->add_edge(const_node5_driver, gt2_sink_1);
+  top->add_edge(const_node2_driver, gt2_sink_2);
+  top->add_edge(const_node3_driver, gt2_sink_3);
+  top->add_edge(gt2_driver_1, top_comp_v);
+
+  //GT: [0,7] < [0,15] & [0,7] < [0,3] ... result = [0,1].
+  auto top_comp_d = top->add_graph_input("comp_d", pos++, 3);
+  auto top_comp_e = top->add_graph_input("comp_e", pos++, 4);
+  auto top_comp_f = top->add_graph_input("comp_f", pos++, 2);
+  auto top_comp_u = top->add_graph_output("comp_u", pos++, 1);
+
+  auto gt3          = top->create_node(GreaterThan_Op);
+  auto gt3_sink_1   = gt3.setup_sink_pin("AU");
+  auto gt3_sink_2   = gt3.setup_sink_pin("BU");
+  auto gt3_sink_3   = gt3.setup_sink_pin("BU");
+  auto gt3_driver_1 = gt3.setup_driver_pin("Y");
+  top->add_edge(top_comp_d, gt3_sink_1);
+  top->add_edge(top_comp_e, gt3_sink_2);
+  top->add_edge(top_comp_f, gt3_sink_3);
+  top->add_edge(gt3_driver_1, top_comp_u);
+
+  //LTE: 10 <= 20 & 10 <= 7 ... always 0.
+  auto top_comp_t = top->add_graph_output("comp_t", pos++, 4);
+
+  auto lte          = top->create_node(LessEqualThan_Op);
+  auto lte_sink_1   = lte.setup_sink_pin("AU");
+  auto lte_sink_2   = lte.setup_sink_pin("BU");
+  auto lte_sink_3   = lte.setup_sink_pin("BU");
+  auto lte_driver_1 = lte.setup_driver_pin("Y");
+  top->add_edge(const_node1_driver, lte_sink_1);
+  top->add_edge(const_node2_driver, lte_sink_2);
+  top->add_edge(const_node3_driver, lte_sink_3);
+
+  top->add_edge(lte_driver_1, top_comp_t);
+
+  //LTE: 1 <= 20 & 1 <= 1 ... always 1.
+  auto top_comp_s = top->add_graph_output("comp_s", pos++, 1);
+
+  auto lte2          = top->create_node(LessEqualThan_Op);
+  auto lte2_sink_1   = lte2.setup_sink_pin("AU");
+  auto lte2_sink_2   = lte2.setup_sink_pin("BU");
+  auto lte2_sink_3   = lte2.setup_sink_pin("BU");
+  auto lte2_driver_1 = lte2.setup_driver_pin("Y");
+  top->add_edge(const_node4_driver, lte2_sink_1);
+  top->add_edge(const_node2_driver, lte2_sink_2);
+  top->add_edge(const_node4_driver, lte2_sink_3);
+  top->add_edge(lte2_driver_1, top_comp_s);
+
+  //LTE: [0,7] < [0,15] & [0,7] < [0,3] ... result = [0,1].
+  auto top_comp_g = top->add_graph_input("comp_g", pos++, 3);
+  auto top_comp_h = top->add_graph_input("comp_h", pos++, 4);
+  auto top_comp_i = top->add_graph_input("comp_i", pos++, 2);
+  auto top_comp_r = top->add_graph_output("comp_r", pos++, 1);
+
+  auto lte3          = top->create_node(LessEqualThan_Op);
+  auto lte3_sink_1   = lte3.setup_sink_pin("AU");
+  auto lte3_sink_2   = lte3.setup_sink_pin("BU");
+  auto lte3_sink_3   = lte3.setup_sink_pin("BU");
+  auto lte3_driver_1 = lte3.setup_driver_pin("Y");
+  top->add_edge(top_comp_g, lte3_sink_1);
+  top->add_edge(top_comp_h, lte3_sink_2);
+  top->add_edge(top_comp_i, lte3_sink_3);
+  top->add_edge(lte3_driver_1, top_comp_r);
+
+  //GTE: 10 >= 20 & 10 >= 7 ... always 0.
+  auto top_comp_q = top->add_graph_output("comp_q", pos++, 4);
+
+  auto gte          = top->create_node(GreaterEqualThan_Op);
+  auto gte_sink_1   = gte.setup_sink_pin("AU");
+  auto gte_sink_2   = gte.setup_sink_pin("BU");
+  auto gte_sink_3   = gte.setup_sink_pin("BU");
+  auto gte_driver_1 = gte.setup_driver_pin("Y");
+  top->add_edge(const_node1_driver, gte_sink_1);
+  top->add_edge(const_node2_driver, gte_sink_2);
+  top->add_edge(const_node3_driver, gte_sink_3);
+
+  top->add_edge(gte_driver_1, top_comp_q);
+
+  //GTE: 1 <= 20 & 1 <= 1 ... always 1.
+  auto top_comp_p = top->add_graph_output("comp_p", pos++, 1);
+
+  auto gte2          = top->create_node(GreaterEqualThan_Op);
+  auto gte2_sink_1   = gte2.setup_sink_pin("AU");
+  auto gte2_sink_2   = gte2.setup_sink_pin("BU");
+  auto gte2_sink_3   = gte2.setup_sink_pin("BU");
+  auto gte2_driver_1 = gte2.setup_driver_pin("Y");
+  top->add_edge(const_node5_driver, gte2_sink_1);
+  top->add_edge(const_node2_driver, gte2_sink_2);
+  top->add_edge(const_node5_driver, gte2_sink_3);
+  top->add_edge(gte2_driver_1, top_comp_p);
+
+  //GTE: [0,7] < [0,15] & [0,7] < [0,3] ... result = [0,1].
+  auto top_comp_j = top->add_graph_input("comp_j", pos++, 3);
+  auto top_comp_k = top->add_graph_input("comp_k", pos++, 4);
+  auto top_comp_l = top->add_graph_input("comp_l", pos++, 2);
+  auto top_comp_o = top->add_graph_output("comp_o", pos++, 1);
+
+  auto gte3          = top->create_node(GreaterEqualThan_Op);
+  auto gte3_sink_1   = gte3.setup_sink_pin("AU");
+  auto gte3_sink_2   = gte3.setup_sink_pin("BU");
+  auto gte3_sink_3   = gte3.setup_sink_pin("BU");
+  auto gte3_driver_1 = gte3.setup_driver_pin("Y");
+  top->add_edge(top_comp_j, gte3_sink_1);
+  top->add_edge(top_comp_k, gte3_sink_2);
+  top->add_edge(top_comp_l, gte3_sink_3);
+  top->add_edge(gte3_driver_1, top_comp_o);
+#endif
+
+#ifdef shift_test
+  //FIXME: Add tests in (try to do before designing pass).
+#endif
+
+#ifdef join_test
+  //Join two inputs (no overflow).
+  auto top_join_a = top->add_graph_input("join_a", pos++, 1);
+  auto top_join_b = top->add_graph_input("join_b", pos++, 3);
+  auto top_join_z = top->add_graph_output("join_z", pos++, 4);
+
+  auto join2i          = top->create_node(Join_Op);
+  auto join2i_sink_1   = join2i.setup_sink_pin(0);
+  auto join2i_sink_2   = join2i.setup_sink_pin(1);
+  auto join2i_driver_1 = join2i.setup_driver_pin("Y");
+  top->add_edge(top_join_a, join2i_sink_1);
+  top->add_edge(top_join_b, join2i_sink_2);
+  top->add_edge(join2i_driver_1, top_join_z);
+
+  //Join two constants.
+  /*auto top_join_y = top->add_graph_output("join_y", pos++, 12);
+
+  //FIXME: This won't work since how I get const value is wrong.
+  auto const_j2c_node1 = top->create_node_const(10);
+  auto const_j2c_node2 = top->create_node_const(20);
+  auto const_j2c_node3 = top->create_node_const(7);
+  auto const_j2c_node1_driver = const_j2c_node1.setup_driver_pin("Y");
+  auto const_j2c_node2_driver = const_j2c_node2.setup_driver_pin("Y");
+  auto const_j2c_node3_driver = const_j2c_node3.setup_driver_pin("Y");
+
+  auto join2c          = top->create_node(Join_Op);
+  auto join2c_sink_1   = join2c.setup_sink_pin(0);
+  auto join2c_sink_2   = join2c.setup_sink_pin(1);
+  auto join2c_sink_3   = join2c.setup_sink_pin(2);
+  auto join2c_driver_1 = join2c.setup_driver_pin("Y");
+  top->add_edge(const_j2c_node1_driver, join2c_sink_1);
+  top->add_edge(const_j2c_node2_driver, join2c_sink_2);
+  top->add_edge(const_j2c_node3_driver, join2c_sink_3);
+  top->add_edge(join2c_driver_1, top_join_y);*/
+
+
+  //Join two inputs (overflow on 1 input).
+  auto top_join_c = top->add_graph_input("join_c", pos++, 65);
+  auto top_join_d = top->add_graph_input("join_d", pos++, 5);
+  auto top_join_x = top->add_graph_output("join_x", pos++, 75);
+
+  auto join2io          = top->create_node(Join_Op);
+  auto join2io_sink_1   = join2io.setup_sink_pin(0);
+  auto join2io_sink_2   = join2io.setup_sink_pin(1);
+  auto join2io_driver_1 = join2io.setup_driver_pin("Y");
+  top->add_edge(top_join_c, join2io_sink_1);
+  top->add_edge(top_join_d, join2io_sink_2);
+  top->add_edge(join2io_driver_1, top_join_x);
+
+  //Join multiple inputs (joining causes overflow).
+  auto top_join_e = top->add_graph_input("join_e", pos++, 10);
+  auto top_join_f = top->add_graph_input("join_f", pos++, 20);
+  auto top_join_g = top->add_graph_input("join_g", pos++, 30);
+  auto top_join_h = top->add_graph_input("join_h", pos++, 39);
+  auto top_join_w = top->add_graph_output("join_w", pos++, 100);
+
+  auto join2o          = top->create_node(Join_Op);
+  auto join2o_sink_1   = join2o.setup_sink_pin(0);
+  auto join2o_sink_2   = join2o.setup_sink_pin(1);
+  auto join2o_sink_3   = join2o.setup_sink_pin(2);
+  auto join2o_sink_4   = join2o.setup_sink_pin(3);
+  auto join2o_driver_1 = join2o.setup_driver_pin("Y");
+  top->add_edge(top_join_e, join2o_sink_1);
+  top->add_edge(top_join_f, join2o_sink_2);
+  top->add_edge(top_join_g, join2o_sink_3);
+  top->add_edge(top_join_h, join2o_sink_4);
+  top->add_edge(join2o_driver_1, top_join_w);
+
+#endif
+
+  //BW cases designed but no test cases written yet: shift (LogicRight, Left)
 
   //------------ construct your lgraph end-------------------
 
