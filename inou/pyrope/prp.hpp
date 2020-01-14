@@ -19,7 +19,7 @@
 #include "ast.hpp"
 #include "elab_scanner.hpp"
 
-#define DEBUG
+//#define DEBUG
 
 // variable argument number macro (adapted from stackoverflow.com/questions/3046889/optional-parameters-with-c-macros)
 #define SCAN_IS_TOKEN_1_ARGS(tok) chk_and_consume(tok, Prp_invalid, &sub_cnt, loc_list)

@@ -51,7 +51,6 @@ cc_binary(
 
 cc_test(
     name = "prp_unit_test",
-    tags = ["fixme"],
     srcs = ["prp_unit_test.cpp"],
     deps = [
         "@gtest//:gtest_main",
