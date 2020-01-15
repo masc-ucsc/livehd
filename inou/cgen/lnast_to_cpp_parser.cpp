@@ -153,7 +153,7 @@ void Lnast_to_cpp_parser::process_buffer() {
   } else if (type.is_dp_assign()) {
     process_assign();
   } else if (type.is_as()) {
-    process_as();
+    process_assign();
   } else if (type.is_label()) {
     process_label();
   } else if (type.is_dot()) {
@@ -252,6 +252,7 @@ bool Lnast_to_cpp_parser::is_attr(std::string_view test_string) { return test_st
 
 void Lnast_to_cpp_parser::process_assign() {
   auto it = node_buffer.begin();
+  const auto op_type = it->type;
   it++;
   std::string_view key = get_node_name(*it);
   it++;
@@ -269,64 +270,47 @@ void Lnast_to_cpp_parser::process_assign() {
     curr_module->var_manager.insert_variable(ref);
   }
 
-  if (is_ref(key)) {
+  std::size_t func_index = ref.find(".combinational");
+  std::string_view func_name = ref.substr(0, func_index);
+  auto func_it = func_map.find((std::string) func_name);
+  if (func_it != func_map.end()) {
+    std::string phrase =  absl::StrCat(func_it->first, "_return ", key);
+
+    curr_module->func_calls.push_back(std::pair<std::string, Cpp_parser_module*>(absl::StrCat(curr_module->filename, "_", key), func_it->second));
+
+    std::string value = curr_module->process_variable(ref);
+    absl::StrAppend(&phrase, " ", op_type.debug_name_cpp(), " ", value, ";\n");
+
+    curr_module->var_manager.insert_variable(key);
+    curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(curr_module->get_indent_buffer(), phrase));
+  } else if (is_ref(key)) {
     fmt::print("map_it: inserting:\tkey:{}\tvalue:{}\n", key, ref);
     ref_map.insert(std::pair<std::string_view, std::string>(key, (std::string)ref));
+  } else if (is_attr(ref)) {
+    if (curr_module->get_if_counter()) {
+    } else {
+    }
+    std::string phrase = absl::StrCat("// LNAST: ", key, " as ", ref, "\n");
+    curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(curr_module->get_indent_buffer(), phrase));
+    curr_module->var_manager.insert_variable(key);
+
+    Variable_options* attr_var = curr_module->var_manager.get(key);
+    attr_var->update_attr((std::string)ref);
+
+    fmt::print("process_as map:\tkey: {}\tvalue: {}\n", key, ref);
   } else {
     // if function print to line and add func variables to module
-    std::string phrase;
-
-    std::size_t      func_index = ref.find("(");
-    std::string_view func_name  = ref.substr(0, func_index);
-    auto             func_it    = func_map.find((std::string)func_name);
-    if (func_it != func_map.end()) {
-      phrase = absl::StrCat(func_it->first, "_return ", key);
-
-      fmt::print("the phrase of the day is : {}\n", phrase);
-      curr_module->func_calls.push_back(
-          std::pair<std::string, Cpp_parser_module*>(absl::StrCat(curr_module->filename, "_", key), func_it->second));
-    } else {
-      phrase = curr_module->process_variable(key);
-      if (curr_module->get_variable_type(key) >= 2) {
-        absl::StrAppend(&phrase, "_next");
-      }
+    std::string phrase = curr_module->process_variable(key);
+    if (curr_module->get_variable_type(key) >= 2) {
+      absl::StrAppend(&phrase, "_next");
     }
     std::string value = curr_module->process_variable(ref);
-    absl::StrAppend(&phrase, " = ", value, ";\n");
+    absl::StrAppend(&phrase, " ", op_type.debug_name_cpp(), " ", value, ";\n");
 
     curr_module->var_manager.insert_variable(key);
     curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(curr_module->get_indent_buffer(), phrase));
 
-    fmt::print("pure_assign value:\tkey: {}\tvalue: {}\n", key, value);
-  }
-}
-
-void Lnast_to_cpp_parser::process_as() {
-  auto it = node_buffer.begin();
-  it++;
-  std::string_view key = get_node_name(*it);
-  it++;
-
-  std::string_view ref    = get_node_name(*it);
-  auto             map_it = ref_map.find(ref);
-  if (map_it != ref_map.end()) {
-    ref = map_it->second;
-  }
-
-  std::string value = (std::string)ref;
-  if (is_ref(key)) {
-    fmt::print("inserting:\tkey:{}\tvalue:{}\n", key, value);
-    ref_map.insert(std::pair<std::string_view, std::string>(key, value));
-  } else {
-    std::string phrase = absl::StrCat("// LNAST: ", key, " as ", value, "\n");
-    curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(curr_module->get_indent_buffer(), phrase));
-    curr_module->var_manager.insert_variable(key);
-
-    if (is_attr(value) && !curr_module->get_if_counter()) {
-      Variable_options* attr_var = curr_module->var_manager.get(key);
-      attr_var->update_attr(value);
-    }
-    fmt::print("process_as map:\tkey: {}\tvalue: {}\n", key, value);
+    fmt::print("assign map:\tkey: {}\tvalue: {}\n", key, value);
   }
 }
 

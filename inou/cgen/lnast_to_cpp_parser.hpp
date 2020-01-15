@@ -41,7 +41,6 @@ private:
   bool             is_attr(std::string_view test_string);
 
   void process_assign();
-  void process_as();
   void process_label();
   void process_if();
   void process_func_call();

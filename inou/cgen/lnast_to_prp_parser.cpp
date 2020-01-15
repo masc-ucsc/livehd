@@ -397,11 +397,12 @@ void Lnast_to_prp_parser::process_if() {
     }
     // this is the else case
     else {
-      absl::StrAppend(&node_str_buffer, " else {\n", sts_buffer_queue.front(), indent_buffer(), "}\n");
+      absl::StrAppend(&node_str_buffer, " else {\n", sts_buffer_queue.front(), indent_buffer(), "}");
       sts_buffer_queue.erase(sts_buffer_queue.begin());
       it++;  // sts
     }
   }
+  absl::StrAppend(&node_str_buffer, "\n");
 
   fmt::print("end process_if\n");
 }

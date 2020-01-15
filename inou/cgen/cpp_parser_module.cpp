@@ -11,7 +11,7 @@ std::string Cpp_parser_module::create_header() {
   std::string hpp_file      = absl::StrCat("class ", filename, " {\n");
   std::string return_struct = absl::StrCat("struct ", filename, "_return {\n");
 
-  combinational_str  = "";
+  combinational_str  = "combinational (";
   initial_output_str = "";
 
   for (auto var_name : var_manager.variable_map) {
@@ -23,16 +23,19 @@ std::string Cpp_parser_module::create_header() {
     }
     // input
     else if (var_type == 1) {
-      if (combinational_str.length()) {
-        combinational_str = absl::StrCat(combinational_str, ", uint32_t ", process_variable(var_name.first));
+      if (combinational_str.length() > 15) {
+        absl::StrAppend(&combinational_str, ", uint32_t ", process_variable(var_name.first));
       } else {
-        combinational_str = absl::StrCat("combinational (uint32_t ", process_variable(var_name.first));
+        // combinational_str = absl::StrCat("uint32_t ", process_variable(var_name.first));
+        absl::StrAppend(&combinational_str, "uint32_t", process_variable(var_name.first));
       }
+      arg_vars.push_back(process_variable(var_name.first));
     }
     // output or register
     else if (var_type == 2 || var_type == 3) {
       absl::StrAppend(&return_struct, indent_buffer(1), "uint32_t ", process_variable(var_name.first), ";\n");
-      absl::StrAppend(&initial_output_str, indent_buffer(1), process_variable(var_name.first), " = 0;\n");
+      absl::StrAppend(&initial_output_str, indent_buffer(1), process_variable(var_name.first), "_next = 0;\n");
+      output_vars.push_back(process_variable(var_name.first));
     }
   }
 
@@ -40,8 +43,9 @@ std::string Cpp_parser_module::create_header() {
   std::string variable_str = absl::StrCat("private:\n", indent_buffer(1), filename, "_return return_vals_next;", "\n", "public:\n",
                                           indent_buffer(1), filename, "_return return_vals;", "\n");
 
-  return absl::StrCat(return_struct, hpp_file, variable_str, "\n  ", filename, "_return ", combinational_str,
-                      ");\n  void sequential();\n}");
+  return absl::StrCat(return_struct, hpp_file, variable_str, "\n", indent_buffer(1), filename, "_return ",
+                      combinational_str, ");\n", indent_buffer(1), "void sequential();\n", indent_buffer(1),
+                      "void reset();\n", indent_buffer(1), "void main();\n}");
 }
 
 std::string Cpp_parser_module::create_implementation() {
@@ -52,18 +56,29 @@ std::string Cpp_parser_module::create_implementation() {
   }
 
   std::string sequential_str = absl::StrCat("void ", filename, "::sequential() {\n", indent_buffer(1),
-                                            "std::memcpy(return_vals, return_vals_next, sizeof return_vals);\n}\n");
+                                            "std::memcpy(return_vals, return_vals_next, sizeof return_vals);\n");
+
+  for (auto ele : func_calls) {
+    absl::StrAppend(&sequential_str, indent_buffer(1), ele.first, ".sequential();\n");
+  }
+
+  absl::StrAppend(&sequential_str, "}\n");
+
+  std::string reset_str = absl::StrCat("void ", filename, "::reset() {\n");
+  fmt::print("output_vars:{}\n", output_vars.size());
+  for (auto ele : output_vars) {
+    fmt::print("{}\n", ele);
+    absl::StrAppend(&reset_str, indent_buffer(1), "return_vals_next.", ele, " = 0;\n");
+  }
+  absl::StrAppend(&reset_str, "}\n");
+
+  std::string main_str = absl::StrCat("void main() {\n", indent_buffer(1), "reset();\n", indent_buffer(1), "sequential();\n", indent_buffer(1), "for (true) {\n", indent_buffer(2), "combinational();\n", indent_buffer(2), "sequential();\n", indent_buffer(1), "}\n}\n");
 
   return absl::StrCat(filename, "_return ", filename, "::", combinational_str, ") {\n", initial_output_str, buffer,
-                      indent_buffer(1), "return return_vals;\n", "}\n", sequential_str);
+                      indent_buffer(1), "return return_vals;\n", "}\n", sequential_str, reset_str, main_str);
 }
 
 std::pair<std::string, std::string> Cpp_parser_module::create_files() {
-  fmt::print("func_calls : {}\n", func_calls.size());
-  for (auto ele : func_calls) {
-    fmt::print("{}\n", ele.first);
-  }
-
   std::string header_str = create_header();
   return std::pair<std::string, std::string>(header_str, create_implementation());
 }
