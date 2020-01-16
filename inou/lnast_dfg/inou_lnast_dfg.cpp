@@ -363,14 +363,16 @@ std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
 
 #ifdef generic_overflow_tests
 
-  #define add_overflow_tests //PASSING
-  #define subt_overflow_tests
+  #define add_overflow_tests //FIXME: LAST CASE NOT PASSING, design not done
+  //#define subt_overflow_tests
 
   #ifdef add_overflow_tests
   auto top_addo_a = top->add_graph_input("addo_a", pos++, 65);
   auto top_addo_b = top->add_graph_input("addo_b", pos++, 71);
   auto top_addo_c = top->add_graph_input("addo_c", pos++, 4);
+  auto top_addo_d = top->add_graph_input("addo_d", pos++, 63);
 
+  auto top_addo_w = top->add_graph_output("addo_w", pos++, 65);
   auto top_addo_x = top->add_graph_output("addo_x", pos++, 69);
   auto top_addo_y = top->add_graph_output("addo_y", pos++, 68);
   auto top_addo_z = top->add_graph_output("addo_z", pos++, 100);
@@ -405,6 +407,17 @@ std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
   top->add_edge(top_addo_c, addo2_sink_2);
   top->add_edge(top_addo_a, addo2_sink_3);
   top->add_edge(addo2_driver_1, top_addo_x);
+
+  // Sum_Op (Add): A:63 + B:63 = Z:64 (this test checks adding 2 non-ovfl and getting ovfl result)
+  auto addo3          = top->create_node(Sum_Op);
+  auto addo3_sink_1   = addo3.setup_sink_pin("AU");
+  auto addo3_sink_2   = addo3.setup_sink_pin("AU");
+  auto addo3_sink_3   = addo3.setup_sink_pin("AU");
+  auto addo3_driver_1 = addo3.setup_driver_pin("Y");
+  top->add_edge(top_addo_d, addo3_sink_1);
+  top->add_edge(top_addo_d, addo3_sink_2);
+  top->add_edge(addo3_driver_1, top_addo_w);
+
   #endif
 
   #ifdef subt_overflow_tests
@@ -412,7 +425,9 @@ std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
   auto top_subo_b = top->add_graph_input("subo_b", pos++, 66);
   auto top_subo_c = top->add_graph_input("subo_c", pos++, 71);
   auto top_subo_d = top->add_graph_input("subo_d", pos++, 4);
+  auto top_subo_d = top->add_graph_input("subo_d", pos++, 63);
 
+  auto top_subo_w = top->add_graph_output("subo_x", pos++, 65);
   auto top_subo_x = top->add_graph_output("subo_x", pos++, 75);
   auto top_subo_y = top->add_graph_output("subo_y", pos++, 74);
   auto top_subo_z = top->add_graph_output("subo_z", pos++, 70);
@@ -445,6 +460,15 @@ std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
   top->add_edge(top_subo_d, subo2_sink_1);
   top->add_edge(top_subo_a, subo2_sink_2);
   top->add_edge(subo2_driver_1, top_subo_z);
+
+  // Sum_Op (Sub): A:63 - B:63 = Z:64 (this test checks subing 2 non-ovfl and getting ovfl result)
+  auto subo3          = top->create_node(Sum_Op);
+  auto subo3_sink_1   = subo3.setup_sink_pin("AU");
+  auto subo3_sink_2   = subo3.setup_sink_pin("BU");
+  auto subo3_driver_1 = subo3.setup_driver_pin("Y");
+  top->add_edge(top_subo_d, subo3_sink_1);
+  top->add_edge(top_subo_a, subo3_sink_2);
+  top->add_edge(subo3_driver_1, top_subo_w);
   #endif
 
 #endif
