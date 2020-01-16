@@ -222,6 +222,8 @@ bool Node::is_type_loop_breaker() const { return current_g->is_type_loop_breaker
 
 bool Node::is_type_sub() const { return current_g->is_sub(nid); }
 
+bool Node::is_type_const() const { return current_g->is_type_const(nid); }
+
 Hierarchy_index Node::hierarchy_go_down() const {
   I(current_g->is_sub(nid));
   return top_g->ref_htree()->go_down(*this);

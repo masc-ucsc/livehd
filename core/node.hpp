@@ -196,6 +196,7 @@ public:
   void             set_type(const Node_Type_Op op, uint32_t bits);
   bool             is_type(const Node_Type_Op op) const;
   bool             is_type_sub() const;
+  bool             is_type_const() const;
   bool             is_type_io() const;
   bool             is_type_loop_breaker() const;
 
