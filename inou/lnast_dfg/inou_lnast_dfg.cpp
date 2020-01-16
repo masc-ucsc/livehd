@@ -262,7 +262,7 @@ void Inou_lnast_dfg::gen_temp_lg(Eprp_var &var) {
 //#define join_test //PASSING w/ exception of constants
 //#define mux_test //PASSING
 //#define comparison_test //PASSING
-#define generic_overflow_tests
+#define generic_overflow_tests //FIXME: FAILING ADD and SUB last tests (see FIXME in section)
 
 std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
   Lbench b("inou.gen_temp_lg.do_tolg");
@@ -290,7 +290,7 @@ std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
   auto top_u = top->add_graph_output("u", pos++, 11);
   auto top_t = top->add_graph_output("t", pos++, 1);
 
-  // Sum_Op (Sub): A:4 - B:3
+  // Sum_Op (Sub): A:4 - B:3 = Z<15,-7>
   auto sub          = top->create_node(Sum_Op);
   auto sub_sink_1   = sub.setup_sink_pin("AU");
   auto sub_sink_2   = sub.setup_sink_pin("BU");
@@ -299,7 +299,7 @@ std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
   top->add_edge(top_b, sub_sink_2);
   top->add_edge(sub_driver_1, top_z);
 
-  // Sum_Op (Add): A:4 + B:3
+  // Sum_Op (Add): A:4 + B:2 = Z<18,0>
   auto add          = top->create_node(Sum_Op);
   auto add_sink_1   = add.setup_sink_pin("AU");
   auto add_sink_2   = add.setup_sink_pin("AU");
@@ -363,8 +363,8 @@ std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
 
 #ifdef generic_overflow_tests
 
-  #define add_overflow_tests //FIXME: LAST CASE NOT PASSING, design not done
-  //#define subt_overflow_tests
+  //#define add_overflow_tests //FIXME FOR SHENG: When I have an inp of 63bits, the explicit max is wrong. (max = -9223372036854775808)
+  #define subt_overflow_tests
 
   #ifdef add_overflow_tests
   auto top_addo_a = top->add_graph_input("addo_a", pos++, 65);
@@ -416,8 +416,8 @@ std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
   auto addo3_driver_1 = addo3.setup_driver_pin("Y");
   top->add_edge(top_addo_d, addo3_sink_1);
   top->add_edge(top_addo_d, addo3_sink_2);
+  top->add_edge(top_addo_d, addo3_sink_3);
   top->add_edge(addo3_driver_1, top_addo_w);
-
   #endif
 
   #ifdef subt_overflow_tests
@@ -425,9 +425,9 @@ std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
   auto top_subo_b = top->add_graph_input("subo_b", pos++, 66);
   auto top_subo_c = top->add_graph_input("subo_c", pos++, 71);
   auto top_subo_d = top->add_graph_input("subo_d", pos++, 4);
-  auto top_subo_d = top->add_graph_input("subo_d", pos++, 63);
+  auto top_subo_e = top->add_graph_input("subo_e", pos++, 63);
 
-  auto top_subo_w = top->add_graph_output("subo_x", pos++, 65);
+  auto top_subo_w = top->add_graph_output("subo_w", pos++, 65);
   auto top_subo_x = top->add_graph_output("subo_x", pos++, 75);
   auto top_subo_y = top->add_graph_output("subo_y", pos++, 74);
   auto top_subo_z = top->add_graph_output("subo_z", pos++, 70);
@@ -466,8 +466,8 @@ std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
   auto subo3_sink_1   = subo3.setup_sink_pin("AU");
   auto subo3_sink_2   = subo3.setup_sink_pin("BU");
   auto subo3_driver_1 = subo3.setup_driver_pin("Y");
-  top->add_edge(top_subo_d, subo3_sink_1);
-  top->add_edge(top_subo_a, subo3_sink_2);
+  top->add_edge(top_subo_e, subo3_sink_1);
+  top->add_edge(top_subo_e, subo3_sink_2);
   top->add_edge(subo3_driver_1, top_subo_w);
   #endif
 
