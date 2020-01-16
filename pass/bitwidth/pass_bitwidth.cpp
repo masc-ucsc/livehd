@@ -208,7 +208,7 @@ void Pass_bitwidth::iterate_arith(const LGraph *lg, Node_pin &pin, Node_Type_Op 
             } else {
               //Case 5: Neither is in ovfl mode, adding/sub'ing them together does not lead to overflow.
               fmt::print("\tIn case 5\n");
-              if (spin.get_pid() == 0 || spin.get_pid() == 1) {  // NOTE: I think this should be spin, rethink over this later.
+              if (spin.get_pid() == 0 || spin.get_pid() == 1) {
                 imp.max += dpin.get_bitwidth().i.max;
                 imp.min += dpin.get_bitwidth().i.min;
               } else {
@@ -219,39 +219,6 @@ void Pass_bitwidth::iterate_arith(const LGraph *lg, Node_pin &pin, Node_Type_Op 
               fmt::print("\n");
             }
           }
-        /*} else {
-          if (imp.overflow) {
-            if (dpin.get_bitwidth().i.overflow) {
-              //Case 6: Both are in overflow.
-              //  Choose larger bw and add 1 to size.
-              fmt::print("\tIn case 6\n");
-              imp.max = (imp.max > dpin.get_bitwidth().i.max) ? imp.max + 1 : dpin.get_bitwidth().i.max + 1;
-              imp.dump();
-              fmt::print("\n");
-            } else {
-              //Case 7: Current is in overflow but new isn't. Convert new to bit count.
-              //  We only increase max # bits by 1 since current can only grow by 1 bit if new < current.
-              fmt::print("\tIn case 7\n");
-              imp.max += 1;
-              imp.dump();
-              fmt::print("\n");
-            }
-          } else if (dpin.get_bitwidth().i.overflow) {
-            //Case 8: Current isn't in ovfl, but new is.
-            fmt::print("\tIn case 3\n");
-            imp.max = first ? dpin.get_bitwidth().i.max : dpin.get_bitwidth().i.max + 1;
-            imp.min = 0;
-            imp.overflow = true;
-            imp.dump();
-            fmt::print("\n");
-          } else {
-            imp.min -= dpin.get_bitwidth().i.max;
-            imp.max -= dpin.get_bitwidth().i.min;
-            imp.dump();
-            fmt::print("\n");
-            // fmt::print("\tsub: imp.max = {}, imp.min = {}\n", imp.max, imp.min);
-          //}
-        }*/
         first = false;
         break;
       case Mult_Op:
