@@ -261,7 +261,8 @@ void Inou_lnast_dfg::gen_temp_lg(Eprp_var &var) {
 //#define basic_tests
 //#define join_test //PASSING w/ exception of constants
 //#define mux_test //PASSING
-#define comparison_test
+//#define comparison_test //PASSING
+#define generic_overflow_tests
 
 std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
   Lbench b("inou.gen_temp_lg.do_tolg");
@@ -357,6 +358,94 @@ std::vector<LGraph *> Inou_lnast_dfg::do_gen_temp_lg() {
   top->add_edge(const_eq_node1_driver_1, equal_sink_1);
   top->add_edge(const_eq_node2_driver_1, equal_sink_2);
   top->add_edge(equal_driver_1, top_t);
+
+#endif
+
+#ifdef generic_overflow_tests
+
+  #define add_overflow_tests //PASSING
+  #define subt_overflow_tests
+
+  #ifdef add_overflow_tests
+  auto top_addo_a = top->add_graph_input("addo_a", pos++, 65);
+  auto top_addo_b = top->add_graph_input("addo_b", pos++, 71);
+  auto top_addo_c = top->add_graph_input("addo_c", pos++, 4);
+
+  auto top_addo_x = top->add_graph_output("addo_x", pos++, 69);
+  auto top_addo_y = top->add_graph_output("addo_y", pos++, 68);
+  auto top_addo_z = top->add_graph_output("addo_z", pos++, 100);
+
+  // Sum_Op (Add): A:65 + B:71 = Z:72
+  auto addo          = top->create_node(Sum_Op);
+  auto addo_sink_1   = addo.setup_sink_pin("AU");
+  auto addo_sink_2   = addo.setup_sink_pin("AU");
+  auto addo_driver_1 = addo.setup_driver_pin("Y");
+  top->add_edge(top_addo_a, addo_sink_1);
+  top->add_edge(top_addo_b, addo_sink_2);
+  top->add_edge(addo_driver_1, top_addo_z);
+
+  // Sum_Op (Add): A:4 + B:4 + C:65 = Z:66
+  auto addo1          = top->create_node(Sum_Op);
+  auto addo1_sink_1   = addo1.setup_sink_pin("AU");
+  auto addo1_sink_2   = addo1.setup_sink_pin("AU");
+  auto addo1_sink_3   = addo1.setup_sink_pin("AU");
+  auto addo1_driver_1 = addo1.setup_driver_pin("Y");
+  top->add_edge(top_addo_c, addo1_sink_1);
+  top->add_edge(top_addo_c, addo1_sink_2);
+  top->add_edge(top_addo_a, addo1_sink_3);
+  top->add_edge(addo1_driver_1, top_addo_y);
+
+  // Sum_Op (Add): A:65 + B:4 + C:65 = Z:67
+  auto addo2          = top->create_node(Sum_Op);
+  auto addo2_sink_1   = addo2.setup_sink_pin("AU");
+  auto addo2_sink_2   = addo2.setup_sink_pin("AU");
+  auto addo2_sink_3   = addo2.setup_sink_pin("AU");
+  auto addo2_driver_1 = addo2.setup_driver_pin("Y");
+  top->add_edge(top_addo_a, addo2_sink_1);
+  top->add_edge(top_addo_c, addo2_sink_2);
+  top->add_edge(top_addo_a, addo2_sink_3);
+  top->add_edge(addo2_driver_1, top_addo_x);
+  #endif
+
+  #ifdef subt_overflow_tests
+  auto top_subo_a = top->add_graph_input("subo_a", pos++, 65);
+  auto top_subo_b = top->add_graph_input("subo_b", pos++, 66);
+  auto top_subo_c = top->add_graph_input("subo_c", pos++, 71);
+  auto top_subo_d = top->add_graph_input("subo_d", pos++, 4);
+
+  auto top_subo_x = top->add_graph_output("subo_x", pos++, 75);
+  auto top_subo_y = top->add_graph_output("subo_y", pos++, 74);
+  auto top_subo_z = top->add_graph_output("subo_z", pos++, 70);
+
+  // Sum_Op (Sub): A:65 - B:71 = Z:72
+  auto subo          = top->create_node(Sum_Op);
+  auto subo_sink_1   = subo.setup_sink_pin("AU");
+  auto subo_sink_2   = subo.setup_sink_pin("BU");
+  auto subo_driver_1 = subo.setup_driver_pin("Y");
+  top->add_edge(top_subo_a, subo_sink_1);
+  top->add_edge(top_subo_c, subo_sink_2);
+  top->add_edge(subo_driver_1, top_subo_x);
+
+  // Sum_Op (Sub): A:71 - B:4 - C:65 = Z:73
+  auto subo1          = top->create_node(Sum_Op);
+  auto subo1_sink_1   = subo1.setup_sink_pin("AU");
+  auto subo1_sink_2   = subo1.setup_sink_pin("BU");
+  auto subo1_sink_3   = subo1.setup_sink_pin("BU");
+  auto subo1_driver_1 = subo1.setup_driver_pin("Y");
+  top->add_edge(top_subo_c, subo1_sink_1);
+  top->add_edge(top_subo_d, subo1_sink_2);
+  top->add_edge(top_subo_a, subo1_sink_3);
+  top->add_edge(subo1_driver_1, top_subo_y);
+
+  // Sum_Op (Sub): A:4 - B:65 = Z:66
+  auto subo2          = top->create_node(Sum_Op);
+  auto subo2_sink_1   = subo2.setup_sink_pin("AU");
+  auto subo2_sink_2   = subo2.setup_sink_pin("BU");
+  auto subo2_driver_1 = subo2.setup_driver_pin("Y");
+  top->add_edge(top_subo_d, subo2_sink_1);
+  top->add_edge(top_subo_a, subo2_sink_2);
+  top->add_edge(subo2_driver_1, top_subo_z);
+  #endif
 
 #endif
 
