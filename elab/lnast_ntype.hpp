@@ -273,7 +273,7 @@ protected:
   };
 
   Lnast_ntype_int val;
-  Lnast_ntype(Lnast_ntype_int _val) : val(_val) {}
+  explicit Lnast_ntype(Lnast_ntype_int _val) : val(_val) {}
 public:
   Lnast_ntype() : val(Lnast_ntype_invalid) {}
 
