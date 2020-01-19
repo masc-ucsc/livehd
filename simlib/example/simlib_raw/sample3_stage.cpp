@@ -4,10 +4,6 @@
 
 #include "sample3_stage.hpp"
 
-Sample3_stage::Sample3_stage(uint64_t _hidx)
-  : hidx(_hidx) {
-}
-
 void Sample3_stage::reset_cycle() {
   tmp  = 0;
   tmp2 = 0;
@@ -33,11 +29,3 @@ void Sample3_stage::cycle(UInt<1> s1_to3_cValid, UInt<32> s1_to3_c, UInt<1> s2_t
 
   tmp = tmp.addw(UInt<32>(7));
 }
-
-#ifdef SIMLIB_TRACE
-void Sample3_stage::add_signature(Simlib_signature &s) {
-  s.append(1102); // tmp
-  s.append(333); // tmp2
-  s.append(222); // ...
-}
-#endif

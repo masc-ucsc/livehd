@@ -134,6 +134,14 @@ public:
     record.push_back(s);
   }
 
+  double get_secs() const {
+    Time_Point tp = std::chrono::system_clock::now();
+
+    Time_Point prev     = start_time;
+    std::chrono::duration<double> t = tp - start_time;
+    return t.count();
+  }
+
   void end() {
 
     Time_Point tp = std::chrono::system_clock::now();

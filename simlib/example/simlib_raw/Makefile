@@ -1,4 +1,4 @@
-CXXFLAGS=-std=c++17 -O3 -I../../ -I../../../lbench/include -DSIMLIB_TRACE
+CXXFLAGS=-std=c++17 -O3 -I../../
 
 sample: livesim_types.hpp.gch main.o  sample1_stage.o  sample2_stage.o  sample3_stage.o  sample_stage.o
 	g++ $(CXXFLAGS) -o $@ main.o  sample1_stage.o  sample2_stage.o  sample3_stage.o  sample_stage.o
@@ -10,5 +10,4 @@ clean:
 	@rm -f sample
 	@rm -f perf.*
 	@rm -f *.o *.gch
-	@rm -f check_*.cpkt
 

@@ -1,0 +1,10 @@
+
+-If signature does not match, do not use it to reload checkpoint
+
+-Move most of the checkpoint functionality to new class (to avoid compile time. Incremental)
+
+-Create a Tracing class
+
+-Create a replxx console for simulations
+
+

@@ -2,10 +2,6 @@
 
 #include "sample1_stage.hpp"
 
-Sample1_stage::Sample1_stage(uint64_t _hidx)
-  : hidx(_hidx) {
-}
-
 void Sample1_stage::reset_cycle() {
   tmp = UInt<32>(0);
   to2_aValid = UInt<1>(0);
@@ -26,16 +22,3 @@ void Sample1_stage::cycle(UInt<32> s3_to1_b, UInt<1> s2_to1_aValid, UInt<32> s2_
   tmp = tmp.addw(UInt<32>(23));
 }
 
-#ifdef SIMLIB_TRACE
-void Sample1_stage::add_signature(Simlib_signature &s) {
-  s.append(hidx);
-  s.append(33 );  // 33 is the semantic ID (hash inputs + op + bits) for to2_aValid
-  s.append(103);
-  s.append(203);
-  s.append(11 );
-  s.append(33 );
-  s.append(2  );
-
-  s.append(202); // memory signature (ports/size/...) semantic ID (sid)
-}
-#endif

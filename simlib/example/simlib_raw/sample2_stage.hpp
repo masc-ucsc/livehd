@@ -1,8 +1,6 @@
 #pragma once
 
 struct Sample2_stage {
-  uint64_t hidx;
-
   UInt<1>     to1_aValid;
   UInt<32> to1_a;
 
@@ -13,8 +11,6 @@ struct Sample2_stage {
   UInt<32> to3_d;
 
   UInt<32> tmp;
-
-  Sample2_stage(uint64_t _hidx);
 
   void reset_cycle();
   void cycle(UInt<1> s1_to2_aValid, UInt<32> s1_to2_a, UInt<32> s1_to2_b) {
@@ -32,8 +28,5 @@ struct Sample2_stage {
 
     tmp = tmp.addw(UInt<32>(13));
   }
-#ifdef SIMLIB_TRACE
-  void add_signature(Simlib_signature &sign);
-#endif
 };
 

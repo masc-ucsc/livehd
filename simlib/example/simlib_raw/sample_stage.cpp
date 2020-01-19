@@ -2,14 +2,6 @@
 
 #include "sample_stage.hpp"
 
-Sample_stage::Sample_stage(uint64_t _hidx)
-  : hidx(_hidx)
-  , s1(33)
-  , s2(2123)
-  , s3(122) {
-  // FIXME: populate random reset (random per variable)
-}
-
 void Sample_stage::reset_cycle() {
 
   s1.reset_cycle();
@@ -34,10 +26,3 @@ void Sample_stage::cycle() {
 
 }
 
-#ifdef SIMLIB_TRACE
-void Sample_stage::add_signature(Simlib_signature &s) {
-  s1.add_signature(s);
-  s2.add_signature(s);
-  s3.add_signature(s);
-}
-#endif
