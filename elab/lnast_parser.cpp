@@ -45,9 +45,9 @@ void Lnast_parser::elaborate() {
   process_statements_op(lnast.get_root(), 1);
   build_lnast();
 
-  for(const auto &index:lnast.depth_preorder()) {
-    lnast.get_data(index).dump();
-  }
+  //for(const auto &index : lnast.depth_preorder()) {
+  //  lnast.get_data(index).dump();
+  //}
 }
 
 void Lnast_parser::build_lnast() {
@@ -116,12 +116,10 @@ void Lnast_parser::build_lnast() {
     target_name = scan_get_token();
 
 
-    if(type.is_pure_assign()) {
-      if (unlikely(function_name_correction(type, target_name))){
-        walk_next_token();
-        walk_next_line();
-        continue;
-      }
+    if(type.is_pure_assign() && unlikely(function_name_correction(type, target_name))) {
+      walk_next_token();
+      walk_next_line();
+      continue;
     }
 
     auto tree_idx_opr = process_operator_node(opr_parent_node, type, cfg_nidx, target_name);

@@ -2,8 +2,7 @@
 #include "lnast.hpp"
 
 void Lnast_node::dump() const {
-  ;
-  //fmt::print("type:{} loc:{}\n", type.debug_name(), loc); // TODO: cleaner API to also dump token
+  fmt::print("type:{} loc:{}\n", type.debug_name(), loc); // TODO: cleaner API to also dump token
 }
 
 void Lnast::do_ssa_trans(const Lnast_nid &top_nid){
@@ -24,7 +23,7 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid){
   }
 }
 
-void Lnast::ssa_if_subtree(const Lnast_nid &if_nid){
+void Lnast::ssa_if_subtree(const Lnast_nid &if_nid) {
   for (const auto &itr_nid : children(if_nid)) {
     if (get_data(itr_nid).type.is_statements()) {
       Phi_rtable if_sts_phi_resolve_table;
@@ -37,34 +36,34 @@ void Lnast::ssa_if_subtree(const Lnast_nid &if_nid){
         else
           ssa_handle_a_statement(itr_nid, opr_nid);
       }
-    }
-
-    if (get_data(itr_nid).type.is_cstatements()){
+    } else if (get_data(itr_nid).type.is_cstatements()){
       for (const auto &opr_nid : children(itr_nid))
         ssa_handle_a_cstatement(itr_nid, opr_nid);
+    } else {
+      I(false);
     }
-
   }
+
   ssa_handle_phi_nodes(if_nid);
 }
 
 void Lnast::ssa_handle_phi_nodes(const Lnast_nid &if_nid) {
   std::vector<Lnast_nid> if_statements_vec;
   for (const auto &itr : children(if_nid)) {
-    if (get_data(itr).type.is_statements()) {
+    if (get_data(itr).type.is_statements())
       if_statements_vec.push_back(itr);
-    }
   }
+
   //2 possible cases: (1)if-elif-elif (2) if-elif-else
   //note: handle reversely to get correct mux priority chain
-  for (auto itr = if_statements_vec.rbegin(); itr != if_statements_vec.rend(); ++itr ) {
+  for (auto itr = if_statements_vec.rbegin(); itr != if_statements_vec.rend(); ++itr) {
     if (itr == if_statements_vec.rbegin() && has_else_statements(if_nid)) {
       continue;
-    } else if (itr == if_statements_vec.rbegin() && !has_else_statements(if_nid)){
+    } else if (itr == if_statements_vec.rbegin() && !has_else_statements(if_nid)) {
       Phi_rtable &true_table  = phi_resolve_tables[get_data(*itr).token.get_text()];
-      Phi_rtable dummy_false_table ; //this is the fake false table for the if-elif-elif
+      Phi_rtable fake_false_table ; //for the case of if-elif-elif
       Lnast_nid condition_nid = get_sibling_prev(*itr);
-      resolve_phi_nodes(condition_nid, true_table, dummy_false_table);
+      resolve_phi_nodes(condition_nid, true_table, fake_false_table);
 
     } else if (itr == if_statements_vec.rbegin()+1 && has_else_statements(if_nid)) {
       Phi_rtable &true_table  = phi_resolve_tables[get_data(*itr).token.get_text()];
@@ -112,7 +111,7 @@ void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table,
 
 
 Lnast_nid Lnast::get_complement_nid(std::string_view brother_name, const Lnast_nid &psts_nid, bool false_path) {
-  if(false_path and new_added_phi_node_table.find(brother_name) != new_added_phi_node_table.end())
+  if(false_path && new_added_phi_node_table.find(brother_name) != new_added_phi_node_table.end())
     return new_added_phi_node_table[brother_name];
   else
     return check_phi_table_parents_chain(brother_name, psts_nid, false);
@@ -126,7 +125,7 @@ Lnast_nid Lnast::check_phi_table_parents_chain(std::string_view target_name, con
     return parent_table[target_name];
 
   if (get_parent(psts_nid) == get_root() && originate_from_csts) {//current sts is top_sts
-    I(false);//variable not defined
+    I(false); //variable not defined
   } else if (get_parent(psts_nid) == get_root() && !originate_from_csts){
     return default_const_nid;
   } else {
@@ -139,7 +138,7 @@ Lnast_nid Lnast::check_phi_table_parents_chain(std::string_view target_name, con
 
 Lnast_nid Lnast::add_phi_node(const Lnast_nid &cond_nid, const Lnast_nid &t_nid, const Lnast_nid &f_nid) {
   auto new_phi_nid = add_child(get_parent(cond_nid), Lnast_node(Lnast_ntype::create_phi(), Token()));
-  auto target_nid = add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(), get_data(t_nid).token, get_data(t_nid).subs));
+  auto target_nid  = add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(), get_data(t_nid).token, get_data(t_nid).subs));
   update_ssa_cnt_table(target_nid);
   add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_cond(), get_data(cond_nid).token, get_data(cond_nid).subs));
   add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(),  get_data(t_nid).token, get_data(t_nid).subs));
@@ -155,12 +154,12 @@ bool Lnast::has_else_statements(const Lnast_nid &if_nid) {
   return (get_data(last_child).type.is_statements() and get_data(second_last_child).type.is_statements());
 }
 
-void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid){
+void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
   //handle statement rhs
-  for (auto itr_opd : children(opr_nid)){
-    if(itr_opd == get_first_child(opr_nid))
+  for (auto itr_opd : children(opr_nid)) {
+    if (itr_opd == get_first_child(opr_nid))
       continue;
-    if(ssa_cnt_table.find(get_data(itr_opd).token.get_text()) != ssa_cnt_table.end()){
+    if (ssa_cnt_table.find(get_data(itr_opd).token.get_text()) != ssa_cnt_table.end()){
       const auto itr_opd_type = get_data(itr_opd).type;
       uint8_t new_subs = ssa_cnt_table[get_data(itr_opd).token.get_text()];
       fmt::print("new subs:{}\n", new_subs);
@@ -171,7 +170,7 @@ void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &o
 
   //handle statement lhs
   const auto type = get_data(opr_nid).type;
-  if(type.is_pure_assign() || type.is_as()){
+  if (type.is_pure_assign() || type.is_as()) {
     const auto  target_nid  = get_first_child(opr_nid);
           auto& target_data = *ref_data(target_nid);
     const auto  target_name = target_data.token.get_text();
@@ -212,7 +211,7 @@ void Lnast::ssa_handle_a_cstatement(const Lnast_nid &psts_nid, const Lnast_nid &
 }
 
 
-void Lnast::update_ssa_cnt_table(const Lnast_nid& target_nid){
+void Lnast::update_ssa_cnt_table(const Lnast_nid &target_nid) {
   auto& target_data = *ref_data(target_nid);
   const auto  target_name =target_data.token.get_text();
   auto itr = ssa_cnt_table.find(target_name);
@@ -224,10 +223,10 @@ void Lnast::update_ssa_cnt_table(const Lnast_nid& target_nid){
   }
 }
 
-void Lnast::update_phi_resolve_table(const Lnast_nid &psts_nid, const Lnast_nid& target_nid){
-  auto &phi_resolve_table = phi_resolve_tables[get_data(psts_nid).token.get_text()];
-  auto& target_data = *ref_data(target_nid);
-  const auto target_name = target_data.token.get_text();
+void Lnast::update_phi_resolve_table(const Lnast_nid &psts_nid, const Lnast_nid &target_nid) {
+  auto       &phi_resolve_table = phi_resolve_tables[get_data(psts_nid).token.get_text()];
+  auto       &target_data       = *ref_data(target_nid);
+  const auto  target_name       = target_data.token.get_text();
   phi_resolve_table[target_name] = target_nid; //for a variable string, always update to latest Lnast_nid
 }
 

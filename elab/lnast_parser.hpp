@@ -32,7 +32,7 @@ protected:
   bool         token_is_valid_ref();
   bool         function_name_correction (Lnast_ntype type, const Token& target_name);
   mmap_lib::Tree_index process_operator_node (const mmap_lib::Tree_index& opr_parent_sts, Lnast_ntype type, uint32_t , const Token& target_name);
-  void         walk_next_token() {scan_next(); line_tkcnt += 1;              };
+  void         walk_next_token() {scan_next(); line_tkcnt += 1;};
   void         walk_next_line()  {scan_next(); line_tkcnt = 1 ; line_num += 1; };
 
 private:
