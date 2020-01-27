@@ -656,10 +656,10 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
       fmt::print(" -- explicit (bits set)\n");
     }
 
-    // FIXME: At this point in time, I need to setup bitwidths for explicit.
-    //    Eventually, Sheng should do this instead (so remove some of the explicit stuff later).
+    // FIXME: At this point in time, I need to setup bitwidths for explicit. Eventually, Sheng should do this instead (so remove some of the explicit stuff later).
     Node_pin editable_pin = pin;
     // Set explicit.
+    // FIXME: SH: I should set explicit bitwidth info on my side whenever I know the real bitwidth
     editable_pin.ref_bitwidth()->e.set_ubits(pin.get_bits());
     // Set implicit.
     editable_pin.ref_bitwidth()->set_implicit();
@@ -693,6 +693,7 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
       } else {
         // bool sign = false;
         if (node.get_type().op == U32Const_Op) {
+          // FIXME: SH: I should set the explicit pin info for constant node on my side
           dpin.ref_bitwidth()->e.set_uconst(
               out_edge.get_bits());  // FIXME: The argument to this function is way wrong, but needed for testing.
           dpin.ref_bitwidth()->set_implicit();
@@ -700,6 +701,7 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
           // Set bitwidth for output edge driver.
           // FIXME: Focused only on unsigned, will have to change later.
           // FIXME x2: Should I even be doing this? Should be Sheng, I think.
+          // FIXME: SH: Yes, I should do it.
           dpin.ref_bitwidth()->e.set_ubits(out_edge.get_bits());
           fmt::print("\t");
           dpin.ref_bitwidth()->e.dump();
