@@ -12,22 +12,76 @@ using Phi_rtable = absl::flat_hash_map<std::string_view, Lnast_nid>; //rtable = 
 struct Lnast_node {
   Lnast_ntype type;
   Token       token;
-  uint32_t    loc;  //sh:fixme: wait for Akash
   uint16_t    subs; //ssa subscript
 
-  Lnast_node()
-    :loc(0), subs(0) { }
+  Lnast_node(): subs(0) { }
 
   Lnast_node(Lnast_ntype _type)
-    :type(_type), loc(0), subs(0) { I(!type.is_invalid());}
+    :type(_type), subs(0) { I(!type.is_invalid());}
 
   Lnast_node(Lnast_ntype _type, const Token &_token)
-    :type(_type), token(_token), loc(0), subs(0) { I(!type.is_invalid());}
+    :type(_type), token(_token), subs(0) { I(!type.is_invalid());}
 
   Lnast_node(Lnast_ntype _type, const Token &_token, uint16_t _subs)
-    :type(_type), token(_token), loc(0), subs(_subs) { I(!type.is_invalid());}
+    :type(_type), token(_token), subs(_subs) { I(!type.is_invalid());}
 
   void dump() const;
+
+  static Lnast_node create_ref(std::string_view var) {
+    return Lnast_node(Lnast_ntype::create_ref(), Token(0, 0, 0, var));
+  }
+
+  static Lnast_node create_ref(std::string_view var, uint32_t line_num){
+    return Lnast_node(Lnast_ntype::create_ref(), Token(0, 0, line_num, var));
+  }
+
+  static Lnast_node create_ref(std::string_view var, uint32_t line_num, uint64_t pos){
+    return Lnast_node(Lnast_ntype::create_ref(), Token(0, pos, line_num, var));
+  } //FIXME: SH: is Token_id a must be in creating a lnast node for HDLs?
+
+  static Lnast_node create_ref(const Token &new_token){
+    return Lnast_node(Lnast_ntype::create_ref(), new_token);
+  }
+
+  static Lnast_node create_const(std::string_view constant_sview) {
+    return Lnast_node(Lnast_ntype::create_const(), Token(0, 0, 0, constant_sview));
+  }
+
+  static Lnast_node create_const(std::string_view constant_sview, uint32_t line_num) {
+    return Lnast_node(Lnast_ntype::create_const(), Token(0, 0, line_num, constant_sview));
+  }
+
+  static Lnast_node create_const(std::string_view constant_sview, uint32_t line_num, uint64_t pos) {
+    return Lnast_node(Lnast_ntype::create_const(), Token(0, pos, line_num, constant_sview));
+  }
+
+  static Lnast_node create_const(const Token &new_token){
+    return Lnast_node(Lnast_ntype::create_const(), new_token);
+  }
+
+  static Lnast_node create_pure_assign(uint32_t line_num = 0) {
+    return Lnast_node(Lnast_ntype::create_pure_assign(), Token(0, 0, line_num, ""));
+  }
+
+  static Lnast_node create_pure_assign(uint32_t line_num = 0, uint64_t pos = 0) {
+    return Lnast_node(Lnast_ntype::create_pure_assign(), Token(0, pos, line_num, ""));
+  }
+
+  static Lnast_node create_statements(std::string_view sts = "") {
+    return Lnast_node(Lnast_ntype::create_statements(), Token(0, 0, 0, sts));
+  }
+
+  static Lnast_node create_statements(std::string_view sts = "", uint32_t line_num = 0) {
+    return Lnast_node(Lnast_ntype::create_statements(), Token(0, 0, line_num, sts));
+  }
+
+  static Lnast_node create_statements(std::string_view sts = "", uint32_t line_num = 0, uint64_t pos = 0) {
+    return Lnast_node(Lnast_ntype::create_statements(), Token(0, pos, line_num, sts));
+  }
+
+  static Lnast_node create_statements(const Token &new_token) {
+    return Lnast_node(Lnast_ntype::create_statements(), new_token);
+  }
 };
 
 

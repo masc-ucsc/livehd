@@ -140,7 +140,8 @@ void Lnast_parser::build_lnast() {
 
 void Lnast_parser::process_statements_op(const mmap_lib::Tree_index& parent_of_sts, uint32_t self_idx){
   if(lnast.get_data(parent_of_sts).type.is_top()){
-    auto tree_top_sts = lnast.add_child(parent_of_sts, Lnast_node(Lnast_ntype::create_statements(), scan_get_token(3)));
+    //auto tree_top_sts = lnast.add_child(parent_of_sts, Lnast_node(Lnast_ntype::create_statements(), scan_get_token(3)));
+    auto tree_top_sts = lnast.add_child(parent_of_sts, Lnast_node::create_statements(scan_get_token(3)));
     fmt::print("statements name :{}\n", scan_get_token().get_text());
     cfg_parent_id2lnast_node[self_idx] = tree_top_sts;
   } else if (lnast.get_data(parent_of_sts).type.is_if()){
@@ -152,12 +153,14 @@ void Lnast_parser::process_statements_op(const mmap_lib::Tree_index& parent_of_s
       lnast.add_child(parent_of_sts, Lnast_node(Lnast_ntype::create_cond(), buffer_if_condition));
       buffer_if_condition_used = true;
     } else { // normal statements
-      auto if_sts = lnast.add_child(parent_of_sts, Lnast_node(Lnast_ntype::create_statements(), scan_get_token()));
+      //auto if_sts = lnast.add_child(parent_of_sts, Lnast_node(Lnast_ntype::create_statements(), scan_get_token()));
+      auto if_sts = lnast.add_child(parent_of_sts, Lnast_node::create_statements(scan_get_token()));
       fmt::print("statements name :{}\n", scan_get_token().get_text());
       cfg_parent_id2lnast_node[self_idx] = if_sts;
     }
   } else if (lnast.get_data(parent_of_sts).type.is_func_def()) {
-    auto tree_func_def_sts = lnast.add_child(parent_of_sts, Lnast_node(Lnast_ntype::create_statements(), scan_get_token()));
+    //auto tree_func_def_sts = lnast.add_child(parent_of_sts, Lnast_node(Lnast_ntype::create_statements(), scan_get_token()));
+    auto tree_func_def_sts = lnast.add_child(parent_of_sts, Lnast_node::create_statements(scan_get_token()));
     fmt::print("statements name :{}\n", scan_get_token().get_text());
     cfg_parent_id2lnast_node[self_idx] = tree_func_def_sts;
   }
@@ -211,7 +214,8 @@ void Lnast_parser::add_operator_subtree(const mmap_lib::Tree_index& tree_idx_opr
 void  Lnast_parser::process_func_def_op(const mmap_lib::Tree_index& tree_idx_fdef, const Token& target_name){
   //10  1  8  59  96  ::{  ___e   $a    $b  %o
 
-  buffer_tmp_func_name_idx = lnast.add_child(tree_idx_fdef, Lnast_node(Lnast_ntype::create_ref(), target_name));
+  //buffer_tmp_func_name_idx = lnast.add_child(tree_idx_fdef, Lnast_node(Lnast_ntype::create_ref(), target_name));
+  buffer_tmp_func_name_idx = lnast.add_child(tree_idx_fdef, Lnast_node::create_ref(target_name));
 
   walk_next_token(); //sh:fixme: jump across strange null in func_def cfg
   auto local_line_num = scan_line();
@@ -229,7 +233,8 @@ void  Lnast_parser::process_func_call_op(const mmap_lib::Tree_index& tree_idx_fc
   //true function call case: K17  K18  0  98  121  .()  ___g  fun1  ___h   ___i
   //fake function call case: K19  K20  0  123 129  .()  ___j  $a
 
-  lnast.add_child(tree_idx_fcall, Lnast_node(Lnast_ntype::create_ref(), target_name));
+  //lnast.add_child(tree_idx_fcall, Lnast_node(Lnast_ntype::create_ref(), target_name));
+  lnast.add_child(tree_idx_fcall, Lnast_node::create_ref(target_name));
 
   I(token_is_valid_ref());
   lnast.add_child(tree_idx_fcall, Lnast_node(operand_analysis(), scan_get_token()));
@@ -263,7 +268,8 @@ void  Lnast_parser::process_if_op(const mmap_lib::Tree_index& tree_idx_if, const
 
 //scan pos start: first operand token, stop: last operand
 void Lnast_parser::process_binary_op(const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name) {
-  lnast.add_child(tree_idx_opr, Lnast_node(Lnast_ntype::create_ref(), target_name));
+  //lnast.add_child(tree_idx_opr, Lnast_node(Lnast_ntype::create_ref(), target_name));
+  lnast.add_child(tree_idx_opr, Lnast_node::create_ref(target_name));
   I(token_is_valid_ref());
   lnast.add_child(tree_idx_opr, Lnast_node(operand_analysis(), scan_get_token()));
   walk_next_token(); //go to 2nd operand
@@ -275,20 +281,23 @@ void Lnast_parser::process_binary_op(const mmap_lib::Tree_index& tree_idx_opr, c
 
 //scan pos start: first operand token, stop: last operand
 void Lnast_parser::process_assign_like_op(const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name) {
-  lnast.add_child(tree_idx_opr, Lnast_node(Lnast_ntype::create_ref(), target_name));
+  //lnast.add_child(tree_idx_opr, Lnast_node(Lnast_ntype::create_ref(), target_name));
+  lnast.add_child(tree_idx_opr, Lnast_node::create_ref(target_name));
   I(scan_is_token(Token_id_alnum) || scan_is_token(Token_id_output) || scan_is_token(Token_id_input) || scan_is_token(Token_id_reference));
   lnast.add_child(tree_idx_opr, Lnast_node(operand_analysis(), scan_get_token()));
 }
 
 //scan pos start: first operand token, stop: last operand
 void Lnast_parser::process_label_op(const mmap_lib::Tree_index& tree_idx_label, const Token& target_name) {
-  lnast.add_child(tree_idx_label, Lnast_node(Lnast_ntype::create_ref(), target_name));
+  //lnast.add_child(tree_idx_label, Lnast_node(Lnast_ntype::create_ref(), target_name));
+  lnast.add_child(tree_idx_label, Lnast_node::create_ref(target_name));
   I(scan_is_token(Token_id_alnum) || scan_is_token(Token_id_output) || scan_is_token(Token_id_input));
   if (scan_is_token(Token_id_alnum) && scan_text().substr(0,2) == "__") {
     auto tree_idx_attr = lnast.add_child(tree_idx_label, Lnast_node(Lnast_ntype::create_attr(), scan_get_token()));
     walk_next_token();
     I(token_is_valid_ref());
-    lnast.add_child(tree_idx_attr, Lnast_node(Lnast_ntype::create_const(), scan_get_token()));
+    //lnast.add_child(tree_idx_attr, Lnast_node(Lnast_ntype::create_const(), scan_get_token()));
+    lnast.add_child(tree_idx_attr, Lnast_node::create_const(scan_get_token()));
   } else { //case of function argument assignment
     lnast.add_child(tree_idx_label, Lnast_node(operand_analysis(), scan_get_token()));
     walk_next_token();

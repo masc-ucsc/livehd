@@ -2,7 +2,7 @@
 #include "lnast.hpp"
 
 void Lnast_node::dump() const {
-  fmt::print("type:{} loc:{}\n", type.debug_name(), loc); // TODO: cleaner API to also dump token
+  fmt::print("type:{}\n", type.debug_name()); // TODO: cleaner API to also dump token
 }
 
 void Lnast::do_ssa_trans(const Lnast_nid &top_nid){
