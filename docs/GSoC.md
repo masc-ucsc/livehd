@@ -10,7 +10,6 @@ This is a proposal of GSoC projects.
 | **Mentor(s)**   | [Jose Renau](https://www.soe.ucsc.edu/~renau)
 | **Skills**      | C++
 | **Description** | Mockturtle is being integrated with LiveHD. The goal of this project is to create a parallel version where each partition is "mockturtled" in parallel. This requires to create a regression testting.
-
 | **Link**        | https://github.com/masc-ucsc/livehd/blob/master/docs/projects.md#mockturtle-qian-chen
 | **Difficulty**  | high
 
@@ -20,8 +19,7 @@ This is a proposal of GSoC projects.
 | **Title**       | Tree-sitter Pyrope
 | **Mentor(s)**   | [Jose Renau](https://www.soe.ucsc.edu/~renau)
 | **Skills**      | Javascript
-| **Description** | Tree-sitter allows incremental parsers. Pyrope is the in-house HDL. We have a javascript (pegjs) Pyrope grammar, the goal is to have an equivalent tree-sitter
-that also incrementally update CFGs.
+| **Description** | Tree-sitter allows incremental parsers. Pyrope is the in-house HDL. We have a javascript (pegjs) Pyrope grammar, the goal is to have an equivalent tree-sitter that also incrementally update CFGs.
 | **Link**        | https://github.com/masc-ucsc/livehd/blob/master/docs/projects.md#tree-sitter-pyrope
 | **Difficulty**  | high
 
