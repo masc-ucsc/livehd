@@ -444,14 +444,14 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
   if (max_pos >= token_list.size() || scanner_pos.value == 0) max_pos = token_list.size() - 1;
 
   size_t line_pos_start = 0;
-  for (int i = token_list[max_pos].pos; i > 0; i--) {
+  for (int i = token_list[max_pos].pos1; i > 0; i--) {
     if (is_newline(memblock[i])) {
       line_pos_start = i;
       break;
     }
   }
   size_t line_pos_end = memblock.size();
-  for (size_t i = token_list[max_pos].pos; i < memblock.size(); i++) {
+  for (size_t i = token_list[max_pos].pos1; i < memblock.size(); i++) {
     if (is_newline(memblock[i])) {
       line_pos_end = i;
       break;
@@ -459,7 +459,7 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
   }
 
   auto line = scan_line();
-  int s_col  = token_list[max_pos].pos - line_pos_start;
+  int s_col  = token_list[max_pos].pos1 - line_pos_start;
   I(s_col>=0);
   size_t col = s_col;
 
@@ -489,7 +489,7 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
   if (!third) return;
 
   int len = token_list[max_pos].get_text().size();
-  if ((token_list[max_pos].pos + len) > line_pos_end) len = line_pos_end - token_list[max_pos].pos;
+  if ((token_list[max_pos].pos1 + len) > line_pos_end) len = line_pos_end - token_list[max_pos].pos1;
 
   std::string third_1(col, ' ');
   std::string third_2(len, '^');
@@ -501,5 +501,5 @@ void Elab_scanner::dump_token() const {
   if (pos >= token_list.size()) pos = token_list.size();
 
   auto &t = token_list[pos];
-  fmt::print("tok:{} pos:{} line:{} text:{}\n", t.tok, t.pos, t.line, t.text);
+  fmt::print("tok:{} pos1:{}, pos2:{}, line:{} text:{}\n", t.tok, t.pos1, t.pos2, t.line, t.text);
 }

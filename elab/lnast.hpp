@@ -28,15 +28,15 @@ struct Lnast_node {
   void dump() const;
 
   static Lnast_node create_ref(std::string_view var) {
-    return Lnast_node(Lnast_ntype::create_ref(), Token(0, 0, 0, var));
+    return Lnast_node(Lnast_ntype::create_ref(), Token(0, 0, 0, 0, var));
   }
 
   static Lnast_node create_ref(std::string_view var, uint32_t line_num){
-    return Lnast_node(Lnast_ntype::create_ref(), Token(0, 0, line_num, var));
+    return Lnast_node(Lnast_ntype::create_ref(), Token(0, 0, 0, line_num, var));
   }
 
-  static Lnast_node create_ref(std::string_view var, uint32_t line_num, uint64_t pos){
-    return Lnast_node(Lnast_ntype::create_ref(), Token(0, pos, line_num, var));
+  static Lnast_node create_ref(std::string_view var, uint32_t line_num, uint64_t pos1, uint64_t pos2){
+    return Lnast_node(Lnast_ntype::create_ref(), Token(0, pos1, pos2, line_num, var));
   } //FIXME: SH: is Token_id a must be in creating a lnast node for HDLs?
 
   static Lnast_node create_ref(const Token &new_token){
@@ -44,39 +44,39 @@ struct Lnast_node {
   }
 
   static Lnast_node create_const(std::string_view constant_sview) {
-    return Lnast_node(Lnast_ntype::create_const(), Token(0, 0, 0, constant_sview));
+    return Lnast_node(Lnast_ntype::create_const(), Token(0, 0, 0, 0, constant_sview));
   }
 
   static Lnast_node create_const(std::string_view constant_sview, uint32_t line_num) {
-    return Lnast_node(Lnast_ntype::create_const(), Token(0, 0, line_num, constant_sview));
+    return Lnast_node(Lnast_ntype::create_const(), Token(0, 0, 0, line_num, constant_sview));
   }
 
-  static Lnast_node create_const(std::string_view constant_sview, uint32_t line_num, uint64_t pos) {
-    return Lnast_node(Lnast_ntype::create_const(), Token(0, pos, line_num, constant_sview));
+  static Lnast_node create_const(std::string_view constant_sview, uint32_t line_num, uint64_t pos1, uint64_t pos2) {
+    return Lnast_node(Lnast_ntype::create_const(), Token(0, pos1, pos2, line_num, constant_sview));
   }
 
   static Lnast_node create_const(const Token &new_token){
     return Lnast_node(Lnast_ntype::create_const(), new_token);
   }
 
-  static Lnast_node create_pure_assign(uint32_t line_num = 0) {
-    return Lnast_node(Lnast_ntype::create_pure_assign(), Token(0, 0, line_num, ""));
+  static Lnast_node create_pure_assign(uint32_t line_num) {
+    return Lnast_node(Lnast_ntype::create_pure_assign(), Token(0, 0, 0, line_num, ""));
   }
 
-  static Lnast_node create_pure_assign(uint32_t line_num = 0, uint64_t pos = 0) {
-    return Lnast_node(Lnast_ntype::create_pure_assign(), Token(0, pos, line_num, ""));
+  static Lnast_node create_pure_assign(uint32_t line_num, uint64_t pos1, uint64_t pos2) {
+    return Lnast_node(Lnast_ntype::create_pure_assign(), Token(0, pos1, pos2, line_num, ""));
   }
 
   static Lnast_node create_statements(std::string_view sts = "") {
-    return Lnast_node(Lnast_ntype::create_statements(), Token(0, 0, 0, sts));
+    return Lnast_node(Lnast_ntype::create_statements(), Token(0, 0, 0, 0, sts));
   }
 
   static Lnast_node create_statements(std::string_view sts = "", uint32_t line_num = 0) {
-    return Lnast_node(Lnast_ntype::create_statements(), Token(0, 0, line_num, sts));
+    return Lnast_node(Lnast_ntype::create_statements(), Token(0, 0, 0, line_num, sts));
   }
 
-  static Lnast_node create_statements(std::string_view sts = "", uint32_t line_num = 0, uint64_t pos = 0) {
-    return Lnast_node(Lnast_ntype::create_statements(), Token(0, pos, line_num, sts));
+  static Lnast_node create_statements(std::string_view sts = "", uint32_t line_num = 0, uint64_t pos1 = 0, uint64_t pos2 = 0) {
+    return Lnast_node(Lnast_ntype::create_statements(), Token(0, pos1, pos2, line_num, sts));
   }
 
   static Lnast_node create_statements(const Token &new_token) {

@@ -82,28 +82,32 @@ constexpr Token_id Token_id_keyword_last  = 254;
 class Token {
 public:
   Token() {
-    tok  = Token_id_nop;
-    pos  = 0;
-    line = 0;
-    text = std::string_view{""};
+    tok   = Token_id_nop;
+    pos1  = 0;
+    pos2  = 0;
+    line  = 0;
+    text  = std::string_view{""};
   }
-  Token(Token_id _tok, uint64_t _pos, uint32_t _line, std::string_view _text) {
-    tok  = _tok;
-    pos  = _pos;
-    line = _line;
-    text = _text;
+  Token(Token_id _tok, uint64_t _pos1, uint64_t _pos2, uint32_t _line, std::string_view _text) {
+    tok   = _tok;
+    pos1  = _pos1;
+    pos2  = _pos2;
+    line  = _line;
+    text  = _text;
   }
-  void reset(Token_id _tok, uint64_t _pos, uint32_t _line, std::string_view _text) {
-    tok  = _tok;
-    pos  = _pos;
-    line = _line;
-    text = _text;
+  void reset(Token_id _tok, uint64_t _pos1, uint32_t _line, std::string_view _text) {
+    tok   = _tok;
+    pos1  = _pos1;
+    pos2  = _pos1; //FIXME: SH: you reset the token so the length of the token should be 0, pos2 follows pos1
+    line  = _line;
+    text  = _text;
   }
-  void clear(uint64_t _pos, uint32_t _line, std::string_view _text) {
-    tok  = Token_id_nop;
-    pos  = _pos;
-    line = _line;
-    text = _text;
+  void clear(uint64_t _pos1, uint32_t _line, std::string_view _text) {
+    tok   = Token_id_nop;
+    pos1  = _pos1;
+    pos2  = _pos1; //FIXME: SH: you clear the token so the length of the token should be 0, pos2 follows pos1
+    line  = _line;
+    text  = _text;
   }
 
   void fuse_token(Token_id new_tok, const Token &t2) {
@@ -121,13 +125,14 @@ public:
   }
 
   void adjust_token_size(uint64_t end_pos) {
-    GI(tok != Token_id_nop, end_pos >= pos);
-    auto new_len = end_pos - pos;
+    GI(tok != Token_id_nop, end_pos >= pos2); //FIXME: SH: check correctness of pos2
+    auto new_len = end_pos - pos2;
     text = std::string_view{text.data(), new_len};
   }
 
   Token_id tok;  // Token (identifier, if, while...)
-  uint64_t pos;  // Position in original memblock for debugging
+  uint64_t pos1;  // start position in original memblock for debugging
+  uint64_t pos2;  // end position in original memblock for debugging
   uint32_t line; // line of code
   std::string_view text;
 
@@ -301,7 +306,7 @@ public:
   }
   uint32_t    scan_line() const;
 
-  size_t get_token_pos() const { return token_list[scan_token()].pos; }
+  size_t get_token_pos() const { return token_list[scan_token()].pos1; }
 
   bool scan_is_prev_token(Token_id tok) const {
     if (scanner_pos == 0) return false;
