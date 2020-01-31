@@ -46,7 +46,7 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
     Lnast_parser lnast_parser(f);
 
     lnast = lnast_parser.ref_lnast();
-    // p.lnast->ssa_trans();
+    lnast->ssa_trans();
 
     auto        pos = f.rfind('/');
     std::string basename;
@@ -60,16 +60,6 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
 
     LGraph *dfg = LGraph::create(path, basename, f);
 
-    /*
-       for (const auto &it: lnast->depth_preorder(lnast->get_root())) {
-       const auto& node_data = lnast->get_data(it);
-       std::string name(node_data.token.get_text(memblock));  //str_view to string
-       std::string type = lnast_parser.ntype_dbg(node_data.type);
-       auto node_scope = node_data.scope;
-       fmt::print("name:{}, type:{}, scope:{}\n", name, type, node_scope);
-       }
-       */
-
     // lnast to dfg
     process_ast_top(dfg);
 
@@ -81,12 +71,12 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
 
 void Inou_lnast_dfg::process_ast_top(LGraph *dfg) {
   const auto top         = lnast->get_root();
-  const auto stmt_parent = lnast->get_first_child(top);
-  process_ast_statements(dfg, stmt_parent);
+  const auto stmts = lnast->get_first_child(top);
+  process_ast_statements(dfg, stmts);
 }
 
-void Inou_lnast_dfg::process_ast_statements(LGraph *dfg, const mmap_lib::Tree_index &stmt_parent) {
-  for (const auto &ast_idx : lnast->children(stmt_parent)) {
+void Inou_lnast_dfg::process_ast_statements(LGraph *dfg, const mmap_lib::Tree_index &stmts) {
+  for (const auto &ast_idx : lnast->children(stmts)) {
     const auto ntype = lnast->get_data(ast_idx).type;
     if (ntype.is_pure_assign()) {
       process_ast_pure_assign_op(dfg, ast_idx);
