@@ -7,7 +7,7 @@ void Lnast_to_prp_parser::generate() {
   for (const mmap_lib::Tree_index& it : lnast->depth_preorder(lnast->get_root())) {
     process_node(it);
   }
-  flush_statements();
+  flush_stmts();
 
   auto basename = absl::StrCat(lnast->get_top_module_name(), ".prp");
 
@@ -30,12 +30,12 @@ void Lnast_to_prp_parser::process_node(const mmap_lib::Tree_index& it) {
 
   if (node_data.type.is_top()) {
     process_top(it.level);
-  } else if (node_data.type.is_statements()) {
+  } else if (node_data.type.is_stmts()) {
     // check the buffer to see if this is an if statement
     // and if it is, check if this is an ifel or an else
     add_to_buffer(node_data);
     push_statement(it.level, node_data.type);
-  } else if (node_data.type.is_cstatements()) {
+  } else if (node_data.type.is_cstmts()) {
     add_to_buffer(node_data);
     push_statement(it.level, node_data.type);
   } else if (it.level == curr_statement_level) {
@@ -63,7 +63,7 @@ void Lnast_to_prp_parser::push_statement(mmap_lib::Tree_level level, Lnast_ntype
   buffer_stack.push_back(node_buffer);
   node_buffer.clear();
 
-  if (type.is_statements()) {
+  if (type.is_stmts()) {
     sts_buffer_stack.push_back(buffer);
     buffer = "";
     inc_indent_buffer();
@@ -80,8 +80,8 @@ void Lnast_to_prp_parser::pop_statement() {
   node_buffer = buffer_stack.back();
   buffer_stack.pop_back();
 
-  if (node_buffer.back().type.is_statements()) {
-    fmt::print("pop with a statements\n");
+  if (node_buffer.back().type.is_stmts()) {
+    fmt::print("pop with a stmts\n");
     sts_buffer_queue.push_back(buffer);
     buffer = sts_buffer_stack.back();
     sts_buffer_stack.pop_back();
@@ -95,8 +95,8 @@ void Lnast_to_prp_parser::pop_statement() {
   fmt::print("after pop\n");
 }
 
-void Lnast_to_prp_parser::flush_statements() {
-  fmt::print("starting to flush statements\n");
+void Lnast_to_prp_parser::flush_stmts() {
+  fmt::print("starting to flush stmts\n");
 
   while (buffer_stack.size() > 0) {
     process_buffer();
@@ -104,7 +104,7 @@ void Lnast_to_prp_parser::flush_statements() {
     node_buffer = buffer_stack.back();
     buffer_stack.pop_back();
 
-    if (node_buffer.back().type.is_statements() && buffer_stack.size() > 0) {
+    if (node_buffer.back().type.is_stmts() && buffer_stack.size() > 0) {
       sts_buffer_queue.push_back(buffer);
       buffer = sts_buffer_stack.back();
       sts_buffer_stack.pop_back();
@@ -116,7 +116,7 @@ void Lnast_to_prp_parser::flush_statements() {
     prev_statement_level = level_stack.back();
   }
 
-  fmt::print("ending flushing statements\n");
+  fmt::print("ending flushing stmts\n");
 }
 
 void Lnast_to_prp_parser::add_to_buffer(Lnast_node node) { node_buffer.push_back(node); }
@@ -128,7 +128,7 @@ void Lnast_to_prp_parser::process_buffer() {
 
   if (type.is_invalid()) {
     // add error
-  } else if (type.is_pure_assign()) {
+  } else if (type.is_assign()) {
     process_assign("=");
   } else if (type.is_dp_assign()) {
     process_assign(":=");
@@ -214,7 +214,7 @@ std::string_view Lnast_to_prp_parser::get_node_name(Lnast_node node) { return no
 void Lnast_to_prp_parser::flush_it(std::vector<Lnast_node>::iterator it) {
   while (it != node_buffer.end()) {
     const auto type = (*it).type;
-    if (type.is_statements() || type.is_cstatements()) {
+    if (type.is_stmts() || type.is_cstmts()) {
       it++;
       continue;
     }
@@ -230,7 +230,7 @@ std::string_view Lnast_to_prp_parser::join_it(std::vector<Lnast_node>::iterator 
   std::string value = "";
   while (it != node_buffer.end()) {
     const auto type = (*it).type;
-    if (type.is_statements() || type.is_cstatements()) {
+    if (type.is_stmts() || type.is_cstmts()) {
       it++;
       continue;
     }
@@ -292,7 +292,7 @@ void Lnast_to_prp_parser::process_assign(std::string_view assign_type) {
     ref = process_number(ref);
   }
 
-  fmt::print("pure_assign map:\tkey: {}\tvalue: {}\n", key, ref);
+  fmt::print("assign map:\tkey: {}\tvalue: {}\n", key, ref);
   if (is_ref(key)) {
     ref_map.insert(std::pair<std::string_view, std::string>(key, (std::string)ref));
   } else {
@@ -381,7 +381,7 @@ void Lnast_to_prp_parser::process_if() {
 
   while (it != node_buffer.end()) {
     // this is the elif case
-    if ((*it).type.is_cstatements()) {
+    if ((*it).type.is_cstmts()) {
       it++;  // csts
       ref    = get_node_name(*it);
       map_it = ref_map.find(ref);
@@ -444,10 +444,10 @@ void Lnast_to_prp_parser::process_func_def() {
   it++;  // func_def
   absl::StrAppend(&node_str_buffer, indent_buffer(), get_node_name(*it), " = :(");
   it++;  // ref
-  while (!(*it).type.is_statements()) {
+  while (!(*it).type.is_stmts()) {
     absl::StrAppend(&node_str_buffer, get_node_name(*it));
 
-    if ((*++it).type.is_statements()) {
+    if ((*++it).type.is_stmts()) {
       absl::StrAppend(&node_str_buffer, "):{\n");
     } else {
       absl::StrAppend(&node_str_buffer, ",");

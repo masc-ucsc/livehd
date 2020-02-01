@@ -7,7 +7,7 @@ void Lnast_to_cfg_parser::generate() {
   for (const mmap_lib::Tree_index& it : lnast->depth_preorder(lnast->get_root())) {
     process_node(it);
   }
-  flush_statements();
+  flush_stmts();
 
   auto basename = absl::StrCat(lnast->get_top_module_name(), ".lnast");
 
@@ -37,13 +37,13 @@ void Lnast_to_cfg_parser::process_node(const mmap_lib::Tree_index& it) {
 
   if (node_data.type.is_top()) {
     process_top(it.level);
-  } else if (node_data.type.is_statements()) {
+  } else if (node_data.type.is_stmts()) {
     // check the buffer to see if this is an if statement
     // and if it is, check if this is an ifel or an else
     if (node_buffer.size() > 0) {
       const auto ntype = node_buffer.front().type;
       if (ntype.is_if()) {
-        if (node_buffer.size() > 3 && !node_buffer.back().type.is_statements()) {
+        if (node_buffer.size() > 3 && !node_buffer.back().type.is_stmts()) {
           if_buffer.push_back(k_next);
           k_next++;
         }
@@ -54,9 +54,9 @@ void Lnast_to_cfg_parser::process_node(const mmap_lib::Tree_index& it) {
     }
     add_to_buffer(node_data);
     push_statement(it.level);
-  } else if (node_data.type.is_cstatements()) {
+  } else if (node_data.type.is_cstmts()) {
     if (node_buffer.size() > 0) {
-      if (node_buffer.back().type.is_statements()) {
+      if (node_buffer.back().type.is_stmts()) {
         if_buffer.push_back(k_next);
       }
     }
@@ -125,8 +125,8 @@ void Lnast_to_cfg_parser::pop_statement(mmap_lib::Tree_level level, Lnast_ntype 
   k_stack.pop_back();
 }
 
-void Lnast_to_cfg_parser::flush_statements() {
-  fmt::print("starting to flush statements\n");
+void Lnast_to_cfg_parser::flush_stmts() {
+  fmt::print("starting to flush stmts\n");
 
   while (buffer_stack.size() > 0) {
     process_buffer();
@@ -144,7 +144,7 @@ void Lnast_to_cfg_parser::flush_statements() {
     k_stack.pop_back();
   }
 
-  fmt::print("ending flushing statements\n");
+  fmt::print("ending flushing stmts\n");
 }
 
 void Lnast_to_cfg_parser::add_to_buffer(Lnast_node node) { node_buffer.push_back(node); }
@@ -158,11 +158,11 @@ void Lnast_to_cfg_parser::process_buffer() {
 
   if (type.is_invalid()) {
     // cause an error
-  } else if (type.is_statements()) {
+  } else if (type.is_stmts()) {
     // not processed from buffer
-  } else if (type.is_cstatements()) {
+  } else if (type.is_cstmts()) {
     // not processed from buffer
-  } else if (type.is_pure_assign()) {
+  } else if (type.is_assign()) {
     process_operator();
   } else if (type.is_dp_assign()) {
     process_operator();
@@ -257,7 +257,7 @@ std::string_view Lnast_to_cfg_parser::get_node_name(Lnast_node node) { return no
 void Lnast_to_cfg_parser::flush_it(std::vector<Lnast_node>::iterator it) {
   while (it != node_buffer.end()) {
     const auto type = (*it).type;
-    if (type.is_statements() || type.is_cstatements()) {
+    if (type.is_stmts() || type.is_cstmts()) {
       it++;
       continue;
     }

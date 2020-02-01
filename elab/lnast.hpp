@@ -34,8 +34,8 @@ struct Lnast_node {
   void dump() const;
 
   CREATE_LNAST_NODE(_top)
-  CREATE_LNAST_NODE(_statements)
-  CREATE_LNAST_NODE(_cstatements)
+  CREATE_LNAST_NODE(_stmts)
+  CREATE_LNAST_NODE(_cstmts)
   CREATE_LNAST_NODE(_if)
   CREATE_LNAST_NODE(_cond)
   CREATE_LNAST_NODE(_uif)
@@ -45,7 +45,7 @@ struct Lnast_node {
   CREATE_LNAST_NODE(_phi)
   CREATE_LNAST_NODE(_func_call)
   CREATE_LNAST_NODE(_func_def)
-  CREATE_LNAST_NODE(_pure_assign)
+  CREATE_LNAST_NODE(_assign)
   CREATE_LNAST_NODE(_dp_assign)
   CREATE_LNAST_NODE(_as)
   CREATE_LNAST_NODE(_label)
@@ -87,7 +87,7 @@ private:
   bool      elder_sibling_is_label    (const Lnast_nid  &self_nid);
   void      update_ssa_cnt_table      (const Lnast_nid  &target_nid);
   void      update_phi_resolve_table  (const Lnast_nid  &psts_nid, const Lnast_nid &target_nid);
-  bool      has_else_statements       (const Lnast_nid  &if_nid);
+  bool      has_else_stmts            (const Lnast_nid  &if_nid);
   Lnast_nid add_phi_node              (const Lnast_nid  &cond_nid, const Lnast_nid &t_nid, const Lnast_nid &f_nid);
   Lnast_nid get_complement_nid             (std::string_view brother_name, const Lnast_nid &psts_nid, bool false_path);
   Lnast_nid check_phi_table_parents_chain  (std::string_view brother_name, const Lnast_nid &psts_nid, bool originate_from_csts);

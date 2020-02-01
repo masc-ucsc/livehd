@@ -72,14 +72,14 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
 void Inou_lnast_dfg::process_ast_top(LGraph *dfg) {
   const auto top         = lnast->get_root();
   const auto stmts = lnast->get_first_child(top);
-  process_ast_statements(dfg, stmts);
+  process_ast_stmts(dfg, stmts);
 }
 
-void Inou_lnast_dfg::process_ast_statements(LGraph *dfg, const mmap_lib::Tree_index &stmts) {
+void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const mmap_lib::Tree_index &stmts) {
   for (const auto &ast_idx : lnast->children(stmts)) {
     const auto ntype = lnast->get_data(ast_idx).type;
-    if (ntype.is_pure_assign()) {
-      process_ast_pure_assign_op(dfg, ast_idx);
+    if (ntype.is_assign()) {
+      process_ast_assign_op(dfg, ast_idx);
     } else if (ntype.is_binary_op()) {
       process_ast_binary_op(dfg, ast_idx);
     } else if (ntype.is_unary_op()) {
@@ -111,9 +111,9 @@ void Inou_lnast_dfg::process_ast_statements(LGraph *dfg, const mmap_lib::Tree_in
   }
 }
 
-void Inou_lnast_dfg::process_ast_pure_assign_op(LGraph *dfg, const mmap_lib::Tree_index &lnast_op_idx) {
+void Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const mmap_lib::Tree_index &lnast_op_idx) {
   // fmt::print("purse_assign\n");
-  const Node_pin opr    = setup_node_pure_assign_and_target(dfg, lnast_op_idx);
+  const Node_pin opr    = setup_node_assign_and_target(dfg, lnast_op_idx);
   const auto     child0 = lnast->get_first_child(lnast_op_idx);
   const auto     child1 = lnast->get_sibling_next(child0);
   const Node_pin opd1   = setup_node_operand(dfg, child1);
@@ -150,7 +150,7 @@ Node_pin Inou_lnast_dfg::setup_node_operator_and_target(LGraph *dfg, const mmap_
   return node_dpin;
 }
 
-Node_pin Inou_lnast_dfg::setup_node_pure_assign_and_target(LGraph *dfg, const mmap_lib::Tree_index &lnast_op_idx) {
+Node_pin Inou_lnast_dfg::setup_node_assign_and_target(LGraph *dfg, const mmap_lib::Tree_index &lnast_op_idx) {
   const auto eldest_child = lnast->get_first_child(lnast_op_idx);
   const auto name         = lnast->get_data(eldest_child).token.get_text();
   if (name.at(0) == '%') {
@@ -214,7 +214,7 @@ void Inou_lnast_dfg::process_ast_dp_assign_op(LGraph *dfg, const mmap_lib::Tree_
 
 void Inou_lnast_dfg::setup_lnast_to_lgraph_primitive_type_mapping() {
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_invalid]     = Invalid_Op;
-  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_pure_assign] = Or_Op;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_assign]      = Or_Op;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_logical_and] = And_Op;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_logical_or]  = Or_Op;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_and]         = And_Op;

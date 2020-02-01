@@ -18,7 +18,7 @@ protected:
   void set_module_name(std::string_view filename);
 
   void         elaborate() override;
-  void         process_statements_op   (const mmap_lib::Tree_index& tree_idx_top, uint32_t);
+  void         process_stmts_op   (const mmap_lib::Tree_index& tree_idx_top, uint32_t);
   void         build_lnast();
   void         process_assign_like_op  (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);
   void         process_label_op        (const mmap_lib::Tree_index& tree_idx_opr, const Token& target_name);

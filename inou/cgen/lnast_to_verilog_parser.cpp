@@ -7,7 +7,7 @@ void Lnast_to_verilog_parser::generate() {
   for (const mmap_lib::Tree_index& it : lnast->depth_preorder(lnast->get_root())) {
     process_node(it);
   }
-  flush_statements();
+  flush_stmts();
   curr_module->dec_indent_buffer();
 
   for (const auto it : file_map) {
@@ -36,10 +36,10 @@ void Lnast_to_verilog_parser::process_node(const mmap_lib::Tree_index& it) {
 
   if (node_data.type.is_top()) {
     process_top(it.level);
-  } else if (node_data.type.is_statements()) {
+  } else if (node_data.type.is_stmts()) {
     add_to_buffer(node_data);
     push_statement(it.level, node_data.type);
-  } else if (node_data.type.is_cstatements()) {
+  } else if (node_data.type.is_cstmts()) {
     add_to_buffer(node_data);
     push_statement(it.level, node_data.type);
   } else if (it.level == curr_statement_level) {
@@ -75,7 +75,7 @@ void Lnast_to_verilog_parser::push_statement(mmap_lib::Tree_level level, Lnast_n
   buffer_stack.push_back(node_buffer);
   node_buffer.clear();
 
-  if (type.is_statements()) {
+  if (type.is_stmts()) {
     curr_module->node_buffer_stack();
     curr_module->inc_indent_buffer();
   }
@@ -91,7 +91,7 @@ void Lnast_to_verilog_parser::pop_statement() {
   node_buffer = buffer_stack.back();
   buffer_stack.pop_back();
 
-  if (node_buffer.back().type.is_statements()) {
+  if (node_buffer.back().type.is_stmts()) {
     curr_module->node_buffer_queue();
     curr_module->dec_indent_buffer();
   }
@@ -103,8 +103,8 @@ void Lnast_to_verilog_parser::pop_statement() {
   fmt::print("after pop\n");
 }
 
-void Lnast_to_verilog_parser::flush_statements() {
-  fmt::print("starting to flush statements\n");
+void Lnast_to_verilog_parser::flush_stmts() {
+  fmt::print("starting to flush stmts\n");
 
   while (buffer_stack.size() > 0) {
     process_buffer();
@@ -112,7 +112,7 @@ void Lnast_to_verilog_parser::flush_statements() {
     node_buffer = buffer_stack.back();
     buffer_stack.pop_back();
 
-    if (node_buffer.back().type.is_statements() && buffer_stack.size() > 0) {
+    if (node_buffer.back().type.is_stmts() && buffer_stack.size() > 0) {
       curr_module->node_buffer_queue();
       curr_module->dec_indent_buffer();
     }
@@ -121,7 +121,7 @@ void Lnast_to_verilog_parser::flush_statements() {
     curr_statement_level = prev_statement_level;
     prev_statement_level = level_stack.back();
   }
-  fmt::print("ending flushing statements\n");
+  fmt::print("ending flushing stmts\n");
 }
 
 void Lnast_to_verilog_parser::add_to_buffer(Lnast_node node) { node_buffer.push_back(node); }
@@ -131,7 +131,7 @@ void Lnast_to_verilog_parser::process_buffer() {
 
   Lnast_ntype type = node_buffer.front().type;
 
-  if (type.is_pure_assign()) {
+  if (type.is_assign()) {
     // check if should be in combinational or stateful
     process_assign();
   } else if (type.is_dp_assign()) {
@@ -299,7 +299,7 @@ void Lnast_to_verilog_parser::process_assign() {
       curr_module->var_manager.insert_variable(key);
       curr_module->add_to_buffer_single(std::pair<int32_t, std::string>(curr_module->get_indent_buffer(), phrase));
 
-      fmt::print("pure_assign map:\tkey: {}\tvalue: {}\n", key, value);
+      fmt::print("assign map:\tkey: {}\tvalue: {}\n", key, value);
     }
   }
 }
@@ -428,7 +428,7 @@ void Lnast_to_verilog_parser::process_if() {
 
   while (it != node_buffer.end()) {
     // this is the elif case
-    if ((*it).type.is_cstatements()) {
+    if ((*it).type.is_cstmts()) {
       it++;  // csts
       ref    = get_node_name(*it);
       map_it = ref_map.find(ref);
@@ -514,7 +514,7 @@ void Lnast_to_verilog_parser::process_func_def() {
   // function name
   it++;  // ref
   // the variables
-  while (!it->type.is_statements()) {
+  while (!it->type.is_stmts()) {
     curr_module->var_manager.insert_variable(get_node_name(*it));
     it++;
   }

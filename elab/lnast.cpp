@@ -25,7 +25,7 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid){
 
 void Lnast::ssa_if_subtree(const Lnast_nid &if_nid) {
   for (const auto &itr_nid : children(if_nid)) {
-    if (get_data(itr_nid).type.is_statements()) {
+    if (get_data(itr_nid).type.is_stmts()) {
       Phi_rtable if_sts_phi_resolve_table;
       phi_resolve_tables[get_data(itr_nid).token.get_text()] = if_sts_phi_resolve_table;
 
@@ -36,7 +36,7 @@ void Lnast::ssa_if_subtree(const Lnast_nid &if_nid) {
         else
           ssa_handle_a_statement(itr_nid, opr_nid);
       }
-    } else if (get_data(itr_nid).type.is_cstatements()){
+    } else if (get_data(itr_nid).type.is_cstmts()){
       for (const auto &opr_nid : children(itr_nid))
         ssa_handle_a_cstatement(itr_nid, opr_nid);
     } else {
@@ -48,26 +48,26 @@ void Lnast::ssa_if_subtree(const Lnast_nid &if_nid) {
 }
 
 void Lnast::ssa_handle_phi_nodes(const Lnast_nid &if_nid) {
-  std::vector<Lnast_nid> if_statements_vec;
+  std::vector<Lnast_nid> if_stmts_vec;
   for (const auto &itr : children(if_nid)) {
-    if (get_data(itr).type.is_statements())
-      if_statements_vec.push_back(itr);
+    if (get_data(itr).type.is_stmts())
+      if_stmts_vec.push_back(itr);
   }
 
   //2 possible cases: (1)if-elif-elif (2) if-elif-else
   //note: handle reversely to get correct mux priority chain
-  for (auto itr = if_statements_vec.rbegin(); itr != if_statements_vec.rend(); ++itr) {
-    if (itr == if_statements_vec.rbegin() && has_else_statements(if_nid)) {
+  for (auto itr = if_stmts_vec.rbegin(); itr != if_stmts_vec.rend(); ++itr) {
+    if (itr == if_stmts_vec.rbegin() && has_else_stmts(if_nid)) {
       continue;
-    } else if (itr == if_statements_vec.rbegin() && !has_else_statements(if_nid)) {
+    } else if (itr == if_stmts_vec.rbegin() && !has_else_stmts(if_nid)) {
       Phi_rtable &true_table  = phi_resolve_tables[get_data(*itr).token.get_text()];
       Phi_rtable fake_false_table ; //for the case of if-elif-elif
       Lnast_nid condition_nid = get_sibling_prev(*itr);
       resolve_phi_nodes(condition_nid, true_table, fake_false_table);
 
-    } else if (itr == if_statements_vec.rbegin()+1 && has_else_statements(if_nid)) {
+    } else if (itr == if_stmts_vec.rbegin()+1 && has_else_stmts(if_nid)) {
       Phi_rtable &true_table  = phi_resolve_tables[get_data(*itr).token.get_text()];
-      Phi_rtable &false_table = phi_resolve_tables[get_data(*if_statements_vec.rbegin()).token.get_text()];
+      Phi_rtable &false_table = phi_resolve_tables[get_data(*if_stmts_vec.rbegin()).token.get_text()];
       Lnast_nid condition_nid = get_sibling_prev(*itr);
       resolve_phi_nodes(condition_nid, true_table, false_table);
 
@@ -148,10 +148,10 @@ Lnast_nid Lnast::add_phi_node(const Lnast_nid &cond_nid, const Lnast_nid &t_nid,
 }
 
 
-bool Lnast::has_else_statements(const Lnast_nid &if_nid) {
+bool Lnast::has_else_stmts(const Lnast_nid &if_nid) {
   Lnast_nid last_child = get_last_child(if_nid);
   Lnast_nid second_last_child = get_sibling_prev(last_child);
-  return (get_data(last_child).type.is_statements() and get_data(second_last_child).type.is_statements());
+  return (get_data(last_child).type.is_stmts() and get_data(second_last_child).type.is_stmts());
 }
 
 void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
@@ -170,7 +170,7 @@ void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &o
 
   //handle statement lhs
   const auto type = get_data(opr_nid).type;
-  if (type.is_pure_assign() || type.is_as()) {
+  if (type.is_assign() || type.is_as()) {
     const auto  target_nid  = get_first_child(opr_nid);
           auto& target_data = *ref_data(target_nid);
     const auto  target_name = target_data.token.get_text();

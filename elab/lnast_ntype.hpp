@@ -9,8 +9,8 @@ public:
     Lnast_ntype_invalid = 0,  // zero is not a valid Lnast_ntype
     //group: tree structure
     Lnast_ntype_top,
-    Lnast_ntype_statements,
-    Lnast_ntype_cstatements,  // statement for condition determination
+    Lnast_ntype_stmts,   // stmts
+    Lnast_ntype_cstmts,  // statement for condition determination
     Lnast_ntype_if,
     Lnast_ntype_cond,
     Lnast_ntype_uif,
@@ -22,7 +22,7 @@ public:
     Lnast_ntype_func_def,     // ::   func_def = sub-graph in lgraph
 
     //group: primitive operator
-    Lnast_ntype_pure_assign,  // =
+    Lnast_ntype_assign,       // =, pure assignment
     Lnast_ntype_dp_assign,    // :=, dp = deprecate
     Lnast_ntype_as,           // as
     Lnast_ntype_label,        // :
@@ -61,8 +61,8 @@ protected:
     "invalid",
     //group: tree structure
     "top",
-    "statements",
-    "cstatements",
+    "stmts",
+    "cstmts",
     "if",
     "cond",
     "uif",
@@ -74,7 +74,7 @@ protected:
     "func_def",
 
     //group: primitive operator
-    "pure_assign",
+    "assign",
     "dp_assign",
     "as",
     "label",
@@ -244,7 +244,7 @@ protected:
     "phi",
     "func_call",
     "func_def",
-    "=", // pure_assign
+    "=", // assign
     ":=",
     "as",
     "=", // label
@@ -281,8 +281,8 @@ public:
 
   static Lnast_ntype create_top()          { return Lnast_ntype(Lnast_ntype_top); }
 
-  static Lnast_ntype create_statements()   { return Lnast_ntype(Lnast_ntype_statements); }
-  static Lnast_ntype create_cstatements()  { return Lnast_ntype(Lnast_ntype_cstatements); }
+  static Lnast_ntype create_stmts()        { return Lnast_ntype(Lnast_ntype_stmts); }
+  static Lnast_ntype create_cstmts()       { return Lnast_ntype(Lnast_ntype_cstmts); }
   static Lnast_ntype create_if()           { return Lnast_ntype(Lnast_ntype_if); }
   static Lnast_ntype create_cond()         { return Lnast_ntype(Lnast_ntype_cond); }
   static Lnast_ntype create_uif()          { return Lnast_ntype(Lnast_ntype_uif); }
@@ -293,7 +293,7 @@ public:
   static Lnast_ntype create_func_call()    { return Lnast_ntype(Lnast_ntype_func_call); }
   static Lnast_ntype create_func_def()     { return Lnast_ntype(Lnast_ntype_func_def); }
 
-  static Lnast_ntype create_pure_assign()  { return Lnast_ntype(Lnast_ntype_pure_assign); }
+  static Lnast_ntype create_assign()       { return Lnast_ntype(Lnast_ntype_assign); }
   static Lnast_ntype create_dp_assign()    { return Lnast_ntype(Lnast_ntype_dp_assign); }
   static Lnast_ntype create_as()           { return Lnast_ntype(Lnast_ntype_as); }
   static Lnast_ntype create_label()        { return Lnast_ntype(Lnast_ntype_label); }
@@ -326,8 +326,8 @@ public:
   bool is_invalid()      const { return val == Lnast_ntype_invalid; }
   bool is_top()          const { return val == Lnast_ntype_top; }
 
-  bool is_statements()   const { return val == Lnast_ntype_statements; }
-  bool is_cstatements()  const { return val == Lnast_ntype_cstatements; }
+  bool is_stmts()        const { return val == Lnast_ntype_stmts; }
+  bool is_cstmts()       const { return val == Lnast_ntype_cstmts; }
   bool is_if()           const { return val == Lnast_ntype_if; }
   bool is_cond()         const { return val == Lnast_ntype_cond; }
   bool is_uif()          const { return val == Lnast_ntype_uif; }
@@ -338,7 +338,7 @@ public:
   bool is_func_call()    const { return val == Lnast_ntype_func_call; }
   bool is_func_def()     const { return val == Lnast_ntype_func_def; }
 
-  bool is_pure_assign()  const { return val == Lnast_ntype_pure_assign; }
+  bool is_assign()       const { return val == Lnast_ntype_assign; }
   bool is_dp_assign()    const { return val == Lnast_ntype_dp_assign; }
   bool is_as()           const { return val == Lnast_ntype_as; }
   bool is_label()        const { return val == Lnast_ntype_label; }

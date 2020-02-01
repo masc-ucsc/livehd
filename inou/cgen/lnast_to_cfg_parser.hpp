@@ -19,7 +19,7 @@ private:
   void process_top(mmap_lib::Tree_level level);
   void push_statement(mmap_lib::Tree_level level);  // prepare for next statement
   void pop_statement(mmap_lib::Tree_level level, Lnast_ntype type);
-  void flush_statements();
+  void flush_stmts();
   void add_to_buffer(Lnast_node node);
   void process_buffer();
 
