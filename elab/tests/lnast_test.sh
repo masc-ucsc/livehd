@@ -1,12 +1,9 @@
 #!/bin/bash
 
-pts='lnast_ssa_nested_utest lnast_ssa_utest2 lnast_ssa_utest lnast_utest'
+pts='lnast_utest lnast_ssa_utest lnast_ssa_nested_utest lnast_ssa_utest2'
 # pts='lnast_utest'
-# pts='counter'
-# pts='counter_stage'
 
 LGSHELL=./bazel-bin/main/lgshell
-
 
 if [ ! -f $LGSHELL ]; then
   if [ -f ./main/lgshell ]; then

@@ -39,8 +39,8 @@ void Lnast::ssa_if_subtree(const Lnast_nid &if_nid) {
     } else if (get_data(itr_nid).type.is_cstmts()){
       for (const auto &opr_nid : children(itr_nid))
         ssa_handle_a_cstatement(itr_nid, opr_nid);
-    } else {
-      I(false);
+    } else { //condition node
+      continue;
     }
   }
 
