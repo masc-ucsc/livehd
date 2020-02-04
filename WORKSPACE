@@ -189,19 +189,20 @@ http_archive(
     ],
 )
 
-#load("@bazel_toolchains//rules:rbe_repo.bzl", "rbe_autoconfig")
+load("@bazel_toolchains//rules:rbe_repo.bzl", "rbe_autoconfig")
 
-#git_repository(
-    #name = "rules_graal",
-    #commit = "54c18d0c002670d755c1a709b94336f74375e21d",
-    #remote = "git://github.com/andyscott/rules_graal",
-#)
+git_repository(
+    name = "rules_graal",
+    commit = "acfe667b44c6a8e78178eb39ad10cc5ba2ee954c",
+    remote = "git://github.com/andyscott/rules_graal",
+)
 
-#load("@rules_graal//graal:graal_bindist.bzl", "graal_bindist_repository")
+load("@rules_graal//graal:graal_bindist.bzl", "graal_bindist_repository")
 
-#graal_bindist_repository(
-    #name = "graal",
-    #version = "19.0.0",
-#)
+graal_bindist_repository(
+    name = "graal",
+    version = "19.3.1",
+    java_version = "11",
+)
 
 
