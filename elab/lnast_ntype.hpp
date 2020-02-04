@@ -20,6 +20,8 @@ public:
     Lnast_ntype_phi,
     Lnast_ntype_func_call,    // .()
     Lnast_ntype_func_def,     // ::   func_def = sub-graph in lgraph
+    Lnast_ntype_select,       // []
+    Lnast_ntype_bit_select,   // [[]]
 
     //group: primitive operator
     Lnast_ntype_assign,       // =, pure assignment
@@ -44,6 +46,7 @@ public:
     Lnast_ntype_ge,
     Lnast_ntype_tuple,        // ()
     Lnast_ntype_tuple_concat, // ++
+    Lnast_ntype_iterate,      // ..
 
     //group: language variable
     Lnast_ntype_ref,
@@ -72,6 +75,8 @@ protected:
     "phi",
     "func_call",
     "func_def",
+    "select", // []
+    "bit_select", // [[]]
 
     //group: primitive operator
     "assign",
@@ -95,7 +100,8 @@ protected:
     "gt",
     "ge",
     "tuple",
-    "tuple_concat",
+    "tuple_concat", // ++
+    "iterate", // ..
 
     //group: language variable
     "ref",
@@ -121,6 +127,9 @@ protected:
     "phi",
     "func_call",
     "func_def",
+    "select",  // []
+    "bit_select", // [[]]
+
     "=",
     ":=",
     "as",
@@ -142,7 +151,8 @@ protected:
     ">",
     ">=",
     "()",
-    "tuple_concat",
+    "tuple_concat", // ++
+    "iterate", // ..
     "ref",
     "const",
     "attr",
@@ -162,6 +172,9 @@ protected:
     "phi",
     "func_call",
     "func_def",
+    "select",  // []
+    "bit_select", // [[]]
+
     "=",
     ":=",
     "as",
@@ -183,7 +196,8 @@ protected:
     ">",
     ">=",
     "()",
-    "tuple_concat",
+    "tuple_concat", // ++
+    "iterate",      // ..
     "ref",
     "const",
     "attr",
@@ -203,6 +217,9 @@ protected:
     "phi",
     "func_call",
     "func_def",
+    "select", // []
+    "bit_select", // [[]]
+
     "=",
     ":=",
     "as",
@@ -225,6 +242,7 @@ protected:
     ">=",
     "()",
     "tuple_concat",
+    "iterate", // ..
     "ref",
     "const",
     "attr",
@@ -244,6 +262,9 @@ protected:
     "phi",
     "func_call",
     "func_def",
+    "select", // []
+    "bit_select", // [[]]
+
     "=", // assign
     ":=",
     "as",
@@ -265,7 +286,8 @@ protected:
     "operator>",
     "operator>=",
     "()",
-    "tuple_concat",
+    "tuple_concat", // ++
+    "iterate", // ..
     "ref",
     "const",
     "attr",
@@ -292,6 +314,8 @@ public:
   static Lnast_ntype create_phi()          { return Lnast_ntype(Lnast_ntype_phi); }
   static Lnast_ntype create_func_call()    { return Lnast_ntype(Lnast_ntype_func_call); }
   static Lnast_ntype create_func_def()     { return Lnast_ntype(Lnast_ntype_func_def); }
+  static Lnast_ntype create_select()       { return Lnast_ntype(Lnast_ntype_select);}
+  static Lnast_ntype create_bit_select()   { return Lnast_ntype(Lnast_ntype_bit_select);}
 
   static Lnast_ntype create_assign()       { return Lnast_ntype(Lnast_ntype_assign); }
   static Lnast_ntype create_dp_assign()    { return Lnast_ntype(Lnast_ntype_dp_assign); }
@@ -314,7 +338,8 @@ public:
   static Lnast_ntype create_gt()           { return Lnast_ntype(Lnast_ntype_gt); }
   static Lnast_ntype create_ge()           { return Lnast_ntype(Lnast_ntype_ge); }
   static Lnast_ntype create_tuple()        { return Lnast_ntype(Lnast_ntype_tuple); }
-  static Lnast_ntype create_tuple_cancat() { return Lnast_ntype(Lnast_ntype_tuple_concat); }
+  static Lnast_ntype create_tuple_concat() { return Lnast_ntype(Lnast_ntype_tuple_concat); }
+  static Lnast_ntype create_iterate()      { return Lnast_ntype(Lnast_ntype_iterate); }
 
   static Lnast_ntype create_ref()          { return Lnast_ntype(Lnast_ntype_ref); }
   static Lnast_ntype create_const()        { return Lnast_ntype(Lnast_ntype_const); }
@@ -337,6 +362,8 @@ public:
   bool is_phi()          const { return val == Lnast_ntype_phi; }
   bool is_func_call()    const { return val == Lnast_ntype_func_call; }
   bool is_func_def()     const { return val == Lnast_ntype_func_def; }
+  bool is_select()       const { return val == Lnast_ntype_select; }
+  bool is_bit_select()   const { return val == Lnast_ntype_bit_select; }
 
   bool is_assign()       const { return val == Lnast_ntype_assign; }
   bool is_dp_assign()    const { return val == Lnast_ntype_dp_assign; }
@@ -360,6 +387,7 @@ public:
   bool is_ge()           const { return val == Lnast_ntype_ge; }
   bool is_tuple()        const { return val == Lnast_ntype_tuple; }
   bool is_tuple_concat() const { return val == Lnast_ntype_tuple_concat; }
+  bool is_iterate()      const { return val == Lnast_ntype_iterate; }
 
   bool is_ref()         const { return val == Lnast_ntype_ref; }
   bool is_const()       const { return val == Lnast_ntype_const; }

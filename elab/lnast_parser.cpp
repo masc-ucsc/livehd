@@ -354,7 +354,7 @@ Lnast_ntype Lnast_parser::operator_analysis() {
       }
   } else if (scan_is_token(Token_id_plus)) {
     if (scan_peep_is_token(Token_id_plus, 1)){
-      type = Lnast_ntype::create_tuple_cancat();
+      type = Lnast_ntype::create_tuple_concat();
       walk_next_token();
     } else {
       type = Lnast_ntype::create_plus();
