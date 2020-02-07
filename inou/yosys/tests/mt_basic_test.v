@@ -1,14 +1,3 @@
-module mt_basic_test (
-input  [1:0] a0, 
-input  [1:0] b0, 
-output [1:0] s0,
-output [1:0] s1,
-output [1:0] s2
-);
-
-assign s0 = a0 & b0;
-assign s1 = a0 | b0;
-assign s2 = a0 ^ b0;
-
-
-endmodule
+version https://git-lfs.github.com/spec/v1
+oid sha256:2f4379c3a5bbe58394aee1a566f1faa70402b56962bb52316e661fb5cb0a635a
+size 188

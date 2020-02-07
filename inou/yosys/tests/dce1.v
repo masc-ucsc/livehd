@@ -1,8 +1,3 @@
-module dce1( input a, input b, output c);
-always @(a or b) begin
-  c = a | b;
-
-  c = a ^ b;
-end
-endmodule
-
+version https://git-lfs.github.com/spec/v1
+oid sha256:5a0a3135680ba2e5dd9ad99952f71199783cf645995afa2bb570764b6782d45a
+size 107

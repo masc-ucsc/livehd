@@ -1,14 +1,3 @@
-
-
-module inner(input z, output a, input y, output h);
-  assign a = y & z;
-  assign h = !(y&z);
-
-endmodule
-
-module submodule (input a, input b, output c, output d);
-
-inner foo(.y(a),.z(b),.a(c),.h(d));
-
-endmodule
-
+version https://git-lfs.github.com/spec/v1
+oid sha256:7bfbf7f795f0ff2c08f940e6d5516e784496d96b4e734e255541fa741f3344af
+size 213

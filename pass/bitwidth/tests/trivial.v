@@ -1,6 +1,3 @@
-module trivial( input [3:0] a, input [3:0] b, output [3:0] c, output [3:0] d, output [3:0] e);
-assign c = a + b;
-assign d = a - b;
-assign e = 4'b1111 - a;
-endmodule
-
+version https://git-lfs.github.com/spec/v1
+oid sha256:b3c005fb4921b2939580abf0ba8c123072acd327e6d98754c564311bf396a9bd
+size 166

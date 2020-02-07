@@ -1,7 +1,3 @@
-module trivial_offset(a, y);
-  input [7:0] a;
-  output [3:0] y;
-
-  assign y = a[7:4] & a[3:0];
-
-endmodule
+version https://git-lfs.github.com/spec/v1
+oid sha256:2d2f7185867ab9884f3b3d3602af06b48346aba3b661543ead64f01cbdd33158
+size 106

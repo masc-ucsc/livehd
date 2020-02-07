@@ -1,18 +1,3 @@
-module cse_basic (
-  output reg y, z, w, x,
-  input a, b, c, d,e, 
-  clk
-);
-
-reg temp1, temp2, temp3, temp4;
-always @ (*) begin
-  temp1 = a & d;
-  temp2 = temp1 | c;
-  y = temp2;
-  temp3 = (a & d) ^ b;
-end
-
-always @ (posedge clk)
-  z <= temp3;
-endmodule
-
+version https://git-lfs.github.com/spec/v1
+oid sha256:21320e3cac6d888c7ffdbb0fb2aa8be8dcaa6fb01a1efd05a64f47bc7096204f
+size 255

@@ -1,20 +1,3 @@
-module array(input [2:0] idx, output reg [7:0] val);
-
-  reg [7:0] array1 [0:2];
-  reg [7:0] array2 [2:0];
-
-initial begin
-  array1[0] = 8'haa;
-  array1[1] = 8'hbb;
-  array1[2] = 8'hcc;
-  array2[0] = 8'haa;
-  array2[1] = 8'hbb;
-  array2[2] = 8'hcc;
-end
-
-always @(*) begin
-  val = array1[idx] - array2[idx];
-end
-
-endmodule
-
+version https://git-lfs.github.com/spec/v1
+oid sha256:24aa4f0f89d4975a19d0b92ab0ee77449094b060b65fbf523f196c8322c1abbc
+size 321

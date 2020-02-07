@@ -1,12 +1,3 @@
-
-module params(a, b, c);
-
-parameter WIDTH = 32;
-
-input  [WIDTH-1:0] a, b;
-output [WIDTH-1:0] c;
-
-assign c = a + b;
-
-
-endmodule
+version https://git-lfs.github.com/spec/v1
+oid sha256:4af324547c3296484812ff98bae060997506e6c85601ea0e1c018f6f594a4a05
+size 127

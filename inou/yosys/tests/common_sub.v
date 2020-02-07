@@ -1,10 +1,3 @@
-module common_sub (
-  output reg y, z,
-  input a, b, c, d,
-);
-
-always @ (*) begin
-  y = (a & d) | c;
-  z = (a & d) ^ b;
-end
-endmodule
+version https://git-lfs.github.com/spec/v1
+oid sha256:de1c3aa3f9f6ab713ea10216881f261192214b9b58436fb5f9c2b107ab1b4da7
+size 134

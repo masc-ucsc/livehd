@@ -1,11 +1,3 @@
-
-module gates(input a, input b, input [3:0] c, input [3:0] d, output [3:0] e,
-output f, output g);
-
-assign f = ~(a^b);
-assign g = ~^c;
-assign e = ~(c^d);
-
-endmodule
-
-
+version https://git-lfs.github.com/spec/v1
+oid sha256:753332fd85638c1f7e9f33f8444018d250fa1d51e4ff4dd4de1be36d8e0efd08
+size 167

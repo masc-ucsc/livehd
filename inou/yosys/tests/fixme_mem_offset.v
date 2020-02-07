@@ -1,19 +1,3 @@
-module mem_offset
-   (
-    input 		                  clk,
-    input [2-1:0]      raddr,
-    input [2-1:0]      waddr,
-    input 		                  we,
-    input      [2-1:0] din,
-    output reg [2-1:0] dout
-    );
-
-   reg [2-1:0] mem [5:50];
-
-  always @(posedge clk) begin
-    mem[waddr] <= din;
-    if (we)
-      dout <= mem[raddr];
-  end
-
-endmodule
+version https://git-lfs.github.com/spec/v1
+oid sha256:eb4293330a38b8ec17a2dac2152d4c1c565ee7f0d4fab798c26085c33a57c01e
+size 352

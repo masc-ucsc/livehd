@@ -1,28 +1,3 @@
-
-module blackboxing2 (input a, input b, output c, output d);
-
-wire tmp1;
-wire tmp2;
-
-cc1 i1(a,b,tmp1,tmp2);
-
-wire tmp3;
-wire tmp4;
-
-cc1 i2(tmp1,tmp2,tmp3,d);
-
-  wire tmp5;
-  wire tmp6;
-
-  assign tmp5 = tmp3 | 1;
-
-cc2 i3(a,tmp6);
-
-  wire tmp7;
-
-  assign tmp7 = tmp6 ^ a;
-
-cc2 i4(tmp7,c);
-
-endmodule
-
+version https://git-lfs.github.com/spec/v1
+oid sha256:10c935145e1ff4203bc0d257ec2a338cc4d90e3f18992fc8555d95893e6c5198
+size 299

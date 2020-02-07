@@ -1,10 +1,3 @@
-module mismatch(input [3:0] a, output [4:0] b);
-
-  wire [2:0] tmp;
-
-  assign tmp = ^a;
-
-  assign b = a[3]? tmp : {6'b0};
-
-endmodule
-
+version https://git-lfs.github.com/spec/v1
+oid sha256:cdbaabc0485cbee20888d3c8ad21875d4042baa313bc9c71dec59aa978317f82
+size 133

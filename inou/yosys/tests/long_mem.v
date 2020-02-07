@@ -1,22 +1,3 @@
-
-module mem
-    (input                clk
-     ,input [3:0]         waddr0
-     ,input               we0
-     ,input [1:0]        din0
-     ,input [3:0]         raddr1
-     ,output reg [1:0]   q1
-     );
-
-   reg [1:0] rf[15:0];
-
-   always @(posedge clk) begin
-     q1 <= rf[raddr1];
-     if (we0) begin
-       rf[waddr0] <= din0;
-     end
-   end
-
-endmodule
-
-
+version https://git-lfs.github.com/spec/v1
+oid sha256:224a8bf4ddf6ac9f47c0261d0184769e2f9bcb3a8d3249adb222a115d34f3d9c
+size 359

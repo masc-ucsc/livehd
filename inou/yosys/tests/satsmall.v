@@ -1,23 +1,3 @@
-module  satsmall(input  a, input  b,
-  input  c,
- 
-  output  out
-);
-
-   wire   out_1;
-   wire   out_2;
-   wire   out_3;
-   
-  assign out_1 = a + b;
-  //assign out_2 = a - c;
-  //assign out_3 = a + b;
-  //assign ei = - a - b;
-   wire  as = a;
-   wire  bs = b;
-
- 
-  assign out = out_1+as * bs - as;
-  
-
-endmodule
-
+version https://git-lfs.github.com/spec/v1
+oid sha256:116fb5d9a279077f31f28520e73677ef25bbc83f9192b4b7a2a2ff2218b7628e
+size 312

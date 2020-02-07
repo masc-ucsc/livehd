@@ -1,9 +1,3 @@
-
-module shift (input [7:0] a, output [7:0] b, output [7:0] c, output [7:0] d, output [7:0] e);
-
-assign b = a >> 1;
-assign c = a << 1;
-assign d = a >>> 1;
-assign e = $signed(a) >>> 1;
-
-endmodule
+version https://git-lfs.github.com/spec/v1
+oid sha256:8b77ed1c73a0b577cce3bc7ab37ce03b71d14ffa12bc76b2f15b6b5e36c21c30
+size 194

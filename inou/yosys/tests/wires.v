@@ -1,7 +1,3 @@
-
-
-module wires(input [7:0] a, output [7:0] b);
-
-assign b = {4'b1001, a[6:3]};
-
-endmodule
+version https://git-lfs.github.com/spec/v1
+oid sha256:8df9d495f605ec4b104d5b35f44ef245ab73c19aa55082dbd64730625501ed5d
+size 89

@@ -1,18 +1,3 @@
-module trivial2a( input a, output c, output d);
-assign c = ~a;
-assign d = a;
-endmodule
-
-module trivial2( input a, input b, output c);
-wire tmp1;
-assign tmp1 = ~a ^ b;
-
-wire t3o1;
-wire t3o2;
-trivial2a t3 (tmp1, t3o1, t3o2);
-
-wire tmp2;
-assign tmp2 = t3o1 & t3o2;
-assign c = !tmp2;
-endmodule
-
+version https://git-lfs.github.com/spec/v1
+oid sha256:f59b8a4014c101efc97fcba791af9af16dca5edb290805921379c8c15cb32d93
+size 291
