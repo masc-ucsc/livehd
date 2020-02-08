@@ -7,7 +7,7 @@ void Lnast_node::dump() const {
 
 void Lnast::do_ssa_trans(const Lnast_nid &top_nid){
   Lnast_nid top_sts_nid = get_first_child(top_nid);
-  default_const_nid = add_child(top_sts_nid, Lnast_node(Lnast_ntype::create_const(), Token()));
+  default_const_nid = add_child(top_sts_nid, Lnast_node(Lnast_ntype::create_const(), Token(Token_id_alnum, 0, 0, 0, "default_const")));
 
 
   Phi_rtable top_phi_resolve_table;
