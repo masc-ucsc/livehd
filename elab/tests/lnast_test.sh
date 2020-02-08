@@ -1,6 +1,6 @@
 #!/bin/bash
 
-pts='lnast_utest lnast_ssa_utest lnast_ssa_nested_utest lnast_ssa_utest2'
+pts='lnast_utest_nested_if lnast_ssa_utest lnast_ssa_nested_utest lnast_ssa_utest2'
 # pts='lnast_utest'
 
 LGSHELL=./bazel-bin/main/lgshell

@@ -46,7 +46,6 @@ public:
     Lnast_ntype_ge,
     Lnast_ntype_tuple,        // ()
     Lnast_ntype_tuple_concat, // ++
-    Lnast_ntype_range,        // ..
 
     //group: language variable
     Lnast_ntype_ref,
@@ -101,7 +100,6 @@ protected:
     "ge",
     "tuple",
     "tuple_concat", // ++
-    "range", // ..
 
     //group: language variable
     "ref",
@@ -152,7 +150,6 @@ protected:
     ">=",
     "()",
     "tuple_concat", // ++
-    "range", // ..
     "ref",
     "const",
     "attr",
@@ -197,7 +194,6 @@ protected:
     ">=",
     "()",
     "tuple_concat", // ++
-    "range",      // ..
     "ref",
     "const",
     "attr",
@@ -242,7 +238,6 @@ protected:
     ">=",
     "()",
     "tuple_concat",
-    "range", // ..
     "ref",
     "const",
     "attr",
@@ -287,7 +282,6 @@ protected:
     "operator>=",
     "()",
     "tuple_concat", // ++
-    "range", // ..
     "ref",
     "const",
     "attr",
@@ -339,7 +333,6 @@ public:
   static Lnast_ntype create_ge()           { return Lnast_ntype(Lnast_ntype_ge); }
   static Lnast_ntype create_tuple()        { return Lnast_ntype(Lnast_ntype_tuple); }
   static Lnast_ntype create_tuple_concat() { return Lnast_ntype(Lnast_ntype_tuple_concat); }
-  static Lnast_ntype create_range()        { return Lnast_ntype(Lnast_ntype_range); }
 
   static Lnast_ntype create_ref()          { return Lnast_ntype(Lnast_ntype_ref); }
   static Lnast_ntype create_const()        { return Lnast_ntype(Lnast_ntype_const); }
@@ -387,32 +380,31 @@ public:
   bool is_ge()           const { return val == Lnast_ntype_ge; }
   bool is_tuple()        const { return val == Lnast_ntype_tuple; }
   bool is_tuple_concat() const { return val == Lnast_ntype_tuple_concat; }
-  bool is_range()        const { return val == Lnast_ntype_range; }
 
-  bool is_ref()         const { return val == Lnast_ntype_ref; }
-  bool is_const()       const { return val == Lnast_ntype_const; }
+  bool is_ref()          const { return val == Lnast_ntype_ref; }
+  bool is_const()        const { return val == Lnast_ntype_const; }
 
-  bool is_attr()        const { return val == Lnast_ntype_attr; }
+  bool is_attr()         const { return val == Lnast_ntype_attr; }
 
-  bool is_assert()      const { return val == Lnast_ntype_assert; }
+  bool is_assert()       const { return val == Lnast_ntype_assert; }
 
   // Super types
-  bool  is_logical_op() const { return (val == Lnast_ntype_logical_and) or
-                                       (val == Lnast_ntype_logical_or); }
-  bool  is_unary_op()   const { return false; } // FIXME: were is the NOT??
+  bool  is_logical_op()  const { return (val == Lnast_ntype_logical_and) or
+                                        (val == Lnast_ntype_logical_or); }
+  bool  is_unary_op()    const { return false; } // FIXME: were is the NOT??
 
-  bool  is_binary_op()  const { return (val == Lnast_ntype_and) or
-                                       (val == Lnast_ntype_or) or
-                                       (val == Lnast_ntype_xor) or
-                                       (val == Lnast_ntype_plus) or
-                                       (val == Lnast_ntype_minus) or
-                                       (val == Lnast_ntype_mult) or
-                                       (val == Lnast_ntype_div) or
-                                       (val == Lnast_ntype_same) or
-                                       (val == Lnast_ntype_lt) or
-                                       (val == Lnast_ntype_le) or
-                                       (val == Lnast_ntype_gt) or
-                                       (val == Lnast_ntype_ge); }
+  bool  is_binary_op()   const { return (val == Lnast_ntype_and) or
+                                        (val == Lnast_ntype_or) or
+                                        (val == Lnast_ntype_xor) or
+                                        (val == Lnast_ntype_plus) or
+                                        (val == Lnast_ntype_minus) or
+                                        (val == Lnast_ntype_mult) or
+                                        (val == Lnast_ntype_div) or
+                                        (val == Lnast_ntype_same) or
+                                        (val == Lnast_ntype_lt) or
+                                        (val == Lnast_ntype_le) or
+                                        (val == Lnast_ntype_gt) or
+                                        (val == Lnast_ntype_ge); }
 
   std::string_view debug_name() const { return namemap[val]; }
   std::string_view debug_name_cfg() const { return namemap_cfg[val]; }

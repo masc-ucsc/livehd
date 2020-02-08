@@ -144,6 +144,9 @@ Lnast_nid Lnast::add_phi_node(const Lnast_nid &cond_nid, const Lnast_nid &t_nid,
   add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(),  get_data(t_nid).token, get_data(t_nid).subs));
   add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(),  get_data(f_nid).token, get_data(f_nid).subs));
   new_added_phi_node_table[get_data(target_nid).token.get_text()] = target_nid;
+
+  auto psts_nid = get_parent(get_parent(cond_nid));
+  update_phi_resolve_table(psts_nid, target_nid);
   return target_nid;
 }
 
@@ -186,7 +189,6 @@ void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &o
 }
 
 
-
 void Lnast::ssa_handle_a_cstatement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid){
   //handle statement rhs
   for (auto itr_opd : children(opr_nid)){
@@ -195,15 +197,19 @@ void Lnast::ssa_handle_a_cstatement(const Lnast_nid &psts_nid, const Lnast_nid &
 
     const auto itr_opd_type = get_data(itr_opd).type;
     const auto itr_opd_name = get_data(itr_opd).token.get_text();
+
     if(itr_opd_type.is_const())
       continue;
+
     if(itr_opd_name.substr(0,3) == "___")
+      continue;
+
+    if(itr_opd_name.substr(0,1) == "%" || itr_opd_name.substr(0,1) == "$")
       continue;
 
     const auto ref_nid      = check_phi_table_parents_chain(itr_opd_name, psts_nid, true);
     uint8_t    new_subs     = get_data(ref_nid).subs;
     Token      ori_token    = get_data(itr_opd).token;
-
 
     set_data(itr_opd, Lnast_node(itr_opd_type, ori_token, new_subs));
   }

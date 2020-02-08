@@ -1,5 +1,8 @@
 #!/bin/bash
 rm -f *.cfg
+./prp lnast_utest_nested_if.prp   | sort -n  > y && column -t y > x && rm -f y && mv x lnast_utest_nested_if.cfg
+./prp lnast_utest_function_call.prp   | sort -n  > y && column -t y > x && rm -f y && mv x lnast_utest_function_call.cfg
+./prp tuple.prp           | sort -n  > y && column -t y > x && rm -f y && mv x tuple.cfg
 ./prp lnast_ssa_nested_utest.prp  | sort -n  > y && column -t y > x && rm -f y && mv x lnast_ssa_nested_utest.cfg
 ./prp lnast_ssa_utest2.prp  | sort -n  > y && column -t y > x && rm -f y && mv x lnast_ssa_utest2.cfg
 ./prp lnast_ssa_utest.prp   | sort -n  > y && column -t y > x && rm -f y && mv x lnast_ssa_utest.cfg

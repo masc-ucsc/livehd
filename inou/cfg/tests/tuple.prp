@@ -1,0 +1,13 @@
+x.bits = 2
+y.bits = 3
+
+x = 3
+y = 7
+
+A = (x, foo = y)
+
+if (foo == 7) {
+  A = A++1
+}
+
+%out = A[0] + A.foo 

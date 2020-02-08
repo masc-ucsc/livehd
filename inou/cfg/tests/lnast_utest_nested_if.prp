@@ -1,0 +1,24 @@
+x = $a                         //x0
+if ($a > 1) {
+  x = $e                       //x1
+  if ($a > 2) {
+    x = $b                     //x2
+  } elif (($a + 1) > 3) {
+    x = $c                     //x3
+  } else {
+    x = $d                     //x4
+  }
+                               //x5 = phi((($a + 1) > 3), x3, x4)
+                               //x6 = phi(($a > 2), x2, x5)
+  y = $e                       //y0
+} else {
+  x = $f                       //x7
+}
+                               //x8 = phi(($a > 1), x6, x7)                  
+                               //y1 = phi(($a > 1), y0, default)
+%o1.__bits = 2
+%o2.__bits = 2
+
+%o1 = x + $a
+%o2 = y + $a
+
