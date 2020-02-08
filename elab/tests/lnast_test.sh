@@ -1,7 +1,8 @@
 #!/bin/bash
 
-pts='lnast_utest_nested_if lnast_ssa_utest lnast_ssa_nested_utest lnast_ssa_utest2'
-# pts='lnast_utest'
+pts='ssa_nested_if ssa_if nested_if'
+# pts='ssa_if'
+
 
 LGSHELL=./bazel-bin/main/lgshell
 
@@ -13,8 +14,6 @@ if [ ! -f $LGSHELL ]; then
     echo "FAILED: could not find lgshell binary in $(pwd)";
   fi
 fi
-
-
 
 for pt in $pts
 do
@@ -29,15 +28,29 @@ do
 
   ${LGSHELL} "inou.graphviz.fromlnast files:${pt}.cfg"
 
-  if [ -f ${pt}.cfg.lnast.dot ]; then
-    echo "Successfully created lnast from ${pt}.cfg"
+  if [ -f ${pt}.lnast.dot ]; then
+    echo "Successfully create a lnast from ${pt}.cfg"
   else
     echo "FAIL: LNAST generation terminated with an error, testcase: ${pt}.cfg"
     exit 1
   fi
   
-  rm -f ${pt}.cfg
-done
+  cat ${pt}.lnast.dot | sort -n > lnast.nodes
+  cat ./inou/cfg/tests/dot_gld/${pt}.lnast.dot.gld | sort -n > lnast.nodes.gld
 
+  diff lnast.nodes lnast.nodes.gld
+  exit_code=$? 
+
+  if [[ $exit_code == 0 ]]; then
+    echo "Successfully match the golden LNAST, testcase: ${pt}.cfg"
+  else 
+    echo "FAIL: generated LNAST doesn't match the golden target, testcase: ${pt}.cfg"
+    exit 1
+  fi
+  
+  rm -f ${pt}.cfg
+  rm -f lnast.dot
+  rm -f lnast.dot.gld
+done
 
 

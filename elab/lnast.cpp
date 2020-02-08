@@ -81,31 +81,61 @@ void Lnast::ssa_handle_phi_nodes(const Lnast_nid &if_nid) {
   }
 }
 
+
+
+//FIXME: SH: what if the phi-tables are already empty?
+//FIXME: SH: is it a correct case? if yes, what action should be taken to avoid
 void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table, Phi_rtable &false_table) {
-  for (auto const&[key, val] : false_table) {
-    if (true_table.find(key) != true_table.end()) {
-      add_phi_node(cond_nid, true_table[key], false_table[key]);
-      true_table.erase(key);
+
+  for (auto itr = false_table.begin(); itr!= false_table.end(); ++itr) {
+    if (true_table.find(itr->first) != true_table.end()){
+      add_phi_node(cond_nid, true_table[itr->first], false_table[itr->first]);
+      true_table.erase(itr->first);
     } else {
       auto if_nid = get_parent(cond_nid);
       auto psts_nid = get_parent(if_nid);
-      auto t_nid = get_complement_nid(key, psts_nid, false);
-      add_phi_node(cond_nid, t_nid, false_table[key]);
+      auto t_nid = get_complement_nid(itr->first, psts_nid, false);
+      add_phi_node(cond_nid, t_nid, false_table[itr->first]);
     }
   }
 
-  for (auto const&[key, val] : true_table) {
-    if (false_table.find(key) != false_table.end()) {
-      add_phi_node(cond_nid, true_table[key], false_table[key]);
-      true_table.erase(key);
+  //for (auto const&[key, val] : false_table) {
+  //  if (true_table.find(key) != true_table.end()) {
+  //    add_phi_node(cond_nid, true_table[key], false_table[key]);
+  //    true_table.erase(key);
+  //  } else {
+  //    auto if_nid = get_parent(cond_nid);
+  //    auto psts_nid = get_parent(if_nid);
+  //    auto t_nid = get_complement_nid(key, psts_nid, false);
+  //    add_phi_node(cond_nid, t_nid, false_table[key]);
+  //  }
+  //}
+
+  for (auto itr = true_table.begin(); itr!= true_table.end(); ++itr) {
+    if (false_table.find(itr->first) != false_table.end()) {
+      add_phi_node(cond_nid, true_table[itr->first], false_table[itr->first]);
+      true_table.erase(itr->first);
     } else {
       auto if_nid = get_parent(cond_nid);
       auto psts_nid = get_parent(if_nid);
-      auto f_nid = get_complement_nid(key, psts_nid, true);
-      add_phi_node(cond_nid, true_table[key], f_nid);
-      true_table.erase(key);
+      auto f_nid = get_complement_nid(itr->first, psts_nid, true);
+      add_phi_node(cond_nid, true_table[itr->first], f_nid);
+      true_table.erase(itr->first);
     }
   }
+
+  //for (auto const&[key, val] : true_table) {
+  //  if (false_table.find(key) != false_table.end()) {
+  //    add_phi_node(cond_nid, true_table[key], false_table[key]);
+  //    true_table.erase(key);
+  //  } else {
+  //    auto if_nid = get_parent(cond_nid);
+  //    auto psts_nid = get_parent(if_nid);
+  //    auto f_nid = get_complement_nid(key, psts_nid, true);
+  //    add_phi_node(cond_nid, true_table[key], f_nid);
+  //    true_table.erase(key);
+  //  }
+  //}
   //I(true_table.empty()); not necessarily true
 }
 

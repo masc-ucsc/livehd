@@ -6,7 +6,10 @@
 #include "lnast_ntype.hpp"
 
 using Lnast_nid = mmap_lib::Tree_index;
-using Phi_rtable = absl::flat_hash_map<std::string_view, Lnast_nid>; //rtable = resolve_table
+//FIXME: need ordered map to guarantee phi-node generation order to be able to test LNAST-SSA
+//FIXME: better to use absl::btree_map
+//using Phi_rtable = absl::flat_hash_map<std::string_view, Lnast_nid>; //rtable = resolve_table
+using Phi_rtable = std::map<std::string_view, Lnast_nid>; //rtable = resolve_table
 
 //tricky old C macro to avoid redundant code from function overloadings
 #define CREATE_LNAST_NODE(type) \

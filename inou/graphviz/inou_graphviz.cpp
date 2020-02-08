@@ -191,7 +191,8 @@ void Inou_graphviz::do_fromlnast(std::string_view f) {
 
   data += "}\n";
 
-  std::string file = absl::StrCat(odir, "/", f, ".lnast.dot");
+  auto f2 = f.substr(0, f.length()-4); // remove ".cfg" in the end
+  std::string file = absl::StrCat(odir, "/", f2, ".lnast.dot");
   int         fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
   if (fd < 0) {
     Pass::error("inou.graphviz_lnast unable to create {}", file);
