@@ -69,7 +69,8 @@ Suggested options for git first time users
     # Set your name and email
     git config --global user.email "perico@example.com"
     git config --global user.name "Perico LosPalotes"
-
+    git config --global pull.rebase true
+    git config --global rebase.autoStash true
 
 Work in the lgraph-private repo, and commit to master branch
 
@@ -121,7 +122,7 @@ Clean the directory from any file not in git (it will remove all the files not c
     git clean -fdx
 
 Save and restore un-committed changes to allow a new git pull. stash is like a "push" and "pop" replays
-the changes in the current directory.
+the changes in the current directory. This will happen automatically if you have the autoStash configuration option.
 
     git stash
     git pull
