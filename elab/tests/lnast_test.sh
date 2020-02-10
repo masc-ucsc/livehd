@@ -1,8 +1,9 @@
 #!/bin/bash
 
-pts='ssa_nested_if ssa_if nested_if'
-# pts='ssa_if'
-
+pts='tuple ssa_nested_if ssa_if nested_if'
+# pts='tuple'
+# pts='ssa_no_else_if'
+# pts='function_call'
 
 LGSHELL=./bazel-bin/main/lgshell
 
@@ -51,6 +52,8 @@ do
   rm -f ${pt}.cfg
   rm -f lnast.dot
   rm -f lnast.dot.gld
+  rm -f lnast.nodes
+  rm -f lnast.nodes.gld
 done
 
 

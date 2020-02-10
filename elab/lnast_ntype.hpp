@@ -127,7 +127,6 @@ protected:
     "func_def",
     "select",  // []
     "bit_select", // [[]]
-
     "=",
     ":=",
     "as",
@@ -171,7 +170,6 @@ protected:
     "func_def",
     "select",  // []
     "bit_select", // [[]]
-
     "=",
     ":=",
     "as",
@@ -215,7 +213,6 @@ protected:
     "func_def",
     "select", // []
     "bit_select", // [[]]
-
     "=",
     ":=",
     "as",
@@ -259,7 +256,6 @@ protected:
     "func_def",
     "select", // []
     "bit_select", // [[]]
-
     "=", // assign
     ":=",
     "as",

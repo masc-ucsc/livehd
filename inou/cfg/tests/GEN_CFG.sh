@@ -10,7 +10,7 @@ generate nested_if
 generate tuple
 generate ssa_if
 generate ssa_nested_if
-
+generate ssa_no_else_if
 # ./prp function_call.prp | sort -n  > y && column -t y > x && rm -f y && mv x function_call.cfg
 # ./prp nested_if.prp     | sort -n  > y && column -t y > x && rm -f y && mv x nested_if.cfg
 # ./prp tuple.prp         | sort -n  > y && column -t y > x && rm -f y && mv x tuple.cfg

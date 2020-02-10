@@ -132,7 +132,7 @@ Lnast_nid Lnast::check_phi_table_parents_chain(std::string_view target_name, con
     return parent_table[target_name];
 
   if (get_parent(psts_nid) == get_root() && originate_from_csts) {//current sts is top_sts
-    I(false); //variable not defined
+    //I(false); //variable not defined
   } else if (get_parent(psts_nid) == get_root() && !originate_from_csts){
     return default_const_nid;
   } else {
@@ -185,8 +185,6 @@ void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &o
           auto& target_data = *ref_data(target_nid);
     const auto  target_name = target_data.token.get_text();
 
-//    if ((target_name.substr(0,3) == "___") || elder_sibling_is_label(opr_nid))
-//      return;
     if (target_name.substr(0,3) == "___")
       return;
 
@@ -242,13 +240,4 @@ void Lnast::update_phi_resolve_table(const Lnast_nid &psts_nid, const Lnast_nid 
   const auto  target_name       = target_data.token.get_text();
   phi_resolve_table[target_name] = target_nid; //for a variable string, always update to latest Lnast_nid
 }
-
-bool Lnast::elder_sibling_is_label(const Lnast_nid &opr_nid) {
-  auto prev_idx = get_sibling_prev(opr_nid);
-  if (prev_idx.is_invalid())
-    return false;
-
-  return get_data(prev_idx).type.is_label();
-}
-
 

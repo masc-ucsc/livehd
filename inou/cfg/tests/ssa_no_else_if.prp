@@ -1,0 +1,8 @@
+$a.__bits = 2
+%out.__bits = 1
+
+%out = 0
+
+if ($a == 2) {
+  %out = 1
+}
