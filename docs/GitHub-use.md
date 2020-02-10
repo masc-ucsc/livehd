@@ -125,7 +125,7 @@ the changes in the current directory.
 
     git stash
     git pull
-    git pop
+    git stash pop
 
 See the differences against the server (still not pushed). Everything may be committed, so git diff may be empty
 

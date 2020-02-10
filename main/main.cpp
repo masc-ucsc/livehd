@@ -120,8 +120,15 @@ Replxx::completions_t hook_shared(std::string const& context, int index, void* u
           if (dp->d_type != DT_DIR && (label_path || label_odir)) continue;
           // fmt::print("preadding {}\n",dp->d_name);
           if (strncasecmp(dp->d_name, filename.c_str(), filename.size()) == 0 || filename.empty()) {
-            // fmt::print("adding {}\n",dp->d_name);
-            sort_files.push_back(dp->d_name);
+            //fmt::print("adding {}\n",dp->d_name);
+            struct stat sb;
+
+            std::string dir_name{path + "/" + dp->d_name};
+            if (stat(dir_name.c_str(), &sb) == 0 && S_ISDIR(sb.st_mode)) {
+              sort_files.push_back(std::string{dp->d_name} + "/");
+            }else{
+              sort_files.push_back(dp->d_name);
+            }
           }
         }
         closedir(dirp);
