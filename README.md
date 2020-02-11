@@ -1,3 +1,6 @@
+
+![LiveHD](https://masc.soe.ucsc.edu/logos/livehd5.png)
+
 # LiveHD: Live Hardware Development
 
 Code quality: [![CodeFactor](https://www.codefactor.io/repository/github/masc-ucsc/livehd/badge)](https://www.codefactor.io/repository/github/masc-ucsc/livehd)
@@ -29,12 +32,10 @@ generation.
 
 ![LiveHD overall flow](./docs/livehd.svg)
 
-
 ## Contribute to LiveHD
 There is a list of available [projects.md](docs/projects.md) to further improve
 LiveHD. If you want to contribute or seek for MS/undergraduate thesis projects, please
 contact renau@ucsc.edu to query about them.
-
 
 ## Building
 
@@ -176,6 +177,14 @@ read an LGraph and make changes to it. Usually this is done for optimizations.
 Examples of passes can be found in `pass/sample`, which compute the histogram
 and count wire numbers of a LGraph.
 
+
+## LNAST vs LGraph
+
+LGraph (Live hardware Graph) is the graph-like data structure and associated
+API inside LiveHD. LNAST (Language Neutral AST) is the tree-like structure and
+associated API to easily create new input languages to LiveHD.
+
+LNAST has a separated [documentation](https://masc.soe.ucsc.edu/lnast-doc).
 
 # Coding Style and Organization
 
