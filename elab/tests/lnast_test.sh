@@ -1,6 +1,6 @@
 #!/bin/bash
 
-pts='tuple ssa_nested_if ssa_if nested_if'
+pts='function_call tuple ssa_nested_if ssa_if nested_if'
 # pts='tuple'
 # pts='ssa_no_else_if'
 # pts='function_call'

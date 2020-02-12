@@ -203,11 +203,17 @@ void Lnast_parser::add_operator_subtree(const Lnast_nid& tree_idx_opr, const Tok
 
 //scan pos start: first operand token, stop: last operand
 void  Lnast_parser::process_func_def_op(const Lnast_nid& tree_idx_fdef, const Token& target_name) {
-  //10  1  8  59  96  ::{  ___e   $a    $b  %o
+  //10  1  8  59  96  ::{  ___e   null $a    $b  %o
 
   buffer_tmp_func_def_name_idx = lnast.add_child(tree_idx_fdef, Lnast_node::create_ref(target_name));
 
-  walk_next_token(); //sh:fixme: jump across strange null in func_def cfg
+  if (scan_text() != "null") { // case of conditional function definition
+    lnast.add_child(tree_idx_fdef, Lnast_node::create_cond(scan_get_token())); //conditional function def
+  } else {
+    lnast.add_child(tree_idx_fdef, Lnast_node::create_cond("true", 0, 0, 0));
+  }
+  walk_next_token();
+
   auto local_line_num = scan_line();
   while (scan_line() == local_line_num) {
     I(token_is_valid_ref());

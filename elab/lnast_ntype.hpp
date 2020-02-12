@@ -19,7 +19,7 @@ public:
     Lnast_ntype_while,
     Lnast_ntype_phi,
     Lnast_ntype_func_call,    // .()
-    Lnast_ntype_func_def,     // ::   func_def = sub-graph in lgraph
+    Lnast_ntype_func_def,     // ::{   func_def = sub-graph in lgraph
     Lnast_ntype_select,       // []
     Lnast_ntype_bit_select,   // [[]]
 
