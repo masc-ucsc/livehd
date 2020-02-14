@@ -52,14 +52,14 @@ def _impl(ctx):
 
   #versions.check(minimum_bazel_version = "0.5.4")
 
-  if "ar_executable" not in dir(ctx.fragments.cpp):
-    cc_toolchain = find_cpp_toolchain(ctx)
-    ar_executable = cc_toolchain.ar_executable()
-    compiler_executable = cc_toolchain.compiler_executable()
-  else:
+  if "ar_executable" in dir(ctx.fragments.cpp):
     print("linkso.bzl switching to fragments interface for older bazel versions")
     ar_executable = ctx.fragments.cpp.ar_executable
     compiler_executable = ctx.fragments.cpp.compiler_executable
+  else:
+    cc_toolchain = find_cpp_toolchain(ctx)
+    ar_executable = cc_toolchain.ar_executable
+    compiler_executable = cc_toolchain.compiler_executable
 
   #print(compiler_executable)
   #print(ar_executable)
