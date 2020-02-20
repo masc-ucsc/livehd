@@ -70,7 +70,7 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
 }
 
 void Inou_lnast_dfg::process_ast_top(LGraph *dfg) {
-  const auto top         = lnast->get_root();
+  const auto top   = lnast->get_root();
   const auto stmts = lnast->get_first_child(top);
   process_ast_stmts(dfg, stmts);
 }

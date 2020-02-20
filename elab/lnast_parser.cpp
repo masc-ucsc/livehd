@@ -262,7 +262,6 @@ void Lnast_parser::process_binary_op(const Lnast_nid& tree_idx_opr, const Token&
 }
 
 
-
 //scan pos start: first operand token, stop: last operand
 void Lnast_parser::process_assign_like_op(const Lnast_nid& tree_idx_opr, const Token& target_name) {
   lnast.add_child(tree_idx_opr, Lnast_node::create_ref(target_name));
