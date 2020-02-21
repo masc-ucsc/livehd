@@ -385,11 +385,11 @@ public:
   bool is_assert()       const { return val == Lnast_ntype_assert; }
 
   // Super types
-  bool  is_logical_op()  const { return (val == Lnast_ntype_logical_and) or
+  bool is_logical_op()   const { return (val == Lnast_ntype_logical_and) or
                                         (val == Lnast_ntype_logical_or); }
-  bool  is_unary_op()    const { return false; } // FIXME: were is the NOT??
+  bool is_unary_op()     const { I(false); return false; } // FIXME: were is the NOT??
 
-  bool  is_binary_op()   const { return (val == Lnast_ntype_and) or
+  bool is_binary_op()    const { return (val == Lnast_ntype_and) or
                                         (val == Lnast_ntype_or) or
                                         (val == Lnast_ntype_xor) or
                                         (val == Lnast_ntype_plus) or
