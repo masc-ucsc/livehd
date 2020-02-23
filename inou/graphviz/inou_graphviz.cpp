@@ -174,9 +174,9 @@ void Inou_graphviz::do_fromlnast(std::string_view f) {
 
     auto id = std::to_string(itr.level) + std::to_string(itr.pos);
     if (node_data.type.is_ref()) {
-      data += fmt::format(" {} [label=\"{}, {}[{}]\"];\n", id, node_data.type.debug_name(), name, subs);
+      data += fmt::format(" {} [label=<{}, {}<I><SUB><font color=\"#ff1020\">{}</font></SUB></I>>];\n", id, node_data.type.debug_name(), name, subs);
     } else {
-      data += fmt::format(" {} [label=\"{}, {}\"];\n", id, node_data.type.debug_name(), name);
+      data += fmt::format(" {} [label=<{}, {}>];\n", id, node_data.type.debug_name(), name);
     }
 
     if (node_data.type.is_top()) continue;
