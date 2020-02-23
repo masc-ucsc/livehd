@@ -159,11 +159,14 @@ Node_pin Inou_lnast_dfg::setup_node_assign_and_target(LGraph *dfg, const mmap_li
   }
 
   // maybe driver_pin 1, try and error
+  //FIXME: sh: setup name of driver_pin?
+  //FIXME: sh: setup name2pin on this dummy Or_Op?
   return dfg->create_node(Or_Op, 1).setup_sink_pin(0);
 }
 
-// note: for operand, except the new io and reg, the node and dpin should already be in the table as the operand comes from existing
-// operator output
+// note: for operand, except the new io and reg, the node and dpin should already be in
+// the table as the operand comes from existing operator output
+// FIXME: sh: what about the constant node?
 Node_pin Inou_lnast_dfg::setup_node_operand(LGraph *dfg, const mmap_lib::Tree_index &ast_idx) {
   // fmt::print("operand name:{}\n", name);
 
