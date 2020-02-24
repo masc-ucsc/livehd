@@ -21,6 +21,70 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid){
       ssa_handle_a_statement(top_sts_nid, opr_nid);
     }
   }
+
+  resolve_ssa_rhs_subs(top_sts_nid);
+}
+
+void Lnast::resolve_ssa_rhs_subs(const Lnast_nid &psts_nid) {
+  Cnt_rtable top_ssa_rhs_cnt_table;
+  ssa_rhs_cnt_tables[get_data(psts_nid).token.get_text()] = top_ssa_rhs_cnt_table;
+  for (const auto &opr_nid : children(psts_nid)) {
+    if (get_data(opr_nid).type.is_func_def()) {
+      continue;
+    } else if (get_data(opr_nid).type.is_phi()) {
+      continue; //already handled in add_phi_node()
+    } else if (get_data(opr_nid).type.is_if()) {
+      ssa_rhs_if_subtree(opr_nid);
+    } else {
+      ssa_rhs_handle_a_statement(psts_nid, opr_nid);
+    }
+  }
+}
+
+void Lnast::ssa_rhs_if_subtree(const Lnast_nid &if_nid) {
+  ;
+}
+
+
+void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
+  auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[get_data(psts_nid).token.get_text()];
+  //handle statement rhs
+  for (auto itr_opd : children(opr_nid)) {
+    if (itr_opd == get_first_child(opr_nid)) {
+      continue;
+    }
+
+    auto       opd_name = get_data(itr_opd).token.get_text();
+    const auto opd_type = get_data(itr_opd).type;
+
+    if (ssa_rhs_cnt_table.find(opd_name) != ssa_rhs_cnt_table.end()){
+      Token   ori_token = get_data(itr_opd).token;
+      uint8_t new_subs = ssa_rhs_cnt_table[get_data(itr_opd).token.get_text()];
+      set_data(itr_opd, Lnast_node(opd_type, ori_token, new_subs));
+      fmt::print("variable:{}, new subs:{}\n", get_data(itr_opd).token.get_text(), new_subs);
+    } else {
+      Token   ori_token = get_data(itr_opd).token;
+      int8_t  new_subs = check_rhs_cnt_table_parents_chain(psts_nid, itr_opd);
+      if (new_subs == -1) {
+        new_subs = 0; //FIXME: sh: actually, here is a good place to check undefined variable
+      }
+      ssa_rhs_cnt_table[opd_name] = new_subs;
+      set_data(itr_opd, Lnast_node(opd_type, ori_token, new_subs));
+    }
+  }
+
+  //handle statement lhs
+  const auto type = get_data(opr_nid).type;
+  if (type.is_assign() || type.is_as()) {
+    const auto  target_nid  = get_first_child(opr_nid);
+    auto& target_data = *ref_data(target_nid);
+    const auto  target_name = target_data.token.get_text();
+
+    if (target_name.substr(0,3) == "___")
+      return;
+
+    update_rhs_ssa_cnt_table(psts_nid, target_nid);
+  }
 }
 
 void Lnast::ssa_if_subtree(const Lnast_nid &if_nid) {
@@ -37,13 +101,15 @@ void Lnast::ssa_if_subtree(const Lnast_nid &if_nid) {
           ssa_handle_a_statement(itr_nid, opr_nid);
       }
     } else if (get_data(itr_nid).type.is_cstmts()) {
-      for (const auto &opr_nid : children(itr_nid))
-        ssa_handle_a_cstatement(itr_nid, opr_nid);
+      //note: the rhs should be handled separately later
+      ;
+      //for (const auto &opr_nid : children(itr_nid)){
+      //  ssa_handle_a_cstatement(itr_nid, opr_nid);
+      //}
     } else { //condition node
       continue;
     }
   }
-
   ssa_handle_phi_nodes(if_nid);
 }
 
@@ -146,7 +212,7 @@ Lnast_nid Lnast::check_phi_table_parents_chain(std::string_view target_name, con
 Lnast_nid Lnast::add_phi_node(const Lnast_nid &cond_nid, const Lnast_nid &t_nid, const Lnast_nid &f_nid) {
   auto new_phi_nid = add_child(get_parent(cond_nid), Lnast_node(Lnast_ntype::create_phi(), Token()));
   auto target_nid  = add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(), get_data(t_nid).token, get_data(t_nid).subs));
-  update_ssa_cnt_table(target_nid);
+  update_global_lhs_ssa_cnt_table(target_nid);
   add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_cond(), get_data(cond_nid).token, get_data(cond_nid).subs));
   add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(),  get_data(t_nid).token, get_data(t_nid).subs));
   add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(),  get_data(f_nid).token, get_data(f_nid).subs));
@@ -165,18 +231,19 @@ bool Lnast::has_else_stmts(const Lnast_nid &if_nid) {
 }
 
 void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
-  //handle statement rhs
-  for (auto itr_opd : children(opr_nid)) {
-    if (itr_opd == get_first_child(opr_nid))
-      continue;
-    if (ssa_cnt_table.find(get_data(itr_opd).token.get_text()) != ssa_cnt_table.end()){
-      const auto itr_opd_type = get_data(itr_opd).type;
-      uint8_t new_subs = ssa_cnt_table[get_data(itr_opd).token.get_text()];
-      fmt::print("variable:{}, new subs:{}\n", get_data(itr_opd).token.get_text(), new_subs);
-      Token   ori_token = get_data(itr_opd).token;
-      set_data(itr_opd, Lnast_node(itr_opd_type, ori_token, new_subs));
-    }
-  }
+  //FIXME: sh: rhs is more complicated than you think, see Lnast::ssa_rhs_process()
+  ////handle statement rhs
+  //for (auto itr_opd : children(opr_nid)) {
+  //  if (itr_opd == get_first_child(opr_nid))
+  //    continue;
+  //  if (ssa_lhs_cnt_table.find(get_data(itr_opd).token.get_text()) != ssa_lhs_cnt_table.end()){
+  //    const auto itr_opd_type = get_data(itr_opd).type;
+  //    uint8_t new_subs = ssa_lhs_cnt_table[get_data(itr_opd).token.get_text()];
+  //    fmt::print("variable:{}, new subs:{}\n", get_data(itr_opd).token.get_text(), new_subs);
+  //    Token   ori_token = get_data(itr_opd).token;
+  //    set_data(itr_opd, Lnast_node(itr_opd_type, ori_token, new_subs));
+  //  }
+  //}
 
   //handle statement lhs
   const auto type = get_data(opr_nid).type;
@@ -188,7 +255,7 @@ void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &o
     if (target_name.substr(0,3) == "___")
       return;
 
-    update_ssa_cnt_table(target_nid); //FIXME: sh: should be mergeable with phi tables
+    update_global_lhs_ssa_cnt_table(target_nid);
     update_phi_resolve_table(psts_nid, target_nid);
   }
 }
@@ -222,15 +289,46 @@ void Lnast::ssa_handle_a_cstatement(const Lnast_nid &psts_nid, const Lnast_nid &
 }
 
 
-void Lnast::update_ssa_cnt_table(const Lnast_nid &target_nid) {
+void Lnast::update_global_lhs_ssa_cnt_table(const Lnast_nid &target_nid) {
   auto& target_data = *ref_data(target_nid);
   const auto  target_name =target_data.token.get_text();
-  auto itr = ssa_cnt_table.find(target_name);
-  if (itr != ssa_cnt_table.end()) {
+  auto itr = global_ssa_lhs_cnt_table.find(target_name);
+  if (itr != global_ssa_lhs_cnt_table.end()) {
     itr->second += 1;
     target_data.subs = itr->second;
   } else {
-    ssa_cnt_table[target_name] = 0;
+    global_ssa_lhs_cnt_table[target_name] = 0;
+  }
+}
+
+void Lnast::update_rhs_ssa_cnt_table(const Lnast_nid &psts_nid, const Lnast_nid &target_key) {
+  auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[get_data(psts_nid).token.get_text()];
+  auto& target_data = *ref_data(target_key);
+  const auto  target_name =target_data.token.get_text();
+  auto itr = ssa_rhs_cnt_table.find(target_name);
+  if (itr != ssa_rhs_cnt_table.end()) {
+    itr->second += 1;
+    target_data.subs = itr->second;
+  } else {
+    //copy from parent table
+    int8_t new_subs = check_rhs_cnt_table_parents_chain();
+  }
+}
+
+int8_t Lnast::check_rhs_cnt_table_parents_chain(const Lnast_nid &psts_nid, const Lnast_nid &target_key) {
+  auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[get_data(psts_nid).token.get_text()];
+  auto& target_data = *ref_data(target_key);
+  const auto  target_name =target_data.token.get_text();
+  auto itr = ssa_rhs_cnt_table.find(target_name);
+
+  if (itr != ssa_rhs_cnt_table.end()) {
+    return ssa_rhs_cnt_table[target_name];
+  } else if (get_parent(psts_nid) == get_root()) {
+    return -1;
+  } else {
+    auto tmp_if_nid = get_parent(psts_nid);
+    auto new_psts_nid = get_parent(tmp_if_nid);
+    return check_rhs_cnt_table_parents_chain(new_psts_nid, target_key);
   }
 }
 
