@@ -36,7 +36,7 @@ void Lnast::ssa_if_subtree(const Lnast_nid &if_nid) {
         else
           ssa_handle_a_statement(itr_nid, opr_nid);
       }
-    } else if (get_data(itr_nid).type.is_cstmts()){
+    } else if (get_data(itr_nid).type.is_cstmts()) {
       for (const auto &opr_nid : children(itr_nid))
         ssa_handle_a_cstatement(itr_nid, opr_nid);
     } else { //condition node
@@ -172,7 +172,7 @@ void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &o
     if (ssa_cnt_table.find(get_data(itr_opd).token.get_text()) != ssa_cnt_table.end()){
       const auto itr_opd_type = get_data(itr_opd).type;
       uint8_t new_subs = ssa_cnt_table[get_data(itr_opd).token.get_text()];
-      fmt::print("new subs:{}\n", new_subs);
+      fmt::print("variable:{}, new subs:{}\n", get_data(itr_opd).token.get_text(), new_subs);
       Token   ori_token = get_data(itr_opd).token;
       set_data(itr_opd, Lnast_node(itr_opd_type, ori_token, new_subs));
     }
@@ -188,7 +188,7 @@ void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &o
     if (target_name.substr(0,3) == "___")
       return;
 
-    update_ssa_cnt_table(target_nid);
+    update_ssa_cnt_table(target_nid); //FIXME: sh: should be mergeable with phi tables
     update_phi_resolve_table(psts_nid, target_nid);
   }
 }
