@@ -9,7 +9,6 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid){
   Lnast_nid top_sts_nid = get_first_child(top_nid);
   default_const_nid = add_child(top_sts_nid, Lnast_node(Lnast_ntype::create_const(), Token(Token_id_alnum, 0, 0, 0, "default_const")));
 
-
   Phi_rtable top_phi_resolve_table;
   phi_resolve_tables[get_data(top_sts_nid).token.get_text()] = top_phi_resolve_table;
   for (const auto &opr_nid : children(top_sts_nid)) {
@@ -31,8 +30,6 @@ void Lnast::resolve_ssa_rhs_subs(const Lnast_nid &psts_nid) {
   for (const auto &opr_nid : children(psts_nid)) {
     if (get_data(opr_nid).type.is_func_def()) {
       continue;
-    } else if (get_data(opr_nid).type.is_phi()) {
-      continue; //already handled in add_phi_node()
     } else if (get_data(opr_nid).type.is_if()) {
       ssa_rhs_if_subtree(opr_nid);
     } else {
@@ -42,7 +39,28 @@ void Lnast::resolve_ssa_rhs_subs(const Lnast_nid &psts_nid) {
 }
 
 void Lnast::ssa_rhs_if_subtree(const Lnast_nid &if_nid) {
-  ;
+  for (const auto &itr_nid : children(if_nid)) {
+    if (get_data(itr_nid).type.is_stmts()) {
+      Cnt_rtable if_sts_ssa_rhs_cnt_table;
+      ssa_rhs_cnt_tables[get_data(itr_nid).token.get_text()] = if_sts_ssa_rhs_cnt_table;
+
+      for (const auto &opr_nid : children(itr_nid)) {
+        I(!get_data(opr_nid).type.is_func_def());
+        if (get_data(opr_nid).type.is_if())
+          ssa_rhs_if_subtree(opr_nid);
+        else
+          ssa_rhs_handle_a_statement(itr_nid, opr_nid);
+      }
+    } else if (get_data(itr_nid).type.is_cstmts()) {
+      for (const auto &opr_nid : children(itr_nid)){
+        ssa_rhs_handle_a_statement(itr_nid, opr_nid);
+      }
+    } else if (get_data(itr_nid).type.is_phi()){
+        update_rhs_ssa_cnt_table(get_parent(if_nid), get_first_child(itr_nid));
+    } else { //condition node
+      continue;
+    }
+  }
 }
 
 
@@ -301,18 +319,15 @@ void Lnast::update_global_lhs_ssa_cnt_table(const Lnast_nid &target_nid) {
   }
 }
 
+
+
+//note: the subs of the lhs of the operator has already handled clearly in first round ssa process, just copy into the
+//      rhs_ssa_cnt_table fine.
 void Lnast::update_rhs_ssa_cnt_table(const Lnast_nid &psts_nid, const Lnast_nid &target_key) {
   auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[get_data(psts_nid).token.get_text()];
   auto& target_data = *ref_data(target_key);
   const auto  target_name =target_data.token.get_text();
-  auto itr = ssa_rhs_cnt_table.find(target_name);
-  if (itr != ssa_rhs_cnt_table.end()) {
-    itr->second += 1;
-    target_data.subs = itr->second;
-  } else {
-    //copy from parent table
-    int8_t new_subs = check_rhs_cnt_table_parents_chain();
-  }
+  ssa_rhs_cnt_table[target_name] = target_data.subs;
 }
 
 int8_t Lnast::check_rhs_cnt_table_parents_chain(const Lnast_nid &psts_nid, const Lnast_nid &target_key) {

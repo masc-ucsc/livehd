@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# pts='ssa_rhs function_call tuple ssa_nested_if ssa_if nested_if'
-pts='ssa_rhs'
+pts='ssa_rhs function_call tuple ssa_nested_if ssa_if nested_if'
+# pts='ssa_rhs'
 # pts='tuple'
 # pts='trivial_bitwidth'
 # pts='ssa_no_else_if'
