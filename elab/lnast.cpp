@@ -4,7 +4,39 @@
 void Lnast_node::dump() const {
   fmt::print("type:{}\n", type.debug_name()); // TODO: cleaner API to also dump token
 }
+/*
+note: if not handle ssa cnt on lhs and rhs separately, there will be a race condition in the
+      if-subtree between child-True and child-False. For example, in the following source code:
 
+      A = 5
+      A = A + 4
+      if (condition)
+        A = A + 1
+        A = A + 2
+      else
+        A = A + 3
+      %out = A
+
+      So the new ssa transformation has two main part. The first and original algorithm
+      focus on the lhs ssa cnt, phi-node resolving, and phi-node insertion. The lhs ssa
+      cnt only need a global count table and the cnt of lhs on every expression will be
+      handled correctly. The second algorithm focus on rhs assignment by using tree rhs
+      cnt tables.
+
+      rhs assignment in 2nd algorithm:
+      - check current scope
+      - if exitst
+          use the local count from local table
+        else
+          if not in parents chain
+            compile error
+          else
+            copy from parents to local tables and
+            use it as cnt
+      lhs assignment in 2nd algorithm:
+      - just copy the subs from the lnast nodes into the local table
+        as the lhs subs has been handled in 1st algorithm.
+*/
 void Lnast::do_ssa_trans(const Lnast_nid &top_nid){
   Lnast_nid top_sts_nid = get_first_child(top_nid);
   default_const_nid = add_child(top_sts_nid, Lnast_node(Lnast_ntype::create_const(), Token(Token_id_alnum, 0, 0, 0, "default_const")));
@@ -23,6 +55,7 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid){
 
   resolve_ssa_rhs_subs(top_sts_nid);
 }
+
 
 void Lnast::resolve_ssa_rhs_subs(const Lnast_nid &psts_nid) {
   Cnt_rtable top_ssa_rhs_cnt_table;
@@ -118,13 +151,7 @@ void Lnast::ssa_if_subtree(const Lnast_nid &if_nid) {
         else
           ssa_handle_a_statement(itr_nid, opr_nid);
       }
-    } else if (get_data(itr_nid).type.is_cstmts()) {
-      //note: the rhs should be handled separately later
-      ;
-      //for (const auto &opr_nid : children(itr_nid)){
-      //  ssa_handle_a_cstatement(itr_nid, opr_nid);
-      //}
-    } else { //condition node
+    } else { //condition node or csts
       continue;
     }
   }
@@ -249,19 +276,7 @@ bool Lnast::has_else_stmts(const Lnast_nid &if_nid) {
 }
 
 void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
-  //FIXME: sh: rhs is more complicated than you think, see Lnast::ssa_rhs_process()
-  ////handle statement rhs
-  //for (auto itr_opd : children(opr_nid)) {
-  //  if (itr_opd == get_first_child(opr_nid))
-  //    continue;
-  //  if (ssa_lhs_cnt_table.find(get_data(itr_opd).token.get_text()) != ssa_lhs_cnt_table.end()){
-  //    const auto itr_opd_type = get_data(itr_opd).type;
-  //    uint8_t new_subs = ssa_lhs_cnt_table[get_data(itr_opd).token.get_text()];
-  //    fmt::print("variable:{}, new subs:{}\n", get_data(itr_opd).token.get_text(), new_subs);
-  //    Token   ori_token = get_data(itr_opd).token;
-  //    set_data(itr_opd, Lnast_node(itr_opd_type, ori_token, new_subs));
-  //  }
-  //}
+  //note: handle statement rhs in the 2nd part SSA
 
   //handle statement lhs
   const auto type = get_data(opr_nid).type;
@@ -279,34 +294,6 @@ void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &o
 }
 
 
-void Lnast::ssa_handle_a_cstatement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid){
-  //handle statement rhs
-  for (auto itr_opd : children(opr_nid)){
-    if(itr_opd == get_first_child(opr_nid))
-      continue;
-
-    const auto itr_opd_type = get_data(itr_opd).type;
-    const auto itr_opd_name = get_data(itr_opd).token.get_text();
-
-    if(itr_opd_type.is_const())
-      continue;
-
-    if(itr_opd_name.substr(0,3) == "___")
-      continue;
-
-    if(itr_opd_name.substr(0,1) == "%" || itr_opd_name.substr(0,1) == "$")
-      continue;
-
-    const auto ref_nid      = check_phi_table_parents_chain(itr_opd_name, psts_nid, true);
-    uint8_t    new_subs     = get_data(ref_nid).subs;
-    Token      ori_token    = get_data(itr_opd).token;
-
-    set_data(itr_opd, Lnast_node(itr_opd_type, ori_token, new_subs));
-  }
-  //no need to handle statement lhs in csts
-}
-
-
 void Lnast::update_global_lhs_ssa_cnt_table(const Lnast_nid &target_nid) {
   auto& target_data = *ref_data(target_nid);
   const auto  target_name =target_data.token.get_text();
@@ -320,9 +307,7 @@ void Lnast::update_global_lhs_ssa_cnt_table(const Lnast_nid &target_nid) {
 }
 
 
-
-//note: the subs of the lhs of the operator has already handled clearly in first round ssa process, just copy into the
-//      rhs_ssa_cnt_table fine.
+//note: the subs of the lhs of the operator has already handled clearly in first round ssa process, just copy into the rhs_ssa_cnt_table fine.
 void Lnast::update_rhs_ssa_cnt_table(const Lnast_nid &psts_nid, const Lnast_nid &target_key) {
   auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[get_data(psts_nid).token.get_text()];
   auto& target_data = *ref_data(target_key);

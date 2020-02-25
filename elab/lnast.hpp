@@ -84,7 +84,6 @@ private:
   void      do_ssa_trans               (const Lnast_nid  &top_nid);
   void      ssa_handle_a_statement     (const Lnast_nid  &psts_nid, const Lnast_nid &opr_nid);
   void      ssa_rhs_handle_a_statement (const Lnast_nid  &psts_nid, const Lnast_nid &opr_nid);
-  void      ssa_handle_a_cstatement    (const Lnast_nid  &psts_nid, const Lnast_nid &opr_nid);
   void      ssa_if_subtree             (const Lnast_nid  &if_nid);
   void      ssa_rhs_if_subtree         (const Lnast_nid  &if_nid);
   void      ssa_handle_phi_nodes       (const Lnast_nid  &if_nid);
