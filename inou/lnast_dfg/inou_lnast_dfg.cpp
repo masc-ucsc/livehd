@@ -1,10 +1,12 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <variant>
 #include "inou_lnast_dfg.hpp"
 
 #include "lbench.hpp"
 #include "lgraph.hpp"
 #include "lnast_parser.hpp"
+
 
 void setup_inou_lnast_dfg() { Inou_lnast_dfg::setup(); }
 
@@ -56,7 +58,9 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
       basename = f;
     }
     auto pos2 = basename.rfind('.');
-    if (pos2 != std::string::npos) basename = basename.substr(0, pos2);
+    if (pos2 != std::string::npos){
+      basename = basename.substr(0, pos2);
+    }
 
     LGraph *dfg = LGraph::create(path, basename, f);
 
@@ -82,6 +86,8 @@ void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const mmap_lib::Tree_index &
       process_ast_assign_op(dfg, ast_idx);
     } else if (ntype.is_binary_op()) {
       process_ast_binary_op(dfg, ast_idx);
+    } else if (ntype.is_dot()) {
+      process_ast_dot_op(dfg, ast_idx);
     } else if (ntype.is_unary_op()) {
       process_ast_unary_op(dfg, ast_idx);
     } else if (ntype.is_logical_op()) {
@@ -112,7 +118,6 @@ void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const mmap_lib::Tree_index &
 }
 
 void Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const mmap_lib::Tree_index &lnast_op_idx) {
-  // fmt::print("purse_assign\n");
   const Node_pin opr    = setup_node_assign_and_target(dfg, lnast_op_idx);
   const auto     child0 = lnast->get_first_child(lnast_op_idx);
   const auto     child1 = lnast->get_sibling_next(child0);
@@ -120,6 +125,11 @@ void Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const mmap_lib::Tree_ind
 
   dfg->add_edge(opd1, opr, 1);
 }
+
+void Inou_lnast_dfg::process_ast_dot_op(LGraph *dfg, const mmap_lib::Tree_index &lnast_op_idx) {
+  name2lnid[lnast->get_data(lnast_op_idx).token.get_text()];
+}
+
 
 void Inou_lnast_dfg::process_ast_binary_op(LGraph *dfg, const mmap_lib::Tree_index &lnast_op_idx) {
   const Node_pin opr = setup_node_operator_and_target(dfg, lnast_op_idx);
@@ -186,7 +196,7 @@ Node_pin Inou_lnast_dfg::setup_node_operand(LGraph *dfg, const mmap_lib::Tree_in
     node_dpin = dfg->get_graph_output_driver(name.substr(1));
   } else if (first_char == '$') {
     node_dpin = dfg->add_graph_input(name.substr(1), Port_invalid, 1);
-  } else if (first_char == '@') {
+  } else if (first_char == '#') {
     node_dpin = dfg->create_node(FFlop_Op).setup_driver_pin();
     // FIXME: set flop name
   } else {

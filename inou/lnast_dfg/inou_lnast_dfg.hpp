@@ -8,6 +8,7 @@
 #include "lgraph.hpp"
 #include "lnast.hpp"
 #include "pass.hpp"
+#include "likely.hpp"
 
 class Inou_lnast_dfg : public Pass {
 private:
@@ -15,8 +16,9 @@ private:
 
   absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Node_Type_Op> primitive_type_lnast2lg;
 
-  // record dpin instead of node because the asymmetry between gio and normal node  ...
-  absl::flat_hash_map<std::string, Node_pin> name2dpin;
+  absl::flat_hash_map<std::string, Node_pin>  name2dpin;
+  absl::flat_hash_map<std::string, Lnast_nid> name2lnid; //mainly for dot recording
+
   int lginp_cnt;
   int lgout_cnt;
 
@@ -32,6 +34,7 @@ protected:
   void process_ast_unary_op    (LGraph *dfg, const mmap_lib::Tree_index &ast_idx);
   void process_ast_logical_op  (LGraph *dfg, const mmap_lib::Tree_index &ast_idx);
   void process_ast_as_op       (LGraph *dfg, const mmap_lib::Tree_index &ast_idx);
+  void process_ast_dot_op      (LGraph *dfg, const mmap_lib::Tree_index &ast_idx);
   void process_ast_label_op    (LGraph *dfg, const mmap_lib::Tree_index &ast_idx);
   void process_ast_if_op       (LGraph *dfg, const mmap_lib::Tree_index &ast_idx);
   void process_ast_uif_op      (LGraph *dfg, const mmap_lib::Tree_index &ast_idx);

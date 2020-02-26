@@ -98,6 +98,12 @@ private:
   int8_t    check_rhs_cnt_table_parents_chain    (const Lnast_nid &psts_nid, const Lnast_nid &target_key);
   void      update_rhs_ssa_cnt_table             (const Lnast_nid &psts_nid, const Lnast_nid &target_key);
 
+  std::string_view get_name  (const Lnast_nid &nid) { return get_data(nid).token.get_text(); }
+  Lnast_ntype      get_type  (const Lnast_nid &nid) { return get_data(nid).type; }
+  uint8_t          get_subs  (const Lnast_nid &nid) { return get_data(nid).subs; }
+  Token            get_token (const Lnast_nid &nid) { return get_data(nid).token; }
+
+
   absl::flat_hash_map<std::string_view, Phi_rtable> phi_resolve_tables;
   absl::flat_hash_map<std::string_view, Cnt_rtable> ssa_rhs_cnt_tables;
   absl::flat_hash_map<std::string_view, uint8_t>    global_ssa_lhs_cnt_table;

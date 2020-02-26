@@ -4,7 +4,7 @@ y.__bits = 3
 x = 3
 y = 7
 
-%out = x + y
+%out = x + y 
 
 
 
