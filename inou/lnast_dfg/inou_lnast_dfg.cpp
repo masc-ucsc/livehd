@@ -79,7 +79,7 @@ void Inou_lnast_dfg::process_ast_top(LGraph *dfg) {
   process_ast_stmts(dfg, stmts);
 }
 
-void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const mmap_lib::Tree_index &stmts) {
+void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const Lnast_nid &stmts) {
   for (const auto &ast_idx : lnast->children(stmts)) {
     const auto ntype = lnast->get_data(ast_idx).type;
     if (ntype.is_assign()) {
@@ -117,7 +117,7 @@ void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const mmap_lib::Tree_index &
   }
 }
 
-void Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const mmap_lib::Tree_index &lnast_op_idx) {
+void Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnast_op_idx) {
   const Node_pin opr    = setup_node_assign_and_target(dfg, lnast_op_idx);
   const auto     child0 = lnast->get_first_child(lnast_op_idx);
   const auto     child1 = lnast->get_sibling_next(child0);
@@ -126,12 +126,12 @@ void Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const mmap_lib::Tree_ind
   dfg->add_edge(opd1, opr, 1);
 }
 
-void Inou_lnast_dfg::process_ast_dot_op(LGraph *dfg, const mmap_lib::Tree_index &lnast_op_idx) {
+void Inou_lnast_dfg::process_ast_dot_op(LGraph *dfg, const Lnast_nid &lnast_op_idx) {
   name2lnid[lnast->get_data(lnast_op_idx).token.get_text()];
 }
 
 
-void Inou_lnast_dfg::process_ast_binary_op(LGraph *dfg, const mmap_lib::Tree_index &lnast_op_idx) {
+void Inou_lnast_dfg::process_ast_binary_op(LGraph *dfg, const Lnast_nid &lnast_op_idx) {
   const Node_pin opr = setup_node_operator_and_target(dfg, lnast_op_idx);
 
   const auto child0 = lnast->get_first_child(lnast_op_idx);
@@ -149,7 +149,7 @@ void Inou_lnast_dfg::process_ast_binary_op(LGraph *dfg, const mmap_lib::Tree_ind
 };
 
 // note: for operator, we must create a new node and dpin as it represents a new gate in the netlist
-Node_pin Inou_lnast_dfg::setup_node_operator_and_target(LGraph *dfg, const mmap_lib::Tree_index &lnast_op_idx) {
+Node_pin Inou_lnast_dfg::setup_node_operator_and_target(LGraph *dfg, const Lnast_nid &lnast_op_idx) {
   const auto eldest_child = lnast->get_first_child(lnast_op_idx);
   const auto name         = lnast->get_data(eldest_child).token.get_text();
   if (name.at(0) == '%') return setup_node_operand(dfg, eldest_child);
@@ -160,9 +160,9 @@ Node_pin Inou_lnast_dfg::setup_node_operator_and_target(LGraph *dfg, const mmap_
   return node_dpin;
 }
 
-Node_pin Inou_lnast_dfg::setup_node_assign_and_target(LGraph *dfg, const mmap_lib::Tree_index &lnast_op_idx) {
+Node_pin Inou_lnast_dfg::setup_node_assign_and_target(LGraph *dfg, const Lnast_nid &lnast_op_idx) {
   const auto eldest_child = lnast->get_first_child(lnast_op_idx);
-  const auto name         = lnast->get_data(eldest_child).token.get_text();
+  const auto name         = lnast->get_name(eldest_child);
   if (name.at(0) == '%') {
     setup_node_operand(dfg, eldest_child);
     return dfg->get_graph_output(name.substr(1));
@@ -170,17 +170,17 @@ Node_pin Inou_lnast_dfg::setup_node_assign_and_target(LGraph *dfg, const mmap_li
 
   // maybe driver_pin 1, try and error
   //FIXME: sh: setup name of driver_pin?
-  //FIXME: sh: setup name2pin on this dummy Or_Op?
+  //FIXME: sh: setup name2pin on this dummy Or_Op? -> yes, you should!
   return dfg->create_node(Or_Op, 1).setup_sink_pin(0);
 }
 
 // note: for operand, except the new io and reg, the node and dpin should already be in
 // the table as the operand comes from existing operator output
 // FIXME: sh: what about the constant node?
-Node_pin Inou_lnast_dfg::setup_node_operand(LGraph *dfg, const mmap_lib::Tree_index &ast_idx) {
+Node_pin Inou_lnast_dfg::setup_node_operand(LGraph *dfg, const Lnast_nid &ast_idx) {
   // fmt::print("operand name:{}\n", name);
 
-  auto name = lnast->get_data(ast_idx).token.get_text();
+  auto name = lnast->get_name(ast_idx);
   assert(!name.empty());
 
   const auto it = name2dpin.find(name);
@@ -207,23 +207,23 @@ Node_pin Inou_lnast_dfg::setup_node_operand(LGraph *dfg, const mmap_lib::Tree_in
   return node_dpin;
 }
 
-Node_Type_Op Inou_lnast_dfg::decode_lnast_op(const mmap_lib::Tree_index &ast_op_idx) {
+Node_Type_Op Inou_lnast_dfg::decode_lnast_op(const Lnast_nid &ast_op_idx) {
   const auto raw_ntype = lnast->get_data(ast_op_idx).type.get_raw_ntype();
   return primitive_type_lnast2lg[raw_ntype];
 }
 
-void Inou_lnast_dfg::process_ast_unary_op(LGraph *dfg, const mmap_lib::Tree_index &ast_idx) { ; };
-void Inou_lnast_dfg::process_ast_logical_op(LGraph *dfg, const mmap_lib::Tree_index &ast_idx) { ; };
-void Inou_lnast_dfg::process_ast_as_op(LGraph *dfg, const mmap_lib::Tree_index &ast_idx) { ; };
-void Inou_lnast_dfg::process_ast_label_op(LGraph *dfg, const mmap_lib::Tree_index &ast_idx) { ; };
-void Inou_lnast_dfg::process_ast_if_op(LGraph *dfg, const mmap_lib::Tree_index &ast_idx) { ; };
-void Inou_lnast_dfg::process_ast_uif_op(LGraph *dfg, const mmap_lib::Tree_index &ast_idx) { ; };
-void Inou_lnast_dfg::process_ast_func_call_op(LGraph *dfg, const mmap_lib::Tree_index &ast_idx) { ; };
-void Inou_lnast_dfg::process_ast_func_def_op(LGraph *dfg, const mmap_lib::Tree_index &ast_idx) { ; };
-void Inou_lnast_dfg::process_ast_sub_op(LGraph *dfg, const mmap_lib::Tree_index &ast_idx) { ; };
-void Inou_lnast_dfg::process_ast_for_op(LGraph *dfg, const mmap_lib::Tree_index &ast_idx) { ; };
-void Inou_lnast_dfg::process_ast_while_op(LGraph *dfg, const mmap_lib::Tree_index &ast_idx) { ; };
-void Inou_lnast_dfg::process_ast_dp_assign_op(LGraph *dfg, const mmap_lib::Tree_index &ast_idx) { ; };
+void Inou_lnast_dfg::process_ast_unary_op(LGraph *dfg, const Lnast_nid &ast_idx) { ; };
+void Inou_lnast_dfg::process_ast_logical_op(LGraph *dfg, const Lnast_nid &ast_idx) { ; };
+void Inou_lnast_dfg::process_ast_as_op(LGraph *dfg, const Lnast_nid &ast_idx) { ; };
+void Inou_lnast_dfg::process_ast_label_op(LGraph *dfg, const Lnast_nid &ast_idx) { ; };
+void Inou_lnast_dfg::process_ast_if_op(LGraph *dfg, const Lnast_nid &ast_idx) { ; };
+void Inou_lnast_dfg::process_ast_uif_op(LGraph *dfg, const Lnast_nid &ast_idx) { ; };
+void Inou_lnast_dfg::process_ast_func_call_op(LGraph *dfg, const Lnast_nid &ast_idx) { ; };
+void Inou_lnast_dfg::process_ast_func_def_op(LGraph *dfg, const Lnast_nid &ast_idx) { ; };
+void Inou_lnast_dfg::process_ast_sub_op(LGraph *dfg, const Lnast_nid &ast_idx) { ; };
+void Inou_lnast_dfg::process_ast_for_op(LGraph *dfg, const Lnast_nid &ast_idx) { ; };
+void Inou_lnast_dfg::process_ast_while_op(LGraph *dfg, const Lnast_nid &ast_idx) { ; };
+void Inou_lnast_dfg::process_ast_dp_assign_op(LGraph *dfg, const Lnast_nid &ast_idx) { ; };
 
 void Inou_lnast_dfg::setup_lnast_to_lgraph_primitive_type_mapping() {
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_invalid]     = Invalid_Op;

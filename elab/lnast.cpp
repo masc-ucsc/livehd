@@ -249,6 +249,7 @@ Lnast_nid Lnast::check_phi_table_parents_chain(std::string_view target_name, con
     auto new_psts_nid = get_parent(tmp_if_nid);
     return check_phi_table_parents_chain(target_name, new_psts_nid, originate_from_csts);
   }
+  I(false);
 }
 
 

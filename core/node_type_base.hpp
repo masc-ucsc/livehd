@@ -50,14 +50,9 @@ enum Node_Type_Op : uint64_t {
   // op_class: wire
   GraphIO_Op,
   DontCare_Op,
-  // op_class: cfg
-  CfgAssign_Op,
-  CfgIf_Op,
-  CfgFunctionCall_Op,
-  CfgFor_Op,
-  CfgWhile_Op,
-  CfgIfMerge_Op,
-  CfgBeenRead_Op,
+  // op_class: Tuple
+  TupAdd_Op,
+  TupGet_Op,
   // op_class: dfg
   DfgRef_Op,
   DfgPendingGraph_Op,
@@ -646,73 +641,29 @@ public:
   };
 };
 
-// start adding CFG node_types descriptions
-
-// Y1=(A==True), Y2=(A==False)
-class Node_Type_CfgIf : public Node_Type {
+// A = tuple precedence, KP = key position, KN = key name, V = value
+class Node_Type_TupAdd : public Node_Type {
 public:
-  Node_Type_CfgIf() : Node_Type("cfg_if", CfgIf_Op, false) {
+  Node_Type_TupAdd() : Node_Type("tuple_add", TupAdd_Op, false) {
     inputs.push_back("A");
-    outputs.push_back("Y1");
-    outputs.push_back("Y2");
-  };
-};
-
-// Y0 = A, Y0,Y1,Y2,Y3 for keeping meta information
-class Node_Type_CfgAssign : public Node_Type {
-public:
-  Node_Type_CfgAssign() : Node_Type("cfg_assign", CfgAssign_Op, false) {
-    inputs.push_back("A");
-    outputs.push_back("Y0");
-    outputs.push_back("Y1");
-    outputs.push_back("Y2");
-    outputs.push_back("Y3");
-  };
-};
-
-// Y1, Y2, Y3 for keeping meta information
-class Node_Type_CfgFunctionCall : public Node_Type {
-public:
-  Node_Type_CfgFunctionCall() : Node_Type("cfg_func", CfgFunctionCall_Op, false) {
-    inputs.push_back("A");
-    outputs.push_back("Y0");
-    outputs.push_back("Y1");
-    outputs.push_back("Y2");
-    outputs.push_back("Y3");
-  };
-};
-
-class Node_Type_CfgFor : public Node_Type {
-public:
-  Node_Type_CfgFor() : Node_Type("cfg_for", CfgFor_Op, false) {
-    inputs.push_back("A");
+    inputs.push_back("KP");
+    inputs.push_back("KN");
+    inputs.push_back("V");
     outputs.push_back("Y");
   };
 };
 
-class Node_Type_CfgWhile : public Node_Type {
+
+// A = tuple precedence, K = position or name, Y = value
+class Node_Type_TupGet : public Node_Type {
 public:
-  Node_Type_CfgWhile() : Node_Type("cfg_while", CfgWhile_Op, false) {
+  Node_Type_TupGet() : Node_Type("tuple_get", TupGet_Op, false) {
     inputs.push_back("A");
+    inputs.push_back("K");
     outputs.push_back("Y");
   };
 };
 
-class Node_Type_CfgIfMerge : public Node_Type {
-public:
-  Node_Type_CfgIfMerge() : Node_Type("cfg_if_merge", CfgIfMerge_Op, false) {
-    inputs.push_back("A");
-    outputs.push_back("Y");
-  };
-};
-
-class Node_Type_CfgBeenRead : public Node_Type {
-public:
-  Node_Type_CfgBeenRead() : Node_Type("cfg_been_read", CfgBeenRead_Op, false) {
-    inputs.push_back("A");
-    outputs.push_back("Y");
-  };
-};
 
 class Node_Type_DfgRef : public Node_Type {
 public:
