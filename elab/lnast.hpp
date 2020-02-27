@@ -5,10 +5,11 @@
 #include "mmap_tree.hpp"
 #include "lnast_ntype.hpp"
 
-using Lnast_nid = mmap_lib::Tree_index;
 //FIXME: need ordered map to guarantee phi-node generation order to be able to test LNAST-SSA, better to use absl::btree_map
 //using Phi_rtable = absl::flat_hash_map<std::string_view, Lnast_nid>; //rtable = resolve_table
+using Lnast_nid = mmap_lib::Tree_index;
 using Phi_rtable = std::map<std::string_view, Lnast_nid>; //rtable = resolve_table
+using Cnt_rtable = absl::flat_hash_map<std::string_view, int8_t>;
 
 //tricky old C macro to avoid redundant code from function overloadings
 #define CREATE_LNAST_NODE(type) \
@@ -80,25 +81,32 @@ struct Lnast_node {
 class Lnast : public mmap_lib::tree<Lnast_node> {
 private:
   std::string top_module_name;
-  void      do_ssa_trans              (const Lnast_nid  &top_nid);
-  void      ssa_handle_a_statement    (const Lnast_nid  &psts_nid, const Lnast_nid &opr_nid);
-  void      ssa_handle_a_cstatement   (const Lnast_nid  &psts_nid, const Lnast_nid &opr_nid);
-  void      ssa_if_subtree            (const Lnast_nid  &if_nid);
-  void      ssa_handle_phi_nodes      (const Lnast_nid  &if_nid);
-  void      resolve_phi_nodes         (const Lnast_nid  &cond_nid, Phi_rtable &true_table, Phi_rtable &false_table);
-  bool      elder_sibling_is_label    (const Lnast_nid  &self_nid);
-  void      update_ssa_cnt_table      (const Lnast_nid  &target_nid);
-  void      update_phi_resolve_table  (const Lnast_nid  &psts_nid, const Lnast_nid &target_nid);
-  bool      has_else_stmts            (const Lnast_nid  &if_nid);
-  Lnast_nid add_phi_node              (const Lnast_nid  &cond_nid, const Lnast_nid &t_nid, const Lnast_nid &f_nid);
-  Lnast_nid get_complement_nid             (std::string_view brother_name, const Lnast_nid &psts_nid, bool false_path);
-  Lnast_nid check_phi_table_parents_chain  (std::string_view brother_name, const Lnast_nid &psts_nid, bool originate_from_csts);
+  void      do_ssa_trans               (const Lnast_nid  &top_nid);
+  void      ssa_handle_a_statement     (const Lnast_nid  &psts_nid, const Lnast_nid &opr_nid);
+  void      ssa_rhs_handle_a_statement (const Lnast_nid  &psts_nid, const Lnast_nid &opr_nid);
+  void      ssa_if_subtree             (const Lnast_nid  &if_nid);
+  void      ssa_rhs_if_subtree         (const Lnast_nid  &if_nid);
+  void      ssa_handle_phi_nodes       (const Lnast_nid  &if_nid);
+  void      resolve_phi_nodes          (const Lnast_nid  &cond_nid, Phi_rtable &true_table, Phi_rtable &false_table);
+  void      update_phi_resolve_table   (const Lnast_nid  &psts_nid, const Lnast_nid &target_nid);
+  bool      has_else_stmts             (const Lnast_nid  &if_nid);
+  Lnast_nid add_phi_node               (const Lnast_nid  &cond_nid, const Lnast_nid &t_nid, const Lnast_nid &f_nid);
+  Lnast_nid get_complement_nid            (std::string_view brother_name, const Lnast_nid &psts_nid, bool false_path);
+  Lnast_nid check_phi_table_parents_chain (std::string_view brother_name, const Lnast_nid &psts_nid, bool originate_from_csts);
+  void      resolve_ssa_rhs_subs                 (const Lnast_nid &psts_nid);
+  void      update_global_lhs_ssa_cnt_table      (const Lnast_nid &target_nid);
+  int8_t    check_rhs_cnt_table_parents_chain    (const Lnast_nid &psts_nid, const Lnast_nid &target_key);
+  void      update_rhs_ssa_cnt_table             (const Lnast_nid &psts_nid, const Lnast_nid &target_key);
+
+
 
   absl::flat_hash_map<std::string_view, Phi_rtable> phi_resolve_tables;
-  absl::flat_hash_map<std::string_view, uint8_t >   ssa_cnt_table;
-  Phi_rtable new_added_phi_node_table;
+  absl::flat_hash_map<std::string_view, Cnt_rtable> ssa_rhs_cnt_tables;
+  absl::flat_hash_map<std::string_view, uint8_t>    global_ssa_lhs_cnt_table;
 
-  Lnast_nid default_const_nid;
+  Phi_rtable new_added_phi_node_table;
+  Lnast_nid  default_const_nid;
+
 public:
   Lnast() = default;
   explicit Lnast(std::string_view _module_name): top_module_name(_module_name) { }
@@ -107,6 +115,11 @@ public:
   };
 
   std::string_view get_top_module_name() const { return top_module_name; }
+
+  std::string_view get_name  (const Lnast_nid &nid) { return get_data(nid).token.get_text(); }
+  Lnast_ntype      get_type  (const Lnast_nid &nid) { return get_data(nid).type; }
+  uint8_t          get_subs  (const Lnast_nid &nid) { return get_data(nid).subs; }
+  Token            get_token (const Lnast_nid &nid) { return get_data(nid).token; }
 };
 
 

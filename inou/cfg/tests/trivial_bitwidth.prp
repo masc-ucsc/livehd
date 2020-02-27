@@ -1,7 +1,10 @@
-x.bits = 2
-y.bits = 3
+x.__bits = 2
+y.__bits = 3
 
 x = 3
 y = 7
 
-%out = x + y
+%out = x + y 
+
+
+

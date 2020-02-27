@@ -39,13 +39,8 @@ Node_Type::_init::_init() {
   Node_Type::table[LUT_Op]               = new Node_Type_LUT();
   Node_Type::table[GraphIO_Op]           = new Node_Type_GraphIO();
 
-  Node_Type::table[CfgAssign_Op]       = new Node_Type_CfgAssign();
-  Node_Type::table[CfgIf_Op]           = new Node_Type_CfgIf();
-  Node_Type::table[CfgFunctionCall_Op] = new Node_Type_CfgFunctionCall();
-  Node_Type::table[CfgFor_Op]          = new Node_Type_CfgFor();
-  Node_Type::table[CfgWhile_Op]        = new Node_Type_CfgWhile();
-  Node_Type::table[CfgIfMerge_Op]      = new Node_Type_CfgIfMerge();
-  Node_Type::table[CfgBeenRead_Op]     = new Node_Type_CfgBeenRead();
+  Node_Type::table[TupAdd_Op]          = new Node_Type_TupAdd();
+  Node_Type::table[TupGet_Op]          = new Node_Type_TupGet();
   Node_Type::table[DontCare_Op]        = new Node_Type_DontCare();
   Node_Type::table[DfgRef_Op]          = new Node_Type_DfgRef();
   Node_Type::table[DfgPendingGraph_Op] = new Node_Type_DfgPendingGraph();
