@@ -1,7 +1,7 @@
 x.__bits = 2
 y.__bits = 3
 
-x = 3
+x = 2
 y = 7
 
 A = (x, foo = y, bar = 4)
@@ -11,6 +11,9 @@ if (A.foo == 7) {
 } else {
   A = A++8
 }
+
+A[0] = 3
+
 
 %out1 = A[0] + A.foo  // 3 + 7 = 10 
 %out2 = A[3] + A.bar  // 4 + 6 = 10 

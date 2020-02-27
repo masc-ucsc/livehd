@@ -641,11 +641,11 @@ public:
   };
 };
 
-// A = tuple precedence, KP = key position, KN = key name, V = value
+// TN = tuple name, KP = key position , KN = key name, V = value
 class Node_Type_TupAdd : public Node_Type {
 public:
   Node_Type_TupAdd() : Node_Type("tuple_add", TupAdd_Op, false) {
-    inputs.push_back("A");
+    inputs.push_back("TN");
     inputs.push_back("KP");
     inputs.push_back("KN");
     inputs.push_back("V");
