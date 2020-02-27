@@ -20,6 +20,7 @@ cc_binary(
             # "//inou/rand:inou_rand",
             "//inou/lnast_dfg:inou_lnast_dfg",
             "//inou/yosys:lgyosys-api",
+            "//inou/firrtl:inou_firrtl_cpp",
 
             # "//pass/abc:pass_abc",
             # "//pass/dfg:pass_dfg",
