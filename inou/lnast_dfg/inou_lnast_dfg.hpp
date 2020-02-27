@@ -48,7 +48,7 @@ protected:
 
   Node_pin     setup_node_operator_and_target (LGraph *dfg, const Lnast_nid &lnidx_opr);
   Node_pin     setup_node_assign_and_target   (LGraph *dfg, const Lnast_nid &lnidx_opr);
-  Node_pin     setup_node_operand             (LGraph *dfg, const Lnast_nid &lnidx);
+  Node_pin     setup_ref_node                 (LGraph *dfg, const Lnast_nid &lnidx);
   Node_Type_Op decode_lnast_op                (const Lnast_nid &lnidx_opr);
   void         setup_lnast_to_lgraph_primitive_type_mapping();
 

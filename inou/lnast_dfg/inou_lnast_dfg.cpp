@@ -148,7 +148,7 @@ void Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_a
 
   } else {
     const Node_pin opr  = setup_node_assign_and_target(dfg, lnidx_assign);
-    const Node_pin opd1 = setup_node_operand(dfg, c1);
+    const Node_pin opd1 = setup_ref_node(dfg, c1);
     dfg->add_edge(opd1, opr, 1);
   }
 }
@@ -171,6 +171,8 @@ Node_pin Inou_lnast_dfg::add_tuple_add_from_dot(LGraph *dfg, const Lnast_nid &ln
   auto kn_dpin = setup_tuple_ref(dfg, lnast->get_name(c2));
   dfg->add_edge(kn_dpin, kn_spin);
 
+  //TODO: continue with the value_dpin design!!!!!!!!!!!!!!!!!!!!!!!!!!
+  //auto value_dpin = opd;
 
 }
 
@@ -195,8 +197,6 @@ void Inou_lnast_dfg::process_ast_select_op(const Lnast_nid &lnidx_sel) {
 }
 
 
-
-
 void Inou_lnast_dfg::process_ast_binary_op(LGraph *dfg, const Lnast_nid &lnidx_opr) {
   const Node_pin opr = setup_node_operator_and_target(dfg, lnidx_opr);
 
@@ -205,8 +205,8 @@ void Inou_lnast_dfg::process_ast_binary_op(LGraph *dfg, const Lnast_nid &lnidx_o
   const auto c2 = lnast->get_sibling_next(c1);
   I(lnast->get_sibling_next(c2).is_invalid());
 
-  const Node_pin opd1 = setup_node_operand(dfg, c1);
-  const Node_pin opd2 = setup_node_operand(dfg, c2);
+  const Node_pin opd1 = setup_ref_node(dfg, c1);
+  const Node_pin opd2 = setup_ref_node(dfg, c2);
   // I(opd1 != opd2);
   // sh_fixme: the sink_pin should be determined by the functionality, not just zero
 
@@ -218,8 +218,8 @@ void Inou_lnast_dfg::process_ast_binary_op(LGraph *dfg, const Lnast_nid &lnidx_o
 Node_pin Inou_lnast_dfg::setup_node_operator_and_target(LGraph *dfg, const Lnast_nid &lnidx_opr) {
   const auto c0 = lnast->get_first_child(lnidx_opr);
   const auto name = lnast->get_data(c0).token.get_text();
-  if (name.at(0) == '%')
-    return setup_node_operand(dfg, c0);
+  if (name.substr(0, 1) == "%")
+    return setup_ref_node(dfg, c0);
 
   const auto lg_ntype_op = decode_lnast_op(lnidx_opr);
   const auto node_dpin   = dfg->create_node(lg_ntype_op, 1).setup_driver_pin(0);
@@ -230,24 +230,25 @@ Node_pin Inou_lnast_dfg::setup_node_operator_and_target(LGraph *dfg, const Lnast
 Node_pin Inou_lnast_dfg::setup_node_assign_and_target(LGraph *dfg, const Lnast_nid &lnidx_opr) {
   const auto c0 = lnast->get_first_child(lnidx_opr);
   const auto name = lnast->get_name(c0);
-  if (name.at(0) == '%') {
-    setup_node_operand(dfg, c0);
-    return dfg->get_graph_output(name.substr(1));
+  if (name.substr(0, 1) == "%") {
+    return setup_ref_node(dfg, c0).get_node().setup_sink_pin(name.substr(1)); //get rid of '%' char
+  } else if (name.substr(0,1) == "#") { //FIXME: sh: check later
+    return setup_ref_node(dfg, c0).get_node().setup_sink_pin("D");
   }
 
   // maybe driver_pin 1, try and error
-  //FIXME: sh: setup name of driver_pin?
-  //FIXME: sh: setup name2pin on this dummy Or_Op? -> yes, you should!
-  return dfg->create_node(Or_Op, 1).setup_sink_pin(0);
+  auto equal_node =  dfg->create_node(Or_Op, 1);
+  name2dpin[name] = equal_node.setup_driver_pin();
+  equal_node.setup_driver_pin().set_name(name);
+  return equal_node.setup_sink_pin(0);
 }
 
-// note: for operand, except the new io and reg, the node and its dpin should already be in
-// the table as the operand comes from existing operator output
-// FIXME: sh: what about the constant node?
 
-Node_pin Inou_lnast_dfg::setup_node_operand(LGraph *dfg, const Lnast_nid &lnidx_opd) {
+//note: for both target and operands, except the new io, reg, and const, the node and its dpin
+//      should already be in the table as the operand comes from existing operator output
+Node_pin Inou_lnast_dfg::setup_ref_node(LGraph *dfg, const Lnast_nid &lnidx_opd) {
+
   // fmt::print("operand name:{}\n", name);
-
   auto name = lnast->get_name(lnidx_opd);
   assert(!name.empty());
 
@@ -256,21 +257,23 @@ Node_pin Inou_lnast_dfg::setup_node_operand(LGraph *dfg, const Lnast_nid &lnidx_
     return it->second;
 
   Node_pin node_dpin;
-  char first_char = name[0];
 
-  if (first_char == '%') {
-    dfg->add_graph_output(name.substr(1), Port_invalid, 1);  // Port_invalid pos, means I do not care about position
+  if (name.substr(0, 1) == "%") {
+    // Port_invalid pos, means I do not care about position
+    dfg->add_graph_output(name.substr(1), Port_invalid, 1);
     node_dpin = dfg->get_graph_output_driver(name.substr(1));
-  } else if (first_char == '$') {
+  } else if (name.substr(0, 1) == "$") {
     node_dpin = dfg->add_graph_input(name.substr(1), Port_invalid, 1);
-  } else if (first_char == '#') {
+  } else if (name.substr(0, 1) == "#") {
     node_dpin = dfg->create_node(FFlop_Op).setup_driver_pin();
-    // FIXME: set flop name
+  } else if (name.substr(0, 2) == "0d" or name.substr(0, 3) == "-0d") {
+    node_dpin = resolve_constant(dfg, name).setup_driver_pin();
   } else {
     I(false);
   }
 
-  name2dpin[name] = node_dpin;  // note: for io, the %$ identifier also recorded
+  node_dpin.set_name(name);
+  name2dpin[name] = node_dpin;  // note: for io and reg, the %$# identifier also recorded
   return node_dpin;
 }
 
