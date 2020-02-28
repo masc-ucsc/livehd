@@ -1,3 +1,12 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:eed84b8d49c20d706839ecf248ea99d8483cd4639d6ea8af517c8e97c2b973c7
-size 198
+module simple_add(input [7:0] a, input [7:0] b,
+  output signed [7:0] h
+);
+
+  signed wire [7:0] as = a;
+  signed wire [7:0] bs = b;
+
+  wire [7:0] f = as + bs;
+  assign h = as + bs - as;
+
+endmodule
+

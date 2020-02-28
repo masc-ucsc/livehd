@@ -1,3 +1,12 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:7f8eb9cd1d65e58ade74b0d91a5263a54e417f404693a43845384b6cb5139b4f
-size 210
+
+
+module unconnected(input a, input b, output c);
+inn foo(.a(a), .b(b), .c(c), .d(), .e());
+endmodule
+
+module inn(input a, input b, input d, output c, output e);
+
+assign c = a & b;
+assign e = a & d;
+endmodule
+

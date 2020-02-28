@@ -1,3 +1,19 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:2369cae0d4b3d760a69f2aaf5212b8aab55cd7ac9a87d0604f3ef0cc45ad980d
-size 221
+module pref_op
+(
+  input   gi,
+  input   pi,
+
+  input   gk,
+  input   pk,
+
+  output  go,
+  output  po
+);
+
+always @(*) begin
+  go = gi | (pi & gk);  // g0 = gi + pi.gk
+  po = pi & pk;         // p0 = pi.pk
+end
+
+endmodule
+

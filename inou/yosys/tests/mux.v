@@ -1,3 +1,15 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:795c4230a7db9e9e7764ac5209d380caad60ccf0d1bd586f810e4f326da241f8
-size 183
+module mux(input a, input b, input sel, output f);
+
+reg f;
+
+always @ (sel or a or b) 
+begin:MUX
+  if (sel == 1'b0) begin
+    f = a;
+  end else begin 
+    f = b;
+  end
+end
+
+endmodule
+

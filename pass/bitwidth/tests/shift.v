@@ -1,3 +1,6 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:de7a8542e7166c5677b4f5c5317ebe05c312c69dbe85aab70d8250d270103c2d
-size 143
+module shift( input [3:0] a, output [3:0] c, output [3:0] d);
+assign c = a << 2'b10;
+assign d = a >> 2'b01;
+assign d = a >>> 2'b11;
+endmodule
+

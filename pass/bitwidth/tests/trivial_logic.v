@@ -1,3 +1,6 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:8024fecff09d311af395df8f75bd32c5ad1d3d40872fd4d6f92fb9eef15b1e12
-size 169
+module trivial_logic( input [3:0] a, input [3:0] b, output [3:0] c, output [3:0] d, output [3:0] e);
+assign c = a & b;
+assign d = ~a;
+assign e = 4'b1111 ^ a;
+endmodule
+

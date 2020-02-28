@@ -1,3 +1,17 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:eaa953c2134e120ae76b7425ad5935de6ebfd674279d383b71fd79bcd542fd85
-size 239
+module common_sub (
+  output reg y, z,
+  input a, b, c, d,
+  clk
+);
+
+reg temp1, temp2, temp3;
+always @ (*) begin
+  temp1 = a & d;
+  temp2 = temp1 | c;
+  y = temp2;
+  temp3 = (a & d) ^ b;
+end
+
+always @ (posedge clk)
+  z <= temp3;
+endmodule

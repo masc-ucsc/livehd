@@ -1,3 +1,10 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:f927bf6af1b6f72bc19cf247bcaad1ce8ab5740a95a76c41738157026280f0eb
-size 210
+
+module shiftx_simple(input [7:0] a, input [1:0] b, output [7:0] c);
+
+assign c = a[$signed(b) +: 8];
+//assign c = a[b +: 8];
+//assign c = $signed(a) >>> $unsigned(b);
+//assign c = a[$signed(3)+:8];
+
+endmodule
+

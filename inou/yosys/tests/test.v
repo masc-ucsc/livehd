@@ -1,3 +1,9 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:3a95f5acf7a8eaf259908888ec1f13fd041510a2f705172f6638039787724257
-size 197
+module test(in1, in2, in3, out1, out2);
+
+input [8:0] in1, in2, in3;
+output [8:0] out1, out2;
+
+assign out1 = in1 + (in2 << 3) + (in3 >> 4);
+assign out2 = in1 + (in2 <<< 3) + (in3 >>> 4);
+
+endmodule

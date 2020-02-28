@@ -1,3 +1,10 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:24b9a24f5be182531f38aeeaafe58cf1d79de2bb6788c5a5f61c0973cf2625de
-size 165
+module dce3(input clk, input b, input a, output d);
+  reg [1:0] array1;
+
+  always @(posedge clk) begin
+    d <= array1[a]^b;
+    array1[a] <= a^b;
+  end
+
+endmodule
+

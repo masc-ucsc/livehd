@@ -1,3 +1,15 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:87b582fbe4fd99ba949f0e4031606ef07a5b05d759ba1a843a5123c6e950bd1c
-size 214
+
+
+module aoi12(a, b, c, y);
+	input a, b, c;
+	output y;
+	assign y = ~((a & b) | c);
+endmodule
+
+module arraycells(a, b, c, y);
+	input a;
+	input [31:0] b, c;
+	output [31:0] y;
+
+	aoi12 p [31:0] (a, b, c, y);
+endmodule
