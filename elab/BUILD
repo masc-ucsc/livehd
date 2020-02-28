@@ -71,6 +71,7 @@ cc_test(
     name = "lnast_parser_unit_test",
     srcs = ["tests/lnast_parser_unit_test.cpp"],
     data = ["//inou/cfg:cfg_pts"],
+    tags = ["fixme"],
     deps = [
         ":elab",
         "@gtest//:gtest_main",
