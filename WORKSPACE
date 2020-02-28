@@ -205,25 +205,6 @@ graal_bindist_repository(
     java_version = "11",
 )
 
-
-##http_archive(
-##    name = "rules_proto",
-##    sha256 = "57001a3b33ec690a175cdf0698243431ef27233017b9bed23f96d44b9c98242f",
-##    strip_prefix = "rules_proto-9cd4f8f1ede19d81c6d48910429fe96776e567b1",
-##    urls = [
-##        "https://mirror.bazel.build/github.com/bazelbuild/rules_proto/archive/9cd4f8f1ede19d81c6d48910429fe96776e567b1.tar.gz",
-##        "https://github.com/bazelbuild/rules_proto/archive/9cd4f8f1ede19d81c6d48910429fe96776e567b1.tar.gz",
-##    ],
-##)
-###
-##load("@rules_cc//cc:repositories.bzl", "rules_cc_dependencies")
-##rules_cc_dependencies()
-##
-##load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies", "rules_proto_toolchains")
-##rules_proto_dependencies()
-##rules_proto_toolchains()
-
-
 http_archive(
     name = "com_google_protobuf",
     strip_prefix = "protobuf-master",

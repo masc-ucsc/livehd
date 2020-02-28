@@ -33,20 +33,6 @@ void Inou_firrtl::ListTypeInfo(const firrtl::FirrtlPB_Type& type) {
       for (int i = 0; i < type.bundle_type().field_size(); i++) {
         cout << "\t" << btype.field(i).id() << ": ";
         ListTypeInfo(btype.field(i).type());
-        /*for (int j = 0; j <= depth; j++) {
-          cout << "\t";
-        }
-        cout << btype.field(i).id() << ": " << dir << "(" << btype.field(i).is_flipped()  << ")" << ", ";*/
-        /*firrtl::Firrtl_Port_Direction field_dir = 0;
-        if (btype.field(i).is_flipped()) {
-          if (dir == 1) {
-            field_dir = 2;
-          } else if (dir == 2) {
-            field_dir = 1;
-          }0
-        }*/
-        //FIXME: Need to introduce is_flipped logic.... test on nested bundles
-        //ListTypeInfo(btype.field(i).type(), btype.field(i).id(), dir, depth+1);
       }
       cout << "\t}\n";
       break;
@@ -54,9 +40,6 @@ void Inou_firrtl::ListTypeInfo(const firrtl::FirrtlPB_Type& type) {
     } case 6: { //Vector type
       const firrtl::FirrtlPB_Type_VectorType vtype = type.vector_type();
       cout << "Vector[" << vtype.size()  << "]" << endl;
-      /*for (int j = 0; j <= depth+1; j++) {
-        cout << "\t";
-      }*/
       ListTypeInfo(vtype.type());
       break;
 
@@ -82,182 +65,228 @@ void Inou_firrtl::ListTypeInfo(const firrtl::FirrtlPB_Type& type) {
   }
 }
 
-//void ListTypeInfo(const firrtl::Firrtl_Type& type, const string id, const firrtl::Firrtl_Port_Direction &dir, uint8_t depth) {
-//  string dir_str;
-//  if(dir == 1) {
-//    dir_str = "input";
-//  } else if (dir == 2) {
-//    dir_str = "output";
-//  } else {
-//    dir_str = "unknown";
-//  }
-//
-//  switch (type.type_case()) {
-//    case 2: { //UInt type
-//      cout << "UInt[" << type.uint_type().width().value() << "]" << endl;
-//      break;
-//
-//    } case 3: { //SInt type
-//      cout << "SInt[" << type.uint_type().width().value() << "]" << endl;
-//      break;
-//
-//    } case 4: { //Clock type
-//      cout << dir_str << " " << id << " : " << "Clock" << endl;
-//      break;
-//
-//    } case 5: { //Bundle type
-//      cout << "Bundle" << endl;
-//      const firrtl::Firrtl_Type_BundleType btype = type.bundle_type();
-//      for (int i = 0; i < type.bundle_type().field_size(); i++) {
-//        for (int j = 0; j <= depth; j++) {
-//          cout << "\t";
-//        }
-//        cout << btype.field(i).id() << ": " << dir << "(" << btype.field(i).is_flipped()  << ")" << ", ";
-//        /*firrtl::Firrtl_Port_Direction field_dir = 0;
-//        if (btype.field(i).is_flipped()) {
-//          if (dir == 1) {
-//            field_dir = 2;
-//          } else if (dir == 2) {
-//            field_dir = 1;
-//          }0
-//        }*/
-//        //FIXME: Need to introduce is_flipped logic.... test on nested bundles
-//        ListTypeInfo(btype.field(i).type(), btype.field(i).id(), dir, depth+1);
-//      }
-//      break;
-//
-//    } case 6: { //Vector type
-//      const firrtl::Firrtl_Type_VectorType vtype = type.vector_type();
-//      cout << "Vector[" << vtype.size()  << "]" << endl;
-//      for (int j = 0; j <= depth+1; j++) {
-//        cout << "\t";
-//      }
-//      ListTypeInfo(vtype.type(), "FIXME", dir, depth+1);
-//      break;
-//
-//    } case 7: { //Fixed type
-//      cout << "Fixed[" << type.fixed_type().width().value() << "." << type.fixed_type().point().value() << "]" << endl;
-//      break;
-//
-//    } case 8: { //Analog type
-//      cout << "Analog[" << type.uint_type().width().value() << "]" << endl;
-//      break;
-//
-//    } case 9: { //AsyncReset type
-//      cout << "AsyncReset" << endl;
-//      break;
-//
-//    } case 10: { //Reset type
-//      cout << "Reset" << endl;
-//      break;
-//
-//    } default:
-//      cout << "Unknown port type." << endl;
-//      return;
-//  }
-//}
-
 void Inou_firrtl::ListPortInfo(const firrtl::FirrtlPB_Port& port) {
   cout << "\t" << port.id() << ": " << port.direction() << ", ";
   ListTypeInfo(port.type());
 }
 
-void Inou_firrtl::IteratePrimOpExpr(const firrtl::FirrtlPB_Expression_PrimOp& op) {
+/*void Inou_firrtl::IteratePrimOpExpr(const firrtl::FirrtlPB_Expression_PrimOp& op) {
   for (int i = 0; i < op.arg_size(); i++) {
     ListExprInfo(op.arg(i));
     cout << " ";
+  }
+}*/
+
+void Inou_firrtl::PrintPrimOp(const firrtl::FirrtlPB_Expression_PrimOp& op, const std::string symbol) {
+  for (int i = 0; i < op.arg_size(); i++) {
+    //cout << "a_";
+    ListExprInfo(op.arg(i));
+    if ((i == (op.arg_size()-1) && (op.const__size() == 0)))
+        break;
+    cout << symbol;
+  }
+  for (int j = 0; j < op.const__size(); j++) {
+    //cout << "c_";
+    //Note: We can't just call ListExprInfo like above since this is not of type Expression.
+    cout << op.const_(j).value();
+    if (j == (op.const__size()-1))
+        break;
+    cout << symbol;
   }
 }
 
 void Inou_firrtl::ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op) {
   //FIXME: Add stuff to this eventually;
-  cout << "primOp: " << op.op();
   switch(op.op()) {
     case 1: { //Op_Add
-      cout << "ADD\n";
+      PrintPrimOp(op, "+");
       break;
+
     } case 2: { //Op_Sub
-      cout << "SUB\n";
+      PrintPrimOp(op, "-");
       break;
-    } case 3: { //Op_Tail
+
+    } case 3: { //Op_Tail -- take in some 'n', returns value with 'n' MSBs removed
+      cout << "tail(";
+      PrintPrimOp(op, ", ");
+      cout << ");";
       break;
-    } case 4: { //Op_Head
+
+    } case 4: { //Op_Head -- take in some 'n', returns
+      cout << "head(";
+      PrintPrimOp(op, ", ");
+      cout << ");";
       break;
+
     } case 5: { //Op_Times
+      PrintPrimOp(op, "*");
       break;
+
     } case 6: { //Op_Divide
+      PrintPrimOp(op, "/");
       break;
+
     } case 7: { //Op_Rem
+      PrintPrimOp(op, "%");
       break;
+
     } case 8: { //Op_ShiftLeft
+      //Note: used if one operand is variable, other is const #.
+      //      a = x << #... bw(a) = w(x) + #
+      PrintPrimOp(op, "<<");
       break;
+
     } case 9: { //Op_Shift_Right
+      //Note: used if one operand is variable, other is const #.
+      //      a = x >> #... bw(a) = w(x) - #
+      PrintPrimOp(op, ">>");
       break;
+
     } case 10: { //Op_Dynamic_Shift_Left
+      //Note: used if operands are both variables.
+      //      a = x << y... bw(a) = w(x) + maxVal(y)
+      PrintPrimOp(op, "<<");
       break;
+
     } case 11: { //Op_Dynamic_Shift_Right
+      //Note: used if operands are both variables.
+      //      a = x >> y... bw(a) = w(x) - minVal(y)
+      PrintPrimOp(op, ">>");
       break;
+
     } case 12: { //Op_Bit_And
+      PrintPrimOp(op, " & ");
       break;
+
     } case 13: { //Op_Bit_Or
+      PrintPrimOp(op, " | ");
       break;
+
     } case 14: { //Op_Bit_Xor
+      PrintPrimOp(op, " ^ ");
       break;
+
     } case 15: { //Op_Bit_Not
+      PrintPrimOp(op, "~");
       break;
+
     } case 16: { //Op_Concat
+      cout << "Cat(";
+      PrintPrimOp(op, ", ");
+      cout << ");";
       break;
+
     } case 17: { //Op_Less
+      PrintPrimOp(op, "<");
       break;
+
     } case 18: { //Op_Less_Eq
+      PrintPrimOp(op, "<=");
       break;
+
     } case 19: { //Op_Greater
+      PrintPrimOp(op, ">");
       break;
+
     } case 20: { //Op_Greater_Eq
+      PrintPrimOp(op, ">=");
       break;
+
     } case 21: { //Op_Equal
-      cout << "EQUALS\n";
+      PrintPrimOp(op, "===");
       break;
-    } case 22: { //Op_Pad
+
+    } case 22: { //Op_Pad ----- FIXME
+      cout << "primOp: " << op.op();
       break;
+
     } case 23: { //Op_Not_Equal
+      PrintPrimOp(op, "=/=");
       break;
+
     } case 24: { //Op_Neg
+      PrintPrimOp(op, "!");
       break;
+
     } case 26: { //Op_Xor_Reduce
+      PrintPrimOp(op, ".xorR");
       break;
-    } case 27: { //Op_Convert
+
+    } case 27: { //Op_Convert ----- FIXME
+      cout << "primOp: " << op.op();
       break;
+
     } case 28: { //Op_As_UInt
+      PrintPrimOp(op, "");
+      cout << ".asUint";
       break;
+
     } case 29: { //Op_As_SInt
+      PrintPrimOp(op, "");
+      cout << ".asSint";
       break;
-    } case 30: { //Op_Extract_Bits
+
+    } case 30: { //Op_Extract_Bits ------ FIXME
+      cout << "primOp: " << op.op();
       break;
+
     } case 31: { //Op_As_Clock
+      PrintPrimOp(op, "");
+      cout << ".asClock";
       break;
+
     } case 32: { //Op_As_Fixed_Point
+      //FIXME: Might need to take one # from front into parens so I know precision bit count
+      PrintPrimOp(op, ".asFixedPoint(");
+      cout << ")";
       break;
+
     } case 33: { //Op_And_Reduce
+      PrintPrimOp(op, ".andR");
       break;
+
     } case 34: { //Op_Or_Reduce
+      PrintPrimOp(op, ".orR");
       break;
+
     } case 35: { //Op_Increase_Precision
+      //FIXME: Might need to take one # from front into parens so I know precision bit count
+      PrintPrimOp(op, ".increasePrecision(");
+      cout << ")";
       break;
+
     } case 36: { //Op_Decrease_Precision
+      //FIXME: Might need to take one # from front into parens so I know precision bit count
+      PrintPrimOp(op, ".decreasePrecision(");
+      cout << ")";
       break;
+
     } case 37: { //Op_Set_Precision
+      PrintPrimOp(op, ".setPrecision(");
+      cout << ")";
       break;
+
     } case 38: { //Op_As_Async_Reset
+      PrintPrimOp(op, "");
+      cout << ".asAsyncReset";
       break;
-    } case 39: { //Op_Wrap
+
+    } case 39: { //Op_Wrap ----- FIXME
+      cout << "primOp: " << op.op();
       break;
-    } case 40: { //Op_Clip
+
+    } case 40: { //Op_Clip ----- FIXME
+      cout << "primOp: " << op.op();
       break;
-    } case 41: { //Op_Squeeze
+
+    } case 41: { //Op_Squeeze ----- FIXME
+      cout << "primOp: " << op.op();
       break;
-    } case 42: { //Op_As_interval
+
+    } case 42: { //Op_As_interval ----- FIXME
+      cout << "primOp: " << op.op();
       break;
+
     } default:
       cout << "Unknown PrimaryOp\n";
       return;
@@ -281,6 +310,7 @@ void Inou_firrtl::ListExprInfo(const firrtl::FirrtlPB_Expression& expr) {
       break;
 
     } case 4: { //ValidIf
+      cout << "validIf()\n";
       //FIXME: What is this?
       break;
 
@@ -317,7 +347,7 @@ void Inou_firrtl::ListExprInfo(const firrtl::FirrtlPB_Expression& expr) {
       break;
 
     } default:
-      cout << "Unknown expression type." << endl;
+      cout << "Unknown expression type: " << expr.expression_case() << endl;
       return;
   }
 }
@@ -351,10 +381,10 @@ void Inou_firrtl::ListStatementInfo(const firrtl::FirrtlPB_Statement& stmt) {
       break;
 
     } case 6: { //Node
-      cout << "Node(" << stmt.node().id();
-      cout << ", ";
+      cout << "node " << stmt.node().id();
+      cout << " = ";
       ListExprInfo(stmt.node().expression());
-      cout << ");\n";
+      cout << "\n";
       break;
 
     } case 7: { //When
@@ -371,13 +401,15 @@ void Inou_firrtl::ListStatementInfo(const firrtl::FirrtlPB_Statement& stmt) {
         }
       }
       cout << "}\n";
-
       break;
 
     } case 8: { //Stop
+      cout << "stop(" << stmt.stop().return_value() << ")\n";
       break;
 
     } case 10: { //Printf
+      //FIXME: Not fully implemented, I think.
+      cout << "printf(" << stmt.printf().value() << ")\n";
       break;
 
     } case 14: { //Skip
