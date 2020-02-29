@@ -27,24 +27,24 @@ protected:
   std::vector<LGraph *> do_tolg();
   std::vector<LGraph *> do_gen_temp_lg();
 
-  void process_ast_top         (LGraph *dfg);
-  void process_ast_stmts       (LGraph *dfg, const Lnast_nid &lnidx_stmts);
-  void process_ast_assign_op   (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_binary_op   (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_unary_op    (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_logical_op  (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_as_op       (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_label_op    (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_if_op       (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_uif_op      (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_func_call_op(LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_func_def_op (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_sub_op      (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_for_op      (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_while_op    (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_dp_assign_op(LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_dot_op      (const Lnast_nid &lnidx);
-  void process_ast_select_op   (const Lnast_nid &lnidx);
+  void process_ast_top          (LGraph *dfg);
+  void process_ast_stmts        (LGraph *dfg, const Lnast_nid &lnidx_stmts);
+  void process_ast_assign_op    (LGraph *dfg, const Lnast_nid &lnidx);
+  void process_ast_binary_op    (LGraph *dfg, const Lnast_nid &lnidx);
+  void process_ast_unary_op     (LGraph *dfg, const Lnast_nid &lnidx);
+  void process_ast_logical_op   (LGraph *dfg, const Lnast_nid &lnidx);
+  void process_ast_as_op        (LGraph *dfg, const Lnast_nid &lnidx);
+  void process_ast_label_op     (LGraph *dfg, const Lnast_nid &lnidx);
+  void process_ast_if_op        (LGraph *dfg, const Lnast_nid &lnidx);
+  void process_ast_uif_op       (LGraph *dfg, const Lnast_nid &lnidx);
+  void process_ast_func_call_op (LGraph *dfg, const Lnast_nid &lnidx);
+  void process_ast_func_def_op  (LGraph *dfg, const Lnast_nid &lnidx);
+  void process_ast_sub_op       (LGraph *dfg, const Lnast_nid &lnidx);
+  void process_ast_for_op       (LGraph *dfg, const Lnast_nid &lnidx);
+  void process_ast_while_op     (LGraph *dfg, const Lnast_nid &lnidx);
+  void process_ast_dp_assign_op (LGraph *dfg, const Lnast_nid &lnidx);
+  void process_ast_dot_op       (const Lnast_nid &lnidx);
+  void process_ast_select_op    (const Lnast_nid &lnidx);
 
   Node_pin     setup_node_operator_and_target (LGraph *dfg, const Lnast_nid &lnidx_opr);
   Node_pin     setup_node_assign_and_target   (LGraph *dfg, const Lnast_nid &lnidx_opr);
@@ -58,6 +58,7 @@ protected:
   Node_pin     add_tuple_get_from_dot (LGraph *dfg, const Lnast_nid &lnidx_dot, const Lnast_nid &lnidx_assign);
   Node_pin     add_tuple_get_from_sel (LGraph *dfg, const Lnast_nid &lnidx_sel, const Lnast_nid &lnidx_assign);
   Node_pin     setup_tuple_ref (LGraph *dfg, std::string_view tup_name);
+
 
   Node         resolve_constant(LGraph *g, std::string_view str_in);
   Node         process_bin_token(LGraph *g, const std::string &token1st, const uint16_t &bit_width, bool is_signed);

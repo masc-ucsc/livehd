@@ -8,6 +8,7 @@
 #include "pass.hpp"
 
 class Pass_bitwidth : public Pass {
+  friend class Inou_lnast_dfg;
 protected:
   int max_iterations;
 
@@ -36,6 +37,7 @@ protected:
   void        do_trans(LGraph *orig);
 
 public:
+  Pass_bitwidth(); // for dfg internal usage
   Pass_bitwidth(const Eprp_var &var);
 
   static void setup();

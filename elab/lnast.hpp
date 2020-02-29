@@ -120,8 +120,9 @@ public:
   Lnast_ntype      get_type  (const Lnast_nid &nid) { return get_data(nid).type; }
   uint8_t          get_subs  (const Lnast_nid &nid) { return get_data(nid).subs; }
   Token            get_token (const Lnast_nid &nid) { return get_data(nid).token; }
+  std::string_view get_sname (const Lnast_nid &nid) { //ssa name
+    // FIXME: sh: any better way to concate a string_view??
+    return absl::StrCat(std::string(get_name(nid)), ",", get_subs(nid));
+  }
 };
-
-
-
 
