@@ -37,7 +37,7 @@ protected:
   void        do_trans(LGraph *orig);
 
 public:
-  Pass_bitwidth(); // for dfg internal usage
+  Pass_bitwidth(){};
   Pass_bitwidth(const Eprp_var &var);
 
   static void setup();

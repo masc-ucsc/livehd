@@ -6,7 +6,6 @@
 #include "lbench.hpp"
 #include "lgraph.hpp"
 #include "lnast_parser.hpp"
-#include "pass/bitwidth/pass_bitwidth.hpp"
 
 
 void setup_inou_lnast_dfg() { Inou_lnast_dfg::setup(); }
@@ -65,13 +64,13 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
 
     LGraph *dfg = LGraph::create(path, basename, f);
 
-    // step1: lnast to dfg
+    // phase-1: lnast to dfg
     process_ast_top(dfg);
-    // step2: dfg tuple structure resolving
+    // phase-2: dfg tuple structure resolving
     //resolve_tuple(dfg);
-    // step3: MIT bitwidth propagation algorithm
-    Pass_bitwidth bw;
-    bw.do_trans(dfg);
+    // phase-3: MIT bitwidth propagation algorithm
+    //bw.do_trans(dfg);
+    // phase-4: Finalize LGraph for code generation
     lgs.push_back(dfg);
   }
 
@@ -210,9 +209,6 @@ void Inou_lnast_dfg::process_ast_select_op(const Lnast_nid &lnidx_sel) {
   name2lnidx_opr[lnast->get_sname(c0)] = lnidx_sel;
 }
 
-void Inou_lnast_dfg::process_ast_default_const(LGraph *dfg, const Lnast_nid &lnidx) {
-  setup_ref_node(dfg, lnidx);
-}
 
 void Inou_lnast_dfg::process_ast_binary_op(LGraph *dfg, const Lnast_nid &lnidx_opr) {
   const Node_pin opr = setup_node_operator_and_target(dfg, lnidx_opr);

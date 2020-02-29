@@ -9,10 +9,12 @@
 #include "lnast.hpp"
 #include "pass.hpp"
 #include "likely.hpp"
+#include "pass_bitwidth.hpp"
 
 class Inou_lnast_dfg : public Pass {
 private:
   Lnast *lnast;
+  Pass_bitwidth bw;
 
   absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Node_Type_Op> primitive_type_lnast2lg;
 

@@ -6,6 +6,7 @@ cc_library(
     visibility = ["//visibility:public"],
     includes = ["."],
     deps = [
+        "//pass/bitwidth:pass_bitwidth",
         "//core:core",
     ],
 )
