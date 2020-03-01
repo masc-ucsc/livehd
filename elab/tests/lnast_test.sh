@@ -73,6 +73,7 @@ do
   echo "----------------------------------------------------"
   
   ${LGSHELL} "inou.lnast_dfg.tolg files:${pt}.cfg"
+  ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.fromlg verbose:false"
 
   if [ $? -ne 0 ]; then
     echo "ERROR: Pyrope compiler failed: LNAST -> LGraph, testcase: ${pt}.cfg"

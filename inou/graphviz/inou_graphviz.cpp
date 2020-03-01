@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <fstream>
+#include <regex>
 
 #include "eprp_utils.hpp"
 #include "lbench.hpp"
@@ -116,23 +117,32 @@ void Inou_graphviz::do_fromlg(LGraph *lg_parent) {
 void Inou_graphviz::populate_lg_data(LGraph *g) {
   std::string data = "digraph {\n";
 
-  g->each_node_fast([&data](const Node &node) {
-    auto node_name = node.has_name() ? node.get_name() : "";
+  g->each_node_fast([&data, this](const Node &node) {
+    std::string node_info;
+    if (!verbose) {
+      fmt::print("verbose:{}\n", verbose);
+      auto pos = node.debug_name().find("_lg_");
+      node_info = node.debug_name().substr(0, pos); //get rid of the lgraph name
+      fmt::print("node_info:{}\n", node_info);
+      node_info = std::regex_replace(node_info, std::regex("node_"), "n");
+    } else {
+      node_info = node.debug_name();
+    }
 
     if (node.get_type().op == U32Const_Op)
-      data += fmt::format(" {} [label=\"{} :{} :{}\"];\n", node.debug_name(), node.debug_name(), node_name,
-                          node.get_type_const_value());
+      data += fmt::format(" {} [label=\"{}:{}\"];\n", node.debug_name(), node_info, node.get_type_const_value());
     else
-      data += fmt::format(" {} [label=\"{} :{}\"];\n", node.debug_name(), node.debug_name(), node_name);
+      data += fmt::format(" {} [label=\"{}\"];\n", node.debug_name(), node_info);
 
     for (auto &out : node.out_edges()) {
-      auto &dpin       = out.driver;
+      auto  dpin       = out.driver;
       auto  dnode_name = dpin.get_node().debug_name();
       auto  snode_name = out.sink.get_node().debug_name();
-      auto  dpin_name  = dpin.has_name() ? dpin.get_name() : "";
       auto  dbits      = dpin.get_bits();
+      auto  dpin_name  = dpin.has_name() ? dpin.get_name() : "";
 
-      data += fmt::format(" {}->{}[label=\"{}b :{} :{} :{}\"];\n", dnode_name, snode_name, dbits, dpin.get_pid(),
+
+      data += fmt::format(" {}->{}[label=\"{}b:{}:{}\n{}\"];\n", dnode_name, snode_name, dbits, dpin.get_pid(),
                           out.sink.get_pid(), dpin_name);
     }
   });

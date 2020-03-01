@@ -122,7 +122,7 @@ public:
   Token            get_token (const Lnast_nid &nid) { return get_data(nid).token; }
   std::string      get_sname (const Lnast_nid &nid) { //ssa name
     // FIXME: sh: any better way to concate a string_view??
-    return absl::StrCat(std::string(get_name(nid)), ",", get_subs(nid));
+    return absl::StrCat(std::string(get_name(nid)), "_", get_subs(nid));
   }
 };
 

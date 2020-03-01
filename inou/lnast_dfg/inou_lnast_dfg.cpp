@@ -188,6 +188,10 @@ void Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_a
   } else {
     const Node_pin opr  = setup_node_assign_and_target(dfg, lnidx_assign);
     const Node_pin opd1 = setup_ref_node_dpin(dfg, c1);
+
+    if(opd1.get_node().get_type().op != U32Const_Op)
+      I(opd1.get_bits() == 0);
+
     dfg->add_edge(opd1, opr);
   }
 }
@@ -254,7 +258,7 @@ void Inou_lnast_dfg::process_ast_binary_op(LGraph *dfg, const Lnast_nid &lnidx_o
   const Node_pin opd1 = setup_ref_node_dpin(dfg, c1);
   const Node_pin opd2 = setup_ref_node_dpin(dfg, c2);
   // I(opd1 != opd2);
-  // sh_fixme: the sink_pin should be determined by the functionality, not just zero
+  // FIXME: sh: the sink_pin should be determined by the functionality, not just zero
 
   dfg->add_edge(opd1, opr.get_node().setup_sink_pin(0));
   dfg->add_edge(opd2, opr.get_node().setup_sink_pin(0));
@@ -269,7 +273,7 @@ Node_pin Inou_lnast_dfg::setup_node_operator_and_target(LGraph *dfg, const Lnast
   //         this is not allowed by LNAST.
 
   const auto lg_ntype_op = decode_lnast_op(lnidx_opr);
-  auto node_dpin   = dfg->create_node(lg_ntype_op, 1).setup_driver_pin(0);
+  auto node_dpin   = dfg->create_node(lg_ntype_op).setup_driver_pin(0);
   node_dpin.set_name(c0_name);
   name2dpin[c0_name]  = node_dpin;
   return node_dpin;
@@ -289,7 +293,7 @@ Node_pin Inou_lnast_dfg::setup_node_assign_and_target(LGraph *dfg, const Lnast_n
     return setup_ref_node_dpin(dfg, c0).get_node().setup_sink_pin("D");
   }
 
-  auto equal_node =  dfg->create_node(Or_Op, 1);
+  auto equal_node =  dfg->create_node(Or_Op);
   name2dpin[c0_name] = equal_node.setup_driver_pin(1); //check
   name2dpin[c0_name].set_name(c0_name);
   return equal_node.setup_sink_pin(0);
@@ -314,10 +318,10 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
 
   if (name.substr(0, 1) == "%") {
     // Port_invalid pos, means I do not care about position
-    dfg->add_graph_output(name.substr(1), Port_invalid, 1);
+    dfg->add_graph_output(name.substr(1), Port_invalid, 0);
     node_dpin = dfg->get_graph_output_driver(name.substr(1));
   } else if (name.substr(0, 1) == "$") {
-    node_dpin = dfg->add_graph_input(name.substr(1), Port_invalid, 1);
+    node_dpin = dfg->add_graph_input(name.substr(1), Port_invalid, 0);
   } else if (name.substr(0, 1) == "#") {
     node_dpin = dfg->create_node(FFlop_Op).setup_driver_pin();
   } else if (name.substr(0, 2) == "0d" or name.substr(0, 3) == "-0d") {
