@@ -649,7 +649,8 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
     fmt::print("inp name={}, sink?={}, driver?={}, pid={}, has_bitwidth={}", pin.get_name(), pin.is_sink(), pin.is_driver(),
                pin.get_pid(), pin.has_bitwidth());
 
-    if (pin.get_bits() == 0) { //FIXME: sh: should be judged by pin.has_bitwidth()
+    //if (pin.get_bits() == 0) { //FIXME: sh: should be judged by pin.has_bitwidth()
+    if (!pin.has_bitwidth()) {
       fmt::print(" -- implicit\n");
       return;
     } else {
@@ -660,7 +661,7 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
     Node_pin editable_pin = pin;
     // Set explicit.
     // FIXME: sh: I should set explicit bitwidth info on my side whenever I know the real bitwidth
-    editable_pin.ref_bitwidth()->e.set_ubits(pin.get_bits()); // FIXME: sh: should be deprecated
+    // editable_pin.ref_bitwidth()->e.set_ubits(pin.get_bits()); // FIXME: sh: should be deprecated
     // Set implicit.
     editable_pin.ref_bitwidth()->set_implicit();
     // Print out ranges for debug
@@ -687,7 +688,8 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
       // FIXME: Currently, first iteration will iterate over same driver pins multiple times, in some cases. (If more than 1 edge
       // has pin X as its driver)
 
-      if (dpin.get_bits() == 0) { //FIXME: sh: should be judged by pin.has_bitwidth()
+      //if (dpin.get_bits() == 0) { //FIXME: sh: should be judged by pin.has_bitwidth()
+      if (!dpin.has_bitwidth()) {
         fmt::print(" -- implicit\n");
         // return;
       } else {
