@@ -1,5 +1,6 @@
 #!/bin/bash
 rm -rf ./lgdb
+rm -f  yosys_script.*
 
 pts='trivial_bitwidth ssa_rhs function_call tuple ssa_nested_if ssa_if nested_if'
 # pts='ssa_rhs'
@@ -73,12 +74,14 @@ do
   echo "----------------------------------------------------"
   
   ${LGSHELL} "inou.lnast_dfg.tolg files:${pt}.cfg"
-  ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.fromlg verbose:false"
-
   if [ $? -ne 0 ]; then
     echo "ERROR: Pyrope compiler failed: LNAST -> LGraph, testcase: ${pt}.cfg"
     exit 1
   fi
+
+
+  ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.fromlg verbose:false"
+  mv ${pt}.dot ${pt}.no_bits.tuple.dot
 
   echo ""
   echo ""
@@ -94,6 +97,8 @@ do
     exit 1
   fi
 
+  ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.fromlg verbose:false"
+  mv ${pt}.dot ${pt}.no_bits.dot
 
   echo ""
   echo ""
@@ -151,7 +156,7 @@ do
   rm -f lnast.dot.gld
   rm -f lnast.nodes
   rm -f lnast.nodes.gld
-  rm -f *.v
+  
 done
 
 

@@ -88,8 +88,19 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
 }
 
 void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
-  for (auto node: dfg->backward()) {
+  //FIXME: sh: reconstruct name2dpin table ... this is because I want to separate lnast->lgraph and tuple_resolving pass so that I could generate intermediate dot view
+  for (const auto &node: dfg->fast()) {
+    if (node.get_type().op != TupAdd_Op) {
+      for (auto &out : node.out_edges())
+        name2dpin[out.driver.get_name()]  = out.driver;
+    }
+    //FIXME: sh: what about TupGet_Op?
+  }
+
+  absl::flat_hash_set<Node::Compact> to_be_deleted;
+  for (const auto &node: dfg->fast()) {
     if (node.get_type().op == TupAdd_Op) {
+      to_be_deleted.insert(node.get_compact());
       bool is_bits_attr = false;
       for (auto &inp : node.inp_edges_ordered()) {
         if (inp.sink.get_pid() == 1 and inp.driver.get_name().substr(0,6) == "__bits") {
@@ -100,12 +111,22 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
           // and we try to set bitwidth on the dpin which represents the x
           auto bits = inp.driver.get_node().get_type_const_value();
           auto target_dpin = name2dpin[node.get_driver_pin().get_name()];
-          target_dpin.ref_bitwidth()->e.set_ubits(bits);
+          fmt::print("hit!\n");
+          fmt::print("taget_dpin name:{}\n", target_dpin.get_name()); //FIXME: dpin name disappear!!??
+          //target_dpin.ref_bitwidth()->e.set_ubits(bits);
+          target_dpin.set_bits(bits);
+          fmt::print("hit2!\n");
         } else {
           ; // true tuple resolving
         }
       }
+      fmt::print("hello end!\n");
     }
+  }
+
+  for (auto &itr : to_be_deleted) {
+    fmt::print("try to delete {}\n", itr.get_node(dfg).debug_name());
+    itr.get_node(dfg).del_node();
   }
 }
 
@@ -222,6 +243,8 @@ Node_pin Inou_lnast_dfg::add_tuple_add_from_dot(LGraph *dfg, const Lnast_nid &ln
 
   name2dpin[lnast->get_sname(c1)] = tup_add.setup_driver_pin();
   tup_add.setup_driver_pin().set_name(lnast->get_sname(c1));
+  fmt::print("tup_add dpin name is:{}\n", lnast->get_sname(c1));
+  fmt::print("dpin name from map is:{}\n", name2dpin[tup_add.get_driver_pin().get_name()].get_name());
 }
 
 //either tuple root or tuple key(str) fit in this case
