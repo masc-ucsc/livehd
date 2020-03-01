@@ -27,7 +27,6 @@ protected:
   bool setup_directory(std::string_view dir) const;
 
   Pass(std::string_view _pass_name, const Eprp_var &var);
-  Pass(){}; //for lnast->lgraph internal passes
 
 public:
   static Eprp eprp;

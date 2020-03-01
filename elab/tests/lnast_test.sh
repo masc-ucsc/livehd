@@ -1,6 +1,7 @@
 #!/bin/bash
+rm -rf ./lgdb
 
-pts='ssa_rhs function_call tuple ssa_nested_if ssa_if nested_if'
+pts='trivial_bitwidth ssa_rhs function_call tuple ssa_nested_if ssa_if nested_if'
 # pts='ssa_rhs'
 # pts='tuple'
 # pts='trivial_bitwidth'
@@ -14,7 +15,7 @@ if [ ! -f $LGSHELL ]; then
     LGSHELL=./main/lgshell
     echo "lgshell is in $(pwd)"
   else
-    echo "FAILED: could not find lgshell binary in $(pwd)";
+    echo "ERROR: could not find lgshell binary in $(pwd)";
   fi
 fi
 
@@ -24,8 +25,15 @@ do
   echo "Pattern:${pt}.cfg"
   echo "Pattern:${pt}.cfg"
   echo ""
-  echo "CFG to LNAST to Graphviz Flow"
+  echo "---------------------------------------------------"
+  echo "CFG -> LNAST -> Graphviz Test"
+  echo "---------------------------------------------------"
   echo ""
+  
+  if [! -f inou/cfg/tests/${pt}.cfg]; then
+    echo "ERROR: could not find ${pt}.cfg in /inou/cfg/tests"
+    exit !
+  fi
 
   ln -s inou/cfg/tests/${pt}.cfg;
 
@@ -34,7 +42,7 @@ do
   if [ -f ${pt}.lnast.dot ]; then
     echo "Successfully create a lnast from ${pt}.cfg"
   else
-    echo "FAIL: LNAST generation terminated with an error, testcase: ${pt}.cfg"
+    echo "ERROR: Pyrope compiler failed: LNAST generation, testcase: ${pt}.cfg"
     exit 1
   fi
   
@@ -47,15 +55,103 @@ do
   if [[ $exit_code == 0 ]]; then
     echo "Successfully match the golden LNAST, testcase: ${pt}.cfg"
   else 
-    echo "FAIL: generated LNAST doesn't match the golden target, testcase: ${pt}.cfg"
+    echo "ERROR: Pyrope compiler failed: generated LNAST doesn't match the golden, testcase: ${pt}.cfg"
     exit 1
   fi
   
+
+
+  echo ""
+  echo ""
+  echo ""
+  echo "===================================================="
+  echo "Pyrope Full Compilation"  
+  echo "===================================================="
+
+  echo "----------------------------------------------------"
+  echo "CFG -> LNAST -> LGraph"  
+  echo "----------------------------------------------------"
+  
+  ${LGSHELL} "inou.lnast_dfg.tolg files:${pt}.cfg"
+
+  if [ $? -ne 0 ]; then
+    echo "ERROR: Pyrope compiler failed: LNAST -> LGraph, testcase: ${pt}.cfg"
+    exit 1
+  fi
+
+  echo ""
+  echo ""
+  echo ""
+  echo "----------------------------------------------------"
+  echo "Tuple Chain Resolve(LGraph)"  
+  echo "----------------------------------------------------"
+  ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.resolve_tuples"
+  if [ $? -eq 0 ]; then
+    echo "Successfully resolve the tuple chain: ${pt}.cfg"
+  else
+    echo "ERROR: Pyrope compiler failed: resolve tuples, testcase: ${pt}.cfg"
+    exit 1
+  fi
+
+
+  echo ""
+  echo ""
+  echo ""
+  echo "----------------------------------------------------"
+  echo "Bitwidth Optimization(LGraph)"  
+  echo "----------------------------------------------------"
+
+  ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth"
+  if [ $? -eq 0 ]; then
+    echo "Successfully optimize design bitwidth: ${pt}.v"
+  else
+    echo "ERROR: Pyrope compiler failed: bitwidth optimization, testcase: ${pt}.cfg"
+    exit 1
+  fi
+
+
+  echo ""
+  echo ""
+  echo ""
+  echo "----------------------------------------------------"
+  echo "Dead Code Elimination(LGraph)"  
+  echo "----------------------------------------------------"
+  echo "Todo ..."
+
+
+  echo ""
+  echo ""
+  echo ""
+  echo "----------------------------------------------------"
+  echo "LGraph -> Verilog"  
+  echo "----------------------------------------------------"
+
+  ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg"
+  if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
+    echo "Successfully generate Verilog: ${pt}.v"
+  else
+    echo "ERROR: Pyrope compiler failed: verilog generation, testcase: ${pt}.cfg"
+    exit 1
+  fi
+
+
+  echo ""
+  echo ""
+  echo ""
+  echo "----------------------------------------------------"
+  echo "Logic Equivalence Check"  
+  echo "----------------------------------------------------"
+  echo "Todo ..."
+
+
+
   rm -f ${pt}.cfg
   rm -f lnast.dot
   rm -f lnast.dot.gld
   rm -f lnast.nodes
   rm -f lnast.nodes.gld
+  rm -f *.v
 done
+
 
 

@@ -14,7 +14,6 @@
 class Inou_lnast_dfg : public Pass {
 private:
   Lnast *lnast;
-  Pass_bitwidth bw;
 
   absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Node_Type_Op> primitive_type_lnast2lg;
 
@@ -27,9 +26,10 @@ private:
 protected:
   void                  setup_memblock();
   std::vector<LGraph *> do_tolg();
+  void                  do_resolve_tuples(LGraph *dfg);
   std::vector<LGraph *> do_gen_temp_lg();
 
-  void process_ast_top          (LGraph *dfg);
+  void lnast2lgraph             (LGraph *dfg);
   void process_ast_stmts        (LGraph *dfg, const Lnast_nid &lnidx_stmts);
   void process_ast_assign_op    (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_binary_op    (LGraph *dfg, const Lnast_nid &lnidx);
@@ -50,7 +50,8 @@ protected:
 
   Node_pin     setup_node_operator_and_target (LGraph *dfg, const Lnast_nid &lnidx_opr);
   Node_pin     setup_node_assign_and_target   (LGraph *dfg, const Lnast_nid &lnidx_opr);
-  Node_pin     setup_ref_node                 (LGraph *dfg, const Lnast_nid &lnidx);
+  Node_pin     setup_ref_node_dpin            (LGraph *dfg, const Lnast_nid &lnidx);
+  Node_pin     setup_ref_node_spin            (LGraph *dfg, const Lnast_nid &lnidx);
   Node_Type_Op decode_lnast_op                (const Lnast_nid &lnidx_opr);
   void         setup_lnast_to_lgraph_primitive_type_mapping();
 
@@ -75,6 +76,7 @@ protected:
 
   // eprp callbacks
   static void tolg(Eprp_var &var);
+  static void resolve_tuples(Eprp_var &var);
   static void gen_temp_lg(Eprp_var &var);
 
 public:
