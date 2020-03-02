@@ -131,7 +131,7 @@ protected:
     while (true) {
       nid.value++;
       if (nid >= static_cast<Index_ID>(node_internal.size())) return 0;
-      if (!node_internal[nid].is_node_state()) continue;
+      if (!node_internal[nid].is_valid()) continue;
       if (is_graph_io(nid)) continue;
       if (node_internal[nid].is_master_root()) return nid;
     }
