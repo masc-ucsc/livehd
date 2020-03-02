@@ -124,12 +124,12 @@ public:
 
   bool is_valid_node(Index_ID nid) const {
     if (nid >= node_internal.size()) return false;
-    return node_internal[nid].is_master_root();
+    return node_internal[nid].is_valid() && node_internal[nid].is_master_root();
   }
 
   bool is_valid_node_pin(Index_ID idx) const {
     if (idx >= node_internal.size()) return false;
-    return node_internal[idx].is_root();
+    return node_internal[idx].is_valid() && node_internal[idx].is_root();
   }
 
   Port_ID get_dst_pid(Index_ID idx) const {
