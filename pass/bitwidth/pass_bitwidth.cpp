@@ -2,7 +2,7 @@
 
 #include "pass_bitwidth.hpp"
 
-#include <math.h>
+#include <cmath>
 
 #include <algorithm>
 #include <charconv>
@@ -645,25 +645,29 @@ void Pass_bitwidth::iterate_mux(const LGraph *lg, Node_pin &pin, Node_Type_Op op
 // MIT Algorithm
 void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
   // Instantiate bitwidths for input pins to graph (from input graphio)
-  lg->each_graph_input([this, lg](const Node_pin &pin) {
-    fmt::print("inp name={}, sink?={}, driver?={}, pid={}, has_bitwidth={}", pin.get_name(), pin.is_sink(), pin.is_driver(),
-               pin.get_pid(), pin.has_bitwidth());
+  lg->each_graph_input([this](const Node_pin &pin) {
+    fmt::print("inp name={}, sink?={}, driver?={}, pid={}, has_bitwidth={}",
+               pin.get_name(), pin.is_sink(), pin.is_driver(), pin.get_pid(), pin.has_bitwidth());
 
-    //if (pin.get_bits() == 0) { //FIXME: sh: should be judged by pin.has_bitwidth()
+    //if (pin.get_bits() == 0) { //FIXME->sh: should be judged by pin.has_bitwidth()
     if (!pin.has_bitwidth()) {
+      I(pin.get_bits() == 0);
       fmt::print(" -- implicit\n");
       return;
     } else {
       fmt::print(" -- explicit (bits set)\n");
     }
 
-    // FIXME: At this point in time, I need to setup bitwidths for explicit. Eventually, Sheng should do this instead (so remove some of the explicit stuff later).
+    // FIXME: At this point in time, I need to setup bitwidths for explicit.
+    //        Eventually, Sheng should do this instead (so remove some of the explicit stuff later).
     Node_pin editable_pin = pin;
+
     // Set explicit.
-    // FIXME: sh: I should set explicit bitwidth info on my side whenever I know the real bitwidth
-    // editable_pin.ref_bitwidth()->e.set_ubits(pin.get_bits()); // FIXME: sh: should be deprecated
+    // FIXME->sh: I should set explicit bitwidth info on my side whenever I know the real bitwidth
+    // editable_pin.ref_bitwidth()->e.set_ubits(pin.get_bits()); // FIXME->sh: should be deprecated
     // Set implicit.
     editable_pin.ref_bitwidth()->set_implicit();
+
     // Print out ranges for debug
     fmt::print("\texp: ");
     pin.get_bitwidth().e.dump();
@@ -682,29 +686,26 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
     for (const auto &out_edge : node.out_edges()) {
       auto dpin = out_edge.driver;
       auto spin = out_edge.sink;
-      fmt::print("name_o:{} {} pid:{} -> name:{} pid:{}\n", dpin.debug_name(), dpin.get_bits(), dpin.get_pid(), spin.debug_name(),
-                 spin.get_pid());
+      fmt::print("name_o:{} {} pid:{} -> name:{} pid:{}\n",
+                 dpin.debug_name(), dpin.get_bits(), dpin.get_pid(), spin.debug_name(), spin.get_pid());
 
-      // FIXME: Currently, first iteration will iterate over same driver pins multiple times, in some cases. (If more than 1 edge
-      // has pin X as its driver)
+      // FIXME: Currently, first iteration will iterate over same driver pins multiple times, in some cases.
+      //        (If more than 1 edge has pin X as its driver)
 
-      //if (dpin.get_bits() == 0) { //FIXME: sh: should be judged by pin.has_bitwidth()
+      //if (dpin.get_bits() == 0) { //FIXME->sh: should be judged by pin.has_bitwidth()
       if (!dpin.has_bitwidth()) {
+        I(dpin.get_bits() == 0);
         fmt::print(" -- implicit\n");
-        // return;
       } else {
         // bool sign = false;
-        // FIXME: sh: should be deprecated
-        if (node.get_type().op == U32Const_Op) {
-          // FIXME: SH: I should set the explicit pin info for constant node on my side
-          dpin.ref_bitwidth()->e.set_uconst(
-              out_edge.get_bits());  // FIXME: The argument to this function is way wrong, but needed for testing.
+        if (node.get_type().op == U32Const_Op) { // FIXME->sh: Const_Op handling should be deprecated, should be handled by prp_const_resolving()
+          dpin.ref_bitwidth()->e.set_uconst(out_edge.get_bits());// FIXME: The argument to this function is way wrong, but needed for testing.
           dpin.ref_bitwidth()->set_implicit();
         } else {
           // Set bitwidth for output edge driver.
           // FIXME: Focused only on unsigned, will have to change later.
           // FIXME x2: Should I even be doing this? Should be Sheng, I think.
-          // FIXME: SH: Yes, I should do it.
+          // FIXME->sh: Yes, I should do it.
           dpin.ref_bitwidth()->e.set_ubits(out_edge.get_bits());
           fmt::print("\t");
           dpin.ref_bitwidth()->e.dump();

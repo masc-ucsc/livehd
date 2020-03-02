@@ -9,7 +9,7 @@
 
 class Pass_bitwidth : public Pass {
 protected:
-  int max_iterations;
+  int max_iterations{};
 
   std::vector<Node_pin> pending;
   std::vector<Node_pin> next_pending;

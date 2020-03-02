@@ -88,13 +88,14 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
 }
 
 void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
-  //FIXME: sh: reconstruct name2dpin table ... this is because I want to separate lnast->lgraph and tuple_resolving pass so that I could generate intermediate dot view
+  //FIXME->sh: reconstruct name2dpin table to separate lnast->lg and tuple_resolving pass
+  //           so that I could generate intermediate dot view
   for (const auto &node: dfg->fast()) {
     if (node.get_type().op != TupAdd_Op) {
       for (auto &out : node.out_edges())
         name2dpin[out.driver.get_name()]  = out.driver;
     }
-    //FIXME: sh: what about TupGet_Op?
+    //FIXME->sh: what about TupGet_Op?
   }
 
   absl::flat_hash_set<Node::Compact> to_be_deleted;
@@ -106,26 +107,23 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
         if (inp.sink.get_pid() == 1 and inp.driver.get_name().substr(0,6) == "__bits") {
           is_bits_attr = true;
         } else if (inp.sink.get_pid() == 3 and is_bits_attr) {
-          // bitwidth assignment for a variable, e.g., x.__bits
+          // node: bitwidth assignment for a variable, e.g., x.__bits
           // in this case, x is not a normal tuple, it should be just a variable
           // and we try to set bitwidth on the dpin which represents the x
           auto bits = inp.driver.get_node().get_type_const_value();
           auto target_dpin = name2dpin[node.get_driver_pin().get_name()];
-          fmt::print("hit!\n");
           fmt::print("taget_dpin name:{}\n", target_dpin.get_name()); //FIXME: dpin name disappear!!??
           //target_dpin.ref_bitwidth()->e.set_ubits(bits);
           target_dpin.set_bits(bits);
-          fmt::print("hit2!\n");
         } else {
           ; // true tuple resolving
         }
       }
-      fmt::print("hello end!\n");
     }
   }
 
   for (auto &itr : to_be_deleted) {
-    fmt::print("try to delete {}\n", itr.get_node(dfg).debug_name());
+    fmt::print("delete {}\n", itr.get_node(dfg).debug_name());
     itr.get_node(dfg).del_node();
   }
 }
@@ -148,7 +146,7 @@ void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const Lnast_nid &lnidx_stmts
       process_ast_dot_op(lnidx);
     } else if (ntype.is_select()) {
       process_ast_select_op(lnidx);
-    } else if (ntype.is_unary_op()) { //FIXME: sh: to be deprecated
+    } else if (ntype.is_unary_op()) { //FIXME->sh: to be deprecated
       process_ast_unary_op(dfg, lnidx);
     } else if (ntype.is_logical_op()) {
       process_ast_logical_op(dfg, lnidx);
@@ -281,7 +279,7 @@ void Inou_lnast_dfg::process_ast_binary_op(LGraph *dfg, const Lnast_nid &lnidx_o
   const Node_pin opd1 = setup_ref_node_dpin(dfg, c1);
   const Node_pin opd2 = setup_ref_node_dpin(dfg, c2);
   // I(opd1 != opd2);
-  // FIXME: sh: the sink_pin should be determined by the functionality, not just zero
+  // FIXME->sh: the sink_pin should be determined by the functionality, not just zero
 
   dfg->add_edge(opd1, opr.get_node().setup_sink_pin(0));
   dfg->add_edge(opd2, opr.get_node().setup_sink_pin(0));
@@ -312,7 +310,7 @@ Node_pin Inou_lnast_dfg::setup_node_assign_and_target(LGraph *dfg, const Lnast_n
       setup_ref_node_dpin(dfg, c0);
       return dfg->get_graph_output(c0_name.substr(1));
     }
-  } else if (c0_name.substr(0,1) == "#") { //FIXME: sh: check later
+  } else if (c0_name.substr(0,1) == "#") { //FIXME->sh: check later
     return setup_ref_node_dpin(dfg, c0).get_node().setup_sink_pin("D");
   }
 

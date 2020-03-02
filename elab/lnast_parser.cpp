@@ -44,7 +44,7 @@ void Lnast_parser::build_lnast() {
   Token       target_name;
   Lnast_ntype type;
   Lnast_nid opr_parent_node; //opr means operator
-  buffer_tmp_func_def_name_idx = Lnast_nid(-1, -1); //FIXME: SH: don't want to initialize through constructor...
+  buffer_tmp_func_def_name_idx = Lnast_nid(-1, -1); //FIXME->sh: don't want to initialize through constructor...
   buffer_tmp_funcall_idx       = Lnast_nid(-1, -1);
   line_tkcnt = 1;
   while (line_num == scan_get_token().line) {
@@ -236,7 +236,7 @@ void  Lnast_parser::process_func_call_op(const Lnast_nid& tree_idx_fcall, const 
   walk_next_token(); //go to ___h
 
   if(scan_line() == line_num + 1){
-    //SH:FIXME: only one operand, fake function call for now!!!
+    //FIXME->sh: only one operand, fake function call for now!!!
     //lnast.ref_data(tree_idx_fcall)->type = Lnast_ntype::create_assign();
     scan_prev();
     return;
