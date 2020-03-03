@@ -4,6 +4,7 @@
 #include <string>
 
 #include "pass.hpp"
+#include "lnast.hpp"
 #include "firrtl.pb.h"
 
 class Inou_firrtl : public Pass {

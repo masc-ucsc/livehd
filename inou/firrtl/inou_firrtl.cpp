@@ -560,6 +560,20 @@ Inou_firrtl::Inou_firrtl(const Eprp_var &var) : Pass("firrtl", var) {
 
 void Inou_firrtl::toLNAST(Eprp_var &var) {
   Inou_firrtl p(var);
+
+  auto node_stmts = Lnast_node::create_stmts("top");
+  Lnast lnast;
+  lnast.set_root(node_stmts);
+
+  //auto node_assign = Lnast_node::create_assign ("asg");
+  //auto node_target = Lnast_node::create_ref("refe");
+  //auto node_const  = Lnast_node::create_const("1230");
+
+  auto idx_stmts  = lnast.get_root();
+  //auto idx_assign = lnast.add_child(idx_stmts, node_assign);
+  //auto idx_target = lnast.add_child(idx_assign, node_target);
+  //auto idx_const  = lnast.add_child(idx_assign, node_const);
+  //auto idx_ref = lnast.add_child(idx_roots, node_ref);
 }
 
 /*int main(int argc, char* argv[]) {
