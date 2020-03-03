@@ -6,6 +6,8 @@
 #include <string>
 #include <charconv>
 
+#include <stdlib.h>
+
 #include "firrtl.pb.h"
 #include "inou_firrtl.hpp"
 
@@ -463,7 +465,7 @@ void Inou_firrtl::ListUserModuleInfo(const firrtl::FirrtlPB_Module& module) {
   }
 }
 
-void Inou_firrtl::ListModuleInfo(const firrtl::FirrtlPB_Module& module) {
+void Inou_firrtl::ListModuleInfo(const firrtl::FirrtlPB_Module& module, Lnast& lnast) {
   if(module.module_case() == 1) {
     cout << "External module.\n";
   } else if (module.module_case() == 2) {
@@ -475,57 +477,24 @@ void Inou_firrtl::ListModuleInfo(const firrtl::FirrtlPB_Module& module) {
 
 void Inou_firrtl::IterateModules(const firrtl::FirrtlPB_Circuit& circuit) {
   for (int i = 0; i < circuit.module_size(); i++) {
-    ListModuleInfo(circuit.module(i));
+    if (circuit.top_size() > 1) {
+      cout << "ERROR: More than 1 top module?\n";
+      exit(-1);//FIXME?
+    }
+
+    //lnast = Lnast(circuit.top(i).name());
+    Lnast lnast(circuit.top(i).name());
+    ListModuleInfo(circuit.module(i), lnast);
   }
 }
 
-// Iterates though all people in the AddressBook and prints info about them.
 void Inou_firrtl::IterateCircuits(const firrtl::FirrtlPB& firrtl_input) {
   for (int i = 0; i < firrtl_input.circuit_size(); i++) {
     const firrtl::FirrtlPB_Circuit& circuit = firrtl_input.circuit(i);
     IterateModules(circuit);
-
-
-
-
-
-
-    //cout << "Module id: " << circuit.module(0).module_().id()  << endl;
-    /*const tutorial::Person& person = address_book.people(i);
-
-    cout << "Person ID: " << person.id() << endl;
-    cout << "  Name: " << person.name() << endl;
-    if (person.email() != "") {
-      cout << "  E-mail address: " << person.email() << endl;
-    }
-
-    for (int j = 0; j < person.phones_size(); j++) {
-      const tutorial::Person::PhoneNumber& phone_number = person.phones(j);
-
-      switch (phone_number.type()) {
-        case tutorial::Person::MOBILE:
-          cout << "  Mobile phone #: ";
-          break;
-        case tutorial::Person::HOME:
-          cout << "  Home phone #: ";
-          break;
-        case tutorial::Person::WORK:
-          cout << "  Work phone #: ";
-          break;
-        default:
-          cout << "  Unknown phone #: ";
-          break;
-      }
-      cout << phone_number.number() << endl;
-    }
-    if (person.has_last_updated()) {
-      cout << "  Updated: " << TimeUtil::ToString(person.last_updated()) << endl;
-    }*/
   }
 }
 
-// Main function:  Reads the entire address book from a file and prints all
-//   the information inside.
 void setup_inou_firrtl() { Inou_firrtl::setup(); }
 
 void Inou_firrtl::setup() {
@@ -561,15 +530,16 @@ Inou_firrtl::Inou_firrtl(const Eprp_var &var) : Pass("firrtl", var) {
 void Inou_firrtl::toLNAST(Eprp_var &var) {
   Inou_firrtl p(var);
 
-  auto node_stmts = Lnast_node::create_stmts("top");
   Lnast lnast;
-  lnast.set_root(node_stmts);
+  auto node_stmts = Lnast_node::create_stmts("top_temp");
+  auto idx_stmts  = lnast.add_child(lnast.get_root(), node_stmts);
+  //lnast.set_root(node_stmts);
 
   //auto node_assign = Lnast_node::create_assign ("asg");
   //auto node_target = Lnast_node::create_ref("refe");
   //auto node_const  = Lnast_node::create_const("1230");
 
-  auto idx_stmts  = lnast.get_root();
+  //auto idx_stmts  = lnast.get_root();
   //auto idx_assign = lnast.add_child(idx_stmts, node_assign);
   //auto idx_target = lnast.add_child(idx_assign, node_target);
   //auto idx_const  = lnast.add_child(idx_assign, node_const);
