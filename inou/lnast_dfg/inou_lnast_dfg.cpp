@@ -16,7 +16,7 @@ void Inou_lnast_dfg::setup() {
   m1.add_label_optional("path", "path to put the lgraph[s]", "lgdb");
   register_inou("lnast_dfg", m1);
 
-  Eprp_method m2("inou.lnast_dfg.resolve_tuples", "resolve tuple chains and get the flattened lgraph", &Inou_lnast_dfg::resolve_tuples);
+  Eprp_method m2("inou.lnast_dfg.resolve_tuples", "resolve tuple chains for flattened lgraph", &Inou_lnast_dfg::resolve_tuples);
   m2.add_label_optional("path", "path to read the lgraph[s]", "lgdb");
   m2.add_label_optional("odir", "output directory for generated verilog files", ".");
   register_inou("lnast_dfg",m2);
@@ -112,7 +112,6 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
           // and we try to set bitwidth on the dpin which represents the x
           auto bits = inp.driver.get_node().get_type_const_value();
           auto target_dpin = name2dpin[node.get_driver_pin().get_name()];
-          fmt::print("taget_dpin name:{}\n", target_dpin.get_name()); //FIXME: dpin name disappear!!??
           //target_dpin.ref_bitwidth()->e.set_ubits(bits);
           target_dpin.set_bits(bits);
         } else {
