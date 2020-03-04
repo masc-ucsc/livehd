@@ -74,9 +74,12 @@ do
   echo "----------------------------------------------------"
   
   ${LGSHELL} "inou.lnast_dfg.tolg files:${pt}.cfg"
-  if [ $? -ne 0 ]; then
+  if [ $? -eq 0 ]; then
+    echo "Successfully create the inital LGraph with tuples: ${pt}.cfg"
+  else
     echo "ERROR: Pyrope compiler failed: LNAST -> LGraph, testcase: ${pt}.cfg"
     exit 1
+
   fi
 
 
@@ -115,6 +118,7 @@ do
     exit 1
   fi
 
+  ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.fromlg verbose:false"
 
   echo ""
   echo ""

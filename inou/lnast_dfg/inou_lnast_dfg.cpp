@@ -88,36 +88,34 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
 }
 
 void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
-  //FIXME->sh: reconstruct name2dpin table to separate lnast->lg and tuple_resolving pass
-  //           so that I could generate intermediate dot view
-  for (const auto &node: dfg->fast()) {
-    if (node.get_type().op != TupAdd_Op) {
-      for (auto &out : node.out_edges())
-        name2dpin[out.driver.get_name()]  = out.driver;
-    }
-    //FIXME->sh: what about TupGet_Op?
-  }
+  ////FIXME->sh: reconstruct name2dpin table to separate lnast->lg and tuple_resolving pass
+  ////           so that I could generate intermediate dot view
+  //for (const auto &node: dfg->fast()) {
+  //  if (node.get_type().op != TupAdd_Op) {
+  //    for (auto &out : node.out_edges())
+  //      name2dpin[out.driver.get_name()]  = out.driver;
+  //  }
+  //  //FIXME->sh: what about TupGet_Op?
+  //}
 
   absl::flat_hash_set<Node::Compact> to_be_deleted;
   for (const auto &node: dfg->fast()) {
     if (node.get_type().op == TupAdd_Op) {
       to_be_deleted.insert(node.get_compact());
-      bool is_bits_attr = false;
-      for (auto &inp : node.inp_edges_ordered()) {
-        if (inp.sink.get_pid() == 1 and inp.driver.get_name().substr(0,6) == "__bits") {
-          is_bits_attr = true;
-        } else if (inp.sink.get_pid() == 3 and is_bits_attr) {
-          // node: bitwidth assignment for a variable, e.g., x.__bits
-          // in this case, x is not a normal tuple, it should be just a variable
-          // and we try to set bitwidth on the dpin which represents the x
-          auto bits = inp.driver.get_node().get_type_const_value();
-          auto target_dpin = name2dpin[node.get_driver_pin().get_name()];
-          //target_dpin.ref_bitwidth()->e.set_ubits(bits);
-          target_dpin.set_bits(bits);
-        } else {
-          ; // true tuple resolving
-        }
+
+      I(node.get_sink_pin(0).inp_edges().size() == 1);
+      I(node.get_sink_pin(3).inp_edges().size() == 1);
+
+      if (is_bit_attr_tuple_add(node)) {
+        //FIXME->sh: now I assume value pin is connected to constant node directly, might need to
+        //switch to full tuple chain path resolution
+        auto bits = node.get_sink_pin(3).inp_edges().begin()->driver.get_node().get_type_const_value();
+        auto target_dpin = Node_pin::find_driver_pin(dfg, node.get_driver_pin().get_name());
+        target_dpin.ref_bitwidth()->e.set_ubits(bits);
+      } else {
+        ; // true tuple resolving
       }
+
     }
   }
 
@@ -206,7 +204,6 @@ void Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_a
   } else {
     const Node_pin opr  = setup_node_assign_and_target(dfg, lnidx_assign);
     const Node_pin opd1 = setup_ref_node_dpin(dfg, c1);
-
     if(opd1.get_node().get_type().op != U32Const_Op)
       I(opd1.get_bits() == 0);
 
@@ -339,7 +336,7 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
   if (name.substr(0, 1) == "%") {
     // Port_invalid pos, means I do not care about position
     dfg->add_graph_output(name.substr(1), Port_invalid, 0);
-    node_dpin = dfg->get_graph_output_driver(name.substr(1));
+    node_dpin = dfg->get_graph_output_driver_pin(name.substr(1));
   } else if (name.substr(0, 1) == "$") {
     node_dpin = dfg->add_graph_input(name.substr(1), Port_invalid, 0);
   } else if (name.substr(0, 1) == "#") {
