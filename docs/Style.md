@@ -111,7 +111,8 @@ for(auto idx:g->unordered()) {
 
 ## const and local variables
 
-It may be too verbose to write const all the time. The coding style request to use const (when possible) in iterators and pointers. The others are up to the programmer.
+It may be too verbose to write const all the time. The coding style request to use 
+const (when possible) in iterators and pointers. The others are up to the programmer.
 
 
 ## Strings must be passed as std::string_view

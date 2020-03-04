@@ -26,6 +26,7 @@ protected:
   void iterate_mux       (Node_pin &pin);
 
   void iterate_driver_pin        (Node_pin &pin);
+
   void bw_pass_setup             (LGraph *lg);
   void bw_pass_dump              (LGraph *lg);
   void bw_implicit_range_to_bits (LGraph *lg);

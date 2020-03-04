@@ -27,6 +27,8 @@ void Lnast_parser::elaborate() {
   I(lnast.empty());
 
   lnast.set_root(Lnast_node(Lnast_ntype::create_top(), Token()));
+
+
   process_stmts_op(lnast.get_root(), 1);
   build_lnast();
 
@@ -107,6 +109,10 @@ void Lnast_parser::build_lnast() {
       walk_next_token();
       walk_next_line();
       continue;
+    } else if (type.is_assign() && unlikely(tuple_name_correction(type, target_name))) {
+      walk_next_token();
+      walk_next_line();
+      continue;
     }
 
     auto tree_idx_opr = process_operator_node(opr_parent_node, type, cfg_nidx, target_name);
@@ -131,7 +137,7 @@ void Lnast_parser::process_tuple_op(const Lnast_nid& parent_of_tup, uint32_t sel
   fmt::print("tuple sequence :{}\n", scan_get_token().get_text());
   walk_next_token();
   fmt::print("tuple sequence name :{}\n", scan_get_token().get_text());
-  lnast.add_child(idx_tuple_seq, Lnast_node::create_ref(scan_get_token())); //tuple_name
+  buffer_tmp_tuple_name_idx = lnast.add_child(idx_tuple_seq, Lnast_node::create_ref(scan_get_token())); //tuple_name
 }
 
 void Lnast_parser::process_stmts_op(const Lnast_nid& parent_of_sts, uint32_t self_idx) {
@@ -275,6 +281,17 @@ Lnast_ntype  Lnast_parser::operand_analysis() {
   } else {
     return Lnast_ntype::create_ref();//includes io and reg such as $a, %b, @r
   }
+}
+
+
+bool Lnast_parser::tuple_name_correction(Lnast_ntype type, const Token &target_name) {
+  I(type.is_assign());
+  if (buffer_tmp_tuple_name_idx.level != -1 &&
+      lnast.get_name(buffer_tmp_tuple_name_idx) == scan_peep_text(1)) {
+    lnast.ref_data(buffer_tmp_tuple_name_idx)->token = target_name;
+    return true;
+  }
+  return false;
 }
 
 bool Lnast_parser::function_def_name_correction(Lnast_ntype type, const Token& target_name) {

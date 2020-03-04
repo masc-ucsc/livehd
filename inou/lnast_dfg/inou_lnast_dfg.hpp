@@ -47,6 +47,7 @@ protected:
   void process_ast_dp_assign_op (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_dot_op       (const Lnast_nid &lnidx);
   void process_ast_select_op    (const Lnast_nid &lnidx);
+  void process_ast_tuple_initialize (LGraph *dfg, const Lnast_nid &lnidx);
 
   Node_pin     setup_node_operator_and_target (LGraph *dfg, const Lnast_nid &lnidx_opr);
   Node_pin     setup_node_assign_and_target   (LGraph *dfg, const Lnast_nid &lnidx_opr);

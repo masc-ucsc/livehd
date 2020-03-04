@@ -88,15 +88,6 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
 }
 
 void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
-  ////FIXME->sh: reconstruct name2dpin table to separate lnast->lg and tuple_resolving pass
-  ////           so that I could generate intermediate dot view
-  //for (const auto &node: dfg->fast()) {
-  //  if (node.get_type().op != TupAdd_Op) {
-  //    for (auto &out : node.out_edges())
-  //      name2dpin[out.driver.get_name()]  = out.driver;
-  //  }
-  //  //FIXME->sh: what about TupGet_Op?
-  //}
 
   absl::flat_hash_set<Node::Compact> to_be_deleted;
   for (const auto &node: dfg->fast()) {
@@ -107,8 +98,7 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
       I(node.get_sink_pin(3).inp_edges().size() == 1);
 
       if (is_bit_attr_tuple_add(node)) {
-        //FIXME->sh: now I assume value pin is connected to constant node directly, might need to
-        //switch to full tuple chain path resolution
+        //FIXME->sh: now I assume value pin is connected to constant node directly, might need to switch to full tuple chain path resolution
         auto bits = node.get_sink_pin(3).inp_edges().begin()->driver.get_node().get_type_const_value();
         auto target_dpin = Node_pin::find_driver_pin(dfg, node.get_driver_pin().get_name());
         target_dpin.ref_bitwidth()->e.set_ubits(bits);
@@ -153,6 +143,8 @@ void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const Lnast_nid &lnidx_stmts
       process_ast_label_op(dfg, lnidx);
     } else if (ntype.is_dp_assign()) {
       process_ast_dp_assign_op(dfg, lnidx);
+    } else if (ntype.is_tuple()) {
+      process_ast_tuple_initialize(dfg, lnidx);
     } else if (ntype.is_if()) {
       process_ast_if_op(dfg, lnidx);
     } else if (ntype.is_uif()) {
@@ -185,30 +177,34 @@ void Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_a
   if (name2lnidx_opr.find(c0_name) != name2lnidx_opr.end()) {
     auto ast_opr_idx = name2lnidx_opr[c0_name];
     //lhs cases: (1)tup.foo = bar; (2)tup[1] = bar;
-    if (lnast->get_type(ast_opr_idx).is_dot())
+    if (lnast->get_type(ast_opr_idx).is_dot()) {
       add_tuple_add_from_dot(dfg, name2lnidx_opr[c0_name], lnidx_assign);
-    else
+    } else {
       ;
       //add_tuple_add_from_sel(dfg, name2lnidx_opr[c0_name], lnidx_assign);
-
+    }
   } else if (name2lnidx_opr.find(c1_name) != name2lnidx_opr.end()) {
     auto ast_opr_idx = name2lnidx_opr[c0_name];
     //rhs example: (1)bar = tup.foo; (2) bar = tup.foo + tup[1]
-    if (lnast->get_type(ast_opr_idx).is_dot())
+    if (lnast->get_type(ast_opr_idx).is_dot()) {
       ;
       //add_tuple_get_from_dot(dfg, name2lnidx_opr[c1_name], lnidx_assign);
-    else
+    } else {
       ;
       //add_tuple_get_from_sel(dfg, name2lnidx_opr[c1_name], lnidx_assign);
-
+    }
   } else {
     const Node_pin opr  = setup_node_assign_and_target(dfg, lnidx_assign);
     const Node_pin opd1 = setup_ref_node_dpin(dfg, c1);
-    if(opd1.get_node().get_type().op != U32Const_Op)
-      I(opd1.get_bits() == 0);
+    GI(opd1.get_node().get_type().op != U32Const_Op, opd1.get_bits() == 0);
 
     dfg->add_edge(opd1, opr);
   }
+}
+
+void Inou_lnast_dfg::process_ast_tuple_initialize(LGraph *dfg, const Lnast_nid &lnidx_tup) {
+
+  auto tn_dpin = setup_tuple_ref(dfg, lnast->get_sname(lnast->get_first_child(lnidx_tup)));
 }
 
 Node_pin Inou_lnast_dfg::add_tuple_add_from_dot(LGraph *dfg, const Lnast_nid &lnidx_dot, const Lnast_nid &lnidx_assign) {

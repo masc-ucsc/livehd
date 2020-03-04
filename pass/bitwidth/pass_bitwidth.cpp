@@ -822,6 +822,6 @@ void Pass_bitwidth::bw_settle_graph_outputs(LGraph *lg) {
     auto spin_name = inp.sink.get_name();
     //auto graph_output_driver_pin = lg->get_graph_output_driver_pin(spin_name); //(1)FIXME->sh: how do I get the graph output name through graph output pin? which is a sink pin
     auto graph_output_driver_pin = lg->get_graph_output_driver_pin("%out");      //(2)FIXME->sh: hard coded for test
-    graph_output_driver_pin.set_bits(bits);                                      //(2)FIXME->sh: how to set bitwidth for a graph output pin?
+    graph_output_driver_pin.set_bits(bits);                                      //(3)FIXME->sh: how to set bitwidth for a graph output pin?
   }
 }
