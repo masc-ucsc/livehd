@@ -819,9 +819,9 @@ void Pass_bitwidth::bw_implicit_range_to_bits(LGraph *lg) {
 void Pass_bitwidth::bw_settle_graph_outputs(LGraph *lg) {
   for (const auto &inp : lg->get_graph_output_node().inp_edges()) {
     auto bits = inp.driver.get_bits();
-    auto spin_name = inp.sink.get_name();
-    //auto graph_output_driver_pin = lg->get_graph_output_driver_pin(spin_name); //(1)FIXME->sh: how do I get the graph output name through graph output pin? which is a sink pin
-    auto graph_output_driver_pin = lg->get_graph_output_driver_pin("%out");      //(2)FIXME->sh: hard coded for test
-    graph_output_driver_pin.set_bits(bits);                                      //(3)FIXME->sh: how to set bitwidth for a graph output pin?
+    auto spin = inp.sink;
+    //note: in graph out node, spin_pid == dpin_pid is always true
+    auto graph_output_driver_pin = spin.get_node().setup_driver_pin(spin.get_pid());
+    graph_output_driver_pin.set_bits(bits);
   }
 }
