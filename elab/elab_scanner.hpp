@@ -98,14 +98,14 @@ public:
   void reset(Token_id _tok, uint64_t _pos1, uint32_t _line, std::string_view _text) {
     tok   = _tok;
     pos1  = _pos1;
-    pos2  = _pos1; //FIXME: SH: you reset the token so the length of the token should be 0, pos2 follows pos1
+    pos2  = _pos1; //FIXME->sh: you reset the token so the length of the token should be 0, pos2 follows pos1
     line  = _line;
     text  = _text;
   }
   void clear(uint64_t _pos1, uint32_t _line, std::string_view _text) {
     tok   = Token_id_nop;
     pos1  = _pos1;
-    pos2  = _pos1; //FIXME: SH: you clear the token so the length of the token should be 0, pos2 follows pos1
+    pos2  = _pos1; //FIXME->sh: you clear the token so the length of the token should be 0, pos2 follows pos1
     line  = _line;
     text  = _text;
   }
@@ -125,7 +125,7 @@ public:
   }
 
   void adjust_token_size(uint64_t end_pos) {
-    GI(tok != Token_id_nop, end_pos >= pos2); //FIXME: SH: check correctness of pos2
+    GI(tok != Token_id_nop, end_pos >= pos2); //FIXME->sh: check correctness of pos2
     auto new_len = end_pos - pos2;
     text = std::string_view{text.data(), new_len};
   }

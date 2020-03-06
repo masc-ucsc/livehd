@@ -29,20 +29,25 @@ protected:
   Lnast_ntype  operand_analysis();
   Lnast_ntype  operator_analysis();
   bool         token_is_valid_ref();
-  bool         function_def_name_correction (Lnast_ntype type, const Token& target_name);
-  bool         function_instance_name_correction (Lnast_ntype type, const Token& target_name);
   Lnast_nid    process_operator_node (const Lnast_nid& opr_parent_sts, Lnast_ntype type, uint32_t , const Token& target_name);
   void         walk_next_token() {scan_next(); line_tkcnt += 1;};
   void         walk_next_line()  {scan_next(); line_tkcnt = 1 ; line_num += 1; };
 
+  bool         function_def_name_correction      (Lnast_ntype type, const Token& target_name);
+  bool         function_instance_name_correction (Lnast_ntype type, const Token& target_name);
+  bool         tuple_name_correction             (Lnast_ntype type, const Token& target_name);
+
+
 private:
+  //FIXME-sh: all data member should be initialized!
   Lnast       lnast;
   uint32_t    line_num;
   uint8_t     line_tkcnt;
   Token       buffer_if_condition;
   bool        buffer_if_condition_used;
-  Lnast_nid   buffer_tmp_func_def_name_idx; //FIXME: SH: need expand to a set when the import prp library supported or multi-function defined in a same prp
+  Lnast_nid   buffer_tmp_func_def_name_idx; //FIXME->sh: need expand to a set when the import prp library supported or multi-function defined in a same prp
   Lnast_nid   buffer_tmp_funcall_idx;
+  Lnast_nid   buffer_tmp_tuple_name_idx = Lnast_nid(-1, -1);
 
   absl::flat_hash_map<uint32_t, Lnast_nid> cfg_parent_id2lnast_node; //translate the parent column idx to corresponding sts node
 

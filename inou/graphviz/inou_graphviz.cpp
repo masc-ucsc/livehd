@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <fstream>
+#include <regex>
 
 #include "eprp_utils.hpp"
 #include "lbench.hpp"
@@ -116,24 +117,36 @@ void Inou_graphviz::do_fromlg(LGraph *lg_parent) {
 void Inou_graphviz::populate_lg_data(LGraph *g) {
   std::string data = "digraph {\n";
 
-  g->each_node_fast([&data](const Node &node) {
-    auto node_name = node.has_name() ? node.get_name() : "";
+  g->each_node_fast([&data, this](const Node &node) {
+    std::string node_info;
+    if (!verbose) {
+      auto pos = node.debug_name().find("_lg_");
+      node_info = node.debug_name().substr(0, pos); //get rid of the lgraph name
+      node_info = std::regex_replace(node_info, std::regex("node_"), "n");
+    } else {
+      node_info = node.debug_name();
+    }
 
     if (node.get_type().op == U32Const_Op)
-      data += fmt::format(" {} [label=\"{} :{} :{}\"];\n", node.debug_name(), node.debug_name(), node_name,
-                          node.get_type_const_value());
+      data += fmt::format(" {} [label=\"{}:{}\"];\n", node.debug_name(), node_info, node.get_type_const_value());
     else
-      data += fmt::format(" {} [label=\"{} :{}\"];\n", node.debug_name(), node.debug_name(), node_name);
+      data += fmt::format(" {} [label=\"{}\"];\n", node.debug_name(), node_info);
+
 
     for (auto &out : node.out_edges()) {
-      auto &dpin       = out.driver;
-      auto  dnode_name = dpin.get_node().debug_name();
-      auto  snode_name = out.sink.get_node().debug_name();
-      auto  dpin_name  = dpin.has_name() ? dpin.get_name() : "";
-      auto  dbits      = dpin.get_bits();
+      auto  dp_pid  = out.driver.get_pid();
+      auto  sp_pid  = out.sink.get_pid();
+      auto  dn_name = out.driver.get_node().debug_name();
+      auto  sn_name = out.sink.get_node().debug_name();
+      auto  dbits   = out.driver.get_bits();
+      auto  dp_name = out.driver.has_name() ? out.driver.get_name() : "";
 
-      data += fmt::format(" {}->{}[label=\"{}b :{} :{} :{}\"];\n", dnode_name, snode_name, dbits, dpin.get_pid(),
-                          out.sink.get_pid(), dpin_name);
+
+      if (node.get_type().op == U32Const_Op)
+        data += fmt::format(" {}->{}[label=\"{}b:({},{})\"];\n", dn_name, sn_name, dbits, dp_pid, sp_pid);
+      else
+        data += fmt::format(" {}->{}[label=\"{}b:({},{}):{}\"];\n", dn_name, sn_name, dbits, dp_pid, sp_pid, dp_name);
+
     }
   });
 
@@ -192,7 +205,7 @@ void Inou_graphviz::do_fromlnast(std::string_view f) {
   data += "}\n";
 
   auto f2 = f.substr(0, f.length()-4); // remove ".cfg" in the end
-  std::string file = absl::StrCat(odir, "/", f2, ".lnast.dot");
+  auto file = absl::StrCat(odir, "/", f2, ".lnast.dot");
   int         fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
   if (fd < 0) {
     Pass::error("inou.graphviz_lnast unable to create {}", file);

@@ -115,7 +115,7 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
     } else {
       int8_t  new_subs = check_rhs_cnt_table_parents_chain(psts_nid, itr_opd);
       if (new_subs == -1) {
-        new_subs = 0; //FIXME: sh: actually, here is a good place to check undefined variable
+        new_subs = 0; //FIXME->sh: actually, here is a good place to check undefined variable
       }
       ssa_rhs_cnt_table[opd_name] = new_subs;
       set_data(itr_opd, Lnast_node(opd_type, ori_token, new_subs));
@@ -192,8 +192,8 @@ void Lnast::ssa_handle_phi_nodes(const Lnast_nid &if_nid) {
 
 
 
-//FIXME: SH: what if the phi-tables are already empty?
-//FIXME: SH: is it a correct case? if yes, what action should be taken to avoid
+//FIXME->sh: what if the phi-tables are already empty?
+//FIXME->sh: is it a correct case? if yes, what action should be taken to avoid
 void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table, Phi_rtable &false_table) {
   for (auto const&[key, val] : false_table) {
     if (true_table.find(key) != true_table.end()) {
@@ -249,7 +249,6 @@ Lnast_nid Lnast::check_phi_table_parents_chain(std::string_view target_name, con
     auto new_psts_nid = get_parent(tmp_if_nid);
     return check_phi_table_parents_chain(target_name, new_psts_nid, originate_from_csts);
   }
-  I(false);
 }
 
 

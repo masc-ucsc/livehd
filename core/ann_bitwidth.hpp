@@ -20,7 +20,7 @@ public:
     bool is_unsigned() const;
     void set_uconst(uint32_t value);
     void set_sconst(uint32_t value);
-    void set_ubits(uint16_t size);
+    void set_ubits(uint16_t size); //FIXME->sh: why it's only 16 bits
     void set_sbits(uint16_t size);
   };
 

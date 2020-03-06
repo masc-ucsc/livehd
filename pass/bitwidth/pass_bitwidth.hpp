@@ -9,34 +9,35 @@
 
 class Pass_bitwidth : public Pass {
 protected:
-  int max_iterations;
+  int max_iterations{};
 
   std::vector<Node_pin> pending;
+  std::vector<Node_pin> initial_imp_unset;
   std::vector<Node_pin> next_pending;
 
-  void mark_all_outputs(const LGraph *lg, Node_pin &pin);
+  void mark_all_outputs  (Node_pin &pin);
+  void iterate_logic     (Node_pin &pin);
+  void iterate_arith     (Node_pin &pin);
+  void iterate_comparison(Node_pin &pin);
+  void iterate_shift     (Node_pin &pin);
+  void iterate_pick      (Node_pin &pin);
+  void iterate_join      (Node_pin &pin);
+  void iterate_equals    (Node_pin &pin);
+  void iterate_mux       (Node_pin &pin);
 
-  void iterate_logic(const LGraph *lg, Node_pin &pin, Node_Type_Op op);
-  void iterate_arith(const LGraph *lg, Node_pin &pin, Node_Type_Op op);
-  void iterate_comparison(const LGraph *lg, Node_pin &pin, Node_Type_Op op);
-  void iterate_shift(const LGraph *lg, Node_pin &pin, Node_Type_Op op);
-  void iterate_pick(const LGraph *lg, Node_pin &pin, Node_Type_Op op);
-  void iterate_join(const LGraph *lg, Node_pin &pin, Node_Type_Op op);
-  void iterate_equals(const LGraph *lg, Node_pin &pin, Node_Type_Op op);
-  void iterate_mux(const LGraph *lg, Node_pin &pin, Node_Type_Op op);
+  void iterate_driver_pin        (Node_pin &pin);
 
-  void iterate_node(LGraph *lg, Index_ID idx);
-  void iterate_driver_pin(LGraph *lg, Node_pin &pin);
-
-  void bw_pass_setup(LGraph *lg);
-  void bw_pass_dump(LGraph *lg);
-  bool bw_pass_iterate(LGraph *lg);
+  void bw_pass_setup             (LGraph *lg);
+  void bw_pass_dump              (LGraph *lg);
+  void bw_implicit_range_to_bits (LGraph *lg);
+  bool bw_pass_iterate           (LGraph *lg);
+  void bw_settle_graph_outputs   (LGraph *lg);
 
   static void trans(Eprp_var &var);
   void        do_trans(LGraph *orig);
 
 public:
-  Pass_bitwidth(const Eprp_var &var);
+  explicit Pass_bitwidth(const Eprp_var &var);
 
   static void setup();
 };

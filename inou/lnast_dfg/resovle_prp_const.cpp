@@ -8,7 +8,7 @@ Node Inou_lnast_dfg::resolve_constant(LGraph *g, std::string_view str) {
   // bool has_bool_dc;
   // bool is_pure_dc;
   bool     is_signed = false;
-  uint32_t explicit_bits;
+  uint32_t exp_bits;
   size_t   bit_width;
 
   std::string token1st, token2nd;
@@ -37,9 +37,9 @@ Node Inou_lnast_dfg::resolve_constant(LGraph *g, std::string_view str) {
 
   // explicit bits width
   if(!token2nd.empty()) {
-    explicit_bits = (uint32_t)std::stoi(token2nd);
+    exp_bits = (uint32_t)std::stoi(token2nd);
   } else
-    explicit_bits = 0;
+    exp_bits = 0;
 
   // main process for bin/hex/dec
   // hex
@@ -54,7 +54,7 @@ Node Inou_lnast_dfg::resolve_constant(LGraph *g, std::string_view str) {
     for(unsigned i = 1; i != token1st.length(); ++i)
       h2b_token1st += hex_char_to_bin(token1st[i]);
 
-    bit_width = explicit_bits ? explicit_bits : h2b_token1st.size();
+    bit_width = exp_bits ? exp_bits : h2b_token1st.size();
     // is_in32b = bit_width > 32 ? false : true;
     size_t dc_pos = h2b_token1st.find('?'); // dc = don't care
     if(dc_pos != std::string::npos) {
@@ -68,7 +68,7 @@ Node Inou_lnast_dfg::resolve_constant(LGraph *g, std::string_view str) {
     token1st  = token1st.substr(2); // exclude leading bin 0b
     idx       = token1st.find_first_not_of('0');
     token1st  = token1st.substr(idx); // exclude leading 0s
-    bit_width = explicit_bits ? explicit_bits : token1st.size();
+    bit_width = exp_bits ? exp_bits : token1st.size();
     // is_in32b = bit_width > 32 ? false : true;
 
     size_t dc_pos = token1st.find('?'); // dc = don't care
@@ -94,8 +94,8 @@ Node Inou_lnast_dfg::resolve_constant(LGraph *g, std::string_view str) {
       // token1st = token1st[0] + token1st.substr(3);//exclude middle "0d"
       token1st = token1st.substr(3); // exclude middle "-0d"
 
-      for(size_t i = 0; i < token1st.size(); i++) {
-        sum = sum * 10 + (token1st[i] - '0');
+      for(auto i : token1st) {
+        sum = sum * 10 + (i - '0');
         // fmt::print("now is round {}, token1st[{}] is {}, sum is {}\n", i, i, token1st[i], sum);
         if(sum >= 4294967296) {
           uint32_t tmp = sum - 4294967296;
@@ -117,11 +117,11 @@ Node Inou_lnast_dfg::resolve_constant(LGraph *g, std::string_view str) {
       s_2scmp = '0' + s_2scmp; // add leading 0 before converting 2's complement
       // fmt::print("before 2's complement, the s_binary = {}\n", s_2scmp);
 
-      for(size_t i = 0; i < s_2scmp.length(); i++) {
-        if(s_2scmp[i] == '0')
-          s_2scmp[i] = '1';
+      for(auto & i : s_2scmp) {
+        if(i == '0')
+          i = '1';
         else
-          s_2scmp[i] = '0';
+          i = '0';
       }
       // fmt::print("middle 2's complement, the s_binary = {}\n", s_2scmp);
 
@@ -141,8 +141,8 @@ Node Inou_lnast_dfg::resolve_constant(LGraph *g, std::string_view str) {
       // fmt::print(" after 2's complement, the s_binary = {}\n", d2b_token1st);
     } else {
       token1st = token1st.substr(2);
-      for(size_t i = 0; i < token1st.size(); i++) {
-        sum = sum * 10 + (token1st[i] - '0');
+      for(auto i : token1st) {
+        sum = sum * 10 + (i - '0');
         // fmt::print("now is round {}, token1st[{}] is {}, sum is {}\n", i, i, token1st[i], sum);
         if(sum >= 4294967296) {
           uint32_t tmp = sum - 4294967296;
@@ -162,7 +162,7 @@ Node Inou_lnast_dfg::resolve_constant(LGraph *g, std::string_view str) {
       }
     }
 
-    bit_width = explicit_bits ? explicit_bits : d2b_token1st.size();
+    bit_width = exp_bits ? exp_bits : d2b_token1st.size();
     // is_in32b = bit_width > 32 ? false : true;
 
     return process_bin_token(g, d2b_token1st, (uint16_t)bit_width, is_signed);
@@ -191,7 +191,8 @@ Node Inou_lnast_dfg::process_bin_token(LGraph *g, const std::string &token, cons
     Node  node_join = g->create_node();
 
     node_join.set_type(Join_Op);
-    node_join.setup_driver_pin(0).set_bits(t_size);
+    //node_join.setup_driver_pin(0).set_bits(t_size);
+    node_join.setup_driver_pin(0).ref_bitwidth()->e.set_ubits(t_size);
 
     int i = 1;
     std::string token_chunk = token.substr(t_size - 32 * i, 32);
@@ -215,8 +216,7 @@ Node Inou_lnast_dfg::process_bin_token(LGraph *g, const std::string &token, cons
     }
     return node_join;
   } else {
-    Node node_const32 = create_const32_node(g, token, bit_width, is_signed);
-    return node_const32;
+    return create_const32_node(g, token, bit_width, is_signed);;
   }
 }
 
@@ -226,14 +226,16 @@ Node Inou_lnast_dfg::process_bin_token_with_dc(LGraph *g, const std::string &tok
   int  t_size = (int)token.size();
   Node node_join = g->create_node();
   node_join.set_type(Join_Op);
-  node_join.setup_driver_pin().set_bits(t_size);
+  //node_join.setup_driver_pin().set_bits(t_size);
+  node_join.setup_driver_pin().ref_bitwidth()->e.set_ubits(t_size);
+
 
   std::string sdc_buf;  // continuous don't care characters
   std::string sval_buf; // continuous val characters
   int         token_size = token.size();
   for(int i = 0; i < token_size; i++) {
     if(token[i] == '?') {
-      if(sval_buf.size()) {
+      if(!sval_buf.empty()) {
         Node node_const32 = create_const32_node(g, sval_buf, sval_buf.size(), is_signed);
         dpins.push_back(node_const32.setup_driver_pin());
         sval_buf.clear();
@@ -271,6 +273,7 @@ Node Inou_lnast_dfg::process_bin_token_with_dc(LGraph *g, const std::string &tok
 Node Inou_lnast_dfg::create_const32_node(LGraph *g, const std::string &str_val, uint16_t node_bit_width, bool is_signed) {
   uint32_t val = cal_bin_val_32b(str_val);
   Node node_const32 = g->create_node_const(val);
+  node_const32.setup_driver_pin().ref_bitwidth()->e.set_ubits(node_bit_width);
   I(node_const32.get_driver_pin().get_bits() == node_bit_width);
   if(!node_const32.setup_driver_pin().has_name())
     node_const32.setup_driver_pin().set_name(absl::StrCat("0d", std::to_string(val)));
@@ -289,7 +292,8 @@ Node Inou_lnast_dfg::create_const32_node(LGraph *g, const std::string &str_val, 
 Node Inou_lnast_dfg::create_dontcare_node(LGraph *g, uint16_t node_bit_width ) {
   Node node_dc = g->create_node();
   node_dc.set_type(DontCare_Op);
-  node_dc.setup_driver_pin().set_bits(node_bit_width);
+  // node_dc.setup_driver_pin().set_bits(node_bit_width);
+  node_dc.setup_driver_pin().ref_bitwidth()->e.set_ubits(node_bit_width);
   return node_dc;
 }
 
@@ -374,3 +378,4 @@ std::string Inou_lnast_dfg::hex_msb_char_to_bin(char c) {
     I(false);
   }
 }
+

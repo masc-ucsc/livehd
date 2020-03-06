@@ -646,8 +646,8 @@ class Node_Type_TupAdd : public Node_Type {
 public:
   Node_Type_TupAdd() : Node_Type("tuple_add", TupAdd_Op, false) {
     inputs.push_back("TN");
-    inputs.push_back("KP");
     inputs.push_back("KN");
+    inputs.push_back("KP");
     inputs.push_back("V");
     outputs.push_back("Y");
   };

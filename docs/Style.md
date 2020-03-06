@@ -102,12 +102,18 @@ for(const auto &[name, id]:name2id) {
 ```
 
 
-## Use "auto" and "const auto" when possible.
+## Use "auto", or "const auto", when possible.
 
 ```cpp
 for(auto idx:g->unordered()) {
   for(const auto &c:g->out_edges(idx)) {
 ```
+
+## const and local variables
+
+It may be too verbose to write const all the time. The coding style request to use 
+const (when possible) in iterators and pointers. The others are up to the programmer.
+
 
 ## Strings must be passed as std::string_view
 

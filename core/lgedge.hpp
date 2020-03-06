@@ -204,10 +204,10 @@ struct __attribute__((packed)) SEdge : public Edge_raw {  // 2 bytes total
 enum Node_State {
   Invalid_State = 0,  // No used or initialized
   // bit3 == 1 is_node_state
-  Free_Node_State = 1,  // Node was deleted, it is in a free list
-  Page_Node_State = 2,  // No node in use, page info (page align)
-  Next_Node_State = 6,  // Entry in use, but it is an extension from another root, but there are more in the list
-  Last_Node_State = 7   // Entry in use, but it is an extension from another, and it is the last in the list
+  Free_node_state = 1,  // Node was deleted, it is in a free list
+  Page_node_state = 2,  // No node in use, page info (page align)
+  Next_node_state = 6,  // Entry in use, but it is an extension from another root, but there are more in the list
+  Last_node_state = 7   // Entry in use, but it is an extension from another, and it is the last in the list
 };
 
 class Node_Internal;
@@ -231,7 +231,7 @@ struct __attribute__((packed)) Node_Internal_Page {
     root_int          = root_int << 12;
 
     Node_Internal_Page *root = (Node_Internal_Page *)root_int;
-    I(root->state == Page_Node_State);
+    I(root->state == Page_node_state);
 
     return *root;
   }
@@ -246,7 +246,7 @@ struct __attribute__((packed)) Node_Internal_Page {
     I(is_page_align());
     I(_idx < (1LL << Index_bits));
     idx   = _idx;
-    state = Page_Node_State;
+    state = Page_node_state;
   }
 };
 
@@ -360,7 +360,18 @@ public:
     inp_long     = 0;
     out_long     = 0;
     nid          = 0;
-    state        = Last_Node_State;
+    state        = Last_node_state;
+  }
+
+  bool is_deleted() const {
+    if (likely(nid)) return false;
+    if (state == Last_node_state) return true;
+    if (state == Free_node_state) return false;
+
+    I(false);  // if a node is deleted it should be Free (todo after garbage collect) or Last
+  }
+  bool is_valid() const {
+    return nid && is_node_state();
   }
 
   bool is_root() const {
@@ -441,7 +452,7 @@ public:
     for (int i = 0; i < inp_pos; i++) {
       sedge[inp_pos - i + 2 - 1] = sedge[inp_pos - i - 1];
     }
-    state = Next_Node_State;
+    state = Next_node_state;
     set_next_state(_idx);
 
     I(is_next_state());
@@ -449,16 +460,16 @@ public:
 
   void assimilate_edges(Node_Internal *other);
 
-  void set_last_state() { state = Last_Node_State; }
+  void set_last_state() { state = Last_node_state; }
   void set_free_state() {
-    state = Free_Node_State;
+    state = Free_node_state;
     I(!root);  // For the moment
     nid = 0;
   }
-  bool is_next_state() const { return state == Next_Node_State; }
-  bool is_free_state() const { return state == Free_Node_State; }
-  bool is_page_state() const { return state == Page_Node_State; }
-  bool is_last_state() const { return state == Last_Node_State; }
+  bool is_next_state() const { return state == Next_node_state; }
+  bool is_free_state() const { return state == Free_node_state; }
+  bool is_page_state() const { return state == Page_node_state; }
+  bool is_last_state() const { return state == Last_node_state; }
   bool is_node_state() const {
     I(!((is_next_state() || is_last_state()) ^ ((state >> 2) & 1)));  // Same upper bit
     return (state >> 2) & 1;
@@ -499,21 +510,21 @@ public:
   bool has_local_inputs() const { return inp_pos > 0; }
   bool has_local_outputs() const { return out_pos > 0; }
   int  get_space_available() const {
-    if (state == Last_Node_State) return (Num_SEdges - (inp_pos + out_pos));
+    if (state == Last_node_state) return (Num_SEdges - (inp_pos + out_pos));
     return (Num_SEdges - (inp_pos + out_pos + 2));
   }
 
   bool has_next_space() const {
-    I(state == Last_Node_State);
+    I(state == Last_node_state);
     return (inp_pos + out_pos + 2) < Num_SEdges;  // pos 0 uses 2 entries (4bytes ptr next)
   }
 
   bool has_space_long() const {
-    int reserve = state == Last_Node_State ? 0 : 2;
+    int reserve = state == Last_node_state ? 0 : 2;
     return inp_long < 3 && out_long < 3 && (reserve + inp_pos + out_pos + 4) < Num_SEdges;
   }
   bool has_space_short() const {
-    int reserve = state == Last_Node_State ? 0 : 2;
+    int reserve = state == Last_node_state ? 0 : 2;
     return (inp_pos + out_pos + reserve) < Num_SEdges;  // pos 0 uses 2 entries (4bytes ptr next)
   }
 
@@ -555,13 +566,13 @@ private:
     // if (inp_pos == 0) return get_input_begin_pos_int();
 
     int pos = inp_pos;
-    if (state != Last_Node_State) pos += 2;
+    if (state != Last_node_state) pos += 2;
 
     return pos;
   }
 
   int get_input_begin_pos_int() const {
-    if (state == Last_Node_State) return 0;
+    if (state == Last_node_state) return 0;
     return 2;
   }
   int get_output_begin_pos_int() const { return Num_SEdges - out_pos - 1; }

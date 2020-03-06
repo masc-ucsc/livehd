@@ -84,7 +84,7 @@ void generate_graphs(int n) {
     for(int j = 0; j < outs; j++) {
       auto pin = g->add_graph_output("o" + std::to_string(j), 1+inps+j,1);
       spins.push_back(pin.get_compact());
-      dpins.push_back(g->get_graph_output_driver(("o" + std::to_string(j))).get_compact());
+      dpins.push_back(g->get_graph_output_driver_pin(("o" + std::to_string(j))).get_compact());
     }
 
     int nnodes = 100 + rand_r(&rseed) % 1000;

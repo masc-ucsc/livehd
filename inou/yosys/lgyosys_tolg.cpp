@@ -70,7 +70,7 @@ static void look_for_wire(LGraph *g, const RTLIL::Wire *wire) {
     auto pin = g->get_graph_output(&wire->name.c_str()[1]);
     I(pin.get_bits() == wire->width);
     if (wire->start_offset) {
-      auto dpin = g->get_graph_output_driver(&wire->name.c_str()[1]);
+      auto dpin = g->get_graph_output_driver_pin(&wire->name.c_str()[1]);
       I(dpin.get_pid() == pin.get_pid());
       dpin.set_offset(wire->start_offset);
     }

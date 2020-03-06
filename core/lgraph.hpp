@@ -131,7 +131,7 @@ protected:
     while (true) {
       nid.value++;
       if (nid >= static_cast<Index_ID>(node_internal.size())) return 0;
-      if (!node_internal[nid].is_node_state()) continue;
+      if (!node_internal[nid].is_valid()) continue;
       if (is_graph_io(nid)) continue;
       if (node_internal[nid].is_master_root()) return nid;
     }
@@ -224,7 +224,7 @@ public:
 
   Node_pin get_graph_input(std::string_view str);
   Node_pin get_graph_output(std::string_view str);
-  Node_pin get_graph_output_driver(std::string_view str);
+  Node_pin get_graph_output_driver_pin(std::string_view str);
 
   bool is_graph_input(std::string_view name) const;
   bool is_graph_output(std::string_view name) const;

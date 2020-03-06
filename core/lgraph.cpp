@@ -156,7 +156,7 @@ Node_pin LGraph::get_graph_output(std::string_view str) {
   return Node(this, Hierarchy_tree::root_index(), Node::Hardcoded_output_nid).setup_sink_pin(io_pid);
 }
 
-Node_pin LGraph::get_graph_output_driver(std::string_view str) {
+Node_pin LGraph::get_graph_output_driver_pin(std::string_view str) {
   auto io_pid = get_self_sub_node().get_instance_pid(str);
 
   return Node(this, Hierarchy_tree::root_index(), Node::Hardcoded_output_nid).setup_driver_pin(io_pid);
