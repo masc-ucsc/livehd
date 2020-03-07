@@ -69,7 +69,7 @@ protected:
 
   // constant resolving
   static Node         resolve_constant(LGraph *g, std::string_view str_in);
-  static Node         process_bin_token(LGraph *g, const std::string &token1st, const uint16_t &bit_width, bool is_signed);
+  static Node         process_bin_token(LGraph *g, const std::string &token1st, uint16_t bit_width, bool is_signed);
   static Node         process_bin_token_with_dc(LGraph *g, const std::string &token1st,bool is_signed);
   static uint32_t     cal_bin_val_32b(const std::string &);
   static Node         create_const32_node(LGraph *g, const std::string &, uint16_t node_bit_width, bool is_signed);

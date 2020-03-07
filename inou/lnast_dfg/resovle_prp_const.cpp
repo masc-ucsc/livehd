@@ -183,8 +183,11 @@ uint32_t Inou_lnast_dfg::cal_bin_val_32b(const std::string &token) {
   return val;
 }
 
-Node Inou_lnast_dfg::process_bin_token(LGraph *g, const std::string &token, const uint16_t &bit_width, bool is_signed) {
-  if(bit_width > 32) {
+Node Inou_lnast_dfg::process_bin_token(LGraph *g, const std::string &token, uint16_t bit_width, bool is_signed) {
+  if (bit_width == 0)
+    bit_width = 1;
+
+  if (bit_width > 32) {
     std::vector<Node_pin> dpins;
     Node  node_const32;
     auto  t_size    = (uint16_t)token.size();

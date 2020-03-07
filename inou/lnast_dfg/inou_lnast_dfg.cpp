@@ -342,7 +342,7 @@ Node_pin Inou_lnast_dfg::add_tuple_add_from_dot(LGraph *dfg, const Lnast_nid &ln
 //either tuple root or tuple key(str) fit in this case
 Node_pin Inou_lnast_dfg::setup_tuple_ref(LGraph *dfg, std::string_view ref_name) {
   if (name2dpin.find(ref_name) == name2dpin.end()) {
-    auto dpin = dfg->create_node(StrConst_Op).setup_driver_pin();
+    auto dpin = dfg->create_node(TupRef_Op).setup_driver_pin();
     dpin.set_name(ref_name);
     name2dpin[ref_name] = dpin;
   }

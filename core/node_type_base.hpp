@@ -53,6 +53,7 @@ enum Node_Type_Op : uint64_t {
   // op_class: Tuple
   TupAdd_Op,
   TupGet_Op,
+  TupRef_Op,
   // op_class: dfg
   DfgRef_Op,
   DfgPendingGraph_Op,
@@ -660,6 +661,15 @@ public:
   Node_Type_TupGet() : Node_Type("tuple_get", TupGet_Op, false) {
     inputs.push_back("A");
     inputs.push_back("K");
+    outputs.push_back("Y");
+  };
+};
+
+
+// Duplicated with StrConst but better debug message!
+class Node_Type_TupRef : public Node_Type {
+public:
+  Node_Type_TupRef() : Node_Type("tuple_ref", TupRef_Op, true) {
     outputs.push_back("Y");
   };
 };
