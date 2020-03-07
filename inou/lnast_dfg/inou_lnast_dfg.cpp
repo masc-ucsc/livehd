@@ -167,12 +167,31 @@ void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const Lnast_nid &lnidx_stmts
   }
 }
 
+void Inou_lnast_dfg::process_ast_binary_op(LGraph *dfg, const Lnast_nid &lnidx_opr) {
+  auto opr_node = setup_node_operator_and_target(dfg, lnidx_opr).get_node();
+
+  for (auto opr_child = lnast->children(lnidx_opr).begin();
+       opr_child != lnast->children(lnidx_opr).end(); ++opr_child) {
+    if (opr_child == lnast->children(lnidx_opr).begin())
+      continue; // already handled at setup_node_operator_and_target();
+    else {
+      auto child_name = lnast->get_sname(*opr_child);
+      Node_pin opd;
+      if (name2lnidx_opr.find(child_name) != name2lnidx_opr.end()) {
+        opd = add_tuple_get_from_dot_or_sel(dfg, name2lnidx_opr[child_name]);
+      } else {
+        opd = setup_ref_node_dpin(dfg, *opr_child);
+      }
+      dfg->add_edge(opd, opr_node.setup_sink_pin(0));// FIXME->sh: the sink_pin should be determined by the functionality, not just zero
+    }
+  };
+}
 
 void Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_assign) {
-  const auto c0 = lnast->get_first_child(lnidx_assign);
-  const auto c1 = lnast->get_sibling_next(c0);
-  const auto c0_name = lnast->get_sname(c0);
-  const auto c1_name = lnast->get_sname(c1);
+  auto c0 = lnast->get_first_child(lnidx_assign);
+  auto c1 = lnast->get_sibling_next(c0);
+  auto c0_name = lnast->get_sname(c0);
+  auto c1_name = lnast->get_sname(c1);
 
   if (name2lnidx_opr.find(c0_name) != name2lnidx_opr.end()) {
     auto ast_opr_idx = name2lnidx_opr[c0_name];
@@ -182,32 +201,23 @@ void Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_a
     } else {
       add_tuple_add_from_sel(dfg, name2lnidx_opr[c0_name], lnidx_assign);
     }
-  } else if (name2lnidx_opr.find(c1_name) != name2lnidx_opr.end()) {
-    auto ast_opr_idx = name2lnidx_opr[c0_name];
-    //rhs example: (1)bar = tup.foo; (2) bar = tup.foo + tup[1]
-    if (lnast->get_type(ast_opr_idx).is_dot()) {
-      add_tuple_get_from_dot(dfg, name2lnidx_opr[c1_name], lnidx_assign);
-    } else {
-      add_tuple_get_from_sel(dfg, name2lnidx_opr[c1_name], lnidx_assign);
-    }
-  } else {
-    const Node_pin opr  = setup_node_assign_and_target(dfg, lnidx_assign);
-    const Node_pin opd1 = setup_ref_node_dpin(dfg, c1);
-    GI(opd1.get_node().get_type().op != U32Const_Op, opd1.get_bits() == 0);
-
-    dfg->add_edge(opd1, opr);
+    return;
   }
+
+  if (name2lnidx_opr.find(c1_name) != name2lnidx_opr.end()) {
+    auto ast_opr_idx = name2lnidx_opr[c1_name];
+    //rhs example: (1)bar = tup.foo; (2) bar = tup.foo + tup[1]
+    if (lnast->get_type(ast_opr_idx).is_dot() || lnast->get_type(ast_opr_idx).is_select())
+      add_tuple_get_from_dot_or_sel(dfg, name2lnidx_opr[c1_name]);
+  }
+
+  Node_pin opr  = setup_node_assign_and_target(dfg, lnidx_assign);
+  Node_pin opd1 = setup_ref_node_dpin(dfg, c1);
+  GI(opd1.get_node().get_type().op != U32Const_Op, opd1.get_bits() == 0);
+
+  dfg->add_edge(opd1, opr);
 }
 
-
-Node_pin Inou_lnast_dfg::add_tuple_get_from_dot(LGraph *dfg, const Lnast_nid &lnidx_dot, const Lnast_nid &lnidx_assign) {
-  dfg->create_node(TupGet_Op);
-  //FIXME->sh: continue from here
-}
-
-Node_pin Inou_lnast_dfg::add_tuple_get_from_sel(LGraph *dfg, const Lnast_nid &lnidx_sel, const Lnast_nid &lnidx_assign) {
-  dfg->create_node(TupGet_Op);
-}
 
 void Inou_lnast_dfg::process_ast_tuple_struct(LGraph *dfg, const Lnast_nid &lnidx_tup) {
   Node_pin tn_dpin;
@@ -243,6 +253,30 @@ void Inou_lnast_dfg::process_ast_tuple_struct(LGraph *dfg, const Lnast_nid &lnid
     }
   }
 }
+
+Node_pin Inou_lnast_dfg::add_tuple_get_from_dot_or_sel(LGraph *dfg, const Lnast_nid &lnidx_opr) {
+  auto tup_get = dfg->create_node(TupGet_Op);
+  auto tn_spin = tup_get.setup_sink_pin(0); // tuple name
+  auto kn_spin = tup_get.setup_sink_pin(1); // key name
+
+  auto c0_dot = lnast->get_first_child(lnidx_opr);
+  auto c1_dot = lnast->get_sibling_next(c0_dot);
+  auto c2_dot = lnast->get_sibling_next(c1_dot);
+
+  auto tn_dpin = setup_tuple_ref(dfg, lnast->get_sname(c1_dot));
+  dfg->add_edge(tn_dpin, tn_spin);
+
+  auto kn_dpin = setup_tuple_ref(dfg, lnast->get_sname(c2_dot));
+  dfg->add_edge(kn_dpin, kn_spin);
+
+  name2dpin[lnast->get_sname(c0_dot)] = tup_get.setup_driver_pin();
+  tup_get.setup_driver_pin().set_name(lnast->get_sname(c0_dot));
+  fmt::print("tup_get dpin name is:{}\n", lnast->get_sname(c0_dot));
+  fmt::print("dpin name from map is:{}\n", name2dpin[tup_get.get_driver_pin().get_name()].get_name());
+
+  return tup_get.get_driver_pin();
+}
+
 
 Node_pin Inou_lnast_dfg::add_tuple_add_from_sel(LGraph *dfg, const Lnast_nid &lnidx_sel, const Lnast_nid &lnidx_assign) {
   auto tup_add    = dfg->create_node(TupAdd_Op);
@@ -328,22 +362,6 @@ void Inou_lnast_dfg::process_ast_select_op(const Lnast_nid &lnidx_sel) {
 }
 
 
-void Inou_lnast_dfg::process_ast_binary_op(LGraph *dfg, const Lnast_nid &lnidx_opr) {
-  const Node_pin opr = setup_node_operator_and_target(dfg, lnidx_opr);
-
-  const auto c0 = lnast->get_first_child(lnidx_opr);
-  const auto c1 = lnast->get_sibling_next(c0);
-  const auto c2 = lnast->get_sibling_next(c1);
-  I(lnast->get_sibling_next(c2).is_invalid());
-
-  const Node_pin opd1 = setup_ref_node_dpin(dfg, c1);
-  const Node_pin opd2 = setup_ref_node_dpin(dfg, c2);
-  // I(opd1 != opd2);
-  // FIXME->sh: the sink_pin should be determined by the functionality, not just zero
-
-  dfg->add_edge(opd1, opr.get_node().setup_sink_pin(0));
-  dfg->add_edge(opd2, opr.get_node().setup_sink_pin(0));
-};
 
 // note: for operator, we must create a new node and dpin as it represents a new gate in the netlist
 Node_pin Inou_lnast_dfg::setup_node_operator_and_target(LGraph *dfg, const Lnast_nid &lnidx_opr) {
@@ -354,9 +372,9 @@ Node_pin Inou_lnast_dfg::setup_node_operator_and_target(LGraph *dfg, const Lnast
   //         this is not allowed by LNAST.
 
   const auto lg_ntype_op = decode_lnast_op(lnidx_opr);
-  auto node_dpin   = dfg->create_node(lg_ntype_op).setup_driver_pin(0);
+  auto node_dpin     = dfg->create_node(lg_ntype_op).setup_driver_pin(0);
+  name2dpin[c0_name] = node_dpin;
   node_dpin.set_name(c0_name);
-  name2dpin[c0_name]  = node_dpin;
   return node_dpin;
 }
 

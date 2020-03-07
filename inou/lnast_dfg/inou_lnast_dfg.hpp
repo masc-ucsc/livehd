@@ -57,14 +57,13 @@ protected:
   void         setup_lnast_to_lgraph_primitive_type_mapping();
 
 
-  bool is_bit_attr_tuple_add(Node node) {
+  static bool is_bit_attr_tuple_add(Node node) {
     return (node.get_sink_pin(1).inp_edges().size() == 1) && (node.get_sink_pin(1).inp_edges().begin()->driver.get_name().substr(0,6) == "__bits");
   }
 
   Node_pin     add_tuple_add_from_dot (LGraph *dfg, const Lnast_nid &lnidx_dot, const Lnast_nid &lnidx_assign);
   Node_pin     add_tuple_add_from_sel (LGraph *dfg, const Lnast_nid &lnidx_sel, const Lnast_nid &lnidx_assign);
-  Node_pin     add_tuple_get_from_dot (LGraph *dfg, const Lnast_nid &lnidx_dot, const Lnast_nid &lnidx_assign);
-  Node_pin     add_tuple_get_from_sel (LGraph *dfg, const Lnast_nid &lnidx_sel, const Lnast_nid &lnidx_assign);
+  Node_pin     add_tuple_get_from_dot_or_sel (LGraph *dfg, const Lnast_nid &lnidx_opr);
   Node_pin     setup_tuple_ref (LGraph *dfg, std::string_view tup_name);
 
 
