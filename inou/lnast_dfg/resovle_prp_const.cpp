@@ -278,14 +278,6 @@ Node Inou_lnast_dfg::create_const32_node(LGraph *g, const std::string &str_val, 
   if(!node_const32.setup_driver_pin().has_name())
     node_const32.setup_driver_pin().set_name(absl::StrCat("0d", std::to_string(val)));
 
-  //SH:FIXME: Attribute for Node_pin explicit/implicit bitwidth??? TBD.
-  /*
-  Node_bitwidth &nb = node_const32.get_driver_pin().get_bits();
-  if(is_signed)
-    nb.e.set_sconst(val);
-  else
-    nb.e.set_uconst(val);
-  */
   return node_const32;
 }
 

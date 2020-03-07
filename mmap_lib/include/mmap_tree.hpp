@@ -266,6 +266,7 @@ public:
     CTree_depth_preorder_iterator end()   const { return CTree_depth_preorder_iterator(Tree_index(-1,-1), t); }  // 0 is end index for iterator
   };
 
+
   class Tree_sibling_iterator {
   public:
     class CTree_sibling_iterator {
@@ -281,6 +282,12 @@ public:
       bool operator!=(const CTree_sibling_iterator &other) {
         I(t == other.t);
         return ti != other.ti;
+      }
+
+      //FIXME->sh: check with Jose or learn to design an iterator throughly
+      bool operator==(const CTree_sibling_iterator &other) {
+        I(t == other.t);
+        return ti == other.ti;
       }
       const Tree_index &operator*() const { return ti; }
 
