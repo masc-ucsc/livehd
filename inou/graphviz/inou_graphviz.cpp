@@ -128,9 +128,9 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
     }
 
     if (node.get_type().op == U32Const_Op)
-      data += fmt::format(" {} [label=\"{}:{}\"];\n", node.debug_name(), node_info, node.get_type_const_value());
+      data += fmt::format(" {} [label=<{}:{}>];\n", node.debug_name(), node_info, node.get_type_const_value());
     else
-      data += fmt::format(" {} [label=\"{}\"];\n", node.debug_name(), node_info);
+      data += fmt::format(" {} [label=<{}>];\n", node.debug_name(), node_info);
 
 
     for (auto &out : node.out_edges()) {
@@ -141,13 +141,12 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
       auto  dbits   = out.driver.get_bits();
       auto  dp_name = out.driver.has_name() ? out.driver.get_name() : "";
 
-
       if (node.get_type().op == U32Const_Op)
-        data += fmt::format(" {}->{}[label=\"{}b:({},{})\"];\n", dn_name, sn_name, dbits, dp_pid, sp_pid);
+        data += fmt::format(" {}->{}[label=<{}b:({},{})>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid);
       else if (node.get_type().op == TupRef_Op)
-        data += fmt::format(" {}->{}[label=\"{}\"];\n", dn_name, sn_name, dp_name);
+        data += fmt::format(" {}->{}[label=<({},{}):<font color=\"#0000ff\">{}</font>>];\n", dn_name, sn_name, dp_pid, sp_pid, dp_name);
       else
-        data += fmt::format(" {}->{}[label=\"{}b:({},{}):{}\"];\n", dn_name, sn_name, dbits, dp_pid, sp_pid, dp_name);
+        data += fmt::format(" {}->{}[label=<{}b:({},{}):{}>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid, dp_name);
     }
   });
 
