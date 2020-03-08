@@ -106,6 +106,8 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
         ; // true tuple resolving
       }
 
+    } else if (node.get_type().op == TupGet_Op) {
+      ;
     }
   }
 
@@ -145,6 +147,8 @@ void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const Lnast_nid &lnidx_stmts
       process_ast_dp_assign_op(dfg, lnidx);
     } else if (ntype.is_tuple()) {
       process_ast_tuple_struct(dfg, lnidx);
+    } else if (ntype.is_tuple_concat()) {
+      process_ast_tuple_concat_op(dfg, lnidx);
     } else if (ntype.is_if()) {
       process_ast_if_op(dfg, lnidx);
     } else if (ntype.is_uif()) {
@@ -165,6 +169,10 @@ void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const Lnast_nid &lnidx_stmts
       return;
     }
   }
+}
+
+void Inou_lnast_dfg::process_ast_tuple_concat_op(LGraph *dfg, const Lnast_nid &lnidx) {
+  return;
 }
 
 void Inou_lnast_dfg::process_ast_binary_op(LGraph *dfg, const Lnast_nid &lnidx_opr) {

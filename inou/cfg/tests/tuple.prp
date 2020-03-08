@@ -1,9 +1,11 @@
 x.__bits = 2
 y.__bits = 3
 
-x = 2
+x = 3
 y = 7
 
 A = (x, foo = y, bar = 4)
 
-%out1 = A[0] + A.foo // 2 + 7 = 9
+A = A++3                  // should I SSA tuple?
+
+%out1 = A[3] + A.foo      // 3 + 7 = 10
