@@ -660,7 +660,8 @@ class Node_Type_TupGet : public Node_Type {
 public:
   Node_Type_TupGet() : Node_Type("tuple_get", TupGet_Op, false) {
     inputs.push_back("A");
-    inputs.push_back("K");
+    inputs.push_back("KN");
+    inputs.push_back("KP");
     outputs.push_back("Y");
   };
 };
