@@ -33,12 +33,13 @@ void help_labels(const std::string& cmd, const std::string& txt, bool required) 
 }
 
 // prototypes
-Replxx::completions_t hook_completion(std::string const& context, int index, void* user_data);
-Replxx::hints_t       hook_hint(std::string const& context, int index, Replxx::Color& color, void* user_data);
-void                  hook_color(std::string const& str, Replxx::colors_t& colors, void* user_data);
+Replxx::completions_t hook_completion(std::string const& context, int index, std::vector<std::string> const& user_data);//SG
+Replxx::hints_t       hook_hint(std::string const& context, int index, Replxx::Color& color, std::vector<std::string> const& user_data);//SG
+void                  hook_color(std::string const& str, Replxx::colors_t& colors, std::vector<std::pair<std::string, Replxx::Color>> const& user_data);//SG
 
-Replxx::completions_t hook_shared(std::string const& context, int index, void* user_data, bool add_all) {
-  auto*                 examples = static_cast<std::vector<std::string>*>(user_data);
+Replxx::completions_t hook_shared(std::string const& context, int index, std::vector<std::string> const& user_data, bool add_all) {//SG_trial
+  //auto*                 examples = static_cast<std::vector<std::string>*>(user_data);//SG_trial
+  auto*                 examples = &(user_data);//SG_trial
   Replxx::completions_t completions;
 
   int  last_cmd_start = context.size();
@@ -94,12 +95,21 @@ Replxx::completions_t hook_shared(std::string const& context, int index, void* u
       prefix        = full_filename;  // Overwrite beginning of the match
       label         = label.substr(0, pos);
     }
+      //SG_debug:
+      fmt::print("This is to debug1");
+      //:SG_debug
     bool label_files  = strcasecmp(label.c_str(), "files") == 0;
     bool label_output = strcasecmp(label.c_str(), "output") == 0;
     bool label_path   = strcasecmp(label.c_str(), "path") == 0;
     bool label_odir   = strcasecmp(label.c_str(), "odir") == 0;
+//SG:
+//    fmt::print("==== label_files {:d}, label_output {:d} , label_path {:d} , label_odir {:d} ====",label_files,label_output,label_path,label_odir);
+
     if (label_files || label_output || label_path || label_odir) {
-      std::string path = ".";
+       //SG_debug:
+      fmt::print("This is to debug2");
+      //:SG_debug
+     std::string path = ".";
       auto        pos2  = full_filename.find_last_of('/');
       std::string filename;
       if (pos2 != std::string::npos) {
@@ -129,6 +139,7 @@ Replxx::completions_t hook_shared(std::string const& context, int index, void* u
             }else{
               sort_files.push_back(dp->d_name);
             }
+
           }
         }
         closedir(dirp);
@@ -137,7 +148,10 @@ Replxx::completions_t hook_shared(std::string const& context, int index, void* u
           fields = sort_files;
         }
       }
-      examples = &fields;
+        //SG_debug:
+      fmt::print("This is to debug3");
+      //:SG_debug
+     examples = &fields;
     }
   } else if (last_cmd_start < last_cmd_end) {
     std::string cmd = context.substr(last_cmd_start, last_cmd_end);
@@ -152,6 +166,7 @@ Replxx::completions_t hook_shared(std::string const& context, int index, void* u
   }
 
   for (auto const& e : *examples) {
+  //SG_trial: for (auto const& e : user_data)
     // fmt::print("checking {} vs {}\n",e, prefix);
     if (strncasecmp(prefix.c_str(), e.c_str(), prefix.size()) == 0) {
       // fmt::print("match {}\n",e);
@@ -180,11 +195,11 @@ Replxx::completions_t hook_shared(std::string const& context, int index, void* u
   return completions;
 }
 
-Replxx::completions_t hook_completion(std::string const& context, int index, void* user_data) {
+Replxx::completions_t hook_completion(std::string const& context, int index, std::vector<std::string> const& user_data) {//SG;
   return hook_shared(context, index, user_data, false);
 }
 
-Replxx::hints_t hook_hint(std::string const& context, int index, Replxx::Color& color, void* user_data) {
+Replxx::hints_t hook_hint(std::string const& context, int index, Replxx::Color& color, std::vector<std::string> const& user_data) {//SG;
   Replxx::hints_t hints;
 
   // only show hint if prefix is at least 'n' chars long
@@ -236,11 +251,12 @@ int real_len(std::string const& s) {
   return (len);
 }
 
-void hook_color(std::string const& context, Replxx::colors_t& colors, void* user_data) {
-  auto* regex_color = static_cast<std::vector<std::pair<std::string, Replxx::Color>>*>(user_data);
+void hook_color(std::string const& context, Replxx::colors_t& colors, std::vector<std::pair<std::string, Replxx::Color>> const& regex_color) {//SG;
+  //SG: auto* regex_color = static_cast<std::vector<std::pair<std::string, Replxx::Color>>*>(user_data);
 
   // highlight matching regex sequences
-  for (auto const& e : *regex_color) {
+  //SG: for (auto const& e : *regex_color)
+  for (auto const& e : regex_color) {
     size_t      pos{0};
     std::string str = context;
     std::smatch match;
@@ -372,11 +388,14 @@ int main(int argc, char** argv) {
   rx.set_max_history_size(8192);
   // rx.set_max_line_size(32768);
   rx.set_max_hint_rows(6);
+  using namespace std::placeholders;//SG;
+  //SG: rx.set_highlighter_callback(hook_color, static_cast<void*>(&regex_color));
+  rx.set_highlighter_callback( std::bind( &hook_color, _1, _2, cref( regex_color ) ));
 
-  rx.set_highlighter_callback(hook_color, static_cast<void*>(&regex_color));
-
-  rx.set_completion_callback(hook_completion, static_cast<void*>(&examples));
-  rx.set_hint_callback(hook_hint, static_cast<void*>(&examples));
+  //SG: rx.set_completion_callback(hook_completion, static_cast<void*>(&examples));
+  rx.set_completion_callback(std::bind( &hook_completion, _1, _2, cref( examples ) ));
+  //SG: rx.set_hint_callback(hook_hint, static_cast<void*>(&examples));
+  rx.set_hint_callback(std::bind( &hook_hint, _1, _2, _3, cref( examples ) ));
 
   if (!option_quiet) {
     std::cout << "Welcome to lgraph\n"
