@@ -177,9 +177,9 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
       prefix_add = prefix_add.substr(pos + 1);
     }
     //completions[0] = prefix_add + completions[0];//SG_27jun_trial
-    //std::cout<<prefix_add + completions[0].text();//SG_27jun_trial
+    //SG_27jun_trial //std::cout<<prefix_add + completions[0].text();
    completions[0] = Replxx::Completion(prefix_add + completions[0].text());//SG_27jun_trial
-    //completions[0](prefix_add + completions[0].text(), completions[0].color());//SG_27jun_trial
+    //SG_27jun_trial //completions[0](prefix_add + completions[0].text(), completions[0].color());
   }
 #endif
 
@@ -462,9 +462,13 @@ int main(int argc, char** argv) {
 
     } else if (input.compare(0, 7, "history") == 0) {
       // display the current history
-      for (size_t i = 0, sz = rx.history_size(); i < sz; ++i) {
-        std::cout << std::setw(4) << i << ": " << rx.history_line(i) << "\n";
-      }
+      //SG_17dec for (size_t i = 0, sz = rx.history_size(); i < sz; ++i) 
+       //SG_17dec std::cout << std::setw(4) << i << ": " << rx.history_line(i) << "\n";
+      Replxx::HistoryScan hs( rx.history_scan() );//SG_17dec
+			for ( int i( 0 ); hs.next(); ++ i ) {//SG_17dec
+				std::cout << std::setw(4) << i << ": " << hs.get().text() << "\n";//SG_17dec
+      }//SG_17dec
+
 
       rx.history_add(input);
       continue;
