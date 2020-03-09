@@ -95,21 +95,12 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
       prefix        = full_filename;  // Overwrite beginning of the match
       label         = label.substr(0, pos);
     }
-      //SG_debug:
-      //fmt::print("This is to debug1");
-      //:SG_debug
     bool label_files  = strcasecmp(label.c_str(), "files") == 0;
     bool label_output = strcasecmp(label.c_str(), "output") == 0;
     bool label_path   = strcasecmp(label.c_str(), "path") == 0;
     bool label_odir   = strcasecmp(label.c_str(), "odir") == 0;
-//SG:
-//    fmt::print("==== label_files {:d}, label_output {:d} , label_path {:d} , label_odir {:d} ====",label_files,label_output,label_path,label_odir);
-
     if (label_files || label_output || label_path || label_odir) {
-       //SG_debug:
-      //fmt::print("This is to debug2");
-      //:SG_debug
-     std::string path = ".";
+      std::string path = ".";
       auto        pos2  = full_filename.find_last_of('/');
       std::string filename;
       if (pos2 != std::string::npos) {
@@ -130,8 +121,8 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
           if (dp->d_type != DT_DIR && (label_path || label_odir)) continue;
           // fmt::print("preadding {}\n",dp->d_name);
           if (strncasecmp(dp->d_name, filename.c_str(), filename.size()) == 0 || filename.empty()) {
-            //fmt::print("adding {}\n",dp->d_name);
-            struct stat sb;
+            // fmt::print("adding {}\n",dp->d_name);
+           struct stat sb;
 
             std::string dir_name{path + "/" + dp->d_name};
             if (stat(dir_name.c_str(), &sb) == 0 && S_ISDIR(sb.st_mode)) {
@@ -148,10 +139,8 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
           fields = sort_files;
         }
       }
-        //SG_debug:
-      //fmt::print("This is to debug3");
-      //:SG_debug
-     examples = &fields;
+      examples = &fields;//SG_trial
+      //user_data = &fields;
     }
   } else if (last_cmd_start < last_cmd_end) {
     std::string cmd = context.substr(last_cmd_start, last_cmd_end);
@@ -166,7 +155,6 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
   }
 
   for (auto const& e : *examples) {
-  //SG_trial: for (auto const& e : user_data)
     // fmt::print("checking {} vs {}\n",e, prefix);
     if (strncasecmp(prefix.c_str(), e.c_str(), prefix.size()) == 0) {
       // fmt::print("match {}\n",e);
@@ -188,7 +176,10 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
     if (pos != std::string::npos) {
       prefix_add = prefix_add.substr(pos + 1);
     }
-    completions[0] = prefix_add + completions[0];
+    //completions[0] = prefix_add + completions[0];//SG_27jun_trial
+    //std::cout<<prefix_add + completions[0].text();//SG_27jun_trial
+   completions[0] = Replxx::Completion(prefix_add + completions[0].text());//SG_27jun_trial
+    //completions[0](prefix_add + completions[0].text(), completions[0].color());//SG_27jun_trial
   }
 #endif
 
@@ -207,12 +198,14 @@ Replxx::hints_t hook_hint(std::string const& context, int index, Replxx::Color& 
   std::string prefix{context.substr(index)};
   if (prefix.size() >= 2 || (!prefix.empty() && prefix.at(0) == '!')) {
     auto opts = hook_shared(context, index, user_data, true);
+    
 #if 1
     for (auto const& e : opts) {
       // fmt::print("prefix[{}] e[{}]\n",prefix,e);
       // if (strncasecmp(e.c_str(), prefix.c_str(), prefix.size()) == 0 ) {
-      if (e.size()>prefix.size())
-        hints.emplace_back(e.substr(prefix.size()).c_str());
+      //SG_27jun_trial:      std::cout << e.text().size()<<std::endl;
+      if (e.text().size()>prefix.size())//SG_27jun_trial
+        hints.emplace_back(e.text().substr(prefix.size()).c_str());//SG_27jun_trial
       //}
     }
 #else
@@ -255,7 +248,7 @@ void hook_color(std::string const& context, Replxx::colors_t& colors, std::vecto
   //SG: auto* regex_color = static_cast<std::vector<std::pair<std::string, Replxx::Color>>*>(user_data);
 
   // highlight matching regex sequences
-  //SG: for (auto const& e : *regex_color)
+  //SG: for (auto const& e : *regex_color) 
   for (auto const& e : regex_color) {
     size_t      pos{0};
     std::string str = context;

@@ -119,7 +119,7 @@ new_git_repository(
 new_git_repository(
     name = "replxx",
     build_file = "BUILD.replxx",
-    commit = "3af1f1e856104beefec5f4c84e5c9ba8bf74cd48", # Dec 11 2018, #"04aa0ec326be427ff351bf0daafbd5ff5933968e", # Dec 10, 2018 (NEXT requires patch)
+    commit = "28043a19d36a82038bddfee0c47ec1d0188e5d1f", #27jun2019
     remote = "https://github.com/AmokHuginnsson/replxx.git",
 )
 new_git_repository(
