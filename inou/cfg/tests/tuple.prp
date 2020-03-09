@@ -6,6 +6,7 @@ y = 7
 
 A = (x, foo = y, bar = 4)
 
-A = A++3                  // should I SSA tuple?
+A = A++3                  
+A = A++5
 
-%out1 = A[3] + A.foo      // 3 + 7 = 10
+%out1 = A[4] + A.foo      // 5 + 7 = 12

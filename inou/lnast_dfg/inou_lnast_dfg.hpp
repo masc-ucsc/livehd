@@ -13,7 +13,7 @@
 
 class Inou_lnast_dfg : public Pass {
 private:
-  Lnast *lnast;
+  Lnast *lnast{};
 
   absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Node_Type_Op> primitive_type_lnast2lg;
 
@@ -26,7 +26,7 @@ private:
 protected:
   void                  setup_memblock();
   std::vector<LGraph *> do_tolg();
-  void                  do_resolve_tuples(LGraph *dfg);
+  static void           do_resolve_tuples(LGraph *dfg);
   std::vector<LGraph *> do_gen_temp_lg();
 
   void lnast2lgraph             (LGraph *dfg);
@@ -48,12 +48,11 @@ protected:
   void process_ast_dot_op       (const Lnast_nid &lnidx);
   void process_ast_select_op    (const Lnast_nid &lnidx);
   void process_ast_tuple_struct (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_tuple_concat_op (LGraph *dfg, const Lnast_nid &lnidx);
+  void process_ast_concat_op (LGraph *dfg, const Lnast_nid &lnidx);
 
   Node_pin     setup_node_operator_and_target (LGraph *dfg, const Lnast_nid &lnidx_opr);
   Node_pin     setup_node_assign_and_target   (LGraph *dfg, const Lnast_nid &lnidx_opr);
   Node_pin     setup_ref_node_dpin            (LGraph *dfg, const Lnast_nid &lnidx);
-  Node_pin     setup_ref_node_spin            (LGraph *dfg, const Lnast_nid &lnidx);
   Node_Type_Op decode_lnast_op                (const Lnast_nid &lnidx_opr);
   void         setup_lnast_to_lgraph_primitive_type_mapping();
 
@@ -72,6 +71,7 @@ protected:
   Node_pin     add_tuple_add_from_sel (LGraph *dfg, const Lnast_nid &lnidx_sel, const Lnast_nid &lnidx_assign);
   Node_pin     add_tuple_get_from_dot_or_sel (LGraph *dfg, const Lnast_nid &lnidx_opr);
   Node_pin     setup_tuple_ref (LGraph *dfg, std::string_view tup_name);
+  Node_pin     setup_tuple_key (LGraph *dfg, std::string_view tup_name);
 
 
   // constant resolving

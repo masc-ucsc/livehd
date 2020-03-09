@@ -54,6 +54,7 @@ enum Node_Type_Op : uint64_t {
   TupAdd_Op,
   TupGet_Op,
   TupRef_Op,
+  TupKey_Op,
   // op_class: dfg
   DfgRef_Op,
   DfgPendingGraph_Op,
@@ -667,7 +668,7 @@ public:
 };
 
 
-// Duplicated with StrConst but better debug message!
+// Y = tuple root name, only used for tuple initialization
 class Node_Type_TupRef : public Node_Type {
 public:
   Node_Type_TupRef() : Node_Type("tuple_ref", TupRef_Op, true) {
@@ -675,6 +676,13 @@ public:
   };
 };
 
+// Y = tuple key name
+class Node_Type_TupKey : public Node_Type {
+public:
+  Node_Type_TupKey() : Node_Type("tuple_key", TupKey_Op, true) {
+    outputs.push_back("Y");
+  };
+};
 
 class Node_Type_DfgRef : public Node_Type {
 public:

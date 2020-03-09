@@ -4,6 +4,7 @@
 3. basic if-else 
 4. nested if-else
 5. tuple-if
+   5-1. what about A[5] = 3 in one of the branch?
 6. function-def subgraphs
 7. function-call
 8. fluid feature
