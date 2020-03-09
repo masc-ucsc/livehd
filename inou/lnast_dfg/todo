@@ -1,12 +1,13 @@
-0. need to design function of tuple_concate to resolve current assertion
-1. basic tuple with a tuple_concat
-2. resovle basic tuple (w/o if)
-3. basic if-else 
-4. nested if-else
-5. tuple-if
-   5-1. what about A[5] = 3 in one of the branch?
-6. function-def subgraphs
-7. function-call
-8. fluid feature
-9. corner cases
+0. ssa of tuple dot and select ....
+1. resovle basic tuple (w/o if)
+2. basic if-else 
+3. nested if-else
+4. tuple-if
+5. 5-1. what about A[5] = 3 in one of the branch?
+   5-2. re-design tuple resolving algorithm 
+   function-def subgraphs
+6. function-call
+7. fluid feature
+8. corner cases ()
+9. 
 A.

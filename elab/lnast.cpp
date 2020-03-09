@@ -4,6 +4,7 @@
 void Lnast_node::dump() const {
   fmt::print("type:{}\n", type.debug_name()); // TODO: cleaner API to also dump token
 }
+
 /*
 note: if not handle ssa cnt on lhs and rhs separately, there will be a race condition in the
       if-subtree between child-True and child-False. For example, in the following source code:
@@ -37,6 +38,7 @@ note: if not handle ssa cnt on lhs and rhs separately, there will be a race cond
       - just copy the subs from the lnast nodes into the local table
         as the lhs subs has been handled in 1st algorithm.
 */
+
 void Lnast::do_ssa_trans(const Lnast_nid &top_nid){
   Lnast_nid top_sts_nid = get_first_child(top_nid);
   default_const_nid = add_child(top_sts_nid, Lnast_node(Lnast_ntype::create_const(), Token(Token_id_alnum, 0, 0, 0, "default_const")));
@@ -282,11 +284,57 @@ void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &o
     const auto  target_nid  = get_first_child(opr_nid);
     const auto  target_name = get_name(target_nid);
 
-    if (target_name.substr(0,3) == "___")
-      return;
+    if (target_name.substr(0,3) == "___") return;
 
     update_global_lhs_ssa_cnt_table(target_nid);
     update_phi_resolve_table(psts_nid, target_nid);
+    return;
+  }
+
+
+  // handle special case: __bits, 3rd child of the dot
+  // FIXME->sh: what about the case of x = 3 and then x.__bits = 2 ? might also need to consider the __bits into SSA
+  if (type.is_dot() and get_name(get_sibling_next(get_sibling_next(get_first_child(opr_nid)))).substr(0,6) == "__bits") {
+    return;
+  }
+
+  // when opr is dot/sel, it might represent both lhs or rhs, need to check future siblings to know
+  if (type.is_dot() || type.is_select()) {
+    fmt::print("DOT 1st child name:{}\n", get_name(get_first_child(opr_nid)));
+    auto c0_opr      = get_first_child(opr_nid);
+    auto c0_opr_name = get_name(c0_opr);
+    auto target_nid  = get_sibling_next(c0_opr); // c1 of dot/sel is target_nid
+    bool hit = false;
+    auto sib = opr_nid;
+    int cnt = 0;
+    while (!hit) {
+      fmt::print("cnt:{}\n", cnt++);
+      fmt::print("sib 1st child name:{}\n", get_name(get_first_child(sib)));
+      sib = get_sibling_next(sib);
+      if (get_type(sib).is_assign()) {
+        auto lhs_assign = get_first_child(sib);
+        auto rhs_assign = get_sibling_next(lhs_assign);
+        if (get_name(lhs_assign) == c0_opr_name) {
+          hit = true;
+          update_global_lhs_ssa_cnt_table(target_nid);
+          update_phi_resolve_table(psts_nid, target_nid);
+        } else if (get_name(rhs_assign) == c0_opr_name) {
+          hit = true;
+        }
+      } else if (get_type(sib).is_binary_op() || get_type(sib).is_logical_op()) { //FIXME->sh: more op?
+        fmt::print("now is binary op:{}\n", get_type(sib).debug_name());
+        for (auto opr_child = children(sib).begin(); opr_child != children(sib).end(); ++opr_child) {
+          if (opr_child == children(sib).begin()) {
+            continue;
+          } else {
+            fmt::print("opr_child name:{}\n", get_name(*opr_child));
+            if (get_name(*opr_child) == c0_opr_name)
+              hit = true;
+          }
+        }
+      }
+    } //note: practically, the assign/opr_op related to the dot/sel_op should be very close
+    return;
   }
 }
 
