@@ -96,7 +96,7 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
       label         = label.substr(0, pos);
     }
       //SG_debug:
-      fmt::print("This is to debug1");
+      //fmt::print("This is to debug1");
       //:SG_debug
     bool label_files  = strcasecmp(label.c_str(), "files") == 0;
     bool label_output = strcasecmp(label.c_str(), "output") == 0;
@@ -107,7 +107,7 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
 
     if (label_files || label_output || label_path || label_odir) {
        //SG_debug:
-      fmt::print("This is to debug2");
+      //fmt::print("This is to debug2");
       //:SG_debug
      std::string path = ".";
       auto        pos2  = full_filename.find_last_of('/');
@@ -149,7 +149,7 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
         }
       }
         //SG_debug:
-      fmt::print("This is to debug3");
+      //fmt::print("This is to debug3");
       //:SG_debug
      examples = &fields;
     }
