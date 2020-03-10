@@ -26,7 +26,7 @@ note: if not handle ssa cnt on lhs and rhs separately, there will be a race cond
 
       rhs assignment in 2nd algorithm:
       - check current scope
-      - if exitst
+      - if exists
           use the local count from local table
         else
           if not in parents chain
@@ -45,6 +45,13 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid){
 
   Phi_rtable top_phi_resolve_table;
   phi_resolve_tables[get_name(top_sts_nid)] = top_phi_resolve_table;
+
+  //step-1: determine lhs or rhs of tuple dot/sel
+  fmt::print("\nStep-1: Determine LHS or RHS of tuple dot/sel\n");
+  determine_dot_sel_lrhs(top_sts_nid);
+
+  //step-2: lhs ssa
+  fmt::print("\nStep-2: LHS SSA\n");
   for (const auto &opr_nid : children(top_sts_nid)) {
     if (get_type(opr_nid).is_if()) {
       ssa_if_subtree(opr_nid);
@@ -55,7 +62,44 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid){
     }
   }
 
+  //step-3: rhs ssa
+  fmt::print("\nStep-3: RHS SSA\n");
   resolve_ssa_rhs_subs(top_sts_nid);
+}
+
+
+void Lnast::determine_dot_sel_lrhs(const Lnast_nid &psts_nid) {
+  for (const auto &opr_nid : children(psts_nid)) {
+
+    if (get_type(opr_nid).is_dot() && get_name(get_sibling_next(get_sibling_next(get_first_child(opr_nid)))).substr(0,6) == "__bits") {
+      dot_sel_lhs_table[opr_nid] = false;
+      fmt::print("dot/sel:{} is rhs\n", get_name(get_first_child(opr_nid)));
+      continue;
+    }
+
+    if (get_type(opr_nid).is_dot() || get_type(opr_nid).is_select()) {
+      auto dot_nid     = opr_nid;
+      auto c0_dot      = get_first_child(dot_nid); //c0 = intermediate target
+      auto c0_dot_name = get_name(c0_dot);
+      bool hit         = false;
+      auto sib         = opr_nid;
+      while (!hit) {
+        sib = get_sibling_next(sib);
+        for (auto sib_child : children(sib)) {
+          //only possible for assign_op
+          if (sib_child == get_first_child(sib) and get_name(sib_child) == c0_dot_name) {
+            hit = true;
+            dot_sel_lhs_table[dot_nid] = true;
+            fmt::print("dot/sel:{} is lhs\n", get_name(get_first_child(dot_nid)));
+          } else if (get_name(sib_child) == c0_dot_name){
+            hit = true;
+            dot_sel_lhs_table[dot_nid] = false;
+            fmt::print("dot/sel:{} is rhs\n", get_name(get_first_child(dot_nid)));
+          }
+        }
+      } //note: practically, the assign/opr_op related to the dot/sel_op should be very close
+    }
+  }
 }
 
 
@@ -91,7 +135,7 @@ void Lnast::ssa_rhs_if_subtree(const Lnast_nid &if_nid) {
         ssa_rhs_handle_a_statement(itr_nid, opr_nid);
       }
     } else if (get_type(itr_nid).is_phi()){
-        update_rhs_ssa_cnt_table(get_parent(if_nid), get_first_child(itr_nid));
+      update_rhs_ssa_cnt_table(get_parent(if_nid), get_first_child(itr_nid));
     } else { //condition node
       continue;
     }
@@ -100,43 +144,116 @@ void Lnast::ssa_rhs_if_subtree(const Lnast_nid &if_nid) {
 
 
 void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
-  auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[get_name(psts_nid)];
-  //handle statement rhs
-  for (auto itr_opd : children(opr_nid)) {
-    if (itr_opd == get_first_child(opr_nid))
-      continue;
+  const auto type = get_type(opr_nid);
 
-    auto       opd_name  = get_name(itr_opd);
-    const auto opd_type  = get_type(itr_opd);
-    Token      ori_token = get_token(itr_opd);
-
-    if (ssa_rhs_cnt_table.find(opd_name) != ssa_rhs_cnt_table.end()){
-      uint8_t new_subs = ssa_rhs_cnt_table[get_name(itr_opd)];
-      set_data(itr_opd, Lnast_node(opd_type, ori_token, new_subs));
-      fmt::print("variable:{}, new subs:{}\n", get_name(itr_opd), new_subs);
-    } else {
-      int8_t  new_subs = check_rhs_cnt_table_parents_chain(psts_nid, itr_opd);
-      if (new_subs == -1) {
-        new_subs = 0; //FIXME->sh: actually, here is a good place to check undefined variable
-      }
-      ssa_rhs_cnt_table[opd_name] = new_subs;
-      set_data(itr_opd, Lnast_node(opd_type, ori_token, new_subs));
+  if (type.is_dot() || type.is_select()) {
+    //handle dot/set which is rhs
+    auto c0_opr      = get_first_child(opr_nid);
+    auto c1_opr      = get_sibling_next(c0_opr); // c1 of dot/sel is target_nid
+    if (!is_lhs(opr_nid) and is_special_case_of_dot_sel_rhs(psts_nid, opr_nid)) {
+      ssa_rhs_handle_a_operand_special(psts_nid, c1_opr);
+    } else if (!is_lhs(opr_nid)) {
+      ssa_rhs_handle_a_operand(psts_nid, c1_opr);
+    }
+    fmt::print("dot/sel:{}, tuple:{}, new subs:{}\n", get_name(c0_opr), get_name(c1_opr), get_subs(c1_opr));
+  } else {
+    //handle statement rhs of normal operators
+    for (auto itr_opd : children(opr_nid)) {
+      if (itr_opd == get_first_child(opr_nid)) continue;
+      ssa_rhs_handle_a_operand(psts_nid, itr_opd);
     }
   }
 
+  //handle dot/set which is lhs
+  if (type.is_dot() || type.is_select()) {
+    auto c0_opr      = get_first_child(opr_nid);
+    auto c1_opr      = get_sibling_next(c0_opr); // c1 of dot/sel is target_nid
+    if (is_lhs(opr_nid))
+      update_rhs_ssa_cnt_table(psts_nid, c1_opr);
+    //fmt::print("dot/sel:{}, tuple:{}, new subs:{}\n", get_name(c0_opr), get_name(c1_opr), get_subs(c1_opr));
+  }
+
   //handle statement lhs
-  const auto type = get_type(opr_nid);
   if (type.is_assign() || type.is_as()) {
     const auto  target_nid  = get_first_child(opr_nid);
     const auto  target_name = get_name(target_nid);
 
-    if (target_name.substr(0,3) == "___")
-      return;
-
+    if (target_name.substr(0,3) == "___") return;
 
     update_rhs_ssa_cnt_table(psts_nid, target_nid);
   }
 }
+
+
+bool Lnast::is_special_case_of_dot_sel_rhs(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
+  I(get_type(opr_nid).is_dot() || get_type(opr_nid).is_select());
+  I(!is_lhs(opr_nid));
+
+  if (opr_nid == get_first_child(psts_nid))
+    return false;
+
+  auto prev_sib_nid = get_sibling_prev(opr_nid); //FIXME->sh: might go out of boundary
+  auto next_sib_nid = get_sibling_next(opr_nid);
+
+  auto c0_prev_sib = get_first_child(prev_sib_nid);
+  auto c0_curr_sib = get_first_child(opr_nid);
+  auto c0_next_sib = get_first_child(next_sib_nid);
+  bool cond1 = false, cond2 = false, cond3 = false, cond4 = false, cond5 = false;
+  if (get_type(prev_sib_nid).is_dot() || get_type(prev_sib_nid).is_select())
+    cond1 = true;
+
+  if (get_type(next_sib_nid).is_assign())
+    cond2 = true;
+
+  if (get_name(c0_prev_sib) == get_name(c0_next_sib))
+    cond3 = true;
+
+  if (get_name(c0_curr_sib) == get_name(get_sibling_next(c0_next_sib)))
+    cond4 = true;
+
+  if (get_name(get_sibling_next(c0_curr_sib)) == get_name(get_sibling_next(c0_prev_sib)))
+    cond5 = true;
+
+  return cond1 and cond2 and cond3 and cond4 and cond5;
+}
+
+void Lnast::ssa_rhs_handle_a_operand_special(const Lnast_nid &gpsts_nid, const Lnast_nid &opd_nid) {
+  //note: immediate struct self assignment: A.foo = A[2], which will leads to consecutive dot and sel,
+  //the sel should follow the subscript before the dot increments it.
+  auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[get_name(gpsts_nid)];
+  auto       opd_name  = get_name(opd_nid);
+  const auto opd_type  = get_type(opd_nid);
+  Token      ori_token = get_token(opd_nid);
+
+  if (ssa_rhs_cnt_table.find(opd_name) != ssa_rhs_cnt_table.end()) {
+    auto  new_subs = ssa_rhs_cnt_table[opd_name] - 1;
+    set_data(opd_nid, Lnast_node(opd_type, ori_token, new_subs));
+    fmt::print("variable:{}, new subs:{}\n", opd_name, new_subs);
+  }
+}
+
+
+void Lnast::ssa_rhs_handle_a_operand(const Lnast_nid &gpsts_nid, const Lnast_nid &opd_nid) {
+  auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[get_name(gpsts_nid)];
+  auto       opd_name  = get_name(opd_nid);
+  const auto opd_type  = get_type(opd_nid);
+  Token      ori_token = get_token(opd_nid);
+
+  if (ssa_rhs_cnt_table.find(opd_name) != ssa_rhs_cnt_table.end()) {
+
+    auto  new_subs = ssa_rhs_cnt_table[opd_name];
+    set_data(opd_nid, Lnast_node(opd_type, ori_token, new_subs));
+    fmt::print("variable:{}, new subs:{}\n", opd_name, new_subs);
+  } else {
+    int8_t  new_subs = check_rhs_cnt_table_parents_chain(gpsts_nid, opd_nid);
+    if (new_subs == -1) {
+      new_subs = 0; //FIXME->sh: actually, here is a good place to check undefined variable
+    }
+    ssa_rhs_cnt_table[opd_name] = new_subs;
+    set_data(opd_nid, Lnast_node(opd_type, ori_token, new_subs));
+  }
+}
+
 
 void Lnast::ssa_if_subtree(const Lnast_nid &if_nid) {
   for (const auto &itr_nid : children(if_nid)) {
@@ -287,57 +404,59 @@ void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &o
     if (target_name.substr(0,3) == "___") return;
 
     update_global_lhs_ssa_cnt_table(target_nid);
+    fmt::print("variable:{}, new subs:{}\n", get_name(target_nid), get_subs(target_nid));
     update_phi_resolve_table(psts_nid, target_nid);
     return;
   }
 
 
-  // handle special case: __bits, 3rd child of the dot
-  // FIXME->sh: what about the case of x = 3 and then x.__bits = 2 ? might also need to consider the __bits into SSA
-  if (type.is_dot() and get_name(get_sibling_next(get_sibling_next(get_first_child(opr_nid)))).substr(0,6) == "__bits") {
-    return;
+  if (type.is_dot() || type.is_select()) {
+    if (is_lhs(opr_nid)) {
+      auto c0_opr      = get_first_child(opr_nid);
+      auto c1_opr      = get_sibling_next(c0_opr); // c1 of dot/sel is target_nid
+      update_global_lhs_ssa_cnt_table(c1_opr);
+      update_phi_resolve_table(psts_nid, c1_opr);
+      fmt::print("dot/sel:{}, tuple:{}, new subs:{}\n", get_name(c0_opr), get_name(c1_opr), get_subs(c1_opr));
+    }
   }
 
-  // when opr is dot/sel, it might represent both lhs or rhs, need to check future siblings to know
-  if (type.is_dot() || type.is_select()) {
-    fmt::print("DOT 1st child name:{}\n", get_name(get_first_child(opr_nid)));
-    auto c0_opr      = get_first_child(opr_nid);
-    auto c0_opr_name = get_name(c0_opr);
-    auto target_nid  = get_sibling_next(c0_opr); // c1 of dot/sel is target_nid
-    bool hit = false;
-    auto sib = opr_nid;
-    int cnt = 0;
-    while (!hit) {
-      fmt::print("cnt:{}\n", cnt++);
-      fmt::print("sib 1st child name:{}\n", get_name(get_first_child(sib)));
-      sib = get_sibling_next(sib);
-      if (get_type(sib).is_assign()) {
-        auto lhs_assign = get_first_child(sib);
-        auto rhs_assign = get_sibling_next(lhs_assign);
-        if (get_name(lhs_assign) == c0_opr_name) {
-          hit = true;
-          update_global_lhs_ssa_cnt_table(target_nid);
-          update_phi_resolve_table(psts_nid, target_nid);
-        } else if (get_name(rhs_assign) == c0_opr_name) {
-          hit = true;
-        }
-      } else if (get_type(sib).is_binary_op() || get_type(sib).is_logical_op()) { //FIXME->sh: more op?
-        fmt::print("now is binary op:{}\n", get_type(sib).debug_name());
-        for (auto opr_child = children(sib).begin(); opr_child != children(sib).end(); ++opr_child) {
-          if (opr_child == children(sib).begin()) {
-            continue;
-          } else {
-            fmt::print("opr_child name:{}\n", get_name(*opr_child));
-            if (get_name(*opr_child) == c0_opr_name)
-              hit = true;
-          }
-        }
-      }
-    } //note: practically, the assign/opr_op related to the dot/sel_op should be very close
-    return;
-  }
+  // // when opr is dot/sel, it might represent both lhs or rhs, need to check future siblings to know
+  // if (type.is_dot() || type.is_select()) {
+  //   auto c0_opr      = get_first_child(opr_nid);
+  //   auto c0_opr_name = get_name(c0_opr);
+  //   auto target_nid  = get_sibling_next(c0_opr); // c1 of dot/sel is target_nid
+  //   bool hit = false;
+  //   auto sib = opr_nid;
+  //   while (!hit) {
+  //     sib = get_sibling_next(sib);
+  //     if (get_type(sib).is_assign()) {
+  //       auto lhs_assign = get_first_child(sib);
+  //       auto rhs_assign = get_sibling_next(lhs_assign);
+  //       if (get_name(lhs_assign) == c0_opr_name) {
+  //         hit = true;
+  //         update_global_lhs_ssa_cnt_table(target_nid);
+  //         update_phi_resolve_table(psts_nid, target_nid);
+  //         fmt::print("target_nid->name:{}, target_nid->subs:{}\n", get_name(target_nid), get_subs(target_nid));
+  //       } else if (get_name(rhs_assign) == c0_opr_name) {
+  //         hit = true;
+  //       }
+  //     } else if (get_type(sib).is_binary_op() || get_type(sib).is_logical_op()) { //FIXME->sh: more op?
+  //       for (auto opr_child = children(sib).begin(); opr_child != children(sib).end(); ++opr_child) {
+  //         if (opr_child == children(sib).begin())         continue;
+  //         else if (get_name(*opr_child) == c0_opr_name)   hit = true;
+  //       }
+  //     }
+  //   } //note: practically, the assign/opr_op related to the dot/sel_op should be very close
+  //   return;
+  // }
 }
 
+bool Lnast::is_lhs(const Lnast_nid &opr_nid) {
+  I(get_type(opr_nid).is_dot() or get_type(opr_nid).is_select());
+  if (dot_sel_lhs_table.find(opr_nid)!= dot_sel_lhs_table.end())
+    return dot_sel_lhs_table[opr_nid];
+  I(false);
+}
 
 void Lnast::update_global_lhs_ssa_cnt_table(const Lnast_nid &target_nid) {
   const auto  target_name = get_name(target_nid);

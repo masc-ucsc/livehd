@@ -97,13 +97,17 @@ private:
   void      update_global_lhs_ssa_cnt_table      (const Lnast_nid &target_nid);
   int8_t    check_rhs_cnt_table_parents_chain    (const Lnast_nid &psts_nid, const Lnast_nid &target_key);
   void      update_rhs_ssa_cnt_table             (const Lnast_nid &psts_nid, const Lnast_nid &target_key);
+  void      determine_dot_sel_lrhs               (const Lnast_nid &psts_nid);
 
-
+  bool      is_lhs                               (const Lnast_nid &opr_nid);
+  bool      is_special_case_of_dot_sel_rhs       (const Lnast_nid &psts_nid,  const Lnast_nid &opr_nid);
+  void      ssa_rhs_handle_a_operand             (const Lnast_nid &gpsts_nid, const Lnast_nid &opd_nid); //gpsts = grand parent
+  void      ssa_rhs_handle_a_operand_special     (const Lnast_nid &gpsts_nid, const Lnast_nid &opd_nid);
 
   absl::flat_hash_map<std::string_view, Phi_rtable> phi_resolve_tables;
   absl::flat_hash_map<std::string_view, Cnt_rtable> ssa_rhs_cnt_tables;
   absl::flat_hash_map<std::string_view, uint8_t>    global_ssa_lhs_cnt_table;
-
+  absl::flat_hash_map<Lnast_nid, bool>              dot_sel_lhs_table;
   Phi_rtable new_added_phi_node_table;
   Lnast_nid  default_const_nid;
 
