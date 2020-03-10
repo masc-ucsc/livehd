@@ -74,7 +74,6 @@ struct Lnast_node {
   CREATE_LNAST_NODE(_const)
   CREATE_LNAST_NODE(_attr)
   CREATE_LNAST_NODE(_assert)
-
 };
 
 
@@ -107,7 +106,8 @@ private:
   absl::flat_hash_map<std::string_view, Phi_rtable> phi_resolve_tables;
   absl::flat_hash_map<std::string_view, Cnt_rtable> ssa_rhs_cnt_tables;
   absl::flat_hash_map<std::string_view, uint8_t>    global_ssa_lhs_cnt_table;
-  absl::flat_hash_map<Lnast_nid, bool>              dot_sel_lhs_table;
+  absl::flat_hash_map<Lnast_nid, bool>              dot_sel_lrhs_table;
+  absl::flat_hash_map<Lnast_nid, Lnast_nid>         dot_sel_lhs_dst_assign_node_table;
   Phi_rtable new_added_phi_node_table;
   Lnast_nid  default_const_nid;
 

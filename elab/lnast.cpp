@@ -72,7 +72,7 @@ void Lnast::determine_dot_sel_lrhs(const Lnast_nid &psts_nid) {
   for (const auto &opr_nid : children(psts_nid)) {
 
     if (get_type(opr_nid).is_dot() && get_name(get_sibling_next(get_sibling_next(get_first_child(opr_nid)))).substr(0,6) == "__bits") {
-      dot_sel_lhs_table[opr_nid] = false;
+      dot_sel_lrhs_table[opr_nid] = false;
       fmt::print("dot/sel:{} is rhs\n", get_name(get_first_child(opr_nid)));
       continue;
     }
@@ -82,18 +82,19 @@ void Lnast::determine_dot_sel_lrhs(const Lnast_nid &psts_nid) {
       auto c0_dot      = get_first_child(dot_nid); //c0 = intermediate target
       auto c0_dot_name = get_name(c0_dot);
       bool hit         = false;
-      auto sib         = opr_nid;
+      auto sib_nid     = opr_nid;
       while (!hit) {
-        sib = get_sibling_next(sib);
-        for (auto sib_child : children(sib)) {
+        sib_nid = get_sibling_next(sib_nid);
+        for (auto sib_child : children(sib_nid)) {
           //only possible for assign_op
-          if (sib_child == get_first_child(sib) and get_name(sib_child) == c0_dot_name) {
+          if (sib_child == get_first_child(sib_nid) and get_name(sib_child) == c0_dot_name) {
             hit = true;
-            dot_sel_lhs_table[dot_nid] = true;
+            dot_sel_lrhs_table[dot_nid] = true;
+            dot_sel_lhs_dst_assign_node_table[dot_nid] = sib_nid;
             fmt::print("dot/sel:{} is lhs\n", get_name(get_first_child(dot_nid)));
           } else if (get_name(sib_child) == c0_dot_name){
             hit = true;
-            dot_sel_lhs_table[dot_nid] = false;
+            dot_sel_lrhs_table[dot_nid] = false;
             fmt::print("dot/sel:{} is rhs\n", get_name(get_first_child(dot_nid)));
           }
         }
@@ -147,7 +148,7 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
   const auto type = get_type(opr_nid);
 
   if (type.is_dot() || type.is_select()) {
-    //handle dot/set which is rhs
+    //handle dot/set which is a rhs
     auto c0_opr      = get_first_child(opr_nid);
     auto c1_opr      = get_sibling_next(c0_opr); // c1 of dot/sel is target_nid
     if (!is_lhs(opr_nid) and is_special_case_of_dot_sel_rhs(psts_nid, opr_nid)) {
@@ -164,7 +165,7 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
     }
   }
 
-  //handle dot/set which is lhs
+  //handle dot/set which is a lhs
   if (type.is_dot() || type.is_select()) {
     auto c0_opr      = get_first_child(opr_nid);
     auto c1_opr      = get_sibling_next(c0_opr); // c1 of dot/sel is target_nid
@@ -185,36 +186,24 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
 }
 
 
+//handle cases: A.foo = A[2] or A.foo = A[1] + A[2] + A.bar; where lhs rhs are both the struct elements;
+//the ssa should be: A_2.foo = A_1[2] or A_6.foo = A_5[1] + A_5[2] + A_5.bar
 bool Lnast::is_special_case_of_dot_sel_rhs(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
-  I(get_type(opr_nid).is_dot() || get_type(opr_nid).is_select());
   I(!is_lhs(opr_nid));
 
   if (opr_nid == get_first_child(psts_nid))
     return false;
 
-  auto prev_sib_nid = get_sibling_prev(opr_nid); //FIXME->sh: might go out of boundary
-  auto next_sib_nid = get_sibling_next(opr_nid);
+  auto prev_sib_nid = get_sibling_prev(opr_nid);
 
-  auto c0_prev_sib = get_first_child(prev_sib_nid);
-  auto c0_curr_sib = get_first_child(opr_nid);
-  auto c0_next_sib = get_first_child(next_sib_nid);
-  bool cond1 = false, cond2 = false, cond3 = false, cond4 = false, cond5 = false;
-  if (get_type(prev_sib_nid).is_dot() || get_type(prev_sib_nid).is_select())
-    cond1 = true;
-
-  if (get_type(next_sib_nid).is_assign())
-    cond2 = true;
-
-  if (get_name(c0_prev_sib) == get_name(c0_next_sib))
-    cond3 = true;
-
-  if (get_name(c0_curr_sib) == get_name(get_sibling_next(c0_next_sib)))
-    cond4 = true;
-
-  if (get_name(get_sibling_next(c0_curr_sib)) == get_name(get_sibling_next(c0_prev_sib)))
-    cond5 = true;
-
-  return cond1 and cond2 and cond3 and cond4 and cond5;
+  if ((get_type(prev_sib_nid).is_dot() or get_type(prev_sib_nid).is_select())) {
+    if (not dot_sel_lrhs_table[prev_sib_nid]) {
+      return is_special_case_of_dot_sel_rhs(psts_nid, prev_sib_nid);
+    } else if (dot_sel_lrhs_table[prev_sib_nid]) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void Lnast::ssa_rhs_handle_a_operand_special(const Lnast_nid &gpsts_nid, const Lnast_nid &opd_nid) {
@@ -453,8 +442,8 @@ void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &o
 
 bool Lnast::is_lhs(const Lnast_nid &opr_nid) {
   I(get_type(opr_nid).is_dot() or get_type(opr_nid).is_select());
-  if (dot_sel_lhs_table.find(opr_nid)!= dot_sel_lhs_table.end())
-    return dot_sel_lhs_table[opr_nid];
+  if (dot_sel_lrhs_table.find(opr_nid)!= dot_sel_lrhs_table.end())
+    return dot_sel_lrhs_table[opr_nid];
   I(false);
 }
 
